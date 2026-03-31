@@ -65,9 +65,19 @@ export default function AiCostTab() {
     return data.taskTypeCosts.slice(0, 8).map((t: any) => ({
       name: t.taskType === 'tour_generation' ? '行程生成'
         : t.taskType === 'ai_chat' ? 'AI 諮詢'
+        : t.taskType === 'customer_service' ? 'AI 諮詢'
         : t.taskType === 'skill_learning' ? '技能學習'
         : t.taskType === 'translation' ? '翻譯'
-        : t.taskType ?? '其他',
+        : t.taskType === 'pdf_parsing' ? 'PDF 解析'
+        : t.taskType === 'content_analysis' ? '內容分析'
+        : t.taskType === 'image_generation' ? '圖片生成'
+        : t.taskType === 'notice_generation' ? '注意事項'
+        : t.taskType === 'meal_planning' ? '餐飲規劃'
+        : t.taskType === 'hotel_search' ? '飯店搜尋'
+        : t.taskType === 'flight_search' ? '機票搜尋'
+        : t.taskType === 'train_search' ? '火車搜尋'
+        : t.taskType === 'unknown' ? '其他'
+        : (t.taskType ?? '其他'),
       費用: parseFloat(t.costUsd),
       Token: t.tokens,
     }));

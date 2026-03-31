@@ -320,7 +320,7 @@ function DeskCard({
           <div className="mt-3 grid grid-cols-3 gap-2">
             <div className="bg-white/80 rounded-lg px-2 py-2 text-center border border-white">
               <div className="text-base font-bold text-gray-900">{stats.calls}</div>
-              <div className="text-[10px] text-gray-500">今日任務</div>
+              <div className="text-[10px] text-gray-500">近期任務</div>
             </div>
             <div className="bg-white/80 rounded-lg px-2 py-2 text-center border border-white">
               <div className="text-base font-bold text-gray-900">{(stats.totalTokens / 1000).toFixed(1)}k</div>
@@ -334,9 +334,9 @@ function DeskCard({
             </div>
           </div>
         ) : (
-          <div className="mt-3 text-xs text-gray-400 text-center py-2 bg-white/40 rounded-lg border border-white">
-            今日尚無工作記錄
-          </div>
+            <div className="text-[10px] text-gray-400 text-center py-2 bg-white/40 rounded-lg border border-white">
+              近 7 天尚無工作記錄
+            </div>
         )}
       </div>
 
@@ -349,7 +349,7 @@ function DeskCard({
           >
             <span className="font-semibold flex items-center gap-1.5">
               <Activity className="h-3.5 w-3.5" />
-              今日工作日誌 ({activities.length} 筆)
+              工作日誌 ({activities.length} 筆)
             </span>
             {expanded
               ? <ChevronDown className="h-3.5 w-3.5" />
@@ -413,7 +413,7 @@ function ActiveTasksBanner({ tasks }: { tasks: any[] }) {
 }
 
 // ── 今日工作摘要統計列 ─────────────────────────────────────────────────────────
-function TodaySummaryBar({ stats }: { stats: any[] }) {
+function RecentSummaryBar({ stats }: { stats: any[] }) {
   if (!stats.length) return null;
   const totalTasks = stats.reduce((s, a) => s + (a.calls || 0), 0);
   const totalTokens = stats.reduce((s, a) => s + (a.totalTokens || 0), 0);
@@ -422,9 +422,9 @@ function TodaySummaryBar({ stats }: { stats: any[] }) {
   return (
     <div className="grid grid-cols-3 gap-4 mb-6">
       {[
-        { icon: User, label: "今日活躍 Agent", value: `${activeAgents} 位`, color: "text-blue-600" },
-        { icon: Activity, label: "今日總任務數", value: `${totalTasks} 筆`, color: "text-green-600" },
-        { icon: TrendingUp, label: "今日 Token 用量", value: `${(totalTokens / 1000).toFixed(1)}k`, color: "text-purple-600" },
+        { icon: User, label: "近 7 天活躍 Agent", value: `${activeAgents} 位`, color: "text-blue-600" },
+        { icon: Activity, label: "近 7 天總任務數", value: `${totalTasks} 筆`, color: "text-green-600" },
+        { icon: TrendingUp, label: "近 7 天 Token 用量", value: `${(totalTokens / 1000).toFixed(1)}k`, color: "text-purple-600" },
       ].map(({ icon: Icon, label, value, color }) => (
         <div key={label} className="bg-white border border-gray-200 rounded-xl px-4 py-3 shadow-sm">
           <div className="flex items-center gap-2 mb-1">
@@ -550,7 +550,7 @@ export default function AiOffice() {
         <div>
           <h3 className="text-lg font-bold text-gray-900">AI 員工辦公室</h3>
           <p className="text-sm text-gray-500 mt-0.5">
-            即時監控每位 AI 員工的工作狀態、正在執行的任務、今日工作彙報
+            即時監控每位 AI 員工的工作狀態、正在執行的任務、近 7 天工作彙報
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -583,16 +583,16 @@ export default function AiOffice() {
       </div>
 
       {/* 今日摘要統計 */}
-      <TodaySummaryBar stats={data?.agentTodayStats ?? []} />
+      <RecentSummaryBar stats={data?.agentTodayStats ?? []} />
 
       {/* 正在執行的任務橫幅 */}
       <ActiveTasksBanner tasks={data?.activeTasks ?? []} />
 
-      {/* 今日無任何活動 */}
+      {/* 近 7 天無任何活動 */}
       {!isLoading && allAgentNames.length === 0 && (
         <div className="text-center py-20 text-gray-400">
           <Coffee className="h-14 w-14 mx-auto mb-4 opacity-20" />
-          <p className="text-base font-medium">今日 AI 員工尚未開始工作</p>
+          <p className="text-base font-medium">近 7 天尚無 AI 員工工作記錄</p>
           <p className="text-sm mt-1 opacity-70">當 Agent 執行任務後，詳細工作日誌將顯示在這裡</p>
         </div>
       )}

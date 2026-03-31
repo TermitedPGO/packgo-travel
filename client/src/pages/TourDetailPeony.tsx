@@ -1816,13 +1816,21 @@ export default function TourDetailPeony() {
   }
 
   // 解析資料（多語言翻譯覆蓋）
-  const heroImage = tour.heroImage || tour.imageUrl || "https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=1200";
+  // 編輯模式下使用 editedTour，否則使用原始 tour
+  const heroImage = (isEditMode && editedTour?.heroImage) 
+    ? editedTour.heroImage 
+    : (tour.heroImage || tour.imageUrl || "https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=1200");
   // 翻譯覆蓋：文字欄位
   const displayTitle = getTranslated('title', tour.title) ?? tour.title;
   const displayDescription = getTranslated('description', tour.description) ?? tour.description;
   const displayHeroSubtitle = getTranslated('heroSubtitle', (tour as any).heroSubtitle) ?? (tour as any).heroSubtitle;
   // 翻譯覆蓋：JSON 欄位（翻譯後為 JSON 字串，需再解析）
-  const keyFeatures = parseJSON(getTranslated('keyFeatures', tour.keyFeatures) ?? tour.keyFeatures, []);
+  // 編輯模式下從 editedTour 讀取最新的 keyFeatures（包含剛上傳的圖片）
+  const keyFeaturesSource = isEditMode && editedTour?.keyFeatures != null ? editedTour.keyFeatures : (tour.keyFeatures);
+  const keyFeatures = parseJSON(
+    typeof keyFeaturesSource === 'string' ? keyFeaturesSource : JSON.stringify(keyFeaturesSource),
+    []
+  );
   const attractions = parseJSON(tour.attractions, []);
   const hotels = parseJSON(tour.hotels, []);
   const meals = parseJSON(tour.meals, []);

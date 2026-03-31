@@ -1771,7 +1771,7 @@ export const appRouter = router({
             costUsd: parseFloat(a.costUsd ?? '0').toFixed(4),
           })),
           taskTypeCosts: taskTypeCosts.map((t: { taskType: string | null; calls: number; tokens: number; costUsd: string }) => ({
-            taskType: t.taskType ?? 'unknown',
+            taskType: t.taskType ?? 'other',
             calls: Number(t.calls),
             tokens: Number(t.tokens),
             costUsd: parseFloat(t.costUsd ?? '0').toFixed(4),
@@ -1853,7 +1853,7 @@ export const appRouter = router({
           })),
           recentActivity: recentActivity.map(a => ({
             agentName: a.agentName,
-            taskType: a.taskType ?? 'unknown',
+            taskType: a.taskType ?? 'other',
             taskId: a.taskId,
             totalTokens: a.totalTokens,
             processingTimeMs: a.processingTimeMs,
@@ -1879,15 +1879,18 @@ export const appRouter = router({
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
 
-        // 今日活動日誌（最近 100 筆）
+        // 最近 7 天的時間範圍（用於顯示活動記錄，避免今日無任務時空白）
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+        // 最近 7 天的活動日誌（最近 200 筆）
         const todayActivities = await drizzleDb
           .select()
           .from(agentActivityLogs)
-          .where(gte(agentActivityLogs.startedAt, todayStart))
+          .where(gte(agentActivityLogs.startedAt, sevenDaysAgo))
           .orderBy(desc(agentActivityLogs.startedAt))
-          .limit(100);
+          .limit(200);
 
-        // 每個 Agent 的今日統計（從 llmUsageLogs）
+        // 每個 Agent 的最近 7 天統計（從 llmUsageLogs）
         const agentTodayStats = await drizzleDb
           .select({
             agentName: llmUsageLogs.agentName,
@@ -1896,7 +1899,7 @@ export const appRouter = router({
             lastActive: sql<string>`MAX(${llmUsageLogs.createdAt})`,
           })
           .from(llmUsageLogs)
-          .where(gte(llmUsageLogs.createdAt, todayStart))
+          .where(gte(llmUsageLogs.createdAt, sevenDaysAgo))
           .groupBy(llmUsageLogs.agentName);
 
         // 最近 10 筆正在執行中的任務（只顯示 status='started' 的任務）

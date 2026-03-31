@@ -5239,3 +5239,39 @@ AI 辦公室看板中，AI 任務永遠顯示「執行中」（started 狀態）
 - [x] MasterAgent 失敗時也呼叫 cleanupZombieTasks(5) 清理 sub-agent 殭屍
 - [x] 降低定時清理間隔：30 分鐘 → 10 分鐘 timeout，10 分鐘 → 5 分鐘輪詢
 - [x] 伺服器啟動時立即執行 cleanupZombieTasks(10) 清理歷史殭屍
+
+---
+
+## Phase 41: 8 個問題修復（2026-03-31）
+
+### 問題 1: AI 辦公室空白（今日無任務時顯示空白）
+- [x] 後端 getAgentOfficeStatus 改為查詢最近 7 天（原本只查今日）
+- [x] 前端 AiOffice 標籤從「今日」改為「近 7 天」
+- [x] 空白提示文字更新為「近 7 天尚無 AI 員工工作記錄」
+
+### 問題 2: AI 自動生成縮小後消失（頁面切換後浮動指示器消失）
+- [x] ToursTab 的 isGenerating 和 currentTaskId 改用 sessionStorage 持久化
+- [x] 頁面重新載入時從 sessionStorage 恢復狀態
+
+### 問題 3: 分類導向問題（所有分類都導向同一頁面）
+- [x] Header 導航修正：團體旅遊→/tours?category=group，包團旅遊→/tours?category=package，郵輪旅遊→/tours?category=cruise，主題旅遊→/tours?category=theme
+- [x] 新增 zh-TW 和 en 翻譯 key：nav.groupTours, nav.packageTours, nav.cruiseTours, nav.themeTours
+
+### 問題 4: 客製旅遊應導向獨立頁面
+- [x] Header 中「客製旅遊」改為導向 /custom-tours 而非 /tours?category=custom
+
+### 問題 5: 翻譯殘留中文
+- [x] 確認問題根源：行程內容未翻譯（非 UI 標籤問題），需手動觸發翻譯
+
+### 問題 6: Hero 區域和特色卡片照片無法更換
+- [x] heroImage 在編輯模式下改從 editedTour 讀取（原本從 tour 原始資料讀取）
+- [x] keyFeatures 在編輯模式下改從 editedTour 讀取
+
+### 問題 7: 編輯模式難用（需要框框才能改字）
+- [x] 重寫 EditableText.tsx 為直接在原地編輯（inline contentEditable）
+- [x] 移除彈出式輸入框，點擊文字直接進入編輯狀態
+
+### 問題 8: AI 中心顯示 unknown 任務類型
+- [x] AiCostTab 圖表翻譯對照表新增更多 taskType 映射
+- [x] routers.ts 中 null taskType 改為 'other' 而非 'unknown'
+- [x] 'unknown' 顯示標籤改為「其他」
