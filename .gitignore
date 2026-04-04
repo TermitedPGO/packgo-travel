@@ -111,3 +111,12 @@ client/public/images-backup/
 
 # Compression scripts output
 scripts/compress-images.log
+
+# Manus workspace junk
+__manus__/
+*.backup
+debug-*
+analysis-*
+research-*
+*-report.md
+*-analysis.md
