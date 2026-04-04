@@ -1139,6 +1139,7 @@ export const appRouter = router({
       .input(
         z.object({
           tourId: z.number(),
+          departureId: z.number().optional(), // Optional for backward compat; use 0 if not provided
           participants: z.number().min(1),
           contactName: z.string().min(1),
           contactEmail: z.string().email(),
@@ -1168,10 +1169,21 @@ export const appRouter = router({
         // Calculate total amount
         const totalAmount = tour.price * input.participants;
 
+        // Resolve departure date
+        let departureDateStr = "TBD";
+        let returnDateStr = "TBD";
+        const departureId = input.departureId ?? 0;
+        if (departureId > 0) {
+          const departure = await db.getDepartureById(departureId);
+          if (departure) {
+            departureDateStr = new Date(departure.departureDate).toLocaleDateString('zh-TW', { year: 'numeric', month: 'long', day: 'numeric' });
+            returnDateStr = new Date(departure.returnDate).toLocaleDateString('zh-TW', { year: 'numeric', month: 'long', day: 'numeric' });
+          }
+        }
         // Create booking
         const booking = await db.createBooking({
           tourId: input.tourId,
-          departureId: 0, // TODO: Add departure selection
+          departureId,
           userId: ctx.user.id,
           customerName: input.contactName,
           customerEmail: input.contactEmail,
@@ -1195,8 +1207,8 @@ export const appRouter = router({
           customerEmail: input.contactEmail,
           bookingId: booking.id,
           tourTitle: tour.title,
-          departureDate: "TBD", // TODO: Add departure date selection
-          returnDate: "TBD", // TODO: Calculate return date
+          departureDate: departureDateStr,
+          returnDate: returnDateStr,
           numberOfAdults: input.participants,
           numberOfChildren: 0,
           numberOfInfants: 0,
