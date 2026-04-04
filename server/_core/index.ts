@@ -57,6 +57,8 @@ async function startServer() {
     // Development
     "http://localhost:3000",
     "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
     // Allow BASE_URL from env if set
     ...(process.env.BASE_URL && process.env.BASE_URL !== "https://packgo09.manus.space"
       ? [process.env.BASE_URL]
