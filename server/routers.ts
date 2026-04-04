@@ -31,7 +31,7 @@ function getStripeClient(): Stripe {
   }
   return _stripeClient;
 }
-import { checkForgotPasswordRateLimitByIP, checkForgotPasswordRateLimitByEmail, checkForgotPasswordGlobalRateLimit, isBlockedEmailDomain, checkBookingCreateRateLimit, checkCheckoutSessionRateLimit } from "./rateLimit";
+import { checkForgotPasswordRateLimitByIP, checkForgotPasswordRateLimitByEmail, checkForgotPasswordGlobalRateLimit, isBlockedEmailDomain, checkBookingCreateRateLimit, checkCheckoutSessionRateLimit, checkAiChatRateLimit } from "./rateLimit";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -309,6 +309,15 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ input, ctx }) => {
+        // Rate limiting: 10 requests per minute per IP
+        const ip = (ctx as any).ip ?? "unknown";
+        const aiChatRateLimit = await checkAiChatRateLimit(ip);
+        if (!aiChatRateLimit.allowed) {
+          throw new TRPCError({
+            code: "TOO_MANY_REQUESTS",
+            message: "AI 對話請求過於頻繁，請稍後再試",
+          });
+        }
         const { message, conversationHistory = [], sessionId } = input;
         const { processMessageWithSkills } = await import("./services/aiChatSkillService");
 
