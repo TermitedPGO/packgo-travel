@@ -152,88 +152,61 @@ async function sendPasswordResetEmailViaSMTP(
     const mailOptions = {
       from: `"PACK&GO 旅行社" <${EMAIL_FROM}>`,
       to,
-      subject: '重設密碼請求 - PACK&GO 旅行社',
+      subject: '重設您的密碼 - PACK&GO 旅行社',
       html: `
         <!DOCTYPE html>
         <html>
         <head>
           <meta charset="utf-8">
-          <style>
-            body {
-              font-family: Arial, sans-serif;
-              line-height: 1.6;
-              color: #333;
-              max-width: 600px;
-              margin: 0 auto;
-              padding: 20px;
-            }
-            .header {
-              background-color: #000;
-              color: #fff;
-              padding: 20px;
-              text-align: center;
-              border-radius: 8px 8px 0 0;
-            }
-            .content {
-              background-color: #f9f9f9;
-              padding: 30px;
-              border-radius: 0 0 8px 8px;
-            }
-            .button {
-              display: inline-block;
-              background-color: #000;
-              color: #fff;
-              padding: 12px 30px;
-              text-decoration: none;
-              border-radius: 25px;
-              margin: 20px 0;
-              font-weight: bold;
-            }
-            .footer {
-              margin-top: 30px;
-              padding-top: 20px;
-              border-top: 1px solid #ddd;
-              font-size: 12px;
-              color: #666;
-              text-align: center;
-            }
-            .warning {
-              background-color: #fff3cd;
-              border-left: 4px solid #ffc107;
-              padding: 12px;
-              margin: 20px 0;
-              border-radius: 4px;
-            }
-          </style>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>重設密碼</title>
         </head>
-        <body>
-          <div class="header">
-            <h1>PACK&GO 旅行社</h1>
-          </div>
-          <div class="content">
-            <h2>重設密碼請求</h2>
-            <p>親愛的 ${userName || '會員'}，</p>
-            <p>我們收到了您的密碼重設請求。請點擊下方按鈕重設您的密碼：</p>
-            <div style="text-align: center;">
-              <a href="${resetUrl}" class="button">重設密碼</a>
-            </div>
-            <p>或複製以下連結至瀏覽器：</p>
-            <p style="word-break: break-all; background-color: #fff; padding: 10px; border-radius: 4px;">
-              ${resetUrl}
-            </p>
-            <div class="warning">
-              <strong>⚠️ 重要提醒：</strong>
-              <ul>
-                <li>此連結將在 <strong>1 小時後</strong>失效</li>
-                <li>如果您沒有提出此請求，請忽略此郵件</li>
-                <li>請勿將此連結分享給他人</li>
-              </ul>
-            </div>
-          </div>
-          <div class="footer">
-            <p>© ${new Date().getFullYear()} PACK&GO 旅行社. All rights reserved.</p>
-            <p>如有任何問題，請聯繫我們的客服團隊</p>
-          </div>
+        <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+          <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f5f5f5; padding: 40px 20px;">
+            <tr>
+              <td align="center">
+                <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                  <tr>
+                    <td style="background-color: #000000; padding: 30px; text-align: center;">
+                      <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: bold; letter-spacing: 2px;">PACK&amp;GO</h1>
+                      <p style="color: #cccccc; margin: 5px 0 0 0; font-size: 14px;">讓旅行更美好</p>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 40px 30px;">
+                      <h2 style="color: #333333; margin: 0 0 20px 0; font-size: 24px;">重設您的密碼</h2>
+                      <p style="color: #666666; line-height: 1.6; margin: 0 0 20px 0;">您好 <strong>${userName || '會員'}</strong>，</p>
+                      <p style="color: #666666; line-height: 1.6; margin: 0 0 30px 0;">我們收到了重設您密碼的請求。請點擊下方按鈕重設您的密碼：</p>
+                      <div style="text-align: center; margin: 30px 0;">
+                        <a href="${resetUrl}" style="display: inline-block; background-color: #000000; color: #ffffff; text-decoration: none; padding: 16px 48px; border-radius: 4px; font-weight: bold; font-size: 18px;">重設密碼</a>
+                      </div>
+                      <p style="color: #999999; font-size: 14px; line-height: 1.6; margin: 20px 0 0 0;">或複製以下連結到瀏覽器：</p>
+                      <p style="color: #0066cc; font-size: 13px; word-break: break-all; margin: 10px 0 20px 0; background-color: #f8f8f8; padding: 12px; border-radius: 4px;">${resetUrl}</p>
+                      <div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; border-radius: 0 4px 4px 0;">
+                        <p style="color: #856404; margin: 0; font-size: 14px; line-height: 1.8;">⚠️ <strong>安全提醒：</strong></p>
+                        <ul style="color: #856404; margin: 8px 0 0 0; padding-left: 20px; font-size: 14px; line-height: 1.8;">
+                          <li>此連結將在 <strong>1 小時後</strong>失效</li>
+                          <li>如果您沒有請求重設密碼，請忽略此郵件</li>
+                          <li>請勿將此連結分享給他人</li>
+                        </ul>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="background-color: #f8f8f8; padding: 24px 30px; text-align: center; border-top: 1px solid #eeeeee;">
+                      <p style="color: #666666; margin: 0 0 8px 0; font-size: 14px;">需要協助？請聯絡我們的客服團隊</p>
+                      <p style="color: #0066cc; margin: 0 0 8px 0; font-size: 14px;">
+                        <a href="tel:+15106342307" style="color: #0066cc; text-decoration: none;">+1 (510) 634-2307</a>
+                        &nbsp;｜&nbsp;
+                        <a href="mailto:Jeffhsieh09@gmail.com" style="color: #0066cc; text-decoration: none;">Jeffhsieh09@gmail.com</a>
+                      </p>
+                      <p style="color: #999999; margin: 12px 0 0 0; font-size: 12px;">© ${new Date().getFullYear()} PACK&amp;GO 旅行社. All rights reserved.</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
         </body>
         </html>
       `,
@@ -244,10 +217,12 @@ async function sendPasswordResetEmailViaSMTP(
 
 ${resetUrl}
 
-重要提醒：
+安全提醒：
 - 此連結將在 1 小時後失效
-- 如果您沒有提出此請求，請忽略此郵件
+- 如果您沒有請求重設密碼，請忽略此郵件
 - 請勿將此連結分享給他人
+
+需要協助？請聯絡客服：+1 (510) 634-2307 | Jeffhsieh09@gmail.com
 
 © ${new Date().getFullYear()} PACK&GO 旅行社. All rights reserved.
       `,

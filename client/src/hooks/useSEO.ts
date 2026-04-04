@@ -11,7 +11,7 @@ interface SEOConfig {
 }
 
 const SITE_NAME = "PACK&GO 旅行社";
-const BASE_URL = "https://packgo-d3xjbq67.manus.space";
+const BASE_URL = "https://packgo09.manus.space";
 const DEFAULT_IMAGE = `${BASE_URL}/og-image.jpg`;
 
 /**

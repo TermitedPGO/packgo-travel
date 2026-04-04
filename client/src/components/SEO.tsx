@@ -1,6 +1,6 @@
 import { Helmet } from "react-helmet-async";
 
-const SITE_URL = "https://packgo-d3xjbq67.manus.space";
+const SITE_URL = "https://packgo09.manus.space";
 const SITE_NAME = "PACK&GO 旅行社";
 const DEFAULT_OG_IMAGE = `${SITE_URL}/og-image.jpg`;
 
