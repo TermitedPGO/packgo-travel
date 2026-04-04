@@ -48,9 +48,9 @@ export default function Destinations() {
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity" />
               
-              <div className="absolute bottom-0 left-0 w-full p-6 transform translate-y-2 group-hover:translate-y-0 transition-transform duration-500">
-                <h3 className="text-2xl font-bold text-white mb-1">{t(dest.nameKey)}</h3>
-                <p className="text-gray-300 text-sm uppercase tracking-wider mb-4">{dest.label}</p>
+              <div className="absolute bottom-0 left-0 w-full p-4 sm:p-6 transform translate-y-2 group-hover:translate-y-0 transition-transform duration-500">
+                <h3 className="text-lg sm:text-2xl font-bold text-white mb-1">{t(dest.nameKey)}</h3>
+                <p className="text-gray-300 text-xs sm:text-sm uppercase tracking-wider mb-2 sm:mb-4">{dest.label}</p>
                 <div className="flex items-center text-white text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-500 delay-100">
                   {t('destinations.viewTours')} <ArrowRight className="ml-2 h-4 w-4" />
                 </div>

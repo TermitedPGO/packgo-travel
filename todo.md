@@ -5326,3 +5326,47 @@ AI 辦公室看板中，AI 任務永遠顯示「執行中」（started 狀態）
 - [x] 加入 Pattern 白名單支援 *.manus.space 和 *.manus.computer
 - [x] 允許無 Origin 請求（Stripe webhook、curl）
 - [x] 阻擋未知來源並記錄警告日誌
+
+---
+
+## 新一輪修復任務（2026-04-04）
+
+### BUG-001：Redis/BullMQ Timeout
+- [x] 增加 ioredis commandTimeout 至 15–30s
+- [x] 加入 retryStrategy 指數退避
+- [x] 加入 enableReadyCheck: false 和 maxRetriesPerRequest: null
+- [x] 根本原因：commandTimeout:0 等同 setTimeout(0)，改為省略屬性（undefined）
+
+### Stripe Session 延長
+- [x] 將 expires_at 從 30 分鐘延長至 60 分鐘
+
+### BUG-004：隱藏無後端服務頁面
+- [x] FlightBooking 加入 Coming Soon advisory banner
+- [x] HotelBooking 加入 Coming Soon advisory banner
+- [x] AirportTransfer 加入 Coming Soon advisory banner
+- [x] 從 Header 主導覽列移除 Flight/Hotel/Airport 連結
+
+### Rate Limiting 覆蓋確認
+- [x] 新增 checkBookingCreateRateLimit（5次/分鐘/IP）
+- [x] 新增 checkCheckoutSessionRateLimit（3次/分鐘/IP）
+- [x] 新增 checkAIChatRateLimit（10次/分鐘/IP）
+- [x] 套用到 bookings.create、createCheckoutSession、/api/ai/chat/stream
+
+### BUG-005：StickyNav 重複 Tab
+- [x] 移除 TourDetailPeony.tsx navItems 中重複的 features tab
+
+### BUG-006：翻譯自動觸發
+- [x] 建立獨立 translationQueue（BullMQ，3次重試，指數退避）
+- [x] 建立 translationWorker 處理翻譯任務
+- [x] 4 個 fire-and-forget 呼叫全部改為 addTourTranslationJob()
+
+### BUG-008：Email HTML 模板
+- [x] 訂單確認 email 完整品牌模板（header/footer/訂單詳情/費用明細/下一步指引）
+- [ ] 密碼重設 email 加入品牌 header/footer（待實作）
+
+### §6.1 響應式設計
+- [x] Destinations.tsx：卡片文字 text-lg sm:text-2xl，padding p-4 sm:p-6
+- [x] FeaturedTours.tsx：grid-cols-1 md:grid-cols-2，文字/按鈕 sm: breakpoints
+- [x] Home.tsx Trustpilot：flex-wrap 改為 grid-cols-1 sm:grid-cols-3
+- [x] WhyChooseUs.tsx：stats 數字 text-2xl sm:text-3xl，卡片 p-4 sm:p-6
+- [x] NewsletterSection.tsx：form flex-col sm:flex-row，input/button 圓角響應式

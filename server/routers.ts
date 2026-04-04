@@ -33,7 +33,7 @@ function getStripeClient(): Stripe {
   }
   return _stripeClient;
 }
-import { checkForgotPasswordRateLimitByIP, checkForgotPasswordRateLimitByEmail, checkForgotPasswordGlobalRateLimit, isBlockedEmailDomain } from "./rateLimit";
+import { checkForgotPasswordRateLimitByIP, checkForgotPasswordRateLimitByEmail, checkForgotPasswordGlobalRateLimit, isBlockedEmailDomain, checkBookingCreateRateLimit, checkCheckoutSessionRateLimit } from "./rateLimit";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -610,10 +610,10 @@ export const appRouter = router({
           createdBy: ctx.user.id,
         });
 
-        // 非同步觸發翻譯（不阻塞建立流程）
-        translateTour(tour.id, ['en', 'es'], 'zh-TW', ctx.user.id)
-          .then((r) => console.log(`[AutoTranslate] Tour ${tour.id} translated to:`, r.translatedLanguages))
-          .catch((e) => console.warn(`[AutoTranslate] Tour ${tour.id} translation error:`, e));
+        // BUG-006: Queue translation job (reliable retry vs fire-and-forget)
+        import("./queue").then(({ addTourTranslationJob }) =>
+          addTourTranslationJob({ tourId: tour.id, targetLanguages: ['en', 'es'], sourceLanguage: 'zh-TW', userId: ctx.user.id })
+        ).catch((e) => console.warn(`[AutoTranslate] Failed to queue translation for tour ${tour.id}:`, e));
         return tour;
       }),
 
@@ -687,10 +687,10 @@ export const appRouter = router({
         }
         const { id, ...updates } = input;
         const tour = await db.updateTour(id, updates);
-        // 非同步觸發翻譯（不阻塞更新流程）
-        translateTour(id, ['en', 'es'], 'zh-TW', ctx.user.id)
-          .then((r) => console.log(`[AutoTranslate] Tour ${id} re-translated to:`, r.translatedLanguages))
-          .catch((e) => console.warn(`[AutoTranslate] Tour ${id} translation error:`, e));
+        // BUG-006: Queue translation job (reliable retry vs fire-and-forget)
+        import("./queue").then(({ addTourTranslationJob }) =>
+          addTourTranslationJob({ tourId: id, targetLanguages: ['en', 'es'], sourceLanguage: 'zh-TW', userId: ctx.user.id })
+        ).catch((e) => console.warn(`[AutoTranslate] Failed to queue translation for tour ${id}:`, e));
         return tour;
       }),
     // Partial update for inline editing (admin only)
@@ -730,9 +730,10 @@ export const appRouter = router({
         const contentFields = ['title', 'description', 'heroSubtitle', 'keyFeatures', 'highlights', 'includes', 'excludes', 'itineraryDetailed', 'costExplanation', 'noticeDetailed'];
         if (contentFields.includes(field)) {
           const userId = (tour as any).createdBy ?? 1;
-          translateTour(id, ['en', 'es'], 'zh-TW', userId)
-            .then((r) => console.log(`[AutoTranslate] Tour ${id} field '${field}' re-translated to:`, r.translatedLanguages))
-            .catch((e) => console.warn(`[AutoTranslate] Tour ${id} field '${field}' translation error:`, e));
+          // BUG-006: Queue translation job (reliable retry vs fire-and-forget)
+          import("./queue").then(({ addTourTranslationJob }) =>
+            addTourTranslationJob({ tourId: id, targetLanguages: ['en', 'es'], sourceLanguage: 'zh-TW', userId })
+          ).catch((e) => console.warn(`[AutoTranslate] Failed to queue translation for tour ${id}:`, e));
         }
         
         return tour;
@@ -904,10 +905,10 @@ export const appRouter = router({
           });
 
           console.log("[SaveFromPreview] Tour saved with ID:", savedTour.id);
-          // 非同步觸發翻譯（不阻塞儲存流程）
-          translateTour(savedTour.id, ['en', 'es'], 'zh-TW', ctx.user.id)
-            .then((r) => console.log(`[AutoTranslate] Tour ${savedTour.id} translated to:`, r.translatedLanguages))
-            .catch((e) => console.warn(`[AutoTranslate] Tour ${savedTour.id} translation error:`, e));
+          // BUG-006: Queue translation job (reliable retry vs fire-and-forget)
+          import("./queue").then(({ addTourTranslationJob }) =>
+            addTourTranslationJob({ tourId: savedTour.id, targetLanguages: ['en', 'es'], sourceLanguage: 'zh-TW', userId: ctx.user.id })
+          ).catch((e) => console.warn(`[AutoTranslate] Failed to queue translation for tour ${savedTour.id}:`, e));
 
           return {
             success: true,
@@ -1146,6 +1147,15 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
+        // Rate limiting: 10 bookings per hour per user
+        const bookingRateLimit = await checkBookingCreateRateLimit(ctx.user.id);
+        if (!bookingRateLimit.allowed) {
+          throw new TRPCError({
+            code: "TOO_MANY_REQUESTS",
+            message: "訂單建立過於頻繁，請稍後再試",
+          });
+        }
+
         // Get tour details
         const tour = await db.getTourById(input.tourId);
         if (!tour) {
@@ -1235,6 +1245,15 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
+        // Rate limiting: 20 checkout sessions per hour per user
+        const checkoutRateLimit = await checkCheckoutSessionRateLimit(ctx.user.id);
+        if (!checkoutRateLimit.allowed) {
+          throw new TRPCError({
+            code: "TOO_MANY_REQUESTS",
+            message: "付款請求過於頻繁，請稍後再試",
+          });
+        }
+
         const booking = await db.getBookingById(input.bookingId);
         if (!booking) {
           throw new TRPCError({
@@ -1301,7 +1320,7 @@ export const appRouter = router({
           customer_email: booking.customerEmail,
           success_url: `${baseUrl}/booking/success?session_id={CHECKOUT_SESSION_ID}&booking_id=${booking.id}`,
           cancel_url: `${baseUrl}/booking/${booking.id}?payment_cancelled=1`,
-          expires_at: Math.floor(Date.now() / 1000) + 30 * 60, // 30 minutes
+          expires_at: Math.floor(Date.now() / 1000) + 60 * 60, // 60 minutes (extended for older clientele)
         });
 
         if (!session.url) {

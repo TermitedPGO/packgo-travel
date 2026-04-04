@@ -39,10 +39,12 @@ export default function Header() {
     {
       labelKey: "nav.services",
       children: [
-        { labelKey: "nav.flightBooking", href: "/flight-booking", descKey: "nav.flightBookingDesc" },
-        { labelKey: "nav.airportTransfer", href: "/airport-transfer", descKey: "nav.airportTransferDesc" },
-        { labelKey: "nav.hotelBooking", href: "/hotel-booking", descKey: "nav.hotelBookingDesc" },
+        // BUG-004: Flight/Hotel/Airport pages have no backend — removed from main nav
+        // They remain accessible via Footer links and direct URL
         { labelKey: "nav.visaServices", href: "/visa-services", descKey: "nav.visaServicesDesc" },
+        { labelKey: "nav.customTourRequest", href: "/custom-tour-request", descKey: "nav.customTourRequestDesc" },
+        { labelKey: "nav.quickInquiry", href: "/inquiry", descKey: "nav.quickInquiryDesc" },
+        { labelKey: "nav.contactUs", href: "/contact-us", descKey: "nav.contactUsDesc" },
       ],
     },
     {

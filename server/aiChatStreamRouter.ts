@@ -11,6 +11,7 @@
 import { Router } from "express";
 import { getHaikuAgent } from "./agents/claudeAgent";
 import { matchSkills } from "./services/aiChatSkillService";
+import { checkAiChatRateLimit } from "./rateLimit";
 
 export const aiChatStreamRouter = Router();
 
@@ -19,6 +20,14 @@ aiChatStreamRouter.get("/ai/chat/stream", async (req, res) => {
 
   if (!message) {
     res.status(400).json({ error: "message is required" });
+    return;
+  }
+
+  // Rate limiting: 60 requests per hour per IP
+  const ip = (req.headers["x-forwarded-for"] as string || req.socket?.remoteAddress || "unknown").split(",")[0].trim();
+  const rateLimitResult = await checkAiChatRateLimit(ip);
+  if (!rateLimitResult.allowed) {
+    res.status(429).json({ error: "請求過於頻繁，請稍後再試" });
     return;
   }
 

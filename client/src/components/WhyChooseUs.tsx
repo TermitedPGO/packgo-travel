@@ -75,7 +75,7 @@ export default function WhyChooseUs() {
             return (
               <div
                 key={index}
-                className="border border-gray-700 p-6 hover:border-white transition-colors duration-300 group"
+                className="border border-gray-700 p-4 sm:p-6 hover:border-white transition-colors duration-300 group"
               >
                 <div className="flex items-start gap-4">
                   <div className="flex-shrink-0 w-12 h-12 border border-gray-600 group-hover:border-white flex items-center justify-center transition-colors">
@@ -96,7 +96,7 @@ export default function WhyChooseUs() {
         </div>
 
         {/* Stats Row */}
-        <div className="mt-12 pt-10 border-t border-gray-800 grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+        <div className="mt-12 pt-10 border-t border-gray-800 grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6 text-center">
           {[
             { numZh: "10+", labelZh: "年旅遊經驗", labelEn: "Years Experience" },
             { numZh: "1,200+", labelZh: "滿意旅客", labelEn: "Happy Travelers" },
@@ -104,7 +104,7 @@ export default function WhyChooseUs() {
             { numZh: "98%", labelZh: "客戶滿意度", labelEn: "Satisfaction Rate" },
           ].map((stat, i) => (
             <div key={i}>
-              <div className="text-3xl font-bold text-white mb-1">{stat.numZh}</div>
+              <div className="text-2xl sm:text-3xl font-bold text-white mb-1">{stat.numZh}</div>
               <div className="text-gray-400 text-sm">{isEn ? stat.labelEn : stat.labelZh}</div>
             </div>
           ))}

@@ -1,5 +1,5 @@
 import { Queue, Worker, Job } from "bullmq";
-import redis from "./redis";
+import { redisBullMQ } from "./redis"; // BUG-001: dedicated BullMQ connection (commandTimeout:0)
 
 /**
  * Job data structure for tour generation
@@ -73,7 +73,7 @@ export interface TourGenerationResult {
  * Queue for tour generation tasks
  */
 export const tourGenerationQueue = new Queue<TourGenerationJobData, TourGenerationResult>("tour-generation", {
-  connection: redis,
+  connection: redisBullMQ,
   defaultJobOptions: {
     attempts: 3, // Retry up to 3 times on failure
     backoff: {
@@ -171,7 +171,7 @@ export interface SkillLearningResult {
  * Queue for skill learning tasks
  */
 export const skillLearningQueue = new Queue<SkillLearningJobData, SkillLearningResult>("skill-learning", {
-  connection: redis,
+  connection: redisBullMQ,
   defaultJobOptions: {
     attempts: 2, // Retry up to 2 times on failure
     backoff: {
@@ -190,3 +190,65 @@ export const skillLearningQueue = new Queue<SkillLearningJobData, SkillLearningR
 });
 
 console.log("✅ Skill learning queue initialized");
+
+// ============================================================
+// Tour Translation Queue (BUG-006)
+// Replaces fire-and-forget translateTour() calls with reliable
+// queued processing that supports retries and failure tracking.
+// ============================================================
+
+/**
+ * Job data structure for tour translation
+ */
+export interface TourTranslationJobData {
+  tourId: number;
+  targetLanguages: string[];
+  sourceLanguage: string;
+  userId: number;
+}
+
+/**
+ * Job result structure for tour translation
+ */
+export interface TourTranslationResult {
+  success: boolean;
+  translatedLanguages: string[];
+  errors: string[];
+}
+
+/**
+ * Queue for tour translation tasks
+ * - 3 retries with exponential backoff (5s → 25s → 125s)
+ * - Failed jobs kept for 7 days for debugging
+ */
+export const tourTranslationQueue = new Queue<TourTranslationJobData, TourTranslationResult>("tour-translation", {
+  connection: redisBullMQ,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: {
+      type: "exponential",
+      delay: 5000,
+    },
+    removeOnComplete: {
+      age: 86400, // 24 hours
+      count: 500,
+    },
+    removeOnFail: {
+      age: 604800, // 7 days
+      count: 1000,
+    },
+  },
+});
+
+/**
+ * Add a tour translation job to the queue (BUG-006)
+ * Use this instead of calling translateTour() directly.
+ */
+export async function addTourTranslationJob(data: TourTranslationJobData) {
+  const jobId = `translate-${data.tourId}-${Date.now()}`;
+  const job = await tourTranslationQueue.add("translate-tour", data, { jobId });
+  console.log(`✅ Tour translation job queued: ${job.id} (tour #${data.tourId} → ${data.targetLanguages.join(", ")})`);
+  return job;
+}
+
+console.log("✅ Tour translation queue initialized");

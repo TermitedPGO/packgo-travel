@@ -64,7 +64,7 @@ function HomeContent() {
         <section className="py-12 bg-white border-b border-gray-200">
           <div className="container flex flex-col items-center justify-center text-center">
             <h4 className="text-xl font-serif font-bold text-black mb-6">{t('reviews.title')}</h4>
-            <div className="flex flex-wrap justify-center gap-8 md:gap-16">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-8 md:gap-16 w-full max-w-3xl">
               {[
                 { name: "5 stars", desc: "This is my first time using a Chinese agency...", author: "Melody, Dec 24" },
                 { name: "Good company", desc: "Good company", author: "Ming Kuang, Dec 22" },

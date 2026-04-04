@@ -32,6 +32,21 @@ export default function AirportTransfer() {
     <div className="min-h-screen flex flex-col bg-white">
       <Header />
 
+      {/* BUG-004: Coming Soon advisory banner */}
+      <div className="bg-amber-50 border-b border-amber-200">
+        <div className="container py-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-amber-800">
+            <span className="text-lg">🚗</span>
+            <span className="text-sm font-medium">此服務目前由專業顧問協助辦理，線上自助訂購功能即將推出</span>
+          </div>
+          <Link href="/inquiry">
+            <Button size="sm" className="bg-amber-600 hover:bg-amber-700 text-white shrink-0">
+              立即詢問顧問
+            </Button>
+          </Link>
+        </div>
+      </div>
+
       <section className="relative bg-black text-white overflow-hidden">
         <div className="absolute inset-0">
           <img

@@ -229,3 +229,48 @@ export async function checkForgotPasswordGlobalRateLimit(): Promise<RateLimitRes
     window: 60, // 1 minute
   });
 }
+
+// ============================================================
+// Booking & Payment Rate Limiting
+// ============================================================
+
+/**
+ * Rate limit for booking creation.
+ * Limit: 10 bookings per hour per user (prevents spam bookings)
+ */
+export async function checkBookingCreateRateLimit(userId: number): Promise<RateLimitResult> {
+  return checkRateLimit({
+    key: `booking-create:user:${userId}`,
+    limit: 10,
+    window: 3600, // 1 hour
+  });
+}
+
+/**
+ * Rate limit for Stripe checkout session creation.
+ * Limit: 20 sessions per hour per user (prevents Stripe API abuse)
+ */
+export async function checkCheckoutSessionRateLimit(userId: number): Promise<RateLimitResult> {
+  return checkRateLimit({
+    key: `checkout-session:user:${userId}`,
+    limit: 20,
+    window: 3600, // 1 hour
+  });
+}
+
+// ============================================================
+// AI Chat Rate Limiting
+// ============================================================
+
+/**
+ * Rate limit for AI chat stream endpoint.
+ * Limit: 60 requests per hour per IP (prevents AI cost abuse)
+ * Uses IP because chat is accessible without login.
+ */
+export async function checkAiChatRateLimit(ip: string): Promise<RateLimitResult> {
+  return checkRateLimit({
+    key: `ai-chat:ip:${ip}`,
+    limit: 60,
+    window: 3600, // 1 hour
+  });
+}

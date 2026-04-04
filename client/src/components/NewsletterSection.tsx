@@ -36,7 +36,7 @@ export default function NewsletterSection() {
             <h3 className="text-2xl font-serif font-bold mb-2">{t('newsletter.title')}</h3>
             <p className="text-gray-300">{t('newsletter.subtitle')}</p>
           </div>
-          <form onSubmit={handleSubmit} className="w-full md:w-1/2 flex gap-0">
+          <form onSubmit={handleSubmit} className="w-full md:w-1/2 flex flex-col sm:flex-row gap-2 sm:gap-0">
             <div className="relative flex-grow">
               <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 h-5 w-5" />
               <input 
@@ -44,14 +44,14 @@ export default function NewsletterSection() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder={t('newsletter.placeholder')} 
-                className="w-full h-12 pl-12 pr-4 bg-white/10 border border-white/20 text-white placeholder:text-gray-500 focus:outline-none focus:border-white focus:ring-1 focus:ring-white transition-all rounded-l-lg"
+                className="w-full h-12 pl-12 pr-4 bg-white/10 border border-white/20 text-white placeholder:text-gray-500 focus:outline-none focus:border-white focus:ring-1 focus:ring-white transition-all rounded-lg sm:rounded-l-lg sm:rounded-r-none"
                 disabled={subscribe.isPending}
               />
             </div>
             <Button 
               type="submit"
               disabled={subscribe.isPending}
-              className="h-12 px-8 bg-white hover:bg-gray-200 text-black rounded-lg font-bold tracking-wide"
+              className="h-12 px-8 bg-white hover:bg-gray-200 text-black rounded-lg sm:rounded-l-none font-bold tracking-wide"
             >
               {subscribe.isPending ? t('common.loading') : t('newsletter.button')}
             </Button>

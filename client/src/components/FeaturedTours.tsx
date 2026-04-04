@@ -58,7 +58,7 @@ export default function FeaturedTours() {
 
         {!isLoading && !error && featuredTours.length > 0 && (
           <>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
               {featuredTours.map((tour) => (
                 <Card key={tour.id} className="group overflow-hidden border-2 border-black   shadow-lg hover:shadow-lg transition-all duration-300">
                   <div className="relative aspect-[4/3] overflow-hidden rounded-t-xl">
@@ -113,7 +113,7 @@ export default function FeaturedTours() {
                           {tour.category === 'custom' && t('nav.customTours')}
                           {tour.category === 'theme' && t('common.features')}
                         </Badge>
-                        <h3 className="text-2xl font-bold text-black group-hover:text-gray-700 transition-colors">
+                        <h3 className="text-xl sm:text-2xl font-bold text-black group-hover:text-gray-700 transition-colors">
                           {getTranslatedField(tour.id, 'title', tour.title)}
                         </h3>
                         <p className="text-gray-600 text-sm font-medium">{tour.destination}</p>
@@ -130,11 +130,11 @@ export default function FeaturedTours() {
                   <CardFooter className="flex items-center justify-between border-t-2 border-black pt-6 bg-gray-50">
                     <div>
                       <span className="text-xs text-gray-500 block">{t('common.perPerson')}</span>
-                      <span className="text-2xl font-bold text-black">{formatPrice(tour.price, (tour.priceCurrency as 'TWD' | 'USD') || 'TWD')}</span>
+                      <span className="text-xl sm:text-2xl font-bold text-black">{formatPrice(tour.price, (tour.priceCurrency as 'TWD' | 'USD') || 'TWD')}</span>
                       <span className="text-xs text-gray-400 ml-1">{t('common.startingFrom')}</span>
                     </div>
                     <Link href={`/tours/${tour.id}`}>
-                      <Button className="bg-black hover:bg-gray-800 text-white px-8 shadow-md transition-transform active:scale-95 rounded-lg">
+                      <Button className="bg-black hover:bg-gray-800 text-white px-4 sm:px-8 shadow-md transition-transform active:scale-95 rounded-lg text-sm sm:text-base">
                         {t('common.viewMore')}
                       </Button>
                     </Link>
@@ -148,7 +148,7 @@ export default function FeaturedTours() {
               <Link href="/tours">
                 <Button 
                   variant="outline" 
-                  className="border-2 border-black  text-black hover:bg-black hover:text-white px-12 py-6 text-lg font-bold transition-all rounded-lg"
+                  className="border-2 border-black text-black hover:bg-black hover:text-white px-8 sm:px-12 py-4 sm:py-6 text-base sm:text-lg font-bold transition-all rounded-lg"
                 >
                   {t('featuredTours.viewAll')}
                 </Button>

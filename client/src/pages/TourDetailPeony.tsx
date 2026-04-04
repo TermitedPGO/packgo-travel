@@ -1841,9 +1841,9 @@ export default function TourDetailPeony() {
 
   // 導覽項目
   const navItems = [
+    // BUG-005 fix: removed duplicate 'features' tab (same section as 'overview')
     { id: "overview", label: t('tourDetail.tabs.overview') },
     { id: "itinerary", label: t('tourDetail.tabs.itinerary') },
-    { id: "features", label: t('tourDetail.tabs.features') || '內容特色' },
     { id: "hotels", label: t('tourDetail.tabs.hotel') },
     { id: "pricing", label: t('tourDetail.tabs.pricing') },
     { id: "notes", label: t('tourDetail.tabs.notes') },

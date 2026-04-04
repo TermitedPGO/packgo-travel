@@ -124,6 +124,11 @@ export const zhTW = {
     airportTransferDesc: '機場接送、專車接送服務',
     hotelBookingDesc: '全球飯店預訂與優惠方案',
     visaServicesDesc: '各國簽證申請與咨詢服務',
+    customTourRequest: '客製行程規劃',
+    customTourRequestDesc: '告訴我們您的夢想旅程，專屬顧問為您量身打造',
+    quickInquiry: '快速詢問',
+    quickInquiryDesc: '填寫線上表單，顧問將於一個工作天內回覆',
+    contactUsDesc: '電話、Email 或親臨門市洽詢',
   },
 
   // Hero 區塊

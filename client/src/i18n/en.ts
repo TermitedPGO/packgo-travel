@@ -124,6 +124,11 @@ export const en = {
     airportTransferDesc: 'Airport pickup & private car service',
     hotelBookingDesc: 'Global hotel booking & special deals',
     visaServicesDesc: 'Visa application & consultation for all countries',
+    customTourRequest: 'Custom Tour Planning',
+    customTourRequestDesc: 'Tell us your dream trip, our advisor will tailor it for you',
+    quickInquiry: 'Quick Inquiry',
+    quickInquiryDesc: 'Fill out our online form, advisor will reply within 1 business day',
+    contactUsDesc: 'Phone, Email or visit our office',
   },
 
   // Hero Section

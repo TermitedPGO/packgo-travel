@@ -1,11 +1,14 @@
 import { Worker, Job } from "bullmq";
-import redis from "./redis";
+import { redisBullMQ } from "./redis"; // BUG-001: dedicated BullMQ connection (commandTimeout:0)
 import {
   TourGenerationJobData,
   TourGenerationProgress,
   TourGenerationResult,
+  TourTranslationJobData,
+  TourTranslationResult,
 } from "./queue";
 import { generateTourFromUrlInternal } from "./tourGenerator";
+import { translateTour, Language } from "./translation";
 
 /**
  * Worker for processing tour generation jobs
@@ -70,7 +73,7 @@ export const tourGenerationWorker = new Worker<TourGenerationJobData, TourGenera
     }
   },
   {
-    connection: redis,
+    connection: redisBullMQ, // BUG-001: use dedicated connection without commandTimeout
     concurrency: 1, // 行程生成是重型 AI 任務，單一並行即可
     lockDuration: 1200000, // 20 分鐘鎖定（長任務需要）
     lockRenewTime: 600000, // 每 10 分鐘更新鎖定
@@ -118,5 +121,55 @@ tourGenerationWorker.on("error", (err) => {
 });
 
 console.log("✅ Tour generation worker initialized (optimized Redis polling)");
+
+// ============================================================
+// Tour Translation Worker (BUG-006)
+// Processes translation jobs from the tourTranslationQueue
+// ============================================================
+
+export const tourTranslationWorker = new Worker<TourTranslationJobData, TourTranslationResult>(
+  "tour-translation",
+  async (job: Job<TourTranslationJobData, TourTranslationResult>) => {
+    const { tourId, targetLanguages, sourceLanguage, userId } = job.data;
+    console.log(`🌐 Processing translation job: ${job.id} (tour #${tourId} → ${targetLanguages.join(", ")})`);
+
+    const result = await translateTour(
+      tourId,
+      targetLanguages as Language[],
+      sourceLanguage as Language,
+      userId
+    );
+
+    if (!result.success && result.errors.length > 0) {
+      // Throw to trigger BullMQ retry
+      throw new Error(`Translation failed: ${result.errors.join("; ")}`);
+    }
+
+    console.log(`✅ Translation job completed: ${job.id} (translated: ${result.translatedLanguages.join(", ")})`);
+    return result;
+  },
+  {
+    connection: redisBullMQ,
+    concurrency: 2, // Allow 2 concurrent translations
+    lockDuration: 300000, // 5 minutes lock (translation is faster than generation)
+    lockRenewTime: 120000, // Renew every 2 minutes
+    drainDelay: 30, // Same as tour generation worker
+    stalledInterval: 300000,
+  }
+);
+
+tourTranslationWorker.on("completed", (job) => {
+  console.log(`✅ Translation job ${job.id} completed`);
+});
+
+tourTranslationWorker.on("failed", (job, err) => {
+  console.error(`❌ Translation job ${job?.id} failed:`, err.message);
+});
+
+tourTranslationWorker.on("error", (err) => {
+  console.error("❌ Translation worker error:", err);
+});
+
+console.log("✅ Tour translation worker initialized");
 
 export default tourGenerationWorker;

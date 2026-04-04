@@ -1,19 +1,27 @@
-import Redis from "ioredis";
+import Redis, { RedisOptions } from "ioredis";
 
 /**
- * Redis client for BullMQ queue management
- * Supports both local Redis and Upstash Redis (cloud)
+ * Redis client configuration for Pack&Go Travel
+ *
+ * BUG-001 Fix: Two separate connections are maintained:
+ * 1. `redis`       — General-purpose (cache, rate-limit, exchange rates)
+ *                    commandTimeout: 30000ms
+ * 2. `redisBullMQ` — Dedicated BullMQ client
+ *                    commandTimeout: OMITTED (undefined)
+ *                    BullMQ uses BLPOP which is a blocking command that legitimately
+ *                    waits 30s+ for new jobs. Setting commandTimeout to 0 causes
+ *                    immediate timeouts (setTimeout(0) fires instantly in ioredis v5).
+ *                    The only correct fix is to NOT set commandTimeout at all.
  *
  * For Upstash: Set UPSTASH_REDIS_URL environment variable
  * Format: rediss://default:PASSWORD@ENDPOINT:PORT
  */
 
-// Check if Upstash URL is provided (production)
 const upstashUrl = process.env.UPSTASH_REDIS_URL;
 
 // Exponential backoff retry: 500ms, 1s, 1.5s ... up to 5s, stop after 10 attempts
 const RETRY_STRATEGY = (times: number) => {
-  if (times > 10) return null; // Stop retrying after 10 attempts
+  if (times > 10) return null;
   return Math.min(times * 500, 5000);
 };
 
@@ -23,59 +31,70 @@ const RECONNECT_ON_ERROR = (err: Error) => {
   return transientErrors.some((e) => err.message.includes(e));
 };
 
-let redis: Redis;
-
-if (upstashUrl) {
-  // Upstash Redis connection (TLS enabled)
-  console.log("🔗 Connecting to Upstash Redis...");
-  redis = new Redis(upstashUrl, {
-    maxRetriesPerRequest: null, // Required for BullMQ
-    enableReadyCheck: false, // Required for BullMQ
-    tls: {
-      rejectUnauthorized: false, // Required for Upstash
-    },
+function createRedisClient(opts: {
+  label: string;
+  commandTimeout?: number; // undefined = no timeout (for BullMQ blocking commands)
+}): Redis {
+  const baseOptions: RedisOptions = {
+    maxRetriesPerRequest: null,   // Required for BullMQ
+    enableReadyCheck: false,      // Required for BullMQ
     retryStrategy: RETRY_STRATEGY,
     reconnectOnError: RECONNECT_ON_ERROR,
-    connectTimeout: 10000,
-    commandTimeout: 30000,
+    connectTimeout: 15000,        // 15s connection timeout
     lazyConnect: false,
+  };
+
+  // Only set commandTimeout if explicitly provided (undefined = no timeout)
+  // ioredis checks: typeof this.options.commandTimeout === "number"
+  // so undefined safely skips the timer entirely
+  if (opts.commandTimeout !== undefined) {
+    baseOptions.commandTimeout = opts.commandTimeout;
+  }
+
+  let client: Redis;
+
+  if (upstashUrl) {
+    baseOptions.tls = { rejectUnauthorized: false }; // Required for Upstash TLS
+    client = new Redis(upstashUrl, baseOptions);
+  } else {
+    baseOptions.host = process.env.REDIS_HOST || "127.0.0.1";
+    baseOptions.port = parseInt(process.env.REDIS_PORT || "6379");
+    client = new Redis(baseOptions);
+  }
+
+  client.on("connect", () => console.log(`✅ [${opts.label}] Redis connected`));
+  client.on("ready",   () => console.log(`✅ [${opts.label}] Redis ready`));
+  client.on("reconnecting", () => console.log(`🔄 [${opts.label}] Redis reconnecting...`));
+  client.on("error", (err) => {
+    const isTransient = ["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED"].some((e) =>
+      err.message.includes(e)
+    );
+    if (!isTransient) {
+      console.error(`❌ [${opts.label}] Redis error:`, err.message);
+    } else {
+      console.warn(`⚠️ [${opts.label}] Redis transient error (will retry):`, err.message);
+    }
   });
-} else {
-  // Local Redis connection (development)
-  console.log("🔗 Connecting to local Redis...");
-  redis = new Redis({
-    host: process.env.REDIS_HOST || "127.0.0.1",
-    port: parseInt(process.env.REDIS_PORT || "6379"),
-    maxRetriesPerRequest: null, // Required for BullMQ
-    enableReadyCheck: false, // Required for BullMQ
-    retryStrategy: RETRY_STRATEGY,
-    reconnectOnError: RECONNECT_ON_ERROR,
-  });
+
+  return client;
 }
 
-redis.on("connect", () => {
-  console.log("✅ Redis connected successfully");
-});
+console.log("🔗 Connecting to " + (upstashUrl ? "Upstash" : "local") + " Redis...");
 
-redis.on("error", (err) => {
-  // Only log non-transient errors to reduce noise
-  const isTransient = ["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED"].some((e) =>
-    err.message.includes(e)
-  );
-  if (!isTransient) {
-    console.error("❌ Redis connection error:", err);
-  } else {
-    console.warn("⚠️ Redis transient error (will retry):", err.message);
-  }
-});
+/**
+ * General-purpose Redis client
+ * Used for: cache, rate-limit, exchange rates, LLM cache
+ * commandTimeout: 30s (regular commands should complete quickly)
+ */
+const redis = createRedisClient({ label: "General", commandTimeout: 30000 });
 
-redis.on("ready", () => {
-  console.log("✅ Redis is ready to accept commands");
-});
+/**
+ * BullMQ-dedicated Redis client
+ * commandTimeout: undefined (NOT SET) — BLPOP is a blocking command that waits for jobs.
+ * Setting commandTimeout to any value (including 0) causes false errors on Upstash free tier.
+ * ioredis v5: typeof commandTimeout === "number" check means undefined safely skips the timer.
+ */
+const redisBullMQ = createRedisClient({ label: "BullMQ" }); // commandTimeout intentionally omitted
 
-redis.on("reconnecting", () => {
-  console.log("🔄 Redis reconnecting...");
-});
-
-export { redis };
+export { redis, redisBullMQ };
 export default redis;
