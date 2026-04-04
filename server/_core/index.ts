@@ -63,12 +63,15 @@ async function startServer() {
       : []),
   ];
 
-  // Patterns for dynamic origins (Manus sandbox preview URLs)
-  const allowedOriginPatterns = [
-    /^https:\/\/[a-z0-9-]+\.manus\.space$/,       // *.manus.space (production)
-    /^https:\/\/[a-z0-9-]+\.manus\.computer$/,    // *.manus.computer (sandbox preview)
-    /^https:\/\/[a-z0-9-]+\.us2\.manus\.computer$/, // *.us2.manus.computer
-  ];
+  // Patterns for dynamic origins
+  // Production: only allow our own domain; Development: allow all Manus sandbox preview URLs
+  const allowedOriginPatterns = process.env.NODE_ENV === 'production'
+    ? [/^https:\/\/packgo09\.manus\.space$/]
+    : [
+        /^https:\/\/[a-z0-9-]+\.manus\.space$/,       // *.manus.space
+        /^https:\/\/[a-z0-9-]+\.manus\.computer$/,    // *.manus.computer (sandbox preview)
+        /^https:\/\/[a-z0-9-]+\.us2\.manus\.computer$/, // *.us2.manus.computer
+      ];
 
   app.use(
     cors({
