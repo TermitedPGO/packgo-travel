@@ -30,3 +30,19 @@ export const ENV = {
   // P0-4: Base URL for sitemap and other absolute URL generation
   baseUrl: process.env.BASE_URL ?? "https://packgo-d3xjbq67.manus.space",
 };
+
+// FIX-02: Startup validation for critical and optional env vars
+const REQUIRED_IN_PRODUCTION = ['DATABASE_URL', 'JWT_SECRET'] as const;
+if (ENV.isProduction) {
+  for (const key of REQUIRED_IN_PRODUCTION) {
+    if (!process.env[key]) {
+      throw new Error(`Missing required environment variable: ${key}`);
+    }
+  }
+  const WARN_VARS = ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'UNSPLASH_ACCESS_KEY'];
+  for (const key of WARN_VARS) {
+    if (!process.env[key]) {
+      console.warn(`[ENV] Warning: ${key} is not set. Related features will be disabled.`);
+    }
+  }
+}
