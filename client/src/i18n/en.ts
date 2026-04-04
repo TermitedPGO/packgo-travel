@@ -328,7 +328,7 @@ export const en = {
     phone: 'Phone',
     email: 'Email',
     businessHours: 'Business Hours',
-    weekdays: 'Monday - Friday',
+    weekdays: 'Monday - Saturday',
     saturday: 'Saturday',
     sunday: 'Sunday',
     closed: 'Closed',

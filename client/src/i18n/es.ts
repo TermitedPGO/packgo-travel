@@ -297,7 +297,7 @@ export const es = {
     phone: 'Teléfono',
     email: 'Correo Electrónico',
     businessHours: 'Horario de Atención',
-    weekdays: 'Lunes - Viernes',
+    weekdays: 'Lunes - Sábado',
     saturday: 'Sábado',
     sunday: 'Domingo',
     closed: 'Cerrado',

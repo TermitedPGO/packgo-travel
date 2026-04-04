@@ -177,8 +177,7 @@ export default function QuickInquiry() {
                     <div>
                       <p className="text-sm text-gray-500 mb-1">服務時間</p>
                       <p className="text-sm text-gray-700 leading-relaxed">
-                        {t('contactUs.weekdays')}：09:00 - 18:00<br />
-                        {t('contactUs.saturday')}：09:00 - 17:00<br />
+                        {t('contactUs.weekdays')}：11:30 - 19:30<br />
                         {t('contactUs.sunday')}：{t('contactUs.closed')}
                       </p>
                     </div>

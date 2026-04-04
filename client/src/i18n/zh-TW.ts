@@ -329,7 +329,7 @@ export const zhTW = {
     phone: '電話',
     email: 'Email',
     businessHours: '營業時間',
-    weekdays: '週一至週五',
+    weekdays: '週一至週六',
     saturday: '週六',
     sunday: '週日',
     closed: '休息',

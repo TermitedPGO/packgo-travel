@@ -211,7 +211,7 @@ export default function PaymentSuccess() {
             </div>
           </div>
           <p className="mt-6 text-base text-gray-500 border-t border-gray-200 pt-4">
-            服務時間：週一至週五 09:00–18:00（太平洋時間）
+            服務時間：週一至週六 11:30–19:30（太平洋時間 PST），週日休息
           </p>
         </Card>
 

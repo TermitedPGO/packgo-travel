@@ -125,7 +125,7 @@ export default function PaymentFailure() {
               <div>
                 <p className="text-sm text-gray-600">{t('contactUs.phone')}</p>
                 <p className="font-semibold text-gray-900">+1 (510) 634-2307</p>
-                <p className="text-xs text-gray-500">{t('contactUs.weekdays')}：09:00-18:00</p>
+                <p className="text-xs text-gray-500">{t('contactUs.weekdays')}：11:30-19:30</p>
               </div>
             </div>
             <div className="flex items-center gap-3">
