@@ -234,29 +234,8 @@ grep -rn "object-cover" client/src --include="*.tsx" | grep -v "rounded"
 
 ---
 
-## 九、工作紀律（給 AI Agent 的規範）
-
-### 9.1 檔案衛生 — 最高優先級
-- 禁止在專案根目錄產生任何 .md 報告、分析文件、研究筆記、臨時腳本、截圖。
-- 如果需要臨時腳本，用完立即刪除。
-- 如果需要記錄決策，寫在 git commit message 或直接更新 CLAUDE.md。
-
-### 9.2 改動範圍控制
-- 一次只做一件事。不要在修 bug 的同時重構其他東西。
-- 不要自作主張「順便改善」。只做被要求的事。
-- 改完要確認 pnpm build 通過（0 TypeScript errors）。
-
-### 9.3 Git 規範
-- 每個功能/修復完成後立即 commit + push origin main。
-- Commit message 用英文，格式：feat:/fix:/chore:/refactor:
-- 禁止 git add . 或 git add -A，只 add 實際改動的檔案。
-- Commit 前檢查 git status，確認沒有垃圾檔案被 stage。
-
----
-
-## 十、版本歷史
+## 九、版本歷史
 
 | 版本 | 日期 | 主要變更 |
 |------|------|----------|
 | 1.0 | 2026-03-26 | 初版，整合所有既有設計決策和禁止事項 |
-| 1.1 | 2026-04-04 | 新增「工作紀律」章節，大規模清理垃圾檔案 |

@@ -1,6 +1,5 @@
 import "dotenv/config";
 import express from "express";
-import { ENV } from "./env";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import { createServer } from "http";
@@ -162,21 +161,6 @@ async function startServer() {
       console.error('[Sitemap] Error generating sitemap:', err);
       res.status(500).send('Error generating sitemap');
     }
-  });
-
-  // Dynamic robots.txt (FIX-03d)
-  app.get('/robots.txt', (req, res) => {
-    const baseUrl = ENV.baseUrl;
-    res.type('text/plain').send(
-`User-agent: *
-Allow: /
-
-Disallow: /admin
-Disallow: /admin/
-Disallow: /api/
-
-Sitemap: ${baseUrl}/sitemap.xml`
-    );
   });
 
   // tRPC API

@@ -1,10 +1,7 @@
 import jwt from 'jsonwebtoken';
 import type { StringValue } from 'ms';
 
-const JWT_SECRET = process.env.JWT_SECRET;
-if (!JWT_SECRET) {
-  throw new Error('JWT_SECRET environment variable is required');
-}
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-in-production';
 const JWT_EXPIRES_IN = '365d'; // 1 year
 
 export interface JWTPayload {
@@ -20,7 +17,7 @@ export interface JWTPayload {
  * @param expiresIn - Token expiry time (e.g., '7d', '30d', '1h'). Defaults to 365 days.
  */
 export function createToken(payload: JWTPayload, expiresIn?: StringValue): string {
-  return jwt.sign(payload, JWT_SECRET!, {
+  return jwt.sign(payload, JWT_SECRET, {
     expiresIn: expiresIn || JWT_EXPIRES_IN,
   });
 }
@@ -30,7 +27,7 @@ export function createToken(payload: JWTPayload, expiresIn?: StringValue): strin
  */
 export function verifyToken(token: string): JWTPayload | null {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET!) as JWTPayload;
+    const decoded = jwt.verify(token, JWT_SECRET) as JWTPayload;
     return decoded;
   } catch (error) {
     return null;

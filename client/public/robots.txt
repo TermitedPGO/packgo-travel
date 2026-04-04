@@ -1,0 +1,13 @@
+# PACK&GO 旅行社 - robots.txt
+User-agent: *
+Allow: /
+
+# 禁止爬取管理後台
+Disallow: /admin
+Disallow: /admin/
+
+# 禁止爬取 API 路由
+Disallow: /api/
+
+# Sitemap 位置
+Sitemap: https://packgo-d3xjbq67.manus.space/sitemap.xml

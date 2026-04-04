@@ -1139,7 +1139,6 @@ export const appRouter = router({
       .input(
         z.object({
           tourId: z.number(),
-          departureId: z.number().optional(), // Optional for backward compat; use 0 if not provided
           participants: z.number().min(1),
           contactName: z.string().min(1),
           contactEmail: z.string().email(),
@@ -1169,21 +1168,10 @@ export const appRouter = router({
         // Calculate total amount
         const totalAmount = tour.price * input.participants;
 
-        // Resolve departure date
-        let departureDateStr = "TBD";
-        let returnDateStr = "TBD";
-        const departureId = input.departureId ?? 0;
-        if (departureId > 0) {
-          const departure = await db.getDepartureById(departureId);
-          if (departure) {
-            departureDateStr = new Date(departure.departureDate).toLocaleDateString('zh-TW', { year: 'numeric', month: 'long', day: 'numeric' });
-            returnDateStr = new Date(departure.returnDate).toLocaleDateString('zh-TW', { year: 'numeric', month: 'long', day: 'numeric' });
-          }
-        }
         // Create booking
         const booking = await db.createBooking({
           tourId: input.tourId,
-          departureId,
+          departureId: 0, // TODO: Add departure selection
           userId: ctx.user.id,
           customerName: input.contactName,
           customerEmail: input.contactEmail,
@@ -1207,8 +1195,8 @@ export const appRouter = router({
           customerEmail: input.contactEmail,
           bookingId: booking.id,
           tourTitle: tour.title,
-          departureDate: departureDateStr,
-          returnDate: returnDateStr,
+          departureDate: "TBD", // TODO: Add departure date selection
+          returnDate: "TBD", // TODO: Calculate return date
           numberOfAdults: input.participants,
           numberOfChildren: 0,
           numberOfInfants: 0,
@@ -1330,9 +1318,6 @@ export const appRouter = router({
             user_id: String(ctx.user.id),
           },
           customer_email: booking.customerEmail,
-          allow_promotion_codes: true,
-          billing_address_collection: "auto",
-          phone_number_collection: { enabled: false },
           success_url: `${baseUrl}/booking/success?session_id={CHECKOUT_SESSION_ID}&booking_id=${booking.id}`,
           cancel_url: `${baseUrl}/booking/${booking.id}?payment_cancelled=1`,
           expires_at: Math.floor(Date.now() / 1000) + 60 * 60, // 60 minutes (extended for older clientele)

@@ -10,8 +10,6 @@
  */
 
 import { useState } from "react";
-import { useLocation } from "wouter";
-import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -197,17 +195,6 @@ function StepCard({ step, index }: { step: DiagnosticStep; index: number }) {
 }
 
 export default function DiagnosticsPage() {
-  const { user, loading: authLoading } = useAuth();
-  const [, navigate] = useLocation();
-
-  if (!authLoading && (!user || user.role !== "admin")) {
-    navigate("/");
-    return null;
-  }
-  if (authLoading) {
-    return <div className="flex items-center justify-center min-h-screen">載入中...</div>;
-  }
-
   const [url, setUrl] = useState("https://travel.liontravel.com/tour/V2_2025XMAS-ALISHAN-TRAIN-3D/detail?departureDate=2025-12-24");
   const [report, setReport] = useState<DiagnosticReport | null>(null);
   

@@ -5370,3 +5370,20 @@ AI 辦公室看板中，AI 任務永遠顯示「執行中」（started 狀態）
 - [x] Home.tsx Trustpilot：flex-wrap 改為 grid-cols-1 sm:grid-cols-3
 - [x] WhyChooseUs.tsx：stats 數字 text-2xl sm:text-3xl，卡片 p-4 sm:p-6
 - [x] NewsletterSection.tsx：form flex-col sm:flex-row，input/button 圓角響應式
+
+---
+
+## FIX 修復任務（2026-04-04）
+
+- [ ] FIX-01：移除 JWT secret 弱預設值（server/jwt.ts）
+- [ ] FIX-02：env.ts 啟動檢查關鍵變數
+- [ ] FIX-03：Hardcoded staging domain → 環境變數（5 個地方）
+- [ ] FIX-04：DiagnosticsPage 加入 admin 權限檢查
+- [ ] FIX-05：Admin getStats 實作真實查詢
+- [ ] FIX-06：Stripe 付款 — 實作真實 checkout session
+- [ ] FIX-07：Booking 訂單日期連接真實出發日期
+- [ ] FIX-08：CORS 限定正式網域
+- [ ] FIX-09：AI Chat endpoint 加嚴格 rate limit
+- [ ] FIX-10：加 favicon
+- [ ] FIX-11：Stripe API 版本修正
+- [ ] FIX-12：移除壞掉的 Umami analytics script
