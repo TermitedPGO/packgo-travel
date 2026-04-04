@@ -28,5 +28,5 @@ export const ENV = {
   unsplashAccessKey: process.env.UNSPLASH_ACCESS_KEY ?? "",
   unsplashSecretKey: process.env.UNSPLASH_SECRET_KEY ?? "",
   // P0-4: Base URL for sitemap and other absolute URL generation
-  baseUrl: process.env.BASE_URL ?? "https://packgo-d3xjbq67.manus.space",
+  baseUrl: process.env.BASE_URL ?? "https://packgo09.manus.space",
 };

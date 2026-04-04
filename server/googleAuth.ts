@@ -8,7 +8,7 @@ import { COOKIE_NAME } from '@shared/const';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '117887318388-n3cqkvtic44sjsd3kmogohah9a373ivd.apps.googleusercontent.com';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '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';
-const GOOGLE_CALLBACK_URL = process.env.GOOGLE_CALLBACK_URL || 'https://packgo-d3xjbq67.manus.space/api/auth/google/callback';
+const GOOGLE_CALLBACK_URL = process.env.GOOGLE_CALLBACK_URL || 'https://packgo09.manus.space/api/auth/google/callback';
 
 /**
  * Initialize Google OAuth strategy

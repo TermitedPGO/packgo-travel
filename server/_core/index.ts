@@ -52,13 +52,13 @@ async function startServer() {
   // P0-6: CORS whitelist - only allow known origins
   const allowedOrigins = [
     // Production domains
-    "https://packgo-d3xjbq67.manus.space",
+    "https://packgo09.manus.space",
     "https://packgo09.manus.space",
     // Development
     "http://localhost:3000",
     "http://localhost:5173",
     // Allow BASE_URL from env if set
-    ...(process.env.BASE_URL && process.env.BASE_URL !== "https://packgo-d3xjbq67.manus.space"
+    ...(process.env.BASE_URL && process.env.BASE_URL !== "https://packgo09.manus.space"
       ? [process.env.BASE_URL]
       : []),
   ];
