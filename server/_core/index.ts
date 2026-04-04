@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express from "express";
+import cors from "cors";
 import cookieParser from "cookie-parser";
 import { createServer } from "http";
 import net from "net";
@@ -48,6 +49,48 @@ async function startServer() {
     console.log(`Server running on http://localhost:${port}/`);
   });
   
+  // P0-6: CORS whitelist - only allow known origins
+  const allowedOrigins = [
+    // Production domains
+    "https://packgo-d3xjbq67.manus.space",
+    "https://packgo09.manus.space",
+    // Development
+    "http://localhost:3000",
+    "http://localhost:5173",
+    // Allow BASE_URL from env if set
+    ...(process.env.BASE_URL && process.env.BASE_URL !== "https://packgo-d3xjbq67.manus.space"
+      ? [process.env.BASE_URL]
+      : []),
+  ];
+
+  // Patterns for dynamic origins (Manus sandbox preview URLs)
+  const allowedOriginPatterns = [
+    /^https:\/\/[a-z0-9-]+\.manus\.space$/,       // *.manus.space (production)
+    /^https:\/\/[a-z0-9-]+\.manus\.computer$/,    // *.manus.computer (sandbox preview)
+    /^https:\/\/[a-z0-9-]+\.us2\.manus\.computer$/, // *.us2.manus.computer
+  ];
+
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        // Allow requests with no origin (e.g., mobile apps, curl, Stripe webhooks)
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.includes(origin)) {
+          return callback(null, true);
+        }
+        // Check pattern-based whitelist
+        if (allowedOriginPatterns.some(p => p.test(origin))) {
+          return callback(null, true);
+        }
+        console.warn(`[CORS] Blocked request from origin: ${origin}`);
+        return callback(new Error(`CORS policy: origin ${origin} not allowed`));
+      },
+      credentials: true,
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Authorization", "stripe-signature"],
+    })
+  );
+
   // Stripe webhook must be registered BEFORE express.json() to preserve raw body
   app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), handleStripeWebhook);
   
@@ -85,7 +128,8 @@ async function startServer() {
     try {
       const { getAllTours } = await import('../db');
       const tours = await getAllTours();
-      const baseUrl = 'https://packgo-d3xjbq67.manus.space';
+      const { ENV } = await import('./env');
+      const baseUrl = ENV.baseUrl;
       const now = new Date().toISOString().split('T')[0];
 
       const staticPages = [

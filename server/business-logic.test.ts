@@ -9,10 +9,33 @@
  * 5. 詢問系統（訪客詢問、email 驗證）
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
 import type { User } from "../drizzle/schema";
+
+// Mock Stripe to avoid real API calls in tests
+vi.mock("stripe", () => {
+  const mockSession = {
+    id: "cs_test_mock_session_id",
+    url: "https://checkout.stripe.com/pay/cs_test_mock",
+    metadata: {},
+    payment_intent: "pi_test_mock",
+    amount_total: 10000,
+    currency: "twd",
+  };
+  const mockStripe = vi.fn().mockImplementation(() => ({
+    checkout: {
+      sessions: {
+        create: vi.fn().mockResolvedValue(mockSession),
+      },
+    },
+    webhooks: {
+      constructEvent: vi.fn(),
+    },
+  }));
+  return { default: mockStripe };
+});
 
 // ─────────────────────────────────────────────
 // 共用 Mock 工具

@@ -4,9 +4,19 @@ import { ENV } from "./env";
 import * as db from "../db";
 import { sendPaymentSuccessEmail } from "../email";
 
-const stripe = new Stripe(ENV.stripeSecretKey, {
-  apiVersion: "2025-12-15.clover",
-});
+// P0-2: Lazy-load Stripe to prevent server crash when STRIPE_SECRET_KEY is not set
+let _stripe: Stripe | null = null;
+function getStripe(): Stripe {
+  if (!_stripe) {
+    if (!ENV.stripeSecretKey) {
+      throw new Error('[Stripe] STRIPE_SECRET_KEY is not configured. Please set it in environment variables.');
+    }
+    _stripe = new Stripe(ENV.stripeSecretKey, {
+      apiVersion: "2025-12-15.clover",
+    });
+  }
+  return _stripe;
+}
 
 export async function handleStripeWebhook(req: Request, res: Response) {
   const sig = req.headers["stripe-signature"];
@@ -19,7 +29,7 @@ export async function handleStripeWebhook(req: Request, res: Response) {
   let event: Stripe.Event;
 
   try {
-    event = stripe.webhooks.constructEvent(
+    event = getStripe().webhooks.constructEvent(
       req.body,
       sig,
       ENV.stripeWebhookSecret

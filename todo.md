@@ -5275,3 +5275,54 @@ AI 辦公室看板中，AI 任務永遠顯示「執行中」（started 狀態）
 - [x] AiCostTab 圖表翻譯對照表新增更多 taskType 映射
 - [x] routers.ts 中 null taskType 改為 'other' 而非 'unknown'
 - [x] 'unknown' 顯示標籤改為「其他」
+
+
+---
+
+## Phase 42: P0 問題全面修復（2026-04-03）
+
+- [ ] P0-1: 實作真實 Stripe Checkout Session（目前回傳 mock URL）
+- [ ] P0-2: Stripe 初始化改為 lazy-load（確認現狀）
+- [ ] P0-3: JWT_SECRET 空字串安全檢查（啟動時驗證）
+- [ ] P0-4: Sitemap URL 改用 BASE_URL 環境變數（目前寫死 manus.space）
+- [ ] P0-5: TranslationAgent 改為 await + try/finally 模式（根本解決殭屍任務）
+- [ ] NEW-004: CORS 白名單設定（目前未設定，接受任何來源）
+
+---
+
+## P0 安全性與穩定性修復（2026-04-04）
+
+### P0-1：Stripe Checkout Session 實作
+- [x] 移除 mock URL（`https://checkout.stripe.com/pay/mock-...`）
+- [x] 實作真實 `stripe.checkout.sessions.create()` 呼叫
+- [x] 支援 TWD 零小數位幣別（不乘以 100）
+- [x] 加入 metadata（booking_id, payment_type, tour_id, user_id）
+- [x] 設定 success_url / cancel_url 使用 BASE_URL 環境變數
+- [x] Session 有效期 30 分鐘
+- [x] Lazy-load Stripe client（避免 STRIPE_SECRET_KEY 未設定時 crash）
+
+### P0-2：Stripe 懶初始化（stripeWebhook.ts）
+- [x] 移除模組層級 Stripe 初始化
+- [x] 改為 `getStripe()` 懶載入函式
+- [x] 未設定 key 時拋出明確錯誤訊息
+
+### P0-3：JWT_SECRET 安全驗證（env.ts）
+- [x] 啟動時驗證 JWT_SECRET 不為空字串
+- [x] 若為空則拋出 Error 阻止伺服器啟動
+
+### P0-4：Sitemap URL 環境變數化（index.ts）
+- [x] 改用 `ENV.baseUrl` 取代硬編碼 URL
+- [x] `baseUrl` 預設值為 `https://packgo-d3xjbq67.manus.space`
+
+### P0-5：TranslationAgent 殭屍任務修復（translation.ts）
+- [x] 加入 `activityCompleted` 旗標追蹤 logAgentComplete 是否已呼叫
+- [x] 加入 `safeComplete()` 包裝函式防止重複呼叫
+- [x] 加入 `try/finally` 確保 logAgentComplete 永遠被呼叫
+- [x] 即使發生未預期錯誤也不會產生殭屍任務
+
+### P0-6：CORS 白名單設定（index.ts）
+- [x] 安裝 `cors` 套件
+- [x] 設定明確白名單（packgo-d3xjbq67.manus.space, packgo09.manus.space, localhost）
+- [x] 加入 Pattern 白名單支援 *.manus.space 和 *.manus.computer
+- [x] 允許無 Origin 請求（Stripe webhook、curl）
+- [x] 阻擋未知來源並記錄警告日誌

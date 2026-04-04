@@ -14,6 +14,25 @@ import * as auth from "./auth";
 import { createToken } from "./jwt";
 import { translateText, translateBatch, translateTour, translateMultipleTours, getTourTranslations, getBatchTourTranslations, getAllTourTranslations, getTranslationJobs, getSupportedLanguages, getAllTranslationsSummary, Language } from "./translation";
 import { getExchangeRates, convertCurrency, getExchangeRate, formatCurrency, getCurrencySymbol, convertPrices, type SupportedCurrency } from "./agents/exchangeRateAgent";
+import Stripe from "stripe";
+import { ENV } from "./_core/env";
+
+// P0-1: Lazy-load Stripe to prevent server crash when STRIPE_SECRET_KEY is not set
+let _stripeClient: Stripe | null = null;
+function getStripeClient(): Stripe {
+  if (!_stripeClient) {
+    if (!ENV.stripeSecretKey) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Stripe 付款服務尚未設定，請聯絡管理員",
+      });
+    }
+    _stripeClient = new Stripe(ENV.stripeSecretKey, {
+      apiVersion: "2025-12-15.clover",
+    });
+  }
+  return _stripeClient;
+}
 import { checkForgotPasswordRateLimitByIP, checkForgotPasswordRateLimitByEmail, checkForgotPasswordGlobalRateLimit, isBlockedEmailDomain } from "./rateLimit";
 
 export const appRouter = router({
@@ -1235,10 +1254,68 @@ export const appRouter = router({
         const amount = input.paymentType === "deposit" ? booking.depositAmount : booking.remainingAmount;
         const description = input.paymentType === "deposit" ? "訂金" : "尾款";
 
-        // TODO: Implement Stripe checkout session creation
-        // For now, return a mock URL
+        if (amount <= 0) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "付款金額無效",
+          });
+        }
+
+        // Get tour info for product name
+        const tour = await db.getTourById(booking.tourId);
+        const tourTitle = tour?.title ?? `行程 #${booking.tourId}`;
+
+        // P0-1: Real Stripe Checkout Session
+        const stripe = getStripeClient();
+        const baseUrl = ENV.baseUrl;
+
+        // Stripe amounts are in smallest currency unit
+        // TWD is a zero-decimal currency (no cents), so amount is already in TWD
+        // For other currencies like USD, multiply by 100
+        const currency = (booking.currency ?? "TWD").toLowerCase();
+        const zeroDecimalCurrencies = ["bif", "clp", "gnf", "jpy", "kmf", "krw", "mga", "pyg", "rwf", "twd", "ugx", "vnd", "vuv", "xaf", "xof", "xpf"];
+        const stripeAmount = zeroDecimalCurrencies.includes(currency) ? amount : Math.round(amount * 100);
+
+        const session = await stripe.checkout.sessions.create({
+          mode: "payment",
+          payment_method_types: ["card"],
+          line_items: [
+            {
+              price_data: {
+                currency,
+                unit_amount: stripeAmount,
+                product_data: {
+                  name: `${tourTitle} - ${description}`,
+                  description: `訂單編號 #${booking.id}，旅客：${booking.customerName}`,
+                },
+              },
+              quantity: 1,
+            },
+          ],
+          metadata: {
+            booking_id: String(booking.id),
+            payment_type: input.paymentType,
+            tour_id: String(booking.tourId),
+            user_id: String(ctx.user.id),
+          },
+          customer_email: booking.customerEmail,
+          success_url: `${baseUrl}/booking/success?session_id={CHECKOUT_SESSION_ID}&booking_id=${booking.id}`,
+          cancel_url: `${baseUrl}/booking/${booking.id}?payment_cancelled=1`,
+          expires_at: Math.floor(Date.now() / 1000) + 30 * 60, // 30 minutes
+        });
+
+        if (!session.url) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "無法建立 Stripe 付款連結，請稍後再試",
+          });
+        }
+
+        console.log(`[Stripe] Created checkout session ${session.id} for booking ${booking.id}, amount ${stripeAmount} ${currency}`);
+
         return {
-          url: `https://checkout.stripe.com/pay/mock-${input.bookingId}-${input.paymentType}`,
+          url: session.url,
+          sessionId: session.id,
         };
       }),
 

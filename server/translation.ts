@@ -260,6 +260,7 @@ export async function translateTour(
   const errors: string[] = [];
   const translatedLanguages: Language[] = [];
   const startTime = Date.now();
+  let activityCompleted = false; // P0-5: Track if logAgentComplete was called
 
   // 記錄翻譯開始
   const activityId = await logAgentStart({
@@ -271,13 +272,24 @@ export async function translateTour(
     userId,
   });
 
+  // P0-5: Ensure logAgentComplete is ALWAYS called via finally block
+  // This prevents zombie tasks even if an unexpected error occurs
+  const safeComplete = async (params: Parameters<typeof logAgentComplete>[1]) => {
+    if (activityId && !activityCompleted) {
+      activityCompleted = true;
+      await logAgentComplete(activityId, params).catch((e) =>
+        console.error('[TranslationAgent] Failed to log completion:', e)
+      );
+    }
+  };
+
   try {
     // 獲取行程資料
     const { tours } = await import('../drizzle/schema');
     const [tour] = await db.select().from(tours).where(eq(tours.id, tourId));
     
     if (!tour) {
-      if (activityId) await logAgentComplete(activityId, { status: 'failed', errorMessage: 'Tour not found' });
+      await safeComplete({ status: 'failed', errorMessage: 'Tour not found' });
       return { success: false, translatedLanguages: [], errors: ['Tour not found'] };
     }
 
@@ -368,16 +380,14 @@ export async function translateTour(
     }
 
     const processingTimeMs = Date.now() - startTime;
-    if (activityId) {
-      await logAgentComplete(activityId, {
-        status: errors.length === 0 ? 'completed' : 'failed',
-        processingTimeMs,
-        resultSummary: errors.length === 0
-          ? `🌐 行程「${tour.title || `#${tourId}`}」已翻譯成 ${translatedLanguages.join('、')}，共 ${fieldsToTranslate.filter(f => f.value).length} 個欄位，耗時 ${(processingTimeMs / 1000).toFixed(1)} 秒`
-          : `⚠️ 翻譯部分失敗：${errors.slice(0, 2).join('; ')}`,
-        errorMessage: errors.length > 0 ? errors.slice(0, 2).join('; ') : undefined,
-      });
-    }
+    await safeComplete({
+      status: errors.length === 0 ? 'completed' : 'failed',
+      processingTimeMs,
+      resultSummary: errors.length === 0
+        ? `🌐 行程「${tour.title || `#${tourId}`}」已翻譯成 ${translatedLanguages.join('、')}，共 ${fieldsToTranslate.filter(f => f.value).length} 個欄位，耗時 ${(processingTimeMs / 1000).toFixed(1)} 秒`
+        : `⚠️ 翻譯部分失敗：${errors.slice(0, 2).join('; ')}`,
+      errorMessage: errors.length > 0 ? errors.slice(0, 2).join('; ') : undefined,
+    });
     return {
       success: errors.length === 0,
       translatedLanguages,
@@ -387,8 +397,17 @@ export async function translateTour(
     const errorMsg = `Translation failed: ${error}`;
     errors.push(errorMsg);
     console.error(`[Translation Agent] ${errorMsg}`);
-    if (activityId) await logAgentComplete(activityId, { status: 'failed', errorMessage: errorMsg.slice(0, 500) });
+    await safeComplete({ status: 'failed', errorMessage: errorMsg.slice(0, 500) });
     return { success: false, translatedLanguages, errors };
+  } finally {
+    // P0-5: Last-resort safety net - if somehow safeComplete was never called, complete now
+    if (activityId && !activityCompleted) {
+      activityCompleted = true;
+      logAgentComplete(activityId, { 
+        status: 'failed', 
+        errorMessage: 'Translation ended unexpectedly (finally block)' 
+      }).catch(() => {});
+    }
   }
 }
 
