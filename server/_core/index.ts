@@ -135,11 +135,11 @@ async function startServer() {
       const staticPages = [
         { url: '/', priority: '1.0', changefreq: 'daily' },
         { url: '/tours', priority: '0.9', changefreq: 'daily' },
-        { url: '/about', priority: '0.7', changefreq: 'monthly' },
-        { url: '/contact', priority: '0.7', changefreq: 'monthly' },
+        { url: '/about-us', priority: '0.7', changefreq: 'monthly' },
+        { url: '/contact-us', priority: '0.7', changefreq: 'monthly' },
         { url: '/custom-tours', priority: '0.8', changefreq: 'weekly' },
         { url: '/group-packages', priority: '0.8', changefreq: 'weekly' },
-        { url: '/cruise', priority: '0.7', changefreq: 'weekly' },
+        { url: '/cruises', priority: '0.7', changefreq: 'weekly' },
         { url: '/visa-services', priority: '0.6', changefreq: 'monthly' },
         { url: '/faq', priority: '0.6', changefreq: 'monthly' },
       ];
