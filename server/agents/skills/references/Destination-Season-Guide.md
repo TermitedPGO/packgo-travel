@@ -376,4 +376,4 @@
 
 ---
 
-*本文件由 PACK&GO 旅遊顧問團隊整理，供 AI 旅遊顧問內部使用。如有任何疑問，請聯繫 service@packgo.com.tw。*
+*本文件由 PACK&GO 旅遊顧問團隊整理，供 AI 旅遊顧問內部使用。如有任何疑問，請聯繫 jeffhsieh09@gmail.com。*

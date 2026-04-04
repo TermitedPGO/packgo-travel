@@ -173,7 +173,7 @@ export default function TourPrintView() {
             </div>
             <div className="text-right text-sm text-gray-500">
               <p className="font-medium text-gray-700">{t('tourPrint.phone')}</p>
-              <p>Email：info@packgo.travel</p>
+              <p>Email：jeffhsieh09@gmail.com</p>
               <p>{t('tourPrint.tourCode')}{tour.productCode || `T${tour.id}`}</p>
               <p>{t('tourPrint.printDate')}{new Date().toLocaleDateString(language === 'en' ? 'en-US' : 'zh-TW')}</p>
             </div>
@@ -625,7 +625,7 @@ export default function TourPrintView() {
               </div>
               <div className="print-contact-item">
                 <Mail className="h-4 w-4" style={{ color: themeColor.secondary }} />
-                <span>info@packgo.com</span>
+                <span>jeffhsieh09@gmail.com</span>
               </div>
               <div className="print-contact-item">
                 <Globe className="h-4 w-4" style={{ color: themeColor.secondary }} />

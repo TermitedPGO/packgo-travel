@@ -205,7 +205,7 @@ ${matchedSkills.map(s => `- ${s.skillName} (${s.skillType}): 關鍵字 ${s.match
 
 **聯絡資訊（當客戶詢問時提供）：**
 - 客服電話：+1 (510) 634-2307
-- Email：info@packgotravel.com
+- Email：jeffhsieh09@gmail.com
 - 地址：39055 Cedar Blvd #126, Newark, CA 94560
 - 營業時間：週一至週六 11:30am-7:30pm（太平洋時間 PST），週日休息
 - 官網：https://packgo09.manus.space

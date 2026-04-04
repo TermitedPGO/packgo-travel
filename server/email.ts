@@ -366,7 +366,7 @@ function generateBookingConfirmationHTML(data: BookingEmailData): string {
         <tr>
           <td style="background:#1a1a1a;padding:28px 40px;text-align:center;">
             <p style="color:#ffffff;margin:0 0 4px 0;font-size:15px;font-weight:700;">PACK&amp;GO 旅行社</p>
-            <p style="color:#999;margin:0 0 12px 0;font-size:12px;">Tel: +886-2-1234-5678 &nbsp;|&nbsp; Email: info@packgo.travel</p>
+            <p style="color:#999;margin:0 0 12px 0;font-size:12px;">Tel: +886-2-1234-5678 &nbsp;|&nbsp; Email: jeffhsieh09@gmail.com</p>
             <p style="color:#666;margin:0;font-size:11px;">&copy; ${new Date().getFullYear()} PACK&amp;GO 旅行社. All rights reserved.</p>
           </td>
         </tr>
