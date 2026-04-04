@@ -218,6 +218,13 @@
       "when": 1774659870025,
       "tag": "0030_wealthy_kate_bishop",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "5",
+      "when": 1775341281766,
+      "tag": "0031_same_vivisector",
+      "breakpoints": true
     }
   ]
 }

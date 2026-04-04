@@ -487,7 +487,8 @@ export const agentSkills = mysqlTable("agentSkills", {
     "highlight_detection",    // 亮點識別
     "transportation_type",    // 交通類型識別
     "meal_classification",    // 餐食分類
-    "accommodation_type"      // 住宿類型
+    "accommodation_type",     // 住宿類型
+    "conversation"            // 對話技能（AI Chat 知識庫）
   ]).notNull(),
   
   // Superpowers-style skill category

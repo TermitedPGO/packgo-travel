@@ -1,0 +1,1 @@
+ALTER TABLE `agentSkills` MODIFY COLUMN `skillType` enum('feature_classification','tag_rule','itinerary_structure','highlight_detection','transportation_type','meal_classification','accommodation_type','conversation') NOT NULL;

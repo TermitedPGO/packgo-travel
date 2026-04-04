@@ -1,5 +1,6 @@
 import { drizzle } from "drizzle-orm/mysql2";
 import { agentSkills, skillApplicationLogs, learningSessions, InsertAgentSkill, InsertSkillApplicationLog, InsertLearningSession, AgentSkill } from "../drizzle/schema";
+import { chatSkillsData } from "./seeds/chatSkills";
 import { eq, and, desc, sql, like, or } from "drizzle-orm";
 
 // Lazily create the drizzle instance
@@ -475,6 +476,24 @@ export async function seedBuiltInSkills() {
   for (const skill of builtInSkills) {
     await db.insert(agentSkills).values(skill);
   }
-  
-  console.log(`[SkillDb] Seeded ${builtInSkills.length} built-in skills`);
+
+  // Seed conversation skills (AI Chat knowledge base)
+  const conversationSkills: InsertAgentSkill[] = chatSkillsData.map(s => ({
+    skillType: s.skillType,
+    skillCategory: s.skillCategory,
+    skillName: s.skillName,
+    skillNameEn: s.skillNameEn,
+    keywords: s.keywords,
+    rules: s.rules,
+    outputLabels: s.outputLabels,
+    description: s.description,
+    isBuiltIn: true,
+    isActive: true,
+  }));
+
+  for (const skill of conversationSkills) {
+    await db.insert(agentSkills).values(skill);
+  }
+
+  console.log(`[SkillDb] Seeded ${builtInSkills.length} built-in skills + ${conversationSkills.length} conversation skills`);
 }
