@@ -1318,6 +1318,9 @@ export const appRouter = router({
             user_id: String(ctx.user.id),
           },
           customer_email: booking.customerEmail,
+          allow_promotion_codes: true,
+          billing_address_collection: "auto",
+          phone_number_collection: { enabled: false },
           success_url: `${baseUrl}/booking/success?session_id={CHECKOUT_SESSION_ID}&booking_id=${booking.id}`,
           cancel_url: `${baseUrl}/booking/${booking.id}?payment_cancelled=1`,
           expires_at: Math.floor(Date.now() / 1000) + 60 * 60, // 60 minutes (extended for older clientele)
