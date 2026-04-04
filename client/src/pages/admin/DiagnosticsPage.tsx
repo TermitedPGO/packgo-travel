@@ -10,6 +10,8 @@
  */
 
 import { useState } from "react";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -195,15 +197,25 @@ function StepCard({ step, index }: { step: DiagnosticStep; index: number }) {
 }
 
 export default function DiagnosticsPage() {
+  const { user, loading: authLoading } = useAuth();
+  const [, navigate] = useLocation();
   const [url, setUrl] = useState("https://travel.liontravel.com/tour/V2_2025XMAS-ALISHAN-TRAIN-3D/detail?departureDate=2025-12-24");
   const [report, setReport] = useState<DiagnosticReport | null>(null);
-  
+
   const diagnoseMutation = trpc.tours.diagnose.useMutation({
     onSuccess: (data) => {
       setReport(data as DiagnosticReport);
     },
   });
-  
+
+  if (authLoading) {
+    return <div className="flex items-center justify-center min-h-screen"><p>Loading...</p></div>;
+  }
+  if (!user || user.role !== "admin") {
+    navigate("/");
+    return null;
+  }
+
   const handleDiagnose = () => {
     if (!url.trim()) return;
     diagnoseMutation.mutate({ url });
