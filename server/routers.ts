@@ -27,9 +27,7 @@ function getStripeClient(): Stripe {
         message: "Stripe 付款服務尚未設定，請聯絡管理員",
       });
     }
-    _stripeClient = new Stripe(ENV.stripeSecretKey, {
-      apiVersion: "2025-12-15.clover",
-    });
+    _stripeClient = new Stripe(ENV.stripeSecretKey);
   }
   return _stripeClient;
 }
