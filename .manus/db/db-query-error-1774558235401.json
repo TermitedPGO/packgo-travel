@@ -1,8 +1,0 @@
-{
-  "query": "UPDATE tours SET featured = 1 WHERE id IN (SELECT id FROM (SELECT id FROM tours WHERE status = 'active' ORDER BY created_at DESC LIMIT 6) AS t);",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute UPDATE tours SET featured = 1 WHERE id IN (SELECT id FROM (SELECT id FROM tours WHERE status = 'active' ORDER BY created_at DESC LIMIT 6) AS t);",
-  "returncode": 1,
-  "logs": [
-    "ERROR 1054 (42S22) at line 1: Unknown column 'created_at' in 'order clause'"
-  ]
-}

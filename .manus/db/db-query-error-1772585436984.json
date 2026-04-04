@@ -1,8 +1,0 @@
-{
-  "query": "\nSELECT \n  locale,\n  fieldName,\n  COUNT(*) as count\nFROM translations\nGROUP BY locale, fieldName\nORDER BY locale, fieldName;\n",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute \nSELECT \n  locale,\n  fieldName,\n  COUNT(*) as count\nFROM translations\nGROUP BY locale, fieldName\nORDER BY locale, fieldName;\n",
-  "returncode": 1,
-  "logs": [
-    "ERROR 1054 (42S22) at line 2: Unknown column 'locale' in 'group statement'"
-  ]
-}

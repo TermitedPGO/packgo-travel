@@ -1,9 +1,0 @@
-{
-  "query": "\nINSERT INTO `homepageContent` (`sectionKey`, `content`) VALUES\n('hero', '{\"title\":\"精選旅程 折扣最後一週\",\"subtitle\":\"* 跟著花期去旅行 *\",\"backgroundImage\":\"/images/hero-sakura.webp\",\"hotKeywords\":[\"北海道\",\"東京\",\"大阪\",\"歐洲\",\"土耳其\",\"郵輪\",\"滑雪\"]}'),\n('trustpilot', '{\"title\":\"Excellent\",\"reviews\":[{\"name\":\"5 stars\",\"desc\":\"This is my first time using a Chinese agency...\",\"author\":\"Melody, Dec 24\"},{\"name\":\"Good company\",\"desc\":\"Good company\",\"author\":\"Ming Kuang, Dec 22\"},{\"name\":\"Excellent job\",\"desc\":\"Excellent job\",\"author\":\"Ruixin Lanwu, Dec 22\"}],\"totalReviews\":\"1,200+\"}');\n",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute \nINSERT INTO `homepageContent` (`sectionKey`, `content`) VALUES\n('hero', '{\"title\":\"精選旅程 折扣最後一週\",\"subtitle\":\"* 跟著花期去旅行 *\",\"backgroundImage\":\"/images/hero-sakura.webp\",\"hotKeywords\":[\"北海道\",\"東京\",\"大阪\",\"歐洲\",\"土耳其\",\"郵輪\",\"滑雪\"]}'),\n('trustpilot', '{\"title\":\"Excellent\",\"reviews\":[{\"name\":\"5 stars\",\"desc\":\"This is my first time using a Chinese agency...\",\"author\":\"Melody, Dec 24\"},{\"name\":\"Good company\",\"desc\":\"Good company\",\"author\":\"Ming Kuang, Dec 22\"},{\"name\":\"Excellent job\",\"desc\":\"Excellent job\",\"author\":\"Ruixin Lanwu, Dec 22\"}],\"totalReviews\":\"1,200+\"}');\n",
-  "rows": [],
-  "messages": [],
-  "stdout": "",
-  "stderr": "",
-  "execution_time_ms": 67
-}

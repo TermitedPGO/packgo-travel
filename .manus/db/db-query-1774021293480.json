@@ -1,9 +1,0 @@
-{
-  "query": "CREATE TABLE IF NOT EXISTS `llmUsageLogs` (\n  `id` int AUTO_INCREMENT NOT NULL,\n  `agentName` varchar(100) NOT NULL,\n  `taskType` varchar(100),\n  `taskId` varchar(100),\n  `model` varchar(100) NOT NULL,\n  `inputTokens` int NOT NULL DEFAULT 0,\n  `outputTokens` int NOT NULL DEFAULT 0,\n  `cacheCreationInputTokens` int NOT NULL DEFAULT 0,\n  `cacheReadInputTokens` int NOT NULL DEFAULT 0,\n  `totalTokens` int NOT NULL DEFAULT 0,\n  `estimatedCostUsd` varchar(20) DEFAULT '0.000000',\n  `processingTimeMs` int,\n  `wasFromCache` boolean NOT NULL DEFAULT false,\n  `userId` int,\n  `createdAt` timestamp NOT NULL DEFAULT (now()),\n  CONSTRAINT `llmUsageLogs_id` PRIMARY KEY(`id`)\n);",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute CREATE TABLE IF NOT EXISTS `llmUsageLogs` (\n  `id` int AUTO_INCREMENT NOT NULL,\n  `agentName` varchar(100) NOT NULL,\n  `taskType` varchar(100),\n  `taskId` varchar(100),\n  `model` varchar(100) NOT NULL,\n  `inputTokens` int NOT NULL DEFAULT 0,\n  `outputTokens` int NOT NULL DEFAULT 0,\n  `cacheCreationInputTokens` int NOT NULL DEFAULT 0,\n  `cacheReadInputTokens` int NOT NULL DEFAULT 0,\n  `totalTokens` int NOT NULL DEFAULT 0,\n  `estimatedCostUsd` varchar(20) DEFAULT '0.000000',\n  `processingTimeMs` int,\n  `wasFromCache` boolean NOT NULL DEFAULT false,\n  `userId` int,\n  `createdAt` timestamp NOT NULL DEFAULT (now()),\n  CONSTRAINT `llmUsageLogs_id` PRIMARY KEY(`id`)\n);",
-  "rows": [],
-  "messages": [],
-  "stdout": "",
-  "stderr": "",
-  "execution_time_ms": 2164
-}

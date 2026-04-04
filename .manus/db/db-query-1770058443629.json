@@ -1,9 +1,0 @@
-{
-  "query": "UPDATE agentSkills SET keywords = '價格,費用,價位,預算', rules = '{\"type\":\"price\",\"conditions\":[{\"min\":0,\"max\":30000,\"label\":\"經濟實惠\"},{\"min\":30001,\"max\":50000,\"label\":\"中價位\"},{\"min\":50001,\"max\":80000,\"label\":\"高價位\"},{\"min\":80001,\"max\":999999,\"label\":\"頂級奢華\"}]}' WHERE skillName = '價格標籤規則';",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute UPDATE agentSkills SET keywords = '價格,費用,價位,預算', rules = '{\"type\":\"price\",\"conditions\":[{\"min\":0,\"max\":30000,\"label\":\"經濟實惠\"},{\"min\":30001,\"max\":50000,\"label\":\"中價位\"},{\"min\":50001,\"max\":80000,\"label\":\"高價位\"},{\"min\":80001,\"max\":999999,\"label\":\"頂級奢華\"}]}' WHERE skillName = '價格標籤規則';",
-  "rows": [],
-  "messages": [],
-  "stdout": "",
-  "stderr": "",
-  "execution_time_ms": 70
-}

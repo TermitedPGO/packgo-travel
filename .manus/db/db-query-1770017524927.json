@@ -1,9 +1,0 @@
-{
-  "query": "CREATE TABLE IF NOT EXISTS imageLibrary (\n  id INT AUTO_INCREMENT PRIMARY KEY,\n  url VARCHAR(1024) NOT NULL,\n  filename VARCHAR(255),\n  mimeType VARCHAR(100),\n  fileSize INT,\n  width INT,\n  height INT,\n  tags TEXT,\n  uploadedBy INT NOT NULL,\n  tourId INT,\n  usageCount INT DEFAULT 0 NOT NULL,\n  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,\n  updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP NOT NULL\n);",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute CREATE TABLE IF NOT EXISTS imageLibrary (\n  id INT AUTO_INCREMENT PRIMARY KEY,\n  url VARCHAR(1024) NOT NULL,\n  filename VARCHAR(255),\n  mimeType VARCHAR(100),\n  fileSize INT,\n  width INT,\n  height INT,\n  tags TEXT,\n  uploadedBy INT NOT NULL,\n  tourId INT,\n  usageCount INT DEFAULT 0 NOT NULL,\n  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,\n  updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP NOT NULL\n);",
-  "rows": [],
-  "messages": [],
-  "stdout": "",
-  "stderr": "",
-  "execution_time_ms": 244
-}

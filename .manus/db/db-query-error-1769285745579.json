@@ -1,8 +1,0 @@
-{
-  "query": "SELECT id, email, name, role, openId, googleId, password FROM user WHERE email = 'jeffhsieh09@gmail.com';",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute SELECT id, email, name, role, openId, googleId, password FROM user WHERE email = 'jeffhsieh09@gmail.com';",
-  "returncode": 1,
-  "logs": [
-    "ERROR 1146 (42S02) at line 1: Table 'd3xjbq67jpff2y4fwefwhw.user' doesn't exist"
-  ]
-}

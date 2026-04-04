@@ -1,9 +1,0 @@
-{
-  "query": "CREATE TABLE IF NOT EXISTS skillDependencies (\n  id INT AUTO_INCREMENT PRIMARY KEY,\n  skillId INT NOT NULL,\n  dependsOnSkillId INT NOT NULL,\n  dependencyType ENUM('required', 'optional', 'enhances') DEFAULT 'required',\n  description TEXT,\n  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n  UNIQUE KEY unique_dependency (skillId, dependsOnSkillId)\n);",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute CREATE TABLE IF NOT EXISTS skillDependencies (\n  id INT AUTO_INCREMENT PRIMARY KEY,\n  skillId INT NOT NULL,\n  dependsOnSkillId INT NOT NULL,\n  dependencyType ENUM('required', 'optional', 'enhances') DEFAULT 'required',\n  description TEXT,\n  createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n  UNIQUE KEY unique_dependency (skillId, dependsOnSkillId)\n);",
-  "rows": [],
-  "messages": [],
-  "stdout": "",
-  "stderr": "",
-  "execution_time_ms": 204
-}

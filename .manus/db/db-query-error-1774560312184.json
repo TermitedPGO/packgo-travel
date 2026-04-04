@@ -1,8 +1,0 @@
-{
-  "query": "SELECT tour_id, target_language, field_name, LEFT(translated_text, 50) as preview FROM translations WHERE tour_id = 1260001 LIMIT 10; SELECT COUNT(*) as total_translations FROM translations;",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute SELECT tour_id, target_language, field_name, LEFT(translated_text, 50) as preview FROM translations WHERE tour_id = 1260001 LIMIT 10; SELECT COUNT(*) as total_translations FROM translations;",
-  "returncode": 1,
-  "logs": [
-    "ERROR 1054 (42S22) at line 1: Unknown column 'tour_id' in 'where clause'"
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "query": "\nCREATE TABLE IF NOT EXISTS `userFavorites` (\n  `id` INT AUTO_INCREMENT PRIMARY KEY,\n  `userId` INT NOT NULL,\n  `tourId` INT NOT NULL,\n  `createdAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,\n  UNIQUE KEY `unique_user_tour` (`userId`, `tourId`)\n);\n\nCREATE TABLE IF NOT EXISTS `userBrowsingHistory` (\n  `id` INT AUTO_INCREMENT PRIMARY KEY,\n  `userId` INT NOT NULL,\n  `tourId` INT NOT NULL,\n  `viewedAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,\n  `viewCount` INT DEFAULT 1 NOT NULL\n);\n",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute \nCREATE TABLE IF NOT EXISTS `userFavorites` (\n  `id` INT AUTO_INCREMENT PRIMARY KEY,\n  `userId` INT NOT NULL,\n  `tourId` INT NOT NULL,\n  `createdAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,\n  UNIQUE KEY `unique_user_tour` (`userId`, `tourId`)\n);\n\nCREATE TABLE IF NOT EXISTS `userBrowsingHistory` (\n  `id` INT AUTO_INCREMENT PRIMARY KEY,\n  `userId` INT NOT NULL,\n  `tourId` INT NOT NULL,\n  `viewedAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,\n  `viewCount` INT DEFAULT 1 NOT NULL\n);\n",
-  "rows": [],
-  "messages": [],
-  "stdout": "",
-  "stderr": "",
-  "execution_time_ms": 405
-}

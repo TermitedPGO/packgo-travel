@@ -1,9 +1,0 @@
-{
-  "query": "CREATE TABLE IF NOT EXISTS `learningSessions` (\n  `id` int AUTO_INCREMENT NOT NULL,\n  `sourceType` enum('pdf','url','manual') NOT NULL,\n  `sourceName` varchar(255) NOT NULL,\n  `sourceContent` text,\n  `skillsLearned` int NOT NULL DEFAULT 0,\n  `skillIds` text,\n  `status` enum('pending','processing','completed','failed','cancelled') NOT NULL DEFAULT 'pending',\n  `errorMessage` text,\n  `initiatedBy` int NOT NULL,\n  `createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  `completedAt` timestamp,\n  CONSTRAINT `learningSessions_id` PRIMARY KEY(`id`)\n);",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute CREATE TABLE IF NOT EXISTS `learningSessions` (\n  `id` int AUTO_INCREMENT NOT NULL,\n  `sourceType` enum('pdf','url','manual') NOT NULL,\n  `sourceName` varchar(255) NOT NULL,\n  `sourceContent` text,\n  `skillsLearned` int NOT NULL DEFAULT 0,\n  `skillIds` text,\n  `status` enum('pending','processing','completed','failed','cancelled') NOT NULL DEFAULT 'pending',\n  `errorMessage` text,\n  `initiatedBy` int NOT NULL,\n  `createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  `completedAt` timestamp,\n  CONSTRAINT `learningSessions_id` PRIMARY KEY(`id`)\n);",
-  "rows": [],
-  "messages": [],
-  "stdout": "",
-  "stderr": "",
-  "execution_time_ms": 230
-}

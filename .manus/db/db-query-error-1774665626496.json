@@ -1,8 +1,0 @@
-{
-  "query": "\nSELECT \n  t.id, \n  t.title,\n  t.status,\n  COUNT(CASE WHEN tt.language = 'en' THEN 1 END) as en_translation_count,\n  GROUP_CONCAT(CASE WHEN tt.language = 'en' THEN tt.field_name END) as en_fields\nFROM tours t\nLEFT JOIN tour_translations tt ON t.id = tt.tour_id\nWHERE t.status = 'active'\nGROUP BY t.id, t.title, t.status\nORDER BY t.id;\n",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute \nSELECT \n  t.id, \n  t.title,\n  t.status,\n  COUNT(CASE WHEN tt.language = 'en' THEN 1 END) as en_translation_count,\n  GROUP_CONCAT(CASE WHEN tt.language = 'en' THEN tt.field_name END) as en_fields\nFROM tours t\nLEFT JOIN tour_translations tt ON t.id = tt.tour_id\nWHERE t.status = 'active'\nGROUP BY t.id, t.title, t.status\nORDER BY t.id;\n",
-  "returncode": 1,
-  "logs": [
-    "ERROR 1146 (42S02) at line 2: Table 'd3xjbq67jpff2y4fwefwhw.tour_translations' doesn't exist"
-  ]
-}

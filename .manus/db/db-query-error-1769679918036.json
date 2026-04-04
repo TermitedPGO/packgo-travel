@@ -1,8 +1,0 @@
-{
-  "query": "SELECT id, title, itinerary_detailed, created_at FROM tours WHERE title LIKE '%台東縱谷%' ORDER BY created_at DESC LIMIT 1;",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute SELECT id, title, itinerary_detailed, created_at FROM tours WHERE title LIKE '%台東縱谷%' ORDER BY created_at DESC LIMIT 1;",
-  "returncode": 1,
-  "logs": [
-    "ERROR 1054 (42S22) at line 1: Unknown column 'itinerary_detailed' in 'field list'"
-  ]
-}

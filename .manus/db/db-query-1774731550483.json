@@ -1,9 +1,0 @@
-{
-  "query": "UPDATE agentActivityLogs SET status = 'completed', completedAt = DATE_ADD(startedAt, INTERVAL 5 MINUTE), resultSummary = '任務已完成（系統自動修正：任務完成時未正確記錄狀態）' WHERE status = 'started' AND startedAt < DATE_SUB(NOW(), INTERVAL 30 MINUTE);",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute UPDATE agentActivityLogs SET status = 'completed', completedAt = DATE_ADD(startedAt, INTERVAL 5 MINUTE), resultSummary = '任務已完成（系統自動修正：任務完成時未正確記錄狀態）' WHERE status = 'started' AND startedAt < DATE_SUB(NOW(), INTERVAL 30 MINUTE);",
-  "rows": [],
-  "messages": [],
-  "stdout": "",
-  "stderr": "",
-  "execution_time_ms": 1547
-}

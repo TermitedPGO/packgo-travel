@@ -1,9 +1,0 @@
-{
-  "query": "CREATE TABLE IF NOT EXISTS `skillApplicationLogs` (\n  `id` int AUTO_INCREMENT NOT NULL,\n  `skillId` int NOT NULL,\n  `tourId` int,\n  `inputContent` text,\n  `matchScore` decimal(3,2),\n  `outputResult` text,\n  `success` boolean NOT NULL DEFAULT true,\n  `errorMessage` text,\n  `appliedAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  `processingTimeMs` int,\n  CONSTRAINT `skillApplicationLogs_id` PRIMARY KEY(`id`)\n);",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute CREATE TABLE IF NOT EXISTS `skillApplicationLogs` (\n  `id` int AUTO_INCREMENT NOT NULL,\n  `skillId` int NOT NULL,\n  `tourId` int,\n  `inputContent` text,\n  `matchScore` decimal(3,2),\n  `outputResult` text,\n  `success` boolean NOT NULL DEFAULT true,\n  `errorMessage` text,\n  `appliedAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  `processingTimeMs` int,\n  CONSTRAINT `skillApplicationLogs_id` PRIMARY KEY(`id`)\n);",
-  "rows": [],
-  "messages": [],
-  "stdout": "",
-  "stderr": "",
-  "execution_time_ms": 218
-}

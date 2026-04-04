@@ -1,9 +1,0 @@
-{
-  "query": "ALTER TABLE agentSkills \nADD COLUMN previousVersionId INT,\nADD COLUMN whenToUse TEXT,\nADD COLUMN corePattern TEXT,\nADD COLUMN quickReference TEXT,\nADD COLUMN commonMistakes TEXT,\nADD COLUMN realWorldImpact TEXT,\nADD COLUMN dependsOn TEXT,\nADD COLUMN testCases TEXT,\nADD COLUMN lastTestedAt TIMESTAMP NULL,\nADD COLUMN testPassRate DECIMAL(3,2);",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute ALTER TABLE agentSkills \nADD COLUMN previousVersionId INT,\nADD COLUMN whenToUse TEXT,\nADD COLUMN corePattern TEXT,\nADD COLUMN quickReference TEXT,\nADD COLUMN commonMistakes TEXT,\nADD COLUMN realWorldImpact TEXT,\nADD COLUMN dependsOn TEXT,\nADD COLUMN testCases TEXT,\nADD COLUMN lastTestedAt TIMESTAMP NULL,\nADD COLUMN testPassRate DECIMAL(3,2);",
-  "rows": [],
-  "messages": [],
-  "stdout": "",
-  "stderr": "",
-  "execution_time_ms": 3049
-}

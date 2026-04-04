@@ -1,9 +1,0 @@
-{
-  "query": "UPDATE agentSkills SET keywords = '天,日,天數,行程天數,旅遊天數', rules = '{\"type\":\"duration\",\"conditions\":[{\"min\":1,\"max\":3,\"label\":\"短天數\"},{\"min\":4,\"max\":5,\"label\":\"中天數\"},{\"min\":6,\"max\":8,\"label\":\"長天數\"},{\"min\":9,\"max\":999,\"label\":\"深度長天數\"}]}' WHERE skillName = '天數標籤規則';",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute UPDATE agentSkills SET keywords = '天,日,天數,行程天數,旅遊天數', rules = '{\"type\":\"duration\",\"conditions\":[{\"min\":1,\"max\":3,\"label\":\"短天數\"},{\"min\":4,\"max\":5,\"label\":\"中天數\"},{\"min\":6,\"max\":8,\"label\":\"長天數\"},{\"min\":9,\"max\":999,\"label\":\"深度長天數\"}]}' WHERE skillName = '天數標籤規則';",
-  "rows": [],
-  "messages": [],
-  "stdout": "",
-  "stderr": "",
-  "execution_time_ms": 60
-}

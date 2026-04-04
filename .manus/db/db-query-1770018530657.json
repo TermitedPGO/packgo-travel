@@ -1,9 +1,0 @@
-{
-  "query": "\nINSERT INTO `destinations` (`name`, `label`, `image`, `region`, `sortOrder`, `isActive`) VALUES\n('歐洲', 'Europe', '/images/dest-europe.webp', 'europe', 1, true),\n('中國 & 亞洲', 'China & Asia', '/images/dest-asia.webp', 'asia', 2, true),\n('南美洲', 'South America', '/images/dest-southamerica.webp', 'south-america', 3, true),\n('以色列 & 約旦', 'Israel & Jordan', '/images/dest-israel.webp', 'middle-east', 4, true),\n('埃及 & 非洲', 'Egypt & Africa', '/images/dest-africa.webp', 'africa', 5, true),\n('郵輪之旅', 'Cruises', '/images/dest-cruise.webp', 'cruise', 6, true);\n",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute \nINSERT INTO `destinations` (`name`, `label`, `image`, `region`, `sortOrder`, `isActive`) VALUES\n('歐洲', 'Europe', '/images/dest-europe.webp', 'europe', 1, true),\n('中國 & 亞洲', 'China & Asia', '/images/dest-asia.webp', 'asia', 2, true),\n('南美洲', 'South America', '/images/dest-southamerica.webp', 'south-america', 3, true),\n('以色列 & 約旦', 'Israel & Jordan', '/images/dest-israel.webp', 'middle-east', 4, true),\n('埃及 & 非洲', 'Egypt & Africa', '/images/dest-africa.webp', 'africa', 5, true),\n('郵輪之旅', 'Cruises', '/images/dest-cruise.webp', 'cruise', 6, true);\n",
-  "rows": [],
-  "messages": [],
-  "stdout": "",
-  "stderr": "",
-  "execution_time_ms": 69
-}

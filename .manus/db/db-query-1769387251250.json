@@ -1,9 +1,0 @@
-{
-  "query": "INSERT INTO users (email, name, role, password, loginMethod, createdAt, updatedAt, lastSignedIn, loginAttempts) VALUES ('admin@packgo.com', 'Admin', 'admin', '$2b$10$rQZ8K8Y8Y8Y8Y8Y8Y8Y8YOhashplaceholder', 'email', NOW(), NOW(), NOW(), 0) ON DUPLICATE KEY UPDATE role = 'admin';",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute INSERT INTO users (email, name, role, password, loginMethod, createdAt, updatedAt, lastSignedIn, loginAttempts) VALUES ('admin@packgo.com', 'Admin', 'admin', '$2b$10$rQZ8K8Y8Y8Y8Y8Y8Y8Y8YOhashplaceholder', 'email', NOW(), NOW(), NOW(), 0) ON DUPLICATE KEY UPDATE role = 'admin';",
-  "rows": [],
-  "messages": [],
-  "stdout": "",
-  "stderr": "",
-  "execution_time_ms": 122
-}

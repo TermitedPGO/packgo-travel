@@ -1,9 +1,0 @@
-{
-  "query": "UPDATE agentSkills SET keywords = '美食,米其林,Michelin,海女小屋,和牛,懷石,料亭,名物,特色餐食,美食之旅,饕客,老饕,在地美食,傳統料理,星級餐廳' WHERE skillName = '美食主題識別';",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute UPDATE agentSkills SET keywords = '美食,米其林,Michelin,海女小屋,和牛,懷石,料亭,名物,特色餐食,美食之旅,饕客,老饕,在地美食,傳統料理,星級餐廳' WHERE skillName = '美食主題識別';",
-  "rows": [],
-  "messages": [],
-  "stdout": "",
-  "stderr": "",
-  "execution_time_ms": 114
-}

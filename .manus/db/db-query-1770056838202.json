@@ -1,9 +1,0 @@
-{
-  "query": "CREATE TABLE IF NOT EXISTS skillTestResults (\n  id INT AUTO_INCREMENT PRIMARY KEY,\n  skillId INT NOT NULL,\n  testCaseId VARCHAR(100) NOT NULL,\n  inputContext TEXT,\n  expectedOutput TEXT,\n  actualOutput TEXT,\n  passed BOOLEAN DEFAULT FALSE,\n  errorMessage TEXT,\n  executedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n  executionTimeMs INT\n);",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute CREATE TABLE IF NOT EXISTS skillTestResults (\n  id INT AUTO_INCREMENT PRIMARY KEY,\n  skillId INT NOT NULL,\n  testCaseId VARCHAR(100) NOT NULL,\n  inputContext TEXT,\n  expectedOutput TEXT,\n  actualOutput TEXT,\n  passed BOOLEAN DEFAULT FALSE,\n  errorMessage TEXT,\n  executedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n  executionTimeMs INT\n);",
-  "rows": [],
-  "messages": [],
-  "stdout": "",
-  "stderr": "",
-  "execution_time_ms": 202
-}

@@ -1,9 +1,0 @@
-{
-  "query": "CREATE TABLE IF NOT EXISTS `autoApprovalRules` (\n  `id` int AUTO_INCREMENT PRIMARY KEY,\n  `ruleName` varchar(255) NOT NULL,\n  `description` text,\n  `ruleType` enum('confidence_threshold','source_type','keyword_count','skill_category','combined') NOT NULL,\n  `conditions` text NOT NULL,\n  `action` enum('auto_approve','auto_reject','flag_priority','notify_admin') NOT NULL,\n  `priority` int NOT NULL DEFAULT 0,\n  `isActive` boolean NOT NULL DEFAULT true,\n  `timesTriggered` int NOT NULL DEFAULT 0,\n  `lastTriggeredAt` timestamp,\n  `createdBy` int NOT NULL,\n  `createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  `updatedAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP\n);",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute CREATE TABLE IF NOT EXISTS `autoApprovalRules` (\n  `id` int AUTO_INCREMENT PRIMARY KEY,\n  `ruleName` varchar(255) NOT NULL,\n  `description` text,\n  `ruleType` enum('confidence_threshold','source_type','keyword_count','skill_category','combined') NOT NULL,\n  `conditions` text NOT NULL,\n  `action` enum('auto_approve','auto_reject','flag_priority','notify_admin') NOT NULL,\n  `priority` int NOT NULL DEFAULT 0,\n  `isActive` boolean NOT NULL DEFAULT true,\n  `timesTriggered` int NOT NULL DEFAULT 0,\n  `lastTriggeredAt` timestamp,\n  `createdBy` int NOT NULL,\n  `createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  `updatedAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP\n);",
-  "rows": [],
-  "messages": [],
-  "stdout": "",
-  "stderr": "",
-  "execution_time_ms": 195
-}

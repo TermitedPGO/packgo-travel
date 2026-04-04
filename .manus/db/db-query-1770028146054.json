@@ -1,9 +1,0 @@
-{
-  "query": "UPDATE destinations SET name = '歐洲地區', label = 'Europe' WHERE region = 'europe';\nUPDATE destinations SET name = '亞洲地區', label = 'Asia' WHERE region = 'asia';\nUPDATE destinations SET name = '美洲地區', label = 'Americas' WHERE region = 'south-america';\nUPDATE destinations SET name = '中東地區', label = 'Middle East' WHERE region = 'middle-east';\nUPDATE destinations SET name = '非洲地區', label = 'Africa' WHERE region = 'africa';",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute UPDATE destinations SET name = '歐洲地區', label = 'Europe' WHERE region = 'europe';\nUPDATE destinations SET name = '亞洲地區', label = 'Asia' WHERE region = 'asia';\nUPDATE destinations SET name = '美洲地區', label = 'Americas' WHERE region = 'south-america';\nUPDATE destinations SET name = '中東地區', label = 'Middle East' WHERE region = 'middle-east';\nUPDATE destinations SET name = '非洲地區', label = 'Africa' WHERE region = 'africa';",
-  "rows": [],
-  "messages": [],
-  "stdout": "",
-  "stderr": "",
-  "execution_time_ms": 95
-}

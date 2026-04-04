@@ -1,9 +1,0 @@
-{
-  "query": "UPDATE agentSkills SET keywords = '文化,歷史,古蹟,神宮,神社,寺廟,城堡,名城,世界遺產,UNESCO,傳統,民俗,祭典,藝術,博物館,古都,文化體驗,歷史之旅' WHERE skillName = '文化探索識別';",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute UPDATE agentSkills SET keywords = '文化,歷史,古蹟,神宮,神社,寺廟,城堡,名城,世界遺產,UNESCO,傳統,民俗,祭典,藝術,博物館,古都,文化體驗,歷史之旅' WHERE skillName = '文化探索識別';",
-  "rows": [],
-  "messages": [],
-  "stdout": "",
-  "stderr": "",
-  "execution_time_ms": 69
-}

@@ -1,9 +1,0 @@
-{
-  "query": "ALTER TABLE tours \n  MODIFY COLUMN title TEXT,\n  MODIFY COLUMN destinationCountry TEXT,\n  MODIFY COLUMN departureCity TEXT,\n  MODIFY COLUMN heroImageAlt TEXT,\n  MODIFY COLUMN poeticTitle TEXT,\n  MODIFY COLUMN promotionText TEXT;",
-  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 4TdGiyGWHynzTjR.2f22c070361b --database D3XjbQ67JpFf2y4FWefWHw --execute ALTER TABLE tours \n  MODIFY COLUMN title TEXT,\n  MODIFY COLUMN destinationCountry TEXT,\n  MODIFY COLUMN departureCity TEXT,\n  MODIFY COLUMN heroImageAlt TEXT,\n  MODIFY COLUMN poeticTitle TEXT,\n  MODIFY COLUMN promotionText TEXT;",
-  "rows": [],
-  "messages": [],
-  "stdout": "",
-  "stderr": "",
-  "execution_time_ms": 421
-}
