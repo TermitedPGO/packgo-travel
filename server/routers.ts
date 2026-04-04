@@ -1142,6 +1142,9 @@ export const appRouter = router({
           contactEmail: z.string().email(),
           contactPhone: z.string().min(1),
           specialRequests: z.string().optional(),
+          departureId: z.number().optional(),
+          departureDate: z.string().optional(),
+          returnDate: z.string().optional(),
         })
       )
       .mutation(async ({ ctx, input }) => {
@@ -1169,7 +1172,7 @@ export const appRouter = router({
         // Create booking
         const booking = await db.createBooking({
           tourId: input.tourId,
-          departureId: 0, // TODO: Add departure selection
+          departureId: input.departureId ?? 0,
           userId: ctx.user.id,
           customerName: input.contactName,
           customerEmail: input.contactEmail,
@@ -1193,8 +1196,8 @@ export const appRouter = router({
           customerEmail: input.contactEmail,
           bookingId: booking.id,
           tourTitle: tour.title,
-          departureDate: "TBD", // TODO: Add departure date selection
-          returnDate: "TBD", // TODO: Calculate return date
+          departureDate: input.departureDate ?? "TBD",
+          returnDate: input.returnDate ?? "TBD",
           numberOfAdults: input.participants,
           numberOfChildren: 0,
           numberOfInfants: 0,
