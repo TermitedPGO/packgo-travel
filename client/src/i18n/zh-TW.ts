@@ -1042,6 +1042,8 @@ export const zhTW = {
     title: '客製旅遊',
     subtitle: '打造專屬於您的完美旅程',
     description: '告訴我們您的夢想旅程，我們將為您量身打造獨一無二的旅遊體驗。',
+    travelersDescription: '告訴我們旅行人數與成員組成，包括長輩或兒童，讓我們為您安排最合適的行程。',
+    interestsDescription: '選擇您感興趣的旅遊主題，如美食、文化、自然或冒險，讓行程更符合您的喜好。',
     form: {
       destination: '目的地',
       destinationPlaceholder: '您想去哪裡？',

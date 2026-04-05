@@ -1040,6 +1040,8 @@ export const en = {
     title: 'Custom Tours',
     subtitle: 'Create your perfect journey',
     description: 'Tell us about your dream trip and we will create a unique travel experience just for you.',
+    travelersDescription: 'Tell us the number of travelers and group composition, including seniors or children, so we can arrange the most suitable itinerary for you.',
+    interestsDescription: 'Choose your preferred travel themes, such as food, culture, nature, or adventure, to make the itinerary better match your interests.',
     form: {
       destination: 'Destination',
       destinationPlaceholder: 'Where would you like to go?',

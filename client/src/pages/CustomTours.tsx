@@ -104,12 +104,12 @@ export default function CustomTours() {
                 {
                   icon: <Users className="h-8 w-8" />,
                   title: t('customTours.form.travelers'),
-                  description: t('customTours.description')
+                  description: t('customTours.travelersDescription')
                 },
                 {
                   icon: <Star className="h-8 w-8" />,
                   title: t('customTours.form.interests'),
-                  description: t('customTours.description')
+                  description: t('customTours.interestsDescription')
                 },
               ].map((feature, idx) => (
                 <div key={idx} className="flex gap-6 p-8 bg-gray-50  hover:shadow-lg transition-all">
