@@ -127,6 +127,8 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
     ]);
 
     abortControllerRef.current = new AbortController();
+    // 30 秒超時：若 SSE 串流卡住，自動中止避免頁面凍結
+    const timeoutId = setTimeout(() => abortControllerRef.current?.abort(), 30000);
 
     try {
       const params = new URLSearchParams({
@@ -171,6 +173,7 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
                   return updated;
                 });
               } else if (eventType === "done") {
+                clearTimeout(timeoutId);
                 updatePenguinExpression("happy");
                 setTimeout(() => updatePenguinExpression("default"), 3000);
                 // Add context-aware suggested replies to the last assistant message
@@ -195,7 +198,20 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
         }
       }
     } catch (error: any) {
-      if (error?.name !== "AbortError") {
+      clearTimeout(timeoutId);
+      if (error?.name === "AbortError") {
+        // 超時或使用者手動中止：顯示友好提示
+        updatePenguinExpression("confused");
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === "assistant" && last.content === "") {
+            updated[updated.length - 1] = { ...last, content: "AI 回應超時，請稍後重試" };
+          }
+          return updated;
+        });
+        setTimeout(() => updatePenguinExpression("default"), 3000);
+      } else {
         updatePenguinExpression("confused");
         setMessages((prev) => {
           const updated = [...prev];
@@ -208,6 +224,7 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
         setTimeout(() => updatePenguinExpression("default"), 3000);
       }
     } finally {
+      clearTimeout(timeoutId);
       setIsStreaming(false);
       abortControllerRef.current = null;
     }
