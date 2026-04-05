@@ -1615,8 +1615,12 @@ export default function TourDetailPeony() {
 
   useEffect(() => {
     if (isEditMode && tourRef.current) {
-      // 使用 structuredClone 替代 JSON.parse/stringify，效能更佳且支援更多型別
-      setEditedTour(structuredClone(tourRef.current));
+      // 用 requestAnimationFrame 避免阻塞 UI thread，讓瀏覽器先渲染編輯模式 UI
+      // 再用 structuredClone 進行深拷貝（效能優於 JSON.parse/stringify）
+      const snapshot = tourRef.current;
+      requestAnimationFrame(() => {
+        setEditedTour(structuredClone(snapshot));
+      });
     } else if (!isEditMode) {
       // 退出編輯模式時清空，避免殘留舊資料
       setEditedTour(null);
@@ -1842,20 +1846,39 @@ export default function TourDetailPeony() {
   const displayTitle = getTranslated('title', tour.title) ?? tour.title;
   const displayDescription = getTranslated('description', tour.description) ?? tour.description;
   const displayHeroSubtitle = getTranslated('heroSubtitle', (tour as any).heroSubtitle) ?? (tour as any).heroSubtitle;
-  // 翻譯覆蓋：JSON 欄位（翻譯後為 JSON 字串，需再解析）
-  // 編輯模式下從 editedTour 讀取最新的 keyFeatures（包含剛上傳的圖片）
-  const keyFeaturesSource = isEditMode && editedTour?.keyFeatures != null ? editedTour.keyFeatures : (tour.keyFeatures);
-  const keyFeatures = parseJSON(
-    typeof keyFeaturesSource === 'string' ? keyFeaturesSource : JSON.stringify(keyFeaturesSource),
-    []
-  );
-  const attractions = parseJSON(tour.attractions, []);
-  const hotels = parseJSON(tour.hotels, []);
-  const meals = parseJSON(tour.meals, []);
-  const itineraryDetailed = parseJSON(getTranslated('itineraryDetailed', tour.itineraryDetailed) ?? tour.itineraryDetailed, []);
-  const costExplanation = parseJSON(getTranslated('costExplanation', tour.costExplanation) ?? tour.costExplanation, null);
-  const transportationInfo = parseJSON(tour.flights, null);
-  const noticeDetailed = parseJSON(getTranslated('noticeDetailed', tour.noticeDetailed) ?? tour.noticeDetailed, null);
+  // 翻譯覆蓋：JSON 欄位全部用 useMemo 快取，避免每次 render 重新 parse
+  // keyFeatures: 編輯模式下從 editedTour 讀取（包含剛上傳的圖片）
+  const keyFeatures = useMemo(() => {
+    const source = isEditMode && editedTour?.keyFeatures != null
+      ? editedTour.keyFeatures
+      : tour?.keyFeatures;
+    return typeof source === 'string' ? parseJSON(source, []) : (source || []);
+  }, [isEditMode, editedTour?.keyFeatures, tour?.keyFeatures]);
+
+  const attractions = useMemo(() => parseJSON(tour?.attractions, []), [tour?.attractions]);
+  const hotels = useMemo(() => parseJSON(tour?.hotels, []), [tour?.hotels]);
+  const meals = useMemo(() => parseJSON(tour?.meals, {}), [tour?.meals]);
+  const itineraryDetailed = useMemo(() => {
+    const source = getTranslated('itineraryDetailed', tour?.itineraryDetailed) ?? tour?.itineraryDetailed;
+    return parseJSON(source, []);
+  }, [tour?.itineraryDetailed, language]);
+  const costExplanation = useMemo(() => parseJSON(
+    getTranslated('costExplanation', tour?.costExplanation) ?? tour?.costExplanation, null
+  ), [tour?.costExplanation, language]);
+  const transportationInfo = useMemo(() => parseJSON(tour?.flights, null), [tour?.flights]);
+  const noticeDetailed = useMemo(() => parseJSON(
+    getTranslated('noticeDetailed', tour?.noticeDetailed) ?? tour?.noticeDetailed, null
+  ), [tour?.noticeDetailed, language]);
+
+  // 修復 3：提取 displayItinerary useMemo，消除 JSX 中 3 次重複 parse
+  const displayItinerary = useMemo(() => {
+    if (isEditMode && editedTour?.itineraryDetailed != null) {
+      return typeof editedTour.itineraryDetailed === 'string'
+        ? parseJSON(editedTour.itineraryDetailed, [])
+        : editedTour.itineraryDetailed;
+    }
+    return itineraryDetailed;
+  }, [isEditMode, editedTour?.itineraryDetailed, itineraryDetailed]);
 
   // 導覽項目
   const navItems = [
@@ -2236,8 +2259,8 @@ export default function TourDetailPeony() {
 
           {/* Daily Itinerary */}
           <div className="space-y-24">
-            {(isEditMode ? (editedTour?.itineraryDetailed ? (typeof editedTour.itineraryDetailed === 'string' ? parseJSON(editedTour.itineraryDetailed, []) : editedTour.itineraryDetailed) : []) : itineraryDetailed).length > 0 ? (
-              (isEditMode ? (editedTour?.itineraryDetailed ? (typeof editedTour.itineraryDetailed === 'string' ? parseJSON(editedTour.itineraryDetailed, []) : editedTour.itineraryDetailed) : []) : itineraryDetailed).map((day: any, index: number) => (
+            {displayItinerary.length > 0 ? (
+              displayItinerary.map((day: any, index: number) => (
                 isEditMode ? (
                   <EditableDayCard
                     key={index}
@@ -2245,12 +2268,7 @@ export default function TourDetailPeony() {
                     index={index}
                     isEditMode={isEditMode}
                     onUpdate={(updatedDay) => {
-                      const currentItinerary = editedTour?.itineraryDetailed 
-                        ? (typeof editedTour.itineraryDetailed === 'string' 
-                          ? parseJSON(editedTour.itineraryDetailed, []) 
-                          : editedTour.itineraryDetailed) 
-                        : [];
-                      const newItinerary = [...currentItinerary];
+                      const newItinerary = [...displayItinerary];
                       newItinerary[index] = updatedDay;
                       updateField('itineraryDetailed', newItinerary);
                     }}
