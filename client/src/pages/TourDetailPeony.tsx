@@ -1805,6 +1805,41 @@ export default function TourDetailPeony() {
     });
   };
 
+  // ====== JSON 欄位 useMemo 快取（必須在所有條件 return 之前，避免 React Error #310）======
+  // keyFeatures: 編輯模式下從 editedTour 讀取
+  const keyFeatures = useMemo(() => {
+    const source = isEditMode && editedTour?.keyFeatures != null
+      ? editedTour.keyFeatures
+      : tour?.keyFeatures;
+    return typeof source === 'string' ? parseJSON(source, []) : (source || []);
+  }, [isEditMode, editedTour?.keyFeatures, tour?.keyFeatures]);
+
+  const attractions = useMemo(() => parseJSON(tour?.attractions, []), [tour?.attractions]);
+  const hotels = useMemo(() => parseJSON(tour?.hotels, []), [tour?.hotels]);
+  const meals = useMemo(() => parseJSON(tour?.meals, {}), [tour?.meals]);
+  const itineraryDetailed = useMemo(() => {
+    const source = getTranslated('itineraryDetailed', tour?.itineraryDetailed) ?? tour?.itineraryDetailed;
+    return parseJSON(source, []);
+  }, [tour?.itineraryDetailed, language]);
+  const costExplanation = useMemo(() => parseJSON(
+    getTranslated('costExplanation', tour?.costExplanation) ?? tour?.costExplanation, null
+  ), [tour?.costExplanation, language]);
+  const transportationInfo = useMemo(() => parseJSON(tour?.flights, null), [tour?.flights]);
+  const noticeDetailed = useMemo(() => parseJSON(
+    getTranslated('noticeDetailed', tour?.noticeDetailed) ?? tour?.noticeDetailed, null
+  ), [tour?.noticeDetailed, language]);
+
+  // displayItinerary: 編輯模式下從 editedTour 讀取，消除 JSX 中重複 parse
+  const displayItinerary = useMemo(() => {
+    if (isEditMode && editedTour?.itineraryDetailed != null) {
+      return typeof editedTour.itineraryDetailed === 'string'
+        ? parseJSON(editedTour.itineraryDetailed, [])
+        : editedTour.itineraryDetailed;
+    }
+    return itineraryDetailed;
+  }, [isEditMode, editedTour?.itineraryDetailed, itineraryDetailed]);
+  // ====== 結束 JSON 欄位 useMemo 快取 ======
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white">
@@ -1846,40 +1881,6 @@ export default function TourDetailPeony() {
   const displayTitle = getTranslated('title', tour.title) ?? tour.title;
   const displayDescription = getTranslated('description', tour.description) ?? tour.description;
   const displayHeroSubtitle = getTranslated('heroSubtitle', (tour as any).heroSubtitle) ?? (tour as any).heroSubtitle;
-  // 翻譯覆蓋：JSON 欄位全部用 useMemo 快取，避免每次 render 重新 parse
-  // keyFeatures: 編輯模式下從 editedTour 讀取（包含剛上傳的圖片）
-  const keyFeatures = useMemo(() => {
-    const source = isEditMode && editedTour?.keyFeatures != null
-      ? editedTour.keyFeatures
-      : tour?.keyFeatures;
-    return typeof source === 'string' ? parseJSON(source, []) : (source || []);
-  }, [isEditMode, editedTour?.keyFeatures, tour?.keyFeatures]);
-
-  const attractions = useMemo(() => parseJSON(tour?.attractions, []), [tour?.attractions]);
-  const hotels = useMemo(() => parseJSON(tour?.hotels, []), [tour?.hotels]);
-  const meals = useMemo(() => parseJSON(tour?.meals, {}), [tour?.meals]);
-  const itineraryDetailed = useMemo(() => {
-    const source = getTranslated('itineraryDetailed', tour?.itineraryDetailed) ?? tour?.itineraryDetailed;
-    return parseJSON(source, []);
-  }, [tour?.itineraryDetailed, language]);
-  const costExplanation = useMemo(() => parseJSON(
-    getTranslated('costExplanation', tour?.costExplanation) ?? tour?.costExplanation, null
-  ), [tour?.costExplanation, language]);
-  const transportationInfo = useMemo(() => parseJSON(tour?.flights, null), [tour?.flights]);
-  const noticeDetailed = useMemo(() => parseJSON(
-    getTranslated('noticeDetailed', tour?.noticeDetailed) ?? tour?.noticeDetailed, null
-  ), [tour?.noticeDetailed, language]);
-
-  // 修復 3：提取 displayItinerary useMemo，消除 JSX 中 3 次重複 parse
-  const displayItinerary = useMemo(() => {
-    if (isEditMode && editedTour?.itineraryDetailed != null) {
-      return typeof editedTour.itineraryDetailed === 'string'
-        ? parseJSON(editedTour.itineraryDetailed, [])
-        : editedTour.itineraryDetailed;
-    }
-    return itineraryDetailed;
-  }, [isEditMode, editedTour?.itineraryDetailed, itineraryDetailed]);
-
   // 導覽項目
   const navItems = [
     // BUG-005 fix: removed duplicate 'features' tab (same section as 'overview')
