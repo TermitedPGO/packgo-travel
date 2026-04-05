@@ -717,21 +717,23 @@ export const appRouter = router({
       .mutation(async ({ input }) => {
         const { id, field, value } = input;
 
-        // 欄位特定驗證
-        if (field === 'price' && typeof value === 'number' && value < 0) {
-          throw new TRPCError({ code: 'BAD_REQUEST', message: '價格不能為負數' });
-        }
-        if (field === 'duration' && typeof value === 'number' && (value < 1 || value > 365)) {
-          throw new TRPCError({ code: 'BAD_REQUEST', message: '天數必須在 1-365 之間' });
-        }
-        if ((field === 'heroImage' || field === 'imageUrl') && typeof value === 'string' && value.length > 0) {
-          const isValidUrl = value.startsWith('http://') || value.startsWith('https://') || value.startsWith('/');
-          if (!isValidUrl) {
-            throw new TRPCError({ code: 'BAD_REQUEST', message: '圖片 URL 格式不正確' });
+        // 欄位特定驗證（fieldValidators 模式）
+        const fieldValidators: Record<string, (v: any) => string | null> = {
+          price: (v) => typeof v === 'number' && v < 0 ? '價格不能為負數' : null,
+          discountPrice: (v) => typeof v === 'number' && v < 0 ? '折扣價不能為負數' : null,
+          duration: (v) => typeof v === 'number' && (v < 1 || v > 365) ? '天數必須在 1-365 之間' : null,
+          title: (v) => typeof v === 'string' && v.length > 200 ? '標題最多 200 字' : null,
+          subtitle: (v) => typeof v === 'string' && v.length > 500 ? '副標題最多 500 字' : null,
+          heroSubtitle: (v) => typeof v === 'string' && v.length > 500 ? '副標題最多 500 字' : null,
+          imageUrl: (v) => typeof v === 'string' && v.length > 0 && !v.startsWith('http') && !v.startsWith('/') ? '圖片 URL 格式不正確' : null,
+          heroImage: (v) => typeof v === 'string' && v.length > 0 && !v.startsWith('http') && !v.startsWith('/') ? '圖片 URL 格式不正確' : null,
+        };
+        const validator = fieldValidators[field];
+        if (validator) {
+          const error = validator(value);
+          if (error) {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: error });
           }
-        }
-        if (field === 'title' && typeof value === 'string' && value.length > 200) {
-          throw new TRPCError({ code: 'BAD_REQUEST', message: '標題不能超過 200 字' });
         }
         
         // Whitelist of allowed fields for inline editing
