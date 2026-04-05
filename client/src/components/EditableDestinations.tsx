@@ -1,6 +1,7 @@
 import { ArrowRight, Pencil, Plus, Trash2, GripVertical, X, Check, Upload, ImageIcon } from "lucide-react";
 import { useLocation } from "wouter";
 import { useHomeEdit } from "@/contexts/HomeEditContext";
+import { useLocale } from "@/contexts/LocaleContext";
 import { trpc } from "@/lib/trpc";
 import { useState, useRef } from "react";
 import { toast } from "sonner";
@@ -32,6 +33,7 @@ const defaultDestinations = [
 export default function EditableDestinations() {
   const [, setLocation] = useLocation();
   const { isEditMode, canEdit } = useHomeEdit();
+  const { t, language } = useLocale();
   const [editingId, setEditingId] = useState<number | null>(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Destination>>({});
@@ -171,10 +173,10 @@ export default function EditableDestinations() {
       <div className="container">
         <div className="text-center mb-12">
           <h2 className="text-3xl font-serif font-bold text-gray-900 mb-4 relative inline-block">
-            探索目的地
+            {t('destinations.title')}
             <span className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-12 h-1 bg-primary"></span>
           </h2>
-          <p className="text-gray-500 mt-4">Discover the world's most amazing places</p>
+          <p className="text-gray-500 mt-4">{t('destinations.subtitle')}</p>
         </div>
 
         {/* Add Button */}
