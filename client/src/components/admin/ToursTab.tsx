@@ -697,7 +697,7 @@ export default function ToursTab() {
                     />
                   </th>
                   <th className="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">行程名稱</th>
-                  <th className="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">目的地</th>
+                  <th className="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider min-w-[140px]">目的地</th>
                   <th className="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">分類</th>
                   <th className="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">天數</th>
                   <th className="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">售價</th>
@@ -753,12 +753,12 @@ export default function ToursTab() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-5 py-5 text-sm">
-                      <div className="font-medium text-gray-800">
+                    <td className="px-5 py-5 text-sm min-w-[140px]">
+                      <div className="font-medium text-gray-800 whitespace-nowrap">
                         {tour.destinationCountry || tour.destination}
                       </div>
                       {tour.destinationCity && (
-                        <div className="text-xs text-gray-400 mt-0.5">{tour.destinationCity}</div>
+                        <div className="text-xs text-gray-400 mt-0.5 whitespace-nowrap">{tour.destinationCity}</div>
                       )}
                     </td>
                     <td className="px-5 py-5">
@@ -802,77 +802,65 @@ export default function ToursTab() {
                     </td>
                     <td className="px-5 py-5">
                       <div className="flex items-center justify-end gap-1">
-                        {/* 上下架 - 含文字 */}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => toggleStatusMutation.mutate({ id: tour.id })}
-                          disabled={toggleStatusMutation.isPending}
-                          className="h-8 px-2 hover:bg-gray-100 transition-colors flex items-center gap-1 text-xs"
-                          title={tour.status === "active" ? "下架" : "上架"}
-                        >
-                          {tour.status === "active" ? (
-                            <><EyeOff className="h-3.5 w-3.5 text-gray-500" /><span className="text-gray-600">下架</span></>
-                          ) : (
-                            <><Eye className="h-3.5 w-3.5 text-green-600" /><span className="text-green-600">上架</span></>
-                          )}
-                        </Button>
-                        {/* 精選 - 含文字 */}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => toggleFeaturedMutation.mutate({ id: tour.id })}
-                          className={`h-8 px-2 transition-colors flex items-center gap-1 text-xs ${
-                            tour.featured === 1
-                              ? "text-amber-600 hover:bg-amber-50"
-                              : "text-gray-400 hover:bg-gray-100"
-                          }`}
-                          title={tour.featured === 1 ? "取消精選" : "設為精選"}
-                          disabled={toggleFeaturedMutation.isPending}
-                        >
-                          <Star className={`h-3.5 w-3.5 ${tour.featured === 1 ? "fill-current" : ""}`} />
-                          <span>精選</span>
-                        </Button>
-                        <div className="w-px h-5 bg-gray-200 mx-0.5"></div>
-                        {/* 出發日期 - 含文字 */}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setSelectedTourForDepartures({id: tour.id, title: tour.title});
-                            setIsDeparturesDialogOpen(true);
-                          }}
-                          className="h-8 px-2 hover:bg-gray-100 transition-colors flex items-center gap-1 text-xs text-gray-600"
-                          title="管理出發日期"
-                        >
-                          <Calendar className="h-3.5 w-3.5 text-gray-500" />
-                          <span>日期</span>
-                        </Button>
-                        {/* 編輯 - 含文字 */}
+                        {/* 編輯按鈕 */}
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => handleEdit(tour.id)}
-                          className="h-8 px-2 hover:bg-blue-50 transition-colors flex items-center gap-1 text-xs text-blue-600"
+                          className="h-8 px-2 hover:bg-blue-50 transition-colors flex items-center gap-1 text-xs text-blue-600 rounded-lg"
                           title="編輯行程"
                         >
                           <Edit className="h-3.5 w-3.5" />
                           <span>編輯</span>
                         </Button>
-                        {/* 更多操作下拉選單 (複製/刪除) */}
+                        {/* 更多操作下拉選單（上下架/精選/日期/複製/刪除） */}
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-8 px-2 hover:bg-gray-100 transition-colors flex items-center gap-1 text-xs text-gray-600"
+                              className="h-8 px-2 hover:bg-gray-100 transition-colors flex items-center gap-1 text-xs text-gray-600 rounded-lg"
                               title="更多操作"
                             >
                               <MoreHorizontal className="h-3.5 w-3.5 text-gray-500" />
                               <span>更多</span>
                             </Button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-36">
+                          <DropdownMenuContent align="end" className="w-44">
+                            {/* 上下架 */}
+                            <DropdownMenuItem
+                              onClick={() => toggleStatusMutation.mutate({ id: tour.id })}
+                              disabled={toggleStatusMutation.isPending}
+                              className="cursor-pointer"
+                            >
+                              {tour.status === "active" ? (
+                                <><EyeOff className="h-4 w-4 mr-2 text-gray-500" />下架行程</>
+                              ) : (
+                                <><Eye className="h-4 w-4 mr-2 text-green-600" />上架行程</>
+                              )}
+                            </DropdownMenuItem>
+                            {/* 精選 */}
+                            <DropdownMenuItem
+                              onClick={() => toggleFeaturedMutation.mutate({ id: tour.id })}
+                              disabled={toggleFeaturedMutation.isPending}
+                              className="cursor-pointer"
+                            >
+                              <Star className={`h-4 w-4 mr-2 ${tour.featured === 1 ? "text-amber-500 fill-current" : "text-gray-400"}`} />
+                              {tour.featured === 1 ? "取消精選" : "設為精選"}
+                            </DropdownMenuItem>
+                            {/* 出發日期 */}
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setSelectedTourForDepartures({id: tour.id, title: tour.title});
+                                setIsDeparturesDialogOpen(true);
+                              }}
+                              className="cursor-pointer"
+                            >
+                              <Calendar className="h-4 w-4 mr-2 text-gray-500" />
+                              管理出發日期
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            {/* 複製 */}
                             <DropdownMenuItem
                               onClick={() => handleDuplicate(tour.id, tour.title)}
                               disabled={duplicateTourMutation.isPending}
@@ -882,6 +870,7 @@ export default function ToursTab() {
                               複製行程
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
+                            {/* 刪除 */}
                             <DropdownMenuItem
                               onClick={() => handleDelete(tour.id)}
                               className="cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50"

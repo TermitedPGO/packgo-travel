@@ -64,7 +64,7 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const savedLang = localStorage.getItem('packgo-language');
-      if (savedLang && ['zh-TW', 'en'].includes(savedLang)) {
+      if (savedLang && ['zh-TW', 'en', 'es'].includes(savedLang)) {
         setLanguageState(savedLang as Language);
       }
     }

@@ -11,7 +11,7 @@ import {
 const processSteps = [
   {
     step: "01",
-    title: "免費諮詢",
+    title: "專業詮詢",
     desc: "聯繫我們的包團顧問，說明您的需求、人數、目的地與預算，我們將為您提供初步規劃建議。",
   },
   {
@@ -70,7 +70,7 @@ export default function GroupPackages() {
         </div>
         <div className="relative container py-24 md:py-32">
           <div className="max-w-2xl">
-            <div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur-sm border border-white/20 rounded-full px-4 py-1.5 text-sm mb-6">
+              <div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur-sm border border-white/20 rounded-lg px-4 py-1.5 text-sm mb-6">
               <Users className="h-4 w-4" />
               <span>包團旅遊服務</span>
             </div>
@@ -84,7 +84,7 @@ export default function GroupPackages() {
             <div className="flex flex-col sm:flex-row gap-4">
               <Link href="/inquiry">
                 <Button className="bg-white text-black hover:bg-gray-100 font-bold px-8 py-3 h-auto rounded-lg text-base">
-                  免費諮詢包團 <ArrowRight className="ml-2 h-5 w-5" />
+                  立即諮詢包團 <ArrowRight className="ml-2 h-5 w-5" />
                 </Button>
               </Link>
               <Link href="/contact-us">
@@ -171,7 +171,7 @@ export default function GroupPackages() {
                 {i < processSteps.length - 1 && (
                   <div className="hidden md:block absolute top-8 left-[60%] w-[80%] h-0.5 bg-gray-200 z-0" />
                 )}
-                <div className="relative z-10 inline-flex items-center justify-center w-16 h-16 rounded-full bg-black text-white text-xl font-bold mb-4">
+                <div className="relative z-10 inline-flex items-center justify-center w-16 h-16 rounded-lg bg-black text-white text-xl font-bold mb-4">
                   {step.step}
                 </div>
                 <h3 className="font-bold text-gray-900 mb-2">{step.title}</h3>
@@ -233,7 +233,7 @@ export default function GroupPackages() {
             {faqs.map((faq, i) => (
               <div key={i} className="border border-gray-200 rounded-xl p-6">
                 <h3 className="font-bold text-gray-900 mb-2 flex items-start gap-2">
-                  <span className="shrink-0 w-6 h-6 rounded-full bg-black text-white text-xs flex items-center justify-center mt-0.5">Q</span>
+                  <span className="shrink-0 w-6 h-6 rounded-lg bg-black text-white text-xs flex items-center justify-center mt-0.5">Q</span>
                   {faq.q}
                 </h3>
                 <p className="text-gray-600 text-sm leading-relaxed pl-8">{faq.a}</p>
@@ -247,11 +247,11 @@ export default function GroupPackages() {
       <section className="py-20 bg-black text-white">
         <div className="container text-center">
           <h2 className="text-3xl md:text-4xl font-bold mb-4">準備好規劃您的包團旅遊了嗎？</h2>
-          <p className="text-gray-300 text-lg mb-8 max-w-xl mx-auto">立即聯繫我們的包團顧問，免費評估您的需求，讓團體旅遊成為最美好的共同回憶。</p>
+          <p className="text-gray-300 text-lg mb-8 max-w-xl mx-auto">立即聯繫我們的包團顧問，評估您的需求，讓團體旅遊成為最美好的共同回憑。</p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link href="/inquiry">
               <Button className="bg-white text-black hover:bg-gray-100 font-bold px-10 py-3 h-auto rounded-lg text-base">
-                立即免費諮詢 <ArrowRight className="ml-2 h-5 w-5" />
+                立即諮詢 <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
             </Link>
             <Link href="/contact-us">

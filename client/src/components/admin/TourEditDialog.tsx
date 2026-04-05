@@ -172,6 +172,36 @@ export function TourEditDialog({
       if (!parsed.flights || typeof parsed.flights !== 'object') {
         parsed.flights = { type: 'FLIGHT', typeName: '' };
       }
+      // 修復：根據 typeName 推斷正確的 type（解決 AI 生成時 type/typeName 不一致的問題）
+      const flightTypeNameLower = (parsed.flights.typeName || '').toLowerCase();
+      if (
+        flightTypeNameLower.includes('飛機') ||
+        flightTypeNameLower.includes('flight') ||
+        flightTypeNameLower.includes('airline') ||
+        flightTypeNameLower.includes('air')
+      ) {
+        parsed.flights.type = 'FLIGHT';
+      } else if (
+        flightTypeNameLower.includes('郵輪') ||
+        flightTypeNameLower.includes('cruise') ||
+        flightTypeNameLower.includes('ship')
+      ) {
+        parsed.flights.type = 'CRUISE';
+      } else if (
+        flightTypeNameLower.includes('巴士') ||
+        flightTypeNameLower.includes('bus') ||
+        flightTypeNameLower.includes('客車')
+      ) {
+        parsed.flights.type = 'BUS';
+      } else if (
+        flightTypeNameLower.includes('自駕') ||
+        flightTypeNameLower.includes('租車') ||
+        flightTypeNameLower.includes('car') ||
+        flightTypeNameLower.includes('drive')
+      ) {
+        parsed.flights.type = 'CAR';
+      }
+      // 如果 type 不是已知類型，保持原有值（防止覆蓋正確設定）
       
       // 解析 images (照片陣列)
       if (typeof parsed.images === 'string') {
@@ -1270,6 +1300,98 @@ export function TourEditDialog({
                           placeholder={t('tourEditDialog.inboundArrivalPlaceholder')}
                         />
                       </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 巴士詳細資訊 */}
+                {editedData.flights?.type === 'BUS' && (
+                  <div className="bg-white rounded-lg p-4 space-y-4 border border-sky-200">
+                    <h4 className="font-medium text-sky-800">巴士詳細資訊</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label className="text-sm font-medium">巴士公司</Label>
+                        <Input
+                          value={editedData.flights?.busCompany || ''}
+                          onChange={(e) => setEditedData({
+                            ...editedData,
+                            flights: { ...editedData.flights, busCompany: e.target.value }
+                          })}
+                          className="mt-2"
+                          placeholder="例：山峰巴士"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium">路線說明</Label>
+                        <Input
+                          value={editedData.flights?.busRoute || ''}
+                          onChange={(e) => setEditedData({
+                            ...editedData,
+                            flights: { ...editedData.flights, busRoute: e.target.value }
+                          })}
+                          className="mt-2"
+                          placeholder="例：台北 → 花蓮"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium">巴士說明</Label>
+                      <Textarea
+                        value={editedData.flights?.description || ''}
+                        onChange={(e) => setEditedData({
+                          ...editedData,
+                          flights: { ...editedData.flights, description: e.target.value }
+                        })}
+                        className="mt-2"
+                        rows={3}
+                        placeholder="巴士相關說明或注意事項"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* 自駕/租車詳細資訊 */}
+                {editedData.flights?.type === 'CAR' && (
+                  <div className="bg-white rounded-lg p-4 space-y-4 border border-sky-200">
+                    <h4 className="font-medium text-sky-800">自駕/租車詳細資訊</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label className="text-sm font-medium">車輛類型</Label>
+                        <Input
+                          value={editedData.flights?.carType || ''}
+                          onChange={(e) => setEditedData({
+                            ...editedData,
+                            flights: { ...editedData.flights, carType: e.target.value }
+                          })}
+                          className="mt-2"
+                          placeholder="例： SUV / 轎車 / 小客車"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium">租車公司</Label>
+                        <Input
+                          value={editedData.flights?.carCompany || ''}
+                          onChange={(e) => setEditedData({
+                            ...editedData,
+                            flights: { ...editedData.flights, carCompany: e.target.value }
+                          })}
+                          className="mt-2"
+                          placeholder="例： Hertz / 區域租車"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium">說明與注意事項</Label>
+                      <Textarea
+                        value={editedData.flights?.description || ''}
+                        onChange={(e) => setEditedData({
+                          ...editedData,
+                          flights: { ...editedData.flights, description: e.target.value }
+                        })}
+                        className="mt-2"
+                        rows={3}
+                        placeholder="自駕或租車相關說明"
+                      />
                     </div>
                   </div>
                 )}

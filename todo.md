@@ -5387,3 +5387,10 @@ AI 辦公室看板中，AI 任務永遠顯示「執行中」（started 狀態）
 - [ ] FIX-10：加 favicon
 - [ ] FIX-11：Stripe API 版本修正
 - [ ] FIX-12：移除壞掉的 Umami analytics script
+
+## 本次修復批次（2026-04-05）
+
+- [ ] TourDetailPeony: 修復編輯模式凍結 bug（useEffect 無限迴圈 + structuredClone）
+- [ ] ToursTab: 修復目的地欄位文字垂直堆疊（加 min-width + overflow-x-auto）
+- [ ] TourEditDialog: 修復交通資訊 tab 動態顯示對應表單區塊
+- [ ] 行程圖片: 為 13 個行程設定 imageUrl 和 heroImage（Unsplash 圖庫）

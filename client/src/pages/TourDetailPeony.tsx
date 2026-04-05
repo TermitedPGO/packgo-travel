@@ -1603,11 +1603,22 @@ export default function TourDetailPeony() {
   }, [tour?.id]);
 
   // 進入編輯模式時複製資料
+  // 修復：依賴只放 isEditMode，避免 tRPC 每次 render 回傳新物件參考造成無限迴圈
+  // 使用 useRef 快照 tour，確保切換時只執行一次深拷貝
+  const tourRef = useRef(tour);
   useEffect(() => {
-    if (isEditMode && tour) {
-      setEditedTour(JSON.parse(JSON.stringify(tour)));
+    tourRef.current = tour;
+  });
+
+  useEffect(() => {
+    if (isEditMode && tourRef.current) {
+      // 使用 structuredClone 替代 JSON.parse/stringify，效能更佳且支援更多型別
+      setEditedTour(structuredClone(tourRef.current));
+    } else if (!isEditMode) {
+      // 退出編輯模式時清空，避免殘留舊資料
+      setEditedTour(null);
     }
-  }, [isEditMode, tour]);
+  }, [isEditMode]);
 
   // 更新欄位
   const updateField = (field: string, value: any) => {
