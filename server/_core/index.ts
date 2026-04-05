@@ -53,27 +53,23 @@ async function startServer() {
   const allowedOrigins = [
     // Production domains
     "https://packgo09.manus.space",
-    "https://packgo09.manus.space",
+    "https://packgo-d3xjbq67.manus.space",
     // Development
     "http://localhost:3000",
     "http://localhost:5173",
     "http://127.0.0.1:3000",
     "http://127.0.0.1:5173",
     // Allow BASE_URL from env if set
-    ...(process.env.BASE_URL && process.env.BASE_URL !== "https://packgo09.manus.space"
-      ? [process.env.BASE_URL]
-      : []),
+    ...(process.env.BASE_URL ? [process.env.BASE_URL] : []),
   ];
 
   // Patterns for dynamic origins
-  // Production: only allow our own domain; Development: allow all Manus sandbox preview URLs
-  const allowedOriginPatterns = process.env.NODE_ENV === 'production'
-    ? [/^https:\/\/packgo09\.manus\.space$/]
-    : [
-        /^https:\/\/[a-z0-9-]+\.manus\.space$/,       // *.manus.space
-        /^https:\/\/[a-z0-9-]+\.manus\.computer$/,    // *.manus.computer (sandbox preview)
-        /^https:\/\/[a-z0-9-]+\.us2\.manus\.computer$/, // *.us2.manus.computer
-      ];
+  // Allow all *.manus.space (production) and *.manus.computer (sandbox preview)
+  const allowedOriginPatterns = [
+    /^https:\/\/[a-z0-9-]+\.manus\.space$/,       // *.manus.space (all production)
+    /^https:\/\/[a-z0-9-]+\.manus\.computer$/,    // *.manus.computer (sandbox preview)
+    /^https:\/\/[a-z0-9-]+\.us2\.manus\.computer$/, // *.us2.manus.computer
+  ];
 
   app.use(
     cors({
