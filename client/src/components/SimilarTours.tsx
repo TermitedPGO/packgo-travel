@@ -77,9 +77,9 @@ export default function SimilarTours({ tourId, title }: SimilarToursProps) {
             >
               {/* Image */}
               <div className="relative aspect-[4/3] overflow-hidden rounded-t-xl bg-gray-100">
-                {tour.heroImage ? (
+                {(tour.imageUrl || tour.heroImage) ? (
                   <img
-                    src={tour.heroImage}
+                    src={tour.imageUrl || tour.heroImage}
                     alt={getTranslatedTitle(tour)}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 rounded-xl"
                     onError={(e) => {

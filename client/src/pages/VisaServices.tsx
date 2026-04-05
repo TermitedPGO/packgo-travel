@@ -136,7 +136,7 @@ export default function VisaServices() {
   return (
     <div className="min-h-screen flex flex-col bg-white">
       <SEO
-        title="代辦簽證服務 | PACK&GO 旅行社"
+        title="代辦簽證服務"
         description="PACK&GO 提供美國、申根、日本、韓國、澳洲等全球主要國家簽證代辦服務，專業顧問全程協助，提高核准率。"
       />
       <Header />
