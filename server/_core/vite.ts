@@ -20,6 +20,18 @@ export async function setupVite(app: Express, server: Server) {
     appType: "custom",
   });
 
+  // CRITICAL: Block Vite middleware from intercepting /api/* requests.
+  // Vite's connect-history-api-fallback rewrites POST requests to GET
+  // and returns index.html, breaking all tRPC mutations.
+  // This guard must be placed BEFORE app.use(vite.middlewares).
+  app.use((req, _res, next) => {
+    if (req.originalUrl.startsWith('/api/')) {
+      // Skip Vite middleware entirely for API routes
+      return next('router');
+    }
+    next();
+  });
+
   app.use(vite.middlewares);
   app.use("*", async (req, res, next) => {
     // 跳過 API 路徑，讓 tRPC 和其他 API router 處理

@@ -431,7 +431,7 @@ export function TourEditDialog({
                         min="0"
                         value={editedData.price ?? 0}
                         onChange={(e) => setEditedData({ ...editedData, price: parseInt(e.target.value) || 0 })}
-                        className="flex-1"
+                        className="flex-1 min-w-[140px]"
                       />
                       <Select
                         value={editedData.priceCurrency || 'TWD'}
