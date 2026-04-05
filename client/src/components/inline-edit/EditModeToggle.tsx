@@ -12,6 +12,8 @@ interface EditModeToggleProps {
   hasChanges?: boolean;
   /** 已修改的數量（顯示在工具列） */
   modifiedCount?: number;
+  /** changesCount 是 modifiedCount 的別名，兩者可互換使用 */
+  changesCount?: number;
   className?: string;
 }
 
@@ -23,8 +25,11 @@ export function EditModeToggle({
   isSaving = false,
   hasChanges = false,
   modifiedCount = 0,
+  changesCount,
   className = "",
 }: EditModeToggleProps) {
+  // changesCount 是 modifiedCount 的別名，優先使用 changesCount
+  const displayCount = changesCount ?? modifiedCount;
   return (
     <div
       className={cn(
@@ -39,9 +44,9 @@ export function EditModeToggle({
           <div className="flex items-center gap-2 px-3 py-1 bg-yellow-100 rounded-lg text-yellow-800 text-sm font-medium">
             <Pencil className="h-4 w-4" />
             編輯中
-            {modifiedCount > 0 && (
+            {displayCount > 0 && (
               <span className="bg-yellow-500 text-white text-xs px-1.5 py-0.5 rounded-full font-bold">
-                {modifiedCount}
+                {displayCount} 個變更
               </span>
             )}
           </div>
@@ -61,8 +66,8 @@ export function EditModeToggle({
                 <>
                   <Save className="h-4 w-4 mr-2" />
                   儲存變更
-                  {modifiedCount > 0 && (
-                    <span className="ml-1 text-xs opacity-80">({modifiedCount} 處)</span>
+                  {displayCount > 0 && (
+                    <span className="ml-1 text-xs opacity-80">({displayCount} 處)</span>
                   )}
                 </>
               )}

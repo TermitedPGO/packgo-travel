@@ -101,11 +101,11 @@ export function EditableText({
     );
   }
 
-  // 編輯模式且激活：顯示輸入框（藍色邊框 + 淺藍背景）
+  // 編輯模式且激活：顯示輸入框（始終藍色邊框 + 淺藍背景，不論 darkBackground）
   return (
     <div className={cn(
       "flex items-start gap-2 rounded-lg p-2 border-2 shadow-xl backdrop-blur-sm w-full",
-      darkBackground ? "bg-white/95 border-yellow-400" : "bg-blue-50 border-blue-500"
+      "bg-blue-50 border-blue-500"
     )}>
       {multiline ? (
         <textarea
@@ -137,7 +137,7 @@ export function EditableText({
       )}
       {maxLength && (
         <span className="text-xs text-gray-400 whitespace-nowrap self-end">
-          {editValue.length}/{maxLength}
+          {editValue.length}/{maxLength} 字
         </span>
       )}
       <div className="flex items-center gap-1 shrink-0">

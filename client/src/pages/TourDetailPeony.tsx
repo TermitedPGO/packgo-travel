@@ -1925,7 +1925,7 @@ export default function TourDetailPeony() {
           onCancel={handleCancelEdit}
           isSaving={isSaving}
           hasChanges={hasChanges}
-          modifiedCount={dirtyFields.size}
+          changesCount={dirtyFields.size}
         />
       )}
       
