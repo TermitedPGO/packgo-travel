@@ -414,7 +414,7 @@ export function TourEditDialog({
                       id="duration"
                       type="number"
                       min="1"
-                      value={editedData.duration || 1}
+                      value={editedData.duration ?? 1}
                       onChange={(e) => setEditedData({ ...editedData, duration: parseInt(e.target.value) || 1 })}
                       className="mt-2"
                     />
@@ -568,7 +568,7 @@ export function TourEditDialog({
                   variant="outline"
                   size="sm"
                   onClick={addDailyItinerary}
-                  className="rounded-full"
+                  className="rounded-lg"
                 >
                   <Plus className="h-4 w-4 mr-2" />
                   {t('tourEditDialog.addDay')}

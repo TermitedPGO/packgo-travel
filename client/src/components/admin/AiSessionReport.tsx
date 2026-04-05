@@ -111,7 +111,7 @@ function AgentCard({ group }: { group: any }) {
             <span className="font-semibold text-gray-900 text-sm">
               {displayName}
             </span>
-            <Badge variant="outline" className="text-xs font-normal rounded-none border-gray-300">
+            <Badge variant="outline" className="text-xs font-normal rounded-md border-gray-300">
               {group.logs?.length ?? 0} 次呼叫
             </Badge>
             {taskTypes.slice(0, 3).map((type: string, i: number) => (
@@ -311,7 +311,7 @@ export default function AiSessionReport() {
               </button>
             ))}
           </div>
-          <Button variant="outline" size="sm" className="rounded-none border-gray-200" onClick={() => refetch()}>
+          <Button variant="outline" size="sm" className="rounded-lg border-gray-200" onClick={() => refetch()}>
             <RefreshCw className="h-3.5 w-3.5" />
           </Button>
         </div>

@@ -128,7 +128,7 @@ export default function Hero() {
                     value={departure}
                     onChange={setDeparture}
                     placeholder={t('hero.search.departurePlaceholder')}
-                    className="w-full [&_input]:rounded-none [&_input]:border-0 [&_input]:border-b-2 [&_input]:border-black [&_input]:bg-transparent [&_input]:focus:ring-0 [&_input]:focus:outline-none [&_input]:h-10 [&_input]:w-full [&_input]:text-sm [&_input]:font-medium [&_input]:px-0 [&_input]:placeholder:text-gray-400"
+                    className="w-full [&_input]:rounded-lg [&_input]:border-0 [&_input]:border-b-2 [&_input]:border-black [&_input]:bg-transparent [&_input]:focus:ring-0 [&_input]:focus:outline-none [&_input]:h-10 [&_input]:w-full [&_input]:text-sm [&_input]:font-medium [&_input]:px-0 [&_input]:placeholder:text-gray-400"
                   />
                 </div>
               </div>
@@ -146,7 +146,7 @@ export default function Hero() {
                     onChange={setDestination}
                     onSelect={handleSearch}
                     placeholder={t('hero.search.destinationPlaceholder')}
-                    className="w-full [&_input]:rounded-none [&_input]:border-0 [&_input]:border-b-2 [&_input]:border-black [&_input]:bg-transparent [&_input]:focus:ring-0 [&_input]:focus:outline-none [&_input]:h-10 [&_input]:w-full [&_input]:text-sm [&_input]:font-medium [&_input]:px-0 [&_input]:placeholder:text-gray-400"
+                    className="w-full [&_input]:rounded-lg [&_input]:border-0 [&_input]:border-b-2 [&_input]:border-black [&_input]:bg-transparent [&_input]:focus:ring-0 [&_input]:focus:outline-none [&_input]:h-10 [&_input]:w-full [&_input]:text-sm [&_input]:font-medium [&_input]:px-0 [&_input]:placeholder:text-gray-400"
                   />
                 </div>
               </div>
@@ -163,7 +163,7 @@ export default function Hero() {
                     value={dateRange}
                     onChange={setDateRange}
                     placeholder={t('hero.search.selectDate')}
-                    className="h-10 rounded-none border-0 border-b-2 border-black bg-transparent w-full [&_button]:rounded-none [&_button]:border-0 [&_button]:border-b-2 [&_button]:border-black [&_button]:bg-transparent [&_button]:h-10 [&_button]:px-0 [&_button]:text-sm [&_button]:font-medium [&_button]:text-gray-700 [&_button]:placeholder:text-gray-400"
+                    className="h-10 rounded-lg border-0 border-b-2 border-black bg-transparent w-full [&_button]:rounded-lg [&_button]:border-0 [&_button]:border-b-2 [&_button]:border-black [&_button]:bg-transparent [&_button]:h-10 [&_button]:px-0 [&_button]:text-sm [&_button]:font-medium [&_button]:text-gray-700 [&_button]:placeholder:text-gray-400"
                   />
                 </div>
               </div>
@@ -172,7 +172,7 @@ export default function Hero() {
               <div className="flex-shrink-0 border-2 border-black flex items-stretch">
                 <Button 
                   onClick={handleSearch}
-                  className="h-full min-h-[88px] w-20 md:w-24 bg-black hover:bg-gray-900 text-white rounded-none font-black flex flex-col items-center justify-center gap-1 border-0"
+                  className="h-full min-h-[88px] w-20 md:w-24 bg-black hover:bg-gray-900 text-white rounded-lg font-black flex flex-col items-center justify-center gap-1 border-0"
                 >
                   <Search className="h-5 w-5 text-white" />
                   <span className="text-xs uppercase tracking-widest">{t('hero.search.searchButton')}</span>

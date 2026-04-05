@@ -535,14 +535,14 @@ export const appRouter = router({
     create: adminProcedure
       .input(
         z.object({
-          title: z.string().min(1),
+          title: z.string().min(1).max(255),
           destination: z.string().min(1),
           destinationCountry: z.string().min(1),
           destinationCity: z.string().min(1),
           description: z.string().min(1),
-          duration: z.number().min(1),
-          price: z.number().min(0),
-          imageUrl: z.string().optional(),
+          duration: z.number().min(1).max(365),
+          price: z.number().gt(0),
+          imageUrl: z.string().url().optional(),
           category: z.enum(["group", "custom", "package", "cruise", "theme"]),
           status: z.enum(["active", "inactive", "soldout"]).default("active"),
           featured: z.number().min(0).max(1).default(0),
@@ -604,14 +604,6 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
-        // Check if user is admin
-        if (ctx.user.role !== "admin") {
-          throw new TRPCError({
-            code: "FORBIDDEN",
-            message: "Only admins can create tours",
-          });
-        }
-
         const tour = await db.createTour({
           ...input,
           createdBy: ctx.user.id,
@@ -787,36 +779,20 @@ export const appRouter = router({
       }),
 
     // Batch delete tours (admin only)
-    batchDelete: protectedProcedure
+    batchDelete: adminProcedure
       .input(z.object({ ids: z.array(z.number()) }))
-      .mutation(async ({ ctx, input }) => {
-        // Check if user is admin
-        if (ctx.user.role !== "admin") {
-          throw new TRPCError({
-            code: "FORBIDDEN",
-            message: "Only admins can delete tours",
-          });
-        }
-
+      .mutation(async ({ input }) => {
         await db.batchDeleteTours(input.ids);
-
         return { success: true };
       }),
 
     // Duplicate tour (admin only) - 複製行程作為模板
-    duplicate: protectedProcedure
+    duplicate: adminProcedure
       .input(z.object({ 
         id: z.number(),
         newTitle: z.string().optional(),
       }))
-      .mutation(async ({ ctx, input }) => {
-        // Check if user is admin
-        if (ctx.user.role !== "admin") {
-          throw new TRPCError({
-            code: "FORBIDDEN",
-            message: "Only admins can duplicate tours",
-          });
-        }
+      .mutation(async ({ input, ctx }) => {
 
         // Get original tour
         const originalTour = await db.getTourById(input.id);
@@ -955,16 +931,9 @@ export const appRouter = router({
       }),
 
     // Toggle tour status (admin only)
-    toggleStatus: protectedProcedure
+    toggleStatus: adminProcedure
       .input(z.object({ id: z.number() }))
-      .mutation(async ({ input, ctx }) => {
-        // Check if user is admin
-        if (ctx.user.role !== "admin") {
-          throw new TRPCError({
-            code: "FORBIDDEN",
-            message: "Only admins can toggle tour status",
-          });
-        }
+      .mutation(async ({ input }) => {
 
         // Get current tour
         const tour = await db.getTourById(input.id);
@@ -1398,34 +1367,19 @@ export const appRouter = router({
       }),
 
     // Admin: Get all bookings
-    adminList: protectedProcedure.query(async ({ ctx }) => {
-      // Check if user is admin
-      if (ctx.user.role !== "admin") {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Only admins can view all bookings",
-        });
-      }
-
+    adminList: adminProcedure.query(async () => {
       return await db.getAllBookings();
     }),
 
     // Admin: Update booking status
-    adminUpdateStatus: protectedProcedure
+    adminUpdateStatus: adminProcedure
       .input(
         z.object({
           id: z.number(),
           status: z.enum(["pending", "confirmed", "cancelled", "completed"]),
         })
       )
-      .mutation(async ({ ctx, input }) => {
-        // Check if user is admin
-        if (ctx.user.role !== "admin") {
-          throw new TRPCError({
-            code: "FORBIDDEN",
-            message: "Only admins can update booking status",
-          });
-        }
+      .mutation(async ({ input }) => {
 
         const { id, status } = input;
         await db.updateBooking(id, { bookingStatus: status });
@@ -1464,13 +1418,19 @@ export const appRouter = router({
           tourId: z.number(),
           departureDate: z.date(),
           returnDate: z.date(),
-          totalSlots: z.number(),
-          adultPrice: z.number(),
+          totalSlots: z.number().min(1, "座位數至少為 1"),
+          adultPrice: z.number().min(1, "成人價格至少為 1"),
           childPriceWithBed: z.number().optional(),
           childPriceNoBed: z.number().optional(),
           infantPrice: z.number().optional(),
           singleRoomSupplement: z.number().optional(),
-        })
+          status: z.enum(["open", "full", "cancelled"]).optional(),
+          currency: z.string().optional(),
+          notes: z.string().optional(),
+        }).refine(
+          (data) => data.returnDate >= data.departureDate,
+          { message: "回程日期必須在出發日期之後", path: ["returnDate"] }
+        )
       )
       .mutation(async ({ input }) => {
         return await db.createDeparture(input);
