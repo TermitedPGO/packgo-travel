@@ -133,7 +133,7 @@ export function EditableDayCard({
     onUpdate({ ...day, image: newSrc, imageUrl: newSrc });
   };
 
-  // 渲染可編輯文字
+  // 渲染可編輯文字（與 EditableText 一致的虛線框風格）
   const renderEditableText = (
     field: string,
     value: string,
@@ -148,28 +148,30 @@ export function EditableDayCard({
 
     if (editingField === field) {
       return (
-        <div className="flex items-center gap-2">
+        <div className="flex items-start gap-2 rounded-lg p-2 border-2 border-blue-500 bg-blue-50 shadow-md">
           {as === "p" ? (
             <Textarea
               value={tempValue}
               onChange={(e) => setTempValue(e.target.value)}
-              className="flex-1 min-h-[80px]"
+              className="flex-1 min-h-[80px] bg-transparent border-none outline-none text-gray-900"
               autoFocus
             />
           ) : (
             <Input
               value={tempValue}
               onChange={(e) => setTempValue(e.target.value)}
-              className="flex-1"
+              className="flex-1 bg-transparent border-none outline-none text-gray-900"
               autoFocus
             />
           )}
-          <Button size="sm" onClick={() => saveField(field)}>
-            <Save className="h-4 w-4" />
-          </Button>
-          <Button size="sm" variant="outline" onClick={cancelEdit}>
-            <X className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-1 shrink-0">
+            <Button size="sm" className="h-8 w-8 p-0 bg-green-600 hover:bg-green-700" onClick={() => saveField(field)}>
+              <Save className="h-4 w-4" />
+            </Button>
+            <Button size="sm" variant="outline" className="h-8 w-8 p-0" onClick={cancelEdit}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       );
     }
@@ -179,14 +181,18 @@ export function EditableDayCard({
       <Tag
         className={cn(
           className,
-          "cursor-pointer hover:bg-yellow-100/50 transition-colors rounded px-1 -mx-1",
-          "border border-dashed border-transparent hover:border-yellow-400"
+          "cursor-pointer relative group transition-all duration-150",
+          "outline outline-1 outline-dashed outline-blue-300/70 rounded-sm hover:outline-blue-500 hover:outline-2",
+          "hover:bg-blue-50/80 px-1 py-0.5"
         )}
         onClick={() => startEdit(field, value || "")}
         title="點擊編輯"
       >
-        {value || placeholder}
-        <Edit2 className="inline-block h-3 w-3 ml-1 opacity-50" />
+        {value || <span className="text-gray-400 italic">{placeholder}</span>}
+        <span className="absolute -top-7 left-0 text-xs bg-blue-600 text-white px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+          <Edit2 className="inline h-3 w-3 mr-1" />
+          點擊編輯
+        </span>
       </Tag>
     );
   };
@@ -274,7 +280,12 @@ export function EditableDayCard({
                             size="sm"
                             variant="ghost"
                             className="h-8 w-8 p-0 text-red-500 opacity-0 group-hover:opacity-100"
-                            onClick={() => removeActivity(actIndex)}
+                            onClick={() => {
+                              if (confirm(`確定要刪除「${activity.title || activity.name || '此活動'}」？`)) {
+                                removeActivity(actIndex);
+                              }
+                            }}
+                            title="刪除活動"
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>

@@ -10,6 +10,8 @@ interface EditModeToggleProps {
   onCancel?: () => void;
   isSaving?: boolean;
   hasChanges?: boolean;
+  /** 已修改的數量（顯示在工具列） */
+  modifiedCount?: number;
   className?: string;
 }
 
@@ -20,28 +22,35 @@ export function EditModeToggle({
   onCancel,
   isSaving = false,
   hasChanges = false,
+  modifiedCount = 0,
   className = "",
 }: EditModeToggleProps) {
   return (
     <div
       className={cn(
-        "fixed bottom-24 right-6 z-[60] flex items-center gap-2 bg-white rounded-lg shadow-lg border border-gray-200 p-2",
+        "fixed bottom-24 right-6 z-[60] flex items-center gap-2 bg-white rounded-lg shadow-xl border p-2 transition-all",
+        isEditMode ? "border-yellow-400 shadow-yellow-100" : "border-gray-200 shadow-lg",
         className
       )}
     >
       {isEditMode ? (
         <>
-          {/* 編輯模式下的按鈕 */}
+          {/* 編輯模式標示 + 已修改數量 */}
           <div className="flex items-center gap-2 px-3 py-1 bg-yellow-100 rounded-lg text-yellow-800 text-sm font-medium">
             <Pencil className="h-4 w-4" />
-            編輯模式
+            編輯中
+            {modifiedCount > 0 && (
+              <span className="bg-yellow-500 text-white text-xs px-1.5 py-0.5 rounded-full font-bold">
+                {modifiedCount}
+              </span>
+            )}
           </div>
-          
+
           {hasChanges && onSave && (
             <Button
               onClick={onSave}
               disabled={isSaving}
-              className="rounded-lg bg-green-600 hover:bg-green-700"
+              className="rounded-lg bg-green-600 hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {isSaving ? (
                 <>
@@ -52,15 +61,19 @@ export function EditModeToggle({
                 <>
                   <Save className="h-4 w-4 mr-2" />
                   儲存變更
+                  {modifiedCount > 0 && (
+                    <span className="ml-1 text-xs opacity-80">({modifiedCount} 處)</span>
+                  )}
                 </>
               )}
             </Button>
           )}
-          
+
           <Button
             variant="outline"
             onClick={onCancel || onToggle}
-            className="rounded-lg"
+            disabled={isSaving}
+            className="rounded-lg disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <X className="h-4 w-4 mr-2" />
             {hasChanges ? "放棄變更" : "退出編輯"}

@@ -1571,6 +1571,8 @@ export default function TourDetailPeony() {
   const [editedTour, setEditedTour] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
+  // 追蹤已修改的欄位（用於顯示修改數量）
+  const [dirtyFields, setDirtyFields] = useState<Set<string>>(new Set());
   const [showShareDialog, setShowShareDialog] = useState(false);
 
   // 更新行程 mutation
@@ -1583,6 +1585,7 @@ export default function TourDetailPeony() {
       setHasChanges(false);
       setIsEditMode(false);
       setEditedTour(null);
+      setDirtyFields(new Set());
     },
     onError: (error) => {
       toast.error(`${t('tourDetail.updateFailed')}${error.message}`);
@@ -1628,6 +1631,8 @@ export default function TourDetailPeony() {
       setHasChanges(true);
       return updated;
     });
+    // 記錄已修改的欄位
+    setDirtyFields((prev) => new Set(prev).add(field));
   };
 
   // 儲存變更
@@ -1677,10 +1682,12 @@ export default function TourDetailPeony() {
         setIsEditMode(false);
         setEditedTour(null);
         setHasChanges(false);
+        setDirtyFields(new Set());
       }
     } else {
       setIsEditMode(false);
       setEditedTour(null);
+      setDirtyFields(new Set());
     }
   };
 
@@ -1895,6 +1902,7 @@ export default function TourDetailPeony() {
           onCancel={handleCancelEdit}
           isSaving={isSaving}
           hasChanges={hasChanges}
+          modifiedCount={dirtyFields.size}
         />
       )}
       
@@ -1948,6 +1956,7 @@ export default function TourDetailPeony() {
               className="text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-4 max-w-4xl leading-tight drop-shadow-lg"
               placeholder={t('tourDetail.editTitlePlaceholder')}
               as="h1"
+              darkBackground
             />
           ) : (
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-4 max-w-4xl leading-tight drop-shadow-lg">
@@ -1965,6 +1974,7 @@ export default function TourDetailPeony() {
                 className="text-xl md:text-2xl text-white/90 mb-6 max-w-2xl"
                 placeholder={t('tourDetail.editSubtitlePlaceholder')}
                 as="p"
+                darkBackground
               />
             ) : (
               <p className="text-xl md:text-2xl text-white/90 mb-6 max-w-2xl">

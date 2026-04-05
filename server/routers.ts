@@ -705,13 +705,34 @@ export const appRouter = router({
     patchField: adminProcedure
       .input(
         z.object({
-          id: z.number(),
-          field: z.string(),
-          value: z.union([z.string(), z.number(), z.null()]),
+          id: z.number().positive(),
+          field: z.string().min(1).max(100),
+          value: z.union([
+            z.string().max(500000), // 最大 500KB 文字（JSON 欄位可能很大）
+            z.number(),
+            z.null(),
+          ]),
         })
       )
       .mutation(async ({ input }) => {
         const { id, field, value } = input;
+
+        // 欄位特定驗證
+        if (field === 'price' && typeof value === 'number' && value < 0) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: '價格不能為負數' });
+        }
+        if (field === 'duration' && typeof value === 'number' && (value < 1 || value > 365)) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: '天數必須在 1-365 之間' });
+        }
+        if ((field === 'heroImage' || field === 'imageUrl') && typeof value === 'string' && value.length > 0) {
+          const isValidUrl = value.startsWith('http://') || value.startsWith('https://') || value.startsWith('/');
+          if (!isValidUrl) {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: '圖片 URL 格式不正確' });
+          }
+        }
+        if (field === 'title' && typeof value === 'string' && value.length > 200) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: '標題不能超過 200 字' });
+        }
         
         // Whitelist of allowed fields for inline editing
         const allowedFields = [

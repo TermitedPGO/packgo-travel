@@ -12,6 +12,8 @@ interface EditableTextProps {
   multiline?: boolean;
   maxLength?: number;
   as?: "h1" | "h2" | "h3" | "h4" | "p" | "span" | "div";
+  /** 是否為深色背景（Hero 區塊用） */
+  darkBackground?: boolean;
 }
 
 export function EditableText({
@@ -24,6 +26,7 @@ export function EditableText({
   multiline = false,
   maxLength,
   as: Component = "span",
+  darkBackground = false,
 }: EditableTextProps) {
   const [isActive, setIsActive] = useState(false);
   const [editValue, setEditValue] = useState(value);
@@ -67,38 +70,52 @@ export function EditableText({
     return <Component className={className}>{value || placeholder}</Component>;
   }
 
-  // 編輯模式但未激活：顯示可點擊的文字
+  // 編輯模式但未激活：顯示可點擊的文字（帶虛線框 + 懸停高亮）
   if (!isActive) {
     return (
       <Component
         className={cn(
           className,
-          "cursor-pointer relative group transition-all",
-          "hover:bg-black/30 hover:outline hover:outline-2 hover:outline-yellow-400 hover:outline-dashed rounded-lg",
-          // 為文字添加背景陰影以確保在任何背景上都可讀
-          "[text-shadow:_0_2px_8px_rgba(0,0,0,0.8),_0_1px_3px_rgba(0,0,0,0.9)]"
+          "cursor-pointer relative group transition-all duration-150",
+          // 虛線框：在編輯模式下始終顯示
+          darkBackground
+            ? "outline outline-1 outline-dashed outline-yellow-400/60 rounded-sm hover:outline-yellow-400 hover:outline-2"
+            : "outline outline-1 outline-dashed outline-blue-300/70 rounded-sm hover:outline-blue-500 hover:outline-2",
+          // 懸停背景
+          darkBackground ? "hover:bg-black/30" : "hover:bg-blue-50/80",
+          "px-1 py-0.5",
         )}
         onClick={() => setIsActive(true)}
+        title="點擊編輯"
       >
-        {value || <span className="text-gray-300 italic">{placeholder}</span>}
-        <Pencil className="absolute -right-8 top-1/2 -translate-y-1/2 h-5 w-5 text-yellow-400 opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-lg" />
+        {value || <span className={darkBackground ? "text-gray-300 italic" : "text-gray-400 italic"}>{placeholder}</span>}
+        {/* 懸停時顯示「點擊編輯」提示 */}
+        <span className={cn(
+          "absolute -top-7 left-0 text-xs px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10",
+          darkBackground ? "bg-yellow-400 text-yellow-900" : "bg-blue-600 text-white"
+        )}>
+          <Pencil className="inline h-3 w-3 mr-1" />
+          點擊編輯
+        </span>
       </Component>
     );
   }
 
-  // 編輯模式且激活：顯示輸入框
+  // 編輯模式且激活：顯示輸入框（藍色邊框 + 淺藍背景）
   return (
-    <div className="flex items-center gap-2 bg-white/95 rounded-lg p-2 border-2 border-yellow-400 shadow-xl backdrop-blur-sm w-full max-w-2xl">
+    <div className={cn(
+      "flex items-start gap-2 rounded-lg p-2 border-2 shadow-xl backdrop-blur-sm w-full",
+      darkBackground ? "bg-white/95 border-yellow-400" : "bg-blue-50 border-blue-500"
+    )}>
       {multiline ? (
         <textarea
           ref={inputRef as React.RefObject<HTMLTextAreaElement>}
           value={editValue}
           onChange={(e) => setEditValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          onBlur={handleSave}
           maxLength={maxLength}
           className={cn(
-            "bg-transparent border-none outline-none resize-none min-h-[60px] w-full",
+            "bg-transparent border-none outline-none resize-none min-h-[60px] w-full text-gray-900",
             inputClassName
           )}
           placeholder={placeholder}
@@ -110,27 +127,31 @@ export function EditableText({
           value={editValue}
           onChange={(e) => setEditValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          onBlur={handleSave}
           maxLength={maxLength}
           className={cn(
-            "bg-transparent border-none outline-none min-w-[100px] w-full",
+            "bg-transparent border-none outline-none min-w-[100px] w-full text-gray-900",
             inputClassName
           )}
           placeholder={placeholder}
         />
       )}
-      <div className="flex items-center gap-1">
+      {maxLength && (
+        <span className="text-xs text-gray-400 whitespace-nowrap self-end">
+          {editValue.length}/{maxLength}
+        </span>
+      )}
+      <div className="flex items-center gap-1 shrink-0">
         <button
-          onClick={handleSave}
-          className="p-1 hover:bg-green-100 rounded text-green-600"
-          title="儲存"
+          onMouseDown={(e) => { e.preventDefault(); handleSave(); }}
+          className="p-1.5 hover:bg-green-100 rounded-lg text-green-600 transition-colors"
+          title="儲存 (Enter)"
         >
           <Check className="h-4 w-4" />
         </button>
         <button
-          onClick={handleCancel}
-          className="p-1 hover:bg-red-100 rounded text-red-600"
-          title="取消"
+          onMouseDown={(e) => { e.preventDefault(); handleCancel(); }}
+          className="p-1.5 hover:bg-red-100 rounded-lg text-red-500 transition-colors"
+          title="取消 (Esc)"
         >
           <X className="h-4 w-4" />
         </button>
