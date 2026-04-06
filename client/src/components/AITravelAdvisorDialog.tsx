@@ -37,13 +37,34 @@ interface AITravelAdvisorDialogProps {
   initialMessage?: string;
 }
 
-// 開場引導建議按鈕
+// 開場引導建議按鈕（第一層）
 const OPENING_SUGGESTIONS = [
-  { icon: MapPin, label: "我想規劃旅遊行程" },
-  { icon: Globe, label: "推薦熱門旅遊目的地" },
-  { icon: FileText, label: "查詢簽證相關資訊" },
-  { icon: Plane, label: "機票與飯店諮詢" },
+  { icon: MapPin, label: "🔍 找行程推薦" },
+  { icon: FileText, label: "📅 查詢出發日期" },
+  { icon: Globe, label: "💰 預算規劃" },
+  { icon: Plane, label: "❓ 其他問題" },
 ];
+
+// 地區選擇按鈕（找行程推薦 → 第二層）
+const REGION_SUGGESTIONS = [
+  "🌸 亞洲",
+  "🏰 歐洲",
+  "🌎 美洲",
+  "🏜️ 中東/非洲",
+  "🚢 郵輪",
+];
+
+// 人數選擇按鈕（選擇地區 → 第三層）
+const PARTY_SIZE_SUGGESTIONS = [
+  "1人",
+  "2人",
+  "3-5人",
+  "6人以上",
+];
+
+// 引導流程狀態
+type GuidedFlowStep = "none" | "region" | "partySize";
+type GuidedFlowData = { region?: string };
 
 // 根據 AI 回應內容推斷後續建議
 function inferSuggestedReplies(content: string): string[] {
@@ -115,6 +136,9 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
 
   const [isStreaming, setIsStreaming] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  // 引導式對話流程狀態
+  const [guidedFlowStep, setGuidedFlowStep] = useState<GuidedFlowStep>("none");
+  const [guidedFlowData, setGuidedFlowData] = useState<GuidedFlowData>({});
 
   const sendStreamMessage = useCallback(async (userMessage: string, history: Message[]) => {
     setIsStreaming(true);
@@ -276,11 +300,55 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
 
   const handleSuggestionClick = (suggestion: string) => {
     if (isStreaming) return;
+
+    // 引導式對話：開場選擇「🔍 找行程推薦」 → 顯示地區選擇
+if (suggestion === "🔍 找行程推薦" && guidedFlowStep === "none") {
+      const updatedHistory = [
+        ...messages,
+        { role: "user" as const, content: suggestion },
+        { role: "assistant" as const, content: "您對哪個地區感興趣？", suggestedReplies: REGION_SUGGESTIONS },
+      ];
+      setMessages(updatedHistory);
+      setGuidedFlowStep("region");
+      return;
+    }
+
+    // 引導式對話：選擇地區 → 顯示人數選擇
+    if (guidedFlowStep === "region" && REGION_SUGGESTIONS.includes(suggestion)) {
+      const updatedHistory = [
+        ...messages,
+        { role: "user" as const, content: suggestion },
+        { role: "assistant" as const, content: `很好！您想前往${suggestion.replace(/^[^\s]+\s/, "")}。請問您預計幾個人出發？`, suggestedReplies: PARTY_SIZE_SUGGESTIONS },
+      ];
+      setMessages(updatedHistory);
+      setGuidedFlowData({ region: suggestion });
+      setGuidedFlowStep("partySize");
+      return;
+    }
+
+    // 引導式對話：選擇人數 → 將地區+人數組合發送給 AI
+    if (guidedFlowStep === "partySize" && PARTY_SIZE_SUGGESTIONS.includes(suggestion)) {
+      const region = guidedFlowData.region?.replace(/^[^\s]+\s/, "") || "";
+      const combinedMessage = `我想找${region}的行程，${suggestion}出發，請幫我推薦適合的行程`;
+      const updatedHistory = [
+        ...messages,
+        { role: "user" as const, content: suggestion },
+      ];
+      setMessages(updatedHistory);
+      setGuidedFlowStep("none");
+      setGuidedFlowData({});
+      sendStreamMessage(combinedMessage, updatedHistory);
+      return;
+    }
+
+    // 一般建議按鈕：直接發送給 AI
     const updatedHistory = [
       ...messages,
       { role: "user" as const, content: suggestion },
     ];
     setMessages(updatedHistory);
+    setGuidedFlowStep("none");
+    setGuidedFlowData({});
     sendStreamMessage(suggestion, messages);
   };
 
@@ -496,23 +564,17 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
           {/* Opening Suggestions - shown only on initial greeting */}
           {showOpeningSuggestions && (
             <div className="mt-2">
-              <p className="text-xs text-gray-400 mb-3 text-center">— 選擇您想了解的主題 —</p>
+              <p className="text-xs text-gray-400 mb-3 text-center">— 請問您想了解什麼？ —</p>
               <div className="grid grid-cols-2 gap-2">
-                {OPENING_SUGGESTIONS.map((suggestion, i) => {
-                  const Icon = suggestion.icon;
-                  return (
-                    <button
-                      key={i}
-                      onClick={() => handleSuggestionClick(suggestion.label)}
-                      className="flex items-center gap-2.5 px-3 py-3 border border-gray-200 rounded-lg text-left text-sm text-gray-700 hover:border-black hover:bg-gray-50 hover:text-black transition-all group"
-                    >
-                      <div className="flex-shrink-0 w-7 h-7 bg-gray-100 rounded-md flex items-center justify-center group-hover:bg-black group-hover:text-white transition-all">
-                        <Icon className="h-3.5 w-3.5" />
-                      </div>
-                      <span className="leading-tight font-medium">{suggestion.label}</span>
-                    </button>
-                  );
-                })}
+                {OPENING_SUGGESTIONS.map((suggestion, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleSuggestionClick(suggestion.label)}
+                    className="flex items-center justify-center gap-2 px-3 py-3 border border-gray-200 rounded-lg text-center text-sm text-gray-700 hover:border-black hover:bg-gray-50 hover:text-black transition-all font-medium"
+                  >
+                    {suggestion.label}
+                  </button>
+                ))}
               </div>
             </div>
           )}

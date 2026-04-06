@@ -134,7 +134,23 @@ CRITICAL RULES:
 - DO NOT translate: single characters, short codes (e.g. "STAY", "EXPLORE"), style keywords
 - Preserve all non-text fields (id, image, imageAlt, keywordStyle, labelColor, labelPosition, etc.) UNCHANGED
 - For arrays of strings, translate each string element
-- Output ONLY the JSON, no explanation, no markdown code blocks`;
+- Output ONLY the JSON, no explanation, no markdown code blocks
+
+TAIWAN PROPER NOUNS (MUST use official English names, never self-translate):
+- 鳴日號 / 鳴日列車 → "The Future" or "NARU"
+- 鳴日廚房 → "The Moving Kitchen"
+- 太魯閣號 → "Taroko Express"
+- 普悠瑪號 → "Puyuma Express"
+- 自強號 → "Tzu-Chiang Limited Express"
+- 莒光號 → "Chu-Kuang Express"
+- 阿里山 → "Alishan"
+- 日月潭 → "Sun Moon Lake"
+- 九份 → "Jiufen"
+- 君品酒店 → "Palais de Chine Hotel" (keep French brand name)
+- 晶華酒店 → "Regent Taipei"
+- 台灣高鐵 → "Taiwan High Speed Rail (THSR)"
+- 台灣鐵路 / 台鐵 → "Taiwan Railways (TRA)"
+If unsure of the official English name, keep the Chinese name and append "(Chinese name)"`;
       userContent = trimmed;
     } else {
       // 普通文字模式
@@ -147,7 +163,23 @@ Guidelines:
 - Keep proper nouns (place names, brand names) appropriately translated or transliterated
 - For travel-related terms, use industry-standard terminology
 - Preserve any formatting (line breaks, punctuation)
-- Only output the translated text, nothing else`;
+- Only output the translated text, nothing else
+
+TAIWAN PROPER NOUNS (MUST use official English names, never self-translate):
+- 鳴日號 / 鳴日列車 → "The Future" or "NARU"
+- 鳴日廚房 → "The Moving Kitchen"
+- 太魯閣號 → "Taroko Express"
+- 普悠瑪號 → "Puyuma Express"
+- 自強號 → "Tzu-Chiang Limited Express"
+- 莒光號 → "Chu-Kuang Express"
+- 阿里山 → "Alishan"
+- 日月潭 → "Sun Moon Lake"
+- 九份 → "Jiufen"
+- 君品酒店 → "Palais de Chine Hotel" (keep French brand name)
+- 晶華酒店 → "Regent Taipei"
+- 台灣高鐵 → "Taiwan High Speed Rail (THSR)"
+- 台灣鐵路 / 台鐵 → "Taiwan Railways (TRA)"
+If unsure of the official English name, keep the Chinese name and append "(Chinese name)"`;
       userContent = text;
     }
 

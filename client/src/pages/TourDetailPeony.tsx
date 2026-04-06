@@ -2146,6 +2146,9 @@ export default function TourDetailPeony() {
                     ...prev,
                     keyFeatures: updatedFeatures
                   }));
+                  // 標記有未儲存的變更（修復 BUG-1：換圖片後儲存按鈕不顯示）
+                  setHasChanges(true);
+                  setDirtyFields((prev) => new Set(prev).add('keyFeatures'));
                 };
                 
                 return (

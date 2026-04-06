@@ -29,11 +29,8 @@ export default function Header() {
     {
       labelKey: "nav.tours",
       children: [
-        { labelKey: "nav.groupTours", href: "/tours?category=package", descKey: "nav.groupToursDesc" },
-        { labelKey: "nav.themeTours", href: "/tours?category=theme", descKey: "nav.themeToursDesc" },
-        { labelKey: "nav.customTours", href: "/tours?category=custom", descKey: "nav.customToursDesc" },
-        { labelKey: "nav.cruiseTours", href: "/tours?category=cruise", descKey: "nav.cruiseToursDesc" },
-        { labelKey: "nav.allTours", href: "/tours", descKey: "nav.allToursDesc" },
+        { labelKey: "nav.groupTours", href: "/group-packages", descKey: "nav.groupToursDesc" },
+        { labelKey: "nav.allTours", href: "/group-packages", descKey: "nav.allToursDesc" },
       ],
     },
     {
