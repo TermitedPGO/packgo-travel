@@ -84,6 +84,7 @@ export const zhTW = {
     haveMoreQuestions: '還有其他問題？',
     saving: '儲存中...',
     viewAll: '查看全部',
+    tourImage: '旅遊圖片',
   },
 
   // 導航

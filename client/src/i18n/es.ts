@@ -81,6 +81,7 @@ export const es = {
     haveMoreQuestions: '¿Tienes más preguntas?',
     saving: 'Guardando...',
     viewAll: 'Ver Todo',
+    tourImage: 'Imagen del Tour',
   },
 
   // Navigation

@@ -88,14 +88,14 @@ export default function SimilarTours({ tourId, title }: SimilarToursProps) {
                       if (parent && !parent.querySelector('.img-fallback')) {
                         const div = document.createElement('div');
                         div.className = 'img-fallback w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-100 to-gray-200';
-                        div.innerHTML = '<span style="color:#9ca3af;font-size:12px">旅遊圖片</span>';
+                        div.innerHTML = `<span style="color:#9ca3af;font-size:12px">${t('common.tourImage')}</span>`;
                         parent.appendChild(div);
                       }
                     }}
                   />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-100 to-gray-200">
-                    <span className="text-gray-400 text-sm">旅遊圖片</span>
+                    <span className="text-gray-400 text-sm">{t('common.tourImage')}</span>
                   </div>
                 )}
                 {tour.featured === 1 && (

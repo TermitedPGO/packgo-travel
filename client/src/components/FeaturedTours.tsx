@@ -73,14 +73,14 @@ export default function FeaturedTours() {
                           if (parent && !parent.querySelector('.img-fallback')) {
                             const div = document.createElement('div');
                             div.className = 'img-fallback absolute inset-0 flex items-center justify-center bg-gradient-to-br from-gray-700 to-gray-900';
-                            div.innerHTML = '<span style="color:#9ca3af;font-size:14px">旅遊圖片</span>';
+                            div.innerHTML = `<span style="color:#9ca3af;font-size:14px">${t('common.tourImage')}</span>`;
                             parent.appendChild(div);
                           }
                         }}
                       />
                     ) : (
                       <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-gray-700 to-gray-900">
-                        <span style={{color:'#9ca3af',fontSize:'14px'}}>旅遊圖片</span>
+                        <span style={{color:'#9ca3af',fontSize:'14px'}}>{t('common.tourImage')}</span>
                       </div>
                     )}
                     <div className="absolute top-4 left-4">

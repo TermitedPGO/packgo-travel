@@ -84,6 +84,7 @@ export const en = {
     haveMoreQuestions: 'Have more questions?',
     saving: 'Saving...',
     viewAll: 'View All',
+    tourImage: 'Tour Image',
   },
 
   // Navigation

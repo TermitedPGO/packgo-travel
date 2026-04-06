@@ -221,7 +221,7 @@ export const appRouter = router({
     // Reset password with token
     resetPassword: publicProcedure
       .input(z.object({
-        token: z.string(),
+        token: z.string().min(32).max(256).regex(/^[a-f0-9]+$/, 'Invalid token format'),
         newPassword: z.string().min(8),
       }))
       .mutation(async ({ input }) => {
@@ -825,19 +825,11 @@ export const appRouter = router({
 
 
     // Get generation job status (admin only)
-    getGenerationStatus: protectedProcedure
+    getGenerationStatus: adminProcedure
       .input(z.object({ 
         jobId: z.string(),
       }))
-      .query(async ({ ctx, input }) => {
-        // Check if user is admin
-        if (ctx.user.role !== "admin") {
-          throw new TRPCError({
-            code: "FORBIDDEN",
-            message: "Only admins can check generation status",
-          });
-        }
-
+      .query(async ({ input }) => {
         const { getTourGenerationJobStatus } = await import("./queue");
         const status = await getTourGenerationJobStatus(input.jobId);
 
