@@ -205,7 +205,7 @@ export default function TourPrintView() {
                 </div>
                 <h1 className="print-tour-title">{tour.title}</h1>
                 <div className="print-tour-meta">
-                  <span><Calendar className="inline h-4 w-4 mr-1" />{tour.duration}{t('tourPrint.days')}</span>
+                  <span><Calendar className="inline h-4 w-4 mr-1" />{tour.duration} {t('tourPrint.days')}</span>
                   <span><MapPin className="inline h-4 w-4 mr-1" />{tour.destination || tour.destinationCountry}</span>
                   <span><Users className="inline h-4 w-4 mr-1" />{t('tourPrint.groupSize')}</span>
                 </div>

@@ -8,6 +8,7 @@ import { Link } from "wouter";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { useLocale } from "@/contexts/LocaleContext";
 import { useMemo } from "react";
+import { translateDestination } from "@/utils/locationMapping";
 
 export default function FeaturedTours() {
   const { data: tours, isLoading, error } = trpc.tours.list.useQuery();
@@ -95,11 +96,11 @@ export default function FeaturedTours() {
                       <div className="flex items-center justify-between text-white">
                         <div className="flex items-center gap-2">
                           <Clock className="h-4 w-4 text-white" />
-                          <span className="text-sm font-medium">{tour.duration}{t('common.days')}</span>
+                          <span className="text-sm font-medium">{tour.duration} {t('common.days')}</span>
                         </div>
                         <div className="flex items-center gap-2">
                           <MapPin className="h-4 w-4 text-white" />
-                          <span className="text-sm font-medium">{tour.destination}</span>
+                          <span className="text-sm font-medium">{translateDestination(tour.destination || '', language)}</span>
                         </div>
                       </div>
                     </div>
@@ -116,7 +117,7 @@ export default function FeaturedTours() {
                         <h3 className="text-xl sm:text-2xl font-bold text-black group-hover:text-gray-700 transition-colors">
                           {getTranslatedField(tour.id, 'title', tour.title)}
                         </h3>
-                        <p className="text-gray-600 text-sm font-medium">{tour.destination}</p>
+                        <p className="text-gray-600 text-sm font-medium">{translateDestination(tour.destination || '', language)}</p>
                       </div>
                     </div>
                   </CardHeader>

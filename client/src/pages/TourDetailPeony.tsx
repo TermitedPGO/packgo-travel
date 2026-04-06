@@ -1806,13 +1806,15 @@ export default function TourDetailPeony() {
   };
 
   // ====== JSON 欄位 useMemo 快取（必須在所有條件 return 之前，避免 React Error #310）======
-  // keyFeatures: 編輯模式下從 editedTour 讀取
+  // keyFeatures: 編輯模式下從 editedTour 讀取，非中文模式使用翻譯
   const keyFeatures = useMemo(() => {
-    const source = isEditMode && editedTour?.keyFeatures != null
-      ? editedTour.keyFeatures
-      : tour?.keyFeatures;
+    if (isEditMode && editedTour?.keyFeatures != null) {
+      const src = editedTour.keyFeatures;
+      return typeof src === 'string' ? parseJSON(src, []) : (src || []);
+    }
+    const source = getTranslated('keyFeatures', tour?.keyFeatures) ?? tour?.keyFeatures;
     return typeof source === 'string' ? parseJSON(source, []) : (source || []);
-  }, [isEditMode, editedTour?.keyFeatures, tour?.keyFeatures]);
+  }, [isEditMode, editedTour?.keyFeatures, tour?.keyFeatures, language]);
 
   const attractions = useMemo(() => parseJSON(tour?.attractions, []), [tour?.attractions]);
   const hotels = useMemo(() => parseJSON(tour?.hotels, []), [tour?.hotels]);

@@ -4,15 +4,15 @@ import { useLocale } from "@/contexts/LocaleContext";
 
 export default function Destinations() {
   const [, setLocation] = useLocation();
-  const { t } = useLocale();
+  const { t, language } = useLocale();
 
   const destinations = [
-    { id: 1, nameKey: "destinations.europe", image: "/images/dest-europe.webp", label: "Europe", region: "europe" },
-    { id: 2, nameKey: "destinations.asia", image: "/images/dest-asia.webp", label: "Asia", region: "asia" },
-    { id: 3, nameKey: "destinations.americas", image: "/images/dest-southamerica.webp", label: "Americas", region: "south-america" },
-    { id: 4, nameKey: "destinations.middleEast", image: "/images/dest-israel.webp", label: "Middle East", region: "middle-east" },
-    { id: 5, nameKey: "destinations.africa", image: "/images/dest-africa.webp", label: "Africa", region: "africa" },
-    { id: 6, nameKey: "destinations.cruises", image: "/images/dest-cruise.webp", label: "Cruises", region: "cruise" },
+    { id: 1, nameKey: "destinations.europe", image: "/images/dest-europe.webp", labelEn: "Europe", region: "europe" },
+    { id: 2, nameKey: "destinations.asia", image: "/images/dest-asia.webp", labelEn: "Asia", region: "asia" },
+    { id: 3, nameKey: "destinations.americas", image: "/images/dest-southamerica.webp", labelEn: "Americas", region: "south-america" },
+    { id: 4, nameKey: "destinations.middleEast", image: "/images/dest-israel.webp", labelEn: "Middle East", region: "middle-east" },
+    { id: 5, nameKey: "destinations.africa", image: "/images/dest-africa.webp", labelEn: "Africa", region: "africa" },
+    { id: 6, nameKey: "destinations.cruises", image: "/images/dest-cruise.webp", labelEn: "Cruises", region: "cruise" },
   ];
 
   const handleDestinationClick = (region: string) => {
@@ -22,6 +22,10 @@ export default function Destinations() {
       setLocation(`/destinations/${region}`);
     }
   };
+
+  // In Chinese/Spanish mode: large Chinese/Spanish name + small English label
+  // In English mode: large English name only (no redundant subtitle)
+  const isChineseMode = language === 'zh-TW';
 
   return (
     <section id="destinations" className="py-20 bg-gray-50">
@@ -50,7 +54,10 @@ export default function Destinations() {
               
               <div className="absolute bottom-0 left-0 w-full p-4 sm:p-6 transform translate-y-2 group-hover:translate-y-0 transition-transform duration-500">
                 <h3 className="text-lg sm:text-2xl font-bold text-white mb-1">{t(dest.nameKey)}</h3>
-                <p className="text-gray-300 text-xs sm:text-sm uppercase tracking-wider mb-2 sm:mb-4">{dest.label}</p>
+                {/* Show English label only in non-English modes as a subtitle */}
+                {isChineseMode && (
+                  <p className="text-gray-300 text-xs sm:text-sm uppercase tracking-wider mb-2 sm:mb-4">{dest.labelEn}</p>
+                )}
                 <div className="flex items-center text-white text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-500 delay-100">
                   {t('destinations.viewTours')} <ArrowRight className="ml-2 h-4 w-4" />
                 </div>

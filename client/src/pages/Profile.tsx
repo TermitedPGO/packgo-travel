@@ -545,7 +545,7 @@ function FavoritesSection({ setLocation }: { setLocation: (path: string) => void
                     </span>
                     <span className="flex items-center gap-1">
                       <Clock className="h-3.5 w-3.5" />
-                      {tour.duration}{t('tours.days')}
+                      {tour.duration} {t('tours.days')}
                     </span>
                   </div>
                   <p className="text-primary font-bold mt-1">

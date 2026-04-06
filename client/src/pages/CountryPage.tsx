@@ -11,6 +11,7 @@ import {
   Sparkles, Mountain, Utensils, Camera, Users, ArrowRight, ArrowLeft
 } from "lucide-react";
 import { useLocale } from "@/contexts/LocaleContext";
+import { translateDestination } from "@/utils/locationMapping";
 
 // 智能標籤生成函數
 const generateSmartTags = (tour: any, t: (key: string) => string): { label: string; icon: any; color: string }[] => {
@@ -133,7 +134,7 @@ export default function CountryPage() {
   const { region, country } = useParams<{ region: string; country: string }>();
   const [, setLocation] = useLocation();
   const [favorites, setFavorites] = useState<Set<number>>(new Set());
-  const { t } = useLocale();
+  const { t, language } = useLocale();
   
   const decodedCountry = decodeURIComponent(country || "");
   const regionConfig = getRegionConfig(t);
@@ -272,7 +273,7 @@ export default function CountryPage() {
                       <div className="p-4">
                         <div className="flex items-center gap-2 text-gray-500 text-sm mb-2">
                           <MapPin className="h-4 w-4" />
-                          <span>{tour.destination}</span>
+                          <span>{translateDestination(tour.destination || '', language)}</span>
                         </div>
                         
                         <h3 className="font-bold text-gray-900 mb-3 line-clamp-2 group-hover:text-primary transition-colors">

@@ -2,6 +2,7 @@ import { useState, useEffect, Fragment, useMemo } from "react";
 import SEO from "@/components/SEO";
 import { useLocation } from "wouter";
 import { useLocale } from "@/contexts/LocaleContext";
+import { translateDestination } from "@/utils/locationMapping";
 import { trackSearch } from "@/lib/analytics";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -707,7 +708,7 @@ export default function SearchResults() {
                           {/* 目的地 */}
                           <div className="flex items-center gap-1 text-sm text-gray-500 mb-2">
                             <MapPin className="h-4 w-4" />
-                            <span>{tour.destinationCountry || tour.destination}</span>
+                            <span>{translateDestination(tour.destinationCountry || tour.destination || '', language)}</span>
                           </div>
 
                           {/* 標題 */}

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Button } from "@/components/ui/button";
@@ -37,30 +37,7 @@ interface AITravelAdvisorDialogProps {
   initialMessage?: string;
 }
 
-// 開場引導建議按鈕（第一層）
-const OPENING_SUGGESTIONS = [
-  { icon: MapPin, label: "🔍 找行程推薦" },
-  { icon: FileText, label: "📅 查詢出發日期" },
-  { icon: Globe, label: "💰 預算規劃" },
-  { icon: Plane, label: "❓ 其他問題" },
-];
-
-// 地區選擇按鈕（找行程推薦 → 第二層）
-const REGION_SUGGESTIONS = [
-  "🌸 亞洲",
-  "🏰 歐洲",
-  "🌎 美洲",
-  "🏜️ 中東/非洲",
-  "🚢 郵輪",
-];
-
-// 人數選擇按鈕（選擇地區 → 第三層）
-const PARTY_SIZE_SUGGESTIONS = [
-  "1人",
-  "2人",
-  "3-5人",
-  "6人以上",
-];
+// 引導流程狀態（moved before component so type is available)
 
 // 引導流程狀態
 type GuidedFlowStep = "none" | "region" | "partySize";
@@ -139,6 +116,29 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
   // 引導式對話流程狀態
   const [guidedFlowStep, setGuidedFlowStep] = useState<GuidedFlowStep>("none");
   const [guidedFlowData, setGuidedFlowData] = useState<GuidedFlowData>({});
+
+  // i18n 快速回覆按鈕（元件內動態生成，支援多語言）
+  const openingSuggestions = useMemo(() => [
+    { icon: MapPin, label: t('aiAdvisor.findTours') },
+    { icon: FileText, label: t('aiAdvisor.checkDates') },
+    { icon: Globe, label: t('aiAdvisor.budgetPlanning') },
+    { icon: Plane, label: t('aiAdvisor.otherQuestions') },
+  ], [t]);
+
+  const regionSuggestions = useMemo(() => [
+    t('aiAdvisor.regionAsia'),
+    t('aiAdvisor.regionEurope'),
+    t('aiAdvisor.regionAmerica'),
+    t('aiAdvisor.regionMiddleEast'),
+    t('aiAdvisor.regionCruise'),
+  ], [t]);
+
+  const partySizeSuggestions = useMemo(() => [
+    t('aiAdvisor.party1'),
+    t('aiAdvisor.party2'),
+    t('aiAdvisor.party35'),
+    t('aiAdvisor.party6plus'),
+  ], [t]);
 
   const sendStreamMessage = useCallback(async (userMessage: string, history: Message[]) => {
     setIsStreaming(true);
@@ -301,12 +301,12 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
   const handleSuggestionClick = (suggestion: string) => {
     if (isStreaming) return;
 
-    // 引導式對話：開場選擇「🔍 找行程推薦」 → 顯示地區選擇
-if (suggestion === "🔍 找行程推薦" && guidedFlowStep === "none") {
+    // 引導式對話：開場選擇「找行程推薦」 → 顯示地區選擇
+    if (suggestion === t('aiAdvisor.findTours') && guidedFlowStep === "none") {
       const updatedHistory = [
         ...messages,
         { role: "user" as const, content: suggestion },
-        { role: "assistant" as const, content: "您對哪個地區感興趣？", suggestedReplies: REGION_SUGGESTIONS },
+        { role: "assistant" as const, content: t('aiAdvisor.regionPrompt'), suggestedReplies: regionSuggestions },
       ];
       setMessages(updatedHistory);
       setGuidedFlowStep("region");
@@ -314,11 +314,11 @@ if (suggestion === "🔍 找行程推薦" && guidedFlowStep === "none") {
     }
 
     // 引導式對話：選擇地區 → 顯示人數選擇
-    if (guidedFlowStep === "region" && REGION_SUGGESTIONS.includes(suggestion)) {
+    if (guidedFlowStep === "region" && regionSuggestions.includes(suggestion)) {
       const updatedHistory = [
         ...messages,
         { role: "user" as const, content: suggestion },
-        { role: "assistant" as const, content: `很好！您想前往${suggestion.replace(/^[^\s]+\s/, "")}。請問您預計幾個人出發？`, suggestedReplies: PARTY_SIZE_SUGGESTIONS },
+        { role: "assistant" as const, content: t('aiAdvisor.partySizePrompt'), suggestedReplies: partySizeSuggestions },
       ];
       setMessages(updatedHistory);
       setGuidedFlowData({ region: suggestion });
@@ -327,9 +327,9 @@ if (suggestion === "🔍 找行程推薦" && guidedFlowStep === "none") {
     }
 
     // 引導式對話：選擇人數 → 將地區+人數組合發送給 AI
-    if (guidedFlowStep === "partySize" && PARTY_SIZE_SUGGESTIONS.includes(suggestion)) {
+    if (guidedFlowStep === "partySize" && partySizeSuggestions.includes(suggestion)) {
       const region = guidedFlowData.region?.replace(/^[^\s]+\s/, "") || "";
-      const combinedMessage = `我想找${region}的行程，${suggestion}出發，請幫我推薦適合的行程`;
+      const combinedMessage = `I'm looking for tours in ${region}, traveling with ${suggestion}. Please recommend suitable tours.`;
       const updatedHistory = [
         ...messages,
         { role: "user" as const, content: suggestion },
@@ -564,9 +564,9 @@ if (suggestion === "🔍 找行程推薦" && guidedFlowStep === "none") {
           {/* Opening Suggestions - shown only on initial greeting */}
           {showOpeningSuggestions && (
             <div className="mt-2">
-              <p className="text-xs text-gray-400 mb-3 text-center">— 請問您想了解什麼？ —</p>
+              <p className="text-xs text-gray-400 mb-3 text-center">{t('aiAdvisor.openingPrompt')}</p>
               <div className="grid grid-cols-2 gap-2">
-                {OPENING_SUGGESTIONS.map((suggestion, i) => (
+                {openingSuggestions.map((suggestion: { icon: typeof MapPin; label: string }, i: number) => (
                   <button
                     key={i}
                     onClick={() => handleSuggestionClick(suggestion.label)}

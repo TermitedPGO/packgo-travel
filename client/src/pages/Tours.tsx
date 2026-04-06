@@ -39,6 +39,7 @@ import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { useLocale } from "@/contexts/LocaleContext";
 import { useDebounce } from "@/hooks/useDebounce";
+import { translateDestination } from "@/utils/locationMapping";
 
 const CATEGORY_TAGS = [
   { value: "all",     labelZh: "全部",     labelEn: "All",           icon: Globe },
@@ -131,7 +132,7 @@ function TourCard({
           )}
           {/* Duration badge overlay */}
           <div className="absolute bottom-3 left-3 bg-black/70 text-white text-xs font-bold px-2 py-1">
-            {tour.duration}{isEn ? " Days" : " 天"} {tour.nights}{isEn ? " Nights" : " 夜"}
+            {tour.duration}{isEn ? " Days" : " 天"}{tour.nights ? (isEn ? ` ${tour.nights} Nights` : ` ${tour.nights} 夜`) : ""}
           </div>
         </div>
       </Link>
@@ -156,7 +157,7 @@ function TourCard({
         <div className="flex items-center text-gray-500 mb-3">
           <MapPin className="h-3.5 w-3.5 mr-1 flex-shrink-0" />
           <span className="text-xs">
-            {tour.destinationCountry}{tour.destinationCity ? ` · ${tour.destinationCity}` : ""}
+            {translateDestination(tour.destinationCountry || '', language)}{tour.destinationCity ? ` · ${translateDestination(tour.destinationCity, language)}` : ""}
           </span>
         </div>
 
