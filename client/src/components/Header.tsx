@@ -30,7 +30,7 @@ export default function Header() {
       labelKey: "nav.tours",
       children: [
         { labelKey: "nav.groupTours", href: "/group-packages", descKey: "nav.groupToursDesc" },
-        { labelKey: "nav.allTours", href: "/group-packages", descKey: "nav.allToursDesc" },
+        { labelKey: "nav.allTours", href: "/tours", descKey: "nav.allToursDesc" },
       ],
     },
     {
@@ -120,9 +120,9 @@ export default function Header() {
               {/* Dropdown Panel */}
               {group.children && openDropdown === group.labelKey && (
                 <div className="absolute top-full left-0 mt-1 w-64 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-50">
-                  {group.children.map((item) => (
+                  {group.children.map((item, idx) => (
                     <Link
-                      key={item.href}
+                      key={`${item.href}-${idx}`}
                       href={item.href}
                       className="flex flex-col px-4 py-3 hover:bg-gray-50 transition-colors group"
                       onClick={() => setOpenDropdown(null)}
