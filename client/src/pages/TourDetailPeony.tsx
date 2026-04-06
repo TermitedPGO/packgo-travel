@@ -2165,7 +2165,7 @@ export default function TourDetailPeony() {
                         imagePath={`keyFeatures.${index}.image`}
                       />
                     ) : featureImage ? (
-                      <div className="relative h-40 overflow-hidden">
+                      <div className="relative h-40 overflow-hidden rounded-xl">
                         <img 
                           src={featureImage} 
                           alt={featureTitle}

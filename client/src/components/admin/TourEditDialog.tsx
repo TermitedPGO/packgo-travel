@@ -342,7 +342,7 @@ export function TourEditDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-7xl max-h-[90vh] overflow-hidden rounded-lg flex flex-col">
+      <DialogContent className="max-w-7xl max-h-[90vh] overflow-hidden rounded-xl flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Edit className="h-5 w-5 text-purple-600" />

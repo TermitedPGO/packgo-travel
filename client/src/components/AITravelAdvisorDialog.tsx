@@ -322,7 +322,7 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md w-[95vw] sm:w-full h-[85vh] sm:h-[650px] flex flex-col p-0 border-2 border-black gap-0 overflow-hidden bg-white shadow-2xl">
+      <DialogContent className="max-w-md w-[95vw] sm:w-full h-[85vh] sm:h-[650px] flex flex-col p-0 border-2 border-black gap-0 overflow-hidden bg-white shadow-2xl rounded-xl">
         {/* Hidden DialogTitle and Description for accessibility */}
         <VisuallyHidden>
           <DialogTitle>{t('aiAdvisor.dialogTitle')}</DialogTitle>

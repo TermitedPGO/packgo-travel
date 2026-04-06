@@ -905,14 +905,16 @@ export async function updateUserProfile(
     .set(updateData)
     .where(eq(users.id, userId));
 
-  // Return updated user
+  // Return updated user (filter sensitive fields)
   const [updated] = await db
     .select()
     .from(users)
     .where(eq(users.id, userId))
     .limit(1);
 
-  return updated;
+  if (!updated) return null;
+  const { password, resetPasswordToken, resetPasswordExpires, loginAttempts, lockoutUntil, ...safeUser } = updated as any;
+  return safeUser;
 }
 
 // Update user avatar
@@ -930,14 +932,16 @@ export async function updateUserAvatar(
     .set({ avatar: avatarUrl })
     .where(eq(users.id, userId));
 
-  // Return updated user
+  // Return updated user (filter sensitive fields)
   const [updated] = await db
     .select()
     .from(users)
     .where(eq(users.id, userId))
     .limit(1);
 
-  return updated;
+  if (!updated) return null;
+  const { password, resetPasswordToken, resetPasswordExpires, loginAttempts, lockoutUntil, ...safeUser } = updated as any;
+  return safeUser;
 }
 
 

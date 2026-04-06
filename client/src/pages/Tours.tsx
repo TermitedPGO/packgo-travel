@@ -100,7 +100,7 @@ function TourCard({
   return (
     <Card className="overflow-hidden hover:shadow-lg transition-all duration-300 group border border-gray-200 flex flex-col">
       <Link href={`/tours/${tour.id}`} className="block">
-        <div className="relative aspect-[4/3] overflow-hidden">
+        <div className="relative aspect-[4/3] overflow-hidden rounded-xl">
           {tour.imageUrl || tour.heroImage ? (
             <img
               src={tour.imageUrl || tour.heroImage}

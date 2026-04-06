@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { MapPin } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc";
+import { useLocale } from "@/contexts/LocaleContext";
 
 interface DepartureAutocompleteProps {
   value: string;
@@ -22,6 +23,7 @@ export function DepartureAutocomplete({
   const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const { t } = useLocale();
 
   // Fetch departure cities from DB — only cities with active tours
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -120,9 +122,9 @@ export function DepartureAutocomplete({
           className="bg-white border-2 border-black max-h-72 overflow-y-auto"
         >
           {isLoading ? (
-            <div className="px-4 py-3 text-sm text-gray-400">載入中...</div>
+            <div className="px-4 py-3 text-sm text-gray-400">{t('common.loading') || '載入中...'}</div>
           ) : filteredCities.length === 0 ? (
-            <div className="px-4 py-3 text-sm text-gray-400">找不到符合的出發地</div>
+            <div className="px-4 py-3 text-sm text-gray-400">{t('hero.noDeparture') || '找不到符合的出發地'}</div>
           ) : (
             filteredCities.map((city, index) => (
               <button
@@ -138,7 +140,7 @@ export function DepartureAutocomplete({
                   <span className="text-gray-900 group-hover/item:text-white font-medium">{city.city}</span>
                 </div>
                 <span className="text-xs text-gray-400 group-hover/item:text-gray-300">
-                  {city.count} 個行程
+                  {city.count} {t('hero.tourCount') || '個行程'}
                 </span>
               </button>
             ))

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { format } from "date-fns";
 import { zhTW } from "date-fns/locale";
+import { enUS } from "date-fns/locale/en-US";
 import { DayPicker, DateRange } from "react-day-picker";
 import "react-day-picker/dist/style.css";
 import { Calendar } from "lucide-react";
@@ -11,6 +12,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { useLocale } from "@/contexts/LocaleContext";
 
 interface DateRangePickerProps {
   value?: DateRange;
@@ -26,6 +28,8 @@ export function DateRangePicker({
   className,
 }: DateRangePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const { language } = useLocale();
+  const dateLocale = language === 'zh-TW' ? zhTW : enUS;
 
   const handleSelect = (range: DateRange | undefined) => {
     onChange?.(range);
@@ -37,8 +41,8 @@ export function DateRangePicker({
 
   const formatDateRange = () => {
     if (!value?.from) return placeholder;
-    if (!value?.to) return format(value.from, "yyyy/MM/dd", { locale: zhTW });
-    return `${format(value.from, "yyyy/MM/dd", { locale: zhTW })} ~ ${format(value.to, "yyyy/MM/dd", { locale: zhTW })}`;
+    if (!value?.to) return format(value.from, "yyyy/MM/dd", { locale: dateLocale });
+    return `${format(value.from, "yyyy/MM/dd", { locale: dateLocale })} ~ ${format(value.to, "yyyy/MM/dd", { locale: dateLocale })}`;
   };
 
   return (
@@ -63,7 +67,7 @@ export function DateRangePicker({
             selected={value}
             onSelect={handleSelect}
             numberOfMonths={2}
-            locale={zhTW}
+            locale={dateLocale}
             disabled={{ before: new Date() }}
             classNames={{
               months: "flex gap-4",
