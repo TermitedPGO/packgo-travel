@@ -339,6 +339,10 @@ export async function translateTour(
       { name: 'itineraryDetailed', value: (tour as any).itineraryDetailed },
       { name: 'costExplanation', value: (tour as any).costExplanation },
       { name: 'noticeDetailed', value: (tour as any).noticeDetailed },
+      // 詩意標題欄位
+      { name: 'poeticTitle', value: (tour as any).poeticTitle },
+      { name: 'poeticSubtitle', value: (tour as any).poeticSubtitle },
+      { name: 'poeticContent', value: (tour as any).poeticContent },
     ];
 
     for (const targetLang of targetLanguages) {
@@ -399,6 +403,66 @@ export async function translateTour(
               translatedText: JSON.stringify(translatedItinerary),
               translatedBy: `user:${userId}`,
             });
+          }
+        }
+
+        // 翻譯飯店資訊（hotels JSON）
+        if ((tour as any).hotels) {
+          try {
+            const hotels = typeof (tour as any).hotels === 'string'
+              ? JSON.parse((tour as any).hotels)
+              : (tour as any).hotels;
+            if (Array.isArray(hotels)) {
+              const translatedHotels = await Promise.all(
+                hotels.map(async (hotel: any) => ({
+                  ...hotel,
+                  name: hotel.name ? await translateText(hotel.name, targetLang, sourceLanguage) : hotel.name,
+                  description: hotel.description ? await translateText(hotel.description, targetLang, sourceLanguage) : hotel.description,
+                }))
+              );
+              await saveTranslation({
+                entityType: 'tour',
+                entityId: tourId,
+                fieldName: 'hotels',
+                sourceLanguage,
+                targetLanguage: targetLang,
+                originalText: JSON.stringify(hotels),
+                translatedText: JSON.stringify(translatedHotels),
+                translatedBy: `user:${userId}`,
+              });
+            }
+          } catch (e) {
+            console.warn(`[Translation Agent] Failed to translate hotels for tour ${tourId}:`, e);
+          }
+        }
+
+        // 翻譯餐食資訊（meals JSON）
+        if ((tour as any).meals) {
+          try {
+            const meals = typeof (tour as any).meals === 'string'
+              ? JSON.parse((tour as any).meals)
+              : (tour as any).meals;
+            if (Array.isArray(meals)) {
+              const translatedMeals = await Promise.all(
+                meals.map(async (meal: any) => ({
+                  ...meal,
+                  name: meal.name ? await translateText(meal.name, targetLang, sourceLanguage) : meal.name,
+                  description: meal.description ? await translateText(meal.description, targetLang, sourceLanguage) : meal.description,
+                }))
+              );
+              await saveTranslation({
+                entityType: 'tour',
+                entityId: tourId,
+                fieldName: 'meals',
+                sourceLanguage,
+                targetLanguage: targetLang,
+                originalText: JSON.stringify(meals),
+                translatedText: JSON.stringify(translatedMeals),
+                translatedBy: `user:${userId}`,
+              });
+            }
+          } catch (e) {
+            console.warn(`[Translation Agent] Failed to translate meals for tour ${tourId}:`, e);
           }
         }
 

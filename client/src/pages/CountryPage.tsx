@@ -149,6 +149,18 @@ export default function CountryPage() {
 
   const tours = searchResults?.tours || [];
 
+  // Batch fetch translations for non-Chinese languages
+  const tourIds = tours.map((t: any) => t.id);
+  const { data: batchTranslations } = trpc.translation.getBatchTourTranslations.useQuery(
+    { tourIds, targetLanguage: language as 'en' | 'es' | 'ja' | 'ko' },
+    { enabled: language !== 'zh-TW' && tourIds.length > 0, staleTime: 1000 * 60 * 5 }
+  );
+  const getTranslatedTitle = (tour: any): string => {
+    if (language === 'zh-TW' || !batchTranslations) return tour.title || '';
+    const tourTrans = (batchTranslations as Record<number, Record<string, string>>)[tour.id];
+    return tourTrans?.title || tour.title || '';
+  };
+
   const handleTourClick = (tourId: number) => {
     setLocation(`/tours/${tourId}`);
   };
@@ -251,7 +263,7 @@ export default function CountryPage() {
                       <div className="relative aspect-[16/10] overflow-hidden rounded-xl">
                         <img
                           src={tour.imageUrl || "https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=800"}
-                          alt={tour.title}
+                          alt={getTranslatedTitle(tour)}
                           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 rounded-xl"
                         />
                         <button
@@ -277,7 +289,7 @@ export default function CountryPage() {
                         </div>
                         
                         <h3 className="font-bold text-gray-900 mb-3 line-clamp-2 group-hover:text-primary transition-colors">
-                          {tour.title}
+                          {getTranslatedTitle(tour)}
                         </h3>
 
                         {/* 標籤 */}

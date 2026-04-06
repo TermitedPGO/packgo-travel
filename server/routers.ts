@@ -748,7 +748,13 @@ export const appRouter = router({
         const tour = await db.updateTour(id, updates);
         
         // 非同步觸發翻譯（只有內容欄位變更時才重新翻譯）
-        const contentFields = ['title', 'description', 'heroSubtitle', 'keyFeatures', 'highlights', 'includes', 'excludes', 'itineraryDetailed', 'costExplanation', 'noticeDetailed'];
+        const contentFields = [
+          'title', 'description', 'heroSubtitle', 'keyFeatures',
+          'highlights', 'includes', 'excludes', 'notes',
+          'itineraryDetailed', 'costExplanation', 'noticeDetailed',
+          'poeticTitle', 'poeticSubtitle', 'poeticContent',
+          'hotels', 'meals', 'dailyItinerary',
+        ];
         if (contentFields.includes(field)) {
           const userId = (tour as any).createdBy ?? 1;
           // BUG-006: Queue translation job (reliable retry vs fire-and-forget)
