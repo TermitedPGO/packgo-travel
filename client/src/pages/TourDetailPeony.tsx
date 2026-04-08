@@ -1817,8 +1817,14 @@ export default function TourDetailPeony() {
   }, [isEditMode, editedTour?.keyFeatures, tour?.keyFeatures, language]);
 
   const attractions = useMemo(() => parseJSON(tour?.attractions, []), [tour?.attractions]);
-  const hotels = useMemo(() => parseJSON(tour?.hotels, []), [tour?.hotels]);
-  const meals = useMemo(() => parseJSON(tour?.meals, {}), [tour?.meals]);
+  const hotels = useMemo(() => {
+    const source = getTranslated('hotels', tour?.hotels) ?? tour?.hotels;
+    return parseJSON(source, []);
+  }, [tour?.hotels, language]);
+  const meals = useMemo(() => {
+    const source = getTranslated('meals', tour?.meals) ?? tour?.meals;
+    return parseJSON(source, {});
+  }, [tour?.meals, language]);
   const itineraryDetailed = useMemo(() => {
     const source = getTranslated('itineraryDetailed', tour?.itineraryDetailed) ?? tour?.itineraryDetailed;
     return parseJSON(source, []);
@@ -2105,7 +2111,7 @@ export default function TourDetailPeony() {
                 as="p"
               />
             ) : (
-              <p>{displayTour.description}</p>
+              <p>{displayDescription}</p>
             )}
           </div>
 

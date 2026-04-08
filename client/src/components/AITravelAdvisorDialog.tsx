@@ -91,14 +91,24 @@ function inferSuggestedReplies(content: string): string[] {
 }
 
 export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessage }: AITravelAdvisorDialogProps) {
-  const { t } = useLocale();
+  const { t, language } = useLocale();
   const [sessionId] = useState(() => `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
-  const [messages, setMessages] = useState<Message[]>([
+  const [messages, setMessages] = useState<Message[]>(() => [
     {
       role: "assistant",
       content: t('aiAdvisor.greeting'),
     },
   ]);
+
+  // Update greeting when language changes (only if still showing initial greeting)
+  useEffect(() => {
+    setMessages(prev => {
+      if (prev.length === 1 && prev[0].role === 'assistant') {
+        return [{ role: 'assistant', content: t('aiAdvisor.greeting') }];
+      }
+      return prev;
+    });
+  }, [language]);
   const [input, setInput] = useState("");
   const [penguinExpression, setPenguinExpression] = useState<PenguinExpression>("waving");
   const [isAnimating, setIsAnimating] = useState(false);

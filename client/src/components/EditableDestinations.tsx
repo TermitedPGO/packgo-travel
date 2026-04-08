@@ -34,6 +34,7 @@ export default function EditableDestinations() {
   const [, setLocation] = useLocation();
   const { isEditMode, canEdit } = useHomeEdit();
   const { t, language } = useLocale();
+  const isChineseMode = language === 'zh-TW';
   const [editingId, setEditingId] = useState<number | null>(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Destination>>({});
@@ -212,11 +213,17 @@ export default function EditableDestinations() {
               <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity" />
               
               <div className="absolute bottom-0 left-0 w-full p-6 transform translate-y-2 group-hover:translate-y-0 transition-transform duration-500">
-                <h3 className="text-2xl font-bold text-white mb-1">{dest.name}</h3>
-                <p className="text-gray-300 text-sm uppercase tracking-wider mb-4">{dest.label}</p>
+                {/* In Chinese mode: show Chinese name (large) + English label (small) */}
+                {/* In English mode: show English label (large) only */}
+                <h3 className="text-2xl font-bold text-white mb-1">
+                  {isChineseMode ? dest.name : (dest.label || dest.name)}
+                </h3>
+                {isChineseMode && (
+                  <p className="text-gray-300 text-sm uppercase tracking-wider mb-4">{dest.label}</p>
+                )}
                 {!isEditMode && (
                   <div className="flex items-center text-white text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-500 delay-100">
-                    查看行程 <ArrowRight className="ml-2 h-4 w-4" />
+                    {t('destinations.viewTours')} <ArrowRight className="ml-2 h-4 w-4" />
                   </div>
                 )}
               </div>

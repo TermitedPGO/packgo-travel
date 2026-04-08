@@ -56,19 +56,18 @@ interface LocaleContextType {
 const LocaleContext = createContext<LocaleContextType | undefined>(undefined);
 
 export function LocaleProvider({ children }: { children: React.ReactNode }) {
-  const [language, setLanguageState] = useState<Language>('zh-TW');
-
-  const [currency, setCurrencyState] = useState<Currency>('TWD');
-  
-  // 在客戶端初始化時從 localStorage 讀取語言設定
-  useEffect(() => {
+  // Read localStorage directly in useState initializer to avoid flash of wrong language on first render
+  const [language, setLanguageState] = useState<Language>(() => {
     if (typeof window !== 'undefined') {
       const savedLang = localStorage.getItem('packgo-language');
-      if (savedLang && ['zh-TW', 'en', 'es'].includes(savedLang)) {
-        setLanguageState(savedLang as Language);
+      if (savedLang && ['zh-TW', 'en'].includes(savedLang)) {
+        return savedLang as Language;
       }
     }
-  }, []);
+    return 'zh-TW';
+  });
+
+  const [currency, setCurrencyState] = useState<Currency>('TWD');
 
   // 在客戶端初始化時從 localStorage 讀取貨幣設定
   useEffect(() => {

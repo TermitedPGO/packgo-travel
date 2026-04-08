@@ -18,6 +18,8 @@ import { useLocale } from "@/contexts/LocaleContext";
 interface HeroContent {
   title: string;
   subtitle: string;
+  title_en?: string;
+  subtitle_en?: string;
   backgroundImage: string;
   hotKeywords: string[];
 }
@@ -236,10 +238,14 @@ export default function EditableHero() {
           ) : (
             <>
               <h2 className="text-white text-xl md:text-2xl font-serif mb-2 tracking-widest text-shadow">
-                {content.subtitle || t('hero.subtitle')}
+                {language === 'en'
+                  ? (content.subtitle_en || t('hero.subtitle'))
+                  : (content.subtitle || t('hero.subtitle'))}
               </h2>
               <h1 className="text-white text-4xl md:text-6xl font-bold font-serif tracking-tight text-shadow-lg">
-                {content.title || t('hero.title')}
+                {language === 'en'
+                  ? (content.title_en || t('hero.title'))
+                  : (content.title || t('hero.title'))}
               </h1>
             </>
           )}

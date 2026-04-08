@@ -1,4 +1,5 @@
 import { invokeLLM } from "./_core/llm";
+import { applyProperNounDictionary, applyDictionaryToJson, buildProperNounSystemPrompt } from "./translation-dictionary";
 import { logLlmUsage } from "./llmUsageService";
 import { logAgentStart, logAgentComplete } from "./agentActivityService";
 import { getDb } from "./db";
@@ -136,21 +137,7 @@ CRITICAL RULES:
 - For arrays of strings, translate each string element
 - Output ONLY the JSON, no explanation, no markdown code blocks
 
-TAIWAN PROPER NOUNS (MUST use official English names, never self-translate):
-- 鳴日號 / 鳴日列車 → "The Future" or "NARU"
-- 鳴日廚房 → "The Moving Kitchen"
-- 太魯閣號 → "Taroko Express"
-- 普悠瑪號 → "Puyuma Express"
-- 自強號 → "Tzu-Chiang Limited Express"
-- 莒光號 → "Chu-Kuang Express"
-- 阿里山 → "Alishan"
-- 日月潭 → "Sun Moon Lake"
-- 九份 → "Jiufen"
-- 君品酒店 → "Palais de Chine Hotel" (keep French brand name)
-- 晶華酒店 → "Regent Taipei"
-- 台灣高鐵 → "Taiwan High Speed Rail (THSR)"
-- 台灣鐵路 / 台鐵 → "Taiwan Railways (TRA)"
-If unsure of the official English name, keep the Chinese name and append "(Chinese name)"`;
+${buildProperNounSystemPrompt()}`;
       userContent = trimmed;
     } else {
       // 普通文字模式
@@ -165,21 +152,7 @@ Guidelines:
 - Preserve any formatting (line breaks, punctuation)
 - Only output the translated text, nothing else
 
-TAIWAN PROPER NOUNS (MUST use official English names, never self-translate):
-- 鳴日號 / 鳴日列車 → "The Future" or "NARU"
-- 鳴日廚房 → "The Moving Kitchen"
-- 太魯閣號 → "Taroko Express"
-- 普悠瑪號 → "Puyuma Express"
-- 自強號 → "Tzu-Chiang Limited Express"
-- 莒光號 → "Chu-Kuang Express"
-- 阿里山 → "Alishan"
-- 日月潭 → "Sun Moon Lake"
-- 九份 → "Jiufen"
-- 君品酒店 → "Palais de Chine Hotel" (keep French brand name)
-- 晶華酒店 → "Regent Taipei"
-- 台灣高鐵 → "Taiwan High Speed Rail (THSR)"
-- 台灣鐵路 / 台鐵 → "Taiwan Railways (TRA)"
-If unsure of the official English name, keep the Chinese name and append "(Chinese name)"`;
+${buildProperNounSystemPrompt()}`;
       userContent = text;
     }
 
@@ -214,12 +187,18 @@ If unsure of the official English name, keep the Chinese name and append "(Chine
       // 移除 AI 可能加的 markdown code block 標記
       translatedText = translatedText.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
       try {
-        JSON.parse(translatedText); // 驗證 JSON 有效性
+        const parsedOutput = JSON.parse(translatedText);
+        // Post-processing: apply proper noun dictionary to all string values in JSON
+        const corrected = applyDictionaryToJson(parsedOutput);
+        translatedText = JSON.stringify(corrected);
       } catch {
         // AI 輸出不是有效 JSON，回退到原始値
         console.warn('[Translation Agent] JSON translation output invalid, falling back to original');
         return text;
       }
+    } else {
+      // Post-processing for plain text: apply proper noun dictionary
+      translatedText = applyProperNounDictionary(translatedText);
     }
     
     // 儲存到快取（Redis 持久化 + 記憶體）

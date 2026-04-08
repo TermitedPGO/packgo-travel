@@ -5394,3 +5394,19 @@ AI 辦公室看板中，AI 任務永遠顯示「執行中」（started 狀態）
 - [ ] ToursTab: 修復目的地欄位文字垂直堆疊（加 min-width + overflow-x-auto）
 - [ ] TourEditDialog: 修復交通資訊 tab 動態顯示對應表單區塊
 - [ ] 行程圖片: 為 13 個行程設定 imageUrl 和 heroImage（Unsplash 圖庫）
+
+---
+## Round 8 核心修復（2026-04-06）
+### 專有名詞字典（最高優先）
+- [x] 建立 server/translation-dictionary.ts 專有名詞對照表
+- [x] 在 translateText() 的 system prompt 注入對照表
+- [x] 翻譯完成後做 post-processing find-and-replace
+- [x] 核心對照：鳴日號→The Future (NARU)、鳴日廚房→The Moving Kitchen、鳴日→The Future、君品collection→Palais de Chine Collection、瑞穗天合→Grand Cosmos Resort Ruisui
+- [x] 重跑 migration 翻譯全部 15 個 active 行程覆蓋錯誤翻譯（2026-04-08 完成，15/15 成功）
+### FIX-A：行程描述（description）沒翻到
+- [x] 確認 addTourTranslationJob 的 fieldsToTranslate 包含 description
+- [x] 確認 TourDetailPeony.tsx 的 displayDescription 使用 getTranslated('description', ...)
+- [x] migration script 翻譯 description 欄位
+### FIX-B：首頁 Hero 文字英文模式仍中文
+- [x] 查 EditableHero.tsx，確認英文模式下 DB homepageContent 不覆蓋翻譯（LocaleContext lazy init 已修復）
+- [x] 如果 Hero 內容來自 DB，讓 DB 支援多語言或 fallback 到 t('hero.title')（已正確 fallback）
