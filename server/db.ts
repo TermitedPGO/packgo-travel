@@ -20,7 +20,10 @@ import {
   competitorTours, CompetitorTour, InsertCompetitorTour,
   competitorDepartures, CompetitorDeparture, InsertCompetitorDeparture,
   competitorPriceHistory, CompetitorPriceHistory, InsertCompetitorPriceHistory,
-  competitorAlerts, CompetitorAlert, InsertCompetitorAlert
+  competitorAlerts, CompetitorAlert, InsertCompetitorAlert,
+  marketingCampaigns, MarketingCampaign, InsertMarketingCampaign,
+  marketingMaterials, MarketingMaterial, InsertMarketingMaterial,
+  emailSendLogs, EmailSendLog, InsertEmailSendLog
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -2449,4 +2452,132 @@ export async function deleteOldAlerts(olderThanDays = 30) {
   await db
     .delete(competitorAlerts)
     .where(lte(competitorAlerts.createdAt, cutoff));
+}
+
+// ============================================
+// Marketing Automation Functions
+// ============================================
+
+// ── Campaign CRUD ──────────────────────────────────────────
+
+export async function createMarketingCampaign(data: InsertMarketingCampaign): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.insert(marketingCampaigns).values(data);
+  return (result[0] as { insertId: number }).insertId;
+}
+
+export async function getMarketingCampaigns(filters?: {
+  type?: "social_post" | "email_newsletter" | "poster";
+  status?: "draft" | "scheduled" | "sending" | "sent" | "cancelled";
+  limit?: number;
+}): Promise<MarketingCampaign[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions = [];
+  if (filters?.type) conditions.push(eq(marketingCampaigns.type, filters.type));
+  if (filters?.status) conditions.push(eq(marketingCampaigns.status, filters.status));
+  const query = db.select().from(marketingCampaigns);
+  if (conditions.length > 0) query.where(and(...conditions));
+  query.orderBy(desc(marketingCampaigns.createdAt));
+  if (filters?.limit) query.limit(filters.limit);
+  return query;
+}
+
+export async function getMarketingCampaignById(id: number): Promise<MarketingCampaign | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(marketingCampaigns).where(eq(marketingCampaigns.id, id)).limit(1);
+  return result.length > 0 ? result[0] : null;
+}
+
+export async function updateMarketingCampaign(id: number, data: Partial<InsertMarketingCampaign>): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(marketingCampaigns).set(data).where(eq(marketingCampaigns.id, id));
+}
+
+export async function deleteMarketingCampaign(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(marketingCampaigns).where(eq(marketingCampaigns.id, id));
+}
+
+// ── Materials ──────────────────────────────────────────────
+
+export async function saveMarketingMaterial(data: InsertMarketingMaterial): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.insert(marketingMaterials).values(data);
+  return (result[0] as { insertId: number }).insertId;
+}
+
+export async function getMarketingMaterials(filters?: {
+  tourId?: number;
+  type?: string;
+  campaignId?: number;
+  limit?: number;
+}): Promise<MarketingMaterial[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions = [];
+  if (filters?.tourId) conditions.push(eq(marketingMaterials.tourId, filters.tourId));
+  if (filters?.campaignId) conditions.push(eq(marketingMaterials.campaignId, filters.campaignId));
+  if (filters?.type) conditions.push(eq(marketingMaterials.type, filters.type as MarketingMaterial["type"]));
+  const query = db.select().from(marketingMaterials);
+  if (conditions.length > 0) query.where(and(...conditions));
+  query.orderBy(desc(marketingMaterials.createdAt));
+  if (filters?.limit) query.limit(filters.limit);
+  return query;
+}
+
+export async function deleteMarketingMaterial(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(marketingMaterials).where(eq(marketingMaterials.id, id));
+}
+
+// ── Email Send Logs ────────────────────────────────────────
+
+export async function createEmailSendLog(data: InsertEmailSendLog): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.insert(emailSendLogs).values(data);
+}
+
+export async function updateEmailSendLog(id: number, data: Partial<InsertEmailSendLog>): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(emailSendLogs).set(data).where(eq(emailSendLogs.id, id));
+}
+
+export async function getEmailSendLogs(campaignId: number): Promise<EmailSendLog[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(emailSendLogs)
+    .where(eq(emailSendLogs.campaignId, campaignId))
+    .orderBy(desc(emailSendLogs.sentAt));
+}
+
+// ── Newsletter Subscribers ─────────────────────────────────
+
+export async function getActiveSubscribers(): Promise<{ email: string }[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({ email: newsletterSubscribers.email })
+    .from(newsletterSubscribers)
+    .where(eq(newsletterSubscribers.status, 'active'));
+}
+
+export async function getSubscriberCount(): Promise<{ total: number; active: number }> {
+  const db = await getDb();
+  if (!db) return { total: 0, active: 0 };
+  const [totalResult, activeResult] = await Promise.all([
+    db.select({ count: sql<number>`count(*)` }).from(newsletterSubscribers),
+    db.select({ count: sql<number>`count(*)` }).from(newsletterSubscribers).where(eq(newsletterSubscribers.status, 'active')),
+  ]);
+  return {
+    total: Number(totalResult[0]?.count ?? 0),
+    active: Number(activeResult[0]?.count ?? 0),
+  };
 }

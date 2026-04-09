@@ -1306,3 +1306,71 @@ export const competitorAlerts = mysqlTable("competitorAlerts", {
 });
 export type CompetitorAlert = typeof competitorAlerts.$inferSelect;
 export type InsertCompetitorAlert = typeof competitorAlerts.$inferInsert;
+
+// ── 行銷自動化系統 ────────────────────────────────────────────
+
+// ── 1. 行銷活動 ──────────────────────────────────────────
+export const marketingCampaigns = mysqlTable("marketingCampaigns", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 500 }).notNull(),
+  type: mysqlEnum("type", [
+    "social_post",
+    "email_newsletter",
+    "poster",
+  ]).notNull(),
+  status: mysqlEnum("status", [
+    "draft",
+    "scheduled",
+    "sending",
+    "sent",
+    "cancelled",
+  ]).default("draft").notNull(),
+  tourIds: text("tourIds"),
+  content: text("content"),
+  scheduledAt: timestamp("scheduledAt"),
+  sentAt: timestamp("sentAt"),
+  recipientCount: int("recipientCount").default(0),
+  metadata: text("metadata"),
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type MarketingCampaign = typeof marketingCampaigns.$inferSelect;
+export type InsertMarketingCampaign = typeof marketingCampaigns.$inferInsert;
+
+// ── 2. 行銷素材 ─────────────────────────────────────────
+export const marketingMaterials = mysqlTable("marketingMaterials", {
+  id: int("id").autoincrement().primaryKey(),
+  campaignId: int("campaignId"),
+  tourId: int("tourId").notNull(),
+  type: mysqlEnum("type", [
+    "social_copy_fb",
+    "social_copy_ig",
+    "social_copy_line",
+    "email_html",
+    "poster_landscape",
+    "poster_square",
+    "poster_story",
+  ]).notNull(),
+  content: text("content"),
+  imageUrl: varchar("imageUrl", { length: 1024 }),
+  metadata: text("metadata"),
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type MarketingMaterial = typeof marketingMaterials.$inferSelect;
+export type InsertMarketingMaterial = typeof marketingMaterials.$inferInsert;
+
+// ── 3. Email 發送記錄 ─────────────────────────────────────
+export const emailSendLogs = mysqlTable("emailSendLogs", {
+  id: int("id").autoincrement().primaryKey(),
+  campaignId: int("campaignId").notNull(),
+  subscriberEmail: varchar("subscriberEmail", { length: 320 }).notNull(),
+  status: mysqlEnum("status", ["pending", "sent", "failed", "bounced"]).default("pending").notNull(),
+  sentAt: timestamp("sentAt"),
+  errorMessage: text("errorMessage"),
+  openedAt: timestamp("openedAt"),
+  clickedAt: timestamp("clickedAt"),
+});
+export type EmailSendLog = typeof emailSendLogs.$inferSelect;
+export type InsertEmailSendLog = typeof emailSendLogs.$inferInsert;

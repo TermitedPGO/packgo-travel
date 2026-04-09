@@ -309,3 +309,57 @@ export async function addCompetitorMonitorJob(data: CompetitorMonitorJobData) {
 }
 
 console.log("✅ Competitor monitor queue initialized");
+
+// ── Marketing Queue ────────────────────────────────────────
+
+export interface MarketingJobData {
+  type: "send_newsletter" | "generate_poster" | "generate_copy";
+  campaignId?: number;
+  tourId?: number;
+  payload: Record<string, unknown>;
+}
+
+export interface MarketingJobResult {
+  success: boolean;
+  message?: string;
+  data?: Record<string, unknown>;
+}
+
+/**
+ * Queue for marketing automation jobs
+ * - 3 retries with exponential backoff
+ * - Completed jobs kept for 24 hours
+ */
+export const marketingQueue = new Queue<MarketingJobData, MarketingJobResult>(
+  "marketing",
+  {
+    connection: redisBullMQ,
+    defaultJobOptions: {
+      attempts: 3,
+      backoff: {
+        type: "exponential",
+        delay: 5000,
+      },
+      removeOnComplete: {
+        age: 86400, // 24 hours
+        count: 500,
+      },
+      removeOnFail: {
+        age: 604800, // 7 days
+        count: 200,
+      },
+    },
+  }
+);
+
+/**
+ * Add a marketing job to the queue
+ */
+export async function addMarketingJob(data: MarketingJobData) {
+  const jobId = `marketing-${data.type}-${Date.now()}`;
+  const job = await marketingQueue.add(data.type, data, { jobId });
+  console.log(`✅ Marketing job queued: ${job.id} (type: ${data.type})`);
+  return job;
+}
+
+console.log("✅ Marketing queue initialized");

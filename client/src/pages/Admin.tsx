@@ -18,6 +18,7 @@ import {
   ListChecks,
   CheckCircle2,
   Binoculars,
+  Megaphone,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
@@ -36,8 +37,9 @@ import AnalyticsTab from "@/components/admin/AnalyticsTab";
 import TaskHistoryContent from "@/components/admin/TaskHistoryContent";
 import CalibrationReviewTab from "@/components/admin/CalibrationReviewTab";
 import CompetitorMonitorTab from "@/components/admin/CompetitorMonitorTab";
+import MarketingTab from "@/components/admin/MarketingTab";
 
-type AdminTab = "dashboard" | "tours" | "bookings" | "inquiries" | "reviews" | "ai-hub" | "analytics" | "task-history" | "calibration-review" | "competitor-monitor";
+type AdminTab = "dashboard" | "tours" | "bookings" | "inquiries" | "reviews" | "ai-hub" | "analytics" | "task-history" | "calibration-review" | "competitor-monitor" | "marketing";
 
 export default function Admin() {
   const { user, loading, isAuthenticated, logout } = useAuth();
@@ -84,6 +86,7 @@ export default function Admin() {
         { id: 'task-history', icon: ListChecks, label: 'AI 任務記錄' },
         { id: 'calibration-review', icon: CheckCircle2, label: 'QA 品質審查' },
         { id: 'competitor-monitor', icon: Binoculars, label: '競品監控', badge: typeof competitorUnread === 'number' && competitorUnread > 0 ? competitorUnread : undefined },
+        { id: 'marketing', icon: Megaphone, label: '行銷自動化' },
       ],
     },
   ];
@@ -264,6 +267,7 @@ export default function Admin() {
           {activeTab === "task-history" && <TaskHistoryContent />}
           {activeTab === "calibration-review" && <CalibrationReviewTab />}
           {activeTab === "competitor-monitor" && <CompetitorMonitorTab />}
+          {activeTab === "marketing" && <MarketingTab />}
         </main>
       </div>
     </div>
