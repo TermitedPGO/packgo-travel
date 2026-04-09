@@ -40,8 +40,9 @@ import CalibrationReviewTab from "@/components/admin/CalibrationReviewTab";
 import CompetitorMonitorTab from "@/components/admin/CompetitorMonitorTab";
 import MarketingTab from "@/components/admin/MarketingTab";
 import VisaManagementTab from "@/components/admin/VisaManagementTab";
+import AffiliateTab from "@/components/admin/AffiliateTab";
 
-type AdminTab = "dashboard" | "tours" | "bookings" | "inquiries" | "reviews" | "ai-hub" | "analytics" | "task-history" | "calibration-review" | "competitor-monitor" | "marketing" | "visa";
+type AdminTab = "dashboard" | "tours" | "bookings" | "inquiries" | "reviews" | "ai-hub" | "analytics" | "task-history" | "calibration-review" | "competitor-monitor" | "marketing" | "visa" | "affiliate";
 
 export default function Admin() {
   const { user, loading, isAuthenticated, logout } = useAuth();
@@ -95,6 +96,12 @@ export default function Admin() {
       label: '簽證服務',
       items: [
         { id: 'visa', icon: FileText, label: '中國簽證管理' },
+      ],
+    },
+    {
+      label: '聯盟行銷',
+      items: [
+        { id: 'affiliate', icon: TrendingUp, label: 'Trip.com 聯盟管理' },
       ],
     },
   ];
@@ -277,6 +284,7 @@ export default function Admin() {
           {activeTab === "competitor-monitor" && <CompetitorMonitorTab />}
           {activeTab === "marketing" && <MarketingTab />}
           {activeTab === "visa" && <VisaManagementTab />}
+          {activeTab === "affiliate" && <AffiliateTab />}
         </main>
       </div>
     </div>

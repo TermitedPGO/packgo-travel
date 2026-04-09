@@ -16,6 +16,7 @@ import { translateText, translateBatch, translateTour, translateMultipleTours, g
 import { getExchangeRates, convertCurrency, getExchangeRate, formatCurrency, getCurrencySymbol, convertPrices, type SupportedCurrency } from "./agents/exchangeRateAgent";
 import { calculateVisaPricing, CHINA_VISA_PRICING } from "./services/visaPricingService";
 import { sendVisaStatusUpdate, sendVisaApprovedEmail, sendVisaRejectedEmail } from "./services/visaEmailService";
+import { generateFlightLink, generateHotelLink, generateHomepageLink, trackAffiliateClick } from "./services/affiliateLinkService";
 import Stripe from "stripe";
 import { ENV } from "./_core/env";
 
@@ -4134,5 +4135,125 @@ export const appRouter = router({
         return { success: true };
       }),
   }),
+  affiliate: router({
+    generateAffiliateLink: publicProcedure
+      .input(z.object({
+        type: z.enum(["flights", "hotels", "homepage"]),
+        origin: z.string().optional(),
+        destination: z.string().optional(),
+        departDate: z.string().optional(),
+        returnDate: z.string().optional(),
+        city: z.string().optional(),
+        checkIn: z.string().optional(),
+        checkOut: z.string().optional(),
+        ouid: z.string().optional(),
+      }))
+      .query(({ input }) => {
+        let url: string;
+        if (input.type === "flights") {
+          url = generateFlightLink({
+            origin: input.origin,
+            destination: input.destination,
+            departDate: input.departDate,
+            returnDate: input.returnDate,
+            ouid: input.ouid,
+          });
+        } else if (input.type === "hotels") {
+          url = generateHotelLink({
+            city: input.city,
+            checkIn: input.checkIn,
+            checkOut: input.checkOut,
+            ouid: input.ouid,
+          });
+        } else {
+          url = generateHomepageLink(input.ouid);
+        }
+        return { url };
+      }),
+
+    trackClick: publicProcedure
+      .input(z.object({
+        platform: z.enum(["trip_flights", "trip_hotels", "trip_homepage"]),
+        targetUrl: z.string(),
+        referrerPage: z.string().optional(),
+        tourId: z.number().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const req = (ctx as any).req;
+        const ipAddress = req?.ip ?? req?.headers?.["x-forwarded-for"] ?? null;
+        const userAgent = req?.headers?.["user-agent"] ?? null;
+        await trackAffiliateClick({
+          userId: ctx.user?.id,
+          platform: input.platform,
+          targetUrl: input.targetUrl,
+          referrerPage: input.referrerPage,
+          tourId: input.tourId,
+          ipAddress: typeof ipAddress === "string" ? ipAddress : undefined,
+          userAgent: typeof userAgent === "string" ? userAgent : undefined,
+        });
+        return { success: true };
+      }),
+
+    getStats: adminProcedure
+      .input(z.object({ days: z.number().default(30) }))
+      .query(async ({ input }) => {
+        return db.getAffiliateStats(input.days);
+      }),
+
+    getClicks: adminProcedure
+      .input(z.object({
+        platform: z.string().optional(),
+        limit: z.number().default(100),
+      }))
+      .query(async ({ input }) => {
+        return db.getAffiliateClicks({ platform: input.platform, limit: input.limit });
+      }),
+
+    upsertPriceComparison: adminProcedure
+      .input(z.object({
+        tourId: z.number(),
+        flightEstimate: z.number().optional(),
+        hotelEstimate: z.number().optional(),
+        activityEstimate: z.number().optional(),
+        mealEstimate: z.number().optional(),
+        transportEstimate: z.number().optional(),
+        otherEstimate: z.number().optional(),
+        flightSource: z.string().optional(),
+        hotelSource: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const total = (input.flightEstimate ?? 0)
+          + (input.hotelEstimate ?? 0)
+          + (input.activityEstimate ?? 0)
+          + (input.mealEstimate ?? 0)
+          + (input.transportEstimate ?? 0)
+          + (input.otherEstimate ?? 0);
+        await db.upsertTourPriceComparison({
+          ...input,
+          totalSelfBook: total > 0 ? total : null,
+          updatedBy: ctx.user.id,
+        });
+        return { success: true };
+      }),
+
+    getPriceComparisons: adminProcedure
+      .query(async () => {
+        return db.getAllPriceComparisons();
+      }),
+
+    deletePriceComparison: adminProcedure
+      .input(z.object({ tourId: z.number() }))
+      .mutation(async ({ input }) => {
+        await db.deleteTourPriceComparison(input.tourId);
+        return { success: true };
+      }),
+
+    getPriceComparison: publicProcedure
+      .input(z.object({ tourId: z.number() }))
+      .query(async ({ input }) => {
+        return db.getTourPriceComparison(input.tourId);
+      }),
+  }),
+
 });
 export type AppRouter = typeof appRouter;

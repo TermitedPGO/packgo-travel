@@ -3,18 +3,76 @@ import { useLocale } from "@/contexts/LocaleContext";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Link } from "wouter";
-import { Plane, Clock, Shield, Globe, CreditCard, Headphones, ArrowRight, Briefcase, Crown, Star } from "lucide-react";
+import { Plane, Clock, Shield, Globe, CreditCard, Headphones, ArrowRight, Briefcase, Crown, Star, ExternalLink, Search } from "lucide-react";
 import AITravelAdvisorDialog from "@/components/AITravelAdvisorDialog";
+import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
 
 export default function FlightBooking() {
   const { t } = useLocale();
   const [advisorOpen, setAdvisorOpen] = useState(false);
   const [advisorInitialMsg, setAdvisorInitialMsg] = useState("");
 
+  // Search form state
+  const [origin, setOrigin] = useState("");
+  const [destination, setDestination] = useState("");
+  const [departDate, setDepartDate] = useState("");
+  const [returnDate, setReturnDate] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
+
+  const utils = trpc.useUtils();
+  const trackClickMutation = trpc.affiliate.trackClick.useMutation();
+
   const openAdvisor = (msg: string) => {
     setAdvisorInitialMsg(msg);
     setAdvisorOpen(true);
+  };
+
+  const handleSearchFlights = async () => {
+    setIsSearching(true);
+    try {
+      const result = await utils.affiliate.generateAffiliateLink.fetch({
+        type: "flights",
+        origin: origin || undefined,
+        destination: destination || undefined,
+        departDate: departDate || undefined,
+        returnDate: returnDate || undefined,
+      });
+      const url = result.url;
+      await trackClickMutation.mutateAsync({
+        platform: "trip_flights",
+        targetUrl: url,
+        referrerPage: "/flight-booking",
+      });
+      toast.info("正在前往 Trip.com 搜尋機票...");
+      window.open(url, "_blank");
+    } catch (err) {
+      toast.error("無法開啟搜尋頁面，請稍後再試");
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleRouteClick = async (route: { fromCode: string; toCode: string; from: string; to: string; duration: string }) => {
+    try {
+      const result = await utils.affiliate.generateAffiliateLink.fetch({
+        type: "flights",
+        origin: route.fromCode,
+        destination: route.toCode,
+      });
+      await trackClickMutation.mutateAsync({
+        platform: "trip_flights",
+        targetUrl: result.url,
+        referrerPage: "/flight-booking",
+      });
+      toast.info(`正在前往 Trip.com 搜尋 ${route.from} → ${route.to} 機票...`);
+      window.open(result.url, "_blank");
+    } catch {
+      openAdvisor(`我想查詢從 ${route.from} 到 ${route.to} 的機票，飛行時間約 ${route.duration}，請問有哪些航班和票價？`);
+    }
   };
 
   const features = [
@@ -32,32 +90,58 @@ export default function FlightBooking() {
   ];
 
   const popularRoutes = [
-    { from: "台北 TPE", to: "東京 TYO", duration: "約 3.5 小時", tag: "熱門" },
-    { from: "台北 TPE", to: "大阪 OSA", duration: "約 3 小時", tag: "熱門" },
-    { from: "台北 TPE", to: "首爾 SEL", duration: "約 2.5 小時", tag: "熱門" },
-    { from: "台北 TPE", to: "曼谷 BKK", duration: "約 4 小時", tag: "推薦" },
-    { from: "台北 TPE", to: "新加坡 SIN", duration: "約 4.5 小時", tag: "推薦" },
-    { from: "台北 TPE", to: "洛杉磯 LAX", duration: "約 12 小時", tag: "長途" },
+    { from: "台北 TPE", to: "東京 TYO", fromCode: "TPE", toCode: "TYO", duration: "約 3.5 小時", tag: "熱門" },
+    { from: "台北 TPE", to: "大阪 OSA", fromCode: "TPE", toCode: "OSA", duration: "約 3 小時", tag: "熱門" },
+    { from: "台北 TPE", to: "首爾 SEL", fromCode: "TPE", toCode: "SEL", duration: "約 2.5 小時", tag: "熱門" },
+    { from: "台北 TPE", to: "曼谷 BKK", fromCode: "TPE", toCode: "BKK", duration: "約 4 小時", tag: "推薦" },
+    { from: "台北 TPE", to: "新加坡 SIN", fromCode: "TPE", toCode: "SIN", duration: "約 4.5 小時", tag: "推薦" },
+    { from: "台北 TPE", to: "洛杉磯 LAX", fromCode: "TPE", toCode: "LAX", duration: "約 12 小時", tag: "長途" },
   ];
 
   return (
     <div className="min-h-screen flex flex-col bg-white">
       <Header />
 
-      {/* BUG-004: Coming Soon advisory banner */}
-      <div className="bg-amber-50 border-b border-amber-200">
-        <div className="container py-3 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-amber-800">
-            <span className="text-lg">✈️</span>
-            <span className="text-sm font-medium">此服務目前由專業顧問協助辦理，線上自助訂購功能即將推出</span>
-          </div>
-          <Link href="/inquiry">
-            <Button size="sm" className="bg-amber-600 hover:bg-amber-700 text-white shrink-0">
-              立即詢問顧問
+      {/* Search Card — placed before hero for immediate visibility */}
+      <section className="py-10 bg-gray-50 border-b border-gray-200">
+        <div className="container">
+          <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow-lg border border-gray-200 p-8">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 bg-black rounded-xl flex items-center justify-center">
+                <Search className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-black">搜尋機票</h2>
+                <p className="text-sm text-gray-500">透過 Trip.com 即時比價，找到最優惠票價</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+              <div>
+                <Label className="text-sm font-medium text-gray-700 mb-1.5 block">出發地</Label>
+                <Input placeholder="城市或機場代碼（如 TPE）" value={origin} onChange={e => setOrigin(e.target.value)} className="h-11" />
+              </div>
+              <div>
+                <Label className="text-sm font-medium text-gray-700 mb-1.5 block">目的地</Label>
+                <Input placeholder="城市或機場代碼（如 NRT）" value={destination} onChange={e => setDestination(e.target.value)} className="h-11" />
+              </div>
+              <div>
+                <Label className="text-sm font-medium text-gray-700 mb-1.5 block">出發日期</Label>
+                <Input type="date" value={departDate} onChange={e => setDepartDate(e.target.value)} className="h-11" />
+              </div>
+              <div>
+                <Label className="text-sm font-medium text-gray-700 mb-1.5 block">回程日期（選填）</Label>
+                <Input type="date" value={returnDate} onChange={e => setReturnDate(e.target.value)} className="h-11" />
+              </div>
+            </div>
+            <Button onClick={handleSearchFlights} disabled={isSearching} className="w-full h-12 bg-black hover:bg-gray-800 text-white font-bold text-base rounded-xl flex items-center justify-center gap-2">
+              <Search className="h-5 w-5" />
+              {isSearching ? "正在開啟 Trip.com..." : "搜尋機票"}
+              <ExternalLink className="h-4 w-4 opacity-70" />
             </Button>
-          </Link>
+            <p className="text-center text-xs text-gray-400 mt-3">將跳轉至 Trip.com 完成搜尋與預訂 · 由 PACK&GO 聯盟合作提供</p>
+          </div>
         </div>
-      </div>
+      </section>
 
       {/* Hero */}
       <section className="relative bg-black text-white overflow-hidden">
@@ -178,7 +262,7 @@ export default function FlightBooking() {
               <button
                 key={i}
                 type="button"
-                onClick={() => openAdvisor(`我想查詢從 ${route.from} 到 ${route.to} 的機票，飛行時間約 ${route.duration}，請問有哪些航班和票價？`)}
+                onClick={() => handleRouteClick(route)}
                 className="flex items-center justify-between p-5 border border-gray-200 rounded-xl hover:border-black hover:shadow-sm transition-all group text-left w-full"
               >
                 <div className="flex items-center gap-4">
@@ -195,13 +279,16 @@ export default function FlightBooking() {
                     </div>
                   </div>
                 </div>
-                <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${
-                  route.tag === "熱門" ? "bg-black text-white" :
-                  route.tag === "推薦" ? "bg-gray-100 text-gray-700" :
-                  "bg-gray-50 text-gray-500"
-                }`}>
-                  {route.tag}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${
+                    route.tag === "熱門" ? "bg-black text-white" :
+                    route.tag === "推薦" ? "bg-gray-100 text-gray-700" :
+                    "bg-gray-50 text-gray-500"
+                  }`}>
+                    {route.tag}
+                  </span>
+                  <ExternalLink className="h-3.5 w-3.5 text-gray-400 group-hover:text-black transition-colors" />
+                </div>
               </button>
             ))}
           </div>

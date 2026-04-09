@@ -3,18 +3,73 @@ import { useLocale } from "@/contexts/LocaleContext";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Link } from "wouter";
-import { Hotel, Star, Wifi, Car, Utensils, Dumbbell, Shield, Headphones, ArrowRight, MapPin, CheckCircle, Building2, Palmtree, Waves, Flame } from "lucide-react";
+import { Hotel, Star, Wifi, Car, Utensils, Dumbbell, Shield, Headphones, ArrowRight, MapPin, CheckCircle, Building2, Palmtree, Waves, Flame, ExternalLink, Search } from "lucide-react";
 import AITravelAdvisorDialog from "@/components/AITravelAdvisorDialog";
+import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
 
 export default function HotelBooking() {
   const { t } = useLocale();
   const [advisorOpen, setAdvisorOpen] = useState(false);
   const [advisorInitialMsg, setAdvisorInitialMsg] = useState("");
 
+  // Hotel search form state
+  const [city, setCity] = useState("");
+  const [checkIn, setCheckIn] = useState("");
+  const [checkOut, setCheckOut] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
+
+  const utils = trpc.useUtils();
+  const trackClickMutation = trpc.affiliate.trackClick.useMutation();
+
   const openAdvisor = (msg: string) => {
     setAdvisorInitialMsg(msg);
     setAdvisorOpen(true);
+  };
+
+  const handleSearchHotels = async () => {
+    setIsSearching(true);
+    try {
+      const result = await utils.affiliate.generateAffiliateLink.fetch({
+        type: "hotels",
+        city: city || undefined,
+        checkIn: checkIn || undefined,
+        checkOut: checkOut || undefined,
+      });
+      const url = result.url;
+      await trackClickMutation.mutateAsync({
+        platform: "trip_hotels",
+        targetUrl: url,
+        referrerPage: "/hotel-booking",
+      });
+      toast.info("正在前往 Trip.com 搜尋飯店...");
+      window.open(url, "_blank");
+    } catch (err) {
+      toast.error("無法開啟搜尋頁面，請稍後再試");
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleDestinationClick = async (dest: { city: string; country: string }) => {
+    try {
+      const result = await utils.affiliate.generateAffiliateLink.fetch({
+        type: "hotels",
+        city: dest.city,
+      });
+      await trackClickMutation.mutateAsync({
+        platform: "trip_hotels",
+        targetUrl: result.url,
+        referrerPage: "/hotel-booking",
+      });
+      toast.info(`正在前往 Trip.com 搜尋${dest.country}${dest.city}飯店...`);
+      window.open(result.url, "_blank");
+    } catch {
+      openAdvisor(`我想在${dest.country}${dest.city}找住宿，請問有哪些推薦的飯店？大概的價位範圍是多少？`);
+    }
   };
 
   const features = [
@@ -55,20 +110,42 @@ export default function HotelBooking() {
     <div className="min-h-screen flex flex-col bg-white">
       <Header />
 
-      {/* BUG-004: Coming Soon advisory banner */}
-      <div className="bg-amber-50 border-b border-amber-200">
-        <div className="container py-3 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-amber-800">
-            <span className="text-lg">🏨</span>
-            <span className="text-sm font-medium">此服務目前由專業顧問協助辦理，線上自助訂購功能即將推出</span>
-          </div>
-          <Link href="/inquiry">
-            <Button size="sm" className="bg-amber-600 hover:bg-amber-700 text-white shrink-0">
-              立即詢問顧問
+      {/* Hotel Search Card */}
+      <section className="py-10 bg-gray-50 border-b border-gray-200">
+        <div className="container">
+          <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow-lg border border-gray-200 p-8">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 bg-black rounded-xl flex items-center justify-center">
+                <Search className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-black">搜尋飯店</h2>
+                <p className="text-sm text-gray-500">透過 Trip.com 即時比價，找到最優惠住宿</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+              <div>
+                <Label className="text-sm font-medium text-gray-700 mb-1.5 block">目的地城市</Label>
+                <Input placeholder="城市名稱（如 Tokyo）" value={city} onChange={e => setCity(e.target.value)} className="h-11" />
+              </div>
+              <div>
+                <Label className="text-sm font-medium text-gray-700 mb-1.5 block">入住日期</Label>
+                <Input type="date" value={checkIn} onChange={e => setCheckIn(e.target.value)} className="h-11" />
+              </div>
+              <div>
+                <Label className="text-sm font-medium text-gray-700 mb-1.5 block">退房日期</Label>
+                <Input type="date" value={checkOut} onChange={e => setCheckOut(e.target.value)} className="h-11" />
+              </div>
+            </div>
+            <Button onClick={handleSearchHotels} disabled={isSearching} className="w-full h-12 bg-black hover:bg-gray-800 text-white font-bold text-base rounded-xl flex items-center justify-center gap-2">
+              <Search className="h-5 w-5" />
+              {isSearching ? "正在開啟 Trip.com..." : "搜尋飯店"}
+              <ExternalLink className="h-4 w-4 opacity-70" />
             </Button>
-          </Link>
+            <p className="text-center text-xs text-gray-400 mt-3">將跳轉至 Trip.com 完成搜尋與預訂 · 由 PACK&GO 聯盟合作提供</p>
+          </div>
         </div>
-      </div>
+      </section>
 
       {/* Hero */}
       <section className="relative bg-black text-white overflow-hidden">
@@ -193,7 +270,7 @@ export default function HotelBooking() {
               <button
                 key={i}
                 type="button"
-                onClick={() => openAdvisor(`我想在${dest.country}${dest.city}找住宿，請問有哪些推薦的飯店？大概的價位範圍是多少？`)}
+                onClick={() => handleDestinationClick(dest)}
                 className="flex items-center gap-4 p-5 border border-gray-200 rounded-xl hover:border-black hover:shadow-sm transition-all group text-left w-full"
               >
                 <div className="w-12 h-12 flex-shrink-0 bg-gray-100 rounded-lg flex items-center justify-center">

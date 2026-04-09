@@ -1487,3 +1487,39 @@ export const visaStatusHistory = mysqlTable("visaStatusHistory", {
 });
 export type VisaStatusHistory = typeof visaStatusHistory.$inferSelect;
 export type InsertVisaStatusHistory = typeof visaStatusHistory.$inferInsert;
+
+// ── 聯盟點擊追蹤 ──────────────────────────────────────────────
+export const affiliateClicks = mysqlTable("affiliateClicks", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId"),
+  platform: mysqlEnum("platform", ["trip_flights", "trip_hotels", "trip_homepage"]).notNull(),
+  targetUrl: varchar("targetUrl", { length: 2048 }).notNull(),
+  referrerPage: varchar("referrerPage", { length: 500 }),
+  tourId: int("tourId"),
+  ipAddress: varchar("ipAddress", { length: 45 }),
+  userAgent: text("userAgent"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type AffiliateClick = typeof affiliateClicks.$inferSelect;
+export type InsertAffiliateClick = typeof affiliateClicks.$inferInsert;
+
+// ── 行程價格比較資料 ──────────────────────────────────────────
+export const tourPriceComparisons = mysqlTable("tourPriceComparisons", {
+  id: int("id").autoincrement().primaryKey(),
+  tourId: int("tourId").notNull(),
+  flightEstimate: int("flightEstimate"),
+  hotelEstimate: int("hotelEstimate"),
+  activityEstimate: int("activityEstimate"),
+  mealEstimate: int("mealEstimate"),
+  transportEstimate: int("transportEstimate"),
+  otherEstimate: int("otherEstimate"),
+  totalSelfBook: int("totalSelfBook"),
+  flightSource: varchar("flightSource", { length: 500 }),
+  hotelSource: varchar("hotelSource", { length: 500 }),
+  lastUpdated: timestamp("lastUpdated").defaultNow().notNull(),
+  updatedBy: int("updatedBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type TourPriceComparison = typeof tourPriceComparisons.$inferSelect;
+export type InsertTourPriceComparison = typeof tourPriceComparisons.$inferInsert;

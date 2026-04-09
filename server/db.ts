@@ -25,7 +25,9 @@ import {
   marketingMaterials, MarketingMaterial, InsertMarketingMaterial,
   emailSendLogs, EmailSendLog, InsertEmailSendLog,
   visaApplications, VisaApplication, InsertVisaApplication,
-  visaStatusHistory, VisaStatusHistory, InsertVisaStatusHistory
+  visaStatusHistory, VisaStatusHistory, InsertVisaStatusHistory,
+  affiliateClicks, AffiliateClick, InsertAffiliateClick,
+  tourPriceComparisons, TourPriceComparison, InsertTourPriceComparison
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -2784,4 +2786,141 @@ export async function getVisaStats(): Promise<{
     rejected: Number(rejectedResult[0]?.count ?? 0),
     totalRevenue: Number(revenueResult[0]?.total ?? 0),
   };
+}
+
+// ============================================
+// Affiliate Click Tracking Functions
+// ============================================
+
+export async function createAffiliateClick(data: InsertAffiliateClick): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot create affiliate click: database not available");
+    return;
+  }
+  await db.insert(affiliateClicks).values(data);
+}
+
+export async function getAffiliateClicks(filters?: {
+  platform?: string;
+  limit?: number;
+}): Promise<AffiliateClick[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const conditions = [];
+  if (filters?.platform) {
+    conditions.push(eq(affiliateClicks.platform, filters.platform as AffiliateClick["platform"]));
+  }
+
+  const query = db.select().from(affiliateClicks);
+  if (conditions.length > 0) {
+    return query.where(and(...conditions)).orderBy(desc(affiliateClicks.createdAt)).limit(filters?.limit ?? 100);
+  }
+  return query.orderBy(desc(affiliateClicks.createdAt)).limit(filters?.limit ?? 100);
+}
+
+export async function getAffiliateStats(days: number): Promise<{
+  totalClicks: number;
+  byPlatform: Record<string, number>;
+  byDay: Array<{ date: string; clicks: number }>;
+  topReferrers: Array<{ page: string; clicks: number }>;
+}> {
+  const db = await getDb();
+  if (!db) return { totalClicks: 0, byPlatform: {}, byDay: [], topReferrers: [] };
+
+  const since = new Date();
+  since.setDate(since.getDate() - days);
+
+  const [totalResult, platformResult, dayResult, referrerResult] = await Promise.all([
+    db.select({ count: sql<number>`count(*)` })
+      .from(affiliateClicks)
+      .where(gte(affiliateClicks.createdAt, since)),
+    db.select({
+      platform: affiliateClicks.platform,
+      count: sql<number>`count(*)`,
+    })
+      .from(affiliateClicks)
+      .where(gte(affiliateClicks.createdAt, since))
+      .groupBy(affiliateClicks.platform),
+    db.select({
+      date: sql<string>`DATE(createdAt)`,
+      clicks: sql<number>`count(*)`,
+    })
+      .from(affiliateClicks)
+      .where(gte(affiliateClicks.createdAt, since))
+      .groupBy(sql`DATE(createdAt)`)
+      .orderBy(sql`DATE(createdAt)`),
+    db.select({
+      page: affiliateClicks.referrerPage,
+      clicks: sql<number>`count(*)`,
+    })
+      .from(affiliateClicks)
+      .where(and(gte(affiliateClicks.createdAt, since), sql`referrerPage IS NOT NULL`))
+      .groupBy(affiliateClicks.referrerPage)
+      .orderBy(desc(sql`count(*)`))
+      .limit(10),
+  ]);
+
+  const byPlatform: Record<string, number> = {};
+  for (const row of platformResult) {
+    byPlatform[row.platform] = Number(row.count);
+  }
+
+  return {
+    totalClicks: Number(totalResult[0]?.count ?? 0),
+    byPlatform,
+    byDay: dayResult.map(r => ({ date: r.date, clicks: Number(r.clicks) })),
+    topReferrers: referrerResult
+      .filter(r => r.page)
+      .map(r => ({ page: r.page!, clicks: Number(r.clicks) })),
+  };
+}
+
+// ============================================
+// Tour Price Comparison Functions
+// ============================================
+
+export async function upsertTourPriceComparison(data: Omit<InsertTourPriceComparison, "id" | "createdAt" | "updatedAt" | "lastUpdated">): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const existing = await db.select({ id: tourPriceComparisons.id })
+    .from(tourPriceComparisons)
+    .where(eq(tourPriceComparisons.tourId, data.tourId))
+    .limit(1);
+
+  if (existing.length > 0) {
+    await db.update(tourPriceComparisons)
+      .set({ ...data, lastUpdated: new Date() })
+      .where(eq(tourPriceComparisons.tourId, data.tourId));
+  } else {
+    await db.insert(tourPriceComparisons).values({ ...data, lastUpdated: new Date() });
+  }
+}
+
+export async function getTourPriceComparison(tourId: number): Promise<TourPriceComparison | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  const result = await db.select()
+    .from(tourPriceComparisons)
+    .where(eq(tourPriceComparisons.tourId, tourId))
+    .limit(1);
+
+  return result.length > 0 ? result[0] : null;
+}
+
+export async function getAllPriceComparisons(): Promise<TourPriceComparison[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  return db.select().from(tourPriceComparisons).orderBy(desc(tourPriceComparisons.updatedAt));
+}
+
+export async function deleteTourPriceComparison(tourId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db.delete(tourPriceComparisons).where(eq(tourPriceComparisons.tourId, tourId));
 }
