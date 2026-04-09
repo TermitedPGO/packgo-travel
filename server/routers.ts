@@ -4280,7 +4280,10 @@ export const appRouter = router({
         endDate: z.date().optional(),
       }))
       .query(async ({ input }) => {
-        return db.getAccountingStats(input);
+        const now = new Date();
+        const startDate = input.startDate ?? new Date(now.getFullYear(), now.getMonth(), 1);
+        const endDate = input.endDate ?? new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        return db.getAccountingStats({ startDate, endDate });
       }),
 
     // Create a new accounting entry
