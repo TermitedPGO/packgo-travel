@@ -3083,16 +3083,22 @@ export async function deleteRecurringExpense(id: number): Promise<boolean> {
 }
 
 export async function updateInvoiceStatus(id: number, status: string): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
   const result = await db.update(invoices).set({ status: status as any, updatedAt: new Date() }).where(eq(invoices.id, id));
   return (result[0] as any).affectedRows > 0;
 }
 
 export async function deleteInvoice(id: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
   const result = await db.delete(invoices).where(eq(invoices.id, id));
   return (result[0] as any).affectedRows > 0;
 }
 
 export async function getRecurringExpenseById(id: number): Promise<RecurringExpense | null> {
+  const db = await getDb();
+  if (!db) return null;
   const rows = await db.select().from(recurringExpenses).where(eq(recurringExpenses.id, id)).limit(1);
   return rows[0] ?? null;
 }

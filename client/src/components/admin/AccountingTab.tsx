@@ -609,7 +609,7 @@ export default function AccountingTab() {
                   <tr key={inv.id} className="border-b hover:bg-gray-50">
                     <td className="px-4 py-2 font-mono text-gray-700">{inv.invoiceNumber}</td>
                     <td className="px-4 py-2 text-gray-700">{inv.customerName}</td>
-                    <td className="px-4 py-2 text-gray-600">{formatDate(inv.issueDate)}</td>
+                    <td className="px-4 py-2 text-gray-600">{formatDate(inv.createdAt)}</td>
                     <td className="px-4 py-2 text-right font-semibold text-gray-800">{formatAmount(inv.totalAmount, inv.currency)}</td>
                     <td className="px-4 py-2 text-center">
                       <span className={`px-2 py-0.5 rounded text-xs font-medium ${invoiceStatusColors[inv.status] ?? "bg-gray-100 text-gray-600"}`}>
