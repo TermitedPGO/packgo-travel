@@ -17,6 +17,7 @@ import {
   TrendingUp,
   ListChecks,
   CheckCircle2,
+  Binoculars,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
@@ -34,8 +35,9 @@ import AiHubTab from "@/components/admin/AiHubTab";
 import AnalyticsTab from "@/components/admin/AnalyticsTab";
 import TaskHistoryContent from "@/components/admin/TaskHistoryContent";
 import CalibrationReviewTab from "@/components/admin/CalibrationReviewTab";
+import CompetitorMonitorTab from "@/components/admin/CompetitorMonitorTab";
 
-type AdminTab = "dashboard" | "tours" | "bookings" | "inquiries" | "reviews" | "ai-hub" | "analytics" | "task-history" | "calibration-review";
+type AdminTab = "dashboard" | "tours" | "bookings" | "inquiries" | "reviews" | "ai-hub" | "analytics" | "task-history" | "calibration-review" | "competitor-monitor";
 
 export default function Admin() {
   const { user, loading, isAuthenticated, logout } = useAuth();
@@ -46,6 +48,7 @@ export default function Admin() {
 
   // Get stats for badge counts
   const { data: statsData } = trpc.admin.getStats.useQuery();
+  const { data: competitorUnread } = trpc.competitor.unreadAlertCount.useQuery();
 
   useEffect(() => {
     if (!loading && !isAuthenticated) {
@@ -80,6 +83,7 @@ export default function Admin() {
         { id: 'ai-hub', icon: Brain, label: 'AI 中心' },
         { id: 'task-history', icon: ListChecks, label: 'AI 任務記錄' },
         { id: 'calibration-review', icon: CheckCircle2, label: 'QA 品質審查' },
+        { id: 'competitor-monitor', icon: Binoculars, label: '競品監控', badge: typeof competitorUnread === 'number' && competitorUnread > 0 ? competitorUnread : undefined },
       ],
     },
   ];
@@ -259,6 +263,7 @@ export default function Admin() {
           {activeTab === "ai-hub" && <AiHubTab />}
           {activeTab === "task-history" && <TaskHistoryContent />}
           {activeTab === "calibration-review" && <CalibrationReviewTab />}
+          {activeTab === "competitor-monitor" && <CompetitorMonitorTab />}
         </main>
       </div>
     </div>

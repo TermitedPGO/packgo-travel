@@ -252,3 +252,60 @@ export async function addTourTranslationJob(data: TourTranslationJobData) {
 }
 
 console.log("✅ Tour translation queue initialized");
+
+// ══════════════════════════════════════════════════════════════
+// 競品監控 Queue (Competitor Monitor)
+// ══════════════════════════════════════════════════════════════
+
+export interface CompetitorMonitorJobData {
+  competitorTourId: number;
+  tourUrl: string;
+  competitor: string;
+  triggeredBy: "schedule" | "manual";
+}
+
+export interface CompetitorMonitorResult {
+  success: boolean;
+  departuresFound: number;
+  alertsGenerated: number;
+  error?: string;
+}
+
+/**
+ * Queue for competitor monitoring scrape jobs
+ * - 2 retries with exponential backoff (10s → 50s)
+ * - Failed jobs kept for 7 days
+ */
+export const competitorMonitorQueue = new Queue<CompetitorMonitorJobData, CompetitorMonitorResult>(
+  "competitor-monitor",
+  {
+    connection: redisBullMQ,
+    defaultJobOptions: {
+      attempts: 2,
+      backoff: {
+        type: "exponential",
+        delay: 10000,
+      },
+      removeOnComplete: {
+        age: 86400, // 24 hours
+        count: 200,
+      },
+      removeOnFail: {
+        age: 604800, // 7 days
+        count: 500,
+      },
+    },
+  }
+);
+
+/**
+ * Add a single competitor scrape job to the queue
+ */
+export async function addCompetitorMonitorJob(data: CompetitorMonitorJobData) {
+  const jobId = `competitor-${data.competitorTourId}-${Date.now()}`;
+  const job = await competitorMonitorQueue.add("scrape-competitor", data, { jobId });
+  console.log(`✅ Competitor monitor job queued: ${job.id} (tour #${data.competitorTourId})`);
+  return job;
+}
+
+console.log("✅ Competitor monitor queue initialized");

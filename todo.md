@@ -5471,3 +5471,17 @@ AI 辦公室看板中，AI 任務永遠顯示「執行中」（started 狀態）
 - [ ] Task 6c: masterAgent 最終資料寫入 imageLibrary
 - [ ] Task 7a: server/services/pdfImageExtractor.test.ts
 - [ ] Task 7b: server/services/imageIntelligenceService.test.ts
+
+
+---
+
+## Round 13 Phase 4A: 雄獅旅遊競品監控系統
+
+- [ ] Task 1: Schema 擴展（4 張新表 competitorTours/Departures/PriceHistory/Alerts）+ migration
+- [ ] Task 2: 建立 competitorScraperService.ts（爬蟲 + 比對 + 告警生成）
+- [ ] Task 3: BullMQ 排程 + Worker（competitor-monitor queue）
+- [ ] Task 4: DB 查詢函數（CRUD + 快照 + 價格歷史 + 告警）
+- [ ] Task 5: tRPC 路由（admin 競品監控 endpoints）
+- [ ] Task 6: Admin UI — CompetitorMonitorTab.tsx（列表 + Dialog + 告警 + 詳情）
+- [ ] Task 7: Admin Header 告警 Badge
+- [ ] Task 8: Unit Tests（competitorScraperService.test.ts）

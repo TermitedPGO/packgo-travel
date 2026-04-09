@@ -1223,3 +1223,86 @@ export const calibrationResults = mysqlTable("calibrationResults", {
 
 export type CalibrationResult = typeof calibrationResults.$inferSelect;
 export type InsertCalibrationResult = typeof calibrationResults.$inferInsert;
+
+
+// ══════════════════════════════════════════════════════════════
+// 競品監控系統 (Competitor Monitoring)
+// ══════════════════════════════════════════════════════════════
+
+// ── 1. 追蹤的競品行程 ──────────────────────────────────────
+export const competitorTours = mysqlTable("competitorTours", {
+  id: int("id").autoincrement().primaryKey(),
+  competitor: mysqlEnum("competitor", ["liontravel", "colatour", "settour"]).default("liontravel").notNull(),
+  tourUrl: varchar("tourUrl", { length: 1024 }).notNull(),
+  normGroupId: varchar("normGroupId", { length: 100 }),
+  tourTitle: varchar("tourTitle", { length: 500 }),
+  destination: varchar("destination", { length: 255 }),
+  duration: int("duration"),
+  basePrice: int("basePrice"),
+  lastScrapedAt: timestamp("lastScrapedAt"),
+  scrapeStatus: mysqlEnum("scrapeStatus", ["active", "paused", "error"]).default("active").notNull(),
+  scrapeErrorMessage: text("scrapeErrorMessage"),
+  scrapeFrequency: mysqlEnum("scrapeFrequency", ["6h", "12h", "daily", "weekly"]).default("daily").notNull(),
+  matchedTourId: int("matchedTourId"),
+  notes: text("notes"),
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type CompetitorTour = typeof competitorTours.$inferSelect;
+export type InsertCompetitorTour = typeof competitorTours.$inferInsert;
+
+// ── 2. 出團日期快照（每次爬取存一份） ─────────────────────
+export const competitorDepartures = mysqlTable("competitorDepartures", {
+  id: int("id").autoincrement().primaryKey(),
+  competitorTourId: int("competitorTourId").notNull(),
+  departureDate: varchar("departureDate", { length: 20 }).notNull(),
+  returnDate: varchar("returnDate", { length: 20 }),
+  adultPrice: int("adultPrice"),
+  childPrice: int("childPrice"),
+  singleSupplement: int("singleSupplement"),
+  totalSeats: int("totalSeats"),
+  availableSeats: int("availableSeats"),
+  departureStatus: mysqlEnum("departureStatus", ["open", "full", "cancelled", "guaranteed"]).default("open").notNull(),
+  scrapedAt: timestamp("scrapedAt").defaultNow().notNull(),
+});
+export type CompetitorDeparture = typeof competitorDepartures.$inferSelect;
+export type InsertCompetitorDeparture = typeof competitorDepartures.$inferInsert;
+
+// ── 3. 價格歷史（追蹤變動） ──────────────────────────────
+export const competitorPriceHistory = mysqlTable("competitorPriceHistory", {
+  id: int("id").autoincrement().primaryKey(),
+  competitorTourId: int("competitorTourId").notNull(),
+  departureDate: varchar("departureDate", { length: 20 }).notNull(),
+  price: int("price").notNull(),
+  previousPrice: int("previousPrice"),
+  priceChange: int("priceChange"),
+  changeType: mysqlEnum("changeType", ["increase", "decrease", "new", "unchanged"]).default("new").notNull(),
+  recordedAt: timestamp("recordedAt").defaultNow().notNull(),
+});
+export type CompetitorPriceHistory = typeof competitorPriceHistory.$inferSelect;
+export type InsertCompetitorPriceHistory = typeof competitorPriceHistory.$inferInsert;
+
+// ── 4. 告警 ──────────────────────────────────────────────
+export const competitorAlerts = mysqlTable("competitorAlerts", {
+  id: int("id").autoincrement().primaryKey(),
+  competitorTourId: int("competitorTourId").notNull(),
+  alertType: mysqlEnum("alertType", [
+    "price_drop",
+    "price_increase",
+    "low_seats",
+    "sold_out",
+    "new_departure",
+    "tour_cancelled",
+    "guaranteed",
+  ]).notNull(),
+  title: varchar("title", { length: 500 }).notNull(),
+  message: text("message"),
+  severity: mysqlEnum("severity", ["info", "warning", "critical"]).default("info").notNull(),
+  metadata: text("metadata"),
+  isRead: int("isRead").default(0).notNull(),
+  readAt: timestamp("readAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CompetitorAlert = typeof competitorAlerts.$inferSelect;
+export type InsertCompetitorAlert = typeof competitorAlerts.$inferInsert;
