@@ -1523,3 +1523,98 @@ export const tourPriceComparisons = mysqlTable("tourPriceComparisons", {
 });
 export type TourPriceComparison = typeof tourPriceComparisons.$inferSelect;
 export type InsertTourPriceComparison = typeof tourPriceComparisons.$inferInsert;
+
+// ── 收支記錄（統一帳本） ──────────────────────────────────────────
+export const accountingEntries = mysqlTable("accountingEntries", {
+  id: int("id").autoincrement().primaryKey(),
+  entryType: mysqlEnum("entryType", ["income", "expense"]).notNull(),
+  category: mysqlEnum("category", [
+    "tour_booking",
+    "visa_service",
+    "affiliate_commission",
+    "flight_booking",
+    "hotel_booking",
+    "other_income",
+    "rent",
+    "utilities",
+    "salary",
+    "marketing",
+    "travel_cost",
+    "supplier_payment",
+    "office_supplies",
+    "software",
+    "insurance",
+    "tax_payment",
+    "bank_fee",
+    "stripe_fee",
+    "consulate_fee",
+    "other_expense",
+  ]).notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  currency: varchar("currency", { length: 3 }).default("USD").notNull(),
+  description: varchar("description", { length: 1000 }).notNull(),
+  bookingId: int("bookingId"),
+  visaApplicationId: int("visaApplicationId"),
+  paymentId: int("paymentId"),
+  entryDate: timestamp("entryDate").notNull(),
+  receiptUrl: varchar("receiptUrl", { length: 1024 }),
+  notes: text("notes"),
+  tags: varchar("tags", { length: 500 }),
+  isTaxDeductible: int("isTaxDeductible").default(0).notNull(),
+  taxCategory: varchar("taxCategory", { length: 100 }),
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type AccountingEntry = typeof accountingEntries.$inferSelect;
+export type InsertAccountingEntry = typeof accountingEntries.$inferInsert;
+
+// ── 客戶發票 ──────────────────────────────────────────────────────
+export const invoices = mysqlTable("invoices", {
+  id: int("id").autoincrement().primaryKey(),
+  invoiceNumber: varchar("invoiceNumber", { length: 50 }).notNull().unique(),
+  customerName: varchar("customerName", { length: 200 }).notNull(),
+  customerEmail: varchar("customerEmail", { length: 320 }),
+  customerPhone: varchar("customerPhone", { length: 50 }),
+  customerAddress: text("customerAddress"),
+  bookingId: int("bookingId"),
+  visaApplicationId: int("visaApplicationId"),
+  userId: int("userId"),
+  subtotal: decimal("subtotal", { precision: 12, scale: 2 }).notNull(),
+  taxRate: decimal("taxRate", { precision: 5, scale: 2 }).default("0"),
+  taxAmount: decimal("taxAmount", { precision: 12, scale: 2 }).default("0"),
+  totalAmount: decimal("totalAmount", { precision: 12, scale: 2 }).notNull(),
+  currency: varchar("currency", { length: 3 }).default("USD").notNull(),
+  lineItems: text("lineItems"),
+  status: mysqlEnum("status", ["draft", "sent", "paid", "overdue", "cancelled"]).default("draft").notNull(),
+  dueDate: timestamp("dueDate"),
+  paidAt: timestamp("paidAt"),
+  sentAt: timestamp("sentAt"),
+  pdfUrl: varchar("pdfUrl", { length: 1024 }),
+  notes: text("notes"),
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type Invoice = typeof invoices.$inferSelect;
+export type InsertInvoice = typeof invoices.$inferInsert;
+
+// ── 定期支出模板 ──────────────────────────────────────────────────
+export const recurringExpenses = mysqlTable("recurringExpenses", {
+  id: int("id").autoincrement().primaryKey(),
+  category: varchar("category", { length: 50 }).notNull(),
+  description: varchar("description", { length: 500 }).notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  currency: varchar("currency", { length: 3 }).default("USD").notNull(),
+  frequency: mysqlEnum("frequency", ["monthly", "quarterly", "yearly"]).default("monthly").notNull(),
+  dayOfMonth: int("dayOfMonth").default(1),
+  isTaxDeductible: int("isTaxDeductible").default(1).notNull(),
+  taxCategory: varchar("taxCategory", { length: 100 }),
+  isActive: int("isActive").default(1).notNull(),
+  lastGeneratedAt: timestamp("lastGeneratedAt"),
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type RecurringExpense = typeof recurringExpenses.$inferSelect;
+export type InsertRecurringExpense = typeof recurringExpenses.$inferInsert;

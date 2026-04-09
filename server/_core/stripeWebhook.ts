@@ -4,6 +4,7 @@ import { ENV } from "./env";
 import * as db from "../db";
 import { sendPaymentSuccessEmail } from "../email";
 import { sendVisaApplicationConfirmation } from "../services/visaEmailService";
+import { createAccountingEntry } from "../db";
 
 
 // P0-2: Lazy-load Stripe to prevent server crash when STRIPE_SECRET_KEY is not set
@@ -140,6 +141,24 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
 
   console.log(`[Stripe Webhook] Booking ${bookingId} payment status updated to ${newPaymentStatus}`);
 
+  // Auto-create accounting income entry
+  try {
+    await createAccountingEntry({
+      entryType: "income",
+      category: "tour_booking",
+      amount: String(amount),
+      currency: (session.currency ?? "usd").toUpperCase(),
+      description: `行程訂單付款 #${bookingId}${paymentType === "deposit" ? "（訂金）" : paymentType === "balance" ? "（尾款）" : "（全額）"}`,
+      bookingId: parseInt(bookingId),
+      entryDate: new Date(),
+      isTaxDeductible: 0,
+      createdBy: 1,
+    });
+    console.log(`[Stripe Webhook] Accounting entry created for booking ${bookingId}`);
+  } catch (err) {
+    console.error("[Stripe Webhook] Failed to create accounting entry:", err);
+  }
+
   // Send payment success email
   try {
     const tour = await db.getTourById(booking.tourId);
@@ -198,6 +217,25 @@ async function handleVisaPaymentCompleted(
 
   // Update application status to paid
   await db.updateVisaApplicationStatus(applicationId, "paid", undefined, "Stripe 付款完成");
+
+  // Auto-create accounting income entry for visa
+  try {
+    const visaAmount = session.amount_total ? session.amount_total / 100 : 0;
+    await createAccountingEntry({
+      entryType: "income",
+      category: "visa_service",
+      amount: String(visaAmount),
+      currency: (session.currency ?? "usd").toUpperCase(),
+      description: `中國簽證代辦 #${applicationId}（${application.firstName} ${application.lastName}）`,
+      visaApplicationId: applicationId,
+      entryDate: new Date(),
+      isTaxDeductible: 0,
+      createdBy: 1,
+    });
+    console.log(`[Stripe Webhook] Accounting entry created for visa application ${applicationId}`);
+  } catch (err) {
+    console.error("[Stripe Webhook] Failed to create visa accounting entry:", err);
+  }
 
   console.log(`[Stripe Webhook] Visa application ${applicationId} payment confirmed`);
 

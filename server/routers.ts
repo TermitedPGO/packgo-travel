@@ -17,6 +17,8 @@ import { getExchangeRates, convertCurrency, getExchangeRate, formatCurrency, get
 import { calculateVisaPricing, CHINA_VISA_PRICING } from "./services/visaPricingService";
 import { sendVisaStatusUpdate, sendVisaApprovedEmail, sendVisaRejectedEmail } from "./services/visaEmailService";
 import { generateFlightLink, generateHotelLink, generateHomepageLink, trackAffiliateClick } from "./services/affiliateLinkService";
+import { generateInvoiceNumber, generateInvoicePdf } from "./services/invoiceService";
+import { generateProfitAndLossReport, generateMonthlyTrend, generateTaxSummary, generateAccountingCsv, generateFinancialDashboard, CATEGORY_LABELS } from "./services/financialReportService";
 import Stripe from "stripe";
 import { ENV } from "./_core/env";
 
@@ -4252,6 +4254,323 @@ export const appRouter = router({
       .input(z.object({ tourId: z.number() }))
       .query(async ({ input }) => {
         return db.getTourPriceComparison(input.tourId);
+      }),
+  }),
+
+
+  accounting: router({
+    // List accounting entries with filters
+    list: adminProcedure
+      .input(z.object({
+        startDate: z.date().optional(),
+        endDate: z.date().optional(),
+        entryType: z.enum(["income", "expense"]).optional(),
+        category: z.string().optional(),
+        limit: z.number().min(1).max(500).default(100),
+        offset: z.number().min(0).default(0),
+      }))
+      .query(async ({ input }) => {
+        return db.getAccountingEntries(input);
+      }),
+
+    // Get accounting stats
+    stats: adminProcedure
+      .input(z.object({
+        startDate: z.date().optional(),
+        endDate: z.date().optional(),
+      }))
+      .query(async ({ input }) => {
+        return db.getAccountingStats(input);
+      }),
+
+    // Create a new accounting entry
+    create: adminProcedure
+      .input(z.object({
+        entryType: z.enum(["income", "expense"]),
+        category: z.string(),
+        amount: z.number().positive(),
+        currency: z.string().default("TWD"),
+        description: z.string(),
+        entryDate: z.date(),
+        isTaxDeductible: z.boolean().default(false),
+        taxCategory: z.string().optional(),
+        notes: z.string().optional(),
+        bookingId: z.number().optional(),
+        visaApplicationId: z.number().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const entry = await db.createAccountingEntry({
+          ...input,
+          amount: String(input.amount),
+          isTaxDeductible: input.isTaxDeductible ? 1 : 0,
+          createdBy: ctx.user.id,
+        });
+        return entry;
+      }),
+
+    // Update an accounting entry
+    update: adminProcedure
+      .input(z.object({
+        id: z.number(),
+        entryType: z.enum(["income", "expense"]).optional(),
+        category: z.string().optional(),
+        amount: z.number().positive().optional(),
+        currency: z.string().optional(),
+        description: z.string().optional(),
+        entryDate: z.date().optional(),
+        isTaxDeductible: z.boolean().optional(),
+        taxCategory: z.string().optional(),
+        notes: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const { id, ...updates } = input;
+        const mapped: Record<string, unknown> = { ...updates };
+        if (updates.amount !== undefined) mapped.amount = String(updates.amount);
+        if (updates.isTaxDeductible !== undefined) mapped.isTaxDeductible = updates.isTaxDeductible ? 1 : 0;
+        return db.updateAccountingEntry(id, mapped);
+      }),
+
+    // Delete an accounting entry
+    delete: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        await db.deleteAccountingEntry(input.id);
+        return { success: true };
+      }),
+
+    // Export CSV
+    exportCsv: adminProcedure
+      .input(z.object({
+        startDate: z.date().optional(),
+        endDate: z.date().optional(),
+        entryType: z.enum(["income", "expense"]).optional(),
+      }))
+      .query(async ({ input }) => {
+        const { entries } = await db.getAccountingEntries({ ...input, limit: 50000 });
+        const csv = generateAccountingCsv(entries);
+        return { csv, filename: `accounting-${new Date().toISOString().slice(0, 10)}.csv` };
+      }),
+
+    // Get category labels
+    categories: adminProcedure.query(async () => {
+      return CATEGORY_LABELS;
+    }),
+
+    // Financial dashboard
+    dashboard: adminProcedure
+      .input(z.object({
+        startDate: z.date().optional(),
+        endDate: z.date().optional(),
+      }))
+      .query(async ({ input }) => {
+        const now = new Date();
+        const startDate = input.startDate ?? new Date(now.getFullYear(), now.getMonth(), 1);
+        const endDate = input.endDate ?? new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+        return generateFinancialDashboard(startDate, endDate);
+      }),
+
+    // P&L report
+    profitAndLoss: adminProcedure
+      .input(z.object({
+        startDate: z.date(),
+        endDate: z.date(),
+      }))
+      .query(async ({ input }) => {
+        return generateProfitAndLossReport(input.startDate, input.endDate);
+      }),
+
+    // Monthly trend
+    monthlyTrend: adminProcedure
+      .input(z.object({ months: z.number().min(1).max(24).default(12) }))
+      .query(async ({ input }) => {
+        return generateMonthlyTrend(input.months);
+      }),
+
+    // Tax summary
+    taxSummary: adminProcedure
+      .input(z.object({ year: z.number().min(2020).max(2030) }))
+      .query(async ({ input }) => {
+        return generateTaxSummary(input.year);
+      }),
+  }),
+
+  invoices: router({
+    // List invoices
+    list: adminProcedure
+      .input(z.object({
+        status: z.string().optional(),
+        limit: z.number().min(1).max(200).default(50),
+        offset: z.number().min(0).default(0),
+      }))
+      .query(async ({ input }) => {
+        return db.getInvoices(input);
+      }),
+
+    // Get single invoice
+    get: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ input }) => {
+        return db.getInvoiceById(input.id);
+      }),
+
+    // Create invoice
+    create: adminProcedure
+      .input(z.object({
+        customerName: z.string(),
+        customerEmail: z.string().optional(),
+        customerPhone: z.string().optional(),
+        customerAddress: z.string().optional(),
+        lineItems: z.array(z.object({
+          description: z.string(),
+          quantity: z.number().positive(),
+          unitPrice: z.number().positive(),
+          amount: z.number().positive(),
+        })),
+        subtotal: z.number(),
+        taxRate: z.number().min(0).max(100).default(0),
+        taxAmount: z.number().default(0),
+        totalAmount: z.number(),
+        currency: z.string().default("TWD"),
+        notes: z.string().optional(),
+        dueDate: z.date().optional(),
+        bookingId: z.number().optional(),
+        visaApplicationId: z.number().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const invoiceNumber = await generateInvoiceNumber();
+        const invoiceData = {
+          invoiceNumber,
+          issueDate: new Date(),
+          status: "draft" as const,
+          ...input,
+        };
+        // Generate HTML invoice and upload to S3
+        const pdfUrl = await generateInvoicePdf(invoiceData);
+        const invoice = await db.createInvoice({
+          ...invoiceData,
+          lineItems: JSON.stringify(input.lineItems),
+          subtotal: String(input.subtotal),
+          taxRate: String(input.taxRate),
+          taxAmount: String(input.taxAmount),
+          totalAmount: String(input.totalAmount),
+          pdfUrl: pdfUrl ?? undefined,
+          createdBy: ctx.user.id,
+        });
+        return invoice;
+      }),
+
+    // Update invoice status
+    updateStatus: adminProcedure
+      .input(z.object({
+        id: z.number(),
+        status: z.enum(["draft", "sent", "paid", "overdue", "cancelled"]),
+      }))
+      .mutation(async ({ input }) => {
+        return db.updateInvoiceStatus(input.id, input.status);
+      }),
+
+    // Delete invoice
+    delete: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        await db.deleteInvoice(input.id);
+        return { success: true };
+      }),
+  }),
+
+  recurringExpenses: router({
+    // List recurring expenses
+    list: adminProcedure.query(async () => {
+      return db.getRecurringExpenses();
+    }),
+
+    // Create recurring expense template
+    create: adminProcedure
+      .input(z.object({
+        name: z.string(),
+        category: z.string(),
+        amount: z.number().positive(),
+        currency: z.string().default("TWD"),
+        frequency: z.enum(["monthly", "quarterly", "yearly"]),
+        nextDueDate: z.date(),
+        isTaxDeductible: z.boolean().default(false),
+        taxCategory: z.string().optional(),
+        notes: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        return db.createRecurringExpense({
+          description: input.name,
+          category: input.category,
+          amount: String(input.amount),
+          currency: input.currency,
+          frequency: input.frequency,
+          dayOfMonth: new Date(input.nextDueDate).getDate(),
+          isTaxDeductible: input.isTaxDeductible ? 1 : 0,
+          taxCategory: input.taxCategory,
+          createdBy: ctx.user.id,
+        });
+      }),
+
+    // Update recurring expense
+    update: adminProcedure
+      .input(z.object({
+        id: z.number(),
+        name: z.string().optional(),
+        category: z.string().optional(),
+        amount: z.number().positive().optional(),
+        currency: z.string().optional(),
+        frequency: z.enum(["monthly", "quarterly", "yearly"]).optional(),
+        nextDueDate: z.date().optional(),
+        isActive: z.boolean().optional(),
+        isTaxDeductible: z.boolean().optional(),
+        taxCategory: z.string().optional(),
+        notes: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const { id, ...updates } = input;
+        const mapped: Record<string, unknown> = { ...updates };
+        if (updates.amount !== undefined) mapped.amount = String(updates.amount);
+        if (updates.isTaxDeductible !== undefined) mapped.isTaxDeductible = updates.isTaxDeductible ? 1 : 0;
+        if (updates.isActive !== undefined) mapped.isActive = updates.isActive ? 1 : 0;
+        if ((updates as any).name !== undefined) { mapped.description = (updates as any).name; delete mapped.name; }
+        if ((updates as any).nextDueDate !== undefined) { mapped.dayOfMonth = new Date((updates as any).nextDueDate).getDate(); delete mapped.nextDueDate; }
+        return db.updateRecurringExpense(id, mapped);
+      }),
+
+    // Delete recurring expense
+    delete: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        await db.deleteRecurringExpense(input.id);
+        return { success: true };
+      }),
+
+    // Apply (generate accounting entry from) a recurring expense
+    applyExpense: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        const expense = await db.getRecurringExpenseById(input.id);
+        if (!expense) throw new TRPCError({ code: "NOT_FOUND", message: "定期支出不存在" });
+        const entry = await db.createAccountingEntry({
+          entryType: "expense",
+          category: expense.category,
+          amount: expense.amount,
+          currency: expense.currency,
+          description: `[定期] ${expense.description}`,
+          entryDate: new Date(),
+          isTaxDeductible: expense.isTaxDeductible,
+          taxCategory: expense.taxCategory ?? undefined,
+          notes: expense.notes ?? undefined,
+          createdBy: ctx.user.id,
+        });
+        // Compute next due date from dayOfMonth
+        const now = new Date();
+        const nextDue = new Date(now.getFullYear(), now.getMonth(), expense.dayOfMonth ?? 1);
+        if (expense.frequency === "monthly") nextDue.setMonth(nextDue.getMonth() + 1);
+        else if (expense.frequency === "quarterly") nextDue.setMonth(nextDue.getMonth() + 3);
+        else if (expense.frequency === "yearly") nextDue.setFullYear(nextDue.getFullYear() + 1);
+        await db.updateRecurringExpense(input.id, { lastGeneratedAt: new Date() });
+        return { entry, nextDueDate: nextDue };
       }),
   }),
 

@@ -27,7 +27,10 @@ import {
   visaApplications, VisaApplication, InsertVisaApplication,
   visaStatusHistory, VisaStatusHistory, InsertVisaStatusHistory,
   affiliateClicks, AffiliateClick, InsertAffiliateClick,
-  tourPriceComparisons, TourPriceComparison, InsertTourPriceComparison
+  tourPriceComparisons, TourPriceComparison, InsertTourPriceComparison,
+  accountingEntries, AccountingEntry, InsertAccountingEntry,
+  invoices, Invoice, InsertInvoice,
+  recurringExpenses, RecurringExpense, InsertRecurringExpense
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -2924,3 +2927,173 @@ export async function deleteTourPriceComparison(tourId: number): Promise<void> {
 
   await db.delete(tourPriceComparisons).where(eq(tourPriceComparisons.tourId, tourId));
 }
+
+// ─── Accounting Entries ────────────────────────────────────────────────────────
+
+export async function createAccountingEntry(data: InsertAccountingEntry): Promise<AccountingEntry | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [result] = await db.insert(accountingEntries).values(data);
+  const id = (result as any).insertId;
+  const [entry] = await db.select().from(accountingEntries).where(eq(accountingEntries.id, id));
+  return entry || null;
+}
+
+export async function getAccountingEntries(params: {
+  entryType?: 'income' | 'expense';
+  category?: string;
+  startDate?: Date;
+  endDate?: Date;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ entries: AccountingEntry[]; total: number }> {
+  const db = await getDb();
+  if (!db) return { entries: [], total: 0 };
+  const conditions = [];
+  if (params.entryType) conditions.push(eq(accountingEntries.entryType, params.entryType));
+  if (params.category) conditions.push(eq(accountingEntries.category, params.category as any));
+  if (params.startDate) conditions.push(gte(accountingEntries.entryDate, params.startDate));
+  if (params.endDate) conditions.push(lte(accountingEntries.entryDate, params.endDate));
+  if (params.search) conditions.push(like(accountingEntries.description, `%${params.search}%`));
+  const where = conditions.length > 0 ? and(...conditions) : undefined;
+  const [countResult] = await db.select({ count: sql<number>`count(*)` }).from(accountingEntries).where(where);
+  const entries = await db.select().from(accountingEntries).where(where)
+    .orderBy(desc(accountingEntries.entryDate))
+    .limit(params.limit ?? 50)
+    .offset(params.offset ?? 0);
+  return { entries, total: Number(countResult.count) };
+}
+
+export async function updateAccountingEntry(id: number, data: Partial<InsertAccountingEntry>): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  await db.update(accountingEntries).set({ ...data, updatedAt: new Date() }).where(eq(accountingEntries.id, id));
+  return true;
+}
+
+export async function deleteAccountingEntry(id: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  await db.delete(accountingEntries).where(eq(accountingEntries.id, id));
+  return true;
+}
+
+export async function getAccountingStats(params: { startDate: Date; endDate: Date }): Promise<{
+  totalIncome: number; totalExpenses: number; netProfit: number;
+  prevTotalIncome: number; prevTotalExpenses: number; prevNetProfit: number;
+  yearIncome: number; yearExpenses: number; yearNetProfit: number;
+}> {
+  const db = await getDb();
+  if (!db) return { totalIncome: 0, totalExpenses: 0, netProfit: 0, prevTotalIncome: 0, prevTotalExpenses: 0, prevNetProfit: 0, yearIncome: 0, yearExpenses: 0, yearNetProfit: 0 };
+  const diff = params.endDate.getTime() - params.startDate.getTime();
+  const prevStart = new Date(params.startDate.getTime() - diff);
+  const prevEnd = new Date(params.endDate.getTime() - diff);
+  const yearStart = new Date(params.startDate.getFullYear(), 0, 1);
+  const yearEnd = new Date(params.startDate.getFullYear(), 11, 31, 23, 59, 59);
+  const [curr, prev, year] = await Promise.all([
+    db.select({ type: accountingEntries.entryType, total: sql<number>`COALESCE(SUM(amount), 0)` })
+      .from(accountingEntries).where(and(gte(accountingEntries.entryDate, params.startDate), lte(accountingEntries.entryDate, params.endDate)))
+      .groupBy(accountingEntries.entryType),
+    db.select({ type: accountingEntries.entryType, total: sql<number>`COALESCE(SUM(amount), 0)` })
+      .from(accountingEntries).where(and(gte(accountingEntries.entryDate, prevStart), lte(accountingEntries.entryDate, prevEnd)))
+      .groupBy(accountingEntries.entryType),
+    db.select({ type: accountingEntries.entryType, total: sql<number>`COALESCE(SUM(amount), 0)` })
+      .from(accountingEntries).where(and(gte(accountingEntries.entryDate, yearStart), lte(accountingEntries.entryDate, yearEnd)))
+      .groupBy(accountingEntries.entryType),
+  ]);
+  const sum = (rows: any[], type: string) => Number(rows.find(r => r.type === type)?.total ?? 0);
+  const ti = sum(curr, 'income'), te = sum(curr, 'expense');
+  const pti = sum(prev, 'income'), pte = sum(prev, 'expense');
+  const yi = sum(year, 'income'), ye = sum(year, 'expense');
+  return { totalIncome: ti, totalExpenses: te, netProfit: ti - te, prevTotalIncome: pti, prevTotalExpenses: pte, prevNetProfit: pti - pte, yearIncome: yi, yearExpenses: ye, yearNetProfit: yi - ye };
+}
+
+// ─── Invoices ─────────────────────────────────────────────────────────────────
+
+export async function createInvoice(data: InsertInvoice): Promise<Invoice | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [result] = await db.insert(invoices).values(data);
+  const id = (result as any).insertId;
+  const [inv] = await db.select().from(invoices).where(eq(invoices.id, id));
+  return inv || null;
+}
+
+export async function getInvoices(params: { status?: string; limit?: number; offset?: number }): Promise<Invoice[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions = [];
+  if (params.status) conditions.push(eq(invoices.status, params.status as any));
+  const where = conditions.length > 0 ? and(...conditions) : undefined;
+  return db.select().from(invoices).where(where).orderBy(desc(invoices.createdAt)).limit(params.limit ?? 50).offset(params.offset ?? 0);
+}
+
+export async function getInvoiceById(id: number): Promise<Invoice | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [inv] = await db.select().from(invoices).where(eq(invoices.id, id));
+  return inv || null;
+}
+
+export async function updateInvoice(id: number, data: Partial<InsertInvoice>): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  await db.update(invoices).set({ ...data, updatedAt: new Date() }).where(eq(invoices.id, id));
+  return true;
+}
+
+export async function getNextInvoiceSequence(year: number): Promise<number> {
+  const db = await getDb();
+  if (!db) return 1;
+  const prefix = `INV-${year}-`;
+  const [result] = await db.select({ count: sql<number>`count(*)` }).from(invoices).where(like(invoices.invoiceNumber, `${prefix}%`));
+  return Number(result.count) + 1;
+}
+
+// ─── Recurring Expenses ───────────────────────────────────────────────────────
+
+export async function getRecurringExpenses(): Promise<RecurringExpense[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(recurringExpenses).orderBy(desc(recurringExpenses.createdAt));
+}
+
+export async function createRecurringExpense(data: InsertRecurringExpense): Promise<RecurringExpense | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [result] = await db.insert(recurringExpenses).values(data);
+  const id = (result as any).insertId;
+  const [exp] = await db.select().from(recurringExpenses).where(eq(recurringExpenses.id, id));
+  return exp || null;
+}
+
+export async function updateRecurringExpense(id: number, data: Partial<InsertRecurringExpense>): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  await db.update(recurringExpenses).set({ ...data, updatedAt: new Date() }).where(eq(recurringExpenses.id, id));
+  return true;
+}
+
+export async function deleteRecurringExpense(id: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  await db.delete(recurringExpenses).where(eq(recurringExpenses.id, id));
+  return true;
+}
+
+export async function updateInvoiceStatus(id: number, status: string): Promise<boolean> {
+  const result = await db.update(invoices).set({ status: status as any, updatedAt: new Date() }).where(eq(invoices.id, id));
+  return (result[0] as any).affectedRows > 0;
+}
+
+export async function deleteInvoice(id: number): Promise<boolean> {
+  const result = await db.delete(invoices).where(eq(invoices.id, id));
+  return (result[0] as any).affectedRows > 0;
+}
+
+export async function getRecurringExpenseById(id: number): Promise<RecurringExpense | null> {
+  const rows = await db.select().from(recurringExpenses).where(eq(recurringExpenses.id, id)).limit(1);
+  return rows[0] ?? null;
+}
+

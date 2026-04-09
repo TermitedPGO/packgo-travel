@@ -20,6 +20,7 @@ import {
   Binoculars,
   Megaphone,
   FileText,
+  DollarSign,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
@@ -41,8 +42,9 @@ import CompetitorMonitorTab from "@/components/admin/CompetitorMonitorTab";
 import MarketingTab from "@/components/admin/MarketingTab";
 import VisaManagementTab from "@/components/admin/VisaManagementTab";
 import AffiliateTab from "@/components/admin/AffiliateTab";
+import AccountingTab from "@/components/admin/AccountingTab";
 
-type AdminTab = "dashboard" | "tours" | "bookings" | "inquiries" | "reviews" | "ai-hub" | "analytics" | "task-history" | "calibration-review" | "competitor-monitor" | "marketing" | "visa" | "affiliate";
+type AdminTab = "dashboard" | "tours" | "bookings" | "inquiries" | "reviews" | "ai-hub" | "analytics" | "task-history" | "calibration-review" | "competitor-monitor" | "marketing" | "visa" | "affiliate" | "accounting";
 
 export default function Admin() {
   const { user, loading, isAuthenticated, logout } = useAuth();
@@ -102,6 +104,12 @@ export default function Admin() {
       label: '聯盟行銷',
       items: [
         { id: 'affiliate', icon: TrendingUp, label: 'Trip.com 聯盟管理' },
+      ],
+    },
+    {
+      label: '財務管理',
+      items: [
+        { id: 'accounting', icon: DollarSign, label: '會計記帳' },
       ],
     },
   ];
@@ -285,6 +293,7 @@ export default function Admin() {
           {activeTab === "marketing" && <MarketingTab />}
           {activeTab === "visa" && <VisaManagementTab />}
           {activeTab === "affiliate" && <AffiliateTab />}
+          {activeTab === "accounting" && <AccountingTab />}
         </main>
       </div>
     </div>
