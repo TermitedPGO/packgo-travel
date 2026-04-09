@@ -46,9 +46,8 @@ export default function Destinations() {
               className="group relative aspect-[4/3] overflow-hidden rounded-xl cursor-pointer shadow-md hover:shadow-xl transition-all duration-500"
             >
               <img 
-                alt={dest.name}
-              src={dest.image} 
-                alt={t(dest.nameKey)} 
+                alt={t(dest.nameKey)}
+                src={dest.image} 
                 className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 rounded-xl"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity" />
