@@ -4561,7 +4561,6 @@ export const appRouter = router({
           entryDate: new Date(),
           isTaxDeductible: expense.isTaxDeductible,
           taxCategory: expense.taxCategory ?? undefined,
-          notes: expense.notes ?? undefined,
           createdBy: ctx.user.id,
         });
         // Compute next due date from dayOfMonth
