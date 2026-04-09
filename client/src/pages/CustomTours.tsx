@@ -66,7 +66,7 @@ export default function CustomTours() {
             alt={t('customTours.title')}
             className="w-full h-full object-cover rounded-xl"
             onError={(e) => {
-              e.currentTarget.src = "/images/hero-sakura.jpg";
+              e.currentTarget.src = "/images/hero-travel.webp";
             }}
           />
           <div className="absolute inset-0 bg-black/40" />

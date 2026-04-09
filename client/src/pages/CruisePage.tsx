@@ -1,10 +1,10 @@
 import { useState, useMemo } from "react";
+import Header from "@/components/Header";
 import SEO from "@/components/SEO";
+import Footer from "@/components/Footer";
 import { useLocale } from "@/contexts/LocaleContext";
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
-import Header from "@/components/Header";
-import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -21,34 +21,6 @@ import {
   Star,
 } from "lucide-react";
 
-// 智能標籤生成函數
-function generateSmartTags(tour: any): { text: string; color: string; icon?: string }[] {
-  const tags: { text: string; color: string; icon?: string }[] = [];
-  
-  // 天數標籤
-  const days = tour.days || 0;
-  if (days >= 10) {
-    tags.push({ text: "深度旅遊", color: "bg-teal-100 text-teal-700 border-teal-200" });
-  } else if (days >= 7) {
-    tags.push({ text: "經典行程", color: "bg-blue-100 text-blue-700 border-blue-200" });
-  } else if (days <= 4 && days > 0) {
-    tags.push({ text: "輕旅行", color: "bg-green-100 text-green-700 border-green-200" });
-  }
-  
-  // 價格標籤
-  const price = tour.price || 0;
-  if (price >= 80000) {
-    tags.push({ text: "精緻行程", color: "bg-amber-100 text-amber-700 border-amber-200", icon: "star" });
-  } else if (price <= 30000 && price > 0) {
-    tags.push({ text: "超值優惠", color: "bg-red-100 text-red-700 border-red-200", icon: "tag" });
-  }
-  
-  // 郵輪標籤
-  tags.push({ text: "郵輪", color: "bg-cyan-100 text-cyan-700 border-cyan-200", icon: "ship" });
-  
-  return tags;
-}
-
 // 郵輪圖片
 const cruiseImages: Record<string, string> = {
   "地中海": "https://images.unsplash.com/photo-1548574505-5e239809ee19?w=800",
@@ -60,37 +32,83 @@ const cruiseImages: Record<string, string> = {
 };
 
 export default function CruisePage() {
-  const { t } = useLocale();
+  const { t, language } = useLocale();
   const [searchQuery, setSearchQuery] = useState("");
   const [favorites, setFavorites] = useState<Set<number>>(new Set());
-  
+
+  // TAG_LABELS: maps tag key → translated label
+  const TAG_LABELS = {
+    deepTravel:  t('cruise.deepTravel'),
+    classicTour: t('cruise.classicTour'),
+    lightTravel: t('cruise.lightTravel'),
+    premiumTour: t('cruise.premiumTour'),
+    valueDeal:   t('cruise.valueDeal'),
+    cruise:      t('cruise.cruise'),
+  };
+
+  // 智能標籤生成函數 — uses TAG_LABELS instead of hardcoded Chinese
+  function generateSmartTags(tour: any): { text: string; color: string; icon?: string }[] {
+    const tags: { text: string; color: string; icon?: string }[] = [];
+
+    const days = tour.days || 0;
+    if (days >= 10) {
+      tags.push({ text: TAG_LABELS.deepTravel, color: "bg-teal-100 text-teal-700 border-teal-200" });
+    } else if (days >= 7) {
+      tags.push({ text: TAG_LABELS.classicTour, color: "bg-blue-100 text-blue-700 border-blue-200" });
+    } else if (days <= 4 && days > 0) {
+      tags.push({ text: TAG_LABELS.lightTravel, color: "bg-green-100 text-green-700 border-green-200" });
+    }
+
+    const price = tour.price || 0;
+    if (price >= 80000) {
+      tags.push({ text: TAG_LABELS.premiumTour, color: "bg-amber-100 text-amber-700 border-amber-200", icon: "star" });
+    } else if (price <= 30000 && price > 0) {
+      tags.push({ text: TAG_LABELS.valueDeal, color: "bg-red-100 text-red-700 border-red-200", icon: "tag" });
+    }
+
+    tags.push({ text: TAG_LABELS.cruise, color: "bg-cyan-100 text-cyan-700 border-cyan-200", icon: "ship" });
+
+    return tags;
+  }
+
   // 搜尋郵輪行程
   const { data: searchResults, isLoading } = trpc.tours.search.useQuery({
     pageSize: 100,
   });
-  
+
   // 過濾郵輪行程
   const cruiseTours = useMemo(() => {
     if (!searchResults?.tours) return [];
-    
+
     return searchResults.tours.filter((tour: any) => {
-      // 檢查是否為郵輪行程
-      // 確保 tags 是陣列
       const tagsArray = Array.isArray(tour.tags) ? tour.tags : [];
-      const isCruise = 
+      const isCruise =
         tour.title?.includes("郵輪") ||
         tour.tourType?.includes("郵輪") ||
         tagsArray.some((tag: string) => tag.includes("郵輪"));
-      
-      // 搜尋過濾
-      const matchesSearch = !searchQuery || 
+
+      const matchesSearch = !searchQuery ||
         tour.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         tour.destination?.toLowerCase().includes(searchQuery.toLowerCase());
-      
+
       return isCruise && matchesSearch;
     });
   }, [searchResults, searchQuery]);
-  
+
+  // Batch fetch translations for non-Chinese languages
+  const tourIds = useMemo(() => cruiseTours.map((t: any) => t.id), [cruiseTours.length, cruiseTours.map((t: any) => t.id).join(',')]);
+  const { data: batchTranslations } = trpc.translation.getBatchTourTranslations.useQuery(
+    { tourIds, targetLanguage: language as 'zh-TW' | 'en' | 'es' | 'ja' | 'ko' },
+    { enabled: language !== 'zh-TW' && tourIds.length > 0 }
+  );
+
+  // Helper to get translated field for a specific tour
+  const getTranslatedField = (tourId: number, field: string, fallback: string) => {
+    if (language === 'zh-TW' || !batchTranslations) return fallback;
+    const tourTranslations = (batchTranslations as Record<number, Record<string, string>>)[tourId];
+    return tourTranslations?.[field] || fallback;
+  };
+
   const toggleFavorite = (id: number) => {
     setFavorites(prev => {
       const newFavorites = new Set(prev);
@@ -102,16 +120,20 @@ export default function CruisePage() {
       return newFavorites;
     });
   };
-  
+
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
-      <SEO title="郵輪旅遊" description="PACK&GO 精選郵輪旅遊行程，帶您暢遊地中海、加勒比海等世界頂級郵輪航線。" url="/cruise" />
+      <SEO
+        title={t('cruise.title')}
+        description={t('cruise.subtitle')}
+        url="/cruise"
+      />
       <Header />
-      
+
       <main className="flex-grow">
         {/* Hero Section */}
         <section className="relative h-[400px] overflow-hidden">
-          <div 
+          <div
             className="absolute inset-0 bg-cover bg-center"
             style={{
               backgroundImage: `url('https://images.unsplash.com/photo-1548574505-5e239809ee19?w=1920')`,
@@ -119,7 +141,7 @@ export default function CruisePage() {
           >
             <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/40 to-black/60" />
           </div>
-          
+
           <div className="relative container h-full flex flex-col justify-center items-center text-center text-white">
             <div className="flex items-center gap-3 mb-4">
               <Ship className="h-12 w-12" />
@@ -134,7 +156,7 @@ export default function CruisePage() {
             </p>
           </div>
         </section>
-        
+
         {/* 麵包屑導航 */}
         <div className="bg-white border-b">
           <div className="container py-3">
@@ -147,7 +169,7 @@ export default function CruisePage() {
             </nav>
           </div>
         </div>
-        
+
         {/* 搜尋區 */}
         <section className="bg-white py-6 border-b">
           <div className="container">
@@ -167,7 +189,7 @@ export default function CruisePage() {
             </div>
           </div>
         </section>
-        
+
         {/* 郵輪行程列表 */}
         <section className="py-12">
           <div className="container">
@@ -181,7 +203,8 @@ export default function CruisePage() {
                   const smartTags = generateSmartTags(tour);
                   const displayTags = smartTags.slice(0, 3);
                   const hasMoreTags = smartTags.length > 3;
-                  
+                  const displayTitle = getTranslatedField(tour.id, 'title', tour.title);
+
                   return (
                     <Link key={tour.id} href={`/tours/${tour.id}`}>
                       <div className="bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-lg transition-all duration-300 group cursor-pointer h-full flex flex-col">
@@ -189,11 +212,11 @@ export default function CruisePage() {
                         <div className="relative h-48 overflow-hidden rounded-t-xl">
                           <img
                             src={tour.imageUrl || cruiseImages.default}
-                            alt={tour.title}
+                            alt={displayTitle}
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 rounded-xl"
                           />
                           <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
-                          
+
                           {/* 收藏按鈕 */}
                           <button
                             onClick={(e) => {
@@ -211,14 +234,14 @@ export default function CruisePage() {
                               }`}
                             />
                           </button>
-                          
+
                           {/* 郵輪標識 */}
                           <div className="absolute top-3 left-3 bg-cyan-500 text-white px-3 py-1 rounded-lg text-sm font-medium flex items-center gap-1">
                             <Ship className="h-4 w-4" />
-                            郵輪
+                            {TAG_LABELS.cruise}
                           </div>
                         </div>
-                        
+
                         {/* 內容 */}
                         <div className="p-4 flex-1 flex flex-col">
                           {/* 目的地 */}
@@ -226,12 +249,12 @@ export default function CruisePage() {
                             <MapPin className="h-4 w-4" />
                             <span>{tour.destination || t('cruise.multipleDestinations')}</span>
                           </div>
-                          
+
                           {/* 標題 */}
                           <h3 className="font-bold text-gray-900 mb-2 line-clamp-2 group-hover:text-primary transition-colors">
-                            {tour.title}
+                            {displayTitle}
                           </h3>
-                          
+
                           {/* 標籤 */}
                           <div className="flex flex-wrap gap-1.5 mb-3 h-[28px] overflow-hidden">
                             {displayTags.map((tag, idx) => (
@@ -252,7 +275,7 @@ export default function CruisePage() {
                               </Badge>
                             )}
                           </div>
-                          
+
                           {/* 天數與價格 */}
                           <div className="mt-auto pt-3 border-t flex items-center justify-between">
                             <div className="flex items-center gap-1 text-gray-600 text-sm">
@@ -292,7 +315,7 @@ export default function CruisePage() {
             )}
           </div>
         </section>
-        
+
         {/* 郵輪特色介紹 */}
         <section className="py-12 bg-white">
           <div className="container">
@@ -331,7 +354,7 @@ export default function CruisePage() {
           </div>
         </section>
       </main>
-      
+
       <Footer />
     </div>
   );

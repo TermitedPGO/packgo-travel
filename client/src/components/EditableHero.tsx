@@ -25,9 +25,9 @@ interface HeroContent {
 }
 
 const defaultContent: HeroContent = {
-  title: "精選旅程 折扣最後一週",
-  subtitle: "* 跟著花期去旅行 *",
-  backgroundImage: "/images/hero-sakura.webp",
+  title: "探索世界 從這裡開始",
+  subtitle: "PACK&GO — Your Journey Starts Here",
+  backgroundImage: "/images/hero-travel.webp",
   hotKeywords: ["北海道", "東京", "大阪", "歐洲", "土耳其", "郵輪", "滑雪"],
 };
 
@@ -88,7 +88,7 @@ export default function EditableHero() {
   const [isUploading, setIsUploading] = useState(false);
 
   // Fetch hero content from database
-  const { data: heroData, refetch } = trpc.homepage.getContent.useQuery(
+  const { data: heroData, refetch, isLoading: isHeroLoading } = trpc.homepage.getContent.useQuery(
     { sectionKey: 'hero' },
     { enabled: true }
   );
@@ -104,8 +104,10 @@ export default function EditableHero() {
     },
   });
 
-  // Use database content or default
-  const content: HeroContent = heroData?.content || defaultContent;
+  // Use database content — only fall back to default if DB query completed with no data
+  const content: HeroContent = isHeroLoading
+    ? defaultContent  // temporary while loading, but hidden by skeleton
+    : (heroData?.content || defaultContent);
 
   useEffect(() => {
     if (heroData?.content) {
@@ -193,13 +195,22 @@ export default function EditableHero() {
     { id: "hotel", labelKey: "hero.search.tabs.hotels", icon: <Hotel className="h-4 w-4" />, locked: true },
   ];
 
+  // Show loading skeleton while hero data is being fetched
+  if (isHeroLoading) {
+    return (
+      <section className="relative w-full h-[600px] md:h-[700px] flex items-center justify-center overflow-hidden bg-gray-200 animate-pulse">
+        <div className="absolute inset-0 bg-gradient-to-b from-gray-300 to-gray-200" />
+      </section>
+    );
+  }
+
   return (
     <section className="relative w-full h-[600px] md:h-[700px] flex items-center justify-center overflow-hidden">
       {/* Background Image */}
       <div className="absolute inset-0 z-0">
         <img 
           src={isEditing ? editContent.backgroundImage : content.backgroundImage} 
-          alt="Cherry Blossoms Travel" 
+          alt="PACK&GO Travel" 
           className="w-full h-full object-cover"
         />
         <div className="absolute inset-0 bg-black/20" />
