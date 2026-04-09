@@ -241,6 +241,17 @@ export async function parsePdf(
   console.log(`[PdfParserAgent] Starting PDF parsing: ${pdfUrl}`);
   const startTime = Date.now();
 
+  // Download PDF buffer once for image extraction (non-fatal if fails)
+  let pdfBuffer: Buffer | null = null;
+  try {
+    const pdfResp = await fetch(pdfUrl);
+    if (pdfResp.ok) {
+      pdfBuffer = Buffer.from(await pdfResp.arrayBuffer());
+    }
+  } catch (err) {
+    console.warn('[PdfParserAgent] Could not download PDF buffer for image extraction:', err);
+  }
+
   try {
     // 報告進度：開始分析
     if (onProgress) {
@@ -307,9 +318,26 @@ export async function parsePdf(
         emergency: [],
       },
       hotelInfo: analysisResult.hotelInfo || [],
-      images: [], // PDF 直接解析不提取圖片
-      rawContent: JSON.stringify(analysisResult, null, 2),
-    };
+      images: await (async () => {
+        if (!pdfBuffer) return [];
+        try {
+          const { extractImagesFromPdf } = await import('../services/pdfImageExtractor');
+          const { uploadPdfImages } = await import('../services/imageIntelligenceService');
+          const rawImages = await extractImagesFromPdf(pdfBuffer);
+          if (rawImages.length === 0) return [];
+          const uploaded = await uploadPdfImages(rawImages, analysisResult.title || 'tour');
+          return uploaded.map(img => ({
+            url: img.url,
+            description: '',
+            page: img.pageNumber,
+            type: (img.type === 'hero' ? 'hero' : img.type === 'feature' ? 'feature' : 'other') as 'hero' | 'feature' | 'hotel' | 'activity' | 'other',
+          }));
+        } catch (imgErr) {
+          console.warn('[PdfParserAgent] Image extraction failed (non-fatal):', imgErr);
+          return [];
+        }
+        })(),
+      rawContent: JSON.stringify(analysisResult, null, 2),    };
 
     const elapsed = Date.now() - startTime;
     console.log(`[PdfParserAgent] PDF parsing completed in ${elapsed}ms`);

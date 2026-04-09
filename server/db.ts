@@ -1916,3 +1916,28 @@ export async function getDepartureCities(): Promise<{ city: string; country: str
 
   return Array.from(cityMap.values()).sort((a, b) => b.count - a.count);
 }
+
+// ============================================================
+// imageLibrary convenience aliases (used by masterAgent pipeline)
+// ============================================================
+/**
+ * Alias for addImageToLibrary – used by masterAgent image pipeline.
+ */
+export const addToImageLibrary = addImageToLibrary;
+
+/**
+ * Search imageLibrary by a text query (matches filename or tags).
+ */
+export async function searchImageLibrary(
+  query: string,
+  limit = 10
+): Promise<ImageLibraryItem[]> {
+  return getImageLibrary({ search: query, limit });
+}
+
+/**
+ * Get all images associated with a specific tour.
+ */
+export async function getImagesByTourId(tourId: number): Promise<ImageLibraryItem[]> {
+  return getImageLibrary({ tourId });
+}

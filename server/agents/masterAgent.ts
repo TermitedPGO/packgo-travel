@@ -486,8 +486,47 @@ export class MasterAgent {
       console.log("[MasterAgent] Starting Phase 4: PARALLEL (6 agents - no image generation)");
       console.log("[MasterAgent] Running: Itinerary, Cost, Notice, Hotel, Meal, Flight");
       
-      // Skip image generation - editors will manage images
-      console.log("[MasterAgent] Skipping ImageGenerationAgent - editors will manage images");
+      // Image intelligence pipeline: PDF-extracted images → Unsplash fallback
+      console.log("[MasterAgent] Starting image intelligence pipeline");
+      let imageResults: { hero: { url: string; alt: string } | null; features: Array<{ url: string; alt: string; source: string }> } = { hero: null, features: [] };
+      try {
+        const { findBestImage } = await import('../services/imageIntelligenceService');
+        // rawData.images contains already-uploaded PDF image URLs (ExtractedImage[])
+        const pdfImageUrls = ((rawData.images || []) as Array<{ url: string; type: string; page: number }>).map(img => ({
+          url: img.url,
+          type: (img.type === 'hero' ? 'hero' : img.type === 'feature' ? 'feature' : 'other') as 'hero' | 'feature' | 'other',
+          pageNumber: img.page || 0,
+        }));
+        const imgDestination = rawData.location?.destinationCity || rawData.location?.destinationCountry || '';
+
+        // Hero image: prefer PDF wide images, then Unsplash
+        const heroResult = await findBestImage(imgDestination, {
+          pdfImageUrls,
+          preferredType: 'hero',
+        });
+        if (heroResult) {
+          imageResults.hero = { url: heroResult.url, alt: `${imgDestination} travel` };
+        }
+
+        // Feature images: PDF first, then Unsplash per highlight
+        for (const highlight of (rawData.highlights || []).slice(0, 6)) {
+          const imgResult = await findBestImage(String(highlight) || imgDestination, {
+            pdfImageUrls,
+            preferredType: 'feature',
+          });
+          if (imgResult) {
+            imageResults.features.push({
+              url: imgResult.url,
+              alt: String(highlight),
+              source: imgResult.source,
+            });
+          }
+        }
+
+        console.log(`[MasterAgent] ✓ Image pipeline: hero=${!!imageResults.hero}, features=${imageResults.features.length}`);
+      } catch (imgPipelineError) {
+        console.warn('[MasterAgent] Image pipeline failed, continuing with defaults:', imgPipelineError);
+      }
       
       // Start all agents (except ImageGenerationAgent and ItineraryAgent which runs separately)
       // DetailsSkill replaces CostAgent, NoticeAgent, HotelAgent, MealAgent
@@ -593,29 +632,34 @@ export class MasterAgent {
         console.log(`[MasterAgent] 🎯 DetailsSkill cache hit for: ${detailsCacheKey} - skipped LLM call`);
       }
       
-      // Dynamic Hero Image: Search from Unsplash based on destination
-      let heroImage = { url: "", alt: "" };
+      // Hero Image: use image pipeline result first, then Unsplash as fallback
+      let heroImage = imageResults.hero || { url: "", alt: "" };
       let highlightImages: any[] = [];
-      let featureImages: any[] = [];
-      
-      // Try to get hero image from Unsplash based on destination
-      try {
-        const { searchUnsplashPhotos } = await import("../services/unsplashService");
-        const destination = rawData.location?.destinationCity || rawData.location?.destinationCountry || "travel";
-        console.log(`[MasterAgent] Searching hero image for destination: ${destination}`);
-        
-        const heroImages = await searchUnsplashPhotos(destination, 1);
-        if (heroImages.length > 0) {
-          heroImage = {
-            url: heroImages[0],
-            alt: `${destination} travel destination`
-          };
-          console.log(`[MasterAgent] ✓ Found hero image from Unsplash: ${heroImage.url.substring(0, 50)}...`);
-        } else {
-          console.log(`[MasterAgent] No hero image found, will use default`);
+      // Feature images from image pipeline (already populated above)
+      let featureImages: any[] = imageResults.features;
+
+      if (!heroImage.url) {
+        // Unsplash fallback for hero image
+        try {
+          const { searchUnsplashPhotos } = await import("../services/unsplashService");
+          const destination = rawData.location?.destinationCity || rawData.location?.destinationCountry || "travel";
+          console.log(`[MasterAgent] Hero not found in pipeline, falling back to Unsplash for: ${destination}`);
+          
+          const heroImages = await searchUnsplashPhotos(destination, 1);
+          if (heroImages.length > 0) {
+            heroImage = {
+              url: heroImages[0],
+              alt: `${destination} travel destination`
+            };
+            console.log(`[MasterAgent] ✓ Found hero image from Unsplash: ${heroImage.url.substring(0, 50)}...`);
+          } else {
+            console.log(`[MasterAgent] No hero image found, will use default`);
+          }
+        } catch (error) {
+          console.warn(`[MasterAgent] Failed to search hero image:`, error);
         }
-      } catch (error) {
-        console.warn(`[MasterAgent] Failed to search hero image:`, error);
+      } else {
+        console.log(`[MasterAgent] ✓ Using image pipeline hero: ${heroImage.url.substring(0, 50)}...`);
       }
       
       // Process DetailsSkill results (replaces CostAgent, NoticeAgent, HotelAgent, MealAgent)
@@ -882,6 +926,36 @@ export class MasterAgent {
         sourceUrl: url,
       };
       
+      // ========================================================================
+      // 6c. Write used images to imageLibrary for future reuse
+      // ========================================================================
+      try {
+        const { addToImageLibrary } = await import('../db');
+        const tourTitle = finalData.title || finalData.poeticTitle || '';
+        const imgLibDestination = finalData.destinationCity || finalData.destinationCountry || '';
+        const allImageUrls: string[] = [
+          heroImage?.url,
+          ...featureImages.map((f: any) => f.url),
+        ].filter((u): u is string => Boolean(u));
+
+        for (const imgUrl of allImageUrls) {
+          try {
+            await addToImageLibrary({
+              url: imgUrl,
+              tags: JSON.stringify([imgLibDestination, tourTitle].filter(Boolean)),
+              uploadedBy: userId || 0,
+            });
+          } catch {
+            // Ignore duplicates or DB errors – image library is non-critical
+          }
+        }
+        if (allImageUrls.length > 0) {
+          console.log(`[MasterAgent] ✓ Saved ${allImageUrls.length} image(s) to imageLibrary`);
+        }
+      } catch (libErr) {
+        console.warn('[MasterAgent] imageLibrary write failed (non-fatal):', libErr);
+      }
+
       // ========================================================================
       // Generate Execution Report
       // ========================================================================

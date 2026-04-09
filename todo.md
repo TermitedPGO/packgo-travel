@@ -5457,3 +5457,17 @@ AI 辦公室看板中，AI 任務永遠顯示「執行中」（started 狀態）
 ### 前端與文件
 - [x] Task 5：TRANSPORT_TYPE_EN const 抽到檔案頂部
 - [x] Task 6：GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET 已設定為環境變數（webdev_request_secrets）
+
+---
+## Round 10 Phase 2A: PDF 圖片提取 + 圖片智慧系統（2026-04-08）
+
+- [ ] Task 1: pnpm add pdf-lib (PDF 圖片提取)
+- [ ] Task 2: 新建 server/services/pdfImageExtractor.ts
+- [ ] Task 3: 整合 PDF 圖片提取到 pdfParserAgent.ts（images: [] → extractAndUploadPdfImages）
+- [ ] Task 4: 新建 server/services/imageIntelligenceService.ts（4 來源優先順序）
+- [ ] Task 5: imageLibrary CRUD 函數加入 server/db.ts（addToImageLibrary, searchImageLibrary, incrementImageUsage, getImagesByTourId）
+- [ ] Task 6a: masterAgent 重新啟用圖片 pipeline（移除 Skipping ImageGenerationAgent）
+- [ ] Task 6b: masterAgent hero image 先用 imageResults，fallback Unsplash
+- [ ] Task 6c: masterAgent 最終資料寫入 imageLibrary
+- [ ] Task 7a: server/services/pdfImageExtractor.test.ts
+- [ ] Task 7b: server/services/imageIntelligenceService.test.ts

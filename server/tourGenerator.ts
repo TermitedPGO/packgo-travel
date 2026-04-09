@@ -126,7 +126,7 @@ export async function generateTourFromUrlInternal(
     });
     
     // 非同步觸發翻譯（不阻塞生成流程）
-    translateTour(tour.id, ['en', 'es'], 'zh-TW', userId)
+    translateTour(tour.id, ['en'], 'zh-TW', userId)
       .then((result) => {
         if (result.success) {
           console.log(`[TourGenerator] Auto-translated tour ${tour.id} to: ${result.translatedLanguages.join(', ')}`);
