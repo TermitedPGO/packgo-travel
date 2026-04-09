@@ -64,6 +64,7 @@ export const DEFAULT_PHASES: Omit<AgentPhase, 'status' | 'progress'>[] = [
   { id: 'meal_agent', name: '餐飲資訊', description: '生成餐飲詳細資訊' },
   { id: 'flight_agent', name: '航班資訊', description: '生成航班詳細資訊' },
   { id: 'finalize', name: '完成組裝', description: '組裝最終行程資料' },
+  { id: 'calibration', name: 'QA 品質審查', description: '自動品質評分與審查' },
 ];
 
 // 階段權重（用於計算整體進度）
@@ -80,6 +81,7 @@ const PHASE_WEIGHTS: Record<string, number> = {
   meal_agent: 5,
   flight_agent: 5,
   finalize: 5,
+  calibration: 5,
 };
 
 /**

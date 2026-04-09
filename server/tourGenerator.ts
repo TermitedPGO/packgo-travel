@@ -4,7 +4,7 @@ import {
   TourGenerationResult,
 } from "./queue";
 import { MasterAgent } from "./agents/masterAgent";
-import { createTour } from "./db";
+import { createTour, saveCalibrationResult } from "./db";
 import { translateTour } from "./translation";
 // Image supplementation removed for speed optimization
 // import { supplementImages } from "./services/unsplashService";
@@ -106,7 +106,13 @@ export async function generateTourFromUrlInternal(
       flights: tourData.flights, // 航班資訊
       
       // Additional fields
-      status: "active",
+      // Status is determined by calibration verdict:
+      // approved → active, review → pending_review, rejected → inactive
+      status: (result.calibrationReport?.verdict === 'approved'
+        ? 'active'
+        : result.calibrationReport?.verdict === 'rejected'
+        ? 'inactive'
+        : 'pending_review') as any,
       featured: 0, // 0 = false, 1 = true
       promotionText: "",
       
@@ -118,6 +124,25 @@ export async function generateTourFromUrlInternal(
     });
     
     console.log("[TourGenerator] Tour saved to database with ID:", tour.id);
+    
+    // Save calibration result to DB (non-blocking)
+    if (result.calibrationReport) {
+      const cr = result.calibrationReport;
+      saveCalibrationResult({
+        tourId: tour.id,
+        contentFidelityScore: cr.contentFidelityScore,
+        translationScore: cr.translationScore,
+        imageScore: cr.imageScore,
+        completenessScore: cr.completenessScore,
+        marketingScore: cr.marketingScore,
+        totalScore: cr.totalScore,
+        verdict: cr.verdict,
+        issues: JSON.stringify(cr.issues),
+        autoFixesApplied: JSON.stringify(cr.autoFixesApplied),
+      }).catch((err) => {
+        console.warn('[TourGenerator] Failed to save calibration result:', err);
+      });
+    }
     
     await job.updateProgress({
       step: "completed",

@@ -15,7 +15,8 @@ import {
   homepageContent, HomepageContent, InsertHomepageContent,
   destinations, Destination, InsertDestination,
   userFavorites, UserFavorite, InsertUserFavorite,
-  userBrowsingHistory, UserBrowsingHistory, InsertUserBrowsingHistory
+  userBrowsingHistory, UserBrowsingHistory, InsertUserBrowsingHistory,
+  calibrationResults, CalibrationResult, InsertCalibrationResult
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -1952,4 +1953,104 @@ export async function updateImageLibraryItem(
   const db = await getDb();
   if (!db) return;
   await db.update(imageLibrary).set(updates).where(eq(imageLibrary.id, id));
+}
+
+// ============================================
+// Calibration Result Functions
+// ============================================
+
+/**
+ * Save a calibration result for a tour.
+ */
+export async function saveCalibrationResult(
+  data: InsertCalibrationResult
+): Promise<CalibrationResult> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db.insert(calibrationResults).values(data);
+  // Fetch the just-inserted row
+  const rows = await db
+    .select()
+    .from(calibrationResults)
+    .where(eq(calibrationResults.tourId, data.tourId))
+    .orderBy(desc(calibrationResults.createdAt))
+    .limit(1);
+  return rows[0];
+}
+
+/**
+ * Get the latest calibration result for a tour.
+ */
+export async function getCalibrationResultByTourId(
+  tourId: number
+): Promise<CalibrationResult | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const rows = await db
+    .select()
+    .from(calibrationResults)
+    .where(eq(calibrationResults.tourId, tourId))
+    .orderBy(desc(calibrationResults.createdAt))
+    .limit(1);
+  return rows[0];
+}
+
+/**
+ * Get tours with status = 'pending_review', joined with their latest calibration result.
+ */
+export async function getPendingReviewTours(): Promise<
+  Array<Tour & { calibration: CalibrationResult | null }>
+> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const pendingTours = await db
+    .select()
+    .from(tours)
+    .where(eq(tours.status, 'pending_review' as any))
+    .orderBy(desc(tours.updatedAt));
+
+  const results = await Promise.all(
+    pendingTours.map(async (tour) => {
+      const calibration = await getCalibrationResultByTourId(tour.id);
+      return { ...tour, calibration: calibration ?? null };
+    })
+  );
+  return results;
+}
+
+/**
+ * Approve a tour: set status to 'active'.
+ */
+export async function approveTour(tourId: number): Promise<Tour> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db
+    .update(tours)
+    .set({ status: 'active' as any, updatedAt: new Date() })
+    .where(eq(tours.id, tourId));
+
+  const rows = await db.select().from(tours).where(eq(tours.id, tourId)).limit(1);
+  if (!rows[0]) throw new Error(`Tour ${tourId} not found`);
+  return rows[0];
+}
+
+/**
+ * Reject a tour: set status to 'inactive'.
+ */
+export async function rejectTour(tourId: number): Promise<Tour> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db
+    .update(tours)
+    .set({ status: 'inactive' as any, updatedAt: new Date() })
+    .where(eq(tours.id, tourId));
+
+  const rows = await db.select().from(tours).where(eq(tours.id, tourId)).limit(1);
+  if (!rows[0]) throw new Error(`Tour ${tourId} not found`);
+  return rows[0];
 }

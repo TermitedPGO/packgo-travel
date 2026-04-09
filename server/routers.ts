@@ -892,7 +892,7 @@ export const appRouter = router({
           duration: z.number().min(1).max(365).optional(),
           imageUrl: z.string().url().optional().or(z.literal('')),
           category: z.enum(["group", "custom", "package", "cruise", "theme"]).optional(),
-          status: z.enum(["active", "inactive", "soldout"]).optional(),
+          status: z.enum(["active", "inactive", "soldout", "draft", "pending_review"]).optional(),
           // 生成系統可能送的額外欄位
           poeticTitle: z.string().max(255).optional(),
           poeticSubtitle: z.string().max(500).optional(),
@@ -929,8 +929,11 @@ export const appRouter = router({
           const { featureImages, executionReport, ...savableData } = tourData;
           
           // Save to database
+          // Default status for manually previewed tours is 'pending_review'
+          // (AI-generated tours go through calibration pipeline and set status automatically)
           const savedTour = await db.createTour({
             ...(savableData as any),
+            status: (savableData as any).status ?? 'pending_review',
             createdBy: ctx.user.id,
           });
 
@@ -1001,6 +1004,37 @@ export const appRouter = router({
           featured: newFeatured === 1,
           message: `行程已${newFeatured === 1 ? "設為精選" : "取消精選"}`,
         };
+      }),
+
+    // Get all tours pending review (admin only)
+    getPendingReview: adminProcedure
+      .query(async () => {
+        const tours = await db.getPendingReviewTours();
+        return tours;
+      }),
+
+    // Approve a tour (set status to active) (admin only)
+    approveTour: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const tour = await db.approveTour(input.id);
+        return { success: true, tour, message: '行程已審核通過並上架' };
+      }),
+
+    // Reject a tour (set status to inactive) (admin only)
+    rejectTour: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const tour = await db.rejectTour(input.id);
+        return { success: true, tour, message: '行程已拒絕並下架' };
+      }),
+
+    // Get calibration result for a tour (admin only)
+    getCalibrationResult: adminProcedure
+      .input(z.object({ tourId: z.number() }))
+      .query(async ({ input }) => {
+        const result = await db.getCalibrationResultByTourId(input.tourId);
+        return result ?? null;
       }),
 
     // Generate PDF for tour (public)

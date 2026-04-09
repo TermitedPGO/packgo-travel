@@ -169,7 +169,7 @@ export const tours = mysqlTable("tours", {
     "cruise",     // 郵輪旅遊
     "theme"       // 主題旅遊
   ]).default("group").notNull(),
-  status: mysqlEnum("status", ["active", "inactive", "soldout"]).default("active").notNull(),
+  status: mysqlEnum("status", ["active", "inactive", "soldout", "draft", "pending_review"]).default("draft").notNull(),
   featured: int("featured").default(0).notNull(), // 0 = not featured, 1 = featured
   
   // Availability
@@ -1189,3 +1189,37 @@ export const agentActivityLogs = mysqlTable("agentActivityLogs", {
 
 export type AgentActivityLog = typeof agentActivityLogs.$inferSelect;
 export type InsertAgentActivityLog = typeof agentActivityLogs.$inferInsert;
+
+/**
+ * Calibration Results table - 記錄每個行程的自動 QA 品質評分
+ * 由 CalibrationAgent 在行程生成後自動執行，結果存入此表
+ */
+export const calibrationResults = mysqlTable("calibrationResults", {
+  id: int("id").autoincrement().primaryKey(),
+  tourId: int("tourId").notNull(),
+
+  // 5 項檢查分數（0-100）
+  contentFidelityScore: int("contentFidelityScore").notNull(),       // CHECK 1: 內容忠實度（30%權重）
+  translationScore: int("translationScore").notNull(),               // CHECK 2: 翻譯品質（20%）
+  imageScore: int("imageScore").notNull(),                           // CHECK 3: 圖片品質（20%）
+  completenessScore: int("completenessScore").notNull(),             // CHECK 4: 完整度（15%）
+  marketingScore: int("marketingScore").notNull(),                   // CHECK 5: 行銷品質（15%）
+
+  // 加權總分
+  totalScore: int("totalScore").notNull(),                           // 0-100 加權平均
+
+  // 結果
+  verdict: mysqlEnum("verdict", ["approved", "review", "rejected"]).notNull(),
+
+  // 問題清單
+  issues: text("issues"),                 // JSON: [{ check, severity, message, autoFixable }]
+  autoFixesApplied: text("autoFixesApplied"),  // JSON: [{ field, before, after }]
+
+  // 原始資料快照（用於比對）
+  sourceSnapshot: text("sourceSnapshot"),  // PDF/URL 原始內容摘要
+
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type CalibrationResult = typeof calibrationResults.$inferSelect;
+export type InsertCalibrationResult = typeof calibrationResults.$inferInsert;

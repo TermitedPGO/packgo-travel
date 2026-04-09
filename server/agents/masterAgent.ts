@@ -42,6 +42,7 @@ import { generateSmartTags, mergeWithExistingTags } from "../utils/tagGenerator"
 import { TourType } from "./itineraryUnifiedAgent";
 import { applyLearnedSkills } from "./learningAgent";
 import { logAgentStart, logAgentComplete, cleanupZombieTasks } from "../agentActivityService";
+import { calibrateTour } from "./calibrationAgent";
 
 export interface MasterAgentResult {
   success: boolean;
@@ -113,6 +114,17 @@ export interface MasterAgentResult {
     percentage: number;
   };
   executionReport?: string; // Agent execution report
+  calibrationReport?: {
+    contentFidelityScore: number;
+    translationScore: number;
+    imageScore: number;
+    completenessScore: number;
+    marketingScore: number;
+    totalScore: number;
+    verdict: "approved" | "review" | "rejected";
+    issues: Array<{ check: string; severity: string; message: string; field?: string; autoFixable: boolean }>;
+    autoFixesApplied: Array<{ field: string; before: string; after: string }>;
+  };
 }
 
 /**
@@ -995,6 +1007,33 @@ export class MasterAgent {
       }
 
       // ========================================================================
+      // Phase 6: CalibrationAgent — Automatic QA Quality Gate
+      // ========================================================================
+      let calibrationReport = null;
+      try {
+        if (taskId) progressTracker.startPhase(taskId, 'calibration');
+        console.log('[MasterAgent] 🔍 Running CalibrationAgent QA...');
+        const sourceContent = rawData.rawContent || '';
+        calibrationReport = await calibrateTour(finalData, sourceContent);
+        console.log(`[MasterAgent] ✓ Calibration: score=${calibrationReport.totalScore}, verdict=${calibrationReport.verdict}`);
+
+        // Apply auto-fixes back to finalData
+        if (calibrationReport.autoFixesApplied.length > 0) {
+          for (const fix of calibrationReport.autoFixesApplied) {
+            if (fix.field in finalData) {
+              (finalData as any)[fix.field] = fix.after;
+            }
+          }
+          console.log(`[MasterAgent] ✓ Applied ${calibrationReport.autoFixesApplied.length} auto-fix(es)`);
+        }
+
+        if (taskId) progressTracker.completePhase(taskId, 'calibration');
+      } catch (calErr) {
+        console.warn('[MasterAgent] CalibrationAgent failed (non-fatal):', calErr);
+        if (taskId) progressTracker.failPhase(taskId, 'calibration', String(calErr));
+      }
+
+      // ========================================================================
       // Generate Execution Report
       // ========================================================================
       const executionReport = this.monitor.generateReport();
@@ -1033,7 +1072,8 @@ export class MasterAgent {
       return {
         success: true,
         data: finalData,
-        executionReport
+        executionReport,
+        calibrationReport: calibrationReport ?? undefined,
       };
       
     } catch (error) {
