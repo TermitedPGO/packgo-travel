@@ -4301,6 +4301,7 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         const entry = await db.createAccountingEntry({
           ...input,
+          category: input.category as any,
           amount: String(input.amount),
           isTaxDeductible: input.isTaxDeductible ? 1 : 0,
           createdBy: ctx.user.id,
