@@ -192,7 +192,7 @@ export default function VisaManagementTab() {
                     <td className="px-4 py-3 text-gray-600">{app.passportCountry}</td>
                     <td className="px-4 py-3">
                       <div>{app.visaType}</div>
-                      <div className="text-gray-500 text-xs">{app.entryType} · {app.processingSpeed}</div>
+                      <div className="text-gray-500 text-xs">{app.entryType}</div>
                     </td>
                     <td className="px-4 py-3 font-medium">
                       USD ${Number(app.totalAmount).toFixed(2)}
@@ -274,7 +274,6 @@ export default function VisaManagementTab() {
                       { label: "出生日期", value: selectedApp.dateOfBirth },
                       { label: "簽證類型", value: selectedApp.visaType },
                       { label: "入境次數", value: selectedApp.entryType },
-                      { label: "處理速度", value: selectedApp.processingSpeed },
                       { label: "申請人數", value: selectedApp.groupSize },
                       { label: "總金額", value: `USD $${Number(selectedApp.totalAmount).toFixed(2)}` },
                       { label: "付款狀態", value: selectedApp.paymentStatus },

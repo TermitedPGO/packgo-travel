@@ -85,27 +85,11 @@ export async function sendVisaApplicationConfirmation(params: {
   toEmail: string;
   applicantName: string;
   applicationId: number;
-  visaTypeName: string;
-  entryTypeName: string;
-  processingSpeedLabel: string;
-  processingDuration: string;
   totalAmount: number;
   passportNumber: string;
   travelDate?: string;
 }): Promise<void> {
-  const {
-    toEmail,
-    applicantName,
-    applicationId,
-    visaTypeName,
-    entryTypeName,
-    processingSpeedLabel,
-    processingDuration,
-    totalAmount,
-    passportNumber,
-    travelDate,
-  } = params;
-
+  const { toEmail, applicantName, applicationId, totalAmount, passportNumber, travelDate } = params;
   const statusUrl = `${SITE_URL}/china-visa/status/${applicationId}`;
 
   const body = `
@@ -115,9 +99,6 @@ export async function sendVisaApplicationConfirmation(params: {
     <table class="info-table">
       <tr><td>申請編號</td><td>#${applicationId}</td></tr>
       <tr><td>護照號碼</td><td>${passportNumber}</td></tr>
-      <tr><td>簽證類型</td><td>${visaTypeName}</td></tr>
-      <tr><td>入境次數</td><td>${entryTypeName}</td></tr>
-      <tr><td>處理速度</td><td>${processingSpeedLabel}（${processingDuration}）</td></tr>
       ${travelDate ? `<tr><td>預計出行日期</td><td>${travelDate}</td></tr>` : ""}
       <tr><td>費用總計</td><td>USD $${totalAmount.toFixed(2)}</td></tr>
       <tr><td>付款狀態</td><td><span class="status-badge status-paid">已付款</span></td></tr>
@@ -126,8 +107,8 @@ export async function sendVisaApplicationConfirmation(params: {
     <ul style="font-size:14px; line-height:2; color:#444; padding-left:20px;">
       <li>有效護照正本（效期需超過 6 個月）</li>
       <li>護照照片頁影本</li>
-      <li>近期 2 吋白底彩色照片 2 張</li>
-      <li>填寫完整的中國簽證申請表</li>
+      <li>近期 2 吋白底彩色照片 2 張（我們可協助拍攝）</li>
+      <li>填寫完整的中國簽證申請表（我們將協助代填）</li>
     </ul>
     <p>您可以隨時查詢申請進度：</p>
     <a href="${statusUrl}" class="cta-btn">查詢申請進度</a>

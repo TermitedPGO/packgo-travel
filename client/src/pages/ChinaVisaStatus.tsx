@@ -157,7 +157,6 @@ export default function ChinaVisaStatus() {
                       { label: isChineseMode ? "護照國籍" : "Nationality", value: application.passportCountry },
                       { label: isChineseMode ? "簽證類型" : "Visa Type", value: application.visaType },
                       { label: isChineseMode ? "入境次數" : "Entry Type", value: application.entryType },
-                      { label: isChineseMode ? "處理速度" : "Processing Speed", value: application.processingSpeed },
                       { label: isChineseMode ? "付款狀態" : "Payment Status", value: application.paymentStatus === "paid" ? (isChineseMode ? "已付款" : "Paid") : (isChineseMode ? "待付款" : "Unpaid") },
                       { label: isChineseMode ? "總金額" : "Total Amount", value: `USD $${Number(application.totalAmount).toFixed(2)}` },
                     ].map((row, i) => (

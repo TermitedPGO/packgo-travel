@@ -14,7 +14,7 @@ import * as auth from "./auth";
 import { createToken } from "./jwt";
 import { translateText, translateBatch, translateTour, translateMultipleTours, getTourTranslations, getBatchTourTranslations, getAllTourTranslations, getTranslationJobs, getSupportedLanguages, getAllTranslationsSummary, Language } from "./translation";
 import { getExchangeRates, convertCurrency, getExchangeRate, formatCurrency, getCurrencySymbol, convertPrices, type SupportedCurrency } from "./agents/exchangeRateAgent";
-import { calculateVisaPricing, getVisaTypeName, getEntryTypeName, getProcessingSpeedInfo, getSupportedCountries, type VisaType, type EntryType, type ProcessingSpeed } from "./services/visaPricingService";
+import { calculateVisaPricing, CHINA_VISA_PRICING } from "./services/visaPricingService";
 import { sendVisaStatusUpdate, sendVisaApprovedEmail, sendVisaRejectedEmail } from "./services/visaEmailService";
 import Stripe from "stripe";
 import { ENV } from "./_core/env";
@@ -3940,27 +3940,11 @@ export const appRouter = router({
     // ── 公開：計算定價 ──────────────────────────────────────────
     calculatePricing: publicProcedure
       .input(z.object({
-        visaType: z.string(),
-        entryType: z.string(),
-        processingSpeed: z.string(),
-        passportCountry: z.string(),
-        groupSize: z.number().default(1),
-        isReturningCustomer: z.boolean().default(false),
+        groupSize: z.number().min(1).default(1),
       }))
       .query(({ input }) => {
-        return calculateVisaPricing({
-          visaType: input.visaType as VisaType,
-          entryType: input.entryType as EntryType,
-          processingSpeed: input.processingSpeed as ProcessingSpeed,
-          passportCountry: input.passportCountry,
-          groupSize: input.groupSize,
-          isReturningCustomer: input.isReturningCustomer,
-        });
+        return calculateVisaPricing({ groupSize: input.groupSize });
       }),
-
-    // ── 公開：取得支援國家清單 ──────────────────────────────────
-    getSupportedCountries: publicProcedure
-      .query(() => getSupportedCountries()),
 
     // ── 公開：提交申請 + 建立 Stripe Checkout Session ──────────
     submitApplication: publicProcedure
@@ -3974,9 +3958,9 @@ export const appRouter = router({
         passportCountry: z.string().min(1),
         dateOfBirth: z.string().min(1),
         placeOfBirth: z.string().optional(),
-        visaType: z.string(),
-        entryType: z.string(),
-        processingSpeed: z.string(),
+        visaType: z.string().optional(),
+        entryType: z.string().optional(),
+        processingSpeed: z.string().optional(),
         travelDate: z.string().optional(),
         travelPurpose: z.string().optional(),
         previousVisits: z.number().default(0),
@@ -3985,14 +3969,8 @@ export const appRouter = router({
         isReturningCustomer: z.boolean().default(false),
       }))
       .mutation(async ({ input, ctx }) => {
-        const pricing = calculateVisaPricing({
-          visaType: input.visaType as VisaType,
-          entryType: input.entryType as EntryType,
-          processingSpeed: input.processingSpeed as ProcessingSpeed,
-          passportCountry: input.passportCountry,
-          groupSize: input.groupSize,
-          isReturningCustomer: input.isReturningCustomer,
-        });
+        // 簡化定價：全包價 $290/人（個人）或 $275/人（團體2人以上）
+        const pricing = calculateVisaPricing({ groupSize: input.groupSize });
 
         const applicationId = await db.createVisaApplication({
           userId: ctx.user?.id ?? null,
@@ -4005,16 +3983,16 @@ export const appRouter = router({
           passportCountry: input.passportCountry,
           dateOfBirth: input.dateOfBirth,
           placeOfBirth: input.placeOfBirth ?? null,
-          visaType: input.visaType as VisaType,
-          entryType: input.entryType as EntryType,
-          processingSpeed: input.processingSpeed as ProcessingSpeed,
+          visaType: (input.visaType ?? "L_tourist") as any,
+          entryType: (input.entryType ?? "single") as any,
+          processingSpeed: "regular" as any,
           travelDate: input.travelDate ?? null,
           travelPurpose: input.travelPurpose ?? null,
           previousVisits: input.previousVisits,
-          serviceFee: pricing.serviceFee.toString(),
-          consulateFee: pricing.consulateFee.toString(),
-          totalAmount: pricing.totalAmount.toString(),
-          discountType: pricing.discountType,
+          serviceFee: pricing.pricePerPerson.toString(),
+          consulateFee: "0",
+          totalAmount: pricing.grandTotal.toString(),
+          discountType: pricing.isGroupDiscount ? "group" : "none",
           groupSize: input.groupSize,
           groupApplicants: input.groupApplicants ?? null,
           applicationStatus: "submitted",
@@ -4022,8 +4000,6 @@ export const appRouter = router({
 
         // Create Stripe Checkout Session
         const stripe = getStripeClient();
-        const visaTypeName = getVisaTypeName(input.visaType as VisaType, "en");
-        const speedInfo = getProcessingSpeedInfo(input.processingSpeed as ProcessingSpeed, "en");
         const siteUrl = process.env.SITE_URL || "https://packgo09.manus.space";
 
         const session = await stripe.checkout.sessions.create({
@@ -4033,21 +4009,26 @@ export const appRouter = router({
               price_data: {
                 currency: "usd",
                 product_data: {
-                  name: `China Visa Service — ${visaTypeName}`,
-                  description: `${speedInfo.label} processing (${speedInfo.duration})`,
+                  name: "中國簽證代辦服務（全包）",
+                  description: "含領事館費、證件照拍攝、代填表格、人工送送",
                 },
-                unit_amount: Math.round(pricing.totalAmount * 100),
+                unit_amount: pricing.pricePerPerson * 100,
               },
-              quantity: 1,
+              quantity: input.groupSize,
             },
           ],
           mode: "payment",
+          allow_promotion_codes: true,
           success_url: `${siteUrl}/china-visa/success?session_id={CHECKOUT_SESSION_ID}&application_id=${applicationId}`,
           cancel_url: `${siteUrl}/china-visa`,
           customer_email: input.email,
+          client_reference_id: ctx.user?.id?.toString() ?? undefined,
           metadata: {
             visa_application_id: String(applicationId),
             payment_type: "visa",
+            user_id: ctx.user?.id?.toString() ?? "",
+            customer_email: input.email,
+            customer_name: `${input.firstName} ${input.lastName}`,
           },
         });
 

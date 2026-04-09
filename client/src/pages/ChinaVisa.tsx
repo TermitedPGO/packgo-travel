@@ -43,19 +43,15 @@ const ENTRY_TYPES = [
   { value: "multiple_12m", zh: "一年多次入境", en: "Multiple Entry (12 months)" },
 ];
 
-const PROCESSING_SPEEDS = [
-  { value: "regular", zh: "普通", en: "Regular", duration_zh: "10-15 個工作日", duration_en: "10-15 business days" },
-  { value: "express", zh: "加急", en: "Express", duration_zh: "5-7 個工作日", duration_en: "5-7 business days" },
-  { value: "rush", zh: "特急", en: "Rush", duration_zh: "2-3 個工作日", duration_en: "2-3 business days" },
-];
+// PROCESSING_SPEEDS removed — no longer offering express/rush options
 
 const REQUIRED_DOCUMENTS = [
-  { zh: "有效護照正本（效期需超過 6 個月）", en: "Valid passport (must be valid for more than 6 months)" },
-  { zh: "護照照片頁影本", en: "Copy of passport photo page" },
-  { zh: "近期 2 吋白底彩色照片 2 張", en: "2 recent 2-inch white background color photos" },
-  { zh: "填寫完整的中國簽證申請表", en: "Completed China visa application form" },
-  { zh: "來回機票訂位確認單", en: "Round-trip flight booking confirmation" },
-  { zh: "飯店訂房確認單或邀請函", en: "Hotel booking confirmation or invitation letter" },
+  { zh: "有效護照（效期 6 個月以上，至少 2 頁空白頁）", en: "Valid passport (6+ months validity, at least 2 blank pages)" },
+  { zh: "簽證申請表（V.2013 表格，我們協助填寫）", en: "Visa application form (V.2013, we help fill it out)" },
+  { zh: "機票預訂確認（或行程計畫）", en: "Flight booking confirmation (or travel itinerary)" },
+  { zh: "飯店預訂確認", en: "Hotel booking confirmation" },
+  { zh: "邀請函（探親/商務簽證適用）", en: "Invitation letter (for family visit / business visa)" },
+  { zh: "有效的美國簽證或綠卡影本（非美國公民）", en: "Valid US visa or green card copy (non-US citizens)" },
 ];
 
 const PROCESS_STEPS = [
@@ -70,8 +66,8 @@ const FAQS = [
   {
     q_zh: "申請中國簽證需要多久？",
     q_en: "How long does it take to get a China visa?",
-    a_zh: "普通處理需 10-15 個工作日，加急 5-7 個工作日，特急 2-3 個工作日。",
-    a_en: "Regular processing takes 10-15 business days, express 5-7 business days, rush 2-3 business days.",
+    a_zh: "一般處理需 10-15 個工作日。請提早申請以確保有足夠時間。",
+    a_en: "Processing typically takes 10-15 business days. Please apply early to ensure sufficient time.",
   },
   {
     q_zh: "我需要親自前往領事館嗎？",
@@ -86,16 +82,16 @@ const FAQS = [
     a_en: "If your visa is rejected, we will refund the service fee. Consulate fees (government fees) are non-refundable.",
   },
   {
-    q_zh: "美國公民申請中國簽證費用較高嗎？",
-    q_en: "Is the China visa fee higher for US citizens?",
-    a_zh: "是的，根據互惠原則，美國公民的領事館費用為 USD $185，其他國家通常為 USD $50-151。",
-    a_en: "Yes, based on reciprocity, the consulate fee for US citizens is USD $185, while other countries are typically USD $50-151.",
+    q_zh: "費用包含哪些項目？",
+    q_en: "What is included in the fee?",
+    a_zh: "我們的全包價包含：領事館簽證規費、證件照拍攝、代填申請表格、人工運送至領事館。無任何隱藏費用。",
+    a_en: "Our all-inclusive fee covers: consulate visa fee, passport photo, application form assistance, and courier to consulate. No hidden fees.",
   },
   {
     q_zh: "可以申請多次入境簽證嗎？",
     q_en: "Can I apply for a multiple-entry visa?",
-    a_zh: "可以，我們提供單次、兩次、半年多次及一年多次入境選項。多次入境需要額外費用。",
-    a_en: "Yes, we offer single, double, 6-month multiple, and 12-month multiple entry options. Multiple entries require additional fees.",
+    a_zh: "可以，我們提供單次、兩次、半年多次及一年多次入境選項，全包價 $290（個人）或 $275（團體）。",
+    a_en: "Yes, we offer single, double, 6-month multiple, and 12-month multiple entry options at our flat rate of $290 (individual) or $275 (group).",
   },
 ];
 
@@ -113,11 +109,9 @@ export default function ChinaVisa() {
     // Step 1: Visa type
     visaType: "L_tourist",
     entryType: "single",
-    processingSpeed: "regular",
     travelDate: "",
     travelPurpose: "",
     groupSize: 1,
-    isReturningCustomer: false,
     // Step 2: Personal info
     firstName: "",
     lastName: "",
@@ -137,17 +131,10 @@ export default function ChinaVisa() {
     setForm(prev => ({ ...prev, [field]: value }));
   };
 
-  // Pricing query
+  // Pricing query — simplified flat pricing
   const pricingQuery = trpc.visa.calculatePricing.useQuery({
-    visaType: form.visaType,
-    entryType: form.entryType,
-    processingSpeed: form.processingSpeed,
-    passportCountry: form.passportCountry,
     groupSize: form.groupSize,
-    isReturningCustomer: form.isReturningCustomer,
   }, { enabled: currentStep >= 1 });
-
-  const countriesQuery = trpc.visa.getSupportedCountries.useQuery();
 
   const submitMutation = trpc.visa.submitApplication.useMutation({
     onSuccess: (data) => {
@@ -178,18 +165,16 @@ export default function ChinaVisa() {
       placeOfBirth: form.placeOfBirth || undefined,
       visaType: form.visaType,
       entryType: form.entryType,
-      processingSpeed: form.processingSpeed,
       travelDate: form.travelDate || undefined,
       travelPurpose: form.travelPurpose || undefined,
       previousVisits: 0,
       groupSize: form.groupSize,
-      isReturningCustomer: form.isReturningCustomer,
+      isReturningCustomer: false,
     });
   };
 
   const selectedVisaType = VISA_TYPES.find(v => v.value === form.visaType);
   const selectedEntryType = ENTRY_TYPES.find(e => e.value === form.entryType);
-  const selectedSpeed = PROCESSING_SPEEDS.find(s => s.value === form.processingSpeed);
 
   // ── Landing page (step 0) ─────────────────────────────────
   if (currentStep === 0) {
@@ -216,7 +201,7 @@ export default function ChinaVisa() {
                   <div className="flex flex-wrap gap-4 mb-8">
                     {[
                       { icon: <Shield className="h-4 w-4" />, zh: "99% 核准率", en: "99% Approval Rate" },
-                      { icon: <Clock className="h-4 w-4" />, zh: "最快 2 天", en: "As fast as 2 days" },
+                      { icon: <Clock className="h-4 w-4" />, zh: "10-15 個工作日", en: "10-15 business days" },
                       { icon: <Users className="h-4 w-4" />, zh: "團體優惠", en: "Group Discounts" },
                     ].map((item, i) => (
                       <div key={i} className="flex items-center gap-2 text-sm text-white/70">
@@ -234,61 +219,82 @@ export default function ChinaVisa() {
                   </Button>
                 </div>
                 <div className="flex-1 grid grid-cols-2 gap-4">
-                  {[
-                    { zh: "旅遊簽 L", en: "Tourist L", price: "from $120" },
-                    { zh: "商務簽 M", en: "Business M", price: "from $150" },
-                    { zh: "學生簽 X", en: "Student X", price: "from $150" },
-                    { zh: "工作簽 Z", en: "Work Z", price: "from $200" },
-                  ].map((item, i) => (
-                    <div key={i} className="border border-white/20 p-4">
-                      <div className="text-lg font-bold mb-1">{isChineseMode ? item.zh : item.en}</div>
-                      <div className="text-gray-400 text-sm">{item.price}</div>
-                    </div>
-                  ))}
+                  <div className="border border-white/20 p-6 flex flex-col">
+                    <div className="text-xs text-white/50 tracking-widest mb-3">{isChineseMode ? "個人申請" : "INDIVIDUAL"}</div>
+                    <div className="text-4xl font-bold text-white mb-1">$290</div>
+                    <div className="text-sm text-white/60 mb-4">{isChineseMode ? "/ 人（全包）" : "/ person (all-in)"}</div>
+                    <ul className="space-y-1.5 text-xs text-white/70">
+                      <li>✅ {isChineseMode ? "領事館簽證規費" : "Consulate visa fee"}</li>
+                      <li>✅ {isChineseMode ? "證件照拍攝" : "Passport photo"}</li>
+                      <li>✅ {isChineseMode ? "代填申請表格" : "Form assistance"}</li>
+                      <li>✅ {isChineseMode ? "人工運送至領事館" : "Courier to consulate"}</li>
+                    </ul>
+                  </div>
+                  <div className="border-2 border-white/60 p-6 flex flex-col bg-white/5">
+                    <div className="text-xs text-white/50 tracking-widest mb-3">{isChineseMode ? "團體申請（2人以上）" : "GROUP (2+ PEOPLE)"}</div>
+                    <div className="text-4xl font-bold text-white mb-1">$275</div>
+                    <div className="text-sm text-white/60 mb-4">{isChineseMode ? "/ 人（全包）" : "/ person (all-in)"}</div>
+                    <ul className="space-y-1.5 text-xs text-white/70">
+                      <li>✅ {isChineseMode ? "領事館簽證規費" : "Consulate visa fee"}</li>
+                      <li>✅ {isChineseMode ? "證件照拍攝" : "Passport photo"}</li>
+                      <li>✅ {isChineseMode ? "代填申請表格" : "Form assistance"}</li>
+                      <li>✅ {isChineseMode ? "人工運送至領事館" : "Courier to consulate"}</li>
+                    </ul>
+                    <div className="mt-3 text-xs text-green-400 font-semibold">{isChineseMode ? "每人省 $15" : "Save $15/person"}</div>
+                  </div>
                 </div>
               </div>
             </div>
           </section>
 
-          {/* Pricing Table */}
+          {/* Pricing Cards — 2 columns */}
           <section className="py-16 bg-gray-50 border-b border-gray-200">
-            <div className="container max-w-5xl mx-auto px-4">
-              <h2 className="text-2xl font-serif font-bold mb-8 text-center">
-                {isChineseMode ? "代辦費用一覽" : "Service Fee Schedule"}
+            <div className="container max-w-4xl mx-auto px-4">
+              <h2 className="text-2xl font-serif font-bold mb-2 text-center">
+                {isChineseMode ? "代辦費用一覽" : "Service Fee"}
               </h2>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm border-collapse">
-                  <thead>
-                    <tr className="bg-[#1A1A1A] text-white">
-                      <th className="px-4 py-3 text-left">{isChineseMode ? "簽證類型" : "Visa Type"}</th>
-                      <th className="px-4 py-3 text-center">{isChineseMode ? "普通 (10-15天)" : "Regular (10-15d)"}</th>
-                      <th className="px-4 py-3 text-center">{isChineseMode ? "加急 (5-7天)" : "Express (5-7d)"}</th>
-                      <th className="px-4 py-3 text-center">{isChineseMode ? "特急 (2-3天)" : "Rush (2-3d)"}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {VISA_TYPES.slice(0, 4).map((vt, i) => (
-                      <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-gray-50"}>
-                        <td className="px-4 py-3 font-medium">{isChineseMode ? vt.zh : vt.en}</td>
-                        <td className="px-4 py-3 text-center">
-                          ${i === 0 ? 120 : i === 1 ? 150 : i === 2 ? 180 : 150}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          ${i === 0 ? 180 : i === 1 ? 210 : i === 2 ? 240 : 210}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          ${i === 0 ? 240 : i === 1 ? 270 : i === 2 ? 300 : 270}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <p className="text-xs text-gray-500 mt-3">
-                  {isChineseMode
-                    ? "* 以上為代辦服務費，不含領事館費用（依護照國籍而定，美國公民 $185，其他國家 $50-151）"
-                    : "* Above are service fees only, excluding consulate fees (varies by nationality: US citizens $185, others $50-151)"}
-                </p>
+              <p className="text-center text-gray-500 text-sm mb-10">
+                {isChineseMode ? "全包價，無任何額外費用" : "All-inclusive price, no hidden fees"}
+              </p>
+              <div className="grid md:grid-cols-2 gap-6 max-w-2xl mx-auto">
+                {/* Individual */}
+                <div className="border-2 border-gray-200 p-8 flex flex-col">
+                  <div className="text-xs text-gray-400 tracking-widest mb-4">{isChineseMode ? "個人申請" : "INDIVIDUAL"}</div>
+                  <div className="text-5xl font-bold text-[#1A1A1A] mb-1">$290</div>
+                  <div className="text-sm text-gray-500 mb-6">{isChineseMode ? "/ 人" : "/ person"}</div>
+                  <ul className="space-y-2 text-sm text-gray-700 mb-6">
+                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{isChineseMode ? "領事館簽證規費" : "Consulate visa fee"}</li>
+                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{isChineseMode ? "證件照拍攝" : "Passport photo"}</li>
+                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{isChineseMode ? "代填申請表格" : "Form assistance"}</li>
+                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{isChineseMode ? "人工運送至領事館" : "Courier to consulate"}</li>
+                  </ul>
+                  <Button onClick={() => setCurrentStep(1)} className="bg-[#1A1A1A] text-white hover:bg-gray-800 rounded-none w-full mt-auto">
+                    {isChineseMode ? "立即申請" : "Apply Now"}
+                  </Button>
+                </div>
+                {/* Group */}
+                <div className="border-2 border-[#1A1A1A] p-8 flex flex-col relative">
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#1A1A1A] text-white text-xs px-4 py-1 font-bold tracking-wider">
+                    {isChineseMode ? "推薦" : "BEST VALUE"}
+                  </div>
+                  <div className="text-xs text-gray-400 tracking-widest mb-4">{isChineseMode ? "團體申請（2人以上）" : "GROUP (2+ PEOPLE)"}</div>
+                  <div className="text-5xl font-bold text-[#1A1A1A] mb-1">$275</div>
+                  <div className="text-sm text-gray-500 mb-1">{isChineseMode ? "/ 人" : "/ person"}</div>
+                  <div className="text-xs text-green-600 font-semibold mb-6">{isChineseMode ? "每人省 $15" : "Save $15/person"}</div>
+                  <ul className="space-y-2 text-sm text-gray-700 mb-6">
+                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{isChineseMode ? "領事館簽證規費" : "Consulate visa fee"}</li>
+                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{isChineseMode ? "證件照拍攝" : "Passport photo"}</li>
+                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{isChineseMode ? "代填申請表格" : "Form assistance"}</li>
+                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{isChineseMode ? "人工運送至領事館" : "Courier to consulate"}</li>
+                  </ul>
+                  <Button onClick={() => setCurrentStep(1)} className="bg-[#1A1A1A] text-white hover:bg-gray-800 rounded-none w-full mt-auto">
+                    {isChineseMode ? "立即申請" : "Apply Now"}
+                  </Button>
+                </div>
               </div>
+              <p className="text-center text-xs text-gray-400 mt-6">
+                {isChineseMode ? "以上為全包價，無任何額外費用" : "All-inclusive price — no additional charges"}
+              </p>
             </div>
           </section>
 
@@ -472,29 +478,7 @@ export default function ChinaVisa() {
                       </div>
                     </div>
 
-                    <div>
-                      <Label className="text-sm font-bold mb-2 block">
-                        {isChineseMode ? "處理速度" : "Processing Speed"}
-                      </Label>
-                      <div className="grid grid-cols-3 gap-2">
-                        {PROCESSING_SPEEDS.map(ps => (
-                          <button
-                            key={ps.value}
-                            onClick={() => updateForm("processingSpeed", ps.value)}
-                            className={`p-3 border-2 text-sm transition-colors ${
-                              form.processingSpeed === ps.value
-                                ? "border-black bg-black text-white"
-                                : "border-gray-200 hover:border-gray-400"
-                            }`}
-                          >
-                            <div className="font-medium">{isChineseMode ? ps.zh : ps.en}</div>
-                            <div className={`text-xs mt-0.5 ${form.processingSpeed === ps.value ? "text-white/70" : "text-gray-500"}`}>
-                              {isChineseMode ? ps.duration_zh : ps.duration_en}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+                    {/* Processing speed removed — standard 10-15 business days */}
 
                     <div>
                       <Label className="text-sm font-bold mb-2 block">
@@ -508,9 +492,9 @@ export default function ChinaVisa() {
                         onChange={e => updateForm("groupSize", parseInt(e.target.value) || 1)}
                         className="w-32 border-2 border-gray-300 rounded-none"
                       />
-                      {form.groupSize >= 5 && (
+                      {form.groupSize >= 2 && (
                         <p className="text-xs text-green-600 mt-1">
-                          {isChineseMode ? "✓ 5人以上享有 10% 團體優惠" : "✓ 10% group discount for 5+ applicants"}
+                          {isChineseMode ? "✓ 2人以上享有團體優惠 $275/人（每人省 $15）" : "✓ Group rate $275/person for 2+ applicants (save $15/person)"}
                         </p>
                       )}
                     </div>
@@ -527,16 +511,7 @@ export default function ChinaVisa() {
                       />
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <Checkbox
-                        id="returning"
-                        checked={form.isReturningCustomer}
-                        onCheckedChange={v => updateForm("isReturningCustomer", !!v)}
-                      />
-                      <Label htmlFor="returning" className="text-sm cursor-pointer">
-                        {isChineseMode ? "我是回頭客（享 5% 優惠）" : "I am a returning customer (5% discount)"}
-                      </Label>
-                    </div>
+                    {/* Returning customer discount removed — flat pricing */}
                   </div>
                 </div>
               )}
@@ -677,7 +652,7 @@ export default function ChinaVisa() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {(countriesQuery.data ?? ["United States", "Canada", "United Kingdom", "Australia", "Other"]).map(c => (
+                          {["United States", "Canada", "United Kingdom", "Australia", "Taiwan", "Hong Kong", "Japan", "South Korea", "Germany", "France", "Other"].map((c: string) => (
                             <SelectItem key={c} value={c}>{c}</SelectItem>
                           ))}
                         </SelectContent>
@@ -713,7 +688,7 @@ export default function ChinaVisa() {
                           {[
                             { label: isChineseMode ? "簽證類型" : "Visa Type", value: isChineseMode ? selectedVisaType?.zh : selectedVisaType?.en },
                             { label: isChineseMode ? "入境次數" : "Entry Type", value: isChineseMode ? selectedEntryType?.zh : selectedEntryType?.en },
-                            { label: isChineseMode ? "處理速度" : "Processing Speed", value: isChineseMode ? selectedSpeed?.zh : selectedSpeed?.en },
+                            // Processing speed removed from review
                             { label: isChineseMode ? "申請人數" : "Group Size", value: form.groupSize },
                             ...(form.travelDate ? [{ label: isChineseMode ? "預計出行日期" : "Travel Date", value: form.travelDate }] : []),
                           ].map((row, i) => (
@@ -826,40 +801,24 @@ export default function ChinaVisa() {
                 {pricing ? (
                   <div className="space-y-3 text-sm">
                     <div className="flex justify-between">
-                      <span className="text-gray-600">{isChineseMode ? "基本服務費" : "Base Service Fee"}</span>
-                      <span>${pricing.breakdown.baseServiceFee}</span>
+                      <span className="text-gray-600">
+                        {isChineseMode ? "中國簽證代辦（全包）" : "China Visa Service (all-in)"}
+                      </span>
+                      <span>${pricing.pricePerPerson}</span>
                     </div>
-                    {pricing.breakdown.entryTypeSurcharge > 0 && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">{isChineseMode ? "入境次數附加費" : "Entry Type Surcharge"}</span>
-                        <span>+${pricing.breakdown.entryTypeSurcharge}</span>
-                      </div>
-                    )}
-                    {pricing.breakdown.processingSpeedSurcharge > 0 && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">{isChineseMode ? "加急費用" : "Processing Surcharge"}</span>
-                        <span>+${pricing.breakdown.processingSpeedSurcharge}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">{isChineseMode ? "領事館費用" : "Consulate Fee"}</span>
-                      <span>+${pricing.consulateFee}</span>
+                    <div className="flex justify-between text-gray-500">
+                      <span>{isChineseMode ? "× 申請人數" : "× Applicants"}</span>
+                      <span>{pricing.groupSize} {isChineseMode ? "人" : "person(s)"}</span>
                     </div>
-                    {pricing.discountAmount > 0 && (
-                      <div className="flex justify-between text-green-600">
-                        <span>{isChineseMode ? "折扣" : "Discount"}</span>
-                        <span>-${pricing.discountAmount.toFixed(2)}</span>
+                    {pricing.isGroupDiscount && (
+                      <div className="text-xs text-green-600 bg-green-50 border border-green-200 p-2">
+                        {isChineseMode ? `✓ 團體優惠：每人省 $${pricing.savedPerPerson}` : `✓ Group rate: save $${pricing.savedPerPerson}/person`}
                       </div>
                     )}
                     <div className="flex justify-between font-bold text-base pt-3 border-t border-gray-200">
-                      <span>{isChineseMode ? "總計" : "Total"}</span>
-                      <span>USD ${pricing.totalAmount.toFixed(2)}</span>
+                      <span>{isChineseMode ? "應付總額" : "Total"}</span>
+                      <span>USD ${pricing.grandTotal.toFixed(2)}</span>
                     </div>
-                    {pricing.discountType !== "none" && (
-                      <div className="bg-green-50 border border-green-200 p-2 text-xs text-green-700">
-                        {pricing.breakdown.discountLabel}
-                      </div>
-                    )}
                   </div>
                 ) : (
                   <div className="text-gray-400 text-sm">

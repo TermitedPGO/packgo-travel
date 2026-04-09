@@ -4,7 +4,7 @@ import { ENV } from "./env";
 import * as db from "../db";
 import { sendPaymentSuccessEmail } from "../email";
 import { sendVisaApplicationConfirmation } from "../services/visaEmailService";
-import { getVisaTypeName, getEntryTypeName, getProcessingSpeedInfo } from "../services/visaPricingService";
+
 
 // P0-2: Lazy-load Stripe to prevent server crash when STRIPE_SECRET_KEY is not set
 let _stripe: Stripe | null = null;
@@ -203,18 +203,10 @@ async function handleVisaPaymentCompleted(
 
   // Send confirmation email
   try {
-    const visaTypeName = getVisaTypeName(application.visaType as Parameters<typeof getVisaTypeName>[0]);
-    const entryTypeName = getEntryTypeName(application.entryType as Parameters<typeof getEntryTypeName>[0]);
-    const speedInfo = getProcessingSpeedInfo(application.processingSpeed as Parameters<typeof getProcessingSpeedInfo>[0]);
-
     await sendVisaApplicationConfirmation({
       toEmail: application.email,
       applicantName: `${application.firstName} ${application.lastName}`,
       applicationId,
-      visaTypeName,
-      entryTypeName,
-      processingSpeedLabel: speedInfo.label,
-      processingDuration: speedInfo.duration,
       totalAmount: Number(application.totalAmount),
       passportNumber: application.passportNumber,
       travelDate: application.travelDate ?? undefined,
