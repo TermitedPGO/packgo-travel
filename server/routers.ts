@@ -4553,7 +4553,7 @@ export const appRouter = router({
         if (!expense) throw new TRPCError({ code: "NOT_FOUND", message: "定期支出不存在" });
         const entry = await db.createAccountingEntry({
           entryType: "expense",
-          category: expense.category,
+          category: expense.category as any,
           amount: expense.amount,
           currency: expense.currency,
           description: `[定期] ${expense.description}`,
