@@ -1941,3 +1941,15 @@ export async function searchImageLibrary(
 export async function getImagesByTourId(tourId: number): Promise<ImageLibraryItem[]> {
   return getImageLibrary({ tourId });
 }
+
+/**
+ * Update imageLibrary item fields (used by Vision analysis pipeline).
+ */
+export async function updateImageLibraryItem(
+  id: number,
+  updates: Partial<Pick<ImageLibraryItem, 'tags' | 'visionDescription' | 'contentType' | 'qualityScore' | 'source'>>
+): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(imageLibrary).set(updates).where(eq(imageLibrary.id, id));
+}

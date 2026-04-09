@@ -428,6 +428,11 @@ export const imageLibrary = mysqlTable("imageLibrary", {
   uploadedBy: int("uploadedBy").notNull(), // User ID who uploaded
   tourId: int("tourId"), // Optional: associated tour ID
   usageCount: int("usageCount").default(0).notNull(), // How many times this image is used
+  // Vision analysis fields (Round 11)
+  source: varchar("source", { length: 50 }), // 'pdf' | 'google_places' | 'unsplash' | 'upload'
+  visionDescription: text("visionDescription"), // Vision analysis description
+  contentType: varchar("contentType", { length: 50 }), // 'landscape' | 'hotel' | 'food' | 'activity' | etc.
+  qualityScore: int("qualityScore"), // Vision quality score 0-100
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

@@ -527,7 +527,45 @@ export class MasterAgent {
       } catch (imgPipelineError) {
         console.warn('[MasterAgent] Image pipeline failed, continuing with defaults:', imgPipelineError);
       }
-      
+
+      // ── Vision Analysis + Smart Match ────────────────────────────────────────
+      // Analyze all collected images with Claude Vision, then smart-match to targets
+      let visionAnalyses: Array<import('../services/visionAnalysisService').VisionAnalysisResult> = [];
+      let smartMatchMap: Map<string, string> = new Map();
+      try {
+        const { analyzeAndTagImages, smartMatchImages } = await import('../services/imageIntelligenceService');
+        const allImageUrls = [
+          imageResults.hero?.url,
+          ...imageResults.features.map((f: any) => f.url),
+        ].filter(Boolean) as string[];
+
+        if (allImageUrls.length > 0) {
+          visionAnalyses = await analyzeAndTagImages(allImageUrls.map(url => ({ url })));
+          console.log(`[MasterAgent] ✓ Vision analyzed ${visionAnalyses.length} images`);
+
+          // Build targets from rawData for smart matching
+          const targets: Array<{ name: string; type: 'attraction' | 'hotel' | 'meal' | 'hero' }> = [
+            ...(Array.isArray(rawData.hotelInfo) ? rawData.hotelInfo : []).map((h: any) => ({
+              name: h?.name || h?.hotel || '',
+              type: 'hotel' as const,
+            })),
+            ...(Array.isArray(rawData.attractions) ? rawData.attractions : []).map((a: any) => ({
+              name: a?.name || '',
+              type: 'attraction' as const,
+            })),
+          ].filter(t => t.name);
+
+          if (targets.length > 0 && visionAnalyses.length > 0) {
+            smartMatchMap = await smartMatchImages(visionAnalyses, allImageUrls, targets);
+            console.log(`[MasterAgent] ✓ Smart matched ${smartMatchMap.size} images to targets`);
+            (imageResults as any).matched = Object.fromEntries(smartMatchMap);
+          }
+        }
+      } catch (visionErr) {
+        console.warn('[MasterAgent] Vision analysis failed, continuing:', visionErr);
+      }
+      // ── End Vision Analysis ──────────────────────────────────────────────────
+
       // Start all agents (except ImageGenerationAgent and ItineraryAgent which runs separately)
       // DetailsSkill replaces CostAgent, NoticeAgent, HotelAgent, MealAgent
       this.monitor.startAgent('DetailsSkill');
