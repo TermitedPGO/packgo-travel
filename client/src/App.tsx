@@ -21,7 +21,9 @@ import BookingDetail from "./pages/BookingDetail";
 import QuickInquiry from "./pages/QuickInquiry";
 import CustomTourRequest from "./pages/CustomTourRequest";
 import CustomTours from "./pages/CustomTours";
-import VisaServices from "./pages/VisaServices";
+import ChinaVisa from "./pages/ChinaVisa";
+import ChinaVisaSuccess from "./pages/ChinaVisaSuccess";
+import ChinaVisaStatus from "./pages/ChinaVisaStatus";
 import GroupPackages from "./pages/GroupPackages";
 import FlightBooking from "./pages/FlightBooking";
 import AirportTransfer from "./pages/AirportTransfer";
@@ -76,7 +78,10 @@ function Router() {
       <Route path={"/inquiry"} component={QuickInquiry} />
       <Route path={"/custom-tour-request"} component={CustomTourRequest} />
       <Route path={"/custom-tours"} component={CustomTours} />
-      <Route path={"/visa-services"} component={VisaServices} />
+      <Route path={"/china-visa"} component={ChinaVisa} />
+      <Route path={"/china-visa/success"} component={ChinaVisaSuccess} />
+      <Route path={"/china-visa/status/:id"} component={ChinaVisaStatus} />
+      <Route path={"/visa-services"}>{() => { if (typeof window !== 'undefined') window.location.replace("/china-visa"); return null; }}</Route>
       <Route path={"/group-packages"} component={GroupPackages} />
       <Route path={"/flight-booking"} component={FlightBooking} />
       <Route path={"/airport-transfer"} component={AirportTransfer} />

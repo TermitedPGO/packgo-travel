@@ -125,6 +125,8 @@ export const en = {
     airportTransferDesc: 'Airport pickup & private car service',
     hotelBookingDesc: 'Global hotel booking & special deals',
     visaServicesDesc: 'Visa application & consultation for all countries',
+    chinaVisa: 'China Visa Service',
+    chinaVisaDesc: 'Professional China mainland visa processing, fast & reliable',
     customTourRequest: 'Custom Tour Planning',
     customTourRequestDesc: 'Tell us your dream trip, our advisor will tailor it for you',
     quickInquiry: 'Quick Inquiry',

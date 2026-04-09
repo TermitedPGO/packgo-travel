@@ -23,7 +23,9 @@ import {
   competitorAlerts, CompetitorAlert, InsertCompetitorAlert,
   marketingCampaigns, MarketingCampaign, InsertMarketingCampaign,
   marketingMaterials, MarketingMaterial, InsertMarketingMaterial,
-  emailSendLogs, EmailSendLog, InsertEmailSendLog
+  emailSendLogs, EmailSendLog, InsertEmailSendLog,
+  visaApplications, VisaApplication, InsertVisaApplication,
+  visaStatusHistory, VisaStatusHistory, InsertVisaStatusHistory
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -2579,5 +2581,207 @@ export async function getSubscriberCount(): Promise<{ total: number; active: num
   return {
     total: Number(totalResult[0]?.count ?? 0),
     active: Number(activeResult[0]?.count ?? 0),
+  };
+}
+
+// ══════════════════════════════════════════════════════════════
+// PHASE 6: 中國簽證代辦 DB 函數
+// ══════════════════════════════════════════════════════════════
+
+// ── 建立申請 ──────────────────────────────────────────────────
+export async function createVisaApplication(
+  data: InsertVisaApplication
+): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.insert(visaApplications).values(data);
+  return (result[0] as { insertId: number }).insertId;
+}
+
+// ── 查詢單筆申請 ──────────────────────────────────────────────
+export async function getVisaApplicationById(
+  id: number
+): Promise<VisaApplication | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db
+    .select()
+    .from(visaApplications)
+    .where(eq(visaApplications.id, id))
+    .limit(1);
+  return result[0] ?? null;
+}
+
+// ── 依 Stripe Session 查詢 ────────────────────────────────────
+export async function getVisaApplicationByStripeSession(
+  sessionId: string
+): Promise<VisaApplication | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db
+    .select()
+    .from(visaApplications)
+    .where(eq(visaApplications.stripeCheckoutSessionId, sessionId))
+    .limit(1);
+  return result[0] ?? null;
+}
+
+// ── 查詢所有申請（Admin）────────────────────────────────────
+export async function getAllVisaApplications(filters?: {
+  status?: string;
+  page?: number;
+  pageSize?: number;
+}): Promise<{ applications: VisaApplication[]; total: number }> {
+  const db = await getDb();
+  if (!db) return { applications: [], total: 0 };
+
+  const page = filters?.page ?? 1;
+  const pageSize = filters?.pageSize ?? 20;
+  const offset = (page - 1) * pageSize;
+
+  const conditions = [];
+  if (filters?.status) {
+    conditions.push(eq(visaApplications.applicationStatus, filters.status as VisaApplication["applicationStatus"]));
+  }
+
+  const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+  const [applications, countResult] = await Promise.all([
+    db
+      .select()
+      .from(visaApplications)
+      .where(whereClause)
+      .orderBy(desc(visaApplications.createdAt))
+      .limit(pageSize)
+      .offset(offset),
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(visaApplications)
+      .where(whereClause),
+  ]);
+
+  return {
+    applications,
+    total: Number(countResult[0]?.count ?? 0),
+  };
+}
+
+// ── 更新申請狀態 ──────────────────────────────────────────────
+export async function updateVisaApplicationStatus(
+  id: number,
+  newStatus: VisaApplication["applicationStatus"],
+  changedBy?: number,
+  note?: string
+): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const current = await getVisaApplicationById(id);
+  const fromStatus = current?.applicationStatus ?? null;
+
+  await db
+    .update(visaApplications)
+    .set({ applicationStatus: newStatus })
+    .where(eq(visaApplications.id, id));
+
+  // 記錄狀態歷程
+  await db.insert(visaStatusHistory).values({
+    applicationId: id,
+    fromStatus: fromStatus ?? undefined,
+    toStatus: newStatus,
+    changedBy,
+    note,
+  });
+}
+
+// ── 更新付款資訊 ──────────────────────────────────────────────
+export async function updateVisaPaymentInfo(
+  id: number,
+  data: {
+    paymentStatus: VisaApplication["paymentStatus"];
+    stripePaymentIntentId?: string;
+    stripeCheckoutSessionId?: string;
+    paidAt?: Date;
+  }
+): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db
+    .update(visaApplications)
+    .set(data)
+    .where(eq(visaApplications.id, id));
+}
+
+// ── 更新 Admin 備註 ───────────────────────────────────────────
+export async function updateVisaAdminNotes(
+  id: number,
+  adminNotes: string,
+  trackingNumber?: string
+): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db
+    .update(visaApplications)
+    .set({ adminNotes, ...(trackingNumber ? { trackingNumber } : {}) })
+    .where(eq(visaApplications.id, id));
+}
+
+// ── 查詢狀態歷程 ──────────────────────────────────────────────
+export async function getVisaStatusHistory(
+  applicationId: number
+): Promise<VisaStatusHistory[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(visaStatusHistory)
+    .where(eq(visaStatusHistory.applicationId, applicationId))
+    .orderBy(desc(visaStatusHistory.createdAt));
+}
+
+// ── 統計資料（Admin Dashboard）────────────────────────────────
+export async function getVisaStats(): Promise<{
+  total: number;
+  pending: number;
+  processing: number;
+  approved: number;
+  rejected: number;
+  totalRevenue: number;
+}> {
+  const db = await getDb();
+  if (!db) return { total: 0, pending: 0, processing: 0, approved: 0, rejected: 0, totalRevenue: 0 };
+
+  const [totalResult, pendingResult, processingResult, approvedResult, rejectedResult, revenueResult] =
+    await Promise.all([
+      db.select({ count: sql<number>`count(*)` }).from(visaApplications),
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(visaApplications)
+        .where(inArray(visaApplications.applicationStatus, ["submitted", "paid", "documents_received"])),
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(visaApplications)
+        .where(eq(visaApplications.applicationStatus, "processing")),
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(visaApplications)
+        .where(inArray(visaApplications.applicationStatus, ["approved", "completed"])),
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(visaApplications)
+        .where(eq(visaApplications.applicationStatus, "rejected")),
+      db
+        .select({ total: sql<number>`sum(totalAmount)` })
+        .from(visaApplications)
+        .where(eq(visaApplications.paymentStatus, "paid")),
+    ]);
+
+  return {
+    total: Number(totalResult[0]?.count ?? 0),
+    pending: Number(pendingResult[0]?.count ?? 0),
+    processing: Number(processingResult[0]?.count ?? 0),
+    approved: Number(approvedResult[0]?.count ?? 0),
+    rejected: Number(rejectedResult[0]?.count ?? 0),
+    totalRevenue: Number(revenueResult[0]?.total ?? 0),
   };
 }

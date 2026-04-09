@@ -38,7 +38,7 @@ export default function Header() {
       children: [
         // BUG-004: Flight/Hotel/Airport pages have no backend — removed from main nav
         // They remain accessible via Footer links and direct URL
-        { labelKey: "nav.visaServices", href: "/visa-services", descKey: "nav.visaServicesDesc" },
+        { labelKey: "nav.chinaVisa", href: "/china-visa", descKey: "nav.chinaVisaDesc" },
         { labelKey: "nav.customTourRequest", href: "/custom-tour-request", descKey: "nav.customTourRequestDesc" },
         { labelKey: "nav.quickInquiry", href: "/inquiry", descKey: "nav.quickInquiryDesc" },
         { labelKey: "nav.contactUs", href: "/contact-us", descKey: "nav.contactUsDesc" },

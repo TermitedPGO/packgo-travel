@@ -19,6 +19,7 @@ import {
   CheckCircle2,
   Binoculars,
   Megaphone,
+  FileText,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
@@ -38,8 +39,9 @@ import TaskHistoryContent from "@/components/admin/TaskHistoryContent";
 import CalibrationReviewTab from "@/components/admin/CalibrationReviewTab";
 import CompetitorMonitorTab from "@/components/admin/CompetitorMonitorTab";
 import MarketingTab from "@/components/admin/MarketingTab";
+import VisaManagementTab from "@/components/admin/VisaManagementTab";
 
-type AdminTab = "dashboard" | "tours" | "bookings" | "inquiries" | "reviews" | "ai-hub" | "analytics" | "task-history" | "calibration-review" | "competitor-monitor" | "marketing";
+type AdminTab = "dashboard" | "tours" | "bookings" | "inquiries" | "reviews" | "ai-hub" | "analytics" | "task-history" | "calibration-review" | "competitor-monitor" | "marketing" | "visa";
 
 export default function Admin() {
   const { user, loading, isAuthenticated, logout } = useAuth();
@@ -87,6 +89,12 @@ export default function Admin() {
         { id: 'calibration-review', icon: CheckCircle2, label: 'QA 品質審查' },
         { id: 'competitor-monitor', icon: Binoculars, label: '競品監控', badge: typeof competitorUnread === 'number' && competitorUnread > 0 ? competitorUnread : undefined },
         { id: 'marketing', icon: Megaphone, label: '行銷自動化' },
+      ],
+    },
+    {
+      label: '簽證服務',
+      items: [
+        { id: 'visa', icon: FileText, label: '中國簽證管理' },
       ],
     },
   ];
@@ -268,6 +276,7 @@ export default function Admin() {
           {activeTab === "calibration-review" && <CalibrationReviewTab />}
           {activeTab === "competitor-monitor" && <CompetitorMonitorTab />}
           {activeTab === "marketing" && <MarketingTab />}
+          {activeTab === "visa" && <VisaManagementTab />}
         </main>
       </div>
     </div>

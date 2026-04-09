@@ -3,6 +3,8 @@ import Stripe from "stripe";
 import { ENV } from "./env";
 import * as db from "../db";
 import { sendPaymentSuccessEmail } from "../email";
+import { sendVisaApplicationConfirmation } from "../services/visaEmailService";
+import { getVisaTypeName, getEntryTypeName, getProcessingSpeedInfo } from "../services/visaPricingService";
 
 // P0-2: Lazy-load Stripe to prevent server crash when STRIPE_SECRET_KEY is not set
 let _stripe: Stripe | null = null;
@@ -86,6 +88,13 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
 
   const bookingId = session.metadata?.booking_id;
   const paymentType = session.metadata?.payment_type as "deposit" | "full" | "balance";
+  const visaApplicationId = session.metadata?.visa_application_id;
+
+  // Handle visa payment
+  if (visaApplicationId) {
+    await handleVisaPaymentCompleted(session, parseInt(visaApplicationId));
+    return;
+  }
 
   if (!bookingId) {
     console.error("[Stripe Webhook] No booking_id in session metadata");
@@ -165,4 +174,53 @@ async function handlePaymentIntentFailed(paymentIntent: Stripe.PaymentIntent) {
 
   // Update payment record status
   await db.updatePaymentStatus(paymentIntent.id, "failed");
+}
+
+async function handleVisaPaymentCompleted(
+  session: Stripe.Checkout.Session,
+  applicationId: number
+) {
+  console.log(`[Stripe Webhook] Processing visa payment for application ${applicationId}`);
+
+  const application = await db.getVisaApplicationById(applicationId);
+  if (!application) {
+    console.error(`[Stripe Webhook] Visa application ${applicationId} not found`);
+    return;
+  }
+
+  // Update payment info
+  await db.updateVisaPaymentInfo(applicationId, {
+    paymentStatus: "paid",
+    stripePaymentIntentId: session.payment_intent as string,
+    stripeCheckoutSessionId: session.id,
+    paidAt: new Date(),
+  });
+
+  // Update application status to paid
+  await db.updateVisaApplicationStatus(applicationId, "paid", undefined, "Stripe 付款完成");
+
+  console.log(`[Stripe Webhook] Visa application ${applicationId} payment confirmed`);
+
+  // Send confirmation email
+  try {
+    const visaTypeName = getVisaTypeName(application.visaType as Parameters<typeof getVisaTypeName>[0]);
+    const entryTypeName = getEntryTypeName(application.entryType as Parameters<typeof getEntryTypeName>[0]);
+    const speedInfo = getProcessingSpeedInfo(application.processingSpeed as Parameters<typeof getProcessingSpeedInfo>[0]);
+
+    await sendVisaApplicationConfirmation({
+      toEmail: application.email,
+      applicantName: `${application.firstName} ${application.lastName}`,
+      applicationId,
+      visaTypeName,
+      entryTypeName,
+      processingSpeedLabel: speedInfo.label,
+      processingDuration: speedInfo.duration,
+      totalAmount: Number(application.totalAmount),
+      passportNumber: application.passportNumber,
+      travelDate: application.travelDate ?? undefined,
+    });
+    console.log(`[Stripe Webhook] Visa confirmation email sent to ${application.email}`);
+  } catch (error) {
+    console.error('[Stripe Webhook] Failed to send visa confirmation email:', error);
+  }
 }

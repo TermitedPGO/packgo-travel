@@ -56,7 +56,7 @@ export default function Footer() {
             <h3 className="text-lg font-serif font-bold mb-6 text-white">{t('footer.services')}</h3>
             <ul className="space-y-4 text-sm text-gray-400">
               <li><Link href="/custom-tours" className="hover:text-primary transition-colors">{t('services.customTours')}</Link></li>
-              <li><Link href="/visa-services" className="hover:text-primary transition-colors">{t('services.visaServices')}</Link></li>
+              <li><Link href="/china-visa" className="hover:text-primary transition-colors">{t('services.visaServices')}</Link></li>
               <li><Link href="/group-packages" className="hover:text-primary transition-colors">{t('services.groupPackages')}</Link></li>
               <li><Link href="/flight-booking" className="hover:text-primary transition-colors">{t('services.flightBooking')}</Link></li>
               <li><Link href="/airport-transfer" className="hover:text-primary transition-colors">{t('services.airportTransfer')}</Link></li>

@@ -1374,3 +1374,116 @@ export const emailSendLogs = mysqlTable("emailSendLogs", {
 });
 export type EmailSendLog = typeof emailSendLogs.$inferSelect;
 export type InsertEmailSendLog = typeof emailSendLogs.$inferInsert;
+
+// ══════════════════════════════════════════════════════════════
+// PHASE 6: 中國簽證代辦服務
+// ══════════════════════════════════════════════════════════════
+
+// ── 1. 簽證申請 ──────────────────────────────────────────────
+export const visaApplications = mysqlTable("visaApplications", {
+  id: int("id").autoincrement().primaryKey(),
+  // 申請人資訊
+  userId: int("userId"),
+  firstName: varchar("firstName", { length: 100 }).notNull(),
+  lastName: varchar("lastName", { length: 100 }).notNull(),
+  email: varchar("email", { length: 320 }).notNull(),
+  phone: varchar("phone", { length: 50 }).notNull(),
+
+  // 護照資訊
+  passportNumber: varchar("passportNumber", { length: 50 }).notNull(),
+  passportExpiry: varchar("passportExpiry", { length: 20 }).notNull(),
+  passportCountry: varchar("passportCountry", { length: 100 }).default("United States").notNull(),
+  dateOfBirth: varchar("dateOfBirth", { length: 20 }).notNull(),
+  placeOfBirth: varchar("placeOfBirth", { length: 200 }),
+
+  // 簽證資訊
+  visaType: mysqlEnum("visaType", [
+    "L_tourist",
+    "M_business",
+    "Q1_family_long",
+    "Q2_family_short",
+    "S1_dependent_long",
+    "S2_dependent_short",
+    "Z_work",
+    "X1_study_long",
+    "X2_study_short",
+  ]).default("L_tourist").notNull(),
+  entryType: mysqlEnum("entryType", [
+    "single",
+    "double",
+    "multiple_6m",
+    "multiple_12m",
+  ]).default("single").notNull(),
+  processingSpeed: mysqlEnum("processingSpeed", [
+    "regular",
+    "express",
+    "rush",
+  ]).default("regular").notNull(),
+
+  // 旅行資訊
+  travelDate: varchar("travelDate", { length: 20 }),
+  travelPurpose: text("travelPurpose"),
+  previousVisits: int("previousVisits").default(0),
+
+  // 定價
+  serviceFee: decimal("serviceFee", { precision: 10, scale: 2 }).notNull(),
+  consulateFee: decimal("consulateFee", { precision: 10, scale: 2 }),
+  totalAmount: decimal("totalAmount", { precision: 10, scale: 2 }).notNull(),
+  discountType: mysqlEnum("discountType", [
+    "none",
+    "group",
+    "returning",
+  ]).default("none").notNull(),
+
+  // 付款
+  paymentStatus: mysqlEnum("paymentStatus", [
+    "unpaid",
+    "paid",
+    "refunded",
+  ]).default("unpaid").notNull(),
+  stripePaymentIntentId: varchar("stripePaymentIntentId", { length: 255 }),
+  stripeCheckoutSessionId: varchar("stripeCheckoutSessionId", { length: 255 }),
+  paidAt: timestamp("paidAt"),
+
+  // 申請狀態
+  applicationStatus: mysqlEnum("applicationStatus", [
+    "draft",
+    "submitted",
+    "paid",
+    "documents_received",
+    "processing",
+    "approved",
+    "rejected",
+    "completed",
+    "cancelled",
+  ]).default("draft").notNull(),
+
+  // Admin 備註
+  adminNotes: text("adminNotes"),
+  trackingNumber: varchar("trackingNumber", { length: 100 }),
+
+  // 附加文件（JSON array of S3 URLs）
+  uploadedDocuments: text("uploadedDocuments"),
+
+  // 同行申請人（JSON array for group applications）
+  groupApplicants: text("groupApplicants"),
+  groupSize: int("groupSize").default(1).notNull(),
+
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type VisaApplication = typeof visaApplications.$inferSelect;
+export type InsertVisaApplication = typeof visaApplications.$inferInsert;
+
+// ── 2. 簽證申請狀態歷程 ──────────────────────────────────────
+export const visaStatusHistory = mysqlTable("visaStatusHistory", {
+  id: int("id").autoincrement().primaryKey(),
+  applicationId: int("applicationId").notNull(),
+  fromStatus: varchar("fromStatus", { length: 50 }),
+  toStatus: varchar("toStatus", { length: 50 }).notNull(),
+  changedBy: int("changedBy"),
+  note: text("note"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type VisaStatusHistory = typeof visaStatusHistory.$inferSelect;
+export type InsertVisaStatusHistory = typeof visaStatusHistory.$inferInsert;
