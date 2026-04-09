@@ -142,3 +142,123 @@ export function trackPurchase(params: {
     ],
   });
 }
+
+// ─── China Visa Funnel ───────────────────────────────────────────────────────
+/**
+ * Fired when a user starts the China visa application wizard (Step 1).
+ */
+export function trackVisaStart() {
+  gtag("event", "visa_start", {
+    event_category: "china_visa",
+    event_label: "wizard_step_1",
+  });
+}
+
+/**
+ * Fired when a user advances to a specific step in the visa wizard.
+ */
+export function trackVisaStep(step: number, stepName: string) {
+  gtag("event", "visa_step", {
+    event_category: "china_visa",
+    step_number: step,
+    step_name: stepName,
+  });
+}
+
+/**
+ * Fired when a user submits the visa application and proceeds to payment.
+ */
+export function trackVisaCheckout(params: {
+  applicantCount: number;
+  totalAmount: number;
+}) {
+  gtag("event", "visa_checkout", {
+    event_category: "china_visa",
+    applicant_count: params.applicantCount,
+    value: params.totalAmount,
+    currency: "USD",
+  });
+  // Also fire GA4 standard begin_checkout
+  gtag("event", "begin_checkout", {
+    currency: "USD",
+    value: params.totalAmount,
+    items: [
+      {
+        item_id: "china_visa",
+        item_name: "中國簽證代辦",
+        price: params.totalAmount,
+        quantity: params.applicantCount,
+      },
+    ],
+  });
+}
+
+/**
+ * Fired when a visa application payment is confirmed (on /china-visa/success).
+ */
+export function trackVisaPurchase(params: {
+  applicationId: number;
+  totalAmount: number;
+  applicantCount: number;
+}) {
+  gtag("event", "purchase", {
+    transaction_id: `visa_${params.applicationId}`,
+    currency: "USD",
+    value: params.totalAmount,
+    items: [
+      {
+        item_id: "china_visa",
+        item_name: "中國簽證代辦",
+        price: params.totalAmount,
+        quantity: params.applicantCount,
+      },
+    ],
+  });
+}
+
+// ─── Affiliate / Flight / Hotel ──────────────────────────────────────────────
+/**
+ * Fired when a user clicks an affiliate link (Trip.com flight or hotel).
+ */
+export function trackAffiliateClick(params: {
+  platform: string;
+  linkType: "flight" | "hotel" | "tour";
+  destination?: string;
+  searchQuery?: string;
+}) {
+  gtag("event", "affiliate_click", {
+    event_category: "affiliate",
+    platform: params.platform,
+    link_type: params.linkType,
+    destination: params.destination ?? "",
+    search_query: params.searchQuery ?? "",
+  });
+}
+
+// ─── Newsletter ──────────────────────────────────────────────────────────────
+/**
+ * Fired when a user subscribes to the newsletter.
+ */
+export function trackNewsletterSignup(source: string) {
+  gtag("event", "newsletter_signup", {
+    event_category: "engagement",
+    source,
+  });
+}
+
+// ─── Contact / Inquiry ───────────────────────────────────────────────────────
+/**
+ * Fired when a user submits a contact or inquiry form.
+ */
+export function trackInquirySubmit(params: {
+  tourId?: string | number;
+  tourName?: string;
+  inquiryType?: string;
+}) {
+  gtag("event", "inquiry_submit", {
+    event_category: "lead",
+    tour_id: params.tourId ? String(params.tourId) : "",
+    tour_name: params.tourName ?? "",
+    inquiry_type: params.inquiryType ?? "general",
+  });
+}

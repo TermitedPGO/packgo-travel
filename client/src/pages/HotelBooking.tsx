@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useLocale } from "@/contexts/LocaleContext";
+import { trackAffiliateClick } from "@/lib/analytics";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
@@ -45,6 +46,7 @@ export default function HotelBooking() {
         targetUrl: url,
         referrerPage: "/hotel-booking",
       });
+      trackAffiliateClick({ platform: 'trip.com', linkType: 'hotel', destination: city || undefined, searchQuery: city || '' });
       toast.info("正在前往 Trip.com 搜尋飯店...");
       window.open(url, "_blank");
     } catch (err) {
@@ -65,6 +67,7 @@ export default function HotelBooking() {
         targetUrl: result.url,
         referrerPage: "/hotel-booking",
       });
+      trackAffiliateClick({ platform: 'trip.com', linkType: 'hotel', destination: dest.city, searchQuery: `${dest.country}${dest.city}` });
       toast.info(`正在前往 Trip.com 搜尋${dest.country}${dest.city}飯店...`);
       window.open(result.url, "_blank");
     } catch {

@@ -400,7 +400,7 @@ export default function AccountingTab() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid grid-cols-4 w-full max-w-lg">
+        <TabsList className="grid grid-cols-2 sm:grid-cols-4 w-full max-w-lg">
           <TabsTrigger value="overview">概覽</TabsTrigger>
           <TabsTrigger value="entries">記帳明細</TabsTrigger>
           <TabsTrigger value="invoices">發票</TabsTrigger>
@@ -799,7 +799,7 @@ export default function AccountingTab() {
               <Label className="text-xs">服務說明 *</Label>
               <Input value={invoiceForm.description} onChange={e => setInvoiceForm(p => ({ ...p, description: e.target.value }))} placeholder="如：日本 5 天 4 夜行程費用" className="h-8 text-sm mt-1" />
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <Label className="text-xs">金額 *</Label>
                 <Input type="number" value={invoiceForm.amount} onChange={e => setInvoiceForm(p => ({ ...p, amount: e.target.value }))} className="h-8 text-sm mt-1" />

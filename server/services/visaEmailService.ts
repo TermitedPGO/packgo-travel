@@ -11,6 +11,7 @@
  */
 
 import nodemailer from "nodemailer";
+import { wrapInBrandTemplate } from "./emailTemplateService";
 
 const SMTP_HOST = process.env.EMAIL_HOST || "smtp.gmail.com";
 const SMTP_PORT = parseInt(process.env.EMAIL_PORT || "587");
@@ -29,55 +30,27 @@ function createTransporter() {
   });
 }
 
-// ── 共用 HTML 模板 ────────────────────────────────────────────
+// ── 共用 HTML 模板（使用統一品牌模板）────────────────────────
 function wrapHtml(title: string, body: string): string {
-  return `<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>${title}</title>
-  <style>
-    body { margin: 0; padding: 0; background: #f5f5f5; font-family: 'Helvetica Neue', Arial, sans-serif; color: #1a1a1a; }
-    .wrapper { max-width: 600px; margin: 40px auto; background: #fff; border: 1px solid #e0e0e0; }
-    .header { background: #1a1a1a; padding: 32px 40px; }
-    .header h1 { margin: 0; color: #fff; font-size: 22px; font-weight: 700; letter-spacing: 1px; }
-    .header p { margin: 4px 0 0; color: #999; font-size: 13px; }
-    .content { padding: 40px; }
-    .content h2 { font-size: 18px; font-weight: 700; margin: 0 0 16px; }
-    .content p { font-size: 14px; line-height: 1.8; margin: 0 0 16px; color: #444; }
-    .info-table { width: 100%; border-collapse: collapse; margin: 24px 0; }
-    .info-table td { padding: 10px 14px; font-size: 13px; border-bottom: 1px solid #f0f0f0; }
-    .info-table td:first-child { color: #888; width: 40%; }
-    .info-table td:last-child { font-weight: 600; color: #1a1a1a; }
-    .status-badge { display: inline-block; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 700; }
-    .status-paid { background: #e8f5e9; color: #2e7d32; }
-    .status-processing { background: #fff3e0; color: #e65100; }
-    .status-approved { background: #e3f2fd; color: #1565c0; }
-    .status-rejected { background: #fce4ec; color: #c62828; }
-    .status-completed { background: #e8f5e9; color: #2e7d32; }
-    .cta-btn { display: inline-block; margin: 24px 0 0; padding: 14px 32px; background: #1a1a1a; color: #fff !important; text-decoration: none; font-size: 14px; font-weight: 700; letter-spacing: 1px; }
-    .divider { border: none; border-top: 1px solid #f0f0f0; margin: 32px 0; }
-    .footer { background: #f5f5f5; padding: 24px 40px; font-size: 12px; color: #888; }
-    .footer a { color: #888; text-decoration: underline; }
-  </style>
-</head>
-<body>
-  <div class="wrapper">
-    <div class="header">
-      <h1>PACK&amp;GO 旅行社</h1>
-      <p>中國簽證代辦服務</p>
-    </div>
-    <div class="content">
-      ${body}
-    </div>
-    <div class="footer">
-      <p>此郵件由系統自動發送，請勿直接回覆。如有疑問，請聯繫我們：<a href="mailto:${FROM_EMAIL}">${FROM_EMAIL}</a></p>
-      <p>© ${new Date().getFullYear()} PACK&amp;GO 旅行社 版權所有</p>
-    </div>
-  </div>
-</body>
-</html>`;
+  // 保留 inline styles for status badges used in body content
+  const styledBody = `
+    <style>
+      .info-table { width: 100%; border-collapse: collapse; margin: 24px 0; }
+      .info-table td { padding: 10px 14px; font-size: 13px; border-bottom: 1px solid #f0f0f0; }
+      .info-table td:first-child { color: #888; width: 40%; }
+      .info-table td:last-child { font-weight: 600; color: #1a1a1a; }
+      .status-badge { display: inline-block; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 700; }
+      .status-paid { background: #e8f5e9; color: #2e7d32; }
+      .status-processing { background: #fff3e0; color: #e65100; }
+      .status-approved { background: #e3f2fd; color: #1565c0; }
+      .status-rejected { background: #fce4ec; color: #c62828; }
+      .status-completed { background: #e8f5e9; color: #2e7d32; }
+      .cta-btn { display: inline-block; margin: 24px 0 0; padding: 14px 32px; background: #0D9488; color: #fff !important; text-decoration: none; font-size: 14px; font-weight: 700; border-radius: 6px; }
+      .divider { border: none; border-top: 1px solid #f0f0f0; margin: 32px 0; }
+    </style>
+    ${body}
+  `;
+  return wrapInBrandTemplate({ title, bodyHtml: styledBody });
 }
 
 // ── 1. 申請確認 Email ─────────────────────────────────────────

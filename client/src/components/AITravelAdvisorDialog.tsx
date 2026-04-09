@@ -266,7 +266,6 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
 
   const feedbackMutation = trpc.ai.recordFeedback.useMutation({
     onSuccess: () => {
-      console.log("感謝您的回饋！");
     },
   });
 

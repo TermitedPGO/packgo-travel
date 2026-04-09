@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useLocale } from "@/contexts/LocaleContext";
+import { trackAffiliateClick } from "@/lib/analytics";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
@@ -47,6 +48,7 @@ export default function FlightBooking() {
         targetUrl: url,
         referrerPage: "/flight-booking",
       });
+      trackAffiliateClick({ platform: 'trip.com', linkType: 'flight', destination: destination || undefined, searchQuery: `${origin || ''}→${destination || ''}` });
       toast.info("正在前往 Trip.com 搜尋機票...");
       window.open(url, "_blank");
     } catch (err) {
@@ -68,6 +70,7 @@ export default function FlightBooking() {
         targetUrl: result.url,
         referrerPage: "/flight-booking",
       });
+      trackAffiliateClick({ platform: 'trip.com', linkType: 'flight', destination: route.toCode, searchQuery: `${route.from}→${route.to}` });
       toast.info(`正在前往 Trip.com 搜尋 ${route.from} → ${route.to} 機票...`);
       window.open(result.url, "_blank");
     } catch {

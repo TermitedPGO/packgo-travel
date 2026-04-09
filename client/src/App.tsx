@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
@@ -7,40 +8,56 @@ import { trackPageView } from "@/lib/analytics";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { LocaleProvider } from "./contexts/LocaleContext";
+
+// ─── Eagerly loaded (critical path) ──────────────────────────────────────────
 import Home from "./pages/Home";
 import Login from "./pages/Login";
-import ForgotPassword from "./pages/ForgotPassword";
-import ResetPassword from "./pages/ResetPassword";
-import Admin from "./pages/Admin";
-import DiagnosticsPage from "./pages/admin/DiagnosticsPage";
-import Profile from "./pages/Profile";
-import TourDetailPeony from "./pages/TourDetailPeony";
-import TourPrintView from "./pages/TourPrintView";
-import BookTour from "./pages/BookTour";
-import BookingDetail from "./pages/BookingDetail";
-import QuickInquiry from "./pages/QuickInquiry";
-import CustomTourRequest from "./pages/CustomTourRequest";
-import CustomTours from "./pages/CustomTours";
-import ChinaVisa from "./pages/ChinaVisa";
-import ChinaVisaSuccess from "./pages/ChinaVisaSuccess";
-import ChinaVisaStatus from "./pages/ChinaVisaStatus";
-import GroupPackages from "./pages/GroupPackages";
-import FlightBooking from "./pages/FlightBooking";
-import AirportTransfer from "./pages/AirportTransfer";
-import HotelBooking from "./pages/HotelBooking";
-import AboutUs from "./pages/AboutUs";
-import TermsOfService from "./pages/TermsOfService";
-import PrivacyPolicy from "./pages/PrivacyPolicy";
-import FAQ from "./pages/FAQ";
-import ContactUs from "./pages/ContactUs";
-import SearchResults from "./pages/SearchResults";
-import Tours from "./pages/Tours";
-import RegionPage from "./pages/RegionPage";
-import CountryPage from "./pages/CountryPage";
-import CruisePage from "./pages/CruisePage";
-import PaymentSuccess from "./pages/PaymentSuccess";
-import PaymentFailure from "./pages/PaymentFailure";
-import TaskHistory from "./pages/TaskHistory";
+
+// ─── Lazily loaded (code split) ───────────────────────────────────────────────
+const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
+const ResetPassword = lazy(() => import("./pages/ResetPassword"));
+const Admin = lazy(() => import("./pages/Admin"));
+const DiagnosticsPage = lazy(() => import("./pages/admin/DiagnosticsPage"));
+const Profile = lazy(() => import("./pages/Profile"));
+const TourDetailPeony = lazy(() => import("./pages/TourDetailPeony"));
+const TourPrintView = lazy(() => import("./pages/TourPrintView"));
+const BookTour = lazy(() => import("./pages/BookTour"));
+const BookingDetail = lazy(() => import("./pages/BookingDetail"));
+const QuickInquiry = lazy(() => import("./pages/QuickInquiry"));
+const CustomTourRequest = lazy(() => import("./pages/CustomTourRequest"));
+const CustomTours = lazy(() => import("./pages/CustomTours"));
+const ChinaVisa = lazy(() => import("./pages/ChinaVisa"));
+const ChinaVisaSuccess = lazy(() => import("./pages/ChinaVisaSuccess"));
+const ChinaVisaStatus = lazy(() => import("./pages/ChinaVisaStatus"));
+const GroupPackages = lazy(() => import("./pages/GroupPackages"));
+const FlightBooking = lazy(() => import("./pages/FlightBooking"));
+const AirportTransfer = lazy(() => import("./pages/AirportTransfer"));
+const HotelBooking = lazy(() => import("./pages/HotelBooking"));
+const AboutUs = lazy(() => import("./pages/AboutUs"));
+const TermsOfService = lazy(() => import("./pages/TermsOfService"));
+const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
+const FAQ = lazy(() => import("./pages/FAQ"));
+const ContactUs = lazy(() => import("./pages/ContactUs"));
+const SearchResults = lazy(() => import("./pages/SearchResults"));
+const Tours = lazy(() => import("./pages/Tours"));
+const RegionPage = lazy(() => import("./pages/RegionPage"));
+const CountryPage = lazy(() => import("./pages/CountryPage"));
+const CruisePage = lazy(() => import("./pages/CruisePage"));
+const PaymentSuccess = lazy(() => import("./pages/PaymentSuccess"));
+const PaymentFailure = lazy(() => import("./pages/PaymentFailure"));
+const TaskHistory = lazy(() => import("./pages/TaskHistory"));
+
+// ─── Loading fallback ─────────────────────────────────────────────────────────
+function PageLoader() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-white">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-8 h-8 border-2 border-black border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm text-gray-500">載入中...</p>
+      </div>
+    </div>
+  );
+}
 
 function RouteTracker() {
   const [location] = useLocation();
@@ -55,6 +72,7 @@ function Router() {
   return (
     <>
     <RouteTracker />
+    <Suspense fallback={<PageLoader />}>
     <Switch>
       <Route path={"/"} component={Home} />
       <Route path={"/search"} component={SearchResults} />
@@ -96,6 +114,7 @@ function Router() {
       {/* Final fallback route */}
       <Route component={NotFound} />
     </Switch>
+    </Suspense>
     </>
   );
 }

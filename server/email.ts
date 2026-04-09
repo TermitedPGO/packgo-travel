@@ -1,5 +1,6 @@
 import { notifyOwner } from "./_core/notification";
 import nodemailer, { type Transporter } from 'nodemailer';
+import { wrapInBrandTemplate, emailInfoTable, emailButton, emailHighlightBox } from "./services/emailTemplateService";
 
 // Email configuration
 const EMAIL_HOST = process.env.EMAIL_HOST || 'smtp.gmail.com';
@@ -167,47 +168,25 @@ export async function sendPaymentSuccessEmail(data: PaymentSuccessEmailData) {
  * Generate HTML email template for payment success
  */
 function generatePaymentSuccessHTML(data: PaymentSuccessEmailData, paymentTypeText: string): string {
-  return `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>付款成功</title>
-</head>
-<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
-  <div style="background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-    <div style="background: #000; color: #fff; padding: 30px; text-align: center;">
-      <h1 style="margin: 0; font-size: 28px;">PACK&GO</h1>
-      <p style="margin: 5px 0 0 0; color: #ccc; font-size: 14px;">讓旅行更美好</p>
-    </div>
-    <div style="padding: 30px;">
-      <div style="text-align: center; margin-bottom: 30px;">
-        <div style="width: 60px; height: 60px; background: #22c55e; border-radius: 50%; margin: 0 auto 15px; display: flex; align-items: center; justify-content: center;">
-          <span style="color: #fff; font-size: 30px;">✓</span>
-        </div>
-        <h2 style="color: #22c55e; margin: 0;">付款成功！</h2>
+  const bodyHtml = `
+    <div style="text-align:center;margin-bottom:24px;">
+      <div style="display:inline-block;width:56px;height:56px;background:#22c55e;border-radius:50%;line-height:56px;text-align:center;margin-bottom:12px;">
+        <span style="color:#fff;font-size:28px;line-height:56px;">&#10003;</span>
       </div>
-      <p style="color: #333;">親愛的 <strong>${data.customerName}</strong>，</p>
-      <p style="color: #666; line-height: 1.6;">您的付款已成功處理，以下是您的付款詳情：</p>
-      
-      <div style="background: #f8f8f8; padding: 20px; border-radius: 8px; margin: 20px 0;">
-        <p style="margin: 0 0 10px 0;"><strong>訂單編號：</strong>#${data.bookingId}</p>
-        <p style="margin: 0 0 10px 0;"><strong>行程名稱：</strong>${data.tourTitle}</p>
-        <p style="margin: 0 0 10px 0;"><strong>付款類型：</strong>${paymentTypeText}</p>
-        <p style="margin: 0; font-size: 20px; color: #22c55e;"><strong>付款金額：</strong>NT$ ${data.paymentAmount.toLocaleString()}</p>
-      </div>
-      
-      <p style="color: #666; line-height: 1.6;">感謝您的付款，我們的專員將盡快與您聯繫，確認行程詳情。</p>
-      <p style="color: #666;">如有任何問題，請隨時與我們聯繫。</p>
+      <p style="font-family:Arial,sans-serif;font-size:22px;font-weight:bold;color:#15803d;margin:0;">付款成功！</p>
     </div>
-    <div style="background: #f8f8f8; padding: 20px; text-align: center; border-top: 1px solid #eee;">
-      <p style="color: #999; margin: 0; font-size: 12px;">祝您旅途愉快！</p>
-      <p style="color: #999; margin: 5px 0 0 0; font-size: 12px;">PACK&GO 旅行社</p>
-    </div>
-  </div>
-</body>
-</html>
-  `.trim();
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#444;margin:0 0 16px 0;">親愛的 <strong>${data.customerName}</strong>，</p>
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#444;line-height:1.7;margin:0 0 16px 0;">您的付款已成功處理，以下是您的付款詳情：</p>
+    ${emailInfoTable([
+      { label: '訂單編號', value: '#' + data.bookingId },
+      { label: '行程名稱', value: data.tourTitle },
+      { label: '付款類型', value: paymentTypeText },
+      { label: '付款金額', value: 'NT$ ' + data.paymentAmount.toLocaleString() },
+    ])}
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#444;line-height:1.7;margin:0 0 8px 0;">感謝您的付款，我們的專員將盡快與您聯繫，確認行程詳情。</p>
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#444;margin:0;">如有任何問題，請隨時與我們聯繫。</p>
+  `;
+  return wrapInBrandTemplate({ title: '付款成功', bodyHtml });
 }
 
 /**

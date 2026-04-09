@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { trackVisaStart, trackVisaStep, trackVisaCheckout } from "@/lib/analytics";
 import { useLocation } from "wouter";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -150,9 +151,22 @@ export default function ChinaVisa() {
 
   const pricing = pricingQuery.data;
 
+  const goToStep = (step: number) => {
+    setCurrentStep(step);
+    if (step === 1) trackVisaStart();
+    else {
+      const names = ['', '簽證類型', '個人資訊', '護照資料', '確認', '付款'];
+      trackVisaStep(step, names[step] || `Step ${step}`);
+    }
+  };
+
   const handleSubmit = async () => {
     setIsSubmitting(true);
     setSubmitError("");
+    trackVisaCheckout({
+      applicantCount: form.groupSize,
+      totalAmount: pricing ? pricing.grandTotal : 290,
+    });
     submitMutation.mutate({
       firstName: form.firstName,
       lastName: form.lastName,
@@ -211,14 +225,14 @@ export default function ChinaVisa() {
                     ))}
                   </div>
                   <Button
-                    onClick={() => setCurrentStep(1)}
+                    onClick={() => goToStep(1)}
                     className="bg-white text-black hover:bg-gray-100 px-8 py-3 text-base font-bold rounded-none"
                   >
                     {isChineseMode ? "立即申請" : "Apply Now"}
                     <ChevronRight className="ml-2 h-4 w-4" />
                   </Button>
                 </div>
-                <div className="flex-1 grid grid-cols-2 gap-4">
+                <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="border border-white/20 p-6 flex flex-col">
                     <div className="text-xs text-white/50 tracking-widest mb-3">{isChineseMode ? "個人申請" : "INDIVIDUAL"}</div>
                     <div className="text-4xl font-bold text-white mb-1">$290</div>
@@ -461,7 +475,7 @@ export default function ChinaVisa() {
                       <Label className="text-sm font-bold mb-2 block">
                         {isChineseMode ? "入境次數" : "Entry Type"}
                       </Label>
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                         {ENTRY_TYPES.map(et => (
                           <button
                             key={et.value}
@@ -523,7 +537,7 @@ export default function ChinaVisa() {
                     {isChineseMode ? "個人資訊" : "Personal Information"}
                   </h2>
                   <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
                         <Label className="text-sm font-bold mb-1 block">
                           {isChineseMode ? "名字" : "First Name"} *
