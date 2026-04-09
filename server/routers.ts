@@ -2247,6 +2247,27 @@ export const appRouter = router({
             message: "Failed to update homepage content",
           });
         }
+        // B2: Auto-translate hero content after update
+        if (input.sectionKey === 'hero') {
+          const contentObj = typeof input.content === 'string'
+            ? JSON.parse(input.content)
+            : (input.content as Record<string, any>);
+          if (contentObj?.title || contentObj?.subtitle) {
+            import('./translation').then(async ({ translateText }) => {
+              try {
+                const [titleEn, subtitleEn] = await Promise.all([
+                  contentObj.title ? translateText(contentObj.title, 'en') : Promise.resolve(''),
+                  contentObj.subtitle ? translateText(contentObj.subtitle, 'en') : Promise.resolve(''),
+                ]);
+                const updatedContent = { ...contentObj, title_en: titleEn, subtitle_en: subtitleEn };
+                await db.upsertHomepageContent('hero', JSON.stringify(updatedContent), ctx.user.id);
+                console.log('[Homepage] Auto-translated hero content to EN');
+              } catch (e) {
+                console.warn('[Homepage] Auto-translation failed:', e);
+              }
+            }).catch(e => console.warn('[Homepage] Failed to import translation module:', e));
+          }
+        }
         return { success: true };
       }),
 

@@ -5410,3 +5410,35 @@ AI 辦公室看板中，AI 任務永遠顯示「執行中」（started 狀態）
 ### FIX-B：首頁 Hero 文字英文模式仍中文
 - [x] 查 EditableHero.tsx，確認英文模式下 DB homepageContent 不覆蓋翻譯（LocaleContext lazy init 已修復）
 - [x] 如果 Hero 內容來自 DB，讓 DB 支援多語言或 fallback 到 t('hero.title')（已正確 fallback）
+
+---
+## Round 9 Phase 1：修好基礎（2026-04-08）
+
+### 1A. Bug 修復（5 項）
+- [ ] A1: Tour Detail Hero 標題英文版仍顯示中文 → getTranslated('title', tour.title)
+- [ ] A2: Hero metadata badges 仍中文（台灣、觀光列車）→ getTranslated() 或 locationMapping
+- [ ] A3: 5 個 Admin API 改為 adminProcedure（batchDelete, duplicate, toggleStatus, adminList, adminUpdateStatus）
+- [ ] A4: saveFromPreview 接受 z.any() → 定義正式 Zod schema
+- [ ] A5: OAuth callback URL 改為 packgo09.manus.space
+
+### 1B. Translator Agent 補完（4 項）
+- [ ] B1: updateTour 整批更新後觸發 addTourTranslationJob()
+- [ ] B2: Homepage 改動後觸發 homepage 翻譯
+- [ ] B3: 前端 getTranslated() 覆蓋：TourCard subtitle、TourDetail notices/flights
+- [ ] B6: thinking.budget_tokens: 128 → 4096（server/_core/llm.ts 第 308 行）
+
+---
+## Round 9 Phase 1（2026-04-08）
+
+### 1A Bug Fixes
+- [x] A1：TourDetailPeony Hero 標題改用 displayTitle（getTranslated）
+- [x] A2：Hero badges 使用 translateDestination（country）和 transport type 英文 mapping
+- [x] A3：確認 5 個 Admin API 已使用 adminProcedure（batchDelete/duplicate/toggleStatus/adminList/adminUpdateStatus）
+- [x] A4：saveFromPreview 已有正式 Zod schema（.passthrough()）
+- [x] A5：OAuth callback URL 已正確設定為 packgo09.manus.space
+
+### 1B Translator Agent
+- [x] B1：updateTour 和 patchField 已觸發 addTourTranslationJob
+- [x] B2：homepage.updateContent 後自動翻譯 hero title/subtitle 並存入 title_en/subtitle_en
+- [x] B3：flights 加入 fieldsToTranslate；transportationInfo 改用 getTranslated('flights', ...)
+- [x] B4：thinking.budget_tokens 從 128 改為 4096

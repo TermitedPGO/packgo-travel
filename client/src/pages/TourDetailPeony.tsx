@@ -76,6 +76,7 @@ import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { useLocale } from "@/contexts/LocaleContext";
+import { translateDestination } from "@/utils/locationMapping";
 import { trackViewTour } from "@/lib/analytics";
 import SEO, { buildTourSchema } from "@/components/SEO";
 import { EditableText, EditableImage, EditableDayCard, EditModeToggle, EditModeBanner } from "@/components/inline-edit";
@@ -1832,7 +1833,9 @@ export default function TourDetailPeony() {
   const costExplanation = useMemo(() => parseJSON(
     getTranslated('costExplanation', tour?.costExplanation) ?? tour?.costExplanation, null
   ), [tour?.costExplanation, language]);
-  const transportationInfo = useMemo(() => parseJSON(tour?.flights, null), [tour?.flights]);
+  const transportationInfo = useMemo(() => parseJSON(
+    getTranslated('flights', tour?.flights) ?? tour?.flights, null
+  ), [tour?.flights, language]);
   const noticeDetailed = useMemo(() => parseJSON(
     getTranslated('noticeDetailed', tour?.noticeDetailed) ?? tour?.noticeDetailed, null
   ), [tour?.noticeDetailed, language]);
@@ -1992,7 +1995,7 @@ export default function TourDetailPeony() {
             />
           ) : (
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-4 max-w-4xl leading-tight drop-shadow-lg">
-              {displayTour.title}
+              {displayTitle}
             </h1>
           )}
 
@@ -2024,7 +2027,7 @@ export default function TourDetailPeony() {
                 style={{ color: themeColor.primary }}
               >
                 <Globe className="h-4 w-4" />
-                <span>{tour.destinationCountry}</span>
+                <span>{translateDestination(tour.destinationCountry, language)}</span>
               </div>
             )}
             <div className="flex items-center gap-2">
@@ -2034,15 +2037,19 @@ export default function TourDetailPeony() {
             <div className="flex items-center gap-2">
               <MapPin className="h-5 w-5" />
               <span>{(() => {
-                const cities = (tour.destinationCity || tour.destinationCountry || '').split(/[,、]/).map((c: string) => c.trim()).filter(Boolean);
-                if (cities.length <= 4) return cities.join('、');
-                return cities.slice(0, 4).join('、') + '…';
+                const rawCities = (tour.destinationCity || tour.destinationCountry || '').split(/[,、]/).map((c: string) => c.trim()).filter(Boolean);
+                const translatedCities = rawCities.map((c: string) => translateDestination(c, language));
+                const sep = language === 'zh-TW' ? '、' : ', ';
+                if (translatedCities.length <= 4) return translatedCities.join(sep);
+                return translatedCities.slice(0, 4).join(sep) + '…';
               })()}</span>
             </div>
             {transportationInfo?.type && (
               <div className="flex items-center gap-2">
                 <TransportIcon type={transportationInfo.type} className="h-5 w-5" />
-                <span>{transportationInfo.typeName || t('tourDetail.selectTransport')}</span>
+                <span>{language === 'en'
+                  ? (({ '飛機': 'Flight', '火車': 'Train', '觀光列車': 'Sightseeing Train', '郵輪': 'Cruise', '自駕': 'Self-drive', '遊覽車': 'Coach', '巴士': 'Bus', '高鐵': 'High-Speed Rail', '船': 'Ferry' } as Record<string, string>)[transportationInfo.typeName] || transportationInfo.typeName || t('tourDetail.selectTransport'))
+                  : (transportationInfo.typeName || t('tourDetail.selectTransport'))}</span>
               </div>
             )}
           </div>

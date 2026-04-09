@@ -318,6 +318,8 @@ export async function translateTour(
       { name: 'itineraryDetailed', value: (tour as any).itineraryDetailed },
       { name: 'costExplanation', value: (tour as any).costExplanation },
       { name: 'noticeDetailed', value: (tour as any).noticeDetailed },
+      // 交通資訊欄位
+      { name: 'flights', value: (tour as any).flights },
       // 詩意標題欄位
       { name: 'poeticTitle', value: (tour as any).poeticTitle },
       { name: 'poeticSubtitle', value: (tour as any).poeticSubtitle },
