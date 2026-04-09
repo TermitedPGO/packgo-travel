@@ -616,7 +616,7 @@ export const appRouter = router({
 
         // BUG-006: Queue translation job (reliable retry vs fire-and-forget)
         import("./queue").then(({ addTourTranslationJob }) =>
-          addTourTranslationJob({ tourId: tour.id, targetLanguages: ['en', 'es'], sourceLanguage: 'zh-TW', userId: ctx.user.id })
+          addTourTranslationJob({ tourId: tour.id, targetLanguages: ['en'], sourceLanguage: 'zh-TW', userId: ctx.user.id })
         ).catch((e) => console.warn(`[AutoTranslate] Failed to queue translation for tour ${tour.id}:`, e));
         return tour;
       }),
@@ -693,7 +693,7 @@ export const appRouter = router({
         const tour = await db.updateTour(id, updates);
         // BUG-006: Queue translation job (reliable retry vs fire-and-forget)
         import("./queue").then(({ addTourTranslationJob }) =>
-          addTourTranslationJob({ tourId: id, targetLanguages: ['en', 'es'], sourceLanguage: 'zh-TW', userId: ctx.user.id })
+          addTourTranslationJob({ tourId: id, targetLanguages: ['en'], sourceLanguage: 'zh-TW', userId: ctx.user.id })
         ).catch((e) => console.warn(`[AutoTranslate] Failed to queue translation for tour ${id}:`, e));
         return tour;
       }),
@@ -759,7 +759,7 @@ export const appRouter = router({
           const userId = (tour as any).createdBy ?? 1;
           // BUG-006: Queue translation job (reliable retry vs fire-and-forget)
           import("./queue").then(({ addTourTranslationJob }) =>
-            addTourTranslationJob({ tourId: id, targetLanguages: ['en', 'es'], sourceLanguage: 'zh-TW', userId })
+            addTourTranslationJob({ tourId: id, targetLanguages: ['en'], sourceLanguage: 'zh-TW', userId })
           ).catch((e) => console.warn(`[AutoTranslate] Failed to queue translation for tour ${id}:`, e));
         }
         
@@ -893,7 +893,30 @@ export const appRouter = router({
           imageUrl: z.string().url().optional().or(z.literal('')),
           category: z.enum(["group", "custom", "package", "cruise", "theme"]).optional(),
           status: z.enum(["active", "inactive", "soldout"]).optional(),
-        }).passthrough(), // allow extra fields from generation
+          // 生成系統可能送的額外欄位
+          poeticTitle: z.string().max(255).optional(),
+          poeticSubtitle: z.string().max(500).optional(),
+          poeticContent: z.string().max(5000).optional(),
+          heroSubtitle: z.string().max(500).optional(),
+          keyFeatures: z.string().max(10000).optional(),
+          hotels: z.string().max(10000).optional(),
+          meals: z.string().max(10000).optional(),
+          flights: z.string().max(5000).optional(),
+          costExplanation: z.string().max(10000).optional(),
+          noticeDetailed: z.string().max(10000).optional(),
+          itineraryDetailed: z.string().max(50000).optional(),
+          colorTheme: z.string().max(1000).optional(),
+          transportationType: z.string().max(100).optional(),
+          transportationName: z.string().max(100).optional(),
+          highlights: z.string().max(10000).optional(),
+          includes: z.string().max(10000).optional(),
+          excludes: z.string().max(10000).optional(),
+          notes: z.string().max(10000).optional(),
+          heroImage: z.string().max(500).optional(),
+          // Preview-only fields (will be stripped before saving)
+          featureImages: z.unknown().optional(),
+          executionReport: z.unknown().optional(),
+        }).strip(),
       }))
       .mutation(async ({ ctx, input }) => {
 
@@ -902,8 +925,8 @@ export const appRouter = router({
         try {
           const tourData = input.tourData;
           
-          // Remove preview-only fields
-          const { poeticTitle, featureImages, executionReport, ...savableData } = tourData;
+          // Remove preview-only fields (featureImages and executionReport are not stored in DB)
+          const { featureImages, executionReport, ...savableData } = tourData;
           
           // Save to database
           const savedTour = await db.createTour({
@@ -914,7 +937,7 @@ export const appRouter = router({
           console.log("[SaveFromPreview] Tour saved with ID:", savedTour.id);
           // BUG-006: Queue translation job (reliable retry vs fire-and-forget)
           import("./queue").then(({ addTourTranslationJob }) =>
-            addTourTranslationJob({ tourId: savedTour.id, targetLanguages: ['en', 'es'], sourceLanguage: 'zh-TW', userId: ctx.user.id })
+            addTourTranslationJob({ tourId: savedTour.id, targetLanguages: ['en'], sourceLanguage: 'zh-TW', userId: ctx.user.id })
           ).catch((e) => console.warn(`[AutoTranslate] Failed to queue translation for tour ${savedTour.id}:`, e));
 
           return {

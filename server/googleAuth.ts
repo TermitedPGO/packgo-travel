@@ -6,14 +6,19 @@ import { createToken } from './jwt';
 import { getSessionCookieOptions } from './_core/cookies';
 import { COOKIE_NAME } from '@shared/const';
 
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '117887318388-n3cqkvtic44sjsd3kmogohah9a373ivd.apps.googleusercontent.com';
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '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';
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const GOOGLE_CALLBACK_URL = process.env.GOOGLE_CALLBACK_URL || 'https://packgo09.manus.space/api/auth/google/callback';
 
 /**
  * Initialize Google OAuth strategy
  */
 export function initializeGoogleAuth(app: Express) {
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+    console.warn('[Google OAuth] GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not set — Google login disabled');
+    return;
+  }
+
   // Configure Google OAuth strategy
   passport.use(
     new GoogleStrategy(

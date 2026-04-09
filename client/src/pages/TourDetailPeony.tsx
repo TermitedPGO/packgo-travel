@@ -82,6 +82,19 @@ import SEO, { buildTourSchema } from "@/components/SEO";
 import { EditableText, EditableImage, EditableDayCard, EditModeToggle, EditModeBanner } from "@/components/inline-edit";
 import { toast } from "sonner";
 
+// 交通工具類型英文對照表（集中管理，避免散落在 JSX 中）
+const TRANSPORT_TYPE_EN: Record<string, string> = {
+  '飛機': 'Flight',
+  '火車': 'Train',
+  '觀光列車': 'Sightseeing Train',
+  '郵輪': 'Cruise',
+  '自駕': 'Self-drive',
+  '遊覽車': 'Coach',
+  '巴士': 'Bus',
+  '高鐵': 'High-Speed Rail',
+  '船': 'Ferry',
+};
+
 // 解析 JSON 字串
 const parseJSON = (str: string | null | undefined, defaultValue: any = null) => {
   if (!str) return defaultValue;
@@ -2048,7 +2061,7 @@ export default function TourDetailPeony() {
               <div className="flex items-center gap-2">
                 <TransportIcon type={transportationInfo.type} className="h-5 w-5" />
                 <span>{language === 'en'
-                  ? (({ '飛機': 'Flight', '火車': 'Train', '觀光列車': 'Sightseeing Train', '郵輪': 'Cruise', '自駕': 'Self-drive', '遊覽車': 'Coach', '巴士': 'Bus', '高鐵': 'High-Speed Rail', '船': 'Ferry' } as Record<string, string>)[transportationInfo.typeName] || transportationInfo.typeName || t('tourDetail.selectTransport'))
+                  ? (TRANSPORT_TYPE_EN[transportationInfo.typeName] || transportationInfo.typeName || t('tourDetail.selectTransport'))
                   : (transportationInfo.typeName || t('tourDetail.selectTransport'))}</span>
               </div>
             )}

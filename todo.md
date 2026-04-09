@@ -5442,3 +5442,18 @@ AI 辦公室看板中，AI 任務永遠顯示「執行中」（started 狀態）
 - [x] B2：homepage.updateContent 後自動翻譯 hero title/subtitle 並存入 title_en/subtitle_en
 - [x] B3：flights 加入 fieldsToTranslate；transportationInfo 改用 getTranslated('flights', ...)
 - [x] B4：thinking.budget_tokens 從 128 改為 4096
+
+---
+## Round 9 修訂版（2026-04-08）
+
+### 安全性修復
+- [x] Task 1：JWT 弱密鑰回退移除（server/jwt.ts）
+- [x] Task 2：Google OAuth 硬編碼密鑰移除（server/googleAuth.ts）
+
+### 翻譯與 Schema 清理
+- [x] Task 3：移除西班牙語翻譯（routers.ts 4 處 targetLanguages）
+- [x] Task 4：saveFromPreview .passthrough() 改為 .strip()
+
+### 前端與文件
+- [x] Task 5：TRANSPORT_TYPE_EN const 抽到檔案頂部
+- [x] Task 6：GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET 已設定為環境變數（webdev_request_secrets）
