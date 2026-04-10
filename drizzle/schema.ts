@@ -1056,7 +1056,7 @@ export const translations = mysqlTable("translations", {
   
   // Language information
   sourceLanguage: varchar("sourceLanguage", { length: 10 }).default("zh-TW").notNull(),
-  targetLanguage: varchar("targetLanguage", { length: 10 }).notNull(), // e.g., "en", "es", "ja", "ko"
+  targetLanguage: varchar("targetLanguage", { length: 10 }).notNull(), // e.g., "en", "ja", "ko"
   
   // Content
   originalText: text("originalText").notNull(),

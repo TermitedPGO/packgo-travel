@@ -3392,8 +3392,8 @@ export const appRouter = router({
     translate: publicProcedure
       .input(z.object({
         text: z.string(),
-        targetLanguage: z.enum(['zh-TW', 'en', 'es']),
-        sourceLanguage: z.enum(['zh-TW', 'en', 'es']).optional().default('zh-TW'),
+        targetLanguage: z.enum(['zh-TW', 'en']),
+        sourceLanguage: z.enum(['zh-TW', 'en']).optional().default('zh-TW'),
       }))
       .mutation(async ({ input }) => {
         const translated = await translateText(
@@ -3408,8 +3408,8 @@ export const appRouter = router({
     translateBatch: publicProcedure
       .input(z.object({
         texts: z.array(z.string()),
-        targetLanguage: z.enum(['zh-TW', 'en', 'es']),
-        sourceLanguage: z.enum(['zh-TW', 'en', 'es']).optional().default('zh-TW'),
+        targetLanguage: z.enum(['zh-TW', 'en']),
+        sourceLanguage: z.enum(['zh-TW', 'en']).optional().default('zh-TW'),
       }))
       .mutation(async ({ input }) => {
         const translated = await translateBatch(
@@ -3424,7 +3424,7 @@ export const appRouter = router({
     translateTour: adminProcedure
       .input(z.object({
         tourId: z.number(),
-        targetLanguages: z.array(z.enum(['zh-TW', 'en', 'es', 'ja', 'ko'])),
+        targetLanguages: z.array(z.enum(['zh-TW', 'en', 'ja', 'ko'])),
       }))
       .mutation(async ({ input, ctx }) => {
         const result = await translateTour(
@@ -3439,7 +3439,7 @@ export const appRouter = router({
     // Translate all tours to multiple languages
     translateAllTours: adminProcedure
       .input(z.object({
-        targetLanguages: z.array(z.enum(['zh-TW', 'en', 'es', 'ja', 'ko'])),
+        targetLanguages: z.array(z.enum(['zh-TW', 'en', 'ja', 'ko'])),
       }))
       .mutation(async ({ input, ctx }) => {
         // Get all tour IDs
@@ -3473,7 +3473,7 @@ export const appRouter = router({
     getTourTranslations: publicProcedure
       .input(z.object({
         tourId: z.number(),
-        targetLanguage: z.enum(['zh-TW', 'en', 'es', 'ja', 'ko']),
+        targetLanguage: z.enum(['zh-TW', 'en', 'ja', 'ko']),
       }))
       .query(async ({ input }) => {
         const translations = await getTourTranslations(
@@ -3487,7 +3487,7 @@ export const appRouter = router({
     getBatchTourTranslations: publicProcedure
       .input(z.object({
         tourIds: z.array(z.number()),
-        targetLanguage: z.enum(['zh-TW', 'en', 'es', 'ja', 'ko']),
+        targetLanguage: z.enum(['zh-TW', 'en', 'ja', 'ko']),
       }))
       .query(async ({ input }) => {
         const result = await getBatchTourTranslations(

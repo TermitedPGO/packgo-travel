@@ -71,7 +71,7 @@ function TourCard({
 }) {
   const shouldLoadTranslation = language !== "zh-TW";
   const { data: translations } = trpc.translation.getTourTranslations.useQuery(
-    { tourId: tour.id, targetLanguage: language as "en" | "es" | "ja" | "ko" },
+    { tourId: tour.id, targetLanguage: language as "en" | "ja" | "ko" },
     { enabled: shouldLoadTranslation, staleTime: 1000 * 60 * 5 }
   );
   const displayTitle = useMemo(() => {

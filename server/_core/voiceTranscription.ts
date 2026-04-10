@@ -29,7 +29,7 @@ import { ENV } from "./env";
 
 export type TranscribeOptions = {
   audioUrl: string; // URL to the audio file (e.g., S3 URL)
-  language?: string; // Optional: specify language code (e.g., "en", "es", "zh")
+  language?: string; // Optional: specify language code (e.g., "en", "zh")
   prompt?: string; // Optional: custom prompt for the transcription
 };
 

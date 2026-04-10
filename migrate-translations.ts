@@ -30,7 +30,7 @@ async function main() {
     try {
       const result = await translateTour(
         tour.id,
-        ['en', 'es'],
+        ['en'],
         'zh-TW',
         MIGRATION_USER_ID
       );

@@ -1666,7 +1666,7 @@ export default function TourDetailPeony() {
 
   // 多語言翻譯查詢：語系非 zh-TW 時自動載入翻譯
   const { data: tourTranslations } = trpc.translation.getTourTranslations.useQuery(
-    { tourId: tourId!, targetLanguage: language as 'zh-TW' | 'en' | 'es' | 'ja' | 'ko' },
+    { tourId: tourId!, targetLanguage: language as 'zh-TW' | 'en' | 'ja' | 'ko' },
     { enabled: !!tourId && language !== 'zh-TW' }
   );
 

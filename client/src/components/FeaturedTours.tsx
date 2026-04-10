@@ -21,7 +21,7 @@ export default function FeaturedTours() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const tourIds = useMemo(() => featuredTours.map(tour => tour.id), [featuredTours.length, featuredTours.map(tour => tour.id).join(',')]);
   const { data: batchTranslations } = trpc.translation.getBatchTourTranslations.useQuery(
-    { tourIds, targetLanguage: language as 'zh-TW' | 'en' | 'es' | 'ja' | 'ko' },
+    { tourIds, targetLanguage: language as 'zh-TW' | 'en' | 'ja' | 'ko' },
     { enabled: language !== 'zh-TW' && tourIds.length > 0 }
   );
 

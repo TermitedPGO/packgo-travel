@@ -36,7 +36,6 @@ async function translateText(text, targetLanguage, sourceLanguage = 'zh-TW') {
   const languageNames = {
     'zh-TW': 'Traditional Chinese (Taiwan)',
     'en': 'English',
-    'es': 'Spanish',
     'ja': 'Japanese',
     'ko': 'Korean',
   };
@@ -234,7 +233,7 @@ async function main() {
     console.log(`找到 ${tours.length} 個上架中的行程`);
     console.log('');
 
-    const targetLanguages = ['en', 'es'];
+    const targetLanguages = ['en'];
     let successCount = 0;
     let failCount = 0;
 

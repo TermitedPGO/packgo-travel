@@ -23,7 +23,7 @@ export default function Destinations() {
     }
   };
 
-  // In Chinese/Spanish mode: large Chinese/Spanish name + small English label
+  // In Chinese mode: large Chinese name + small English label
   // In English mode: large English name only (no redundant subtitle)
   const isChineseMode = language === 'zh-TW';
 

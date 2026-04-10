@@ -11,7 +11,7 @@
 | 專案名稱 | PACK&GO 旅行社 |
 | 技術棧 | React 19 + Tailwind 4 + tRPC 11 + Drizzle ORM + MySQL |
 | 部署網域 | packgo09.manus.space |
-| 主要語言 | 繁體中文（預設）、英文、西班牙文 |
+| 主要語言 | 繁體中文（預設）、英文 |
 | 用戶角色 | `user`（一般會員）、`admin`（旅行社業主） |
 
 ---
@@ -103,7 +103,7 @@ WebScraperAgent → ContentAnalyzerAgent → [並行] ColorThemeAgent + ImagePro
 ### 3.4 多語言架構
 
 - **i18n 框架：** 自定義（`client/src/locales/`）
-- **語言檔案：** `zh-TW.ts`（預設）、`en.ts`、`es.ts`
+- **語言檔案：** `zh-TW.ts`（預設）、`en.ts`
 - **使用方式：** `const { t } = useTranslation()` → `t('key')`
 - **禁止：** 在 JSX 中直接硬編碼中文字串（動態資料庫內容除外）
 
@@ -175,7 +175,7 @@ grep -rn "object-cover" client/src --include="*.tsx" | grep -v "rounded"
 
 當用戶說「英文版顯示中文」時：
 1. 找到元件中的硬編碼中文字串
-2. 在 `zh-TW.ts`、`en.ts`、`es.ts` 中加入對應翻譯
+2. 在 `zh-TW.ts`、`en.ts` 中加入對應翻譯
 3. 將 JSX 中的中文字串替換為 `{t('key')}`
 
 ### 5.3 API 錯誤
@@ -200,7 +200,6 @@ grep -rn "object-cover" client/src --include="*.tsx" | grep -v "rounded"
 | 全域樣式 | `client/src/index.css` |
 | i18n 繁中 | `client/src/locales/zh-TW.ts` |
 | i18n 英文 | `client/src/locales/en.ts` |
-| i18n 西班牙文 | `client/src/locales/es.ts` |
 | AI 生成主控 | `server/agents/masterAgent.ts` |
 | 進度追蹤 | `server/agents/progressTracker.ts` |
 | 行程詳情頁 | `client/src/pages/TourDetailPeony.tsx` |

@@ -60,13 +60,12 @@ async function setCachedTranslation(cacheKey: string, value: string): Promise<vo
 }
 
 // 支援的語言
-export type Language = 'zh-TW' | 'en' | 'es' | 'ja' | 'ko';
+export type Language = 'zh-TW' | 'en' | 'ja' | 'ko';
 
 // 語言名稱對應
 const languageFullNames: Record<Language, string> = {
   'zh-TW': 'Traditional Chinese (Taiwan)',
   'en': 'English',
-  'es': 'Spanish',
   'ja': 'Japanese',
   'ko': 'Korean',
 };
@@ -75,7 +74,6 @@ const languageFullNames: Record<Language, string> = {
 const languageNativeNames: Record<Language, string> = {
   'zh-TW': '繁體中文',
   'en': 'English',
-  'es': 'Español',
   'ja': '日本語',
   'ko': '한국어',
 };
@@ -794,14 +792,12 @@ export async function getTranslationJobs(limit: number = 20): Promise<any[]> {
 
 /**
  * 取得所有行程的翻譯摘要（批次查詢，用於管理後台）
- * 回傳每個行程的翻譯狀態（是否有 EN/ES 翻譯及欄位數量）
+ * 回傳每個行程的翻譯狀態（是否有 EN 翻譯及欄位數量）
  */
 export async function getAllTranslationsSummary(): Promise<Array<{
   tourId: number;
   hasEn: boolean;
-  hasEs: boolean;
   enFieldCount: number;
-  esFieldCount: number;
   totalFields: number;
 }>> {
   const db = await getDb();
@@ -845,23 +841,20 @@ export async function getAllTranslationsSummary(): Promise<Array<{
     );
     
     // 按行程 ID 和語言分組統計
-    const summaryMap = new Map<number, { enCount: number; esCount: number }>();
+    const summaryMap = new Map<number, { enCount: number }>();
     for (const row of results) {
       const tourId = row.entityId;
       if (!summaryMap.has(tourId)) {
-        summaryMap.set(tourId, { enCount: 0, esCount: 0 });
+        summaryMap.set(tourId, { enCount: 0 });
       }
       const entry = summaryMap.get(tourId)!;
       if (row.targetLanguage === 'en') entry.enCount++;
-      else if (row.targetLanguage === 'es') entry.esCount++;
     }
     
     return Array.from(summaryMap.entries()).map(([tourId, counts]) => ({
       tourId,
       hasEn: counts.enCount > 0,
-      hasEs: counts.esCount > 0,
       enFieldCount: counts.enCount,
-      esFieldCount: counts.esCount,
       totalFields: tourFieldsMap.get(tourId) ?? 0,
     }));
   } catch (error) {

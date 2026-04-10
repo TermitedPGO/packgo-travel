@@ -98,7 +98,7 @@ export default function CruisePage() {
   // Batch fetch translations for non-Chinese languages
   const tourIds = useMemo(() => cruiseTours.map((t: any) => t.id), [cruiseTours.length, cruiseTours.map((t: any) => t.id).join(',')]);
   const { data: batchTranslations } = trpc.translation.getBatchTourTranslations.useQuery(
-    { tourIds, targetLanguage: language as 'zh-TW' | 'en' | 'es' | 'ja' | 'ko' },
+    { tourIds, targetLanguage: language as 'zh-TW' | 'en' | 'ja' | 'ko' },
     { enabled: language !== 'zh-TW' && tourIds.length > 0 }
   );
 
