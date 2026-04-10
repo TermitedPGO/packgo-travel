@@ -22,32 +22,33 @@ import type { z } from "zod";
 
 type QuickInquiryForm = z.infer<typeof quickInquirySchema>;
 
-const SUBJECT_OPTIONS = [
-  { value: "一般詢問", label: "一般詢問" },
-  { value: "行程預訂", label: "行程預訂" },
-  { value: "客製旅遊", label: "客製旅遊" },
-  { value: "簽證服務", label: "簽證服務" },
-  { value: "機票預購", label: "機票預購" },
-  { value: "機場接送", label: "機場接送" },
-  { value: "飯店預訂", label: "飯店預訂" },
-  { value: "包團旅遊", label: "包團旅遊" },
-  { value: "郵輪旅遊", label: "郵輪旅遊" },
-  { value: "其他問題", label: "其他問題" },
-];
-
-const QUICK_SUBJECTS = [
-  { value: "行程預訂", emoji: "🗺️" },
-  { value: "客製旅遊", emoji: "✨" },
-  { value: "機票預購", emoji: "✈️" },
-  { value: "飯店預訂", emoji: "🏨" },
-  { value: "簽證服務", emoji: "📋" },
-  { value: "郵輪旅遊", emoji: "🚢" },
-];
-
 export default function ContactUs() {
   const { t } = useLocale();
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [quickSubject, setQuickSubject] = useState("");
+
+  // Subject options using i18n keys
+  const SUBJECT_OPTIONS = [
+    { value: t('contactUs.subjects.general'), label: t('contactUs.subjects.general') },
+    { value: t('contactUs.subjects.tourBooking'), label: t('contactUs.subjects.tourBooking') },
+    { value: t('contactUs.subjects.customTour'), label: t('contactUs.subjects.customTour') },
+    { value: t('contactUs.subjects.visaService'), label: t('contactUs.subjects.visaService') },
+    { value: t('contactUs.subjects.flightTicket'), label: t('contactUs.subjects.flightTicket') },
+    { value: t('contactUs.subjects.airportTransfer'), label: t('contactUs.subjects.airportTransfer') },
+    { value: t('contactUs.subjects.hotelBooking'), label: t('contactUs.subjects.hotelBooking') },
+    { value: t('contactUs.subjects.groupTour'), label: t('contactUs.subjects.groupTour') },
+    { value: t('contactUs.subjects.cruiseTour'), label: t('contactUs.subjects.cruiseTour') },
+    { value: t('contactUs.subjects.other'), label: t('contactUs.subjects.other') },
+  ];
+
+  const QUICK_SUBJECTS = [
+    { value: t('contactUs.subjects.tourBooking'), emoji: "🗺️" },
+    { value: t('contactUs.subjects.customTour'), emoji: "✨" },
+    { value: t('contactUs.subjects.flightTicket'), emoji: "✈️" },
+    { value: t('contactUs.subjects.hotelBooking'), emoji: "🏨" },
+    { value: t('contactUs.subjects.visaService'), emoji: "📋" },
+    { value: t('contactUs.subjects.cruiseTour'), emoji: "🚢" },
+  ];
 
   const {
     register,
@@ -70,7 +71,7 @@ export default function ContactUs() {
       setQuickSubject("");
     },
     onError: (error) => {
-      alert(`送出失敗：${error.message}`);
+      alert(`${t('contactUs.errorMsg')}${error.message}`);
     },
   });
 
@@ -88,14 +89,14 @@ export default function ContactUs() {
       title={t('contactUs.title')}
       subtitle={t('contactUs.subtitle')}
     >
-      <SEO title="聯絡我們" description="聯絡 PACK&GO 旅行社，我們的旅遊顧問將盡快回覆您的詢問。" url="/contact-us" />
+      <SEO title={t('contactUs.title')} description={t('contactUs.intro')} url="/contact-us" />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 mt-4">
 
         {/* Left: Contact Info */}
         <div className="lg:col-span-1 space-y-6">
           <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
-            <h3 className="text-lg font-bold text-gray-900 mb-5">聯絡資訊</h3>
+            <h3 className="text-lg font-bold text-gray-900 mb-5">{t('contactUs.contactInfo')}</h3>
             <div className="space-y-5">
               <div className="flex items-start gap-4">
                 <div className="bg-black rounded-lg p-2.5 shrink-0">
@@ -146,9 +147,9 @@ export default function ContactUs() {
           </div>
 
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-5">
-            <p className="text-amber-800 text-sm font-semibold mb-1 flex items-center gap-1.5"><MessageSquare className="h-4 w-4" /> 快速回覆</p>
+            <p className="text-amber-800 text-sm font-semibold mb-1 flex items-center gap-1.5"><MessageSquare className="h-4 w-4" /> {t('contactUs.quickReply')}</p>
             <p className="text-amber-700 text-sm leading-relaxed">
-              填寫右側表單後，我們的旅遊顧問將在 24 小時內以電子郵件回覆您。
+              {t('contactUs.quickReplyDesc')}
             </p>
           </div>
         </div>
@@ -158,26 +159,26 @@ export default function ContactUs() {
           {isSubmitted ? (
             <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
               <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
-              <h3 className="text-2xl font-bold text-gray-900 mb-3">諮詢已送出！</h3>
-              <p className="text-gray-600 mb-6">感謝您的詢問，我們將在 24 小時內回覆您。</p>
+              <h3 className="text-2xl font-bold text-gray-900 mb-3">{t('contactUs.successTitle')}</h3>
+              <p className="text-gray-600 mb-6">{t('contactUs.successMsg')}</p>
               <Button onClick={() => setIsSubmitted(false)} size="lg" className="rounded-lg px-8">
-                再次諮詢
+                {t('contactUs.submitAgain')}
               </Button>
             </div>
           ) : (
             <div className="bg-white rounded-xl border border-gray-200 p-8">
-              <h2 className="text-xl font-bold text-gray-900 mb-6">填寫諮詢表單</h2>
+              <h2 className="text-xl font-bold text-gray-900 mb-6">{t('contactUs.formTitle')}</h2>
               <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                   <div>
                     <Label htmlFor="customerName" className="text-sm font-medium text-gray-700 mb-1.5 block">
-                      姓名 <span className="text-red-500">*</span>
+                      {t('contactUs.nameLabel')} <span className="text-red-500">*</span>
                     </Label>
                     <Input
                       id="customerName"
                       {...register("customerName")}
-                      placeholder="請輸入您的姓名"
+                      placeholder={t('contactUs.namePlaceholder')}
                       className="h-11 rounded-lg"
                     />
                     {errors.customerName && (
@@ -186,12 +187,12 @@ export default function ContactUs() {
                   </div>
                   <div>
                     <Label htmlFor="customerPhone" className="text-sm font-medium text-gray-700 mb-1.5 block">
-                      電話
+                      {t('contactUs.phoneLabel')}
                     </Label>
                     <Input
                       id="customerPhone"
                       {...register("customerPhone")}
-                      placeholder="請輸入您的電話"
+                      placeholder={t('contactUs.phonePlaceholder')}
                       className="h-11 rounded-lg"
                     />
                   </div>
@@ -199,13 +200,13 @@ export default function ContactUs() {
 
                 <div>
                   <Label htmlFor="customerEmail" className="text-sm font-medium text-gray-700 mb-1.5 block">
-                    電子郵件 <span className="text-red-500">*</span>
+                    {t('contactUs.emailLabel')} <span className="text-red-500">*</span>
                   </Label>
                   <Input
                     id="customerEmail"
                     type="email"
                     {...register("customerEmail")}
-                    placeholder="請輸入您的電子郵件"
+                    placeholder={t('contactUs.emailPlaceholder')}
                     className="h-11 rounded-lg"
                   />
                   {errors.customerEmail && (
@@ -216,7 +217,7 @@ export default function ContactUs() {
                 {/* Subject with Quick-pick chips */}
                 <div>
                   <Label className="text-sm font-medium text-gray-700 mb-1.5 block">
-                    諮詢主題 <span className="text-red-500">*</span>
+                    {t('contactUs.subjectLabel')} <span className="text-red-500">*</span>
                   </Label>
                   {/* Quick-pick chips */}
                   <div className="flex flex-wrap gap-2 mb-2.5">
@@ -248,7 +249,7 @@ export default function ContactUs() {
                         value={field.value || quickSubject}
                       >
                         <SelectTrigger className="h-11 rounded-lg">
-                          <SelectValue placeholder="或從下拉選單選擇..." />
+                          <SelectValue placeholder={t('contactUs.selectSubjectPlaceholder')} />
                         </SelectTrigger>
                         <SelectContent>
                           {SUBJECT_OPTIONS.map((opt) => (
@@ -267,12 +268,12 @@ export default function ContactUs() {
 
                 <div>
                   <Label htmlFor="message" className="text-sm font-medium text-gray-700 mb-1.5 block">
-                    詢問內容 <span className="text-red-500">*</span>
+                    {t('contactUs.messageLabel')} <span className="text-red-500">*</span>
                   </Label>
                   <Textarea
                     id="message"
                     {...register("message")}
-                    placeholder="請詳細描述您的旅遊需求或問題..."
+                    placeholder={t('contactUs.messagePlaceholder')}
                     rows={5}
                     className="rounded-lg resize-none"
                   />
@@ -288,7 +289,7 @@ export default function ContactUs() {
                   className="w-full h-12 text-base font-bold rounded-lg"
                 >
                   <MessageSquare className="h-5 w-5 mr-2" />
-                  {createInquiry.isPending ? '送出中...' : '送出諮詢'}
+                  {createInquiry.isPending ? t('contactUs.submitting') : t('contactUs.submitBtn')}
                 </Button>
               </form>
             </div>

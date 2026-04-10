@@ -47,10 +47,10 @@ export default function HotelBooking() {
         referrerPage: "/hotel-booking",
       });
       trackAffiliateClick({ platform: 'trip.com', linkType: 'hotel', destination: city || undefined, searchQuery: city || '' });
-      toast.info("正在前往 Trip.com 搜尋飯店...");
+      toast.info(t('hotelBooking.page.toastSearching'));
       window.open(url, "_blank");
     } catch (err) {
-      toast.error("無法開啟搜尋頁面，請稍後再試");
+      toast.error(t('hotelBooking.page.toastError'));
     } finally {
       setIsSearching(false);
     }
@@ -68,36 +68,36 @@ export default function HotelBooking() {
         referrerPage: "/hotel-booking",
       });
       trackAffiliateClick({ platform: 'trip.com', linkType: 'hotel', destination: dest.city, searchQuery: `${dest.country}${dest.city}` });
-      toast.info(`正在前往 Trip.com 搜尋${dest.country}${dest.city}飯店...`);
+      toast.info(t('hotelBooking.page.toastSearching'));
       window.open(result.url, "_blank");
     } catch {
-      openAdvisor(`我想在${dest.country}${dest.city}找住宿，請問有哪些推薦的飯店？大概的價位範圍是多少？`);
+      openAdvisor(`${dest.country} ${dest.city}`);
     }
   };
 
   const features = [
-    { icon: Star, title: "精選優質飯店", desc: "嚴格篩選全球各地優質飯店，從精品民宿到五星豪華酒店，滿足各種需求。" },
-    { icon: Shield, title: "最低價格保證", desc: "提供最具競爭力的飯店價格，若您找到更低價，我們承諾差額退還。" },
-    { icon: Headphones, title: "專人入住協助", desc: "提前確認入住細節，協助特殊需求安排，讓您抵達即享受。" },
-    { icon: CheckCircle, title: "彈性取消政策", desc: "提供多種取消方案選擇，讓您的行程規劃更有彈性。" },
+    { icon: Star, title: t('hotelBooking.page.feature1Title'), desc: t('hotelBooking.page.feature1Desc') },
+    { icon: Shield, title: t('hotelBooking.page.feature2Title'), desc: t('hotelBooking.page.feature2Desc') },
+    { icon: Headphones, title: t('hotelBooking.page.feature3Title'), desc: t('hotelBooking.page.feature3Desc') },
+    { icon: CheckCircle, title: t('hotelBooking.page.feature4Title'), desc: t('hotelBooking.page.feature4Desc') },
   ];
 
   const hotelTypes = [
-    { name: "精品設計旅館", desc: "獨特設計風格，體驗當地文化與藝術", Icon: Hotel, tag: "個性首選" },
-    { name: "商務酒店", desc: "完善商務設施，高效舒適的工作環境", Icon: Building2, tag: "商旅必備" },
-    { name: "度假村", desc: "全包式服務，享受無憂無慮的假期", Icon: Palmtree, tag: "休閒放鬆" },
-    { name: "五星豪華酒店", desc: "頂級服務與設施，尊享奢華體驗", Icon: Star, tag: "頂級享受" },
-    { name: "溫泉旅館", desc: "日式傳統風情，療愈身心的溫泉體驗", Icon: Flame, tag: "日本特色" },
-    { name: "海景民宿", desc: "絕美海景視野，感受大自然的壯闊", Icon: Waves, tag: "自然風情" },
+    { name: t('hotelBooking.page.type1Name'), desc: t('hotelBooking.page.type1Desc'), Icon: Hotel, tag: t('hotelBooking.page.type1Tag') },
+    { name: t('hotelBooking.page.type2Name'), desc: t('hotelBooking.page.type2Desc'), Icon: Building2, tag: t('hotelBooking.page.type2Tag') },
+    { name: t('hotelBooking.page.type3Name'), desc: t('hotelBooking.page.type3Desc'), Icon: Palmtree, tag: t('hotelBooking.page.type3Tag') },
+    { name: t('hotelBooking.page.type4Name'), desc: t('hotelBooking.page.type4Desc'), Icon: Star, tag: t('hotelBooking.page.type4Tag') },
+    { name: t('hotelBooking.page.type5Name'), desc: t('hotelBooking.page.type5Desc'), Icon: Flame, tag: t('hotelBooking.page.type5Tag') },
+    { name: t('hotelBooking.page.type6Name'), desc: t('hotelBooking.page.type6Desc'), Icon: Waves, tag: t('hotelBooking.page.type6Tag') },
   ];
 
   const amenities = [
-    { icon: Wifi, label: "免費 Wi-Fi" },
-    { icon: Car, label: "停車場" },
-    { icon: Utensils, label: "餐廳" },
-    { icon: Dumbbell, label: "健身房" },
-    { icon: Star, label: "游泳池" },
-    { icon: Shield, label: "24H 保全" },
+    { icon: Wifi, label: t('hotelBooking.filters.wifi') },
+    { icon: Car, label: t('hotelBooking.filters.parking') },
+    { icon: Utensils, label: t('hotelBooking.filters.restaurant') },
+    { icon: Dumbbell, label: t('hotelBooking.filters.gym') },
+    { icon: Star, label: t('hotelBooking.filters.pool') },
+    { icon: Shield, label: t('hotelBooking.filters.security') },
   ];
 
   const destinations = [
@@ -122,30 +122,30 @@ export default function HotelBooking() {
                 <Search className="h-5 w-5 text-white" />
               </div>
               <div>
-                <h2 className="text-xl font-bold text-black">搜尋飯店</h2>
-                <p className="text-sm text-gray-500">透過 Trip.com 即時比價，找到最優惠住宿</p>
+                <h2 className="text-xl font-bold text-black">{t('hotelBooking.page.searchTitle')}</h2>
+                <p className="text-sm text-gray-500">{t('hotelBooking.page.searchSubtitle')}</p>
               </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
               <div>
-                <Label className="text-sm font-medium text-gray-700 mb-1.5 block">目的地城市</Label>
-                <Input placeholder="城市名稱（如 Tokyo）" value={city} onChange={e => setCity(e.target.value)} className="h-11" />
+                <Label className="text-sm font-medium text-gray-700 mb-1.5 block">{t('hotelBooking.page.destinationLabel')}</Label>
+                <Input placeholder={t('hotelBooking.page.destinationPlaceholder')} value={city} onChange={e => setCity(e.target.value)} className="h-11" />
               </div>
               <div>
-                <Label className="text-sm font-medium text-gray-700 mb-1.5 block">入住日期</Label>
+                <Label className="text-sm font-medium text-gray-700 mb-1.5 block">{t('hotelBooking.page.checkInLabel')}</Label>
                 <Input type="date" value={checkIn} onChange={e => setCheckIn(e.target.value)} className="h-11" />
               </div>
               <div>
-                <Label className="text-sm font-medium text-gray-700 mb-1.5 block">退房日期</Label>
+                <Label className="text-sm font-medium text-gray-700 mb-1.5 block">{t('hotelBooking.page.checkOutLabel')}</Label>
                 <Input type="date" value={checkOut} onChange={e => setCheckOut(e.target.value)} className="h-11" />
               </div>
             </div>
             <Button onClick={handleSearchHotels} disabled={isSearching} className="w-full h-12 bg-black hover:bg-gray-800 text-white font-bold text-base rounded-xl flex items-center justify-center gap-2">
               <Search className="h-5 w-5" />
-              {isSearching ? "正在開啟 Trip.com..." : "搜尋飯店"}
+              {isSearching ? t('hotelBooking.page.searching') : t('hotelBooking.page.searchBtn')}
               <ExternalLink className="h-4 w-4 opacity-70" />
             </Button>
-            <p className="text-center text-xs text-gray-400 mt-3">將跳轉至 Trip.com 完成搜尋與預訂 · 由 PACK&GO 聯盟合作提供</p>
+            <p className="text-center text-xs text-gray-400 mt-3">{t('hotelBooking.page.redirectNote')}</p>
           </div>
         </div>
       </section>
@@ -163,25 +163,24 @@ export default function HotelBooking() {
           <div className="max-w-2xl">
             <div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur-sm border border-white/20 rounded-full px-4 py-1.5 text-sm mb-6">
               <Hotel className="h-4 w-4" />
-              <span>飯店預訂服務</span>
+              <span>{t('hotelBooking.page.heroBadge')}</span>
             </div>
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-6 leading-tight">
-              每一晚都是<br />
-              <span className="text-gray-300">難忘的旅程記憶</span>
+              {t('hotelBooking.page.heroTitle')}<br />
+              <span className="text-gray-300">{t('hotelBooking.page.heroTitleHighlight')}</span>
             </h1>
             <p className="text-xl text-gray-300 mb-8 leading-relaxed">
-              PACK&GO 精選全球優質飯店，從溫馨民宿到頂級豪華酒店，
-              專業顧問為您找到最適合的住宿選擇。
+              {t('hotelBooking.page.heroDesc')}
             </p>
             <div className="flex flex-col sm:flex-row gap-4">
               <Link href="/inquiry">
                 <Button className="bg-white text-black hover:bg-gray-100 font-bold px-8 py-3 h-auto rounded-lg text-base">
-                  立即諮詢住宿 <ArrowRight className="ml-2 h-5 w-5" />
+                  {t('hotelBooking.page.heroCtaInquiry')} <ArrowRight className="ml-2 h-5 w-5" />
                 </Button>
               </Link>
               <Link href="/contact-us">
                 <Button variant="outline" className="border-white/50 text-white hover:bg-white/10 font-bold px-8 py-3 h-auto rounded-lg text-base bg-transparent">
-                  聯絡我們
+                  {t('hotelBooking.page.heroCtaContact')}
                 </Button>
               </Link>
             </div>
@@ -194,10 +193,10 @@ export default function HotelBooking() {
         <div className="container">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
             {[
-              { num: "5,000+", label: "合作飯店" },
-              { num: "80+", label: "目的地城市" },
-              { num: "3★-5★", label: "星級範圍" },
-              { num: "99%", label: "訂房成功率" },
+              { num: "5,000+", label: t('hotelBooking.page.statPartnerHotels') },
+              { num: "80+", label: t('hotelBooking.page.statCities') },
+              { num: "3★-5★", label: t('hotelBooking.page.statStarRange') },
+              { num: "99%", label: t('hotelBooking.page.statSuccessRate') },
             ].map((stat, i) => (
               <div key={i}>
                 <div className="text-3xl font-bold text-white mb-1">{stat.num}</div>
@@ -212,8 +211,8 @@ export default function HotelBooking() {
       <section className="py-20 bg-white">
         <div className="container">
           <div className="text-center mb-14">
-            <h2 className="text-3xl md:text-4xl font-bold text-black mb-4">我們的飯店服務優勢</h2>
-            <p className="text-gray-600 text-lg max-w-2xl mx-auto">不只是訂房，更是為您打造完美的住宿體驗</p>
+            <h2 className="text-3xl md:text-4xl font-bold text-black mb-4">{t('hotelBooking.page.featuresTitle')}</h2>
+            <p className="text-gray-600 text-lg max-w-2xl mx-auto">{t('hotelBooking.page.featuresSubtitle')}</p>
           </div>
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
             {features.map((feature, i) => (
@@ -233,15 +232,15 @@ export default function HotelBooking() {
       <section className="py-20 bg-gray-50">
         <div className="container">
           <div className="text-center mb-14">
-            <h2 className="text-3xl md:text-4xl font-bold text-black mb-4">住宿類型</h2>
-            <p className="text-gray-600 text-lg">多元住宿選擇，滿足不同旅行風格</p>
+            <h2 className="text-3xl md:text-4xl font-bold text-black mb-4">{t('hotelBooking.page.typesTitle')}</h2>
+            <p className="text-gray-600 text-lg">{t('hotelBooking.page.typesSubtitle')}</p>
           </div>
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {hotelTypes.map((type, i) => (
               <button
                 key={i}
                 type="button"
-                onClick={() => openAdvisor(`我對「${type.name}」有興趣，${type.desc}，請問有哪些推薦的選擇和大概的價位？`)}
+                onClick={() => openAdvisor(`${type.name}: ${type.desc}`)}
                 className="bg-white rounded-xl p-6 border border-gray-100 hover:border-black hover:shadow-md transition-all flex items-start gap-4 text-left w-full"
               >
                 <div className="w-10 h-10 flex-shrink-0 bg-gray-100 rounded-lg flex items-center justify-center">
@@ -253,7 +252,7 @@ export default function HotelBooking() {
                     <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{type.tag}</span>
                   </div>
                   <p className="text-gray-600 text-sm leading-relaxed mb-3">{type.desc}</p>
-                  <span className="text-xs text-black font-medium underline underline-offset-2">點擊諮詢此類型 →</span>
+                  <span className="text-xs text-black font-medium underline underline-offset-2">{t('hotelBooking.page.typeClickHint')}</span>
                 </div>
               </button>
             ))}
@@ -265,8 +264,8 @@ export default function HotelBooking() {
       <section className="py-20 bg-white">
         <div className="container">
           <div className="text-center mb-14">
-            <h2 className="text-3xl md:text-4xl font-bold text-black mb-4">熱門目的地</h2>
-            <p className="text-gray-600 text-lg">精選亞洲熱門城市，提供最豐富的住宿選擇</p>
+            <h2 className="text-3xl md:text-4xl font-bold text-black mb-4">{t('hotelBooking.page.destTitle')}</h2>
+            <p className="text-gray-600 text-lg">{t('hotelBooking.page.destSubtitle')}</p>
           </div>
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
             {destinations.map((dest, i) => (
@@ -288,7 +287,7 @@ export default function HotelBooking() {
                 </div>
                 <div className="text-right">
                   <div className="font-bold text-black text-sm">{dest.hotels}</div>
-                  <div className="text-xs text-gray-500">間飯店</div>
+                  <div className="text-xs text-gray-500">{t('hotelBooking.page.destHotels')}</div>
                 </div>
               </button>
             ))}
@@ -300,15 +299,15 @@ export default function HotelBooking() {
       <section className="py-20 bg-gray-50">
         <div className="container">
           <div className="text-center mb-14">
-            <h2 className="text-3xl md:text-4xl font-bold text-black mb-4">常見設施篩選</h2>
-            <p className="text-gray-600 text-lg">告訴我們您的需求，我們為您找到最合適的飯店</p>
+            <h2 className="text-3xl md:text-4xl font-bold text-black mb-4">{t('hotelBooking.page.amenitiesTitle')}</h2>
+            <p className="text-gray-600 text-lg">{t('hotelBooking.page.amenitiesSubtitle')}</p>
           </div>
           <div className="flex flex-wrap justify-center gap-4">
             {amenities.map((amenity, i) => (
               <button
                 key={i}
                 type="button"
-                onClick={() => openAdvisor(`我在找有「${amenity.label}」設施的飯店，請問有哪些推薦的選擇？`)}
+                onClick={() => openAdvisor(`${amenity.label}`)}
                 className="flex items-center gap-2 bg-white border border-gray-200 rounded-full px-5 py-2.5 text-sm font-medium text-gray-700 hover:border-black hover:text-black transition-all"
               >
                 <amenity.icon className="h-4 w-4" />
@@ -317,7 +316,7 @@ export default function HotelBooking() {
             ))}
           </div>
           <p className="text-center text-gray-500 text-sm mt-6">
-            點擊設施標籤，AI 顧問將為您推薦符合需求的飯店
+            {t('hotelBooking.page.amenitiesHint')}
           </p>
         </div>
       </section>
@@ -325,19 +324,19 @@ export default function HotelBooking() {
       {/* CTA */}
       <section className="py-20 bg-black text-white">
         <div className="container text-center">
-          <h2 className="text-3xl md:text-4xl font-bold mb-4">找到您的完美住所</h2>
+          <h2 className="text-3xl md:text-4xl font-bold mb-4">{t('hotelBooking.page.ctaTitle')}</h2>
           <p className="text-gray-400 text-lg mb-8 max-w-xl mx-auto">
-            告訴我們您的旅行日期、目的地與預算，我們為您推薦最適合的住宿選擇
+            {t('hotelBooking.page.ctaDesc')}
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link href="/inquiry">
               <Button className="bg-white text-black hover:bg-gray-100 font-bold px-10 py-3 h-auto rounded-lg text-base">
-                立即諮詢 <ArrowRight className="ml-2 h-5 w-5" />
+                {t('hotelBooking.page.ctaInquiry')} <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
             </Link>
             <Link href="/contact-us">
               <Button variant="outline" className="border-white/30 text-white hover:bg-white/10 font-bold px-10 py-3 h-auto rounded-lg text-base bg-transparent">
-                查看聯絡方式
+                {t('hotelBooking.page.ctaContact')}
               </Button>
             </Link>
           </div>

@@ -67,17 +67,54 @@ const regionConfig: Record<string, {
   }
 };
 
-// 國家圖片映射（使用本地圖片優先，備用 Unsplash）
+// 國家名稱 i18n key 映射（中文名稱 → i18n key）
+const countryI18nKeys: Record<string, string> = {
+  "台灣": "destinations.taiwan",
+  "日本": "destinations.japan",
+  "中國": "destinations.china",
+  "韓國": "destinations.korea",
+  "泰國": "destinations.thailand",
+  "越南": "destinations.vietnam",
+  "新加坡": "destinations.singapore",
+  "馬來西亞": "destinations.malaysia",
+  "印尼": "destinations.indonesia",
+  "菲律賓": "destinations.philippines",
+  "英國": "destinations.uk",
+  "法國": "destinations.france",
+  "德國": "destinations.germany",
+  "義大利": "destinations.italy",
+  "西班牙": "destinations.spain",
+  "瑞士": "destinations.switzerland",
+  "希臘": "destinations.greece",
+  "土耳其": "destinations.turkey",
+  "澳洲": "destinations.australia",
+  "紐西蘭": "destinations.newZealand",
+  "美國": "destinations.usa",
+  "加拿大": "destinations.canada",
+  "墨西哥": "destinations.mexico",
+  "巴西": "destinations.brazil",
+  "阿根廷": "destinations.argentina",
+  "秘魯": "destinations.peru",
+  "埃及": "destinations.egypt",
+  "摩洛哥": "destinations.morocco",
+  "南非": "destinations.southAfrica",
+  "約旦": "destinations.jordan",
+  "以色列": "destinations.israel",
+  "阿聯酋": "destinations.uae",
+  "杜拜": "destinations.dubai",
+};
+
+// 國家圖片映射（使用 Unsplash）
 const countryImages: Record<string, string> = {
-  // 亞洲 - 使用本地高品質圖片
-  "台灣": "/images/countries/taiwan.jpg",
-  "日本": "/images/countries/japan.jpg",
-  "中國": "/images/countries/china.jpg",
-  "韓國": "/images/countries/korea.jpg",
-  "泰國": "/images/countries/thailand.jpg",
-  "越南": "/images/countries/vietnam.jpg",
-  "新加坡": "/images/countries/singapore.jpg",
-  "馬來西亞": "/images/countries/malaysia.jpg",
+  // 亞洲
+  "台灣": "https://images.unsplash.com/photo-1470004914212-05527e49370b?w=800",
+  "日本": "https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=800",
+  "中國": "https://images.unsplash.com/photo-1508804185872-d7badad00f7d?w=800",
+  "韓國": "https://images.unsplash.com/photo-1517154421773-0529f29ea451?w=800",
+  "泰國": "https://images.unsplash.com/photo-1528181304800-259b08848526?w=800",
+  "越南": "https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=800",
+  "新加坡": "https://images.unsplash.com/photo-1525625293386-3f8f99389edd?w=800",
+  "馬來西亞": "https://images.unsplash.com/photo-1596422846543-75c6fc197f07?w=800",
   "印尼": "https://images.unsplash.com/photo-1537996194471-e657df975ab4?w=800",
   "印度": "https://images.unsplash.com/photo-1524492412937-b28074a5d7da?w=800",
   "菲律賓": "https://images.unsplash.com/photo-1518509562904-e7ef99cdcc86?w=800",
@@ -85,15 +122,15 @@ const countryImages: Record<string, string> = {
   "緬甸": "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=800",
   "尼泊爾": "https://images.unsplash.com/photo-1544735716-392fe2489ffa?w=800",
   "斯里蘭卡": "https://images.unsplash.com/photo-1586523969990-d8e3c?w=800",
-  // 歐洲 - 使用本地高品質圖片
-  "英國": "/images/countries/uk.jpg",
-  "法國": "/images/countries/france.jpg",
-  "德國": "/images/countries/germany.jpg",
-  "義大利": "/images/countries/italy.jpg",
-  "西班牙": "/images/countries/spain.jpg",
-  "瑞士": "/images/countries/switzerland.jpg",
-  "荷蘭": "/images/countries/netherlands.jpg",
-  "希臘": "/images/countries/greece.jpg",
+  // 歐洲
+  "英國": "https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?w=800",
+  "法國": "https://images.unsplash.com/photo-1502602898657-3e91760cbb34?w=800",
+  "德國": "https://images.unsplash.com/photo-1467269204594-9661b134dd2b?w=800",
+  "義大利": "https://images.unsplash.com/photo-1515542622106-78bda8ba0e5b?w=800",
+  "西班牙": "https://images.unsplash.com/photo-1543785734-4b6e564642f8?w=800",
+  "瑞士": "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800",
+  "荷蘭": "https://images.unsplash.com/photo-1512470876302-972faa2aa9a4?w=800",
+  "希臘": "https://images.unsplash.com/photo-1555993539-1732b0258235?w=800",
   "捷克": "https://images.unsplash.com/photo-1519677100203-a0e668c92439?w=800",
   "奧地利": "https://images.unsplash.com/photo-1516426122078-c23e76319af?w=800",
   "巴爾幹半島": "https://images.unsplash.com/photo-1555990538-1e6c0c1b1b0c?w=800",
@@ -102,30 +139,30 @@ const countryImages: Record<string, string> = {
   "北歐": "https://images.unsplash.com/photo-1507272931001-fc06c17e4f43?w=800",
   "冰島": "https://images.unsplash.com/photo-1504893524553-b855bce32c67?w=800",
   "克羅埃西亞": "https://images.unsplash.com/photo-1555990538-1e6c0c1b1b0c?w=800",
-  // 大洋洲 - 使用本地高品質圖片
-  "澳洲": "/images/countries/australia.jpg",
+  // 大洋洲
+  "澳洲": "https://images.unsplash.com/photo-1523482580672-f109ba8cb9be?w=800",
   "紐西蘭": "https://images.unsplash.com/photo-1507699622108-4be3abd695ad?w=800",
-  // 美洲 - 使用本地高品質圖片
-  "美國": "/images/countries/usa.jpg",
-  "加拿大": "/images/countries/canada.jpg",
+  // 美洲
+  "美國": "https://images.unsplash.com/photo-1485738422979-f5c462d49f74?w=800",
+  "加拿大": "https://images.unsplash.com/photo-1517935706615-2717063c2225?w=800",
   "墨西哥": "https://images.unsplash.com/photo-1518105779142-d975f22f1b0a?w=800",
-  "巴西": "/images/countries/brazil.jpg",
+  "巴西": "https://images.unsplash.com/photo-1483729558449-99ef09a8c325?w=800",
   "阿根廷": "https://images.unsplash.com/photo-1612294037637-ec328d0e075e?w=800",
   "秘魯": "https://images.unsplash.com/photo-1526392060635-9d6019884377?w=800",
   "智利": "https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?w=800",
   "古巴": "https://images.unsplash.com/photo-1500759285222-a95626b934cb?w=800",
-  // 非洲 - 使用本地高品質圖片
-  "埃及": "/images/countries/egypt.jpg",
+  // 非洲
+  "埃及": "https://images.unsplash.com/photo-1539650116574-75c0c6d73f6e?w=800",
   "南非": "https://images.unsplash.com/photo-1484318571209-661cf29a69c3?w=800",
   "摩洛哥": "https://images.unsplash.com/photo-1489749798305-4fea3ae63d43?w=800",
   "肯亞": "https://images.unsplash.com/photo-1547471080-7cc2caa01a7e?w=800",
   "坦尚尼亞": "https://images.unsplash.com/photo-1516426122078-c23e76319801?w=800",
-  // 中東 - 使用本地高品質圖片
+  // 中東
   "阿聯酋": "https://images.unsplash.com/photo-1512453979798-5ea266f8880c?w=800",
   "杜拜": "https://images.unsplash.com/photo-1512453979798-5ea266f8880c?w=800",
-  "約旦": "/images/countries/jordan.jpg",
+  "約旦": "https://images.unsplash.com/photo-1548786811-dd6e453ccca7?w=800",
   "以色列": "https://images.unsplash.com/photo-1544967082-d9d25d867d66?w=800",
-  "土耳其": "/images/countries/turkey.jpg",
+  "土耳其": "https://images.unsplash.com/photo-1541432901042-2d8bd64b4a9b?w=800",
 };
 
 export default function RegionPage() {
@@ -291,7 +328,7 @@ export default function RegionPage() {
                       />
                       <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-80 group-hover:opacity-90 transition-opacity" />
                       <div className="absolute bottom-0 left-0 w-full p-4">
-                        <h3 className="text-xl font-bold text-white">{country.country}</h3>
+                        <h3 className="text-xl font-bold text-white">{countryI18nKeys[country.country] ? t(countryI18nKeys[country.country]) : country.country}</h3>
                         <p className="text-gray-200 text-sm">{country.count} {t('countryPage.tours')}</p>
                       </div>
                       <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
