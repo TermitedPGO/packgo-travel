@@ -13,43 +13,45 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Plane, Home, CheckCircle, CalendarIcon } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
-import { zhTW } from "date-fns/locale";
+import { zhTW, enUS } from "date-fns/locale";
 import type { z } from "zod";
 import { useLocale } from "@/contexts/LocaleContext";
 
 type CustomTourForm = z.infer<typeof customTourSchema>;
 
-// Quick-pick destinations
-const QUICK_DESTINATIONS = [
-  { label: "🇯🇵 日本", value: "日本" },
-  { label: "🇰🇷 韓國", value: "韓國" },
-  { label: "🇹🇭 泰國", value: "泰國" },
-  { label: "🇸🇬 新加坡", value: "新加坡" },
-  { label: "🇪🇺 歐洲", value: "歐洲" },
-  { label: "🇺🇸 美國", value: "美國" },
-];
-
-// Quick-pick durations
-const QUICK_DURATIONS = [
-  { label: "3 天", value: 3 },
-  { label: "5 天", value: 5 },
-  { label: "7 天", value: 7 },
-  { label: "10 天", value: 10 },
-  { label: "14 天", value: 14 },
-];
-
-// Quick-pick group sizes
-const QUICK_PEOPLE = [
-  { label: "1 人", value: 1 },
-  { label: "2 人", value: 2 },
-  { label: "4 人", value: 4 },
-  { label: "6 人", value: 6 },
-  { label: "10+ 人", value: 10 },
-];
-
 export default function CustomTourRequest() {
   const [isSubmitted, setIsSubmitted] = useState(false);
-  const { t } = useLocale();
+  const { t, language } = useLocale();
+  const isChineseMode = language === 'zh-TW';
+  const dateLocale = isChineseMode ? zhTW : enUS;
+
+  // Quick-pick destinations (inside component for i18n)
+  const QUICK_DESTINATIONS = [
+    { label: isChineseMode ? "🇯🇵 日本" : "🇯🇵 Japan", value: isChineseMode ? "日本" : "Japan" },
+    { label: isChineseMode ? "🇰🇷 韓國" : "🇰🇷 South Korea", value: isChineseMode ? "韓國" : "South Korea" },
+    { label: isChineseMode ? "🇹🇭 泰國" : "🇹🇭 Thailand", value: isChineseMode ? "泰國" : "Thailand" },
+    { label: isChineseMode ? "🇸🇬 新加坡" : "🇸🇬 Singapore", value: isChineseMode ? "新加坡" : "Singapore" },
+    { label: isChineseMode ? "🇪🇺 歐洲" : "🇪🇺 Europe", value: isChineseMode ? "歐洲" : "Europe" },
+    { label: isChineseMode ? "🇺🇸 美國" : "🇺🇸 USA", value: isChineseMode ? "美國" : "USA" },
+  ];
+
+  // Quick-pick durations
+  const QUICK_DURATIONS = [
+    { label: isChineseMode ? "3 天" : "3 days", value: 3 },
+    { label: isChineseMode ? "5 天" : "5 days", value: 5 },
+    { label: isChineseMode ? "7 天" : "7 days", value: 7 },
+    { label: isChineseMode ? "10 天" : "10 days", value: 10 },
+    { label: isChineseMode ? "14 天" : "14 days", value: 14 },
+  ];
+
+  // Quick-pick group sizes
+  const QUICK_PEOPLE = [
+    { label: isChineseMode ? "1 人" : "1 pax", value: 1 },
+    { label: isChineseMode ? "2 人" : "2 pax", value: 2 },
+    { label: isChineseMode ? "4 人" : "4 pax", value: 4 },
+    { label: isChineseMode ? "6 人" : "6 pax", value: 6 },
+    { label: isChineseMode ? "10+ 人" : "10+ pax", value: 10 },
+  ];
 
   const {
     register,
@@ -87,7 +89,7 @@ export default function CustomTourRequest() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center py-12">
       <SEO title="客製行程申請" description="填寫您的旅遊需求，PACK&GO 專業顧問將為您規劃最適合的客製化行程。" url="/custom-tour-request" />
         <div className="container max-w-2xl">
-          <div className="bg-white  shadow-lg p-12 text-center">
+          <div className="bg-white rounded-xl shadow-lg p-12 text-center">
             <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-6" />
             <h2 className="text-3xl font-serif font-bold text-gray-900 mb-4">
               {t("customTourRequest.successTitle2")}
@@ -316,7 +318,7 @@ export default function CustomTourRequest() {
                           >
                             <CalendarIcon className="mr-2 h-4 w-4" />
                             {field.value ? (
-                              format(field.value, "PPP", { locale: zhTW })
+                              format(field.value, "PPP", { locale: dateLocale })
                             ) : (
                               <span className="text-gray-500">
                                 {t("customTourRequest.selectDate")}

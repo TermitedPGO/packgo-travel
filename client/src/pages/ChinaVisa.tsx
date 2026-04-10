@@ -155,7 +155,9 @@ export default function ChinaVisa() {
     setCurrentStep(step);
     if (step === 1) trackVisaStart();
     else {
-      const names = ['', '簽證類型', '個人資訊', '護照資料', '確認', '付款'];
+      const names = isChineseMode
+        ? ['', '簽證類型', '個人資訊', '護照資料', '確認', '付款']
+        : ['', 'Visa Type', 'Personal Info', 'Passport Info', 'Review', 'Payment'];
       trackVisaStep(step, names[step] || `Step ${step}`);
     }
   };
@@ -226,7 +228,7 @@ export default function ChinaVisa() {
                   </div>
                   <Button
                     onClick={() => goToStep(1)}
-                    className="bg-white text-black hover:bg-gray-100 px-8 py-3 text-base font-bold rounded-none"
+                    className="bg-white text-black hover:bg-gray-100 px-8 py-3 text-base font-bold rounded-lg"
                   >
                     {isChineseMode ? "立即申請" : "Apply Now"}
                     <ChevronRight className="ml-2 h-4 w-4" />
@@ -282,7 +284,7 @@ export default function ChinaVisa() {
                     <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{isChineseMode ? "代填申請表格" : "Form assistance"}</li>
                     <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{isChineseMode ? "人工運送至領事館" : "Courier to consulate"}</li>
                   </ul>
-                  <Button onClick={() => setCurrentStep(1)} className="bg-[#1A1A1A] text-white hover:bg-gray-800 rounded-none w-full mt-auto">
+                  <Button onClick={() => setCurrentStep(1)} className="bg-[#1A1A1A] text-white hover:bg-gray-800 rounded-lg w-full mt-auto">
                     {isChineseMode ? "立即申請" : "Apply Now"}
                   </Button>
                 </div>
@@ -301,7 +303,7 @@ export default function ChinaVisa() {
                     <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{isChineseMode ? "代填申請表格" : "Form assistance"}</li>
                     <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{isChineseMode ? "人工運送至領事館" : "Courier to consulate"}</li>
                   </ul>
-                  <Button onClick={() => setCurrentStep(1)} className="bg-[#1A1A1A] text-white hover:bg-gray-800 rounded-none w-full mt-auto">
+                  <Button onClick={() => setCurrentStep(1)} className="bg-[#1A1A1A] text-white hover:bg-gray-800 rounded-lg w-full mt-auto">
                     {isChineseMode ? "立即申請" : "Apply Now"}
                   </Button>
                 </div>
@@ -382,7 +384,7 @@ export default function ChinaVisa() {
               </p>
               <Button
                 onClick={() => setCurrentStep(1)}
-                className="bg-white text-black hover:bg-gray-100 px-10 py-3 text-base font-bold rounded-none"
+                className="bg-white text-black hover:bg-gray-100 px-10 py-3 text-base font-bold rounded-lg"
               >
                 {isChineseMode ? "立即開始申請" : "Start Application Now"}
                 <ChevronRight className="ml-2 h-4 w-4" />
@@ -770,7 +772,7 @@ export default function ChinaVisa() {
                 <Button
                   variant="outline"
                   onClick={() => setCurrentStep(s => s - 1)}
-                  className="border-2 border-gray-300 rounded-none"
+                  className="border-2 border-gray-300 rounded-lg"
                 >
                   <ChevronLeft className="mr-2 h-4 w-4" />
                   {isChineseMode ? "上一步" : "Back"}
@@ -779,7 +781,7 @@ export default function ChinaVisa() {
                 {currentStep < 4 ? (
                   <Button
                     onClick={() => setCurrentStep(s => s + 1)}
-                    className="bg-black text-white hover:bg-gray-800 rounded-none px-8"
+                    className="bg-black text-white hover:bg-gray-800 rounded-lg px-8"
                   >
                     {isChineseMode ? "下一步" : "Next"}
                     <ChevronRight className="ml-2 h-4 w-4" />
@@ -788,7 +790,7 @@ export default function ChinaVisa() {
                   <Button
                     onClick={handleSubmit}
                     disabled={isSubmitting}
-                    className="bg-black text-white hover:bg-gray-800 rounded-none px-8"
+                    className="bg-black text-white hover:bg-gray-800 rounded-lg px-8"
                   >
                     {isSubmitting ? (
                       <>

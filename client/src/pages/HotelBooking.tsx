@@ -13,7 +13,8 @@ import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 
 export default function HotelBooking() {
-  const { t } = useLocale();
+  const { t, language } = useLocale();
+  const isChineseMode = language === 'zh-TW';
   const [advisorOpen, setAdvisorOpen] = useState(false);
   const [advisorInitialMsg, setAdvisorInitialMsg] = useState("");
 
@@ -101,12 +102,12 @@ export default function HotelBooking() {
   ];
 
   const destinations = [
-    { city: "東京", country: "日本", hotels: "500+" },
-    { city: "大阪", country: "日本", hotels: "300+" },
-    { city: "首爾", country: "韓國", hotels: "400+" },
-    { city: "曼谷", country: "泰國", hotels: "600+" },
-    { city: "新加坡", country: "新加坡", hotels: "250+" },
-    { city: "峨里島", country: "印尼", hotels: "350+" },
+    { city: isChineseMode ? "東京" : "Tokyo", country: isChineseMode ? "日本" : "Japan", hotels: "500+" },
+    { city: isChineseMode ? "大阪" : "Osaka", country: isChineseMode ? "日本" : "Japan", hotels: "300+" },
+    { city: isChineseMode ? "首爾" : "Seoul", country: isChineseMode ? "韓國" : "South Korea", hotels: "400+" },
+    { city: isChineseMode ? "曼谷" : "Bangkok", country: isChineseMode ? "泰國" : "Thailand", hotels: "600+" },
+    { city: isChineseMode ? "新加坡" : "Singapore", country: isChineseMode ? "新加坡" : "Singapore", hotels: "250+" },
+    { city: isChineseMode ? "峇里島" : "Bali", country: isChineseMode ? "印尼" : "Indonesia", hotels: "350+" },
   ];
 
   return (
