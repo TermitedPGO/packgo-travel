@@ -5485,3 +5485,16 @@ AI 辦公室看板中，AI 任務永遠顯示「執行中」（started 狀態）
 - [ ] Task 6: Admin UI — CompetitorMonitorTab.tsx（列表 + Dialog + 告警 + 詳情）
 - [ ] Task 7: Admin Header 告警 Badge
 - [ ] Task 8: Unit Tests（competitorScraperService.test.ts）
+
+## Round 26 — AI 生成系統收尾（2026-04-10）
+
+- [x] B5: 修復 ContentAnalyzer 目的地解析（排除折扣文字）
+- [x] B5: 更新現有行程中錯誤的 destinationCity/Country 資料（tour 1860006: 早鳥折5000 → 英國愛爾蘭）
+- [x] 錯誤處理 UI: 後端 progressTracker 支援 failed 狀態 + errorMessage（已存在）
+- [x] 錯誤處理 UI: 前端顯示紅色錯誤區塊 + 重試按鈕 + 返回按鈕
+- [x] 錯誤處理 UI: i18n 新增 generationFailed/retryGeneration/backToList 等翻譯
+- [x] 舊行程補資料: 查詢 1860001-1860005 的 supplementUrl 狀態（PDF 模式無 URL，無法自動補充）
+- [x] 舊行程補資料: 1860001 有 sourceUrl，可 Force Regenerate 補充（已記錄）
+- [x] 端對端驗證: tour 1860006 完整確認建立出發日流程 ✅
+- [x] 端對端驗證: 前台日曆顯示新建立的出發日（6月22日）✅
+- [x] pnpm build 驗證 TypeScript 0 errors ✅

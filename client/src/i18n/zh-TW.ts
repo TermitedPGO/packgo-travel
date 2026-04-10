@@ -2929,6 +2929,11 @@ export const zhTW = {
     categoryCruise: '郵輪旅遊',
     categoryTheme: '主題旅遊',
     minimizeToBackground: '縮小到背景',
+    generationFailed: '行程生成失敗',
+    generationFailedDesc: '生成過程中發生錯誤，請確認網址是否正確或稍後重試。',
+    retryGeneration: '重新生成',
+    backToInput: '返回輸入',
+    errorDetails: '錯誤詳情',
   },
 
   // 後台行程編輯對話框

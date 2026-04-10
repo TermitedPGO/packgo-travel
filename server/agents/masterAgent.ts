@@ -459,16 +459,57 @@ export class MasterAgent {
         // Extract destination from pageTitle: remove common prefixes/suffixes
         let _parsedCountry = '';
         let _parsedCity = '';
-        // Try to extract destination from title patterns like "英國愛爾蘭經典13日"
-        const _destMatch = _pageTitle.match(/^[^｜|]+[｜|]([^｜|]+?)(?:經典|深度|精選|探索|之旅|\d+日|\d+天)/);
+        
+        // Helper: detect discount/promo text (not a destination)
+        const _isDiscountText = (s: string) =>
+          /折|省|優惠|早鳥|特惠|限時|團費|現省|折扣|加碼|送|贈|免費|優待|特價|促銷|\d{3,}/.test(s);
+        
+        // Split pageTitle by ｜ or | to get segments
+        const _titleSegments = _pageTitle.split(/[｜|]/).map((s: string) => s.trim()).filter((s: string) => s.length > 0);
+        
+        // Strategy 1: Try to extract destination after ｜ with pattern "英國愛爾蘭經典13日"
+        const _destMatch = _pageTitle.match(/[｜|]([^｜|]+?)(?:經典|深度|精選|探索|之旅|\d+日|\d+天)/);
         if (_destMatch) {
-          _parsedCity = _destMatch[1].trim();
-        } else {
-          // Fallback: take first segment before ｜ or first 10 chars
-          const _firstSeg = _pageTitle.split(/[｜|]/)[0]?.trim() || '';
-          if (_firstSeg.length > 0 && _firstSeg.length <= 20) {
-            _parsedCity = _firstSeg;
+          const candidate = _destMatch[1].trim();
+          if (!_isDiscountText(candidate)) {
+            _parsedCity = candidate;
           }
+        }
+        
+        // Strategy 2: Find first non-discount segment containing known country/region keywords
+        if (!_parsedCity) {
+          const _destKeywords = ['英國', '愛爾蘭', '法國', '義大利', '日本', '韓國', '泰國', '越南',
+            '帛琉', '台灣', '美國', '德國', '西班牙', '希臘', '土耳其', '澳洲', '紐西蘭', '加拿大',
+            '中國', '香港', '澳門', '新加坡', '馬來西亞', '印尼', '菲律賓', '印度', '埃及', '摩洛哥',
+            '南非', '秘魯', '阿根廷', '巴西', '北歐', '東歐', '南歐', '中東', '東南亞', '東北亞',
+            '歐洲', '亞洲', '非洲', '美洲', '大洋洲'];
+          for (const seg of _titleSegments) {
+            if (!_isDiscountText(seg) && seg.length >= 2 && seg.length <= 30) {
+              if (_destKeywords.some(k => seg.includes(k))) {
+                _parsedCity = seg;
+                break;
+              }
+            }
+          }
+        }
+        
+        // Strategy 3: Extract destination from main title segment (e.g. "英國愛爾蘭經典13日" → "英國愛爾蘭")
+        if (!_parsedCity) {
+          for (const seg of _titleSegments) {
+            if (!_isDiscountText(seg)) {
+              const _countryExtract = seg.match(/^([\u4e00-\u9fa5]{2,8}?)(?:經典|深度|精選|探索|之旅|\d+日|\d+天)/);
+              if (_countryExtract) {
+                _parsedCity = _countryExtract[1].trim();
+                break;
+              }
+            }
+          }
+        }
+        
+        // Strategy 4: Last resort - first non-discount segment (length ≤ 20)
+        if (!_parsedCity) {
+          const _firstNonDiscount = _titleSegments.find((s: string) => !_isDiscountText(s) && s.length <= 20);
+          if (_firstNonDiscount) _parsedCity = _firstNonDiscount;
         }
         // Try to extract country from URL or content
         const _countryPatterns: Record<string, string> = {

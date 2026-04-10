@@ -2922,6 +2922,11 @@ export const en = {
     categoryCruise: 'Cruise Tour',
     categoryTheme: 'Theme Tour',
     minimizeToBackground: 'Minimize to Background',
+    generationFailed: 'Tour Generation Failed',
+    generationFailedDesc: 'An error occurred during generation. Please verify the URL is correct or try again later.',
+    retryGeneration: 'Retry Generation',
+    backToInput: 'Back to Input',
+    errorDetails: 'Error Details',
   },
 
   // Admin Tour Edit Dialog
