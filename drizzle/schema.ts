@@ -200,6 +200,10 @@ export const tours = mysqlTable("tours", {
   // JSON 格式：{colorTheme?: {failed, fallbackUsed, reason}, heroContent?: {...}, features?: {...}, imageGeneration?: {hero?: {...}, features?: {...}}}
   warningFlags: text("warningFlags"), // JSON string of warning flags
   
+  // DateExtractor 暫存欄位：AI 從 URL 提取的出發日期/人數/價格（等待 admin 確認）
+  // JSON 格式：{departureDates: [{date, status, price?}], capacity: {maxParticipants, minParticipants?}, pricing: {adultPrice, childWithBedPrice?, childNoBedPrice?, infantPrice?, currency, priceNote?}, productCode?}
+  extractedDepartures: text("extractedDepartures"), // JSON - DateExtractor result pending admin confirmation
+  
   // Metadata
   createdBy: int("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),

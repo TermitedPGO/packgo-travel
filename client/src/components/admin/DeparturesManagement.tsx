@@ -1,4 +1,3 @@
-import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -18,7 +17,9 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
-import { Calendar, Edit, Loader2, Plus, Trash2, Users } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Calendar, Bot, CheckCircle2, Edit, Loader2, Plus, Trash2, Users } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -67,6 +68,55 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
 
   const utils = trpc.useUtils();
   const { data: departures, isLoading } = trpc.departures.listByTour.useQuery({ tourId });
+
+  // AI Extracted Departures state
+  const [isAiImportDialogOpen, setIsAiImportDialogOpen] = useState(false);
+  const [selectedExtractedDates, setSelectedExtractedDates] = useState<Set<string>>(new Set());
+  const [editedPrices, setEditedPrices] = useState<Record<string, { adultPrice?: number; maxParticipants?: number }>>({});
+
+  // Query extracted departures
+  const { data: extractedData, isLoading: isExtractedLoading } =
+    trpc.tours.getExtractedDepartures.useQuery(
+      { tourId },
+      { enabled: isAiImportDialogOpen }
+    );
+
+  // Confirm extracted departures mutation
+  const confirmExtractedMutation = trpc.tours.confirmExtractedDepartures.useMutation({
+    onSuccess: (result) => {
+      utils.departures.listByTour.invalidate({ tourId });
+      setIsAiImportDialogOpen(false);
+      setSelectedExtractedDates(new Set());
+      setEditedPrices({});
+      toast.success(result.message);
+    },
+    onError: (error) => {
+      toast.error(`確認失敗：${error.message}`);
+    },
+  });
+
+  const handleAiImportConfirm = () => {
+    if (!extractedData?.extractedDepartures?.departureDates) return;
+    const pricing = extractedData.extractedDepartures.pricing || {};
+    const capacity = extractedData.extractedDepartures.capacity || {};
+    const selectedDates = extractedData.extractedDepartures.departureDates
+      .filter((d: any) => selectedExtractedDates.has(d.date))
+      .map((d: any) => ({
+        date: d.date,
+        status: 'available' as const,
+        adultPrice: editedPrices[d.date]?.adultPrice ?? pricing.adultPrice ?? d.price,
+        childWithBedPrice: pricing.childWithBedPrice,
+        childNoBedPrice: pricing.childNoBedPrice,
+        infantPrice: pricing.infantPrice,
+        maxParticipants: editedPrices[d.date]?.maxParticipants ?? capacity.maxParticipants,
+        notes: d.notes,
+      }));
+    if (selectedDates.length === 0) {
+      toast.error('請至少勾選一個出發日期');
+      return;
+    }
+    confirmExtractedMutation.mutate({ tourId, selectedDates, clearExtracted: true });
+  };
 
   const createMutation = trpc.departures.create.useMutation({
     onSuccess: () => {
@@ -306,8 +356,16 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
 
   return (
     <div className="space-y-4">
-      {/* Header - title shown in parent Dialog, only show action button */}
-      <div className="flex items-center justify-end">
+      {/* Header - title shown in parent Dialog, only show action buttons */}
+      <div className="flex items-center justify-end gap-2">
+        <Button
+          variant="outline"
+          onClick={() => setIsAiImportDialogOpen(true)}
+          className="border-gray-300 h-8 text-xs px-3 gap-1.5"
+        >
+          <Bot className="w-3.5 h-3.5" />
+          AI 批量匯入
+        </Button>
         <Button
           onClick={() => { resetForm(); setIsCreateDialogOpen(true); }}
           className="bg-black text-white hover:bg-gray-800 h-8 text-xs px-3"
@@ -434,6 +492,156 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
             <Button onClick={handleUpdate} disabled={updateMutation.isPending} className="bg-black text-white hover:bg-gray-800">
               {updateMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               {t('departuresTab.update')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* AI Extracted Departures Import Dialog */}
+      <Dialog open={isAiImportDialogOpen} onOpenChange={setIsAiImportDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Bot className="w-5 h-5" />
+              AI 抽取出發日期預覽
+            </DialogTitle>
+            <DialogDescription className="text-xs text-gray-500">
+              以下是 AI 從供應商網站自動抽取的出發日期與價格資訊。請勾選要建立的日期，確認後將自動新增至出發日期管理。
+            </DialogDescription>
+          </DialogHeader>
+
+          {isExtractedLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+              <span className="ml-2 text-sm text-gray-500">載入 AI 抽取結果...</span>
+            </div>
+          ) : !extractedData?.extractedDepartures ? (
+            <div className="py-12 text-center">
+              <Bot className="w-12 h-12 mx-auto mb-3 text-gray-200" />
+              <p className="text-sm font-medium text-gray-600">尚無 AI 抽取資料</p>
+              <p className="text-xs text-gray-400 mt-1">請先使用「AI 自動生成」功能（URL 或 PDF+URL 模式）生成行程，系統將自動抽取出發日期。</p>
+            </div>
+          ) : (
+            <div className="space-y-4 py-2">
+              {/* Pricing Summary */}
+              {extractedData.extractedDepartures.pricing && (
+                <div className="bg-gray-50 border border-gray-200 p-3 text-xs space-y-1">
+                  <p className="font-semibold text-gray-700 mb-1.5">AI 抽取價格摘要</p>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-gray-600">
+                    {extractedData.extractedDepartures.pricing.adultPrice && (
+                      <span>成人：NT$ {extractedData.extractedDepartures.pricing.adultPrice.toLocaleString()}</span>
+                    )}
+                    {extractedData.extractedDepartures.pricing.childWithBedPrice && (
+                      <span>兒童含床：NT$ {extractedData.extractedDepartures.pricing.childWithBedPrice.toLocaleString()}</span>
+                    )}
+                    {extractedData.extractedDepartures.pricing.childNoBedPrice && (
+                      <span>兒童不含床：NT$ {extractedData.extractedDepartures.pricing.childNoBedPrice.toLocaleString()}</span>
+                    )}
+                    {extractedData.extractedDepartures.pricing.infantPrice && (
+                      <span>嬰兒：NT$ {extractedData.extractedDepartures.pricing.infantPrice.toLocaleString()}</span>
+                    )}
+                    {extractedData.extractedDepartures.capacity?.maxParticipants && (
+                      <span>最多人數：{extractedData.extractedDepartures.capacity.maxParticipants} 人</span>
+                    )}
+                    {extractedData.extractedDepartures.pricing.priceNote && (
+                      <span className="col-span-2 text-gray-500">{extractedData.extractedDepartures.pricing.priceNote}</span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Select All */}
+              {extractedData.extractedDepartures.departureDates && extractedData.extractedDepartures.departureDates.length > 0 && (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="select-all"
+                      checked={selectedExtractedDates.size === extractedData.extractedDepartures.departureDates.length}
+                      onCheckedChange={(checked) => {
+                        if (checked) {
+                          setSelectedExtractedDates(new Set(extractedData.extractedDepartures.departureDates.map((d: any) => d.date)));
+                        } else {
+                          setSelectedExtractedDates(new Set());
+                        }
+                      }}
+                    />
+                    <label htmlFor="select-all" className="text-xs font-medium text-gray-700 cursor-pointer">
+                      全選（共 {extractedData.extractedDepartures.departureDates.length} 個日期）
+                    </label>
+                  </div>
+                  <span className="text-xs text-gray-500">已選 {selectedExtractedDates.size} 個</span>
+                </div>
+              )}
+
+              {/* Dates List */}
+              <div className="border border-gray-200 overflow-hidden divide-y divide-gray-100">
+                {extractedData.extractedDepartures.departureDates?.map((dep: any, idx: number) => (
+                  <div key={dep.date} className={`flex items-center gap-3 px-3 py-2.5 ${selectedExtractedDates.has(dep.date) ? 'bg-blue-50' : 'bg-white'}`}>
+                    <Checkbox
+                      id={`dep-${idx}`}
+                      checked={selectedExtractedDates.has(dep.date)}
+                      onCheckedChange={(checked) => {
+                        const next = new Set(selectedExtractedDates);
+                        if (checked) next.add(dep.date); else next.delete(dep.date);
+                        setSelectedExtractedDates(next);
+                      }}
+                    />
+                    <label htmlFor={`dep-${idx}`} className="flex-1 cursor-pointer">
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-semibold text-gray-900">
+                          {dep.date ? (() => { try { return format(new Date(dep.date), 'yyyy/MM/dd'); } catch { return dep.date; } })() : '日期未知'}
+                        </span>
+                        {dep.status && (
+                          <span className={`text-xs px-1.5 py-0.5 font-medium ${
+                            dep.status === 'available' ? 'bg-green-100 text-green-700' :
+                            dep.status === 'soldout' ? 'bg-red-100 text-red-700' :
+                            'bg-gray-100 text-gray-600'
+                          }`}>{dep.status === 'available' ? '可報名' : dep.status === 'soldout' ? '已額滿' : dep.status}</span>
+                        )}
+                        {dep.price && (
+                          <span className="text-xs text-gray-500">NT$ {dep.price.toLocaleString()}</span>
+                        )}
+                      </div>
+                    </label>
+                    {/* Inline price edit */}
+                    {selectedExtractedDates.has(dep.date) && (
+                      <div className="flex items-center gap-1.5">
+                        <Input
+                          type="number"
+                          placeholder="成人價"
+                          value={editedPrices[dep.date]?.adultPrice ?? extractedData.extractedDepartures.pricing?.adultPrice ?? dep.price ?? ''}
+                          onChange={(e) => setEditedPrices(prev => ({ ...prev, [dep.date]: { ...prev[dep.date], adultPrice: Number(e.target.value) } }))}
+                          className="w-24 h-7 text-xs border-gray-300"
+                        />
+                        <Input
+                          type="number"
+                          placeholder="名額"
+                          value={editedPrices[dep.date]?.maxParticipants ?? extractedData.extractedDepartures.capacity?.maxParticipants ?? ''}
+                          onChange={(e) => setEditedPrices(prev => ({ ...prev, [dep.date]: { ...prev[dep.date], maxParticipants: Number(e.target.value) } }))}
+                          className="w-16 h-7 text-xs border-gray-300"
+                        />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAiImportDialogOpen(false)} className="border-gray-300">
+              取消
+            </Button>
+            <Button
+              onClick={handleAiImportConfirm}
+              disabled={confirmExtractedMutation.isPending || selectedExtractedDates.size === 0 || !extractedData?.extractedDepartures}
+              className="bg-black text-white hover:bg-gray-800"
+            >
+              {confirmExtractedMutation.isPending ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />建立中...</>
+              ) : (
+                <><CheckCircle2 className="w-4 h-4 mr-2" />確認建立 {selectedExtractedDates.size} 筆出發日期</>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

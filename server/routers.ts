@@ -1204,6 +1204,139 @@ export const appRouter = router({
           .slice(0, input.limit);
         return scored.length > 0 ? scored : (allTours as any[]).slice(0, input.limit);
       }),
+
+    // Admin: Get extracted departures for a tour (DateExtractor result pending confirmation)
+    getExtractedDepartures: adminProcedure
+      .input(z.object({ tourId: z.number() }))
+      .query(async ({ input }) => {
+        const { tours: toursTable } = await import('../drizzle/schema');
+        const { eq } = await import('drizzle-orm');
+        const drizzleDb = await db.getDb();
+        if (!drizzleDb) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '資料庫不可用' });
+        const [tour] = await drizzleDb.select({
+          id: toursTable.id,
+          title: toursTable.title,
+          extractedDepartures: toursTable.extractedDepartures,
+        }).from(toursTable).where(eq(toursTable.id, input.tourId));
+        if (!tour) throw new TRPCError({ code: 'NOT_FOUND', message: '行程不存在' });
+        return {
+          tourId: tour.id,
+          title: tour.title,
+          extractedDepartures: tour.extractedDepartures ? JSON.parse(tour.extractedDepartures) : null,
+        };
+      }),
+
+    // Admin: Confirm extracted departures and create actual departure records
+    confirmExtractedDepartures: adminProcedure
+      .input(z.object({
+        tourId: z.number(),
+        selectedDates: z.array(z.object({
+          date: z.string(), // ISO date string
+          status: z.string().optional().default('available'),
+          adultPrice: z.number().optional(),
+          childWithBedPrice: z.number().optional(),
+          childNoBedPrice: z.number().optional(),
+          infantPrice: z.number().optional(),
+          maxParticipants: z.number().optional(),
+          minParticipants: z.number().optional(),
+          notes: z.string().optional(),
+        })),
+        clearExtracted: z.boolean().optional().default(true), // Clear extractedDepartures after confirmation
+      }))
+      .mutation(async ({ input }) => {
+        const { tours: toursTable, tourDepartures: departuresTable } = await import('../drizzle/schema');
+        const { eq } = await import('drizzle-orm');
+        const drizzleDb = await db.getDb();
+        if (!drizzleDb) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '資料庫不可用' });
+        
+        // Verify tour exists
+        const [tour] = await drizzleDb.select({ id: toursTable.id, title: toursTable.title })
+          .from(toursTable).where(eq(toursTable.id, input.tourId));
+        if (!tour) throw new TRPCError({ code: 'NOT_FOUND', message: '行程不存在' });
+        
+        // Create departure records for each selected date
+        const created = [];
+        const errors = [];
+        
+        for (const dep of input.selectedDates) {
+          try {
+            const departureDate = new Date(dep.date);
+            if (isNaN(departureDate.getTime())) {
+              errors.push({ date: dep.date, error: '日期格式無效' });
+              continue;
+            }
+            // returnDate defaults to departureDate + 1 day if not specified
+            const returnDate = new Date(departureDate);
+            returnDate.setDate(returnDate.getDate() + 1);
+            
+            const result = await drizzleDb.insert(departuresTable).values([{
+              tourId: input.tourId,
+              departureDate,
+              returnDate,
+              status: ((dep.status === 'available' || dep.status === 'open') ? 'open' : dep.status === 'cancelled' ? 'cancelled' : 'open') as any,
+              adultPrice: dep.adultPrice || 0,
+              childPriceWithBed: dep.childWithBedPrice || null,
+              childPriceNoBed: dep.childNoBedPrice || null,
+              infantPrice: dep.infantPrice || null,
+              totalSlots: dep.maxParticipants || 30,
+              notes: dep.notes || null,
+            }]);
+            created.push({ date: dep.date, id: (result as any).insertId });
+          } catch (err: any) {
+            errors.push({ date: dep.date, error: err.message });
+          }
+        }
+        
+        // Clear extractedDepartures if requested
+        if (input.clearExtracted) {
+          await drizzleDb.update(toursTable)
+            .set({ extractedDepartures: null })
+            .where(eq(toursTable.id, input.tourId));
+        }
+        
+        return {
+          success: true,
+          created: created.length,
+          errors,
+          message: `已建立 ${created.length} 筆出發日期記錄${errors.length > 0 ? `，${errors.length} 筆失敗` : ''}`,
+        };
+      }),
+
+    // Admin: Save extracted departures from DateExtractor (called by tourGenerator)
+    saveExtractedDepartures: adminProcedure
+      .input(z.object({
+        tourId: z.number(),
+        extractedData: z.object({
+          departureDates: z.array(z.object({
+            date: z.string(),
+            status: z.string().optional(),
+            price: z.number().optional(),
+          })).optional(),
+          capacity: z.object({
+            maxParticipants: z.number().optional(),
+            minParticipants: z.number().optional(),
+          }).optional(),
+          pricing: z.object({
+            adultPrice: z.number().optional(),
+            childWithBedPrice: z.number().optional(),
+            childNoBedPrice: z.number().optional(),
+            infantPrice: z.number().optional(),
+            currency: z.string().optional(),
+            priceNote: z.string().optional(),
+          }).optional(),
+          productCode: z.string().optional(),
+        }),
+      }))
+      .mutation(async ({ input }) => {
+        const { tours: toursTable } = await import('../drizzle/schema');
+        const { eq } = await import('drizzle-orm');
+        const drizzleDb = await db.getDb();
+        if (!drizzleDb) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '資料庫不可用' });
+        await drizzleDb.update(toursTable)
+          .set({ extractedDepartures: JSON.stringify(input.extractedData) })
+          .where(eq(toursTable.id, input.tourId));
+        return { success: true };
+      }),
   }),
 
   // Booking management router
