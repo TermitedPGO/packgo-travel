@@ -63,9 +63,6 @@ export async function generateTourFromUrlInternal(
     
     const tourData = result.data;
     
-    // Image supplementation skipped - editors will manage images manually
-    console.log('[TourGenerator] Skipping image supplement - editors will manage images');
-    
     // Save to database
     await job.updateProgress({
       step: "saving",
@@ -128,6 +125,7 @@ export async function generateTourFromUrlInternal(
     
     // ── B3 Fix: Auto-supplement cover image via Unsplash (non-blocking) ──
     // Always supplement imageUrl (list thumbnail) regardless of heroImage (detail page banner)
+    console.log(`[TourGenerator] B3: Checking imageUrl - tourData.imageUrl=${(tourData as any).imageUrl}, destination=${tourData.destinationCity || tourData.destinationCountry}`);
     if (!(tourData as any).imageUrl) {
       const destination = tourData.destinationCity || tourData.destinationCountry || '';
       if (destination) {
@@ -155,6 +153,7 @@ export async function generateTourFromUrlInternal(
     
     // ── B4 Fix: Save extractedDepartures from DateExtractor (non-blocking) ──
     const _extractedMeta = (tourData as any).extractedTourMeta;
+    console.log(`[TourGenerator] B4: extractedTourMeta=${_extractedMeta ? JSON.stringify(_extractedMeta).substring(0,100) : 'null'}`);
     if (_extractedMeta && _extractedMeta.departureDates?.length > 0) {
       try {
         await updateTour(tour.id, {
