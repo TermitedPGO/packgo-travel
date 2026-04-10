@@ -24,7 +24,7 @@ import { trpc } from "@/lib/trpc";
 import DeparturesManagement from "./DeparturesManagement";
 import { GenerationProgressComponent } from "./GenerationProgress";
 import { TourEditDialog } from "./TourEditDialog";
-import { Calendar, ChevronDown, Copy, Edit, Eye, EyeOff, ExternalLink, FileUp, Loader2, MoreHorizontal, Plus, RefreshCw, Search, Sparkles, Star, Trash2, Upload } from "lucide-react";
+import { Calendar, ChevronDown, Copy, Edit, Eye, EyeOff, ExternalLink, FileUp, Globe, Loader2, MoreHorizontal, Plus, RefreshCw, Search, Sparkles, Star, Trash2, Upload } from "lucide-react";
 import { LoadingRow } from "@/components/ui/spinner";
 import {
   DropdownMenu,
@@ -73,7 +73,8 @@ export default function ToursTab() {
   const [forceRegenerate, setForceRegenerate] = useState(false);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [pdfUploading, setPdfUploading] = useState(false);
-  const [inputMode, setInputMode] = useState<"url" | "pdf">("pdf");  // PDF is the recommended and default mode
+  const [inputMode, setInputMode] = useState<"url" | "pdf" | "pdf_url">("pdf");  // PDF is the recommended and default mode
+  const [supplementUrl, setSupplementUrl] = useState(""); // 供應商官網 URL（PDF+URL 模式）
   const [generatedTourData, setGeneratedTourData] = useState<any>(null);
   const [extractionStep, setExtractionStep] = useState<number>(0); // 0: 未開始, 1: 抓取網頁, 2: 解析內容, 3: AI 分析, 4: 預覽準備完成
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null); // 用於進度追蹤
@@ -317,18 +318,18 @@ export default function ToursTab() {
 
   const handleAutoGenerate = async () => {
     if (inputMode === "url") {
+      // 模式 1：URL only
       if (!autoGenerateUrl.trim()) {
         toast.error(t('toursTab.enterUrl'));
         return;
       }
-      
-      // 提交異步生成任務
       submitAsyncGenerationMutation.mutate({ 
         url: autoGenerateUrl,
         forceRegenerate,
+        isPdf: false,
       });
-    } else {
-      // PDF 模式
+    } else if (inputMode === "pdf") {
+      // 模式 2：PDF only
       if (!pdfFile) {
         toast.error(t('toursTab.selectPdf'));
         return;
@@ -338,7 +339,6 @@ export default function ToursTab() {
         setPdfUploading(true);
         toast.info(t('toursTab.uploadingPdf'));
         
-        // 上傳 PDF 到 S3
         const formData = new FormData();
         formData.append("pdf", pdfFile);
         
@@ -357,7 +357,6 @@ export default function ToursTab() {
         setPdfUploading(false);
         toast.success(t('toursTab.pdfUploadSuccess'));
         
-        // 使用 PDF URL 提交生成任務
         submitAsyncGenerationMutation.mutate({ 
           url: pdfUrl,
           forceRegenerate,
@@ -366,6 +365,51 @@ export default function ToursTab() {
       } catch (error: any) {
         setPdfUploading(false);
         console.error("[PDF Upload] Error:", error);
+        toast.error(t('toursTab.pdfUploadError').replace('{message}', error.message));
+      }
+    } else {
+      // 模式 3：PDF + URL
+      if (!pdfFile) {
+        toast.error(t('toursTab.selectPdf'));
+        return;
+      }
+      if (!supplementUrl.trim()) {
+        toast.error('請輸入供應商官網 URL');
+        return;
+      }
+      
+      try {
+        setPdfUploading(true);
+        toast.info(t('toursTab.uploadingPdf'));
+        
+        const formData = new FormData();
+        formData.append("pdf", pdfFile);
+        
+        const uploadResponse = await fetch("/api/pdf/upload", {
+          method: "POST",
+          body: formData,
+        });
+        
+        if (!uploadResponse.ok) {
+          throw new Error(t('toursTab.pdfUploadFailed'));
+        }
+        
+        const { url: pdfUrl } = await uploadResponse.json();
+        console.log("[PDF+URL] PDF uploaded to:", pdfUrl);
+        console.log("[PDF+URL] Supplement URL:", supplementUrl);
+        
+        setPdfUploading(false);
+        toast.success('📎 PDF 上傳成功，正在結合官網資料生成...');
+        
+        submitAsyncGenerationMutation.mutate({ 
+          url: pdfUrl,
+          forceRegenerate,
+          isPdf: true,
+          supplementUrl: supplementUrl.trim(),
+        });
+      } catch (error: any) {
+        setPdfUploading(false);
+        console.error("[PDF+URL] Error:", error);
         toast.error(t('toursTab.pdfUploadError').replace('{message}', error.message));
       }
     }
@@ -1044,8 +1088,77 @@ export default function ToursTab() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            {/* PDF 上傳 */}
-            
+            {/* 輸入模式選擇：三個模式切換 */}
+            <div className="flex gap-1 p-1 bg-gray-100 rounded-lg">
+              <button
+                type="button"
+                onClick={() => setInputMode("pdf")}
+                disabled={isGenerating || pdfUploading}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-md text-xs font-medium transition-all ${
+                  inputMode === "pdf"
+                    ? "bg-white text-purple-700 shadow-sm"
+                    : "text-gray-600 hover:text-gray-800"
+                }`}
+              >
+                <FileUp className="h-3.5 w-3.5" />
+                PDF 檔案
+              </button>
+              <button
+                type="button"
+                onClick={() => setInputMode("url")}
+                disabled={isGenerating || pdfUploading}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-md text-xs font-medium transition-all ${
+                  inputMode === "url"
+                    ? "bg-white text-blue-700 shadow-sm"
+                    : "text-gray-600 hover:text-gray-800"
+                }`}
+              >
+                <Globe className="h-3.5 w-3.5" />
+                官網 URL
+              </button>
+              <button
+                type="button"
+                onClick={() => setInputMode("pdf_url")}
+                disabled={isGenerating || pdfUploading}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-md text-xs font-medium transition-all ${
+                  inputMode === "pdf_url"
+                    ? "bg-white text-green-700 shadow-sm"
+                    : "text-gray-600 hover:text-gray-800"
+                }`}
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                PDF + URL
+              </button>
+            </div>
+
+            {/* 模式說明 */}
+            <div className={`text-xs rounded-lg px-3 py-2 ${
+              inputMode === "pdf" ? "bg-purple-50 text-purple-700" :
+              inputMode === "url" ? "bg-blue-50 text-blue-700" :
+              "bg-green-50 text-green-700"
+            }`}>
+              {inputMode === "pdf" && "📌 上傳供應商提供的 PDF 行程表，AI 將自動解析內容"}
+              {inputMode === "url" && "🌐 輸入供應商官網的行程頁面 URL，AI 動態爬取 + Vision 抽取日期/價格"}
+              {inputMode === "pdf_url" && "✨ 同時上傳 PDF 並提供官網 URL，得到最完整的行程資料"}
+            </div>
+
+            {/* URL 輸入（URL 模式） */}
+            {inputMode === "url" && (
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">官網行程頁面 URL</Label>
+                <input
+                  type="url"
+                  value={autoGenerateUrl}
+                  onChange={(e) => setAutoGenerateUrl(e.target.value)}
+                  placeholder="https://travel.liontravel.com/detail?..."
+                  disabled={isGenerating}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+            )}
+
+            {/* PDF 上傳（PDF 模式 + PDF+URL 模式） */}
+            {(inputMode === "pdf" || inputMode === "pdf_url") && (
               <div className="space-y-2">
                 <Label>{t('toursTab.selectPdfFile')}</Label>
                 <div 
@@ -1099,6 +1212,25 @@ export default function ToursTab() {
                   </button>
                 )}
               </div>
+            )}
+
+            {/* 官網 URL 輸入（PDF+URL 模式） */}
+            {inputMode === "pdf_url" && (
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">
+                  官網行程頁面 URL
+                  <span className="ml-1.5 text-xs font-normal text-green-600">(用於 AI Vision 抽取日期/人數/價格)</span>
+                </Label>
+                <input
+                  type="url"
+                  value={supplementUrl}
+                  onChange={(e) => setSupplementUrl(e.target.value)}
+                  placeholder="https://travel.liontravel.com/detail?..."
+                  disabled={isGenerating || pdfUploading}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                />
+              </div>
+            )}
             
             {/* 強制重新生成選項 */}
             <div className="flex items-center space-x-2">
@@ -1151,7 +1283,11 @@ export default function ToursTab() {
             </Button>
             <Button
               onClick={handleAutoGenerate}
-              disabled={submitAsyncGenerationMutation.isPending || isGenerating || pdfUploading || (inputMode === "url" ? !autoGenerateUrl.trim() : !pdfFile)}
+              disabled={submitAsyncGenerationMutation.isPending || isGenerating || pdfUploading || (
+                inputMode === "url" ? !autoGenerateUrl.trim() :
+                inputMode === "pdf" ? !pdfFile :
+                /* pdf_url */ (!pdfFile || !supplementUrl.trim())
+              )}
               className="bg-purple-600 text-white hover:bg-purple-700 rounded-full"
             >
               {(submitAsyncGenerationMutation.isPending || isGenerating || pdfUploading) ? (

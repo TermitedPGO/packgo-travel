@@ -53,6 +53,8 @@ export type ProgressEvent = {
 // 預設的 Agent 階段配置
 export const DEFAULT_PHASES: Omit<AgentPhase, 'status' | 'progress'>[] = [
   { id: 'web_scraper', name: '網頁爬取', description: '從來源網站提取行程資訊' },
+  { id: 'dynamic_render', name: '動態渲染', description: '使用 Puppeteer 動態渲染網頁' },
+  { id: 'date_extractor', name: 'AI 日期抽取', description: 'AI Vision 分析截圖，抽取出發日期/人數/價格' },
   { id: 'content_analyzer', name: '內容分析', description: '分析並結構化行程資料' },
   { id: 'color_theme', name: '配色主題', description: '生成行程配色方案' },
   { id: 'image_prompt', name: '圖片提示', description: '生成圖片搜尋關鍵字' },
@@ -70,6 +72,8 @@ export const DEFAULT_PHASES: Omit<AgentPhase, 'status' | 'progress'>[] = [
 // 階段權重（用於計算整體進度）
 const PHASE_WEIGHTS: Record<string, number> = {
   web_scraper: 15,
+  dynamic_render: 8,
+  date_extractor: 7,
   content_analyzer: 10,
   color_theme: 5,
   image_prompt: 5,

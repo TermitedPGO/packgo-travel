@@ -855,31 +855,43 @@ export const appRouter = router({
       }),
 
 
-    // Submit async PDF tour generation job (admin only) - PDF only
+    // Submit async tour generation job (admin only)
+    // Supports three modes:
+    //   1. PDF only (isPdf=true, no supplementUrl)
+    //   2. URL only (isPdf=false, no supplementUrl)
+    //   3. PDF + URL (isPdf=true, supplementUrl provided)
     submitAsyncGeneration: adminProcedure
       .input(z.object({ 
-        url: z.string().url(), // PDF URL from S3 upload
+        url: z.string().url(), // PDF URL (S3) or tour page URL
         forceRegenerate: z.boolean().optional().default(false),
-        isPdf: z.boolean().default(true), // Always true - PDF only
+        isPdf: z.boolean().default(true), // true = PDF input, false = URL input
+        supplementUrl: z.string().url().optional(), // 供應商官網 URL（配合 PDF 使用）
       }))
       .mutation(async ({ ctx, input }) => {
         const { addTourGenerationJob } = await import("./queue");
         const requestId = `gen_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+        
+        const mode = !input.isPdf ? 'URL' : (input.supplementUrl ? 'PDF+URL' : 'PDF');
+        console.log(`[SubmitGeneration] Mode: ${mode}, URL: ${input.url.slice(0, 80)}`);
+        if (input.supplementUrl) {
+          console.log(`[SubmitGeneration] Supplement URL: ${input.supplementUrl.slice(0, 80)}`);
+        }
         
         const job = await addTourGenerationJob({
           url: input.url,
           userId: ctx.user.id,
           requestId,
           forceRegenerate: input.forceRegenerate,
-          isPdf: true, // Always PDF
+          isPdf: input.isPdf,
+          supplementUrl: input.supplementUrl,
         });
 
-        console.log(`[SubmitPdfGeneration] Job submitted: ${job.id}`);
+        console.log(`[SubmitGeneration] Job submitted: ${job.id} (mode: ${mode})`);
 
         return {
           jobId: job.id!,
           requestId,
-          message: "行程生成任務已提交，請稍候...",
+          message: `行程生成任務已提交（${mode} 模式），請稍候...`,
         };
       }),
 

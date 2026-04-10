@@ -45,7 +45,8 @@ export const tourGenerationWorker = new Worker<TourGenerationJobData, TourGenera
         job.data.userId,
         job,
         job.data.forceRegenerate || false,
-        job.data.isPdf || false
+        job.data.isPdf || false,
+        job.data.supplementUrl
       );
 
       // Complete

@@ -195,7 +195,8 @@ export class MasterAgent {
     onProgress?: (step: string, percentage: number) => void,
     taskId?: string,
     forceRegenerate: boolean = false,
-    isPdf: boolean = false
+    isPdf: boolean = false,
+    supplementUrl?: string  // 供應商官網 URL（配合 PDF 使用，用於抽取日期/人數/價格）
   ): Promise<MasterAgentResult> {
     const startTime = Date.now();
     console.log("[MasterAgent] Starting OPTIMIZED tour generation...");
@@ -203,6 +204,7 @@ export class MasterAgent {
     console.log("[MasterAgent] User ID:", userId);
     console.log("[MasterAgent] Force Regenerate:", forceRegenerate);
     console.log("[MasterAgent] Is PDF:", isPdf);
+    console.log("[MasterAgent] Supplement URL:", supplementUrl || 'none');
     
     // Reset monitor for new execution
     this.monitor.reset();
@@ -352,9 +354,137 @@ export class MasterAgent {
         
         // Cache the PDF parse result (1 day TTL)
         await generationCache.cacheScrapeResult(url, rawData);
+        
+        // PDF + URL mode: also run DateExtractor on supplementUrl
+        if (supplementUrl) {
+          console.log(`[MasterAgent] 📎 PDF+URL mode: also scraping supplement URL: ${supplementUrl}`);
+          if (taskId) progressTracker.startPhase(taskId, 'dynamic_render');
+          onProgress?.("rendering_supplement", 22);
+          
+          try {
+            let supplementScrape: import('../services/dynamicScraperService').DynamicScrapeResult | Partial<import('../services/dynamicScraperService').DynamicScrapeResult>;
+            try {
+              const { scrapeDynamicPage } = await import('../services/dynamicScraperService');
+              supplementScrape = await scrapeDynamicPage(supplementUrl);
+            } catch {
+              const { scrapeStaticFallback } = await import('../services/dynamicScraperService');
+              supplementScrape = await scrapeStaticFallback(supplementUrl);
+            }
+            
+            if (taskId) progressTracker.completePhase(taskId, 'dynamic_render');
+            if (taskId) progressTracker.startPhase(taskId, 'date_extractor');
+            onProgress?.("extracting_dates", 25);
+            
+            const { extractTourMeta } = await import('../agents/dateExtractorAgent');
+            const supplementMeta = await extractTourMeta(
+              supplementScrape.screenshots || { fullPage: Buffer.alloc(0) },
+              supplementScrape.rawText || '',
+              supplementUrl
+            );
+            
+            // Merge supplement data into rawData
+            if (supplementMeta.departureDates.length > 0) {
+              (rawData as any).departureDates = supplementMeta.departureDates;
+            }
+            if (supplementMeta.capacity.maxParticipants > 0) {
+              (rawData as any).maxParticipants = supplementMeta.capacity.maxParticipants;
+            }
+            if (supplementMeta.pricing.adultPrice > 0 && !rawData.pricing?.price) {
+              rawData.pricing = { ...rawData.pricing, price: supplementMeta.pricing.adultPrice };
+            }
+            (rawData as any).extractedTourMeta = supplementMeta;
+            
+            console.log(`[MasterAgent] ✓ Supplement URL DateExtractor: ${supplementMeta.departureDates.length} dates merged`);
+            if (taskId) progressTracker.completePhase(taskId, 'date_extractor');
+          } catch (suppErr) {
+            console.warn('[MasterAgent] Supplement URL processing failed (non-fatal):', suppErr);
+            if (taskId) {
+              progressTracker.completePhase(taskId, 'dynamic_render');
+              progressTracker.completePhase(taskId, 'date_extractor');
+            }
+          }
+        }
       } else {
-        // URL scraping removed - only PDF input is supported
-        throw new Error("URL 爬蟲功能已移除，請使用 PDF 上傳");
+        // URL mode: use DynamicScraperService (Puppeteer)
+        console.log("[MasterAgent] 🌐 URL mode: dynamic scraping with Puppeteer...");
+        if (taskId) progressTracker.startPhase(taskId, 'dynamic_render');
+        onProgress?.("rendering_page", 10);
+        
+        let scrapeResult: import('../services/dynamicScraperService').DynamicScrapeResult | Partial<import('../services/dynamicScraperService').DynamicScrapeResult>;
+        try {
+          const { scrapeDynamicPage } = await import('../services/dynamicScraperService');
+          scrapeResult = await scrapeDynamicPage(url);
+          console.log(`[MasterAgent] ✓ Dynamic scrape completed: ${scrapeResult.renderedHtml?.length || 0} chars HTML, ${scrapeResult.rawText?.length || 0} chars text`);
+        } catch (scrapeErr) {
+          console.warn('[MasterAgent] Puppeteer scrape failed, falling back to static HTTP:', scrapeErr);
+          const { scrapeStaticFallback } = await import('../services/dynamicScraperService');
+          scrapeResult = await scrapeStaticFallback(url);
+        }
+        
+        if (taskId) progressTracker.completePhase(taskId, 'dynamic_render');
+        
+        // Phase 1.5: DateExtractorAgent (AI Vision) - 並行執行
+        if (taskId) progressTracker.startPhase(taskId, 'date_extractor');
+        onProgress?.("extracting_dates", 15);
+        
+        let extractedTourMeta: import('../agents/dateExtractorAgent').ExtractedTourMeta | null = null;
+        try {
+          const { extractTourMeta } = await import('../agents/dateExtractorAgent');
+          extractedTourMeta = await extractTourMeta(
+            scrapeResult.screenshots || { fullPage: Buffer.alloc(0) },
+            scrapeResult.rawText || '',
+            url
+          );
+          console.log(`[MasterAgent] ✓ DateExtractor: ${extractedTourMeta.departureDates.length} dates, maxParticipants: ${extractedTourMeta.capacity.maxParticipants}, adultPrice: ${extractedTourMeta.pricing.adultPrice}`);
+        } catch (extractErr) {
+          console.warn('[MasterAgent] DateExtractorAgent failed (non-fatal):', extractErr);
+        }
+        
+        if (taskId) progressTracker.completePhase(taskId, 'date_extractor');
+        
+        // Convert scraped HTML to rawData format compatible with ContentAnalyzerAgent
+        const urlRawData = {
+          basicInfo: {
+            title: scrapeResult.pageTitle || '',
+            subtitle: '',
+            description: '',
+            productCode: extractedTourMeta?.productCode || '',
+          },
+          location: {
+            destinationCountry: '',
+            destinationCity: '',
+          },
+          duration: { days: 0, nights: 0 },
+          pricing: {
+            price: extractedTourMeta?.pricing.adultPrice || 0,
+            basePrice: extractedTourMeta?.pricing.adultPrice || 0,
+            currency: extractedTourMeta?.pricing.currency || 'TWD',
+            priceNote: extractedTourMeta?.pricing.priceNote || '',
+          },
+          highlights: [],
+          dailyItinerary: [],
+          includes: [],
+          excludes: [],
+          accommodation: [],
+          hotels: [],
+          meals: [],
+          flights: [],
+          notices: [],
+          images: [],
+          rawContent: scrapeResult.rawText || '',
+          renderedHtml: scrapeResult.renderedHtml || '',
+          sourceUrl: url,
+          isPdfSource: false,
+          // 注入 DateExtractor 結果
+          extractedTourMeta: extractedTourMeta,
+          maxParticipants: extractedTourMeta?.capacity.maxParticipants || 0,
+          departureDates: extractedTourMeta?.departureDates || [],
+        };
+        
+        rawData = urlRawData;
+        
+        // Cache the scrape result
+        await generationCache.cacheScrapeResult(url, rawData);
       }
       
       if (taskId) progressTracker.completePhase(taskId, 'web_scraper');

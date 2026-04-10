@@ -10,6 +10,7 @@ export interface TourGenerationJobData {
   requestId: string; // Unique identifier for tracking
   forceRegenerate?: boolean; // If true, ignore cache and regenerate
   isPdf?: boolean; // If true, treat URL as PDF file URL
+  supplementUrl?: string; // 供應商官網 URL（配合 PDF 使用，用於抽取日期/人數/價格）
 }
 
 /**
