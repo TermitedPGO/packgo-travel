@@ -1558,12 +1558,11 @@ const PriceComparisonWidget = ({
   tourPrice: number;
   themeColor: ReturnType<typeof getThemeColorByDestination>;
 }) => {
+  const { t } = useLocale();
   const utils = trpc.useUtils();
   const trackClickMutation = trpc.affiliate.trackClick.useMutation();
   const { data: comparison, isLoading } = trpc.affiliate.getPriceComparison.useQuery({ tourId });
-
   if (isLoading || !comparison) return null;
-
   const selfBookTotal = comparison.totalSelfBook ?? 0;
   const savings = selfBookTotal > 0 ? selfBookTotal - tourPrice : 0;
   const savingsPct = selfBookTotal > 0 ? Math.round((savings / selfBookTotal) * 100) : 0;
@@ -1594,21 +1593,21 @@ const PriceComparisonWidget = ({
 
   return (
     <div className="mt-10 bg-gray-50 rounded-2xl border border-gray-200 p-6">
-      <h3 className="text-lg font-bold text-gray-900 mb-1">自助 vs. 跟團費用比較</h3>
-      <p className="text-sm text-gray-500 mb-5">以下為估算數據，實際費用依市場行情而定</p>
+      <h3 className="text-lg font-bold text-gray-900 mb-1">{t('tourDetail.priceComparison.title')}</h3>
+      <p className="text-sm text-gray-500 mb-5">{t('tourDetail.priceComparison.subtitle')}</p>
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
         {[
-          { label: "✈️ 機票（估算）", value: comparison.flightEstimate, onClick: handleFlightClick, clickLabel: "Trip.com 搜尋機票" },
-          { label: "🏨 飯店（估算）", value: comparison.hotelEstimate, onClick: handleHotelClick, clickLabel: "Trip.com 搜尋飯店" },
-          { label: "🎟 景點門票", value: comparison.activityEstimate, onClick: null, clickLabel: null },
-          { label: "🍜 餐飲", value: comparison.mealEstimate, onClick: null, clickLabel: null },
-          { label: "🚌 當地交通", value: comparison.transportEstimate, onClick: null, clickLabel: null },
-          { label: "📦 其他費用", value: comparison.otherEstimate, onClick: null, clickLabel: null },
+          { label: t('tourDetail.priceComparison.flightEstimate'), value: comparison.flightEstimate, onClick: handleFlightClick, clickLabel: t('tourDetail.priceComparison.searchFlights') },
+          { label: t('tourDetail.priceComparison.hotelEstimate'), value: comparison.hotelEstimate, onClick: handleHotelClick, clickLabel: t('tourDetail.priceComparison.searchHotels') },
+          { label: t('tourDetail.priceComparison.activityEstimate'), value: comparison.activityEstimate, onClick: null, clickLabel: null },
+          { label: t('tourDetail.priceComparison.mealEstimate'), value: comparison.mealEstimate, onClick: null, clickLabel: null },
+          { label: t('tourDetail.priceComparison.transportEstimate'), value: comparison.transportEstimate, onClick: null, clickLabel: null },
+          { label: t('tourDetail.priceComparison.otherEstimate'), value: comparison.otherEstimate, onClick: null, clickLabel: null },
         ].map((item, i) => (
           <div key={i} className="bg-white rounded-xl border border-gray-100 p-4">
             <p className="text-xs text-gray-500 mb-1">{item.label}</p>
             <p className="text-base font-bold text-gray-900">
-              {item.value ? `NT$ ${item.value.toLocaleString()}` : "請洽詢"}
+              {item.value ? `NT$ ${item.value.toLocaleString()}` : t('tourDetail.priceComparison.inquire')}
             </p>
             {item.onClick && item.value && (
               <button
@@ -1623,29 +1622,29 @@ const PriceComparisonWidget = ({
       </div>
       <div className="flex flex-col sm:flex-row gap-4 items-center justify-between bg-white rounded-xl border border-gray-200 p-4">
         <div>
-          <p className="text-sm text-gray-500">自助旅遊估算總費用</p>
+          <p className="text-sm text-gray-500">{t('tourDetail.priceComparison.selfBookTotal')}</p>
           <p className="text-2xl font-bold text-gray-900">
-            {selfBookTotal > 0 ? `NT$ ${selfBookTotal.toLocaleString()}` : "請洽詢"}
+            {selfBookTotal > 0 ? `NT$ ${selfBookTotal.toLocaleString()}` : t('tourDetail.priceComparison.inquire')}
           </p>
         </div>
         <div className="text-center">
-          <p className="text-xs text-gray-400">vs.</p>
+          <p className="text-xs text-gray-400">{t('tourDetail.priceComparison.vs')}</p>
         </div>
         <div>
-          <p className="text-sm text-gray-500">PACK&GO 跟團費用</p>
+          <p className="text-sm text-gray-500">{t('tourDetail.priceComparison.packagePrice')}</p>
           <p className="text-2xl font-bold" style={{ color: themeColor.primary }}>
             NT$ {tourPrice.toLocaleString()}
           </p>
         </div>
         {savings > 0 && (
           <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-center">
-            <p className="text-xs text-green-700 font-medium">跟團省下</p>
+            <p className="text-xs text-green-700 font-medium">{t('tourDetail.priceComparison.savings')}</p>
             <p className="text-xl font-bold text-green-700">NT$ {savings.toLocaleString()}</p>
-            <p className="text-xs text-green-600">約省 {savingsPct}%</p>
+            <p className="text-xs text-green-600">{t('tourDetail.priceComparison.savingsPct').replace('{pct}', String(savingsPct))}</p>
           </div>
         )}
       </div>
-      <p className="text-xs text-gray-400 mt-3 text-center">資料來源：{comparison.flightSource || "Trip.com"} · {comparison.hotelSource || "Trip.com"} · 最後更新：{new Date(comparison.lastUpdated).toLocaleDateString('zh-TW')}</p>
+      <p className="text-xs text-gray-400 mt-3 text-center">{t('tourDetail.priceComparison.dataSource').replace('{flight}', comparison.flightSource || 'Trip.com').replace('{hotel}', comparison.hotelSource || 'Trip.com').replace('{date}', new Date(comparison.lastUpdated).toLocaleDateString())}</p>
     </div>
   );
 };
