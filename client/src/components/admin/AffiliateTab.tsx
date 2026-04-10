@@ -103,7 +103,7 @@ function ClickLog() {
               {clicks.map((click: any) => (
                 <TableRow key={click.id}>
                   <TableCell className="text-sm text-gray-600 whitespace-nowrap">
-                    {new Date(click.clickedAt).toLocaleString("zh-TW")}
+                    {new Date(click.createdAt).toLocaleString("zh-TW")}
                   </TableCell>
                   <TableCell>
                     <span className={`text-xs font-medium px-2 py-1 rounded-full ${
