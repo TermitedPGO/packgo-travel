@@ -2781,6 +2781,7 @@ export const zhTW = {
     checkUrlAndRetry: '請檢查網址是否正確並重試',
     saveTourSuccess: '行程已成功儲存！',
     enterUrl: '請輸入行程網址',
+    invalidUrl: '請輸入有效的 URL（需以 http:// 或 https:// 開頭）',
     selectPdf: '請選擇 PDF 檔案',
     uploadingPdf: '正在上傳 PDF 檔案...',
     pdfUploadFailed: 'PDF 上傳失敗',
@@ -3248,6 +3249,23 @@ export const zhTW = {
     loginRequired: '請先登入',
     loginToFavorite: '登入後即可收藏喜愛的行程',
     goToLogin: '前往登入',
+  },
+  // AI 出發日預覽確認
+  departurePreview: {
+    title: 'AI 抽取的出發日期',
+    extractedFrom: '資料來源',
+    extractedAt: '抽取時間',
+    noExtractedData: '此行程沒有 AI 抽取的出發日資料',
+    departureDate: '出發日期',
+    returnDate: '回程日期',
+    availableSpots: '團位',
+    adultPrice: '成人價',
+    childPrice: '兒童價',
+    infantPrice: '嬰兒價',
+    selectAll: '全選',
+    deselectAll: '取消全選',
+    confirmCreate: '確認建立',
+    departuresCreated: '成功建立 {count} 筆出發日',
   },
   // 圖片裁切工具
   imageCropper: {

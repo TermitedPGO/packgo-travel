@@ -22,6 +22,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
 import DeparturesManagement from "./DeparturesManagement";
+import DeparturePreview from "./DeparturePreview";
 import { GenerationProgressComponent } from "./GenerationProgress";
 import { TourEditDialog } from "./TourEditDialog";
 import { Calendar, ChevronDown, Copy, Edit, Eye, EyeOff, ExternalLink, FileUp, Globe, Loader2, MoreHorizontal, Plus, RefreshCw, Search, Sparkles, Star, Trash2, Upload } from "lucide-react";
@@ -69,6 +70,8 @@ export default function ToursTab() {
   const [selectedTourForEdit, setSelectedTourForEdit] = useState<any>(null);
   const [isDeparturesDialogOpen, setIsDeparturesDialogOpen] = useState(false);
   const [selectedTourForDepartures, setSelectedTourForDepartures] = useState<{id: number, title: string} | null>(null);
+  const [isAiDeparturePreviewOpen, setIsAiDeparturePreviewOpen] = useState(false);
+  const [selectedTourForAiPreview, setSelectedTourForAiPreview] = useState<{id: number, title: string} | null>(null);
   const [autoGenerateUrl, setAutoGenerateUrl] = useState("");
   const [forceRegenerate, setForceRegenerate] = useState(false);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
@@ -323,6 +326,14 @@ export default function ToursTab() {
         toast.error(t('toursTab.enterUrl'));
         return;
       }
+      // B6 fix: validate URL format
+      try {
+        const parsed = new URL(autoGenerateUrl.trim());
+        if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error();
+      } catch {
+        toast.error(t('toursTab.invalidUrl') || '請輸入有效的 URL（需以 http:// 或 https:// 開頭）');
+        return;
+      }
       submitAsyncGenerationMutation.mutate({ 
         url: autoGenerateUrl,
         forceRegenerate,
@@ -375,6 +386,14 @@ export default function ToursTab() {
       }
       if (!supplementUrl.trim()) {
         toast.error('請輸入供應商官網 URL');
+        return;
+      }
+      // B6 fix: validate supplementUrl format
+      try {
+        const parsed = new URL(supplementUrl.trim());
+        if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error();
+      } catch {
+        toast.error(t('toursTab.invalidUrl') || '請輸入有效的 URL（需以 http:// 或 https:// 開頭）');
         return;
       }
       
@@ -903,6 +922,19 @@ export default function ToursTab() {
                               <Calendar className="h-4 w-4 mr-2 text-gray-500" />
                               管理出發日期
                             </DropdownMenuItem>
+                            {/* AI 出發日預覽（只在有 extractedDepartures 時顯示） */}
+                            {(tour as any).extractedDepartures && (
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setSelectedTourForAiPreview({id: tour.id, title: tour.title});
+                                  setIsAiDeparturePreviewOpen(true);
+                                }}
+                                className="cursor-pointer text-teal-700 focus:text-teal-700 focus:bg-teal-50"
+                              >
+                                <Sparkles className="h-4 w-4 mr-2 text-teal-600" />
+                                AI 出發日預覽
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuSeparator />
                             {/* 複製 */}
                             <DropdownMenuItem
@@ -1323,6 +1355,22 @@ export default function ToursTab() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* AI Departure Preview Dialog */}
+      {selectedTourForAiPreview && (
+        <DeparturePreview
+          tourId={selectedTourForAiPreview.id}
+          tourTitle={selectedTourForAiPreview.title}
+          open={isAiDeparturePreviewOpen}
+          onOpenChange={(open) => {
+            setIsAiDeparturePreviewOpen(open);
+            if (!open) setSelectedTourForAiPreview(null);
+          }}
+          onConfirmed={() => {
+            utils.tours.list.invalidate();
+          }}
+        />
+      )}
 
       {/* Preview Generated Tour Dialog - Enhanced */}
       <Dialog open={isPreviewDialogOpen} onOpenChange={setIsPreviewDialogOpen}>

@@ -2774,6 +2774,7 @@ export const en = {
     checkUrlAndRetry: 'Please check the URL and try again',
     saveTourSuccess: 'Tour saved successfully!',
     enterUrl: 'Please enter tour URL',
+    invalidUrl: 'Please enter a valid URL (must start with http:// or https://)',
     selectPdf: 'Please select a PDF file',
     uploadingPdf: 'Uploading PDF file...',
     pdfUploadFailed: 'PDF upload failed',
@@ -3241,6 +3242,23 @@ export const en = {
     loginRequired: 'Please log in first',
     loginToFavorite: 'Log in to save your favorite tours',
     goToLogin: 'Go to Login',
+  },
+  // AI Departure Preview
+  departurePreview: {
+    title: 'AI Extracted Departures',
+    extractedFrom: 'Data Source',
+    extractedAt: 'Extracted At',
+    noExtractedData: 'No AI extracted departure data for this tour',
+    departureDate: 'Departure Date',
+    returnDate: 'Return Date',
+    availableSpots: 'Spots',
+    adultPrice: 'Adult Price',
+    childPrice: 'Child Price',
+    infantPrice: 'Infant Price',
+    selectAll: 'Select All',
+    deselectAll: 'Deselect All',
+    confirmCreate: 'Confirm Create',
+    departuresCreated: 'Successfully created {count} departures',
   },
   // Image Cropper
   imageCropper: {

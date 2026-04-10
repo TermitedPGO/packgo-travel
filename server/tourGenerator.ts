@@ -127,7 +127,8 @@ export async function generateTourFromUrlInternal(
     console.log("[TourGenerator] Tour saved to database with ID:", tour.id);
     
     // ── B3 Fix: Auto-supplement cover image via Unsplash (non-blocking) ──
-    if (!tourData.heroImage) {
+    // Always supplement imageUrl (list thumbnail) regardless of heroImage (detail page banner)
+    if (!(tourData as any).imageUrl) {
       const destination = tourData.destinationCity || tourData.destinationCountry || '';
       if (destination) {
         (async () => {
