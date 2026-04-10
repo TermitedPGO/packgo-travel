@@ -4,10 +4,9 @@ import {
   TourGenerationResult,
 } from "./queue";
 import { MasterAgent } from "./agents/masterAgent";
-import { createTour, saveCalibrationResult } from "./db";
+import { createTour, saveCalibrationResult, updateTour } from "./db";
 import { translateTour } from "./translation";
-// Image supplementation removed for speed optimization
-// import { supplementImages } from "./services/unsplashService";
+import { searchUnsplashPhotos } from "./services/unsplashService";
 
 /**
  * Internal tour generation function called by worker
@@ -126,6 +125,45 @@ export async function generateTourFromUrlInternal(
     });
     
     console.log("[TourGenerator] Tour saved to database with ID:", tour.id);
+    
+    // ── B3 Fix: Auto-supplement cover image via Unsplash (non-blocking) ──
+    if (!tourData.heroImage) {
+      const destination = tourData.destinationCity || tourData.destinationCountry || '';
+      if (destination) {
+        (async () => {
+          try {
+            // Try English keyword first, fallback to destination name
+            const englishKeywords: Record<string, string> = {
+              '英國': 'United Kingdom London', '愛爾蘭': 'Ireland landscape', '法國': 'France Paris',
+              '義大利': 'Italy Rome', '日本': 'Japan travel', '韓國': 'Korea Seoul',
+              '泰國': 'Thailand travel', '越南': 'Vietnam travel', '帛琉': 'Palau ocean',
+              '台灣': 'Taiwan travel', '美國': 'USA travel', '德國': 'Germany travel',
+            };
+            const searchQuery = englishKeywords[destination] || destination + ' travel landscape';
+            const images = await searchUnsplashPhotos(searchQuery, 1);
+            if (images.length > 0) {
+              await updateTour(tour.id, { imageUrl: images[0] });
+              console.log(`[TourGenerator] ✓ Auto-supplemented cover image for tour ${tour.id}: ${images[0].substring(0, 60)}...`);
+            }
+          } catch (imgErr) {
+            console.warn('[TourGenerator] Cover image supplement failed (non-fatal):', imgErr);
+          }
+        })();
+      }
+    }
+    
+    // ── B4 Fix: Save extractedDepartures from DateExtractor (non-blocking) ──
+    const _extractedMeta = (tourData as any).extractedTourMeta;
+    if (_extractedMeta && _extractedMeta.departureDates?.length > 0) {
+      try {
+        await updateTour(tour.id, {
+          extractedDepartures: JSON.stringify(_extractedMeta),
+        } as any);
+        console.log(`[TourGenerator] ✓ Saved extractedDepartures for tour ${tour.id}: ${_extractedMeta.departureDates.length} dates`);
+      } catch (depErr) {
+        console.warn('[TourGenerator] extractedDepartures save failed (non-fatal):', depErr);
+      }
+    }
     
     // Save calibration result to DB (non-blocking)
     if (result.calibrationReport) {

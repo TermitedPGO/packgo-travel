@@ -442,6 +442,52 @@ export class MasterAgent {
         
         if (taskId) progressTracker.completePhase(taskId, 'date_extractor');
         
+        // ── Quick parse: extract location & duration from pageTitle + rawContent ──
+        const _pageTitle = scrapeResult.pageTitle || '';
+        const _rawText = scrapeResult.rawText || '';
+        
+        // Extract duration: look for patterns like "13日", "13天", "13-day"
+        let _parsedDays = 0;
+        let _parsedNights = 0;
+        const _durationMatch = (_pageTitle + ' ' + _rawText.substring(0, 500)).match(/(\d+)\s*(?:日|天|days?)/i);
+        if (_durationMatch) {
+          _parsedDays = parseInt(_durationMatch[1], 10);
+          _parsedNights = _parsedDays > 1 ? _parsedDays - 1 : 0;
+        }
+        // Note: ExtractedTourMeta doesn't have duration field, rely on regex parse only
+        
+        // Extract destination from pageTitle: remove common prefixes/suffixes
+        let _parsedCountry = '';
+        let _parsedCity = '';
+        // Try to extract destination from title patterns like "英國愛爾蘭經典13日"
+        const _destMatch = _pageTitle.match(/^[^｜|]+[｜|]([^｜|]+?)(?:經典|深度|精選|探索|之旅|\d+日|\d+天)/);
+        if (_destMatch) {
+          _parsedCity = _destMatch[1].trim();
+        } else {
+          // Fallback: take first segment before ｜ or first 10 chars
+          const _firstSeg = _pageTitle.split(/[｜|]/)[0]?.trim() || '';
+          if (_firstSeg.length > 0 && _firstSeg.length <= 20) {
+            _parsedCity = _firstSeg;
+          }
+        }
+        // Try to extract country from URL or content
+        const _countryPatterns: Record<string, string> = {
+          '英國': '英國', '愛爾蘭': '愛爾蘭', '法國': '法國', '義大利': '義大利', '日本': '日本',
+          '韓國': '韓國', '泰國': '泰國', '越南': '越南', '帛琉': '帛琉', '台灣': '台灣',
+          '美國': '美國', '德國': '德國', '西班牙': '西班牙', '希臘': '希臘', '土耳其': '土耳其',
+          'UK': '英國', 'Ireland': '愛爾蘭', 'Japan': '日本', 'Korea': '韓國', 'Thailand': '泰國',
+        };
+        for (const [keyword, country] of Object.entries(_countryPatterns)) {
+          if (_pageTitle.includes(keyword) || url.toLowerCase().includes(keyword.toLowerCase())) {
+            _parsedCountry = country;
+            if (!_parsedCity) _parsedCity = country;
+            break;
+          }
+        }
+        // Note: ExtractedTourMeta doesn't have location/duration fields, skip those overrides
+        
+        console.log(`[MasterAgent] Quick parse → days=${_parsedDays}, country="${_parsedCountry}", city="${_parsedCity}"`);
+        
         // Convert scraped HTML to rawData format compatible with ContentAnalyzerAgent
         const urlRawData = {
           basicInfo: {
@@ -451,10 +497,10 @@ export class MasterAgent {
             productCode: extractedTourMeta?.productCode || '',
           },
           location: {
-            destinationCountry: '',
-            destinationCity: '',
+            destinationCountry: _parsedCountry,
+            destinationCity: _parsedCity,
           },
-          duration: { days: 0, nights: 0 },
+          duration: { days: _parsedDays, nights: _parsedNights },
           pricing: {
             price: extractedTourMeta?.pricing.adultPrice || 0,
             basePrice: extractedTourMeta?.pricing.adultPrice || 0,
@@ -1104,6 +1150,9 @@ export class MasterAgent {
         // Metadata
         originalityScore: analyzedContent.originalityScore,
         sourceUrl: url,
+        
+        // DateExtractor results (for extractedDepartures saving in tourGenerator)
+        extractedTourMeta: (rawData as any).extractedTourMeta || null,
       };
       
       // ========================================================================
