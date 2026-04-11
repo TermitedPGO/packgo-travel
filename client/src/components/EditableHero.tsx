@@ -138,9 +138,17 @@ export default function EditableHero() {
   });
 
   // Use database content — only fall back to default if DB query completed with no data
-  const content: HeroContent = isHeroLoading
+  const rawContent: HeroContent = isHeroLoading
     ? defaultContent  // temporary while loading, but hidden by skeleton
     : (heroData?.content || defaultContent);
+
+  // B4 Fix: If DB hotKeywords has fewer than 3 items, use the default 7 keywords as fallback
+  const content: HeroContent = {
+    ...rawContent,
+    hotKeywords: (rawContent.hotKeywords && rawContent.hotKeywords.length >= 3)
+      ? rawContent.hotKeywords
+      : defaultContent.hotKeywords,
+  };
 
   useEffect(() => {
     if (heroData?.content) {
@@ -410,7 +418,7 @@ export default function EditableHero() {
         )}
 
         {/* Search Console */}
-        <div className="w-full max-w-5xl bg-white shadow-2xl animate-in slide-in-from-bottom-10 duration-700 delay-300 rounded-3xl overflow-hidden">
+        <div className="w-full max-w-5xl bg-white shadow-2xl animate-in slide-in-from-bottom-10 duration-700 delay-300 rounded-3xl">
           {/* Tabs */}
           <div className="flex w-full border-b border-gray-200 bg-gray-50 rounded-t-3xl">
             {searchTabs.map((tab) => (
