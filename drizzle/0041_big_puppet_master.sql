@@ -1,0 +1,1 @@
+ALTER TABLE `tourDepartures` MODIFY COLUMN `status` enum('open','full','cancelled','confirmed') NOT NULL DEFAULT 'open';

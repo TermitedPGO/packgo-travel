@@ -154,6 +154,22 @@ export const en = {
       hotKeywordsList: ['Hokkaido', 'Tokyo', 'Osaka', 'Europe', 'Turkey', 'Cruise', 'Skiing'],
       searchButton: 'Search',
       featureComingSoon: 'Coming soon, stay tuned!',
+      // Flight search
+      flightFrom: 'From',
+      flightFromPlaceholder: 'Enter departure city',
+      flightTo: 'To',
+      flightToPlaceholder: 'Enter destination city',
+      flightDate: 'Departure Date',
+      flightReturnDate: 'Return Date',
+      flightSearchButton: 'Search Flights',
+      toastSearchingFlight: 'Redirecting to Trip.com for flights...',
+      // Hotel search
+      hotelCity: 'City',
+      hotelCityPlaceholder: 'Enter city name',
+      hotelCheckIn: 'Check-in',
+      hotelCheckOut: 'Check-out',
+      hotelSearchButton: 'Search Hotels',
+      toastSearchingHotel: 'Redirecting to Trip.com for hotels...',
     },
     edit: {
       changeBackground: 'Change Background Image',

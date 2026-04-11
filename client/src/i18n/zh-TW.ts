@@ -154,6 +154,23 @@ export const zhTW = {
       hotKeywordsList: ['北海道', '東京', '大阪', '歐洲', '土耳其', '郵輪', '滑雪'],
       searchButton: '搜尋',
       featureComingSoon: '功能即將推出，敬請期待！',
+      // 機票搜尋
+      flightFrom: '出發地',
+      flightFromPlaceholder: '輸入出發城市',
+      flightTo: '目的地',
+      flightToPlaceholder: '輸入目的城市',
+      flightDate: '出發日期',
+      flightReturnDate: '回程日期',
+      flightSearchButton: '搜尋機票',
+      toastSearchingFlight: '正在前往 Trip.com 搜尋機票...',
+      // 訂房搜尋
+      hotelCity: '城市',
+      hotelCityPlaceholder: '輸入城市名稱',
+      hotelDate: '入住 / 退房',
+      hotelCheckIn: '入住日期',
+      hotelCheckOut: '退房日期',
+      hotelSearchButton: '搜尋飯店',
+      toastSearchingHotel: '正在前往 Trip.com 搜尋飯店...',
     },
     edit: {
       changeBackground: '更換背景圖片',
@@ -1364,28 +1381,7 @@ export const zhTW = {
       toastError: '無法開啟搜尋頁面，請稍後再試',
     },
   },
-  // 郵輪
-  cruises: {
-    title: '郵輪之旅',
-    subtitle: '奢華海上假期',
-    description: '體驗世界級郵輪旅遊，享受海上的極致奢華。',
-    search: {
-      destination: '航線目的地',
-      departurePort: '出發港口',
-      departureDate: '出發日期',
-      duration: '航程天數',
-      cruiseLine: '郵輪公司',
-      searchButton: '搜尋郵輪',
-    },
-    features: {
-      dining: '精緻餐飲',
-      entertainment: '娛樂設施',
-      excursions: '岸上觀光',
-      spa: 'SPA 療程',
-      casino: '賭場',
-      pool: '泳池',
-    },
-  },
+  // cruises block merged into cruise below
 
   // 快速詢問
   quickInquiry: {
@@ -2064,6 +2060,23 @@ export const zhTW = {
     title: '郵輪之旅',
     comingSoon: '即將推出，敬請期待',
     subtitle: '探索世界最美麗的海域，享受豪華郵輪上的頂級服務與精彩活動',
+    description: '體驗世界級郵輪旅遊，享受海上的極致奢華。',
+    search: {
+      destination: '航線目的地',
+      departurePort: '出發港口',
+      departureDate: '出發日期',
+      duration: '航程天數',
+      cruiseLine: '郵輪公司',
+      searchButton: '搜尋郵輪',
+    },
+    features: {
+      dining: '精緻餐飲',
+      entertainment: '娛樂設施',
+      excursions: '岸上觀光',
+      spa: 'SPA 療程',
+      casino: '賭場',
+      pool: '泳池',
+    },
     home: '首頁',
     searchPlaceholder: '搜尋郵輪行程...',
     totalCruises: '共 {count} 個郵輪行程',

@@ -121,6 +121,23 @@ const DeparturePriceCalendar = ({
   const { data: departures, isLoading } = trpc.departures.list.useQuery({ tourId });
   const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [selectedDeparture, setSelectedDeparture] = useState<number | null>(null);
+  const [hasAutoJumped, setHasAutoJumped] = useState(false);
+
+  // Auto-jump to the nearest upcoming departure month when data loads
+  useEffect(() => {
+    if (departures && departures.length > 0 && !hasAutoJumped) {
+      const now = new Date();
+      now.setHours(0, 0, 0, 0);
+      const futureDepartures = (departures as any[])
+        .filter((d) => new Date(d.departureDate) >= now && d.status !== 'cancelled')
+        .sort((a, b) => new Date(a.departureDate).getTime() - new Date(b.departureDate).getTime());
+      if (futureDepartures.length > 0) {
+        const nearest = new Date(futureDepartures[0].departureDate);
+        setSelectedMonth(new Date(nearest.getFullYear(), nearest.getMonth(), 1));
+      }
+      setHasAutoJumped(true);
+    }
+  }, [departures, hasAutoJumped]);
 
   // 獲取當月的出發日期
   const monthDepartures = useMemo(() => {

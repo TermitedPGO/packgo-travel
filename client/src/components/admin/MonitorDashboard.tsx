@@ -16,6 +16,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const trpcAny = trpc as any;
+
 // ── Types ────────────────────────────────────────────────────
 type MonitorLog = {
   id: number;
@@ -180,17 +183,17 @@ export default function MonitorDashboard() {
   const [logLimit, setLogLimit] = useState(50);
 
   // tRPC queries
-  const { data: stats, refetch: refetchStats } = trpc.tourMonitor.getStats.useQuery();
+  const { data: stats, refetch: refetchStats } = trpcAny.tourMonitor.getStats.useQuery();
   const {
     data: logs,
     isLoading: logsLoading,
     refetch: refetchLogs,
-  } = trpc.tourMonitor.getRecentLogs.useQuery({ limit: logLimit });
-  const { data: latestRun, refetch: refetchLatestRun } = trpc.tourMonitor.getLatestRun.useQuery();
+  } = trpcAny.tourMonitor.getRecentLogs.useQuery({ limit: logLimit });
+  const { data: latestRun, refetch: refetchLatestRun } = trpcAny.tourMonitor.getLatestRun.useQuery();
 
   // Trigger manual run
-  const triggerRun = trpc.tourMonitor.triggerRun.useMutation({
-    onSuccess: (data) => {
+  const triggerRun = trpcAny.tourMonitor.triggerRun.useMutation({
+    onSuccess: (data: { message: string }) => {
       toast.success(data.message);
       setTimeout(() => {
         refetchStats();
@@ -198,7 +201,7 @@ export default function MonitorDashboard() {
         refetchLatestRun();
       }, 3000);
     },
-    onError: (err) => {
+    onError: (err: { message: string }) => {
       toast.error(`觸發失敗：${err.message}`);
     },
   });
@@ -304,7 +307,7 @@ export default function MonitorDashboard() {
           </div>
         ) : (
           <div className="space-y-2">
-            {(logs as MonitorLog[]).map((log) => (
+            {(logs as unknown as MonitorLog[]).map((log) => (
               <LogRow key={log.id} log={log} />
             ))}
           </div>

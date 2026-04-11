@@ -240,7 +240,7 @@ export const tourDepartures = mysqlTable("tourDepartures", {
   singleRoomSupplement: int("singleRoomSupplement"), // Single room surcharge
   totalSlots: int("totalSlots").notNull(), // Total available slots
   bookedSlots: int("bookedSlots").default(0).notNull(), // Already booked slots
-  status: mysqlEnum("status", ["open", "full", "cancelled"]).default("open").notNull(),
+  status: mysqlEnum("status", ["open", "full", "cancelled", "confirmed"]).default("open").notNull(),
   currency: varchar("currency", { length: 3 }).default("TWD").notNull(),
   notes: text("notes"), // Special notes for this departure
   createdAt: timestamp("createdAt").defaultNow().notNull(),

@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { Calendar, MapPin, Search, Sparkles, Plane, Hotel, Ticket, Users, Lock, Pencil, X, Check, Upload, ImageIcon } from "lucide-react";
+import { Calendar, MapPin, Search, Sparkles, Plane, Hotel, Ticket, Users, Pencil, X, Check, Upload, ImageIcon } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { DateRangePicker } from "@/components/DateRangePicker";
@@ -77,6 +77,13 @@ export default function EditableHero() {
   const [departure, setDeparture] = useState("");
   const [destination, setDestination] = useState("");
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
+  // Flight search state
+  const [flightFrom, setFlightFrom] = useState("");
+  const [flightTo, setFlightTo] = useState("");
+  const [flightDateRange, setFlightDateRange] = useState<DateRange | undefined>(undefined);
+  // Hotel search state
+  const [hotelCity, setHotelCity] = useState("");
+  const [hotelDateRange, setHotelDateRange] = useState<DateRange | undefined>(undefined);
   const [, setLocation] = useLocation();
   const { t, language } = useLocale();
   
@@ -131,8 +138,23 @@ export default function EditableHero() {
     setLocation(`/search?destination=${encodeURIComponent(keyword)}`);
   };
 
-  const handleLockedTabClick = (tabName: string) => {
-    toast.info(t('hero.search.featureComingSoon'));
+  const handleFlightSearch = () => {
+    const params = new URLSearchParams();
+    if (flightFrom) params.set('dcity', flightFrom);
+    if (flightTo) params.set('acity', flightTo);
+    if (flightDateRange?.from) params.set('departDate', flightDateRange.from.toISOString().split('T')[0]);
+    if (flightDateRange?.to) params.set('returnDate', flightDateRange.to.toISOString().split('T')[0]);
+    toast.info(t('hero.search.redirectingToFlight') || '正在前往機票搜尋...');
+    window.open(`https://www.trip.com/flights/?${params.toString()}`, '_blank');
+  };
+
+  const handleHotelSearch = () => {
+    const params = new URLSearchParams();
+    if (hotelCity) params.set('city', hotelCity);
+    if (hotelDateRange?.from) params.set('checkIn', hotelDateRange.from.toISOString().split('T')[0]);
+    if (hotelDateRange?.to) params.set('checkOut', hotelDateRange.to.toISOString().split('T')[0]);
+    toast.info(t('hero.search.redirectingToHotel') || '正在前往訂房搜尋...');
+    window.open(`https://www.trip.com/hotels/?${params.toString()}`, '_blank');
   };
 
   const handleSaveContent = () => {
@@ -190,9 +212,9 @@ export default function EditableHero() {
 
   // 搜尋標籤配置
   const searchTabs = [
-    { id: "group", labelKey: "hero.search.tabs.groupTours", icon: <Users className="h-4 w-4" />, locked: false },
-    { id: "flight", labelKey: "hero.search.tabs.flights", icon: <Plane className="h-4 w-4" />, locked: true },
-    { id: "hotel", labelKey: "hero.search.tabs.hotels", icon: <Hotel className="h-4 w-4" />, locked: true },
+    { id: "group", labelKey: "hero.search.tabs.groupTours", icon: <Users className="h-4 w-4" /> },
+    { id: "flight", labelKey: "hero.search.tabs.flights", icon: <Plane className="h-4 w-4" /> },
+    { id: "hotel", labelKey: "hero.search.tabs.hotels", icon: <Hotel className="h-4 w-4" /> },
   ];
 
   // Show loading skeleton while hero data is being fetched
@@ -307,24 +329,15 @@ export default function EditableHero() {
             {searchTabs.map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => {
-                  if (tab.locked) {
-                    handleLockedTabClick(t(tab.labelKey));
-                  } else {
-                    setActiveTab(tab.id);
-                  }
-                }}
+                onClick={() => setActiveTab(tab.id)}
                 className={`flex-1 py-4 px-2 text-base font-medium transition-all relative flex items-center justify-center gap-2 ${
-                  tab.locked 
-                    ? "text-gray-400 cursor-not-allowed bg-gray-100" 
-                    : activeTab === tab.id 
-                      ? "text-primary bg-white border-t-2 border-t-primary" 
-                      : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+                  activeTab === tab.id 
+                    ? "text-primary bg-white border-t-2 border-t-primary" 
+                    : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
                 }`}
               >
                 {tab.icon}
                 {t(tab.labelKey)}
-                {tab.locked && <Lock className="h-3 w-3 ml-1" />}
               </button>
             ))}
           </div>
@@ -332,9 +345,10 @@ export default function EditableHero() {
           {/* Tab Content */}
           <div className="p-4 bg-white rounded-b-3xl">
             <div className="flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                {/* Use flexbox with equal basis for equal widths */}
+
+              {/* Group Tour Search */}
+              {activeTab === "group" && (
                 <div className="flex flex-col md:flex-row gap-4 items-end">
-                  {/* Departure Location - Changed to Autocomplete */}
                   <div className="w-full" style={{ flex: '1 1 0', minWidth: 0 }}>
                     <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.departure')}</label>
                     <DepartureAutocomplete 
@@ -344,8 +358,6 @@ export default function EditableHero() {
                       className="w-full [[&_input]:rounded-full_input]:rounded-lg [&_input]:bg-gray-50 [&_input]:border-gray-200 [&_input]:focus:ring-primary [&_input]:focus:border-primary [&_input]:h-12 [&_input]:w-full"
                     />
                   </div>
-
-                  {/* Keyword Input */}
                   <div className="w-full" style={{ flex: '1 1 0', minWidth: 0 }}>
                     <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.keyword')}</label>
                     <DestinationAutocomplete 
@@ -356,8 +368,6 @@ export default function EditableHero() {
                       className="w-full [[&_input]:rounded-full_input]:rounded-lg [&_input]:bg-gray-50 [&_input]:border-gray-200 [&_input]:focus:ring-primary [&_input]:focus:border-primary [&_input]:h-12 [&_input]:w-full"
                     />
                   </div>
-
-                  {/* Date Range Picker */}
                   <div className="w-full" style={{ flex: '1 1 0', minWidth: 0 }}>
                     <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.departureDate')}</label>
                     <DateRangePicker 
@@ -367,8 +377,6 @@ export default function EditableHero() {
                       className="h-12 rounded-lg w-full"
                     />
                   </div>
-
-                  {/* Search Button */}
                   <div className="w-full md:w-32 flex-shrink-0">
                     <Button 
                       onClick={handleSearch}
@@ -378,9 +386,94 @@ export default function EditableHero() {
                     </Button>
                   </div>
                 </div>
+              )}
 
+              {/* Flight Search */}
+              {activeTab === "flight" && (
+                <div className="flex flex-col md:flex-row gap-4 items-end">
+                  <div className="w-full" style={{ flex: '1 1 0', minWidth: 0 }}>
+                    <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.flightFrom') || '出發地'}</label>
+                    <div className="relative">
+                      <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <input
+                        type="text"
+                        value={flightFrom}
+                        onChange={(e) => setFlightFrom(e.target.value)}
+                        placeholder={t('hero.search.flightFromPlaceholder') || '輸入出發城市'}
+                        className="w-full h-12 pl-9 pr-3 border border-gray-200 rounded-lg bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+                      />
+                    </div>
+                  </div>
+                  <div className="w-full" style={{ flex: '1 1 0', minWidth: 0 }}>
+                    <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.flightTo') || '目的地'}</label>
+                    <div className="relative">
+                      <Plane className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <input
+                        type="text"
+                        value={flightTo}
+                        onChange={(e) => setFlightTo(e.target.value)}
+                        placeholder={t('hero.search.flightToPlaceholder') || '輸入目的城市'}
+                        className="w-full h-12 pl-9 pr-3 border border-gray-200 rounded-lg bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+                      />
+                    </div>
+                  </div>
+                  <div className="w-full" style={{ flex: '1 1 0', minWidth: 0 }}>
+                    <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.flightDate') || '出發日期'}</label>
+                    <DateRangePicker 
+                      value={flightDateRange}
+                      onChange={setFlightDateRange}
+                      placeholder={t('hero.search.selectDate')}
+                      className="h-12 rounded-lg w-full"
+                    />
+                  </div>
+                  <div className="w-full md:w-32 flex-shrink-0">
+                    <Button 
+                      onClick={handleFlightSearch}
+                      className="w-full h-12 bg-black hover:bg-gray-900 text-white rounded-lg font-bold shadow-md transition-all hover:shadow-lg"
+                    >
+                      {t('hero.search.searchButton')}
+                    </Button>
+                  </div>
+                </div>
+              )}
 
-                {/* Hot Keywords - Only show for group tours */}
+              {/* Hotel Search */}
+              {activeTab === "hotel" && (
+                <div className="flex flex-col md:flex-row gap-4 items-end">
+                  <div className="w-full" style={{ flex: '2 1 0', minWidth: 0 }}>
+                    <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.hotelCity') || '城市/目的地'}</label>
+                    <div className="relative">
+                      <Hotel className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <input
+                        type="text"
+                        value={hotelCity}
+                        onChange={(e) => setHotelCity(e.target.value)}
+                        placeholder={t('hero.search.hotelCityPlaceholder') || '輸入城市或目的地'}
+                        className="w-full h-12 pl-9 pr-3 border border-gray-200 rounded-lg bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+                      />
+                    </div>
+                  </div>
+                  <div className="w-full" style={{ flex: '2 1 0', minWidth: 0 }}>
+                    <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.hotelDate') || '入住 / 退房'}</label>
+                    <DateRangePicker 
+                      value={hotelDateRange}
+                      onChange={setHotelDateRange}
+                      placeholder={t('hero.search.selectDate')}
+                      className="h-12 rounded-lg w-full"
+                    />
+                  </div>
+                  <div className="w-full md:w-32 flex-shrink-0">
+                    <Button 
+                      onClick={handleHotelSearch}
+                      className="w-full h-12 bg-black hover:bg-gray-900 text-white rounded-lg font-bold shadow-md transition-all hover:shadow-lg"
+                    >
+                      {t('hero.search.searchButton')}
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Hot Keywords - Only show for group tours */}
                 {activeTab === "group" && (
                   <div className="flex items-center gap-2 text-sm text-gray-500 mt-2 pt-2 border-t border-gray-100">
                     <span className="font-medium text-primary">{t('hero.search.hotKeywords')}：</span>
