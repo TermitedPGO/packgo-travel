@@ -1,13 +1,16 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useLocale } from "@/contexts/LocaleContext";
 import { trackAffiliateClick } from "@/lib/analytics";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Link } from "wouter";
-import { Hotel, Star, Wifi, Car, Utensils, Dumbbell, Shield, Headphones, ArrowRight, MapPin, CheckCircle, Building2, Palmtree, Waves, Flame, ExternalLink, Search } from "lucide-react";
+import {
+  Hotel, Star, Wifi, Car, Utensils, Dumbbell, Shield, Headphones,
+  ArrowRight, MapPin, CheckCircle, Building2, Palmtree, Waves, Flame,
+  ExternalLink, Search, Users
+} from "lucide-react";
 import AITravelAdvisorDialog from "@/components/AITravelAdvisorDialog";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
@@ -24,8 +27,26 @@ export default function HotelBooking() {
   const [checkOut, setCheckOut] = useState("");
   const [isSearching, setIsSearching] = useState(false);
 
+  // Room & guest picker
+  const [rooms, setRooms] = useState(1);
+  const [hotelAdults, setHotelAdults] = useState(2);
+  const [hotelChildren, setHotelChildren] = useState(0);
+  const [showRoomPicker, setShowRoomPicker] = useState(false);
+  const roomPickerRef = useRef<HTMLDivElement>(null);
+
   const utils = trpc.useUtils();
   const trackClickMutation = trpc.affiliate.trackClick.useMutation();
+
+  // Close picker on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (roomPickerRef.current && !roomPickerRef.current.contains(e.target as Node)) {
+        setShowRoomPicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const openAdvisor = (msg: string) => {
     setAdvisorInitialMsg(msg);
@@ -40,6 +61,9 @@ export default function HotelBooking() {
         city: city || undefined,
         checkIn: checkIn || undefined,
         checkOut: checkOut || undefined,
+        rooms,
+        hotelAdults,
+        hotelChildren,
       });
       const url = result.url;
       await trackClickMutation.mutateAsync({
@@ -75,6 +99,8 @@ export default function HotelBooking() {
       openAdvisor(`${dest.country} ${dest.city}`);
     }
   };
+
+  const roomSummary = `${rooms} ${t('hero.search.hotel.room')}, ${hotelAdults + hotelChildren} ${t('hero.search.hotel.guests')}`;
 
   const features = [
     { icon: Star, title: t('hotelBooking.page.feature1Title'), desc: t('hotelBooking.page.feature1Desc') },
@@ -114,39 +140,115 @@ export default function HotelBooking() {
     <div className="min-h-screen flex flex-col bg-white">
       <Header />
 
-      {/* Hotel Search Card */}
+      {/* ─── Full-width Trip.com-style Hotel Search Card ─── */}
       <section className="py-10 bg-gray-50 border-b border-gray-200">
         <div className="container">
-          <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow-lg border border-gray-200 p-8">
-            <div className="flex items-center gap-3 mb-6">
+          <div className="max-w-5xl mx-auto bg-white rounded-3xl shadow-xl border border-gray-200 overflow-hidden">
+            {/* Card Header */}
+            <div className="flex items-center gap-3 px-8 pt-7 pb-4 border-b border-gray-100">
               <div className="w-10 h-10 bg-black rounded-xl flex items-center justify-center">
-                <Search className="h-5 w-5 text-white" />
+                <Hotel className="h-5 w-5 text-white" />
               </div>
               <div>
                 <h2 className="text-xl font-bold text-black">{t('hotelBooking.page.searchTitle')}</h2>
                 <p className="text-sm text-gray-500">{t('hotelBooking.page.searchSubtitle')}</p>
               </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-              <div>
-                <Label className="text-sm font-medium text-gray-700 mb-1.5 block">{t('hotelBooking.page.destinationLabel')}</Label>
-                <Input placeholder={t('hotelBooking.page.destinationPlaceholder')} value={city} onChange={e => setCity(e.target.value)} className="h-11" />
+
+            <div className="px-8 py-6 space-y-5">
+              {/* Row: Destination + Check-in + Check-out + Rooms/Guests + Search */}
+              <div className="flex flex-col md:flex-row gap-4 items-end">
+                {/* Destination */}
+                <div className="w-full" style={{ flex: '1.5 1 0', minWidth: 0 }}>
+                  <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hotelBooking.page.destinationLabel')}</label>
+                  <Input
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    placeholder={t('hotelBooking.page.destinationPlaceholder')}
+                    className="h-12 rounded-lg bg-gray-50 border-gray-200 focus:ring-black focus:border-black"
+                  />
+                </div>
+
+                {/* Check-in */}
+                <div className="w-full" style={{ flex: '0.8 1 0', minWidth: 0 }}>
+                  <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hotelBooking.page.checkInLabel')}</label>
+                  <Input type="date" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} className="h-12 rounded-lg bg-gray-50 border-gray-200" />
+                </div>
+
+                {/* Check-out */}
+                <div className="w-full" style={{ flex: '0.8 1 0', minWidth: 0 }}>
+                  <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hotelBooking.page.checkOutLabel')}</label>
+                  <Input type="date" value={checkOut} onChange={(e) => setCheckOut(e.target.value)} className="h-12 rounded-lg bg-gray-50 border-gray-200" />
+                </div>
+
+                {/* Room & Guest picker */}
+                <div className="w-full relative" style={{ flex: '1 1 0', minWidth: 0 }} ref={roomPickerRef}>
+                  <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.hotel.roomsGuests')}</label>
+                  <button
+                    onClick={() => setShowRoomPicker(!showRoomPicker)}
+                    className="w-full h-12 px-4 text-sm text-left border border-gray-200 rounded-lg bg-gray-50 text-gray-700 hover:border-gray-300 flex items-center justify-between"
+                  >
+                    <span>{roomSummary}</span>
+                    <Users className="h-4 w-4 text-gray-400" />
+                  </button>
+                  {showRoomPicker && (
+                    <div className="absolute top-full left-0 mt-2 w-72 bg-white rounded-xl shadow-xl border border-gray-200 p-4 z-50">
+                      {/* Rooms */}
+                      <div className="flex items-center justify-between py-2">
+                        <div className="text-sm font-medium text-gray-900">{t('hero.search.hotel.room')}</div>
+                        <div className="flex items-center gap-3">
+                          <button onClick={() => setRooms(Math.max(1, rooms - 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-40" disabled={rooms <= 1}>−</button>
+                          <span className="w-6 text-center font-medium">{rooms}</span>
+                          <button onClick={() => setRooms(Math.min(8, rooms + 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50" disabled={rooms >= 8}>+</button>
+                        </div>
+                      </div>
+                      {/* Adults */}
+                      <div className="flex items-center justify-between py-2 border-t border-gray-100">
+                        <div>
+                          <div className="text-sm font-medium text-gray-900">{t('hero.search.flight.adults')}</div>
+                          <div className="text-xs text-gray-500">{t('hero.search.hotel.perRoom')}</div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <button onClick={() => setHotelAdults(Math.max(1, hotelAdults - 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-40" disabled={hotelAdults <= 1}>−</button>
+                          <span className="w-6 text-center font-medium">{hotelAdults}</span>
+                          <button onClick={() => setHotelAdults(Math.min(6, hotelAdults + 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50" disabled={hotelAdults >= 6}>+</button>
+                        </div>
+                      </div>
+                      {/* Children */}
+                      <div className="flex items-center justify-between py-2 border-t border-gray-100">
+                        <div>
+                          <div className="text-sm font-medium text-gray-900">{t('hero.search.flight.children')}</div>
+                          <div className="text-xs text-gray-500">{t('hero.search.hotel.childrenAge')}</div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <button onClick={() => setHotelChildren(Math.max(0, hotelChildren - 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-40" disabled={hotelChildren <= 0}>−</button>
+                          <span className="w-6 text-center font-medium">{hotelChildren}</span>
+                          <button onClick={() => setHotelChildren(Math.min(4, hotelChildren + 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50" disabled={hotelChildren >= 4}>+</button>
+                        </div>
+                      </div>
+                      <button onClick={() => setShowRoomPicker(false)} className="mt-3 w-full py-2 bg-black text-white text-sm font-medium rounded-lg hover:bg-gray-800">
+                        {t('common.confirm')}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Search button */}
+                <div className="w-full md:w-40 flex-shrink-0">
+                  <Button
+                    onClick={handleSearchHotels}
+                    disabled={isSearching}
+                    className="w-full h-12 bg-black hover:bg-gray-900 text-white rounded-lg font-bold shadow-md transition-all hover:shadow-lg flex items-center justify-center gap-2"
+                  >
+                    <Search className="h-4 w-4" />
+                    {isSearching ? t('hotelBooking.page.searching') : t('hotelBooking.page.searchBtn')}
+                    <ExternalLink className="h-3.5 w-3.5 opacity-70" />
+                  </Button>
+                </div>
               </div>
-              <div>
-                <Label className="text-sm font-medium text-gray-700 mb-1.5 block">{t('hotelBooking.page.checkInLabel')}</Label>
-                <Input type="date" value={checkIn} onChange={e => setCheckIn(e.target.value)} className="h-11" />
-              </div>
-              <div>
-                <Label className="text-sm font-medium text-gray-700 mb-1.5 block">{t('hotelBooking.page.checkOutLabel')}</Label>
-                <Input type="date" value={checkOut} onChange={e => setCheckOut(e.target.value)} className="h-11" />
-              </div>
+
+              <p className="text-center text-xs text-gray-400">{t('hotelBooking.page.redirectNote')}</p>
             </div>
-            <Button onClick={handleSearchHotels} disabled={isSearching} className="w-full h-12 bg-black hover:bg-gray-800 text-white font-bold text-base rounded-xl flex items-center justify-center gap-2">
-              <Search className="h-5 w-5" />
-              {isSearching ? t('hotelBooking.page.searching') : t('hotelBooking.page.searchBtn')}
-              <ExternalLink className="h-4 w-4 opacity-70" />
-            </Button>
-            <p className="text-center text-xs text-gray-400 mt-3">{t('hotelBooking.page.redirectNote')}</p>
           </div>
         </div>
       </section>
@@ -189,25 +291,6 @@ export default function HotelBooking() {
         </div>
       </section>
 
-      {/* Stats */}
-      <section className="bg-gray-900 text-white py-8">
-        <div className="container">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
-            {[
-              { num: "5,000+", label: t('hotelBooking.page.statPartnerHotels') },
-              { num: "80+", label: t('hotelBooking.page.statCities') },
-              { num: "3★-5★", label: t('hotelBooking.page.statStarRange') },
-              { num: "99%", label: t('hotelBooking.page.statSuccessRate') },
-            ].map((stat, i) => (
-              <div key={i}>
-                <div className="text-3xl font-bold text-white mb-1">{stat.num}</div>
-                <div className="text-gray-400 text-sm">{stat.label}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* Features */}
       <section className="py-20 bg-white">
         <div className="container">
@@ -229,114 +312,93 @@ export default function HotelBooking() {
         </div>
       </section>
 
-      {/* Hotel Types — clickable to open AI advisor */}
+      {/* Hotel Types */}
       <section className="py-20 bg-gray-50">
         <div className="container">
           <div className="text-center mb-14">
             <h2 className="text-3xl md:text-4xl font-bold text-black mb-4">{t('hotelBooking.page.typesTitle')}</h2>
             <p className="text-gray-600 text-lg">{t('hotelBooking.page.typesSubtitle')}</p>
           </div>
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {hotelTypes.map((type, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => openAdvisor(`${type.name}: ${type.desc}`)}
-                className="bg-white rounded-xl p-6 border border-gray-100 hover:border-black hover:shadow-md transition-all flex items-start gap-4 text-left w-full"
-              >
-                <div className="w-10 h-10 flex-shrink-0 bg-gray-100 rounded-lg flex items-center justify-center">
-                  <type.Icon className="h-5 w-5 text-black" />
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <h3 className="text-base font-bold text-black">{type.name}</h3>
-                    <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{type.tag}</span>
+              <div key={i} className="bg-white rounded-2xl p-6 border border-gray-200 hover:border-black hover:shadow-md transition-all group cursor-pointer">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 bg-gray-100 group-hover:bg-black rounded-xl flex items-center justify-center transition-colors">
+                    <type.Icon className="h-6 w-6 text-gray-700 group-hover:text-white transition-colors" />
                   </div>
-                  <p className="text-gray-600 text-sm leading-relaxed mb-3">{type.desc}</p>
-                  <span className="text-xs text-black font-medium underline underline-offset-2">{t('hotelBooking.page.typeClickHint')}</span>
+                  <span className="text-xs font-bold bg-gray-100 text-gray-600 px-3 py-1 rounded-full">{type.tag}</span>
                 </div>
-              </button>
+                <h3 className="text-lg font-bold text-black mb-2">{type.name}</h3>
+                <p className="text-gray-600 text-sm leading-relaxed">{type.desc}</p>
+              </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* Popular Destinations — clickable to open AI advisor */}
-      <section className="py-20 bg-white">
+      {/* Amenities */}
+      <section className="py-16 bg-white border-t border-gray-100">
         <div className="container">
-          <div className="text-center mb-14">
-            <h2 className="text-3xl md:text-4xl font-bold text-black mb-4">{t('hotelBooking.page.destTitle')}</h2>
-            <p className="text-gray-600 text-lg">{t('hotelBooking.page.destSubtitle')}</p>
-          </div>
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {destinations.map((dest, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => handleDestinationClick(dest)}
-                className="flex items-center gap-4 p-5 border border-gray-200 rounded-xl hover:border-black hover:shadow-sm transition-all group text-left w-full"
-              >
-                <div className="w-12 h-12 flex-shrink-0 bg-gray-100 rounded-lg flex items-center justify-center">
-                  <MapPin className="h-6 w-6 text-black" />
-                </div>
-                <div className="flex-1">
-                  <div className="font-bold text-black">{dest.city}</div>
-                  <div className="flex items-center gap-1 text-sm text-gray-500">
-                    <MapPin className="h-3.5 w-3.5" />
-                    {dest.country}
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="font-bold text-black text-sm">{dest.hotels}</div>
-                  <div className="text-xs text-gray-500">{t('hotelBooking.page.destHotels')}</div>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Amenities — clickable chips to open AI advisor */}
-      <section className="py-20 bg-gray-50">
-        <div className="container">
-          <div className="text-center mb-14">
-            <h2 className="text-3xl md:text-4xl font-bold text-black mb-4">{t('hotelBooking.page.amenitiesTitle')}</h2>
-            <p className="text-gray-600 text-lg">{t('hotelBooking.page.amenitiesSubtitle')}</p>
+          <div className="text-center mb-10">
+            <h2 className="text-2xl font-bold text-black mb-2">{t('hotelBooking.page.amenitiesTitle')}</h2>
           </div>
           <div className="flex flex-wrap justify-center gap-4">
             {amenities.map((amenity, i) => (
+              <div key={i} className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-full px-5 py-2.5">
+                <amenity.icon className="h-4 w-4 text-gray-600" />
+                <span className="text-sm font-medium text-gray-700">{amenity.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Popular Destinations */}
+      <section className="py-20 bg-gray-50">
+        <div className="container">
+          <div className="text-center mb-14">
+            <h2 className="text-3xl md:text-4xl font-bold text-black mb-4">{t('hotelBooking.page.destinationsTitle')}</h2>
+            <p className="text-gray-600 text-lg">{t('hotelBooking.page.destinationsSubtitle')}</p>
+          </div>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {destinations.map((dest, i) => (
               <button
                 key={i}
-                type="button"
-                onClick={() => openAdvisor(`${amenity.label}`)}
-                className="flex items-center gap-2 bg-white border border-gray-200 rounded-full px-5 py-2.5 text-sm font-medium text-gray-700 hover:border-black hover:text-black transition-all"
+                onClick={() => handleDestinationClick(dest)}
+                className="group bg-white border border-gray-200 rounded-2xl p-6 hover:border-black hover:shadow-md transition-all text-left"
               >
-                <amenity.icon className="h-4 w-4" />
-                {amenity.label}
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-10 h-10 bg-gray-100 group-hover:bg-black rounded-xl flex items-center justify-center transition-colors">
+                    <MapPin className="h-5 w-5 text-gray-600 group-hover:text-white transition-colors" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-black">{dest.city}</div>
+                    <div className="text-xs text-gray-500">{dest.country}</div>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-gray-500">{dest.hotels} {t('hotelBooking.page.hotelsCount')}</span>
+                  <ExternalLink className="h-4 w-4 text-gray-400 group-hover:text-black transition-colors" />
+                </div>
               </button>
             ))}
           </div>
-          <p className="text-center text-gray-500 text-sm mt-6">
-            {t('hotelBooking.page.amenitiesHint')}
-          </p>
         </div>
       </section>
 
       {/* CTA */}
       <section className="py-20 bg-black text-white">
         <div className="container text-center">
-          <h2 className="text-3xl md:text-4xl font-bold mb-4">{t('hotelBooking.page.ctaTitle')}</h2>
-          <p className="text-gray-400 text-lg mb-8 max-w-xl mx-auto">
-            {t('hotelBooking.page.ctaDesc')}
-          </p>
+          <h2 className="text-3xl md:text-4xl font-bold mb-6">{t('hotelBooking.page.ctaTitle')}</h2>
+          <p className="text-gray-300 text-lg mb-10 max-w-2xl mx-auto">{t('hotelBooking.page.ctaDesc')}</p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link href="/inquiry">
-              <Button className="bg-white text-black hover:bg-gray-100 font-bold px-10 py-3 h-auto rounded-lg text-base">
+              <Button className="bg-white text-black hover:bg-gray-100 font-bold px-10 py-4 h-auto rounded-xl text-base">
                 {t('hotelBooking.page.ctaInquiry')} <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
             </Link>
             <Link href="/contact-us">
-              <Button variant="outline" className="border-white/30 text-white hover:bg-white/10 font-bold px-10 py-3 h-auto rounded-lg text-base bg-transparent">
+              <Button variant="outline" className="border-white/50 text-white hover:bg-white/10 font-bold px-10 py-4 h-auto rounded-xl text-base bg-transparent">
                 {t('hotelBooking.page.ctaContact')}
               </Button>
             </Link>
@@ -344,14 +406,8 @@ export default function HotelBooking() {
         </div>
       </section>
 
-      {/* AI Travel Advisor Dialog */}
-      <AITravelAdvisorDialog
-        open={advisorOpen}
-        onOpenChange={setAdvisorOpen}
-        initialMessage={advisorInitialMsg}
-      />
-
       <Footer />
+      <AITravelAdvisorDialog open={advisorOpen} onOpenChange={setAdvisorOpen} initialMessage={advisorInitialMsg} />
     </div>
   );
 }

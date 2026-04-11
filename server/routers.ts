@@ -4313,13 +4313,23 @@ export const appRouter = router({
     generateAffiliateLink: publicProcedure
       .input(z.object({
         type: z.enum(["flights", "hotels", "homepage"]),
+        // Flight params
         origin: z.string().optional(),
         destination: z.string().optional(),
         departDate: z.string().optional(),
         returnDate: z.string().optional(),
+        adults: z.number().min(1).max(9).optional(),
+        children: z.number().min(0).max(9).optional(),
+        infants: z.number().min(0).max(9).optional(),
+        cabinClass: z.enum(['economy', 'premiumEconomy', 'business', 'first']).optional(),
+        // Hotel params
         city: z.string().optional(),
         checkIn: z.string().optional(),
         checkOut: z.string().optional(),
+        rooms: z.number().min(1).max(8).optional(),
+        hotelAdults: z.number().min(1).max(6).optional(),
+        hotelChildren: z.number().min(0).max(4).optional(),
+        // Common
         ouid: z.string().optional(),
       }))
       .query(({ input }) => {
@@ -4331,6 +4341,10 @@ export const appRouter = router({
             departDate: input.departDate,
             returnDate: input.returnDate,
             ouid: input.ouid,
+            adults: input.adults,
+            children: input.children,
+            infants: input.infants,
+            cabinClass: input.cabinClass,
           });
         } else if (input.type === "hotels") {
           url = generateHotelLink({
@@ -4338,6 +4352,9 @@ export const appRouter = router({
             checkIn: input.checkIn,
             checkOut: input.checkOut,
             ouid: input.ouid,
+            rooms: input.rooms,
+            adults: input.hotelAdults,
+            children: input.hotelChildren,
           });
         } else {
           url = generateHomepageLink(input.ouid);

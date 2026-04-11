@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { Calendar, MapPin, Search, Sparkles, Plane, Hotel, Ticket, Users, Pencil, X, Check, Upload, ImageIcon } from "lucide-react";
+import { Calendar, MapPin, Search, Sparkles, Plane, Hotel, Ticket, Users, Pencil, X, Check, Upload, ImageIcon, ArrowLeftRight, Lock } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { DateRangePicker } from "@/components/DateRangePicker";
@@ -77,16 +77,35 @@ export default function EditableHero() {
   const [departure, setDeparture] = useState("");
   const [destination, setDestination] = useState("");
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
+
   // Flight search state
-  const [flightFrom, setFlightFrom] = useState("");
-  const [flightTo, setFlightTo] = useState("");
-  const [flightDateRange, setFlightDateRange] = useState<DateRange | undefined>(undefined);
+  const [tripType, setTripType] = useState<'roundtrip' | 'oneway'>('roundtrip');
+  const [flightOrigin, setFlightOrigin] = useState('');
+  const [flightDestination, setFlightDestination] = useState('');
+  const [flightDepartDate, setFlightDepartDate] = useState('');
+  const [flightReturnDate, setFlightReturnDate] = useState('');
+  const [adults, setAdults] = useState(1);
+  const [children, setChildren] = useState(0);
+  const [infants, setInfants] = useState(0);
+  const [cabinClass, setCabinClass] = useState<'economy' | 'premiumEconomy' | 'business' | 'first'>('economy');
+  const [showPassengerPicker, setShowPassengerPicker] = useState(false);
+
   // Hotel search state
-  const [hotelCity, setHotelCity] = useState("");
-  const [hotelDateRange, setHotelDateRange] = useState<DateRange | undefined>(undefined);
+  const [hotelCity, setHotelCity] = useState('');
+  const [hotelCheckIn, setHotelCheckIn] = useState('');
+  const [hotelCheckOut, setHotelCheckOut] = useState('');
+  const [rooms, setRooms] = useState(1);
+  const [hotelAdults, setHotelAdults] = useState(2);
+  const [hotelChildren, setHotelChildren] = useState(0);
+  const [showRoomPicker, setShowRoomPicker] = useState(false);
+
+  // Search loading state
+  const [isFlightSearching, setIsFlightSearching] = useState(false);
+  const [isHotelSearching, setIsHotelSearching] = useState(false);
+
   const [, setLocation] = useLocation();
   const { t, language } = useLocale();
-  
+
   const { isEditMode, canEdit } = useHomeEdit();
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState<HeroContent>(defaultContent);
@@ -94,11 +113,18 @@ export default function EditableHero() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
 
+  // Refs for click-outside close
+  const passengerPickerRef = useRef<HTMLDivElement>(null);
+  const roomPickerRef = useRef<HTMLDivElement>(null);
+
   // Fetch hero content from database
   const { data: heroData, refetch, isLoading: isHeroLoading } = trpc.homepage.getContent.useQuery(
     { sectionKey: 'hero' },
     { enabled: true }
   );
+
+  const utils = trpc.useUtils();
+  const trackClickMutation = trpc.affiliate.trackClick.useMutation();
 
   const updateContentMutation = trpc.homepage.updateContent.useMutation({
     onSuccess: () => {
@@ -122,6 +148,20 @@ export default function EditableHero() {
     }
   }, [heroData]);
 
+  // Click-outside close for pickers
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (passengerPickerRef.current && !passengerPickerRef.current.contains(e.target as Node)) {
+        setShowPassengerPicker(false);
+      }
+      if (roomPickerRef.current && !roomPickerRef.current.contains(e.target as Node)) {
+        setShowRoomPicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const handleSearch = () => {
     const params = new URLSearchParams();
     if (destination.trim()) {
@@ -138,24 +178,71 @@ export default function EditableHero() {
     setLocation(`/search?destination=${encodeURIComponent(keyword)}`);
   };
 
-  const handleFlightSearch = () => {
-    const params = new URLSearchParams();
-    if (flightFrom) params.set('dcity', flightFrom);
-    if (flightTo) params.set('acity', flightTo);
-    if (flightDateRange?.from) params.set('departDate', flightDateRange.from.toISOString().split('T')[0]);
-    if (flightDateRange?.to) params.set('returnDate', flightDateRange.to.toISOString().split('T')[0]);
-    toast.info(t('hero.search.redirectingToFlight') || '正在前往機票搜尋...');
-    window.open(`https://www.trip.com/flights/?${params.toString()}`, '_blank');
+  // Swap cities helper
+  const handleSwapCities = () => {
+    const temp = flightOrigin;
+    setFlightOrigin(flightDestination);
+    setFlightDestination(temp);
   };
 
-  const handleHotelSearch = () => {
-    const params = new URLSearchParams();
-    if (hotelCity) params.set('city', hotelCity);
-    if (hotelDateRange?.from) params.set('checkIn', hotelDateRange.from.toISOString().split('T')[0]);
-    if (hotelDateRange?.to) params.set('checkOut', hotelDateRange.to.toISOString().split('T')[0]);
-    toast.info(t('hero.search.redirectingToHotel') || '正在前往訂房搜尋...');
-    window.open(`https://www.trip.com/hotels/?${params.toString()}`, '_blank');
+  // Flight search handler
+  const handleFlightSearch = async () => {
+    setIsFlightSearching(true);
+    try {
+      const result = await utils.affiliate.generateAffiliateLink.fetch({
+        type: 'flights',
+        origin: flightOrigin || undefined,
+        destination: flightDestination || undefined,
+        departDate: flightDepartDate || undefined,
+        returnDate: tripType === 'roundtrip' ? (flightReturnDate || undefined) : undefined,
+        adults,
+        children,
+        infants,
+        cabinClass,
+      });
+      await trackClickMutation.mutateAsync({
+        platform: 'trip_flights',
+        targetUrl: result.url,
+        referrerPage: '/',
+      });
+      window.open(result.url, '_blank');
+    } catch {
+      toast.error(t('hero.search.searchError'));
+    } finally {
+      setIsFlightSearching(false);
+    }
   };
+
+  // Hotel search handler
+  const handleHotelSearch = async () => {
+    setIsHotelSearching(true);
+    try {
+      const result = await utils.affiliate.generateAffiliateLink.fetch({
+        type: 'hotels',
+        city: hotelCity || undefined,
+        checkIn: hotelCheckIn || undefined,
+        checkOut: hotelCheckOut || undefined,
+        rooms,
+        hotelAdults,
+        hotelChildren,
+      });
+      await trackClickMutation.mutateAsync({
+        platform: 'trip_hotels',
+        targetUrl: result.url,
+        referrerPage: '/',
+      });
+      window.open(result.url, '_blank');
+    } catch {
+      toast.error(t('hero.search.searchError'));
+    } finally {
+      setIsHotelSearching(false);
+    }
+  };
+
+  // Passenger/room total display helpers
+  const totalPassengers = adults + children + infants;
+  const passengerSummary = `${totalPassengers} ${t('hero.search.flight.passengers')}`;
+  const roomSummary = `${rooms} ${t('hero.search.hotel.room')}, ${hotelAdults + hotelChildren} ${t('hero.search.hotel.guests')}`;
 
   const handleSaveContent = () => {
     updateContentMutation.mutate({
@@ -322,7 +409,7 @@ export default function EditableHero() {
           </div>
         )}
 
-        {/* Search Console - Lion Travel Style */}
+        {/* Search Console */}
         <div className="w-full max-w-5xl bg-white shadow-2xl animate-in slide-in-from-bottom-10 duration-700 delay-300 rounded-3xl overflow-hidden">
           {/* Tabs */}
           <div className="flex w-full border-b border-gray-200 bg-gray-50 rounded-t-3xl">
@@ -346,135 +433,48 @@ export default function EditableHero() {
           <div className="p-4 bg-white rounded-b-3xl">
             <div className="flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
 
-              {/* Group Tour Search */}
+              {/* ═══ GROUP TOURS TAB ═══ */}
               {activeTab === "group" && (
-                <div className="flex flex-col md:flex-row gap-4 items-end">
-                  <div className="w-full" style={{ flex: '1 1 0', minWidth: 0 }}>
-                    <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.departure')}</label>
-                    <DepartureAutocomplete 
-                      value={departure}
-                      onChange={setDeparture}
-                      placeholder={t('hero.search.departurePlaceholder')}
-                      className="w-full [[&_input]:rounded-full_input]:rounded-lg [&_input]:bg-gray-50 [&_input]:border-gray-200 [&_input]:focus:ring-primary [&_input]:focus:border-primary [&_input]:h-12 [&_input]:w-full"
-                    />
-                  </div>
-                  <div className="w-full" style={{ flex: '1 1 0', minWidth: 0 }}>
-                    <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.keyword')}</label>
-                    <DestinationAutocomplete 
-                      value={destination}
-                      onChange={setDestination}
-                      onSelect={handleSearch}
-                      placeholder={t('hero.search.destinationPlaceholder')}
-                      className="w-full [[&_input]:rounded-full_input]:rounded-lg [&_input]:bg-gray-50 [&_input]:border-gray-200 [&_input]:focus:ring-primary [&_input]:focus:border-primary [&_input]:h-12 [&_input]:w-full"
-                    />
-                  </div>
-                  <div className="w-full" style={{ flex: '1 1 0', minWidth: 0 }}>
-                    <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.departureDate')}</label>
-                    <DateRangePicker 
-                      value={dateRange}
-                      onChange={setDateRange}
-                      placeholder={t('hero.search.selectDate')}
-                      className="h-12 rounded-lg w-full"
-                    />
-                  </div>
-                  <div className="w-full md:w-32 flex-shrink-0">
-                    <Button 
-                      onClick={handleSearch}
-                      className="w-full h-12 bg-black hover:bg-gray-900 text-white rounded-lg font-bold shadow-md transition-all hover:shadow-lg"
-                    >
-                      {t('hero.search.searchButton')}
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              {/* Flight Search */}
-              {activeTab === "flight" && (
-                <div className="flex flex-col md:flex-row gap-4 items-end">
-                  <div className="w-full" style={{ flex: '1 1 0', minWidth: 0 }}>
-                    <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.flightFrom') || '出發地'}</label>
-                    <div className="relative">
-                      <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                      <input
-                        type="text"
-                        value={flightFrom}
-                        onChange={(e) => setFlightFrom(e.target.value)}
-                        placeholder={t('hero.search.flightFromPlaceholder') || '輸入出發城市'}
-                        className="w-full h-12 pl-9 pr-3 border border-gray-200 rounded-lg bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+                <>
+                  <div className="flex flex-col md:flex-row gap-4 items-end">
+                    <div className="w-full" style={{ flex: '1 1 0', minWidth: 0 }}>
+                      <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.departure')}</label>
+                      <DepartureAutocomplete 
+                        value={departure}
+                        onChange={setDeparture}
+                        placeholder={t('hero.search.departurePlaceholder')}
+                        className="w-full [[&_input]:rounded-full_input]:rounded-lg [&_input]:bg-gray-50 [&_input]:border-gray-200 [&_input]:focus:ring-primary [&_input]:focus:border-primary [&_input]:h-12 [&_input]:w-full"
                       />
                     </div>
-                  </div>
-                  <div className="w-full" style={{ flex: '1 1 0', minWidth: 0 }}>
-                    <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.flightTo') || '目的地'}</label>
-                    <div className="relative">
-                      <Plane className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                      <input
-                        type="text"
-                        value={flightTo}
-                        onChange={(e) => setFlightTo(e.target.value)}
-                        placeholder={t('hero.search.flightToPlaceholder') || '輸入目的城市'}
-                        className="w-full h-12 pl-9 pr-3 border border-gray-200 rounded-lg bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+                    <div className="w-full" style={{ flex: '1 1 0', minWidth: 0 }}>
+                      <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.keyword')}</label>
+                      <DestinationAutocomplete 
+                        value={destination}
+                        onChange={setDestination}
+                        onSelect={handleSearch}
+                        placeholder={t('hero.search.destinationPlaceholder')}
+                        className="w-full [[&_input]:rounded-full_input]:rounded-lg [&_input]:bg-gray-50 [&_input]:border-gray-200 [&_input]:focus:ring-primary [&_input]:focus:border-primary [&_input]:h-12 [&_input]:w-full"
                       />
                     </div>
-                  </div>
-                  <div className="w-full" style={{ flex: '1 1 0', minWidth: 0 }}>
-                    <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.flightDate') || '出發日期'}</label>
-                    <DateRangePicker 
-                      value={flightDateRange}
-                      onChange={setFlightDateRange}
-                      placeholder={t('hero.search.selectDate')}
-                      className="h-12 rounded-lg w-full"
-                    />
-                  </div>
-                  <div className="w-full md:w-32 flex-shrink-0">
-                    <Button 
-                      onClick={handleFlightSearch}
-                      className="w-full h-12 bg-black hover:bg-gray-900 text-white rounded-lg font-bold shadow-md transition-all hover:shadow-lg"
-                    >
-                      {t('hero.search.searchButton')}
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              {/* Hotel Search */}
-              {activeTab === "hotel" && (
-                <div className="flex flex-col md:flex-row gap-4 items-end">
-                  <div className="w-full" style={{ flex: '2 1 0', minWidth: 0 }}>
-                    <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.hotelCity') || '城市/目的地'}</label>
-                    <div className="relative">
-                      <Hotel className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                      <input
-                        type="text"
-                        value={hotelCity}
-                        onChange={(e) => setHotelCity(e.target.value)}
-                        placeholder={t('hero.search.hotelCityPlaceholder') || '輸入城市或目的地'}
-                        className="w-full h-12 pl-9 pr-3 border border-gray-200 rounded-lg bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+                    <div className="w-full" style={{ flex: '1 1 0', minWidth: 0 }}>
+                      <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.departureDate')}</label>
+                      <DateRangePicker 
+                        value={dateRange}
+                        onChange={setDateRange}
+                        placeholder={t('hero.search.selectDate')}
+                        className="h-12 rounded-lg w-full"
                       />
                     </div>
+                    <div className="w-full md:w-32 flex-shrink-0">
+                      <Button 
+                        onClick={handleSearch}
+                        className="w-full h-12 bg-black hover:bg-gray-900 text-white rounded-lg font-bold shadow-md transition-all hover:shadow-lg"
+                      >
+                        {t('hero.search.searchButton')}
+                      </Button>
+                    </div>
                   </div>
-                  <div className="w-full" style={{ flex: '2 1 0', minWidth: 0 }}>
-                    <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.hotelDate') || '入住 / 退房'}</label>
-                    <DateRangePicker 
-                      value={hotelDateRange}
-                      onChange={setHotelDateRange}
-                      placeholder={t('hero.search.selectDate')}
-                      className="h-12 rounded-lg w-full"
-                    />
-                  </div>
-                  <div className="w-full md:w-32 flex-shrink-0">
-                    <Button 
-                      onClick={handleHotelSearch}
-                      className="w-full h-12 bg-black hover:bg-gray-900 text-white rounded-lg font-bold shadow-md transition-all hover:shadow-lg"
-                    >
-                      {t('hero.search.searchButton')}
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              {/* Hot Keywords - Only show for group tours */}
-                {activeTab === "group" && (
+                  {/* Hot Keywords */}
                   <div className="flex items-center gap-2 text-sm text-gray-500 mt-2 pt-2 border-t border-gray-100">
                     <span className="font-medium text-primary">{t('hero.search.hotKeywords')}：</span>
                     {isEditing ? (
@@ -499,7 +499,266 @@ export default function EditableHero() {
                       </div>
                     )}
                   </div>
-                )}
+                </>
+              )}
+
+              {/* ═══ FLIGHT TAB ═══ */}
+              {activeTab === "flight" && (
+                <>
+                  {/* Row 1: Trip type toggle + Cabin class + Passenger picker */}
+                  <div className="flex flex-wrap items-center gap-3 mb-1">
+                    {/* Trip type toggle */}
+                    <div className="flex bg-gray-100 rounded-lg p-0.5">
+                      <button
+                        onClick={() => setTripType('roundtrip')}
+                        className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${
+                          tripType === 'roundtrip' ? 'bg-white text-black shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        {t('hero.search.flight.roundtrip')}
+                      </button>
+                      <button
+                        onClick={() => setTripType('oneway')}
+                        className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${
+                          tripType === 'oneway' ? 'bg-white text-black shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        {t('hero.search.flight.oneway')}
+                      </button>
+                    </div>
+
+                    {/* Cabin class dropdown */}
+                    <select
+                      value={cabinClass}
+                      onChange={(e) => setCabinClass(e.target.value as 'economy' | 'premiumEconomy' | 'business' | 'first')}
+                      className="h-9 px-3 text-sm border border-gray-200 rounded-lg bg-gray-50 text-gray-700 focus:ring-primary focus:border-primary"
+                    >
+                      <option value="economy">{t('hero.search.flight.cabinEconomy')}</option>
+                      <option value="premiumEconomy">{t('hero.search.flight.cabinPremiumEconomy')}</option>
+                      <option value="business">{t('hero.search.flight.cabinBusiness')}</option>
+                      <option value="first">{t('hero.search.flight.cabinFirst')}</option>
+                    </select>
+
+                    {/* Passenger picker button */}
+                    <div className="relative" ref={passengerPickerRef}>
+                      <button
+                        onClick={() => setShowPassengerPicker(!showPassengerPicker)}
+                        className="h-9 px-3 text-sm border border-gray-200 rounded-lg bg-gray-50 text-gray-700 hover:border-gray-300 flex items-center gap-2"
+                      >
+                        <Users className="h-3.5 w-3.5" />
+                        {passengerSummary}
+                      </button>
+                      {/* Passenger dropdown */}
+                      {showPassengerPicker && (
+                        <div className="absolute top-full left-0 mt-2 w-72 bg-white rounded-xl shadow-xl border border-gray-200 p-4 z-50">
+                          {/* Adults */}
+                          <div className="flex items-center justify-between py-2">
+                            <div>
+                              <div className="text-sm font-medium text-gray-900">{t('hero.search.flight.adults')}</div>
+                              <div className="text-xs text-gray-500">{t('hero.search.flight.adultsAge')}</div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <button onClick={() => setAdults(Math.max(1, adults - 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-40" disabled={adults <= 1}>−</button>
+                              <span className="w-6 text-center font-medium">{adults}</span>
+                              <button onClick={() => setAdults(Math.min(9, adults + 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50" disabled={adults >= 9}>+</button>
+                            </div>
+                          </div>
+                          {/* Children */}
+                          <div className="flex items-center justify-between py-2 border-t border-gray-100">
+                            <div>
+                              <div className="text-sm font-medium text-gray-900">{t('hero.search.flight.children')}</div>
+                              <div className="text-xs text-gray-500">{t('hero.search.flight.childrenAge')}</div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <button onClick={() => setChildren(Math.max(0, children - 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-40" disabled={children <= 0}>−</button>
+                              <span className="w-6 text-center font-medium">{children}</span>
+                              <button onClick={() => setChildren(Math.min(9, children + 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50" disabled={children >= 9}>+</button>
+                            </div>
+                          </div>
+                          {/* Infants */}
+                          <div className="flex items-center justify-between py-2 border-t border-gray-100">
+                            <div>
+                              <div className="text-sm font-medium text-gray-900">{t('hero.search.flight.infants')}</div>
+                              <div className="text-xs text-gray-500">{t('hero.search.flight.infantsAge')}</div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <button onClick={() => setInfants(Math.max(0, infants - 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-40" disabled={infants <= 0}>−</button>
+                              <span className="w-6 text-center font-medium">{infants}</span>
+                              <button onClick={() => setInfants(Math.min(adults, infants + 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50" disabled={infants >= adults}>+</button>
+                            </div>
+                          </div>
+                          {/* Close button */}
+                          <button onClick={() => setShowPassengerPicker(false)} className="mt-3 w-full py-2 bg-black text-white text-sm font-medium rounded-lg hover:bg-gray-800">
+                            {t('common.confirm')}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Row 2: Origin ⇄ Destination + Dates + Search */}
+                  <div className="flex flex-col md:flex-row gap-4 items-end">
+                    {/* Origin */}
+                    <div className="w-full" style={{ flex: '1 1 0', minWidth: 0 }}>
+                      <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.flight.origin')}</label>
+                      <Input
+                        value={flightOrigin}
+                        onChange={(e) => setFlightOrigin(e.target.value)}
+                        placeholder={t('hero.search.flight.originPlaceholder')}
+                        className="h-12 rounded-lg bg-gray-50 border-gray-200"
+                      />
+                    </div>
+
+                    {/* Swap button */}
+                    <button
+                      onClick={handleSwapCities}
+                      className="hidden md:flex w-10 h-10 flex-shrink-0 items-center justify-center rounded-full border border-gray-300 bg-white hover:bg-gray-50 text-gray-500 hover:text-black transition-colors mb-1"
+                      title={t('hero.search.flight.swap')}
+                    >
+                      <ArrowLeftRight className="h-4 w-4" />
+                    </button>
+
+                    {/* Destination */}
+                    <div className="w-full" style={{ flex: '1 1 0', minWidth: 0 }}>
+                      <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.flight.destination')}</label>
+                      <Input
+                        value={flightDestination}
+                        onChange={(e) => setFlightDestination(e.target.value)}
+                        placeholder={t('hero.search.flight.destinationPlaceholder')}
+                        className="h-12 rounded-lg bg-gray-50 border-gray-200"
+                      />
+                    </div>
+
+                    {/* Depart date */}
+                    <div className="w-full" style={{ flex: '0.8 1 0', minWidth: 0 }}>
+                      <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.flight.departDate')}</label>
+                      <Input type="date" value={flightDepartDate} onChange={(e) => setFlightDepartDate(e.target.value)} className="h-12 rounded-lg bg-gray-50 border-gray-200" />
+                    </div>
+
+                    {/* Return date (only if roundtrip) */}
+                    {tripType === 'roundtrip' && (
+                      <div className="w-full" style={{ flex: '0.8 1 0', minWidth: 0 }}>
+                        <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.flight.returnDate')}</label>
+                        <Input type="date" value={flightReturnDate} onChange={(e) => setFlightReturnDate(e.target.value)} className="h-12 rounded-lg bg-gray-50 border-gray-200" />
+                      </div>
+                    )}
+
+                    {/* Search button */}
+                    <div className="w-full md:w-36 flex-shrink-0">
+                      <Button
+                        onClick={handleFlightSearch}
+                        disabled={isFlightSearching}
+                        className="w-full h-12 bg-black hover:bg-gray-900 text-white rounded-lg font-bold shadow-md transition-all hover:shadow-lg flex items-center justify-center gap-2"
+                      >
+                        <Search className="h-4 w-4" />
+                        {isFlightSearching ? t('hero.search.searching') : t('hero.search.flight.searchFlights')}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Trip.com note */}
+                  <p className="text-xs text-gray-400 text-center mt-1">{t('hero.search.flight.tripComNote')}</p>
+                </>
+              )}
+
+              {/* ═══ HOTEL TAB ═══ */}
+              {activeTab === "hotel" && (
+                <>
+                  <div className="flex flex-col md:flex-row gap-4 items-end">
+                    {/* Destination city */}
+                    <div className="w-full" style={{ flex: '1.2 1 0', minWidth: 0 }}>
+                      <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.hotel.destination')}</label>
+                      <Input
+                        value={hotelCity}
+                        onChange={(e) => setHotelCity(e.target.value)}
+                        placeholder={t('hero.search.hotel.destinationPlaceholder')}
+                        className="h-12 rounded-lg bg-gray-50 border-gray-200"
+                      />
+                    </div>
+
+                    {/* Check-in */}
+                    <div className="w-full" style={{ flex: '0.8 1 0', minWidth: 0 }}>
+                      <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.hotel.checkIn')}</label>
+                      <Input type="date" value={hotelCheckIn} onChange={(e) => setHotelCheckIn(e.target.value)} className="h-12 rounded-lg bg-gray-50 border-gray-200" />
+                    </div>
+
+                    {/* Check-out */}
+                    <div className="w-full" style={{ flex: '0.8 1 0', minWidth: 0 }}>
+                      <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.hotel.checkOut')}</label>
+                      <Input type="date" value={hotelCheckOut} onChange={(e) => setHotelCheckOut(e.target.value)} className="h-12 rounded-lg bg-gray-50 border-gray-200" />
+                    </div>
+
+                    {/* Room & Guest picker button */}
+                    <div className="w-full relative" style={{ flex: '1 1 0', minWidth: 0 }} ref={roomPickerRef}>
+                      <label className="block text-xs font-medium text-gray-700 mb-1.5">{t('hero.search.hotel.roomsGuests')}</label>
+                      <button
+                        onClick={() => setShowRoomPicker(!showRoomPicker)}
+                        className="w-full h-12 px-4 text-sm text-left border border-gray-200 rounded-lg bg-gray-50 text-gray-700 hover:border-gray-300 flex items-center justify-between"
+                      >
+                        <span>{roomSummary}</span>
+                        <Users className="h-4 w-4 text-gray-400" />
+                      </button>
+                      {/* Room picker dropdown */}
+                      {showRoomPicker && (
+                        <div className="absolute top-full left-0 mt-2 w-72 bg-white rounded-xl shadow-xl border border-gray-200 p-4 z-50">
+                          {/* Rooms */}
+                          <div className="flex items-center justify-between py-2">
+                            <div className="text-sm font-medium text-gray-900">{t('hero.search.hotel.room')}</div>
+                            <div className="flex items-center gap-3">
+                              <button onClick={() => setRooms(Math.max(1, rooms - 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-40" disabled={rooms <= 1}>−</button>
+                              <span className="w-6 text-center font-medium">{rooms}</span>
+                              <button onClick={() => setRooms(Math.min(8, rooms + 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50" disabled={rooms >= 8}>+</button>
+                            </div>
+                          </div>
+                          {/* Adults */}
+                          <div className="flex items-center justify-between py-2 border-t border-gray-100">
+                            <div>
+                              <div className="text-sm font-medium text-gray-900">{t('hero.search.flight.adults')}</div>
+                              <div className="text-xs text-gray-500">{t('hero.search.hotel.perRoom')}</div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <button onClick={() => setHotelAdults(Math.max(1, hotelAdults - 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-40" disabled={hotelAdults <= 1}>−</button>
+                              <span className="w-6 text-center font-medium">{hotelAdults}</span>
+                              <button onClick={() => setHotelAdults(Math.min(6, hotelAdults + 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50" disabled={hotelAdults >= 6}>+</button>
+                            </div>
+                          </div>
+                          {/* Children */}
+                          <div className="flex items-center justify-between py-2 border-t border-gray-100">
+                            <div>
+                              <div className="text-sm font-medium text-gray-900">{t('hero.search.flight.children')}</div>
+                              <div className="text-xs text-gray-500">{t('hero.search.hotel.childrenAge')}</div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <button onClick={() => setHotelChildren(Math.max(0, hotelChildren - 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-40" disabled={hotelChildren <= 0}>−</button>
+                              <span className="w-6 text-center font-medium">{hotelChildren}</span>
+                              <button onClick={() => setHotelChildren(Math.min(4, hotelChildren + 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50" disabled={hotelChildren >= 4}>+</button>
+                            </div>
+                          </div>
+                          <button onClick={() => setShowRoomPicker(false)} className="mt-3 w-full py-2 bg-black text-white text-sm font-medium rounded-lg hover:bg-gray-800">
+                            {t('common.confirm')}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Search button */}
+                    <div className="w-full md:w-36 flex-shrink-0">
+                      <Button
+                        onClick={handleHotelSearch}
+                        disabled={isHotelSearching}
+                        className="w-full h-12 bg-black hover:bg-gray-900 text-white rounded-lg font-bold shadow-md transition-all hover:shadow-lg flex items-center justify-center gap-2"
+                      >
+                        <Search className="h-4 w-4" />
+                        {isHotelSearching ? t('hero.search.searching') : t('hero.search.hotel.searchHotels')}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Trip.com note */}
+                  <p className="text-xs text-gray-400 text-center mt-1">{t('hero.search.hotel.tripComNote')}</p>
+                </>
+              )}
+
             </div>
           </div>
         </div>

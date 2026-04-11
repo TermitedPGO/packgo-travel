@@ -27,6 +27,10 @@ export function generateFlightLink(params?: {
   departDate?: string;
   returnDate?: string;
   ouid?: string;
+  adults?: number;
+  children?: number;
+  infants?: number;
+  cabinClass?: string;
 }): string {
   const deepLinkId = TRIP_COM_CONFIG.deepLinks.flights;
   const url = new URL(`${BASE_URL}/${deepLinkId}`);
@@ -38,6 +42,14 @@ export function generateFlightLink(params?: {
   if (params?.destination) url.searchParams.set("acity", params.destination);
   if (params?.departDate) url.searchParams.set("ddate", params.departDate);
   if (params?.returnDate) url.searchParams.set("rdate", params.returnDate);
+  if (params?.adults && params.adults > 1) url.searchParams.set("adult", String(params.adults));
+  if (params?.children && params.children > 0) url.searchParams.set("child", String(params.children));
+  if (params?.infants && params.infants > 0) url.searchParams.set("infant", String(params.infants));
+  if (params?.cabinClass && params.cabinClass !== 'economy') {
+    const cabinMap: Record<string, string> = { premiumEconomy: 'PremiumEconomy', business: 'Business', first: 'First' };
+    const mappedCabin = cabinMap[params.cabinClass];
+    if (mappedCabin) url.searchParams.set("cabin", mappedCabin);
+  }
 
   return url.toString();
 }
@@ -50,6 +62,9 @@ export function generateHotelLink(params?: {
   checkIn?: string;
   checkOut?: string;
   ouid?: string;
+  rooms?: number;
+  adults?: number;
+  children?: number;
 }): string {
   const deepLinkId = TRIP_COM_CONFIG.deepLinks.hotels;
   const url = new URL(`${BASE_URL}/${deepLinkId}`);
@@ -60,6 +75,9 @@ export function generateHotelLink(params?: {
   if (params?.city) url.searchParams.set("city", params.city);
   if (params?.checkIn) url.searchParams.set("checkin", params.checkIn);
   if (params?.checkOut) url.searchParams.set("checkout", params.checkOut);
+  if (params?.rooms && params.rooms > 1) url.searchParams.set("rooms", String(params.rooms));
+  if (params?.adults && params.adults > 0) url.searchParams.set("adults", String(params.adults));
+  if (params?.children && params.children > 0) url.searchParams.set("children", String(params.children));
 
   return url.toString();
 }
