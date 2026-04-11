@@ -179,18 +179,18 @@ async function startServer() {
     serveStatic(app);
   }
 
-  // Schedule zombie task cleanup every 5 minutes (timeout: 10 min)
+  // Schedule zombie task cleanup every 5 minutes (timeout: 5 min)
   try {
     const { cleanupZombieTasks } = await import('../agentActivityService');
     // Run cleanup immediately on startup
-    cleanupZombieTasks(10).then(count => {
+    cleanupZombieTasks(5).then(count => {
       if (count > 0) console.log(`[Startup] Cleaned up ${count} zombie task(s)`);
     }).catch(() => {});
     // Then run every 5 minutes
     setInterval(() => {
-      cleanupZombieTasks(10).catch(() => {});
+      cleanupZombieTasks(5).catch(() => {});
     }, 5 * 60 * 1000);
-    console.log('[Startup] Zombie task cleanup scheduler initialized (every 5 min, timeout 10 min)');
+    console.log('[Startup] Zombie task cleanup scheduler initialized (every 5 min, timeout 5 min)');
   } catch (err) {
     console.warn('[Startup] Failed to initialize zombie cleanup:', err);
   }

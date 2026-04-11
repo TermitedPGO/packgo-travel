@@ -129,7 +129,7 @@ export async function logAgentComplete(
 }
 
 /**
- * 清理殭屍任務：將超過 timeout 分鐘仍為 'started' 的任務標記為 'completed'
+ * 清理殭屍任務：將超過 timeout 分鐘仍為 'started' 的任務標記為 'failed'
  * 防止 Agent 辦公室永遠顯示「執行中」
  */
 export async function cleanupZombieTasks(timeoutMinutes = 30): Promise<number> {
@@ -155,13 +155,13 @@ export async function cleanupZombieTasks(timeoutMinutes = 30): Promise<number> {
 
     if (zombies.length === 0) return 0;
 
-    // Mark them as completed
+    // Mark them as failed (not completed) - they timed out
     await drizzleDb
       .update(agentActivityLogs)
       .set({
-        status: 'completed',
-        completedAt: sql`startedAt + INTERVAL 5 MINUTE`,
-        resultSummary: '任務已完成（系統自動修正：任務完成時未正確記錄狀態）',
+        status: 'failed',
+        completedAt: sql`NOW()`,
+        errorMessage: `任務逾時（超過 ${timeoutMinutes} 分鐘未完成）`,
       })
       .where(
         and(
@@ -170,10 +170,10 @@ export async function cleanupZombieTasks(timeoutMinutes = 30): Promise<number> {
         )
       );
 
-    // Broadcast completed events for each zombie
+    // Broadcast failed events for each zombie
     for (const zombie of zombies) {
       agentOfficeEmitter.emit('office_event', {
-        type: 'agent_completed',
+        type: 'agent_failed',
         agentName: zombie.agentName,
         activityId: zombie.id,
         timestamp: Date.now(),
