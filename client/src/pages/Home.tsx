@@ -93,7 +93,7 @@ function HomeContent() {
       <Footer />
 
       {/* Floating AI Advisor Button with Penguin Character */}
-      <div className="fixed bottom-4 right-4 z-50">
+      <div className="fixed bottom-4 right-4 z-40">
         <button
           onClick={() => setAiDialogOpen(true)}
           className="flex flex-col items-end transition-all hover:scale-105 group"

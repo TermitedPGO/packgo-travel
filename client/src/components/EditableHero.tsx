@@ -438,7 +438,7 @@ export default function EditableHero() {
           </div>
 
           {/* Tab Content */}
-          <div className="p-4 bg-white rounded-b-3xl">
+          <div className="p-4 bg-white rounded-b-3xl" style={{ minHeight: '180px' }}>
             <div className="flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
 
               {/* ═══ GROUP TOURS TAB ═══ */}
@@ -558,7 +558,7 @@ export default function EditableHero() {
                       </button>
                       {/* Passenger dropdown */}
                       {showPassengerPicker && (
-                        <div className="absolute top-full left-0 mt-2 w-72 bg-white rounded-xl shadow-xl border border-gray-200 p-4 z-50">
+                        <div className="absolute top-full mt-2 bg-white rounded-xl shadow-xl border border-gray-200 p-4 z-50 w-72 left-0">
                           {/* Adults */}
                           <div className="flex items-center justify-between py-2">
                             <div>
@@ -708,7 +708,7 @@ export default function EditableHero() {
                       </button>
                       {/* Room picker dropdown */}
                       {showRoomPicker && (
-                        <div className="absolute top-full left-0 mt-2 w-72 bg-white rounded-xl shadow-xl border border-gray-200 p-4 z-50">
+                        <div className="absolute top-full mt-2 bg-white rounded-xl shadow-xl border border-gray-200 p-4 z-50 w-full md:w-72 left-0 md:left-auto md:right-0">
                           {/* Rooms */}
                           <div className="flex items-center justify-between py-2">
                             <div className="text-sm font-medium text-gray-900">{t('hero.search.hotel.room')}</div>

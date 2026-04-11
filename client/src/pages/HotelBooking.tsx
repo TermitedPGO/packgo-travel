@@ -192,7 +192,7 @@ export default function HotelBooking() {
                     <Users className="h-4 w-4 text-gray-400" />
                   </button>
                   {showRoomPicker && (
-                    <div className="absolute top-full left-0 mt-2 w-72 bg-white rounded-xl shadow-xl border border-gray-200 p-4 z-50">
+                    <div className="absolute top-full mt-2 bg-white rounded-xl shadow-xl border border-gray-200 p-4 z-50 w-full md:w-72 left-0 md:left-auto md:right-0">
                       {/* Rooms */}
                       <div className="flex items-center justify-between py-2">
                         <div className="text-sm font-medium text-gray-900">{t('hero.search.hotel.room')}</div>
