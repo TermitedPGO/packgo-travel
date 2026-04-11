@@ -5529,3 +5529,31 @@ AI 辦公室看板中，AI 任務永遠顯示「執行中」（started 狀態）
 - [x] 錯誤 UI 測試（輸入無效 URL 觸發失敗流程）
 - [x] 修復 Zombie 清理：超時任務應標記為「失敗」而非「已完成」
 - [x] 縮短 Zombie 清理超時（10分鐘 → 5分鐘）
+
+## Round 32 — AI 核心修復 + 供應商監控系統（2026-04-11）
+### PART A：AI 核心修復
+- [ ] A1: 修復 PDF Parser — 多出發日 + 日期格式驗證 + 多幣值 + 多價格
+- [ ] A2: 修復 masterAgent — 不再丟棄出發日期，保留 extractedDepartures
+- [ ] A3: Calibration 結果存入 DB（新增 4 個欄位）+ 管理後台 AI 品質 badge
+- [ ] A4: 清理 7 個廢棄 Agent（確認無活躍引用後刪除）
+### PART B：供應商監控系統
+- [ ] B1: 建立 TourMonitorService（三層漏斗：DOM Hash → Haiku → Vision）
+- [ ] B2: 資料庫 schema 新增（tourMonitorLogs 表 + tours 新欄位）
+- [ ] B3: BullMQ 排程（每日凌晨 3:00）+ Worker
+- [ ] B4: tRPC monitor endpoints（5 個）
+- [ ] B5: 監控 Dashboard UI（MonitorDashboard.tsx + Tab 整合）
+- [ ] B6: 前台售完/緊迫感顯示（灰色日期、剩餘座位紅字、確定出發綠色）
+
+## Round 32 — AI 核心修復 + 供應商監控系統（2026-04-11）
+### PART A：AI 核心修復
+- [ ] A1: 修復 PDF Parser — 多出發日 + 日期格式驗證 + 多幣值 + 多價格
+- [ ] A2: 修復 masterAgent — 不再丟棄出發日期，保留 extractedDepartures
+- [ ] A3: Calibration 結果存入 DB（新增 4 個欄位）+ 管理後台 AI 品質 badge
+- [ ] A4: 清理 7 個廢棄 Agent（確認無活躍引用後刪除）
+### PART B：供應商監控系統
+- [ ] B1: 建立 TourMonitorService（三層漏斗：DOM Hash → Haiku → Vision）
+- [ ] B2: 資料庫 schema 新增（tourMonitorLogs 表 + tours 新欄位）
+- [ ] B3: BullMQ 排程（每日凌晨 3:00）+ Worker
+- [ ] B4: tRPC monitor endpoints（5 個）
+- [ ] B5: 監控 Dashboard UI（MonitorDashboard.tsx + Tab 整合）
+- [ ] B6: 前台售完/緊迫感顯示（灰色日期、剩餘座位紅字、確定出發綠色）

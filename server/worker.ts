@@ -173,4 +173,7 @@ tourTranslationWorker.on("error", (err) => {
 
 console.log("✅ Tour translation worker initialized");
 
+// Initialize tour monitor worker
+export { tourMonitorWorker } from "./tourMonitorWorker";
+
 export default tourGenerationWorker;

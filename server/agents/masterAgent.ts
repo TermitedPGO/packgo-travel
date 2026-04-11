@@ -355,6 +355,33 @@ export class MasterAgent {
         // Cache the PDF parse result (1 day TTL)
         await generationCache.cacheScrapeResult(url, rawData);
         
+        // A2 FIX: If no supplementUrl, build extractedTourMeta from pdfData directly
+        // This ensures allDepartureDates from PDF are preserved as extractedDepartures
+        if (!supplementUrl && pdfData.allDepartureDates && pdfData.allDepartureDates.length > 0) {
+          const pdfMeta = {
+            departureDates: pdfData.allDepartureDates.map((dateStr: string) => ({
+              date: dateStr,
+              status: 'open' as const,
+              price: pdfData.adultPrice || pdfData.price || 0,
+            })),
+            capacity: {
+              maxParticipants: pdfData.totalSlots || 20,
+              minParticipants: 0,
+            },
+            pricing: {
+              adultPrice: pdfData.adultPrice || pdfData.price || 0,
+              childWithBedPrice: pdfData.childPrice || 0,
+              childNoBedPrice: pdfData.childPriceNoBed || 0,
+              infantPrice: pdfData.infantPrice || 0,
+              currency: pdfData.currency || 'TWD',
+              priceNote: pdfData.priceNote || '',
+            },
+            productCode: pdfData.productCode || '',
+          };
+          (rawData as any).extractedTourMeta = pdfMeta;
+          console.log(`[MasterAgent] ✓ PDF extractedTourMeta built: ${pdfMeta.departureDates.length} dates from PDF`);
+        }
+
         // PDF + URL mode: also run DateExtractor on supplementUrl
         if (supplementUrl) {
           console.log(`[MasterAgent] 📎 PDF+URL mode: also scraping supplement URL: ${supplementUrl}`);

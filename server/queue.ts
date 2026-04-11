@@ -364,3 +364,89 @@ export async function addMarketingJob(data: MarketingJobData) {
 }
 
 console.log("✅ Marketing queue initialized");
+
+// ── Tour Monitor Queue ──────────────────────────────────────────────────────
+// Runs daily at 03:00 to check all active tours for supplier changes
+
+export interface TourMonitorJobData {
+  triggeredBy: "schedule" | "manual";
+  triggeredByUserId?: number;
+}
+
+export interface TourMonitorJobResult {
+  runId: string;
+  totalTours: number;
+  checkedTours: number;
+  changedTours: number;
+  failedTours: number;
+  changesCount: number;
+}
+
+/**
+ * Queue for daily supplier tour monitoring
+ * - Runs at 03:00 daily (Taiwan time, UTC+8 = 19:00 UTC)
+ * - Manual trigger also supported via tRPC
+ */
+export const tourMonitorQueue = new Queue<TourMonitorJobData, TourMonitorJobResult>(
+  "tour-monitor",
+  {
+    connection: redisBullMQ,
+    defaultJobOptions: {
+      attempts: 2,
+      backoff: {
+        type: "exponential",
+        delay: 60000, // 1 minute
+      },
+      removeOnComplete: {
+        age: 604800, // 7 days
+        count: 100,
+      },
+      removeOnFail: {
+        age: 2592000, // 30 days
+        count: 50,
+      },
+    },
+  }
+);
+
+/**
+ * Schedule the daily tour monitor job at 03:00 Taiwan time (19:00 UTC)
+ */
+export async function scheduleDailyTourMonitor() {
+  // Remove existing repeatable jobs first to avoid duplicates
+  const repeatableJobs = await tourMonitorQueue.getRepeatableJobs();
+  for (const job of repeatableJobs) {
+    if (job.name === "daily-tour-monitor") {
+      await tourMonitorQueue.removeRepeatableByKey(job.key);
+    }
+  }
+
+  // Schedule: every day at 19:00 UTC = 03:00 Taiwan time (UTC+8)
+  await tourMonitorQueue.add(
+    "daily-tour-monitor",
+    { triggeredBy: "schedule" },
+    {
+      repeat: {
+        pattern: "0 19 * * *", // 19:00 UTC = 03:00 Taiwan
+      },
+      jobId: "daily-tour-monitor-scheduled",
+    }
+  );
+  console.log("✅ Daily tour monitor scheduled at 03:00 Taiwan time (19:00 UTC)");
+}
+
+/**
+ * Manually trigger a tour monitor run
+ */
+export async function triggerManualTourMonitor(userId?: number) {
+  const jobId = `tour-monitor-manual-${Date.now()}`;
+  const job = await tourMonitorQueue.add(
+    "manual-tour-monitor",
+    { triggeredBy: "manual", triggeredByUserId: userId },
+    { jobId }
+  );
+  console.log(`✅ Manual tour monitor triggered: ${job.id}`);
+  return job;
+}
+
+console.log("✅ Tour monitor queue initialized");

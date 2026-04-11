@@ -18,6 +18,7 @@ import {
   ListChecks,
   CheckCircle2,
   Binoculars,
+  Activity,
   Megaphone,
   FileText,
   DollarSign,
@@ -43,8 +44,9 @@ import MarketingTab from "@/components/admin/MarketingTab";
 import VisaManagementTab from "@/components/admin/VisaManagementTab";
 import AffiliateTab from "@/components/admin/AffiliateTab";
 import AccountingTab from "@/components/admin/AccountingTab";
+import MonitorDashboard from "@/components/admin/MonitorDashboard";
 
-type AdminTab = "dashboard" | "tours" | "bookings" | "inquiries" | "reviews" | "ai-hub" | "analytics" | "task-history" | "calibration-review" | "competitor-monitor" | "marketing" | "visa" | "affiliate" | "accounting";
+type AdminTab = "dashboard" | "tours" | "bookings" | "inquiries" | "reviews" | "ai-hub" | "analytics" | "task-history" | "calibration-review" | "competitor-monitor" | "tour-monitor" | "marketing" | "visa" | "affiliate" | "accounting";
 
 export default function Admin() {
   const { user, loading, isAuthenticated, logout } = useAuth();
@@ -91,6 +93,7 @@ export default function Admin() {
         { id: 'task-history', icon: ListChecks, label: 'AI 任務記錄' },
         { id: 'calibration-review', icon: CheckCircle2, label: 'QA 品質審查' },
         { id: 'competitor-monitor', icon: Binoculars, label: '競品監控', badge: typeof competitorUnread === 'number' && competitorUnread > 0 ? competitorUnread : undefined },
+        { id: 'tour-monitor', icon: Activity, label: '供應商監控' },
         { id: 'marketing', icon: Megaphone, label: '行銷自動化' },
       ],
     },
@@ -290,6 +293,7 @@ export default function Admin() {
           {activeTab === "task-history" && <TaskHistoryContent />}
           {activeTab === "calibration-review" && <CalibrationReviewTab />}
           {activeTab === "competitor-monitor" && <CompetitorMonitorTab />}
+          {activeTab === "tour-monitor" && <MonitorDashboard />}
           {activeTab === "marketing" && <MarketingTab />}
           {activeTab === "visa" && <VisaManagementTab />}
           {activeTab === "affiliate" && <AffiliateTab />}

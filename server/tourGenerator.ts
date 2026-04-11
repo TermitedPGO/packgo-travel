@@ -168,6 +168,7 @@ export async function generateTourFromUrlInternal(
     // Save calibration result to DB (non-blocking)
     if (result.calibrationReport) {
       const cr = result.calibrationReport;
+      // Save to calibrationResults table (detailed history)
       saveCalibrationResult({
         tourId: tour.id,
         contentFidelityScore: cr.contentFidelityScore,
@@ -181,6 +182,15 @@ export async function generateTourFromUrlInternal(
         autoFixesApplied: JSON.stringify(cr.autoFixesApplied),
       }).catch((err) => {
         console.warn('[TourGenerator] Failed to save calibration result:', err);
+      });
+      // Also save summary fields to tours table for quick display in admin UI
+      updateTour(tour.id, {
+        calibrationScore: cr.totalScore,
+        calibrationVerdict: cr.verdict,
+        calibrationReport: JSON.stringify({ issues: cr.issues, autoFixesApplied: cr.autoFixesApplied }),
+        calibratedAt: new Date(),
+      } as any).catch((err) => {
+        console.warn('[TourGenerator] Failed to save calibration fields to tours:', err);
       });
     }
     

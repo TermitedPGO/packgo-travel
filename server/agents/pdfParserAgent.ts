@@ -22,8 +22,17 @@ export interface PdfParseResult {
   subtitle: string;
   productCode: string;
   departureDate: string;
+  returnDate: string;
+  allDepartureDates: string[];
   duration: number;
   price: number;
+  adultPrice: number;
+  childPrice: number;
+  childPriceNoBed: number;
+  infantPrice: number;
+  singleSupplement: number;
+  currency: string;
+  totalSlots: number;
   priceNote: string;
   destinations: string[];
   country: string;
@@ -146,9 +155,18 @@ function buildJsonSchema(): string {
   "title": "行程標題",
   "subtitle": "行程副標題",
   "productCode": "產品代碼",
-  "departureDate": "出發日期",
+  "departureDate": "最早的出發日期，必須為 YYYY-MM-DD 格式（如 2026-05-15）。若無法確定精確日期，填空字串。",
+  "returnDate": "回程日期，YYYY-MM-DD 格式。若無明確回程日，根據天數推算。",
+  "allDepartureDates": "所有出發日期陣列，每個必須 YYYY-MM-DD 格式。如 [\"2026-05-01\", \"2026-05-08\"]。有多個梯次全部列出。若只有一個日期，也用陣列格式。",
+  "adultPrice": "成人價格（純數字，去掉貨幣符號和逗號，如 NT$18,000 → 18000）",
+  "childPrice": "兒童價格（有床）純數字。若無此資訊填 0。",
+  "childPriceNoBed": "兒童不佔床價格，純數字。若無填 0。",
+  "infantPrice": "嬰兒價格，純數字。若無填 0。",
+  "singleSupplement": "單人房差價，純數字。若無填 0。",
+  "currency": "價格幣值：TWD / USD / JPY / EUR / KRW / THB / VND / SGD / AUD / GBP / CHF。根據 PDF 內容判斷，無法確定預設 TWD。",
+  "totalSlots": "團位人數上限，純數字。若無填 20。",
   "duration": 天數（數字）,
-  "price": 價格（數字，如 NT$18,000 → 18000）,
+  "price": 成人價格（數字，如 NT$18,000 → 18000，與 adultPrice 相同）,
   "priceNote": "價格備註",
   "destinations": ["目的地1", "目的地2"],
   "country": "國家",
@@ -285,14 +303,48 @@ export async function parsePdf(
       });
     }
 
+    // 日期驗證函數
+    const isValidDate = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d);
+    // 過濾有效出發日期
+    const rawAllDates: string[] = Array.isArray(analysisResult.allDepartureDates)
+      ? analysisResult.allDepartureDates.filter(isValidDate)
+      : [];
+    // departureDate 驗證與 fallback
+    let departureDate = isValidDate(analysisResult.departureDate || '') ? analysisResult.departureDate : '';
+    if (!departureDate && rawAllDates.length > 0) departureDate = rawAllDates[0];
+    // returnDate 推算
+    let returnDate = isValidDate(analysisResult.returnDate || '') ? analysisResult.returnDate : '';
+    if (!returnDate && departureDate) {
+      const d = new Date(departureDate);
+      d.setDate(d.getDate() + (analysisResult.duration || 1) - 1);
+      returnDate = d.toISOString().split('T')[0];
+    }
+    // 價格確保為正數
+    const adultPrice = Math.max(0, Number(analysisResult.adultPrice || analysisResult.price || 0));
+    const childPrice = Math.max(0, Number(analysisResult.childPrice || 0));
+    const childPriceNoBed = Math.max(0, Number(analysisResult.childPriceNoBed || 0));
+    const infantPrice = Math.max(0, Number(analysisResult.infantPrice || 0));
+    const singleSupplement = Math.max(0, Number(analysisResult.singleSupplement || 0));
+    const currency = analysisResult.currency || 'TWD';
+    const totalSlots = Math.max(1, Number(analysisResult.totalSlots || 20));
+
     // 構建結果
     const result: PdfParseResult = {
       title: analysisResult.title || "未命名行程",
       subtitle: analysisResult.subtitle || "",
       productCode: analysisResult.productCode || "",
-      departureDate: analysisResult.departureDate || "",
+      departureDate,
+      returnDate,
+      allDepartureDates: rawAllDates,
+      adultPrice,
+      childPrice,
+      childPriceNoBed,
+      infantPrice,
+      singleSupplement,
+      currency,
+      totalSlots,
       duration: analysisResult.duration || 1,
-      price: analysisResult.price || 0,
+      price: adultPrice || analysisResult.price || 0,
       priceNote: analysisResult.priceNote || "",
       destinations: analysisResult.destinations || [],
       country: analysisResult.country || "台灣",

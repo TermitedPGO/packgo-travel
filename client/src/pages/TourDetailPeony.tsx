@@ -266,6 +266,9 @@ const DeparturePriceCalendar = ({
           const isSelected = departure && selectedDeparture === departure.id;
           const isPast = date && date < new Date(new Date().setHours(0, 0, 0, 0));
           const isFull = departure?.status === 'full';
+          const isConfirmed = departure?.status === 'confirmed';
+          const remainingSeats = departure ? (departure.totalSlots ?? 0) - (departure.bookedSlots ?? 0) : 0;
+          const isLowSeats = !isFull && departure && departure.totalSlots && remainingSeats <= 5 && remainingSeats > 0;
           
           return (
             <div 
@@ -274,6 +277,7 @@ const DeparturePriceCalendar = ({
                 min-h-[90px] p-3 border-b border-r border-gray-50 relative transition-all duration-200
                 ${!date ? 'bg-gray-50/50' : 'bg-white'}
                 ${isPast ? 'bg-gray-50/50 opacity-40' : ''}
+                ${isFull && !isPast ? 'bg-gray-100 opacity-60' : ''}
                 ${departure && !isPast && !isFull ? 'cursor-pointer hover:bg-gray-50 hover:shadow-inner' : ''}
                 ${isSelected ? 'bg-blue-50 shadow-inner' : ''}
               `}
@@ -300,9 +304,14 @@ const DeparturePriceCalendar = ({
                   {departure && (
                     <div className="mt-auto">
                       {isFull ? (
-                        <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-lg">{t('tourDetail.soldOut')}</span>
+                        <span className="text-xs text-gray-400 bg-gray-200 px-2 py-1 rounded-lg">{t('tourDetail.soldOut')}</span>
                       ) : (
                         <>
+                          {isConfirmed && (
+                            <span className="text-[9px] font-bold text-green-700 bg-green-100 px-1.5 py-0.5 rounded mb-0.5 inline-block">
+                              ✓ {t('tourDetail.confirmed') || '確定出發'}
+                            </span>
+                          )}
                           <div 
                             className="text-xs font-bold px-2 py-1 rounded-lg text-white shadow-sm"
                             style={{ backgroundColor: themeColor.secondary }}
@@ -310,8 +319,10 @@ const DeparturePriceCalendar = ({
                             ${(departure.adultPrice || basePrice).toLocaleString()}
                           </div>
                           {departure.totalSlots && (
-                            <p className="text-[10px] text-gray-500 mt-1 font-medium">
-                              {(t('tourDetail.remainingSeats') || '剩 {seats} 位').replace('{seats}', String(departure.totalSlots - (departure.bookedSlots || 0)))}
+                            <p className={`text-[10px] mt-1 font-medium ${isLowSeats ? 'text-red-500 font-bold' : 'text-gray-500'}`}>
+                              {isLowSeats
+                                ? `⚡ ${(t('tourDetail.remainingSeats') || '剩 {seats} 位').replace('{seats}', String(remainingSeats))}`
+                                : (t('tourDetail.remainingSeats') || '剩 {seats} 位').replace('{seats}', String(remainingSeats))}
                             </p>
                           )}
                         </>

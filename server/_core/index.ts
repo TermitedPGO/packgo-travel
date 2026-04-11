@@ -195,6 +195,14 @@ async function startServer() {
     console.warn('[Startup] Failed to initialize zombie cleanup:', err);
   }
 
+  // Schedule daily tour monitor at 03:00 Taiwan time (19:00 UTC)
+  try {
+    const { scheduleDailyTourMonitor } = await import('../queue');
+    await scheduleDailyTourMonitor();
+  } catch (err) {
+    console.warn('[Startup] Failed to schedule daily tour monitor:', err);
+  }
+
   const preferredPort = parseInt(process.env.PORT || "3000");
   
   // Set SO_REUSEADDR option before listening

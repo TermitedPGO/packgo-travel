@@ -204,6 +204,17 @@ export const tours = mysqlTable("tours", {
   // JSON 格式：{departureDates: [{date, status, price?}], capacity: {maxParticipants, minParticipants?}, pricing: {adultPrice, childWithBedPrice?, childNoBedPrice?, infantPrice?, currency, priceNote?}, productCode?}
   extractedDepartures: text("extractedDepartures"), // JSON - DateExtractor result pending admin confirmation
   
+  // Supplier Monitor fields (updated by TourMonitorService)
+  lastMonitoredAt: timestamp("lastMonitoredAt"), // when the tour was last checked
+  monitorStatus: varchar("monitorStatus", { length: 20 }), // 'ok' | 'changed' | 'error'
+  monitorChangeSummary: text("monitorChangeSummary"), // latest change summary
+
+  // Calibration QA fields (from CalibrationAgent)
+  calibrationScore: int("calibrationScore"), // 0-100 total score
+  calibrationVerdict: varchar("calibrationVerdict", { length: 20 }), // 'pass' | 'warn' | 'fail'
+  calibrationReport: text("calibrationReport"), // JSON - full CalibrationReport
+  calibratedAt: timestamp("calibratedAt"), // when calibration was last run
+
   // Metadata
   createdBy: int("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -1622,3 +1633,42 @@ export const recurringExpenses = mysqlTable("recurringExpenses", {
 });
 export type RecurringExpense = typeof recurringExpenses.$inferSelect;
 export type InsertRecurringExpense = typeof recurringExpenses.$inferInsert;
+
+// ── 供應商監控日誌 ──────────────────────────────────────────────────
+// Stores results of daily supplier monitoring runs (price changes, seat availability, etc.)
+export const tourMonitorLogs = mysqlTable("tourMonitorLogs", {
+  id: int("id").autoincrement().primaryKey(),
+  tourId: int("tourId").notNull(), // references tours.id
+  monitoredAt: timestamp("monitoredAt").defaultNow().notNull(), // when this check ran
+  sourceUrl: varchar("sourceUrl", { length: 1024 }), // URL that was checked
+  
+  // Departure availability changes
+  departureDate: varchar("departureDate", { length: 20 }), // YYYY-MM-DD
+  previousStatus: varchar("previousStatus", { length: 20 }), // 'open' | 'soldout' | 'confirmed' | 'cancelled'
+  currentStatus: varchar("currentStatus", { length: 20 }), // 'open' | 'soldout' | 'confirmed' | 'cancelled'
+  
+  // Price changes
+  previousPrice: int("previousPrice"), // in TWD
+  currentPrice: int("currentPrice"), // in TWD
+  priceChanged: int("priceChanged").default(0), // 0=no, 1=yes
+  
+  // Seat availability
+  previousSeats: int("previousSeats"),
+  currentSeats: int("currentSeats"),
+  seatsChanged: int("seatsChanged").default(0), // 0=no, 1=yes
+  
+  // Overall change detection
+  hasChanges: int("hasChanges").default(0), // 0=no changes, 1=changes detected
+  changesSummary: text("changesSummary"), // human-readable summary of changes
+  rawSnapshot: text("rawSnapshot"), // JSON - raw scraped data snapshot
+  
+  // Monitor run metadata
+  runId: varchar("runId", { length: 64 }), // unique ID per monitoring run (groups all tours in one run)
+  status: mysqlEnum("status", ["success", "failed", "skipped"]).default("success").notNull(),
+  errorMessage: text("errorMessage"), // if status=failed
+  durationMs: int("durationMs"), // how long this check took
+  
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type TourMonitorLog = typeof tourMonitorLogs.$inferSelect;
+export type InsertTourMonitorLog = typeof tourMonitorLogs.$inferInsert;
