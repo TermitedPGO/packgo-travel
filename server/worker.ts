@@ -18,10 +18,11 @@ import { translateTour, Language } from "./translation";
  * - Worker 只負責初始化和錯誤處理
  * - 進度百分比由 MasterAgent 根據實際執行階段計算
  *
- * Redis 請求量優化說明（2026-03-28）：
+ * Redis 請求量優化設明（2026-03-28）：
  * - drainDelay: 30s（預設 5s）→ 空閒時每 30 秒才 long-poll 一次，減少 ~83% idle 請求
- * - stalledInterval: 300s（預設 30s）→ 每 5 分鐘才檢查 stalled job，減少 ~90% 檢查請求
+ * - stalledInterval: 600s（Round 36: 從 300s 延長）→ 每 10 分鐘才檢查 stalled job
  * - concurrency: 1（預設 1）→ 行程生成是重型 AI 任務，不需要並行
+ * Round 36 修復： lockDuration 20分鐘→ 40分鐘， lockRenewTime 10分鐘→ 5分鐘（更頻繁更新）
  * 預估每日 Redis 請求量：~8,000 次（原本 ~50,000+ 次）
  */
 export const tourGenerationWorker = new Worker<TourGenerationJobData, TourGenerationResult>(
@@ -76,8 +77,8 @@ export const tourGenerationWorker = new Worker<TourGenerationJobData, TourGenera
   {
     connection: redisBullMQ, // BUG-001: use dedicated connection without commandTimeout
     concurrency: 1, // 行程生成是重型 AI 任務，單一並行即可
-    lockDuration: 1200000, // 20 分鐘鎖定（長任務需要）
-    lockRenewTime: 600000, // 每 10 分鐘更新鎖定
+    lockDuration: 2400000, // 40 分鐘鎖定（Round 36: 從 20分鐘提升，給 SPA 爬蟲+LLM 足夠時間）
+    lockRenewTime: 300000,  // 每 5 分鐘更新鎖定（Round 36: 從 10分鐘縮短，更頻繁更新避免 stall）
     maxStalledCount: 3, // 最多 3 次 stalled 重試
 
     // === Redis 請求量優化設定 ===
@@ -86,9 +87,9 @@ export const tourGenerationWorker = new Worker<TourGenerationJobData, TourGenera
     drainDelay: 30,
 
     // stalledInterval: 檢查 stalled job 的間隔（毫秒）
-    // 預設 30,000ms → 改為 300,000ms（5 分鐘）
-    // 行程生成任務本身就需要數分鐘，5 分鐘檢查一次已足夠
-    stalledInterval: 300000,
+    // Round 36: 從 300,000ms（5分鐘）延長到 600,000ms（10分鐘）
+    // 行程生成需要 2-5 分鐘，10 分鐘檢查一次已足夠
+    stalledInterval: 600000,
 
     limiter: {
       max: 10, // 每分鐘最多 10 個任務

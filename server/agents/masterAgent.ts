@@ -438,8 +438,9 @@ export class MasterAgent {
         onProgress?.("rendering_page", 10);
         
         let scrapeResult: import('../services/dynamicScraperService').DynamicScrapeResult | Partial<import('../services/dynamicScraperService').DynamicScrapeResult>;
-        // Overall scraping timeout: 45 seconds to prevent hanging on invalid/unreachable URLs
-        const SCRAPE_TIMEOUT_MS = 45000;
+        // Overall scraping timeout: 90 seconds to allow for slow SPA sites like liontravel.com
+        // liontravel.com is a React SPA: networkidle2 (~20s) + domcontentloaded fallback (~20s) + autoScroll (~10s) + screenshot (~5s) = ~55s minimum
+        const SCRAPE_TIMEOUT_MS = 90000;
         const scrapeTimeoutPromise = new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error(`爬取逾時（${SCRAPE_TIMEOUT_MS / 1000} 秒）。請確認 URL 是否可正常存取，或改用 PDF 上傳方式。`)), SCRAPE_TIMEOUT_MS)
         );

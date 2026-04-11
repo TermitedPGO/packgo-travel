@@ -86,27 +86,32 @@ export async function scrapeDynamicPage(url: string): Promise<DynamicScrapeResul
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     );
 
-    // 設定超時 30 秒
-    page.setDefaultNavigationTimeout(30000);
-    page.setDefaultTimeout(30000);
+    // 設定超時 25 秒（給足夠時間但不過長）
+    page.setDefaultNavigationTimeout(25000);
+    page.setDefaultTimeout(25000);
 
     // 導航到目標 URL
+    // Strategy: try networkidle2 (20s) first for static sites; SPA sites like liontravel.com will timeout
+    // and fall back to domcontentloaded (20s) + 5s JS execution wait
     console.log(`[DynamicScraper] Navigating to: ${url}`);
     try {
       await page.goto(url, {
         waitUntil: 'networkidle2',
-        timeout: 30000,
+        timeout: 20000, // Reduced from 30s to 20s - SPAs rarely achieve networkidle2
       });
+      console.log(`[DynamicScraper] ✓ networkidle2 achieved`);
     } catch (navErr) {
-      // 如果 networkidle2 超時，嘗試 domcontentloaded
-      console.warn(`[DynamicScraper] networkidle2 timeout, falling back to domcontentloaded`);
+      // SPA sites like liontravel.com will always timeout on networkidle2
+      // Fall back to domcontentloaded and wait for JS to execute
+      console.warn(`[DynamicScraper] networkidle2 timeout (expected for SPAs), falling back to domcontentloaded`);
       try {
         await page.goto(url, {
           waitUntil: 'domcontentloaded',
           timeout: 20000,
         });
-        // 等待額外 3 秒讓 JS 執行
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        // Wait 5 seconds for SPA JS framework to render content (React/Vue/Angular)
+        console.log(`[DynamicScraper] domcontentloaded OK, waiting 5s for SPA rendering...`);
+        await new Promise(resolve => setTimeout(resolve, 5000));
       } catch (fallbackErr) {
         console.warn(`[DynamicScraper] Navigation fallback also failed, using partial content`);
       }
