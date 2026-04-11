@@ -58,6 +58,20 @@ const DURATION_PRESETS = [
   { labelZh: "16 天以上", labelEn: "16+ Days",     min: 16, max: undefined as number | undefined },
 ];
 
+// Country flag emoji helper
+function getFlagEmoji(country: string): string {
+  const flags: Record<string, string> = {
+    "日本": "🇯🇵", "韓國": "🇰🇷", "台灣": "🇹🇼", "泰國": "🇹🇭",
+    "越南": "🇻🇳", "新加坡": "🇸🇬", "馬來西亞": "🇲🇾", "印尼": "🇮🇩",
+    "菲律賓": "🇵🇭", "帛琉": "🇵🇼", "澳洲": "🇦🇺", "紐西蘭": "🇳🇿",
+    "美國": "🇺🇸", "加拿大": "🇨🇦", "英國": "🇬🇧", "法國": "🇫🇷",
+    "德國": "🇩🇪", "義大利": "🇮🇹", "西班牙": "🇪🇸", "瑞士": "🇨🇭",
+    "希臘": "🇬🇷", "土耳其": "🇹🇷", "埃及": "🇪🇬", "摩洛哥": "🇲🇦",
+    "中國": "🇨🇳", "香港": "🇭🇰", "澳門": "🇲🇴",
+  };
+  return flags[country] || "🌍";
+}
+
 function TourCard({
   tour,
   language,
@@ -79,6 +93,12 @@ function TourCard({
     return translations?.title || tour.title;
   }, [language, translations, tour.title]);
 
+  // Fetch next departure for this tour
+  const { data: nextDeparture } = trpc.departures.getNext.useQuery(
+    { tourId: tour.id },
+    { staleTime: 1000 * 60 * 5 }
+  );
+
   // Determine included items from tour data
   const includedTags = useMemo(() => {
     const tags: { icon: typeof Plane; labelZh: string; labelEn: string }[] = [];
@@ -97,6 +117,16 @@ function TourCard({
   }, [tour.included]);
 
   const isEn = language === "en";
+
+  // Format departure date
+  const nextDepartureLabel = useMemo(() => {
+    if (!nextDeparture?.departureDate) return null;
+    const d = new Date(nextDeparture.departureDate);
+    if (isEn) {
+      return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    }
+    return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
+  }, [nextDeparture, isEn]);
 
   return (
     <Card className="overflow-hidden hover:shadow-lg transition-all duration-300 group border border-gray-200 flex flex-col">
@@ -152,12 +182,27 @@ function TourCard({
         </Link>
 
         {/* Location */}
-        <div className="flex items-center text-gray-500 mb-3">
+        <div className="flex items-center text-gray-500 mb-2">
           <MapPin className="h-3.5 w-3.5 mr-1 flex-shrink-0" />
           <span className="text-xs">
             {translateDestination(tour.destinationCountry || '', language)}{tour.destinationCity ? ` · ${translateDestination(tour.destinationCity, language)}` : ""}
           </span>
         </div>
+
+        {/* Next Departure Date */}
+        {nextDepartureLabel && (
+          <div className="flex items-center text-gray-500 mb-2">
+            <Calendar className="h-3.5 w-3.5 mr-1 flex-shrink-0 text-teal-600" />
+            <span className="text-xs text-teal-700 font-medium">
+              {isEn ? "Next: " : "最近出發："}{nextDepartureLabel}
+            </span>
+            {nextDeparture?.totalSlots && nextDeparture.bookedSlots !== undefined && (
+              <span className="ml-2 text-xs text-gray-400">
+                ({nextDeparture.totalSlots - nextDeparture.bookedSlots} {isEn ? "seats left" : "席"})
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Included Tags */}
         {includedTags.length > 0 && (
@@ -261,6 +306,7 @@ export default function Tours() {
   const [selectedDurationIdx, setSelectedDurationIdx] = useState<number>(0);
   const [selectedSortBy, setSelectedSortBy] = useState<string>("popular");
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [selectedCountry, setSelectedCountry] = useState<string>("all");
   const [page, setPage] = useState(1);
 
   // Sync category when URL changes (e.g. navigating from header menu)
@@ -278,6 +324,27 @@ export default function Tours() {
   const handleCategoryChange = useCallback((value: string) => { setSelectedCategory(value); resetPage(); }, [resetPage]);
   const handleDurationChange = useCallback((idx: number) => { setSelectedDurationIdx(idx); resetPage(); }, [resetPage]);
   const handleSortChange = useCallback((value: string) => { setSelectedSortBy(value); resetPage(); }, [resetPage]);
+  const handleCountryChange = useCallback((country: string) => {
+    setSelectedCountry(country);
+    // When selecting a country, also set it as the destination search
+    if (country !== "all") {
+      setSearchInput(country);
+    } else {
+      setSearchInput("");
+    }
+    resetPage();
+  }, [resetPage]);
+
+  // Fetch filter options to get destination countries
+  const { data: filterOptions } = trpc.tours.getFilterOptions.useQuery(undefined, {
+    staleTime: 1000 * 60 * 5,
+  });
+
+  // Top destinations (show max 8 countries)
+  const topDestinations = useMemo(() => {
+    if (!filterOptions?.destinations) return [];
+    return filterOptions.destinations.slice(0, 8);
+  }, [filterOptions]);
 
   const searchParams = {
     destination: debouncedSearch || undefined,
@@ -308,6 +375,7 @@ export default function Tours() {
     setSelectedCategory("all");
     setSelectedDurationIdx(0);
     setSelectedSortBy("popular");
+    setSelectedCountry("all");
     setPage(1);
   }, []);
 
@@ -335,6 +403,46 @@ export default function Tours() {
             <p className="text-xl text-gray-300">{t("tours.subtitle")}</p>
           </div>
         </section>
+
+        {/* Destination Country Quick Filter */}
+        {topDestinations.length > 0 && (
+          <section className="bg-white border-b py-3">
+            <div className="container">
+              <div className="flex items-center gap-2 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+                <span className="flex-shrink-0 text-xs text-gray-500 font-medium whitespace-nowrap">
+                  {language === "en" ? "Destination:" : "目的地："}
+                </span>
+                <button
+                  onClick={() => handleCountryChange("all")}
+                  className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-all duration-200 ${
+                    selectedCountry === "all"
+                      ? "bg-teal-700 text-white border-teal-700"
+                      : "bg-white text-gray-600 border-gray-200 hover:border-teal-400 hover:bg-teal-50"
+                  }`}
+                >
+                  🌍 {language === "en" ? "All" : "全部"}
+                </button>
+                {topDestinations.map((dest) => (
+                  <button
+                    key={dest.country}
+                    onClick={() => handleCountryChange(dest.country)}
+                    className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-all duration-200 ${
+                      selectedCountry === dest.country
+                        ? "bg-teal-700 text-white border-teal-700"
+                        : "bg-white text-gray-600 border-gray-200 hover:border-teal-400 hover:bg-teal-50"
+                    }`}
+                  >
+                    <span>{getFlagEmoji(dest.country)}</span>
+                    <span>{translateDestination(dest.country, language)}</span>
+                    <span className={`text-xs ${selectedCountry === dest.country ? "text-teal-100" : "text-gray-400"}`}>
+                      ({dest.count})
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* Filter Bar */}
         <section className="bg-white border-b sticky top-0 z-10 shadow-sm">

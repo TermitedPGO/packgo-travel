@@ -411,14 +411,23 @@ export class MasterAgent {
         onProgress?.("rendering_page", 10);
         
         let scrapeResult: import('../services/dynamicScraperService').DynamicScrapeResult | Partial<import('../services/dynamicScraperService').DynamicScrapeResult>;
+        // Overall scraping timeout: 45 seconds to prevent hanging on invalid/unreachable URLs
+        const SCRAPE_TIMEOUT_MS = 45000;
+        const scrapeTimeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`爬取逾時（${SCRAPE_TIMEOUT_MS / 1000} 秒）。請確認 URL 是否可正常存取，或改用 PDF 上傳方式。`)), SCRAPE_TIMEOUT_MS)
+        );
         try {
           const { scrapeDynamicPage } = await import('../services/dynamicScraperService');
-          scrapeResult = await scrapeDynamicPage(url);
+          scrapeResult = await Promise.race([scrapeDynamicPage(url), scrapeTimeoutPromise]);
           console.log(`[MasterAgent] ✓ Dynamic scrape completed: ${scrapeResult.renderedHtml?.length || 0} chars HTML, ${scrapeResult.rawText?.length || 0} chars text`);
         } catch (scrapeErr) {
+          // If it's a timeout error, re-throw immediately without fallback
+          if (scrapeErr instanceof Error && scrapeErr.message.includes('爬取逾時')) {
+            throw scrapeErr;
+          }
           console.warn('[MasterAgent] Puppeteer scrape failed, falling back to static HTTP:', scrapeErr);
           const { scrapeStaticFallback } = await import('../services/dynamicScraperService');
-          scrapeResult = await scrapeStaticFallback(url);
+          scrapeResult = await Promise.race([scrapeStaticFallback(url), scrapeTimeoutPromise]);
         }
         
         if (taskId) progressTracker.completePhase(taskId, 'dynamic_render');

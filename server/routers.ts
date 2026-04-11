@@ -1598,6 +1598,32 @@ export const appRouter = router({
 
   // Departures management router
   departures: router({
+    // Get next upcoming departure for a single tour
+    getNext: publicProcedure
+      .input(z.object({ tourId: z.number() }))
+      .query(async ({ input }) => {
+        const allDepartures = await db.getTourDepartures(input.tourId);
+        const now = new Date();
+        const upcoming = (allDepartures as any[])
+          .filter((d: any) => d.status !== 'cancelled' && new Date(d.departureDate) > now)
+          .sort((a: any, b: any) => new Date(a.departureDate).getTime() - new Date(b.departureDate).getTime());
+        return upcoming[0] || null;
+      }),
+    // Get next upcoming departure for multiple tours (batch)
+    getNextBatch: publicProcedure
+      .input(z.object({ tourIds: z.array(z.number()) }))
+      .query(async ({ input }) => {
+        const result: Record<number, any> = {};
+        const now = new Date();
+        await Promise.all(input.tourIds.map(async (tourId) => {
+          const allDepartures = await db.getTourDepartures(tourId);
+          const upcoming = (allDepartures as any[])
+            .filter((d: any) => d.status !== 'cancelled' && new Date(d.departureDate) > now)
+            .sort((a: any, b: any) => new Date(a.departureDate).getTime() - new Date(b.departureDate).getTime());
+          result[tourId] = upcoming[0] || null;
+        }));
+        return result;
+      }),
     // Get all departures for a tour
     list: publicProcedure
       .input(z.object({ tourId: z.number() }))
