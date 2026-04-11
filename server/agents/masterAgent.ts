@@ -570,6 +570,13 @@ export class MasterAgent {
         
         rawData = urlRawData;
         
+        // Validate that we have enough content to generate a meaningful tour
+        const rawTextLength = scrapeResult.rawText?.length || 0;
+        const hasPageTitle = !!(scrapeResult.pageTitle && scrapeResult.pageTitle.trim().length > 5);
+        if (rawTextLength < 200 && !hasPageTitle) {
+          throw new Error(`無法從此 URL 取得足夠的行程資訊（僅取得 ${rawTextLength} 字元）。請確認 URL 是否為有效的旅遊行程頁面，例如：https://travel.liontravel.com/detail?...`);
+        }
+        
         // Cache the scrape result
         await generationCache.cacheScrapeResult(url, rawData);
       }
