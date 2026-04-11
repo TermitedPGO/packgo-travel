@@ -179,18 +179,20 @@ async function startServer() {
     serveStatic(app);
   }
 
-  // Schedule zombie task cleanup every 5 minutes (timeout: 5 min)
+  // Schedule zombie task cleanup every 10 minutes (timeout: 25 min)
+  // Round 36-Fix-2: 從 5 分鐘延長到 25 分鐘，避免誤殺正在執行的任務
+  // 排程間隔從 5 分鐘改為 10 分鐘，減少不必要的 DB 查詢
   try {
     const { cleanupZombieTasks } = await import('../agentActivityService');
     // Run cleanup immediately on startup
-    cleanupZombieTasks(5).then(count => {
+    cleanupZombieTasks(25).then(count => {
       if (count > 0) console.log(`[Startup] Cleaned up ${count} zombie task(s)`);
     }).catch(() => {});
-    // Then run every 5 minutes
+    // Then run every 10 minutes
     setInterval(() => {
-      cleanupZombieTasks(5).catch(() => {});
-    }, 5 * 60 * 1000);
-    console.log('[Startup] Zombie task cleanup scheduler initialized (every 5 min, timeout 5 min)');
+      cleanupZombieTasks(25).catch(() => {});
+    }, 10 * 60 * 1000);
+    console.log('[Startup] Zombie task cleanup scheduler initialized (every 10 min, timeout 25 min)');
   } catch (err) {
     console.warn('[Startup] Failed to initialize zombie cleanup:', err);
   }
