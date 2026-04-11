@@ -1330,8 +1330,8 @@ export class MasterAgent {
         });
       }
 
-      // 清理可能殘留的殭屍任務（5 分鐘未完成的 started 任務）
-      cleanupZombieTasks(5).catch(() => {});
+      // 清理可能殘留的殭屍任務（Round 36-Fix: 從 5 分鐘延長到 25 分鐘，避免誤殺正在執行的任務）
+      cleanupZombieTasks(25).catch(() => {});
 
       return {
         success: true,
@@ -1360,8 +1360,8 @@ export class MasterAgent {
         });
       }
 
-      // 失敗時也清理殭屍任務（sub-agent 可能已 logAgentStart 但未 logAgentComplete）
-      cleanupZombieTasks(5).catch(() => {});
+      // 失敗時也清理殭屍任務（Round 36-Fix: 從 5 分鐘延長到 25 分鐘，避免誤殺正在執行的任務）
+      cleanupZombieTasks(25).catch(() => {});
       
       return {
         success: false,

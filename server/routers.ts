@@ -2227,13 +2227,14 @@ export const appRouter = router({
           .groupBy(llmUsageLogs.agentName);
 
         // 最近 10 筆正在執行中的任務（只顯示 status='started' 的任務）
-        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+        // Round 36-Fix: 從 5 分鐘改為 30 分鐘，避免長時間執行的任務在工作日誌中消失
+        const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
         const activeTasks = await drizzleDb
           .select()
           .from(agentActivityLogs)
           .where(
             and(
-              gte(agentActivityLogs.startedAt, fiveMinutesAgo),
+              gte(agentActivityLogs.startedAt, thirtyMinutesAgo),
               eq(agentActivityLogs.status, 'started')
             )
           )
