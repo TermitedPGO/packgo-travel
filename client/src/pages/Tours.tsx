@@ -94,7 +94,8 @@ function TourCard({
   }, [language, translations, tour.title]);
 
   // Fetch next departure for this tour
-  const { data: nextDeparture } = trpc.departures.getNext.useQuery(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: nextDeparture } = (trpc.departures as any).getNext.useQuery(
     { tourId: tour.id },
     { staleTime: 1000 * 60 * 5 }
   );
