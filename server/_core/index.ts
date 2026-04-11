@@ -185,14 +185,14 @@ async function startServer() {
   try {
     const { cleanupZombieTasks } = await import('../agentActivityService');
     // Run cleanup immediately on startup
-    cleanupZombieTasks(25).then(count => {
+    cleanupZombieTasks(30).then(count => {
       if (count > 0) console.log(`[Startup] Cleaned up ${count} zombie task(s)`);
     }).catch(() => {});
     // Then run every 10 minutes
     setInterval(() => {
-      cleanupZombieTasks(25).catch(() => {});
+      cleanupZombieTasks(30).catch(() => {});
     }, 10 * 60 * 1000);
-    console.log('[Startup] Zombie task cleanup scheduler initialized (every 10 min, timeout 25 min)');
+    console.log('[Startup] Zombie task cleanup scheduler initialized (every 10 min, timeout 30 min)');
   } catch (err) {
     console.warn('[Startup] Failed to initialize zombie cleanup:', err);
   }

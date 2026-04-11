@@ -2241,21 +2241,21 @@ export const appRouter = router({
           .orderBy(desc(agentActivityLogs.startedAt))
           .limit(10);
 
-        // 清理欭屍任務：超過 20 分鐘仍為 started 的任務自動標記為 failed
-        // Round 36: 從 10 分鐘延長到 20 分鐘，給 SPA 爬蟲（90s） + LLM 處理（~5分鐘）足夠時間
-        const twentyMinutesAgo = new Date(Date.now() - 20 * 60 * 1000);
+        // 清理殭屍任務：超過 30 分鐘仍為 started 的任務自動標記為 failed
+        // Round 36-Fix-3: 從 20 分鐘延長到 30 分鐘，與 index.ts 排程器保持一致
+        const thirtyMinutesAgoForCleanup = new Date(Date.now() - 30 * 60 * 1000);
         await drizzleDb
           .update(agentActivityLogs)
           .set({
             status: 'failed',
-            errorMessage: '任務逾時（超過 20 分鐘未完成）。可能原因：(1) URL 無法存取或載入太慢 (2) LLM 處理逾時 (3) 網路連線問題。建議改用 PDF 上傳方式。',
+            errorMessage: '任務逾時（超過 30 分鐘未完成）。可能原因：(1) URL 無法存取或載入太慢 (2) LLM 處理逾時 (3) 網路連線問題。建議改用 PDF 上傳方式。',
             completedAt: new Date(),
           })
           .where(
             and(
               eq(agentActivityLogs.status, 'started'),
               gte(agentActivityLogs.startedAt, todayStart),
-              sql`${agentActivityLogs.startedAt} < ${twentyMinutesAgo}`
+              sql`${agentActivityLogs.startedAt} < ${thirtyMinutesAgoForCleanup}`
             )
           );
 
