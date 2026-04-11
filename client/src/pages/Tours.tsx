@@ -471,6 +471,25 @@ export default function Tours() {
 
               <div className="flex-shrink-0 w-px h-8 bg-gray-200 mx-1" />
 
+              {/* Always-visible keyword search input */}
+              <div className="relative flex-shrink-0 w-56">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                <Input
+                  placeholder={language === "en" ? "Search tours..." : "搜尋行程..."}
+                  value={searchInput}
+                  onChange={(e) => handleSearchChange(e.target.value)}
+                  className="pl-9 pr-8 rounded-full h-9 text-sm border-gray-200 focus:border-gray-400"
+                />
+                {searchInput && (
+                  <button
+                    onClick={() => handleSearchChange("")}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+
               <button
                 onClick={() => setShowAdvanced((v) => !v)}
                 className={`flex-shrink-0 flex items-center gap-2 px-4 py-2 rounded-full border text-sm font-medium transition-all duration-200 ${

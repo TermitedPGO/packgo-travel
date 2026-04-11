@@ -14,8 +14,33 @@ export default function FeaturedTours() {
   const { data: tours, isLoading, error } = trpc.tours.list.useQuery();
   const { t, formatPrice, language } = useLocale();
 
-  // Filter to show only featured and active tours, limit to 4
-  const featuredTours = tours?.filter(tour => tour.featured === 1 && tour.status === 'active').slice(0, 4) || [];
+  // Show featured tours (featured=1) or fallback to diverse active tours from different regions
+  const featuredTours = useMemo(() => {
+    if (!tours) return [];
+    const activeTours = tours.filter(tour => tour.status === 'active');
+    // First try featured tours
+    const markedFeatured = activeTours.filter(tour => tour.featured === 1);
+    if (markedFeatured.length >= 4) return markedFeatured.slice(0, 6);
+    // Fallback: pick diverse tours from different destination countries
+    const seen = new Set<string>();
+    const diverse: typeof activeTours = [];
+    for (const tour of activeTours) {
+      const country = (tour.destinationCountry || tour.destination || 'other').split('·')[0].trim();
+      if (!seen.has(country)) {
+        seen.add(country);
+        diverse.push(tour);
+      }
+      if (diverse.length >= 6) break;
+    }
+    // If still not enough, fill with remaining active tours
+    if (diverse.length < 4) {
+      for (const tour of activeTours) {
+        if (!diverse.find(t => t.id === tour.id)) diverse.push(tour);
+        if (diverse.length >= 6) break;
+      }
+    }
+    return diverse;
+  }, [tours]);
 
   // Batch fetch translations for non-Chinese languages
   // eslint-disable-next-line react-hooks/exhaustive-deps
