@@ -43,17 +43,29 @@ export async function generateTourFromUrlInternal(
     
     // Execute tour generation with progress tracking
     const result = await masterAgent.execute(url, userId, async (step, percentage) => {
-      // Get partial results from progressTracker
+      // Get partial results and phases from progressTracker
       const progressData = progressTracker.getProgress(taskId);
       const partialResults = progressData?.partialResults;
+      // Build phases array from progressTracker data
+      const phases = progressData?.phases ? Object.entries(progressData.phases).map(([id, phase]: [string, any]) => ({
+        id,
+        status: phase.status as 'pending' | 'running' | 'completed' | 'failed',
+        progress: phase.progress || 0,
+        currentTask: phase.currentTask,
+        error: phase.error,
+        startTime: phase.startTime,
+        endTime: phase.endTime,
+      })) : undefined;
       
-      // Update job progress with partial results
+      // Update job progress with partial results and phases
       await job.updateProgress({
         step,
         progress: percentage,
         message: `Processing: ${step}`,
         timestamp: Date.now(),
         partialResults: partialResults || undefined,
+        phases,
+        overallProgress: percentage,
       });
     }, taskId, forceRegenerate, isPdf, supplementUrl);
     
@@ -66,8 +78,10 @@ export async function generateTourFromUrlInternal(
     // Save to database
     await job.updateProgress({
       step: "saving",
-      percentage: 95,
+      progress: 95,
       message: "Saving tour to database...",
+      timestamp: Date.now(),
+      overallProgress: 95,
     });
     
     const tour = await createTour({
@@ -196,8 +210,10 @@ export async function generateTourFromUrlInternal(
     
     await job.updateProgress({
       step: "completed",
-      percentage: 100,
+      progress: 100,
       message: "Tour generation completed!",
+      timestamp: Date.now(),
+      overallProgress: 100,
     });
     
     // 非同步觸發翻譯（不阻塞生成流程）

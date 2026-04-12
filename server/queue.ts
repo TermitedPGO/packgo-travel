@@ -32,15 +32,25 @@ export interface PartialResults {
 }
 
 /**
- * Job progress structure
- */
-/**
  * 技能學習通知
  */
 export interface SkillLearned {
   name: string;
   category: string;
   timestamp: number;
+}
+
+/**
+ * Individual phase progress (for detailed frontend display)
+ */
+export interface PhaseProgress {
+  id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  progress: number; // 0-100
+  currentTask?: string;
+  error?: string;
+  startTime?: number;
+  endTime?: number;
 }
 
 /**
@@ -53,6 +63,9 @@ export interface TourGenerationProgress {
   timestamp: number;
   partialResults?: PartialResults;
   skillsLearned?: SkillLearned[];
+  // Enhanced: backend phases data for accurate frontend display
+  phases?: PhaseProgress[];
+  overallProgress?: number; // explicit overall progress 0-100
 }
 
 /**

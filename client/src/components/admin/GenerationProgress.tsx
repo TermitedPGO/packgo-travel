@@ -126,6 +126,17 @@ const STEP_DETAILS: Record<string, { phase: string; task: string; baseProgress: 
   'failed': { phase: 'finalize', task: '生成失敗', baseProgress: 0 },
 };
 
+// Backend PhaseProgress from queue.ts
+interface BackendPhaseProgress {
+  id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  progress: number;
+  currentTask?: string;
+  error?: string;
+  startTime?: number;
+  endTime?: number;
+}
+
 interface GenerationProgressProps {
   taskId: string | null;
   isGenerating: boolean;
@@ -139,6 +150,9 @@ interface GenerationProgressProps {
       timestamp: number;
       partialResults?: PartialResults;
       skillsLearned?: SkillLearned[];
+      // Enhanced: backend phases data
+      phases?: BackendPhaseProgress[];
+      overallProgress?: number;
     } | null;
     failedReason?: string;
   } | null;
@@ -160,6 +174,8 @@ export function GenerationProgressComponent({
   const [skillNotifications, setSkillNotifications] = useState<SkillLearned[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const startTimeRef = useRef<number>(Date.now());
+  // Monotonic progress: never allow progress to go backward
+  const lastProgressRef = useRef<number>(0);
 
   // 定義所有階段
   const allPhases: AgentPhase[] = [
@@ -180,36 +196,66 @@ export function GenerationProgressComponent({
   useEffect(() => {
     if (!pollingStatus || !isGenerating) return;
 
-    const currentStep = pollingStatus.progressDetails?.step || 'starting';
-    const stepInfo = STEP_DETAILS[currentStep] || { phase: 'web_scraper', task: '處理中', baseProgress: 0 };
-    const currentPhaseId = stepInfo.phase;
-    const currentTask = stepInfo.task;
-    
-    // 計算準確的進度百分比
-    const reportedProgress = pollingStatus.progressDetails?.progress || pollingStatus.progress || 0;
-    const calculatedProgress = Math.max(stepInfo.baseProgress, reportedProgress);
+    // ── Priority 1: Use backend phases data if available ──
+    const backendPhases = pollingStatus.progressDetails?.phases;
+    const backendOverallProgress = pollingStatus.progressDetails?.overallProgress;
 
-    // 構建階段列表
-    const phases = allPhases.map(phase => ({ ...phase }));
-    const phaseOrder = phases.map(p => p.id);
-    const currentPhaseIndex = phaseOrder.indexOf(currentPhaseId);
+    let phases: AgentPhase[];
+    let currentPhaseId: string;
+    let calculatedProgress: number;
 
-    phases.forEach((phase, index) => {
-      if (index < currentPhaseIndex) {
-        phase.status = 'completed';
-        phase.progress = 100;
-      } else if (index === currentPhaseIndex) {
-        phase.status = pollingStatus.status === 'failed' ? 'failed' : 'running';
-        phase.progress = Math.min(100, Math.max(0, (calculatedProgress - stepInfo.baseProgress) * 10));
-        phase.currentTask = currentTask;
-        if (pollingStatus.status === 'failed') {
-          phase.error = pollingStatus.failedReason;
+    if (backendPhases && backendPhases.length > 0) {
+      // Build phases from backend data (accurate)
+      phases = allPhases.map(phase => {
+        const backendPhase = backendPhases.find(bp => bp.id === phase.id);
+        if (backendPhase) {
+          return {
+            ...phase,
+            status: backendPhase.status,
+            progress: backendPhase.progress,
+            currentTask: backendPhase.currentTask || phase.description,
+            error: backendPhase.error,
+            startTime: backendPhase.startTime,
+            endTime: backendPhase.endTime,
+          };
         }
-      } else {
-        phase.status = 'pending';
-        phase.progress = 0;
-      }
-    });
+        return { ...phase };
+      });
+      currentPhaseId = backendPhases.find(bp => bp.status === 'running')?.id ||
+                       backendPhases.filter(bp => bp.status === 'completed').at(-1)?.id ||
+                       'web_scraper';
+      calculatedProgress = backendOverallProgress ??
+                           (pollingStatus.progressDetails?.progress || pollingStatus.progress || 0);
+    } else {
+      // ── Fallback: Use STEP_DETAILS static mapping ──
+      const currentStep = pollingStatus.progressDetails?.step || 'starting';
+      const stepInfo = STEP_DETAILS[currentStep] || { phase: 'web_scraper', task: '處理中', baseProgress: 0 };
+      currentPhaseId = stepInfo.phase;
+      const currentTask = stepInfo.task;
+      const reportedProgress = pollingStatus.progressDetails?.progress || pollingStatus.progress || 0;
+      calculatedProgress = Math.max(stepInfo.baseProgress, reportedProgress);
+
+      phases = allPhases.map(phase => ({ ...phase }));
+      const phaseOrder = phases.map(p => p.id);
+      const currentPhaseIndex = phaseOrder.indexOf(currentPhaseId);
+
+      phases.forEach((phase, index) => {
+        if (index < currentPhaseIndex) {
+          phase.status = 'completed';
+          phase.progress = 100;
+        } else if (index === currentPhaseIndex) {
+          phase.status = pollingStatus.status === 'failed' ? 'failed' : 'running';
+          phase.progress = Math.min(100, Math.max(0, (calculatedProgress - stepInfo.baseProgress) * 10));
+          phase.currentTask = currentTask;
+          if (pollingStatus.status === 'failed') {
+            phase.error = pollingStatus.failedReason;
+          }
+        } else {
+          phase.status = 'pending';
+          phase.progress = 0;
+        }
+      });
+    }
 
     // 如果已完成，標記所有階段為完成
     if (pollingStatus.status === 'completed') {
@@ -217,21 +263,24 @@ export function GenerationProgressComponent({
         phase.status = 'completed';
         phase.progress = 100;
       });
+      calculatedProgress = 100;
     }
+
+    // ── Monotonic progress: never go backward ──
+    const monotonicProgress = Math.max(lastProgressRef.current, calculatedProgress);
+    lastProgressRef.current = monotonicProgress;
 
     // 處理技能學習通知
     const newSkills = pollingStatus.progressDetails?.skillsLearned || [];
     if (newSkills.length > skillNotifications.length) {
-      const addedSkills = newSkills.slice(skillNotifications.length);
       setSkillNotifications(newSkills);
-      // 可以在這裡觸發 toast 通知
     }
 
     setProgress({
       taskId: taskId || '',
       status: pollingStatus.status as any,
       currentPhase: currentPhaseId,
-      overallProgress: calculatedProgress,
+      overallProgress: monotonicProgress,
       phases,
       startTime: startTimeRef.current,
       error: pollingStatus.failedReason,

@@ -909,6 +909,7 @@ export class MasterAgent {
         }
         
         if (taskId) progressTracker.completePhase(taskId, 'itinerary');
+        onProgress?.("extracting_itinerary", 65); // Phase 4: Itinerary completed
       } catch (error) {
         console.error("[MasterAgent] Itinerary generation error:", error);
         if (taskId) progressTracker.failPhase(taskId, 'itinerary', error instanceof Error ? error.message : 'Unknown error');
@@ -997,6 +998,7 @@ export class MasterAgent {
             progressTracker.completePhase(taskId, 'hotel_agent');
             progressTracker.completePhase(taskId, 'meal_agent');
           }
+          onProgress?.("extracting_costs", 75); // Phase 4: DetailsSkill completed
           console.log(`[MasterAgent] ✓ DetailsSkill completed (costs, notices, hotels, meals)`);
           console.log(`[MasterAgent] hotelData type: ${typeof hotelData}, isArray: ${Array.isArray(hotelData)}, length: ${Array.isArray(hotelData) ? hotelData.length : 'N/A'}`);
           console.log(`[MasterAgent] mealData type: ${typeof mealData}, isArray: ${Array.isArray(mealData)}, length: ${Array.isArray(mealData) ? mealData.length : 'N/A'}`);
@@ -1056,6 +1058,7 @@ export class MasterAgent {
           transportationData = result.data;
           this.monitor.completeAgent('TransportationAgent', result);
           if (taskId) progressTracker.completePhase(taskId, 'flight_agent');
+          onProgress?.("extracting_flights", 80); // Phase 4: TransportationAgent completed
           console.log(`[MasterAgent] ✓ TransportationAgent completed`);
           // 記錄 TransportationAgent 詳細工作
           try {
