@@ -450,11 +450,17 @@ export class ItineraryUnifiedAgent {
   private async polishWithSingleLLMCall(
     extractedItineraries: ExtractedItinerary[],
     destinationInfo: { country?: string; city?: string },
-    originalDataSnapshot: OriginalDataSnapshot
+    originalDataSnapshot: OriginalDataSnapshot,
+    rawData?: any  // P1-Self-Repair: optional rawData for selfRepairHint injection
   ): Promise<PolishedItinerary[]> {
     const { city = "", country = "" } = destinationInfo;
     const { originalTransportation, tourType } = originalDataSnapshot;
 
+    // P1-Self-Repair: inject selfRepairHint if provided by MasterAgent
+    const itinerarySelfRepairHint = rawData?.selfRepairHint || '';
+    const itinerarySelfRepairSection = itinerarySelfRepairHint
+      ? `\n【自我修復指令 — 第 ${rawData?.selfRepairRound || 1} 次重試，請針對以下問題改善行程描述】：\n${itinerarySelfRepairHint}`
+      : '';
     const systemPrompt = `你是資深旅遊文案編輯。美化行程描述，保持原始資訊完全不變。
 核心規則：
 1. 保留所有景點名稱、時間、飯店名稱、交通方式
@@ -463,7 +469,7 @@ export class ItineraryUnifiedAgent {
 4. 禁止新增原始資料中沒有的景點或活動
 ${originalTransportation ? `原始交通方式：${originalTransportation}` : ""}
 ${tourType === "MINGRI_TRAIN" ? "注意：這是鳴日號觀光列車行程，所有交通描述必須使用火車/列車，禁止出現飛機/航班/機場。" : ""}
-${tourType === "CRUISE" ? "注意：這是郵輪行程，所有交通描述必須使用郵輪/遊輪，禁止出現飛機/航班。" : ""}`;
+${tourType === "CRUISE" ? "注意：這是郵輪行程，所有交通描述必須使用郵輪/遊輪，禁止出現飛機/航班。" : ""}${itinerarySelfRepairSection}`;
 
     const userPrompt = `美化以下行程（目的地：${city}${country ? `, ${country}` : ""}）：
 ${JSON.stringify(extractedItineraries, null, 2)}
@@ -690,7 +696,8 @@ ${JSON.stringify(extractedItineraries, null, 2)}
       let polishedItineraries = await this.polishWithSingleLLMCall(
         extractedItineraries,
         destinationInfo,
-        snapshot
+        snapshot,
+        rawData  // P1-Self-Repair: pass rawData for selfRepairHint injection
       );
 
       // Step 4: FidelityCheck + AutoRepair（純邏輯）

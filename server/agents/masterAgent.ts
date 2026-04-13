@@ -1295,6 +1295,97 @@ export class MasterAgent {
           console.log(`[MasterAgent] ✓ Applied ${calibrationReport.autoFixesApplied.length} auto-fix(es)`);
         }
 
+        // ── P1-Self-Repair: if score < 70, re-run Phase 2 + Phase 4 with fix instructions ──
+        const SELF_REPAIR_THRESHOLD = 70;
+        const MAX_SELF_REPAIR_ROUNDS = 2;
+        let selfRepairRound = 0;
+        while (
+          calibrationReport.totalScore < SELF_REPAIR_THRESHOLD &&
+          selfRepairRound < MAX_SELF_REPAIR_ROUNDS
+        ) {
+          selfRepairRound++;
+          console.log(`[MasterAgent] 🔧 Self-Repair Round ${selfRepairRound}: score=${calibrationReport.totalScore} < ${SELF_REPAIR_THRESHOLD}, re-running Phase 2 + Phase 4...`);
+
+          // Build fix instruction from calibration issues
+          const criticalIssues = calibrationReport.issues
+            .filter((i: any) => i.severity === 'critical' || i.severity === 'warning')
+            .map((i: any) => `- [${i.check}] ${i.message}${i.field ? ` (欄位: ${i.field})` : ''}`)
+            .join('\n');
+          const selfRepairHint = criticalIssues
+            ? `上一次生成的品質分數為 ${calibrationReport.totalScore}/100，以下問題需要修正：\n${criticalIssues}\n請確保本次輸出修正以上所有問題。`
+            : `上一次生成的品質分數為 ${calibrationReport.totalScore}/100，請提升整體文案品質。`;
+
+          // Inject repair hint into rawData
+          (rawData as any).selfRepairHint = selfRepairHint;
+          (rawData as any).selfRepairRound = selfRepairRound;
+
+          // Re-run Phase 2: ContentAnalyzerAgent
+          console.log('[MasterAgent] 🔧 Self-Repair: Re-running ContentAnalyzerAgent...');
+          let repairedAnalyzedContent = analyzedContent;
+          try {
+            const repairAnalysisResult = await this.retryManager.executeWithRetry(
+              () => this.contentAnalyzerAgent.execute(rawData),
+              this.retryConfig,
+              'ContentAnalyzerAgent-SelfRepair'
+            );
+            if (repairAnalysisResult.success && repairAnalysisResult.data) {
+              repairedAnalyzedContent = repairAnalysisResult.data;
+              // Update finalData with repaired content
+              (finalData as any).poeticTitle = repairedAnalyzedContent.poeticTitle;
+              (finalData as any).title = repairedAnalyzedContent.title;
+              (finalData as any).description = repairedAnalyzedContent.description;
+              (finalData as any).heroSubtitle = repairedAnalyzedContent.heroSubtitle;
+              (finalData as any).highlights = JSON.stringify(repairedAnalyzedContent.highlights || []);
+              (finalData as any).keyFeatures = JSON.stringify(repairedAnalyzedContent.highlights || []);
+              console.log(`[MasterAgent] 🔧 Self-Repair: ContentAnalyzer updated title="${repairedAnalyzedContent.poeticTitle}"`);
+            }
+          } catch (repairErr) {
+            console.warn('[MasterAgent] Self-Repair ContentAnalyzer failed (non-fatal):', repairErr);
+          }
+
+          // Re-run Phase 4: ItineraryUnifiedAgent
+          console.log('[MasterAgent] 🔧 Self-Repair: Re-running ItineraryUnifiedAgent...');
+          try {
+            const repairItineraryResult = await this.itineraryUnifiedAgent.execute(rawData);
+            if (repairItineraryResult.success && repairItineraryResult.data?.polishedItineraries.length > 0) {
+              const { polishedItineraries: repairedItineraries } = repairItineraryResult.data;
+              // Re-assign images
+              const { assignItineraryImages } = await import('../services/itineraryImageService');
+              const repairedWithImages = await assignItineraryImages(
+                repairedItineraries,
+                { country: rawData?.location?.destinationCountry, city: rawData?.location?.destinationCity }
+              );
+              (finalData as any).itineraryDetailed = JSON.stringify(repairedWithImages);
+              console.log(`[MasterAgent] 🔧 Self-Repair: Itinerary updated (${repairedItineraries.length} days)`);
+            }
+          } catch (repairErr) {
+            console.warn('[MasterAgent] Self-Repair ItineraryUnified failed (non-fatal):', repairErr);
+          }
+
+          // Re-run calibration
+          console.log('[MasterAgent] 🔧 Self-Repair: Re-running CalibrationAgent...');
+          try {
+            const repairCalibration = await calibrateTour(finalData, sourceContent);
+            console.log(`[MasterAgent] 🔧 Self-Repair Round ${selfRepairRound} result: score=${repairCalibration.totalScore} (was ${calibrationReport.totalScore})`);
+            // Apply auto-fixes from repair calibration
+            if (repairCalibration.autoFixesApplied.length > 0) {
+              for (const fix of repairCalibration.autoFixesApplied) {
+                if (fix.field in finalData) {
+                  (finalData as any)[fix.field] = fix.after;
+                }
+              }
+            }
+            calibrationReport = repairCalibration;
+          } catch (repairCalErr) {
+            console.warn('[MasterAgent] Self-Repair CalibrationAgent failed (non-fatal):', repairCalErr);
+            break;
+          }
+        }
+
+        // Clean up repair hints from rawData
+        delete (rawData as any).selfRepairHint;
+        delete (rawData as any).selfRepairRound;
+
         if (taskId) progressTracker.completePhase(taskId, 'calibration');
       } catch (calErr) {
         console.warn('[MasterAgent] CalibrationAgent failed (non-fatal):', calErr);

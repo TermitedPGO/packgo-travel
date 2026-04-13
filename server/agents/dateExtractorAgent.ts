@@ -1,6 +1,11 @@
 /**
  * DateExtractorAgent
  * 使用 Claude Vision 分析網頁截圖，抽取出發日期、人數上限、分級價格
+ *
+ * Round 39 P0 升級：
+ * - P0-Context: rawText 8K → 15K（讓 AI 看到頁面下方的價格）
+ * - P0-Prompt: 強制搜尋策略 + Chain-of-Thought + 提高放棄門檻（不接受 price=0）
+ * - P0-Harness: 5 策略 fallback chain + 結構化驗證（price≥1000 才接受）
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -101,34 +106,162 @@ function extractDatesFromText(rawText: string): ExtractedTourMeta['departureDate
   return dates.slice(0, 20); // 最多 20 個日期
 }
 
+// ============================================================
+// P0-Harness: 5 策略 Fallback Chain（價格抽取）
+// ============================================================
+
 /**
- * 從 rawText 用正則表達式抽取價格（增強版 fallback）
- * 支援多種格式：NT$45,800、45800元、成人 45,800、大人 45800 等
+ * 策略 1: 帶前綴的精確匹配（成人/大人/Adult + 數字）
  */
-export function extractPriceFromText(rawText: string): Partial<ExtractedTourMeta['pricing']> {
-  const result: Partial<ExtractedTourMeta['pricing']> = { currency: 'TWD' };
-  
-  // 成人價格：多種前綴
-  const adultPatterns = [
+function strategy1_prefixMatch(rawText: string): number | undefined {
+  const patterns = [
     /(?:成人|大人|Adult)\s*[：:＄$NT]*\s*([\d,]+)/i,
     /NT\$?\s*([\d,]+)\s*(?:\/人|\/位|起)/i,
     /(?:定價|售價|原價|特價)\s*[：:＄$NT]*\s*([\d,]+)/i,
     /\$\s*([\d,]+)\s*(?:TWD|元|起)/i,
-    // 純數字 + 元（台幣常見格式）
-    /([\d,]{5,6})\s*元/g,
   ];
-  
-  for (const pattern of adultPatterns) {
-    const match = rawText.match(pattern);
-    if (match) {
-      const price = parseInt(match[1].replace(/,/g, ''));
-      if (price >= 1000 && price <= 500000) {
-        result.adultPrice = price;
-        break;
+  for (const p of patterns) {
+    const m = rawText.match(p);
+    if (m) {
+      const price = parseInt(m[1].replace(/,/g, ''));
+      if (price >= 5000 && price <= 500000) return price;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * 策略 2: 純數字 + 單位（5-6 位數 + 元/TWD）
+ */
+function strategy2_numberUnit(rawText: string): number | undefined {
+  const patterns = [
+    /([\d,]{5,7})\s*元/g,
+    /NT\$?\s*([\d,]{5,7})/g,
+    /([\d,]{5,7})\s*TWD/gi,
+  ];
+  const candidates: number[] = [];
+  for (const p of patterns) {
+    let m: RegExpExecArray | null;
+    const re = new RegExp(p.source, p.flags);
+    while ((m = re.exec(rawText)) !== null) {
+      const price = parseInt(m[1].replace(/,/g, ''));
+      if (price >= 5000 && price <= 500000) candidates.push(price);
+    }
+  }
+  if (candidates.length === 0) return undefined;
+  // 取最高值（成人票通常最貴）
+  return Math.max(...candidates);
+}
+
+/**
+ * 策略 3: 上下文窗口掃描（取包含 "元" 或 "TWD" 的行，找最大數字）
+ */
+function strategy3_contextWindow(rawText: string): number | undefined {
+  const lines = rawText.split('\n');
+  const candidates: number[] = [];
+  for (const line of lines) {
+    if (/元|TWD|NT\$|\$/.test(line)) {
+      const nums = line.match(/[\d,]{4,7}/g) || [];
+      for (const n of nums) {
+        const price = parseInt(n.replace(/,/g, ''));
+        if (price >= 5000 && price <= 500000) candidates.push(price);
       }
     }
   }
-  
+  if (candidates.length === 0) return undefined;
+  return Math.max(...candidates);
+}
+
+/**
+ * 策略 4: 寬鬆數字掃描（任何 5 位數以上的數字，取中位數）
+ */
+function strategy4_looseScan(rawText: string): number | undefined {
+  const nums = rawText.match(/\b([\d,]{5,7})\b/g) || [];
+  const candidates: number[] = [];
+  for (const n of nums) {
+    const price = parseInt(n.replace(/,/g, ''));
+    if (price >= 5000 && price <= 500000) candidates.push(price);
+  }
+  if (candidates.length === 0) return undefined;
+  candidates.sort((a, b) => a - b);
+  // 取中位數（避免極端值）
+  return candidates[Math.floor(candidates.length / 2)];
+}
+
+/**
+ * 策略 5: priceHints 直接使用（來自 JS DOM 擷取）
+ */
+function strategy5_priceHints(priceHints?: PriceHints): number | undefined {
+  return priceHints?.adultPrice;
+}
+
+/**
+ * P0-Harness: 5 策略 fallback chain 主函式
+ * 依序嘗試 5 種策略，第一個成功的結果即返回
+ * 如果全部失敗，返回 undefined（不填 0！）
+ */
+function extractPriceWithFallbackChain(rawText: string, priceHints?: PriceHints): {
+  adultPrice: number | undefined;
+  strategyUsed: string;
+} {
+  // 策略 5 優先（JS DOM 擷取最可靠）
+  const s5 = strategy5_priceHints(priceHints);
+  if (s5 !== undefined) {
+    console.log(`[DateExtractor] ✓ Price strategy 5 (priceHints): ${s5}`);
+    return { adultPrice: s5, strategyUsed: 'priceHints' };
+  }
+
+  const s1 = strategy1_prefixMatch(rawText);
+  if (s1 !== undefined) {
+    console.log(`[DateExtractor] ✓ Price strategy 1 (prefix match): ${s1}`);
+    return { adultPrice: s1, strategyUsed: 'prefix_match' };
+  }
+
+  const s2 = strategy2_numberUnit(rawText);
+  if (s2 !== undefined) {
+    console.log(`[DateExtractor] ✓ Price strategy 2 (number+unit): ${s2}`);
+    return { adultPrice: s2, strategyUsed: 'number_unit' };
+  }
+
+  const s3 = strategy3_contextWindow(rawText);
+  if (s3 !== undefined) {
+    console.log(`[DateExtractor] ✓ Price strategy 3 (context window): ${s3}`);
+    return { adultPrice: s3, strategyUsed: 'context_window' };
+  }
+
+  const s4 = strategy4_looseScan(rawText);
+  if (s4 !== undefined) {
+    console.log(`[DateExtractor] ✓ Price strategy 4 (loose scan): ${s4}`);
+    return { adultPrice: s4, strategyUsed: 'loose_scan' };
+  }
+
+  console.warn(`[DateExtractor] ⚠ All 5 price strategies failed — marking as pending manual input`);
+  return { adultPrice: undefined, strategyUsed: 'none' };
+}
+
+/**
+ * P0-Harness: 結構化驗證（不接受 price=0 或 price<1000）
+ */
+function validatePrice(price: number | undefined): number {
+  if (price === undefined || price === null) return 0;
+  if (price < 1000) {
+    console.warn(`[DateExtractor] ⚠ Price ${price} rejected (< 1000 TWD), setting to 0`);
+    return 0;
+  }
+  return price;
+}
+
+/**
+ * 從 rawText 用正則表達式抽取價格（增強版 fallback，整合 5 策略 chain）
+ * 支援多種格式：NT$45,800、45800元、成人 45,800、大人 45800 等
+ */
+export function extractPriceFromText(rawText: string, priceHints?: PriceHints): Partial<ExtractedTourMeta['pricing']> {
+  const result: Partial<ExtractedTourMeta['pricing']> = { currency: 'TWD' };
+
+  // 使用 5 策略 fallback chain 抽取成人價格
+  const { adultPrice } = extractPriceWithFallbackChain(rawText, priceHints);
+  result.adultPrice = validatePrice(adultPrice);
+
   // 小孩佔床
   const childBedPatterns = [
     /(?:小孩佔床|孩童佔床|兒童佔床|Child with bed)\s*[：:＄$NT]*\s*([\d,]+)/i,
@@ -195,6 +328,11 @@ export function extractPriceFromText(rawText: string): Partial<ExtractedTourMeta
 /**
  * 使用 Claude Vision 分析截圖，抽取行程元數據
  * @param priceHints - 來自 DynamicScraper 的 JS 價格擷取結果（可選）
+ *
+ * Round 39 P0-Prompt 升級：
+ * - 強制搜尋策略：禁止直接回傳 0，必須窮盡所有候選數字
+ * - Chain-of-Thought：要求 AI 先列出所有候選數字再選最佳
+ * - 提高放棄門檻：只有真的找不到才標記 null
  */
 export async function extractTourMeta(
   screenshots: { fullPage: Buffer; dateSection?: Buffer; priceSection?: Buffer },
@@ -267,20 +405,20 @@ export async function extractTourMeta(
     });
   }
   
-  // 加入純文字作為補充
-  const textSample = rawText.slice(0, 8000); // 限制文字長度
+  // P0-Context: rawText 8K → 15K（讓 AI 看到頁面下方的價格）
+  const textSample = rawText.slice(0, 15000); // Round 39: 從 8000 擴展到 15000
   imageContents.push({
     type: 'text',
-    text: `\n以下是頁面純文字（補充參考）：\n${textSample}`,
+    text: `\n以下是頁面純文字（補充參考，請仔細搜尋其中的價格資訊）：\n${textSample}`,
   });
   
-  // 加入 priceHints 作為額外參考
+  // 加入 priceHints 作為額外參考（P0: 擴展到 10 筆，原本 5 筆）
   if (priceHints?.rawPriceTexts?.length) {
     const priceHintText = [
-      `\n【JS 價格擷取結果（請優先參考）】`,
-      priceHints.adultPrice ? `估算成人價格：${priceHints.adultPrice} TWD` : '',
-      priceHints.childWithBedPrice ? `估算小孩佔床：${priceHints.childWithBedPrice} TWD` : '',
-      `原始價格文字：\n${priceHints.rawPriceTexts.slice(0, 5).join('\n')}`,
+      `\n【JS DOM 直接擷取的價格線索（高可信度，請優先參考）】`,
+      priceHints.adultPrice ? `JS 估算成人價格：${priceHints.adultPrice} TWD` : '',
+      priceHints.childWithBedPrice ? `JS 估算小孩佔床：${priceHints.childWithBedPrice} TWD` : '',
+      `JS 原始價格文字（前 10 筆）：\n${priceHints.rawPriceTexts.slice(0, 10).join('\n')}`,
     ].filter(Boolean).join('\n');
     imageContents.push({ type: 'text', text: priceHintText });
   }
@@ -290,38 +428,53 @@ export async function extractTourMeta(
   
   if (!hasImages) {
     console.warn('[DateExtractor] No screenshots available, using text-only fallback');
-    // 直接從文字抽取日期和價格
+    // 直接從文字抽取日期和價格（使用 5 策略 chain）
     const textDates = extractDatesFromText(rawText);
-    const textPricing = extractPriceFromText(rawText);
-    // 優先使用 priceHints
-    const adultPrice = priceHints?.adultPrice || textPricing.adultPrice || 0;
+    const textPricing = extractPriceFromText(rawText, priceHints);
     return {
       departureDates: textDates,
       capacity: { maxParticipants: 0 },
       pricing: {
-        adultPrice,
-        childWithBedPrice: priceHints?.childWithBedPrice || textPricing.childWithBedPrice,
+        adultPrice: textPricing.adultPrice || 0,
+        childWithBedPrice: textPricing.childWithBedPrice,
         childNoBedPrice: textPricing.childNoBedPrice,
-        infantPrice: priceHints?.infantPrice || textPricing.infantPrice,
+        infantPrice: textPricing.infantPrice,
         currency: 'TWD',
         priceNote: textPricing.priceNote,
       },
     };
   }
-  
-  const prompt = `你是一個旅遊網站資料抽取專家。請分析這個旅遊行程網頁截圖，抽取以下資訊：
 
-1. 所有可選的出發日期（格式 YYYY-MM-DD）及各日期的狀態（可報名/即將額滿/已售完）
-2. 每團人數限制（上限和最低成團人數）
+  // ============================================================
+  // P0-Prompt: 強制搜尋策略 + Chain-of-Thought 提示詞
+  // ============================================================
+  const prompt = `你是一個旅遊網站資料抽取專家。請分析這個旅遊行程網頁截圖和文字，抽取以下資訊：
+
+1. 所有可選的出發日期（格式 YYYY-MM-DD）及各日期的狀態
+2. 每團人數限制
 3. 價格分級（成人、小孩佔床、小孩不佔床、嬰兒）
 4. 行程代碼（如果有）
 
-重要規則：
-- 如果某項資訊在截圖中找不到，回傳 null 或 0
-- 日期格式必須是 YYYY-MM-DD（例如 2026-05-15）
+【強制搜尋規則 — 請嚴格遵守】：
+- 你必須在截圖和文字中窮盡搜尋所有數字，不得輕易放棄
+- 價格通常出現在頁面下方的「費用說明」、「團費」、「報名費」區塊
+- 如果截圖中看不清楚，請從純文字中搜尋包含「元」、「TWD」、「NT$」、「成人」、「大人」的行
+- 台灣旅遊行程的成人票價通常在 NT$20,000 ~ NT$200,000 之間
+- 禁止直接回傳 adultPrice=0，除非你已確認整個頁面完全沒有任何價格資訊
+
+【Chain-of-Thought 思考步驟】：
+步驟 1: 先列出截圖和文字中所有看到的數字（4位數以上）
+步驟 2: 判斷哪些數字是價格（有「元」「TWD」「NT$」「成人」「大人」等關鍵字）
+步驟 3: 從候選價格中選出成人票價（通常是最高的那個）
+步驟 4: 填入 JSON
+
+【日期格式規則】：
+- 格式必須是 YYYY-MM-DD（例如 2026-05-15）
 - 只回傳未來的日期（今天之後）
-- 價格單位為台幣（TWD）
+
+【輸出規則】：
 - 以 JSON 格式回傳，不要有任何前言或解釋
+- 如果某項資訊真的找不到，才回傳 null 或 0
 
 JSON 格式：
 {
@@ -388,12 +541,28 @@ JSON 格式：
     
     const extracted = JSON.parse(jsonMatch[0]) as ExtractedTourMeta;
     
-    // 驗證和清理數據
-    // 如果 Claude 沒有抽取到價格，使用 priceHints 或 regex fallback 補充
-    const regexPricing = extractPriceFromText(rawText);
+    // ============================================================
+    // P0-Harness: 結構化驗證 + 5 策略 fallback chain
+    // ============================================================
     const claudeAdultPrice = extracted.pricing?.adultPrice || 0;
-    const fallbackAdultPrice = priceHints?.adultPrice || regexPricing.adultPrice || 0;
-    
+
+    // 如果 Claude 回傳 0 或無效價格，啟動 5 策略 fallback chain
+    let finalAdultPrice = claudeAdultPrice;
+    let priceSource = 'claude';
+    if (claudeAdultPrice < 1000) {
+      console.warn(`[DateExtractor] Claude returned invalid adultPrice=${claudeAdultPrice}, triggering 5-strategy fallback chain...`);
+      const { adultPrice: fallbackPrice, strategyUsed } = extractPriceWithFallbackChain(rawText, priceHints);
+      if (fallbackPrice !== undefined && fallbackPrice >= 1000) {
+        finalAdultPrice = fallbackPrice;
+        priceSource = `fallback:${strategyUsed}`;
+        console.log(`[DateExtractor] ✓ Fallback price found: ${finalAdultPrice} (strategy: ${strategyUsed})`);
+      } else {
+        finalAdultPrice = 0;
+        priceSource = 'none';
+        console.warn(`[DateExtractor] ⚠ No valid price found after all 5 strategies — adultPrice=0, needs manual input`);
+      }
+    }
+
     const result: ExtractedTourMeta = {
       departureDates: (extracted.departureDates || []).filter(d => d.date && /^\d{4}-\d{2}-\d{2}$/.test(d.date)),
       capacity: {
@@ -401,39 +570,44 @@ JSON 格式：
         minParticipants: extracted.capacity?.minParticipants,
       },
       pricing: {
-        // 優先使用 Claude 的結果，fallback 到 priceHints 或 regex
-        adultPrice: claudeAdultPrice > 0 ? claudeAdultPrice : fallbackAdultPrice,
-        childWithBedPrice: extracted.pricing?.childWithBedPrice || priceHints?.childWithBedPrice || regexPricing.childWithBedPrice,
-        childNoBedPrice: extracted.pricing?.childNoBedPrice || regexPricing.childNoBedPrice,
-        infantPrice: extracted.pricing?.infantPrice || priceHints?.infantPrice || regexPricing.infantPrice,
+        adultPrice: validatePrice(finalAdultPrice),
+        // 子女/嬰兒價格：Claude 優先，fallback 到 priceHints 或 regex
+        childWithBedPrice: extracted.pricing?.childWithBedPrice
+          || priceHints?.childWithBedPrice
+          || extractPriceFromText(rawText).childWithBedPrice,
+        childNoBedPrice: extracted.pricing?.childNoBedPrice
+          || extractPriceFromText(rawText).childNoBedPrice,
+        infantPrice: extracted.pricing?.infantPrice
+          || priceHints?.infantPrice
+          || extractPriceFromText(rawText).infantPrice,
         currency: extracted.pricing?.currency || 'TWD',
-        priceNote: extracted.pricing?.priceNote || regexPricing.priceNote,
+        priceNote: extracted.pricing?.priceNote || extractPriceFromText(rawText).priceNote,
       },
       productCode: extracted.productCode,
     };
     
-    console.log(`[DateExtractor] Extracted ${result.departureDates.length} dates, maxParticipants: ${result.capacity.maxParticipants}, adultPrice: ${result.pricing.adultPrice} (claude: ${claudeAdultPrice}, fallback: ${fallbackAdultPrice})`);
+    console.log(`[DateExtractor] ✓ Extracted ${result.departureDates.length} dates, maxParticipants: ${result.capacity.maxParticipants}, adultPrice: ${result.pricing.adultPrice} (source: ${priceSource}, claude: ${claudeAdultPrice})`);
     
     return result;
   } catch (err: any) {
     console.error('[DateExtractor] Claude Vision failed:', err.message);
     
-    // Fallback：從純文字抽取日期和價格
-    console.log('[DateExtractor] Falling back to text-based extraction...');
+    // Fallback：從純文字抽取日期和價格（使用 5 策略 chain）
+    console.log('[DateExtractor] Falling back to text-based extraction with 5-strategy chain...');
     const textDates = extractDatesFromText(rawText);
+    const { adultPrice: fallbackAdultPrice, strategyUsed } = extractPriceWithFallbackChain(rawText, priceHints);
     const textPricing = extractPriceFromText(rawText);
     
-    // 優先使用 priceHints，其次使用 regex 結果
-    const adultPrice = priceHints?.adultPrice || textPricing.adultPrice || 0;
+    console.log(`[DateExtractor] Text fallback: adultPrice=${fallbackAdultPrice} (strategy: ${strategyUsed})`);
     
     return {
       departureDates: textDates,
       capacity: { maxParticipants: 0 },
       pricing: {
-        adultPrice,
-        childWithBedPrice: priceHints?.childWithBedPrice || textPricing.childWithBedPrice,
+        adultPrice: validatePrice(fallbackAdultPrice),
+        childWithBedPrice: textPricing.childWithBedPrice,
         childNoBedPrice: textPricing.childNoBedPrice,
-        infantPrice: priceHints?.infantPrice || textPricing.infantPrice,
+        infantPrice: textPricing.infantPrice,
         currency: 'TWD',
         priceNote: textPricing.priceNote,
       },

@@ -207,6 +207,7 @@ export async function scrapeDynamicPage(url: string): Promise<DynamicScrapeResul
     }
 
     // JS 價格擷取：直接從 DOM 讀取價格數字（不依賴截圖）
+    // P0-Context Round 39: 升級為 TreeWalker DOM 遍歷 + CSS 選擇器雙策略
     const priceHints = await page.evaluate(() => {
       const rawPriceTexts: string[] = [];
       const pricePatterns = [
@@ -214,15 +215,15 @@ export async function scrapeDynamicPage(url: string): Promise<DynamicScrapeResul
         /\$\s*([\d,]+)/g,
         /([\d,]+)\s*元/g,
         /([\d,]+)\s*TWD/gi,
+        /([\d,]+)\s*(?:\/人|\/位)/g,
       ];
-      
-      // 收集所有價格相關元素的文字
+
+      // ── 策略 A：CSS 選擇器（快速，適合有 class 的網站）──
       const priceSelectors = [
         '[class*="price"]', '[class*="pricing"]', '[class*="fee"]',
         '[class*="cost"]', '[class*="amount"]', '[data-price]',
         '[class*="ntd"]', '[class*="twd"]',
       ];
-      
       for (const sel of priceSelectors) {
         try {
           const els = document.querySelectorAll(sel);
@@ -234,12 +235,34 @@ export async function scrapeDynamicPage(url: string): Promise<DynamicScrapeResul
           });
         } catch {}
       }
-      
+
+      // ── 策略 B：TreeWalker DOM 遍歷（適合混淆 class 的網站，如 liontravel）──
+      // 找到包含價格關鍵字的文字節點，取其父元素的上下文文字
+      try {
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        let node: Text | null;
+        while ((node = walker.nextNode() as Text | null) !== null) {
+          const text = node.textContent || '';
+          if (/TWD|NT\$|元\/人|成人|大人|小孩佔床|不佔床|嬰兒/.test(text) && text.trim().length > 2) {
+            const parent = node.parentElement;
+            if (parent) {
+              const contextEl = parent.closest('tr, li, div, td, p') as HTMLElement | null;
+              const contextText = contextEl?.innerText || parent.innerText || text;
+              if (contextText && contextText.length < 300) {
+                rawPriceTexts.push(contextText.trim().slice(0, 150));
+              }
+            }
+          }
+        }
+      } catch {}
+
+      // ── 去重 ──
+      const uniqueTexts = rawPriceTexts.filter((v, i, arr) => arr.indexOf(v) === i);
+
       // 從收集到的文字中擷取價格數字
-      const allText = rawPriceTexts.join(' ');
+      const allText = uniqueTexts.join(' ');
       const prices: number[] = [];
       for (const pattern of pricePatterns) {
-        // 使用 exec 迴圈替代 matchAll（相容性更好）
         let m: RegExpExecArray | null;
         const p = new RegExp(pattern.source, pattern.flags);
         while ((m = p.exec(allText)) !== null) {
@@ -247,15 +270,19 @@ export async function scrapeDynamicPage(url: string): Promise<DynamicScrapeResul
           if (num >= 1000 && num <= 500000) prices.push(num);
         }
       }
-      
+
       prices.sort((a, b) => a - b);
-      // 使用 filter 替代 Set spread（相容性更好）
       const uniquePrices = prices.filter((v, i, arr) => arr.indexOf(v) === i);
-      
+
+      // 成人價格：取最高的（旅遊網站通常成人最貴）
+      // 子女/嬰兒：取較低的幾個
+      const adultPrice = uniquePrices.length > 0 ? uniquePrices[uniquePrices.length - 1] : undefined;
+      const childWithBedPrice = uniquePrices.length > 1 ? uniquePrices[Math.floor(uniquePrices.length * 0.6)] : undefined;
+
       return {
-        rawPriceTexts: rawPriceTexts.slice(0, 10), // 最多 10 筆
-        adultPrice: uniquePrices.length > 0 ? uniquePrices[Math.floor(uniquePrices.length / 2)] : undefined, // 中位數
-        childWithBedPrice: uniquePrices.length > 1 ? uniquePrices[Math.floor(uniquePrices.length / 4)] : undefined,
+        rawPriceTexts: uniqueTexts.slice(0, 15), // P0: 最多 15 筆（原本 10 筆）
+        adultPrice,
+        childWithBedPrice,
       };
     }).catch(() => ({ rawPriceTexts: [] as string[], adultPrice: undefined as number | undefined, childWithBedPrice: undefined as number | undefined }));
     

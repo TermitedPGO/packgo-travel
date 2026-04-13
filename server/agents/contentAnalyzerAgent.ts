@@ -199,6 +199,11 @@ export class ContentAnalyzerAgent {
 
 禁用詞彙：靈魂、洗滯、光影、呵喃、心靈、深度對話、完美融合`;
 
+    // P1-Self-Repair: inject selfRepairHint if provided by MasterAgent
+    const selfRepairHint = rawData.selfRepairHint || '';
+    const selfRepairSection = selfRepairHint
+      ? `\n\n【自我修復指令 — 請針對以下問題改善，這是第 ${rawData.selfRepairRound || 1} 次重試】：\n${selfRepairHint}\n請特別注意上述問題，確保輸出質量高於上次。`
+      : '';
     const userPrompt = `請根據以下資訊生成旅遊文案（所有內容必須為繁體中文）：
 
 目的地：${destinationCity}, ${destinationCountry}
@@ -207,7 +212,7 @@ export class ContentAnalyzerAgent {
 原描述：${originalDescription}
 行程亮點：${highlights.slice(0, 5).join("、")}
 飯店等級：${hotelGrade}
-特色體驗：${specialExperiences.join("、")}
+特色體驗：${specialExperiences.join("、")}${selfRepairSection}
 
 請生成（全部用繁體中文）：
 1. poeticTitle: 詩意化標題（15-25字）
