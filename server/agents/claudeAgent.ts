@@ -122,6 +122,9 @@ export class ClaudeAgent {
 
   constructor(options?: { model?: ClaudeModel }) {
     const apiKey = process.env.ANTHROPIC_API_KEY;
+    // 診斷日誌 — 確認 API key 狀態
+    console.log(`[ClaudeAgent] ANTHROPIC_API_KEY status: ${apiKey ? `SET (${apiKey.substring(0, 8)}...)` : 'NOT SET'}`);
+    console.log(`[ClaudeAgent] BUILT_IN_FORGE_API_KEY status: ${process.env.BUILT_IN_FORGE_API_KEY ? 'SET' : 'NOT SET'}`);
     if (!apiKey) {
       throw new Error('ANTHROPIC_API_KEY is not set');
     }
@@ -321,6 +324,34 @@ export class ClaudeAgent {
     } catch (error: any) {
       const duration = Date.now() - startTime;
       console.error(`[ClaudeAgent] Error after ${duration}ms:`, error.message);
+
+      // Forge fallback: 當 Anthropic 直連失敗（403/forbidden）時，透過 Forge proxy 呼叫
+      if (error?.status === 403 || error?.message?.includes('forbidden') || error?.message?.includes('403')) {
+        console.warn(`[ClaudeAgent] Anthropic direct call failed (403), falling back to Forge proxy...`);
+        try {
+          const { invokeLLM } = await import('../_core/llm');
+          const forgeResult = await invokeLLM({
+            messages: [
+              ...(options?.systemPrompt ? [{ role: 'system' as const, content: options.systemPrompt }] : []),
+              { role: 'user' as const, content: prompt },
+            ],
+            maxTokens: options?.maxTokens || 4096,
+          });
+          const forgeContent = forgeResult.choices?.[0]?.message?.content;
+          const contentStr = typeof forgeContent === 'string' ? forgeContent : JSON.stringify(forgeContent);
+          console.log(`[ClaudeAgent] Forge fallback succeeded (${Date.now() - startTime}ms)`);
+          return {
+            success: true,
+            content: contentStr,
+            usage: {
+              inputTokens: forgeResult.usage?.prompt_tokens || 0,
+              outputTokens: forgeResult.usage?.completion_tokens || 0,
+            },
+          };
+        } catch (forgeErr: any) {
+          console.error(`[ClaudeAgent] Forge fallback also failed:`, forgeErr.message);
+        }
+      }
 
       return {
         success: false,
@@ -523,6 +554,55 @@ export class ClaudeAgent {
     } catch (error: any) {
       const duration = Date.now() - startTime;
       console.error(`[ClaudeAgent] Structured message error after ${duration}ms:`, error.message);
+
+      // Forge fallback: 當 Anthropic 直連失敗（403/forbidden）時，透過 Forge proxy 呼叫
+      // Forge 使用 response_format: json_schema 替代 Claude tool_use
+      if (error?.status === 403 || error?.message?.includes('forbidden') || error?.message?.includes('403')) {
+        console.warn(`[ClaudeAgent] Anthropic structured call failed (403), falling back to Forge proxy...`);
+        try {
+          const { invokeLLM } = await import('../_core/llm');
+          const schemaName = options?.schemaName || 'structured_output';
+          const forgeResult = await invokeLLM({
+            messages: [
+              { role: 'system' as const, content: systemPromptText + '\n\n請回傳符合指定 JSON schema 的結構化資料。' },
+              { role: 'user' as const, content: prompt },
+            ],
+            maxTokens: options?.maxTokens || 4096,
+            response_format: {
+              type: 'json_schema',
+              json_schema: {
+                name: schemaName,
+                strict: false,
+                schema: schema as any,
+              },
+            },
+          });
+          const forgeContent = forgeResult.choices?.[0]?.message?.content;
+          const contentStr = typeof forgeContent === 'string' ? forgeContent : JSON.stringify(forgeContent);
+          // 嘗試解析 JSON
+          let parsedData: T;
+          try {
+            parsedData = JSON.parse(contentStr) as T;
+          } catch {
+            // 如果不是有效 JSON，尝試提取 JSON 區塊
+            const jsonMatch = contentStr.match(/\{[\s\S]*\}/);
+            if (!jsonMatch) throw new Error('Forge fallback: no valid JSON in response');
+            parsedData = JSON.parse(jsonMatch[0]) as T;
+          }
+          console.log(`[ClaudeAgent] Forge structured fallback succeeded (${Date.now() - startTime}ms)`);
+          return {
+            success: true,
+            data: parsedData,
+            content: contentStr,
+            usage: {
+              inputTokens: forgeResult.usage?.prompt_tokens || 0,
+              outputTokens: forgeResult.usage?.completion_tokens || 0,
+            },
+          };
+        } catch (forgeErr: any) {
+          console.error(`[ClaudeAgent] Forge structured fallback also failed:`, forgeErr.message);
+        }
+      }
 
       return {
         success: false,
