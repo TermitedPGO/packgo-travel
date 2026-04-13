@@ -28,6 +28,15 @@ export interface ExtractedTourMeta {
   productCode?: string;        // 行程代碼
 }
 
+// priceHints 型別（來自 DynamicScrapeResult）
+export interface PriceHints {
+  adultPrice?: number;
+  childWithBedPrice?: number;
+  childNoBedPrice?: number;
+  infantPrice?: number;
+  rawPriceTexts: string[];
+}
+
 // 最大圖片大小（bytes），超過則壓縮
 const MAX_IMAGE_SIZE = 4 * 1024 * 1024; // 4MB
 
@@ -93,14 +102,110 @@ function extractDatesFromText(rawText: string): ExtractedTourMeta['departureDate
 }
 
 /**
+ * 從 rawText 用正則表達式抽取價格（增強版 fallback）
+ * 支援多種格式：NT$45,800、45800元、成人 45,800、大人 45800 等
+ */
+export function extractPriceFromText(rawText: string): Partial<ExtractedTourMeta['pricing']> {
+  const result: Partial<ExtractedTourMeta['pricing']> = { currency: 'TWD' };
+  
+  // 成人價格：多種前綴
+  const adultPatterns = [
+    /(?:成人|大人|Adult)\s*[：:＄$NT]*\s*([\d,]+)/i,
+    /NT\$?\s*([\d,]+)\s*(?:\/人|\/位|起)/i,
+    /(?:定價|售價|原價|特價)\s*[：:＄$NT]*\s*([\d,]+)/i,
+    /\$\s*([\d,]+)\s*(?:TWD|元|起)/i,
+    // 純數字 + 元（台幣常見格式）
+    /([\d,]{5,6})\s*元/g,
+  ];
+  
+  for (const pattern of adultPatterns) {
+    const match = rawText.match(pattern);
+    if (match) {
+      const price = parseInt(match[1].replace(/,/g, ''));
+      if (price >= 1000 && price <= 500000) {
+        result.adultPrice = price;
+        break;
+      }
+    }
+  }
+  
+  // 小孩佔床
+  const childBedPatterns = [
+    /(?:小孩佔床|孩童佔床|兒童佔床|Child with bed)\s*[：:＄$NT]*\s*([\d,]+)/i,
+    /佔床\s*[：:＄$NT]*\s*([\d,]+)/i,
+  ];
+  for (const pattern of childBedPatterns) {
+    const match = rawText.match(pattern);
+    if (match) {
+      const price = parseInt(match[1].replace(/,/g, ''));
+      if (price >= 500 && price <= 500000) {
+        result.childWithBedPrice = price;
+        break;
+      }
+    }
+  }
+  
+  // 小孩不佔床
+  const childNoBedPatterns = [
+    /(?:小孩不佔床|孩童不佔床|兒童不佔床|Child no bed)\s*[：:＄$NT]*\s*([\d,]+)/i,
+    /不佔床\s*[：:＄$NT]*\s*([\d,]+)/i,
+  ];
+  for (const pattern of childNoBedPatterns) {
+    const match = rawText.match(pattern);
+    if (match) {
+      const price = parseInt(match[1].replace(/,/g, ''));
+      if (price >= 500 && price <= 500000) {
+        result.childNoBedPrice = price;
+        break;
+      }
+    }
+  }
+  
+  // 嬰兒
+  const infantPatterns = [
+    /(?:嬰兒|Infant)\s*[：:＄$NT]*\s*([\d,]+)/i,
+  ];
+  for (const pattern of infantPatterns) {
+    const match = rawText.match(pattern);
+    if (match) {
+      const price = parseInt(match[1].replace(/,/g, ''));
+      if (price >= 0 && price <= 100000) {
+        result.infantPrice = price;
+        break;
+      }
+    }
+  }
+  
+  // 價格備註
+  const notePatterns = [
+    /(?:含稅|含稅費|含服務費|不含稅|小費另計|小費自理)/,
+  ];
+  for (const pattern of notePatterns) {
+    const match = rawText.match(pattern);
+    if (match) {
+      result.priceNote = match[0];
+      break;
+    }
+  }
+  
+  console.log(`[DateExtractor] extractPriceFromText: adultPrice=${result.adultPrice}, childWithBed=${result.childWithBedPrice}, childNoBed=${result.childNoBedPrice}`);
+  return result;
+}
+
+/**
  * 使用 Claude Vision 分析截圖，抽取行程元數據
+ * @param priceHints - 來自 DynamicScraper 的 JS 價格擷取結果（可選）
  */
 export async function extractTourMeta(
   screenshots: { fullPage: Buffer; dateSection?: Buffer; priceSection?: Buffer },
   rawText: string,
-  sourceUrl: string
+  sourceUrl: string,
+  priceHints?: PriceHints
 ): Promise<ExtractedTourMeta> {
   console.log(`[DateExtractor] Starting extraction for: ${sourceUrl}`);
+  if (priceHints?.rawPriceTexts?.length) {
+    console.log(`[DateExtractor] priceHints available: ${priceHints.rawPriceTexts.length} texts, adultPrice hint: ${priceHints.adultPrice}`);
+  }
   
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -169,17 +274,38 @@ export async function extractTourMeta(
     text: `\n以下是頁面純文字（補充參考）：\n${textSample}`,
   });
   
+  // 加入 priceHints 作為額外參考
+  if (priceHints?.rawPriceTexts?.length) {
+    const priceHintText = [
+      `\n【JS 價格擷取結果（請優先參考）】`,
+      priceHints.adultPrice ? `估算成人價格：${priceHints.adultPrice} TWD` : '',
+      priceHints.childWithBedPrice ? `估算小孩佔床：${priceHints.childWithBedPrice} TWD` : '',
+      `原始價格文字：\n${priceHints.rawPriceTexts.slice(0, 5).join('\n')}`,
+    ].filter(Boolean).join('\n');
+    imageContents.push({ type: 'text', text: priceHintText });
+  }
+  
   // 如果沒有任何截圖，只用文字
   const hasImages = imageContents.some(c => c.type === 'image');
   
   if (!hasImages) {
     console.warn('[DateExtractor] No screenshots available, using text-only fallback');
-    // 直接從文字抽取日期
+    // 直接從文字抽取日期和價格
     const textDates = extractDatesFromText(rawText);
+    const textPricing = extractPriceFromText(rawText);
+    // 優先使用 priceHints
+    const adultPrice = priceHints?.adultPrice || textPricing.adultPrice || 0;
     return {
       departureDates: textDates,
       capacity: { maxParticipants: 0 },
-      pricing: { adultPrice: 0, currency: 'TWD' },
+      pricing: {
+        adultPrice,
+        childWithBedPrice: priceHints?.childWithBedPrice || textPricing.childWithBedPrice,
+        childNoBedPrice: textPricing.childNoBedPrice,
+        infantPrice: priceHints?.infantPrice || textPricing.infantPrice,
+        currency: 'TWD',
+        priceNote: textPricing.priceNote,
+      },
     };
   }
   
@@ -263,6 +389,11 @@ JSON 格式：
     const extracted = JSON.parse(jsonMatch[0]) as ExtractedTourMeta;
     
     // 驗證和清理數據
+    // 如果 Claude 沒有抽取到價格，使用 priceHints 或 regex fallback 補充
+    const regexPricing = extractPriceFromText(rawText);
+    const claudeAdultPrice = extracted.pricing?.adultPrice || 0;
+    const fallbackAdultPrice = priceHints?.adultPrice || regexPricing.adultPrice || 0;
+    
     const result: ExtractedTourMeta = {
       departureDates: (extracted.departureDates || []).filter(d => d.date && /^\d{4}-\d{2}-\d{2}$/.test(d.date)),
       capacity: {
@@ -270,36 +401,41 @@ JSON 格式：
         minParticipants: extracted.capacity?.minParticipants,
       },
       pricing: {
-        adultPrice: extracted.pricing?.adultPrice || 0,
-        childWithBedPrice: extracted.pricing?.childWithBedPrice,
-        childNoBedPrice: extracted.pricing?.childNoBedPrice,
-        infantPrice: extracted.pricing?.infantPrice,
+        // 優先使用 Claude 的結果，fallback 到 priceHints 或 regex
+        adultPrice: claudeAdultPrice > 0 ? claudeAdultPrice : fallbackAdultPrice,
+        childWithBedPrice: extracted.pricing?.childWithBedPrice || priceHints?.childWithBedPrice || regexPricing.childWithBedPrice,
+        childNoBedPrice: extracted.pricing?.childNoBedPrice || regexPricing.childNoBedPrice,
+        infantPrice: extracted.pricing?.infantPrice || priceHints?.infantPrice || regexPricing.infantPrice,
         currency: extracted.pricing?.currency || 'TWD',
-        priceNote: extracted.pricing?.priceNote,
+        priceNote: extracted.pricing?.priceNote || regexPricing.priceNote,
       },
       productCode: extracted.productCode,
     };
     
-    console.log(`[DateExtractor] Extracted ${result.departureDates.length} dates, maxParticipants: ${result.capacity.maxParticipants}, adultPrice: ${result.pricing.adultPrice}`);
+    console.log(`[DateExtractor] Extracted ${result.departureDates.length} dates, maxParticipants: ${result.capacity.maxParticipants}, adultPrice: ${result.pricing.adultPrice} (claude: ${claudeAdultPrice}, fallback: ${fallbackAdultPrice})`);
     
     return result;
   } catch (err: any) {
     console.error('[DateExtractor] Claude Vision failed:', err.message);
     
-    // Fallback：從純文字抽取日期
-    console.log('[DateExtractor] Falling back to text-based date extraction...');
+    // Fallback：從純文字抽取日期和價格
+    console.log('[DateExtractor] Falling back to text-based extraction...');
     const textDates = extractDatesFromText(rawText);
+    const textPricing = extractPriceFromText(rawText);
     
-    // 嘗試從文字抽取價格
-    const priceMatch = rawText.match(/(?:成人|大人)[^\d]*(\d{4,6})/);
-    const adultPrice = priceMatch ? parseInt(priceMatch[1]) : 0;
+    // 優先使用 priceHints，其次使用 regex 結果
+    const adultPrice = priceHints?.adultPrice || textPricing.adultPrice || 0;
     
     return {
       departureDates: textDates,
       capacity: { maxParticipants: 0 },
       pricing: {
         adultPrice,
+        childWithBedPrice: priceHints?.childWithBedPrice || textPricing.childWithBedPrice,
+        childNoBedPrice: textPricing.childNoBedPrice,
+        infantPrice: priceHints?.infantPrice || textPricing.infantPrice,
         currency: 'TWD',
+        priceNote: textPricing.priceNote,
       },
     };
   }

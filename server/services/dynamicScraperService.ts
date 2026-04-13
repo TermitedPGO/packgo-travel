@@ -16,6 +16,13 @@ export interface DynamicScrapeResult {
   pageTitle: string;
   sourceUrl: string;
   scrapedAt: Date;
+  priceHints?: {               // JS 價格擷取結果（供 dateExtractorAgent 參考）
+    adultPrice?: number;
+    childWithBedPrice?: number;
+    childNoBedPrice?: number;
+    infantPrice?: number;
+    rawPriceTexts: string[];   // 原始價格文字（供 AI 參考）
+  };
 }
 
 // 系統 Chromium 路徑
@@ -37,14 +44,28 @@ const DATE_SELECTORS = [
 
 // 價格區塊的 CSS 選擇器
 const PRICE_SELECTORS = [
+  // 通用 class 名稱
   '[class*="price"]',
   '[class*="pricing"]',
   '[class*="fee"]',
   '[class*="cost"]',
+  '[class*="amount"]',
+  '[class*="total"]',
+  // ID 選擇器
   '[id*="price"]',
+  '[id*="pricing"]',
+  // 通用 class
   '.tour-price',
   '.price-table',
   '.price-section',
+  '.price',
+  // data 屬性
+  '[data-price]',
+  '[data-pricing]',
+  // 台灣旅遊網站常見
+  '[class*="ntd"]',
+  '[class*="twd"]',
+  '[class*="dollar"]',
 ];
 
 /**
@@ -185,6 +206,65 @@ export async function scrapeDynamicPage(url: string): Promise<DynamicScrapeResul
       }
     }
 
+    // JS 價格擷取：直接從 DOM 讀取價格數字（不依賴截圖）
+    const priceHints = await page.evaluate(() => {
+      const rawPriceTexts: string[] = [];
+      const pricePatterns = [
+        /NT\$?\s*([\d,]+)/gi,
+        /\$\s*([\d,]+)/g,
+        /([\d,]+)\s*元/g,
+        /([\d,]+)\s*TWD/gi,
+      ];
+      
+      // 收集所有價格相關元素的文字
+      const priceSelectors = [
+        '[class*="price"]', '[class*="pricing"]', '[class*="fee"]',
+        '[class*="cost"]', '[class*="amount"]', '[data-price]',
+        '[class*="ntd"]', '[class*="twd"]',
+      ];
+      
+      for (const sel of priceSelectors) {
+        try {
+          const els = document.querySelectorAll(sel);
+          els.forEach(el => {
+            const text = (el as HTMLElement).innerText || el.textContent || '';
+            if (text.match(/[\d,]{4,}/) && text.length < 200) {
+              rawPriceTexts.push(text.trim().slice(0, 100));
+            }
+          });
+        } catch {}
+      }
+      
+      // 從收集到的文字中擷取價格數字
+      const allText = rawPriceTexts.join(' ');
+      const prices: number[] = [];
+      for (const pattern of pricePatterns) {
+        // 使用 exec 迴圈替代 matchAll（相容性更好）
+        let m: RegExpExecArray | null;
+        const p = new RegExp(pattern.source, pattern.flags);
+        while ((m = p.exec(allText)) !== null) {
+          const num = parseInt(m[1].replace(/,/g, ''));
+          if (num >= 1000 && num <= 500000) prices.push(num);
+        }
+      }
+      
+      prices.sort((a, b) => a - b);
+      // 使用 filter 替代 Set spread（相容性更好）
+      const uniquePrices = prices.filter((v, i, arr) => arr.indexOf(v) === i);
+      
+      return {
+        rawPriceTexts: rawPriceTexts.slice(0, 10), // 最多 10 筆
+        adultPrice: uniquePrices.length > 0 ? uniquePrices[Math.floor(uniquePrices.length / 2)] : undefined, // 中位數
+        childWithBedPrice: uniquePrices.length > 1 ? uniquePrices[Math.floor(uniquePrices.length / 4)] : undefined,
+      };
+    }).catch(() => ({ rawPriceTexts: [] as string[], adultPrice: undefined as number | undefined, childWithBedPrice: undefined as number | undefined }));
+    
+    if (priceHints.rawPriceTexts.length > 0) {
+      console.log(`[DynamicScraper] ✓ JS price extraction: ${priceHints.rawPriceTexts.length} price texts found, estimated adultPrice: ${priceHints.adultPrice}`);
+    } else {
+      console.log(`[DynamicScraper] No price elements found via JS extraction`);
+    }
+
     console.log(`[DynamicScraper] Scrape completed. HTML: ${renderedHtml.length} chars, Text: ${rawText.length} chars`);
     console.log(`[DynamicScraper] Screenshots: fullPage=${fullPageBuffer.length} bytes, dateSection=${dateSectionBuffer?.length || 0} bytes, priceSection=${priceSectionBuffer?.length || 0} bytes`);
 
@@ -199,6 +279,7 @@ export async function scrapeDynamicPage(url: string): Promise<DynamicScrapeResul
       pageTitle,
       sourceUrl: url,
       scrapedAt: new Date(),
+      priceHints,
     };
   } finally {
     if (browser) {

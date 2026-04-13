@@ -470,7 +470,8 @@ export class MasterAgent {
           extractedTourMeta = await extractTourMeta(
             scrapeResult.screenshots || { fullPage: Buffer.alloc(0) },
             scrapeResult.rawText || '',
-            url
+            url,
+            (scrapeResult as any).priceHints // 傳遞 JS 價格擷取結果（可選）
           );
           console.log(`[MasterAgent] ✓ DateExtractor: ${extractedTourMeta.departureDates.length} dates, maxParticipants: ${extractedTourMeta.capacity.maxParticipants}, adultPrice: ${extractedTourMeta.pricing.adultPrice}`);
         } catch (extractErr) {
