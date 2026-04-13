@@ -220,7 +220,7 @@ ${JSON.stringify(rawData.flight, null, 2)}
       departureAirport = '台北松山機場 (TSA)';
     } else if (/San Francisco|SFO|舊金山/.test(deptHint)) {
       departureAirport = 'San Francisco International Airport (SFO)';
-    } else if (/Los Angeles|LAX|洛衫磣/.test(deptHint)) {
+    } else if (/Los Angeles|LAX|洛杉磯/.test(deptHint)) {
       departureAirport = 'Los Angeles International Airport (LAX)';
     } else if (/成田|NRT/.test(deptHint)) {
       departureAirport = '成田國際機場 (NRT)';
@@ -235,7 +235,7 @@ ${JSON.stringify(rawData.flight, null, 2)}
 
     // ── 偵測台灣國內行程 ──
     const isTaiwanDomestic = ['台灣'].includes(destinationCountry) ||
-      /台北|台中|台南|高雄|花蓮|台東|墓丁|阿里山|日月潭|宜蘭|南投|澎湖|金門|馬祖/.test(destination);
+      /台北|台中|台南|高雄|花蓮|台東|墾丁|阿里山|日月潭|宜蘭|南投|澎湖|金門|馬祖/.test(destination);
 
     if (isTaiwanDomestic) {
       return {
@@ -257,7 +257,7 @@ ${JSON.stringify(rawData.flight, null, 2)}
           arrivalAirport: departureAirport !== '依實際訂位為準' ? departureAirport : '依行程通知',
         },
         description: `本行程為台灣國內旅遊，交通方式依行程安排。具體集合地點與交通方式將於行前通知中說明。`,
-        features: ['國內行程', '專車接送', '舶適交通'],
+        features: ['國內行程', '專車接送', '舒適交通'],
       };
     }
 
@@ -281,9 +281,9 @@ ${JSON.stringify(rawData.flight, null, 2)}
         arrivalAirport: departureAirport,
       },
       description: departureAirport !== '依實際訂位為準'
-        ? `從${departureAirport}出發，搞乘國際航班前往${destination}。具體航班資訊將於訂位確認後提供。`
-        : `搞乘國際航班前往${destination}，出發機場與航班資訊將於訂位確認後提供。`,
-      features: ['國際航班', '贴心服務', '舶適座位'],
+        ? `從${departureAirport}出發，搭乘國際航班前往${destination}。具體航班資訊將於訂位確認後提供。`
+        : `搭乘國際航班前往${destination}，出發機場與航班資訊將於訂位確認後提供。`,
+      features: ['國際航班', '貼心服務', '舒適座位'],
     };
   }
 }
