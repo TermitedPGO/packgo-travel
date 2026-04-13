@@ -27,7 +27,7 @@ export interface ExtractedTourMeta {
     childWithBedPrice?: number;
     childNoBedPrice?: number;
     infantPrice?: number;
-    currency: 'TWD' | 'USD';
+    currency: 'TWD' | 'USD' | 'EUR' | 'JPY' | 'KRW' | 'THB' | 'AUD' | 'GBP' | 'CAD' | 'VND';
     priceNote?: string;        // "含稅"、"小費另計" 等
   };
   productCode?: string;        // 行程代碼
@@ -119,12 +119,18 @@ function strategy1_prefixMatch(rawText: string): number | undefined {
     /NT\$?\s*([\d,]+)\s*(?:\/人|\/位|起)/i,
     /(?:定價|售價|原價|特價)\s*[：:＄$NT]*\s*([\d,]+)/i,
     /\$\s*([\d,]+)\s*(?:TWD|元|起)/i,
+    // 多幣別
+    /(?:USD|US\$)\s*([\d,]+)/i,
+    /(?:EUR|€)\s*([\d,]+)/i,
+    /(?:JPY|¥|･)\s*([\d,]+)/i,
+    /(?:GBP|£)\s*([\d,]+)/i,
+    /([\d,]+)\s*円/i,
   ];
   for (const p of patterns) {
     const m = rawText.match(p);
     if (m) {
       const price = parseInt(m[1].replace(/,/g, ''));
-      if (price >= 5000 && price <= 500000) return price;
+      if (price >= 100 && price <= 9999999) return price;
     }
   }
   return undefined;
@@ -138,6 +144,12 @@ function strategy2_numberUnit(rawText: string): number | undefined {
     /([\d,]{5,7})\s*元/g,
     /NT\$?\s*([\d,]{5,7})/g,
     /([\d,]{5,7})\s*TWD/gi,
+    // 多幣別
+    /(?:USD|US\$)\s*([\d,]{3,10})/gi,
+    /(?:EUR|€)\s*([\d,]{3,10})/gi,
+    /(?:JPY|¥|･)\s*([\d,]{4,10})/gi,
+    /([\d,]{4,10})\s*円/gi,
+    /(?:GBP|£)\s*([\d,]{3,10})/gi,
   ];
   const candidates: number[] = [];
   for (const p of patterns) {
@@ -145,7 +157,7 @@ function strategy2_numberUnit(rawText: string): number | undefined {
     const re = new RegExp(p.source, p.flags);
     while ((m = re.exec(rawText)) !== null) {
       const price = parseInt(m[1].replace(/,/g, ''));
-      if (price >= 5000 && price <= 500000) candidates.push(price);
+      if (price >= 100 && price <= 9999999) candidates.push(price);
     }
   }
   if (candidates.length === 0) return undefined;
@@ -160,11 +172,11 @@ function strategy3_contextWindow(rawText: string): number | undefined {
   const lines = rawText.split('\n');
   const candidates: number[] = [];
   for (const line of lines) {
-    if (/元|TWD|NT\$|\$/.test(line)) {
+    if (/元|TWD|NT\$|USD|US\$|EUR|€|JPY|¥|円|GBP|£|KRW|₩|\$/.test(line)) {
       const nums = line.match(/[\d,]{4,7}/g) || [];
       for (const n of nums) {
         const price = parseInt(n.replace(/,/g, ''));
-        if (price >= 5000 && price <= 500000) candidates.push(price);
+        if (price >= 100 && price <= 9999999) candidates.push(price);
       }
     }
   }
@@ -180,7 +192,7 @@ function strategy4_looseScan(rawText: string): number | undefined {
   const candidates: number[] = [];
   for (const n of nums) {
     const price = parseInt(n.replace(/,/g, ''));
-    if (price >= 5000 && price <= 500000) candidates.push(price);
+    if (price >= 100 && price <= 9999999) candidates.push(price);
   }
   if (candidates.length === 0) return undefined;
   candidates.sort((a, b) => a - b);
@@ -256,7 +268,18 @@ function validatePrice(price: number | undefined): number {
  * 支援多種格式：NT$45,800、45800元、成人 45,800、大人 45800 等
  */
 export function extractPriceFromText(rawText: string, priceHints?: PriceHints): Partial<ExtractedTourMeta['pricing']> {
-  const result: Partial<ExtractedTourMeta['pricing']> = { currency: 'TWD' };
+  // 偵測幣別
+  let detectedCurrency: ExtractedTourMeta['pricing']['currency'] = 'TWD'; // 預設
+  if (/USD|US\$/.test(rawText)) detectedCurrency = 'USD';
+  else if (/EUR|€/.test(rawText)) detectedCurrency = 'EUR';
+  else if (/JPY|¥|円/.test(rawText)) detectedCurrency = 'JPY';
+  else if (/GBP|£/.test(rawText)) detectedCurrency = 'GBP';
+  else if (/KRW|₩|원/.test(rawText)) detectedCurrency = 'KRW';
+  else if (/THB|฿/.test(rawText)) detectedCurrency = 'THB';
+  else if (/AUD|A\$/.test(rawText)) detectedCurrency = 'AUD';
+  else if (/VND/.test(rawText)) detectedCurrency = 'VND';
+
+  const result: Partial<ExtractedTourMeta['pricing']> = { currency: detectedCurrency };
 
   // 使用 5 策略 fallback chain 抽取成人價格
   const { adultPrice } = extractPriceWithFallbackChain(rawText, priceHints);
@@ -467,6 +490,18 @@ export async function extractTourMeta(
 步驟 2: 判斷哪些數字是價格（有「元」「TWD」「NT$」「成人」「大人」等關鍵字）
 步驟 3: 從候選價格中選出成人票價（通常是最高的那個）
 步驟 4: 填入 JSON
+
+【幣別辨識規則】：
+- 看到 TWD / NT$ / NTD / 元 → currency: "TWD"
+- 看到 USD / US$ → currency: "USD"
+- 看到 EUR / € → currency: "EUR"
+- 看到 JPY / ¥ / 円 → currency: "JPY"
+- 看到 GBP / £ → currency: "GBP"
+- 看到 KRW / ₩ / 원 → currency: "KRW"
+- 看到 THB / ฿ → currency: "THB"
+- 看到 AUD / A$ → currency: "AUD"
+- 看到 VND → currency: "VND"
+- 如果無法確定，根據網站語言和 URL 推測最可能的幣別
 
 【日期格式規則】：
 - 格式必須是 YYYY-MM-DD（例如 2026-05-15）

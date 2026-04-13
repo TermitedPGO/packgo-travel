@@ -14,6 +14,48 @@ import { COPYWRITER_SKILL } from "./skillLibrary";
 import { getKeyInstructions, extractJsonSchema } from "./skillLoader";
 import { applyLearnedSkills } from "./learningAgent";
 
+/**
+ * 根據目的地回傳對應的文案風格指引
+ * PACK&GO 品牌：美國精品華語旅行社，行程涵蓋全球
+ */
+function getDestinationStyle(country: string, city: string): string {
+  const c = (country || '').trim();
+  const combined = `${c} ${city || ''}`.trim();
+
+  if (['日本'].includes(c) || /東京|大阪|京都|北海道|沖縄|筱根|奈良|名古屋|福岡|鹿児島/.test(combined)) {
+    return '日本行程：強調四季美學、職人精神、和式細致。善用「季節限定」「匠心」「旬味」等詞彙。注意區分關東/關西/北海道的風情差異。';
+  }
+  if (['韓國'].includes(c) || /首爾|釜山|濟州/.test(combined)) {
+    return '韓國行程：強調潮流與傳統並存、韓式美食體驗、都會與自然的對比。';
+  }
+  if (['泰國','越南','新加坡','馬來西亞','印尼','菲律賓','柬埔寨','緬甸','實國'].includes(c)) {
+    return '東南亞行程：強調熱帶風情、在地文化深度、自然生態奇觀。用詞輕鬆活潑但不廉價。';
+  }
+  if (['帛琅','馬爾地夫','斐濟','大溪地','關島','塞班'].includes(c) || /島/.test(combined)) {
+    return '海島行程：強調海洋生態、水上活動、純淨放鬆、度假氛圍。用詞清爽明亮。';
+  }
+  if (['台灣'].includes(c) || /台北|台中|台南|高雄|花蓮|台東|墓丁|阿里山|日月潭|宜蘭|南投/.test(combined)) {
+    return '台灣行程：強調在地深度、鐵道風情、小鎮文化、美食。走「重新認識台灣」的深度路線，避免觀光客視角。';
+  }
+  if (['英國','法國','義大利','德國','西班牙','希臘','土耳其','瑞士','奧地利','荷蘭','葡萄牙','捷克','克羅埃西亞','冰島','挪威','瑞典','丹麥','芬蘭','愛爾蘭','比利時','匈牙利','波蘭','羅馬尼亞'].includes(c) || /歐洲|北歐|東歐|南歐/.test(combined)) {
+    return '歐洲行程：強調歷史縱深、建築美學、藝術人文、美食美酒文化。用詞可稍偏優雅古典。根據具體國家調整風情差異。';
+  }
+  if (['澳洲','紐西蘭'].includes(c)) {
+    return '紐澳行程：強調壯闊自然、戶外探索、農莊體驗、純淨空氣。';
+  }
+  if (['美國','加拿大','秘魯','阿根廷','巴西','墨西哥','智利','古巴','哥倫比亞'].includes(c)) {
+    return '美洲行程：強調多元文化、壯麗地景、公路精神、冒險體驗。';
+  }
+  if (['埃及','摩洛哥','南非','肯亞','杜拜','約旦','以色列'].includes(c) || /中東|非洲/.test(combined)) {
+    return '中東/非洲行程：強調文明遗跡、沙漠奇景、野生動物、異域風情。';
+  }
+  if (['中國','香港','澳門'].includes(c)) {
+    return '中國/港澳行程：強調千年文化、美食文化、現代與傳統交融。';
+  }
+
+  return `本行程目的地為${c || '海外'}，請根據該地區的文化特色和旅遊亮點，選擇最適合的描述風格。`;
+}
+
 export interface ContentAnalyzerResult {
   success: boolean;
   data?: {
@@ -184,20 +226,28 @@ export class ContentAnalyzerAgent {
     const hotelGrade = rawData.accommodation?.hotelGrade || "";
     const specialExperiences = rawData.specialExperiences || [];
     
-    // 簡化的系統提示
-    const systemPrompt = `你是資深旅遊雜誌主編，專門撰寫有吸引力的旅遊文案。
+    // PACK&GO 品牌核心 + 目的地自適應風格
+    const destinationStyle = getDestinationStyle(destinationCountry, destinationCity);
 
-重要規則：
-- 所有輸出必須使用繁體中文，即使輸入資料是英文或其他語言，也必須翻譯為繁體中文。
-- 地名、景點名稱可保留原文並加上中文譯名（例：科托爾灣 Kotor Bay）
+    const systemPrompt = `你是 PACK&GO 旅行社的資深文案總監。
 
-風格要求：
-1. 使用精煉的形容詞（雅奢、秘境、極致）
-2. 加入動詞增加動感（尋蹤、漫遊、探索）
-3. 使用感官細節描寫
+品牌定位：美國精品華語旅行社，服務追求品質的華語旅客，行程涵蓋全球。
+品牌調性：雅奄但不浮誇、有溫度但不煎情、專業但不生硬。
+
+語言規則：
+- 所有輸出必須使用繁體中文
+- 地名、景點名稱保留原文並加中文（例：科托爾灣 Kotor Bay、筱根 Hakone）
+- 即使輸入資料是英文或其他語言，也必須翻譯為繁體中文
+
+風格要點：
+1. 使用精鍌的形容詞，動詞帶動感（尋蹤、漫遊、品味、探索）
+2. 每段描述至少包含一個感官細節（視覺、聽覺、居覺、味覺、觸覺）
+3. 內容必須基於原始資料，禁止捧造景點或體驗
 4. 保持簡潔專業
 
-禁用詞彙：靈魂、洗滯、光影、呵喃、心靈、深度對話、完美融合`;
+本次目的地風格指引：${destinationStyle}
+
+禁用詞彙：靈魂、洗滞、光影、尼喃、心靈、深度對話、完美融合、一生必去`;
 
     // P1-Self-Repair: inject selfRepairHint if provided by MasterAgent
     const selfRepairHint = rawData.selfRepairHint || '';

@@ -196,30 +196,94 @@ ${JSON.stringify(rawData.flight, null, 2)}
   
   /**
    * Generate default flight information when no data is available
+   * 動態判斷出發機場和行程類型（國際 vs 國內）
    */
   private generateDefaultFlight(rawData: any): FlightAgentResult['data'] {
     const destination = rawData?.location?.destinationCity || rawData?.location?.destinationCountry || '目的地';
-    
+    const destinationCountry = rawData?.location?.destinationCountry || '';
+    const sourceUrl = rawData?.sourceUrl || '';
+    const rawContent = rawData?.rawContent || rawData?.renderedHtml || '';
+
+    // ── 動態判斷出發機場 ──
+    let departureAirport = '依實際訂位為準';
+    const departureCity = rawData?.location?.departureCity || '';
+
+    // 從原始內容搜尋出發地線索
+    const departureMatch = rawContent.match(/(?:出發地|出發機場|集合地點|出發)[\uff1a:]+\s*(.+?)(?:\n|$)/);
+    const deptHint = departureMatch?.[1]?.trim() || departureCity;
+
+    if (/桃園|TPE|台北/.test(deptHint)) {
+      departureAirport = '台北桃園國際機場 (TPE)';
+    } else if (/高雄|KHH/.test(deptHint)) {
+      departureAirport = '高雄國際機場 (KHH)';
+    } else if (/松山|TSA/.test(deptHint)) {
+      departureAirport = '台北松山機場 (TSA)';
+    } else if (/San Francisco|SFO|舊金山/.test(deptHint)) {
+      departureAirport = 'San Francisco International Airport (SFO)';
+    } else if (/Los Angeles|LAX|洛衫磣/.test(deptHint)) {
+      departureAirport = 'Los Angeles International Airport (LAX)';
+    } else if (/成田|NRT/.test(deptHint)) {
+      departureAirport = '成田國際機場 (NRT)';
+    } else if (/關西|KIX/.test(deptHint)) {
+      departureAirport = '關西國際機場 (KIX)';
+    } else if (!deptHint) {
+      // 沒有出發地資訊 → 根據行程來源網站推斷
+      if (/liontravel|colatour|settour|eztravel|kkday|klook/.test(sourceUrl)) {
+        departureAirport = '台北桃園國際機場 (TPE)';
+      }
+    }
+
+    // ── 偵測台灣國內行程 ──
+    const isTaiwanDomestic = ['台灣'].includes(destinationCountry) ||
+      /台北|台中|台南|高雄|花蓮|台東|墓丁|阿里山|日月潭|宜蘭|南投|澎湖|金門|馬祖/.test(destination);
+
+    if (isTaiwanDomestic) {
+      return {
+        airline: '國內行程（無航班）',
+        outbound: {
+          flightNo: 'N/A',
+          departureTime: '依行程表',
+          arrivalTime: '依行程表',
+          duration: '依行程表',
+          departureAirport: departureAirport !== '依實際訂位為準' ? departureAirport : '集合地點依行程通知',
+          arrivalAirport: destination,
+        },
+        inbound: {
+          flightNo: 'N/A',
+          departureTime: '依行程表',
+          arrivalTime: '依行程表',
+          duration: '依行程表',
+          departureAirport: destination,
+          arrivalAirport: departureAirport !== '依實際訂位為準' ? departureAirport : '依行程通知',
+        },
+        description: `本行程為台灣國內旅遊，交通方式依行程安排。具體集合地點與交通方式將於行前通知中說明。`,
+        features: ['國內行程', '專車接送', '舶適交通'],
+      };
+    }
+
+    // ── 國際行程 ──
     return {
       airline: '請依實際訂位為準',
       outbound: {
         flightNo: 'TBA',
         departureTime: '請依實際訂位為準',
         arrivalTime: '請依實際訂位為準',
-        duration: '約 3-5 小時',
-        departureAirport: '台北桃園國際機場 (TPE)',
+        duration: '依航班為準',
+        departureAirport: departureAirport,
         arrivalAirport: `${destination}國際機場`,
       },
       inbound: {
         flightNo: 'TBA',
         departureTime: '請依實際訂位為準',
         arrivalTime: '請依實際訂位為準',
-        duration: '約 3-5 小時',
+        duration: '依航班為準',
         departureAirport: `${destination}國際機場`,
-        arrivalAirport: '台北桃園國際機場 (TPE)',
+        arrivalAirport: departureAirport,
       },
-      description: `從台北桃園國際機場出發，搭乘舒適的國際航班前往${destination}。航班提供貼心的機上服務，讓您在旅途中享受舒適的飛行體驗。具體航班資訊將於訂位確認後提供。`,
-      features: ['國際航班', '貼心服務', '舒適座位'],
+      description: departureAirport !== '依實際訂位為準'
+        ? `從${departureAirport}出發，搞乘國際航班前往${destination}。具體航班資訊將於訂位確認後提供。`
+        : `搞乘國際航班前往${destination}，出發機場與航班資訊將於訂位確認後提供。`,
+      features: ['國際航班', '贴心服務', '舶適座位'],
     };
   }
 }

@@ -216,6 +216,12 @@ export async function scrapeDynamicPage(url: string): Promise<DynamicScrapeResul
         /([\d,]+)\s*元/g,
         /([\d,]+)\s*TWD/gi,
         /([\d,]+)\s*(?:\/人|\/位)/g,
+        // 多幣別
+        /(?:USD|US\$)\s*([\d,]+)/gi,
+        /(?:EUR|€)\s*([\d,]+)/gi,
+        /(?:JPY|¥|･)\s*([\d,]+)/gi,
+        /(?:GBP|£)\s*([\d,]+)/gi,
+        /(?:KRW|₩)\s*([\d,]+)/gi,
       ];
 
       // ── 策略 A：CSS 選擇器（快速，適合有 class 的網站）──
@@ -243,7 +249,7 @@ export async function scrapeDynamicPage(url: string): Promise<DynamicScrapeResul
         let node: Text | null;
         while ((node = walker.nextNode() as Text | null) !== null) {
           const text = node.textContent || '';
-          if (/TWD|NT\$|元\/人|成人|大人|小孩佔床|不佔床|嬰兒/.test(text) && text.trim().length > 2) {
+          if (/TWD|NT\$|NTD|USD|US\$|EUR|€|JPY|¥|円|GBP|£|KRW|₩|元\/人|成人|大人|小孩佔床|不佔床|嬰兒|Adult|Price/.test(text) && text.trim().length > 2) {
             const parent = node.parentElement;
             if (parent) {
               const contextEl = parent.closest('tr, li, div, td, p') as HTMLElement | null;
@@ -363,13 +369,43 @@ export async function scrapeStaticFallback(url: string): Promise<Partial<Dynamic
     // 簡單提取文字（移除 HTML 標籤）
     const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
     
+    // 從 static HTML 文字中嘗試擷取價格
+    const staticPricePatterns = [
+      /(?:TWD|NTD|NT\$)\s*?([\d,]+)/gi,
+      /(?:USD|US\$)\s*?([\d,]+)/gi,
+      /(?:EUR|€)\s*?([\d,]+)/gi,
+      /(?:JPY|¥)\s*?([\d,]+)/gi,
+      /(?:成人|大人|每人|售價|團費)[^\d\n]{0,30}([\d,]{4,7})/g,
+      /([\d,]{4,7})\s*元/g,
+    ];
+    const rawPriceTexts: string[] = [];
+    const fallbackPrices: number[] = [];
+    for (const pattern of staticPricePatterns) {
+      let m;
+      const re = new RegExp(pattern.source, pattern.flags);
+      while ((m = re.exec(text)) !== null) {
+        const num = parseInt(m[1].replace(/,/g, ''), 10);
+        if (num >= 100 && num <= 9999999) {
+          fallbackPrices.push(num);
+          const start = Math.max(0, m.index - 30);
+          const end = Math.min(text.length, m.index + m[0].length + 30);
+          rawPriceTexts.push(text.slice(start, end).trim());
+        }
+      }
+    }
+    const sortedPrices = Array.from(new Set(fallbackPrices)).sort((a, b) => a - b);
+
     return {
       renderedHtml: html,
-      rawText: text.slice(0, 50000), // 限制文字長度
+      rawText: text.slice(0, 50000),
       screenshots: { fullPage: Buffer.alloc(0) },
       pageTitle: html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] || '',
       sourceUrl: url,
       scrapedAt: new Date(),
+      priceHints: sortedPrices.length > 0 ? {
+        adultPrice: sortedPrices[sortedPrices.length - 1],
+        rawPriceTexts: rawPriceTexts.slice(0, 15),
+      } : undefined,
     };
   } catch (err) {
     console.error(`[DynamicScraper] Static fallback also failed:`, err);

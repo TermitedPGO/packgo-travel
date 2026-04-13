@@ -295,7 +295,7 @@ export class MasterAgent {
               productCode: pdfData.productCode || '',
             },
             location: {
-              destinationCountry: pdfData.country || '台灣',
+              destinationCountry: pdfData.country || '',
               destinationCity: pdfData.destinations?.join(', ') || '',
             },
             duration: {
@@ -305,7 +305,7 @@ export class MasterAgent {
             pricing: {
               price: pdfData.price || 0,
               basePrice: pdfData.price || 0,
-              currency: 'TWD',
+              currency: pdfData.currency || 'TWD',
               priceNote: pdfData.priceNote || '',
             },
             highlights: pdfData.highlights || [],
@@ -406,7 +406,8 @@ export class MasterAgent {
             const supplementMeta = await extractTourMeta(
               supplementScrape.screenshots || { fullPage: Buffer.alloc(0) },
               supplementScrape.rawText || '',
-              supplementUrl
+              supplementUrl,
+              (supplementScrape as any).priceHints  // 傳遞 priceHints
             );
             
             // Merge supplement data into rawData
@@ -1293,6 +1294,77 @@ export class MasterAgent {
             }
           }
           console.log(`[MasterAgent] ✓ Applied ${calibrationReport.autoFixesApplied.length} auto-fix(es)`);
+        }
+
+        // ── Price Rescue: 如果 price=0 是低分根因，先用 regex 補救 ──
+        if ((finalData.price === 0 || finalData.price === undefined) && calibrationReport.totalScore < 70) {
+          console.log('[MasterAgent] ⚠ Price=0 detected with low QA score, attempting price rescue...');
+          const rescueRawText = rawData.rawContent || rawData.renderedHtml || '';
+
+          // 多幣別 regex 搜尋
+          const pricePatterns = [
+            { regex: /(?:TWD|NTD|NT\$)\s*?([\d,]+)/gi, currency: 'TWD' },
+            { regex: /(?:USD|US\$)\s*?([\d,]+)/gi, currency: 'USD' },
+            { regex: /(?:EUR|€)\s*?([\d,]+)/gi, currency: 'EUR' },
+            { regex: /(?:JPY|¥)\s*?([\d,]+)/gi, currency: 'JPY' },
+            { regex: /(?:GBP|£)\s*?([\d,]+)/gi, currency: 'GBP' },
+            { regex: /(?:成人|大人|每人|售價|團費)[^\d\n]{0,30}([\d,]{4,7})/g, currency: 'AUTO' },
+            { regex: /([\d,]{4,7})\s*元/g, currency: 'TWD' },
+          ];
+
+          const candidates: Array<{ price: number; currency: string }> = [];
+          for (const { regex, currency } of pricePatterns) {
+            let match;
+            const re = new RegExp(regex.source, regex.flags);
+            while ((match = re.exec(rescueRawText)) !== null) {
+              const num = parseInt(match[1].replace(/,/g, ''), 10);
+              if (num >= 100 && num <= 9999999) {
+                candidates.push({ price: num, currency });
+              }
+            }
+          }
+
+          // 也嘗試從 priceHints 取得
+          const scrapeHints = (rawData as any)?.extractedTourMeta?.pricing?.adultPrice;
+          if (scrapeHints && scrapeHints > 0) {
+            candidates.push({ price: scrapeHints, currency: (rawData as any)?.extractedTourMeta?.pricing?.currency || 'TWD' });
+          }
+
+          if (candidates.length > 0) {
+            // 優先選有明確幣別的
+            const withCurrency = candidates.filter(c => c.currency !== 'AUTO');
+            const pool = withCurrency.length > 0 ? withCurrency : candidates;
+            pool.sort((a, b) => a.price - b.price);
+            const rescued = pool[Math.floor(pool.length / 2)];
+
+            console.log(`[MasterAgent] ✓ Price rescue: ${rescued.price} ${rescued.currency} (from ${candidates.length} candidates)`);
+            finalData.price = rescued.price;
+            if (rawData.pricing) {
+              rawData.pricing.price = rescued.price;
+              rawData.pricing.basePrice = rescued.price;
+              if (rescued.currency !== 'AUTO') {
+                rawData.pricing.currency = rescued.currency;
+              }
+            }
+
+            // 重跟 calibration
+            try {
+              console.log('[MasterAgent] 🔄 Re-running calibration after price rescue...');
+              calibrationReport = await calibrateTour(finalData, sourceContent);
+              console.log(`[MasterAgent] ✓ Post-rescue calibration: score=${calibrationReport.totalScore}, verdict=${calibrationReport.verdict}`);
+              if (calibrationReport.autoFixesApplied.length > 0) {
+                for (const fix of calibrationReport.autoFixesApplied) {
+                  if (fix.field in finalData) {
+                    (finalData as any)[fix.field] = fix.after;
+                  }
+                }
+              }
+            } catch (reCalErr) {
+              console.warn('[MasterAgent] Post-rescue calibration failed:', reCalErr);
+            }
+          } else {
+            console.log('[MasterAgent] ⚠ Price rescue found no candidates in rawText');
+          }
         }
 
         // ── P1-Self-Repair: if score < 70, re-run Phase 2 + Phase 4 with fix instructions ──
