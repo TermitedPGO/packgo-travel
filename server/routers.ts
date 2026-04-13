@@ -856,6 +856,63 @@ export const appRouter = router({
       }),
 
 
+    // Cancel a stuck generation job (admin only)
+    cancelGeneration: adminProcedure
+      .input(z.object({
+        jobId: z.string(),
+      }))
+      .mutation(async ({ input }) => {
+        const { tourGenerationQueue } = await import("./queue");
+        const job = await tourGenerationQueue.getJob(input.jobId);
+
+        if (!job) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: `Job ${input.jobId} not found`,
+          });
+        }
+
+        const state = await job.getState();
+        console.log(`[Admin] Cancelling generation job ${input.jobId} (state: ${state})`);
+
+        // Move to failed state with reason
+        await job.moveToFailed(
+          new Error('Admin manually cancelled: generation stuck'),
+          job.token || '0',
+          false // don't fetch next job
+        );
+
+        // Also update progress to show cancelled state
+        await job.updateProgress({
+          step: 'cancelled',
+          progress: 0,
+          message: '\u7ba1\u7406\u54e1\u5df2\u53d6\u6d88\u6b64\u751f\u6210\u4efb\u52d9',
+          timestamp: Date.now(),
+        });
+
+        return {
+          success: true,
+          message: `Job ${input.jobId} cancelled (was: ${state})`,
+        };
+      }),
+
+    // List all active generation jobs (admin only) — for finding stuck jobs
+    listActiveGenerations: adminProcedure
+      .query(async () => {
+        const { tourGenerationQueue } = await import("./queue");
+        const activeJobs = await tourGenerationQueue.getJobs(['active', 'waiting']);
+
+        return activeJobs.map(job => ({
+          id: job.id,
+          url: job.data.url,
+          userId: job.data.userId,
+          requestId: job.data.requestId,
+          progress: job.progress,
+          createdAt: job.timestamp,
+          state: 'active',
+        }));
+      }),
+
     // Submit async tour generation job (admin only)
     // Supports three modes:
     //   1. PDF only (isPdf=true, no supplementUrl)

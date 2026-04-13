@@ -1370,11 +1370,19 @@ export class MasterAgent {
         // ── P1-Self-Repair: if score < 70, re-run Phase 2 + Phase 4 with fix instructions ──
         const SELF_REPAIR_THRESHOLD = 70;
         const MAX_SELF_REPAIR_ROUNDS = 2;
+        const SELF_REPAIR_TIMEOUT_MS = 60000; // 60 秒總時間上限
         let selfRepairRound = 0;
+        const selfRepairStartTime = Date.now();
         while (
           calibrationReport.totalScore < SELF_REPAIR_THRESHOLD &&
           selfRepairRound < MAX_SELF_REPAIR_ROUNDS
         ) {
+          // ⏱ 檢查總時間限制
+          const selfRepairElapsed = Date.now() - selfRepairStartTime;
+          if (selfRepairElapsed > SELF_REPAIR_TIMEOUT_MS) {
+            console.warn(`[MasterAgent] ⏱ Self-Repair timeout after ${Math.round(selfRepairElapsed / 1000)}s (limit: ${SELF_REPAIR_TIMEOUT_MS / 1000}s). Stopping with score=${calibrationReport.totalScore}`);
+            break;
+          }
           selfRepairRound++;
           console.log(`[MasterAgent] 🔧 Self-Repair Round ${selfRepairRound}: score=${calibrationReport.totalScore} < ${SELF_REPAIR_THRESHOLD}, re-running Phase 2 + Phase 4...`);
 
@@ -1448,6 +1456,9 @@ export class MasterAgent {
               }
             }
             calibrationReport = repairCalibration;
+            // ⏱ 計時日誌
+            const roundElapsed = Date.now() - selfRepairStartTime;
+            console.log(`[MasterAgent] ⏱ Self-Repair Round ${selfRepairRound} complete: ${Math.round(roundElapsed / 1000)}s elapsed, score=${calibrationReport.totalScore}`);
           } catch (repairCalErr) {
             console.warn('[MasterAgent] Self-Repair CalibrationAgent failed (non-fatal):', repairCalErr);
             break;
