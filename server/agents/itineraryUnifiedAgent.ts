@@ -588,7 +588,11 @@ ${JSON.stringify(extractedItineraries, null, 2)}
     const originalActivitiesCount = original.reduce((s, d) => s + d.activities.length, 0);
     const polishedActivitiesCount = polished.reduce((s, d) => s + d.activities.length, 0);
     const activitiesAdded = Math.max(0, polishedActivitiesCount - originalActivitiesCount);
-    if (activitiesAdded > originalActivitiesCount * 0.2) {
+    // ENRICHMENT RULE: When source has 0 activities, adding geographically consistent
+    // attractions is ACCEPTABLE ENRICHMENT (travel agencies are expected to enrich bare itineraries).
+    // Only penalize if source has activities AND the AI added more than 20% extra.
+    const isEnrichmentFromEmpty = originalActivitiesCount === 0;
+    if (!isEnrichmentFromEmpty && activitiesAdded > originalActivitiesCount * 0.2) {
       issues.push(`新增了過多活動：${activitiesAdded} 個（原始 ${originalActivitiesCount} 個）`);
       score -= 20;
     }

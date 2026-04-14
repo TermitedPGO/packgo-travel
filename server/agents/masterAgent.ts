@@ -1455,9 +1455,17 @@ export class MasterAgent {
                 }
               }
             }
-            calibrationReport = repairCalibration;
             // ⏱ 計時日誌
             const roundElapsed = Date.now() - selfRepairStartTime;
+            // SCORE FLOOR: Only keep the repair result if it actually improves the score.
+            // If score did not improve, keep the original and stop wasting time on more rounds.
+            if (repairCalibration.totalScore > calibrationReport.totalScore) {
+              console.log(`[MasterAgent] ✅ Self-Repair Round ${selfRepairRound}: score improved ${calibrationReport.totalScore} → ${repairCalibration.totalScore}`);
+              calibrationReport = repairCalibration;
+            } else {
+              console.log(`[MasterAgent] ⚠️ Self-Repair Round ${selfRepairRound}: score did NOT improve (${repairCalibration.totalScore} ≤ ${calibrationReport.totalScore}), keeping original and stopping`);
+              break;
+            }
             console.log(`[MasterAgent] ⏱ Self-Repair Round ${selfRepairRound} complete: ${Math.round(roundElapsed / 1000)}s elapsed, score=${calibrationReport.totalScore}`);
           } catch (repairCalErr) {
             console.warn('[MasterAgent] Self-Repair CalibrationAgent failed (non-fatal):', repairCalErr);
