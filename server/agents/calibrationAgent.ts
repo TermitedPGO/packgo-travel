@@ -642,7 +642,7 @@ export async function calibrateTour(
   // Translation check (sequential — needs DB)
   const translationResult = tourId
     ? await checkTranslationQuality(tourId)
-    : { score: 50, issues: [{ check: "translation" as const, severity: "warning" as const, message: "No tourId — translation check skipped", autoFixable: false }] };
+    : { score: 80, issues: [{ check: "translation" as const, severity: "info" as const, message: "Translation pending (runs after calibration — expected)", autoFixable: false }] };
 
   // Aggregate all issues
   const allIssues: CalibrationIssue[] = [

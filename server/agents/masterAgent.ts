@@ -555,7 +555,17 @@ export class MasterAgent {
           '英國': '英國', '愛爾蘭': '愛爾蘭', '法國': '法國', '義大利': '義大利', '日本': '日本',
           '韓國': '韓國', '泰國': '泰國', '越南': '越南', '帛琉': '帛琉', '台灣': '台灣',
           '美國': '美國', '德國': '德國', '西班牙': '西班牙', '希臘': '希臘', '土耳其': '土耳其',
+          // Japanese regions → 日本
+          '四國': '日本', '北海道': '日本', '沖繩': '日本', '九州': '日本', '關西': '日本',
+          '關東': '日本', '東北': '日本', '東京': '日本', '大阪': '日本', '京都': '日本',
+          '北陸': '日本', '中部': '日本', '中國地方': '日本', '山陰': '日本', '山陽': '日本',
+          // Korean regions → 韓國
+          '首爾': '韓國', '釜山': '韓國', '濟州': '韓國',
+          // Other regions
+          '峇里': '印尼', '巴里': '印尼', '曼谷': '泰國', '清邁': '泰國', '普吉': '泰國',
+          '河內': '越南', '胡志明': '越南', '峴港': '越南',
           'UK': '英國', 'Ireland': '愛爾蘭', 'Japan': '日本', 'Korea': '韓國', 'Thailand': '泰國',
+          'Shikoku': '日本', 'Hokkaido': '日本', 'Okinawa': '日本', 'Kyushu': '日本',
         };
         for (const [keyword, country] of Object.entries(_countryPatterns)) {
           if (_pageTitle.includes(keyword) || url.toLowerCase().includes(keyword.toLowerCase())) {
@@ -784,7 +794,11 @@ export class MasterAgent {
         }
 
         // Feature images: PDF first, then Unsplash per highlight
-        for (const highlight of (rawData.highlights || []).slice(0, 6)) {
+        // Use analyzedContent.highlights as fallback when rawData.highlights is empty
+        const highlightSources = (rawData.highlights?.length > 0)
+          ? rawData.highlights
+          : (analyzedContent?.highlights || []);
+        for (const highlight of highlightSources.slice(0, 6)) {
           const imgResult = await findBestImage(String(highlight) || imgDestination, {
             pdfImageUrls,
             preferredType: 'feature',
@@ -1192,6 +1206,7 @@ export class MasterAgent {
         // Duration
         days: rawData.duration?.days || 0,
         nights: rawData.duration?.nights || 0,
+        duration: rawData.duration?.days || 0, // CalibrationAgent checks tourData.duration (not .days)
         
         // Pricing
         price: rawData.pricing?.price || 0,
