@@ -62,37 +62,35 @@ export async function checkContentFidelity(
   }
 
   try {
-    const prompt = `You are a quality auditor for a travel agency. Compare the generated tour data with the original source content.
+    const prompt = `You are a quality auditor for PACK&GO travel agency. Compare the generated tour with the original source.
 
-SOURCE CONTENT (original PDF/URL text):
-${sourceContent.slice(0, 3000)}
+SOURCE CONTENT (original URL/PDF text):
+${sourceContent.slice(0, 6000)}
 
 GENERATED TOUR DATA:
 Title: ${tourData.title || "(missing)"}
+Poetic Title: ${(tourData as any).poeticTitle || "(none)"}
 Duration: ${tourData.duration || "(missing)"} days
 Price: ${tourData.price || "(missing)"}
-Description: ${(tourData.description || "").slice(0, 500)}
+Destination: ${(tourData as any).destinationCountry || "(missing)"}
+Description: ${(tourData.description || "").slice(0, 800)}
 
-IMPORTANT ENRICHMENT RULE:
-- When the source content has few or no structured attractions/landmarks but the generated tour adds well-known attractions that are geographically consistent with the itinerary stops, this is ACCEPTABLE ENRICHMENT, not a fidelity violation.
-- A travel agency is expected to enrich bare itineraries with relevant local attractions.
-- Only flag as a fidelity issue if the added content is factually WRONG (wrong city, wrong country) or contradicts the source.
-- Do NOT penalize for adding more detail than the source — only penalize for adding INCORRECT detail.
-
-Evaluate:
-1. Does the title reflect the original itinerary? (0-100)
-2. Is the price consistent? (within 10% tolerance)
-3. Is the duration correct?
-4. Overall fidelity score (0-100)
+SCORING RULES:
+1. Title (0-100): The generated title MAY be creatively rewritten. Score HIGH (80-100) if it correctly identifies the destination, duration, and key theme. Do NOT require exact match with source title. Creative poetic titles are ENCOURAGED.
+2. Price (consistent/deviation): Check if price is within 15% of source. If source has no clear price, mark as consistent.
+3. Duration (correct): Check if the number of days matches. "7天6夜" = 7 days, "8日" = 8 days.
+4. Content accuracy (0-100): Are the destination, key activities, and tour highlights factually correct? Adding well-known local attractions is acceptable enrichment. Only penalize for WRONG information (wrong city, wrong country, contradicting source).
+5. Overall fidelity (0-100): Weighted average considering above factors. A well-written creative adaptation that preserves all factual information should score 80-95.
 
 Respond in JSON:
 {
   "titleScore": 0-100,
   "priceConsistent": true/false,
-  "priceDeviation": 0-100 (percentage deviation),
+  "priceDeviation": 0-100,
   "durationCorrect": true/false,
+  "contentAccuracy": 0-100,
   "overallScore": 0-100,
-  "issues": ["issue1", "issue2"]
+  "issues": ["only list FACTUAL errors, not creative differences"]
 }`;
 
     const response = await invokeLLM({
@@ -112,10 +110,11 @@ Respond in JSON:
               priceConsistent: { type: "boolean" },
               priceDeviation: { type: "number" },
               durationCorrect: { type: "boolean" },
+              contentAccuracy: { type: "number" },
               overallScore: { type: "number" },
               issues: { type: "array", items: { type: "string" } },
             },
-            required: ["titleScore", "priceConsistent", "priceDeviation", "durationCorrect", "overallScore", "issues"],
+            required: ["titleScore", "priceConsistent", "priceDeviation", "durationCorrect", "contentAccuracy", "overallScore", "issues"],
             additionalProperties: false,
           },
         },

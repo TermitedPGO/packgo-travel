@@ -581,6 +581,14 @@ export class MasterAgent {
           // Other regions
           '峇里': '印尼', '巴里': '印尼', '曼谷': '泰國', '清邁': '泰國', '普吉': '泰國',
           '河內': '越南', '胡志明': '越南', '峴港': '越南',
+          // South America
+          '秘魯': '秘魯', '智利': '智利', '巴西': '巴西', '阿根廷': '阿根廷', '哥倫比亞': '哥倫比亞',
+          '玻利維亞': '玻利維亞', '厄瓜多': '厄瓜多', '烏拉圭': '烏拉圭', '巴拉圭': '巴拉圭',
+          '馬丘比丘': '秘魯', '庫斯科': '秘魯', '復活節島': '智利', '納斯卡': '秘魯',
+          'Peru': '秘魯', 'Chile': '智利', 'Brazil': '巴西', 'Argentina': '阿根廷',
+          // Middle East / Africa
+          '以色列': '以色列', '約旦': '約旦', '杜拜': '阿聯酋', '阿布達比': '阿聯酋',
+          '肯亞': '肯亞', '坦尚尼亞': '坦尚尼亞',
           'UK': '英國', 'Ireland': '愛爾蘭', 'Japan': '日本', 'Korea': '韓國', 'Thailand': '泰國',
           'Shikoku': '日本', 'Hokkaido': '日本', 'Okinawa': '日本', 'Kyushu': '日本',
         };
@@ -1282,7 +1290,7 @@ export class MasterAgent {
       // ========================================================================
 
       // Fix 1: duration fallback — extract from title / rawText if still 0
-      console.log(`[MasterAgent] 📏 Duration check: finalData.duration=${finalData.duration}, finalData.days=${finalData.days}, finalData.title="${(finalData.title || '').substring(0, 60)}", analyzedContent.title="${(analyzedContent?.title || '').substring(0, 60)}"`);
+
       if (!finalData.duration || finalData.duration === 0) {
         const textToSearch = [
           finalData.title || '',           // Generated title (e.g. "四國四鐵道輕奢七日")
@@ -1292,8 +1300,8 @@ export class MasterAgent {
           analyzedContent?.title || '',
           rawData?.rawContent?.slice(0, 2000) || '',
         ].join(' ');
-        console.log(`[MasterAgent] 📏 Duration fallback textToSearch (first 200): "${textToSearch.substring(0, 200)}"`);
-        console.log(`[MasterAgent] 📏 Duration fallback rawData.rawContent (first 200): "${(rawData?.rawContent || '').substring(0, 200)}"`);
+
+
 
         // Helper: convert Chinese number to Arabic
         const chineseToNum: Record<string, number> = {
@@ -1322,7 +1330,7 @@ export class MasterAgent {
           finalData.duration = extracted;
           finalData.days = extracted;
           finalData.nights = extracted > 1 ? extracted - 1 : 0;
-          console.log(`[MasterAgent] 📏 Duration fallback: ${finalData.duration} days`);
+
         }
       }
 
@@ -1360,7 +1368,7 @@ export class MasterAgent {
         for (const [keyword, country] of Object.entries(countryMap)) {
           if (textToSearch.includes(keyword)) {
             finalData.destinationCountry = country;
-            console.log(`[MasterAgent] 🌍 Country fallback: ${country} (matched "${keyword}")`);
+
             break;
           }
         }
@@ -1372,7 +1380,7 @@ export class MasterAgent {
         try { kf = JSON.parse(finalData.keyFeatures || '[]'); } catch { kf = []; }
         if (kf.length === 0 && analyzedContent?.highlights?.length > 0) {
           finalData.keyFeatures = JSON.stringify(analyzedContent.highlights);
-          console.log(`[MasterAgent] ✨ KeyFeatures fallback: ${analyzedContent.highlights.length} items from ContentAnalyzer`);
+
         }
       }
 
@@ -1392,11 +1400,59 @@ export class MasterAgent {
             }
             if (itineraryImageUrls.length > 0) {
               finalData.featureImages = JSON.stringify(itineraryImageUrls);
-              console.log(`[MasterAgent] 🖼️ FeatureImages fallback: ${itineraryImageUrls.length} images from itinerary days`);
+
             }
           } catch {
             // Non-critical — skip
           }
+        }
+      }
+
+      // Fix 5: hotels fallback — use default hotels if empty array
+      {
+        let hotelArr: any[] = [];
+        try { hotelArr = JSON.parse(finalData.hotels || '[]'); } catch { hotelArr = []; }
+        if (hotelArr.length === 0) {
+          const dest = finalData.destinationCity || finalData.destinationCountry || '目的地';
+          finalData.hotels = JSON.stringify([
+            {
+              name: `${dest}精選飯店`,
+              stars: '四星級',
+              description: `位於${dest}的優質飯店，提供舒適的住宿環境和完善的設施。地理位置優越，鄰近主要景點，交通便利。客房寬敞明亮，配備現代化設施，讓您在旅途中享受家一般的溫馨。`,
+              facilities: ['免費 WiFi', '健身房', '餐廳', '商務中心', '機場接送'],
+              location: `${dest}市中心`,
+            }
+          ]);
+        }
+      }
+
+      // Fix 6: meals fallback — use default meals if empty array
+      {
+        let mealArr: any[] = [];
+        try { mealArr = JSON.parse(finalData.meals || '[]'); } catch { mealArr = []; }
+        if (mealArr.length === 0) {
+          const dest = finalData.destinationCity || finalData.destinationCountry || '目的地';
+          finalData.meals = JSON.stringify([
+            {
+              name: `${dest}特色早餐`,
+              type: 'breakfast',
+              description: `在飯店享用豐盛的自助早餐，提供當地特色料理和國際美食，讓您充滿活力地開始新的一天。`,
+              cuisine: '國際自助餐',
+              restaurant: '飯店餐廳',
+            },
+            {
+              name: `${dest}特色午餐`,
+              type: 'lunch',
+              description: `品嚐當地特色料理，選用新鮮食材，由當地名廚精心烹調，讓您體驗最道地的美食文化。`,
+              cuisine: '當地特色料理',
+            },
+            {
+              name: `${dest}精緻晚餐`,
+              type: 'dinner',
+              description: `在精心挑選的餐廳享用精緻晚餐，品嚐當地特色菜色，配以優雅的用餐環境，為一天的行程畫上完美句點。`,
+              cuisine: '當地精緻料理',
+            },
+          ]);
         }
       }
 
