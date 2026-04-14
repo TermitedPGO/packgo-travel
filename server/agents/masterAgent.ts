@@ -485,14 +485,31 @@ export class MasterAgent {
         const _pageTitle = scrapeResult.pageTitle || '';
         const _rawText = scrapeResult.rawText || '';
         
-        // Extract duration: look for patterns like "13日", "13天", "13-day"
+        // Extract duration: look for patterns like "13日", "13天", "13-day", "五日", "七天"
         let _parsedDays = 0;
         let _parsedNights = 0;
-        const _durationMatch = (_pageTitle + ' ' + _rawText.substring(0, 500)).match(/(\d+)\s*(?:日|天|days?)/i);
-        if (_durationMatch) {
-          _parsedDays = parseInt(_durationMatch[1], 10);
+        const _durationSearchText = _pageTitle + ' ' + _rawText.substring(0, 2000);
+        // Pattern A: Arabic digits
+        const _durationMatchA = _durationSearchText.match(/(\d+)\s*(?:日|天|days?)/i);
+        if (_durationMatchA) {
+          _parsedDays = parseInt(_durationMatchA[1], 10);
+        }
+        // Pattern B: Chinese digits (一日, 二天, 五日, 七天, 十日...)
+        if (!_parsedDays) {
+          const _chineseNumMap: Record<string, number> = {
+            '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
+            '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
+            '十一': 11, '十二': 12, '十三': 13, '十四': 14, '十五': 15,
+          };
+          const _durationMatchB = _durationSearchText.match(/(十[一二三四五]?|[一二三四五六七八九十])\s*[天日]/);
+          if (_durationMatchB) {
+            _parsedDays = _chineseNumMap[_durationMatchB[1]] || 0;
+          }
+        }
+        if (_parsedDays > 0) {
           _parsedNights = _parsedDays > 1 ? _parsedDays - 1 : 0;
         }
+        console.log(`[MasterAgent] Quick parse duration: title="${_pageTitle.substring(0, 80)}" → days=${_parsedDays}`);
         // Note: ExtractedTourMeta doesn't have duration field, rely on regex parse only
         
         // Extract destination from pageTitle: remove common prefixes/suffixes
