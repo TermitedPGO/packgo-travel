@@ -248,10 +248,11 @@ describe("checkTranslationQuality", () => {
     expect(issues).toHaveLength(0);
   });
 
-  it("returns score 50 and warning when no translations exist", async () => {
+  it("returns score 80 and empty issues when no translations exist (Round 47: neutral-optimistic score)", async () => {
     const { score, issues } = await checkTranslationQuality(999);
-    expect(score).toBe(50);
-    expect(issues.some((i) => i.message.includes("pending"))).toBe(true);
+    expect(score).toBe(80);
+    // Round 47: when translation is pending, issues is empty (no penalty)
+    expect(issues).toHaveLength(0);
   });
 
   it("deducts 15 for Chinese characters in English translation", async () => {

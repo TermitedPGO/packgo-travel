@@ -43,6 +43,7 @@ import { TourType } from "./itineraryUnifiedAgent";
 import { applyLearnedSkills } from "./learningAgent";
 import { logAgentStart, logAgentComplete, cleanupZombieTasks } from "../agentActivityService";
 import { calibrateTour } from "./calibrationAgent";
+import { fetchLionTravelData, buildRawContentFromLionData } from "../services/lionTravelApiService";
 
 export interface MasterAgentResult {
   success: boolean;
@@ -261,7 +262,7 @@ export class MasterAgent {
       if (taskId) progressTracker.startPhase(taskId, 'web_scraper');
       
       // Check for cached scrape result first (skip if forceRegenerate)
-      let rawData;
+      let rawData: any;
       const cachedScrape = forceRegenerate ? null : await generationCache.getScrapeResult(url);
       if (cachedScrape) {
         console.log("[MasterAgent] 🎯 Scrape cache HIT!");
@@ -433,6 +434,159 @@ export class MasterAgent {
           }
         }
       } else {
+        // ─── Round 50: Liontravel Direct API Integration ───────────────────────────
+        // Detect liontravel.com URLs and fetch data directly via JSON API,
+        // bypassing Puppeteer entirely (~55s → ~2s)
+        let lionApiHandled = false;
+        if (url.includes('liontravel.com')) {
+          console.log('[MasterAgent] 🦁 Liontravel detected: trying direct API...');
+          if (taskId) progressTracker.startPhase(taskId, 'dynamic_render');
+          onProgress?.("rendering_page", 10);
+          const lionData = await fetchLionTravelData(url);
+          if (lionData) {
+            console.log(`[MasterAgent] 🦁 Liontravel detected: using direct API (${lionData.tourDays} days, price=${lionData.price} ${lionData.currencyCode})`);
+            if (taskId) progressTracker.completePhase(taskId, 'dynamic_render');
+            if (taskId) progressTracker.startPhase(taskId, 'date_extractor');
+            if (taskId) progressTracker.completePhase(taskId, 'date_extractor');
+
+            // Detect destination country from tourName + arriveAirport
+            const _lionCountryPatterns: Record<string, string> = {
+              '英國': '英國', '愛爾蘭': '愛爾蘭', '法國': '法國', '義大利': '義大利', '日本': '日本',
+              '韓國': '韓國', '泰國': '泰國', '越南': '越南', '帛琦': '帛琦', '台灣': '台灣',
+              '美國': '美國', '德國': '德國', '西班牙': '西班牙', '希臘': '希臘', '土耳其': '土耳其',
+              '澳洲': '澳洲', '紐西蘭': '紐西蘭', '加拿大': '加拿大',
+              '四國': '日本', '北海道': '日本', '沖縄': '日本', '九州': '日本', '關西': '日本',
+              '首爾': '韓國', '釜山': '韓國', '濟州': '韓國',
+              '峨里': '印尼', '曼谷': '泰國', '清邁': '泰國',
+              '秘魯': '秘魯', '智利': '智利', '巴西': '巴西', '阿根廷': '阿根廷',
+              '馬丘比丘': '秘魯', '庫斯科': '秘魯', '復活節峳': '智利',
+              'Peru': '秘魯', 'Chile': '智利', 'Japan': '日本', 'Korea': '韓國',
+              'NRT': '日本', 'KIX': '日本', 'CTS': '日本', 'OKA': '日本', 'ICN': '韓國',
+              'BKK': '泰國', 'HAN': '越南', 'SGN': '越南', 'LHR': '英國', 'CDG': '法國',
+              'FCO': '義大利', 'ATH': '希臘', 'IST': '土耳其', 'SYD': '澳洲', 'AKL': '紐西蘭',
+              'LIM': '秘魯', 'SCL': '智利', 'GRU': '巴西', 'EZE': '阿根廷',
+            };
+            const _lionSearchText = lionData.tourName + ' ' + lionData.outboundFlight.arriveAirport;
+            let _lionCountry = '';
+            for (const [kw, country] of Object.entries(_lionCountryPatterns)) {
+              if (_lionSearchText.includes(kw)) {
+                _lionCountry = country;
+                break;
+              }
+            }
+
+            // Build raw content text for ContentAnalyzer
+            const _lionRawContent = buildRawContentFromLionData(lionData);
+
+            // Map dailyItinerary
+            const _lionDailyItinerary = lionData.dailyItinerary.map(d => ({
+              day: d.day,
+              title: d.travelPoint,
+              description: d.summary,
+              activities: d.attractions.map(a => a.name).filter(Boolean),
+              accommodation: d.hotelName,
+              meals: [
+                d.breakfast ? `早餐：${d.breakfast}` : '',
+                d.lunch ? `午餐：${d.lunch}` : '',
+                d.dinner ? `晚餐：${d.dinner}` : '',
+              ].filter(Boolean),
+              specialNote: d.specialNote,
+            }));
+
+            // Map hotels
+            const _lionHotels = lionData.dailyItinerary
+              .filter(d => d.hotelName)
+              .map(d => ({ name: d.hotelName, day: d.day, stars: 0 }));
+
+            // Map meals
+            const _lionMeals: string[] = [];
+            for (const d of lionData.dailyItinerary) {
+              if (d.breakfast) _lionMeals.push(`第${d.day}天早餐：${d.breakfast}`);
+              if (d.lunch) _lionMeals.push(`第${d.day}天午餐：${d.lunch}`);
+              if (d.dinner) _lionMeals.push(`第${d.day}天晚餐：${d.dinner}`);
+            }
+
+            // Map flights
+            const _lionFlights: any[] = [];
+            if (lionData.outboundFlight.airline) {
+              _lionFlights.push({
+                type: 'outbound',
+                airline: lionData.outboundFlight.airline,
+                departureTime: lionData.outboundFlight.departureTime,
+                arriveTime: lionData.outboundFlight.arriveTime,
+                departureAirport: lionData.outboundFlight.departureAirport,
+                arriveAirport: lionData.outboundFlight.arriveAirport,
+              });
+            }
+            if (lionData.returnFlight.airline) {
+              _lionFlights.push({
+                type: 'return',
+                airline: lionData.returnFlight.airline,
+                departureTime: lionData.returnFlight.departureTime,
+                arriveTime: lionData.returnFlight.arriveTime,
+                departureAirport: lionData.returnFlight.departureAirport,
+                arriveAirport: lionData.returnFlight.arriveAirport,
+              });
+            }
+
+            // Map notices
+            const _lionNotices = lionData.notices.map(n => ({
+              title: n.chineseTitle || n.title,
+              content: n.content,
+            }));
+
+            rawData = {
+              basicInfo: {
+                title: lionData.tourName,
+                subtitle: '',
+                description: '',
+                productCode: lionData.tourId,
+              },
+              location: {
+                destinationCountry: _lionCountry,
+                destinationCity: _lionCountry,
+              },
+              duration: {
+                days: lionData.tourDays,
+                nights: lionData.tourDays > 1 ? lionData.tourDays - 1 : 0,
+              },
+              pricing: {
+                price: lionData.pricing.adultPrice || lionData.price,
+                basePrice: lionData.pricing.adultPrice || lionData.price,
+                currency: lionData.currencyCode,
+                priceNote: lionData.pricing.singleSupplement || '',
+              },
+              highlights: lionData.tags,
+              dailyItinerary: _lionDailyItinerary,
+              includes: [],
+              excludes: [],
+              accommodation: _lionHotels.map(h => h.name),
+              hotels: _lionHotels,
+              meals: _lionMeals,
+              flights: _lionFlights,
+              notices: _lionNotices,
+              images: lionData.heroImageUrl ? [lionData.heroImageUrl] : [],
+              rawContent: _lionRawContent,
+              renderedHtml: lionData.featuresHtml,
+              sourceUrl: url,
+              isPdfSource: false,
+              extractedTourMeta: null,
+              maxParticipants: lionData.totalSeats,
+              departureDates: lionData.goDate ? [lionData.goDate] : [],
+              // Store structured pricing for Phase 5
+              lionPricing: lionData.pricing,
+              lionGroupId: lionData.groupId,
+            } as any;
+
+            lionApiHandled = true;
+            await generationCache.cacheScrapeResult(url, rawData);
+          } else {
+            console.warn('[MasterAgent] 🦁 Liontravel direct API failed, falling back to Puppeteer');
+          }
+        }
+        // ─── End Round 50 ─────────────────────────────────────────────────────────
+
+        if (!lionApiHandled) {
         // URL mode: use DynamicScraperService (Puppeteer)
         console.log("[MasterAgent] 🌐 URL mode: dynamic scraping with Puppeteer...");
         if (taskId) progressTracker.startPhase(taskId, 'dynamic_render');
@@ -653,6 +807,7 @@ export class MasterAgent {
         
         // Cache the scrape result
         await generationCache.cacheScrapeResult(url, rawData);
+        } // end if (!lionApiHandled)
       }
       
       if (taskId) progressTracker.completePhase(taskId, 'web_scraper');
@@ -1233,8 +1388,8 @@ export class MasterAgent {
         nights: rawData.duration?.nights || 0,
         duration: rawData.duration?.days || 0, // CalibrationAgent checks tourData.duration (not .days)
         
-        // Pricing
-        price: rawData.pricing?.price || 0,
+        // Pricing — Round 50: prefer lionPricing.adultPrice for liontravel URLs
+        price: (rawData.lionPricing?.adultPrice || rawData.pricing?.price || 0),
         
         // Hero section
         heroImage: heroImage.url,

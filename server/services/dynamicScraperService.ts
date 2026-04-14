@@ -214,6 +214,105 @@ export async function scrapeDynamicPage(url: string): Promise<DynamicScrapeResul
     console.log(`[APIIntercept] ═══════════════════\n`);
     // ═══ End log ═══
 
+    // ═══ Round 49b: 從瀏覽器內部呼叫雄獅 API ═══
+    const lionApiData = await page.evaluate(async () => {
+      const results: Record<string, any> = {};
+      
+      // Step 1: 讀取 SSR 嵌入的 JSON
+      try {
+        const tourParaEl = document.querySelector('#tourPara');
+        if (tourParaEl) {
+          const tourParaText = tourParaEl.getAttribute('value') 
+            || tourParaEl.textContent 
+            || tourParaEl.innerHTML;
+          results['tourPara'] = tourParaText?.slice(0, 2000);
+        }
+      } catch(e) { results['tourPara_error'] = String(e); }
+      
+      try {
+        const seoParaEl = document.querySelector('#seoPara');
+        if (seoParaEl) {
+          results['seoPara'] = (seoParaEl.getAttribute('value') || seoParaEl.textContent)?.slice(0, 2000);
+        }
+      } catch(e) {}
+      
+      // Step 2: 呼叫 API 端點（帶瀏覽器 cookies）
+      const apiEndpoints = [
+        'daytripinfojson',
+        'tourinfojson', 
+        'priceinfojson',
+        'groupcalendarjson',
+        'noticeinfojson',
+        'packageinfojson',
+        'travelinfojson',
+      ];
+      
+      // 從當前 URL 取得參數
+      const params = new URLSearchParams(window.location.search);
+      const queryString = params.toString();
+      
+      for (const endpoint of apiEndpoints) {
+        try {
+          // 嘗試多種 URL 格式
+          const urls = [
+            `/${endpoint}?${queryString}`,
+            `/detail/${endpoint}?${queryString}`,
+            `/Content/TourDetail/${endpoint}?${queryString}`,
+          ];
+          
+          for (const url of urls) {
+            try {
+              const resp = await fetch(url, {
+                credentials: 'include',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+              });
+              if (resp.ok) {
+                const text = await resp.text();
+                results[endpoint] = {
+                  url: url,
+                  status: resp.status,
+                  size: text.length,
+                  preview: text.slice(0, 1000),
+                  isJson: text.startsWith('{') || text.startsWith('['),
+                };
+                break; // 找到了就不再試其他 URL 格式
+              }
+            } catch {}
+          }
+          
+          if (!results[endpoint]) {
+            results[endpoint] = { status: 'not_found' };
+          }
+        } catch(e) {
+          results[endpoint] = { error: String(e) };
+        }
+      }
+      
+      // Step 3: 搜尋頁面上所有 data-* 屬性中的 JSON
+      const allDataAttrs: Record<string, string> = {};
+      document.querySelectorAll('[data-json], [data-info], [data-config], [data-para]').forEach((el: Element) => {
+        Array.from((el as HTMLElement).attributes).forEach(attr => {
+          if (attr.name.startsWith('data-') && attr.value.length > 20) {
+            allDataAttrs[`${(el as HTMLElement).id || (el as HTMLElement).className}_${attr.name}`] = attr.value.slice(0, 500);
+          }
+        });
+      });
+      if (Object.keys(allDataAttrs).length > 0) {
+        results['dataAttributes'] = allDataAttrs;
+      }
+      
+      return results;
+    }).catch((e: any) => ({ evaluate_error: String(e) }));
+
+    // 完整印出結果
+    console.log(`\n[LionAPI] ═══ 雄獅 API 偵察結果 ═══`);
+    for (const [key, value] of Object.entries(lionApiData)) {
+      console.log(`[LionAPI] 📡 ${key}:`);
+      console.log(`[LionAPI]   ${JSON.stringify(value).slice(0, 500)}`);
+    }
+    console.log(`[LionAPI] ═══════════════════════\n`);
+    // ═══ End Round 49b ═══
+
     // 自動滾動頁面，觸發 lazy load
     console.log(`[DynamicScraper] Auto-scrolling for lazy load...`);
     await autoScroll(page);
