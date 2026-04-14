@@ -1282,6 +1282,7 @@ export class MasterAgent {
       // ========================================================================
 
       // Fix 1: duration fallback — extract from title / rawText if still 0
+      console.log(`[MasterAgent] 📏 Duration check: finalData.duration=${finalData.duration}, finalData.days=${finalData.days}, finalData.title="${(finalData.title || '').substring(0, 60)}", analyzedContent.title="${(analyzedContent?.title || '').substring(0, 60)}"`);
       if (!finalData.duration || finalData.duration === 0) {
         const textToSearch = [
           finalData.title || '',           // Generated title (e.g. "四國四鐵道輕奢七日")
@@ -1291,6 +1292,8 @@ export class MasterAgent {
           analyzedContent?.title || '',
           rawData?.rawContent?.slice(0, 2000) || '',
         ].join(' ');
+        console.log(`[MasterAgent] 📏 Duration fallback textToSearch (first 200): "${textToSearch.substring(0, 200)}"`);
+        console.log(`[MasterAgent] 📏 Duration fallback rawData.rawContent (first 200): "${(rawData?.rawContent || '').substring(0, 200)}"`);
 
         // Helper: convert Chinese number to Arabic
         const chineseToNum: Record<string, number> = {
