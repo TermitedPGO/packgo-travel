@@ -1261,6 +1261,96 @@ export class MasterAgent {
       };
       
       // ========================================================================
+      // 6b. Universal Field Fallbacks (Round 47 — URL-mode robustness)
+      // ========================================================================
+
+      // Fix 1: duration fallback — extract from title / rawText if still 0
+      if (!finalData.duration || finalData.duration === 0) {
+        const textToSearch = [
+          rawData?.basicInfo?.title || '',
+          rawData?.rawText?.slice(0, 2000) || '',
+          analyzedContent?.title || '',
+        ].join(' ');
+        // Matches: 7天, 7日, 8天7夜, 10 days, 5天4夜
+        const durationMatch = textToSearch.match(/(\d+)\s*天(?:\d+夜)?|(\d+)\s*日|(\d+)\s*days?/i);
+        if (durationMatch) {
+          const extracted = parseInt(durationMatch[1] || durationMatch[2] || durationMatch[3], 10);
+          finalData.duration = extracted;
+          finalData.days = extracted;
+          finalData.nights = extracted > 1 ? extracted - 1 : 0;
+          console.log(`[MasterAgent] 📏 Duration fallback: ${finalData.duration} days`);
+        }
+      }
+
+      // Fix 2: destinationCountry fallback — scan title + rawText for country keywords
+      if (!finalData.destinationCountry || finalData.destinationCountry === '') {
+        const countryMap: Record<string, string> = {
+          '日本': '日本', '韓國': '韓國', '泰國': '泰國', '越南': '越南',
+          '義大利': '義大利', '法國': '法國', '西班牙': '西班牙', '英國': '英國',
+          '德國': '德國', '瑞士': '瑞士', '奧地利': '奧地利', '荷蘭': '荷蘭',
+          '土耳其': '土耳其', '希臘': '希臘', '捷克': '捷克', '克羅埃西亞': '克羅埃西亞',
+          '美國': '美國', '加拿大': '加拿大', '澳洲': '澳洲', '紐西蘭': '紐西蘭',
+          '新加坡': '新加坡', '馬來西亞': '馬來西亞', '印尼': '印尼', '菲律賓': '菲律賓',
+          '柬埔寨': '柬埔寨', '緬甸': '緬甸', '印度': '印度', '尼泊爾': '尼泊爾',
+          '埃及': '埃及', '摩洛哥': '摩洛哥', '南非': '南非',
+          '秘魯': '秘魯', '智利': '智利', '巴西': '巴西', '阿根廷': '阿根廷',
+          '冰島': '冰島', '挪威': '挪威', '芬蘭': '芬蘭', '瑞典': '瑞典', '丹麥': '丹麥',
+          '帛琉': '帛琉', '峇里': '印尼', '巴里': '印尼', '曼谷': '泰國', '清邁': '泰國',
+          '普吉': '泰國', '河內': '越南', '胡志明': '越南', '峴港': '越南',
+          '首爾': '韓國', '釜山': '韓國', '濟州': '韓國',
+          '四國': '日本', '北海道': '日本', '沖繩': '日本', '九州': '日本', '關西': '日本',
+          '關東': '日本', '東北': '日本', '東京': '日本', '大阪': '日本', '京都': '日本',
+          '北陸': '日本', '中部': '日本', '山陰': '日本', '山陽': '日本',
+        };
+        const textToSearch = [
+          rawData?.basicInfo?.title || '',
+          analyzedContent?.title || '',
+          rawData?.rawText?.slice(0, 1000) || '',
+        ].join(' ');
+        for (const [keyword, country] of Object.entries(countryMap)) {
+          if (textToSearch.includes(keyword)) {
+            finalData.destinationCountry = country;
+            console.log(`[MasterAgent] 🌍 Country fallback: ${country} (matched "${keyword}")`);
+            break;
+          }
+        }
+      }
+
+      // Fix 3: keyFeatures fallback — use analyzedContent.highlights if empty
+      {
+        let kf: string[] = [];
+        try { kf = JSON.parse(finalData.keyFeatures || '[]'); } catch { kf = []; }
+        if (kf.length === 0 && analyzedContent?.highlights?.length > 0) {
+          finalData.keyFeatures = JSON.stringify(analyzedContent.highlights);
+          console.log(`[MasterAgent] ✨ KeyFeatures fallback: ${analyzedContent.highlights.length} items from ContentAnalyzer`);
+        }
+      }
+
+      // Fix 4: featureImages fallback — use itinerary day images if featureImageUrls is empty
+      {
+        let fi: string[] = [];
+        try { fi = JSON.parse(finalData.featureImages || '[]'); } catch { fi = []; }
+        if (fi.length === 0 && itineraryData) {
+          try {
+            const itineraryArr = JSON.parse(itineraryData);
+            const itineraryImageUrls: string[] = [];
+            for (const day of itineraryArr) {
+              if (day.image && typeof day.image === 'string' && day.image.startsWith('http')) {
+                itineraryImageUrls.push(day.image);
+              }
+              if (itineraryImageUrls.length >= 5) break;
+            }
+            if (itineraryImageUrls.length > 0) {
+              finalData.featureImages = JSON.stringify(itineraryImageUrls);
+              console.log(`[MasterAgent] 🖼️ FeatureImages fallback: ${itineraryImageUrls.length} images from itinerary days`);
+            }
+          } catch {
+            // Non-critical — skip
+          }
+        }
+      }
+
+      // ========================================================================
       // 6c. Write used images to imageLibrary for future reuse
       // ========================================================================
       try {
