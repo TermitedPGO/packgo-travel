@@ -23,6 +23,13 @@ export interface DynamicScrapeResult {
     infantPrice?: number;
     rawPriceTexts: string[];   // 原始價格文字（供 AI 參考）
   };
+  // Round 50: Structured API data intercepted from liontravel.com
+  lionApiData?: {
+    travelInfo?: any;    // /detail/travelinfojson
+    daytrip?: any;       // /detail/daytripinfojson
+    pricing?: any;       // /detail/priceinfojson
+    notice?: any;        // /detail/noticeinfojson
+  };
 }
 
 // 系統 Chromium 路徑
@@ -111,6 +118,14 @@ export async function scrapeDynamicPage(url: string): Promise<DynamicScrapeResul
     page.setDefaultNavigationTimeout(25000);
     page.setDefaultTimeout(25000);
 
+    // ═══ Round 50: Capture liontravel structured API data ═══
+    const lionApiCapture: {
+      travelInfo?: any;
+      daytrip?: any;
+      pricing?: any;
+      notice?: any;
+    } = {};
+
     // ═══ Round 49: API Response Interception Test ═══
     const interceptedApiResponses: Array<{
       url: string;
@@ -151,6 +166,14 @@ export async function scrapeDynamicPage(url: string): Promise<DynamicScrapeResul
             };
             interceptedApiResponses.push(entry);
             console.log(`[APIIntercept] 📡 ${status} ${url.slice(0, 100)} (${text.length} bytes)`);
+
+            // Round 50: Capture key liontravel API responses
+            if (parsedData && url.includes('liontravel.com/detail/')) {
+              if (url.includes('travelinfojson')) lionApiCapture.travelInfo = parsedData;
+              else if (url.includes('daytripinfojson')) lionApiCapture.daytrip = parsedData;
+              else if (url.includes('priceinfojson')) lionApiCapture.pricing = parsedData;
+              else if (url.includes('noticeinfojson')) lionApiCapture.notice = parsedData;
+            }
           }
         }
       } catch (e) {
@@ -476,6 +499,12 @@ export async function scrapeDynamicPage(url: string): Promise<DynamicScrapeResul
     console.log(`[DynamicScraper] Scrape completed. HTML: ${renderedHtml.length} chars, Text: ${rawText.length} chars`);
     console.log(`[DynamicScraper] Screenshots: fullPage=${fullPageBuffer.length} bytes, dateSection=${dateSectionBuffer?.length || 0} bytes, priceSection=${priceSectionBuffer?.length || 0} bytes`);
 
+    // Round 50: Log lionApiCapture results
+    const capturedKeys = Object.keys(lionApiCapture);
+    if (capturedKeys.length > 0) {
+      console.log(`[DynamicScraper] 🦁 lionApiCapture: captured ${capturedKeys.join(', ')}`);
+    }
+
     return {
       renderedHtml,
       rawText,
@@ -488,6 +517,7 @@ export async function scrapeDynamicPage(url: string): Promise<DynamicScrapeResul
       sourceUrl: url,
       scrapedAt: new Date(),
       priceHints,
+      lionApiData: capturedKeys.length > 0 ? lionApiCapture : undefined,
     };
   } finally {
     if (browser) {

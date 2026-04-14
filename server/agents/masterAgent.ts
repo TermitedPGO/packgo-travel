@@ -797,7 +797,58 @@ export class MasterAgent {
         };
         
         rawData = urlRawData;
-        
+
+        // ── Round 50: Enrich rawData with liontravel structured API data ──────
+        if (scrapeResult.lionApiData) {
+          const ld = scrapeResult.lionApiData;
+          console.log('[MasterAgent] 🦁 Enriching rawData with lionApiData:', Object.keys(ld).join(', '));
+
+          // travelinfojson: basic tour info
+          const gi = ld.travelInfo?.GroupInfo ?? {};
+          if (gi.TourDays && Number(gi.TourDays) > 0) {
+            rawData.duration.days = Number(gi.TourDays);
+            rawData.duration.nights = Number(gi.TourDays) - 1;
+          }
+          if (gi.GroupID) rawData.basicInfo.productCode = gi.GroupID;
+
+          // priceinfojson: pricing
+          const priceList = ld.pricing?.PriceList ?? [];
+          const adultRow = priceList.find((p: any) => p.PriceType === 'A' || p.PriceTypeName?.includes('成人') || p.PriceTypeName?.includes('大人'));
+          const adultPrice = adultRow?.StraightLowestPrice || adultRow?.Price || 0;
+          if (adultPrice > 0) {
+            rawData.pricing.price = adultPrice;
+            rawData.pricing.basePrice = adultPrice;
+            rawData.pricing.currency = ld.pricing?.CurrencyCode || 'TWD';
+          }
+
+          // daytripinfojson: daily itinerary
+          const days = ld.daytrip?.DayTripList ?? [];
+          if (days.length > 0) {
+            rawData.dailyItinerary = days.map((d: any, i: number) => ({
+              day: i + 1,
+              title: d.TravelPoint || `Day ${i + 1}`,
+              description: d.Summary || '',
+              meals: [d.Breakfast, d.Lunch, d.Dinner].filter(Boolean),
+              accommodation: d.HotelName || '',
+            }));
+            // Also extract hotel names from daytrip
+            const hotelNames = Array.from(new Set(days.map((d: any) => d.HotelName).filter(Boolean))) as string[];
+            if (hotelNames.length > 0 && rawData.hotels.length === 0) {
+              rawData.hotels = hotelNames.map((name: string) => ({ name, type: '飯店', stars: 4 }));
+            }
+          }
+
+          // noticeinfojson: notices
+          const noteList = ld.notice?.NoteList ?? [];
+          if (noteList.length > 0 && rawData.notices.length === 0) {
+            rawData.notices = noteList.map((n: any) => n.Content || n.Title || '').filter(Boolean);
+          }
+
+          // Store raw lionApiData for downstream agents
+          (rawData as any).lionApiData = ld;
+        }
+        // ── End Round 50 ──────────────────────────────────────────────────────
+
         // Validate that we have enough content to generate a meaningful tour
         const rawTextLength = scrapeResult.rawText?.length || 0;
         const hasPageTitle = !!(scrapeResult.pageTitle && scrapeResult.pageTitle.trim().length > 5);
