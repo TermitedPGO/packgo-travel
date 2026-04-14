@@ -111,6 +111,54 @@ export async function scrapeDynamicPage(url: string): Promise<DynamicScrapeResul
     page.setDefaultNavigationTimeout(25000);
     page.setDefaultTimeout(25000);
 
+    // ═══ Round 49: API Response Interception Test ═══
+    const interceptedApiResponses: Array<{
+      url: string;
+      status: number;
+      contentType: string;
+      dataSize: number;
+      dataPreview: string;  // 前 500 字元
+      fullData?: any;       // 完整 JSON（如果 < 50KB）
+    }> = [];
+
+    page.on('response', async (response) => {
+      try {
+        const url = response.url();
+        const contentType = response.headers()['content-type'] || '';
+        const status = response.status();
+        
+        // 只攔截 JSON API 回應（排除靜態資源）
+        if (
+          status === 200 &&
+          (contentType.includes('json') || contentType.includes('javascript')) &&
+          !url.includes('.js') &&    // 排除 JS bundle
+          !url.includes('.css') &&   // 排除 CSS
+          !url.includes('google') && // 排除 GA/GTM
+          !url.includes('facebook')  // 排除 FB pixel
+        ) {
+          const text = await response.text().catch(() => '');
+          if (text.length > 50 && text.length < 500000) {
+            let parsedData: any = null;
+            try { parsedData = JSON.parse(text); } catch {}
+            
+            const entry = {
+              url: url.slice(0, 200),
+              status,
+              contentType: contentType.slice(0, 50),
+              dataSize: text.length,
+              dataPreview: text.slice(0, 500),
+              fullData: text.length < 50000 ? parsedData : undefined,
+            };
+            interceptedApiResponses.push(entry);
+            console.log(`[APIIntercept] 📡 ${status} ${url.slice(0, 100)} (${text.length} bytes)`);
+          }
+        }
+      } catch (e) {
+        // 非致命錯誤，忽略
+      }
+    });
+    // ═══ End API Interception ═══
+
     // 導航到目標 URL
     // Strategy: try networkidle2 (20s) first for static sites; SPA sites like liontravel.com will timeout
     // and fall back to domcontentloaded (20s) + 5s JS execution wait
@@ -137,6 +185,34 @@ export async function scrapeDynamicPage(url: string): Promise<DynamicScrapeResul
         console.warn(`[DynamicScraper] Navigation fallback also failed, using partial content`);
       }
     }
+
+    // ═══ Log intercepted API results ═══
+    console.log(`\n[APIIntercept] ═══ 攔截結果 ═══`);
+    console.log(`[APIIntercept] 共攔截 ${interceptedApiResponses.length} 個 API 回應：`);
+    for (const resp of interceptedApiResponses) {
+      console.log(`[APIIntercept] ──────────────────────`);
+      console.log(`[APIIntercept] URL: ${resp.url}`);
+      console.log(`[APIIntercept] Size: ${resp.dataSize} bytes`);
+      console.log(`[APIIntercept] Preview: ${resp.dataPreview.slice(0, 300)}`);
+      
+      // 如果有完整 JSON，列出 top-level keys
+      if (resp.fullData && typeof resp.fullData === 'object') {
+        const keys = Object.keys(resp.fullData);
+        console.log(`[APIIntercept] JSON keys: [${keys.join(', ')}]`);
+        
+        // 特別標記可能包含行程資料的 API
+        const interestingKeys = ['itinerary', 'schedule', 'tour', 'detail', 'price', 
+          'departure', 'hotel', 'meal', 'day', 'flight', 'content', 'data', 'result'];
+        const matchedKeys = keys.filter(k => 
+          interestingKeys.some(ik => k.toLowerCase().includes(ik))
+        );
+        if (matchedKeys.length > 0) {
+          console.log(`[APIIntercept] ⭐ 可能的行程資料 keys: [${matchedKeys.join(', ')}]`);
+        }
+      }
+    }
+    console.log(`[APIIntercept] ═══════════════════\n`);
+    // ═══ End log ═══
 
     // 自動滾動頁面，觸發 lazy load
     console.log(`[DynamicScraper] Auto-scrolling for lazy load...`);
