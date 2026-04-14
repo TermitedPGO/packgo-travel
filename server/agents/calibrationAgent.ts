@@ -688,6 +688,19 @@ export async function calibrateTour(
     totalScore >= 85 ? "approved" : totalScore >= 60 ? "review" : "rejected";
 
   console.log(`[CalibrationAgent] Score: ${totalScore}, Verdict: ${verdict}, Issues: ${allIssues.length}, AutoFixes: ${fixes.length}`);
+  console.log(`[CalibrationAgent] 📊 Final Report:`);
+  console.log(`  Content Fidelity : ${scores.content}  (weight: ${WEIGHTS.content * 100}%)`);
+  console.log(`  Translation      : ${scores.translation}  (weight: ${WEIGHTS.translation * 100}%)`);
+  console.log(`  Image            : ${scores.image}  (weight: ${WEIGHTS.image * 100}%)`);
+  console.log(`  Completeness     : ${scores.completeness}  (weight: ${WEIGHTS.completeness * 100}%)`);
+  console.log(`  Marketing        : ${scores.marketing}  (weight: ${WEIGHTS.marketing * 100}%)`);
+  console.log(`  Total            : ${totalScore}`);
+  if (allIssues.length > 0) {
+    console.log(`  Issues (${allIssues.length}):`);
+    for (const issue of allIssues) {
+      console.log(`    [${issue.check}][${issue.severity}] ${issue.message}${issue.field ? ` (field: ${issue.field})` : ''}`);
+    }
+  }
 
   return {
     contentFidelityScore: scores.content,

@@ -286,8 +286,10 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     response_format,
   } = params;
 
+  // Use Claude Sonnet 4.5 as the default model via Forge proxy
+  // All Claude 4.5 models are supported: haiku-4-5-20251001, sonnet-4-5-20250929, opus-4-5-20251101
   const payload: Record<string, unknown> = {
-    model: "gemini-2.5-flash",
+    model: "claude-sonnet-4-5-20250929",
     messages: messages.map(normalizeMessage),
   };
 
@@ -303,10 +305,10 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.tool_choice = normalizedToolChoice;
   }
 
-  payload.max_tokens = 32768
-  payload.thinking = {
-    "budget_tokens": 4096
-  }
+  // Claude supports up to 64K output tokens; cap at 8K for typical use
+  payload.max_tokens = 8192;
+  // Note: 'thinking' parameter is Gemini-specific; Claude uses extended thinking differently
+  // Do NOT set payload.thinking for Claude models
 
   const normalizedResponseFormat = normalizeResponseFormat({
     responseFormat,
