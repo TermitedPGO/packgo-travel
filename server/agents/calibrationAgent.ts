@@ -57,12 +57,62 @@ export async function checkContentFidelity(
   const issues: CalibrationIssue[] = [];
 
   if (!sourceContent || sourceContent.trim().length < 50) {
-    // No source to compare — give neutral score
     return { score: 70, issues: [] };
   }
 
+  // ════════ Step 1: 規則化 price/duration 比對 ════════
+
+  // 1a. 從 sourceContent 提取 source price（規則化，不靠 LLM）
+  let sourcePrice = 0;
+  // 格式1: buildRawContentFromLionData 輸出 "價格：83,900 TWD"
+  const priceLine = sourceContent.match(/價格[：:]\s*([\d,]+)\s*(TWD|USD|JPY|EUR)?/);
+  if (priceLine) {
+    sourcePrice = parseFloat(priceLine[1].replace(/,/g, ''));
+  }
+  // 格式2: "NT$83,900" 或 "NT 83,900"
+  if (sourcePrice === 0) {
+    const ntMatch = sourceContent.match(/NT\$?\s*([\d,]+)/);
+    if (ntMatch) sourcePrice = parseFloat(ntMatch[1].replace(/,/g, ''));
+  }
+  // 格式3: "83,900元"
+  if (sourcePrice === 0) {
+    const yuanMatch = sourceContent.match(/([\d,]{4,})\s*元/);
+    if (yuanMatch) sourcePrice = parseFloat(yuanMatch[1].replace(/,/g, ''));
+  }
+
+  // 1b. 從 sourceContent 提取 source duration
+  let sourceDays = 0;
+  const daysLine = sourceContent.match(/天數[：:]\s*(\d+)/);
+  if (daysLine) {
+    sourceDays = parseInt(daysLine[1], 10);
+  }
+  if (sourceDays === 0) {
+    const daysMatch = sourceContent.match(/(\d+)\s*(?:天|日|days?)/i);
+    if (daysMatch) sourceDays = parseInt(daysMatch[1], 10);
+  }
+
+  // 1c. 取得 generated tour 的 price 和 duration
+  const genPrice = typeof tourData.price === 'number' ? tourData.price : parseFloat(String(tourData.price)) || 0;
+  const genDays = typeof tourData.duration === 'number' ? tourData.duration : parseInt(String(tourData.duration)) || 0;
+
+  // 1d. 規則化比對
+  let rulePriceOk = true;
+  let rulePriceDeviation = 0;
+  if (sourcePrice > 0 && genPrice > 0) {
+    rulePriceDeviation = Math.abs(genPrice - sourcePrice) / sourcePrice * 100;
+    rulePriceOk = rulePriceDeviation <= 15;
+    console.log(`[CalibrationAgent] Rule-based price check: source=${sourcePrice}, gen=${genPrice}, deviation=${rulePriceDeviation.toFixed(1)}%, ok=${rulePriceOk}`);
+  }
+
+  let ruleDurationOk = true;
+  if (sourceDays > 0 && genDays > 0) {
+    ruleDurationOk = genDays === sourceDays;
+    console.log(`[CalibrationAgent] Rule-based duration check: source=${sourceDays}, gen=${genDays}, ok=${ruleDurationOk}`);
+  }
+
+  // ════════ Step 2: LLM 只評估標題和內容品質 ════════
   try {
-    const prompt = `You are a quality auditor for PACK&GO travel agency. Compare the generated tour with the original source.
+    const prompt = `You are a quality auditor for PACK&GO travel agency. Evaluate the quality of the generated tour description.
 
 SOURCE CONTENT (original URL/PDF text):
 ${sourceContent.slice(0, 6000)}
@@ -70,27 +120,22 @@ ${sourceContent.slice(0, 6000)}
 GENERATED TOUR DATA:
 Title: ${tourData.title || "(missing)"}
 Poetic Title: ${(tourData as any).poeticTitle || "(none)"}
-Duration: ${tourData.duration || "(missing)"} days
-Price: ${tourData.price || "(missing)"}
 Destination: ${(tourData as any).destinationCountry || "(missing)"}
 Description: ${(tourData.description || "").slice(0, 800)}
 
 SCORING RULES:
-1. Title (0-100): The generated title MAY be creatively rewritten. Score HIGH (80-100) if it correctly identifies the destination, duration, and key theme. Do NOT require exact match with source title. Creative poetic titles are ENCOURAGED.
-2. Price (consistent/deviation): Check if price is within 15% of source. If source has no clear price, mark as consistent.
-3. Duration (correct): Check if the number of days matches. "7天6夜" = 7 days, "8日" = 8 days.
-4. Content accuracy (0-100): Are the destination, key activities, and tour highlights factually correct? Adding well-known local attractions is acceptable enrichment. Only penalize for WRONG information (wrong city, wrong country, contradicting source).
-5. Overall fidelity (0-100): Weighted average considering above factors. A well-written creative adaptation that preserves all factual information should score 80-95.
+1. Title (0-100): Creative rewriting is ENCOURAGED. Score HIGH (80-100) if it correctly identifies destination, duration, and theme. Do NOT require exact match.
+2. Content accuracy (0-100): Are the destination, activities, and highlights factually correct? Enrichment with well-known local attractions is acceptable. Only penalize WRONG information (wrong city, wrong country, contradicting source).
+3. Overall creative quality (0-100): Is this a well-written, attractive tour description that preserves factual accuracy?
+
+NOTE: Price and duration accuracy are checked separately by rule-based validation. Do NOT evaluate price or duration here.
 
 Respond in JSON:
 {
   "titleScore": 0-100,
-  "priceConsistent": true/false,
-  "priceDeviation": 0-100,
-  "durationCorrect": true/false,
   "contentAccuracy": 0-100,
   "overallScore": 0-100,
-  "issues": ["only list FACTUAL errors, not creative differences"]
+  "issues": ["only FACTUAL errors, not creative differences"]
 }`;
 
     const response = await invokeLLM({
@@ -107,14 +152,11 @@ Respond in JSON:
             type: "object",
             properties: {
               titleScore: { type: "number" },
-              priceConsistent: { type: "boolean" },
-              priceDeviation: { type: "number" },
-              durationCorrect: { type: "boolean" },
               contentAccuracy: { type: "number" },
               overallScore: { type: "number" },
               issues: { type: "array", items: { type: "string" } },
             },
-            required: ["titleScore", "priceConsistent", "priceDeviation", "durationCorrect", "contentAccuracy", "overallScore", "issues"],
+            required: ["titleScore", "contentAccuracy", "overallScore", "issues"],
             additionalProperties: false,
           },
         },
@@ -128,26 +170,47 @@ Respond in JSON:
     let score = Math.round(result.overallScore ?? 70);
     score = Math.max(0, Math.min(100, score));
 
-    if (!result.priceConsistent && result.priceDeviation > 10) {
-      issues.push({
-        check: "content",
-        severity: "critical",
-        message: `Price deviation ${result.priceDeviation?.toFixed(0)}% from source`,
-        field: "price",
-        autoFixable: false,
-      });
-      score = Math.max(0, score - 20);
+    // ════════ Step 3: 組合規則化結果 + LLM 結果 ════════
+    if (!rulePriceOk && sourcePrice > 0) {
+      if (rulePriceDeviation > 50) {
+        issues.push({
+          check: "content",
+          severity: "critical",
+          message: `Price deviation ${rulePriceDeviation.toFixed(0)}% from source (${sourcePrice} → ${genPrice})`,
+          field: "price",
+          autoFixable: false,
+        });
+        score = Math.max(0, score - 20);
+      } else if (rulePriceDeviation > 25) {
+        issues.push({
+          check: "content",
+          severity: "warning",
+          message: `Price deviation ${rulePriceDeviation.toFixed(0)}% from source`,
+          field: "price",
+          autoFixable: false,
+        });
+        score = Math.max(0, score - 10);
+      } else {
+        issues.push({
+          check: "content",
+          severity: "info",
+          message: `Minor price deviation ${rulePriceDeviation.toFixed(0)}%`,
+          field: "price",
+          autoFixable: false,
+        });
+        score = Math.max(0, score - 5);
+      }
     }
 
-    if (!result.durationCorrect) {
+    if (!ruleDurationOk && sourceDays > 0) {
       issues.push({
         check: "content",
         severity: "critical",
-        message: "Duration does not match source content",
+        message: `Duration mismatch: source=${sourceDays} days, generated=${genDays} days`,
         field: "duration",
         autoFixable: false,
       });
-      score = Math.max(0, score - 20);
+      score = Math.max(0, score - 15);
     }
 
     for (const issue of result.issues ?? []) {

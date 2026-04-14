@@ -22,16 +22,14 @@ vi.mock("../_core/llm", () => ({
     const userMsg = messages.find((m: any) => m.role === "user")?.content ?? "";
     const systemMsg = messages.find((m: any) => m.role === "system")?.content ?? "";
 
-    // Content fidelity mock
+    // Content fidelity mock (Round 51: only titleScore, contentAccuracy, overallScore, issues)
     if (systemMsg.includes("quality auditor")) {
       return {
         choices: [{
           message: {
             content: JSON.stringify({
               titleScore: 85,
-              priceConsistent: true,
-              priceDeviation: 2,
-              durationCorrect: true,
+              contentAccuracy: 88,
               overallScore: 85,
               issues: [],
             }),
@@ -327,6 +325,37 @@ describe("checkContentFidelity", () => {
     const { score } = await checkContentFidelity(completeTour, source);
     expect(score).toBeGreaterThan(0);
     expect(score).toBeLessThanOrEqual(100);
+  });
+
+  it("rule-based: no deduction when price matches source (deviation=0%)", async () => {
+    // completeTour.price = 45000, source has "45,000元" → deviation 0%
+    const source = "日本七日賞櫻行程，費用45,000元，包含機票住宿，每日精彩安排，帶您體驗最美的日本春天。".repeat(5);
+    const { score, issues } = await checkContentFidelity(completeTour, source);
+    expect(issues.some((i) => i.field === "price")).toBe(false);
+    expect(score).toBeGreaterThanOrEqual(80); // LLM returns 85, no price deduction
+  });
+
+  it("rule-based: critical deduction when price deviation > 50%", async () => {
+    // completeTour.price = 45000, source has "價格：10,000 TWD" → deviation ~350%
+    const source = "日本七日賞櫻行程，價格：10,000 TWD，包含機票住宿，每日精彩安排，帶您體驗最美的日本春天。".repeat(5);
+    const { score, issues } = await checkContentFidelity(completeTour, source);
+    expect(issues.some((i) => i.field === "price" && i.severity === "critical")).toBe(true);
+    expect(score).toBeLessThanOrEqual(65); // 85 - 20 = 65
+  });
+
+  it("rule-based: no deduction when duration matches source", async () => {
+    // completeTour.duration = 7, source has "7天"
+    const source = "日本7天賞櫻行程，費用45000元，包含機票住宿，每日精彩安排，帶您體驗最美的日本春天。".repeat(5);
+    const { issues } = await checkContentFidelity(completeTour, source);
+    expect(issues.some((i) => i.field === "duration")).toBe(false);
+  });
+
+  it("rule-based: critical deduction when duration mismatches source", async () => {
+    // completeTour.duration = 7, source has "3天"
+    const source = "日本3天賞櫻行程，費用45000元，包含機票住宿，每日精彩安排，帶您體驗最美的日本春天。".repeat(5);
+    const { score, issues } = await checkContentFidelity(completeTour, source);
+    expect(issues.some((i) => i.field === "duration" && i.severity === "critical")).toBe(true);
+    expect(score).toBeLessThanOrEqual(70); // 85 - 15 = 70
   });
 });
 

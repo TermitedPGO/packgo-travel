@@ -1844,7 +1844,7 @@ export class MasterAgent {
           console.log('[MasterAgent] 🔧 Self-Repair: Re-running ItineraryUnifiedAgent...');
           try {
             const repairItineraryResult = await this.itineraryUnifiedAgent.execute(rawData);
-            if (repairItineraryResult.success && repairItineraryResult.data?.polishedItineraries.length > 0) {
+            if (repairItineraryResult.success && repairItineraryResult.data?.polishedItineraries && repairItineraryResult.data.polishedItineraries.length > 0) {
               const { polishedItineraries: repairedItineraries } = repairItineraryResult.data;
               // Re-assign images
               const { assignItineraryImages } = await import('../services/itineraryImageService');
