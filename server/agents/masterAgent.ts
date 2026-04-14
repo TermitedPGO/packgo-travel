@@ -1284,6 +1284,8 @@ export class MasterAgent {
       // Fix 1: duration fallback — extract from title / rawText if still 0
       if (!finalData.duration || finalData.duration === 0) {
         const textToSearch = [
+          finalData.title || '',           // Generated title (e.g. "四國四鐵道輕奢七日")
+          finalData.poeticTitle || '',     // Poetic title may also contain duration
           rawData?.basicInfo?.title || '',
           rawData?.rawText?.slice(0, 2000) || '',
           analyzedContent?.title || '',

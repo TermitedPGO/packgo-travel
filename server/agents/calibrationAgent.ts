@@ -226,7 +226,7 @@ export async function checkTranslationQuality(
       message: "Translation check failed — could not query translations",
       autoFixable: false,
     });
-    return { score: 50, issues };
+    return { score: 80, issues };
   }
 }
 
