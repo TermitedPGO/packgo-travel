@@ -1270,11 +1270,33 @@ export class MasterAgent {
           rawData?.basicInfo?.title || '',
           rawData?.rawText?.slice(0, 2000) || '',
           analyzedContent?.title || '',
+          rawData?.rawContent?.slice(0, 2000) || '',
         ].join(' ');
-        // Matches: 7天, 7日, 8天7夜, 10 days, 5天4夜
-        const durationMatch = textToSearch.match(/(\d+)\s*天(?:\d+夜)?|(\d+)\s*日|(\d+)\s*days?/i);
-        if (durationMatch) {
-          const extracted = parseInt(durationMatch[1] || durationMatch[2] || durationMatch[3], 10);
+
+        // Helper: convert Chinese number to Arabic
+        const chineseToNum: Record<string, number> = {
+          '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
+          '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
+          '十一': 11, '十二': 12, '十三': 13, '十四': 14, '十五': 15,
+        };
+
+        let extracted = 0;
+
+        // Pattern 1: Arabic digits — 7天, 7日, 8天7夜, 10 days, 5天4夜
+        const arabicMatch = textToSearch.match(/(\d+)\s*天(?:\d+夜)?|(\d+)\s*日|(\d+)\s*days?/i);
+        if (arabicMatch) {
+          extracted = parseInt(arabicMatch[1] || arabicMatch[2] || arabicMatch[3], 10);
+        }
+
+        // Pattern 2: Chinese digits — 二日, 三日, 七天, 十日
+        if (!extracted) {
+          const chineseMatch = textToSearch.match(/(十[一二三四五]?|[一二三四五六七八九十])\s*[天日]/);
+          if (chineseMatch) {
+            extracted = chineseToNum[chineseMatch[1]] || 0;
+          }
+        }
+
+        if (extracted > 0) {
           finalData.duration = extracted;
           finalData.days = extracted;
           finalData.nights = extracted > 1 ? extracted - 1 : 0;
@@ -1295,12 +1317,18 @@ export class MasterAgent {
           '埃及': '埃及', '摩洛哥': '摩洛哥', '南非': '南非',
           '秘魯': '秘魯', '智利': '智利', '巴西': '巴西', '阿根廷': '阿根廷',
           '冰島': '冰島', '挪威': '挪威', '芬蘭': '芬蘭', '瑞典': '瑞典', '丹麥': '丹麥',
-          '帛琉': '帛琉', '峇里': '印尼', '巴里': '印尼', '曼谷': '泰國', '清邁': '泰國',
-          '普吉': '泰國', '河內': '越南', '胡志明': '越南', '峴港': '越南',
+          '帛空': '帛空', '帛空島': '帛空', '巴里島': '印尼', '巴里': '印尼', '曼谷': '泰國', '清邁': '泰國',
+          '普吉': '泰國', '河內': '越南', '胡志明': '越南', '峨港': '越南',
           '首爾': '韓國', '釜山': '韓國', '濟州': '韓國',
-          '四國': '日本', '北海道': '日本', '沖繩': '日本', '九州': '日本', '關西': '日本',
+          '四國': '日本', '北海道': '日本', '沖縄': '日本', '九州': '日本', '關西': '日本',
           '關東': '日本', '東北': '日本', '東京': '日本', '大阪': '日本', '京都': '日本',
           '北陸': '日本', '中部': '日本', '山陰': '日本', '山陽': '日本',
+          // Taiwan cities
+          '台灣': '台灣', '台北': '台灣', '台中': '台灣', '台南': '台灣', '高雄': '台灣',
+          '花蓮': '台灣', '宜蘭': '台灣', '嘉義': '台灣', '屏東': '台灣', '台東': '台灣',
+          '新竹': '台灣', '南投': '台灣', '雲林': '台灣', '彰化': '台灣', '基隆': '台灣',
+          '日月潭': '台灣', '阿里山': '台灣', '太魯閣': '台灣', '墨家': '台灣',
+          '福森號': '台灣', '福森': '台灣', '舔子': '台灣', '澎湖': '台灣',
         };
         const textToSearch = [
           rawData?.basicInfo?.title || '',
