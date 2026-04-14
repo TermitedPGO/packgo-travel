@@ -165,9 +165,12 @@ export class ItineraryUnifiedAgent {
   // ─── 純邏輯層（無 LLM）────────────────────────────────────────────────────
 
   private identifyTourType(rawData: any): TourType {
+    // ⚠️  Use ONLY title + transportation field — NOT full JSON.stringify
+    // Full stringify causes false positives (e.g. schema descriptions containing "郵輪")
     const title = rawData?.title || rawData?.basicInfo?.title || "";
-    const content = JSON.stringify(rawData).toLowerCase();
-    const searchText = (title + " " + content).toLowerCase();
+    const originalTitle = rawData?.basicInfo?.originalTitle || rawData?.originalTitle || "";
+    const transportation = rawData?.transportation || rawData?.basicInfo?.transportation || "";
+    const searchText = (title + " " + originalTitle + " " + transportation).toLowerCase();
 
     if (
       searchText.includes("鳴日號") ||
@@ -181,6 +184,21 @@ export class ItineraryUnifiedAgent {
       } catch {}
       return "MINGRI_TRAIN";
     }
+    // 🚂 RAIL check MUST come BEFORE CRUISE to prevent false positives
+    // "鐵道"/"鐵路"/"火車"/"新幹線"/"列車"/"高鐵"/"台鐵" 行程 ≠ 郵輪行程
+    if (
+      searchText.includes("鐵道") ||
+      searchText.includes("鐵路") ||
+      searchText.includes("火車") ||
+      searchText.includes("新幹線") ||
+      searchText.includes("列車") ||
+      searchText.includes("高鐵") ||
+      searchText.includes("台鐵")
+    ) {
+      console.log("[ItineraryUnifiedAgent] Tour type: TRAIN (rail keywords in title/transport)");
+      return "TRAIN";
+    }
+    // 🚢 CRUISE check — only if no rail keywords found
     if (searchText.includes("郵輪") || searchText.includes("遊輪") || searchText.includes("cruise")) {
       console.log("[ItineraryUnifiedAgent] Tour type: CRUISE");
       return "CRUISE";
@@ -188,15 +206,6 @@ export class ItineraryUnifiedAgent {
     if (searchText.includes("自駕") || searchText.includes("租車") || searchText.includes("開車")) {
       console.log("[ItineraryUnifiedAgent] Tour type: SELF_DRIVE");
       return "SELF_DRIVE";
-    }
-    if (
-      searchText.includes("火車") ||
-      searchText.includes("鐵路") ||
-      searchText.includes("高鐵") ||
-      searchText.includes("台鐵")
-    ) {
-      console.log("[ItineraryUnifiedAgent] Tour type: TRAIN");
-      return "TRAIN";
     }
     if (
       searchText.includes("飛機") ||
@@ -461,15 +470,23 @@ export class ItineraryUnifiedAgent {
     const itinerarySelfRepairSection = itinerarySelfRepairHint
       ? `\n【自我修復指令 — 第 ${rawData?.selfRepairRound || 1} 次重試，請針對以下問題改善行程描述】：\n${itinerarySelfRepairHint}`
       : '';
-    const systemPrompt = `你是資深旅遊文案編輯。美化行程描述，保持原始資訊完全不變。
+    // 輸出 transport 判斷說明（對 Forge/Gemini 尤為重要）
+    const transportRuleNote = tourType === 'TRAIN'
+      ? `注意：這是鐵道行程（${originalTransportation || '火車/新幹線/列車'}）。交通描述必須使用火車/鐵路/新幹線等鐵道相關用語，禁止出現「郵輪」「遊輪」「飛機」「航班」。`
+      : tourType === 'MINGRI_TRAIN'
+      ? `注意：這是鳴日號觀光列車行程，所有交通描述必須使用火車/列車，禁止出現飛機/航班/機場。`
+      : tourType === 'CRUISE'
+      ? `注意：這是郵輪行程，所有交通描述必須使用郵輪/遊輪，禁止出現飛機/航班。`
+      : '';
+    const systemPrompt = `你是 PACK&GO 旅行社的專業旅遊行程規劃師。請用繁體中文美化行程描述，保持原始資訊完全不變。
 核心規則：
 1. 保留所有景點名稱、時間、飯店名稱、交通方式
-2. 每個活動描述 40-60 字，使用生動但簡潔的描述
+2. 每個活動描述 40-60 字，使用生動但簡潔的繁體中文描述
 3. 禁止更改交通方式或飯店名稱
 4. 禁止新增原始資料中沒有的景點或活動
-${originalTransportation ? `原始交通方式：${originalTransportation}` : ""}
-${tourType === "MINGRI_TRAIN" ? "注意：這是鳴日號觀光列車行程，所有交通描述必須使用火車/列車，禁止出現飛機/航班/機場。" : ""}
-${tourType === "CRUISE" ? "注意：這是郵輪行程，所有交通描述必須使用郵輪/遊輪，禁止出現飛機/航班。" : ""}${itinerarySelfRepairSection}`;
+5. 絕對不要使用簡體中文
+${originalTransportation ? `原始交通方式：${originalTransportation}` : ''}
+${transportRuleNote}${itinerarySelfRepairSection}`;
 
     const userPrompt = `美化以下行程（目的地：${city}${country ? `, ${country}` : ""}）：
 ${JSON.stringify(extractedItineraries, null, 2)}

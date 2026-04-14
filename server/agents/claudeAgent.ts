@@ -119,17 +119,27 @@ export class ClaudeAgent {
   /** 子類別可覆寫，用於識別記錄來源 */
   protected agentName: string = 'ClaudeAgent';
   protected taskType?: string;
+  /** Forge-first mode: skip Claude direct call, go straight to Forge */
+  private useForgeFirst: boolean = false;
 
   constructor(options?: { model?: ClaudeModel }) {
     const apiKey = process.env.ANTHROPIC_API_KEY;
-    // 診斷日誌 — 確認 API key 狀態
-    console.log(`[ClaudeAgent] ANTHROPIC_API_KEY status: ${apiKey ? `SET (${apiKey.substring(0, 8)}...)` : 'NOT SET'}`);
+    // 偵測是否在 Manus production 環境（Forge 可用 = 跳過 Claude 直連，省掉 403 延遲）
+    const forgeAvailable = !!(process.env.BUILT_IN_FORGE_API_KEY && process.env.BUILT_IN_FORGE_API_URL);
+    this.useForgeFirst = forgeAvailable;
+    console.log(`[ClaudeAgent] Mode: ${this.useForgeFirst ? '🔀 Forge-first (production — skipping Claude direct)' : '🔵 Claude-direct (local dev)'}`);
+    console.log(`[ClaudeAgent] ANTHROPIC_API_KEY status: ${apiKey ? `SET (${apiKey.substring(0, 12)}...)` : 'NOT SET'}`);
     console.log(`[ClaudeAgent] BUILT_IN_FORGE_API_KEY status: ${process.env.BUILT_IN_FORGE_API_KEY ? 'SET' : 'NOT SET'}`);
-    if (!apiKey) {
-      throw new Error('ANTHROPIC_API_KEY is not set');
+    if (!apiKey && !forgeAvailable) {
+      throw new Error('ANTHROPIC_API_KEY is not set and Forge is not available');
     }
-
-    this.client = new Anthropic({ apiKey });
+    // Only create Anthropic client if we might use it (local dev)
+    if (apiKey) {
+      this.client = new Anthropic({ apiKey });
+    } else {
+      // Forge-only mode: create a dummy client (will never be called)
+      this.client = null as any;
+    }
     // Default to Haiku 4.5 for cost-effectiveness
     this.model = options?.model || CLAUDE_MODELS.HAIKU_45;
     
@@ -262,9 +272,39 @@ export class ClaudeAgent {
       enableCaching?: boolean; // P2: enable prompt caching for system prompt
     }
   ): Promise<ClaudeResult> {
-    console.log('[ClaudeAgent] Sending message to Claude...');
     const startTime = Date.now();
 
+    // 🔀 Forge-first mode: skip Claude direct call entirely (production environment)
+    if (this.useForgeFirst) {
+      console.log(`[ClaudeAgent:${this.agentName}] 🔀 Forge-first: sending directly to Forge (no Claude attempt)`);
+      try {
+        const { invokeLLM } = await import('../_core/llm');
+        const forgeResult = await invokeLLM({
+          messages: [
+            ...(options?.systemPrompt ? [{ role: 'system' as const, content: options.systemPrompt }] : []),
+            { role: 'user' as const, content: prompt },
+          ],
+          maxTokens: options?.maxTokens || 4096,
+        });
+        const forgeContent = forgeResult.choices?.[0]?.message?.content;
+        const contentStr = typeof forgeContent === 'string' ? forgeContent : JSON.stringify(forgeContent);
+        console.log(`[ClaudeAgent:${this.agentName}] ✅ Forge-first succeeded (${Date.now() - startTime}ms)`);
+        this.updateUsageStats(forgeResult.usage?.prompt_tokens || 0, forgeResult.usage?.completion_tokens || 0);
+        return {
+          success: true,
+          content: contentStr,
+          usage: {
+            inputTokens: forgeResult.usage?.prompt_tokens || 0,
+            outputTokens: forgeResult.usage?.completion_tokens || 0,
+          },
+        };
+      } catch (forgeErr: any) {
+        console.error(`[ClaudeAgent:${this.agentName}] Forge-first failed:`, forgeErr.message);
+        return { success: false, error: forgeErr.message || 'Forge error' };
+      }
+    }
+
+    console.log(`[ClaudeAgent:${this.agentName}] 🔵 Calling Anthropic API (model: ${this.model})...`);
     try {
       // P2: Build system prompt with cache_control if caching is enabled
       // Caching is enabled by default for system prompts >= 1024 tokens (Haiku minimum)
@@ -295,7 +335,9 @@ export class ClaudeAgent {
       });
 
       const duration = Date.now() - startTime;
-      console.log(`[ClaudeAgent] Response received in ${duration}ms`);
+      const inputTok = response.usage.input_tokens;
+      const outputTok = response.usage.output_tokens;
+      console.log(`[ClaudeAgent:${this.agentName}] ✅ Anthropic API success (tokens: ${inputTok}/${outputTok}, ${duration}ms)`);
 
       // P2: Extract cache stats from usage
       const usage = response.usage as any;
@@ -327,7 +369,7 @@ export class ClaudeAgent {
 
       // Forge fallback: 當 Anthropic 直連失敗（403/forbidden）時，透過 Forge proxy 呼叫
       if (error?.status === 403 || error?.message?.includes('forbidden') || error?.message?.includes('403')) {
-        console.warn(`[ClaudeAgent] Anthropic direct call failed (403), falling back to Forge proxy...`);
+        console.warn(`[ClaudeAgent:${this.agentName}] ⚠️ FALLBACK to Forge triggered! (reason: ${error.message?.substring(0, 80)})`);
         try {
           const { invokeLLM } = await import('../_core/llm');
           const forgeResult = await invokeLLM({
@@ -463,14 +505,59 @@ export class ClaudeAgent {
   ): Promise<ClaudeStructuredResult<T>> {
     const schemaName = options?.schemaName || 'structured_output';
     const schemaDescription = options?.schemaDescription || 'Extract structured data according to the schema';
-    
-    console.log(`[ClaudeAgent] Sending structured message with schema: ${schemaName}`);
     const startTime = Date.now();
 
     // Build system prompt with strict data fidelity rules if enabled
     let systemPromptText = options?.systemPrompt || '你是一個專業的資料提取專家，擅長從文本中提取結構化資訊。';
     if (options?.strictDataFidelity !== false) {
       systemPromptText = `${systemPromptText}\n\n${STRICT_DATA_FIDELITY_RULES}`;
+    }
+
+    // 🔀 Forge-first mode: skip Claude direct call entirely (production environment)
+    if (this.useForgeFirst) {
+      console.log(`[ClaudeAgent:${this.agentName}] 🔀 Forge-first: sending structured request directly to Forge (schema: ${schemaName})`);
+      try {
+        const { invokeLLM } = await import('../_core/llm');
+        const forgeResult = await invokeLLM({
+          messages: [
+            { role: 'system' as const, content: systemPromptText + '\n\n請回傳符合指定 JSON schema 的結構化資料。' },
+            { role: 'user' as const, content: prompt },
+          ],
+          maxTokens: options?.maxTokens || 4096,
+          response_format: {
+            type: 'json_schema',
+            json_schema: {
+              name: schemaName,
+              strict: false,
+              schema: schema as any,
+            },
+          },
+        });
+        const forgeContent = forgeResult.choices?.[0]?.message?.content;
+        const contentStr = typeof forgeContent === 'string' ? forgeContent : JSON.stringify(forgeContent);
+        let parsedData: T;
+        try {
+          parsedData = JSON.parse(contentStr) as T;
+        } catch {
+          const jsonMatch = contentStr.match(/\{[\s\S]*\}/);
+          if (!jsonMatch) throw new Error('Forge-first: no valid JSON in response');
+          parsedData = JSON.parse(jsonMatch[0]) as T;
+        }
+        console.log(`[ClaudeAgent:${this.agentName}] ✅ Forge-first structured succeeded (${Date.now() - startTime}ms)`);
+        this.updateUsageStats(forgeResult.usage?.prompt_tokens || 0, forgeResult.usage?.completion_tokens || 0);
+        return {
+          success: true,
+          data: parsedData,
+          content: contentStr,
+          usage: {
+            inputTokens: forgeResult.usage?.prompt_tokens || 0,
+            outputTokens: forgeResult.usage?.completion_tokens || 0,
+          },
+        };
+      } catch (forgeErr: any) {
+        console.error(`[ClaudeAgent:${this.agentName}] Forge-first structured failed:`, forgeErr.message);
+        return { success: false, error: forgeErr.message || 'Forge error' };
+      }
     }
 
     // P2: Apply Prompt Caching to system prompt
@@ -485,6 +572,7 @@ export class ClaudeAgent {
         ]
       : systemPromptText;
 
+    console.log(`[ClaudeAgent:${this.agentName}] 🔵 Calling Anthropic API (model: ${this.model}, schema: ${schemaName})...`);
     try {
       // Use Claude's tool use feature to enforce JSON schema
       const response = await this.client.messages.create({
@@ -509,7 +597,9 @@ export class ClaudeAgent {
       });
 
       const duration = Date.now() - startTime;
-      console.log(`[ClaudeAgent] Structured response received in ${duration}ms`);
+      const inputTok2 = response.usage.input_tokens;
+      const outputTok2 = response.usage.output_tokens;
+      console.log(`[ClaudeAgent:${this.agentName}] ✅ Anthropic API success (tokens: ${inputTok2}/${outputTok2}, ${duration}ms)`);
 
       // P2: Extract cache stats
       const usageRaw = response.usage as any;
@@ -558,7 +648,7 @@ export class ClaudeAgent {
       // Forge fallback: 當 Anthropic 直連失敗（403/forbidden）時，透過 Forge proxy 呼叫
       // Forge 使用 response_format: json_schema 替代 Claude tool_use
       if (error?.status === 403 || error?.message?.includes('forbidden') || error?.message?.includes('403')) {
-        console.warn(`[ClaudeAgent] Anthropic structured call failed (403), falling back to Forge proxy...`);
+        console.warn(`[ClaudeAgent:${this.agentName}] ⚠️ FALLBACK to Forge triggered! (reason: ${error.message?.substring(0, 80)})`);
         try {
           const { invokeLLM } = await import('../_core/llm');
           const schemaName = options?.schemaName || 'structured_output';
