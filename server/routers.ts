@@ -1201,6 +1201,76 @@ export const appRouter = router({
         
         return report;
       }),
+    // Round 58: Quick environment + LLM diagnostic (to be removed after diagnosis)
+    diagnoseEnv: adminProcedure
+      .mutation(async () => {
+        const { ENV } = await import('./_core/env');
+        const results: Record<string, any> = {};
+        
+        // 1. Check env vars
+        results.env = {
+          forgeApiUrl: ENV.forgeApiUrl || '(empty - will use fallback)',
+          forgeApiKeySet: !!ENV.forgeApiKey,
+          nodeEnv: process.env.NODE_ENV,
+        };
+        
+        // 2. Test LLM with 30s timeout
+        const llmStart = Date.now();
+        try {
+          const { invokeLLM } = await import('./_core/llm');
+          const llmResult = await invokeLLM({
+            messages: [{ role: 'user', content: 'Say OK in 2 words' }],
+          });
+          results.llm = {
+            ok: true,
+            elapsed: Date.now() - llmStart,
+            model: llmResult.model,
+            content: llmResult.choices[0]?.message?.content,
+          };
+        } catch (err: any) {
+          results.llm = { ok: false, elapsed: Date.now() - llmStart, error: err?.message };
+        }
+        
+        // 3. Test LionTravel API
+        const lionStart = Date.now();
+        try {
+          const { fetchLionTravelData } = await import('./services/lionTravelApiService');
+          const testUrl = 'https://travel.liontravel.com/detail?NormGroupID=96f88eb6-8d38-46ff-a55d-6f0862248428&GroupID=26NZ502MN15-GX&Platform=APP';
+          const lionResult = await fetchLionTravelData(testUrl);
+          results.lionApi = {
+            ok: !!lionResult,
+            elapsed: Date.now() - lionStart,
+            title: lionResult?.tourName?.substring(0, 50) ?? null,
+            price: lionResult?.price ?? null,
+          };
+        } catch (err: any) {
+          results.lionApi = { ok: false, elapsed: Date.now() - lionStart, error: err?.message };
+        }
+        
+        // 4. Test static HTTP scraping (no Puppeteer)
+        const httpStart = Date.now();
+        try {
+          const testUrl = 'https://travel.liontravel.com/detail?NormGroupID=96f88eb6-8d38-46ff-a55d-6f0862248428&GroupID=26NZ502MN15-GX&Platform=APP';
+          const resp = await fetch(testUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+            signal: AbortSignal.timeout(15000),
+          });
+          const html = await resp.text();
+          const titleMatch = html.match(/<title>([^<]+)<\/title>/);
+          results.httpScrape = {
+            ok: resp.ok,
+            status: resp.status,
+            elapsed: Date.now() - httpStart,
+            htmlLength: html.length,
+            title: titleMatch?.[1]?.substring(0, 80) ?? null,
+          };
+        } catch (err: any) {
+          results.httpScrape = { ok: false, elapsed: Date.now() - httpStart, error: err?.message };
+        }
+        
+        console.log('[diagnoseEnv] Results:', JSON.stringify(results, null, 2));
+        return results;
+      }),
     // Get similar tours based on destination/category/price
     getSimilar: publicProcedure
       .input(z.object({
