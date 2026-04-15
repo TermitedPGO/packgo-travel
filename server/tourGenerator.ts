@@ -193,46 +193,57 @@ export async function generateTourFromUrlInternal(
     if (_lionAllDepartures && _lionAllDepartures.length > 0) {
       (async () => {
         try {
-          // Clear existing departures for this tour before re-inserting
-          const existingDeps = await getTourDepartures(tour.id);
-          // Only insert if no departures exist yet (avoid duplicates on re-generation)
-          if (existingDeps.length === 0) {
-            let inserted = 0;
-            for (const dep of _lionAllDepartures) {
-              try {
-                // Parse date: "2026/07/06" → Date object
-                const [year, month, day] = dep.date.split('/').map(Number);
-                if (!year || !month || !day) continue;
-                const departureDate = new Date(year, month - 1, day, 8, 0, 0); // 08:00 departure
-                const returnDate = new Date(year, month - 1, day + (tourData.nights || tourData.days - 1 || 0), 20, 0, 0);
-                // Map status: "報名" → "open", "客滿" → "full", "取消" → "cancelled"
-                const statusMap: Record<string, 'open' | 'full' | 'cancelled' | 'confirmed'> = {
-                  '報名': 'open',
-                  '客滿': 'full',
-                  '取消': 'cancelled',
-                  '確定': 'confirmed',
-                };
-                const mappedStatus = statusMap[dep.status] || 'open';
-                await createDeparture({
-                  tourId: tour.id,
-                  departureDate,
-                  returnDate,
-                  adultPrice: Math.round(dep.price),
-                  totalSlots: dep.totalSeats || 20,
-                  bookedSlots: Math.max(0, (dep.totalSeats || 20) - (dep.availableSeats || 0)),
-                  status: mappedStatus,
-                  currency: dep.currencyCode || 'TWD',
-                  notes: `lionGroupId: ${dep.groupId}`,
-                });
-                inserted++;
-              } catch (singleDepErr) {
-                // Non-critical — skip individual departure errors
-              }
-            }
-            console.log(`[TourGenerator] ✓ B5: Inserted ${inserted}/${_lionAllDepartures.length} liontravel departures for tour ${tour.id}`);
-          } else {
-            console.log(`[TourGenerator] B5: Skipped — tour ${tour.id} already has ${existingDeps.length} departure(s)`);
+          const { tourDepartures: departuresTable } = await import('../drizzle/schema');
+          const { eq } = await import('drizzle-orm');
+          const { getDb } = await import('./db');
+          const drizzleDb = await getDb();
+
+          if (!drizzleDb) {
+            console.warn('[TourGenerator] B5: DB not available, skipping departure insert');
+            return;
           }
+
+          // Clear existing departures for this tour (so re-generation always updates)
+          const existingDeps = await getTourDepartures(tour.id);
+          if (existingDeps.length > 0) {
+            await drizzleDb.delete(departuresTable).where(eq(departuresTable.tourId, tour.id));
+            console.log(`[TourGenerator] B5: Cleared ${existingDeps.length} old departure(s) for tour ${tour.id}`);
+          }
+
+          // Insert fresh departures from liontravel API
+          let inserted = 0;
+          for (const dep of _lionAllDepartures) {
+            try {
+              // Parse date: "2026/07/06" → Date object
+              const [year, month, day] = dep.date.split('/').map(Number);
+              if (!year || !month || !day) continue;
+              const departureDate = new Date(year, month - 1, day, 8, 0, 0); // 08:00 departure
+              const returnDate = new Date(year, month - 1, day + (tourData.nights || tourData.days - 1 || 0), 20, 0, 0);
+              // Map status: "報名" → "open", "客滿" → "full", "取消" → "cancelled"
+              const statusMap: Record<string, 'open' | 'full' | 'cancelled' | 'confirmed'> = {
+                '報名': 'open',
+                '客滿': 'full',
+                '取消': 'cancelled',
+                '確定': 'confirmed',
+              };
+              const mappedStatus = statusMap[dep.status] || 'open';
+              await createDeparture({
+                tourId: tour.id,
+                departureDate,
+                returnDate,
+                adultPrice: Math.round(dep.price),
+                totalSlots: dep.totalSeats || 20,
+                bookedSlots: Math.max(0, (dep.totalSeats || 20) - (dep.availableSeats || 0)),
+                status: mappedStatus,
+                currency: dep.currencyCode || 'TWD',
+                notes: `lionGroupId: ${dep.groupId}`,
+              });
+              inserted++;
+            } catch (singleDepErr) {
+              // Non-critical — skip individual departure errors
+            }
+          }
+          console.log(`[TourGenerator] ✓ B5: Inserted ${inserted}/${_lionAllDepartures.length} liontravel departures for tour ${tour.id}`);
         } catch (b5Err) {
           console.warn('[TourGenerator] B5 lionDepartures save failed (non-fatal):', b5Err);
         }

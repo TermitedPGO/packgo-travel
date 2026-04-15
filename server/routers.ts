@@ -1395,6 +1395,76 @@ export const appRouter = router({
           .where(eq(toursTable.id, input.tourId));
         return { success: true };
       }),
+
+    // Round 54: Backfill all liontravel tour departures (clear + re-insert)
+    backfillLionDepartures: adminProcedure
+      .mutation(async () => {
+        const { tours: toursTable, tourDepartures: departuresTable } = await import('../drizzle/schema');
+        const { like, eq } = await import('drizzle-orm');
+        const { fetchLionTravelData } = await import('./services/lionTravelApiService');
+        const drizzleDb = await db.getDb();
+        if (!drizzleDb) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '資料庫不可用' });
+
+        // Find all liontravel tours
+        const lionTours = await drizzleDb.select({
+          id: toursTable.id,
+          title: toursTable.title,
+          sourceUrl: toursTable.sourceUrl,
+          duration: toursTable.duration,
+        })
+        .from(toursTable)
+        .where(like(toursTable.sourceUrl, '%liontravel.com%'));
+
+        const results: { tourId: number; title: string; inserted: number; total: number; error?: string }[] = [];
+
+        for (const tour of lionTours) {
+          if (!tour.sourceUrl) continue;
+          try {
+            const lionData = await fetchLionTravelData(tour.sourceUrl);
+            if (!lionData) throw new Error('fetchLionTravelData returned null');
+            const departures = lionData.allDepartures || [];
+
+            // Clear existing departures
+            await drizzleDb.delete(departuresTable).where(eq(departuresTable.tourId, tour.id));
+
+            // Insert fresh departures
+            let inserted = 0;
+            for (const dep of departures) {
+              try {
+                const [year, month, day] = dep.date.split('/').map(Number);
+                if (!year || !month || !day) continue;
+                const departureDate = new Date(year, month - 1, day, 8, 0, 0);
+                const returnDate = new Date(year, month - 1, day + (tour.duration ? tour.duration - 1 : 0), 20, 0, 0);
+                const statusMap: Record<string, 'open' | 'full' | 'cancelled' | 'confirmed'> = {
+                  '報名': 'open', '客滿': 'full', '取消': 'cancelled', '確定': 'confirmed',
+                };
+                await db.createDeparture({
+                  tourId: tour.id,
+                  departureDate,
+                  returnDate,
+                  adultPrice: Math.round(dep.price),
+                  totalSlots: dep.totalSeats || 20,
+                  bookedSlots: Math.max(0, (dep.totalSeats || 20) - (dep.availableSeats || 0)),
+                  status: statusMap[dep.status] || 'open',
+                  currency: dep.currencyCode || 'TWD',
+                  notes: `lionGroupId: ${dep.groupId}`,
+                });
+                inserted++;
+              } catch { /* skip individual errors */ }
+            }
+            results.push({ tourId: tour.id, title: tour.title || '', inserted, total: departures.length });
+          } catch (err: unknown) {
+            results.push({ tourId: tour.id, title: tour.title || '', inserted: 0, total: 0, error: err instanceof Error ? err.message : String(err) });
+          }
+          // Throttle to avoid hammering the API
+          await new Promise(r => setTimeout(r, 500));
+        }
+
+        const totalInserted = results.reduce((s, r) => s + r.inserted, 0);
+        const successCount = results.filter(r => !r.error).length;
+        const failCount = results.filter(r => !!r.error).length;
+        return { totalTours: lionTours.length, successCount, failCount, totalInserted, results };
+      }),
   }),
 
   // Booking management router
