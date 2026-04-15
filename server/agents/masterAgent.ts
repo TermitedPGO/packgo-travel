@@ -126,6 +126,8 @@ export interface MasterAgentResult {
     issues: Array<{ check: string; severity: string; message: string; field?: string; autoFixable: boolean }>;
     autoFixesApplied: Array<{ field: string; before: string; after: string }>;
   };
+  // Round 55 Diag-C: Phase timing data
+  phaseTimings?: { phases: Record<string, string>; totalMs: number; totalSec: string };
 }
 
 /**
@@ -2103,20 +2105,34 @@ export class MasterAgent {
 
       // 清理可能殘留的殭屍任務（Round 36-Fix-3: 從 25 分鐘延長到 30 分鐘，與 index.ts 排程器保持一致）
       _endPhaseTimer('P6b_selfRepair');
-      // Round 55 Diag-C: Print phase timing summary
-      console.log('[MasterAgent] \u23f1 ========= PHASE TIMING SUMMARY =========');
+      // Round 55 Diag-C: Build timing summary
+      const _phaseDurations: Record<string, string> = {};
       for (const [name, startMs] of Object.entries(_phaseTimers)) {
-        const elapsed = Date.now() - startMs;
-        console.log(`[MasterAgent] \u23f1   ${name}: started at +${((startMs - startTime)/1000).toFixed(1)}s`);
+        _phaseDurations[name] = `+${((startMs - startTime)/1000).toFixed(1)}s`;
       }
-      console.log(`[MasterAgent] \u23f1 TOTAL: ${Date.now() - startTime}ms (${((Date.now() - startTime)/1000).toFixed(1)}s)`);
+      const _totalMs = Date.now() - startTime;
+      const _timingSummary = Object.entries(_phaseDurations).map(([n, t]) => `${n}@${t}`).join(' | ');
+      console.log('[MasterAgent] \u23f1 ========= PHASE TIMING SUMMARY =========');
+      console.log(`[MasterAgent] \u23f1 ${_timingSummary}`);
+      console.log(`[MasterAgent] \u23f1 TOTAL: ${_totalMs}ms (${(_totalMs/1000).toFixed(1)}s)`);
       console.log('[MasterAgent] \u23f1 =========================================');
+      // Update resultSummary with timing info
+      if (activityId) {
+        const title = finalData.title || finalData.poeticTitle || '未命名行程';
+        const dest = finalData.destinationCity || finalData.destinationCountry || '';
+        await logAgentComplete(activityId, {
+          status: 'completed',
+          processingTimeMs: _totalMs,
+          resultSummary: `已完成行程生成：「${title}${dest ? ` · ${dest}` : ''}」，耗時 ${(_totalMs/1000).toFixed(0)} 秒 | ⏱ ${_timingSummary}`,
+        });
+      }
       cleanupZombieTasks(30).catch(() => {});
       return {
         success: true,
         data: finalData,
         executionReport,
         calibrationReport: calibrationReport ?? undefined,
+        phaseTimings: { phases: _phaseDurations, totalMs: _totalMs, totalSec: (_totalMs/1000).toFixed(1) },
       };
       
     } catch (error) {
