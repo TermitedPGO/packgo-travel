@@ -124,6 +124,7 @@ export async function scrapeDynamicPage(url: string): Promise<DynamicScrapeResul
       daytrip?: any;
       pricing?: any;
       notice?: any;
+      calendar?: any;  // Round 52: groupcalendarjson for allDepartures
     } = {};
 
     // ═══ Round 49: API Response Interception Test ═══
@@ -173,6 +174,7 @@ export async function scrapeDynamicPage(url: string): Promise<DynamicScrapeResul
               else if (url.includes('daytripinfojson')) lionApiCapture.daytrip = parsedData;
               else if (url.includes('priceinfojson')) lionApiCapture.pricing = parsedData;
               else if (url.includes('noticeinfojson')) lionApiCapture.notice = parsedData;
+              else if (url.includes('groupcalendarjson')) lionApiCapture.calendar = parsedData; // Round 52
             }
           }
         }

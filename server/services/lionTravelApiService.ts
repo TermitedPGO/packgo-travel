@@ -2,9 +2,30 @@
  * Round 50: Liontravel Direct API Integration
  * Fetches structured tour data directly from liontravel.com JSON endpoints,
  * completely bypassing Puppeteer. Reduces scrape time from ~55s to ~2s.
+ *
+ * Round 52: Added fetchAllDepartures + extractFeatureImages
  */
 
 // ─── Interfaces ────────────────────────────────────────────────────────────────
+
+export interface LionDeparture {
+  groupId: string;        // e.g. "26JH706JXR-T"
+  date: string;           // e.g. "2026/07/06"
+  weekDay: string;        // e.g. "一"
+  price: number;          // e.g. 99000
+  currencyCode: string;   // e.g. "TWD"
+  availableSeats: number; // e.g. 15
+  totalSeats: number;     // e.g. 16
+  status: string;         // e.g. "報名"
+  tourId: string;         // e.g. "SJP05CCR99"
+}
+
+export interface LionImage {
+  url: string;
+  alt: string;
+  source: 'attraction' | 'feature'; // from attraction list or feature section
+  day?: number;                      // day number if from attraction
+}
 
 export interface LionAttractionItem {
   name: string;
@@ -78,6 +99,10 @@ export interface LionTravelApiData {
   notices: LionNotice[];
   // Raw features HTML for ContentAnalyzer
   featuresHtml: string;
+  // Round 52: All departure dates with prices
+  allDepartures: LionDeparture[];
+  // Round 52: All feature images (attraction + feature section)
+  featureImages: LionImage[];
 }
 
 // ─── HTML Utilities ─────────────────────────────────────────────────────────────
@@ -169,8 +194,8 @@ export async function fetchLionTravelData(
       return null;
     }
 
-    // ── Step 2: parallel fetch daytripinfojson + priceinfojson + noticeinfojson
-    const [daytripRaw, priceRaw, noticeRaw] = await Promise.all([
+    // ── Step 2: parallel fetch daytripinfojson + priceinfojson + noticeinfojson + groupcalendarjson
+    const [daytripRaw, priceRaw, noticeRaw, calendarRaw] = await Promise.all([
       postJson(
         '/detail/daytripinfojson',
         { NormGroupID: normGroupId, GroupID: groupId },
@@ -189,6 +214,12 @@ export async function fetchLionTravelData(
         referer,
         signal
       ).catch(() => ({ NoteList: [] })), // noticeinfojson is optional
+      postJson(
+        '/detail/groupcalendarjson',
+        { NormGroupID: normGroupId },
+        referer,
+        signal
+      ).catch(() => ({ GroupCalendarList: [] })), // groupcalendarjson is optional
     ]);
 
     // ── Parse travelinfojson ──────────────────────────────────────────────────
@@ -248,13 +279,20 @@ export async function fetchLionTravelData(
     });
 
     // ── Parse priceinfojson ───────────────────────────────────────────────────
-    // MultiPricesList[0].GroupPricesList[0] has the most detailed pricing
+    // Round 52: Use StraightLowestPrice from GroupList as primary price (most accurate "lowest price")
+    // AdultsPriceOrig from MultiPricesList can be higher (e.g., specific group surcharges)
+    const groupListPrices = (priceRaw?.GroupList ?? []).map((g: any) => safeParseFloat(g.StraightLowestPrice)).filter((p: number) => p > 0);
+    const groupListLowestPrice = groupListPrices.length > 0 ? Math.min(...groupListPrices) : 0;
     const multiPrices = priceRaw?.MultiPricesList ?? [];
     const groupPrices =
       (multiPrices[0]?.GroupPricesList ?? [])[0] ?? {};
-
+    const adultsPriceOrig = safeParseFloat(groupPrices.AdultsPriceOrig ?? priceRaw?.StraightLowestPrice);
+    // Prefer groupListLowestPrice when available and lower than AdultsPriceOrig
+    const bestAdultPrice = (groupListLowestPrice > 0 && (adultsPriceOrig === 0 || groupListLowestPrice < adultsPriceOrig))
+      ? groupListLowestPrice
+      : adultsPriceOrig;
     const pricing: LionPricing = {
-      adultPrice: safeParseFloat(groupPrices.AdultsPriceOrig ?? priceRaw?.StraightLowestPrice),
+      adultPrice: bestAdultPrice,
       childWithBed: safeParseFloat(groupPrices.ChildrenWithBedOrig),
       childNoBed: safeParseFloat(groupPrices.ChildrenNoPriceOrig),
       babyPrice: safeParseFloat(groupPrices.BabyPriceOrig),
@@ -282,6 +320,52 @@ export async function fetchLionTravelData(
       content: stripHtml(n.Desc ?? ''),
     }));
 
+    // ── Parse groupcalendarjson → allDepartures ────────────────────────────────
+    const calendarList: any[] = calendarRaw?.GroupCalendarList ?? [];
+    const allDepartures: LionDeparture[] = calendarList
+      .filter((c: any) => c.GroupID && c.GoDate)
+      .map((c: any) => ({
+        groupId: c.GroupID ?? '',
+        date: c.GoDate ?? '',
+        weekDay: c.WeekDay ?? '',
+        price: safeParseFloat((c.Price ?? '').toString().replace(/,/g, '')),
+        currencyCode: c.CurrencyCode ?? 'TWD',
+        availableSeats: parseInt(c.SpareSeats ?? '0', 10),
+        totalSeats: parseInt(c.TotalSeats ?? '0', 10),
+        status: c.Status ?? '',
+        tourId: c.TourID ?? '',
+      }));
+
+    // ── Extract featureImages from attractions + featuresHtml ─────────────────
+    const featureImages: LionImage[] = [];
+    // 1. Attraction images from daily itinerary
+    for (const day of dailyItinerary) {
+      for (const attr of day.attractions) {
+        if (attr.imgUrl && attr.imgUrl.startsWith('http')) {
+          featureImages.push({
+            url: attr.imgUrl,
+            alt: attr.name || `Day ${day.day} attraction`,
+            source: 'attraction',
+            day: day.day,
+          });
+        }
+      }
+    }
+    // 2. Feature images from featuresHtml (src="...")
+    const featureImgRegex = /src=["']([^"']+)["']/gi;
+    let featureMatch;
+    while ((featureMatch = featureImgRegex.exec(featuresHtml)) !== null) {
+      const imgUrl = featureMatch[1];
+      if (imgUrl.startsWith('http') && !featureImages.some(i => i.url === imgUrl)) {
+        featureImages.push({
+          url: imgUrl,
+          alt: '',
+          source: 'feature',
+        });
+      }
+    }
+    console.log(`[LionAPI] Extracted ${featureImages.length} feature images, ${allDepartures.length} departures for ${normGroupId}`);
+
     // ── Assemble result ───────────────────────────────────────────────────────
     const result: LionTravelApiData = {
       tourName: stripHtml(gi.TourName ?? daytripRaw?.TourName ?? ''),
@@ -305,6 +389,8 @@ export async function fetchLionTravelData(
       pricing,
       notices,
       featuresHtml,
+      allDepartures,
+      featureImages,
     };
 
     // If top-level price is 0, use adultPrice from pricing

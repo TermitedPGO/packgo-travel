@@ -201,6 +201,28 @@ export class MasterAgent {
   ): Promise<MasterAgentResult> {
     const startTime = Date.now();
     console.log("[MasterAgent] Starting OPTIMIZED tour generation...");
+
+    // ========================================================================
+    // Round 52: Auto-convert old LionTravel URL format to new format
+    // Old: https://www.liontravel.com/webpd/webpdsh00.aspx?sKind=1&sProd=24JO217BRC-T
+    // New: https://travel.liontravel.com/detail?GroupID=24JO217BRC-T
+    // ========================================================================
+    if (!isPdf && url.includes('liontravel.com') && url.includes('webpd')) {
+      try {
+        const oldUrlObj = new URL(url);
+        const sProd = oldUrlObj.searchParams.get('sProd');
+        if (sProd) {
+          const newUrl = `https://travel.liontravel.com/detail?GroupID=${sProd}&TourSource=Lion&Platform=APP`;
+          console.log(`[MasterAgent] 🔄 Round 52: Auto-converted old LionTravel URL format:`);
+          console.log(`[MasterAgent]   Old: ${url}`);
+          console.log(`[MasterAgent]   New: ${newUrl}`);
+          url = newUrl;
+        }
+      } catch (e) {
+        console.warn('[MasterAgent] URL conversion failed (non-fatal):', e);
+      }
+    }
+
     console.log("[MasterAgent] URL:", url);
     console.log("[MasterAgent] User ID:", userId);
     console.log("[MasterAgent] Force Regenerate:", forceRegenerate);
@@ -576,9 +598,53 @@ export class MasterAgent {
               // Store structured pricing for Phase 5
               lionPricing: lionData.pricing,
               lionGroupId: lionData.groupId,
+              // Round 52: All departure dates from groupcalendarjson
+              lionAllDepartures: lionData.allDepartures,
+              // Round 52: Feature images from attraction list + featuresHtml
+              lionFeatureImages: lionData.featureImages,
             } as any;
 
             lionApiHandled = true;
+
+            // Round 52: If allDepartures is empty from direct API (IP-blocked), try Puppeteer for groupcalendarjson
+            if (lionData.allDepartures.length === 0) {
+              console.log('[MasterAgent] 🦁 Round 52: allDepartures empty from direct API, launching Puppeteer for groupcalendarjson...');
+              try {
+                const { scrapeDynamicPage } = await import('../services/dynamicScraperService');
+                const CALENDAR_SCRAPE_TIMEOUT_MS = 120000;
+                const calendarScrapeTimeout = new Promise<never>((_, reject) =>
+                  setTimeout(() => reject(new Error('calendar scrape timeout')), CALENDAR_SCRAPE_TIMEOUT_MS)
+                );
+                const calScrape = await Promise.race([scrapeDynamicPage(url), calendarScrapeTimeout]);
+                const calLd = calScrape.lionApiData as any;
+                if (calLd) {
+                  const _calRaw = calLd.calendar;
+                  const _calList: any[] = Array.isArray(_calRaw) ? _calRaw : (_calRaw?.GroupCalendarList ?? []);
+                  if (_calList.length > 0) {
+                    const safeParseFloat2 = (v: any) => { const n = parseFloat(String(v ?? '').replace(/,/g, '')); return isNaN(n) ? 0 : n; };
+                    (rawData as any).lionAllDepartures = _calList
+                      .filter((c: any) => (c.ID || c.GroupID) && (c.Date || c.GoDate))
+                      .map((c: any) => ({
+                        groupId: c.ID ?? c.GroupID ?? '',
+                        date: c.Date ?? c.GoDate ?? '',
+                        weekDay: c.WeekDay ?? '',
+                        price: safeParseFloat2(c.Price),
+                        currencyCode: c.CurrencyCode ?? 'TWD',
+                        availableSeats: parseInt(c.AvailableVacancy ?? c.SpareSeat ?? c.SpareSeats ?? '0', 10),
+                        totalSeats: parseInt(c.TotalSeats ?? '0', 10),
+                        status: c.Status ?? '',
+                        tourId: c.TourID ?? c.NormGroupID ?? '',
+                      }));
+                    console.log(`[MasterAgent] 🦁 Round 52: Puppeteer supplemented ${(rawData as any).lionAllDepartures.length} departures from groupcalendarjson`);
+                  } else {
+                    console.log('[MasterAgent] 🦁 Round 52: Puppeteer groupcalendarjson also empty');
+                  }
+                }
+              } catch (calErr) {
+                console.warn('[MasterAgent] 🦁 Round 52: Puppeteer calendar fallback failed:', (calErr as Error).message);
+              }
+            }
+
             await generationCache.cacheScrapeResult(url, rawData);
           } else {
             console.warn('[MasterAgent] 🦁 Liontravel direct API failed, falling back to Puppeteer');
@@ -593,9 +659,10 @@ export class MasterAgent {
         onProgress?.("rendering_page", 10);
         
         let scrapeResult: import('../services/dynamicScraperService').DynamicScrapeResult | Partial<import('../services/dynamicScraperService').DynamicScrapeResult>;
-        // Overall scraping timeout: 90 seconds to allow for slow SPA sites like liontravel.com
-        // liontravel.com is a React SPA: networkidle2 (~20s) + domcontentloaded fallback (~20s) + autoScroll (~10s) + screenshot (~5s) = ~55s minimum
-        const SCRAPE_TIMEOUT_MS = 90000;
+        // Overall scraping timeout: 120 seconds to allow for slow SPA sites like liontravel.com
+        // liontravel.com is a React SPA: networkidle2 (~20s) + domcontentloaded fallback (~20s) + autoScroll (~30s) + screenshot (~10s) + API calls (~30s) = ~110s max
+        // Round 52: Increased from 90s to 120s to ensure groupcalendarjson is captured
+        const SCRAPE_TIMEOUT_MS = 120000;
         const scrapeTimeoutPromise = new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error(`爬取逾時（${SCRAPE_TIMEOUT_MS / 1000} 秒）。請確認 URL 是否可正常存取，或改用 PDF 上傳方式。`)), SCRAPE_TIMEOUT_MS)
         );
@@ -842,6 +909,30 @@ export class MasterAgent {
           const noteList = ld.notice?.NoteList ?? [];
           if (noteList.length > 0 && rawData.notices.length === 0) {
             rawData.notices = noteList.map((n: any) => n.Content || n.Title || '').filter(Boolean);
+          }
+
+          // Round 52: groupcalendarjson → lionAllDepartures (from Puppeteer-intercepted data)
+          // groupcalendarjson returns an array directly (not {GroupCalendarList: [...]})
+          const _calendarRaw = (ld as any).calendar;
+          const calendarList: any[] = Array.isArray(_calendarRaw)
+            ? _calendarRaw
+            : (_calendarRaw?.GroupCalendarList ?? []);
+          if (calendarList.length > 0) {
+            const safeParseFloat = (v: any) => { const n = parseFloat(String(v ?? '').replace(/,/g, '')); return isNaN(n) ? 0 : n; };
+            (rawData as any).lionAllDepartures = calendarList
+              .filter((c: any) => (c.ID || c.GroupID) && (c.Date || c.GoDate))
+              .map((c: any) => ({
+                groupId: c.ID ?? c.GroupID ?? '',
+                date: c.Date ?? c.GoDate ?? '',
+                weekDay: c.WeekDay ?? '',
+                price: safeParseFloat(c.Price),
+                currencyCode: c.CurrencyCode ?? 'TWD',
+                availableSeats: parseInt(c.AvailableVacancy ?? c.SpareSeat ?? c.SpareSeats ?? '0', 10),
+                totalSeats: parseInt(c.TotalSeats ?? '0', 10),
+                status: c.Status ?? '',
+                tourId: c.TourID ?? c.NormGroupID ?? '',
+              }));
+            console.log(`[MasterAgent] 🦁 Round 52: Extracted ${(rawData as any).lionAllDepartures.length} departures from intercepted groupcalendarjson`);
           }
 
           // Store raw lionApiData for downstream agents
@@ -1489,6 +1580,8 @@ export class MasterAgent {
         
         // DateExtractor results (for extractedDepartures saving in tourGenerator)
         extractedTourMeta: (rawData as any).extractedTourMeta || null,
+        // Round 52: All departure dates from liontravel groupcalendarjson
+        lionAllDepartures: (rawData as any).lionAllDepartures || null,
       };
       
       // ========================================================================
@@ -1590,7 +1683,18 @@ export class MasterAgent {
         }
       }
 
-      // Fix 4: featureImages fallback — use itinerary day images if featureImageUrls is empty
+      // Fix 4: featureImages — Round 52: prefer lionFeatureImages (from attraction list + featuresHtml)
+      // Then fallback to Unsplash featureImageUrls, then itinerary day images
+      {
+        const lionFI = (rawData as any).lionFeatureImages as import('../services/lionTravelApiService').LionImage[] | undefined;
+        if (lionFI && lionFI.length > 0) {
+          const lionFIUrls = lionFI.map(img => img.url).filter(u => u.startsWith('http'));
+          if (lionFIUrls.length > 0) {
+            finalData.featureImages = JSON.stringify(lionFIUrls);
+            console.log(`[MasterAgent] ✓ Using ${lionFIUrls.length} lionFeatureImages (attraction + featuresHtml)`);
+          }
+        }
+      }
       {
         let fi: string[] = [];
         try { fi = JSON.parse(finalData.featureImages || '[]'); } catch { fi = []; }

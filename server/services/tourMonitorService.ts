@@ -14,6 +14,7 @@ import { randomBytes } from 'crypto';
 import { getDb } from '../db';
 import { tours, tourDepartures, tourMonitorLogs } from '../../drizzle/schema';
 import { eq, and, gte, isNotNull, ne, desc } from 'drizzle-orm';
+import { fetchLionTravelData } from './lionTravelApiService';
 
 export interface MonitorRunResult {
   runId: string;
@@ -327,9 +328,44 @@ interface ScrapedTourData {
 
 /**
  * Scrape a tour page for current departure data
- * Uses lightweight HTTP scraping to check availability
+ * Round 52: For liontravel URLs, use direct API (fast, accurate).
+ * For other URLs, fall back to Puppeteer + dateExtractorAgent.
  */
 async function scrapeTourPage(url: string): Promise<ScrapedTourData> {
+  // ── Round 52: liontravel direct API path ──
+  const isLiontravel = url.includes('travel.liontravel.com') || url.includes('liontravel.com');
+  if (isLiontravel) {
+    try {
+      console.log(`[TourMonitor] 🦁 Using liontravel direct API for monitoring: ${url.slice(0, 80)}`);
+      const lionData = await Promise.race([
+        fetchLionTravelData(url),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('liontravel API timeout (15s)')), 15000)
+        ),
+      ]);
+      if (!lionData) throw new Error('liontravel API returned null');
+      // Map LionDeparture[] to ScrapedDeparture[]
+      const statusMap: Record<string, ScrapedDeparture['status']> = {
+        '報名': 'open',
+        '客滿': 'soldout',
+        '確定': 'confirmed',
+        '取消': 'cancelled',
+      };
+      const departures: ScrapedDeparture[] = (lionData.allDepartures || []).map(dep => ({
+        date: dep.date.replace(/\//g, '-'), // "2026/07/06" → "2026-07-06"
+        status: statusMap[dep.status] || 'open',
+        price: dep.price,
+        seats: dep.availableSeats,
+      }));
+      console.log(`[TourMonitor] ✓ liontravel API: ${departures.length} departures, price=${lionData.pricing?.adultPrice}`);
+      return { departures, price: lionData.pricing?.adultPrice };
+    } catch (lionErr) {
+      console.warn(`[TourMonitor] liontravel API failed, falling back to Puppeteer: ${lionErr}`);
+      // Fall through to Puppeteer path
+    }
+  }
+
+  // ── Puppeteer path (non-liontravel or liontravel API fallback) ──
   const { scrapeStaticFallback } = await import('./dynamicScraperService');
   const { extractTourMeta } = await import('../agents/dateExtractorAgent');
   
