@@ -58,7 +58,18 @@ export async function logAgentStart(input: ActivityLogInput): Promise<number | n
     });
 
     // Return the inserted ID
-    const insertId = (result as unknown as { insertId: number }).insertId;
+    // Drizzle MySQL insert returns [ResultSetHeader, FieldPacket[]]
+    // ResultSetHeader has insertId as number
+    let insertId: number | undefined;
+    try {
+      const header = Array.isArray(result) ? result[0] : result;
+      insertId = (header as any)?.insertId;
+      if (typeof insertId !== 'number' || insertId <= 0) {
+        insertId = undefined;
+      }
+    } catch {
+      insertId = undefined;
+    }
 
     // Broadcast to SSE clients
     const event: AgentOfficeEvent = {

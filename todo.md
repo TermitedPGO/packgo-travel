@@ -5568,3 +5568,22 @@ AI 辦公室看板中，AI 任務永遠顯示「執行中」（started 狀態）
 - [ ] 主選單恢復機票/訂房連結
 - [ ] 日曆預設跳到最近出發日月份
 - [ ] 全站驗收
+
+
+---
+
+## Round 59: 部署修復 + A/B Testing Group 0 基準測試（2026-04-15）
+
+### 59.1 確認 & 部署最新代碼
+- [x] 確認 Round 57 修復已在代碼中（forge.manus.ai fallback、120s AbortController）
+- [x] 修復 Activity Logging 雙重調用（刪除第一次 logAgentComplete，保留帶 timing 的第二次）
+- [x] 增強 logAgentStart insertId 安全性（Array.isArray 檢查）
+- [x] pnpm build 確認 0 errors
+- [ ] 部署到 packgo-d3xjbq67.manus.space
+- [ ] 驗證部署成功（首頁正常載入）
+
+### 59.2 A/B Testing Group 0 基準測試
+- [ ] 測試 URL-A：日本關西（26ED504TK-T）
+- [ ] 測試 URL-B：歐洲（25IT321TKN-T）
+- [ ] 測試 URL-C：韓國（26KR508BRN-T）
+- [ ] 記錄結果表格（總耗時、成功、Calibration 分數、Phase Timing）

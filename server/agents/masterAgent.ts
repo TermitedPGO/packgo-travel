@@ -2091,17 +2091,7 @@ export class MasterAgent {
         progressTracker.completeTask(taskId);
       }
       
-      // 記錄 MasterAgent 完成
-      if (activityId) {
-        const processingTimeMs = Date.now() - startTime;
-        const title = finalData.title || finalData.poeticTitle || '未命名行程';
-        const dest = finalData.destinationCity || finalData.destinationCountry || '';
-        await logAgentComplete(activityId, {
-          status: 'completed',
-          processingTimeMs,
-          resultSummary: `已完成行程生成：「${title}${dest ? ` · ${dest}` : ''}」，耗時 ${(processingTimeMs / 1000).toFixed(0)} 秒`,
-        });
-      }
+      // (Round 59: removed duplicate logAgentComplete — the second call below includes phase timing data)
 
       // 清理可能殘留的殭屍任務（Round 36-Fix-3: 從 25 分鐘延長到 30 分鐘，與 index.ts 排程器保持一致）
       _endPhaseTimer('P6b_selfRepair');

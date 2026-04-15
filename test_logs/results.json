@@ -1,0 +1,91 @@
+[
+  {
+    "group": "0",
+    "label": "A",
+    "url_name": "關西",
+    "status": "unknown",
+    "total_time": 605,
+    "timings": {
+      "P1_scrape": 0.1,
+      "P2_contentAnalyzer": 84.4,
+      "P3_colorTheme": 89.6,
+      "P3b_imageIntelligence": 90.1,
+      "P3c_visionAnalysis": 90.8,
+      "P4_details": 92.3,
+      "P4_itinerary": 92.3,
+      "P5_assembly": 103.1,
+      "P6_calibration": 103.9,
+      "P6b_selfRepair": 106.2
+    },
+    "qa_score": 95,
+    "verdict": "approved",
+    "sr_rounds": 0,
+    "llm_calls": 34
+  },
+  {
+    "group": "0",
+    "label": "B",
+    "url_name": "花蓮",
+    "status": "completed",
+    "total_time": 145,
+    "timings_cumulative": {
+      "P1_scrape": 0.1,
+      "P2_contentAnalyzer": 107.6,
+      "P3_colorTheme": 110.0,
+      "P3b_imageIntelligence": 110.6,
+      "P3c_visionAnalysis": 110.7,
+      "P4_details": 114.6,
+      "P4_itinerary": 114.6,
+      "P5_assembly": 118.6,
+      "P6_calibration": 118.7,
+      "P6b_selfRepair": 125.3
+    },
+    "timings": {
+      "P1_scrape": 0.1,
+      "P2_contentAnalyzer": 107.5,
+      "P3_colorTheme": 2.4,
+      "P4_details": 4.6,
+      "P4_itinerary": 0.0,
+      "P5_assembly": 4.0,
+      "P6_calibration": 0.1,
+      "P6b_selfRepair": 6.6
+    },
+    "qa_score": 64,
+    "verdict": "review",
+    "sr_rounds": 2,
+    "llm_calls": 14
+  },
+  {
+    "group": "0",
+    "label": "C",
+    "url_name": "歐洲",
+    "status": "completed",
+    "total_time": 65,
+    "timings_cumulative": {
+      "P1_scrape": 0.1,
+      "P2_contentAnalyzer": 11.4,
+      "P3_colorTheme": 16.8,
+      "P3b_imageIntelligence": 17.2,
+      "P3c_visionAnalysis": 17.7,
+      "P4_details": 18.7,
+      "P4_itinerary": 18.7,
+      "P5_assembly": 49.6,
+      "P6_calibration": 50.1,
+      "P6b_selfRepair": 52.3
+    },
+    "timings": {
+      "P1_scrape": 0.1,
+      "P2_contentAnalyzer": 11.3,
+      "P3_colorTheme": 5.4,
+      "P4_details": 1.9,
+      "P4_itinerary": 0.0,
+      "P5_assembly": 30.9,
+      "P6_calibration": 0.5,
+      "P6b_selfRepair": 2.2
+    },
+    "qa_score": 93,
+    "verdict": "approved",
+    "sr_rounds": 0,
+    "llm_calls": 7
+  }
+]
