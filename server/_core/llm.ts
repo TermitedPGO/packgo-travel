@@ -213,7 +213,7 @@ const normalizeToolChoice = (
 const resolveApiUrl = () =>
   ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0
     ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`
-    : "https://forge.manus.im/v1/chat/completions";
+    : "https://forge.manus.ai/v1/chat/completions"; // forge.manus.im is deprecated (DNS no longer resolves)
 
 const assertApiKey = () => {
   if (!ENV.forgeApiKey) {
@@ -321,21 +321,49 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.response_format = normalizedResponseFormat;
   }
 
-  const response = await fetch(resolveApiUrl(), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${ENV.forgeApiKey}`,
-    },
-    body: JSON.stringify(payload),
-  });
+  // Add 120-second timeout to prevent infinite hanging when Forge API is unresponsive
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, 120_000);
 
+  const apiUrl = resolveApiUrl();
+  const startMs = Date.now();
+  console.log(`[invokeLLM] → ${apiUrl} (model: ${payload.model}, msgs: ${messages.length})`);
+
+  let response: Response;
+  try {
+    response = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${ENV.forgeApiKey}`,
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } catch (fetchErr: any) {
+    clearTimeout(timeoutId);
+    const elapsed = Date.now() - startMs;
+    if (fetchErr.name === 'AbortError') {
+      console.error(`[invokeLLM] ⏱ TIMEOUT after ${elapsed}ms — Forge API did not respond within 120s`);
+      throw new Error(`LLM invoke timed out after 120s (Forge API unresponsive)`);
+    }
+    console.error(`[invokeLLM] ❌ fetch error after ${elapsed}ms:`, fetchErr.message);
+    throw fetchErr;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  const elapsed = Date.now() - startMs;
   if (!response.ok) {
     const errorText = await response.text();
+    console.error(`[invokeLLM] ❌ HTTP ${response.status} after ${elapsed}ms — ${errorText.substring(0, 200)}`);
     throw new Error(
       `LLM invoke failed: ${response.status} ${response.statusText} – ${errorText}`
     );
   }
+  console.log(`[invokeLLM] ✅ HTTP ${response.status} in ${elapsed}ms`);
 
   const result = (await response.json()) as InvokeResult;
   
