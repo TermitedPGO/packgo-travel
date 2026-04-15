@@ -201,6 +201,10 @@ export class MasterAgent {
   ): Promise<MasterAgentResult> {
     const startTime = Date.now();
     console.log("[MasterAgent] Starting OPTIMIZED tour generation...");
+    // Round 55 Diag-C: Phase timing helpers
+    const _phaseTimers: Record<string, number> = {};
+    const _startPhaseTimer = (name: string) => { _phaseTimers[name] = Date.now(); console.log(`[MasterAgent] \u23f1 PHASE START: ${name}`); };
+    const _endPhaseTimer = (name: string) => { const ms = Date.now() - (_phaseTimers[name] || Date.now()); console.log(`[MasterAgent] \u23f1 PHASE END: ${name} \u2014 ${ms}ms (${(ms/1000).toFixed(1)}s)`); };
 
     // ========================================================================
     // Round 52: Auto-convert old LionTravel URL format to new format
@@ -279,6 +283,7 @@ export class MasterAgent {
       // Phase 1: Web Scraping or PDF Parsing (Critical, Sequential)
       // Must complete first as all other agents depend on rawData
       // ========================================================================
+      _startPhaseTimer('P1_scrape');
       onProgress?.(isPdf ? "parsing_pdf" : "scraping", 10);
       this.monitor.startAgent('WebScraperAgent');
       if (taskId) progressTracker.startPhase(taskId, 'web_scraper');
@@ -477,6 +482,7 @@ export class MasterAgent {
             }
           }
           if (lionData) {
+            console.log(`[MasterAgent] \u23f1 P1: liontravel API SUCCESS \u2014 using direct API path`);
             console.log(`[MasterAgent] 🦁 Liontravel detected: using direct API (${lionData.tourDays} days, price=${lionData.price} ${lionData.currencyCode})`);
             if (taskId) progressTracker.completePhase(taskId, 'dynamic_render');
             if (taskId) progressTracker.startPhase(taskId, 'date_extractor');
@@ -658,6 +664,7 @@ export class MasterAgent {
 
             await generationCache.cacheScrapeResult(url, rawData);
           } else {
+            console.warn('[MasterAgent] \u23f1 P1: liontravel API FAILED \u2014 falling back to Puppeteer');
             console.warn('[MasterAgent] 🦁 Liontravel direct API failed, falling back to Puppeteer');
           }
         }
@@ -987,12 +994,14 @@ export class MasterAgent {
       }
       
       if (taskId) progressTracker.completePhase(taskId, 'web_scraper');
+      _endPhaseTimer('P1_scrape');
       console.log("[MasterAgent] ✓ Phase 1 completed: Web scraping");
       
       // ========================================================================
       // Phase 2: Content Analysis + Lion Title (Critical, Sequential)
       // Must complete before image prompts can be generated
       // ========================================================================
+      _startPhaseTimer('P2_contentAnalyzer');
       onProgress?.("analyzing", 25);
       this.monitor.startAgent('ContentAnalyzerAgent');
       if (taskId) progressTracker.startPhase(taskId, 'content_analyzer');
@@ -1038,6 +1047,7 @@ export class MasterAgent {
         });
       }
       
+      _endPhaseTimer('P2_contentAnalyzer');
       console.log("[MasterAgent] ✓ Phase 2 completed: Content analysis + Lion title");
       console.log("[MasterAgent] Originality score:", analyzedContent.originalityScore);
       console.log("[MasterAgent] Poetic title:", analyzedContent.poeticTitle);
@@ -1046,6 +1056,7 @@ export class MasterAgent {
       // Phase 3: ColorTheme ONLY (ImagePrompt removed for speed optimization)
       // Image generation is skipped - editors will manage images manually
       // ========================================================================
+      _startPhaseTimer('P3_colorTheme');
       onProgress?.("generating_themes", 40);
       console.log("[MasterAgent] Starting Phase 3: ColorTheme only (image generation disabled)");
       
@@ -1117,6 +1128,7 @@ export class MasterAgent {
       // Skip ImagePromptAgent - editors will manage images
       console.log("[MasterAgent] Skipping ImagePromptAgent - editors will manage images");
       
+      _endPhaseTimer('P3_colorTheme');
       console.log("[MasterAgent] ✓ Phase 3 completed: ColorTheme only");
       
       // ========================================================================
@@ -1127,6 +1139,7 @@ export class MasterAgent {
       console.log("[MasterAgent] Starting Phase 4: PARALLEL (6 agents - no image generation)");
       console.log("[MasterAgent] Running: Itinerary, Cost, Notice, Hotel, Meal, Flight");
       
+      _startPhaseTimer('P3b_imageIntelligence');
       // Image intelligence pipeline: PDF-extracted images → Unsplash fallback
       console.log("[MasterAgent] Starting image intelligence pipeline");
       let imageResults: { hero: { url: string; alt: string } | null; features: Array<{ url: string; alt: string; source: string }> } = { hero: null, features: [] };
@@ -1172,8 +1185,9 @@ export class MasterAgent {
       } catch (imgPipelineError) {
         console.warn('[MasterAgent] Image pipeline failed, continuing with defaults:', imgPipelineError);
       }
-
-      // ── Vision Analysis + Smart Match ────────────────────────────────────────
+      _endPhaseTimer('P3b_imageIntelligence');
+      _startPhaseTimer('P3c_visionAnalysis');
+      // ── Vision Analysis + Smart Match ────────────────────────────────────────────────────────────────────────────
       // Analyze all collected images with Claude Vision, then smart-match to targets
       let visionAnalyses: Array<import('../services/visionAnalysisService').VisionAnalysisResult> = [];
       let smartMatchMap: Map<string, string> = new Map();
@@ -1209,10 +1223,11 @@ export class MasterAgent {
       } catch (visionErr) {
         console.warn('[MasterAgent] Vision analysis failed, continuing:', visionErr);
       }
-      // ── End Vision Analysis ──────────────────────────────────────────────────
-
+      _endPhaseTimer('P3c_visionAnalysis');
+      // ── End Vision Analysis ────────────────────────────────────────────────────────────────────────────
       // Start all agents (except ImageGenerationAgent and ItineraryAgent which runs separately)
       // DetailsSkill replaces CostAgent, NoticeAgent, HotelAgent, MealAgent
+      _startPhaseTimer('P4_details');
       this.monitor.startAgent('DetailsSkill');
       this.monitor.startAgent('TransportationAgent');
       if (taskId) {
@@ -1227,6 +1242,7 @@ export class MasterAgent {
         progressTracker.startPhase(taskId, 'flight_agent');
       }
       
+      _startPhaseTimer('P4_itinerary');
       // Execute Itinerary (Unified: Extract + Polish in single LLM call)
       // ItineraryUnifiedAgent replaces ItineraryExtractAgent + ItineraryPolishAgent
       let itineraryData = "";
@@ -1459,6 +1475,8 @@ export class MasterAgent {
         transportationData = this.fallbackManager.handleFailure('TransportationAgent', error);
       }
       
+      _endPhaseTimer('P4_details');
+      _endPhaseTimer('P4_itinerary');
       console.log("[MasterAgent] ✓ Phase 4 completed: PARALLEL (6 agents - no image generation)");
       
       // Extract feature image URLs
@@ -1467,6 +1485,7 @@ export class MasterAgent {
       // ========================================================================
       // Phase 5: Assemble Final Data
       // ========================================================================
+      _startPhaseTimer('P5_assembly');
       onProgress?.("assembling", 90);
       if (taskId) progressTracker.startPhase(taskId, 'finalize');
       
@@ -1838,8 +1857,10 @@ export class MasterAgent {
       }
 
       // ========================================================================
+      _endPhaseTimer('P5_assembly');
       // Phase 6: CalibrationAgent — Automatic QA Quality Gate
       // ========================================================================
+      _startPhaseTimer('P6_calibration');
       let calibrationReport = null;
       try {
         if (taskId) progressTracker.startPhase(taskId, 'calibration');
@@ -1929,6 +1950,8 @@ export class MasterAgent {
           }
         }
 
+        _endPhaseTimer('P6_calibration');
+        _startPhaseTimer('P6b_selfRepair');
         // ── P1-Self-Repair: if score < 70, re-run Phase 2 + Phase 4 with fix instructions ──
         const SELF_REPAIR_THRESHOLD = 70;
         const MAX_SELF_REPAIR_ROUNDS = 2;
@@ -2079,8 +2102,16 @@ export class MasterAgent {
       }
 
       // 清理可能殘留的殭屍任務（Round 36-Fix-3: 從 25 分鐘延長到 30 分鐘，與 index.ts 排程器保持一致）
+      _endPhaseTimer('P6b_selfRepair');
+      // Round 55 Diag-C: Print phase timing summary
+      console.log('[MasterAgent] \u23f1 ========= PHASE TIMING SUMMARY =========');
+      for (const [name, startMs] of Object.entries(_phaseTimers)) {
+        const elapsed = Date.now() - startMs;
+        console.log(`[MasterAgent] \u23f1   ${name}: started at +${((startMs - startTime)/1000).toFixed(1)}s`);
+      }
+      console.log(`[MasterAgent] \u23f1 TOTAL: ${Date.now() - startTime}ms (${((Date.now() - startTime)/1000).toFixed(1)}s)`);
+      console.log('[MasterAgent] \u23f1 =========================================');
       cleanupZombieTasks(30).catch(() => {});
-
       return {
         success: true,
         data: finalData,
