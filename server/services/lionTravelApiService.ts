@@ -194,8 +194,9 @@ export async function fetchLionTravelData(
       return null;
     }
 
-    // ── Step 2: parallel fetch daytripinfojson + priceinfojson + noticeinfojson + groupcalendarjson
-    const [daytripRaw, priceRaw, noticeRaw, calendarRaw] = await Promise.all([
+    // ── Step 2: parallel fetch daytripinfojson + priceinfojson + noticeinfojson
+    // Round 53 Bug 1 fix: groupcalendarjson needs TourID from travelinfojson (gi), so call it separately after Promise.all
+    const [daytripRaw, priceRaw, noticeRaw] = await Promise.all([
       postJson(
         '/detail/daytripinfojson',
         { NormGroupID: normGroupId, GroupID: groupId },
@@ -214,13 +215,19 @@ export async function fetchLionTravelData(
         referer,
         signal
       ).catch(() => ({ NoteList: [] })), // noticeinfojson is optional
-      postJson(
-        '/detail/groupcalendarjson',
-        { NormGroupID: normGroupId },
-        referer,
-        signal
-      ).catch(() => ({ GroupCalendarList: [] })), // groupcalendarjson is optional
     ]);
+    // Round 53 Bug 1 fix: call groupcalendarjson after travelinfojson so we have gi.TourID
+    const calendarRaw = await postJson(
+      '/detail/groupcalendarjson',
+      {
+        NormGroupID: normGroupId,
+        TourID: gi.TourID || '',
+        GoDateStart: new Date().toISOString().split('T')[0],
+        GoDateEnd: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      },
+      referer,
+      signal
+    ).catch(() => []);
 
     // ── Parse travelinfojson ──────────────────────────────────────────────────
     const outboundFlight: LionFlight = {
@@ -319,23 +326,24 @@ export async function fetchLionTravelData(
       chineseTitle: n.CTitle ?? '',
       content: stripHtml(n.Desc ?? ''),
     }));
-
-    // ── Parse groupcalendarjson → allDepartures ────────────────────────────────
-    const calendarList: any[] = calendarRaw?.GroupCalendarList ?? [];
+    // ── Parse groupcalendarjson → allDepartures ────────────────────────────────────────────────
+    // Round 53 Bug 2 fix: API returns array directly, not { GroupCalendarList: [...] }
+    const calendarList: any[] = Array.isArray(calendarRaw) ? calendarRaw : [];
+    // Round 53 Bug 3 fix: correct field names from API response
+    // API returns: ID, Date, WeekDay, Price, CurrencyCode, AvailableVacancy, TotalVacnacy (typo in API), Status
     const allDepartures: LionDeparture[] = calendarList
-      .filter((c: any) => c.GroupID && c.GoDate)
+      .filter((c: any) => c.ID && c.Date)
       .map((c: any) => ({
-        groupId: c.GroupID ?? '',
-        date: c.GoDate ?? '',
+        groupId: c.ID ?? '',
+        date: c.Date ?? '',
         weekDay: c.WeekDay ?? '',
         price: safeParseFloat((c.Price ?? '').toString().replace(/,/g, '')),
-        currencyCode: c.CurrencyCode ?? 'TWD',
-        availableSeats: parseInt(c.SpareSeats ?? '0', 10),
-        totalSeats: parseInt(c.TotalSeats ?? '0', 10),
+        currencyCode: c.CurrencyCode ?? pricing.currencyCode ?? 'TWD',
+        availableSeats: parseInt(c.AvailableVacancy ?? '0', 10),
+        totalSeats: parseInt(c.TotalVacnacy ?? '0', 10), // Note: API has typo 'TotalVacnacy'
         status: c.Status ?? '',
-        tourId: c.TourID ?? '',
+        tourId: normGroupId,
       }));
-
     // ── Extract featureImages from attractions + featuresHtml ─────────────────
     const featureImages: LionImage[] = [];
     // 1. Attraction images from daily itinerary
@@ -464,4 +472,13 @@ export function buildRawContentFromLionData(data: LionTravelApiData): string {
   }
 
   return lines.join('\n');
+}
+
+// ─── fetchAllDepartures ──────────────────────────────────────────────────────
+// Lightweight function to fetch only departure dates for a given Lion Travel URL.
+// Used by test scripts and standalone departure queries.
+export async function fetchAllDepartures(url: string): Promise<LionDeparture[]> {
+  const data = await fetchLionTravelData(url);
+  if (!data) return [];
+  return data.allDepartures;
 }
