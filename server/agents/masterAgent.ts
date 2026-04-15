@@ -464,7 +464,18 @@ export class MasterAgent {
           console.log('[MasterAgent] 🦁 Liontravel detected: trying direct API...');
           if (taskId) progressTracker.startPhase(taskId, 'dynamic_render');
           onProgress?.("rendering_page", 10);
-          const lionData = await fetchLionTravelData(url);
+          let lionData = await fetchLionTravelData(url);
+          if (!lionData) {
+            // Round 55: Retry once after 2s — transient network/DNS issues
+            console.warn('[MasterAgent] 🦁 Liontravel API attempt 1 failed, retrying in 2s...');
+            await new Promise(r => setTimeout(r, 2000));
+            lionData = await fetchLionTravelData(url);
+            if (lionData) {
+              console.log('[MasterAgent] 🦁 Liontravel API retry succeeded');
+            } else {
+              console.warn('[MasterAgent] 🦁 Liontravel API attempt 2 also failed');
+            }
+          }
           if (lionData) {
             console.log(`[MasterAgent] 🦁 Liontravel detected: using direct API (${lionData.tourDays} days, price=${lionData.price} ${lionData.currencyCode})`);
             if (taskId) progressTracker.completePhase(taskId, 'dynamic_render');
@@ -864,6 +875,29 @@ export class MasterAgent {
         };
         
         rawData = urlRawData;
+
+        // ── Round 55: For liontravel URLs in Puppeteer fallback, rescue price from API ──
+        // LLM often misreads GTM tracking codes (e.g., "19052490 GTM電子商務碼") as prices.
+        // Try a lightweight API call specifically for price.
+        if (url.includes('liontravel.com')) {
+          try {
+            const { fetchLionTravelData: fetchLionPrice } = await import('../services/lionTravelApiService');
+            const lionPriceData = await fetchLionPrice(url);
+            if (lionPriceData?.pricing?.adultPrice && lionPriceData.pricing.adultPrice > 0) {
+              rawData.pricing.price = lionPriceData.pricing.adultPrice;
+              rawData.pricing.basePrice = lionPriceData.pricing.adultPrice;
+              rawData.pricing.currency = lionPriceData.pricing.currencyCode || 'TWD';
+              // Also fix productCode and departureCity
+              if (lionPriceData.tourId) rawData.basicInfo.productCode = lionPriceData.tourId;
+              if (lionPriceData.departureCity) rawData.location.departureCity = lionPriceData.departureCity;
+              // Store lionPricing for finalData assembly
+              (rawData as any).lionPricing = lionPriceData.pricing;
+              console.log(`[MasterAgent] 🦁 Round 55: Puppeteer fallback price rescued from API: ${lionPriceData.pricing.adultPrice} ${lionPriceData.pricing.currencyCode}`);
+            }
+          } catch (lionPriceErr) {
+            console.warn('[MasterAgent] 🦁 Round 55: Price rescue API call also failed:', (lionPriceErr as Error).message);
+          }
+        }
 
         // ── Round 50: Enrich rawData with liontravel structured API data ──────
         if (scrapeResult.lionApiData) {
@@ -1583,6 +1617,13 @@ export class MasterAgent {
         // Round 52: All departure dates from liontravel groupcalendarjson
         lionAllDepartures: (rawData as any).lionAllDepartures || null,
       };
+
+      // Round 55: Price sanity check — detect GTM codes / tracking numbers misread as prices
+      // No single tour package should cost > NT$2,000,000 (even luxury cruises rarely exceed this)
+      if (finalData.price > 2000000) {
+        console.warn(`[MasterAgent] ⚠️ Round 55: Price ${finalData.price} exceeds sanity limit (2M TWD), likely GTM/tracking code. Resetting to 0 for price rescue.`);
+        (finalData as any).price = 0;
+      }
       
       // ========================================================================
       // 6b. Universal Field Fallbacks (Round 47 — URL-mode robustness)
