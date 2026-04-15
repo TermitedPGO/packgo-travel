@@ -1463,10 +1463,76 @@ export const appRouter = router({
         const totalInserted = results.reduce((s, r) => s + r.inserted, 0);
         const successCount = results.filter(r => !r.error).length;
         const failCount = results.filter(r => !!r.error).length;
-        return { totalTours: lionTours.length, successCount, failCount, totalInserted, results };
+         return { totalTours: lionTours.length, successCount, failCount, totalInserted, results };
+      }),
+
+    // Round 55 Supplement: Temporary diagnostic — remove after use
+    diagnoseLionApi: adminProcedure
+      .mutation(async () => {
+        const results: Record<string, any> = {};
+        const testUrl = 'https://travel.liontravel.com/detail?NormGroupID=d51a67a5-9864-4761-b7dd-b25cc42c0367';
+        // Test 1: Can we reach liontravel.com at all?
+        try {
+          const start = Date.now();
+          const resp = await fetch('https://travel.liontravel.com', {
+            signal: AbortSignal.timeout(10000)
+          });
+          results.reachability = { ok: resp.ok, status: resp.status, ms: Date.now() - start };
+        } catch (err: any) {
+          results.reachability = { ok: false, error: err.message };
+        }
+        // Test 2: Can we call travelinfojson?
+        try {
+          const start = Date.now();
+          const resp = await fetch('https://travel.liontravel.com/detail/travelinfojson', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'User-Agent': 'Mozilla/5.0',
+              'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: 'NormGroupID=d51a67a5-9864-4761-b7dd-b25cc42c0367',
+            signal: AbortSignal.timeout(10000),
+          });
+          const data = await resp.json();
+          const gi = data?.GroupInfo ?? {};
+          results.travelinfojson = {
+            ok: !!gi.GroupID,
+            groupId: gi.GroupID,
+            price: gi.StraightLowestPrice,
+            ms: Date.now() - start
+          };
+        } catch (err: any) {
+          results.travelinfojson = { ok: false, error: err.message };
+        }
+        // Test 3: Full fetchLionTravelData
+        try {
+          const { fetchLionTravelData } = await import('./services/lionTravelApiService');
+          const start = Date.now();
+          const data = await fetchLionTravelData(testUrl);
+          results.fullApi = {
+            ok: !!data,
+            price: data?.pricing?.adultPrice,
+            departures: data?.allDepartures?.length ?? 0,
+            ms: Date.now() - start
+          };
+        } catch (err: any) {
+          results.fullApi = { ok: false, error: err.message };
+        }
+        // Test 4: DNS resolution
+        try {
+          const dns = await import('dns');
+          const { promisify } = await import('util');
+          const resolve = promisify(dns.resolve);
+          const start = Date.now();
+          const addresses = await resolve('travel.liontravel.com');
+          results.dns = { ok: true, addresses, ms: Date.now() - start };
+        } catch (err: any) {
+          results.dns = { ok: false, error: err.message };
+        }
+        return results;
       }),
   }),
-
   // Booking management router
   bookings: router({
     // Create new booking
