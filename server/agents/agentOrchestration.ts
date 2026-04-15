@@ -103,6 +103,12 @@ export class RetryManager {
    * Check if an error is retryable
    */
   private isRetryableError(error: Error, retryableErrors: string[]): boolean {
+    // Explicitly non-retryable errors (e.g., LLM 120s timeout)
+    if ((error as any).nonRetryable === true) {
+      console.log(`[RetryManager] Error marked as nonRetryable, skipping retry: ${error.message}`);
+      return false;
+    }
+    
     const errorMessage = error.message || '';
     const errorCode = (error as any).code || '';
     
@@ -436,7 +442,7 @@ export const DEFAULT_RETRY_CONFIG: RetryConfig = {
     'ECONNRESET',
     'ENOTFOUND',
     'ECONNREFUSED',
-    'timeout',
+    // 'timeout' removed — LLM 120s timeouts should NOT be retried (4×120s = 8 min waste)
     'network',
     'fetch failed'
   ]

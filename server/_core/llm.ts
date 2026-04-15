@@ -347,7 +347,9 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     const elapsed = Date.now() - startMs;
     if (fetchErr.name === 'AbortError') {
       console.error(`[invokeLLM] ⏱ TIMEOUT after ${elapsed}ms — Forge API did not respond within 120s`);
-      throw new Error(`LLM invoke timed out after 120s (Forge API unresponsive)`);
+      const err = new Error(`LLM_TIMEOUT: Forge API did not respond within 120s (elapsed: ${elapsed}ms)`);
+      (err as any).nonRetryable = true;
+      throw err;
     }
     console.error(`[invokeLLM] ❌ fetch error after ${elapsed}ms:`, fetchErr.message);
     throw fetchErr;

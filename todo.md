@@ -5587,3 +5587,30 @@ AI 辦公室看板中，AI 任務永遠顯示「執行中」（started 狀態）
 - [ ] 測試 URL-B：歐洲（25IT321TKN-T）
 - [ ] 測試 URL-C：韓國（26KR508BRN-T）
 - [ ] 記錄結果表格（總耗時、成功、Calibration 分數、Phase Timing）
+
+
+---
+
+## Round 59: Production LLM Timeout 修復 + A/B Testing
+
+### 59.1 診斷 Production 問題
+- [x] 確認 production diagnoseEnv LLM 測試正常（886ms）
+- [x] 確認 production 行程生成卡在 P2 ContentAnalyzer（10+ 分鐘）
+- [x] 發現根本原因：LLM timeout 120s × 4 retries = 480s 浪費
+
+### 59.2 修復
+- [x] 修復 Activity Logging 雙重調用
+- [x] 增強 insertId 安全性
+- [x] 移除 timeout 從 retryableErrors（防止 4×120s = 8min 浪費）
+- [x] LLM timeout 加上 nonRetryable 標記
+- [x] isRetryableError 檢查 nonRetryable 標記
+- [x] 新增 llmStressTest 端點（測試大 prompt）
+- [x] pnpm build 確認 0 errors
+
+### 59.3 A/B Testing Group 0
+- [ ] 部署到 production
+- [ ] 執行 llmStressTest（small/medium/large）
+- [ ] 執行 Group 0 URL-A 基準測試
+- [ ] 執行 Group 0 URL-B 基準測試
+- [ ] 執行 Group 0 URL-C 基準測試
+- [ ] 彙整結果表格

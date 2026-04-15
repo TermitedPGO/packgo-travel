@@ -1271,6 +1271,91 @@ export const appRouter = router({
         console.log('[diagnoseEnv] Results:', JSON.stringify(results, null, 2));
         return results;
       }),
+    // LLM Stress Test: simulate ContentAnalyzer-sized prompt
+    llmStressTest: adminProcedure
+      .input(z.object({
+        promptSize: z.enum(['small', 'medium', 'large']).optional().default('medium'),
+      }))
+      .mutation(async ({ input }) => {
+        const { invokeLLM } = await import('./_core/llm');
+        const startMs = Date.now();
+        
+        // Generate prompts of different sizes to simulate real agent workloads
+        const smallPrompt = 'Say hello in Traditional Chinese. Reply in 10 words or less.';
+        const mediumPrompt = `你是 PACK&GO 旅行社的資深文案總監。
+品牌定位：美國精品華語旅行社，服務追求品質的華語旅客，行程涵蓋全球。
+品牌調性：雅奢但不浮誇、有溫度但不煥情、專業但不生硬。
+請根據以下資訊生成旅遊文案（所有內容必須為繁體中文）：
+目的地：京都, 日本
+天數：5天4夜
+原標題：快閃關西三日遊
+原描述：祈福勝尾寺，漫步清水寺，品味京都古都風情
+行程亮點：清水寺、伏見稻荷大社、金閣寺、嵐山竹林、奈良公園
+飯店等級：五星級
+特色體驗：和服體驗、茶道體驗、懷石料理
+
+請生成（全部用繁體中文）：
+1. poeticTitle: 詩意化標題（15-25字）
+2. title: 行銷標題（20-30字）
+3. description: 行程介紹（100-120字）
+4. heroSubtitle: Hero副標題（30-40字）
+5. highlights: 6-10個行程亮點（每個10-30字）`;
+        const largePrompt = mediumPrompt + '\n\n' + mediumPrompt.repeat(3) + '\n\n額外資訊：' + 'A'.repeat(2000);
+        
+        const prompt = input.promptSize === 'small' ? smallPrompt 
+          : input.promptSize === 'large' ? largePrompt 
+          : mediumPrompt;
+        
+        try {
+          console.log(`[llmStressTest] Starting ${input.promptSize} prompt test (${prompt.length} chars)...`);
+          const result = await invokeLLM({
+            messages: [
+              { role: 'system', content: '你是一個專業的旅遊文案專家。請用繁體中文回答。' },
+              { role: 'user', content: prompt },
+            ],
+            maxTokens: 2000,
+            response_format: {
+              type: 'json_schema',
+              json_schema: {
+                name: 'stress_test_output',
+                strict: false,
+                schema: {
+                  type: 'object',
+                  properties: {
+                    poeticTitle: { type: 'string' },
+                    title: { type: 'string' },
+                    description: { type: 'string' },
+                  },
+                  required: ['poeticTitle', 'title', 'description'],
+                },
+              },
+            },
+          });
+          const elapsed = Date.now() - startMs;
+          const content = result.choices?.[0]?.message?.content;
+          console.log(`[llmStressTest] ✅ ${input.promptSize} prompt completed in ${elapsed}ms`);
+          return {
+            success: true,
+            promptSize: input.promptSize,
+            promptChars: prompt.length,
+            elapsedMs: elapsed,
+            model: result.model,
+            content: typeof content === 'string' ? content.substring(0, 200) : JSON.stringify(content).substring(0, 200),
+            usage: result.usage,
+          };
+        } catch (err: any) {
+          const elapsed = Date.now() - startMs;
+          console.error(`[llmStressTest] ❌ ${input.promptSize} prompt failed in ${elapsed}ms:`, err.message);
+          return {
+            success: false,
+            promptSize: input.promptSize,
+            promptChars: prompt.length,
+            elapsedMs: elapsed,
+            error: err.message,
+            nonRetryable: (err as any).nonRetryable || false,
+          };
+        }
+      }),
     // Get similar tours based on destination/category/price
     getSimilar: publicProcedure
       .input(z.object({
