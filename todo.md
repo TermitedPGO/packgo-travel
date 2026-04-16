@@ -5640,3 +5640,18 @@ AI 辦公室看板中，AI 任務永遠顯示「執行中」（started 狀態）
 ### Step 5: A/B 比較報告
 - [ ] 產出 Group 0 vs Group 1 比較表
 - [ ] 回答 3 個關鍵問題
+
+---
+
+## Round 59 — 全站清理（2026-04-15）
+
+- [x] Revert calibrationAgent.ts: 刪除 CALIBRATION_MODEL 常量及 4 處 model override
+- [x] 清理行程：刪除重複/損壞行程（19→7筆））
+- [x] 修正目的地欄位（關西→大阪、呀哥窟→柬埔寨/暹粒、奧捷→奧地利/維也納）
+- [x] SQL 刪除全部 36 筆詢問（guest@test.com）
+- [x] SQL 刪除全部 30 筆訂單（test@example.com）
+- [x] 前端修復：目的地重複顯示（越南·越南等）
+- [x] 前端修復：卡片標題顏色統一為 text-gray-900
+- [x] 前端修復：已額滿顯示「已額滿」/「Fully Booked」
+- [x] pnpm build 0 errors
+- [ ] Deploy & 完整驗證

@@ -154,6 +154,11 @@ function TourCard({
               <MapPin className="h-12 w-12 text-white/40" />
             </div>
           )}
+          {tour.status === "soldout" && (
+            <Badge className="absolute top-4 right-4 bg-gray-800 text-white">
+              {isEn ? "Fully Booked" : "已額滿"}
+            </Badge>
+          )}
           {tour.status === "inactive" && (
             <Badge className="absolute top-4 right-4 bg-red-500 text-white">
               {t("tours.inactive")}
@@ -177,7 +182,7 @@ function TourCard({
 
         {/* Title */}
         <Link href={`/tours/${tour.id}`}>
-          <h3 className="text-base font-bold mb-2 line-clamp-2 group-hover:text-primary transition-colors leading-snug cursor-pointer">
+          <h3 className="text-base font-bold mb-2 line-clamp-2 text-gray-900 group-hover:text-primary transition-colors leading-snug cursor-pointer">
             {displayTitle}
           </h3>
         </Link>
@@ -186,7 +191,7 @@ function TourCard({
         <div className="flex items-center text-gray-500 mb-2">
           <MapPin className="h-3.5 w-3.5 mr-1 flex-shrink-0" />
           <span className="text-xs">
-            {translateDestination(tour.destinationCountry || '', language)}{tour.destinationCity ? ` · ${translateDestination(tour.destinationCity, language)}` : ""}
+            {translateDestination(tour.destinationCountry || '', language)}{tour.destinationCity && tour.destinationCity !== tour.destinationCountry ? ` · ${translateDestination(tour.destinationCity, language)}` : ""}
           </span>
         </div>
 
