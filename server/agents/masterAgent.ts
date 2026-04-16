@@ -611,7 +611,9 @@ export class MasterAgent {
               meals: _lionMeals,
               flights: _lionFlights,
               notices: _lionNotices,
-              images: lionData.heroImageUrl ? [lionData.heroImageUrl] : [],
+              images: lionData.heroImageUrl ? [{ url: lionData.heroImageUrl, type: 'hero', page: 0 }] : [],
+              // Fix 4 (Round 63): store lionHeroImageUrl explicitly for Tier-2 fallback
+              lionHeroImageUrl: lionData.heroImageUrl || '',
               rawContent: _lionRawContent,
               renderedHtml: lionData.featuresHtml,
               sourceUrl: url,
@@ -1349,24 +1351,31 @@ export class MasterAgent {
       let featureImages: any[] = imageResults.features;
 
       if (!heroImage.url) {
-        // Unsplash fallback for hero image
-        try {
-          const { searchUnsplashPhotos } = await import("../services/unsplashService");
-          const destination = rawData.location?.destinationCity || rawData.location?.destinationCountry || "travel";
-          console.log(`[MasterAgent] Hero not found in pipeline, falling back to Unsplash for: ${destination}`);
-          
-          const heroImages = await searchUnsplashPhotos(destination, 1);
-          if (heroImages.length > 0) {
-            heroImage = {
-              url: heroImages[0],
-              alt: `${destination} travel destination`
-            };
-            console.log(`[MasterAgent] ✓ Found hero image from Unsplash: ${heroImage.url.substring(0, 50)}...`);
-          } else {
-            console.log(`[MasterAgent] No hero image found, will use default`);
+        // Fix 4 (Round 63): Tier-2 fallback — use liontravel heroImageUrl before Unsplash
+        const lionHeroUrl = (rawData as any)?.images?.[0]?.url || (rawData as any)?.lionHeroImageUrl || '';
+        if (lionHeroUrl && lionHeroUrl.startsWith('http')) {
+          heroImage = { url: lionHeroUrl, alt: `${rawData.location?.destinationCity || rawData.location?.destinationCountry || 'travel'} travel` };
+          console.log(`[MasterAgent] Fix 4 (Round 63): Using Lion heroImageUrl as Tier-2 fallback: ${lionHeroUrl.substring(0, 60)}...`);
+        } else {
+          // Tier-3 fallback: Unsplash
+          try {
+            const { searchUnsplashPhotos } = await import("../services/unsplashService");
+            const destination = rawData.location?.destinationCity || rawData.location?.destinationCountry || "travel";
+            console.log(`[MasterAgent] Fix 4 (Round 63): Hero not found in pipeline or Lion, falling back to Unsplash for: ${destination}`);
+            
+            const heroImages = await searchUnsplashPhotos(destination, 1);
+            if (heroImages.length > 0) {
+              heroImage = {
+                url: heroImages[0],
+                alt: `${destination} travel destination`
+              };
+              console.log(`[MasterAgent] ✓ Found hero image from Unsplash (Tier-3): ${heroImage.url.substring(0, 50)}...`);
+            } else {
+              console.log(`[MasterAgent] Fix 4 (Round 63): No hero image found from any source (pipeline/Lion/Unsplash)`);
+            }
+          } catch (error) {
+            console.warn(`[MasterAgent] Failed to search hero image:`, error);
           }
-        } catch (error) {
-          console.warn(`[MasterAgent] Failed to search hero image:`, error);
         }
       } else {
         console.log(`[MasterAgent] ✓ Using image pipeline hero: ${heroImage.url.substring(0, 50)}...`);
@@ -1658,11 +1667,23 @@ export class MasterAgent {
           }))
         ),
         
-        // Fix 3 (Round 62): hotelImages — URL array extracted from hotels
-        hotelImages: JSON.stringify(
-          (Array.isArray(hotelData) ? hotelData : (hotelData?.hotels || []))
-            .map((h: any) => h.image).filter(Boolean)
-        ),
+        // Fix 3 (Round 63): hotelImages — URL array extracted from hotels.image; fallback to lionFeatureImages if empty
+        hotelImages: (() => {
+          const hotelsArr = Array.isArray(hotelData) ? hotelData : (hotelData?.hotels || []);
+          const hotelImgUrls = hotelsArr.map((h: any) => h.image).filter((u: any) => typeof u === 'string' && u.startsWith('http'));
+          if (hotelImgUrls.length > 0) return JSON.stringify(hotelImgUrls);
+          // Fallback: use lionFeatureImages (attraction images) as hotel image gallery
+          const lionFI = (rawData as any)?.lionFeatureImages || [];
+          const lionFIUrls = lionFI
+            .filter((img: any) => img?.url && img.url.startsWith('http'))
+            .slice(0, 8)
+            .map((img: any) => img.url);
+          if (lionFIUrls.length > 0) {
+            console.log(`[MasterAgent] Fix 3 (Round 63): hotelImages empty, using ${lionFIUrls.length} lionFeatureImages as fallback`);
+            return JSON.stringify(lionFIUrls);
+          }
+          return JSON.stringify([]);
+        })(),
         
         // Fix 3 (Round 62): galleryImages — from featureImageObjects
         galleryImages: JSON.stringify(
@@ -1808,29 +1829,49 @@ export class MasterAgent {
       {
         const lionFI = (rawData as any).lionFeatureImages as import('../services/lionTravelApiService').LionImage[] | undefined;
         if (lionFI && lionFI.length > 0) {
-          const lionFIUrls = lionFI.map(img => img.url).filter(u => u.startsWith('http'));
-          if (lionFIUrls.length > 0) {
-            finalData.featureImages = JSON.stringify(lionFIUrls);
-            console.log(`[MasterAgent] ✓ Using ${lionFIUrls.length} lionFeatureImages (attraction + featuresHtml)`);
+          // Fix 1 (Round 63): store full objects {url, caption, alt} not URL strings
+          const lionFIObjs = lionFI
+            .filter((img: any) => img?.url && img.url.startsWith('http'))
+            .map((img: any, i: number) => ({
+              url: img.url,
+              caption: img.caption || img.alt || '',
+              alt: img.alt || img.caption || '',
+              position: i === 0 ? 'large' : 'small',
+            }));
+          if (lionFIObjs.length > 0) {
+            finalData.featureImages = JSON.stringify(lionFIObjs);
+            console.log(`[MasterAgent] ✓ Using ${lionFIObjs.length} lionFeatureImages as objects (Round 63 Fix 1)`);
           }
         }
       }
       {
-        let fi: string[] = [];
+        let fi: any[] = [];
         try { fi = JSON.parse(finalData.featureImages || '[]'); } catch { fi = []; }
+        // Fix 1 (Round 63): check if fi is URL-string array (old format) and convert to objects
+        if (fi.length > 0 && typeof fi[0] === 'string') {
+          fi = fi.map((url: string, i: number) => ({ url, caption: '', alt: '', position: i === 0 ? 'large' : 'small' }));
+          finalData.featureImages = JSON.stringify(fi);
+          console.log(`[MasterAgent] ✓ Converted ${fi.length} URL strings to featureImage objects (Round 63 Fix 1)`);
+        }
         if (fi.length === 0 && itineraryData) {
           try {
             const itineraryArr = JSON.parse(itineraryData);
-            const itineraryImageUrls: string[] = [];
+            // Fix 1 (Round 63): store objects {url, caption, alt} not URL strings
+            const itineraryImageObjs: any[] = [];
             for (const day of itineraryArr) {
               if (day.image && typeof day.image === 'string' && day.image.startsWith('http')) {
-                itineraryImageUrls.push(day.image);
+                itineraryImageObjs.push({
+                  url: day.image,
+                  caption: day.title || `Day ${day.day || itineraryImageObjs.length + 1}`,
+                  alt: day.title || '',
+                  position: itineraryImageObjs.length === 0 ? 'large' : 'small',
+                });
               }
-              if (itineraryImageUrls.length >= 5) break;
+              if (itineraryImageObjs.length >= 5) break;
             }
-            if (itineraryImageUrls.length > 0) {
-              finalData.featureImages = JSON.stringify(itineraryImageUrls);
-
+            if (itineraryImageObjs.length > 0) {
+              finalData.featureImages = JSON.stringify(itineraryImageObjs);
+              console.log(`[MasterAgent] ✓ Using ${itineraryImageObjs.length} itinerary images as featureImage objects (Round 63 Fix 1)`);
             }
           } catch {
             // Non-critical — skip

@@ -372,6 +372,16 @@ export class DetailsSkill {
     const days = rawData?.duration?.days || 0;
     const pricing = rawData?.pricing || rawData?.pricingDetails || {};
 
+    // Fix 2 (Round 63): collect available image URLs from lionFeatureImages for hotel/meal image assignment
+    const lionFIImages: any[] = (rawData as any)?.lionFeatureImages || [];
+    const availableImageUrls = lionFIImages
+      .filter((img: any) => img?.url && img.url.startsWith('http'))
+      .slice(0, 20)
+      .map((img: any, i: number) => `${i + 1}. ${img.url}${img.alt ? ' (' + img.alt + ')' : ''}`);
+    const imageSection = availableImageUrls.length > 0
+      ? `\n## 可用圖片 URL 列表（共 ${availableImageUrls.length} 張）\n${availableImageUrls.join('\n')}\n\n【重要】請從上方圖片列表中，為每個飯店和餐廳選擇最合適的圖片 URL 填入 image 欄位，imageAlt 填入對應描述。找不到合適圖片就留空字串。`
+      : '';
+
     const prompt = `請根據以下旅遊行程資料，一次性生成四個部分的結構化資訊。
 
 ## 行程基本資訊
@@ -389,11 +399,11 @@ ${JSON.stringify(accommodationData, null, 2).substring(0, 2000)}
 ${JSON.stringify(pricing, null, 2).substring(0, 1000)}
 
 ## 行程概要
-${JSON.stringify(dailyItinerary.slice(0, 8).map((d: any) => ({ day: d.day, title: d.title, accommodation: d.accommodation, meals: d.meals })), null, 2).substring(0, 1500)}
+${JSON.stringify(dailyItinerary.slice(0, 8).map((d: any) => ({ day: d.day, title: d.title, accommodation: d.accommodation, meals: d.meals })), null, 2).substring(0, 1500)}${imageSection}
 
 請生成：
-1. meals: 餐飲介紹（根據每日行程提取，包含 name/type/description/cuisine/restaurant）
-2. hotels: 住宿介紹（根據住宿資料提取，包含 name/stars/description/facilities/location）
+1. meals: 餐飲介紹（根據每日行程提取，包含 name/type/description/cuisine/restaurant，若有可用圖片請填入 image/imageAlt）
+2. hotels: 住宿介紹（根據住宿資料提取，包含 name/stars/description/facilities/location，若有可用圖片請填入 image/imageAlt）
 3. costs: 費用說明（包含 included/excluded/additionalCosts/notes）
 4. notices: 注意事項（包含 preparation/culturalNotes/healthSafety/emergency，每類 3-4 條）`;
 

@@ -457,8 +457,8 @@ export function checkCompleteness(tourData: any): { score: number; issues: Calib
     }
   }
 
-  // Fix 6 (Round 62): 7 hard deduction rules for image/data integrity
-  // Rule 1: hotelImages empty
+  // Fix 5 (Round 63): 7 hard deduction rules for image/data integrity — upgraded weights
+  // Rule 1: hotelImages empty — upgraded -5 → -10
   {
     let empty = true;
     try {
@@ -466,11 +466,11 @@ export function checkCompleteness(tourData: any): { score: number; issues: Calib
       if (Array.isArray(v) && v.length > 0) empty = false;
     } catch { /* keep empty=true */ }
     if (empty) {
-      issues.push({ check: 'completeness', severity: 'warning', message: 'hotelImages is empty — hotel images not generated', field: 'hotelImages', autoFixable: false });
-      score -= 5;
+      issues.push({ check: 'completeness', severity: 'warning', message: 'hotelImages is empty — hotel images not generated (Round 63: -10)', field: 'hotelImages', autoFixable: false });
+      score -= 10; // Round 63: upgraded from -5 to -10
     }
   }
-  // Rule 2: galleryImages empty
+  // Rule 2: galleryImages empty — upgraded -5 → -8
   {
     let empty = true;
     try {
@@ -478,11 +478,11 @@ export function checkCompleteness(tourData: any): { score: number; issues: Calib
       if (Array.isArray(v) && v.length > 0) empty = false;
     } catch { /* keep empty=true */ }
     if (empty) {
-      issues.push({ check: 'completeness', severity: 'warning', message: 'galleryImages is empty — feature gallery not generated', field: 'galleryImages', autoFixable: false });
-      score -= 5;
+      issues.push({ check: 'completeness', severity: 'warning', message: 'galleryImages is empty — feature gallery not generated (Round 63: -8)', field: 'galleryImages', autoFixable: false });
+      score -= 8; // Round 63: upgraded from -5 to -8
     }
   }
-  // Rule 3: attractions empty
+  // Rule 3: attractions empty — upgraded -5 → -7
   {
     let empty = true;
     try {
@@ -490,11 +490,12 @@ export function checkCompleteness(tourData: any): { score: number; issues: Calib
       if (Array.isArray(v) && v.length > 0) empty = false;
     } catch { /* keep empty=true */ }
     if (empty) {
-      issues.push({ check: 'completeness', severity: 'warning', message: 'attractions is empty — no attraction data generated', field: 'attractions', autoFixable: false });
-      score -= 5;
+      issues.push({ check: 'completeness', severity: 'warning', message: 'attractions is empty — no attraction data generated (Round 63: -7)', field: 'attractions', autoFixable: false });
+      score -= 7; // Round 63: upgraded from -5 to -7
     }
   }
   // Rule 4: featureImages empty or URL-only strings (not full objects)
+  // upgraded: empty -5 → -10; old format -3 → -5
   {
     let bad = true;
     try {
@@ -505,49 +506,49 @@ export function checkCompleteness(tourData: any): { score: number; issues: Calib
         if (typeof firstItem === 'object' && firstItem !== null && firstItem.url) bad = false;
         else if (typeof firstItem === 'string') {
           // URL-only strings — old format
-          issues.push({ check: 'completeness', severity: 'warning', message: 'featureImages contains URL-only strings instead of full objects {url, alt, caption, position}', field: 'featureImages', autoFixable: false });
-          score -= 3;
+          issues.push({ check: 'completeness', severity: 'warning', message: 'featureImages contains URL-only strings instead of full objects {url, alt, caption, position} (Round 63: -5)', field: 'featureImages', autoFixable: false });
+          score -= 5; // Round 63: upgraded from -3 to -5
           bad = false; // Not empty, just old format
         }
       }
     } catch { /* keep bad=true */ }
     if (bad) {
-      issues.push({ check: 'completeness', severity: 'warning', message: 'featureImages is empty — feature images not generated', field: 'featureImages', autoFixable: false });
-      score -= 5;
+      issues.push({ check: 'completeness', severity: 'warning', message: 'featureImages is empty — feature images not generated (Round 63: -10)', field: 'featureImages', autoFixable: false });
+      score -= 10; // Round 63: upgraded from -5 to -10
     }
   }
-  // Rule 5: hotels[].image missing
+  // Rule 5: hotels[].image missing — upgraded per-hotel -2 → -3, cap -5 → -9
   {
     try {
       const v = typeof tourData.hotels === 'string' ? JSON.parse(tourData.hotels) : tourData.hotels;
       if (Array.isArray(v) && v.length > 0) {
         const missingCount = v.filter((h: any) => !h.image || h.image === '').length;
         if (missingCount > 0) {
-          issues.push({ check: 'completeness', severity: 'warning', message: `${missingCount}/${v.length} hotel(s) missing image field`, field: 'hotels', autoFixable: false });
-          score -= Math.min(5, missingCount * 2);
+          issues.push({ check: 'completeness', severity: 'warning', message: `${missingCount}/${v.length} hotel(s) missing image field (Round 63: -3 each, max -9)`, field: 'hotels', autoFixable: false });
+          score -= Math.min(9, missingCount * 3); // Round 63: upgraded from -2 each / max -5
         }
       }
     } catch { /* skip */ }
   }
-  // Rule 6: meals[].image missing
+  // Rule 6: meals[].image missing — upgraded per-meal -2 → -3, cap -5 → -9
   {
     try {
       const v = typeof tourData.meals === 'string' ? JSON.parse(tourData.meals) : tourData.meals;
       if (Array.isArray(v) && v.length > 0) {
         const missingCount = v.filter((m: any) => !m.image || m.image === '').length;
         if (missingCount > 0) {
-          issues.push({ check: 'completeness', severity: 'warning', message: `${missingCount}/${v.length} meal(s) missing image field`, field: 'meals', autoFixable: false });
-          score -= Math.min(5, missingCount * 2);
+          issues.push({ check: 'completeness', severity: 'warning', message: `${missingCount}/${v.length} meal(s) missing image field (Round 63: -3 each, max -9)`, field: 'meals', autoFixable: false });
+          score -= Math.min(9, missingCount * 3); // Round 63: upgraded from -2 each / max -5
         }
       }
     } catch { /* skip */ }
   }
-  // Rule 7: heroImage missing
+  // Rule 7: heroImage missing — upgraded -15 → -20 (critical)
   {
     const heroMissing = !tourData.heroImage || tourData.heroImage === '';
     if (heroMissing) {
-      issues.push({ check: 'completeness', severity: 'critical', message: 'heroImage is missing — banner image not generated', field: 'heroImage', autoFixable: false });
-      score -= 15;
+      issues.push({ check: 'completeness', severity: 'critical', message: 'heroImage is missing — banner image not generated (Round 63: -20)', field: 'heroImage', autoFixable: false });
+      score -= 20; // Round 63: upgraded from -15 to -20
     }
   }
 
