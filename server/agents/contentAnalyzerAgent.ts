@@ -182,7 +182,8 @@ export class ContentAnalyzerAgent {
             imageAlt: h,
             title: h,
             subtitle: i === 0 ? "STAY" : "EXPLORE",
-            description: h,
+            // P2 Fix: description should NOT duplicate title; leave empty so frontend shows only title
+            description: "",
             labelColor: "#F39C12",
             labelPosition: "bottom-right",
           })),

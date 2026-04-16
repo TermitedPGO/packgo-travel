@@ -1307,7 +1307,10 @@ export class MasterAgent {
       }
       
       // P3: Check Details cache before LLM call
-      const detailsCacheKey = rawData.location?.destinationCity || rawData.location?.destinationCountry || "unknown";
+      // Round 60: Include sourceUrl/tourId in cache key to prevent cross-tour cache pollution
+      const _cacheDestination = rawData.location?.destinationCity || rawData.location?.destinationCountry || "unknown";
+      const _cacheSourceId = rawData.sourceUrl || rawData.normGroupId || rawData.basicInfo?.title?.slice(0, 20) || "";
+      const detailsCacheKey = `${_cacheDestination}::${_cacheSourceId}`;
       const cachedDetails = await generationCache.getDetailsResult(detailsCacheKey);
       
       // Execute DetailsSkill (replaces CostAgent, NoticeAgent, HotelAgent, MealAgent)
@@ -1637,6 +1640,8 @@ export class MasterAgent {
         extractedTourMeta: (rawData as any).extractedTourMeta || null,
         // Round 52: All departure dates from liontravel groupcalendarjson
         lionAllDepartures: (rawData as any).lionAllDepartures || null,
+        // Round 60: Pass lionPricing so tourGenerator can store child/infant prices per departure
+        lionPricing: (rawData as any).lionPricing || null,
       };
 
       // Round 55: Price sanity check — detect GTM codes / tracking numbers misread as prices

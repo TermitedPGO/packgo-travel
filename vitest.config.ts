@@ -15,5 +15,13 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["server/**/*.test.ts", "server/**/*.spec.ts"],
+    // Run test files sequentially to avoid Redis race conditions between parallel tests
+    pool: "forks",
+    poolOptions: {
+      forks: {
+        maxForks: 1,
+        minForks: 1,
+      },
+    },
   },
 });

@@ -324,12 +324,19 @@ export class DetailsSkill {
     let mealData = rawData?.meals || rawData?.dining || [];
     const dailyItinerary = rawData?.dailyItinerary || rawData?.itinerary || [];
     
-    // 從每日行程提取餐食資訊
+    // 從每日行程提取餐食資訊（支援 string 和 array 格式）
     if ((!mealData || mealData.length === 0) && dailyItinerary.length > 0) {
       const extractedMeals: any[] = [];
       for (const day of dailyItinerary) {
-        if (day.meals && typeof day.meals === 'string' && day.meals.trim()) {
-          extractedMeals.push({ day: day.day || 0, description: day.meals.trim() });
+        if (day.meals) {
+          if (typeof day.meals === 'string' && day.meals.trim()) {
+            // Format: "早餐、午餐"
+            extractedMeals.push({ day: day.day || 0, description: day.meals.trim() });
+          } else if (Array.isArray(day.meals) && day.meals.length > 0) {
+            // Format: ["早餐", "午餐"] or [{name: "早餐", ...}]
+            const mealStr = day.meals.map((m: any) => typeof m === 'string' ? m : (m.name || m.type || JSON.stringify(m))).join('、');
+            if (mealStr.trim()) extractedMeals.push({ day: day.day || 0, description: mealStr });
+          }
         }
       }
       if (extractedMeals.length > 0) mealData = extractedMeals;

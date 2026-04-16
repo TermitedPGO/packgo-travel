@@ -5654,4 +5654,41 @@ AI 辦公室看板中，AI 任務永遠顯示「執行中」（started 狀態）
 - [x] 前端修復：卡片標題顏色統一為 text-gray-900
 - [x] 前端修復：已額滿顯示「已額滿」/「Fully Booked」
 - [x] pnpm build 0 errors
-- [ ] Deploy & 完整驗證
+- [x] Deploy & 完整驗證
+
+---
+
+## Round 60 — 行程品質修復 + 年齡定價（2026-04-16）
+
+### P0 — 必須立即修復
+- [ ] P0-1: 修復行程圖片破損（onError fallback + imageGenerationAgent 穩定圖片來源）
+- [ ] P0-2: 修復 MealAgent 完全無輸出（debug pipeline + 確認 DB 存入）
+- [ ] P0-3: 修復 HotelAgent 只對義大利有效 + 住宿圖片 prompt 含城市名
+- [ ] P0-4a: webScraperAgent 從 LionTravel 抓取年齡分級價格（大人/兒童佔床/兒童不佔床/嬰兒）
+- [ ] P0-4b: tourGenerator.ts 第 234 行存入所有年齡價格欄位
+- [ ] P0-4c: TourDetailPeony.tsx 出發日曆顯示所有年齡價格
+- [ ] P0-4d: TourEditDialog.tsx 管理出發日期可編輯各年齡價格
+
+### P1 — 重要修復
+- [ ] P1-1: i18n — 英文模式下住宿地點/目的地/費用明細/特色描述不顯示中文
+- [ ] P1-2: 目的地 metadata 缺失（台灣、德瑞、東歐 3 條無 destination）
+- [ ] P1-3: Hero 主圖不匹配（ImagePromptAgent prompt 加入目的地國家名）
+- [ ] P1-4: 座位數預設 0 → 改為 20，或 seats=0 時前端隱藏顯示
+
+### P2 — 優化
+- [ ] P2-1: Pricing section 加入費用包含/不包含明細表
+- [ ] P2-2: LLM cache key 加入行程 ID 防資料污染
+- [ ] P2-3: Feature Card title 與 description 重複問題
+
+### 驗證清單
+- [ ] 行程圖片全部正常載入
+- [ ] 英文模式下無中文殘留
+- [ ] 出發日期日曆顯示成人/兒童佔床/兒童不佔床/嬰兒各年齡價格
+- [ ] 預訂頁面各年齡價格計算正確
+- [ ] Admin 管理出發日期可編輯各年齡價格
+- [ ] 所有行程有餐食資訊
+- [ ] 所有行程有住宿卡片
+- [ ] 目的地篩選器顯示所有國家
+- [ ] Pricing section 有費用包含/不包含明細
+- [ ] pnpm build 0 errors
+- [ ] pnpm test 所有測試通過

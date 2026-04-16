@@ -335,7 +335,7 @@ const DeparturePriceCalendar = ({
                           >
                             ${(departure.adultPrice || basePrice).toLocaleString()}
                           </div>
-                          {departure.totalSlots && (
+                          {(departure.totalSlots && departure.totalSlots > 0) && (
                             <p className={`text-[10px] mt-1 font-medium ${isLowSeats ? 'text-red-500 font-bold' : 'text-gray-500'}`}>
                               {isLowSeats
                                 ? `⚡ ${(t('tourDetail.remainingSeats') || '剩 {seats} 位').replace('{seats}', String(remainingSeats))}`
@@ -380,6 +380,31 @@ const DeparturePriceCalendar = ({
                   <p className="text-3xl font-bold" style={{ color: themeColor.secondary }}>
                     NT$ {(dep.adultPrice || basePrice).toLocaleString()}
                   </p>
+                  {/* Round 60: Age-based pricing breakdown */}
+                  <div className="mt-2 text-left space-y-1">
+                    <p className="text-xs text-gray-500">
+                      <span className="font-medium text-gray-700">{t('tourDetail.adultPrice') || '成人'}：</span>
+                      NT$ {(dep.adultPrice || basePrice).toLocaleString()}
+                    </p>
+                    {(dep.childPriceWithBed ?? 0) > 0 && (
+                      <p className="text-xs text-gray-500">
+                        <span className="font-medium text-gray-700">{t('tourDetail.childWithBed') || '小孩佔床'}：</span>
+                        NT$ {(dep.childPriceWithBed ?? 0).toLocaleString()}
+                      </p>
+                    )}
+                    {(dep.childPriceNoBed ?? 0) > 0 && (
+                      <p className="text-xs text-gray-500">
+                        <span className="font-medium text-gray-700">{t('tourDetail.childNoBed') || '小孩不佔床'}：</span>
+                        NT$ {(dep.childPriceNoBed ?? 0).toLocaleString()}
+                      </p>
+                    )}
+                    {(dep.infantPrice ?? 0) > 0 && (
+                      <p className="text-xs text-gray-500">
+                        <span className="font-medium text-gray-700">{t('tourDetail.infantPrice') || '嬰兒'}：</span>
+                        NT$ {(dep.infantPrice ?? 0).toLocaleString()}
+                      </p>
+                    )}
+                  </div>
                   <Button 
                     onClick={() => onSelectDeparture(dep.id)}
                     className="mt-3 px-6 py-2 text-white"
@@ -1022,7 +1047,8 @@ const DayCard = ({
   isExpanded,
   onToggle,
   onShowMealDetail,
-  onShowAttractionDetail
+  onShowAttractionDetail,
+  destinationCountry,
 }: { 
   day: any; 
   index: number;
@@ -1031,10 +1057,33 @@ const DayCard = ({
   onToggle: () => void;
   onShowMealDetail: (detail: MealDetail) => void;
   onShowAttractionDetail: (activity: any) => void;
+  destinationCountry?: string;
 }) => {
   const { t } = useLocale();
   const isEven = index % 2 === 0;
-  const dayImage = day.image || day.imageUrl || `https://images.unsplash.com/photo-${1500000000000 + index * 1000}?w=800`;
+  const [imgError, setImgError] = React.useState(false);
+  // Stable Unsplash fallback photos per destination (verified real photo IDs)
+  const DEST_FALLBACK_PHOTOS: Record<string, string[]> = {
+    '日本': ['photo-1528360983277-13d401cdc186', 'photo-1493976040374-85c8e12f0c0e', 'photo-1545569341-9eb8b30979d9', 'photo-1528360983277-13d401cdc186', 'photo-1540959733332-eab4deabeeaf'],
+    '韓國': ['photo-1517154421773-0529f29ea451', 'photo-1538485399081-7191377e8241', 'photo-1601042879364-f3947d3f9c16', 'photo-1517154421773-0529f29ea451', 'photo-1538485399081-7191377e8241'],
+    '泰國': ['photo-1528181304800-259b08848526', 'photo-1552465011-b4e21bf6e79a', 'photo-1506665531195-3566af2b4dfa', 'photo-1528181304800-259b08848526', 'photo-1552465011-b4e21bf6e79a'],
+    '越南': ['photo-1557750255-c76072a7aad1', 'photo-1583417319070-4a69db38a482', 'photo-1540611025311-01df3cef54b5', 'photo-1557750255-c76072a7aad1', 'photo-1583417319070-4a69db38a482'],
+    '義大利': ['photo-1516483638261-f4dbaf036963', 'photo-1534445867742-43195f401b6c', 'photo-1555992336-03a23c7b20ee', 'photo-1516483638261-f4dbaf036963', 'photo-1534445867742-43195f401b6c'],
+    '法國': ['photo-1502602898657-3e91760cbb34', 'photo-1499856871958-5b9627545d1a', 'photo-1431274172761-fca41d930114', 'photo-1502602898657-3e91760cbb34', 'photo-1499856871958-5b9627545d1a'],
+    '英國': ['photo-1513635269975-59663e0ac1ad', 'photo-1486299267070-83823f5448dd', 'photo-1520986606214-8b456906c813', 'photo-1513635269975-59663e0ac1ad', 'photo-1486299267070-83823f5448dd'],
+    '德國': ['photo-1467269204594-9661b134dd2b', 'photo-1560969184-10fe8719e047', 'photo-1467269204594-9661b134dd2b', 'photo-1560969184-10fe8719e047', 'photo-1467269204594-9661b134dd2b'],
+    '瑞士': ['photo-1506905925346-21bda4d32df4', 'photo-1527668752968-14dc70a27c95', 'photo-1491555103944-7c647fd857e6', 'photo-1506905925346-21bda4d32df4', 'photo-1527668752968-14dc70a27c95'],
+    '奧地利': ['photo-1516550893923-42d28e5677af', 'photo-1573599852326-2d4da0bbe613', 'photo-1516550893923-42d28e5677af', 'photo-1573599852326-2d4da0bbe613', 'photo-1516550893923-42d28e5677af'],
+    '台灣': ['photo-1470004914212-05527e49370b', 'photo-1558618666-fcd25c85cd64', 'photo-1580674684081-7617fbf3d745', 'photo-1470004914212-05527e49370b', 'photo-1558618666-fcd25c85cd64'],
+    '馬來西亞': ['photo-1596422846543-75c6fc197f07', 'photo-1508009603885-50cf7c579365', 'photo-1596422846543-75c6fc197f07', 'photo-1508009603885-50cf7c579365', 'photo-1596422846543-75c6fc197f07'],
+    '柬埔寨': ['photo-1508009603885-50cf7c579365', 'photo-1583417319070-4a69db38a482', 'photo-1508009603885-50cf7c579365', 'photo-1583417319070-4a69db38a482', 'photo-1508009603885-50cf7c579365'],
+    '冰島': ['photo-1476610182048-b716b8518aae', 'photo-1509773896068-7fd415d91e2e', 'photo-1531168556467-80aace0d0144', 'photo-1476610182048-b716b8518aae', 'photo-1509773896068-7fd415d91e2e'],
+  };
+  const DEFAULT_FALLBACK = ['photo-1488085061387-422e29b40080', 'photo-1469854523086-cc02fe5d8800', 'photo-1503220317375-aaad61436b1b', 'photo-1488085061387-422e29b40080', 'photo-1469854523086-cc02fe5d8800'];
+  const fallbackPhotos = (destinationCountry && DEST_FALLBACK_PHOTOS[destinationCountry]) || DEFAULT_FALLBACK;
+  const fallbackUrl = `https://images.unsplash.com/${fallbackPhotos[index % fallbackPhotos.length]}?w=800&q=80&fit=crop`;
+  const primaryImage = day.image || day.imageUrl;
+  const dayImage = (!imgError && primaryImage) ? primaryImage : fallbackUrl;
   
   return (
     <div className="relative animate-fade-in" style={{ animationDelay: `${index * 100}ms` }}>
@@ -1053,7 +1102,8 @@ const DayCard = ({
           <img 
             src={dayImage}
             alt={day.title || `Day ${index + 1}`}
-              className="w-full h-full object-cover transition-transform duration-700 rounded-xl"
+            className="w-full h-full object-cover transition-transform duration-700 rounded-xl"
+            onError={() => setImgError(true)}
           />
         </div>
         
@@ -2446,6 +2496,7 @@ export default function TourDetailPeony() {
                     onToggle={() => toggleDay(index)}
                     onShowMealDetail={handleShowMealDetail}
                     onShowAttractionDetail={handleShowAttractionDetail}
+                    destinationCountry={tour?.destinationCountry}
                   />
                 )
               ))
@@ -2615,6 +2666,49 @@ export default function TourDetailPeony() {
               {t('tourDetail.contactUs')}
             </Button>
           </div>
+
+          {/* Round 60: P2 - Cost Explanation in Pricing section */}
+          {costExplanation && (costExplanation.included?.length > 0 || costExplanation.excluded?.length > 0) && (
+            <div className="mt-12">
+              <h3 className="text-2xl font-bold text-center mb-8" style={{ color: themeColor.primary }}>
+                {t('tourDetail.costDetails') || '費用說明'}
+              </h3>
+              <div className="grid md:grid-cols-2 gap-6">
+                {costExplanation.included && costExplanation.included.length > 0 && (
+                  <div className="bg-green-50 rounded-xl p-6 border border-green-100">
+                    <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-green-700">
+                      <Check className="h-5 w-5" />
+                      {t('tourDetail.includedItems') || '費用包含'}
+                    </h4>
+                    <ul className="space-y-2">
+                      {ensureArray(costExplanation.included).map((item: string, index: number) => (
+                        <li key={index} className="flex items-start gap-2 text-sm text-gray-700">
+                          <Check className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {costExplanation.excluded && costExplanation.excluded.length > 0 && (
+                  <div className="bg-red-50 rounded-xl p-6 border border-red-100">
+                    <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-red-700">
+                      <X className="h-5 w-5" />
+                      {t('tourDetail.excludedItems') || '費用不含'}
+                    </h4>
+                    <ul className="space-y-2">
+                      {ensureArray(costExplanation.excluded).map((item: string, index: number) => (
+                        <li key={index} className="flex items-start gap-2 text-sm text-gray-700">
+                          <X className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Price Comparison Widget */}
           <PriceComparisonWidget tourId={tour.id} tourPrice={tour.price || 0} themeColor={themeColor} />

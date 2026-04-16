@@ -68,7 +68,18 @@ describe('reCAPTCHA v3 Integration', () => {
           }),
         } as any);
 
-        const caller = appRouter.createCaller(createMockContext());
+        // Use a unique IP to avoid rate limiting from other parallel tests
+        const uniqueIp = `10.0.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`;
+        const ctx = {
+          req: {
+            headers: { 'x-forwarded-for': uniqueIp },
+            get: () => undefined,
+            socket: { remoteAddress: uniqueIp },
+          } as any,
+          res: { cookie: () => {}, clearCookie: () => {} } as any,
+          user: null,
+        };
+        const caller = appRouter.createCaller(ctx);
         const result = await caller.auth.requestPasswordReset({
           email: `recaptcha-mock-${Date.now()}@packgo-test.com`,
           recaptchaToken: 'valid-mock-token',

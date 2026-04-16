@@ -189,6 +189,13 @@ export async function generateTourFromUrlInternal(
       totalSeats: number;
       status: string;
     }> | null;
+    // Round 60: Extract child/infant pricing from lionPricing
+    const _lionPricing = (tourData as any).lionPricing as {
+      adultPrice: number;
+      childWithBed: number;
+      childNoBed: number;
+      babyPrice: number;
+    } | null;
     console.log(`[TourGenerator] B5: lionAllDepartures=${_lionAllDepartures ? _lionAllDepartures.length + ' entries' : 'null'}`);
     if (_lionAllDepartures && _lionAllDepartures.length > 0) {
       (async () => {
@@ -232,6 +239,10 @@ export async function generateTourFromUrlInternal(
                 departureDate,
                 returnDate,
                 adultPrice: Math.round(dep.price),
+                // Round 60: Store child/infant pricing from lionPricing
+                childPriceWithBed: _lionPricing?.childWithBed ? Math.round(_lionPricing.childWithBed) : undefined,
+                childPriceNoBed: _lionPricing?.childNoBed ? Math.round(_lionPricing.childNoBed) : undefined,
+                infantPrice: _lionPricing?.babyPrice ? Math.round(_lionPricing.babyPrice) : undefined,
                 totalSlots: dep.totalSeats || 20,
                 bookedSlots: Math.max(0, (dep.totalSeats || 20) - (dep.availableSeats || 0)),
                 status: mappedStatus,
