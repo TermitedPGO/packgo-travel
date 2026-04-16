@@ -1318,7 +1318,11 @@ export class MasterAgent {
       const _cacheDestination = rawData.location?.destinationCity || rawData.location?.destinationCountry || "unknown";
       const _cacheSourceId = rawData.sourceUrl || rawData.normGroupId || rawData.basicInfo?.title?.slice(0, 20) || "";
       const detailsCacheKey = `${_cacheDestination}::${_cacheSourceId}`;
-      const cachedDetails = await generationCache.getDetailsResult(detailsCacheKey);
+      // Round 64 Fix A: respect forceRegenerate flag (previously ignored → stale cache poisoned verification)
+      const cachedDetails = forceRegenerate ? null : await generationCache.getDetailsResult(detailsCacheKey);
+      if (forceRegenerate) {
+        console.log(`[MasterAgent] 🔄 Round 64: forceRegenerate=true — bypassing DetailsSkill cache for key "${detailsCacheKey}"`);
+      }
       
       // Execute DetailsSkill (replaces CostAgent, NoticeAgent, HotelAgent, MealAgent)
       // and TransportationAgent in parallel
@@ -1344,41 +1348,57 @@ export class MasterAgent {
         console.log(`[MasterAgent] 🎯 DetailsSkill cache hit for: ${detailsCacheKey} - skipped LLM call`);
       }
       
-      // Hero Image: use image pipeline result first, then Unsplash as fallback
-      let heroImage = imageResults.hero || { url: "", alt: "" };
+      // Hero Image: Forge (pipeline) → Lion real image → Unsplash (last resort)
+      // Round 64 Fix B: Round 63 Fix 4 was broken — imageGenerationAgent already falls back to Unsplash
+      // internally on Forge failure, so `!heroImage.url` was never true and Lion fallback never fired.
+      // Now we inspect `source` to detect the case where pipeline gave us Unsplash (i.e. Forge failed),
+      // and prefer the real Lion travel image in that case.
+      let heroImage: { url: string; alt: string; source?: string } = imageResults.hero || { url: "", alt: "", source: "fallback" };
       let highlightImages: any[] = [];
       // Feature images from image pipeline (already populated above)
       let featureImages: any[] = imageResults.features;
 
-      if (!heroImage.url) {
-        // Fix 4 (Round 63): Tier-2 fallback — use liontravel heroImageUrl before Unsplash
+      const pipelineSource = (imageResults.hero as any)?.source as string | undefined;
+      const pipelineGaveRealHero = !!heroImage.url && pipelineSource === 'ai';
+
+      if (!pipelineGaveRealHero) {
+        // Either pipeline returned empty, or pipeline fell back to Unsplash/fallback internally.
+        // In both cases, prefer the real liontravel hero image if available.
         const lionHeroUrl = (rawData as any)?.images?.[0]?.url || (rawData as any)?.lionHeroImageUrl || '';
         if (lionHeroUrl && lionHeroUrl.startsWith('http')) {
-          heroImage = { url: lionHeroUrl, alt: `${rawData.location?.destinationCity || rawData.location?.destinationCountry || 'travel'} travel` };
-          console.log(`[MasterAgent] Fix 4 (Round 63): Using Lion heroImageUrl as Tier-2 fallback: ${lionHeroUrl.substring(0, 60)}...`);
-        } else {
-          // Tier-3 fallback: Unsplash
+          heroImage = {
+            url: lionHeroUrl,
+            alt: `${rawData.location?.destinationCity || rawData.location?.destinationCountry || 'travel'} travel`,
+            source: 'lion',
+          };
+          console.log(`[MasterAgent] Round 64 Fix B: Forge failed (pipelineSource=${pipelineSource}), using Lion heroImageUrl: ${lionHeroUrl.substring(0, 60)}...`);
+        } else if (!heroImage.url) {
+          // No pipeline image AND no Lion image → Unsplash Tier-3
           try {
             const { searchUnsplashPhotos } = await import("../services/unsplashService");
             const destination = rawData.location?.destinationCity || rawData.location?.destinationCountry || "travel";
-            console.log(`[MasterAgent] Fix 4 (Round 63): Hero not found in pipeline or Lion, falling back to Unsplash for: ${destination}`);
-            
+            console.log(`[MasterAgent] Round 64: No pipeline/Lion hero, falling back to Unsplash for: ${destination}`);
+
             const heroImages = await searchUnsplashPhotos(destination, 1);
             if (heroImages.length > 0) {
               heroImage = {
                 url: heroImages[0],
-                alt: `${destination} travel destination`
+                alt: `${destination} travel destination`,
+                source: 'unsplash',
               };
               console.log(`[MasterAgent] ✓ Found hero image from Unsplash (Tier-3): ${heroImage.url.substring(0, 50)}...`);
             } else {
-              console.log(`[MasterAgent] Fix 4 (Round 63): No hero image found from any source (pipeline/Lion/Unsplash)`);
+              console.log(`[MasterAgent] Round 64: No hero image found from any source (pipeline/Lion/Unsplash)`);
             }
           } catch (error) {
             console.warn(`[MasterAgent] Failed to search hero image:`, error);
           }
+        } else {
+          // Pipeline gave us Unsplash/fallback but no Lion available → keep pipeline result
+          console.log(`[MasterAgent] Round 64: Forge failed, no Lion available, keeping pipeline ${pipelineSource} hero: ${heroImage.url.substring(0, 50)}...`);
         }
       } else {
-        console.log(`[MasterAgent] ✓ Using image pipeline hero: ${heroImage.url.substring(0, 50)}...`);
+        console.log(`[MasterAgent] ✓ Using Forge pipeline hero (source=${pipelineSource}): ${heroImage.url.substring(0, 50)}...`);
       }
       
       // Process DetailsSkill results (replaces CostAgent, NoticeAgent, HotelAgent, MealAgent)
