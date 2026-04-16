@@ -16,6 +16,11 @@
 
 import { invokeLLM } from "../_core/llm";
 
+// A/B Test Group 1: CalibrationAgent model selection
+// Group 0 (baseline): uses default Sonnet
+// Group 1 (current): uses Haiku for faster calibration
+const CALIBRATION_MODEL = 'claude-haiku-4-5-20251001';
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface CalibrationIssue {
@@ -139,6 +144,7 @@ Respond in JSON:
 }`;
 
     const response = await invokeLLM({
+      model: CALIBRATION_MODEL,
       messages: [
         { role: "system", content: "You are a strict quality auditor. Respond only with valid JSON." },
         { role: "user", content: prompt },
@@ -540,10 +546,11 @@ export async function checkMarketingQuality(
   if (title.length > 0) {
     try {
       const response = await invokeLLM({
+        model: CALIBRATION_MODEL,
         messages: [
           {
             role: "system",
-            content: "You are a travel marketing expert. Rate the attractiveness of this tour title on a scale of 0-100. Respond with only a JSON object.",
+            content: "You are a travel marketing expert. Evaluate if this tour title is attractive and marketable. Rate it from 0-100. Respond with only a JSON object.",
           },
           {
             role: "user",
@@ -607,6 +614,7 @@ async function applyAutoFixes(
       if (field === "description" && issue.message.includes("too short")) {
         const before = tourData.description || "";
         const response = await invokeLLM({
+          model: CALIBRATION_MODEL,
           messages: [
             {
               role: "system",
@@ -637,6 +645,7 @@ async function applyAutoFixes(
         const before = JSON.stringify(current);
 
         const response = await invokeLLM({
+          model: CALIBRATION_MODEL,
           messages: [
             {
               role: "system",

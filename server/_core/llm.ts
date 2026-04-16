@@ -67,6 +67,7 @@ export type InvokeParams = {
   output_schema?: OutputSchema;
   responseFormat?: ResponseFormat;
   response_format?: ResponseFormat;
+  model?: string; // Override default model (e.g. 'claude-haiku-4-5-20251001')
 };
 
 export type ToolCall = {
@@ -284,12 +285,13 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     output_schema,
     responseFormat,
     response_format,
+    model: modelOverride,
   } = params;
 
   // Use Claude Sonnet 4.5 as the default model via Forge proxy
   // All Claude 4.5 models are supported: haiku-4-5-20251001, sonnet-4-5-20250929, opus-4-5-20251101
   const payload: Record<string, unknown> = {
-    model: "claude-sonnet-4-5-20250929",
+    model: modelOverride || "claude-sonnet-4-5-20250929",
     messages: messages.map(normalizeMessage),
   };
 

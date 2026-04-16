@@ -5614,3 +5614,29 @@ AI 辦公室看板中，AI 任務永遠顯示「執行中」（started 狀態）
 - [ ] 執行 Group 0 URL-B 基準測試
 - [ ] 執行 Group 0 URL-C 基準測試
 - [ ] 彙整結果表格
+
+
+---
+
+## Phase: A/B Test Group 1 — CalibrationAgent 改用 Haiku（2026-04-15）
+
+### Step 1: 修改 llm.ts 加入 model override 支援
+- [ ] 確認 InvokeParams 有 model?: string 欄位
+- [ ] 確認 invokeLLM 使用 modelOverride
+
+### Step 2: 修改 calibrationAgent.ts 使用 Haiku 模型
+- [ ] 加入 CALIBRATION_MODEL 常量
+- [ ] 修改 4 處 invokeLLM 調用加入 model: CALIBRATION_MODEL
+
+### Step 3: Build & Deploy
+- [ ] pnpm build 確認 0 errors
+- [ ] 部署到 packgo-d3xjbq67.manus.space
+
+### Step 4: 重跑 3 個 URL 測試
+- [ ] 韓國首爾清州 5 日 (forceRegenerate)
+- [ ] 泰國五星 5 日 (forceRegenerate)
+- [ ] 越南北越下龍灣 5 日 (forceRegenerate)
+
+### Step 5: A/B 比較報告
+- [ ] 產出 Group 0 vs Group 1 比較表
+- [ ] 回答 3 個關鍵問題
