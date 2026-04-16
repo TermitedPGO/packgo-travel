@@ -24,6 +24,8 @@ export interface MealData {
   description: string;
   cuisine: string;
   restaurant?: string;
+  image?: string;       // ⬅️ Fix 1: added
+  imageAlt?: string;    // ⬅️ Fix 1: added
 }
 
 export interface HotelData {
@@ -32,6 +34,8 @@ export interface HotelData {
   description: string;
   facilities: string[];
   location: string;
+  image?: string;       // ⬅️ Fix 1: added
+  imageAlt?: string;    // ⬅️ Fix 1: added
 }
 
 export interface CostData {
@@ -78,6 +82,8 @@ const MEAL_SCHEMA: JSONSchema = {
           description: { type: "string", description: "餐點描述（100-150字）" },
           cuisine: { type: "string", description: "料理類型" },
           restaurant: { type: "string", description: "餐廳名稱" },
+          image: { type: "string", description: "餐點或餐廳圖片 URL" },
+          imageAlt: { type: "string", description: "圖片替代文字" },
         },
         required: ["name", "type", "description", "cuisine"],
       },
@@ -103,6 +109,8 @@ const HOTEL_SCHEMA: JSONSchema = {
             description: "飯店設施列表",
           },
           location: { type: "string", description: "地理位置描述" },
+          image: { type: "string", description: "飯店圖片 URL" },
+          imageAlt: { type: "string", description: "圖片替代文字" },
         },
         required: ["name", "stars", "description", "facilities", "location"],
       },
@@ -184,6 +192,8 @@ const COMBINED_DETAILS_SCHEMA: JSONSchema = {
           description: { type: "string", description: "餐點描述（80-120字）" },
           cuisine: { type: "string", description: "料理類型" },
           restaurant: { type: "string", description: "餐廳名稱" },
+          image: { type: "string", description: "餐點或餐廳圖片 URL" },
+          imageAlt: { type: "string", description: "圖片替代文字" },
         },
         required: ["name", "type", "description", "cuisine"],
       },
@@ -203,6 +213,8 @@ const COMBINED_DETAILS_SCHEMA: JSONSchema = {
             description: "飯店設施列表",
           },
           location: { type: "string", description: "地理位置描述" },
+          image: { type: "string", description: "飯店圖片 URL" },
+          imageAlt: { type: "string", description: "圖片替代文字" },
         },
         required: ["name", "stars", "description", "facilities", "location"],
       },

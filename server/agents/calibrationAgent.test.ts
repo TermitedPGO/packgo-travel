@@ -112,14 +112,25 @@ const completeTour = {
   description: "帶您深入日本最美的賞櫻景點，體驗日本文化與美食，住宿精選溫泉旅館，留下難忘的旅遊回憶。",
   destinationCountry: "日本",
   itineraryDetailed: JSON.stringify([{ day: 1, activities: ["抵達東京"] }]),
-  hotels: JSON.stringify([{ name: "東京大倉飯店" }]),
-  meals: "含早餐",
+  // Fix 6 (Round 62): hotels now need image field for Rule 5
+  hotels: JSON.stringify([{ name: "東京大倉飯店", image: "https://example.com/hotel.jpg", imageAlt: "東京大倉飯店" }]),
+  // Fix 6 (Round 62): meals now need image field for Rule 6
+  meals: JSON.stringify([{ name: "日式早餐", image: "https://example.com/meal.jpg", imageAlt: "日式早餐" }]),
   costExplanation: "費用包含機票、住宿、餐食",
   noticeDetailed: "請攜帶護照",
   heroImage: "https://example.com/japan.jpg",
-  featureImages: JSON.stringify(["https://example.com/1.jpg", "https://example.com/2.jpg", "https://example.com/3.jpg"]),
+  // Fix 6 (Round 62): featureImages now need full objects for Rule 4
+  featureImages: JSON.stringify([
+    { url: "https://example.com/1.jpg", alt: "櫻花", caption: "上野公園", position: "large" },
+    { url: "https://example.com/2.jpg", alt: "富士山", caption: "富士山景色", position: "small" },
+    { url: "https://example.com/3.jpg", alt: "温泉", caption: "溫泉旅館", position: "small" },
+  ]),
   keyFeatures: JSON.stringify(["賞櫻勝地", "溫泉體驗", "美食之旅", "文化探索"]),
   heroSubtitle: "春日限定，與您共賞最美的日本",
+  // Fix 6 (Round 62): new fields for Rules 1-3
+  hotelImages: JSON.stringify(["https://example.com/hotel.jpg"]),
+  galleryImages: JSON.stringify([{ url: "https://example.com/1.jpg", caption: "櫻花" }]),
+  attractions: JSON.stringify([{ name: "上野公園", description: "賞櫻勝地", image: "https://example.com/1.jpg", imageAlt: "櫻花" }]),
 };
 
 const minimalTour = {

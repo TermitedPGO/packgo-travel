@@ -457,6 +457,100 @@ export function checkCompleteness(tourData: any): { score: number; issues: Calib
     }
   }
 
+  // Fix 6 (Round 62): 7 hard deduction rules for image/data integrity
+  // Rule 1: hotelImages empty
+  {
+    let empty = true;
+    try {
+      const v = typeof tourData.hotelImages === 'string' ? JSON.parse(tourData.hotelImages) : tourData.hotelImages;
+      if (Array.isArray(v) && v.length > 0) empty = false;
+    } catch { /* keep empty=true */ }
+    if (empty) {
+      issues.push({ check: 'completeness', severity: 'warning', message: 'hotelImages is empty — hotel images not generated', field: 'hotelImages', autoFixable: false });
+      score -= 5;
+    }
+  }
+  // Rule 2: galleryImages empty
+  {
+    let empty = true;
+    try {
+      const v = typeof tourData.galleryImages === 'string' ? JSON.parse(tourData.galleryImages) : tourData.galleryImages;
+      if (Array.isArray(v) && v.length > 0) empty = false;
+    } catch { /* keep empty=true */ }
+    if (empty) {
+      issues.push({ check: 'completeness', severity: 'warning', message: 'galleryImages is empty — feature gallery not generated', field: 'galleryImages', autoFixable: false });
+      score -= 5;
+    }
+  }
+  // Rule 3: attractions empty
+  {
+    let empty = true;
+    try {
+      const v = typeof tourData.attractions === 'string' ? JSON.parse(tourData.attractions) : tourData.attractions;
+      if (Array.isArray(v) && v.length > 0) empty = false;
+    } catch { /* keep empty=true */ }
+    if (empty) {
+      issues.push({ check: 'completeness', severity: 'warning', message: 'attractions is empty — no attraction data generated', field: 'attractions', autoFixable: false });
+      score -= 5;
+    }
+  }
+  // Rule 4: featureImages empty or URL-only strings (not full objects)
+  {
+    let bad = true;
+    try {
+      const v = typeof tourData.featureImages === 'string' ? JSON.parse(tourData.featureImages) : tourData.featureImages;
+      if (Array.isArray(v) && v.length > 0) {
+        // Check if items are full objects (not bare URL strings)
+        const firstItem = v[0];
+        if (typeof firstItem === 'object' && firstItem !== null && firstItem.url) bad = false;
+        else if (typeof firstItem === 'string') {
+          // URL-only strings — old format
+          issues.push({ check: 'completeness', severity: 'warning', message: 'featureImages contains URL-only strings instead of full objects {url, alt, caption, position}', field: 'featureImages', autoFixable: false });
+          score -= 3;
+          bad = false; // Not empty, just old format
+        }
+      }
+    } catch { /* keep bad=true */ }
+    if (bad) {
+      issues.push({ check: 'completeness', severity: 'warning', message: 'featureImages is empty — feature images not generated', field: 'featureImages', autoFixable: false });
+      score -= 5;
+    }
+  }
+  // Rule 5: hotels[].image missing
+  {
+    try {
+      const v = typeof tourData.hotels === 'string' ? JSON.parse(tourData.hotels) : tourData.hotels;
+      if (Array.isArray(v) && v.length > 0) {
+        const missingCount = v.filter((h: any) => !h.image || h.image === '').length;
+        if (missingCount > 0) {
+          issues.push({ check: 'completeness', severity: 'warning', message: `${missingCount}/${v.length} hotel(s) missing image field`, field: 'hotels', autoFixable: false });
+          score -= Math.min(5, missingCount * 2);
+        }
+      }
+    } catch { /* skip */ }
+  }
+  // Rule 6: meals[].image missing
+  {
+    try {
+      const v = typeof tourData.meals === 'string' ? JSON.parse(tourData.meals) : tourData.meals;
+      if (Array.isArray(v) && v.length > 0) {
+        const missingCount = v.filter((m: any) => !m.image || m.image === '').length;
+        if (missingCount > 0) {
+          issues.push({ check: 'completeness', severity: 'warning', message: `${missingCount}/${v.length} meal(s) missing image field`, field: 'meals', autoFixable: false });
+          score -= Math.min(5, missingCount * 2);
+        }
+      }
+    } catch { /* skip */ }
+  }
+  // Rule 7: heroImage missing
+  {
+    const heroMissing = !tourData.heroImage || tourData.heroImage === '';
+    if (heroMissing) {
+      issues.push({ check: 'completeness', severity: 'critical', message: 'heroImage is missing — banner image not generated', field: 'heroImage', autoFixable: false });
+      score -= 15;
+    }
+  }
+
   // If critical fields missing, cap score to force rejected verdict
   if (hasCriticalMissing) {
     score = Math.min(score, 40);

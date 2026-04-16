@@ -111,11 +111,17 @@ export async function generateTourFromUrlInternal(
       
       // Detailed content from agents (CRITICAL: These fields were missing!)
       itineraryDetailed: tourData.itineraryDetailed, // 每日行程
+      // Fix 4 (Round 62): dailyItinerary dual-write for legacy field compatibility
+      dailyItinerary: tourData.itineraryDetailed, // Legacy field — same data as itineraryDetailed
       costExplanation: tourData.costExplanation, // 費用說明
       noticeDetailed: tourData.noticeDetailed, // 注意事項
       hotels: tourData.hotels, // 飯店介紹
       meals: tourData.meals, // 餐飲介紹
       flights: tourData.flights, // 航班資訊
+      // Fix 4 (Round 62): Pass new fields from masterAgent Fix 3
+      hotelImages: tourData.hotelImages,
+      galleryImages: tourData.galleryImages,
+      attractions: tourData.attractions,
       
       // Additional fields
       // Status is determined by calibration verdict:

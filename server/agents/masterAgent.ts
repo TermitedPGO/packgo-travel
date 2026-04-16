@@ -105,6 +105,11 @@ export interface MasterAgentResult {
     // Feature Images
     featureImages: string; // JSON string
     
+    // Fix 3 (Round 62): Additional image/data fields
+    hotelImages: string; // JSON string — URL array from hotels
+    galleryImages: string; // JSON string — [{url, caption}] from featureImages
+    attractions: string; // JSON string — [{name, description, image, imageAlt}]
+    
     // Metadata
     originalityScore: number;
     sourceUrl: string;
@@ -1484,8 +1489,15 @@ export class MasterAgent {
       _endPhaseTimer('P4_itinerary');
       console.log("[MasterAgent] ✓ Phase 4 completed: PARALLEL (6 agents - no image generation)");
       
-      // Extract feature image URLs
-      const featureImageUrls = featureImages.map(img => img.url).filter(url => url !== "");
+      // Fix 2 (Round 62): featureImages keep full object structure {url, alt, caption, position}
+      const featureImageObjects = featureImages.map((img: any, i: number) => ({
+        url: img.url || '',
+        alt: img.alt || '',
+        caption: img.caption || '',
+        position: i === 0 ? 'large' : 'small'
+      })).filter((f: any) => f.url !== '');
+      // Keep URL array for backward compat (used in allImageUrls below)
+      const featureImageUrls = featureImageObjects.map((f: any) => f.url);
       
       // ========================================================================
       // Phase 5: Assemble Final Data
@@ -1605,8 +1617,8 @@ export class MasterAgent {
         // Key Features (required field)
         keyFeatures: JSON.stringify(analyzedContent.highlights || []),
         
-        // Feature Images
-        featureImages: JSON.stringify(featureImageUrls),
+        // Feature Images — Fix 2 (Round 62): store full object {url, alt, caption, position}
+        featureImages: JSON.stringify(featureImageObjects),
         
         // Poetic content
         poeticContent: JSON.stringify(analyzedContent.poeticContent),
@@ -1620,11 +1632,52 @@ export class MasterAgent {
         // Detailed Notice
         noticeDetailed: JSON.stringify(noticeData),
         
-        // Hotels (hotelData is already an array from DetailsSkill)
-        hotels: JSON.stringify(Array.isArray(hotelData) ? hotelData : (hotelData?.hotels || [])),
+        // Hotels — Fix 3 (Round 62): explicitly preserve image/imageAlt fields
+        hotels: JSON.stringify(
+          (Array.isArray(hotelData) ? hotelData : (hotelData?.hotels || [])).map((h: any) => ({
+            name: h.name,
+            stars: h.stars,
+            description: h.description,
+            facilities: h.facilities,
+            location: h.location,
+            image: h.image || '',
+            imageAlt: h.imageAlt || h.name || ''
+          }))
+        ),
         
-        // Meals (mealData is already an array from DetailsSkill)
-        meals: JSON.stringify(Array.isArray(mealData) ? mealData : (mealData?.meals || [])),
+        // Meals — Fix 3 (Round 62): explicitly preserve image/imageAlt fields
+        meals: JSON.stringify(
+          (Array.isArray(mealData) ? mealData : (mealData?.meals || [])).map((m: any) => ({
+            name: m.name,
+            type: m.type,
+            description: m.description,
+            cuisine: m.cuisine,
+            restaurant: m.restaurant,
+            image: m.image || '',
+            imageAlt: m.imageAlt || m.name || ''
+          }))
+        ),
+        
+        // Fix 3 (Round 62): hotelImages — URL array extracted from hotels
+        hotelImages: JSON.stringify(
+          (Array.isArray(hotelData) ? hotelData : (hotelData?.hotels || []))
+            .map((h: any) => h.image).filter(Boolean)
+        ),
+        
+        // Fix 3 (Round 62): galleryImages — from featureImageObjects
+        galleryImages: JSON.stringify(
+          featureImageObjects.map((f: any) => ({ url: f.url, caption: f.caption || f.alt || '' }))
+        ),
+        
+        // Fix 3 (Round 62): attractions — from highlights with featureImage URLs
+        attractions: JSON.stringify(
+          (rawData.highlights || []).slice(0, 10).map((h: any, i: number) => ({
+            name: h.title || h.name || `景點 ${i + 1}`,
+            description: h.description || h.content || '',
+            image: featureImageObjects[i]?.url || '',
+            imageAlt: h.title || h.name || ''
+          }))
+        ),
         
         // Transportation (交通資訊 - 只有飛機行程才生成)
         // 火車、巴士等行程的交通資訊已整合到每日行程中
