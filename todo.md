@@ -5692,3 +5692,15 @@ AI 辦公室看板中，AI 任務永遠顯示「執行中」（started 狀態）
 - [ ] Pricing section 有費用包含/不包含明細
 - [ ] pnpm build 0 errors
 - [ ] pnpm test 所有測試通過
+
+---
+
+## Round 61 — 年齡定價補齊 + i18n 保底翻譯 + 日曆顯示（2026-04-16）
+
+- [x] Fix 1a: tourGenerator B5 年齡定價公式（childWithBed=adult×0.9, childNoBed=adult×0.75, infant=adult×0.1）
+- [x] Fix 1b: 後台 DepartureEditDialog 3 個年齡價位欄位（已存在，確認完整）
+- [x] Fix 2: TourDetailPeony 日曆選日後顯示 4 階價格（已存在，確認完整）
+- [x] Fix 3: getTourTranslations 無翻譯時自動觸發 fallback translation job
+- [x] translateFallback.test.ts 新增 5 個測試
+- [x] pnpm build 0 errors (Round 61)
+- [x] pnpm test 490 passed / 0 failed (Round 61)

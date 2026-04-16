@@ -3935,6 +3935,17 @@ export const appRouter = router({
           input.tourId,
           input.targetLanguage as Language
         );
+        // Fix 3 (Round 61): If no translations found and target is not zh-TW, trigger fallback translation job
+        if (Object.keys(translations).length === 0 && input.targetLanguage !== 'zh-TW') {
+          import('./queue').then(({ addTourTranslationJob }) =>
+            addTourTranslationJob({
+              tourId: input.tourId,
+              targetLanguages: [input.targetLanguage],
+              sourceLanguage: 'zh-TW',
+              userId: 0, // system-triggered
+            })
+          ).catch((e) => console.warn(`[TranslateFallback] Failed to queue translation for tour ${input.tourId}:`, e));
+        }
         return translations;
       }),
 

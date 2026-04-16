@@ -234,15 +234,23 @@ export async function generateTourFromUrlInternal(
                 '確定': 'confirmed',
               };
               const mappedStatus = statusMap[dep.status] || 'open';
+              // Round 61: Use LionTravel API pricing if available, otherwise apply formula
+              const adultPriceForDep = Math.round(dep.price);
+              const childWithBedFromApi = _lionPricing?.childWithBed && _lionPricing.childWithBed > 0 ? Math.round(_lionPricing.childWithBed) : null;
+              const childNoBedFromApi = _lionPricing?.childNoBed && _lionPricing.childNoBed > 0 ? Math.round(_lionPricing.childNoBed) : null;
+              const babyFromApi = _lionPricing?.babyPrice && _lionPricing.babyPrice > 0 ? Math.round(_lionPricing.babyPrice) : null;
+              // Fallback formula: childWithBed = adult × 0.9, childNoBed = adult × 0.75, infant = adult × 0.1
+              const childPriceWithBedFinal = childWithBedFromApi ?? Math.round(adultPriceForDep * 0.9);
+              const childPriceNoBedFinal = childNoBedFromApi ?? Math.round(adultPriceForDep * 0.75);
+              const infantPriceFinal = babyFromApi ?? Math.round(adultPriceForDep * 0.1);
               await createDeparture({
                 tourId: tour.id,
                 departureDate,
                 returnDate,
-                adultPrice: Math.round(dep.price),
-                // Round 60: Store child/infant pricing from lionPricing
-                childPriceWithBed: _lionPricing?.childWithBed ? Math.round(_lionPricing.childWithBed) : undefined,
-                childPriceNoBed: _lionPricing?.childNoBed ? Math.round(_lionPricing.childNoBed) : undefined,
-                infantPrice: _lionPricing?.babyPrice ? Math.round(_lionPricing.babyPrice) : undefined,
+                adultPrice: adultPriceForDep,
+                childPriceWithBed: childPriceWithBedFinal,
+                childPriceNoBed: childPriceNoBedFinal,
+                infantPrice: infantPriceFinal,
                 totalSlots: dep.totalSeats || 20,
                 bookedSlots: Math.max(0, (dep.totalSeats || 20) - (dep.availableSeats || 0)),
                 status: mappedStatus,
