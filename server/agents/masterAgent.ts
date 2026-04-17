@@ -1661,48 +1661,64 @@ export class MasterAgent {
         // Detailed Notice
         noticeDetailed: JSON.stringify(noticeData),
         
-        // Hotels — Fix 3 (Round 62): explicitly preserve image/imageAlt fields
-        hotels: JSON.stringify(
-          (Array.isArray(hotelData) ? hotelData : (hotelData?.hotels || [])).map((h: any) => ({
-            name: h.name,
-            stars: h.stars,
-            description: h.description,
-            facilities: h.facilities,
-            location: h.location,
-            image: h.image || '',
-            imageAlt: h.imageAlt || h.name || ''
-          }))
-        ),
-        
-        // Meals — Fix 3 (Round 62): explicitly preserve image/imageAlt fields
-        meals: JSON.stringify(
-          (Array.isArray(mealData) ? mealData : (mealData?.meals || [])).map((m: any) => ({
-            name: m.name,
-            type: m.type,
-            description: m.description,
-            cuisine: m.cuisine,
-            restaurant: m.restaurant,
-            image: m.image || '',
-            imageAlt: m.imageAlt || m.name || ''
-          }))
-        ),
-        
-        // Fix 3 (Round 63): hotelImages — URL array extracted from hotels.image; fallback to lionFeatureImages if empty
-        hotelImages: (() => {
-          const hotelsArr = Array.isArray(hotelData) ? hotelData : (hotelData?.hotels || []);
-          const hotelImgUrls = hotelsArr.map((h: any) => h.image).filter((u: any) => typeof u === 'string' && u.startsWith('http'));
-          if (hotelImgUrls.length > 0) return JSON.stringify(hotelImgUrls);
-          // Fallback: use lionFeatureImages (attraction images) as hotel image gallery
+        // Round 67: Compute shared image pool ONCE for hotels / meals / hotelImages reuse.
+        // Previously each hotel/meal object had an empty `image` field because DetailsSkill's
+        // Claude prompt never received lionFeatureImages. This round-robin-assigns the scraped
+        // CDN URLs onto each hotel[i] / meal[i] so cards render thumbnails.
+        ...(() => {
+          const hotelsArrRaw = Array.isArray(hotelData) ? hotelData : (hotelData?.hotels || []);
+          const mealsArrRaw = Array.isArray(mealData) ? mealData : (mealData?.meals || []);
           const lionFI = (rawData as any)?.lionFeatureImages || [];
-          const lionFIUrls = lionFI
-            .filter((img: any) => img?.url && img.url.startsWith('http'))
-            .slice(0, 8)
+          const lionFIUrls: string[] = lionFI
+            .filter((img: any) => img?.url && typeof img.url === 'string' && img.url.startsWith('http'))
             .map((img: any) => img.url);
-          if (lionFIUrls.length > 0) {
-            console.log(`[MasterAgent] Fix 3 (Round 63): hotelImages empty, using ${lionFIUrls.length} lionFeatureImages as fallback`);
-            return JSON.stringify(lionFIUrls);
+          const scrapedHotelUrls: string[] = hotelsArrRaw
+            .map((h: any) => h.image)
+            .filter((u: any) => typeof u === 'string' && u.startsWith('http'));
+          const hotelImagePool = scrapedHotelUrls.length > 0 ? scrapedHotelUrls : lionFIUrls;
+          const mealImagePool = lionFIUrls; // meals use attraction/feature imagery as fallback
+
+          if (hotelImagePool.length === 0) {
+            console.warn(`[MasterAgent] Round 67: no hotel image pool available — hotels[].image will be empty`);
           }
-          return JSON.stringify([]);
+          if (mealImagePool.length === 0) {
+            console.warn(`[MasterAgent] Round 67: no meal image pool available — meals[].image will be empty`);
+          }
+
+          return {
+            // Hotels — Round 67: round-robin assign image from pool when Claude returned empty
+            hotels: JSON.stringify(
+              hotelsArrRaw.map((h: any, i: number) => ({
+                name: h.name,
+                stars: h.stars,
+                description: h.description,
+                facilities: h.facilities,
+                location: h.location,
+                image: (typeof h.image === 'string' && h.image.startsWith('http'))
+                  ? h.image
+                  : (hotelImagePool.length > 0 ? hotelImagePool[i % hotelImagePool.length] : ''),
+                imageAlt: h.imageAlt || h.name || ''
+              }))
+            ),
+
+            // Meals — Round 67: round-robin assign image from lionFeatureImages pool
+            meals: JSON.stringify(
+              mealsArrRaw.map((m: any, i: number) => ({
+                name: m.name,
+                type: m.type,
+                description: m.description,
+                cuisine: m.cuisine,
+                restaurant: m.restaurant,
+                image: (typeof m.image === 'string' && m.image.startsWith('http'))
+                  ? m.image
+                  : (mealImagePool.length > 0 ? mealImagePool[i % mealImagePool.length] : ''),
+                imageAlt: m.imageAlt || m.name || ''
+              }))
+            ),
+
+            // hotelImages — preserved from Round 63 behavior (URL array, max 8)
+            hotelImages: JSON.stringify(hotelImagePool.slice(0, 8)),
+          };
         })(),
         
         // Fix 3 (Round 62): galleryImages — from featureImageObjects
