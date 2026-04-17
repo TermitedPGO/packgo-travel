@@ -146,15 +146,27 @@ async function postJson(
   signal: AbortSignal
 ): Promise<any> {
   const formBody = new URLSearchParams(body).toString();
-  const resp = await fetch(`${LION_BASE}${path}`, {
-    method: 'POST',
-    headers: { ...DEFAULT_HEADERS, Referer: referer },
-    body: formBody,
-    signal,
-  });
+  const t0 = Date.now();
+  let resp: Response;
+  try {
+    resp = await fetch(`${LION_BASE}${path}`, {
+      method: 'POST',
+      headers: { ...DEFAULT_HEADERS, Referer: referer },
+      body: formBody,
+      signal,
+    });
+  } catch (fetchErr: any) {
+    const elapsed = Date.now() - t0;
+    console.error(`[LionAPI] ❌ fetch ${path} failed after ${elapsed}ms: ${fetchErr.name}: ${fetchErr.message}`);
+    throw fetchErr;
+  }
+  const elapsed = Date.now() - t0;
   if (!resp.ok) {
+    const errText = await resp.text().catch(() => '<body read failed>');
+    console.error(`[LionAPI] ❌ ${path} → HTTP ${resp.status} after ${elapsed}ms — body preview: ${errText.substring(0, 150)}`);
     throw new Error(`HTTP ${resp.status} for ${path}`);
   }
+  console.log(`[LionAPI] ✓ ${path} → HTTP ${resp.status} in ${elapsed}ms`);
   return resp.json();
 }
 
@@ -408,7 +420,13 @@ export async function fetchLionTravelData(
 
     return result;
   } catch (err: any) {
-    console.warn(`[LionAPI] fetchLionTravelData failed: ${err?.message ?? err}`);
+    // Round 66 Diag: more verbose logging to diagnose production scrape-timeout
+    console.error(`[LionAPI] ❌ fetchLionTravelData failed for ${normGroupId}:`);
+    console.error(`  name: ${err?.name}`);
+    console.error(`  message: ${err?.message}`);
+    console.error(`  code: ${err?.code || err?.cause?.code || 'n/a'}`);
+    console.error(`  cause: ${err?.cause?.message || 'n/a'}`);
+    if (err?.stack) console.error(`  stack (top 3): ${err.stack.split('\n').slice(0, 3).join(' | ')}`);
     return null;
   }
 }
