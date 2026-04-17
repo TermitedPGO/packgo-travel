@@ -488,6 +488,16 @@ export class MasterAgent {
               console.warn('[MasterAgent] 🦁 Liontravel API attempt 2 also failed');
             }
           }
+          // Fix A (Round 67+): 404 detection — if tourName contains 404 error text, throw immediately
+          if (lionData && (
+            lionData.tourName.includes('404') ||
+            lionData.tourName.includes('檔案或目錄遺失') ||
+            lionData.tourName.includes('頁面不存在') ||
+            lionData.tourName.trim() === ''
+          )) {
+            console.error(`[MasterAgent] 🦁 Liontravel 404 detected: tourName="${lionData.tourName}" — throwing Tour URL invalid`);
+            throw new Error('Tour URL invalid: 雄獅行程頁面不存在或已下架，請確認 URL 是否正確。');
+          }
           if (lionData) {
             console.log(`[MasterAgent] \u23f1 P1: liontravel API SUCCESS \u2014 using direct API path`);
             console.log(`[MasterAgent] 🦁 Liontravel detected: using direct API (${lionData.tourDays} days, price=${lionData.price} ${lionData.currencyCode})`);
