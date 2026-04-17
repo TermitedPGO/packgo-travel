@@ -333,6 +333,11 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   const startMs = Date.now();
   console.log(`[invokeLLM] → ${apiUrl} (model: ${payload.model}, msgs: ${messages.length})`);
 
+  // Round 65 Fix C: do NOT clear timeout between fetch and body read.
+  // The 120s AbortController must cover BOTH headers-phase and body-stream-phase,
+  // because a slow/hung response.json() (Forge body stream never reaching EOF)
+  // can otherwise hang forever. Only clear timeout after the body is fully parsed,
+  // or inside the catch path.
   let response: Response;
   try {
     response = await fetch(apiUrl, {
@@ -355,24 +360,35 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     }
     console.error(`[invokeLLM] ❌ fetch error after ${elapsed}ms:`, fetchErr.message);
     throw fetchErr;
-  } finally {
+  }
+
+  try {
+    const elapsed = Date.now() - startMs;
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[invokeLLM] ❌ HTTP ${response.status} after ${elapsed}ms — ${errorText.substring(0, 200)}`);
+      throw new Error(
+        `LLM invoke failed: ${response.status} ${response.statusText} – ${errorText}`
+      );
+    }
+    console.log(`[invokeLLM] ✅ HTTP ${response.status} in ${elapsed}ms`);
+
+    const result = (await response.json()) as InvokeResult;
     clearTimeout(timeoutId);
-  }
 
-  const elapsed = Date.now() - startMs;
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error(`[invokeLLM] ❌ HTTP ${response.status} after ${elapsed}ms — ${errorText.substring(0, 200)}`);
-    throw new Error(
-      `LLM invoke failed: ${response.status} ${response.statusText} – ${errorText}`
-    );
-  }
-  console.log(`[invokeLLM] ✅ HTTP ${response.status} in ${elapsed}ms`);
+    // Cache the result
+    await setCachedResponse(params, result);
 
-  const result = (await response.json()) as InvokeResult;
-  
-  // Cache the result
-  await setCachedResponse(params, result);
-  
-  return result;
+    return result;
+  } catch (bodyErr: any) {
+    clearTimeout(timeoutId);
+    const elapsed = Date.now() - startMs;
+    if (bodyErr.name === 'AbortError' || /aborted|The user aborted a request/i.test(bodyErr.message || '')) {
+      console.error(`[invokeLLM] ⏱ TIMEOUT (body) after ${elapsed}ms — Forge API body stream did not complete within 120s`);
+      const err = new Error(`LLM_TIMEOUT: Forge API body stream hung (elapsed: ${elapsed}ms)`);
+      (err as any).nonRetryable = true;
+      throw err;
+    }
+    throw bodyErr;
+  }
 }
