@@ -345,6 +345,13 @@ export async function scrapeDynamicPage(url: string): Promise<DynamicScrapeResul
     // 取得頁面標題
     const pageTitle = await page.title().catch(() => '');
 
+    // Fix A (Round 67+): 404 detection — if page title contains error keywords, throw immediately
+    const LION_404_PATTERNS = /404錯誤|檔案或目錄遺失|找不到頁面|頁面不存在|Page Not Found/i;
+    if (LION_404_PATTERNS.test(pageTitle)) {
+      console.error(`[DynamicScraper] 🚫 404 detected in pageTitle: "${pageTitle}" — throwing Tour URL invalid`);
+      throw new Error('Tour URL invalid: Lion Travel returned 404 page');
+    }
+
     // 取得渲染後 HTML
     const renderedHtml = await page.content().catch(() => '');
 
@@ -602,11 +609,19 @@ export async function scrapeStaticFallback(url: string): Promise<Partial<Dynamic
     }
     const sortedPrices = Array.from(new Set(fallbackPrices)).sort((a, b) => a - b);
 
+    const staticPageTitle = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] || '';
+    // Fix A (Round 67+): 404 detection in static fallback
+    const LION_404_PATTERNS_STATIC = /404錯誤|檔案或目錄遺失|找不到頁面|頁面不存在|Page Not Found/i;
+    if (LION_404_PATTERNS_STATIC.test(staticPageTitle)) {
+      console.error(`[DynamicScraper] 🚫 Static fallback 404 detected in pageTitle: "${staticPageTitle}" — throwing Tour URL invalid`);
+      throw new Error('Tour URL invalid: Lion Travel returned 404 page');
+    }
+
     return {
       renderedHtml: html,
       rawText: text.slice(0, 50000),
       screenshots: { fullPage: Buffer.alloc(0) },
-      pageTitle: html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] || '',
+      pageTitle: staticPageTitle,
       sourceUrl: url,
       scrapedAt: new Date(),
       priceHints: sortedPrices.length > 0 ? {
