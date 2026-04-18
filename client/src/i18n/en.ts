@@ -1387,7 +1387,7 @@ export const en = {
       featuresTitle: 'Why Book Flights with PACK&GO?',
       featuresSubtitle: 'We are more than a booking platform — your dedicated travel advisor',
       feature1Title: 'Global Route Coverage',
-      feature1Desc: 'Partnered with 500+ airlines worldwide, covering major routes across Asia, Europe, Americas and more.',
+      feature1Desc: 'Partnered with a global network of airlines, covering major routes across Asia, Europe, Americas and more.',
       feature2Title: 'Best Fare Guarantee',
       feature2Desc: 'Through professional procurement channels, we secure the most competitive fares with flexible change/refund options.',
       feature3Title: '24/7 Personal Service',

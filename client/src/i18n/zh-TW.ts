@@ -1393,7 +1393,7 @@ export const zhTW = {
       featuresTitle: '為什麼選擇 PACK&GO 訂機票？',
       featuresSubtitle: '我們不只是訂票平台，更是您的專屬旅遊顧問',
       feature1Title: '全球航線覆蓋',
-      feature1Desc: '與全球 500+ 航空公司合作，涵蓋亞洲、歐洲、美洲等主要航線。',
+      feature1Desc: '與全球航空公司網絡合作，涵蓋亞洲、歐洲、美洲等主要航線。',
       feature2Title: '最優惠票價',
       feature2Desc: '透過專業採購管道，取得市場最具競爭力的機票價格，提供彈性退改票服務。',
       feature3Title: '24/7 專人服務',
