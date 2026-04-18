@@ -211,12 +211,13 @@ export default function ChinaVisa() {
                   </h1>
                   <p className="text-gray-400 text-lg mb-8 leading-relaxed">
                     {isChineseMode
-                      ? "專業代辦中國各類型簽證，省時省力，全程協助。超過 15 年簽證代辦經驗，核准率高達 99%。"
-                      : "Professional China visa application service. Save time and effort with our full assistance. Over 15 years of experience with a 99% approval rate."}
+                      ? "專業代辦中國各類型簽證，省時省力，全程協助。"
+                      : "Professional China visa application service. Save time and effort with our full assistance."}
                   </p>
+                  {/* FTC 16 CFR §260.5: removed "15 years experience" and "99% approval rate"
+                      claims — no substantiating records on file. */}
                   <div className="flex flex-wrap gap-4 mb-8">
                     {[
-                      { icon: <Shield className="h-4 w-4" />, zh: "99% 核准率", en: "99% Approval Rate" },
                       { icon: <Clock className="h-4 w-4" />, zh: "10-15 個工作日", en: "10-15 business days" },
                       { icon: <Users className="h-4 w-4" />, zh: "團體優惠", en: "Group Discounts" },
                     ].map((item, i) => (

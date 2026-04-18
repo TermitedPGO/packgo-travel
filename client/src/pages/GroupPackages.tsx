@@ -225,10 +225,11 @@ export default function GroupPackages() {
                 {[
                   {
                     icon: Users,
-                    title: isChineseMode ? "豐富包團經驗" : "Extensive Group Travel Experience",
+                    title: isChineseMode ? "各類型團體皆可承接" : "All Group Types Welcome",
+                    // FTC 16 CFR §260.5: removed unsubstantiated "Over 200 successful group tours" claim.
                     desc: isChineseMode
-                      ? "超過 200 個成功包團案例，服務過各種規模與類型的團體，從家族旅遊到企業員工旅遊皆有豐富經驗。"
-                      : "Over 200 successful group tours, serving groups of all sizes and types — from family trips to corporate employee travel.",
+                      ? "服務各種規模與類型的團體，從家族旅遊到企業員工旅遊皆可量身規劃。"
+                      : "We serve groups of all sizes and types — from family trips to corporate employee travel — with a custom itinerary for each.",
                   },
                   {
                     icon: Clock,
