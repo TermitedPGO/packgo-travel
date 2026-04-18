@@ -271,10 +271,7 @@ export default function GroupPackages() {
                 className="w-full h-full object-cover"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
-              <div className="absolute bottom-6 left-6 text-white">
-                <div className="text-4xl font-bold">200+</div>
-                <div className="text-gray-200">{isChineseMode ? "成功包團案例" : "Successful Group Tours"}</div>
-              </div>
+              {/* FTC 16 CFR §260.5: unsubstantiated numeric claim removed (no verified tour count) */}
             </div>
           </div>
         </div>
