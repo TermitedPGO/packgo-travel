@@ -127,13 +127,17 @@ export default function HotelBooking() {
     { icon: Shield, label: t('hotelBooking.filters.security') },
   ];
 
+  // Hardcoded per-city hotel counts ("500+", "300+" etc.) removed per FTC
+  // Act §5 / 16 CFR Part 260 — not substantiated by live Trip.com inventory
+  // API. Destination cards now show city/country only; re-introduce counts
+  // only when sourced from a live partner API response.
   const destinations = [
-    { city: isChineseMode ? "東京" : "Tokyo", country: isChineseMode ? "日本" : "Japan", hotels: "500+" },
-    { city: isChineseMode ? "大阪" : "Osaka", country: isChineseMode ? "日本" : "Japan", hotels: "300+" },
-    { city: isChineseMode ? "首爾" : "Seoul", country: isChineseMode ? "韓國" : "South Korea", hotels: "400+" },
-    { city: isChineseMode ? "曼谷" : "Bangkok", country: isChineseMode ? "泰國" : "Thailand", hotels: "600+" },
-    { city: isChineseMode ? "新加坡" : "Singapore", country: isChineseMode ? "新加坡" : "Singapore", hotels: "250+" },
-    { city: isChineseMode ? "峇里島" : "Bali", country: isChineseMode ? "印尼" : "Indonesia", hotels: "350+" },
+    { city: isChineseMode ? "東京" : "Tokyo", country: isChineseMode ? "日本" : "Japan" },
+    { city: isChineseMode ? "大阪" : "Osaka", country: isChineseMode ? "日本" : "Japan" },
+    { city: isChineseMode ? "首爾" : "Seoul", country: isChineseMode ? "韓國" : "South Korea" },
+    { city: isChineseMode ? "曼谷" : "Bangkok", country: isChineseMode ? "泰國" : "Thailand" },
+    { city: isChineseMode ? "新加坡" : "Singapore", country: isChineseMode ? "新加坡" : "Singapore" },
+    { city: isChineseMode ? "峇里島" : "Bali", country: isChineseMode ? "印尼" : "Indonesia" },
   ];
 
   return (
@@ -376,8 +380,7 @@ export default function HotelBooking() {
                     <div className="text-xs text-gray-500">{dest.country}</div>
                   </div>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-500">{dest.hotels} {t('hotelBooking.page.hotelsCount')}</span>
+                <div className="flex items-center justify-end">
                   <ExternalLink className="h-4 w-4 text-gray-400 group-hover:text-black transition-colors" />
                 </div>
               </button>

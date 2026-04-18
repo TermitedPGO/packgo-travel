@@ -317,11 +317,11 @@ export const en = {
     button: 'Subscribe',
   },
 
-  // Reviews
-  reviews: {
-    title: 'Excellent',
-    basedOn: 'Based on 1,200+ reviews',
-  },
+  // Reviews block removed — FTC 16 CFR §465 compliance.
+  // Dead i18n keys (`reviews.title`, `reviews.basedOn`) previously
+  // powered a Trustpilot-style widget with a hardcoded "Based on 1,200+
+  // reviews" claim. Widget was removed from Home.tsx; these keys had no
+  // remaining consumers.
 
   // Footer
   footer: {

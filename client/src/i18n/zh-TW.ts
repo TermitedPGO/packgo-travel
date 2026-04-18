@@ -318,11 +318,10 @@ export const zhTW = {
     button: '訂閱',
   },
 
-  // 評價
-  reviews: {
-    title: 'Excellent',
-    basedOn: 'Based on 1,200+ reviews',
-  },
+  // 評價區塊已移除 — 遵循 FTC 16 CFR §465。
+  // 原 `reviews.title` / `reviews.basedOn` 驅動的 Trustpilot 風格元件，
+  // 含硬編碼「Based on 1,200+ reviews」聲明，已於 Home.tsx 移除。
+  // 此 i18n keys 已無元件使用，故一併刪除避免誤用。
 
   // 頁尾
   footer: {

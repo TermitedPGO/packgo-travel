@@ -145,24 +145,12 @@ export default function AirportTransfer() {
         </div>
       </section>
 
-      {/* Stats */}
-      <section className="bg-gray-900 text-white py-8">
-        <div className="container">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
-            {[
-              { num: "50+", label: isChineseMode ? "服務機場" : "Airports Served" },
-              { num: "30+", label: isChineseMode ? "服務城市" : "Cities Covered" },
-              { num: "5,000+", label: isChineseMode ? "完成接送次數" : "Transfers Completed" },
-              { num: "100%", label: isChineseMode ? "準時率" : "On-Time Rate" },
-            ].map((stat, i) => (
-              <div key={i}>
-                <div className="text-3xl font-bold text-white mb-1">{stat.num}</div>
-                <div className="text-gray-400 text-sm">{stat.label}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+      {/*
+        Stats Row removed per FTC Act §5 / 16 CFR Part 260. Prior hardcoded
+        numbers ("50+ airports", "30+ cities", "5,000+ transfers", "100%
+        on-time") had no reasonable basis documented. Re-introduce only
+        when backed by auditable data from partner API or booking records.
+      */}
 
       {/* Features */}
       <section className="py-20 bg-white">

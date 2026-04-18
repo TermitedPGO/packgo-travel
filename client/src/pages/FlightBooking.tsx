@@ -359,24 +359,14 @@ export default function FlightBooking() {
         </div>
       </section>
 
-      {/* Stats */}
-      <section className="bg-gray-900 text-white py-8">
-        <div className="container">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
-            {[
-              { num: "500+", label: t('flightBooking.page.statAirlines') },
-              { num: "150+", label: t('flightBooking.page.statCountries') },
-              { num: "10,000+", label: t('flightBooking.page.statPassengers') },
-              { num: "98%", label: t('flightBooking.page.statSatisfaction') },
-            ].map((stat, i) => (
-              <div key={i}>
-                <div className="text-3xl font-bold text-white mb-1">{stat.num}</div>
-                <div className="text-gray-400 text-sm">{stat.label}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+      {/*
+        Stats Row removed per FTC Act §5 (deceptive acts/practices) and
+        16 CFR Part 260 (advertising substantiation). Prior hardcoded
+        numbers ("500+ airlines", "150+ countries", "10,000+ passengers",
+        "98% satisfaction") had no reasonable basis documented. Re-introduce
+        only when backed by auditable data (e.g., live Trip.com API metrics
+        or tRPC query over bookings with tourist-facing caveats).
+      */}
 
       {/* Features */}
       <section className="py-20 bg-white">

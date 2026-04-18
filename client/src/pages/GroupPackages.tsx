@@ -123,24 +123,13 @@ export default function GroupPackages() {
         </div>
       </section>
 
-      {/* Stats */}
-      <section className="bg-[#1A1A1A] text-white py-12">
-        <div className="container">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
-            {[
-              { value: "200+", label: isChineseMode ? "成功包團案例" : "Successful Group Tours" },
-              { value: "10–50", label: isChineseMode ? "彈性團體規模（人）" : "Flexible Group Size (pax)" },
-              { value: "98%", label: isChineseMode ? "客戶滿意度" : "Customer Satisfaction" },
-              { value: "24hr", label: isChineseMode ? "全天客服支援" : "24/7 Support" },
-            ].map((stat, i) => (
-              <div key={i}>
-                <div className="text-3xl font-bold text-white mb-1">{stat.value}</div>
-                <div className="text-gray-400 text-sm">{stat.label}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+      {/*
+        Stats Row removed per FTC Act §5 / 16 CFR Part 260. Prior numbers
+        ("200+ successful group tours", "98% customer satisfaction") had
+        no reasonable basis documented. The "10–50 pax" range and "24/7
+        support" labels are factual policy statements and could be
+        re-introduced separately as non-numeric service descriptors.
+      */}
 
       {/* Features Grid */}
       <section className="py-20 bg-white">
