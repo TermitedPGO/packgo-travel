@@ -137,7 +137,7 @@ function TourCard({
             <img
               src={tour.imageUrl || tour.heroImage}
               alt={displayTitle}
-              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+              className="w-full h-full object-cover rounded-xl group-hover:scale-105 transition-transform duration-500"
               onError={(e) => {
                 e.currentTarget.style.display = 'none';
                 const parent = e.currentTarget.parentElement;
@@ -172,13 +172,32 @@ function TourCard({
       </Link>
 
       <div className="p-5 flex flex-col flex-grow">
-        {/* Rating Row */}
-        <div className="flex items-center gap-1 mb-2">
-          {[1,2,3,4,5].map(i => (
-            <Star key={i} className={`h-3.5 w-3.5 ${i <= 5 ? 'fill-black text-black' : 'text-gray-300'}`} />
-          ))}
-          <span className="text-xs text-gray-500 ml-1">(5.0)</span>
-        </div>
+        {/*
+          Rating Row — FTC 16 CFR Part 465 / Act §5 compliance.
+          Previously rendered a hardcoded 5-star display with "(5.0)" on every
+          card regardless of whether any reviews existed. That is a deceptive
+          testimonial under the FTC fake review rule. We now only render real
+          ratings sourced from the tour record; otherwise show "no reviews yet".
+        */}
+        {typeof tour.rating === "number" && tour.rating > 0 ? (
+          <div className="flex items-center gap-1 mb-2">
+            {[1,2,3,4,5].map(i => (
+              <Star
+                key={i}
+                className={`h-3.5 w-3.5 ${i <= Math.round(tour.rating as number) ? 'fill-black text-black' : 'text-gray-300'}`}
+              />
+            ))}
+            <span className="text-xs text-gray-500 ml-1">
+              ({(tour.rating as number).toFixed(1)})
+            </span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1 mb-2">
+            <span className="text-xs text-gray-400">
+              {isEn ? "No reviews yet" : "尚無評價"}
+            </span>
+          </div>
+        )}
 
         {/* Title */}
         <Link href={`/tours/${tour.id}`}>

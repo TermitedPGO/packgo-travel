@@ -95,20 +95,14 @@ export default function WhyChooseUs() {
           })}
         </div>
 
-        {/* Stats Row */}
-        <div className="mt-12 pt-10 border-t border-gray-800 grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6 text-center">
-          {[
-            { numZh: "10+", labelZh: "年旅遊經驗", labelEn: "Years Experience" },
-            { numZh: "1,200+", labelZh: "滿意旅客", labelEn: "Happy Travelers" },
-            { numZh: "50+", labelZh: "旅遊目的地", labelEn: "Destinations" },
-            { numZh: "98%", labelZh: "客戶滿意度", labelEn: "Satisfaction Rate" },
-          ].map((stat, i) => (
-            <div key={i}>
-              <div className="text-2xl sm:text-3xl font-bold text-white mb-1">{stat.numZh}</div>
-              <div className="text-gray-400 text-sm">{isEn ? stat.labelEn : stat.labelZh}</div>
-            </div>
-          ))}
-        </div>
+        {/*
+          Stats Row removed per FTC Act §5 (deceptive acts/practices) and
+          16 CFR Part 260 (advertising substantiation).
+          Prior hardcoded numbers ("10+ years", "1,200+ travelers",
+          "50+ destinations", "98% satisfaction") had no reasonable basis
+          documented. Re-introduce only when backed by auditable data
+          (e.g., tRPC query over bookings table with tourist-facing caveats).
+        */}
       </div>
     </section>
   );
