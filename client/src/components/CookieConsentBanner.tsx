@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import { Cookie, X } from "lucide-react";
 import { useLocale } from "@/contexts/LocaleContext";
+import { loadGA4 } from "@/lib/analytics";
 
 /**
  * CCPA/CPRA-compliant cookie consent banner.
@@ -43,13 +44,22 @@ export default function CookieConsentBanner() {
   useEffect(() => {
     // Only show if the user has NOT already decided.
     const decided = getCookieConsent();
-    if (!decided) setVisible(true);
+    if (!decided) {
+      setVisible(true);
+    } else if (decided === "all") {
+      // Returning visitor who already accepted analytics — load GA4 now.
+      loadGA4();
+    }
   }, []);
 
   if (!visible) return null;
 
   const handle = (choice: Consent) => {
     setCookieConsent(choice);
+    if (choice === "all") {
+      // User just accepted analytics — inject GA4 script immediately.
+      loadGA4();
+    }
     setVisible(false);
   };
 

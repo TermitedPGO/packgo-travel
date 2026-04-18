@@ -60,34 +60,12 @@ function HomeContent() {
         {/* Newsletter Section */}
         <NewsletterSection />
 
-        {/* Trustpilot Section */}
-        <section className="py-12 bg-white border-b border-gray-200">
-          <div className="container flex flex-col items-center justify-center text-center">
-            <h4 className="text-xl font-serif font-bold text-black mb-6">{t('reviews.title')}</h4>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-8 md:gap-16 w-full max-w-3xl">
-              {[
-                { name: "5 stars", desc: "This is my first time using a Chinese agency...", author: "Melody, Dec 24" },
-                { name: "Good company", desc: "Good company", author: "Ming Kuang, Dec 22" },
-                { name: "Excellent job", desc: "Excellent job", author: "Ruixin Lanwu, Dec 22" },
-              ].map((review, idx) => (
-                <div key={idx} className="flex flex-col items-start text-left max-w-[250px]">
-                  <div className="flex text-black mb-2">
-                    {"★★★★★".split("").map((star, i) => (
-                      <span key={i} className="text-xl">★</span>
-                    ))}
-                  </div>
-                  <h5 className="font-bold text-black text-sm mb-1">{review.name}</h5>
-                  <p className="text-gray-600 text-xs mb-2 line-clamp-2">{review.desc}</p>
-                  <span className="text-gray-400 text-[10px]">{review.author}</span>
-                </div>
-              ))}
-            </div>
-            <div className="mt-8 flex items-center gap-2 text-sm font-medium text-black">
-              <span className="text-black text-xl">★</span> Trustpilot
-              <span className="text-gray-500 font-normal">{t('reviews.basedOn')}</span>
-            </div>
-          </div>
-        </section>
+        {/* Trustpilot section removed per FTC 16 CFR §465 (eff. 2024-10-21).
+            Hardcoded reviews (Melody / Ming Kuang / Ruixin Lanwu) and
+            "Based on 1,200+ reviews" claim violated the rule against
+            fabricated consumer reviews. Verified reviews are handled by
+            <TestimonialsCarousel /> above, which only shows reviews linked
+            to actual completed bookings via trpc.reviews.listVerified. */}
       </main>
 
       <Footer />

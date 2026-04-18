@@ -4,7 +4,12 @@
  *
  * Provides typed wrappers around window.gtag() for all custom events.
  * All functions are no-ops if gtag is not loaded (e.g., ad-blocker).
+ *
+ * CCPA/CPRA: gtag.js is NOT loaded on page load. It is injected by loadGA4()
+ * only after the user accepts analytics cookies via CookieConsentBanner.
  */
+
+const GA4_MEASUREMENT_ID = "G-91VLGFSK70";
 
 declare global {
   interface Window {
@@ -21,6 +26,28 @@ function hasAnalyticsConsent(): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Inject the GA4 gtag.js script and update consent to granted.
+ * Idempotent — safe to call multiple times (guarded by window.__ga4Loaded).
+ * Must be called AFTER the user accepts analytics cookies.
+ */
+export function loadGA4() {
+  if (typeof window === "undefined") return;
+  if (!hasAnalyticsConsent()) return;
+  const w = window as unknown as { __ga4Loaded?: boolean; gtag?: (...a: unknown[]) => void };
+  if (w.__ga4Loaded) {
+    w.gtag?.("consent", "update", { analytics_storage: "granted" });
+    return;
+  }
+  w.__ga4Loaded = true;
+  w.gtag?.("consent", "update", { analytics_storage: "granted" });
+  const script = document.createElement("script");
+  script.async = true;
+  script.src = `https://www.googletagmanager.com/gtag/js?id=${GA4_MEASUREMENT_ID}`;
+  document.head.appendChild(script);
+  w.gtag?.("config", GA4_MEASUREMENT_ID, { anonymize_ip: true });
 }
 
 /** Safe gtag caller — skips if gtag is blocked OR user has not opted in. */
