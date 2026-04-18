@@ -170,13 +170,20 @@ export default function RegionPage() {
   const [, setLocation] = useLocation();
   const { t } = useLocale();
   
+  // Render a friendly fallback when the :region slug doesn't match any
+  // known region config — avoids leaking the literal "{region}" template
+  // placeholder to the UI.
+  const friendlyRegion = (region || "")
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase()) || "this region";
   const config = regionConfig[region || ""] || {
     nameKey: "regionPage.title",
-    label: "Unknown",
+    nameParams: { region: friendlyRegion },
+    label: friendlyRegion,
     descriptionKey: "regionPage.subtitle",
     image: "/images/dest-europe.webp",
     continents: []
-  };
+  } as any;
 
   // 獲取篩選選項（包含國家列表）
   const { data: filterOptions, isLoading } = trpc.tours.getFilterOptions.useQuery();
@@ -218,7 +225,7 @@ export default function RegionPage() {
           <section className="relative h-[400px] overflow-hidden">
             <img 
               src={config.image} 
-              alt={t(config.nameKey)}
+              alt={t(config.nameKey, (config as any).nameParams)}
               className="w-full h-full object-cover"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
@@ -233,7 +240,7 @@ export default function RegionPage() {
                   {t('common.backToHome')}
                 </Button>
                 <h1 className="text-4xl md:text-5xl font-serif font-bold text-white mb-2">
-                  {t(config.nameKey)}
+                  {t(config.nameKey, (config as any).nameParams)}
                 </h1>
                 <p className="text-gray-200 text-lg">{t(config.descriptionKey)}</p>
               </div>
@@ -262,7 +269,7 @@ export default function RegionPage() {
         <section className="relative h-[400px] overflow-hidden">
           <img 
             src={config.image} 
-            alt={t(config.nameKey)}
+            alt={t(config.nameKey, (config as any).nameParams)}
             className="w-full h-full object-cover"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
@@ -277,7 +284,7 @@ export default function RegionPage() {
                 {t('common.backToHome')}
               </Button>
               <h1 className="text-4xl md:text-5xl font-serif font-bold text-white mb-2">
-                {t(config.nameKey)}
+                {t(config.nameKey, (config as any).nameParams)}
               </h1>
               <p className="text-gray-200 text-lg">{t(config.descriptionKey)}</p>
             </div>

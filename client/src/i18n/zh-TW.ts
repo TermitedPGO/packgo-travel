@@ -331,7 +331,14 @@ export const zhTW = {
     quickLinks: '快速連結',
     services: '我們的服務',
     contactInfo: '聯絡資訊',
-    copyright: '© {year} PACK&GO Travel Agency. All Rights Reserved.',
+    copyright: '© {year} Pack & Go, LLC. 版權所有。',
+    legalName: 'Pack & Go, LLC',
+    businessLicense: 'Newark 商業執照 #115622',
+    cstNumber: '加州旅遊業者登記證 (CST) #2166984-40',
+    tcrfParticipant: '加州旅客消費補償基金 (TCRF) 參與者',
+    trustAccountStatement: '加州法律要求特定旅遊業者持有信託帳戶或履約保證。本公司持有 Bank of America 開立之客戶信託帳戶。',
+    stateDisclaimer: '旅遊業者登記不代表加州政府之背書。',
+    legalLinks: '法律聲明',
   },
 
   // 服務

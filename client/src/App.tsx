@@ -8,6 +8,7 @@ import { trackPageView } from "@/lib/analytics";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { LocaleProvider } from "./contexts/LocaleContext";
+import CookieConsentBanner from "./components/CookieConsentBanner";
 
 // ─── Eagerly loaded (critical path) ──────────────────────────────────────────
 import Home from "./pages/Home";
@@ -135,6 +136,7 @@ function App() {
           <TooltipProvider>
             <Toaster />
             <Router />
+            <CookieConsentBanner />
           </TooltipProvider>
         </LocaleProvider>
       </ThemeProvider>

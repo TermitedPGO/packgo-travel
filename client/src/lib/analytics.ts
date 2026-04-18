@@ -13,8 +13,19 @@ declare global {
   }
 }
 
-/** Safe gtag caller — silently skips if gtag is blocked */
+/** Has the user accepted analytics cookies (CCPA/CPRA gate). */
+function hasAnalyticsConsent(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem("pag_cookie_consent") === "all";
+  } catch {
+    return false;
+  }
+}
+
+/** Safe gtag caller — skips if gtag is blocked OR user has not opted in. */
 function gtag(...args: unknown[]) {
+  if (!hasAnalyticsConsent()) return;
   if (typeof window !== "undefined" && typeof window.gtag === "function") {
     window.gtag(...args);
   }

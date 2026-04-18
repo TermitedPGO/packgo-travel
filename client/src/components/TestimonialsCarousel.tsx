@@ -1,63 +1,46 @@
 import { useState, useEffect } from "react";
-import { ChevronLeft, ChevronRight, Quote } from "lucide-react";
+import { ChevronLeft, ChevronRight, Quote, Star } from "lucide-react";
 import { useLocale } from "@/contexts/LocaleContext";
+import { trpc } from "@/lib/trpc";
 
-const testimonials = [
-  {
-    nameZh: "陳美玲",
-    nameEn: "Melody Chen",
-    locationZh: "台北",
-    locationEn: "Taipei",
-    tourZh: "日本北海道 8 天 7 夜",
-    tourEn: "Hokkaido Japan 8D7N",
-    rating: 5,
-    textZh: "第一次使用 PACK&GO 訂行程，完全超出預期！領隊非常專業，行程安排得很緊湊但不疲憊，每個景點都很精彩。飯店選擇也很棒，下次一定還要再訂！",
-    textEn: "First time using PACK&GO and it completely exceeded my expectations! The guide was very professional, the itinerary was well-paced, and every attraction was amazing. Will definitely book again!",
-    date: "Dec 2024",
-  },
-  {
-    nameZh: "王明光",
-    nameEn: "Ming Kuang Wang",
-    locationZh: "高雄",
-    locationEn: "Kaohsiung",
-    tourZh: "歐洲精華 12 天",
-    tourEn: "Europe Highlights 12 Days",
-    rating: 5,
-    textZh: "PACK&GO 的服務真的很好！從出發前的準備到回程，每個環節都照顧得很周到。特別是簽證辦理幫了我們很大的忙，省去很多麻煩。強烈推薦！",
-    textEn: "PACK&GO's service is truly excellent! From pre-trip preparation to the return journey, every detail was well taken care of. The visa processing assistance was especially helpful. Highly recommended!",
-    date: "Dec 2024",
-  },
-  {
-    nameZh: "林瑞欣",
-    nameEn: "Ruixin Lin",
-    locationZh: "台中",
-    locationEn: "Taichung",
-    tourZh: "土耳其熱氣球 10 天",
-    tourEn: "Turkey Hot Air Balloon 10 Days",
-    rating: 5,
-    textZh: "土耳其熱氣球之旅是我這輩子最難忘的旅行！PACK&GO 安排的每個細節都很完美，從卡帕多奇亞的熱氣球到伊斯坦堡的美食，全都令人印象深刻。",
-    textEn: "The Turkey hot air balloon tour was the most unforgettable trip of my life! Every detail arranged by PACK&GO was perfect, from the Cappadocia balloon ride to Istanbul's cuisine.",
-    date: "Nov 2024",
-  },
-  {
-    nameZh: "張家豪",
-    nameEn: "Jason Chang",
-    locationZh: "新竹",
-    locationEn: "Hsinchu",
-    tourZh: "地中海郵輪 7 天",
-    tourEn: "Mediterranean Cruise 7 Days",
-    rating: 5,
-    textZh: "郵輪行程安排得非常好，PACK&GO 的工作人員在出發前詳細說明了所有注意事項，讓我們全家都玩得很開心。孩子們特別喜歡船上的活動，下次還要再來！",
-    textEn: "The cruise itinerary was excellently arranged. PACK&GO staff explained all details before departure, making it a wonderful family trip. The kids loved the onboard activities!",
-    date: "Oct 2024",
-  },
-];
+/**
+ * Real-review carousel.
+ *
+ * Legal note (FTC 16 CFR Part 465, effective 2024-10-21):
+ * Displaying fabricated or unverifiable testimonials is a civil violation
+ * punishable by up to $51,744 per occurrence. This component therefore
+ * ONLY renders reviews that come from `reviews.listVerified` on the server,
+ * where each row is required to carry a matching `bookingId` proving the
+ * reviewer actually completed a tour. If no verified reviews exist yet,
+ * an honest placeholder is shown instead.
+ */
+
+interface VerifiedReview {
+  id: number;
+  displayName: string;
+  location?: string | null;
+  tourTitle: string;
+  rating: number;
+  text: string;
+  createdAt: string;
+  bookingId: number;
+}
 
 export default function TestimonialsCarousel() {
   const [current, setCurrent] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
   const { language } = useLocale();
   const isEn = language === "en";
+
+  // Only show reviews that are tied to a real completed booking.
+  // If the endpoint doesn't exist yet, the query returns undefined and we
+  // fall through to the "no reviews yet" placeholder.
+  const reviewsQuery = (trpc as any)?.reviews?.listVerified?.useQuery?.(
+    { limit: 10 },
+    { retry: false }
+  );
+  const reviews: VerifiedReview[] = reviewsQuery?.data ?? [];
+  const isLoading: boolean = reviewsQuery?.isLoading ?? false;
 
   const goTo = (index: number) => {
     if (isAnimating) return;
@@ -66,16 +49,59 @@ export default function TestimonialsCarousel() {
     setTimeout(() => setIsAnimating(false), 300);
   };
 
-  const prev = () => goTo((current - 1 + testimonials.length) % testimonials.length);
-  const next = () => goTo((current + 1) % testimonials.length);
+  const prev = () =>
+    goTo((current - 1 + Math.max(reviews.length, 1)) % Math.max(reviews.length, 1));
+  const next = () => goTo((current + 1) % Math.max(reviews.length, 1));
 
-  // Auto-advance every 6 seconds
   useEffect(() => {
+    if (reviews.length <= 1) return;
     const timer = setInterval(next, 6000);
     return () => clearInterval(timer);
-  }, [current]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current, reviews.length]);
 
-  const t = testimonials[current];
+  // --- Empty state (no verified reviews yet) ---------------------------------
+  if (!isLoading && reviews.length === 0) {
+    return (
+      <section className="py-16 bg-white border-b border-gray-200">
+        <div className="container">
+          <div className="text-center mb-8">
+            <p className="text-xs font-bold tracking-[0.3em] text-gray-400 uppercase mb-3">
+              {isEn ? "VERIFIED REVIEWS" : "實證旅客評價"}
+            </p>
+            <h2 className="text-3xl md:text-4xl font-serif font-bold text-black mb-4">
+              {isEn ? "Be Our First Story" : "成為我們第一位說故事的旅客"}
+            </h2>
+          </div>
+          <div className="max-w-2xl mx-auto rounded-xl border border-gray-200 bg-gray-50 p-8 text-center">
+            <Quote className="h-10 w-10 text-gray-300 mx-auto mb-4" />
+            <p className="text-gray-700 text-base leading-relaxed mb-2">
+              {isEn
+                ? "Pack & Go publishes reviews only after a customer has completed a tour. We don't display fabricated or unverified testimonials."
+                : "Pack & Go 僅發布真實旅客完成行程後的評價。我們不展示任何未經驗證的推薦。"}
+            </p>
+            <p className="text-gray-500 text-sm">
+              {isEn
+                ? "Your trip can be the first review shown here."
+                : "您的旅程，將是這裡的第一則真實回饋。"}
+            </p>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <section className="py-16 bg-white border-b border-gray-200">
+        <div className="container">
+          <div className="h-48 animate-pulse rounded-xl bg-gray-100 max-w-3xl mx-auto" />
+        </div>
+      </section>
+    );
+  }
+
+  const r = reviews[current];
 
   return (
     <section className="py-16 bg-white border-b border-gray-200">
@@ -83,11 +109,16 @@ export default function TestimonialsCarousel() {
         {/* Section Header */}
         <div className="text-center mb-12">
           <p className="text-xs font-bold tracking-[0.3em] text-gray-400 uppercase mb-3">
-            {isEn ? "TESTIMONIALS" : "旅客評價"}
+            {isEn ? "VERIFIED REVIEWS" : "實證旅客評價"}
           </p>
           <h2 className="text-3xl md:text-4xl font-serif font-bold text-black mb-4">
             {isEn ? "What Our Travelers Say" : "旅客怎麼說"}
           </h2>
+          <p className="text-xs text-gray-500">
+            {isEn
+              ? "Each review is linked to a completed booking. FTC 16 CFR §465 compliant."
+              : "每則評價皆對應實際完成之訂單。符合美國 FTC 16 CFR §465 規範。"}
+          </p>
         </div>
 
         {/* Carousel */}
@@ -95,66 +126,65 @@ export default function TestimonialsCarousel() {
           <div
             className={`transition-opacity duration-300 ${isAnimating ? "opacity-0" : "opacity-100"}`}
           >
-            {/* Quote Icon */}
             <div className="flex justify-center mb-6">
               <Quote className="h-10 w-10 text-gray-200" />
             </div>
 
-            {/* Stars */}
             <div className="flex justify-center gap-1 mb-6">
-              {Array.from({ length: t.rating }).map((_, i) => (
-                <span key={i} className="text-black text-xl">★</span>
+              {Array.from({ length: r.rating }).map((_, i) => (
+                <Star key={i} className="h-5 w-5 fill-black text-black" />
               ))}
             </div>
 
-            {/* Review Text */}
             <blockquote className="text-center text-gray-700 text-lg leading-relaxed mb-8 font-serif italic px-4">
-              "{isEn ? t.textEn : t.textZh}"
+              &ldquo;{r.text}&rdquo;
             </blockquote>
 
-            {/* Reviewer Info */}
             <div className="text-center">
-              <p className="font-bold text-black text-base">
-                {isEn ? t.nameEn : t.nameZh}
-              </p>
+              <p className="font-bold text-black text-base">{r.displayName}</p>
               <p className="text-gray-500 text-sm mt-1">
-                {isEn ? t.locationEn : t.locationZh} · {isEn ? t.tourEn : t.tourZh} · {t.date}
+                {[r.location, r.tourTitle, new Date(r.createdAt).toLocaleDateString(isEn ? "en-US" : "zh-TW", { year: "numeric", month: "short" })]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+              <p className="text-[10px] text-gray-400 mt-2 tracking-wider uppercase">
+                {isEn ? `Verified booking #${r.bookingId}` : `已驗證訂單 #${r.bookingId}`}
               </p>
             </div>
           </div>
 
-          {/* Navigation */}
-          <div className="flex items-center justify-center gap-6 mt-10">
-            <button
-              onClick={prev}
-              className="w-10 h-10 border border-gray-300 hover:border-black flex items-center justify-center transition-colors"
-              aria-label="Previous review"
-            >
-              <ChevronLeft className="h-5 w-5 text-gray-600" />
-            </button>
+          {reviews.length > 1 && (
+            <div className="flex items-center justify-center gap-6 mt-10">
+              <button
+                onClick={prev}
+                className="w-10 h-10 rounded-lg border border-gray-300 hover:border-black flex items-center justify-center transition-colors"
+                aria-label={isEn ? "Previous review" : "上一則評價"}
+              >
+                <ChevronLeft className="h-5 w-5 text-gray-600" />
+              </button>
 
-            {/* Dots */}
-            <div className="flex gap-2">
-              {testimonials.map((_, i) => (
-                <button
-                  key={i}
-                  onClick={() => goTo(i)}
-                  className={`w-2 h-2 transition-all ${
-                    i === current ? "bg-black w-6" : "bg-gray-300 hover:bg-gray-500"
-                  }`}
-                  aria-label={`Go to review ${i + 1}`}
-                />
-              ))}
+              <div className="flex gap-2">
+                {reviews.map((_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => goTo(i)}
+                    className={`h-2 rounded-full transition-all ${
+                      i === current ? "bg-black w-6" : "bg-gray-300 w-2 hover:bg-gray-500"
+                    }`}
+                    aria-label={isEn ? `Go to review ${i + 1}` : `前往第 ${i + 1} 則評價`}
+                  />
+                ))}
+              </div>
+
+              <button
+                onClick={next}
+                className="w-10 h-10 rounded-lg border border-gray-300 hover:border-black flex items-center justify-center transition-colors"
+                aria-label={isEn ? "Next review" : "下一則評價"}
+              >
+                <ChevronRight className="h-5 w-5 text-gray-600" />
+              </button>
             </div>
-
-            <button
-              onClick={next}
-              className="w-10 h-10 border border-gray-300 hover:border-black flex items-center justify-center transition-colors"
-              aria-label="Next review"
-            >
-              <ChevronRight className="h-5 w-5 text-gray-600" />
-            </button>
-          </div>
+          )}
         </div>
       </div>
     </section>

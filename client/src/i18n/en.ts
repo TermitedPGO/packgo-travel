@@ -330,7 +330,14 @@ export const en = {
     quickLinks: 'Quick Links',
     services: 'Our Services',
     contactInfo: 'Contact Info',
-    copyright: '© {year} PACK&GO Travel Agency. All Rights Reserved.',
+    copyright: '© {year} Pack & Go, LLC. All Rights Reserved.',
+    legalName: 'Pack & Go, LLC',
+    businessLicense: 'Newark Business License #115622',
+    cstNumber: 'California Seller of Travel (CST) #2166984-40',
+    tcrfParticipant: 'Participant in the California Travel Consumer Restitution Fund (TCRF)',
+    trustAccountStatement: 'California law requires certain sellers of travel to have a trust account or bond. This business has a trust account at Bank of America, N.A.',
+    stateDisclaimer: 'Registration as a seller of travel does not constitute approval by the State of California.',
+    legalLinks: 'Legal',
   },
 
   // Services

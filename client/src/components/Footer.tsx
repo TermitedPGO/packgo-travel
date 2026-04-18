@@ -96,12 +96,31 @@ export default function Footer() {
           </div>
         </div>
 
+        {/* Legal Disclosures (California Seller of Travel - B&P §17550 et seq.) */}
+        <div className="border-t border-gray-800 pt-8 pb-6">
+          <div className="text-xs text-gray-400 leading-relaxed space-y-2 max-w-4xl">
+            <p className="font-semibold text-gray-300">
+              {t('footer.legalName')} &middot; 39055 Cedar Blvd #126, Newark, CA 94560
+            </p>
+            <p>
+              {t('footer.businessLicense')} &middot; {t('footer.cstNumber')}
+            </p>
+            <p>{t('footer.tcrfParticipant')}</p>
+            <p className="text-gray-500">{t('footer.trustAccountStatement')}</p>
+            <p className="text-gray-500 italic">{t('footer.stateDisclaimer')}</p>
+          </div>
+        </div>
+
         {/* Bottom Bar */}
-        <div className="border-t border-gray-800 pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
+        <div className="border-t border-gray-800 pt-6 flex flex-col md:flex-row justify-between items-center gap-4">
           <p className="text-xs text-gray-500">
             {t('footer.copyright', { year: new Date().getFullYear() })}
           </p>
-
+          <div className="flex gap-4 text-xs text-gray-500">
+            <Link href="/privacy-policy" className="hover:text-gray-300 transition-colors">{t('nav.privacyPolicy')}</Link>
+            <span>&middot;</span>
+            <Link href="/terms-of-service" className="hover:text-gray-300 transition-colors">{t('nav.termsOfService')}</Link>
+          </div>
         </div>
       </div>
     </footer>
