@@ -1,113 +1,131 @@
-// Preconfigured storage helpers for Manus WebDev templates
-// Uses the Biz-provided storage proxy (Authorization: Bearer <token>)
+// Storage helpers — Cloudflare R2 (S3-compatible) for Fly.io deployment.
+//
+// Replaces the legacy Manus Forge storage proxy. Public API unchanged:
+//   storagePut(key, data, contentType) -> { key, url }
+//   storageGet(key) -> { key, url }
+//   storageImagePut(baseKey, buffer, options) -> OptimizedImageUrls
+//
+// URL strategy:
+//   - If R2_PUBLIC_BASE_URL is set (e.g. a Cloudflare Custom Domain bound to the
+//     bucket), uploads return <public-base>/<key> and reads return the same
+//     direct URL — cacheable at the CDN.
+//   - Otherwise we return a presigned GET URL (default 1 hour) for reads, and
+//     on upload we also return a presigned URL so the caller always receives
+//     something immediately usable without needing the bucket to be public.
+//
+// Requirements (server/_core/env.ts):
+//   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT, R2_BUCKET
+//   R2_PUBLIC_BASE_URL (optional — enables direct, non-expiring URLs)
 
-import { ENV } from './_core/env';
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+} from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
-type StorageConfig = { baseUrl: string; apiKey: string };
+import { ENV } from "./_core/env";
 
-function getStorageConfig(): StorageConfig {
-  const baseUrl = ENV.forgeApiUrl;
-  const apiKey = ENV.forgeApiKey;
+// ──────────────────────────────────────────────────────────────────────────────
+// Client (lazy-initialised so build/import doesn't fail if env is absent)
+// ──────────────────────────────────────────────────────────────────────────────
 
-  if (!baseUrl || !apiKey) {
+let _client: S3Client | null = null;
+
+function getR2Client(): { client: S3Client; bucket: string; publicBase: string } {
+  if (!ENV.r2AccessKeyId || !ENV.r2SecretAccessKey || !ENV.r2Endpoint || !ENV.r2Bucket) {
     throw new Error(
-      "Storage proxy credentials missing: set BUILT_IN_FORGE_API_URL and BUILT_IN_FORGE_API_KEY"
+      "R2 storage credentials missing. Required env vars: " +
+        "R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT, R2_BUCKET."
     );
   }
-
-  return { baseUrl: baseUrl.replace(/\/+$/, ""), apiKey };
+  if (!_client) {
+    _client = new S3Client({
+      region: "auto", // R2 ignores region but SDK requires one
+      endpoint: ENV.r2Endpoint,
+      credentials: {
+        accessKeyId: ENV.r2AccessKeyId,
+        secretAccessKey: ENV.r2SecretAccessKey,
+      },
+      forcePathStyle: true, // safer for R2's endpoint format
+    });
+  }
+  return {
+    client: _client,
+    bucket: ENV.r2Bucket,
+    publicBase: ENV.r2PublicBaseUrl.replace(/\/+$/, ""),
+  };
 }
 
-function buildUploadUrl(baseUrl: string, relKey: string): URL {
-  const url = new URL("v1/storage/upload", ensureTrailingSlash(baseUrl));
-  url.searchParams.set("path", normalizeKey(relKey));
-  return url;
-}
-
-async function buildDownloadUrl(
-  baseUrl: string,
-  relKey: string,
-  apiKey: string
-): Promise<string> {
-  const downloadApiUrl = new URL(
-    "v1/storage/downloadUrl",
-    ensureTrailingSlash(baseUrl)
-  );
-  downloadApiUrl.searchParams.set("path", normalizeKey(relKey));
-  const response = await fetch(downloadApiUrl, {
-    method: "GET",
-    headers: buildAuthHeaders(apiKey),
-  });
-  return (await response.json()).url;
-}
-
-function ensureTrailingSlash(value: string): string {
-  return value.endsWith("/") ? value : `${value}/`;
-}
+// ──────────────────────────────────────────────────────────────────────────────
+// Key + buffer helpers
+// ──────────────────────────────────────────────────────────────────────────────
 
 function normalizeKey(relKey: string): string {
   return relKey.replace(/^\/+/, "");
 }
 
-function toFormData(
-  data: Buffer | Uint8Array | string,
-  contentType: string,
-  fileName: string
-): FormData {
-  const blob =
-    typeof data === "string"
-      ? new Blob([data], { type: contentType })
-      : new Blob([data as any], { type: contentType });
-  const form = new FormData();
-  form.append("file", blob, fileName || "file");
-  return form;
+function toNodeBuffer(data: Buffer | Uint8Array | string, contentType: string): Buffer {
+  if (typeof data === "string") {
+    // If caller passes JSON/text, encode as UTF-8. For binary, pass Buffer/Uint8Array.
+    return Buffer.from(data, contentType.startsWith("text/") || contentType.includes("json") ? "utf8" : "binary");
+  }
+  if (Buffer.isBuffer(data)) return data;
+  return Buffer.from(data);
 }
 
-function buildAuthHeaders(apiKey: string): HeadersInit {
-  return { Authorization: `Bearer ${apiKey}` };
+async function buildReadUrl(key: string): Promise<string> {
+  const { client, bucket, publicBase } = getR2Client();
+  if (publicBase) {
+    return `${publicBase}/${encodeURI(key)}`;
+  }
+  // Presigned GET, 1-hour TTL
+  const cmd = new GetObjectCommand({ Bucket: bucket, Key: key });
+  return await getSignedUrl(client, cmd, { expiresIn: 3600 });
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Public API
+// ──────────────────────────────────────────────────────────────────────────────
 
 export async function storagePut(
   relKey: string,
   data: Buffer | Uint8Array | string,
   contentType = "application/octet-stream"
 ): Promise<{ key: string; url: string }> {
-  const { baseUrl, apiKey } = getStorageConfig();
+  const { client, bucket } = getR2Client();
   const key = normalizeKey(relKey);
-  const uploadUrl = buildUploadUrl(baseUrl, key);
-  const formData = toFormData(data, contentType, key.split("/").pop() ?? key);
-  const response = await fetch(uploadUrl, {
-    method: "POST",
-    headers: buildAuthHeaders(apiKey),
-    body: formData,
-  });
+  const body = toNodeBuffer(data, contentType);
 
-  if (!response.ok) {
-    const message = await response.text().catch(() => response.statusText);
-    throw new Error(
-      `Storage upload failed (${response.status} ${response.statusText}): ${message}`
-    );
-  }
-  const url = (await response.json()).url;
+  await client.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+    })
+  );
+
+  const url = await buildReadUrl(key);
   return { key, url };
 }
 
-export async function storageGet(relKey: string): Promise<{ key: string; url: string; }> {
-  const { baseUrl, apiKey } = getStorageConfig();
+export async function storageGet(relKey: string): Promise<{ key: string; url: string }> {
   const key = normalizeKey(relKey);
-  return {
-    key,
-    url: await buildDownloadUrl(baseUrl, key, apiKey),
-  };
+  const url = await buildReadUrl(key);
+  return { key, url };
 }
 
-// Image optimization and upload
+// ──────────────────────────────────────────────────────────────────────────────
+// Optimised image upload (sharp multi-size pipeline unchanged)
+// ──────────────────────────────────────────────────────────────────────────────
+
 import {
   optimizeImage,
   generateStorageKeys,
   getMimeType,
   type ImageOptimizationOptions,
-} from './imageOptimizer';
+} from "./imageOptimizer";
 
 export interface OptimizedImageUrls {
   thumbnail: string;
@@ -117,8 +135,8 @@ export interface OptimizedImageUrls {
 }
 
 /**
- * Upload an image with automatic optimization and multiple sizes
- * @param baseKey - Base storage key without extension (e.g., "tours/123/image1")
+ * Upload an image with automatic optimization and multiple sizes.
+ * @param baseKey - Base storage key without extension (e.g. "tours/123/image1")
  * @param imageBuffer - Input image buffer
  * @param options - Optimization options
  * @returns URLs for all generated sizes
@@ -128,16 +146,12 @@ export async function storageImagePut(
   imageBuffer: Buffer,
   options: ImageOptimizationOptions = {}
 ): Promise<OptimizedImageUrls> {
-  const format = options.format || 'webp';
+  const format = options.format || "webp";
   const mimeType = getMimeType(format);
 
-  // Optimize image to multiple sizes
   const optimized = await optimizeImage(imageBuffer, options);
-
-  // Generate storage keys
   const keys = generateStorageKeys(baseKey, format);
 
-  // Upload all sizes in parallel
   const [thumbnailResult, mediumResult, largeResult, originalResult] = await Promise.all([
     storagePut(keys.thumbnail, optimized.thumbnail, mimeType),
     storagePut(keys.medium, optimized.medium, mimeType),

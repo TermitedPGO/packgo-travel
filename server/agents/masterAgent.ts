@@ -1537,7 +1537,109 @@ export class MasterAgent {
       })).filter((f: any) => f.url !== '');
       // Keep URL array for backward compat (used in allImageUrls below)
       const featureImageUrls = featureImageObjects.map((f: any) => f.url);
-      
+
+      // ────────────────────────────────────────────────────────────────────────
+      // Round 68 Fix 4: Pre-compute hotel/meal image pools WITH Unsplash fallback.
+      // When the source URL doesn't have structured hotel/meal data (e.g. japan.travel,
+      // generic blog posts), both `scrapedHotelUrls` and `lionFeatureImages` are empty,
+      // which used to leave hotelImages=[] and meals[].image="" (QA deducts up to -29).
+      // Now we do an Unsplash search using hotel name / meal name / city as keywords.
+      // ────────────────────────────────────────────────────────────────────────
+      const hotelsArrRaw = Array.isArray(hotelData) ? hotelData : (hotelData?.hotels || []);
+      const mealsArrRaw = Array.isArray(mealData) ? mealData : (mealData?.meals || []);
+      const lionFIForPools = (rawData as any)?.lionFeatureImages || [];
+      const lionFIUrlsForPools: string[] = lionFIForPools
+        .filter((img: any) => img?.url && typeof img.url === 'string' && img.url.startsWith('http'))
+        .map((img: any) => img.url);
+      const scrapedHotelUrls: string[] = hotelsArrRaw
+        .map((h: any) => h.image)
+        .filter((u: any) => typeof u === 'string' && u.startsWith('http'));
+      let hotelImagePool: string[] = scrapedHotelUrls.length > 0
+        ? scrapedHotelUrls.slice()
+        : lionFIUrlsForPools.slice();
+      let mealImagePool: string[] = lionFIUrlsForPools.slice();
+
+      const cityHint = rawData.location?.destinationCity || rawData.location?.destinationCountry || '';
+
+      if (hotelImagePool.length === 0) {
+        try {
+          const { searchUnsplashPhotos } = await import('../services/unsplashService');
+          const queries = [
+            ...hotelsArrRaw.map((h: any) => h.name).filter((n: any) => typeof n === 'string' && n.length > 0).slice(0, 2),
+            cityHint ? `${cityHint} hotel` : 'luxury hotel',
+            cityHint ? `${cityHint} resort` : 'boutique hotel',
+          ];
+          for (const q of queries) {
+            if (hotelImagePool.length >= 4) break;
+            const photos = await searchUnsplashPhotos(q, 2);
+            hotelImagePool.push(...photos);
+          }
+          console.log(`[MasterAgent] Round 68 Fix 4: hotelImagePool Unsplash fallback → ${hotelImagePool.length} images`);
+        } catch (e) {
+          console.warn('[MasterAgent] Round 68 Fix 4: hotelImagePool Unsplash fallback failed:', e);
+        }
+      }
+
+      if (mealImagePool.length === 0) {
+        try {
+          const { searchUnsplashPhotos } = await import('../services/unsplashService');
+          const queries = [
+            ...mealsArrRaw.map((m: any) => m.restaurant || m.name || m.cuisine)
+              .filter((n: any) => typeof n === 'string' && n.length > 0).slice(0, 3),
+            cityHint ? `${cityHint} food` : 'cuisine food',
+            cityHint ? `${cityHint} restaurant` : 'fine dining restaurant',
+          ];
+          for (const q of queries) {
+            if (mealImagePool.length >= 6) break;
+            const photos = await searchUnsplashPhotos(q, 2);
+            mealImagePool.push(...photos);
+          }
+          console.log(`[MasterAgent] Round 68 Fix 4: mealImagePool Unsplash fallback → ${mealImagePool.length} images`);
+        } catch (e) {
+          console.warn('[MasterAgent] Round 68 Fix 4: mealImagePool Unsplash fallback failed:', e);
+        }
+      }
+
+      // ────────────────────────────────────────────────────────────────────────
+      // Round 69 Fix 2: highlightImagePool — ensure highlights and keyFeatures
+      // have enough images. Previously when ItineraryAgent produced 7-8 highlights
+      // but ImagePromptAgent only returned 4-6 featureImages, the trailing
+      // highlights got image="" (rendered as empty grey boxes on tour detail page).
+      // Vietnam: 7 highlights → 4 images (3 empty). Fukuoka: 8 → 4 (4 empty).
+      // Now we top up with Unsplash using highlight titles + destination as queries.
+      // ────────────────────────────────────────────────────────────────────────
+      const highlightsArrForPool = analyzedContent.highlights || [];
+      const highlightImagePool: string[] = featureImages
+        .filter((img: any) => img?.url && typeof img.url === 'string' && img.url.startsWith('http'))
+        .map((img: any) => img.url);
+
+      if (highlightImagePool.length < highlightsArrForPool.length) {
+        const needed = highlightsArrForPool.length - highlightImagePool.length;
+        try {
+          const { searchUnsplashPhotos } = await import('../services/unsplashService');
+          const startIdx = highlightImagePool.length;
+          // Build queries from trailing highlights that have no image yet
+          const queries: string[] = [];
+          for (let i = startIdx; i < highlightsArrForPool.length; i++) {
+            const h: any = highlightsArrForPool[i];
+            const title = (typeof h?.title === 'string' && h.title.length > 0) ? h.title : '';
+            const q = title ? `${title} ${cityHint || ''}`.trim() : (cityHint ? `${cityHint} landmark` : 'travel destination');
+            queries.push(q);
+          }
+          // Add one generic destination fallback query
+          queries.push(cityHint ? `${cityHint} travel scenery` : 'travel scenery');
+
+          for (const q of queries) {
+            if (highlightImagePool.length >= highlightsArrForPool.length) break;
+            const photos = await searchUnsplashPhotos(q, 1);
+            if (photos.length > 0) highlightImagePool.push(...photos);
+          }
+          console.log(`[MasterAgent] Round 69 Fix 2: highlightImagePool topped up → ${highlightImagePool.length}/${highlightsArrForPool.length} (needed +${needed})`);
+        } catch (e) {
+          console.warn('[MasterAgent] Round 69 Fix 2: highlightImagePool Unsplash fallback failed:', e);
+        }
+      }
+
       // ========================================================================
       // Phase 5: Assemble Final Data
       // ========================================================================
@@ -1650,11 +1752,35 @@ export class MasterAgent {
         // Color theme
         colorTheme: JSON.stringify(colorTheme),
         
-        // Highlights
-        highlights: JSON.stringify(analyzedContent.highlights),
-        
-        // Key Features (required field)
-        keyFeatures: JSON.stringify(analyzedContent.highlights || []),
+        // Highlights — Round 68 Fix 3 + Round 69 Fix 2: merge image onto each
+        // highlight. Round 68 merged from featureImageObjects (one per highlight);
+        // Round 69 adds highlightImagePool fallback for when ItineraryAgent produces
+        // more highlights than ImagePromptAgent generated images for. The pool is
+        // pre-topped-up with Unsplash so every highlight gets a real URL.
+        highlights: JSON.stringify(
+          (analyzedContent.highlights || []).map((h: any, i: number) => ({
+            ...h,
+            image: (h.image && typeof h.image === 'string' && h.image.startsWith('http'))
+              ? h.image
+              : (featureImageObjects[i]?.url
+                  || highlightImagePool[i]
+                  || (highlightImagePool.length > 0 ? highlightImagePool[i % highlightImagePool.length] : '')),
+            imageAlt: h.imageAlt || featureImageObjects[i]?.alt || h.title || '',
+          }))
+        ),
+
+        // Key Features — mirror the same merge so cards/gallery stay consistent
+        keyFeatures: JSON.stringify(
+          (analyzedContent.highlights || []).map((h: any, i: number) => ({
+            ...h,
+            image: (h.image && typeof h.image === 'string' && h.image.startsWith('http'))
+              ? h.image
+              : (featureImageObjects[i]?.url
+                  || highlightImagePool[i]
+                  || (highlightImagePool.length > 0 ? highlightImagePool[i % highlightImagePool.length] : '')),
+            imageAlt: h.imageAlt || featureImageObjects[i]?.alt || h.title || '',
+          }))
+        ),
         
         // Feature Images — Fix 2 (Round 62): store full object {url, alt, caption, position}
         featureImages: JSON.stringify(featureImageObjects),
@@ -1671,79 +1797,59 @@ export class MasterAgent {
         // Detailed Notice
         noticeDetailed: JSON.stringify(noticeData),
         
-        // Round 67: Compute shared image pool ONCE for hotels / meals / hotelImages reuse.
-        // Previously each hotel/meal object had an empty `image` field because DetailsSkill's
-        // Claude prompt never received lionFeatureImages. This round-robin-assigns the scraped
-        // CDN URLs onto each hotel[i] / meal[i] so cards render thumbnails.
-        ...(() => {
-          const hotelsArrRaw = Array.isArray(hotelData) ? hotelData : (hotelData?.hotels || []);
-          const mealsArrRaw = Array.isArray(mealData) ? mealData : (mealData?.meals || []);
-          const lionFI = (rawData as any)?.lionFeatureImages || [];
-          const lionFIUrls: string[] = lionFI
-            .filter((img: any) => img?.url && typeof img.url === 'string' && img.url.startsWith('http'))
-            .map((img: any) => img.url);
-          const scrapedHotelUrls: string[] = hotelsArrRaw
-            .map((h: any) => h.image)
-            .filter((u: any) => typeof u === 'string' && u.startsWith('http'));
-          const hotelImagePool = scrapedHotelUrls.length > 0 ? scrapedHotelUrls : lionFIUrls;
-          const mealImagePool = lionFIUrls; // meals use attraction/feature imagery as fallback
+        // Round 68 Fix 4: hotels / meals / hotelImages — use pre-computed pools that
+        // include an Unsplash fallback when the source has no structured images.
+        hotels: JSON.stringify(
+          hotelsArrRaw.map((h: any, i: number) => ({
+            name: h.name,
+            stars: h.stars,
+            description: h.description,
+            facilities: h.facilities,
+            location: h.location,
+            image: (typeof h.image === 'string' && h.image.startsWith('http'))
+              ? h.image
+              : (hotelImagePool.length > 0 ? hotelImagePool[i % hotelImagePool.length] : ''),
+            imageAlt: h.imageAlt || h.name || ''
+          }))
+        ),
 
-          if (hotelImagePool.length === 0) {
-            console.warn(`[MasterAgent] Round 67: no hotel image pool available — hotels[].image will be empty`);
-          }
-          if (mealImagePool.length === 0) {
-            console.warn(`[MasterAgent] Round 67: no meal image pool available — meals[].image will be empty`);
-          }
+        meals: JSON.stringify(
+          mealsArrRaw.map((m: any, i: number) => ({
+            name: m.name,
+            type: m.type,
+            description: m.description,
+            cuisine: m.cuisine,
+            restaurant: m.restaurant,
+            image: (typeof m.image === 'string' && m.image.startsWith('http'))
+              ? m.image
+              : (mealImagePool.length > 0 ? mealImagePool[i % mealImagePool.length] : ''),
+            imageAlt: m.imageAlt || m.name || ''
+          }))
+        ),
 
-          return {
-            // Hotels — Round 67: round-robin assign image from pool when Claude returned empty
-            hotels: JSON.stringify(
-              hotelsArrRaw.map((h: any, i: number) => ({
-                name: h.name,
-                stars: h.stars,
-                description: h.description,
-                facilities: h.facilities,
-                location: h.location,
-                image: (typeof h.image === 'string' && h.image.startsWith('http'))
-                  ? h.image
-                  : (hotelImagePool.length > 0 ? hotelImagePool[i % hotelImagePool.length] : ''),
-                imageAlt: h.imageAlt || h.name || ''
-              }))
-            ),
-
-            // Meals — Round 67: round-robin assign image from lionFeatureImages pool
-            meals: JSON.stringify(
-              mealsArrRaw.map((m: any, i: number) => ({
-                name: m.name,
-                type: m.type,
-                description: m.description,
-                cuisine: m.cuisine,
-                restaurant: m.restaurant,
-                image: (typeof m.image === 'string' && m.image.startsWith('http'))
-                  ? m.image
-                  : (mealImagePool.length > 0 ? mealImagePool[i % mealImagePool.length] : ''),
-                imageAlt: m.imageAlt || m.name || ''
-              }))
-            ),
-
-            // hotelImages — preserved from Round 63 behavior (URL array, max 8)
-            hotelImages: JSON.stringify(hotelImagePool.slice(0, 8)),
-          };
-        })(),
+        hotelImages: JSON.stringify(hotelImagePool.slice(0, 8)),
         
         // Fix 3 (Round 62): galleryImages — from featureImageObjects
         galleryImages: JSON.stringify(
           featureImageObjects.map((f: any) => ({ url: f.url, caption: f.caption || f.alt || '' }))
         ),
         
-        // Fix 3 (Round 62): attractions — from highlights with featureImage URLs
+        // Round 68 Fix 5: attractions — fall back to analyzedContent.highlights when
+        // rawData.highlights is empty (which it is for unstructured sources like
+        // japan.travel/en/). Without this fallback attractions=[] and QA deducts -7.
         attractions: JSON.stringify(
-          (rawData.highlights || []).slice(0, 10).map((h: any, i: number) => ({
-            name: h.title || h.name || `景點 ${i + 1}`,
-            description: h.description || h.content || '',
-            image: featureImageObjects[i]?.url || '',
-            imageAlt: h.title || h.name || ''
-          }))
+          (((rawData.highlights && rawData.highlights.length > 0)
+            ? rawData.highlights
+            : (analyzedContent?.highlights || [])) as any[])
+            .slice(0, 10)
+            .map((h: any, i: number) => ({
+              name: h.title || h.name || `景點 ${i + 1}`,
+              description: h.description || h.content || h.subtitle || '',
+              image: (h.image && typeof h.image === 'string' && h.image.startsWith('http'))
+                ? h.image
+                : (featureImageObjects[i]?.url || ''),
+              imageAlt: h.imageAlt || h.title || h.name || ''
+            }))
         ),
         
         // Transportation (交通資訊 - 只有飛機行程才生成)
@@ -1820,9 +1926,33 @@ export class MasterAgent {
         }
       }
 
-      // Fix 2: destinationCountry fallback — scan title + rawText for country keywords
-      if (!finalData.destinationCountry || finalData.destinationCountry === '') {
+      // Round 68 Fix 1b: if still 0, derive duration from dailyItinerary length.
+      // Real-world reason: sources like japan.travel/en/ have no duration copy but we do
+      // generate a multi-day itinerary. Without this the tour shows "0 天" and QA deducts -25.
+      if (!finalData.duration || finalData.duration === 0) {
+        try {
+          const itin = typeof itineraryData === 'string' ? JSON.parse(itineraryData) : itineraryData;
+          const days = Array.isArray(itin) ? itin.length : (Array.isArray(itin?.days) ? itin.days.length : 0);
+          if (days > 0) {
+            finalData.duration = days;
+            finalData.days = days;
+            finalData.nights = days > 1 ? days - 1 : 0;
+            console.log(`[MasterAgent] Round 68 Fix 1b: duration=${days} derived from dailyItinerary.length`);
+          }
+        } catch (e) {
+          console.warn('[MasterAgent] Round 68 Fix 1b: failed to parse itineraryData for duration fallback', e);
+        }
+      }
+
+      // Fix 2: destinationCountry cross-check (Round 68 — runs unconditionally).
+      // Previous behaviour only ran when destinationCountry was empty, so an upstream
+      // mis-extraction (e.g. japan.travel/en/ → "英國") stuck. Now we always derive a
+      // country from the city/title keywords; if the derived answer disagrees with the
+      // existing value we override, because city names are more reliable than /en/ path
+      // hints or LLM guesses.
+      {
         const countryMap: Record<string, string> = {
+          // Country names (self-map)
           '日本': '日本', '韓國': '韓國', '泰國': '泰國', '越南': '越南',
           '義大利': '義大利', '法國': '法國', '西班牙': '西班牙', '英國': '英國',
           '德國': '德國', '瑞士': '瑞士', '奧地利': '奧地利', '荷蘭': '荷蘭',
@@ -1833,30 +1963,62 @@ export class MasterAgent {
           '埃及': '埃及', '摩洛哥': '摩洛哥', '南非': '南非',
           '秘魯': '秘魯', '智利': '智利', '巴西': '巴西', '阿根廷': '阿根廷',
           '冰島': '冰島', '挪威': '挪威', '芬蘭': '芬蘭', '瑞典': '瑞典', '丹麥': '丹麥',
-          '帛空': '帛空', '帛空島': '帛空', '巴里島': '印尼', '巴里': '印尼', '曼谷': '泰國', '清邁': '泰國',
-          '普吉': '泰國', '河內': '越南', '胡志明': '越南', '峨港': '越南',
+          '帛琉': '帛琉', '帛琉島': '帛琉', '巴里島': '印尼', '巴里': '印尼',
+          // SE Asia cities
+          '曼谷': '泰國', '清邁': '泰國', '普吉': '泰國',
+          '河內': '越南', '胡志明': '越南', '峴港': '越南',
+          // Korea cities
           '首爾': '韓國', '釜山': '韓國', '濟州': '韓國',
-          '四國': '日本', '北海道': '日本', '沖縄': '日本', '九州': '日本', '關西': '日本',
-          '關東': '日本', '東北': '日本', '東京': '日本', '大阪': '日本', '京都': '日本',
+          // Japan regions + major cities
+          '四國': '日本', '北海道': '日本', '沖繩': '日本', '沖縄': '日本',
+          '九州': '日本', '關西': '日本', '關東': '日本', '東北': '日本',
           '北陸': '日本', '中部': '日本', '山陰': '日本', '山陽': '日本',
+          '東京': '日本', '大阪': '日本', '京都': '日本', '名古屋': '日本',
+          '神戸': '日本', '神戶': '日本', '橫濱': '日本', '橫浜': '日本',
+          '札幌': '日本', '函館': '日本', '小樽': '日本', '仙台': '日本',
+          // Kyushu & Okinawa detail (Round 68: these were missing, caused 福岡→英國 bug)
+          '福岡': '日本', 'Fukuoka': '日本', '博多': '日本', '九大': '日本',
+          '熊本': '日本', 'Kumamoto': '日本',
+          '鹿兒島': '日本', '鹿児島': '日本', 'Kagoshima': '日本',
+          '長崎': '日本', 'Nagasaki': '日本',
+          '佐賀': '日本', 'Saga': '日本',
+          '大分': '日本', 'Oita': '日本', '別府': '日本', '由布院': '日本', '湯布院': '日本',
+          '宮崎': '日本', 'Miyazaki': '日本',
+          '那霸': '日本', '石垣': '日本', '宮古島': '日本',
           // Taiwan cities
           '台灣': '台灣', '台北': '台灣', '台中': '台灣', '台南': '台灣', '高雄': '台灣',
           '花蓮': '台灣', '宜蘭': '台灣', '嘉義': '台灣', '屏東': '台灣', '台東': '台灣',
           '新竹': '台灣', '南投': '台灣', '雲林': '台灣', '彰化': '台灣', '基隆': '台灣',
-          '日月潭': '台灣', '阿里山': '台灣', '太魯閣': '台灣', '墨家': '台灣',
-          '福森號': '台灣', '福森': '台灣', '舔子': '台灣', '澎湖': '台灣',
+          '日月潭': '台灣', '阿里山': '台灣', '太魯閣': '台灣',
+          '澎湖': '台灣', '金門': '台灣', '馬祖': '台灣',
         };
         const textToSearch = [
+          finalData.destinationCity || '',
+          finalData.title || '',
+          rawData?.location?.destinationCity || '',
           rawData?.basicInfo?.title || '',
           analyzedContent?.title || '',
-          rawData?.rawText?.slice(0, 1000) || '',
+          rawData?.rawText?.slice(0, 2000) || '',
         ].join(' ');
+
+        let derivedCountry = '';
         for (const [keyword, country] of Object.entries(countryMap)) {
           if (textToSearch.includes(keyword)) {
-            finalData.destinationCountry = country;
-
+            derivedCountry = country;
             break;
           }
+        }
+
+        const currentCountry = finalData.destinationCountry;
+        if (derivedCountry && currentCountry !== derivedCountry) {
+          if (currentCountry) {
+            console.warn(
+              `[MasterAgent] Round 68 Fix 2: destinationCountry mismatch — ` +
+              `extracted="${currentCountry}" vs city-derived="${derivedCountry}"; ` +
+              `overriding (city keyword is more reliable).`
+            );
+          }
+          finalData.destinationCountry = derivedCountry;
         }
       }
 

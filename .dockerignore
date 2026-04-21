@@ -1,0 +1,44 @@
+# Version control
+.git
+.gitignore
+
+# Dependencies (rebuilt inside container)
+node_modules
+.pnpm-store
+
+# Build output (rebuilt inside container)
+dist
+.vite
+
+# Logs
+*.log
+.manus-logs
+test_logs
+
+# IDE / OS
+.DS_Store
+.vscode
+.idea
+
+# Environment files (secrets injected via fly secrets set)
+.env
+.env.local
+.env.*.local
+
+# Testing
+coverage
+
+# Manus-specific artifacts
+.manus
+manus.yaml
+.manusignore
+
+# Docs / scratchpad
+todo.md
+*.md
+!README.md
+
+# Scripts that don't need to ship (but keep migrate.mjs for Fly release_command)
+scripts
+!scripts/migrate.mjs
+test_gen2.mjs

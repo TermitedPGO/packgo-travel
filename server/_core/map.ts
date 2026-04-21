@@ -1,10 +1,17 @@
 /**
- * Google Maps API Integration for Manus WebDev Templates
- * 
- * Main function: makeRequest<T>(endpoint, params) - Makes authenticated requests to Google Maps APIs
- * All credentials are automatically injected. Array parameters use | as separator.
- * 
- * See API examples below the type definitions for usage patterns.
+ * Google Maps API — direct integration (Fly.io deployment).
+ *
+ * Replaces the legacy Manus Forge `/v1/maps/proxy/*` wrapper. `makeRequest()`
+ * signature is UNCHANGED so all callers keep working.
+ *
+ * Routing rules:
+ *   - `/v1/snapToRoads`, `/v1/nearestRoads`, `/v1/speedLimits` → roads.googleapis.com
+ *   - Everything else (`/maps/api/...`)                        → maps.googleapis.com
+ *
+ * Env:
+ *   GOOGLE_API_KEY  (required — must have Maps APIs enabled in GCP project)
+ *
+ * Array params still use `|` as separator (Google's native convention).
  */
 
 import { ENV } from "./env";
@@ -13,25 +20,26 @@ import { ENV } from "./env";
 // Configuration
 // ============================================================================
 
-type MapsConfig = {
-  baseUrl: string;
-  apiKey: string;
-};
+const MAPS_BASE_URL = "https://maps.googleapis.com";
+const ROADS_BASE_URL = "https://roads.googleapis.com";
 
-function getMapsConfig(): MapsConfig {
-  const baseUrl = ENV.forgeApiUrl;
-  const apiKey = ENV.forgeApiKey;
-
-  if (!baseUrl || !apiKey) {
+function getApiKey(): string {
+  if (!ENV.googleApiKey) {
     throw new Error(
-      "Google Maps proxy credentials missing: set BUILT_IN_FORGE_API_URL and BUILT_IN_FORGE_API_KEY"
+      "GOOGLE_API_KEY is not configured. Set it via `fly secrets set GOOGLE_API_KEY=...`."
     );
   }
+  return ENV.googleApiKey;
+}
 
-  return {
-    baseUrl: baseUrl.replace(/\/+$/, ""),
-    apiKey,
-  };
+function resolveBaseUrl(endpoint: string): string {
+  // Roads API uses a separate host; everything else is on maps.googleapis.com
+  if (endpoint.startsWith("/v1/snapToRoads") ||
+      endpoint.startsWith("/v1/nearestRoads") ||
+      endpoint.startsWith("/v1/speedLimits")) {
+    return ROADS_BASE_URL;
+  }
+  return MAPS_BASE_URL;
 }
 
 // ============================================================================
@@ -44,27 +52,24 @@ interface RequestOptions {
 }
 
 /**
- * Make authenticated requests to Google Maps APIs
- * 
- * @param endpoint - The API endpoint (e.g., "/maps/api/geocode/json")
- * @param params - Query parameters for the request
- * @param options - Additional request options
- * @returns The API response
+ * Make authenticated requests to Google Maps APIs.
+ *
+ * @param endpoint - API endpoint, e.g. "/maps/api/geocode/json" or "/v1/snapToRoads"
+ * @param params - Query parameters (array values use `|` separator, Google's convention)
+ * @param options - Additional request options (method, body)
+ * @returns The API response as JSON
  */
 export async function makeRequest<T = unknown>(
   endpoint: string,
   params: Record<string, unknown> = {},
   options: RequestOptions = {}
 ): Promise<T> {
-  const { baseUrl, apiKey } = getMapsConfig();
+  const apiKey = getApiKey();
+  const baseUrl = resolveBaseUrl(endpoint);
 
-  // Construct full URL: baseUrl + /v1/maps/proxy + endpoint
-  const url = new URL(`${baseUrl}/v1/maps/proxy${endpoint}`);
-
-  // Add API key as query parameter (standard Google Maps API authentication)
+  const url = new URL(`${baseUrl}${endpoint}`);
   url.searchParams.append("key", apiKey);
 
-  // Add other query parameters
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null) {
       url.searchParams.append(key, String(value));

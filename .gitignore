@@ -120,3 +120,7 @@ analysis-*
 research-*
 *-report.md
 *-analysis.md
+
+# Claude Code session state
+.claude/
+

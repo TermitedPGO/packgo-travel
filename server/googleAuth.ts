@@ -8,7 +8,12 @@ import { COOKIE_NAME } from '@shared/const';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-const GOOGLE_CALLBACK_URL = process.env.GOOGLE_CALLBACK_URL || 'https://packgo09.manus.space/api/auth/google/callback';
+// Prefer explicit GOOGLE_CALLBACK_URL; else derive from BASE_URL; else fall back to Fly.io.
+// NOTE: whatever URL ends up here MUST also be registered under "Authorized redirect URIs"
+// in the Google Cloud Console OAuth 2.0 client, or the callback will 400.
+const GOOGLE_CALLBACK_URL =
+  process.env.GOOGLE_CALLBACK_URL ||
+  `${(process.env.BASE_URL || 'https://packgo-travel.fly.dev').replace(/\/$/, '')}/api/auth/google/callback`;
 
 /**
  * Initialize Google OAuth strategy

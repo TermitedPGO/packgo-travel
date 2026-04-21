@@ -51,7 +51,9 @@ async function startServer() {
   
   // P0-6: CORS whitelist - only allow known origins
   const allowedOrigins = [
-    // Production domains
+    // Fly.io production
+    "https://packgo-travel.fly.dev",
+    // Legacy Manus domains (kept during migration overlap; remove once DNS cutover completes)
     "https://packgo09.manus.space",
     "https://packgo-d3xjbq67.manus.space",
     // Development
@@ -64,11 +66,13 @@ async function startServer() {
   ];
 
   // Patterns for dynamic origins
-  // Allow all *.manus.space (production) and *.manus.computer (sandbox preview)
   const allowedOriginPatterns = [
-    /^https:\/\/[a-z0-9-]+\.manus\.space$/,       // *.manus.space (all production)
-    /^https:\/\/[a-z0-9-]+\.manus\.computer$/,    // *.manus.computer (sandbox preview)
-    /^https:\/\/[a-z0-9-]+\.us2\.manus\.computer$/, // *.us2.manus.computer
+    // Fly.io preview deploys (future, e.g. PR builds)
+    /^https:\/\/[a-z0-9-]+\.fly\.dev$/,
+    // Legacy Manus preview/production (kept during migration overlap)
+    /^https:\/\/[a-z0-9-]+\.manus\.space$/,
+    /^https:\/\/[a-z0-9-]+\.manus\.computer$/,
+    /^https:\/\/[a-z0-9-]+\.us2\.manus\.computer$/,
   ];
 
   app.use(
@@ -91,6 +95,16 @@ async function startServer() {
       allowedHeaders: ["Content-Type", "Authorization", "stripe-signature"],
     })
   );
+
+  // Health check — registered early, no auth, no DB lookup. Fly's
+  // http_service health probe hits this; also handy for Cloudflare DNS monitoring.
+  app.get("/healthz", (_req, res) => {
+    res.status(200).json({
+      status: "ok",
+      ts: new Date().toISOString(),
+      commit: process.env.FLY_MACHINE_VERSION ?? process.env.GIT_COMMIT ?? "unknown",
+    });
+  });
 
   // Stripe webhook must be registered BEFORE express.json() to preserve raw body
   app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), handleStripeWebhook);

@@ -98,63 +98,58 @@ export class ImageGenerationAgent {
   }
   
   /**
-   * Generate hero image with Manus API
+   * Fetch hero image — now powered by Google Programmable Search (CSE) image
+   * search rather than an AI image generator. Rationale: real travel content
+   * needs *real* photos of named subjects (e.g. a specific Taiwanese train),
+   * not AI-imagined composites. The original prompt is used verbatim (CJK
+   * characters are a FEATURE for regional queries, not a problem).
    */
   private async generateHeroImage(
     prompt: string,
     styleGuide: StyleGuide
   ): Promise<ImageGenerationResult> {
-    // Fix 5 (Round 62): Ensure prompt is in English for better Forge API image matching
-    // CJK characters in prompts often produce poor results; translate common patterns
-    const ensureEnglishPrompt = (p: string): string => {
-      // If prompt already looks mostly English (< 20% CJK chars), keep as-is
-      const cjkCount = (p.match(/[\u4e00-\u9fff\u3040-\u30ff]/g) || []).length;
-      if (cjkCount / p.length < 0.2) return p;
-      // Strip CJK characters and keep the English portion if any
-      const englishPart = p.replace(/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]+/g, ' ').trim();
-      if (englishPart.length > 20) return englishPart;
-      // Fallback: generic travel photography prompt
-      return 'Professional travel photography, scenic landscape, vibrant colors, high quality, no text, no watermark';
-    };
-    const englishPrompt = ensureEnglishPrompt(prompt);
-    console.log(`[ImageGenerationAgent] Generating hero image with Forge API. Original prompt length: ${prompt.length}, English prompt: "${englishPrompt.substring(0, 80)}..."`);
-    
-    // Fix 5 (Round 62): try/catch with detailed Forge API logging
+    console.log(
+      `[ImageGenerationAgent] Hero image via CSE. Prompt: "${prompt.substring(0, 80)}..."`
+    );
+
     try {
-      const forgeStartMs = Date.now();
-      // Generate image with Manus API (Forge)
-      const result = await generateImage({ prompt: englishPrompt });
-      const forgeElapsedMs = Date.now() - forgeStartMs;
-      console.log(`[ImageGenerationAgent] Forge API response: elapsed=${forgeElapsedMs}ms, url=${result.url ? result.url.substring(0, 60) + '...' : 'null'}`);
-      
+      const startMs = Date.now();
+      // generateImage() already uploads to R2 internally and returns { url, sourceUrl? }
+      const result = await generateImage({ prompt });
+      const elapsedMs = Date.now() - startMs;
+      console.log(
+        `[ImageGenerationAgent] CSE response: elapsed=${elapsedMs}ms, url=${
+          result.url ? result.url.substring(0, 60) + "..." : "null"
+        }`
+      );
+
       if (!result.url) {
-        throw new Error("Forge API returned empty URL for hero image");
+        throw new Error("CSE returned no usable image for hero prompt");
       }
-      
-      // Download and upload to S3
-      const s3Url = await this.uploadImageToS3(result.url, "hero");
-      console.log(`[ImageGenerationAgent] Hero image uploaded to S3: ${s3Url.substring(0, 60)}...`);
-      
-      // Validate style consistency
-      const isConsistent = validateStyleConsistency(s3Url, styleGuide);
+
+      // Already on R2 — no second upload needed.
+      const finalUrl = result.url;
+
+      // Validate style consistency (best-effort; CSE images don't always match a style guide)
+      const isConsistent = validateStyleConsistency(finalUrl, styleGuide);
       if (!isConsistent) {
         console.warn("[ImageGenerationAgent] Hero image style inconsistency detected");
       }
-      
-      console.log("[ImageGenerationAgent] ✓ Hero image generated successfully via Forge API");
-      
+
+      console.log("[ImageGenerationAgent] ✓ Hero image sourced successfully via CSE");
+
       return {
-        url: s3Url,
+        url: finalUrl,
         alt: "Hero image",
-        source: "ai",
-        prompt: englishPrompt,
+        source: "ai", // keep "ai" label unchanged to avoid schema churn in callers
+        prompt,
       };
     } catch (error) {
-      // Fix 5 (Round 62): Log Forge API failure details before falling back
-      console.error(`[ImageGenerationAgent] ✗ Forge API hero image generation failed (will fallback to Unsplash):`, error instanceof Error ? error.message : error);
-      
-      // Fallback to Unsplash using the English prompt
-      return await this.getUnsplashImage(englishPrompt, "hero");
+      console.error(
+        "[ImageGenerationAgent] ✗ CSE hero image sourcing failed (will fallback to Unsplash):",
+        error instanceof Error ? error.message : error
+      );
+      return await this.getUnsplashImage(prompt, "hero");
     }
   }
   

@@ -58,57 +58,23 @@ const validatePayload = (input: NotificationPayload): NotificationPayload => {
 };
 
 /**
- * Dispatches a project-owner notification through the Manus Notification Service.
- * Returns `true` if the request was accepted, `false` when the upstream service
- * cannot be reached (callers can fall back to email/slack). Validation errors
- * bubble up as TRPC errors so callers can fix the payload.
+ * Dispatches a project-owner notification.
+ *
+ * NOTE: After the Fly.io migration off Manus Forge, the upstream
+ * `WebDevService/SendNotification` endpoint no longer exists. Payload
+ * validation is still enforced (malformed inputs still throw TRPCError), but
+ * delivery is a no-op that returns `false` so callers take their fallback
+ * path (e.g. email via SMTP, Slack webhook). Re-implement with a real
+ * provider (SendGrid, Slack Incoming Webhooks, etc.) when needed.
  */
 export async function notifyOwner(
   payload: NotificationPayload
 ): Promise<boolean> {
-  const { title, content } = validatePayload(payload);
-
-  if (!ENV.forgeApiUrl) {
-    throw new TRPCError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: "Notification service URL is not configured.",
-    });
-  }
-
-  if (!ENV.forgeApiKey) {
-    throw new TRPCError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: "Notification service API key is not configured.",
-    });
-  }
-
-  const endpoint = buildEndpointUrl(ENV.forgeApiUrl);
-
-  try {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        authorization: `Bearer ${ENV.forgeApiKey}`,
-        "content-type": "application/json",
-        "connect-protocol-version": "1",
-      },
-      body: JSON.stringify({ title, content }),
-    });
-
-    if (!response.ok) {
-      const detail = await response.text().catch(() => "");
-      console.warn(
-        `[Notification] Failed to notify owner (${response.status} ${response.statusText})${
-          detail ? `: ${detail}` : ""
-        }`
-      );
-      return false;
-    }
-
-    return true;
-  } catch (error) {
-    console.warn("[Notification] Error calling notification service:", error);
-    return false;
-  }
+  // Preserve validation behaviour — malformed callers still get TRPCError.
+  validatePayload(payload);
+  console.warn(
+    "[Notification] notifyOwner() is a no-op after Manus migration; " +
+      "caller should use its fallback channel."
+  );
+  return false;
 }

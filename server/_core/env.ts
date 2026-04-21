@@ -21,12 +21,27 @@ export const ENV = {
   oAuthServerUrl: process.env.OAUTH_SERVER_URL ?? "",
   ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
   isProduction: process.env.NODE_ENV === "production",
+  // Legacy Manus Forge proxy (deprecated — kept for consumers not yet migrated).
+  // TODO(phase-2a): Remove once all callers use direct SDKs.
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
+  // Direct-provider credentials (Fly.io deployment)
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
+  // Cloudflare R2 (S3-compatible) object storage
+  r2AccessKeyId: process.env.R2_ACCESS_KEY_ID ?? "",
+  r2SecretAccessKey: process.env.R2_SECRET_ACCESS_KEY ?? "",
+  r2Endpoint: process.env.R2_ENDPOINT ?? "",
+  r2Bucket: process.env.R2_BUCKET ?? "",
+  r2PublicBaseUrl: process.env.R2_PUBLIC_BASE_URL ?? "",
+  // Upstash Redis
+  upstashRedisUrl: process.env.UPSTASH_REDIS_URL ?? "",
+  // Google (Custom Search + Maps)
+  googleApiKey: process.env.GOOGLE_API_KEY ?? "",
+  googleCseId: process.env.GOOGLE_CSE_ID ?? "",
   stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? "",
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
   unsplashAccessKey: process.env.UNSPLASH_ACCESS_KEY ?? "",
   unsplashSecretKey: process.env.UNSPLASH_SECRET_KEY ?? "",
   // P0-4: Base URL for sitemap and other absolute URL generation
-  baseUrl: process.env.BASE_URL ?? "https://packgo09.manus.space",
+  baseUrl: process.env.BASE_URL ?? "https://packgo-travel.fly.dev",
 };
