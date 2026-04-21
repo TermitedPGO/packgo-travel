@@ -798,19 +798,24 @@ export default function ToursTab() {
                                 <Sparkles className="h-3 w-3" />
                 {t('toursTab.aiGenerated')}
               </span>
-                              {/* A3: Calibration QA badge */}
-                              {(tour as any).calibrationVerdict && (
-                                <span className={`inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-full font-medium ${
-                                  (tour as any).calibrationVerdict === 'pass'
-                                    ? 'bg-green-100 text-green-700'
-                                    : (tour as any).calibrationVerdict === 'warn'
-                                    ? 'bg-yellow-100 text-yellow-700'
-                                    : 'bg-red-100 text-red-700'
-                                }`} title={`AI 品質評分: ${(tour as any).calibrationScore ?? '-'}/100`}>
-                                  {(tour as any).calibrationVerdict === 'pass' ? '✅' : (tour as any).calibrationVerdict === 'warn' ? '⚠️' : '❌'}
-                                  {(tour as any).calibrationScore != null ? `${(tour as any).calibrationScore}分` : 'QA'}
-                                </span>
-                              )}
+                              {/* A3: Calibration QA badge — backend verdicts are 'approved' | 'review' | 'rejected' */}
+                              {(tour as any).calibrationVerdict && (() => {
+                                const verdict = (tour as any).calibrationVerdict;
+                                const isApproved = verdict === 'approved' || verdict === 'pass';
+                                const isReview = verdict === 'review' || verdict === 'warn';
+                                const badgeClass = isApproved
+                                  ? 'bg-green-100 text-green-700'
+                                  : isReview
+                                  ? 'bg-yellow-100 text-yellow-700'
+                                  : 'bg-red-100 text-red-700';
+                                const icon = isApproved ? '✅' : isReview ? '⚠️' : '❌';
+                                return (
+                                  <span className={`inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-full font-medium ${badgeClass}`} title={`AI 品質評分: ${(tour as any).calibrationScore ?? '-'}/100`}>
+                                    {icon}
+                                    {(tour as any).calibrationScore != null ? `${(tour as any).calibrationScore}分` : 'QA'}
+                                  </span>
+                                );
+                              })()}
                               {tour.sourceUrl && (
                                 <a
                                   href={tour.sourceUrl}

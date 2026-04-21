@@ -47,6 +47,17 @@ export async function assignItineraryImages(
     
     console.log(`[ItineraryImageService] Search queries:`, searchQueries);
     
+    // Round 71: pre-fetch a small pool of destination-fallback images so every day
+    // gets an image even when the specific activity/location query returns 0 hits.
+    // Without this, Italy 10-day tours were getting 8/10 coverage (two days blank).
+    let fallbackPool: string[] = [];
+    try {
+      const fallbackKeyword = destinationInfo.country || destinationInfo.city || 'travel landscape';
+      fallbackPool = await searchUnsplashPhotos(`${fallbackKeyword} travel`.trim(), 10);
+    } catch (err) {
+      console.warn(`[ItineraryImageService] Fallback pool fetch failed (non-fatal):`, err);
+    }
+
     // 批次搜尋圖片（每個關鍵字搜尋 1 張）
     const imagePromises = searchQueries.map(async (query, index) => {
       try {
@@ -59,24 +70,27 @@ export async function assignItineraryImages(
         return null;
       }
     });
-    
+
     const images = await Promise.all(imagePromises);
-    
+
     // 為每日行程配置圖片
     const result = itineraries.map((day, index) => {
-      const image = images[index];
+      const image = images[index]
+        // Round 71: fall back to destination-pool image when primary query found nothing.
+        || (fallbackPool.length > 0 ? fallbackPool[index % fallbackPool.length] : null);
       const location = day.activities[0]?.location || day.title || `Day ${day.day}`;
-      
+
       return {
         ...day,
         image: image || undefined,
         imageAlt: image ? `${location} - ${destinationInfo.country || '旅遊'}` : undefined,
       };
     });
-    
+
     const assignedCount = result.filter(d => d.image).length;
-    console.log(`[ItineraryImageService] Successfully assigned ${assignedCount}/${itineraries.length} images`);
-    
+    const fromFallback = result.filter((d, i) => d.image && !images[i]).length;
+    console.log(`[ItineraryImageService] Successfully assigned ${assignedCount}/${itineraries.length} images (${fromFallback} from destination fallback)`);
+
     return result;
   } catch (error) {
     console.error("[ItineraryImageService] Error assigning images:", error);

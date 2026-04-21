@@ -127,14 +127,29 @@ export class TransportationAgent {
 
     // 從原始資料中識別
     const searchText = JSON.stringify(rawData).toLowerCase();
-    
-    // 火車關鍵字
+
+    // International flight signals take priority over in-country train keywords.
+    // Example: Italy 10-day tour titled "羅馬、威尼斯雙火車深度之旅" starts with 台北✈羅馬 —
+    // the flight is the primary transport, the trains are an in-country feature.
+    const flightSignals = [
+      '✈', '機場', '航空', '航班', 'airline', 'airport',
+      '桃園國際', '成田', '關西', '仁川', '樟宜', '浦東', '首都',
+      '羅馬菲烏米奇諾', '戴高樂', '希斯洛', '法蘭克福',
+    ];
+    const hasFlightSignal = flightSignals.some(s => searchText.includes(s.toLowerCase()));
+
+    // 火車關鍵字 — only classify as TRAIN if we DON'T also see a flight signal.
+    // Taiwan-domestic train tours (鳴日 etc.) naturally lack international flight signals.
     const trainKeywords = ['鳴日', 'mingri', '火車', '列車', '台鐵', '高鐵', '普悠瑪', '太魯閣', '自強號', '車站', '南港站', '台北車站'];
-    for (const keyword of trainKeywords) {
-      if (searchText.includes(keyword.toLowerCase())) {
-        console.log(`[TransportationAgent] Found train keyword: ${keyword}`);
-        return 'TRAIN';
+    if (!hasFlightSignal) {
+      for (const keyword of trainKeywords) {
+        if (searchText.includes(keyword.toLowerCase())) {
+          console.log(`[TransportationAgent] Found train keyword: ${keyword}`);
+          return 'TRAIN';
+        }
       }
+    } else {
+      console.log('[TransportationAgent] Flight signal present — skipping train-keyword match (international tour)');
     }
 
     // 郵輪關鍵字

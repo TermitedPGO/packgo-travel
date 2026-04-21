@@ -2,10 +2,10 @@ import { Job } from "bullmq";
 import {
   TourGenerationJobData,
   TourGenerationResult,
+  addTourTranslationJob,
 } from "./queue";
 import { MasterAgent } from "./agents/masterAgent";
 import { createTour, saveCalibrationResult, updateTour, createDeparture, getTourDepartures } from "./db";
-import { translateTour } from "./translation";
 import { searchUnsplashPhotos } from "./services/unsplashService";
 
 /**
@@ -105,6 +105,9 @@ export async function generateTourFromUrlInternal(
       // Color theme and features
       colorTheme: tourData.colorTheme,
       keyFeatures: tourData.keyFeatures,
+      // Round 71: previously dropped on the floor — createTour never saw poeticTitle,
+      // so DB rows had poeticTitle=null even though ContentAnalyzerAgent generated it.
+      poeticTitle: tourData.poeticTitle,
       poeticContent: tourData.poeticContent,
       featureImages: tourData.featureImages,
       highlights: tourData.highlights,
@@ -312,18 +315,21 @@ export async function generateTourFromUrlInternal(
       overallProgress: 100,
     });
     
-    // 非同步觸發翻譯（不阻塞生成流程）
-    translateTour(tour.id, ['en'], 'zh-TW', userId)
-      .then((result) => {
-        if (result.success) {
-          console.log(`[TourGenerator] Auto-translated tour ${tour.id} to: ${result.translatedLanguages.join(', ')}`);
-        } else {
-          console.warn(`[TourGenerator] Auto-translation failed for tour ${tour.id}:`, result.errors);
-        }
-      })
-      .catch((err) => {
-        console.warn(`[TourGenerator] Auto-translation error for tour ${tour.id}:`, err);
+    // Round 71: queue translation via BullMQ instead of fire-and-forget.
+    // BUG-006 added addTourTranslationJob specifically for this purpose (retries +
+    // failure tracking). Previous direct translateTour() call had no retry on
+    // transient failures and lost translations on worker restart.
+    try {
+      await addTourTranslationJob({
+        tourId: tour.id,
+        targetLanguages: ['en'],
+        sourceLanguage: 'zh-TW',
+        userId,
       });
+      console.log(`[TourGenerator] ✓ Queued auto-translation for tour ${tour.id} → en`);
+    } catch (err) {
+      console.warn(`[TourGenerator] Failed to queue translation for tour ${tour.id}:`, err);
+    }
     
     return {
       success: true,

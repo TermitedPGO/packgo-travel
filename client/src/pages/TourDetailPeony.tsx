@@ -2236,12 +2236,12 @@ export default function TourDetailPeony() {
                 return translatedCities.slice(0, 4).join(sep) + '…';
               })()}</span>
             </div>
-            {transportationInfo?.type && (
+            {transportationInfo?.type && transportationInfo.typeName && transportationInfo.typeName !== '待確認' && (
               <div className="flex items-center gap-2">
                 <TransportIcon type={transportationInfo.type} className="h-5 w-5" />
                 <span>{language === 'en'
-                  ? (TRANSPORT_TYPE_EN[transportationInfo.typeName] || transportationInfo.typeName || t('tourDetail.selectTransport'))
-                  : (transportationInfo.typeName || t('tourDetail.selectTransport'))}</span>
+                  ? (TRANSPORT_TYPE_EN[transportationInfo.typeName] || transportationInfo.typeName)
+                  : transportationInfo.typeName}</span>
               </div>
             )}
           </div>
