@@ -190,7 +190,11 @@ const DeparturePriceCalendar = ({
     setSelectedMonth(new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 1));
   };
 
-  const weekDays = tArray('tourDetail.weekdays').length > 0 ? tArray('tourDetail.weekdays') : ['日', '一', '二', '三', '四', '五', '六'];
+  // Round 72 follow-up: weekdays are provided by tArray() for both zh-TW and
+  // en locales. The safety fallback uses English initials (language-neutral)
+  // rather than hardcoded Chinese, so an i18n load failure never leaks zh
+  // strings into an en-locale render.
+  const weekDays = tArray('tourDetail.weekdays').length > 0 ? tArray('tourDetail.weekdays') : ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
   if (isLoading) {
     return (
@@ -1089,7 +1093,7 @@ const DayCard = ({
     <div className="relative animate-fade-in" style={{ animationDelay: `${index * 100}ms` }}>
       {/* Day Badge */}
       <div 
-        className="absolute left-1/2 -translate-x-1/2 -top-5 z-10 px-6 py-2 text-base font-bold tracking-wider bg-white border-2 shadow-md"
+        className="absolute left-1/2 -translate-x-1/2 -top-5 z-10 px-6 py-2 text-base font-bold tracking-wider bg-white border-2 shadow-md rounded-lg"
         style={{ color: themeColor.primary, borderColor: themeColor.primary }}
       >
         DAY {day.day || index + 1}
@@ -1566,7 +1570,7 @@ const HotelCard = ({ hotel, themeColor }: { hotel: any; themeColor: ReturnType<t
         />
         {/* 星級標籤 */}
         {starRating > 0 && (
-          <div className="absolute top-4 left-4 bg-white/95 backdrop-blur-sm px-3 py-1.5 flex items-center gap-1 shadow-md">
+          <div className="absolute top-4 left-4 bg-white/95 backdrop-blur-sm px-3 py-1.5 flex items-center gap-1 shadow-md rounded-md">
             {[...Array(starRating)].map((_, i) => (
               <Star key={i} className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
             ))}
@@ -2863,7 +2867,7 @@ export default function TourDetailPeony() {
       {tour?.id && <SimilarTours tourId={tour.id} />}
 
       {/* Fixed Bottom CTA (所有裝置) */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t-2 border-gray-200 shadow-2xl z-50">
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t-2 border-gray-200 shadow-2xl z-50 rounded-t-xl">
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4">
           <div className="flex items-center justify-between gap-4">
             <div>
