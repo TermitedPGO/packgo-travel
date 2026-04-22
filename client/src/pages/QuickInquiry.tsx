@@ -147,10 +147,10 @@ export default function QuickInquiry() {
       <div className="bg-black text-white py-12 px-4">
         <div className="container max-w-4xl text-center">
           <h1 className="text-4xl md:text-5xl font-serif font-bold mb-3">
-            {t('quickInquiry.title') || '快速諮詢'}
+            {t('quickInquiry.title')}
           </h1>
           <p className="text-gray-300 text-lg">
-            {t('quickInquiry.subtitle') || '填寫表單，我們將在24小時內回覆您'}
+            {t('quickInquiry.subtitle')}
           </p>
         </div>
       </div>

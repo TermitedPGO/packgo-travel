@@ -262,7 +262,7 @@ export default function RegionPage() {
           <section className="py-16">
             <div className="container">
               <p className="text-gray-500 text-center">
-                {t('cruise.comingSoon') || '郵輪行程功能開發中，敬請期待...'}
+                {t('cruise.comingSoon')}
               </p>
             </div>
           </section>
