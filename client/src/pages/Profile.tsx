@@ -7,7 +7,7 @@ import {
   Loader2, User, Calendar, LogOut, Heart, ShoppingBag, 
   MapPin, TrendingUp, Award, MessageSquare, ChevronRight, Package, Clock
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import AvatarUpload from "@/components/AvatarUpload";
 import { useForm } from "react-hook-form";
@@ -488,13 +488,30 @@ function FavoritesSection({ setLocation }: { setLocation: (path: string) => void
   const { data: favorites, isLoading } = trpc.favorites.list.useQuery();
   const utils = trpc.useUtils();
   const { t, language } = useLocale();
-  
+
   const removeMutation = trpc.favorites.remove.useMutation({
     onSuccess: () => {
       utils.favorites.list.invalidate();
       utils.favorites.getIds.invalidate();
     },
   });
+
+  // Batch fetch translations for non-Chinese languages
+  const favoriteTourIds = useMemo(
+    () => (favorites ?? []).map((t: any) => t.id),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [(favorites ?? []).map((t: any) => t.id).join(',')]
+  );
+  const { data: batchTranslations } = trpc.translation.getBatchTourTranslations.useQuery(
+    { tourIds: favoriteTourIds, targetLanguage: language as 'zh-TW' | 'en' | 'ja' | 'ko' },
+    { enabled: language !== 'zh-TW' && favoriteTourIds.length > 0 }
+  );
+
+  const getTranslatedTitle = (tour: any) => {
+    if (language === 'zh-TW' || !batchTranslations) return tour.title;
+    const tourTrans = (batchTranslations as Record<number, Record<string, string>>)[tour.id];
+    return tourTrans?.title || tour.title;
+  };
 
   return (
     <Card className=" border border-gray-200 bg-white shadow-sm">
@@ -522,9 +539,9 @@ function FavoritesSection({ setLocation }: { setLocation: (path: string) => void
                 {/* Tour Image */}
                 <div className="h-20 w-28 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
                   {tour.mainImage || tour.heroImage || tour.imageUrl ? (
-                    <img 
-                      src={tour.mainImage || tour.heroImage || tour.imageUrl} 
-                      alt={tour.title}
+                    <img
+                      src={tour.mainImage || tour.heroImage || tour.imageUrl}
+                      alt={getTranslatedTitle(tour)}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform rounded-xl"
                     />
                   ) : (
@@ -537,7 +554,7 @@ function FavoritesSection({ setLocation }: { setLocation: (path: string) => void
                 {/* Tour Info */}
                 <div className="flex-1 min-w-0">
                   <h4 className="font-medium text-black truncate group-hover:text-gray-700">
-                    {tour.title}
+                    {getTranslatedTitle(tour)}
                   </h4>
                   <div className="flex items-center gap-4 mt-1 text-sm text-gray-500">
                     <span className="flex items-center gap-1">
