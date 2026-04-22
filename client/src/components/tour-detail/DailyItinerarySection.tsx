@@ -205,7 +205,7 @@ export const DailyItinerarySection: React.FC<DailyItinerarySectionProps> = ({
                         <div
                           key={actIndex}
                           className={cn(
-                            "bg-white rounded-lg p-5 shadow-sm",
+                            "bg-white rounded-xl p-5 shadow-sm",
                             "flex flex-col lg:flex-row gap-4",
                             actIndex % 2 === 1 && "lg:flex-row-reverse" // Zigzag layout
                           )}
@@ -226,13 +226,13 @@ export const DailyItinerarySection: React.FC<DailyItinerarySectionProps> = ({
                                   }}
                                   isEditable={isEditMode}
                                   aspectRatio="4/3"
-                                  className="w-full rounded-lg"
+                                  className="w-full rounded-xl"
                                 />
                               ) : activity.image ? (
                                 <img
                                   src={activity.image}
                                   alt={activity.imageAlt || activity.title}
-                                  className="w-full aspect-[4/3] object-cover rounded-lg"
+                                  className="w-full aspect-[4/3] object-cover rounded-xl"
                                 />
                               ) : null}
                             </div>
@@ -320,7 +320,7 @@ export const DailyItinerarySection: React.FC<DailyItinerarySectionProps> = ({
                     {/* Meals & Accommodation Row */}
                     <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
                       {/* Meals Card */}
-                      <div className="bg-white rounded-lg p-5 shadow-sm">
+                      <div className="bg-white rounded-xl p-5 shadow-sm">
                         <div className="flex items-center gap-2 mb-4">
                           <Utensils className="h-5 w-5" style={{ color: ensureReadableOnWhite(colorTheme.accent) }} />
                           <h5 className="font-bold text-lg" style={{ color: ensureReadableOnWhite(colorTheme.primary) }}>
@@ -360,7 +360,7 @@ export const DailyItinerarySection: React.FC<DailyItinerarySectionProps> = ({
 
                       {/* Accommodation Card */}
                       {day.accommodation && (
-                        <div className="bg-white rounded-lg p-5 shadow-sm">
+                        <div className="bg-white rounded-xl p-5 shadow-sm">
                           <div className="flex items-center gap-2 mb-4">
                             <Hotel className="h-5 w-5" style={{ color: ensureReadableOnWhite(colorTheme.accent) }} />
                             <h5 className="font-bold text-lg" style={{ color: ensureReadableOnWhite(colorTheme.primary) }}>

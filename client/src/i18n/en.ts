@@ -85,6 +85,13 @@ export const en = {
     saving: 'Saving...',
     viewAll: 'View All',
     tourImage: 'Tour Image',
+    // Accessibility labels (Round 72 follow-up)
+    backToTop: 'Back to top',
+    openAiAdvisor: 'Open AI Travel Advisor',
+    aiAdvisorInputPlaceholder: 'Enter your travel preferences...',
+    searchToursPlaceholder: 'Search tours...',
+    passportDisplayPlaceholder: 'As shown on passport',
+    cityCountryPlaceholder: 'City, Country',
   },
 
   // Navigation

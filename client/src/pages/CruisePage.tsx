@@ -207,7 +207,7 @@ export default function CruisePage() {
 
                   return (
                     <Link key={tour.id} href={`/tours/${tour.id}`}>
-                      <div className="bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-lg transition-all duration-300 group cursor-pointer h-full flex flex-col">
+                      <div className="bg-white rounded-xl overflow-hidden shadow-sm hover:shadow-lg transition-all duration-300 group cursor-pointer h-full flex flex-col">
                         {/* 圖片 */}
                         <div className="relative h-48 overflow-hidden rounded-t-xl">
                           <img

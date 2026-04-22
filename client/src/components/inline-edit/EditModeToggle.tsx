@@ -33,7 +33,7 @@ export function EditModeToggle({
   return (
     <div
       className={cn(
-        "fixed bottom-24 right-6 z-[60] flex items-center gap-2 bg-white rounded-lg shadow-xl border p-2 transition-all",
+        "fixed bottom-24 right-6 z-[60] flex items-center gap-2 bg-white rounded-xl shadow-xl border p-2 transition-all",
         isEditMode ? "border-yellow-400 shadow-yellow-100" : "border-gray-200 shadow-lg",
         className
       )}

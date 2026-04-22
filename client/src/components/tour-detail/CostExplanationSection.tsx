@@ -49,7 +49,7 @@ export const CostExplanationSection: React.FC<CostExplanationSectionProps> = ({
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
           {/* Included */}
           {included.length > 0 && (
-            <div className="bg-white rounded-lg p-5 shadow-sm">
+            <div className="bg-white rounded-xl p-5 shadow-sm">
               <div className="flex items-center gap-2 mb-3">
                 <CheckCircle2
                   className="h-5 w-5"
@@ -78,7 +78,7 @@ export const CostExplanationSection: React.FC<CostExplanationSectionProps> = ({
 
           {/* Excluded */}
           {excluded.length > 0 && (
-            <div className="bg-white rounded-lg p-5 shadow-sm">
+            <div className="bg-white rounded-xl p-5 shadow-sm">
               <div className="flex items-center gap-2 mb-3">
                 <XCircle
                   className="h-5 w-5"
@@ -108,7 +108,7 @@ export const CostExplanationSection: React.FC<CostExplanationSectionProps> = ({
 
         {/* Additional Costs */}
         {additionalCosts.length > 0 && (
-          <div className="bg-white rounded-lg p-5 shadow-sm mb-6">
+          <div className="bg-white rounded-xl p-5 shadow-sm mb-6">
             <div className="flex items-center gap-2 mb-3">
               <AlertCircle
                 className="h-5 w-5"

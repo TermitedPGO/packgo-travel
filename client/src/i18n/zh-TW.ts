@@ -85,6 +85,13 @@ export const zhTW = {
     saving: '儲存中...',
     viewAll: '查看全部',
     tourImage: '旅遊圖片',
+    // Accessibility labels (Round 72 follow-up)
+    backToTop: '返回頂部',
+    openAiAdvisor: '開啟 AI 旅遊顧問',
+    aiAdvisorInputPlaceholder: '輸入您的旅遊需求...',
+    searchToursPlaceholder: '搜尋行程...',
+    passportDisplayPlaceholder: '如護照所示',
+    cityCountryPlaceholder: '城市, 國家',
   },
 
   // 導航

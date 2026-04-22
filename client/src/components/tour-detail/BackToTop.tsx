@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from "react";
 import { ArrowUp } from "lucide-react";
 import { ensureReadableOnWhite } from "@/lib/colorUtils";
+import { useLocale } from "@/contexts/LocaleContext";
 
 export interface BackToTopProps {
   colorTheme: {
@@ -16,6 +17,7 @@ export interface BackToTopProps {
 }
 
 export const BackToTop: React.FC<BackToTopProps> = ({ colorTheme }) => {
+  const { t } = useLocale();
   const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
@@ -51,7 +53,7 @@ export const BackToTop: React.FC<BackToTopProps> = ({ colorTheme }) => {
             backgroundColor: colorTheme.accent,
             color: "white",
           }}
-          aria-label="返回頂部"
+          aria-label={t('common.backToTop')}
         >
           <ArrowUp className="h-6 w-6" />
         </button>

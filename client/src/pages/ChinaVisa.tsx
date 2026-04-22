@@ -98,7 +98,7 @@ const FAQS = [
 
 // ── 主頁面 ────────────────────────────────────────────────────
 export default function ChinaVisa() {
-  const { language } = useLocale();
+  const { language, t } = useLocale();
   const isChineseMode = language === "zh-TW";
   const [, navigate] = useLocation();
   const [currentStep, setCurrentStep] = useState(0); // 0 = landing, 1-5 = wizard steps
@@ -507,7 +507,7 @@ export default function ChinaVisa() {
                         max={50}
                         value={form.groupSize}
                         onChange={e => updateForm("groupSize", parseInt(e.target.value) || 1)}
-                        className="w-32 border-2 border-gray-300 rounded-none"
+                        className="w-32 border-2 border-gray-300 rounded-lg"
                       />
                       {form.groupSize >= 2 && (
                         <p className="text-xs text-green-600 mt-1">
@@ -524,7 +524,7 @@ export default function ChinaVisa() {
                         type="date"
                         value={form.travelDate}
                         onChange={e => updateForm("travelDate", e.target.value)}
-                        className="border-2 border-gray-300 rounded-none"
+                        className="border-2 border-gray-300 rounded-lg"
                       />
                     </div>
 
@@ -548,8 +548,8 @@ export default function ChinaVisa() {
                         <Input
                           value={form.firstName}
                           onChange={e => updateForm("firstName", e.target.value)}
-                          placeholder={isChineseMode ? "如護照所示" : "As shown on passport"}
-                          className="border-2 border-gray-300 rounded-none"
+                          placeholder={t('common.passportDisplayPlaceholder')}
+                          className="border-2 border-gray-300 rounded-lg"
                         />
                       </div>
                       <div>
@@ -559,8 +559,8 @@ export default function ChinaVisa() {
                         <Input
                           value={form.lastName}
                           onChange={e => updateForm("lastName", e.target.value)}
-                          placeholder={isChineseMode ? "如護照所示" : "As shown on passport"}
-                          className="border-2 border-gray-300 rounded-none"
+                          placeholder={t('common.passportDisplayPlaceholder')}
+                          className="border-2 border-gray-300 rounded-lg"
                         />
                       </div>
                     </div>
@@ -572,7 +572,7 @@ export default function ChinaVisa() {
                         type="email"
                         value={form.email}
                         onChange={e => updateForm("email", e.target.value)}
-                        className="border-2 border-gray-300 rounded-none"
+                        className="border-2 border-gray-300 rounded-lg"
                       />
                     </div>
                     <div>
@@ -583,7 +583,7 @@ export default function ChinaVisa() {
                         value={form.phone}
                         onChange={e => updateForm("phone", e.target.value)}
                         placeholder="+1 (555) 000-0000"
-                        className="border-2 border-gray-300 rounded-none"
+                        className="border-2 border-gray-300 rounded-lg"
                       />
                     </div>
                     <div>
@@ -594,7 +594,7 @@ export default function ChinaVisa() {
                         type="date"
                         value={form.dateOfBirth}
                         onChange={e => updateForm("dateOfBirth", e.target.value)}
-                        className="border-2 border-gray-300 rounded-none"
+                        className="border-2 border-gray-300 rounded-lg"
                       />
                     </div>
                     <div>
@@ -604,8 +604,8 @@ export default function ChinaVisa() {
                       <Input
                         value={form.placeOfBirth}
                         onChange={e => updateForm("placeOfBirth", e.target.value)}
-                        placeholder={isChineseMode ? "城市, 國家" : "City, Country"}
-                        className="border-2 border-gray-300 rounded-none"
+                        placeholder={t('common.cityCountryPlaceholder')}
+                        className="border-2 border-gray-300 rounded-lg"
                       />
                     </div>
                     <div>
@@ -616,7 +616,7 @@ export default function ChinaVisa() {
                         value={form.travelPurpose}
                         onChange={e => updateForm("travelPurpose", e.target.value)}
                         rows={3}
-                        className="border-2 border-gray-300 rounded-none"
+                        className="border-2 border-gray-300 rounded-lg"
                       />
                     </div>
                   </div>
@@ -638,7 +638,7 @@ export default function ChinaVisa() {
                         value={form.passportNumber}
                         onChange={e => updateForm("passportNumber", e.target.value.toUpperCase())}
                         placeholder="A12345678"
-                        className="border-2 border-gray-300 rounded-none font-mono"
+                        className="border-2 border-gray-300 rounded-lg font-mono"
                       />
                     </div>
                     <div>
@@ -649,7 +649,7 @@ export default function ChinaVisa() {
                         type="date"
                         value={form.passportExpiry}
                         onChange={e => updateForm("passportExpiry", e.target.value)}
-                        className="border-2 border-gray-300 rounded-none"
+                        className="border-2 border-gray-300 rounded-lg"
                       />
                       <p className="text-xs text-gray-500 mt-1">
                         {isChineseMode
@@ -665,7 +665,7 @@ export default function ChinaVisa() {
                         value={form.passportCountry}
                         onValueChange={v => updateForm("passportCountry", v)}
                       >
-                        <SelectTrigger className="border-2 border-gray-300 rounded-none">
+                        <SelectTrigger className="border-2 border-gray-300 rounded-lg">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>

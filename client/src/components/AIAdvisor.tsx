@@ -99,7 +99,7 @@ export default function AIAdvisor() {
               <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
                 <Bot className="h-5 w-5" />
               </div>
-              <div className="bg-white border border-gray-100 p-3 rounded-lg shadow-sm flex items-center gap-1">
+              <div className="bg-white border border-gray-100 p-3 rounded-xl shadow-sm flex items-center gap-1">
                 <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
                 <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
                 <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />

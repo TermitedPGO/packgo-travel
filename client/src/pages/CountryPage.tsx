@@ -267,7 +267,7 @@ export default function CountryPage() {
                     <div
                       key={tour.id}
                       onClick={() => handleTourClick(tour.id)}
-                      className="group cursor-pointer bg-white border border-gray-100 rounded-lg overflow-hidden hover:shadow-lg transition-all duration-300"
+                      className="group cursor-pointer bg-white border border-gray-100 rounded-xl overflow-hidden hover:shadow-lg transition-all duration-300"
                     >
                       {/* 圖片 */}
                       <div className="relative aspect-[16/10] overflow-hidden rounded-xl">

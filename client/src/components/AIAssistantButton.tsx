@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { MessageCircle, X } from "lucide-react";
+import { useLocale } from "@/contexts/LocaleContext";
 
 interface AIAssistantButtonProps {
   onClick: () => void;
@@ -7,6 +8,7 @@ interface AIAssistantButtonProps {
 }
 
 export default function AIAssistantButton({ onClick, isOpen }: AIAssistantButtonProps) {
+  const { t } = useLocale();
   const [showBubble, setShowBubble] = useState(true);
   const [isHovered, setIsHovered] = useState(false);
   const [bubbleAnimation, setBubbleAnimation] = useState(true);
@@ -97,7 +99,7 @@ export default function AIAssistantButton({ onClick, isOpen }: AIAssistantButton
         className={`relative group transition-all duration-300 ${
           isHovered ? "scale-110" : "scale-100"
         }`}
-        aria-label="開啟 AI 旅遊顧問"
+        aria-label={t('common.openAiAdvisor')}
       >
         {/* Character Avatar */}
         <div

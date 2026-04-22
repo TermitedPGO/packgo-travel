@@ -502,10 +502,10 @@ export default function Tours() {
               <div className="relative flex-shrink-0 w-56">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
                 <Input
-                  placeholder={language === "en" ? "Search tours..." : "搜尋行程..."}
+                  placeholder={t('common.searchToursPlaceholder')}
                   value={searchInput}
                   onChange={(e) => handleSearchChange(e.target.value)}
-                  className="pl-9 pr-8 rounded-full h-9 text-sm border-gray-200 focus:border-gray-400"
+                  className="pl-9 pr-8 rounded-lg h-9 text-sm border-gray-200 focus:border-gray-400"
                 />
                 {searchInput && (
                   <button
