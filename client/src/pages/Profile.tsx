@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useLocale } from "@/contexts/LocaleContext";
+import { translateDestination } from "@/utils/locationMapping";
 
 export default function Profile() {
   const { user, loading, isAuthenticated, logout } = useAuth();
@@ -486,7 +487,7 @@ export default function Profile() {
 function FavoritesSection({ setLocation }: { setLocation: (path: string) => void }) {
   const { data: favorites, isLoading } = trpc.favorites.list.useQuery();
   const utils = trpc.useUtils();
-  const { t } = useLocale();
+  const { t, language } = useLocale();
   
   const removeMutation = trpc.favorites.remove.useMutation({
     onSuccess: () => {
@@ -541,7 +542,7 @@ function FavoritesSection({ setLocation }: { setLocation: (path: string) => void
                   <div className="flex items-center gap-4 mt-1 text-sm text-gray-500">
                     <span className="flex items-center gap-1">
                       <MapPin className="h-3.5 w-3.5" />
-                      {tour.destinationCountry || tour.destination}
+                      {translateDestination(tour.destinationCountry || tour.destination || '', language)}
                     </span>
                     <span className="flex items-center gap-1">
                       <Clock className="h-3.5 w-3.5" />

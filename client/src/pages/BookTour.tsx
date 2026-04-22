@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { getLoginUrl } from "@/const";
 import { useLocale } from "@/contexts/LocaleContext";
+import { translateDestination } from "@/utils/locationMapping";
 import { trackBeginCheckout } from "@/lib/analytics";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -309,7 +310,7 @@ export default function BookTour() {
           <CardHeader>
             <CardTitle>{tour.title}</CardTitle>
             <CardDescription>
-              {tour.destination} · {tour.duration} {t('common.days')}
+              {translateDestination(tour.destination || '', language)} · {tour.duration} {t('common.days')}
             </CardDescription>
           </CardHeader>
         </Card>

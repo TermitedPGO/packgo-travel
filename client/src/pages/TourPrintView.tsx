@@ -14,6 +14,7 @@ import { useRoute, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { useLocale } from "@/contexts/LocaleContext";
+import { translateDestination } from "@/utils/locationMapping";
 import { 
   Printer,
   ArrowLeft,
@@ -201,12 +202,12 @@ export default function TourPrintView() {
                   className="inline-block px-3 py-1 text-sm font-medium mb-3"
                   style={{ backgroundColor: themeColor.primary, color: "white" }}
                 >
-                  {tour.destinationCountry || t('tourPrint.featuredTour')}
+                  {tour.destinationCountry ? translateDestination(tour.destinationCountry, language) : t('tourPrint.featuredTour')}
                 </div>
                 <h1 className="print-tour-title">{tour.title}</h1>
                 <div className="print-tour-meta">
                   <span><Calendar className="inline h-4 w-4 mr-1" />{tour.duration} {t('tourPrint.days')}</span>
-                  <span><MapPin className="inline h-4 w-4 mr-1" />{tour.destination || tour.destinationCountry}</span>
+                  <span><MapPin className="inline h-4 w-4 mr-1" />{translateDestination(tour.destination || tour.destinationCountry || '', language)}</span>
                   <span><Users className="inline h-4 w-4 mr-1" />{t('tourPrint.groupSize')}</span>
                 </div>
               </div>

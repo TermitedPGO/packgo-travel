@@ -3,6 +3,7 @@ import Header from "@/components/Header";
 import SEO from "@/components/SEO";
 import Footer from "@/components/Footer";
 import { useLocale } from "@/contexts/LocaleContext";
+import { translateDestination } from "@/utils/locationMapping";
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -247,7 +248,7 @@ export default function CruisePage() {
                           {/* 目的地 */}
                           <div className="flex items-center gap-1 text-gray-500 text-sm mb-2">
                             <MapPin className="h-4 w-4" />
-                            <span>{tour.destination || t('cruise.multipleDestinations')}</span>
+                            <span>{tour.destination ? translateDestination(tour.destination, language) : t('cruise.multipleDestinations')}</span>
                           </div>
 
                           {/* 標題 */}

@@ -1,6 +1,7 @@
 import { trpc } from "@/lib/trpc";
 import { useLocation } from "wouter";
 import { useLocale } from "@/contexts/LocaleContext";
+import { translateDestination } from "@/utils/locationMapping";
 import { useMemo } from "react";
 
 interface SimilarToursProps {
@@ -103,7 +104,7 @@ export default function SimilarTours({ tourId, title }: SimilarToursProps) {
               {/* Content */}
               <div className="p-4">
                 <p className="text-xs text-gray-500 mb-1">
-                  {tour.destinationCountry} · {tour.duration} {t('similarTours.days')}
+                  {translateDestination(tour.destinationCountry || '', language)} · {tour.duration} {t('similarTours.days')}
                 </p>
                 <h3 className="font-bold text-gray-900 text-sm leading-snug mb-2 line-clamp-2 group-hover:text-black">
                   {getTranslatedTitle(tour)}
