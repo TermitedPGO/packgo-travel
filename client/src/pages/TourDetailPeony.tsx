@@ -612,11 +612,11 @@ const AttractionDetailDialog = ({
         
         {/* 圖片輪播 */}
         {hasImages && (
-          <div className="relative aspect-[16/9] rounded-lg overflow-hidden mb-4">
-            <img 
-              src={images[currentImageIndex]} 
+          <div className="relative aspect-[16/9] rounded-xl overflow-hidden mb-4">
+            <img
+              src={images[currentImageIndex]}
               alt={name}
-              className="w-full h-full object-cover rounded-lg"
+              className="w-full h-full object-cover rounded-xl"
             />
             {images.length > 1 && (
               <>
@@ -944,11 +944,11 @@ const MealDetailDialog = ({
         
         {/* 圖片輪播 */}
         {hasImages && (
-          <div className="relative aspect-[16/9] rounded-lg overflow-hidden mb-4">
-            <img 
-              src={images[currentImageIndex]} 
+          <div className="relative aspect-[16/9] rounded-xl overflow-hidden mb-4">
+            <img
+              src={images[currentImageIndex]}
               alt={detail.name}
-              className="w-full h-full object-cover rounded-lg"
+              className="w-full h-full object-cover rounded-xl"
             />
             {images.length > 1 && (
               <>
@@ -1321,11 +1321,11 @@ const HotelCard = ({ hotel, themeColor }: { hotel: any; themeColor: ReturnType<t
         
         {/* 圖片輪播 */}
         {hasImages && (
-          <div className="relative aspect-video overflow-hidden rounded-lg mb-6">
-            <img 
+          <div className="relative aspect-video overflow-hidden rounded-xl mb-6">
+            <img
               src={images[currentImageIndex]}
               alt={hotel.imageAlt || hotel.name}
-              className="w-full h-full object-cover rounded-lg"
+              className="w-full h-full object-cover rounded-xl"
             />
             {images.length > 1 && (
               <>
@@ -1444,7 +1444,7 @@ const HotelCard = ({ hotel, themeColor }: { hotel: any; themeColor: ReturnType<t
               detail.roomTypes.map((room, idx) => (
                 <div key={idx} className="flex items-center gap-4 p-4 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">
                   {room.image && (
-                    <img src={room.image} alt={room.name} className="w-24 h-16 object-cover rounded-lg flex-shrink-0" />
+                    <img src={room.image} alt={room.name} className="w-24 h-16 object-cover rounded-xl flex-shrink-0" />
                   )}
                   <div className="flex-grow">
                     <p className="font-medium">{room.name}</p>
@@ -2100,9 +2100,19 @@ export default function TourDetailPeony() {
   return (
     <div className="min-h-screen flex flex-col bg-white">
       {/* 動態 SEO meta 標籤 */}
+      {/* Round 72: always pass bilingual { zh, en } tuples so crawlers see the
+          correct language regardless of the viewer's active locale. The zh
+          value is the canonical DB content; en falls back to zh when no
+          translation exists yet. */}
       <SEO
-        title={displayTitle}
-        description={displayDescription ?? undefined}
+        title={{
+          zh: tour.title,
+          en: ((tourTranslations as Record<string, string> | undefined)?.title) ?? tour.title,
+        }}
+        description={{
+          zh: tour.description ?? "",
+          en: ((tourTranslations as Record<string, string> | undefined)?.description) ?? tour.description ?? "",
+        }}
         image={(tour as any).heroImage || (tour as any).imageUrl || undefined}
         url={`/tours/${tour.id}`}
         type="article"
@@ -2376,10 +2386,10 @@ export default function TourDetailPeony() {
                       />
                     ) : featureImage ? (
                       <div className="relative h-40 overflow-hidden rounded-xl">
-                        <img 
-                          src={featureImage} 
+                        <img
+                          src={featureImage}
                           alt={featureTitle}
-                          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
+                          className="w-full h-full object-cover rounded-xl transition-transform duration-300 group-hover:scale-110"
                         />
                         <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
                       </div>
