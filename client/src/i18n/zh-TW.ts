@@ -374,6 +374,7 @@ export const zhTW = {
     twd: '新台幣',
     usd: '美金',
     note: '※ 轉換價格僅供參考',
+    rateDisclaimer: '匯率僅供參考，實際價格以屆時人員提供的報價為準',
   },
 
   // 語言
@@ -1102,6 +1103,11 @@ export const zhTW = {
     noticesDesc: '出發前請詳閱以下資訊',
     pricePerPerson: '每人售價 (含稅)',
     contactForDeparture: '請聯繫我們查詢可出發日期',
+    costDetails: '費用說明',
+    childWithBed: '小孩佔床',
+    childNoBed: '小孩不佔床',
+    confirmed: '確定出發',
+    infantPrice: '嬰兒',
     tabs: {
       overview: '行程特色',
       itinerary: '每日行程',

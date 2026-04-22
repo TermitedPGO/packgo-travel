@@ -199,7 +199,7 @@ const DeparturePriceCalendar = ({
   if (isLoading) {
     return (
       <div className="bg-gray-50 p-8 text-center mb-8">
-        <p className="text-gray-500">{t('tourDetail.loading') || '載入出發日期中...'}</p>
+        <p className="text-gray-500">{t('tourDetail.loading')}</p>
       </div>
     );
   }
@@ -208,7 +208,7 @@ const DeparturePriceCalendar = ({
   if (!departures || departures.length === 0) {
     return (
       <div className="bg-gray-50 p-8 text-center mb-8">
-        <p className="text-sm text-gray-500 mb-2">{t('tourDetail.pricePerPerson') || '每人售價 (含稅)'}</p>
+        <p className="text-sm text-gray-500 mb-2">{t('tourDetail.pricePerPerson')}</p>
         <div className="flex items-baseline justify-center gap-2">
           <span className="text-sm" style={{ color: themeColor.secondary }}>NT$</span>
           <span className="text-5xl font-bold" style={{ color: themeColor.primary }}>
@@ -216,7 +216,7 @@ const DeparturePriceCalendar = ({
           </span>
           <span className="text-gray-500">{t('tourDetail.startingFrom')}</span>
         </div>
-        <p className="text-gray-400 mt-4 text-sm">{t('tourDetail.contactForDeparture') || '請聯繫我們查詢可出發日期'}</p>
+        <p className="text-gray-400 mt-4 text-sm">{t('tourDetail.contactForDeparture')}</p>
       </div>
     );
   }
@@ -238,9 +238,9 @@ const DeparturePriceCalendar = ({
         </button>
         <div className="text-center">
           <h3 className="text-2xl font-bold text-white tracking-wide">
-            {(t('tourDetail.yearMonthFormat') || '{year} 年 {month} 月').replace('{year}', String(selectedMonth.getFullYear())).replace('{month}', String(selectedMonth.getMonth() + 1))}
+            {(t('tourDetail.yearMonthFormat')).replace('{year}', String(selectedMonth.getFullYear())).replace('{month}', String(selectedMonth.getMonth() + 1))}
           </h3>
-          <p className="text-white/80 text-sm mt-1">{t('tourDetail.selectDepartureDate') || '選擇您理想的出發日期'}</p>
+          <p className="text-white/80 text-sm mt-1">{t('tourDetail.selectDepartureDate')}</p>
         </div>
         <button 
           onClick={nextMonth}
@@ -254,7 +254,7 @@ const DeparturePriceCalendar = ({
       <div className="flex items-center justify-center gap-6 py-4 bg-gray-50 border-b border-gray-100">
         <div className="flex items-center gap-2">
           <div className="w-4 h-4 rounded-lg" style={{ backgroundColor: themeColor.secondary }}></div>
-          <span className="text-sm text-gray-600">{t('tourDetail.available') || '可預訂'}</span>
+          <span className="text-sm text-gray-600">{t('tourDetail.available')}</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-4 h-4 rounded bg-gray-300"></div>
@@ -262,7 +262,7 @@ const DeparturePriceCalendar = ({
         </div>
         <div className="flex items-center gap-2">
           <div className="w-4 h-4 rounded bg-gray-100 border border-gray-200"></div>
-          <span className="text-sm text-gray-600">{t('tourDetail.noDeparture') || '無出團'}</span>
+          <span className="text-sm text-gray-600">{t('tourDetail.noDeparture')}</span>
         </div>
       </div>
 
@@ -330,7 +330,7 @@ const DeparturePriceCalendar = ({
                         <>
                           {isConfirmed && (
                             <span className="text-[9px] font-bold text-green-700 bg-green-100 px-1.5 py-0.5 rounded mb-0.5 inline-block">
-                              ✓ {t('tourDetail.confirmed') || '確定出發'}
+                              ✓ {t('tourDetail.confirmed')}
                             </span>
                           )}
                           <div 
@@ -342,8 +342,8 @@ const DeparturePriceCalendar = ({
                           {(departure.totalSlots && departure.totalSlots > 0) && (
                             <p className={`text-[10px] mt-1 font-medium ${isLowSeats ? 'text-red-500 font-bold' : 'text-gray-500'}`}>
                               {isLowSeats
-                                ? `⚡ ${(t('tourDetail.remainingSeats') || '剩 {seats} 位').replace('{seats}', String(remainingSeats))}`
-                                : (t('tourDetail.remainingSeats') || '剩 {seats} 位').replace('{seats}', String(remainingSeats))}
+                                ? `⚡ ${(t('tourDetail.remainingSeats')).replace('{seats}', String(remainingSeats))}`
+                                : (t('tourDetail.remainingSeats')).replace('{seats}', String(remainingSeats))}
                             </p>
                           )}
                         </>
@@ -369,42 +369,42 @@ const DeparturePriceCalendar = ({
             return (
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                 <div>
-                  <p className="text-sm text-gray-500 mb-1">{t('tourDetail.selectedDeparture') || '已選擇出發日期'}</p>
+                  <p className="text-sm text-gray-500 mb-1">{t('tourDetail.selectedDeparture')}</p>
                   <p className="text-xl font-bold" style={{ color: themeColor.primary }}>
                     {depDate.getFullYear()}/{depDate.getMonth() + 1}/{depDate.getDate()} 
                     <span className="text-gray-400 mx-2">~</span>
                     {retDate.getFullYear()}/{retDate.getMonth() + 1}/{retDate.getDate()}
                   </p>
                   <p className="text-sm text-gray-500 mt-1">
-                    {(t('tourDetail.remainingSeatsLabel') || '剩餘名額：{seats} 位').replace('{seats}', String(dep.totalSlots - (dep.bookedSlots || 0)))}
+                    {(t('tourDetail.remainingSeatsLabel')).replace('{seats}', String(dep.totalSlots - (dep.bookedSlots || 0)))}
                   </p>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm text-gray-500 mb-1">{t('tourDetail.pricePerPerson') || '每人價格'}</p>
+                  <p className="text-sm text-gray-500 mb-1">{t('tourDetail.pricePerPerson')}</p>
                   <p className="text-3xl font-bold" style={{ color: themeColor.secondary }}>
                     NT$ {(dep.adultPrice || basePrice).toLocaleString()}
                   </p>
                   {/* Round 60: Age-based pricing breakdown */}
                   <div className="mt-2 text-left space-y-1">
                     <p className="text-xs text-gray-500">
-                      <span className="font-medium text-gray-700">{t('tourDetail.adultPrice') || '成人'}：</span>
+                      <span className="font-medium text-gray-700">{t('tourDetail.adultPrice')}：</span>
                       NT$ {(dep.adultPrice || basePrice).toLocaleString()}
                     </p>
                     {(dep.childPriceWithBed ?? 0) > 0 && (
                       <p className="text-xs text-gray-500">
-                        <span className="font-medium text-gray-700">{t('tourDetail.childWithBed') || '小孩佔床'}：</span>
+                        <span className="font-medium text-gray-700">{t('tourDetail.childWithBed')}：</span>
                         NT$ {(dep.childPriceWithBed ?? 0).toLocaleString()}
                       </p>
                     )}
                     {(dep.childPriceNoBed ?? 0) > 0 && (
                       <p className="text-xs text-gray-500">
-                        <span className="font-medium text-gray-700">{t('tourDetail.childNoBed') || '小孩不佔床'}：</span>
+                        <span className="font-medium text-gray-700">{t('tourDetail.childNoBed')}：</span>
                         NT$ {(dep.childPriceNoBed ?? 0).toLocaleString()}
                       </p>
                     )}
                     {(dep.infantPrice ?? 0) > 0 && (
                       <p className="text-xs text-gray-500">
-                        <span className="font-medium text-gray-700">{t('tourDetail.infantPrice') || '嬰兒'}：</span>
+                        <span className="font-medium text-gray-700">{t('tourDetail.infantPrice')}：</span>
                         NT$ {(dep.infantPrice ?? 0).toLocaleString()}
                       </p>
                     )}
@@ -663,7 +663,7 @@ const AttractionDetailDialog = ({
             {detail.duration && (
               <div className="flex items-center gap-1 text-gray-600">
                 <Clock className="h-4 w-4" style={{ color: themeColor.secondary }} />
-                <span>{t('tourDetail.suggestedVisit') || '建議遊覽：'}{detail.duration}</span>
+                <span>{t('tourDetail.suggestedVisit')}{detail.duration}</span>
               </div>
             )}
           </div>
@@ -671,7 +671,7 @@ const AttractionDetailDialog = ({
           {/* 景點介紹 */}
           {detail.description && (
             <div>
-              <h4 className="font-semibold text-gray-900 mb-2">{t('tourDetail.attractionIntro') || '景點介紹'}</h4>
+              <h4 className="font-semibold text-gray-900 mb-2">{t('tourDetail.attractionIntro')}</h4>
               <p className="text-gray-600 leading-relaxed">{detail.description}</p>
             </div>
           )}
@@ -909,7 +909,7 @@ const MealCard = ({
         {hasImages && (
           <div className="mt-1 flex items-center justify-center gap-1 text-xs text-gray-400">
             <ImageIcon className="h-3 w-3" />
-            <span>{(t('tourDetail.photoCount') || '{count} 張照片').replace('{count}', String(images.length))}</span>
+            <span>{(t('tourDetail.photoCount')).replace('{count}', String(images.length))}</span>
           </div>
         )}
       </div>
@@ -1378,7 +1378,7 @@ const HotelCard = ({ hotel, themeColor }: { hotel: any; themeColor: ReturnType<t
               </div>
             )}
             {detail.totalReviews && (
-              <span className="text-gray-500">{(t('tourDetail.reviewCount') || '({count} 則評價)').replace('{count}', String(detail.totalReviews))}</span>
+              <span className="text-gray-500">{(t('tourDetail.reviewCount')).replace('{count}', String(detail.totalReviews))}</span>
             )}
           </div>
         )}
@@ -1475,11 +1475,11 @@ const HotelCard = ({ hotel, themeColor }: { hotel: any; themeColor: ReturnType<t
                 </div>
                 <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">
                   <div>
-                    <p className="font-medium">{t('tourDetail.upgradeRoom') || '升等豪華房'}</p>
-                    <p className="text-sm text-gray-500">{t('tourDetail.upgradeRoomDesc') || '更寬敢空間、景觀陽台、迷你吧檯'}</p>
+                    <p className="font-medium">{t('tourDetail.upgradeRoom')}</p>
+                    <p className="text-sm text-gray-500">{t('tourDetail.upgradeRoomDesc')}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-sm text-gray-500">{t('tourDetail.perNightExtra') || '每晚加價'}</p>
+                    <p className="text-sm text-gray-500">{t('tourDetail.perNightExtra')}</p>
                     <p className="font-bold" style={{ color: themeColor.secondary }}>+NT$2,000</p>
                   </div>
                 </div>
@@ -1548,7 +1548,7 @@ const HotelCard = ({ hotel, themeColor }: { hotel: any; themeColor: ReturnType<t
         <div className="p-4 bg-gray-50 rounded-lg">
           <p className="text-sm text-gray-500 flex items-start gap-2">
             <Info className="h-4 w-4 mt-0.5 flex-shrink-0" />
-            <span>{t('tourDetail.hotelDisclaimer') || '實際入住飯店可能根據當地情況調整為同級飯店，請以最終行程確認書為準。'}</span>
+            <span>{t('tourDetail.hotelDisclaimer')}</span>
           </p>
         </div>
       </DialogContent>
@@ -2155,7 +2155,7 @@ export default function TourDetailPeony() {
           <div className="flex items-center gap-2 text-sm text-gray-700">
             <button onClick={() => navigate("/")} className="hover:text-black transition-colors">{t('nav.home')}</button>
             <span>&gt;</span>
-            <button onClick={() => navigate("/tours")} className="hover:text-black transition-colors">{t('nav.allTours') || '所有行程'}</button>
+            <button onClick={() => navigate("/tours")} className="hover:text-black transition-colors">{t('nav.allTours')}</button>
             <span>&gt;</span>
             <span className="text-black">{displayTitle}</span>
           </div>
@@ -2463,12 +2463,12 @@ export default function TourDetailPeony() {
             <div className="text-center p-6 bg-gray-50">
               <Users className="h-10 w-10 mx-auto mb-3 text-gray-600" />
               <p className="text-base text-gray-700 mb-1">{t('tourDetail.groupSize')}</p>
-              <p className="font-bold text-xl">{(t('tourDetail.groupPeople') || '{min}-{max} 人').replace('{min}', String((tour as any).minGroupSize || 10)).replace('{max}', String((tour as any).maxGroupSize || 25))}</p>
+              <p className="font-bold text-xl">{(t('tourDetail.groupPeople')).replace('{min}', String((tour as any).minGroupSize || 10)).replace('{max}', String((tour as any).maxGroupSize || 25))}</p>
             </div>
             <div className="text-center p-6 bg-gray-50">
               <Calendar className="h-10 w-10 mx-auto mb-3 text-gray-600" />
               <p className="text-base text-gray-700 mb-1">{t('tourDetail.departureDate')}</p>
-              <p className="font-bold text-xl">{t('tourDetail.multipleDates') || '多日期可選'}</p>
+              <p className="font-bold text-xl">{t('tourDetail.multipleDates')}</p>
             </div>
           </div>
         </div>
@@ -2480,7 +2480,7 @@ export default function TourDetailPeony() {
           <h2 className="text-3xl md:text-4xl font-bold text-center mb-4" style={{ color: themeColor.primary }}>
             {t('tourDetail.itineraryHighlights')}
           </h2>
-          <p className="text-lg text-gray-700 text-center mb-16">{t('tourDetail.dailyItineraryDesc') || '每一天都是獨特的旅程體驗'}</p>
+          <p className="text-lg text-gray-700 text-center mb-16">{t('tourDetail.dailyItineraryDesc')}</p>
 
           {/* Daily Itinerary */}
           <div className="space-y-24">
@@ -2517,7 +2517,7 @@ export default function TourDetailPeony() {
             ) : (
               <div className="text-center py-12 text-gray-700">
                 <Info className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                <p>{t('tourDetail.itineraryComingSoon') || '詳細行程資訊即將更新'}</p>
+                <p>{t('tourDetail.itineraryComingSoon')}</p>
               </div>
             )}
           </div>
@@ -2530,7 +2530,7 @@ export default function TourDetailPeony() {
           <h2 className="text-3xl md:text-4xl font-bold text-center mb-4" style={{ color: themeColor.primary }}>
             {t('tourDetail.upgradeOptions')}
           </h2>
-          <p className="text-lg text-gray-700 text-center mb-12">{t('tourDetail.highlightsDesc') || '精心安排的行程亮點'}</p>
+          <p className="text-lg text-gray-700 text-center mb-12">{t('tourDetail.highlightsDesc')}</p>
 
           {/* Attractions */}
           {attractions.length > 0 && (
@@ -2635,7 +2635,7 @@ export default function TourDetailPeony() {
             <h2 className="text-3xl md:text-4xl font-bold text-center mb-4" style={{ color: themeColor.primary }}>
               {t('tourDetail.luxuryHotel')}
             </h2>
-            <p className="text-lg text-gray-700 text-center mb-12">{t('tourDetail.hotelDesc') || '嚴選優質住宿，讓您的旅程更加舒適'}</p>
+            <p className="text-lg text-gray-700 text-center mb-12">{t('tourDetail.hotelDesc')}</p>
 
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
               {hotels.map((hotel: any, index: number) => (
@@ -2652,7 +2652,7 @@ export default function TourDetailPeony() {
           <h2 className="text-3xl md:text-4xl font-bold text-center mb-4" style={{ color: themeColor.primary }}>
             {t('tourDetail.departurePricing')}
           </h2>
-          <p className="text-lg text-gray-700 text-center mb-12">{t('tourDetail.selectDepartureDate') || '選擇您理想的出發日期'}</p>
+          <p className="text-lg text-gray-700 text-center mb-12">{t('tourDetail.selectDepartureDate')}</p>
 
           {/* Dynamic Price Calendar */}
           <DeparturePriceCalendar 
@@ -2685,14 +2685,14 @@ export default function TourDetailPeony() {
           {costExplanation && (costExplanation.included?.length > 0 || costExplanation.excluded?.length > 0) && (
             <div className="mt-12">
               <h3 className="text-2xl font-bold text-center mb-8" style={{ color: themeColor.primary }}>
-                {t('tourDetail.costDetails') || '費用說明'}
+                {t('tourDetail.costDetails')}
               </h3>
               <div className="grid md:grid-cols-2 gap-6">
                 {costExplanation.included && costExplanation.included.length > 0 && (
                   <div className="bg-green-50 rounded-xl p-6 border border-green-100">
                     <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-green-700">
                       <Check className="h-5 w-5" />
-                      {t('tourDetail.includedItems') || '費用包含'}
+                      {t('tourDetail.includedItems')}
                     </h4>
                     <ul className="space-y-2">
                       {ensureArray(costExplanation.included).map((item: string, index: number) => (
@@ -2708,7 +2708,7 @@ export default function TourDetailPeony() {
                   <div className="bg-red-50 rounded-xl p-6 border border-red-100">
                     <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-red-700">
                       <X className="h-5 w-5" />
-                      {t('tourDetail.excludedItems') || '費用不含'}
+                      {t('tourDetail.excludedItems')}
                     </h4>
                     <ul className="space-y-2">
                       {ensureArray(costExplanation.excluded).map((item: string, index: number) => (
@@ -2729,7 +2729,7 @@ export default function TourDetailPeony() {
 
           {/* Contact Info */}
           <div className="mt-12 text-center text-gray-700">
-            <p className="mb-4">{t('tourDetail.contactAdvisor') || '如需更多資訊，歡迎聯繫我們的旅遊顧問'}</p>
+            <p className="mb-4">{t('tourDetail.contactAdvisor')}</p>
             <div className="flex flex-wrap justify-center gap-6">
               <a href="tel:+15106342307" className="flex items-center gap-2 hover:text-black transition-colors">
                 <Phone className="h-4 w-4" />
@@ -2750,7 +2750,7 @@ export default function TourDetailPeony() {
           <h2 className="text-3xl md:text-4xl font-bold text-center mb-4" style={{ color: themeColor.primary }}>
             {t('tourDetail.notices')}
           </h2>
-          <p className="text-lg text-gray-700 text-center mb-12">{t('tourDetail.noticesDesc') || '出發前請詳閱以下資訊'}</p>
+          <p className="text-lg text-gray-700 text-center mb-12">{t('tourDetail.noticesDesc')}</p>
 
           {noticeDetailed ? (
             <div className="grid md:grid-cols-2 gap-6">
@@ -2761,7 +2761,7 @@ export default function TourDetailPeony() {
                     <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${themeColor.secondary}15` }}>
                       <Luggage className="h-5 w-5" style={{ color: themeColor.secondary }} />
                     </div>
-                    <h3 className="text-lg font-bold">{t('tourDetail.preTrip') || '行前準備'}</h3>
+                    <h3 className="text-lg font-bold">{t('tourDetail.preTrip')}</h3>
                   </div>
                   <ul className="space-y-2">
                     {ensureArray(noticeDetailed.preparation).map((item: string, index: number) => (
@@ -2781,7 +2781,7 @@ export default function TourDetailPeony() {
                     <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${themeColor.secondary}15` }}>
                       <FileText className="h-5 w-5" style={{ color: themeColor.secondary }} />
                     </div>
-                    <h3 className="text-lg font-bold">{t('tourDetail.documents') || '證件需求'}</h3>
+                    <h3 className="text-lg font-bold">{t('tourDetail.documents')}</h3>
                   </div>
                   <ul className="space-y-2">
                     {ensureArray(noticeDetailed.documents).map((item: string, index: number) => (
@@ -2801,7 +2801,7 @@ export default function TourDetailPeony() {
                     <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${themeColor.secondary}15` }}>
                       <Heart className="h-5 w-5" style={{ color: themeColor.secondary }} />
                     </div>
-                    <h3 className="text-lg font-bold">{t('tourDetail.health') || '健康須知'}</h3>
+                    <h3 className="text-lg font-bold">{t('tourDetail.health')}</h3>
                   </div>
                   <ul className="space-y-2">
                     {ensureArray(noticeDetailed.health).map((item: string, index: number) => (
@@ -2821,7 +2821,7 @@ export default function TourDetailPeony() {
                     <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${themeColor.secondary}15` }}>
                       <PhoneCall className="h-5 w-5" style={{ color: themeColor.secondary }} />
                     </div>
-                    <h3 className="text-lg font-bold">{t('tourDetail.emergency') || '緊急聯絡'}</h3>
+                    <h3 className="text-lg font-bold">{t('tourDetail.emergency')}</h3>
                   </div>
                   <ul className="space-y-2">
                     {ensureArray(noticeDetailed.emergency).map((item: string, index: number) => (
@@ -2841,7 +2841,7 @@ export default function TourDetailPeony() {
                     <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${themeColor.secondary}15` }}>
                       <Info className="h-5 w-5" style={{ color: themeColor.secondary }} />
                     </div>
-                    <h3 className="text-lg font-bold">{t('tourDetail.terms') || '條款與細則'}</h3>
+                    <h3 className="text-lg font-bold">{t('tourDetail.terms')}</h3>
                   </div>
                   <ul className="grid md:grid-cols-2 gap-2">
                     {ensureArray(noticeDetailed.terms).map((item: string, index: number) => (
@@ -2857,7 +2857,7 @@ export default function TourDetailPeony() {
           ) : (
             <div className="text-center py-12 text-gray-700">
               <Info className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-              <p>{t('tourDetail.noticesAdvisor') || '詳細注意事項請洽詢旅遊顧問'}</p>
+              <p>{t('tourDetail.noticesAdvisor')}</p>
             </div>
           )}
         </div>
@@ -2871,7 +2871,7 @@ export default function TourDetailPeony() {
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <p className="text-xs text-gray-500">{t('tourDetail.pricePerPersonFrom') || '每人售價起'}</p>
+              <p className="text-xs text-gray-500">{t('tourDetail.pricePerPersonFrom')}</p>
               <p className="text-xl md:text-2xl font-bold" style={{ color: themeColor.primary }}>
                 NT$ {tour.price ? tour.price.toLocaleString() : t('tourDetail.inquirePrice')}
               </p>
@@ -2884,14 +2884,14 @@ export default function TourDetailPeony() {
                 style={{ borderColor: themeColor.primary, color: themeColor.primary }}
               >
                 <Phone className="h-4 w-4 mr-2" />
-                {t('tourDetail.contactUs') || '聯絡詢問'}
+                {t('tourDetail.contactUs')}
               </Button>
               <Button 
                 onClick={() => navigate(`/book/${tour.id}`)}
                 className="px-6 md:px-10 py-3 text-white font-bold text-base md:text-lg"
                 style={{ backgroundColor: themeColor.primary }}
               >
-                {t('tourDetail.bookNowBtn') || '立即預訂'}
+                {t('tourDetail.bookNowBtn')}
               </Button>
             </div>
           </div>
@@ -2924,7 +2924,7 @@ export default function TourDetailPeony() {
             <DialogTitle className="text-xl font-bold">{t('tourDetail.shareThisTour')}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <p className="text-gray-600 text-sm">{(t('tourDetail.shareRecommend') || '分享「{title}」給您的親友！').replace('{title}', displayTitle)}</p>
+            <p className="text-gray-600 text-sm">{(t('tourDetail.shareRecommend')).replace('{title}', displayTitle)}</p>
             
             {/* 複製連結 */}
             <div className="flex items-center gap-2">
@@ -2968,7 +2968,7 @@ export default function TourDetailPeony() {
               <button
                 onClick={() => {
                   const url = encodeURIComponent(window.location.href);
-                  const text = encodeURIComponent((t('tourDetail.lineShareText') || '推薦這個行程給你：{title}').replace('{title}', displayTitle));
+                  const text = encodeURIComponent((t('tourDetail.lineShareText')).replace('{title}', displayTitle));
                   window.open(`https://social-plugins.line.me/lineit/share?url=${url}&text=${text}`, '_blank', 'width=600,height=400');
                 }}
                 className="flex flex-col items-center gap-2 p-3 rounded-lg hover:bg-gray-100 transition-colors"
@@ -2985,7 +2985,7 @@ export default function TourDetailPeony() {
               <button
                 onClick={() => {
                   const url = encodeURIComponent(window.location.href);
-                  const text = encodeURIComponent((t('tourDetail.lineShareText') || '推薦這個行程給你：{title}').replace('{title}', displayTitle));
+                  const text = encodeURIComponent((t('tourDetail.lineShareText')).replace('{title}', displayTitle));
                   window.open(`https://twitter.com/intent/tweet?url=${url}&text=${text}`, '_blank', 'width=600,height=400');
                 }}
                 className="flex flex-col items-center gap-2 p-3 rounded-lg hover:bg-gray-100 transition-colors"
@@ -3002,7 +3002,7 @@ export default function TourDetailPeony() {
               <button
                 onClick={() => {
                   const url = encodeURIComponent(window.location.href);
-                  const text = encodeURIComponent((t('tourDetail.lineShareText') || '推薦這個行程給你：{title}').replace('{title}', displayTitle) + ' ');
+                  const text = encodeURIComponent((t('tourDetail.lineShareText')).replace('{title}', displayTitle) + ' ');
                   window.open(`https://wa.me/?text=${text}${url}`, '_blank', 'width=600,height=400');
                 }}
                 className="flex flex-col items-center gap-2 p-3 rounded-lg hover:bg-gray-100 transition-colors"

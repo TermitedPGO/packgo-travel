@@ -374,6 +374,7 @@ export const en = {
     twd: 'TWD',
     usd: 'USD',
     note: '※ Converted prices are for reference only',
+    rateDisclaimer: 'Exchange rates are for reference only; actual prices will be provided at the time of inquiry.',
   },
 
   // Language
@@ -938,6 +939,11 @@ export const en = {
     noticesDesc: 'Please read the following information before departure',
     pricePerPerson: 'Price Per Person (incl. tax)',
     contactForDeparture: 'Please contact us for available departure dates',
+    costDetails: 'Cost Details',
+    childWithBed: 'Child (with bed)',
+    childNoBed: 'Child (no bed)',
+    confirmed: 'Confirmed',
+    infantPrice: 'Infant',
     itinerary: 'Daily Itinerary',
     day: 'Day {day}',
     included: 'What\'s Included',

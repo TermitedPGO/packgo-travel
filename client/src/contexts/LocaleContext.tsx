@@ -177,7 +177,7 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
     formatPrice,
     exchangeRate,
     isLoadingRate,
-    rateDisclaimer: ratesData?.disclaimer || '匯率僅供參考，實際價格以屆時人員提供的報價為準',
+    rateDisclaimer: ratesData?.disclaimer || t('currency.rateDisclaimer'),
     t,
     tArray,
   }), [language, setLanguage, currency, setCurrency, convertPrice, formatPrice, exchangeRate, isLoadingRate, ratesData, t, tArray]);

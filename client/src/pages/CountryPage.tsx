@@ -19,18 +19,18 @@ const generateSmartTags = (tour: any, t: (key: string) => string): { label: stri
   
   // 根據天數判斷行程類型
   if (tour.duration >= 10) {
-    tags.push({ label: t('tours.filters.deepTravel') || "深度旅遊", icon: Mountain, color: "bg-emerald-100 text-emerald-700" });
+    tags.push({ label: t('tours.filters.deepTravel'), icon: Mountain, color: "bg-emerald-100 text-emerald-700" });
   } else if (tour.duration >= 7) {
-    tags.push({ label: t('tours.filters.classic') || "經典行程", icon: Star, color: "bg-amber-100 text-amber-700" });
+    tags.push({ label: t('tours.filters.classic'), icon: Star, color: "bg-amber-100 text-amber-700" });
   } else if (tour.duration <= 4) {
-    tags.push({ label: t('tours.filters.shortTrip') || "輕旅行", icon: Sparkles, color: "bg-sky-100 text-sky-700" });
+    tags.push({ label: t('tours.filters.shortTrip'), icon: Sparkles, color: "bg-sky-100 text-sky-700" });
   }
   
   // 根據價格判斷行程等級
   if (tour.price && tour.price >= 80000) {
-    tags.push({ label: t('tours.filters.premium') || "精緻行程", icon: Star, color: "bg-purple-100 text-purple-700" });
+    tags.push({ label: t('tours.filters.premium'), icon: Star, color: "bg-purple-100 text-purple-700" });
   } else if (tour.price && tour.price < 30000) {
-    tags.push({ label: t('tours.filters.budget') || "超值優惠", icon: Sparkles, color: "bg-rose-100 text-rose-700" });
+    tags.push({ label: t('tours.filters.budget'), icon: Sparkles, color: "bg-rose-100 text-rose-700" });
   }
   
   // 根據交通方式判斷
@@ -40,33 +40,33 @@ const generateSmartTags = (tour: any, t: (key: string) => string): { label: stri
   const combinedText = `${title} ${description}`;
   
   if (category === "cruise" || combinedText.includes("郵輪") || combinedText.includes("遊輪")) {
-    tags.push({ label: t('cruise.title') || "郵輪", icon: Ship, color: "bg-blue-100 text-blue-700" });
+    tags.push({ label: t('cruise.title'), icon: Ship, color: "bg-blue-100 text-blue-700" });
   }
   
   if (tour.outboundAirline || combinedText.includes("航空") || combinedText.includes("飛機")) {
-    tags.push({ label: t('flightBooking.title') || "航空", icon: Plane, color: "bg-indigo-100 text-indigo-700" });
+    tags.push({ label: t('flightBooking.title'), icon: Plane, color: "bg-indigo-100 text-indigo-700" });
   }
   
   if (combinedText.includes("高鐵") || combinedText.includes("火車") || combinedText.includes("列車")) {
-    tags.push({ label: t('tours.filters.rail') || "鐵道", icon: Train, color: "bg-orange-100 text-orange-700" });
+    tags.push({ label: t('tours.filters.rail'), icon: Train, color: "bg-orange-100 text-orange-700" });
   }
   
   if (combinedText.includes("巴士") || combinedText.includes("遊覽車")) {
-    tags.push({ label: t('tours.filters.bus') || "巴士", icon: Bus, color: "bg-gray-100 text-gray-700" });
+    tags.push({ label: t('tours.filters.bus'), icon: Bus, color: "bg-gray-100 text-gray-700" });
   }
   
   // 根據特色活動判斷
   if (combinedText.includes("美食") || combinedText.includes("料理") || combinedText.includes("餐廳")) {
-    tags.push({ label: t('tours.filters.foodTour') || "美食之旅", icon: Utensils, color: "bg-red-100 text-red-700" });
+    tags.push({ label: t('tours.filters.foodTour'), icon: Utensils, color: "bg-red-100 text-red-700" });
   }
   
   if (combinedText.includes("攝影") || combinedText.includes("拍照") || combinedText.includes("打卡")) {
-    tags.push({ label: t('tours.filters.photoTour') || "攝影之旅", icon: Camera, color: "bg-pink-100 text-pink-700" });
+    tags.push({ label: t('tours.filters.photoTour'), icon: Camera, color: "bg-pink-100 text-pink-700" });
   }
   
   // 根據行程類型判斷
   if (category === "group" || combinedText.includes("團體")) {
-    tags.push({ label: t('groupPackages.title') || "團體旅遊", icon: Users, color: "bg-teal-100 text-teal-700" });
+    tags.push({ label: t('groupPackages.title'), icon: Users, color: "bg-teal-100 text-teal-700" });
   }
   
   // 解析資料庫中的 tags 欄位
@@ -93,13 +93,13 @@ const getRegionConfig = (t: (key: string) => string): Record<string, {
   name: string;
   label: string;
 }> => ({
-  "europe": { name: t('destinations.regions.europe') || "歐洲地區", label: "Europe" },
-  "asia": { name: t('destinations.regions.asia') || "亞洲地區", label: "Asia" },
-  "south-america": { name: t('destinations.regions.americas') || "美洲地區", label: "Americas" },
-  "middle-east": { name: t('destinations.regions.middleEast') || "中東地區", label: "Middle East" },
-  "africa": { name: t('destinations.regions.africa') || "非洲地區", label: "Africa" },
-  "cruise": { name: t('cruise.title') || "郵輪之旅", label: "Cruises" },
-  "oceania": { name: t('destinations.regions.oceania') || "大洋洲地區", label: "Oceania" }
+  "europe": { name: t('destinations.regions.europe'), label: "Europe" },
+  "asia": { name: t('destinations.regions.asia'), label: "Asia" },
+  "south-america": { name: t('destinations.regions.americas'), label: "Americas" },
+  "middle-east": { name: t('destinations.regions.middleEast'), label: "Middle East" },
+  "africa": { name: t('destinations.regions.africa'), label: "Africa" },
+  "cruise": { name: t('cruise.title'), label: "Cruises" },
+  "oceania": { name: t('destinations.regions.oceania'), label: "Oceania" }
 });
 
 // 國家圖片映射
@@ -138,7 +138,7 @@ export default function CountryPage() {
   
   const decodedCountry = decodeURIComponent(country || "");
   const regionConfig = getRegionConfig(t);
-  const regionInfo = regionConfig[region || ""] || { name: t('common.unknown') || "未知地區", label: "Unknown" };
+  const regionInfo = regionConfig[region || ""] || { name: t('common.unknown'), label: "Unknown" };
 
   // 搜尋該國家的所有行程
   const { data: searchResults, isLoading } = trpc.tours.search.useQuery({
