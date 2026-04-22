@@ -48,6 +48,15 @@ export default function BookTour() {
   
   // Queries
   const { data: tour, isLoading: tourLoading } = trpc.tours.getById.useQuery({ id: tourId });
+
+  // Fetch single-tour translation when not in Chinese mode
+  const { data: tourTranslation } = trpc.translation.getTourTranslations.useQuery(
+    { tourId, targetLanguage: language as 'zh-TW' | 'en' | 'ja' | 'ko' },
+    { enabled: language !== 'zh-TW' && tourId > 0 }
+  );
+  const displayTitle = language === 'zh-TW'
+    ? (tour?.title || '')
+    : (tourTranslation?.title || tour?.title || '');
   const { data: departures, isLoading: departuresLoading } = trpc.departures.listByTour.useQuery({ tourId });
   const createBookingMutation = trpc.bookings.create.useMutation();
   
@@ -308,7 +317,7 @@ export default function BookTour() {
         {/* Tour Info */}
         <Card className="mb-6">
           <CardHeader>
-            <CardTitle>{tour.title}</CardTitle>
+            <CardTitle>{displayTitle}</CardTitle>
             <CardDescription>
               {translateDestination(tour.destination || '', language)} · {tour.duration} {t('common.days')}
             </CardDescription>
@@ -740,7 +749,7 @@ export default function BookTour() {
               <div>
                 <h3 className="font-bold mb-2">{t('bookTour.tourInfo')}</h3>
                 <div className="text-sm space-y-1">
-                  <div>{t('bookTour.tour')}：{tour.title}</div>
+                  <div>{t('bookTour.tour')}：{displayTitle}</div>
                   <div>
                     {t('bookTour.departureDate')}：{new Date(selectedDeparture.departureDate).toLocaleDateString(getLocaleString())}
                   </div>

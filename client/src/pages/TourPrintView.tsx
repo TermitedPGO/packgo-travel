@@ -88,7 +88,19 @@ export default function TourPrintView() {
     { id: tourId! },
     { enabled: !!tourId }
   );
-  
+
+  // Fetch single-tour translation when not in Chinese mode
+  const { data: tourTranslation } = trpc.translation.getTourTranslations.useQuery(
+    { tourId: tourId!, targetLanguage: language as 'zh-TW' | 'en' | 'ja' | 'ko' },
+    { enabled: language !== 'zh-TW' && !!tourId }
+  );
+  const displayTitle = language === 'zh-TW'
+    ? (tour?.title || '')
+    : (tourTranslation?.title || tour?.title || '');
+  const displayDescription = language === 'zh-TW'
+    ? (tour?.description || '')
+    : (tourTranslation?.description || tour?.description || '');
+
   // 頁面載入後自動觸發列印
   useEffect(() => {
     if (tour && !isLoading) {
@@ -183,9 +195,9 @@ export default function TourPrintView() {
           {/* 行程封面圖 */}
           <div className="print-cover-image">
             {tour.heroImage ? (
-              <img 
-                src={tour.heroImage} 
-                alt={tour.title}
+              <img
+                src={tour.heroImage}
+                alt={displayTitle}
                 className="w-full h-full object-cover"
               />
             ) : (
@@ -204,7 +216,7 @@ export default function TourPrintView() {
                 >
                   {tour.destinationCountry ? translateDestination(tour.destinationCountry, language) : t('tourPrint.featuredTour')}
                 </div>
-                <h1 className="print-tour-title">{tour.title}</h1>
+                <h1 className="print-tour-title">{displayTitle}</h1>
                 <div className="print-tour-meta">
                   <span><Calendar className="inline h-4 w-4 mr-1" />{tour.duration} {t('tourPrint.days')}</span>
                   <span><MapPin className="inline h-4 w-4 mr-1" />{translateDestination(tour.destination || tour.destinationCountry || '', language)}</span>
@@ -219,7 +231,7 @@ export default function TourPrintView() {
             <h2 className="print-section-title" style={{ color: themeColor.primary }}>
               {t('tourPrint.tourIntro')}
             </h2>
-            <p className="print-intro-text">{tour.description}</p>
+            <p className="print-intro-text">{displayDescription}</p>
           </div>
           
           {/* 行程亮點 */}
@@ -249,7 +261,7 @@ export default function TourPrintView() {
           <div key={dayIndex} className="print-page print-itinerary-page">
             {/* 頁眉 */}
             <div className="print-page-header">
-              <span className="font-medium">{tour.title}</span>
+              <span className="font-medium">{displayTitle}</span>
               <span className="text-gray-500">{t('tourPrint.tourCode')}{tour.productCode || `T${tour.id}`}</span>
             </div>
             
@@ -378,7 +390,7 @@ export default function TourPrintView() {
           <div className="print-page print-hotels-page">
             {/* 頁眉 */}
             <div className="print-page-header">
-              <span className="font-medium">{tour.title}</span>
+              <span className="font-medium">{displayTitle}</span>
               <span className="text-gray-500">{t('tourPrint.hotelInfo')}</span>
             </div>
             
@@ -452,7 +464,7 @@ export default function TourPrintView() {
         <div className="print-page print-pricing-page">
           {/* 頁眉 */}
           <div className="print-page-header">
-            <span className="font-medium">{tour.title}</span>
+            <span className="font-medium">{displayTitle}</span>
             <span className="text-gray-500">{t('tourPrint.pricingInfo')}</span>
           </div>
           
@@ -532,7 +544,7 @@ export default function TourPrintView() {
         <div className="print-page print-notes-page">
           {/* 頁眉 */}
           <div className="print-page-header">
-            <span className="font-medium">{tour.title}</span>
+            <span className="font-medium">{displayTitle}</span>
             <span className="text-gray-500">{t('tourPrint.notes')}</span>
           </div>
           
