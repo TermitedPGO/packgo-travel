@@ -22,35 +22,34 @@ type CustomTourForm = z.infer<typeof customTourSchema>;
 export default function CustomTourRequest() {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const { t, language } = useLocale();
-  const isChineseMode = language === 'zh-TW';
-  const dateLocale = isChineseMode ? zhTW : enUS;
+  const dateLocale = language === 'zh-TW' ? zhTW : enUS;
 
   // Quick-pick destinations (inside component for i18n)
   const QUICK_DESTINATIONS = [
-    { label: isChineseMode ? "🇯🇵 日本" : "🇯🇵 Japan", value: isChineseMode ? "日本" : "Japan" },
-    { label: isChineseMode ? "🇰🇷 韓國" : "🇰🇷 South Korea", value: isChineseMode ? "韓國" : "South Korea" },
-    { label: isChineseMode ? "🇹🇭 泰國" : "🇹🇭 Thailand", value: isChineseMode ? "泰國" : "Thailand" },
-    { label: isChineseMode ? "🇸🇬 新加坡" : "🇸🇬 Singapore", value: isChineseMode ? "新加坡" : "Singapore" },
-    { label: isChineseMode ? "🇪🇺 歐洲" : "🇪🇺 Europe", value: isChineseMode ? "歐洲" : "Europe" },
-    { label: isChineseMode ? "🇺🇸 美國" : "🇺🇸 USA", value: isChineseMode ? "美國" : "USA" },
+    { label: t("customTourRequest.quickDestJapanLabel"), value: t("customTourRequest.quickDestJapanValue") },
+    { label: t("customTourRequest.quickDestKoreaLabel"), value: t("customTourRequest.quickDestKoreaValue") },
+    { label: t("customTourRequest.quickDestThailandLabel"), value: t("customTourRequest.quickDestThailandValue") },
+    { label: t("customTourRequest.quickDestSingaporeLabel"), value: t("customTourRequest.quickDestSingaporeValue") },
+    { label: t("customTourRequest.quickDestEuropeLabel"), value: t("customTourRequest.quickDestEuropeValue") },
+    { label: t("customTourRequest.quickDestUSALabel"), value: t("customTourRequest.quickDestUSAValue") },
   ];
 
   // Quick-pick durations
   const QUICK_DURATIONS = [
-    { label: isChineseMode ? "3 天" : "3 days", value: 3 },
-    { label: isChineseMode ? "5 天" : "5 days", value: 5 },
-    { label: isChineseMode ? "7 天" : "7 days", value: 7 },
-    { label: isChineseMode ? "10 天" : "10 days", value: 10 },
-    { label: isChineseMode ? "14 天" : "14 days", value: 14 },
+    { label: t("customTourRequest.duration3"), value: 3 },
+    { label: t("customTourRequest.duration5"), value: 5 },
+    { label: t("customTourRequest.duration7"), value: 7 },
+    { label: t("customTourRequest.duration10"), value: 10 },
+    { label: t("customTourRequest.duration14"), value: 14 },
   ];
 
   // Quick-pick group sizes
   const QUICK_PEOPLE = [
-    { label: isChineseMode ? "1 人" : "1 pax", value: 1 },
-    { label: isChineseMode ? "2 人" : "2 pax", value: 2 },
-    { label: isChineseMode ? "4 人" : "4 pax", value: 4 },
-    { label: isChineseMode ? "6 人" : "6 pax", value: 6 },
-    { label: isChineseMode ? "10+ 人" : "10+ pax", value: 10 },
+    { label: t("customTourRequest.people1"), value: 1 },
+    { label: t("customTourRequest.people2"), value: 2 },
+    { label: t("customTourRequest.people4"), value: 4 },
+    { label: t("customTourRequest.people6"), value: 6 },
+    { label: t("customTourRequest.people10Plus"), value: 10 },
   ];
 
   const {
@@ -145,7 +144,7 @@ export default function CustomTourRequest() {
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit(onSubmit)} className="bg-white  shadow-lg p-8">
+        <form onSubmit={handleSubmit(onSubmit)} className="bg-white rounded-xl shadow-lg p-8">
           <div className="space-y-6">
             {/* Personal Info Section */}
             <div className="pb-6 border-b">
@@ -379,7 +378,7 @@ export default function CustomTourRequest() {
                     {...register("message")}
                     placeholder={t("customTourRequest.messagePlaceholder")}
                     rows={8}
-                    className=" mt-2"
+                    className="rounded-lg mt-2"
                   />
                   {errors.message && (
                     <p className="text-red-500 text-sm mt-1">{errors.message.message}</p>
@@ -403,7 +402,7 @@ export default function CustomTourRequest() {
         </form>
 
         {/* Info Box */}
-        <div className="mt-8 bg-blue-50  p-6">
+        <div className="mt-8 bg-blue-50 rounded-xl p-6">
           <h3 className="font-semibold text-gray-900 mb-3">
             {t("customTourRequest.serviceTitle")}
           </h3>

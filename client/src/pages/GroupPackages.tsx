@@ -10,74 +10,41 @@ import {
 import { useLocale } from "@/contexts/LocaleContext";
 
 export default function GroupPackages() {
-  const { language } = useLocale();
-  const isChineseMode = language === 'zh-TW';
+  const { t } = useLocale();
 
   const processSteps = [
-    {
-      step: "01",
-      title: isChineseMode ? "專業諮詢" : "Expert Consultation",
-      desc: isChineseMode
-        ? "聯繫我們的包團顧問，說明您的需求、人數、目的地與預算，我們將為您提供初步規劃建議。"
-        : "Contact our group travel consultant, share your needs, group size, destination, and budget — we'll provide initial planning suggestions.",
-    },
-    {
-      step: "02",
-      title: isChineseMode ? "客製方案" : "Customized Plan",
-      desc: isChineseMode
-        ? "根據您的需求量身打造行程，包含航班、住宿、餐食、景點與導遊安排，提供完整報價。"
-        : "A tailor-made itinerary covering flights, accommodation, meals, attractions, and guide arrangements, with a full quote.",
-    },
-    {
-      step: "03",
-      title: isChineseMode ? "確認訂金" : "Confirm Deposit",
-      desc: isChineseMode
-        ? "確認行程細節後繳付訂金，我們立即為您鎖位並開始辦理相關手續。"
-        : "After confirming itinerary details, pay the deposit and we'll immediately secure your spots and begin processing.",
-    },
-    {
-      step: "04",
-      title: isChineseMode ? "出發旅遊" : "Depart & Enjoy",
-      desc: isChineseMode
-        ? "專業領隊全程陪同，讓您和團員盡情享受旅程，無後顧之憂。"
-        : "A professional tour leader accompanies you throughout, so you and your group can enjoy every moment worry-free.",
-    },
+    { step: "01", title: t("groupPackages.page.step1Title"), desc: t("groupPackages.page.step1Desc") },
+    { step: "02", title: t("groupPackages.page.step2Title"), desc: t("groupPackages.page.step2Desc") },
+    { step: "03", title: t("groupPackages.page.step3Title"), desc: t("groupPackages.page.step3Desc") },
+    { step: "04", title: t("groupPackages.page.step4Title"), desc: t("groupPackages.page.step4Desc") },
   ];
 
   const faqs = [
-    {
-      q: isChineseMode ? "最少幾人可以包團？" : "What is the minimum group size?",
-      a: isChineseMode
-        ? "一般包團最少需要 10 人，最多可達 50 人。人數越多，每人費用越優惠。我們也提供 10 人以下的小包團服務，費用另議。"
-        : "Standard group bookings require a minimum of 10 people, up to 50. The larger the group, the better the per-person rate. We also offer small group packages under 10 — pricing on request.",
-    },
-    {
-      q: isChineseMode ? "可以指定出發日期嗎？" : "Can we choose our own departure date?",
-      a: isChineseMode
-        ? "包團旅遊最大的優勢就是可以自由選擇出發日期，完全配合您的團員時間安排。"
-        : "One of the biggest advantages of group bookings is the freedom to choose your own departure date, fully aligned with your group's schedule.",
-    },
-    {
-      q: isChineseMode ? "行程可以客製化嗎？" : "Can the itinerary be customized?",
-      a: isChineseMode
-        ? "當然可以！我們提供完全客製化服務，從景點選擇、住宿等級到餐食安排，都可依照您的需求調整。"
-        : "Absolutely! We offer fully customized services — from attraction selection and accommodation grade to meal arrangements, all adjustable to your needs.",
-    },
-    {
-      q: isChineseMode ? "費用包含哪些項目？" : "What does the package price include?",
-      a: isChineseMode
-        ? "標準包套費用包含來回機票、全程住宿、接送交通、專業領隊及部分餐食。詳細包含項目會在報價單中清楚列明。"
-        : "Standard packages include round-trip flights, full accommodation, transfer transportation, a professional tour leader, and some meals. All inclusions are clearly listed in the quote.",
-    },
+    { q: t("groupPackages.page.faq1Q"), a: t("groupPackages.page.faq1A") },
+    { q: t("groupPackages.page.faq2Q"), a: t("groupPackages.page.faq2A") },
+    { q: t("groupPackages.page.faq3Q"), a: t("groupPackages.page.faq3A") },
+    { q: t("groupPackages.page.faq4Q"), a: t("groupPackages.page.faq4A") },
+  ];
+
+  const advantages = [
+    { icon: Star, title: t("groupPackages.page.advantage1Title"), desc: t("groupPackages.page.advantage1Desc") },
+    { icon: MapPin, title: t("groupPackages.page.advantage2Title"), desc: t("groupPackages.page.advantage2Desc") },
+    { icon: Gift, title: t("groupPackages.page.advantage3Title"), desc: t("groupPackages.page.advantage3Desc") },
+    { icon: Shield, title: t("groupPackages.page.advantage4Title"), desc: t("groupPackages.page.advantage4Desc") },
+  ];
+
+  const whyUs = [
+    { icon: Users, title: t("groupPackages.page.whyUs1Title"), desc: t("groupPackages.page.whyUs1Desc") },
+    { icon: Clock, title: t("groupPackages.page.whyUs2Title"), desc: t("groupPackages.page.whyUs2Desc") },
+    { icon: CheckCircle, title: t("groupPackages.page.whyUs3Title"), desc: t("groupPackages.page.whyUs3Desc") },
+    { icon: Headphones, title: t("groupPackages.page.whyUs4Title"), desc: t("groupPackages.page.whyUs4Desc") },
   ];
 
   return (
     <div className="min-h-screen flex flex-col bg-white">
       <SEO
-        title={isChineseMode ? "包團旅遊" : "Group Packages"}
-        description={isChineseMode
-          ? "PACK&GO 提供專業包團旅遊服務，10-50 人團體皆可客製行程，專業領隊全程陪同，享受最優惠的團體價格。"
-          : "PACK&GO offers professional group travel services for groups of 10–50. Customized itineraries, professional tour leaders, and the best group rates."}
+        title={t("groupPackages.page.seoTitle")}
+        description={t("groupPackages.page.seoDescription")}
       />
       <Header />
 
@@ -94,28 +61,26 @@ export default function GroupPackages() {
           <div className="max-w-2xl">
             <div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur-sm border border-white/20 rounded-lg px-4 py-1.5 text-sm mb-6">
               <Users className="h-4 w-4" />
-              <span>{isChineseMode ? "包團旅遊服務" : "Group Travel Service"}</span>
+              <span>{t("groupPackages.page.heroTag")}</span>
             </div>
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-6 leading-tight">
-              {isChineseMode ? "與親友共享旅程" : "Travel Together"}<br />
+              {t("groupPackages.page.heroTitleLine1")}<br />
               <span className="text-gray-300">
-                {isChineseMode ? "專屬包團，全程無憂" : "Exclusive Group Tours, Worry-Free"}
+                {t("groupPackages.page.heroTitleLine2")}
               </span>
             </h1>
             <p className="text-xl text-gray-300 mb-8 leading-relaxed">
-              {isChineseMode
-                ? "PACK&GO 包團顧問擁有豐富的團體旅遊規劃經驗，從行程設計到現場領隊，全程貼心照顧，讓您的團體旅遊留下美好回憶。"
-                : "PACK&GO's group travel consultants have extensive experience in planning group trips — from itinerary design to on-site tour leadership, we take care of every detail so your group creates lasting memories."}
+              {t("groupPackages.page.heroSubtitle")}
             </p>
             <div className="flex flex-col sm:flex-row gap-4">
               <Link href="/inquiry">
                 <Button className="bg-white text-black hover:bg-gray-100 font-bold px-8 py-3 h-auto rounded-lg text-base">
-                  {isChineseMode ? "立即諮詢包團" : "Inquire Now"} <ArrowRight className="ml-2 h-5 w-5" />
+                  {t("groupPackages.page.ctaPrimary")} <ArrowRight className="ml-2 h-5 w-5" />
                 </Button>
               </Link>
               <Link href="/contact-us">
                 <Button variant="outline" className="border-white text-white hover:bg-white/10 font-bold px-8 py-3 h-auto rounded-lg text-base bg-transparent">
-                  {isChineseMode ? "聯絡我們" : "Contact Us"}
+                  {t("groupPackages.page.ctaSecondary")}
                 </Button>
               </Link>
             </div>
@@ -136,43 +101,14 @@ export default function GroupPackages() {
         <div className="container">
           <div className="text-center mb-14">
             <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
-              {isChineseMode ? "包團旅遊的優勢" : "Advantages of Group Travel"}
+              {t("groupPackages.page.advantagesTitle")}
             </h2>
             <p className="text-gray-500 text-lg">
-              {isChineseMode ? "專為您的團體量身打造，享受最貼心的旅遊服務" : "Tailor-made for your group — enjoy the most attentive travel service"}
+              {t("groupPackages.page.advantagesSubtitle")}
             </p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {[
-              {
-                icon: Star,
-                title: isChineseMode ? "專業領隊全程陪同" : "Professional Tour Leader",
-                desc: isChineseMode
-                  ? "經驗豐富的專業領隊全程照顧，熟悉當地文化與景點，讓您放心享受旅程。"
-                  : "Experienced professional tour leaders accompany you throughout, familiar with local culture and attractions.",
-              },
-              {
-                icon: MapPin,
-                title: isChineseMode ? "完全客製化行程" : "Fully Customized Itinerary",
-                desc: isChineseMode
-                  ? "依照團員喜好與需求量身設計行程，景點、餐食、住宿均可靈活調整。"
-                  : "Itineraries designed to your group's preferences — attractions, meals, and accommodation all flexibly adjustable.",
-              },
-              {
-                icon: Gift,
-                title: isChineseMode ? "團體優惠價格" : "Group Discount Pricing",
-                desc: isChineseMode
-                  ? "多人同行享受更優惠的團體價格，人數越多折扣越大，物超所值。"
-                  : "The more people, the better the group rate. Enjoy greater discounts with larger groups — exceptional value.",
-              },
-              {
-                icon: Shield,
-                title: isChineseMode ? "全程安心保障" : "Full Peace-of-Mind Coverage",
-                desc: isChineseMode
-                  ? "完善的行程安排與旅遊保險，緊急狀況即時處理，讓您的旅程安全無虞。"
-                  : "Comprehensive itinerary planning and travel insurance, with immediate handling of emergencies for a safe journey.",
-              },
-            ].map((feature, i) => (
+            {advantages.map((feature, i) => (
               <div key={i} className="bg-gray-50 rounded-xl p-8 hover:shadow-lg transition-all">
                 <div className="w-12 h-12 rounded-lg bg-black text-white flex items-center justify-center mb-5">
                   <feature.icon className="h-6 w-6" />
@@ -190,10 +126,10 @@ export default function GroupPackages() {
         <div className="container">
           <div className="text-center mb-12">
             <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
-              {isChineseMode ? "包團流程" : "Group Booking Process"}
+              {t("groupPackages.page.processTitle")}
             </h2>
             <p className="text-gray-500 text-lg">
-              {isChineseMode ? "簡單 4 步驟，輕鬆完成包團預訂" : "4 simple steps to complete your group booking"}
+              {t("groupPackages.page.processSubtitle")}
             </p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -219,40 +155,10 @@ export default function GroupPackages() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
             <div>
               <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-6">
-                {isChineseMode ? "為什麼選擇 PACK&GO 包團？" : "Why Choose PACK&GO for Group Travel?"}
+                {t("groupPackages.page.whyUsTitle")}
               </h2>
               <div className="space-y-5">
-                {[
-                  {
-                    icon: Users,
-                    title: isChineseMode ? "各類型團體皆可承接" : "All Group Types Welcome",
-                    // FTC 16 CFR §260.5: removed unsubstantiated "Over 200 successful group tours" claim.
-                    desc: isChineseMode
-                      ? "服務各種規模與類型的團體，從家族旅遊到企業員工旅遊皆可量身規劃。"
-                      : "We serve groups of all sizes and types — from family trips to corporate employee travel — with a custom itinerary for each.",
-                  },
-                  {
-                    icon: Clock,
-                    title: isChineseMode ? "節省規劃時間" : "Save Planning Time",
-                    desc: isChineseMode
-                      ? "從行程設計到機票訂位、飯店預訂，全程由我們代勞，您只需告訴我們需求，其餘交給我們。"
-                      : "From itinerary design to flight and hotel bookings, we handle everything. Just tell us your needs and leave the rest to us.",
-                  },
-                  {
-                    icon: CheckCircle,
-                    title: isChineseMode ? "透明報價無隱費" : "Transparent Pricing, No Hidden Fees",
-                    desc: isChineseMode
-                      ? "提供詳細的費用明細，包含與不含項目一目了然，讓您安心預算規劃。"
-                      : "Detailed cost breakdowns with clear inclusions and exclusions — plan your budget with confidence.",
-                  },
-                  {
-                    icon: Headphones,
-                    title: isChineseMode ? "24 小時緊急支援" : "24-Hour Emergency Support",
-                    desc: isChineseMode
-                      ? "旅途中遇到任何問題，我們的客服團隊隨時待命，確保您的旅程順利無阻。"
-                      : "Our customer service team is on standby around the clock to handle any issue during your trip.",
-                  },
-                ].map((item, i) => (
+                {whyUs.map((item, i) => (
                   <div key={i} className="flex gap-4">
                     <div className="shrink-0 w-10 h-10 rounded-lg bg-black text-white flex items-center justify-center">
                       <item.icon className="h-5 w-5" />
@@ -283,7 +189,7 @@ export default function GroupPackages() {
         <div className="container max-w-3xl">
           <div className="text-center mb-12">
             <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
-              {isChineseMode ? "常見問題" : "Frequently Asked Questions"}
+              {t("groupPackages.page.faqTitle")}
             </h2>
           </div>
           <div className="space-y-4">
@@ -304,23 +210,21 @@ export default function GroupPackages() {
       <section className="py-20 bg-black text-white">
         <div className="container text-center">
           <h2 className="text-3xl md:text-4xl font-bold mb-4">
-            {isChineseMode ? "準備好規劃您的包團旅遊了嗎？" : "Ready to Plan Your Group Tour?"}
+            {t("groupPackages.page.finalCtaTitle")}
           </h2>
           <p className="text-gray-300 text-lg mb-8 max-w-xl mx-auto">
-            {isChineseMode
-              ? "立即聯繫我們的包團顧問，評估您的需求，讓團體旅遊成為最美好的共同回憶。"
-              : "Contact our group travel consultant now to assess your needs and make your group trip an unforgettable shared memory."}
+            {t("groupPackages.page.finalCtaSubtitle")}
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link href="/inquiry">
               <Button className="bg-white text-black hover:bg-gray-100 font-bold px-10 py-3 h-auto rounded-lg text-base">
-                {isChineseMode ? "立即諮詢" : "Inquire Now"} <ArrowRight className="ml-2 h-5 w-5" />
+                {t("groupPackages.page.finalCtaInquire")} <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
             </Link>
             <Link href="/contact-us">
               <Button variant="outline" className="border-white text-white hover:bg-white/10 font-bold px-10 py-3 h-auto rounded-lg text-base bg-transparent">
                 <Phone className="mr-2 h-4 w-4" />
-                {isChineseMode ? "查看聯絡方式" : "View Contact Info"}
+                {t("groupPackages.page.finalCtaContact")}
               </Button>
             </Link>
           </div>
