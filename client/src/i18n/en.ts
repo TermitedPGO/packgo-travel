@@ -284,6 +284,7 @@ export const en = {
       europe: 'Europe',
       middleEast: 'Middle East',
       oceania: 'Oceania',
+      other: 'Other',
     },
     cruises: 'Cruises',
     viewTours: 'View Tours',

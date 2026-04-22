@@ -22,6 +22,51 @@ import { DestinationAutocomplete } from "@/components/DestinationAutocomplete";
 import { groupDestinationsByContinent, continentOrder } from "@shared/continentMapping";
 import { FavoriteButton } from "@/components/FavoriteButton";
 
+// 後端回傳的智能標籤中文 → i18n key 對映（避免英文模式顯示中文字）
+const SMART_TAG_KEY_MAP: Record<string, string> = {
+  "深度旅遊": "search.deepTravel",
+  "經典行程": "search.classicTour",
+  "輕旅行": "search.lightTravel",
+  "一般行程": "search.normalTour",
+  "精緻行程": "search.premiumTour",
+  "超值優惠": "search.valueDeal",
+  "航空": "search.aviation",
+  "鐵道": "search.railway",
+  "郵輪": "search.cruiseTag",
+  "巴士": "search.bus",
+  "美食之旅": "search.foodTour",
+  "攝影之旅": "search.photoTour",
+  "團體旅遊": "search.groupTour",
+  "永續旅遊": "search.sustainableTravel",
+  "溫泉": "search.hotSpring",
+};
+
+const translateSmartTag = (label: string, t: (key: string) => string): string => {
+  const key = SMART_TAG_KEY_MAP[label];
+  if (!key) return label;
+  const translated = t(key);
+  // 若 t() 找不到對應 key 會回傳 key 本身，此時 fallback 回原字串
+  return translated === key ? label : translated;
+};
+
+// 後端回傳的洲別中文 → i18n key 對映
+const CONTINENT_KEY_MAP: Record<string, string> = {
+  "亞洲": "destinations.regions.asia",
+  "歐洲": "destinations.regions.europe",
+  "大洋洲": "destinations.regions.oceania",
+  "美洲": "destinations.regions.americas",
+  "非洲": "destinations.regions.africa",
+  "中東": "destinations.regions.middleEast",
+  "其他": "destinations.regions.other",
+};
+
+const translateContinent = (continent: string, t: (key: string) => string): string => {
+  const key = CONTINENT_KEY_MAP[continent];
+  if (!key) return continent;
+  const translated = t(key);
+  return translated === key ? continent : translated;
+};
+
 // 智能標籤生成函數 - 根據行程資料自動生成正確的標籤
 // t() is passed in from the component so labels are i18n-routed instead of
 // a lang ternary (CLAUDE.md §4.1).
@@ -444,7 +489,7 @@ export default function SearchResults() {
                               onClick={() => toggleContinent(continent)}
                               className="w-full flex items-center justify-between px-3 py-2 bg-gray-100 hover:bg-gray-200 transition-colors"
                             >
-                              <span className="font-medium text-gray-800">{continent}</span>
+                              <span className="font-medium text-gray-800">{translateContinent(continent, t)}</span>
                               <div className="flex items-center gap-2">
                                 <span className="text-xs text-gray-500">
                                   {t('search.toursCount', { count: destinations.reduce((sum, d) => sum + d.count, 0) })}
@@ -465,7 +510,7 @@ export default function SearchResults() {
                                       checked={selectedDestinations.includes(country)}
                                       onCheckedChange={() => toggleDestination(country)}
                                     />
-                                    <span className="text-sm text-gray-600 flex-1">{country}</span>
+                                    <span className="text-sm text-gray-600 flex-1">{translateDestination(country, language)}</span>
                                     <span className="text-xs text-gray-400">({count})</span>
                                   </label>
                                 ))}
@@ -498,7 +543,7 @@ export default function SearchResults() {
                                 }`}
                                 onClick={() => toggleTag(label)}
                               >
-                                {label}
+                                {translateSmartTag(label, t)}
                                 <span className="ml-1 text-xs opacity-70">({count})</span>
                               </Badge>
                             ))}
@@ -522,7 +567,7 @@ export default function SearchResults() {
                                 }`}
                                 onClick={() => toggleTag(label)}
                               >
-                                {label}
+                                {translateSmartTag(label, t)}
                                 <span className="ml-1 text-xs opacity-70">({count})</span>
                               </Badge>
                             ))}
@@ -546,7 +591,7 @@ export default function SearchResults() {
                                 }`}
                                 onClick={() => toggleTag(label)}
                               >
-                                {label}
+                                {translateSmartTag(label, t)}
                                 <span className="ml-1 text-xs opacity-70">({count})</span>
                               </Badge>
                             ))}
@@ -570,7 +615,7 @@ export default function SearchResults() {
                                 }`}
                                 onClick={() => toggleTag(label)}
                               >
-                                {label}
+                                {translateSmartTag(label, t)}
                                 <span className="ml-1 text-xs opacity-70">({count})</span>
                               </Badge>
                             ))}
@@ -633,23 +678,23 @@ export default function SearchResults() {
                   </Badge>
                 )}
                 {selectedDestinations.map(dest => (
-                  <Badge 
+                  <Badge
                     key={dest}
-                    variant="secondary" 
+                    variant="secondary"
                     className="bg-gray-200 text-gray-700 hover:bg-gray-300 cursor-pointer"
                     onClick={() => toggleDestination(dest)}
                   >
-                    {dest} <X className="h-3 w-3 ml-1" />
+                    {translateDestination(dest, language)} <X className="h-3 w-3 ml-1" />
                   </Badge>
                 ))}
                 {selectedTags.map(tag => (
-                  <Badge 
+                  <Badge
                     key={tag}
-                    variant="secondary" 
+                    variant="secondary"
                     className="bg-gray-200 text-gray-700 hover:bg-gray-300 cursor-pointer"
                     onClick={() => toggleTag(tag)}
                   >
-                    {tag} <X className="h-3 w-3 ml-1" />
+                    {translateSmartTag(tag, t)} <X className="h-3 w-3 ml-1" />
                   </Badge>
                 ))}
               </div>

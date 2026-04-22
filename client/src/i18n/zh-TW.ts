@@ -285,6 +285,7 @@ export const zhTW = {
       europe: '歐洲',
       middleEast: '中東',
       oceania: '大洋洲',
+      other: '其他',
     },
     cruises: '郵輪之旅',
     viewTours: '查看行程',
