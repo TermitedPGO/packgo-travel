@@ -1,9 +1,9 @@
 import React, { useState } from "react";
-import { 
-  ChevronDown, 
-  ChevronUp, 
-  Plus, 
-  Trash2, 
+import {
+  ChevronDown,
+  ChevronUp,
+  Plus,
+  Trash2,
   GripVertical,
   Clock,
   MapPin,
@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { EditableImage } from "./EditableImage";
+import { useLocale } from "@/contexts/LocaleContext";
 
 interface Activity {
   time?: string;
@@ -64,6 +65,7 @@ export function EditableDayCard({
   tourId,
   themeColor,
 }: EditableDayCardProps) {
+  const { t } = useLocale();
   const [isExpanded, setIsExpanded] = useState(false);
   const [editingField, setEditingField] = useState<string | null>(null);
   const [tempValue, setTempValue] = useState("");
@@ -186,12 +188,12 @@ export function EditableDayCard({
           "hover:bg-blue-50/80 px-1 py-0.5"
         )}
         onClick={() => startEdit(field, value || "")}
-        title="點擊編輯"
+        title={t('common.clickToEdit')}
       >
         {value || <span className="text-gray-400 italic">{placeholder}</span>}
         <span className="absolute -top-7 left-0 text-xs bg-blue-600 text-white px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
           <Edit2 className="inline h-3 w-3 mr-1" />
-          點擊編輯
+          {t('common.clickToEdit')}
         </span>
       </Tag>
     );
@@ -236,17 +238,17 @@ export function EditableDayCard({
           {/* Title */}
           {renderEditableText(
             "title",
-            day.title || day.location || `第 ${index + 1} 天`,
-            "輸入標題...",
+            day.title || day.location || t('tourDetail.day', { day: index + 1 }),
+            t('tourDetail.editTitlePlaceholder'),
             "text-2xl md:text-3xl font-bold mb-4",
             "h3"
           )}
-          
+
           {/* Description */}
           {renderEditableText(
             "description",
             day.description || day.summary || "",
-            "輸入描述...",
+            t('tourDetail.editDescPlaceholder'),
             "text-gray-600 leading-relaxed mb-6",
             "p"
           )}
@@ -267,13 +269,13 @@ export function EditableDayCard({
                           <Input
                             value={activity.time || ""}
                             onChange={(e) => updateActivity(actIndex, "time", e.target.value)}
-                            placeholder="時間 (如: 09:00)"
+                            placeholder={t('tourDetail.activityTimePlaceholder')}
                             className="w-24 h-8 text-sm"
                           />
                           <Input
                             value={activity.title || ""}
                             onChange={(e) => updateActivity(actIndex, "title", e.target.value)}
-                            placeholder="活動標題"
+                            placeholder={t('tourDetail.activityTitlePlaceholder')}
                             className="flex-1 h-8"
                           />
                           <Button
@@ -281,11 +283,12 @@ export function EditableDayCard({
                             variant="ghost"
                             className="h-8 w-8 p-0 text-red-500 opacity-0 group-hover:opacity-100"
                             onClick={() => {
-                              if (confirm(`確定要刪除「${activity.title || activity.name || '此活動'}」？`)) {
+                              const activityName = activity.title || activity.name || t('tourDetail.defaultActivityName');
+                              if (confirm(t('tourDetail.confirmDeleteActivity', { title: activityName }))) {
                                 removeActivity(actIndex);
                               }
                             }}
-                            title="刪除活動"
+                            title={t('tourDetail.deleteActivity')}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -294,7 +297,7 @@ export function EditableDayCard({
                           <Textarea
                             value={activity.description || ""}
                             onChange={(e) => updateActivity(actIndex, "description", e.target.value)}
-                            placeholder="活動描述（選填）"
+                            placeholder={t('tourDetail.activityDescPlaceholder')}
                             className="text-sm min-h-[60px]"
                           />
                         )}
@@ -314,7 +317,7 @@ export function EditableDayCard({
                 </div>
               ))}
               
-              {/* 新增活動按鈕 */}
+              {/* Add Activity Button */}
               {isEditMode && (
                 <Button
                   variant="outline"
@@ -323,7 +326,7 @@ export function EditableDayCard({
                   className="mt-2"
                 >
                   <Plus className="h-4 w-4 mr-1" />
-                  新增活動
+                  {t('tourDetail.addActivity')}
                 </Button>
               )}
             </div>
@@ -336,9 +339,9 @@ export function EditableDayCard({
               className="flex items-center gap-2 text-sm font-bold transition-colors text-gray-900 hover:text-black"
             >
               {isExpanded ? (
-                <>收起 <ChevronUp className="h-4 w-4" /></>
+                <>{t('tourDetail.collapse')} <ChevronUp className="h-4 w-4" /></>
               ) : (
-                <>查看更多 <ChevronDown className="h-4 w-4" /></>
+                <>{t('tourDetail.readMore')} <ChevronDown className="h-4 w-4" /></>
               )}
             </button>
           )}
@@ -347,12 +350,12 @@ export function EditableDayCard({
           {(day.accommodation || isEditMode) && (
             <div className="mt-4 pt-4 border-t border-gray-100">
               <div className="flex items-center gap-2 text-sm text-gray-600">
-                <span className="font-medium">今晚住宿：</span>
+                <span className="font-medium">{t('tourDetail.todayHotel')}</span>
                 {isEditMode ? (
                   <Input
                     value={day.accommodation || ""}
                     onChange={(e) => onUpdate({ ...day, accommodation: e.target.value })}
-                    placeholder="輸入住宿名稱"
+                    placeholder={t('tourDetail.accommodationPlaceholder')}
                     className="flex-1 h-8"
                   />
                 ) : (
@@ -366,42 +369,42 @@ export function EditableDayCard({
           {(day.meals || isEditMode) && (
             <div className="mt-4 pt-4 border-t border-gray-100">
               <div className="text-sm text-gray-600 space-y-2">
-                <span className="font-medium block mb-2">今日餐食：</span>
+                <span className="font-medium block mb-2">{t('tourDetail.todayMeals')}</span>
                 {isEditMode ? (
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
-                      <span className="w-12 text-gray-500">早餐</span>
+                      <span className="w-12 text-gray-500">{t('tourDetail.breakfast')}</span>
                       <Input
                         value={day.meals?.breakfast || ""}
-                        onChange={(e) => onUpdate({ 
-                          ...day, 
-                          meals: { ...day.meals, breakfast: e.target.value } 
+                        onChange={(e) => onUpdate({
+                          ...day,
+                          meals: { ...day.meals, breakfast: e.target.value }
                         })}
-                        placeholder="輸入早餐內容"
+                        placeholder={t('tourDetail.breakfastPlaceholder')}
                         className="flex-1 h-8"
                       />
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="w-12 text-gray-500">午餐</span>
+                      <span className="w-12 text-gray-500">{t('tourDetail.lunch')}</span>
                       <Input
                         value={day.meals?.lunch || ""}
-                        onChange={(e) => onUpdate({ 
-                          ...day, 
-                          meals: { ...day.meals, lunch: e.target.value } 
+                        onChange={(e) => onUpdate({
+                          ...day,
+                          meals: { ...day.meals, lunch: e.target.value }
                         })}
-                        placeholder="輸入午餐內容"
+                        placeholder={t('tourDetail.lunchPlaceholder')}
                         className="flex-1 h-8"
                       />
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="w-12 text-gray-500">晚餐</span>
+                      <span className="w-12 text-gray-500">{t('tourDetail.dinner')}</span>
                       <Input
                         value={day.meals?.dinner || ""}
-                        onChange={(e) => onUpdate({ 
-                          ...day, 
-                          meals: { ...day.meals, dinner: e.target.value } 
+                        onChange={(e) => onUpdate({
+                          ...day,
+                          meals: { ...day.meals, dinner: e.target.value }
                         })}
-                        placeholder="輸入晚餐內容"
+                        placeholder={t('tourDetail.dinnerPlaceholder')}
                         className="flex-1 h-8"
                       />
                     </div>
@@ -409,13 +412,13 @@ export function EditableDayCard({
                 ) : (
                   <div className="flex flex-wrap gap-4">
                     {day.meals?.breakfast && (
-                      <span>早：{day.meals.breakfast}</span>
+                      <span>{t('tourDetail.breakfast')}: {day.meals.breakfast}</span>
                     )}
                     {day.meals?.lunch && (
-                      <span>午：{day.meals.lunch}</span>
+                      <span>{t('tourDetail.lunch')}: {day.meals.lunch}</span>
                     )}
                     {day.meals?.dinner && (
-                      <span>晚：{day.meals.dinner}</span>
+                      <span>{t('tourDetail.dinner')}: {day.meals.dinner}</span>
                     )}
                   </div>
                 )}
