@@ -2331,6 +2331,19 @@ export const en = {
     party2: '2 people',
     party35: '3-5 people',
     party6plus: '6+ people',
+    timeoutMessage: 'AI response timed out. Please try again later.',
+    suggestions: {
+      japan: ['Must-see sights in Tokyo?', 'Osaka food recommendations', 'Best months to visit Japan?', 'How do I get a Japan visa?'],
+      europe: ['Multi-country Europe tour ideas', 'Schengen visa overview', 'Typical Europe travel budget?', 'Best season to visit Europe'],
+      seAsia: ['Bangkok itinerary ideas', 'How many days for Southeast Asia?', 'Do I need a visa for Southeast Asia?', 'Family-friendly Southeast Asia trips'],
+      usa: ['US East vs. West Coast tours', 'US visa application process', 'Self-guided vs. group tour in the US?', 'US trip budget planning'],
+      itinerary: ['How many days for this trip?', 'Family-friendly itineraries', 'Honeymoon itinerary ideas', 'Backpacker itinerary planning'],
+      visa: ['How long does a visa take?', 'Which countries are visa-free?', 'How to apply for an e-visa?', 'What if my visa is denied?'],
+      flight: ['How to find cheap flights?', 'Is a business-class upgrade worth it?', 'How early should I book?', 'Baggage allowance rules'],
+      hotel: ['How to pick the right hotel?', 'Downtown vs. suburbs?', 'Family-friendly hotels', 'Hotel early-bird deals'],
+      budget: ['How to reduce travel costs?', 'Do I need travel insurance?', 'Credit card or cash abroad?', 'How to allocate a travel budget?'],
+      generic: ['I have more questions', 'Recommend a suitable tour', 'Check departure dates and prices', 'Talk to a travel advisor'],
+    },
   },
 
   // Group Packages Page

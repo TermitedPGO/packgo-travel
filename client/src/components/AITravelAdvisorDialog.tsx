@@ -43,55 +43,34 @@ interface AITravelAdvisorDialogProps {
 type GuidedFlowStep = "none" | "region" | "partySize";
 type GuidedFlowData = { region?: string };
 
-// 根據 AI 回應內容推斷後續建議
-function inferSuggestedReplies(content: string): string[] {
+// Classify AI response content to pick a suggestion category. The caller
+// resolves the category key through tArray() so suggestions always render
+// in the user's active language.
+type SuggestionCategory =
+  | 'japan' | 'europe' | 'seAsia' | 'usa' | 'itinerary'
+  | 'visa' | 'flight' | 'hotel' | 'budget' | 'generic';
+
+function inferSuggestionCategory(content: string): SuggestionCategory {
   const lower = content.toLowerCase();
 
-  // 目的地相關
-  if (lower.includes("日本") || lower.includes("japan")) {
-    return ["東京有哪些必去景點？", "大阪美食推薦", "日本幾月去最好？", "日本簽證怎麼辦？"];
-  }
-  if (lower.includes("歐洲") || lower.includes("europe")) {
-    return ["歐洲幾國遊行程推薦", "歐洲申根簽證說明", "歐洲旅遊預算大概多少？", "歐洲最佳旅遊季節"];
-  }
-  if (lower.includes("東南亞") || lower.includes("泰國") || lower.includes("thailand")) {
-    return ["泰國曼谷行程規劃", "東南亞幾天最適合？", "東南亞簽證需要嗎？", "東南亞親子旅遊推薦"];
-  }
-  if (lower.includes("美國") || lower.includes("美洲") || lower.includes("usa")) {
-    return ["美國東西岸行程比較", "美國簽證申請流程", "美國自由行還是跟團好？", "美國旅遊預算規劃"];
-  }
+  // Destination keywords (match both Chinese and English forms)
+  if (lower.includes("日本") || lower.includes("japan")) return 'japan';
+  if (lower.includes("歐洲") || lower.includes("europe")) return 'europe';
+  if (lower.includes("東南亞") || lower.includes("泰國") || lower.includes("thailand")) return 'seAsia';
+  if (lower.includes("美國") || lower.includes("美洲") || lower.includes("usa")) return 'usa';
 
-  // 行程規劃相關
-  if (lower.includes("行程") || lower.includes("規劃") || lower.includes("itinerary")) {
-    return ["幾天的行程比較適合？", "推薦適合家庭的行程", "蜜月旅遊行程建議", "背包客行程規劃"];
-  }
+  // Topic keywords
+  if (lower.includes("行程") || lower.includes("規劃") || lower.includes("itinerary")) return 'itinerary';
+  if (lower.includes("簽證") || lower.includes("visa")) return 'visa';
+  if (lower.includes("機票") || lower.includes("flight") || lower.includes("航班")) return 'flight';
+  if (lower.includes("飯店") || lower.includes("hotel") || lower.includes("住宿")) return 'hotel';
+  if (lower.includes("預算") || lower.includes("費用") || lower.includes("price") || lower.includes("cost")) return 'budget';
 
-  // 簽證相關
-  if (lower.includes("簽證") || lower.includes("visa")) {
-    return ["簽證需要多久辦理？", "免簽國家有哪些？", "電子簽證怎麼申請？", "簽證被拒怎麼辦？"];
-  }
-
-  // 機票相關
-  if (lower.includes("機票") || lower.includes("flight") || lower.includes("航班")) {
-    return ["如何找到便宜機票？", "商務艙值得升等嗎？", "機票多早訂比較好？", "行李限重規定說明"];
-  }
-
-  // 飯店相關
-  if (lower.includes("飯店") || lower.includes("hotel") || lower.includes("住宿")) {
-    return ["飯店怎麼選比較好？", "市區還是郊區住宿？", "親子飯店推薦", "飯店早鳥優惠說明"];
-  }
-
-  // 預算相關
-  if (lower.includes("預算") || lower.includes("費用") || lower.includes("price") || lower.includes("cost")) {
-    return ["如何降低旅遊費用？", "旅遊保險需要買嗎？", "刷卡還是帶現金好？", "旅遊預算怎麼分配？"];
-  }
-
-  // 通用後續建議
-  return ["還有其他問題想了解", "幫我推薦適合的行程", "查詢出發日期與費用", "聯絡旅遊顧問諮詢"];
+  return 'generic';
 }
 
 export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessage }: AITravelAdvisorDialogProps) {
-  const { t, language } = useLocale();
+  const { t, tArray, language } = useLocale();
   const [sessionId] = useState(() => `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
   const [messages, setMessages] = useState<Message[]>(() => [
     {
@@ -215,9 +194,10 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
                   const updated = [...prev];
                   const last = updated[updated.length - 1];
                   if (last?.role === "assistant" && last.content) {
+                    const category = inferSuggestionCategory(last.content);
                     updated[updated.length - 1] = {
                       ...last,
-                      suggestedReplies: inferSuggestedReplies(last.content),
+                      suggestedReplies: tArray(`aiAdvisor.suggestions.${category}`),
                     };
                   }
                   return updated;
@@ -234,13 +214,13 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
     } catch (error: any) {
       clearTimeout(timeoutId);
       if (error?.name === "AbortError") {
-        // 超時或使用者手動中止：顯示友好提示
+        // Timeout or manual abort — show friendly message
         updatePenguinExpression("confused");
         setMessages((prev) => {
           const updated = [...prev];
           const last = updated[updated.length - 1];
           if (last?.role === "assistant" && last.content === "") {
-            updated[updated.length - 1] = { ...last, content: "AI 回應超時，請稍後重試" };
+            updated[updated.length - 1] = { ...last, content: t('aiAdvisor.timeoutMessage') };
           }
           return updated;
         });
@@ -262,7 +242,7 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
       setIsStreaming(false);
       abortControllerRef.current = null;
     }
-  }, [sessionId, t]);
+  }, [sessionId, t, tArray]);
 
   const feedbackMutation = trpc.ai.recordFeedback.useMutation({
     onSuccess: () => {
