@@ -34,24 +34,20 @@ export default function SimilarTours({ tourId, title }: SimilarToursProps) {
     return tourTrans?.title || tour.title;
   };
 
-  const sectionTitle = title || (language === 'zh-TW' ? '您可能也喜歡' : t('tours.similar') || 'You May Also Like');
-  const viewAllLabel = language === 'zh-TW' ? '查看所有行程' : t('common.viewAll') || 'View All';
-  const perPersonLabel = language === 'zh-TW' ? '每人起' : t('common.perPerson') || 'Per Person';
-  const featuredLabel = language === 'zh-TW' ? '精選' : t('featuredTours.title') || 'Featured';
+  const sectionTitle = title || t('tours.similar');
+  const viewAllLabel = t('similarTours.viewAll');
+  const perPersonLabel = t('similarTours.perPersonFrom');
+  const featuredLabel = t('similarTours.featured');
 
   const getCategoryLabel = (category: string) => {
-    if (language === 'zh-TW') {
-      return category === 'group' ? '團體' :
-             category === 'private' ? '私人' :
-             category === 'self_guided' ? '自由行' :
-             category === 'cruise' ? '郵輪' :
-             category === 'theme' ? '主題' : category;
+    switch (category) {
+      case 'group': return t('similarTours.catGroup');
+      case 'private': return t('similarTours.catPrivate');
+      case 'self_guided': return t('similarTours.catSelfGuided');
+      case 'cruise': return t('similarTours.catCruise');
+      case 'theme': return t('similarTours.catTheme');
+      default: return category;
     }
-    return category === 'group' ? 'Group' :
-           category === 'private' ? 'Private' :
-           category === 'self_guided' ? 'Self-Guided' :
-           category === 'cruise' ? 'Cruise' :
-           category === 'theme' ? 'Theme' : category;
   };
 
   if (isLoading || !similarTours || similarTours.length === 0) return null;
@@ -73,7 +69,7 @@ export default function SimilarTours({ tourId, title }: SimilarToursProps) {
             <div
               key={tour.id}
               onClick={() => navigate(`/tours/${tour.id}`)}
-              className="bg-white border border-gray-200 cursor-pointer group hover:shadow-md transition-all duration-200"
+              className="bg-white border border-gray-200 rounded-xl overflow-hidden cursor-pointer group hover:shadow-md transition-all duration-200"
             >
               {/* Image */}
               <div className="relative aspect-[4/3] overflow-hidden rounded-t-xl bg-gray-100">
@@ -81,7 +77,7 @@ export default function SimilarTours({ tourId, title }: SimilarToursProps) {
                   <img
                     src={tour.imageUrl || tour.heroImage}
                     alt={getTranslatedTitle(tour)}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 rounded-xl"
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 rounded-t-xl"
                     onError={(e) => {
                       e.currentTarget.style.display = 'none';
                       const parent = e.currentTarget.parentElement;
@@ -99,7 +95,7 @@ export default function SimilarTours({ tourId, title }: SimilarToursProps) {
                   </div>
                 )}
                 {tour.featured === 1 && (
-                  <div className="absolute top-2 left-2 bg-black text-white text-xs px-2 py-0.5 font-medium">
+                  <div className="absolute top-2 left-2 bg-black text-white text-xs px-2 py-0.5 rounded-md font-medium">
                     {featuredLabel}
                   </div>
                 )}
@@ -107,7 +103,7 @@ export default function SimilarTours({ tourId, title }: SimilarToursProps) {
               {/* Content */}
               <div className="p-4">
                 <p className="text-xs text-gray-500 mb-1">
-                  {tour.destinationCountry} · {tour.duration} {language === 'zh-TW' ? '天' : t('common.days') || 'Days'}
+                  {tour.destinationCountry} · {tour.duration} {t('similarTours.days')}
                 </p>
                 <h3 className="font-bold text-gray-900 text-sm leading-snug mb-2 line-clamp-2 group-hover:text-black">
                   {getTranslatedTitle(tour)}
@@ -119,7 +115,7 @@ export default function SimilarTours({ tourId, title }: SimilarToursProps) {
                       {formatPrice(tour.price || 0, (tour.priceCurrency || 'TWD') as 'TWD' | 'USD')}
                     </p>
                   </div>
-                  <span className="text-xs text-gray-500 border border-gray-200 px-2 py-0.5">
+                  <span className="text-xs text-gray-500 border border-gray-200 rounded-md px-2 py-0.5">
                     {getCategoryLabel(tour.category)}
                   </span>
                 </div>

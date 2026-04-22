@@ -42,20 +42,20 @@ import { useDebounce } from "@/hooks/useDebounce";
 import { translateDestination } from "@/utils/locationMapping";
 
 const CATEGORY_TAGS = [
-  { value: "all",     labelZh: "全部",     labelEn: "All",           icon: Globe },
-  { value: "group",   labelZh: "團體旅遊", labelEn: "Group Tours",   icon: Users },
-  { value: "theme",   labelZh: "主題旅遊", labelEn: "Theme Tours",   icon: Sparkles },
-  { value: "custom",  labelZh: "客製旅遊", labelEn: "Custom Tours",  icon: Compass },
-  { value: "package", labelZh: "包團旅遊", labelEn: "Package Tours", icon: Package },
-  { value: "cruise",  labelZh: "郵輪旅遊", labelEn: "Cruise Tours",  icon: Anchor },
+  { value: "all",     labelKey: "tours.categoryAll",     icon: Globe },
+  { value: "group",   labelKey: "tours.categoryGroup",   icon: Users },
+  { value: "theme",   labelKey: "tours.categoryTheme",   icon: Sparkles },
+  { value: "custom",  labelKey: "tours.categoryCustom",  icon: Compass },
+  { value: "package", labelKey: "tours.categoryPackage", icon: Package },
+  { value: "cruise",  labelKey: "tours.categoryCruise",  icon: Anchor },
 ];
 
 const DURATION_PRESETS = [
-  { labelZh: "全部天數",  labelEn: "Any Duration", min: undefined as number | undefined, max: undefined as number | undefined },
-  { labelZh: "1-5 天",   labelEn: "1-5 Days",     min: 1,  max: 5  },
-  { labelZh: "6-10 天",  labelEn: "6-10 Days",    min: 6,  max: 10 },
-  { labelZh: "11-15 天", labelEn: "11-15 Days",   min: 11, max: 15 },
-  { labelZh: "16 天以上", labelEn: "16+ Days",     min: 16, max: undefined as number | undefined },
+  { labelKey: "tours.durationAny",     min: undefined as number | undefined, max: undefined as number | undefined },
+  { labelKey: "tours.duration1_5",     min: 1,  max: 5  },
+  { labelKey: "tours.duration6_10",    min: 6,  max: 10 },
+  { labelKey: "tours.duration11_15",   min: 11, max: 15 },
+  { labelKey: "tours.duration16Plus",  min: 16, max: undefined as number | undefined },
 ];
 
 // Country flag emoji helper
@@ -102,16 +102,16 @@ function TourCard({
 
   // Determine included items from tour data
   const includedTags = useMemo(() => {
-    const tags: { icon: typeof Plane; labelZh: string; labelEn: string }[] = [];
+    const tags: { icon: typeof Plane; labelKey: string }[] = [];
     const inc = tour.included || "";
     if (inc.includes("機票") || inc.includes("flight") || inc.toLowerCase().includes("air")) {
-      tags.push({ icon: Plane, labelZh: "含機票", labelEn: "Flights" });
+      tags.push({ icon: Plane, labelKey: "tours.tagFlights" });
     }
     if (inc.includes("飯店") || inc.includes("hotel") || inc.includes("住宿") || inc.toLowerCase().includes("hotel")) {
-      tags.push({ icon: Hotel, labelZh: "含住宿", labelEn: "Hotels" });
+      tags.push({ icon: Hotel, labelKey: "tours.tagHotels" });
     }
     if (inc.includes("餐") || inc.includes("meal") || inc.includes("food") || inc.toLowerCase().includes("meal")) {
-      tags.push({ icon: Utensils, labelZh: "含餐食", labelEn: "Meals" });
+      tags.push({ icon: Utensils, labelKey: "tours.tagMeals" });
     }
     // Show max 2 tags to keep card clean
     return tags.slice(0, 2);
@@ -165,7 +165,7 @@ function TourCard({
             </Badge>
           )}
           {/* Duration badge overlay */}
-          <div className="absolute bottom-3 left-3 bg-black/70 text-white text-xs font-bold px-2 py-1">
+          <div className="absolute bottom-3 left-3 bg-black/70 text-white text-xs font-bold px-2 py-1 rounded-md">
             {tour.duration} {t("tours.days")}{tour.nights ? ` ${tour.nights} ${t("tours.nights")}` : ""}
           </div>
         </div>
@@ -235,9 +235,9 @@ function TourCard({
             {includedTags.map((tag, i) => {
               const Icon = tag.icon;
               return (
-                <span key={i} className="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-600 px-2 py-0.5 border border-gray-200">
+                <span key={i} className="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md border border-gray-200">
                   <Icon className="h-3 w-3" />
-                  {isEn ? tag.labelEn : tag.labelZh}
+                  {t(tag.labelKey)}
                 </span>
               );
             })}
@@ -438,7 +438,7 @@ export default function Tours() {
             <div className="container">
               <div className="flex items-center gap-2 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
                 <span className="flex-shrink-0 text-xs text-gray-500 font-medium whitespace-nowrap">
-                  {language === "en" ? "Destination:" : "目的地："}
+                  {t("tours.destinationLabel")}
                 </span>
                 <button
                   onClick={() => handleCountryChange("all")}
@@ -448,7 +448,7 @@ export default function Tours() {
                       : "bg-white text-gray-600 border-gray-200 hover:border-teal-400 hover:bg-teal-50"
                   }`}
                 >
-                  🌍 {language === "en" ? "All" : "全部"}
+                  🌍 {t("tours.allDestinations")}
                 </button>
                 {topDestinations.map((dest) => (
                   <button
@@ -478,7 +478,7 @@ export default function Tours() {
             <div className="flex items-center gap-2 py-4 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
               {CATEGORY_TAGS.map((tag) => {
                 const Icon = tag.icon;
-                const label = language === "en" ? tag.labelEn : tag.labelZh;
+                const label = t(tag.labelKey);
                 const isActive = selectedCategory === tag.value;
                 return (
                   <button
@@ -526,7 +526,7 @@ export default function Tours() {
                 }`}
               >
                 <SlidersHorizontal className="h-4 w-4" />
-                {language === "en" ? "Filters" : "篩選"}
+                {t("tours.filtersButton")}
                 {activeFiltersCount > 0 && (
                   <span className="bg-white text-gray-900 text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center ml-1">
                     {activeFiltersCount}
@@ -540,7 +540,7 @@ export default function Tours() {
                   className="flex-shrink-0 flex items-center gap-1 px-3 py-2 rounded-full text-sm text-red-600 hover:bg-red-50 transition-colors"
                 >
                   <X className="h-3 w-3" />
-                  {language === "en" ? "Clear" : "清除"}
+                  {t("tours.clear")}
                 </button>
               )}
             </div>
@@ -562,7 +562,7 @@ export default function Tours() {
 
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm text-gray-500 font-medium whitespace-nowrap">
-                      {language === "en" ? "Duration:" : "天數："}
+                      {t("tours.durationLabel")}
                     </span>
                     {DURATION_PRESETS.map((preset, idx) => (
                       <button
@@ -574,7 +574,7 @@ export default function Tours() {
                             : "bg-white text-gray-600 border-gray-200 hover:border-gray-400"
                         }`}
                       >
-                        {language === "en" ? preset.labelEn : preset.labelZh}
+                        {t(preset.labelKey)}
                       </button>
                     ))}
                   </div>
@@ -614,7 +614,7 @@ export default function Tours() {
                 <p className="text-gray-500 text-lg mb-4">{t("tours.noResults")}</p>
                 {activeFiltersCount > 0 && (
                   <Button variant="outline" onClick={clearAllFilters} className="rounded-lg">
-                    {language === "en" ? "Clear all filters" : "清除所有篩選條件"}
+                    {t("tours.clearAllFilters")}
                   </Button>
                 )}
               </div>
@@ -627,9 +627,7 @@ export default function Tours() {
                     {t("tours.tours")}
                     {pagination && pagination.totalPages > 1 && (
                       <span className="text-gray-400 ml-2">
-                        ({language === "en"
-                          ? `Page ${pagination.page} / ${pagination.totalPages}`
-                          : `第 ${pagination.page} / ${pagination.totalPages} 頁`})
+                        ({t("tours.pageIndicator", { page: String(pagination.page), total: String(pagination.totalPages) })})
                       </span>
                     )}
                   </p>

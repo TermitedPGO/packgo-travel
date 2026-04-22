@@ -14,7 +14,7 @@ import { Link } from "wouter";
  * in a regulatory inquiry.
  */
 export default function PrivacyPolicy() {
-  const { language } = useLocale();
+  const { language, t } = useLocale();
   const isEn = language === "en";
 
   const T = isEn
@@ -270,11 +270,11 @@ export default function PrivacyPolicy() {
             .
           </p>
           <p className="mt-2">
-            {isEn ? "See also our " : "亦請參閱本公司之"}
+            {t('privacyPolicy.seeAlsoPrefix')}
             <Link href="/terms-of-service" className="underline hover:text-black">
-              {isEn ? "Terms of Service" : "服務條款"}
+              {t('privacyPolicy.seeAlsoLink')}
             </Link>
-            {isEn ? " for booking-related disclosures." : "，了解訂購相關揭露。"}
+            {t('privacyPolicy.seeAlsoSuffix')}
           </p>
         </div>
       </div>

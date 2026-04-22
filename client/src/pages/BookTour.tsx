@@ -801,34 +801,22 @@ export default function BookTour() {
                   Required to appear on the booking confirmation / itinerary. */}
               <div className="rounded-xl border border-gray-300 bg-gray-50 p-4 text-xs text-gray-700 space-y-2">
                 <p className="font-semibold text-gray-900">
-                  {language === 'en'
-                    ? 'California Seller of Travel Disclosures'
-                    : '加州旅遊業者法定揭露'}
+                  {t('bookTour.cstTitle')}
                 </p>
                 <p>
-                  {language === 'en'
-                    ? 'Pack & Go, LLC · CST #2166984-40 · 39055 Cedar Blvd #126, Newark, CA 94560 · +1 (510) 634-2307.'
-                    : 'Pack & Go, LLC · 加州旅遊業者登記 #2166984-40 · 39055 Cedar Blvd #126, Newark, CA 94560 · +1 (510) 634-2307。'}
+                  {t('bookTour.cstEntity')}
                 </p>
                 <p>
-                  {language === 'en'
-                    ? 'California law requires certain sellers of travel to have a trust account or bond. This business has a trust account at Bank of America, N.A. All customer funds are deposited directly into that account in compliance with California Business & Professions Code §17550.15.'
-                    : '加州法律要求特定旅遊業者持有信託帳戶或履約保證。本公司於 Bank of America, N.A. 開立客戶信託帳戶，所有旅客款項依加州 B&P §17550.15 規定直接存入該帳戶。'}
+                  {t('bookTour.cstTrust')}
                 </p>
                 <p>
-                  {language === 'en'
-                    ? 'Pack & Go is a participant in the California Travel Consumer Restitution Fund (TCRF). California residents who believe a seller of travel has defaulted may file a claim with the Travel Consumer Restitution Corporation (https://tcrcinfo.org) within 12 months after the scheduled completion of travel. Claim limits are set by statute. If you are NOT a California resident, this transaction is NOT covered by the TCRF.'
-                    : 'Pack & Go 為加州旅客消費補償基金（TCRF）參與者。加州居民如認為旅遊業者違約，得於原定行程結束後 12 個月內向 Travel Consumer Restitution Corporation (https://tcrcinfo.org) 提出理賠申請，上限依法規定。若您並非加州居民，本交易不受 TCRF 保障。'}
+                  {t('bookTour.cstTcrf')}
                 </p>
                 <p>
-                  {language === 'en'
-                    ? 'Upon cancellation, all sums paid for services not provided will be promptly refunded, unless you have cancelled in violation of terms clearly disclosed and agreed to. Supplier-side penalties (airline, hotel, cruise) are passed through at cost.'
-                    : '取消時，本公司將即時退還未提供服務之款項，但您違反已揭露且同意之取消條款者除外。供應商端罰款（航空公司、飯店、郵輪）將依實際金額轉嫁。'}
+                  {t('bookTour.cstCancellation')}
                 </p>
                 <p className="italic text-gray-500">
-                  {language === 'en'
-                    ? 'Registration as a seller of travel does not constitute approval by the State of California.'
-                    : '旅遊業者登記不代表加州政府之背書。'}
+                  {t('bookTour.cstDisclaimer')}
                 </p>
               </div>
 

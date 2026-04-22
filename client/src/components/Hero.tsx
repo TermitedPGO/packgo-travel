@@ -340,9 +340,7 @@ export default function Hero() {
             {(activeTab === "flight" || activeTab === "hotel") && (
               <div className="mt-4 pt-4 border-t border-gray-200">
                 <p className="text-xs text-gray-400">
-                  {language === 'zh-TW'
-                    ? '由 Trip.com 提供搜尋服務，點擊搜尋將跳轉至 Trip.com 完成預訂'
-                    : 'Search powered by Trip.com. Clicking search will redirect you to Trip.com to complete your booking.'}
+                  {t('hero.search.tripcomAttribution')}
                 </p>
               </div>
             )}
