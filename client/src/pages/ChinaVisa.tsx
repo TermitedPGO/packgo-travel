@@ -1,6 +1,5 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { trackVisaStart, trackVisaStep, trackVisaCheckout } from "@/lib/analytics";
-import { useLocation } from "wouter";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { trpc } from "@/lib/trpc";
@@ -9,12 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
 import { useLocale } from "@/contexts/LocaleContext";
 import {
   ChevronRight,
   ChevronLeft,
-  FileText,
   CreditCard,
   CheckCircle,
   Clock,
@@ -26,81 +23,52 @@ import {
 
 // ── 簽證類型資料 ──────────────────────────────────────────────
 const VISA_TYPES = [
-  { value: "L_tourist", zh: "L 簽 — 旅遊簽證", en: "L Visa — Tourist", desc_zh: "適合觀光、探親、探友", desc_en: "For tourism, visiting relatives/friends" },
-  { value: "M_business", zh: "M 簽 — 商務簽證", en: "M Visa — Business", desc_zh: "適合商業活動、參展、洽談", desc_en: "For business activities, exhibitions, negotiations" },
-  { value: "Q1_family_long", zh: "Q1 簽 — 家庭團聚（長期）", en: "Q1 Visa — Family Reunion (Long-term)", desc_zh: "定居中國的外籍配偶或子女", desc_en: "Foreign spouses/children residing in China" },
-  { value: "Q2_family_short", zh: "Q2 簽 — 家庭探親（短期）", en: "Q2 Visa — Family Visit (Short-term)", desc_zh: "短期探訪在中國的家庭成員", desc_en: "Short-term visit to family members in China" },
-  { value: "S1_dependent_long", zh: "S1 簽 — 隨行家屬（長期）", en: "S1 Visa — Dependent (Long-term)", desc_zh: "在華工作外籍人員的長期家屬", desc_en: "Long-term dependents of foreigners working in China" },
-  { value: "S2_dependent_short", zh: "S2 簽 — 隨行家屬（短期）", en: "S2 Visa — Dependent (Short-term)", desc_zh: "在華工作外籍人員的短期家屬", desc_en: "Short-term dependents of foreigners working in China" },
-  { value: "Z_work", zh: "Z 簽 — 工作簽證", en: "Z Visa — Work", desc_zh: "在中國就業的外籍人員", desc_en: "Foreigners employed in China" },
-  { value: "X1_study_long", zh: "X1 簽 — 學生簽證（長期）", en: "X1 Visa — Student (Long-term)", desc_zh: "在中國就讀 6 個月以上", desc_en: "Studying in China for more than 6 months" },
-  { value: "X2_study_short", zh: "X2 簽 — 學生簽證（短期）", en: "X2 Visa — Student (Short-term)", desc_zh: "在中國就讀 6 個月以下", desc_en: "Studying in China for 6 months or less" },
+  { value: "L_tourist", titleKey: "chinaVisaPage.visaTypes.L_touristTitle", descKey: "chinaVisaPage.visaTypes.L_touristDesc" },
+  { value: "M_business", titleKey: "chinaVisaPage.visaTypes.M_businessTitle", descKey: "chinaVisaPage.visaTypes.M_businessDesc" },
+  { value: "Q1_family_long", titleKey: "chinaVisaPage.visaTypes.Q1_family_longTitle", descKey: "chinaVisaPage.visaTypes.Q1_family_longDesc" },
+  { value: "Q2_family_short", titleKey: "chinaVisaPage.visaTypes.Q2_family_shortTitle", descKey: "chinaVisaPage.visaTypes.Q2_family_shortDesc" },
+  { value: "S1_dependent_long", titleKey: "chinaVisaPage.visaTypes.S1_dependent_longTitle", descKey: "chinaVisaPage.visaTypes.S1_dependent_longDesc" },
+  { value: "S2_dependent_short", titleKey: "chinaVisaPage.visaTypes.S2_dependent_shortTitle", descKey: "chinaVisaPage.visaTypes.S2_dependent_shortDesc" },
+  { value: "Z_work", titleKey: "chinaVisaPage.visaTypes.Z_workTitle", descKey: "chinaVisaPage.visaTypes.Z_workDesc" },
+  { value: "X1_study_long", titleKey: "chinaVisaPage.visaTypes.X1_study_longTitle", descKey: "chinaVisaPage.visaTypes.X1_study_longDesc" },
+  { value: "X2_study_short", titleKey: "chinaVisaPage.visaTypes.X2_study_shortTitle", descKey: "chinaVisaPage.visaTypes.X2_study_shortDesc" },
 ];
 
 const ENTRY_TYPES = [
-  { value: "single", zh: "單次入境", en: "Single Entry" },
-  { value: "double", zh: "兩次入境", en: "Double Entry" },
-  { value: "multiple_6m", zh: "半年多次入境", en: "Multiple Entry (6 months)" },
-  { value: "multiple_12m", zh: "一年多次入境", en: "Multiple Entry (12 months)" },
+  { value: "single", labelKey: "chinaVisaPage.entryTypes.single" },
+  { value: "double", labelKey: "chinaVisaPage.entryTypes.double" },
+  { value: "multiple_6m", labelKey: "chinaVisaPage.entryTypes.multiple_6m" },
+  { value: "multiple_12m", labelKey: "chinaVisaPage.entryTypes.multiple_12m" },
 ];
 
-// PROCESSING_SPEEDS removed — no longer offering express/rush options
-
-const REQUIRED_DOCUMENTS = [
-  { zh: "有效護照（效期 6 個月以上，至少 2 頁空白頁）", en: "Valid passport (6+ months validity, at least 2 blank pages)" },
-  { zh: "簽證申請表（V.2013 表格，我們協助填寫）", en: "Visa application form (V.2013, we help fill it out)" },
-  { zh: "機票預訂確認（或行程計畫）", en: "Flight booking confirmation (or travel itinerary)" },
-  { zh: "飯店預訂確認", en: "Hotel booking confirmation" },
-  { zh: "邀請函（探親/商務簽證適用）", en: "Invitation letter (for family visit / business visa)" },
-  { zh: "有效的美國簽證或綠卡影本（非美國公民）", en: "Valid US visa or green card copy (non-US citizens)" },
+const REQUIRED_DOC_KEYS = [
+  "chinaVisaPage.docs.doc1",
+  "chinaVisaPage.docs.doc2",
+  "chinaVisaPage.docs.doc3",
+  "chinaVisaPage.docs.doc4",
+  "chinaVisaPage.docs.doc5",
+  "chinaVisaPage.docs.doc6",
 ];
 
-const PROCESS_STEPS = [
-  { zh: "線上填寫申請表", en: "Fill out online application form" },
-  { zh: "線上付款代辦費用", en: "Pay service fee online" },
-  { zh: "郵寄或親送護照及文件", en: "Mail or deliver passport and documents" },
-  { zh: "我們代為送件至領事館", en: "We submit to the consulate on your behalf" },
-  { zh: "簽證核准後通知取件", en: "Notify you to pick up after visa approval" },
+const PROCESS_STEP_KEYS = [
+  "chinaVisaPage.steps.step1",
+  "chinaVisaPage.steps.step2",
+  "chinaVisaPage.steps.step3",
+  "chinaVisaPage.steps.step4",
+  "chinaVisaPage.steps.step5",
 ];
 
-const FAQS = [
-  {
-    q_zh: "申請中國簽證需要多久？",
-    q_en: "How long does it take to get a China visa?",
-    a_zh: "一般處理需 10-15 個工作日。請提早申請以確保有足夠時間。",
-    a_en: "Processing typically takes 10-15 business days. Please apply early to ensure sufficient time.",
-  },
-  {
-    q_zh: "我需要親自前往領事館嗎？",
-    q_en: "Do I need to visit the consulate in person?",
-    a_zh: "不需要！我們全程代辦，您只需郵寄或親送護照及文件至我們辦公室即可。",
-    a_en: "No! We handle everything. You just need to mail or deliver your passport and documents to our office.",
-  },
-  {
-    q_zh: "如果簽證被拒，可以退款嗎？",
-    q_en: "Can I get a refund if my visa is rejected?",
-    a_zh: "若簽證被拒，我們將退還代辦服務費。領事館費用（政府費用）恕不退還。",
-    a_en: "If your visa is rejected, we will refund the service fee. Consulate fees (government fees) are non-refundable.",
-  },
-  {
-    q_zh: "費用包含哪些項目？",
-    q_en: "What is included in the fee?",
-    a_zh: "我們的全包價包含：領事館簽證規費、證件照拍攝、代填申請表格、人工運送至領事館。無任何隱藏費用。",
-    a_en: "Our all-inclusive fee covers: consulate visa fee, passport photo, application form assistance, and courier to consulate. No hidden fees.",
-  },
-  {
-    q_zh: "可以申請多次入境簽證嗎？",
-    q_en: "Can I apply for a multiple-entry visa?",
-    a_zh: "可以，我們提供單次、兩次、半年多次及一年多次入境選項，全包價 $290（個人）或 $275（團體）。",
-    a_en: "Yes, we offer single, double, 6-month multiple, and 12-month multiple entry options at our flat rate of $290 (individual) or $275 (group).",
-  },
+const FAQ_KEYS: Array<{ q: string; a: string }> = [
+  { q: "chinaVisaPage.faqs.q1", a: "chinaVisaPage.faqs.a1" },
+  { q: "chinaVisaPage.faqs.q2", a: "chinaVisaPage.faqs.a2" },
+  { q: "chinaVisaPage.faqs.q3", a: "chinaVisaPage.faqs.a3" },
+  { q: "chinaVisaPage.faqs.q4", a: "chinaVisaPage.faqs.a4" },
+  { q: "chinaVisaPage.faqs.q5", a: "chinaVisaPage.faqs.a5" },
 ];
 
 // ── 主頁面 ────────────────────────────────────────────────────
 export default function ChinaVisa() {
-  const { language, t } = useLocale();
-  const isChineseMode = language === "zh-TW";
-  const [, navigate] = useLocation();
+  const { t } = useLocale();
   const [currentStep, setCurrentStep] = useState(0); // 0 = landing, 1-5 = wizard steps
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
@@ -155,9 +123,14 @@ export default function ChinaVisa() {
     setCurrentStep(step);
     if (step === 1) trackVisaStart();
     else {
-      const names = isChineseMode
-        ? ['', '簽證類型', '個人資訊', '護照資料', '確認', '付款']
-        : ['', 'Visa Type', 'Personal Info', 'Passport Info', 'Review', 'Payment'];
+      const names = [
+        "",
+        t("chinaVisaPage.stepVisaType"),
+        t("chinaVisaPage.stepPersonalInfo"),
+        t("chinaVisaPage.stepPassportInfo"),
+        t("chinaVisaPage.stepReview"),
+        t("chinaVisaPage.stepPayment"),
+      ];
       trackVisaStep(step, names[step] || `Step ${step}`);
     }
   };
@@ -203,27 +176,25 @@ export default function ChinaVisa() {
             <div className="container max-w-5xl mx-auto px-4">
               <div className="flex flex-col md:flex-row items-center gap-12">
                 <div className="flex-1">
-                  <div className="inline-block border border-white/30 px-3 py-1 text-xs tracking-widest text-white/60 mb-6">
-                    {isChineseMode ? "中國簽證代辦服務" : "CHINA VISA SERVICE"}
+                  <div className="inline-block border border-white/30 rounded-md px-3 py-1 text-xs tracking-widest text-white/60 mb-6">
+                    {t("chinaVisaPage.eyebrow")}
                   </div>
                   <h1 className="text-4xl md:text-5xl font-serif font-bold mb-6 leading-tight">
-                    {isChineseMode ? "中國簽證代辦" : "China Visa Application"}
+                    {t("chinaVisaPage.title")}
                   </h1>
                   <p className="text-gray-400 text-lg mb-8 leading-relaxed">
-                    {isChineseMode
-                      ? "專業代辦中國各類型簽證，省時省力，全程協助。"
-                      : "Professional China visa application service. Save time and effort with our full assistance."}
+                    {t("chinaVisaPage.subtitle")}
                   </p>
                   {/* FTC 16 CFR §260.5: removed "15 years experience" and "99% approval rate"
                       claims — no substantiating records on file. */}
                   <div className="flex flex-wrap gap-4 mb-8">
                     {[
-                      { icon: <Clock className="h-4 w-4" />, zh: "10-15 個工作日", en: "10-15 business days" },
-                      { icon: <Users className="h-4 w-4" />, zh: "團體優惠", en: "Group Discounts" },
+                      { icon: <Clock className="h-4 w-4" />, label: t("chinaVisaPage.badgeProcessing") },
+                      { icon: <Users className="h-4 w-4" />, label: t("chinaVisaPage.badgeGroup") },
                     ].map((item, i) => (
                       <div key={i} className="flex items-center gap-2 text-sm text-white/70">
                         {item.icon}
-                        <span>{isChineseMode ? item.zh : item.en}</span>
+                        <span>{item.label}</span>
                       </div>
                     ))}
                   </div>
@@ -231,33 +202,33 @@ export default function ChinaVisa() {
                     onClick={() => goToStep(1)}
                     className="bg-white text-black hover:bg-gray-100 px-8 py-3 text-base font-bold rounded-lg"
                   >
-                    {isChineseMode ? "立即申請" : "Apply Now"}
+                    {t("chinaVisaPage.applyNow")}
                     <ChevronRight className="ml-2 h-4 w-4" />
                   </Button>
                 </div>
                 <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="border border-white/20 p-6 flex flex-col">
-                    <div className="text-xs text-white/50 tracking-widest mb-3">{isChineseMode ? "個人申請" : "INDIVIDUAL"}</div>
+                  <div className="border border-white/20 rounded-xl p-6 flex flex-col">
+                    <div className="text-xs text-white/50 tracking-widest mb-3">{t("chinaVisaPage.individualLabel")}</div>
                     <div className="text-4xl font-bold text-white mb-1">$290</div>
-                    <div className="text-sm text-white/60 mb-4">{isChineseMode ? "/ 人（全包）" : "/ person (all-in)"}</div>
+                    <div className="text-sm text-white/60 mb-4">{t("chinaVisaPage.perPersonAllIn")}</div>
                     <ul className="space-y-1.5 text-xs text-white/70">
-                      <li>✅ {isChineseMode ? "領事館簽證規費" : "Consulate visa fee"}</li>
-                      <li>✅ {isChineseMode ? "證件照拍攝" : "Passport photo"}</li>
-                      <li>✅ {isChineseMode ? "代填申請表格" : "Form assistance"}</li>
-                      <li>✅ {isChineseMode ? "人工運送至領事館" : "Courier to consulate"}</li>
+                      <li>✅ {t("chinaVisaPage.featureConsulateFee")}</li>
+                      <li>✅ {t("chinaVisaPage.featurePassportPhoto")}</li>
+                      <li>✅ {t("chinaVisaPage.featureFormAssist")}</li>
+                      <li>✅ {t("chinaVisaPage.featureCourier")}</li>
                     </ul>
                   </div>
-                  <div className="border-2 border-white/60 p-6 flex flex-col bg-white/5">
-                    <div className="text-xs text-white/50 tracking-widest mb-3">{isChineseMode ? "團體申請（2人以上）" : "GROUP (2+ PEOPLE)"}</div>
+                  <div className="border-2 border-white/60 rounded-xl p-6 flex flex-col bg-white/5">
+                    <div className="text-xs text-white/50 tracking-widest mb-3">{t("chinaVisaPage.groupLabel")}</div>
                     <div className="text-4xl font-bold text-white mb-1">$275</div>
-                    <div className="text-sm text-white/60 mb-4">{isChineseMode ? "/ 人（全包）" : "/ person (all-in)"}</div>
+                    <div className="text-sm text-white/60 mb-4">{t("chinaVisaPage.perPersonAllIn")}</div>
                     <ul className="space-y-1.5 text-xs text-white/70">
-                      <li>✅ {isChineseMode ? "領事館簽證規費" : "Consulate visa fee"}</li>
-                      <li>✅ {isChineseMode ? "證件照拍攝" : "Passport photo"}</li>
-                      <li>✅ {isChineseMode ? "代填申請表格" : "Form assistance"}</li>
-                      <li>✅ {isChineseMode ? "人工運送至領事館" : "Courier to consulate"}</li>
+                      <li>✅ {t("chinaVisaPage.featureConsulateFee")}</li>
+                      <li>✅ {t("chinaVisaPage.featurePassportPhoto")}</li>
+                      <li>✅ {t("chinaVisaPage.featureFormAssist")}</li>
+                      <li>✅ {t("chinaVisaPage.featureCourier")}</li>
                     </ul>
-                    <div className="mt-3 text-xs text-green-400 font-semibold">{isChineseMode ? "每人省 $15" : "Save $15/person"}</div>
+                    <div className="mt-3 text-xs text-green-400 font-semibold">{t("chinaVisaPage.savePerPerson")}</div>
                   </div>
                 </div>
               </div>
@@ -268,49 +239,49 @@ export default function ChinaVisa() {
           <section className="py-16 bg-gray-50 border-b border-gray-200">
             <div className="container max-w-4xl mx-auto px-4">
               <h2 className="text-2xl font-serif font-bold mb-2 text-center">
-                {isChineseMode ? "代辦費用一覽" : "Service Fee"}
+                {t("chinaVisaPage.pricingTitle")}
               </h2>
               <p className="text-center text-gray-500 text-sm mb-10">
-                {isChineseMode ? "全包價，無任何額外費用" : "All-inclusive price, no hidden fees"}
+                {t("chinaVisaPage.pricingSubtitle")}
               </p>
               <div className="grid md:grid-cols-2 gap-6 max-w-2xl mx-auto">
                 {/* Individual */}
-                <div className="border-2 border-gray-200 p-8 flex flex-col">
-                  <div className="text-xs text-gray-400 tracking-widest mb-4">{isChineseMode ? "個人申請" : "INDIVIDUAL"}</div>
+                <div className="border-2 border-gray-200 rounded-xl p-8 flex flex-col">
+                  <div className="text-xs text-gray-400 tracking-widest mb-4">{t("chinaVisaPage.individualLabel")}</div>
                   <div className="text-5xl font-bold text-[#1A1A1A] mb-1">$290</div>
-                  <div className="text-sm text-gray-500 mb-6">{isChineseMode ? "/ 人" : "/ person"}</div>
+                  <div className="text-sm text-gray-500 mb-6">{t("chinaVisaPage.perPerson")}</div>
                   <ul className="space-y-2 text-sm text-gray-700 mb-6">
-                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{isChineseMode ? "領事館簽證規費" : "Consulate visa fee"}</li>
-                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{isChineseMode ? "證件照拍攝" : "Passport photo"}</li>
-                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{isChineseMode ? "代填申請表格" : "Form assistance"}</li>
-                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{isChineseMode ? "人工運送至領事館" : "Courier to consulate"}</li>
+                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{t("chinaVisaPage.featureConsulateFee")}</li>
+                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{t("chinaVisaPage.featurePassportPhoto")}</li>
+                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{t("chinaVisaPage.featureFormAssist")}</li>
+                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{t("chinaVisaPage.featureCourier")}</li>
                   </ul>
                   <Button onClick={() => setCurrentStep(1)} className="bg-[#1A1A1A] text-white hover:bg-gray-800 rounded-lg w-full mt-auto">
-                    {isChineseMode ? "立即申請" : "Apply Now"}
+                    {t("chinaVisaPage.applyNow")}
                   </Button>
                 </div>
                 {/* Group */}
-                <div className="border-2 border-[#1A1A1A] p-8 flex flex-col relative">
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#1A1A1A] text-white text-xs px-4 py-1 font-bold tracking-wider">
-                    {isChineseMode ? "推薦" : "BEST VALUE"}
+                <div className="border-2 border-[#1A1A1A] rounded-xl p-8 flex flex-col relative">
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#1A1A1A] text-white rounded-md text-xs px-4 py-1 font-bold tracking-wider">
+                    {t("chinaVisaPage.bestValue")}
                   </div>
-                  <div className="text-xs text-gray-400 tracking-widest mb-4">{isChineseMode ? "團體申請（2人以上）" : "GROUP (2+ PEOPLE)"}</div>
+                  <div className="text-xs text-gray-400 tracking-widest mb-4">{t("chinaVisaPage.groupLabel")}</div>
                   <div className="text-5xl font-bold text-[#1A1A1A] mb-1">$275</div>
-                  <div className="text-sm text-gray-500 mb-1">{isChineseMode ? "/ 人" : "/ person"}</div>
-                  <div className="text-xs text-green-600 font-semibold mb-6">{isChineseMode ? "每人省 $15" : "Save $15/person"}</div>
+                  <div className="text-sm text-gray-500 mb-1">{t("chinaVisaPage.perPerson")}</div>
+                  <div className="text-xs text-green-600 font-semibold mb-6">{t("chinaVisaPage.savePerPerson")}</div>
                   <ul className="space-y-2 text-sm text-gray-700 mb-6">
-                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{isChineseMode ? "領事館簽證規費" : "Consulate visa fee"}</li>
-                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{isChineseMode ? "證件照拍攝" : "Passport photo"}</li>
-                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{isChineseMode ? "代填申請表格" : "Form assistance"}</li>
-                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{isChineseMode ? "人工運送至領事館" : "Courier to consulate"}</li>
+                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{t("chinaVisaPage.featureConsulateFee")}</li>
+                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{t("chinaVisaPage.featurePassportPhoto")}</li>
+                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{t("chinaVisaPage.featureFormAssist")}</li>
+                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{t("chinaVisaPage.featureCourier")}</li>
                   </ul>
                   <Button onClick={() => setCurrentStep(1)} className="bg-[#1A1A1A] text-white hover:bg-gray-800 rounded-lg w-full mt-auto">
-                    {isChineseMode ? "立即申請" : "Apply Now"}
+                    {t("chinaVisaPage.applyNow")}
                   </Button>
                 </div>
               </div>
               <p className="text-center text-xs text-gray-400 mt-6">
-                {isChineseMode ? "以上為全包價，無任何額外費用" : "All-inclusive price — no additional charges"}
+                {t("chinaVisaPage.pricingFooter")}
               </p>
             </div>
           </section>
@@ -321,28 +292,28 @@ export default function ChinaVisa() {
               <div className="grid md:grid-cols-2 gap-12">
                 <div>
                   <h2 className="text-2xl font-serif font-bold mb-6">
-                    {isChineseMode ? "所需文件" : "Required Documents"}
+                    {t("chinaVisaPage.requiredDocsTitle")}
                   </h2>
                   <ul className="space-y-3">
-                    {REQUIRED_DOCUMENTS.map((doc, i) => (
+                    {REQUIRED_DOC_KEYS.map((key, i) => (
                       <li key={i} className="flex items-start gap-3">
                         <CheckCircle className="h-5 w-5 text-green-600 mt-0.5 flex-shrink-0" />
-                        <span className="text-gray-700">{isChineseMode ? doc.zh : doc.en}</span>
+                        <span className="text-gray-700">{t(key)}</span>
                       </li>
                     ))}
                   </ul>
                 </div>
                 <div>
                   <h2 className="text-2xl font-serif font-bold mb-6">
-                    {isChineseMode ? "申請流程" : "Application Process"}
+                    {t("chinaVisaPage.processTitle")}
                   </h2>
                   <ol className="space-y-4">
-                    {PROCESS_STEPS.map((step, i) => (
+                    {PROCESS_STEP_KEYS.map((key, i) => (
                       <li key={i} className="flex items-start gap-4">
                         <div className="w-8 h-8 bg-[#1A1A1A] text-white rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0">
                           {i + 1}
                         </div>
-                        <span className="text-gray-700 pt-1">{isChineseMode ? step.zh : step.en}</span>
+                        <span className="text-gray-700 pt-1">{t(key)}</span>
                       </li>
                     ))}
                   </ol>
@@ -355,16 +326,16 @@ export default function ChinaVisa() {
           <section className="py-16 bg-gray-50 border-b border-gray-200">
             <div className="container max-w-5xl mx-auto px-4">
               <h2 className="text-2xl font-serif font-bold mb-8 text-center">
-                {isChineseMode ? "常見問題" : "Frequently Asked Questions"}
+                {t("chinaVisaPage.faqTitle")}
               </h2>
               <div className="space-y-6 max-w-3xl mx-auto">
-                {FAQS.map((faq, i) => (
+                {FAQ_KEYS.map((faq, i) => (
                   <div key={i} className="border-b border-gray-200 pb-6">
                     <h3 className="font-bold text-gray-900 mb-2">
-                      {isChineseMode ? faq.q_zh : faq.q_en}
+                      {t(faq.q)}
                     </h3>
                     <p className="text-gray-600 text-sm leading-relaxed">
-                      {isChineseMode ? faq.a_zh : faq.a_en}
+                      {t(faq.a)}
                     </p>
                   </div>
                 ))}
@@ -376,18 +347,16 @@ export default function ChinaVisa() {
           <section className="py-16 bg-[#1A1A1A] text-white text-center">
             <div className="container max-w-2xl mx-auto px-4">
               <h2 className="text-3xl font-serif font-bold mb-4">
-                {isChineseMode ? "準備好申請了嗎？" : "Ready to Apply?"}
+                {t("chinaVisaPage.ctaTitle")}
               </h2>
               <p className="text-gray-400 mb-8">
-                {isChineseMode
-                  ? "只需 5 分鐘填寫申請表，我們為您處理所有繁瑣手續"
-                  : "Just 5 minutes to fill out the form, we handle all the paperwork for you"}
+                {t("chinaVisaPage.ctaSubtitle")}
               </p>
               <Button
                 onClick={() => setCurrentStep(1)}
                 className="bg-white text-black hover:bg-gray-100 px-10 py-3 text-base font-bold rounded-lg"
               >
-                {isChineseMode ? "立即開始申請" : "Start Application Now"}
+                {t("chinaVisaPage.ctaButton")}
                 <ChevronRight className="ml-2 h-4 w-4" />
               </Button>
             </div>
@@ -399,9 +368,13 @@ export default function ChinaVisa() {
   }
 
   // ── Wizard (steps 1-5) ────────────────────────────────────
-  const stepTitles = isChineseMode
-    ? ["選擇簽證類型", "個人資訊", "護照資訊", "確認申請", "付款"]
-    : ["Select Visa Type", "Personal Info", "Passport Info", "Review", "Payment"];
+  const stepTitles = [
+    t("chinaVisaPage.step1Title"),
+    t("chinaVisaPage.step2Title"),
+    t("chinaVisaPage.step3Title"),
+    t("chinaVisaPage.step4Title"),
+    t("chinaVisaPage.stepPayment"),
+  ];
 
   return (
     <div className="min-h-screen flex flex-col bg-white font-sans">
@@ -411,13 +384,13 @@ export default function ChinaVisa() {
         <div className="bg-[#1A1A1A] text-white py-8">
           <div className="container max-w-4xl mx-auto px-4">
             <h1 className="text-2xl font-serif font-bold mb-6">
-              {isChineseMode ? "中國簽證申請" : "China Visa Application"}
+              {t("chinaVisaPage.wizardTitle")}
             </h1>
             {/* Step indicators */}
             <div className="flex items-center gap-0">
               {stepTitles.map((title, i) => (
                 <div key={i} className="flex items-center">
-                  <div className={`flex items-center gap-2 px-3 py-1 text-sm ${
+                  <div className={`flex items-center gap-2 rounded-md px-3 py-1 text-sm ${
                     i + 1 === currentStep ? "bg-white text-black font-bold" :
                     i + 1 < currentStep ? "text-white/60" : "text-white/30"
                   }`}>
@@ -446,28 +419,28 @@ export default function ChinaVisa() {
               {currentStep === 1 && (
                 <div>
                   <h2 className="text-xl font-bold mb-6">
-                    {isChineseMode ? "選擇簽證類型" : "Select Visa Type"}
+                    {t("chinaVisaPage.step1Title")}
                   </h2>
 
                   <div className="space-y-6">
                     <div>
                       <Label className="text-sm font-bold mb-2 block">
-                        {isChineseMode ? "簽證類型" : "Visa Type"}
+                        {t("chinaVisaPage.visaTypeLabel")}
                       </Label>
                       <div className="grid gap-2">
                         {VISA_TYPES.map(vt => (
                           <button
                             key={vt.value}
                             onClick={() => updateForm("visaType", vt.value)}
-                            className={`text-left p-3 border-2 transition-colors ${
+                            className={`text-left p-3 border-2 rounded-lg transition-colors ${
                               form.visaType === vt.value
                                 ? "border-black bg-black text-white"
                                 : "border-gray-200 hover:border-gray-400"
                             }`}
                           >
-                            <div className="font-medium text-sm">{isChineseMode ? vt.zh : vt.en}</div>
+                            <div className="font-medium text-sm">{t(vt.titleKey)}</div>
                             <div className={`text-xs mt-0.5 ${form.visaType === vt.value ? "text-white/70" : "text-gray-500"}`}>
-                              {isChineseMode ? vt.desc_zh : vt.desc_en}
+                              {t(vt.descKey)}
                             </div>
                           </button>
                         ))}
@@ -476,20 +449,20 @@ export default function ChinaVisa() {
 
                     <div>
                       <Label className="text-sm font-bold mb-2 block">
-                        {isChineseMode ? "入境次數" : "Entry Type"}
+                        {t("chinaVisaPage.entryTypeLabel")}
                       </Label>
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                         {ENTRY_TYPES.map(et => (
                           <button
                             key={et.value}
                             onClick={() => updateForm("entryType", et.value)}
-                            className={`p-3 border-2 text-sm font-medium transition-colors ${
+                            className={`p-3 border-2 rounded-lg text-sm font-medium transition-colors ${
                               form.entryType === et.value
                                 ? "border-black bg-black text-white"
                                 : "border-gray-200 hover:border-gray-400"
                             }`}
                           >
-                            {isChineseMode ? et.zh : et.en}
+                            {t(et.labelKey)}
                           </button>
                         ))}
                       </div>
@@ -499,7 +472,7 @@ export default function ChinaVisa() {
 
                     <div>
                       <Label className="text-sm font-bold mb-2 block">
-                        {isChineseMode ? "申請人數" : "Number of Applicants"}
+                        {t("chinaVisaPage.applicantsLabel")}
                       </Label>
                       <Input
                         type="number"
@@ -511,14 +484,14 @@ export default function ChinaVisa() {
                       />
                       {form.groupSize >= 2 && (
                         <p className="text-xs text-green-600 mt-1">
-                          {isChineseMode ? "✓ 2人以上享有團體優惠 $275/人（每人省 $15）" : "✓ Group rate $275/person for 2+ applicants (save $15/person)"}
+                          {t("chinaVisaPage.groupDiscountNote")}
                         </p>
                       )}
                     </div>
 
                     <div>
                       <Label className="text-sm font-bold mb-2 block">
-                        {isChineseMode ? "預計出行日期（選填）" : "Planned Travel Date (Optional)"}
+                        {t("chinaVisaPage.travelDateLabel")}
                       </Label>
                       <Input
                         type="date"
@@ -537,13 +510,13 @@ export default function ChinaVisa() {
               {currentStep === 2 && (
                 <div>
                   <h2 className="text-xl font-bold mb-6">
-                    {isChineseMode ? "個人資訊" : "Personal Information"}
+                    {t("chinaVisaPage.step2Title")}
                   </h2>
                   <div className="space-y-4">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
                         <Label className="text-sm font-bold mb-1 block">
-                          {isChineseMode ? "名字" : "First Name"} *
+                          {t("chinaVisaPage.firstName")} *
                         </Label>
                         <Input
                           value={form.firstName}
@@ -554,7 +527,7 @@ export default function ChinaVisa() {
                       </div>
                       <div>
                         <Label className="text-sm font-bold mb-1 block">
-                          {isChineseMode ? "姓氏" : "Last Name"} *
+                          {t("chinaVisaPage.lastName")} *
                         </Label>
                         <Input
                           value={form.lastName}
@@ -566,7 +539,7 @@ export default function ChinaVisa() {
                     </div>
                     <div>
                       <Label className="text-sm font-bold mb-1 block">
-                        {isChineseMode ? "電子郵件" : "Email"} *
+                        {t("chinaVisaPage.email")} *
                       </Label>
                       <Input
                         type="email"
@@ -577,7 +550,7 @@ export default function ChinaVisa() {
                     </div>
                     <div>
                       <Label className="text-sm font-bold mb-1 block">
-                        {isChineseMode ? "電話號碼" : "Phone Number"} *
+                        {t("chinaVisaPage.phone")} *
                       </Label>
                       <Input
                         value={form.phone}
@@ -588,7 +561,7 @@ export default function ChinaVisa() {
                     </div>
                     <div>
                       <Label className="text-sm font-bold mb-1 block">
-                        {isChineseMode ? "出生日期" : "Date of Birth"} *
+                        {t("chinaVisaPage.dob")} *
                       </Label>
                       <Input
                         type="date"
@@ -599,7 +572,7 @@ export default function ChinaVisa() {
                     </div>
                     <div>
                       <Label className="text-sm font-bold mb-1 block">
-                        {isChineseMode ? "出生地點（選填）" : "Place of Birth (Optional)"}
+                        {t("chinaVisaPage.pob")}
                       </Label>
                       <Input
                         value={form.placeOfBirth}
@@ -610,7 +583,7 @@ export default function ChinaVisa() {
                     </div>
                     <div>
                       <Label className="text-sm font-bold mb-1 block">
-                        {isChineseMode ? "旅行目的（選填）" : "Travel Purpose (Optional)"}
+                        {t("chinaVisaPage.travelPurpose")}
                       </Label>
                       <Textarea
                         value={form.travelPurpose}
@@ -627,12 +600,12 @@ export default function ChinaVisa() {
               {currentStep === 3 && (
                 <div>
                   <h2 className="text-xl font-bold mb-6">
-                    {isChineseMode ? "護照資訊" : "Passport Information"}
+                    {t("chinaVisaPage.step3Title")}
                   </h2>
                   <div className="space-y-4">
                     <div>
                       <Label className="text-sm font-bold mb-1 block">
-                        {isChineseMode ? "護照號碼" : "Passport Number"} *
+                        {t("chinaVisaPage.passportNumber")} *
                       </Label>
                       <Input
                         value={form.passportNumber}
@@ -643,7 +616,7 @@ export default function ChinaVisa() {
                     </div>
                     <div>
                       <Label className="text-sm font-bold mb-1 block">
-                        {isChineseMode ? "護照到期日" : "Passport Expiry Date"} *
+                        {t("chinaVisaPage.passportExpiry")} *
                       </Label>
                       <Input
                         type="date"
@@ -652,14 +625,12 @@ export default function ChinaVisa() {
                         className="border-2 border-gray-300 rounded-lg"
                       />
                       <p className="text-xs text-gray-500 mt-1">
-                        {isChineseMode
-                          ? "護照效期需超過 6 個月"
-                          : "Passport must be valid for more than 6 months"}
+                        {t("chinaVisaPage.passportExpiryNote")}
                       </p>
                     </div>
                     <div>
                       <Label className="text-sm font-bold mb-1 block">
-                        {isChineseMode ? "護照國籍" : "Passport Country"} *
+                        {t("chinaVisaPage.passportCountry")} *
                       </Label>
                       <Select
                         value={form.passportCountry}
@@ -675,13 +646,11 @@ export default function ChinaVisa() {
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="bg-amber-50 border border-amber-200 p-4">
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
                       <div className="flex gap-2">
                         <AlertCircle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
                         <div className="text-sm text-amber-800">
-                          {isChineseMode
-                            ? "請確保護照資訊與護照完全一致，任何錯誤可能導致簽證被拒。"
-                            : "Please ensure passport information exactly matches your passport. Any discrepancy may result in visa rejection."}
+                          {t("chinaVisaPage.passportWarning")}
                         </div>
                       </div>
                     </div>
@@ -693,21 +662,21 @@ export default function ChinaVisa() {
               {currentStep === 4 && (
                 <div>
                   <h2 className="text-xl font-bold mb-6">
-                    {isChineseMode ? "確認申請資訊" : "Review Your Application"}
+                    {t("chinaVisaPage.step4Title")}
                   </h2>
                   <div className="space-y-6">
-                    <div className="border border-gray-200">
+                    <div className="border border-gray-200 rounded-xl overflow-hidden">
                       <div className="bg-gray-50 px-4 py-2 font-bold text-sm border-b border-gray-200">
-                        {isChineseMode ? "簽證資訊" : "Visa Information"}
+                        {t("chinaVisaPage.reviewVisaInfo")}
                       </div>
                       <table className="w-full text-sm">
                         <tbody>
                           {[
-                            { label: isChineseMode ? "簽證類型" : "Visa Type", value: isChineseMode ? selectedVisaType?.zh : selectedVisaType?.en },
-                            { label: isChineseMode ? "入境次數" : "Entry Type", value: isChineseMode ? selectedEntryType?.zh : selectedEntryType?.en },
+                            { label: t("chinaVisaPage.visaTypeLabel"), value: selectedVisaType ? t(selectedVisaType.titleKey) : "" },
+                            { label: t("chinaVisaPage.reviewEntryType"), value: selectedEntryType ? t(selectedEntryType.labelKey) : "" },
                             // Processing speed removed from review
-                            { label: isChineseMode ? "申請人數" : "Group Size", value: form.groupSize },
-                            ...(form.travelDate ? [{ label: isChineseMode ? "預計出行日期" : "Travel Date", value: form.travelDate }] : []),
+                            { label: t("chinaVisaPage.reviewGroupSize"), value: form.groupSize },
+                            ...(form.travelDate ? [{ label: t("chinaVisaPage.reviewTravelDate"), value: form.travelDate }] : []),
                           ].map((row, i) => (
                             <tr key={i} className="border-b border-gray-100">
                               <td className="px-4 py-2 text-gray-500 w-1/3">{row.label}</td>
@@ -718,17 +687,17 @@ export default function ChinaVisa() {
                       </table>
                     </div>
 
-                    <div className="border border-gray-200">
+                    <div className="border border-gray-200 rounded-xl overflow-hidden">
                       <div className="bg-gray-50 px-4 py-2 font-bold text-sm border-b border-gray-200">
-                        {isChineseMode ? "個人資訊" : "Personal Information"}
+                        {t("chinaVisaPage.reviewPersonalInfo")}
                       </div>
                       <table className="w-full text-sm">
                         <tbody>
                           {[
-                            { label: isChineseMode ? "姓名" : "Name", value: `${form.firstName} ${form.lastName}` },
-                            { label: isChineseMode ? "電子郵件" : "Email", value: form.email },
-                            { label: isChineseMode ? "電話" : "Phone", value: form.phone },
-                            { label: isChineseMode ? "出生日期" : "Date of Birth", value: form.dateOfBirth },
+                            { label: t("chinaVisaPage.reviewName"), value: `${form.firstName} ${form.lastName}` },
+                            { label: t("chinaVisaPage.reviewEmail"), value: form.email },
+                            { label: t("chinaVisaPage.reviewPhone"), value: form.phone },
+                            { label: t("chinaVisaPage.reviewDob"), value: form.dateOfBirth },
                           ].map((row, i) => (
                             <tr key={i} className="border-b border-gray-100">
                               <td className="px-4 py-2 text-gray-500 w-1/3">{row.label}</td>
@@ -739,16 +708,16 @@ export default function ChinaVisa() {
                       </table>
                     </div>
 
-                    <div className="border border-gray-200">
+                    <div className="border border-gray-200 rounded-xl overflow-hidden">
                       <div className="bg-gray-50 px-4 py-2 font-bold text-sm border-b border-gray-200">
-                        {isChineseMode ? "護照資訊" : "Passport Information"}
+                        {t("chinaVisaPage.reviewPassportInfo")}
                       </div>
                       <table className="w-full text-sm">
                         <tbody>
                           {[
-                            { label: isChineseMode ? "護照號碼" : "Passport Number", value: form.passportNumber },
-                            { label: isChineseMode ? "到期日" : "Expiry Date", value: form.passportExpiry },
-                            { label: isChineseMode ? "國籍" : "Country", value: form.passportCountry },
+                            { label: t("chinaVisaPage.reviewPassportNumber"), value: form.passportNumber },
+                            { label: t("chinaVisaPage.reviewExpiry"), value: form.passportExpiry },
+                            { label: t("chinaVisaPage.reviewCountry"), value: form.passportCountry },
                           ].map((row, i) => (
                             <tr key={i} className="border-b border-gray-100">
                               <td className="px-4 py-2 text-gray-500 w-1/3">{row.label}</td>
@@ -760,7 +729,7 @@ export default function ChinaVisa() {
                     </div>
 
                     {submitError && (
-                      <div className="bg-red-50 border border-red-200 p-4 text-sm text-red-700">
+                      <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
                         {submitError}
                       </div>
                     )}
@@ -776,7 +745,7 @@ export default function ChinaVisa() {
                   className="border-2 border-gray-300 rounded-lg"
                 >
                   <ChevronLeft className="mr-2 h-4 w-4" />
-                  {isChineseMode ? "上一步" : "Back"}
+                  {t("chinaVisaPage.back")}
                 </Button>
 
                 {currentStep < 4 ? (
@@ -784,7 +753,7 @@ export default function ChinaVisa() {
                     onClick={() => setCurrentStep(s => s + 1)}
                     className="bg-black text-white hover:bg-gray-800 rounded-lg px-8"
                   >
-                    {isChineseMode ? "下一步" : "Next"}
+                    {t("chinaVisaPage.next")}
                     <ChevronRight className="ml-2 h-4 w-4" />
                   </Button>
                 ) : (
@@ -796,12 +765,12 @@ export default function ChinaVisa() {
                     {isSubmitting ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        {isChineseMode ? "處理中..." : "Processing..."}
+                        {t("chinaVisaPage.processing")}
                       </>
                     ) : (
                       <>
                         <CreditCard className="mr-2 h-4 w-4" />
-                        {isChineseMode ? "前往付款" : "Proceed to Payment"}
+                        {t("chinaVisaPage.proceedToPayment")}
                       </>
                     )}
                   </Button>
@@ -811,42 +780,42 @@ export default function ChinaVisa() {
 
             {/* Pricing sidebar */}
             <div className="md:col-span-1">
-              <div className="sticky top-4 border-2 border-gray-200 p-6">
+              <div className="sticky top-4 border-2 border-gray-200 rounded-xl p-6">
                 <h3 className="font-bold text-sm mb-4 pb-3 border-b border-gray-200">
-                  {isChineseMode ? "費用明細" : "Fee Breakdown"}
+                  {t("chinaVisaPage.feeBreakdown")}
                 </h3>
                 {pricing ? (
                   <div className="space-y-3 text-sm">
                     <div className="flex justify-between">
                       <span className="text-gray-600">
-                        {isChineseMode ? "中國簽證代辦（全包）" : "China Visa Service (all-in)"}
+                        {t("chinaVisaPage.feeItemName")}
                       </span>
                       <span>${pricing.pricePerPerson}</span>
                     </div>
                     <div className="flex justify-between text-gray-500">
-                      <span>{isChineseMode ? "× 申請人數" : "× Applicants"}</span>
-                      <span>{pricing.groupSize} {isChineseMode ? "人" : "person(s)"}</span>
+                      <span>{t("chinaVisaPage.feeApplicants")}</span>
+                      <span>{pricing.groupSize} {t("chinaVisaPage.personLabel")}</span>
                     </div>
                     {pricing.isGroupDiscount && (
-                      <div className="text-xs text-green-600 bg-green-50 border border-green-200 p-2">
-                        {isChineseMode ? `✓ 團體優惠：每人省 $${pricing.savedPerPerson}` : `✓ Group rate: save $${pricing.savedPerPerson}/person`}
+                      <div className="text-xs text-green-600 bg-green-50 border border-green-200 rounded-lg p-2">
+                        {t("chinaVisaPage.groupRateNote", { amount: String(pricing.savedPerPerson) })}
                       </div>
                     )}
                     <div className="flex justify-between font-bold text-base pt-3 border-t border-gray-200">
-                      <span>{isChineseMode ? "應付總額" : "Total"}</span>
+                      <span>{t("chinaVisaPage.totalLabel")}</span>
                       <span>USD ${pricing.grandTotal.toFixed(2)}</span>
                     </div>
                   </div>
                 ) : (
                   <div className="text-gray-400 text-sm">
-                    {isChineseMode ? "計算中..." : "Calculating..."}
+                    {t("chinaVisaPage.calculating")}
                   </div>
                 )}
 
                 <div className="mt-6 pt-4 border-t border-gray-200">
                   <div className="flex items-center gap-2 text-xs text-gray-500">
                     <Shield className="h-3 w-3" />
-                    <span>{isChineseMode ? "安全 SSL 加密付款" : "Secure SSL encrypted payment"}</span>
+                    <span>{t("chinaVisaPage.secureSsl")}</span>
                   </div>
                 </div>
               </div>
