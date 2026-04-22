@@ -1142,6 +1142,13 @@ export const en = {
     uploadImage: 'Upload Image',
     imageFormatsSupport: 'Supports JPG, PNG, GIF, WebP. Max 10MB',
     dragDropHint: 'You can drag and drop images into the area above',
+    editPriceAndDateTitle: 'Edit Price & Dates',
+    priceNtdLabel: 'Price (NT$)',
+    enterPricePlaceholder: 'Enter price',
+    currentPriceHint: 'Current price: NT$ {price}',
+    priceStartDateLabel: 'Start Date',
+    priceEndDateLabel: 'End Date',
+    savingInProgress: 'Saving...',
     tourImageAlt: 'Tour image',
     tabs: {
       overview: 'Tour Features',

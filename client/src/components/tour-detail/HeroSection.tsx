@@ -7,6 +7,7 @@ import React from "react";
 import { EditableText } from "./EditableText";
 import { EditableImage } from "./EditableImage";
 import { useEditMode } from "@/contexts/EditModeContext";
+import { useLocale } from "@/contexts/LocaleContext";
 
 export interface HeroSectionProps {
   title: string;
@@ -34,6 +35,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
   onImageUpload,
 }) => {
   const { isEditMode } = useEditMode();
+  const { t } = useLocale();
 
   return (
     <section className="relative w-full">
@@ -108,7 +110,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
                         await onUpdate("heroSubtitle", newValue);
                       }}
                       isEditable={isEditMode}
-                      placeholder="輸入副標題..."
+                      placeholder={t('tourDetail.editSubtitlePlaceholder')}
                       className="text-lg lg:text-xl text-white/90"
                       as="p"
                     />

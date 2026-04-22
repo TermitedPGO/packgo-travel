@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ensureReadableOnWhite } from "@/lib/colorUtils";
+import { useLocale } from "@/contexts/LocaleContext";
 
 interface PriceEditDialogProps {
   open: boolean;
@@ -46,6 +47,7 @@ export const PriceEditDialog: React.FC<PriceEditDialogProps> = ({
   onSave,
   colorTheme,
 }) => {
+  const { t } = useLocale();
   const [price, setPrice] = useState(currentPrice.toString());
   const [startDate, setStartDate] = useState(
     currentStartDate ? formatDateForInput(currentStartDate) : ""
@@ -92,7 +94,7 @@ export const PriceEditDialog: React.FC<PriceEditDialogProps> = ({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <DollarSign className="h-5 w-5" style={{ color: ensureReadableOnWhite(colorTheme.accent) }} />
-            編輯價格與日期
+            {t('tourDetail.editPriceAndDateTitle')}
           </DialogTitle>
         </DialogHeader>
 
@@ -100,7 +102,7 @@ export const PriceEditDialog: React.FC<PriceEditDialogProps> = ({
           {/* 價格 */}
           <div className="space-y-2">
             <Label htmlFor="price" className="text-sm font-medium">
-              價格 (NT$)
+              {t('tourDetail.priceNtdLabel')}
             </Label>
             <div className="relative">
               <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -110,18 +112,18 @@ export const PriceEditDialog: React.FC<PriceEditDialogProps> = ({
                 value={price}
                 onChange={(e) => setPrice(e.target.value)}
                 className="pl-10"
-                placeholder="輸入價格"
+                placeholder={t('tourDetail.enterPricePlaceholder')}
               />
             </div>
             <p className="text-xs text-gray-500">
-              目前價格：NT$ {currentPrice.toLocaleString()}
+              {t('tourDetail.currentPriceHint', { price: currentPrice.toLocaleString() })}
             </p>
           </div>
 
           {/* 開始日期 */}
           <div className="space-y-2">
             <Label htmlFor="startDate" className="text-sm font-medium">
-              開始日期
+              {t('tourDetail.priceStartDateLabel')}
             </Label>
             <div className="relative">
               <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -138,7 +140,7 @@ export const PriceEditDialog: React.FC<PriceEditDialogProps> = ({
           {/* 結束日期 */}
           <div className="space-y-2">
             <Label htmlFor="endDate" className="text-sm font-medium">
-              結束日期
+              {t('tourDetail.priceEndDateLabel')}
             </Label>
             <div className="relative">
               <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -159,7 +161,7 @@ export const PriceEditDialog: React.FC<PriceEditDialogProps> = ({
             onClick={() => onOpenChange(false)}
             disabled={isSaving}
           >
-            取消
+            {t('common.cancel')}
           </Button>
           <Button
             onClick={handleSave}
@@ -167,7 +169,7 @@ export const PriceEditDialog: React.FC<PriceEditDialogProps> = ({
             style={{ backgroundColor: colorTheme.accent }}
             className="text-white"
           >
-            {isSaving ? "儲存中..." : "儲存"}
+            {isSaving ? t('tourDetail.savingInProgress') : t('common.save')}
           </Button>
         </DialogFooter>
       </DialogContent>
