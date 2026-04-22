@@ -88,6 +88,9 @@ export const en = {
     viewAll: 'View All',
     tourImage: 'Tour Image',
     clickToEdit: 'Click to edit',
+    clickToEditPlaceholder: 'Click to edit...',
+    saveShortcut: 'Save (Enter)',
+    cancelShortcut: 'Cancel (Esc)',
     // Accessibility labels (Round 72 follow-up)
     backToTop: 'Back to top',
     openAiAdvisor: 'Open AI Travel Advisor',

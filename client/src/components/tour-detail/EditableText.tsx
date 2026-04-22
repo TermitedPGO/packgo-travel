@@ -6,6 +6,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Pencil, Check, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useLocale } from "@/contexts/LocaleContext";
 
 export interface EditableTextProps {
   value: string;
@@ -24,12 +25,14 @@ export const EditableText: React.FC<EditableTextProps> = ({
   onSave,
   isEditable = false,
   className = "",
-  placeholder = "點擊編輯...",
+  placeholder,
   multiline = false,
   maxLength,
   style,
   as: Component = "span",
 }) => {
+  const { t } = useLocale();
+  const resolvedPlaceholder = placeholder ?? t('common.clickToEditPlaceholder');
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
   const [isSaving, setIsSaving] = useState(false);
@@ -95,10 +98,10 @@ export const EditableText: React.FC<EditableTextProps> = ({
         onMouseEnter={() => setShowEditIcon(true)}
         onMouseLeave={() => setShowEditIcon(false)}
         onClick={handleStartEdit}
-        title={isEditable ? "點擊編輯" : undefined}
+        title={isEditable ? t('common.clickToEdit') : undefined}
       >
         <Component className={className} style={style}>
-          {value || <span className="text-gray-400 italic">{placeholder}</span>}
+          {value || <span className="text-gray-400 italic">{resolvedPlaceholder}</span>}
         </Component>
         {isEditable && (
           <div className="absolute -right-8 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -163,7 +166,7 @@ export const EditableText: React.FC<EditableTextProps> = ({
           onClick={handleSave}
           disabled={isSaving}
           className="p-1 bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50"
-          title="儲存 (Enter)"
+          title={t('common.saveShortcut')}
         >
           <Check className="h-4 w-4" />
         </button>
@@ -171,7 +174,7 @@ export const EditableText: React.FC<EditableTextProps> = ({
           onClick={handleCancel}
           disabled={isSaving}
           className="p-1 bg-gray-500 text-white rounded hover:bg-gray-600 disabled:opacity-50"
-          title="取消 (Esc)"
+          title={t('common.cancelShortcut')}
         >
           <X className="h-4 w-4" />
         </button>

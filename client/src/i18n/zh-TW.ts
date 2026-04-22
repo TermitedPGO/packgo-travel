@@ -88,6 +88,9 @@ export const zhTW = {
     viewAll: '查看全部',
     tourImage: '旅遊圖片',
     clickToEdit: '點擊編輯',
+    clickToEditPlaceholder: '點擊編輯...',
+    saveShortcut: '儲存 (Enter)',
+    cancelShortcut: '取消 (Esc)',
     // Accessibility labels (Round 72 follow-up)
     backToTop: '返回頂部',
     openAiAdvisor: '開啟 AI 旅遊顧問',
