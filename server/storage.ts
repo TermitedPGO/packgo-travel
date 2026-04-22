@@ -21,6 +21,8 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  DeleteObjectCommand,
+  DeleteObjectsCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
@@ -114,6 +116,108 @@ export async function storageGet(relKey: string): Promise<{ key: string; url: st
   const key = normalizeKey(relKey);
   const url = await buildReadUrl(key);
   return { key, url };
+}
+
+/**
+ * Delete a single object from R2.
+ * Round 72: added for masterAgent rollback — previously there was no way to
+ * remove orphaned images from failed tour generations.
+ *
+ * Returns true if the delete succeeded, false otherwise (errors are swallowed
+ * to prevent cascading failures during cleanup).
+ */
+export async function storageDelete(relKey: string): Promise<boolean> {
+  try {
+    const { client, bucket } = getR2Client();
+    const key = normalizeKey(relKey);
+    await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+    return true;
+  } catch (err) {
+    console.warn(`[storage] Failed to delete key "${relKey}":`, err);
+    return false;
+  }
+}
+
+/**
+ * Delete multiple objects from R2 in a single call (up to 1000 keys per request).
+ * Automatically chunks larger inputs.
+ * Round 72: batched cleanup for masterAgent rollback.
+ */
+export async function storageDeleteMany(relKeys: string[]): Promise<{ deleted: number; failed: number }> {
+  if (relKeys.length === 0) return { deleted: 0, failed: 0 };
+
+  let deleted = 0;
+  let failed = 0;
+
+  try {
+    const { client, bucket } = getR2Client();
+    const keys = relKeys.map(normalizeKey);
+
+    // R2/S3 limit: 1000 keys per DeleteObjects call
+    const CHUNK = 1000;
+    for (let i = 0; i < keys.length; i += CHUNK) {
+      const batch = keys.slice(i, i + CHUNK);
+      try {
+        const result = await client.send(
+          new DeleteObjectsCommand({
+            Bucket: bucket,
+            Delete: {
+              Objects: batch.map((Key) => ({ Key })),
+              Quiet: true,
+            },
+          })
+        );
+        deleted += batch.length - (result.Errors?.length ?? 0);
+        failed += result.Errors?.length ?? 0;
+      } catch (err) {
+        console.warn(`[storage] Batch delete failed for ${batch.length} keys:`, err);
+        failed += batch.length;
+      }
+    }
+  } catch (err) {
+    console.warn(`[storage] storageDeleteMany setup failed:`, err);
+    failed = relKeys.length;
+  }
+
+  return { deleted, failed };
+}
+
+/**
+ * Extract R2 storage key from a full URL.
+ * Works for both public-base URLs and presigned URLs.
+ * Returns null if the URL doesn't look like it belongs to our R2 bucket.
+ *
+ * Round 72: used by rollback to turn stored image URLs back into keys for deletion.
+ */
+export function extractR2KeyFromUrl(url: string): string | null {
+  if (!url || typeof url !== "string") return null;
+
+  try {
+    const parsed = new URL(url);
+    const publicBase = ENV.r2PublicBaseUrl.replace(/\/+$/, "");
+
+    // Case 1: public base URL (e.g. https://cdn.packgo.com/tours/123/hero.webp)
+    if (publicBase && url.startsWith(publicBase + "/")) {
+      return decodeURI(url.slice(publicBase.length + 1).split("?")[0]);
+    }
+
+    // Case 2: R2 endpoint URL with bucket in path (presigned or direct)
+    // Format: https://<account>.r2.cloudflarestorage.com/<bucket>/<key>?<signed params>
+    const path = parsed.pathname.replace(/^\/+/, "");
+    const bucketPrefix = ENV.r2Bucket + "/";
+    if (path.startsWith(bucketPrefix)) {
+      return decodeURI(path.slice(bucketPrefix.length));
+    }
+
+    // Case 3: virtual-hosted style (bucket as subdomain)
+    if (parsed.hostname.startsWith(ENV.r2Bucket + ".") && path.length > 0) {
+      return decodeURI(path);
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

@@ -220,7 +220,14 @@ export default function BookTour() {
   if (tourLoading || authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-      <SEO title="預訂行程" description="預訂 PACK&GO 旅遊行程，填寫旅客資料完成預訂，開始您的旅遊之旅。" url="/book" />
+      <SEO
+        title={{ zh: "預訂行程", en: "Book Tour" }}
+        description={{
+          zh: "預訂 PACK&GO 旅遊行程，填寫旅客資料完成預訂，開始您的旅遊之旅。",
+          en: "Book your PACK&GO tour — fill in traveler details to complete your reservation and start your journey.",
+        }}
+        url="/book"
+      />
         <Loader2 className="h-8 w-8 animate-spin" />
       </div>
     );

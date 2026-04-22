@@ -30,10 +30,17 @@ export async function generateTourFromUrlInternal(
   console.log("[TourGenerator] Force Regenerate:", forceRegenerate);
   console.log("[TourGenerator] Is PDF:", isPdf);
   console.log("[TourGenerator] Supplement URL:", supplementUrl || 'none');
-  
+
+  // Round 72: track tourData across the outer try so the catch can clean up
+  // orphaned R2 assets if createTour (or any sync post-insert step) throws
+  // after masterAgent has already uploaded images.
+  let lastKnownTourData: any = null;
+  let masterAgentRef: MasterAgent | null = null;
+
   try {
     // Create Master Agent
     const masterAgent = new MasterAgent();
+    masterAgentRef = masterAgent;
     
     // Generate taskId for progress tracking
     const taskId = `gen_${Date.now()}_${Math.random().toString(36).substring(7)}`;
@@ -72,8 +79,9 @@ export async function generateTourFromUrlInternal(
     if (!result.success || !result.data) {
       throw new Error(result.error || "Tour generation failed");
     }
-    
+
     const tourData = result.data;
+    lastKnownTourData = tourData; // Round 72: track for rollback
     
     // Save to database
     await job.updateProgress({
@@ -337,6 +345,18 @@ export async function generateTourFromUrlInternal(
     };
   } catch (error) {
     console.error("[TourGenerator] Error:", error);
+
+    // Round 72: If masterAgent succeeded (so R2 images exist) but createTour
+    // or a sync post-insert step threw, sweep the orphaned R2 assets.
+    // masterAgent's own catch handles the case where masterAgent itself failed.
+    if (lastKnownTourData && masterAgentRef) {
+      try {
+        await masterAgentRef.rollback(lastKnownTourData);
+      } catch (cleanupErr) {
+        console.warn("[TourGenerator] Post-generation rollback hit an error (non-fatal):", cleanupErr);
+      }
+    }
+
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",

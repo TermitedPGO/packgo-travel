@@ -24,28 +24,30 @@ import type { z } from "zod";
 
 type QuickInquiryForm = z.infer<typeof quickInquirySchema>;
 
+// Round 72: keep `value` in Chinese so DB rows stay stable across existing inquiries;
+// labels are pulled from i18n at render time.
 const SUBJECT_OPTIONS = [
-  { value: "一般詢問", label: "一般詢問" },
-  { value: "行程預訂", label: "行程預訂" },
-  { value: "客製旅遊", label: "客製旅遊" },
-  { value: "簽證服務", label: "簽證服務" },
-  { value: "機票預購", label: "機票預購" },
-  { value: "機場接送", label: "機場接送" },
-  { value: "飯店預訂", label: "飯店預訂" },
-  { value: "包團旅遊", label: "包團旅遊" },
-  { value: "郵輪旅遊", label: "郵輪旅遊" },
-  { value: "其他問題", label: "其他問題" },
-];
+  { value: "一般詢問", labelKey: "quickInquiry.form.subjects.general" },
+  { value: "行程預訂", labelKey: "quickInquiry.form.subjects.booking" },
+  { value: "客製旅遊", labelKey: "quickInquiry.form.subjects.customTour" },
+  { value: "簽證服務", labelKey: "quickInquiry.form.subjects.visa" },
+  { value: "機票預購", labelKey: "quickInquiry.form.subjects.flightBooking" },
+  { value: "機場接送", labelKey: "quickInquiry.form.subjects.airportTransfer" },
+  { value: "飯店預訂", labelKey: "quickInquiry.form.subjects.hotelBooking" },
+  { value: "包團旅遊", labelKey: "quickInquiry.form.subjects.groupTour" },
+  { value: "郵輪旅遊", labelKey: "quickInquiry.form.subjects.cruise" },
+  { value: "其他問題", labelKey: "quickInquiry.form.subjects.other" },
+] as const;
 
 // Quick-pick subject chips (most common ones)
 const QUICK_SUBJECTS = [
-  { value: "行程預訂", emoji: "🗺️" },
-  { value: "客製旅遊", emoji: "✨" },
-  { value: "機票預購", emoji: "✈️" },
-  { value: "飯店預訂", emoji: "🏨" },
-  { value: "簽證服務", emoji: "📋" },
-  { value: "郵輪旅遊", emoji: "🚢" },
-];
+  { value: "行程預訂", labelKey: "quickInquiry.form.subjects.booking", emoji: "🗺️" },
+  { value: "客製旅遊", labelKey: "quickInquiry.form.subjects.customTour", emoji: "✨" },
+  { value: "機票預購", labelKey: "quickInquiry.form.subjects.flightBooking", emoji: "✈️" },
+  { value: "飯店預訂", labelKey: "quickInquiry.form.subjects.hotelBooking", emoji: "🏨" },
+  { value: "簽證服務", labelKey: "quickInquiry.form.subjects.visa", emoji: "📋" },
+  { value: "郵輪旅遊", labelKey: "quickInquiry.form.subjects.cruise", emoji: "🚢" },
+] as const;
 
 export default function QuickInquiry() {
   const [isSubmitted, setIsSubmitted] = useState(false);
@@ -89,7 +91,14 @@ export default function QuickInquiry() {
   if (isSubmitted) {
     return (
       <div className="min-h-screen flex flex-col bg-gray-50">
-        <SEO title="快速諮詢" description="快速填寫諮詢表單，PACK&GO 旅遊顧問將在最短時間內回覆您的旅遊需求。" url="/inquiry" />
+        <SEO
+          title={{ zh: "快速諮詢", en: "Quick Inquiry" }}
+          description={{
+            zh: "快速填寫諮詢表單，PACK&GO 旅遊顧問將在最短時間內回覆您的旅遊需求。",
+            en: "Fill out the quick inquiry form and a PACK&GO travel advisor will get back to you as soon as possible.",
+          }}
+          url="/inquiry"
+        />
         <Header />
         <main className="flex-1 flex items-center justify-center py-16 px-4">
           <div className="bg-white shadow-lg p-12 text-center max-w-lg w-full rounded-xl">
@@ -112,7 +121,7 @@ export default function QuickInquiry() {
                 onClick={() => setIsSubmitted(false)}
                 className="w-full sm:w-auto rounded-lg text-base px-8"
               >
-                再次諮詢
+                {t('quickInquiry.success.submitAgain')}
               </Button>
             </div>
           </div>
@@ -124,7 +133,14 @@ export default function QuickInquiry() {
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
-      <SEO title="快速諮詢" description="快速填寫諮詢表單，PACK&GO 旅遊顧問將在最短時間內回覆您的旅遊需求。" url="/inquiry" />
+      <SEO
+        title={{ zh: "快速諮詢", en: "Quick Inquiry" }}
+        description={{
+          zh: "快速填寫諮詢表單，PACK&GO 旅遊顧問將在最短時間內回覆您的旅遊需求。",
+          en: "Fill out the quick inquiry form and a PACK&GO travel advisor will get back to you as soon as possible.",
+        }}
+        url="/inquiry"
+      />
       <Header />
 
       {/* Page Hero */}
@@ -146,14 +162,14 @@ export default function QuickInquiry() {
             {/* Left: Contact Info */}
             <div className="lg:col-span-1 space-y-6">
               <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-                <h3 className="text-lg font-bold text-gray-900 mb-5">聯絡資訊</h3>
+                <h3 className="text-lg font-bold text-gray-900 mb-5">{t('quickInquiry.contactInfo')}</h3>
                 <div className="space-y-5">
                   <div className="flex items-start gap-4">
                     <div className="bg-black rounded-lg p-2.5 shrink-0">
                       <Phone className="h-5 w-5 text-white" />
                     </div>
                     <div>
-                      <p className="text-sm text-gray-500 mb-0.5">電話</p>
+                      <p className="text-sm text-gray-500 mb-0.5">{t('quickInquiry.phoneLabel')}</p>
                       <a href="tel:+15106342307" className="text-base font-semibold text-gray-900 hover:text-primary transition-colors">
                         +1 (510) 634-2307
                       </a>
@@ -164,7 +180,7 @@ export default function QuickInquiry() {
                       <Mail className="h-5 w-5 text-white" />
                     </div>
                     <div>
-                      <p className="text-sm text-gray-500 mb-0.5">電子郵件</p>
+                      <p className="text-sm text-gray-500 mb-0.5">{t('quickInquiry.emailLabel')}</p>
                       <a href="mailto:Jeffhsieh09@gmail.com" className="text-base font-semibold text-gray-900 hover:text-primary transition-colors break-words">
                         Jeffhsieh09@gmail.com
                       </a>
@@ -175,7 +191,7 @@ export default function QuickInquiry() {
                       <Clock className="h-5 w-5 text-white" />
                     </div>
                     <div>
-                      <p className="text-sm text-gray-500 mb-1">服務時間</p>
+                      <p className="text-sm text-gray-500 mb-1">{t('quickInquiry.serviceHoursLabel')}</p>
                       <p className="text-sm text-gray-700 leading-relaxed">
                         {t('contactUs.weekdays')}：11:30 - 19:30<br />
                         {t('contactUs.sunday')}：{t('contactUs.closed')}
@@ -186,9 +202,9 @@ export default function QuickInquiry() {
               </div>
 
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-5">
-                <p className="text-amber-800 text-sm font-medium mb-1 flex items-center gap-1.5"><MessageSquare className="h-4 w-4" /> 填寫提示</p>
+                <p className="text-amber-800 text-sm font-medium mb-1 flex items-center gap-1.5"><MessageSquare className="h-4 w-4" /> {t('quickInquiry.tipTitle')}</p>
                 <p className="text-amber-700 text-sm leading-relaxed">
-                  請盡量填寫完整的聯絡資訊，方便我們的顧問快速回覆您的需求。
+                  {t('quickInquiry.tipDesc')}
                 </p>
               </div>
             </div>
@@ -196,7 +212,7 @@ export default function QuickInquiry() {
             {/* Right: Form */}
             <div className="lg:col-span-2">
               <div className="bg-white rounded-xl shadow-sm p-8 border border-gray-100">
-                <h2 className="text-2xl font-bold text-gray-900 mb-6">填寫諮詢表單</h2>
+                <h2 className="text-2xl font-bold text-gray-900 mb-6">{t('quickInquiry.formTitle')}</h2>
                 <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
 
                   {/* Name + Phone Row */}
@@ -251,7 +267,7 @@ export default function QuickInquiry() {
                   {/* Subject with Quick-pick chips */}
                   <div>
                     <Label className="text-base font-medium text-gray-700 mb-2 block">
-                      諮詢主題 <span className="text-red-500">*</span>
+                      {t('quickInquiry.form.subject')} <span className="text-red-500">*</span>
                     </Label>
                     {/* Quick-pick chips */}
                     <div className="flex flex-wrap gap-2 mb-3">
@@ -267,7 +283,7 @@ export default function QuickInquiry() {
                           }`}
                         >
                           <span>{s.emoji}</span>
-                          <span>{s.value}</span>
+                          <span>{t(s.labelKey)}</span>
                         </button>
                       ))}
                     </div>
@@ -284,12 +300,12 @@ export default function QuickInquiry() {
                           value={field.value || quickSubject}
                         >
                           <SelectTrigger className="h-12 text-base rounded-lg">
-                            <SelectValue placeholder="或從下拉選單選擇..." />
+                            <SelectValue placeholder={t('quickInquiry.form.subjectDropdownPlaceholder')} />
                           </SelectTrigger>
                           <SelectContent>
                             {SUBJECT_OPTIONS.map((opt) => (
                               <SelectItem key={opt.value} value={opt.value} className="text-base py-3">
-                                {opt.label}
+                                {t(opt.labelKey)}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -326,11 +342,11 @@ export default function QuickInquiry() {
                     className="w-full h-14 text-lg font-bold rounded-lg"
                   >
                     <MessageSquare className="h-5 w-5 mr-2" />
-                    {createInquiry.isPending ? '送出中...' : '送出諮詢'}
+                    {createInquiry.isPending ? t('quickInquiry.form.submitting') : t('quickInquiry.form.submitButton')}
                   </Button>
 
                   <p className="text-center text-sm text-gray-400">
-                    送出後，我們將在 24 小時內以電子郵件回覆您
+                    {t('quickInquiry.footerNote')}
                   </p>
                 </form>
               </div>

@@ -37,7 +37,7 @@ function getStripeClient(): Stripe {
   }
   return _stripeClient;
 }
-import { checkForgotPasswordRateLimitByIP, checkForgotPasswordRateLimitByEmail, checkForgotPasswordGlobalRateLimit, isBlockedEmailDomain, checkBookingCreateRateLimit, checkCheckoutSessionRateLimit, checkAiChatRateLimit } from "./rateLimit";
+import { checkForgotPasswordRateLimitByIP, checkForgotPasswordRateLimitByEmail, checkForgotPasswordGlobalRateLimit, isBlockedEmailDomain, checkBookingCreateRateLimit, checkCheckoutSessionRateLimit, checkAiChatRateLimit, checkAiChatDailyLimit, checkAiChatGlobalAnonymousLimit, checkAiChatUserDailyLimit } from "./rateLimit";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -320,15 +320,57 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ input, ctx }) => {
-        // Rate limiting: 10 requests per minute per IP
-        const ip = (ctx as any).ip ?? "unknown";
-        const aiChatRateLimit = await checkAiChatRateLimit(ip);
-        if (!aiChatRateLimit.allowed) {
+        // Round 72: Multi-layered rate limit for AI chat.
+        // Prior state: (ctx as any).ip was ALWAYS undefined because TrpcContext
+        // didn't expose ip, so the per-IP hourly bucket was effectively global.
+        // Now ctx.ip is populated by getClientIp() in context.ts (Fly-Client-IP
+        // → X-Forwarded-For → socket → "unknown"), and we layer three caps:
+        //   1. Per-IP hourly (60/hr) — slows single-IP burst abuse
+        //   2. Per-IP daily  (200/day) — catches persistent low-burst abuse
+        //   3. Global anonymous daily (5000/day) — caps total $ cost ceiling
+        // Logged-in users get their own user-scoped daily cap (500/day) and
+        // bypass the global anonymous bucket.
+        const ip = ctx.ip;
+        const isAuthenticated = !!ctx.user?.id;
+
+        // Per-IP hourly cap always applies.
+        const hourlyLimit = await checkAiChatRateLimit(ip);
+        if (!hourlyLimit.allowed) {
           throw new TRPCError({
             code: "TOO_MANY_REQUESTS",
             message: "AI 對話請求過於頻繁，請稍後再試",
           });
         }
+
+        // Per-IP daily cap always applies.
+        const dailyLimit = await checkAiChatDailyLimit(ip);
+        if (!dailyLimit.allowed) {
+          throw new TRPCError({
+            code: "TOO_MANY_REQUESTS",
+            message: "今日 AI 對話配額已達上限，請明日再試或登入取得更高配額",
+          });
+        }
+
+        if (isAuthenticated) {
+          // Authenticated users: per-user daily cap (more generous).
+          const userDailyLimit = await checkAiChatUserDailyLimit(ctx.user!.id);
+          if (!userDailyLimit.allowed) {
+            throw new TRPCError({
+              code: "TOO_MANY_REQUESTS",
+              message: "今日 AI 對話配額已達上限（500 則 / 日），明日重置",
+            });
+          }
+        } else {
+          // Anonymous users: also counted against global anon bucket (cost ceiling).
+          const globalAnon = await checkAiChatGlobalAnonymousLimit();
+          if (!globalAnon.allowed) {
+            throw new TRPCError({
+              code: "TOO_MANY_REQUESTS",
+              message: "AI 助理今日流量已達上限，請登入或稍後再試",
+            });
+          }
+        }
+
         const { message, conversationHistory = [], sessionId } = input;
         const { processMessageWithSkills } = await import("./services/aiChatSkillService");
 

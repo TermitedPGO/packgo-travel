@@ -186,7 +186,17 @@ export default function CountryPage() {
 
   return (
     <div className="min-h-screen flex flex-col bg-white">
-      <SEO title="目的地" description="探索 PACK&GO 精選旅遊目的地，發現世界各地的精彩旅遊行程。" url="/destinations" />
+      <SEO
+        title={{
+          zh: `${translateDestination(decodedCountry, 'zh-TW')} 旅遊行程`,
+          en: `${translateDestination(decodedCountry, 'en')} Tours`,
+        }}
+        description={{
+          zh: `探索 ${translateDestination(decodedCountry, 'zh-TW')} 精選旅遊行程，PACK&GO 為您規劃難忘的旅遊體驗。`,
+          en: `Explore curated tour packages in ${translateDestination(decodedCountry, 'en')} — PACK&GO plans unforgettable travel experiences for you.`,
+        }}
+        url={`/destinations/${encodeURIComponent(decodedCountry)}`}
+      />
       <Header />
       <main className="flex-grow">
         {/* Hero Section */}

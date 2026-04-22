@@ -24,12 +24,15 @@ interface DateRangePickerProps {
 export function DateRangePicker({
   value,
   onChange,
-  placeholder = "選擇日期",
+  placeholder,
   className,
 }: DateRangePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const { language } = useLocale();
   const dateLocale = language === 'zh-TW' ? zhTW : enUS;
+  // Round 72: locale-aware default placeholder. Previously hardcoded "選擇日期"
+  // which would have shown Chinese in English mode if any caller omitted the prop.
+  const resolvedPlaceholder = placeholder ?? (language === 'en' ? 'Select dates' : '選擇日期');
 
   const handleSelect = (range: DateRange | undefined) => {
     onChange?.(range);
@@ -40,7 +43,7 @@ export function DateRangePicker({
   };
 
   const formatDateRange = () => {
-    if (!value?.from) return placeholder;
+    if (!value?.from) return resolvedPlaceholder;
     if (!value?.to) return format(value.from, "yyyy/MM/dd", { locale: dateLocale });
     return `${format(value.from, "yyyy/MM/dd", { locale: dateLocale })} ~ ${format(value.to, "yyyy/MM/dd", { locale: dateLocale })}`;
   };

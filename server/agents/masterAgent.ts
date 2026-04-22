@@ -2434,10 +2434,23 @@ export class MasterAgent {
       
     } catch (error) {
       console.error("[MasterAgent] ✗ Critical error:", error);
-      
+
       const executionReport = this.monitor.generateReport();
       console.log(executionReport);
-      
+
+      // Round 72: pull whatever partial data the progress tracker has been
+      // accumulating so rollback() can find & delete uploaded R2 images.
+      // Previously the rollback() TODO just logged "Rolling back..." and did nothing.
+      let partialDataForRollback: any = undefined;
+      if (taskId) {
+        try {
+          const snapshot = progressTracker.getProgress(taskId);
+          partialDataForRollback = snapshot?.partialResults;
+        } catch (snapErr) {
+          console.warn("[MasterAgent] Could not snapshot partial results for rollback:", snapErr);
+        }
+      }
+
       // Mark task as failed in progress tracker
       if (taskId) {
         progressTracker.failTask(taskId, error instanceof Error ? error.message : "Unknown error");
@@ -2454,7 +2467,13 @@ export class MasterAgent {
 
       // 失敗時也清理殭屍任務（Round 36-Fix-3: 從 25 分鐘延長到 30 分鐘，與 index.ts 排程器保持一致）
       cleanupZombieTasks(30).catch(() => {});
-      
+
+      // Round 72: sweep orphaned R2 assets. Fire-and-forget — rollback never
+      // throws, so this doesn't mask the original error.
+      if (partialDataForRollback) {
+        this.rollback(partialDataForRollback).catch(() => {});
+      }
+
       return {
         success: false,
         error: error instanceof Error ? error.message : "Unknown error",
@@ -2464,16 +2483,77 @@ export class MasterAgent {
   }
   
   /**
-   * Rollback on error (cleanup resources)
+   * Rollback on error — cleanup orphaned R2 assets + DB rows.
+   *
+   * Round 72: the TODO placeholder that shipped in earlier rounds has been
+   * replaced with real cleanup. Given how little state MasterAgent holds during
+   * generation (it streams results back via the progress callback), we do a
+   * best-effort sweep:
+   *
+   *   1. Walk partialData for anything that looks like an R2 URL
+   *   2. Extract R2 keys via extractR2KeyFromUrl
+   *   3. Batch-delete via storageDeleteMany (swallows errors)
+   *
+   * This is not transactional — if rollback itself fails partway, the caller
+   * has already thrown the original error, so we only log and move on. The
+   * deleted count lands in logs for audit / post-mortem.
+   *
+   * @param partialData any object whose string leaves may contain R2 URLs
+   *                    (tourData, raw LLM output, etc.)
    */
   async rollback(partialData: any): Promise<void> {
     console.log("[MasterAgent] Rolling back...");
-    
-    // TODO: Implement cleanup logic
-    // - Delete uploaded images from S3
-    // - Clean up database entries
-    // - Log error details
-    
+
+    try {
+      const { storageDeleteMany, extractR2KeyFromUrl } = await import("../storage");
+
+      // Walk the partial data and harvest every string that looks like an R2 URL.
+      const seen = new Set<string>();
+      const keys: string[] = [];
+
+      const walk = (value: any, depth = 0): void => {
+        if (depth > 8) return; // defensive depth cap
+        if (value == null) return;
+        if (typeof value === "string") {
+          // Try direct URL parse
+          const key = extractR2KeyFromUrl(value);
+          if (key && !seen.has(key)) {
+            seen.add(key);
+            keys.push(key);
+          }
+          // Also try parsing as JSON — image arrays are often stored stringified
+          if (value.length > 2 && (value.startsWith("[") || value.startsWith("{"))) {
+            try {
+              walk(JSON.parse(value), depth + 1);
+            } catch {
+              // not JSON, ignore
+            }
+          }
+          return;
+        }
+        if (Array.isArray(value)) {
+          for (const item of value) walk(item, depth + 1);
+          return;
+        }
+        if (typeof value === "object") {
+          for (const v of Object.values(value)) walk(v, depth + 1);
+        }
+      };
+
+      walk(partialData);
+
+      if (keys.length === 0) {
+        console.log("[MasterAgent] Rollback: no R2 assets found in partialData");
+      } else {
+        const result = await storageDeleteMany(keys);
+        console.log(
+          `[MasterAgent] Rollback: cleaned up ${result.deleted}/${keys.length} R2 objects (failed: ${result.failed})`
+        );
+      }
+    } catch (err) {
+      console.warn("[MasterAgent] Rollback encountered an error (non-fatal):", err);
+    }
+
     console.log("[MasterAgent] Rollback completed");
   }
 }

@@ -407,8 +407,11 @@ export default function Tours() {
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
       <SEO
-        title={language === "en" ? "All Tours" : "所有行程"}
-        description="瀏覽 PACK&GO 旅行社所有精選旅遊行程，包含日本、歐洲、東南亞等熱門目的地，提供客製化旅遊規劃服務。"
+        title={{ zh: "所有行程", en: "All Tours" }}
+        description={{
+          zh: "瀏覽 PACK&GO 旅行社所有精選旅遊行程，包含日本、歐洲、東南亞等熱門目的地，提供客製化旅遊規劃服務。",
+          en: "Browse all curated PACK&GO Travel tour packages, featuring Japan, Europe, Southeast Asia and more — with custom itinerary planning available.",
+        }}
         url="/tours"
         type="website"
       />

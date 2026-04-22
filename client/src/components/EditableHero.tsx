@@ -451,7 +451,7 @@ export default function EditableHero() {
                         value={departure}
                         onChange={setDeparture}
                         placeholder={t('hero.search.departurePlaceholder')}
-                        className="w-full [[&_input]:rounded-full_input]:rounded-lg [&_input]:bg-gray-50 [&_input]:border-gray-200 [&_input]:focus:ring-primary [&_input]:focus:border-primary [&_input]:h-12 [&_input]:w-full"
+                        className="w-full [&_input]:rounded-lg [&_input]:bg-gray-50 [&_input]:border-gray-200 [&_input]:focus:ring-primary [&_input]:focus:border-primary [&_input]:h-12 [&_input]:w-full"
                       />
                     </div>
                     <div className="w-full" style={{ flex: '1 1 0', minWidth: 0 }}>
@@ -461,7 +461,7 @@ export default function EditableHero() {
                         onChange={setDestination}
                         onSelect={handleSearch}
                         placeholder={t('hero.search.destinationPlaceholder')}
-                        className="w-full [[&_input]:rounded-full_input]:rounded-lg [&_input]:bg-gray-50 [&_input]:border-gray-200 [&_input]:focus:ring-primary [&_input]:focus:border-primary [&_input]:h-12 [&_input]:w-full"
+                        className="w-full [&_input]:rounded-lg [&_input]:bg-gray-50 [&_input]:border-gray-200 [&_input]:focus:ring-primary [&_input]:focus:border-primary [&_input]:h-12 [&_input]:w-full"
                       />
                     </div>
                     <div className="w-full" style={{ flex: '1 1 0', minWidth: 0 }}>

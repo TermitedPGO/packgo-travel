@@ -11,7 +11,12 @@
 import { Router } from "express";
 import { getHaikuAgent } from "./agents/claudeAgent";
 import { matchSkills } from "./services/aiChatSkillService";
-import { checkAiChatRateLimit } from "./rateLimit";
+import {
+  checkAiChatRateLimit,
+  checkAiChatDailyLimit,
+  checkAiChatGlobalAnonymousLimit,
+} from "./rateLimit";
+import { getClientIp } from "./_core/context";
 
 export const aiChatStreamRouter = Router();
 
@@ -23,11 +28,27 @@ aiChatStreamRouter.get("/ai/chat/stream", async (req, res) => {
     return;
   }
 
-  // Rate limiting: 60 requests per hour per IP
-  const ip = (req.headers["x-forwarded-for"] as string || req.socket?.remoteAddress || "unknown").split(",")[0].trim();
-  const rateLimitResult = await checkAiChatRateLimit(ip);
-  if (!rateLimitResult.allowed) {
+  // Round 72: unified multi-layered rate limit (per-IP hourly + per-IP daily +
+  // global anonymous daily). Keeps SSE endpoint in sync with tRPC ai.chat.
+  const ip = getClientIp(req);
+
+  const hourly = await checkAiChatRateLimit(ip);
+  if (!hourly.allowed) {
     res.status(429).json({ error: "請求過於頻繁，請稍後再試" });
+    return;
+  }
+
+  const daily = await checkAiChatDailyLimit(ip);
+  if (!daily.allowed) {
+    res.status(429).json({ error: "今日配額已達上限，請明日再試" });
+    return;
+  }
+
+  // SSE endpoint is anonymous-only (no JWT in query string), so always count
+  // toward the global anonymous cost cap.
+  const globalAnon = await checkAiChatGlobalAnonymousLimit();
+  if (!globalAnon.allowed) {
+    res.status(429).json({ error: "AI 助理今日流量已達上限" });
     return;
   }
 

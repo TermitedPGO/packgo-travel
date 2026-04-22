@@ -55,7 +55,14 @@ export default function CustomTours() {
 
   return (
     <div className="min-h-screen flex flex-col bg-white">
-      <SEO title="客製行程" description="讓 PACK&GO 為您量身打造專屬旅遊行程，從路線規劃到住宿安排，一切由您決定。" url="/custom-tours" />
+      <SEO
+        title={{ zh: "客製行程", en: "Custom Tours" }}
+        description={{
+          zh: "讓 PACK&GO 為您量身打造專屬旅遊行程，從路線規劃到住宿安排，一切由您決定。",
+          en: "Let PACK&GO tailor a one-of-a-kind itinerary for you — from routing to accommodation, every detail is yours to decide.",
+        }}
+        url="/custom-tours"
+      />
       <Header />
 
       {/* Hero Section */}

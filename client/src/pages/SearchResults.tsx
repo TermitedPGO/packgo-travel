@@ -329,7 +329,14 @@ export default function SearchResults() {
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
-      <SEO title="搜尋結果" description="搜尋 PACK&GO 旅行社的旅遊行程，找到最適合您的旅遊方案。" url="/search" />
+      <SEO
+        title={{ zh: "搜尋結果", en: "Search Results" }}
+        description={{
+          zh: "搜尋 PACK&GO 旅行社的旅遊行程，找到最適合您的旅遊方案。",
+          en: "Search PACK&GO Travel tour packages to find the itinerary that fits you best.",
+        }}
+        url="/search"
+      />
       <Header />
       
       <main className="flex-grow">

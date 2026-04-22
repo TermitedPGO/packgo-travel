@@ -263,8 +263,8 @@ export async function checkCheckoutSessionRateLimit(userId: number): Promise<Rat
 // ============================================================
 
 /**
- * Rate limit for AI chat stream endpoint.
- * Limit: 60 requests per hour per IP (prevents AI cost abuse)
+ * Rate limit for AI chat — per-IP hourly cap.
+ * Limit: 60 requests per hour per IP (prevents single-IP abuse).
  * Uses IP because chat is accessible without login.
  */
 export async function checkAiChatRateLimit(ip: string): Promise<RateLimitResult> {
@@ -272,5 +272,50 @@ export async function checkAiChatRateLimit(ip: string): Promise<RateLimitResult>
     key: `ai-chat:ip:${ip}`,
     limit: 60,
     window: 3600, // 1 hour
+  });
+}
+
+/**
+ * Rate limit for AI chat — per-IP daily cap.
+ * Limit: 200 requests per day per IP.
+ * Secondary cap for persistent low-burst abuse that slips through the hourly bucket.
+ *
+ * Round 72: added because a bot with 24h patience could burn 60×24=1440 msgs/day
+ * from one IP under the hourly cap alone.
+ */
+export async function checkAiChatDailyLimit(ip: string): Promise<RateLimitResult> {
+  return checkRateLimit({
+    key: `ai-chat:ip-daily:${ip}`,
+    limit: 200,
+    window: 86400, // 24 hours
+  });
+}
+
+/**
+ * Rate limit for AI chat — global anonymous daily cap.
+ * Limit: 5000 requests per day across ALL anonymous traffic (logged-in users bypass).
+ * Worst-case cost cap: 5000 × ~$0.01/request = $50/day ceiling for anon chat.
+ *
+ * Round 72: defense against distributed bot farms with many IPs that each stay
+ * under the per-IP caps. Authenticated users have their own per-user limits and
+ * don't count toward this bucket.
+ */
+export async function checkAiChatGlobalAnonymousLimit(): Promise<RateLimitResult> {
+  return checkRateLimit({
+    key: `ai-chat:global-anonymous`,
+    limit: 5000,
+    window: 86400, // 24 hours
+  });
+}
+
+/**
+ * Rate limit for AI chat — per-authenticated-user daily cap.
+ * Limit: 500 requests per day per user (much more generous than anonymous).
+ */
+export async function checkAiChatUserDailyLimit(userId: number): Promise<RateLimitResult> {
+  return checkRateLimit({
+    key: `ai-chat:user-daily:${userId}`,
+    limit: 500,
+    window: 86400, // 24 hours
   });
 }

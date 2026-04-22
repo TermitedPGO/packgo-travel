@@ -87,7 +87,14 @@ export default function CustomTourRequest() {
   if (isSubmitted) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center py-12">
-      <SEO title="客製行程申請" description="填寫您的旅遊需求，PACK&GO 專業顧問將為您規劃最適合的客製化行程。" url="/custom-tour-request" />
+      <SEO
+        title={{ zh: "客製行程申請", en: "Custom Tour Request" }}
+        description={{
+          zh: "填寫您的旅遊需求，PACK&GO 專業顧問將為您規劃最適合的客製化行程。",
+          en: "Tell us what you want — PACK&GO's travel advisors will design a custom itinerary tailored to your needs.",
+        }}
+        url="/custom-tour-request"
+      />
         <div className="container max-w-2xl">
           <div className="bg-white rounded-xl shadow-lg p-12 text-center">
             <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-6" />

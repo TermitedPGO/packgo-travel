@@ -7,6 +7,7 @@ import Footer from "@/components/Footer";
 import { trpc } from "@/lib/trpc";
 import { continentMapping, continentOrder } from "@shared/continentMapping";
 import { useLocale } from "@/contexts/LocaleContext";
+import { translate as translateKey } from "@/i18n";
 
 // 地區配置（與首頁 Destinations 對應）
 const regionConfig: Record<string, {
@@ -218,7 +219,17 @@ export default function RegionPage() {
   if (region === "cruise") {
     return (
       <div className="min-h-screen flex flex-col bg-white">
-      <SEO title="地區行程" description="瀏覽 PACK&GO 各地區精選旅遊行程，找到最適合您的旅遊目的地。" url="/regions" />
+      <SEO
+        title={{
+          zh: `${translateKey(config.nameKey, 'zh-TW', (config as any).nameParams)} 旅遊行程`,
+          en: `${translateKey(config.nameKey, 'en', (config as any).nameParams)} Tours`,
+        }}
+        description={{
+          zh: `瀏覽 PACK&GO ${translateKey(config.nameKey, 'zh-TW', (config as any).nameParams)} 地區精選旅遊行程，找到最適合您的旅遊目的地。`,
+          en: `Browse PACK&GO curated tour packages in ${translateKey(config.nameKey, 'en', (config as any).nameParams)} — find the destination that fits you best.`,
+        }}
+        url={`/destinations/${region}`}
+      />
         <Header />
         <main className="flex-grow">
           {/* Hero Section */}
