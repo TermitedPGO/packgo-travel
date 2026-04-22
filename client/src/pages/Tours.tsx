@@ -156,7 +156,7 @@ function TourCard({
           )}
           {tour.status === "soldout" && (
             <Badge className="absolute top-4 right-4 bg-gray-800 text-white">
-              {isEn ? "Fully Booked" : "已額滿"}
+              {t("tours.fullyBooked")}
             </Badge>
           )}
           {tour.status === "inactive" && (
@@ -166,7 +166,7 @@ function TourCard({
           )}
           {/* Duration badge overlay */}
           <div className="absolute bottom-3 left-3 bg-black/70 text-white text-xs font-bold px-2 py-1">
-            {tour.duration}{isEn ? " Days" : " 天"}{tour.nights ? (isEn ? ` ${tour.nights} Nights` : ` ${tour.nights} 夜`) : ""}
+            {tour.duration} {t("tours.days")}{tour.nights ? ` ${tour.nights} ${t("tours.nights")}` : ""}
           </div>
         </div>
       </Link>
@@ -194,7 +194,7 @@ function TourCard({
         ) : (
           <div className="flex items-center gap-1 mb-2">
             <span className="text-xs text-gray-400">
-              {isEn ? "No reviews yet" : "尚無評價"}
+              {t("tours.noReviewsYet")}
             </span>
           </div>
         )}
@@ -219,11 +219,11 @@ function TourCard({
           <div className="flex items-center text-gray-500 mb-2">
             <Calendar className="h-3.5 w-3.5 mr-1 flex-shrink-0 text-teal-600" />
             <span className="text-xs text-teal-700 font-medium">
-              {isEn ? "Next: " : "最近出發："}{nextDepartureLabel}
+              {t("tours.nextDeparture")}{nextDepartureLabel}
             </span>
             {nextDeparture?.totalSlots && nextDeparture.bookedSlots !== undefined && (
               <span className="ml-2 text-xs text-gray-400">
-                ({nextDeparture.totalSlots - nextDeparture.bookedSlots} {isEn ? "seats left" : "席"})
+                ({nextDeparture.totalSlots - nextDeparture.bookedSlots} {t("tours.seatsLeftSuffix")})
               </span>
             )}
           </div>
@@ -258,7 +258,7 @@ function TourCard({
           <div className="flex gap-2">
             <Link href={`/tours/${tour.id}`} className="flex-1">
               <Button className="w-full bg-black text-white hover:bg-gray-800 text-xs py-2 h-9">
-                {isEn ? "View Details" : "查看詳情"}
+                {t("tours.viewDetails")}
               </Button>
             </Link>
             <Link href={`/contact-us?tour=${encodeURIComponent(displayTitle)}`}>

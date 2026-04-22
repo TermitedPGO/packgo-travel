@@ -9,16 +9,16 @@ import { Label } from "@/components/ui/label";
 import { useLocale } from "@/contexts/LocaleContext";
 import { Search, CheckCircle, Clock, AlertCircle, XCircle, FileText, Loader2 } from "lucide-react";
 
-const STATUS_CONFIG: Record<string, { color: string; icon: React.ReactElement; zh: string; en: string }> = {
-  draft:               { color: "gray",   icon: <FileText className="h-4 w-4" />,    zh: "草稿",       en: "Draft" },
-  submitted:           { color: "blue",   icon: <Clock className="h-4 w-4" />,       zh: "已提交",     en: "Submitted" },
-  paid:                { color: "green",  icon: <CheckCircle className="h-4 w-4" />, zh: "已付款",     en: "Paid" },
-  documents_received:  { color: "blue",   icon: <FileText className="h-4 w-4" />,    zh: "文件已收到", en: "Documents Received" },
-  processing:          { color: "yellow", icon: <Clock className="h-4 w-4" />,       zh: "處理中",     en: "Processing" },
-  approved:            { color: "green",  icon: <CheckCircle className="h-4 w-4" />, zh: "已核准",     en: "Approved" },
-  rejected:            { color: "red",    icon: <XCircle className="h-4 w-4" />,     zh: "已拒絕",     en: "Rejected" },
-  completed:           { color: "green",  icon: <CheckCircle className="h-4 w-4" />, zh: "已完成",     en: "Completed" },
-  cancelled:           { color: "gray",   icon: <XCircle className="h-4 w-4" />,     zh: "已取消",     en: "Cancelled" },
+const STATUS_CONFIG: Record<string, { color: string; icon: React.ReactElement; i18nKey: string }> = {
+  draft:               { color: "gray",   icon: <FileText className="h-4 w-4" />,    i18nKey: "draft" },
+  submitted:           { color: "blue",   icon: <Clock className="h-4 w-4" />,       i18nKey: "submitted" },
+  paid:                { color: "green",  icon: <CheckCircle className="h-4 w-4" />, i18nKey: "paid" },
+  documents_received:  { color: "blue",   icon: <FileText className="h-4 w-4" />,    i18nKey: "documents_received" },
+  processing:          { color: "yellow", icon: <Clock className="h-4 w-4" />,       i18nKey: "processing" },
+  approved:            { color: "green",  icon: <CheckCircle className="h-4 w-4" />, i18nKey: "approved" },
+  rejected:            { color: "red",    icon: <XCircle className="h-4 w-4" />,     i18nKey: "rejected" },
+  completed:           { color: "green",  icon: <CheckCircle className="h-4 w-4" />, i18nKey: "completed" },
+  cancelled:           { color: "gray",   icon: <XCircle className="h-4 w-4" />,     i18nKey: "cancelled" },
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -30,8 +30,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default function ChinaVisaStatus() {
-  const { language } = useLocale();
-  const isChineseMode = language === "zh-TW";
+  const { t } = useLocale();
   const [, params] = useRoute("/china-visa/status/:id");
   const routeId = params?.id ? parseInt(params.id) : 0;
 
@@ -61,12 +60,10 @@ export default function ChinaVisaStatus() {
         <div className="bg-[#1A1A1A] text-white py-12">
           <div className="container max-w-3xl mx-auto px-4">
             <h1 className="text-3xl font-serif font-bold mb-2">
-              {isChineseMode ? "簽證申請進度查詢" : "Visa Application Status"}
+              {t("visaStatus.pageTitle")}
             </h1>
             <p className="text-gray-400">
-              {isChineseMode
-                ? "輸入您的申請編號以查詢最新進度"
-                : "Enter your application ID to check the latest status"}
+              {t("visaStatus.pageSubtitle")}
             </p>
           </div>
         </div>
@@ -76,23 +73,23 @@ export default function ChinaVisaStatus() {
           <div className="flex gap-3 mb-10">
             <div className="flex-1">
               <Label className="text-sm font-bold mb-1 block">
-                {isChineseMode ? "申請編號" : "Application ID"}
+                {t("visaStatus.applicationId")}
               </Label>
               <Input
                 value={searchId}
                 onChange={e => setSearchId(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && handleSearch()}
-                placeholder={isChineseMode ? "例如：12345" : "e.g. 12345"}
-                className="border-2 border-gray-300 rounded-none font-mono"
+                placeholder={t("visaStatus.idPlaceholder")}
+                className="border-2 border-gray-300 rounded-lg font-mono"
               />
             </div>
             <div className="flex items-end">
               <Button
                 onClick={handleSearch}
-                className="bg-black text-white hover:bg-gray-800 rounded-none px-6 h-10"
+                className="bg-black text-white hover:bg-gray-800 rounded-lg px-6 h-10"
               >
                 <Search className="mr-2 h-4 w-4" />
-                {isChineseMode ? "查詢" : "Search"}
+                {t("visaStatus.searchButton")}
               </Button>
             </div>
           </div>
@@ -109,9 +106,7 @@ export default function ChinaVisaStatus() {
             <div className="bg-red-50 border border-red-200 p-4 text-sm text-red-700 flex gap-2">
               <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
               <span>
-                {isChineseMode
-                  ? "找不到此申請編號，請確認後重試。"
-                  : "Application not found. Please verify your ID and try again."}
+                {t("visaStatus.notFound")}
               </span>
             </div>
           )}
@@ -123,19 +118,19 @@ export default function ChinaVisaStatus() {
               <div className="border-2 border-gray-200">
                 <div className="bg-gray-50 px-6 py-3 border-b border-gray-200 flex items-center justify-between">
                   <span className="font-bold text-sm">
-                    {isChineseMode ? "申請狀態" : "Application Status"}
+                    {t("visaStatus.applicationStatus")}
                   </span>
                   <span className="text-xs text-gray-500">#{application.id}</span>
                 </div>
                 <div className="px-6 py-6 flex items-center gap-4">
                   <div className={`flex items-center gap-2 px-4 py-2 border rounded-full text-sm font-bold ${STATUS_COLORS[statusCfg.color]}`}>
                     {statusCfg.icon}
-                    <span>{isChineseMode ? statusCfg.zh : statusCfg.en}</span>
+                    <span>{t(`visaStatus.statusLabels.${statusCfg.i18nKey}`)}</span>
                   </div>
                   {application.applicationStatus === "approved" && application.trackingNumber && (
                     <div className="text-sm">
                       <span className="text-gray-500 mr-2">
-                        {isChineseMode ? "追蹤號碼：" : "Tracking #:"}
+                        {t("visaStatus.trackingNumber")}
                       </span>
                       <span className="font-mono font-bold">{application.trackingNumber}</span>
                     </div>
@@ -146,19 +141,19 @@ export default function ChinaVisaStatus() {
               {/* Application info */}
               <div className="border-2 border-gray-200">
                 <div className="bg-gray-50 px-6 py-3 border-b border-gray-200 font-bold text-sm">
-                  {isChineseMode ? "申請資訊" : "Application Information"}
+                  {t("visaStatus.applicationInfo")}
                 </div>
                 <table className="w-full text-sm">
                   <tbody>
                     {[
-                      { label: isChineseMode ? "申請人" : "Applicant", value: `${application.firstName} ${application.lastName}` },
-                      { label: isChineseMode ? "電子郵件" : "Email", value: application.email },
-                      { label: isChineseMode ? "護照號碼" : "Passport Number", value: application.passportNumber },
-                      { label: isChineseMode ? "護照國籍" : "Nationality", value: application.passportCountry },
-                      { label: isChineseMode ? "簽證類型" : "Visa Type", value: application.visaType },
-                      { label: isChineseMode ? "入境次數" : "Entry Type", value: application.entryType },
-                      { label: isChineseMode ? "付款狀態" : "Payment Status", value: application.paymentStatus === "paid" ? (isChineseMode ? "已付款" : "Paid") : (isChineseMode ? "待付款" : "Unpaid") },
-                      { label: isChineseMode ? "總金額" : "Total Amount", value: `USD $${Number(application.totalAmount).toFixed(2)}` },
+                      { label: t("visaStatus.applicant"), value: `${application.firstName} ${application.lastName}` },
+                      { label: t("visaStatus.email"), value: application.email },
+                      { label: t("visaStatus.passportNumber"), value: application.passportNumber },
+                      { label: t("visaStatus.nationality"), value: application.passportCountry },
+                      { label: t("visaStatus.visaType"), value: application.visaType },
+                      { label: t("visaStatus.entryType"), value: application.entryType },
+                      { label: t("visaStatus.paymentStatus"), value: application.paymentStatus === "paid" ? t("visaStatus.paid") : t("visaStatus.unpaid") },
+                      { label: t("visaStatus.totalAmount"), value: `USD $${Number(application.totalAmount).toFixed(2)}` },
                     ].map((row, i) => (
                       <tr key={i} className="border-b border-gray-100">
                         <td className="px-6 py-3 text-gray-500 w-1/3">{row.label}</td>
@@ -173,20 +168,23 @@ export default function ChinaVisaStatus() {
               {history.length > 0 && (
                 <div className="border-2 border-gray-200">
                   <div className="bg-gray-50 px-6 py-3 border-b border-gray-200 font-bold text-sm">
-                    {isChineseMode ? "狀態歷史記錄" : "Status History"}
+                    {t("visaStatus.statusHistory")}
                   </div>
                   <div className="px-6 py-4 space-y-4">
                     {history.map((h, i) => {
-                      const cfg = STATUS_CONFIG[h.toStatus] ?? { color: "gray", icon: <Clock className="h-4 w-4" />, zh: h.toStatus, en: h.toStatus };
+                      const cfg = STATUS_CONFIG[h.toStatus];
+                      const color = cfg?.color ?? "gray";
+                      const icon = cfg?.icon ?? <Clock className="h-4 w-4" />;
+                      const label = cfg ? t(`visaStatus.statusLabels.${cfg.i18nKey}`) : h.toStatus;
                       return (
                         <div key={i} className="flex gap-4">
-                          <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center border ${STATUS_COLORS[cfg.color]}`}>
-                            {cfg.icon}
+                          <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center border ${STATUS_COLORS[color]}`}>
+                            {icon}
                           </div>
                           <div className="flex-1 pt-1">
                             <div className="flex items-center gap-2 mb-1">
                               <span className="font-bold text-sm">
-                                {isChineseMode ? cfg.zh : cfg.en}
+                                {label}
                               </span>
                               <span className="text-xs text-gray-400">
                                 {new Date(h.createdAt).toLocaleString()}
@@ -207,7 +205,7 @@ export default function ChinaVisaStatus() {
               {application.adminNotes && (
                 <div className="bg-blue-50 border border-blue-200 p-4 text-sm">
                   <div className="font-bold text-blue-800 mb-1">
-                    {isChineseMode ? "備註" : "Notes"}
+                    {t("visaStatus.notes")}
                   </div>
                   <p className="text-blue-700">{application.adminNotes}</p>
                 </div>
@@ -217,9 +215,9 @@ export default function ChinaVisaStatus() {
                 <Button
                   variant="outline"
                   onClick={() => refetch()}
-                  className="border-2 border-gray-300 rounded-none"
+                  className="border-2 border-gray-300 rounded-lg"
                 >
-                  {isChineseMode ? "重新整理" : "Refresh"}
+                  {t("visaStatus.refresh")}
                 </Button>
               </div>
             </div>
@@ -229,7 +227,7 @@ export default function ChinaVisaStatus() {
           {queryId === 0 && (
             <div className="text-center py-16 text-gray-400">
               <Search className="h-12 w-12 mx-auto mb-4 opacity-30" />
-              <p>{isChineseMode ? "請輸入申請編號以查詢進度" : "Please enter your application ID to check status"}</p>
+              <p>{t("visaStatus.emptyHint")}</p>
             </div>
           )}
         </div>
