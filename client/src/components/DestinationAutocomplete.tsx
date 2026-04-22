@@ -11,49 +11,53 @@ interface DestinationAutocompleteProps {
   className?: string;
 }
 
+// Keywords stay bilingual so substring matching works regardless of input language.
+// The visible name is resolved through i18n via nameKey.
 const popularDestinations = [
-  { zh: "日本", en: "Japan", keywords: ["日本", "japan", "東京", "大阪", "京都", "北海道", "沖繩", "tokyo", "osaka", "kyoto", "hokkaido", "okinawa"] },
-  { zh: "韓國", en: "Korea", keywords: ["韓國", "korea", "首爾", "釜山", "濟州島", "seoul", "busan", "jeju"] },
-  { zh: "泰國", en: "Thailand", keywords: ["泰國", "thailand", "曼谷", "清邁", "普吉島", "bangkok", "chiang mai", "phuket"] },
-  { zh: "新加坡", en: "Singapore", keywords: ["新加坡", "singapore"] },
-  { zh: "馬來西亞", en: "Malaysia", keywords: ["馬來西亞", "malaysia", "吉隆坡", "檳城", "kuala lumpur", "penang"] },
-  { zh: "越南", en: "Vietnam", keywords: ["越南", "vietnam", "河內", "胡志明市", "峴港", "hanoi", "ho chi minh", "da nang"] },
-  { zh: "歐洲", en: "Europe", keywords: ["歐洲", "europe", "法國", "義大利", "西班牙", "英國", "德國", "france", "italy", "spain", "uk", "germany"] },
-  { zh: "美國", en: "USA", keywords: ["美國", "usa", "america", "紐約", "洛杉磯", "舊金山", "new york", "los angeles", "san francisco"] },
-  { zh: "澳洲", en: "Australia", keywords: ["澳洲", "australia", "雪梨", "墨爾本", "sydney", "melbourne"] },
-  { zh: "紐西蘭", en: "New Zealand", keywords: ["紐西蘭", "new zealand", "奧克蘭", "基督城", "auckland", "christchurch"] },
+  { nameKey: "destinations.japan", keywords: ["日本", "japan", "東京", "大阪", "京都", "北海道", "沖繩", "tokyo", "osaka", "kyoto", "hokkaido", "okinawa"] },
+  { nameKey: "destinations.korea", keywords: ["韓國", "korea", "首爾", "釜山", "濟州島", "seoul", "busan", "jeju"] },
+  { nameKey: "destinations.thailand", keywords: ["泰國", "thailand", "曼谷", "清邁", "普吉島", "bangkok", "chiang mai", "phuket"] },
+  { nameKey: "destinations.singapore", keywords: ["新加坡", "singapore"] },
+  { nameKey: "destinations.malaysia", keywords: ["馬來西亞", "malaysia", "吉隆坡", "檳城", "kuala lumpur", "penang"] },
+  { nameKey: "destinations.vietnam", keywords: ["越南", "vietnam", "河內", "胡志明市", "峴港", "hanoi", "ho chi minh", "da nang"] },
+  { nameKey: "destinations.europe", keywords: ["歐洲", "europe", "法國", "義大利", "西班牙", "英國", "德國", "france", "italy", "spain", "uk", "germany"] },
+  { nameKey: "destinations.usa", keywords: ["美國", "usa", "america", "紐約", "洛杉磯", "舊金山", "new york", "los angeles", "san francisco"] },
+  { nameKey: "destinations.australia", keywords: ["澳洲", "australia", "雪梨", "墨爾本", "sydney", "melbourne"] },
+  { nameKey: "destinations.newZealand", keywords: ["紐西蘭", "new zealand", "奧克蘭", "基督城", "auckland", "christchurch"] },
 ];
 
 export function DestinationAutocomplete({
   value,
   onChange,
   onSelect,
-  placeholder = "請輸入目的地、景點、關鍵字",
+  placeholder,
   className,
 }: DestinationAutocompleteProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [filteredDestinations, setFilteredDestinations] = useState<typeof popularDestinations>([]);
   const containerRef = useRef<HTMLDivElement>(null);
-  const { language } = useLocale();
+  const { t } = useLocale();
+  const resolvedPlaceholder = placeholder ?? t("common.destinationAutocompletePlaceholder");
 
-  const getDestName = (dest: typeof popularDestinations[0]) =>
-    language === "en" ? dest.en : dest.zh;
+  const getDestName = (dest: typeof popularDestinations[0]) => t(dest.nameKey);
 
   useEffect(() => {
     if (value.trim()) {
       const searchLower = value.toLowerCase();
-      const filtered = popularDestinations.filter((dest) =>
-        dest.keywords.some((keyword) => keyword.toLowerCase().includes(searchLower)) ||
-        dest.en.toLowerCase().includes(searchLower) ||
-        dest.zh.includes(value)
-      );
+      const filtered = popularDestinations.filter((dest) => {
+        const displayName = getDestName(dest).toLowerCase();
+        return (
+          dest.keywords.some((keyword) => keyword.toLowerCase().includes(searchLower)) ||
+          displayName.includes(searchLower)
+        );
+      });
       setFilteredDestinations(filtered);
       setIsOpen(filtered.length > 0);
     } else {
       setFilteredDestinations([]);
       setIsOpen(false);
     }
-  }, [value]);
+  }, [value, t]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -87,13 +91,13 @@ export function DestinationAutocomplete({
               setIsOpen(true);
             }
           }}
-          placeholder={placeholder}
+          placeholder={resolvedPlaceholder}
           className="w-full h-12 pl-12 pr-4 border-2 border-black bg-white text-gray-900 placeholder:text-gray-400 focus:outline-none transition-all rounded-lg"
         />
       </div>
 
       {isOpen && filteredDestinations.length > 0 && (
-        <div className="absolute z-[9999] w-full mt-1 bg-white border-2 border-black shadow-none max-h-60 overflow-y-auto">
+        <div className="absolute z-[9999] w-full mt-1 bg-white border-2 border-black shadow-none max-h-60 overflow-y-auto rounded-lg">
           {filteredDestinations.map((dest, index) => (
             <button
               key={index}

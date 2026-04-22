@@ -16,7 +16,7 @@ export function DepartureAutocomplete({
   value,
   onChange,
   onSelect,
-  placeholder = "輸入出發地",
+  placeholder,
   className,
 }: DepartureAutocompleteProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -24,6 +24,7 @@ export function DepartureAutocomplete({
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { t } = useLocale();
+  const resolvedPlaceholder = placeholder ?? t("hero.search.departurePlaceholder");
 
   // Fetch departure cities from DB — only cities with active tours
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -110,7 +111,7 @@ export function DepartureAutocomplete({
           value={value}
           onChange={handleChange}
           onFocus={handleFocus}
-          placeholder={placeholder}
+          placeholder={resolvedPlaceholder}
           className="w-full h-12 pl-12 pr-4 border-2 border-black bg-white text-gray-900 placeholder:text-gray-400 focus:outline-none transition-all rounded-lg"
         />
       </div>
@@ -119,12 +120,12 @@ export function DepartureAutocomplete({
       {showDropdown && (
         <div
           style={dropdownStyle}
-          className="bg-white border-2 border-black max-h-72 overflow-y-auto"
+          className="bg-white border-2 border-black max-h-72 overflow-y-auto rounded-lg"
         >
           {isLoading ? (
-            <div className="px-4 py-3 text-sm text-gray-400">{t('common.loading') || '載入中...'}</div>
+            <div className="px-4 py-3 text-sm text-gray-400">{t("common.loading")}</div>
           ) : filteredCities.length === 0 ? (
-            <div className="px-4 py-3 text-sm text-gray-400">{t('hero.noDeparture') || '找不到符合的出發地'}</div>
+            <div className="px-4 py-3 text-sm text-gray-400">{t("hero.search.noDeparture")}</div>
           ) : (
             filteredCities.map((city, index) => (
               <button
@@ -140,7 +141,7 @@ export function DepartureAutocomplete({
                   <span className="text-gray-900 group-hover/item:text-white font-medium">{city.city}</span>
                 </div>
                 <span className="text-xs text-gray-400 group-hover/item:text-gray-300">
-                  {city.count} {t('hero.tourCount') || '個行程'}
+                  {city.count} {t("hero.search.tourCount")}
                 </span>
               </button>
             ))

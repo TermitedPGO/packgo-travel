@@ -126,7 +126,7 @@ export function LocaleSwitcher() {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44 bg-white border border-gray-200 shadow-lg p-1">
-        <div className="px-2 py-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">{t('language.label') || '語言'}</div>
+        <div className="px-2 py-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">{t('language.label')}</div>
         {languages.map((lang) => (
           <DropdownMenuItem
             key={lang.code}
@@ -141,7 +141,7 @@ export function LocaleSwitcher() {
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator className="bg-gray-100 my-1" />
-        <div className="px-2 py-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">{t('currency.label') || '幣別'}</div>
+        <div className="px-2 py-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">{t('currency.label')}</div>
         {currencies.map((curr) => (
           <DropdownMenuItem
             key={curr.code}
