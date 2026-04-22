@@ -7,7 +7,7 @@ import { useEffect } from "react";
 import { trackPageView } from "@/lib/analytics";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
-import { LocaleProvider } from "./contexts/LocaleContext";
+import { LocaleProvider, useLocale } from "./contexts/LocaleContext";
 import CookieConsentBanner from "./components/CookieConsentBanner";
 
 // ─── Eagerly loaded (critical path) ──────────────────────────────────────────
@@ -50,11 +50,12 @@ const TaskHistory = lazy(() => import("./pages/TaskHistory"));
 
 // ─── Loading fallback ─────────────────────────────────────────────────────────
 function PageLoader() {
+  const { t } = useLocale();
   return (
     <div className="min-h-screen flex items-center justify-center bg-white">
       <div className="flex flex-col items-center gap-3">
         <div className="w-8 h-8 border-2 border-black border-t-transparent rounded-full animate-spin" />
-        <p className="text-sm text-gray-500">載入中...</p>
+        <p className="text-sm text-gray-500">{t('common.loading')}</p>
       </div>
     </div>
   );

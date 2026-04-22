@@ -719,6 +719,12 @@ export const zhTW = {
     avatarUpdateFailed: '更新頭像失敗，請稍後再試',
     avatarDeleteFailed: '刪除頭像失敗，請稍後再試',
     confirmDeleteAvatar: '確定要刪除頭像嗎？',
+    avatarUploadFailed: '上傳頭像失敗，請稍後再試',
+    deleteAvatar: '刪除頭像',
+    cropAvatar: '裁切頭像',
+    zoom: '縮放',
+    uploading: '上傳中...',
+    uploadAvatar: '上傳頭像',
   },
 
   // 預訂相關
@@ -2059,6 +2065,7 @@ export const zhTW = {
     },
     tourNotFound: '找不到行程',
     backToHome: '返回首頁',
+    backToTourDetail: '返回行程詳情',
     selectDeparture: '選擇出發日期',
     noDepartures: '目前沒有可預訂的出發日期',
     departureDate: '出發日期',
@@ -2284,6 +2291,7 @@ export const zhTW = {
     askQuestion: '問我問題！',
     minimize: '最小化對話框',
     close: '關閉對話框',
+    bubblePrompt: '點擊我回答您的旅遊問題！',
     openingPrompt: '— 請問您想了解什麼？ —',
     findTours: '🔍 找行程推薦',
     checkDates: '📅 查詢出發日期',

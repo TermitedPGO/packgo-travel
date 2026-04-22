@@ -58,7 +58,7 @@ export default function AIAssistantButton({ onClick, isOpen }: AIAssistantButton
           }}
         >
           <p className="text-sm font-medium text-black">
-            點擊我回答您的旅遊問題！
+            {t('aiAdvisor.bubblePrompt')}
           </p>
           {/* Arrow pointing down */}
           <div
@@ -109,7 +109,7 @@ export default function AIAssistantButton({ onClick, isOpen }: AIAssistantButton
         >
           <img
             src="/ai-assistant-avatar.png"
-            alt="AI 旅遊顧問"
+            alt={t('aiAdvisor.title')}
             className={`w-14 h-14 object-contain transition-transform duration-300 ${
               isHovered ? "scale-110" : "scale-100"
             }`}

@@ -3,6 +3,7 @@ import Cropper from "react-easy-crop";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Upload, X } from "lucide-react";
+import { useLocale } from "@/contexts/LocaleContext";
 
 interface AvatarUploadProps {
   currentAvatar?: string;
@@ -11,6 +12,7 @@ interface AvatarUploadProps {
 }
 
 export default function AvatarUpload({ currentAvatar, onUploadComplete, onDelete }: AvatarUploadProps) {
+  const { t } = useLocale();
   const [isOpen, setIsOpen] = useState(false);
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [crop, setCrop] = useState({ x: 0, y: 0 });
@@ -114,7 +116,7 @@ export default function AvatarUpload({ currentAvatar, onUploadComplete, onDelete
       };
     } catch (error) {
       console.error("Error uploading avatar:", error);
-      alert("上傳頭像失敗，請稍後再試");
+      alert(t('profile.avatarUploadFailed'));
     } finally {
       setIsUploading(false);
     }
@@ -143,7 +145,7 @@ export default function AvatarUpload({ currentAvatar, onUploadComplete, onDelete
             <button
               onClick={onDelete}
               className="p-2 bg-white/20 rounded-full hover:bg-white/30 transition-colors"
-              title="刪除頭像"
+              title={t('profile.deleteAvatar')}
             >
               <X className="h-5 w-5 text-white" />
             </button>
@@ -161,7 +163,7 @@ export default function AvatarUpload({ currentAvatar, onUploadComplete, onDelete
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
         <DialogContent className="max-w-2xl ">
           <DialogHeader>
-            <DialogTitle className="text-2xl font-bold">裁切頭像</DialogTitle>
+            <DialogTitle className="text-2xl font-bold">{t('profile.cropAvatar')}</DialogTitle>
           </DialogHeader>
           <div className="relative h-96 bg-gray-100 ">
             {imageSrc && (
@@ -181,7 +183,7 @@ export default function AvatarUpload({ currentAvatar, onUploadComplete, onDelete
           <div className="space-y-4">
             <div>
               <label className="text-sm font-medium text-gray-700 mb-2 block">
-                縮放
+                {t('profile.zoom')}
               </label>
               <input
                 type="range"
@@ -201,18 +203,18 @@ export default function AvatarUpload({ currentAvatar, onUploadComplete, onDelete
                 setIsOpen(false);
                 setImageSrc(null);
               }}
-              className="rounded-full border-2 border-black"
+              className="rounded-lg border-2 border-black"
             >
               <X className="h-4 w-4 mr-2" />
-              取消
+              {t('common.cancel')}
             </Button>
             <Button
               onClick={handleUpload}
               disabled={isUploading}
-              className="rounded-full bg-black text-white hover:bg-gray-800"
+              className="rounded-lg bg-black text-white hover:bg-gray-800"
             >
               <Upload className="h-4 w-4 mr-2" />
-              {isUploading ? "上傳中..." : "上傳頭像"}
+              {isUploading ? t('profile.uploading') : t('profile.uploadAvatar')}
             </Button>
           </DialogFooter>
         </DialogContent>

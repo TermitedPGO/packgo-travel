@@ -718,6 +718,12 @@ export const en = {
     avatarUpdateFailed: 'Failed to update avatar, please try again later',
     avatarDeleteFailed: 'Failed to delete avatar, please try again later',
     confirmDeleteAvatar: 'Are you sure you want to delete your avatar?',
+    avatarUploadFailed: 'Failed to upload avatar, please try again later',
+    deleteAvatar: 'Delete avatar',
+    cropAvatar: 'Crop Avatar',
+    zoom: 'Zoom',
+    uploading: 'Uploading...',
+    uploadAvatar: 'Upload Avatar',
   },
 
   // Booking Related
@@ -2099,6 +2105,7 @@ export const en = {
     },
     tourNotFound: 'Tour not found',
     backToHome: 'Back to Home',
+    backToTourDetail: 'Back to Tour Details',
     selectDeparture: 'Select Departure Date',
     noDepartures: 'No available departure dates',
     departureDate: 'Departure Date',
@@ -2324,6 +2331,7 @@ export const en = {
     askQuestion: 'Ask me a question!',
     minimize: 'Minimize dialog',
     close: 'Close dialog',
+    bubblePrompt: 'Click me to answer your travel questions!',
     openingPrompt: '— What would you like to know? —',
     findTours: '🔍 Find Tours',
     checkDates: '📅 Check Dates',

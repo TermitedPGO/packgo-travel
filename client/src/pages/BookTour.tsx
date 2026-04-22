@@ -255,7 +255,7 @@ export default function BookTour() {
           className="flex items-center gap-2 text-gray-600 hover:text-black transition-colors mb-6 text-sm font-medium"
         >
           <ArrowLeft className="h-4 w-4" />
-          返回行程詳情
+          {t('bookTour.backToTourDetail')}
         </button>
         {/* Progress Steps */}
         <div className="mb-8">
