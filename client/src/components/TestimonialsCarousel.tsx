@@ -29,7 +29,7 @@ interface VerifiedReview {
 export default function TestimonialsCarousel() {
   const [current, setCurrent] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
-  const { language } = useLocale();
+  const { language, t } = useLocale();
   const isEn = language === "en";
 
   // Only show reviews that are tied to a real completed booking.
@@ -158,7 +158,7 @@ export default function TestimonialsCarousel() {
               <button
                 onClick={prev}
                 className="w-10 h-10 rounded-lg border border-gray-300 hover:border-black flex items-center justify-center transition-colors"
-                aria-label={isEn ? "Previous review" : "上一則評價"}
+                aria-label={t('common.previousReview')}
               >
                 <ChevronLeft className="h-5 w-5 text-gray-600" />
               </button>
@@ -171,7 +171,7 @@ export default function TestimonialsCarousel() {
                     className={`h-2 rounded-full transition-all ${
                       i === current ? "bg-black w-6" : "bg-gray-300 w-2 hover:bg-gray-500"
                     }`}
-                    aria-label={isEn ? `Go to review ${i + 1}` : `前往第 ${i + 1} 則評價`}
+                    aria-label={t('common.goToReview', { index: i + 1 })}
                   />
                 ))}
               </div>
@@ -179,7 +179,7 @@ export default function TestimonialsCarousel() {
               <button
                 onClick={next}
                 className="w-10 h-10 rounded-lg border border-gray-300 hover:border-black flex items-center justify-center transition-colors"
-                aria-label={isEn ? "Next review" : "下一則評價"}
+                aria-label={t('common.nextReview')}
               >
                 <ChevronRight className="h-5 w-5 text-gray-600" />
               </button>

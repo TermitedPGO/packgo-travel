@@ -37,7 +37,7 @@ export function setCookieConsent(v: Consent) {
 }
 
 export default function CookieConsentBanner() {
-  const { language } = useLocale();
+  const { language, t } = useLocale();
   const isEn = language === "en";
   const [visible, setVisible] = useState(false);
 
@@ -67,7 +67,7 @@ export default function CookieConsentBanner() {
     <div
       role="dialog"
       aria-live="polite"
-      aria-label={isEn ? "Cookie consent" : "Cookie 同意"}
+      aria-label={t('common.cookieConsent')}
       className="fixed bottom-4 left-4 right-4 md:left-6 md:right-auto md:max-w-md z-50"
     >
       <div className="rounded-xl border border-gray-200 bg-white shadow-2xl p-5">
@@ -105,7 +105,7 @@ export default function CookieConsentBanner() {
           </div>
           <button
             onClick={() => handle("necessary")}
-            aria-label={isEn ? "Close and accept necessary only" : "關閉並僅接受必要 Cookie"}
+            aria-label={t('common.closeCookieBanner')}
             className="rounded-md p-1 text-gray-400 hover:text-black hover:bg-gray-100 transition-colors"
           >
             <X className="h-4 w-4" />

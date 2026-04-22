@@ -92,6 +92,12 @@ export const en = {
     searchToursPlaceholder: 'Search tours...',
     passportDisplayPlaceholder: 'As shown on passport',
     cityCountryPlaceholder: 'City, Country',
+    openMenu: 'Open menu',
+    cookieConsent: 'Cookie consent',
+    closeCookieBanner: 'Close and accept necessary only',
+    previousReview: 'Previous review',
+    nextReview: 'Next review',
+    goToReview: 'Go to review {index}',
   },
 
   // Navigation

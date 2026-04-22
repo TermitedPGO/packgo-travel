@@ -182,7 +182,7 @@ export default function Header() {
         <button
           className="lg:hidden p-2 text-gray-600"
           onClick={() => setIsMenuOpen(!isMenuOpen)}
-          aria-label="開啟選單"
+          aria-label={t('common.openMenu')}
         >
           {isMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
         </button>

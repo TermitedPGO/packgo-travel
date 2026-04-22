@@ -92,6 +92,12 @@ export const zhTW = {
     searchToursPlaceholder: '搜尋行程...',
     passportDisplayPlaceholder: '如護照所示',
     cityCountryPlaceholder: '城市, 國家',
+    openMenu: '開啟選單',
+    cookieConsent: 'Cookie 同意',
+    closeCookieBanner: '關閉並僅接受必要 Cookie',
+    previousReview: '上一則評價',
+    nextReview: '下一則評價',
+    goToReview: '前往第 {index} 則評價',
   },
 
   // 導航
