@@ -15,8 +15,7 @@ import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 
 export default function FlightBooking() {
-  const { t, language } = useLocale();
-  const isChineseMode = language === 'zh-TW';
+  const { t } = useLocale();
   const [advisorOpen, setAdvisorOpen] = useState(false);
   const [advisorInitialMsg, setAdvisorInitialMsg] = useState("");
 
@@ -131,19 +130,20 @@ export default function FlightBooking() {
     { name: t('flightBooking.page.cabin4Name'), nameEn: "First Class", desc: t('flightBooking.page.cabin4Desc'), Icon: Crown },
   ];
 
+  const cityTpe = t('flightBooking.page.cityTpe');
   const popularRoutes = [
-    { from: isChineseMode ? "台北 TPE" : "Taipei TPE", to: isChineseMode ? "東京 TYO" : "Tokyo TYO", fromCode: "TPE", toCode: "TYO", duration: isChineseMode ? "約 3.5 小時" : "~3.5 hours", tagKey: "popular" as const },
-    { from: isChineseMode ? "台北 TPE" : "Taipei TPE", to: isChineseMode ? "大阪 OSA" : "Osaka OSA", fromCode: "TPE", toCode: "OSA", duration: isChineseMode ? "約 3 小時" : "~3 hours", tagKey: "popular" as const },
-    { from: isChineseMode ? "台北 TPE" : "Taipei TPE", to: isChineseMode ? "首爾 SEL" : "Seoul SEL", fromCode: "TPE", toCode: "SEL", duration: isChineseMode ? "約 2.5 小時" : "~2.5 hours", tagKey: "popular" as const },
-    { from: isChineseMode ? "台北 TPE" : "Taipei TPE", to: isChineseMode ? "曼谷 BKK" : "Bangkok BKK", fromCode: "TPE", toCode: "BKK", duration: isChineseMode ? "約 4 小時" : "~4 hours", tagKey: "recommended" as const },
-    { from: isChineseMode ? "台北 TPE" : "Taipei TPE", to: isChineseMode ? "新加坡 SIN" : "Singapore SIN", fromCode: "TPE", toCode: "SIN", duration: isChineseMode ? "約 4.5 小時" : "~4.5 hours", tagKey: "recommended" as const },
-    { from: isChineseMode ? "台北 TPE" : "Taipei TPE", to: isChineseMode ? "洛杉磯 LAX" : "Los Angeles LAX", fromCode: "TPE", toCode: "LAX", duration: isChineseMode ? "約 12 小時" : "~12 hours", tagKey: "longhaul" as const },
+    { from: cityTpe, to: t('flightBooking.page.cityTyo'), fromCode: "TPE", toCode: "TYO", duration: t('flightBooking.page.duration3h5'), tagKey: "popular" as const },
+    { from: cityTpe, to: t('flightBooking.page.cityOsa'), fromCode: "TPE", toCode: "OSA", duration: t('flightBooking.page.duration3h'), tagKey: "popular" as const },
+    { from: cityTpe, to: t('flightBooking.page.citySel'), fromCode: "TPE", toCode: "SEL", duration: t('flightBooking.page.duration2h5'), tagKey: "popular" as const },
+    { from: cityTpe, to: t('flightBooking.page.cityBkk'), fromCode: "TPE", toCode: "BKK", duration: t('flightBooking.page.duration4h'), tagKey: "recommended" as const },
+    { from: cityTpe, to: t('flightBooking.page.citySin'), fromCode: "TPE", toCode: "SIN", duration: t('flightBooking.page.duration4h5'), tagKey: "recommended" as const },
+    { from: cityTpe, to: t('flightBooking.page.cityLax'), fromCode: "TPE", toCode: "LAX", duration: t('flightBooking.page.duration12h'), tagKey: "longhaul" as const },
   ];
 
   const routeTagLabels = {
-    popular: isChineseMode ? "熱門" : "Popular",
-    recommended: isChineseMode ? "推薦" : "Recommended",
-    longhaul: isChineseMode ? "長途" : "Long-haul",
+    popular: t('flightBooking.page.routeTagHot'),
+    recommended: t('flightBooking.page.routeTagRecommended'),
+    longhaul: t('flightBooking.page.routeTagLongHaul'),
   };
 
   return (

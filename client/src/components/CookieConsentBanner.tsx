@@ -37,8 +37,7 @@ export function setCookieConsent(v: Consent) {
 }
 
 export default function CookieConsentBanner() {
-  const { language, t } = useLocale();
-  const isEn = language === "en";
+  const { t } = useLocale();
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -75,16 +74,14 @@ export default function CookieConsentBanner() {
           <Cookie className="h-6 w-6 text-black shrink-0 mt-0.5" aria-hidden />
           <div className="flex-1 min-w-0">
             <h2 className="text-base font-bold text-black mb-1">
-              {isEn ? "Your privacy, your choice" : "您的隱私，您作主"}
+              {t("cookieBanner.title")}
             </h2>
             <p className="text-sm text-gray-600 leading-relaxed">
-              {isEn
-                ? "We use strictly necessary cookies to run this site. With your permission we also use analytics cookies (Plausible, Google Analytics) to understand how the site is used. We do not sell or share your personal information."
-                : "本網站使用維持運作所必需之 Cookie。若您同意，我們另將使用分析 Cookie（Plausible、Google Analytics）以了解網站使用情形。本公司不出售亦不分享您的個人資料。"}
+              {t("cookieBanner.body")}
             </p>
             <p className="text-xs text-gray-500 mt-2">
               <Link href="/privacy-policy" className="underline hover:text-black">
-                {isEn ? "Read our Privacy Policy" : "閱讀隱私權政策"}
+                {t("cookieBanner.readPolicy")}
               </Link>
             </p>
 
@@ -93,13 +90,13 @@ export default function CookieConsentBanner() {
                 onClick={() => handle("necessary")}
                 className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
               >
-                {isEn ? "Necessary only" : "僅必要 Cookie"}
+                {t("cookieBanner.necessaryOnly")}
               </button>
               <button
                 onClick={() => handle("all")}
                 className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 transition-colors"
               >
-                {isEn ? "Accept all" : "全部接受"}
+                {t("cookieBanner.acceptAll")}
               </button>
             </div>
           </div>

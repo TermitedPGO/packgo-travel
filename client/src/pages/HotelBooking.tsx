@@ -16,8 +16,7 @@ import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 
 export default function HotelBooking() {
-  const { t, language } = useLocale();
-  const isChineseMode = language === 'zh-TW';
+  const { t } = useLocale();
   const [advisorOpen, setAdvisorOpen] = useState(false);
   const [advisorInitialMsg, setAdvisorInitialMsg] = useState("");
 
@@ -132,12 +131,12 @@ export default function HotelBooking() {
   // API. Destination cards now show city/country only; re-introduce counts
   // only when sourced from a live partner API response.
   const destinations = [
-    { city: isChineseMode ? "東京" : "Tokyo", country: isChineseMode ? "日本" : "Japan" },
-    { city: isChineseMode ? "大阪" : "Osaka", country: isChineseMode ? "日本" : "Japan" },
-    { city: isChineseMode ? "首爾" : "Seoul", country: isChineseMode ? "韓國" : "South Korea" },
-    { city: isChineseMode ? "曼谷" : "Bangkok", country: isChineseMode ? "泰國" : "Thailand" },
-    { city: isChineseMode ? "新加坡" : "Singapore", country: isChineseMode ? "新加坡" : "Singapore" },
-    { city: isChineseMode ? "峇里島" : "Bali", country: isChineseMode ? "印尼" : "Indonesia" },
+    { city: t('hotelBooking.page.cityTokyo'), country: t('hotelBooking.page.countryJapan') },
+    { city: t('hotelBooking.page.cityOsaka'), country: t('hotelBooking.page.countryJapan') },
+    { city: t('hotelBooking.page.citySeoul'), country: t('hotelBooking.page.countryKorea') },
+    { city: t('hotelBooking.page.cityBangkok'), country: t('hotelBooking.page.countryThailand') },
+    { city: t('hotelBooking.page.citySingapore'), country: t('hotelBooking.page.countrySingapore') },
+    { city: t('hotelBooking.page.cityBali'), country: t('hotelBooking.page.countryIndonesia') },
   ];
 
   return (

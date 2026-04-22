@@ -30,7 +30,7 @@ export default function TestimonialsCarousel() {
   const [current, setCurrent] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
   const { language, t } = useLocale();
-  const isEn = language === "en";
+  const isEn = language === "en"; // retained for locale-dependent formatting only
 
   // Only show reviews that are tied to a real completed booking.
   // If the endpoint doesn't exist yet, the query returns undefined and we
@@ -67,23 +67,19 @@ export default function TestimonialsCarousel() {
         <div className="container">
           <div className="text-center mb-8">
             <p className="text-xs font-bold tracking-[0.3em] text-gray-400 uppercase mb-3">
-              {isEn ? "VERIFIED REVIEWS" : "實證旅客評價"}
+              {t("testimonials.eyebrow")}
             </p>
             <h2 className="text-3xl md:text-4xl font-serif font-bold text-black mb-4">
-              {isEn ? "Be Our First Story" : "成為我們第一位說故事的旅客"}
+              {t("testimonials.emptyTitle")}
             </h2>
           </div>
           <div className="max-w-2xl mx-auto rounded-xl border border-gray-200 bg-gray-50 p-8 text-center">
             <Quote className="h-10 w-10 text-gray-300 mx-auto mb-4" />
             <p className="text-gray-700 text-base leading-relaxed mb-2">
-              {isEn
-                ? "Pack & Go publishes reviews only after a customer has completed a tour. We don't display fabricated or unverified testimonials."
-                : "Pack & Go 僅發布真實旅客完成行程後的評價。我們不展示任何未經驗證的推薦。"}
+              {t("testimonials.emptyBody")}
             </p>
             <p className="text-gray-500 text-sm">
-              {isEn
-                ? "Your trip can be the first review shown here."
-                : "您的旅程，將是這裡的第一則真實回饋。"}
+              {t("testimonials.emptyFootnote")}
             </p>
           </div>
         </div>
@@ -109,15 +105,13 @@ export default function TestimonialsCarousel() {
         {/* Section Header */}
         <div className="text-center mb-12">
           <p className="text-xs font-bold tracking-[0.3em] text-gray-400 uppercase mb-3">
-            {isEn ? "VERIFIED REVIEWS" : "實證旅客評價"}
+            {t("testimonials.eyebrow")}
           </p>
           <h2 className="text-3xl md:text-4xl font-serif font-bold text-black mb-4">
-            {isEn ? "What Our Travelers Say" : "旅客怎麼說"}
+            {t("testimonials.title")}
           </h2>
           <p className="text-xs text-gray-500">
-            {isEn
-              ? "Each review is linked to a completed booking. FTC 16 CFR §465 compliant."
-              : "每則評價皆對應實際完成之訂單。符合美國 FTC 16 CFR §465 規範。"}
+            {t("testimonials.complianceNote")}
           </p>
         </div>
 
@@ -148,7 +142,7 @@ export default function TestimonialsCarousel() {
                   .join(" · ")}
               </p>
               <p className="text-[10px] text-gray-400 mt-2 tracking-wider uppercase">
-                {isEn ? `Verified booking #${r.bookingId}` : `已驗證訂單 #${r.bookingId}`}
+                {t("testimonials.verifiedBooking", { id: String(r.bookingId) })}
               </p>
             </div>
           </div>

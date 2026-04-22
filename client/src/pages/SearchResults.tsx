@@ -23,60 +23,61 @@ import { groupDestinationsByContinent, continentOrder } from "@shared/continentM
 import { FavoriteButton } from "@/components/FavoriteButton";
 
 // 智能標籤生成函數 - 根據行程資料自動生成正確的標籤
-const generateSmartTags = (tour: any, language: string = 'zh-TW') => {
+// t() is passed in from the component so labels are i18n-routed instead of
+// a lang ternary (CLAUDE.md §4.1).
+const generateSmartTags = (tour: any, t: (key: string) => string) => {
   const tags: { label: string; icon: any; color: string }[] = [];
-  const isEn = language === 'en';
-  
+
   // 1. 根據天數判斷行程類型
   if (tour.duration >= 10) {
-    tags.push({ label: isEn ? "In-Depth" : "深度旅遊", icon: Mountain, color: "bg-emerald-100 text-emerald-700" });
+    tags.push({ label: t("searchResults.tagInDepth"), icon: Mountain, color: "bg-emerald-100 text-emerald-700" });
   } else if (tour.duration >= 7) {
-    tags.push({ label: isEn ? "Classic" : "經典行程", icon: Star, color: "bg-amber-100 text-amber-700" });
+    tags.push({ label: t("searchResults.tagClassic"), icon: Star, color: "bg-amber-100 text-amber-700" });
   } else if (tour.duration <= 4) {
-    tags.push({ label: isEn ? "Short Trip" : "輕旅行", icon: Sparkles, color: "bg-sky-100 text-sky-700" });
+    tags.push({ label: t("searchResults.tagShortTrip"), icon: Sparkles, color: "bg-sky-100 text-sky-700" });
   }
-  
+
   // 2. 根據價格判斷行程等級
   if (tour.price && tour.price >= 80000) {
-    tags.push({ label: isEn ? "Premium" : "精緻行程", icon: Star, color: "bg-purple-100 text-purple-700" });
+    tags.push({ label: t("searchResults.tagPremium"), icon: Star, color: "bg-purple-100 text-purple-700" });
   } else if (tour.price && tour.price < 30000) {
-    tags.push({ label: isEn ? "Value Deal" : "超值優惠", icon: Sparkles, color: "bg-rose-100 text-rose-700" });
+    tags.push({ label: t("searchResults.tagValueDeal"), icon: Sparkles, color: "bg-rose-100 text-rose-700" });
   }
-  
+
   // 3. 根據交通方式判斷
   const category = tour.category?.toLowerCase() || "";
   const title = tour.title?.toLowerCase() || "";
   const description = tour.description?.toLowerCase() || "";
   const combinedText = `${title} ${description}`;
-  
+
   if (category === "cruise" || combinedText.includes("郵輪") || combinedText.includes("遊輪") || combinedText.includes("cruise")) {
-    tags.push({ label: isEn ? "Cruise" : "郵輪", icon: Ship, color: "bg-blue-100 text-blue-700" });
+    tags.push({ label: t("searchResults.tagCruise"), icon: Ship, color: "bg-blue-100 text-blue-700" });
   }
-  
+
   if (tour.outboundAirline || combinedText.includes("航空") || combinedText.includes("飛機") || combinedText.includes("flight") || combinedText.includes("airline")) {
-    tags.push({ label: isEn ? "Flight" : "航空", icon: Plane, color: "bg-indigo-100 text-indigo-700" });
+    tags.push({ label: t("searchResults.tagFlight"), icon: Plane, color: "bg-indigo-100 text-indigo-700" });
   }
-  
+
   if (combinedText.includes("高鐵") || combinedText.includes("火車") || combinedText.includes("列車") || combinedText.includes("train") || combinedText.includes("rail")) {
-    tags.push({ label: isEn ? "Rail" : "鐵道", icon: Train, color: "bg-orange-100 text-orange-700" });
+    tags.push({ label: t("searchResults.tagRail"), icon: Train, color: "bg-orange-100 text-orange-700" });
   }
-  
+
   if (combinedText.includes("巴士") || combinedText.includes("遊覽車") || combinedText.includes("bus") || combinedText.includes("coach")) {
-    tags.push({ label: isEn ? "Bus" : "巴士", icon: Bus, color: "bg-gray-100 text-gray-700" });
+    tags.push({ label: t("searchResults.tagBus"), icon: Bus, color: "bg-gray-100 text-gray-700" });
   }
-  
+
   // 4. 根據特色活動判斷
   if (combinedText.includes("美食") || combinedText.includes("料理") || combinedText.includes("餐廳") || combinedText.includes("food") || combinedText.includes("cuisine") || combinedText.includes("dining")) {
-    tags.push({ label: isEn ? "Food Tour" : "美食之旅", icon: Utensils, color: "bg-red-100 text-red-700" });
+    tags.push({ label: t("searchResults.tagFoodTour"), icon: Utensils, color: "bg-red-100 text-red-700" });
   }
-  
+
   if (combinedText.includes("攝影") || combinedText.includes("拍照") || combinedText.includes("打卡") || combinedText.includes("photo") || combinedText.includes("photography")) {
-    tags.push({ label: isEn ? "Photo Tour" : "攝影之旅", icon: Camera, color: "bg-pink-100 text-pink-700" });
+    tags.push({ label: t("searchResults.tagPhotoTour"), icon: Camera, color: "bg-pink-100 text-pink-700" });
   }
-  
+
   // 5. 根據行程類型判斷
   if (category === "group" || combinedText.includes("團體") || combinedText.includes("group")) {
-    tags.push({ label: isEn ? "Group Tour" : "團體旅遊", icon: Users, color: "bg-teal-100 text-teal-700" });
+    tags.push({ label: t("searchResults.tagGroupTour"), icon: Users, color: "bg-teal-100 text-teal-700" });
   }
   
   // 6. 解析資料庫中的 tags 欄位
@@ -414,7 +415,7 @@ export default function SearchResults() {
 
             {/* 可展開的篩選面板 */}
             {showFilters && filterOptions && (
-              <div className="mt-4 p-6 bg-gray-50  border border-gray-200 animate-in slide-in-from-top-2 duration-200">
+              <div className="mt-4 p-6 bg-gray-50 rounded-xl border border-gray-200 animate-in slide-in-from-top-2 duration-200">
                 <div className="flex items-center justify-between mb-6">
                   <h3 className="font-bold text-gray-900">{t('search.advancedFilter')}</h3>
                   {activeFilterCount > 0 && (
@@ -661,7 +662,7 @@ export default function SearchResults() {
           <div className="container">
             {isLoading ? (
               <div className="text-center py-16">
-                <div className="animate-spin rounded-lg h-12 w-12 border-b-2 border-black mx-auto mb-4"></div>
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-black mx-auto mb-4"></div>
                 <p className="text-gray-500">{t('common.loading')}</p>
               </div>
             ) : tours && tours.length > 0 ? (
@@ -676,7 +677,7 @@ export default function SearchResults() {
                 {/* 行程卡片網格 */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {tours.map((tour: any) => {
-                    const tags = generateSmartTags(tour, language);
+                    const tags = generateSmartTags(tour, t);
                     const isFavorite = favorites.has(tour.id);
                     
                     return (
