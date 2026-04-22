@@ -114,7 +114,7 @@ export function EditableDayCard({
   const addActivity = () => {
     const newActivity: Activity = {
       time: "",
-      title: "新活動",
+      title: t('tourDetail.newActivityTitle'),
       description: "",
       location: "",
     };

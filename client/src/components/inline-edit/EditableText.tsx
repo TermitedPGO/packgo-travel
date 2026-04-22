@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Pencil, Check, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useLocale } from "@/contexts/LocaleContext";
 
 interface EditableTextProps {
   value: string;
@@ -22,12 +23,14 @@ export function EditableText({
   isEditing,
   className = "",
   inputClassName = "",
-  placeholder = "點擊編輯...",
+  placeholder,
   multiline = false,
   maxLength,
   as: Component = "span",
   darkBackground = false,
 }: EditableTextProps) {
+  const { t } = useLocale();
+  const resolvedPlaceholder = placeholder ?? t('common.clickToEditPlaceholder');
   const [isActive, setIsActive] = useState(false);
   const [editValue, setEditValue] = useState(value);
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
@@ -67,7 +70,7 @@ export function EditableText({
 
   // 非編輯模式：直接顯示文字
   if (!isEditing) {
-    return <Component className={className}>{value || placeholder}</Component>;
+    return <Component className={className}>{value || resolvedPlaceholder}</Component>;
   }
 
   // 編輯模式但未激活：顯示可點擊的文字（帶虛線框 + 懸停高亮）
@@ -86,16 +89,16 @@ export function EditableText({
           "px-1 py-0.5",
         )}
         onClick={() => setIsActive(true)}
-        title="點擊編輯"
+        title={t('common.clickToEdit')}
       >
-        {value || <span className={darkBackground ? "text-gray-300 italic" : "text-gray-400 italic"}>{placeholder}</span>}
+        {value || <span className={darkBackground ? "text-gray-300 italic" : "text-gray-400 italic"}>{resolvedPlaceholder}</span>}
         {/* 懸停時顯示「點擊編輯」提示 */}
         <span className={cn(
           "absolute -top-7 left-0 text-xs px-1.5 py-0.5 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10",
           darkBackground ? "bg-yellow-400 text-yellow-900" : "bg-blue-600 text-white"
         )}>
           <Pencil className="inline h-3 w-3 mr-1" />
-          點擊編輯
+          {t('common.clickToEdit')}
         </span>
       </Component>
     );
@@ -118,7 +121,7 @@ export function EditableText({
             "bg-transparent border-none outline-none resize-none min-h-[60px] w-full text-gray-900",
             inputClassName
           )}
-          placeholder={placeholder}
+          placeholder={resolvedPlaceholder}
         />
       ) : (
         <input
@@ -132,26 +135,26 @@ export function EditableText({
             "bg-transparent border-none outline-none min-w-[100px] w-full text-gray-900",
             inputClassName
           )}
-          placeholder={placeholder}
+          placeholder={resolvedPlaceholder}
         />
       )}
       {maxLength && (
         <span className="text-xs text-gray-400 whitespace-nowrap self-end">
-          {editValue.length}/{maxLength} 字
+          {t('common.charCount', { current: editValue.length, max: maxLength })}
         </span>
       )}
       <div className="flex items-center gap-1 shrink-0">
         <button
           onMouseDown={(e) => { e.preventDefault(); handleSave(); }}
           className="p-1.5 hover:bg-green-100 rounded-lg text-green-600 transition-colors"
-          title="儲存 (Enter)"
+          title={t('common.saveShortcut')}
         >
           <Check className="h-4 w-4" />
         </button>
         <button
           onMouseDown={(e) => { e.preventDefault(); handleCancel(); }}
           className="p-1.5 hover:bg-red-100 rounded-lg text-red-500 transition-colors"
-          title="取消 (Esc)"
+          title={t('common.cancelShortcut')}
         >
           <X className="h-4 w-4" />
         </button>

@@ -2,6 +2,7 @@ import React from "react";
 import { Pencil, Eye, Save, X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useLocale } from "@/contexts/LocaleContext";
 
 interface EditModeToggleProps {
   isEditMode: boolean;
@@ -28,6 +29,7 @@ export function EditModeToggle({
   changesCount,
   className = "",
 }: EditModeToggleProps) {
+  const { t } = useLocale();
   // changesCount 是 modifiedCount 的別名，優先使用 changesCount
   const displayCount = changesCount ?? modifiedCount;
   return (
@@ -43,10 +45,10 @@ export function EditModeToggle({
           {/* 編輯模式標示 + 已修改數量 */}
           <div className="flex items-center gap-2 px-3 py-1 bg-yellow-100 rounded-lg text-yellow-800 text-sm font-medium">
             <Pencil className="h-4 w-4" />
-            編輯中
+            {t('tourDetail.editingLabel')}
             {displayCount > 0 && (
               <span className="bg-yellow-500 text-white text-xs px-1.5 py-0.5 rounded-full font-bold">
-                {displayCount} 個變更
+                {t('tourDetail.changeCountBadge', { count: displayCount })}
               </span>
             )}
           </div>
@@ -60,14 +62,14 @@ export function EditModeToggle({
               {isSaving ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  儲存中...
+                  {t('tourDetail.savingInProgress')}
                 </>
               ) : (
                 <>
                   <Save className="h-4 w-4 mr-2" />
-                  儲存變更
+                  {t('tourDetail.saveChanges')}
                   {displayCount > 0 && (
-                    <span className="ml-1 text-xs opacity-80">({displayCount} 處)</span>
+                    <span className="ml-1 text-xs opacity-80">{t('tourDetail.changeCountSuffix', { count: displayCount })}</span>
                   )}
                 </>
               )}
@@ -81,7 +83,7 @@ export function EditModeToggle({
             className="rounded-lg disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <X className="h-4 w-4 mr-2" />
-            {hasChanges ? "放棄變更" : "退出編輯"}
+            {hasChanges ? t('tourDetail.discardChanges') : t('tourDetail.exitEditMode')}
           </Button>
         </>
       ) : (
@@ -92,7 +94,7 @@ export function EditModeToggle({
             className="rounded-lg bg-yellow-500 hover:bg-yellow-600 text-white"
           >
             <Pencil className="h-4 w-4 mr-2" />
-            進入編輯模式
+            {t('tourDetail.enterEditMode')}
           </Button>
         </>
       )}
@@ -108,20 +110,21 @@ export function EditModeBanner({
   isEditMode: boolean;
   hasChanges: boolean;
 }) {
+  const { t } = useLocale();
   if (!isEditMode) return null;
 
   return (
     <div className="fixed top-0 left-0 right-0 z-[100] bg-yellow-400 text-yellow-900 py-2 px-4 text-center text-sm font-medium shadow-md">
       <div className="flex items-center justify-center gap-2">
         <Pencil className="h-4 w-4" />
-        <span>您正在編輯模式中</span>
+        <span>{t('tourDetail.inEditModeBanner')}</span>
         {hasChanges && (
           <span className="bg-yellow-600 text-white px-2 py-0.5 rounded text-xs">
-            有未儲存的變更
+            {t('tourDetail.unsavedChangesBadge')}
           </span>
         )}
         <span className="text-yellow-700">
-          — 點擊任何文字或圖片即可編輯
+          {t('tourDetail.editModeHint')}
         </span>
       </div>
     </div>

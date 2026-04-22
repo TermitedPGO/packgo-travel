@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { ImageCropper } from "@/components/ImageCropper";
 import { trpc } from "@/lib/trpc";
+import { useLocale } from "@/contexts/LocaleContext";
 
 interface EditableImageProps {
   src: string;
@@ -64,6 +65,7 @@ export function EditableImage({
   tourId,
   imagePath = "image",
 }: EditableImageProps) {
+  const { t } = useLocale();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [imageUrl, setImageUrl] = useState(src);
   const [isUploading, setIsUploading] = useState(false);
@@ -103,13 +105,13 @@ export function EditableImage({
     // 驗證檔案類型
     const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/jpg'];
     if (!validTypes.includes(file.type) && !file.type.startsWith("image/")) {
-      toast.error("請選擇圖片檔案（支援 JPG、PNG、GIF、WebP）");
+      toast.error(t('tourDetail.imageInvalidType'));
       return;
     }
 
     // 驗證檔案大小 (最大 10MB)
     if (file.size > 10 * 1024 * 1024) {
-      toast.error("圖片大小不能超過 10MB");
+      toast.error(t('tourDetail.imageSizeExceeded'));
       return;
     }
 
@@ -126,7 +128,7 @@ export function EditableImage({
       setActiveTab("crop");
     };
     reader.readAsDataURL(file);
-  }, []);
+  }, [t]);
 
   // 上傳檔案到伺服器並添加到圖片庫
   const uploadFile = async (fileOrBlob: File | Blob) => {
@@ -153,16 +155,16 @@ export function EditableImage({
             });
 
             if (!response.ok) {
-              throw new Error("上傳失敗");
+              throw new Error(t('tourDetail.uploadFailed'));
             }
 
                   const result = await response.json();
                   const { url, optimization } = result;
-                  
+
                   // 顯示壓縮資訊
                   if (optimization) {
                     const savedKB = ((optimization.originalSize - optimization.optimizedSize) / 1024).toFixed(1);
-                    toast.success(`圖片已壓縮：節省 ${savedKB}KB (${optimization.compressionRatio})`);
+                    toast.success(t('tourDetail.imageCompressed', { savedKB, ratio: optimization.compressionRatio }));
                   }
                   uploadedUrl = url;
           } else {
@@ -176,7 +178,7 @@ export function EditableImage({
             });
 
             if (!response.ok) {
-              throw new Error("上傳失敗");
+              throw new Error(t('tourDetail.uploadFailed'));
             }
 
             const { url } = await response.json();
@@ -199,23 +201,23 @@ export function EditableImage({
 
           setImageUrl(uploadedUrl);
           onSave(uploadedUrl);
-          toast.success("圖片上傳成功");
+          toast.success(t('tourDetail.imageUploadSuccess'));
           setIsDialogOpen(false);
           setImageToCrop(null);
           setActiveTab("upload");
         } catch (error) {
-          toast.error("圖片上傳失敗，請稍後再試");
+          toast.error(t('tourDetail.imageUploadFailedRetry'));
         } finally {
           setIsUploading(false);
         }
       };
       reader.onerror = () => {
-        toast.error("讀取檔案失敗");
+        toast.error(t('tourDetail.fileReadFailed'));
         setIsUploading(false);
       };
       reader.readAsDataURL(fileOrBlob);
     } catch (error) {
-      toast.error("圖片上傳失敗，請稍後再試");
+      toast.error(t('tourDetail.imageUploadFailedRetry'));
       setIsUploading(false);
     }
   };
@@ -229,7 +231,7 @@ export function EditableImage({
   const handleSelectFromLibrary = (url: string) => {
     setImageUrl(url);
     onSave(url);
-    toast.success("已選擇圖片");
+    toast.success(t('tourDetail.imageSelected'));
     setIsDialogOpen(false);
   };
 
@@ -312,12 +314,12 @@ export function EditableImage({
         <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
           <div className="text-white text-center">
             <Camera className="h-8 w-8 mx-auto mb-2" />
-            <span className="text-sm font-medium">點擊更換圖片</span>
+            <span className="text-sm font-medium">{t('tourDetail.clickToReplaceImage')}</span>
           </div>
         </div>
         {/* 編輯標記 */}
         <div className="absolute top-2 right-2 bg-yellow-400 text-yellow-900 px-2 py-1 rounded text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity">
-          可編輯
+          {t('tourDetail.editableBadge')}
         </div>
       </div>
 
@@ -327,7 +329,7 @@ export function EditableImage({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Camera className="h-5 w-5" />
-              更換圖片
+              {t('tourDetail.replaceImage')}
             </DialogTitle>
           </DialogHeader>
 
@@ -345,11 +347,11 @@ export function EditableImage({
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="upload" className="flex items-center gap-2">
                   <Upload className="h-4 w-4" />
-                  上傳圖片
+                  {t('tourDetail.uploadImage')}
                 </TabsTrigger>
                 <TabsTrigger value="library" className="flex items-center gap-2">
                   <FolderOpen className="h-4 w-4" />
-                  圖片庫
+                  {t('tourDetail.imageLibrary')}
                 </TabsTrigger>
               </TabsList>
 
@@ -376,13 +378,13 @@ export function EditableImage({
                     {imageUrl ? (
                       <img
                         src={imageUrl}
-                        alt="預覽"
+                        alt={t('tourDetail.imagePreviewAlt')}
                         className="w-full h-full object-cover rounded-lg"
                       />
                     ) : (
                       <div className="flex flex-col items-center justify-center h-full text-gray-400 py-12">
                         <ImageIcon className="h-16 w-16 mb-4" />
-                        <p className="text-sm">尚未選擇圖片</p>
+                        <p className="text-sm">{t('tourDetail.noImageSelected')}</p>
                       </div>
                     )}
                   </div>
@@ -393,12 +395,12 @@ export function EditableImage({
                       {isUploading ? (
                         <>
                           <Loader2 className="h-12 w-12 text-primary animate-spin mb-3" />
-                          <p className="text-gray-600 font-medium">上傳中...</p>
+                          <p className="text-gray-600 font-medium">{t('tourDetail.uploadingImage')}</p>
                         </>
                       ) : (
                         <>
                           <Upload className="h-12 w-12 text-primary mb-3" />
-                          <p className="text-gray-600 font-medium">放開以上傳圖片</p>
+                          <p className="text-gray-600 font-medium">{t('tourDetail.releaseToUpload')}</p>
                         </>
                       )}
                     </div>
@@ -423,20 +425,20 @@ export function EditableImage({
                     {isUploading ? (
                       <>
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        上傳中...
+                        {t('tourDetail.uploadingImage')}
                       </>
                     ) : (
                       <>
                         <Upload className="h-4 w-4 mr-2" />
-                        選擇圖片並裁切
+                        {t('tourDetail.selectAndCrop')}
                       </>
                     )}
                   </Button>
                   <p className="text-xs text-gray-500 mt-2">
-                    支援 JPG、PNG、GIF、WebP 格式，最大 10MB，上傳時自動壓縮優化
+                    {t('tourDetail.imageFormatsWithOptimize')}
                   </p>
                   <p className="text-xs text-gray-400 mt-1">
-                    可直接拖放圖片到上方區域，上傳後可進行裁切
+                    {t('tourDetail.dragDropWithCropHint')}
                   </p>
                 </div>
               </TabsContent>
@@ -453,12 +455,12 @@ export function EditableImage({
                       >
                         <img
                           src={image.url}
-                          alt={image.filename || "圖片"}
+                          alt={image.filename || t('tourDetail.imageAltFallback')}
                           className="w-full h-full object-cover rounded-lg"
                         />
                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
                           <span className="text-white text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity">
-                            選擇
+                            {t('tourDetail.selectImage')}
                           </span>
                         </div>
                       </div>
@@ -467,8 +469,8 @@ export function EditableImage({
                 ) : (
                   <div className="flex flex-col items-center justify-center py-12 text-gray-400">
                     <FolderOpen className="h-16 w-16 mb-4" />
-                    <p className="text-sm">圖片庫是空的</p>
-                    <p className="text-xs mt-1">上傳的圖片會自動加入圖片庫</p>
+                    <p className="text-sm">{t('tourDetail.libraryEmpty')}</p>
+                    <p className="text-xs mt-1">{t('tourDetail.libraryAutoAddHint')}</p>
                   </div>
                 )}
               </TabsContent>
