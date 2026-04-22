@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { useLocale } from "@/contexts/LocaleContext";
 
 export interface EditableImageProps {
   src: string;
@@ -32,8 +33,10 @@ export const EditableImage: React.FC<EditableImageProps> = ({
   isEditable = false,
   className = "",
   aspectRatio = "16/9",
-  placeholder = "點擊上傳圖片",
+  placeholder,
 }) => {
+  const { t } = useLocale();
+  const resolvedPlaceholder = placeholder ?? t('tourDetail.clickToUploadImage');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -54,13 +57,13 @@ export const EditableImage: React.FC<EditableImageProps> = ({
     // 驗證檔案類型
     const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/jpg'];
     if (!validTypes.includes(file.type) && !file.type.startsWith("image/")) {
-      toast.error("請選擇圖片檔案（支援 JPG、PNG、GIF、WebP）");
+      toast.error(t('tourDetail.imageInvalidType'));
       return;
     }
 
     // 驗證檔案大小 (最大 10MB)
     if (file.size > 10 * 1024 * 1024) {
-      toast.error("圖片大小不能超過 10MB");
+      toast.error(t('tourDetail.imageSizeExceeded'));
       return;
     }
 
@@ -71,12 +74,12 @@ export const EditableImage: React.FC<EditableImageProps> = ({
 
     try {
       await onUpload(file);
-      toast.success("圖片上傳成功");
+      toast.success(t('tourDetail.imageUploadSuccess'));
       setIsDialogOpen(false);
       setPreviewUrl(null);
     } catch (error) {
       console.error("圖片上傳失敗:", error);
-      toast.error("圖片上傳失敗，請重試");
+      toast.error(t('tourDetail.imageUploadFailedRetry'));
       setPreviewUrl(null);
     } finally {
       setIsUploading(false);
@@ -88,7 +91,7 @@ export const EditableImage: React.FC<EditableImageProps> = ({
 
     // 清理 object URL
     URL.revokeObjectURL(objectUrl);
-  }, [onUpload]);
+  }, [onUpload, t]);
 
   // 處理檔案選擇
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -139,7 +142,7 @@ export const EditableImage: React.FC<EditableImageProps> = ({
           <img src={src} alt={alt} className="w-full h-full object-cover rounded-lg" />
         ) : (
           <div className="w-full h-full bg-gray-200 flex items-center justify-center">
-            <span className="text-gray-400">{placeholder}</span>
+            <span className="text-gray-400">{resolvedPlaceholder}</span>
           </div>
         )}
       </div>
@@ -162,7 +165,7 @@ export const EditableImage: React.FC<EditableImageProps> = ({
           <img src={displaySrc} alt={alt} className="w-full h-full object-cover rounded-lg" />
         ) : (
           <div className="w-full h-full bg-gray-200 flex items-center justify-center">
-            <span className="text-gray-400">{placeholder}</span>
+            <span className="text-gray-400">{resolvedPlaceholder}</span>
           </div>
         )}
 
@@ -171,12 +174,12 @@ export const EditableImage: React.FC<EditableImageProps> = ({
           {isUploading ? (
             <>
               <Loader2 className="h-8 w-8 text-white animate-spin mb-2" />
-              <span className="text-white text-sm">上傳中...</span>
+              <span className="text-white text-sm">{t('tourDetail.uploadingImage')}</span>
             </>
           ) : (
             <>
               <Camera className="h-8 w-8 text-white mb-2" />
-              <span className="text-white text-sm">點擊更換圖片</span>
+              <span className="text-white text-sm">{t('tourDetail.clickToReplaceImage')}</span>
             </>
           )}
         </div>
@@ -188,7 +191,7 @@ export const EditableImage: React.FC<EditableImageProps> = ({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Camera className="h-5 w-5" />
-              更換圖片
+              {t('tourDetail.replaceImage')}
             </DialogTitle>
           </DialogHeader>
 
@@ -214,13 +217,13 @@ export const EditableImage: React.FC<EditableImageProps> = ({
                 {displaySrc ? (
                   <img
                     src={displaySrc}
-                    alt="預覽"
+                    alt={t('tourDetail.imagePreviewAlt')}
                     className="w-full h-full object-cover rounded-lg"
                   />
                 ) : (
                   <div className="flex flex-col items-center justify-center h-full text-gray-400 py-12">
                     <ImageIcon className="h-16 w-16 mb-4" />
-                    <p className="text-sm">尚未選擇圖片</p>
+                    <p className="text-sm">{t('tourDetail.noImageSelected')}</p>
                   </div>
                 )}
               </div>
@@ -231,13 +234,13 @@ export const EditableImage: React.FC<EditableImageProps> = ({
                   {isUploading ? (
                     <>
                       <Loader2 className="h-12 w-12 text-primary animate-spin mb-3" />
-                      <p className="text-gray-600 font-medium">上傳中...</p>
-                      <p className="text-gray-400 text-sm">圖片將自動調整大小</p>
+                      <p className="text-gray-600 font-medium">{t('tourDetail.uploadingImage')}</p>
+                      <p className="text-gray-400 text-sm">{t('tourDetail.imageAutoResize')}</p>
                     </>
                   ) : (
                     <>
                       <Upload className="h-12 w-12 text-primary mb-3" />
-                      <p className="text-gray-600 font-medium">放開以上傳圖片</p>
+                      <p className="text-gray-600 font-medium">{t('tourDetail.releaseToUpload')}</p>
                     </>
                   )}
                 </div>
@@ -262,20 +265,20 @@ export const EditableImage: React.FC<EditableImageProps> = ({
                 {isUploading ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    上傳中...
+                    {t('tourDetail.uploadingImage')}
                   </>
                 ) : (
                   <>
                     <Upload className="h-4 w-4 mr-2" />
-                    上傳圖片
+                    {t('tourDetail.uploadImage')}
                   </>
                 )}
               </Button>
               <p className="text-xs text-gray-500 mt-2">
-                支援 JPG、PNG、GIF、WebP 格式，最大 10MB
+                {t('tourDetail.imageFormatsSupport')}
               </p>
               <p className="text-xs text-gray-400 mt-1">
-                可直接拖放圖片到上方區域
+                {t('tourDetail.dragDropHint')}
               </p>
             </div>
           </div>
