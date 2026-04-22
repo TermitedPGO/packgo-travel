@@ -222,7 +222,7 @@ const DeparturePriceCalendar = ({
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-lg overflow-hidden mb-8 border border-gray-100">
+    <div className="bg-white rounded-xl shadow-lg overflow-hidden mb-8 border border-gray-100">
       {/* 日曆標題 - 卓面級設計 */}
       <div 
         className="flex items-center justify-between p-6" 
@@ -840,7 +840,7 @@ const MealCard = ({
   
   return (
     <div 
-      className={`bg-white border ${config.borderColor} rounded-lg overflow-hidden transition-all duration-300 ${config.hoverBg} ${isSpecialMeal ? 'cursor-pointer hover:shadow-md' : ''} flex flex-col h-full`}
+      className={`bg-white border ${config.borderColor} rounded-xl overflow-hidden transition-all duration-300 ${config.hoverBg} ${isSpecialMeal ? 'cursor-pointer hover:shadow-md' : ''} flex flex-col h-full`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onClick={handleClick}
@@ -2375,7 +2375,7 @@ export default function TourDetailPeony() {
                 return (
                   <div 
                     key={index} 
-                    className={`group rounded-lg border border-gray-100 hover:shadow-lg transition-all duration-300 bg-white hover:-translate-y-1 overflow-hidden ${isEditMode ? 'ring-2 ring-yellow-200' : ''}`}
+                    className={`group rounded-xl border border-gray-100 hover:shadow-lg transition-all duration-300 bg-white hover:-translate-y-1 overflow-hidden ${isEditMode ? 'ring-2 ring-yellow-200' : ''}`}
                   >
                     {/* 圖片區域 - 支援編輯 */}
                     {isEditMode ? (
@@ -2756,7 +2756,7 @@ export default function TourDetailPeony() {
             <div className="grid md:grid-cols-2 gap-6">
               {/* Preparation */}
               {noticeDetailed.preparation && ensureArray(noticeDetailed.preparation).length > 0 && (
-                <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+                <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
                   <div className="flex items-center gap-3 mb-4">
                     <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${themeColor.secondary}15` }}>
                       <Luggage className="h-5 w-5" style={{ color: themeColor.secondary }} />
@@ -2776,7 +2776,7 @@ export default function TourDetailPeony() {
 
               {/* Documents */}
               {noticeDetailed.documents && ensureArray(noticeDetailed.documents).length > 0 && (
-                <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+                <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
                   <div className="flex items-center gap-3 mb-4">
                     <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${themeColor.secondary}15` }}>
                       <FileText className="h-5 w-5" style={{ color: themeColor.secondary }} />
@@ -2796,7 +2796,7 @@ export default function TourDetailPeony() {
 
               {/* Health */}
               {noticeDetailed.health && ensureArray(noticeDetailed.health).length > 0 && (
-                <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+                <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
                   <div className="flex items-center gap-3 mb-4">
                     <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${themeColor.secondary}15` }}>
                       <Heart className="h-5 w-5" style={{ color: themeColor.secondary }} />
@@ -2816,7 +2816,7 @@ export default function TourDetailPeony() {
 
               {/* Emergency Contact */}
               {noticeDetailed.emergency && ensureArray(noticeDetailed.emergency).length > 0 && (
-                <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+                <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
                   <div className="flex items-center gap-3 mb-4">
                     <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${themeColor.secondary}15` }}>
                       <PhoneCall className="h-5 w-5" style={{ color: themeColor.secondary }} />
@@ -2836,7 +2836,7 @@ export default function TourDetailPeony() {
 
               {/* Terms */}
               {noticeDetailed.terms && ensureArray(noticeDetailed.terms).length > 0 && (
-                <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow md:col-span-2">
+                <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow md:col-span-2">
                   <div className="flex items-center gap-3 mb-4">
                     <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${themeColor.secondary}15` }}>
                       <Info className="h-5 w-5" style={{ color: themeColor.secondary }} />
