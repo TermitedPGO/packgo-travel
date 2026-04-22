@@ -23,7 +23,7 @@ export default function PrivacyPolicy() {
         subtitle: "How Pack & Go, LLC collects, uses, and protects your personal information.",
         effective: "Effective date",
         intro:
-          "This Privacy Policy describes how Pack & Go, LLC (\"Pack & Go\", \"we\", \"us\") collects and processes personal information about visitors to packgo09.manus.space (the \"Site\") and customers of our travel services. It also explains the rights available to California residents under the California Consumer Privacy Act (CCPA), as amended by the California Privacy Rights Act (CPRA).",
+          "This Privacy Policy describes how Pack & Go, LLC (\"Pack & Go\", \"we\", \"us\") collects and processes personal information about visitors to packgo-travel.fly.dev (the \"Site\") and customers of our travel services. It also explains the rights available to California residents under the California Consumer Privacy Act (CCPA), as amended by the California Privacy Rights Act (CPRA).",
         s1h: "1. Categories of personal information we collect",
         s1intro:
           "In the last 12 months we have collected the following categories of personal information, as those categories are defined in Cal. Civ. Code §1798.140:",
@@ -104,7 +104,7 @@ export default function PrivacyPolicy() {
         subtitle: "Pack & Go, LLC 如何蒐集、使用並保護您的個人資料。",
         effective: "生效日期",
         intro:
-          "本隱私權政策說明 Pack & Go, LLC（下稱「本公司」）如何蒐集與處理您造訪 packgo09.manus.space（下稱「本網站」）及使用本公司旅遊服務時之個人資料，並載明加州居民依加州消費者隱私法（CCPA，經 CPRA 修正）所享有之權利。",
+          "本隱私權政策說明 Pack & Go, LLC（下稱「本公司」）如何蒐集與處理您造訪 packgo-travel.fly.dev（下稱「本網站」）及使用本公司旅遊服務時之個人資料，並載明加州居民依加州消費者隱私法（CCPA，經 CPRA 修正）所享有之權利。",
         s1h: "一、蒐集之個人資料類別",
         s1intro:
           "過去 12 個月內，本公司依加州民法 §1798.140 所列類別蒐集下列個人資料：",

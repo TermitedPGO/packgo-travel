@@ -19,7 +19,7 @@ const SMTP_USER = process.env.EMAIL_USER || "";
 const SMTP_PASS = process.env.EMAIL_PASSWORD || "";
 const FROM_NAME = "PACK&GO 旅行社 — 中國簽證代辦";
 const FROM_EMAIL = SMTP_USER;
-const SITE_URL = process.env.SITE_URL || "https://packgo09.manus.space";
+const SITE_URL = process.env.SITE_URL || "https://packgo-travel.fly.dev";
 
 function createTransporter() {
   return nodemailer.createTransport({

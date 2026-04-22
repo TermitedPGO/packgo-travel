@@ -23,7 +23,7 @@ export default function TermsOfService() {
         subtitle: "The contract governing every booking with Pack & Go, LLC.",
         effective: "Effective date",
         intro:
-          "These Terms of Service (the \"Terms\") govern your use of the website packgo09.manus.space (the \"Site\") and any travel services booked through Pack & Go, LLC (\"Pack & Go\", \"we\", \"us\"). By booking a tour, submitting an inquiry, or creating an account, you agree to these Terms.",
+          "These Terms of Service (the \"Terms\") govern your use of the website packgo-travel.fly.dev (the \"Site\") and any travel services booked through Pack & Go, LLC (\"Pack & Go\", \"we\", \"us\"). By booking a tour, submitting an inquiry, or creating an account, you agree to these Terms.",
         s1h: "1. Who we are",
         s1p: [
           "Pack & Go, LLC is a California limited liability company with its principal place of business at 39055 Cedar Blvd #126, Newark, CA 94560, USA.",
@@ -85,7 +85,7 @@ export default function TermsOfService() {
         subtitle: "與 Pack & Go, LLC 所有訂單之契約依據。",
         effective: "生效日期",
         intro:
-          "本服務條款（下稱「本條款」）規範您使用 packgo09.manus.space 網站（下稱「本網站」）及透過 Pack & Go, LLC（下稱「本公司」、「我們」）預訂之任何旅遊服務。一旦您下單、送出諮詢或建立會員，即視為接受本條款。",
+          "本服務條款（下稱「本條款」）規範您使用 packgo-travel.fly.dev 網站（下稱「本網站」）及透過 Pack & Go, LLC（下稱「本公司」、「我們」）預訂之任何旅遊服務。一旦您下單、送出諮詢或建立會員，即視為接受本條款。",
         s1h: "一、公司資訊",
         s1p: [
           "Pack & Go, LLC 為依加州法律成立之有限責任公司，主事務所設於 39055 Cedar Blvd #126, Newark, CA 94560, USA。",

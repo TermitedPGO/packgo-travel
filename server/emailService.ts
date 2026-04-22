@@ -8,7 +8,7 @@ const EMAIL_SECURE = process.env.EMAIL_SECURE === 'true';
 const EMAIL_USER = process.env.EMAIL_USER;
 const EMAIL_PASSWORD = process.env.EMAIL_PASSWORD;
 const EMAIL_FROM = process.env.EMAIL_FROM || EMAIL_USER || 'noreply@packgo.com';
-const BASE_URL = process.env.BASE_URL || 'https://packgo09.manus.space';
+const BASE_URL = process.env.BASE_URL || 'https://packgo-travel.fly.dev';
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 
 // Initialize SendGrid if API key is available

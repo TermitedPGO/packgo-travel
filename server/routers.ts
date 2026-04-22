@@ -4511,7 +4511,7 @@ export const appRouter = router({
 
         // Create Stripe Checkout Session
         const stripe = getStripeClient();
-        const siteUrl = process.env.SITE_URL || "https://packgo09.manus.space";
+        const siteUrl = process.env.SITE_URL || "https://packgo-travel.fly.dev";
 
         const session = await stripe.checkout.sessions.create({
           payment_method_types: ["card"],

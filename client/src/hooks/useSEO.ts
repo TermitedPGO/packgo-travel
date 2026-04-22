@@ -11,7 +11,8 @@ interface SEOConfig {
 }
 
 const SITE_NAME = "PACK&GO 旅行社";
-const BASE_URL = "https://packgo09.manus.space";
+// Round 72: corrected from stale packgo09.manus.space. Fly.io is the canonical host.
+const BASE_URL = "https://packgo-travel.fly.dev";
 const DEFAULT_IMAGE = `${BASE_URL}/og-image.jpg`;
 
 /**
