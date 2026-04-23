@@ -6,6 +6,67 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import viteConfig from "../../vite.config";
 
+/**
+ * Server-side route whitelist — mirrors client/src/App.tsx routes.
+ *
+ * Used to decide whether the SPA fallback should return HTTP 200 (valid route,
+ * React will render the page) or HTTP 404 (unknown URL — the SPA shell is still
+ * served so NotFound.tsx can render, but with a real 404 status so Google does
+ * not treat every garbage URL as a soft-200).
+ *
+ * Keep this in sync with App.tsx <Route path="..."> entries. A prefix that ends
+ * with "/" matches anything below it (nested paths). An entry without a trailing
+ * slash matches only the exact path.
+ */
+const KNOWN_ROUTE_PATTERNS: RegExp[] = [
+  /^\/$/,
+  /^\/search$/,
+  /^\/destinations\/[^/]+$/,              // /destinations/:region
+  /^\/destinations\/[^/]+\/[^/]+$/,       // /destinations/:region/:country
+  /^\/cruises$/,
+  /^\/tours$/,
+  /^\/tours\/[^/]+$/,                     // /tours/:id
+  /^\/tours\/[^/]+\/print$/,              // /tours/:id/print
+  /^\/tour\/[^/]+$/,                      // legacy /tour/:id (seen in sitemap)
+  /^\/login$/,
+  /^\/forgot-password$/,
+  /^\/reset-password$/,
+  /^\/admin(\/.*)?$/,                     // /admin and any nested admin route
+  /^\/profile$/,
+  /^\/book\/[^/]+$/,                      // /book/:id
+  /^\/bookings\/[^/]+$/,                  // /bookings/:id
+  /^\/payment\/(success|failure)$/,
+  /^\/inquiry$/,
+  /^\/custom-tour-request$/,
+  /^\/custom-tours$/,
+  /^\/china-visa$/,
+  /^\/china-visa\/success$/,
+  /^\/china-visa\/status\/[^/]+$/,
+  /^\/visa-services$/,
+  /^\/group-packages$/,
+  /^\/flight-booking$/,
+  /^\/airport-transfer$/,
+  /^\/hotel-booking$/,
+  /^\/about-us$/,
+  /^\/terms-of-service$/,
+  /^\/privacy-policy$/,
+  /^\/faq$/,
+  /^\/contact-us$/,
+  /^\/404$/,
+];
+
+/** Strip query string + trailing slash (except for root) for pattern matching. */
+function normalizeUrlForMatch(originalUrl: string): string {
+  const pathOnly = originalUrl.split("?")[0] || "/";
+  if (pathOnly === "/") return "/";
+  return pathOnly.replace(/\/+$/, "");
+}
+
+function isKnownRoute(originalUrl: string): boolean {
+  const pathOnly = normalizeUrlForMatch(originalUrl);
+  return KNOWN_ROUTE_PATTERNS.some((re) => re.test(pathOnly));
+}
+
 export async function setupVite(app: Express, server: Server) {
   const serverOptions = {
     middlewareMode: true,
@@ -44,7 +105,10 @@ export async function setupVite(app: Express, server: Server) {
         `src="/src/main.tsx?v=${nanoid()}"`
       );
       const page = await vite.transformIndexHtml(url, template);
-      res.status(200).set({ "Content-Type": "text/html" }).end(page);
+      // Return 404 status for unknown routes so Google does not collect soft-404s.
+      // The SPA shell is still served so NotFound.tsx renders normally to users.
+      const statusCode = isKnownRoute(url) ? 200 : 404;
+      res.status(statusCode).set({ "Content-Type": "text/html" }).end(page);
     } catch (e) {
       vite.ssrFixStacktrace(e as Error);
       next(e);
@@ -71,6 +135,9 @@ export function serveStatic(app: Express) {
     if (req.originalUrl.startsWith('/api/')) {
       return next();
     }
-    res.sendFile(path.resolve(distPath, "index.html"));
+    // Return 404 status for unknown routes so Google does not collect soft-404s.
+    // The SPA shell is still served so NotFound.tsx renders normally to users.
+    const statusCode = isKnownRoute(req.originalUrl) ? 200 : 404;
+    res.status(statusCode).sendFile(path.resolve(distPath, "index.html"));
   });
 }

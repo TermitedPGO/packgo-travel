@@ -3,9 +3,10 @@
 
   <head>
     <meta charset="UTF-8" />
+    <!-- Accessibility: no maximum-scale (WCAG 1.4.4 — users must be able to zoom) -->
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+      content="width=device-width, initial-scale=1.0" />
     <title>PACK&GO 旅行社 | 專業旅遊規劃、團體旅遊、客製行程</title>
 
     <!-- SEO Meta Tags -->
@@ -29,6 +30,12 @@
     <meta name="twitter:title" content="PACK&GO 旅行社 | 專業旅遊規劃" />
     <meta name="twitter:description" content="PACK&GO 旅行社提供專業旅遊規劃服務，包含團體旅遊、客製行程、機票預訂、飯店預訂、郵輪旅遊等服務。" />
     <meta name="twitter:image" content="https://packgo-travel.fly.dev/og-image.jpg" />
+
+    <!-- PWA manifest + favicon / apple touch icon -->
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/png" href="/images/logo-bag-black-v2.png" />
+    <link rel="apple-touch-icon" href="/images/logo-bag-black-v2.png" />
+    <meta name="theme-color" content="#0D9488" />
 
     <!-- Schema.org JSON-LD -->
     <script type="application/ld+json">
