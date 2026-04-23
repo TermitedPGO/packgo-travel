@@ -20,9 +20,11 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { ExternalLink, TrendingUp, MousePointerClick, Plane, Hotel, BarChart3, Plus, Pencil, Trash2 } from "lucide-react";
+import { useLocale } from "@/contexts/LocaleContext";
 
 // ─── Stats Cards ─────────────────────────────────────────────────────────────
 function StatsCards({ days }: { days: number }) {
+  const { t } = useLocale();
   const { data: stats, isLoading } = trpc.affiliate.getStats.useQuery({ days });
 
   if (isLoading) {
@@ -30,8 +32,8 @@ function StatsCards({ days }: { days: number }) {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         {[...Array(4)].map((_, i) => (
           <div key={i} className="bg-white rounded-xl border border-gray-200 p-5 animate-pulse">
-            <div className="h-4 bg-gray-200 rounded mb-3 w-2/3" />
-            <div className="h-8 bg-gray-200 rounded w-1/2" />
+            <div className="h-4 bg-gray-200 rounded-md mb-3 w-2/3" />
+            <div className="h-8 bg-gray-200 rounded-md w-1/2" />
           </div>
         ))}
       </div>
@@ -39,10 +41,10 @@ function StatsCards({ days }: { days: number }) {
   }
 
   const cards = [
-    { label: "總點擊數", value: stats?.totalClicks ?? 0, icon: MousePointerClick, color: "text-blue-600" },
-    { label: "機票點擊", value: stats?.byPlatform?.trip_flights ?? 0, icon: Plane, color: "text-sky-600" },
-    { label: "飯店點擊", value: stats?.byPlatform?.trip_hotels ?? 0, icon: Hotel, color: "text-amber-600" },
-    { label: "熱門來源數", value: stats?.topReferrers?.length ?? 0, icon: TrendingUp, color: "text-green-600" },
+    { label: t('admin.affiliateTab.statTotalClicks'),   value: stats?.totalClicks ?? 0,                       icon: MousePointerClick, color: "text-blue-600" },
+    { label: t('admin.affiliateTab.statFlightClicks'),  value: stats?.byPlatform?.trip_flights ?? 0,          icon: Plane,             color: "text-sky-600" },
+    { label: t('admin.affiliateTab.statHotelClicks'),   value: stats?.byPlatform?.trip_hotels ?? 0,           icon: Hotel,             color: "text-amber-600" },
+    { label: t('admin.affiliateTab.statTopReferrers'),  value: stats?.topReferrers?.length ?? 0,              icon: TrendingUp,        color: "text-green-600" },
   ];
 
   return (
@@ -62,48 +64,51 @@ function StatsCards({ days }: { days: number }) {
 
 // ─── Click Log ───────────────────────────────────────────────────────────────
 function ClickLog() {
+  const { t, language } = useLocale();
   const [platform, setPlatform] = useState<string | undefined>(undefined);
   const { data: clicks, isLoading } = trpc.affiliate.getClicks.useQuery({
     platform,
     limit: 100,
   });
 
+  const localeArg = language === 'en' ? 'en-US' : 'zh-TW';
+
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-8">
       <div className="flex items-center justify-between p-5 border-b border-gray-100">
         <h3 className="font-bold text-gray-900 flex items-center gap-2">
-          <MousePointerClick className="h-4 w-4" /> 點擊記錄
+          <MousePointerClick className="h-4 w-4" /> {t('admin.affiliateTab.clickLogTitle')}
         </h3>
         <select
           className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700"
           value={platform ?? ""}
           onChange={e => setPlatform(e.target.value || undefined)}
         >
-          <option value="">全部平台</option>
-          <option value="trip_flights">Trip.com 機票</option>
-          <option value="trip_hotels">Trip.com 飯店</option>
+          <option value="">{t('admin.affiliateTab.allPlatforms')}</option>
+          <option value="trip_flights">{t('admin.affiliateTab.platformFlights')}</option>
+          <option value="trip_hotels">{t('admin.affiliateTab.platformHotels')}</option>
         </select>
       </div>
       {isLoading ? (
-        <div className="p-8 text-center text-gray-400">載入中...</div>
+        <div className="p-8 text-center text-gray-400">{t('admin.affiliateTab.loading')}</div>
       ) : !clicks || clicks.length === 0 ? (
-        <div className="p-8 text-center text-gray-400">尚無點擊記錄</div>
+        <div className="p-8 text-center text-gray-400">{t('admin.affiliateTab.emptyClicks')}</div>
       ) : (
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>時間</TableHead>
-                <TableHead>平台</TableHead>
-                <TableHead>來源頁面</TableHead>
-                <TableHead>目標 URL</TableHead>
+                <TableHead>{t('admin.affiliateTab.colTime')}</TableHead>
+                <TableHead>{t('admin.affiliateTab.colPlatform')}</TableHead>
+                <TableHead>{t('admin.affiliateTab.colReferrer')}</TableHead>
+                <TableHead>{t('admin.affiliateTab.colTargetUrl')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {clicks.map((click: any) => (
                 <TableRow key={click.id}>
                   <TableCell className="text-sm text-gray-600 whitespace-nowrap">
-                    {new Date(click.createdAt).toLocaleString("zh-TW")}
+                    {new Date(click.createdAt).toLocaleString(localeArg)}
                   </TableCell>
                   <TableCell>
                     <span className={`text-xs font-medium px-2 py-1 rounded-full ${
@@ -111,7 +116,7 @@ function ClickLog() {
                         ? "bg-sky-100 text-sky-700"
                         : "bg-amber-100 text-amber-700"
                     }`}>
-                      {click.platform === "trip_flights" ? "✈️ 機票" : "🏨 飯店"}
+                      {click.platform === "trip_flights" ? t('admin.affiliateTab.badgeFlights') : t('admin.affiliateTab.badgeHotels')}
                     </span>
                   </TableCell>
                   <TableCell className="text-sm text-gray-600">{click.referrerPage || "-"}</TableCell>
@@ -145,14 +150,15 @@ function PriceComparisonForm({
   existing?: any;
   onSuccess: () => void;
 }) {
+  const { t } = useLocale();
   const utils = trpc.useUtils();
   const upsertMutation = trpc.affiliate.upsertPriceComparison.useMutation({
     onSuccess: () => {
-      toast.success("價格比較資料已儲存");
+      toast.success(t('admin.affiliateTab.toastSaved'));
       utils.affiliate.getPriceComparisons.invalidate();
       onSuccess();
     },
-    onError: (err) => toast.error(`儲存失敗：${err.message}`),
+    onError: (err) => toast.error(t('admin.affiliateTab.toastSaveFailed', { err: err.message })),
   });
 
   const [form, setForm] = useState({
@@ -182,12 +188,12 @@ function PriceComparisonForm({
   };
 
   const fields = [
-    { key: "flightEstimate", label: "✈️ 機票估算 (NT$)" },
-    { key: "hotelEstimate", label: "🏨 飯店估算 (NT$)" },
-    { key: "activityEstimate", label: "🎟 景點門票估算 (NT$)" },
-    { key: "mealEstimate", label: "🍜 餐飲估算 (NT$)" },
-    { key: "transportEstimate", label: "🚌 當地交通估算 (NT$)" },
-    { key: "otherEstimate", label: "📦 其他費用估算 (NT$)" },
+    { key: "flightEstimate",    label: t('admin.affiliateTab.fieldFlight') },
+    { key: "hotelEstimate",     label: t('admin.affiliateTab.fieldHotel') },
+    { key: "activityEstimate",  label: t('admin.affiliateTab.fieldActivity') },
+    { key: "mealEstimate",      label: t('admin.affiliateTab.fieldMeal') },
+    { key: "transportEstimate", label: t('admin.affiliateTab.fieldTransport') },
+    { key: "otherEstimate",     label: t('admin.affiliateTab.fieldOther') },
   ];
 
   return (
@@ -201,72 +207,78 @@ function PriceComparisonForm({
               placeholder="0"
               value={(form as any)[f.key]}
               onChange={e => setForm(prev => ({ ...prev, [f.key]: e.target.value }))}
+              className="rounded-lg"
             />
           </div>
         ))}
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <Label className="text-sm mb-1 block">機票資料來源</Label>
+          <Label className="text-sm mb-1 block">{t('admin.affiliateTab.flightSourceLabel')}</Label>
           <Input
-            placeholder="如 Trip.com 查詢"
+            placeholder={t('admin.affiliateTab.sourcePlaceholder')}
             value={form.flightSource}
             onChange={e => setForm(prev => ({ ...prev, flightSource: e.target.value }))}
+            className="rounded-lg"
           />
         </div>
         <div>
-          <Label className="text-sm mb-1 block">飯店資料來源</Label>
+          <Label className="text-sm mb-1 block">{t('admin.affiliateTab.hotelSourceLabel')}</Label>
           <Input
-            placeholder="如 Trip.com 查詢"
+            placeholder={t('admin.affiliateTab.sourcePlaceholder')}
             value={form.hotelSource}
             onChange={e => setForm(prev => ({ ...prev, hotelSource: e.target.value }))}
+            className="rounded-lg"
           />
         </div>
       </div>
-      <Button type="submit" disabled={upsertMutation.isPending} className="w-full">
-        {upsertMutation.isPending ? "儲存中..." : "儲存"}
+      <Button type="submit" disabled={upsertMutation.isPending} className="w-full rounded-lg">
+        {upsertMutation.isPending ? t('admin.affiliateTab.savingButton') : t('admin.affiliateTab.saveButton')}
       </Button>
     </form>
   );
 }
 
 function PriceComparisonManagement() {
+  const { t, language } = useLocale();
   const utils = trpc.useUtils();
   const { data: comparisons, isLoading } = trpc.affiliate.getPriceComparisons.useQuery();
   const deleteMutation = trpc.affiliate.deletePriceComparison.useMutation({
     onSuccess: () => {
-      toast.success("已刪除");
+      toast.success(t('admin.affiliateTab.toastDeleted'));
       utils.affiliate.getPriceComparisons.invalidate();
     },
-    onError: (err) => toast.error(`刪除失敗：${err.message}`),
+    onError: (err) => toast.error(t('admin.affiliateTab.toastDeleteFailed', { err: err.message })),
   });
   const [addTourId, setAddTourId] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [editItem, setEditItem] = useState<any>(null);
+  const localeArg = language === 'en' ? 'en-US' : 'zh-TW';
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
       <div className="flex items-center justify-between p-5 border-b border-gray-100">
         <h3 className="font-bold text-gray-900 flex items-center gap-2">
-          <BarChart3 className="h-4 w-4" /> 行程自助 vs. 跟團費用比較管理
+          <BarChart3 className="h-4 w-4" /> {t('admin.affiliateTab.priceSectionTitle')}
         </h3>
         <Dialog open={addOpen} onOpenChange={setAddOpen}>
           <DialogTrigger asChild>
-            <Button size="sm" className="flex items-center gap-1">
-              <Plus className="h-4 w-4" /> 新增
+            <Button size="sm" className="flex items-center gap-1 rounded-lg">
+              <Plus className="h-4 w-4" /> {t('admin.affiliateTab.addButton')}
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="rounded-xl">
             <DialogHeader>
-              <DialogTitle>新增價格比較資料</DialogTitle>
+              <DialogTitle>{t('admin.affiliateTab.addDialogTitle')}</DialogTitle>
             </DialogHeader>
             <div className="mb-4">
-              <Label className="text-sm mb-1 block">行程 ID</Label>
+              <Label className="text-sm mb-1 block">{t('admin.affiliateTab.tourIdLabel')}</Label>
               <Input
                 type="number"
-                placeholder="輸入行程 ID"
+                placeholder={t('admin.affiliateTab.tourIdPlaceholder')}
                 value={addTourId}
                 onChange={e => setAddTourId(e.target.value)}
+                className="rounded-lg"
               />
             </div>
             {addTourId && (
@@ -279,20 +291,20 @@ function PriceComparisonManagement() {
         </Dialog>
       </div>
       {isLoading ? (
-        <div className="p-8 text-center text-gray-400">載入中...</div>
+        <div className="p-8 text-center text-gray-400">{t('admin.affiliateTab.loading')}</div>
       ) : !comparisons || comparisons.length === 0 ? (
-        <div className="p-8 text-center text-gray-400">尚無價格比較資料，請點擊「新增」建立</div>
+        <div className="p-8 text-center text-gray-400">{t('admin.affiliateTab.emptyComparisons')}</div>
       ) : (
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>行程 ID</TableHead>
-                <TableHead>機票估算</TableHead>
-                <TableHead>飯店估算</TableHead>
-                <TableHead>自助總計</TableHead>
-                <TableHead>最後更新</TableHead>
-                <TableHead>操作</TableHead>
+                <TableHead>{t('admin.affiliateTab.colTourId')}</TableHead>
+                <TableHead>{t('admin.affiliateTab.colFlightEst')}</TableHead>
+                <TableHead>{t('admin.affiliateTab.colHotelEst')}</TableHead>
+                <TableHead>{t('admin.affiliateTab.colSelfTotal')}</TableHead>
+                <TableHead>{t('admin.affiliateTab.colLastUpdated')}</TableHead>
+                <TableHead>{t('admin.affiliateTab.colActions')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -305,19 +317,19 @@ function PriceComparisonManagement() {
                     {item.totalSelfBook ? `NT$ ${item.totalSelfBook.toLocaleString()}` : "-"}
                   </TableCell>
                   <TableCell className="text-sm text-gray-500">
-                    {new Date(item.lastUpdated).toLocaleDateString("zh-TW")}
+                    {new Date(item.lastUpdated).toLocaleDateString(localeArg)}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
                       <Dialog open={editItem?.id === item.id} onOpenChange={(open) => !open && setEditItem(null)}>
                         <DialogTrigger asChild>
-                          <Button size="sm" variant="outline" onClick={() => setEditItem(item)}>
+                          <Button size="sm" variant="outline" className="rounded-lg" onClick={() => setEditItem(item)}>
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
                         </DialogTrigger>
-                        <DialogContent>
+                        <DialogContent className="rounded-xl">
                           <DialogHeader>
-                            <DialogTitle>編輯行程 #{item.tourId} 價格比較</DialogTitle>
+                            <DialogTitle>{t('admin.affiliateTab.editDialogTitle', { id: String(item.tourId) })}</DialogTitle>
                           </DialogHeader>
                           <PriceComparisonForm
                             tourId={item.tourId}
@@ -329,9 +341,9 @@ function PriceComparisonManagement() {
                       <Button
                         size="sm"
                         variant="outline"
-                        className="text-red-600 border-red-200 hover:bg-red-50"
+                        className="text-red-600 border-red-200 hover:bg-red-50 rounded-lg"
                         onClick={() => {
-                          if (confirm(`確定刪除行程 #${item.tourId} 的比較資料？`)) {
+                          if (confirm(t('admin.affiliateTab.deleteConfirm', { id: String(item.tourId) }))) {
                             deleteMutation.mutate({ tourId: item.tourId });
                           }
                         }}
@@ -353,23 +365,24 @@ function PriceComparisonManagement() {
 // ─── Main AffiliateTab ────────────────────────────────────────────────────────
 export default function AffiliateTab() {
   const [days, setDays] = useState(30);
+  const { t } = useLocale();
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">聯盟行銷管理</h2>
-          <p className="text-sm text-gray-500 mt-1">Trip.com 聯盟點擊追蹤與自助 vs. 跟團費用比較</p>
+          <h2 className="text-2xl font-bold text-gray-900">{t('admin.affiliateTab.title')}</h2>
+          <p className="text-sm text-gray-500 mt-1">{t('admin.affiliateTab.subtitle')}</p>
         </div>
         <select
           className="text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-700"
           value={days}
           onChange={e => setDays(Number(e.target.value))}
         >
-          <option value={7}>近 7 天</option>
-          <option value={30}>近 30 天</option>
-          <option value={90}>近 90 天</option>
+          <option value={7}>{t('admin.affiliateTab.days7')}</option>
+          <option value={30}>{t('admin.affiliateTab.days30')}</option>
+          <option value={90}>{t('admin.affiliateTab.days90')}</option>
         </select>
       </div>
 
