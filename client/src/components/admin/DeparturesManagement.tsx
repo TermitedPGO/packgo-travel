@@ -91,7 +91,7 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
       toast.success(result.message);
     },
     onError: (error) => {
-      toast.error(`確認失敗：${error.message}`);
+      toast.error(t('departuresTab.confirmFailed', { message: error.message }));
     },
   });
 
@@ -112,7 +112,7 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
         notes: d.notes,
       }));
     if (selectedDates.length === 0) {
-      toast.error('請至少勾選一個出發日期');
+      toast.error(t('departuresTab.selectAtLeastOne'));
       return;
     }
     confirmExtractedMutation.mutate({ tourId, selectedDates, clearExtracted: true });
@@ -126,7 +126,7 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
       toast.success(t('departuresTab.createSuccess'));
     },
     onError: (error) => {
-      toast.error(t('departuresTab.createError').replace('{message}', error.message));
+      toast.error(t('departuresTab.createError', { message: error.message }));
     },
   });
 
@@ -138,7 +138,7 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
       toast.success(t('departuresTab.updateSuccess'));
     },
     onError: (error) => {
-      toast.error(t('departuresTab.updateError').replace('{message}', error.message));
+      toast.error(t('departuresTab.updateError', { message: error.message }));
     },
   });
 
@@ -150,7 +150,7 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
       toast.success(t('departuresTab.deleteSuccess'));
     },
     onError: (error) => {
-      toast.error(t('departuresTab.deleteError').replace('{message}', error.message));
+      toast.error(t('departuresTab.deleteError', { message: error.message }));
     },
   });
 
@@ -239,7 +239,7 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
           type="date"
           value={formData.departureDate}
           onChange={(e) => setFormData({ ...formData, departureDate: e.target.value })}
-          className="border-gray-300"
+          className="border-gray-300 rounded-lg"
         />
       </div>
       <div className="space-y-1.5">
@@ -248,7 +248,7 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
           type="date"
           value={formData.returnDate}
           onChange={(e) => setFormData({ ...formData, returnDate: e.target.value })}
-          className="border-gray-300"
+          className="border-gray-300 rounded-lg"
         />
       </div>
       <div className="space-y-1.5">
@@ -257,7 +257,7 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
           type="number"
           value={formData.adultPrice}
           onChange={(e) => setFormData({ ...formData, adultPrice: Number(e.target.value) })}
-          className="border-gray-300"
+          className="border-gray-300 rounded-lg"
         />
       </div>
       <div className="space-y-1.5">
@@ -266,7 +266,7 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
           type="number"
           value={formData.childPriceWithBed || ""}
           onChange={(e) => setFormData({ ...formData, childPriceWithBed: e.target.value ? Number(e.target.value) : undefined })}
-          className="border-gray-300"
+          className="border-gray-300 rounded-lg"
         />
       </div>
       <div className="space-y-1.5">
@@ -275,7 +275,7 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
           type="number"
           value={formData.childPriceNoBed || ""}
           onChange={(e) => setFormData({ ...formData, childPriceNoBed: e.target.value ? Number(e.target.value) : undefined })}
-          className="border-gray-300"
+          className="border-gray-300 rounded-lg"
         />
       </div>
       <div className="space-y-1.5">
@@ -284,7 +284,7 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
           type="number"
           value={formData.infantPrice || ""}
           onChange={(e) => setFormData({ ...formData, infantPrice: e.target.value ? Number(e.target.value) : undefined })}
-          className="border-gray-300"
+          className="border-gray-300 rounded-lg"
         />
       </div>
       <div className="space-y-1.5">
@@ -293,7 +293,7 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
           type="number"
           value={formData.singleRoomSupplement || ""}
           onChange={(e) => setFormData({ ...formData, singleRoomSupplement: e.target.value ? Number(e.target.value) : undefined })}
-          className="border-gray-300"
+          className="border-gray-300 rounded-lg"
         />
       </div>
       <div className="space-y-1.5">
@@ -302,7 +302,7 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
           type="number"
           value={formData.totalSlots}
           onChange={(e) => setFormData({ ...formData, totalSlots: Number(e.target.value) })}
-          className="border-gray-300"
+          className="border-gray-300 rounded-lg"
         />
       </div>
       <div className="space-y-1.5">
@@ -319,16 +319,16 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
         </Select>
       </div>
       <div className="space-y-1.5">
-        <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wider">幣別</Label>
+        <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('departuresTab.currencyLabel')}</Label>
         <Select value={formData.currency} onValueChange={(value) => setFormData({ ...formData, currency: value })}>
-          <SelectTrigger className="border-gray-300">
+          <SelectTrigger className="border-gray-300 rounded-lg">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="TWD">TWD 新台幣</SelectItem>
-            <SelectItem value="USD">USD 美元</SelectItem>
-            <SelectItem value="JPY">JPY 日圓</SelectItem>
-            <SelectItem value="EUR">EUR 歐元</SelectItem>
+            <SelectItem value="TWD">{t('departuresTab.currencyTWD')}</SelectItem>
+            <SelectItem value="USD">{t('departuresTab.currencyUSD')}</SelectItem>
+            <SelectItem value="JPY">{t('departuresTab.currencyJPY')}</SelectItem>
+            <SelectItem value="EUR">{t('departuresTab.currencyEUR')}</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -338,8 +338,8 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
           value={formData.notes}
           onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
           rows={2}
-          placeholder="備註（選填）"
-          className="border-gray-300 text-sm"
+          placeholder={t('departuresTab.notesPlaceholder')}
+          className="border-gray-300 text-sm rounded-lg"
         />
       </div>
     </div>
@@ -349,7 +349,7 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
     return (
       <div className="flex items-center justify-center py-8">
         <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
-        <span className="ml-2 text-sm text-gray-500">載入中...</span>
+        <span className="ml-2 text-sm text-gray-500">{t('departuresTab.loading')}</span>
       </div>
     );
   }
@@ -361,14 +361,14 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
         <Button
           variant="outline"
           onClick={() => setIsAiImportDialogOpen(true)}
-          className="border-gray-300 h-8 text-xs px-3 gap-1.5"
+          className="border-gray-300 h-8 text-xs px-3 gap-1.5 rounded-lg"
         >
           <Bot className="w-3.5 h-3.5" />
-          AI 批量匯入
+          {t('departuresTab.aiBulkImport')}
         </Button>
         <Button
           onClick={() => { resetForm(); setIsCreateDialogOpen(true); }}
-          className="bg-black text-white hover:bg-gray-800 h-8 text-xs px-3"
+          className="bg-black text-white hover:bg-gray-800 h-8 text-xs px-3 rounded-lg"
         >
           <Plus className="w-3.5 h-3.5 mr-1.5" />
           {t('departuresTab.addDeparture')}
@@ -417,7 +417,7 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
                       </div>
                     </td>
                     <td className="px-4 py-4">
-                      <span className={`inline-flex items-center px-2 py-0.5 text-xs font-semibold ${statusConfig.className}`}>
+                      <span className={`inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-md ${statusConfig.className}`}>
                         {statusConfig.label}
                       </span>
                     </td>
@@ -459,17 +459,17 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
 
       {/* Create Dialog */}
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl">
           <DialogHeader>
             <DialogTitle>{t('departuresTab.createTitle')}</DialogTitle>
             <DialogDescription className="text-xs text-gray-500">{t('departuresTab.createDesc')}</DialogDescription>
           </DialogHeader>
           {renderFormFields()}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)} className="border-gray-300">
+            <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)} className="border-gray-300 rounded-lg">
               {t('common.cancel')}
             </Button>
-            <Button onClick={handleCreate} disabled={createMutation.isPending} className="bg-black text-white hover:bg-gray-800">
+            <Button onClick={handleCreate} disabled={createMutation.isPending} className="bg-black text-white hover:bg-gray-800 rounded-lg">
               {createMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               {t('departuresTab.create')}
             </Button>
@@ -479,17 +479,17 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
 
       {/* Edit Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl">
           <DialogHeader>
             <DialogTitle>{t('departuresTab.editTitle')}</DialogTitle>
             <DialogDescription className="text-xs text-gray-500">{t('departuresTab.editDesc')}</DialogDescription>
           </DialogHeader>
           {renderFormFields()}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)} className="border-gray-300">
+            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)} className="border-gray-300 rounded-lg">
               {t('common.cancel')}
             </Button>
-            <Button onClick={handleUpdate} disabled={updateMutation.isPending} className="bg-black text-white hover:bg-gray-800">
+            <Button onClick={handleUpdate} disabled={updateMutation.isPending} className="bg-black text-white hover:bg-gray-800 rounded-lg">
               {updateMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               {t('departuresTab.update')}
             </Button>
@@ -499,49 +499,49 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
 
       {/* AI Extracted Departures Import Dialog */}
       <Dialog open={isAiImportDialogOpen} onOpenChange={setIsAiImportDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto rounded-xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Bot className="w-5 h-5" />
-              AI 抽取出發日期預覽
+              {t('departuresTab.aiImportTitle')}
             </DialogTitle>
             <DialogDescription className="text-xs text-gray-500">
-              以下是 AI 從供應商網站自動抽取的出發日期與價格資訊。請勾選要建立的日期，確認後將自動新增至出發日期管理。
+              {t('departuresTab.aiImportDesc')}
             </DialogDescription>
           </DialogHeader>
 
           {isExtractedLoading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
-              <span className="ml-2 text-sm text-gray-500">載入 AI 抽取結果...</span>
+              <span className="ml-2 text-sm text-gray-500">{t('departuresTab.aiImportLoading')}</span>
             </div>
           ) : !extractedData?.extractedDepartures ? (
             <div className="py-12 text-center">
               <Bot className="w-12 h-12 mx-auto mb-3 text-gray-200" />
-              <p className="text-sm font-medium text-gray-600">尚無 AI 抽取資料</p>
-              <p className="text-xs text-gray-400 mt-1">請先使用「AI 自動生成」功能（URL 或 PDF+URL 模式）生成行程，系統將自動抽取出發日期。</p>
+              <p className="text-sm font-medium text-gray-600">{t('departuresTab.aiImportEmptyTitle')}</p>
+              <p className="text-xs text-gray-400 mt-1">{t('departuresTab.aiImportEmptyDesc')}</p>
             </div>
           ) : (
             <div className="space-y-4 py-2">
               {/* Pricing Summary */}
               {extractedData.extractedDepartures.pricing && (
-                <div className="bg-gray-50 border border-gray-200 p-3 text-xs space-y-1">
-                  <p className="font-semibold text-gray-700 mb-1.5">AI 抽取價格摘要</p>
+                <div className="bg-gray-50 border border-gray-200 p-3 text-xs space-y-1 rounded-lg">
+                  <p className="font-semibold text-gray-700 mb-1.5">{t('departuresTab.aiPriceSummary')}</p>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-gray-600">
                     {extractedData.extractedDepartures.pricing.adultPrice && (
-                      <span>成人：NT$ {extractedData.extractedDepartures.pricing.adultPrice.toLocaleString()}</span>
+                      <span>{t('departuresTab.priceAdult', { v: extractedData.extractedDepartures.pricing.adultPrice.toLocaleString() })}</span>
                     )}
                     {extractedData.extractedDepartures.pricing.childWithBedPrice && (
-                      <span>兒童含床：NT$ {extractedData.extractedDepartures.pricing.childWithBedPrice.toLocaleString()}</span>
+                      <span>{t('departuresTab.priceChildWithBed', { v: extractedData.extractedDepartures.pricing.childWithBedPrice.toLocaleString() })}</span>
                     )}
                     {extractedData.extractedDepartures.pricing.childNoBedPrice && (
-                      <span>兒童不含床：NT$ {extractedData.extractedDepartures.pricing.childNoBedPrice.toLocaleString()}</span>
+                      <span>{t('departuresTab.priceChildNoBed', { v: extractedData.extractedDepartures.pricing.childNoBedPrice.toLocaleString() })}</span>
                     )}
                     {extractedData.extractedDepartures.pricing.infantPrice && (
-                      <span>嬰兒：NT$ {extractedData.extractedDepartures.pricing.infantPrice.toLocaleString()}</span>
+                      <span>{t('departuresTab.priceInfant', { v: extractedData.extractedDepartures.pricing.infantPrice.toLocaleString() })}</span>
                     )}
                     {extractedData.extractedDepartures.capacity?.maxParticipants && (
-                      <span>最多人數：{extractedData.extractedDepartures.capacity.maxParticipants} 人</span>
+                      <span>{t('departuresTab.maxParticipantsFormat', { n: String(extractedData.extractedDepartures.capacity.maxParticipants) })}</span>
                     )}
                     {extractedData.extractedDepartures.pricing.priceNote && (
                       <span className="col-span-2 text-gray-500">{extractedData.extractedDepartures.pricing.priceNote}</span>
@@ -566,15 +566,15 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
                       }}
                     />
                     <label htmlFor="select-all" className="text-xs font-medium text-gray-700 cursor-pointer">
-                      全選（共 {extractedData.extractedDepartures.departureDates.length} 個日期）
+                      {t('departuresTab.selectAllLabel', { n: String(extractedData.extractedDepartures.departureDates.length) })}
                     </label>
                   </div>
-                  <span className="text-xs text-gray-500">已選 {selectedExtractedDates.size} 個</span>
+                  <span className="text-xs text-gray-500">{t('departuresTab.selectedCountLabel', { n: String(selectedExtractedDates.size) })}</span>
                 </div>
               )}
 
               {/* Dates List */}
-              <div className="border border-gray-200 overflow-hidden divide-y divide-gray-100">
+              <div className="border border-gray-200 overflow-hidden divide-y divide-gray-100 rounded-lg">
                 {extractedData.extractedDepartures.departureDates?.map((dep: any, idx: number) => (
                   <div key={dep.date} className={`flex items-center gap-3 px-3 py-2.5 ${selectedExtractedDates.has(dep.date) ? 'bg-blue-50' : 'bg-white'}`}>
                     <Checkbox
@@ -589,14 +589,20 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
                     <label htmlFor={`dep-${idx}`} className="flex-1 cursor-pointer">
                       <div className="flex items-center gap-3">
                         <span className="text-sm font-semibold text-gray-900">
-                          {dep.date ? (() => { try { return format(new Date(dep.date), 'yyyy/MM/dd'); } catch { return dep.date; } })() : '日期未知'}
+                          {dep.date ? (() => { try { return format(new Date(dep.date), 'yyyy/MM/dd'); } catch { return dep.date; } })() : t('departuresTab.dateUnknown')}
                         </span>
                         {dep.status && (
-                          <span className={`text-xs px-1.5 py-0.5 font-medium ${
+                          <span className={`text-xs px-1.5 py-0.5 font-medium rounded-md ${
                             dep.status === 'available' ? 'bg-green-100 text-green-700' :
                             dep.status === 'soldout' ? 'bg-red-100 text-red-700' :
                             'bg-gray-100 text-gray-600'
-                          }`}>{dep.status === 'available' ? '可報名' : dep.status === 'soldout' ? '已額滿' : dep.status}</span>
+                          }`}>
+                            {dep.status === 'available'
+                              ? t('departuresTab.statusAvailable')
+                              : dep.status === 'soldout'
+                                ? t('departuresTab.statusSoldOut')
+                                : dep.status}
+                          </span>
                         )}
                         {dep.price && (
                           <span className="text-xs text-gray-500">NT$ {dep.price.toLocaleString()}</span>
@@ -608,17 +614,17 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
                       <div className="flex items-center gap-1.5">
                         <Input
                           type="number"
-                          placeholder="成人價"
+                          placeholder={t('departuresTab.adultPricePlaceholder')}
                           value={editedPrices[dep.date]?.adultPrice ?? extractedData.extractedDepartures.pricing?.adultPrice ?? dep.price ?? ''}
                           onChange={(e) => setEditedPrices(prev => ({ ...prev, [dep.date]: { ...prev[dep.date], adultPrice: Number(e.target.value) } }))}
-                          className="w-24 h-7 text-xs border-gray-300"
+                          className="w-24 h-7 text-xs border-gray-300 rounded-lg"
                         />
                         <Input
                           type="number"
-                          placeholder="名額"
+                          placeholder={t('departuresTab.slotsPlaceholder')}
                           value={editedPrices[dep.date]?.maxParticipants ?? extractedData.extractedDepartures.capacity?.maxParticipants ?? ''}
                           onChange={(e) => setEditedPrices(prev => ({ ...prev, [dep.date]: { ...prev[dep.date], maxParticipants: Number(e.target.value) } }))}
-                          className="w-16 h-7 text-xs border-gray-300"
+                          className="w-16 h-7 text-xs border-gray-300 rounded-lg"
                         />
                       </div>
                     )}
@@ -629,18 +635,18 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
           )}
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAiImportDialogOpen(false)} className="border-gray-300">
-              取消
+            <Button variant="outline" onClick={() => setIsAiImportDialogOpen(false)} className="border-gray-300 rounded-lg">
+              {t('departuresTab.cancel')}
             </Button>
             <Button
               onClick={handleAiImportConfirm}
               disabled={confirmExtractedMutation.isPending || selectedExtractedDates.size === 0 || !extractedData?.extractedDepartures}
-              className="bg-black text-white hover:bg-gray-800"
+              className="bg-black text-white hover:bg-gray-800 rounded-lg"
             >
               {confirmExtractedMutation.isPending ? (
-                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />建立中...</>
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{t('departuresTab.creatingLabel')}</>
               ) : (
-                <><CheckCircle2 className="w-4 h-4 mr-2" />確認建立 {selectedExtractedDates.size} 筆出發日期</>
+                <><CheckCircle2 className="w-4 h-4 mr-2" />{t('departuresTab.confirmCreateFormat', { n: String(selectedExtractedDates.size) })}</>
               )}
             </Button>
           </DialogFooter>
@@ -649,7 +655,7 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-sm rounded-xl">
           <DialogHeader>
             <DialogTitle>{t('departuresTab.deleteTitle')}</DialogTitle>
             <DialogDescription className="text-sm text-gray-500">
@@ -657,11 +663,12 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} className="border-gray-300">
+            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} className="border-gray-300 rounded-lg">
               {t('common.cancel')}
             </Button>
             <Button
               variant="destructive"
+              className="rounded-lg"
               onClick={() => { if (selectedDepartureId) deleteMutation.mutate({ id: selectedDepartureId }); }}
               disabled={deleteMutation.isPending}
             >
