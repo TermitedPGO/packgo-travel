@@ -100,16 +100,13 @@ export default function DeparturePreview({
 
   const confirmMutation = trpc.tours.confirmExtractedDepartures.useMutation({
     onSuccess: (result) => {
-      toast.success(
-        t("departuresCreated", { count: result.created }) ||
-          `成功建立 ${result.created} 筆出發日`
-      );
+      toast.success(t("departurePreview.departuresCreated", { count: String(result.created) }));
       utils.tours.getExtractedDepartures.invalidate({ tourId });
       onConfirmed?.();
       onOpenChange(false);
     },
     onError: (err) => {
-      toast.error(err.message || "建立失敗");
+      toast.error(err.message || t("departurePreview.createFailed"));
     },
   });
 
@@ -154,7 +151,7 @@ export default function DeparturePreview({
   const handleConfirm = () => {
     const selectedRows = rows.filter((_, i) => selected.has(i));
     if (selectedRows.length === 0) {
-      toast.warning("請至少選擇一筆出發日期");
+      toast.warning(t("departurePreview.selectOne"));
       return;
     }
     confirmMutation.mutate({
@@ -182,7 +179,7 @@ export default function DeparturePreview({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-lg">
             <CalendarDays className="h-5 w-5 text-teal-600" />
-            {t("extractedDepartures") || "AI 抽取的出發日期"}
+            {t("departurePreview.title")}
           </DialogTitle>
           <p className="text-sm text-muted-foreground mt-1">{tourTitle}</p>
         </DialogHeader>
@@ -192,7 +189,7 @@ export default function DeparturePreview({
           <div className="flex flex-wrap gap-4 text-xs text-muted-foreground border border-border rounded-lg px-3 py-2 bg-muted/30">
             {sourceUrl && (
               <span className="flex items-center gap-1">
-                <span className="font-medium">{t("extractedFrom") || "資料來源"}：</span>
+                <span className="font-medium">{t("departurePreview.extractedFrom")}：</span>
                 <a
                   href={sourceUrl}
                   target="_blank"
@@ -206,7 +203,7 @@ export default function DeparturePreview({
             )}
             {extractedAt && (
               <span>
-                <span className="font-medium">{t("extractedAt") || "抽取時間"}：</span>
+                <span className="font-medium">{t("departurePreview.extractedAt")}：</span>
                 {new Date(extractedAt).toLocaleString()}
               </span>
             )}
@@ -223,7 +220,7 @@ export default function DeparturePreview({
         {/* Error */}
         {error && (
           <div className="text-center py-8 text-destructive">
-            載入失敗：{error.message}
+            {t("departurePreview.loadError", { err: error.message })}
           </div>
         )}
 
@@ -231,7 +228,7 @@ export default function DeparturePreview({
         {!isLoading && !error && rows.length === 0 && (
           <div className="text-center py-12 text-muted-foreground">
             <CalendarDays className="h-12 w-12 mx-auto mb-3 opacity-30" />
-            <p>{t("noExtractedData") || "此行程沒有 AI 抽取的出發日資料"}</p>
+            <p>{t("departurePreview.noExtractedData")}</p>
           </div>
         )}
 
@@ -249,17 +246,17 @@ export default function DeparturePreview({
                 {selected.size === rows.length ? (
                   <>
                     <CheckSquare className="h-4 w-4" />
-                    {t("deselectAll") || "取消全選"}
+                    {t("departurePreview.deselectAll")}
                   </>
                 ) : (
                   <>
                     <Square className="h-4 w-4" />
-                    {t("selectAll") || "全選"}
+                    {t("departurePreview.selectAll")}
                   </>
                 )}
               </Button>
               <Badge variant="secondary" className="rounded-md text-xs">
-                已選 {selected.size} / {rows.length} 筆
+                {t("departurePreview.selectedCount", { n: String(selected.size), total: String(rows.length) })}
               </Badge>
             </div>
 
@@ -275,25 +272,25 @@ export default function DeparturePreview({
                       />
                     </th>
                     <th className="px-3 py-2 text-left font-medium text-muted-foreground">
-                      {t("departureDate") || "出發日期"}
+                      {t("departurePreview.departureDate")}
                     </th>
                     <th className="px-3 py-2 text-left font-medium text-muted-foreground">
-                      {t("returnDate") || "回程日期"}
+                      {t("departurePreview.returnDate")}
                     </th>
                     <th className="px-3 py-2 text-left font-medium text-muted-foreground">
-                      {t("availableSpots") || "團位"}
+                      {t("departurePreview.availableSpots")}
                     </th>
                     <th className="px-3 py-2 text-left font-medium text-muted-foreground">
-                      {t("adultPrice") || "成人價"}
+                      {t("departurePreview.adultPrice")}
                     </th>
                     <th className="px-3 py-2 text-left font-medium text-muted-foreground">
-                      {t("childPrice") || "兒童價"}
+                      {t("departurePreview.childPrice")}
                     </th>
                     <th className="px-3 py-2 text-left font-medium text-muted-foreground">
-                      {t("infantPrice") || "嬰兒價"}
+                      {t("departurePreview.infantPrice")}
                     </th>
                     <th className="px-3 py-2 text-left font-medium text-muted-foreground">
-                      狀態
+                      {t("departurePreview.colStatus")}
                     </th>
                   </tr>
                 </thead>
@@ -316,7 +313,7 @@ export default function DeparturePreview({
                           value={row.date}
                           onChange={(e) => handleCellEdit(idx, "date", e.target.value)}
                           className="h-7 text-xs rounded-lg w-32"
-                          placeholder="YYYY-MM-DD"
+                          placeholder={t("departurePreview.placeholderDate")}
                         />
                       </td>
                       <td className="px-3 py-2">
@@ -324,7 +321,7 @@ export default function DeparturePreview({
                           value={row.returnDate || ""}
                           onChange={(e) => handleCellEdit(idx, "returnDate", e.target.value)}
                           className="h-7 text-xs rounded-lg w-32"
-                          placeholder="YYYY-MM-DD"
+                          placeholder={t("departurePreview.placeholderDate")}
                         />
                       </td>
                       <td className="px-3 py-2">
@@ -333,7 +330,7 @@ export default function DeparturePreview({
                           value={row.availableSpots ?? ""}
                           onChange={(e) => handleCellEdit(idx, "availableSpots", e.target.value)}
                           className="h-7 text-xs rounded-lg w-20"
-                          placeholder="人數"
+                          placeholder={t("departurePreview.placeholderSpots")}
                         />
                       </td>
                       <td className="px-3 py-2">
@@ -342,7 +339,7 @@ export default function DeparturePreview({
                           value={row.adultPrice ?? ""}
                           onChange={(e) => handleCellEdit(idx, "adultPrice", e.target.value)}
                           className="h-7 text-xs rounded-lg w-24"
-                          placeholder="NT$"
+                          placeholder={t("departurePreview.placeholderPrice")}
                         />
                       </td>
                       <td className="px-3 py-2">
@@ -351,7 +348,7 @@ export default function DeparturePreview({
                           value={row.childWithBedPrice ?? ""}
                           onChange={(e) => handleCellEdit(idx, "childWithBedPrice", e.target.value)}
                           className="h-7 text-xs rounded-lg w-24"
-                          placeholder="NT$"
+                          placeholder={t("departurePreview.placeholderPrice")}
                         />
                       </td>
                       <td className="px-3 py-2">
@@ -360,7 +357,7 @@ export default function DeparturePreview({
                           value={row.infantPrice ?? ""}
                           onChange={(e) => handleCellEdit(idx, "infantPrice", e.target.value)}
                           className="h-7 text-xs rounded-lg w-24"
-                          placeholder="NT$"
+                          placeholder={t("departurePreview.placeholderPrice")}
                         />
                       </td>
                       <td className="px-3 py-2">
@@ -368,7 +365,7 @@ export default function DeparturePreview({
                           value={row.status || ""}
                           onChange={(e) => handleCellEdit(idx, "status", e.target.value)}
                           className="h-7 text-xs rounded-lg w-24"
-                          placeholder="狀態"
+                          placeholder={t("departurePreview.placeholderStatus")}
                         />
                       </td>
                     </tr>
@@ -385,7 +382,7 @@ export default function DeparturePreview({
             className="rounded-lg"
             onClick={() => onOpenChange(false)}
           >
-            取消
+            {t("departurePreview.cancelButton")}
           </Button>
           {rows.length > 0 && (
             <Button
@@ -396,7 +393,7 @@ export default function DeparturePreview({
               {confirmMutation.isPending && (
                 <Loader2 className="h-4 w-4 animate-spin" />
               )}
-              {t("confirmCreate") || "確認建立"} ({selected.size} 筆)
+              {t("departurePreview.confirmButtonWithCount", { n: String(selected.size) })}
             </Button>
           )}
         </DialogFooter>

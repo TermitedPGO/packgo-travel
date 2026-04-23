@@ -4274,6 +4274,17 @@ export const en = {
     deselectAll: 'Deselect All',
     confirmCreate: 'Confirm Create',
     departuresCreated: 'Successfully created {count} departures',
+    createFailed: 'Creation failed',
+    selectOne: 'Please select at least one departure date',
+    loadError: 'Load failed: {err}',
+    selectedCount: 'Selected {n} / {total}',
+    colStatus: 'Status',
+    placeholderDate: 'YYYY-MM-DD',
+    placeholderSpots: 'Spots',
+    placeholderPrice: 'NT$',
+    placeholderStatus: 'Status',
+    cancelButton: 'Cancel',
+    confirmButtonWithCount: 'Confirm Create ({n})',
   },
   // Image Cropper
   imageCropper: {

@@ -4282,6 +4282,17 @@ export const zhTW = {
     deselectAll: '取消全選',
     confirmCreate: '確認建立',
     departuresCreated: '成功建立 {count} 筆出發日',
+    createFailed: '建立失敗',
+    selectOne: '請至少選擇一筆出發日期',
+    loadError: '載入失敗：{err}',
+    selectedCount: '已選 {n} / {total} 筆',
+    colStatus: '狀態',
+    placeholderDate: 'YYYY-MM-DD',
+    placeholderSpots: '人數',
+    placeholderPrice: 'NT$',
+    placeholderStatus: '狀態',
+    cancelButton: '取消',
+    confirmButtonWithCount: '確認建立 ({n} 筆)',
   },
   // 圖片裁切工具
   imageCropper: {
