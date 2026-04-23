@@ -4,6 +4,7 @@
  * Shows calibration scores, issues, and allows approve/reject actions.
  */
 import { useState } from "react";
+import { useLocale } from "@/contexts/LocaleContext";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -107,21 +108,22 @@ function ScoreBar({ label, score }: { label: string; score: number }) {
 // ─── Verdict Badge ────────────────────────────────────────────────────────────
 
 function VerdictBadge({ verdict }: { verdict: "approved" | "review" | "rejected" }) {
+  const { t } = useLocale();
   if (verdict === "approved")
     return (
-      <Badge className="bg-green-100 text-green-800 border-green-200">
-        <CheckCircle className="w-3 h-3 mr-1" /> 通過
+      <Badge className="bg-green-100 text-green-800 border-green-200 rounded-md">
+        <CheckCircle className="w-3 h-3 mr-1" /> {t("admin.calibrationReview.verdictApproved")}
       </Badge>
     );
   if (verdict === "rejected")
     return (
-      <Badge className="bg-red-100 text-red-800 border-red-200">
-        <XCircle className="w-3 h-3 mr-1" /> 拒絕
+      <Badge className="bg-red-100 text-red-800 border-red-200 rounded-md">
+        <XCircle className="w-3 h-3 mr-1" /> {t("admin.calibrationReview.verdictRejected")}
       </Badge>
     );
   return (
-    <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">
-      <AlertTriangle className="w-3 h-3 mr-1" /> 待審
+    <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200 rounded-md">
+      <AlertTriangle className="w-3 h-3 mr-1" /> {t("admin.calibrationReview.verdictReview")}
     </Badge>
   );
 }
@@ -129,11 +131,12 @@ function VerdictBadge({ verdict }: { verdict: "approved" | "review" | "rejected"
 // ─── Issue Severity Badge ─────────────────────────────────────────────────────
 
 function SeverityBadge({ severity }: { severity: string }) {
+  const { t } = useLocale();
   if (severity === "critical")
-    return <Badge className="bg-red-100 text-red-700 text-xs">嚴重</Badge>;
+    return <Badge className="bg-red-100 text-red-700 text-xs rounded-md">{t("admin.calibrationReview.severityCritical")}</Badge>;
   if (severity === "warning")
-    return <Badge className="bg-yellow-100 text-yellow-700 text-xs">警告</Badge>;
-  return <Badge className="bg-blue-100 text-blue-700 text-xs">提示</Badge>;
+    return <Badge className="bg-yellow-100 text-yellow-700 text-xs rounded-md">{t("admin.calibrationReview.severityWarning")}</Badge>;
+  return <Badge className="bg-blue-100 text-blue-700 text-xs rounded-md">{t("admin.calibrationReview.severityInfo")}</Badge>;
 }
 
 // ─── Tour Card ────────────────────────────────────────────────────────────────
@@ -151,6 +154,7 @@ function TourCalibrationCard({
   isApproving: boolean;
   isRejecting: boolean;
 }) {
+  const { t, language } = useLocale();
   const [expanded, setExpanded] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const cal = tour.calibration;
@@ -163,8 +167,13 @@ function TourCalibrationCard({
   const criticalCount = issues.filter((i) => i.severity === "critical").length;
   const warningCount = issues.filter((i) => i.severity === "warning").length;
 
+  const priceStr = tour.price?.toLocaleString(language === "en" ? "en-US" : "zh-TW");
+  const calibratedAt = cal
+    ? new Date(cal.createdAt).toLocaleString(language === "en" ? "en-US" : "zh-TW")
+    : t("admin.calibrationReview.dialogNoTime");
+
   return (
-    <Card className="border border-gray-200 shadow-sm">
+    <Card className="border border-gray-200 shadow-sm rounded-xl">
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
@@ -174,15 +183,16 @@ function TourCalibrationCard({
             <CardDescription className="mt-1 text-sm text-gray-500">
               {tour.destinationCountry}
               {tour.destinationCity ? ` · ${tour.destinationCity}` : ""} ·{" "}
-              {tour.duration} 天 · NT$ {tour.price?.toLocaleString()}
+              {t("admin.calibrationReview.durationDays", { days: String(tour.duration) })} ·{" "}
+              {t("admin.calibrationReview.priceFormat", { price: priceStr ?? "" })}
             </CardDescription>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {cal ? (
               <VerdictBadge verdict={cal.verdict} />
             ) : (
-              <Badge variant="outline" className="text-gray-500">
-                無校準資料
+              <Badge variant="outline" className="text-gray-500 rounded-md">
+                {t("admin.calibrationReview.noCalibration")}
               </Badge>
             )}
           </div>
@@ -195,7 +205,7 @@ function TourCalibrationCard({
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-gray-700">
-                總分：
+                {t("admin.calibrationReview.totalScoreLabel")}
                 <span
                   className={`ml-1 font-bold ${
                     cal.totalScore >= 80
@@ -205,23 +215,23 @@ function TourCalibrationCard({
                       : "text-red-600"
                   }`}
                 >
-                  {cal.totalScore} / 100
+                  {t("admin.calibrationReview.totalScoreValue", { score: String(cal.totalScore) })}
                 </span>
               </span>
               <div className="flex items-center gap-2 text-xs text-gray-500">
                 {criticalCount > 0 && (
                   <span className="text-red-600 font-medium">
-                    {criticalCount} 嚴重問題
+                    {t("admin.calibrationReview.criticalCount", { n: String(criticalCount) })}
                   </span>
                 )}
                 {warningCount > 0 && (
                   <span className="text-yellow-600 font-medium">
-                    {warningCount} 警告
+                    {t("admin.calibrationReview.warningCount", { n: String(warningCount) })}
                   </span>
                 )}
                 {autoFixes.length > 0 && (
                   <span className="text-green-600 font-medium">
-                    {autoFixes.length} 自動修正
+                    {t("admin.calibrationReview.autoFixCount", { n: String(autoFixes.length) })}
                   </span>
                 )}
               </div>
@@ -229,11 +239,11 @@ function TourCalibrationCard({
 
             {/* Score Bars */}
             <div className="grid grid-cols-2 gap-x-6 gap-y-2">
-              <ScoreBar label="內容忠實度 (30%)" score={cal.contentFidelityScore} />
-              <ScoreBar label="翻譯品質 (20%)" score={cal.translationScore} />
-              <ScoreBar label="圖片品質 (20%)" score={cal.imageScore} />
-              <ScoreBar label="完整度 (15%)" score={cal.completenessScore} />
-              <ScoreBar label="行銷品質 (15%)" score={cal.marketingScore} />
+              <ScoreBar label={t("admin.calibrationReview.scoreContentFidelity")} score={cal.contentFidelityScore} />
+              <ScoreBar label={t("admin.calibrationReview.scoreTranslation")} score={cal.translationScore} />
+              <ScoreBar label={t("admin.calibrationReview.scoreImage")} score={cal.imageScore} />
+              <ScoreBar label={t("admin.calibrationReview.scoreCompleteness")} score={cal.completenessScore} />
+              <ScoreBar label={t("admin.calibrationReview.scoreMarketing")} score={cal.marketingScore} />
             </div>
 
             {/* Expandable Issues */}
@@ -248,14 +258,16 @@ function TourCalibrationCard({
                   ) : (
                     <ChevronDown className="w-3 h-3" />
                   )}
-                  {expanded ? "收起問題清單" : `查看 ${issues.length} 個問題`}
+                  {expanded
+                    ? t("admin.calibrationReview.collapseIssues")
+                    : t("admin.calibrationReview.viewIssues", { n: String(issues.length) })}
                 </button>
                 {expanded && (
                   <div className="mt-2 space-y-2 max-h-48 overflow-y-auto">
                     {issues.map((issue, idx) => (
                       <div
                         key={idx}
-                        className="flex items-start gap-2 p-2 rounded-md bg-gray-50 text-xs"
+                        className="flex items-start gap-2 p-2 rounded-lg bg-gray-50 text-xs"
                       >
                         <SeverityBadge severity={issue.severity} />
                         <div className="flex-1 min-w-0">
@@ -265,7 +277,7 @@ function TourCalibrationCard({
                           <span className="text-gray-600">{issue.message}</span>
                           {issue.field && (
                             <span className="ml-1 text-gray-400">
-                              ({issue.field})
+                              {t("admin.calibrationReview.fieldInline", { field: issue.field })}
                             </span>
                           )}
                         </div>
@@ -276,7 +288,7 @@ function TourCalibrationCard({
                                 <CheckCircle className="w-3 h-3 text-green-500 shrink-0" />
                               </TooltipTrigger>
                               <TooltipContent>
-                                <p>已自動修正</p>
+                                <p>{t("admin.calibrationReview.autoFixedTooltip")}</p>
                               </TooltipContent>
                             </Tooltip>
                           </TooltipProvider>
@@ -297,23 +309,23 @@ function TourCalibrationCard({
               variant="outline"
               size="sm"
               onClick={() => setDetailOpen(true)}
-              className="text-xs h-8"
+              className="text-xs h-8 rounded-lg"
             >
               <Eye className="w-3 h-3 mr-1" />
-              查看詳情
+              {t("admin.calibrationReview.viewDetailsButton")}
             </Button>
             <Button
               variant="outline"
               size="sm"
               asChild
-              className="text-xs h-8"
+              className="text-xs h-8 rounded-lg"
             >
               <a
                 href={`/tours/${tour.id}`}
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                預覽行程
+                {t("admin.calibrationReview.previewTourButton")}
               </a>
             </Button>
           </div>
@@ -323,19 +335,19 @@ function TourCalibrationCard({
               size="sm"
               onClick={() => onReject(tour.id)}
               disabled={isRejecting || isApproving}
-              className="text-xs h-8 border-red-200 text-red-600 hover:bg-red-50"
+              className="text-xs h-8 border-red-200 text-red-600 hover:bg-red-50 rounded-lg"
             >
               <XCircle className="w-3 h-3 mr-1" />
-              拒絕
+              {t("admin.calibrationReview.rejectButton")}
             </Button>
             <Button
               size="sm"
               onClick={() => onApprove(tour.id)}
               disabled={isApproving || isRejecting}
-              className="text-xs h-8 bg-green-600 hover:bg-green-700 text-white"
+              className="text-xs h-8 bg-green-600 hover:bg-green-700 text-white rounded-lg"
             >
               <CheckCircle className="w-3 h-3 mr-1" />
-              核准上架
+              {t("admin.calibrationReview.approveButton")}
             </Button>
           </div>
         </div>
@@ -343,25 +355,29 @@ function TourCalibrationCard({
 
       {/* Detail Dialog */}
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto rounded-xl">
           <DialogHeader>
-            <DialogTitle>校準詳情 — {tour.title}</DialogTitle>
+            <DialogTitle>
+              {t("admin.calibrationReview.dialogTitle", { title: tour.title })}
+            </DialogTitle>
             <DialogDescription>
-              校準時間：{cal ? new Date(cal.createdAt).toLocaleString() : "無資料"}
+              {t("admin.calibrationReview.dialogCalibratedAt", { time: calibratedAt })}
             </DialogDescription>
           </DialogHeader>
           {cal ? (
             <div className="space-y-4">
               {/* All scores */}
               <div className="space-y-2">
-                <h4 className="text-sm font-semibold text-gray-700">評分詳情</h4>
-                <ScoreBar label="內容忠實度 (30%)" score={cal.contentFidelityScore} />
-                <ScoreBar label="翻譯品質 (20%)" score={cal.translationScore} />
-                <ScoreBar label="圖片品質 (20%)" score={cal.imageScore} />
-                <ScoreBar label="完整度 (15%)" score={cal.completenessScore} />
-                <ScoreBar label="行銷品質 (15%)" score={cal.marketingScore} />
+                <h4 className="text-sm font-semibold text-gray-700">
+                  {t("admin.calibrationReview.dialogScoresHeader")}
+                </h4>
+                <ScoreBar label={t("admin.calibrationReview.scoreContentFidelity")} score={cal.contentFidelityScore} />
+                <ScoreBar label={t("admin.calibrationReview.scoreTranslation")} score={cal.translationScore} />
+                <ScoreBar label={t("admin.calibrationReview.scoreImage")} score={cal.imageScore} />
+                <ScoreBar label={t("admin.calibrationReview.scoreCompleteness")} score={cal.completenessScore} />
+                <ScoreBar label={t("admin.calibrationReview.scoreMarketing")} score={cal.marketingScore} />
                 <div className="pt-1 border-t">
-                  <ScoreBar label="加權總分" score={cal.totalScore} />
+                  <ScoreBar label={t("admin.calibrationReview.scoreWeightedTotal")} score={cal.totalScore} />
                 </div>
               </div>
 
@@ -369,7 +385,7 @@ function TourCalibrationCard({
               {issues.length > 0 && (
                 <div className="space-y-2">
                   <h4 className="text-sm font-semibold text-gray-700">
-                    問題清單 ({issues.length})
+                    {t("admin.calibrationReview.dialogIssuesHeader", { n: String(issues.length) })}
                   </h4>
                   <div className="space-y-2">
                     {issues.map((issue, idx) => (
@@ -383,7 +399,7 @@ function TourCalibrationCard({
                           {issue.message}
                           {issue.field && (
                             <span className="ml-1 text-gray-400 text-xs">
-                              (欄位: {issue.field})
+                              {t("admin.calibrationReview.fieldWithLabel", { field: issue.field })}
                             </span>
                           )}
                         </div>
@@ -397,7 +413,7 @@ function TourCalibrationCard({
               {autoFixes.length > 0 && (
                 <div className="space-y-2">
                   <h4 className="text-sm font-semibold text-gray-700">
-                    自動修正 ({autoFixes.length})
+                    {t("admin.calibrationReview.dialogAutoFixesHeader", { n: String(autoFixes.length) })}
                   </h4>
                   <div className="space-y-2">
                     {autoFixes.map((fix, idx) => (
@@ -406,7 +422,7 @@ function TourCalibrationCard({
                         className="p-3 rounded-lg bg-green-50 border border-green-100 text-xs space-y-1"
                       >
                         <div className="font-medium text-green-700">
-                          欄位：{fix.field}
+                          {t("admin.calibrationReview.dialogFieldHeader", { field: fix.field })}
                         </div>
                         <div className="text-gray-500 line-through truncate">
                           {fix.before}
@@ -421,12 +437,12 @@ function TourCalibrationCard({
           ) : (
             <div className="py-8 text-center text-gray-400">
               <Info className="w-8 h-8 mx-auto mb-2" />
-              <p>此行程尚無校準資料</p>
+              <p>{t("admin.calibrationReview.dialogNoCalibration")}</p>
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDetailOpen(false)}>
-              關閉
+            <Button variant="outline" onClick={() => setDetailOpen(false)} className="rounded-lg">
+              {t("admin.calibrationReview.dialogCloseButton")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -438,6 +454,7 @@ function TourCalibrationCard({
 // ─── Main Tab ─────────────────────────────────────────────────────────────────
 
 export default function CalibrationReviewTab() {
+  const { t } = useLocale();
   const utils = trpc.useUtils();
   const { data: pendingTours, isLoading, refetch } =
     trpc.tours.getPendingReview.useQuery(undefined, {
@@ -446,21 +463,21 @@ export default function CalibrationReviewTab() {
 
   const approveMutation = trpc.tours.approveTour.useMutation({
     onSuccess: (data) => {
-      toast.success("行程已核准", { description: data.message });
+      toast.success(t("admin.calibrationReview.toastApproveSuccess"), { description: data.message });
       utils.tours.getPendingReview.invalidate();
     },
     onError: (err) => {
-      toast.error("核准失敗", { description: err.message });
+      toast.error(t("admin.calibrationReview.toastApproveFailed"), { description: err.message });
     },
   });
 
   const rejectMutation = trpc.tours.rejectTour.useMutation({
     onSuccess: (data) => {
-      toast.success("行程已拒絕", { description: data.message });
+      toast.success(t("admin.calibrationReview.toastRejectSuccess"), { description: data.message });
       utils.tours.getPendingReview.invalidate();
     },
     onError: (err) => {
-      toast.error("拒絕失敗", { description: err.message });
+      toast.error(t("admin.calibrationReview.toastRejectFailed"), { description: err.message });
     },
   });
 
@@ -471,9 +488,11 @@ export default function CalibrationReviewTab() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">QA 品質審查</h2>
+          <h2 className="text-xl font-semibold text-gray-900">
+            {t("admin.calibrationReview.pageTitle")}
+          </h2>
           <p className="text-sm text-gray-500 mt-1">
-            審查 AI 自動生成行程的品質校準結果，核准後行程將自動上架。
+            {t("admin.calibrationReview.pageDescription")}
           </p>
         </div>
         <Button
@@ -481,42 +500,48 @@ export default function CalibrationReviewTab() {
           size="sm"
           onClick={() => refetch()}
           disabled={isLoading}
-          className="gap-2"
+          className="gap-2 rounded-lg"
         >
           <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
-          重新整理
+          {t("admin.calibrationReview.refreshButton")}
         </Button>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4">
-        <Card className="border border-gray-200">
+        <Card className="border border-gray-200 rounded-xl">
           <CardContent className="pt-4 pb-4">
             <div className="text-2xl font-bold text-gray-900">{tours.length}</div>
-            <div className="text-xs text-gray-500 mt-1">待審行程</div>
+            <div className="text-xs text-gray-500 mt-1">
+              {t("admin.calibrationReview.statPending")}
+            </div>
           </CardContent>
         </Card>
-        <Card className="border border-gray-200">
+        <Card className="border border-gray-200 rounded-xl">
           <CardContent className="pt-4 pb-4">
             <div className="text-2xl font-bold text-yellow-600">
-              {tours.filter((t) => t.calibration?.verdict === "review").length}
+              {tours.filter((tour) => tour.calibration?.verdict === "review").length}
             </div>
-            <div className="text-xs text-gray-500 mt-1">需人工審查</div>
+            <div className="text-xs text-gray-500 mt-1">
+              {t("admin.calibrationReview.statManualReview")}
+            </div>
           </CardContent>
         </Card>
-        <Card className="border border-gray-200">
+        <Card className="border border-gray-200 rounded-xl">
           <CardContent className="pt-4 pb-4">
             <div className="text-2xl font-bold text-red-600">
               {tours.filter(
-                (t) =>
-                  t.calibration &&
-                  t.calibration.issues &&
-                  JSON.parse(t.calibration.issues).filter(
+                (tour) =>
+                  tour.calibration &&
+                  tour.calibration.issues &&
+                  JSON.parse(tour.calibration.issues).filter(
                     (i: CalibrationIssue) => i.severity === "critical"
                   ).length > 0
               ).length}
             </div>
-            <div className="text-xs text-gray-500 mt-1">含嚴重問題</div>
+            <div className="text-xs text-gray-500 mt-1">
+              {t("admin.calibrationReview.statCritical")}
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -525,13 +550,17 @@ export default function CalibrationReviewTab() {
       {isLoading ? (
         <div className="py-16 text-center text-gray-400">
           <RefreshCw className="w-8 h-8 mx-auto mb-3 animate-spin" />
-          <p>載入中...</p>
+          <p>{t("admin.calibrationReview.loading")}</p>
         </div>
       ) : tours.length === 0 ? (
         <div className="py-16 text-center text-gray-400 border-2 border-dashed border-gray-200 rounded-xl">
           <CheckCircle className="w-12 h-12 mx-auto mb-3 text-green-400" />
-          <p className="text-lg font-medium text-gray-600">目前沒有待審行程</p>
-          <p className="text-sm mt-1">所有 AI 生成行程均已完成審查</p>
+          <p className="text-lg font-medium text-gray-600">
+            {t("admin.calibrationReview.emptyTitle")}
+          </p>
+          <p className="text-sm mt-1">
+            {t("admin.calibrationReview.emptySubtitle")}
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
