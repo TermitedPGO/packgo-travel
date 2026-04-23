@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
+import { useLocale } from "@/contexts/LocaleContext";
 import {
   Plus,
   RefreshCw,
@@ -38,7 +39,6 @@ import {
   TrendingDown,
   TrendingUp,
   Search,
-  Eye,
   Loader2,
 } from "lucide-react";
 
@@ -105,6 +105,8 @@ function TourListView({
   onViewDetail: (id: number) => void;
   onViewAlerts: () => void;
 }) {
+  const { t, language } = useLocale();
+  const locale = language === "en" ? "en-US" : "zh-TW";
   const utils = trpc.useUtils();
   const { data, isLoading } = trpc.competitor.list.useQuery({
     search: searchQuery || undefined,
@@ -115,7 +117,7 @@ function TourListView({
 
   const triggerScrape = trpc.competitor.triggerScrape.useMutation({
     onSuccess: () => {
-      toast.success("爬取任務已加入佇列");
+      toast.success(t("admin.competitorMonitor.toastScrapeQueued"));
       utils.competitor.list.invalidate();
     },
     onError: (err) => toast.error(err.message),
@@ -123,7 +125,7 @@ function TourListView({
 
   const updateTour = trpc.competitor.update.useMutation({
     onSuccess: () => {
-      toast.success("已更新");
+      toast.success(t("admin.competitorMonitor.toastUpdated"));
       utils.competitor.list.invalidate();
     },
     onError: (err) => toast.error(err.message),
@@ -131,7 +133,7 @@ function TourListView({
 
   const deleteTour = trpc.competitor.delete.useMutation({
     onSuccess: () => {
-      toast.success("已刪除");
+      toast.success(t("admin.competitorMonitor.toastDeleted"));
       utils.competitor.list.invalidate();
     },
     onError: (err) => toast.error(err.message),
@@ -152,10 +154,19 @@ function TourListView({
 
   const competitorLabel = (c: string) => {
     switch (c) {
-      case "liontravel": return "雄獅旅遊";
-      case "colatour": return "可樂旅遊";
-      case "settour": return "東南旅遊";
+      case "liontravel": return t("admin.competitorMonitor.competitorLion");
+      case "colatour": return t("admin.competitorMonitor.competitorCola");
+      case "settour": return t("admin.competitorMonitor.competitorSet");
       default: return c;
+    }
+  };
+
+  const statusLabel = (status: string) => {
+    switch (status) {
+      case "active": return t("admin.competitorMonitor.statusActive");
+      case "paused": return t("admin.competitorMonitor.statusPaused");
+      case "error": return t("admin.competitorMonitor.statusError");
+      default: return status;
     }
   };
 
@@ -164,7 +175,9 @@ function TourListView({
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h2 className="text-xl font-bold text-gray-900">競品監控</h2>
+          <h2 className="text-xl font-bold text-gray-900">
+            {t("admin.competitorMonitor.pageTitle")}
+          </h2>
           <button
             onClick={onViewAlerts}
             className="relative p-2 rounded-lg hover:bg-gray-100 transition-colors"
@@ -185,7 +198,7 @@ function TourListView({
         <div className="relative flex-1 max-w-xs">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
           <Input
-            placeholder="搜尋行程名稱或目的地..."
+            placeholder={t("admin.competitorMonitor.searchPlaceholder")}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-9 rounded-lg"
@@ -193,24 +206,24 @@ function TourListView({
         </div>
         <Select value={filterCompetitor} onValueChange={setFilterCompetitor}>
           <SelectTrigger className="w-[140px] rounded-lg">
-            <SelectValue placeholder="競爭對手" />
+            <SelectValue placeholder={t("admin.competitorMonitor.filterCompetitorPlaceholder")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">全部</SelectItem>
-            <SelectItem value="liontravel">雄獅旅遊</SelectItem>
-            <SelectItem value="colatour">可樂旅遊</SelectItem>
-            <SelectItem value="settour">東南旅遊</SelectItem>
+            <SelectItem value="all">{t("admin.competitorMonitor.filterAll")}</SelectItem>
+            <SelectItem value="liontravel">{t("admin.competitorMonitor.competitorLion")}</SelectItem>
+            <SelectItem value="colatour">{t("admin.competitorMonitor.competitorCola")}</SelectItem>
+            <SelectItem value="settour">{t("admin.competitorMonitor.competitorSet")}</SelectItem>
           </SelectContent>
         </Select>
         <Select value={filterStatus} onValueChange={setFilterStatus}>
           <SelectTrigger className="w-[120px] rounded-lg">
-            <SelectValue placeholder="狀態" />
+            <SelectValue placeholder={t("admin.competitorMonitor.filterStatusPlaceholder")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">全部</SelectItem>
-            <SelectItem value="active">監控中</SelectItem>
-            <SelectItem value="paused">已暫停</SelectItem>
-            <SelectItem value="error">錯誤</SelectItem>
+            <SelectItem value="all">{t("admin.competitorMonitor.filterAll")}</SelectItem>
+            <SelectItem value="active">{t("admin.competitorMonitor.statusActive")}</SelectItem>
+            <SelectItem value="paused">{t("admin.competitorMonitor.statusPaused")}</SelectItem>
+            <SelectItem value="error">{t("admin.competitorMonitor.statusError")}</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -223,8 +236,8 @@ function TourListView({
       ) : !data?.tours?.length ? (
         <div className="text-center py-12 text-gray-500">
           <Search className="h-10 w-10 mx-auto mb-3 text-gray-300" />
-          <p className="font-medium">尚無監控行程</p>
-          <p className="text-sm mt-1">點擊「新增監控」開始追蹤競品行程</p>
+          <p className="font-medium">{t("admin.competitorMonitor.emptyTitle")}</p>
+          <p className="text-sm mt-1">{t("admin.competitorMonitor.emptyDesc")}</p>
         </div>
       ) : (
         <div className="bg-white rounded-xl border overflow-hidden">
@@ -232,14 +245,14 @@ function TourListView({
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-gray-50/60">
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">行程名稱</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">競爭對手</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">目的地</th>
-                  <th className="text-center px-4 py-3 font-medium text-gray-600">天數</th>
-                  <th className="text-right px-4 py-3 font-medium text-gray-600">最新價格</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">上次爬取</th>
-                  <th className="text-center px-4 py-3 font-medium text-gray-600">狀態</th>
-                  <th className="text-right px-4 py-3 font-medium text-gray-600">操作</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">{t("admin.competitorMonitor.colTourName")}</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">{t("admin.competitorMonitor.colCompetitor")}</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">{t("admin.competitorMonitor.colDestination")}</th>
+                  <th className="text-center px-4 py-3 font-medium text-gray-600">{t("admin.competitorMonitor.colDuration")}</th>
+                  <th className="text-right px-4 py-3 font-medium text-gray-600">{t("admin.competitorMonitor.colLatestPrice")}</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">{t("admin.competitorMonitor.colLastScraped")}</th>
+                  <th className="text-center px-4 py-3 font-medium text-gray-600">{t("admin.competitorMonitor.colStatus")}</th>
+                  <th className="text-right px-4 py-3 font-medium text-gray-600">{t("admin.competitorMonitor.colActions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -251,7 +264,7 @@ function TourListView({
                   >
                     <td className="px-4 py-3">
                       <div className="font-medium text-gray-900 line-clamp-1 max-w-[280px]">
-                        {tour.tourTitle || "（未命名）"}
+                        {tour.tourTitle || t("admin.competitorMonitor.untitled")}
                       </div>
                     </td>
                     <td className="px-4 py-3">
@@ -261,7 +274,7 @@ function TourListView({
                     </td>
                     <td className="px-4 py-3 text-gray-600">{tour.destination || "—"}</td>
                     <td className="px-4 py-3 text-center text-gray-600">
-                      {tour.duration ? `${tour.duration}天` : "—"}
+                      {tour.duration ? `${tour.duration}${t("admin.competitorMonitor.daysSuffix")}` : "—"}
                     </td>
                     <td className="px-4 py-3 text-right font-medium">
                       {tour.basePrice
@@ -270,14 +283,14 @@ function TourListView({
                     </td>
                     <td className="px-4 py-3 text-gray-500 text-xs">
                       {tour.lastScrapedAt
-                        ? new Date(tour.lastScrapedAt).toLocaleString("zh-TW")
-                        : "尚未爬取"}
+                        ? new Date(tour.lastScrapedAt).toLocaleString(locale)
+                        : t("admin.competitorMonitor.notYetScraped")}
                     </td>
                     <td className="px-4 py-3 text-center">
                       <div className="flex items-center justify-center gap-1.5">
                         {statusIcon(tour.scrapeStatus)}
                         <span className="text-xs text-gray-500">
-                          {tour.scrapeStatus === "active" ? "監控中" : tour.scrapeStatus === "paused" ? "已暫停" : "錯誤"}
+                          {statusLabel(tour.scrapeStatus)}
                         </span>
                       </div>
                     </td>
@@ -286,24 +299,24 @@ function TourListView({
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-8 w-8 p-0"
+                          className="h-8 w-8 p-0 rounded-lg"
                           onClick={() => triggerScrape.mutate({ id: tour.id })}
                           disabled={triggerScrape.isPending}
-                          title="立即爬取"
+                          title={t("admin.competitorMonitor.actionScrapeNow")}
                         >
                           <RefreshCw className={`h-4 w-4 ${triggerScrape.isPending ? "animate-spin" : ""}`} />
                         </Button>
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-8 w-8 p-0"
+                          className="h-8 w-8 p-0 rounded-lg"
                           onClick={() =>
                             updateTour.mutate({
                               id: tour.id,
                               scrapeStatus: tour.scrapeStatus === "active" ? "paused" : "active",
                             })
                           }
-                          title={tour.scrapeStatus === "active" ? "暫停" : "恢復"}
+                          title={tour.scrapeStatus === "active" ? t("admin.competitorMonitor.actionPause") : t("admin.competitorMonitor.actionResume")}
                         >
                           {tour.scrapeStatus === "active" ? (
                             <Pause className="h-4 w-4" />
@@ -314,13 +327,13 @@ function TourListView({
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-8 w-8 p-0 text-red-500 hover:text-red-700"
+                          className="h-8 w-8 p-0 rounded-lg text-red-500 hover:text-red-700"
                           onClick={() => {
-                            if (confirm("確定要刪除此監控行程？")) {
+                            if (confirm(t("admin.competitorMonitor.confirmDelete"))) {
                               deleteTour.mutate({ id: tour.id });
                             }
                           }}
-                          title="刪除"
+                          title={t("admin.competitorMonitor.actionDelete")}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -333,7 +346,7 @@ function TourListView({
           </div>
           {data.total > data.pageSize && (
             <div className="px-4 py-3 border-t text-sm text-gray-500 text-center">
-              顯示 {data.tours.length} / {data.total} 筆
+              {t("admin.competitorMonitor.pagination", { count: String(data.tours.length), total: String(data.total) })}
             </div>
           )}
         </div>
@@ -344,6 +357,7 @@ function TourListView({
 
 // ── 6B: Add Tour Dialog ──────────────────────────────────────
 function AddTourDialog() {
+  const { t } = useLocale();
   const utils = trpc.useUtils();
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState("");
@@ -352,8 +366,8 @@ function AddTourDialog() {
   const [notes, setNotes] = useState("");
 
   const createTour = trpc.competitor.create.useMutation({
-    onSuccess: (tour) => {
-      toast.success("已新增監控行程，正在執行第一次爬取...");
+    onSuccess: () => {
+      toast.success(t("admin.competitorMonitor.toastCreated"));
       utils.competitor.list.invalidate();
       setOpen(false);
       setUrl("");
@@ -364,7 +378,7 @@ function AddTourDialog() {
 
   const handleSubmit = () => {
     if (!url.trim()) {
-      toast.error("請輸入行程 URL");
+      toast.error(t("admin.competitorMonitor.toastUrlRequired"));
       return;
     }
     createTour.mutate({
@@ -380,55 +394,63 @@ function AddTourDialog() {
       <DialogTrigger asChild>
         <Button className="rounded-lg bg-teal-600 hover:bg-teal-700 text-white">
           <Plus className="h-4 w-4 mr-1.5" />
-          新增監控
+          {t("admin.competitorMonitor.addButton")}
         </Button>
       </DialogTrigger>
       <DialogContent className="rounded-xl max-w-md">
         <DialogHeader>
-          <DialogTitle>新增競品監控</DialogTitle>
+          <DialogTitle>{t("admin.competitorMonitor.addDialogTitle")}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div>
-            <label className="text-sm font-medium text-gray-700 mb-1 block">行程 URL</label>
+            <label className="text-sm font-medium text-gray-700 mb-1 block">
+              {t("admin.competitorMonitor.urlLabel")}
+            </label>
             <Input
-              placeholder="https://travel.liontravel.com/..."
+              placeholder={t("admin.competitorMonitor.urlPlaceholder")}
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               className="rounded-lg"
             />
-            <p className="text-xs text-gray-400 mt-1">貼上雄獅旅遊的行程頁面網址</p>
+            <p className="text-xs text-gray-400 mt-1">{t("admin.competitorMonitor.urlHint")}</p>
           </div>
           <div>
-            <label className="text-sm font-medium text-gray-700 mb-1 block">競爭對手</label>
+            <label className="text-sm font-medium text-gray-700 mb-1 block">
+              {t("admin.competitorMonitor.competitorLabel")}
+            </label>
             <Select value={competitor} onValueChange={(v: any) => setCompetitor(v)}>
               <SelectTrigger className="rounded-lg">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="liontravel">雄獅旅遊</SelectItem>
-                <SelectItem value="colatour">可樂旅遊</SelectItem>
-                <SelectItem value="settour">東南旅遊</SelectItem>
+                <SelectItem value="liontravel">{t("admin.competitorMonitor.competitorLion")}</SelectItem>
+                <SelectItem value="colatour">{t("admin.competitorMonitor.competitorCola")}</SelectItem>
+                <SelectItem value="settour">{t("admin.competitorMonitor.competitorSet")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <div>
-            <label className="text-sm font-medium text-gray-700 mb-1 block">爬取頻率</label>
+            <label className="text-sm font-medium text-gray-700 mb-1 block">
+              {t("admin.competitorMonitor.frequencyLabel")}
+            </label>
             <Select value={frequency} onValueChange={(v: any) => setFrequency(v)}>
               <SelectTrigger className="rounded-lg">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="6h">每 6 小時</SelectItem>
-                <SelectItem value="12h">每 12 小時</SelectItem>
-                <SelectItem value="daily">每天</SelectItem>
-                <SelectItem value="weekly">每週</SelectItem>
+                <SelectItem value="6h">{t("admin.competitorMonitor.freq6h")}</SelectItem>
+                <SelectItem value="12h">{t("admin.competitorMonitor.freq12h")}</SelectItem>
+                <SelectItem value="daily">{t("admin.competitorMonitor.freqDaily")}</SelectItem>
+                <SelectItem value="weekly">{t("admin.competitorMonitor.freqWeekly")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <div>
-            <label className="text-sm font-medium text-gray-700 mb-1 block">備註（選填）</label>
+            <label className="text-sm font-medium text-gray-700 mb-1 block">
+              {t("admin.competitorMonitor.notesLabel")}
+            </label>
             <Textarea
-              placeholder="例如：主要競品、需特別關注..."
+              placeholder={t("admin.competitorMonitor.notesPlaceholder")}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               className="rounded-lg resize-none"
@@ -438,7 +460,9 @@ function AddTourDialog() {
         </div>
         <DialogFooter>
           <DialogClose asChild>
-            <Button variant="outline" className="rounded-lg">取消</Button>
+            <Button variant="outline" className="rounded-lg">
+              {t("admin.competitorMonitor.cancel")}
+            </Button>
           </DialogClose>
           <Button
             onClick={handleSubmit}
@@ -450,7 +474,7 @@ function AddTourDialog() {
             ) : (
               <Plus className="h-4 w-4 mr-1.5" />
             )}
-            新增並開始爬取
+            {t("admin.competitorMonitor.addAndStart")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -460,6 +484,8 @@ function AddTourDialog() {
 
 // ── 6C: Alerts View ──────────────────────────────────────────
 function AlertsView({ onBack }: { onBack: () => void }) {
+  const { t, language } = useLocale();
+  const locale = language === "en" ? "en-US" : "zh-TW";
   const utils = trpc.useUtils();
   const { data, isLoading } = trpc.competitor.alerts.useQuery({ pageSize: 50 });
 
@@ -472,7 +498,7 @@ function AlertsView({ onBack }: { onBack: () => void }) {
 
   const markAllRead = trpc.competitor.markAllAlertsRead.useMutation({
     onSuccess: () => {
-      toast.success("已全部標為已讀");
+      toast.success(t("admin.competitorMonitor.toastAllMarkedRead"));
       utils.competitor.alerts.invalidate();
       utils.competitor.unreadAlertCount.invalidate();
     },
@@ -503,9 +529,11 @@ function AlertsView({ onBack }: { onBack: () => void }) {
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="sm" onClick={onBack} className="rounded-lg">
             <ArrowLeft className="h-4 w-4 mr-1" />
-            返回
+            {t("admin.competitorMonitor.backButton")}
           </Button>
-          <h2 className="text-xl font-bold text-gray-900">告警列表</h2>
+          <h2 className="text-xl font-bold text-gray-900">
+            {t("admin.competitorMonitor.alertsTitle")}
+          </h2>
         </div>
         <Button
           variant="outline"
@@ -515,7 +543,7 @@ function AlertsView({ onBack }: { onBack: () => void }) {
           disabled={markAllRead.isPending}
         >
           <BellOff className="h-4 w-4 mr-1.5" />
-          全部標為已讀
+          {t("admin.competitorMonitor.markAllRead")}
         </Button>
       </div>
 
@@ -526,8 +554,8 @@ function AlertsView({ onBack }: { onBack: () => void }) {
       ) : !data?.alerts?.length ? (
         <div className="text-center py-12 text-gray-500">
           <Bell className="h-10 w-10 mx-auto mb-3 text-gray-300" />
-          <p className="font-medium">暫無告警</p>
-          <p className="text-sm mt-1">當競品行程有價格或座位變動時，告警會出現在這裡</p>
+          <p className="font-medium">{t("admin.competitorMonitor.emptyAlertsTitle")}</p>
+          <p className="text-sm mt-1">{t("admin.competitorMonitor.emptyAlertsDesc")}</p>
         </div>
       ) : (
         <div className="space-y-2">
@@ -555,7 +583,7 @@ function AlertsView({ onBack }: { onBack: () => void }) {
                     <p className="text-xs text-gray-600 mt-0.5 line-clamp-2">{alert.message}</p>
                   )}
                   <p className="text-[10px] text-gray-400 mt-1">
-                    {new Date(alert.createdAt).toLocaleString("zh-TW")}
+                    {new Date(alert.createdAt).toLocaleString(locale)}
                   </p>
                 </div>
                 {!alert.isRead && (
@@ -565,7 +593,7 @@ function AlertsView({ onBack }: { onBack: () => void }) {
                     className="h-7 text-xs rounded-md"
                     onClick={() => markRead.mutate({ alertId: alert.id })}
                   >
-                    已讀
+                    {t("admin.competitorMonitor.markRead")}
                   </Button>
                 )}
               </div>
@@ -579,6 +607,8 @@ function AlertsView({ onBack }: { onBack: () => void }) {
 
 // ── 6D: Detail View ──────────────────────────────────────────
 function DetailView({ tourId, onBack }: { tourId: number; onBack: () => void }) {
+  const { t, language } = useLocale();
+  const locale = language === "en" ? "en-US" : "zh-TW";
   const { data, isLoading } = trpc.competitor.getById.useQuery({ id: tourId });
   const { data: priceHistory } = trpc.competitor.priceHistory.useQuery({
     competitorTourId: tourId,
@@ -600,9 +630,9 @@ function DetailView({ tourId, onBack }: { tourId: number; onBack: () => void }) 
   if (!data) {
     return (
       <div className="text-center py-12 text-gray-500">
-        <p>找不到此行程</p>
+        <p>{t("admin.competitorMonitor.notFound")}</p>
         <Button variant="outline" className="mt-3 rounded-lg" onClick={onBack}>
-          返回列表
+          {t("admin.competitorMonitor.backToList")}
         </Button>
       </div>
     );
@@ -616,10 +646,10 @@ function DetailView({ tourId, onBack }: { tourId: number; onBack: () => void }) 
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="sm" onClick={onBack} className="rounded-lg">
           <ArrowLeft className="h-4 w-4 mr-1" />
-          返回
+          {t("admin.competitorMonitor.backButton")}
         </Button>
         <h2 className="text-xl font-bold text-gray-900 line-clamp-1">
-          {tour.tourTitle || "（未命名行程）"}
+          {tour.tourTitle || t("admin.competitorMonitor.untitledTour")}
         </h2>
         {tour.tourUrl && (
           <a
@@ -635,18 +665,21 @@ function DetailView({ tourId, onBack }: { tourId: number; onBack: () => void }) 
 
       {/* Info Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <InfoCard label="目的地" value={tour.destination || "—"} />
-        <InfoCard label="天數" value={tour.duration ? `${tour.duration} 天` : "—"} />
+        <InfoCard label={t("admin.competitorMonitor.infoDestination")} value={tour.destination || "—"} />
         <InfoCard
-          label="最新基準價"
+          label={t("admin.competitorMonitor.infoDuration")}
+          value={tour.duration ? `${tour.duration} ${t("admin.competitorMonitor.daysSuffix")}` : "—"}
+        />
+        <InfoCard
+          label={t("admin.competitorMonitor.infoBasePrice")}
           value={tour.basePrice ? `NT$ ${tour.basePrice.toLocaleString()}` : "—"}
         />
         <InfoCard
-          label="上次爬取"
+          label={t("admin.competitorMonitor.infoLastScraped")}
           value={
             tour.lastScrapedAt
-              ? new Date(tour.lastScrapedAt).toLocaleString("zh-TW")
-              : "尚未爬取"
+              ? new Date(tour.lastScrapedAt).toLocaleString(locale)
+              : t("admin.competitorMonitor.notYetScraped")
           }
         />
       </div>
@@ -654,21 +687,25 @@ function DetailView({ tourId, onBack }: { tourId: number; onBack: () => void }) 
       {/* Departures Table */}
       <div className="bg-white rounded-xl border overflow-hidden">
         <div className="px-4 py-3 border-b bg-gray-50/60">
-          <h3 className="font-semibold text-gray-900">出團日期</h3>
+          <h3 className="font-semibold text-gray-900">
+            {t("admin.competitorMonitor.departuresTitle")}
+          </h3>
         </div>
         {!departures?.length ? (
-          <div className="px-4 py-8 text-center text-gray-500 text-sm">尚無出團資料</div>
+          <div className="px-4 py-8 text-center text-gray-500 text-sm">
+            {t("admin.competitorMonitor.emptyDepartures")}
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-gray-50/30">
-                  <th className="text-left px-4 py-2.5 font-medium text-gray-600">出發日期</th>
-                  <th className="text-left px-4 py-2.5 font-medium text-gray-600">回程日期</th>
-                  <th className="text-right px-4 py-2.5 font-medium text-gray-600">大人價</th>
-                  <th className="text-right px-4 py-2.5 font-medium text-gray-600">小孩價</th>
-                  <th className="text-center px-4 py-2.5 font-medium text-gray-600">剩餘座位</th>
-                  <th className="text-center px-4 py-2.5 font-medium text-gray-600">狀態</th>
+                  <th className="text-left px-4 py-2.5 font-medium text-gray-600">{t("admin.competitorMonitor.depColDate")}</th>
+                  <th className="text-left px-4 py-2.5 font-medium text-gray-600">{t("admin.competitorMonitor.depColReturn")}</th>
+                  <th className="text-right px-4 py-2.5 font-medium text-gray-600">{t("admin.competitorMonitor.depColAdult")}</th>
+                  <th className="text-right px-4 py-2.5 font-medium text-gray-600">{t("admin.competitorMonitor.depColChild")}</th>
+                  <th className="text-center px-4 py-2.5 font-medium text-gray-600">{t("admin.competitorMonitor.depColSeats")}</th>
+                  <th className="text-center px-4 py-2.5 font-medium text-gray-600">{t("admin.competitorMonitor.depColStatus")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -715,7 +752,9 @@ function DetailView({ tourId, onBack }: { tourId: number; onBack: () => void }) 
       {priceHistory && priceHistory.length > 0 && (
         <div className="bg-white rounded-xl border overflow-hidden">
           <div className="px-4 py-3 border-b bg-gray-50/60">
-            <h3 className="font-semibold text-gray-900">價格變動紀錄</h3>
+            <h3 className="font-semibold text-gray-900">
+              {t("admin.competitorMonitor.priceHistoryTitle")}
+            </h3>
           </div>
           <div className="p-4">
             <PriceHistoryChart history={priceHistory} />
@@ -727,7 +766,9 @@ function DetailView({ tourId, onBack }: { tourId: number; onBack: () => void }) 
       {alertsData?.alerts && alertsData.alerts.length > 0 && (
         <div className="bg-white rounded-xl border overflow-hidden">
           <div className="px-4 py-3 border-b bg-gray-50/60">
-            <h3 className="font-semibold text-gray-900">歷史告警</h3>
+            <h3 className="font-semibold text-gray-900">
+              {t("admin.competitorMonitor.alertHistoryTitle")}
+            </h3>
           </div>
           <div className="divide-y">
             {alertsData.alerts.map((alert: any) => (
@@ -740,7 +781,7 @@ function DetailView({ tourId, onBack }: { tourId: number; onBack: () => void }) 
                   )}
                 </div>
                 <span className="text-[10px] text-gray-400 whitespace-nowrap">
-                  {new Date(alert.createdAt).toLocaleString("zh-TW")}
+                  {new Date(alert.createdAt).toLocaleString(locale)}
                 </span>
               </div>
             ))}
@@ -763,16 +804,29 @@ function InfoCard({ label, value }: { label: string; value: string }) {
 }
 
 function DepartureStatusBadge({ status }: { status: string }) {
-  const config: Record<string, { label: string; className: string }> = {
-    open: { label: "可報名", className: "bg-green-100 text-green-700" },
-    full: { label: "已滿團", className: "bg-red-100 text-red-700" },
-    cancelled: { label: "已取消", className: "bg-gray-100 text-gray-600" },
-    guaranteed: { label: "確認出團", className: "bg-blue-100 text-blue-700" },
+  const { t } = useLocale();
+  const DEP_STATUS_KEYS: Record<string, string> = {
+    open: "depStatusOpen",
+    full: "depStatusFull",
+    cancelled: "depStatusCancelled",
+    guaranteed: "depStatusGuaranteed",
   };
-  const c = config[status] || config.open;
+  const DEP_STATUS_COLORS: Record<string, string> = {
+    open: "bg-green-100 text-green-700",
+    full: "bg-red-100 text-red-700",
+    cancelled: "bg-gray-100 text-gray-600",
+    guaranteed: "bg-blue-100 text-blue-700",
+  };
+  const config = useMemo(() => {
+    const key = DEP_STATUS_KEYS[status] || DEP_STATUS_KEYS.open;
+    return {
+      label: t(`admin.competitorMonitor.${key}`),
+      className: DEP_STATUS_COLORS[status] || DEP_STATUS_COLORS.open,
+    };
+  }, [status, t]);
   return (
-    <span className={`inline-block px-2 py-0.5 rounded-md text-xs font-medium ${c.className}`}>
-      {c.label}
+    <span className={`inline-block px-2 py-0.5 rounded-md text-xs font-medium ${config.className}`}>
+      {config.label}
     </span>
   );
 }
@@ -788,6 +842,7 @@ function SeverityDot({ severity }: { severity: string }) {
 }
 
 function PriceHistoryChart({ history }: { history: any[] }) {
+  const { t } = useLocale();
   // Simple SVG line chart for price history
   if (!history.length) return null;
 
@@ -860,13 +915,13 @@ function PriceHistoryChart({ history }: { history: any[] }) {
       </svg>
       <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
         <span className="flex items-center gap-1">
-          <span className="w-3 h-0.5 bg-teal-600 inline-block" /> 價格走勢
+          <span className="w-3 h-0.5 bg-teal-600 inline-block" /> {t("admin.competitorMonitor.chartPriceTrend")}
         </span>
         <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-full border-2 border-red-500 inline-block" /> 降價
+          <span className="w-2 h-2 rounded-full border-2 border-red-500 inline-block" /> {t("admin.competitorMonitor.chartPriceDrop")}
         </span>
         <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-full border-2 border-yellow-500 inline-block" /> 漲價
+          <span className="w-2 h-2 rounded-full border-2 border-yellow-500 inline-block" /> {t("admin.competitorMonitor.chartPriceIncrease")}
         </span>
       </div>
     </div>
