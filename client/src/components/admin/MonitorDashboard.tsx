@@ -15,6 +15,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useLocale } from "@/contexts/LocaleContext";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const trpcAny = trpc as any;
@@ -56,7 +57,7 @@ function StatCard({
   icon: React.ElementType;
 }) {
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-4 flex items-center gap-3">
+    <div className="bg-white border border-gray-200 rounded-xl p-4 flex items-center gap-3">
       <div className={`p-2 rounded-lg ${color}`}>
         <Icon className="w-5 h-5 text-white" />
       </div>
@@ -71,6 +72,7 @@ function StatCard({
 // ── Log Row ──────────────────────────────────────────────────
 function LogRow({ log }: { log: MonitorLog }) {
   const [expanded, setExpanded] = useState(false);
+  const { t, language } = useLocale();
 
   const statusColor =
     log.status === "ok"
@@ -81,22 +83,34 @@ function LogRow({ log }: { log: MonitorLog }) {
           ? "bg-red-100 text-red-700"
           : "bg-gray-100 text-gray-600";
 
-  const checkedAt = new Date(log.checkedAt).toLocaleString("zh-TW", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const checkedAt = new Date(log.checkedAt).toLocaleString(
+    language === 'en' ? 'en-US' : 'zh-TW',
+    {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }
+  );
+
+  const statusLabel =
+    log.status === "ok"
+      ? t('admin.monitorDashboard.statusOk')
+      : log.status === "changed"
+        ? t('admin.monitorDashboard.statusChanged')
+        : log.status === "error"
+          ? t('admin.monitorDashboard.statusError')
+          : log.status;
 
   return (
-    <div className="border border-gray-200 rounded-lg overflow-hidden">
+    <div className="border border-gray-200 rounded-xl overflow-hidden">
       <div
         className="flex items-center gap-3 px-4 py-3 bg-white cursor-pointer hover:bg-gray-50 transition-colors"
         onClick={() => setExpanded(!expanded)}
       >
         {/* Status */}
-        <Badge className={`text-xs px-2 py-0.5 ${statusColor} border-0 min-w-[56px] justify-center`}>
-          {log.status === "ok" ? "正常" : log.status === "changed" ? "變動" : log.status === "error" ? "錯誤" : log.status}
+        <Badge className={`text-xs px-2 py-0.5 rounded-md ${statusColor} border-0 min-w-[56px] justify-center`}>
+          {statusLabel}
         </Badge>
 
         {/* Change indicator */}
@@ -106,7 +120,7 @@ function LogRow({ log }: { log: MonitorLog }) {
 
         {/* Tour title */}
         <span className="text-sm font-medium text-gray-800 flex-1 truncate">
-          {log.tourTitle || `行程 #${log.tourId}`}
+          {log.tourTitle || t('admin.monitorDashboard.rowFallbackTitle', { id: String(log.tourId) })}
         </span>
 
         {/* Change summary */}
@@ -129,36 +143,36 @@ function LogRow({ log }: { log: MonitorLog }) {
         <div className="px-4 pb-3 bg-gray-50 border-t border-gray-100 space-y-2">
           <div className="grid grid-cols-2 gap-2 text-xs">
             <div>
-              <span className="text-gray-500">行程 ID：</span>
+              <span className="text-gray-500">{t('admin.monitorDashboard.detailTourId')}</span>
               <span className="text-gray-800 font-mono">{log.tourId}</span>
             </div>
             <div>
-              <span className="text-gray-500">檢查類型：</span>
+              <span className="text-gray-500">{t('admin.monitorDashboard.detailCheckType')}</span>
               <span className="text-gray-800">{log.checkType}</span>
             </div>
             {log.priceChange && (
               <div className="col-span-2">
-                <span className="text-gray-500">價格變動：</span>
+                <span className="text-gray-500">{t('admin.monitorDashboard.detailPriceChange')}</span>
                 <span className="text-yellow-700 font-medium">{log.priceChange}</span>
               </div>
             )}
             {log.seatsChange && (
               <div className="col-span-2">
-                <span className="text-gray-500">座位變動：</span>
+                <span className="text-gray-500">{t('admin.monitorDashboard.detailSeatsChange')}</span>
                 <span className="text-blue-700 font-medium">{log.seatsChange}</span>
               </div>
             )}
             {log.runId && (
               <div className="col-span-2">
-                <span className="text-gray-500">Run ID：</span>
+                <span className="text-gray-500">{t('admin.monitorDashboard.detailRunId')}</span>
                 <span className="text-gray-600 font-mono text-[10px]">{log.runId}</span>
               </div>
             )}
           </div>
           {log.rawResponse && (
             <details className="text-xs">
-              <summary className="text-gray-500 cursor-pointer hover:text-gray-700">查看原始回應</summary>
-              <pre className="mt-1 p-2 bg-white border border-gray-200 rounded text-[10px] overflow-auto max-h-32 text-gray-700">
+              <summary className="text-gray-500 cursor-pointer hover:text-gray-700">{t('admin.monitorDashboard.detailViewRaw')}</summary>
+              <pre className="mt-1 p-2 bg-white border border-gray-200 rounded-lg text-[10px] overflow-auto max-h-32 text-gray-700">
                 {log.rawResponse}
               </pre>
             </details>
@@ -170,7 +184,7 @@ function LogRow({ log }: { log: MonitorLog }) {
             className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
           >
             <ExternalLink className="w-3 h-3" />
-            查看行程頁面
+            {t('admin.monitorDashboard.detailViewTour')}
           </a>
         </div>
       )}
@@ -181,6 +195,7 @@ function LogRow({ log }: { log: MonitorLog }) {
 // ── Main Component ───────────────────────────────────────────
 export default function MonitorDashboard() {
   const [logLimit, setLogLimit] = useState(50);
+  const { t, language } = useLocale();
 
   // tRPC queries
   const { data: stats, refetch: refetchStats } = trpcAny.tourMonitor.getStats.useQuery();
@@ -202,7 +217,7 @@ export default function MonitorDashboard() {
       }, 3000);
     },
     onError: (err: { message: string }) => {
-      toast.error(`觸發失敗：${err.message}`);
+      toast.error(t('admin.monitorDashboard.toastTriggerFailed', { err: err.message }));
     },
   });
 
@@ -210,7 +225,7 @@ export default function MonitorDashboard() {
     refetchStats();
     refetchLogs();
     refetchLatestRun();
-    toast.success("已重新整理");
+    toast.success(t('admin.monitorDashboard.toastRefreshed'));
   };
 
   const statsData: MonitorStats = stats ?? { total: 0, ok: 0, changed: 0, error: 0, unmonitored: 0 };
@@ -220,40 +235,40 @@ export default function MonitorDashboard() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold text-gray-900">供應商監控儀表板</h2>
+          <h2 className="text-xl font-bold text-gray-900">{t('admin.monitorDashboard.title')}</h2>
           <p className="text-sm text-gray-500 mt-0.5">
-            每日凌晨 3:00 自動檢查行程出發日期、座位、價格變動
+            {t('admin.monitorDashboard.subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleRefresh}>
+          <Button variant="outline" size="sm" onClick={handleRefresh} className="rounded-lg">
             <RefreshCw className="w-4 h-4 mr-1.5" />
-            重新整理
+            {t('admin.monitorDashboard.refreshButton')}
           </Button>
           <Button
             size="sm"
             onClick={() => triggerRun.mutate()}
             disabled={triggerRun.isPending}
-            className="bg-blue-600 hover:bg-blue-700 text-white"
+            className="bg-blue-600 hover:bg-blue-700 text-white rounded-lg"
           >
             {triggerRun.isPending ? (
               <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
             ) : (
               <Activity className="w-4 h-4 mr-1.5" />
             )}
-            手動觸發監控
+            {t('admin.monitorDashboard.triggerButton')}
           </Button>
         </div>
       </div>
 
       {/* Latest Run Info */}
       {latestRun && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center gap-3 text-sm">
+        <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center gap-3 text-sm">
           <Clock className="w-4 h-4 text-blue-500 flex-shrink-0" />
           <span className="text-blue-700">
-            上次監控：
+            {t('admin.monitorDashboard.lastRunPrefix')}
             <span className="font-medium ml-1">
-              {new Date((latestRun as any).checkedAt || Date.now()).toLocaleString("zh-TW")}
+              {new Date((latestRun as any).checkedAt || Date.now()).toLocaleString(language === 'en' ? 'en-US' : 'zh-TW')}
             </span>
             {(latestRun as any).runId && (
               <span className="text-blue-500 ml-2 font-mono text-xs">#{(latestRun as any).runId?.slice(-8)}</span>
@@ -264,24 +279,24 @@ export default function MonitorDashboard() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <StatCard label="總行程數" value={statsData.total} color="bg-gray-500" icon={Activity} />
-        <StatCard label="正常" value={statsData.ok} color="bg-green-500" icon={CheckCircle2} />
-        <StatCard label="有變動" value={statsData.changed} color="bg-yellow-500" icon={AlertTriangle} />
-        <StatCard label="錯誤" value={statsData.error} color="bg-red-500" icon={XCircle} />
-        <StatCard label="未監控" value={statsData.unmonitored} color="bg-gray-400" icon={Clock} />
+        <StatCard label={t('admin.monitorDashboard.statTotal')} value={statsData.total} color="bg-gray-500" icon={Activity} />
+        <StatCard label={t('admin.monitorDashboard.statOk')} value={statsData.ok} color="bg-green-500" icon={CheckCircle2} />
+        <StatCard label={t('admin.monitorDashboard.statChanged')} value={statsData.changed} color="bg-yellow-500" icon={AlertTriangle} />
+        <StatCard label={t('admin.monitorDashboard.statError')} value={statsData.error} color="bg-red-500" icon={XCircle} />
+        <StatCard label={t('admin.monitorDashboard.statUnmonitored')} value={statsData.unmonitored} color="bg-gray-400" icon={Clock} />
       </div>
 
       {/* Recent Logs */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-gray-700">最近監控記錄</h3>
+          <h3 className="text-sm font-semibold text-gray-700">{t('admin.monitorDashboard.sectionRecent')}</h3>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500">顯示</span>
+            <span className="text-xs text-gray-500">{t('admin.monitorDashboard.showLabel')}</span>
             {[50, 100, 200].map((n) => (
               <button
                 key={n}
                 onClick={() => setLogLimit(n)}
-                className={`text-xs px-2 py-1 rounded border transition-colors ${
+                className={`text-xs px-2 py-1 rounded-md border transition-colors ${
                   logLimit === n
                     ? "bg-blue-600 text-white border-blue-600"
                     : "bg-white text-gray-600 border-gray-200 hover:border-blue-300"
@@ -290,20 +305,20 @@ export default function MonitorDashboard() {
                 {n}
               </button>
             ))}
-            <span className="text-xs text-gray-500">筆</span>
+            <span className="text-xs text-gray-500">{t('admin.monitorDashboard.showUnit')}</span>
           </div>
         </div>
 
         {logsLoading ? (
           <div className="flex items-center justify-center py-12 text-gray-400">
             <Loader2 className="w-6 h-6 animate-spin mr-2" />
-            <span className="text-sm">載入中...</span>
+            <span className="text-sm">{t('admin.monitorDashboard.loading')}</span>
           </div>
         ) : !logs || logs.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-gray-400">
             <Activity className="w-10 h-10 mb-3 opacity-40" />
-            <p className="text-sm">尚無監控記錄</p>
-            <p className="text-xs mt-1">點擊「手動觸發監控」開始第一次檢查</p>
+            <p className="text-sm">{t('admin.monitorDashboard.emptyTitle')}</p>
+            <p className="text-xs mt-1">{t('admin.monitorDashboard.emptyDesc')}</p>
           </div>
         ) : (
           <div className="space-y-2">
