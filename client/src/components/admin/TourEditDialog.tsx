@@ -448,6 +448,57 @@ export function TourEditDialog({
                     </div>
                   </div>
 
+                  {/* Row: 手動修正 AI 抽取的人數與日期（修正提取錯誤） */}
+                  <div className="col-span-2 grid grid-cols-3 gap-4">
+                    <div>
+                      <Label htmlFor="maxParticipants" className="text-sm font-medium">
+                        {t('tourEditDialog.maxParticipantsLabel')}
+                      </Label>
+                      <Input
+                        id="maxParticipants"
+                        type="number"
+                        min="0"
+                        value={editedData.maxParticipants ?? ''}
+                        placeholder={t('tourEditDialog.maxParticipantsPlaceholder')}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setEditedData({ ...editedData, maxParticipants: v === '' ? null : parseInt(v) || 0 });
+                        }}
+                        className="mt-2"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="startDate" className="text-sm font-medium">
+                        {t('tourEditDialog.startDate')}
+                      </Label>
+                      <Input
+                        id="startDate"
+                        type="date"
+                        value={editedData.startDate ? new Date(editedData.startDate).toISOString().slice(0, 10) : ''}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setEditedData({ ...editedData, startDate: v ? new Date(v) : null });
+                        }}
+                        className="mt-2"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="endDate" className="text-sm font-medium">
+                        {t('tourEditDialog.endDate')}
+                      </Label>
+                      <Input
+                        id="endDate"
+                        type="date"
+                        value={editedData.endDate ? new Date(editedData.endDate).toISOString().slice(0, 10) : ''}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setEditedData({ ...editedData, endDate: v ? new Date(v) : null });
+                        }}
+                        className="mt-2"
+                      />
+                    </div>
+                  </div>
+
                   <div className="col-span-2">
                     <Label htmlFor="description" className="text-sm font-medium">
                       {t('tourEditDialog.description')}

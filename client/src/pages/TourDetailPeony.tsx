@@ -1789,6 +1789,20 @@ export default function TourDetailPeony() {
     },
   });
 
+  // PDF 下載 mutation — calls server-side Puppeteer, returns S3 URL
+  const generatePdfMutation = trpc.tours.generatePdf.useMutation({
+    onSuccess: (data) => {
+      toast.success(t('tourDetail.pdfGenerated'));
+      // Open the signed PDF URL in a new tab so the browser downloads / previews it
+      if (data?.url) {
+        window.open(data.url, '_blank', 'noopener,noreferrer');
+      }
+    },
+    onError: (error) => {
+      toast.error(`${t('tourDetail.pdfFailed')}${error.message}`);
+    },
+  });
+
   // GA4: 行程詳情頁瀏覽事件
   useEffect(() => {
     if (tour) {
@@ -2275,14 +2289,26 @@ export default function TourDetailPeony() {
             
             {/* Action Buttons */}
             <div className="hidden md:flex items-center gap-4">
-              <button 
+              <button
                 onClick={() => window.open(`/tours/${tourId}/print`, '_blank')}
                 className="flex items-center gap-2 text-sm text-gray-600 hover:text-black transition-colors"
               >
                 <Printer className="h-4 w-4" />
                 {t('tourDetail.print')}
               </button>
-              <button 
+              <button
+                onClick={() => {
+                  if (!tourId) return;
+                  toast.info(t('tourDetail.pdfGenerating'));
+                  generatePdfMutation.mutate({ id: tourId });
+                }}
+                disabled={generatePdfMutation.isPending}
+                className="flex items-center gap-2 text-sm text-gray-600 hover:text-black transition-colors disabled:opacity-50 disabled:cursor-wait"
+              >
+                <Download className="h-4 w-4" />
+                {generatePdfMutation.isPending ? t('tourDetail.pdfGenerating') : t('tourDetail.downloadPdf')}
+              </button>
+              <button
                 onClick={() => setShowShareDialog(true)}
                 className="flex items-center gap-2 text-sm text-gray-600 hover:text-black transition-colors"
               >

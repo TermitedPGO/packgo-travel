@@ -501,6 +501,8 @@ export default function ToursTab() {
         status: tour.status,
         featured: tour.featured || 0,
         maxParticipants: tour.maxParticipants || undefined,
+        startDate: (tour as any).startDate || null,
+        endDate: (tour as any).endDate || null,
         // Content
         highlights: tour.highlights || "",
         includes: tour.includes || "",
