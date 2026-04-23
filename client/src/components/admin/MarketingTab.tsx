@@ -8,10 +8,10 @@
  * - Materials library
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useLocale } from "@/contexts/LocaleContext";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -43,12 +43,10 @@ import {
   Mail,
   Loader2,
   ExternalLink,
-  RefreshCw,
   Send,
   Facebook,
   Instagram,
   MessageCircle,
-  ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -80,22 +78,23 @@ const STATUS_COLORS: Record<CampaignStatus, string> = {
   cancelled: "bg-red-100 text-red-700",
 };
 
-const STATUS_LABELS: Record<CampaignStatus, string> = {
-  draft: "草稿",
-  scheduled: "已排程",
-  sent: "已發送",
-  cancelled: "已取消",
+const STATUS_KEYS: Record<CampaignStatus, string> = {
+  draft: "statusDraft",
+  scheduled: "statusScheduled",
+  sent: "statusSent",
+  cancelled: "statusCancelled",
 };
 
-const TYPE_LABELS: Record<CampaignType, string> = {
-  social_post: "社群貼文",
-  email_newsletter: "電子報",
-  poster: "海報",
+const TYPE_KEYS: Record<CampaignType, string> = {
+  social_post: "typeSocialPost",
+  email_newsletter: "typeEmailNewsletter",
+  poster: "typePoster",
 };
 
 // ── Main Component ─────────────────────────────────────────
 
 export default function MarketingTab() {
+  const { t } = useLocale();
   const [activeSubTab, setActiveSubTab] = useState<"campaigns" | "copy" | "poster" | "newsletter">("campaigns");
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -107,23 +106,23 @@ export default function MarketingTab() {
         <div className="flex items-center gap-3">
           <Megaphone className="w-6 h-6 text-teal-600" />
           <div>
-            <h2 className="text-xl font-bold text-gray-900">行銷自動化中心</h2>
-            <p className="text-sm text-gray-500">管理行銷活動、AI 文案、海報生成與電子報發送</p>
+            <h2 className="text-xl font-bold text-gray-900">{t("admin.marketing.pageTitle")}</h2>
+            <p className="text-sm text-gray-500">{t("admin.marketing.pageDesc")}</p>
           </div>
         </div>
-        <Button onClick={() => setShowCreateDialog(true)} className="flex items-center gap-2">
+        <Button onClick={() => setShowCreateDialog(true)} className="flex items-center gap-2 rounded-lg">
           <Plus className="w-4 h-4" />
-          新增活動
+          {t("admin.marketing.addCampaign")}
         </Button>
       </div>
 
       {/* Sub-tabs */}
       <Tabs value={activeSubTab} onValueChange={(v) => setActiveSubTab(v as typeof activeSubTab)}>
-        <TabsList className="grid grid-cols-4 w-full max-w-xl">
-          <TabsTrigger value="campaigns">活動管理</TabsTrigger>
-          <TabsTrigger value="copy">社群文案</TabsTrigger>
-          <TabsTrigger value="poster">海報生成</TabsTrigger>
-          <TabsTrigger value="newsletter">電子報</TabsTrigger>
+        <TabsList className="grid grid-cols-4 w-full max-w-xl rounded-lg">
+          <TabsTrigger value="campaigns">{t("admin.marketing.tabCampaigns")}</TabsTrigger>
+          <TabsTrigger value="copy">{t("admin.marketing.tabCopy")}</TabsTrigger>
+          <TabsTrigger value="poster">{t("admin.marketing.tabPoster")}</TabsTrigger>
+          <TabsTrigger value="newsletter">{t("admin.marketing.tabNewsletter")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="campaigns">
@@ -158,39 +157,41 @@ export default function MarketingTab() {
 // ── Campaigns Panel ────────────────────────────────────────
 
 function CampaignsPanel({
-  selectedCampaign,
+  selectedCampaign: _selectedCampaign,
   onSelectCampaign,
 }: {
   selectedCampaign: Campaign | null;
   onSelectCampaign: (c: Campaign | null) => void;
 }) {
+  const { t, language } = useLocale();
   const { data, isLoading, refetch } = trpc.marketing.listCampaigns.useQuery({ page: 1, pageSize: 50 });
   const deleteMutation = trpc.marketing.deleteCampaign.useMutation({
-    onSuccess: () => { toast.success("活動已刪除"); refetch(); },
+    onSuccess: () => { toast.success(t("admin.marketing.toastCampaignDeleted")); refetch(); },
     onError: (e) => toast.error(e.message),
   });
 
   if (isLoading) return <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>;
 
   const campaigns = (data as { campaigns?: Campaign[] })?.campaigns ?? [];
+  const locale = language === "en" ? "en-US" : "zh-TW";
 
   return (
     <div className="space-y-4">
       {campaigns.length === 0 ? (
         <div className="text-center py-16 text-gray-400">
           <Megaphone className="w-12 h-12 mx-auto mb-3 opacity-30" />
-          <p>尚無行銷活動，點擊「新增活動」開始</p>
+          <p>{t("admin.marketing.emptyCampaigns")}</p>
         </div>
       ) : (
-        <div className="border border-gray-200 rounded-lg overflow-hidden">
+        <div className="border border-gray-200 rounded-xl overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">活動名稱</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">類型</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">狀態</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">建立時間</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-600">操作</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">{t("admin.marketing.colCampaignName")}</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">{t("admin.marketing.colType")}</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">{t("admin.marketing.colStatus")}</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">{t("admin.marketing.colCreatedAt")}</th>
+                <th className="text-right px-4 py-3 font-medium text-gray-600">{t("admin.marketing.colActions")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -201,14 +202,14 @@ function CampaignsPanel({
                   onClick={() => onSelectCampaign(campaign)}
                 >
                   <td className="px-4 py-3 font-medium text-gray-900">{campaign.name}</td>
-                  <td className="px-4 py-3 text-gray-500">{TYPE_LABELS[campaign.type]}</td>
+                  <td className="px-4 py-3 text-gray-500">{t(`admin.marketing.${TYPE_KEYS[campaign.type]}`)}</td>
                   <td className="px-4 py-3">
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${STATUS_COLORS[campaign.status]}`}>
-                      {STATUS_LABELS[campaign.status]}
+                    <span className={`px-2 py-1 rounded-md text-xs font-medium ${STATUS_COLORS[campaign.status]}`}>
+                      {t(`admin.marketing.${STATUS_KEYS[campaign.status]}`)}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-gray-500">
-                    {new Date(campaign.createdAt).toLocaleDateString("zh-TW")}
+                    {new Date(campaign.createdAt).toLocaleDateString(locale)}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <Button
@@ -216,11 +217,11 @@ function CampaignsPanel({
                       size="sm"
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (confirm("確定刪除此活動？")) {
+                        if (confirm(t("admin.marketing.confirmDeleteCampaign"))) {
                           deleteMutation.mutate({ campaignId: campaign.id });
                         }
                       }}
-                      className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                      className="text-red-500 hover:text-red-700 hover:bg-red-50 rounded-md"
                     >
                       <Trash2 className="w-4 h-4" />
                     </Button>
@@ -238,6 +239,7 @@ function CampaignsPanel({
 // ── Copy Generator Panel ───────────────────────────────────
 
 function CopyGeneratorPanel() {
+  const { t } = useLocale();
   const [tourId, setTourId] = useState("");
   const [platform, setPlatform] = useState<Platform>("facebook");
   const [tone, setTone] = useState<Tone>("professional");
@@ -245,7 +247,7 @@ function CopyGeneratorPanel() {
   const [result, setResult] = useState<null | {
     mainCopy: string;
     hashtags: string[];
-     cta: string;
+    cta: string;
     characterCount: number;
   }>(null);
   const generateMutation = trpc.marketing.generateCopy.useMutation({
@@ -258,9 +260,9 @@ function CopyGeneratorPanel() {
         characterCount: ((data as any).copyText ?? (data as any).mainCopy ?? "").length,
       };
       setResult(mapped);
-      toast.success("文案生成成功！");
+      toast.success(t("admin.marketing.toastCopyGenerated"));
     },
-    onError: (e) => toast.error(`生成失敗：${e.message}`),
+    onError: (e) => toast.error(t("admin.marketing.toastGenerateFailedWithMsg", { msg: e.message })),
   });
 
   const platformIcons: Record<Platform, React.ReactNode> = {
@@ -272,25 +274,26 @@ function CopyGeneratorPanel() {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       {/* Left: Config */}
-      <div className="space-y-4 border border-gray-200 rounded-lg p-5">
+      <div className="space-y-4 border border-gray-200 rounded-xl p-5">
         <h3 className="font-semibold text-gray-900 flex items-center gap-2">
           <Copy className="w-4 h-4 text-teal-600" />
-          AI 社群文案生成器
+          {t("admin.marketing.copyGeneratorTitle")}
         </h3>
 
         <div className="space-y-3">
           <div>
-            <label className="text-sm font-medium text-gray-700 mb-1 block">行程 ID</label>
+            <label className="text-sm font-medium text-gray-700 mb-1 block">{t("admin.marketing.tourIdLabel")}</label>
             <Input
               type="number"
-              placeholder="輸入行程 ID"
+              placeholder={t("admin.marketing.tourIdPlaceholder")}
               value={tourId}
               onChange={(e) => setTourId(e.target.value)}
+              className="rounded-lg"
             />
           </div>
 
           <div>
-            <label className="text-sm font-medium text-gray-700 mb-1 block">目標平台</label>
+            <label className="text-sm font-medium text-gray-700 mb-1 block">{t("admin.marketing.targetPlatform")}</label>
             <div className="flex gap-2">
               {(["facebook", "instagram", "line"] as Platform[]).map((p) => (
                 <button
@@ -310,36 +313,36 @@ function CopyGeneratorPanel() {
           </div>
 
           <div>
-            <label className="text-sm font-medium text-gray-700 mb-1 block">文案風格</label>
+            <label className="text-sm font-medium text-gray-700 mb-1 block">{t("admin.marketing.copyTone")}</label>
             <Select value={tone} onValueChange={(v) => setTone(v as Tone)}>
-              <SelectTrigger>
+              <SelectTrigger className="rounded-lg">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="professional">專業正式</SelectItem>
-                <SelectItem value="casual">輕鬆親切</SelectItem>
-                <SelectItem value="exciting">熱情活潑</SelectItem>
-                <SelectItem value="luxury">高端奢華</SelectItem>
+                <SelectItem value="professional">{t("admin.marketing.toneProfessional")}</SelectItem>
+                <SelectItem value="casual">{t("admin.marketing.toneCasual")}</SelectItem>
+                <SelectItem value="exciting">{t("admin.marketing.toneExciting")}</SelectItem>
+                <SelectItem value="luxury">{t("admin.marketing.toneLuxury")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
           <div>
-            <label className="text-sm font-medium text-gray-700 mb-1 block">語言</label>
+            <label className="text-sm font-medium text-gray-700 mb-1 block">{t("admin.marketing.language")}</label>
             <Select value={language} onValueChange={(v) => setLanguage(v as "zh-TW" | "en")}>
-              <SelectTrigger>
+              <SelectTrigger className="rounded-lg">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="zh-TW">繁體中文</SelectItem>
-                <SelectItem value="en">English</SelectItem>
+                <SelectItem value="zh-TW">{t("admin.marketing.langZhTW")}</SelectItem>
+                <SelectItem value="en">{t("admin.marketing.langEn")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
           <Button
             onClick={() => {
-              if (!tourId) { toast.error("請輸入行程 ID"); return; }
+              if (!tourId) { toast.error(t("admin.marketing.tourIdRequired")); return; }
               generateMutation.mutate({
                 tourId: parseInt(tourId),
                 platform,
@@ -348,46 +351,48 @@ function CopyGeneratorPanel() {
               });
             }}
             disabled={generateMutation.isPending}
-            className="w-full"
+            className="w-full rounded-lg"
           >
             {generateMutation.isPending ? (
-              <><Loader2 className="w-4 h-4 animate-spin mr-2" />生成中...</>
+              <><Loader2 className="w-4 h-4 animate-spin mr-2" />{t("admin.marketing.generating")}</>
             ) : (
-              <><Copy className="w-4 h-4 mr-2" />生成文案</>
+              <><Copy className="w-4 h-4 mr-2" />{t("admin.marketing.generateCopy")}</>
             )}
           </Button>
         </div>
       </div>
 
       {/* Right: Result */}
-      <div className="border border-gray-200 rounded-lg p-5">
-        <h3 className="font-semibold text-gray-900 mb-4">生成結果</h3>
+      <div className="border border-gray-200 rounded-xl p-5">
+        <h3 className="font-semibold text-gray-900 mb-4">{t("admin.marketing.generationResult")}</h3>
         {!result ? (
           <div className="text-center py-12 text-gray-400">
             <Copy className="w-10 h-10 mx-auto mb-3 opacity-30" />
-            <p>填寫左側設定後點擊「生成文案」</p>
+            <p>{t("admin.marketing.configFirstCopy")}</p>
           </div>
         ) : (
           <div className="space-y-4">
             <div>
-              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1 block">主文案</label>
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1 block">{t("admin.marketing.mainCopy")}</label>
               <div className="bg-gray-50 rounded-lg p-3 text-sm text-gray-800 whitespace-pre-wrap">
                 {result.mainCopy}
               </div>
-              <p className="text-xs text-gray-400 mt-1 text-right">{result.characterCount} 字</p>
+              <p className="text-xs text-gray-400 mt-1 text-right">
+                {t("admin.marketing.charCount", { n: String(result.characterCount) })}
+              </p>
             </div>
 
             <div>
               <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1 block">Hashtags</label>
               <div className="flex flex-wrap gap-1">
                 {result.hashtags.map((tag, i) => (
-                  <span key={i} className="bg-teal-50 text-teal-700 text-xs px-2 py-1 rounded">{tag}</span>
+                  <span key={i} className="bg-teal-50 text-teal-700 text-xs px-2 py-1 rounded-md">{tag}</span>
                 ))}
               </div>
             </div>
 
             <div>
-              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1 block">行動呼籲 (CTA)</label>
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1 block">{t("admin.marketing.ctaLabel")}</label>
               <div className="bg-teal-50 rounded-lg p-3 text-sm text-teal-800 font-medium">
                 {result.cta}
               </div>
@@ -399,12 +404,12 @@ function CopyGeneratorPanel() {
               onClick={() => {
                 const text = `${result.mainCopy}\n\n${result.hashtags.join(" ")}\n\n${result.cta}`;
                 navigator.clipboard.writeText(text);
-                toast.success("已複製到剪貼簿");
+                toast.success(t("admin.marketing.copiedToClipboard"));
               }}
-              className="w-full"
+              className="w-full rounded-lg"
             >
               <Copy className="w-4 h-4 mr-2" />
-              複製全部
+              {t("admin.marketing.copyAll")}
             </Button>
           </div>
         )}
@@ -416,6 +421,7 @@ function CopyGeneratorPanel() {
 // ── Poster Generator Panel ─────────────────────────────────
 
 function PosterGeneratorPanel() {
+  const { t } = useLocale();
   const [tourId, setTourId] = useState("");
   const [format, setFormat] = useState<PosterFormat>("landscape");
   const [result, setResult] = useState<null | { s3Url: string; format: string; width: number; height: number }>(null);
@@ -423,39 +429,40 @@ function PosterGeneratorPanel() {
   const generateMutation = trpc.marketing.generatePoster.useMutation({
     onSuccess: (data) => {
       setResult(data);
-      toast.success("海報生成成功！");
+      toast.success(t("admin.marketing.toastPosterGenerated"));
     },
-    onError: (e) => toast.error(`生成失敗：${e.message}`),
+    onError: (e) => toast.error(t("admin.marketing.toastGenerateFailedWithMsg", { msg: e.message })),
   });
 
-  const formatInfo: Record<PosterFormat, { label: string; size: string; desc: string }> = {
-    landscape: { label: "橫式", size: "1200×630", desc: "Facebook/OG 封面" },
-    square: { label: "方形", size: "1080×1080", desc: "Instagram 貼文" },
-    story: { label: "限動", size: "1080×1920", desc: "IG/LINE 限時動態" },
-  };
+  const formatInfo = useMemo<Record<PosterFormat, { label: string; size: string; desc: string }>>(() => ({
+    landscape: { label: t("admin.marketing.formatLandscape"), size: "1200×630", desc: t("admin.marketing.formatLandscapeDesc") },
+    square: { label: t("admin.marketing.formatSquare"), size: "1080×1080", desc: t("admin.marketing.formatSquareDesc") },
+    story: { label: t("admin.marketing.formatStory"), size: "1080×1920", desc: t("admin.marketing.formatStoryDesc") },
+  }), [t]);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       {/* Left: Config */}
-      <div className="space-y-4 border border-gray-200 rounded-lg p-5">
+      <div className="space-y-4 border border-gray-200 rounded-xl p-5">
         <h3 className="font-semibold text-gray-900 flex items-center gap-2">
           <Image className="w-4 h-4 text-teal-600" />
-          AI 海報生成器
+          {t("admin.marketing.posterGeneratorTitle")}
         </h3>
 
         <div className="space-y-3">
           <div>
-            <label className="text-sm font-medium text-gray-700 mb-1 block">行程 ID</label>
+            <label className="text-sm font-medium text-gray-700 mb-1 block">{t("admin.marketing.tourIdLabel")}</label>
             <Input
               type="number"
-              placeholder="輸入行程 ID"
+              placeholder={t("admin.marketing.tourIdPlaceholder")}
               value={tourId}
               onChange={(e) => setTourId(e.target.value)}
+              className="rounded-lg"
             />
           </div>
 
           <div>
-            <label className="text-sm font-medium text-gray-700 mb-1 block">海報尺寸</label>
+            <label className="text-sm font-medium text-gray-700 mb-1 block">{t("admin.marketing.posterFormat")}</label>
             <div className="grid grid-cols-3 gap-2">
               {(["landscape", "square", "story"] as PosterFormat[]).map((f) => (
                 <button
@@ -477,36 +484,36 @@ function PosterGeneratorPanel() {
 
           <Button
             onClick={() => {
-              if (!tourId) { toast.error("請輸入行程 ID"); return; }
+              if (!tourId) { toast.error(t("admin.marketing.tourIdRequired")); return; }
               generateMutation.mutate({ tourId: parseInt(tourId), format });
             }}
             disabled={generateMutation.isPending}
-            className="w-full"
+            className="w-full rounded-lg"
           >
             {generateMutation.isPending ? (
-              <><Loader2 className="w-4 h-4 animate-spin mr-2" />生成中（約 15-30 秒）...</>
+              <><Loader2 className="w-4 h-4 animate-spin mr-2" />{t("admin.marketing.posterGenerating")}</>
             ) : (
-              <><Image className="w-4 h-4 mr-2" />生成海報</>
+              <><Image className="w-4 h-4 mr-2" />{t("admin.marketing.generatePoster")}</>
             )}
           </Button>
         </div>
       </div>
 
       {/* Right: Preview */}
-      <div className="border border-gray-200 rounded-lg p-5">
-        <h3 className="font-semibold text-gray-900 mb-4">海報預覽</h3>
+      <div className="border border-gray-200 rounded-xl p-5">
+        <h3 className="font-semibold text-gray-900 mb-4">{t("admin.marketing.posterPreview")}</h3>
         {!result ? (
           <div className="text-center py-12 text-gray-400">
             <Image className="w-10 h-10 mx-auto mb-3 opacity-30" />
-            <p>填寫左側設定後點擊「生成海報」</p>
+            <p>{t("admin.marketing.configFirstPoster")}</p>
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="border border-gray-200 rounded-lg overflow-hidden">
+            <div className="border border-gray-200 rounded-xl overflow-hidden">
               <img
                 src={result.s3Url}
                 alt="Generated poster"
-                className="w-full object-contain"
+                className="w-full object-contain rounded-xl"
                 style={{ maxHeight: "400px" }}
               />
             </div>
@@ -519,7 +526,7 @@ function PosterGeneratorPanel() {
                 className="flex items-center gap-1 text-teal-600 hover:underline"
               >
                 <ExternalLink className="w-3 h-3" />
-                開啟原圖
+                {t("admin.marketing.openOriginal")}
               </a>
             </div>
           </div>
@@ -532,6 +539,7 @@ function PosterGeneratorPanel() {
 // ── Newsletter Panel ───────────────────────────────────────
 
 function NewsletterPanel() {
+  const { t } = useLocale();
   const [subject, setSubject] = useState("");
   const [htmlContent, setHtmlContent] = useState("");
   const [campaignId, setCampaignId] = useState("");
@@ -540,70 +548,75 @@ function NewsletterPanel() {
   const sendMutation = trpc.marketing.sendNewsletter.useMutation({
     onSuccess: (data) => {
       const r = data as { sent?: number; failed?: number };
-      toast.success(`電子報發送完成！成功 ${r.sent ?? 0} 封，失敗 ${r.failed ?? 0} 封`);
+      toast.success(t("admin.marketing.toastNewsletterSent", {
+        sent: String(r.sent ?? 0),
+        failed: String(r.failed ?? 0),
+      }));
       setSubject("");
       setHtmlContent("");
     },
-    onError: (e) => toast.error(`發送失敗：${e.message}`),
+    onError: (e) => toast.error(t("admin.marketing.toastSendFailed", { msg: e.message })),
   });
 
   return (
     <div className="space-y-6">
       {/* Subscriber stats */}
       <div className="grid grid-cols-2 gap-4">
-        <div className="border border-gray-200 rounded-lg p-4 text-center">
+        <div className="border border-gray-200 rounded-xl p-4 text-center">
           <p className="text-3xl font-bold text-teal-600">{statsData?.active ?? 0}</p>
-          <p className="text-sm text-gray-500 mt-1">有效訂閱者</p>
+          <p className="text-sm text-gray-500 mt-1">{t("admin.marketing.activeSubs")}</p>
         </div>
-        <div className="border border-gray-200 rounded-lg p-4 text-center">
+        <div className="border border-gray-200 rounded-xl p-4 text-center">
           <p className="text-3xl font-bold text-gray-700">{statsData?.total ?? 0}</p>
-          <p className="text-sm text-gray-500 mt-1">總訂閱者</p>
+          <p className="text-sm text-gray-500 mt-1">{t("admin.marketing.totalSubs")}</p>
         </div>
       </div>
 
       {/* Compose */}
-      <div className="border border-gray-200 rounded-lg p-5 space-y-4">
+      <div className="border border-gray-200 rounded-xl p-5 space-y-4">
         <h3 className="font-semibold text-gray-900 flex items-center gap-2">
           <Mail className="w-4 h-4 text-teal-600" />
-          撰寫電子報
+          {t("admin.marketing.composeNewsletter")}
         </h3>
 
         <div>
-          <label className="text-sm font-medium text-gray-700 mb-1 block">活動 ID（選填）</label>
+          <label className="text-sm font-medium text-gray-700 mb-1 block">{t("admin.marketing.campaignIdOptional")}</label>
           <Input
             type="number"
-            placeholder="關聯到現有活動"
+            placeholder={t("admin.marketing.linkToCampaign")}
             value={campaignId}
             onChange={(e) => setCampaignId(e.target.value)}
+            className="rounded-lg"
           />
         </div>
 
         <div>
-          <label className="text-sm font-medium text-gray-700 mb-1 block">郵件主旨</label>
+          <label className="text-sm font-medium text-gray-700 mb-1 block">{t("admin.marketing.emailSubject")}</label>
           <Input
-            placeholder="例：【PACK&GO】日本東京 5 天 4 夜限時優惠"
+            placeholder={t("admin.marketing.subjectPlaceholder")}
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
+            className="rounded-lg"
           />
         </div>
 
         <div>
-          <label className="text-sm font-medium text-gray-700 mb-1 block">HTML 內容</label>
+          <label className="text-sm font-medium text-gray-700 mb-1 block">{t("admin.marketing.htmlContent")}</label>
           <Textarea
-            placeholder="輸入 HTML 格式的電子報內容..."
+            placeholder={t("admin.marketing.htmlContentPlaceholder")}
             value={htmlContent}
             onChange={(e) => setHtmlContent(e.target.value)}
             rows={10}
-            className="font-mono text-sm"
+            className="font-mono text-sm rounded-lg"
           />
         </div>
 
         <Button
           onClick={() => {
-            if (!subject) { toast.error("請輸入郵件主旨"); return; }
-            if (!htmlContent) { toast.error("請輸入電子報內容"); return; }
-            if (!campaignId) { toast.error("請輸入活動 ID"); return; }
-            if (!confirm(`確定發送給 ${statsData?.active ?? 0} 位訂閱者？`)) return;
+            if (!subject) { toast.error(t("admin.marketing.subjectRequired")); return; }
+            if (!htmlContent) { toast.error(t("admin.marketing.contentRequired")); return; }
+            if (!campaignId) { toast.error(t("admin.marketing.campaignIdRequired")); return; }
+            if (!confirm(t("admin.marketing.confirmSendPrompt", { n: String(statsData?.active ?? 0) }))) return;
             sendMutation.mutate({
               campaignId: parseInt(campaignId),
               subject,
@@ -611,12 +624,12 @@ function NewsletterPanel() {
             });
           }}
           disabled={sendMutation.isPending}
-          className="w-full"
+          className="w-full rounded-lg"
         >
           {sendMutation.isPending ? (
-            <><Loader2 className="w-4 h-4 animate-spin mr-2" />發送中...</>
+            <><Loader2 className="w-4 h-4 animate-spin mr-2" />{t("admin.marketing.sending")}</>
           ) : (
-            <><Send className="w-4 h-4 mr-2" />發送電子報</>
+            <><Send className="w-4 h-4 mr-2" />{t("admin.marketing.sendNewsletter")}</>
           )}
         </Button>
       </div>
@@ -627,6 +640,7 @@ function NewsletterPanel() {
 // ── Create Campaign Dialog ─────────────────────────────────
 
 function CreateCampaignDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { t } = useLocale();
   const [name, setName] = useState("");
   const [type, setType] = useState<CampaignType>("social_post");
   const [tourId, setTourId] = useState("");
@@ -635,7 +649,7 @@ function CreateCampaignDialog({ open, onClose }: { open: boolean; onClose: () =>
   const utils = trpc.useUtils();
   const createMutation = trpc.marketing.createCampaign.useMutation({
     onSuccess: () => {
-      toast.success("活動已建立");
+      toast.success(t("admin.marketing.toastCampaignCreated"));
       utils.marketing.listCampaigns.invalidate();
       onClose();
       setName("");
@@ -648,62 +662,66 @@ function CreateCampaignDialog({ open, onClose }: { open: boolean; onClose: () =>
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md rounded-xl">
         <DialogHeader>
-          <DialogTitle>新增行銷活動</DialogTitle>
+          <DialogTitle>{t("admin.marketing.createCampaignTitle")}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
           <div>
-            <label className="text-sm font-medium text-gray-700 mb-1 block">活動名稱</label>
+            <label className="text-sm font-medium text-gray-700 mb-1 block">{t("admin.marketing.colCampaignName")}</label>
             <Input
-              placeholder="例：2025 春季日本行銷活動"
+              placeholder={t("admin.marketing.namePlaceholder")}
               value={name}
               onChange={(e) => setName(e.target.value)}
+              className="rounded-lg"
             />
           </div>
 
           <div>
-            <label className="text-sm font-medium text-gray-700 mb-1 block">活動類型</label>
+            <label className="text-sm font-medium text-gray-700 mb-1 block">{t("admin.marketing.campaignType")}</label>
             <Select value={type} onValueChange={(v) => setType(v as CampaignType)}>
-              <SelectTrigger>
+              <SelectTrigger className="rounded-lg">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="social_post">社群貼文</SelectItem>
-                <SelectItem value="email_newsletter">電子報</SelectItem>
-                <SelectItem value="poster">海報</SelectItem>
+                <SelectItem value="social_post">{t("admin.marketing.typeSocialPost")}</SelectItem>
+                <SelectItem value="email_newsletter">{t("admin.marketing.typeEmailNewsletter")}</SelectItem>
+                <SelectItem value="poster">{t("admin.marketing.typePoster")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
           <div>
-            <label className="text-sm font-medium text-gray-700 mb-1 block">關聯行程 ID（選填）</label>
+            <label className="text-sm font-medium text-gray-700 mb-1 block">{t("admin.marketing.associatedTourId")}</label>
             <Input
               type="number"
-              placeholder="輸入行程 ID"
+              placeholder={t("admin.marketing.tourIdPlaceholder")}
               value={tourId}
               onChange={(e) => setTourId(e.target.value)}
+              className="rounded-lg"
             />
           </div>
 
           {type === "email_newsletter" && (
             <div>
-              <label className="text-sm font-medium text-gray-700 mb-1 block">郵件主旨（選填）</label>
+              <label className="text-sm font-medium text-gray-700 mb-1 block">{t("admin.marketing.subjectOptional")}</label>
               <Input
-                placeholder="電子報主旨"
+                placeholder={t("admin.marketing.newsletterSubject")}
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
+                className="rounded-lg"
               />
             </div>
           )}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>取消</Button>
+          <Button variant="outline" onClick={onClose} className="rounded-lg">{t("admin.marketing.cancel")}</Button>
           <Button
+            className="rounded-lg"
             onClick={() => {
-              if (!name) { toast.error("請輸入活動名稱"); return; }
+              if (!name) { toast.error(t("admin.marketing.nameRequired")); return; }
               createMutation.mutate({
                 name,
                 type,
@@ -713,7 +731,7 @@ function CreateCampaignDialog({ open, onClose }: { open: boolean; onClose: () =>
             }}
             disabled={createMutation.isPending}
           >
-            {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "建立"}
+            {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : t("admin.marketing.create")}
           </Button>
         </DialogFooter>
       </DialogContent>
