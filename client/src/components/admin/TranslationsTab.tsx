@@ -22,35 +22,8 @@ import { Loader2, Languages, RefreshCw, CheckCircle, XCircle, Search, Globe } fr
 import { toast } from "sonner";
 import { useLocale } from "@/contexts/LocaleContext";
 
-// 語言顯示名稱
-const LANGUAGE_LABELS: Record<string, string> = {
-  en: "English (EN)",
-  ja: "日本語 (JA)",
-  ko: "한국어 (KO)",
-};
-
-// 翻譯欄位顯示名稱（一般行程 + AI 生成行程）
-const FIELD_LABELS: Record<string, string> = {
-  title: "Title",
-  description: "Description",
-  highlights: "Highlights",
-  includes: "Includes",
-  excludes: "Excludes",
-  notes: "Notes",
-  heroSubtitle: "Subtitle (AI)",
-  keyFeatures: "Key Features (AI)",
-  itineraryDetailed: "Itinerary Details (AI)",
-  costExplanation: "Cost Explanation (AI)",
-  noticeDetailed: "Notice Details (AI)",
-};
-
-type TourWithTranslationStatus = {
-  id: number;
-  title: string;
-  status: string;
-  hasEn: boolean;
-  enFieldCount: number;
-};
+// Total fields fallback when backend summary is absent
+const TOTAL_TRANSLATION_FIELDS = 11;
 
 export default function TranslationsTab() {
   const { t } = useLocale();
@@ -74,12 +47,12 @@ export default function TranslationsTab() {
   // 翻譯所有行程 mutation
   const translateAllMutation = trpc.translation.translateAllTours.useMutation({
     onSuccess: (data) => {
-      toast.success(t('translationsTab.batchTranslateSuccess').replace('{count}', String(data.totalTours)));
+      toast.success(t('translationsTab.batchTranslateSuccess', { count: String(data.totalTours) }));
       refetchTranslations();
       setIsTranslateAllDialogOpen(false);
     },
     onError: (error) => {
-      toast.error(t('translationsTab.translateError').replace('{message}', error.message));
+      toast.error(t('translationsTab.translateError', { message: error.message }));
     },
   });
 
@@ -87,13 +60,13 @@ export default function TranslationsTab() {
   const translateTourMutation = trpc.translation.translateTour.useMutation({
     onSuccess: (data) => {
       const langs = data.translatedLanguages?.join(", ") || "EN/ES";
-      toast.success(t('translationsTab.singleTranslateSuccess').replace('{langs}', langs));
+      toast.success(t('translationsTab.singleTranslateSuccess', { langs }));
       refetchTranslations();
       setIsTranslateSingleDialogOpen(false);
       setSelectedTour(null);
     },
     onError: (error) => {
-      toast.error(t('translationsTab.translateError').replace('{message}', error.message));
+      toast.error(t('translationsTab.translateError', { message: error.message }));
     },
   });
 
@@ -137,10 +110,10 @@ export default function TranslationsTab() {
       : {};
 
   const tourList = Array.isArray(tours) ? tours : [];
-  const filteredTours = tourList.filter((t: any) =>
+  const filteredTours = tourList.filter((tour: any) =>
     !searchKeyword ||
-    t.title?.toLowerCase().includes(searchKeyword.toLowerCase()) ||
-    t.destination?.toLowerCase().includes(searchKeyword.toLowerCase())
+    tour.title?.toLowerCase().includes(searchKeyword.toLowerCase()) ||
+    tour.destination?.toLowerCase().includes(searchKeyword.toLowerCase())
   );
 
   const totalTours = tourList.length;
@@ -175,11 +148,11 @@ export default function TranslationsTab() {
 
       {/* 統計卡片 */}
       <div className="grid grid-cols-2 gap-4">
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
+        <div className="bg-white border border-gray-200 rounded-xl p-4">
           <div className="text-2xl font-bold text-gray-900">{totalTours}</div>
           <div className="text-sm text-gray-500">{t('translationsTab.totalTours')}</div>
         </div>
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
+        <div className="bg-white border border-gray-200 rounded-xl p-4">
           <div className="text-2xl font-bold text-green-600">{translatedEnCount}</div>
           <div className="text-sm text-gray-500">{t('translationsTab.translatedEn')}</div>
           <div className="text-xs text-gray-400 mt-1">
@@ -195,7 +168,7 @@ export default function TranslationsTab() {
           placeholder={t('translationsTab.searchPlaceholder')}
           value={searchKeyword}
           onChange={(e) => setSearchKeyword(e.target.value)}
-          className="pl-10"
+          className="pl-10 rounded-lg"
         />
       </div>
 
@@ -229,7 +202,7 @@ export default function TranslationsTab() {
                   const translationStatus = translationSummaryMap[tour.id];
                   const hasEn = translationStatus?.hasEn ?? false;
                   const enCount = translationStatus?.enCount ?? 0;
-                  const totalFields = translationStatus?.totalFields ?? Object.keys(FIELD_LABELS).length;
+                  const totalFields = translationStatus?.totalFields ?? TOTAL_TRANSLATION_FIELDS;
 
                   return (
                     <TableRow key={tour.id} className="hover:bg-gray-50">
@@ -281,7 +254,7 @@ export default function TranslationsTab() {
 
       {/* 翻譯所有行程確認對話框 */}
       <Dialog open={isTranslateAllDialogOpen} onOpenChange={setIsTranslateAllDialogOpen}>
-        <DialogContent>
+        <DialogContent className="rounded-xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Globe className="h-5 w-5" />
@@ -290,7 +263,7 @@ export default function TranslationsTab() {
           </DialogHeader>
           <div className="py-4 space-y-3">
             <p className="text-gray-600">
-              {t('translationsTab.translateAllDesc').replace('{count}', String(totalTours))}
+              {t('translationsTab.translateAllDesc', { count: String(totalTours) })}
             </p>
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-700">
               <strong>{t('translationsTab.warningLabel')}</strong>{t('translationsTab.translateAllWarning')}
@@ -319,7 +292,7 @@ export default function TranslationsTab() {
 
       {/* 翻譯單一行程確認對話框 */}
       <Dialog open={isTranslateSingleDialogOpen} onOpenChange={setIsTranslateSingleDialogOpen}>
-        <DialogContent>
+        <DialogContent className="rounded-xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Languages className="h-5 w-5" />
@@ -328,7 +301,7 @@ export default function TranslationsTab() {
           </DialogHeader>
           <div className="py-4 space-y-3">
             <p className="text-gray-600">
-              {t('translationsTab.translateTourDesc').replace('{title}', selectedTour?.title || '')}
+              {t('translationsTab.translateTourDesc', { title: selectedTour?.title || '' })}
             </p>
             <p className="text-sm text-gray-500">
               {t('translationsTab.targetLanguages')}
