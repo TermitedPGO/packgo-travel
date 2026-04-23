@@ -45,13 +45,13 @@ export function TourEditDialog({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 上傳圖片到 S3
-  const uploadImageFile = useCallback(async (file: File, index?: number): Promise<string | null> => {
+  const uploadImageFile = useCallback(async (file: File, _index?: number): Promise<string | null> => {
     if (!file.type.startsWith('image/')) {
-      toast.error('只支援圖片格式（JPG、PNG、WebP）');
+      toast.error(t('tourEditDialog.toastImageFormatOnly'));
       return null;
     }
     if (file.size > 10 * 1024 * 1024) {
-      toast.error('圖片大小不能超過 10MB');
+      toast.error(t('tourEditDialog.toastImageSizeMax'));
       return null;
     }
     return new Promise((resolve) => {
@@ -68,19 +68,19 @@ export function TourEditDialog({
           const { url } = await response.json();
           resolve(url);
         } catch (err) {
-          toast.error('圖片上傳失敗，請重試');
+          toast.error(t('tourEditDialog.toastUploadFailed'));
           resolve(null);
         }
       };
       reader.readAsDataURL(file);
     });
-  }, []);
+  }, [t]);
 
   // 處理拖曳上傳多張圖片
   const handleDropImages = useCallback(async (files: FileList) => {
     const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
     if (imageFiles.length === 0) return;
-    toast.info(`正在上傳 ${imageFiles.length} 張圖片...`);
+    toast.info(t('tourEditDialog.toastUploadingN', { n: String(imageFiles.length) }));
     const newImages = [...(editedData?.images || [])];
     const startIndex = newImages.length;
     // 先加入佔位符
@@ -103,8 +103,8 @@ export function TourEditDialog({
       });
       return { ...prev, images: updated.filter((img: any) => img.url !== '' || updated.indexOf(img) < startIndex) };
     });
-    toast.success(`${results.filter(r => r.url).length} 張圖片上傳成功`);
-  }, [editedData?.images, uploadImageFile]);
+    toast.success(t('tourEditDialog.toastNUploaded', { n: String(results.filter(r => r.url).length) }));
+  }, [editedData?.images, uploadImageFile, t]);
 
   // 當 tourData 變化時，更新 editedData
   useEffect(() => {
@@ -1307,10 +1307,10 @@ export function TourEditDialog({
                 {/* 巴士詳細資訊 */}
                 {editedData.flights?.type === 'BUS' && (
                   <div className="bg-white rounded-lg p-4 space-y-4 border border-sky-200">
-                    <h4 className="font-medium text-sky-800">巴士詳細資訊</h4>
+                    <h4 className="font-medium text-sky-800">{t('tourEditDialog.busDetails')}</h4>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <Label className="text-sm font-medium">巴士公司</Label>
+                        <Label className="text-sm font-medium">{t('tourEditDialog.busCompany')}</Label>
                         <Input
                           value={editedData.flights?.busCompany || ''}
                           onChange={(e) => setEditedData({
@@ -1318,11 +1318,11 @@ export function TourEditDialog({
                             flights: { ...editedData.flights, busCompany: e.target.value }
                           })}
                           className="mt-2"
-                          placeholder="例：山峰巴士"
+                          placeholder={t('tourEditDialog.busCompanyPlaceholder')}
                         />
                       </div>
                       <div>
-                        <Label className="text-sm font-medium">路線說明</Label>
+                        <Label className="text-sm font-medium">{t('tourEditDialog.busRoute')}</Label>
                         <Input
                           value={editedData.flights?.busRoute || ''}
                           onChange={(e) => setEditedData({
@@ -1330,12 +1330,12 @@ export function TourEditDialog({
                             flights: { ...editedData.flights, busRoute: e.target.value }
                           })}
                           className="mt-2"
-                          placeholder="例：台北 → 花蓮"
+                          placeholder={t('tourEditDialog.busRoutePlaceholder')}
                         />
                       </div>
                     </div>
                     <div>
-                      <Label className="text-sm font-medium">巴士說明</Label>
+                      <Label className="text-sm font-medium">{t('tourEditDialog.busDesc')}</Label>
                       <Textarea
                         value={editedData.flights?.description || ''}
                         onChange={(e) => setEditedData({
@@ -1344,7 +1344,7 @@ export function TourEditDialog({
                         })}
                         className="mt-2"
                         rows={3}
-                        placeholder="巴士相關說明或注意事項"
+                        placeholder={t('tourEditDialog.busDescPlaceholder')}
                       />
                     </div>
                   </div>
@@ -1353,10 +1353,10 @@ export function TourEditDialog({
                 {/* 自駕/租車詳細資訊 */}
                 {editedData.flights?.type === 'CAR' && (
                   <div className="bg-white rounded-lg p-4 space-y-4 border border-sky-200">
-                    <h4 className="font-medium text-sky-800">自駕/租車詳細資訊</h4>
+                    <h4 className="font-medium text-sky-800">{t('tourEditDialog.carDetails')}</h4>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <Label className="text-sm font-medium">車輛類型</Label>
+                        <Label className="text-sm font-medium">{t('tourEditDialog.carType')}</Label>
                         <Input
                           value={editedData.flights?.carType || ''}
                           onChange={(e) => setEditedData({
@@ -1364,11 +1364,11 @@ export function TourEditDialog({
                             flights: { ...editedData.flights, carType: e.target.value }
                           })}
                           className="mt-2"
-                          placeholder="例： SUV / 轎車 / 小客車"
+                          placeholder={t('tourEditDialog.carTypePlaceholder')}
                         />
                       </div>
                       <div>
-                        <Label className="text-sm font-medium">租車公司</Label>
+                        <Label className="text-sm font-medium">{t('tourEditDialog.carCompany')}</Label>
                         <Input
                           value={editedData.flights?.carCompany || ''}
                           onChange={(e) => setEditedData({
@@ -1376,12 +1376,12 @@ export function TourEditDialog({
                             flights: { ...editedData.flights, carCompany: e.target.value }
                           })}
                           className="mt-2"
-                          placeholder="例： Hertz / 區域租車"
+                          placeholder={t('tourEditDialog.carCompanyPlaceholder')}
                         />
                       </div>
                     </div>
                     <div>
-                      <Label className="text-sm font-medium">說明與注意事項</Label>
+                      <Label className="text-sm font-medium">{t('tourEditDialog.carDesc')}</Label>
                       <Textarea
                         value={editedData.flights?.description || ''}
                         onChange={(e) => setEditedData({
@@ -1390,7 +1390,7 @@ export function TourEditDialog({
                         })}
                         className="mt-2"
                         rows={3}
-                        placeholder="自駕或租車相關說明"
+                        placeholder={t('tourEditDialog.carDescPlaceholder')}
                       />
                     </div>
                   </div>
@@ -1404,7 +1404,7 @@ export function TourEditDialog({
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="font-semibold text-gray-900">{t('tourEditDialog.tourPhotos')}</h3>
-                    <p className="text-xs text-gray-500 mt-0.5">支援拖曳上傳、點擊選擇或輸入圖片 URL（JPG/PNG/WebP，最大 10MB）</p>
+                    <p className="text-xs text-gray-500 mt-0.5">{t('tourEditDialog.uploadHint')}</p>
                   </div>
                   <div className="flex gap-2">
                     <Button
@@ -1414,7 +1414,7 @@ export function TourEditDialog({
                       onClick={() => fileInputRef.current?.click()}
                     >
                       <Upload className="h-4 w-4 mr-2" />
-                      上傳圖片
+                      {t('tourEditDialog.uploadButton')}
                     </Button>
                     <Button
                       type="button"
@@ -1466,8 +1466,8 @@ export function TourEditDialog({
                   onClick={() => fileInputRef.current?.click()}
                 >
                   <Upload className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-                  <p className="text-sm font-medium text-gray-600">拖曳圖片到此處，或點擊選擇檔案</p>
-                  <p className="text-xs text-gray-400 mt-1">支援批量上傳，每張最大 10MB</p>
+                  <p className="text-sm font-medium text-gray-600">{t('tourEditDialog.dragDropHint')}</p>
+                  <p className="text-xs text-gray-400 mt-1">{t('tourEditDialog.dragDropSub')}</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -1494,7 +1494,7 @@ export function TourEditDialog({
                       {uploadingImages[index] ? (
                         <div className="w-full h-32 bg-gray-100 flex items-center justify-center">
                           <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
-                          <span className="ml-2 text-sm text-gray-500">上傳中...</span>
+                          <span className="ml-2 text-sm text-gray-500">{t('tourEditDialog.uploading')}</span>
                         </div>
                       ) : image.url ? (
                         <div className="relative overflow-hidden rounded-lg group">
@@ -1507,7 +1507,7 @@ export function TourEditDialog({
                           <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                             <label className="cursor-pointer bg-white text-gray-800 text-xs px-3 py-1.5 font-medium hover:bg-gray-100">
                               <Upload className="h-3 w-3 inline mr-1" />
-                              替換圖片
+                              {t('tourEditDialog.replaceImage')}
                               <input
                                 type="file"
                                 accept="image/*"
@@ -1532,7 +1532,7 @@ export function TourEditDialog({
                       ) : (
                         <label className="w-full h-32 bg-white border border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:bg-gray-50">
                           <Upload className="h-6 w-6 text-gray-400 mb-1" />
-                          <span className="text-xs text-gray-500">點擊上傳圖片</span>
+                          <span className="text-xs text-gray-500">{t('tourEditDialog.clickToUpload')}</span>
                           <input
                             type="file"
                             accept="image/*"
@@ -1555,7 +1555,7 @@ export function TourEditDialog({
                       )}
 
                       <div>
-                        <Label className="text-xs font-medium text-gray-600">圖片 URL（或上傳後自動填入）</Label>
+                        <Label className="text-xs font-medium text-gray-600">{t('tourEditDialog.imageUrlLabel')}</Label>
                         <Input
                           value={image.url || ''}
                           onChange={(e) => {
