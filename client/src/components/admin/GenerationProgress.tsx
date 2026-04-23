@@ -103,27 +103,27 @@ const AGENT_ICONS: Record<string, React.ReactNode> = {
   learning: <Brain className="h-3.5 w-3.5" />,
 };
 
-// 步驟到階段的映射（更精確）
-const STEP_DETAILS: Record<string, { phase: string; task: string; baseProgress: number }> = {
-  'starting': { phase: 'web_scraper', task: '初始化生成任務', baseProgress: 0 },
-  'scraping': { phase: 'web_scraper', task: '抓取網頁內容', baseProgress: 5 },
-  'parsing_pdf': { phase: 'web_scraper', task: '解析 PDF 文件', baseProgress: 5 },
-  'analyzing': { phase: 'content_analyzer', task: '分析行程結構', baseProgress: 15 },
-  'extracting_basic': { phase: 'content_analyzer', task: '提取基本資訊', baseProgress: 20 },
-  'extracting_itinerary': { phase: 'itinerary', task: '解析每日行程', baseProgress: 30 },
-  'extracting_hotels': { phase: 'hotel_agent', task: '提取住宿資訊', baseProgress: 40 },
-  'extracting_meals': { phase: 'meal_agent', task: '提取餐飲資訊', baseProgress: 45 },
-  'extracting_flights': { phase: 'flight_agent', task: '提取航班資訊', baseProgress: 50 },
-  'extracting_costs': { phase: 'cost_agent', task: '分析費用明細', baseProgress: 55 },
-  'extracting_notices': { phase: 'notice_agent', task: '整理注意事項', baseProgress: 60 },
-  'generating_themes': { phase: 'color_theme', task: '生成配色主題', baseProgress: 70 },
-  'generating_color_theme': { phase: 'color_theme', task: '優化配色方案', baseProgress: 75 },
-  'generating_content': { phase: 'itinerary', task: '生成詩意描述', baseProgress: 80 },
-  'applying_skills': { phase: 'learning', task: '應用已學習技能', baseProgress: 85 },
-  'learning_new_skills': { phase: 'learning', task: '學習新技能', baseProgress: 88 },
-  'saving': { phase: 'finalize', task: '儲存到資料庫', baseProgress: 92 },
-  'completed': { phase: 'finalize', task: '生成完成', baseProgress: 100 },
-  'failed': { phase: 'finalize', task: '生成失敗', baseProgress: 0 },
+// 步驟到階段的映射（更精確）— taskKey 用於 i18n 查找
+const STEP_DETAILS: Record<string, { phase: string; taskKey: string; baseProgress: number }> = {
+  'starting': { phase: 'web_scraper', taskKey: 'taskStarting', baseProgress: 0 },
+  'scraping': { phase: 'web_scraper', taskKey: 'taskScraping', baseProgress: 5 },
+  'parsing_pdf': { phase: 'web_scraper', taskKey: 'taskParsingPdf', baseProgress: 5 },
+  'analyzing': { phase: 'content_analyzer', taskKey: 'taskAnalyzing', baseProgress: 15 },
+  'extracting_basic': { phase: 'content_analyzer', taskKey: 'taskExtractingBasic', baseProgress: 20 },
+  'extracting_itinerary': { phase: 'itinerary', taskKey: 'taskExtractingItinerary', baseProgress: 30 },
+  'extracting_hotels': { phase: 'hotel_agent', taskKey: 'taskExtractingHotels', baseProgress: 40 },
+  'extracting_meals': { phase: 'meal_agent', taskKey: 'taskExtractingMeals', baseProgress: 45 },
+  'extracting_flights': { phase: 'flight_agent', taskKey: 'taskExtractingFlights', baseProgress: 50 },
+  'extracting_costs': { phase: 'cost_agent', taskKey: 'taskExtractingCosts', baseProgress: 55 },
+  'extracting_notices': { phase: 'notice_agent', taskKey: 'taskExtractingNotices', baseProgress: 60 },
+  'generating_themes': { phase: 'color_theme', taskKey: 'taskGeneratingThemes', baseProgress: 70 },
+  'generating_color_theme': { phase: 'color_theme', taskKey: 'taskGeneratingColorTheme', baseProgress: 75 },
+  'generating_content': { phase: 'itinerary', taskKey: 'taskGeneratingContent', baseProgress: 80 },
+  'applying_skills': { phase: 'learning', taskKey: 'taskApplyingSkills', baseProgress: 85 },
+  'learning_new_skills': { phase: 'learning', taskKey: 'taskLearningNewSkills', baseProgress: 88 },
+  'saving': { phase: 'finalize', taskKey: 'taskSaving', baseProgress: 92 },
+  'completed': { phase: 'finalize', taskKey: 'taskCompleted', baseProgress: 100 },
+  'failed': { phase: 'finalize', taskKey: 'taskFailed', baseProgress: 0 },
 };
 
 // Backend PhaseProgress from queue.ts
@@ -229,9 +229,9 @@ export function GenerationProgressComponent({
     } else {
       // ── Fallback: Use STEP_DETAILS static mapping ──
       const currentStep = pollingStatus.progressDetails?.step || 'starting';
-      const stepInfo = STEP_DETAILS[currentStep] || { phase: 'web_scraper', task: '處理中', baseProgress: 0 };
+      const stepInfo = STEP_DETAILS[currentStep] || { phase: 'web_scraper', taskKey: 'taskProcessing', baseProgress: 0 };
       currentPhaseId = stepInfo.phase;
-      const currentTask = stepInfo.task;
+      const currentTask = t(`generationProgress.${stepInfo.taskKey}`);
       const reportedProgress = pollingStatus.progressDetails?.progress || pollingStatus.progress || 0;
       calculatedProgress = Math.max(stepInfo.baseProgress, reportedProgress);
 
@@ -340,7 +340,7 @@ export function GenerationProgressComponent({
   const completedCount = displayPhases.filter(p => p.status === 'completed').length;
 
   return (
-    <div className="w-full bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">
+    <div className="w-full bg-gray-50 rounded-xl border border-gray-200 overflow-hidden">
       {/* 緊湊的主要進度區 */}
       <div className="p-3">
         {/* 頂部：狀態、進度、時間 */}
@@ -400,7 +400,7 @@ export function GenerationProgressComponent({
           <div className="mt-2 flex items-center gap-2 text-xs">
             <Sparkles className="h-3 w-3 text-amber-500" />
             <span className="text-amber-600">
-              {t('generationProgress.skillsLearned').replace('{count}', String(skillNotifications.length))}
+              {t('generationProgress.skillsLearned', { count: String(skillNotifications.length) })}
             </span>
             {skillNotifications.slice(-2).map((skill, idx) => (
               <Badge key={idx} variant="outline" className="text-xs py-0 bg-amber-50 border-amber-200 text-amber-700">
@@ -424,7 +424,7 @@ export function GenerationProgressComponent({
         ) : (
           <>
             <ChevronDown className="h-3 w-3" />
-            {t('generationProgress.expand').replace('{completed}', String(completedCount)).replace('{total}', String(displayPhases.length))}
+            {t('generationProgress.expand', { completed: String(completedCount), total: String(displayPhases.length) })}
           </>
         )}
       </button>
