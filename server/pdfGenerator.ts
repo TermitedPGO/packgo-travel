@@ -1,8 +1,18 @@
 // PDF generation using Puppeteer
 // Generates tour itinerary PDFs from HTML templates
 
-import puppeteer, { type Browser, type Page } from 'puppeteer';
+import puppeteer, { type Browser, type Page } from 'puppeteer-core';
 import { storagePut } from './storage';
+
+/**
+ * Path to the system Chromium binary. Matches the pattern used by
+ * dynamicScraperService / competitorScraperService / posterGeneratorService
+ * — the Dockerfile installs /usr/bin/chromium and sets CHROMIUM_PATH at
+ * runtime. Without this, puppeteer.launch() tries to use the bundled
+ * Chromium which is skipped in CI (PUPPETEER_SKIP_DOWNLOAD=true), so PDF
+ * generation silently fails in production.
+ */
+const CHROMIUM_PATH = process.env.CHROMIUM_PATH || '/usr/bin/chromium';
 
 export interface TourPdfData {
   id: number;
@@ -592,6 +602,7 @@ export async function generateTourPdf(data: TourPdfData): Promise<Buffer> {
 
   try {
     browser = await puppeteer.launch({
+      executablePath: CHROMIUM_PATH,
       headless: true,
       args: [
         '--no-sandbox',
