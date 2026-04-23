@@ -1,47 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { trpc } from "@/lib/trpc";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  RefreshCw, CheckCircle2, AlertCircle, Clock,
+  RefreshCw, Clock,
   Zap, DollarSign, ChevronDown, ChevronRight, FileText, Bot
 } from "lucide-react";
-
-// Task type label mapping
-const TASK_LABELS: Record<string, string> = {
-  tour_generation:  "行程生成",
-  ai_chat:          "AI 諮詢",
-  skill_learning:   "技能學習",
-  translation:      "翻譯",
-  image_analysis:   "圖片分析",
-  data_extraction:  "資料擷取",
-  cost_analysis:    "費用分析",
-  itinerary:        "行程規劃",
-  content_analysis: "內容分析",
-};
-
-// Agent name display mapping (strip "Agent" suffix and map to friendly names)
-const AGENT_DISPLAY: Record<string, string> = {
-  "ClaudeAgent":             "通用 AI",
-  "MasterAgent":             "主控 Agent",
-  "ItineraryAgent":          "行程規劃 Agent",
-  "ItineraryUnifiedAgent":   "行程統合 Agent",
-  "CostAgent":               "費用分析 Agent",
-  "ContentAnalyzerAgent":    "內容分析 Agent",
-  "TranslationAgent":        "翻譯 Agent",
-  "TranslateAgent":          "翻譯 Agent",
-};
-
-function agentDisplayName(name: string | null): string {
-  if (!name) return "未知 Agent";
-  return AGENT_DISPLAY[name] ?? name.replace(/Agent$/i, " Agent");
-}
-
-function taskLabel(type: string | null) {
-  if (!type) return null;
-  return TASK_LABELS[type] ?? type;
-}
+import { useLocale } from "@/contexts/LocaleContext";
 
 // Agent avatar color based on name
 function agentColor(name: string | null): string {
@@ -60,6 +26,40 @@ function agentColor(name: string | null): string {
 
 function AgentCard({ group }: { group: any }) {
   const [expanded, setExpanded] = useState(false);
+  const { t, language } = useLocale();
+
+  const TASK_LABELS = useMemo<Record<string, string>>(() => ({
+    tour_generation: t('admin.aiSessionReport.taskTourGeneration'),
+    ai_chat: t('admin.aiSessionReport.taskAiChat'),
+    skill_learning: t('admin.aiSessionReport.taskSkillLearning'),
+    translation: t('admin.aiSessionReport.taskTranslation'),
+    image_analysis: t('admin.aiSessionReport.taskImageAnalysis'),
+    data_extraction: t('admin.aiSessionReport.taskDataExtraction'),
+    cost_analysis: t('admin.aiSessionReport.taskCostAnalysis'),
+    itinerary: t('admin.aiSessionReport.taskItinerary'),
+    content_analysis: t('admin.aiSessionReport.taskContentAnalysis'),
+  }), [t]);
+
+  const AGENT_DISPLAY = useMemo<Record<string, string>>(() => ({
+    "ClaudeAgent": t('admin.aiSessionReport.agentClaude'),
+    "MasterAgent": t('admin.aiSessionReport.agentMaster'),
+    "ItineraryAgent": t('admin.aiSessionReport.agentItinerary'),
+    "ItineraryUnifiedAgent": t('admin.aiSessionReport.agentItineraryUnified'),
+    "CostAgent": t('admin.aiSessionReport.agentCost'),
+    "ContentAnalyzerAgent": t('admin.aiSessionReport.agentContentAnalyzer'),
+    "TranslationAgent": t('admin.aiSessionReport.agentTranslation'),
+    "TranslateAgent": t('admin.aiSessionReport.agentTranslation'),
+  }), [t]);
+
+  const agentDisplayName = (name: string | null): string => {
+    if (!name) return t('admin.aiSessionReport.unknownAgent');
+    return AGENT_DISPLAY[name] ?? name.replace(/Agent$/i, " Agent");
+  };
+
+  const taskLabel = (type: string | null): string | null => {
+    if (!type) return null;
+    return TASK_LABELS[type] ?? type;
+  };
 
   const totalCost = group.logs?.reduce(
     (sum: number, l: any) => sum + parseFloat(l.estimatedCostUsd ?? "0"), 0
@@ -78,16 +78,17 @@ function AgentCard({ group }: { group: any }) {
 
   // Most recent log time
   const latestTime = group.logs?.reduce((latest: number, l: any) => {
-    const t = new Date(l.createdAt).getTime();
-    return t > latest ? t : latest;
+    const ts = new Date(l.createdAt).getTime();
+    return ts > latest ? ts : latest;
   }, 0) ?? 0;
 
   const displayName = agentDisplayName(group.agentName);
   const colorClass = agentColor(group.agentName);
   const initials = displayName.slice(0, 2);
+  const localeArg = language === 'en' ? 'en-US' : 'zh-TW';
 
   return (
-    <div className="border border-gray-200 bg-white">
+    <div className="border border-gray-200 bg-white rounded-xl overflow-hidden">
       {/* Card Header */}
       <button
         className="w-full flex items-center gap-4 px-5 py-4 text-left hover:bg-gray-50 transition-colors"
@@ -101,7 +102,7 @@ function AgentCard({ group }: { group: any }) {
         </div>
 
         {/* Agent avatar */}
-        <div className={`shrink-0 w-9 h-9 flex items-center justify-center text-xs font-bold ${colorClass}`}>
+        <div className={`shrink-0 w-9 h-9 flex items-center justify-center text-xs font-bold rounded-lg ${colorClass}`}>
           {initials}
         </div>
 
@@ -112,16 +113,16 @@ function AgentCard({ group }: { group: any }) {
               {displayName}
             </span>
             <Badge variant="outline" className="text-xs font-normal rounded-md border-gray-300">
-              {group.logs?.length ?? 0} 次呼叫
+              {t('admin.aiSessionReport.callCount', { n: String(group.logs?.length ?? 0) })}
             </Badge>
             {taskTypes.slice(0, 3).map((type: string, i: number) => (
-              <span key={i} className="text-xs text-blue-600 bg-blue-50 px-1.5 py-0.5 border border-blue-100">
+              <span key={i} className="text-xs text-blue-600 bg-blue-50 px-1.5 py-0.5 border border-blue-100 rounded-md">
                 {taskLabel(type) ?? type}
               </span>
             ))}
           </div>
           <div className="text-xs text-gray-400 mt-0.5">
-            最後活動：{latestTime ? new Date(latestTime).toLocaleString("zh-TW", {
+            {t('admin.aiSessionReport.lastActivity')}{latestTime ? new Date(latestTime).toLocaleString(localeArg, {
               month: "2-digit", day: "2-digit",
               hour: "2-digit", minute: "2-digit"
             }) : "—"}
@@ -152,43 +153,43 @@ function AgentCard({ group }: { group: any }) {
           <div className="px-5 py-3 bg-gray-50 border-b border-gray-100">
             <div className="flex items-center gap-2 mb-2">
               <FileText className="h-4 w-4 text-gray-500" />
-              <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Agent 使用摘要</span>
+              <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">{t('admin.aiSessionReport.summarySectionTitle')}</span>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
               <div>
-                <div className="text-gray-400">Agent 名稱</div>
+                <div className="text-gray-400">{t('admin.aiSessionReport.summaryAgentName')}</div>
                 <div className="font-medium text-gray-800">{displayName}</div>
               </div>
               <div>
-                <div className="text-gray-400">執行任務類型</div>
+                <div className="text-gray-400">{t('admin.aiSessionReport.summaryTaskTypes')}</div>
                 <div className="font-medium text-gray-800">
-                  {taskTypes.length > 0 ? taskTypes.map(t => taskLabel(t) ?? t).join("、") : "—"}
+                  {taskTypes.length > 0 ? taskTypes.map(ty => taskLabel(ty) ?? ty).join(language === 'en' ? ', ' : "、") : "—"}
                 </div>
               </div>
               <div>
-                <div className="text-gray-400">總 Token 消耗</div>
+                <div className="text-gray-400">{t('admin.aiSessionReport.summaryTotalTokens')}</div>
                 <div className="font-medium text-gray-800">{totalTokens.toLocaleString()} tokens</div>
               </div>
               <div>
-                <div className="text-gray-400">總費用 (USD)</div>
+                <div className="text-gray-400">{t('admin.aiSessionReport.summaryTotalCost')}</div>
                 <div className="font-medium text-gray-800">${totalCost.toFixed(5)}</div>
               </div>
               <div>
-                <div className="text-gray-400">總耗時</div>
-                <div className="font-medium text-gray-800">{(totalMs / 1000).toFixed(1)} 秒</div>
+                <div className="text-gray-400">{t('admin.aiSessionReport.summaryTotalTime')}</div>
+                <div className="font-medium text-gray-800">{t('admin.aiSessionReport.summaryElapsedValue', { n: (totalMs / 1000).toFixed(1) })}</div>
               </div>
               <div>
-                <div className="text-gray-400">呼叫次數</div>
-                <div className="font-medium text-gray-800">{group.logs?.length ?? 0} 次</div>
+                <div className="text-gray-400">{t('admin.aiSessionReport.summaryCallCount')}</div>
+                <div className="font-medium text-gray-800">{t('admin.aiSessionReport.summaryCallCountValue', { n: String(group.logs?.length ?? 0) })}</div>
               </div>
               <div>
-                <div className="text-gray-400">快取命中</div>
+                <div className="text-gray-400">{t('admin.aiSessionReport.summaryCacheHits')}</div>
                 <div className="font-medium text-gray-800">
-                  {group.logs?.filter((l: any) => l.wasFromCache).length ?? 0} 次
+                  {t('admin.aiSessionReport.summaryCacheHitsValue', { n: String(group.logs?.filter((l: any) => l.wasFromCache).length ?? 0) })}
                 </div>
               </div>
               <div>
-                <div className="text-gray-400">成功率</div>
+                <div className="text-gray-400">{t('admin.aiSessionReport.summarySuccessRate')}</div>
                 <div className="font-medium text-gray-800">
                   {group.logs?.length
                     ? `${Math.round((group.logs.filter((l: any) => l.success !== false).length / group.logs.length) * 100)}%`
@@ -203,14 +204,14 @@ function AgentCard({ group }: { group: any }) {
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-gray-100 bg-white">
-                <th className="text-left px-5 py-2 text-gray-400 font-medium uppercase tracking-wide">時間</th>
-                <th className="text-left px-3 py-2 text-gray-400 font-medium uppercase tracking-wide">任務類型</th>
-                <th className="text-left px-3 py-2 text-gray-400 font-medium uppercase tracking-wide">模型</th>
-                <th className="text-right px-3 py-2 text-gray-400 font-medium uppercase tracking-wide">Input</th>
-                <th className="text-right px-3 py-2 text-gray-400 font-medium uppercase tracking-wide">Output</th>
-                <th className="text-right px-3 py-2 text-gray-400 font-medium uppercase tracking-wide">費用</th>
-                <th className="text-center px-3 py-2 text-gray-400 font-medium uppercase tracking-wide">快取</th>
-                <th className="text-right px-3 py-2 text-gray-400 font-medium uppercase tracking-wide">耗時</th>
+                <th className="text-left px-5 py-2 text-gray-400 font-medium uppercase tracking-wide">{t('admin.aiSessionReport.tableTime')}</th>
+                <th className="text-left px-3 py-2 text-gray-400 font-medium uppercase tracking-wide">{t('admin.aiSessionReport.tableTaskType')}</th>
+                <th className="text-left px-3 py-2 text-gray-400 font-medium uppercase tracking-wide">{t('admin.aiSessionReport.tableModel')}</th>
+                <th className="text-right px-3 py-2 text-gray-400 font-medium uppercase tracking-wide">{t('admin.aiSessionReport.tableInput')}</th>
+                <th className="text-right px-3 py-2 text-gray-400 font-medium uppercase tracking-wide">{t('admin.aiSessionReport.tableOutput')}</th>
+                <th className="text-right px-3 py-2 text-gray-400 font-medium uppercase tracking-wide">{t('admin.aiSessionReport.tableCost')}</th>
+                <th className="text-center px-3 py-2 text-gray-400 font-medium uppercase tracking-wide">{t('admin.aiSessionReport.tableCache')}</th>
+                <th className="text-right px-3 py-2 text-gray-400 font-medium uppercase tracking-wide">{t('admin.aiSessionReport.tableElapsed')}</th>
               </tr>
             </thead>
             <tbody>
@@ -219,7 +220,7 @@ function AgentCard({ group }: { group: any }) {
               ).map((log: any, i: number) => (
                 <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
                   <td className="px-5 py-2 text-gray-500">
-                    {new Date(log.createdAt).toLocaleString("zh-TW", {
+                    {new Date(log.createdAt).toLocaleString(localeArg, {
                       month: "2-digit", day: "2-digit",
                       hour: "2-digit", minute: "2-digit"
                     })}
@@ -260,6 +261,7 @@ function AgentCard({ group }: { group: any }) {
 
 export default function AiSessionReport() {
   const [days, setDays] = useState(7);
+  const { t } = useLocale();
 
   const { data, isLoading, refetch } = trpc.admin.getLlmStats.useQuery({ days }, {
     staleTime: 1000 * 60 * 5,
@@ -287,18 +289,20 @@ export default function AiSessionReport() {
     return Array.from(agentMap.values()).sort((a, b) => b.lastTime - a.lastTime);
   })();
 
+  const daysSuffix = t('admin.aiSessionReport.daysSuffix');
+
   return (
     <div className="space-y-5">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-base font-bold text-gray-900">AI 任務使用摘要</h3>
+          <h3 className="text-base font-bold text-gray-900">{t('admin.aiSessionReport.title')}</h3>
           <p className="text-xs text-gray-500 mt-0.5">
-            依 Agent 分組顯示，點擊展開查看詳細呼叫記錄
+            {t('admin.aiSessionReport.subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex border border-gray-200">
+          <div className="flex border border-gray-200 rounded-lg overflow-hidden">
             {[3, 7, 14, 30].map(d => (
               <button
                 key={d}
@@ -307,7 +311,7 @@ export default function AiSessionReport() {
                   days === d ? "bg-black text-white" : "bg-white text-gray-600 hover:bg-gray-50"
                 }`}
               >
-                {d}天
+                {d}{daysSuffix}
               </button>
             ))}
           </div>
@@ -321,13 +325,13 @@ export default function AiSessionReport() {
       {isLoading ? (
         <div className="flex items-center justify-center py-16 text-gray-400 text-sm gap-2">
           <RefreshCw className="h-4 w-4 animate-spin" />
-          載入中...
+          {t('admin.aiSessionReport.loading')}
         </div>
       ) : agentGroups.length === 0 ? (
-        <div className="border border-dashed border-gray-200 py-16 text-center">
+        <div className="border border-dashed border-gray-200 py-16 text-center rounded-xl">
           <Bot className="h-8 w-8 text-gray-300 mx-auto mb-3" />
-          <p className="text-sm text-gray-400">近 {days} 天無 AI 任務記錄</p>
-          <p className="text-xs text-gray-300 mt-1">每次使用 AI 功能後，報告將自動出現在這裡</p>
+          <p className="text-sm text-gray-400">{t('admin.aiSessionReport.emptyTitle', { days: String(days) })}</p>
+          <p className="text-xs text-gray-300 mt-1">{t('admin.aiSessionReport.emptyDesc')}</p>
         </div>
       ) : (
         <div className="space-y-2">
