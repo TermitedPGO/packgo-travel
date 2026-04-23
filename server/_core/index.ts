@@ -96,6 +96,62 @@ async function startServer() {
     })
   );
 
+  // Security headers — applied to all responses before any route handler
+  // Tuned for React + Stripe + Google OAuth + S3 images + GTM (no nonce — uses 'unsafe-inline' for scripts to keep build simple).
+  app.use((_req, res, next) => {
+    // Prevent MIME sniffing
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    // Only allow embedding in same origin (clickjacking defense — modern replacement is frame-ancestors in CSP, but X-Frame-Options is still honored by older browsers)
+    res.setHeader("X-Frame-Options", "SAMEORIGIN");
+    // Disable legacy XSS auditor (caused more issues than it fixed)
+    res.setHeader("X-XSS-Protection", "0");
+    // Strict referrer policy — don't leak full URLs to external sites
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    // HSTS: 1 year, include subdomains, allow preload. Only emit in production (dev uses http://localhost)
+    if (process.env.NODE_ENV === "production") {
+      res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
+    }
+    // Permissions-Policy — disable camera/mic/geolocation by default (tours don't need them)
+    res.setHeader(
+      "Permissions-Policy",
+      "camera=(), microphone=(), geolocation=(self), payment=(self \"https://js.stripe.com\" \"https://checkout.stripe.com\")"
+    );
+    // Content-Security-Policy — balanced: allows Stripe, GTM, S3, Google OAuth, inline scripts (Vite bundles rely on them).
+    // Report-only in dev, enforce in production.
+    const cspDirectives = [
+      "default-src 'self'",
+      // Scripts: self + Stripe + GTM + Google + inline (React needs unsafe-inline for hydration; a strict nonce-based CSP would require deeper build changes)
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com https://checkout.stripe.com https://www.googletagmanager.com https://www.google-analytics.com https://accounts.google.com https://apis.google.com",
+      // Styles: self + inline (Tailwind + shadcn)
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      // Images: self + data URIs + S3 + all https (tour images come from many CDNs)
+      "img-src 'self' data: blob: https:",
+      // Fonts: self + Google Fonts
+      "font-src 'self' data: https://fonts.gstatic.com",
+      // Connections: self + Stripe + Google + S3 + analytics
+      "connect-src 'self' https://api.stripe.com https://checkout.stripe.com https://*.s3.amazonaws.com https://*.googleapis.com https://www.google-analytics.com https://accounts.google.com",
+      // Frames: Stripe Checkout + Google OAuth
+      "frame-src 'self' https://js.stripe.com https://checkout.stripe.com https://accounts.google.com",
+      // Objects and base URI: strict
+      "object-src 'none'",
+      "base-uri 'self'",
+      // Form actions: self + Stripe
+      "form-action 'self' https://checkout.stripe.com",
+      // Don't allow framing from other sites
+      "frame-ancestors 'self'",
+      // Upgrade http→https
+      ...(process.env.NODE_ENV === "production" ? ["upgrade-insecure-requests"] : []),
+    ].join("; ");
+    // Use report-only in dev so we can observe violations without breaking anything
+    const cspHeader =
+      process.env.NODE_ENV === "production"
+        ? "Content-Security-Policy"
+        : "Content-Security-Policy-Report-Only";
+    res.setHeader(cspHeader, cspDirectives);
+    next();
+  });
+
   // Health check — registered early, no auth, no DB lookup. Fly's
   // http_service health probe hits this; also handy for Cloudflare DNS monitoring.
   app.get("/healthz", (_req, res) => {
@@ -159,16 +215,20 @@ async function startServer() {
         { url: '/faq', priority: '0.6', changefreq: 'monthly' },
       ];
 
+      // Include both active and soldout tours (soldout still has SEO value; inactive/draft excluded)
       const tourUrls = tours
-        .filter((t: any) => t.status === 'published')
-        .map((t: any) => `  <url>\n    <loc>${baseUrl}/tour/${t.id}</loc>\n    <lastmod>${now}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`)
+        .filter((t: any) => t.status === 'active' || t.status === 'soldout')
+        .map((t: any) => {
+          const lastmod = t.updatedAt ? new Date(t.updatedAt).toISOString().split('T')[0] : now;
+          return `  <url>\n    <loc>${baseUrl}/tour/${t.id}</loc>\n    <xhtml:link rel="alternate" hreflang="zh-TW" href="${baseUrl}/tour/${t.id}"/>\n    <xhtml:link rel="alternate" hreflang="en" href="${baseUrl}/tour/${t.id}?lang=en"/>\n    <xhtml:link rel="alternate" hreflang="x-default" href="${baseUrl}/tour/${t.id}"/>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`;
+        })
         .join('\n');
 
       const staticUrls = staticPages
-        .map(p => `  <url>\n    <loc>${baseUrl}${p.url}</loc>\n    <lastmod>${now}</lastmod>\n    <changefreq>${p.changefreq}</changefreq>\n    <priority>${p.priority}</priority>\n  </url>`)
+        .map(p => `  <url>\n    <loc>${baseUrl}${p.url}</loc>\n    <xhtml:link rel="alternate" hreflang="zh-TW" href="${baseUrl}${p.url}"/>\n    <xhtml:link rel="alternate" hreflang="en" href="${baseUrl}${p.url}?lang=en"/>\n    <xhtml:link rel="alternate" hreflang="x-default" href="${baseUrl}${p.url}"/>\n    <lastmod>${now}</lastmod>\n    <changefreq>${p.changefreq}</changefreq>\n    <priority>${p.priority}</priority>\n  </url>`)
         .join('\n');
 
-      const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${staticUrls}\n${tourUrls}\n</urlset>`;
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n${staticUrls}\n${tourUrls}\n</urlset>`;
 
       res.header('Content-Type', 'application/xml');
       res.send(xml);

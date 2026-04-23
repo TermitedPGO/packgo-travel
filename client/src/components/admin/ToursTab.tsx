@@ -179,24 +179,24 @@ export default function ToursTab() {
     },
   });
 
-  // 快速修改分類 mutation
+  // Quick-patch category mutation
   const patchFieldMutation = trpc.tours.patchField.useMutation({
     onSuccess: () => {
       utils.tours.list.invalidate();
-      toast.success('分類已更新');
+      toast.success(t('toursTab.categoryUpdated'));
     },
     onError: (error) => {
-      toast.error(`更新失敗：${error.message}`);
+      toast.error(t('toursTab.updateFailed').replace('{message}', error.message));
     },
   });
 
-  // 分類標籤顯示
-  const CATEGORY_LABELS: Record<string, { label: string; color: string }> = {
-    group:   { label: '團體旅遊', color: 'bg-blue-100 text-blue-700' },
-    custom:  { label: '客製旅遊', color: 'bg-purple-100 text-purple-700' },
-    package: { label: '包團旅遊', color: 'bg-green-100 text-green-700' },
-    cruise:  { label: '郵輪旅遊', color: 'bg-cyan-100 text-cyan-700' },
-    theme:   { label: '主題旅遊', color: 'bg-orange-100 text-orange-700' },
+  // Category pill color map (labels come from t() on the SelectItems)
+  const CATEGORY_COLORS: Record<string, string> = {
+    group:   'bg-blue-100 text-blue-700',
+    custom:  'bg-purple-100 text-purple-700',
+    package: 'bg-green-100 text-green-700',
+    cruise:  'bg-cyan-100 text-cyan-700',
+    theme:   'bg-orange-100 text-orange-700',
   };
 
   // 複製行程 mutation
@@ -385,7 +385,7 @@ export default function ToursTab() {
         return;
       }
       if (!supplementUrl.trim()) {
-        toast.error('請輸入供應商官網 URL');
+        toast.error(t('toursTab.enterSupplementUrl'));
         return;
       }
       // B6 fix: validate supplementUrl format
@@ -418,7 +418,7 @@ export default function ToursTab() {
         console.log("[PDF+URL] Supplement URL:", supplementUrl);
         
         setPdfUploading(false);
-        toast.success('📎 PDF 上傳成功，正在結合官網資料生成...');
+        toast.success(t('toursTab.pdfUrlUploadSuccess'));
         
         submitAsyncGenerationMutation.mutate({ 
           url: pdfUrl,
@@ -643,8 +643,8 @@ export default function ToursTab() {
         >
           <Loader2 className="h-4 w-4 animate-spin text-purple-400" />
           <div>
-            <p className="text-xs font-semibold">AI 行程生成中...</p>
-            <p className="text-[10px] text-gray-400">點擊查看進度</p>
+            <p className="text-xs font-semibold">{t('toursTab.aiGenerationInProgress')}</p>
+            <p className="text-[10px] text-gray-400">{t('toursTab.clickToViewProgress')}</p>
           </div>
         </div>
       )}
@@ -656,7 +656,7 @@ export default function ToursTab() {
           <p className="text-gray-500 text-sm mt-1">
             {t('toursTab.subtitle')}
             {filteredTours && (
-              <span className="ml-2 text-gray-400">（共 {filteredTours.length} 筆）</span>
+              <span className="ml-2 text-gray-400">{t('toursTab.totalCount').replace('{count}', String(filteredTours.length))}</span>
             )}
           </p>
         </div>
@@ -668,7 +668,7 @@ export default function ToursTab() {
               className="border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300"
             >
               <Trash2 className="h-4 w-4 mr-2" />
-              刪除已選 ({selectedTourIds.length})
+              {t('toursTab.deleteSelected').replace('{count}', String(selectedTourIds.length))}
             </Button>
           )}
           <Button
@@ -677,14 +677,14 @@ export default function ToursTab() {
             className="border-gray-300 text-gray-700 hover:bg-gray-50"
           >
             <Sparkles className="h-4 w-4 mr-2" />
-            AI 生成行程
+            {t('toursTab.aiAutoGenerate')}
           </Button>
           <Button
             onClick={() => setIsCreateDialogOpen(true)}
             className="bg-black text-white hover:bg-gray-800"
           >
             <Plus className="h-4 w-4 mr-2" />
-            新增行程
+            {t('toursTab.addTour')}
           </Button>
         </div>
       </div>
@@ -695,7 +695,7 @@ export default function ToursTab() {
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input
-              placeholder="搜尋行程名稱、目的地..."
+              placeholder={t('toursTab.searchPlaceholder')}
               value={searchKeyword}
               onChange={(e) => setSearchKeyword(e.target.value)}
               className="pl-10 border-gray-300"
@@ -704,36 +704,36 @@ export default function ToursTab() {
         </div>
         <Select value={statusFilter} onValueChange={(v: any) => setStatusFilter(v)}>
           <SelectTrigger className="w-[130px] border-gray-300">
-            <SelectValue placeholder="狀態" />
+            <SelectValue placeholder={t('toursTab.statusLabel')} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">全部狀態</SelectItem>
-            <SelectItem value="active">上架中</SelectItem>
-            <SelectItem value="inactive">已下架</SelectItem>
+            <SelectItem value="all">{t('toursTab.statusAll')}</SelectItem>
+            <SelectItem value="active">{t('toursTab.statusActive')}</SelectItem>
+            <SelectItem value="inactive">{t('toursTab.statusInactive')}</SelectItem>
           </SelectContent>
         </Select>
         <Select value={featuredFilter} onValueChange={(v: any) => setFeaturedFilter(v)}>
           <SelectTrigger className="w-[130px] border-gray-300">
-            <SelectValue placeholder="精選" />
+            <SelectValue placeholder={t('toursTab.featuredLabel')} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">全部行程</SelectItem>
-            <SelectItem value="featured">★ 精選行程</SelectItem>
-            <SelectItem value="normal">一般行程</SelectItem>
+            <SelectItem value="all">{t('toursTab.featuredAll')}</SelectItem>
+            <SelectItem value="featured">{t('toursTab.featuredOnly')}</SelectItem>
+            <SelectItem value="normal">{t('toursTab.normalOnly')}</SelectItem>
           </SelectContent>
         </Select>
         <Select value={sortBy} onValueChange={(v: any) => setSortBy(v)}>
           <SelectTrigger className="w-[150px] border-gray-300">
-            <SelectValue placeholder="排序" />
+            <SelectValue placeholder={t('toursTab.sortLabel')} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="default">預設排序</SelectItem>
-            <SelectItem value="price-asc">價格 由低到高</SelectItem>
-            <SelectItem value="price-desc">價格 由高到低</SelectItem>
-            <SelectItem value="duration-asc">天數 由短到長</SelectItem>
-            <SelectItem value="duration-desc">天數 由長到短</SelectItem>
-            <SelectItem value="date-desc">最新新增</SelectItem>
-            <SelectItem value="date-asc">最早新增</SelectItem>
+            <SelectItem value="default">{t('toursTab.sortDefault')}</SelectItem>
+            <SelectItem value="price-asc">{t('toursTab.sortPriceAsc')}</SelectItem>
+            <SelectItem value="price-desc">{t('toursTab.sortPriceDesc')}</SelectItem>
+            <SelectItem value="duration-asc">{t('toursTab.sortDaysAsc')}</SelectItem>
+            <SelectItem value="duration-desc">{t('toursTab.sortDaysDesc')}</SelectItem>
+            <SelectItem value="date-desc">{t('toursTab.sortNewest')}</SelectItem>
+            <SelectItem value="date-asc">{t('toursTab.sortOldest')}</SelectItem>
           </SelectContent>
         </Select>
         {(searchKeyword || statusFilter !== "all" || featuredFilter !== "all") && (
@@ -741,7 +741,7 @@ export default function ToursTab() {
             onClick={() => { setSearchKeyword(""); setStatusFilter("all"); setFeaturedFilter("all"); }}
             className="text-sm text-gray-500 hover:text-gray-700 underline"
           >
-            清除篩選
+            {t('toursTab.clearFilters')}
           </button>
         )}
       </div>
@@ -761,13 +761,13 @@ export default function ToursTab() {
                       onCheckedChange={toggleSelectAll}
                     />
                   </th>
-                  <th className="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">行程名稱</th>
-                  <th className="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider min-w-[140px]">目的地</th>
-                  <th className="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">分類</th>
-                  <th className="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">天數</th>
-                  <th className="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">售價</th>
-                  <th className="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">狀態</th>
-                  <th className="px-5 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">操作</th>
+                  <th className="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('toursTab.colTour')}</th>
+                  <th className="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider min-w-[140px]">{t('toursTab.colDestination')}</th>
+                  <th className="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('toursTab.colCategory')}</th>
+                  <th className="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('toursTab.colDays')}</th>
+                  <th className="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('toursTab.colPrice')}</th>
+                  <th className="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('toursTab.colStatus')}</th>
+                  <th className="px-5 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('toursTab.colActions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -789,7 +789,7 @@ export default function ToursTab() {
                           />
                         ) : (
                           <div className="h-14 w-20 bg-gray-100 rounded flex items-center justify-center flex-shrink-0">
-                            <span className="text-gray-400 text-xs">無圖片</span>
+                            <span className="text-gray-400 text-xs">{t('toursTab.noImage')}</span>
                           </div>
                         )}
                         <div className="min-w-0">
@@ -812,9 +812,9 @@ export default function ToursTab() {
                                   : 'bg-red-100 text-red-700';
                                 const icon = isApproved ? '✅' : isReview ? '⚠️' : '❌';
                                 return (
-                                  <span className={`inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-full font-medium ${badgeClass}`} title={`AI 品質評分: ${(tour as any).calibrationScore ?? '-'}/100`}>
+                                  <span className={`inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-full font-medium ${badgeClass}`} title={t('toursTab.calibrationScoreTitle').replace('{score}', String((tour as any).calibrationScore ?? '-'))}>
                                     {icon}
-                                    {(tour as any).calibrationScore != null ? `${(tour as any).calibrationScore}分` : 'QA'}
+                                    {(tour as any).calibrationScore != null ? t('toursTab.calibrationScoreSuffix').replace('{score}', String((tour as any).calibrationScore)) : 'QA'}
                                   </span>
                                 );
                               })()}
@@ -849,19 +849,19 @@ export default function ToursTab() {
                         value={tour.category}
                         onValueChange={(val) => patchFieldMutation.mutate({ id: tour.id, field: 'category', value: val })}
                       >
-                        <SelectTrigger className={`h-7 text-xs border-0 px-2 py-0 w-[90px] font-medium rounded-full ${CATEGORY_LABELS[tour.category]?.color || 'bg-gray-100 text-gray-600'}`}>
+                        <SelectTrigger className={`h-7 text-xs border-0 px-2 py-0 w-[90px] font-medium rounded-full ${CATEGORY_COLORS[tour.category] || 'bg-gray-100 text-gray-600'}`}>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="group">團體旅遊</SelectItem>
-                          <SelectItem value="custom">客製旅遊</SelectItem>
-                          <SelectItem value="package">包團旅遊</SelectItem>
-                          <SelectItem value="cruise">郵輪旅遊</SelectItem>
-                          <SelectItem value="theme">主題旅遊</SelectItem>
+                          <SelectItem value="group">{t('toursTab.categoryGroup')}</SelectItem>
+                          <SelectItem value="custom">{t('toursTab.categoryCustom')}</SelectItem>
+                          <SelectItem value="package">{t('toursTab.categoryPackage')}</SelectItem>
+                          <SelectItem value="cruise">{t('toursTab.categoryCruise')}</SelectItem>
+                          <SelectItem value="theme">{t('toursTab.categoryTheme')}</SelectItem>
                         </SelectContent>
                       </Select>
                     </td>
-                    <td className="px-5 py-5 text-sm font-medium text-gray-700">{tour.duration} 天</td>
+                    <td className="px-5 py-5 text-sm font-medium text-gray-700">{t('toursTab.daysUnit').replace('{days}', String(tour.duration))}</td>
                     <td className="px-5 py-5 text-sm font-semibold text-gray-900">
                       NT$ {tour.price.toLocaleString()}
                     </td>
@@ -874,11 +874,11 @@ export default function ToursTab() {
                               : "bg-gray-100 text-gray-500 border border-gray-200"
                           }`}
                         >
-                          {tour.status === "active" ? "● 上架中" : "○ 已下架"}
+                          {tour.status === "active" ? `● ${t('toursTab.statusActiveBadge')}` : `○ ${t('toursTab.statusInactiveBadge')}`}
                         </span>
                         {tour.featured === 1 && (
                           <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-gray-700 text-white w-fit">
-                            ★ 精選
+                            {t('toursTab.featuredBadge')}
                           </span>
                         )}
                       </div>
@@ -891,10 +891,10 @@ export default function ToursTab() {
                           size="sm"
                           onClick={() => handleEdit(tour.id)}
                           className="h-8 px-2 hover:bg-blue-50 transition-colors flex items-center gap-1 text-xs text-blue-600 rounded-lg"
-                          title="編輯行程"
+                          title={t('toursTab.editTour')}
                         >
                           <Edit className="h-3.5 w-3.5" />
-                          <span>編輯</span>
+                          <span>{t('toursTab.editButton')}</span>
                         </Button>
                         {/* 更多操作下拉選單（上下架/精選/日期/複製/刪除） */}
                         <DropdownMenu>
@@ -903,10 +903,10 @@ export default function ToursTab() {
                               variant="ghost"
                               size="sm"
                               className="h-8 px-2 hover:bg-gray-100 transition-colors flex items-center gap-1 text-xs text-gray-600 rounded-lg"
-                              title="更多操作"
+                              title={t('toursTab.moreActions')}
                             >
                               <MoreHorizontal className="h-3.5 w-3.5 text-gray-500" />
-                              <span>更多</span>
+                              <span>{t('toursTab.moreButton')}</span>
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-44">
@@ -917,9 +917,9 @@ export default function ToursTab() {
                               className="cursor-pointer"
                             >
                               {tour.status === "active" ? (
-                                <><EyeOff className="h-4 w-4 mr-2 text-gray-500" />下架行程</>
+                                <><EyeOff className="h-4 w-4 mr-2 text-gray-500" />{t('toursTab.deactivate')}</>
                               ) : (
-                                <><Eye className="h-4 w-4 mr-2 text-green-600" />上架行程</>
+                                <><Eye className="h-4 w-4 mr-2 text-green-600" />{t('toursTab.activate')}</>
                               )}
                             </DropdownMenuItem>
                             {/* 精選 */}
@@ -929,7 +929,7 @@ export default function ToursTab() {
                               className="cursor-pointer"
                             >
                               <Star className={`h-4 w-4 mr-2 ${tour.featured === 1 ? "text-amber-500 fill-current" : "text-gray-400"}`} />
-                              {tour.featured === 1 ? "取消精選" : "設為精選"}
+                              {tour.featured === 1 ? t('toursTab.removeFeatured') : t('toursTab.setFeatured')}
                             </DropdownMenuItem>
                             {/* 出發日期 */}
                             <DropdownMenuItem
@@ -940,7 +940,7 @@ export default function ToursTab() {
                               className="cursor-pointer"
                             >
                               <Calendar className="h-4 w-4 mr-2 text-gray-500" />
-                              管理出發日期
+                              {t('toursTab.manageDepartures')}
                             </DropdownMenuItem>
                             {/* AI 出發日預覽（只在有 extractedDepartures 時顯示） */}
                             {(tour as any).extractedDepartures && (
@@ -952,7 +952,7 @@ export default function ToursTab() {
                                 className="cursor-pointer text-teal-700 focus:text-teal-700 focus:bg-teal-50"
                               >
                                 <Sparkles className="h-4 w-4 mr-2 text-teal-600" />
-                                AI 出發日預覽
+                                {t('toursTab.aiDeparturePreview')}
                               </DropdownMenuItem>
                             )}
                             <DropdownMenuSeparator />
@@ -963,7 +963,7 @@ export default function ToursTab() {
                               className="cursor-pointer"
                             >
                               <Copy className="h-4 w-4 mr-2 text-gray-500" />
-                              複製行程
+                              {t('toursTab.copyTour')}
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             {/* 刪除 */}
@@ -972,7 +972,7 @@ export default function ToursTab() {
                               className="cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50"
                             >
                               <Trash2 className="h-4 w-4 mr-2" />
-                              刪除行程
+                              {t('toursTab.deleteTour')}
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -1154,7 +1154,7 @@ export default function ToursTab() {
                 }`}
               >
                 <FileUp className="h-3.5 w-3.5" />
-                PDF 檔案
+                {t('toursTab.modePdf')}
               </button>
               <button
                 type="button"
@@ -1167,7 +1167,7 @@ export default function ToursTab() {
                 }`}
               >
                 <Globe className="h-3.5 w-3.5" />
-                官網 URL
+                {t('toursTab.modeUrl')}
               </button>
               <button
                 type="button"
@@ -1180,7 +1180,7 @@ export default function ToursTab() {
                 }`}
               >
                 <Sparkles className="h-3.5 w-3.5" />
-                PDF + URL
+                {t('toursTab.modePdfUrl')}
               </button>
             </div>
 
@@ -1190,15 +1190,15 @@ export default function ToursTab() {
               inputMode === "url" ? "bg-blue-50 text-blue-700" :
               "bg-green-50 text-green-700"
             }`}>
-              {inputMode === "pdf" && "📌 上傳供應商提供的 PDF 行程表，AI 將自動解析內容"}
-              {inputMode === "url" && "🌐 輸入供應商官網的行程頁面 URL，AI 動態爬取 + Vision 抽取日期/價格"}
-              {inputMode === "pdf_url" && "✨ 同時上傳 PDF 並提供官網 URL，得到最完整的行程資料"}
+              {inputMode === "pdf" && t('toursTab.modePdfHint')}
+              {inputMode === "url" && t('toursTab.modeUrlHint')}
+              {inputMode === "pdf_url" && t('toursTab.modePdfUrlHint')}
             </div>
 
             {/* URL 輸入（URL 模式） */}
             {inputMode === "url" && (
               <div className="space-y-2">
-                <Label className="text-sm font-medium">官網行程頁面 URL</Label>
+                <Label className="text-sm font-medium">{t('toursTab.urlInputLabel')}</Label>
                 <input
                   type="url"
                   value={autoGenerateUrl}
@@ -1271,8 +1271,8 @@ export default function ToursTab() {
             {inputMode === "pdf_url" && (
               <div className="space-y-2">
                 <Label className="text-sm font-medium">
-                  官網行程頁面 URL
-                  <span className="ml-1.5 text-xs font-normal text-green-600">(用於 AI Vision 抽取日期/人數/價格)</span>
+                  {t('toursTab.urlInputLabel')}
+                  <span className="ml-1.5 text-xs font-normal text-green-600">{t('toursTab.urlInputSubLabel')}</span>
                 </Label>
                 <input
                   type="url"

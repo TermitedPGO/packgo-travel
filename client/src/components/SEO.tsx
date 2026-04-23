@@ -73,6 +73,12 @@ export default function SEO({
   const metaUrl = url ? `${SITE_URL}${url}` : SITE_URL;
   const ogLocale = isEn ? "en_US" : "zh_TW";
 
+  // hreflang alternate URLs — share the same canonical path, language via ?lang= param
+  const pathOnly = url ?? "/";
+  const separator = pathOnly.includes("?") ? "&" : "?";
+  const zhUrl = `${SITE_URL}${pathOnly}`;
+  const enUrl = `${SITE_URL}${pathOnly}${separator}lang=en`;
+
   // Normalise schema to array
   const schemas = schema ? (Array.isArray(schema) ? schema : [schema]) : [];
 
@@ -84,6 +90,11 @@ export default function SEO({
       <meta name="description" content={metaDesc} />
       <link rel="canonical" href={metaUrl} />
 
+      {/* hreflang alternates — tells Google which URL serves which language */}
+      <link rel="alternate" hrefLang="zh-TW" href={zhUrl} />
+      <link rel="alternate" hrefLang="en" href={enUrl} />
+      <link rel="alternate" hrefLang="x-default" href={zhUrl} />
+
       {/* Open Graph */}
       <meta property="og:type" content={type} />
       <meta property="og:url" content={metaUrl} />
@@ -91,6 +102,7 @@ export default function SEO({
       <meta property="og:description" content={metaDesc} />
       <meta property="og:image" content={metaImage} />
       <meta property="og:locale" content={ogLocale} />
+      <meta property="og:locale:alternate" content={isEn ? "zh_TW" : "en_US"} />
       <meta property="og:site_name" content={siteName} />
 
       {/* Twitter Card */}
