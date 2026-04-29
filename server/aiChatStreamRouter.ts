@@ -91,6 +91,22 @@ aiChatStreamRouter.get("/ai/chat/stream", async (req, res) => {
       // skill matching failure is non-fatal
     }
 
+    // v78: Live context enrichment — query real tour catalog when user
+    // mentions a destination, inject quote/visa/escalation suggestions
+    // when intent is detected. Replaces "AI making stuff up" with grounded
+    // answers that reference actual inventory.
+    let liveContext = "";
+    try {
+      const { enrichChatContext } = await import("./services/aiChatContextService");
+      const enrichment = await enrichChatContext(message, conversationHistory);
+      liveContext = enrichment.systemPromptAddition;
+      if (enrichment.detectedIntent.length > 0) {
+        sendEvent("intent", { detected: enrichment.detectedIntent, matchedTours: enrichment.matchedTourCount });
+      }
+    } catch (err) {
+      console.warn("[AIChatStream] context enrichment failed (non-fatal):", (err as Error)?.message);
+    }
+
     const systemPrompt = `# PACK&GO 旅行社 AI 旅遊顧問
 
 ## 品牌身份
@@ -136,7 +152,7 @@ aiChatStreamRouter.get("/ai/chat/stream", async (req, res) => {
 - 提供具體、可行的建議，避免模糊回答
 - 不確定的資訊（如最新簽證規定）請建議客戶直接聯繫客服確認
 - 適時推薦 PACK&GO 的服務，但不要過度推銷
-${skillContext}`;
+${skillContext}${liveContext}`;
 
     // Build messages array (last 10 turns + current message)
     const messages = [

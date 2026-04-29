@@ -35,7 +35,13 @@ export default function BookingsTab() {
     refunded:     { label: t('admin.bookingsTab.paymentRefunded'),     color: "bg-orange-50 text-orange-700 border-orange-200" },
   }), [t]);
 
-  const { data: bookings = [], isLoading, refetch } = trpc.bookings.adminList.useQuery();
+  const { data: rawBookings = [], isLoading, refetch } = trpc.bookings.adminList.useQuery();
+  // v78v: status quick-filter via clicking stats cards (default 'all')
+  const [statusFilter, setStatusFilter] = useState<"all" | BookingStatus>("all");
+  const bookings = useMemo(() => {
+    if (statusFilter === "all") return rawBookings;
+    return (rawBookings as any[]).filter((b) => b.bookingStatus === statusFilter);
+  }, [rawBookings, statusFilter]);
 
   const updateStatusMutation = trpc.bookings.adminUpdateStatus.useMutation({
     onSuccess: () => { refetch(); toast.success(t('admin.bookingsTab.toastStatusUpdated')); },
@@ -43,7 +49,29 @@ export default function BookingsTab() {
     onSettled: () => setUpdatingId(null),
   });
 
-  const handleStatusChange = (bookingId: number, newStatus: BookingStatus) => {
+  const handleStatusChange = (bookingId: number, newStatus: BookingStatus, currentStatus?: BookingStatus) => {
+    // v70: confirm before destructive transitions. Without this an admin can
+    // mis-click the dropdown and instantly change a booking's status with no
+    // undo — e.g. flipping a paid booking to "cancelled" sends the wrong
+    // signal to refund/operations and there's no audit trail to recover from.
+    // Only require confirmation for transitions that affect the customer:
+    // → cancelled (irreversible side effects)
+    // → completed (final state, hard to revert)
+    // → refunded   (financial)
+    if (newStatus !== currentStatus) {
+      // refunded isn't part of bookingStatus enum (it's a payment status), so
+      // we only check booking-status destructive transitions here.
+      const destructive: BookingStatus[] = ["cancelled", "completed"];
+      if (destructive.includes(newStatus)) {
+        const labelKey = `admin.bookingsTab.confirmStatusChange.${newStatus}`;
+        const fallback =
+          newStatus === "cancelled"
+            ? "確定要將此訂單改為「已取消」嗎？此動作無法復原。"
+            : "確定要將此訂單改為「已完成」嗎？此狀態屬於最終狀態。";
+        const message = t(labelKey) || fallback;
+        if (!window.confirm(message)) return;
+      }
+    }
     setUpdatingId(bookingId);
     updateStatusMutation.mutate({ id: bookingId, status: newStatus });
   };
@@ -58,11 +86,12 @@ export default function BookingsTab() {
     return new Intl.NumberFormat(language === 'en' ? 'en-US' : 'zh-TW', { style: "currency", currency }).format(amount);
   };
 
+  // v78v: stats count from raw (unfiltered) so they don't move when user filters
   const stats = {
-    total:     bookings.length,
-    pending:   bookings.filter((b: any) => b.bookingStatus === "pending").length,
-    confirmed: bookings.filter((b: any) => b.bookingStatus === "confirmed").length,
-    completed: bookings.filter((b: any) => b.bookingStatus === "completed").length,
+    total:     rawBookings.length,
+    pending:   (rawBookings as any[]).filter((b) => b.bookingStatus === "pending").length,
+    confirmed: (rawBookings as any[]).filter((b) => b.bookingStatus === "confirmed").length,
+    completed: (rawBookings as any[]).filter((b) => b.bookingStatus === "completed").length,
   };
 
   const paxSuffix = t('admin.bookingsTab.paxSuffix');
@@ -81,20 +110,31 @@ export default function BookingsTab() {
         </Button>
       </div>
 
-      {/* Stats Row */}
-      {bookings.length > 0 && (
-        <div className="grid grid-cols-4 gap-4">
-          {[
-            { label: t('admin.bookingsTab.statAll'),       value: stats.total,     color: "text-gray-900" },
-            { label: t('admin.bookingsTab.statPending'),   value: stats.pending,   color: "text-yellow-700" },
-            { label: t('admin.bookingsTab.statConfirmed'), value: stats.confirmed, color: "text-blue-700" },
-            { label: t('admin.bookingsTab.statCompleted'), value: stats.completed, color: "text-green-700" },
-          ].map((stat) => (
-            <div key={stat.label} className="bg-white border border-gray-200 p-4 rounded-xl">
-              <p className="text-xs text-gray-500 uppercase tracking-wide">{stat.label}</p>
-              <p className={`text-2xl font-bold mt-1 ${stat.color}`}>{stat.value}</p>
-            </div>
-          ))}
+      {/* Stats Row — v78v: clickable, acts as quick status filter */}
+      {rawBookings.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {([
+            { key: "all" as const,       label: t('admin.bookingsTab.statAll'),       value: stats.total,     color: "text-gray-900",     ring: "ring-gray-900" },
+            { key: "pending" as const,   label: t('admin.bookingsTab.statPending'),   value: stats.pending,   color: "text-yellow-700",   ring: "ring-yellow-500" },
+            { key: "confirmed" as const, label: t('admin.bookingsTab.statConfirmed'), value: stats.confirmed, color: "text-blue-700",     ring: "ring-blue-500" },
+            { key: "completed" as const, label: t('admin.bookingsTab.statCompleted'), value: stats.completed, color: "text-green-700",    ring: "ring-green-500" },
+          ]).map((stat) => {
+            const isActive = statusFilter === stat.key;
+            return (
+              <button
+                key={stat.label}
+                onClick={() => setStatusFilter(stat.key as any)}
+                className={`text-left bg-white border p-4 rounded-xl transition-all ${
+                  isActive
+                    ? `border-transparent ring-2 ${stat.ring} shadow-sm`
+                    : "border-gray-200 hover:border-gray-300 hover:shadow-sm"
+                }`}
+              >
+                <p className="text-xs text-gray-500 uppercase tracking-wide">{stat.label}</p>
+                <p className={`text-2xl font-bold mt-1 ${stat.color}`}>{stat.value}</p>
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -169,7 +209,7 @@ export default function BookingsTab() {
                               <DropdownMenuItem
                                 key={status}
                                 className={`flex items-center gap-2 text-xs ${booking.bookingStatus === status ? "font-semibold" : ""}`}
-                                onClick={() => handleStatusChange(booking.id, status)}
+                                onClick={() => handleStatusChange(booking.id, status, booking.bookingStatus)}
                               >
                                 {cfg.icon}
                                 {cfg.label}
@@ -276,7 +316,7 @@ export default function BookingsTab() {
                       size="sm"
                       className={`text-xs h-8 rounded-lg ${selectedBooking.bookingStatus === status ? "ring-2 ring-offset-1 ring-gray-400" : ""}`}
                       onClick={() => {
-                        handleStatusChange(selectedBooking.id, status);
+                        handleStatusChange(selectedBooking.id, status, selectedBooking.bookingStatus);
                         setSelectedBooking({ ...selectedBooking, bookingStatus: status });
                       }}
                     >

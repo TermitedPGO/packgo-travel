@@ -1,14 +1,29 @@
 import GenericPage from "@/components/GenericPage";
+import SEO from "@/components/SEO";
 import { useLocale } from "@/contexts/LocaleContext";
 
 export default function AboutUs() {
   const { t } = useLocale();
 
   return (
-    <GenericPage
-      title={t('aboutUs.title')}
-      subtitle={t('aboutUs.subtitle')}
-    >
+    <>
+      {/* v73: SEO meta added — was the only public page missing canonical/OG */}
+      <SEO
+        title={{
+          zh: '關於我們 - PACK&GO 旅行社',
+          en: 'About Us - PACK&GO Travel',
+        }}
+        description={{
+          zh: 'PACK&GO 旅行社致力於提供高品質、客製化的旅遊體驗。了解我們的使命、服務範圍與專業團隊。',
+          en: 'PACK&GO Travel is dedicated to delivering high-quality, customised travel experiences. Learn about our mission, services and team.',
+        }}
+        url="/about-us"
+        type="website"
+      />
+      <GenericPage
+        title={t('aboutUs.title')}
+        subtitle={t('aboutUs.subtitle')}
+      >
       <div className="space-y-6 text-gray-700 max-w-4xl">
         <p className="text-lg">
           {t('aboutUs.intro')}
@@ -46,7 +61,7 @@ export default function AboutUs() {
             <p className="text-xs uppercase tracking-wider text-gray-500 mb-1">
               {t('aboutUs.cityLicenceLabel')}
             </p>
-            <p className="font-semibold text-black">Newark #115622</p>
+            <p className="font-semibold text-black">Newark #115594</p>
             <p className="text-sm text-gray-600 mt-1">
               {t('aboutUs.cityLicenceDesc')}
             </p>
@@ -55,7 +70,7 @@ export default function AboutUs() {
             <p className="text-xs uppercase tracking-wider text-gray-500 mb-1">
               {t('aboutUs.cstLabel')}
             </p>
-            <p className="font-semibold text-black">CST #2166984-40</p>
+            <p className="font-semibold text-black">CST #2166984</p>
             <p className="text-sm text-gray-600 mt-1">
               {t('aboutUs.cstDesc')}
             </p>
@@ -80,6 +95,7 @@ export default function AboutUs() {
           <strong>{t('aboutUs.email')}：</strong>Jeffhsieh09@gmail.com
         </p>
       </div>
-    </GenericPage>
+      </GenericPage>
+    </>
   );
 }

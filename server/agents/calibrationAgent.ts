@@ -50,11 +50,121 @@ const WEIGHTS = {
   marketing: 0.15,
 };
 
+// ── v67: combined fidelity + marketing LLM helper ─────────────────────────────
+//
+// Previously CalibrationAgent fired TWO separate LLM calls per tour:
+//   1. checkContentFidelity → fidelity scores + factual issues
+//   2. checkMarketingQuality → title attractiveness rating
+//
+// Both calls audit the same tour data; only the question differs. Merging them
+// into a single Haiku call cuts calibration LLM usage by 50% (and removes one
+// network round-trip from every tour generation).
+//
+// `runCalibration` calls this once up front and passes the result down to
+// `checkContentFidelity` / `checkMarketingQuality` via the `precomputedLLM`
+// param — those functions still work standalone if called directly (they fall
+// back to their own LLM call when nothing is precomputed).
+export interface PrecomputedQualityLLM {
+  titleScore: number;
+  contentAccuracy: number;
+  overallScore: number;
+  issues: string[];
+  marketingTitleScore: number;
+  marketingTitleFeedback: string;
+}
+
+export async function combinedQualityLLM(
+  tourData: any,
+  sourceContent?: string
+): Promise<PrecomputedQualityLLM | null> {
+  const title = tourData.title || "";
+  const hasFidelityInput = !!(sourceContent && sourceContent.trim().length >= 50);
+  const hasMarketingInput = title.length > 0;
+  if (!hasFidelityInput && !hasMarketingInput) return null;
+
+  const prompt = `You audit a generated travel tour on TWO axes:
+
+A) FIDELITY vs SOURCE
+${hasFidelityInput
+  ? `SOURCE CONTENT (original URL/PDF text):
+${sourceContent!.slice(0, 6000)}
+
+GENERATED TOUR DATA:
+Title: ${tourData.title || "(missing)"}
+Poetic Title: ${(tourData as any).poeticTitle || "(none)"}
+Destination: ${(tourData as any).destinationCountry || "(missing)"}
+Description: ${(tourData.description || "").slice(0, 800)}
+
+SCORING RULES:
+- titleScore (0-100): Creative rewriting is encouraged. Score HIGH if destination/duration/theme are correct. Don't require exact match.
+- contentAccuracy (0-100): Are destination/activities/highlights factually correct? Enrichment with well-known local attractions is acceptable. Only penalize WRONG information.
+- overallScore (0-100): Overall creative quality preserving factual accuracy.
+- issues: ONLY clear factual errors (wrong destination, wrong country, contradicts source). Empty array if none. Do NOT include "might mislead" / "not explicitly confirmed" / soft observations.
+- A flawless tour with no factual errors → overallScore: 100. Don't default to 90-95 out of politeness.
+NOTE: Price and duration accuracy are checked by rule-based validation — DO NOT evaluate price/duration here.`
+  : `(no source content available — return titleScore=70, contentAccuracy=70, overallScore=70, issues=[])`}
+
+B) MARKETING — Title Attractiveness
+${hasMarketingInput
+  ? `Tour Title: "${title}"
+Rate from 0-100 how attractive and marketable this title is. Provide brief feedback (one sentence).`
+  : `(no title — return marketingTitleScore=50, marketingTitleFeedback="Title missing")`}
+
+Respond ONLY with valid JSON in this exact shape:
+{
+  "titleScore": 0-100,
+  "contentAccuracy": 0-100,
+  "overallScore": 0-100,
+  "issues": ["only factual errors — empty if none"],
+  "marketingTitleScore": 0-100,
+  "marketingTitleFeedback": "one-sentence feedback"
+}`;
+
+  try {
+    const response = await invokeLLM({
+      model: "claude-haiku-4-5-20251001",
+      maxTokens: 1024,
+      messages: [
+        { role: "system", content: "You are a strict quality auditor. Respond only with valid JSON." },
+        { role: "user", content: prompt },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "combined_quality_check",
+          strict: true,
+          schema: {
+            type: "object",
+            properties: {
+              titleScore: { type: "number" },
+              contentAccuracy: { type: "number" },
+              overallScore: { type: "number" },
+              issues: { type: "array", items: { type: "string" } },
+              marketingTitleScore: { type: "number" },
+              marketingTitleFeedback: { type: "string" },
+            },
+            required: ["titleScore", "contentAccuracy", "overallScore", "issues", "marketingTitleScore", "marketingTitleFeedback"],
+            additionalProperties: false,
+          },
+        },
+      },
+    });
+    const content = response?.choices?.[0]?.message?.content;
+    if (!content) return null;
+    const parsed = typeof content === "string" ? JSON.parse(content) : content;
+    return parsed as PrecomputedQualityLLM;
+  } catch (err) {
+    console.warn("[CalibrationAgent] combinedQualityLLM failed, will fall back to per-check LLM calls:", err);
+    return null;
+  }
+}
+
 // ── CHECK 1: Content Fidelity (30%) ──────────────────────────────────────────
 
 export async function checkContentFidelity(
   tourData: any,
-  sourceContent?: string
+  sourceContent?: string,
+  precomputedLLM?: PrecomputedQualityLLM | null
 ): Promise<{ score: number; issues: CalibrationIssue[] }> {
   const issues: CalibrationIssue[] = [];
 
@@ -113,8 +223,23 @@ export async function checkContentFidelity(
   }
 
   // ════════ Step 2: LLM 只評估標題和內容品質 ════════
+  // v67: if precomputedLLM is provided (set by runCalibration via combinedQualityLLM),
+  // we skip the LLM call entirely — the orchestrator already paid for both fidelity
+  // AND marketing scores in a single combined call. Standalone direct callers of
+  // checkContentFidelity (no precomputed) still get the original fall-back path.
   try {
-    const prompt = `You are a quality auditor for PACK&GO travel agency. Evaluate the quality of the generated tour description.
+    let result: { titleScore: number; contentAccuracy: number; overallScore: number; issues: string[] };
+
+    if (precomputedLLM) {
+      result = {
+        titleScore: precomputedLLM.titleScore,
+        contentAccuracy: precomputedLLM.contentAccuracy,
+        overallScore: precomputedLLM.overallScore,
+        issues: precomputedLLM.issues,
+      };
+    } else {
+      // Fallback path: per-check LLM call (only when called directly, not via runCalibration)
+      const prompt = `You are a quality auditor for PACK&GO travel agency. Evaluate the quality of the generated tour description.
 
 SOURCE CONTENT (original URL/PDF text):
 ${sourceContent.slice(0, 6000)}
@@ -125,20 +250,6 @@ Poetic Title: ${(tourData as any).poeticTitle || "(none)"}
 Destination: ${(tourData as any).destinationCountry || "(missing)"}
 Description: ${(tourData.description || "").slice(0, 800)}
 
-SCORING RULES:
-1. Title (0-100): Creative rewriting is ENCOURAGED. Score HIGH (80-100) if it correctly identifies destination, duration, and theme. Do NOT require exact match.
-2. Content accuracy (0-100): Are the destination, activities, and highlights factually correct? Enrichment with well-known local attractions is acceptable. Only penalize WRONG information (wrong city, wrong country, contradicting source).
-3. Overall creative quality (0-100): Is this a well-written, attractive tour description that preserves factual accuracy?
-
-NOTE: Price and duration accuracy are checked separately by rule-based validation. Do NOT evaluate price or duration here.
-
-ISSUES ARRAY — CRITICAL RULES (Round 69):
-- ONLY include entries that describe a CLEAR FACTUAL ERROR (wrong destination, wrong country, contradicts source, invented data that doesn't match source).
-- DO NOT include positive observations, neutral comments, stylistic preferences, or soft concerns like "might mislead" / "not explicitly confirmed" / "could be clearer".
-- DO NOT include phrases like "correctly references", "is accurate", "is appropriate" — these are NOT issues.
-- If the tour has no factual errors, return an EMPTY array: "issues": []
-- A flawless tour with no factual errors should score overallScore: 100. Do NOT default to 90-95 out of politeness — reserve those scores for tours with actual concerns.
-
 Respond in JSON:
 {
   "titleScore": 0-100,
@@ -146,36 +257,36 @@ Respond in JSON:
   "overallScore": 0-100,
   "issues": ["ONLY factual errors — empty array if none"]
 }`;
-
-    const response = await invokeLLM({
-      messages: [
-        { role: "system", content: "You are a strict quality auditor. Respond only with valid JSON." },
-        { role: "user", content: prompt },
-      ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "fidelity_check",
-          strict: true,
-          schema: {
-            type: "object",
-            properties: {
-              titleScore: { type: "number" },
-              contentAccuracy: { type: "number" },
-              overallScore: { type: "number" },
-              issues: { type: "array", items: { type: "string" } },
+      const response = await invokeLLM({
+        model: "claude-haiku-4-5-20251001",
+        maxTokens: 1024,
+        messages: [
+          { role: "system", content: "You are a strict quality auditor. Respond only with valid JSON." },
+          { role: "user", content: prompt },
+        ],
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "fidelity_check",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: {
+                titleScore: { type: "number" },
+                contentAccuracy: { type: "number" },
+                overallScore: { type: "number" },
+                issues: { type: "array", items: { type: "string" } },
+              },
+              required: ["titleScore", "contentAccuracy", "overallScore", "issues"],
+              additionalProperties: false,
             },
-            required: ["titleScore", "contentAccuracy", "overallScore", "issues"],
-            additionalProperties: false,
           },
         },
-      },
-    });
-
-    const content = response?.choices?.[0]?.message?.content;
-    if (!content) return { score: 70, issues: [] };
-
-    const result = typeof content === "string" ? JSON.parse(content) : content;
+      });
+      const content = response?.choices?.[0]?.message?.content;
+      if (!content) return { score: 70, issues: [] };
+      result = typeof content === "string" ? JSON.parse(content) : content;
+    }
 
     // ──── Round 69 Fix 1 + Round 70 Fix 1: Trust FACTUAL issues only ────
     // Round 69: LLM consistently returned overallScore=93-95 even with issues=[]
@@ -616,7 +727,8 @@ export function checkCompleteness(tourData: any): { score: number; issues: Calib
 // ── CHECK 5: Marketing Quality (15%) ─────────────────────────────────────────
 
 export async function checkMarketingQuality(
-  tourData: any
+  tourData: any,
+  precomputedLLM?: PrecomputedQualityLLM | null
 ): Promise<{ score: number; issues: CalibrationIssue[] }> {
   const issues: CalibrationIssue[] = [];
   let score = 100;
@@ -686,52 +798,64 @@ export async function checkMarketingQuality(
   }
 
   // LLM title attractiveness check
+  // v67: prefer precomputed score from combinedQualityLLM (set by runCalibration).
+  // Fallback to a per-call LLM only if standalone caller passed nothing.
   const title = tourData.title || "";
   if (title.length > 0) {
     try {
-      const response = await invokeLLM({
-        messages: [
-          {
-            role: "system",
-            content: "You are a travel marketing expert. Evaluate if this tour title is attractive and marketable. Rate it from 0-100. Respond with only a JSON object.",
-          },
-          {
-            role: "user",
-            content: `Rate this tour title: "${title}"\n\nRespond: {"score": 0-100, "feedback": "brief feedback"}`,
-          },
-        ],
-        response_format: {
-          type: "json_schema",
-          json_schema: {
-            name: "title_rating",
-            strict: true,
-            schema: {
-              type: "object",
-              properties: {
-                score: { type: "number" },
-                feedback: { type: "string" },
+      let titleScore: number;
+      let feedback: string;
+
+      if (precomputedLLM) {
+        titleScore = Math.max(0, Math.min(100, precomputedLLM.marketingTitleScore ?? 70));
+        feedback = precomputedLLM.marketingTitleFeedback || "";
+      } else {
+        const response = await invokeLLM({
+          model: "claude-haiku-4-5-20251001",
+          maxTokens: 256,
+          messages: [
+            {
+              role: "system",
+              content: "You are a travel marketing expert. Evaluate if this tour title is attractive and marketable. Rate it from 0-100. Respond with only a JSON object.",
+            },
+            {
+              role: "user",
+              content: `Rate this tour title: "${title}"\n\nRespond: {"score": 0-100, "feedback": "brief feedback"}`,
+            },
+          ],
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "title_rating",
+              strict: true,
+              schema: {
+                type: "object",
+                properties: {
+                  score: { type: "number" },
+                  feedback: { type: "string" },
+                },
+                required: ["score", "feedback"],
+                additionalProperties: false,
               },
-              required: ["score", "feedback"],
-              additionalProperties: false,
             },
           },
-        },
-      });
-
-      const content = response?.choices?.[0]?.message?.content;
-      if (content) {
+        });
+        const content = response?.choices?.[0]?.message?.content;
+        if (!content) return { score: Math.max(0, Math.min(100, score)), issues };
         const result = typeof content === "string" ? JSON.parse(content) : content;
-        const titleScore = Math.max(0, Math.min(100, result.score ?? 70));
-        if (titleScore < 50) {
-          issues.push({
-            check: "marketing",
-            severity: "info",
-            message: `Title attractiveness: ${titleScore}/100 — ${result.feedback}`,
-            field: "title",
-            autoFixable: false,
-          });
-          score -= 10;
-        }
+        titleScore = Math.max(0, Math.min(100, result.score ?? 70));
+        feedback = result.feedback || "";
+      }
+
+      if (titleScore < 50) {
+        issues.push({
+          check: "marketing",
+          severity: "info",
+          message: `Title attractiveness: ${titleScore}/100 — ${feedback}`,
+          field: "title",
+          autoFixable: false,
+        });
+        score -= 10;
       }
     } catch {
       // Non-critical — skip LLM title check
@@ -756,7 +880,10 @@ async function applyAutoFixes(
     try {
       if (field === "description" && issue.message.includes("too short")) {
         const before = tourData.description || "";
+        // v67: description expansion — Haiku, 512 tokens (output is 100-300 chars).
         const response = await invokeLLM({
+          model: "claude-haiku-4-5-20251001",
+          maxTokens: 512,
           messages: [
             {
               role: "system",
@@ -786,7 +913,10 @@ async function applyAutoFixes(
         }
         const before = JSON.stringify(current);
 
+        // v67: keyFeatures generation — Haiku, 512 tokens (3-5 short bullets).
         const response = await invokeLLM({
+          model: "claude-haiku-4-5-20251001",
+          maxTokens: 512,
           messages: [
             {
               role: "system",
@@ -843,12 +973,17 @@ export async function calibrateTour(
 
   const tourId = tourData.id || tourData.tourId;
 
+  // v67: Combine fidelity + marketing-title LLM into ONE call up front.
+  // Previously these fired as 2 separate Sonnet calls (now Haiku post-v67) —
+  // merging into one single Haiku call halves calibration LLM token use.
+  const combined = await combinedQualityLLM(tourData, sourceContent);
+
   // Run all 5 checks in parallel (except translation which needs tourId)
   const [contentResult, imageResult, completenessResult, marketingResult] = await Promise.all([
-    checkContentFidelity(tourData, sourceContent),
+    checkContentFidelity(tourData, sourceContent, combined),
     checkImageQuality(tourData, tourId),
     Promise.resolve(checkCompleteness(tourData)),
-    checkMarketingQuality(tourData),
+    checkMarketingQuality(tourData, combined),
   ]);
 
   // Translation check (sequential — needs DB).
@@ -870,11 +1005,13 @@ export async function calibrateTour(
   // Apply auto-fixes
   const { tourData: fixedTourData, fixes } = await applyAutoFixes(tourData, allIssues);
 
-  // Re-run marketing check after fixes (description/keyFeatures may have changed)
+  // Re-run marketing check after fixes (description/keyFeatures may have changed).
+  // v67: pass the same precomputed LLM scores so the recheck stays purely rule-based
+  // and skips the (now unused) per-check LLM fallback.
   let finalMarketingScore = marketingResult.score;
   if (fixes.some((f) => f.field === "description" || f.field === "keyFeatures")) {
     try {
-      const recheck = await checkMarketingQuality(fixedTourData);
+      const recheck = await checkMarketingQuality(fixedTourData, combined);
       finalMarketingScore = recheck.score;
     } catch {
       // Keep original score

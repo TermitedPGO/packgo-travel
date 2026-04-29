@@ -37,9 +37,13 @@ function generateCacheKey(params: InvokeParams): string {
   
   const jsonString = JSON.stringify(cacheInput);
   const hash = createHash("sha256").update(jsonString).digest("hex");
-  
-  // Include model in cache key (currently hardcoded to gemini-2.5-flash)
-  return `llm:cache:${hash}:gemini-2.5-flash`;
+
+  // v67 FIX: include the actual model in cache key so Haiku/Sonnet/Opus
+  // results don't collide. Previously hardcoded to "gemini-2.5-flash" which
+  // meant every model shared a cache slot — guaranteed cross-model cache
+  // poisoning, and effectively defeated the 24h cache for new model migrations.
+  const model = (params as any).model || "claude-sonnet-4-5-20250929";
+  return `llm:cache:${hash}:${model}`;
 }
 
 /**

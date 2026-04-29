@@ -149,6 +149,114 @@ export const locationMapping: Record<string, string> = {
   '西伯利亞': 'Siberia',
   '伊爾庫茨克': 'Irkutsk',
   '李斯特維揚卡': 'Listvyanka',
+
+  // v78o: Switzerland / Germany / Austria cities (was missing — Zürich/Lucerne etc. shown in Chinese on EN site)
+  '蘇黎世': 'Zürich',
+  '盧森': 'Lucerne',
+  '琉森': 'Lucerne',
+  '少女峰': 'Jungfrau',
+  '伯恩': 'Bern',
+  '日內瓦': 'Geneva',
+  '洛桑': 'Lausanne',
+  '蒙特勒': 'Montreux',
+  '馬特宏峰': 'Matterhorn',
+  '策馬特': 'Zermatt',
+  '聖莫里茲': 'St. Moritz',
+  '巴塞爾': 'Basel',
+  '茵特拉肯': 'Interlaken',
+  '冰河快車': 'Glacier Express',
+
+  // Germany
+  '柏林': 'Berlin',
+  '慕尼黑': 'Munich',
+  '法蘭克福': 'Frankfurt',
+  '漢堡': 'Hamburg',
+  '科隆': 'Cologne',
+  '海德堡': 'Heidelberg',
+  '紐倫堡': 'Nuremberg',
+  '羅滕堡': 'Rothenburg',
+  '德勒斯登': 'Dresden',
+  '萊比錫': 'Leipzig',
+  '波茨坦': 'Potsdam',
+  '黑森林': 'Black Forest',
+  '新天鵝堡': 'Neuschwanstein Castle',
+
+  // Austria
+  '維也納': 'Vienna',
+  '薩爾斯堡': 'Salzburg',
+  '因斯布魯克': 'Innsbruck',
+  '哈爾施塔特': 'Hallstatt',
+
+  // USA cities (East Coast tour route)
+  '紐約': 'New York',
+  '華盛頓': 'Washington DC',
+  '華盛頓特區': 'Washington DC',
+  '費城': 'Philadelphia',
+  '波士頓': 'Boston',
+  '尼加拉瀑布': 'Niagara Falls',
+  '舊金山': 'San Francisco',
+  '洛杉磯': 'Los Angeles',
+  '拉斯維加斯': 'Las Vegas',
+  '大峽谷': 'Grand Canyon',
+  '芝加哥': 'Chicago',
+  '邁阿密': 'Miami',
+  '奧蘭多': 'Orlando',
+  '夏威夷': 'Hawaii',
+  '檀香山': 'Honolulu',
+
+  // France / UK
+  '巴黎': 'Paris',
+  '里昂': 'Lyon',
+  '馬賽': 'Marseille',
+  '尼斯': 'Nice',
+  '凡爾賽': 'Versailles',
+  '倫敦': 'London',
+  '愛丁堡': 'Edinburgh',
+  '劍橋': 'Cambridge',
+  '牛津': 'Oxford',
+
+  // Italy
+  '羅馬': 'Rome',
+  '佛羅倫斯': 'Florence',
+  '威尼斯': 'Venice',
+  '米蘭': 'Milan',
+  '那不勒斯': 'Naples',
+  '比薩': 'Pisa',
+  '西西里': 'Sicily',
+
+  // Malaysia
+  '吉隆坡': 'Kuala Lumpur',
+  '檳城': 'Penang',
+  '馬六甲': 'Malacca',
+  '沙巴': 'Sabah',
+  '亞庇': 'Kota Kinabalu',
+
+  // v78p: Philippines + others (caught by production crawler)
+  '宿霧': 'Cebu',
+  '馬尼拉': 'Manila',
+  '長灘島': 'Boracay',
+  '巴拉望': 'Palawan',
+  '科隆': 'Coron',  // Philippines (also Germany — handled separately)
+  '愛妮島': 'El Nido',
+
+  // Indonesia
+  '峇里島': 'Bali',
+  '雅加達': 'Jakarta',
+
+  // Thailand
+  '曼谷': 'Bangkok',
+  '清邁': 'Chiang Mai',
+  '普吉島': 'Phuket',
+  '芭達雅': 'Pattaya',
+
+  // Vietnam
+  '河內': 'Hanoi',
+  '胡志明市': 'Ho Chi Minh City',
+  '下龍灣': 'Ha Long Bay',
+
+  // Korea
+  '首爾': 'Seoul',
+  '釜山韓國': 'Busan',
 };
 
 /**

@@ -49,6 +49,8 @@ interface BookingEmailData {
   totalPrice: number;
   depositAmount: number;
   remainingAmount: number;
+  /** v78x: Optional customer language preference. Defaults to 'zh-TW' for backward compat. */
+  language?: 'zh-TW' | 'en';
 }
 
 /**
@@ -56,7 +58,7 @@ interface BookingEmailData {
  * Uses SMTP to send actual email to customer, with notifyOwner as backup notification
  */
 export async function sendBookingConfirmationEmail(data: BookingEmailData) {
-  // Always notify owner about new booking
+  // Always notify owner about new booking (owner reads ZH)
   const emailContent = `
 訂單確認通知
 
@@ -85,18 +87,24 @@ export async function sendBookingConfirmationEmail(data: BookingEmailData) {
     content: emailContent,
   });
 
+  // v78x: Subject + template language follows the customer's preference.
+  const isEN = data.language === 'en';
+  const subject = isEN
+    ? `Booking confirmed #${data.bookingId} - ${data.tourTitle}`
+    : `訂單確認 #${data.bookingId} - ${data.tourTitle}`;
+
   // Try to send actual email to customer
   const smtp = getTransporter();
   if (smtp) {
     try {
       await smtp.sendMail({
-        from: `"PACK&GO 旅行社" <${EMAIL_FROM}>`,
+        from: `"PACK&GO Travel" <${EMAIL_FROM}>`,
         to: data.to,
-        subject: `訂單確認 #${data.bookingId} - ${data.tourTitle}`,
+        subject,
         html: generateBookingConfirmationHTML(data),
         text: emailContent,
       });
-      console.log('[Email] Booking confirmation email sent to:', data.to);
+      console.log('[Email] Booking confirmation email sent to:', data.to, `(${data.language || 'zh-TW'})`);
     } catch (error) {
       console.error('[Email] Failed to send booking confirmation email:', error);
     }
@@ -112,19 +120,21 @@ interface PaymentSuccessEmailData {
   tourTitle: string;
   paymentAmount: number;
   paymentType: "deposit" | "balance" | "full";
+  /** v78y: customer language preference; defaults to zh-TW */
+  language?: 'zh-TW' | 'en';
 }
 
 /**
  * Send payment success email to customer
  */
 export async function sendPaymentSuccessEmail(data: PaymentSuccessEmailData) {
-  const paymentTypeText = {
-    deposit: "訂金",
-    balance: "尾款",
-    full: "全額",
-  }[data.paymentType];
+  const isEN = data.language === 'en';
+  const paymentTypeText = isEN
+    ? ({ deposit: 'Deposit', balance: 'Balance', full: 'Full payment' }[data.paymentType])
+    : ({ deposit: '訂金', balance: '尾款', full: '全額' }[data.paymentType]);
 
-  const emailContent = `
+  // Owner notification stays in ZH (admin reads ZH).
+  const ownerEmailContent = `
 付款成功通知
 
 客戶姓名：${data.customerName}
@@ -133,15 +143,30 @@ export async function sendPaymentSuccessEmail(data: PaymentSuccessEmailData) {
 行程名稱：${data.tourTitle}
 
 付款資訊：
-- 付款類型：${paymentTypeText}
+- 付款類型：${ isEN ? ({ deposit: '訂金', balance: '尾款', full: '全額' }[data.paymentType]) : paymentTypeText }
 - 付款金額：NT$ ${data.paymentAmount.toLocaleString()}
 
 感謝您的付款，我們將盡快為您安排行程。
   `.trim();
 
+  // Customer-facing plain-text fallback follows the customer's language.
+  const customerEmailContent = isEN
+    ? `Payment confirmed
+
+Dear ${data.customerName},
+
+Order #: ${data.bookingId}
+Tour: ${data.tourTitle}
+
+Payment type: ${paymentTypeText}
+Amount: NT$ ${data.paymentAmount.toLocaleString()}
+
+Thank you. Our team will continue arranging your trip and will email the final itinerary once supplier confirms.`
+    : ownerEmailContent;
+
   await notifyOwner({
     title: `付款成功 #${data.bookingId} - ${data.customerName}`,
-    content: emailContent,
+    content: ownerEmailContent,
   });
 
   // Try to send actual email to customer
@@ -149,13 +174,15 @@ export async function sendPaymentSuccessEmail(data: PaymentSuccessEmailData) {
   if (smtp) {
     try {
       await smtp.sendMail({
-        from: `"PACK&GO 旅行社" <${EMAIL_FROM}>`,
+        from: `"PACK&GO Travel" <${EMAIL_FROM}>`,
         to: data.customerEmail,
-        subject: `付款成功 #${data.bookingId} - ${data.tourTitle}`,
+        subject: isEN
+          ? `Payment confirmed #${data.bookingId} - ${data.tourTitle}`
+          : `付款成功 #${data.bookingId} - ${data.tourTitle}`,
         html: generatePaymentSuccessHTML(data, paymentTypeText),
-        text: emailContent,
+        text: customerEmailContent,
       });
-      console.log('[Email] Payment success email sent to:', data.customerEmail);
+      console.log('[Email] Payment success email sent to:', data.customerEmail, `(${data.language || 'zh-TW'})`);
     } catch (error) {
       console.error('[Email] Failed to send payment success email:', error);
     }
@@ -164,196 +191,717 @@ export async function sendPaymentSuccessEmail(data: PaymentSuccessEmailData) {
   return true;
 }
 
+// ============================================================================
+// v77: Trip Reminder Email — sent at 30/14/7/3/1 days before departure.
+// Each window has slightly different copy aimed at the customer's current
+// concern (planning vs paperwork vs final logistics).
+// ============================================================================
+
+export interface TripReminderEmailData {
+  to: string;
+  customerName: string;
+  bookingId: number;
+  tourTitle: string;
+  departureDate: Date;
+  returnDate: Date | null;
+  daysOut: 30 | 14 | 7 | 3 | 1;
+  balanceDue: number;
+  balanceCurrency: string;
+  balanceUnpaid: boolean;
+  /** v78y: bilingual reminder copy */
+  language?: 'zh-TW' | 'en';
+}
+
+const REMINDER_COPY: Record<30 | 14 | 7 | 3 | 1, { zh: { subject: string; body: string }; en: { subject: string; body: string } }> = {
+  30: {
+    zh: {
+      subject: '出發倒數 30 天｜開始準備您的旅程',
+      body: '距離您的行程出發還有 30 天。建議您此時開始確認護照效期、辦理簽證（如需要）、預訂出發地交通。如果您尚未繳清尾款，本月底前請完成。',
+    },
+    en: {
+      subject: '30 days to departure | Start preparing for your trip',
+      body: "Your trip departs in 30 days. Now is a good time to verify your passport validity, apply for visas (if required), and book transportation from your home city to the airport. If your balance is unpaid, please settle it by month-end.",
+    },
+  },
+  14: {
+    zh: {
+      subject: '出發倒數 14 天｜文件與行李檢查',
+      body: '距離出發還有 14 天。請再次檢查護照（建議至少有 6 個月效期）、簽證、旅平險。我們建議您確認航班資訊與機場接送，並開始整理行李清單。',
+    },
+    en: {
+      subject: '14 days to departure | Documents & packing checklist',
+      body: 'Departure is 14 days away. Recheck your passport (at least 6 months validity recommended), visa, and travel insurance. Confirm flight details + airport transfer, and start your packing list.',
+    },
+  },
+  7: {
+    zh: {
+      subject: '出發倒數 7 天｜尾款提醒與最終確認',
+      body: '一週後您將踏上旅程！請務必在此時：(1) 完成尾款支付（若仍有未付款項），(2) 與旅伴核對最終旅客資料，(3) 確認出發機場、報到時間。',
+    },
+    en: {
+      subject: '7 days to departure | Balance + final confirmation',
+      body: "One week to go! Please make sure to: (1) settle the balance payment if still outstanding, (2) double-check traveler info with your companions, (3) confirm the departure airport and check-in time.",
+    },
+  },
+  3: {
+    zh: {
+      subject: '出發倒數 3 天｜行程與緊急聯絡',
+      body: '3 天後出發！請列印或下載最終行程表、保留我們的緊急聯絡電話 +1 (510) 634-2307。確保手機漫遊或當地 SIM 卡準備就緒。',
+    },
+    en: {
+      subject: '3 days to departure | Itinerary & emergency contacts',
+      body: 'Departure in 3 days! Print or download your final itinerary, save our emergency line +1 (510) 634-2307. Make sure international roaming or a local SIM is ready.',
+    },
+  },
+  1: {
+    zh: {
+      subject: '明日出發｜祝您旅途愉快',
+      body: '您的旅程即將開始！再次提醒：提早至少 3 小時抵達國際線機場、攜帶護照與簽證、行動電源充飽。如遇任何問題，隨時聯絡我們：+1 (510) 634-2307。',
+    },
+    en: {
+      subject: 'Departing tomorrow | Have a great trip',
+      body: 'Your journey starts tomorrow! Reminder: arrive at the international terminal at least 3 hours before flight, carry passport + visa, charge your power bank. Any issues, reach us at +1 (510) 634-2307.',
+    },
+  },
+};
+
+export async function sendTripReminderEmail(data: TripReminderEmailData) {
+  const isEN = data.language === 'en';
+  const copy = REMINDER_COPY[data.daysOut][isEN ? 'en' : 'zh'];
+  const dateStr = data.departureDate.toLocaleDateString(isEN ? 'en-US' : 'zh-TW', { year: 'numeric', month: 'long', day: 'numeric' });
+
+  const balanceLine = data.balanceUnpaid && data.balanceDue > 0
+    ? (isEN
+        ? `\nOutstanding balance: ${data.balanceCurrency} ${data.balanceDue.toLocaleString()}\nPay at: https://packgo-travel.fly.dev/booking/${data.bookingId}`
+        : `\n尚未繳清的尾款：${data.balanceCurrency} ${data.balanceDue.toLocaleString()}\n請至訂單頁完成付款：https://packgo-travel.fly.dev/booking/${data.bookingId}`)
+    : '';
+
+  const emailText = isEN
+    ? `${copy.subject}
+
+Dear ${data.customerName},
+
+${copy.body}
+
+Order #: ${data.bookingId}
+Tour: ${data.tourTitle}
+Departure: ${dateStr}${balanceLine}
+
+Questions? Contact us anytime:
+PACK&GO Travel (CST #2166984)
+Phone: +1 (510) 634-2307
+Email: support@packgoplay.com
+
+Have a wonderful trip!`
+    : `${copy.subject}
+
+親愛的 ${data.customerName}，
+
+${copy.body}
+
+訂單編號：#${data.bookingId}
+行程：${data.tourTitle}
+出發日期：${dateStr}${balanceLine}
+
+如有任何問題，請隨時與我們聯絡：
+PACK & GO 旅行社（CST #2166984）
+電話：+1 (510) 634-2307
+信箱：support@packgoplay.com
+
+祝您旅途愉快！`;
+
+  // Notify owner (Slack/email fallback) so ops sees activity (always ZH for owner)
+  const ownerCopy = REMINDER_COPY[data.daysOut].zh;
+  await notifyOwner({
+    title: `行程提醒 (${data.daysOut}d) #${data.bookingId} — ${data.customerName}`,
+    content: `${ownerCopy.subject}\n\n${ownerCopy.body}\n\n訂單 #${data.bookingId} — ${data.tourTitle}`,
+  }).catch(() => {});
+
+  const smtp = getTransporter();
+  if (!smtp) return false;
+
+  try {
+    await smtp.sendMail({
+      from: `"PACK&GO Travel" <${EMAIL_FROM}>`,
+      to: data.to,
+      subject: `${copy.subject} — ${data.tourTitle}`,
+      html: generateTripReminderHTML(data, copy),
+      text: emailText.trim(),
+    });
+    console.log(`[Email] Trip reminder (${data.daysOut}d, ${data.language || 'zh-TW'}) sent to ${data.to} for booking ${data.bookingId}`);
+    return true;
+  } catch (error) {
+    console.error('[Email] Failed to send trip reminder:', error);
+    return false;
+  }
+}
+
+function generateTripReminderHTML(
+  data: TripReminderEmailData,
+  copy: { subject: string; body: string }
+): string {
+  const isEN = data.language === 'en';
+  const labels = isEN
+    ? { greet: 'Dear', orderNo: 'Order #', tour: 'Tour', dep: 'Departure',
+        balLabel: 'Outstanding balance', balCta: 'Pay now',
+        contactLine: 'Questions? Call +1 (510) 634-2307 or reply to this email.' }
+    : { greet: '親愛的', orderNo: '訂單編號', tour: '行程名稱', dep: '出發日期',
+        balLabel: '未繳清尾款', balCta: '立即付款',
+        contactLine: '如有任何問題，請聯絡 +1 (510) 634-2307 或回覆此 email。' };
+
+  const dateStr = data.departureDate.toLocaleDateString(isEN ? 'en-US' : 'zh-TW', {
+    year: 'numeric', month: 'long', day: 'numeric',
+  });
+  const balanceBlock = data.balanceUnpaid && data.balanceDue > 0
+    ? `<div style="margin:16px 0;padding:14px 16px;border-left:4px solid #f59e0b;background:#fffbeb;border-radius:6px;">
+         <p style="margin:0 0 6px 0;font-family:Arial,sans-serif;font-size:14px;font-weight:bold;color:#92400e;">${labels.balLabel}</p>
+         <p style="margin:0 0 8px 0;font-family:Arial,sans-serif;font-size:14px;color:#78350f;">${isEN ? 'Amount' : '金額'}: ${data.balanceCurrency} ${data.balanceDue.toLocaleString()}</p>
+         <a href="https://packgo-travel.fly.dev/booking/${data.bookingId}" style="display:inline-block;padding:8px 16px;background:#f59e0b;color:#fff;text-decoration:none;border-radius:6px;font-family:Arial,sans-serif;font-size:14px;">${labels.balCta}</a>
+       </div>`
+    : '';
+  const bodyHtml = `
+    <p style="font-family:Arial,sans-serif;font-size:18px;font-weight:bold;color:#111;margin:0 0 12px 0;">${copy.subject}</p>
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#444;margin:0 0 16px 0;">${labels.greet} <strong>${data.customerName}</strong>${isEN ? ',' : '，'}</p>
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#444;line-height:1.7;margin:0 0 16px 0;">${copy.body}</p>
+    ${emailInfoTable([
+      { label: labels.orderNo, value: '#' + data.bookingId },
+      { label: labels.tour, value: data.tourTitle },
+      { label: labels.dep, value: dateStr },
+    ])}
+    ${balanceBlock}
+    <p style="font-family:Arial,sans-serif;font-size:13px;color:#666;margin:16px 0 0 0;">${labels.contactLine}</p>
+  `;
+  return wrapInBrandTemplate({ title: copy.subject, bodyHtml });
+}
+
 /**
  * Generate HTML email template for payment success
  */
 function generatePaymentSuccessHTML(data: PaymentSuccessEmailData, paymentTypeText: string): string {
+  const isEN = data.language === 'en';
+  const c = isEN ? {
+    title: 'Payment confirmed',
+    heading: 'Payment confirmed!',
+    greeting: 'Dear',
+    intro: 'Your payment has been processed. Below are the details:',
+    labelOrder: 'Order #',
+    labelTour: 'Tour',
+    labelType: 'Payment type',
+    labelAmount: 'Amount',
+    thanksLine: 'Thank you. Our team will continue arranging your trip and will email the final itinerary once the supplier confirms.',
+    contactLine: 'Questions? Reply to this email or call +1 (510) 634-2307.',
+  } : {
+    title: '付款成功',
+    heading: '付款成功！',
+    greeting: '親愛的',
+    intro: '您的付款已成功處理，以下是您的付款詳情：',
+    labelOrder: '訂單編號',
+    labelTour: '行程名稱',
+    labelType: '付款類型',
+    labelAmount: '付款金額',
+    thanksLine: '感謝您的付款，我們的專員將盡快與您聯繫，確認行程詳情。',
+    contactLine: '如有任何問題，請隨時與我們聯繫。',
+  };
   const bodyHtml = `
     <div style="text-align:center;margin-bottom:24px;">
       <div style="display:inline-block;width:56px;height:56px;background:#22c55e;border-radius:50%;line-height:56px;text-align:center;margin-bottom:12px;">
         <span style="color:#fff;font-size:28px;line-height:56px;">&#10003;</span>
       </div>
-      <p style="font-family:Arial,sans-serif;font-size:22px;font-weight:bold;color:#15803d;margin:0;">付款成功！</p>
+      <p style="font-family:Arial,sans-serif;font-size:22px;font-weight:bold;color:#15803d;margin:0;">${c.heading}</p>
     </div>
-    <p style="font-family:Arial,sans-serif;font-size:14px;color:#444;margin:0 0 16px 0;">親愛的 <strong>${data.customerName}</strong>，</p>
-    <p style="font-family:Arial,sans-serif;font-size:14px;color:#444;line-height:1.7;margin:0 0 16px 0;">您的付款已成功處理，以下是您的付款詳情：</p>
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#444;margin:0 0 16px 0;">${c.greeting} <strong>${data.customerName}</strong>${isEN ? ',' : '，'}</p>
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#444;line-height:1.7;margin:0 0 16px 0;">${c.intro}</p>
     ${emailInfoTable([
-      { label: '訂單編號', value: '#' + data.bookingId },
-      { label: '行程名稱', value: data.tourTitle },
-      { label: '付款類型', value: paymentTypeText },
-      { label: '付款金額', value: 'NT$ ' + data.paymentAmount.toLocaleString() },
+      { label: c.labelOrder, value: '#' + data.bookingId },
+      { label: c.labelTour, value: data.tourTitle },
+      { label: c.labelType, value: paymentTypeText },
+      { label: c.labelAmount, value: 'NT$ ' + data.paymentAmount.toLocaleString() },
     ])}
-    <p style="font-family:Arial,sans-serif;font-size:14px;color:#444;line-height:1.7;margin:0 0 8px 0;">感謝您的付款，我們的專員將盡快與您聯繫，確認行程詳情。</p>
-    <p style="font-family:Arial,sans-serif;font-size:14px;color:#444;margin:0;">如有任何問題，請隨時與我們聯繫。</p>
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#444;line-height:1.7;margin:0 0 8px 0;">${c.thanksLine}</p>
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:#444;margin:0;">${c.contactLine}</p>
   `;
-  return wrapInBrandTemplate({ title: '付款成功', bodyHtml });
+  return wrapInBrandTemplate({ title: c.title, bodyHtml });
 }
 
 /**
  * Generate branded HTML email template for booking confirmation (BUG-008)
  */
 function generateBookingConfirmationHTML(data: BookingEmailData): string {
-  const totalPax = data.numberOfAdults + data.numberOfChildren + data.numberOfInfants;
+  const isEN = data.language === 'en';
+  // v78x: All user-facing strings extracted into a single copy block + bilingual.
+  // Owner notification text stays ZH (sees admin perspective in notifyOwner).
+  const c = isEN ? {
+    htmlLang: 'en',
+    title: 'Booking confirmed - PACK&GO Travel',
+    tagline: "LET'S TRAVEL TOGETHER",
+    successHeading: 'Booking confirmed!',
+    successSub: 'Thank you for choosing PACK&GO Travel',
+    greeting: 'Dear',
+    intro: 'Your booking has been successfully created. Our team will reach out within <strong>1–2 business days</strong> to confirm details — please watch your phone and email.',
+    sectionOrder: 'Order details',
+    labelId: 'Order #',
+    labelTour: 'Tour',
+    labelDeparture: 'Departure date',
+    labelReturn: 'Return date',
+    labelPax: 'Travelers',
+    paxAdult: (n: number) => `${n} adult${n > 1 ? 's' : ''}`,
+    paxChild: (n: number) => `${n} child${n > 1 ? 'ren' : ''}`,
+    paxInfant: (n: number) => `${n} infant${n > 1 ? 's' : ''}`,
+    paxJoin: ', ',
+    sectionFee: 'Fee breakdown',
+    feeDeposit: 'Deposit (due in 3 days)',
+    feeRemaining: 'Balance (due 30 days before departure)',
+    feeTotal: 'Total',
+    nextSteps: 'What happens next',
+    step1: 'Our team confirms your booking by phone or email within 1–2 business days',
+    step2: 'Please pay the deposit within <strong>3 days</strong> to lock in your seat',
+    step3: 'You\'ll receive a balance-payment reminder 30 days before departure',
+    step4: 'Final itinerary + e-tickets sent 7 days before departure',
+    footerName: 'PACK&GO Travel',
+    footerContact: 'Tel: +1 (510) 634-2307 | Email: support@packgoplay.com',
+    footerLicense: 'CST #2166984 (California Seller of Travel)',
+    footerCopy: `© ${new Date().getFullYear()} PACK&GO Travel. All rights reserved.`,
+  } : {
+    htmlLang: 'zh-TW',
+    title: '訂單確認 - PACK&GO 旅行社',
+    tagline: "LET'S TRAVEL TOGETHER",
+    successHeading: '訂單已確認！',
+    successSub: '感謝您選擇 PACK&GO 旅行社',
+    greeting: '親愛的',
+    intro: '您的行程預訂已成功建立。我們的專員將在 <strong>1-2 個工作日內</strong>與您確認訂單詳情，請注意查收電話及電子郵件。',
+    sectionOrder: '訂單詳情',
+    labelId: '訂單編號',
+    labelTour: '行程名稱',
+    labelDeparture: '出發日期',
+    labelReturn: '回程日期',
+    labelPax: '旅客人數',
+    paxAdult: (n: number) => `成人 ${n} 位`,
+    paxChild: (n: number) => `兒童 ${n} 位`,
+    paxInfant: (n: number) => `嬰兒 ${n} 位`,
+    paxJoin: '、',
+    sectionFee: '費用明細',
+    feeDeposit: '訂金（須於 3 天內付清）',
+    feeRemaining: '尾款（出發前 30 天付清）',
+    feeTotal: '總金額',
+    nextSteps: '接下來的步驟',
+    step1: '我們的專員將在 1-2 個工作日內以電話或電郵確認訂單',
+    step2: '請於 <strong>3 天內</strong>完成訂金付款，以保留您的座位',
+    step3: '出發前 30 天將收到尾款付款提醒',
+    step4: '出發前 7 天將收到完整行程資料及電子機票',
+    footerName: 'PACK&GO 旅行社',
+    footerContact: 'Tel: +1 (510) 634-2307 | Email: support@packgoplay.com',
+    footerLicense: 'CST #2166984（加州合法旅行社）',
+    footerCopy: `© ${new Date().getFullYear()} PACK&GO 旅行社. All rights reserved.`,
+  };
   const paxParts = [
-    data.numberOfAdults > 0 ? `成人 ${data.numberOfAdults} 位` : '',
-    data.numberOfChildren > 0 ? `兒童 ${data.numberOfChildren} 位` : '',
-    data.numberOfInfants > 0 ? `嬰兒 ${data.numberOfInfants} 位` : '',
-  ].filter(Boolean).join('、');
+    data.numberOfAdults > 0 ? c.paxAdult(data.numberOfAdults) : '',
+    data.numberOfChildren > 0 ? c.paxChild(data.numberOfChildren) : '',
+    data.numberOfInfants > 0 ? c.paxInfant(data.numberOfInfants) : '',
+  ].filter(Boolean).join(c.paxJoin);
 
   return `
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html lang="${c.htmlLang}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>訂單確認 - PACK&amp;GO 旅行社</title>
+  <title>${c.title}</title>
 </head>
 <body style="margin:0;padding:0;background-color:#f4f4f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f4;padding:40px 20px;">
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.12);">
-
-        <!-- Header -->
         <tr>
           <td style="background:linear-gradient(135deg,#1a1a1a 0%,#3a3a3a 100%);padding:36px 40px;text-align:center;">
             <h1 style="color:#ffffff;margin:0;font-size:32px;font-weight:900;letter-spacing:4px;">PACK&amp;GO</h1>
-            <p style="color:#cccccc;margin:6px 0 0 0;font-size:13px;letter-spacing:2px;">LET'S TRAVEL TOGETHER</p>
+            <p style="color:#cccccc;margin:6px 0 0 0;font-size:13px;letter-spacing:2px;">${c.tagline}</p>
           </td>
         </tr>
-
-        <!-- Success Banner -->
         <tr>
           <td style="background-color:#f0fdf4;padding:24px 40px;text-align:center;border-bottom:1px solid #dcfce7;">
             <div style="display:inline-block;width:52px;height:52px;background:#22c55e;border-radius:50%;line-height:52px;text-align:center;margin-bottom:12px;">
               <span style="color:#fff;font-size:26px;line-height:52px;">&#10003;</span>
             </div>
-            <h2 style="color:#15803d;margin:0;font-size:22px;font-weight:700;">訂單已確認！</h2>
-            <p style="color:#166534;margin:6px 0 0 0;font-size:14px;">感謝您選擇 PACK&amp;GO 旅行社</p>
+            <h2 style="color:#15803d;margin:0;font-size:22px;font-weight:700;">${c.successHeading}</h2>
+            <p style="color:#166534;margin:6px 0 0 0;font-size:14px;">${c.successSub}</p>
           </td>
         </tr>
-
-        <!-- Greeting -->
         <tr>
           <td style="padding:32px 40px 0 40px;">
-            <p style="color:#333;font-size:16px;margin:0 0 8px 0;">親愛的 <strong>${data.customerName}</strong>，您好！</p>
-            <p style="color:#666;font-size:15px;line-height:1.7;margin:0;">您的行程預訂已成功建立。我們的專員將在 <strong>1-2 個工作日內</strong>與您確認訂單詳情，請注意查收電話及電子郵件。</p>
+            <p style="color:#333;font-size:16px;margin:0 0 8px 0;">${c.greeting} <strong>${data.customerName}</strong>${isEN ? ',' : '，您好！'}</p>
+            <p style="color:#666;font-size:15px;line-height:1.7;margin:0;">${c.intro}</p>
           </td>
         </tr>
-
-        <!-- Order Summary -->
         <tr>
           <td style="padding:24px 40px;">
             <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8f9fa;border-radius:10px;overflow:hidden;border:1px solid #e9ecef;">
-              <tr>
-                <td style="background:#1a1a1a;padding:14px 20px;">
-                  <p style="color:#fff;margin:0;font-size:13px;font-weight:700;letter-spacing:1px;">訂單詳情</p>
-                </td>
-              </tr>
-              <tr>
-                <td style="padding:20px;">
-                  <table width="100%" cellpadding="0" cellspacing="0">
-                    <tr>
-                      <td style="padding:8px 0;border-bottom:1px solid #e9ecef;">
-                        <span style="color:#888;font-size:13px;">訂單編號</span>
-                        <span style="color:#333;font-size:13px;font-weight:700;float:right;">#${data.bookingId}</span>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td style="padding:8px 0;border-bottom:1px solid #e9ecef;">
-                        <span style="color:#888;font-size:13px;">行程名稱</span>
-                        <span style="color:#333;font-size:13px;font-weight:600;float:right;max-width:320px;text-align:right;display:block;">${data.tourTitle}</span>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td style="padding:8px 0;border-bottom:1px solid #e9ecef;">
-                        <span style="color:#888;font-size:13px;">出發日期</span>
-                        <span style="color:#333;font-size:13px;font-weight:600;float:right;">${data.departureDate}</span>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td style="padding:8px 0;border-bottom:1px solid #e9ecef;">
-                        <span style="color:#888;font-size:13px;">回程日期</span>
-                        <span style="color:#333;font-size:13px;font-weight:600;float:right;">${data.returnDate}</span>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td style="padding:8px 0;">
-                        <span style="color:#888;font-size:13px;">旅客人數</span>
-                        <span style="color:#333;font-size:13px;font-weight:600;float:right;">${paxParts}</span>
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-              </tr>
+              <tr><td style="background:#1a1a1a;padding:14px 20px;"><p style="color:#fff;margin:0;font-size:13px;font-weight:700;letter-spacing:1px;">${c.sectionOrder}</p></td></tr>
+              <tr><td style="padding:20px;">
+                <table width="100%" cellpadding="0" cellspacing="0">
+                  <tr><td style="padding:8px 0;border-bottom:1px solid #e9ecef;"><span style="color:#888;font-size:13px;">${c.labelId}</span><span style="color:#333;font-size:13px;font-weight:700;float:right;">#${data.bookingId}</span></td></tr>
+                  <tr><td style="padding:8px 0;border-bottom:1px solid #e9ecef;"><span style="color:#888;font-size:13px;">${c.labelTour}</span><span style="color:#333;font-size:13px;font-weight:600;float:right;max-width:320px;text-align:right;display:block;">${data.tourTitle}</span></td></tr>
+                  <tr><td style="padding:8px 0;border-bottom:1px solid #e9ecef;"><span style="color:#888;font-size:13px;">${c.labelDeparture}</span><span style="color:#333;font-size:13px;font-weight:600;float:right;">${data.departureDate}</span></td></tr>
+                  <tr><td style="padding:8px 0;border-bottom:1px solid #e9ecef;"><span style="color:#888;font-size:13px;">${c.labelReturn}</span><span style="color:#333;font-size:13px;font-weight:600;float:right;">${data.returnDate}</span></td></tr>
+                  <tr><td style="padding:8px 0;"><span style="color:#888;font-size:13px;">${c.labelPax}</span><span style="color:#333;font-size:13px;font-weight:600;float:right;">${paxParts}</span></td></tr>
+                </table>
+              </td></tr>
             </table>
           </td>
         </tr>
-
-        <!-- Payment Summary -->
         <tr>
           <td style="padding:0 40px 24px 40px;">
             <table width="100%" cellpadding="0" cellspacing="0" style="background:#fff9f0;border-radius:10px;overflow:hidden;border:1px solid #fed7aa;">
-              <tr>
-                <td style="background:#ea580c;padding:14px 20px;">
-                  <p style="color:#fff;margin:0;font-size:13px;font-weight:700;letter-spacing:1px;">費用明細</p>
-                </td>
-              </tr>
-              <tr>
-                <td style="padding:20px;">
-                  <table width="100%" cellpadding="0" cellspacing="0">
-                    <tr>
-                      <td style="padding:8px 0;border-bottom:1px solid #fed7aa;">
-                        <span style="color:#9a3412;font-size:13px;">訂金（須於 3 天內付清）</span>
-                        <span style="color:#9a3412;font-size:15px;font-weight:700;float:right;">NT$ ${data.depositAmount.toLocaleString()}</span>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td style="padding:8px 0;border-bottom:1px solid #fed7aa;">
-                        <span style="color:#888;font-size:13px;">尾款（出發前 30 天付清）</span>
-                        <span style="color:#666;font-size:13px;font-weight:600;float:right;">NT$ ${data.remainingAmount.toLocaleString()}</span>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td style="padding:12px 0 0 0;">
-                        <span style="color:#333;font-size:15px;font-weight:700;">總金額</span>
-                        <span style="color:#ea580c;font-size:20px;font-weight:900;float:right;">NT$ ${data.totalPrice.toLocaleString()}</span>
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-              </tr>
+              <tr><td style="background:#ea580c;padding:14px 20px;"><p style="color:#fff;margin:0;font-size:13px;font-weight:700;letter-spacing:1px;">${c.sectionFee}</p></td></tr>
+              <tr><td style="padding:20px;">
+                <table width="100%" cellpadding="0" cellspacing="0">
+                  <tr><td style="padding:8px 0;border-bottom:1px solid #fed7aa;"><span style="color:#9a3412;font-size:13px;">${c.feeDeposit}</span><span style="color:#9a3412;font-size:15px;font-weight:700;float:right;">NT$ ${data.depositAmount.toLocaleString()}</span></td></tr>
+                  <tr><td style="padding:8px 0;border-bottom:1px solid #fed7aa;"><span style="color:#888;font-size:13px;">${c.feeRemaining}</span><span style="color:#666;font-size:13px;font-weight:600;float:right;">NT$ ${data.remainingAmount.toLocaleString()}</span></td></tr>
+                  <tr><td style="padding:12px 0 0 0;"><span style="color:#333;font-size:15px;font-weight:700;">${c.feeTotal}</span><span style="color:#ea580c;font-size:20px;font-weight:900;float:right;">NT$ ${data.totalPrice.toLocaleString()}</span></td></tr>
+                </table>
+              </td></tr>
             </table>
           </td>
         </tr>
-
-        <!-- Next Steps -->
         <tr>
           <td style="padding:0 40px 32px 40px;">
             <div style="background:#eff6ff;border-left:4px solid #3b82f6;padding:16px 20px;border-radius:0 8px 8px 0;">
-              <p style="color:#1e40af;font-size:14px;font-weight:700;margin:0 0 8px 0;">ℹ️ 接下來的步驟</p>
+              <p style="color:#1e40af;font-size:14px;font-weight:700;margin:0 0 8px 0;">${c.nextSteps}</p>
               <ol style="color:#1e40af;font-size:13px;line-height:1.8;margin:0;padding-left:18px;">
-                <li>我們的專員將在 1-2 個工作日內以電話或電郵確認訂單</li>
-                <li>請於 <strong>3 天內</strong>完成訂金付款，以保際您的座位</li>
-                <li>出發前 30 天將收到尾款付款提醒</li>
-                <li>出發前 7 天將收到完整行程資料及電子機票</li>
+                <li>${c.step1}</li>
+                <li>${c.step2}</li>
+                <li>${c.step3}</li>
+                <li>${c.step4}</li>
               </ol>
             </div>
           </td>
         </tr>
-
-        <!-- Footer -->
         <tr>
           <td style="background:#1a1a1a;padding:28px 40px;text-align:center;">
-            <p style="color:#ffffff;margin:0 0 4px 0;font-size:15px;font-weight:700;">PACK&amp;GO 旅行社</p>
-            <p style="color:#999;margin:0 0 12px 0;font-size:12px;">Tel: +886-2-1234-5678 &nbsp;|&nbsp; Email: jeffhsieh09@gmail.com</p>
-            <p style="color:#666;margin:0;font-size:11px;">&copy; ${new Date().getFullYear()} PACK&amp;GO 旅行社. All rights reserved.</p>
+            <p style="color:#ffffff;margin:0 0 4px 0;font-size:15px;font-weight:700;">${c.footerName}</p>
+            <p style="color:#999;margin:0 0 4px 0;font-size:12px;">${c.footerContact}</p>
+            <p style="color:#999;margin:0 0 12px 0;font-size:11px;">${c.footerLicense}</p>
+            <p style="color:#666;margin:0;font-size:11px;">${c.footerCopy}</p>
           </td>
         </tr>
-
       </table>
     </td></tr>
   </table>
 </body>
 </html>
   `.trim();
+}
+
+// ─── v78l Sprint 4A: Supplier auto-notification ──────────────────────────
+
+export interface SupplierNotificationData {
+  supplierEmail: string;
+  supplierName?: string;
+  supplierNotes?: string;
+  /** Supplier may prefer English or Mandarin — default zh-TW */
+  language?: "zh-TW" | "en";
+  // Booking context
+  bookingId: number;
+  bookingReference?: string;
+  customerName: string;
+  customerPhone?: string;
+  customerEmail: string;
+  tourTitle: string;
+  departureDate: string;
+  returnDate?: string;
+  numberOfAdults: number;
+  numberOfChildren?: number;
+  numberOfInfants?: number;
+  specialRequests?: string;
+  agentEmail?: string;
+}
+
+/**
+ * Email the supplier (hotel/operator) when a booking is paid.
+ * CC's Jeff so he sees what went out.
+ */
+export async function sendSupplierNotificationEmail(data: SupplierNotificationData) {
+  const isEN = data.language === "en";
+  const subject = isEN
+    ? `[PACK&GO] New booking #${data.bookingId} — ${data.tourTitle}`
+    : `【PACK&GO】新訂單 #${data.bookingId} — ${data.tourTitle}`;
+
+  const text = isEN
+    ? `Hello ${data.supplierName || "Supplier"},
+
+PACK&GO Travel has confirmed a new paid booking. Please confirm availability and reply with vendor confirmation.
+
+Booking ID: #${data.bookingId}${data.bookingReference ? ` (Ref: ${data.bookingReference})` : ""}
+Tour: ${data.tourTitle}
+Departure: ${data.departureDate}${data.returnDate ? ` → ${data.returnDate}` : ""}
+
+Travelers:
+  • Adults: ${data.numberOfAdults}
+  • Children: ${data.numberOfChildren ?? 0}
+  • Infants: ${data.numberOfInfants ?? 0}
+
+Customer:
+  • Name: ${data.customerName}
+  • Phone: ${data.customerPhone || "—"}
+  • Email: ${data.customerEmail}
+
+${data.specialRequests ? `Special requests: ${data.specialRequests}\n\n` : ""}${data.supplierNotes ? `Internal notes: ${data.supplierNotes}\n\n` : ""}Please reply to this email to confirm. Thank you.
+
+—
+PACK&GO Travel — CST #2166984
+${BASE_URL}`
+    : `${data.supplierName || "供應商"} 您好：
+
+PACK&GO 旅行社已收到新訂單，請確認接團安排並回覆。
+
+訂單編號：#${data.bookingId}${data.bookingReference ? `（參考：${data.bookingReference}）` : ""}
+行程：${data.tourTitle}
+出發：${data.departureDate}${data.returnDate ? ` → ${data.returnDate}` : ""}
+
+旅客人數：
+  • 成人：${data.numberOfAdults}
+  • 兒童：${data.numberOfChildren ?? 0}
+  • 嬰兒：${data.numberOfInfants ?? 0}
+
+客戶聯絡：
+  • 姓名：${data.customerName}
+  • 電話：${data.customerPhone || "—"}
+  • Email：${data.customerEmail}
+
+${data.specialRequests ? `特殊需求：${data.specialRequests}\n\n` : ""}${data.supplierNotes ? `內部備註：${data.supplierNotes}\n\n` : ""}請回覆此 email 確認接團安排，謝謝。
+
+—
+PACK&GO 旅行社 — CST #2166984
+${BASE_URL}`;
+
+  const html = wrapInBrandTemplate(`
+    <h2 style="color:#0d9488; margin-bottom: 16px;">${subject}</h2>
+    <p>${isEN ? `Hello <strong>${data.supplierName || "Supplier"}</strong>,` : `${data.supplierName || "供應商"} 您好：`}</p>
+    <p>${isEN ? "PACK&GO Travel has confirmed a new paid booking. Please confirm availability and reply." : "PACK&GO 旅行社已收到新訂單，請確認接團安排並回覆。"}</p>
+    ${emailInfoTable([
+      [isEN ? "Booking ID" : "訂單編號", `#${data.bookingId}`],
+      [isEN ? "Tour" : "行程", data.tourTitle],
+      [isEN ? "Departure" : "出發日", data.departureDate],
+      ...(data.returnDate ? [[isEN ? "Return" : "回程日", data.returnDate]] : []),
+      [isEN ? "Adults" : "成人", String(data.numberOfAdults)],
+      ...(data.numberOfChildren ? [[isEN ? "Children" : "兒童", String(data.numberOfChildren)]] : []),
+      ...(data.numberOfInfants ? [[isEN ? "Infants" : "嬰兒", String(data.numberOfInfants)]] : []),
+      [isEN ? "Customer" : "客戶", data.customerName],
+      ...(data.customerPhone ? [[isEN ? "Phone" : "電話", data.customerPhone]] : []),
+      [isEN ? "Email" : "Email", data.customerEmail],
+    ] as [string, string][])}
+    ${data.specialRequests ? emailHighlightBox(`<strong>${isEN ? "Special requests" : "特殊需求"}:</strong> ${data.specialRequests}`) : ""}
+    ${data.supplierNotes ? `<p style="font-size:13px; color:#666;"><em>${isEN ? "Internal notes" : "內部備註"}：${data.supplierNotes}</em></p>` : ""}
+    <p style="margin-top:24px;">${isEN ? "Please reply to confirm. Thank you." : "請回覆此 email 確認接團安排，謝謝。"}</p>
+  `);
+
+  const smtp = getTransporter();
+  if (!smtp) {
+    console.warn("[Email] SMTP not configured — supplier notification skipped for booking", data.bookingId);
+    return false;
+  }
+  try {
+    await smtp.sendMail({
+      from: `"PACK&GO Travel" <${EMAIL_FROM}>`,
+      to: data.supplierEmail,
+      cc: data.agentEmail || EMAIL_FROM, // CC Jeff so he has a paper trail
+      subject,
+      text,
+      html,
+    });
+    console.log(`[Email] Supplier notification sent to ${data.supplierEmail} for booking #${data.bookingId}`);
+    return true;
+  } catch (err) {
+    console.error("[Email] Supplier notification failed:", err);
+    return false;
+  }
+}
+
+// ─── v78l Sprint 4B: AI quote follow-up sequence ─────────────────────────
+
+export interface QuoteFollowUpData {
+  customerEmail: string;
+  customerName?: string;
+  quoteNumber: string;
+  pdfUrl?: string | null;
+  /** Day mark — affects copy tone */
+  stage: "24h" | "3d" | "7d";
+  language?: "zh-TW" | "en";
+  /** Brief recap of the trip (destination, days, party) so customer remembers */
+  tripRecap?: string;
+}
+
+export async function sendQuoteFollowUpEmail(data: QuoteFollowUpData) {
+  const isEN = data.language === "en";
+  const stageCopy = {
+    "24h": {
+      subjectZh: `您的行程建議書 ${data.quoteNumber} — 有任何問題嗎？`,
+      subjectEn: `Your itinerary ${data.quoteNumber} — any questions?`,
+      bodyZh: `您好${data.customerName ? `，${data.customerName}` : ""}：\n\n感謝您昨天向 PACK&GO 諮詢。我們的 AI 顧問已為您整理一份行程建議。\n\n如有任何疑問，或想調整內容，歡迎隨時回覆此 email 或撥打 +1 (510) 634-2307。\n\n附帶提醒：最終報價我們會在 1 週內與供應商確認後另行通知。`,
+      bodyEn: `Hello${data.customerName ? `, ${data.customerName}` : ""},\n\nThanks for reaching out to PACK&GO yesterday. Our AI advisor has put together an itinerary for you.\n\nQuestions or want changes? Reply or call +1 (510) 634-2307.\n\nAs a reminder: final pricing follows within 1 week after we confirm with suppliers.`,
+    },
+    "3d": {
+      subjectZh: `${data.quoteNumber} — 出發位子有限，要保留嗎？`,
+      subjectEn: `${data.quoteNumber} — Limited seats, want to lock yours?`,
+      bodyZh: `您好${data.customerName ? `，${data.customerName}` : ""}：\n\n您 3 天前看的行程建議${data.quoteNumber}，目前出發日仍有空位。\n\n旅遊團通常離出發越近、空位越緊張。如果這趟旅程符合您的期待，建議您回覆此 email 或致電 +1 (510) 634-2307 讓我們先為您鎖位（鎖位不收訂金，只是預留位子方便我們和供應商確認）。`,
+      bodyEn: `Hello${data.customerName ? `, ${data.customerName}` : ""},\n\nYour itinerary ${data.quoteNumber} from 3 days ago — seats are still available.\n\nGroup tours fill up fast as departure approaches. If this trip looks right, reply or call +1 (510) 634-2307 to hold seats (no deposit needed yet — just a hold so we can confirm with suppliers).`,
+    },
+    "7d": {
+      subjectZh: `${data.quoteNumber} — 最後機會，是否需要協助？`,
+      subjectEn: `${data.quoteNumber} — Last chance — anything we can help with?`,
+      bodyZh: `您好${data.customerName ? `，${data.customerName}` : ""}：\n\n一個禮拜前您曾向我們諮詢行程建議${data.quoteNumber}。\n\n如果這趟旅程不再考慮中，沒問題，請忽略此信。\n如果您仍在計畫中、只是時間還沒定，回覆告訴我您的偏好（出發月份、預算、特別需求），我們可以為您提供新的建議。\n\n或者您正在比較多家旅行社 — 我們的優勢：CST #2166984 加州合法旅行業者、TCRF 消費者保障基金成員、+1 (510) 634-2307 真人接聽。`,
+      bodyEn: `Hello${data.customerName ? `, ${data.customerName}` : ""},\n\nA week ago you reached out about itinerary ${data.quoteNumber}.\n\nIf you've moved on, no worries — please ignore this.\nIf you're still planning but timing isn't fixed yet, reply with your preferences (month, budget, special needs) and we'll prepare a fresh suggestion.\n\nOr you're comparing agencies — our credentials: CST #2166984 California-licensed, TCRF Consumer Protection member, +1 (510) 634-2307 real human support.`,
+    },
+  };
+  const copy = stageCopy[data.stage];
+  const subject = isEN ? copy.subjectEn : copy.subjectZh;
+  const text = isEN ? copy.bodyEn : copy.bodyZh;
+  const html = wrapInBrandTemplate(
+    `<p>${(isEN ? copy.bodyEn : copy.bodyZh).replace(/\n\n/g, "</p><p>").replace(/\n/g, "<br>")}</p>` +
+      (data.pdfUrl
+        ? `<div style="margin: 24px 0;">${emailButton(isEN ? "View itinerary" : "查看行程建議", data.pdfUrl)}</div>`
+        : "") +
+      (data.tripRecap ? `<p style="font-size:13px;color:#666;"><em>${data.tripRecap}</em></p>` : "")
+  );
+
+  const smtp = getTransporter();
+  if (!smtp) {
+    console.warn(`[Email] SMTP not configured — quote follow-up ${data.stage} skipped for ${data.quoteNumber}`);
+    return false;
+  }
+  try {
+    await smtp.sendMail({
+      from: `"PACK&GO Travel" <${EMAIL_FROM}>`,
+      to: data.customerEmail,
+      subject,
+      text,
+      html,
+    });
+    console.log(`[Email] Quote follow-up ${data.stage} sent for ${data.quoteNumber} → ${data.customerEmail}`);
+    return true;
+  } catch (err) {
+    console.error("[Email] Quote follow-up failed:", err);
+    return false;
+  }
+}
+
+// ─── v78l Sprint 4C: Post-trip review request ────────────────────────────
+
+export interface ReviewRequestData {
+  customerEmail: string;
+  customerName: string;
+  bookingId: number;
+  tourTitle: string;
+  language?: "zh-TW" | "en";
+  /** Optional Google Place ID for direct review link */
+  googleReviewUrl?: string;
+  yelpReviewUrl?: string;
+}
+
+export async function sendReviewRequestEmail(data: ReviewRequestData) {
+  const isEN = data.language === "en";
+  const subject = isEN
+    ? `Welcome home! How was your ${data.tourTitle} trip?`
+    : `歡迎回家！您的「${data.tourTitle}」旅程如何？`;
+
+  const text = isEN
+    ? `Hello ${data.customerName},\n\nYou just got home from ${data.tourTitle} (booking #${data.bookingId}). We hope it was wonderful!\n\nIf you have 30 seconds, would you mind leaving us a review?\n  • Google: ${data.googleReviewUrl || "(link coming soon)"}\n  • Yelp: ${data.yelpReviewUrl || "(link coming soon)"}\n\nReply with one or two photos and a sentence — we'd love to hear about your favorite moment.\n\nAs a thank-you, your next booking gets 5% off (mention "REVIEW5" when you book).\n\n— PACK&GO Travel\n  +1 (510) 634-2307`
+    : `親愛的 ${data.customerName} 您好：\n\n您剛結束的「${data.tourTitle}」旅程（訂單 #${data.bookingId}）希望一切順利！\n\n如果您願意花 30 秒，能否為我們留個評價？\n  • Google：${data.googleReviewUrl || "（連結整理中）"}\n  • Yelp：${data.yelpReviewUrl || "（連結整理中）"}\n\n或者您可以直接回信，附上一兩張照片與感想，我們很想聽您最喜歡的瞬間。\n\n為感謝您，下次訂團享 5% 優惠（訂團時報「REVIEW5」即可）。\n\n— PACK&GO 旅行社\n  +1 (510) 634-2307`;
+
+  const buttons: string[] = [];
+  if (data.googleReviewUrl) buttons.push(emailButton(isEN ? "Review on Google" : "在 Google 留評價", data.googleReviewUrl));
+  if (data.yelpReviewUrl) buttons.push(emailButton(isEN ? "Review on Yelp" : "在 Yelp 留評價", data.yelpReviewUrl));
+
+  const html = wrapInBrandTemplate(`
+    <h2 style="color:#0d9488; margin-bottom: 16px;">${subject}</h2>
+    <p>${text.split("\n\n")[0]}</p>
+    <p>${text.split("\n\n")[1]}</p>
+    ${buttons.length > 0 ? `<div style="margin: 20px 0; display: flex; gap: 12px; flex-wrap: wrap;">${buttons.join("")}</div>` : ""}
+    ${emailHighlightBox(`<strong>${isEN ? "Thank-you bonus" : "感謝獎勵"}:</strong> ${isEN ? "5% off your next trip — code REVIEW5" : "下次訂團 5% 優惠，代碼 REVIEW5"}`)}
+    <p style="font-size:12px; color:#999; margin-top:24px;">PACK&GO Travel · CST #2166984 · +1 (510) 634-2307</p>
+  `);
+
+  const smtp = getTransporter();
+  if (!smtp) {
+    console.warn(`[Email] SMTP not configured — review request skipped for booking #${data.bookingId}`);
+    return false;
+  }
+  try {
+    await smtp.sendMail({
+      from: `"PACK&GO Travel" <${EMAIL_FROM}>`,
+      to: data.customerEmail,
+      subject,
+      text,
+      html,
+    });
+    console.log(`[Email] Review request sent for booking #${data.bookingId} → ${data.customerEmail}`);
+    return true;
+  } catch (err) {
+    console.error("[Email] Review request failed:", err);
+    return false;
+  }
+}
+
+// ─── v78n Sprint 6A: Booking abandonment recovery ──────────────────────
+
+export interface AbandonmentRecoveryData {
+  customerEmail: string;
+  customerName: string;
+  bookingId: number;
+  tourTitle: string;
+  departureDate: string;
+  totalPrice: number;
+  currency: string;
+  language?: "zh-TW" | "en";
+  /** Recovery discount code (5% off) */
+  recoveryCode?: string;
+}
+
+export async function sendAbandonmentRecoveryEmail(data: AbandonmentRecoveryData) {
+  const isEN = data.language === "en";
+  const cur = (data.currency || "TWD").toUpperCase();
+  const sym = cur === "TWD" ? "NT$" : cur === "USD" ? "$" : `${cur} `;
+  const priceStr = `${sym}${data.totalPrice.toLocaleString()}`;
+  const code = data.recoveryCode || "BACK5";
+
+  const subject = isEN
+    ? `Your spot is still waiting — ${data.tourTitle}`
+    : `您的座位還為您保留中 — ${data.tourTitle}`;
+
+  const text = isEN
+    ? `Hello ${data.customerName},\n\nWe noticed you started booking ${data.tourTitle} (departing ${data.departureDate}) but didn't complete payment.\n\nYour seat is reserved for 24 more hours. Total: ${priceStr}\n\nUse code ${code} at checkout for 5% off.\n\n${BASE_URL}/bookings/${data.bookingId}\n\nQuestions? Reply or call +1 (510) 634-2307.\n\n— PACK&GO Travel`
+    : `親愛的 ${data.customerName} 您好：\n\n您剛才開始預訂「${data.tourTitle}」（出發日 ${data.departureDate}），但似乎還沒完成付款。\n\n您的座位我們已為您保留 24 小時。總金額：${priceStr}\n\n結帳時使用優惠碼 ${code}，享 5% 折扣。\n\n${BASE_URL}/bookings/${data.bookingId}\n\n有任何問題？回覆此 email 或撥打 +1 (510) 634-2307\n\n— PACK&GO 旅行社`;
+
+  const html = wrapInBrandTemplate(`
+    <h2 style="color:#0d9488; margin-bottom: 16px;">${isEN ? "Your spot is still waiting" : "您的座位仍為您保留中"}</h2>
+    <p>${isEN ? `Hello <strong>${data.customerName}</strong>,` : `親愛的 <strong>${data.customerName}</strong> 您好：`}</p>
+    <p>${
+      isEN
+        ? `We noticed you started booking <strong>${data.tourTitle}</strong> (departing ${data.departureDate}) but didn't complete payment.`
+        : `您剛才開始預訂「<strong>${data.tourTitle}</strong>」（出發日 ${data.departureDate}），但似乎還沒完成付款。`
+    }</p>
+    ${emailHighlightBox(`<strong>${isEN ? "Your seat is reserved for 24 more hours" : "我們為您保留座位 24 小時"}</strong><br>${isEN ? "Total" : "總金額"}: ${priceStr}`)}
+    <p>${isEN ? `Use code <strong style="font-family: monospace; padding: 2px 6px; background: #fef3c7; border-radius: 4px;">${code}</strong> at checkout for <strong>5% off</strong>.` : `結帳時使用優惠碼 <strong style="font-family: monospace; padding: 2px 6px; background: #fef3c7; border-radius: 4px;">${code}</strong>，享 <strong>5% 折扣</strong>。`}</p>
+    <div style="margin: 24px 0;">${emailButton(isEN ? "Complete booking" : "繼續完成預訂", `${BASE_URL}/bookings/${data.bookingId}`)}</div>
+    <p style="font-size:13px; color:#6b7280;">${isEN ? "Questions? Reply this email or call" : "有任何問題？回覆此 email 或撥打"} <a href="tel:+15106342307" style="color: #0d9488;">+1 (510) 634-2307</a></p>
+  `);
+
+  const smtp = getTransporter();
+  if (!smtp) {
+    console.warn(`[Email] SMTP not configured — abandonment recovery skipped for booking #${data.bookingId}`);
+    return false;
+  }
+  try {
+    await smtp.sendMail({
+      from: `"PACK&GO Travel" <${EMAIL_FROM}>`,
+      to: data.customerEmail,
+      subject,
+      text,
+      html,
+    });
+    console.log(`[Email] Abandonment recovery sent for booking #${data.bookingId} → ${data.customerEmail}`);
+    return true;
+  } catch (err) {
+    console.error("[Email] Abandonment recovery failed:", err);
+    return false;
+  }
 }

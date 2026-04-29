@@ -1,4 +1,4 @@
-import { Shield, Clock, Users, Star, Globe, Headphones } from "lucide-react";
+import { Shield, Clock, Users, Star, Globe, Headphones, BadgeCheck, Lock } from "lucide-react";
 import { useLocale } from "@/contexts/LocaleContext";
 
 export default function WhyChooseUs() {
@@ -81,13 +81,35 @@ export default function WhyChooseUs() {
         </div>
 
         {/*
-          Stats Row removed per FTC Act §5 (deceptive acts/practices) and
-          16 CFR Part 260 (advertising substantiation).
-          Prior hardcoded numbers ("10+ years", "1,200+ travelers",
-          "50+ destinations", "98% satisfaction") had no reasonable basis
-          documented. Re-introduce only when backed by auditable data
-          (e.g., tRPC query over bookings table with tourist-facing caveats).
+          v78i — Trust badges row. These are AUDITABLE legal credentials
+          (CST license, TCRF participant) — not statistical claims.
+          Stats Row remains removed per FTC Act §5; this is different.
         */}
+        <div className="mt-12 pt-8 border-t border-gray-800">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="flex items-center gap-3 px-5 py-4 rounded-xl border border-gray-700 bg-gray-900/50">
+              <BadgeCheck className="h-8 w-8 text-emerald-400 flex-shrink-0" />
+              <div>
+                <div className="text-sm font-bold text-white">{t("whyChooseUs.trustCstTitle")}</div>
+                <div className="text-xs text-gray-400 mt-0.5 font-mono">CST #2166984</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 px-5 py-4 rounded-xl border border-gray-700 bg-gray-900/50">
+              <Shield className="h-8 w-8 text-emerald-400 flex-shrink-0" />
+              <div>
+                <div className="text-sm font-bold text-white">{t("whyChooseUs.trustTcrfTitle")}</div>
+                <div className="text-xs text-gray-400 mt-0.5">{t("whyChooseUs.trustTcrfBody")}</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 px-5 py-4 rounded-xl border border-gray-700 bg-gray-900/50">
+              <Lock className="h-8 w-8 text-emerald-400 flex-shrink-0" />
+              <div>
+                <div className="text-sm font-bold text-white">{t("whyChooseUs.trustStripeTitle")}</div>
+                <div className="text-xs text-gray-400 mt-0.5">{t("whyChooseUs.trustStripeBody")}</div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
   );

@@ -124,7 +124,11 @@ ${PLATFORM_RULES[platform]}
   "imageCaption": "圖片說明（50字以內）"
 }`;
 
+  // v67: was defaulting to Sonnet ($3/$15 per 1M). Social copy is short
+  // structured output — Haiku at $1/$5 is plenty.
   const response = await invokeLLM({
+    model: "claude-haiku-4-5-20251001",
+    maxTokens: 1024,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },

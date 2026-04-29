@@ -238,6 +238,70 @@ async function startServer() {
     }
   });
 
+  // v78f: AI quote inline-HTML viewer. Used when R2 isn't available
+  // (or as a permanent serve-from-DB strategy). Reads aiQuotes.pdfHtml and
+  // serves it as a standalone web page suitable for forwarding to customers.
+  app.get("/api/aiQuotes/:id/view", async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).send("Invalid quote id");
+      }
+      const { getAiQuoteById } = await import("../db");
+      const quote = await getAiQuoteById(id);
+      if (!quote) return res.status(404).send("Quote not found");
+      if (!quote.pdfHtml) return res.status(404).send("Quote has no rendered HTML");
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "private, max-age=300"); // 5 min cache OK; quote rarely changes
+      return res.send(quote.pdfHtml);
+    } catch (err) {
+      console.error("[aiQuotes view] error:", (err as Error)?.message);
+      return res.status(500).send("Internal error");
+    }
+  });
+
+  // v78g: invoice inline-HTML viewer. UNLIKE quotes, invoices contain private
+  // customer/payment info — auth required: invoice owner OR admin only.
+  app.get("/api/invoices/:id/view", async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).send("Invalid invoice id");
+      }
+      const { COOKIE_NAME } = await import("@shared/const");
+      const { verifyToken } = await import("../jwt");
+      const { getInvoiceById, getUserById, getBookingById } = await import("../db");
+
+      const token = (req as any).cookies?.[COOKIE_NAME];
+      const payload = token ? verifyToken(token) : null;
+      if (!payload) return res.status(401).send("Login required");
+      const user = await getUserById(payload.userId);
+      if (!user) return res.status(401).send("Login required");
+
+      const invoice = await getInvoiceById(id);
+      if (!invoice) return res.status(404).send("Invoice not found");
+
+      // Authorization: admin always allowed; otherwise must own the linked booking
+      if (user.role !== "admin") {
+        if (!invoice.bookingId) return res.status(403).send("Forbidden");
+        const booking = await getBookingById(invoice.bookingId);
+        if (!booking || booking.userId !== user.id) {
+          return res.status(403).send("Forbidden");
+        }
+      }
+
+      if (!invoice.pdfHtml) return res.status(404).send("Invoice has no rendered HTML");
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "private, no-store"); // never cache invoices
+      return res.send(invoice.pdfHtml);
+    } catch (err) {
+      console.error("[invoices view] error:", (err as Error)?.message);
+      return res.status(500).send("Internal error");
+    }
+  });
+
   // tRPC API
   app.use(
     "/api/trpc",
@@ -277,6 +341,17 @@ async function startServer() {
     await scheduleDailyTourMonitor();
   } catch (err) {
     console.warn('[Startup] Failed to schedule daily tour monitor:', err);
+  }
+
+  // v77: Schedule daily trip-reminder scan at 09:00 Taipei (01:00 UTC). Sends
+  // 30/14/7/3/1-day departure reminders; idempotent via Redis SET dedup.
+  try {
+    const { scheduleDailyTripReminders } = await import('../queue');
+    await scheduleDailyTripReminders();
+    // Also import the worker so it starts processing the queue
+    await import('../tripReminderWorker');
+  } catch (err) {
+    console.warn('[Startup] Failed to schedule trip reminders:', err);
   }
 
   const preferredPort = parseInt(process.env.PORT || "3000");

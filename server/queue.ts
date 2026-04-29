@@ -434,18 +434,97 @@ export async function scheduleDailyTourMonitor() {
     }
   }
 
-  // Schedule: every day at 19:00 UTC = 03:00 Taiwan time (UTC+8)
+  // Round 66: bumped cadence from daily (03:00 TW) to every 3 hours so that
+  // supplier status transitions (報名→客滿→取消) propagate to our UI within
+  // at most 3 hours instead of 24. Liontravel's public API doesn't expose
+  // real seat counts, but the `Status` field DOES reflect real inventory —
+  // so polling more often is the main lever we have for accuracy.
   await tourMonitorQueue.add(
     "daily-tour-monitor",
     { triggeredBy: "schedule" },
     {
       repeat: {
-        pattern: "0 19 * * *", // 19:00 UTC = 03:00 Taiwan
+        pattern: "0 */3 * * *", // every 3 hours at minute 0
       },
       jobId: "daily-tour-monitor-scheduled",
     }
   );
-  console.log("✅ Daily tour monitor scheduled at 03:00 Taiwan time (19:00 UTC)");
+  console.log("✅ Tour monitor scheduled every 3 hours (was: daily 03:00 TW)");
+}
+
+// ============================================================================
+// v77: Trip Reminder Queue — sends scheduled emails to customers as their
+// departure date approaches (30, 14, 7, 3, and 1 days out).
+//
+// Why: the member-system audit identified "no trip notifications" as the
+// single biggest customer-experience gap. Customers forget the date, fail to
+// pay balance on time, miss flights, and don't no-show recover. A simple
+// reminder pipeline fixes ~80% of avoidable post-booking friction.
+//
+// Mechanics: a daily 09:00 Taipei (01:00 UTC) cron scans all confirmed
+// bookings and queues per-booking emails when the departure is exactly
+// {30, 14, 7, 3, 1} days away. Idempotency: a Redis SET tracks
+// `reminder:sent:{bookingId}:{daysOut}` so we never double-send.
+// ============================================================================
+
+export interface TripReminderJobData {
+  triggeredBy: "schedule" | "manual";
+}
+
+export interface TripReminderJobResult {
+  scanned: number;
+  emailsQueued: number;
+  errors: number;
+}
+
+export const tripReminderQueue = new Queue<TripReminderJobData, TripReminderJobResult>(
+  "trip-reminder",
+  {
+    connection: redisBullMQ,
+    defaultJobOptions: {
+      attempts: 2,
+      backoff: { type: "exponential", delay: 60000 },
+      removeOnComplete: { age: 604800, count: 100 }, // 7 days
+      removeOnFail: { age: 2592000, count: 50 },     // 30 days
+    },
+  }
+);
+
+/**
+ * Schedule the daily trip-reminder scan at 01:00 UTC (09:00 Taipei).
+ * Picks up at the start of business day so reminders land in customer
+ * inboxes when they're most likely to read them.
+ */
+export async function scheduleDailyTripReminders() {
+  const repeatableJobs = await tripReminderQueue.getRepeatableJobs();
+  for (const job of repeatableJobs) {
+    if (job.name === "daily-trip-reminder") {
+      await tripReminderQueue.removeRepeatableByKey(job.key);
+    }
+  }
+  await tripReminderQueue.add(
+    "daily-trip-reminder",
+    { triggeredBy: "schedule" },
+    {
+      repeat: {
+        pattern: "0 1 * * *", // daily at 01:00 UTC = 09:00 Taipei = 18:00 PT (prev day)
+      },
+      jobId: "daily-trip-reminder-scheduled",
+    }
+  );
+  console.log("✅ Trip reminder scan scheduled daily at 09:00 Taipei (01:00 UTC)");
+}
+
+/**
+ * Manually trigger a trip-reminder scan (admin debugging)
+ */
+export async function triggerManualTripReminderScan(userId?: number) {
+  const jobId = `trip-reminder-manual-${Date.now()}`;
+  return await tripReminderQueue.add(
+    "manual-trip-reminder",
+    { triggeredBy: "manual", triggeredByUserId: userId } as any,
+    { jobId }
+  );
 }
 
 /**

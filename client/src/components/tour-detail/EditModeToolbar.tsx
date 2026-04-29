@@ -73,15 +73,20 @@ export const EditModeButton: React.FC<EditModeToolbarProps> = ({ colorTheme }) =
 
   if (!canEdit || isEditMode) return null;
 
+  // v78r: position bottom-LEFT (not right) to avoid overlap with the Book Now CTA
+  // in the bottom sticky rail, and use lower opacity + smaller size — it's an
+  // admin-only utility, shouldn't compete visually with the customer flow.
   return (
     <Button
       onClick={toggleEditMode}
-      className="fixed bottom-24 right-6 z-50 rounded-lg w-14 h-14 shadow-lg hover:shadow-xl transition-all"
+      className="fixed bottom-24 left-4 z-50 rounded-full w-11 h-11 shadow-md hover:shadow-lg opacity-60 hover:opacity-100 transition-all"
       style={{
-        backgroundColor: colorTheme?.accent || "#E63946",
+        backgroundColor: colorTheme?.accent || "#1f2937",
       }}
+      aria-label="Enter Edit Mode"
+      title="Enter Edit Mode"
     >
-      <Pencil className="h-6 w-6 text-white" />
+      <Pencil className="h-4 w-4 text-white" />
     </Button>
   );
 };

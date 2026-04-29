@@ -152,27 +152,46 @@ export class TransportationAgent {
       console.log('[TransportationAgent] Flight signal present — skipping train-keyword match (international tour)');
     }
 
-    // 郵輪關鍵字
-    const cruiseKeywords = ['郵輪', '遊輪', 'cruise', '船', '港口', '航線'];
-    for (const keyword of cruiseKeywords) {
-      if (searchText.includes(keyword.toLowerCase())) {
-        return 'CRUISE';
+    // 郵輪關鍵字 — only classify as CRUISE when flight signal is absent AND a product-specific
+    // cruise term is present. Previously listed '船' / '港口' / '航線' which matched common
+    // in-tour activities (遊船/sightseeing boat, any mentioned port, airline 航線) and caused
+    // international flight tours (e.g. 國王湖遊船 as a day-3 stop) to be misclassified as CRUISE,
+    // which then stripped outbound flight info in masterAgent.ts. Post-fix: only the explicit
+    // product terms 郵輪/遊輪/cruise/公主遊輪 trigger — a真正的郵輪產品 title always uses these.
+    const cruiseKeywords = ['郵輪', '遊輪', 'cruise', '公主遊輪', '皇家加勒比', 'royal caribbean', 'princess cruises', '麗星郵輪', '歌詩達'];
+    if (!hasFlightSignal) {
+      for (const keyword of cruiseKeywords) {
+        if (searchText.includes(keyword.toLowerCase())) {
+          console.log(`[TransportationAgent] Found cruise keyword: ${keyword}`);
+          return 'CRUISE';
+        }
       }
+    } else {
+      // Even with a flight signal, a tour can be a fly-cruise (飛+郵輪). But those are rare
+      // in the LionTravel catalog and always list the flight as the primary leg, so FLIGHT
+      // is still the right classifier here — cruise activity will appear in the itinerary.
+      console.log('[TransportationAgent] Flight signal present — skipping cruise-keyword match (flight-primary tour)');
     }
 
     // 自駕關鍵字
     const carKeywords = ['自駕', '租車', 'self-drive', 'car rental', '開車'];
-    for (const keyword of carKeywords) {
-      if (searchText.includes(keyword.toLowerCase())) {
-        return 'CAR';
+    if (!hasFlightSignal) {
+      for (const keyword of carKeywords) {
+        if (searchText.includes(keyword.toLowerCase())) {
+          console.log(`[TransportationAgent] Found car keyword: ${keyword}`);
+          return 'CAR';
+        }
       }
     }
 
     // 巴士關鍵字
     const busKeywords = ['遊覽車', '巴士', 'bus', '專車'];
-    for (const keyword of busKeywords) {
-      if (searchText.includes(keyword.toLowerCase())) {
-        return 'BUS';
+    if (!hasFlightSignal) {
+      for (const keyword of busKeywords) {
+        if (searchText.includes(keyword.toLowerCase())) {
+          console.log(`[TransportationAgent] Found bus keyword: ${keyword}`);
+          return 'BUS';
+        }
       }
     }
 

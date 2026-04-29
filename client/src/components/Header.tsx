@@ -145,6 +145,16 @@ export default function Header() {
 
         {/* Right Side */}
         <div className="hidden md:flex items-center gap-2">
+          {/* v78h: Phone CTA — instant trust signal & 1-click call (matches signettours/Trip.com pattern) */}
+          <a
+            href="tel:+15106342307"
+            className="flex items-center gap-1.5 h-8 px-2.5 text-sm font-semibold text-primary hover:bg-primary/5 rounded-md transition-colors whitespace-nowrap"
+            aria-label="Call PACK&GO"
+          >
+            <Phone className="h-3.5 w-3.5" />
+            <span>+1 (510) 634-2307</span>
+          </a>
+
           <LocaleSwitcher />
 
           {/* Admin Panel Link */}

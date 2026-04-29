@@ -172,6 +172,34 @@ export class ItineraryUnifiedAgent {
     const transportation = rawData?.transportation || rawData?.basicInfo?.transportation || "";
     const searchText = (title + " " + originalTitle + " " + transportation).toLowerCase();
 
+    // v69 GUARD — international tour from Taiwan must classify as FLIGHT regardless
+    // of in-country rail mentions (e.g. "瑞士德國…雙火車體驗"). Without this guard,
+    // rail keywords like 火車/列車/鐵道 in the title for tours featuring Bernina /
+    // Glacier Express / Romantic Road were causing TransportationAgent to strip
+    // outbound flight info and label the JSON as type=TRAIN, producing absurd
+    // "搭火車從台北去德國" results (#420001/420002/420010 in v68 batch).
+    const taiwanDeparture = (rawData?.departureCity || rawData?.location?.departureCity || "");
+    const destinationCountry = (rawData?.destinationCountry || rawData?.location?.destinationCountry || "");
+    const isInternational =
+      (taiwanDeparture.includes("台北") || taiwanDeparture.includes("台灣") || taiwanDeparture.includes("桃園")) &&
+      destinationCountry &&
+      !["台灣", "Taiwan", ""].includes(destinationCountry.trim());
+    const intlFlightSignal =
+      searchText.includes("✈") ||
+      searchText.includes("機場") ||
+      searchText.includes("航空") ||
+      searchText.includes("航班") ||
+      searchText.includes("飛機") ||
+      searchText.includes("機票");
+    // If the tour is unambiguously international AND there's any flight signal in
+    // the title/transportation field, it's FLIGHT — do NOT let in-country rail
+    // keywords win. Mingri (Taiwan-only) still bypasses this guard via its own
+    // earlier check below.
+    if (isInternational && intlFlightSignal) {
+      console.log(`[ItineraryUnifiedAgent] Tour type: FLIGHT (international: ${taiwanDeparture}→${destinationCountry}, flight signal present — overriding rail/cruise keywords)`);
+      return "FLIGHT";
+    }
+
     if (
       searchText.includes("鳴日號") ||
       searchText.includes("鳴日") ||
@@ -181,21 +209,30 @@ export class ItineraryUnifiedAgent {
       console.log("[ItineraryUnifiedAgent] Tour type: MINGRI_TRAIN");
       try {
         this.tourTypesKnowledge = loadReferenceSections("Taiwan-Tour-Types", ["鳴日號火車行程"]);
-      } catch {}
+      } catch (err) {
+        // v71: was silent. If reference sections fail to load, MINGRI_TRAIN
+        // detection still works but the LLM polish prompt loses its
+        // domain-specific context, leading to lower-quality output.
+        console.warn("[ItineraryUnifiedAgent] loadReferenceSections(Taiwan-Tour-Types) failed:", (err as Error)?.message);
+      }
       return "MINGRI_TRAIN";
     }
     // 🚂 RAIL check MUST come BEFORE CRUISE to prevent false positives
     // "鐵道"/"鐵路"/"火車"/"新幹線"/"列車"/"高鐵"/"台鐵" 行程 ≠ 郵輪行程
+    // v69: also gated on NOT being international (covered by guard above; this is
+    // a defense-in-depth in case the guard's signals miss).
     if (
-      searchText.includes("鐵道") ||
-      searchText.includes("鐵路") ||
-      searchText.includes("火車") ||
-      searchText.includes("新幹線") ||
-      searchText.includes("列車") ||
-      searchText.includes("高鐵") ||
-      searchText.includes("台鐵")
+      !isInternational && (
+        searchText.includes("鐵道") ||
+        searchText.includes("鐵路") ||
+        searchText.includes("火車") ||
+        searchText.includes("新幹線") ||
+        searchText.includes("列車") ||
+        searchText.includes("高鐵") ||
+        searchText.includes("台鐵")
+      )
     ) {
-      console.log("[ItineraryUnifiedAgent] Tour type: TRAIN (rail keywords in title/transport)");
+      console.log("[ItineraryUnifiedAgent] Tour type: TRAIN (rail keywords in title/transport, domestic)");
       return "TRAIN";
     }
     // 🚢 CRUISE check — only if no rail keywords found
@@ -485,6 +522,11 @@ export class ItineraryUnifiedAgent {
 3. 禁止更改交通方式或飯店名稱
 4. 禁止新增原始資料中沒有的景點或活動
 5. 絕對不要使用簡體中文
+6. 【v69 重要】：每一天的 activities 陣列至少要有 1 筆活動，不可為空陣列。若原始資料 day 1 或最後一天沒有具體景點（通常是搭機日），請依據前後文補一筆「出發/抵達/返程」類型的活動：
+   • Day 1（首日）若無景點：補一筆「搭機前往${city}（航程約 X 小時，抵達後辦理入住休息）」
+   • 最後一天若無景點：補一筆「享用早餐後整理行李，搭機返回${rawData?.departureCity || '台北'}，結束愉快旅程」
+   • 中間若有空白日：用「自由活動」+前後景點脈絡填補
+   絕對不允許 activities 為空陣列。
 ${originalTransportation ? `原始交通方式：${originalTransportation}` : ''}
 ${transportRuleNote}${itinerarySelfRepairSection}`;
 
@@ -501,7 +543,9 @@ ${JSON.stringify(extractedItineraries, null, 2)}
         UNIFIED_ITINERARY_SCHEMA,
         {
           systemPrompt,
-          maxTokens: 8192,
+          // v67: was 8192 — actual output rarely exceeds ~3K. 4096 leaves
+          // headroom for long itineraries (15+ days) without burning quota.
+          maxTokens: 4096,
           temperature: 0.5,
           schemaName: "unified_polished_itineraries",
           schemaDescription: "合併提取與美化的行程輸出",
@@ -605,6 +649,60 @@ ${JSON.stringify(extractedItineraries, null, 2)}
       overallScore: Math.max(0, score),
       issues,
     };
+  }
+
+  /**
+   * v69 safety-net: ensure every day has ≥1 activity, regardless of which path
+   * (LLM polish, fallback, or auto-repair) produced the polished itinerary.
+   * Without this, source data with bare day-1 / last-day flight days produces
+   * UI sections that look "missing" instead of "travel day".
+   */
+  private fillEmptyDayActivities(
+    polished: PolishedItinerary[],
+    city: string,
+    departureCity: string
+  ): PolishedItinerary[] {
+    const totalDays = polished.length;
+    return polished.map((d, i) => {
+      const acts = Array.isArray(d.activities) ? d.activities : [];
+      const hasRealActivity = acts.some(
+        (a: any) =>
+          a &&
+          typeof a === "object" &&
+          ((typeof a.title === "string" && a.title.trim().length > 0) ||
+            (typeof a.description === "string" && a.description.trim().length > 0))
+      );
+      if (hasRealActivity) return d;
+
+      const isFirst = i === 0;
+      const isLast = i === totalDays - 1;
+      let title = "自由活動";
+      let description = "依當地天氣與身心狀況彈性安排，建議深入體驗目的地的日常風景。";
+      if (isFirst) {
+        title = `啟程前往${city || "目的地"}`;
+        description = `自${departureCity}出發，搭乘航班/列車前往${city || "目的地"}，抵達後辦理入住，視時間調整作息，為接下來的旅程蓄積精神。`;
+      } else if (isLast) {
+        title = `啟程返回${departureCity}`;
+        description = `享用早餐後整理行李，前往機場/車站搭乘交通工具返回${departureCity}，為這趟旅程畫下圓滿句點。`;
+      }
+      console.warn(
+        `[ItineraryUnifiedAgent] v69 safety-net filled empty day ${d.day || i + 1} (${
+          isFirst ? "first" : isLast ? "last" : "middle"
+        })`
+      );
+      return {
+        ...d,
+        activities: [
+          {
+            time: "",
+            title,
+            description,
+            transportation: "",
+            location: city || "",
+          },
+        ] as any,
+      };
+    });
   }
 
   private autoRepairItineraries(
@@ -735,6 +833,17 @@ ${JSON.stringify(extractedItineraries, null, 2)}
       if (fidelityCheck.issues.length > 0) {
         console.warn(`[ItineraryUnifiedAgent] Fidelity issues: ${fidelityCheck.issues.join(", ")}`);
       }
+
+      // v69 safety-net (lifted to execute level): no matter which path produced
+      // polishedItineraries — LLM success, LLM fallback, or autoRepair — every
+      // day must have at least one activity. Source data sometimes has bare
+      // day-1 (departure flight) and last day (return flight) with no
+      // activities; render those as travel days.
+      polishedItineraries = this.fillEmptyDayActivities(
+        polishedItineraries,
+        destinationInfo.city || destinationInfo.country || "目的地",
+        rawData?.departureCity || rawData?.location?.departureCity || "台北"
+      );
 
       const totalElapsedMs = Date.now() - startTime;
       console.log(`[ItineraryUnifiedAgent] ✓ Completed: ${polishedItineraries.length} days, ${llmCallCount} LLM call(s), ${totalElapsedMs}ms`);

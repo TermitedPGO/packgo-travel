@@ -54,6 +54,28 @@ export default function BookingDetail() {
     },
   });
 
+  // v78w: Wire up cancel-booking endpoint that already exists server-side.
+  // Triggers an unrefundable warning prompt before calling the mutation.
+  const cancelMutation = trpc.bookings.cancel.useMutation({
+    onSuccess: () => {
+      toast.success(t('bookingDetail.cancelSuccess') || "Booking cancelled. Refund (if eligible) processed within 1 week.");
+      refetch();
+    },
+    onError: (error) => {
+      toast.error(t('bookingDetail.cancelFailed') || "Failed to cancel booking", {
+        description: error.message,
+      });
+    },
+  });
+
+  const handleCancelBooking = () => {
+    const confirmMsg = t('bookingDetail.cancelConfirm') ||
+      "Are you sure you want to cancel this booking?\n\nRefund eligibility depends on time-to-departure and tour cancellation policy. We'll review and email you within 1 week.";
+    if (window.confirm(confirmMsg)) {
+      cancelMutation.mutate({ id: bookingId });
+    }
+  };
+
   const handlePayment = (paymentType: "deposit" | "balance" | "full") => {
     if (!user) {
       toast.error(t('bookingDetail.loginRequiredToast'));
@@ -380,6 +402,26 @@ export default function BookingDetail() {
                   <p>• {t('bookingDetail.contactSupport')}</p>
                   <p>• {t('bookingDetail.cancellationPolicy')}</p>
                 </div>
+
+                {/* v78w: Cancel booking button (only shown for non-cancelled, non-completed) */}
+                {booking.bookingStatus !== "cancelled" && booking.bookingStatus !== "completed" && (
+                  <>
+                    <Separator />
+                    <Button
+                      variant="outline"
+                      onClick={handleCancelBooking}
+                      disabled={cancelMutation.isPending}
+                      className="w-full text-red-600 border-red-200 hover:bg-red-50 hover:border-red-300 hover:text-red-700 rounded-lg"
+                    >
+                      {cancelMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <XCircle className="h-4 w-4 mr-2" />
+                      )}
+                      {t('bookingDetail.cancelBookingBtn') || "Cancel booking"}
+                    </Button>
+                  </>
+                )}
               </CardContent>
             </Card>
           </div>

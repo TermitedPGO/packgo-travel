@@ -96,16 +96,57 @@ export default function Footer() {
           </div>
         </div>
 
+        {/* Trust Credentials Row (v78i — make legal credentials prominent, not buried) */}
+        <div className="border-t border-gray-800 pt-8 pb-4">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mb-4">
+            <div className="flex items-center gap-2 text-sm">
+              <span className="px-2.5 py-1 rounded-md bg-emerald-900/40 border border-emerald-700 text-emerald-300 font-mono font-semibold">
+                CST #2166984
+              </span>
+              <span className="text-xs text-gray-400">{t('footer.businessLicense')}</span>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <span className="px-2.5 py-1 rounded-md bg-emerald-900/40 border border-emerald-700 text-emerald-300 font-semibold text-xs">
+                TCRF
+              </span>
+              <span className="text-xs text-gray-400">{t('footer.tcrfParticipant')}</span>
+            </div>
+            {/* v78m Sprint 5D: review platform links (set via Fly secrets PACKGO_GOOGLE_REVIEW_URL / PACKGO_YELP_REVIEW_URL) */}
+            {(import.meta as any).env?.VITE_GOOGLE_REVIEW_URL && (
+              <a
+                href={(import.meta as any).env.VITE_GOOGLE_REVIEW_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-sm text-gray-400 hover:text-emerald-300 transition-colors"
+              >
+                <span className="px-2.5 py-1 rounded-md bg-blue-900/40 border border-blue-700 text-blue-300 font-semibold text-xs">
+                  Google Reviews
+                </span>
+                <span className="text-xs">{t("footer.readReviews") || "查看真實評價 →"}</span>
+              </a>
+            )}
+            {(import.meta as any).env?.VITE_YELP_REVIEW_URL && (
+              <a
+                href={(import.meta as any).env.VITE_YELP_REVIEW_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-sm text-gray-400 hover:text-emerald-300 transition-colors"
+              >
+                <span className="px-2.5 py-1 rounded-md bg-red-900/40 border border-red-700 text-red-300 font-semibold text-xs">
+                  Yelp
+                </span>
+                <span className="text-xs">{t("footer.readReviews") || "查看真實評價 →"}</span>
+              </a>
+            )}
+          </div>
+        </div>
+
         {/* Legal Disclosures (California Seller of Travel - B&P §17550 et seq.) */}
-        <div className="border-t border-gray-800 pt-8 pb-6">
+        <div className="border-t border-gray-800 pt-6 pb-6">
           <div className="text-xs text-gray-400 leading-relaxed space-y-2 max-w-4xl">
             <p className="font-semibold text-gray-300">
               {t('footer.legalName')} &middot; 39055 Cedar Blvd #126, Newark, CA 94560
             </p>
-            <p>
-              {t('footer.businessLicense')} &middot; {t('footer.cstNumber')}
-            </p>
-            <p>{t('footer.tcrfParticipant')}</p>
             <p className="text-gray-500">{t('footer.trustAccountStatement')}</p>
             <p className="text-gray-500 italic">{t('footer.stateDisclaimer')}</p>
           </div>

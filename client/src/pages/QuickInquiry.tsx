@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { MessageSquare, CheckCircle, Phone, Mail, Clock } from "lucide-react";
+import { MessageSquare, CheckCircle, Phone, Mail, Clock, Map, Sparkles, Plane, Hotel, FileText, Anchor } from "lucide-react";
 import { Link } from "wouter";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -40,14 +40,15 @@ const SUBJECT_OPTIONS = [
 ] as const;
 
 // Quick-pick subject chips (most common ones)
-const QUICK_SUBJECTS = [
-  { value: "行程預訂", labelKey: "quickInquiry.form.subjects.booking", emoji: "🗺️" },
-  { value: "客製旅遊", labelKey: "quickInquiry.form.subjects.customTour", emoji: "✨" },
-  { value: "機票預購", labelKey: "quickInquiry.form.subjects.flightBooking", emoji: "✈️" },
-  { value: "飯店預訂", labelKey: "quickInquiry.form.subjects.hotelBooking", emoji: "🏨" },
-  { value: "簽證服務", labelKey: "quickInquiry.form.subjects.visa", emoji: "📋" },
-  { value: "郵輪旅遊", labelKey: "quickInquiry.form.subjects.cruise", emoji: "🚢" },
-] as const;
+// v78h: chip icons via lucide-react SVG (replaces emoji)
+const QUICK_SUBJECTS: { value: string; labelKey: string; icon: React.ElementType }[] = [
+  { value: "行程預訂", labelKey: "quickInquiry.form.subjects.booking", icon: Map },
+  { value: "客製旅遊", labelKey: "quickInquiry.form.subjects.customTour", icon: Sparkles },
+  { value: "機票預購", labelKey: "quickInquiry.form.subjects.flightBooking", icon: Plane },
+  { value: "飯店預訂", labelKey: "quickInquiry.form.subjects.hotelBooking", icon: Hotel },
+  { value: "簽證服務", labelKey: "quickInquiry.form.subjects.visa", icon: FileText },
+  { value: "郵輪旅遊", labelKey: "quickInquiry.form.subjects.cruise", icon: Anchor },
+];
 
 export default function QuickInquiry() {
   const [isSubmitted, setIsSubmitted] = useState(false);
@@ -271,7 +272,9 @@ export default function QuickInquiry() {
                     </Label>
                     {/* Quick-pick chips */}
                     <div className="flex flex-wrap gap-2 mb-3">
-                      {QUICK_SUBJECTS.map((s) => (
+                      {QUICK_SUBJECTS.map((s) => {
+                        const Icon = s.icon;
+                        return (
                         <button
                           key={s.value}
                           type="button"
@@ -282,10 +285,11 @@ export default function QuickInquiry() {
                               : "border-gray-300 text-gray-600 hover:border-black hover:text-black bg-white"
                           }`}
                         >
-                          <span>{s.emoji}</span>
+                          <Icon className="h-3.5 w-3.5" />
                           <span>{t(s.labelKey)}</span>
                         </button>
-                      ))}
+                        );
+                      })}
                     </div>
                     {/* Full dropdown for all options */}
                     <Controller

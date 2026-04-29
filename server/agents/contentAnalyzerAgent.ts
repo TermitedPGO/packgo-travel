@@ -89,21 +89,28 @@ export interface ContentAnalyzerResult {
 const COMBINED_OUTPUT_SCHEMA: JSONSchema = {
   type: "object",
   properties: {
-    poeticTitle: { 
-      type: "string", 
-      description: "詩意化的行程標題，15-25 個中文字" 
+    poeticTitle: {
+      type: "string",
+      description: "詩意化的行程標題，15-25 個中文字"
     },
-    title: { 
-      type: "string", 
-      description: "行銷標題，20-30 個中文字" 
+    // Bug #7 fix: previously poeticSubtitle was declared on the result type but
+    // never requested from the LLM. Now part of the required schema so every
+    // tour gets a poetic subtitle generated.
+    poeticSubtitle: {
+      type: "string",
+      description: "詩意副標題，與 poeticTitle 搭配使用，12-20 個中文字，帶有意境或動感"
     },
-    description: { 
-      type: "string", 
-      description: "行程介紹，100-120 個中文字" 
+    title: {
+      type: "string",
+      description: "行銷標題，20-30 個中文字"
     },
-    heroSubtitle: { 
-      type: "string", 
-      description: "Hero 副標題，30-40 個中文字" 
+    description: {
+      type: "string",
+      description: "行程介紹，100-120 個中文字"
+    },
+    heroSubtitle: {
+      type: "string",
+      description: "Hero 副標題，30-40 個中文字"
     },
     highlights: {
       type: "array",
@@ -111,7 +118,7 @@ const COMBINED_OUTPUT_SCHEMA: JSONSchema = {
       description: "6-10 個行程亮點，每個 10-30 個中文字"
     },
   },
-  required: ["poeticTitle", "title", "description", "heroSubtitle", "highlights"],
+  required: ["poeticTitle", "poeticSubtitle", "title", "description", "heroSubtitle", "highlights"],
 };
 
 /**
@@ -189,7 +196,7 @@ export class ContentAnalyzerAgent {
           })),
           keyFeatures,
           poeticContent,
-          poeticSubtitle: "",
+          poeticSubtitle: combinedResult.poeticSubtitle,
           attractions: [],
           hotels: [],
           meals: [],
@@ -212,6 +219,7 @@ export class ContentAnalyzerAgent {
    */
   private async generateAllContent(rawData: any): Promise<{
     poeticTitle: string;
+    poeticSubtitle: string;
     title: string;
     description: string;
     heroSubtitle: string;
@@ -269,14 +277,16 @@ export class ContentAnalyzerAgent {
 
 請生成（全部用繁體中文）：
 1. poeticTitle: 詩意化標題（15-25字）
-2. title: 行銷標題（20-30字）
-3. description: 行程介紹（100-120字）
-4. heroSubtitle: Hero副標題（30-40字）
-5. highlights: 6-10個行程亮點（每個10-30字，必須為繁體中文，英文景點名請翻譯）`;
+2. poeticSubtitle: 詩意副標題（12-20字，與 poeticTitle 互相呼應、帶動感或意境，例如「越山尋夢，踏野拾光」、「多瑙河畔的時光漫步」）
+3. title: 行銷標題（20-30字）
+4. description: 行程介紹（100-120字）
+5. heroSubtitle: Hero副標題（30-40字）
+6. highlights: 6-10個行程亮點（每個10-30字，必須為繁體中文，英文景點名請翻譯）`;
 
     try {
       const response = await this.claudeAgent.sendStructuredMessage<{
         poeticTitle: string;
+        poeticSubtitle: string;
         title: string;
         description: string;
         heroSubtitle: string;
@@ -302,6 +312,7 @@ export class ContentAnalyzerAgent {
 
       return {
         poeticTitle: response.data.poeticTitle || `${destinationCity}${days}日精選之旅`,
+        poeticSubtitle: response.data.poeticSubtitle || `${days}日${nights}夜的深度漫遊`,
         title: response.data.title || originalTitle || "精選行程",
         description: response.data.description || originalDescription || "探索精彩行程，體驗難忘旅程。",
         heroSubtitle: response.data.heroSubtitle || `${destinationCity}深度遊．${days}天${nights}夜`,
@@ -309,10 +320,11 @@ export class ContentAnalyzerAgent {
       };
     } catch (error) {
       console.error("[ContentAnalyzerAgent] Combined generation failed:", error);
-      
+
       // Fallback
       return {
         poeticTitle: `${destinationCity}${days}日精選之旅`,
+        poeticSubtitle: `${days}日${nights}夜的深度漫遊`,
         title: originalTitle || "精選行程",
         description: originalDescription || "探索精彩行程，體驗難忘旅程。",
         heroSubtitle: `${destinationCity}深度遊．${days}天${nights}夜`,
@@ -397,20 +409,25 @@ export class ContentAnalyzerAgent {
     heroSubtitle: string;
   }): number {
     const totalLength = content.title.length + content.description.length + content.heroSubtitle.length;
-    
+
     // Basic score: longer content = higher originality
     let score = Math.min(100, totalLength / 3);
-    
+
     // Check for common phrases (reduce score if found)
     const commonPhrases = ["行程", "旅遊", "精選", "特色", "深度"];
     let commonCount = 0;
     commonPhrases.forEach(phrase => {
       if (content.description.includes(phrase)) commonCount++;
     });
-    
+
     score -= commonCount * 5;
-    
-    return Math.max(60, Math.min(100, score));
+
+    // Diversity bonus: reward when description contains varied vocabulary
+    const uniqueChars = new Set(content.description).size;
+    if (uniqueChars > 40) score += 5;
+    if (uniqueChars > 60) score += 5;
+
+    return Math.max(0, Math.min(100, score));
   }
 
   /**

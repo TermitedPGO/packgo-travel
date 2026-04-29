@@ -1,4 +1,4 @@
-import { eq, and, gte, lte, desc, inArray, like, or, sql } from "drizzle-orm";
+import { eq, and, gte, lte, desc, inArray, like, or, sql, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql2 from "mysql2";
 import { 
@@ -30,7 +30,8 @@ import {
   tourPriceComparisons, TourPriceComparison, InsertTourPriceComparison,
   accountingEntries, AccountingEntry, InsertAccountingEntry,
   invoices, Invoice, InsertInvoice,
-  recurringExpenses, RecurringExpense, InsertRecurringExpense
+  recurringExpenses, RecurringExpense, InsertRecurringExpense,
+  aiQuotes, AiQuote, InsertAiQuote,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -447,21 +448,70 @@ export async function createTour(tour: InsertTour): Promise<Tour> {
 }
 
 /**
- * Update an existing tour
+ * Update an existing tour.
+ *
+ * v75 (optional optimistic locking): if `expectedUpdatedAt` is passed, the
+ * UPDATE only succeeds when the row's current updatedAt matches — preventing
+ * the "two admins edit same tour, last writer wins silently" race. Callers
+ * that pass it can detect a conflict and prompt the user to refresh + retry.
+ *
+ * Backwards compatible: callers that don't pass `expectedUpdatedAt` get the
+ * old last-writer-wins behavior.
  */
-export async function updateTour(id: number, updates: Partial<InsertTour>): Promise<Tour> {
+export class TourUpdateConflictError extends Error {
+  constructor(public id: number) {
+    super(`Tour ${id} was modified by another admin since you loaded it`);
+    this.name = "TourUpdateConflictError";
+  }
+}
+
+export async function updateTour(
+  id: number,
+  updates: Partial<InsertTour>,
+  expectedUpdatedAt?: Date | string
+): Promise<Tour> {
   const db = await getDb();
   if (!db) {
     throw new Error("Database not available");
   }
 
-  await db.update(tours).set(updates).where(eq(tours.id, id));
-  
+  // v75: dailyItinerary and itineraryDetailed hold the same payload (legacy
+  // dual-write from when the schema was migrated). If a caller updates only
+  // one, the other becomes stale and search/listing pages may show old data.
+  // Auto-mirror so writes to either field always update both.
+  if (updates.itineraryDetailed !== undefined && updates.dailyItinerary === undefined) {
+    updates = { ...updates, dailyItinerary: updates.itineraryDetailed };
+  } else if (updates.dailyItinerary !== undefined && updates.itineraryDetailed === undefined) {
+    updates = { ...updates, itineraryDetailed: updates.dailyItinerary };
+  }
+
+  if (expectedUpdatedAt) {
+    // Use a guarded UPDATE: only matches the row when updatedAt equals the
+    // version the caller saw. If another admin wrote between read and update,
+    // the WHERE doesn't match and affectedRows = 0.
+    const expected = expectedUpdatedAt instanceof Date
+      ? expectedUpdatedAt
+      : new Date(expectedUpdatedAt);
+    const result = await db
+      .update(tours)
+      .set(updates)
+      .where(and(eq(tours.id, id), eq(tours.updatedAt, expected)));
+    const affected = (result as any)?.[0]?.affectedRows ?? 0;
+    if (affected === 0) {
+      // Either the tour vanished, or another admin updated it. Distinguish:
+      const exists = await getTourById(id);
+      if (!exists) throw new Error(`Tour ${id} not found`);
+      throw new TourUpdateConflictError(id);
+    }
+  } else {
+    await db.update(tours).set(updates).where(eq(tours.id, id));
+  }
+
   const updatedTour = await getTourById(id);
   if (!updatedTour) {
     throw new Error("Failed to retrieve updated tour");
   }
-  
+
   return updatedTour;
 }
 
@@ -521,6 +571,77 @@ export async function getDepartureById(id: number): Promise<TourDeparture | unde
 
   const result = await db.select().from(tourDepartures).where(eq(tourDepartures.id, id)).limit(1);
   return result.length > 0 ? result[0] : undefined;
+}
+
+/**
+ * v74: Atomically reserve N slots on a departure.
+ *
+ * Returns `{ reserved: true }` if the increment succeeded, or
+ *         `{ reserved: false, available: <currentFree> }` if there isn't enough capacity.
+ *
+ * The guarded UPDATE is the critical piece: by including the capacity check in
+ * the WHERE clause, MySQL enforces atomicity at the row level — two concurrent
+ * callers cannot both increment past `totalSlots`. Whichever query reaches the
+ * row first wins; the other sees `affectedRows = 0`.
+ *
+ * Without this, the previous code path simply created bookings without ever
+ * touching `bookedSlots`, allowing unlimited overbooking on the last seat.
+ */
+export async function tryReserveDepartureSlots(
+  departureId: number,
+  count: number
+): Promise<{ reserved: boolean; available: number }> {
+  const db = await getDb();
+  if (!db) return { reserved: false, available: 0 };
+
+  // Drizzle MySQL: use sql template for the conditional increment
+  const result = await db.execute(sql`
+    UPDATE tourDepartures
+    SET bookedSlots = bookedSlots + ${count},
+        updatedAt = NOW()
+    WHERE id = ${departureId}
+      AND status NOT IN ('cancelled', 'full')
+      AND (bookedSlots + ${count}) <= totalSlots
+  `);
+  // mysql2 returns OkPacket with affectedRows
+  const affected = (result as any)?.[0]?.affectedRows ?? 0;
+  if (affected > 0) {
+    // If we just hit exactly totalSlots, also flip status to 'full'
+    await db.execute(sql`
+      UPDATE tourDepartures
+      SET status = 'full'
+      WHERE id = ${departureId}
+        AND bookedSlots >= totalSlots
+        AND status = 'open'
+    `).catch(() => {});
+    return { reserved: true, available: 0 };
+  }
+  // Reservation failed — fetch current capacity for a useful error message
+  const dep = await getDepartureById(departureId);
+  const free = dep ? Math.max(0, dep.totalSlots - dep.bookedSlots) : 0;
+  return { reserved: false, available: free };
+}
+
+/**
+ * v74: Release reserved slots (called when booking creation fails after we
+ * already incremented, or when a confirmed booking is cancelled).
+ *
+ * Uses GREATEST to prevent bookedSlots going negative if called too many times.
+ * Also flips status back from 'full' to 'open' if capacity is freed.
+ */
+export async function releaseDepartureSlots(
+  departureId: number,
+  count: number
+): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.execute(sql`
+    UPDATE tourDepartures
+    SET bookedSlots = GREATEST(0, bookedSlots - ${count}),
+        status = CASE WHEN status = 'full' AND (bookedSlots - ${count}) < totalSlots THEN 'open' ELSE status END,
+        updatedAt = NOW()
+    WHERE id = ${departureId}
+  `);
 }
 
 /**
@@ -589,6 +710,26 @@ export async function getUserBookings(userId: number) {
   }
 
   const result = await db.select().from(bookings).where(eq(bookings.userId, userId));
+  return result;
+}
+
+/**
+ * v75: Get active (non-cancelled) bookings tied to a specific departure.
+ * Used as a safety check before allowing admin to delete a departure —
+ * silently orphaning bookings would lose customer money trail.
+ */
+export async function getActiveBookingsByDepartureId(departureId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const result = await db
+    .select()
+    .from(bookings)
+    .where(
+      and(
+        eq(bookings.departureId, departureId),
+        ne(bookings.bookingStatus, "cancelled" as any)
+      )
+    );
   return result;
 }
 
@@ -712,13 +853,42 @@ export async function createBookingParticipant(participant: InsertBookingPartici
 
   const result = await db.insert(bookingParticipants).values(participant);
   const insertId = Number(result[0].insertId);
-  
+
   const participants = await db.select().from(bookingParticipants).where(eq(bookingParticipants.id, insertId)).limit(1);
   if (participants.length === 0) {
     throw new Error("Failed to retrieve created participant");
   }
-  
+
   return participants[0];
+}
+
+/**
+ * v77: replace ALL participants for a booking in one atomic operation.
+ * Used by the customer-facing form that captures passenger details after
+ * the booking is created. Idempotent — calling repeatedly with the same
+ * payload converges to the same final state.
+ *
+ * Implementation: delete-then-insert inside a transaction so partial failures
+ * don't leave half-stale participant rows.
+ */
+export async function replaceBookingParticipants(
+  bookingId: number,
+  participants: Omit<InsertBookingParticipant, "bookingId" | "id">[]
+): Promise<BookingParticipant[]> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  // Drizzle MySQL transaction
+  await db.transaction(async (tx) => {
+    await tx.delete(bookingParticipants).where(eq(bookingParticipants.bookingId, bookingId));
+    if (participants.length > 0) {
+      await tx.insert(bookingParticipants).values(
+        participants.map((p) => ({ ...p, bookingId }))
+      );
+    }
+  });
+
+  return await getBookingParticipants(bookingId);
 }
 
 // ============================================
@@ -757,6 +927,23 @@ export async function createPayment(payment: InsertPayment): Promise<Payment> {
   }
   
   return paymentRecords[0];
+}
+
+/**
+ * v70: Lookup an existing payment by Stripe Payment Intent ID.
+ * Used by the webhook for idempotency — Stripe retries webhook deliveries
+ * (network blips, gateway errors), and without this check we'd insert duplicate
+ * payment rows + flip booking status repeatedly.
+ */
+export async function getPaymentByIntentId(stripePaymentIntentId: string): Promise<Payment | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db
+    .select()
+    .from(payments)
+    .where(eq(payments.stripePaymentIntentId, stripePaymentIntentId))
+    .limit(1);
+  return rows[0] ?? null;
 }
 
 /**
@@ -3036,6 +3223,23 @@ export async function getInvoiceById(id: number): Promise<Invoice | null> {
   return inv || null;
 }
 
+/**
+ * v77: lookup an invoice by its associated booking. Used by the customer
+ * "Download receipt" flow to avoid regenerating PDFs that already exist.
+ * Returns the most recent invoice for that booking (in case of multiple).
+ */
+export async function getInvoiceByBookingId(bookingId: number): Promise<Invoice | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db
+    .select()
+    .from(invoices)
+    .where(eq(invoices.bookingId, bookingId))
+    .orderBy(desc(invoices.createdAt))
+    .limit(1);
+  return rows[0] || null;
+}
+
 export async function updateInvoice(id: number, data: Partial<InsertInvoice>): Promise<boolean> {
   const db = await getDb();
   if (!db) return false;
@@ -3100,6 +3304,46 @@ export async function getRecurringExpenseById(id: number): Promise<RecurringExpe
   const db = await getDb();
   if (!db) return null;
   const rows = await db.select().from(recurringExpenses).where(eq(recurringExpenses.id, id)).limit(1);
+  return rows[0] ?? null;
+}
+
+// ── v78: AI Quotes ──────────────────────────────────────────────────────────
+
+export async function createAiQuote(data: InsertAiQuote): Promise<AiQuote | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.insert(aiQuotes).values(data);
+  const insertId = Number((result[0] as any).insertId);
+  const rows = await db.select().from(aiQuotes).where(eq(aiQuotes.id, insertId)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function listAiQuotes(params: { status?: string; limit?: number; offset?: number }): Promise<AiQuote[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions: any[] = [];
+  if (params.status) conditions.push(eq(aiQuotes.status, params.status as any));
+  const query = db.select().from(aiQuotes);
+  const finalQuery = conditions.length > 0
+    ? query.where(and(...conditions))
+    : query;
+  return await finalQuery
+    .orderBy(desc(aiQuotes.createdAt))
+    .limit(params.limit ?? 50)
+    .offset(params.offset ?? 0);
+}
+
+export async function updateAiQuote(id: number, data: Partial<InsertAiQuote>): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const result = await db.update(aiQuotes).set(data).where(eq(aiQuotes.id, id));
+  return (result[0] as any).affectedRows > 0;
+}
+
+export async function getAiQuoteById(id: number): Promise<AiQuote | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(aiQuotes).where(eq(aiQuotes.id, id)).limit(1);
   return rows[0] ?? null;
 }
 

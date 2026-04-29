@@ -82,6 +82,32 @@ export default function PaymentSuccess() {
                 {t("paymentSuccess.orderDetails")}
               </h2>
 
+              {/* v78w: Tour summary at top — was missing despite data being available.
+                  Customer needs to see "what they bought" prominently before contact info. */}
+              {((booking as any).tourTitle || (booking as any).tour?.title) && (
+                <div className="mb-6 p-4 rounded-xl bg-emerald-50 border border-emerald-200">
+                  <p className="text-xs uppercase tracking-wider text-emerald-700 font-semibold mb-1">
+                    {t("paymentSuccess.tourLabel") || "Tour"}
+                  </p>
+                  <p className="text-lg md:text-xl font-bold text-gray-900 leading-snug mb-2">
+                    {((booking as any).tourTitle || (booking as any).tour?.title || "").split(/[|｜]/)[0].trim()}
+                  </p>
+                  {(booking as any).departureDate && (
+                    <p className="text-sm text-gray-700 flex items-center gap-2">
+                      <svg className="h-4 w-4 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                      <strong>{t("paymentSuccess.departureLabel") || "Departure"}:</strong>{" "}
+                      {new Date((booking as any).departureDate).toLocaleDateString(
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        (booking as any).language === "en" ? "en-US" : "zh-TW",
+                        { year: "numeric", month: "long", day: "numeric" }
+                      )}
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="space-y-4 mb-6">
                 <div className="flex justify-between items-center py-2">
                   <span className="text-lg text-gray-600">{t("paymentSuccess.customerName")}</span>
@@ -132,12 +158,32 @@ export default function PaymentSuccess() {
                 </div>
               </div>
 
-              {/* Confirmation email notice */}
-              <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <p className="text-base text-blue-900">
-                  <strong>{t("paymentSuccess.confirmationSentLabel")}</strong>{" "}
-                  {t("paymentSuccess.confirmationSentBody", { email: booking.customerEmail })}
-                </p>
+              {/* v78w: "What happens next" — concrete timeline replaces vague "email sent" */}
+              <div className="mt-6 bg-blue-50 border border-blue-200 rounded-xl p-5">
+                <h3 className="font-bold text-blue-900 mb-3">
+                  {t("paymentSuccess.whatNextTitle") || "What happens next"}
+                </h3>
+                <ol className="space-y-2.5 text-sm text-blue-900">
+                  <li className="flex items-start gap-2">
+                    <span className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold">1</span>
+                    <span>
+                      <strong>{t("paymentSuccess.confirmationSentLabel")}</strong>{" "}
+                      {t("paymentSuccess.confirmationSentBody", { email: booking.customerEmail })}
+                    </span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold">2</span>
+                    <span>{t("paymentSuccess.nextStep2") || "Our team confirms your seats with the supplier within 1 week and emails you the final itinerary."}</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold">3</span>
+                    <span>{t("paymentSuccess.nextStep3") || "30 days before departure, we'll send pre-trip preparation reminders (visa, packing, contact info)."}</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold">4</span>
+                    <span>{t("paymentSuccess.nextStep4") || "Questions? Call +1 (510) 634-2307 or reply to your confirmation email anytime."}</span>
+                  </li>
+                </ol>
               </div>
             </Card>
 

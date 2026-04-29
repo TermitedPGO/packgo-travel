@@ -5,6 +5,31 @@ import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, adminProcedure, router } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+
+// v71: bounded string helpers — all free-form text inputs MUST use one of these
+// instead of bare `z.string()`. Without max bounds, attackers can send 10MB
+// payloads per field and DoS the database / LLM pipeline. Sizes are picked to
+// be generous for legitimate content.
+//   shortStr  – names, codes, country/city, single-line metadata
+//   mediumStr – paragraphs, descriptions, comments
+//   longStr   – JSON blobs (itinerary, highlights, hotel images), poetic content
+//
+// v74 (security hardening): also strip ASCII control characters (NULL, BEL, ESC,
+// DEL, etc.) — live attack test confirmed `\x00`/`\x07` were persisting verbatim
+// into MySQL `tours.title`, which can corrupt log rendering, break PDF/email
+// generators that use C-style string functions, and is a known WAF-evasion
+// vector. We allow tab (0x09), LF (0x0A), CR (0x0D) since those are legitimate
+// in textarea content. Anything else in the C0 range or DEL gets stripped.
+//
+// Implementation note: zod's `.transform()` produces a ZodPipe which loses the
+// `.min()` / `.max()` chain methods. So instead of transforming, we use `.refine`
+// to REJECT inputs with control chars. For inputs that legitimately may include
+// stray copy-paste control chars, callers should pre-clean before submitting.
+const CONTROL_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
+const noControlChars = (s: string) => !CONTROL_CHARS.test(s);
+const shortStr = z.string().max(255).refine(noControlChars, { message: "禁止控制字元" });
+const mediumStr = z.string().max(5_000).refine(noControlChars, { message: "禁止控制字元" });
+const longStr = z.string().max(50_000).refine(noControlChars, { message: "禁止控制字元" });
 import * as db from "./db";
 import * as skillDb from "./skillDb";
 import { learnFromPdfContent, initializeBuiltInSkills } from "./agents/learningAgent";
@@ -55,10 +80,11 @@ export const appRouter = router({
     
     // Register with email/password
     register: publicProcedure
+      // v73: bounded inputs — public auth endpoint, must be DoS-safe.
       .input(z.object({
-        email: z.string().email(),
-        password: z.string().min(8),
-        name: z.string().optional(),
+        email: z.string().email().max(320),
+        password: z.string().min(8).max(128),
+        name: shortStr.optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         try {
@@ -228,7 +254,7 @@ export const appRouter = router({
     resetPassword: publicProcedure
       .input(z.object({
         token: z.string().min(32).max(256).regex(/^[a-f0-9]+$/, 'Invalid token format'),
-        newPassword: z.string().min(8),
+        newPassword: z.string().min(8).max(128), // v73: bound max length
       }))
       .mutation(async ({ input }) => {
         try {
@@ -405,9 +431,9 @@ export const appRouter = router({
     recordFeedback: publicProcedure
       .input(
         z.object({
-          usageLogIds: z.array(z.number()),
+          usageLogIds: z.array(z.number().int().positive()).max(100),
           feedback: z.enum(["positive", "negative"]),
-          comment: z.string().optional(),
+          comment: mediumStr.optional(), // v73: bound 5KB max
         })
       )
       .mutation(async ({ input }) => {
@@ -535,6 +561,197 @@ export const appRouter = router({
       return await db.getFilterOptions();
     }),
 
+    /**
+     * v78o Sprint 7: Tour route map — server-side geocoding + Google Static
+     * Map URL for the daily itinerary. We do this server-side because the
+     * client-side Forge proxy isn't available in production.
+     *
+     * Returns: { staticMapUrl, stops: [{day, name, lat, lng}] }
+     * The static map URL is signed once with our GOOGLE_API_KEY (server-only),
+     * so the frontend just renders it as <img>. Cached in-memory for 24h.
+     */
+    getRouteMap: publicProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ input }) => {
+        const tour = await db.getTourById(input.id);
+        if (!tour) return { staticMapUrl: null, stops: [], directionsUrl: null };
+
+        // Parse itinerary
+        let itinerary: any[] = [];
+        try {
+          itinerary = typeof (tour as any).itineraryDetailed === "string"
+            ? JSON.parse((tour as any).itineraryDetailed)
+            : (tour as any).itineraryDetailed || [];
+        } catch {
+          itinerary = [];
+        }
+        if (!Array.isArray(itinerary) || itinerary.length === 0) {
+          return { staticMapUrl: null, stops: [], directionsUrl: null };
+        }
+
+        // Build geocode queries — itinerary titles are like "慕尼黑Munich－258km－聖加侖St.Gallen"
+        // Strategy: split on multi-city separators, take first chunk, extract trailing English
+        // (bilingual format: "ChineseEnglish" with no space — English is more reliable for geocoding)
+        const country = (tour as any).destinationCountry || "";
+
+        const _extractFirstPlace = (raw: string): string => {
+          if (!raw) return "";
+          // 1. Strip "Day N:" / "第 N 日：" prefixes
+          let s = String(raw)
+            .replace(/^(day\s*\d+\s*[:\-]?\s*|第\s*\d+\s*日\s*[:\-]?\s*)/i, "")
+            .replace(/[（(].*?[）)]/g, "")  // strip parentheticals
+            .replace(/\+{2,}.*?\+{2,}/g, "") // strip "+++接駁..." asides
+            .trim();
+          if (!s) return "";
+
+          // 2. Split on multi-city separators (slash, comma, 、, en/em-dash, hyphen-with-spaces, "/")
+          // The "－" character is U+FF0D fullwidth hyphen — common in zh-tw itinerary text
+          const firstChunk = s.split(/[／/、,，–—－]| - | – /)[0].trim();
+
+          // 3. If chunk contains both Chinese and English (bilingual format), prefer English
+          // Pattern: "慕尼黑Munich" → extract "Munich"; "台北 Taipei" → extract "Taipei"
+          const englishMatch = firstChunk.match(/[A-Za-z][A-Za-z .'-]+(?:\s*[A-Za-z][A-Za-z .'-]+)*$/);
+          if (englishMatch && englishMatch[0].length >= 3) {
+            return englishMatch[0].trim();
+          }
+          return firstChunk;
+        };
+
+        const queries: { day: any; q: string }[] = itinerary.map((d: any) => {
+          // Prefer explicit location/city, then activities[0].location, then parsed title
+          const explicit = (d.location || d.city || "").trim();
+          const activityLoc = Array.isArray(d.activities) && d.activities[0]?.location
+            ? String(d.activities[0].location).trim() : "";
+          const fromTitle = _extractFirstPlace(d.title || "");
+          const cleaned = explicit || activityLoc || fromTitle;
+          if (!cleaned) return { day: d, q: "" };
+
+          // Translate country to English for Google's geocoder (which handles
+          // both, but English is more reliable). Reuse client locationMapping.
+          const _countryEn: Record<string, string> = {
+            "瑞士": "Switzerland", "德國": "Germany", "奧地利": "Austria",
+            "法國": "France", "義大利": "Italy", "英國": "United Kingdom",
+            "西班牙": "Spain", "葡萄牙": "Portugal", "荷蘭": "Netherlands",
+            "比利時": "Belgium", "希臘": "Greece", "捷克": "Czech Republic",
+            "美國": "USA", "加拿大": "Canada", "墨西哥": "Mexico",
+            "日本": "Japan", "韓國": "South Korea", "中國": "China",
+            "泰國": "Thailand", "越南": "Vietnam", "新加坡": "Singapore",
+            "馬來西亞": "Malaysia", "印尼": "Indonesia", "菲律賓": "Philippines",
+            "澳洲": "Australia", "紐西蘭": "New Zealand", "土耳其": "Turkey",
+            "波蘭": "Poland", "蒙古": "Mongolia", "俄羅斯": "Russia",
+          };
+          const countryEn = _countryEn[country] || country;
+          // Only append country if cleaned is purely Chinese (no English) — for
+          // English-name queries, Google can geocode cities directly.
+          const hasEnglish = /[A-Za-z]{2,}/.test(cleaned);
+          const q = countryEn && !cleaned.includes(countryEn) && !hasEnglish
+            ? `${cleaned}, ${countryEn}`
+            : cleaned;
+          return { day: d, q };
+        });
+
+        // Geocode each unique query (server-side, with simple in-process cache)
+        const _cache = (globalThis as any).__packgoGeocodeCache ||
+          ((globalThis as any).__packgoGeocodeCache = new Map<string, { lat: number; lng: number } | null>());
+
+        const { makeRequest } = await import("./_core/map");
+
+        const stops: Array<{ day: number; name: string; lat: number; lng: number }> = [];
+        for (let i = 0; i < queries.length; i++) {
+          const { day, q } = queries[i];
+          if (!q) continue;
+          let coord: { lat: number; lng: number } | null = _cache.get(q) ?? null;
+          if (coord === null && !_cache.has(q)) {
+            try {
+              const resp = await makeRequest<any>("/maps/api/geocode/json", { address: q });
+              if (resp?.status && resp.status !== "OK" && resp.status !== "ZERO_RESULTS") {
+                console.warn(`[getRouteMap] geocode "${q}" returned status=${resp.status}: ${resp.error_message || ""}`);
+              }
+              const loc = resp?.results?.[0]?.geometry?.location;
+              if (loc?.lat && loc?.lng) {
+                coord = { lat: loc.lat, lng: loc.lng };
+              }
+            } catch (err) {
+              console.warn(`[getRouteMap] geocode failed for "${q}":`, (err as Error).message);
+            }
+            _cache.set(q, coord);
+          }
+          if (coord) {
+            stops.push({
+              day: i + 1,
+              name: (day.title || day.location || day.city || q).replace(/^(day\s*\d+\s*[:\-]?\s*|第\s*\d+\s*日\s*[:\-]?\s*)/i, ""),
+              lat: coord.lat,
+              lng: coord.lng,
+            });
+          }
+        }
+
+        // v78o: Country-level fallback when geocoding can't resolve specific cities.
+        // Uses Static Maps (different API surface than Geocoding) — works as long
+        // as Static Maps is enabled even if Geocoding isn't.
+        if (stops.length === 0) {
+          const countryEnFallback: Record<string, string> = {
+            "瑞士": "Switzerland", "德國": "Germany", "奧地利": "Austria",
+            "法國": "France", "義大利": "Italy", "英國": "United Kingdom",
+            "美國": "USA", "日本": "Japan", "韓國": "South Korea",
+            "馬來西亞": "Malaysia", "泰國": "Thailand", "新加坡": "Singapore",
+          };
+          const countryNameForMap = countryEnFallback[country] || country;
+          if (countryNameForMap) {
+            const apiKey = process.env.GOOGLE_API_KEY || "";
+            const params = new URLSearchParams();
+            params.set("size", "1200x520");
+            params.set("scale", "2");
+            params.set("maptype", "roadmap");
+            params.set("center", countryNameForMap);
+            params.set("zoom", "6");
+            params.set("key", apiKey);
+            const fallbackUrl = `https://maps.googleapis.com/maps/api/staticmap?${params.toString()}`;
+            const directionsFallback = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(countryNameForMap)}`;
+            return {
+              staticMapUrl: fallbackUrl,
+              stops: [],
+              directionsUrl: directionsFallback,
+              fallbackMode: "country" as const,
+            };
+          }
+          return { staticMapUrl: null, stops: [], directionsUrl: null };
+        }
+
+        // Build Google Static Maps URL — numbered labels (max 26 supported via A-Z)
+        // Use color "blue" + label number for each stop, plus a path connecting them
+        const apiKey = process.env.GOOGLE_API_KEY || "";
+        const baseUrl = "https://maps.googleapis.com/maps/api/staticmap";
+        const params = new URLSearchParams();
+        params.set("size", "1200x520");
+        params.set("scale", "2"); // retina
+        params.set("maptype", "roadmap");
+        // Markers: one parameter per stop with auto-numbered label
+        // Note: Static Maps labels only support A-Z so we use a series of markers
+        stops.slice(0, 26).forEach((s, i) => {
+          const label = String.fromCharCode(65 + i); // A, B, C, ...
+          params.append("markers", `color:0x0d9488|label:${label}|${s.lat},${s.lng}`);
+        });
+        // Path polyline (semi-transparent teal)
+        if (stops.length >= 2) {
+          const path = stops.map((s) => `${s.lat},${s.lng}`).join("|");
+          params.append("path", `color:0x0d9488aa|weight:3|${path}`);
+        }
+        params.set("key", apiKey);
+        const staticMapUrl = `${baseUrl}?${params.toString()}`;
+
+        // Build "Open in Google Maps" multi-stop URL
+        const directionsUrl =
+          stops.length >= 2
+            ? `https://www.google.com/maps/dir/?api=1&origin=${stops[0].lat},${stops[0].lng}&destination=${stops[stops.length - 1].lat},${stops[stops.length - 1].lng}` +
+              (stops.length > 2
+                ? `&waypoints=${stops.slice(1, -1).map((s) => `${s.lat},${s.lng}`).join("|")}`
+                : "")
+            : `https://www.google.com/maps/search/?api=1&query=${stops[0].lat},${stops[0].lng}`;
+
+        return { staticMapUrl, stops, directionsUrl };
+      }),
+
     // Get distinct departure cities from active tours (for search autocomplete)
     getDepartureCities: publicProcedure.query(async () => {
       return await db.getDepartureCities();
@@ -602,64 +819,75 @@ export const appRouter = router({
           startDate: z.date().optional(),
           endDate: z.date().optional(),
           maxParticipants: z.number().optional(),
-          highlights: z.string().optional(),
-          includes: z.string().optional(),
-          excludes: z.string().optional(),
-          // New fields for enhanced tour data
-          productCode: z.string().optional(),
-          promotionText: z.string().optional(),
-          tags: z.string().optional(),
-          departureCountry: z.string().optional(),
-          departureCity: z.string().optional(),
-          departureAirportCode: z.string().optional(),
-          departureAirportName: z.string().optional(),
-          destinationRegion: z.string().optional(),
-          destinationAirportCode: z.string().optional(),
-          destinationAirportName: z.string().optional(),
-          destinationDescription: z.string().optional(),
-          nights: z.number().optional(),
-          priceUnit: z.string().optional(),
-          availableSeats: z.number().optional(),
-          outboundAirline: z.string().optional(),
-          outboundFlightNo: z.string().optional(),
-          outboundDepartureTime: z.string().optional(),
-          outboundArrivalTime: z.string().optional(),
-          outboundFlightDuration: z.string().optional(),
-          inboundAirline: z.string().optional(),
-          inboundFlightNo: z.string().optional(),
-          inboundDepartureTime: z.string().optional(),
-          inboundArrivalTime: z.string().optional(),
-          inboundFlightDuration: z.string().optional(),
-          hotelName: z.string().optional(),
-          hotelGrade: z.string().optional(),
-          hotelNights: z.number().optional(),
-          hotelLocation: z.string().optional(),
-          hotelDescription: z.string().optional(),
-          hotelFacilities: z.string().optional(),
-          hotelRoomType: z.string().optional(),
-          hotelRoomSize: z.string().optional(),
-          hotelCheckIn: z.string().optional(),
-          hotelCheckOut: z.string().optional(),
-          hotelSpecialOffers: z.string().optional(),
-          hotelImages: z.string().optional(),
-          hotelWebsite: z.string().optional(),
-          attractions: z.string().optional(),
-          dailyItinerary: z.string().optional(),
-          optionalTours: z.string().optional(),
-          specialReminders: z.string().optional(),
-          notes: z.string().optional(),
-          safetyGuidelines: z.string().optional(),
-          flightRules: z.string().optional(),
-          galleryImages: z.string().optional(),
-          sourceUrl: z.string().url().optional(),
-          isAutoGenerated: z.number().optional(),
-          airline: z.string().optional(),
+          // v71: all bounded; long JSON blobs at 50KB, descriptions 5KB, single-line 255
+          highlights: longStr.optional(),
+          includes: longStr.optional(),
+          excludes: longStr.optional(),
+          productCode: shortStr.optional(),
+          promotionText: shortStr.optional(),
+          tags: longStr.optional(),
+          departureCountry: shortStr.optional(),
+          departureCity: shortStr.optional(),
+          departureAirportCode: shortStr.optional(),
+          departureAirportName: shortStr.optional(),
+          destinationRegion: shortStr.optional(),
+          destinationAirportCode: shortStr.optional(),
+          destinationAirportName: shortStr.optional(),
+          destinationDescription: mediumStr.optional(),
+          nights: z.number().int().min(0).max(365).optional(),
+          priceUnit: shortStr.optional(),
+          availableSeats: z.number().int().min(0).max(10_000).optional(),
+          outboundAirline: shortStr.optional(),
+          outboundFlightNo: shortStr.optional(),
+          outboundDepartureTime: shortStr.optional(),
+          outboundArrivalTime: shortStr.optional(),
+          outboundFlightDuration: shortStr.optional(),
+          inboundAirline: shortStr.optional(),
+          inboundFlightNo: shortStr.optional(),
+          inboundDepartureTime: shortStr.optional(),
+          inboundArrivalTime: shortStr.optional(),
+          inboundFlightDuration: shortStr.optional(),
+          hotelName: shortStr.optional(),
+          hotelGrade: shortStr.optional(),
+          hotelNights: z.number().int().min(0).max(365).optional(),
+          hotelLocation: shortStr.optional(),
+          hotelDescription: mediumStr.optional(),
+          hotelFacilities: longStr.optional(),
+          hotelRoomType: shortStr.optional(),
+          hotelRoomSize: shortStr.optional(),
+          hotelCheckIn: shortStr.optional(),
+          hotelCheckOut: shortStr.optional(),
+          hotelSpecialOffers: longStr.optional(),
+          hotelImages: longStr.optional(),
+          hotelWebsite: shortStr.optional(),
+          attractions: longStr.optional(),
+          dailyItinerary: longStr.optional(),
+          optionalTours: longStr.optional(),
+          specialReminders: mediumStr.optional(),
+          notes: mediumStr.optional(),
+          safetyGuidelines: mediumStr.optional(),
+          flightRules: mediumStr.optional(),
+          galleryImages: longStr.optional(),
+          sourceUrl: z.string().url().max(2048).optional(),
+          isAutoGenerated: z.number().int().min(0).max(1).optional(),
+          airline: shortStr.optional(),
         })
       )
       .mutation(async ({ ctx, input }) => {
         const tour = await db.createTour({
           ...input,
           createdBy: ctx.user.id,
+        });
+
+        // v74: audit log coverage gap from live attack test — tour.create was
+        // not being logged. Now every admin tour creation produces a row.
+        const { audit } = await import("./_core/auditLog");
+        audit({
+          ctx,
+          action: "tour.create",
+          targetType: "tour",
+          targetId: tour.id,
+          changes: { title: tour.title, price: input.price, duration: input.duration, sourceUrl: input.sourceUrl || null },
         });
 
         // BUG-006: Queue translation job (reliable retry vs fire-and-forget)
@@ -673,60 +901,53 @@ export const appRouter = router({
     update: adminProcedure
       .input(
         z.object({
-          id: z.number(),
-          // Basic Information
-          title: z.string().min(1).optional(),
-          destination: z.string().min(1).optional(),
-          description: z.string().min(1).optional(),
-          duration: z.number().min(1).optional(),
-          price: z.number().min(0).optional(),
+          id: z.number().int().positive().max(2_147_483_647),
+          // v71: bounded sizes — see constants at top of file.
+          title: shortStr.min(1).optional(),
+          destination: shortStr.min(1).optional(),
+          description: longStr.min(1).optional(),
+          duration: z.number().int().min(1).max(365).optional(),
+          price: z.number().min(0).max(100_000_000).optional(),
           priceCurrency: z.enum(["TWD", "USD"]).optional(),
-          
-          // Images
-          imageUrl: z.string().optional(),
-          heroImage: z.string().optional(),
-          heroSubtitle: z.string().optional(),
-          
-          // Location
-          destinationCountry: z.string().optional(),
-          destinationCity: z.string().optional(),
-          
-          // Category & Status
+          imageUrl: z.string().max(2048).optional(),
+          heroImage: z.string().max(2048).optional(),
+          heroSubtitle: mediumStr.optional(),
+          destinationCountry: shortStr.optional(),
+          destinationCity: shortStr.optional(),
           category: z.enum(["group", "custom", "package", "cruise", "theme"]).optional(),
           status: z.enum(["active", "inactive", "soldout"]).optional(),
-          featured: z.number().min(0).max(1).optional(),
-          
-          // Dates
+          featured: z.number().int().min(0).max(1).optional(),
           startDate: z.date().optional(),
           endDate: z.date().optional(),
-          
-          // Capacity
-          maxParticipants: z.number().optional(),
-          currentParticipants: z.number().optional(),
-          
-          // Extra fields
-          productCode: z.string().optional(),
-          promotionText: z.string().optional(),
-          departureCity: z.string().optional(),
-          departureAirportName: z.string().optional(),
-          notes: z.string().nullable().optional(),
-          sourceUrl: z.string().optional(),
-          // Content (JSON strings)
-          highlights: z.string().nullable().optional(),
-          includes: z.string().nullable().optional(),
-          excludes: z.string().nullable().optional(),
-          keyFeatures: z.string().nullable().optional(),
-          attractions: z.string().nullable().optional(),
-          hotels: z.string().nullable().optional(),
-          meals: z.string().nullable().optional(),
-          flights: z.string().nullable().optional(),
-          itineraryDetailed: z.string().nullable().optional(),
-          costExplanation: z.string().nullable().optional(),
-          noticeDetailed: z.string().nullable().optional(),
-          poeticContent: z.string().nullable().optional(),
-          poeticTitle: z.string().nullable().optional(),
-          colorTheme: z.string().nullable().optional(),
-          galleryImages: z.string().nullable().optional(),
+          maxParticipants: z.number().int().min(0).max(10_000).optional(),
+          currentParticipants: z.number().int().min(0).max(10_000).optional(),
+          productCode: shortStr.optional(),
+          promotionText: shortStr.optional(),
+          departureCity: shortStr.optional(),
+          departureAirportName: shortStr.optional(),
+          notes: mediumStr.nullable().optional(),
+          sourceUrl: z.string().max(2048).optional(),
+          // Content JSON blobs — bigger cap because some tours legitimately have long itineraries
+          highlights: longStr.nullable().optional(),
+          includes: longStr.nullable().optional(),
+          excludes: longStr.nullable().optional(),
+          keyFeatures: longStr.nullable().optional(),
+          attractions: longStr.nullable().optional(),
+          hotels: longStr.nullable().optional(),
+          meals: longStr.nullable().optional(),
+          flights: longStr.nullable().optional(),
+          itineraryDetailed: longStr.nullable().optional(),
+          costExplanation: longStr.nullable().optional(),
+          noticeDetailed: longStr.nullable().optional(),
+          poeticContent: longStr.nullable().optional(),
+          poeticTitle: shortStr.nullable().optional(),
+          colorTheme: longStr.nullable().optional(),
+          galleryImages: longStr.nullable().optional(),
+          // v75: optional optimistic-lock token. Client passes the `updatedAt`
+          // from when it loaded the tour; if the tour was modified by another
+          // admin between then and now, the update is rejected with CONFLICT
+          // (CLIENT_CLOSED_REQUEST equivalent) so the UI can prompt re-load.
+          expectedUpdatedAt: z.string().datetime().optional(),
         })
       )
       .mutation(async ({ ctx, input }) => {
@@ -737,8 +958,35 @@ export const appRouter = router({
             message: "Only admins can update tours",
           });
         }
-        const { id, ...updates } = input;
-        const tour = await db.updateTour(id, updates);
+        const { id, expectedUpdatedAt, ...updates } = input;
+
+        // v74: snapshot the BEFORE row so audit log captures the diff
+        const before = await db.getTourById(id).catch(() => null);
+
+        let tour;
+        try {
+          tour = await db.updateTour(id, updates, expectedUpdatedAt);
+        } catch (e: any) {
+          if (e?.name === "TourUpdateConflictError") {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "另一位管理員已修改此行程，請重新載入後再儲存",
+            });
+          }
+          throw e;
+        }
+
+        // v74: audit log coverage. Only log fields that actually changed.
+        const { audit, diffFields } = await import("./_core/auditLog");
+        const diff = diffFields(before as any, updates as any);
+        audit({
+          ctx,
+          action: "tour.update",
+          targetType: "tour",
+          targetId: id,
+          changes: { fields: diff.fields, before: diff.before, after: diff.after },
+        });
+
         // BUG-006: Queue translation job (reliable retry vs fire-and-forget)
         import("./queue").then(({ addTourTranslationJob }) =>
           addTourTranslationJob({ tourId: id, targetLanguages: ['en'], sourceLanguage: 'zh-TW', userId: ctx.user.id })
@@ -769,19 +1017,33 @@ export const appRouter = router({
           ]),
         })
       )
-      .mutation(async ({ input }) => {
+      .mutation(async ({ ctx, input }) => {
         const { id, field, value } = input;
 
         // 欄位特定驗證（fieldValidators 模式）
+        // v75: extended to cover ENUM fields (status, featured, category) — prior
+        // patchField allowed setting status="foo", featured=99, category="banana"
+        // because the union validator only enforced (string|number|null), not the
+        // semantic per-field constraints. Now any inline-edit on an enum field
+        // is checked against its DB enum values.
+        const STATUS_VALUES = new Set(['active', 'inactive', 'soldout', 'draft', 'pending_review']);
+        const CATEGORY_VALUES = new Set(['group', 'custom', 'package', 'cruise', 'theme']);
+        const CONTROL_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
+
         const fieldValidators: Record<string, (v: any) => string | null> = {
-          price: (v) => typeof v === 'number' && v < 0 ? '價格不能為負數' : null,
+          price: (v) => typeof v === 'number' && (v < 0 || v > 100_000_000) ? '價格必須在 0–1 億之間' : null,
           discountPrice: (v) => typeof v === 'number' && v < 0 ? '折扣價不能為負數' : null,
           duration: (v) => typeof v === 'number' && (v < 1 || v > 365) ? '天數必須在 1-365 之間' : null,
+          maxParticipants: (v) => typeof v === 'number' && (v < 0 || v > 10_000) ? '人數必須在 0–10000 之間' : null,
           title: (v) => typeof v === 'string' && v.length > 200 ? '標題最多 200 字' : null,
           subtitle: (v) => typeof v === 'string' && v.length > 500 ? '副標題最多 500 字' : null,
           heroSubtitle: (v) => typeof v === 'string' && v.length > 500 ? '副標題最多 500 字' : null,
           imageUrl: (v) => typeof v === 'string' && v.length > 0 && !v.startsWith('http') && !v.startsWith('/') ? '圖片 URL 格式不正確' : null,
           heroImage: (v) => typeof v === 'string' && v.length > 0 && !v.startsWith('http') && !v.startsWith('/') ? '圖片 URL 格式不正確' : null,
+          // v75: enum validations
+          status: (v) => typeof v === 'string' && !STATUS_VALUES.has(v) ? `status 必須是: ${Array.from(STATUS_VALUES).join(', ')}` : null,
+          featured: (v) => typeof v === 'number' && v !== 0 && v !== 1 ? 'featured 必須是 0 或 1' : null,
+          category: (v) => typeof v === 'string' && !CATEGORY_VALUES.has(v) ? `category 必須是: ${Array.from(CATEGORY_VALUES).join(', ')}` : null,
         };
         const validator = fieldValidators[field];
         if (validator) {
@@ -790,11 +1052,36 @@ export const appRouter = router({
             throw new TRPCError({ code: 'BAD_REQUEST', message: error });
           }
         }
+        // v75: also reject control chars on any string field — same defense as
+        // the global shortStr/mediumStr/longStr helpers, but patchField uses a
+        // single union validator so we re-enforce here.
+        if (typeof value === 'string' && CONTROL_CHARS.test(value)) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: '禁止控制字元' });
+        }
         
         // field is already validated by z.enum whitelist above
         const updates: Record<string, any> = { [field]: value };
+
+        // v73: snapshot the previous value so audit log captures the change
+        const beforeRow = await db.getTourById(id).catch(() => null);
+        const previousValue = (beforeRow as any)?.[field];
+
         const tour = await db.updateTour(id, updates);
-        
+
+        // v73: log the inline-edit mutation
+        const { audit } = await import("./_core/auditLog");
+        audit({
+          ctx,
+          action: "tour.updateField",
+          targetType: "tour",
+          targetId: id,
+          changes: {
+            field,
+            before: previousValue !== undefined ? previousValue : null,
+            after: value,
+          },
+        });
+
         // 非同步觸發翻譯（只有內容欄位變更時才重新翻譯）
         const contentFields = [
           'title', 'description', 'heroSubtitle', 'keyFeatures',
@@ -816,7 +1103,7 @@ export const appRouter = router({
 
     // Delete tour (admin only)
     delete: adminProcedure
-      .input(z.object({ id: z.number() }))
+      .input(z.object({ id: z.number().int().positive().max(2_147_483_647) }))
       .mutation(async ({ ctx, input }) => {
         // Check if user is admin
         if (ctx.user.role !== "admin") {
@@ -826,16 +1113,41 @@ export const appRouter = router({
           });
         }
 
+        // v73: snapshot the tour BEFORE delete so the audit log records what
+        // was destroyed (title, price, etc.) — useful for "I deleted the wrong
+        // one" recovery.
+        let beforeSnapshot: any = null;
+        try {
+          beforeSnapshot = await db.getTourById(input.id);
+        } catch { /* if read fails, we still proceed with delete */ }
+
         await db.deleteTour(input.id);
+
+        const { audit } = await import("./_core/auditLog");
+        audit({
+          ctx,
+          action: "tour.delete",
+          targetType: "tour",
+          targetId: input.id,
+          changes: { before: beforeSnapshot ? { id: beforeSnapshot.id, title: beforeSnapshot.title, price: beforeSnapshot.price, status: beforeSnapshot.status } : null },
+        });
 
         return { success: true };
       }),
 
     // Batch delete tours (admin only)
     batchDelete: adminProcedure
-      .input(z.object({ ids: z.array(z.number()) }))
-      .mutation(async ({ input }) => {
+      .input(z.object({ ids: z.array(z.number().int().positive()).max(500) }))
+      .mutation(async ({ ctx, input }) => {
         await db.batchDeleteTours(input.ids);
+        const { audit } = await import("./_core/auditLog");
+        audit({
+          ctx,
+          action: "tour.batchDelete",
+          targetType: "tour",
+          targetId: `batch[${input.ids.length}]`,
+          changes: { ids: input.ids },
+        });
         return { success: true };
       }),
 
@@ -1076,8 +1388,8 @@ export const appRouter = router({
 
     // Toggle tour status (admin only)
     toggleStatus: adminProcedure
-      .input(z.object({ id: z.number() }))
-      .mutation(async ({ input }) => {
+      .input(z.object({ id: z.number().int().positive().max(2_147_483_647) }))
+      .mutation(async ({ ctx, input }) => {
 
         // Get current tour
         const tour = await db.getTourById(input.id);
@@ -1094,6 +1406,16 @@ export const appRouter = router({
         // Update tour status
         await db.updateTour(input.id, { status: newStatus });
 
+        // v75: audit (publish/unpublish is high-impact — affects public site)
+        const { audit } = await import("./_core/auditLog");
+        audit({
+          ctx,
+          action: "tour.toggleStatus",
+          targetType: "tour",
+          targetId: input.id,
+          changes: { before: tour.status, after: newStatus },
+        });
+
         return {
           success: true,
           newStatus,
@@ -1103,8 +1425,8 @@ export const appRouter = router({
 
     // Toggle featured status (admin only)
     toggleFeatured: adminProcedure
-      .input(z.object({ id: z.number() }))
-      .mutation(async ({ input }) => {
+      .input(z.object({ id: z.number().int().positive().max(2_147_483_647) }))
+      .mutation(async ({ ctx, input }) => {
         const tour = await db.getTourById(input.id);
         if (!tour) {
           throw new TRPCError({
@@ -1115,6 +1437,16 @@ export const appRouter = router({
 
         const newFeatured = tour.featured === 1 ? 0 : 1;
         await db.updateTour(input.id, { featured: newFeatured });
+
+        // v75: audit
+        const { audit } = await import("./_core/auditLog");
+        audit({
+          ctx,
+          action: "tour.toggleFeatured",
+          targetType: "tour",
+          targetId: input.id,
+          changes: { before: tour.featured, after: newFeatured },
+        });
 
         return {
           success: true,
@@ -1132,17 +1464,33 @@ export const appRouter = router({
 
     // Approve a tour (set status to active) (admin only)
     approveTour: adminProcedure
-      .input(z.object({ id: z.number() }))
-      .mutation(async ({ input }) => {
+      .input(z.object({ id: z.number().int().positive().max(2_147_483_647) }))
+      .mutation(async ({ ctx, input }) => {
         const tour = await db.approveTour(input.id);
+        const { audit } = await import("./_core/auditLog");
+        audit({
+          ctx,
+          action: "tour.approve",
+          targetType: "tour",
+          targetId: input.id,
+          changes: { newStatus: "active" },
+        });
         return { success: true, tour, message: '行程已審核通過並上架' };
       }),
 
     // Reject a tour (set status to inactive) (admin only)
     rejectTour: adminProcedure
-      .input(z.object({ id: z.number() }))
-      .mutation(async ({ input }) => {
+      .input(z.object({ id: z.number().int().positive().max(2_147_483_647) }))
+      .mutation(async ({ ctx, input }) => {
         const tour = await db.rejectTour(input.id);
+        const { audit } = await import("./_core/auditLog");
+        audit({
+          ctx,
+          action: "tour.reject",
+          targetType: "tour",
+          targetId: input.id,
+          changes: { newStatus: "inactive" },
+        });
         return { success: true, tour, message: '行程已拒絕並下架' };
       }),
 
@@ -1635,13 +1983,16 @@ export const appRouter = router({
                 const statusMap: Record<string, 'open' | 'full' | 'cancelled' | 'confirmed'> = {
                   '報名': 'open', '客滿': 'full', '取消': 'cancelled', '確定': 'confirmed',
                 };
+                // NOTE: LionTravel's public API returns AvailableVacancy as a
+                // placeholder (= TotalVacnacy - 1 uniformly across all dates), not
+                // real bookings. Imported tours have 0 actual bookings on our side.
                 await db.createDeparture({
                   tourId: tour.id,
                   departureDate,
                   returnDate,
                   adultPrice: Math.round(dep.price),
                   totalSlots: dep.totalSeats || 20,
-                  bookedSlots: Math.max(0, (dep.totalSeats || 20) - (dep.availableSeats || 0)),
+                  bookedSlots: 0,
                   status: statusMap[dep.status] || 'open',
                   currency: dep.currencyCode || 'TWD',
                   notes: `lionGroupId: ${dep.groupId}`,
@@ -1666,21 +2017,48 @@ export const appRouter = router({
   // Booking management router
   bookings: router({
     // Create new booking
+    // v74 SECURITY OVERHAUL: this mutation handles real customer money flow.
+    // Audit found 4 money-critical bugs that this rewrite fixes:
+    //   1. PRICE BYPASS — server was using `tour.price × participants` ignoring
+    //      departure-specific pricing (child / infant / single-supplement).
+    //      Customers could be over- or undercharged. Now: server fetches the
+    //      departure row and recomputes total from per-passenger prices.
+    //   2. OVERBOOKING — `bookedSlots` was never incremented; concurrent
+    //      bookings on a 1-slot departure both succeeded. Now: atomic
+    //      check-and-increment via a guarded UPDATE returning rowcount.
+    //   3. ORPHAN BOOKING — `departureId` was optional, defaulting to 0 (no
+    //      such row). Now: required + verified to belong to the tour.
+    //   4. PAST DATES — booking departures in the past was allowed. Now:
+    //      reject if departureDate < now.
+    // Also v74: contactEmail defaults to the authenticated user's email
+    // unless explicitly set; prevents using booking flow as a spam vector
+    // toward third parties.
     create: protectedProcedure
       .input(
         z.object({
-          tourId: z.number(),
-          participants: z.number().min(1),
-          contactName: z.string().min(1),
-          contactEmail: z.string().email(),
-          contactPhone: z.string().min(1),
-          specialRequests: z.string().optional(),
-          departureId: z.number().optional(),
-          departureDate: z.string().optional(),
-          returnDate: z.string().optional(),
+          tourId: z.number().int().positive().max(2_147_483_647),
+          // departureId is now REQUIRED — orphan bookings without a departure
+          // are unbookable in practice (customer doesn't know which date) and
+          // create accounting/ops problems.
+          departureId: z.number().int().positive().max(2_147_483_647),
+          numberOfAdults: z.number().int().min(0).max(100).default(0),
+          numberOfChildrenWithBed: z.number().int().min(0).max(100).default(0),
+          numberOfChildrenNoBed: z.number().int().min(0).max(100).default(0),
+          numberOfInfants: z.number().int().min(0).max(100).default(0),
+          numberOfSingleRooms: z.number().int().min(0).max(100).default(0),
+          // Legacy: total participants count (for backwards compat with old client)
+          participants: z.number().int().min(0).max(500).optional(),
+          contactName: shortStr.min(1),
+          contactEmail: z.string().email().max(320).optional(), // optional: defaults to ctx.user.email
+          contactPhone: shortStr.min(1),
+          specialRequests: mediumStr.optional(),
+          // v78x: Customer's current UI language — drives email language preference
+          language: z.enum(["zh-TW", "en"]).optional(),
         })
       )
       .mutation(async ({ ctx, input }) => {
+        const { audit } = await import("./_core/auditLog");
+
         // Rate limiting: 10 bookings per hour per user
         const bookingRateLimit = await checkBookingCreateRateLimit(ctx.user.id);
         if (!bookingRateLimit.allowed) {
@@ -1690,54 +2068,174 @@ export const appRouter = router({
           });
         }
 
-        // Get tour details
+        // ── Validate tour ────────────────────────────────────────────
         const tour = await db.getTourById(input.tourId);
         if (!tour) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Tour not found" });
+        }
+
+        // ── Validate departure ───────────────────────────────────────
+        const departure = await db.getDepartureById(input.departureId);
+        if (!departure) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Departure not found" });
+        }
+        if (departure.tourId !== input.tourId) {
           throw new TRPCError({
-            code: "NOT_FOUND",
-            message: "Tour not found",
+            code: "BAD_REQUEST",
+            message: "Departure does not belong to this tour",
+          });
+        }
+        // Reject past dates
+        const departureTime = new Date(departure.departureDate).getTime();
+        if (departureTime < Date.now()) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "出發日期已過，無法預訂此團",
+          });
+        }
+        // Reject already-cancelled or full departures
+        if (departure.status === "cancelled") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "此出發日期已取消" });
+        }
+
+        // ── Compute total participants ───────────────────────────────
+        // Legacy clients send `participants`; new clients send the breakdown.
+        // If only `participants` is provided, treat them all as adults.
+        const adults = input.numberOfAdults || input.participants || 0;
+        const childWithBed = input.numberOfChildrenWithBed || 0;
+        const childNoBed = input.numberOfChildrenNoBed || 0;
+        const infants = input.numberOfInfants || 0;
+        const singleRooms = input.numberOfSingleRooms || 0;
+        const totalSeatsRequested = adults + childWithBed + childNoBed; // infants don't take seats
+        if (totalSeatsRequested < 1) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "至少需 1 位旅客" });
+        }
+
+        // ── Atomic slot check + increment ────────────────────────────
+        // This MUST be atomic to prevent overbooking: a guarded UPDATE that
+        // increments only when there's enough capacity, returning affectedRows=0
+        // when full. Two concurrent bookings on the last seat → exactly one wins.
+        const slotResult = await db.tryReserveDepartureSlots(
+          input.departureId,
+          totalSeatsRequested
+        );
+        if (!slotResult.reserved) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: `此出發日僅剩 ${slotResult.available} 位，無法預訂 ${totalSeatsRequested} 位`,
           });
         }
 
-        // Calculate total amount
-        const totalAmount = tour.price * input.participants;
+        // ── Server-side price computation ────────────────────────────
+        // Use departure-specific prices, NOT the tour's headline price. This
+        // is the canonical source of truth — client-supplied prices are ignored.
+        const adultPrice = departure.adultPrice;
+        const childWithBedPrice = departure.childPriceWithBed ?? adultPrice;
+        const childNoBedPrice = departure.childPriceNoBed ?? Math.floor(adultPrice * 0.7);
+        const infantPrice = departure.infantPrice ?? 0;
+        const singleSupplement = departure.singleRoomSupplement ?? 0;
 
-        // Create booking
-        const booking = await db.createBooking({
-          tourId: input.tourId,
-          departureId: input.departureId ?? 0,
-          userId: ctx.user.id,
-          customerName: input.contactName,
-          customerEmail: input.contactEmail,
-          customerPhone: input.contactPhone,
-          numberOfAdults: input.participants,
-          numberOfChildrenWithBed: 0,
-          numberOfChildrenNoBed: 0,
-          numberOfInfants: 0,
-          numberOfSingleRooms: 0,
-          totalPrice: totalAmount,
-          depositAmount: Math.floor(totalAmount * 0.2), // 20% deposit
-          remainingAmount: Math.floor(totalAmount * 0.8),
-          message: input.specialRequests,
-          bookingStatus: "pending",
+        const totalPrice =
+          adults * adultPrice +
+          childWithBed * childWithBedPrice +
+          childNoBed * childNoBedPrice +
+          infants * infantPrice +
+          singleRooms * singleSupplement;
+
+        if (totalPrice <= 0) {
+          // Capacity already incremented — release before throwing
+          await db.releaseDepartureSlots(input.departureId, totalSeatsRequested).catch(() => {});
+          throw new TRPCError({ code: "BAD_REQUEST", message: "計算金額異常" });
+        }
+
+        // v74: default contactEmail to authenticated user's email so the
+        // booking flow can't be used to send DKIM-aligned confirmation mail
+        // to arbitrary third parties.
+        const contactEmail = input.contactEmail || ctx.user.email;
+
+        let booking;
+        try {
+          booking = await db.createBooking({
+            tourId: input.tourId,
+            departureId: input.departureId,
+            userId: ctx.user.id,
+            customerName: input.contactName,
+            customerEmail: contactEmail,
+            customerPhone: input.contactPhone,
+            numberOfAdults: adults,
+            numberOfChildrenWithBed: childWithBed,
+            numberOfChildrenNoBed: childNoBed,
+            numberOfInfants: infants,
+            numberOfSingleRooms: singleRooms,
+            totalPrice,
+            depositAmount: Math.floor(totalPrice * 0.2),
+            remainingAmount: totalPrice - Math.floor(totalPrice * 0.2),
+            message: input.specialRequests,
+            bookingStatus: "pending",
+            // v78y: stick the customer's language to the booking row so all
+            // downstream emails (payment / reminders) speak it.
+            customerLanguage: input.language || "zh-TW",
+          } as any);
+        } catch (err) {
+          // If booking row insert fails, release the slots we reserved
+          await db.releaseDepartureSlots(input.departureId, totalSeatsRequested).catch(() => {});
+          throw err;
+        }
+
+        // Audit (fire-and-forget)
+        audit({
+          ctx,
+          action: "booking.create",
+          targetType: "booking",
+          targetId: booking.id,
+          changes: {
+            tourId: input.tourId,
+            departureId: input.departureId,
+            seats: totalSeatsRequested,
+            totalPrice,
+          },
         });
 
-        // Send confirmation email
-        await sendBookingConfirmationEmail({
-          to: input.contactEmail,
+        // Email confirmation. Failure must not break the booking — log loudly
+        // so ops can manually re-send if SMTP is broken.
+        const departureDateStr = new Date(departure.departureDate).toISOString().split("T")[0];
+        const returnDateStr = departure.returnDate
+          ? new Date(departure.returnDate).toISOString().split("T")[0]
+          : "";
+        sendBookingConfirmationEmail({
+          to: contactEmail,
           customerName: input.contactName,
-          customerEmail: input.contactEmail,
+          customerEmail: contactEmail,
           bookingId: booking.id,
           tourTitle: tour.title,
-          departureDate: input.departureDate ?? "TBD",
-          returnDate: input.returnDate ?? "TBD",
-          numberOfAdults: input.participants,
-          numberOfChildren: 0,
-          numberOfInfants: 0,
-          totalPrice: totalAmount,
-          depositAmount: Math.floor(totalAmount * 0.2),
-          remainingAmount: Math.floor(totalAmount * 0.8),
-        });
+          departureDate: departureDateStr,
+          returnDate: returnDateStr,
+          numberOfAdults: adults,
+          numberOfChildren: childWithBed + childNoBed,
+          numberOfInfants: infants,
+          totalPrice,
+          depositAmount: Math.floor(totalPrice * 0.2),
+          remainingAmount: totalPrice - Math.floor(totalPrice * 0.2),
+          language: input.language, // v78x: customer's preferred email language
+        }).catch((emailErr) =>
+          console.error(
+            `[bookings.create] Email send failed for booking ${booking.id}:`,
+            emailErr?.message
+          )
+        );
+
+        // v78n Sprint 6A: schedule 30-min abandonment recovery email
+        try {
+          const { scheduleAbandonmentRecovery } = await import(
+            "./queues/abandonmentRecoveryQueue"
+          );
+          await scheduleAbandonmentRecovery(booking.id);
+        } catch (err) {
+          console.warn(
+            "[bookings.create] Failed to schedule abandonment recovery:",
+            (err as Error).message
+          );
+        }
 
         return booking;
       }),
@@ -1747,10 +2245,129 @@ export const appRouter = router({
       return await db.getUserBookings(ctx.user.id);
     }),
 
-    // Get single booking
-    getById: protectedProcedure
-      .input(z.object({ id: z.number() }))
+    // v77: Get all passenger details for a booking (owner or admin only).
+    listParticipants: protectedProcedure
+      .input(z.object({ bookingId: z.number().int().positive().max(2_147_483_647) }))
       .query(async ({ ctx, input }) => {
+        const booking = await db.getBookingById(input.bookingId);
+        if (!booking) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Booking not found" });
+        }
+        if (booking.userId !== ctx.user.id && ctx.user.role !== "admin") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Not authorised" });
+        }
+        return await db.getBookingParticipants(input.bookingId);
+      }),
+
+    // v77: Replace ALL passenger details for a booking. Customer fills the
+    // form post-booking (passport numbers, DOB, dietary needs, etc.) so ops
+    // can submit visa applications, assign hotel rooms, and order meals.
+    //
+    // Without this endpoint, schema-defined fields (passportNumber, etc.)
+    // were unreachable from the UI and ops staff had to chase customers via
+    // email — the #1 friction point identified in the member audit.
+    saveParticipants: protectedProcedure
+      .input(
+        z.object({
+          bookingId: z.number().int().positive().max(2_147_483_647),
+          participants: z.array(
+            z.object({
+              participantType: z.enum(["adult", "child", "infant"]),
+              firstName: shortStr.min(1),
+              lastName: shortStr.min(1),
+              gender: z.enum(["male", "female", "other"]).optional(),
+              dateOfBirth: z.string().date().optional(),       // YYYY-MM-DD
+              passportNumber: shortStr.optional(),
+              passportExpiry: z.string().date().optional(),    // YYYY-MM-DD
+              nationality: shortStr.optional(),
+              dietaryRequirements: mediumStr.optional(),
+              specialNeeds: mediumStr.optional(),
+            })
+          ).max(50), // soft cap — no booking has 50 travelers; protects against payload abuse
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const booking = await db.getBookingById(input.bookingId);
+        if (!booking) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Booking not found" });
+        }
+        if (booking.userId !== ctx.user.id && ctx.user.role !== "admin") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Not authorised" });
+        }
+
+        // Verify participant counts add up to the booking's seat counts.
+        const counts = { adult: 0, child: 0, infant: 0 };
+        for (const p of input.participants) counts[p.participantType]++;
+        const expectedAdults = booking.numberOfAdults || 0;
+        const expectedChildren =
+          (booking.numberOfChildrenWithBed || 0) + (booking.numberOfChildrenNoBed || 0);
+        const expectedInfants = booking.numberOfInfants || 0;
+
+        if (
+          counts.adult !== expectedAdults ||
+          counts.child !== expectedChildren ||
+          counts.infant !== expectedInfants
+        ) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `旅客人數不符：訂單為 ${expectedAdults} 大 / ${expectedChildren} 童 / ${expectedInfants} 嬰，您填了 ${counts.adult} 大 / ${counts.child} 童 / ${counts.infant} 嬰`,
+          });
+        }
+
+        // Convert date strings → Date objects for DB
+        const participantsWithDates = input.participants.map((p) => ({
+          ...p,
+          dateOfBirth: p.dateOfBirth ? new Date(p.dateOfBirth) : null,
+          passportExpiry: p.passportExpiry ? new Date(p.passportExpiry) : null,
+        }));
+
+        const saved = await db.replaceBookingParticipants(input.bookingId, participantsWithDates as any);
+
+        // Audit (admin actions on bookings) — only if admin not owner. Customer
+        // updates to their own booking aren't audit events.
+        if (ctx.user.role === "admin" && booking.userId !== ctx.user.id) {
+          const { audit } = await import("./_core/auditLog");
+          audit({
+            ctx,
+            action: "booking.saveParticipants",
+            targetType: "booking",
+            targetId: input.bookingId,
+            changes: { count: saved.length },
+          });
+        }
+
+        return saved;
+      }),
+
+    // Get single booking
+    // v72: bounded ID + per-user rate limit (60 reads / hour) so an attacker
+    // can't brute-force-enumerate booking IDs to map who-owns-what via timing
+    // differences between 404 (not exist) and 403 (exist but not yours).
+    getById: protectedProcedure
+      .input(z.object({ id: z.number().int().positive().max(2_147_483_647) }))
+      .query(async ({ ctx, input }) => {
+        // Rate-limit: 60 booking lookups per user per hour. Admins exempt
+        // (they need to view bookings during support).
+        if (ctx.user.role !== "admin") {
+          try {
+            const { redis } = await import("./redis");
+            const hour = new Date().toISOString().slice(0, 13); // YYYY-MM-DDTHH
+            const key = `ratelimit:bookings:getById:${ctx.user.id}:${hour}`;
+            const count = await redis.incr(key);
+            if (count === 1) await redis.expire(key, 3600);
+            if (count > 60) {
+              throw new TRPCError({
+                code: "TOO_MANY_REQUESTS",
+                message: "Too many booking lookups — please try again later.",
+              });
+            }
+          } catch (e) {
+            // If Redis is down, don't block legitimate users — just log
+            if ((e as TRPCError)?.code === "TOO_MANY_REQUESTS") throw e;
+            console.warn("[bookings.getById] rate-limit check failed:", (e as Error)?.message);
+          }
+        }
+
         const booking = await db.getBookingById(input.id);
         if (!booking) {
           throw new TRPCError({
@@ -1774,8 +2391,15 @@ export const appRouter = router({
     createCheckoutSession: protectedProcedure
       .input(
         z.object({
-          bookingId: z.number(),
+          bookingId: z.number().int().positive().max(2_147_483_647),
           paymentType: z.enum(["deposit", "remaining"]),
+          // v76: optional billing-address hints used to compute CA sales tax
+          // server-side. If omitted we fall back to the customer's profile or
+          // their previous booking; if still unknown we skip tax (non-CA).
+          billingState: shortStr.optional(),
+          billingCity: shortStr.optional(),
+          billingPostalCode: shortStr.optional(),
+          billingCountry: shortStr.optional(),
         })
       )
       .mutation(async ({ ctx, input }) => {
@@ -1829,33 +2453,80 @@ export const appRouter = router({
         const zeroDecimalCurrencies = ["bif", "clp", "gnf", "jpy", "kmf", "krw", "mga", "pyg", "rwf", "twd", "ugx", "vnd", "vuv", "xaf", "xof", "xpf"];
         const stripeAmount = zeroDecimalCurrencies.includes(currency) ? amount : Math.round(amount * 100);
 
-        const session = await stripe.checkout.sessions.create({
-          mode: "payment",
-          payment_method_types: ["card"],
-          line_items: [
-            {
-              price_data: {
-                currency,
-                unit_amount: stripeAmount,
-                product_data: {
-                  name: `${tourTitle} - ${description}`,
-                  description: `訂單編號 #${booking.id}，旅客：${booking.customerName}`,
-                },
-              },
-              quantity: 1,
-            },
-          ],
-          metadata: {
-            booking_id: String(booking.id),
-            payment_type: input.paymentType,
-            tour_id: String(booking.tourId),
-            user_id: String(ctx.user.id),
-          },
-          customer_email: booking.customerEmail,
-          success_url: `${baseUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}&booking_id=${booking.id}`,
-          cancel_url: `${baseUrl}/booking/${booking.id}?payment_cancelled=1`,
-          expires_at: Math.floor(Date.now() / 1000) + 60 * 60, // 60 minutes (extended for older clientele)
+        // v74: Stripe idempotency key. Prevents the double-charge race where a
+        // user opens the booking page in two browser tabs and clicks "Pay" in
+        // both simultaneously — without an idempotency key Stripe creates two
+        // distinct checkout sessions (different payment_intents), and the
+        // webhook idempotency guard (which dedupes by payment_intent) doesn't
+        // catch them. With this key, the second request returns the same
+        // session as the first within Stripe's 24-hour idempotency window.
+        const idempotencyKey = `co:${booking.id}:${input.paymentType}:${new Date().toISOString().slice(0, 10)}`;
+
+        // v76: California sales tax — compute server-side from billing-address
+        // hints, add as a separate Stripe line item so customer sees breakdown.
+        const { calculateSalesTax } = await import("./services/salesTaxService");
+        const taxResult = calculateSalesTax(amount, {
+          country: input.billingCountry || "US",
+          state: input.billingState || "",
+          city: input.billingCity || "",
+          postalCode: input.billingPostalCode || "",
         });
+        const taxStripeAmount =
+          taxResult.amount > 0
+            ? (zeroDecimalCurrencies.includes(currency)
+                ? Math.round(taxResult.amount)
+                : Math.round(taxResult.amount * 100))
+            : 0;
+
+        const lineItems: any[] = [
+          {
+            price_data: {
+              currency,
+              unit_amount: stripeAmount,
+              product_data: {
+                name: `${tourTitle} - ${description}`,
+                description: `訂單編號 #${booking.id}, ${booking.customerName}`,
+              },
+            },
+            quantity: 1,
+          },
+        ];
+        if (taxStripeAmount > 0) {
+          lineItems.push({
+            price_data: {
+              currency,
+              unit_amount: taxStripeAmount,
+              product_data: {
+                name: `Sales Tax (${(taxResult.rate * 100).toFixed(3)}%) — ${taxResult.jurisdiction}`,
+                description: `California sales tax on order #${booking.id}`,
+              },
+            },
+            quantity: 1,
+          });
+        }
+
+        const session = await stripe.checkout.sessions.create(
+          {
+            mode: "payment",
+            payment_method_types: ["card"],
+            line_items: lineItems,
+            metadata: {
+              booking_id: String(booking.id),
+              payment_type: input.paymentType,
+              tour_id: String(booking.tourId),
+              user_id: String(ctx.user.id),
+              // v76: tax info persisted to webhook metadata for accounting reconciliation
+              tax_rate: String(taxResult.rate),
+              tax_amount: String(taxResult.amount),
+              tax_jurisdiction: taxResult.jurisdiction,
+            },
+            customer_email: booking.customerEmail,
+            success_url: `${baseUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}&booking_id=${booking.id}`,
+            cancel_url: `${baseUrl}/booking/${booking.id}?payment_cancelled=1`,
+            expires_at: Math.floor(Date.now() / 1000) + 60 * 60, // 60 minutes (extended for older clientele)
+          },
+          { idempotencyKey }
+        );
 
         if (!session.url) {
           throw new TRPCError({
@@ -1873,8 +2544,10 @@ export const appRouter = router({
       }),
 
     // Cancel booking
+    // v74: also releases the reserved departure slots (was previously never
+    // decremented — cancelled bookings still counted as taken capacity).
     cancel: protectedProcedure
-      .input(z.object({ id: z.number() }))
+      .input(z.object({ id: z.number().int().positive().max(2_147_483_647) }))
       .mutation(async ({ ctx, input }) => {
         const booking = await db.getBookingById(input.id);
         if (!booking) {
@@ -1892,9 +2565,36 @@ export const appRouter = router({
           });
         }
 
+        // Idempotency: already cancelled → no-op
+        if (booking.bookingStatus === "cancelled") return { success: true };
+
         // Update booking status
         await db.updateBooking(input.id, { bookingStatus: "cancelled" });
 
+        // Release reserved seats
+        const seatCount =
+          (booking.numberOfAdults || 0) +
+          (booking.numberOfChildrenWithBed || 0) +
+          (booking.numberOfChildrenNoBed || 0);
+        if (seatCount > 0 && booking.departureId) {
+          await db.releaseDepartureSlots(booking.departureId, seatCount).catch((e) =>
+            console.warn(`[bookings.cancel] Failed to release slots for ${input.id}:`, e?.message)
+          );
+        }
+
+        // Audit
+        const { audit } = await import("./_core/auditLog");
+        audit({
+          ctx,
+          action: "booking.cancel",
+          targetType: "booking",
+          targetId: input.id,
+          changes: { before: booking.bookingStatus, after: "cancelled" },
+        });
+
+        // Note: this does NOT issue a Stripe refund — that requires a separate
+        // explicit refund flow with admin approval. If the user already paid,
+        // ops will handle the refund manually until the refund flow lands.
         return { success: true };
       }),
 
@@ -1904,19 +2604,226 @@ export const appRouter = router({
     }),
 
     // Admin: Update booking status
+    // v73: bounded ID + audit log on every status change. Booking-status
+    // mutations affect customer money + ops, so they always need a paper trail.
     adminUpdateStatus: adminProcedure
       .input(
         z.object({
-          id: z.number(),
+          id: z.number().int().positive().max(2_147_483_647),
           status: z.enum(["pending", "confirmed", "cancelled", "completed"]),
+          reason: z.string().max(500).optional(), // optional admin note (esp. for cancellations)
         })
       )
-      .mutation(async ({ input }) => {
+      .mutation(async ({ ctx, input }) => {
+        const { id, status, reason } = input;
 
-        const { id, status } = input;
+        // Snapshot previous status for the diff
+        const before = await db.getBookingById(id).catch(() => null);
+        if (!before) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Booking not found" });
+        }
+        const previousStatus = before.bookingStatus || "pending";
+
+        // v74: state machine — reject illegal transitions. Without this, admin
+        // can mis-click and flip a "completed" booking back to "pending",
+        // creating accounting inconsistencies.
+        const ALLOWED_TRANSITIONS: Record<string, string[]> = {
+          pending:   ["confirmed", "cancelled", "completed"],
+          confirmed: ["completed", "cancelled"],
+          completed: [],            // terminal
+          cancelled: [],            // terminal
+        };
+        const allowedNext = ALLOWED_TRANSITIONS[previousStatus] || [];
+        if (status !== previousStatus && !allowedNext.includes(status)) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `不允許的狀態轉換：${previousStatus} → ${status}（合法選項：${allowedNext.join(", ") || "無，此狀態不可變更"}）`,
+          });
+        }
+
         await db.updateBooking(id, { bookingStatus: status });
 
+        // v74: when booking is cancelled, release the reserved seats so the
+        // departure's bookedSlots is decremented and the seats become bookable
+        // again. Previously this was never done — cancelled bookings still
+        // counted toward overbooking caps.
+        if (status === "cancelled" && previousStatus !== "cancelled") {
+          const seatCount =
+            (before.numberOfAdults || 0) +
+            (before.numberOfChildrenWithBed || 0) +
+            (before.numberOfChildrenNoBed || 0);
+          if (seatCount > 0 && before.departureId) {
+            await db.releaseDepartureSlots(before.departureId, seatCount).catch((e) =>
+              console.warn(`[adminUpdateStatus] Failed to release slots for booking ${id}:`, e?.message)
+            );
+          }
+        }
+
+        const { audit } = await import("./_core/auditLog");
+        audit({
+          ctx,
+          action: "booking.updateStatus",
+          targetType: "booking",
+          targetId: id,
+          changes: { before: previousStatus, after: status },
+          reason,
+        });
+
         return { success: true };
+      }),
+
+    // v76: Admin-initiated refund flow.
+    //
+    // Replaces the prior "ops manually refund via Stripe dashboard" pattern,
+    // which left our DB out of sync (booking status said "paid" while Stripe
+    // had already returned the money). Now:
+    //   1. Admin calls this endpoint with bookingId + amount + reason.
+    //   2. We look up the latest successful payment row for the booking.
+    //   3. Call Stripe API with idempotency key to reverse the charge.
+    //   4. Optimistically mark our DB to refunded (the existing
+    //      `charge.refunded` webhook handler dedupes when Stripe confirms).
+    //   5. Release the departure slots so the seats are bookable again.
+    //   6. Audit trail with reason captured.
+    //
+    // Also handles partial refunds (amount < original charge): payment row
+    // stays "paid" but a separate refunds entry tracks the partial.
+    adminRefund: adminProcedure
+      .input(
+        z.object({
+          bookingId: z.number().int().positive().max(2_147_483_647),
+          // Optional: partial refund. If omitted, full amount is refunded.
+          amount: z.number().min(0.01).max(100_000_000).optional(),
+          reason: z.string().min(1).max(500),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const { audit } = await import("./_core/auditLog");
+
+        const booking = await db.getBookingById(input.bookingId);
+        if (!booking) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Booking not found" });
+        }
+
+        // Find the most recent successful payment for this booking
+        const payments = await db.getBookingPayments(input.bookingId);
+        const successful = (payments || []).filter(
+          (p: any) => p.paymentStatus === "completed" && p.stripePaymentIntentId
+        );
+        if (successful.length === 0) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "此訂單沒有可退款的付款紀錄",
+          });
+        }
+        // Refund the latest payment first (deposit, then balance, etc.)
+        const target = successful[successful.length - 1];
+        const targetIntentId = target.stripePaymentIntentId;
+        if (!targetIntentId) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "此付款紀錄無 Stripe payment intent，無法退款",
+          });
+        }
+        const originalAmount = Number(target.amount) || 0;
+
+        const refundAmount = input.amount ?? originalAmount;
+        if (refundAmount > originalAmount) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `退款金額不可超過原付款金額 (${originalAmount})`,
+          });
+        }
+
+        const stripe = getStripeClient();
+        // Stripe amount: zero-decimal currencies (TWD/JPY/etc.) don't multiply.
+        const currency = (target.currency || booking.currency || "TWD").toLowerCase();
+        const zeroDecimalCurrencies = ["bif", "clp", "gnf", "jpy", "kmf", "krw", "mga", "pyg", "rwf", "twd", "ugx", "vnd", "vuv", "xaf", "xof", "xpf"];
+        const stripeRefundAmount = zeroDecimalCurrencies.includes(currency)
+          ? Math.round(refundAmount)
+          : Math.round(refundAmount * 100);
+
+        // Idempotency key: same booking+payment+date won't double-refund even
+        // if the admin double-clicks.
+        const idempotencyKey = `refund:${input.bookingId}:${target.id}:${new Date().toISOString().slice(0, 10)}`;
+
+        let stripeRefund;
+        try {
+          stripeRefund = await stripe.refunds.create(
+            {
+              payment_intent: targetIntentId,
+              amount: stripeRefundAmount,
+              reason: "requested_by_customer",
+              metadata: {
+                booking_id: String(input.bookingId),
+                admin_user_id: String(ctx.user.id),
+                admin_reason: input.reason.slice(0, 500),
+              },
+            },
+            { idempotencyKey }
+          );
+        } catch (err: any) {
+          // Stripe errored — DON'T touch our DB; surface error to admin
+          console.error(`[bookings.adminRefund] Stripe refund failed:`, err?.message);
+          audit({
+            ctx,
+            action: "booking.refund",
+            targetType: "booking",
+            targetId: input.bookingId,
+            changes: { intentId: targetIntentId, amount: refundAmount },
+            reason: input.reason,
+            success: false,
+            errorMessage: err?.message?.slice(0, 200) || "Stripe error",
+          });
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: `Stripe 退款失敗：${err?.message || "未知錯誤"}`,
+          });
+        }
+
+        const isFullRefund = refundAmount >= originalAmount;
+
+        // Optimistically update DB. Webhook will dedupe via paymentStatus check.
+        if (isFullRefund) {
+          await db.updateBooking(input.bookingId, {
+            paymentStatus: "refunded",
+            bookingStatus: "cancelled",
+          });
+          // Release seats (idempotent at SQL level)
+          const seatCount =
+            (booking.numberOfAdults || 0) +
+            (booking.numberOfChildrenWithBed || 0) +
+            (booking.numberOfChildrenNoBed || 0);
+          if (seatCount > 0 && booking.departureId && booking.bookingStatus !== "cancelled") {
+            await db.releaseDepartureSlots(booking.departureId, seatCount).catch((e) =>
+              console.warn(`[bookings.adminRefund] release slots failed:`, e?.message)
+            );
+          }
+        }
+        // Partial refund: leave paymentStatus="paid"; the partial is recorded
+        // in Stripe and surfaced to ops via the webhook's partial-refund log.
+
+        audit({
+          ctx,
+          action: "booking.refund",
+          targetType: "booking",
+          targetId: input.bookingId,
+          changes: {
+            stripeRefundId: stripeRefund.id,
+            paymentIntentId: targetIntentId,
+            amount: refundAmount,
+            originalAmount,
+            isFullRefund,
+          },
+          reason: input.reason,
+          success: true,
+        });
+
+        return {
+          success: true,
+          refundId: stripeRefund.id,
+          amount: refundAmount,
+          isFullRefund,
+        };
       }),
   }),
 
@@ -1932,6 +2839,28 @@ export const appRouter = router({
           .filter((d: any) => d.status !== 'cancelled' && new Date(d.departureDate) > now)
           .sort((a: any, b: any) => new Date(a.departureDate).getTime() - new Date(b.departureDate).getTime());
         return upcoming[0] || null;
+      }),
+    // v78s: Top-N upcoming departures for tour list cards (Lion Travel chip pattern)
+    // Returns lean fields only — id, date, status, adultPrice — to keep payload small
+    getUpcoming: publicProcedure
+      .input(z.object({ tourId: z.number(), limit: z.number().min(1).max(10).default(3) }))
+      .query(async ({ input }) => {
+        const allDepartures = await db.getTourDepartures(input.tourId);
+        const now = new Date();
+        const upcoming = (allDepartures as any[])
+          .filter((d: any) => d.status !== 'cancelled' && new Date(d.departureDate) > now)
+          .sort((a: any, b: any) => new Date(a.departureDate).getTime() - new Date(b.departureDate).getTime())
+          .slice(0, input.limit)
+          .map((d: any) => ({
+            id: d.id,
+            departureDate: d.departureDate,
+            status: d.status, // 'open' | 'confirmed' | 'full' | 'waitlist'
+            adultPrice: d.adultPrice ?? null,
+            currency: d.currency ?? null,
+            currentParticipants: d.currentParticipants ?? 0,
+            maxParticipants: d.maxParticipants ?? null,
+          }));
+        return upcoming;
       }),
     // Get next upcoming departure for multiple tours (batch)
     getNextBatch: publicProcedure
@@ -1990,38 +2919,93 @@ export const appRouter = router({
           { message: "回程日期必須在出發日期之後", path: ["returnDate"] }
         )
       )
-      .mutation(async ({ input }) => {
-        return await db.createDeparture(input);
+      .mutation(async ({ ctx, input }) => {
+        const created = await db.createDeparture(input);
+        const { audit } = await import("./_core/auditLog");
+        audit({
+          ctx,
+          action: "departure.create",
+          targetType: "departure",
+          targetId: created.id,
+          changes: {
+            tourId: input.tourId,
+            departureDate: input.departureDate,
+            adultPrice: input.adultPrice,
+            totalSlots: input.totalSlots,
+          },
+        });
+        return created;
       }),
 
     // Update departure (admin only)
     update: adminProcedure
       .input(
         z.object({
-          id: z.number(),
+          id: z.number().int().positive().max(2_147_483_647),
           departureDate: z.date().optional(),
           returnDate: z.date().optional(),
-          totalSlots: z.number().optional(),
-          adultPrice: z.number().optional(),
-          childPriceWithBed: z.number().optional(),
-          childPriceNoBed: z.number().optional(),
-          infantPrice: z.number().optional(),
-          singleRoomSupplement: z.number().optional(),
-          status: z.enum(["open", "full", "cancelled"]).optional(),
-          currency: z.string().optional(),
-          notes: z.string().optional(),
+          totalSlots: z.number().int().min(0).max(10_000).optional(),
+          adultPrice: z.number().int().min(0).max(100_000_000).optional(),
+          childPriceWithBed: z.number().int().min(0).max(100_000_000).optional(),
+          childPriceNoBed: z.number().int().min(0).max(100_000_000).optional(),
+          infantPrice: z.number().int().min(0).max(100_000_000).optional(),
+          singleRoomSupplement: z.number().int().min(0).max(100_000_000).optional(),
+          status: z.enum(["open", "full", "cancelled", "confirmed"]).optional(),
+          currency: shortStr.optional(),
+          notes: mediumStr.optional(),
         })
       )
-      .mutation(async ({ input }) => {
+      .mutation(async ({ ctx, input }) => {
         const { id, ...updates } = input;
-        return await db.updateDeparture(id, updates);
+        const before = await db.getDepartureById(id).catch(() => null);
+        const result = await db.updateDeparture(id, updates);
+        const { audit, diffFields } = await import("./_core/auditLog");
+        const diff = diffFields(before as any, updates as any);
+        audit({
+          ctx,
+          action: "departure.update",
+          targetType: "departure",
+          targetId: id,
+          changes: { fields: diff.fields, before: diff.before, after: diff.after },
+        });
+        return result;
       }),
 
     // Delete departure (admin only)
     delete: adminProcedure
-      .input(z.object({ id: z.number() }))
-      .mutation(async ({ input }) => {
+      .input(z.object({ id: z.number().int().positive().max(2_147_483_647) }))
+      .mutation(async ({ ctx, input }) => {
+        // v75: snapshot + reject delete if any active bookings reference it.
+        // Otherwise we'd orphan customer bookings to a non-existent departure.
+        const before = await db.getDepartureById(input.id).catch(() => null);
+        if (!before) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Departure not found" });
+        }
+        const activeBookings = await db.getActiveBookingsByDepartureId(input.id).catch(() => [] as any[]);
+        if (activeBookings.length > 0) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: `此出發日有 ${activeBookings.length} 筆有效訂單，無法刪除。請先取消相關訂單。`,
+          });
+        }
         await db.deleteDeparture(input.id);
+
+        const { audit } = await import("./_core/auditLog");
+        audit({
+          ctx,
+          action: "departure.delete",
+          targetType: "departure",
+          targetId: input.id,
+          changes: {
+            before: {
+              tourId: before.tourId,
+              departureDate: before.departureDate,
+              adultPrice: before.adultPrice,
+              totalSlots: before.totalSlots,
+              bookedSlots: before.bookedSlots,
+            },
+          },
+        });
         return { success: true };
       }),
   }),
@@ -2052,6 +3036,51 @@ export const appRouter = router({
           });
         }
         return inquiry;
+      }),
+
+    /**
+     * v78q Sprint 9 #4: Translate inquiry subject + message for admin readability.
+     * Goes through translateEntity('inquiry', ...) which uses the registry +
+     * skip-if-unchanged. Returns the translated fields (admin can see ZH original
+     * + EN translation side-by-side).
+     */
+    translate: adminProcedure
+      .input(z.object({
+        id: z.number(),
+        targetLanguage: z.enum(["en", "ja", "ko"]).default("en"),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const { translateEntity } = await import("./translation");
+        const result = await translateEntity(
+          "inquiry",
+          input.id,
+          [input.targetLanguage as any],
+          "zh-TW" as any,
+          ctx.user.id
+        );
+        if (!result.success) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: result.errors.join("; ") || "Translation failed",
+          });
+        }
+        // Read back the saved translation rows
+        const db2 = await import("./db").then((m) => m.getDb());
+        if (!db2) return { translated: {} };
+        const { translations: tTable } = await import("../drizzle/schema");
+        const { and: _and, eq: _eq } = await import("drizzle-orm");
+        const rows = await db2.select().from(tTable).where(
+          _and(
+            _eq(tTable.entityType, "inquiry" as any),
+            _eq(tTable.entityId, input.id),
+            _eq(tTable.targetLanguage, input.targetLanguage)
+          )
+        );
+        const translated: Record<string, string> = {};
+        for (const r of rows as any[]) {
+          translated[r.fieldName] = r.translatedText;
+        }
+        return { translated };
       }),
 
     // Create new inquiry
@@ -4552,12 +5581,36 @@ export const appRouter = router({
         return { applicationId, checkoutUrl: session.url };
       }),
 
-    // ── 公開：查詢申請狀態 ──────────────────────────────────────
+    // ── 查詢申請狀態 ──────────────────────────────────────
+    // v70 SECURITY FIX: was `publicProcedure` with NO ownership check — any
+    // anonymous caller could enumerate `applicationId` and read every applicant's
+    // passport number, DOB, email, phone, payment status. PII / GDPR / CCPA leak.
+    // Now requires authentication AND (a) user owns the application, OR
+    // (b) user is admin. Guest applicants who applied without logging in must
+    // present matching `email` to retrieve status (defense-in-depth lookup).
     getApplicationStatus: publicProcedure
-      .input(z.object({ applicationId: z.number() }))
-      .query(async ({ input }) => {
+      .input(z.object({
+        applicationId: z.number().int().positive().max(2_147_483_647),
+        email: z.string().email().optional(), // for guest applicants (no userId)
+      }))
+      .query(async ({ ctx, input }) => {
         const application = await db.getVisaApplicationById(input.applicationId);
         if (!application) throw new TRPCError({ code: "NOT_FOUND", message: "申請案件不存在" });
+
+        // Admin can read any application
+        const isAdmin = ctx.user?.role === "admin";
+        // Authenticated user must own it
+        const isOwnerByUserId =
+          !!ctx.user?.id && !!application.userId && ctx.user.id === application.userId;
+        // Guest path: matching email + correct applicationId (rate-limited at edge)
+        const isOwnerByEmail =
+          !!input.email && application.email.toLowerCase() === input.email.toLowerCase();
+
+        if (!isAdmin && !isOwnerByUserId && !isOwnerByEmail) {
+          // 403, not 404 — but message stays vague so we don't confirm existence
+          throw new TRPCError({ code: "FORBIDDEN", message: "無權查看此申請" });
+        }
+
         const history = await db.getVisaStatusHistory(input.applicationId);
         return { application, history };
       }),
@@ -4923,7 +5976,564 @@ export const appRouter = router({
       }),
   }),
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // v78: WeChat Assist — paste an inbound WeChat / 朋友圈 / LINE message,
+  // AI drafts a reply in Jeff's voice, owner reviews/edits/approves.
+  // Manual-paste mode works immediately; webhook mode lights up once Jeff
+  // verifies his WeChat Official Account.
+  // ──────────────────────────────────────────────────────────────────────────
+  wechatAssist: router({
+    // Admin pastes inbound message → gets AI draft back
+    draftReply: adminProcedure
+      .input(
+        z.object({
+          inboundText: z.string().min(1).max(5000),
+          source: z.enum(["wechat_oa", "manual_paste", "moments_reply"]).default("manual_paste"),
+          fromDisplayName: shortStr.optional(),
+          fromOpenId: shortStr.optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const { draftReply } = await import("./services/wechatAssistService");
+        const result = await draftReply(input);
+        const { audit } = await import("./_core/auditLog");
+        audit({
+          ctx,
+          action: "wechat.draftReply",
+          targetType: "wechatMessage",
+          targetId: result.messageId || "n/a",
+          changes: { source: input.source, intent: result.detectedIntent.join(",") },
+        });
+        return result;
+      }),
+
+    // List pending messages (status=ready_review)
+    listPending: adminProcedure.query(async () => {
+      const dbi = await db.getDb();
+      if (!dbi) return [];
+      const { wechatMessages } = await import("../drizzle/schema");
+      const { eq, desc } = await import("drizzle-orm");
+      return await dbi
+        .select()
+        .from(wechatMessages)
+        .where(eq(wechatMessages.status, "ready_review" as any))
+        .orderBy(desc(wechatMessages.receivedAt))
+        .limit(50);
+    }),
+
+    // Approve / mark sent
+    approve: adminProcedure
+      .input(
+        z.object({
+          messageId: z.number().int().positive().max(2_147_483_647),
+          finalText: mediumStr.min(1),
+          markAsSent: z.boolean().default(true),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const dbi = await db.getDb();
+        if (!dbi) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+        const { wechatMessages } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        await dbi
+          .update(wechatMessages)
+          .set({
+            finalText: input.finalText,
+            approvedAt: new Date(),
+            sentAt: input.markAsSent ? new Date() : null,
+            status: input.markAsSent ? "sent" : "approved",
+          } as any)
+          .where(eq(wechatMessages.id, input.messageId));
+
+        const { audit } = await import("./_core/auditLog");
+        audit({
+          ctx,
+          action: "wechat.approve",
+          targetType: "wechatMessage",
+          targetId: input.messageId,
+          changes: { markAsSent: input.markAsSent },
+        });
+        return { success: true };
+      }),
+
+    // Mark as skipped (don't reply)
+    skip: adminProcedure
+      .input(z.object({ messageId: z.number().int().positive().max(2_147_483_647) }))
+      .mutation(async ({ ctx, input }) => {
+        const dbi = await db.getDb();
+        if (!dbi) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+        const { wechatMessages } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        await dbi
+          .update(wechatMessages)
+          .set({ status: "skipped" as any })
+          .where(eq(wechatMessages.id, input.messageId));
+        const { audit } = await import("./_core/auditLog");
+        audit({
+          ctx,
+          action: "wechat.skip",
+          targetType: "wechatMessage",
+          targetId: input.messageId,
+        });
+        return { success: true };
+      }),
+  }),
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // v78g: R2 storage healthcheck. Diagnostic so admin can verify R2 setup
+  // after fixing the bucket in Cloudflare. Returns precise reason on failure.
+  // ──────────────────────────────────────────────────────────────────────────
+  // v78n Sprint 6B: AI marketing content generator (admin)
+  marketingContent: router({
+    generateWeekly: adminProcedure
+      .input(
+        z.object({
+          topN: z.number().int().min(1).max(5).default(3),
+          language: z.enum(["zh-TW", "en"]).default("zh-TW"),
+          platforms: z
+            .array(z.enum(["instagram", "facebook", "xiaohongshu"]))
+            .default(["instagram", "facebook", "xiaohongshu"]),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const { generateWeeklySocialPosts } = await import(
+          "./services/marketingContentService"
+        );
+        const drafts = await generateWeeklySocialPosts(
+          input.topN,
+          input.language,
+          input.platforms
+        );
+        const { audit } = await import("./_core/auditLog");
+        audit({
+          ctx,
+          action: "marketing.generateWeekly",
+          targetType: "system",
+          targetId: 0,
+          changes: { drafts: drafts.length, language: input.language },
+        });
+        return { drafts };
+      }),
+  }),
+
+  // v78m Sprint 5A: trigger the daily digest manually (admin)
+  ops: router({
+    /**
+     * v78p: Flush translation cache + re-translate all active tours.
+     * Use after fixing translator bugs (e.g. maxTokens too low). One-shot
+     * script — safe to call multiple times, queue dedup handles concurrency.
+     *
+     * Returns: { flushedCacheKeys, translationsDeleted, queuedJobs, tourIds }
+     */
+    rerunAllTourTranslations: adminProcedure.mutation(async ({ ctx }) => {
+      const { redis } = await import("./redis");
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+
+      // 1. Flush all translation:* cache keys (forces fresh LLM calls)
+      let flushedCount = 0;
+      try {
+        // SCAN through the keyspace, deleting in batches
+        let cursor = "0";
+        do {
+          const reply = await (redis as any).scan(cursor, "MATCH", "translate:*", "COUNT", 500);
+          cursor = reply[0];
+          const keys = reply[1] || [];
+          if (keys.length > 0) {
+            await (redis as any).del(...keys);
+            flushedCount += keys.length;
+          }
+        } while (cursor !== "0");
+      } catch (err) {
+        console.warn("[rerunTranslations] cache flush failed (non-fatal):", (err as Error).message);
+      }
+
+      // 2. Delete existing translation rows for active tours so the worker re-saves fresh ones
+      const { tours, translations } = await import("../drizzle/schema");
+      const { eq, and, inArray } = await import("drizzle-orm");
+      const activeTours = await db
+        .select({ id: tours.id })
+        .from(tours)
+        .where(eq(tours.status, "active" as any));
+      const ids = activeTours.map((t: any) => t.id);
+      let deleted = 0;
+      if (ids.length > 0) {
+        const r = await db
+          .delete(translations)
+          .where(and(eq(translations.entityType, "tour"), inArray(translations.entityId, ids)));
+        deleted = (r as any).affectedRows ?? 0;
+      }
+
+      // 3. Queue re-translation jobs (sequential, not parallel — Anthropic rate limits)
+      const { addTourTranslationJob } = await import("./queue");
+      const queued: number[] = [];
+      for (const id of ids) {
+        try {
+          await addTourTranslationJob({
+            tourId: id,
+            targetLanguages: ["en"],
+            sourceLanguage: "zh-TW",
+            userId: ctx.user?.id || 1,
+          });
+          queued.push(id);
+        } catch (err) {
+          console.warn(`[rerunTranslations] queue failed for tour ${id}:`, (err as Error).message);
+        }
+      }
+
+      const { audit } = await import("./_core/auditLog");
+      audit({
+        ctx,
+        action: "ops.translations.rerunAll",
+        targetType: "system",
+        targetId: 0,
+        changes: { flushedCacheKeys: flushedCount, translationsDeleted: deleted, queuedJobs: queued.length },
+      });
+
+      return {
+        flushedCacheKeys: flushedCount,
+        translationsDeleted: deleted,
+        queuedJobs: queued.length,
+        tourIds: queued,
+      };
+    }),
+
+    sendDailyDigestNow: adminProcedure.mutation(async ({ ctx }) => {
+      const { runDailyDigestJob } = await import("./services/dailyDigestService");
+      const result = await runDailyDigestJob();
+      const { audit } = await import("./_core/auditLog");
+      audit({
+        ctx,
+        action: "ops.dailyDigest.manualTrigger",
+        targetType: "system",
+        targetId: 0,
+        changes: { sent: result.sent },
+      });
+      return {
+        sent: result.sent,
+        summary: result.data
+          ? {
+              pendingWechat: result.data.pendingWechat.length,
+              quotesToFollowUp: result.data.newQuotesToFollowUp.length,
+              newInquiries: result.data.newInquiries,
+              newQuotes24h: result.data.newQuotesCount,
+              newBookings24h: result.data.newBookingsCount,
+              revenue24h: result.data.revenue24h,
+            }
+          : null,
+      };
+    }),
+  }),
+
+  storage: router({
+    healthcheck: adminProcedure.query(async () => {
+      const { storagePut, storageGet } = await import("./storage");
+      const { ENV } = await import("./_core/env");
+      const result: any = {
+        bucket: ENV.r2Bucket,
+        endpoint: ENV.r2Endpoint,
+        publicBaseUrl: ENV.r2PublicBaseUrl || null,
+        put: { ok: false, error: null as string | null, key: null as string | null },
+        get: { ok: false, error: null as string | null, url: null as string | null },
+      };
+      const probeKey = `healthcheck/probe-${Date.now()}.txt`;
+      try {
+        const put = await storagePut(probeKey, Buffer.from("ok", "utf-8"), "text/plain");
+        result.put.ok = true;
+        result.put.key = put.key;
+      } catch (err: any) {
+        result.put.error = `${err?.name || "Error"}: ${err?.message?.slice(0, 200) || String(err).slice(0, 200)}`;
+      }
+      if (result.put.ok) {
+        try {
+          const get = await storageGet(probeKey);
+          result.get.ok = true;
+          result.get.url = get.url;
+        } catch (err: any) {
+          result.get.error = `${err?.name || "Error"}: ${err?.message?.slice(0, 200) || ""}`;
+        }
+      }
+      result.summary = result.put.ok && result.get.ok
+        ? "R2 storage is fully operational"
+        : `R2 broken — fix: ${result.put.error || result.get.error}`;
+      return result;
+    }),
+  }),
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // v78: Auto Reconciliation — single dashboard that joins internal payments,
+  // Stripe live ledger, and accounting entries to spot discrepancies.
+  // Replaces ~2 hours of monthly close pain for a 1-person ops.
+  // ──────────────────────────────────────────────────────────────────────────
+  reconciliation: router({
+    runReport: adminProcedure
+      .input(
+        z.object({
+          // ISO dates: defaults to current month
+          start: z.string().date().optional(),
+          end: z.string().date().optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const now = new Date();
+        const defaultStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const defaultEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+        const start = input.start ? new Date(input.start) : defaultStart;
+        const end = input.end ? new Date(input.end) : defaultEnd;
+
+        const { runReconciliation } = await import("./services/reconciliationService");
+        const report = await runReconciliation(start, end);
+
+        const { audit } = await import("./_core/auditLog");
+        audit({
+          ctx,
+          action: "reconciliation.run",
+          targetType: "report",
+          targetId: `${start.toISOString().slice(0,10)}_${end.toISOString().slice(0,10)}`,
+          changes: {
+            discrepancies: report.discrepancies.length,
+            netProfit: report.pnl.netProfit,
+          },
+        });
+
+        return report;
+      }),
+  }),
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // v78: AI Quote Generator — customer free-form intent → matched tours →
+  // PDF quote in ~30 seconds.  Replaces 1 hour of manual quoting per request,
+  // so a 1-person operation can scale to 50+ quotes/day.
+  // ──────────────────────────────────────────────────────────────────────────
+  aiQuotes: router({
+    // Public — anyone can request a quote without signing up
+    generate: publicProcedure
+      .input(
+        z.object({
+          rawRequest: mediumStr.min(10), // at least 10 chars; max 5000
+          customerName: shortStr.optional(),
+          customerEmail: z.string().email().max(320).optional(),
+          customerPhone: shortStr.optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const { extractQuoteParams, matchToursForQuote, buildQuotePdf, generateQuoteNumber } =
+          await import("./services/aiQuoteService");
+
+        // 1. Extract params via LLM
+        const params = await extractQuoteParams(input.rawRequest);
+
+        // 2. Match against tour catalog
+        const matched = await matchToursForQuote(params);
+
+        // 3. Generate PDF + persist
+        const quoteNumber = await generateQuoteNumber();
+        const validUntil = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000); // 14 days
+        const { html, r2Url } = await buildQuotePdf({
+          quoteNumber,
+          rawRequest: input.rawRequest,
+          params,
+          tours: matched,
+          customerName: input.customerName,
+          customerEmail: input.customerEmail,
+          validUntil,
+        });
+
+        const totalPax = (params.adults || 1) + (params.children || 0);
+        const estimatedTotal = matched[0]
+          ? Math.ceil(matched[0].price * totalPax)
+          : null;
+
+        // Persist for funnel tracking — store HTML inline so the quote is
+        // viewable even when R2 storage is unavailable. URL is set after
+        // insert (fallback) or to R2 URL (preferred when available).
+        const inserted = await db.createAiQuote({
+          rawRequest: input.rawRequest,
+          extractedParams: JSON.stringify(params),
+          quoteNumber,
+          recommendedTours: JSON.stringify(matched.map((t: any) => t.id)),
+          estimatedTotal,
+          currency: params.currency || (matched[0]?.priceCurrency) || "USD",
+          pdfUrl: r2Url, // may be overwritten below to view-route fallback
+          pdfHtml: html,
+          customerName: input.customerName || null,
+          customerEmail: input.customerEmail || null,
+          customerPhone: input.customerPhone || null,
+          userId: ctx.user?.id || null,
+          status: "generated",
+          validUntil,
+        } as any);
+
+        // Fallback URL when R2 was unavailable: serve from /api/aiQuotes/:id/view
+        let finalPdfUrl: string | null = r2Url;
+        if (!finalPdfUrl && inserted?.id) {
+          const { ENV } = await import("./_core/env");
+          const base = ENV.baseUrl || "https://packgo-travel.fly.dev";
+          finalPdfUrl = `${base.replace(/\/+$/, "")}/api/aiQuotes/${inserted.id}/view`;
+          // Update the row so adminList / external links see the resolvable URL
+          await db.updateAiQuote(inserted.id, { pdfUrl: finalPdfUrl } as any);
+        }
+
+        // v78l Sprint 4B: schedule 24h/3d/7d follow-up emails (no-op if no email)
+        if (inserted?.id && input.customerEmail) {
+          try {
+            const { scheduleQuoteFollowUps } = await import("./queues/quoteFollowUpQueue");
+            await scheduleQuoteFollowUps(inserted.id, input.customerEmail);
+          } catch (err) {
+            console.warn("[aiQuotes.generate] Failed to schedule follow-ups:", (err as Error).message);
+          }
+        }
+
+        return {
+          quoteId: inserted?.id,
+          quoteNumber,
+          pdfUrl: finalPdfUrl,
+          matchedTourIds: matched.map((t: any) => t.id),
+          extractedParams: params,
+          estimatedTotal,
+          currency: params.currency || matched[0]?.priceCurrency || "USD",
+          validUntil,
+        };
+      }),
+
+    // Admin — list all generated quotes (funnel view)
+    adminList: adminProcedure
+      .input(z.object({
+        status: z.enum(["generated", "sent", "viewed", "converted", "expired"]).optional(),
+        limit: z.number().int().min(1).max(200).default(50),
+        offset: z.number().int().min(0).default(0),
+      }))
+      .query(async ({ input }) => {
+        return await db.listAiQuotes(input);
+      }),
+
+    // Mark quote as converted (when admin finds matching booking)
+    adminMarkConverted: adminProcedure
+      .input(z.object({
+        quoteId: z.number().int().positive().max(2_147_483_647),
+        bookingId: z.number().int().positive().max(2_147_483_647),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        await db.updateAiQuote(input.quoteId, {
+          status: "converted",
+          bookingId: input.bookingId,
+        });
+        // v78l Sprint 4B: cancel any scheduled follow-up emails — customer is converted
+        try {
+          const { cancelQuoteFollowUps } = await import("./queues/quoteFollowUpQueue");
+          await cancelQuoteFollowUps(input.quoteId);
+        } catch {}
+        const { audit } = await import("./_core/auditLog");
+        audit({
+          ctx,
+          action: "aiQuote.markConverted",
+          targetType: "aiQuote",
+          targetId: input.quoteId,
+          changes: { bookingId: input.bookingId },
+        });
+        return { success: true };
+      }),
+  }),
+
   invoices: router({
+    // v77: customer-facing — get OR generate invoice for a booking the user owns.
+    // Returns the invoice URL (S3-hosted HTML) the customer can download/print.
+    // If an invoice has already been generated for this booking, returns it
+    // straight away; otherwise builds one from the booking data and persists.
+    forBooking: protectedProcedure
+      .input(z.object({ bookingId: z.number().int().positive().max(2_147_483_647) }))
+      .mutation(async ({ ctx, input }) => {
+        const booking = await db.getBookingById(input.bookingId);
+        if (!booking) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Booking not found" });
+        }
+        if (booking.userId !== ctx.user.id && ctx.user.role !== "admin") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Not authorised" });
+        }
+
+        // Try to find an existing invoice for this booking
+        const existing = await db.getInvoiceByBookingId(input.bookingId).catch(() => null);
+        if (existing?.pdfUrl) {
+          return { url: existing.pdfUrl, invoiceNumber: existing.invoiceNumber, cached: true };
+        }
+
+        // Build line items from the booking's seat counts.
+        const tour = await db.getTourById(booking.tourId);
+        const tourTitle = tour?.title || `行程 #${booking.tourId}`;
+        const lineItems: any[] = [];
+        if (booking.numberOfAdults && booking.numberOfAdults > 0) {
+          const total = Number(booking.totalPrice) || 0;
+          // Best-effort split — full breakdown comes from departure pricing
+          // when the booking was created. For invoice display, show as one
+          // aggregate line if we can't reliably split.
+          lineItems.push({
+            description: `${tourTitle} — ${booking.numberOfAdults} 大 / ${booking.numberOfChildrenWithBed || 0} 童帶床 / ${booking.numberOfChildrenNoBed || 0} 童不帶床 / ${booking.numberOfInfants || 0} 嬰`,
+            quantity: 1,
+            unitPrice: total,
+            amount: total,
+          });
+        }
+
+        const invoiceNumber = await generateInvoiceNumber();
+        const subtotal = Number(booking.totalPrice) || 0;
+        const taxRate = 0; // tax already collected via Stripe line items at checkout
+        const taxAmount = 0;
+        const totalAmount = subtotal;
+        const { html, r2Url } = await generateInvoicePdf({
+          invoiceNumber,
+          issueDate: new Date(),
+          customerName: booking.customerName,
+          customerEmail: booking.customerEmail,
+          customerPhone: booking.customerPhone || undefined,
+          lineItems,
+          subtotal,
+          taxRate,
+          taxAmount,
+          totalAmount,
+          currency: booking.currency || "TWD",
+          status: booking.paymentStatus === "paid" ? "paid" : "pending",
+        });
+
+        // v78g: persist HTML inline so the invoice is viewable even if R2 fails
+        const inserted = await db.createInvoice({
+          invoiceNumber,
+          bookingId: input.bookingId,
+          customerName: booking.customerName,
+          customerEmail: booking.customerEmail,
+          customerPhone: booking.customerPhone || null,
+          subtotal: String(subtotal),
+          taxRate: String(taxRate),
+          taxAmount: String(taxAmount),
+          totalAmount: String(totalAmount),
+          currency: booking.currency || "TWD",
+          status: booking.paymentStatus === "paid" ? "paid" : "draft",
+          pdfUrl: r2Url,
+          pdfHtml: html,
+          createdBy: booking.userId || ctx.user.id,
+        } as any).catch((e) => {
+          console.warn("[invoices.forBooking] persist failed:", e?.message);
+          return null;
+        });
+
+        // Resolve the final URL: R2 if available, else /api/invoices/:id/view
+        let finalUrl: string | null = r2Url;
+        if (!finalUrl && inserted?.id) {
+          const { ENV } = await import("./_core/env");
+          const base = (ENV.baseUrl || "https://packgo-travel.fly.dev").replace(/\/+$/, "");
+          finalUrl = `${base}/api/invoices/${inserted.id}/view`;
+          await db.updateInvoice(inserted.id, { pdfUrl: finalUrl } as any).catch(() => {});
+        }
+        if (!finalUrl) {
+          // Could not even persist. Return the HTML directly via a data: URL so
+          // the customer at least gets something. (Rare path — DB write failed.)
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "發票生成失敗，請稍後再試",
+          });
+        }
+        return { url: finalUrl, invoiceNumber, cached: false };
+      }),
+
     // List invoices
     list: adminProcedure
       .input(z.object({
@@ -4973,8 +6583,8 @@ export const appRouter = router({
           status: "draft" as const,
           ...input,
         };
-        // Generate HTML invoice and upload to S3
-        const pdfUrl = await generateInvoicePdf(invoiceData);
+        // v78g: generate HTML + best-effort R2 upload (R2 failure is OK)
+        const { html, r2Url } = await generateInvoicePdf(invoiceData);
         const invoice = await db.createInvoice({
           ...invoiceData,
           lineItems: JSON.stringify(input.lineItems),
@@ -4982,9 +6592,19 @@ export const appRouter = router({
           taxRate: String(input.taxRate),
           taxAmount: String(input.taxAmount),
           totalAmount: String(input.totalAmount),
-          pdfUrl: pdfUrl ?? undefined,
+          pdfUrl: r2Url ?? undefined,
+          pdfHtml: html,
           createdBy: ctx.user.id,
-        });
+        } as any);
+
+        // If R2 wasn't available, set pdfUrl to the view route now that we have an id
+        if (!r2Url && invoice?.id) {
+          const { ENV } = await import("./_core/env");
+          const base = (ENV.baseUrl || "https://packgo-travel.fly.dev").replace(/\/+$/, "");
+          const viewUrl = `${base}/api/invoices/${invoice.id}/view`;
+          await db.updateInvoice(invoice.id, { pdfUrl: viewUrl } as any).catch(() => {});
+          (invoice as any).pdfUrl = viewUrl;
+        }
         return invoice;
       }),
 

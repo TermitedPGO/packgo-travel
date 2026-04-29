@@ -5,7 +5,10 @@ import FeaturedTours from "@/components/FeaturedTours";
 import Footer from "@/components/Footer";
 import Header from "@/components/Header";
 import EditableHero from "@/components/EditableHero";
+import HomeHeroSpotlight from "@/components/HomeHeroSpotlight";
+import HomeWelcomeBack from "@/components/HomeWelcomeBack";
 import NewsletterSection from "@/components/NewsletterSection";
+import CompareBar from "@/components/CompareBar";
 import WhyChooseUs from "@/components/WhyChooseUs";
 import TestimonialsCarousel from "@/components/TestimonialsCarousel";
 import HomeFAQ from "@/components/HomeFAQ";
@@ -47,6 +50,11 @@ function HomeContent() {
       )}
       
       <main className="flex-grow">
+        {/* v78m Sprint 5C: personalized welcome for logged-in users with recent views */}
+        <HomeWelcomeBack />
+        {/* v78i: featured tour spotlight ABOVE the search hero (signettours pattern) —
+            converts visitors who don't know what to search for. */}
+        <HomeHeroSpotlight />
         <EditableHero />
         <EditableDestinations />
         <FeaturedTours />
@@ -69,36 +77,39 @@ function HomeContent() {
       </main>
 
       <Footer />
+      <CompareBar />
 
-      {/* Floating AI Advisor Button with Penguin Character */}
+      {/* Floating AI Advisor — v78h: smaller on mobile so it stops covering tour cards.
+          Speech bubble hidden on small screens; button alone is enough on mobile. */}
       <div className="fixed bottom-4 right-4 z-40">
         <button
           onClick={() => setAiDialogOpen(true)}
           className="flex flex-col items-end transition-all hover:scale-105 group"
           aria-label={t('home.aiAdvisor.title')}
         >
-          {/* Speech Bubble - Rounded Design */}
-          <div className="mb-1 mr-4 px-4 py-2 bg-white border border-gray-200 text-black text-sm font-medium shadow-md rounded-xl">
+          {/* Speech Bubble - hidden on mobile to avoid overlap */}
+          <div className="hidden md:block mb-1 mr-4 px-4 py-2 bg-white border border-gray-200 text-black text-sm font-medium shadow-md rounded-xl">
             {t('home.aiAdvisor.bubble')}
           </div>
-          {/* Penguin Image - Original Design */}
+          {/* Penguin Image - smaller on mobile */}
           <img
             src="https://files.manuscdn.com/user_upload_by_module/session_file/310519663159191204/jeyVKrdLKJdFniJk.png"
             alt={t('home.aiAdvisor.title')}
-            className="w-28 h-28 object-contain drop-shadow-lg animate-penguin-wobble"
+            className="w-16 h-16 md:w-28 md:h-28 object-contain drop-shadow-lg animate-penguin-wobble"
           />
         </button>
       </div>
 
-      {/* Admin Edit Mode Button - positioned on left side to avoid overlap with penguin */}
+      {/* v78o: Admin Edit Mode Button — icon-only on mobile to free up screen real estate */}
       {canEdit && !isEditMode && (
         <button
           onClick={toggleEditMode}
-          className="fixed bottom-8 left-8 bg-black hover:bg-gray-800 text-white px-4 py-3 shadow-2xl flex items-center gap-2 transition-all hover:scale-105 z-50 rounded-lg"
+          className="fixed bottom-4 left-4 md:bottom-8 md:left-8 bg-black hover:bg-gray-800 text-white p-3 md:px-4 md:py-3 shadow-2xl flex items-center gap-0 md:gap-2 transition-all hover:scale-105 z-40 rounded-full md:rounded-lg opacity-60 hover:opacity-100"
           aria-label={t('home.editMode.enter')}
+          title={t('home.editMode.button')}
         >
-          <Pencil className="h-5 w-5" />
-          <span className="font-medium">{t('home.editMode.button')}</span>
+          <Pencil className="h-4 w-4 md:h-5 md:w-5" />
+          <span className="hidden md:inline font-medium">{t('home.editMode.button')}</span>
         </button>
       )}
 

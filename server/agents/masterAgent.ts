@@ -17,8 +17,11 @@
  */
 
 import { ContentAnalyzerAgent } from "./contentAnalyzerAgent";
-import { ImagePromptAgent } from "./imagePromptAgent";
-import { ImageGenerationAgent } from "./imageGenerationAgent";
+// v77: ImagePromptAgent + ImageGenerationAgent removed from masterAgent — they
+// were instantiated in the constructor but never invoked (Unsplash + ColorThemeAgent
+// fallback path serves all production tour generations). Files retained for
+// other callers; the ~12K tokens/tour potential cost they represented was zero
+// in practice but the dead instantiation was misleading new maintainers.
 import { ColorThemeAgent } from "./colorThemeAgent";
 import { ItineraryUnifiedAgent } from "./itineraryUnifiedAgent";
 // ItineraryExtractAgent + ItineraryPolishAgent merged into ItineraryUnifiedAgent (single LLM call)
@@ -50,6 +53,7 @@ export interface MasterAgentResult {
   data?: {
     // Basic info
     poeticTitle: string; // 詩意化標題 (Sipincollection 風格)
+    poeticSubtitle?: string; // 詩意副標題 — surfaces from ContentAnalyzerAgent
     title: string;
     description: string;
     productCode: string;
@@ -148,8 +152,8 @@ export class MasterAgent {
 
   // Agent instances
   private contentAnalyzerAgent: ContentAnalyzerAgent;
-  private imagePromptAgent: ImagePromptAgent;
-  private imageGenerationAgent: ImageGenerationAgent;
+  // v77: imagePromptAgent + imageGenerationAgent removed (were dead-instantiated
+  // but never invoked; Unsplash + ColorThemeAgent path covers all production paths)
   private colorThemeAgent: ColorThemeAgent;
   private itineraryUnifiedAgent: ItineraryUnifiedAgent; // merged Extract + Polish
   // DetailsSkill replaces CostAgent, NoticeAgent, HotelAgent, MealAgent
@@ -175,8 +179,7 @@ export class MasterAgent {
     
     // Initialize all agents
     this.contentAnalyzerAgent = new ContentAnalyzerAgent();
-    this.imagePromptAgent = new ImagePromptAgent();
-    this.imageGenerationAgent = new ImageGenerationAgent();
+    // v77: imagePromptAgent + imageGenerationAgent no longer instantiated.
     this.colorThemeAgent = new ColorThemeAgent();
     this.itineraryUnifiedAgent = new ItineraryUnifiedAgent(); // single LLM call for extract + polish
     // DetailsSkill replaces CostAgent, NoticeAgent, HotelAgent, MealAgent
@@ -507,27 +510,280 @@ export class MasterAgent {
 
             // Detect destination country from tourName + arriveAirport
             const _lionCountryPatterns: Record<string, string> = {
+              // Direct country names
               '英國': '英國', '愛爾蘭': '愛爾蘭', '法國': '法國', '義大利': '義大利', '日本': '日本',
               '韓國': '韓國', '泰國': '泰國', '越南': '越南', '帛琦': '帛琦', '台灣': '台灣',
               '美國': '美國', '德國': '德國', '西班牙': '西班牙', '希臘': '希臘', '土耳其': '土耳其',
               '澳洲': '澳洲', '紐西蘭': '紐西蘭', '加拿大': '加拿大',
-              '四國': '日本', '北海道': '日本', '沖縄': '日本', '九州': '日本', '關西': '日本',
+              '奧地利': '奧地利', '捷克': '捷克', '瑞士': '瑞士', '匈牙利': '匈牙利', '波蘭': '波蘭',
+              '克羅埃西亞': '克羅埃西亞', '冰島': '冰島', '挪威': '挪威', '瑞典': '瑞典',
+              '丹麥': '丹麥', '芬蘭': '芬蘭', '比利時': '比利時', '荷蘭': '荷蘭',
+              '羅馬尼亞': '羅馬尼亞', '保加利亞': '保加利亞', '葡萄牙': '葡萄牙',
+              '菲律賓': '菲律賓', '新加坡': '新加坡', '馬來西亞': '馬來西亞', '印尼': '印尼',
+              '印度': '印度', '尼泊爾': '尼泊爾', '斯里蘭卡': '斯里蘭卡', '不丹': '不丹',
+              '蒙古': '蒙古', '中國': '中國', '香港': '香港', '澳門': '澳門',
+              '埃及': '埃及', '摩洛哥': '摩洛哥', '南非': '南非', '肯亞': '肯亞',
+              '墨西哥': '墨西哥', '古巴': '古巴', '哥斯大黎加': '哥斯大黎加',
+              // Multi-country combos (use first country as primary)
+              '奧捷': '奧地利', '北歐': '挪威', '東歐': '捷克', '南歐': '義大利', '西歐': '法國',
+              '美東': '美國', '美西': '美國', '美加': '美國',
+              '中歐': '德國', '英愛': '英國', '法瑞義': '法國', '德奧': '德國',
+              // Japan regions
+              '四國': '日本', '北海道': '日本', '沖縄': '日本', '沖繩': '日本', '九州': '日本', '關西': '日本',
+              '京阪神': '日本', '東京': '日本', '大阪': '日本', '京都': '日本', '名古屋': '日本', '福岡': '日本',
+              '廣島': '日本', '神戶': '日本', '奈良': '日本', '富士山': '日本',
+              // Korea regions
               '首爾': '韓國', '釜山': '韓國', '濟州': '韓國',
-              '峨里': '印尼', '曼谷': '泰國', '清邁': '泰國',
+              // Southeast Asia cities
+              '峨里': '印尼', '巴里島': '印尼', '峇里島': '印尼', '雅加達': '印尼',
+              '曼谷': '泰國', '清邁': '泰國', '普吉': '泰國', '蘇梅': '泰國',
+              '河內': '越南', '胡志明': '越南', '峴港': '越南', '下龍灣': '越南',
+              '馬尼拉': '菲律賓', '宿霧': '菲律賓', '長灘島': '菲律賓',
+              '吉隆坡': '馬來西亞', '沙巴': '馬來西亞', '檳城': '馬來西亞',
+              // European cities
+              '維也納': '奧地利', '薩爾斯堡': '奧地利', '哈修塔特': '奧地利',
+              '布拉格': '捷克', '庫倫洛夫': '捷克',
+              '蘇黎世': '瑞士', '日內瓦': '瑞士', '琉森': '瑞士', '采爾馬特': '瑞士',
+              '布達佩斯': '匈牙利', '華沙': '波蘭', '克拉科夫': '波蘭',
+              '羅馬': '義大利', '米蘭': '義大利', '威尼斯': '義大利', '佛羅倫斯': '義大利', '那不勒斯': '義大利',
+              '巴黎': '法國', '尼斯': '法國', '里昂': '法國', '馬賽': '法國',
+              '倫敦': '英國', '愛丁堡': '英國', '曼徹斯特': '英國',
+              '柏林': '德國', '慕尼黑': '德國', '法蘭克福': '德國', '漢堡': '德國',
+              '巴塞隆納': '西班牙', '馬德里': '西班牙', '塞維亞': '西班牙',
+              '雅典': '希臘', '聖托里尼': '希臘', '米克諾斯': '希臘',
+              '伊斯坦堡': '土耳其', '卡帕多奇亞': '土耳其',
+              '阿姆斯特丹': '荷蘭', '布魯塞爾': '比利時',
+              '雷克雅維克': '冰島', '奧斯陸': '挪威', '斯德哥爾摩': '瑞典',
+              '哥本哈根': '丹麥', '赫爾辛基': '芬蘭',
+              // Americas cities
+              '紐約': '美國', '華盛頓': '美國', '費城': '美國', '波士頓': '美國', '芝加哥': '美國',
+              '洛杉磯': '美國', '舊金山': '美國', '拉斯維加斯': '美國', '西雅圖': '美國', '邁阿密': '美國',
+              '夏威夷': '美國', '阿拉斯加': '美國', '黃石': '美國',
+              '溫哥華': '加拿大', '多倫多': '加拿大', '渥太華': '加拿大', '魁北克': '加拿大',
+              // Oceania
+              '雪梨': '澳洲', '墨爾本': '澳洲', '黃金海岸': '澳洲', '布里斯本': '澳洲',
+              '奧克蘭': '紐西蘭', '基督城': '紐西蘭', '皇后鎮': '紐西蘭',
+              // South America
               '秘魯': '秘魯', '智利': '智利', '巴西': '巴西', '阿根廷': '阿根廷',
-              '馬丘比丘': '秘魯', '庫斯科': '秘魯', '復活節峳': '智利',
+              '馬丘比丘': '秘魯', '庫斯科': '秘魯', '復活節島': '智利',
+              '里約': '巴西', '聖保羅': '巴西', '布宜諾斯艾利斯': '阿根廷',
+              // English
               'Peru': '秘魯', 'Chile': '智利', 'Japan': '日本', 'Korea': '韓國',
-              'NRT': '日本', 'KIX': '日本', 'CTS': '日本', 'OKA': '日本', 'ICN': '韓國',
-              'BKK': '泰國', 'HAN': '越南', 'SGN': '越南', 'LHR': '英國', 'CDG': '法國',
-              'FCO': '義大利', 'ATH': '希臘', 'IST': '土耳其', 'SYD': '澳洲', 'AKL': '紐西蘭',
+              // Airport codes
+              'NRT': '日本', 'HND': '日本', 'KIX': '日本', 'CTS': '日本', 'OKA': '日本', 'FUK': '日本', 'NGO': '日本',
+              'ICN': '韓國', 'PUS': '韓國', 'CJU': '韓國',
+              'BKK': '泰國', 'DMK': '泰國', 'HKT': '泰國', 'CNX': '泰國',
+              'HAN': '越南', 'SGN': '越南', 'DAD': '越南',
+              'MNL': '菲律賓', 'CEB': '菲律賓', 'KUL': '馬來西亞', 'BKI': '馬來西亞',
+              'DPS': '印尼', 'CGK': '印尼', 'SIN': '新加坡',
+              'LHR': '英國', 'LGW': '英國', 'EDI': '英國', 'MAN': '英國',
+              'CDG': '法國', 'ORY': '法國', 'NCE': '法國',
+              'FCO': '義大利', 'MXP': '義大利', 'VCE': '義大利',
+              'FRA': '德國', 'MUC': '德國', 'BER': '德國',
+              'VIE': '奧地利', 'PRG': '捷克', 'ZRH': '瑞士', 'GVA': '瑞士',
+              'BUD': '匈牙利', 'WAW': '波蘭',
+              'BCN': '西班牙', 'MAD': '西班牙',
+              'ATH': '希臘', 'IST': '土耳其', 'AMS': '荷蘭', 'BRU': '比利時',
+              'KEF': '冰島', 'OSL': '挪威', 'ARN': '瑞典', 'CPH': '丹麥', 'HEL': '芬蘭',
+              'SYD': '澳洲', 'MEL': '澳洲', 'BNE': '澳洲',
+              'AKL': '紐西蘭', 'CHC': '紐西蘭',
+              'JFK': '美國', 'EWR': '美國', 'LAX': '美國', 'SFO': '美國', 'ORD': '美國',
+              'LAS': '美國', 'SEA': '美國', 'MIA': '美國', 'BOS': '美國', 'IAD': '美國', 'DFW': '美國',
+              'HNL': '美國', 'ANC': '美國',
+              'YVR': '加拿大', 'YYZ': '加拿大', 'YUL': '加拿大',
               'LIM': '秘魯', 'SCL': '智利', 'GRU': '巴西', 'EZE': '阿根廷',
+              'CAI': '埃及', 'CMN': '摩洛哥', 'JNB': '南非', 'NBO': '肯亞',
+              'MEX': '墨西哥', 'HAV': '古巴',
             };
+
+            // City lookup — returns a specific city/region name (distinct from country)
+            const _lionCityPatterns: Record<string, string> = {
+              // Japan
+              '北海道': '北海道', '沖縄': '沖繩', '沖繩': '沖繩', '九州': '九州', '關西': '關西', '京阪神': '京阪神',
+              '東京': '東京', '大阪': '大阪', '京都': '京都', '名古屋': '名古屋', '福岡': '福岡',
+              '廣島': '廣島', '神戶': '神戶', '奈良': '奈良', '四國': '四國',
+              // Korea
+              '首爾': '首爾', '釜山': '釜山', '濟州': '濟州',
+              // SE Asia
+              '曼谷': '曼谷', '清邁': '清邁', '普吉': '普吉', '蘇梅': '蘇梅',
+              '河內': '河內', '胡志明': '胡志明', '峴港': '峴港', '下龍灣': '下龍灣',
+              '巴里島': '巴里島', '峇里島': '峇里島',
+              '馬尼拉': '馬尼拉', '宿霧': '宿霧', '長灘島': '長灘島',
+              '吉隆坡': '吉隆坡', '沙巴': '沙巴', '檳城': '檳城',
+              // Europe
+              '維也納': '維也納', '薩爾斯堡': '薩爾斯堡', '哈修塔特': '哈修塔特',
+              '布拉格': '布拉格', '庫倫洛夫': '庫倫洛夫',
+              '蘇黎世': '蘇黎世', '日內瓦': '日內瓦', '琉森': '琉森', '采爾馬特': '采爾馬特',
+              '布達佩斯': '布達佩斯', '華沙': '華沙', '克拉科夫': '克拉科夫',
+              '羅馬': '羅馬', '米蘭': '米蘭', '威尼斯': '威尼斯', '佛羅倫斯': '佛羅倫斯',
+              '巴黎': '巴黎', '尼斯': '尼斯', '里昂': '里昂',
+              '倫敦': '倫敦', '愛丁堡': '愛丁堡',
+              '柏林': '柏林', '慕尼黑': '慕尼黑', '法蘭克福': '法蘭克福',
+              '巴塞隆納': '巴塞隆納', '馬德里': '馬德里',
+              '雅典': '雅典', '聖托里尼': '聖托里尼', '米克諾斯': '米克諾斯',
+              '伊斯坦堡': '伊斯坦堡', '卡帕多奇亞': '卡帕多奇亞',
+              '阿姆斯特丹': '阿姆斯特丹', '布魯塞爾': '布魯塞爾',
+              '雷克雅維克': '雷克雅維克', '奧斯陸': '奧斯陸',
+              '斯德哥爾摩': '斯德哥爾摩', '哥本哈根': '哥本哈根', '赫爾辛基': '赫爾辛基',
+              // Americas
+              '紐約': '紐約', '華盛頓': '華盛頓', '費城': '費城', '波士頓': '波士頓', '芝加哥': '芝加哥',
+              '洛杉磯': '洛杉磯', '舊金山': '舊金山', '拉斯維加斯': '拉斯維加斯', '西雅圖': '西雅圖',
+              '邁阿密': '邁阿密', '夏威夷': '夏威夷', '阿拉斯加': '阿拉斯加',
+              '溫哥華': '溫哥華', '多倫多': '多倫多', '魁北克': '魁北克',
+              // Oceania
+              '雪梨': '雪梨', '墨爾本': '墨爾本', '黃金海岸': '黃金海岸', '布里斯本': '布里斯本',
+              '奧克蘭': '奧克蘭', '基督城': '基督城', '皇后鎮': '皇后鎮',
+              // Multi-country labels used as "city"
+              '奧捷': '奧捷', '北歐': '北歐', '東歐': '東歐', '南歐': '南歐', '西歐': '西歐',
+              '美東': '美東', '美西': '美西', '美加': '美加',
+              // South America
+              '馬丘比丘': '馬丘比丘', '庫斯科': '庫斯科',
+              '里約': '里約', '聖保羅': '聖保羅', '布宜諾斯艾利斯': '布宜諾斯艾利斯',
+            };
+
             const _lionSearchText = lionData.tourName + ' ' + lionData.outboundFlight.arriveAirport;
             let _lionCountry = '';
             for (const [kw, country] of Object.entries(_lionCountryPatterns)) {
               if (_lionSearchText.includes(kw)) {
                 _lionCountry = country;
                 break;
+              }
+            }
+
+            // Extract specific city — search across tourName + daily itinerary + flight airports.
+            // Previously only searched tourName, which meant tours with region-only titles like
+            // "北歐極光冒險10日" or "經典土耳其10日｜土航直飛" fell back to the region/country
+            // label even though the itinerary clearly visits 奧斯陸 / 伊斯坦堡 / 卡帕多奇亞.
+            // City patterns are ordered so specific cities come before region buckets in the dict,
+            // so the first match is always the most specific label available.
+            const _lionItineraryText = (lionData.dailyItinerary || [])
+              .map(d => [
+                d.travelPoint || '',
+                d.summary || '',
+                d.hotelName || '',
+                (d.attractions || []).map((a: any) => a?.name || '').join(' '),
+              ].join(' '))
+              .join(' ');
+
+            // Round 66: airport code → city fallback. Helps when tour names/itinerary
+            // only give a region ("北歐") but the flight airport code pins down a
+            // specific city (OSL → 奧斯陸, IST → 伊斯坦堡, etc.).
+            const _lionAirportCodeToCity: Record<string, string> = {
+              'NRT': '東京', 'HND': '東京', 'KIX': '大阪', 'NGO': '名古屋', 'FUK': '福岡', 'CTS': '札幌', 'OKA': '沖繩',
+              'ICN': '首爾', 'GMP': '首爾', 'PUS': '釜山', 'CJU': '濟州',
+              'BKK': '曼谷', 'HKT': '普吉', 'CNX': '清邁',
+              'HAN': '河內', 'SGN': '胡志明', 'DAD': '峴港',
+              'DPS': '峇里島', 'KUL': '吉隆坡', 'PEN': '檳城', 'BKI': '沙巴',
+              'MNL': '馬尼拉', 'CEB': '宿霧',
+              'VIE': '維也納', 'PRG': '布拉格', 'BUD': '布達佩斯', 'WAW': '華沙',
+              'ZRH': '蘇黎世', 'GVA': '日內瓦',
+              'CDG': '巴黎', 'ORY': '巴黎', 'NCE': '尼斯', 'LYS': '里昂',
+              'LHR': '倫敦', 'LGW': '倫敦', 'EDI': '愛丁堡',
+              'FRA': '法蘭克福', 'MUC': '慕尼黑', 'TXL': '柏林', 'BER': '柏林',
+              'FCO': '羅馬', 'MXP': '米蘭', 'VCE': '威尼斯', 'FLR': '佛羅倫斯',
+              'BCN': '巴塞隆納', 'MAD': '馬德里',
+              'ATH': '雅典', 'JTR': '聖托里尼',
+              'IST': '伊斯坦堡', 'SAW': '伊斯坦堡', 'ASR': '卡帕多奇亞', 'NAV': '卡帕多奇亞',
+              'AMS': '阿姆斯特丹', 'BRU': '布魯塞爾',
+              'KEF': '雷克雅維克', 'OSL': '奧斯陸', 'ARN': '斯德哥爾摩', 'CPH': '哥本哈根', 'HEL': '赫爾辛基',
+              'JFK': '紐約', 'EWR': '紐約', 'LGA': '紐約', 'IAD': '華盛頓', 'BOS': '波士頓', 'ORD': '芝加哥',
+              'LAX': '洛杉磯', 'SFO': '舊金山', 'LAS': '拉斯維加斯', 'SEA': '西雅圖', 'MIA': '邁阿密',
+              'HNL': '夏威夷', 'ANC': '阿拉斯加', 'YVR': '溫哥華', 'YYZ': '多倫多',
+              'SYD': '雪梨', 'MEL': '墨爾本', 'BNE': '布里斯本', 'OOL': '黃金海岸',
+              'AKL': '奧克蘭', 'CHC': '基督城', 'ZQN': '皇后鎮',
+            };
+            const _lionFlightAirportCodes = [
+              lionData.outboundFlight?.arriveAirport || '',
+              lionData.returnFlight?.departureAirport || '',
+            ].join(' ').toUpperCase().match(/\b[A-Z]{3}\b/g) || [];
+
+            const _lionCitySearchText = [
+              lionData.tourName || '',
+              _lionItineraryText,
+              lionData.outboundFlight?.arriveAirport || '',
+              lionData.returnFlight?.departureAirport || '',
+            ].join(' ');
+
+            // Round 66: build an inverse city→country lookup so mixed-region tours
+            // (e.g. "羅馬與土耳其經典10日") don't pick a city in the WRONG country.
+            // We prefer the first city pattern that matches AND sits inside
+            // `_lionCountry`; fall back to any match only if no same-country city
+            // exists.
+            const _lionCityToCountry: Record<string, string> = {
+              '東京': '日本', '大阪': '日本', '京都': '日本', '名古屋': '日本', '福岡': '日本',
+              '廣島': '日本', '神戶': '日本', '奈良': '日本', '四國': '日本', '北海道': '日本',
+              '沖繩': '日本', '九州': '日本', '關西': '日本', '京阪神': '日本',
+              '首爾': '韓國', '釜山': '韓國', '濟州': '韓國',
+              '曼谷': '泰國', '清邁': '泰國', '普吉': '泰國', '蘇梅': '泰國',
+              '河內': '越南', '胡志明': '越南', '峴港': '越南', '下龍灣': '越南',
+              '巴里島': '印尼', '峇里島': '印尼',
+              '馬尼拉': '菲律賓', '宿霧': '菲律賓', '長灘島': '菲律賓',
+              '吉隆坡': '馬來西亞', '沙巴': '馬來西亞', '檳城': '馬來西亞',
+              '維也納': '奧地利', '薩爾斯堡': '奧地利', '哈修塔特': '奧地利',
+              '布拉格': '捷克', '庫倫洛夫': '捷克',
+              '蘇黎世': '瑞士', '日內瓦': '瑞士', '琉森': '瑞士', '采爾馬特': '瑞士',
+              '布達佩斯': '匈牙利', '華沙': '波蘭', '克拉科夫': '波蘭',
+              '羅馬': '義大利', '米蘭': '義大利', '威尼斯': '義大利', '佛羅倫斯': '義大利',
+              '巴黎': '法國', '尼斯': '法國', '里昂': '法國',
+              '倫敦': '英國', '愛丁堡': '英國',
+              '柏林': '德國', '慕尼黑': '德國', '法蘭克福': '德國',
+              '巴塞隆納': '西班牙', '馬德里': '西班牙',
+              '雅典': '希臘', '聖托里尼': '希臘', '米克諾斯': '希臘',
+              '伊斯坦堡': '土耳其', '卡帕多奇亞': '土耳其',
+              '阿姆斯特丹': '荷蘭', '布魯塞爾': '比利時',
+              '雷克雅維克': '冰島', '奧斯陸': '挪威',
+              '斯德哥爾摩': '瑞典', '哥本哈根': '丹麥', '赫爾辛基': '芬蘭',
+              '紐約': '美國', '華盛頓': '美國', '費城': '美國', '波士頓': '美國', '芝加哥': '美國',
+              '洛杉磯': '美國', '舊金山': '美國', '拉斯維加斯': '美國', '西雅圖': '美國',
+              '邁阿密': '美國', '夏威夷': '美國', '阿拉斯加': '美國',
+              '溫哥華': '加拿大', '多倫多': '加拿大', '魁北克': '加拿大',
+              '雪梨': '澳洲', '墨爾本': '澳洲', '黃金海岸': '澳洲', '布里斯本': '澳洲',
+              '奧克蘭': '紐西蘭', '基督城': '紐西蘭', '皇后鎮': '紐西蘭',
+              '馬丘比丘': '秘魯', '庫斯科': '秘魯',
+              '里約': '巴西', '聖保羅': '巴西', '布宜諾斯艾利斯': '阿根廷',
+            };
+
+            let _lionCity = '';
+            // Pass 1: city AND same-country match
+            for (const [kw, city] of Object.entries(_lionCityPatterns)) {
+              if (_lionCitySearchText.includes(kw)) {
+                const cityCountry = _lionCityToCountry[city];
+                if (!cityCountry || !_lionCountry || cityCountry === _lionCountry) {
+                  _lionCity = city;
+                  break;
+                }
+              }
+            }
+            // Pass 2: airport-code hint (same-country only)
+            if (!_lionCity) {
+              for (const code of _lionFlightAirportCodes) {
+                const city = _lionAirportCodeToCity[code];
+                if (city) {
+                  const cityCountry = _lionCityToCountry[city];
+                  if (!cityCountry || !_lionCountry || cityCountry === _lionCountry) {
+                    _lionCity = city;
+                    break;
+                  }
+                }
+              }
+            }
+            // Pass 3: any match (legacy behavior — prevents empty city for edge cases)
+            if (!_lionCity) {
+              for (const [kw, city] of Object.entries(_lionCityPatterns)) {
+                if (_lionCitySearchText.includes(kw)) { _lionCity = city; break; }
+              }
+            }
+            if (!_lionCity) _lionCity = _lionCountry;
+
+            // v68: if city is known but country is empty (e.g. title says 南法/蔚藍海岸 but
+            // none of those map to a country pattern, while the itinerary mentioned 尼斯),
+            // reverse-lookup the country from the city. Prevents destinationCountry='' on
+            // tours whose marketing title uses a region phrase instead of a country name.
+            if (_lionCity && !_lionCountry) {
+              const inferredCountry = _lionCityToCountry[_lionCity];
+              if (inferredCountry) {
+                _lionCountry = inferredCountry;
+                console.log(`[MasterAgent] City→Country backfill: ${_lionCity} → ${inferredCountry}`);
               }
             }
 
@@ -562,26 +818,33 @@ export class MasterAgent {
               if (d.dinner) _lionMeals.push(`第${d.day}天晚餐：${d.dinner}`);
             }
 
-            // Map flights
+            // Map flights — use FlightAgent's expected field names (arrivalTime,
+            // arrivalAirport, flightNo, duration). Round 66: previously we emitted
+            // `arriveTime`/`arriveAirport` which FlightAgent's JSON schema ignored,
+            // causing the LLM to fabricate values (or output "<UNKNOWN>" placeholders).
             const _lionFlights: any[] = [];
             if (lionData.outboundFlight.airline) {
               _lionFlights.push({
                 type: 'outbound',
                 airline: lionData.outboundFlight.airline,
+                flightNo: '', // LionTravel API doesn't expose flight numbers publicly
                 departureTime: lionData.outboundFlight.departureTime,
-                arriveTime: lionData.outboundFlight.arriveTime,
+                arrivalTime: lionData.outboundFlight.arriveTime,
+                duration: '',
                 departureAirport: lionData.outboundFlight.departureAirport,
-                arriveAirport: lionData.outboundFlight.arriveAirport,
+                arrivalAirport: lionData.outboundFlight.arriveAirport,
               });
             }
             if (lionData.returnFlight.airline) {
               _lionFlights.push({
                 type: 'return',
                 airline: lionData.returnFlight.airline,
+                flightNo: '',
                 departureTime: lionData.returnFlight.departureTime,
-                arriveTime: lionData.returnFlight.arriveTime,
+                arrivalTime: lionData.returnFlight.arriveTime,
+                duration: '',
                 departureAirport: lionData.returnFlight.departureAirport,
-                arriveAirport: lionData.returnFlight.arriveAirport,
+                arrivalAirport: lionData.returnFlight.arriveAirport,
               });
             }
 
@@ -600,7 +863,8 @@ export class MasterAgent {
               },
               location: {
                 destinationCountry: _lionCountry,
-                destinationCity: _lionCountry,
+                destinationCity: _lionCity,
+                departureCity: lionData.departureCity || '',
               },
               duration: {
                 days: lionData.tourDays,
@@ -1726,6 +1990,7 @@ export class MasterAgent {
       const finalData = {
         // Basic info
         poeticTitle: analyzedContent.poeticTitle, // Use ContentAnalyzerAgent's poetic title
+        poeticSubtitle: (analyzedContent as any).poeticSubtitle || "",
         title: analyzedContent.title,
         description: analyzedContent.description,
         productCode: rawData.basicInfo?.productCode || "",
@@ -1769,17 +2034,35 @@ export class MasterAgent {
           }))
         ),
 
-        // Key Features — mirror the same merge so cards/gallery stay consistent
+        // Key Features — v69: was rebuilding from highlights (→ byte-identical
+        // duplicate of `highlights`). ContentAnalyzer already produces a
+        // structurally-distinct keyFeatures[] with poetic phrases / vertical-text
+        // layout (see contentAnalyzerAgent.generateKeyFeatures). Use those
+        // directly, only merging in real images. If contentAnalyzer didn't return
+        // any keyFeatures, fall back to a SLIM version of highlights (drops the
+        // description so it's at least visually different from highlights).
         keyFeatures: JSON.stringify(
-          (analyzedContent.highlights || []).map((h: any, i: number) => ({
-            ...h,
-            image: (h.image && typeof h.image === 'string' && h.image.startsWith('http'))
-              ? h.image
-              : (featureImageObjects[i]?.url
-                  || highlightImagePool[i]
-                  || (highlightImagePool.length > 0 ? highlightImagePool[i % highlightImagePool.length] : '')),
-            imageAlt: h.imageAlt || featureImageObjects[i]?.alt || h.title || '',
-          }))
+          (analyzedContent.keyFeatures && analyzedContent.keyFeatures.length > 0
+            ? analyzedContent.keyFeatures.map((kf: any, i: number) => ({
+                ...kf,
+                image: (kf.image && typeof kf.image === 'string' && kf.image.startsWith('http'))
+                  ? kf.image
+                  : (featureImageObjects[i]?.url
+                      || highlightImagePool[i]
+                      || (highlightImagePool.length > 0 ? highlightImagePool[i % highlightImagePool.length] : '')),
+                imageAlt: kf.imageAlt || featureImageObjects[i]?.alt || kf.keyword || kf.title || '',
+              }))
+            : (analyzedContent.highlights || []).slice(0, 4).map((h: any, i: number) => ({
+                title: h.title,
+                subtitle: h.subtitle || (i === 0 ? "STAY" : "EXPLORE"),
+                image: (h.image && typeof h.image === 'string' && h.image.startsWith('http'))
+                  ? h.image
+                  : (featureImageObjects[i]?.url
+                      || highlightImagePool[i]
+                      || (highlightImagePool.length > 0 ? highlightImagePool[i % highlightImagePool.length] : '')),
+                imageAlt: h.imageAlt || featureImageObjects[i]?.alt || h.title || '',
+              }))
+          )
         ),
         
         // Feature Images — Fix 2 (Round 62): store full object {url, alt, caption, position}
@@ -2265,6 +2548,22 @@ export class MasterAgent {
         const SELF_REPAIR_THRESHOLD = 70;
         const MAX_SELF_REPAIR_ROUNDS = 2;
         const SELF_REPAIR_TIMEOUT_MS = 60000; // 60 秒總時間上限
+
+        // v67: emit a single, greppable line per tour so we can compute the
+        // self-repair trigger rate from logs. Each tour logs exactly one of:
+        //   [SelfRepair] score=X trigger=true   (will run repair)
+        //   [SelfRepair] score=X trigger=false  (passed)
+        // grep '\[SelfRepair\]' | awk to compute rate.
+        const willTriggerSelfRepair = calibrationReport.totalScore < SELF_REPAIR_THRESHOLD;
+        console.log(`[SelfRepair] score=${calibrationReport.totalScore} trigger=${willTriggerSelfRepair} threshold=${SELF_REPAIR_THRESHOLD}`);
+        // Bump a Redis counter for daily rollup (best-effort, never throws)
+        try {
+          const { redis } = await import('../redis');
+          const day = new Date().toISOString().slice(0, 10);
+          await redis.hincrby(`selfrepair:stats:${day}`, willTriggerSelfRepair ? 'triggered' : 'passed', 1);
+          await redis.expire(`selfrepair:stats:${day}`, 30 * 24 * 60 * 60); // keep 30 days
+        } catch { /* silent */ }
+
         let selfRepairRound = 0;
         const selfRepairStartTime = Date.now();
         while (
@@ -2310,7 +2609,15 @@ export class MasterAgent {
               (finalData as any).description = repairedAnalyzedContent.description;
               (finalData as any).heroSubtitle = repairedAnalyzedContent.heroSubtitle;
               (finalData as any).highlights = JSON.stringify(repairedAnalyzedContent.highlights || []);
-              (finalData as any).keyFeatures = JSON.stringify(repairedAnalyzedContent.highlights || []);
+              // v69: don't copy highlights into keyFeatures — keyFeatures has its
+              // own poetic-vertical-text shape from contentAnalyzer.generateKeyFeatures()
+              (finalData as any).keyFeatures = JSON.stringify(
+                repairedAnalyzedContent.keyFeatures && repairedAnalyzedContent.keyFeatures.length > 0
+                  ? repairedAnalyzedContent.keyFeatures
+                  : (repairedAnalyzedContent.highlights || []).slice(0, 4).map((h: any) => ({
+                      title: h.title, subtitle: h.subtitle || 'EXPLORE', image: h.image, imageAlt: h.imageAlt
+                    }))
+              );
               console.log(`[MasterAgent] 🔧 Self-Repair: ContentAnalyzer updated title="${repairedAnalyzedContent.poeticTitle}"`);
             }
           } catch (repairErr) {
@@ -2334,6 +2641,31 @@ export class MasterAgent {
             }
           } catch (repairErr) {
             console.warn('[MasterAgent] Self-Repair ItineraryUnified failed (non-fatal):', repairErr);
+          }
+
+          // v73 Self-Repair: also re-run DetailsSkill so hotel / meal / cost /
+          // notice issues (e.g. "hotelImages empty", "meals missing") have a
+          // chance to be fixed. Previously the loop only re-ran Phase 2 +
+          // Phase 4 (ContentAnalyzer + Itinerary) and never re-ran the agent
+          // that actually populates hotels/meals/costs, so calibration scores
+          // for those checks stayed identical across rounds — wasted compute.
+          console.log('[MasterAgent] 🔧 Self-Repair: Re-running DetailsSkill...');
+          try {
+            const repairDetails = await this.retryManager.executeWithRetry(
+              () => this.detailsSkill.executeAllCombined(rawData),
+              this.retryConfig,
+              'DetailsSkill-SelfRepair'
+            );
+            const repairData = repairDetails?.data;
+            if (repairData) {
+              if (repairData.hotels !== undefined) (finalData as any).hotels = JSON.stringify(repairData.hotels);
+              if (repairData.meals !== undefined) (finalData as any).meals = JSON.stringify(repairData.meals);
+              if (repairData.costs !== undefined) (finalData as any).costExplanation = JSON.stringify(repairData.costs);
+              if (repairData.notices !== undefined) (finalData as any).noticeDetailed = JSON.stringify(repairData.notices);
+              console.log('[MasterAgent] 🔧 Self-Repair: DetailsSkill updated hotels/meals/costs/notices');
+            }
+          } catch (repairErr) {
+            console.warn('[MasterAgent] Self-Repair DetailsSkill failed (non-fatal):', repairErr);
           }
 
           // Re-run calibration
@@ -2470,8 +2802,11 @@ export class MasterAgent {
 
       // Round 72: sweep orphaned R2 assets. Fire-and-forget — rollback never
       // throws, so this doesn't mask the original error.
+      // v71: log if rollback fails so we can investigate orphaned-asset accumulation.
       if (partialDataForRollback) {
-        this.rollback(partialDataForRollback).catch(() => {});
+        this.rollback(partialDataForRollback).catch((rollbackErr) =>
+          console.warn("[MasterAgent] rollback(partialData) failed (orphaned assets may remain):", (rollbackErr as Error)?.message)
+        );
       }
 
       return {

@@ -123,10 +123,31 @@ export default function Profile() {
     setLocation("/");
   };
 
+  // v71: replace bare spinner with a content-shaped skeleton so the page
+  // doesn't visually "jump" when data arrives. Previously users saw a blank
+  // page → spinner → fully-rendered profile, which is jarring.
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <Loader2 className="h-8 w-8 animate-spin text-black" />
+      <div className="min-h-screen bg-gray-50">
+        <div className="bg-white border-b border-gray-200">
+          <div className="container py-8">
+            <div className="flex items-center gap-6 animate-pulse">
+              <div className="h-20 w-20 rounded-full bg-gray-200" />
+              <div className="flex-1 space-y-3">
+                <div className="h-6 w-1/3 bg-gray-200 rounded-lg" />
+                <div className="h-4 w-1/4 bg-gray-100 rounded-lg" />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="container py-8 grid md:grid-cols-3 gap-4 animate-pulse">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="bg-white rounded-xl p-6 border border-gray-100 space-y-3">
+              <div className="h-4 w-1/2 bg-gray-100 rounded" />
+              <div className="h-8 w-1/3 bg-gray-200 rounded" />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }

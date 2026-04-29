@@ -133,28 +133,57 @@ CRITICAL RULES:
 - DO NOT translate: single characters, short codes (e.g. "STAY", "EXPLORE"), style keywords
 - Preserve all non-text fields (id, image, imageAlt, keywordStyle, labelColor, labelPosition, etc.) UNCHANGED
 - For arrays of strings, translate each string element
-- Output ONLY the JSON, no explanation, no markdown code blocks
+
+BILINGUAL CONTENT HANDLING (very important):
+- Source text frequently contains BOTH Chinese AND English in the SAME string,
+  e.g. "台北Taipei / 慕尼黑Munich" or "聖加侖大教堂 Kathedrale St. Gallen" or "馬特宏峰Matterhorn"
+- When translating to ${languageFullNames[targetLanguage]}: output ONLY the target-language form,
+  NOT the bilingual form. Example: "台北Taipei / 慕尼黑Munich" → "Taipei / Munich"
+- Drop the Chinese characters from bilingual phrases — never preserve both
+- For Chinese-only place names (e.g. "蘇黎世", "瓦萊州小鎮"), translate to English equivalent
+  (e.g. "Zürich", "Valais village"). Use Wikipedia-style English transliteration.
+- For star ratings like "四星級", "五星級" — translate to "4-star", "5-star"
+- For times like "待確認" — translate to "To be confirmed"
+- For meal types "早餐/午餐/晚餐" — translate to "Breakfast/Lunch/Dinner"
+
+OUTPUT: Output ONLY the JSON, no explanation, no markdown code blocks, no preamble.
 
 ${buildProperNounSystemPrompt()}`;
       userContent = trimmed;
     } else {
       // 普通文字模式
-      systemPrompt = `You are a professional translator specializing in travel and tourism content. 
+      systemPrompt = `You are a professional translator specializing in travel and tourism content.
 Your task is to translate text from ${languageFullNames[sourceLanguage]} to ${languageFullNames[targetLanguage]}.
 
-Guidelines:
+CRITICAL OUTPUT RULES — ABSOLUTELY NON-NEGOTIABLE:
+- Output ONLY the translated text. NOTHING else.
+- DO NOT explain your reasoning. DO NOT say "I need to translate" or "Based on the dictionary". DO NOT add notes, parentheticals, or commentary.
+- DO NOT preserve the source text alongside the translation.
+- DO NOT use markdown code blocks.
+- If the input is a single short phrase (under 50 chars), respond with a single short phrase.
+- If the input contains BOTH source-language AND target-language text already (bilingual), output ONLY the target-language form.
+
+Style guidelines:
 - Maintain the original meaning and tone
-- Use natural, fluent expressions in the target language
-- Keep proper nouns (place names, brand names) appropriately translated or transliterated
-- For travel-related terms, use industry-standard terminology
-- Preserve any formatting (line breaks, punctuation)
-- Only output the translated text, nothing else
+- Use natural, fluent expressions
+- Keep proper nouns appropriately translated or transliterated
+- Use industry-standard travel terminology
+- Preserve formatting (line breaks, punctuation)
 
 ${buildProperNounSystemPrompt()}`;
       userContent = text;
     }
 
+    // v67: Haiku is plenty for translation and 5x cheaper than Sonnet.
+    // v78p: maxTokens was 2048 — way too small for large JSON like itineraryDetailed
+    // (10-day tour ≈ 4-8K chars source, 6-12K output tokens). Output truncation made
+    // JSON.parse fail and fall back to original ZH text — root cause of "translator
+    // didn't translate the itinerary" bug. Bumped to 16K to comfortably fit all current
+    // tour fields. Haiku 4.5 supports 64K output max.
+    const estimatedTokens = Math.min(16384, Math.max(2048, Math.ceil(userContent.length * 2.5)));
     const response = await invokeLLM({
+      model: "claude-haiku-4-5-20251001",
+      maxTokens: estimatedTokens,
       messages: [
         {
           role: "system",
@@ -195,6 +224,20 @@ ${buildProperNounSystemPrompt()}`;
         return text;
       }
     } else {
+      // v78p: Detect LLM "thinking out loud" outputs (e.g. for short hotel names
+      // the LLM sometimes responds with "I need to translate X. Based on the
+      // dictionary, ..." instead of just the translated string). Reject + fallback.
+      const looksLikeExplanation =
+        translatedText.length > Math.max(150, text.length * 4) ||
+        /^I need to translate|^Based on the (proper )?noun dictionary|^Looking at|^Since|^Let me|^The translation is|^Note:|^\(This /i.test(translatedText) ||
+        /\n\n\(This /i.test(translatedText);
+      if (looksLikeExplanation) {
+        console.warn(
+          `[Translation Agent] Rejected likely-explanation output for input "${text.slice(0, 40)}…" → output started with "${translatedText.slice(0, 80)}"`
+        );
+        // Fallback: return source unchanged so dictionary can fix obvious bits
+        return applyProperNounDictionary(text);
+      }
       // Post-processing for plain text: apply proper noun dictionary
       translatedText = applyProperNounDictionary(translatedText);
     }
@@ -328,14 +371,51 @@ export async function translateTour(
       if (targetLang === sourceLanguage) continue;
 
       try {
+        // v78p Sprint 8 #2: Pre-fetch existing translations for this tour+lang
+        // so we can skip LLM calls when content hasn't changed. Saves cost on
+        // re-runs (e.g. admin saves a tour that only changed price — title,
+        // description, etc. don't need re-translation).
+        const existingRows = await db
+          .select()
+          .from(translations)
+          .where(
+            and(
+              eq(translations.entityType, 'tour'),
+              eq(translations.entityId, tourId),
+              eq(translations.targetLanguage, targetLang)
+            )
+          );
+        const existingByField = new Map<string, { originalText: string | null; translatedText: string | null }>();
+        for (const r of existingRows as any[]) {
+          existingByField.set(r.fieldName, {
+            originalText: r.originalText,
+            translatedText: r.translatedText,
+          });
+        }
+
+        let skipped = 0;
+        let translated = 0;
         for (const field of fieldsToTranslate) {
           if (!field.value) continue;
+
+          // Skip if the source text is unchanged AND we have a non-empty translation
+          const existing = existingByField.get(field.name);
+          if (
+            existing &&
+            existing.originalText === field.value &&
+            existing.translatedText &&
+            existing.translatedText.length > 0
+          ) {
+            skipped++;
+            continue;
+          }
 
           const translatedText = await translateText(
             field.value,
             targetLang,
             sourceLanguage
           );
+          translated++;
 
           // 儲存翻譯到資料庫
           await saveTranslation({
@@ -349,6 +429,9 @@ export async function translateTour(
             translatedBy: `user:${userId}`,
           });
         }
+        if (skipped > 0 || translated > 0) {
+          console.log(`[TranslationAgent] tour #${tourId} → ${targetLang}: ${translated} translated, ${skipped} skipped (unchanged)`);
+        }
 
         // 翻譯每日行程（如果有）
         if (tour.dailyItinerary) {
@@ -357,31 +440,38 @@ export async function translateTour(
             : tour.dailyItinerary;
 
           if (Array.isArray(dailyItinerary)) {
-            const translatedItinerary = await Promise.all(
-              dailyItinerary.map(async (day: any) => ({
-                ...day,
-                title: day.title ? await translateText(day.title, targetLang, sourceLanguage) : day.title,
-                description: day.description ? await translateText(day.description, targetLang, sourceLanguage) : day.description,
-                activities: day.activities ? await Promise.all(
-                  day.activities.map(async (activity: any) => ({
-                    ...activity,
-                    name: activity.name ? await translateText(activity.name, targetLang, sourceLanguage) : activity.name,
-                    description: activity.description ? await translateText(activity.description, targetLang, sourceLanguage) : activity.description,
-                  }))
-                ) : day.activities,
-              }))
-            );
+            const sourceJson = JSON.stringify(dailyItinerary);
+            // Skip whole-block translation if source unchanged
+            const existingDI = existingByField.get('dailyItinerary');
+            if (existingDI && existingDI.originalText === sourceJson && existingDI.translatedText) {
+              // already up-to-date, skip
+            } else {
+              const translatedItinerary = await Promise.all(
+                dailyItinerary.map(async (day: any) => ({
+                  ...day,
+                  title: day.title ? await translateText(day.title, targetLang, sourceLanguage) : day.title,
+                  description: day.description ? await translateText(day.description, targetLang, sourceLanguage) : day.description,
+                  activities: day.activities ? await Promise.all(
+                    day.activities.map(async (activity: any) => ({
+                      ...activity,
+                      name: activity.name ? await translateText(activity.name, targetLang, sourceLanguage) : activity.name,
+                      description: activity.description ? await translateText(activity.description, targetLang, sourceLanguage) : activity.description,
+                    }))
+                  ) : day.activities,
+                }))
+              );
 
-            await saveTranslation({
-              entityType: 'tour',
-              entityId: tourId,
-              fieldName: 'dailyItinerary',
-              sourceLanguage,
-              targetLanguage: targetLang,
-              originalText: JSON.stringify(dailyItinerary),
-              translatedText: JSON.stringify(translatedItinerary),
-              translatedBy: `user:${userId}`,
-            });
+              await saveTranslation({
+                entityType: 'tour',
+                entityId: tourId,
+                fieldName: 'dailyItinerary',
+                sourceLanguage,
+                targetLanguage: targetLang,
+                originalText: sourceJson,
+                translatedText: JSON.stringify(translatedItinerary),
+                translatedBy: `user:${userId}`,
+              });
+            }
           }
         }
 
@@ -392,23 +482,29 @@ export async function translateTour(
               ? JSON.parse((tour as any).hotels)
               : (tour as any).hotels;
             if (Array.isArray(hotels)) {
-              const translatedHotels = await Promise.all(
-                hotels.map(async (hotel: any) => ({
-                  ...hotel,
-                  name: hotel.name ? await translateText(hotel.name, targetLang, sourceLanguage) : hotel.name,
-                  description: hotel.description ? await translateText(hotel.description, targetLang, sourceLanguage) : hotel.description,
-                }))
-              );
-              await saveTranslation({
-                entityType: 'tour',
-                entityId: tourId,
-                fieldName: 'hotels',
-                sourceLanguage,
-                targetLanguage: targetLang,
-                originalText: JSON.stringify(hotels),
-                translatedText: JSON.stringify(translatedHotels),
-                translatedBy: `user:${userId}`,
-              });
+              const sourceJson = JSON.stringify(hotels);
+              const existingH = existingByField.get('hotels');
+              if (existingH && existingH.originalText === sourceJson && existingH.translatedText) {
+                // up-to-date, skip
+              } else {
+                const translatedHotels = await Promise.all(
+                  hotels.map(async (hotel: any) => ({
+                    ...hotel,
+                    name: hotel.name ? await translateText(hotel.name, targetLang, sourceLanguage) : hotel.name,
+                    description: hotel.description ? await translateText(hotel.description, targetLang, sourceLanguage) : hotel.description,
+                  }))
+                );
+                await saveTranslation({
+                  entityType: 'tour',
+                  entityId: tourId,
+                  fieldName: 'hotels',
+                  sourceLanguage,
+                  targetLanguage: targetLang,
+                  originalText: sourceJson,
+                  translatedText: JSON.stringify(translatedHotels),
+                  translatedBy: `user:${userId}`,
+                });
+              }
             }
           } catch (e) {
             console.warn(`[Translation Agent] Failed to translate hotels for tour ${tourId}:`, e);
@@ -422,23 +518,29 @@ export async function translateTour(
               ? JSON.parse((tour as any).meals)
               : (tour as any).meals;
             if (Array.isArray(meals)) {
-              const translatedMeals = await Promise.all(
-                meals.map(async (meal: any) => ({
-                  ...meal,
-                  name: meal.name ? await translateText(meal.name, targetLang, sourceLanguage) : meal.name,
-                  description: meal.description ? await translateText(meal.description, targetLang, sourceLanguage) : meal.description,
-                }))
-              );
-              await saveTranslation({
-                entityType: 'tour',
-                entityId: tourId,
-                fieldName: 'meals',
-                sourceLanguage,
-                targetLanguage: targetLang,
-                originalText: JSON.stringify(meals),
-                translatedText: JSON.stringify(translatedMeals),
-                translatedBy: `user:${userId}`,
-              });
+              const sourceJson = JSON.stringify(meals);
+              const existingM = existingByField.get('meals');
+              if (existingM && existingM.originalText === sourceJson && existingM.translatedText) {
+                // up-to-date, skip
+              } else {
+                const translatedMeals = await Promise.all(
+                  meals.map(async (meal: any) => ({
+                    ...meal,
+                    name: meal.name ? await translateText(meal.name, targetLang, sourceLanguage) : meal.name,
+                    description: meal.description ? await translateText(meal.description, targetLang, sourceLanguage) : meal.description,
+                  }))
+                );
+                await saveTranslation({
+                  entityType: 'tour',
+                  entityId: tourId,
+                  fieldName: 'meals',
+                  sourceLanguage,
+                  targetLanguage: targetLang,
+                  originalText: sourceJson,
+                  translatedText: JSON.stringify(translatedMeals),
+                  translatedBy: `user:${userId}`,
+                });
+              }
             }
           } catch (e) {
             console.warn(`[Translation Agent] Failed to translate meals for tour ${tourId}:`, e);
@@ -487,10 +589,171 @@ export async function translateTour(
 }
 
 /**
+ * v78q Sprint 9 #1: Generic registry-driven translation.
+ *
+ * Reads the entity row by (entityType, entityId), looks up the registry to
+ * decide which scalar + JSON fields to translate, then iterates with the same
+ * skip-if-unchanged + dictionary-aware machinery as translateTour.
+ *
+ * Adding a new entity type now means registering it in TRANSLATABLE_ENTITIES
+ * — no changes here.
+ */
+export async function translateEntity(
+  entityType: string,
+  entityId: number,
+  targetLanguages: Language[],
+  sourceLanguage: Language = "zh-TW",
+  userId: number
+): Promise<{ success: boolean; translatedLanguages: Language[]; errors: string[] }> {
+  const { TRANSLATABLE_ENTITIES, applyToJsonPath } = await import("./translationRegistry");
+  const entityDef = (TRANSLATABLE_ENTITIES as any)[entityType];
+  if (!entityDef) {
+    return { success: false, translatedLanguages: [], errors: [`Entity type "${entityType}" not registered`] };
+  }
+
+  const db = await getDb();
+  if (!db) return { success: false, translatedLanguages: [], errors: ["Database not available"] };
+
+  // Dynamically import the table from drizzle schema by name
+  const schema = await import("../drizzle/schema");
+  const table = (schema as any)[entityDef.tableName];
+  if (!table) {
+    return { success: false, translatedLanguages: [], errors: [`Table "${entityDef.tableName}" not in schema`] };
+  }
+
+  const [row] = await db.select().from(table).where(eq(table[entityDef.idColumn], entityId));
+  if (!row) {
+    return { success: false, translatedLanguages: [], errors: [`${entityType} #${entityId} not found`] };
+  }
+
+  const errors: string[] = [];
+  const translatedLanguages: Language[] = [];
+
+  for (const targetLang of targetLanguages) {
+    if (targetLang === sourceLanguage) continue;
+
+    try {
+      // Pre-fetch existing translations for skip-if-unchanged
+      const existingRows = await db
+        .select()
+        .from(translations)
+        .where(
+          and(
+            eq(translations.entityType, entityType as any),
+            eq(translations.entityId, entityId),
+            eq(translations.targetLanguage, targetLang)
+          )
+        );
+      const existingByField = new Map<string, { originalText: string | null; translatedText: string | null }>();
+      for (const r of existingRows as any[]) {
+        existingByField.set(r.fieldName, {
+          originalText: r.originalText,
+          translatedText: r.translatedText,
+        });
+      }
+
+      let skipped = 0;
+      let translated = 0;
+
+      // 1. Scalar fields
+      for (const fieldName of entityDef.scalarFields) {
+        const value = (row as any)[fieldName];
+        if (!value || typeof value !== "string") continue;
+
+        const existing = existingByField.get(fieldName);
+        if (existing && existing.originalText === value && existing.translatedText) {
+          skipped++;
+          continue;
+        }
+
+        const translatedText = await translateText(value, targetLang, sourceLanguage);
+        translated++;
+        await saveTranslation({
+          entityType: entityType as any,
+          entityId,
+          fieldName,
+          sourceLanguage,
+          targetLanguage: targetLang,
+          originalText: value,
+          translatedText,
+          translatedBy: `user:${userId}`,
+        });
+      }
+
+      // 2. JSON fields with nested-path rules (registry-driven)
+      for (const jf of entityDef.jsonFields) {
+        const raw = (row as any)[jf.name];
+        if (!raw) continue;
+        const sourceJson = typeof raw === "string" ? raw : JSON.stringify(raw);
+
+        const existing = existingByField.get(jf.name);
+        if (existing && existing.originalText === sourceJson && existing.translatedText) {
+          skipped++;
+          continue;
+        }
+
+        let parsed: any;
+        try {
+          parsed = typeof raw === "string" ? JSON.parse(raw) : JSON.parse(JSON.stringify(raw));
+        } catch (e) {
+          console.warn(`[translateEntity] ${entityType}#${entityId}.${jf.name} invalid JSON, skipping`);
+          continue;
+        }
+
+        // Apply each rule via applyToJsonPath, transforming string fields via translateText
+        await applyToJsonPath(parsed, jf.rules, async (s) => {
+          if (typeof s !== "string" || !s.trim()) return s;
+          return await translateText(s, targetLang, sourceLanguage);
+        });
+        translated++;
+
+        await saveTranslation({
+          entityType: entityType as any,
+          entityId,
+          fieldName: jf.name,
+          sourceLanguage,
+          targetLanguage: targetLang,
+          originalText: sourceJson,
+          translatedText: JSON.stringify(parsed),
+          translatedBy: `user:${userId}`,
+        });
+      }
+
+      if (skipped > 0 || translated > 0) {
+        console.log(
+          `[translateEntity] ${entityType}#${entityId} → ${targetLang}: ${translated} translated, ${skipped} skipped`
+        );
+      }
+      translatedLanguages.push(targetLang);
+    } catch (err) {
+      const msg = (err as Error).message;
+      console.error(`[translateEntity] ${entityType}#${entityId} → ${targetLang} failed:`, msg);
+      errors.push(`${targetLang}: ${msg}`);
+    }
+  }
+
+  return { success: errors.length === 0, translatedLanguages, errors };
+}
+
+/**
+ * Translate one customer inquiry via the registry. Convenience wrapper —
+ * same one-liner as `translateEntity('inquiry', ...)` but discoverable in
+ * editor autocomplete.
+ */
+export async function translateInquiry(
+  inquiryId: number,
+  targetLanguages: Language[] = ["en"],
+  sourceLanguage: Language = "zh-TW",
+  userId: number = 1
+) {
+  return translateEntity("inquiry", inquiryId, targetLanguages, sourceLanguage, userId);
+}
+
+/**
  * 儲存翻譯到資料庫
  */
 async function saveTranslation(data: {
-  entityType: 'tour' | 'tour_departure' | 'page' | 'ui_element' | 'notification';
+  entityType: 'tour' | 'tour_departure' | 'page' | 'ui_element' | 'notification' | 'inquiry' | 'destination' | 'homepage_content';
   entityId: number;
   fieldName: string;
   sourceLanguage: string;

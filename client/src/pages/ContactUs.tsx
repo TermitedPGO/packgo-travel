@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { MessageSquare, Phone, Mail, MapPin, Clock, CheckCircle } from "lucide-react";
+import { MessageSquare, Phone, Mail, MapPin, Clock, CheckCircle, Map, Sparkles, Plane, Hotel, FileText, Anchor } from "lucide-react";
 import { useLocale } from "@/contexts/LocaleContext";
 import type { z } from "zod";
 
@@ -41,13 +41,14 @@ export default function ContactUs() {
     { value: t('contactUs.subjects.other'), label: t('contactUs.subjects.other') },
   ];
 
-  const QUICK_SUBJECTS = [
-    { value: t('contactUs.subjects.tourBooking'), emoji: "🗺️" },
-    { value: t('contactUs.subjects.customTour'), emoji: "✨" },
-    { value: t('contactUs.subjects.flightTicket'), emoji: "✈️" },
-    { value: t('contactUs.subjects.hotelBooking'), emoji: "🏨" },
-    { value: t('contactUs.subjects.visaService'), emoji: "📋" },
-    { value: t('contactUs.subjects.cruiseTour'), emoji: "🚢" },
+  // v78h: chip icons via lucide-react SVG (replaces emoji)
+  const QUICK_SUBJECTS: { value: string; icon: React.ElementType }[] = [
+    { value: t('contactUs.subjects.tourBooking'), icon: Map },
+    { value: t('contactUs.subjects.customTour'), icon: Sparkles },
+    { value: t('contactUs.subjects.flightTicket'), icon: Plane },
+    { value: t('contactUs.subjects.hotelBooking'), icon: Hotel },
+    { value: t('contactUs.subjects.visaService'), icon: FileText },
+    { value: t('contactUs.subjects.cruiseTour'), icon: Anchor },
   ];
 
   const {
@@ -221,7 +222,9 @@ export default function ContactUs() {
                   </Label>
                   {/* Quick-pick chips */}
                   <div className="flex flex-wrap gap-2 mb-2.5">
-                    {QUICK_SUBJECTS.map((s) => (
+                    {QUICK_SUBJECTS.map((s) => {
+                      const Icon = s.icon;
+                      return (
                       <button
                         key={s.value}
                         type="button"
@@ -232,10 +235,11 @@ export default function ContactUs() {
                             : "border-gray-300 text-gray-600 hover:border-black hover:text-black bg-white"
                         }`}
                       >
-                        <span>{s.emoji}</span>
+                        <Icon className="h-3.5 w-3.5" />
                         <span>{s.value}</span>
                       </button>
-                    ))}
+                      );
+                    })}
                   </div>
                   <Controller
                     name="subject"

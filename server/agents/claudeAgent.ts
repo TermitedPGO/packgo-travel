@@ -38,6 +38,25 @@ export const CLAUDE_MODELS = {
 
 export type ClaudeModel = typeof CLAUDE_MODELS[keyof typeof CLAUDE_MODELS];
 
+/**
+ * v67: Anthropic prompt caching has model-specific minimum block sizes:
+ *   - Sonnet / Opus: 1024 tokens
+ *   - Haiku:         2048 tokens
+ * Below the minimum, `cache_control` is ignored — you pay full price AND get
+ * no cache hit. Previously we used a 500-character heuristic which is ≈125
+ * tokens — way below either threshold, so caching was effectively disabled
+ * for short prompts and silently wasted cache_control on most requests.
+ *
+ * This helper estimates tokens at ~3.5 chars/token (conservative for CJK)
+ * and returns true only when the block is large enough to actually save money.
+ */
+function shouldUsePromptCache(text: string, model: string): boolean {
+  if (!text) return false;
+  const estimatedTokens = Math.floor(text.length / 3.5);
+  const minTokens = model.includes("haiku") ? 2048 : 1024;
+  return estimatedTokens >= minTokens;
+}
+
 export interface ClaudeMessage {
   role: 'user' | 'assistant';
   content: string;
@@ -309,7 +328,7 @@ export class ClaudeAgent {
       // P2: Build system prompt with cache_control if caching is enabled
       // Caching is enabled by default for system prompts >= 1024 tokens (Haiku minimum)
       const systemPromptText = options?.systemPrompt || '';
-      const shouldCache = options?.enableCaching !== false && systemPromptText.length >= 500;
+      const shouldCache = options?.enableCaching !== false && shouldUsePromptCache(systemPromptText, this.model);
       
       const systemParam = shouldCache && systemPromptText
         ? [
@@ -420,7 +439,7 @@ export class ClaudeAgent {
     try {
       // P2: Build system prompt with cache_control
       const systemPromptText = options?.systemPrompt || '';
-      const shouldCache = options?.enableCaching !== false && systemPromptText.length >= 500;
+      const shouldCache = options?.enableCaching !== false && shouldUsePromptCache(systemPromptText, this.model);
       
       const systemParam = shouldCache && systemPromptText
         ? [
@@ -561,7 +580,7 @@ export class ClaudeAgent {
     }
 
     // P2: Apply Prompt Caching to system prompt
-    const shouldCache = options?.enableCaching !== false && systemPromptText.length >= 500;
+    const shouldCache = options?.enableCaching !== false && shouldUsePromptCache(systemPromptText, this.model);
     const systemParam = shouldCache
       ? [
           {
@@ -720,7 +739,7 @@ export class ClaudeAgent {
   ): AsyncGenerator<string, void, unknown> {
     const startTime = Date.now();
     const systemPromptText = options?.systemPrompt || '';
-    const shouldCache = options?.enableCaching !== false && systemPromptText.length >= 500;
+    const shouldCache = options?.enableCaching !== false && shouldUsePromptCache(systemPromptText, this.model);
 
     const systemParam = shouldCache && systemPromptText
       ? [{ type: 'text' as const, text: systemPromptText, cache_control: { type: 'ephemeral' as const } }]

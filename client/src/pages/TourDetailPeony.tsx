@@ -10,6 +10,8 @@
 
 import React, { useEffect, useState, useRef, useMemo } from "react";
 import SimilarTours from "@/components/SimilarTours";
+import TourDeparturesTable from "@/components/TourDeparturesTable";
+import { recordTourView } from "@/components/HomeWelcomeBack";
 import {
   Dialog,
   DialogContent,
@@ -70,10 +72,15 @@ import {
   ImageIcon,
   Globe,
   Ticket,
-  ExternalLink
+  ExternalLink,
+  DollarSign,
+  // v78t: trust signals strip
+  ShieldCheck,
+  Lock,
 } from "lucide-react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import TourRouteMap from "@/components/tour-detail/TourRouteMap";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { useLocale } from "@/contexts/LocaleContext";
 import { translateDestination } from "@/utils/locationMapping";
@@ -117,7 +124,7 @@ const DeparturePriceCalendar = ({
   themeColor: ReturnType<typeof getThemeColorByDestination>;
   onSelectDeparture: (departureId: number) => void;
 }) => {
-  const { t, tArray } = useLocale();
+  const { t, tArray, formatPrice, currencySymbol } = useLocale();
   const { data: departures, isLoading } = trpc.departures.list.useQuery({ tourId });
   const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [selectedDeparture, setSelectedDeparture] = useState<number | null>(null);
@@ -204,15 +211,14 @@ const DeparturePriceCalendar = ({
     );
   }
 
-  // 如果沒有出發日期，顯示基本價格
+  // 如果沒有出發日期，顯示基本價格 (v78o: 用 formatPrice 自動依使用者選的幣別轉換)
   if (!departures || departures.length === 0) {
     return (
       <div className="bg-gray-50 p-8 text-center mb-8">
         <p className="text-sm text-gray-500 mb-2">{t('tourDetail.pricePerPerson')}</p>
         <div className="flex items-baseline justify-center gap-2">
-          <span className="text-sm" style={{ color: themeColor.secondary }}>NT$</span>
           <span className="text-5xl font-bold" style={{ color: themeColor.primary }}>
-            {basePrice ? basePrice.toLocaleString() : t('tourDetail.inquirePrice')}
+            {basePrice ? formatPrice(basePrice, "TWD") : t('tourDetail.inquirePrice')}
           </span>
           <span className="text-gray-500">{t('tourDetail.startingFrom')}</span>
         </div>
@@ -288,8 +294,9 @@ const DeparturePriceCalendar = ({
           const isPast = date && date < new Date(new Date().setHours(0, 0, 0, 0));
           const isFull = departure?.status === 'full';
           const isConfirmed = departure?.status === 'confirmed';
-          const remainingSeats = departure ? (departure.totalSlots ?? 0) - (departure.bookedSlots ?? 0) : 0;
-          const isLowSeats = !isFull && departure && departure.totalSlots && remainingSeats <= 5 && remainingSeats > 0;
+          // Round 66: stopped surfacing numeric "剩 X 位" because imported tours
+          // use LionTravel's placeholder `AvailableVacancy` field which is not
+          // real inventory data. We rely on the status enum instead.
           
           return (
             <div 
@@ -333,17 +340,18 @@ const DeparturePriceCalendar = ({
                               ✓ {t('tourDetail.confirmed')}
                             </span>
                           )}
-                          <div 
+                          <div
                             className="text-xs font-bold px-2 py-1 rounded-lg text-white shadow-sm"
                             style={{ backgroundColor: themeColor.secondary }}
                           >
                             ${(departure.adultPrice || basePrice).toLocaleString()}
                           </div>
-                          {(departure.totalSlots && departure.totalSlots > 0) && (
-                            <p className={`text-[10px] mt-1 font-medium ${isLowSeats ? 'text-red-500 font-bold' : 'text-gray-500'}`}>
-                              {isLowSeats
-                                ? `⚡ ${(t('tourDetail.remainingSeats')).replace('{seats}', String(remainingSeats))}`
-                                : (t('tourDetail.remainingSeats')).replace('{seats}', String(remainingSeats))}
+                          {/* Round 66: status badge replaces numeric seat count.
+                              For 'open', show a subtle pill; 'confirmed' already
+                              renders above as a success badge. */}
+                          {departure.status === 'open' && (
+                            <p className="text-[10px] mt-1 font-medium text-emerald-600">
+                              {t('tourDetail.statusOpen')}
                             </p>
                           )}
                         </>
@@ -375,37 +383,57 @@ const DeparturePriceCalendar = ({
                     <span className="text-gray-400 mx-2">~</span>
                     {retDate.getFullYear()}/{retDate.getMonth() + 1}/{retDate.getDate()}
                   </p>
-                  <p className="text-sm text-gray-500 mt-1">
-                    {(t('tourDetail.remainingSeatsLabel')).replace('{seats}', String(dep.totalSlots - (dep.bookedSlots || 0)))}
+                  {/* Round 66: replaced numeric seat count with a status pill.
+                      LionTravel's public API doesn't expose real remaining seats,
+                      and we hadn't taken any bookings ourselves for imported tours,
+                      so the number was misleading. */}
+                  <p className="text-sm text-gray-500 mt-1 inline-flex items-center gap-2">
+                    {dep.status === 'full' ? (
+                      <span className="px-2 py-0.5 rounded-md bg-gray-100 text-gray-500 text-xs font-medium">
+                        {t('tourDetail.soldOut')}
+                      </span>
+                    ) : dep.status === 'confirmed' ? (
+                      <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 text-xs font-medium">
+                        ✓ {t('tourDetail.confirmed')}
+                      </span>
+                    ) : dep.status === 'cancelled' ? (
+                      <span className="px-2 py-0.5 rounded-md bg-red-50 text-red-600 text-xs font-medium">
+                        {t('tourDetail.statusCancelled')}
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-xs font-medium">
+                        ● {t('tourDetail.statusOpen')}
+                      </span>
+                    )}
                   </p>
                 </div>
                 <div className="text-right">
                   <p className="text-sm text-gray-500 mb-1">{t('tourDetail.pricePerPerson')}</p>
                   <p className="text-3xl font-bold" style={{ color: themeColor.secondary }}>
-                    NT$ {(dep.adultPrice || basePrice).toLocaleString()}
+                    {formatPrice(Number(dep.adultPrice || basePrice), (dep.currency as any) || "TWD")}
                   </p>
-                  {/* Round 60: Age-based pricing breakdown */}
+                  {/* Round 60: Age-based pricing breakdown — v78o: formatPrice handles currency conversion */}
                   <div className="mt-2 text-left space-y-1">
                     <p className="text-xs text-gray-500">
                       <span className="font-medium text-gray-700">{t('tourDetail.adultPrice')}：</span>
-                      NT$ {(dep.adultPrice || basePrice).toLocaleString()}
+                      {formatPrice(Number(dep.adultPrice || basePrice), (dep.currency as any) || "TWD")}
                     </p>
                     {(dep.childPriceWithBed ?? 0) > 0 && (
                       <p className="text-xs text-gray-500">
                         <span className="font-medium text-gray-700">{t('tourDetail.childWithBed')}：</span>
-                        NT$ {(dep.childPriceWithBed ?? 0).toLocaleString()}
+                        {formatPrice(Number(dep.childPriceWithBed ?? 0), (dep.currency as any) || "TWD")}
                       </p>
                     )}
                     {(dep.childPriceNoBed ?? 0) > 0 && (
                       <p className="text-xs text-gray-500">
                         <span className="font-medium text-gray-700">{t('tourDetail.childNoBed')}：</span>
-                        NT$ {(dep.childPriceNoBed ?? 0).toLocaleString()}
+                        {formatPrice(Number(dep.childPriceNoBed ?? 0), (dep.currency as any) || "TWD")}
                       </p>
                     )}
                     {(dep.infantPrice ?? 0) > 0 && (
                       <p className="text-xs text-gray-500">
                         <span className="font-medium text-gray-700">{t('tourDetail.infantPrice')}：</span>
-                        NT$ {(dep.infantPrice ?? 0).toLocaleString()}
+                        {formatPrice(Number(dep.infantPrice ?? 0), (dep.currency as any) || "TWD")}
                       </p>
                     )}
                   </div>
@@ -511,14 +539,14 @@ const getThemeColorByDestination = (country: string | null | undefined) => {
 };
 
 // 交通類型圖標
-const TransportIcon = ({ type, className = "h-5 w-5" }: { type: string; className?: string }) => {
+const TransportIcon = ({ type, className = "h-5 w-5", style }: { type: string; className?: string; style?: React.CSSProperties }) => {
   switch (type) {
-    case 'FLIGHT': return <Plane className={className} />;
-    case 'TRAIN': return <Train className={className} />;
-    case 'CRUISE': return <Ship className={className} />;
-    case 'BUS': return <Bus className={className} />;
-    case 'CAR': return <Car className={className} />;
-    default: return <Plane className={className} />;
+    case 'FLIGHT': return <Plane className={className} style={style} />;
+    case 'TRAIN': return <Train className={className} style={style} />;
+    case 'CRUISE': return <Ship className={className} style={style} />;
+    case 'BUS': return <Bus className={className} style={style} />;
+    case 'CAR': return <Car className={className} style={style} />;
+    default: return <Plane className={className} style={style} />;
   }
 };
 
@@ -1291,7 +1319,7 @@ interface HotelDetail {
 
 // 飯店卡片組件 - 重新設計版（含彈窗功能）
 const HotelCard = ({ hotel, themeColor }: { hotel: any; themeColor: ReturnType<typeof getThemeColorByDestination> }) => {
-  const { t } = useLocale();
+  const { t, formatPrice } = useLocale();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const starRating = hotel.rating || parseStarRating(hotel.stars);
@@ -1480,7 +1508,7 @@ const HotelCard = ({ hotel, themeColor }: { hotel: any; themeColor: ReturnType<t
                   </div>
                   <div className="text-right">
                     <p className="text-sm text-gray-500">{t('tourDetail.perNightExtra')}</p>
-                    <p className="font-bold" style={{ color: themeColor.secondary }}>+NT$2,000</p>
+                    <p className="font-bold" style={{ color: themeColor.secondary }}>+{formatPrice(2000, "TWD")}</p>
                   </div>
                 </div>
               </>
@@ -1640,7 +1668,7 @@ const PriceComparisonWidget = ({
   tourPrice: number;
   themeColor: ReturnType<typeof getThemeColorByDestination>;
 }) => {
-  const { t } = useLocale();
+  const { t, formatPrice } = useLocale();
   const utils = trpc.useUtils();
   const trackClickMutation = trpc.affiliate.trackClick.useMutation();
   const { data: comparison, isLoading } = trpc.affiliate.getPriceComparison.useQuery({ tourId });
@@ -1689,7 +1717,7 @@ const PriceComparisonWidget = ({
           <div key={i} className="bg-white rounded-xl border border-gray-100 p-4">
             <p className="text-xs text-gray-500 mb-1">{item.label}</p>
             <p className="text-base font-bold text-gray-900">
-              {item.value ? `NT$ ${item.value.toLocaleString()}` : t('tourDetail.priceComparison.inquire')}
+              {item.value ? formatPrice(item.value, "TWD") : t('tourDetail.priceComparison.inquire')}
             </p>
             {item.onClick && item.value && (
               <button
@@ -1732,7 +1760,7 @@ const PriceComparisonWidget = ({
 };
 
 export default function TourDetailPeony() {
-  const { t, language } = useLocale();
+  const { t, language, formatPrice } = useLocale();
   const [matchSipin, paramsSipin] = useRoute("/tours-sipin/:id");
   const [matchTours, paramsTours] = useRoute("/tours/:id");
   const [matchMinimal, paramsMinimal] = useRoute("/tours-minimal/:id");
@@ -1745,6 +1773,12 @@ export default function TourDetailPeony() {
     { id: tourId! },
     { enabled: !!tourId }
   );
+
+  // v78m Sprint 5C: record this view in localStorage for the "Recently viewed"
+  // section on the homepage (only fires when we successfully load a tour)
+  useEffect(() => {
+    if (tourId) recordTourView(tourId);
+  }, [tourId]);
 
   // 多語言翻譯查詢：語系非 zh-TW 時自動載入翻譯
   const { data: tourTranslations } = trpc.translation.getTourTranslations.useQuery(
@@ -1911,10 +1945,9 @@ export default function TourDetailPeony() {
 
   const [activeTab, setActiveTab] = useState("overview");
   // 預設展開所有天數
-  const [expandedDays, setExpandedDays] = useState<Set<number>>(() => {
-    // 預設展開前 10 天（足夠涵蓋大多數行程）
-    return new Set(Array.from({ length: 20 }, (_, i) => i));
-  });
+  // v78n Sprint 6C: default to collapsed (only Day 1 open) so users can scan
+  // the itinerary at a glance, then expand the days they care about.
+  const [expandedDays, setExpandedDays] = useState<Set<number>>(() => new Set([0]));
   const [selectedMealDetail, setSelectedMealDetail] = useState<MealDetail | null>(null);
   const [isMealDetailOpen, setIsMealDetailOpen] = useState(false);
   const [selectedAttractionDetail, setSelectedAttractionDetail] = useState<AttractionDetail | null>(null);
@@ -2025,30 +2058,33 @@ export default function TourDetailPeony() {
     }
     const source = getTranslated('keyFeatures', tour?.keyFeatures) ?? tour?.keyFeatures;
     return typeof source === 'string' ? parseJSON(source, []) : (source || []);
-  }, [isEditMode, editedTour?.keyFeatures, tour?.keyFeatures, language]);
+  }, [isEditMode, editedTour?.keyFeatures, tour?.keyFeatures, language, tourTranslations]);
 
   const attractions = useMemo(() => parseJSON(tour?.attractions, []), [tour?.attractions]);
   const hotels = useMemo(() => {
     const source = getTranslated('hotels', tour?.hotels) ?? tour?.hotels;
     return parseJSON(source, []);
-  }, [tour?.hotels, language]);
+  }, [tour?.hotels, language, tourTranslations]);
   const meals = useMemo(() => {
     const source = getTranslated('meals', tour?.meals) ?? tour?.meals;
     return parseJSON(source, {});
-  }, [tour?.meals, language]);
+  }, [tour?.meals, language, tourTranslations]);
+  // v78p: Add `tourTranslations` to deps — was missing, causing stale memos
+  // when async translation data loaded AFTER initial render. Symptom: pages
+  // showed Chinese until next state change.
   const itineraryDetailed = useMemo(() => {
     const source = getTranslated('itineraryDetailed', tour?.itineraryDetailed) ?? tour?.itineraryDetailed;
     return parseJSON(source, []);
-  }, [tour?.itineraryDetailed, language]);
+  }, [tour?.itineraryDetailed, language, tourTranslations]);
   const costExplanation = useMemo(() => parseJSON(
     getTranslated('costExplanation', tour?.costExplanation) ?? tour?.costExplanation, null
-  ), [tour?.costExplanation, language]);
+  ), [tour?.costExplanation, language, tourTranslations]);
   const transportationInfo = useMemo(() => parseJSON(
     getTranslated('flights', tour?.flights) ?? tour?.flights, null
-  ), [tour?.flights, language]);
+  ), [tour?.flights, language, tourTranslations]);
   const noticeDetailed = useMemo(() => parseJSON(
     getTranslated('noticeDetailed', tour?.noticeDetailed) ?? tour?.noticeDetailed, null
-  ), [tour?.noticeDetailed, language]);
+  ), [tour?.noticeDetailed, language, tourTranslations]);
 
   // displayItinerary: 編輯模式下從 editedTour 讀取，消除 JSX 中重複 parse
   const displayItinerary = useMemo(() => {
@@ -2100,6 +2136,14 @@ export default function TourDetailPeony() {
     : (tour.heroImage || tour.imageUrl || "https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=1200");
   // 翻譯覆蓋：文字欄位
   const displayTitle = getTranslated('title', tour.title) ?? tour.title;
+  // v78j: split long titles into clean primary headline + subtitle chips.
+  // Heuristic: if first segment is < 6 chars (likely a marketing prefix like
+  // "好運發發發"), skip it and use the second segment as primary.
+  const _segments = (displayTitle || "").split(/[|｜]/).map(s => s.trim()).filter(Boolean);
+  const _isMarketingPrefix = (s: string) => s.length < 6 && !/[0-9]|day|night|天|夜/i.test(s);
+  const _primaryIdx = _segments.length > 1 && _isMarketingPrefix(_segments[0]) ? 1 : 0;
+  const primaryTitle = _segments[_primaryIdx] || displayTitle || "";
+  const titleChips = _segments.filter((_, i) => i !== _primaryIdx);
   const displayDescription = getTranslated('description', tour.description) ?? tour.description;
   const displayHeroSubtitle = getTranslated('heroSubtitle', (tour as any).heroSubtitle) ?? (tour as any).heroSubtitle;
   // 導覽項目
@@ -2176,8 +2220,8 @@ export default function TourDetailPeony() {
         </div>
       </div>
 
-      {/* Hero Section */}
-      <section className="relative h-[45vh] sm:h-[55vh] md:h-[60vh] min-h-[320px] max-h-[600px]">
+      {/* Hero Section — v78r: compressed (was 60vh) so the title doesn't crowd out the photo */}
+      <section className="relative h-[35vh] sm:h-[40vh] md:h-[45vh] min-h-[280px] max-h-[480px]">
         {isEditMode ? (
           <div className="absolute inset-0">
             <EditableImage
@@ -2208,18 +2252,39 @@ export default function TourDetailPeony() {
               value={displayTour.title || ""}
               onSave={(value) => updateField("title", value)}
               isEditing={isEditMode}
-              className="text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-4 max-w-4xl leading-tight drop-shadow-lg"
+              className="text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-3 max-w-4xl leading-tight drop-shadow-lg"
               placeholder={t('tourDetail.editTitlePlaceholder')}
               as="h1"
               darkBackground
             />
           ) : (
-            <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-4 max-w-4xl leading-tight drop-shadow-lg">
-              {displayTitle}
-            </h1>
+            <>
+              <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-3 max-w-4xl leading-tight drop-shadow-lg" title={displayTitle}>
+                {primaryTitle}
+              </h1>
+              {/* v78j: highlight chips from secondary title segments */}
+              {/* v78r: keep only short, punchy chips (≤ 24 chars) max 2; the long
+                  marketing copy was duplicating the main title and crowding the hero */}
+              {titleChips.length > 0 && (() => {
+                const punchy = titleChips.filter((c) => c.length <= 24).slice(0, 2);
+                if (punchy.length === 0) return null;
+                return (
+                  <div className="flex flex-wrap items-center gap-2 mb-4 max-w-3xl">
+                    {punchy.map((chip, i) => (
+                      <span
+                        key={i}
+                        className="inline-flex items-center px-2.5 py-1 rounded-md bg-white/15 backdrop-blur-sm border border-white/20 text-xs md:text-sm text-white font-medium"
+                      >
+                        {chip}
+                      </span>
+                    ))}
+                  </div>
+                );
+              })()}
+            </>
           )}
 
-          {/* Subtitle / Poetic Title */}
+          {/* Subtitle / Poetic Title — v78p: respect translation lookup for EN */}
           {(displayTour.poeticTitle || isEditMode) && (
             isEditMode ? (
               <EditableText
@@ -2233,7 +2298,7 @@ export default function TourDetailPeony() {
               />
             ) : (
               <p className="text-xl md:text-2xl text-white/90 mb-6 max-w-2xl">
-                {displayTour.poeticTitle}
+                {getTranslated('poeticTitle', displayTour.poeticTitle) ?? displayTour.poeticTitle}
               </p>
             )
           )}
@@ -2276,45 +2341,172 @@ export default function TourDetailPeony() {
         </div>
       </section>
 
-      {/* Sticky Navigation Tabs */}
-      <nav className="sticky top-[80px] z-40 bg-white shadow-sm">
+      {/* v78t: Trust badges strip — under hero, above Quick Facts.
+          Reinforces decision with visible legal credentials before the user even
+          reaches the price + Book CTA. CST + TCRF are California Seller of Travel
+          law requirements; Stripe + 24h support are competitive differentiators. */}
+      <section className="bg-gray-50 border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 md:px-6 py-2.5">
+          <div className="flex items-center justify-center md:justify-between gap-3 md:gap-6 flex-wrap text-[11px] md:text-xs text-gray-600">
+            <div className="inline-flex items-center gap-1.5">
+              <ShieldCheck className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0" />
+              <span className="hidden sm:inline">{language === 'en' ? 'California Seller of Travel' : '加州合法旅行社'} </span>
+              <span className="font-semibold text-gray-800">CST #2166984</span>
+            </div>
+            <div className="inline-flex items-center gap-1.5">
+              <Heart className="h-3.5 w-3.5 text-pink-600 flex-shrink-0" />
+              <span>{language === 'en' ? 'TCRF Consumer Protection' : 'TCRF 消費者保障'}</span>
+            </div>
+            <div className="inline-flex items-center gap-1.5">
+              <Lock className="h-3.5 w-3.5 text-blue-600 flex-shrink-0" />
+              <span>{language === 'en' ? 'Stripe Encrypted Payment' : 'Stripe 加密付款'}</span>
+            </div>
+            <div className="inline-flex items-center gap-1.5">
+              <PhoneCall className="h-3.5 w-3.5 text-amber-600 flex-shrink-0" />
+              <span>{language === 'en' ? '24-hour customer support' : '24 小時客服'}</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* v78o: Quick Facts Strip — 切入主題 — 讓使用者 3 秒看到核心資訊 */}
+      <section className="bg-white border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 md:px-6 py-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-4">
+            {/* 天數 */}
+            <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-100">
+              <Clock className="h-4 w-4 flex-shrink-0" style={{ color: themeColor.primary }} />
+              <div className="min-w-0">
+                <p className="text-[10px] uppercase tracking-wide text-gray-500 leading-none">{t('tourDetail.duration') || (language === 'en' ? 'Duration' : '行程天數')}</p>
+                <p className="text-sm font-bold text-gray-900 mt-0.5 truncate">{tour.duration || t('tourDetail.multiDayTour')}</p>
+              </div>
+            </div>
+
+            {/* 城市數 */}
+            <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-100">
+              <MapPin className="h-4 w-4 flex-shrink-0" style={{ color: themeColor.primary }} />
+              <div className="min-w-0">
+                <p className="text-[10px] uppercase tracking-wide text-gray-500 leading-none">{language === 'en' ? 'Cities' : '途經城市'}</p>
+                <p className="text-sm font-bold text-gray-900 mt-0.5 truncate">
+                  {(() => {
+                    const rawCities = (tour.destinationCity || tour.destinationCountry || '').split(/[,、]/).map((c: string) => c.trim()).filter(Boolean);
+                    const n = rawCities.length;
+                    if (n === 0) return tour.destinationCountry ? translateDestination(tour.destinationCountry, language) : '—';
+                    return language === 'en' ? `${n} ${n === 1 ? 'city' : 'cities'}` : `${n} 座城市`;
+                  })()}
+                </p>
+              </div>
+            </div>
+
+            {/* 交通 */}
+            {transportationInfo?.type && (
+              <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-100">
+                <TransportIcon type={transportationInfo.type} className="h-4 w-4 flex-shrink-0" style={{ color: themeColor.primary }} />
+                <div className="min-w-0">
+                  <p className="text-[10px] uppercase tracking-wide text-gray-500 leading-none">{language === 'en' ? 'Transport' : '主要交通'}</p>
+                  <p className="text-sm font-bold text-gray-900 mt-0.5 truncate">
+                    {language === 'en'
+                      ? (TRANSPORT_TYPE_EN[transportationInfo.typeName || ''] || transportationInfo.typeName || '—')
+                      : (transportationInfo.typeName || '—')}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* 起價 */}
+            <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border" style={{ backgroundColor: `${themeColor.primary}08`, borderColor: `${themeColor.primary}30` }}>
+              <DollarSign className="h-4 w-4 flex-shrink-0" style={{ color: themeColor.primary }} />
+              <div className="min-w-0">
+                <p className="text-[10px] uppercase tracking-wide text-gray-500 leading-none">{language === 'en' ? 'From / person' : '每人起價'}</p>
+                <p className="text-sm font-bold mt-0.5 truncate" style={{ color: themeColor.primary }}>
+                  {tour.price ? formatPrice(Number(tour.price), (tour.priceCurrency as any) || "TWD") : t('tourDetail.inquirePrice')}
+                </p>
+              </div>
+            </div>
+
+            {/* 立即預訂 CTA — 隱藏在手機，桌面顯示 */}
+            <button
+              onClick={() => navigate(`/book/${tour.id}`)}
+              className="hidden lg:flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-white font-semibold text-sm transition-opacity hover:opacity-90"
+              style={{ backgroundColor: themeColor.primary }}
+            >
+              <Calendar className="h-4 w-4" />
+              {t('tourDetail.bookNowBtn')}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* Sticky Navigation Tabs — v78r: Lion-Travel pattern: nav + price + Book CTA all in
+          one row, always visible. Print/PDF/Share demoted to icon-only secondary actions. */}
+      <nav className="sticky top-[80px] z-40 bg-white shadow-sm border-b border-gray-100">
         <div className="max-w-7xl mx-auto px-2 md:px-6">
-          <div className="flex items-center justify-between overflow-x-auto scrollbar-hide">
-            <NavTabs 
-              items={navItems} 
-              activeTab={activeTab} 
-              onTabClick={scrollToSection}
-              themeColor={themeColor}
-            />
-            
-            {/* Action Buttons */}
-            <div className="hidden md:flex items-center gap-4">
-              <button
-                onClick={() => window.open(`/tours/${tourId}/print`, '_blank')}
-                className="flex items-center gap-2 text-sm text-gray-600 hover:text-black transition-colors"
+          <div className="flex items-center justify-between gap-2 md:gap-4">
+            {/* Left: section nav */}
+            <div className="flex-1 min-w-0 overflow-x-auto scrollbar-hide">
+              <NavTabs
+                items={navItems}
+                activeTab={activeTab}
+                onTabClick={scrollToSection}
+                themeColor={themeColor}
+              />
+            </div>
+
+            {/* Right: price + Book CTA + secondary actions (icon-only) */}
+            <div className="flex items-center gap-2 md:gap-3 shrink-0">
+              {/* Price label — desktop only, very prominent */}
+              <div className="hidden lg:flex flex-col items-end leading-tight">
+                <span className="text-[10px] uppercase tracking-wide text-gray-400">
+                  {t('tourDetail.pricePerPersonFrom') || 'From / person'}
+                </span>
+                <span className="text-base font-bold" style={{ color: themeColor.primary }}>
+                  {tour.price
+                    ? formatPrice(Number(tour.price), (tour.priceCurrency as any) || 'TWD')
+                    : t('tourDetail.inquirePrice')}
+                </span>
+              </div>
+
+              {/* Book Now CTA — always visible (desktop + mobile) */}
+              <Button
+                onClick={() => navigate(`/book/${tour.id}`)}
+                className="px-3 md:px-5 py-2 text-white text-sm md:text-base font-semibold shadow-sm rounded-lg"
+                style={{ backgroundColor: themeColor.primary }}
               >
-                <Printer className="h-4 w-4" />
-                {t('tourDetail.print')}
-              </button>
-              <button
-                onClick={() => {
-                  if (!tourId) return;
-                  toast.info(t('tourDetail.pdfGenerating'));
-                  generatePdfMutation.mutate({ id: tourId });
-                }}
-                disabled={generatePdfMutation.isPending}
-                className="flex items-center gap-2 text-sm text-gray-600 hover:text-black transition-colors disabled:opacity-50 disabled:cursor-wait"
-              >
-                <Download className="h-4 w-4" />
-                {generatePdfMutation.isPending ? t('tourDetail.pdfGenerating') : t('tourDetail.downloadPdf')}
-              </button>
-              <button
-                onClick={() => setShowShareDialog(true)}
-                className="flex items-center gap-2 text-sm text-gray-600 hover:text-black transition-colors"
-              >
-                <Share2 className="h-4 w-4" />
-                {t('tourDetail.share')}
-              </button>
+                {t('tourDetail.bookNowBtn')}
+              </Button>
+
+              {/* Print / PDF / Share — icon-only on hover, hidden on mobile */}
+              <div className="hidden md:flex items-center gap-1 ml-1">
+                <button
+                  onClick={() => window.open(`/tours/${tourId}/print`, '_blank')}
+                  className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+                  aria-label={t('tourDetail.print')}
+                  title={t('tourDetail.print')}
+                >
+                  <Printer className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => {
+                    if (!tourId) return;
+                    toast.info(t('tourDetail.pdfGenerating'));
+                    generatePdfMutation.mutate({ id: tourId });
+                  }}
+                  disabled={generatePdfMutation.isPending}
+                  className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 transition-colors disabled:opacity-50"
+                  aria-label={t('tourDetail.downloadPdf')}
+                  title={t('tourDetail.downloadPdf')}
+                >
+                  <Download className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => setShowShareDialog(true)}
+                  className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+                  aria-label={t('tourDetail.share')}
+                  title={t('tourDetail.share')}
+                >
+                  <Share2 className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -2354,9 +2546,15 @@ export default function TourDetailPeony() {
             )}
           </div>
 
-          {/* Key Features Grid - 重新設計的特色卡片（支援編輯模式） */}
+          {/* Key Features Grid — v78r: 2-col grid; v78t: dynamic for sparse cases.
+              1 feature → single centered card (avoids half-empty row).
+              2+ features → 2-col grid. */}
           {keyFeatures.length > 0 && (
-            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mt-12">
+            <div className={`grid gap-5 mt-12 ${
+              keyFeatures.length === 1
+                ? 'grid-cols-1 max-w-2xl mx-auto'
+                : 'md:grid-cols-2'
+            }`}>
               {keyFeatures.map((feature: any, index: number) => {
                 // 為每個特色分配不同的圖示和顏色
                 const featureStyles = [
@@ -2455,11 +2653,13 @@ export default function TourDetailPeony() {
                         </>
                       ) : (
                         <>
-                          <h3 className="font-bold text-base text-gray-800 mb-2 leading-snug min-h-[3rem]">
+                          {/* v78r: removed min-h-3rem (was forcing artificial card height even when title is short)
+                              and line-clamp-2 (was hiding 60% of LLM-generated descriptions) */}
+                          <h3 className="font-bold text-base md:text-lg text-gray-800 mb-2 leading-snug">
                             {featureTitle}
                           </h3>
                           {featureDescription && (
-                            <p className="text-sm text-gray-600 leading-relaxed line-clamp-2">{featureDescription}</p>
+                            <p className="text-sm text-gray-600 leading-relaxed">{featureDescription}</p>
                           )}
                         </>
                       )}
@@ -2482,8 +2682,11 @@ export default function TourDetailPeony() {
               <p className="text-base text-gray-700 mb-1">{t('tourDetail.destination')}</p>
               <p className="font-bold text-xl">{(() => {
                 const cities = (tour.destinationCity || tour.destinationCountry || '').split(/[,、]/).map((c: string) => c.trim()).filter(Boolean);
-                if (cities.length <= 4) return cities.join('、');
-                return cities.slice(0, 4).join('、') + '…';
+                // v78p: translate each city + use locale-appropriate separator
+                const translated = cities.map((c: string) => translateDestination(c, language));
+                const sep = language === 'zh-TW' ? '、' : ', ';
+                if (translated.length <= 4) return translated.join(sep);
+                return translated.slice(0, 4).join(sep) + '…';
               })()}</p>
             </div>
             <div className="text-center p-6 bg-gray-50">
@@ -2500,13 +2703,44 @@ export default function TourDetailPeony() {
         </div>
       </section>
 
+      {/* v78o: Tour Route Map — server-side geocode + Google Static Map */}
+      {displayItinerary && displayItinerary.length > 0 && tour.id && (
+        <TourRouteMap
+          tourId={tour.id}
+          itinerary={displayItinerary}
+          destinationCountry={tour.destinationCountry || undefined}
+          themeColor={themeColor}
+        />
+      )}
+
       {/* Itinerary Section - Zigzag Layout */}
       <section ref={sectionRefs.itinerary} id="itinerary" className="py-16 lg:py-24 bg-gray-50">
         <div className="max-w-7xl mx-auto px-6">
           <h2 className="text-3xl md:text-4xl font-bold text-center mb-4" style={{ color: themeColor.primary }}>
             {t('tourDetail.itineraryHighlights')}
           </h2>
-          <p className="text-lg text-gray-700 text-center mb-16">{t('tourDetail.dailyItineraryDesc')}</p>
+          <p className="text-lg text-gray-700 text-center mb-8">{t('tourDetail.dailyItineraryDesc')}</p>
+
+          {/* v78n Sprint 6C: expand/collapse all toggle */}
+          {displayItinerary.length > 1 && (
+            <div className="flex justify-center mb-12">
+              <button
+                onClick={() => {
+                  if (expandedDays.size >= displayItinerary.length) {
+                    setExpandedDays(new Set([0]));
+                  } else {
+                    setExpandedDays(new Set(displayItinerary.map((_: any, i: number) => i)));
+                  }
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white border border-gray-300 hover:border-gray-400 text-sm text-gray-700 hover:text-gray-900 transition-colors"
+                style={{ borderColor: themeColor.primary, color: themeColor.primary }}
+              >
+                {expandedDays.size >= displayItinerary.length
+                  ? (language === "en" ? "Collapse all" : "全部收合")
+                  : (language === "en" ? "Expand all days" : `展開全部 ${displayItinerary.length} 天`)}
+              </button>
+            </div>
+          )}
 
           {/* Daily Itinerary */}
           <div className="space-y-24">
@@ -2593,7 +2827,8 @@ export default function TourDetailPeony() {
                 <Utensils className="h-5 w-5" style={{ color: themeColor.secondary }} />
                 {t('tourDetail.mealPlan')}
               </h3>
-              <div className="grid md:grid-cols-2 gap-4">
+              {/* v78t: sparse case — 1 meal renders full-width instead of half-empty row */}
+              <div className={`grid gap-4 ${meals.length === 1 ? 'grid-cols-1 max-w-2xl mx-auto' : 'md:grid-cols-2'}`}>
                 {meals.map((meal: any, index: number) => (
                   <div key={index} className="flex items-start gap-3 p-4 bg-gray-50">
                     <div 
@@ -2663,7 +2898,14 @@ export default function TourDetailPeony() {
             </h2>
             <p className="text-lg text-gray-700 text-center mb-12">{t('tourDetail.hotelDesc')}</p>
 
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {/* v78t: dynamic grid — sparse cases (1-2 hotels) get more-balanced layout */}
+            <div className={`grid gap-8 ${
+              hotels.length === 1
+                ? 'grid-cols-1 max-w-2xl mx-auto'
+                : hotels.length === 2
+                  ? 'md:grid-cols-2 max-w-5xl mx-auto'
+                  : 'md:grid-cols-2 lg:grid-cols-3'
+            }`}>
               {hotels.map((hotel: any, index: number) => (
                 <HotelCard key={index} hotel={hotel} themeColor={themeColor} />
               ))}
@@ -2889,30 +3131,42 @@ export default function TourDetailPeony() {
         </div>
       </section>
 
+      {/* v78m Sprint 5B: Departures + pricing table (signettours pattern) */}
+      {tour?.id && (
+        <TourDeparturesTable
+          tourId={tour.id}
+          basePrice={tour.price || 0}
+          baseCurrency={tour.priceCurrency || "TWD"}
+          themeColor={themeColor}
+        />
+      )}
+
       {/* Similar Tours Recommendation */}
       {tour?.id && <SimilarTours tourId={tour.id} />}
 
-      {/* Fixed Bottom CTA (所有裝置) */}
+      {/* Fixed Bottom CTA (v78i: phone now tel: link for 1-click call; price respects tour currency) */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t-2 border-gray-200 shadow-2xl z-50 rounded-t-xl">
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4">
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-xs text-gray-500">{t('tourDetail.pricePerPersonFrom')}</p>
               <p className="text-xl md:text-2xl font-bold" style={{ color: themeColor.primary }}>
-                NT$ {tour.price ? tour.price.toLocaleString() : t('tourDetail.inquirePrice')}
+                {tour.price
+                  ? formatPrice(Number(tour.price), (tour.priceCurrency as any) || "TWD")
+                  : t('tourDetail.inquirePrice')}
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <Button 
-                variant="outline"
-                onClick={() => navigate("/contact-us")}
-                className="hidden md:flex px-5 py-3 font-medium border-2"
+              <a
+                href="tel:+15106342307"
+                className="hidden md:inline-flex items-center gap-2 px-5 py-3 font-medium rounded-lg border-2 transition-colors hover:bg-primary/5"
                 style={{ borderColor: themeColor.primary, color: themeColor.primary }}
               >
-                <Phone className="h-4 w-4 mr-2" />
-                {t('tourDetail.contactUs')}
-              </Button>
-              <Button 
+                <Phone className="h-4 w-4" />
+                <span className="hidden lg:inline">+1 (510) 634-2307</span>
+                <span className="lg:hidden">{t('tourDetail.contactUs')}</span>
+              </a>
+              <Button
                 onClick={() => navigate(`/book/${tour.id}`)}
                 className="px-6 md:px-10 py-3 text-white font-bold text-base md:text-lg"
                 style={{ backgroundColor: themeColor.primary }}
@@ -2951,7 +3205,31 @@ export default function TourDetailPeony() {
           </DialogHeader>
           <div className="space-y-4 py-4">
             <p className="text-gray-600 text-sm">{(t('tourDetail.shareRecommend')).replace('{title}', displayTitle)}</p>
-            
+
+            {/* v78h: Native share — opens iOS/Android system share sheet so user can pick WeChat, IG, etc. */}
+            {typeof navigator !== 'undefined' && typeof (navigator as any).share === 'function' && (
+              <Button
+                onClick={async () => {
+                  try {
+                    await (navigator as any).share({
+                      title: displayTitle,
+                      text: (t('tourDetail.lineShareText')).replace('{title}', displayTitle),
+                      url: window.location.href,
+                    });
+                  } catch {
+                    // user cancelled
+                  }
+                }}
+                className="w-full"
+                style={{ backgroundColor: themeColor.primary }}
+              >
+                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                </svg>
+                立刻分享 / Share
+              </Button>
+            )}
+
             {/* 複製連結 */}
             <div className="flex items-center gap-2">
               <input
@@ -3039,6 +3317,35 @@ export default function TourDetailPeony() {
                   </svg>
                 </div>
                 <span className="text-xs text-gray-600">WhatsApp</span>
+              </button>
+            </div>
+
+            {/* v78h: Email + Print row */}
+            <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-100 mt-2">
+              <button
+                onClick={() => {
+                  const subject = encodeURIComponent(displayTitle);
+                  const body = encodeURIComponent(
+                    (t('tourDetail.lineShareText')).replace('{title}', displayTitle) +
+                      '\n\n' + window.location.href
+                  );
+                  window.location.href = `mailto:?subject=${subject}&body=${body}`;
+                }}
+                className="flex items-center justify-center gap-2 p-3 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors text-sm text-gray-700"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                Email
+              </button>
+              <button
+                onClick={() => window.print()}
+                className="flex items-center justify-center gap-2 p-3 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors text-sm text-gray-700"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                </svg>
+                列印 / Print
               </button>
             </div>
           </div>

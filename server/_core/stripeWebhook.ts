@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import Stripe from "stripe";
 import { ENV } from "./env";
 import * as db from "../db";
-import { sendPaymentSuccessEmail } from "../email";
+import { sendPaymentSuccessEmail, sendSupplierNotificationEmail } from "../email";
 import { sendVisaApplicationConfirmation } from "../services/visaEmailService";
 import { createAccountingEntry } from "../db";
 
@@ -70,6 +70,17 @@ export async function handleStripeWebhook(req: Request, res: Response) {
         break;
       }
 
+      // v74: handle refunds. Previously this event was silently ignored —
+      // Stripe issued a refund (manual via dashboard or dispute), but the
+      // booking row still showed paymentStatus='paid' indefinitely. Now we
+      // sync paymentStatus to 'refunded' and create an audit trail.
+      case "charge.refunded":
+      case "charge.refund.updated": {
+        const charge = event.data.object as Stripe.Charge;
+        await handleChargeRefunded(charge);
+        break;
+      }
+
       default:
         console.log(`[Stripe Webhook] Unhandled event type: ${event.type}`);
     }
@@ -113,6 +124,20 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
   const paymentIntentId = session.payment_intent as string;
   const amount = session.amount_total ? session.amount_total / 100 : 0; // Convert from cents
 
+  // v70: idempotency guard — Stripe retries webhook deliveries on transient
+  // failures (timeouts, 5xx). Without this check we'd insert duplicate payment
+  // rows for the same payment_intent and double-flip the booking status, which
+  // can also trigger duplicate accounting entries below.
+  if (paymentIntentId) {
+    const existing = await db.getPaymentByIntentId(paymentIntentId);
+    if (existing) {
+      console.log(
+        `[Stripe Webhook] Idempotent skip: payment ${paymentIntentId} already recorded (id=${existing.id})`
+      );
+      return;
+    }
+  }
+
   await db.createPayment({
     bookingId: parseInt(bookingId),
     stripePaymentIntentId: paymentIntentId,
@@ -127,19 +152,39 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
 
   // Update booking payment status
   let newPaymentStatus: "unpaid" | "deposit" | "paid" | "refunded" = "paid";
-  
+
   if (paymentType === "deposit") {
     newPaymentStatus = "deposit";
   } else if (paymentType === "balance") {
     newPaymentStatus = "paid";
   }
 
+  // v74: only flip bookingStatus to "confirmed" when payment is FULLY received.
+  // Previously a 20% deposit immediately marked the booking "confirmed" which
+  // misled the customer (and ops dashboards) into thinking the seat was secured.
+  // The booking now stays "pending" until the balance is paid.
+  const newBookingStatus: "pending" | "confirmed" =
+    newPaymentStatus === "paid" ? "confirmed" : "pending";
+
   await db.updateBooking(parseInt(bookingId), {
     paymentStatus: newPaymentStatus,
-    bookingStatus: "confirmed",
+    bookingStatus: newBookingStatus,
   });
 
   console.log(`[Stripe Webhook] Booking ${bookingId} payment status updated to ${newPaymentStatus}`);
+
+  // v78n Sprint 6A: customer paid → cancel any pending abandonment recovery email
+  try {
+    const { cancelAbandonmentRecovery } = await import(
+      "../queues/abandonmentRecoveryQueue"
+    );
+    await cancelAbandonmentRecovery(parseInt(bookingId));
+  } catch (err) {
+    console.warn(
+      "[Stripe Webhook] Failed to cancel abandonment recovery:",
+      (err as Error).message
+    );
+  }
 
   // Auto-create accounting income entry
   try {
@@ -170,8 +215,43 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
         tourTitle: tour.title,
         paymentAmount: amount,
         paymentType: paymentType || "full",
+        // v78y: respect the customer's chosen language stored at booking time
+        language: ((booking as any).customerLanguage as 'zh-TW' | 'en' | undefined) || undefined,
       });
       console.log(`[Stripe Webhook] Payment success email sent to ${booking.customerEmail}`);
+
+      // v78l Sprint 4A: Auto-notify supplier if email is on file. Only on
+      // FIRST paid event (deposit OR full) — skip on balance to avoid duplicates.
+      if (paymentType !== "balance" && (tour as any).supplierEmail) {
+        try {
+          const departure = booking.departureDate
+            ? new Date(booking.departureDate).toLocaleDateString("zh-TW")
+            : "TBD";
+          const returnDate = booking.endDate
+            ? new Date(booking.endDate).toLocaleDateString("zh-TW")
+            : undefined;
+          await sendSupplierNotificationEmail({
+            supplierEmail: (tour as any).supplierEmail,
+            supplierName: (tour as any).supplierName,
+            supplierNotes: (tour as any).supplierNotes,
+            language: "zh-TW", // Suppliers default to zh-TW; can be made per-tour later
+            bookingId: booking.id,
+            customerName: booking.customerName,
+            customerPhone: booking.customerPhone || undefined,
+            customerEmail: booking.customerEmail,
+            tourTitle: tour.title,
+            departureDate: departure,
+            returnDate,
+            numberOfAdults: booking.numberOfAdults || 0,
+            numberOfChildren: (booking.numberOfChildrenWithBed || 0) + (booking.numberOfChildrenNoBed || 0),
+            numberOfInfants: booking.numberOfInfants || 0,
+            specialRequests: (booking as any).specialRequests || (booking as any).notes || undefined,
+          });
+          console.log(`[Stripe Webhook] Supplier notification sent for booking #${booking.id}`);
+        } catch (supplierErr) {
+          console.error("[Stripe Webhook] Supplier notification failed:", supplierErr);
+        }
+      }
     }
   } catch (error) {
     console.error('[Stripe Webhook] Failed to send payment success email:', error);
@@ -193,6 +273,70 @@ async function handlePaymentIntentFailed(paymentIntent: Stripe.PaymentIntent) {
 
   // Update payment record status
   await db.updatePaymentStatus(paymentIntent.id, "failed");
+}
+
+/**
+ * v74: handle Stripe `charge.refunded` event.
+ *
+ * Triggered when a charge is fully or partially refunded — either via the
+ * Stripe dashboard, the API, or as part of a dispute resolution. Without this
+ * handler, refunds happen on Stripe's side but our booking row continues to
+ * show paymentStatus="paid" indefinitely, breaking accounting reconciliation.
+ *
+ * Logic:
+ *   - If `amount_refunded === amount` → full refund: paymentStatus="refunded"
+ *   - Else partial refund: paymentStatus stays "paid" (we don't currently
+ *     model partial refunds; ops handles them manually). Just log.
+ *   - bookingStatus is NOT auto-flipped — admin should explicitly cancel
+ *     the booking via adminUpdateStatus, which has its own confirmation +
+ *     audit trail.
+ */
+async function handleChargeRefunded(charge: Stripe.Charge) {
+  console.log("[Stripe Webhook] Processing charge.refunded");
+  console.log("[Stripe Webhook] Charge:", charge.id, "amount:", charge.amount, "refunded:", charge.amount_refunded);
+
+  const paymentIntentId = typeof charge.payment_intent === "string"
+    ? charge.payment_intent
+    : charge.payment_intent?.id;
+
+  if (!paymentIntentId) {
+    console.warn("[Stripe Webhook] charge.refunded: no payment_intent on charge");
+    return;
+  }
+
+  const isFullRefund = charge.amount_refunded >= charge.amount;
+  if (!isFullRefund) {
+    console.log(
+      `[Stripe Webhook] Partial refund detected (${charge.amount_refunded}/${charge.amount}) — leaving paymentStatus alone, manual reconciliation needed`
+    );
+    return;
+  }
+
+  // Look up our payment row by Stripe payment intent ID
+  const payment = await db.getPaymentByIntentId(paymentIntentId);
+  if (!payment) {
+    console.warn(`[Stripe Webhook] charge.refunded: no local payment for intent ${paymentIntentId}`);
+    return;
+  }
+
+  // Idempotency: if already marked refunded, skip (Stripe sometimes fires this
+  // event multiple times for the same refund).
+  if (payment.paymentStatus === "refunded") {
+    console.log(`[Stripe Webhook] charge.refunded: payment ${payment.id} already marked refunded`);
+    return;
+  }
+
+  // Update both the payment row and the booking row
+  await db.updatePaymentStatus(paymentIntentId, "refunded", new Date()).catch((e) =>
+    console.error("[Stripe Webhook] charge.refunded: updatePaymentStatus failed:", e?.message)
+  );
+
+  if (payment.bookingId) {
+    await db.updateBooking(payment.bookingId, { paymentStatus: "refunded" }).catch((e) =>
+      console.error("[Stripe Webhook] charge.refunded: updateBooking failed:", e?.message)
+    );
+    console.log(`[Stripe Webhook] Booking ${payment.bookingId} marked refunded`);
+  }
 }
 
 async function handleVisaPaymentCompleted(

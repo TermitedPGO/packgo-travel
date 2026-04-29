@@ -21,13 +21,17 @@ interface Destination {
   isActive: boolean;
 }
 
-const defaultDestinations = [
-  { id: 1, name: "歐洲地區", image: "/images/dest-europe.webp", label: "Europe", region: "europe" },
-  { id: 2, name: "亞洲地區", image: "/images/dest-asia.webp", label: "Asia", region: "asia" },
-  { id: 3, name: "美洲地區", image: "/images/dest-southamerica.webp", label: "Americas", region: "south-america" },
-  { id: 4, name: "中東地區", image: "/images/dest-israel.webp", label: "Middle East", region: "middle-east" },
-  { id: 5, name: "非洲地區", image: "/images/dest-africa.webp", label: "Africa", region: "africa" },
-  { id: 6, name: "郵輪之旅", image: "/images/dest-cruise.webp", label: "Cruises", region: "cruise" },
+// v70: defaults now use translation keys for `name` so EN locale doesn't show
+// Chinese fallbacks. Keys reference the existing `destinations.*` block.
+const buildDefaultDestinations = (
+  t: (k: string) => string
+): Array<{ id: number; name: string; image: string; label: string; region: string }> => [
+  { id: 1, name: t('destinations.europe'),     image: "/images/dest-europe.webp",        label: "Europe",      region: "europe" },
+  { id: 2, name: t('destinations.asia'),       image: "/images/dest-asia.webp",          label: "Asia",        region: "asia" },
+  { id: 3, name: t('destinations.americas'),   image: "/images/dest-southamerica.webp",  label: "Americas",    region: "south-america" },
+  { id: 4, name: t('destinations.middleEast'), image: "/images/dest-israel.webp",        label: "Middle East", region: "middle-east" },
+  { id: 5, name: t('destinations.africa'),     image: "/images/dest-africa.webp",        label: "Africa",      region: "africa" },
+  { id: 6, name: t('destinations.cruises'),    image: "/images/dest-cruise.webp",        label: "Cruises",     region: "cruise" },
 ];
 
 export default function EditableDestinations() {
@@ -46,39 +50,39 @@ export default function EditableDestinations() {
   
   const updateMutation = trpc.homepage.updateDestination.useMutation({
     onSuccess: () => {
-      toast.success('目的地已更新');
+      toast.success(t('editableDestinations.toastUpdated'));
       setEditingId(null);
       refetch();
     },
     onError: (error) => {
-      toast.error('更新失敗: ' + error.message);
+      toast.error(t('editableDestinations.toastUpdateFailed') + ': ' + error.message);
     },
   });
 
   const createMutation = trpc.homepage.createDestination.useMutation({
     onSuccess: () => {
-      toast.success('目的地已新增');
+      toast.success(t('editableDestinations.toastCreated'));
       setShowAddDialog(false);
       setEditForm({});
       refetch();
     },
     onError: (error) => {
-      toast.error('新增失敗: ' + error.message);
+      toast.error(t('editableDestinations.toastCreateFailed') + ': ' + error.message);
     },
   });
 
   const deleteMutation = trpc.homepage.deleteDestination.useMutation({
     onSuccess: () => {
-      toast.success('目的地已刪除');
+      toast.success(t('editableDestinations.toastDeleted'));
       refetch();
     },
     onError: (error) => {
-      toast.error('刪除失敗: ' + error.message);
+      toast.error(t('editableDestinations.toastDeleteFailed') + ': ' + error.message);
     },
   });
 
-  // Use database destinations or default
-  const destinations = dbDestinations || defaultDestinations;
+  // Use database destinations or default. v70: defaults are now locale-aware.
+  const destinations = dbDestinations || buildDefaultDestinations(t);
 
   const handleDestinationClick = (region: string) => {
     if (!isEditMode) {
@@ -124,7 +128,7 @@ export default function EditableDestinations() {
   };
 
   const handleDelete = (id: number) => {
-    if (confirm('確定要刪除這個目的地嗎？')) {
+    if (confirm(t('editableDestinations.deleteConfirm'))) {
       deleteMutation.mutate({ id });
     }
   };
@@ -134,12 +138,12 @@ export default function EditableDestinations() {
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      toast.error('請選擇圖片檔案');
+      toast.error(t('editableDestinations.toastImageOnly'));
       return;
     }
 
     if (file.size > 10 * 1024 * 1024) {
-      toast.error('圖片大小不能超過 10MB');
+      toast.error(t('editableDestinations.toastImageMaxSize'));
       return;
     }
 
@@ -156,14 +160,14 @@ export default function EditableDestinations() {
       });
 
       if (!response.ok) {
-        throw new Error('上傳失敗');
+        throw new Error(t('editableDestinations.toastUploadFailed'));
       }
 
       const data = await response.json();
       setEditForm(prev => ({ ...prev, image: data.url }));
-      toast.success('圖片上傳成功');
+      toast.success(t('editableDestinations.toastUploadSuccess'));
     } catch (error) {
-      toast.error('圖片上傳失敗');
+      toast.error(t('editableDestinations.toastUploadFailed'));
     } finally {
       setIsUploading(false);
     }
@@ -191,7 +195,7 @@ export default function EditableDestinations() {
               className="bg-black hover:bg-gray-800"
             >
               <Plus className="h-4 w-4 mr-2" />
-              新增目的地
+              {t('editableDestinations.addButton')}
             </Button>
           </div>
         )}
@@ -260,38 +264,38 @@ export default function EditableDestinations() {
       <Dialog open={editingId !== null} onOpenChange={(open) => !open && setEditingId(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>編輯目的地</DialogTitle>
+            <DialogTitle>{t('editableDestinations.editTitle')}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <Label>名稱</Label>
+              <Label>{t('editableDestinations.nameLabel')}</Label>
               <Input
                 value={editForm.name || ''}
                 onChange={(e) => setEditForm(prev => ({ ...prev, name: e.target.value }))}
-                placeholder="例如：歐洲"
+                placeholder={t('editableDestinations.placeholderName')}
                 className="mt-1"
               />
             </div>
             <div>
-              <Label>英文標籤</Label>
+              <Label>{t('editableDestinations.englishLabel')}</Label>
               <Input
                 value={editForm.label || ''}
                 onChange={(e) => setEditForm(prev => ({ ...prev, label: e.target.value }))}
-                placeholder="例如：Europe"
+                placeholder={t('editableDestinations.placeholderEnglishLabel')}
                 className="mt-1"
               />
             </div>
             <div>
-              <Label>區域代碼</Label>
+              <Label>{t('editableDestinations.regionLabel')}</Label>
               <Input
                 value={editForm.region || ''}
                 onChange={(e) => setEditForm(prev => ({ ...prev, region: e.target.value }))}
-                placeholder="例如：europe"
+                placeholder={t('editableDestinations.placeholderRegion')}
                 className="mt-1"
               />
             </div>
             <div>
-              <Label>圖片</Label>
+              <Label>{t('editableDestinations.imageLabel')}</Label>
               <div className="mt-1 space-y-2">
                 {editForm.image && (
                   <img src={editForm.image} alt="Preview" className="w-full h-32 object-cover rounded-lg" />
@@ -304,7 +308,7 @@ export default function EditableDestinations() {
                     disabled={isUploading}
                     className="flex-1"
                   >
-                    {isUploading ? '上傳中...' : '上傳圖片'}
+                    {isUploading ? t('editableDestinations.uploadingButton') : t('editableDestinations.uploadButton')}
                   </Button>
                   <Input
                     type="file"
@@ -317,12 +321,12 @@ export default function EditableDestinations() {
                 <Input
                   value={editForm.image || ''}
                   onChange={(e) => setEditForm(prev => ({ ...prev, image: e.target.value }))}
-                  placeholder="或輸入圖片網址"
+                  placeholder={t('editableDestinations.placeholderImageUrl')}
                 />
               </div>
             </div>
             <div className="flex items-center justify-between">
-              <Label>顯示在首頁</Label>
+              <Label>{t('editableDestinations.isActiveLabel')}</Label>
               <Switch
                 checked={editForm.isActive ?? true}
                 onCheckedChange={(checked) => setEditForm(prev => ({ ...prev, isActive: checked }))}
@@ -331,11 +335,11 @@ export default function EditableDestinations() {
             <div className="flex gap-2 pt-4">
               <Button onClick={handleSave} disabled={updateMutation.isPending} className="flex-1">
                 <Check className="h-4 w-4 mr-2" />
-                儲存
+                {t('editableDestinations.saveButton')}
               </Button>
               <Button variant="outline" onClick={() => setEditingId(null)} className="flex-1">
                 <X className="h-4 w-4 mr-2" />
-                取消
+                {t('editableDestinations.cancelButton')}
               </Button>
             </div>
           </div>
@@ -346,38 +350,38 @@ export default function EditableDestinations() {
       <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>新增目的地</DialogTitle>
+            <DialogTitle>{t('editableDestinations.addTitle')}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <Label>名稱 *</Label>
+              <Label>{t('editableDestinations.nameLabelRequired')}</Label>
               <Input
                 value={editForm.name || ''}
                 onChange={(e) => setEditForm(prev => ({ ...prev, name: e.target.value }))}
-                placeholder="例如：歐洲"
+                placeholder={t('editableDestinations.placeholderName')}
                 className="mt-1"
               />
             </div>
             <div>
-              <Label>英文標籤</Label>
+              <Label>{t('editableDestinations.englishLabel')}</Label>
               <Input
                 value={editForm.label || ''}
                 onChange={(e) => setEditForm(prev => ({ ...prev, label: e.target.value }))}
-                placeholder="例如：Europe"
+                placeholder={t('editableDestinations.placeholderEnglishLabel')}
                 className="mt-1"
               />
             </div>
             <div>
-              <Label>區域代碼</Label>
+              <Label>{t('editableDestinations.regionLabel')}</Label>
               <Input
                 value={editForm.region || ''}
                 onChange={(e) => setEditForm(prev => ({ ...prev, region: e.target.value }))}
-                placeholder="例如：europe"
+                placeholder={t('editableDestinations.placeholderRegion')}
                 className="mt-1"
               />
             </div>
             <div>
-              <Label>圖片</Label>
+              <Label>{t('editableDestinations.imageLabel')}</Label>
               <div className="mt-1 space-y-2">
                 {editForm.image && (
                   <img src={editForm.image} alt="Preview" className="w-full h-32 object-cover rounded-lg" />
@@ -390,18 +394,18 @@ export default function EditableDestinations() {
                     disabled={isUploading}
                     className="flex-1"
                   >
-                    {isUploading ? '上傳中...' : '上傳圖片'}
+                    {isUploading ? t('editableDestinations.uploadingButton') : t('editableDestinations.uploadButton')}
                   </Button>
                 </div>
                 <Input
                   value={editForm.image || ''}
                   onChange={(e) => setEditForm(prev => ({ ...prev, image: e.target.value }))}
-                  placeholder="或輸入圖片網址"
+                  placeholder={t('editableDestinations.placeholderImageUrl')}
                 />
               </div>
             </div>
             <div className="flex items-center justify-between">
-              <Label>顯示在首頁</Label>
+              <Label>{t('editableDestinations.isActiveLabel')}</Label>
               <Switch
                 checked={editForm.isActive ?? true}
                 onCheckedChange={(checked) => setEditForm(prev => ({ ...prev, isActive: checked }))}
@@ -410,11 +414,11 @@ export default function EditableDestinations() {
             <div className="flex gap-2 pt-4">
               <Button onClick={handleCreate} disabled={createMutation.isPending || !editForm.name} className="flex-1">
                 <Check className="h-4 w-4 mr-2" />
-                新增
+                {t('editableDestinations.addNewButton')}
               </Button>
               <Button variant="outline" onClick={() => setShowAddDialog(false)} className="flex-1">
                 <X className="h-4 w-4 mr-2" />
-                取消
+                {t('editableDestinations.cancelButton')}
               </Button>
             </div>
           </div>

@@ -100,20 +100,25 @@ export class FlightAgent {
       };
 
       // Build prompt
+      // Round 66 fix: previously used `rawData.flight` (singular) which is always
+      // undefined — real data lives in `flightData` from line 52. That typo sent
+      // `undefined` to Claude, and Haiku filled every field with `<UNKNOWN>`.
       const prompt = `
 請根據以下航班資訊，生成專業的航班介紹：
 
 航班資訊：
-${JSON.stringify(rawData.flight, null, 2)}
+${JSON.stringify(flightData, null, 2)}
 
 請生成包含以下欄位的航班資訊：
-- airline: 航空公司名稱
+- airline: 航空公司名稱（若資料無此欄位，請填 "待確認"，不要填 "<UNKNOWN>" 或任何尖括號佔位符）
 - outbound: 去程航班資訊（航班號、出發時間、抵達時間、飛行時長、出發機場、抵達機場）
 - inbound: 回程航班資訊（航班號、出發時間、抵達時間、飛行時長、出發機場、抵達機場）
 - description: 航班描述（150-200字，包含航空公司、航班時間、飛行時長、機上服務）
 - features: 航班特色列表
 
-**重要：如果提供的航班資訊不足，請根據目的地生成合理的預設航班資訊。**
+**重要規則：**
+1. 任何缺失的文字欄位必須填 "待確認" 或 "依實際訂位為準"，嚴禁輸出 "<UNKNOWN>"、"<TBA>" 或其他尖括號包裹的佔位符。
+2. 如果提供的航班資訊不足，請根據目的地生成合理的預設航班資訊。
 `;
 
       // Call Claude with structured output
@@ -125,7 +130,8 @@ ${JSON.stringify(rawData.flight, null, 2)}
         flightSchema,
         {
           systemPrompt: `${FLIGHT_SKILL}\n\n${STRICT_DATA_FIDELITY_RULES}`,
-          maxTokens: 2048,
+          // v67: was 2048 — flight schema output is ~300-500 tokens. 1024 is plenty.
+          maxTokens: 1024,
           temperature: 0.5,
           schemaName: 'flight_output',
           schemaDescription: '航班資訊結構化輸出',
@@ -141,6 +147,29 @@ ${JSON.stringify(rawData.flight, null, 2)}
       }
 
       let parsedFlightData = response.data;
+
+      // Round 66 fix: sanitize placeholder tokens Claude emits when it has no data.
+      // If ALL fields are placeholders, fall back to generateDefaultFlight() (which
+      // at least produces destination-aware strings rather than "<UNKNOWN>").
+      const PLACEHOLDER_RE = /^\s*<?(UNKNOWN|TBA|N\/A|未知|unknown)>?\s*$/i;
+      const clean = (v: any): string => {
+        if (typeof v !== 'string') return v;
+        return PLACEHOLDER_RE.test(v) ? '' : v;
+      };
+      const cleanLeg = (leg: any) => {
+        if (!leg || typeof leg !== 'object') return leg;
+        for (const k of Object.keys(leg)) leg[k] = clean(leg[k]);
+        return leg;
+      };
+      parsedFlightData.airline = clean(parsedFlightData.airline);
+      parsedFlightData.description = clean(parsedFlightData.description);
+      cleanLeg(parsedFlightData.outbound);
+      cleanLeg(parsedFlightData.inbound);
+      const looksEmpty = !parsedFlightData.airline && !parsedFlightData.outbound?.flightNo && !parsedFlightData.outbound?.departureTime;
+      if (looksEmpty) {
+        console.warn("[FlightAgent] LLM returned only placeholders — falling back to generateDefaultFlight()");
+        return { success: true, data: this.generateDefaultFlight(rawData) };
+      }
 
       // Regex 補強：從 Markdown 中提取 HH:MM 格式的時間
       if (flightData && typeof flightData === 'string') {

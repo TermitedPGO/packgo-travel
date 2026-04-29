@@ -22,6 +22,9 @@ import {
   Megaphone,
   FileText,
   DollarSign,
+  Sparkles,
+  Receipt,
+  Calculator,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
@@ -45,8 +48,14 @@ import VisaManagementTab from "@/components/admin/VisaManagementTab";
 import AffiliateTab from "@/components/admin/AffiliateTab";
 import AccountingTab from "@/components/admin/AccountingTab";
 import MonitorDashboard from "@/components/admin/MonitorDashboard";
+// v78 productivity tools
+import AiQuotesTab from "@/components/admin/AiQuotesTab";
+import WechatAssistTab from "@/components/admin/WechatAssistTab";
+import InvoicesTab from "@/components/admin/InvoicesTab";
+import ReconciliationTab from "@/components/admin/ReconciliationTab";
+import MarketingContentTab from "@/components/admin/MarketingContentTab";
 
-type AdminTab = "dashboard" | "tours" | "bookings" | "inquiries" | "reviews" | "ai-hub" | "analytics" | "task-history" | "calibration-review" | "competitor-monitor" | "tour-monitor" | "marketing" | "visa" | "affiliate" | "accounting";
+type AdminTab = "dashboard" | "tours" | "bookings" | "inquiries" | "reviews" | "ai-hub" | "analytics" | "task-history" | "calibration-review" | "competitor-monitor" | "tour-monitor" | "marketing" | "visa" | "affiliate" | "accounting" | "ai-quotes" | "wechat-assist" | "invoices" | "reconciliation" | "marketing-content";
 
 export default function Admin() {
   const { user, loading, isAuthenticated, logout } = useAuth();
@@ -81,6 +90,8 @@ export default function Admin() {
         { id: 'dashboard', icon: LayoutDashboard, label: '總覽儀表板' },
         { id: 'tours', icon: Plane, label: '行程管理', badge: statsData?.activeTours },
         { id: 'bookings', icon: ShoppingCart, label: '訂單管理' },
+        { id: 'ai-quotes', icon: Sparkles, label: 'AI 報價單' },
+        { id: 'wechat-assist', icon: MessageSquare, label: 'WeChat 助手' },
         { id: 'inquiries', icon: MessageSquare, label: '客戶詢問', badge: statsData?.pendingInquiries },
         { id: 'reviews', icon: Star, label: '客戶評價' },
       ],
@@ -95,6 +106,7 @@ export default function Admin() {
         { id: 'competitor-monitor', icon: Binoculars, label: '競品監控', badge: typeof competitorUnread === 'number' && competitorUnread > 0 ? competitorUnread : undefined },
         { id: 'tour-monitor', icon: Activity, label: '供應商監控' },
         { id: 'marketing', icon: Megaphone, label: '行銷自動化' },
+        { id: 'marketing-content', icon: Sparkles, label: 'AI 社群文案' },
       ],
     },
     {
@@ -112,6 +124,8 @@ export default function Admin() {
     {
       label: '財務管理',
       items: [
+        { id: 'invoices', icon: Receipt, label: '發票管理' },
+        { id: 'reconciliation', icon: Calculator, label: '對帳中心' },
         { id: 'accounting', icon: DollarSign, label: '會計記帳' },
       ],
     },
@@ -283,7 +297,7 @@ export default function Admin() {
 
         {/* Page Content */}
         <main className="flex-1 px-4 lg:px-8 py-8 overflow-auto">
-          {activeTab === "dashboard" && <DashboardTab />}
+          {activeTab === "dashboard" && <DashboardTab onNavigate={(tab) => setActiveTab(tab as AdminTab)} />}
           {activeTab === "tours" && <ToursTab />}
           {activeTab === "bookings" && <BookingsTab />}
           {activeTab === "inquiries" && <InquiriesTab />}
@@ -298,6 +312,11 @@ export default function Admin() {
           {activeTab === "visa" && <VisaManagementTab />}
           {activeTab === "affiliate" && <AffiliateTab />}
           {activeTab === "accounting" && <AccountingTab />}
+          {activeTab === "ai-quotes" && <AiQuotesTab />}
+          {activeTab === "wechat-assist" && <WechatAssistTab />}
+          {activeTab === "invoices" && <InvoicesTab />}
+          {activeTab === "reconciliation" && <ReconciliationTab />}
+          {activeTab === "marketing-content" && <MarketingContentTab />}
         </main>
       </div>
     </div>

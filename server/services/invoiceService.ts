@@ -42,19 +42,30 @@ export async function generateInvoiceNumber(): Promise<string> {
 }
 
 /**
- * Generate an HTML invoice and upload it to S3, returning the public URL.
- * Uses a clean, professional HTML template suitable for printing.
+ * Generate an HTML invoice. Returns BOTH the raw HTML (always) and an R2 URL
+ * if the upload succeeded.
+ *
+ * v78g: caller persists `html` to `invoices.pdfHtml` and uses `r2Url` if
+ * present, otherwise falls back to `/api/invoices/:id/view`. R2 is best-effort
+ * — production R2 bucket missing means we always serve via the view route.
  */
-export async function generateInvoicePdf(data: InvoiceData): Promise<string | null> {
+export async function generateInvoicePdf(
+  data: InvoiceData
+): Promise<{ html: string; r2Url: string | null }> {
+  const html = buildInvoiceHtml(data);
+
+  let r2Url: string | null = null;
   try {
-    const html = buildInvoiceHtml(data);
     const key = `invoices/${data.invoiceNumber}-${Date.now()}.html`;
     const { url } = await storagePut(key, Buffer.from(html, "utf-8"), "text/html");
-    return url;
-  } catch (err) {
-    console.error("[invoiceService] Failed to generate invoice:", err);
-    return null;
+    r2Url = url;
+  } catch (err: any) {
+    console.warn(
+      `[invoiceService] R2 upload skipped (${err?.name || "error"}: ${err?.message?.slice(0, 80) || ""}). Invoice will be served via /api/invoices/:id/view.`
+    );
   }
+
+  return { html, r2Url };
 }
 
 function formatCurrency(amount: number, currency: string): string {

@@ -35,8 +35,18 @@ export function EditModeToggle({
   return (
     <div
       className={cn(
-        "fixed bottom-24 right-6 z-[60] flex items-center gap-2 bg-white rounded-xl shadow-xl border p-2 transition-all",
-        isEditMode ? "border-yellow-400 shadow-yellow-100" : "border-gray-200 shadow-lg",
+        // v78u: TWO MODES with different positions to avoid CTA overlap.
+        //
+        // Edit mode (active): bottom-left toolbar with save/cancel — needs to be
+        // prominent since admin is mid-edit; bottom-LEFT keeps it away from the
+        // customer-style Book Now CTA in the bottom-sticky rail (right side).
+        //
+        // Preview mode (default): tiny pill at top-right under header, opacity 70%.
+        // Out of the way of every customer CTA. Admin clicks "Edit" → toolbar slides
+        // out to the prominent bottom-left position.
+        isEditMode
+          ? "fixed bottom-24 left-4 z-[60] flex items-center gap-2 bg-white rounded-xl shadow-xl border-2 p-2 transition-all border-yellow-400 shadow-yellow-100"
+          : "fixed top-20 right-4 z-[40] flex items-center gap-2 bg-white rounded-full shadow-sm border p-1 transition-all opacity-70 hover:opacity-100 border-gray-200",
         className
       )}
     >
@@ -88,13 +98,16 @@ export function EditModeToggle({
         </>
       ) : (
         <>
-          {/* 預覽模式下的按鈕 */}
+          {/* v78u: 預覽模式 — 縮小成圓型 icon button (top-right) */}
           <Button
             onClick={onToggle}
-            className="rounded-lg bg-yellow-500 hover:bg-yellow-600 text-white"
+            size="sm"
+            variant="ghost"
+            className="rounded-full h-8 w-8 p-0 hover:bg-yellow-50 text-gray-600 hover:text-yellow-700"
+            aria-label={t('tourDetail.enterEditMode')}
+            title={t('tourDetail.enterEditMode')}
           >
-            <Pencil className="h-4 w-4 mr-2" />
-            {t('tourDetail.enterEditMode')}
+            <Pencil className="h-4 w-4" />
           </Button>
         </>
       )}

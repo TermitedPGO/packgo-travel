@@ -458,10 +458,41 @@ function anthropicToInvokeResult(
 // Main entry
 // ──────────────────────────────────────────────────────────────────────────────
 
+// v72: per-day Redis counters so we can answer "how much did each agent
+// spend yesterday?" without parsing log files. Best-effort and non-blocking —
+// counter failures never affect the LLM call itself. Query via:
+//   HGETALL llm:stats:YYYY-MM-DD
+// Sample keys: input:claude-haiku-4-5, output:claude-haiku-4-5,
+//              cache_hit, cache_miss, prompt_cache_read, prompt_cache_write
+async function bumpStat(field: string, n: number): Promise<void> {
+  if (n <= 0) return;
+  try {
+    const { redis } = await import("./../redis");
+    const day = new Date().toISOString().slice(0, 10);
+    await redis.hincrby(`llm:stats:${day}`, field, n);
+    // 30-day TTL on first write of the day
+    await redis.expire(`llm:stats:${day}`, 30 * 24 * 60 * 60);
+  } catch {
+    // silent — observability must never break the request path
+  }
+}
+
 export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
+  const t0 = Date.now();
+
   // 1. Cache lookup (key is already stable across param shapes — see llmCache.ts)
   const cached = await getCachedResponse(params);
-  if (cached) return cached;
+  if (cached) {
+    // v67: explicit cache-hit log so we can grep "[invokeLLM] cache=HIT" to
+    // measure 24h app-cache effectiveness. Previously cache hits were silent
+    // here (only the LLMCache layer logged, with a different prefix).
+    console.log(
+      `[invokeLLM] cache=HIT model=${(cached.model || "?")} elapsed=${Date.now() - t0}ms`
+    );
+    bumpStat("cache_hit", 1);
+    return cached;
+  }
+  bumpStat("cache_miss", 1);
 
   // 2. Translate params
   const { system: rawSystem, messages: anthropicMessages } = normalizeToAnthropic(
@@ -520,10 +551,28 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   }
 
   const elapsed = Date.now() - startMs;
+  // v67: include Anthropic prompt-cache stats so we can see whether
+  // cache_control directives are actually firing on the API side.
+  // cache_creation = first time we wrote to Anthropic's 5m/1h cache;
+  // cache_read = a hit (90% cheaper input tokens).
+  const u = resp.usage as any;
+  const cacheCreate = u?.cache_creation_input_tokens ?? 0;
+  const cacheRead = u?.cache_read_input_tokens ?? 0;
+  const inputTokens = u?.input_tokens ?? 0;
+  const outputTokens = u?.output_tokens ?? 0;
   console.log(
-    `[invokeLLM] ✅ ${resp.stop_reason ?? "ok"} in ${elapsed}ms ` +
-      `(in: ${resp.usage?.input_tokens ?? "?"}, out: ${resp.usage?.output_tokens ?? "?"})`
+    `[invokeLLM] cache=MISS model=${model} ${resp.stop_reason ?? "ok"} ${elapsed}ms ` +
+      `in=${inputTokens} out=${outputTokens} ` +
+      `prompt_cache_write=${cacheCreate} prompt_cache_read=${cacheRead}`
   );
+
+  // v72: bump the per-day stats hash. We track tokens per model so the daily
+  // summary can show e.g. "yesterday: Haiku 1.2M in / 0.4M out, Sonnet 100K in".
+  bumpStat(`input:${model}`, inputTokens);
+  bumpStat(`output:${model}`, outputTokens);
+  bumpStat("prompt_cache_write", cacheCreate);
+  bumpStat("prompt_cache_read", cacheRead);
+  bumpStat("calls_total", 1);
 
   // 4. Convert back to OpenAI-style, cache, return
   const result = anthropicToInvokeResult(resp, structuredToolName);

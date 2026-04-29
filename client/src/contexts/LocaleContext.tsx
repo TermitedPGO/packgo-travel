@@ -2,28 +2,35 @@ import React, { createContext, useContext, useState, useCallback, useMemo, useEf
 import { translate, translateArray } from '@/i18n';
 import { trpc } from '@/lib/trpc';
 
-// 支援的語言（繁體中文和英文）
-export type Language = 'zh-TW' | 'en';
+// v78q: Sprint 9 #3 — added Japanese + Korean. Server-side translator already
+// supports them; this opens up client-side switching.
+export type Language = 'zh-TW' | 'en' | 'ja' | 'ko';
 
-// 支援的幣值
-export type Currency = 'TWD' | 'USD';
+// 支援的幣值（v78q: 加入 JPY + KRW，搭配新語言）
+export type Currency = 'TWD' | 'USD' | 'JPY' | 'KRW';
 
-// 語言顯示名稱
+// 語言顯示名稱（用該語言的母語表示）
 export const languageNames: Record<Language, string> = {
   'zh-TW': '繁體中文',
   'en': 'English',
+  'ja': '日本語',
+  'ko': '한국어',
 };
 
 // 幣值顯示名稱和符號
 export const currencyInfo: Record<Currency, { name: string; symbol: string }> = {
   'TWD': { name: '新台幣', symbol: 'NT$' },
-  'USD': { name: '美金', symbol: 'USD$' },
+  'USD': { name: '美金', symbol: '$' },
+  'JPY': { name: '日圓', symbol: '¥' },
+  'KRW': { name: '韓圓', symbol: '₩' },
 };
 
-// 備用匯率（當 API 不可用時使用）
+// 備用匯率（當 API 不可用時使用，per 1 USD）
 const FALLBACK_RATES: Record<string, number> = {
-  TWD: 32.5,
   USD: 1,
+  TWD: 32.5,
+  JPY: 156,
+  KRW: 1380,
 };
 
 interface LocaleContextType {
@@ -60,7 +67,7 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
   const [language, setLanguageState] = useState<Language>(() => {
     if (typeof window !== 'undefined') {
       const savedLang = localStorage.getItem('packgo-language');
-      if (savedLang && ['zh-TW', 'en'].includes(savedLang)) {
+      if (savedLang && ['zh-TW', 'en', 'ja', 'ko'].includes(savedLang)) {
         return savedLang as Language;
       }
     }
@@ -73,9 +80,27 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('packgo-currency');
-      if (saved && ['TWD', 'USD'].includes(saved)) {
+      if (saved && ['TWD', 'USD', 'JPY', 'KRW'].includes(saved)) {
         setCurrencyState(saved as Currency);
       }
+    }
+  }, []);
+
+  // v78o: 支援 URL 參數 ?lang=en 與 ?currency=USD（外部分享連結用）
+  // 例如 packgo-travel.fly.dev/?lang=en 直接切英文，避免使用者每次都要點開選單
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const urlLang = params.get('lang');
+    const urlCurrency = params.get('currency');
+
+    if (urlLang && ['en', 'zh-TW', 'ja', 'ko'].includes(urlLang)) {
+      setLanguageState(urlLang as Language);
+      localStorage.setItem('packgo-language', urlLang);
+    }
+    if (urlCurrency && ['USD', 'TWD', 'JPY', 'KRW'].includes(urlCurrency)) {
+      setCurrencyState(urlCurrency as Currency);
+      localStorage.setItem('packgo-currency', urlCurrency);
     }
   }, []);
 

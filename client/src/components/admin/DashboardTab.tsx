@@ -1,8 +1,13 @@
 import { trpc } from "@/lib/trpc";
 import { Users, Plane, ShoppingCart, MessageSquare, DollarSign, TrendingUp, ArrowRight, AlertCircle, CheckCircle2, Clock, Mail } from "lucide-react";
 import { useLocale } from "@/contexts/LocaleContext";
+import DailyBriefingCard from "./DailyBriefingCard";
 
-export default function DashboardTab() {
+interface DashboardTabProps {
+  onNavigate?: (tab: string) => void;
+}
+
+export default function DashboardTab({ onNavigate }: DashboardTabProps = {}) {
   const { data: statsData, isLoading } = trpc.admin.getStats.useQuery();
   const { t, language } = useLocale();
 
@@ -67,6 +72,9 @@ export default function DashboardTab() {
 
   return (
     <div className="space-y-8">
+      {/* v78i: Daily Briefing — actionable items at top, replaces empty stats first impression */}
+      {onNavigate && <DailyBriefingCard onNavigate={onNavigate} />}
+
       {/* Page Title */}
       <div>
         <h2 className="text-2xl font-bold text-gray-900">{t('admin.dashboardTab.title')}</h2>

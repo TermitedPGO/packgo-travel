@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { Link, useSearch } from "wouter";
+import { Link, useSearch, useLocation } from "wouter";
 import SEO from "@/components/SEO";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -37,6 +37,8 @@ import {
 } from "lucide-react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import CompareBar, { addToCompare, removeFromCompare, useCompareIds } from "@/components/CompareBar";
+import { toast } from "sonner";
 import { useLocale } from "@/contexts/LocaleContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { translateDestination } from "@/utils/locationMapping";
@@ -58,18 +60,47 @@ const DURATION_PRESETS = [
   { labelKey: "tours.duration16Plus",  min: 16, max: undefined as number | undefined },
 ];
 
-// Country flag emoji helper
-function getFlagEmoji(country: string): string {
-  const flags: Record<string, string> = {
-    "日本": "🇯🇵", "韓國": "🇰🇷", "台灣": "🇹🇼", "泰國": "🇹🇭",
-    "越南": "🇻🇳", "新加坡": "🇸🇬", "馬來西亞": "🇲🇾", "印尼": "🇮🇩",
-    "菲律賓": "🇵🇭", "帛琉": "🇵🇼", "澳洲": "🇦🇺", "紐西蘭": "🇳🇿",
-    "美國": "🇺🇸", "加拿大": "🇨🇦", "英國": "🇬🇧", "法國": "🇫🇷",
-    "德國": "🇩🇪", "義大利": "🇮🇹", "西班牙": "🇪🇸", "瑞士": "🇨🇭",
-    "希臘": "🇬🇷", "土耳其": "🇹🇷", "埃及": "🇪🇬", "摩洛哥": "🇲🇦",
-    "中國": "🇨🇳", "香港": "🇭🇰", "澳門": "🇲🇴",
-  };
-  return flags[country] || "🌍";
+// v78u: Price range presets (TWD-based, since most tour data is stored in TWD).
+// formatPrice in render layer handles the displayed currency conversion.
+const PRICE_PRESETS = [
+  { label: { zh: "不限", en: "Any" }, min: undefined as number | undefined, max: undefined as number | undefined },
+  { label: { zh: "$50K 以下", en: "Under $50K" }, min: undefined, max: 50000 },
+  { label: { zh: "$50K–$100K", en: "$50K–$100K" }, min: 50000, max: 100000 },
+  { label: { zh: "$100K–$150K", en: "$100K–$150K" }, min: 100000, max: 150000 },
+  { label: { zh: "$150K 以上", en: "$150K+" }, min: 150000, max: undefined },
+];
+
+// v78h: removed getFlagEmoji() — emoji flags violate the no-emoji design rule.
+// Country is now rendered via lucide `Globe` icon + country name only.
+
+// v78j: tiny "+ compare" toggle for tour cards. Reactive — uses useCompareIds()
+// so the same tour pinned across multiple cards stays in sync.
+function CompareToggle({ tourId }: { tourId: number }) {
+  const ids = useCompareIds();
+  const inCompare = ids.includes(tourId);
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (inCompare) removeFromCompare(tourId);
+        else {
+          const ok = addToCompare(tourId);
+          if (!ok) toast.error("最多比較 3 個行程");
+        }
+      }}
+      className={`absolute top-3 right-3 z-10 w-8 h-8 rounded-full flex items-center justify-center transition-all shadow-md ${
+        inCompare
+          ? "bg-black text-white"
+          : "bg-white/90 text-gray-700 hover:bg-white"
+      }`}
+      aria-label={inCompare ? "移出比較" : "加入比較"}
+      title={inCompare ? "已在比較清單" : "加入比較"}
+    >
+      {inCompare ? <X className="h-4 w-4" /> : <SlidersHorizontal className="h-4 w-4" />}
+    </button>
+  );
 }
 
 function TourCard({
@@ -93,12 +124,21 @@ function TourCard({
     return translations?.title || tour.title;
   }, [language, translations, tour.title]);
 
-  // Fetch next departure for this tour
+  // v78p: Same fallback chain for the subtitle / description preview text shown
+  // under the tour title — was leaking ZH on EN site because we read tour.heroSubtitle
+  // directly without the translation lookup.
+  const displaySubtitle = useMemo(() => {
+    if (language === "zh-TW") return tour.heroSubtitle || tour.description;
+    return translations?.heroSubtitle || translations?.description || tour.heroSubtitle || tour.description;
+  }, [language, translations, tour.heroSubtitle, tour.description]);
+
+  // v78s: Fetch top-3 upcoming departures (Lion Travel chip pattern)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: nextDeparture } = (trpc.departures as any).getNext.useQuery(
-    { tourId: tour.id },
+  const { data: upcomingDepartures } = (trpc.departures as any).getUpcoming.useQuery(
+    { tourId: tour.id, limit: 3 },
     { staleTime: 1000 * 60 * 5 }
   );
+  const nextDeparture = (upcomingDepartures as any[] | undefined)?.[0] ?? null;
 
   // Determine included items from tour data
   const includedTags = useMemo(() => {
@@ -130,7 +170,7 @@ function TourCard({
   }, [nextDeparture, isEn]);
 
   return (
-    <Card className="overflow-hidden hover:shadow-lg transition-all duration-300 group border border-gray-200 flex flex-col">
+    <Card className="relative overflow-hidden hover:shadow-lg transition-all duration-300 group border border-gray-200 flex flex-col">
       <Link href={`/tours/${tour.id}`} className="block">
         <div className="relative aspect-[4/3] overflow-hidden rounded-xl">
           {tour.imageUrl || tour.heroImage ? (
@@ -170,6 +210,8 @@ function TourCard({
           </div>
         </div>
       </Link>
+      {/* v78j: compare toggle — small unobtrusive button overlay top-right */}
+      <CompareToggle tourId={tour.id} />
 
       <div className="p-5 flex flex-col flex-grow">
         {/*
@@ -179,6 +221,9 @@ function TourCard({
           testimonial under the FTC fake review rule. We now only render real
           ratings sourced from the tour record; otherwise show "no reviews yet".
         */}
+        {/* Rating Row — only render when there's a real rating, otherwise show
+            "精選" featured badge (if applicable) so the card doesn't display
+            an empty/awkward "no reviews" state. v78h. */}
         {typeof tour.rating === "number" && tour.rating > 0 ? (
           <div className="flex items-center gap-1 mb-2">
             {[1,2,3,4,5].map(i => (
@@ -191,13 +236,12 @@ function TourCard({
               ({(tour.rating as number).toFixed(1)})
             </span>
           </div>
-        ) : (
-          <div className="flex items-center gap-1 mb-2">
-            <span className="text-xs text-gray-400">
-              {t("tours.noReviewsYet")}
-            </span>
+        ) : tour.featured ? (
+          <div className="inline-flex items-center gap-1 mb-2 px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold w-fit">
+            <Sparkles className="h-3 w-3" />
+            {t("tours.featuredBadge") || "精選"}
           </div>
-        )}
+        ) : null}
 
         {/* Title */}
         <Link href={`/tours/${tour.id}`}>
@@ -205,6 +249,13 @@ function TourCard({
             {displayTitle}
           </h3>
         </Link>
+
+        {/* v78h: 2-line selling-point preview (matches Lion Travel pattern) */}
+        {displaySubtitle && (
+          <p className="text-xs text-gray-600 mb-2 line-clamp-2 leading-relaxed">
+            {(displaySubtitle as string).slice(0, 80)}
+          </p>
+        )}
 
         {/* Location */}
         <div className="flex items-center text-gray-500 mb-2">
@@ -214,16 +265,38 @@ function TourCard({
           </span>
         </div>
 
-        {/* Next Departure Date */}
-        {nextDepartureLabel && (
-          <div className="flex items-center text-gray-500 mb-2">
-            <Calendar className="h-3.5 w-3.5 mr-1 flex-shrink-0 text-teal-600" />
-            <span className="text-xs text-teal-700 font-medium">
-              {t("tours.nextDeparture")}{nextDepartureLabel}
-            </span>
-            {nextDeparture?.totalSlots && nextDeparture.bookedSlots !== undefined && (
-              <span className="ml-2 text-xs text-gray-400">
-                ({nextDeparture.totalSlots - nextDeparture.bookedSlots} {t("tours.seatsLeftSuffix")})
+        {/* v78s: Multi-departure chip strip — Lion-Travel pattern.
+            Shows up to 3 upcoming dates with status pill ("Available"/"Confirmed"/"Sold out").
+            More informative than single-date label, helps users see frequency at a glance. */}
+        {upcomingDepartures && (upcomingDepartures as any[]).length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-2.5">
+            {(upcomingDepartures as any[]).slice(0, 3).map((dep: any) => {
+              const d = new Date(dep.departureDate);
+              const dateLabel = isEn
+                ? d.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+                : `${d.getMonth() + 1}/${d.getDate()}`;
+              const status = dep.status as string;
+              const statusConfig: Record<string, { label: string; cls: string }> = {
+                open: { label: isEn ? "Available" : "可預訂", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+                confirmed: { label: isEn ? "Confirmed" : "確定出發", cls: "bg-blue-50 text-blue-700 border-blue-200" },
+                full: { label: isEn ? "Sold out" : "額滿", cls: "bg-gray-100 text-gray-500 border-gray-200" },
+                waitlist: { label: isEn ? "Waitlist" : "候補", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+              };
+              const sCfg = statusConfig[status] || statusConfig.open;
+              return (
+                <span
+                  key={dep.id}
+                  className={`inline-flex items-center gap-1 text-[10px] md:text-xs font-medium px-1.5 py-0.5 rounded border ${sCfg.cls}`}
+                  title={`${dateLabel} · ${sCfg.label}`}
+                >
+                  <Calendar className="h-2.5 w-2.5 md:h-3 md:w-3" />
+                  <span>{dateLabel}</span>
+                </span>
+              );
+            })}
+            {(upcomingDepartures as any[]).length > 3 && (
+              <span className="text-[10px] md:text-xs text-gray-400 px-1.5 py-0.5">
+                +{(upcomingDepartures as any[]).length - 3}
               </span>
             )}
           </div>
@@ -255,18 +328,13 @@ function TourCard({
             </span>
             <span className="text-xs text-gray-400 ml-1">{t("tours.startingFrom")}</span>
           </div>
-          <div className="flex gap-2">
-            <Link href={`/tours/${tour.id}`} className="flex-1">
-              <Button className="w-full bg-black text-white hover:bg-gray-800 text-xs py-2 h-9">
-                {t("tours.viewDetails")}
-              </Button>
-            </Link>
-            <Link href={`/contact-us?tour=${encodeURIComponent(displayTitle)}`}>
-              <Button variant="outline" className="border-gray-300 hover:border-black text-xs py-2 h-9 px-3">
-                <MessageCircle className="h-3.5 w-3.5" />
-              </Button>
-            </Link>
-          </div>
+          {/* v78h: single primary CTA (removed secondary chat button to reduce
+              cognitive load on tour cards — matches signettours pattern). */}
+          <Link href={`/tours/${tour.id}`} className="block">
+            <Button className="w-full bg-black text-white hover:bg-gray-800 text-xs py-2 h-9">
+              {t("tours.viewDetails")}
+            </Button>
+          </Link>
         </div>
       </div>
     </Card>
@@ -324,11 +392,13 @@ function Pagination({
 }
 
 export default function Tours() {
+  const [, setLocation] = useLocation(); // v78v: empty-state CTA navigation
   const searchString = useSearch();
   const urlCategory = useMemo(() => new URLSearchParams(searchString).get("category") || "all", [searchString]);
   const [searchInput, setSearchInput] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>(urlCategory);
   const [selectedDurationIdx, setSelectedDurationIdx] = useState<number>(0);
+  const [selectedPriceIdx, setSelectedPriceIdx] = useState<number>(0); // v78u
   const [selectedSortBy, setSelectedSortBy] = useState<string>("popular");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [selectedCountry, setSelectedCountry] = useState<string>("all");
@@ -343,11 +413,13 @@ export default function Tours() {
 
   const debouncedSearch = useDebounce(searchInput, 400);
   const selectedDuration = DURATION_PRESETS[selectedDurationIdx];
+  const selectedPrice = PRICE_PRESETS[selectedPriceIdx]; // v78u
 
   const resetPage = useCallback(() => setPage(1), []);
   const handleSearchChange = useCallback((value: string) => { setSearchInput(value); resetPage(); }, [resetPage]);
   const handleCategoryChange = useCallback((value: string) => { setSelectedCategory(value); resetPage(); }, [resetPage]);
   const handleDurationChange = useCallback((idx: number) => { setSelectedDurationIdx(idx); resetPage(); }, [resetPage]);
+  const handlePriceChange = useCallback((idx: number) => { setSelectedPriceIdx(idx); resetPage(); }, [resetPage]); // v78u
   const handleSortChange = useCallback((value: string) => { setSelectedSortBy(value); resetPage(); }, [resetPage]);
   const handleCountryChange = useCallback((country: string) => {
     setSelectedCountry(country);
@@ -376,6 +448,8 @@ export default function Tours() {
     category: selectedCategory !== "all" ? selectedCategory : undefined,
     minDays: selectedDuration.min,
     maxDays: selectedDuration.max,
+    minPrice: selectedPrice.min, // v78u
+    maxPrice: selectedPrice.max, // v78u
     sortBy: selectedSortBy as "popular" | "price_asc" | "price_desc" | "days_asc" | "days_desc",
     page,
     pageSize: 12,
@@ -390,15 +464,17 @@ export default function Tours() {
     let count = 0;
     if (selectedCategory !== "all") count++;
     if (selectedDurationIdx !== 0) count++;
+    if (selectedPriceIdx !== 0) count++; // v78u
     if (selectedSortBy !== "popular") count++;
     if (debouncedSearch) count++;
     return count;
-  }, [selectedCategory, selectedDurationIdx, selectedSortBy, debouncedSearch]);
+  }, [selectedCategory, selectedDurationIdx, selectedPriceIdx, selectedSortBy, debouncedSearch]);
 
   const clearAllFilters = useCallback(() => {
     setSearchInput("");
     setSelectedCategory("all");
     setSelectedDurationIdx(0);
+    setSelectedPriceIdx(0); // v78u
     setSelectedSortBy("popular");
     setSelectedCountry("all");
     setPage(1);
@@ -448,7 +524,8 @@ export default function Tours() {
                       : "bg-white text-gray-600 border-gray-200 hover:border-teal-400 hover:bg-teal-50"
                   }`}
                 >
-                  🌍 {t("tours.allDestinations")}
+                  <Globe className="h-3.5 w-3.5" />
+                  {t("tours.allDestinations")}
                 </button>
                 {topDestinations.map((dest) => (
                   <button
@@ -460,7 +537,6 @@ export default function Tours() {
                         : "bg-white text-gray-600 border-gray-200 hover:border-teal-400 hover:bg-teal-50"
                     }`}
                   >
-                    <span>{getFlagEmoji(dest.country)}</span>
                     <span>{translateDestination(dest.country, language)}</span>
                     <span className={`text-xs ${selectedCountry === dest.country ? "text-teal-100" : "text-gray-400"}`}>
                       ({dest.count})
@@ -547,7 +623,38 @@ export default function Tours() {
           </div>
 
           {showAdvanced && (
-            <div className="border-t bg-gray-50">
+            <>
+              {/* v78v: Mobile slide-over backdrop — taps outside to close */}
+              <div
+                onClick={() => setShowAdvanced(false)}
+                className="md:hidden fixed inset-0 bg-black/40 z-40"
+                aria-hidden
+              />
+              <div className={`
+                border-t bg-gray-50
+                md:relative md:block
+                fixed inset-x-0 bottom-0 z-50 max-h-[80vh] overflow-y-auto rounded-t-2xl shadow-2xl
+                md:max-h-none md:overflow-visible md:rounded-none md:shadow-none md:inset-auto md:bottom-auto
+                animate-in slide-in-from-bottom-4 md:animate-none
+              `}>
+                {/* Mobile-only header with close button */}
+                <div className="md:hidden flex items-center justify-between px-4 py-3 border-b bg-white sticky top-0">
+                  <h3 className="font-semibold text-base">
+                    {language === "en" ? "Filters" : "篩選"}
+                    {activeFiltersCount > 0 && (
+                      <span className="ml-2 inline-flex items-center justify-center bg-gray-900 text-white text-xs font-bold rounded-full w-5 h-5">
+                        {activeFiltersCount}
+                      </span>
+                    )}
+                  </h3>
+                  <button
+                    onClick={() => setShowAdvanced(false)}
+                    className="p-1.5 -mr-1.5 rounded-full hover:bg-gray-100"
+                    aria-label="Close filters"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
               <div className="container py-4">
                 <div className="flex flex-col md:flex-row gap-4 items-start md:items-center flex-wrap">
                   <div className="relative flex-grow max-w-sm">
@@ -579,6 +686,26 @@ export default function Tours() {
                     ))}
                   </div>
 
+                  {/* v78u: Price range chips — major missing filter, customers always ask "what's my budget" */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm text-gray-500 font-medium whitespace-nowrap">
+                      {language === "en" ? "Price" : "預算"}
+                    </span>
+                    {PRICE_PRESETS.map((preset, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => handlePriceChange(idx)}
+                        className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                          selectedPriceIdx === idx
+                            ? "bg-gray-900 text-white border-gray-900"
+                            : "bg-white text-gray-600 border-gray-200 hover:border-gray-400"
+                        }`}
+                      >
+                        {language === "en" ? preset.label.en : preset.label.zh}
+                      </button>
+                    ))}
+                  </div>
+
                   <div className="flex items-center gap-2 md:ml-auto">
                     <span className="text-sm text-gray-500 whitespace-nowrap">
                       {t("tours.sortBy")}:
@@ -598,7 +725,21 @@ export default function Tours() {
                   </div>
                 </div>
               </div>
-            </div>
+              {/* v78v: Mobile-only "View N tours" sticky footer */}
+              <div className="md:hidden sticky bottom-0 bg-white border-t px-4 py-3 flex items-center justify-between gap-3">
+                {activeFiltersCount > 0 && (
+                  <button onClick={clearAllFilters} className="text-sm text-red-600 font-medium">
+                    {t("tours.clear")}
+                  </button>
+                )}
+                <Button onClick={() => setShowAdvanced(false)} className="ml-auto rounded-lg">
+                  {language === "en"
+                    ? `View ${pagination?.total ?? tours.length} tours`
+                    : `查看 ${pagination?.total ?? tours.length} 個行程`}
+                </Button>
+              </div>
+              </div>
+            </>
           )}
         </section>
 
@@ -610,12 +751,58 @@ export default function Tours() {
                 <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
               </div>
             ) : tours.length === 0 ? (
-              <div className="text-center py-20">
-                <p className="text-gray-500 text-lg mb-4">{t("tours.noResults")}</p>
-                {activeFiltersCount > 0 && (
-                  <Button variant="outline" onClick={clearAllFilters} className="rounded-lg">
-                    {t("tours.clearAllFilters")}
+              // v78v: rich empty state — illustrative + actionable next steps
+              <div className="max-w-xl mx-auto text-center py-16 px-4">
+                <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 mb-5">
+                  <Search className="h-7 w-7 text-gray-400" />
+                </div>
+                <h3 className="text-xl md:text-2xl font-bold text-gray-900 mb-2">
+                  {language === "en" ? "No tours match your search" : "沒有符合的行程"}
+                </h3>
+                <p className="text-gray-500 mb-6 leading-relaxed">
+                  {activeFiltersCount > 0
+                    ? (language === "en"
+                        ? "Try removing one of your filters, or browse other destinations below."
+                        : "試試移除一些篩選條件，或瀏覽下方其他目的地。")
+                    : (language === "en"
+                        ? "Be the first to plan a custom trip — our AI will draft an itinerary in 30 seconds."
+                        : "您可以提交客製需求 — AI 30 秒內為您草擬行程。")}
+                </p>
+                <div className="flex flex-col sm:flex-row gap-3 justify-center mb-8">
+                  {activeFiltersCount > 0 && (
+                    <Button variant="outline" onClick={clearAllFilters} className="rounded-lg">
+                      <X className="h-4 w-4 mr-1.5" />
+                      {t("tours.clearAllFilters")}
+                    </Button>
+                  )}
+                  <Button onClick={() => setLocation("/custom-tour-request")} className="rounded-lg">
+                    <Sparkles className="h-4 w-4 mr-1.5" />
+                    {language === "en" ? "Request a custom tour" : "客製化行程"}
                   </Button>
+                </div>
+                {/* Suggest popular destinations as next-best-action */}
+                {topDestinations && topDestinations.length > 0 && (
+                  <div>
+                    <p className="text-xs uppercase tracking-wider text-gray-400 mb-3">
+                      {language === "en" ? "Popular destinations" : "熱門目的地"}
+                    </p>
+                    <div className="flex flex-wrap gap-2 justify-center">
+                      {topDestinations.slice(0, 6).map((dest: any) => (
+                        <button
+                          key={dest.country}
+                          onClick={() => {
+                            clearAllFilters();
+                            handleSearchChange(dest.country);
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-gray-200 hover:border-gray-400 hover:bg-gray-50 text-sm font-medium text-gray-700 transition-colors"
+                        >
+                          <MapPin className="h-3.5 w-3.5 text-gray-400" />
+                          {translateDestination(dest.country, language)}
+                          <span className="text-gray-400 text-xs">({dest.count})</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
             ) : (
@@ -671,6 +858,7 @@ export default function Tours() {
       </main>
 
       <Footer />
+      <CompareBar />
     </div>
   );
 }

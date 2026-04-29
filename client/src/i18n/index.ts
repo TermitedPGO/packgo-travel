@@ -1,11 +1,15 @@
 import { zhTW } from './zh-TW';
 import { en } from './en';
+import { ja } from './ja';
+import { ko } from './ko';
 import type { Language } from '@/contexts/LocaleContext';
 
-// 翻譯資源（僅支援繁體中文和英文）
+// 翻譯資源（v78q: 加入 ja + ko，先用 en 為後備）
 export const translations = {
   'zh-TW': zhTW,
   'en': en,
+  'ja': ja,
+  'ko': ko,
 } as const;
 
 export type TranslationKeys = typeof zhTW;
@@ -49,11 +53,17 @@ export function translate(
   const translation = translations[language];
   let text = getNestedValue(translation, key);
   
-  // 如果找不到翻譯，嘗試使用繁體中文
-  if (text === undefined && language !== 'zh-TW') {
-    text = getNestedValue(translations['zh-TW'], key);
+  // v78q: Fallback chain — for ja/ko fall back to en (so users see English not Chinese)
+  // For en fall back to zh-TW (legacy behavior). For zh-TW just return key.
+  if (text === undefined) {
+    if (language === 'ja' || language === 'ko') {
+      text = getNestedValue(translations['en'], key);
+      if (text === undefined) text = getNestedValue(translations['zh-TW'], key);
+    } else if (language === 'en') {
+      text = getNestedValue(translations['zh-TW'], key);
+    }
   }
-  
+
   // 如果還是找不到，返回 key
   if (text === undefined) {
     console.warn(`[i18n] Missing translation for key: ${key}`);
@@ -78,11 +88,16 @@ export function translateArray(
   const translation = translations[language];
   let arr = getNestedArrayValue(translation, key);
   
-  // 如果找不到翻譯，嘗試使用繁體中文
-  if (arr === undefined && language !== 'zh-TW') {
-    arr = getNestedArrayValue(translations['zh-TW'], key);
+  // v78q: Same fallback chain as translate() — ja/ko → en → zh-TW
+  if (arr === undefined) {
+    if (language === 'ja' || language === 'ko') {
+      arr = getNestedArrayValue(translations['en'], key);
+      if (arr === undefined) arr = getNestedArrayValue(translations['zh-TW'], key);
+    } else if (language === 'en') {
+      arr = getNestedArrayValue(translations['zh-TW'], key);
+    }
   }
-  
+
   // 如果還是找不到，返回空陣列並警告
   if (arr === undefined) {
     console.warn(`[i18n] Missing array translation for key: ${key}`);
@@ -92,4 +107,4 @@ export function translateArray(
   return arr;
 }
 
-export { zhTW, en };
+export { zhTW, en, ja, ko };

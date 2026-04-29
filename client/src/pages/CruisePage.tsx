@@ -33,7 +33,7 @@ const cruiseImages: Record<string, string> = {
 };
 
 export default function CruisePage() {
-  const { t, language } = useLocale();
+  const { t, language, formatPrice } = useLocale();
   const [searchQuery, setSearchQuery] = useState("");
   const [favorites, setFavorites] = useState<Set<number>>(new Set());
 
@@ -286,7 +286,7 @@ export default function CruisePage() {
                             <div className="text-right">
                               <div className="text-xs text-gray-500">{t('cruise.perPerson')}</div>
                               <div className="text-lg font-bold text-primary">
-                                NT$ {tour.price?.toLocaleString() || "-"}
+                                {tour.price ? formatPrice(Number(tour.price), "TWD") : "-"}
                                 <span className="text-sm font-normal text-gray-500">{t('cruise.from')}</span>
                               </div>
                             </div>

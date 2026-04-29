@@ -21,7 +21,7 @@ import Footer from "@/components/Footer";
 type BookingStep = "date" | "travelers" | "details" | "confirm";
 
 export default function BookTour() {
-  const { t, language } = useLocale();
+  const { t, language, formatPrice } = useLocale();
   const params = useParams();
   const [, navigate] = useLocation();
   const { user, loading: authLoading } = useAuth();
@@ -42,6 +42,10 @@ export default function BookTour() {
   const [customerEmail, setCustomerEmail] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [message, setMessage] = useState("");
+  // v76: explicit consent to CST disclosures + cancellation policy. Required by
+  // CA B&P §17550 — buyer must affirm receipt of mandatory disclosures before
+  // payment. Without this, the booking cannot be submitted.
+  const [acceptedDisclosures, setAcceptedDisclosures] = useState(false);
   
   // Participant details
   const [participants, setParticipants] = useState<any[]>([]);
@@ -146,15 +150,28 @@ export default function BookTour() {
       });
     }
 
+    if (!selectedDepartureId) {
+      toast.error(t('bookTour.pickDepartureFirst') || '請先選擇出發日期');
+      return;
+    }
     try {
-      const totalParticipants = numberOfAdults + numberOfChildrenWithBed + numberOfChildrenNoBed + numberOfInfants;
+      // v74: pass per-passenger breakdown + departureId so server can compute
+      // the canonical total price using departure-specific rates (was previously
+      // ignoring child/infant pricing on the server side).
       const booking = await createBookingMutation.mutateAsync({
         tourId,
-        participants: totalParticipants,
+        departureId: selectedDepartureId,
+        numberOfAdults,
+        numberOfChildrenWithBed,
+        numberOfChildrenNoBed,
+        numberOfInfants,
+        numberOfSingleRooms: 0,
         contactName: customerName,
         contactEmail: customerEmail,
         contactPhone: customerPhone,
         specialRequests: message,
+        // v78x: pass current locale so booking confirmation email matches customer's UI language
+        language: language === "en" ? "en" : "zh-TW",
       });
       
       toast.success(t('bookTour.bookingSuccess'), {
@@ -227,18 +244,48 @@ export default function BookTour() {
     setParticipants(newParticipants);
   }, [numberOfAdults, numberOfChildrenWithBed, numberOfChildrenNoBed, numberOfInfants]);
   
-  if (tourLoading || authLoading) {
+  // v71: was only checking tourLoading + authLoading; departuresLoading was
+  // missing → page rendered with a half-loaded form (price calculator pulled
+  // from undefined departures) until the second query landed. Now we show a
+  // proper skeleton until ALL critical queries complete.
+  if (tourLoading || authLoading || departuresLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-      <SEO
-        title={{ zh: "預訂行程", en: "Book Tour" }}
-        description={{
-          zh: "預訂 PACK&GO 旅遊行程，填寫旅客資料完成預訂，開始您的旅遊之旅。",
-          en: "Book your PACK&GO tour — fill in traveler details to complete your reservation and start your journey.",
-        }}
-        url="/book"
-      />
-        <Loader2 className="h-8 w-8 animate-spin" />
+      <div className="min-h-screen bg-gray-50">
+        <SEO
+          title={{ zh: "預訂行程", en: "Book Tour" }}
+          description={{
+            zh: "預訂 PACK&GO 旅遊行程，填寫旅客資料完成預訂，開始您的旅遊之旅。",
+            en: "Book your PACK&GO tour — fill in traveler details to complete your reservation and start your journey.",
+          }}
+          url="/book"
+        />
+        <div className="container mx-auto px-4 py-8 max-w-5xl animate-pulse">
+          {/* Title skeleton */}
+          <div className="h-8 w-2/3 bg-gray-200 rounded-lg mb-3" />
+          <div className="h-4 w-1/3 bg-gray-200 rounded-lg mb-8" />
+          <div className="grid lg:grid-cols-3 gap-6">
+            {/* Form column skeleton */}
+            <div className="lg:col-span-2 space-y-4">
+              <div className="bg-white rounded-xl p-6 border border-gray-100 space-y-3">
+                <div className="h-5 w-1/4 bg-gray-200 rounded" />
+                <div className="h-10 w-full bg-gray-100 rounded-lg" />
+                <div className="h-10 w-full bg-gray-100 rounded-lg" />
+                <div className="h-10 w-3/4 bg-gray-100 rounded-lg" />
+              </div>
+              <div className="bg-white rounded-xl p-6 border border-gray-100 space-y-3">
+                <div className="h-5 w-1/3 bg-gray-200 rounded" />
+                <div className="h-24 w-full bg-gray-100 rounded-lg" />
+              </div>
+            </div>
+            {/* Summary column skeleton */}
+            <div className="bg-white rounded-xl p-6 border border-gray-100 space-y-3 h-fit">
+              <div className="h-6 w-1/2 bg-gray-200 rounded" />
+              <div className="h-4 w-full bg-gray-100 rounded" />
+              <div className="h-4 w-5/6 bg-gray-100 rounded" />
+              <div className="h-12 w-full bg-gray-200 rounded-lg mt-4" />
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -341,47 +388,61 @@ export default function BookTour() {
                   {departures.map(departure => {
                     const availableSlots = departure.totalSlots - departure.bookedSlots;
                     const isAvailable = availableSlots > 0 && departure.status === "open";
-                    
+                    // v78s: status pill labels matching tour list cards
+                    const statusPill =
+                      departure.status === "cancelled"
+                        ? { label: t("bookTour.cancelled"), cls: "bg-red-50 text-red-700 border-red-200" }
+                        : departure.status === "full" || availableSlots <= 0
+                          ? { label: t("bookTour.soldOut"), cls: "bg-gray-100 text-gray-500 border-gray-200" }
+                          : (departure as any).status === "confirmed"
+                            ? { label: language === "zh-TW" ? "確定出發" : "Confirmed", cls: "bg-blue-50 text-blue-700 border-blue-200" }
+                            : { label: language === "zh-TW" ? "可預訂" : "Available", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+                    const lowSeats = isAvailable && availableSlots > 0 && availableSlots <= 3;
+
                     return (
                       <div
                         key={departure.id}
-                        className={`border rounded-lg p-4 cursor-pointer transition-all ${
+                        className={`border-2 rounded-xl p-4 transition-all ${
                           selectedDepartureId === departure.id
-                            ? "border-black bg-gray-50"
+                            ? "border-primary bg-primary/5 shadow-sm"
                             : isAvailable
-                            ? "border-gray-300 hover:border-gray-400"
-                            : "border-gray-200 bg-gray-100 cursor-not-allowed opacity-60"
+                              ? "border-gray-200 hover:border-gray-400 cursor-pointer"
+                              : "border-gray-200 bg-gray-50 cursor-not-allowed opacity-60"
                         }`}
                         onClick={() => isAvailable && setSelectedDepartureId(departure.id)}
                       >
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <div className="font-bold text-lg">
-                              {new Date(departure.departureDate).toLocaleDateString(getLocaleString(), {
-                                year: "numeric",
-                                month: "long",
-                                day: "numeric",
-                              })}
+                        <div className="flex justify-between items-start gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap mb-1">
+                              <div className="font-bold text-base md:text-lg">
+                                {new Date(departure.departureDate).toLocaleDateString(getLocaleString(), {
+                                  year: "numeric", month: "long", day: "numeric",
+                                })}
+                              </div>
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium border ${statusPill.cls}`}>
+                                {statusPill.label}
+                              </span>
                             </div>
-                            <div className="text-sm text-gray-600 mt-1">
+                            <div className="text-xs md:text-sm text-gray-600 mt-1">
                               {t('bookTour.returnDate')}：{new Date(departure.returnDate).toLocaleDateString(getLocaleString())}
                             </div>
-                            <div className="text-sm text-gray-600 mt-1">
+                            <div className={`text-xs md:text-sm mt-1 ${lowSeats ? "text-amber-700 font-medium" : "text-gray-600"}`}>
+                              {lowSeats && (
+                                <span className="inline-flex items-center gap-1 mr-2">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                                </span>
+                              )}
                               {t('bookTour.remainingSlots')}：{availableSlots} / {departure.totalSlots}
+                              {lowSeats && (language === "zh-TW" ? "（即將售完）" : " (almost full)")}
                             </div>
                           </div>
-                          <div className="text-right">
-                            <div className="text-2xl font-bold">
-                              {departure.currency} ${departure.adultPrice.toLocaleString()}
+                          <div className="text-right shrink-0">
+                            <div className="text-xl md:text-2xl font-bold" style={{ color: "#0d9488" }}>
+                              {formatPrice(Number(departure.adultPrice), ((departure.currency as any) || "TWD"))}
                             </div>
-                            <div className="text-sm text-gray-600">{t('bookTour.perPerson')}</div>
+                            <div className="text-xs text-gray-500">{t('bookTour.perPerson')}</div>
                           </div>
                         </div>
-                        {!isAvailable && (
-                          <div className="mt-2 text-sm text-red-600 font-medium">
-                            {departure.status === "cancelled" ? t('bookTour.cancelled') : t('bookTour.soldOut')}
-                          </div>
-                        )}
                       </div>
                     );
                   })}
@@ -404,7 +465,7 @@ export default function BookTour() {
           </Card>
         )}
         
-        {/* Step 2: Traveler Configuration */}
+        {/* Step 2: Traveler Configuration — v78t: stepper UI + status pills + formatPrice */}
         {currentStep === "travelers" && selectedDeparture && (
           <Card>
             <CardHeader>
@@ -412,109 +473,76 @@ export default function BookTour() {
               <CardDescription>{t('bookTour.selectTravelersDesc')}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="adults">{t('bookTour.adults')}</Label>
-                  <Input
-                    id="adults"
-                    type="number"
-                    min="0"
-                    value={numberOfAdults}
-                    onChange={(e) => setNumberOfAdults(parseInt(e.target.value) || 0)}
-                    className="mt-1"
-                  />
-                  <div className="text-sm text-gray-600 mt-1">
-                    ${selectedDeparture.adultPrice.toLocaleString()} / {t('common.person')}
+              {/* v78t: ±-stepper buttons replace bare number inputs (better mobile UX, friendlier).
+                  Each row: [- 0 +] big touch targets, label left, price right. */}
+              {(() => {
+                const cur = (selectedDeparture.currency as any) || "TWD";
+                type Row = { label: string; value: number; setValue: (n: number) => void; price: number; perKey: string };
+                const rows: Row[] = [
+                  { label: t('bookTour.adults'), value: numberOfAdults, setValue: setNumberOfAdults, price: selectedDeparture.adultPrice, perKey: 'common.person' },
+                ];
+                if (selectedDeparture.childPriceWithBed)
+                  rows.push({ label: t('bookTour.childrenWithBed'), value: numberOfChildrenWithBed, setValue: setNumberOfChildrenWithBed, price: selectedDeparture.childPriceWithBed, perKey: 'common.person' });
+                if (selectedDeparture.childPriceNoBed)
+                  rows.push({ label: t('bookTour.childrenNoBed'), value: numberOfChildrenNoBed, setValue: setNumberOfChildrenNoBed, price: selectedDeparture.childPriceNoBed, perKey: 'common.person' });
+                if (selectedDeparture.infantPrice)
+                  rows.push({ label: t('bookTour.infants'), value: numberOfInfants, setValue: setNumberOfInfants, price: selectedDeparture.infantPrice, perKey: 'common.person' });
+                if (selectedDeparture.singleRoomSupplement)
+                  rows.push({ label: t('bookTour.singleRooms'), value: numberOfSingleRooms, setValue: setNumberOfSingleRooms, price: selectedDeparture.singleRoomSupplement, perKey: 'bookTour.perRoom' });
+                return (
+                  <div className="space-y-3">
+                    {rows.map((row, idx) => (
+                      <div key={idx} className="flex items-center justify-between gap-3 p-4 rounded-xl border-2 border-gray-200 hover:border-gray-300 transition-colors">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-gray-900">{row.label}</p>
+                          <p className="text-sm text-gray-500">
+                            {formatPrice(Number(row.price), cur)} / {t(row.perKey)}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => row.setValue(Math.max(0, row.value - 1))}
+                            disabled={row.value <= 0}
+                            className="w-9 h-9 rounded-full border border-gray-300 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed text-lg font-medium text-gray-700"
+                            aria-label={`decrease ${row.label}`}
+                          >
+                            −
+                          </button>
+                          <span className="w-8 text-center font-bold text-lg tabular-nums">{row.value}</span>
+                          <button
+                            type="button"
+                            onClick={() => row.setValue(row.value + 1)}
+                            className="w-9 h-9 rounded-full border border-gray-300 hover:bg-gray-100 text-lg font-medium text-gray-700"
+                            aria-label={`increase ${row.label}`}
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
+                );
+              })()}
+
+              {/* Price Summary — v78t: card-style with currency-aware formatting */}
+              <div className="rounded-xl border-2 border-gray-200 bg-gray-50 p-5 space-y-2.5">
+                <div className="flex justify-between items-center pb-2 border-b border-gray-200">
+                  <span className="text-base font-semibold text-gray-900">{t('bookTour.totalAmount')}</span>
+                  <span className="text-2xl font-bold" style={{ color: "#0d9488" }}>
+                    {formatPrice(totalPrice, ((selectedDeparture.currency as any) || "TWD"))}
+                  </span>
                 </div>
-                
-                {selectedDeparture.childPriceWithBed && (
-                  <div>
-                    <Label htmlFor="childrenWithBed">{t('bookTour.childrenWithBed')}</Label>
-                    <Input
-                      id="childrenWithBed"
-                      type="number"
-                      min="0"
-                      value={numberOfChildrenWithBed}
-                      onChange={(e) => setNumberOfChildrenWithBed(parseInt(e.target.value) || 0)}
-                      className="mt-1"
-                    />
-                    <div className="text-sm text-gray-600 mt-1">
-                      ${selectedDeparture.childPriceWithBed.toLocaleString()} / {t('common.person')}
-                    </div>
-                  </div>
-                )}
-                
-                {selectedDeparture.childPriceNoBed && (
-                  <div>
-                    <Label htmlFor="childrenNoBed">{t('bookTour.childrenNoBed')}</Label>
-                    <Input
-                      id="childrenNoBed"
-                      type="number"
-                      min="0"
-                      value={numberOfChildrenNoBed}
-                      onChange={(e) => setNumberOfChildrenNoBed(parseInt(e.target.value) || 0)}
-                      className="mt-1"
-                    />
-                    <div className="text-sm text-gray-600 mt-1">
-                      ${selectedDeparture.childPriceNoBed.toLocaleString()} / {t('common.person')}
-                    </div>
-                  </div>
-                )}
-                
-                {selectedDeparture.infantPrice && (
-                  <div>
-                    <Label htmlFor="infants">{t('bookTour.infants')}</Label>
-                    <Input
-                      id="infants"
-                      type="number"
-                      min="0"
-                      value={numberOfInfants}
-                      onChange={(e) => setNumberOfInfants(parseInt(e.target.value) || 0)}
-                      className="mt-1"
-                    />
-                    <div className="text-sm text-gray-600 mt-1">
-                      ${selectedDeparture.infantPrice.toLocaleString()} / {t('common.person')}
-                    </div>
-                  </div>
-                )}
-                
-                {selectedDeparture.singleRoomSupplement && (
-                  <div>
-                    <Label htmlFor="singleRooms">{t('bookTour.singleRooms')}</Label>
-                    <Input
-                      id="singleRooms"
-                      type="number"
-                      min="0"
-                      value={numberOfSingleRooms}
-                      onChange={(e) => setNumberOfSingleRooms(parseInt(e.target.value) || 0)}
-                      className="mt-1"
-                    />
-                    <div className="text-sm text-gray-600 mt-1">
-                      ${selectedDeparture.singleRoomSupplement.toLocaleString()} / {t('bookTour.perRoom')}
-                    </div>
-                  </div>
-                )}
-              </div>
-              
-              {/* Price Summary */}
-              <div className="border-t pt-4">
-                <div className="space-y-2">
-                  <div className="flex justify-between text-lg">
-                    <span>{t('bookTour.totalAmount')}</span>
-                    <span className="font-bold">${totalPrice.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between text-sm text-gray-600">
-                    <span>{t('bookTour.deposit')}</span>
-                    <span>${depositAmount.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between text-sm text-gray-600">
-                    <span>{t('bookTour.balance')}</span>
-                    <span>${(totalPrice - depositAmount).toLocaleString()}</span>
-                  </div>
+                <div className="flex justify-between text-sm text-gray-600">
+                  <span>{t('bookTour.deposit')}</span>
+                  <span className="font-medium">{formatPrice(depositAmount, ((selectedDeparture.currency as any) || "TWD"))}</span>
+                </div>
+                <div className="flex justify-between text-sm text-gray-600">
+                  <span>{t('bookTour.balance')}</span>
+                  <span className="font-medium">{formatPrice(totalPrice - depositAmount, ((selectedDeparture.currency as any) || "TWD"))}</span>
                 </div>
               </div>
-              
+
               <div className="flex justify-between mt-6">
                 <Button variant="outline" onClick={() => setCurrentStep("date")}>
                   {t('bookTour.previousStep')}
@@ -822,6 +850,10 @@ export default function BookTour() {
                 <p>
                   {t('bookTour.cstTcrf')}
                 </p>
+                {/* v76: 3-business-day right of rescission required by CA B&P §17550.13 */}
+                <p className="font-semibold text-gray-900">
+                  {t('bookTour.cstThreeDayRight')}
+                </p>
                 <p>
                   {t('bookTour.cstCancellation')}
                 </p>
@@ -830,13 +862,29 @@ export default function BookTour() {
                 </p>
               </div>
 
+              {/* v76: mandatory consent checkbox — without this the booking
+                  button stays disabled. CA B&P §17550 requires affirmative
+                  acknowledgement of disclosures before charging. */}
+              <label className="flex items-start gap-3 mt-4 cursor-pointer rounded-lg border border-gray-200 bg-white p-4 hover:border-gray-300 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={acceptedDisclosures}
+                  onChange={(e) => setAcceptedDisclosures(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-black focus:ring-black"
+                />
+                <span className="text-sm text-gray-700 leading-relaxed">
+                  {t('bookTour.acceptDisclosures')}
+                </span>
+              </label>
+
               <div className="flex justify-between mt-6">
                 <Button variant="outline" onClick={() => setCurrentStep("details")}>
                   {t('bookTour.previousStep')}
                 </Button>
                 <Button
                   onClick={handleSubmit}
-                  disabled={createBookingMutation.isPending}
+                  disabled={createBookingMutation.isPending || !acceptedDisclosures}
+                  title={!acceptedDisclosures ? t('bookTour.acceptRequired') : undefined}
                 >
                   {createBookingMutation.isPending && (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />

@@ -92,6 +92,142 @@ export async function generateTourFromUrlInternal(
       overallProgress: 95,
     });
     
+    // ─────────────────────────────────────────────────────────────────────
+    // Derive legacy flight / hotel columns from the JSON blobs so we don't
+    // leave the denormalised DB columns empty. Without this the admin list
+    // view, search filters, and exports that read these columns all show
+    // "-" even though the data is available in the JSON blob.
+    // ─────────────────────────────────────────────────────────────────────
+    const safeJson = (raw: any): any => {
+      if (!raw) return null;
+      if (typeof raw === "object") return raw;
+      try { return JSON.parse(raw); } catch { return null; }
+    };
+
+    const flightsJson = safeJson(tourData.flights);
+    const hotelsJson = safeJson(tourData.hotels);
+    const hotelsArray: any[] = Array.isArray(hotelsJson) ? hotelsJson : [];
+
+    // Placeholder hotel entries — "機上" (in-flight overnight), "TBA", "未定" etc.
+    // These appear as legitimate-looking hotel objects in the JSON (with `stars: "待確認"`)
+    // but aren't real accommodation. Skip them when picking a representative hotel.
+    const isPlaceholderHotel = (h: any): boolean => {
+      if (!h || typeof h !== "object") return true;
+      const name = typeof h.name === "string" ? h.name.trim() : "";
+      if (!name) return true;
+      return (
+        name === "機上" ||
+        name === "TBA" ||
+        name === "未定" ||
+        name === "待確認" ||
+        name === "尚未安排" ||
+        name.includes("國際航線") ||
+        name.includes("飛行途中")
+      );
+    };
+    const realHotels = hotelsArray.filter((h) => !isPlaceholderHotel(h));
+    const firstHotel = realHotels[0] || hotelsArray[0] || null;
+
+    // Grade extraction — the `stars` field from hotelsAgent is a pre-formatted string like
+    // "四星級" / "五星級" / "三星級至四星級" / "待確認", NOT a number. Previous code did
+    // `${stars}星級` which produced the nonsensical "四星級星級". Treat `stars` as a display
+    // string, only discard explicit placeholders.
+    const cleanStars = (raw: any): string | null => {
+      if (raw === null || raw === undefined) return null;
+      const t = String(raw).trim();
+      if (!t) return null;
+      if (["待確認", "TBA", "未定", "尚未安排", "-"].includes(t)) return null;
+      // Leading digits like "4" → "四星級" mapping for the rare case the agent returns a number
+      const digitMap: Record<string, string> = { "3": "三星級", "4": "四星級", "5": "五星級" };
+      if (digitMap[t]) return digitMap[t];
+      return t;
+    };
+
+    let hotelGrade: string | null = null;
+    for (const h of realHotels) {
+      const s = cleanStars(h?.stars);
+      if (s) { hotelGrade = s; break; }
+    }
+    // Fallback: any hotel entry (including placeholders — sometimes 機上 has a real star rating
+    // attached by mistake, but still better than null)
+    if (!hotelGrade) {
+      for (const h of hotelsArray) {
+        const s = cleanStars(h?.stars);
+        if (s) { hotelGrade = s; break; }
+      }
+    }
+    // Final fallback: derive grade from hotel-name keyword match — covers the case where
+    // the agent populated `name` but left `stars` as "待確認".
+    if (!hotelGrade && firstHotel?.name && typeof firstHotel.name === "string") {
+      const upper = firstHotel.name.toUpperCase();
+      const hasAny = (patterns: RegExp[]) => patterns.some((r) => r.test(upper));
+      if (
+        hasAny([
+          /五星/, /FIVE.?STAR/i,
+          /GRAND HYATT/, /MANDARIN ORIENTAL/, /FOUR SEASONS/,
+          /RITZ.?CARLTON/, /PENINSULA/, /ST\.? ?REGIS/,
+          /SHERATON GRAND/, /CONRAD/, /PARK HYATT/,
+          /INTERCONTINENTAL/, /WALDORF/, /PULLMAN/,
+          /SHANGRI.?LA/, /W HOTEL/, /REGENT/,
+        ])
+      ) {
+        hotelGrade = "五星級";
+      } else if (
+        hasAny([
+          /四星/, /FOUR.?STAR/i,
+          /MARRIOTT/, /HYATT REGENCY/, /SHERATON/,
+          /CROWNE PLAZA/, /DOUBLETREE/, /NOVOTEL/,
+          /RADISSON BLU/, /\bVOCO\b/, /\bINDIGO\b/,
+          /\bMOXY\b/, /MANTRA/, /SCANDIC/, /\bTHON\b/,
+          /RAMADA PLAZA/, /WYNDHAM/, /HILTON GARDEN/,
+          /PULLMAN/, /MERCURE/,
+        ])
+      ) {
+        hotelGrade = "四星級";
+      } else if (
+        hasAny([
+          /三星/, /THREE.?STAR/i,
+          /HYATT PLACE/, /HOLIDAY INN/, /BEST WESTERN/,
+          /COURTYARD/, /\bIBIS\b/, /COMFORT/, /HAMPTON INN/,
+          /\bTRYP\b/, /RAMADA(?! PLAZA)/, /\bQUALITY\b/,
+        ])
+      ) {
+        hotelGrade = "三星級";
+      }
+    }
+
+    const outbound = flightsJson?.outbound || null;
+    const inbound = flightsJson?.inbound || null;
+    const rawAirline = flightsJson?.extra?.airline || flightsJson?.airline || null;
+
+    // Round 66 safety net: strip "<UNKNOWN>" / "UNKNOWN" / "<TBA>" style placeholders
+    // that occasionally leak from Claude Haiku when given sparse flight data.
+    // The FlightAgent already sanitizes, this is defense-in-depth before DB write.
+    const PLACEHOLDER_RE = /^\s*<?(UNKNOWN|TBA|N\/A|未知|unknown)>?\s*$/i;
+    const stripPlaceholder = (v: any): string | null => {
+      if (v === null || v === undefined) return null;
+      if (typeof v !== "string") return v;
+      return PLACEHOLDER_RE.test(v.trim()) ? null : v;
+    };
+    const stripLeg = (leg: any) => {
+      if (!leg || typeof leg !== "object") return leg;
+      const out: any = { ...leg };
+      for (const k of Object.keys(out)) out[k] = stripPlaceholder(out[k]);
+      return out;
+    };
+    const cleanOutbound = stripLeg(outbound);
+    const cleanInbound = stripLeg(inbound);
+    const airline = stripPlaceholder(rawAirline);
+
+    // Airport code — 3-letter IATA if departurePoint/departureAirport contains one
+    const extractAirportCode = (s: string | null | undefined): string | null => {
+      if (!s || typeof s !== "string") return null;
+      const m = s.match(/\b([A-Z]{3})\b/);
+      return m ? m[1] : null;
+    };
+    const departureAirportCode =
+      extractAirportCode(outbound?.departurePoint || outbound?.departureAirport) || null;
+
     const tour = await createTour({
       title: tourData.title,
       description: tourData.description,
@@ -99,17 +235,19 @@ export async function generateTourFromUrlInternal(
       destinationCountry: tourData.destinationCountry,
       destinationCity: tourData.destinationCity,
       departureCity: tourData.departureCity,
+      departureAirportCode,
+      departureAirportName: outbound?.departurePoint || outbound?.departureAirport || null,
       duration: tourData.days,
       nights: tourData.nights,
       price: tourData.price,
       destination: tourData.destinationCity || tourData.destinationCountry, // Legacy field for compatibility
       tags: JSON.stringify(tourData.tags),
-      
+
       // Hero section
       heroImage: tourData.heroImage,
       heroImageAlt: tourData.heroImageAlt,
       heroSubtitle: tourData.heroSubtitle,
-      
+
       // Color theme and features
       colorTheme: tourData.colorTheme,
       keyFeatures: tourData.keyFeatures,
@@ -117,9 +255,12 @@ export async function generateTourFromUrlInternal(
       // so DB rows had poeticTitle=null even though ContentAnalyzerAgent generated it.
       poeticTitle: tourData.poeticTitle,
       poeticContent: tourData.poeticContent,
+      // Round 74: poeticSubtitle was also dropped — ContentAnalyzer generates it
+      // but nothing downstream surfaced it until this fix.
+      poeticSubtitle: (tourData as any).poeticSubtitle || null,
       featureImages: tourData.featureImages,
       highlights: tourData.highlights,
-      
+
       // Detailed content from agents (CRITICAL: These fields were missing!)
       itineraryDetailed: tourData.itineraryDetailed, // 每日行程
       // Fix 4 (Round 62): dailyItinerary dual-write for legacy field compatibility
@@ -128,12 +269,53 @@ export async function generateTourFromUrlInternal(
       noticeDetailed: tourData.noticeDetailed, // 注意事項
       hotels: tourData.hotels, // 飯店介紹
       meals: tourData.meals, // 餐飲介紹
-      flights: tourData.flights, // 航班資訊
+      // Round 66: recursively sanitize placeholder strings anywhere in the flights
+      // JSON blob before persisting, so the detail page never renders "<UNKNOWN>".
+      flights: (() => {
+        const recurse = (v: any): any => {
+          if (v === null || v === undefined) return v;
+          if (typeof v === "string") return PLACEHOLDER_RE.test(v.trim()) ? "" : v;
+          if (Array.isArray(v)) return v.map(recurse);
+          if (typeof v === "object") {
+            const o: any = {};
+            for (const k of Object.keys(v)) o[k] = recurse(v[k]);
+            return o;
+          }
+          return v;
+        };
+        return recurse(tourData.flights);
+      })(),
       // Fix 4 (Round 62): Pass new fields from masterAgent Fix 3
       hotelImages: tourData.hotelImages,
       galleryImages: tourData.galleryImages,
       attractions: tourData.attractions,
-      
+
+      // Round 74 — Legacy denormalised columns derived from the JSON blobs.
+      // Admin list / search / export paths still read from these columns, so
+      // leaving them null made the 10-tour comparison table look empty even
+      // when flights/hotels JSON was fully populated.
+      outboundAirline: airline,
+      outboundFlightNo: cleanOutbound?.vehicleNo || cleanOutbound?.flightNo || null,
+      outboundDepartureTime: cleanOutbound?.departureTime || null,
+      outboundArrivalTime: cleanOutbound?.arrivalTime || null,
+      outboundFlightDuration: cleanOutbound?.duration || null,
+      inboundAirline: airline,
+      inboundFlightNo: cleanInbound?.vehicleNo || cleanInbound?.flightNo || null,
+      inboundDepartureTime: cleanInbound?.departureTime || null,
+      inboundArrivalTime: cleanInbound?.arrivalTime || null,
+      inboundFlightDuration: cleanInbound?.duration || null,
+      hotelName: firstHotel?.name || null,
+      hotelGrade,
+      // v69: was using hotels JSON length, but that's the count of UNIQUE hotels,
+      // not nightly count. A 10-day tour with 7 hotels (some 2-night stays) would
+      // record hotelNights=7 even though the customer has 9 actual hotel nights.
+      // The convention for our N-day tours is: hotelNights = duration - 1
+      // (one less than total days, since the last day is travel-back). If duration
+      // is missing, fall back to hotels JSON length so we never write null.
+      hotelNights: (typeof tourData.days === "number" && tourData.days > 1)
+        ? tourData.days - 1
+        : (Array.isArray(hotelsJson) ? hotelsJson.length : null),
+
       // Additional fields
       // Status is determined by calibration verdict:
       // approved → active, review → pending_review, rejected → inactive
@@ -144,7 +326,7 @@ export async function generateTourFromUrlInternal(
         : 'pending_review') as any,
       featured: 0, // 0 = false, 1 = true
       promotionText: "",
-      
+
       // Metadata
       createdBy: userId,
       sourceUrl: tourData.sourceUrl,
@@ -260,6 +442,11 @@ export async function generateTourFromUrlInternal(
               const childPriceWithBedFinal = childWithBedFromApi ?? Math.round(adultPriceForDep * 0.9);
               const childPriceNoBedFinal = childNoBedFromApi ?? Math.round(adultPriceForDep * 0.75);
               const infantPriceFinal = babyFromApi ?? Math.round(adultPriceForDep * 0.1);
+              // NOTE: LionTravel's public calendar API returns `AvailableVacancy` as a
+              // placeholder (always = TotalVacnacy - 1 across all dates), NOT real
+              // booking counts. Treat imported departures as 0 bookings — they are
+              // fresh scrapes and we have no authoritative sales data for them.
+              // Using availableSeats would surface the "剩 19 位" placeholder to users.
               await createDeparture({
                 tourId: tour.id,
                 departureDate,
@@ -269,7 +456,7 @@ export async function generateTourFromUrlInternal(
                 childPriceNoBed: childPriceNoBedFinal,
                 infantPrice: infantPriceFinal,
                 totalSlots: dep.totalSeats || 20,
-                bookedSlots: Math.max(0, (dep.totalSeats || 20) - (dep.availableSeats || 0)),
+                bookedSlots: 0,
                 status: mappedStatus,
                 currency: dep.currencyCode || 'TWD',
                 notes: `lionGroupId: ${dep.groupId}`,

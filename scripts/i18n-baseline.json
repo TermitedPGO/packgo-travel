@@ -1,0 +1,122 @@
+[
+  {
+    "file": "client/src/pages/BookTour.tsx",
+    "line": 154,
+    "text": "請先選擇出發日期",
+    "score": 17
+  },
+  {
+    "file": "client/src/components/Footer.tsx",
+    "line": 125,
+    "text": "查看真實評價 →",
+    "score": 13
+  },
+  {
+    "file": "client/src/components/Footer.tsx",
+    "line": 138,
+    "text": "查看真實評價 →",
+    "score": 13
+  },
+  {
+    "file": "client/src/components/admin/AiQuotesTab.tsx",
+    "line": 51,
+    "text": "已標記為轉單",
+    "score": 10
+  },
+  {
+    "file": "client/src/components/admin/AiQuotesTab.tsx",
+    "line": 55,
+    "text": "更新失敗：",
+    "score": 10
+  },
+  {
+    "file": "client/src/components/admin/InvoicesTab.tsx",
+    "line": 41,
+    "text": "狀態已更新",
+    "score": 10
+  },
+  {
+    "file": "client/src/components/admin/InvoicesTab.tsx",
+    "line": 43,
+    "text": "失敗：",
+    "score": 10
+  },
+  {
+    "file": "client/src/components/admin/MarketingContentTab.tsx",
+    "line": 77,
+    "text": "生成失敗：",
+    "score": 10
+  },
+  {
+    "file": "client/src/components/admin/MarketingContentTab.tsx",
+    "line": 82,
+    "text": "已複製到剪貼簿",
+    "score": 10
+  },
+  {
+    "file": "client/src/components/admin/ReconciliationTab.tsx",
+    "line": 77,
+    "text": "對帳完成",
+    "score": 10
+  },
+  {
+    "file": "client/src/components/admin/ReconciliationTab.tsx",
+    "line": 79,
+    "text": "失敗：",
+    "score": 10
+  },
+  {
+    "file": "client/src/components/admin/WechatAssistTab.tsx",
+    "line": 55,
+    "text": "已生成 AI 草稿",
+    "score": 10
+  },
+  {
+    "file": "client/src/components/admin/WechatAssistTab.tsx",
+    "line": 60,
+    "text": "失敗：",
+    "score": 10
+  },
+  {
+    "file": "client/src/components/admin/WechatAssistTab.tsx",
+    "line": 69,
+    "text": "失敗：",
+    "score": 10
+  },
+  {
+    "file": "client/src/components/admin/WechatAssistTab.tsx",
+    "line": 75,
+    "text": "已略過",
+    "score": 10
+  },
+  {
+    "file": "client/src/components/admin/WechatAssistTab.tsx",
+    "line": 78,
+    "text": "失敗：",
+    "score": 10
+  },
+  {
+    "file": "client/src/components/admin/WechatAssistTab.tsx",
+    "line": 207,
+    "text": "已複製到剪貼簿",
+    "score": 10
+  },
+  {
+    "file": "client/src/pages/Tours.tsx",
+    "line": 80,
+    "text": "最多比較 3 個行程",
+    "score": 10
+  },
+  {
+    "file": "client/src/components/admin/MarketingContentTab.tsx",
+    "line": 75,
+    "text": "生成 ${data.drafts.length} 則草稿",
+    "score": 9
+  },
+  {
+    "file": "client/src/components/admin/WechatAssistTab.tsx",
+    "line": 66,
+    "text": "已核准；請複製訊息傳送至 WeChat",
+    "score": 9
+  }
+]

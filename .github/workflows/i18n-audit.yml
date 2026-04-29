@@ -1,0 +1,103 @@
+# v78q Sprint 9 #2: CI integration for i18n leak detection.
+#
+# Runs `pnpm i18n:audit` on every PR. Fails the check if HIGH-confidence
+# hardcoded Chinese strings are introduced (score >= 9 in scripts/i18n-audit.mjs).
+# Posts a comment on the PR listing the new leaks with file:line references.
+#
+# Why: Sprint 7 found 27 hardcoded ZH strings that had been merged silently
+# over months. With this gate, future leaks get caught before merge.
+
+name: i18n Audit
+
+on:
+  pull_request:
+    paths:
+      - "client/src/**/*.tsx"
+      - "client/src/**/*.ts"
+      - "client/src/i18n/**"
+      - "scripts/i18n-audit.mjs"
+  push:
+    branches: [main, master]
+
+jobs:
+  audit:
+    name: Detect hardcoded Chinese strings
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run audit (JSON)
+        id: audit
+        run: |
+          set +e  # don't fail script on non-zero exit; we handle exit code below
+          node scripts/i18n-audit.mjs --json > /tmp/i18n-leaks.json
+          echo "exit_code=$?" >> $GITHUB_OUTPUT
+          # Count high-confidence (score >= 9) leaks
+          HIGH=$(node -e "
+            const j = require('/tmp/i18n-leaks.json');
+            console.log(j.filter(i => i.score >= 9).length);
+          ")
+          echo "high_count=$HIGH" >> $GITHUB_OUTPUT
+          echo "High-confidence leaks: $HIGH"
+
+      - name: Show audit summary
+        run: |
+          node scripts/i18n-audit.mjs --max=50 || true
+
+      # v78q: Diff against the baseline so we only fail on NEW leaks introduced
+      # by this PR. Existing leaks (admin toasts mostly) are tracked in
+      # scripts/i18n-baseline.json and don't block merges.
+      - name: Compute new leaks vs baseline
+        id: diff
+        run: |
+          BASELINE=scripts/i18n-baseline.json
+          if [ ! -f "$BASELINE" ]; then
+            echo "No baseline file — first run, skipping diff. Use \`pnpm i18n:baseline\` to record current state."
+            echo "new_count=0" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          NEW_COUNT=$(node -e "
+            const cur = require('/tmp/i18n-leaks.json').filter(i => i.score >= 9);
+            const base = require('./scripts/i18n-baseline.json');
+            const baseSet = new Set(base.map(b => b.file + ':' + b.text));
+            const fresh = cur.filter(i => !baseSet.has(i.file + ':' + i.text));
+            require('fs').writeFileSync('/tmp/new-leaks.json', JSON.stringify(fresh, null, 2));
+            console.log(fresh.length);
+          ")
+          echo "new_count=$NEW_COUNT" >> $GITHUB_OUTPUT
+          echo "New leaks (not in baseline): $NEW_COUNT"
+
+      - name: Post PR comment with NEW findings
+        if: github.event_name == 'pull_request' && steps.diff.outputs.new_count != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const fresh = JSON.parse(fs.readFileSync('/tmp/new-leaks.json', 'utf8'));
+            if (fresh.length === 0) return;
+            const lines = fresh.slice(0, 20).map(i =>
+              `- \`${i.file}:${i.line}\` — \`${i.text.replace(/`/g, "\\`")}\``
+            );
+            const body = `## ⚠️ i18n: ${fresh.length} NEW hardcoded Chinese string${fresh.length === 1 ? '' : 's'} introduced by this PR\n\n` +
+              `Please route these through \`t('key')\` and add to \`client/src/i18n/zh-TW.ts\` + \`en.ts\`.\n\n` +
+              lines.join('\n') +
+              (fresh.length > 20 ? `\n\n…and ${fresh.length - 20} more` : '') +
+              `\n\nRun \`pnpm i18n:audit\` locally to see context.`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
+
+      - name: Fail if NEW leaks introduced
+        if: steps.diff.outputs.new_count != '0'
+        run: |
+          echo "::error::${{ steps.diff.outputs.new_count }} new hardcoded Chinese strings introduced. See PR comment."
+          exit 1

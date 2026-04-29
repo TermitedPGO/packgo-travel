@@ -44,6 +44,41 @@ export function TourEditDialog({
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // v70: track the snapshot of data the dialog was opened with, so we can
+  // detect "dirty" state (unsaved edits) and warn before a destructive close.
+  // Without this, accidentally clicking outside the dialog wipes minutes/hours
+  // of itinerary editing — Jeff has lost real work to this.
+  const initialDataRef = useRef<string>("");
+  const isDirty = (() => {
+    if (!editedData) return false;
+    if (!initialDataRef.current) return false;
+    try {
+      return JSON.stringify(editedData) !== initialDataRef.current;
+    } catch {
+      return false;
+    }
+  })();
+
+  const handleDialogOpenChange = useCallback(
+    (next: boolean) => {
+      // Allow opens through unconditionally
+      if (next) {
+        onOpenChange(true);
+        return;
+      }
+      // Block close if dirty unless user confirms
+      if (isDirty) {
+        const confirmed = window.confirm(
+          t('tourEditDialog.unsavedChangesWarning') ||
+            "您有未儲存的變更，確定要關閉嗎？關閉後將無法復原。"
+        );
+        if (!confirmed) return;
+      }
+      onOpenChange(false);
+    },
+    [isDirty, onOpenChange, t]
+  );
+
   // 上傳圖片到 S3
   const uploadImageFile = useCallback(async (file: File, _index?: number): Promise<string | null> => {
     if (!file.type.startsWith('image/')) {
@@ -216,6 +251,14 @@ export function TourEditDialog({
       }
       
       setEditedData(parsed);
+      // v70: snapshot baseline AFTER the parse-and-normalize step, so dirty
+      // detection compares against the dialog's actual rendered state, not
+      // the raw incoming JSON-string form.
+      try {
+        initialDataRef.current = JSON.stringify(parsed);
+      } catch {
+        initialDataRef.current = "";
+      }
     }
   }, [tourData]);
 
@@ -231,6 +274,9 @@ export function TourEditDialog({
       flights: JSON.stringify(editedData.flights || {}),
       images: JSON.stringify(editedData.images || []),
     };
+    // v70: after a successful save, reset the dirty baseline so closing
+    // immediately afterwards doesn't re-prompt for unsaved changes.
+    try { initialDataRef.current = JSON.stringify(editedData); } catch {}
     onSave(dataToSave);
   };
 
@@ -341,7 +387,7 @@ export function TourEditDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleDialogOpenChange}>
       <DialogContent className="max-w-7xl max-h-[90vh] overflow-hidden rounded-xl flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -562,6 +608,67 @@ export function TourEditDialog({
                       id="destinationCity"
                       value={editedData.destinationCity || ""}
                       onChange={(e) => setEditedData({ ...editedData, destinationCity: e.target.value })}
+                      className="mt-2"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* v78l Sprint 4A: Supplier contact for auto-notify on booking confirm */}
+              <div className="bg-emerald-50 rounded-lg p-6 space-y-4 border border-emerald-100">
+                <div>
+                  <h3 className="font-semibold text-emerald-900">供應商聯絡（自動通知）</h3>
+                  <p className="text-xs text-emerald-700 mt-1">
+                    當訂單付款完成時，系統會自動 email 通知此供應商接團安排。空白則不通知。
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="supplierName" className="text-sm font-medium">
+                      供應商名稱
+                    </Label>
+                    <Input
+                      id="supplierName"
+                      value={(editedData as any).supplierName || ""}
+                      onChange={(e) => setEditedData({ ...editedData, supplierName: e.target.value } as any)}
+                      placeholder="例如：日本國際旅行社、Marriott Honeymoon Desk"
+                      className="mt-2"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="supplierEmail" className="text-sm font-medium">
+                      供應商 Email
+                    </Label>
+                    <Input
+                      id="supplierEmail"
+                      type="email"
+                      value={(editedData as any).supplierEmail || ""}
+                      onChange={(e) => setEditedData({ ...editedData, supplierEmail: e.target.value } as any)}
+                      placeholder="bookings@supplier.com"
+                      className="mt-2"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="supplierPhone" className="text-sm font-medium">
+                      供應商電話
+                    </Label>
+                    <Input
+                      id="supplierPhone"
+                      value={(editedData as any).supplierPhone || ""}
+                      onChange={(e) => setEditedData({ ...editedData, supplierPhone: e.target.value } as any)}
+                      placeholder="+81-3-xxxx-xxxx"
+                      className="mt-2"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="supplierNotes" className="text-sm font-medium">
+                      內部備註
+                    </Label>
+                    <Input
+                      id="supplierNotes"
+                      value={(editedData as any).supplierNotes || ""}
+                      onChange={(e) => setEditedData({ ...editedData, supplierNotes: e.target.value } as any)}
+                      placeholder="出發前 2 週需確認、需中文導遊…"
                       className="mt-2"
                     />
                   </div>

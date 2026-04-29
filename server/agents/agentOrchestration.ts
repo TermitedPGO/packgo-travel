@@ -316,7 +316,18 @@ export class FallbackManager {
     }
     
     console.warn(`[FallbackManager] Non-critical agent ${agentName} failed, using fallback data`);
-    return config.fallbackData;
+    // v71: tag the fallback payload so downstream calibration / observability
+    // can distinguish "this tour genuinely had no hotels in source" (e.g. a
+    // self-drive tour) from "HotelAgent crashed and we substituted empty data".
+    // Previously calibration penalized BOTH cases identically, hiding real
+    // agent failures behind low marketing scores. Consumers that only access
+    // `.hotels` / `.meals` etc. are unaffected by this extra key.
+    return {
+      ...config.fallbackData,
+      _fallbackUsed: true,
+      _fallbackAgent: agentName,
+      _fallbackError: error?.message?.slice(0, 200) || "unknown",
+    };
   }
   
   /**

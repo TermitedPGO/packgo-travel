@@ -4,9 +4,52 @@
  * Produces tags, quality score, content type, and match keywords.
  *
  * Cost: ~$0.001/image (Claude Haiku, detail: low)
+ *
+ * v67: added URL-based Redis cache. Vision results don't change for the same
+ * image URL — caching for 7 days avoids re-analyzing the same photo every time
+ * a tour is regenerated.
  */
 
+import { createHash } from "crypto";
 import { invokeLLM } from "../_core/llm";
+import { redis } from "../redis";
+
+// v67: cache vision results by image URL hash for 7 days. Same photo on
+// regen of the same tour → instant cache hit, zero LLM tokens.
+const VISION_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
+let _visionCacheAvailable = true;
+
+function visionCacheKey(imageUrl: string): string {
+  return `vision:v1:${createHash("sha256").update(imageUrl).digest("hex").slice(0, 32)}`;
+}
+
+async function getCachedVision(imageUrl: string): Promise<VisionAnalysisResult | null> {
+  if (!_visionCacheAvailable) return null;
+  try {
+    const raw = await redis.get(visionCacheKey(imageUrl));
+    if (raw) {
+      console.log(`[VisionCache] HIT ${imageUrl.slice(0, 60)}`);
+      return JSON.parse(raw) as VisionAnalysisResult;
+    }
+  } catch (err: any) {
+    console.warn("[VisionCache] read error, disabling:", err?.message);
+    _visionCacheAvailable = false;
+  }
+  return null;
+}
+
+async function setCachedVision(imageUrl: string, result: VisionAnalysisResult): Promise<void> {
+  if (!_visionCacheAvailable) return;
+  try {
+    await redis.setex(
+      visionCacheKey(imageUrl),
+      VISION_CACHE_TTL_SECONDS,
+      JSON.stringify(result)
+    );
+  } catch (err: any) {
+    console.warn("[VisionCache] write error:", err?.message);
+  }
+}
 
 export interface VisionAnalysisResult {
   description: string;       // One-sentence description
@@ -51,8 +94,18 @@ function extractJson(raw: string): string {
  * Returns a VisionAnalysisResult; never throws – falls back to DEFAULT_RESULT.
  */
 export async function analyzeImage(imageUrl: string): Promise<VisionAnalysisResult> {
+  // v67: short-circuit on cache hit. Same image URL → same result; 7-day TTL.
+  // For a tour regen with N reused images, this saves N × ~600 tokens of vision input.
+  const cached = await getCachedVision(imageUrl);
+  if (cached) return cached;
+
   try {
+    // v67: was defaulting to Sonnet on every image. Vision tagging is a
+    // structured task — Haiku 4.5 supports vision and is fine here.
+    // Per-tour ~5-10 images × Haiku is dramatically cheaper than Sonnet.
     const response = await invokeLLM({
+      model: "claude-haiku-4-5-20251001",
+      maxTokens: 512,
       messages: [
         {
           role: "user",
@@ -100,7 +153,7 @@ Only return valid JSON, no markdown, no explanation.`,
         ? (parsed.contentType as VisionAnalysisResult["contentType"])
         : "other";
 
-    return {
+    const result: VisionAnalysisResult = {
       description:
         typeof parsed.description === "string" && parsed.description
           ? parsed.description
@@ -115,6 +168,10 @@ Only return valid JSON, no markdown, no explanation.`,
         ? parsed.matchKeywords.map(String)
         : DEFAULT_RESULT.matchKeywords,
     };
+    // v67: persist vision result so subsequent requests for the same image URL
+    // (regen, retry, refresh) are free. Don't await — fire-and-forget.
+    setCachedVision(imageUrl, result).catch(() => { /* silent */ });
+    return result;
   } catch (err) {
     console.warn("[VisionAnalysis] analyzeImage failed, using default:", err);
     return { ...DEFAULT_RESULT };

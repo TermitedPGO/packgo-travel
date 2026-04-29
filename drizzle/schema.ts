@@ -215,6 +215,13 @@ export const tours = mysqlTable("tours", {
   calibrationReport: text("calibrationReport"), // JSON - full CalibrationReport
   calibratedAt: timestamp("calibratedAt"), // when calibration was last run
 
+  // v78l (Sprint 4A): supplier contact for auto-notify on booking confirmation.
+  // When a booking goes paid, server emails supplierEmail with customer + dates.
+  supplierName: varchar("supplierName", { length: 200 }),
+  supplierEmail: varchar("supplierEmail", { length: 320 }),
+  supplierPhone: varchar("supplierPhone", { length: 50 }),
+  supplierNotes: text("supplierNotes"),
+
   // Metadata
   createdBy: int("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -286,6 +293,10 @@ export const bookings = mysqlTable("bookings", {
   ]).default("unpaid").notNull(),
   depositDueDate: timestamp("depositDueDate"), // Deadline for deposit payment
   balanceDueDate: timestamp("balanceDueDate"), // Deadline for balance payment
+  // v78y: customer's preferred email language at booking time. Drives all
+  // subsequent emails (payment confirmation, reminders, cancellation, refund)
+  // so we never switch languages mid-flow.
+  customerLanguage: varchar("customerLanguage", { length: 8 }).default("zh-TW"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -1064,8 +1075,9 @@ export type InsertSkillPerformanceMetrics = typeof skillPerformanceMetrics.$infe
 export const translations = mysqlTable("translations", {
   id: int("id").autoincrement().primaryKey(),
   
-  // Entity reference
-  entityType: mysqlEnum("entityType", ["tour", "tour_departure", "page", "ui_element", "notification"]).notNull(),
+  // Entity reference — v78q: added inquiry, destination, homepage_content for the
+  // generic translateEntity() pipeline (see server/translationRegistry.ts).
+  entityType: mysqlEnum("entityType", ["tour", "tour_departure", "page", "ui_element", "notification", "inquiry", "destination", "homepage_content"]).notNull(),
   entityId: int("entityId").notNull(),
   fieldName: varchar("fieldName", { length: 100 }).notNull(), // e.g., "title", "description", "dailyItinerary"
   
@@ -1606,6 +1618,8 @@ export const invoices = mysqlTable("invoices", {
   paidAt: timestamp("paidAt"),
   sentAt: timestamp("sentAt"),
   pdfUrl: varchar("pdfUrl", { length: 1024 }),
+  // v78g: invoice HTML inlined so invoices work without R2 storage
+  pdfHtml: text("pdfHtml"),
   notes: text("notes"),
   createdBy: int("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -1672,3 +1686,102 @@ export const tourMonitorLogs = mysqlTable("tourMonitorLogs", {
 });
 export type TourMonitorLog = typeof tourMonitorLogs.$inferSelect;
 export type InsertTourMonitorLog = typeof tourMonitorLogs.$inferInsert;
+
+// ── WeChat 訊息收件匣（v78）─────────────────────────────────────────────────
+// Inbound from WeChat OA webhook, AI drafts a reply, owner reviews/approves.
+// Until WeChat OA is verified, this table backs a manual-paste interface so
+// the AI can still draft replies to messages Jeff copies in from his phone.
+export const wechatMessages = mysqlTable("wechatMessages", {
+  id: int("id").autoincrement().primaryKey(),
+  // Source
+  source: mysqlEnum("source", ["wechat_oa", "manual_paste", "moments_reply"]).notNull(),
+  fromOpenId: varchar("fromOpenId", { length: 64 }), // WeChat user OpenID (null for manual paste)
+  fromDisplayName: varchar("fromDisplayName", { length: 200 }),
+  // Content
+  inboundText: text("inboundText").notNull(),
+  receivedAt: timestamp("receivedAt").defaultNow().notNull(),
+  // AI draft
+  aiDraftText: text("aiDraftText"),
+  aiDraftAt: timestamp("aiDraftAt"),
+  aiConfidence: decimal("aiConfidence", { precision: 3, scale: 2 }), // 0.00-1.00
+  // Owner action
+  status: mysqlEnum("status", ["pending_draft", "ready_review", "approved", "sent", "skipped"]).default("pending_draft").notNull(),
+  finalText: text("finalText"),       // edits made by owner before sending
+  approvedAt: timestamp("approvedAt"),
+  sentAt: timestamp("sentAt"),
+  // Linkage
+  linkedQuoteId: int("linkedQuoteId"),     // if this thread led to a quote
+  linkedBookingId: int("linkedBookingId"), // if it led to a booking
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type WechatMessage = typeof wechatMessages.$inferSelect;
+export type InsertWechatMessage = typeof wechatMessages.$inferInsert;
+
+// ── AI 報價單（v78）──────────────────────────────────────────────────────────
+// Customer free-form intent → LLM extracts {destination, days, pax, budget…}
+// → tour catalog match → PDF quote sent to customer.  Saved here so the
+// admin can follow up, see conversion funnel (quoted → booked), and re-issue.
+export const aiQuotes = mysqlTable("aiQuotes", {
+  id: int("id").autoincrement().primaryKey(),
+  // Original free-form request
+  rawRequest: text("rawRequest").notNull(),
+  // Extracted parameters (JSON: {destination, days, adults, children, budget, currency, departureMonth, preferences})
+  extractedParams: text("extractedParams"),
+  // Quote output
+  quoteNumber: varchar("quoteNumber", { length: 32 }).notNull().unique(), // QUOTE-2026-0001
+  recommendedTours: text("recommendedTours"), // JSON array of tour IDs that were matched
+  estimatedTotal: int("estimatedTotal"),       // best-effort total in `currency`
+  currency: varchar("currency", { length: 3 }).default("USD").notNull(),
+  pdfUrl: varchar("pdfUrl", { length: 1024 }), // public URL — either R2 or /api/aiQuotes/:id/view
+  // v78f: HTML body inlined so the quote works without R2 storage. The
+  // /api/aiQuotes/:id/view endpoint reads this column and serves it.
+  pdfHtml: text("pdfHtml"),
+  // Customer info (optional — anonymous quote OK)
+  customerName: varchar("customerName", { length: 200 }),
+  customerEmail: varchar("customerEmail", { length: 320 }),
+  customerPhone: varchar("customerPhone", { length: 50 }),
+  userId: int("userId"),                       // null if anonymous
+  // Funnel tracking
+  status: mysqlEnum("status", ["generated", "sent", "viewed", "converted", "expired"]).default("generated").notNull(),
+  bookingId: int("bookingId"),                 // populated if quote → booking
+  // Validity
+  validUntil: timestamp("validUntil"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type AiQuote = typeof aiQuotes.$inferSelect;
+export type InsertAiQuote = typeof aiQuotes.$inferInsert;
+
+// ── 管理員操作審計日誌（v73）─────────────────────────────────────────────────
+// Tracks WHO did WHAT WHEN. Required for compliance + dispute resolution +
+// post-incident forensics. Every admin mutation that touches customer data,
+// tours, bookings, or settings should write a row here.
+export const adminAuditLog = mysqlTable("adminAuditLog", {
+  id: int("id").autoincrement().primaryKey(),
+  // Actor
+  userId: int("userId").notNull(), // who performed the action (admin user)
+  userEmail: varchar("userEmail", { length: 320 }).notNull(), // captured at action time so it's stable even if user is renamed
+  userRole: varchar("userRole", { length: 32 }).notNull(),
+
+  // Action
+  action: varchar("action", { length: 64 }).notNull(), // e.g. "tour.update", "booking.cancel", "user.delete"
+  targetType: varchar("targetType", { length: 32 }), // e.g. "tour", "booking", "user", "visa"
+  targetId: varchar("targetId", { length: 64 }), // string so it can hold numeric IDs OR string UUIDs
+
+  // Details
+  changes: text("changes"), // JSON: { before: {...}, after: {...} } or { fields: [...] }
+  reason: text("reason"), // optional human-entered note (refunds, cancellations, etc.)
+
+  // Request context
+  ipAddress: varchar("ipAddress", { length: 45 }), // ipv6-safe length
+  userAgent: varchar("userAgent", { length: 500 }),
+
+  // Outcome
+  success: int("success").default(1).notNull(), // 0=failure (denied / errored), 1=success
+  errorMessage: text("errorMessage"),
+
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type AdminAuditLog = typeof adminAuditLog.$inferSelect;
+export type InsertAdminAuditLog = typeof adminAuditLog.$inferInsert;

@@ -177,4 +177,12 @@ console.log("✅ Tour translation worker initialized");
 // Initialize tour monitor worker
 export { tourMonitorWorker } from "./tourMonitorWorker";
 
+// v78l Sprint 4B: AI quote follow-up worker (24h/3d/7d email cadence)
+import { initQuoteFollowUpWorker } from "./queues/quoteFollowUpQueue";
+initQuoteFollowUpWorker();
+
+// v78n Sprint 6A: booking abandonment recovery worker (30-min cart drop email)
+import { initAbandonmentRecoveryWorker } from "./queues/abandonmentRecoveryQueue";
+initAbandonmentRecoveryWorker();
+
 export default tourGenerationWorker;
