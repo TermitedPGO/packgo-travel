@@ -24,13 +24,18 @@ export default function Header() {
   const { t } = useLocale();
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // 3-tier navigation: 行程 / 服務 / 聯絡我們
+  // v78z-z3 Sprint 9: collapsed Services from 6 → 3 items per UX audit.
+  // Removed nav.quickInquiry (was redundant with nav.contactUs).
+  // Moved nav.customTourRequest under Tours (it IS a tour request).
+  // Kept Services dropdown for flight/hotel/visa (legitimate sub-products).
+  // Contact Us is now a single top-level link, no nested duplicate.
   const navGroups: NavGroup[] = [
     {
       labelKey: "nav.tours",
       children: [
         { labelKey: "nav.groupTours", href: "/group-packages", descKey: "nav.groupToursDesc" },
         { labelKey: "nav.allTours", href: "/tours", descKey: "nav.allToursDesc" },
+        { labelKey: "nav.customTourRequest", href: "/custom-tour-request", descKey: "nav.customTourRequestDesc" },
       ],
     },
     {
@@ -39,9 +44,6 @@ export default function Header() {
         { labelKey: "nav.flightBooking", href: "/flight-booking", descKey: "nav.flightBookingDesc" },
         { labelKey: "nav.hotelBooking", href: "/hotel-booking", descKey: "nav.hotelBookingDesc" },
         { labelKey: "nav.chinaVisa", href: "/china-visa", descKey: "nav.chinaVisaDesc" },
-        { labelKey: "nav.customTourRequest", href: "/custom-tour-request", descKey: "nav.customTourRequestDesc" },
-        { labelKey: "nav.quickInquiry", href: "/inquiry", descKey: "nav.quickInquiryDesc" },
-        { labelKey: "nav.contactUs", href: "/contact-us", descKey: "nav.contactUsDesc" },
       ],
     },
     {

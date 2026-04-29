@@ -1,5 +1,5 @@
 import { trpc } from "@/lib/trpc";
-import { Users, Plane, ShoppingCart, MessageSquare, DollarSign, TrendingUp, ArrowRight, AlertCircle, CheckCircle2, Clock, Mail } from "lucide-react";
+import { Plane, ShoppingCart, MessageSquare, DollarSign, ArrowRight, AlertCircle, CheckCircle2, Clock } from "lucide-react";
 import { useLocale } from "@/contexts/LocaleContext";
 import DailyBriefingCard from "./DailyBriefingCard";
 
@@ -22,51 +22,11 @@ export default function DashboardTab({ onNavigate }: DashboardTabProps = {}) {
   const revenueGrowth = statsData?.revenueGrowth ?? 0;
   const revenueSign = revenueGrowth >= 0 ? '+' : '';
 
-  const stats = [
-    {
-      title: t('admin.dashboardTab.todayBookings'),
-      value: isLoading ? "—" : (statsData?.todayBookings ?? 0).toString(),
-      sub: t('admin.dashboardTab.todayBookingsSub'),
-      icon: ShoppingCart,
-      accent: "text-gray-900",
-    },
-    {
-      title: t('admin.dashboardTab.monthlyRevenue'),
-      value: isLoading ? "—" : formatCurrency(statsData?.thisMonthRevenue || 0),
-      sub: isLoading ? "" : t('admin.dashboardTab.monthlyRevenueSub', { sign: revenueSign, pct: revenueGrowth.toFixed(1) }),
-      icon: DollarSign,
-      accent: revenueGrowth >= 0 ? "text-green-600" : "text-red-600",
-    },
-    {
-      title: t('admin.dashboardTab.pendingInquiries'),
-      value: isLoading ? "—" : (statsData?.pendingInquiries ?? 0).toString(),
-      sub: isLoading ? "" : t('admin.dashboardTab.pendingInquiriesSub', { n: String(statsData?.totalInquiries || 0) }),
-      icon: MessageSquare,
-      accent: (statsData?.pendingInquiries ?? 0) > 0 ? "text-amber-600" : "text-gray-500",
-    },
-    {
-      title: t('admin.dashboardTab.activeTours'),
-      value: isLoading ? "—" : (statsData?.activeTours ?? 0).toString(),
-      sub: isLoading ? "" : t('admin.dashboardTab.activeToursSub', { n: String(statsData?.totalTours || 0) }),
-      icon: Plane,
-      accent: "text-gray-900",
-    },
-    {
-      title: t('admin.dashboardTab.totalUsers'),
-      value: isLoading ? "—" : (statsData?.totalUsers ?? 0).toLocaleString(),
-      sub: t('admin.dashboardTab.totalUsersSub'),
-      icon: Users,
-      accent: "text-gray-900",
-    },
-    {
-      title: t('admin.dashboardTab.newsletterSubs'),
-      value: isLoading ? "—" : (statsData?.totalSubscribers ?? 0).toLocaleString(),
-      sub: t('admin.dashboardTab.newsletterSubsSub'),
-      icon: Mail,
-      accent: "text-gray-900",
-    },
-  ];
-
+  // v78z-z3 Sprint 9: 6 stat cards → 1 monthly summary card per UX audit.
+  // The 6 stats Jeff cannot act on (totalUsers / newsletterSubs / etc.) were
+  // vanity metrics. Daily Briefing already shows actionable items.
+  // The single card surfaces the 3 numbers that drive his daily decisions:
+  // today's bookings, this month's revenue + growth, active tours.
   const newInquiries = statsData?.pendingInquiries || 0;
   const activeTours = statsData?.activeTours || 0;
 
@@ -81,24 +41,45 @@ export default function DashboardTab({ onNavigate }: DashboardTabProps = {}) {
         <p className="text-sm text-gray-500 mt-1">{t('admin.dashboardTab.welcomeSubtitle')}</p>
       </div>
 
-      {/* Statistics Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-        {stats.map((stat, index) => {
-          const Icon = stat.icon;
-          return (
-            <div
-              key={index}
-              className="bg-white border border-gray-200 p-6 rounded-xl"
-            >
-              <div className="flex items-start justify-between mb-4">
-                <p className="text-sm text-gray-500 font-medium">{stat.title}</p>
-                <Icon className="h-5 w-5 text-gray-300" />
-              </div>
-              <p className="text-3xl font-bold text-gray-900 mb-1">{stat.value}</p>
-              <p className={`text-xs font-medium ${stat.accent}`}>{stat.sub}</p>
+      {/* v78z-z3 Sprint 9: single monthly summary card replaces 6 vanity stat cards.
+          Surfaces 3 actionable metrics: today's bookings · this month's revenue · active tours. */}
+      <div className="bg-white border border-gray-200 rounded-xl p-6 md:p-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8 divide-y md:divide-y-0 md:divide-x divide-gray-100">
+          <div className="md:pr-6">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">
+              <ShoppingCart className="h-3.5 w-3.5" />
+              {t('admin.dashboardTab.todayBookings')}
             </div>
-          );
-        })}
+            <p className="text-4xl font-bold text-gray-900 tabular-nums">
+              {isLoading ? "—" : (statsData?.todayBookings ?? 0)}
+            </p>
+            <p className="text-xs text-gray-500 mt-1">{t('admin.dashboardTab.todayBookingsSub')}</p>
+          </div>
+          <div className="md:px-6 pt-6 md:pt-0">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">
+              <DollarSign className="h-3.5 w-3.5" />
+              {t('admin.dashboardTab.monthlyRevenue')}
+            </div>
+            <p className="text-4xl font-bold text-gray-900 tabular-nums">
+              {isLoading ? "—" : formatCurrency(statsData?.thisMonthRevenue || 0)}
+            </p>
+            <p className={`text-xs mt-1 font-medium ${revenueGrowth >= 0 ? "text-green-600" : "text-red-600"}`}>
+              {isLoading ? "" : t('admin.dashboardTab.monthlyRevenueSub', { sign: revenueSign, pct: revenueGrowth.toFixed(1) })}
+            </p>
+          </div>
+          <div className="md:pl-6 pt-6 md:pt-0">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">
+              <Plane className="h-3.5 w-3.5" />
+              {t('admin.dashboardTab.activeTours')}
+            </div>
+            <p className="text-4xl font-bold text-gray-900 tabular-nums">
+              {isLoading ? "—" : (statsData?.activeTours ?? 0)}
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              {isLoading ? "" : t('admin.dashboardTab.activeToursSub', { n: String(statsData?.totalTours || 0) })}
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* Status Overview */}

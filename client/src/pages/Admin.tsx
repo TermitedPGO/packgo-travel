@@ -11,6 +11,7 @@ import {
   Star,
   Brain,
   ChevronRight,
+  ChevronDown,
   Menu,
   X,
   BarChart2,
@@ -79,9 +80,12 @@ export default function Admin() {
     setLocation("/");
   };
 
-  // 導航分組結構
+  // v78z-z3 Sprint 9: AI advanced tools collapsible group (default collapsed)
+  // per UX audit — 8 admin tabs that are dev/aspirational reduced to 4
+  // visible by default; the rest behind a toggle.
   const navGroups: {
     label: string;
+    collapsible?: boolean;
     items: { id: AdminTab; icon: React.ElementType; label: string; badge?: number }[];
   }[] = [
     {
@@ -100,13 +104,19 @@ export default function Admin() {
       label: '進階功能',
       items: [
         { id: 'analytics', icon: TrendingUp, label: '流量分析' },
+        { id: 'competitor-monitor', icon: Binoculars, label: '競品監控', badge: typeof competitorUnread === 'number' && competitorUnread > 0 ? competitorUnread : undefined },
+        { id: 'marketing', icon: Megaphone, label: '行銷自動化' },
+        { id: 'marketing-content', icon: Sparkles, label: 'AI 社群文案' },
+      ],
+    },
+    {
+      label: 'AI 系統 (進階)',
+      collapsible: true,
+      items: [
         { id: 'ai-hub', icon: Brain, label: 'AI 中心' },
         { id: 'task-history', icon: ListChecks, label: 'AI 任務記錄' },
         { id: 'calibration-review', icon: CheckCircle2, label: 'QA 品質審查' },
-        { id: 'competitor-monitor', icon: Binoculars, label: '競品監控', badge: typeof competitorUnread === 'number' && competitorUnread > 0 ? competitorUnread : undefined },
         { id: 'tour-monitor', icon: Activity, label: '供應商監控' },
-        { id: 'marketing', icon: Megaphone, label: '行銷自動化' },
-        { id: 'marketing-content', icon: Sparkles, label: 'AI 社群文案' },
       ],
     },
     {
@@ -130,6 +140,21 @@ export default function Admin() {
       ],
     },
   ];
+
+  // Track collapsed state for collapsible groups (default collapsed)
+  // unless current activeTab lives inside it (auto-expand to show context).
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {};
+    for (const g of navGroups) {
+      if (g.collapsible) {
+        const containsActive = g.items.some(it => it.id === activeTab);
+        initial[g.label] = !containsActive; // collapsed by default unless active tab is inside
+      }
+    }
+    return initial;
+  });
+  const toggleGroup = (label: string) =>
+    setCollapsedGroups(prev => ({ ...prev, [label]: !prev[label] }));
 
   const navItems = navGroups.flatMap(g => g.items);
 
@@ -193,14 +218,34 @@ export default function Admin() {
 
         {/* Navigation - 分組導航 */}
         <nav className="flex-1 py-3 overflow-y-auto">
-          {navGroups.map((group, groupIdx) => (
+          {navGroups.map((group, groupIdx) => {
+            const isCollapsed = group.collapsible && collapsedGroups[group.label];
+            return (
             <div key={group.label} className={groupIdx > 0 ? "mt-4 pt-4 border-t border-gray-100" : ""}>
               {/* Group label */}
-              <div className="px-6 pb-1.5">
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.15em]">
-                  {group.label}
-                </span>
-              </div>
+              {group.collapsible ? (
+                <button
+                  onClick={() => toggleGroup(group.label)}
+                  className="w-full px-6 pb-1.5 flex items-center justify-between hover:bg-gray-50/60 transition-colors group"
+                  aria-expanded={!isCollapsed}
+                >
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.15em] group-hover:text-gray-600">
+                    {group.label}
+                  </span>
+                  {isCollapsed ? (
+                    <ChevronRight className="h-3 w-3 text-gray-400" />
+                  ) : (
+                    <ChevronDown className="h-3 w-3 text-gray-400" />
+                  )}
+                </button>
+              ) : (
+                <div className="px-6 pb-1.5">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.15em]">
+                    {group.label}
+                  </span>
+                </div>
+              )}
+              {!isCollapsed && (
               <div>
                 {group.items.map((item) => {
                   const Icon = item.icon;
@@ -250,8 +295,10 @@ export default function Admin() {
                   );
                 })}
               </div>
+              )}
             </div>
-          ))}
+            );
+          })}
         </nav>
 
         {/* Sidebar Footer */}
