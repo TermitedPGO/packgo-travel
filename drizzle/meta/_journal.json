@@ -337,6 +337,13 @@
       "when": 1777400004000,
       "tag": "0047_tours_supplier_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "5",
+      "when": 1777430159201,
+      "tag": "0048_customer_language",
+      "breakpoints": true
     }
   ]
 }
