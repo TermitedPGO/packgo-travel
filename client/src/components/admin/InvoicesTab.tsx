@@ -24,7 +24,7 @@ import { toast } from "sonner";
 type InvoiceStatus = "draft" | "sent" | "paid" | "overdue" | "cancelled";
 
 export default function InvoicesTab() {
-  const { language } = useLocale();
+  const { language, t } = useLocale();
   const dateLocale = language === "zh-TW" ? zhTW : enUS;
   const [statusFilter, setStatusFilter] = useState<InvoiceStatus | "all">("all");
 
@@ -38,17 +38,17 @@ export default function InvoicesTab() {
   const updateStatusMutation = trpc.invoices.updateStatus.useMutation({
     onSuccess: () => {
       utils.invoices.list.invalidate();
-      toast.success("狀態已更新");
+      toast.success(t("invoicesTab.toastStatusUpdated"));
     },
-    onError: (err) => toast.error("失敗：" + err.message),
+    onError: (err) => toast.error(t("invoicesTab.toastFailed") + err.message),
   });
 
   const statusConfig: Record<string, { label: string; className: string }> = {
-    draft: { label: "草稿", className: "bg-gray-100 text-gray-700 border border-gray-200" },
-    sent: { label: "已寄送", className: "bg-blue-100 text-blue-800 border border-blue-200" },
-    paid: { label: "已付款", className: "bg-green-100 text-green-800 border border-green-200" },
-    overdue: { label: "逾期", className: "bg-red-100 text-red-800 border border-red-200" },
-    cancelled: { label: "已取消", className: "bg-gray-100 text-gray-500 border border-gray-200" },
+    draft: { label: t("invoicesTab.statusDraft"), className: "bg-gray-100 text-gray-700 border border-gray-200" },
+    sent: { label: t("invoicesTab.statusSent"), className: "bg-blue-100 text-blue-800 border border-blue-200" },
+    paid: { label: t("invoicesTab.statusPaid"), className: "bg-green-100 text-green-800 border border-green-200" },
+    overdue: { label: t("invoicesTab.statusOverdue"), className: "bg-red-100 text-red-800 border border-red-200" },
+    cancelled: { label: t("invoicesTab.statusCancelled"), className: "bg-gray-100 text-gray-500 border border-gray-200" },
   };
 
   const fmtDate = (d: Date | string | null) => {
@@ -78,9 +78,9 @@ export default function InvoicesTab() {
     <div className="space-y-6">
       <div className="flex items-end justify-between flex-wrap gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">發票管理</h2>
+          <h2 className="text-2xl font-bold text-gray-900">{t("invoicesTab.title")}</h2>
           <p className="text-sm text-gray-500 mt-1">
-            所有客戶發票一覽，可即時開啟 HTML 版發票，並更新付款狀態。
+            {t("invoicesTab.subtitle")}
           </p>
         </div>
         <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as any)}>
@@ -88,12 +88,12 @@ export default function InvoicesTab() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">全部狀態</SelectItem>
-            <SelectItem value="draft">草稿</SelectItem>
-            <SelectItem value="sent">已寄送</SelectItem>
-            <SelectItem value="paid">已付款</SelectItem>
-            <SelectItem value="overdue">逾期</SelectItem>
-            <SelectItem value="cancelled">已取消</SelectItem>
+            <SelectItem value="all">{t("invoicesTab.filterAll")}</SelectItem>
+            <SelectItem value="draft">{t("invoicesTab.statusDraft")}</SelectItem>
+            <SelectItem value="sent">{t("invoicesTab.statusSent")}</SelectItem>
+            <SelectItem value="paid">{t("invoicesTab.statusPaid")}</SelectItem>
+            <SelectItem value="overdue">{t("invoicesTab.statusOverdue")}</SelectItem>
+            <SelectItem value="cancelled">{t("invoicesTab.statusCancelled")}</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -103,13 +103,13 @@ export default function InvoicesTab() {
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">發票號</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">客戶</th>
-                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">總金額</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">狀態</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">開立日</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">付款日</th>
-                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">{t("invoicesTab.colInvoiceNumber")}</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">{t("invoicesTab.colCustomer")}</th>
+                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">{t("invoicesTab.colTotal")}</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">{t("invoicesTab.colStatus")}</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">{t("invoicesTab.colIssuedAt")}</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">{t("invoicesTab.colPaidAt")}</th>
+                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">{t("invoicesTab.colActions")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -117,7 +117,7 @@ export default function InvoicesTab() {
               {!isLoading && (!invoices || invoices.length === 0) && (
                 <tr>
                   <td colSpan={7} className="px-4 py-12 text-center text-gray-500">
-                    目前沒有符合條件的發票
+                    {t("invoicesTab.emptyList")}
                   </td>
                 </tr>
               )}
@@ -154,11 +154,11 @@ export default function InvoicesTab() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="draft">草稿</SelectItem>
-                          <SelectItem value="sent">已寄送</SelectItem>
-                          <SelectItem value="paid">已付款</SelectItem>
-                          <SelectItem value="overdue">逾期</SelectItem>
-                          <SelectItem value="cancelled">已取消</SelectItem>
+                          <SelectItem value="draft">{t("invoicesTab.statusDraft")}</SelectItem>
+                          <SelectItem value="sent">{t("invoicesTab.statusSent")}</SelectItem>
+                          <SelectItem value="paid">{t("invoicesTab.statusPaid")}</SelectItem>
+                          <SelectItem value="overdue">{t("invoicesTab.statusOverdue")}</SelectItem>
+                          <SelectItem value="cancelled">{t("invoicesTab.statusCancelled")}</SelectItem>
                         </SelectContent>
                       </Select>
                     </td>
@@ -183,7 +183,7 @@ export default function InvoicesTab() {
                             className="rounded-lg gap-1"
                           >
                             <FileText className="h-3.5 w-3.5" />
-                            查看
+                            {t("invoicesTab.actionView")}
                             <ExternalLink className="h-3 w-3" />
                           </Button>
                         )}

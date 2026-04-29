@@ -23,6 +23,7 @@ import {
   Calendar,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useLocale } from "@/contexts/LocaleContext";
 
 function MonthRangeInput({
   start,
@@ -67,6 +68,7 @@ function thisMonthRange() {
 }
 
 export default function ReconciliationTab() {
+  const { t } = useLocale();
   const initial = thisMonthRange();
   const [range, setRange] = useState(initial);
   const [report, setReport] = useState<any>(null);
@@ -74,9 +76,9 @@ export default function ReconciliationTab() {
   const runReportMutation = trpc.reconciliation.runReport.useMutation({
     onSuccess: (data) => {
       setReport(data);
-      toast.success("對帳完成");
+      toast.success(t("reconciliationTab.toastDone"));
     },
-    onError: (err) => toast.error("失敗：" + err.message),
+    onError: (err) => toast.error(t("reconciliationTab.toastFailed") + err.message),
   });
 
   const fmtMoney = (amt: number, currency = "USD") => {
@@ -97,17 +99,17 @@ export default function ReconciliationTab() {
     { label: string; icon: any; className: string }
   > = {
     high: {
-      label: "嚴重",
+      label: t("reconciliationTab.severityHigh"),
       icon: AlertTriangle,
       className: "bg-red-50 border-red-200 text-red-900",
     },
     medium: {
-      label: "中度",
+      label: t("reconciliationTab.severityMedium"),
       icon: AlertTriangle,
       className: "bg-amber-50 border-amber-200 text-amber-900",
     },
     low: {
-      label: "輕微",
+      label: t("reconciliationTab.severityLow"),
       icon: AlertTriangle,
       className: "bg-blue-50 border-blue-200 text-blue-900",
     },
@@ -117,9 +119,9 @@ export default function ReconciliationTab() {
     <div className="space-y-6">
       <div className="flex items-end justify-between flex-wrap gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">對帳中心</h2>
+          <h2 className="text-2xl font-bold text-gray-900">{t("reconciliationTab.title")}</h2>
           <p className="text-sm text-gray-500 mt-1">
-            自動比對內部訂單 / Stripe 實際扣款 / 帳本紀錄，發現差異一目了然。
+            {t("reconciliationTab.subtitle")}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -140,12 +142,12 @@ export default function ReconciliationTab() {
           >
             {runReportMutation.isPending ? (
               <>
-                <Spinner className="h-4 w-4" /> 計算中...
+                <Spinner className="h-4 w-4" /> {t("reconciliationTab.calculating")}
               </>
             ) : (
               <>
                 <Receipt className="h-4 w-4" />
-                跑對帳
+                {t("reconciliationTab.runReport")}
               </>
             )}
           </Button>
@@ -155,7 +157,7 @@ export default function ReconciliationTab() {
       {!report && !runReportMutation.isPending && (
         <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
           <Receipt className="h-12 w-12 mx-auto text-gray-300 mb-3" />
-          <p className="text-gray-500">選擇日期範圍後點「跑對帳」</p>
+          <p className="text-gray-500">{t("reconciliationTab.emptyHint")}</p>
         </div>
       )}
 
@@ -166,7 +168,7 @@ export default function ReconciliationTab() {
               <div className="flex items-start gap-2">
                 <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
                 <div className="text-sm text-amber-900">
-                  <div className="font-medium mb-1">系統警告</div>
+                  <div className="font-medium mb-1">{t("reconciliationTab.warningsTitle")}</div>
                   <ul className="list-disc list-inside space-y-0.5">
                     {report.warnings.map((w: string, i: number) => (
                       <li key={i}>{w}</li>
@@ -180,41 +182,41 @@ export default function ReconciliationTab() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-white rounded-xl border border-gray-200 p-5">
               <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-                收入
+                {t("reconciliationTab.cardIncome")}
               </div>
               <div className="text-2xl font-bold text-gray-900">
                 {fmtMoney(report.pnl?.income || 0, report.pnl?.currency || "USD")}
               </div>
               <div className="text-xs text-gray-500 mt-1">
-                {report.internalPayments?.count || 0} 筆內部紀錄
+                {t("reconciliationTab.cardIncomeSub", { count: report.internalPayments?.count || 0 })}
               </div>
             </div>
 
             <div className="bg-white rounded-xl border border-gray-200 p-5">
               <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-                Stripe 手續費
+                {t("reconciliationTab.cardStripeFees")}
               </div>
               <div className="text-2xl font-bold text-amber-600">
                 {fmtMoney(report.pnl?.stripeFees || 0, "USD")}
               </div>
               <div className="text-xs text-gray-500 mt-1">
-                {report.stripeCharges?.count || 0} 筆扣款
+                {t("reconciliationTab.cardStripeFeesSub", { count: report.stripeCharges?.count || 0 })}
               </div>
             </div>
 
             <div className="bg-white rounded-xl border border-gray-200 p-5">
               <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-                估算成本
+                {t("reconciliationTab.cardEstimatedCosts")}
               </div>
               <div className="text-2xl font-bold text-red-600">
                 {fmtMoney(report.pnl?.estimatedCosts || 0, "USD")}
               </div>
-              <div className="text-xs text-gray-500 mt-1">手動 + 自動帳目</div>
+              <div className="text-xs text-gray-500 mt-1">{t("reconciliationTab.cardEstimatedCostsSub")}</div>
             </div>
 
             <div className="bg-white rounded-xl border border-gray-200 p-5">
               <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-                淨利
+                {t("reconciliationTab.cardNetProfit")}
               </div>
               <div
                 className={`text-2xl font-bold ${
@@ -228,11 +230,11 @@ export default function ReconciliationTab() {
               <div className="text-xs text-gray-500 mt-1 flex items-center gap-1">
                 {(report.pnl?.netProfit || 0) >= 0 ? (
                   <>
-                    <TrendingUp className="h-3 w-3 text-green-500" /> 獲利
+                    <TrendingUp className="h-3 w-3 text-green-500" /> {t("reconciliationTab.profitLabel")}
                   </>
                 ) : (
                   <>
-                    <TrendingDown className="h-3 w-3 text-red-500" /> 虧損
+                    <TrendingDown className="h-3 w-3 text-red-500" /> {t("reconciliationTab.lossLabel")}
                   </>
                 )}
               </div>
@@ -244,7 +246,7 @@ export default function ReconciliationTab() {
               <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center gap-2">
                 <AlertTriangle className="h-4 w-4 text-amber-600" />
                 <h3 className="text-sm font-semibold text-gray-900">
-                  異常事項（{report.discrepancies.length}）
+                  {t("reconciliationTab.discrepanciesTitle", { count: report.discrepancies.length })}
                 </h3>
               </div>
               <div className="divide-y divide-gray-100">
@@ -273,29 +275,29 @@ export default function ReconciliationTab() {
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center gap-2">
                 <CreditCard className="h-4 w-4 text-gray-600" />
-                <h3 className="text-sm font-semibold text-gray-900">Stripe 帳本</h3>
+                <h3 className="text-sm font-semibold text-gray-900">{t("reconciliationTab.stripeLedgerTitle")}</h3>
               </div>
               <div className="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                 <div>
-                  <div className="text-xs text-gray-500">總扣款</div>
+                  <div className="text-xs text-gray-500">{t("reconciliationTab.stripeTotal")}</div>
                   <div className="font-semibold">
                     {fmtMoney(report.stripeCharges.totalAmount, "USD")}
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs text-gray-500">手續費</div>
+                  <div className="text-xs text-gray-500">{t("reconciliationTab.stripeFees")}</div>
                   <div className="font-semibold text-amber-600">
                     -{fmtMoney(report.stripeCharges.totalFees, "USD")}
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs text-gray-500">入帳金額</div>
+                  <div className="text-xs text-gray-500">{t("reconciliationTab.stripeNet")}</div>
                   <div className="font-semibold text-green-600">
                     {fmtMoney(report.stripeCharges.netToBank, "USD")}
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs text-gray-500">幣別</div>
+                  <div className="text-xs text-gray-500">{t("reconciliationTab.stripeCurrency")}</div>
                   <div className="font-semibold">
                     {Object.keys(report.stripeCharges.byCurrency || {}).join(", ") ||
                       "—"}
@@ -309,7 +311,7 @@ export default function ReconciliationTab() {
             <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex items-center gap-3">
               <CheckCircle2 className="h-5 w-5 text-green-600" />
               <div className="text-sm text-green-900">
-                此期間沒有發現異常 — 所有紀錄皆對齊
+                {t("reconciliationTab.noDiscrepancies")}
               </div>
             </div>
           )}

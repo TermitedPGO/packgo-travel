@@ -30,7 +30,7 @@ import { useLocale } from "@/contexts/LocaleContext";
 import { toast } from "sonner";
 
 export default function WechatAssistTab() {
-  const { language } = useLocale();
+  const { language, t } = useLocale();
   const dateLocale = language === "zh-TW" ? zhTW : enUS;
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [editedDraft, setEditedDraft] = useState("");
@@ -52,30 +52,30 @@ export default function WechatAssistTab() {
   const draftReplyMutation = trpc.wechatAssist.draftReply.useMutation({
     onSuccess: () => {
       utils.wechatAssist.listPending.invalidate();
-      toast.success("已生成 AI 草稿");
+      toast.success(t("wechatAssistTab.toastDraftReady"));
       setIsComposing(false);
       setComposeText("");
       setComposeFrom("");
     },
-    onError: (err) => toast.error("失敗：" + err.message),
+    onError: (err) => toast.error(t("wechatAssistTab.toastFailed") + err.message),
   });
 
   const approveMutation = trpc.wechatAssist.approve.useMutation({
     onSuccess: () => {
       utils.wechatAssist.listPending.invalidate();
-      toast.success("已核准；請複製訊息傳送至 WeChat");
+      toast.success(t("wechatAssistTab.toastApproved"));
       setSelectedId(null);
     },
-    onError: (err) => toast.error("失敗：" + err.message),
+    onError: (err) => toast.error(t("wechatAssistTab.toastFailed") + err.message),
   });
 
   const skipMutation = trpc.wechatAssist.skip.useMutation({
     onSuccess: () => {
       utils.wechatAssist.listPending.invalidate();
-      toast.success("已略過");
+      toast.success(t("wechatAssistTab.toastSkipped"));
       setSelectedId(null);
     },
-    onError: (err) => toast.error("失敗：" + err.message),
+    onError: (err) => toast.error(t("wechatAssistTab.toastFailed") + err.message),
   });
 
   const fmtDate = (d: Date | string | null) => {
@@ -91,9 +91,9 @@ export default function WechatAssistTab() {
     <div className="space-y-6">
       <div className="flex items-end justify-between flex-wrap gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">WeChat 助手</h2>
+          <h2 className="text-2xl font-bold text-gray-900">{t("wechatAssistTab.title")}</h2>
           <p className="text-sm text-gray-500 mt-1">
-            把 WeChat 客戶訊息貼進來 → AI 立刻產出草稿 → 你檢查、編輯、核准 → 複製貼回 WeChat。
+            {t("wechatAssistTab.subtitle")}
           </p>
         </div>
         <Button
@@ -101,14 +101,14 @@ export default function WechatAssistTab() {
           onClick={() => setIsComposing(true)}
         >
           <Plus className="h-4 w-4" />
-          新增訊息
+          {t("wechatAssistTab.addMessage")}
         </Button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
-            <h3 className="text-sm font-semibold text-gray-900">待處理訊息</h3>
+            <h3 className="text-sm font-semibold text-gray-900">{t("wechatAssistTab.pendingTitle")}</h3>
           </div>
           <div className="max-h-[600px] overflow-y-auto">
             {isLoading && (
@@ -118,7 +118,7 @@ export default function WechatAssistTab() {
             )}
             {!isLoading && (!messages || messages.length === 0) && (
               <div className="px-4 py-12 text-center text-sm text-gray-500">
-                目前沒有待處理的訊息
+                {t("wechatAssistTab.emptyPending")}
               </div>
             )}
             {messages?.map((m: any) => {
@@ -140,7 +140,7 @@ export default function WechatAssistTab() {
                 >
                   <div className="flex items-start justify-between gap-2 mb-1">
                     <div className="text-sm font-medium text-gray-900">
-                      {m.fromDisplayName || "未知用戶"}
+                      {m.fromDisplayName || t("wechatAssistTab.unknownUser")}
                     </div>
                     <span
                       className={`text-xs font-medium px-1.5 py-0.5 rounded ${confidenceColor}`}
@@ -157,7 +157,7 @@ export default function WechatAssistTab() {
                     {Array.isArray(m.detectedIntent) &&
                       m.detectedIntent.length > 0 && (
                         <span className="ml-2 text-gray-500">
-                          意圖：{m.detectedIntent.join(", ")}
+                          {t("wechatAssistTab.intentLabel")}{m.detectedIntent.join(", ")}
                         </span>
                       )}
                   </div>
@@ -171,13 +171,13 @@ export default function WechatAssistTab() {
           {!selected ? (
             <div className="px-4 py-24 text-center">
               <MessageSquare className="h-12 w-12 mx-auto text-gray-300 mb-3" />
-              <p className="text-sm text-gray-500">點選左側訊息以檢視 AI 草稿</p>
+              <p className="text-sm text-gray-500">{t("wechatAssistTab.selectMessageHint")}</p>
             </div>
           ) : (
             <div className="p-5 space-y-4">
               <div>
                 <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-                  客戶來訊（{selected.fromDisplayName || "未知"}）
+                  {t("wechatAssistTab.inboundLabel", { name: selected.fromDisplayName || t("wechatAssistTab.unknownLabel") })}
                 </div>
                 <div className="bg-gray-50 rounded-lg p-3 text-sm text-gray-800 whitespace-pre-wrap">
                   {selected.inboundText}
@@ -187,7 +187,7 @@ export default function WechatAssistTab() {
               <div>
                 <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 flex items-center gap-1">
                   <Sparkles className="h-3 w-3" />
-                  AI 草稿（可編輯）
+                  {t("wechatAssistTab.aiDraftLabel")}
                 </div>
                 <Textarea
                   rows={10}
@@ -204,10 +204,10 @@ export default function WechatAssistTab() {
                   className="rounded-lg gap-1"
                   onClick={() => {
                     navigator.clipboard.writeText(editedDraft);
-                    toast.success("已複製到剪貼簿");
+                    toast.success(t("wechatAssistTab.toastCopied"));
                   }}
                 >
-                  複製文字
+                  {t("wechatAssistTab.copyText")}
                 </Button>
                 <div className="flex gap-2">
                   <Button
@@ -219,7 +219,7 @@ export default function WechatAssistTab() {
                     disabled={skipMutation.isPending}
                   >
                     <XCircle className="h-4 w-4" />
-                    略過
+                    {t("wechatAssistTab.skip")}
                   </Button>
                   <Button
                     className="rounded-lg gap-1 bg-green-600 hover:bg-green-700"
@@ -232,7 +232,7 @@ export default function WechatAssistTab() {
                     disabled={approveMutation.isPending || !editedDraft.trim()}
                   >
                     <CheckCircle2 className="h-4 w-4" />
-                    核准（標記已寄出）
+                    {t("wechatAssistTab.approve")}
                   </Button>
                 </div>
               </div>
@@ -244,18 +244,18 @@ export default function WechatAssistTab() {
       <Dialog open={isComposing} onOpenChange={setIsComposing}>
         <DialogContent className="rounded-xl">
           <DialogHeader>
-            <DialogTitle>新增訊息（手動貼入）</DialogTitle>
+            <DialogTitle>{t("wechatAssistTab.composeDialogTitle")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-gray-600">
-              把 WeChat 客戶傳給你的訊息貼進來，AI 會立刻分析意圖並產出草稿。
+              {t("wechatAssistTab.composeDialogBody")}
             </p>
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">
-                客戶名稱（可選）
+                {t("wechatAssistTab.composeNameLabel")}
               </label>
               <Input
-                placeholder="張小姐"
+                placeholder={t("wechatAssistTab.composeNamePlaceholder")}
                 value={composeFrom}
                 onChange={(e) => setComposeFrom(e.target.value)}
                 className="rounded-lg"
@@ -263,11 +263,11 @@ export default function WechatAssistTab() {
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">
-                客戶訊息原文
+                {t("wechatAssistTab.composeMessageLabel")}
               </label>
               <Textarea
                 rows={6}
-                placeholder="例如：Jeff 哥你好，請問瑞士 10 日六月底還有位嗎？"
+                placeholder={t("wechatAssistTab.composeMessagePlaceholder")}
                 value={composeText}
                 onChange={(e) => setComposeText(e.target.value)}
                 className="rounded-lg"
@@ -279,7 +279,7 @@ export default function WechatAssistTab() {
                 className="rounded-lg"
                 onClick={() => setIsComposing(false)}
               >
-                取消
+                {t("common.cancel")}
               </Button>
               <Button
                 className="rounded-lg"
@@ -294,7 +294,7 @@ export default function WechatAssistTab() {
                   })
                 }
               >
-                {draftReplyMutation.isPending ? "AI 生成中..." : "讓 AI 起草"}
+                {draftReplyMutation.isPending ? t("wechatAssistTab.composeSubmitting") : t("wechatAssistTab.composeSubmit")}
               </Button>
             </div>
           </div>

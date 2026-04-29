@@ -32,7 +32,7 @@ import { toast } from "sonner";
 type QuoteStatus = "generated" | "sent" | "viewed" | "converted" | "expired";
 
 export default function AiQuotesTab() {
-  const { language } = useLocale();
+  const { language, t } = useLocale();
   const dateLocale = language === "zh-TW" ? zhTW : enUS;
   const [statusFilter, setStatusFilter] = useState<QuoteStatus | "all">("all");
   const [convertingId, setConvertingId] = useState<number | null>(null);
@@ -48,19 +48,19 @@ export default function AiQuotesTab() {
   const markConvertedMutation = trpc.aiQuotes.adminMarkConverted.useMutation({
     onSuccess: () => {
       utils.aiQuotes.adminList.invalidate();
-      toast.success("已標記為轉單");
+      toast.success(t("aiQuotesTab.toastConverted"));
       setConvertingId(null);
       setBookingIdInput("");
     },
-    onError: (err) => toast.error("更新失敗：" + err.message),
+    onError: (err) => toast.error(t("aiQuotesTab.toastUpdateFailed") + err.message),
   });
 
   const statusConfig: Record<string, { label: string; className: string }> = {
-    generated: { label: "已生成", className: "bg-blue-100 text-blue-800 border border-blue-200" },
-    sent: { label: "已寄出", className: "bg-indigo-100 text-indigo-800 border border-indigo-200" },
-    viewed: { label: "已開啟", className: "bg-purple-100 text-purple-800 border border-purple-200" },
-    converted: { label: "已轉單", className: "bg-green-100 text-green-800 border border-green-200" },
-    expired: { label: "已過期", className: "bg-gray-100 text-gray-600 border border-gray-200" },
+    generated: { label: t("aiQuotesTab.statusGenerated"), className: "bg-blue-100 text-blue-800 border border-blue-200" },
+    sent: { label: t("aiQuotesTab.statusSent"), className: "bg-indigo-100 text-indigo-800 border border-indigo-200" },
+    viewed: { label: t("aiQuotesTab.statusViewed"), className: "bg-purple-100 text-purple-800 border border-purple-200" },
+    converted: { label: t("aiQuotesTab.statusConverted"), className: "bg-green-100 text-green-800 border border-green-200" },
+    expired: { label: t("aiQuotesTab.statusExpired"), className: "bg-gray-100 text-gray-600 border border-gray-200" },
   };
 
   const fmtDate = (d: Date | string | null) => {
@@ -89,9 +89,9 @@ export default function AiQuotesTab() {
     <div className="space-y-6">
       <div className="flex items-end justify-between flex-wrap gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">AI 報價單</h2>
+          <h2 className="text-2xl font-bold text-gray-900">{t("aiQuotesTab.title")}</h2>
           <p className="text-sm text-gray-500 mt-1">
-            客戶透過 AI 報價產生器送出的詢價，全自動產出 PDF 後追蹤轉單。
+            {t("aiQuotesTab.subtitle")}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -100,12 +100,12 @@ export default function AiQuotesTab() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">全部狀態</SelectItem>
-              <SelectItem value="generated">已生成</SelectItem>
-              <SelectItem value="sent">已寄出</SelectItem>
-              <SelectItem value="viewed">已開啟</SelectItem>
-              <SelectItem value="converted">已轉單</SelectItem>
-              <SelectItem value="expired">已過期</SelectItem>
+              <SelectItem value="all">{t("aiQuotesTab.filterAll")}</SelectItem>
+              <SelectItem value="generated">{t("aiQuotesTab.statusGenerated")}</SelectItem>
+              <SelectItem value="sent">{t("aiQuotesTab.statusSent")}</SelectItem>
+              <SelectItem value="viewed">{t("aiQuotesTab.statusViewed")}</SelectItem>
+              <SelectItem value="converted">{t("aiQuotesTab.statusConverted")}</SelectItem>
+              <SelectItem value="expired">{t("aiQuotesTab.statusExpired")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -116,13 +116,13 @@ export default function AiQuotesTab() {
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">報價單</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">客戶</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">需求摘要</th>
-                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">估算</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">狀態</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">建立時間</th>
-                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">{t("aiQuotesTab.colQuote")}</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">{t("aiQuotesTab.colCustomer")}</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">{t("aiQuotesTab.colSummary")}</th>
+                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">{t("aiQuotesTab.colEstimate")}</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">{t("aiQuotesTab.colStatus")}</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">{t("aiQuotesTab.colCreatedAt")}</th>
+                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">{t("aiQuotesTab.colActions")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -130,7 +130,7 @@ export default function AiQuotesTab() {
               {!isLoading && (!quotes || quotes.length === 0) && (
                 <tr>
                   <td colSpan={7} className="px-4 py-12 text-center text-gray-500">
-                    目前沒有符合條件的報價單
+                    {t("aiQuotesTab.emptyList")}
                   </td>
                 </tr>
               )}
@@ -141,9 +141,9 @@ export default function AiQuotesTab() {
                 } catch {}
                 const summary = [
                   params.destinationCountry || params.destinationCity,
-                  params.days ? `${params.days}天` : null,
-                  params.adults ? `${params.adults}大${params.children ? "+" + params.children + "小" : ""}` : null,
-                  params.budgetMax ? `預算 ${params.currency || "USD"} ${params.budgetMax}` : null,
+                  params.days ? `${params.days}${t("aiQuotesTab.daysSuffix")}` : null,
+                  params.adults ? `${params.adults}${t("aiQuotesTab.adultsSuffix")}${params.children ? "+" + params.children + t("aiQuotesTab.childrenSuffix") : ""}` : null,
+                  params.budgetMax ? `${t("aiQuotesTab.budgetPrefix")} ${params.currency || "USD"} ${params.budgetMax}` : null,
                 ].filter(Boolean).join(" · ");
                 const status = statusConfig[q.status] || statusConfig.generated;
                 return (
@@ -153,7 +153,7 @@ export default function AiQuotesTab() {
                       <div className="text-xs text-gray-500">#{q.id}</div>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="text-sm text-gray-900">{q.customerName || "匿名"}</div>
+                      <div className="text-sm text-gray-900">{q.customerName || t("aiQuotesTab.customerAnonymous")}</div>
                       {q.customerEmail && (
                         <div className="text-xs text-gray-500 flex items-center gap-1">
                           <Mail className="h-3 w-3" />
@@ -196,7 +196,7 @@ export default function AiQuotesTab() {
                             className="rounded-lg gap-1"
                           >
                             <FileText className="h-3.5 w-3.5" />
-                            查看
+                            {t("aiQuotesTab.actionView")}
                             <ExternalLink className="h-3 w-3" />
                           </Button>
                         )}
@@ -208,7 +208,7 @@ export default function AiQuotesTab() {
                             className="rounded-lg gap-1"
                           >
                             <CheckCircle2 className="h-3.5 w-3.5" />
-                            標記轉單
+                            {t("aiQuotesTab.actionMarkConverted")}
                           </Button>
                         )}
                       </div>
@@ -224,15 +224,15 @@ export default function AiQuotesTab() {
       <Dialog open={!!convertingId} onOpenChange={(o) => !o && setConvertingId(null)}>
         <DialogContent className="rounded-xl">
           <DialogHeader>
-            <DialogTitle>標記為已轉單</DialogTitle>
+            <DialogTitle>{t("aiQuotesTab.dialogTitle")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-gray-600">
-              請輸入對應的訂單 ID（在訂單管理中可以找到），系統會把這張報價單與該訂單關聯。
+              {t("aiQuotesTab.dialogBody")}
             </p>
             <Input
               type="number"
-              placeholder="訂單 ID"
+              placeholder={t("aiQuotesTab.bookingIdPlaceholder")}
               value={bookingIdInput}
               onChange={(e) => setBookingIdInput(e.target.value)}
               className="rounded-lg"
@@ -246,7 +246,7 @@ export default function AiQuotesTab() {
                   setBookingIdInput("");
                 }}
               >
-                取消
+                {t("common.cancel")}
               </Button>
               <Button
                 className="rounded-lg"
@@ -259,7 +259,7 @@ export default function AiQuotesTab() {
                   });
                 }}
               >
-                確認標記
+                {t("aiQuotesTab.confirmConvert")}
               </Button>
             </div>
           </div>

@@ -28,6 +28,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useLocale } from "@/contexts/LocaleContext";
 
 type Platform = "instagram" | "facebook" | "xiaohongshu";
 
@@ -40,46 +41,47 @@ interface SocialPostDraft {
   imageUrl?: string;
 }
 
-const platformConfig: Record<
-  Platform,
-  { label: string; icon: any; bg: string; text: string }
-> = {
-  instagram: {
-    label: "Instagram",
-    icon: Instagram,
-    bg: "bg-pink-50 border-pink-200",
-    text: "text-pink-700",
-  },
-  facebook: {
-    label: "Facebook",
-    icon: Facebook,
-    bg: "bg-blue-50 border-blue-200",
-    text: "text-blue-700",
-  },
-  xiaohongshu: {
-    label: "小紅書",
-    icon: Globe,
-    bg: "bg-red-50 border-red-200",
-    text: "text-red-700",
-  },
-};
-
 export default function MarketingContentTab() {
+  const { t } = useLocale();
   const [topN, setTopN] = useState(3);
   const [language, setLanguage] = useState<"zh-TW" | "en">("zh-TW");
   const [drafts, setDrafts] = useState<SocialPostDraft[]>([]);
 
+  const platformConfig: Record<
+    Platform,
+    { label: string; icon: any; bg: string; text: string }
+  > = {
+    instagram: {
+      label: "Instagram",
+      icon: Instagram,
+      bg: "bg-pink-50 border-pink-200",
+      text: "text-pink-700",
+    },
+    facebook: {
+      label: "Facebook",
+      icon: Facebook,
+      bg: "bg-blue-50 border-blue-200",
+      text: "text-blue-700",
+    },
+    xiaohongshu: {
+      label: t("marketingContentTab.platformXiaohongshu"),
+      icon: Globe,
+      bg: "bg-red-50 border-red-200",
+      text: "text-red-700",
+    },
+  };
+
   const generateMutation = trpc.marketingContent.generateWeekly.useMutation({
     onSuccess: (data) => {
       setDrafts(data.drafts);
-      toast.success(`生成 ${data.drafts.length} 則草稿`);
+      toast.success(t("marketingContentTab.toastGenerated", { count: data.drafts.length }));
     },
-    onError: (err) => toast.error("生成失敗：" + err.message),
+    onError: (err) => toast.error(t("marketingContentTab.toastGenerateFailed") + err.message),
   });
 
   const copyText = (text: string) => {
     navigator.clipboard.writeText(text);
-    toast.success("已複製到剪貼簿");
+    toast.success(t("marketingContentTab.toastCopied"));
   };
 
   const groupedByTour = drafts.reduce<Record<number, SocialPostDraft[]>>(
@@ -95,9 +97,9 @@ export default function MarketingContentTab() {
     <div className="space-y-6">
       <div className="flex items-end justify-between flex-wrap gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">AI 行銷內容生成</h2>
+          <h2 className="text-2xl font-bold text-gray-900">{t("marketingContentTab.title")}</h2>
           <p className="text-sm text-gray-500 mt-1">
-            一鍵為精選行程生成 Instagram / Facebook / 小紅書貼文草稿。檢查後直接複製貼到平台。
+            {t("marketingContentTab.subtitle")}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -106,10 +108,10 @@ export default function MarketingContentTab() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="1">1 個行程</SelectItem>
-              <SelectItem value="2">2 個行程</SelectItem>
-              <SelectItem value="3">3 個行程（建議）</SelectItem>
-              <SelectItem value="5">5 個行程</SelectItem>
+              <SelectItem value="1">{t("marketingContentTab.tourCountOne")}</SelectItem>
+              <SelectItem value="2">{t("marketingContentTab.tourCountTwo")}</SelectItem>
+              <SelectItem value="3">{t("marketingContentTab.tourCountThreeRecommended")}</SelectItem>
+              <SelectItem value="5">{t("marketingContentTab.tourCountFive")}</SelectItem>
             </SelectContent>
           </Select>
           <Select value={language} onValueChange={(v) => setLanguage(v as any)}>
@@ -117,8 +119,8 @@ export default function MarketingContentTab() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="zh-TW">繁體中文</SelectItem>
-              <SelectItem value="en">English</SelectItem>
+              <SelectItem value="zh-TW">{t("marketingContentTab.langZh")}</SelectItem>
+              <SelectItem value="en">{t("marketingContentTab.langEn")}</SelectItem>
             </SelectContent>
           </Select>
           <Button
@@ -135,12 +137,12 @@ export default function MarketingContentTab() {
             {generateMutation.isPending ? (
               <>
                 <Spinner className="h-4 w-4" />
-                生成中… (~30 秒)
+                {t("marketingContentTab.generating")}
               </>
             ) : (
               <>
                 <Sparkles className="h-4 w-4" />
-                AI 生成本週貼文
+                {t("marketingContentTab.generateButton")}
               </>
             )}
           </Button>
@@ -151,8 +153,7 @@ export default function MarketingContentTab() {
         <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
           <Sparkles className="h-12 w-12 mx-auto text-gray-300 mb-3" />
           <p className="text-gray-500">
-            點「AI 生成本週貼文」開始，AI 會為您挑選 Top {topN} 個精選行程，
-            並為每個行程產出 IG / FB / 小紅書 三個版本的貼文。
+            {t("marketingContentTab.emptyHint", { topN })}
           </p>
         </div>
       )}
@@ -166,11 +167,11 @@ export default function MarketingContentTab() {
                   <img
                     src={tourDrafts[0].imageUrl}
                     alt={tourDrafts[0].tourTitle}
-                    className="w-12 h-12 rounded-lg object-cover"
+                    className="w-12 h-12 rounded-xl object-cover"
                   />
                 )}
                 <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-500">行程</p>
+                  <p className="text-xs uppercase tracking-wide text-gray-500">{t("marketingContentTab.tourLabel")}</p>
                   <h3 className="font-semibold text-gray-900">
                     {tourDrafts[0].tourTitle.split(/[|｜]/)[0].trim()}
                   </h3>
@@ -198,7 +199,7 @@ export default function MarketingContentTab() {
                           onClick={() => copyText(fullText)}
                         >
                           <Copy className="h-3 w-3" />
-                          複製
+                          {t("marketingContentTab.copyButton")}
                         </Button>
                       </div>
                       <div className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap mb-3">
@@ -237,7 +238,7 @@ export default function MarketingContentTab() {
               disabled={generateMutation.isPending}
             >
               <RefreshCw className="h-4 w-4" />
-              重新生成（換不同行程或角度）
+              {t("marketingContentTab.regenerateButton")}
             </Button>
           </div>
         </div>

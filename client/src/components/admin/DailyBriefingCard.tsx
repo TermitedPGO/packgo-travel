@@ -12,15 +12,24 @@
  */
 import { trpc } from "@/lib/trpc";
 import { useLocale } from "@/contexts/LocaleContext";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { MessageSquare, Sparkles, AlertTriangle, ArrowRight, CheckCircle2, FileText } from "lucide-react";
 
 interface Props {
   onNavigate: (tab: string) => void;
 }
 
+// Helper: pluralize ICU-style "{count} draft{s}" -> "5 drafts" / "1 draft"
+const pluralize = (template: string, count: number, plural: Record<string, string>) =>
+  template
+    .replace("{count}", String(count))
+    .replace(/\{(\w+)\}/g, (_, k) => (count === 1 ? "" : plural[k] || ""));
+
 export default function DailyBriefingCard({ onNavigate }: Props) {
-  const { language } = useLocale();
+  const { language, t } = useLocale();
   const isEN = language === "en";
+  const { user } = useAuth();
+  const displayName = user?.name || (user?.email || "").split("@")[0] || "Admin";
 
   // Pending WeChat drafts (status=ready_review)
   const { data: pendingWechat } = trpc.wechatAssist.listPending.useQuery({ limit: 50 });
@@ -38,12 +47,14 @@ export default function DailyBriefingCard({ onNavigate }: Props) {
   const inquiryCount = inquiries?.filter((i: any) => i.status === "new").length ?? 0;
   const totalActions = wechatCount + quotesCount + inquiryCount;
 
-  // Friendly time-based greeting
+  // Time-based greeting (reuse homeWelcomeBack keys)
   const hour = new Date().getHours();
-  const greeting = hour < 6 ? (isEN ? "Late night" : "深夜了") :
-                   hour < 12 ? (isEN ? "Good morning" : "早安") :
-                   hour < 18 ? (isEN ? "Good afternoon" : "午安") :
-                   (isEN ? "Good evening" : "晚上好");
+  const greetingKey =
+    hour < 6 ? "homeWelcomeBack.greetingLate"
+    : hour < 12 ? "homeWelcomeBack.greetingMorning"
+    : hour < 18 ? "homeWelcomeBack.greetingAfternoon"
+    : "homeWelcomeBack.greetingEvening";
+  const greeting = t(greetingKey);
   const dateStr = new Date().toLocaleDateString(isEN ? "en-US" : "zh-TW", {
     month: "short",
     day: "numeric",
@@ -56,12 +67,8 @@ export default function DailyBriefingCard({ onNavigate }: Props) {
       icon: MessageSquare,
       bg: "bg-emerald-50 border-emerald-200",
       iconBg: "bg-emerald-100 text-emerald-700",
-      title: isEN
-        ? `${wechatCount} WeChat draft${wechatCount > 1 ? "s" : ""} ready for review`
-        : `${wechatCount} 則 WeChat 草稿等您 approve`,
-      sub: isEN
-        ? "AI generated replies. One click to send."
-        : "AI 已生成回覆，一鍵核准傳送",
+      title: pluralize(t("dailyBriefing.wechatTitle"), wechatCount, { s: "s" }),
+      sub: t("dailyBriefing.wechatSub"),
       tab: "wechat-assist",
     },
     quotesCount > 0 && {
@@ -69,12 +76,8 @@ export default function DailyBriefingCard({ onNavigate }: Props) {
       icon: Sparkles,
       bg: "bg-blue-50 border-blue-200",
       iconBg: "bg-blue-100 text-blue-700",
-      title: isEN
-        ? `${quotesCount} new quote${quotesCount > 1 ? "s" : ""} to follow up`
-        : `${quotesCount} 張新報價單需要跟進`,
-      sub: isEN
-        ? "Customers expecting your reply within 24h."
-        : "客戶等您 24 小時內回覆",
+      title: pluralize(t("dailyBriefing.quotesTitle"), quotesCount, { s: "s" }),
+      sub: t("dailyBriefing.quotesSub"),
       tab: "ai-quotes",
     },
     inquiryCount > 0 && {
@@ -82,12 +85,9 @@ export default function DailyBriefingCard({ onNavigate }: Props) {
       icon: AlertTriangle,
       bg: "bg-amber-50 border-amber-200",
       iconBg: "bg-amber-100 text-amber-700",
-      title: isEN
-        ? `${inquiryCount} new inquir${inquiryCount > 1 ? "ies" : "y"}`
-        : `${inquiryCount} 則新客戶詢問`,
-      sub: isEN
-        ? "Direct questions from website contact form."
-        : "網站聯絡表單來信",
+      title: pluralize(t("dailyBriefing.inquiryTitle"), inquiryCount, { ies: "ies" })
+        .replace(/\{ies\}/g, inquiryCount === 1 ? "y" : "ies"),
+      sub: t("dailyBriefing.inquirySub"),
       tab: "inquiries",
     },
   ].filter(Boolean) as any[];
@@ -97,17 +97,17 @@ export default function DailyBriefingCard({ onNavigate }: Props) {
       <div className="flex items-start justify-between mb-6">
         <div>
           <p className="text-xs font-bold tracking-[0.2em] uppercase text-emerald-300 mb-2">
-            {isEN ? "PACK&GO Daily Briefing" : "PACK&GO 早報"}
+            {t("dailyBriefing.header")}
           </p>
           <h2 className="text-2xl md:text-3xl font-bold">
-            {greeting}，Jeff
+            {greeting}{t("common.greetingComma")}{displayName}
           </h2>
           <p className="text-sm text-gray-400 mt-1">{dateStr}</p>
         </div>
         <div className="text-right">
           <p className="text-3xl font-bold tabular-nums">{totalActions}</p>
           <p className="text-xs text-gray-400 uppercase tracking-wide">
-            {isEN ? "Actions today" : "今日待處理"}
+            {t("dailyBriefing.actionsToday")}
           </p>
         </div>
       </div>
@@ -116,9 +116,7 @@ export default function DailyBriefingCard({ onNavigate }: Props) {
         <div className="flex items-center gap-3 p-4 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
           <CheckCircle2 className="h-5 w-5 text-emerald-300" />
           <p className="text-sm text-emerald-100">
-            {isEN
-              ? "All clear. AI is handling the rest."
-              : "所有事項已處理完畢，AI 正在處理其餘的訊息。"}
+            {t("dailyBriefing.allClear")}
           </p>
         </div>
       ) : (
@@ -151,21 +149,21 @@ export default function DailyBriefingCard({ onNavigate }: Props) {
           className="hover:bg-white/5 rounded-lg py-2 transition-colors"
         >
           <Sparkles className="h-4 w-4 mx-auto text-emerald-300 mb-1" />
-          <p className="text-xs text-gray-400">{isEN ? "AI Quotes" : "AI 報價"}</p>
+          <p className="text-xs text-gray-400">{t("dailyBriefing.tileAiQuotes")}</p>
         </button>
         <button
           onClick={() => onNavigate("invoices")}
           className="hover:bg-white/5 rounded-lg py-2 transition-colors"
         >
           <FileText className="h-4 w-4 mx-auto text-emerald-300 mb-1" />
-          <p className="text-xs text-gray-400">{isEN ? "Invoices" : "發票"}</p>
+          <p className="text-xs text-gray-400">{t("dailyBriefing.tileInvoices")}</p>
         </button>
         <button
           onClick={() => onNavigate("reconciliation")}
           className="hover:bg-white/5 rounded-lg py-2 transition-colors"
         >
           <CheckCircle2 className="h-4 w-4 mx-auto text-emerald-300 mb-1" />
-          <p className="text-xs text-gray-400">{isEN ? "Reconciliation" : "對帳"}</p>
+          <p className="text-xs text-gray-400">{t("dailyBriefing.tileReconciliation")}</p>
         </button>
       </div>
     </div>

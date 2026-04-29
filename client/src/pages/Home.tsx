@@ -79,19 +79,16 @@ function HomeContent() {
       <Footer />
       <CompareBar />
 
-      {/* Floating AI Advisor — v78h: smaller on mobile so it stops covering tour cards.
-          Speech bubble hidden on small screens; button alone is enough on mobile. */}
+      {/* Floating AI Advisor — v78z-z2: speech bubble removed per UX audit
+          (always-on visual noise). Penguin icon alone is enough; tooltip on
+          hover via aria-label/title for discoverability. */}
       <div className="fixed bottom-4 right-4 z-40">
         <button
           onClick={() => setAiDialogOpen(true)}
-          className="flex flex-col items-end transition-all hover:scale-105 group"
+          className="transition-all hover:scale-105 group"
           aria-label={t('home.aiAdvisor.title')}
+          title={t('home.aiAdvisor.bubble')}
         >
-          {/* Speech Bubble - hidden on mobile to avoid overlap */}
-          <div className="hidden md:block mb-1 mr-4 px-4 py-2 bg-white border border-gray-200 text-black text-sm font-medium shadow-md rounded-xl">
-            {t('home.aiAdvisor.bubble')}
-          </div>
-          {/* Penguin Image - smaller on mobile */}
           <img
             src="https://files.manuscdn.com/user_upload_by_module/session_file/310519663159191204/jeyVKrdLKJdFniJk.png"
             alt={t('home.aiAdvisor.title')}

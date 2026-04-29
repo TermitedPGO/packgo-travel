@@ -83,28 +83,11 @@ export default function HomeWelcomeBack() {
           .filter(Boolean)
       : [];
 
-  // No recent views? Just show the greeting line; no card.
+  // v78z-z2 Sprint 8: render NOTHING when no recent views.
+  // Empty-state greeting bar was visual noise for the 95% of returning users
+  // without recent tour views (per UX audit).
   if (recentTours.length === 0) {
-    return (
-      <section className="bg-gradient-to-r from-emerald-50 via-teal-50 to-blue-50 border-b border-gray-200">
-        <div className="container py-4 flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <p className="text-base font-semibold text-gray-800">
-              {greeting}{isEN ? ", " : "，"}{displayName}
-            </p>
-            <p className="text-xs text-gray-500 mt-0.5">
-              {t("homeWelcomeBack.welcomeMessage")}
-            </p>
-          </div>
-          <Link href="/tours">
-            <button className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline">
-              {t("homeWelcomeBack.browseTours")}
-              <ArrowRight className="h-3.5 w-3.5" />
-            </button>
-          </Link>
-        </div>
-      </section>
-    );
+    return null;
   }
 
   // v78o: 用 LocaleContext 的 formatPrice — 自動依使用者選的幣別轉換 + 格式化
@@ -124,7 +107,7 @@ export default function HomeWelcomeBack() {
               {t("homeWelcomeBack.recentlyViewed")}
             </p>
             <h2 className="text-xl md:text-2xl font-bold text-gray-900">
-              {greeting}{isEN ? ", " : "，"}{displayName}
+              {greeting}{t("common.greetingComma")}{displayName}
             </h2>
           </div>
           <Link href="/tours">
@@ -177,16 +160,16 @@ function RecentTourCard({
 
   return (
     <Link href={`/tours/${tour.id}`} className="block group">
-      <div className="rounded-lg overflow-hidden bg-gray-100 aspect-[4/3] mb-2">
+      <div className="rounded-xl overflow-hidden bg-gray-100 aspect-[4/3] mb-2">
         {tour.imageUrl || tour.heroImage ? (
           <img
             src={tour.imageUrl || tour.heroImage}
             alt={displayTitle}
             loading="lazy"
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+            className="w-full h-full object-cover rounded-xl group-hover:scale-105 transition-transform duration-300"
           />
         ) : (
-          <div className="w-full h-full bg-gradient-to-br from-teal-500 to-teal-700" />
+          <div className="w-full h-full bg-gradient-to-br from-teal-500 to-teal-700 rounded-xl" />
         )}
       </div>
       <h3 className="text-sm font-semibold text-gray-900 line-clamp-2 leading-tight mb-1">

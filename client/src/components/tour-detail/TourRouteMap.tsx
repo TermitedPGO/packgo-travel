@@ -130,7 +130,7 @@ export default function TourRouteMap({ tourId, itinerary, themeColor }: Props) {
                   {String.fromCharCode(65 + idx)}
                 </span>
                 <span className="text-gray-700 font-medium">
-                  {`${isEN ? "Day" : "Day"} ${s.day}`} · {s.name}
+                  {isEN ? `Day ${s.day}` : `第 ${s.day} 天`} · {s.name}
                 </span>
               </div>
             ))}

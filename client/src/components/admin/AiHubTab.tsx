@@ -1,21 +1,22 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState } from "react";
-import { BarChart2, FileText, Building2 } from "lucide-react";
+import { BarChart2, FileText } from "lucide-react";
 import AiCostTab from "./AiCostTab";
 import AiSessionReport from "./AiSessionReport";
-import AiOffice from "./AiOffice";
 import { useLocale } from "@/contexts/LocaleContext";
 
-type HubTab = "office" | "report" | "session";
+// v78z-z2 Sprint 8: removed "office" sub-tab (AiOffice department-org-chart with
+// per-agent emoji icons). Per UX audit it was an engineering demo, not a product
+// surface. AiOffice.tsx + AiTeamRoster.tsx remain on disk but no longer mount.
+type HubTab = "report" | "session";
 
 export default function AiHubTab() {
   const { t } = useLocale();
-  const [activeTab, setActiveTab] = useState<HubTab>("office");
+  const [activeTab, setActiveTab] = useState<HubTab>("report");
 
   // v72: tab labels and page header migrated to i18n. Previously rendered as
   // hardcoded Chinese even on EN locale.
   const tabs: { id: HubTab; icon: any; label: string; desc: string }[] = [
-    { id: "office",  icon: Building2, label: t('aiHubTab.officeLabel'),  desc: t('aiHubTab.officeDesc') },
     { id: "report",  icon: BarChart2, label: t('aiHubTab.reportLabel'),  desc: t('aiHubTab.reportDesc') },
     { id: "session", icon: FileText,  label: t('aiHubTab.sessionLabel'), desc: t('aiHubTab.sessionDesc') },
   ];
@@ -59,7 +60,6 @@ export default function AiHubTab() {
 
       {/* Tab Content */}
       <div>
-        {activeTab === "office"  && <AiOffice />}
         {activeTab === "report"  && <AiCostTab />}
         {activeTab === "session" && <AiSessionReport />}
       </div>

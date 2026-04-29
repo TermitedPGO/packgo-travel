@@ -18,13 +18,26 @@ import { useLocale } from "@/contexts/LocaleContext";
 import { translateDestination } from "@/utils/locationMapping";
 import { ChevronLeft, ChevronRight, MapPin, Clock, ArrowRight } from "lucide-react";
 
-const ROTATE_MS = 6000;
+// v78z-z2 Sprint 8: slowed auto-rotation 6s → 12s + respects
+// prefers-reduced-motion (older audience, accessibility).
+const ROTATE_MS = 12000;
 
 export default function HomeHeroSpotlight() {
   const { t, language, formatPrice } = useLocale();
   const { data: tours } = trpc.tours.list.useQuery();
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(false);
+
+  // Detect prefers-reduced-motion (accessibility)
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setReducedMotion(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setReducedMotion(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
 
   // Pick featured tours; fallback to most-recent active tours
   const slides = useMemo(() => {
@@ -35,14 +48,14 @@ export default function HomeHeroSpotlight() {
     return pick;
   }, [tours]);
 
-  // Auto-rotate
+  // Auto-rotate (12s, pause on hover/focus, disable for reduced-motion users)
   useEffect(() => {
-    if (paused || slides.length < 2) return;
+    if (paused || reducedMotion || slides.length < 2) return;
     const id = setInterval(() => {
       setIndex((i) => (i + 1) % slides.length);
     }, ROTATE_MS);
     return () => clearInterval(id);
-  }, [paused, slides.length]);
+  }, [paused, reducedMotion, slides.length]);
 
   // Reset index if slides change to avoid out-of-bounds
   useEffect(() => {
@@ -87,6 +100,9 @@ export default function HomeHeroSpotlight() {
       className="relative w-full h-[60vh] md:h-[70vh] overflow-hidden bg-gray-900"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
+      onFocus={() => setPaused(true)}
+      onBlur={() => setPaused(false)}
+      onTouchStart={() => setPaused(true)}
     >
       {/* Slides — only the active one is visually rendered; others stacked invisibly to keep transition simple */}
       {slides.map((slide: any, i: number) => {

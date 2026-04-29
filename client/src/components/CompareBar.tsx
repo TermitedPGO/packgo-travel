@@ -19,7 +19,9 @@ import { Link } from "wouter";
 import { useLocale } from "@/contexts/LocaleContext";
 
 const STORAGE_KEY = "packgo:compareTourIds";
+const STAMP_KEY = "packgo:compareTourIdsStamp";
 const MAX_COMPARE = 3;
+const STALE_MS = 24 * 60 * 60 * 1000; // v78z-z2: auto-clear after 24h inactivity
 
 // Module-level event listeners so any component can update
 type Listener = (ids: number[]) => void;
@@ -28,6 +30,13 @@ const listeners: Set<Listener> = new Set();
 function readIds(): number[] {
   if (typeof window === "undefined") return [];
   try {
+    // v78z-z2: drop stale entries (>24h since last write)
+    const stamp = Number(localStorage.getItem(STAMP_KEY) || 0);
+    if (stamp && Date.now() - stamp > STALE_MS) {
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(STAMP_KEY);
+      return [];
+    }
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
@@ -41,6 +50,7 @@ function writeIds(ids: number[]) {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(ids));
+    localStorage.setItem(STAMP_KEY, String(Date.now()));
   } catch {}
   listeners.forEach((fn) => fn(ids));
 }
@@ -75,17 +85,19 @@ export function useCompareIds(): number[] {
 }
 
 export default function CompareBar() {
-  const { language, formatPrice } = useLocale();
+  const { language, formatPrice, t: tr } = useLocale();
   const isEN = language === "en";
   const ids = useCompareIds();
   const [open, setOpen] = useState(false);
 
   // Fetch the tours selected for compare
   const { data: tours } = trpc.tours.list.useQuery(undefined, {
-    enabled: ids.length > 0,
+    enabled: ids.length >= 2,
   });
 
-  if (ids.length === 0) return null;
+  // v78z-z2 Sprint 8: only show when user has 2+ tours to actually compare.
+  // 1 tour means user is mid-selection — bar is noise.
+  if (ids.length < 2) return null;
 
   const compared = (tours || []).filter((t: any) => ids.includes(t.id));
 
@@ -102,17 +114,17 @@ export default function CompareBar() {
       <div className="fixed bottom-20 md:bottom-6 left-4 z-30 bg-black text-white rounded-full shadow-2xl flex items-center gap-2 pl-4 pr-2 py-2">
         <GitCompare className="h-4 w-4" />
         <span className="text-sm font-medium hidden sm:inline">
-          {isEN ? "Compare" : "比較"}
+          {tr("compareBar.label")}
         </span>
         <span className="inline-flex items-center justify-center min-w-[1.5rem] h-6 px-1.5 rounded-full bg-white text-black text-xs font-bold">
           {ids.length}
         </span>
         <Button
           size="sm"
-          className="ml-1 h-7 px-3 text-xs rounded-full bg-white text-black hover:bg-gray-200"
+          className="ml-1 h-7 px-3 text-xs rounded-lg bg-white text-black hover:bg-gray-200"
           onClick={() => setOpen(true)}
         >
-          {isEN ? "View" : "查看"}
+          {tr("compareBar.view")}
         </Button>
       </div>
 
@@ -120,13 +132,13 @@ export default function CompareBar() {
         <DialogContent className="max-w-5xl rounded-xl">
           <DialogHeader>
             <DialogTitle className="text-xl">
-              {isEN ? "Compare tours" : "行程比較"}
+              {tr("compareBar.title")}
             </DialogTitle>
           </DialogHeader>
 
           {compared.length === 0 ? (
             <p className="text-gray-500 py-8 text-center">
-              {isEN ? "No tours selected" : "尚未選擇行程"}
+              {tr("compareBar.noToursSelected")}
             </p>
           ) : (
             <div className="overflow-x-auto -mx-4">
@@ -136,20 +148,20 @@ export default function CompareBar() {
                     <th className="text-left text-xs uppercase tracking-wide text-gray-400 font-medium pb-2"></th>
                     {compared.map((t: any) => (
                       <th key={t.id} className="text-left pb-3 align-bottom min-w-[200px]">
-                        <div className="relative bg-gray-50 rounded-lg p-3">
+                        <div className="relative bg-gray-50 rounded-xl p-3">
                           <button
                             onClick={() => removeFromCompare(t.id)}
                             className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white shadow flex items-center justify-center hover:bg-gray-100"
-                            aria-label="Remove"
+                            aria-label={tr("compareBar.removeAria")}
                           >
                             <X className="h-3 w-3" />
                           </button>
                           {(t.imageUrl || t.heroImage) && (
-                            <div className="aspect-[4/3] rounded-md overflow-hidden bg-gray-200 mb-2">
+                            <div className="aspect-[4/3] rounded-xl overflow-hidden bg-gray-200 mb-2">
                               <img
                                 src={t.imageUrl || t.heroImage}
                                 alt={t.title}
-                                className="w-full h-full object-cover"
+                                className="w-full h-full object-cover rounded-xl"
                               />
                             </div>
                           )}
@@ -157,8 +169,8 @@ export default function CompareBar() {
                             {(t.title || "").split(/[|｜]/)[0].trim()}
                           </h4>
                           <Link href={`/tours/${t.id}`}>
-                            <Button size="sm" className="w-full rounded-md text-xs h-8" onClick={() => setOpen(false)}>
-                              {isEN ? "View tour" : "查看行程"}
+                            <Button size="sm" className="w-full rounded-lg text-xs h-8" onClick={() => setOpen(false)}>
+                              {tr("compareBar.viewTour")}
                             </Button>
                           </Link>
                         </div>
@@ -171,7 +183,7 @@ export default function CompareBar() {
                           <div className="aspect-[4/3] rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-gray-400 hover:text-gray-600 transition-colors cursor-pointer">
                             <div className="text-center">
                               <Plus className="h-6 w-6 mx-auto mb-1" />
-                              <p className="text-xs">{isEN ? "Add tour" : "加入行程"}</p>
+                              <p className="text-xs">{tr("compareBar.addTour")}</p>
                             </div>
                           </div>
                         </Link>
@@ -180,12 +192,12 @@ export default function CompareBar() {
                   </tr>
                 </thead>
                 <tbody className="text-sm">
-                  <Row label={isEN ? "Destination" : "目的地"} values={compared.map((t: any) => t.destinationCountry || "—")} />
-                  <Row label={isEN ? "City" : "城市"} values={compared.map((t: any) => t.destinationCity || "—")} />
-                  <Row label={isEN ? "Duration" : "天數"} values={compared.map((t: any) => `${t.duration || "?"}${isEN ? "D" : "天"}${t.nights ? `${t.nights}${isEN ? "N" : "夜"}` : ""}`)} />
-                  <Row label={isEN ? "Starting price" : "起價（每人）"} values={compared.map((t: any) => fmtPrice(t.price || 0, t.priceCurrency || "USD"))} bold />
-                  <Row label={isEN ? "Category" : "類型"} values={compared.map((t: any) => (t.category === "group" ? (isEN ? "Group" : "團體") : t.category === "cruise" ? (isEN ? "Cruise" : "郵輪") : t.category === "custom" ? (isEN ? "Custom" : "客製") : t.category || "—"))} />
-                  <Row label={isEN ? "Rating" : "評分"} values={compared.map((t: any) => (t.rating > 0 ? `${t.rating.toFixed(1)} / 5` : isEN ? "New" : "新行程"))} />
+                  <Row label={tr("compareBar.destination")} values={compared.map((t: any) => t.destinationCountry || "—")} />
+                  <Row label={tr("compareBar.city")} values={compared.map((t: any) => t.destinationCity || "—")} />
+                  <Row label={tr("compareBar.duration")} values={compared.map((t: any) => `${t.duration || "?"}${tr("compareBar.daySuffix")}${t.nights ? `${t.nights}${tr("compareBar.nightSuffix")}` : ""}`)} />
+                  <Row label={tr("compareBar.startingPrice")} values={compared.map((t: any) => fmtPrice(t.price || 0, t.priceCurrency || "USD"))} bold />
+                  <Row label={tr("compareBar.category")} values={compared.map((t: any) => (t.category === "group" ? tr("compareBar.catGroup") : t.category === "cruise" ? tr("compareBar.catCruise") : t.category === "custom" ? tr("compareBar.catCustom") : t.category || "—"))} />
+                  <Row label={tr("compareBar.rating")} values={compared.map((t: any) => (t.rating > 0 ? `${t.rating.toFixed(1)} / 5` : tr("compareBar.ratingNew")))} />
                 </tbody>
               </table>
             </div>
@@ -196,10 +208,10 @@ export default function CompareBar() {
               onClick={() => writeIds([])}
               className="text-sm text-gray-500 hover:text-gray-700 underline"
             >
-              {isEN ? "Clear all" : "全部清除"}
+              {tr("compareBar.clearAll")}
             </button>
             <Button onClick={() => setOpen(false)} variant="outline" className="rounded-lg">
-              {isEN ? "Close" : "關閉"}
+              {tr("common.close")}
             </Button>
           </div>
         </DialogContent>
