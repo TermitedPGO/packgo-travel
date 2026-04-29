@@ -12,6 +12,7 @@ import {
   Brain,
   ChevronRight,
   ChevronDown,
+  Mail,
   Menu,
   X,
   BarChart2,
@@ -37,6 +38,7 @@ import DashboardTab from "@/components/admin/DashboardTab";
 import ToursTab from "@/components/admin/ToursTab";
 import BookingsTab from "@/components/admin/BookingsTab";
 import InquiriesTab from "@/components/admin/InquiriesTab";
+import InboxTab from "@/components/admin/InboxTab";
 import ReviewsTab from "@/components/admin/ReviewsTab";
 import TranslationsTab from "@/components/admin/TranslationsTab";
 import AiHubTab from "@/components/admin/AiHubTab";
@@ -48,6 +50,7 @@ import MarketingTab from "@/components/admin/MarketingTab";
 import VisaManagementTab from "@/components/admin/VisaManagementTab";
 import AffiliateTab from "@/components/admin/AffiliateTab";
 import AccountingTab from "@/components/admin/AccountingTab";
+import FinanceTab from "@/components/admin/FinanceTab";
 import MonitorDashboard from "@/components/admin/MonitorDashboard";
 // v78 productivity tools
 import AiQuotesTab from "@/components/admin/AiQuotesTab";
@@ -56,7 +59,7 @@ import InvoicesTab from "@/components/admin/InvoicesTab";
 import ReconciliationTab from "@/components/admin/ReconciliationTab";
 import MarketingContentTab from "@/components/admin/MarketingContentTab";
 
-type AdminTab = "dashboard" | "tours" | "bookings" | "inquiries" | "reviews" | "ai-hub" | "analytics" | "task-history" | "calibration-review" | "competitor-monitor" | "tour-monitor" | "marketing" | "visa" | "affiliate" | "accounting" | "ai-quotes" | "wechat-assist" | "invoices" | "reconciliation" | "marketing-content";
+type AdminTab = "dashboard" | "inbox" | "finance" | "tours" | "bookings" | "inquiries" | "reviews" | "ai-hub" | "analytics" | "task-history" | "calibration-review" | "competitor-monitor" | "tour-monitor" | "marketing" | "visa" | "affiliate" | "accounting" | "ai-quotes" | "wechat-assist" | "invoices" | "reconciliation" | "marketing-content";
 
 export default function Admin() {
   const { user, loading, isAuthenticated, logout } = useAuth();
@@ -92,12 +95,19 @@ export default function Admin() {
       label: '日常管理',
       items: [
         { id: 'dashboard', icon: LayoutDashboard, label: '總覽儀表板' },
+        { id: 'inbox', icon: Mail, label: '收件匣 (統一)', badge: statsData?.pendingInquiries },
         { id: 'tours', icon: Plane, label: '行程管理', badge: statsData?.activeTours },
         { id: 'bookings', icon: ShoppingCart, label: '訂單管理' },
-        { id: 'ai-quotes', icon: Sparkles, label: 'AI 報價單' },
-        { id: 'wechat-assist', icon: MessageSquare, label: 'WeChat 助手' },
-        { id: 'inquiries', icon: MessageSquare, label: '客戶詢問', badge: statsData?.pendingInquiries },
         { id: 'reviews', icon: Star, label: '客戶評價' },
+      ],
+    },
+    {
+      label: '收件匣分支 (細部)',
+      collapsible: true,
+      items: [
+        { id: 'inquiries', icon: MessageSquare, label: '客戶詢問' },
+        { id: 'wechat-assist', icon: MessageSquare, label: 'WeChat 助手' },
+        { id: 'ai-quotes', icon: Sparkles, label: 'AI 報價單' },
       ],
     },
     {
@@ -134,9 +144,7 @@ export default function Admin() {
     {
       label: '財務管理',
       items: [
-        { id: 'invoices', icon: Receipt, label: '發票管理' },
-        { id: 'reconciliation', icon: Calculator, label: '對帳中心' },
-        { id: 'accounting', icon: DollarSign, label: '會計記帳' },
+        { id: 'finance', icon: DollarSign, label: '財務 (統一)' },
       ],
     },
   ];
@@ -347,6 +355,7 @@ export default function Admin() {
           {activeTab === "dashboard" && <DashboardTab onNavigate={(tab) => setActiveTab(tab as AdminTab)} />}
           {activeTab === "tours" && <ToursTab />}
           {activeTab === "bookings" && <BookingsTab />}
+          {activeTab === "inbox" && <InboxTab onNavigate={(tab) => setActiveTab(tab as AdminTab)} />}
           {activeTab === "inquiries" && <InquiriesTab />}
           {activeTab === "reviews" && <ReviewsTab />}
           {activeTab === "analytics" && <AnalyticsTab />}
@@ -358,6 +367,7 @@ export default function Admin() {
           {activeTab === "marketing" && <MarketingTab />}
           {activeTab === "visa" && <VisaManagementTab />}
           {activeTab === "affiliate" && <AffiliateTab />}
+          {activeTab === "finance" && <FinanceTab />}
           {activeTab === "accounting" && <AccountingTab />}
           {activeTab === "ai-quotes" && <AiQuotesTab />}
           {activeTab === "wechat-assist" && <WechatAssistTab />}

@@ -328,104 +328,11 @@ export default function Profile() {
           </div>
 
           {/* Main Content */}
+          {/* v78z-z3 Sprint 9: per UX audit, removed 3 vanity stat cards
+              (completedTrips/upcomingTrips/totalSpent) and Quick Actions
+              section (3 buttons that linked back to same page or existing nav).
+              Customer profile is now 2 sections: My Bookings + Favorites. */}
           <div className="lg:col-span-9 space-y-6">
-            {/* Statistics Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <Card className=" border border-gray-200 bg-white shadow-sm hover:shadow-md transition-shadow">
-                <CardContent className="p-6">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-sm text-gray-500 mb-2">{t('profile.completedTrips')}</p>
-                      <p className="text-3xl font-bold text-black">{completedTrips}</p>
-                      <p className="text-xs text-gray-400 mt-2">{t('profile.trips')}</p>
-                    </div>
-                    <div className="h-14 w-14 rounded-lg bg-gray-100 flex items-center justify-center">
-                      <MapPin className="h-7 w-7 text-black" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className=" border border-gray-200 bg-white shadow-sm hover:shadow-md transition-shadow">
-                <CardContent className="p-6">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-sm text-gray-500 mb-2">{t('profile.upcomingTrips')}</p>
-                      <p className="text-3xl font-bold text-black">{upcomingTrips}</p>
-                      <p className="text-xs text-gray-400 mt-2">{t('profile.tours')}</p>
-                    </div>
-                    <div className="h-14 w-14 rounded-lg bg-gray-100 flex items-center justify-center">
-                      <Package className="h-7 w-7 text-black" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className=" border border-gray-200 bg-white shadow-sm hover:shadow-md transition-shadow">
-                <CardContent className="p-6">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-sm text-gray-500 mb-2">{t('profile.totalSpent')}</p>
-                      <p className="text-3xl font-bold text-black">${totalSpent.toLocaleString()}</p>
-                      <p className="text-xs text-gray-400 mt-2">{t('profile.totalAmount')}</p>
-                    </div>
-                    <div className="h-14 w-14 rounded-lg bg-gray-100 flex items-center justify-center">
-                      <TrendingUp className="h-7 w-7 text-black" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Quick Actions */}
-            <Card className=" border border-gray-200 bg-white shadow-sm">
-              <CardHeader className="border-b border-gray-200">
-                <CardTitle className="text-lg text-black">{t('profile.quickActions')}</CardTitle>
-              </CardHeader>
-              <CardContent className="p-6">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <button
-                    onClick={() => setLocation("/profile")}
-                    className="flex items-center justify-between p-4  border border-gray-200 hover:border-black hover:bg-gray-50 transition-all group"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="h-12 w-12 rounded-lg bg-gray-100 flex items-center justify-center">
-                        <ShoppingBag className="h-6 w-6 text-black" />
-                      </div>
-                      <span className="font-medium text-black">{t('profile.myBookings')}</span>
-                    </div>
-                    <ChevronRight className="h-5 w-5 text-gray-400 group-hover:text-black transition-colors" />
-                  </button>
-
-                  <button
-                    onClick={() => setLocation("/profile")}
-                    className="flex items-center justify-between p-4  border border-gray-200 hover:border-black hover:bg-gray-50 transition-all group"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="h-12 w-12 rounded-lg bg-gray-100 flex items-center justify-center">
-                        <Heart className="h-6 w-6 text-black" />
-                      </div>
-                      <span className="font-medium text-black">{t('profile.favorites')}</span>
-                    </div>
-                    <ChevronRight className="h-5 w-5 text-gray-400 group-hover:text-black transition-colors" />
-                  </button>
-
-                  <button
-                    onClick={() => setLocation("/contact")}
-                    className="flex items-center justify-between p-4  border border-gray-200 hover:border-black hover:bg-gray-50 transition-all group"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="h-12 w-12 rounded-lg bg-gray-100 flex items-center justify-center">
-                        <MessageSquare className="h-6 w-6 text-black" />
-                      </div>
-                      <span className="font-medium text-black">{t('profile.contactSupport')}</span>
-                    </div>
-                    <ChevronRight className="h-5 w-5 text-gray-400 group-hover:text-black transition-colors" />
-                  </button>
-                </div>
-              </CardContent>
-            </Card>
-
             {/* Recent Bookings */}
             <Card className=" border border-gray-200 bg-white shadow-sm">
               <CardHeader className="border-b border-gray-200">
