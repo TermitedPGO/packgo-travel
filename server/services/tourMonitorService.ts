@@ -113,8 +113,12 @@ export async function runMonitorCycle(): Promise<MonitorRunResult> {
           errorMessage: err instanceof Error ? err.message : String(err),
           durationMs: Date.now() - checkStart,
           hasChanges: 0,
-        } as any).catch(() => {});
-        
+        } as any).catch((dbErr) =>
+          // v71: don't silently swallow log-write failures — if the monitor log
+          // table itself is broken we want to know.
+          console.warn(`[TourMonitor] Failed to write tourMonitorLogs row for tour ${tour.id}:`, (dbErr as Error)?.message)
+        );
+
         // Update tour monitor status
         if (db) await db.update(tours)
           .set({
@@ -122,7 +126,9 @@ export async function runMonitorCycle(): Promise<MonitorRunResult> {
             monitorStatus: 'error',
           } as any)
           .where(eq(tours.id, tour.id))
-          .catch(() => {});
+          .catch((dbErr) =>
+            console.warn(`[TourMonitor] Failed to update monitor status for tour ${tour.id}:`, (dbErr as Error)?.message)
+          );
       }
     }));
     
@@ -264,19 +270,34 @@ async function checkTour(tourId: number, sourceUrl: string, runId: string): Prom
           });
           
           // Auto-update DB if status changed to soldout or confirmed
+          // Round 66: normalize status through the zh→enum mapper to avoid
+          // writing Chinese strings (報名/客滿/etc.) into a strict enum column.
           if (changeTypes.includes('status') && scrapedDep.status && db) {
-            await db.update(tourDepartures)
-              .set({ status: scrapedDep.status as any })
-              .where(eq(tourDepartures.id, dbDep.id))
-              .catch(() => {});
+            const normalized = normalizeDepartureStatus(scrapedDep.status);
+            if (normalized) {
+              await db.update(tourDepartures)
+                .set({ status: normalized })
+                .where(eq(tourDepartures.id, dbDep.id))
+                .catch((err) => console.warn(`[TourMonitor] Failed to update status for departure ${dbDep.id}:`, err?.message));
+            } else {
+              console.warn(`[TourMonitor] Unknown status "${scrapedDep.status}" for departure ${dbDep.id} — skipping status update`);
+            }
           }
           
           // Auto-update seats if changed
+          // v78z hot-fix: tourDepartures schema uses totalSlots/bookedSlots
+          // (not availableSeats — that's on the tours table). Drizzle silently
+          // strips unknown keys → empty SET clause → MySQL syntax error.
+          // Convert: bookedSlots = totalSlots - availableSeats(scraped).
           if (changeTypes.includes('seats') && scrapedDep.seats !== undefined && db) {
+            const totalSlots = (dbDep as any).totalSlots ?? 0;
+            const newBookedSlots = Math.max(0, totalSlots - scrapedDep.seats);
             await db.update(tourDepartures)
-              .set({ availableSeats: scrapedDep.seats } as any)
+              .set({ bookedSlots: newBookedSlots } as any)
               .where(eq(tourDepartures.id, dbDep.id))
-              .catch(() => {});
+              .catch((dbErr) =>
+                console.warn(`[TourMonitor] Failed to update seats for departure ${dbDep.id}:`, (dbErr as Error)?.message)
+              );
           }
         } else {
           // No changes - log success
@@ -314,11 +335,39 @@ async function checkTour(tourId: number, sourceUrl: string, runId: string): Prom
   };
 }
 
+// NOTE: DB enum is ["open", "full", "cancelled", "confirmed"]. We use "full"
+// (not "soldout") to stay aligned with drizzle/schema.ts tourDepartures.status.
 interface ScrapedDeparture {
   date: string; // YYYY-MM-DD
-  status?: 'open' | 'soldout' | 'confirmed' | 'cancelled';
+  status?: 'open' | 'full' | 'confirmed' | 'cancelled';
   price?: number;
   seats?: number;
+}
+
+/**
+ * Round 66: Normalize any status value (LionTravel zh, English enum, dateExtractor raw)
+ * into our tourDepartures.status enum. Returns null when it can't match — callers
+ * must skip the DB write in that case to avoid MySQL ER_TRUNCATED_WRONG_VALUE_FOR_FIELD.
+ */
+export function normalizeDepartureStatus(
+  raw: string | undefined | null
+): 'open' | 'full' | 'confirmed' | 'cancelled' | null {
+  if (!raw) return null;
+  const s = String(raw).trim().toLowerCase();
+  if (!s) return null;
+  const zhMap: Record<string, 'open' | 'full' | 'confirmed' | 'cancelled'> = {
+    '報名': 'open', '可報名': 'open', '候補': 'open',
+    '客滿': 'full', '額滿': 'full', '已額滿': 'full', '暫停受理': 'full',
+    '確定': 'confirmed', '已成團': 'confirmed', '成團': 'confirmed', '保證成團': 'confirmed',
+    '取消': 'cancelled', '已取消': 'cancelled', '停辦': 'cancelled',
+  };
+  const trimmed = String(raw).trim();
+  if (zhMap[trimmed]) return zhMap[trimmed];
+  if (['open', 'full', 'confirmed', 'cancelled'].includes(s)) {
+    return s as 'open' | 'full' | 'confirmed' | 'cancelled';
+  }
+  if (s === 'soldout' || s === 'sold_out' || s === 'sold-out') return 'full';
+  return null;
 }
 
 interface ScrapedTourData {
@@ -345,15 +394,10 @@ async function scrapeTourPage(url: string): Promise<ScrapedTourData> {
       ]);
       if (!lionData) throw new Error('liontravel API returned null');
       // Map LionDeparture[] to ScrapedDeparture[]
-      const statusMap: Record<string, ScrapedDeparture['status']> = {
-        '報名': 'open',
-        '客滿': 'soldout',
-        '確定': 'confirmed',
-        '取消': 'cancelled',
-      };
+      // DB enum uses 'full' (not 'soldout'); use normalizeDepartureStatus for consistency.
       const departures: ScrapedDeparture[] = (lionData.allDepartures || []).map(dep => ({
         date: dep.date.replace(/\//g, '-'), // "2026/07/06" → "2026-07-06"
-        status: statusMap[dep.status] || 'open',
+        status: normalizeDepartureStatus(dep.status) || 'open',
         price: dep.price,
         seats: dep.availableSeats,
       }));
@@ -385,9 +429,11 @@ async function scrapeTourPage(url: string): Promise<ScrapedTourData> {
   );
   
   return {
+    // Round 66: normalize status strings through the shared mapper so the
+    // Puppeteer fallback path never writes unknown enum values to MySQL.
     departures: (meta.departureDates as Array<{ date: string; status?: string; price?: number }>).map((d) => ({
       date: d.date,
-      status: d.status as ScrapedDeparture['status'],
+      status: normalizeDepartureStatus(d.status) ?? undefined,
       price: d.price,
     })),
     price: meta.pricing.adultPrice,
