@@ -1785,3 +1785,23 @@ export const adminAuditLog = mysqlTable("adminAuditLog", {
 });
 export type AdminAuditLog = typeof adminAuditLog.$inferSelect;
 export type InsertAdminAuditLog = typeof adminAuditLog.$inferInsert;
+
+// v78z-z3 Sprint 11: poster generation logs (Image 2.0 Phase A v0).
+// Tracks every gpt-image-2 call so we can show cost-to-date in admin and
+// kill the pipeline if monthly spend exceeds budget.
+export const posterGenLogs = mysqlTable("posterGenLogs", {
+  id: int("id").autoincrement().primaryKey(),
+  tourId: int("tourId"),
+  prompt: text("prompt").notNull(),
+  size: varchar("size", { length: 16 }).notNull(),
+  quality: varchar("quality", { length: 16 }).notNull(),
+  costUsd: varchar("costUsd", { length: 16 }).notNull(), // store as string to avoid float precision drift
+  durationMs: int("durationMs").notNull(),
+  storageKey: varchar("storageKey", { length: 512 }),
+  status: varchar("status", { length: 32 }).notNull(), // success / refused / errored
+  errorMessage: text("errorMessage"),
+  generatedBy: int("generatedBy"), // admin user id
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type PosterGenLog = typeof posterGenLogs.$inferSelect;
+export type InsertPosterGenLog = typeof posterGenLogs.$inferInsert;

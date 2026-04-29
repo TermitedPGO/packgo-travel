@@ -6368,6 +6368,168 @@ export const appRouter = router({
   // PDF quote in ~30 seconds.  Replaces 1 hour of manual quoting per request,
   // so a 1-person operation can scale to 50+ quotes/day.
   // ──────────────────────────────────────────────────────────────────────────
+  // v78z-z3 Sprint 11: Image 2.0 Phase A v0 — poster generator.
+  // Single endpoint that runs gpt-image-2 → Sharp overlay → R2.
+  // Cost log → admin can see today's spend.
+  posterGen: router({
+    generate: adminProcedure
+      .input(
+        z.object({
+          tourId: z.number().int().positive(),
+          themePrompt: z.string().max(500).optional(),
+          language: z.enum(["zh-TW", "en"]).default("zh-TW"),
+          quality: z.enum(["low", "medium", "high"]).default("medium"),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const { generatePoster } = await import("./services/posterCompositeService");
+        const { tours, tourDepartures, posterGenLogs } = await import("../drizzle/schema");
+        const { eq, gte, sql, and } = await import("drizzle-orm");
+        const { TRPCError } = await import("@trpc/server");
+        const drizzleDb = await db.getDb();
+        if (!drizzleDb) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+
+        // Fetch tour data
+        const [tour] = await drizzleDb.select().from(tours).where(eq(tours.id, input.tourId)).limit(1);
+        if (!tour) throw new TRPCError({ code: "NOT_FOUND", message: `Tour ${input.tourId} not found` });
+
+        // Pick the next future departure (if any)
+        const now = new Date();
+        const [nextDep] = await drizzleDb
+          .select({ departureDate: tourDepartures.departureDate, adultPrice: tourDepartures.adultPrice, currency: tourDepartures.currency })
+          .from(tourDepartures)
+          .where(and(eq(tourDepartures.tourId, input.tourId), gte(tourDepartures.departureDate, now), eq(tourDepartures.status, "open")))
+          .orderBy(tourDepartures.departureDate)
+          .limit(1);
+
+        const departureDateStr = nextDep?.departureDate
+          ? new Date(nextDep.departureDate).toLocaleDateString(input.language === "en" ? "en-US" : "zh-TW", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            })
+          : input.language === "en" ? "On request" : "客製洽詢";
+
+        const priceVal = (nextDep?.adultPrice as number | undefined) ?? (tour as any).price ?? 0;
+        const cur = (nextDep?.currency as string | undefined) || (tour as any).priceCurrency || "TWD";
+        const priceStr = priceVal > 0
+          ? cur === "USD" ? `$${priceVal.toLocaleString()}` : `NT$ ${priceVal.toLocaleString()}`
+          : input.language === "en" ? "Inquire" : "洽詢";
+
+        const durationStr = (tour as any).duration
+          ? input.language === "en"
+            ? `${(tour as any).duration} days`
+            : `${(tour as any).duration} 天`
+          : "—";
+
+        const titleField = input.language === "en"
+          ? ((tour as any).titleEn || (tour as any).title_en || tour.title)
+          : tour.title;
+
+        // Soft daily budget guard: refuse if today's spend already > $5
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+        const [todaySpendRow] = await drizzleDb
+          .select({ total: sql<string>`COALESCE(SUM(CAST(${posterGenLogs.costUsd} AS DECIMAL(10,4))), 0)` })
+          .from(posterGenLogs)
+          .where(and(eq(posterGenLogs.status, "success"), gte(posterGenLogs.createdAt, startOfToday)));
+        const todaySpend = Number(todaySpendRow?.total ?? 0);
+        if (todaySpend > 5.0) {
+          throw new TRPCError({
+            code: "TOO_MANY_REQUESTS",
+            message: `Daily image-gen budget exceeded ($${todaySpend.toFixed(2)} / $5.00). Try again tomorrow or raise the limit.`,
+          });
+        }
+
+        try {
+          const result = await generatePoster({
+            tourId: input.tourId,
+            tourTitle: titleField || `Tour #${input.tourId}`,
+            departureDateStr,
+            priceStr,
+            durationStr,
+            themePrompt: input.themePrompt,
+            language: input.language,
+            quality: input.quality,
+          });
+
+          await drizzleDb.insert(posterGenLogs).values({
+            tourId: input.tourId,
+            prompt: input.themePrompt || titleField || "",
+            size: "1024x1820",
+            quality: input.quality,
+            costUsd: result.cost.toFixed(4),
+            durationMs: result.durationMs,
+            storageKey: result.storageKey,
+            status: "success",
+            generatedBy: ctx.user?.id ?? null,
+          } as any);
+
+          return {
+            posterUrl: result.posterUrl,
+            storageKey: result.storageKey,
+            costUsd: result.cost,
+            durationMs: result.durationMs,
+          };
+        } catch (err) {
+          await drizzleDb.insert(posterGenLogs).values({
+            tourId: input.tourId,
+            prompt: input.themePrompt || titleField || "",
+            size: "1024x1820",
+            quality: input.quality,
+            costUsd: "0",
+            durationMs: 0,
+            status: "errored",
+            errorMessage: (err as Error).message?.slice(0, 1000) || "Unknown error",
+            generatedBy: ctx.user?.id ?? null,
+          } as any);
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: `Poster generation failed: ${(err as Error).message}`,
+          });
+        }
+      }),
+
+    // Cost surface for admin UI: today's spend + month-to-date spend + recent logs.
+    getCostStatus: adminProcedure.query(async () => {
+      const { posterGenLogs } = await import("../drizzle/schema");
+      const { sql, gte, eq, and, desc } = await import("drizzle-orm");
+      const drizzleDb = await db.getDb();
+      if (!drizzleDb) return { todaySpend: 0, monthSpend: 0, recentCount: 0 };
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      const startOfMonth = new Date();
+      startOfMonth.setDate(1);
+      startOfMonth.setHours(0, 0, 0, 0);
+      const [today] = await drizzleDb.select({
+        total: sql<string>`COALESCE(SUM(CAST(${posterGenLogs.costUsd} AS DECIMAL(10,4))), 0)`,
+        n: sql<string>`COUNT(*)`,
+      }).from(posterGenLogs).where(and(eq(posterGenLogs.status, "success"), gte(posterGenLogs.createdAt, startOfToday)));
+      const [month] = await drizzleDb.select({
+        total: sql<string>`COALESCE(SUM(CAST(${posterGenLogs.costUsd} AS DECIMAL(10,4))), 0)`,
+        n: sql<string>`COUNT(*)`,
+      }).from(posterGenLogs).where(and(eq(posterGenLogs.status, "success"), gte(posterGenLogs.createdAt, startOfMonth)));
+      const recent = await drizzleDb.select().from(posterGenLogs).orderBy(desc(posterGenLogs.createdAt)).limit(10);
+      return {
+        todaySpend: Number(today?.total ?? 0),
+        todayCount: Number(today?.n ?? 0),
+        monthSpend: Number(month?.total ?? 0),
+        monthCount: Number(month?.n ?? 0),
+        dailyBudget: 5.0,
+        monthlyBudget: 50.0,
+        recentLogs: recent.map((r: any) => ({
+          id: r.id,
+          tourId: r.tourId,
+          quality: r.quality,
+          costUsd: Number(r.costUsd),
+          status: r.status,
+          storageKey: r.storageKey,
+          createdAt: r.createdAt,
+        })),
+      };
+    }),
+  }),
+
   aiQuotes: router({
     // Public — anyone can request a quote without signing up
     generate: publicProcedure
