@@ -19,6 +19,8 @@ import { MessageSquare, Sparkles, AlertCircle, Globe, ArrowRight, Clock, Filter 
 import { Button } from "@/components/ui/button";
 
 type Channel = "all" | "web" | "wechat" | "quote";
+type SlaLevel = "fresh" | "warn" | "urgent"; // <12h / 12-24h / >24h
+
 type InboxItem = {
   id: string;
   channel: "web" | "wechat" | "quote";
@@ -30,7 +32,7 @@ type InboxItem = {
   preview: string;
   createdAt: Date | null;
   targetTab: string; // admin tab to navigate to
-  isUrgent: boolean; // >24h ago
+  sla: SlaLevel;
 };
 
 interface Props {
@@ -55,7 +57,17 @@ export default function InboxTab({ onNavigate }: Props = {}) {
   const items: InboxItem[] = useMemo(() => {
     const list: InboxItem[] = [];
     const now = Date.now();
+    // v78z-z3 Sprint 10 (C2): two-tier SLA per UX audit
+    // <12h fresh · 12-24h warn (amber) · >24h urgent (red)
+    const WARN_MS = 12 * 60 * 60 * 1000;
     const URGENT_MS = 24 * 60 * 60 * 1000;
+    const slaLevel = (createdAt: Date | null): SlaLevel => {
+      if (!createdAt) return "fresh";
+      const age = now - createdAt.getTime();
+      if (age > URGENT_MS) return "urgent";
+      if (age > WARN_MS) return "warn";
+      return "fresh";
+    };
 
     // Web inquiries (only "new" status — others are handled)
     (inquiries || [])
@@ -73,7 +85,7 @@ export default function InboxTab({ onNavigate }: Props = {}) {
           preview: i.subject || i.message?.slice(0, 80) || "",
           createdAt,
           targetTab: "inquiries",
-          isUrgent: createdAt ? now - createdAt.getTime() > URGENT_MS : false,
+          sla: slaLevel(createdAt),
         });
       });
 
@@ -91,7 +103,7 @@ export default function InboxTab({ onNavigate }: Props = {}) {
         preview: (w.aiDraftReply || w.inboundText || "").slice(0, 100),
         createdAt,
         targetTab: "wechat-assist",
-        isUrgent: createdAt ? now - createdAt.getTime() > URGENT_MS : false,
+        sla: slaLevel(createdAt),
       });
     });
 
@@ -109,13 +121,16 @@ export default function InboxTab({ onNavigate }: Props = {}) {
         preview: q.rawRequest?.slice(0, 100) || "",
         createdAt,
         targetTab: "ai-quotes",
-        isUrgent: createdAt ? now - createdAt.getTime() > URGENT_MS : false,
+        sla: slaLevel(createdAt),
       });
     });
 
-    // Sort: urgent first, then by recency desc
+    // Sort: urgent (red) → warn (amber) → fresh, then by recency desc
+    const slaPriority: Record<SlaLevel, number> = { urgent: 0, warn: 1, fresh: 2 };
     list.sort((a, b) => {
-      if (a.isUrgent !== b.isUrgent) return a.isUrgent ? -1 : 1;
+      const da = slaPriority[a.sla];
+      const db = slaPriority[b.sla];
+      if (da !== db) return da - db;
       const ta = a.createdAt?.getTime() || 0;
       const tb = b.createdAt?.getTime() || 0;
       return tb - ta;
@@ -223,9 +238,14 @@ export default function InboxTab({ onNavigate }: Props = {}) {
                     <span className={`text-xs font-bold uppercase tracking-wide ${item.channelText}`}>
                       {item.channelLabel}
                     </span>
-                    {item.isUrgent && (
+                    {item.sla === "urgent" && (
                       <span className="text-xs font-bold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-md">
                         {t("inboxTab.urgent")}
+                      </span>
+                    )}
+                    {item.sla === "warn" && (
+                      <span className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-md">
+                        {t("inboxTab.warn")}
                       </span>
                     )}
                     <span className="text-xs text-gray-400">·</span>

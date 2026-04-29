@@ -3305,6 +3305,69 @@ export const appRouter = router({
       };
     }),
 
+    // v78z-z3 Sprint 10 (C4): booking risk metrics — 3 actionable warning
+    // signals for solo founder. Each metric also returns sample IDs so the
+    // dashboard card can deep-link admin into the relevant detail view.
+    getRiskMetrics: adminProcedure.query(async () => {
+      const { tours: toursTable, bookings: bookingsTable, tourDepartures: departuresTable } = await import('../drizzle/schema');
+      const { sql: sqlFn } = await import('drizzle-orm');
+      const drizzleDb = await db.getDb();
+      if (!drizzleDb) {
+        return { lowCapacity: { count: 0, departureIds: [] }, unpaidBalance: { count: 0, bookingIds: [] }, staleTours: { count: 0, tourIds: [] } };
+      }
+      const now = new Date();
+      const in30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+      const sinceFourteenDays = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+      const sinceThirtyDays = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+      // 1. Low capacity: open departures within 30 days with < 50% booked.
+      const lowCapacityRows = await drizzleDb.select({
+        id: departuresTable.id,
+      }).from(departuresTable).where(
+        sqlFn`${departuresTable.status} = 'open'
+          AND ${departuresTable.departureDate} >= ${now}
+          AND ${departuresTable.departureDate} <= ${in30Days}
+          AND ${departuresTable.totalSlots} > 0
+          AND (${departuresTable.bookedSlots} * 1.0 / ${departuresTable.totalSlots}) < 0.5`
+      ).limit(20);
+
+      // 2. Unpaid balance: bookings with deposit_paid for >14 days (stuck).
+      const unpaidRows = await drizzleDb.select({
+        id: bookingsTable.id,
+      }).from(bookingsTable).where(
+        sqlFn`${bookingsTable.paymentStatus} = 'deposit_paid'
+          AND ${bookingsTable.bookingStatus} IN ('confirmed','pending')
+          AND ${bookingsTable.createdAt} <= ${sinceFourteenDays}`
+      ).limit(20);
+
+      // 3. Stale tours: active tours with NO bookings in last 30 days.
+      const staleRows = await drizzleDb.execute(
+        sqlFn`SELECT t.id FROM tours t
+          WHERE t.status = 'active'
+            AND NOT EXISTS (
+              SELECT 1 FROM bookings b
+              WHERE b.tourId = t.id AND b.createdAt >= ${sinceThirtyDays}
+            )
+          LIMIT 20`
+      ) as any;
+      const staleRowsArr: any[] = Array.isArray(staleRows[0]) ? staleRows[0] : staleRows;
+
+      return {
+        lowCapacity: {
+          count: lowCapacityRows.length,
+          departureIds: lowCapacityRows.map((r: any) => Number(r.id)),
+        },
+        unpaidBalance: {
+          count: unpaidRows.length,
+          bookingIds: unpaidRows.map((r: any) => Number(r.id)),
+        },
+        staleTours: {
+          count: staleRowsArr.length,
+          tourIds: staleRowsArr.map((r: any) => Number(r.id)),
+        },
+      };
+    }),
+
     // Get detailed analytics data for charts
     getAnalytics: adminProcedure
       .input(z.object({ days: z.number().min(7).max(180).default(30) }))

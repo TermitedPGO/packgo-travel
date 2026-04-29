@@ -2,6 +2,7 @@ import { trpc } from "@/lib/trpc";
 import { Plane, ShoppingCart, MessageSquare, DollarSign, ArrowRight, AlertCircle, CheckCircle2, Clock } from "lucide-react";
 import { useLocale } from "@/contexts/LocaleContext";
 import DailyBriefingCard from "./DailyBriefingCard";
+import BookingRiskCard from "./BookingRiskCard";
 
 interface DashboardTabProps {
   onNavigate?: (tab: string) => void;
@@ -34,6 +35,10 @@ export default function DashboardTab({ onNavigate }: DashboardTabProps = {}) {
     <div className="space-y-8">
       {/* v78i: Daily Briefing — actionable items at top, replaces empty stats first impression */}
       {onNavigate && <DailyBriefingCard onNavigate={onNavigate} />}
+
+      {/* v78z-z3 Sprint 10 (C4): Booking Risk Card — surfaces 3 warning signals.
+          Renders nothing if zero risks (saves visual noise). */}
+      {onNavigate && <BookingRiskCard onNavigate={onNavigate} />}
 
       {/* Page Title */}
       <div>
