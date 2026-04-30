@@ -8,7 +8,7 @@ import { invokeLLM } from '../_core/llm';
  * because ANTHROPIC_API_KEY is a proxy key for forge.manus.im (not for api.anthropic.com).
  * These tests use invokeLLM which correctly routes through the Manus Forge proxy.
  */
-describe('ClaudeAgent', () => {
+describe.skipIf(!process.env.BUILT_IN_FORGE_API_KEY && !process.env.ANTHROPIC_API_KEY)('ClaudeAgent', () => {
   it('should send a simple message to Claude', async () => {
     const response = await invokeLLM({
       messages: [

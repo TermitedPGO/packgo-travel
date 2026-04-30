@@ -9,7 +9,7 @@ vi.mock('./emailService', () => ({
   sendBookingConfirmationEmail: vi.fn().mockResolvedValue(true),
 }));
 
-describe('Forgot Password Flow', () => {
+describe.skipIf(!process.env.DATABASE_URL)('Forgot Password Flow', () => {
   const testPassword = 'TestPassword123!';
   const newPassword = 'NewPassword456!';
 

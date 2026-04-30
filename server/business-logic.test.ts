@@ -83,7 +83,7 @@ function createCtx(user?: User): TrpcContext {
 // 1. 行程搜尋業務邏輯
 // ─────────────────────────────────────────────
 
-describe("行程搜尋業務邏輯 (tours.search)", () => {
+describe.skipIf(!process.env.DATABASE_URL)("行程搜尋業務邏輯 (tours.search)", () => {
   it("無篩選條件時應回傳分頁結果，包含 pagination 物件", async () => {
     const caller = appRouter.createCaller(createCtx());
     const result = await caller.tours.search({ page: 1, pageSize: 12 });
@@ -206,7 +206,7 @@ describe("行程搜尋業務邏輯 (tours.search)", () => {
 // 2. 支付流程業務邏輯
 // ─────────────────────────────────────────────
 
-describe("支付流程業務邏輯 (bookings)", () => {
+describe.skipIf(!process.env.DATABASE_URL)("支付流程業務邏輯 (bookings)", () => {
   it("未登入用戶嘗試建立訂單應拋出 UNAUTHORIZED", async () => {
     const caller = appRouter.createCaller(createCtx(undefined));
     await expect(
@@ -297,7 +297,7 @@ describe("支付流程業務邏輯 (bookings)", () => {
 // 3. 行程 CRUD 業務邏輯（Admin 保護）
 // ─────────────────────────────────────────────
 
-describe("行程 CRUD 業務邏輯 (Admin 保護)", () => {
+describe.skipIf(!process.env.DATABASE_URL)("行程 CRUD 業務邏輯 (Admin 保護)", () => {
   it("非 admin 用戶嘗試建立行程應拋出 FORBIDDEN", async () => {
     const caller = appRouter.createCaller(createCtx(mockRegularUser));
     await expect(
@@ -380,7 +380,7 @@ describe("行程 CRUD 業務邏輯 (Admin 保護)", () => {
 // 5. 詢問系統業務邏輯
 // ─────────────────────────────────────────────
 
-describe("詢問系統業務邏輯 (inquiries)", () => {
+describe.skipIf(!process.env.DATABASE_URL)("詢問系統業務邏輯 (inquiries)", () => {
   it("建立詢問單不需要登入（訪客詢問）", async () => {
     const caller = appRouter.createCaller(createCtx(undefined));
     const result = await caller.inquiries.create({

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import * as auth from './auth';
 import * as db from './db';
 
-describe('Login Security Mechanism', () => {
+describe.skipIf(!process.env.DATABASE_URL)('Login Security Mechanism', () => {
   const testPassword = 'TestPassword123!';
   const wrongPassword = 'WrongPassword123!';
 

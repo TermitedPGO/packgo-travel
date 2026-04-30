@@ -10,6 +10,15 @@ vi.mock("../_core/llm", () => ({
   invokeLLM: vi.fn(),
 }));
 
+// Stub Redis cache so each test starts with a miss; otherwise the first test's
+// result poisons subsequent ones (all use the same image URL → same cache key).
+vi.mock("../redis", () => ({
+  redis: {
+    get: vi.fn().mockResolvedValue(null),
+    setex: vi.fn().mockResolvedValue("OK"),
+  },
+}));
+
 import { invokeLLM } from "../_core/llm";
 import { analyzeImage } from "./visionAnalysisService";
 

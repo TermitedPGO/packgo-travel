@@ -128,10 +128,14 @@ describe('reCAPTCHA v3 Integration', () => {
 
     it('should reject request with missing token in production (no VITEST)', async () => {
       const originalFetch = global.fetch;
-      const originalEnv = process.env.VITEST;
+      const originalVitest = process.env.VITEST;
+      const originalNodeEnv = process.env.NODE_ENV;
 
       try {
+        // Implementation checks both VITEST and NODE_ENV==='test'; vitest sets
+        // both, so we override both to simulate production.
         delete process.env.VITEST;
+        process.env.NODE_ENV = 'production';
         process.env.RECAPTCHA_SECRET_KEY = 'test-secret-key';
 
         const caller = appRouter.createCaller(createMockContext());
@@ -143,7 +147,8 @@ describe('reCAPTCHA v3 Integration', () => {
           })
         ).rejects.toThrow('驗證失敗');
       } finally {
-        process.env.VITEST = originalEnv;
+        process.env.VITEST = originalVitest;
+        process.env.NODE_ENV = originalNodeEnv;
         global.fetch = originalFetch;
       }
     });

@@ -35,7 +35,7 @@ const createMockContext = (user?: User) => ({
   res: {} as any,
 });
 
-describe("Tours API", () => {
+describe.skipIf(!process.env.DATABASE_URL)("Tours API", () => {
   let testTourId: number;
 
   describe("tours.list", () => {

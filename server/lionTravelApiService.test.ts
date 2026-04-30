@@ -237,9 +237,9 @@ describe('fetchLionTravelData', () => {
     expect(result!.notices[0].content).toContain('出發前30天取消');
   });
 
-  it('returns null and logs warning when fetch throws', async () => {
+  it('returns null and logs error when fetch throws', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')));
-    const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const result = await fetchLionTravelData(
       'https://travel.liontravel.com/detail?NormGroupID=test-norm-id'
@@ -247,7 +247,7 @@ describe('fetchLionTravelData', () => {
 
     expect(result).toBeNull();
     expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining('[LionAPI] fetchLionTravelData failed')
+      expect.stringContaining('[LionAPI] ❌ fetchLionTravelData failed')
     );
     consoleSpy.mockRestore();
   });

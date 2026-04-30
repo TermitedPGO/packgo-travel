@@ -16,7 +16,7 @@ function createMockContext(user: User | null = null) {
   };
 }
 
-describe('JWT Authentication System', () => {
+describe.skipIf(!process.env.DATABASE_URL)('JWT Authentication System', () => {
   let testUser: User;
 
   beforeAll(async () => {

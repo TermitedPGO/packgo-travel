@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as auth from './auth';
 import * as db from './db';
 
-describe('Authentication System', () => {
+describe.skipIf(!process.env.DATABASE_URL)('Authentication System', () => {
   const testEmail = `test-${Date.now()}@example.com`;
   const testPassword = 'TestPassword123!';
   const testName = 'Test User';

@@ -7,7 +7,7 @@ import { invokeLLM } from './_core/llm';
  * The Manus platform uses a proxy API (forge.manus.im) for LLM calls.
  * Direct Anthropic SDK calls are NOT supported (returns 403) - use invokeLLM instead.
  */
-describe('API Keys Validation', () => {
+describe.skipIf(!process.env.BUILT_IN_FORGE_API_KEY)('API Keys Validation', () => {
   it('should have BUILT_IN_FORGE_API_KEY configured', () => {
     const apiKey = process.env.BUILT_IN_FORGE_API_KEY;
     if (apiKey) {

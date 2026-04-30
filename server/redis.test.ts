@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import Redis from "ioredis";
 
-describe("Upstash Redis Connection", () => {
+describe.skipIf(!process.env.UPSTASH_REDIS_URL)("Upstash Redis Connection", () => {
   let redis: Redis;
 
   beforeAll(() => {

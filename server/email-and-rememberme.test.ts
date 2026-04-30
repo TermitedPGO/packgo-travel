@@ -26,7 +26,7 @@ function createMockContext(user: any = null): Context {
   };
 }
 
-describe('Email Service and Remember Me Feature', () => {
+describe.skipIf(!process.env.DATABASE_URL)('Email Service and Remember Me Feature', () => {
   let testUser: any;
 
   beforeAll(async () => {

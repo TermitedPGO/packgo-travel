@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 
-describe("Unsplash API", () => {
+describe.skipIf(!process.env.UNSPLASH_ACCESS_KEY)("Unsplash API", () => {
   it("should validate Unsplash API credentials", async () => {
     const accessKey = process.env.UNSPLASH_ACCESS_KEY;
     

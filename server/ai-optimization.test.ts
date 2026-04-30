@@ -124,7 +124,7 @@ describe("P1: DetailsSkill combined schema structure", () => {
 // ═══════════════════════════════════════════════════════
 // P2: ClaudeAgent Prompt Caching Support
 // ═══════════════════════════════════════════════════════
-describe("P2: ClaudeAgent Prompt Caching interfaces", () => {
+describe.skipIf(!process.env.BUILT_IN_FORGE_API_KEY && !process.env.ANTHROPIC_API_KEY)("P2: ClaudeAgent Prompt Caching interfaces", () => {
   it("ClaudeResult should include cache stats fields", async () => {
     const { ClaudeAgent } = await import("./agents/claudeAgent");
     
