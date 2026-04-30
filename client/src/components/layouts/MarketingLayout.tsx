@@ -39,10 +39,7 @@ export default function MarketingLayout({
 
       <main className="flex-grow">
         <section
-          className={cn(
-            "relative h-[360px] md:h-[420px] flex items-center justify-center overflow-hidden",
-            heroBgImage ? "bg-foreground" : "bg-primary",
-          )}
+          className="relative h-[360px] md:h-[420px] flex items-center justify-center overflow-hidden bg-foreground"
           style={
             heroBgImage
               ? {
@@ -53,13 +50,9 @@ export default function MarketingLayout({
               : undefined
           }
         >
-          <div
-            className={cn(
-              "absolute inset-0",
-              heroBgImage ? "bg-black/55" : "bg-black/15",
-            )}
-            aria-hidden
-          />
+          {heroBgImage && (
+            <div className="absolute inset-0 bg-black/55" aria-hidden />
+          )}
 
           <div className="container relative z-10 text-center text-white px-4">
             <h1 className="font-serif text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight">

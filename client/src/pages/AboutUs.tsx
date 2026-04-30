@@ -47,10 +47,10 @@ export default function AboutUs() {
           { label: t('aboutUs.cstLabel'), value: 'CST #2166984', desc: t('aboutUs.cstDesc') },
           { label: t('aboutUs.consumerProtectionLabel'), value: t('aboutUs.tcrfParticipant'), desc: t('aboutUs.consumerProtectionDesc') },
         ].map((card) => (
-          <div key={card.label} className="rounded-xl border border-primary/15 bg-primary/5 p-5">
-            <p className="text-xs uppercase tracking-[0.18em] text-primary/80 mb-1.5">{card.label}</p>
+          <div key={card.label} className="rounded-xl border border-foreground/15 bg-white p-5">
+            <p className="text-xs uppercase tracking-[0.18em] text-foreground/55 mb-1.5">{card.label}</p>
             <p className="font-serif font-semibold text-foreground text-lg">{card.value}</p>
-            <p className="text-sm text-foreground/70 mt-1.5 leading-relaxed">{card.desc}</p>
+            <p className="text-sm text-foreground/65 mt-1.5 leading-relaxed">{card.desc}</p>
           </div>
         ))}
       </div>

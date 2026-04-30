@@ -48,7 +48,7 @@ export default function TermsOfService() {
       <Section h={t('termsOfService.fullTerms.s10h')} p={tArray('termsOfService.fullTerms.s10p')} />
       <Section h={t('termsOfService.fullTerms.s11h')} p={tArray('termsOfService.fullTerms.s11p')} />
 
-      <div className="not-prose mt-12 rounded-xl border border-primary/15 bg-primary/5 p-5 text-sm text-foreground/70 leading-relaxed">
+      <div className="not-prose mt-12 rounded-xl border border-foreground/15 bg-foreground/[0.02] p-5 text-sm text-foreground/70 leading-relaxed">
         <p>{t('termsOfService.fullTerms.dojFooter')}</p>
       </div>
     </MarketingLayout>

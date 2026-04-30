@@ -92,17 +92,17 @@ export default function Header() {
                 // Simple link (no dropdown)
                 <Link
                   href={group.href}
-                  className="flex items-center gap-1 px-4 py-2 text-[15px] font-medium text-gray-700 hover:text-primary transition-colors rounded-md hover:bg-gray-50"
+                  className="flex items-center gap-1 px-3 py-5 text-[15px] font-medium tracking-wide text-foreground/75 hover:text-foreground transition-colors border-b-2 border-transparent hover:border-foreground"
                 >
                   {t(group.labelKey)}
                 </Link>
               ) : (
                 // Dropdown trigger
                 <button
-                  className={`flex items-center gap-1 px-4 py-2 text-[15px] font-medium transition-colors rounded-md ${
+                  className={`flex items-center gap-1 px-3 py-5 text-[15px] font-medium tracking-wide transition-colors border-b-2 ${
                     openDropdown === group.labelKey
-                      ? "text-primary bg-red-50"
-                      : "text-gray-700 hover:text-primary hover:bg-gray-50"
+                      ? "text-foreground border-foreground"
+                      : "text-foreground/75 hover:text-foreground border-transparent hover:border-foreground"
                   }`}
                   onClick={() =>
                     setOpenDropdown(
@@ -121,19 +121,19 @@ export default function Header() {
 
               {/* Dropdown Panel */}
               {group.children && openDropdown === group.labelKey && (
-                <div className="absolute top-full left-0 mt-1 w-64 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-50">
+                <div className="absolute top-full left-0 mt-0 w-72 bg-white shadow-xl border border-foreground/10 py-2 z-50">
                   {group.children.map((item, idx) => (
                     <Link
                       key={`${item.href}-${idx}`}
                       href={item.href}
-                      className="flex flex-col px-4 py-3 hover:bg-gray-50 transition-colors group"
+                      className="flex flex-col px-5 py-3 hover:bg-foreground/5 transition-colors group border-l-2 border-transparent hover:border-foreground"
                       onClick={() => setOpenDropdown(null)}
                     >
-                      <span className="text-[14px] font-semibold text-gray-800 group-hover:text-primary transition-colors">
+                      <span className="text-[14px] font-semibold tracking-wide text-foreground transition-colors">
                         {t(item.labelKey)}
                       </span>
                       {item.descKey && (
-                        <span className="text-[12px] text-gray-500 mt-0.5">
+                        <span className="text-[12px] text-foreground/55 mt-0.5">
                           {t(item.descKey)}
                         </span>
                       )}

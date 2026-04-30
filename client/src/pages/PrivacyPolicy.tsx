@@ -96,7 +96,7 @@ export default function PrivacyPolicy() {
           <p>{t('privacyPolicy.fullPolicy.s12p')}</p>
         </Section>
 
-      <div className="not-prose mt-12 rounded-xl border border-primary/15 bg-primary/5 p-5 text-sm text-foreground/70 leading-relaxed">
+      <div className="not-prose mt-12 rounded-xl border border-foreground/15 bg-foreground/[0.02] p-5 text-sm text-foreground/70 leading-relaxed">
         <p>
           {t('privacyPolicy.fullPolicy.cppaPrefix')}
           <a
