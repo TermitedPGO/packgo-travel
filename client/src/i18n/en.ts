@@ -5372,7 +5372,7 @@ export const en = {
     secureSsl: 'Secure SSL encrypted payment',
     visaTypes: {
       L_tourist10yrTitle: 'China 10-Year Tourist Visa',
-      L_tourist10yrDesc: 'Exclusive to US passport holders. Valid for 10 years with multiple entries; up to 60-day stay per entry. Suitable for tourism, visiting family or friends.',
+      L_tourist10yrDesc: 'Exclusive to US passport holders. Valid for 10 years with multiple entries; standard 90-day stay per entry, with up to 180 days available for qualifying cases (family visits, long-term business, etc.). Suitable for tourism, visiting family or friends.',
     },
     entryTypes: {
       multiple_10y: '10-year multiple entry',

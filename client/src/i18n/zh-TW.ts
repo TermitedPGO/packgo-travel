@@ -5370,7 +5370,7 @@ export const zhTW = {
     secureSsl: '安全 SSL 加密付款',
     visaTypes: {
       L_tourist10yrTitle: '中國 10 年旅遊簽證',
-      L_tourist10yrDesc: '美國護照持有人專屬，10 年內可多次往返中國，每次最長停留 60 天。適合觀光、探親、探友。',
+      L_tourist10yrDesc: '美國護照持有人專屬，10 年內可多次往返中國，每次最長停留 90 天；如有特殊需求（探親、長期商務等）可協助辦理 180 天延長。適合觀光、探親、探友。',
     },
     entryTypes: {
       multiple_10y: '10 年多次入境',
