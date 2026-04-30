@@ -3,7 +3,7 @@
  *
  * Composites a brand-locked overlay onto an AI-generated background.
  * Pipeline:
- *   gpt-image-2 → background PNG (1024×1820)
+ *   gpt-image-2 → background PNG (1024×1792)
  *      ↓
  *   Sharp composite layers:
  *     - Bottom 35% gradient mask (for text legibility)
@@ -54,7 +54,7 @@ export interface PosterResult {
 }
 
 const POSTER_W = 1024;
-const POSTER_H = 1820;
+const POSTER_H = 1792;
 // PACK&GO brand teal #0D9488
 const BRAND_TEAL = "#0D9488";
 const BRAND_TEAL_DARK = "#0F766E";
@@ -187,7 +187,7 @@ export async function generatePoster(opts: PosterOptions): Promise<PosterResult>
   const prompt = buildPrompt(opts);
   const aiResult = await generateImage({
     prompt,
-    size: "1024x1820",
+    size: "1024x1792",
     quality: opts.quality || "medium",
     timeoutMs: 90_000,
   });

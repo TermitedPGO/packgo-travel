@@ -18,7 +18,7 @@ const MODEL_ID = "gpt-image-2";
 
 export interface GenerateOptions {
   prompt: string;
-  size?: "1024x1024" | "1024x1820" | "1820x1024" | "2048x2048";
+  size?: "1024x1024" | "1024x1792" | "1792x1024" | "2048x2048";
   quality?: "low" | "medium" | "high";
   /** Default 60s; set higher for high-quality requests. */
   timeoutMs?: number;
