@@ -2525,7 +2525,7 @@ export default function TourDetailPeony() {
       {/* Overview Section */}
       <section ref={sectionRefs.overview} id="overview" className="py-16 lg:py-24">
         <div className="max-w-5xl mx-auto px-6">
-          <h2 className="text-3xl md:text-4xl font-bold text-center mb-12" style={{ color: themeColor.primary }}>
+          <h2 className="text-3xl md:text-4xl font-serif font-bold tracking-tight text-center mb-12" style={{ color: themeColor.primary }}>
             {t('tourDetail.description')}
           </h2>
           
@@ -2556,23 +2556,14 @@ export default function TourDetailPeony() {
                 : 'md:grid-cols-2'
             }`}>
               {keyFeatures.map((feature: any, index: number) => {
-                // 為每個特色分配不同的圖示和顏色
-                const featureStyles = [
-                  { icon: Sailboat, color: '#0D7377', bgColor: '#E6F4F4' },
-                  { icon: TreePine, color: '#2E7D32', bgColor: '#E8F5E9' },
-                  { icon: Coffee, color: '#795548', bgColor: '#EFEBE9' },
-                  { icon: Mountain, color: '#5D4037', bgColor: '#D7CCC8' },
-                  { icon: Waves, color: '#0277BD', bgColor: '#E1F5FE' },
-                  { icon: Sunrise, color: '#F57C00', bgColor: '#FFF3E0' },
-                  { icon: Compass, color: '#7B1FA2', bgColor: '#F3E5F5' },
-                  { icon: Footprints, color: '#00695C', bgColor: '#E0F2F1' },
-                  { icon: Bike, color: '#1565C0', bgColor: '#E3F2FD' },
-                  { icon: Landmark, color: '#C62828', bgColor: '#FFEBEE' },
-                  { icon: UtensilsCrossed, color: '#EF6C00', bgColor: '#FFF8E1' },
-                  { icon: Wine, color: '#6A1B9A', bgColor: '#F3E5F5' },
+                // Round 79: per Jeff's B&W brand rule (tour photos exception only),
+                // dropped the 12-color rainbow icon palette. Visual variety now comes
+                // purely from the icon shape; styling stays neutral foreground/5.
+                const featureIcons = [
+                  Sailboat, TreePine, Coffee, Mountain, Waves, Sunrise,
+                  Compass, Footprints, Bike, Landmark, UtensilsCrossed, Wine,
                 ];
-                const style = featureStyles[index % featureStyles.length];
-                const IconComponent = style.icon;
+                const IconComponent = featureIcons[index % featureIcons.length];
                 
                 // 檢查 feature 是否有圖片
                 const featureImage = typeof feature !== 'string' ? (feature.image || feature.imageUrl || feature.photo) : null;
@@ -2622,11 +2613,8 @@ export default function TourDetailPeony() {
                         <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
                       </div>
                     ) : (
-                      <div 
-                        className="h-40 flex items-center justify-center transition-transform duration-300"
-                        style={{ backgroundColor: style.bgColor }}
-                      >
-                        <IconComponent className="h-16 w-16 transition-transform duration-300 group-hover:scale-110" style={{ color: style.color }} />
+                      <div className="h-40 flex items-center justify-center bg-foreground/[0.04] transition-transform duration-300">
+                        <IconComponent className="h-16 w-16 text-foreground/70 transition-transform duration-300 group-hover:scale-110" />
                       </div>
                     )}
                     {/* 文字區域 - 支援編輯 */}
@@ -2716,7 +2704,7 @@ export default function TourDetailPeony() {
       {/* Itinerary Section - Zigzag Layout */}
       <section ref={sectionRefs.itinerary} id="itinerary" className="py-16 lg:py-24 bg-gray-50">
         <div className="max-w-7xl mx-auto px-6">
-          <h2 className="text-3xl md:text-4xl font-bold text-center mb-4" style={{ color: themeColor.primary }}>
+          <h2 className="text-3xl md:text-4xl font-serif font-bold tracking-tight text-center mb-4" style={{ color: themeColor.primary }}>
             {t('tourDetail.itineraryHighlights')}
           </h2>
           <p className="text-lg text-gray-700 text-center mb-8">{t('tourDetail.dailyItineraryDesc')}</p>
@@ -2787,7 +2775,7 @@ export default function TourDetailPeony() {
       {/* Features Section */}
       <section ref={sectionRefs.features} id="features" className="py-16 lg:py-24">
         <div className="max-w-5xl mx-auto px-6">
-          <h2 className="text-3xl md:text-4xl font-bold text-center mb-4" style={{ color: themeColor.primary }}>
+          <h2 className="text-3xl md:text-4xl font-serif font-bold tracking-tight text-center mb-4" style={{ color: themeColor.primary }}>
             {t('tourDetail.upgradeOptions')}
           </h2>
           <p className="text-lg text-gray-700 text-center mb-12">{t('tourDetail.highlightsDesc')}</p>
@@ -2893,7 +2881,7 @@ export default function TourDetailPeony() {
       {hotels.length > 0 && (
         <section ref={sectionRefs.hotels} id="hotels" className="py-16 lg:py-24 bg-gray-50">
           <div className="max-w-7xl mx-auto px-6">
-            <h2 className="text-3xl md:text-4xl font-bold text-center mb-4" style={{ color: themeColor.primary }}>
+            <h2 className="text-3xl md:text-4xl font-serif font-bold tracking-tight text-center mb-4" style={{ color: themeColor.primary }}>
               {t('tourDetail.luxuryHotel')}
             </h2>
             <p className="text-lg text-gray-700 text-center mb-12">{t('tourDetail.hotelDesc')}</p>
@@ -2917,7 +2905,7 @@ export default function TourDetailPeony() {
       {/* Pricing Section */}
       <section ref={sectionRefs.pricing} id="pricing" className="py-16 lg:py-24">
         <div className="max-w-5xl mx-auto px-6">
-          <h2 className="text-3xl md:text-4xl font-bold text-center mb-4" style={{ color: themeColor.primary }}>
+          <h2 className="text-3xl md:text-4xl font-serif font-bold tracking-tight text-center mb-4" style={{ color: themeColor.primary }}>
             {t('tourDetail.departurePricing')}
           </h2>
           <p className="text-lg text-gray-700 text-center mb-12">{t('tourDetail.selectDepartureDate')}</p>
@@ -3015,7 +3003,7 @@ export default function TourDetailPeony() {
       {/* Notes Section */}
       <section ref={sectionRefs.notes} id="notes" className="py-16 lg:py-24 bg-gray-50">
         <div className="max-w-5xl mx-auto px-6">
-          <h2 className="text-3xl md:text-4xl font-bold text-center mb-4" style={{ color: themeColor.primary }}>
+          <h2 className="text-3xl md:text-4xl font-serif font-bold tracking-tight text-center mb-4" style={{ color: themeColor.primary }}>
             {t('tourDetail.notices')}
           </h2>
           <p className="text-lg text-gray-700 text-center mb-12">{t('tourDetail.noticesDesc')}</p>

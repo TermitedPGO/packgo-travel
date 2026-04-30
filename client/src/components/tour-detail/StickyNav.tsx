@@ -88,7 +88,7 @@ export const StickyNav: React.FC<StickyNavProps> = ({ tourTitle, colorTheme, tra
               <button
                 key={item.href}
                 onClick={() => scrollToSection(item.href)}
-                className="text-sm lg:text-base font-medium hover:underline transition-all"
+                className="text-sm lg:text-base font-medium tracking-wide hover:underline transition-all"
                 style={{
                   color: colorTheme.primary,
                 }}
