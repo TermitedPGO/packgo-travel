@@ -2,6 +2,8 @@ import { useState } from "react";
 import { trackVisaStart, trackVisaStep, trackVisaCheckout } from "@/lib/analytics";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import VisaPreCheck from "@/components/visa/VisaPreCheck";
+import VisaIdentitySelector from "@/components/visa/VisaIdentitySelector";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -286,39 +288,28 @@ export default function ChinaVisa() {
             </div>
           </section>
 
-          {/* Required Documents */}
+          {/* Pre-check (3 conditions per Jeff's SOP) */}
+          <VisaPreCheck />
+
+          {/* Identity selector with per-category document checklist (PDF SOP §02) */}
+          <VisaIdentitySelector />
+
+          {/* Process Steps */}
           <section className="py-16 border-b border-gray-200">
-            <div className="container max-w-5xl mx-auto px-4">
-              <div className="grid md:grid-cols-2 gap-12">
-                <div>
-                  <h2 className="text-2xl font-serif font-bold mb-6">
-                    {t("chinaVisaPage.requiredDocsTitle")}
-                  </h2>
-                  <ul className="space-y-3">
-                    {REQUIRED_DOC_KEYS.map((key, i) => (
-                      <li key={i} className="flex items-start gap-3">
-                        <CheckCircle className="h-5 w-5 text-green-600 mt-0.5 flex-shrink-0" />
-                        <span className="text-gray-700">{t(key)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <div>
-                  <h2 className="text-2xl font-serif font-bold mb-6">
-                    {t("chinaVisaPage.processTitle")}
-                  </h2>
-                  <ol className="space-y-4">
-                    {PROCESS_STEP_KEYS.map((key, i) => (
-                      <li key={i} className="flex items-start gap-4">
-                        <div className="w-8 h-8 bg-[#1A1A1A] text-white rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0">
-                          {i + 1}
-                        </div>
-                        <span className="text-gray-700 pt-1">{t(key)}</span>
-                      </li>
-                    ))}
-                  </ol>
-                </div>
-              </div>
+            <div className="container max-w-3xl mx-auto px-4">
+              <h2 className="text-2xl font-serif font-bold mb-8 text-center">
+                {t("chinaVisaPage.processTitle")}
+              </h2>
+              <ol className="space-y-4">
+                {PROCESS_STEP_KEYS.map((key, i) => (
+                  <li key={i} className="flex items-start gap-4">
+                    <div className="w-8 h-8 bg-foreground text-white rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0">
+                      {i + 1}
+                    </div>
+                    <span className="text-foreground/80 pt-1">{t(key)}</span>
+                  </li>
+                ))}
+              </ol>
             </div>
           </section>
 
