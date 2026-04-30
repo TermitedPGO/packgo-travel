@@ -24,77 +24,43 @@ export default function AboutUs() {
         title={t('aboutUs.title')}
         subtitle={t('aboutUs.subtitle')}
       >
-      <div className="space-y-6 text-gray-700 max-w-4xl">
-        <p className="text-lg">
-          {t('aboutUs.intro')}
-        </p>
+      <p className="lead">{t('aboutUs.intro')}</p>
 
-        <h2 className="text-2xl font-bold text-black mt-8">{t('aboutUs.mission.title')}</h2>
-        <p>
-          {t('aboutUs.mission.content')}
-        </p>
+      <h2>{t('aboutUs.mission.title')}</h2>
+      <p>{t('aboutUs.mission.content')}</p>
 
-        <h2 className="text-2xl font-bold text-black mt-8">{t('aboutUs.servicesTitle')}</h2>
-        <ul className="list-disc pl-6 space-y-2">
-          <li>{t('aboutUs.servicesList.customTours')}</li>
-          <li>{t('aboutUs.servicesList.visaServices')}</li>
-          <li>{t('aboutUs.servicesList.groupPackages')}</li>
-          <li>{t('aboutUs.servicesList.flightBooking')}</li>
-          <li>{t('aboutUs.servicesList.airportTransfer')}</li>
-          <li>{t('aboutUs.servicesList.hotelBooking')}</li>
-        </ul>
+      <h2>{t('aboutUs.servicesTitle')}</h2>
+      <ul>
+        <li>{t('aboutUs.servicesList.customTours')}</li>
+        <li>{t('aboutUs.servicesList.visaServices')}</li>
+        <li>{t('aboutUs.servicesList.groupPackages')}</li>
+        <li>{t('aboutUs.servicesList.flightBooking')}</li>
+        <li>{t('aboutUs.servicesList.airportTransfer')}</li>
+        <li>{t('aboutUs.servicesList.hotelBooking')}</li>
+      </ul>
 
-        <h2 className="text-2xl font-bold text-black mt-8">
-          {t('aboutUs.licencesTitle')}
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="rounded-xl border border-gray-200 bg-gray-50 p-5">
-            <p className="text-xs uppercase tracking-wider text-gray-500 mb-1">
-              {t('aboutUs.legalEntityLabel')}
-            </p>
-            <p className="font-semibold text-black">Pack & Go, LLC</p>
-            <p className="text-sm text-gray-600 mt-1">
-              {t('aboutUs.legalEntityDesc')}
-            </p>
+      <h2>{t('aboutUs.licencesTitle')}</h2>
+      <div className="not-prose grid grid-cols-1 md:grid-cols-2 gap-4 my-6">
+        {[
+          { label: t('aboutUs.legalEntityLabel'), value: 'Pack & Go, LLC', desc: t('aboutUs.legalEntityDesc') },
+          { label: t('aboutUs.cityLicenceLabel'), value: 'Newark #115594', desc: t('aboutUs.cityLicenceDesc') },
+          { label: t('aboutUs.cstLabel'), value: 'CST #2166984', desc: t('aboutUs.cstDesc') },
+          { label: t('aboutUs.consumerProtectionLabel'), value: t('aboutUs.tcrfParticipant'), desc: t('aboutUs.consumerProtectionDesc') },
+        ].map((card) => (
+          <div key={card.label} className="rounded-xl border border-primary/15 bg-primary/5 p-5">
+            <p className="text-xs uppercase tracking-[0.18em] text-primary/80 mb-1.5">{card.label}</p>
+            <p className="font-serif font-semibold text-foreground text-lg">{card.value}</p>
+            <p className="text-sm text-foreground/70 mt-1.5 leading-relaxed">{card.desc}</p>
           </div>
-          <div className="rounded-xl border border-gray-200 bg-gray-50 p-5">
-            <p className="text-xs uppercase tracking-wider text-gray-500 mb-1">
-              {t('aboutUs.cityLicenceLabel')}
-            </p>
-            <p className="font-semibold text-black">Newark #115594</p>
-            <p className="text-sm text-gray-600 mt-1">
-              {t('aboutUs.cityLicenceDesc')}
-            </p>
-          </div>
-          <div className="rounded-xl border border-gray-200 bg-gray-50 p-5">
-            <p className="text-xs uppercase tracking-wider text-gray-500 mb-1">
-              {t('aboutUs.cstLabel')}
-            </p>
-            <p className="font-semibold text-black">CST #2166984</p>
-            <p className="text-sm text-gray-600 mt-1">
-              {t('aboutUs.cstDesc')}
-            </p>
-          </div>
-          <div className="rounded-xl border border-gray-200 bg-gray-50 p-5">
-            <p className="text-xs uppercase tracking-wider text-gray-500 mb-1">
-              {t('aboutUs.consumerProtectionLabel')}
-            </p>
-            <p className="font-semibold text-black">
-              {t('aboutUs.tcrfParticipant')}
-            </p>
-            <p className="text-sm text-gray-600 mt-1">
-              {t('aboutUs.consumerProtectionDesc')}
-            </p>
-          </div>
-        </div>
-
-        <h2 className="text-2xl font-bold text-black mt-8">{t('aboutUs.contactTitle')}</h2>
-        <p>
-          <strong>{t('aboutUs.address')}：</strong>39055 Cedar Blvd #126, Newark, CA 94560, USA<br />
-          <strong>{t('aboutUs.phone')}：</strong>+1 (510) 634-2307<br />
-          <strong>{t('aboutUs.email')}：</strong>Jeffhsieh09@gmail.com
-        </p>
+        ))}
       </div>
+
+      <h2>{t('aboutUs.contactTitle')}</h2>
+      <p>
+        <strong>{t('aboutUs.address')}：</strong>39055 Cedar Blvd #126, Newark, CA 94560, USA<br />
+        <strong>{t('aboutUs.phone')}：</strong>+1 (510) 634-2307<br />
+        <strong>{t('aboutUs.email')}：</strong>Jeffhsieh09@gmail.com
+      </p>
       </MarketingLayout>
     </>
   );

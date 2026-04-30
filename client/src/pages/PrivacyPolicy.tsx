@@ -18,13 +18,13 @@ export default function PrivacyPolicy() {
 
   const Section = ({ h, children }: { h: string; children: React.ReactNode }) => (
     <>
-      <h2 className="text-2xl font-bold text-black mt-8">{h}</h2>
-      <div className="mt-3 space-y-3 leading-relaxed">{children}</div>
+      <h2>{h}</h2>
+      {children}
     </>
   );
 
   const List = ({ items }: { items: string[] }) => (
-    <ul className="list-disc pl-6 space-y-2">
+    <ul>
       {items.map((item, i) => (
         <li key={i}>{item}</li>
       ))}
@@ -36,18 +36,17 @@ export default function PrivacyPolicy() {
       title={t('privacyPolicy.fullPolicy.title')}
       subtitle={t('privacyPolicy.fullPolicy.subtitle')}
     >
-      <div className="space-y-4 text-gray-700 max-w-4xl">
-        <p className="text-sm text-gray-500">
-          {t('privacyPolicy.fullPolicy.effective')}: 2026-04-18
-        </p>
+      <p className="!text-sm !text-foreground/50 !mt-0">
+        {t('privacyPolicy.fullPolicy.effective')}: 2026-04-18
+      </p>
 
-        <p className="leading-relaxed">{t('privacyPolicy.fullPolicy.intro')}</p>
+      <p className="lead">{t('privacyPolicy.fullPolicy.intro')}</p>
 
         <Section h={t('privacyPolicy.fullPolicy.s1h')}>
           <p>{t('privacyPolicy.fullPolicy.s1intro')}</p>
           <List items={tArray('privacyPolicy.fullPolicy.s1list')} />
-          <p className="text-sm text-gray-600 italic">
-            {t('privacyPolicy.fullPolicy.s1note')}
+          <p>
+            <em>{t('privacyPolicy.fullPolicy.s1note')}</em>
           </p>
         </Section>
 
@@ -97,27 +96,26 @@ export default function PrivacyPolicy() {
           <p>{t('privacyPolicy.fullPolicy.s12p')}</p>
         </Section>
 
-        <div className="mt-12 rounded-xl border border-gray-200 bg-gray-50 p-4 text-xs text-gray-600">
-          <p>
-            {t('privacyPolicy.fullPolicy.cppaPrefix')}
-            <a
-              href="https://cppa.ca.gov"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline hover:text-black"
-            >
-              cppa.ca.gov
-            </a>
-            .
-          </p>
-          <p className="mt-2">
-            {t('privacyPolicy.seeAlsoPrefix')}
-            <Link href="/terms-of-service" className="underline hover:text-black">
-              {t('privacyPolicy.seeAlsoLink')}
-            </Link>
-            {t('privacyPolicy.seeAlsoSuffix')}
-          </p>
-        </div>
+      <div className="not-prose mt-12 rounded-xl border border-primary/15 bg-primary/5 p-5 text-sm text-foreground/70 leading-relaxed">
+        <p>
+          {t('privacyPolicy.fullPolicy.cppaPrefix')}
+          <a
+            href="https://cppa.ca.gov"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary hover:underline"
+          >
+            cppa.ca.gov
+          </a>
+          .
+        </p>
+        <p className="mt-2">
+          {t('privacyPolicy.seeAlsoPrefix')}
+          <Link href="/terms-of-service" className="text-primary hover:underline">
+            {t('privacyPolicy.seeAlsoLink')}
+          </Link>
+          {t('privacyPolicy.seeAlsoSuffix')}
+        </p>
       </div>
     </MarketingLayout>
   );

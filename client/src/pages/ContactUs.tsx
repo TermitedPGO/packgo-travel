@@ -100,7 +100,7 @@ export default function ContactUs() {
             <h3 className="text-lg font-bold text-gray-900 mb-5">{t('contactUs.contactInfo')}</h3>
             <div className="space-y-5">
               <div className="flex items-start gap-4">
-                <div className="bg-black rounded-lg p-2.5 shrink-0">
+                <div className="bg-primary rounded-lg p-2.5 shrink-0">
                   <MapPin className="h-5 w-5 text-white" />
                 </div>
                 <div>
@@ -111,7 +111,7 @@ export default function ContactUs() {
                 </div>
               </div>
               <div className="flex items-start gap-4">
-                <div className="bg-black rounded-lg p-2.5 shrink-0">
+                <div className="bg-primary rounded-lg p-2.5 shrink-0">
                   <Phone className="h-5 w-5 text-white" />
                 </div>
                 <div>
@@ -122,7 +122,7 @@ export default function ContactUs() {
                 </div>
               </div>
               <div className="flex items-start gap-4">
-                <div className="bg-black rounded-lg p-2.5 shrink-0">
+                <div className="bg-primary rounded-lg p-2.5 shrink-0">
                   <Mail className="h-5 w-5 text-white" />
                 </div>
                 <div>
@@ -133,7 +133,7 @@ export default function ContactUs() {
                 </div>
               </div>
               <div className="flex items-start gap-4">
-                <div className="bg-black rounded-lg p-2.5 shrink-0">
+                <div className="bg-primary rounded-lg p-2.5 shrink-0">
                   <Clock className="h-5 w-5 text-white" />
                 </div>
                 <div>

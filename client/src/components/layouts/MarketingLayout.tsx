@@ -80,7 +80,24 @@ export default function MarketingLayout({
 
         <section className="py-16 md:py-20">
           <div className="container">
-            <div className="max-w-4xl mx-auto prose prose-lg">{children}</div>
+            <div
+              className={[
+                "max-w-4xl mx-auto prose prose-lg",
+                // Brand typography: pulls hero's serif + teal accent into body
+                "prose-headings:font-serif prose-headings:text-foreground prose-headings:tracking-tight",
+                // h2: vertical teal bar that echoes the hero
+                "prose-h2:relative prose-h2:pl-4 prose-h2:mt-12 prose-h2:mb-4 prose-h2:font-bold",
+                "prose-h2:before:content-[''] prose-h2:before:absolute prose-h2:before:left-0",
+                "prose-h2:before:top-2 prose-h2:before:bottom-2 prose-h2:before:w-1 prose-h2:before:bg-primary prose-h2:before:rounded-full",
+                "prose-h3:font-serif",
+                "prose-p:text-foreground/80 prose-p:leading-relaxed",
+                "prose-strong:text-foreground prose-strong:font-semibold",
+                "prose-a:text-primary prose-a:no-underline hover:prose-a:underline",
+                "prose-li:text-foreground/80 prose-li:my-1",
+              ].join(" ")}
+            >
+              {children}
+            </div>
 
             {ctaText && ctaLink && (
               <div className="text-center mt-12">
