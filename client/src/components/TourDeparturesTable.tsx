@@ -118,6 +118,9 @@ export default function TourDeparturesTable({
                   <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                     {t("tourDeparturesTable.statusLabel")}
                   </th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    {t("tourDeparturesTable.seatsLabel")}
+                  </th>
                   <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                     {t("tourDeparturesTable.priceLabel")}
                   </th>
@@ -135,9 +138,13 @@ export default function TourDeparturesTable({
                       ? Number(dep.adultPrice)
                       : basePrice;
                   const currency = dep.currency || baseCurrency;
-                  const seatsLeft = dep.maxParticipants
-                    ? Number(dep.maxParticipants) - Number(dep.currentParticipants || 0)
-                    : null;
+                  // Round 79: schema fields are totalSlots/bookedSlots (NOT
+                  // maxParticipants/currentParticipants — that bug shipped from a copy-paste
+                  // from the tour entity, which uses different naming).
+                  const totalSlots = Number((dep as any).totalSlots ?? (dep as any).maxParticipants ?? 0);
+                  const bookedSlots = Number((dep as any).bookedSlots ?? (dep as any).currentParticipants ?? 0);
+                  const seatsLeft = totalSlots > 0 ? totalSlots - bookedSlots : null;
+                  const isConfirmed = dep.status === "confirmed";
 
                   return (
                     <tr key={dep.id} className="hover:bg-gray-50">
@@ -165,11 +172,32 @@ export default function TourDeparturesTable({
                         >
                           {status.label}
                         </span>
-                        {seatsLeft !== null && seatsLeft > 0 && seatsLeft <= 3 && !isFull && (
-                          <div className="mt-1 text-xs text-amber-600 flex items-center gap-1">
-                            <Users className="h-3 w-3" />
-                            {t("tourDeparturesTable.seatsLeft", { n: seatsLeft, s: seatsLeft > 1 ? "s" : "" })}
+                        {isConfirmed && (
+                          <div className="mt-1 text-xs text-primary flex items-center gap-1 font-medium">
+                            ✓ {t("tourDeparturesTable.groupConfirmed")}
                           </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {totalSlots > 0 ? (
+                          <div className="text-sm">
+                            <div className="font-semibold text-foreground">
+                              {bookedSlots} / {totalSlots}
+                            </div>
+                            {seatsLeft !== null && seatsLeft > 0 && seatsLeft <= 3 && !isFull && (
+                              <div className="mt-0.5 text-xs text-amber-600 flex items-center gap-1">
+                                <Users className="h-3 w-3" />
+                                {t("tourDeparturesTable.seatsLeft", { n: seatsLeft, s: seatsLeft > 1 ? "s" : "" })}
+                              </div>
+                            )}
+                            {seatsLeft !== null && seatsLeft > 3 && !isFull && (
+                              <div className="mt-0.5 text-xs text-foreground/55">
+                                {t("tourDeparturesTable.seatsAvailable", { n: seatsLeft })}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-foreground/30 text-xs">—</span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-right">

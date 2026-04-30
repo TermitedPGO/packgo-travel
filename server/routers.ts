@@ -2857,8 +2857,10 @@ export const appRouter = router({
             status: d.status, // 'open' | 'confirmed' | 'full' | 'waitlist'
             adultPrice: d.adultPrice ?? null,
             currency: d.currency ?? null,
-            currentParticipants: d.currentParticipants ?? 0,
-            maxParticipants: d.maxParticipants ?? null,
+            // Round 79: schema uses totalSlots/bookedSlots, not maxParticipants/currentParticipants.
+            // Old code mapped non-existent fields → frontends saw undefined and seat-count UI never rendered.
+            bookedSlots: d.bookedSlots ?? 0,
+            totalSlots: d.totalSlots ?? null,
           }));
         return upcoming;
       }),

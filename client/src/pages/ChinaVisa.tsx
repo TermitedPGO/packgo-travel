@@ -24,23 +24,20 @@ import {
 } from "lucide-react";
 
 // ── 簽證類型資料 ──────────────────────────────────────────────
+// Round 79: Pack&Go only handles the 10-year multiple-entry tourist visa
+// (L tourist, multiple_12m × 10y per CN consulate policy for US passport
+// holders). Other visa categories (M business, Q family, S dependent,
+// Z work, X student) are out of scope.
 const VISA_TYPES = [
-  { value: "L_tourist", titleKey: "chinaVisaPage.visaTypes.L_touristTitle", descKey: "chinaVisaPage.visaTypes.L_touristDesc" },
-  { value: "M_business", titleKey: "chinaVisaPage.visaTypes.M_businessTitle", descKey: "chinaVisaPage.visaTypes.M_businessDesc" },
-  { value: "Q1_family_long", titleKey: "chinaVisaPage.visaTypes.Q1_family_longTitle", descKey: "chinaVisaPage.visaTypes.Q1_family_longDesc" },
-  { value: "Q2_family_short", titleKey: "chinaVisaPage.visaTypes.Q2_family_shortTitle", descKey: "chinaVisaPage.visaTypes.Q2_family_shortDesc" },
-  { value: "S1_dependent_long", titleKey: "chinaVisaPage.visaTypes.S1_dependent_longTitle", descKey: "chinaVisaPage.visaTypes.S1_dependent_longDesc" },
-  { value: "S2_dependent_short", titleKey: "chinaVisaPage.visaTypes.S2_dependent_shortTitle", descKey: "chinaVisaPage.visaTypes.S2_dependent_shortDesc" },
-  { value: "Z_work", titleKey: "chinaVisaPage.visaTypes.Z_workTitle", descKey: "chinaVisaPage.visaTypes.Z_workDesc" },
-  { value: "X1_study_long", titleKey: "chinaVisaPage.visaTypes.X1_study_longTitle", descKey: "chinaVisaPage.visaTypes.X1_study_longDesc" },
-  { value: "X2_study_short", titleKey: "chinaVisaPage.visaTypes.X2_study_shortTitle", descKey: "chinaVisaPage.visaTypes.X2_study_shortDesc" },
+  {
+    value: "L_tourist_10yr",
+    titleKey: "chinaVisaPage.visaTypes.L_tourist10yrTitle",
+    descKey: "chinaVisaPage.visaTypes.L_tourist10yrDesc",
+  },
 ];
 
 const ENTRY_TYPES = [
-  { value: "single", labelKey: "chinaVisaPage.entryTypes.single" },
-  { value: "double", labelKey: "chinaVisaPage.entryTypes.double" },
-  { value: "multiple_6m", labelKey: "chinaVisaPage.entryTypes.multiple_6m" },
-  { value: "multiple_12m", labelKey: "chinaVisaPage.entryTypes.multiple_12m" },
+  { value: "multiple_10y", labelKey: "chinaVisaPage.entryTypes.multiple_10y" },
 ];
 
 const REQUIRED_DOC_KEYS = [
@@ -78,8 +75,8 @@ export default function ChinaVisa() {
   // Form state
   const [form, setForm] = useState({
     // Step 1: Visa type
-    visaType: "L_tourist",
-    entryType: "single",
+    visaType: "L_tourist_10yr",
+    entryType: "multiple_10y",
     travelDate: "",
     travelPurpose: "",
     groupSize: 1,
@@ -414,52 +411,24 @@ export default function ChinaVisa() {
                   </h2>
 
                   <div className="space-y-6">
+                    {/* Round 79: only one product (10-year tourist visa). Show as a
+                        single confirmed card instead of a dropdown — no choice to make. */}
                     <div>
                       <Label className="text-sm font-bold mb-2 block">
                         {t("chinaVisaPage.visaTypeLabel")}
                       </Label>
-                      <div className="grid gap-2">
-                        {VISA_TYPES.map(vt => (
-                          <button
-                            key={vt.value}
-                            onClick={() => updateForm("visaType", vt.value)}
-                            className={`text-left p-3 border-2 rounded-lg transition-colors ${
-                              form.visaType === vt.value
-                                ? "border-black bg-black text-white"
-                                : "border-gray-200 hover:border-gray-400"
-                            }`}
-                          >
-                            <div className="font-medium text-sm">{t(vt.titleKey)}</div>
-                            <div className={`text-xs mt-0.5 ${form.visaType === vt.value ? "text-white/70" : "text-gray-500"}`}>
-                              {t(vt.descKey)}
-                            </div>
-                          </button>
-                        ))}
+                      <div className="rounded-lg border-2 border-foreground bg-foreground text-white p-4">
+                        <div className="font-serif font-bold text-base">
+                          {t(VISA_TYPES[0].titleKey)}
+                        </div>
+                        <div className="text-sm mt-1 text-white/80 leading-relaxed">
+                          {t(VISA_TYPES[0].descKey)}
+                        </div>
+                        <div className="mt-3 inline-flex items-center gap-2 text-xs tracking-widest uppercase text-white/60">
+                          <span>{t(ENTRY_TYPES[0].labelKey)}</span>
+                        </div>
                       </div>
                     </div>
-
-                    <div>
-                      <Label className="text-sm font-bold mb-2 block">
-                        {t("chinaVisaPage.entryTypeLabel")}
-                      </Label>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                        {ENTRY_TYPES.map(et => (
-                          <button
-                            key={et.value}
-                            onClick={() => updateForm("entryType", et.value)}
-                            className={`p-3 border-2 rounded-lg text-sm font-medium transition-colors ${
-                              form.entryType === et.value
-                                ? "border-black bg-black text-white"
-                                : "border-gray-200 hover:border-gray-400"
-                            }`}
-                          >
-                            {t(et.labelKey)}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Processing speed removed — standard 10-15 business days */}
 
                     <div>
                       <Label className="text-sm font-bold mb-2 block">
