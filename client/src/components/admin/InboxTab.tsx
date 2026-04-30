@@ -44,7 +44,7 @@ export default function InboxTab({ onNavigate }: Props = {}) {
   const [filter, setFilter] = useState<Channel>("all");
 
   const { data: inquiries, isLoading: l1 } = trpc.inquiries.list.useQuery();
-  const { data: pendingWechat, isLoading: l2 } = trpc.wechatAssist.listPending.useQuery({ limit: 50 });
+  const { data: pendingWechat, isLoading: l2 } = trpc.wechatAssist.listPending.useQuery();
   const { data: pendingQuotes, isLoading: l3 } = trpc.aiQuotes.adminList.useQuery({
     status: "generated",
     limit: 50,

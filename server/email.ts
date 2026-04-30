@@ -673,26 +673,27 @@ ${data.specialRequests ? `特殊需求：${data.specialRequests}\n\n` : ""}${dat
 PACK&GO 旅行社 — CST #2166984
 ${BASE_URL}`;
 
-  const html = wrapInBrandTemplate(`
+  const bodyHtml = `
     <h2 style="color:#0d9488; margin-bottom: 16px;">${subject}</h2>
     <p>${isEN ? `Hello <strong>${data.supplierName || "Supplier"}</strong>,` : `${data.supplierName || "供應商"} 您好：`}</p>
     <p>${isEN ? "PACK&GO Travel has confirmed a new paid booking. Please confirm availability and reply." : "PACK&GO 旅行社已收到新訂單，請確認接團安排並回覆。"}</p>
     ${emailInfoTable([
-      [isEN ? "Booking ID" : "訂單編號", `#${data.bookingId}`],
-      [isEN ? "Tour" : "行程", data.tourTitle],
-      [isEN ? "Departure" : "出發日", data.departureDate],
-      ...(data.returnDate ? [[isEN ? "Return" : "回程日", data.returnDate]] : []),
-      [isEN ? "Adults" : "成人", String(data.numberOfAdults)],
-      ...(data.numberOfChildren ? [[isEN ? "Children" : "兒童", String(data.numberOfChildren)]] : []),
-      ...(data.numberOfInfants ? [[isEN ? "Infants" : "嬰兒", String(data.numberOfInfants)]] : []),
-      [isEN ? "Customer" : "客戶", data.customerName],
-      ...(data.customerPhone ? [[isEN ? "Phone" : "電話", data.customerPhone]] : []),
-      [isEN ? "Email" : "Email", data.customerEmail],
-    ] as [string, string][])}
+      { label: isEN ? "Booking ID" : "訂單編號", value: `#${data.bookingId}` },
+      { label: isEN ? "Tour" : "行程", value: data.tourTitle },
+      { label: isEN ? "Departure" : "出發日", value: data.departureDate },
+      ...(data.returnDate ? [{ label: isEN ? "Return" : "回程日", value: data.returnDate }] : []),
+      { label: isEN ? "Adults" : "成人", value: String(data.numberOfAdults) },
+      ...(data.numberOfChildren ? [{ label: isEN ? "Children" : "兒童", value: String(data.numberOfChildren) }] : []),
+      ...(data.numberOfInfants ? [{ label: isEN ? "Infants" : "嬰兒", value: String(data.numberOfInfants) }] : []),
+      { label: isEN ? "Customer" : "客戶", value: data.customerName },
+      ...(data.customerPhone ? [{ label: isEN ? "Phone" : "電話", value: data.customerPhone }] : []),
+      { label: isEN ? "Email" : "Email", value: data.customerEmail },
+    ])}
     ${data.specialRequests ? emailHighlightBox(`<strong>${isEN ? "Special requests" : "特殊需求"}:</strong> ${data.specialRequests}`) : ""}
     ${data.supplierNotes ? `<p style="font-size:13px; color:#666;"><em>${isEN ? "Internal notes" : "內部備註"}：${data.supplierNotes}</em></p>` : ""}
     <p style="margin-top:24px;">${isEN ? "Please reply to confirm. Thank you." : "請回覆此 email 確認接團安排，謝謝。"}</p>
-  `);
+  `;
+  const html = wrapInBrandTemplate({ title: subject, bodyHtml });
 
   const smtp = getTransporter();
   if (!smtp) {
@@ -755,13 +756,13 @@ export async function sendQuoteFollowUpEmail(data: QuoteFollowUpData) {
   const copy = stageCopy[data.stage];
   const subject = isEN ? copy.subjectEn : copy.subjectZh;
   const text = isEN ? copy.bodyEn : copy.bodyZh;
-  const html = wrapInBrandTemplate(
+  const bodyHtml =
     `<p>${(isEN ? copy.bodyEn : copy.bodyZh).replace(/\n\n/g, "</p><p>").replace(/\n/g, "<br>")}</p>` +
-      (data.pdfUrl
-        ? `<div style="margin: 24px 0;">${emailButton(isEN ? "View itinerary" : "查看行程建議", data.pdfUrl)}</div>`
-        : "") +
-      (data.tripRecap ? `<p style="font-size:13px;color:#666;"><em>${data.tripRecap}</em></p>` : "")
-  );
+    (data.pdfUrl
+      ? `<div style="margin: 24px 0;">${emailButton(isEN ? "View itinerary" : "查看行程建議", data.pdfUrl)}</div>`
+      : "") +
+    (data.tripRecap ? `<p style="font-size:13px;color:#666;"><em>${data.tripRecap}</em></p>` : "");
+  const html = wrapInBrandTemplate({ title: subject, bodyHtml });
 
   const smtp = getTransporter();
   if (!smtp) {
@@ -811,14 +812,15 @@ export async function sendReviewRequestEmail(data: ReviewRequestData) {
   if (data.googleReviewUrl) buttons.push(emailButton(isEN ? "Review on Google" : "在 Google 留評價", data.googleReviewUrl));
   if (data.yelpReviewUrl) buttons.push(emailButton(isEN ? "Review on Yelp" : "在 Yelp 留評價", data.yelpReviewUrl));
 
-  const html = wrapInBrandTemplate(`
+  const bodyHtml = `
     <h2 style="color:#0d9488; margin-bottom: 16px;">${subject}</h2>
     <p>${text.split("\n\n")[0]}</p>
     <p>${text.split("\n\n")[1]}</p>
     ${buttons.length > 0 ? `<div style="margin: 20px 0; display: flex; gap: 12px; flex-wrap: wrap;">${buttons.join("")}</div>` : ""}
     ${emailHighlightBox(`<strong>${isEN ? "Thank-you bonus" : "感謝獎勵"}:</strong> ${isEN ? "5% off your next trip — code REVIEW5" : "下次訂團 5% 優惠，代碼 REVIEW5"}`)}
     <p style="font-size:12px; color:#999; margin-top:24px;">PACK&GO Travel · CST #2166984 · +1 (510) 634-2307</p>
-  `);
+  `;
+  const html = wrapInBrandTemplate({ title: subject, bodyHtml });
 
   const smtp = getTransporter();
   if (!smtp) {
@@ -871,7 +873,7 @@ export async function sendAbandonmentRecoveryEmail(data: AbandonmentRecoveryData
     ? `Hello ${data.customerName},\n\nWe noticed you started booking ${data.tourTitle} (departing ${data.departureDate}) but didn't complete payment.\n\nYour seat is reserved for 24 more hours. Total: ${priceStr}\n\nUse code ${code} at checkout for 5% off.\n\n${BASE_URL}/bookings/${data.bookingId}\n\nQuestions? Reply or call +1 (510) 634-2307.\n\n— PACK&GO Travel`
     : `親愛的 ${data.customerName} 您好：\n\n您剛才開始預訂「${data.tourTitle}」（出發日 ${data.departureDate}），但似乎還沒完成付款。\n\n您的座位我們已為您保留 24 小時。總金額：${priceStr}\n\n結帳時使用優惠碼 ${code}，享 5% 折扣。\n\n${BASE_URL}/bookings/${data.bookingId}\n\n有任何問題？回覆此 email 或撥打 +1 (510) 634-2307\n\n— PACK&GO 旅行社`;
 
-  const html = wrapInBrandTemplate(`
+  const bodyHtml = `
     <h2 style="color:#0d9488; margin-bottom: 16px;">${isEN ? "Your spot is still waiting" : "您的座位仍為您保留中"}</h2>
     <p>${isEN ? `Hello <strong>${data.customerName}</strong>,` : `親愛的 <strong>${data.customerName}</strong> 您好：`}</p>
     <p>${
@@ -883,7 +885,8 @@ export async function sendAbandonmentRecoveryEmail(data: AbandonmentRecoveryData
     <p>${isEN ? `Use code <strong style="font-family: monospace; padding: 2px 6px; background: #fef3c7; border-radius: 4px;">${code}</strong> at checkout for <strong>5% off</strong>.` : `結帳時使用優惠碼 <strong style="font-family: monospace; padding: 2px 6px; background: #fef3c7; border-radius: 4px;">${code}</strong>，享 <strong>5% 折扣</strong>。`}</p>
     <div style="margin: 24px 0;">${emailButton(isEN ? "Complete booking" : "繼續完成預訂", `${BASE_URL}/bookings/${data.bookingId}`)}</div>
     <p style="font-size:13px; color:#6b7280;">${isEN ? "Questions? Reply this email or call" : "有任何問題？回覆此 email 或撥打"} <a href="tel:+15106342307" style="color: #0d9488;">+1 (510) 634-2307</a></p>
-  `);
+  `;
+  const html = wrapInBrandTemplate({ title: subject, bodyHtml });
 
   const smtp = getTransporter();
   if (!smtp) {

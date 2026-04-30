@@ -1,5 +1,5 @@
 import { trpc } from "@/lib/trpc";
-import { Plane, ShoppingCart, MessageSquare, DollarSign, ArrowRight, AlertCircle, CheckCircle2, Clock } from "lucide-react";
+import { Plane, ShoppingCart, MessageSquare, DollarSign, ArrowRight, AlertCircle, CheckCircle2, Clock, TrendingUp } from "lucide-react";
 import { useLocale } from "@/contexts/LocaleContext";
 import DailyBriefingCard from "./DailyBriefingCard";
 import BookingRiskCard from "./BookingRiskCard";

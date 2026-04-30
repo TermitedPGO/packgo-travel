@@ -224,11 +224,28 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
       // FIRST paid event (deposit OR full) — skip on balance to avoid duplicates.
       if (paymentType !== "balance" && (tour as any).supplierEmail) {
         try {
-          const departure = booking.departureDate
-            ? new Date(booking.departureDate).toLocaleDateString("zh-TW")
+          // bookings stores only departureId; dates live on tourDepartures
+          const drizzleDb = await db.getDb();
+          let depDate: Date | null = null;
+          let retDate: Date | null = null;
+          if (drizzleDb) {
+            const { tourDepartures } = await import("../../drizzle/schema");
+            const { eq } = await import("drizzle-orm");
+            const [dep] = await drizzleDb
+              .select()
+              .from(tourDepartures)
+              .where(eq(tourDepartures.id, booking.departureId))
+              .limit(1);
+            if (dep) {
+              depDate = dep.departureDate;
+              retDate = dep.returnDate;
+            }
+          }
+          const departure = depDate
+            ? new Date(depDate).toLocaleDateString("zh-TW")
             : "TBD";
-          const returnDate = booking.endDate
-            ? new Date(booking.endDate).toLocaleDateString("zh-TW")
+          const returnDate = retDate
+            ? new Date(retDate).toLocaleDateString("zh-TW")
             : undefined;
           await sendSupplierNotificationEmail({
             supplierEmail: (tour as any).supplierEmail,

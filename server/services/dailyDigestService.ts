@@ -427,7 +427,7 @@ export async function sendDailyDigestEmail(
       to: recipient,
       subject,
       text: textParts.join("\n"),
-      html: wrapInBrandTemplate(htmlBody),
+      html: wrapInBrandTemplate({ title: subject, bodyHtml: htmlBody }),
     });
     console.log(`[DailyDigest] Sent to ${recipient}: ${totalActions} actions, ${digest.newQuotesCount} quotes, ${digest.newBookingsCount} bookings`);
     return true;

@@ -21,9 +21,10 @@ export function useTranslation() {
     targetLang?: Language
   ): Promise<string> => {
     const target = targetLang || language;
-    
-    // 如果是繁體中文，直接返回原文
-    if (target === 'zh-TW') {
+
+    // Translation only supports en (zh-TW is the source). ja/ko are valid
+    // i18n locales elsewhere but fall back to source until a translator is wired up.
+    if (target !== 'en') {
       return text;
     }
 
@@ -59,9 +60,8 @@ export function useTranslation() {
     targetLang?: Language
   ): Promise<string[]> => {
     const target = targetLang || language;
-    
-    // 如果是繁體中文，直接返回原文
-    if (target === 'zh-TW') {
+
+    if (target !== 'en') {
       return texts;
     }
 

@@ -32,7 +32,7 @@ export default function DailyBriefingCard({ onNavigate }: Props) {
   const displayName = user?.name || (user?.email || "").split("@")[0] || "Admin";
 
   // Pending WeChat drafts (status=ready_review)
-  const { data: pendingWechat } = trpc.wechatAssist.listPending.useQuery({ limit: 50 });
+  const { data: pendingWechat } = trpc.wechatAssist.listPending.useQuery();
   // New AI quotes (status=generated, last 7 days)
   const { data: pendingQuotes } = trpc.aiQuotes.adminList.useQuery({
     status: "generated",

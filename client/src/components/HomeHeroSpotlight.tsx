@@ -136,7 +136,7 @@ export default function HomeHeroSpotlight() {
               {/* v78j: split title at pipe; skip first segment if it's a short
                   marketing prefix (< 6 chars, no digits/天/夜). */}
               {(() => {
-                const segs = (titleField || "").split(/[|｜]/).map(s => s.trim()).filter(Boolean);
+                const segs = (titleField || "").split(/[|｜]/).map((s: string) => s.trim()).filter(Boolean);
                 const skipFirst = segs.length > 1 && segs[0].length < 6 && !/[0-9]|day|night|天|夜/i.test(segs[0]);
                 return segs[skipFirst ? 1 : 0] || titleField;
               })()}

@@ -39,9 +39,7 @@ export default function WechatAssistTab() {
   const [composeFrom, setComposeFrom] = useState("");
 
   const utils = trpc.useUtils();
-  const { data: messages, isLoading } = trpc.wechatAssist.listPending.useQuery({
-    limit: 100,
-  });
+  const { data: messages, isLoading } = trpc.wechatAssist.listPending.useQuery();
 
   const selected = messages?.find((m: any) => m.id === selectedId);
 
@@ -113,7 +111,7 @@ export default function WechatAssistTab() {
           <div className="max-h-[600px] overflow-y-auto">
             {isLoading && (
               <div className="p-4">
-                <LoadingRow colSpan={1} />
+                <LoadingRow />
               </div>
             )}
             {!isLoading && (!messages || messages.length === 0) && (

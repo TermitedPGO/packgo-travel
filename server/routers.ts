@@ -6190,8 +6190,8 @@ export const appRouter = router({
      */
     rerunAllTourTranslations: adminProcedure.mutation(async ({ ctx }) => {
       const { redis } = await import("./redis");
-      const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+      const drizzleDb = await db.getDb();
+      if (!drizzleDb) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
 
       // 1. Flush all translation:* cache keys (forces fresh LLM calls)
       let flushedCount = 0;
@@ -6214,14 +6214,14 @@ export const appRouter = router({
       // 2. Delete existing translation rows for active tours so the worker re-saves fresh ones
       const { tours, translations } = await import("../drizzle/schema");
       const { eq, and, inArray } = await import("drizzle-orm");
-      const activeTours = await db
+      const activeTours = await drizzleDb
         .select({ id: tours.id })
         .from(tours)
         .where(eq(tours.status, "active" as any));
       const ids = activeTours.map((t: any) => t.id);
       let deleted = 0;
       if (ids.length > 0) {
-        const r = await db
+        const r = await drizzleDb
           .delete(translations)
           .where(and(eq(translations.entityType, "tour"), inArray(translations.entityId, ids)));
         deleted = (r as any).affectedRows ?? 0;

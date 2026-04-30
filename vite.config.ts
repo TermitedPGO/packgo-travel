@@ -3,7 +3,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import fs from "node:fs";
 import path from "node:path";
-import { defineConfig, type Plugin, type ViteDevServer } from "vite";
+import { defineConfig, type Plugin, type PluginOption, type ViteDevServer } from "vite";
 
 // vite-plugin-manus-runtime was removed during Fly.io migration.
 // If you ever need the Manus dev bridge back, re-add the package and
@@ -155,7 +155,7 @@ function vitePluginManusDebugCollector(): Plugin {
   };
 }
 
-const plugins: Plugin[] = [
+const plugins: PluginOption[] = [
   react(),
   tailwindcss(),
   jsxLocPlugin(),

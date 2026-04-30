@@ -236,7 +236,7 @@ export const locationMapping: Record<string, string> = {
   '馬尼拉': 'Manila',
   '長灘島': 'Boracay',
   '巴拉望': 'Palawan',
-  '科隆': 'Coron',  // Philippines (also Germany — handled separately)
+  '科隆島': 'Coron',  // Philippines (bare 科隆 maps to Cologne, Germany — line 174)
   '愛妮島': 'El Nido',
 
   // Indonesia
