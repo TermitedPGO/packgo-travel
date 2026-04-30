@@ -263,6 +263,114 @@ function validatePrice(price: number | undefined): number {
   return price;
 }
 
+// ============================================================
+// Capacity (人數) extraction — Round 79: Jeff flagged AI 人數抓取不夠精準
+// Same pattern as price: regex strategies + validation + fallback
+// ============================================================
+
+/**
+ * Strategy A: max-capacity patterns (最多/上限/不超過 X 人)
+ */
+function strategyA_maxKeyword(rawText: string): number | undefined {
+  const patterns = [
+    /(?:最多|上限|不超過|至多|最高|每團最多)\s*(\d{1,3})\s*(?:人|位)/g,
+    /(\d{1,3})\s*(?:人|位)\s*(?:以下|為限|限定|為上限)/g,
+    /每團\s*(\d{1,3})\s*(?:人|位)/g,
+    /團體\s*(\d{1,3})\s*(?:人|位)/g,
+    /(?:max|maximum)\s*(\d{1,3})\s*(?:people|pax|persons?)/gi,
+  ];
+  for (const p of patterns) {
+    const re = new RegExp(p.source, p.flags);
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(rawText)) !== null) {
+      const n = parseInt(m[1]);
+      if (n >= 4 && n <= 200) return n;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Strategy B: min-capacity patterns (最少/成團/X 人成行)
+ */
+function strategyB_minKeyword(rawText: string): number | undefined {
+  const patterns = [
+    /(?:最少|至少|每團最少|最低|起算|起跳)\s*(\d{1,3})\s*(?:人|位)/g,
+    /(\d{1,3})\s*(?:人|位)\s*(?:成行|成團|起行|起跳|出團|以上|起算)/g,
+    /(?:min|minimum)\s*(\d{1,3})\s*(?:people|pax|persons?)/gi,
+  ];
+  for (const p of patterns) {
+    const re = new RegExp(p.source, p.flags);
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(rawText)) !== null) {
+      const n = parseInt(m[1]);
+      if (n >= 1 && n <= 100) return n;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Strategy C: range patterns (X-Y 人 / X~Y 人 / X 至 Y 人)
+ */
+function strategyC_range(rawText: string): { min?: number; max?: number } {
+  const patterns = [
+    /(\d{1,3})\s*[-~–]\s*(\d{1,3})\s*(?:人|位)/g,
+    /(\d{1,3})\s*至\s*(\d{1,3})\s*(?:人|位)/g,
+  ];
+  for (const p of patterns) {
+    const re = new RegExp(p.source, p.flags);
+    const m = re.exec(rawText);
+    if (m) {
+      const lo = parseInt(m[1]);
+      const hi = parseInt(m[2]);
+      if (lo >= 1 && hi >= lo && hi <= 200) return { min: lo, max: hi };
+    }
+  }
+  return {};
+}
+
+/**
+ * Validate capacity against sane group-tour bounds, swap if reversed.
+ */
+function validateCapacity(cap: { maxParticipants?: number; minParticipants?: number }): {
+  maxParticipants: number;
+  minParticipants?: number;
+} {
+  let max = cap.maxParticipants ?? 0;
+  let min = cap.minParticipants;
+
+  // Sanity bounds
+  if (max < 0 || max > 200) max = 0;
+  if (min !== undefined && (min < 0 || min > 200)) min = undefined;
+
+  // Reversed range — swap
+  if (min !== undefined && max > 0 && min > max) {
+    [min, max] = [max, min];
+  }
+
+  return { maxParticipants: max, minParticipants: min };
+}
+
+/**
+ * Capacity extraction with strategy chain — used as Vision fallback or text-only path.
+ */
+export function extractCapacityFromText(rawText: string): {
+  maxParticipants: number;
+  minParticipants?: number;
+} {
+  // Range first (gives both at once)
+  const range = strategyC_range(rawText);
+  const max = strategyA_maxKeyword(rawText) ?? range.max;
+  const min = strategyB_minKeyword(rawText) ?? range.min;
+
+  if (max !== undefined || min !== undefined) {
+    console.log(`[DateExtractor] Capacity from text: max=${max}, min=${min}`);
+  }
+
+  return validateCapacity({ maxParticipants: max ?? 0, minParticipants: min });
+}
+
 /**
  * 從 rawText 用正則表達式抽取價格（增強版 fallback，整合 5 策略 chain）
  * 支援多種格式：NT$45,800、45800元、成人 45,800、大人 45800 等
@@ -456,7 +564,7 @@ export async function extractTourMeta(
     const textPricing = extractPriceFromText(rawText, priceHints);
     return {
       departureDates: textDates,
-      capacity: { maxParticipants: 0 },
+      capacity: extractCapacityFromText(rawText),
       pricing: {
         adultPrice: textPricing.adultPrice || 0,
         childWithBedPrice: textPricing.childWithBedPrice,
@@ -474,9 +582,17 @@ export async function extractTourMeta(
   const prompt = `你是一個旅遊網站資料抽取專家。請分析這個旅遊行程網頁截圖和文字，抽取以下資訊：
 
 1. 所有可選的出發日期（格式 YYYY-MM-DD）及各日期的狀態
-2. 每團人數限制
+2. 每團人數限制（最多 maxParticipants / 最少 minParticipants）
 3. 價格分級（成人、小孩佔床、小孩不佔床、嬰兒）
 4. 行程代碼（如果有）
+
+【人數抽取規則 — 仔細區分 max vs min】：
+- 「最多 32 人 / 上限 32 人 / 不超過 32 人 / 32 人為限」→ maxParticipants: 32
+- 「最少 16 人 / 至少 16 人成團 / 16 人成行 / 16 人起算」→ minParticipants: 16
+- 「16-32 人 / 16~32 人 / 16 至 32 人」→ minParticipants: 16, maxParticipants: 32
+- 「2 人成行」→ minParticipants: 2（這是最低成團，不是最多！）
+- 「每團 30 人」→ 不確定 max 或 min，保守填 maxParticipants: 30
+- 找不到任何相關描述 → 兩者都填 0 / 不填，不要亂猜
 
 【強制搜尋規則 — 請嚴格遵守】：
 - 你必須在截圖和文字中窮盡搜尋所有數字，不得輕易放棄
@@ -598,12 +714,25 @@ JSON 格式：
       }
     }
 
+    // Capacity: validate Vision's answer; if max=0 or out of range, run text fallback.
+    const claudeMax = extracted.capacity?.maxParticipants;
+    const claudeMin = extracted.capacity?.minParticipants;
+    let finalCapacity = validateCapacity({
+      maxParticipants: claudeMax,
+      minParticipants: claudeMin,
+    });
+    let capacitySource = 'claude';
+    if (finalCapacity.maxParticipants === 0) {
+      const textCap = extractCapacityFromText(rawText);
+      if (textCap.maxParticipants > 0 || textCap.minParticipants !== undefined) {
+        finalCapacity = textCap;
+        capacitySource = 'fallback:regex';
+      }
+    }
+
     const result: ExtractedTourMeta = {
       departureDates: (extracted.departureDates || []).filter(d => d.date && /^\d{4}-\d{2}-\d{2}$/.test(d.date)),
-      capacity: {
-        maxParticipants: extracted.capacity?.maxParticipants || 0,
-        minParticipants: extracted.capacity?.minParticipants,
-      },
+      capacity: finalCapacity,
       pricing: {
         adultPrice: validatePrice(finalAdultPrice),
         // 子女/嬰兒價格：Claude 優先，fallback 到 priceHints 或 regex
@@ -621,7 +750,7 @@ JSON 格式：
       productCode: extracted.productCode,
     };
     
-    console.log(`[DateExtractor] ✓ Extracted ${result.departureDates.length} dates, maxParticipants: ${result.capacity.maxParticipants}, adultPrice: ${result.pricing.adultPrice} (source: ${priceSource}, claude: ${claudeAdultPrice})`);
+    console.log(`[DateExtractor] ✓ Extracted ${result.departureDates.length} dates, capacity: max=${result.capacity.maxParticipants} min=${result.capacity.minParticipants ?? '-'} (source: ${capacitySource}), adultPrice: ${result.pricing.adultPrice} (source: ${priceSource}, claude: ${claudeAdultPrice})`);
     
     return result;
   } catch (err: any) {
@@ -637,7 +766,7 @@ JSON 格式：
     
     return {
       departureDates: textDates,
-      capacity: { maxParticipants: 0 },
+      capacity: extractCapacityFromText(rawText),
       pricing: {
         adultPrice: validatePrice(fallbackAdultPrice),
         childWithBedPrice: textPricing.childWithBedPrice,
