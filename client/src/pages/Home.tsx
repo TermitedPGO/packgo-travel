@@ -4,8 +4,7 @@ import EditableDestinations from "@/components/EditableDestinations";
 import FeaturedTours from "@/components/FeaturedTours";
 import Footer from "@/components/Footer";
 import Header from "@/components/Header";
-import EditableHero from "@/components/EditableHero";
-import HomeHeroSpotlight from "@/components/HomeHeroSpotlight";
+import HomeHero from "@/components/home/HomeHero";
 import HomeWelcomeBack from "@/components/HomeWelcomeBack";
 import NewsletterSection from "@/components/NewsletterSection";
 import CompareBar from "@/components/CompareBar";
@@ -13,7 +12,7 @@ import WhyChooseUs from "@/components/WhyChooseUs";
 import TestimonialsCarousel from "@/components/TestimonialsCarousel";
 import HomeFAQ from "@/components/HomeFAQ";
 import { Button } from "@/components/ui/button";
-import { MessageCircle, Pencil, X } from "lucide-react";
+import { Pencil, X } from "lucide-react";
 import { useState } from "react";
 import AITravelAdvisorDialog from "@/components/AITravelAdvisorDialog";
 import { HomeEditProvider, useHomeEdit } from "@/contexts/HomeEditContext";
@@ -50,15 +49,17 @@ function HomeContent() {
       )}
       
       <main className="flex-grow">
-        {/* v78m Sprint 5C: personalized welcome for logged-in users with recent views */}
+        {/* Round 79: anchor hero replaces the previous Spotlight + EditableHero
+            duo. Single fixed-copy serif headline gives every visitor the same
+            brand impression instead of a rotating ESG roulette. */}
+        <HomeHero />
+        {/* Personalized welcome for logged-in users with recent views — moved
+            below the hero so first-time visitors still see the brand promise
+            first. */}
         <HomeWelcomeBack />
-        {/* v78i: featured tour spotlight ABOVE the search hero (signettours pattern) —
-            converts visitors who don't know what to search for. */}
-        <HomeHeroSpotlight />
-        <EditableHero />
         <EditableDestinations />
         <FeaturedTours />
-        
+
         {/* Why Choose Us Section */}
         <WhyChooseUs />
         {/* Testimonials Carousel */}
@@ -79,23 +80,18 @@ function HomeContent() {
       <Footer />
       <CompareBar />
 
-      {/* Floating AI Advisor — v78z-z2: speech bubble removed per UX audit
-          (always-on visual noise). Penguin icon alone is enough; tooltip on
-          hover via aria-label/title for discoverability. */}
-      <div className="fixed bottom-4 right-4 z-40">
-        <button
-          onClick={() => setAiDialogOpen(true)}
-          className="transition-all hover:scale-105 group"
-          aria-label={t('home.aiAdvisor.title')}
-          title={t('home.aiAdvisor.bubble')}
-        >
-          <img
-            src="https://files.manuscdn.com/user_upload_by_module/session_file/310519663159191204/jeyVKrdLKJdFniJk.png"
-            alt={t('home.aiAdvisor.title')}
-            className="w-16 h-16 md:w-28 md:h-28 object-contain drop-shadow-lg animate-penguin-wobble"
-          />
-        </button>
-      </div>
+      {/* Round 79: penguin mascot dropped — cartoon vibe didn't match the
+          B&W premium brand baseline. AI advisor is now a discreet
+          bottom-right pill, lower visual weight than the brand. */}
+      <button
+        onClick={() => setAiDialogOpen(true)}
+        className="fixed bottom-6 right-6 z-40 inline-flex items-center gap-2 rounded-full bg-foreground text-white px-5 h-11 text-sm font-medium tracking-wide shadow-lg hover:bg-foreground/90 transition-colors"
+        aria-label={t('home.aiAdvisor.title')}
+        title={t('home.aiAdvisor.bubble')}
+      >
+        <span aria-hidden>✨</span>
+        <span>{t('home.aiAdvisor.title')}</span>
+      </button>
 
       {/* v78o: Admin Edit Mode Button — icon-only on mobile to free up screen real estate */}
       {canEdit && !isEditMode && (

@@ -260,6 +260,16 @@ export const zhTW = {
   },
 
   // 首頁
+  // Round 79: HomeHero anchor copy. Stays fixed across visits so brand
+  // doesn't roulette like the old HomeHeroSpotlight did.
+  homeHero: {
+    eyebrow: 'PACK&GO TRAVEL · CST #2166984 · Newark CA',
+    title: '讓旅行更美好',
+    subtitle: '美西出發 · 亞太定制 · 精緻團體。實體店面、雙語顧問，從規劃到回國，每一段都有人接住。',
+    ctaPrimary: '規劃我的旅程',
+    ctaSecondary: '看精選行程',
+    phoneNote: '營業時間真人接聽',
+  },
   home: {
     slogan: '讓旅行更美好',
     editMode: {

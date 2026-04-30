@@ -260,6 +260,15 @@ export const en = {
   },
 
   // Home Page
+  // Round 79: HomeHero anchor copy.
+  homeHero: {
+    eyebrow: 'PACK&GO TRAVEL · CST #2166984 · NEWARK CA',
+    title: 'Travel, Beautifully',
+    subtitle: 'Curated Asia-Pacific journeys from California. Walk-in advisors, bilingual support, every detail handled — from itinerary to homecoming.',
+    ctaPrimary: 'Plan My Trip',
+    ctaSecondary: 'Browse Tours',
+    phoneNote: 'real-person support during business hours',
+  },
   home: {
     slogan: 'Making Travel Better',
     editMode: {
