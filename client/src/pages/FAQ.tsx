@@ -1,4 +1,4 @@
-import GenericPage from "@/components/GenericPage";
+import MarketingLayout from "@/components/layouts/MarketingLayout";
 import SEO from "@/components/SEO";
 import { useLocale } from "@/contexts/LocaleContext";
 
@@ -6,7 +6,7 @@ export default function FAQ() {
   const { t } = useLocale();
   
   return (
-    <GenericPage
+    <MarketingLayout
       title={t('faq.title')}
       subtitle={t('faq.subtitle')}
       ctaText={t('faq.moreQuestions')}
@@ -55,6 +55,6 @@ export default function FAQ() {
           </p>
         </div>
       </div>
-    </GenericPage>
+    </MarketingLayout>
   );
 }

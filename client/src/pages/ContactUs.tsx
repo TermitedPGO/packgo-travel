@@ -1,5 +1,5 @@
 import { useState } from "react";
-import GenericPage from "@/components/GenericPage";
+import MarketingLayout from "@/components/layouts/MarketingLayout";
 import SEO from "@/components/SEO";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -86,7 +86,7 @@ export default function ContactUs() {
   };
 
   return (
-    <GenericPage
+    <MarketingLayout
       title={t('contactUs.title')}
       subtitle={t('contactUs.subtitle')}
     >
@@ -300,6 +300,6 @@ export default function ContactUs() {
           )}
         </div>
       </div>
-    </GenericPage>
+    </MarketingLayout>
   );
 }

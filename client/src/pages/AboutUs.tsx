@@ -1,4 +1,4 @@
-import GenericPage from "@/components/GenericPage";
+import MarketingLayout from "@/components/layouts/MarketingLayout";
 import SEO from "@/components/SEO";
 import { useLocale } from "@/contexts/LocaleContext";
 
@@ -20,7 +20,7 @@ export default function AboutUs() {
         url="/about-us"
         type="website"
       />
-      <GenericPage
+      <MarketingLayout
         title={t('aboutUs.title')}
         subtitle={t('aboutUs.subtitle')}
       >
@@ -95,7 +95,7 @@ export default function AboutUs() {
           <strong>{t('aboutUs.email')}：</strong>Jeffhsieh09@gmail.com
         </p>
       </div>
-      </GenericPage>
+      </MarketingLayout>
     </>
   );
 }

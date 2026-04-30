@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import type { StringValue } from 'ms';
+import { randomBytes } from 'crypto';
 
 // v70: strict secret loading — throw in prod, also throw if the dev fallback is
 // being used because the fallback is a *publicly known string* (it lives in
@@ -20,7 +21,7 @@ if (!JWT_SECRET) {
 const SECRET =
   JWT_SECRET ||
   // 32 bytes random hex, regenerated each process start
-  require('crypto').randomBytes(32).toString('hex');
+  randomBytes(32).toString('hex');
 
 // v70: was 365 days — gave attackers a 12-month window on any compromised token.
 // Reduced to 14 days. For longer-lived sessions, callers should rotate via a

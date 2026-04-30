@@ -1,4 +1,4 @@
-import GenericPage from "@/components/GenericPage";
+import MarketingLayout from "@/components/layouts/MarketingLayout";
 import { useLocale } from "@/contexts/LocaleContext";
 
 /**
@@ -28,7 +28,7 @@ export default function TermsOfService() {
   );
 
   return (
-    <GenericPage
+    <MarketingLayout
       title={t('termsOfService.fullTerms.title')}
       subtitle={t('termsOfService.fullTerms.subtitle')}
     >
@@ -55,6 +55,6 @@ export default function TermsOfService() {
           <p>{t('termsOfService.fullTerms.dojFooter')}</p>
         </div>
       </div>
-    </GenericPage>
+    </MarketingLayout>
   );
 }

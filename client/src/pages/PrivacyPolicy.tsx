@@ -1,4 +1,4 @@
-import GenericPage from "@/components/GenericPage";
+import MarketingLayout from "@/components/layouts/MarketingLayout";
 import { useLocale } from "@/contexts/LocaleContext";
 import { Link } from "wouter";
 
@@ -32,7 +32,7 @@ export default function PrivacyPolicy() {
   );
 
   return (
-    <GenericPage
+    <MarketingLayout
       title={t('privacyPolicy.fullPolicy.title')}
       subtitle={t('privacyPolicy.fullPolicy.subtitle')}
     >
@@ -119,6 +119,6 @@ export default function PrivacyPolicy() {
           </p>
         </div>
       </div>
-    </GenericPage>
+    </MarketingLayout>
   );
 }
