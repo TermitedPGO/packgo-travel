@@ -351,6 +351,13 @@
       "when": 1777503147576,
       "tag": "0049_poster_gen_logs",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "5",
+      "when": 1777512289954,
+      "tag": "0050_marketing_assets_iterations",
+      "breakpoints": true
     }
   ]
 }

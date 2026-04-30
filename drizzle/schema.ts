@@ -1805,3 +1805,45 @@ export const posterGenLogs = mysqlTable("posterGenLogs", {
 });
 export type PosterGenLog = typeof posterGenLogs.$inferSelect;
 export type InsertPosterGenLog = typeof posterGenLogs.$inferInsert;
+
+// v78z-z3 Sprint 11 (Image 2.0 Phase A v1):
+// User-uploaded reference assets (logo, photos, past posters) for use as
+// inputs to gpt-image-2 generation. Stored in R2 with metadata here.
+export const marketingAssets = mysqlTable("marketingAssets", {
+  id: int("id").autoincrement().primaryKey(),
+  ownerId: int("ownerId"), // admin user who uploaded
+  kind: varchar("kind", { length: 32 }).notNull(), // logo / photo / past_poster / scene_ref
+  label: varchar("label", { length: 200 }).notNull(),
+  storageKey: varchar("storageKey", { length: 512 }).notNull(),
+  width: int("width"),
+  height: int("height"),
+  fileSize: int("fileSize"),
+  mimeType: varchar("mimeType", { length: 64 }),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type MarketingAsset = typeof marketingAssets.$inferSelect;
+export type InsertMarketingAsset = typeof marketingAssets.$inferInsert;
+
+// One row per generation/edit iteration. Lets admin compare v1 vs v3 of
+// the same poster project + revert. Each iteration links back to its
+// parent for tree-style history.
+export const posterIterations = mysqlTable("posterIterations", {
+  id: int("id").autoincrement().primaryKey(),
+  projectKey: varchar("projectKey", { length: 64 }).notNull(), // groups iterations together
+  parentIterationId: int("parentIterationId"), // null = root, else points back
+  ownerId: int("ownerId"),
+  prompt: text("prompt").notNull(),
+  mode: varchar("mode", { length: 16 }).notNull(), // generate / edit
+  size: varchar("size", { length: 16 }).notNull(),
+  quality: varchar("quality", { length: 16 }).notNull(),
+  costUsd: varchar("costUsd", { length: 16 }).notNull(),
+  durationMs: int("durationMs").notNull(),
+  storageKey: varchar("storageKey", { length: 512 }),
+  status: varchar("status", { length: 32 }).notNull(), // success / errored
+  errorMessage: text("errorMessage"),
+  referenceAssetIds: text("referenceAssetIds"), // JSON array of marketingAssets.id used
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type PosterIteration = typeof posterIterations.$inferSelect;
+export type InsertPosterIteration = typeof posterIterations.$inferInsert;

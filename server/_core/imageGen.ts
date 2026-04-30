@@ -1,14 +1,18 @@
 /**
- * imageGen.ts — v78z-z3 Sprint 11 (Image 2.0 Phase A v0).
+ * imageGen.ts — v78z-z3 Sprint 11 (Image 2.0 Phase A v1).
  *
- * Lean wrapper around OpenAI gpt-image-2. Just enough surface for the
- * poster generator MVP. NOT the full IMAGE-2.0-SPEC.md circuit-breaker /
- * budget table / batch / mask flow — that's Phase B (next month).
+ * OpenAI gpt-image-2 wrapper:
+ *   - generateImage()       text → image (from-scratch generation)
+ *   - editImage()           image (+ optional mask) + prompt → edited image
+ *                           For "fix this area" iteration OR "use this
+ *                           reference image as the starting point".
  *
- * Inputs:  prompt + size + quality
- * Outputs: PNG buffer + cost ($USD)
+ * Phase B (next month) will add: full circuit-breaker / batch / async
+ * job queue. For now we keep it synchronous and let the BullMQ trip
+ * reminder worker pattern carry over later.
  */
 import OpenAI from "openai";
+import { toFile } from "openai/uploads";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
@@ -16,11 +20,25 @@ const client = new OpenAI({
 
 const MODEL_ID = "gpt-image-2";
 
+export type GptImageSize = "1024x1024" | "1024x1792" | "1792x1024" | "2048x2048";
+export type GptImageQuality = "low" | "medium" | "high";
+
 export interface GenerateOptions {
   prompt: string;
-  size?: "1024x1024" | "1024x1792" | "1792x1024" | "2048x2048";
-  quality?: "low" | "medium" | "high";
-  /** Default 60s; set higher for high-quality requests. */
+  size?: GptImageSize;
+  quality?: GptImageQuality;
+  /** Default 90s for low/medium, 240s for high. */
+  timeoutMs?: number;
+}
+
+export interface EditOptions {
+  prompt: string;
+  /** Source image (the one to edit). PNG buffer. */
+  image: Buffer;
+  /** Optional mask. PNG with transparent areas = "edit here", opaque = "keep". */
+  mask?: Buffer;
+  size?: GptImageSize;
+  quality?: GptImageQuality;
   timeoutMs?: number;
 }
 
@@ -30,18 +48,21 @@ export interface GenerateResult {
   height: number;
   fileSize: number;
   cost: number; // USD
+  inputTokens: number;
+  outputTokens: number;
   durationMs: number;
 }
 
 /**
- * gpt-image-2 pricing as of 2026 (confirm against OpenAI docs at deploy):
- *   - low quality:     $0.011 / image (1024x1024)
- *   - medium quality:  $0.042 / image (1024x1024)
- *   - high quality:    $0.167 / image (1024x1024)
- *   - portrait/landscape (1820 long edge): ~1.7× of square
+ * gpt-image-2 pricing as of 2026 (verify against OpenAI docs at deploy):
+ *   - low quality:     $0.011 / 1024x1024
+ *   - medium quality:  $0.042 / 1024x1024
+ *   - high quality:    $0.167 / 1024x1024
+ *   - portrait/landscape (1792 long edge): ~1.7× of square
+ *   - 2048x2048: ~2.5× of square
  *
- * We charge per output token internally; this is a coarse estimate to
- * surface "today's spend" UX without exact token math.
+ * This is a coarse estimate to surface "today's spend" UX. Real billing
+ * is at OpenAI's end based on token counts.
  */
 function estimateCost(size: string, quality: string): number {
   const baseCost: Record<string, number> = {
@@ -49,7 +70,8 @@ function estimateCost(size: string, quality: string): number {
     medium: 0.042,
     high: 0.167,
   };
-  const sizeMultiplier = size === "1024x1024" ? 1.0 : size === "2048x2048" ? 2.5 : 1.7;
+  const sizeMultiplier =
+    size === "1024x1024" ? 1.0 : size === "2048x2048" ? 2.5 : 1.7;
   return (baseCost[quality] || 0.042) * sizeMultiplier;
 }
 
@@ -58,17 +80,12 @@ function parseSize(size: string): { width: number; height: number } {
   return { width: w, height: h };
 }
 
+function defaultTimeoutFor(quality: GptImageQuality): number {
+  return quality === "high" ? 240_000 : 90_000;
+}
+
 /**
- * Generate an image from a text prompt.
- *
- * Throws on:
- *   - missing API key (env)
- *   - OpenAI API errors (timeout, rate limit, content policy violation)
- *   - empty/malformed response
- *
- * Returns a PNG buffer and cost estimate. Caller should:
- *   1. Persist to S3/R2 with sensible cache-control headers
- *   2. Log the cost to your spend tracker
+ * Generate an image from text only (no reference).
  */
 export async function generateImage(opts: GenerateOptions): Promise<GenerateResult> {
   if (!process.env.OPENAI_API_KEY) {
@@ -79,8 +96,6 @@ export async function generateImage(opts: GenerateOptions): Promise<GenerateResu
   const size = opts.size || "1024x1024";
   const quality = opts.quality || "medium";
 
-  // OpenAI SDK call — note: gpt-image-2 SDK signature may evolve; we cast
-  // to `any` on params it doesn't yet type to avoid blocking on SDK lag.
   const response = (await client.images.generate(
     {
       model: MODEL_ID,
@@ -90,7 +105,7 @@ export async function generateImage(opts: GenerateOptions): Promise<GenerateResu
       n: 1,
       response_format: "b64_json" as any,
     },
-    { timeout: opts.timeoutMs || 90_000 } // 90s default — gpt-image-2 can be slow
+    { timeout: opts.timeoutMs || defaultTimeoutFor(quality) }
   )) as any;
 
   const item = response?.data?.[0];
@@ -100,6 +115,7 @@ export async function generateImage(opts: GenerateOptions): Promise<GenerateResu
 
   const imageBuffer = Buffer.from(item.b64_json, "base64");
   const { width, height } = parseSize(size);
+  const usage = response.usage || {};
 
   return {
     imageBuffer,
@@ -107,6 +123,75 @@ export async function generateImage(opts: GenerateOptions): Promise<GenerateResu
     height,
     fileSize: imageBuffer.length,
     cost: estimateCost(size, quality),
+    inputTokens: usage.input_tokens || 0,
+    outputTokens: usage.output_tokens || 0,
+    durationMs: Date.now() - start,
+  };
+}
+
+/**
+ * Edit an existing image. Two main use cases:
+ *
+ *  1. ITERATION ("regenerate with this fix"):
+ *     - Pass the previous output as `image`
+ *     - No mask
+ *     - Prompt describes the desired changes (e.g. "make the logo bigger,
+ *       fix the date to 2026/12/19")
+ *
+ *  2. MASKED EDIT ("change this area only"):
+ *     - Pass image
+ *     - Pass mask (PNG with transparent = edit, opaque = preserve)
+ *     - Prompt describes what should appear in the masked area
+ *
+ * The OpenAI API takes the image (and optional mask) as multipart files.
+ */
+export async function editImage(opts: EditOptions): Promise<GenerateResult> {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY env var not set — cannot call gpt-image-2");
+  }
+
+  const start = Date.now();
+  const size = opts.size || "1024x1024";
+  const quality = opts.quality || "medium";
+
+  // OpenAI SDK expects File-like uploads
+  const imageFile = await toFile(opts.image, "input.png", { type: "image/png" });
+  const maskFile = opts.mask
+    ? await toFile(opts.mask, "mask.png", { type: "image/png" })
+    : undefined;
+
+  const params: any = {
+    model: MODEL_ID,
+    prompt: opts.prompt,
+    image: imageFile,
+    size,
+    quality,
+    n: 1,
+    response_format: "b64_json",
+  };
+  if (maskFile) params.mask = maskFile;
+
+  const response = (await client.images.edit(params, {
+    timeout: opts.timeoutMs || defaultTimeoutFor(quality),
+  })) as any;
+
+  const item = response?.data?.[0];
+  if (!item?.b64_json) {
+    throw new Error("gpt-image-2 edit returned no image data");
+  }
+
+  const imageBuffer = Buffer.from(item.b64_json, "base64");
+  const { width, height } = parseSize(size);
+  const usage = response.usage || {};
+
+  return {
+    imageBuffer,
+    width,
+    height,
+    fileSize: imageBuffer.length,
+    cost: estimateCost(size, quality),
+    inputTokens: usage.input_tokens || 0,
+    outputTokens: usage.output_tokens || 0,
     durationMs: Date.now() - start,
   };
 }

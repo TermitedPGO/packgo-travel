@@ -124,3 +124,7 @@ research-*
 # Claude Code session state
 .claude/
 
+# Standalone sub-project: PACK&GO Agents (separate evaluation track,
+# contains IMAGE-2.0-SPEC, agent profiles, acceptance test results).
+# Lives in this directory for convenience but is not part of the website repo.
+agents-testing/
