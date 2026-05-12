@@ -98,16 +98,29 @@ export const retrospectiveWorker = new Worker<
     // Flatten each retro message into per-proposal decision rows so
     // the LLM sees each individual suggestion + Jeff's verdict, not
     // just the wrapper title.
+    //
+    // Reviewer note v2: distinguish "context legitimately had no
+    // proposals" from "context was malformed JSON". Both produce a
+    // fallback row, but the malformed case is logged so we notice if
+    // formatRetrospectiveAsMessage's output schema drifts.
     const pastDecisions = decisionRows.flatMap((row) => {
       let proposals: Array<{
         agentName: string;
         proposedRulesDiff: string;
       }> = [];
+      let parseFailed = false;
       try {
         const ctx = JSON.parse(row.context ?? "{}");
-        proposals = Array.isArray(ctx.proposals) ? ctx.proposals : [];
+        if (Array.isArray(ctx.proposals)) {
+          proposals = ctx.proposals;
+        }
       } catch {
-        /* ignore */
+        parseFailed = true;
+      }
+      if (parseFailed) {
+        console.warn(
+          `[RetrospectiveWorker] agentMessages ${row.id} has malformed context JSON; using wrapper title as fallback`
+        );
       }
       // If we can't extract per-proposal, fall back to one row using the title
       if (proposals.length === 0) {

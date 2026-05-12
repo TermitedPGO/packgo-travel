@@ -2438,10 +2438,15 @@ export const agentMessages = mysqlTable("agentMessages", {
   unreadIdx: index("idx_am_unread").on(table.readByJeff, table.priority, table.createdAt),
   agentIdx: index("idx_am_agent").on(table.agentName, table.createdAt),
   priorityIdx: index("idx_am_priority").on(table.priority, table.createdAt),
+  // Reviewer note v2: column order matches the actual query pattern
+  // (filter by messageType + date range, then non-equality decision
+  // filter handled in residual scan). The earlier (msgType, decision,
+  // createdAt) ordering couldn't help inArray() lookups since
+  // proposalDecision was used as non-equality.
   proposalIdx: index("idx_am_proposal_decision").on(
     table.messageType,
-    table.proposalDecision,
-    table.createdAt
+    table.createdAt,
+    table.proposalDecision
   ),
 }));
 

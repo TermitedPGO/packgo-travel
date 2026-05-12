@@ -31,7 +31,7 @@ SET @sql := IF(
       AND table_name = 'agentMessages'
       AND index_name = 'idx_am_proposal_decision'
   ),
-  'CREATE INDEX `idx_am_proposal_decision` ON `agentMessages`(`messageType`, `proposalDecision`, `createdAt`)',
+  'CREATE INDEX `idx_am_proposal_decision` ON `agentMessages`(`messageType`, `createdAt`, `proposalDecision`)',
   'SELECT ''index idx_am_proposal_decision already exists, skipping'''
 );
 PREPARE stmt FROM @sql;

@@ -1919,7 +1919,12 @@ export const agentRouter = router({
     .mutation(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new Error("Database not available");
-      await db
+      // Code-review v2: guard with proposalDecision='pending' so a
+      // double-click / two-tab race / re-fire of the same mutation
+      // doesn't clobber the original decision + readAt + note. The
+      // second call returns alreadyDecided=true so the UI can show
+      // "this was already decided" instead of silently overwriting.
+      const result: any = await db
         .update(agentMessages)
         .set({
           proposalDecision: input.decision,
@@ -1927,8 +1932,15 @@ export const agentRouter = router({
           readByJeff: 1,
           readAt: new Date(),
         })
-        .where(eq(agentMessages.id, input.messageId));
-      return { success: true };
+        .where(
+          and(
+            eq(agentMessages.id, input.messageId),
+            eq(agentMessages.proposalDecision, "pending")
+          )
+        );
+      const affected =
+        (result?.[0]?.affectedRows ?? result?.affectedRows ?? 0) | 0;
+      return { success: true, alreadyDecided: affected === 0 };
     }),
 
   /** Internal: agent posts a message to Jeff. Used by future cron jobs / self-retrospective. */

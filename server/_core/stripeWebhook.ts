@@ -465,43 +465,79 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
   );
 
   if (payment.bookingId) {
-    // QA audit 2026-05-11 Phase 8 fix: previously we only marked
-    // paymentStatus=refunded, leaving bookingStatus="confirmed" and
-    // tourDepartures.bookedSlots un-decremented. That meant a Stripe-
-    // initiated refund left the seat permanently consumed in our DB.
-    // Now: also flip bookingStatus → "cancelled" + release the slot.
-    const bookingBefore = await db.getBookingById(payment.bookingId);
-
-    await db
-      .updateBooking(payment.bookingId, {
-        paymentStatus: "refunded",
-        bookingStatus: "cancelled",
-      })
-      .catch((e) =>
-        console.error(
-          "[Stripe Webhook] charge.refunded: updateBooking failed:",
-          e?.message
-        )
+    // QA audit 2026-05-11 Phase 8 fix + code-review v2: previously we
+    // snapshotted the booking then updated then released slots, which
+    // raced against bookings.cancel() and Stripe webhook replays
+    // (double-release the seat). Now: atomic UPDATE … WHERE
+    // bookingStatus != 'cancelled' returns affectedRows=1 only when
+    // THIS handler owned the state transition, and we release slots
+    // only in that case. Concurrent callers see affectedRows=0 and
+    // skip the release.
+    const drizzle = await (await import("../db")).getDb();
+    if (!drizzle) {
+      console.error(
+        "[Stripe Webhook] charge.refunded: DB unavailable, cannot transition booking"
       );
-    console.log(
-      `[Stripe Webhook] Booking ${payment.bookingId} marked refunded + cancelled`
-    );
+      return;
+    }
+    const { bookings: bookingsTable } = await import("../../drizzle/schema");
+    const { and, eq, ne } = await import("drizzle-orm");
 
-    // Release the seat IF it was still claiming capacity. Skip if the
-    // booking was already cancelled earlier (by customer or admin),
-    // since those flows already called releaseDepartureSlots.
-    const wasActive =
-      bookingBefore &&
-      bookingBefore.bookingStatus !== "cancelled" &&
-      bookingBefore.departureId;
-    if (wasActive) {
+    // Read seat counts BEFORE the conditional update so we have the
+    // numbers if we win the race. This snapshot is allowed to be
+    // stale; only the conditional update controls whether we release.
+    const bookingSnap = await db.getBookingById(payment.bookingId);
+
+    let transitionedToCancelled = false;
+    try {
+      const result: any = await drizzle
+        .update(bookingsTable)
+        .set({
+          paymentStatus: "refunded",
+          bookingStatus: "cancelled",
+        })
+        .where(
+          and(
+            eq(bookingsTable.id, payment.bookingId),
+            ne(bookingsTable.bookingStatus, "cancelled")
+          )
+        );
+      // mysql2 result shape: rows.affectedRows. Drizzle wraps it.
+      const affected =
+        (result?.[0]?.affectedRows ?? result?.affectedRows ?? 0) | 0;
+      transitionedToCancelled = affected > 0;
+      console.log(
+        `[Stripe Webhook] Booking ${payment.bookingId} refund update affected=${affected} (transitioned=${transitionedToCancelled})`
+      );
+
+      // If the booking was already cancelled before we got here, we
+      // still need to ensure paymentStatus is recorded as refunded
+      // (the conditional update above skipped because of the != cancelled
+      // guard). Run an unconditional paymentStatus-only update — this
+      // is idempotent and never triggers a slot release.
+      if (!transitionedToCancelled) {
+        await drizzle
+          .update(bookingsTable)
+          .set({ paymentStatus: "refunded" })
+          .where(eq(bookingsTable.id, payment.bookingId));
+      }
+    } catch (e) {
+      console.error(
+        "[Stripe Webhook] charge.refunded: updateBooking failed:",
+        (e as Error)?.message
+      );
+    }
+
+    // Release seats ONLY if THIS handler owned the active → cancelled
+    // transition. Replay or concurrent bookings.cancel paths skip.
+    if (transitionedToCancelled && bookingSnap?.departureId) {
       const seatCount =
-        (bookingBefore!.numberOfAdults || 0) +
-        (bookingBefore!.numberOfChildrenWithBed || 0) +
-        (bookingBefore!.numberOfChildrenNoBed || 0);
+        (bookingSnap.numberOfAdults || 0) +
+        (bookingSnap.numberOfChildrenWithBed || 0) +
+        (bookingSnap.numberOfChildrenNoBed || 0);
       if (seatCount > 0) {
         await db
-          .releaseDepartureSlots(bookingBefore!.departureId, seatCount)
+          .releaseDepartureSlots(bookingSnap.departureId, seatCount)
           .catch((e) =>
             console.error(
               `[Stripe Webhook] charge.refunded: releaseDepartureSlots failed for booking ${payment.bookingId}:`,
