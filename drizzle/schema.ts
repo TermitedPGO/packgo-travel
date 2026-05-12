@@ -1,4 +1,4 @@
-import { boolean, decimal, int, mysqlEnum, mysqlTable, text, timestamp, varchar, unique, index } from "drizzle-orm/mysql-core";
+import { boolean, date, decimal, int, mysqlEnum, mysqlTable, text, timestamp, varchar, unique, index } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -2477,3 +2477,116 @@ export const gmailIntegration = mysqlTable("gmailIntegration", {
 
 export type GmailIntegration = typeof gmailIntegration.$inferSelect;
 export type InsertGmailIntegration = typeof gmailIntegration.$inferInsert;
+
+// ──────────────────────────────────────────────────────────────────────────
+// Plaid bookkeeping integration (migration 0070).
+//
+// linkedBankAccounts: one row per Plaid Item × account (a Plaid Item is one
+// bank login, can expose multiple accounts e.g. Chase checking + savings +
+// credit card). plaidAccessTokenEncrypted is AES-GCM encrypted at the app
+// layer using PLAID_ENCRYPTION_KEY env var before insert.
+//
+// bankTransactions: synced via Plaid /transactions/sync using the per-account
+// cursor stored on linkedBankAccounts. AccountingAgent reads new rows,
+// classifies into agentCategory, sets agentConfidence. Jeff can override.
+// ──────────────────────────────────────────────────────────────────────────
+
+export const linkedBankAccounts = mysqlTable("linkedBankAccounts", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  plaidItemId: varchar("plaidItemId", { length: 64 }).notNull(),
+  plaidAccountId: varchar("plaidAccountId", { length: 128 }).notNull(),
+  plaidAccessTokenEncrypted: text("plaidAccessTokenEncrypted").notNull(),
+  plaidInstitutionId: varchar("plaidInstitutionId", { length: 64 }),
+  institutionName: varchar("institutionName", { length: 128 }).notNull(),
+  institutionLogoUrl: varchar("institutionLogoUrl", { length: 512 }),
+  accountMask: varchar("accountMask", { length: 8 }),
+  accountName: varchar("accountName", { length: 128 }).notNull(),
+  accountOfficialName: varchar("accountOfficialName", { length: 256 }),
+  accountType: mysqlEnum("accountType", [
+    "depository",
+    "credit",
+    "loan",
+    "investment",
+    "other",
+  ]).notNull(),
+  accountSubtype: varchar("accountSubtype", { length: 32 }),
+  isTrustAccount: int("isTrustAccount").default(0).notNull(),
+  isActive: int("isActive").default(1).notNull(),
+  currentBalance: decimal("currentBalance", { precision: 14, scale: 2 }),
+  availableBalance: decimal("availableBalance", { precision: 14, scale: 2 }),
+  isoCurrencyCode: varchar("isoCurrencyCode", { length: 3 }).default("USD").notNull(),
+  cursor: varchar("cursor", { length: 512 }),
+  lastSyncedAt: timestamp("lastSyncedAt"),
+  lastSyncError: text("lastSyncError"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  plaidAccountIdx: unique("uniq_plaid_account").on(table.plaidAccountId),
+  userActiveIdx: index("idx_user_active").on(table.userId, table.isActive),
+}));
+
+export type LinkedBankAccount = typeof linkedBankAccounts.$inferSelect;
+export type InsertLinkedBankAccount = typeof linkedBankAccounts.$inferInsert;
+
+export const bankTransactions = mysqlTable("bankTransactions", {
+  id: int("id").autoincrement().primaryKey(),
+  linkedAccountId: int("linkedAccountId").notNull(),
+  plaidTransactionId: varchar("plaidTransactionId", { length: 128 }).notNull(),
+  // Plaid uses ISO date. Amount sign: positive = outflow (expense),
+  // negative = inflow (income/refund). We preserve Plaid's sign.
+  date: date("date").notNull(),
+  authorizedDate: date("authorizedDate"),
+  amount: decimal("amount", { precision: 14, scale: 2 }).notNull(),
+  isoCurrencyCode: varchar("isoCurrencyCode", { length: 3 }).default("USD").notNull(),
+  merchantName: varchar("merchantName", { length: 256 }),
+  description: text("description"),
+  paymentChannel: varchar("paymentChannel", { length: 32 }),
+  // Plaid's PFC taxonomy (Personal Finance Category) — primary + detailed
+  plaidCategoryPrimary: varchar("plaidCategoryPrimary", { length: 64 }),
+  plaidCategoryDetailed: varchar("plaidCategoryDetailed", { length: 128 }),
+  // AccountingAgent output
+  agentCategory: varchar("agentCategory", { length: 64 }),
+  agentConfidence: int("agentConfidence"),
+  agentReasoning: text("agentReasoning"),
+  // Jeff override (when he disagrees with the agent)
+  jeffOverrideCategory: varchar("jeffOverrideCategory", { length: 64 }),
+  jeffOverrideReason: text("jeffOverrideReason"),
+  // Manually exclude personal items from accounting reports
+  excludeFromAccounting: int("excludeFromAccounting").default(0).notNull(),
+  excludeReason: varchar("excludeReason", { length: 256 }),
+  isPending: int("isPending").default(0).notNull(),
+  accountOwner: varchar("accountOwner", { length: 128 }),
+  // Optional foreign keys to PACK&GO entities — lets the agent link e.g.
+  // a Stripe payout to the originating booking.
+  relatedBookingId: int("relatedBookingId"),
+  relatedInquiryId: int("relatedInquiryId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  plaidTxnIdx: unique("uniq_plaid_txn").on(table.plaidTransactionId),
+  accountDateIdx: index("idx_account_date").on(table.linkedAccountId, table.date),
+  agentCategoryIdx: index("idx_agent_category").on(table.agentCategory, table.date),
+  pendingIdx: index("idx_pending").on(table.isPending, table.date),
+}));
+
+export type BankTransaction = typeof bankTransactions.$inferSelect;
+export type InsertBankTransaction = typeof bankTransactions.$inferInsert;
+
+export const plaidWebhookEvents = mysqlTable("plaidWebhookEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  webhookType: varchar("webhookType", { length: 64 }).notNull(),
+  webhookCode: varchar("webhookCode", { length: 64 }).notNull(),
+  plaidItemId: varchar("plaidItemId", { length: 64 }),
+  payload: text("payload"),
+  processedAt: timestamp("processedAt"),
+  processedSuccess: int("processedSuccess").default(0).notNull(),
+  processedError: text("processedError"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  itemCreatedIdx: index("idx_item_created").on(table.plaidItemId, table.createdAt),
+  unprocessedIdx: index("idx_unprocessed").on(table.processedSuccess, table.createdAt),
+}));
+
+export type PlaidWebhookEvent = typeof plaidWebhookEvents.$inferSelect;
+export type InsertPlaidWebhookEvent = typeof plaidWebhookEvents.$inferInsert;
