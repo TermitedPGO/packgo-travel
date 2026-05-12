@@ -3952,6 +3952,47 @@ export const appRouter = router({
         const returnDateStr = departure.returnDate
           ? new Date(departure.returnDate).toISOString().split("T")[0]
           : "";
+        const depositAmount = Math.floor(totalPrice * 0.2);
+        const remainingAmount = totalPrice - depositAmount;
+
+        // QA audit 2026-05-11 Phase 9 fix: auto-generate the deposit invoice
+        // PDF and attach its URL to the confirmation email so the customer
+        // never has to ask "how do I pay?". Failure to generate is non-fatal
+        // — the booking + email still ship without the attachment.
+        let depositInvoiceUrl: string | undefined;
+        try {
+          const { renderDepositHtml } = await import("./services/skills/depositTemplate");
+          const { renderHtmlToPdf } = await import("./services/skills/skillPdfService");
+          const { storagePut } = await import("./storage");
+          const isUsd = (departure as any).currency === "USD" || tour.priceUsd != null;
+          const html = renderDepositHtml({
+            bookingId: booking.id,
+            customerName: input.contactName,
+            customerEmail: contactEmail,
+            tripName: tour.title,
+            departureDate: departureDateStr,
+            passengers: `${adults + childWithBed + childNoBed} 位`,
+            totalUSD: isUsd ? totalPrice : Math.round(totalPrice / 32),
+            depositUSD: isUsd ? depositAmount : Math.round(depositAmount / 32),
+          });
+          const pdf = await renderHtmlToPdf(html);
+          const ts = Date.now();
+          const stored = await storagePut(
+            `tools/deposits/${ts}_booking-${booking.id}.pdf`,
+            pdf,
+            "application/pdf"
+          );
+          depositInvoiceUrl = stored.url;
+          console.log(
+            `[bookings.create] Deposit invoice PDF generated for booking ${booking.id}: ${depositInvoiceUrl}`
+          );
+        } catch (depositErr) {
+          console.warn(
+            `[bookings.create] Deposit invoice generation failed for booking ${booking.id}:`,
+            (depositErr as Error)?.message
+          );
+        }
+
         sendBookingConfirmationEmail({
           to: contactEmail,
           customerName: input.contactName,
@@ -3964,9 +4005,10 @@ export const appRouter = router({
           numberOfChildren: childWithBed + childNoBed,
           numberOfInfants: infants,
           totalPrice,
-          depositAmount: Math.floor(totalPrice * 0.2),
-          remainingAmount: totalPrice - Math.floor(totalPrice * 0.2),
+          depositAmount,
+          remainingAmount,
           language: input.language, // v78x: customer's preferred email language
+          depositInvoiceUrl,
         }).catch((emailErr) =>
           console.error(
             `[bookings.create] Email send failed for booking ${booking.id}:`,

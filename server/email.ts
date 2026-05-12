@@ -52,6 +52,10 @@ interface BookingEmailData {
   remainingAmount: number;
   /** v78x: Optional customer language preference. Defaults to 'zh-TW' for backward compat. */
   language?: 'zh-TW' | 'en';
+  /** QA audit Phase 9: pre-generated deposit invoice PDF URL. When present
+   *  the email renders a prominent "下載訂金通知 / 立即付款" CTA so the
+   *  customer never has to ask "how do I pay?". */
+  depositInvoiceUrl?: string;
 }
 
 /**
@@ -563,6 +567,17 @@ function generateBookingConfirmationHTML(data: BookingEmailData): string {
             </table>
           </td>
         </tr>
+        ${data.depositInvoiceUrl ? `
+        <tr>
+          <td style="padding:0 40px 24px 40px;">
+            <div style="background:#1a2a4a;padding:22px 24px;border-radius:8px;text-align:center;">
+              <p style="color:#c9a563;font-size:11px;letter-spacing:0.2em;margin:0 0 6px 0;text-transform:uppercase;font-weight:700;">${data.language === 'en' ? 'Deposit Invoice' : '訂金繳款通知'}</p>
+              <p style="color:#fff;font-size:13px;margin:0 0 14px 0;line-height:1.5;">${data.language === 'en' ? 'A formal PDF invoice with payment instructions has been generated for this booking.' : '我們已為您備好完整訂金繳款通知 PDF,包含金額明細與付款資訊。'}</p>
+              <a href="${data.depositInvoiceUrl}" style="display:inline-block;padding:12px 28px;background:#c9a563;color:#1a2a4a;font-weight:700;text-decoration:none;border-radius:4px;font-size:14px;letter-spacing:0.04em;">${data.language === 'en' ? 'Download deposit invoice (PDF) →' : '下載訂金通知 PDF →'}</a>
+            </div>
+          </td>
+        </tr>
+        ` : ''}
         <tr>
           <td style="padding:0 40px 32px 40px;">
             <div style="background:#eff6ff;border-left:4px solid #3b82f6;padding:16px 20px;border-radius:0 8px 8px 0;">
