@@ -49,6 +49,20 @@ export default function BookingsTab() {
     onSettled: () => setUpdatingId(null),
   });
 
+  // QA audit 2026-05-11 Phase 9 fix wire-up: generate deposit invoice PDF
+  // for a booking with one click. Opens the resulting PDF in a new tab so
+  // Jeff can sanity-check before forwarding to the customer.
+  const generateDepositMutation = trpc.tools.generateDeposit.useMutation({
+    onSuccess: (res) => {
+      toast.success(t('admin.bookingsTab.toastDepositGenerated') || "訂金通知 PDF 已產生");
+      if (res.url) {
+        window.open(res.url, "_blank", "noopener,noreferrer");
+      }
+    },
+    onError: (err: any) =>
+      toast.error(err?.message || (t('admin.bookingsTab.toastDepositFailed') || "PDF 產生失敗")),
+  });
+
   const handleStatusChange = (bookingId: number, newStatus: BookingStatus, currentStatus?: BookingStatus) => {
     // v70: confirm before destructive transitions. Without this an admin can
     // mis-click the dropdown and instantly change a booking's status with no
@@ -325,6 +339,63 @@ export default function BookingsTab() {
                     </Button>
                   ))}
                 </div>
+              </div>
+
+              {/* QA audit Phase 9 fix: one-click deposit invoice PDF for the
+                  customer. Jeff can copy the URL into the confirmation email
+                  manually until the auto-attach flow ships. */}
+              <div className="border-t border-gray-200 pt-4">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                  {t('admin.bookingsTab.toolsLabel') || "工具"}
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs h-8 rounded-lg"
+                  disabled={
+                    generateDepositMutation.isPending ||
+                    !selectedBooking.totalAmount ||
+                    !selectedBooking.depositAmount
+                  }
+                  onClick={() => {
+                    const depUSD = Number(selectedBooking.depositAmount ?? 0);
+                    const totUSD = Number(selectedBooking.totalAmount ?? 0);
+                    if (!depUSD || !totUSD) {
+                      toast.error(
+                        t('admin.bookingsTab.toastMissingAmount') ||
+                          "訂單缺少金額,無法產生 PDF"
+                      );
+                      return;
+                    }
+                    generateDepositMutation.mutate({
+                      bookingId: selectedBooking.id,
+                      customerName: selectedBooking.contactName || "Customer",
+                      customerEmail: selectedBooking.contactEmail || undefined,
+                      tripName:
+                        selectedBooking.tourTitle ||
+                        `Tour #${selectedBooking.tourId}`,
+                      departureDate: selectedBooking.departureDate
+                        ? new Date(selectedBooking.departureDate).toLocaleDateString(
+                            language === "en" ? "en-US" : "zh-TW",
+                            { year: "numeric", month: "long", day: "numeric" }
+                          )
+                        : "未定",
+                      passengers:
+                        selectedBooking.totalPax != null
+                          ? `${selectedBooking.totalPax} 位`
+                          : undefined,
+                      totalUSD: totUSD,
+                      depositUSD: depUSD,
+                    });
+                  }}
+                >
+                  {generateDepositMutation.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <Download className="h-3.5 w-3.5 mr-1.5" />
+                  )}
+                  {t('admin.bookingsTab.generateDepositPdf') || "產生訂金通知 PDF"}
+                </Button>
               </div>
             </div>
           )}
