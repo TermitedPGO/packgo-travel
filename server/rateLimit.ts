@@ -230,6 +230,36 @@ export async function checkForgotPasswordGlobalRateLimit(): Promise<RateLimitRes
   });
 }
 
+/**
+ * Rate limit for login attempts by IP address.
+ * Limit: 10 attempts per 15 minutes per IP — covers the case where ONE
+ * attacker brute-forces multiple accounts. (More permissive than password
+ * reset because legitimate users mistype passwords more often than they
+ * forget them.) QA audit 2026-05-11 Phase 6 found login was wide open.
+ */
+export async function checkLoginRateLimitByIP(ip: string): Promise<RateLimitResult> {
+  return checkRateLimit({
+    key: `login:ip:${ip}`,
+    limit: 10,
+    window: 900, // 15 minutes
+  });
+}
+
+/**
+ * Rate limit for login attempts by email address.
+ * Limit: 5 attempts per 15 minutes per account — covers credential-stuffing
+ * where attacker rotates IPs but targets one account. Same email + wrong
+ * password 5× → 15 min lockout (then auto-reopens).
+ */
+export async function checkLoginRateLimitByEmail(email: string): Promise<RateLimitResult> {
+  const normalizedEmail = email.toLowerCase().trim();
+  return checkRateLimit({
+    key: `login:email:${normalizedEmail}`,
+    limit: 5,
+    window: 900, // 15 minutes
+  });
+}
+
 // ============================================================
 // Booking & Payment Rate Limiting
 // ============================================================

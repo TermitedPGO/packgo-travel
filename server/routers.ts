@@ -66,7 +66,7 @@ function getStripeClient(): Stripe {
   }
   return _stripeClient;
 }
-import { checkForgotPasswordRateLimitByIP, checkForgotPasswordRateLimitByEmail, checkForgotPasswordGlobalRateLimit, isBlockedEmailDomain, checkBookingCreateRateLimit, checkCheckoutSessionRateLimit, checkAiChatRateLimit, checkAiChatDailyLimit, checkAiChatGlobalAnonymousLimit, checkAiChatUserDailyLimit } from "./rateLimit";
+import { checkForgotPasswordRateLimitByIP, checkForgotPasswordRateLimitByEmail, checkForgotPasswordGlobalRateLimit, checkLoginRateLimitByIP, checkLoginRateLimitByEmail, isBlockedEmailDomain, checkBookingCreateRateLimit, checkCheckoutSessionRateLimit, checkAiChatRateLimit, checkAiChatDailyLimit, checkAiChatGlobalAnonymousLimit, checkAiChatUserDailyLimit } from "./rateLimit";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -129,6 +129,35 @@ export const appRouter = router({
         rememberMe: z.boolean().optional().default(false),
       }))
       .mutation(async ({ input, ctx }) => {
+        // QA audit 2026-05-11 Phase 6 fix: login was previously wide open
+        // to credential brute-force. Now rate-limited by IP (10 / 15 min)
+        // AND by email (5 / 15 min) so credential-stuffing across rotating
+        // IPs still hits the per-account ceiling.
+        const ip = (
+          (ctx.req.headers["x-forwarded-for"] as string) ||
+          ctx.req.socket?.remoteAddress ||
+          "unknown"
+        )
+          .split(",")[0]
+          .trim();
+        const ipLimit = await checkLoginRateLimitByIP(ip);
+        if (!ipLimit.allowed) {
+          console.warn(`[Auth] IP rate limit exceeded for login: ${ip}`);
+          throw new TRPCError({
+            code: "TOO_MANY_REQUESTS",
+            message: "登入嘗試過於頻繁,請 15 分鐘後再試",
+          });
+        }
+        const emailLimit = await checkLoginRateLimitByEmail(input.email);
+        if (!emailLimit.allowed) {
+          console.warn(`[Auth] Email rate limit exceeded for login (account lock): ${input.email}`);
+          // Same generic 401 to avoid revealing which accounts are locked.
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "登入失敗",
+          });
+        }
+
         try {
           const user = await auth.authenticateUser(input.email, input.password);
           
