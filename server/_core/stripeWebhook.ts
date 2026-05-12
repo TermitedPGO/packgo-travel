@@ -465,10 +465,51 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
   );
 
   if (payment.bookingId) {
-    await db.updateBooking(payment.bookingId, { paymentStatus: "refunded" }).catch((e) =>
-      console.error("[Stripe Webhook] charge.refunded: updateBooking failed:", e?.message)
+    // QA audit 2026-05-11 Phase 8 fix: previously we only marked
+    // paymentStatus=refunded, leaving bookingStatus="confirmed" and
+    // tourDepartures.bookedSlots un-decremented. That meant a Stripe-
+    // initiated refund left the seat permanently consumed in our DB.
+    // Now: also flip bookingStatus → "cancelled" + release the slot.
+    const bookingBefore = await db.getBookingById(payment.bookingId);
+
+    await db
+      .updateBooking(payment.bookingId, {
+        paymentStatus: "refunded",
+        bookingStatus: "cancelled",
+      })
+      .catch((e) =>
+        console.error(
+          "[Stripe Webhook] charge.refunded: updateBooking failed:",
+          e?.message
+        )
+      );
+    console.log(
+      `[Stripe Webhook] Booking ${payment.bookingId} marked refunded + cancelled`
     );
-    console.log(`[Stripe Webhook] Booking ${payment.bookingId} marked refunded`);
+
+    // Release the seat IF it was still claiming capacity. Skip if the
+    // booking was already cancelled earlier (by customer or admin),
+    // since those flows already called releaseDepartureSlots.
+    const wasActive =
+      bookingBefore &&
+      bookingBefore.bookingStatus !== "cancelled" &&
+      bookingBefore.departureId;
+    if (wasActive) {
+      const seatCount =
+        (bookingBefore!.numberOfAdults || 0) +
+        (bookingBefore!.numberOfChildrenWithBed || 0) +
+        (bookingBefore!.numberOfChildrenNoBed || 0);
+      if (seatCount > 0) {
+        await db
+          .releaseDepartureSlots(bookingBefore!.departureId, seatCount)
+          .catch((e) =>
+            console.error(
+              `[Stripe Webhook] charge.refunded: releaseDepartureSlots failed for booking ${payment.bookingId}:`,
+              e?.message
+            )
+          );
+      }
+    }
 
     // Round 80.22: claw back any Packpoint awarded for this booking.
     // Per docs/packpoint-policy.md §5: "取消訂單若已發點,扣回該次發放的
