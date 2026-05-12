@@ -3959,66 +3959,75 @@ export const appRouter = router({
         const depositAmount = Math.floor(totalPrice * 0.2);
         const remainingAmount = totalPrice - depositAmount;
 
-        // QA audit 2026-05-11 Phase 9 fix: auto-generate the deposit invoice
-        // PDF and attach its URL to the confirmation email so the customer
-        // never has to ask "how do I pay?". Failure to generate is non-fatal
-        // — the booking + email still ship without the attachment.
-        let depositInvoiceUrl: string | undefined;
-        try {
-          const { renderDepositHtml } = await import("./services/skills/depositTemplate");
-          const { renderHtmlToPdf } = await import("./services/skills/skillPdfService");
-          const { storagePut } = await import("./storage");
-          const isUsd = (departure as any).currency === "USD" || tour.priceUsd != null;
-          const html = renderDepositHtml({
-            bookingId: booking.id,
-            customerName: input.contactName,
-            customerEmail: contactEmail,
-            tripName: tour.title,
-            departureDate: departureDateStr,
-            passengers: `${adults + childWithBed + childNoBed} 位`,
-            totalUSD: isUsd ? totalPrice : Math.round(totalPrice / 32),
-            depositUSD: isUsd ? depositAmount : Math.round(depositAmount / 32),
-          });
-          const pdf = await renderHtmlToPdf(html);
-          const ts = Date.now();
-          const stored = await storagePut(
-            `tools/deposits/${ts}_booking-${booking.id}.pdf`,
-            pdf,
-            "application/pdf"
-          );
-          depositInvoiceUrl = stored.url;
-          console.log(
-            `[bookings.create] Deposit invoice PDF generated for booking ${booking.id}: ${depositInvoiceUrl}`
-          );
-        } catch (depositErr) {
-          console.warn(
-            `[bookings.create] Deposit invoice generation failed for booking ${booking.id}:`,
-            (depositErr as Error)?.message
-          );
-        }
+        // Deposit PDF generation + confirmation email run AFTER returning
+        // the booking to the customer. Previously the Puppeteer render
+        // (5-15s) blocked the customer's HTTP response — they saw
+        // "loading…" for a long time after clicking Confirm. Now the
+        // response returns in <1s and the PDF + email finish in the
+        // background.
+        //
+        // Email still gets the PDF URL because both run inside the same
+        // promise chain — they're just decoupled from the HTTP response.
+        const isUsd = (departure as any).currency === "USD" || tour.priceUsd != null;
+        void (async () => {
+          let depositInvoiceUrl: string | undefined;
+          try {
+            const { renderDepositHtml } = await import("./services/skills/depositTemplate");
+            const { renderHtmlToPdf } = await import("./services/skills/skillPdfService");
+            const { storagePut } = await import("./storage");
+            const html = renderDepositHtml({
+              bookingId: booking.id,
+              customerName: input.contactName,
+              customerEmail: contactEmail,
+              tripName: tour.title,
+              departureDate: departureDateStr,
+              passengers: `${adults + childWithBed + childNoBed} 位`,
+              totalUSD: isUsd ? totalPrice : Math.round(totalPrice / 32),
+              depositUSD: isUsd ? depositAmount : Math.round(depositAmount / 32),
+            });
+            const pdf = await renderHtmlToPdf(html);
+            const ts = Date.now();
+            const stored = await storagePut(
+              `tools/deposits/${ts}_booking-${booking.id}.pdf`,
+              pdf,
+              "application/pdf"
+            );
+            depositInvoiceUrl = stored.url;
+            console.log(
+              `[bookings.create] Deposit invoice PDF generated for booking ${booking.id}: ${depositInvoiceUrl}`
+            );
+          } catch (depositErr) {
+            console.warn(
+              `[bookings.create] Deposit invoice generation failed for booking ${booking.id}:`,
+              (depositErr as Error)?.message
+            );
+          }
 
-        sendBookingConfirmationEmail({
-          to: contactEmail,
-          customerName: input.contactName,
-          customerEmail: contactEmail,
-          bookingId: booking.id,
-          tourTitle: tour.title,
-          departureDate: departureDateStr,
-          returnDate: returnDateStr,
-          numberOfAdults: adults,
-          numberOfChildren: childWithBed + childNoBed,
-          numberOfInfants: infants,
-          totalPrice,
-          depositAmount,
-          remainingAmount,
-          language: input.language, // v78x: customer's preferred email language
-          depositInvoiceUrl,
-        }).catch((emailErr) =>
-          console.error(
-            `[bookings.create] Email send failed for booking ${booking.id}:`,
-            emailErr?.message
-          )
-        );
+          try {
+            await sendBookingConfirmationEmail({
+              to: contactEmail,
+              customerName: input.contactName,
+              customerEmail: contactEmail,
+              bookingId: booking.id,
+              tourTitle: tour.title,
+              departureDate: departureDateStr,
+              returnDate: returnDateStr,
+              numberOfAdults: adults,
+              numberOfChildren: childWithBed + childNoBed,
+              numberOfInfants: infants,
+              totalPrice,
+              depositAmount,
+              remainingAmount,
+              language: input.language, // v78x: customer's preferred email language
+              depositInvoiceUrl,
+            });
+          } catch (emailErr) {
+            console.error(
+              `[bookings.create] Email send failed for booking ${booking.id}:`,
+              (emailErr as Error)?.message
+            );
+          }
+        })();
 
         // v78n Sprint 6A: schedule 30-min abandonment recovery email
         try {
