@@ -89,11 +89,18 @@ export interface TourGenerationResult {
 export const tourGenerationQueue = new Queue<TourGenerationJobData, TourGenerationResult>("tour-generation", {
   connection: redisBullMQ,
   defaultJobOptions: {
-    attempts: 3, // Retry up to 3 times on failure
-    backoff: {
-      type: "exponential",
-      delay: 5000, // Start with 5 second delay
-    },
+    // v80.24: was attempts=3 with 5s exponential backoff. The audit found
+    // we now have THREE compounding retry layers:
+    //   - BullMQ (3 attempts here)
+    //   - RetryManager inside masterAgent (3 attempts per LLM call)
+    //   - Anthropic SDK (maxRetries: 2)
+    // Net: 18 retries per LLM call when something flaps. A single JSON
+    // SyntaxError used to cost 3 × 120s = 6 minutes of LLM compute.
+    //
+    // We now do ONE BullMQ attempt and let masterAgent's per-step RetryManager
+    // make the fine-grained retry decisions. Anthropic SDK is also forced to 0
+    // retries (see _core/llm.ts) so we have a single source of retry truth.
+    attempts: 1,
     removeOnComplete: {
       age: 3600, // Keep completed jobs for 1 hour
       count: 100, // Keep last 100 completed jobs
@@ -542,3 +549,127 @@ export async function triggerManualTourMonitor(userId?: number) {
 }
 
 console.log("✅ Tour monitor queue initialized");
+
+// ============================================================================
+// Round 81 Phase 3.5: Self-Retrospective Agent — weekly cron.
+//
+// Every Monday 01:00 UTC (Sunday 18:00 PT / Monday 09:00 Taipei) the
+// retrospective agent reads the past 7 days of outcomes + policies and
+// produces a structured digest with optional policy proposals. The
+// result lands in the Inbox under "政策提案 · Self-Retrospective".
+// ============================================================================
+
+export interface RetrospectiveJobData {
+  triggeredBy: "schedule" | "manual";
+  windowDays?: number;
+}
+
+export interface RetrospectiveJobResult {
+  totalOutcomesAnalyzed: number;
+  proposalsCount: number;
+  messageId: number;
+}
+
+export const retrospectiveQueue = new Queue<
+  RetrospectiveJobData,
+  RetrospectiveJobResult
+>("retrospective", {
+  connection: redisBullMQ,
+  defaultJobOptions: {
+    attempts: 2,
+    backoff: { type: "exponential", delay: 60000 },
+    removeOnComplete: { age: 1209600, count: 50 }, // 14 days
+    removeOnFail: { age: 2592000, count: 50 }, // 30 days
+  },
+});
+
+export async function scheduleWeeklyRetrospective() {
+  const repeatableJobs = await retrospectiveQueue.getRepeatableJobs();
+  for (const job of repeatableJobs) {
+    if (job.name === "weekly-retrospective") {
+      await retrospectiveQueue.removeRepeatableByKey(job.key);
+    }
+  }
+  await retrospectiveQueue.add(
+    "weekly-retrospective",
+    { triggeredBy: "schedule", windowDays: 7 },
+    {
+      repeat: {
+        pattern: "0 1 * * 1", // Monday 01:00 UTC (= Sun 18:00 PT / Mon 09:00 Taipei)
+      },
+      jobId: "weekly-retrospective-scheduled",
+    }
+  );
+  console.log(
+    "✅ Weekly retrospective scheduled: Monday 01:00 UTC (Sunday 18:00 PT)"
+  );
+}
+
+console.log("✅ Retrospective queue initialized");
+
+// ============================================================================
+// Gmail Poll Queue — periodically scan active Gmail integrations, run the
+// InquiryAgent pipeline for new threads.
+//
+// QA audit 2026-05-11 Phase 9 found this was the #1 customer-churn gap:
+// InquiryAgent drafts excellent replies, gmailPipeline.ts has the auto-send
+// path wired, but nothing triggered the pipeline on a schedule. It only
+// fired when Jeff manually clicked "Run now" in admin. A customer asks at
+// 10am, Jeff opens admin at 2pm → 4-hour cold reply.
+//
+// Cadence: every 10 minutes. Jeff can tune via cron pattern; tighter than
+// 5 min adds Gmail API quota pressure without proportional customer
+// benefit since most inquiries don't need sub-15-min response.
+// ============================================================================
+
+export interface GmailPollJobData {
+  triggeredBy: "schedule" | "manual";
+}
+
+export interface GmailPollJobResult {
+  integrationsScanned: number;
+  totalProcessed: number;
+  totalAutoReplied: number;
+  totalEscalated: number;
+  errors: number;
+}
+
+export const gmailPollQueue = new Queue<GmailPollJobData, GmailPollJobResult>(
+  "gmail-poll",
+  {
+    connection: redisBullMQ,
+    defaultJobOptions: {
+      attempts: 2,
+      backoff: { type: "exponential", delay: 30000 },
+      removeOnComplete: { age: 604800, count: 100 }, // 7 days
+      removeOnFail: { age: 2592000, count: 50 }, // 30 days
+    },
+  }
+);
+
+/**
+ * Schedule Gmail polling every 10 minutes. Each tick runs the full
+ * pipeline (fetch new threads → classify → optionally auto-reply) for
+ * every active gmailIntegration row.
+ */
+export async function scheduleGmailPoll() {
+  const repeatableJobs = await gmailPollQueue.getRepeatableJobs();
+  for (const job of repeatableJobs) {
+    if (job.name === "gmail-poll-tick") {
+      await gmailPollQueue.removeRepeatableByKey(job.key);
+    }
+  }
+  await gmailPollQueue.add(
+    "gmail-poll-tick",
+    { triggeredBy: "schedule" },
+    {
+      repeat: {
+        pattern: "*/10 * * * *", // every 10 minutes
+      },
+      jobId: "gmail-poll-scheduled",
+    }
+  );
+  console.log("✅ Gmail poll scheduled: every 10 minutes");
+}
+
+console.log("✅ Gmail poll queue initialized");

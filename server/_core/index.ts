@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express from "express";
+import compression from "compression";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import { createServer } from "http";
@@ -17,6 +18,7 @@ import { progressRouter } from "../progressRouter";
 import { aiChatStreamRouter } from "../aiChatStreamRouter";
 import { generalImageUploadRouter } from "../generalImageUpload";
 import { initializeGoogleAuth } from "../googleAuth";
+import { initializeGmailOAuth } from "../gmailOAuth";
 import "../worker"; // Initialize BullMQ worker
 
 function isPortAvailable(port: number): Promise<boolean> {
@@ -40,6 +42,10 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 
 async function startServer() {
   const app = express();
+  // SEO audit 2026-05-09: enable response compression. The 702KB JS bundle
+  // was being served uncompressed; gzip cuts it ~70% and fixes LCP on slow
+  // connections. Added before any route handlers so all responses benefit.
+  app.use(compression());
   const server = createServer(app);
   
   // Enable SO_REUSEADDR to allow port reuse
@@ -49,9 +55,40 @@ async function startServer() {
     console.log(`Server running on http://localhost:${port}/`);
   });
   
+  // Round 80.18 v2: redirect old fly.dev / Manus / www → canonical
+  // packgoplay.com. CRITICAL exemptions:
+  //   - /healthz: Fly internal probes
+  //   - /api/*: tRPC + REST API calls (301 turns POST→GET, breaks mutations)
+  //   - /sitemap.xml + /robots.txt: SEO crawlers
+  // Use 308 (not 301) to preserve HTTP method on form submits / file uploads
+  // that legitimately hit the page-side host (rare).
+  app.use((req, res, next) => {
+    if (
+      req.path === "/healthz" ||
+      req.path.startsWith("/api/") ||
+      req.path === "/sitemap.xml" ||
+      req.path === "/robots.txt"
+    ) {
+      return next();
+    }
+    const host = (req.headers.host || "").toLowerCase();
+    const isLegacyHost =
+      host === "packgo-travel.fly.dev" ||
+      host === "packgo09.manus.space" ||
+      host === "packgo-d3xjbq67.manus.space" ||
+      host === "www.packgoplay.com";
+    if (isLegacyHost) {
+      return res.redirect(308, `https://packgoplay.com${req.originalUrl}`);
+    }
+    return next();
+  });
+
   // P0-6: CORS whitelist - only allow known origins
   const allowedOrigins = [
-    // Fly.io production
+    // Round 80.18: production custom domain
+    "https://packgoplay.com",
+    "https://www.packgoplay.com",
+    // Fly.io (kept as origin alias — internal health checks + redirect source)
     "https://packgo-travel.fly.dev",
     // Legacy Manus domains (kept during migration overlap; remove once DNS cutover completes)
     "https://packgo09.manus.space",
@@ -129,8 +166,12 @@ async function startServer() {
       "img-src 'self' data: blob: https:",
       // Fonts: self + Google Fonts
       "font-src 'self' data: https://fonts.gstatic.com",
-      // Connections: self + Stripe + Google + S3 + analytics
-      "connect-src 'self' https://api.stripe.com https://checkout.stripe.com https://*.s3.amazonaws.com https://*.googleapis.com https://www.google-analytics.com https://accounts.google.com",
+      // Connections: self + Stripe + Google + S3 + analytics + map tile providers.
+      // Round 80.21 v14 — maplibre-gl fetches raster tiles via XHR, which
+      // CSP blocks unless connect-src lists the tile CDN. Added Carto +
+      // OSM Nominatim. Without this, packgoplay.com map renders white
+      // and console fills with `AJAXError: Failed to fetch (0)`.
+      "connect-src 'self' https://api.stripe.com https://checkout.stripe.com https://*.s3.amazonaws.com https://*.googleapis.com https://www.google-analytics.com https://accounts.google.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://nominatim.openstreetmap.org https://*.basemaps.cartocdn.com https://basemaps.cartocdn.com https://tiles.basemaps.cartocdn.com https://tiles.openfreemap.org https://*.openfreemap.org https://a.tile.opentopomap.org https://b.tile.opentopomap.org https://c.tile.opentopomap.org https://*.opentopomap.org",
       // Frames: Stripe Checkout + Google OAuth
       "frame-src 'self' https://js.stripe.com https://checkout.stripe.com https://accounts.google.com",
       // Objects and base URI: strict
@@ -172,8 +213,11 @@ async function startServer() {
   // Cookie parser - MUST be before routes that need to read cookies
   app.use(cookieParser());
   
-  // Google OAuth
+  // Google OAuth (user login)
   initializeGoogleAuth(app);
+
+  // Gmail OAuth (Round 81 — email pipeline)
+  initializeGmailOAuth(app);
   
   // Manus OAuth removed - using Google OAuth + Email/Password instead
   // Avatar upload API
@@ -187,7 +231,98 @@ async function startServer() {
   
   // PDF upload API
   app.use("/api", pdfUploadRouter);
-  
+
+  // v80.24: Internal test endpoint for automated quality regression tests.
+  // Protected by INTERNAL_TEST_TOKEN (set via fly secrets). Lets Claude /
+  // CI scripts trigger tour generation programmatically without admin login.
+  // POST /api/internal/test-generate
+  //   Headers: Authorization: Bearer <INTERNAL_TEST_TOKEN>
+  //   Body: { url: string, mode?: "URL" | "PDF", isPdf?: boolean }
+  // Returns: { jobId: string }
+  app.post("/api/internal/test-generate", async (req, res) => {
+    try {
+      const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
+      const expected = process.env.INTERNAL_TEST_TOKEN || "";
+      if (!expected) {
+        return res.status(503).json({ error: "INTERNAL_TEST_TOKEN not configured" });
+      }
+      if (!token || token !== expected) {
+        return res.status(401).json({ error: "Invalid token" });
+      }
+      const { url, mode, isPdf, force } = req.body || {};
+      if (typeof url !== "string" || !url) {
+        return res.status(400).json({ error: "Missing url" });
+      }
+      const { addTourGenerationJob } = await import("../queue");
+      const requestId = `gen_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      const job = await addTourGenerationJob({
+        url,
+        userId: 1, // admin user id
+        requestId,
+        forceRegenerate: force === true || force === "true",
+        isPdf: typeof isPdf === "boolean" ? isPdf : mode === "PDF",
+      });
+      const jobId = String(job.id || requestId);
+      console.log(`[internal/test-generate] queued job=${jobId} mode=${isPdf ? "PDF" : "URL"} url=${url.slice(0, 80)}`);
+      return res.json({ jobId, mode: isPdf ? "PDF" : "URL" });
+    } catch (err) {
+      console.error("[internal/test-generate] error:", err);
+      return res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // v80.24: Bulk import from Lion Travel — fast path that skips LLM
+  // rewriting. Imports raw Lion data + real seats in ~30 seconds for 50+
+  // tours. Admin can trigger background LLM rewrite later.
+  // POST /api/internal/bulk-import-lion
+  //   Body: { ids?: string[], categoryPath?: string, limit?: number, queueRewrite?: boolean }
+  //   Returns: BulkImportBatchResult + (if queueRewrite) queued: N
+  app.post("/api/internal/bulk-import-lion", async (req, res) => {
+    try {
+      const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
+      const expected = process.env.INTERNAL_TEST_TOKEN || "";
+      if (!expected || token !== expected) {
+        return res.status(401).json({ error: "Invalid token" });
+      }
+      const { ids, categoryPath, limit, queueRewrite } = req.body || {};
+      if (!ids?.length && !categoryPath) {
+        return res.status(400).json({ error: "Provide either ids[] or categoryPath" });
+      }
+      const { bulkImportFromLion, queueRewriteForImportedTours } = await import("../services/lionBulkImportService");
+      const result = await bulkImportFromLion({ ids, categoryPath, limit });
+      let queued = 0;
+      if (queueRewrite && result.imported > 0) {
+        const tourIds = result.results.filter(r => r.success && r.tourId).map(r => r.tourId!);
+        ({ queued } = await queueRewriteForImportedTours(tourIds, { userId: 1 }));
+      }
+      return res.json({ ...result, queued });
+    } catch (err) {
+      console.error("[internal/bulk-import-lion] error:", err);
+      return res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // Status endpoint paired with test-generate
+  app.get("/api/internal/test-status/:jobId", async (req, res) => {
+    try {
+      const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
+      const expected = process.env.INTERNAL_TEST_TOKEN || "";
+      if (!expected || token !== expected) {
+        return res.status(401).json({ error: "Invalid token" });
+      }
+      const { tourGenerationQueue } = await import("../queue");
+      const job = await tourGenerationQueue.getJob(req.params.jobId);
+      if (!job) return res.status(404).json({ error: "Job not found" });
+      const state = await job.getState();
+      const progress = job.progress;
+      const result = state === "completed" ? job.returnvalue : null;
+      const failedReason = state === "failed" ? job.failedReason : null;
+      return res.json({ jobId: job.id, state, progress, result, failedReason });
+    } catch (err) {
+      return res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   // Progress tracking SSE API
   app.use("/api", progressRouter);
 
@@ -203,15 +338,26 @@ async function startServer() {
       const baseUrl = ENV.baseUrl;
       const now = new Date().toISOString().split('T')[0];
 
+      // Sitemap pages — SEO audit 2026-05-09 added missing high-value pages
+      // (china-visa, membership, rewards, flight/hotel/airport-transfer,
+      // custom-tour-request, inquiry) and replaced /visa-services with the
+      // canonical /china-visa (the former is a JS redirect).
       const staticPages = [
         { url: '/', priority: '1.0', changefreq: 'daily' },
         { url: '/tours', priority: '0.9', changefreq: 'daily' },
-        { url: '/about-us', priority: '0.7', changefreq: 'monthly' },
-        { url: '/contact-us', priority: '0.7', changefreq: 'monthly' },
+        { url: '/china-visa', priority: '0.9', changefreq: 'weekly' },
         { url: '/custom-tours', priority: '0.8', changefreq: 'weekly' },
+        { url: '/custom-tour-request', priority: '0.8', changefreq: 'weekly' },
         { url: '/group-packages', priority: '0.8', changefreq: 'weekly' },
         { url: '/cruises', priority: '0.7', changefreq: 'weekly' },
-        { url: '/visa-services', priority: '0.6', changefreq: 'monthly' },
+        { url: '/flight-booking', priority: '0.7', changefreq: 'weekly' },
+        { url: '/hotel-booking', priority: '0.7', changefreq: 'weekly' },
+        { url: '/airport-transfer', priority: '0.7', changefreq: 'weekly' },
+        { url: '/membership', priority: '0.7', changefreq: 'monthly' },
+        { url: '/rewards', priority: '0.6', changefreq: 'monthly' },
+        { url: '/about-us', priority: '0.7', changefreq: 'monthly' },
+        { url: '/contact-us', priority: '0.7', changefreq: 'monthly' },
+        { url: '/inquiry', priority: '0.6', changefreq: 'monthly' },
         { url: '/faq', priority: '0.6', changefreq: 'monthly' },
       ];
 
@@ -220,7 +366,7 @@ async function startServer() {
         .filter((t: any) => t.status === 'active' || t.status === 'soldout')
         .map((t: any) => {
           const lastmod = t.updatedAt ? new Date(t.updatedAt).toISOString().split('T')[0] : now;
-          return `  <url>\n    <loc>${baseUrl}/tour/${t.id}</loc>\n    <xhtml:link rel="alternate" hreflang="zh-TW" href="${baseUrl}/tour/${t.id}"/>\n    <xhtml:link rel="alternate" hreflang="en" href="${baseUrl}/tour/${t.id}?lang=en"/>\n    <xhtml:link rel="alternate" hreflang="x-default" href="${baseUrl}/tour/${t.id}"/>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`;
+          return `  <url>\n    <loc>${baseUrl}/tours/${t.id}</loc>\n    <xhtml:link rel="alternate" hreflang="zh-TW" href="${baseUrl}/tours/${t.id}"/>\n    <xhtml:link rel="alternate" hreflang="en" href="${baseUrl}/tours/${t.id}?lang=en"/>\n    <xhtml:link rel="alternate" hreflang="x-default" href="${baseUrl}/tours/${t.id}"/>\n    <lastmod>${lastmod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`;
         })
         .join('\n');
 
@@ -352,6 +498,55 @@ async function startServer() {
     await import('../tripReminderWorker');
   } catch (err) {
     console.warn('[Startup] Failed to schedule trip reminders:', err);
+  }
+
+  // Round 81 Phase 3.5: Schedule weekly Self-Retrospective at Mon 01:00 UTC
+  // (Sun 18:00 PT). Reads past 7 days of agent outcomes + policies, posts
+  // a digest + policy proposals to the Inbox.
+  try {
+    const { scheduleWeeklyRetrospective } = await import('../queue');
+    await scheduleWeeklyRetrospective();
+    await import('../retrospectiveWorker');
+  } catch (err) {
+    console.warn('[Startup] Failed to schedule weekly retrospective:', err);
+  }
+
+  // QA audit 2026-05-11 Phase 9 P0: Gmail poll cron. Closes the
+  // "customer asks at 10am, Jeff sees at 2pm" gap by polling every 10
+  // minutes and running InquiryAgent pipeline on new threads. autoSend
+  // gate inside the pipeline still respects per-policy autoSendEnabled.
+  try {
+    const { scheduleGmailPoll } = await import('../queue');
+    await scheduleGmailPoll();
+    await import('../gmailPollWorker');
+  } catch (err) {
+    console.warn('[Startup] Failed to schedule Gmail poll:', err);
+  }
+
+  // Round 80.22 Phase C: Packpoint daily maintenance — auto-upgrade tier,
+  // 18-month inactivity expiry, birthday bonus. Runs at 02:00 UTC (10:00
+  // Taipei). Idempotent on each user-level mutation.
+  try {
+    const {
+      scheduleDailyPackpointMaintenance,
+      initPackpointMaintenanceWorker,
+    } = await import('../queues/packpointMaintenanceQueue');
+    await scheduleDailyPackpointMaintenance();
+    initPackpointMaintenanceWorker();
+  } catch (err) {
+    console.warn('[Startup] Failed to schedule Packpoint maintenance:', err);
+  }
+
+  // Round 80.22 Phase H2: Supplier poster processing worker — async
+  // pipeline (AI Vision → gpt-image-2 → 7 platform copies). Triggered
+  // by admin uploads via posters.create tRPC mutation.
+  try {
+    const { initPosterProcessingWorker } = await import(
+      '../queues/posterProcessingQueue'
+    );
+    initPosterProcessingWorker();
+  } catch (err) {
+    console.warn('[Startup] Failed to init poster processing worker:', err);
   }
 
   const preferredPort = parseInt(process.env.PORT || "3000");
