@@ -2204,22 +2204,26 @@ export const appRouter = router({
     }),
 
     // Search tours with filters (public)
+    // QA audit 2026-05-11 Phase 2 fix: input was unbounded — destination
+    // and category accepted arbitrary-length strings, arrays were uncapped.
+    // A 10MB Unicode payload would tie up the query planner. All inputs
+    // now have realistic length / count caps.
     search: publicProcedure
       .input(
         z.object({
-          destination: z.string().optional(),
-          category: z.string().optional(),
-          minDays: z.number().optional(),
-          maxDays: z.number().optional(),
-          minPrice: z.number().optional(),
-          maxPrice: z.number().optional(),
-          airlines: z.array(z.string()).optional(),
-          hotelGrades: z.array(z.string()).optional(),
-          specialActivities: z.array(z.string()).optional(),
-          tags: z.array(z.string()).optional(),
+          destination: z.string().max(100).optional(),
+          category: z.string().max(50).optional(),
+          minDays: z.number().int().min(0).max(365).optional(),
+          maxDays: z.number().int().min(0).max(365).optional(),
+          minPrice: z.number().min(0).max(1_000_000).optional(),
+          maxPrice: z.number().min(0).max(1_000_000).optional(),
+          airlines: z.array(z.string().max(50)).max(20).optional(),
+          hotelGrades: z.array(z.string().max(30)).max(10).optional(),
+          specialActivities: z.array(z.string().max(50)).max(20).optional(),
+          tags: z.array(z.string().max(50)).max(20).optional(),
           sortBy: z.enum(["popular", "price_asc", "price_desc", "days_asc", "days_desc"]).optional(),
-          page: z.number().min(1).default(1),
-          pageSize: z.number().min(1).max(100).default(12),
+          page: z.number().int().min(1).max(10_000).default(1),
+          pageSize: z.number().int().min(1).max(100).default(12),
         })
       )
       .query(async ({ input }) => {
