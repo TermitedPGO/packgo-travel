@@ -5,6 +5,7 @@ import * as db from "../db";
 import { sendPaymentSuccessEmail, sendSupplierNotificationEmail } from "../email";
 import { sendVisaApplicationConfirmation } from "../services/visaEmailService";
 import { createAccountingEntry } from "../db";
+import { notifyOwner } from "./notification";
 
 
 // P0-2: Lazy-load Stripe to prevent server crash when STRIPE_SECRET_KEY is not set
@@ -81,6 +82,20 @@ export async function handleStripeWebhook(req: Request, res: Response) {
         break;
       }
 
+      // Round 80.20: Membership Phase 2 — subscription lifecycle.
+      // Customer subscribes → set users.tier; cancels → reset to free.
+      case "customer.subscription.created":
+      case "customer.subscription.updated": {
+        const sub = event.data.object as Stripe.Subscription;
+        await handleSubscriptionUpserted(sub);
+        break;
+      }
+      case "customer.subscription.deleted": {
+        const sub = event.data.object as Stripe.Subscription;
+        await handleSubscriptionDeleted(sub);
+        break;
+      }
+
       default:
         console.log(`[Stripe Webhook] Unhandled event type: ${event.type}`);
     }
@@ -96,7 +111,28 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
   console.log("[Stripe Webhook] Processing checkout.session.completed");
   console.log("[Stripe Webhook] Session ID:", session.id);
   console.log("[Stripe Webhook] Payment Intent:", session.payment_intent);
+  console.log("[Stripe Webhook] Mode:", session.mode);
   console.log("[Stripe Webhook] Metadata:", session.metadata);
+
+  // Round 80.22: subscription checkout — promote user tier here as a safety
+  // net. customer.subscription.created should also fire (and reach
+  // handleSubscriptionUpserted), but this fallback means tier flips even if
+  // the user only enabled `checkout.session.completed` in their webhook.
+  if (session.mode === "subscription" && session.subscription) {
+    const subscriptionId =
+      typeof session.subscription === "string"
+        ? session.subscription
+        : session.subscription.id;
+    try {
+      const sub = await getStripe().subscriptions.retrieve(subscriptionId);
+      await handleSubscriptionUpserted(sub);
+    } catch (err: any) {
+      console.error(
+        `[Stripe Webhook] Failed to promote tier from checkout.session.completed: ${err.message}`
+      );
+    }
+    return;
+  }
 
   const bookingId = session.metadata?.booking_id;
   const paymentType = session.metadata?.payment_type as "deposit" | "full" | "balance";
@@ -172,6 +208,57 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
   });
 
   console.log(`[Stripe Webhook] Booking ${bookingId} payment status updated to ${newPaymentStatus}`);
+
+  // Round 80.22: award Packpoint when booking is FULLY paid. We award on
+  // the FULL subtotal (not the per-payment amount) so deposit + balance
+  // doesn't double-count. Idempotency is enforced by awardBookingPackpoint
+  // checking pointsTransactions for an existing booking_earn row.
+  // Skip awarding if no userId on booking (guest checkout) — points need a
+  // user to attach to.
+  if (newPaymentStatus === "paid" && (booking as any).userId) {
+    try {
+      const { awardBookingPackpoint } = await import("./packpoint");
+      // Currency: most PACK&GO bookings are USD; for TWD or other currencies
+      // we'd need exchange-rate conversion. Skip non-USD for now to avoid
+      // mis-awarding (TODO: integrate exchangeRateAgent if multi-currency).
+      const currency = (session.currency ?? "usd").toLowerCase();
+      if (currency === "usd") {
+        const points = await awardBookingPackpoint({
+          userId: (booking as any).userId,
+          bookingId: parseInt(bookingId),
+          tourId: booking.tourId,
+          subtotalUsd: booking.totalPrice, // booking.totalPrice is in original currency
+        });
+        console.log(`[Stripe Webhook] Packpoint awarded for booking ${bookingId}: ${points} pts`);
+      } else {
+        console.log(
+          `[Stripe Webhook] Skipped Packpoint for booking ${bookingId} (non-USD currency: ${currency})`
+        );
+      }
+    } catch (err) {
+      console.error(
+        `[Stripe Webhook] Failed to award Packpoint for booking ${bookingId}:`,
+        (err as Error).message
+      );
+      // Don't fail the webhook on point-award errors
+    }
+
+    // Round 80.22 Phase D: referral bonus on FIRST paid booking.
+    // Idempotency lives inside awardReferralOnFirstBooking via the
+    // users.referralBonusAwarded flag — repeat calls are no-ops.
+    try {
+      const { awardReferralOnFirstBooking } = await import("./referral");
+      await awardReferralOnFirstBooking({
+        refereeUserId: (booking as any).userId,
+        bookingId: parseInt(bookingId),
+      });
+    } catch (err) {
+      console.error(
+        `[Stripe Webhook] Referral payout failed for booking ${bookingId}:`,
+        (err as Error).message
+      );
+    }
+  }
 
   // v78n Sprint 6A: customer paid → cancel any pending abandonment recovery email
   try {
@@ -274,6 +361,34 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
     console.error('[Stripe Webhook] Failed to send payment success email:', error);
     // Don't fail the webhook if email fails
   }
+
+  // QA Audit 2026-05-11 Phase 5 fix: notify Jeff every time a payment lands.
+  // Phase 5 found Jeff was completely blind to payment events — Stripe sent
+  // emails to the customer + supplier but never to the owner. With Jeff
+  // potentially leading a tour overseas with limited bandwidth, an inbox
+  // line is the simplest reliable signal that money moved.
+  try {
+    const tour = await db.getTourById(booking.tourId);
+    const tourTitle = tour?.title ?? `Tour #${booking.tourId}`;
+    const usd = (amount / 100).toFixed(2);
+    const kindZh =
+      paymentType === "deposit"
+        ? "訂金"
+        : paymentType === "balance"
+          ? "尾款"
+          : "全額";
+    await notifyOwner({
+      title: `收到付款 $${usd} — ${tourTitle}`,
+      content:
+        `Booking #${booking.id} · ${kindZh}\n` +
+        `客戶: ${booking.customerName}\n` +
+        `行程: ${tourTitle}\n` +
+        `金額: $${usd} ${(session.currency ?? "usd").toUpperCase()}\n` +
+        `Stripe session: ${session.id}`,
+    });
+  } catch (err) {
+    console.error("[Stripe Webhook] notifyOwner (payment) failed:", err);
+  }
 }
 
 async function handlePaymentIntentSucceeded(paymentIntent: Stripe.PaymentIntent) {
@@ -353,6 +468,69 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
       console.error("[Stripe Webhook] charge.refunded: updateBooking failed:", e?.message)
     );
     console.log(`[Stripe Webhook] Booking ${payment.bookingId} marked refunded`);
+
+    // Round 80.22: claw back any Packpoint awarded for this booking.
+    // Per docs/packpoint-policy.md §5: "取消訂單若已發點,扣回該次發放的
+    // packpoint(若餘額不足,記為負餘額,需用未來訂單補回)". Our deduct
+    // helper caps at current balance (no negative), so users who already
+    // spent the points won't get a punitive negative — but the audit trail
+    // captures the clawback attempt amount.
+    try {
+      const booking = await db.getBookingById(payment.bookingId);
+      if (booking && (booking as any).userId) {
+        const { getDb } = await import("../db");
+        const drizzle = await getDb();
+        if (drizzle) {
+          const { pointsTransactions } = await import("../../drizzle/schema");
+          const { sql } = await import("drizzle-orm");
+          const [earnRow] = await drizzle
+            .select({ delta: pointsTransactions.delta })
+            .from(pointsTransactions)
+            .where(
+              sql`${pointsTransactions.referenceType} = 'booking' AND ${pointsTransactions.referenceId} = ${payment.bookingId} AND ${pointsTransactions.reason} = 'booking_earn'`
+            )
+            .limit(1);
+
+          if (earnRow && earnRow.delta > 0) {
+            const { deductPackpoint } = await import("./packpoint");
+            await deductPackpoint({
+              userId: (booking as any).userId,
+              amount: earnRow.delta,
+              reason: "clawback",
+              referenceType: "booking",
+              referenceId: payment.bookingId,
+              description: `Refund clawback for booking #${payment.bookingId}`,
+            });
+            console.log(
+              `[Stripe Webhook] Clawed back ${earnRow.delta} Packpoint from booking ${payment.bookingId} refund`
+            );
+          }
+        }
+      }
+    } catch (err) {
+      console.error(
+        `[Stripe Webhook] Packpoint clawback failed for booking ${payment.bookingId}:`,
+        (err as Error).message
+      );
+    }
+  }
+
+  // QA Audit 2026-05-11 Phase 5 fix: notify Jeff on every refund — full or
+  // initiated. Refunds are the highest-touch financial event (accounting,
+  // tax, customer-relationship), so silence here was the worst gap.
+  try {
+    const usd = (charge.amount_refunded / 100).toFixed(2);
+    await notifyOwner({
+      title: `退款 $${usd} — Booking #${payment.bookingId ?? "?"}`,
+      content:
+        `Charge: ${charge.id}\n` +
+        `Payment intent: ${paymentIntentId}\n` +
+        `Refunded: $${usd} ${(charge.currency ?? "usd").toUpperCase()}\n` +
+        `Original: $${(charge.amount / 100).toFixed(2)}\n` +
+        `Booking: ${payment.bookingId ?? "(無對應 booking)"}`,
+    });
+  } catch (err) {
+    console.error("[Stripe Webhook] notifyOwner (refund) failed:", err);
   }
 }
 
@@ -414,4 +592,130 @@ async function handleVisaPaymentCompleted(
   } catch (error) {
     console.error('[Stripe Webhook] Failed to send visa confirmation email:', error);
   }
+
+  // QA Audit Phase 5 fix: visa payment notification to Jeff.
+  try {
+    const usd = session.amount_total ? (session.amount_total / 100).toFixed(2) : "?";
+    await notifyOwner({
+      title: `中國簽證付款 $${usd} — Application #${applicationId}`,
+      content:
+        `申請人: ${application.firstName} ${application.lastName}\n` +
+        `護照: ${application.passportNumber}\n` +
+        `Email: ${application.email}\n` +
+        `金額: $${usd}\n` +
+        `Travel date: ${application.travelDate ?? "未填"}`,
+    });
+  } catch (err) {
+    console.error("[Stripe Webhook] notifyOwner (visa) failed:", err);
+  }
+}
+
+// ─── Round 80.20: Membership subscription handlers ────────────────────────
+//
+// Lifecycle:
+//   1. User clicks Plus on /membership → tRPC creates Checkout session
+//      with `metadata.tier = 'plus' | 'concierge'` and `metadata.userId`
+//   2. After payment, Stripe sends `customer.subscription.created` →
+//      we set users.tier + tierExpiresAt + stripeSubscriptionId
+//   3. Renewals fire `customer.subscription.updated` → refresh tierExpiresAt
+//   4. Cancel fires `customer.subscription.deleted` → reset to 'free'
+//
+// Idempotent: rerunning on the same subscription is safe (idempotency check
+// via stripeSubscriptionId match).
+
+import { tierFromPriceId } from "./membershipPricing";
+import { getDb } from "../db";
+import { users } from "../../drizzle/schema";
+import { eq } from "drizzle-orm";
+
+async function handleSubscriptionUpserted(sub: Stripe.Subscription) {
+  console.log("[Stripe Webhook] Processing subscription upsert", sub.id, sub.status);
+
+  // Identify the user — first by metadata.userId, fallback to customer
+  const userIdFromMeta = sub.metadata?.userId;
+  let userId: number | null = userIdFromMeta ? parseInt(userIdFromMeta, 10) : null;
+  let stripeCustomerId =
+    typeof sub.customer === "string" ? sub.customer : sub.customer?.id || null;
+
+  if (!userId && stripeCustomerId) {
+    // Fallback: lookup by stored stripeCustomerId
+    const db = await getDb();
+    if (db) {
+      const rows = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.stripeCustomerId, stripeCustomerId))
+        .limit(1);
+      userId = rows[0]?.id || null;
+    }
+  }
+
+  if (!userId) {
+    console.error("[Stripe Webhook] Could not identify user for subscription", sub.id);
+    return;
+  }
+
+  // Map price to tier
+  const priceId = sub.items.data[0]?.price.id;
+  const tier = priceId ? tierFromPriceId(priceId) : null;
+  if (!tier) {
+    console.warn(
+      `[Stripe Webhook] Subscription ${sub.id} priceId=${priceId} doesn't match any tier; skipping`
+    );
+    return;
+  }
+
+  // Compute expiry — current_period_end is unix seconds
+  const periodEnd = (sub as any).current_period_end || sub.items.data[0]?.current_period_end;
+  const expiresAt = periodEnd ? new Date(periodEnd * 1000) : null;
+
+  // Set tier IFF subscription is active or trialing. Past_due / canceled
+  // / incomplete drop the user back to 'free' silently (still log).
+  const isActive = sub.status === "active" || sub.status === "trialing";
+
+  const db = await getDb();
+  if (!db) return;
+
+  if (isActive) {
+    await db
+      .update(users)
+      .set({
+        tier,
+        tierExpiresAt: expiresAt,
+        stripeSubscriptionId: sub.id,
+        stripeCustomerId,
+      })
+      .where(eq(users.id, userId));
+    console.log(
+      `[Stripe Webhook] ✓ User ${userId} → tier=${tier} expires=${expiresAt?.toISOString()}`
+    );
+  } else {
+    await db
+      .update(users)
+      .set({
+        tier: "free",
+        tierExpiresAt: null,
+        stripeSubscriptionId: sub.id, // keep ref for re-activate
+        stripeCustomerId,
+      })
+      .where(eq(users.id, userId));
+    console.log(
+      `[Stripe Webhook] User ${userId} subscription ${sub.status} → reverted to free`
+    );
+  }
+}
+
+async function handleSubscriptionDeleted(sub: Stripe.Subscription) {
+  console.log("[Stripe Webhook] Processing subscription deletion", sub.id);
+  const db = await getDb();
+  if (!db) return;
+  await db
+    .update(users)
+    .set({
+      tier: "free",
+      tierExpiresAt: null,
+      stripeSubscriptionId: null,
+    })
+    .where(eq(users.stripeSubscriptionId, sub.id));
+  console.log(`[Stripe Webhook] ✓ Subscription ${sub.id} canceled → users reverted to free`);
 }
