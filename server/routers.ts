@@ -36,6 +36,7 @@ const mediumStr = z.string().max(5_000).refine(noControlChars, { message: "禁�
 const longStr = z.string().max(50_000).refine(noControlChars, { message: "禁止控制字元 / Control characters not allowed" });
 import * as db from "./db";
 import * as skillDb from "./skillDb";
+import { redis } from "./redis";
 import { learnFromPdfContent, initializeBuiltInSkills } from "./agents/learningAgent";
 import { SkillLearnerAgent } from "./agents/skillLearnerAgent";
 import { invokeLLM } from "./_core/llm";
@@ -5027,8 +5028,26 @@ export const appRouter = router({
         return user ?? null;
       }),
 
-    // Get dashboard statistics (real data)
+    // Get dashboard statistics (real data).
+    // QA audit 2026-05-11 Phase 2 P0 fix: this procedure was running 11
+    // sequential SELECTs (~150-300ms each) every time someone opened the
+    // admin home, with zero caching. Now wrapped in a 60s Redis cache so
+    // multiple admin tabs in the same minute share one DB pass.
+    //
+    // 60s TTL chosen because: (a) the UI shows daily/monthly aggregates
+    // where 1-min staleness is invisible, (b) Stripe webhook /
+    // booking.create cache-bust would be a bigger refactor — Jeff can
+    // hard-refresh if he wants a real-time read after a payment lands.
     getStats: adminProcedure.query(async () => {
+      const CACHE_KEY = "admin:stats:v1";
+      const CACHE_TTL = 60; // seconds
+      try {
+        const cached = await redis.get(CACHE_KEY);
+        if (cached) return JSON.parse(cached);
+      } catch (err) {
+        console.warn("[admin.getStats] cache read failed:", err);
+      }
+
       const { tours: toursTable, bookings: bookingsTable, inquiries: inquiriesTable, users: usersTable, newsletterSubscribers: newsletterTable } = await import('../drizzle/schema');
       const { sql: sqlFn, eq: eqFn, gte: gteFn, count: countFn } = await import('drizzle-orm');
       const drizzleDb = await db.getDb();
@@ -5040,21 +5059,38 @@ export const appRouter = router({
       const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
       const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
-      const [totalToursRow] = await drizzleDb.select({ count: countFn() }).from(toursTable);
-      const [activeToursRow] = await drizzleDb.select({ count: countFn() }).from(toursTable).where(eqFn(toursTable.status, 'active'));
-      const [totalBookingsRow] = await drizzleDb.select({ count: countFn() }).from(bookingsTable);
-      const [todayBookingsRow] = await drizzleDb.select({ count: countFn() }).from(bookingsTable).where(gteFn(bookingsTable.createdAt, startOfToday));
-      const [totalRevenueRow] = await drizzleDb.select({ total: sqlFn<number>`COALESCE(SUM(${bookingsTable.totalPrice}), 0)` }).from(bookingsTable).where(sqlFn`${bookingsTable.bookingStatus} IN ('confirmed', 'completed')`);
-      const [thisMonthRevenueRow] = await drizzleDb.select({ total: sqlFn<number>`COALESCE(SUM(${bookingsTable.totalPrice}), 0)` }).from(bookingsTable).where(sqlFn`${bookingsTable.bookingStatus} IN ('confirmed', 'completed') AND ${bookingsTable.createdAt} >= ${startOfThisMonth}`);
-      const [lastMonthRevenueRow] = await drizzleDb.select({ total: sqlFn<number>`COALESCE(SUM(${bookingsTable.totalPrice}), 0)` }).from(bookingsTable).where(sqlFn`${bookingsTable.bookingStatus} IN ('confirmed', 'completed') AND ${bookingsTable.createdAt} >= ${startOfLastMonth} AND ${bookingsTable.createdAt} <= ${endOfLastMonth}`);
-      const [totalInquiriesRow] = await drizzleDb.select({ count: countFn() }).from(inquiriesTable);
-      const [pendingInquiriesRow] = await drizzleDb.select({ count: countFn() }).from(inquiriesTable).where(sqlFn`${inquiriesTable.status} IN ('new', 'in_progress')`);
-      const [totalUsersRow] = await drizzleDb.select({ count: countFn() }).from(usersTable);
-      const [totalSubscribersRow] = await drizzleDb.select({ count: countFn() }).from(newsletterTable).where(eqFn(newsletterTable.status, 'active'));
+      // Run the 11 stat queries in parallel — previously they were sequential
+      // (cumulative ~1.5-3s on a cold cache). Parallel + Promise.all drops
+      // cold-path latency to ~max(individual query time) ≈ 300ms.
+      const [
+        totalToursRow,
+        activeToursRow,
+        totalBookingsRow,
+        todayBookingsRow,
+        totalRevenueRow,
+        thisMonthRevenueRow,
+        lastMonthRevenueRow,
+        totalInquiriesRow,
+        pendingInquiriesRow,
+        totalUsersRow,
+        totalSubscribersRow,
+      ] = await Promise.all([
+        drizzleDb.select({ count: countFn() }).from(toursTable).then((r) => r[0]),
+        drizzleDb.select({ count: countFn() }).from(toursTable).where(eqFn(toursTable.status, 'active')).then((r) => r[0]),
+        drizzleDb.select({ count: countFn() }).from(bookingsTable).then((r) => r[0]),
+        drizzleDb.select({ count: countFn() }).from(bookingsTable).where(gteFn(bookingsTable.createdAt, startOfToday)).then((r) => r[0]),
+        drizzleDb.select({ total: sqlFn<number>`COALESCE(SUM(${bookingsTable.totalPrice}), 0)` }).from(bookingsTable).where(sqlFn`${bookingsTable.bookingStatus} IN ('confirmed', 'completed')`).then((r) => r[0]),
+        drizzleDb.select({ total: sqlFn<number>`COALESCE(SUM(${bookingsTable.totalPrice}), 0)` }).from(bookingsTable).where(sqlFn`${bookingsTable.bookingStatus} IN ('confirmed', 'completed') AND ${bookingsTable.createdAt} >= ${startOfThisMonth}`).then((r) => r[0]),
+        drizzleDb.select({ total: sqlFn<number>`COALESCE(SUM(${bookingsTable.totalPrice}), 0)` }).from(bookingsTable).where(sqlFn`${bookingsTable.bookingStatus} IN ('confirmed', 'completed') AND ${bookingsTable.createdAt} >= ${startOfLastMonth} AND ${bookingsTable.createdAt} <= ${endOfLastMonth}`).then((r) => r[0]),
+        drizzleDb.select({ count: countFn() }).from(inquiriesTable).then((r) => r[0]),
+        drizzleDb.select({ count: countFn() }).from(inquiriesTable).where(sqlFn`${inquiriesTable.status} IN ('new', 'in_progress')`).then((r) => r[0]),
+        drizzleDb.select({ count: countFn() }).from(usersTable).then((r) => r[0]),
+        drizzleDb.select({ count: countFn() }).from(newsletterTable).where(eqFn(newsletterTable.status, 'active')).then((r) => r[0]),
+      ]);
       const thisMonthRevenue = Number(thisMonthRevenueRow?.total ?? 0);
       const lastMonthRevenue = Number(lastMonthRevenueRow?.total ?? 0);
       const revenueGrowth = lastMonthRevenue > 0 ? ((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100 : (thisMonthRevenue > 0 ? 100 : 0);
-      return {
+      const result = {
         totalTours: Number(totalToursRow?.count ?? 0),
         activeTours: Number(activeToursRow?.count ?? 0),
         totalBookings: Number(totalBookingsRow?.count ?? 0),
@@ -5067,6 +5103,12 @@ export const appRouter = router({
         totalUsers: Number(totalUsersRow?.count ?? 0),
         totalSubscribers: Number(totalSubscribersRow?.count ?? 0),
       };
+      try {
+        await redis.setex(CACHE_KEY, CACHE_TTL, JSON.stringify(result));
+      } catch (err) {
+        console.warn("[admin.getStats] cache write failed:", err);
+      }
+      return result;
     }),
 
     // v78z-z3 Sprint 10 (C4): booking risk metrics — 3 actionable warning
