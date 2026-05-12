@@ -523,6 +523,15 @@ async function startServer() {
     console.warn('[Startup] Failed to schedule Gmail poll:', err);
   }
 
+  // Booking followup worker — drains the queue that bookings.create
+  // enqueues into. Generates deposit PDF + sends confirmation email
+  // off the HTTP critical path.
+  try {
+    await import('../bookingFollowupWorker');
+  } catch (err) {
+    console.warn('[Startup] Failed to init booking followup worker:', err);
+  }
+
   // Round 80.22 Phase C: Packpoint daily maintenance — auto-upgrade tier,
   // 18-month inactivity expiry, birthday bonus. Runs at 02:00 UTC (10:00
   // Taipei). Idempotent on each user-level mutation.

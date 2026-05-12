@@ -673,3 +673,58 @@ export async function scheduleGmailPoll() {
 }
 
 console.log("✅ Gmail poll queue initialized");
+
+// ============================================================================
+// Booking Followup Queue — async deposit PDF generation + confirmation
+// email AFTER bookings.create commits.
+//
+// Earlier we fire-and-forget'd a Puppeteer render off the main thread
+// (commit a7481d8), which removed it from the customer's HTTP path but
+// left it brittle: a server restart mid-render would drop the email.
+// This queue persists the job in Redis so it survives restarts and gets
+// 2 automatic retries on transient failure.
+// ============================================================================
+
+export interface BookingFollowupJobData {
+  bookingId: number;
+  // The fields below are denormalized into the job payload so the worker
+  // doesn't have to re-query — keeps it survivable even if the DB row
+  // changes between enqueue and execution (rare but possible if admin
+  // edits the booking immediately).
+  contactName: string;
+  contactEmail: string;
+  tourId: number;
+  tourTitle: string;
+  departureDateStr: string;
+  returnDateStr: string;
+  adults: number;
+  childWithBed: number;
+  childNoBed: number;
+  infants: number;
+  totalPrice: number;
+  depositAmount: number;
+  remainingAmount: number;
+  isUsd: boolean;
+  language?: "zh-TW" | "en";
+}
+
+export interface BookingFollowupJobResult {
+  bookingId: number;
+  depositInvoiceUrl: string | null;
+  emailSent: boolean;
+}
+
+export const bookingFollowupQueue = new Queue<
+  BookingFollowupJobData,
+  BookingFollowupJobResult
+>("booking-followup", {
+  connection: redisBullMQ,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 30_000 },
+    removeOnComplete: { age: 86_400, count: 200 }, // 1 day
+    removeOnFail: { age: 2_592_000, count: 100 },   // 30 days
+  },
+});
+
+console.log("✅ Booking followup queue initialized");
