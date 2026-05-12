@@ -15,7 +15,7 @@ import {
   agentPolicies,
   agentMessages,
 } from "../drizzle/schema";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import {
   runSelfRetrospective,
   formatRetrospectiveAsMessage,
@@ -65,6 +65,69 @@ export const retrospectiveWorker = new Worker<
       .from(agentPolicies)
       .where(eq(agentPolicies.active, 1));
 
+    // QA audit 2026-05-11 Phase 1 fix: pull recent adopted/rejected
+    // proposal messages so the LLM can avoid re-suggesting things
+    // Jeff already evaluated. Looks back 60 days — long enough that
+    // a quarterly review remembers, short enough that policies still
+    // get re-examined if conditions actually change.
+    const decisionLookback = new Date(
+      Date.now() - 60 * 24 * 60 * 60 * 1000
+    );
+    const decisionRows = await db
+      .select({
+        id: agentMessages.id,
+        title: agentMessages.title,
+        body: agentMessages.body,
+        context: agentMessages.context,
+        proposalDecision: agentMessages.proposalDecision,
+        jeffResponse: agentMessages.jeffResponse,
+        readAt: agentMessages.readAt,
+        createdAt: agentMessages.createdAt,
+      })
+      .from(agentMessages)
+      .where(
+        and(
+          eq(agentMessages.messageType, "proposal"),
+          inArray(agentMessages.proposalDecision, ["adopted", "rejected"]),
+          gte(agentMessages.createdAt, decisionLookback)
+        )
+      )
+      .orderBy(desc(agentMessages.createdAt))
+      .limit(30);
+
+    // Flatten each retro message into per-proposal decision rows so
+    // the LLM sees each individual suggestion + Jeff's verdict, not
+    // just the wrapper title.
+    const pastDecisions = decisionRows.flatMap((row) => {
+      let proposals: Array<{
+        agentName: string;
+        proposedRulesDiff: string;
+      }> = [];
+      try {
+        const ctx = JSON.parse(row.context ?? "{}");
+        proposals = Array.isArray(ctx.proposals) ? ctx.proposals : [];
+      } catch {
+        /* ignore */
+      }
+      // If we can't extract per-proposal, fall back to one row using the title
+      if (proposals.length === 0) {
+        return [{
+          proposalSummary: row.title,
+          agentName: "general",
+          decision: row.proposalDecision as "adopted" | "rejected",
+          decidedAt: row.readAt ?? row.createdAt,
+          note: row.jeffResponse,
+        }];
+      }
+      return proposals.map((p) => ({
+        proposalSummary: p.proposedRulesDiff ?? row.title,
+        agentName: p.agentName ?? "general",
+        decision: row.proposalDecision as "adopted" | "rejected",
+        decidedAt: row.readAt ?? row.createdAt,
+        note: row.jeffResponse,
+      }));
+    });
+
     const retro = await runSelfRetrospective({
       outcomes: outcomes.map((o) => ({
         ...o,
@@ -72,6 +135,7 @@ export const retrospectiveWorker = new Worker<
       })),
       policies,
       windowDays,
+      pastDecisions,
     });
 
     const formatted = formatRetrospectiveAsMessage(retro, windowDays);
