@@ -67,10 +67,10 @@ const BW_STYLE: google.maps.MapTypeStyle[] = [
   { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#ffffff" }, { weight: 2 }] },
   { featureType: "road", elementType: "labels", stylers: [{ visibility: "off" }] },
 
-  // Hide POIs, transit, business markers
+  // Hide POIs + transit. `business` is folded into `poi.business`, so
+  // the line above already covers it (reviewer v2 nit).
   { featureType: "poi", stylers: [{ visibility: "off" }] },
   { featureType: "transit", stylers: [{ visibility: "off" }] },
-  { featureType: "business", stylers: [{ visibility: "off" }] },
 
   // Keep administrative labels at low contrast — gives the map context
   // without competing with our markers
@@ -120,7 +120,12 @@ function loadMapScript(): Promise<void> {
   return new Promise((resolve, reject) => {
     const script = document.createElement("script");
     script.id = SCRIPT_ID;
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${API_KEY}&v=weekly&libraries=marker,geometry`;
+    // Note: dropped `marker` library — reviewer v2 flagged that
+    // AdvancedMarkerElement requires `mapId`, but mapId + inline `styles`
+    // is the one combo Google explicitly doesn't support. Using the
+    // legacy google.maps.Marker (deprecated Feb 2024 but supported
+    // through 2026) keeps inline B&W styling working.
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${API_KEY}&v=weekly&libraries=geometry`;
     script.async = true;
     script.defer = true;
     script.onload = () => resolve();
@@ -138,12 +143,17 @@ export default function TourRouteMapGoogle({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
-  const markersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
+  const markersRef = useRef<google.maps.Marker[]>([]);
+  const markerListenersRef = useRef<google.maps.MapsEventListener[]>([]);
   const polylineRef = useRef<google.maps.Polyline | null>(null);
+  const zoomCapListenerRef = useRef<google.maps.MapsEventListener | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState<string>("");
 
-  // Initial map creation — runs once
+  // Initial map creation — runs once. Reviewer v2 fix: cleanup hoisted
+  // to the actual useEffect return so unmount disposes the Map, all
+  // markers, the polyline, and the zoom-cap listener. Previously the
+  // cleanup was dead code inside the inner async IIFE.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -173,16 +183,16 @@ export default function TourRouteMapGoogle({
         // Frame the tour
         map.fitBounds(bounds, { top: 60, right: 60, bottom: 60, left: 60 });
         // Cap the zoom so single-stop tours don't zoom into street level
-        const listener = google.maps.event.addListenerOnce(map, "bounds_changed", () => {
-          if ((map.getZoom() ?? 0) > 11) map.setZoom(11);
-        });
+        zoomCapListenerRef.current = google.maps.event.addListenerOnce(
+          map,
+          "bounds_changed",
+          () => {
+            if ((map.getZoom() ?? 0) > 11) map.setZoom(11);
+          }
+        );
 
         mapRef.current = map;
         setStatus("ready");
-
-        return () => {
-          google.maps.event.removeListener(listener);
-        };
       } catch (err) {
         if (cancelled) return;
         console.warn("[TourRouteMapGoogle] load failed, will fall back to SVG:", err);
@@ -192,80 +202,109 @@ export default function TourRouteMapGoogle({
     })();
     return () => {
       cancelled = true;
+      // Reviewer v2 fix: dispose every Google Maps object that holds
+      // DOM refs / event listeners so SPA navigation doesn't leak.
+      if (zoomCapListenerRef.current) {
+        google.maps.event.removeListener(zoomCapListenerRef.current);
+        zoomCapListenerRef.current = null;
+      }
+      for (const l of markerListenersRef.current) {
+        google.maps.event.removeListener(l);
+      }
+      markerListenersRef.current = [];
+      for (const m of markersRef.current) m.setMap(null);
+      markersRef.current = [];
+      if (polylineRef.current) {
+        polylineRef.current.setMap(null);
+        polylineRef.current = null;
+      }
+      // No explicit Map.destroy() exists in v3; nulling the ref + the
+      // container being removed from DOM is the documented dispose path.
+      mapRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Markers + route line — re-render when stops change
+  // Markers + route line — re-render when stops change.
+  // Reviewer v2 fix: using legacy google.maps.Marker (deprecated 2024,
+  // supported through 2026) because AdvancedMarkerElement requires
+  // mapId, but mapId + inline `styles` is the one combo Google doesn't
+  // support. Migrate to cloud-styled mapId + AdvancedMarkerElement
+  // later when we want HTML-based marker DOM.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || status !== "ready" || !window.google?.maps?.marker) return;
+    if (!map || status !== "ready" || !window.google?.maps) return;
 
-    // Clear previous markers
-    for (const m of markersRef.current) m.map = null;
+    // Clear previous markers + listeners
+    for (const l of markerListenersRef.current) {
+      google.maps.event.removeListener(l);
+    }
+    markerListenersRef.current = [];
+    for (const m of markersRef.current) m.setMap(null);
     markersRef.current = [];
     if (polylineRef.current) {
       polylineRef.current.setMap(null);
       polylineRef.current = null;
     }
 
-    // Draw markers
+    // Draw primary day markers
     for (let i = 0; i < stops.length; i++) {
       const s = stops[i];
       const isLit = highlightedDay === s.day;
-
-      // Build the marker DOM — solid black circle with white day number
-      const pin = document.createElement("div");
-      pin.style.cssText = `
-        width: ${isLit ? 36 : 32}px;
-        height: ${isLit ? 36 : 32}px;
-        border-radius: 50%;
-        background: #1a1a1a;
-        border: 2px solid #ffffff;
-        color: #ffffff;
-        font: 700 ${isLit ? 14 : 13}px -apple-system, "PingFang TC", "Noto Sans TC", sans-serif;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.35);
-        cursor: pointer;
-        transition: transform 150ms ease;
-        transform: scale(${isLit ? 1.05 : 1});
-      `;
-      pin.textContent = String(s.day);
-
-      const marker = new google.maps.marker.AdvancedMarkerElement({
-        map,
+      const marker = new google.maps.Marker({
         position: { lat: s.lat, lng: s.lng },
-        content: pin,
+        map,
         title: `Day ${s.day}: ${s.name}`,
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: isLit ? 16 : 14,
+          fillColor: "#1a1a1a",
+          fillOpacity: 1,
+          strokeColor: "#ffffff",
+          strokeWeight: 2,
+        },
+        label: {
+          text: String(s.day),
+          color: "#ffffff",
+          fontSize: isLit ? "14px" : "13px",
+          fontWeight: "700",
+          fontFamily:
+            '-apple-system, "PingFang TC", "Noto Sans TC", sans-serif',
+        },
+        zIndex: isLit ? 1000 : 100 + i,
       });
 
       if (onMarkerHover) {
-        pin.addEventListener("mouseenter", () => onMarkerHover(s.day));
-        pin.addEventListener("mouseleave", () => onMarkerHover(null));
+        markerListenersRef.current.push(
+          marker.addListener("mouseover", () => onMarkerHover(s.day)),
+          marker.addListener("mouseout", () => onMarkerHover(null))
+        );
       }
-
       markersRef.current.push(marker);
     }
 
-    // Outliers — slightly faded to show they're off-region
+    // Outliers — smaller faded grey circles for off-region start/end
     for (const s of outliers) {
-      const pin = document.createElement("div");
-      pin.style.cssText = `
-        width: 26px; height: 26px; border-radius: 50%;
-        background: #5a5a5a; border: 2px solid #ffffff; color: #ffffff;
-        font: 600 11px -apple-system, sans-serif;
-        display: flex; align-items: center; justify-content: center;
-        opacity: 0.7;
-      `;
-      pin.textContent = String(s.day);
-
-      const marker = new google.maps.marker.AdvancedMarkerElement({
-        map,
+      const marker = new google.maps.Marker({
         position: { lat: s.lat, lng: s.lng },
-        content: pin,
+        map,
         title: `Day ${s.day}: ${s.name} (出發/返回地)`,
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 10,
+          fillColor: "#5a5a5a",
+          fillOpacity: 0.7,
+          strokeColor: "#ffffff",
+          strokeWeight: 2,
+        },
+        label: {
+          text: String(s.day),
+          color: "#ffffff",
+          fontSize: "11px",
+          fontWeight: "600",
+        },
+        opacity: 0.85,
+        zIndex: 50,
       });
       markersRef.current.push(marker);
     }
@@ -297,8 +336,15 @@ export default function TourRouteMapGoogle({
   }, [stops, outliers, themeColor.primary, highlightedDay, status, onMarkerHover]);
 
   if (status === "error") {
-    // The Hybrid wrapper inspects this and falls back to the SVG renderer.
-    // We render a hidden marker so the wrapper can detect us.
+    // CRITICAL: This synchronous throw during render is how the effect's
+    // async error reaches MapErrorBoundary. React error boundaries do NOT
+    // catch errors thrown inside useEffect (or any async code) — the
+    // pattern is: effect catches → setState("error") → render throws →
+    // boundary catches → SVG fallback renders.
+    //
+    // Do not refactor this to throw directly inside the useEffect catch
+    // block — that error would be silently swallowed and the fallback
+    // would never engage.
     throw new Error(errorMsg || "Google Maps unavailable");
   }
 
