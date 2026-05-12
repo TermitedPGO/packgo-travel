@@ -4897,6 +4897,74 @@ export const appRouter = router({
         });
       }),
 
+    /**
+     * Emergency intake — for customers currently on a trip needing
+     * urgent help (medical, missed flight, lost passport, etc.).
+     *
+     * QA audit 2026-05-11 Phase 5 found PACK&GO had no dedicated
+     * emergency channel — the same ContactUs form handled both "I
+     * want to book a tour" and "I'm in Iceland at 3am with no
+     * passport". This procedure routes emergencies through a
+     * separate intake that:
+     *   1. Tags inquiryType="emergency" so admin Inbox sorts them up
+     *   2. Immediately calls notifyOwner with [緊急] title prefix so
+     *      Jeff's email gets a high-priority signal (and his email
+     *      client likely flags it red)
+     *   3. Captures the customer's current location for context
+     */
+    createEmergency: publicProcedure
+      .input(
+        z.object({
+          customerName: z.string().min(1).max(100),
+          customerEmail: z.string().email().max(320),
+          customerPhone: z.string().min(1).max(40),
+          currentLocation: z.string().min(1).max(200),
+          severity: z.enum(["medical", "flight", "passport", "safety", "other"]),
+          message: z.string().min(1).max(5000),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const severityLabel: Record<typeof input.severity, string> = {
+          medical: "醫療緊急",
+          flight: "班機問題",
+          passport: "證件遺失",
+          safety: "人身安全",
+          other: "其他緊急",
+        };
+        const labelZh = severityLabel[input.severity];
+
+        const inquiry = await db.createInquiry({
+          customerName: input.customerName,
+          customerEmail: input.customerEmail,
+          customerPhone: input.customerPhone,
+          subject: `[緊急 · ${labelZh}] ${input.currentLocation}`,
+          message: input.message,
+          inquiryType: "emergency",
+          userId: ctx.user?.id,
+          status: "new",
+        });
+
+        // Fire-and-forget owner notification — never block the
+        // customer-facing response on the email send.
+        const { notifyOwner } = await import("./_core/notification");
+        notifyOwner({
+          title: `🆘 [緊急 · ${labelZh}] ${input.customerName} @ ${input.currentLocation}`,
+          content:
+            `客戶: ${input.customerName}\n` +
+            `Email: ${input.customerEmail}\n` +
+            `電話: ${input.customerPhone}\n` +
+            `位置: ${input.currentLocation}\n` +
+            `性質: ${labelZh}\n\n` +
+            `訊息:\n${input.message}\n\n` +
+            `Inquiry ID: ${inquiry?.id ?? "?"}\n` +
+            `請盡快撥打客戶電話。`,
+        }).catch((err) =>
+          console.error("[inquiries.createEmergency] notifyOwner failed:", err)
+        );
+
+        return inquiry;
+      }),
+
     // Update inquiry status (admin only)
     updateStatus: adminProcedure
       .input(

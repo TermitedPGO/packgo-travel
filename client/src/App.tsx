@@ -39,6 +39,9 @@ const TermsOfService = lazy(() => import("./pages/TermsOfService"));
 const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
 const FAQ = lazy(() => import("./pages/FAQ"));
 const ContactUs = lazy(() => import("./pages/ContactUs"));
+const Emergency = lazy(() => import("./pages/Emergency"));
+const Membership = lazy(() => import("./pages/Membership"));
+const Rewards = lazy(() => import("./pages/Rewards"));
 const SearchResults = lazy(() => import("./pages/SearchResults"));
 const Tours = lazy(() => import("./pages/Tours"));
 const RegionPage = lazy(() => import("./pages/RegionPage"));
@@ -47,14 +50,48 @@ const CruisePage = lazy(() => import("./pages/CruisePage"));
 const PaymentSuccess = lazy(() => import("./pages/PaymentSuccess"));
 const PaymentFailure = lazy(() => import("./pages/PaymentFailure"));
 const TaskHistory = lazy(() => import("./pages/TaskHistory"));
+const AIAdvisorMockup = lazy(() => import("./pages/preview/AIAdvisorMockup"));
+const ToursTabMockup = lazy(() => import("./pages/preview/ToursTabMockup"));
 
 // ─── Loading fallback ─────────────────────────────────────────────────────────
+// Round 80.21 — Jeff reported the previous CSS-border spinner had a "boxy
+// pixel" at the join between the black 3/4 arc and the transparent top
+// segment (CSS borders use butt caps with no smoothing). Replaced with an
+// inline SVG spinner using stroke-linecap="round" — silky-smooth circular
+// arc at any zoom, no aliasing, brand-aligned (black + gold accent).
 function PageLoader() {
   const { t } = useLocale();
   return (
     <div className="min-h-screen flex items-center justify-center bg-white">
       <div className="flex flex-col items-center gap-3">
-        <div className="w-8 h-8 border-2 border-black border-t-transparent rounded-full animate-spin" />
+        <svg
+          className="h-8 w-8 animate-spin"
+          viewBox="0 0 50 50"
+          xmlns="http://www.w3.org/2000/svg"
+          aria-hidden
+        >
+          {/* Background ring (faint) */}
+          <circle
+            cx="25"
+            cy="25"
+            r="20"
+            fill="none"
+            stroke="#e5e7eb"
+            strokeWidth="3"
+          />
+          {/* Active arc — gold, 1/4 sweep, rounded caps */}
+          <circle
+            cx="25"
+            cy="25"
+            r="20"
+            fill="none"
+            stroke="#c9a563"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeDasharray="125.6"
+            strokeDashoffset="94.2"
+          />
+        </svg>
         <p className="text-sm text-gray-500">{t('common.loading')}</p>
       </div>
     </div>
@@ -69,11 +106,41 @@ function RouteTracker() {
   return null;
 }
 
+/**
+ * Round 80.22 Phase D: capture ?ref=CODE on any page load and stash in
+ * localStorage with a 90-day TTL. After signup, ProfilePage / Header
+ * picks it up and calls claimReferral mutation. Stripping the param from
+ * the URL keeps it from re-firing on refresh.
+ */
+function ReferralCapture() {
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get("ref");
+      if (!code) return;
+      const normalized = code.trim().toUpperCase();
+      if (!/^PACK[A-Z2-9]{4}$/.test(normalized)) return;
+      const payload = { code: normalized, ts: Date.now() };
+      localStorage.setItem("packgo_ref", JSON.stringify(payload));
+      // Clean from URL so refresh doesn't keep firing & affiliate-tracking
+      // pixels don't see the param leak through.
+      params.delete("ref");
+      const cleaned = window.location.pathname + (params.toString() ? "?" + params.toString() : "") + window.location.hash;
+      window.history.replaceState({}, "", cleaned);
+      console.log("[Referral] Captured code:", normalized);
+    } catch (err) {
+      console.warn("[Referral] Capture failed", err);
+    }
+  }, []);
+  return null;
+}
+
 function Router() {
   // make sure to consider if you need authentication for certain routes
   return (
     <>
     <RouteTracker />
+    <ReferralCapture />
     <Suspense fallback={<PageLoader />}>
     <Switch>
       <Route path={"/"} component={Home} />
@@ -111,6 +178,13 @@ function Router() {
       <Route path={"/privacy-policy"} component={PrivacyPolicy} />
       <Route path={"/faq"} component={FAQ} />
       <Route path={"/contact-us"} component={ContactUs} />
+      <Route path={"/emergency"} component={Emergency} />
+      <Route path={"/membership"} component={Membership} />
+      <Route path={"/rewards"} component={Rewards} />
+
+      {/* Round 80.9: internal preview routes (mockups for product decisions) */}
+      <Route path={"/preview/ai-advisor-mockup"} component={AIAdvisorMockup} />
+      <Route path={"/preview/tours-tab-mockup"} component={ToursTabMockup} />
 
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
