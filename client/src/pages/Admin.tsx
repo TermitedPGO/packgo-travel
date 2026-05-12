@@ -47,6 +47,7 @@ import ReviewsTab from "@/components/admin/ReviewsTab";
 import AiHubTab from "@/components/admin/AiHubTab";
 import AnalyticsTab from "@/components/admin/AnalyticsTab";
 import TaskHistoryContent from "@/components/admin/TaskHistoryContent";
+import AuditLogTab from "@/components/admin/AuditLogTab";
 import CalibrationReviewTab from "@/components/admin/CalibrationReviewTab";
 import CompetitorMonitorTab from "@/components/admin/CompetitorMonitorTab";
 import MarketingTab from "@/components/admin/MarketingTab";
@@ -77,7 +78,7 @@ import OfficeInboxTab from "@/components/admin/OfficeInboxTab";
 
 type PageId =
   // Office — Inbox is the default; everything else is advanced
-  | "office-inbox" | "office-chat" | "autonomous-agents" | "ai-hub" | "task-history" | "calibration-review" | "llm-cost"
+  | "office-inbox" | "office-chat" | "autonomous-agents" | "ai-hub" | "task-history" | "calibration-review" | "llm-cost" | "audit-log"
   // Operations
   | "dashboard" | "inbox" | "tours" | "bookings" | "inquiries" | "tour-monitor"
   // Customers — now includes 中國簽證
@@ -103,6 +104,7 @@ const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageD
       { id: "ai-hub", label: "AI 中心" },
       { id: "calibration-review", label: "QA 審查" },
       { id: "task-history", label: "任務記錄" },
+      { id: "audit-log", label: "審計日誌" },
       { id: "llm-cost", label: "AI 成本" },
     ],
   },
@@ -315,6 +317,8 @@ function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
       return <AiHubTab />;
     case "task-history":
       return <TaskHistoryContent />;
+    case "audit-log":
+      return <AuditLogTab />;
     case "calibration-review":
       return <CalibrationReviewTab />;
     case "llm-cost":

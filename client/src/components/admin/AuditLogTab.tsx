@@ -1,0 +1,268 @@
+/**
+ * AuditLogTab — read-only viewer for adminAuditLog rows.
+ *
+ * Audit rows have been collected since v73 (every admin mutation that
+ * touches customer data writes one via server/_core/auditLog.ts), but
+ * there was no admin UI to browse them. This tab fixes that gap so Jeff
+ * can:
+ *   - Spot suspicious activity (an unexpected IP, a mass-delete burst)
+ *   - Reconstruct what changed and when (refund disputes, accidental
+ *     status changes)
+ *   - Audit his own past actions before making a similar one
+ *
+ * Filter by action prefix (e.g. "booking.") or target type to narrow
+ * the noise. Newest first.
+ */
+import { Fragment, useState } from "react";
+import { trpc } from "@/lib/trpc";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
+import { LoadingRow } from "@/components/ui/spinner";
+import { Shield, Filter, Loader2, AlertCircle } from "lucide-react";
+
+type Row = {
+  id: number;
+  userId: number;
+  userEmail: string;
+  userRole: string;
+  action: string;
+  targetType: string | null;
+  targetId: string | null;
+  changes: string | null;
+  reason: string | null;
+  ipAddress: string | null;
+  success: number;
+  errorMessage: string | null;
+  createdAt: string | Date;
+};
+
+const ACTION_PREFIXES = [
+  { value: "", label: "全部" },
+  { value: "tour.", label: "Tour" },
+  { value: "booking.", label: "Booking" },
+  { value: "user.", label: "User" },
+  { value: "visa.", label: "Visa" },
+  { value: "system.", label: "System" },
+];
+
+const TARGET_TYPES = [
+  { value: "", label: "全部" },
+  { value: "tour", label: "Tour" },
+  { value: "booking", label: "Booking" },
+  { value: "user", label: "User" },
+  { value: "visa", label: "Visa" },
+];
+
+export default function AuditLogTab() {
+  const [actionPrefix, setActionPrefix] = useState("");
+  const [targetType, setTargetType] = useState("");
+  const [expanded, setExpanded] = useState<number | null>(null);
+
+  const { data, isLoading, refetch } = trpc.system.auditLogList.useQuery({
+    limit: 100,
+    actionPrefix: actionPrefix || undefined,
+    targetType: targetType || undefined,
+  });
+
+  const rows: Row[] = (data?.items as Row[]) ?? [];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-bold flex items-center gap-2">
+            <Shield className="h-5 w-5 text-gray-700" />
+            審計日誌
+          </h2>
+          <p className="text-xs text-gray-500 mt-0.5">
+            每筆 admin 變更操作的完整記錄,用於合規與爭議調查
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => refetch()}
+          className="rounded-lg"
+        >
+          {isLoading ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            "重新整理"
+          )}
+        </Button>
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <Filter className="h-3.5 w-3.5 text-gray-400" />
+        <Select
+          value={actionPrefix || "__all__"}
+          onValueChange={(v) => setActionPrefix(v === "__all__" ? "" : v)}
+        >
+          <SelectTrigger className="rounded-lg h-8 text-xs w-32">
+            <SelectValue placeholder="操作類別" />
+          </SelectTrigger>
+          <SelectContent>
+            {ACTION_PREFIXES.map((p) => (
+              <SelectItem key={p.value || "all"} value={p.value || "__all__"}>
+                {p.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select
+          value={targetType || "__all__"}
+          onValueChange={(v) => setTargetType(v === "__all__" ? "" : v)}
+        >
+          <SelectTrigger className="rounded-lg h-8 text-xs w-32">
+            <SelectValue placeholder="目標類型" />
+          </SelectTrigger>
+          <SelectContent>
+            {TARGET_TYPES.map((t) => (
+              <SelectItem key={t.value || "all"} value={t.value || "__all__"}>
+                {t.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {(actionPrefix || targetType) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs h-8 rounded-lg"
+            onClick={() => {
+              setActionPrefix("");
+              setTargetType("");
+            }}
+          >
+            清除
+          </Button>
+        )}
+        <span className="text-xs text-gray-400 ml-auto">
+          {rows.length} 筆
+        </span>
+      </div>
+
+      {isLoading ? (
+        <LoadingRow />
+      ) : rows.length === 0 ? (
+        <div className="py-12 text-center text-gray-400 text-sm">
+          沒有符合條件的審計記錄。
+        </div>
+      ) : (
+        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 text-gray-500 uppercase tracking-wide">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium">時間</th>
+                <th className="px-3 py-2 text-left font-medium">操作</th>
+                <th className="px-3 py-2 text-left font-medium">目標</th>
+                <th className="px-3 py-2 text-left font-medium">操作者</th>
+                <th className="px-3 py-2 text-left font-medium">IP</th>
+                <th className="px-3 py-2 text-left font-medium">結果</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const isOpen = expanded === r.id;
+                return (
+                  <Fragment key={r.id}>
+                    <tr
+                      className={`border-t border-gray-100 hover:bg-gray-50 cursor-pointer ${
+                        r.success === 0 ? "bg-red-50/30" : ""
+                      }`}
+                      onClick={() => setExpanded(isOpen ? null : r.id)}
+                    >
+                      <td className="px-3 py-2 font-mono text-gray-600">
+                        {new Date(r.createdAt).toLocaleString("zh-TW", {
+                          month: "2-digit",
+                          day: "2-digit",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </td>
+                      <td className="px-3 py-2 font-medium">{r.action}</td>
+                      <td className="px-3 py-2 text-gray-700">
+                        {r.targetType ? `${r.targetType}` : "—"}
+                        {r.targetId ? (
+                          <span className="text-gray-400 ml-1">
+                            #{r.targetId}
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-2 text-gray-600 truncate max-w-[180px]">
+                        {r.userEmail}
+                      </td>
+                      <td className="px-3 py-2 text-gray-500 font-mono">
+                        {r.ipAddress || "—"}
+                      </td>
+                      <td className="px-3 py-2">
+                        {r.success === 1 ? (
+                          <span className="text-green-700">✓</span>
+                        ) : (
+                          <span className="text-red-700 inline-flex items-center gap-1">
+                            <AlertCircle className="h-3 w-3" />
+                            失敗
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                    {isOpen && (
+                      <tr className="border-t border-gray-100 bg-gray-50/60">
+                        <td colSpan={6} className="px-4 py-3">
+                          <div className="space-y-2 text-xs">
+                            {r.reason && (
+                              <div>
+                                <span className="text-gray-500">原因:</span>{" "}
+                                <span className="text-gray-800">
+                                  {r.reason}
+                                </span>
+                              </div>
+                            )}
+                            {r.changes && (
+                              <div>
+                                <p className="text-gray-500 mb-1">變更內容:</p>
+                                <pre className="bg-white border border-gray-200 rounded p-2 overflow-x-auto text-[11px] leading-relaxed text-gray-700 max-h-64">
+                                  {(() => {
+                                    try {
+                                      return JSON.stringify(
+                                        JSON.parse(r.changes),
+                                        null,
+                                        2
+                                      );
+                                    } catch {
+                                      return r.changes;
+                                    }
+                                  })()}
+                                </pre>
+                              </div>
+                            )}
+                            {r.errorMessage && (
+                              <div>
+                                <p className="text-red-600 font-semibold">
+                                  錯誤訊息:
+                                </p>
+                                <p className="text-red-700 bg-red-50 border border-red-200 rounded p-2 mt-1">
+                                  {r.errorMessage}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
