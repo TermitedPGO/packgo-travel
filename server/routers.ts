@@ -1,5 +1,9 @@
 import { COOKIE_NAME } from "@shared/const";
+import { getAliases } from "./_helpers/placeNameAliases";
+import { normalizePlaceName } from "./_helpers/llmPlaceNormalizer";
 import { tourMonitorRouter } from "./routers/tourMonitorRouter";
+import { agentRouter } from "./routers/agentRouter";
+import { toolsRouter } from "./routers/toolsRouter";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, adminProcedure, router } from "./_core/trpc";
@@ -27,9 +31,9 @@ import { z } from "zod";
 // stray copy-paste control chars, callers should pre-clean before submitting.
 const CONTROL_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
 const noControlChars = (s: string) => !CONTROL_CHARS.test(s);
-const shortStr = z.string().max(255).refine(noControlChars, { message: "禁止控制字元" });
-const mediumStr = z.string().max(5_000).refine(noControlChars, { message: "禁止控制字元" });
-const longStr = z.string().max(50_000).refine(noControlChars, { message: "禁止控制字元" });
+const shortStr = z.string().max(255).refine(noControlChars, { message: "禁止控制字元 / Control characters not allowed" });
+const mediumStr = z.string().max(5_000).refine(noControlChars, { message: "禁止控制字元 / Control characters not allowed" });
+const longStr = z.string().max(50_000).refine(noControlChars, { message: "禁止控制字元 / Control characters not allowed" });
 import * as db from "./db";
 import * as skillDb from "./skillDb";
 import { learnFromPdfContent, initializeBuiltInSkills } from "./agents/learningAgent";
@@ -284,17 +288,52 @@ export const appRouter = router({
           name: z.string().min(2).max(50).optional(),
           phone: z.string().max(20).optional(),
           address: z.string().optional(),
+          // Round 80.22 Phase E: birthday for the +100 annual Packpoint cron.
+          // Stored as YYYY-MM-DD on the client and parsed to a Date here.
+          // Once set, can't be changed (anti-fraud — would let users harvest
+          // birthday bonuses by toggling the field). Returns 409 on retry.
+          birthDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
         })
       )
       .mutation(async ({ ctx, input }) => {
-        const updated = await db.updateUserProfile(ctx.user.id, input);
+        // Special-case birthDate: write directly via drizzle so we can enforce
+        // "set once" and validate the date is sane (not future, not before 1900).
+        if (input.birthDate) {
+          const parsed = new Date(input.birthDate + "T12:00:00Z"); // noon UTC for tz safety
+          if (isNaN(parsed.getTime())) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid birthDate" });
+          }
+          if (parsed > new Date() || parsed < new Date("1900-01-01")) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "請輸入合理的生日日期" });
+          }
+          if ((ctx.user as any).birthDate) {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "生日已設定,如需更改請聯絡客服",
+            });
+          }
+          const drizzleDb = await db.getDb();
+          if (drizzleDb) {
+            const { users: usersTable } = await import("../drizzle/schema");
+            const { eq } = await import("drizzle-orm");
+            await drizzleDb
+              .update(usersTable)
+              .set({ birthDate: parsed })
+              .where(eq(usersTable.id, ctx.user.id));
+          }
+        }
+        const profileUpdates = { ...input };
+        delete (profileUpdates as any).birthDate; // handled above
+        const updated = Object.keys(profileUpdates).length > 0
+          ? await db.updateUserProfile(ctx.user.id, profileUpdates)
+          : true;
         if (!updated) {
           throw new TRPCError({
             code: "INTERNAL_SERVER_ERROR",
             message: "Failed to update profile",
           });
         }
-        return updated;
+        return { ok: true };
       }),
     
     // Upload avatar
@@ -329,20 +368,710 @@ export const appRouter = router({
       }),
   }),
   
+  // Round 80.20: Membership Phase 2 — Stripe subscription lifecycle.
+  // Public endpoints for /membership page; webhook handles tier flips.
+  membership: router({
+    // Read current user's membership status (for /membership UI to show
+    // "Manage subscription" instead of "Subscribe" when already paid).
+    getStatus: publicProcedure.query(async ({ ctx }) => {
+      const user = ctx.user as any;
+      if (!user) {
+        return { tier: "free" as const, expiresAt: null, hasSubscription: false };
+      }
+      return {
+        tier: (user.tier || "free") as "free" | "plus" | "concierge",
+        expiresAt: user.tierExpiresAt || null,
+        hasSubscription: Boolean(user.stripeSubscriptionId),
+      };
+    }),
+
+    // Create a Stripe Checkout session for the given paid tier. Logged-in
+    // users only — anonymous flow would need email capture first which we
+    // defer to Phase 3.
+    createCheckoutSession: protectedProcedure
+      .input(
+        z.object({
+          tier: z.enum(["plus", "concierge"]),
+          period: z.enum(["yearly", "monthly"]).default("yearly"),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const { isMembershipPricingConfigured, priceIdForTier, hasMonthlyOption } =
+          await import("./_core/membershipPricing");
+        if (!isMembershipPricingConfigured()) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message:
+              "Stripe membership pricing is not yet configured. Please set yearly Stripe price IDs.",
+          });
+        }
+        // Round 80.21: monthly is optional — if user picks monthly but it's
+        // not configured for this tier, fall back to yearly with a hint.
+        const period =
+          input.period === "monthly" && !hasMonthlyOption(input.tier)
+            ? "yearly"
+            : input.period;
+
+        const Stripe = (await import("stripe")).default;
+        const stripe = new Stripe(ENV.stripeSecretKey);
+        const baseUrl = ENV.baseUrl || "https://packgoplay.com";
+
+        // Reuse existing customer if user already has one
+        let customerId = (ctx.user as any).stripeCustomerId as string | null;
+        if (!customerId) {
+          const customer = await stripe.customers.create({
+            email: ctx.user.email || undefined,
+            name: ctx.user.name || undefined,
+            metadata: { userId: String(ctx.user.id) },
+          });
+          customerId = customer.id;
+          // Save for next time (best-effort — webhook also captures it)
+          try {
+            const { getDb } = await import("./db");
+            const { users } = await import("../drizzle/schema");
+            const { eq } = await import("drizzle-orm");
+            const dbInstance = await getDb();
+            if (dbInstance) {
+              await dbInstance
+                .update(users)
+                .set({ stripeCustomerId: customerId })
+                .where(eq(users.id, ctx.user.id));
+            }
+          } catch (e) {
+            console.warn("[Membership] Failed to persist stripeCustomerId:", e);
+          }
+        }
+
+        const session = await stripe.checkout.sessions.create({
+          mode: "subscription",
+          customer: customerId,
+          line_items: [{ price: priceIdForTier(input.tier, period), quantity: 1 }],
+          success_url: `${baseUrl}/membership?success=1&tier=${input.tier}&period=${period}`,
+          cancel_url: `${baseUrl}/membership?canceled=1`,
+          // Metadata so webhook can identify the user even if subscription
+          // lookup fails (defensive).
+          subscription_data: {
+            metadata: {
+              userId: String(ctx.user.id),
+              tier: input.tier,
+              period,
+            },
+          },
+          // Allow customer to enter promotion code at checkout (set up in
+          // Stripe Dashboard) — useful for "FRIENDS" / "EARLYBIRD" discounts.
+          allow_promotion_codes: true,
+        });
+
+        return { url: session.url };
+      }),
+
+    // Customer portal — let users manage / cancel their subscription.
+    createPortalSession: protectedProcedure.mutation(async ({ ctx }) => {
+      const customerId = (ctx.user as any).stripeCustomerId as string | null;
+      if (!customerId) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "No subscription found for your account.",
+        });
+      }
+      const Stripe = (await import("stripe")).default;
+      const stripe = new Stripe(ENV.stripeSecretKey);
+      const baseUrl = ENV.baseUrl || "https://packgoplay.com";
+      const portal = await stripe.billingPortal.sessions.create({
+        customer: customerId,
+        return_url: `${baseUrl}/membership`,
+      });
+      return { url: portal.url };
+    }),
+  }),
+
+  // Round 80.22: Packpoint loyalty system. Read-only queries here; mutations
+  // happen automatically in the Stripe webhook (booking earn) or via the
+  // checkout flow (redemption). Admin adjustments use the admin router.
+  packpoint: router({
+    /**
+     * Get current user's Packpoint status: balance, lifetime, last activity,
+     * days until inactivity expiry. Returns null balance for guests.
+     */
+    getStatus: publicProcedure.query(async ({ ctx }) => {
+      const user = ctx.user as any;
+      if (!user) {
+        return {
+          balance: 0,
+          lifetimeEarned: 0,
+          lastActivityAt: null as Date | null,
+          daysUntilExpiry: null as number | null,
+          tier: "free" as const,
+          isLoggedIn: false,
+        };
+      }
+
+      const lastActivity = user.packpointLastActivityAt
+        ? new Date(user.packpointLastActivityAt)
+        : null;
+      const EXPIRY_DAYS = 18 * 30;
+      let daysUntilExpiry: number | null = null;
+      if (lastActivity) {
+        const elapsed = (Date.now() - lastActivity.getTime()) / (1000 * 60 * 60 * 24);
+        daysUntilExpiry = Math.max(0, Math.ceil(EXPIRY_DAYS - elapsed));
+      }
+
+      return {
+        balance: user.packpointBalance ?? 0,
+        lifetimeEarned: user.packpointLifetimeEarned ?? 0,
+        lastActivityAt: lastActivity,
+        daysUntilExpiry,
+        tier: (user.tier || "free") as "free" | "plus" | "concierge",
+        isLoggedIn: true,
+      };
+    }),
+
+    /**
+     * Paginated transaction history for Profile page.
+     * Most recent first; default 20 per page.
+     */
+    getHistory: protectedProcedure
+      .input(
+        z.object({
+          limit: z.number().min(1).max(100).default(20),
+          cursor: z.number().optional(),
+        })
+      )
+      .query(async ({ ctx, input }) => {
+        const { getDb } = await import("./db");
+        const db = await getDb();
+        if (!db) return { items: [], nextCursor: null };
+
+        const { pointsTransactions } = await import("../drizzle/schema");
+        const { eq, and, lt, desc } = await import("drizzle-orm");
+
+        const conditions = input.cursor
+          ? and(
+              eq(pointsTransactions.userId, ctx.user.id),
+              lt(pointsTransactions.id, input.cursor)
+            )
+          : eq(pointsTransactions.userId, ctx.user.id);
+
+        const rows = await db
+          .select()
+          .from(pointsTransactions)
+          .where(conditions)
+          .orderBy(desc(pointsTransactions.id))
+          .limit(input.limit + 1);
+
+        const hasMore = rows.length > input.limit;
+        const items = hasMore ? rows.slice(0, input.limit) : rows;
+        const nextCursor = hasMore ? items[items.length - 1].id : null;
+
+        return { items, nextCursor };
+      }),
+
+    /**
+     * Estimate redemption value: how much $ does X points buy, capped at
+     * 50% of subtotal (policy §5)? Used by checkout UI to show preview.
+     */
+    estimateRedemption: protectedProcedure
+      .input(
+        z.object({
+          points: z.number().int().min(0),
+          subtotalUsd: z.number().min(0),
+        })
+      )
+      .query(({ ctx, input }) => {
+        const user = ctx.user as any;
+        const balance = user.packpointBalance ?? 0;
+        const MIN_POINTS = 100;
+        const MAX_REDEMPTION_PCT = 0.5;
+
+        if (input.points === 0) {
+          return { discountUsd: 0, valid: true, error: null as string | null };
+        }
+        if (input.points < MIN_POINTS) {
+          return {
+            discountUsd: 0,
+            valid: false,
+            error: `Minimum redemption is ${MIN_POINTS} Packpoint ($1)`,
+          };
+        }
+        if (input.points > balance) {
+          return {
+            discountUsd: 0,
+            valid: false,
+            error: `You only have ${balance} Packpoint`,
+          };
+        }
+        const requestedDiscount = input.points / 100; // 100 pt = $1
+        const maxDiscount = input.subtotalUsd * MAX_REDEMPTION_PCT;
+        const discountUsd = Math.min(requestedDiscount, maxDiscount);
+        return { discountUsd, valid: true, error: null };
+      }),
+
+    /**
+     * Admin: manually adjust a user's Packpoint balance with a reason.
+     * Use cases: customer comp (unhappy / VIP gift), missed bonus make-up,
+     * fraud clawback, promotional grants. Audit-trail captured automatically
+     * via pointsTransactions row with reason='admin_adjust'.
+     */
+    adminAdjust: adminProcedure
+      .input(
+        z.object({
+          userId: z.number().int().positive(),
+          delta: z.number().int().refine((v) => v !== 0, "delta must be non-zero"),
+          description: z.string().min(3).max(500),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const { awardPackpoint, deductPackpoint } = await import("./_core/packpoint");
+        if (input.delta > 0) {
+          const newBalance = await awardPackpoint({
+            userId: input.userId,
+            delta: input.delta,
+            reason: "signup_bonus", // closest "earn" reason; we override description
+            description: `[Admin ${ctx.user.email}] ${input.description}`,
+          });
+          if (newBalance === null) {
+            throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });
+          }
+          return { newBalance };
+        }
+        const newBalance = await deductPackpoint({
+          userId: input.userId,
+          amount: Math.abs(input.delta),
+          reason: "admin_adjust",
+          description: `[Admin ${ctx.user.email}] ${input.description}`,
+        });
+        if (newBalance === null) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });
+        }
+        return { newBalance };
+      }),
+
+    /**
+     * Admin: trigger the daily Packpoint maintenance run on demand.
+     * Useful for testing the auto-upgrade / expiry / birthday flows without
+     * waiting for the 02:00 UTC cron.
+     */
+    adminTriggerMaintenance: adminProcedure.mutation(async ({ ctx }) => {
+      const { triggerManualPackpointMaintenance } = await import(
+        "./queues/packpointMaintenanceQueue"
+      );
+      const job = await triggerManualPackpointMaintenance(ctx.user.id);
+      return { jobId: String(job.id) };
+    }),
+
+    /**
+     * Round 80.22 Phase D: get current user's referral code.
+     * Lazy-generates if missing (for users created before referrals existed).
+     * Returns the code, share URL, and current count of successful referrals.
+     */
+    getReferralStatus: protectedProcedure.query(async ({ ctx }) => {
+      const { ensureReferralCode } = await import("./_core/referral");
+      const code = await ensureReferralCode(ctx.user.id);
+      const baseUrl = ENV.baseUrl || "https://packgoplay.com";
+      const shareUrl = code ? `${baseUrl}/?ref=${code}` : null;
+
+      // Count successful referrals (referees who triggered a payout)
+      const drizzleDb = await db.getDb();
+      let successfulCount = 0;
+      let pendingCount = 0;
+      if (drizzleDb) {
+        const { users: usersTable } = await import("../drizzle/schema");
+        const { eq, and, sql } = await import("drizzle-orm");
+        const [success] = await drizzleDb
+          .select({ c: sql<number>`COUNT(*)` })
+          .from(usersTable)
+          .where(
+            and(
+              eq(usersTable.referredBy, ctx.user.id),
+              eq(usersTable.referralBonusAwarded, true)
+            )
+          );
+        const [pending] = await drizzleDb
+          .select({ c: sql<number>`COUNT(*)` })
+          .from(usersTable)
+          .where(
+            and(
+              eq(usersTable.referredBy, ctx.user.id),
+              eq(usersTable.referralBonusAwarded, false)
+            )
+          );
+        successfulCount = Number(success?.c || 0);
+        pendingCount = Number(pending?.c || 0);
+      }
+
+      return {
+        code,
+        shareUrl,
+        successfulCount,
+        pendingCount,
+        rewardPerReferral: 500,
+      };
+    }),
+
+    /**
+     * Round 80.22 Phase D: claim a referral code post-signup. UI calls this
+     * once the user is logged in if a `?ref=` param was captured pre-auth.
+     * No-op if user already has a referredBy.
+     */
+    claimReferral: protectedProcedure
+      .input(z.object({ code: z.string().min(4).max(16) }))
+      .mutation(async ({ ctx, input }) => {
+        const { attachReferral } = await import("./_core/referral");
+        const ok = await attachReferral({
+          refereeUserId: ctx.user.id,
+          refereeEmail: ctx.user.email,
+          referralCode: input.code,
+        });
+        return { attached: ok };
+      }),
+  }),
+
+  /**
+   * Round 80.22 Phase F: Reward vouchers. Public catalog + protected
+   * redeem/list, admin marks-as-used.
+   */
+  vouchers: router({
+    /**
+     * Public catalog with optional gate-state evaluation (e.g. photo book
+     * shows "you need 50 photos, have 37" copy when user is logged in).
+     */
+    catalog: publicProcedure.query(async ({ ctx }) => {
+      const { VOUCHER_CATALOG } = await import("./_core/vouchers");
+      const userId = ctx.user?.id;
+      // Attach gate-blocked status per item
+      const items = await Promise.all(
+        VOUCHER_CATALOG.map(async (item) => {
+          let gateBlocked: string | null = null;
+          if (item.gate && userId) {
+            try {
+              gateBlocked = await item.gate(userId);
+            } catch {
+              gateBlocked = null;
+            }
+          }
+          return {
+            sku: item.sku,
+            type: item.type,
+            pointsCost: item.pointsCost,
+            amountUsd: item.amountUsd,
+            titleZh: item.titleZh,
+            titleEn: item.titleEn,
+            descriptionZh: item.descriptionZh,
+            descriptionEn: item.descriptionEn,
+            gateBlocked,
+          };
+        })
+      );
+      return items;
+    }),
+
+    /** Customer redeems Packpoint for a voucher. */
+    redeem: protectedProcedure
+      .input(z.object({ sku: z.string().max(32) }))
+      .mutation(async ({ ctx, input }) => {
+        const { issueVoucher } = await import("./_core/vouchers");
+        // Pre-check: does user have enough points?
+        const userBalance = (ctx.user as any).packpointBalance ?? 0;
+        const { findCatalogItem } = await import("./_core/vouchers");
+        const item = findCatalogItem(input.sku);
+        if (!item) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "兌換項目不存在" });
+        }
+        if (userBalance < item.pointsCost) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Packpoint 不足(需要 ${item.pointsCost.toLocaleString()},目前 ${userBalance.toLocaleString()})`,
+          });
+        }
+        const result = await issueVoucher({ userId: ctx.user.id, sku: input.sku });
+        if (!result.ok) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: result.error });
+        }
+
+        // Round 80.22 Phase G: email the code to the customer (best-effort)
+        try {
+          const { sendVoucherIssuedEmail } = await import("./email");
+          // Detect language: check user.preferredLocale or ctx
+          const lang =
+            ((ctx.user as any).customerLanguage as "zh-TW" | "en" | undefined) ?? "zh-TW";
+          await sendVoucherIssuedEmail({
+            customerEmail: ctx.user.email,
+            customerName: ctx.user.name || ctx.user.email.split("@")[0],
+            voucherCode: result.data.code,
+            voucherTitle: lang === "en" ? item.titleEn : item.titleZh,
+            amountUsd: result.data.amountUsd,
+            pointsCost: result.data.pointsCost,
+            expiresAt: result.data.expiresAt,
+            language: lang,
+          });
+        } catch (err) {
+          // Don't fail the redemption — code is still in the UI
+          console.error("[vouchers.redeem] Email failed:", err);
+        }
+
+        return result.data;
+      }),
+
+    /** List current user's own vouchers. */
+    myVouchers: protectedProcedure.query(async ({ ctx }) => {
+      const drizzleDb = await db.getDb();
+      if (!drizzleDb) return [];
+      const { rewardVouchers } = await import("../drizzle/schema");
+      const { eq, desc } = await import("drizzle-orm");
+      return await drizzleDb
+        .select()
+        .from(rewardVouchers)
+        .where(eq(rewardVouchers.userId, ctx.user.id))
+        .orderBy(desc(rewardVouchers.createdAt));
+    }),
+
+    /** Admin: list all vouchers with filters. */
+    adminList: adminProcedure
+      .input(
+        z.object({
+          status: z.enum(["issued", "redeemed", "expired", "voided", "all"]).default("all"),
+          type: z.enum(["flight_credit", "photo_book", "tour_credit", "all"]).default("all"),
+          limit: z.number().int().positive().max(200).default(50),
+          cursor: z.number().int().optional(),
+        })
+      )
+      .query(async ({ input }) => {
+        const drizzleDb = await db.getDb();
+        if (!drizzleDb) return { items: [], nextCursor: null };
+        const { rewardVouchers, users: usersTable } = await import("../drizzle/schema");
+        const { eq, and, lt, desc } = await import("drizzle-orm");
+        const filters = [];
+        if (input.status !== "all") filters.push(eq(rewardVouchers.status, input.status));
+        if (input.type !== "all") filters.push(eq(rewardVouchers.type, input.type));
+        if (input.cursor) filters.push(lt(rewardVouchers.id, input.cursor));
+        const whereClause = filters.length ? and(...filters) : undefined;
+        const rows = await drizzleDb
+          .select({
+            id: rewardVouchers.id,
+            userId: rewardVouchers.userId,
+            authorName: usersTable.name,
+            authorEmail: usersTable.email,
+            type: rewardVouchers.type,
+            code: rewardVouchers.code,
+            amountUsd: rewardVouchers.amountUsd,
+            pointsCost: rewardVouchers.pointsCost,
+            status: rewardVouchers.status,
+            expiresAt: rewardVouchers.expiresAt,
+            redeemedAt: rewardVouchers.redeemedAt,
+            redeemedAgainstBookingId: rewardVouchers.redeemedAgainstBookingId,
+            notes: rewardVouchers.notes,
+            createdAt: rewardVouchers.createdAt,
+          })
+          .from(rewardVouchers)
+          .leftJoin(usersTable, eq(rewardVouchers.userId, usersTable.id))
+          .where(whereClause)
+          .orderBy(desc(rewardVouchers.id))
+          .limit(input.limit + 1);
+
+        const hasMore = rows.length > input.limit;
+        const items = hasMore ? rows.slice(0, input.limit) : rows;
+        return { items, nextCursor: hasMore ? items[items.length - 1].id : null };
+      }),
+
+    /** Admin: mark a voucher as redeemed (used). */
+    adminMarkRedeemed: adminProcedure
+      .input(
+        z.object({
+          voucherId: z.number().int().positive(),
+          bookingId: z.number().int().positive().optional(),
+          notes: z.string().max(500).optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const { markVoucherRedeemed } = await import("./_core/vouchers");
+        const result = await markVoucherRedeemed({
+          voucherId: input.voucherId,
+          adminId: ctx.user.id,
+          bookingId: input.bookingId,
+          notes: input.notes,
+        });
+        if (!result.ok) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: result.error });
+        }
+        return { ok: true };
+      }),
+  }),
+
+  /**
+   * Round 80.22 Phase F: Trip photos. Customer uploads photos from a
+   * completed booking; +10 Packpoint per photo (capped per booking via
+   * a UNIQUE check on photo count). Used by photo book voucher gate.
+   */
+  photos: router({
+    /** Upload a photo URL (from S3 / pre-signed upload). */
+    upload: protectedProcedure
+      .input(
+        z.object({
+          bookingId: z.number().int().positive(),
+          photoUrl: z.string().url().max(1024),
+          caption: z.string().max(500).optional(),
+          isPublic: z.boolean().default(false),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const booking = await db.getBookingById(input.bookingId);
+        if (!booking) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Booking not found" });
+        }
+        if ((booking as any).userId !== ctx.user.id) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Not your booking" });
+        }
+        if (booking.bookingStatus !== "completed") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "只能上傳已完成行程的照片",
+          });
+        }
+
+        const drizzleDb = await db.getDb();
+        if (!drizzleDb) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        const { tripPhotos } = await import("../drizzle/schema");
+        const { eq, and, sql } = await import("drizzle-orm");
+
+        // Count existing photos for THIS booking — cap at 10 with bonus pt
+        // (per policy §4 — photo bonus is +10 each, max 100 pts per booking).
+        const [countRow] = await drizzleDb
+          .select({ c: sql<number>`COUNT(*)` })
+          .from(tripPhotos)
+          .where(eq(tripPhotos.bookingId, input.bookingId));
+        const existingCount = Number(countRow?.c || 0);
+        const eligibleForBonus = existingCount < 10;
+
+        // Insert the photo
+        const result = await drizzleDb.insert(tripPhotos).values({
+          userId: ctx.user.id,
+          bookingId: input.bookingId,
+          photoUrl: input.photoUrl,
+          caption: input.caption || null,
+          isPublic: input.isPublic,
+          pointsAwarded: false, // updated below if eligible
+        });
+        const photoId = (result as any)[0]?.insertId ?? 0;
+
+        // Award +10 if eligible
+        let pointsEarned = 0;
+        if (eligibleForBonus) {
+          try {
+            const { awardPackpoint } = await import("./_core/packpoint");
+            await awardPackpoint({
+              userId: ctx.user.id,
+              delta: 10,
+              reason: "photo_bonus",
+              referenceType: "photo",
+              referenceId: photoId,
+              description: `上傳行程照片 (booking #${input.bookingId})`,
+            });
+            await drizzleDb
+              .update(tripPhotos)
+              .set({ pointsAwarded: true })
+              .where(eq(tripPhotos.id, photoId));
+            pointsEarned = 10;
+          } catch (err) {
+            console.error("[Photos] Bonus award failed:", err);
+          }
+        }
+
+        return { photoId, pointsEarned, capReached: !eligibleForBonus };
+      }),
+
+    /** List user's own photos (optionally for one booking). */
+    myPhotos: protectedProcedure
+      .input(z.object({ bookingId: z.number().int().positive().optional() }).optional())
+      .query(async ({ ctx, input }) => {
+        const drizzleDb = await db.getDb();
+        if (!drizzleDb) return [];
+        const { tripPhotos } = await import("../drizzle/schema");
+        const { eq, and, desc } = await import("drizzle-orm");
+        const conditions = input?.bookingId
+          ? and(eq(tripPhotos.userId, ctx.user.id), eq(tripPhotos.bookingId, input.bookingId))
+          : eq(tripPhotos.userId, ctx.user.id);
+        return await drizzleDb
+          .select()
+          .from(tripPhotos)
+          .where(conditions)
+          .orderBy(desc(tripPhotos.id));
+      }),
+
+    /** Delete a photo (soft delete via removal — points are NOT clawed back). */
+    delete: protectedProcedure
+      .input(z.object({ photoId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        const drizzleDb = await db.getDb();
+        if (!drizzleDb) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        const { tripPhotos } = await import("../drizzle/schema");
+        const { eq, and } = await import("drizzle-orm");
+        await drizzleDb
+          .delete(tripPhotos)
+          .where(and(eq(tripPhotos.id, input.photoId), eq(tripPhotos.userId, ctx.user.id)));
+        return { ok: true };
+      }),
+  }),
+
   // AI Travel Advisor router
   ai: router({
-    // Skill-enhanced AI chat with performance tracking
+    // Round 80.19: query current quota status without consuming a message.
+    // Used by dialog open to show the counter pill + paywall preview.
+    getQuota: publicProcedure.query(async ({ ctx }) => {
+      const userTier = (ctx.user as any)?.tier || "free";
+      const isPaidTier = userTier === "plus" || userTier === "concierge";
+      if (isPaidTier) {
+        return { tier: userTier as "plus" | "concierge", used: 0, cap: -1, windowDays: 30 };
+      }
+      const FREE_TIER_LIMIT = 5;
+      const FREE_TIER_WINDOW_DAYS = 30;
+      const ip = ctx.ip;
+      const { createHash } = await import("crypto");
+      const ipHashKey = ip ? createHash("sha256").update(ip).digest("hex").slice(0, 64) : null;
+      const userIdKey = ctx.user?.id ?? null;
+      const { aiAdvisorUsage } = await import("../drizzle/schema");
+      const { sql, and, gt, eq } = await import("drizzle-orm");
+      const { getDb } = await import("./db");
+      const db = await getDb();
+      let usage = 0;
+      if (db) {
+        const since = new Date(Date.now() - FREE_TIER_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+        const conditions = userIdKey
+          ? and(eq(aiAdvisorUsage.userId, userIdKey), gt(aiAdvisorUsage.createdAt, since))
+          : ipHashKey
+          ? and(eq(aiAdvisorUsage.ipHash, ipHashKey), gt(aiAdvisorUsage.createdAt, since))
+          : null;
+        if (conditions) {
+          const rows = await db
+            .select({ c: sql<number>`COUNT(*)` })
+            .from(aiAdvisorUsage)
+            .where(conditions);
+          usage = Number(rows[0]?.c || 0);
+        }
+      }
+      return {
+        tier: "free" as const,
+        used: usage,
+        cap: FREE_TIER_LIMIT,
+        windowDays: FREE_TIER_WINDOW_DAYS,
+      };
+    }),
+
+    // Skill-enhanced AI chat with performance tracking.
+    // Code-review 2026-05-09: bounded message + history to prevent DoS
+    // (single 100MB request could stall LLM and rack up cost). 5000 chars
+    // is plenty for natural-language travel inquiries; 50 history items
+    // covers any realistic conversation turn.
     chat: publicProcedure
       .input(
         z.object({
-          message: z.string(),
+          message: z.string().max(5000),
           conversationHistory: z.array(
             z.object({
               role: z.enum(["user", "assistant"]),
-              content: z.string(),
+              content: z.string().max(5000),
             })
-          ).optional(),
-          sessionId: z.string().optional(),
+          ).max(50).optional(),
+          sessionId: z.string().max(200).optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {
@@ -397,6 +1126,62 @@ export const appRouter = router({
           }
         }
 
+        // Round 80.19: AI Advisor Phase 1 — tier-based rate limit.
+        // Free / anonymous users: 5 messages / rolling 30-day window.
+        // Plus / Concierge members: unlimited (still logged for abuse cap).
+        // We check BEFORE calling the LLM so users hitting the limit get
+        // an immediate paywall response instead of paying for one more
+        // turn.
+        const userTier = (ctx.user as any)?.tier || "free";
+        const isPaidTier = userTier === "plus" || userTier === "concierge";
+        const FREE_TIER_LIMIT = 5;
+        const FREE_TIER_WINDOW_DAYS = 30;
+
+        let usageBefore = 0;
+        if (!isPaidTier) {
+          // Compute identity key for rate limit: userId for logged-in,
+          // sha256(ip) for anonymous.
+          const { createHash } = await import("crypto");
+          const ipHashKey = ip ? createHash("sha256").update(ip).digest("hex").slice(0, 64) : null;
+          const userIdKey = ctx.user?.id ?? null;
+
+          // Count messages in the rolling 30-day window. Use raw SQL because
+          // Drizzle's count() doesn't support `gt` on timestamps cleanly here.
+          const { aiAdvisorUsage } = await import("../drizzle/schema");
+          const { sql, and, gt, eq } = await import("drizzle-orm");
+          const { getDb } = await import("./db");
+          const db = await getDb();
+          if (db) {
+            const since = new Date(Date.now() - FREE_TIER_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+            const conditions = userIdKey
+              ? and(eq(aiAdvisorUsage.userId, userIdKey), gt(aiAdvisorUsage.createdAt, since))
+              : ipHashKey
+              ? and(eq(aiAdvisorUsage.ipHash, ipHashKey), gt(aiAdvisorUsage.createdAt, since))
+              : null;
+            if (conditions) {
+              const rows = await db
+                .select({ c: sql<number>`COUNT(*)` })
+                .from(aiAdvisorUsage)
+                .where(conditions);
+              usageBefore = Number(rows[0]?.c || 0);
+            }
+          }
+
+          if (usageBefore >= FREE_TIER_LIMIT) {
+            throw new TRPCError({
+              code: "FORBIDDEN",
+              message: JSON.stringify({
+                kind: "QUOTA_EXCEEDED",
+                tier: "free",
+                used: usageBefore,
+                cap: FREE_TIER_LIMIT,
+                windowDays: FREE_TIER_WINDOW_DAYS,
+                upgradeUrl: "/membership",
+              }),
+            });
+          }
+        }
+
         const { message, conversationHistory = [], sessionId } = input;
         const { processMessageWithSkills } = await import("./services/aiChatSkillService");
 
@@ -409,6 +1194,27 @@ export const appRouter = router({
             sessionId: sessionId || `session_${Date.now()}`,
           });
 
+          // Round 80.19: log usage (regardless of tier, for analytics + abuse).
+          try {
+            const { aiAdvisorUsage } = await import("../drizzle/schema");
+            const { getDb } = await import("./db");
+            const db = await getDb();
+            if (db) {
+              const { createHash } = await import("crypto");
+              const ipHashKey = ip ? createHash("sha256").update(ip).digest("hex").slice(0, 64) : null;
+              await db.insert(aiAdvisorUsage).values({
+                ipHash: ctx.user?.id ? null : ipHashKey,
+                userId: ctx.user?.id ?? null,
+                sessionId: sessionId || null,
+                messagePreview: message.slice(0, 500),
+                tokenCount: 0, // could be filled from result if exposed
+                tier: userTier,
+              });
+            }
+          } catch (logErr) {
+            console.warn("[AI Chat] Usage log failed (non-fatal):", logErr);
+          }
+
           return {
             response: result.response,
             triggeredSkills: result.triggeredSkills.map(s => ({
@@ -417,6 +1223,15 @@ export const appRouter = router({
               confidence: s.confidence,
             })),
             usageLogIds: result.usageLogIds,
+            // Round 80.19: surface remaining quota so the UI can show a counter.
+            quota: isPaidTier
+              ? null
+              : {
+                  used: usageBefore + 1, // we just consumed one
+                  cap: FREE_TIER_LIMIT,
+                  windowDays: FREE_TIER_WINDOW_DAYS,
+                  tier: "free" as const,
+                },
           };
         } catch (error) {
           console.error("[AI Chat] Error:", error);
@@ -570,11 +1385,43 @@ export const appRouter = router({
      * The static map URL is signed once with our GOOGLE_API_KEY (server-only),
      * so the frontend just renders it as <img>. Cached in-memory for 24h.
      */
+    /**
+     * Admin: regenerate the per-tour AI travel map via gpt-image-2.
+     * Reads the tour's stops + transport segments, builds a region-aware
+     * prompt, calls OpenAI, uploads the PNG to R2, and saves the URL to
+     * `tours.aiMapUrl`. Cost: ~$0.28 per call. Duration: ~135-160s.
+     *
+     * v331 Phase A — synchronous; admin UI shows a spinner and waits.
+     * Phase B will move this to a BullMQ job for non-blocking generation.
+     */
+    regenerateAiMap: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const { generateTourMap } = await import("./services/tourMapGenerator");
+        const result = await generateTourMap({ tourId: input.id });
+        return {
+          aiMapUrl: result.url,
+          cost: result.cost,
+          durationMs: result.durationMs,
+        };
+      }),
+
     getRouteMap: publicProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
         const tour = await db.getTourById(input.id);
-        if (!tour) return { staticMapUrl: null, stops: [], directionsUrl: null };
+        if (!tour) {
+          return {
+            staticMapUrl: null,
+            stops: [],
+            directionsUrl: null,
+            aiMapUrl: null,
+          };
+        }
+
+        // v331 — surface the AI tour-map URL so the client can render
+        // the painted PNG instead of the SVG canvas when it's available.
+        const aiMapUrl = (tour as any).aiMapUrl ?? null;
 
         // Parse itinerary
         let itinerary: any[] = [];
@@ -586,7 +1433,12 @@ export const appRouter = router({
           itinerary = [];
         }
         if (!Array.isArray(itinerary) || itinerary.length === 0) {
-          return { staticMapUrl: null, stops: [], directionsUrl: null };
+          return {
+            staticMapUrl: null,
+            stops: [],
+            directionsUrl: null,
+            aiMapUrl,
+          };
         }
 
         // Build geocode queries — itinerary titles are like "慕尼黑Munich－258km－聖加侖St.Gallen"
@@ -594,9 +1446,23 @@ export const appRouter = router({
         // (bilingual format: "ChineseEnglish" with no space — English is more reliable for geocoding)
         const country = (tour as any).destinationCountry || "";
 
-        const _extractFirstPlace = (raw: string): string => {
+        // Round 80.21 — extract DESTINATION (last city) from a day's title.
+        // The previous version (`_extractFirstPlace`) silently broke on the
+        // most common separator in PACK&GO-formatted itineraries: 「→」
+        // (U+2192). For "台北 → 慕尼黑：飛越歐洲" it returned the entire
+        // string as the first chunk, then appended ", Switzerland" → Google
+        // ZERO_RESULTS, fallback triggered, country-level map shown.
+        //
+        // New rules:
+        // 1. Strip prefixes (Day N / 第 N 日)
+        // 2. Strip parentheticals + colon-clauses (「飛越歐洲」 description)
+        // 3. Split on a comprehensive separator set (now includes →,>,⇒)
+        // 4. Take the LAST chunk — that's where the traveler ends the day
+        //    (e.g. "台北 → 慕尼黑" → "慕尼黑"; geocode result is more useful
+        //    for the destination than the start).
+        // 5. Prefer trailing English when bilingual ("慕尼黑Munich" → Munich)
+        const _extractDestinationPlace = (raw: string): string => {
           if (!raw) return "";
-          // 1. Strip "Day N:" / "第 N 日：" prefixes
           let s = String(raw)
             .replace(/^(day\s*\d+\s*[:\-]?\s*|第\s*\d+\s*日\s*[:\-]?\s*)/i, "")
             .replace(/[（(].*?[）)]/g, "")  // strip parentheticals
@@ -604,26 +1470,113 @@ export const appRouter = router({
             .trim();
           if (!s) return "";
 
-          // 2. Split on multi-city separators (slash, comma, 、, en/em-dash, hyphen-with-spaces, "/")
-          // The "－" character is U+FF0D fullwidth hyphen — common in zh-tw itinerary text
-          const firstChunk = s.split(/[／/、,，–—－]| - | – /)[0].trim();
+          // Strip everything after a colon — that's typically the day's
+          // theme/description, not a location ("飛越歐洲" / "返程啟航").
+          // The space before ":" is preserved if present.
+          s = s.split(/[:：]/)[0].trim();
+          if (!s) return "";
 
-          // 3. If chunk contains both Chinese and English (bilingual format), prefer English
-          // Pattern: "慕尼黑Munich" → extract "Munich"; "台北 Taipei" → extract "Taipei"
-          const englishMatch = firstChunk.match(/[A-Za-z][A-Za-z .'-]+(?:\s*[A-Za-z][A-Za-z .'-]+)*$/);
+          // Comprehensive separator regex — adds → (U+2192), ⇒ (U+21D2),
+          // ↔ (U+2194 bidirectional), ⇄ (U+21C4), > (ASCII), and ASCII
+          // sequences "->", "=>", "<->", "<=>". Round 80.21 follow-up:
+          // the ↔ char actually appears in some itineraries as a
+          // bidirectional flight indicator ("台北 ↔ 巴黎") — without
+          // splitting on it, geocoding queries the entire string and
+          // gets ZERO_RESULTS.
+          const SEP = /\s*(?:↔|⇄|→|⇒|<->|<=>|->|=>|>|[／/、,，–—－])\s*| - | – /g;
+          const chunks = s.split(SEP).map(c => c.trim()).filter(Boolean);
+          if (chunks.length === 0) return "";
+
+          // Take the LAST chunk — the day's destination.
+          const lastChunk = chunks[chunks.length - 1];
+
+          // Prefer trailing English when bilingual ("慕尼黑Munich" → Munich)
+          const englishMatch = lastChunk.match(/[A-Za-z][A-Za-z .'-]+(?:\s*[A-Za-z][A-Za-z .'-]+)*$/);
           if (englishMatch && englishMatch[0].length >= 3) {
             return englishMatch[0].trim();
           }
-          return firstChunk;
+          return lastChunk;
+        };
+        // Backwards-compat alias (kept in case other code paths reference it)
+        const _extractFirstPlace = _extractDestinationPlace;
+
+        // Region map — moved out of the queries.map callback so tryGoogle
+        // and tryNominatim (defined later, in a sibling scope) can use it.
+        const _region: Record<string, string> = {
+          // Europe
+          at: "EU", be: "EU", bg: "EU", ch: "EU", cz: "EU", de: "EU", dk: "EU",
+          ee: "EU", es: "EU", fi: "EU", fr: "EU", gb: "EU", gr: "EU", hr: "EU",
+          hu: "EU", ie: "EU", is: "EU", it: "EU", li: "EU", lt: "EU", lu: "EU",
+          lv: "EU", mc: "EU", mt: "EU", nl: "EU", no: "EU", pl: "EU", pt: "EU",
+          ro: "EU", se: "EU", si: "EU", sk: "EU", va: "EU", ad: "EU", sm: "EU",
+          // East Asia
+          cn: "EA", hk: "EA", jp: "EA", kr: "EA", mo: "EA", mn: "EA", tw: "EA", kp: "EA",
+          // Southeast Asia
+          bn: "SE", id: "SE", kh: "SE", la: "SE", mm: "SE", my: "SE", ph: "SE",
+          sg: "SE", th: "SE", tl: "SE", vn: "SE",
+          // South Asia
+          af: "SA", bd: "SA", bt: "SA", in: "SA", lk: "SA", mv: "SA", np: "SA", pk: "SA",
+          // Middle East / North Africa
+          ae: "ME", bh: "ME", eg: "ME", il: "ME", iq: "ME", ir: "ME", jo: "ME",
+          kw: "ME", lb: "ME", om: "ME", qa: "ME", sa: "ME", sy: "ME", tr: "ME",
+          ye: "ME", ps: "ME",
+          // Africa (sub-Saharan)
+          dz: "AF", et: "AF", gh: "AF", ke: "AF", ma: "AF", ng: "AF", rw: "AF",
+          sn: "AF", tn: "AF", tz: "AF", ug: "AF", za: "AF",
+          // North America
+          ca: "NA", mx: "NA", us: "NA",
+          // Latin America
+          ar: "LA", bo: "LA", br: "LA", cl: "LA", co: "LA", cu: "LA", do: "LA",
+          ec: "LA", gt: "LA", hn: "LA", ni: "LA", pa: "LA", pe: "LA", py: "LA",
+          sv: "LA", uy: "LA", ve: "LA", cr: "LA", jm: "LA", pr: "LA",
+          // Oceania
+          au: "OC", fj: "OC", nc: "OC", nz: "OC", pf: "OC", pg: "OC", to: "OC", ws: "OC",
+          // CIS / Caucasus / Central Asia
+          am: "CA", az: "CA", by: "CA", ge: "CA", kg: "CA", kz: "CA", md: "CA",
+          ru: "CA", tj: "CA", tm: "CA", ua: "CA", uz: "CA",
         };
 
         const queries: { day: any; q: string }[] = itinerary.map((d: any) => {
-          // Prefer explicit location/city, then activities[0].location, then parsed title
-          const explicit = (d.location || d.city || "").trim();
-          const activityLoc = Array.isArray(d.activities) && d.activities[0]?.location
-            ? String(d.activities[0].location).trim() : "";
-          const fromTitle = _extractFirstPlace(d.title || "");
-          const cleaned = explicit || activityLoc || fromTitle;
+          // Prefer explicit location/city, then activities[0].location, then parsed title.
+          // Round 80.21 v4 — bug fix: activities[0].location was used RAW
+          // ("巴黎 ↔ 台北") which broke isHomeReturn detection (cleaned
+          // didn't equal departureCity). Now we run it through the same
+          // _extractDestinationPlace as titles, so all three sources
+          // produce a clean lastChunk consistently.
+          //
+          // v9 — additional bug fix: activities[0].location is sometimes
+          // formatted "{city},{country}" (full-width comma). After
+          // splitting, lastChunk = country name (「瑞士」), which would
+          // get rejected as a country-fallback by tryGoogle. We must
+          // skip extraction results that match the destinationCountry
+          // and fall through to the title path instead.
+          //
+          // Only compares against Chinese country name (`country`) here
+          // — `countryEn` isn't computed yet at this point in the loop.
+          const _isJustCountry = (c: string): boolean => {
+            return c === country;
+          };
+          const explicitRaw = _extractDestinationPlace((d.location || d.city || "").trim());
+          const explicit = _isJustCountry(explicitRaw) ? "" : explicitRaw;
+          // Round 80.21 v10 — prefer title's lastChunk over activities[0].
+          // activities[0] is the FIRST activity of the day (typically the
+          // morning stop or starting point), but for the route map we
+          // want the day's DESTINATION (where the traveler ends the day).
+          // Day 4 「伯恩 → 黃金列車 → 蒙投」 has activities[0]="伯恩舊城區"
+          // (start) but title lastChunk is "蒙投" (end). Title wins.
+          //
+          // Fallback to activities.last() if title parsing yields empty;
+          // gives a real city for days where title is just a theme like
+          // "自由日". Final fallback to activities[0].
+          const acts = Array.isArray(d.activities) ? d.activities : [];
+          const lastActLoc = acts.length > 0 && acts[acts.length - 1]?.location
+            ? _extractDestinationPlace(String(acts[acts.length - 1].location)) : "";
+          const firstActLoc = acts.length > 0 && acts[0]?.location
+            ? _extractDestinationPlace(String(acts[0].location)) : "";
+          const activityLast = _isJustCountry(lastActLoc) ? "" : lastActLoc;
+          const activityFirst = _isJustCountry(firstActLoc) ? "" : firstActLoc;
+          const fromTitle = _extractDestinationPlace(d.title || "");
+          const cleaned = explicit || fromTitle || activityLast || activityFirst;
           if (!cleaned) return { day: d, q: "" };
 
           // Translate country to English for Google's geocoder (which handles
@@ -639,42 +1592,390 @@ export const appRouter = router({
             "馬來西亞": "Malaysia", "印尼": "Indonesia", "菲律賓": "Philippines",
             "澳洲": "Australia", "紐西蘭": "New Zealand", "土耳其": "Turkey",
             "波蘭": "Poland", "蒙古": "Mongolia", "俄羅斯": "Russia",
+            // Middle East + Africa — added for Dubai/Cairo, Egypt, Israel etc.
+            "阿聯": "United Arab Emirates", "阿拉伯聯合大公國": "United Arab Emirates",
+            "杜拜": "Dubai, United Arab Emirates", "埃及": "Egypt",
+            "以色列": "Israel", "約旦": "Jordan", "摩洛哥": "Morocco",
+            "南非": "South Africa", "肯亞": "Kenya", "坦尚尼亞": "Tanzania",
+            // Latin America
+            "巴西": "Brazil", "阿根廷": "Argentina", "智利": "Chile", "秘魯": "Peru",
+            // South Asia
+            "印度": "India", "尼泊爾": "Nepal", "斯里蘭卡": "Sri Lanka",
+            "不丹": "Bhutan", "馬爾地夫": "Maldives",
+            // CIS / Caucasus
+            "喬治亞": "Georgia", "亞美尼亞": "Armenia", "亞塞拜然": "Azerbaijan",
+            "哈薩克": "Kazakhstan", "烏茲別克": "Uzbekistan",
+          };
+          // ISO 3166-1 alpha-2 lower-case country codes for result-validation.
+          // Used to reject geocoder results in the wrong REGION (Round 80.21
+          // v7 — strict country match was too restrictive; rejected Munich
+          // for Switzerland tours since Munich is in Germany. Now we
+          // validate by REGION group so Schengen Europe results are mutually
+          // acceptable, East Asia mutually, etc.).
+          const _countryIso: Record<string, string> = {
+            "瑞士": "ch", "德國": "de", "奧地利": "at",
+            "法國": "fr", "義大利": "it", "英國": "gb",
+            "西班牙": "es", "葡萄牙": "pt", "荷蘭": "nl",
+            "比利時": "be", "希臘": "gr", "捷克": "cz",
+            "美國": "us", "加拿大": "ca", "墨西哥": "mx",
+            "日本": "jp", "韓國": "kr", "中國": "cn",
+            "泰國": "th", "越南": "vn", "新加坡": "sg",
+            "馬來西亞": "my", "印尼": "id", "菲律賓": "ph",
+            "澳洲": "au", "紐西蘭": "nz", "土耳其": "tr",
+            "波蘭": "pl", "蒙古": "mn", "俄羅斯": "ru",
+            "阿聯": "ae", "阿拉伯聯合大公國": "ae",
+            "杜拜": "ae", "埃及": "eg",
+            "以色列": "il", "約旦": "jo", "摩洛哥": "ma",
+            "南非": "za", "肯亞": "ke", "坦尚尼亞": "tz",
+            "巴西": "br", "阿根廷": "ar", "智利": "cl", "秘魯": "pe",
+            "印度": "in", "尼泊爾": "np", "斯里蘭卡": "lk",
+            "不丹": "bt", "馬爾地夫": "mv",
+            "喬治亞": "ge", "亞美尼亞": "am", "亞塞拜然": "az",
+            "哈薩克": "kz", "烏茲別克": "uz",
+            "台灣": "tw", "香港": "hk",
           };
           const countryEn = _countryEn[country] || country;
-          // Only append country if cleaned is purely Chinese (no English) — for
-          // English-name queries, Google can geocode cities directly.
+          const expectedIso = _countryIso[country] || null;
+          // Round 80.21 v7 — soft region validation (vs strict ISO match)
+          const expectedRegion = expectedIso ? _region[expectedIso] : null;
+          // Round 80.21 v4 — home-return detection.
+          // Bug case: Day 9 of tour 990014 was "巴黎 → 台北:回程啟航".
+          // lastChunk = "台北", but appending ", France" then querying
+          // Google found a Chinese restaurant named "台北" in Paris
+          // (lat 48.85). The first candidate succeeded with WRONG country.
+          //
+          // Fix: when lastChunk matches the tour's departureCity (or first
+          // 2 chars of it — handles "台北 TPE" departure formats),
+          // SKIP the destinationCountry qualifier entirely. Google's
+          // raw "台北" resolves to Taipei correctly.
+          const departureCity = ((tour as any).departureCity || "").trim();
+          const isHomeReturn = !!departureCity && (
+            cleaned === departureCity ||
+            cleaned === departureCity.slice(0, 2) ||
+            cleaned.startsWith(departureCity.slice(0, 2)) && cleaned.length <= departureCity.length + 2
+          );
+          // Round 80.21 v3 — Multi-tier candidate strategy.
+          //
+          // Bugs in v2:
+          //   - Day 8 "巴黎自由日" → "巴黎自由日, France" fails → fallback to
+          //     bare "巴黎自由日" → Google returns a Brunei result, coord set,
+          //     done with WRONG location.
+          //   - Days 3,5,6,7 with titles like "巴黎左岸文藝風情" both
+          //     candidates fail → 0 stops returned for that day.
+          //
+          // Fix: insert a CITY HINT candidate (first 2-3 Chinese chars) BETWEEN
+          // the specific query and the raw fallback. So order becomes:
+          //   1. "{cleaned}, {country}"   — most specific, wins if exact
+          //   2. "{hint3}, {country}"     — 3-char city prefix (蘇黎世/蒙特勒)
+          //   3. "{hint2}, {country}"     — 2-char city prefix (巴黎/東京)
+          //   4. "{cleaned}"              — raw, last resort
+          //
+          // For Day 8 "巴黎自由日": (1) fails, (2) "巴黎自" fails, (3) "巴黎,
+          // France" → Paris ✓, break before raw "巴黎自由日" → Brunei.
+          //
+          // English-bearing queries keep raw-first (Google handles English
+          // place names well even without country qualifier).
           const hasEnglish = /[A-Za-z]{2,}/.test(cleaned);
-          const q = countryEn && !cleaned.includes(countryEn) && !hasEnglish
-            ? `${cleaned}, ${countryEn}`
-            : cleaned;
-          return { day: d, q };
+          // Round 80.21 v6 — Chinese-only candidates ALL validated against
+          // expectedIso (including raw fallback). Without this, when both
+          // "瓦萊州, Switzerland" and "瓦萊, Switzerland" failed via
+          // Nominatim, raw "瓦萊州" was tried with expectedIso=null and
+          // accepted Vietnam's Lai Châu (lat 22, lng 103) — completely
+          // wrong country. Now raw fallback also rejects wrong-country
+          // results; the day silently drops off the map (legend below
+          // still lists it) which is much better than a wrong pin.
+          //
+          // English-bearing and home-return queries keep expectedIso=null:
+          //   - English: Google handles disambiguation well even without
+          //     country qualifier (Munich → Germany without "Germany")
+          //   - Home-return: lastChunk = departureCity, must match TW or
+          //     home country, NOT destinationCountry (which is the trip's
+          //     foreign destination).
+          // Round 80.21 v7 — candidates carry expectedRegion (not iso)
+          // for soft same-region validation (EU accepts EU, EA accepts EA, etc.)
+          const candidates: { q: string; expectedRegion: string | null }[] = [];
+          if (isHomeReturn) {
+            candidates.push({ q: cleaned, expectedRegion: null });
+          } else if (countryEn && !cleaned.includes(countryEn)) {
+            if (hasEnglish) {
+              candidates.push({ q: cleaned, expectedRegion: null });
+              candidates.push({ q: `${cleaned}, ${countryEn}`, expectedRegion });
+            } else {
+              candidates.push({ q: `${cleaned}, ${countryEn}`, expectedRegion });
+              if (cleaned.length >= 4) {
+                const hint3 = cleaned.slice(0, 3);
+                if (hint3 !== cleaned) {
+                  candidates.push({ q: `${hint3}, ${countryEn}`, expectedRegion });
+                }
+              }
+              if (cleaned.length >= 3) {
+                const hint2 = cleaned.slice(0, 2);
+                if (hint2 !== cleaned && !candidates.some((c) => c.q === `${hint2}, ${countryEn}`)) {
+                  candidates.push({ q: `${hint2}, ${countryEn}`, expectedRegion });
+                }
+              }
+              candidates.push({ q: cleaned, expectedRegion });
+            }
+          } else {
+            candidates.push({ q: cleaned, expectedRegion: null });
+          }
+          // Round 80.21 v10 — append alias candidates as final-tier fallback.
+          // For known OTA non-standard names (蒙投/冰河3000/西庸古堡/...),
+          // inject the standard English / canonical Chinese forms. New
+          // tours SHOULD use standard names per skill rules, but this
+          // rescues legacy tour data + edge cases.
+          // See server/_helpers/placeNameAliases.ts.
+          const aliases = getAliases(cleaned);
+          for (const alias of aliases) {
+            if (alias.en && !candidates.some((c) => c.q === alias.en)) {
+              candidates.push({ q: alias.en, expectedRegion });
+            }
+            if (alias.zh && countryEn) {
+              const aliasQ = `${alias.zh}, ${countryEn}`;
+              if (!candidates.some((c) => c.q === aliasQ)) {
+                candidates.push({ q: aliasQ, expectedRegion });
+              }
+            }
+          }
+          return { day: d, q: cleaned, candidates, expectedRegion };
         });
 
-        // Geocode each unique query (server-side, with simple in-process cache)
+        // Geocode each unique query (server-side, with simple in-process cache).
+        // Round 80.21 v2 — cache key prefixed with version "v2". When we
+        // bumped the candidate ordering logic, old "巴黎"→Taipei negative
+        // cache entries needed to be invalidated without restarting the
+        // process. Using a versioned prefix means all old keys become
+        // unreachable, effectively clearing the cache. Future logic
+        // changes can bump to v3, v4, etc.
+        const CACHE_VERSION = "v13"; // bump on candidate ordering changes
         const _cache = (globalThis as any).__packgoGeocodeCache ||
           ((globalThis as any).__packgoGeocodeCache = new Map<string, { lat: number; lng: number } | null>());
+        const cacheKey = (cand: string) => `${CACHE_VERSION}:${country}:${cand}`;
 
         const { makeRequest } = await import("./_core/map");
 
+        // Round 80.21 follow-up — Nominatim fallback.
+        //
+        // Discovered via fly logs: GOOGLE_API_KEY in prod returns
+        // REQUEST_DENIED ("This API project was not found... You may need
+        // to enable the API"). When that happens, ALL Google geocode
+        // calls fail and getRouteMap returns 0 stops, triggering the
+        // RouteFlowFallback chip view instead of the SVG map.
+        //
+        // OpenStreetMap's Nominatim is free, no API key, accurate at
+        // city level (uses real OSM data). Rate limit is 1 req/sec but
+        // we respect that with sequential per-query awaits + the
+        // existing 24h in-process cache. We track the "google denied"
+        // signal in a process-wide flag so we don't burn 13 failed calls
+        // before falling back.
+        const _googleStatus = (globalThis as any).__packgoGoogleStatus ||
+          ((globalThis as any).__packgoGoogleStatus = { denied: false, deniedSince: 0 });
+        // Round 80.21 v4 — Google retry after 60s cooldown. Without this,
+        // a single REQUEST_DENIED locks us into Nominatim forever (until
+        // process restart / deploy). Now we re-try Google every 60s — if
+        // Jeff fixes the GCP key, the next batch picks it up automatically.
+        const GOOGLE_RETRY_COOLDOWN_MS = 60_000;
+        if (_googleStatus.denied && Date.now() - _googleStatus.deniedSince > GOOGLE_RETRY_COOLDOWN_MS) {
+          _googleStatus.denied = false;
+        }
+
+        // Round 80.21 v7 — region-based validation (was strict ISO match).
+        // Strict country match rejected legitimate neighbor-country stops
+        // like Munich (de) on a Switzerland (ch) tour. Now we accept any
+        // result whose country is in the same region group (EU, EA, SE,
+        // ME, NA, LA, OC, CA, AF, SA). Wrong-region results still get
+        // rejected — Lai Châu (vn, region SE) is correctly rejected for a
+        // Switzerland (ch, region EU) destination.
+        const tryGoogle = async (
+          cand: string,
+          expRegion: string | null
+        ): Promise<{ lat: number; lng: number } | null> => {
+          try {
+            const resp = await makeRequest<any>("/maps/api/geocode/json", { address: cand });
+            if (resp?.status === "REQUEST_DENIED") {
+              if (!_googleStatus.denied) {
+                console.warn(`[getRouteMap] Google REQUEST_DENIED — switching to Nominatim fallback for the rest of this request batch. Reason: ${resp.error_message || "no message"}`);
+                _googleStatus.denied = true;
+                _googleStatus.deniedSince = Date.now();
+              }
+              return null;
+            }
+            if (resp?.status && resp.status !== "OK" && resp.status !== "ZERO_RESULTS") {
+              console.warn(`[getRouteMap] geocode "${cand}" returned status=${resp.status}: ${resp.error_message || ""}`);
+            }
+            const result = resp?.results?.[0];
+            const loc = result?.geometry?.location;
+            if (!loc?.lat || !loc?.lng) return null;
+            // Round 80.21 v9 — reject country-level fallback results.
+            // When Google can't find a specific city (e.g. "慕尼黑,
+            // Switzerland" — Munich isn't in CH), it returns the country
+            // CENTER. types = ["country", "political"]. Multiple days
+            // then resolve to the same uninformative coord (46.82, 8.23
+            // = geometric center of Switzerland).
+            const resTypes: string[] = Array.isArray(result?.types) ? result.types : [];
+            const isCountryFallback = resTypes.includes("country") &&
+              !resTypes.some((t) => ["locality", "sublocality", "neighborhood", "administrative_area_level_2", "administrative_area_level_3", "tourist_attraction", "point_of_interest", "establishment"].includes(t));
+            if (isCountryFallback) {
+              console.log(`[getRouteMap] Google "${cand}" returned country-level result (types=${resTypes.join(",")}) — rejecting, will try next candidate`);
+              return null;
+            }
+            // Region validation (v7)
+            if (expRegion) {
+              const resCountry = result?.address_components?.find(
+                (c: any) => c?.types?.includes("country")
+              )?.short_name?.toLowerCase();
+              const resRegion = resCountry ? _region[resCountry] : null;
+              if (resRegion && resRegion !== expRegion) {
+                console.log(`[getRouteMap] Google "${cand}" region mismatch: expected ${expRegion}, got ${resRegion} (${resCountry}) — rejecting`);
+                return null;
+              }
+            }
+            return { lat: loc.lat, lng: loc.lng };
+          } catch (err) {
+            console.warn(`[getRouteMap] Google geocode failed for "${cand}":`, (err as Error).message);
+            return null;
+          }
+        };
+
+        const tryNominatim = async (
+          cand: string,
+          expRegion: string | null
+        ): Promise<{ lat: number; lng: number } | null> => {
+          try {
+            const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=1&accept-language=en,zh-TW&q=${encodeURIComponent(cand)}`;
+            const resp = await fetch(url, {
+              headers: {
+                "User-Agent": "PACK&GO Travel (Newark CA) +https://packgoplay.com",
+              },
+              signal: AbortSignal.timeout(8000),
+            });
+            if (!resp.ok) {
+              console.warn(`[getRouteMap] Nominatim "${cand}" returned ${resp.status}`);
+              return null;
+            }
+            const data = (await resp.json()) as any[];
+            const first = data?.[0];
+            if (!first?.lat || !first?.lon) return null;
+            // Region validation (v7)
+            if (expRegion) {
+              const resCountry = (first?.address?.country_code || "").toLowerCase();
+              const resRegion = resCountry ? _region[resCountry] : null;
+              if (resRegion && resRegion !== expRegion) {
+                console.log(`[getRouteMap] Nominatim "${cand}" region mismatch: expected ${expRegion}, got ${resRegion} (${resCountry}) — rejecting`);
+                return null;
+              }
+            }
+            return { lat: parseFloat(first.lat), lng: parseFloat(first.lon) };
+          } catch (err) {
+            console.warn(`[getRouteMap] Nominatim failed for "${cand}":`, (err as Error).message);
+            return null;
+          }
+        };
+
+        // Country English name + ISO region — same logic as inside
+        // queries.map; pulled up here so the LLM fallback (after the
+        // candidate loop) can use them.
+        const _outerCountryEn = (() => {
+          const map: Record<string, string> = {
+            "瑞士": "Switzerland", "德國": "Germany", "奧地利": "Austria",
+            "法國": "France", "義大利": "Italy", "英國": "United Kingdom",
+            "西班牙": "Spain", "葡萄牙": "Portugal", "荷蘭": "Netherlands",
+            "比利時": "Belgium", "希臘": "Greece", "捷克": "Czech Republic",
+            "美國": "USA", "加拿大": "Canada", "墨西哥": "Mexico",
+            "日本": "Japan", "韓國": "South Korea", "中國": "China",
+            "泰國": "Thailand", "越南": "Vietnam", "新加坡": "Singapore",
+            "馬來西亞": "Malaysia", "印尼": "Indonesia", "菲律賓": "Philippines",
+            "澳洲": "Australia", "紐西蘭": "New Zealand", "土耳其": "Turkey",
+            "阿聯": "United Arab Emirates", "杜拜": "Dubai, United Arab Emirates",
+            "埃及": "Egypt", "以色列": "Israel", "摩洛哥": "Morocco",
+            "南非": "South Africa", "肯亞": "Kenya",
+            "印度": "India", "尼泊爾": "Nepal", "斯里蘭卡": "Sri Lanka",
+            "台灣": "Taiwan", "香港": "Hong Kong",
+          };
+          return map[country] || country;
+        })();
+
         const stops: Array<{ day: number; name: string; lat: number; lng: number }> = [];
         for (let i = 0; i < queries.length; i++) {
-          const { day, q } = queries[i];
+          const { day, q, candidates, expectedRegion: outerExpRegion } = queries[i] as any;
           if (!q) continue;
-          let coord: { lat: number; lng: number } | null = _cache.get(q) ?? null;
-          if (coord === null && !_cache.has(q)) {
-            try {
-              const resp = await makeRequest<any>("/maps/api/geocode/json", { address: q });
-              if (resp?.status && resp.status !== "OK" && resp.status !== "ZERO_RESULTS") {
-                console.warn(`[getRouteMap] geocode "${q}" returned status=${resp.status}: ${resp.error_message || ""}`);
+          let coord: { lat: number; lng: number } | null = null;
+          for (const c of (candidates as { q: string; expectedRegion: string | null }[])) {
+            const cand = c.q;
+            const expRegion = c.expectedRegion;
+            // Cache hit (positive) — use it
+            const cached = _cache.get(cacheKey(cand));
+            if (cached) { coord = cached; break; }
+            // Cache hit (negative) — skip, try next candidate
+            if (_cache.has(cacheKey(cand))) continue;
+
+            // Try Google first (when not previously denied)
+            if (!_googleStatus.denied) {
+              const g = await tryGoogle(cand, expRegion);
+              if (g) {
+                coord = g;
+                _cache.set(cacheKey(cand), coord);
+                break;
               }
-              const loc = resp?.results?.[0]?.geometry?.location;
-              if (loc?.lat && loc?.lng) {
-                coord = { lat: loc.lat, lng: loc.lng };
+              if (!_googleStatus.denied) {
+                _cache.set(cacheKey(cand), null);
+                continue;
               }
-            } catch (err) {
-              console.warn(`[getRouteMap] geocode failed for "${q}":`, (err as Error).message);
+              // fall through to Nominatim
             }
-            _cache.set(q, coord);
+
+            // Nominatim fallback (free, no key)
+            const n = await tryNominatim(cand, expRegion);
+            if (n) {
+              coord = n;
+              _cache.set(cacheKey(cand), coord);
+              break;
+            }
+            _cache.set(cacheKey(cand), null);
+            // Nominatim has a 1 req/sec etiquette rule — sleep 1s between
+            // candidate attempts that hit the actual API. Cache hits don't
+            // sleep (most production calls will be 100% cache after warm-up).
+            await new Promise((r) => setTimeout(r, 1100));
+          }
+          // Round 80.21 v11 — LLM fallback when all candidates failed.
+          // After both static aliases and direct geocoding miss, ask
+          // Claude Haiku to normalize the place name. Result cached in
+          // Redis (30-day TTL) so subsequent requests hit cache.
+          if (!coord && q) {
+            const llmAlias = await normalizePlaceName(q, country);
+            if (llmAlias && (llmAlias.en || llmAlias.zh)) {
+              const llmCandidates: { q: string; expectedRegion: string | null }[] = [];
+              if (llmAlias.en) llmCandidates.push({ q: llmAlias.en, expectedRegion: outerExpRegion });
+              if (llmAlias.zh && _outerCountryEn) {
+                llmCandidates.push({ q: `${llmAlias.zh}, ${_outerCountryEn}`, expectedRegion: outerExpRegion });
+              }
+              for (const c of llmCandidates) {
+                const cand = c.q;
+                const cached = _cache.get(cacheKey(cand));
+                if (cached) { coord = cached; break; }
+                if (_cache.has(cacheKey(cand))) continue;
+                if (!_googleStatus.denied) {
+                  const g = await tryGoogle(cand, c.expectedRegion);
+                  if (g) {
+                    coord = g;
+                    _cache.set(cacheKey(cand), coord);
+                    console.log(`[getRouteMap] LLM rescue: "${q}" → "${cand}" (${coord.lat.toFixed(2)},${coord.lng.toFixed(2)})`);
+                    break;
+                  }
+                  _cache.set(cacheKey(cand), null);
+                  continue;
+                }
+                const n = await tryNominatim(cand, c.expectedRegion);
+                if (n) {
+                  coord = n;
+                  _cache.set(cacheKey(cand), coord);
+                  console.log(`[getRouteMap] LLM rescue (Nominatim): "${q}" → "${cand}" (${coord.lat.toFixed(2)},${coord.lng.toFixed(2)})`);
+                  break;
+                }
+                _cache.set(cacheKey(cand), null);
+                await new Promise((r) => setTimeout(r, 1100));
+              }
+            }
           }
           if (coord) {
             stops.push({
@@ -689,13 +1990,42 @@ export const appRouter = router({
         // v78o: Country-level fallback when geocoding can't resolve specific cities.
         // Uses Static Maps (different API surface than Geocoding) — works as long
         // as Static Maps is enabled even if Geocoding isn't.
+        // v80.23: when geocoding fails, surface the itinerary place names as
+        // "raw stops" so the legend isn't empty even without lat/lng.
         if (stops.length === 0) {
           const countryEnFallback: Record<string, string> = {
             "瑞士": "Switzerland", "德國": "Germany", "奧地利": "Austria",
             "法國": "France", "義大利": "Italy", "英國": "United Kingdom",
             "美國": "USA", "日本": "Japan", "韓國": "South Korea",
             "馬來西亞": "Malaysia", "泰國": "Thailand", "新加坡": "Singapore",
+            "杜拜": "Dubai, United Arab Emirates", "阿聯": "United Arab Emirates",
+            "阿拉伯聯合大公國": "United Arab Emirates",
+            "埃及": "Egypt", "以色列": "Israel", "約旦": "Jordan",
+            "摩洛哥": "Morocco", "土耳其": "Turkey",
+            "印度": "India", "尼泊爾": "Nepal", "斯里蘭卡": "Sri Lanka",
+            "馬爾地夫": "Maldives", "中國": "China", "越南": "Vietnam",
+            "印尼": "Indonesia", "菲律賓": "Philippines", "澳洲": "Australia",
+            "紐西蘭": "New Zealand", "加拿大": "Canada", "墨西哥": "Mexico",
+            "巴西": "Brazil", "南非": "South Africa", "肯亞": "Kenya",
+            "西班牙": "Spain", "葡萄牙": "Portugal",
+            "希臘": "Greece", "荷蘭": "Netherlands", "比利時": "Belgium",
+            "捷克": "Czech Republic", "波蘭": "Poland", "俄羅斯": "Russia",
           };
+          // Even without geocoding, show the itinerary place names in the legend
+          // so users see "Day 1 · 杜拜" instead of "0 個地點".
+          const rawStops = queries
+            .filter((q) => q.q)
+            .slice(0, 26)
+            .map((q, i) => ({
+              day: i + 1,
+              name: (q.day.title || q.day.location || q.day.city || q.q).replace(
+                /^(day\s*\d+\s*[:\-]?\s*|第\s*\d+\s*日\s*[:\-]?\s*)/i,
+                ""
+              ),
+              lat: 0,
+              lng: 0,
+            }));
+
           const countryNameForMap = countryEnFallback[country] || country;
           if (countryNameForMap) {
             const apiKey = process.env.GOOGLE_API_KEY || "";
@@ -704,43 +2034,123 @@ export const appRouter = router({
             params.set("scale", "2");
             params.set("maptype", "roadmap");
             params.set("center", countryNameForMap);
-            params.set("zoom", "6");
+            params.set("zoom", country.includes("杜拜") ? "9" : "5");
             params.set("key", apiKey);
             const fallbackUrl = `https://maps.googleapis.com/maps/api/staticmap?${params.toString()}`;
             const directionsFallback = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(countryNameForMap)}`;
             return {
               staticMapUrl: fallbackUrl,
-              stops: [],
+              stops: rawStops,
               directionsUrl: directionsFallback,
               fallbackMode: "country" as const,
+              aiMapUrl,
             };
           }
-          return { staticMapUrl: null, stops: [], directionsUrl: null };
+          return {
+            staticMapUrl: null,
+            stops: rawStops,
+            directionsUrl: null,
+            fallbackMode: "names_only" as const,
+            aiMapUrl,
+          };
         }
 
-        // Build Google Static Maps URL — numbered labels (max 26 supported via A-Z)
-        // Use color "blue" + label number for each stop, plus a path connecting them
+        // Round 80.21 v5 — server-side cluster filter + branded static map.
+        //
+        // Why: Maplibre with vector tiles was too slow loading from Asia
+        // (Jeff: 「載入時間太慢了」). Reverting to Google Static Maps API
+        // for instant single-image render, but with two upgrades:
+        //   1. CLUSTER FILTER — same haversine-3000km logic from the
+        //      previous client-side attempt, now done server-side so
+        //      the static map URL only contains primary-cluster stops.
+        //   2. BRANDED STYLING — `style=` parameters strip Google's
+        //      colorful default theme and produce a clean B&W minimal
+        //      map matching PACK&GO's brand (similar to Carto Positron).
+        //
+        // Output: { staticMapUrl, stops (primary), outliers, ... }
+
+        // Cluster filter — separate primary stops from outliers
+        const haversineKm = (lat1: number, lng1: number, lat2: number, lng2: number) => {
+          const R = 6371;
+          const toRad = (d: number) => (d * Math.PI) / 180;
+          const dLat = toRad(lat2 - lat1);
+          const dLng = toRad(lng2 - lng1);
+          const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+          return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        };
+        let primaryStops = stops;
+        let outlierStops: typeof stops = [];
+        if (stops.length > 4) {
+          const lats = [...stops.map(s => s.lat)].sort((a, b) => a - b);
+          const lngs = [...stops.map(s => s.lng)].sort((a, b) => a - b);
+          const medLat = lats[Math.floor(lats.length / 2)];
+          const medLng = lngs[Math.floor(lngs.length / 2)];
+          const RADIUS_KM = 3000;
+          const inCluster = stops.filter(s => haversineKm(s.lat, s.lng, medLat, medLng) <= RADIUS_KM);
+          const outside = stops.filter(s => haversineKm(s.lat, s.lng, medLat, medLng) > RADIUS_KM);
+          // Only filter when it actually helps (cluster has >= half of stops)
+          if (inCluster.length >= Math.max(3, Math.floor(stops.length * 0.5))) {
+            primaryStops = inCluster;
+            outlierStops = outside;
+          }
+        }
+
         const apiKey = process.env.GOOGLE_API_KEY || "";
         const baseUrl = "https://maps.googleapis.com/maps/api/staticmap";
         const params = new URLSearchParams();
-        params.set("size", "1200x520");
-        params.set("scale", "2"); // retina
+        params.set("size", "640x270"); // 12:5 aspect; 640 is Static Maps free limit
+        params.set("scale", "2"); // retina → effective 1280x540
         params.set("maptype", "roadmap");
-        // Markers: one parameter per stop with auto-numbered label
-        // Note: Static Maps labels only support A-Z so we use a series of markers
-        stops.slice(0, 26).forEach((s, i) => {
-          const label = String.fromCharCode(65 + i); // A, B, C, ...
-          params.append("markers", `color:0x0d9488|label:${label}|${s.lat},${s.lng}`);
+        // Round 80.21 v9 — Jeff updated direction (5/6 00:30): map base
+        // should be plain B&W gray (「黑白灰為配色」). Cleaner, simpler,
+        // matches PACK&GO baseline. Gold reserved as ACCENT only on the
+        // SVG decorations (title bar, compass rose) — not on the map
+        // itself. The map looks like a clean architectural diagram, not
+        // a decorated treasure map.
+        const brandStyles = [
+          // Water — soft pale gray (sea)
+          "feature:water|element:geometry|color:0xeef0f3",
+          "feature:water|element:labels|visibility:off",
+          // Land — slightly darker gray than water for differentiation
+          "feature:landscape|element:geometry|color:0xf7f7f6",
+          "feature:landscape.natural|color:0xf2f2f0",
+          "feature:landscape.natural.terrain|color:0xebebe8",
+          // Roads — hidden for clean canvas
+          "feature:road|element:geometry|visibility:off",
+          "feature:road|element:labels|visibility:off",
+          // POI — hidden
+          "feature:poi|visibility:off",
+          "feature:transit|visibility:off",
+          // Country borders — soft black for clean B&W look
+          "feature:administrative.country|element:geometry.stroke|color:0x111111|weight:1.0",
+          // Province/state borders — subtle gray
+          "feature:administrative.province|element:geometry.stroke|color:0x9ca3af|weight:0.4",
+          // Country labels — soft black with white halo for legibility
+          "feature:administrative.country|element:labels.text.fill|color:0x1f2937",
+          "feature:administrative.country|element:labels.text.stroke|color:0xffffff|weight:3",
+          // Locality (city) labels — neutral gray
+          "feature:administrative.locality|element:labels.text.fill|color:0x4b5563",
+          "feature:administrative.locality|element:labels.text.stroke|color:0xffffff|weight:2.5",
+          "feature:administrative.province|element:labels|visibility:off",
+        ];
+        for (const s of brandStyles) params.append("style", s);
+        // Markers: solid black pin with white day number (1-9 numbers,
+        // 10+ letters since Google Static labels are single-char only)
+        primaryStops.slice(0, 26).forEach((s, i) => {
+          const label = i < 9 ? String(i + 1) : String.fromCharCode(65 + i - 9);
+          // Soft black for B&W aesthetic
+          params.append("markers", `color:0x111111|label:${label}|${s.lat},${s.lng}`);
         });
-        // Path polyline (semi-transparent teal)
-        if (stops.length >= 2) {
-          const path = stops.map((s) => `${s.lat},${s.lng}`).join("|");
-          params.append("path", `color:0x0d9488aa|weight:3|${path}`);
+        // Path polyline — soft black solid line, weight 3
+        if (primaryStops.length >= 2) {
+          const path = primaryStops.map((s) => `${s.lat},${s.lng}`).join("|");
+          params.append("path", `color:0x111111dd|weight:3|${path}`);
         }
         params.set("key", apiKey);
         const staticMapUrl = `${baseUrl}?${params.toString()}`;
 
-        // Build "Open in Google Maps" multi-stop URL
+        // Build "Open in Google Maps" multi-stop URL (uses ALL stops incl outliers)
         const directionsUrl =
           stops.length >= 2
             ? `https://www.google.com/maps/dir/?api=1&origin=${stops[0].lat},${stops[0].lng}&destination=${stops[stops.length - 1].lat},${stops[stops.length - 1].lng}` +
@@ -749,7 +2159,13 @@ export const appRouter = router({
                 : "")
             : `https://www.google.com/maps/search/?api=1&query=${stops[0].lat},${stops[0].lng}`;
 
-        return { staticMapUrl, stops, directionsUrl };
+        return {
+          staticMapUrl,
+          stops: primaryStops,
+          outliers: outlierStops,
+          directionsUrl,
+          aiMapUrl,
+        };
       }),
 
     // Get distinct departure cities from active tours (for search autocomplete)
@@ -801,6 +2217,139 @@ export const appRouter = router({
         };
       }),
 
+    /**
+     * Round 80.13: lightweight typeahead endpoint for the homepage hero
+     * search bar. Returns up to 8 suggestions across 4 categories:
+     *   - destination (matches tour.destinationCountry / destinationCity)
+     *   - tour (matches tour.title — exact tour link)
+     *   - season (curated tags: 春櫻 / 秋楓 / 雪國)
+     *   - popular (returned when query is empty — 4 top destinations)
+     *
+     * Designed for low-latency autocomplete: queries the tour list (cached
+     * in tRPC) and does in-memory fuzzy match. NO new DB tables needed.
+     *
+     * Routing:
+     *   - destination → /tours?destination={country}
+     *   - tour        → /tours/{id}
+     *   - season      → /tours?season={key}
+     */
+    suggest: publicProcedure
+      .input(z.object({ query: z.string().max(50).default("") }))
+      .query(async ({ input }) => {
+        const q = input.query.trim().toLowerCase();
+        const allTours = await db.listTours();
+        const active = allTours.filter((t) => t.status === "active");
+
+        type Suggestion = {
+          type: "destination" | "tour" | "season" | "popular";
+          label: string;
+          sublabel?: string;
+          href: string;
+          imageUrl?: string;
+        };
+        const out: Suggestion[] = [];
+
+        // Empty query → popular destinations (top by featured count) + seasons
+        if (!q) {
+          // Top 4 destinations by featured count
+          const destMap = new Map<string, { country: string; count: number; img?: string }>();
+          for (const t of active) {
+            const country = (t.destinationCountry || "").trim();
+            if (!country) continue;
+            const existing = destMap.get(country);
+            if (existing) {
+              existing.count += t.featured === 1 ? 2 : 1; // featured weighted 2x
+            } else {
+              destMap.set(country, { country, count: t.featured === 1 ? 2 : 1, img: t.heroImage || t.imageUrl || undefined });
+            }
+          }
+          const topDests = Array.from(destMap.values())
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 4);
+          for (const d of topDests) {
+            out.push({
+              type: "popular",
+              label: d.country,
+              sublabel: `${d.count} 個行程`,
+              href: `/tours?destination=${encodeURIComponent(d.country)}`,
+              imageUrl: d.img,
+            });
+          }
+          // Plus 3 seasonal suggestions
+          out.push(
+            { type: "season", label: "春櫻 (3-4月)", href: "/tours?season=spring" },
+            { type: "season", label: "秋楓 (10-11月)", href: "/tours?season=autumn" },
+            { type: "season", label: "雪國 (12-2月)", href: "/tours?season=winter" },
+          );
+          return { suggestions: out.slice(0, 8) };
+        }
+
+        // ── Query mode ───────────────────────────────────────────────────
+        // Match destination countries / cities first (highest signal)
+        const seenDest = new Set<string>();
+        for (const t of active) {
+          const country = (t.destinationCountry || "").trim();
+          const city = (t.destinationCity || "").trim();
+          if (country && country.toLowerCase().includes(q) && !seenDest.has(country)) {
+            seenDest.add(country);
+            const sample = active.find((x) => x.destinationCountry === country);
+            out.push({
+              type: "destination",
+              label: country,
+              sublabel: "看所有 " + country + " 行程",
+              href: `/tours?destination=${encodeURIComponent(country)}`,
+              imageUrl: sample?.heroImage || sample?.imageUrl || undefined,
+            });
+          }
+          if (city && city.toLowerCase().includes(q) && !seenDest.has(city) && city !== country) {
+            seenDest.add(city);
+            out.push({
+              type: "destination",
+              label: city,
+              sublabel: country ? `${country} · 看所有行程` : "看所有行程",
+              href: `/tours?destination=${encodeURIComponent(city)}`,
+              imageUrl: t.heroImage || t.imageUrl || undefined,
+            });
+          }
+          if (out.length >= 5) break;
+        }
+
+        // Then individual tours by title (up to 3 matches)
+        const tourMatches = active
+          .filter((t) => (t.title || "").toLowerCase().includes(q))
+          .slice(0, 3);
+        for (const t of tourMatches) {
+          out.push({
+            type: "tour",
+            label: t.title,
+            sublabel: `${t.destinationCountry || ""} · ${t.duration} 天 · NT$ ${(t.price || 0).toLocaleString()}`,
+            href: `/tours/${t.id}`,
+            imageUrl: t.heroImage || t.imageUrl || undefined,
+          });
+        }
+
+        // If still less than 3 results, try season keyword match
+        if (out.length < 3) {
+          const seasonHints: Array<{ kw: string[]; key: string; label: string }> = [
+            { kw: ["櫻", "spring", "春", "3月", "4月"], key: "spring", label: "春櫻 (3-4月)" },
+            { kw: ["楓", "autumn", "fall", "秋", "10月", "11月"], key: "autumn", label: "秋楓 (10-11月)" },
+            { kw: ["雪", "winter", "冬", "12月", "1月", "2月"], key: "winter", label: "雪國 (12-2月)" },
+          ];
+          for (const s of seasonHints) {
+            if (s.kw.some((k) => q.includes(k.toLowerCase()))) {
+              out.push({
+                type: "season",
+                label: s.label,
+                sublabel: "依季節篩選",
+                href: `/tours?season=${s.key}`,
+              });
+            }
+          }
+        }
+
+        return { suggestions: out.slice(0, 8) };
+      }),
+
     // Create new tour (admin only)
     create: adminProcedure
       .input(
@@ -816,8 +2365,9 @@ export const appRouter = router({
           category: z.enum(["group", "custom", "package", "cruise", "theme"]),
           status: z.enum(["active", "inactive", "soldout"]).default("active"),
           featured: z.number().min(0).max(1).default(0),
-          startDate: z.date().optional(),
-          endDate: z.date().optional(),
+          // Round 80.22: accept null too — frontend sends null when user clears the date input.
+          startDate: z.date().nullable().optional(),
+          endDate: z.date().nullable().optional(),
           maxParticipants: z.number().optional(),
           // v71: all bounded; long JSON blobs at 50KB, descriptions 5KB, single-line 255
           highlights: longStr.optional(),
@@ -917,8 +2467,9 @@ export const appRouter = router({
           category: z.enum(["group", "custom", "package", "cruise", "theme"]).optional(),
           status: z.enum(["active", "inactive", "soldout"]).optional(),
           featured: z.number().int().min(0).max(1).optional(),
-          startDate: z.date().optional(),
-          endDate: z.date().optional(),
+          // Round 80.22: accept null too — frontend sends null when user clears the date input.
+          startDate: z.date().nullable().optional(),
+          endDate: z.date().nullable().optional(),
           maxParticipants: z.number().int().min(0).max(10_000).optional(),
           currentParticipants: z.number().int().min(0).max(10_000).optional(),
           productCode: shortStr.optional(),
@@ -943,6 +2494,12 @@ export const appRouter = router({
           poeticTitle: shortStr.nullable().optional(),
           colorTheme: longStr.nullable().optional(),
           galleryImages: longStr.nullable().optional(),
+          // Round 80.22: Packpoint per-tour multiplier + commission estimate.
+          // pointsEarnRate stored × 100 (25 = 0.25x default).
+          // estimatedCommissionPct stored × 100 (1500 = 15%).
+          pointsEarnRate: z.number().int().min(0).max(500).optional(),
+          estimatedCommissionPct: z.number().int().min(0).max(10000).nullable().optional(),
+          excludeFromPackpoint: z.boolean().optional(),
           // v75: optional optimistic-lock token. Client passes the `updatedAt`
           // from when it loaded the tour; if the tour was modified by another
           // admin between then and now, the update is rejected with CONFLICT
@@ -1306,6 +2863,62 @@ export const appRouter = router({
           message: `行程生成任務已提交（${mode} 模式），請稍候...`,
         };
       }),
+
+    // v80.24: Bulk import from Lion Travel — fast path, no LLM
+    bulkImportFromLion: adminProcedure
+      .input(z.object({
+        ids: z.array(z.string()).optional(),
+        categoryPath: z.string().optional(),
+        limit: z.number().min(1).max(100).default(30),
+        queueRewrite: z.boolean().default(false),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        if (!input.ids?.length && !input.categoryPath) {
+          throw new Error("Provide either ids or categoryPath");
+        }
+        const { bulkImportFromLion, queueRewriteForImportedTours } = await import("./services/lionBulkImportService");
+        const result = await bulkImportFromLion({
+          ids: input.ids,
+          categoryPath: input.categoryPath,
+          limit: input.limit,
+        });
+        let queued = 0;
+        if (input.queueRewrite && result.imported > 0) {
+          const tourIds = result.results.filter(r => r.success && r.tourId).map(r => r.tourId!);
+          ({ queued } = await queueRewriteForImportedTours(tourIds, { userId: ctx.user.id }));
+        }
+        console.log(`[bulkImportFromLion] admin=${ctx.user.id} imported=${result.imported}/${result.total} queued=${queued}`);
+        return { ...result, queued };
+      }),
+
+    // List Lion category options (for admin UI dropdown)
+    listLionCategories: adminProcedure.query(async () => {
+      // Static list — no need for tRPC fetch each time
+      return [
+        { path: "japan/kanto", label: "日本｜關東" },
+        { path: "japan/kansai", label: "日本｜關西" },
+        { path: "japan/hokkaido", label: "日本｜北海道" },
+        { path: "japan/kyushu", label: "日本｜九州" },
+        { path: "japan/okinawa", label: "日本｜沖繩" },
+        { path: "japan/tohoku", label: "日本｜東北" },
+        { path: "korea/seoul", label: "韓國｜首爾" },
+        { path: "korea/pusan", label: "韓國｜釜山" },
+        { path: "korea/jeju", label: "韓國｜濟州" },
+        { path: "taiwan/index", label: "台灣" },
+        { path: "middleeurope-westerneurope/index", label: "歐洲｜中西歐" },
+        { path: "southerneurope-northerneurope/index", label: "歐洲｜南歐 / 北歐" },
+        { path: "easterneurope-russia/index", label: "歐洲｜東歐 / 俄羅斯" },
+        { path: "southasia/index", label: "南亞 / 中亞" },
+        { path: "middleeast/index", label: "中東" },
+        { path: "africa/index", label: "非洲" },
+        { path: "china/easternchina", label: "中國｜華東" },
+        { path: "china/northernchina", label: "中國｜華北" },
+        { path: "china/southernchina", label: "中國｜華南" },
+        { path: "china/southwesternchina", label: "中國｜西南" },
+        { path: "china/centralchina", label: "中國｜華中" },
+        { path: "china/xinjiang-tibet", label: "中國｜新疆 / 西藏" },
+      ];
+    }),
 
     // Save tour from preview (admin only)
     // Used after previewing generated tour data (admin only)
@@ -2054,6 +3667,12 @@ export const appRouter = router({
           specialRequests: mediumStr.optional(),
           // v78x: Customer's current UI language — drives email language preference
           language: z.enum(["zh-TW", "en"]).optional(),
+          // Round 80.22: optional Packpoint redemption applied at booking
+          // creation. 100 pts = $1 USD discount. Validated server-side
+          // against user's balance; capped at 50% of totalPrice (policy §5).
+          // Only honored when departure currency is USD — TWD bookings
+          // require FX conversion which we defer for now.
+          pointsToRedeem: z.number().int().min(0).max(10_000_000).optional(),
         })
       )
       .mutation(async ({ ctx, input }) => {
@@ -2135,17 +3754,80 @@ export const appRouter = router({
         const infantPrice = departure.infantPrice ?? 0;
         const singleSupplement = departure.singleRoomSupplement ?? 0;
 
-        const totalPrice =
+        const grossTotalPrice =
           adults * adultPrice +
           childWithBed * childWithBedPrice +
           childNoBed * childNoBedPrice +
           infants * infantPrice +
           singleRooms * singleSupplement;
 
-        if (totalPrice <= 0) {
+        if (grossTotalPrice <= 0) {
           // Capacity already incremented — release before throwing
           await db.releaseDepartureSlots(input.departureId, totalSeatsRequested).catch(() => {});
           throw new TRPCError({ code: "BAD_REQUEST", message: "計算金額異常" });
+        }
+
+        // ── Round 80.22: Packpoint redemption (optional) ─────────────────
+        // Apply discount BEFORE creating the booking so totalPrice reflects
+        // the discounted amount. Round 80.22 Phase D: TWD bookings now
+        // supported via FX conversion at the moment of booking.
+        const departureCurrency = ((departure as any).currency || "TWD").toUpperCase();
+        let pointsRedeemed = 0;
+        let totalPrice = grossTotalPrice;
+        if (input.pointsToRedeem && input.pointsToRedeem > 0) {
+          const userBalance = (ctx.user as any).packpointBalance ?? 0;
+          if (input.pointsToRedeem > userBalance) {
+            await db.releaseDepartureSlots(input.departureId, totalSeatsRequested).catch(() => {});
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: `您的餘額僅 ${userBalance} 點,無法折抵 ${input.pointsToRedeem} 點`,
+            });
+          }
+          if (input.pointsToRedeem < 100) {
+            await db.releaseDepartureSlots(input.departureId, totalSeatsRequested).catch(() => {});
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "最低折抵 100 點($1)",
+            });
+          }
+          // 100 pt = $1 USD. Convert to booking currency at current FX rate.
+          const requestedDiscountUsd = input.pointsToRedeem / 100;
+          let discountInBookingCurrency: number;
+          if (departureCurrency === "USD") {
+            discountInBookingCurrency = requestedDiscountUsd;
+          } else {
+            try {
+              discountInBookingCurrency = await convertCurrency(
+                requestedDiscountUsd,
+                "USD" as SupportedCurrency,
+                departureCurrency as SupportedCurrency
+              );
+            } catch (err) {
+              await db.releaseDepartureSlots(input.departureId, totalSeatsRequested).catch(() => {});
+              throw new TRPCError({
+                code: "INTERNAL_SERVER_ERROR",
+                message: "匯率服務暫時不可用,請稍後再試或不使用 Packpoint 折抵",
+              });
+            }
+          }
+          // Cap at 50% of subtotal (policy §5)
+          const maxDiscount = grossTotalPrice * 0.5;
+          const finalDiscount = Math.min(discountInBookingCurrency, maxDiscount);
+          totalPrice = Math.max(0, Math.floor(grossTotalPrice - finalDiscount));
+          // Compute actual points consumed: convert finalDiscount back to USD
+          // to find how many points we should deduct (handles the 50% cap case)
+          const finalDiscountUsd =
+            departureCurrency === "USD"
+              ? finalDiscount
+              : await convertCurrency(
+                  finalDiscount,
+                  departureCurrency as SupportedCurrency,
+                  "USD" as SupportedCurrency
+                ).catch(() => requestedDiscountUsd);
+          pointsRedeemed = Math.floor(finalDiscountUsd * 100);
+          console.log(
+            `[bookings.create] Packpoint redemption: user ${ctx.user.id} → -${pointsRedeemed} pts, discount ${departureCurrency} ${finalDiscount}`
+          );
         }
 
         // v74: default contactEmail to authenticated user's email so the
@@ -2180,6 +3862,29 @@ export const appRouter = router({
           // If booking row insert fails, release the slots we reserved
           await db.releaseDepartureSlots(input.departureId, totalSeatsRequested).catch(() => {});
           throw err;
+        }
+
+        // Round 80.22: deduct the points NOW that booking exists with
+        // a valid id we can reference in the audit trail. If this fails the
+        // booking still exists but at the discounted price (effectively a
+        // free discount) — log loudly so ops can manually reconcile.
+        if (pointsRedeemed > 0) {
+          try {
+            const { deductPackpoint } = await import("./_core/packpoint");
+            await deductPackpoint({
+              userId: ctx.user.id,
+              amount: pointsRedeemed,
+              reason: "redemption",
+              referenceType: "booking",
+              referenceId: booking.id,
+              description: `Booking #${booking.id} — $${pointsRedeemed / 100} discount`,
+            });
+          } catch (err) {
+            console.error(
+              `[bookings.create] CRITICAL: Packpoint deduction failed for booking ${booking.id}:`,
+              (err as Error).message
+            );
+          }
         }
 
         // Audit (fire-and-forget)
@@ -3265,6 +4970,34 @@ export const appRouter = router({
 
   // Admin dashboard router
   admin: router({
+    /**
+     * Round 80.22 Phase C: lookup user by exact email for the Packpoint
+     * admin tab. Returns minimal info needed for the adjust form (id, email,
+     * name, tier, balance, lifetime). Returns null if not found rather than
+     * 404 so the UI can show a friendly toast.
+     */
+    lookupUserByEmail: adminProcedure
+      .input(z.object({ email: z.string().email().max(320) }))
+      .query(async ({ input }) => {
+        const drizzleDb = await db.getDb();
+        if (!drizzleDb) return null;
+        const { users: usersTable } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const [user] = await drizzleDb
+          .select({
+            id: usersTable.id,
+            email: usersTable.email,
+            name: usersTable.name,
+            tier: usersTable.tier,
+            balance: usersTable.packpointBalance,
+            lifetime: usersTable.packpointLifetimeEarned,
+          })
+          .from(usersTable)
+          .where(eq(usersTable.email, input.email))
+          .limit(1);
+        return user ?? null;
+      }),
+
     // Get dashboard statistics (real data)
     getStats: adminProcedure.query(async () => {
       const { tours: toursTable, bookings: bookingsTable, inquiries: inquiriesTable, users: usersTable, newsletterSubscribers: newsletterTable } = await import('../drizzle/schema');
@@ -3530,6 +5263,208 @@ export const appRouter = router({
             processingTimeMs: l.processingTimeMs,
             createdAt: l.createdAt,
           })),
+        };
+      }),
+
+    // Round 80.15-G: LLM cost report — reads per-day Redis stats hashes
+    // (written by server/_core/llm.ts bumpStat) so a solo founder can see
+    // "what's AI burning today?" without joining DB tables.
+    //
+    // Redis schema: HGETALL llm:stats:YYYY-MM-DD
+    //   input:<model>            input tokens for that model
+    //   output:<model>           output tokens for that model
+    //   prompt_cache_read        Anthropic prompt-cache read tokens (10% cost)
+    //   prompt_cache_write       Anthropic prompt-cache write tokens (125% cost)
+    //   cache_hit / cache_miss   app-level llmCache hit counters (call counts, NOT tokens)
+    //   calls_total              total API calls
+    //   circuit_opened           breaker trip count
+    //
+    // Pricing rates (USD per 1M tokens):
+    //   Haiku  in $1   / out $5
+    //   Sonnet in $3   / out $15
+    //   Opus   in $15  / out $75
+    //   Cache read = input × 0.10
+    //   Cache write = input × 1.25
+    llmCostReport: adminProcedure
+      .input(z.object({
+        days: z.number().int().min(1).max(30).default(7),
+      }))
+      .query(async ({ input }) => {
+        const { redis } = await import("./redis");
+
+        // Pricing per 1K tokens for easier math (1/1000 of per-1M rate).
+        const RATES_PER_K: Record<string, { in: number; out: number }> = {
+          haiku:  { in: 0.001,  out: 0.005  },
+          sonnet: { in: 0.003,  out: 0.015  },
+          opus:   { in: 0.015,  out: 0.075  },
+        };
+        const CACHE_READ_MULT = 0.10;
+        const CACHE_WRITE_MULT = 1.25;
+
+        function classifyModel(model: string): "haiku" | "sonnet" | "opus" | null {
+          const m = model.toLowerCase();
+          if (m.includes("haiku")) return "haiku";
+          if (m.includes("sonnet")) return "sonnet";
+          if (m.includes("opus")) return "opus";
+          return null;
+        }
+
+        function inputCostPerK(model: string): number {
+          const tier = classifyModel(model);
+          if (!tier) return RATES_PER_K.sonnet.in; // safe default
+          return RATES_PER_K[tier].in;
+        }
+
+        function outputCostPerK(model: string): number {
+          const tier = classifyModel(model);
+          if (!tier) return RATES_PER_K.sonnet.out;
+          return RATES_PER_K[tier].out;
+        }
+
+        // Build list of UTC date strings (newest first) — matches the
+        // YYYY-MM-DD format that bumpStat() writes.
+        const dates: string[] = [];
+        const today = new Date();
+        for (let i = 0; i < input.days; i++) {
+          const d = new Date(today);
+          d.setUTCDate(d.getUTCDate() - i);
+          dates.push(d.toISOString().slice(0, 10));
+        }
+
+        type ModelRow = {
+          model: string;
+          inputTokens: number;
+          outputTokens: number;
+          cacheReadTokens: number;
+          cacheWriteTokens: number;
+          costUSD: number;
+        };
+        type DayRow = {
+          date: string;
+          callsTotal: number;
+          cacheHits: number;
+          cacheMisses: number;
+          circuitOpened: number;
+          perModel: ModelRow[];
+          totalUSD: number;
+        };
+
+        const days: DayRow[] = [];
+        let totalUSD = 0;
+        let totalCalls = 0;
+        let totalCacheHits = 0;
+        let totalCacheMisses = 0;
+
+        for (const date of dates) {
+          const key = `llm:stats:${date}`;
+          let raw: Record<string, string> = {};
+          try {
+            raw = (await redis.hgetall(key)) as Record<string, string>;
+          } catch {
+            raw = {};
+          }
+
+          const callsTotal = Number(raw.calls_total ?? 0);
+          const cacheHits = Number(raw.cache_hit ?? 0);
+          const cacheMisses = Number(raw.cache_miss ?? 0);
+          const circuitOpened = Number(raw.circuit_opened ?? 0);
+          const promptCacheRead = Number(raw.prompt_cache_read ?? 0);
+          const promptCacheWrite = Number(raw.prompt_cache_write ?? 0);
+
+          // Aggregate input:<model> and output:<model> by model name.
+          const modelMap = new Map<string, ModelRow>();
+          const ensure = (model: string): ModelRow => {
+            let row = modelMap.get(model);
+            if (!row) {
+              row = {
+                model,
+                inputTokens: 0,
+                outputTokens: 0,
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+                costUSD: 0,
+              };
+              modelMap.set(model, row);
+            }
+            return row;
+          };
+
+          for (const [field, value] of Object.entries(raw)) {
+            const n = Number(value ?? 0);
+            if (!Number.isFinite(n) || n <= 0) continue;
+            if (field.startsWith("input:")) {
+              const model = field.slice("input:".length);
+              ensure(model).inputTokens += n;
+            } else if (field.startsWith("output:")) {
+              const model = field.slice("output:".length);
+              ensure(model).outputTokens += n;
+            }
+          }
+
+          // Spread prompt-cache tokens across the day's models in proportion
+          // to their input share. Anthropic stats don't tell us per-model
+          // cache split, but the assumption (cache follows where input goes)
+          // is good enough for a single-tenant cost view.
+          const totalInput = Array.from(modelMap.values()).reduce(
+            (acc, r) => acc + r.inputTokens, 0
+          );
+          if (totalInput > 0) {
+            for (const row of modelMap.values()) {
+              const share = row.inputTokens / totalInput;
+              row.cacheReadTokens = Math.round(promptCacheRead * share);
+              row.cacheWriteTokens = Math.round(promptCacheWrite * share);
+            }
+          } else if (promptCacheRead > 0 || promptCacheWrite > 0) {
+            // No model-tagged input but we did see cache activity — bucket
+            // it under "unknown" so it surfaces somewhere.
+            const row = ensure("unknown");
+            row.cacheReadTokens = promptCacheRead;
+            row.cacheWriteTokens = promptCacheWrite;
+          }
+
+          // Cost per model.
+          let dayUSD = 0;
+          for (const row of modelMap.values()) {
+            const inK  = inputCostPerK(row.model);
+            const outK = outputCostPerK(row.model);
+            const baseInputCost  = (row.inputTokens / 1000)  * inK;
+            const outputCost     = (row.outputTokens / 1000) * outK;
+            const cacheReadCost  = (row.cacheReadTokens  / 1000) * inK * CACHE_READ_MULT;
+            const cacheWriteCost = (row.cacheWriteTokens / 1000) * inK * CACHE_WRITE_MULT;
+            row.costUSD = baseInputCost + outputCost + cacheReadCost + cacheWriteCost;
+            dayUSD += row.costUSD;
+          }
+
+          // Sort models so the most expensive shows first.
+          const perModel = Array.from(modelMap.values()).sort(
+            (a, b) => b.costUSD - a.costUSD
+          );
+
+          days.push({
+            date,
+            callsTotal,
+            cacheHits,
+            cacheMisses,
+            circuitOpened,
+            perModel,
+            totalUSD: dayUSD,
+          });
+
+          totalUSD += dayUSD;
+          totalCalls += callsTotal;
+          totalCacheHits += cacheHits;
+          totalCacheMisses += cacheMisses;
+        }
+
+        const cacheLookups = totalCacheHits + totalCacheMisses;
+        const cacheHitRate = cacheLookups > 0 ? totalCacheHits / cacheLookups : 0;
+
+        return {
+          totalUSD,
+          totalCalls,
+          totalCacheHits,
+          cacheHitRate,
+          days, // already newest-first
         };
       }),
 
@@ -7074,6 +9009,602 @@ export const appRouter = router({
 
   // ── Tour Monitor ──────────────────────────────────────────────────────────
   tourMonitor: tourMonitorRouter,
+
+  // ── Autonomous AI Agents (Round 81) ───────────────────────────────────────
+  // Layer 0+1 plumbing: outcome tracking + customer memory. Each individual
+  // agent (Inquiry/Review/Marketing/Followup/Refund) reads/writes through
+  // this single router so we have one audit point + admin gating.
+  agent: agentRouter,
+
+  // ── PACK&GO Skills (server-side PDF tools) ────────────────────────────────
+  // Round 81 Phase A: packgo-quote integration. Wraps the existing Mac-side
+  // Claude Code skill as a server-side endpoint so admin can generate PDFs
+  // without leaving the browser.
+  tools: toolsRouter,
+
+  // ── Reviews — FTC-compliant testimonials ──────────────────────────────────
+  // Round 80.7: stub endpoint that returns [] so TestimonialsCarousel doesn't
+  // throw "No procedure found" in console on every page load. When Jeff
+  // collects real customer reviews tied to completed bookings, this endpoint
+  // will expand to query a `reviews` table joined to `bookings` (FTC 16 CFR
+  // §465: each row MUST carry a verified bookingId — no fabricated reviews).
+  /**
+   * Round 80.22 Phase H2: Supplier poster distribution.
+   * Admin uploads supplier poster → AI processes (~30s) → admin reviews
+   * + edits 7 platform copies → distributes (manual paste for social,
+   * auto for newsletter). Tracks distribution status per platform.
+   */
+  posters: router({
+    /**
+     * Admin: kick off processing on a freshly-uploaded raw poster.
+     * Caller must have ALREADY uploaded the image to S3 via /api/upload/image
+     * and obtained the URL (same flow as other admin image uploads).
+     */
+    create: adminProcedure
+      .input(
+        z.object({
+          originalImageUrl: z.string().url().max(1024),
+          originalCopyText: z.string().max(10_000).optional(),
+          // Session B simplification: vendor + audience are rarely supplied
+          // by Jeff — the AI infers them from the poster. Defaults let the
+          // composer ship just (image, copy) without forcing dropdowns.
+          sourceVendor: z
+            .enum(["lion", "zongheng", "house", "other"])
+            .default("other"),
+          targetAudience: z
+            .enum(["family", "honeymoon", "parent_child", "business", "senior", "general"])
+            .default("general"),
+          title: z.string().max(500).optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const drizzleDb = await db.getDb();
+        if (!drizzleDb) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        const { posterAssets } = await import("../drizzle/schema");
+
+        const result = await drizzleDb.insert(posterAssets).values({
+          sourceVendor: input.sourceVendor,
+          targetAudience: input.targetAudience,
+          originalImageUrl: input.originalImageUrl,
+          originalCopyText: input.originalCopyText ?? null,
+          title: input.title ?? null,
+          status: "uploaded",
+          createdBy: ctx.user.id,
+        });
+        const posterAssetId = (result as any)[0]?.insertId ?? 0;
+
+        // Enqueue async processing (returns immediately, ~30s in background)
+        try {
+          const { enqueuePosterProcessing } = await import(
+            "./queues/posterProcessingQueue"
+          );
+          await enqueuePosterProcessing(posterAssetId);
+        } catch (err) {
+          console.error("[posters.create] Failed to enqueue:", err);
+          // Mark failed so admin knows
+          const { eq } = await import("drizzle-orm");
+          await drizzleDb
+            .update(posterAssets)
+            .set({ status: "failed", notes: "Failed to enqueue processing" })
+            .where(eq(posterAssets.id, posterAssetId));
+        }
+
+        return { id: posterAssetId };
+      }),
+
+    /** Admin: list posters (most recent first) with status filter. */
+    list: adminProcedure
+      .input(
+        z.object({
+          status: z
+            .enum([
+              "uploaded",
+              "processing",
+              "ready",
+              "approved",
+              "distributed",
+              "archived",
+              "failed",
+              "all",
+            ])
+            .default("all"),
+          limit: z.number().int().positive().max(100).default(30),
+          cursor: z.number().int().optional(),
+        })
+      )
+      .query(async ({ input }) => {
+        const drizzleDb = await db.getDb();
+        if (!drizzleDb) return { items: [], nextCursor: null };
+        const { posterAssets } = await import("../drizzle/schema");
+        const { eq, and, lt, desc } = await import("drizzle-orm");
+        const filters = [];
+        if (input.status !== "all") filters.push(eq(posterAssets.status, input.status));
+        if (input.cursor) filters.push(lt(posterAssets.id, input.cursor));
+        const whereClause = filters.length ? and(...filters) : undefined;
+        const rows = await drizzleDb
+          .select()
+          .from(posterAssets)
+          .where(whereClause)
+          .orderBy(desc(posterAssets.id))
+          .limit(input.limit + 1);
+        const hasMore = rows.length > input.limit;
+        const items = hasMore ? rows.slice(0, input.limit) : rows;
+        return { items, nextCursor: hasMore ? items[items.length - 1].id : null };
+      }),
+
+    /** Admin: get one poster + its 7 platform copies. Used for review page. */
+    get: adminProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .query(async ({ input }) => {
+        const drizzleDb = await db.getDb();
+        if (!drizzleDb) return null;
+        const { posterAssets, posterPlatformCopies } = await import(
+          "../drizzle/schema"
+        );
+        const { eq } = await import("drizzle-orm");
+        const [poster] = await drizzleDb
+          .select()
+          .from(posterAssets)
+          .where(eq(posterAssets.id, input.id))
+          .limit(1);
+        if (!poster) return null;
+        const copies = await drizzleDb
+          .select()
+          .from(posterPlatformCopies)
+          .where(eq(posterPlatformCopies.posterAssetId, input.id));
+        return { poster, copies };
+      }),
+
+    /** Admin: update a single platform copy (edit text or hashtags). */
+    updateCopy: adminProcedure
+      .input(
+        z.object({
+          copyId: z.number().int().positive(),
+          copyText: z.string().max(10_000).optional(),
+          hashtags: z.string().max(2000).nullable().optional(),
+          status: z.enum(["draft", "approved", "posted", "skipped"]).optional(),
+          postedUrl: z.string().max(1024).nullable().optional(),
+          notes: z.string().max(1000).nullable().optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const drizzleDb = await db.getDb();
+        if (!drizzleDb) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        const { posterPlatformCopies } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const updates: any = {};
+        if (input.copyText !== undefined) updates.copyText = input.copyText;
+        if (input.hashtags !== undefined) updates.hashtags = input.hashtags;
+        if (input.status !== undefined) {
+          updates.status = input.status;
+          if (input.status === "posted") updates.postedAt = new Date();
+        }
+        if (input.postedUrl !== undefined) updates.postedUrl = input.postedUrl;
+        if (input.notes !== undefined) updates.notes = input.notes;
+        await drizzleDb
+          .update(posterPlatformCopies)
+          .set(updates)
+          .where(eq(posterPlatformCopies.id, input.copyId));
+        return { ok: true };
+      }),
+
+    /** Admin: regenerate the AI poster image (call gpt-image-2 again). */
+    regenerateImage: adminProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ input }) => {
+        const drizzleDb = await db.getDb();
+        if (!drizzleDb) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        const { posterAssets } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        await drizzleDb
+          .update(posterAssets)
+          .set({ status: "processing" })
+          .where(eq(posterAssets.id, input.id));
+        const { enqueuePosterProcessing } = await import(
+          "./queues/posterProcessingQueue"
+        );
+        await enqueuePosterProcessing(input.id);
+        return { ok: true };
+      }),
+
+    /** Admin: archive a poster (no longer surface in active queue). */
+    archive: adminProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ input }) => {
+        const drizzleDb = await db.getDb();
+        if (!drizzleDb) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        const { posterAssets } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        await drizzleDb
+          .update(posterAssets)
+          .set({ status: "archived" })
+          .where(eq(posterAssets.id, input.id));
+        return { ok: true };
+      }),
+
+    /** Admin: mark whole poster as approved (all copies considered ready). */
+    approve: adminProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ input }) => {
+        const drizzleDb = await db.getDb();
+        if (!drizzleDb) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        const { posterAssets, posterPlatformCopies } = await import(
+          "../drizzle/schema"
+        );
+        const { eq, and } = await import("drizzle-orm");
+        await drizzleDb.transaction(async (tx) => {
+          await tx
+            .update(posterAssets)
+            .set({ status: "approved" })
+            .where(eq(posterAssets.id, input.id));
+          // Promote all draft copies to approved (skip ones already 'posted'/'skipped')
+          await tx
+            .update(posterPlatformCopies)
+            .set({ status: "approved" })
+            .where(
+              and(
+                eq(posterPlatformCopies.posterAssetId, input.id),
+                eq(posterPlatformCopies.status, "draft")
+              )
+            );
+        });
+        return { ok: true };
+      }),
+  }),
+
+  reviews: router({
+    /**
+     * Public list of approved reviews for a given tour (or all tours if
+     * tourId is omitted). Used by TourDetail page + TestimonialsCarousel
+     * on Home. Hidden / pending / rejected never surface here.
+     */
+    listVerified: publicProcedure
+      .input(
+        z
+          .object({
+            tourId: z.number().int().positive().optional(),
+            limit: z.number().int().positive().max(50).default(10),
+          })
+          .optional()
+      )
+      .query(async ({ input }) => {
+        const drizzleDb = await db.getDb();
+        if (!drizzleDb) return [];
+        const { tourReviews, users: usersTable, tours: toursTable } = await import(
+          "../drizzle/schema"
+        );
+        const { eq, and, desc } = await import("drizzle-orm");
+
+        const conditions = input?.tourId
+          ? and(eq(tourReviews.status, "approved"), eq(tourReviews.tourId, input.tourId))
+          : eq(tourReviews.status, "approved");
+
+        const rows = await drizzleDb
+          .select({
+            id: tourReviews.id,
+            tourId: tourReviews.tourId,
+            tourTitle: toursTable.title,
+            rating: tourReviews.rating,
+            title: tourReviews.title,
+            content: tourReviews.content,
+            photos: tourReviews.photos,
+            language: tourReviews.language,
+            publishedAt: tourReviews.publishedAt,
+            authorName: usersTable.name,
+            authorAvatar: usersTable.avatar,
+          })
+          .from(tourReviews)
+          .leftJoin(usersTable, eq(tourReviews.userId, usersTable.id))
+          .leftJoin(toursTable, eq(tourReviews.tourId, toursTable.id))
+          .where(conditions)
+          .orderBy(desc(tourReviews.publishedAt))
+          .limit(input?.limit ?? 10);
+
+        return rows;
+      }),
+
+    /**
+     * List the current user's own reviews — surfaces draft/pending status
+     * so they know what's awaiting moderation.
+     */
+    myReviews: protectedProcedure.query(async ({ ctx }) => {
+      const drizzleDb = await db.getDb();
+      if (!drizzleDb) return [];
+      const { tourReviews, tours: toursTable } = await import("../drizzle/schema");
+      const { eq, desc } = await import("drizzle-orm");
+      return await drizzleDb
+        .select({
+          id: tourReviews.id,
+          tourId: tourReviews.tourId,
+          tourTitle: toursTable.title,
+          bookingId: tourReviews.bookingId,
+          rating: tourReviews.rating,
+          title: tourReviews.title,
+          content: tourReviews.content,
+          status: tourReviews.status,
+          rejectionReason: tourReviews.rejectionReason,
+          createdAt: tourReviews.createdAt,
+          publishedAt: tourReviews.publishedAt,
+        })
+        .from(tourReviews)
+        .leftJoin(toursTable, eq(tourReviews.tourId, toursTable.id))
+        .where(eq(tourReviews.userId, ctx.user.id))
+        .orderBy(desc(tourReviews.createdAt));
+    }),
+
+    /**
+     * Submit a review for a completed booking. Server validates:
+     *   - Booking belongs to the user
+     *   - Booking is 'completed' (not pending/cancelled)
+     *   - No existing review for this booking (UNIQUE constraint backs this)
+     * The review enters the moderation queue; +50 Packpoint is paid out
+     * when the admin approves.
+     */
+    create: protectedProcedure
+      .input(
+        z.object({
+          bookingId: z.number().int().positive(),
+          rating: z.number().int().min(1).max(5),
+          title: z.string().trim().min(3).max(200),
+          content: z.string().trim().min(10).max(5000),
+          photos: z.array(z.string().url()).max(10).optional(),
+          language: z.enum(["zh-TW", "en"]).default("zh-TW"),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const booking = await db.getBookingById(input.bookingId);
+        if (!booking) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Booking not found" });
+        }
+        if ((booking as any).userId !== ctx.user.id) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Not your booking" });
+        }
+        if (booking.bookingStatus !== "completed") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "您只能在行程完成後才能評論此筆訂單",
+          });
+        }
+
+        const drizzleDb = await db.getDb();
+        if (!drizzleDb) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        const { tourReviews } = await import("../drizzle/schema");
+
+        try {
+          const result = await drizzleDb.insert(tourReviews).values({
+            userId: ctx.user.id,
+            tourId: booking.tourId,
+            bookingId: input.bookingId,
+            rating: input.rating,
+            title: input.title,
+            content: input.content,
+            photos: input.photos ? JSON.stringify(input.photos) : null,
+            language: input.language,
+            status: "pending",
+          });
+          return { ok: true, status: "pending" as const };
+        } catch (err: any) {
+          if (/Duplicate entry/i.test(err?.message || "")) {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "您已經評論過此行程 / You already reviewed this tour",
+            });
+          }
+          throw err;
+        }
+      }),
+
+    /**
+     * Round 80.25 — open commenting on tour reviews.
+     * Logged-in users can submit reviews/comments without a prior booking.
+     * The compound UNIQUE on (userId, tourId) prevents one user from
+     * spam-flooding a single tour. All entries enter the moderation queue
+     * and only surface on TourDetail after admin approval.
+     */
+    createPublic: protectedProcedure
+      .input(
+        z.object({
+          tourId: z.number().int().positive(),
+          rating: z.number().int().min(1).max(5),
+          title: z.string().trim().min(3).max(200),
+          content: z.string().trim().min(10).max(5000),
+          photos: z.array(z.string().url()).max(10).optional(),
+          language: z.enum(["zh-TW", "en"]).default("zh-TW"),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const tour = await db.getTourById(input.tourId);
+        if (!tour) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Tour not found" });
+        }
+        const drizzleDb = await db.getDb();
+        if (!drizzleDb) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        const { tourReviews } = await import("../drizzle/schema");
+        try {
+          await drizzleDb.insert(tourReviews).values({
+            userId: ctx.user.id,
+            tourId: input.tourId,
+            bookingId: null,
+            rating: input.rating,
+            title: input.title,
+            content: input.content,
+            photos: input.photos ? JSON.stringify(input.photos) : null,
+            language: input.language,
+            status: "pending",
+          });
+          return { ok: true, status: "pending" as const };
+        } catch (err: any) {
+          if (/Duplicate entry/i.test(err?.message || "")) {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "您已經評論過此行程 / You already reviewed this tour",
+            });
+          }
+          throw err;
+        }
+      }),
+
+    /**
+     * Admin: paginated review queue with filter by status.
+     */
+    adminList: adminProcedure
+      .input(
+        z.object({
+          status: z.enum(["pending", "approved", "rejected", "hidden", "all"]).default("all"),
+          limit: z.number().int().positive().max(100).default(50),
+          cursor: z.number().int().optional(),
+        })
+      )
+      .query(async ({ input }) => {
+        const drizzleDb = await db.getDb();
+        if (!drizzleDb) return { items: [], nextCursor: null };
+        const { tourReviews, users: usersTable, tours: toursTable } = await import(
+          "../drizzle/schema"
+        );
+        const { eq, and, lt, desc } = await import("drizzle-orm");
+
+        const filters = [];
+        if (input.status !== "all") filters.push(eq(tourReviews.status, input.status));
+        if (input.cursor) filters.push(lt(tourReviews.id, input.cursor));
+        const whereClause = filters.length ? and(...filters) : undefined;
+
+        const rows = await drizzleDb
+          .select({
+            id: tourReviews.id,
+            userId: tourReviews.userId,
+            authorName: usersTable.name,
+            authorEmail: usersTable.email,
+            tourId: tourReviews.tourId,
+            tourTitle: toursTable.title,
+            bookingId: tourReviews.bookingId,
+            rating: tourReviews.rating,
+            title: tourReviews.title,
+            content: tourReviews.content,
+            photos: tourReviews.photos,
+            language: tourReviews.language,
+            status: tourReviews.status,
+            rejectionReason: tourReviews.rejectionReason,
+            createdAt: tourReviews.createdAt,
+            publishedAt: tourReviews.publishedAt,
+          })
+          .from(tourReviews)
+          .leftJoin(usersTable, eq(tourReviews.userId, usersTable.id))
+          .leftJoin(toursTable, eq(tourReviews.tourId, toursTable.id))
+          .where(whereClause)
+          .orderBy(desc(tourReviews.id))
+          .limit(input.limit + 1);
+
+        const hasMore = rows.length > input.limit;
+        const items = hasMore ? rows.slice(0, input.limit) : rows;
+        const nextCursor = hasMore ? items[items.length - 1].id : null;
+        return { items, nextCursor };
+      }),
+
+    /**
+     * Admin: approve a review. Awards +50 Packpoint to the author IFF
+     * this is the first time we approved it (idempotent via status check).
+     */
+    adminApprove: adminProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        const drizzleDb = await db.getDb();
+        if (!drizzleDb) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        const { tourReviews } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+
+        const [review] = await drizzleDb
+          .select()
+          .from(tourReviews)
+          .where(eq(tourReviews.id, input.id))
+          .limit(1);
+        if (!review) throw new TRPCError({ code: "NOT_FOUND", message: "Review not found" });
+        const wasAlreadyApproved = review.status === "approved";
+
+        await drizzleDb
+          .update(tourReviews)
+          .set({
+            status: "approved",
+            moderatedAt: new Date(),
+            moderatedBy: ctx.user.id,
+            publishedAt: review.publishedAt ?? new Date(),
+            rejectionReason: null,
+          })
+          .where(eq(tourReviews.id, input.id));
+
+        // Idempotent +50 Packpoint: only on first approval, not re-approve
+        // after un-hide.
+        if (!wasAlreadyApproved) {
+          try {
+            const { awardPackpoint } = await import("./_core/packpoint");
+            await awardPackpoint({
+              userId: review.userId,
+              delta: 50,
+              reason: "review_bonus",
+              referenceType: "review",
+              referenceId: review.id,
+              description: `行程評論獎勵(已通過審核)`,
+            });
+          } catch (err) {
+            console.error(`[Reviews] Packpoint award failed for review ${review.id}:`, err);
+            // Don't fail the approval — admin retry / manual adjust available
+          }
+        }
+
+        return { ok: true, awarded: !wasAlreadyApproved ? 50 : 0 };
+      }),
+
+    /**
+     * Admin: reject a review with a customer-visible reason.
+     */
+    adminReject: adminProcedure
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+          reason: z.string().trim().min(3).max(500),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const drizzleDb = await db.getDb();
+        if (!drizzleDb) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        const { tourReviews } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+
+        await drizzleDb
+          .update(tourReviews)
+          .set({
+            status: "rejected",
+            moderatedAt: new Date(),
+            moderatedBy: ctx.user.id,
+            rejectionReason: input.reason,
+            publishedAt: null,
+          })
+          .where(eq(tourReviews.id, input.id));
+
+        return { ok: true };
+      }),
+
+    /**
+     * Admin: hide an approved review (e.g. policy violation discovered later).
+     * Doesn't claw back the +50 Packpoint already paid.
+     */
+    adminHide: adminProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        const drizzleDb = await db.getDb();
+        if (!drizzleDb) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        const { tourReviews } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        await drizzleDb
+          .update(tourReviews)
+          .set({
+            status: "hidden",
+            moderatedAt: new Date(),
+            moderatedBy: ctx.user.id,
+          })
+          .where(eq(tourReviews.id, input.id));
+        return { ok: true };
+      }),
+  }),
 
 });
 export type AppRouter = typeof appRouter;
