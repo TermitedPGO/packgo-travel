@@ -260,6 +260,25 @@ export async function checkLoginRateLimitByEmail(email: string): Promise<RateLim
   });
 }
 
+/**
+ * Rate limit for admin mutations (per admin user).
+ * Limit: 60 mutations / minute per admin user.
+ *
+ * QA audit 2026-05-11 Phase 6 found admin mutations were not throttled —
+ * if Jeff's session token is compromised, an attacker can do thousands of
+ * destructive operations per second (delete tours, refund bookings, etc.).
+ * 60/min is well above human admin click rate (a fast admin clicks ~5-10/
+ * min, browser-driven scripted bulk operations < 30/min) but blocks any
+ * automated attack hammering the API.
+ */
+export async function checkAdminMutationRateLimit(userId: number): Promise<RateLimitResult> {
+  return checkRateLimit({
+    key: `admin-mutation:user:${userId}`,
+    limit: 60,
+    window: 60, // 1 minute
+  });
+}
+
 // ============================================================
 // Booking & Payment Rate Limiting
 // ============================================================
