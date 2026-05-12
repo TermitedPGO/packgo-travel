@@ -20,7 +20,7 @@
 import { getDb } from "../db";
 import { bookings, tourDepartures, tours } from "../../drizzle/schema";
 import { and, eq, gte, lte, inArray } from "drizzle-orm";
-import { sendTripReminderEmail, sendReviewRequestEmail } from "../email";
+import { sendTripReminderEmail, sendReviewRequestEmail, sendWinbackEmail } from "../email";
 import { redis } from "../redis";
 
 export type ReminderWindow = 30 | 14 | 7 | 3 | 1;
@@ -230,6 +230,101 @@ export async function runPostTripReviewScan(): Promise<PostTripReviewScanResult>
       if (ok) result.emailsQueued++;
     } catch (err) {
       console.error(`[postTripReview] booking ${row.bookingId} failed:`, (err as Error)?.message);
+      result.errors++;
+    }
+  }
+
+  return result;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// 30-day winback scan — QA Audit 2026-05-11 Phase 9 fix.
+//
+// Phase 9 finding: PACK&GO had no automation reminding former customers
+// after their trip ended. Repeat-booking rate is the #1 revenue lever for
+// a one-person agency; this closes that gap.
+//
+// Cadence: 30 days after returnDate. Idempotency: redis key
+// `winback:sent:{bookingId}` (180-day TTL — prevents double-sending if a
+// customer somehow lingers in the 30-day window for >1 scan cycle).
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface WinbackScanResult {
+  scanned: number;
+  emailsQueued: number;
+  errors: number;
+}
+
+const WINBACK_DAYS = 30;
+
+async function alreadyWinback(bookingId: number): Promise<boolean> {
+  try {
+    const key = `winback:sent:${bookingId}`;
+    const existed = await redis.exists(key);
+    if (existed) return true;
+    await redis.setex(key, 180 * 24 * 60 * 60, String(Date.now()));
+    return false;
+  } catch (err) {
+    console.warn("[winback] Redis check failed, skipping:", (err as Error)?.message);
+    return true;
+  }
+}
+
+export async function runWinbackScan(): Promise<WinbackScanResult> {
+  const db = await getDb();
+  const result: WinbackScanResult = { scanned: 0, emailsQueued: 0, errors: 0 };
+  if (!db) return result;
+
+  // Find bookings whose returnDate was exactly WINBACK_DAYS ago, where the
+  // trip actually happened (paid + confirmed/completed). 24-hour window so
+  // timezone edge cases don't drop the booking.
+  const now = new Date();
+  const targetDate = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - WINBACK_DAYS)
+  );
+  const targetStart = targetDate;
+  const targetEnd = new Date(targetDate.getTime() + 24 * 60 * 60 * 1000);
+
+  const rows = await db
+    .select({
+      bookingId: bookings.id,
+      customerName: bookings.customerName,
+      customerEmail: bookings.customerEmail,
+      bookingStatus: bookings.bookingStatus,
+      paymentStatus: bookings.paymentStatus,
+      returnDate: tourDepartures.returnDate,
+      tourId: bookings.tourId,
+      tourTitle: tours.title,
+    })
+    .from(bookings)
+    .leftJoin(tourDepartures, eq(bookings.departureId, tourDepartures.id))
+    .leftJoin(tours, eq(bookings.tourId, tours.id))
+    .where(
+      and(
+        inArray(bookings.bookingStatus, ["confirmed", "completed"]),
+        eq(bookings.paymentStatus, "paid"),
+        gte(tourDepartures.returnDate, targetStart),
+        lte(tourDepartures.returnDate, targetEnd)
+      )
+    );
+
+  result.scanned = rows.length;
+
+  for (const row of rows) {
+    if (!row.customerEmail || !row.returnDate) continue;
+    if (await alreadyWinback(row.bookingId)) continue;
+
+    try {
+      const ok = await sendWinbackEmail({
+        customerEmail: row.customerEmail,
+        customerName: row.customerName,
+        bookingId: row.bookingId,
+        pastTourTitle: row.tourTitle || `Tour #${row.tourId}`,
+        language: "zh-TW",
+      });
+      if (ok) result.emailsQueued++;
+    } catch (err) {
+      console.error(`[winback] booking ${row.bookingId} failed:`, (err as Error)?.message);
       result.errors++;
     }
   }

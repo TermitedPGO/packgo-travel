@@ -7,7 +7,7 @@
 import { Worker, Job } from "bullmq";
 import { redisBullMQ } from "./redis";
 import { TripReminderJobData, TripReminderJobResult } from "./queue";
-import { runTripReminderScan, runPostTripReviewScan } from "./services/tripReminderService";
+import { runTripReminderScan, runPostTripReviewScan, runWinbackScan } from "./services/tripReminderService";
 import { notifyOwner } from "./_core/notification";
 
 export const tripReminderWorker = new Worker<TripReminderJobData, TripReminderJobResult>(
@@ -28,6 +28,18 @@ export const tripReminderWorker = new Worker<TripReminderJobData, TripReminderJo
         );
       } catch (reviewErr) {
         console.error(`[TripReminderWorker] Post-trip review scan failed:`, reviewErr);
+      }
+
+      // QA audit 2026-05-11 Phase 9 fix: 30-day winback. Same daily cadence
+      // since the entire pipeline already runs once at 09:00 Taipei; the
+      // returnDate-based scan key makes this idempotent across runs.
+      try {
+        const winbackResult = await runWinbackScan();
+        console.log(
+          `[TripReminderWorker] 30-day winback scan: scanned=${winbackResult.scanned} queued=${winbackResult.emailsQueued} errors=${winbackResult.errors}`
+        );
+      } catch (winbackErr) {
+        console.error(`[TripReminderWorker] Winback scan failed:`, winbackErr);
       }
 
       // v78m Sprint 5A: daily ops digest email to owner
