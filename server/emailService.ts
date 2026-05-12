@@ -1,5 +1,6 @@
 import nodemailer, { type Transporter } from 'nodemailer';
 import sgMail from '@sendgrid/mail';
+import { redactEmail } from './_core/redact';
 
 // Email configuration
 const EMAIL_HOST = process.env.EMAIL_HOST || 'smtp.gmail.com';
@@ -126,7 +127,7 @@ async function sendPasswordResetEmailViaSendGrid(
 
   try {
     await sgMail.send(msg);
-    console.log('[Email] Password reset email sent via SendGrid to:', to);
+    console.log('[Email] Password reset email sent via SendGrid to:', redactEmail(to));
     return true;
   } catch (error: any) {
     console.error('[Email] Failed to send password reset email via SendGrid:', error.message);
@@ -229,7 +230,7 @@ ${resetUrl}
     };
 
     await transporter.sendMail(mailOptions);
-    console.log('[Email] Password reset email sent via SMTP to:', to);
+    console.log('[Email] Password reset email sent via SMTP to:', redactEmail(to));
     return true;
   } catch (error) {
     console.error('[Email] Failed to send password reset email via SMTP:', error);
@@ -320,7 +321,7 @@ async function sendWelcomeEmailViaSendGrid(
 
   try {
     await sgMail.send(msg);
-    console.log('[Email] Welcome email sent via SendGrid to:', to);
+    console.log('[Email] Welcome email sent via SendGrid to:', redactEmail(to));
     return true;
   } catch (error: any) {
     console.error('[Email] Failed to send welcome email via SendGrid:', error.message);
@@ -420,7 +421,7 @@ async function sendWelcomeEmailViaSMTP(
     };
 
     await transporter.sendMail(mailOptions);
-    console.log('[Email] Welcome email sent via SMTP to:', to);
+    console.log('[Email] Welcome email sent via SMTP to:', redactEmail(to));
     return true;
   } catch (error) {
     console.error('[Email] Failed to send welcome email via SMTP:', error);

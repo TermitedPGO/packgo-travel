@@ -5,6 +5,7 @@ import * as auth from './auth';
 import { createToken } from './jwt';
 import { getSessionCookieOptions } from './_core/cookies';
 import { COOKIE_NAME } from '@shared/const';
+import { redactEmail, redactName } from './_core/redact';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
@@ -40,7 +41,7 @@ export function initializeGoogleAuth(app: Express) {
           const googleId = profile.id;
           const email = profile.emails?.[0]?.value;
           const name = profile.displayName;
-          console.log('[Google OAuth] Profile data:', { googleId, email, name });
+          console.log('[Google OAuth] Profile data:', { googleId, email: redactEmail(email), name: redactName(name) });
 
           if (!email) {
             console.error('[Google OAuth] No email in profile');
@@ -50,7 +51,7 @@ export function initializeGoogleAuth(app: Express) {
           // Create or get user
           console.log('[Google OAuth] Creating or getting user...');
           const user = await auth.createOrGetGoogleUser(googleId, email, name);
-          console.log('[Google OAuth] User created/retrieved:', user ? `${user.email} (ID: ${user.id})` : 'null');
+          console.log('[Google OAuth] User created/retrieved:', user ? `${redactEmail(user.email)} (ID: ${user.id})` : 'null');
 
           return done(null, user);
         } catch (error) {
@@ -83,7 +84,7 @@ export function initializeGoogleAuth(app: Express) {
       try {
         console.log('[Google OAuth] Callback triggered');
         const user = req.user as any;
-        console.log('[Google OAuth] User from passport:', user ? `${user.email} (ID: ${user.id})` : 'null');
+        console.log('[Google OAuth] User from passport:', user ? `${redactEmail(user.email)} (ID: ${user.id})` : 'null');
 
         if (!user) {
           console.error('[Google OAuth] No user found in request');

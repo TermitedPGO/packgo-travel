@@ -1,4 +1,5 @@
 import { notifyOwner } from "./_core/notification";
+import { redactEmail } from "./_core/redact";
 import nodemailer, { type Transporter } from 'nodemailer';
 import { wrapInBrandTemplate, emailInfoTable, emailButton, emailHighlightBox } from "./services/emailTemplateService";
 
@@ -104,7 +105,7 @@ export async function sendBookingConfirmationEmail(data: BookingEmailData) {
         html: generateBookingConfirmationHTML(data),
         text: emailContent,
       });
-      console.log('[Email] Booking confirmation email sent to:', data.to, `(${data.language || 'zh-TW'})`);
+      console.log('[Email] Booking confirmation email sent to:', redactEmail(data.to), `(${data.language || 'zh-TW'})`);
     } catch (error) {
       console.error('[Email] Failed to send booking confirmation email:', error);
     }
@@ -182,7 +183,7 @@ Thank you. Our team will continue arranging your trip and will email the final i
         html: generatePaymentSuccessHTML(data, paymentTypeText),
         text: customerEmailContent,
       });
-      console.log('[Email] Payment success email sent to:', data.customerEmail, `(${data.language || 'zh-TW'})`);
+      console.log('[Email] Payment success email sent to:', redactEmail(data.customerEmail), `(${data.language || 'zh-TW'})`);
     } catch (error) {
       console.error('[Email] Failed to send payment success email:', error);
     }
@@ -272,8 +273,8 @@ export async function sendTripReminderEmail(data: TripReminderEmailData) {
 
   const balanceLine = data.balanceUnpaid && data.balanceDue > 0
     ? (isEN
-        ? `\nOutstanding balance: ${data.balanceCurrency} ${data.balanceDue.toLocaleString()}\nPay at: https://packgo-travel.fly.dev/booking/${data.bookingId}`
-        : `\n尚未繳清的尾款：${data.balanceCurrency} ${data.balanceDue.toLocaleString()}\n請至訂單頁完成付款：https://packgo-travel.fly.dev/booking/${data.bookingId}`)
+        ? `\nOutstanding balance: ${data.balanceCurrency} ${data.balanceDue.toLocaleString()}\nPay at: ${BASE_URL}/booking/${data.bookingId}`
+        : `\n尚未繳清的尾款：${data.balanceCurrency} ${data.balanceDue.toLocaleString()}\n請至訂單頁完成付款：${BASE_URL}/booking/${data.bookingId}`)
     : '';
 
   const emailText = isEN
@@ -328,7 +329,7 @@ PACK & GO 旅行社（CST #2166984）
       html: generateTripReminderHTML(data, copy),
       text: emailText.trim(),
     });
-    console.log(`[Email] Trip reminder (${data.daysOut}d, ${data.language || 'zh-TW'}) sent to ${data.to} for booking ${data.bookingId}`);
+    console.log(`[Email] Trip reminder (${data.daysOut}d, ${data.language || 'zh-TW'}) sent to ${redactEmail(data.to)} for booking ${data.bookingId}`);
     return true;
   } catch (error) {
     console.error('[Email] Failed to send trip reminder:', error);
@@ -356,7 +357,7 @@ function generateTripReminderHTML(
     ? `<div style="margin:16px 0;padding:14px 16px;border-left:4px solid #f59e0b;background:#fffbeb;border-radius:6px;">
          <p style="margin:0 0 6px 0;font-family:Arial,sans-serif;font-size:14px;font-weight:bold;color:#92400e;">${labels.balLabel}</p>
          <p style="margin:0 0 8px 0;font-family:Arial,sans-serif;font-size:14px;color:#78350f;">${isEN ? 'Amount' : '金額'}: ${data.balanceCurrency} ${data.balanceDue.toLocaleString()}</p>
-         <a href="https://packgo-travel.fly.dev/booking/${data.bookingId}" style="display:inline-block;padding:8px 16px;background:#f59e0b;color:#fff;text-decoration:none;border-radius:6px;font-family:Arial,sans-serif;font-size:14px;">${labels.balCta}</a>
+         <a href="${BASE_URL}/booking/${data.bookingId}" style="display:inline-block;padding:8px 16px;background:#f59e0b;color:#fff;text-decoration:none;border-radius:6px;font-family:Arial,sans-serif;font-size:14px;">${labels.balCta}</a>
        </div>`
     : '';
   const bodyHtml = `
@@ -709,7 +710,7 @@ ${BASE_URL}`;
       text,
       html,
     });
-    console.log(`[Email] Supplier notification sent to ${data.supplierEmail} for booking #${data.bookingId}`);
+    console.log(`[Email] Supplier notification sent to ${redactEmail(data.supplierEmail)} for booking #${data.bookingId}`);
     return true;
   } catch (err) {
     console.error("[Email] Supplier notification failed:", err);
@@ -777,7 +778,7 @@ export async function sendQuoteFollowUpEmail(data: QuoteFollowUpData) {
       text,
       html,
     });
-    console.log(`[Email] Quote follow-up ${data.stage} sent for ${data.quoteNumber} → ${data.customerEmail}`);
+    console.log(`[Email] Quote follow-up ${data.stage} sent for ${data.quoteNumber} → ${redactEmail(data.customerEmail)}`);
     return true;
   } catch (err) {
     console.error("[Email] Quote follow-up failed:", err);
@@ -835,7 +836,7 @@ export async function sendReviewRequestEmail(data: ReviewRequestData) {
       text,
       html,
     });
-    console.log(`[Email] Review request sent for booking #${data.bookingId} → ${data.customerEmail}`);
+    console.log(`[Email] Review request sent for booking #${data.bookingId} → ${redactEmail(data.customerEmail)}`);
     return true;
   } catch (err) {
     console.error("[Email] Review request failed:", err);
@@ -901,10 +902,76 @@ export async function sendAbandonmentRecoveryEmail(data: AbandonmentRecoveryData
       text,
       html,
     });
-    console.log(`[Email] Abandonment recovery sent for booking #${data.bookingId} → ${data.customerEmail}`);
+    console.log(`[Email] Abandonment recovery sent for booking #${data.bookingId} → ${redactEmail(data.customerEmail)}`);
     return true;
   } catch (err) {
     console.error("[Email] Abandonment recovery failed:", err);
+    return false;
+  }
+}
+
+// ─── Round 80.22 Phase G: Voucher issued email ──────────────────────────
+
+export interface VoucherIssuedEmailData {
+  customerEmail: string;
+  customerName: string;
+  voucherCode: string;
+  voucherTitle: string;       // e.g. "$500 機票折抵券" / "$500 Flight Credit"
+  amountUsd: number;
+  pointsCost: number;
+  expiresAt: Date;
+  language?: "zh-TW" | "en";
+}
+
+/**
+ * Sent immediately after a customer redeems Packpoint for a voucher.
+ * Reinforces the brand + gives them the code + tells them how to use it.
+ */
+export async function sendVoucherIssuedEmail(data: VoucherIssuedEmailData) {
+  const isEN = data.language === "en";
+  const subject = isEN
+    ? `Your reward voucher: ${data.voucherTitle}`
+    : `兌換成功!您的 ${data.voucherTitle}`;
+  const expiryStr = data.expiresAt.toLocaleDateString(isEN ? "en-US" : "zh-TW", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+  const text = isEN
+    ? `Hi ${data.customerName},\n\nThanks for redeeming ${data.pointsCost.toLocaleString()} Packpoint for ${data.voucherTitle}.\n\nYour voucher code:\n  ${data.voucherCode}\n\nValue: $${data.amountUsd}\nExpires: ${expiryStr}\n\nHow to use: present this code when booking with PACK&GO. We'll apply it to your next eligible booking.\n\nQuestions? Reply this email or call +1 (510) 634-2307.\n\n— PACK&GO Travel`
+    : `${data.customerName} 您好,\n\n感謝您用 ${data.pointsCost.toLocaleString()} Packpoint 兌換 ${data.voucherTitle}。\n\n您的 voucher 代碼:\n  ${data.voucherCode}\n\n價值:$${data.amountUsd}\n到期日:${expiryStr}\n\n使用方式:預訂時告訴 PACK&GO 此 voucher code,我們會自動套用到符合條件的訂單上。\n\n如有問題請回覆此 email 或致電 +1 (510) 634-2307。\n\n— PACK&GO 旅行社`;
+
+  const bodyHtml = `
+    <h2 style="color:#8a6f3a; margin-bottom: 16px;">${isEN ? "Voucher Issued 🎁" : "兌換成功 🎁"}</h2>
+    <p>${isEN ? `Hi <strong>${data.customerName}</strong>,` : `<strong>${data.customerName}</strong> 您好,`}</p>
+    <p>${isEN ? `You redeemed ${data.pointsCost.toLocaleString()} Packpoint for:` : `您用 ${data.pointsCost.toLocaleString()} Packpoint 兌換:`}</p>
+    ${emailHighlightBox(`<strong style="font-size:16px;">${data.voucherTitle}</strong><br><span style="font-size:13px;color:#666;">${isEN ? "Value" : "面額"}: $${data.amountUsd}</span>`)}
+    <p style="margin-top:20px; font-size:13px; color:#666;">${isEN ? "Voucher code (click to copy):" : "Voucher 代碼(可全選複製):"}</p>
+    <div style="font-family:monospace; font-size:18px; font-weight:700; padding:14px 20px; background:#FAF8F2; border:1px solid #c9a563; border-radius:8px; text-align:center; letter-spacing:2px; user-select:all;">${data.voucherCode}</div>
+    <p style="margin-top:16px; font-size:13px;">${isEN ? `<strong>Expires:</strong> ${expiryStr}` : `<strong>到期日:</strong>${expiryStr}`}</p>
+    <p style="font-size:13px; color:#555;">${isEN ? "<strong>How to use:</strong> Present this code when booking with PACK&GO. We'll apply it to your next eligible booking automatically." : "<strong>使用方式:</strong>預訂時告訴 PACK&GO 此 voucher code,我們會自動套用到符合條件的訂單上。"}</p>
+    <div style="margin: 24px 0;">${emailButton(isEN ? "View my vouchers" : "查看我的 voucher", `${BASE_URL}/rewards`)}</div>
+    <p style="font-size:12px; color:#999; margin-top:24px;">PACK&GO Travel · CST #2166984 · +1 (510) 634-2307</p>
+  `;
+  const html = wrapInBrandTemplate({ title: subject, bodyHtml });
+
+  const smtp = getTransporter();
+  if (!smtp) {
+    console.warn(`[Email] SMTP not configured — voucher email skipped (${data.voucherCode})`);
+    return false;
+  }
+  try {
+    await smtp.sendMail({
+      from: `"PACK&GO Travel" <${EMAIL_FROM}>`,
+      to: data.customerEmail,
+      subject,
+      text,
+      html,
+    });
+    console.log(`[Email] Voucher issued email sent (${data.voucherCode}) → ${redactEmail(data.customerEmail)}`);
+    return true;
+  } catch (err) {
+    console.error("[Email] Voucher issued email failed:", err);
     return false;
   }
 }

@@ -6,6 +6,7 @@ import { sendPaymentSuccessEmail, sendSupplierNotificationEmail } from "../email
 import { sendVisaApplicationConfirmation } from "../services/visaEmailService";
 import { createAccountingEntry } from "../db";
 import { notifyOwner } from "./notification";
+import { redactEmail } from "./redact";
 
 
 // P0-2: Lazy-load Stripe to prevent server crash when STRIPE_SECRET_KEY is not set
@@ -305,7 +306,7 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
         // v78y: respect the customer's chosen language stored at booking time
         language: ((booking as any).customerLanguage as 'zh-TW' | 'en' | undefined) || undefined,
       });
-      console.log(`[Stripe Webhook] Payment success email sent to ${booking.customerEmail}`);
+      console.log(`[Stripe Webhook] Payment success email sent to ${redactEmail(booking.customerEmail)}`);
 
       // v78l Sprint 4A: Auto-notify supplier if email is on file. Only on
       // FIRST paid event (deposit OR full) — skip on balance to avoid duplicates.
@@ -588,7 +589,7 @@ async function handleVisaPaymentCompleted(
       passportNumber: application.passportNumber,
       travelDate: application.travelDate ?? undefined,
     });
-    console.log(`[Stripe Webhook] Visa confirmation email sent to ${application.email}`);
+    console.log(`[Stripe Webhook] Visa confirmation email sent to ${redactEmail(application.email)}`);
   } catch (error) {
     console.error('[Stripe Webhook] Failed to send visa confirmation email:', error);
   }

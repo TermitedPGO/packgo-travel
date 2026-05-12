@@ -6,6 +6,7 @@
 
 import nodemailer, { type Transporter } from "nodemailer";
 import { updateMarketingCampaign } from "../db";
+import { redactEmail } from "../_core/redact";
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -257,7 +258,7 @@ export async function sendNewsletter(
           });
 
           sent++;
-          console.log(`[EmailMarketing] Sent to ${email} (campaign ${campaignId})`);
+          console.log(`[EmailMarketing] Sent to ${redactEmail(email)} (campaign ${campaignId})`);
         } catch (err) {
           failed++;
           console.error(`[EmailMarketing] Failed to send to ${email}:`, err);

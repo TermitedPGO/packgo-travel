@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import * as db from './db';
 import { sendPasswordResetEmail } from './emailService';
+import { redactEmail } from './_core/redact';
 
 const SALT_ROUNDS = 10;
 
@@ -102,7 +103,7 @@ export async function requestPasswordReset(email: string) {
   try {
     const emailSent = await sendPasswordResetEmail(email, resetToken, user.name || undefined);
     if (emailSent) {
-      console.log('[Auth] Password reset email sent successfully to:', email);
+      console.log('[Auth] Password reset email sent successfully to:', redactEmail(email));
     } else {
       console.error('[Auth] Failed to send password reset email to:', email);
     }
