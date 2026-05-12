@@ -19,12 +19,67 @@
  */
 
 import { Worker, Job } from "bullmq";
-import { redisBullMQ } from "./redis";
+import { redis, redisBullMQ } from "./redis";
 import {
   BookingFollowupJobData,
   BookingFollowupJobResult,
 } from "./queue";
 import { notifyOwner } from "./_core/notification";
+
+// Code-review v2 follow-up: if Puppeteer breaks for a reason that isn't
+// transient (template HTML bug, library upgrade regression, R2 outage),
+// every subsequent booking would silently ship without the PDF and Jeff
+// would have no signal. Track consecutive PDF failures across all bookings
+// in a shared Redis counter. After PDF_FAILURE_ALERT_THRESHOLD in a row,
+// fire one notifyOwner alert; reset on first success. Notification is
+// throttled by a separate "alert sent" key so we don't spam after every
+// additional failure once the threshold is crossed.
+const PDF_FAILURE_COUNTER_KEY = "booking-followup:pdf-failures";
+const PDF_FAILURE_ALERT_KEY = "booking-followup:pdf-alert-sent";
+const PDF_FAILURE_ALERT_THRESHOLD = 5;
+const PDF_FAILURE_ALERT_REARM_SECONDS = 6 * 60 * 60; // 6 hours
+
+async function trackPdfFailure(bookingId: number, err: unknown): Promise<void> {
+  try {
+    const count = await redis.incr(PDF_FAILURE_COUNTER_KEY);
+    if (count >= PDF_FAILURE_ALERT_THRESHOLD) {
+      // Throttle: alert at most once per 6h. SET NX returns null if already set.
+      const setResult = await redis.set(
+        PDF_FAILURE_ALERT_KEY,
+        String(Date.now()),
+        "EX",
+        PDF_FAILURE_ALERT_REARM_SECONDS,
+        "NX"
+      );
+      if (setResult === "OK") {
+        await notifyOwner({
+          title: `🚨 PDF service degraded — ${count} consecutive failures`,
+          content:
+            `Booking followup worker has failed to generate the deposit invoice PDF ` +
+            `${count} times in a row (most recent: booking #${bookingId}).\n\n` +
+            `Customers are receiving confirmation emails WITHOUT the deposit invoice ` +
+            `link until this is fixed.\n\n` +
+            `Most recent error:\n${(err as Error)?.message ?? "(unknown)"}\n\n` +
+            `Check Fly logs for Puppeteer / R2 / template errors. Counter resets to 0 on next ` +
+            `successful render; this alert re-arms after 6 hours.`,
+        });
+      }
+    }
+  } catch (counterErr) {
+    console.warn(
+      "[BookingFollowupWorker] Failed to track PDF failure counter:",
+      (counterErr as Error)?.message
+    );
+  }
+}
+
+async function clearPdfFailureCounter(): Promise<void> {
+  try {
+    await redis.del(PDF_FAILURE_COUNTER_KEY);
+  } catch {
+    /* counter cleanup is best-effort */
+  }
+}
 
 export const bookingFollowupWorker = new Worker<
   BookingFollowupJobData,
@@ -68,6 +123,9 @@ export const bookingFollowupWorker = new Worker<
       console.log(
         `[BookingFollowupWorker] PDF ready for booking ${d.bookingId}: ${depositInvoiceUrl}`
       );
+      // PDF service is healthy → reset the consecutive-failure counter
+      // so any flake recovery promptly re-arms the threshold alert.
+      void clearPdfFailureCounter();
     } catch (depositErr) {
       console.warn(
         `[BookingFollowupWorker] Deposit PDF generation failed for booking ${d.bookingId}:`,
@@ -75,7 +133,11 @@ export const bookingFollowupWorker = new Worker<
       );
       // Don't throw — we still want the email to ship (without the PDF link)
       // rather than retry the whole job. PDF failures are usually
-      // Puppeteer-flake and rerunning rarely helps.
+      // Puppeteer-flake and rerunning rarely helps. BUT: track the
+      // consecutive-failure counter so Jeff gets alerted if the issue
+      // turns out to be persistent (template bug, R2 outage, library
+      // regression) rather than a single render flake.
+      void trackPdfFailure(d.bookingId, depositErr);
     }
 
     // 2. Send the confirmation email (with PDF URL if it succeeded)
