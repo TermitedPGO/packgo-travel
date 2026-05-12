@@ -28,15 +28,341 @@ export const users = mysqlTable("users", {
   avatar: varchar("avatar", { length: 512 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
-  
+
+  /**
+   * Round 80.19: Membership tier — drives AI Advisor rate-limit bypass,
+   * tour discounts, priority support. Populated by Stripe webhook on
+   * subscription create / update / cancel. See docs/membership-plan.md.
+   * Free → 5 AI advisor messages / 30 days, normal pricing.
+   * Plus → unlimited AI advisor, Packpoint 5x earn rate, no-fee changes within 60d.
+   * Concierge → unlimited AI advisor, Packpoint 10x earn rate, dedicated advisor.
+   */
+  tier: mysqlEnum("tier", ["free", "plus", "concierge"]).default("free").notNull(),
+  /** Stripe subscription ID (for webhook lookup). Null for free tier. */
+  stripeSubscriptionId: varchar("stripeSubscriptionId", { length: 255 }),
+  /** Stripe customer ID (one-to-one with user; reused across subscriptions) */
+  stripeCustomerId: varchar("stripeCustomerId", { length: 255 }),
+  /** When the current paid tier expires. Null for free tier. */
+  tierExpiresAt: timestamp("tierExpiresAt"),
+
+  /**
+   * Round 80.22: Packpoint balance (loyalty points).
+   * 100 Packpoint = $1 USD redemption. Earned via bookings × tier × tour
+   * multipliers, or via engagement bonuses (signup +50, review +50, refer
+   * +500, birthday +100). Redeemed at checkout to offset booking cost.
+   * Authoritative source is the running sum of pointsTransactions, but
+   * we cache the balance here for fast queries (Header badge, profile).
+   */
+  packpointBalance: int("packpointBalance").default(0).notNull(),
+  /** Lifetime Packpoint earned — never decreases (used for tier-up thresholds). */
+  packpointLifetimeEarned: int("packpointLifetimeEarned").default(0).notNull(),
+  /** Last time user earned or redeemed — drives 18-month inactivity expiry. */
+  packpointLastActivityAt: timestamp("packpointLastActivityAt"),
+  /** Date of birth for birthday bonus (+100 pts/year). Optional. */
+  birthDate: timestamp("birthDate"),
+
+  /**
+   * Round 80.22 Phase D: Referral program.
+   * referralCode: unique 8-char code generated on signup; user shares this
+   *   to earn +500 Packpoint when a referee first pays for a booking.
+   * referredBy: userId of the referrer (null = direct signup).
+   * referralBonusAwarded: true once the referrer has been paid for THIS
+   *   referee's first booking. Prevents double-payment on subsequent
+   *   bookings by the same referee.
+   */
+  referralCode: varchar("referralCode", { length: 16 }).unique(),
+  referredBy: int("referredBy"),
+  referralBonusAwarded: boolean("referralBonusAwarded").default(false).notNull(),
+
   /** Login security fields */
   loginAttempts: int("loginAttempts").default(0).notNull(), // Number of failed login attempts
   lockoutUntil: timestamp("lockoutUntil"), // Account locked until this time
-  
+
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
 });
+
+/**
+ * Round 80.22 Phase H2: Supplier poster distribution.
+ *
+ * Capture the source poster from suppliers (雄獅 / 縱橫) via WeChat,
+ * AI rewrites + brands it, multi-platform copy generated, admin reviews,
+ * distributes (auto for newsletter, manual for WeChat / IG / etc.).
+ *
+ * Workflow stages:
+ *   1. uploaded → poster + original copy in DB
+ *   2. processing → AI vision analysing image
+ *   3. ready → AI generated branded poster + 7 platform copies
+ *   4. approved → admin reviewed and approved
+ *   5. distributed → at least 1 platform marked as posted
+ *   6. archived → admin no longer wants to surface
+ */
+export const posterAssets = mysqlTable("posterAssets", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Supplier sourcing — drives credibility footer + analytics. */
+  sourceVendor: mysqlEnum("sourceVendor", ["lion", "zongheng", "house", "other"]).notNull(),
+  /** Free-form name from admin or AI-extracted ("夏威夷 6 天精選團 7/15 出發"). */
+  title: varchar("title", { length: 500 }),
+  /** Target audience tag — drives copy tone in AI generation. */
+  targetAudience: mysqlEnum("targetAudience", [
+    "family",        // 家庭旅遊
+    "honeymoon",     // 蜜月
+    "parent_child",  // 親子
+    "business",      // 商務
+    "senior",        // 銀髮族
+    "general",       // 通用
+  ]).default("general").notNull(),
+  /** Original poster image (uploaded by admin from WeChat screenshot). */
+  originalImageUrl: varchar("originalImageUrl", { length: 1024 }).notNull(),
+  /** Original promotional copy text (paste from WeChat). */
+  originalCopyText: text("originalCopyText"),
+  /** Branded poster image (PACK&GO logo + frame applied via Sharp). */
+  brandedImageUrl: varchar("brandedImageUrl", { length: 1024 }),
+  /** AI Vision extracted info as JSON: title, dates, prices, highlights, palette. */
+  aiAnalysis: text("aiAnalysis"),
+  status: mysqlEnum("status", [
+    "uploaded",
+    "processing",
+    "ready",
+    "approved",
+    "distributed",
+    "archived",
+    "failed",
+  ]).default("uploaded").notNull(),
+  /** Admin notes / processing errors. */
+  notes: text("notes"),
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  statusIdx: index("idx_poster_status").on(table.status, table.createdAt),
+}));
+
+export type PosterAsset = typeof posterAssets.$inferSelect;
+export type InsertPosterAsset = typeof posterAssets.$inferInsert;
+
+/**
+ * Round 80.22 Phase H2: Per-platform copy generated for each poster.
+ * 7 rows per posterAsset (one per platform). Admin can edit + approve
+ * each independently. Tracks distribution status separately per platform.
+ */
+export const posterPlatformCopies = mysqlTable("posterPlatformCopies", {
+  id: int("id").autoincrement().primaryKey(),
+  posterAssetId: int("posterAssetId").notNull(),
+  platform: mysqlEnum("platform", [
+    "wechat_moments",  // 朋友圈
+    "wechat_group",    // 微信群
+    "xiaohongshu",     // 小紅書
+    "line",            // LINE 群
+    "facebook",        // FB Page / personal
+    "instagram",       // IG
+    "newsletter",      // Email newsletter (auto-distributed)
+  ]).notNull(),
+  /** AI-generated copy text. Admin can edit before approving. */
+  copyText: text("copyText").notNull(),
+  /** Optional hashtags (separate field for platforms that use them prominently). */
+  hashtags: text("hashtags"),
+  status: mysqlEnum("status", ["draft", "approved", "posted", "skipped"]).default("draft").notNull(),
+  /** When admin marked as posted (or auto-set for newsletter). */
+  postedAt: timestamp("postedAt"),
+  /** URL of the live post (admin pastes after posting). */
+  postedUrl: varchar("postedUrl", { length: 1024 }),
+  /** Free-form admin notes. */
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  posterIdx: index("idx_platform_copy_poster").on(table.posterAssetId),
+  platformIdx: index("idx_platform_copy_status").on(table.platform, table.status),
+}));
+
+export type PosterPlatformCopy = typeof posterPlatformCopies.$inferSelect;
+export type InsertPosterPlatformCopy = typeof posterPlatformCopies.$inferInsert;
+
+/**
+ * Round 80.22 Phase F: Reward vouchers — Packpoint redeemed for tangible
+ * rewards (flight credit, photo book, etc.). Unlike inline cash discount
+ * (which we already do at checkout), vouchers are issued ahead of time
+ * with a unique code and consumed on a later transaction.
+ *
+ * Lifecycle:
+ *   1. Customer redeems on /rewards page → pts deducted → voucher issued
+ *      (status='issued', code=PACK-FLT-XXXXXXXX, expires in 12 months).
+ *   2. Customer presents code to PACK&GO when booking flight (manual flow).
+ *   3. Admin marks status='redeemed' in admin UI; reference points to the
+ *      booking that consumed the voucher.
+ *   4. Cron sweep marks 'expired' vouchers (no clawback — points were
+ *      already paid into the system).
+ *
+ * Why a separate table (vs reusing pointsTransactions): vouchers have
+ * customer-facing codes, expiry dates, redemption tracking that don't fit
+ * the immutable transaction-log model.
+ */
+export const rewardVouchers = mysqlTable("rewardVouchers", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  /** Voucher type (drives UI label + redemption rules). */
+  type: mysqlEnum("type", [
+    "flight_credit",   // PACK&GO flight booking discount
+    "photo_book",      // Premium photo book printing
+    "tour_credit",     // Generic tour discount voucher (alt to inline redemption)
+  ]).notNull(),
+  /** Customer-facing unique code (PACK-FLT-XXXXXXXX format). */
+  code: varchar("code", { length: 32 }).notNull().unique(),
+  /** $ value (USD) — what the voucher is worth at redemption. */
+  amountUsd: int("amountUsd").notNull(),
+  /** Packpoint cost — how many points the user spent (audit trail). */
+  pointsCost: int("pointsCost").notNull(),
+
+  status: mysqlEnum("status", ["issued", "redeemed", "expired", "voided"]).default("issued").notNull(),
+  /** Set when status moves to 'redeemed'. */
+  redeemedAt: timestamp("redeemedAt"),
+  /** Admin who marked redeemed. */
+  redeemedByAdminId: int("redeemedByAdminId"),
+  /** Reference to the booking / order that consumed it (nullable). */
+  redeemedAgainstBookingId: int("redeemedAgainstBookingId"),
+
+  /** Default 12 months. */
+  expiresAt: timestamp("expiresAt").notNull(),
+  /** Free-form admin notes (e.g., "applied to booking #123 for $250 discount"). */
+  notes: text("notes"),
+
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  userIdx: index("idx_voucher_user").on(table.userId, table.status),
+  codeIdx: index("idx_voucher_code").on(table.code),
+}));
+
+export type RewardVoucher = typeof rewardVouchers.$inferSelect;
+export type InsertRewardVoucher = typeof rewardVouchers.$inferInsert;
+
+/**
+ * Round 80.22 Phase F: Trip photos — customer-uploaded photos from a
+ * completed booking. Drives:
+ *   - +10 Packpoint per photo (capped at 100 pts / 10 photos per booking
+ *     per docs/packpoint-policy.md §4)
+ *   - Photo book voucher unlock (50+ photos across approved bookings)
+ *   - Future: photo gallery on user profile + tour pages (with consent)
+ */
+export const tripPhotos = mysqlTable("tripPhotos", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  bookingId: int("bookingId").notNull(),
+  /** S3 URL — must be served from our trusted bucket, not arbitrary URLs. */
+  photoUrl: varchar("photoUrl", { length: 1024 }).notNull(),
+  caption: varchar("caption", { length: 500 }),
+  /** True once the +10 Packpoint has been awarded for this photo. */
+  pointsAwarded: boolean("pointsAwarded").default(false).notNull(),
+  /** True if customer opted in to share publicly on tour gallery. */
+  isPublic: boolean("isPublic").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  bookingIdx: index("idx_photo_booking").on(table.bookingId),
+  userIdx: index("idx_photo_user").on(table.userId),
+}));
+
+export type TripPhoto = typeof tripPhotos.$inferSelect;
+export type InsertTripPhoto = typeof tripPhotos.$inferInsert;
+
+/**
+ * Round 80.22 Phase E: Tour reviews — customer-submitted reviews after a
+ * completed booking. Drives social proof on TourDetail/TestimonialsCarousel
+ * and earns the user +50 Packpoint when approved by admin.
+ *
+ * Lifecycle:
+ *   1. Customer completes a booking (bookingStatus='completed')
+ *   2. Customer submits review → status='pending'
+ *   3. Admin approves → status='approved', publishedAt set, +50 Packpoint
+ *      awarded (idempotent via bookingId)
+ *   4. Admin can reject (with reason) or hide later
+ *
+ * Why bookingId required: ties the review to a real verified purchase.
+ * FTC 16 CFR §465 (eff 2024-10-21) bans fabricated/incentivized reviews
+ * without disclosure — verified-purchase status is our compliance anchor.
+ */
+export const tourReviews = mysqlTable("tourReviews", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  tourId: int("tourId").notNull(),
+  // Round 80.25 — nullable. Logged-in users may post reviews/comments
+  // without a prior booking ("open commenting"). Booking-tied reviews
+  // still set this for the +50 Packpoint reward path.
+  bookingId: int("bookingId"),
+
+  rating: int("rating").notNull(), // 1–5 stars
+  title: varchar("title", { length: 200 }).notNull(),
+  content: text("content").notNull(),
+  /** Optional photos uploaded with the review (S3 URLs as JSON array). */
+  photos: text("photos"),
+  /** Locale of the review text (zh-TW / en) — surfaces correctly in i18n UI. */
+  language: varchar("language", { length: 8 }).default("zh-TW").notNull(),
+
+  status: mysqlEnum("status", ["pending", "approved", "rejected", "hidden"]).default("pending").notNull(),
+  /** Set when admin moves review out of 'pending'. */
+  moderatedAt: timestamp("moderatedAt"),
+  moderatedBy: int("moderatedBy"), // admin userId
+  /** Reason text shown to author on rejection. */
+  rejectionReason: text("rejectionReason"),
+
+  /** When customer submitted vs when admin approved (drives "publish date" UI). */
+  publishedAt: timestamp("publishedAt"),
+
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  // Round 80.25 — one review per (user, tour) regardless of booking source.
+  // Was uq_review_booking on bookingId; switched to compound (userId, tourId)
+  // when bookingId went nullable so a single user still can't spam-flood a
+  // tour with multiple reviews.
+  userTourIdx: unique("uq_review_user_tour").on(table.userId, table.tourId),
+  // Fast lookup for "all approved reviews for tour X" (TourDetail page)
+  tourStatusIdx: index("idx_review_tour_status").on(table.tourId, table.status),
+}));
+
+export type TourReview = typeof tourReviews.$inferSelect;
+export type InsertTourReview = typeof tourReviews.$inferInsert;
+
+/**
+ * Round 80.22: Packpoint transaction log (immutable audit trail).
+ * Every earn / redeem / expire / adjust event creates a row here.
+ * users.packpointBalance is a denormalized sum of all rows for that user.
+ *
+ * Why immutable: regulators may require proof of point liability for
+ * accounting. Negative `delta` = redemption / clawback, positive = earn.
+ */
+export const pointsTransactions = mysqlTable("pointsTransactions", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  /** Positive int = earn; negative int = redeem / clawback / expire. */
+  delta: int("delta").notNull(),
+  /** Categorize for analytics + filtering. */
+  reason: mysqlEnum("reason", [
+    "booking_earn",       // Earned from a booking (×tier ×tour multiplier)
+    "signup_bonus",       // +50 first-time signup
+    "review_bonus",       // +50 per completed-tour review
+    "referral_bonus",     // +500 successful referral (both sides)
+    "birthday_bonus",     // +100/year
+    "photo_bonus",        // +10 per photo upload
+    "redemption",         // -X, used at checkout
+    "clawback",           // -X, refund / cancel claws back earned points
+    "expiration",         // -X, 18-month inactivity sweep
+    "admin_adjust",       // Manual adjustment by admin (+ or -)
+  ]).notNull(),
+  /** Optional reference: bookingId / reviewId / referralCode etc. */
+  referenceType: varchar("referenceType", { length: 50 }),
+  referenceId: int("referenceId"),
+  /** Free-form description for audit (admin reason, error context). */
+  description: text("description"),
+  /** Running balance after this transaction (for fast history queries). */
+  balanceAfter: int("balanceAfter").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  userIdx: index("idx_points_user").on(table.userId, table.createdAt),
+}));
+
+export type PointsTransaction = typeof pointsTransactions.$inferSelect;
+export type InsertPointsTransaction = typeof pointsTransactions.$inferInsert;
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
@@ -51,7 +377,7 @@ export const tours = mysqlTable("tours", {
   
   // Basic Information
   title: text("title").notNull(),
-  productCode: varchar("productCode", { length: 50 }), // 產品代碼 (e.g., 26JO217BRC-T)
+  productCode: varchar("productCode", { length: 100 }), // 產品代碼 (e.g., 26JO217BRC-T) — v80.24: 50→100 to fit longer supplier codes
   description: text("description").notNull(),
   
   // Location Information - Departure
@@ -66,7 +392,7 @@ export const tours = mysqlTable("tours", {
   destinationRegion: varchar("destinationRegion", { length: 100 }), // 目的地區域 (e.g., 那霸)
   destinationAirportCode: varchar("destinationAirportCode", { length: 10 }), // 目的地機場代碼 (e.g., OKA)
   destinationAirportName: varchar("destinationAirportName", { length: 100 }), // 目的地機場名稱
-  destination: text("destination").notNull(), // Legacy field for compatibility
+  destination: text("destination"), // v81: legacy nullable; new code uses destinationCity
   
   // Duration & Pricing
   duration: int("duration").notNull(), // in days
@@ -76,33 +402,39 @@ export const tours = mysqlTable("tours", {
   priceUnit: varchar("priceUnit", { length: 20 }).default("人/起"), // 價格單位
   
   // Flight Information - Outbound
-  outboundAirline: varchar("outboundAirline", { length: 100 }), // 去程航空公司
+  // v80.24: bumped from 100 to 200 — LLM-cleaned airline names like
+  // "All Nippon Airways (ANA / Star Alliance) — codeshare with United"
+  // can exceed 100 chars on bilingual itineraries.
+  outboundAirline: varchar("outboundAirline", { length: 200 }), // 去程航空公司
   outboundFlightNo: varchar("outboundFlightNo", { length: 20 }), // 去程航班號
   outboundDepartureTime: varchar("outboundDepartureTime", { length: 10 }), // 去程出發時間 (e.g., 06:55)
   outboundArrivalTime: varchar("outboundArrivalTime", { length: 10 }), // 去程抵達時間 (e.g., 09:15)
   outboundFlightDuration: varchar("outboundFlightDuration", { length: 20 }), // 去程飛行時間 (e.g., 1h20m)
-  
+
   // Flight Information - Inbound
-  inboundAirline: varchar("inboundAirline", { length: 100 }), // 回程航空公司
+  inboundAirline: varchar("inboundAirline", { length: 200 }), // 回程航空公司
   inboundFlightNo: varchar("inboundFlightNo", { length: 20 }), // 回程航班號
   inboundDepartureTime: varchar("inboundDepartureTime", { length: 10 }), // 回程出發時間
   inboundArrivalTime: varchar("inboundArrivalTime", { length: 10 }), // 回程抵達時間
   inboundFlightDuration: varchar("inboundFlightDuration", { length: 20 }), // 回程飛行時間
-  
+
   // Accommodation Information
-  hotelName: varchar("hotelName", { length: 255 }), // 酒店名稱
-  hotelGrade: varchar("hotelGrade", { length: 50 }), // 酒店等級 (e.g., 五星級, 四星級)
+  // v80.24: bumped lengths — Japanese / Korean hotel names can be 50+ chars
+  // each in chinese AND english side-by-side; grade strings can include
+  // "五星級豪華酒店 / 5-Star Luxury Resort"; room size formats vary.
+  hotelName: varchar("hotelName", { length: 500 }), // 酒店名稱
+  hotelGrade: varchar("hotelGrade", { length: 100 }), // 酒店等級 (e.g., 五星級, 四星級)
   hotelNights: int("hotelNights"), // 住宿晚數
-  hotelLocation: varchar("hotelLocation", { length: 255 }), // 酒店位置
+  hotelLocation: varchar("hotelLocation", { length: 500 }), // 酒店位置
   hotelDescription: text("hotelDescription"), // 酒店介紹
   hotelFacilities: text("hotelFacilities"), // JSON array of facilities
-  hotelRoomType: varchar("hotelRoomType", { length: 100 }), // 房型
-  hotelRoomSize: varchar("hotelRoomSize", { length: 50 }), // 房間大小 (e.g., 30-35平方米)
+  hotelRoomType: varchar("hotelRoomType", { length: 200 }), // 房型
+  hotelRoomSize: varchar("hotelRoomSize", { length: 100 }), // 房間大小 (e.g., 30-35平方米)
   hotelCheckIn: varchar("hotelCheckIn", { length: 10 }), // 入住時間 (e.g., 15:00)
   hotelCheckOut: varchar("hotelCheckOut", { length: 10 }), // 退房時間 (e.g., 11:00)
   hotelSpecialOffers: text("hotelSpecialOffers"), // JSON array of special offers
   hotelImages: text("hotelImages"), // JSON array of image URLs
-  hotelWebsite: varchar("hotelWebsite", { length: 512 }), // 酒店官網
+  hotelWebsite: varchar("hotelWebsite", { length: 2048 }), // 酒店官網 (Round 80.22: bumped 512→2048 to fit R2 pre-signed URLs)
   
   // Destination Description
   destinationDescription: text("destinationDescription"), // 目的地介紹
@@ -122,12 +454,22 @@ export const tours = mysqlTable("tours", {
   promotionText: text("promotionText"), // 促銷文字 (e.g., 過年大促銷)
   
   // Images
-  imageUrl: varchar("imageUrl", { length: 512 }), // Main image
+  // Round 80.22: bumped 512→2048 to fit R2 pre-signed URLs (signed URLs run
+  // 1500-2000 chars with X-Amz-* query params)
+  imageUrl: varchar("imageUrl", { length: 2048 }), // Main image
   galleryImages: text("galleryImages"), // JSON array of gallery image URLs with metadata
-  
+
+  // v331 — AI tour-map. When non-NULL, the tour detail page renders
+  // this PNG (rendered by gpt-image-2 from the itinerary) instead of
+  // the SVG canvas. See `server/services/tourMapGenerator.ts` for the
+  // generation flow.
+  aiMapUrl: varchar("aiMapUrl", { length: 2048 }), // Public URL of the painted map
+  aiMapPrompt: text("aiMapPrompt"), // Exact prompt used (audit / re-runs)
+  aiMapGeneratedAt: timestamp("aiMapGeneratedAt"), // When the current image was rendered
+
   // === New Fields for Luxury Design ===
   // Hero Section
-  heroImage: varchar("heroImage", { length: 512 }), // Full-screen hero background image
+  heroImage: varchar("heroImage", { length: 2048 }), // Full-screen hero background image
   heroImageAlt: text("heroImageAlt"), // Hero image alt text for SEO
   heroSubtitle: text("heroSubtitle"), // Hero subtitle - tour highlights summary
   
@@ -221,6 +563,20 @@ export const tours = mysqlTable("tours", {
   supplierEmail: varchar("supplierEmail", { length: 320 }),
   supplierPhone: varchar("supplierPhone", { length: 50 }),
   supplierNotes: text("supplierNotes"),
+
+  /**
+   * Round 80.22: Packpoint per-tour multiplier.
+   * Final earn = booking_subtotal × 1 × tier_multiplier(1/5/10) × pointsEarnRate.
+   * Default 0.25 (thin-margin safe even at 5% commission). Jeff sets higher
+   * (0.5 / 1 / 2) for promotional campaigns or high-margin tours. 0 = exclude
+   * this tour from earning entirely (used for affiliate/promo bookings).
+   * Stored × 100 to avoid floating-point: 25 = 0.25x, 100 = 1x, 200 = 2x.
+   */
+  pointsEarnRate: int("pointsEarnRate").default(25).notNull(),
+  /** Optional: Jeff's estimated commission % (× 10000, e.g. 1500 = 15%). Used in admin cost calculator. */
+  estimatedCommissionPct: int("estimatedCommissionPct"),
+  /** True = this tour never earns Packpoint (overrides pointsEarnRate). */
+  excludeFromPackpoint: boolean("excludeFromPackpoint").default(false).notNull(),
 
   // Metadata
   createdBy: int("createdBy").notNull(),
@@ -1847,3 +2203,272 @@ export const posterIterations = mysqlTable("posterIterations", {
 });
 export type PosterIteration = typeof posterIterations.$inferSelect;
 export type InsertPosterIteration = typeof posterIterations.$inferInsert;
+
+// ─── AI Advisor Usage (Round 80.19) ───────────────────────────────────────
+//
+// Tracks per-IP and per-userId message counts within a rolling 30-day window
+// for AI Travel Advisor rate limiting (free tier = 5 messages / 30 days).
+//
+// Plus / Concierge members bypass rate limit but we still log usage for
+// abuse detection (hard cap 100 / day per account).
+//
+// Key choice:
+//   - Anonymous users → keyed by `ipHash` (sha256 of IP)
+//   - Logged-in users → keyed by `userId`
+// One row PER message — easy to count via WHERE createdAt > NOW() - 30 days.
+// Old rows can be pruned by a daily cron (>30 days old).
+
+export const aiAdvisorUsage = mysqlTable("aiAdvisorUsage", {
+  id: int("id").autoincrement().primaryKey(),
+  /** sha256(IP) — used for anonymous rate limiting. Null when userId is set. */
+  ipHash: varchar("ipHash", { length: 64 }),
+  /** Logged-in user id. Null for anonymous. */
+  userId: int("userId"),
+  /** The session id from the chat dialog (for grouping/debug). */
+  sessionId: varchar("sessionId", { length: 64 }),
+  /** Snapshot of the message text (first 500 chars) — for abuse review. */
+  messagePreview: text("messagePreview"),
+  /** Approx tokens billed for this turn (sum of in + out). */
+  tokenCount: int("tokenCount").default(0).notNull(),
+  /** User's tier at time of message — for analytics. */
+  tier: varchar("tier", { length: 20 }).default("free").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type AiAdvisorUsage = typeof aiAdvisorUsage.$inferSelect;
+export type InsertAiAdvisorUsage = typeof aiAdvisorUsage.$inferInsert;
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Round 81 — Autonomous AI Agents foundation
+ *
+ * Layer 0 (outcome tracking): every action a self-running agent takes is
+ * recorded with downstream outcomes. The Self-Retrospective Agent reads
+ * these tables weekly and updates each agent's policy autonomously based
+ * on conversion + sentiment + LTV correlations.
+ *
+ * Layer 1 (customer memory): single-source-of-truth profile per customer
+ * (multi-channel identity resolution: same person on email + WhatsApp +
+ * WeChat = one profile). Powers per-customer voice matching for the
+ * Inquiry/Review/Marketing/Followup/Refund agents.
+ * ───────────────────────────────────────────────────────────────────── */
+
+export const interactionOutcomes = mysqlTable("interactionOutcomes", {
+  id: int("id").autoincrement().primaryKey(),
+  agentName: varchar("agentName", { length: 50 }).notNull(),
+  interactionId: int("interactionId").notNull(),
+  customerProfileId: int("customerProfileId"),
+  actionTaken: varchar("actionTaken", { length: 50 }).notNull(),
+  confidence: int("confidence"),
+  policyVersion: int("policyVersion"),
+
+  // Short-term outcomes (24-72h)
+  customerReplied: int("customerReplied").default(0).notNull(),
+  customerReplyTimeMs: int("customerReplyTimeMs"),
+  customerSentiment: mysqlEnum("customerSentiment", ["positive", "neutral", "negative"]),
+
+  // Mid-term outcomes (30 days)
+  customerBooked: int("customerBooked").default(0).notNull(),
+  bookedAmount: int("bookedAmount"),
+  customerOptedOut: int("customerOptedOut").default(0).notNull(),
+  reviewSubmitted: int("reviewSubmitted").default(0).notNull(),
+  reviewRating: int("reviewRating"),
+
+  // Long-term outcomes (90+ days)
+  refundRequested: int("refundRequested").default(0).notNull(),
+  jeffOverride: int("jeffOverride").default(0).notNull(),
+  jeffOverrideReason: text("jeffOverrideReason"),
+
+  outcomeFinalized: int("outcomeFinalized").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  agentIdx: index("idx_outcome_agent").on(table.agentName, table.createdAt),
+  customerIdx: index("idx_outcome_customer").on(table.customerProfileId),
+  finalizedIdx: index("idx_outcome_finalized").on(table.outcomeFinalized, table.createdAt),
+}));
+
+export type InteractionOutcome = typeof interactionOutcomes.$inferSelect;
+export type InsertInteractionOutcome = typeof interactionOutcomes.$inferInsert;
+
+export const agentPolicies = mysqlTable("agentPolicies", {
+  id: int("id").autoincrement().primaryKey(),
+  agentName: varchar("agentName", { length: 50 }).notNull(),
+  version: int("version").notNull(),
+  rules: text("rules").notNull(),
+  active: int("active").default(0).notNull(),
+  performanceData: text("performanceData"),
+  createdBy: varchar("createdBy", { length: 50 }),
+  reasonNote: text("reasonNote"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  agentVersionIdx: unique("uq_agent_version").on(table.agentName, table.version),
+  agentActiveIdx: index("idx_agent_active").on(table.agentName, table.active),
+}));
+
+export type AgentPolicy = typeof agentPolicies.$inferSelect;
+export type InsertAgentPolicy = typeof agentPolicies.$inferInsert;
+
+export const agentMetrics = mysqlTable("agentMetrics", {
+  id: int("id").autoincrement().primaryKey(),
+  agentName: varchar("agentName", { length: 50 }).notNull(),
+  weekStart: timestamp("weekStart").notNull(),
+  totalInteractions: int("totalInteractions").default(0).notNull(),
+  autoActionsCount: int("autoActionsCount").default(0).notNull(),
+  escalatedCount: int("escalatedCount").default(0).notNull(),
+  jeffOverrideCount: int("jeffOverrideCount").default(0).notNull(),
+  conversionRate: int("conversionRate"),
+  avgSentimentScore: int("avgSentimentScore"),
+  avgResponseTimeMs: int("avgResponseTimeMs"),
+  errorRate: int("errorRate"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  agentWeekIdx: unique("uq_agent_week").on(table.agentName, table.weekStart),
+}));
+
+export type AgentMetrics = typeof agentMetrics.$inferSelect;
+export type InsertAgentMetrics = typeof agentMetrics.$inferInsert;
+
+export const customerProfiles = mysqlTable("customerProfiles", {
+  id: int("id").autoincrement().primaryKey(),
+
+  // Multi-channel identifiers
+  userId: int("userId"),
+  email: varchar("email", { length: 255 }),
+  phone: varchar("phone", { length: 32 }),
+  wechatId: varchar("wechatId", { length: 100 }),
+  lineId: varchar("lineId", { length: 100 }),
+  whatsappPhone: varchar("whatsappPhone", { length: 32 }),
+
+  // AI-learned communication preferences
+  preferredLanguage: varchar("preferredLanguage", { length: 8 }).default("zh-TW").notNull(),
+  communicationStyle: mysqlEnum("communicationStyle", ["formal", "casual", "detailed", "concise"]),
+  preferredChannel: varchar("preferredChannel", { length: 20 }),
+
+  // Family / context
+  familyContext: text("familyContext"),
+  budgetTier: int("budgetTier"),
+
+  // Engagement signals
+  totalSpend: int("totalSpend").default(0).notNull(),
+  bookingCount: int("bookingCount").default(0).notNull(),
+  lastInteractionAt: timestamp("lastInteractionAt"),
+  responseTimeExpectationMs: int("responseTimeExpectationMs"),
+  vipScore: int("vipScore").default(0).notNull(),
+
+  // AI observations (auto-summarized periodically)
+  aiNotes: text("aiNotes"),
+
+  status: mysqlEnum("status", ["active", "dormant", "opted_out", "blocked"]).default("active").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  emailIdx: index("idx_cp_email").on(table.email),
+  phoneIdx: index("idx_cp_phone").on(table.phone),
+  userIdx: unique("uq_cp_user").on(table.userId),
+  vipIdx: index("idx_cp_vip").on(table.vipScore),
+  statusIdx: index("idx_cp_status").on(table.status),
+}));
+
+export type CustomerProfile = typeof customerProfiles.$inferSelect;
+export type InsertCustomerProfile = typeof customerProfiles.$inferInsert;
+
+export const customerInteractions = mysqlTable("customerInteractions", {
+  id: int("id").autoincrement().primaryKey(),
+  customerProfileId: int("customerProfileId").notNull(),
+
+  channel: mysqlEnum("channel", ["email", "whatsapp", "wechat", "line", "sms", "phone", "web_form", "review"]).notNull(),
+  direction: mysqlEnum("direction", ["inbound", "outbound"]).notNull(),
+
+  content: text("content").notNull(),
+  contentSummary: text("contentSummary"),
+
+  generatedBy: mysqlEnum("generatedBy", ["human", "ai_auto", "ai_draft_human_approved"]),
+  agentName: varchar("agentName", { length: 50 }),
+
+  sentiment: mysqlEnum("sentiment", ["positive", "neutral", "negative"]),
+  classification: varchar("classification", { length: 50 }),
+  urgency: int("urgency").default(50).notNull(),
+
+  outcomeId: int("outcomeId"),
+
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  customerIdx: index("idx_int_customer").on(table.customerProfileId, table.createdAt),
+  channelIdx: index("idx_int_channel").on(table.channel, table.direction),
+  classIdx: index("idx_int_class").on(table.classification),
+  outcomeIdx: index("idx_int_outcome").on(table.outcomeId),
+}));
+
+export type CustomerInteraction = typeof customerInteractions.$inferSelect;
+export type InsertCustomerInteraction = typeof customerInteractions.$inferInsert;
+
+// Round 81 — Agent ↔ Jeff chatbox (Layer 1.5)
+export const agentMessages = mysqlTable("agentMessages", {
+  id: int("id").autoincrement().primaryKey(),
+  agentName: varchar("agentName", { length: 50 }).notNull(),
+  senderRole: mysqlEnum("senderRole", ["agent", "jeff"]).default("agent").notNull(),
+  messageType: mysqlEnum("messageType", [
+    "proposal",
+    "observation",
+    "question",
+    "alert",
+    "digest",
+    "escalation",
+  ]).notNull(),
+  title: varchar("title", { length: 200 }).notNull(),
+  body: text("body").notNull(),
+  context: text("context"),
+  priority: mysqlEnum("priority", ["low", "normal", "high", "critical"])
+    .default("normal")
+    .notNull(),
+  relatedOutcomeId: int("relatedOutcomeId"),
+  relatedInteractionId: int("relatedInteractionId"),
+  relatedCustomerProfileId: int("relatedCustomerProfileId"),
+  readByJeff: int("readByJeff").default(0).notNull(),
+  jeffResponse: text("jeffResponse"),
+  readAt: timestamp("readAt"),
+  // QA audit 2026-05-11 Phase 1 fix: track whether Jeff adopted/rejected
+  // a proposal so the next Self-Retrospective can reference past decisions
+  // and stop re-suggesting things he's already evaluated.
+  proposalDecision: mysqlEnum("proposalDecision", ["pending", "adopted", "rejected"])
+    .default("pending")
+    .notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  unreadIdx: index("idx_am_unread").on(table.readByJeff, table.priority, table.createdAt),
+  agentIdx: index("idx_am_agent").on(table.agentName, table.createdAt),
+  priorityIdx: index("idx_am_priority").on(table.priority, table.createdAt),
+  proposalIdx: index("idx_am_proposal_decision").on(
+    table.messageType,
+    table.proposalDecision,
+    table.createdAt
+  ),
+}));
+
+export type AgentMessage = typeof agentMessages.$inferSelect;
+export type InsertAgentMessage = typeof agentMessages.$inferInsert;
+
+// Round 81 — Gmail OAuth integration (email pipeline)
+export const gmailIntegration = mysqlTable("gmailIntegration", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId"),
+  emailAddress: varchar("emailAddress", { length: 255 }).notNull(),
+  accessToken: text("accessToken").notNull(),
+  refreshToken: text("refreshToken").notNull(),
+  scope: text("scope"),
+  tokenExpiresAt: timestamp("tokenExpiresAt"),
+  lastPollAt: timestamp("lastPollAt"),
+  lastHistoryId: varchar("lastHistoryId", { length: 100 }),
+  messagesProcessed: int("messagesProcessed").default(0).notNull(),
+  messagesFailed: int("messagesFailed").default(0).notNull(),
+  isActive: int("isActive").default(1).notNull(),
+  disconnectReason: text("disconnectReason"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  emailIdx: unique("uq_gmail_email").on(table.emailAddress),
+  activeIdx: index("idx_gmail_active").on(table.isActive, table.lastPollAt),
+}));
+
+export type GmailIntegration = typeof gmailIntegration.$inferSelect;
+export type InsertGmailIntegration = typeof gmailIntegration.$inferInsert;

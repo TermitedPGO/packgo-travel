@@ -358,6 +358,139 @@
       "when": 1777512289954,
       "tag": "0050_marketing_assets_iterations",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "5",
+      "when": 1777842514528,
+      "tag": "0051_superb_punisher",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "5",
+      "when": 1777857600000,
+      "tag": "0052_packpoint_loyalty",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "5",
+      "when": 1777867200000,
+      "tag": "0053_referral_program",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "5",
+      "when": 1777875000000,
+      "tag": "0054_tour_reviews",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "5",
+      "when": 1777881000000,
+      "tag": "0055_rewards_and_photos",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "5",
+      "when": 1777887000000,
+      "tag": "0056_poster_distribution",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "5",
+      "when": 1777920000000,
+      "tag": "0057_enlarge_image_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "5",
+      "when": 1778000000000,
+      "tag": "0058_enlarge_tour_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "5",
+      "when": 1778328000000,
+      "tag": "0059_tour_ai_map",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "5",
+      "when": 1778328600000,
+      "tag": "0060_backfill_tour_990015_aimap",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "5",
+      "when": 1778332200000,
+      "tag": "0061_revert_tour_990015_aimap",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "5",
+      "when": 1778440085772,
+      "tag": "0062_open_review_commenting",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "5",
+      "when": 1778442665240,
+      "tag": "0063_outcome_tracking",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "5",
+      "when": 1778442666240,
+      "tag": "0064_customer_memory",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "5",
+      "when": 1778616000000,
+      "tag": "0065_agent_messages",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "5",
+      "when": 1778620000000,
+      "tag": "0066_gmail_integration",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "5",
+      "when": 1778625000000,
+      "tag": "0067_agent_chat_role",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "5",
+      "when": 1778629000000,
+      "tag": "0068_tours_destination_nullable",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "5",
+      "when": 1778900000000,
+      "tag": "0069_agent_messages_proposal_decision",
+      "breakpoints": true
     }
   ]
 }

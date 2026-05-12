@@ -1898,6 +1898,39 @@ export const agentRouter = router({
     return rows;
   }),
 
+  /**
+   * Mark a Self-Retrospective proposal as adopted or rejected.
+   *
+   * QA audit 2026-05-11 Phase 1: previously proposals were write-only
+   * — Jeff could read them but had no way to record whether he
+   * acted on them. So the next retrospective had no signal about
+   * which suggestions worked, and re-suggested the same things.
+   * Now: proposalDecision column (drizzle/0069) captures it, and
+   * future runSelfRetrospective can read past decisions as context.
+   */
+  markProposal: adminProcedure
+    .input(
+      z.object({
+        messageId: z.number().int().positive(),
+        decision: z.enum(["adopted", "rejected"]),
+        note: z.string().max(2000).optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database not available");
+      await db
+        .update(agentMessages)
+        .set({
+          proposalDecision: input.decision,
+          jeffResponse: input.note ?? null,
+          readByJeff: 1,
+          readAt: new Date(),
+        })
+        .where(eq(agentMessages.id, input.messageId));
+      return { success: true };
+    }),
+
   /** Internal: agent posts a message to Jeff. Used by future cron jobs / self-retrospective. */
   postMessage: adminProcedure
     .input(
