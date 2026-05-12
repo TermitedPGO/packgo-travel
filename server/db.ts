@@ -205,6 +205,30 @@ export async function createUserWithPassword(data: { email: string; password: st
     throw new Error("Failed to create user");
   }
 
+  // Round 80.22: signup bonus +50 Packpoint. Best-effort — failures shouldn't
+  // block account creation. Idempotency at user level (only awarded once
+  // since this is the only place users are created via password flow).
+  try {
+    const { awardPackpoint } = await import("./_core/packpoint");
+    await awardPackpoint({
+      userId: user.id,
+      delta: 50,
+      reason: "signup_bonus",
+      description: "Welcome bonus for signing up",
+    });
+  } catch (err) {
+    console.error("[Packpoint] Signup bonus failed for user", user.id, err);
+  }
+
+  // Round 80.22 Phase D: assign unique referral code so the user can share
+  // their link immediately. Best-effort.
+  try {
+    const { ensureReferralCode } = await import("./_core/referral");
+    await ensureReferralCode(user.id);
+  } catch (err) {
+    console.error("[Referral] Code generation failed for user", user.id, err);
+  }
+
   return user;
 }
 
@@ -226,6 +250,27 @@ export async function createUserWithGoogle(data: { googleId: string; email: stri
   const user = await getUserByGoogleId(data.googleId);
   if (!user) {
     throw new Error("Failed to create user");
+  }
+
+  // Round 80.22: signup bonus +50 Packpoint (same as password flow).
+  try {
+    const { awardPackpoint } = await import("./_core/packpoint");
+    await awardPackpoint({
+      userId: user.id,
+      delta: 50,
+      reason: "signup_bonus",
+      description: "Welcome bonus for signing up via Google",
+    });
+  } catch (err) {
+    console.error("[Packpoint] Signup bonus failed for user", user.id, err);
+  }
+
+  // Round 80.22 Phase D: assign unique referral code on Google signup too.
+  try {
+    const { ensureReferralCode } = await import("./_core/referral");
+    await ensureReferralCode(user.id);
+  } catch (err) {
+    console.error("[Referral] Code generation failed for user", user.id, err);
   }
 
   return user;
@@ -516,7 +561,15 @@ export async function updateTour(
 }
 
 /**
- * Delete a tour
+ * Delete a tour. Refuses deletion if there are pending or confirmed
+ * bookings still attached (would orphan a customer's record). Best-
+ * effort S3 cleanup of hero / gallery / AI map images after the row
+ * is gone — failures only warn.
+ *
+ * QA audit 2026-05-11 Phase 8 found the old version was a plain
+ * `delete(tours)` with no booking check and no S3 cleanup, which
+ * silently orphaned customer bookings + left 5-50 R2 objects per
+ * deleted tour burning storage.
  */
 export async function deleteTour(id: number): Promise<void> {
   const db = await getDb();
@@ -524,21 +577,93 @@ export async function deleteTour(id: number): Promise<void> {
     throw new Error("Database not available");
   }
 
+  // 1. Refuse if any non-terminal booking exists.
+  const [{ activeCount }] = await db
+    .select({
+      activeCount: sql<number>`COUNT(*)`,
+    })
+    .from(bookings)
+    .where(
+      and(
+        eq(bookings.tourId, id),
+        sql`${bookings.bookingStatus} IN ('pending', 'confirmed')`
+      )
+    );
+  const n = Number(activeCount ?? 0);
+  if (n > 0) {
+    throw new Error(
+      `Cannot delete tour ${id}: ${n} pending/confirmed booking(s) still attached. Archive the tour instead, or cancel/complete the bookings first.`
+    );
+  }
+
+  // 2. Collect S3 keys to clean up AFTER the row is gone (so a failed
+  //    delete doesn't leave the DB referencing keys we already nuked).
+  const [tour] = await db.select().from(tours).where(eq(tours.id, id)).limit(1);
+  const keysToDelete: string[] = [];
+  if (tour) {
+    if (tour.imageUrl) keysToDelete.push(tour.imageUrl);
+    if ((tour as any).heroImage) keysToDelete.push((tour as any).heroImage);
+    if ((tour as any).aiMapUrl) keysToDelete.push((tour as any).aiMapUrl);
+    const galleryRaw = (tour as any).galleryImages;
+    if (galleryRaw && typeof galleryRaw === "string") {
+      try {
+        const parsed = JSON.parse(galleryRaw);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            if (typeof item === "string") keysToDelete.push(item);
+            else if (item && typeof item === "object" && typeof item.url === "string") {
+              keysToDelete.push(item.url);
+            }
+          }
+        }
+      } catch {
+        /* malformed JSON — leave the gallery images as orphans rather than crash */
+      }
+    }
+  }
+
+  // 3. Nuke the row.
   await db.delete(tours).where(eq(tours.id, id));
+
+  // 4. Best-effort R2 cleanup. Never throw — the DB row is already gone
+  //    and the caller has succeeded; orphan keys are a follow-up concern.
+  if (keysToDelete.length > 0) {
+    try {
+      const { storageDeleteMany } = await import("./storage");
+      const result = await storageDeleteMany(keysToDelete);
+      console.log(
+        `[deleteTour] Cleaned ${result.deleted}/${keysToDelete.length} R2 objects for tour ${id} (${result.failed} failed)`
+      );
+    } catch (err) {
+      console.warn(`[deleteTour] R2 cleanup error for tour ${id}:`, err);
+    }
+  }
 }
 
 /**
- * Batch delete multiple tours
+ * Batch delete multiple tours. Delegates to deleteTour() per id so each
+ * tour gets the active-booking check + R2 cleanup. Returns counts of
+ * deleted vs skipped (tours with pending/confirmed bookings can't be
+ * batch-deleted; admin must archive or cancel them first).
+ *
+ * QA audit 2026-05-11 Phase 8: previously this was a single bulk DELETE
+ * with no protection — could orphan customer bookings + leak S3 keys
+ * for every tour in the batch.
  */
-export async function batchDeleteTours(ids: number[]): Promise<void> {
-  const db = await getDb();
-  if (!db) {
-    throw new Error("Database not available");
+export async function batchDeleteTours(ids: number[]): Promise<{ deleted: number; skipped: { id: number; reason: string }[] }> {
+  if (ids.length === 0) return { deleted: 0, skipped: [] };
+
+  let deleted = 0;
+  const skipped: { id: number; reason: string }[] = [];
+  for (const id of ids) {
+    try {
+      await deleteTour(id);
+      deleted++;
+    } catch (err: any) {
+      skipped.push({ id, reason: err?.message ?? "unknown error" });
+    }
   }
-
-  if (ids.length === 0) return;
-
-  await db.delete(tours).where(inArray(tours.id, ids));
+  return { deleted, skipped };
 }
 
 // ============================================

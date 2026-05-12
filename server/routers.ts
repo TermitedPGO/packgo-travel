@@ -2708,7 +2708,20 @@ export const appRouter = router({
           beforeSnapshot = await db.getTourById(input.id);
         } catch { /* if read fails, we still proceed with delete */ }
 
-        await db.deleteTour(input.id);
+        try {
+          await db.deleteTour(input.id);
+        } catch (err: any) {
+          // db.deleteTour throws when bookings are still attached. Translate
+          // to a TRPC CONFLICT so the admin UI can show the message verbatim
+          // instead of a generic 500.
+          if (err?.message?.startsWith("Cannot delete tour")) {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: err.message,
+            });
+          }
+          throw err;
+        }
 
         const { audit } = await import("./_core/auditLog");
         audit({
@@ -2726,16 +2739,18 @@ export const appRouter = router({
     batchDelete: adminProcedure
       .input(z.object({ ids: z.array(z.number().int().positive()).max(500) }))
       .mutation(async ({ ctx, input }) => {
-        await db.batchDeleteTours(input.ids);
+        const result = await db.batchDeleteTours(input.ids);
         const { audit } = await import("./_core/auditLog");
         audit({
           ctx,
           action: "tour.batchDelete",
           targetType: "tour",
           targetId: `batch[${input.ids.length}]`,
-          changes: { ids: input.ids },
+          changes: { ids: input.ids, deleted: result.deleted, skipped: result.skipped.length },
         });
-        return { success: true };
+        // Partial success is allowed — return both counts so the UI can show
+        // "Deleted 8, skipped 2 (still have bookings)".
+        return { success: true, deleted: result.deleted, skipped: result.skipped };
       }),
 
     // Duplicate tour (admin only) - 複製行程作為模板
