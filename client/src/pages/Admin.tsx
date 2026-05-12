@@ -1,46 +1,49 @@
-import { useAuth } from "@/_core/hooks/useAuth";
-import { LoadingPage } from "@/components/ui/spinner";
-import { Button } from "@/components/ui/button";
-import {
-  Home,
-  LogOut,
-  LayoutDashboard,
-  Plane,
-  ShoppingCart,
-  MessageSquare,
-  Star,
-  Brain,
-  ChevronRight,
-  ChevronDown,
-  Mail,
-  Menu,
-  X,
-  BarChart2,
-  TrendingUp,
-  ListChecks,
-  CheckCircle2,
-  Binoculars,
-  Activity,
-  Megaphone,
-  FileText,
-  DollarSign,
-  Sparkles,
-  Receipt,
-  Calculator,
-} from "lucide-react";
+/**
+ * PACK&GO Admin — Session A IA cleanup (Round 81+).
+ *
+ * 5 domains, each with 1 primary tab + advanced dropdown:
+ *   - 🏢 辦公室     primary: 收件匣            adv: 聊天 / 練習場 / AI 中心 / QA / 任務 / 成本
+ *   - 📋 營運       primary: 行程              adv: 總覽 / 收件匣 / 訂單 / 詢問 / 供應商監控
+ *   - 👥 客戶       primary: 評價              adv: 報價單 / AI 報價 / Packpoint / Voucher / WeChat / 中國簽證
+ *   - 📢 行銷       primary: 海報              adv: 自動化 / AI 文案 / 流量 / 競品 / Trip.com 聯盟
+ *   - 💰 財務       primary: 總覽              adv: 帳務 / 發票 / 對帳
+ *
+ * One-person ops principle: surface daily-flow first, push everything else
+ * into the 進階 dropdown so sub-nav stays calm.
+ *
+ * Design system codified in:
+ *   ~/.claude/projects/-Users-jeff-Desktop---/memory/feedback_admin_design_system.md
+ */
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
-import { useLocale } from "@/contexts/LocaleContext";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { LoadingPage } from "@/components/ui/spinner";
 import { trpc } from "@/lib/trpc";
+import {
+  Building2,
+  ClipboardList,
+  Users,
+  Megaphone,
+  Settings,
+} from "lucide-react";
 
-// Import tab components
+import {
+  TopBar,
+  DomainSidebar,
+  DomainSubNav,
+  CommandPalette,
+  type Domain,
+  type SubNavItem,
+} from "@/components/admin/primitives";
+import { useCommandPaletteHotkey } from "@/components/admin/primitives/CommandPalette";
+
+// All existing tab components (wrapped in the new shell — no behavior change)
 import DashboardTab from "@/components/admin/DashboardTab";
 import ToursTab from "@/components/admin/ToursTab";
 import BookingsTab from "@/components/admin/BookingsTab";
 import InquiriesTab from "@/components/admin/InquiriesTab";
 import InboxTab from "@/components/admin/InboxTab";
 import ReviewsTab from "@/components/admin/ReviewsTab";
-import TranslationsTab from "@/components/admin/TranslationsTab";
 import AiHubTab from "@/components/admin/AiHubTab";
 import AnalyticsTab from "@/components/admin/AnalyticsTab";
 import TaskHistoryContent from "@/components/admin/TaskHistoryContent";
@@ -52,330 +55,326 @@ import AffiliateTab from "@/components/admin/AffiliateTab";
 import AccountingTab from "@/components/admin/AccountingTab";
 import FinanceTab from "@/components/admin/FinanceTab";
 import MonitorDashboard from "@/components/admin/MonitorDashboard";
-// v78 productivity tools
 import AiQuotesTab from "@/components/admin/AiQuotesTab";
 import WechatAssistTab from "@/components/admin/WechatAssistTab";
 import InvoicesTab from "@/components/admin/InvoicesTab";
 import ReconciliationTab from "@/components/admin/ReconciliationTab";
 import MarketingContentTab from "@/components/admin/MarketingContentTab";
+import LlmCostTab from "@/components/admin/LlmCostTab";
+import PackpointTab from "@/components/admin/PackpointTab";
+import VouchersTab from "@/components/admin/VouchersTab";
+import PostersTab from "@/components/admin/PostersTab";
+import AutonomousAgentsTab from "@/components/admin/AutonomousAgentsTab";
+import OfficeOverviewTab from "@/components/admin/OfficeOverviewTab";
+// Round 81 Phase A: server-side PACK&GO skill (quote PDF)
+import QuoteToolTab from "@/components/admin/tools/QuoteToolTab";
+// Round 81 Phase 1 of C workflow: Inbox-first default landing
+import OfficeInboxTab from "@/components/admin/OfficeInboxTab";
 
-type AdminTab = "dashboard" | "inbox" | "finance" | "tours" | "bookings" | "inquiries" | "reviews" | "ai-hub" | "analytics" | "task-history" | "calibration-review" | "competitor-monitor" | "tour-monitor" | "marketing" | "visa" | "affiliate" | "accounting" | "ai-quotes" | "wechat-assist" | "invoices" | "reconciliation" | "marketing-content";
+// ────────────────────────────────────────────────────────────────────────
+// Information architecture
+// ────────────────────────────────────────────────────────────────────────
+
+type PageId =
+  // Office — Inbox is the default; everything else is advanced
+  | "office-inbox" | "office-chat" | "autonomous-agents" | "ai-hub" | "task-history" | "calibration-review" | "llm-cost"
+  // Operations
+  | "dashboard" | "inbox" | "tours" | "bookings" | "inquiries" | "tour-monitor"
+  // Customers — now includes 中國簽證
+  | "reviews" | "packpoint" | "vouchers" | "ai-quotes" | "wechat-assist" | "tool-quote" | "visa"
+  // Marketing — now includes Trip.com 聯盟
+  | "marketing" | "marketing-content" | "posters" | "analytics" | "competitor-monitor" | "affiliate"
+  // Finance (formerly System)
+  | "finance" | "accounting" | "invoices" | "reconciliation";
+
+type DomainId = "office" | "ops" | "customers" | "marketing" | "system";
+
+type PageDef = { id: PageId; label: string };
+
+const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageDef[] }> = {
+  office: {
+    domain: { id: "office", label: "辦公室", icon: Building2 },
+    primary: [
+      { id: "office-inbox", label: "📥 收件匣" },
+    ],
+    advanced: [
+      { id: "office-chat", label: "聊天" },
+      { id: "autonomous-agents", label: "練習場" },
+      { id: "ai-hub", label: "AI 中心" },
+      { id: "calibration-review", label: "QA 審查" },
+      { id: "task-history", label: "任務記錄" },
+      { id: "llm-cost", label: "AI 成本" },
+    ],
+  },
+  ops: {
+    domain: { id: "ops", label: "營運", icon: ClipboardList },
+    primary: [
+      { id: "tours", label: "行程" },
+    ],
+    advanced: [
+      { id: "dashboard", label: "總覽" },
+      { id: "inbox", label: "收件匣" },
+      { id: "bookings", label: "訂單" },
+      { id: "inquiries", label: "詢問" },
+      { id: "tour-monitor", label: "供應商監控" },
+    ],
+  },
+  customers: {
+    domain: { id: "customers", label: "客戶", icon: Users },
+    primary: [
+      { id: "reviews", label: "評價" },
+    ],
+    advanced: [
+      { id: "tool-quote", label: "📄 報價單" },
+      { id: "ai-quotes", label: "AI 報價單" },
+      { id: "packpoint", label: "Packpoint" },
+      { id: "vouchers", label: "Voucher" },
+      { id: "wechat-assist", label: "WeChat 助手" },
+      { id: "visa", label: "中國簽證" },
+    ],
+  },
+  marketing: {
+    domain: { id: "marketing", label: "行銷", icon: Megaphone },
+    primary: [
+      { id: "posters", label: "海報" },
+    ],
+    advanced: [
+      { id: "marketing", label: "自動化" },
+      { id: "marketing-content", label: "AI 文案" },
+      { id: "analytics", label: "流量分析" },
+      { id: "competitor-monitor", label: "競品" },
+      { id: "affiliate", label: "Trip.com 聯盟" },
+    ],
+  },
+  system: {
+    domain: { id: "system", label: "財務", icon: Settings },
+    primary: [
+      { id: "finance", label: "總覽" },
+    ],
+    advanced: [
+      { id: "accounting", label: "帳務" },
+      { id: "invoices", label: "發票" },
+      { id: "reconciliation", label: "對帳" },
+    ],
+  },
+};
+
+function allPages(cfg: { primary: PageDef[]; advanced: PageDef[] }): PageDef[] {
+  return [...cfg.primary, ...cfg.advanced];
+}
+
+// Reverse lookup: pageId → domainId
+const PAGE_TO_DOMAIN: Record<PageId, DomainId> = Object.fromEntries(
+  Object.entries(IA).flatMap(([d, cfg]) =>
+    allPages(cfg).map((p) => [p.id, d])
+  )
+) as Record<PageId, DomainId>;
+
+// ────────────────────────────────────────────────────────────────────────
+// Component
+// ────────────────────────────────────────────────────────────────────────
 
 export default function Admin() {
   const { user, loading, isAuthenticated, logout } = useAuth();
   const [, setLocation] = useLocation();
-  const { t } = useLocale();
-  const [activeTab, setActiveTab] = useState<AdminTab>("dashboard");
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [activePage, setActivePage] = useState<PageId>("office-inbox");
+  const [paletteOpen, setPaletteOpen] = useCommandPaletteHotkey();
+  const activeDomain = PAGE_TO_DOMAIN[activePage] ?? "office";
 
-  // Get stats for badge counts
+  // Badge counts
   const { data: statsData } = trpc.admin.getStats.useQuery();
   const { data: competitorUnread } = trpc.competitor.unreadAlertCount.useQuery();
+  const { data: unreadAgents } = trpc.agent.unreadPerAgent.useQuery();
+  const { data: pendingForJeff } = trpc.agent.pendingForJeff.useQuery();
 
   useEffect(() => {
-    if (!loading && !isAuthenticated) {
-      setLocation("/login");
-    }
+    if (!loading && !isAuthenticated) setLocation("/login");
   }, [loading, isAuthenticated, setLocation]);
-
-  const handleLogout = () => {
-    logout();
-    setLocation("/");
-  };
-
-  // v78z-z3 Sprint 9: AI advanced tools collapsible group (default collapsed)
-  // per UX audit — 8 admin tabs that are dev/aspirational reduced to 4
-  // visible by default; the rest behind a toggle.
-  const navGroups: {
-    label: string;
-    collapsible?: boolean;
-    items: { id: AdminTab; icon: React.ElementType; label: string; badge?: number }[];
-  }[] = [
-    {
-      label: '日常管理',
-      items: [
-        { id: 'dashboard', icon: LayoutDashboard, label: '總覽儀表板' },
-        { id: 'inbox', icon: Mail, label: '收件匣 (統一)', badge: statsData?.pendingInquiries },
-        { id: 'tours', icon: Plane, label: '行程管理', badge: statsData?.activeTours },
-        { id: 'bookings', icon: ShoppingCart, label: '訂單管理' },
-        { id: 'reviews', icon: Star, label: '客戶評價' },
-      ],
-    },
-    {
-      label: '收件匣分支 (細部)',
-      collapsible: true,
-      items: [
-        { id: 'inquiries', icon: MessageSquare, label: '客戶詢問' },
-        { id: 'wechat-assist', icon: MessageSquare, label: 'WeChat 助手' },
-        { id: 'ai-quotes', icon: Sparkles, label: 'AI 報價單' },
-      ],
-    },
-    {
-      label: '進階功能',
-      items: [
-        { id: 'analytics', icon: TrendingUp, label: '流量分析' },
-        { id: 'competitor-monitor', icon: Binoculars, label: '競品監控', badge: typeof competitorUnread === 'number' && competitorUnread > 0 ? competitorUnread : undefined },
-        { id: 'marketing', icon: Megaphone, label: '行銷自動化' },
-        { id: 'marketing-content', icon: Sparkles, label: 'AI 社群文案' },
-      ],
-    },
-    {
-      label: 'AI 系統 (進階)',
-      collapsible: true,
-      items: [
-        { id: 'ai-hub', icon: Brain, label: 'AI 中心' },
-        { id: 'task-history', icon: ListChecks, label: 'AI 任務記錄' },
-        { id: 'calibration-review', icon: CheckCircle2, label: 'QA 品質審查' },
-        { id: 'tour-monitor', icon: Activity, label: '供應商監控' },
-      ],
-    },
-    {
-      label: '簽證服務',
-      items: [
-        { id: 'visa', icon: FileText, label: '中國簽證管理' },
-      ],
-    },
-    {
-      label: '聯盟行銷',
-      items: [
-        { id: 'affiliate', icon: TrendingUp, label: 'Trip.com 聯盟管理' },
-      ],
-    },
-    {
-      label: '財務管理',
-      items: [
-        { id: 'finance', icon: DollarSign, label: '財務 (統一)' },
-      ],
-    },
-  ];
-
-  // Track collapsed state for collapsible groups (default collapsed)
-  // unless current activeTab lives inside it (auto-expand to show context).
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>(() => {
-    const initial: Record<string, boolean> = {};
-    for (const g of navGroups) {
-      if (g.collapsible) {
-        const containsActive = g.items.some(it => it.id === activeTab);
-        initial[g.label] = !containsActive; // collapsed by default unless active tab is inside
-      }
-    }
-    return initial;
-  });
-  const toggleGroup = (label: string) =>
-    setCollapsedGroups(prev => ({ ...prev, [label]: !prev[label] }));
-
-  const navItems = navGroups.flatMap(g => g.items);
-
-  const currentNavItem = navItems.find(item => item.id === activeTab);
 
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <LoadingPage text={t('admin.loading')} />
+        <LoadingPage text="載入中…" />
       </div>
     );
   }
+  if (!isAuthenticated) return null;
 
-  if (!isAuthenticated) {
-    return null;
-  }
+  // Compute domain-level badges
+  const totalUnreadAgents = unreadAgents
+    ? Object.values(unreadAgents).reduce((s, n) => s + n, 0)
+    : 0;
+  const officeBadge = totalUnreadAgents + (pendingForJeff?.length ?? 0);
+  const opsBadge = statsData?.pendingInquiries;
+  const marketingBadge =
+    typeof competitorUnread === "number" && competitorUnread > 0
+      ? competitorUnread
+      : undefined;
+
+  // Inject badges into domains
+  const domains: Domain[] = [
+    { ...IA.office.domain, badge: officeBadge > 0 ? officeBadge : undefined },
+    { ...IA.ops.domain, badge: opsBadge },
+    { ...IA.customers.domain },
+    { ...IA.marketing.domain, badge: marketingBadge },
+    { ...IA.system.domain },
+  ];
+
+  // Sub-nav for the active domain — primary inline, advanced in dropdown
+  const toSubNavItem = (p: PageDef): SubNavItem => {
+    let badge: number | undefined;
+    if (p.id === "inquiries") badge = statsData?.pendingInquiries;
+    if (p.id === "tours") badge = statsData?.activeTours;
+    if (p.id === "competitor-monitor")
+      badge =
+        typeof competitorUnread === "number" && competitorUnread > 0
+          ? competitorUnread
+          : undefined;
+    if (p.id === "office-inbox") badge = pendingForJeff?.length;
+    if (p.id === "autonomous-agents")
+      badge = totalUnreadAgents > 0 ? totalUnreadAgents : undefined;
+    return { id: p.id, label: p.label, badge };
+  };
+  const primaryItems: SubNavItem[] = IA[activeDomain].primary.map(toSubNavItem);
+  const advancedItems: SubNavItem[] = IA[activeDomain].advanced.map(toSubNavItem);
+
+  const activePageMeta = allPages(IA[activeDomain]).find((p) => p.id === activePage);
+  const breadcrumb = [
+    { label: IA[activeDomain].domain.label },
+    { label: activePageMeta?.label ?? "" },
+  ];
+
+  // Palette actions: every page in IA as a jump
+  const paletteActions = Object.entries(IA).flatMap(([d, cfg]) =>
+    allPages(cfg).map((p) => ({
+      id: p.id,
+      label: p.label,
+      hint: cfg.domain.label,
+      icon: <cfg.domain.icon className="h-3.5 w-3.5" />,
+      onSelect: () => setActivePage(p.id),
+    }))
+  );
+
+  const handleSelectDomain = (id: string) => {
+    const domain = id as DomainId;
+    // Switching domain → jump to that domain's primary page
+    setActivePage(IA[domain].primary[0].id);
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
-      {/* Mobile overlay */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/40 z-30 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
+    <div className="h-screen bg-gray-50 flex flex-col">
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        actions={paletteActions}
+      />
+
+      <div className="flex-1 flex min-h-0">
+        <DomainSidebar
+          domains={domains}
+          active={activeDomain}
+          onSelect={handleSelectDomain}
+          user={user ? { name: user.name, email: user.email } : undefined}
+          onLogout={() => {
+            logout();
+            setLocation("/");
+          }}
+          onHome={() => setLocation("/")}
         />
-      )}
 
-      {/* Sidebar */}
-      <aside
-        className={`
-          fixed top-0 left-0 h-full w-64 bg-white border-r border-gray-200 z-40 flex flex-col
-          transform transition-transform duration-200 ease-in-out
-          ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
-          lg:translate-x-0 lg:static lg:z-auto
-        `}
-      >
-        {/* Sidebar Header */}
-        <div className="px-6 py-6 border-b border-gray-100">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">PACK&GO</p>
-              <h2 className="text-lg font-bold text-gray-900">{t('admin.title')}</h2>
-            </div>
-            <button
-              onClick={() => setSidebarOpen(false)}
-              className="lg:hidden p-1 rounded hover:bg-gray-100"
-            >
-              <X className="h-5 w-5 text-gray-500" />
-            </button>
-          </div>
-          <div className="mt-3 flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-black text-white flex items-center justify-center text-sm font-bold">
-              {(user?.name || "A").charAt(0).toUpperCase()}
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-gray-900 truncate">{user?.name || t('admin.administrator')}</p>
-              <p className="text-xs text-gray-500 truncate">{user?.email}</p>
-            </div>
-          </div>
+        <div className="flex-1 flex flex-col min-w-0">
+          <TopBar
+            breadcrumb={breadcrumb}
+            onSearchClick={() => setPaletteOpen(true)}
+          />
+          <DomainSubNav
+            primaryItems={primaryItems}
+            advancedItems={advancedItems}
+            active={activePage}
+            onSelect={(id) => setActivePage(id as PageId)}
+          />
+          <main className="flex-1 overflow-auto px-4 lg:px-6 py-4">
+            {renderPage(activePage, setActivePage)}
+          </main>
         </div>
-
-        {/* Navigation - 分組導航 */}
-        <nav className="flex-1 py-3 overflow-y-auto">
-          {navGroups.map((group, groupIdx) => {
-            const isCollapsed = group.collapsible && collapsedGroups[group.label];
-            return (
-            <div key={group.label} className={groupIdx > 0 ? "mt-4 pt-4 border-t border-gray-100" : ""}>
-              {/* Group label */}
-              {group.collapsible ? (
-                <button
-                  onClick={() => toggleGroup(group.label)}
-                  className="w-full px-6 pb-1.5 flex items-center justify-between hover:bg-gray-50/60 transition-colors group"
-                  aria-expanded={!isCollapsed}
-                >
-                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.15em] group-hover:text-gray-600">
-                    {group.label}
-                  </span>
-                  {isCollapsed ? (
-                    <ChevronRight className="h-3 w-3 text-gray-400" />
-                  ) : (
-                    <ChevronDown className="h-3 w-3 text-gray-400" />
-                  )}
-                </button>
-              ) : (
-                <div className="px-6 pb-1.5">
-                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.15em]">
-                    {group.label}
-                  </span>
-                </div>
-              )}
-              {!isCollapsed && (
-              <div>
-                {group.items.map((item) => {
-                  const Icon = item.icon;
-                  const isActive = activeTab === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => {
-                        setActiveTab(item.id);
-                        setSidebarOpen(false);
-                      }}
-                      className={`
-                        w-full flex items-center justify-between px-6 py-2.5 text-sm
-                        transition-colors duration-100 group relative
-                        ${isActive
-                          ? "text-gray-900 font-semibold bg-gray-50"
-                          : "text-gray-500 font-normal hover:text-gray-900 hover:bg-gray-50/60"
-                        }
-                      `}
-                    >
-                      {/* Active left border */}
-                      <span
-                        className={`absolute left-0 top-1 bottom-1 w-[2.5px] transition-all duration-100
-                          ${isActive ? "bg-gray-900" : "bg-transparent"}
-                        `}
-                      />
-                      <div className="flex items-center gap-3">
-                        <Icon
-                          className={`h-[15px] w-[15px] flex-shrink-0 transition-colors
-                            ${isActive ? "text-gray-900" : "text-gray-400 group-hover:text-gray-600"}
-                          `}
-                        />
-                        <span className="tracking-tight">{item.label}</span>
-                      </div>
-                      {item.badge !== undefined && item.badge > 0 && (
-                        <span className={`
-                          text-[11px] font-semibold px-1.5 py-px min-w-[20px] text-center
-                          ${isActive
-                            ? "bg-gray-900 text-white"
-                            : "bg-gray-100 text-gray-500 group-hover:bg-gray-200"
-                          }
-                        `}>
-                          {item.badge}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-              )}
-            </div>
-            );
-          })}
-        </nav>
-
-        {/* Sidebar Footer */}
-        <div className="py-3 border-t border-gray-100">
-          <button
-            onClick={() => setLocation("/")}
-            className="w-full flex items-center gap-3 px-6 py-2.5 text-sm font-normal text-gray-500 hover:text-gray-900 hover:bg-gray-50/60 transition-colors"
-          >
-            <Home className="h-[15px] w-[15px] text-gray-400" />
-            <span className="tracking-tight">{t('admin.backToHome')}</span>
-          </button>
-          <button
-            onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-6 py-2.5 text-sm font-normal text-gray-500 hover:text-red-600 hover:bg-red-50/60 transition-colors"
-          >
-            <LogOut className="h-[15px] w-[15px] text-gray-400" />
-            <span className="tracking-tight">{t('admin.logout')}</span>
-          </button>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0 lg:ml-0">
-        {/* Top Bar */}
-        <header className="bg-white border-b border-gray-200 sticky top-0 z-20 px-4 lg:px-8 py-4">
-          <div className="flex items-center gap-4">
-            {/* Mobile menu button */}
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="lg:hidden p-2 rounded-lg hover:bg-gray-100"
-            >
-              <Menu className="h-5 w-5 text-gray-600" />
-            </button>
-
-            {/* Breadcrumb */}
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-gray-400">{t('admin.title')}</span>
-              <ChevronRight className="h-4 w-4 text-gray-300" />
-              <span className="font-semibold text-gray-900">{currentNavItem?.label}</span>
-            </div>
-          </div>
-        </header>
-
-        {/* Page Content */}
-        <main className="flex-1 px-4 lg:px-8 py-8 overflow-auto">
-          {activeTab === "dashboard" && <DashboardTab onNavigate={(tab) => setActiveTab(tab as AdminTab)} />}
-          {activeTab === "tours" && <ToursTab />}
-          {activeTab === "bookings" && <BookingsTab />}
-          {activeTab === "inbox" && <InboxTab onNavigate={(tab) => setActiveTab(tab as AdminTab)} />}
-          {activeTab === "inquiries" && <InquiriesTab />}
-          {activeTab === "reviews" && <ReviewsTab />}
-          {activeTab === "analytics" && <AnalyticsTab />}
-          {activeTab === "ai-hub" && <AiHubTab />}
-          {activeTab === "task-history" && <TaskHistoryContent />}
-          {activeTab === "calibration-review" && <CalibrationReviewTab />}
-          {activeTab === "competitor-monitor" && <CompetitorMonitorTab />}
-          {activeTab === "tour-monitor" && <MonitorDashboard />}
-          {activeTab === "marketing" && <MarketingTab />}
-          {activeTab === "visa" && <VisaManagementTab />}
-          {activeTab === "affiliate" && <AffiliateTab />}
-          {activeTab === "finance" && <FinanceTab />}
-          {activeTab === "accounting" && <AccountingTab />}
-          {activeTab === "ai-quotes" && <AiQuotesTab />}
-          {activeTab === "wechat-assist" && <WechatAssistTab />}
-          {activeTab === "invoices" && <InvoicesTab />}
-          {activeTab === "reconciliation" && <ReconciliationTab />}
-          {activeTab === "marketing-content" && <MarketingContentTab />}
-        </main>
       </div>
     </div>
   );
+}
+
+function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
+  switch (page) {
+    // Office
+    case "office-inbox":
+      return <OfficeInboxTab onNavigate={(t) => setActivePage(t as PageId)} />;
+    case "office-chat":
+      return <OfficeOverviewTab onNavigate={(t) => setActivePage(t as PageId)} />;
+    case "autonomous-agents":
+      return <AutonomousAgentsTab />;
+    case "ai-hub":
+      return <AiHubTab />;
+    case "task-history":
+      return <TaskHistoryContent />;
+    case "calibration-review":
+      return <CalibrationReviewTab />;
+    case "llm-cost":
+      return <LlmCostTab />;
+
+    // Operations
+    case "dashboard":
+      return <DashboardTab onNavigate={(t) => setActivePage(t as PageId)} />;
+    case "inbox":
+      return <InboxTab onNavigate={(t) => setActivePage(t as PageId)} />;
+    case "tours":
+      return <ToursTab />;
+    case "bookings":
+      return <BookingsTab />;
+    case "inquiries":
+      return <InquiriesTab />;
+    case "tour-monitor":
+      return <MonitorDashboard />;
+
+    // Customers
+    case "reviews":
+      return <ReviewsTab />;
+    case "packpoint":
+      return <PackpointTab />;
+    case "vouchers":
+      return <VouchersTab />;
+    case "ai-quotes":
+      return <AiQuotesTab />;
+    case "wechat-assist":
+      return <WechatAssistTab />;
+    case "tool-quote":
+      return <QuoteToolTab />;
+
+    // Marketing
+    case "marketing":
+      return <MarketingTab />;
+    case "marketing-content":
+      return <MarketingContentTab />;
+    case "posters":
+      return <PostersTab />;
+    case "analytics":
+      return <AnalyticsTab />;
+    case "competitor-monitor":
+      return <CompetitorMonitorTab />;
+
+    // System
+    case "finance":
+      return <FinanceTab />;
+    case "accounting":
+      return <AccountingTab />;
+    case "invoices":
+      return <InvoicesTab />;
+    case "reconciliation":
+      return <ReconciliationTab />;
+    case "visa":
+      return <VisaManagementTab />;
+    case "affiliate":
+      return <AffiliateTab />;
+
+    default:
+      return <div className="text-center py-16 text-gray-400">Unknown page: {page}</div>;
+  }
 }
