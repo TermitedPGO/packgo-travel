@@ -68,6 +68,10 @@ tourMonitorWorker.on("completed", (job, result) => {
 
 tourMonitorWorker.on("failed", (job, err) => {
   console.error(`[TourMonitorWorker] ❌ Job ${job?.id} failed:`, err.message);
+  notifyOwner({
+    title: `[TourMonitorWorker] Job ${job?.id ?? "?"} failed`,
+    content: `Error: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
+  }).catch((e) => console.error("[notifyOwner] dispatch failed:", e));
 });
 
 tourMonitorWorker.on("error", (err) => {

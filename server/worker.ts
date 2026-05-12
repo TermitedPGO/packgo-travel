@@ -9,6 +9,7 @@ import {
 } from "./queue";
 import { generateTourFromUrlInternal } from "./tourGenerator";
 import { translateTour, Language } from "./translation";
+import { notifyOwner } from "./_core/notification";
 
 /**
  * Worker for processing tour generation jobs
@@ -76,7 +77,12 @@ export const tourGenerationWorker = new Worker<TourGenerationJobData, TourGenera
   },
   {
     connection: redisBullMQ, // BUG-001: use dedicated connection without commandTimeout
-    concurrency: 1, // 行程生成是重型 AI 任務，單一並行即可
+    // v80.24: bulk-import scenarios queue 50-100 tours; concurrency=1 takes
+    // ~50-100 minutes serial. Anthropic Haiku 4.5 has 4000 req/min limit on
+    // tier 1, each tour fires ~10-15 LLM calls so concurrency=4 ≈ 60 req/min
+    // — well under the cap. 50-tour batch: 50 min → ~13 min. Single-tour
+    // latency unchanged.
+    concurrency: 4,
     lockDuration: 2400000, // 40 分鐘鎖定（Round 36: 從 20分鐘提升，給 SPA 爬蟲+LLM 足夠時間）
     lockRenewTime: 300000,  // 每 5 分鐘更新鎖定（Round 36: 從 10分鐘縮短，更頻繁更新避免 stall）
     maxStalledCount: 3, // 最多 3 次 stalled 重試
@@ -116,6 +122,10 @@ tourGenerationWorker.on("completed", (job) => {
 
 tourGenerationWorker.on("failed", (job, err) => {
   console.error(`❌ Job ${job?.id} failed:`, err.message);
+  notifyOwner({
+    title: `[TourGeneration] Job ${job?.id ?? "?"} failed`,
+    content: `Tour ID: ${(job?.data as any)?.tourId ?? "?"}\nError: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
+  }).catch((e) => console.error("[notifyOwner] dispatch failed:", e));
 });
 
 tourGenerationWorker.on("error", (err) => {
@@ -166,6 +176,10 @@ tourTranslationWorker.on("completed", (job) => {
 
 tourTranslationWorker.on("failed", (job, err) => {
   console.error(`❌ Translation job ${job?.id} failed:`, err.message);
+  notifyOwner({
+    title: `[TourTranslation] Job ${job?.id ?? "?"} failed`,
+    content: `Tour ID: ${(job?.data as any)?.tourId ?? "?"}\nError: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
+  }).catch((e) => console.error("[notifyOwner] dispatch failed:", e));
 });
 
 tourTranslationWorker.on("error", (err) => {

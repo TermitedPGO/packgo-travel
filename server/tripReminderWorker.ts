@@ -8,6 +8,7 @@ import { Worker, Job } from "bullmq";
 import { redisBullMQ } from "./redis";
 import { TripReminderJobData, TripReminderJobResult } from "./queue";
 import { runTripReminderScan, runPostTripReviewScan } from "./services/tripReminderService";
+import { notifyOwner } from "./_core/notification";
 
 export const tripReminderWorker = new Worker<TripReminderJobData, TripReminderJobResult>(
   "trip-reminder",
@@ -66,6 +67,10 @@ tripReminderWorker.on("completed", (job, result) => {
 
 tripReminderWorker.on("failed", (job, err) => {
   console.error(`[TripReminderWorker] ❌ Job ${job?.id} failed:`, err.message);
+  notifyOwner({
+    title: `[TripReminderWorker] Job ${job?.id ?? "?"} failed`,
+    content: `Error: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
+  }).catch((e) => console.error("[notifyOwner] dispatch failed:", e));
 });
 
 console.log("✅ Trip reminder worker initialized");

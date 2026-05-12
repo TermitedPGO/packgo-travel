@@ -15,6 +15,7 @@ import { Queue, Worker, Job } from "bullmq";
 import { redisBullMQ } from "../redis";
 import { sendAbandonmentRecoveryEmail } from "../email";
 import * as db from "../db";
+import { notifyOwner } from "../_core/notification";
 
 const QUEUE_NAME = "abandonment-recovery";
 const RECOVERY_DELAY_MS = 30 * 60 * 1000; // 30 minutes
@@ -117,6 +118,10 @@ export function initAbandonmentRecoveryWorker() {
   );
   _worker.on("failed", (job, err) => {
     console.error(`[AbandonmentRecovery] Job ${job?.id} failed:`, err.message);
+    notifyOwner({
+      title: `[AbandonmentRecovery] Job ${job?.id ?? "?"} failed`,
+      content: `Error: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
+    }).catch((e) => console.error("[notifyOwner] dispatch failed:", e));
   });
   console.log("✅ Abandonment recovery worker initialized");
   return _worker;

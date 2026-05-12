@@ -11,6 +11,7 @@
  */
 import { Worker, Job } from "bullmq";
 import { redisBullMQ } from "./redis";
+import { notifyOwner } from "./_core/notification";
 import {
   CompetitorMonitorJobData,
   CompetitorMonitorResult,
@@ -143,6 +144,10 @@ competitorMonitorWorker.on("completed", (job) => {
 
 competitorMonitorWorker.on("failed", (job, err) => {
   console.error(`❌ Competitor monitor job ${job?.id} failed:`, err.message);
+  notifyOwner({
+    title: `[CompetitorMonitorWorker] Job ${job?.id ?? "?"} failed`,
+    content: `Error: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
+  }).catch((e) => console.error("[notifyOwner] dispatch failed:", e));
 });
 
 competitorMonitorWorker.on("error", (err) => {

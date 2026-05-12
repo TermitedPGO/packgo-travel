@@ -13,6 +13,7 @@ import {
 import { sendNewsletter } from "./services/emailMarketingService";
 import { generatePoster } from "./services/posterGeneratorService";
 import { generateSocialCopy } from "./services/marketingCopyService";
+import { notifyOwner } from "./_core/notification";
 import {
   saveMarketingMaterial,
   getActiveSubscribers,
@@ -191,6 +192,10 @@ marketingWorker.on("completed", (job, result) => {
 
 marketingWorker.on("failed", (job, err) => {
   console.error(`[MarketingWorker] ❌ Job ${job?.id} failed:`, err.message);
+  notifyOwner({
+    title: `[MarketingWorker] Job ${job?.id ?? "?"} failed`,
+    content: `Error: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
+  }).catch((e) => console.error("[notifyOwner] dispatch failed:", e));
 });
 
 marketingWorker.on("error", (err) => {

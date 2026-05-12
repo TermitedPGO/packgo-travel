@@ -13,6 +13,7 @@ import { Queue, Worker, Job } from "bullmq";
 import { redisBullMQ } from "../redis";
 import { sendQuoteFollowUpEmail, QuoteFollowUpData } from "../email";
 import * as db from "../db";
+import { notifyOwner } from "../_core/notification";
 
 const QUEUE_NAME = "quote-followup";
 
@@ -135,6 +136,10 @@ export function initQuoteFollowUpWorker() {
   );
   _worker.on("failed", (job, err) => {
     console.error(`[QuoteFollowUp] Job ${job?.id} failed:`, err.message);
+    notifyOwner({
+      title: `[QuoteFollowUp] Job ${job?.id ?? "?"} failed`,
+      content: `Error: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
+    }).catch((e) => console.error("[notifyOwner] dispatch failed:", e));
   });
   console.log("✅ Quote follow-up worker initialized");
   return _worker;
