@@ -20,7 +20,7 @@
 import { getDb } from "../db";
 import { bookings, tourDepartures, tours } from "../../drizzle/schema";
 import { and, eq, gte, lte, inArray } from "drizzle-orm";
-import { sendTripReminderEmail, sendReviewRequestEmail, sendWinbackEmail } from "../email";
+import { sendTripReminderEmail, sendReviewRequestEmail, sendWinbackEmail, sendCheckinEmail } from "../email";
 import { redis } from "../redis";
 
 export type ReminderWindow = 30 | 14 | 7 | 3 | 1;
@@ -325,6 +325,97 @@ export async function runWinbackScan(): Promise<WinbackScanResult> {
       if (ok) result.emailsQueued++;
     } catch (err) {
       console.error(`[winback] booking ${row.bookingId} failed:`, (err as Error)?.message);
+      result.errors++;
+    }
+  }
+
+  return result;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// 90-day check-in scan — QA Audit 2026-05-11 Phase 9 fix (Step ⑦).
+//
+// Final touchpoint in the customer journey. By 90 days post-trip the
+// active memory has faded and competitors are easier to switch to.
+// Tone is intentionally low-pressure (referral perk, not direct sell)
+// — goal is mental availability, not immediate conversion.
+//
+// Idempotency: redis key `checkin:sent:{bookingId}` (270-day TTL).
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface CheckinScanResult {
+  scanned: number;
+  emailsQueued: number;
+  errors: number;
+}
+
+const CHECKIN_DAYS = 90;
+
+async function alreadyCheckedIn(bookingId: number): Promise<boolean> {
+  try {
+    const key = `checkin:sent:${bookingId}`;
+    const existed = await redis.exists(key);
+    if (existed) return true;
+    await redis.setex(key, 270 * 24 * 60 * 60, String(Date.now()));
+    return false;
+  } catch (err) {
+    console.warn("[checkin] Redis check failed, skipping:", (err as Error)?.message);
+    return true;
+  }
+}
+
+export async function runCheckinScan(): Promise<CheckinScanResult> {
+  const db = await getDb();
+  const result: CheckinScanResult = { scanned: 0, emailsQueued: 0, errors: 0 };
+  if (!db) return result;
+
+  const now = new Date();
+  const targetDate = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - CHECKIN_DAYS)
+  );
+  const targetStart = targetDate;
+  const targetEnd = new Date(targetDate.getTime() + 24 * 60 * 60 * 1000);
+
+  const rows = await db
+    .select({
+      bookingId: bookings.id,
+      customerName: bookings.customerName,
+      customerEmail: bookings.customerEmail,
+      bookingStatus: bookings.bookingStatus,
+      paymentStatus: bookings.paymentStatus,
+      returnDate: tourDepartures.returnDate,
+      tourId: bookings.tourId,
+      tourTitle: tours.title,
+    })
+    .from(bookings)
+    .leftJoin(tourDepartures, eq(bookings.departureId, tourDepartures.id))
+    .leftJoin(tours, eq(bookings.tourId, tours.id))
+    .where(
+      and(
+        inArray(bookings.bookingStatus, ["confirmed", "completed"]),
+        eq(bookings.paymentStatus, "paid"),
+        gte(tourDepartures.returnDate, targetStart),
+        lte(tourDepartures.returnDate, targetEnd)
+      )
+    );
+
+  result.scanned = rows.length;
+
+  for (const row of rows) {
+    if (!row.customerEmail || !row.returnDate) continue;
+    if (await alreadyCheckedIn(row.bookingId)) continue;
+
+    try {
+      const ok = await sendCheckinEmail({
+        customerEmail: row.customerEmail,
+        customerName: row.customerName,
+        bookingId: row.bookingId,
+        pastTourTitle: row.tourTitle || `Tour #${row.tourId}`,
+        language: "zh-TW",
+      });
+      if (ok) result.emailsQueued++;
+    } catch (err) {
+      console.error(`[checkin] booking ${row.bookingId} failed:`, (err as Error)?.message);
       result.errors++;
     }
   }

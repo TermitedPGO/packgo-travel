@@ -7,7 +7,7 @@
 import { Worker, Job } from "bullmq";
 import { redisBullMQ } from "./redis";
 import { TripReminderJobData, TripReminderJobResult } from "./queue";
-import { runTripReminderScan, runPostTripReviewScan, runWinbackScan } from "./services/tripReminderService";
+import { runTripReminderScan, runPostTripReviewScan, runWinbackScan, runCheckinScan } from "./services/tripReminderService";
 import { notifyOwner } from "./_core/notification";
 
 export const tripReminderWorker = new Worker<TripReminderJobData, TripReminderJobResult>(
@@ -40,6 +40,17 @@ export const tripReminderWorker = new Worker<TripReminderJobData, TripReminderJo
         );
       } catch (winbackErr) {
         console.error(`[TripReminderWorker] Winback scan failed:`, winbackErr);
+      }
+
+      // QA audit Phase 9 step ⑦: 90-day check-in. Final scheduled
+      // touchpoint in the customer journey — low-pressure referral cue.
+      try {
+        const checkinResult = await runCheckinScan();
+        console.log(
+          `[TripReminderWorker] 90-day check-in scan: scanned=${checkinResult.scanned} queued=${checkinResult.emailsQueued} errors=${checkinResult.errors}`
+        );
+      } catch (checkinErr) {
+        console.error(`[TripReminderWorker] Check-in scan failed:`, checkinErr);
       }
 
       // v78m Sprint 5A: daily ops digest email to owner
