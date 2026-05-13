@@ -205,6 +205,17 @@ async function startServer() {
 
   // Stripe webhook must be registered BEFORE express.json() to preserve raw body
   app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), handleStripeWebhook);
+
+  // Plaid webhook — same raw-body pattern in case we later add JWT
+  // signature verification on the headers + raw body.
+  app.post(
+    "/api/plaid/webhook",
+    express.raw({ type: "application/json" }),
+    async (req, res) => {
+      const { handlePlaidWebhook } = await import("./plaidWebhook");
+      await handlePlaidWebhook(req, res);
+    }
+  );
   
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
