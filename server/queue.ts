@@ -813,3 +813,71 @@ export async function triggerManualPlaidSync(userId?: number) {
 }
 
 console.log("✅ Plaid daily sync queue initialized");
+
+// ============================================================================
+// Phase 4 — Trust Account Recognition Cron
+//
+// Once a day at 06:00 UTC (1 hour after the Plaid sync at 05:00) scan
+// trustDeferredIncome for rows whose expectedRecognitionDate has arrived
+// and mark them recognized. This shifts the income from "deferred liability"
+// to actual P&L revenue on the recognition date.
+//
+// Feature-flagged via PLAID_TRUST_DEFERRAL_ENABLED in the service layer —
+// when off the worker fires but does nothing.
+// ============================================================================
+
+export interface TrustRecognitionJobData {
+  triggeredBy: "schedule" | "manual";
+}
+
+export interface TrustRecognitionJobResult {
+  runId: string;
+  scanned: number;
+  recognized: number;
+  totalRecognizedAmount: number;
+  skippedNoDepartureDate: number;
+  skippedNotMatched: number;
+}
+
+export const trustRecognitionQueue = new Queue<
+  TrustRecognitionJobData,
+  TrustRecognitionJobResult
+>("trust-recognition", {
+  connection: redisBullMQ,
+  defaultJobOptions: {
+    attempts: 2,
+    backoff: { type: "exponential", delay: 60_000 },
+    removeOnComplete: { age: 604_800, count: 60 }, // 7 days
+    removeOnFail: { age: 2_592_000, count: 30 },   // 30 days
+  },
+});
+
+export async function scheduleDailyTrustRecognition() {
+  const repeatableJobs = await trustRecognitionQueue.getRepeatableJobs();
+  for (const job of repeatableJobs) {
+    if (job.name === "trust-recognition-daily") {
+      await trustRecognitionQueue.removeRepeatableByKey(job.key);
+    }
+  }
+  await trustRecognitionQueue.add(
+    "trust-recognition-daily",
+    { triggeredBy: "schedule" },
+    {
+      repeat: { pattern: "0 6 * * *" }, // 06:00 UTC daily
+      jobId: "trust-recognition-scheduled",
+    }
+  );
+  console.log(
+    "✅ Trust recognition scheduled: 06:00 UTC daily (after Plaid sync)"
+  );
+}
+
+export async function triggerManualTrustRecognition() {
+  return await trustRecognitionQueue.add(
+    "trust-recognition-manual",
+    { triggeredBy: "manual" },
+    { jobId: `trust-recog-manual-${Date.now()}` }
+  );
+}
+
+console.log("✅ Trust recognition queue initialized");

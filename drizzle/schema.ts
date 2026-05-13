@@ -2592,3 +2592,65 @@ export const plaidWebhookEvents = mysqlTable("plaidWebhookEvents", {
 
 export type PlaidWebhookEvent = typeof plaidWebhookEvents.$inferSelect;
 export type InsertPlaidWebhookEvent = typeof plaidWebhookEvents.$inferInsert;
+
+/**
+ * Phase 4 — CST §17550 trust account income deferral.
+ *
+ * One row per bank-transaction-into-trust-account. Tracks: when the money
+ * came in, which booking it pays for, when we expect to recognize it as
+ * income (= booking.departureDate), and whether/when it was actually
+ * recognized.
+ *
+ * Feature-flagged off via PLAID_TRUST_DEFERRAL_ENABLED env. When off, the
+ * AccountingAgent treats trust-account inflows like any other income and
+ * this table is unused. When on, income_booking transactions on
+ * isTrustAccount=1 accounts get a deferred-income row instead of hitting
+ * P&L immediately.
+ */
+export const trustDeferredIncome = mysqlTable(
+  "trustDeferredIncome",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    bankTransactionId: int("bankTransactionId").notNull(),
+    linkedAccountId: int("linkedAccountId").notNull(),
+    bookingId: int("bookingId"),
+    matchConfidence: int("matchConfidence").default(0).notNull(),
+    matchMethod: mysqlEnum("matchMethod", ["auto", "manual", "unmatched"])
+      .default("unmatched")
+      .notNull(),
+    amount: decimal("amount", { precision: 14, scale: 2 }).notNull(),
+    isoCurrencyCode: varchar("isoCurrencyCode", { length: 3 })
+      .default("USD")
+      .notNull(),
+    depositDate: date("depositDate").notNull(),
+    expectedRecognitionDate: date("expectedRecognitionDate"),
+    recognizedAt: timestamp("recognizedAt"),
+    recognitionRunId: varchar("recognitionRunId", { length: 64 }),
+    reversedAt: timestamp("reversedAt"),
+    reversedReason: varchar("reversedReason", { length: 256 }),
+    notes: text("notes"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => ({
+    bankTxnIdx: unique("uniq_bank_txn").on(table.bankTransactionId),
+    recognitionReadyIdx: index("idx_recognition_ready").on(
+      table.recognizedAt,
+      table.expectedRecognitionDate,
+      table.reversedAt
+    ),
+    bookingPendingIdx: index("idx_booking_pending").on(
+      table.bookingId,
+      table.recognizedAt
+    ),
+    accountStatusIdx: index("idx_account_status").on(
+      table.linkedAccountId,
+      table.recognizedAt,
+      table.reversedAt
+    ),
+  })
+);
+
+export type TrustDeferredIncome = typeof trustDeferredIncome.$inferSelect;
+export type InsertTrustDeferredIncome =
+  typeof trustDeferredIncome.$inferInsert;

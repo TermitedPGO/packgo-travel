@@ -163,6 +163,32 @@ export async function classifyOne(
     })
     .where(eq(bankTransactions.id, transactionId));
 
+  // Phase 4 hook: if classified income_booking AND on a trust account,
+  // record a deferred-income row. Feature-flagged via env so it's a no-op
+  // until Jeff confirms Q1-Q7 in PHASE_4_TRUST_DEFERRAL_DESIGN.md.
+  if (
+    agentOut.category === "income_booking" &&
+    (row.acct?.isTrustAccount ?? 0) === 1
+  ) {
+    try {
+      const { processTrustInflow, isTrustDeferralEnabled } = await import(
+        "./trustDeferralService"
+      );
+      if (isTrustDeferralEnabled()) {
+        const r = await processTrustInflow(transactionId);
+        console.log(
+          `[accountingAgent] trust-deferral on txn ${transactionId}: deferredId=${r.deferredId} bookingId=${r.bookingId} confidence=${r.confidence} reason=${r.reason}`
+        );
+      }
+    } catch (err) {
+      // Don't fail classification if trust deferral chain blows up
+      console.error(
+        `[accountingAgent] trust-deferral hook failed for txn ${transactionId}:`,
+        (err as Error)?.message
+      );
+    }
+  }
+
   return {
     transactionId,
     category: agentOut.category,

@@ -43,7 +43,7 @@ import {
   linkedBankAccounts,
   bankTransactions,
 } from "../../drizzle/schema";
-import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { syncOneLinkedAccount } from "../services/plaidSyncService";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -636,4 +636,185 @@ export const plaidRouter = router({
         userId: ctx.user.id,
       });
     }),
+
+  // ── Phase 4: Trust account deferral admin ───────────────────────────────
+
+  /**
+   * Reconciliation view: per trust account, show outstanding deferred amount,
+   * unmatched rows count, and how that compares to the live balance.
+   *
+   * In CST §17550 compliance, sum(deferred unmatched + matched) on a trust
+   * account should == linkedBankAccounts.currentBalance. If they diverge,
+   * something's wrong: untracked manual withdrawals, refunded bookings
+   * not yet reversed, etc.
+   */
+  trustReconciliation: adminProcedure.query(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) return [];
+    const { computeOutstandingTrust, isTrustDeferralEnabled } = await import(
+      "../services/trustDeferralService"
+    );
+
+    const trustAccounts = await db
+      .select({
+        id: linkedBankAccounts.id,
+        institutionName: linkedBankAccounts.institutionName,
+        accountName: linkedBankAccounts.accountName,
+        accountMask: linkedBankAccounts.accountMask,
+        currentBalance: linkedBankAccounts.currentBalance,
+        isoCurrencyCode: linkedBankAccounts.isoCurrencyCode,
+      })
+      .from(linkedBankAccounts)
+      .where(
+        and(
+          eq(linkedBankAccounts.userId, ctx.user.id),
+          eq(linkedBankAccounts.isTrustAccount, 1),
+          eq(linkedBankAccounts.isActive, 1)
+        )
+      );
+
+    const enabled = isTrustDeferralEnabled();
+    const results = await Promise.all(
+      trustAccounts.map(async (a) => {
+        const outstanding = await computeOutstandingTrust(a.id);
+        const balance = parseFloat(String(a.currentBalance ?? 0));
+        const drift = balance - outstanding.totalOutstanding;
+        return {
+          ...a,
+          enabled,
+          outstandingTotal: outstanding.totalOutstanding,
+          outstandingRows: outstanding.rowCount,
+          unmatchedCount: outstanding.unmatchedCount,
+          unmatchedTotal: outstanding.unmatchedTotal,
+          balance,
+          drift, // positive = trust balance > what we're tracking (orphan deposits)
+        };
+      })
+    );
+    return results;
+  }),
+
+  /**
+   * List trust deferred rows for admin review. Filters: linkedAccountId,
+   * status (unmatched / pending-recognition / recognized / reversed).
+   */
+  trustDeferredList: adminProcedure
+    .input(
+      z
+        .object({
+          linkedAccountId: z.number().int().positive().optional(),
+          status: z
+            .enum(["unmatched", "pending", "recognized", "reversed", "all"])
+            .default("unmatched"),
+          limit: z.number().int().min(1).max(200).default(50),
+        })
+        .optional()
+    )
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      const status = input?.status ?? "unmatched";
+
+      const { trustDeferredIncome } = await import("../../drizzle/schema");
+
+      // Get the user's trust account ids first
+      const userTrustIds = await db
+        .select({ id: linkedBankAccounts.id })
+        .from(linkedBankAccounts)
+        .where(
+          and(
+            eq(linkedBankAccounts.userId, ctx.user.id),
+            eq(linkedBankAccounts.isTrustAccount, 1)
+          )
+        );
+      const ids = userTrustIds.map((r) => r.id);
+      if (ids.length === 0) return [];
+
+      const filters: any[] = [inArray(trustDeferredIncome.linkedAccountId, ids)];
+      if (input?.linkedAccountId) {
+        filters.push(
+          eq(trustDeferredIncome.linkedAccountId, input.linkedAccountId)
+        );
+      }
+      if (status === "unmatched") {
+        filters.push(eq(trustDeferredIncome.matchMethod, "unmatched"));
+        filters.push(isNull(trustDeferredIncome.recognizedAt));
+        filters.push(isNull(trustDeferredIncome.reversedAt));
+      } else if (status === "pending") {
+        filters.push(isNull(trustDeferredIncome.recognizedAt));
+        filters.push(isNull(trustDeferredIncome.reversedAt));
+      } else if (status === "recognized") {
+        filters.push(
+          sql`${trustDeferredIncome.recognizedAt} IS NOT NULL`
+        );
+      } else if (status === "reversed") {
+        filters.push(sql`${trustDeferredIncome.reversedAt} IS NOT NULL`);
+      }
+      // "all" → no filter
+
+      return await db
+        .select()
+        .from(trustDeferredIncome)
+        .where(and(...filters))
+        .orderBy(desc(trustDeferredIncome.depositDate))
+        .limit(input?.limit ?? 50);
+    }),
+
+  /**
+   * Manually link an unmatched deferred row to a booking. Recomputes the
+   * expected recognition date from the booking's tourDeparture.departureDate.
+   */
+  trustLinkBooking: adminProcedure
+    .input(
+      z.object({
+        deferredId: z.number().int().positive(),
+        bookingId: z.number().int().positive(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const { linkInflowToBooking } = await import(
+        "../services/trustDeferralService"
+      );
+      return await linkInflowToBooking(input);
+    }),
+
+  /**
+   * Reverse a deferred row (booking cancelled, refund processed). Won't be
+   * recognized as income. Subtracts from trust reconciliation.
+   */
+  trustReverse: adminProcedure
+    .input(
+      z.object({
+        deferredId: z.number().int().positive(),
+        reason: z.string().min(1).max(256),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const { reverseDeferral } = await import(
+        "../services/trustDeferralService"
+      );
+      return await reverseDeferral(input);
+    }),
+
+  /**
+   * Manually trigger the daily trust-recognition scan. Useful for admin
+   * "rerun now" button after fixing matches.
+   */
+  trustRecognizeNow: adminProcedure.mutation(async () => {
+    const { recognizeReadyDepartures, isTrustDeferralEnabled } = await import(
+      "../services/trustDeferralService"
+    );
+    if (!isTrustDeferralEnabled()) {
+      return {
+        runId: "disabled",
+        scanned: 0,
+        recognized: 0,
+        totalRecognizedAmount: 0,
+        skippedNoDepartureDate: 0,
+        skippedNotMatched: 0,
+        error: "PLAID_TRUST_DEFERRAL_ENABLED is not set",
+      } as const;
+    }
+    return await recognizeReadyDepartures();
+  }),
 });

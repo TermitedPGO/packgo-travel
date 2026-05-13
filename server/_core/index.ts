@@ -556,6 +556,18 @@ async function startServer() {
     console.warn('[Startup] Failed to schedule Plaid daily sync:', err);
   }
 
+  // Phase 4: Trust account recognition cron at 06:00 UTC (1 hr after Plaid
+  // sync so today's deposits are in the DB before we scan for ready-to-
+  // recognize rows). Feature-flagged via PLAID_TRUST_DEFERRAL_ENABLED in
+  // the service layer — worker fires but no-ops when off.
+  try {
+    const { scheduleDailyTrustRecognition } = await import('../queue');
+    await scheduleDailyTrustRecognition();
+    await import('../trustRecognitionWorker');
+  } catch (err) {
+    console.warn('[Startup] Failed to schedule trust recognition cron:', err);
+  }
+
   // Round 80.22 Phase C: Packpoint daily maintenance — auto-upgrade tier,
   // 18-month inactivity expiry, birthday bonus. Runs at 02:00 UTC (10:00
   // Taipei). Idempotent on each user-level mutation.

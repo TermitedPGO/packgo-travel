@@ -505,6 +505,13 @@
       "when": 1778965000000,
       "tag": "0071_widen_institution_logo",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "5",
+      "when": 1778966000000,
+      "tag": "0072_trust_deferred_income",
+      "breakpoints": true
     }
   ]
 }

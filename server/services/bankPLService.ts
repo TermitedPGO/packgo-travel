@@ -208,7 +208,31 @@ export async function generateBankPL(opts: {
   const totalExpenses = cogs + operating;
   // Refunds (positive = paid out to customer) net against income.
   // grossProfit = income - cogs - refunds
-  const netIncome = totalIncome - refunds;
+  const grossIncome = totalIncome - refunds;
+
+  // Phase 4: subtract deferred-but-not-yet-recognized trust income from
+  // monthly P&L. CST §17550 says customer prepayments don't count as
+  // income until departure. Feature-flagged: when off, this is 0 and
+  // recognition matches the deposit date (Phase 3 behavior).
+  let deferredIncomeSubtracted = 0;
+  try {
+    const { totalDeferredForUser, isTrustDeferralEnabled } = await import(
+      "./trustDeferralService"
+    );
+    if (isTrustDeferralEnabled()) {
+      deferredIncomeSubtracted = await totalDeferredForUser({
+        userId: opts.userId,
+        asOfDate: opts.endDate,
+      });
+    }
+  } catch (err) {
+    console.warn(
+      "[bankPL] trust deferral lookup failed (returning gross):",
+      (err as Error)?.message
+    );
+  }
+
+  const netIncome = grossIncome - deferredIncomeSubtracted;
   const grossProfit = netIncome - cogs;
   const netProfit = grossProfit - operating;
   const profitMargin = netIncome > 0 ? (netProfit / netIncome) * 100 : 0;
