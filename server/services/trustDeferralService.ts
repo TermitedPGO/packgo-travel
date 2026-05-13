@@ -175,27 +175,54 @@ async function findBookingMatch(txn: {
     const amountDelta = Math.min(...targets.map((t) => Math.abs(t - txnAmt)));
     if (amountDelta > AUTOMATCH_AMOUNT_WINDOW) continue;
 
-    // Score
+    // Score components (Phase 4 E2E test 2026-05-13 calibration):
+    //   Exact amount + same calendar day on its own = strong signal even
+    //   without a pi_* hint in the description. Weighting:
+    //     exact amount (50) + same day (30) = 80 → just crosses threshold
+    //     exact amount (50) + same day (30) + pi_* (20) = 100 → ceiling
+    //     close amount (30-40) + same day (30) = 60-70 → below threshold,
+    //                                                    surfaces for Jeff
+    //   This reflects PACK&GO's actual transaction density (1-5 payments/
+    //   day, mostly unique amounts) — false-positive rate of same-day
+    //   exact-amount is very low.
     let score = 0;
-    if (amountDelta === 0) score += 40;
-    else if (amountDelta < 0.5) score += 30;
-    else score += 20;
+    if (amountDelta === 0) score += 50;
+    else if (amountDelta < 0.5) score += 40;
+    else score += 25;
 
-    // Time proximity
+    // Time proximity. Compare by CALENDAR DATE (UTC), not raw millisecond
+    // diff — a deposit hit 2026-05-13 00:00 (a Plaid DATE field gets parsed
+    // as midnight) and a payment.paidAt 2026-05-13 20:42 are the SAME day
+    // but their ms-diff is 0.86 days, which would have triggered the
+    // `days <= 1` branch (score 20) instead of the same-day branch (score
+    // 30). Without the +30 same-day boost, generic Stripe descriptors
+    // without pi_* IDs land at score 60 — below the 80 auto-match
+    // threshold — and the row stays unmatched even when the payment is
+    // obviously the right one. Fix: bucket by ISO date string.
     if (c.paidAt) {
-      const days = Math.abs(txnDate.getTime() - new Date(c.paidAt).getTime()) / 86_400_000;
-      if (days === 0) score += 30;
-      else if (days <= 1) score += 20;
-      else score += 10;
+      const txnYmd = txnDate.toISOString().slice(0, 10);
+      const paidYmd = new Date(c.paidAt).toISOString().slice(0, 10);
+      if (txnYmd === paidYmd) {
+        score += 30;
+      } else {
+        const days =
+          Math.abs(txnDate.getTime() - new Date(c.paidAt).getTime()) /
+          86_400_000;
+        if (days <= 1) score += 20;
+        else score += 10;
+      }
     }
 
-    // Stripe PaymentIntent ID match (Stripe transfer descriptors include pi_*)
+    // Stripe PaymentIntent ID match (Stripe transfer descriptors include pi_*).
+    // Reduced from +30 to +20 after the 2026-05-13 calibration — exact
+    // amount + same day no longer needs this boost to clear 80, so pi_*
+    // becomes "icing" rather than required.
     const desc = (txn.description ?? "").toLowerCase();
     if (
       c.stripePaymentIntentId &&
       desc.includes(c.stripePaymentIntentId.toLowerCase())
     ) {
-      score += 30;
+      score += 20;
     }
 
     score = Math.min(100, score);
