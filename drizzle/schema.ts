@@ -1,4 +1,4 @@
-import { boolean, date, decimal, int, mysqlEnum, mysqlTable, text, timestamp, varchar, unique, index } from "drizzle-orm/mysql-core";
+import { boolean, date, decimal, int, mediumtext, mysqlEnum, mysqlTable, text, timestamp, varchar, unique, index } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -2499,7 +2499,9 @@ export const linkedBankAccounts = mysqlTable("linkedBankAccounts", {
   plaidAccessTokenEncrypted: text("plaidAccessTokenEncrypted").notNull(),
   plaidInstitutionId: varchar("plaidInstitutionId", { length: 64 }),
   institutionName: varchar("institutionName", { length: 128 }).notNull(),
-  institutionLogoUrl: varchar("institutionLogoUrl", { length: 512 }),
+  // Plaid embeds base64-encoded PNGs (~5-15KB). Stored as `data:image/png;base64,…`
+  // data URIs. VARCHAR(512) silently truncated/rejected — see migration 0071.
+  institutionLogoUrl: mediumtext("institutionLogoUrl"),
   accountMask: varchar("accountMask", { length: 8 }),
   accountName: varchar("accountName", { length: 128 }).notNull(),
   accountOfficialName: varchar("accountOfficialName", { length: 256 }),

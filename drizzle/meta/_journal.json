@@ -498,6 +498,13 @@
       "when": 1778964000000,
       "tag": "0070_plaid_accounting",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "5",
+      "when": 1778965000000,
+      "tag": "0071_widen_institution_logo",
+      "breakpoints": true
     }
   ]
 }
