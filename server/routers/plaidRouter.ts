@@ -626,4 +626,64 @@ export const plaidRouter = router({
         .where(eq(bankTransactions.id, input.transactionId));
       return { success: true };
     }),
+
+  // ── Phase 3: AccountingAgent ────────────────────────────────────────────
+  //
+  // Classify uncategorized bank transactions into PACK&GO's 10-category
+  // taxonomy. Used by:
+  //   - Admin "AI 分類" button on the BankAccountsTab (batch)
+  //   - Per-transaction "重新分類" link (single)
+  //   - Phase 1.5 plaidSyncWorker after each sync (auto-classify new txns)
+
+  /**
+   * Classify a single transaction. Useful when Jeff edits a merchant name
+   * and wants the agent to re-evaluate.
+   */
+  classifyTransaction: adminProcedure
+    .input(z.object({ transactionId: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const { classifyOne } = await import(
+        "../services/accountingAgentService"
+      );
+      // Verify ownership before classifying — we don't want to burn LLM
+      // tokens on a txn from another admin's account.
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const [row] = await db
+        .select({ ownerUserId: linkedBankAccounts.userId })
+        .from(bankTransactions)
+        .leftJoin(
+          linkedBankAccounts,
+          eq(bankTransactions.linkedAccountId, linkedBankAccounts.id)
+        )
+        .where(eq(bankTransactions.id, input.transactionId))
+        .limit(1);
+      if (!row || row.ownerUserId !== ctx.user.id) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      return await classifyOne(input.transactionId);
+    }),
+
+  /**
+   * Run AccountingAgent on every uncategorized transaction (up to limit).
+   * Default 50/run; bumpable to 200 for backfills. Scoped to this admin's
+   * accounts only.
+   */
+  classifyBatch: adminProcedure
+    .input(
+      z
+        .object({
+          limit: z.number().int().min(1).max(200).default(50),
+        })
+        .optional()
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { classifyUncategorizedBatch } = await import(
+        "../services/accountingAgentService"
+      );
+      return await classifyUncategorizedBatch({
+        limit: input?.limit ?? 50,
+        userId: ctx.user.id,
+      });
+    }),
 });

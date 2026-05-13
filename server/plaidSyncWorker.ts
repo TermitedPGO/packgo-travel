@@ -54,6 +54,30 @@ export const plaidSyncWorker = new Worker<
         `[plaidSyncWorker] ✅ Job ${job.id}: accounts=${result.totalAccounts} added=${result.totalAdded} modified=${result.totalModified} removed=${result.totalRemoved} failed=${result.failedAccounts}`
       );
 
+      // Phase 3: auto-classify new transactions in the same job.
+      // Caps at 200 to keep the run bounded; if a HISTORICAL_UPDATE
+      // dropped 5000 backfill txns, classify the most recent 200
+      // now and let tomorrow's run pick up the next 200. The admin
+      // can also click "AI 分類" manually for an immediate backfill.
+      if (result.totalAdded > 0) {
+        try {
+          const { classifyUncategorizedBatch } = await import(
+            "./services/accountingAgentService"
+          );
+          const classifyResult = await classifyUncategorizedBatch({
+            limit: Math.min(200, result.totalAdded + 50),
+          });
+          console.log(
+            `[plaidSyncWorker] auto-classified: processed=${classifyResult.processed} succeeded=${classifyResult.succeeded} needsReview=${classifyResult.needsReviewCount} byCategory=${JSON.stringify(classifyResult.byCategory)}`
+          );
+        } catch (classifyErr) {
+          console.error(
+            "[plaidSyncWorker] auto-classify failed (sync still succeeded):",
+            (classifyErr as Error)?.message
+          );
+        }
+      }
+
       // Alert on any account-level failures so Jeff sees them in his
       // morning digest. We don't fail the whole job because retrying
       // wouldn't help (broken bank login won't fix itself).
