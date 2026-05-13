@@ -5983,6 +5983,8 @@ export const zhTW = {
     toastExportReady: 'ZIP 已產生({count} 筆交易),正在開啟下載⋯',
     errExport: '年度匯出失敗:',
     errSdkBlocked: 'Plaid SDK 無法載入。最常見原因:① 瀏覽器擴充功能擋住 cdn.plaid.com(Honorlock、AdGuard、uBlock 等)→ 試無痕模式 Cmd+Shift+N。② 公司/校園網路 firewall。③ Chrome 開啟 Secure DNS 解析錯誤 → Settings → Privacy → 關掉「Use secure DNS」。修好後重整再試。',
+    fallbackHostedLink: '嵌入式 Plaid Link 載入慢,改用 Plaid 自家 Hosted 頁面⋯',
+    toastHostedLinkDone: '✅ Plaid 連結完成。系統正在抓取帳戶資料,稍等幾秒會出現在下方。',
   },
   posterGen: {
     title: '海報 Composer',

@@ -5981,6 +5981,8 @@ export const en = {
     toastExportReady: 'ZIP ready ({count} transactions). Opening download…',
     errExport: 'Year-end export failed: ',
     errSdkBlocked: 'Plaid SDK failed to load. Common causes: (1) Browser extension blocking cdn.plaid.com (Honorlock, AdGuard, uBlock, etc.) — try Incognito Cmd+Shift+N. (2) Corporate/school firewall. (3) Chrome Secure DNS resolving incorrectly — Settings → Privacy → disable "Use secure DNS". Fix and retry.',
+    fallbackHostedLink: 'Embedded Plaid Link slow to load — switching to Plaid Hosted page…',
+    toastHostedLinkDone: '✅ Plaid linking complete. Fetching account data, accounts will appear below in a few seconds.',
   },
   posterGen: {
     title: 'Poster Composer',

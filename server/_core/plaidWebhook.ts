@@ -111,6 +111,13 @@ export async function handlePlaidWebhook(req: Request, res: Response): Promise<v
         // Good news — user re-authed; clear any stored sync error
         await clearSyncError(itemId);
       }
+    } else if (webhookType === "LINK") {
+      // Hosted Link completed — exchange the public_tokens from the session.
+      // Payload contains:
+      //   link_session_id, link_token, public_tokens (array), status
+      if (webhookCode === "SESSION_FINISHED" || webhookCode === "EVENTS") {
+        await handleHostedLinkSessionFinished(payload);
+      }
     }
 
     // Mark event as processed
@@ -222,5 +229,182 @@ async function clearSyncError(itemId: string | null): Promise<void> {
       .update(linkedBankAccounts)
       .set({ lastSyncError: null })
       .where(eq(linkedBankAccounts.plaidItemId, itemId));
+  }
+}
+
+/**
+ * Handle LINK / SESSION_FINISHED webhook for Hosted Link.
+ *
+ * Plaid sends this after the user completes the Hosted Link flow. The payload
+ * contains either:
+ *   - public_tokens: [...] inline (newer API)
+ *   - link_token: "..." — we then call /link/token/get to retrieve tokens
+ *
+ * We exchange each public_token for an access_token, persist a row in
+ * linkedBankAccounts (per account under the item), and run an initial sync.
+ *
+ * Idempotency: linkedBankAccounts has UNIQUE(plaidAccountId) so re-runs of
+ * the same SESSION_FINISHED webhook hit the duplicate-key path and skip.
+ */
+async function handleHostedLinkSessionFinished(payload: any): Promise<void> {
+  console.log(
+    `[plaid-webhook] LINK/SESSION_FINISHED — link_session=${payload?.link_session_id} status=${payload?.status}`
+  );
+
+  // Pull public_tokens from inline payload first
+  let publicTokens: string[] = [];
+  if (Array.isArray(payload?.public_tokens)) {
+    publicTokens = payload.public_tokens.filter(
+      (t: any) => typeof t === "string"
+    );
+  }
+
+  // Fallback: if not inline, fetch via /link/token/get
+  if (publicTokens.length === 0 && payload?.link_token) {
+    try {
+      const { getLinkSessionPublicTokens } = await import("./plaid");
+      publicTokens = await getLinkSessionPublicTokens(payload.link_token);
+      console.log(
+        `[plaid-webhook] fetched ${publicTokens.length} public_tokens via linkTokenGet`
+      );
+    } catch (err) {
+      console.error(
+        "[plaid-webhook] linkTokenGet failed:",
+        (err as Error)?.message
+      );
+    }
+  }
+
+  if (publicTokens.length === 0) {
+    console.warn(
+      "[plaid-webhook] SESSION_FINISHED but no public_tokens — user may have abandoned flow"
+    );
+    return;
+  }
+
+  // Find Jeff's userId — Hosted Link sessions can land for any user, but in
+  // PACK&GO we only have one admin. Look him up by role='admin' as a sane
+  // default; if you ever have multiple admins, we'd need to pass userId
+  // through the link_token client_user_id and read it back.
+  const db = await getDb();
+  if (!db) return;
+  const { users } = await import("../../drizzle/schema");
+  const [adminUser] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.role, "admin"))
+    .limit(1);
+  if (!adminUser) {
+    console.error(
+      "[plaid-webhook] no admin user found; cannot attribute Hosted Link result"
+    );
+    return;
+  }
+
+  // Exchange each public_token and persist
+  const {
+    exchangePublicToken,
+    listAccounts,
+    getInstitutionByItem,
+    encryptAccessToken,
+  } = await import("./plaid");
+  const { linkedBankAccounts } = await import("../../drizzle/schema");
+
+  for (const publicToken of publicTokens) {
+    try {
+      const { accessToken, itemId: newItemId } =
+        await exchangePublicToken(publicToken);
+      const encrypted = encryptAccessToken(accessToken);
+      const [accountsRes, institution] = await Promise.all([
+        listAccounts(accessToken),
+        getInstitutionByItem(accessToken),
+      ]);
+
+      const insertedIds: number[] = [];
+      for (const a of accountsRes.accounts) {
+        const t = a.type as
+          | "depository"
+          | "credit"
+          | "loan"
+          | "investment"
+          | "other";
+        try {
+          const ins: any = await db.insert(linkedBankAccounts).values({
+            userId: adminUser.id,
+            plaidItemId: newItemId,
+            plaidAccountId: a.account_id,
+            plaidAccessTokenEncrypted: encrypted,
+            plaidInstitutionId: institution?.institution_id ?? null,
+            institutionName:
+              institution?.name ?? a.name?.slice(0, 128) ?? "Bank",
+            institutionLogoUrl: institution?.logo
+              ? `data:image/png;base64,${institution.logo}`
+              : null,
+            accountMask: a.mask ?? null,
+            accountName: (a.name ?? "Account").slice(0, 128),
+            accountOfficialName: a.official_name?.slice(0, 256) ?? null,
+            accountType: t,
+            accountSubtype: a.subtype ? String(a.subtype).slice(0, 32) : null,
+            currentBalance:
+              a.balances.current != null ? String(a.balances.current) : null,
+            availableBalance:
+              a.balances.available != null
+                ? String(a.balances.available)
+                : null,
+            isoCurrencyCode: a.balances.iso_currency_code ?? "USD",
+          });
+          const newId = Number(ins?.[0]?.insertId ?? 0);
+          if (newId > 0) insertedIds.push(newId);
+        } catch (err) {
+          const msg = (err as Error)?.message ?? "";
+          if (!msg.toLowerCase().includes("duplicate")) {
+            console.warn(
+              `[plaid-webhook] Hosted Link insert account ${a.account_id} failed:`,
+              msg
+            );
+          }
+        }
+      }
+
+      // Initial sync via shared service
+      if (insertedIds.length > 0) {
+        const { syncOneLinkedAccount } = await import(
+          "../services/plaidSyncService"
+        );
+        for (const id of insertedIds) {
+          const [row] = await db
+            .select()
+            .from(linkedBankAccounts)
+            .where(eq(linkedBankAccounts.id, id))
+            .limit(1);
+          if (row) {
+            const r = await syncOneLinkedAccount({
+              id: row.id,
+              plaidAccountId: row.plaidAccountId,
+              plaidAccessTokenEncrypted: row.plaidAccessTokenEncrypted,
+              cursor: row.cursor,
+            });
+            console.log(
+              `[plaid-webhook] Hosted Link initial sync ${id}: +${r.added} txns${r.error ? ` (error: ${r.error})` : ""}`
+            );
+          }
+        }
+      }
+
+      await notifyOwner({
+        title: `✅ Plaid 連線成功 — ${institution?.name ?? "新銀行"}`,
+        content:
+          `透過 Hosted Link 連結了 ${accountsRes.accounts.length} 個帳戶。\n\n` +
+          accountsRes.accounts
+            .map((a) => `- ${a.name} (${a.subtype ?? a.type})`)
+            .join("\n") +
+          `\n\n進 admin → 財務 → 銀行帳戶 確認交易已抓進來。`,
+      });
+    } catch (err) {
+      console.error(
+        "[plaid-webhook] Hosted Link exchange failed:",
+        (err as Error)?.message
+      );
+    }
   }
 }

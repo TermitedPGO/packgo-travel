@@ -98,6 +98,7 @@ export default function BankAccountsTab() {
 
   const [filterAccountId, setFilterAccountId] = useState<number | "all">("all");
   const [linkToken, setLinkToken] = useState<string | null>(null);
+  const [hostedLinkUrl, setHostedLinkUrl] = useState<string | null>(null);
 
   const { data: accounts, isLoading: accountsLoading } =
     trpc.plaid.linkedAccountsList.useQuery();
@@ -110,7 +111,10 @@ export default function BankAccountsTab() {
     });
 
   const createLinkTokenMut = trpc.plaid.createLinkToken.useMutation({
-    onSuccess: ({ linkToken }) => setLinkToken(linkToken),
+    onSuccess: ({ linkToken, hostedLinkUrl }) => {
+      setLinkToken(linkToken);
+      setHostedLinkUrl(hostedLinkUrl ?? null);
+    },
     onError: (err) => toast.error(t("bankAccounts.errLinkToken") + err.message),
   });
 
@@ -202,38 +206,54 @@ export default function BankAccountsTab() {
     }
   }, [linkToken, ready, opened, open]);
 
-  // SDK-load watchdog: if we have a token but the Plaid script hasn't
-  // become ready within 8s, the CDN was probably blocked (ad-blocker,
-  // Honorlock, corporate firewall, DoH-resolved-to-NXDOMAIN, etc.).
-  // Surface that with an actionable toast instead of staying silent —
-  // a click with "no response" is the worst possible UX.
+  // SDK-load watchdog: if embedded Plaid script doesn't become ready in
+  // 4s, fall through to Hosted Link redirect. This is the safety net for
+  // when cdn.plaid.com is blocked (ad-blocker, Honorlock, corporate
+  // firewall, DoH misroute). Hosted Link hits Plaid's own domain instead
+  // of the CDN, which is much harder to block.
   useEffect(() => {
     if (!linkToken || ready) return;
     const timer = setTimeout(() => {
       if (!ready) {
-        toast.error(t("bankAccounts.errSdkBlocked"), { duration: 12000 });
-        setLinkToken(null); // reset so user can retry after fixing
+        if (hostedLinkUrl) {
+          toast.info(t("bankAccounts.fallbackHostedLink"), { duration: 6000 });
+          // Redirect after a short delay so the toast is visible
+          setTimeout(() => {
+            window.location.href = hostedLinkUrl;
+          }, 1500);
+        } else {
+          toast.error(t("bankAccounts.errSdkBlocked"), { duration: 12000 });
+          setLinkToken(null);
+        }
       }
-    }, 8000);
+    }, 4000);
     return () => clearTimeout(timer);
-  }, [linkToken, ready, t]);
+  }, [linkToken, ready, hostedLinkUrl, t]);
 
   const handleStartLink = () => {
-    // Pre-flight: ping the Plaid CDN to detect blocking BEFORE minting a
-    // link token. If the SDK won't load, no point burning a sandbox token.
-    fetch("https://cdn.plaid.com/link/v2/stable/link-initialize.js", {
-      method: "HEAD",
-      mode: "no-cors",
-    })
-      .then(() => {
-        // no-cors fetch always resolves opaque on success; the only way
-        // it rejects is a network-level block (extension, firewall, DNS).
-        createLinkTokenMut.mutate();
-      })
-      .catch(() => {
-        toast.error(t("bankAccounts.errSdkBlocked"), { duration: 12000 });
-      });
+    createLinkTokenMut.mutate();
   };
+
+  // After Hosted Link redirects back to /admin?plaid=done, show a success
+  // toast and refresh the accounts list. The webhook handler does the
+  // actual public_token exchange server-side; this is just UX.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("plaid") === "done") {
+      toast.success(t("bankAccounts.toastHostedLinkDone"), { duration: 8000 });
+      // Strip the query param so refresh doesn't re-toast
+      window.history.replaceState({}, "", window.location.pathname);
+      // Poll for newly linked accounts — webhook may take a few seconds
+      let attempts = 0;
+      const poll = setInterval(() => {
+        attempts++;
+        utils.plaid.linkedAccountsList.invalidate();
+        utils.plaid.transactionsList.invalidate();
+        if (attempts >= 10) clearInterval(poll);
+      }, 3000);
+      return () => clearInterval(poll);
+    }
+  }, [utils, t]);
 
   // Month-to-date P&L for the "本月損益" card
   const monthRange = useMemo(() => {

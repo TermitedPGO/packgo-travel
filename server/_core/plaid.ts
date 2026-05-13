@@ -142,22 +142,56 @@ export function decryptAccessToken(encoded: string): string {
 
 /**
  * Mint a link_token for the frontend Plaid Link component.
- * The frontend uses this in <PlaidLink token={...}> to open the OAuth modal.
+ *
+ * Returns both `linkToken` (for the embedded usePlaidLink hook) AND
+ * `hostedLinkUrl` (for the redirect-based Hosted Link flow). Frontend
+ * tries embedded first; if cdn.plaid.com is blocked (proctoring software,
+ * corporate firewall, ad-blocker), it falls through to hostedLinkUrl.
+ *
+ * The base URL for the completion redirect is derived from PLAID_WEBHOOK_URL
+ * (which we already have set as a Fly secret pointing to packgoplay.com).
  */
-export async function createLinkToken(userId: number): Promise<string> {
+export async function createLinkToken(userId: number): Promise<{
+  linkToken: string;
+  hostedLinkUrl: string | null;
+  expiration: string;
+}> {
   const client = getPlaidClient();
+
+  // Derive the redirect URI from the webhook URL's origin. This avoids
+  // adding ANOTHER env var just for the redirect.
+  let completionRedirectUri: string | undefined;
+  if (process.env.PLAID_WEBHOOK_URL) {
+    try {
+      const u = new URL(process.env.PLAID_WEBHOOK_URL);
+      completionRedirectUri = `${u.origin}/admin?plaid=done`;
+    } catch {
+      /* keep undefined → Plaid will fall back to user closing tab */
+    }
+  }
+
   const request: LinkTokenCreateRequest = {
     user: { client_user_id: String(userId) },
     client_name: "PACK&GO Travel",
     products: [Products.Transactions],
     country_codes: [CountryCode.Us],
     language: "en",
+    hosted_link: {
+      url_lifetime_seconds: 1800, // 30 minutes
+      ...(completionRedirectUri
+        ? { completion_redirect_uri: completionRedirectUri }
+        : {}),
+    },
   };
   if (process.env.PLAID_WEBHOOK_URL) {
     request.webhook = process.env.PLAID_WEBHOOK_URL;
   }
   const res = await client.linkTokenCreate(request);
-  return res.data.link_token;
+  return {
+    linkToken: res.data.link_token,
+    hostedLinkUrl: res.data.hosted_link_url ?? null,
+    expiration: res.data.expiration,
+  };
 }
 
 /**
@@ -246,4 +280,46 @@ export async function syncTransactions(
 export async function removeItem(accessTokenPlain: string): Promise<void> {
   const client = getPlaidClient();
   await client.itemRemove({ access_token: accessTokenPlain });
+}
+
+/**
+ * Retrieve the public_tokens generated during a Hosted Link session.
+ *
+ * In Hosted Link, the user completes the flow on Plaid's domain. After
+ * completion, Plaid:
+ *   1. Sends a webhook `LINK / SESSION_FINISHED` (we get it on /api/plaid/webhook)
+ *   2. Redirects the browser back to our completion_redirect_uri
+ *
+ * The public_token isn't returned to the redirect URL — it's only accessible
+ * by calling /link/token/get with the original link_token. We can call this
+ * from the webhook handler (preferred, server-only) OR from the redirect
+ * handler if we passed the link_token through state.
+ *
+ * Returns an array because a single Hosted Link session can produce multiple
+ * Items if the user selects accounts at multiple institutions.
+ */
+export async function getLinkSessionPublicTokens(
+  linkToken: string
+): Promise<string[]> {
+  const client = getPlaidClient();
+  const res = await client.linkTokenGet({ link_token: linkToken });
+  // The response shape varies depending on SDK version. We pluck defensively.
+  const metadata = (res.data as any).link_token_get_response_metadata
+    ?? (res.data as any).metadata
+    ?? res.data;
+  const publicTokens: string[] = [];
+  // Newer SDK exposes `public_tokens` array on response root or metadata
+  const directList = (res.data as any).public_tokens
+    ?? metadata?.public_tokens;
+  if (Array.isArray(directList)) {
+    for (const t of directList) {
+      if (typeof t === "string") publicTokens.push(t);
+      else if (t?.public_token) publicTokens.push(t.public_token);
+    }
+  }
+  // Some shapes nest under metadata.public_token (singular, legacy)
+  const single = metadata?.public_token ?? (res.data as any).public_token;
+  if (typeof single === "string") publicTokens.push(single);
+  // De-dup
+  return Array.from(new Set(publicTokens));
 }

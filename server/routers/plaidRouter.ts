@@ -74,8 +74,8 @@ export const plaidRouter = router({
   createLinkToken: adminProcedure.mutation(async ({ ctx }) => {
     requirePlaid();
     try {
-      const token = await createLinkToken(ctx.user.id);
-      return { linkToken: token };
+      const result = await createLinkToken(ctx.user.id);
+      return result; // { linkToken, hostedLinkUrl, expiration }
     } catch (err) {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
