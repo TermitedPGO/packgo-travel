@@ -33,7 +33,6 @@ import {
   exchangePublicToken,
   listAccounts,
   getInstitutionByItem,
-  syncTransactions,
   removeItem,
   encryptAccessToken,
   decryptAccessToken,
@@ -45,7 +44,7 @@ import {
   bankTransactions,
 } from "../../drizzle/schema";
 import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
-import type { Transaction } from "plaid";
+import { syncOneLinkedAccount } from "../services/plaidSyncService";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -59,144 +58,11 @@ function requirePlaid() {
   }
 }
 
-/**
- * Persist a batch of Plaid transactions into bankTransactions.
- * Uses INSERT ... ON DUPLICATE KEY UPDATE to be idempotent if Plaid
- * returns the same transaction in a later sync (transactions can be
- * pending → posted and amount can change slightly).
- */
-async function upsertTransactions(
-  linkedAccountId: number,
-  txns: Transaction[]
-): Promise<number> {
-  if (txns.length === 0) return 0;
-  const db = await getDb();
-  if (!db) return 0;
-  let inserted = 0;
-  for (const t of txns) {
-    try {
-      await db
-        .insert(bankTransactions)
-        .values({
-          linkedAccountId,
-          plaidTransactionId: t.transaction_id,
-          date: t.date as any, // Drizzle date accepts ISO string
-          authorizedDate: (t.authorized_date as any) ?? null,
-          amount: String(t.amount),
-          isoCurrencyCode: (t.iso_currency_code ?? "USD") as string,
-          merchantName: t.merchant_name ?? t.name?.slice(0, 256) ?? null,
-          description: t.name ?? null,
-          paymentChannel: t.payment_channel ?? null,
-          plaidCategoryPrimary:
-            (t.personal_finance_category as any)?.primary ?? null,
-          plaidCategoryDetailed:
-            (t.personal_finance_category as any)?.detailed ?? null,
-          isPending: t.pending ? 1 : 0,
-          accountOwner: t.account_owner ?? null,
-        })
-        .onDuplicateKeyUpdate({
-          set: {
-            amount: String(t.amount),
-            isPending: t.pending ? 1 : 0,
-            merchantName: t.merchant_name ?? t.name?.slice(0, 256) ?? null,
-            updatedAt: new Date(),
-          },
-        });
-      inserted++;
-    } catch (err) {
-      console.warn(
-        `[plaid] upsert transaction ${t.transaction_id} failed:`,
-        (err as Error)?.message
-      );
-    }
-  }
-  return inserted;
-}
-
-/**
- * Run an incremental /transactions/sync until has_more=false, persisting
- * adds + updates + handling removes. Returns counts.
- */
-async function syncOneAccount(linkedAccount: {
-  id: number;
-  plaidAccessTokenEncrypted: string;
-  cursor: string | null;
-  plaidAccountId: string;
-}): Promise<{ added: number; modified: number; removed: number; cursor: string }> {
-  const db = await getDb();
-  if (!db) throw new Error("DB unavailable");
-
-  let accessToken: string;
-  try {
-    accessToken = decryptAccessToken(linkedAccount.plaidAccessTokenEncrypted);
-  } catch (err) {
-    throw new Error(
-      "Failed to decrypt access token — check PLAID_ENCRYPTION_KEY env"
-    );
-  }
-
-  let cursor = linkedAccount.cursor;
-  let added = 0;
-  let modified = 0;
-  let removed = 0;
-
-  // Loop until has_more=false (Plaid paginates large batches)
-  // Cap at 20 iterations as defensive safety.
-  for (let i = 0; i < 20; i++) {
-    const page = await syncTransactions(accessToken, cursor);
-
-    // Plaid /transactions/sync returns all accounts under the Item; filter to
-    // just the one matching this linkedAccount.
-    const addedForThis = page.added.filter(
-      (t) => t.account_id === linkedAccount.plaidAccountId
-    );
-    const modForThis = page.modified.filter(
-      (t) => t.account_id === linkedAccount.plaidAccountId
-    );
-    const remForThis = page.removed.filter(
-      (t: any) => t.account_id === linkedAccount.plaidAccountId
-    );
-
-    added += await upsertTransactions(linkedAccount.id, addedForThis);
-    modified += await upsertTransactions(linkedAccount.id, modForThis);
-
-    // Plaid "removed" = transaction was reversed/cancelled. Soft-delete by
-    // marking excludeFromAccounting=1.
-    for (const r of remForThis) {
-      try {
-        await db
-          .update(bankTransactions)
-          .set({
-            excludeFromAccounting: 1,
-            excludeReason: "Plaid marked removed",
-            updatedAt: new Date(),
-          })
-          .where(eq(bankTransactions.plaidTransactionId, r.transaction_id));
-        removed++;
-      } catch (err) {
-        console.warn(
-          `[plaid] failed to soft-remove ${r.transaction_id}:`,
-          (err as Error)?.message
-        );
-      }
-    }
-
-    cursor = page.nextCursor;
-    if (!page.hasMore) break;
-  }
-
-  // Persist new cursor + bump lastSyncedAt
-  await db
-    .update(linkedBankAccounts)
-    .set({
-      cursor,
-      lastSyncedAt: new Date(),
-      lastSyncError: null,
-    })
-    .where(eq(linkedBankAccounts.id, linkedAccount.id));
-
-  return { added, modified, removed, cursor: cursor ?? "" };
-}
+// NB: the old local syncOneAccount() and upsertTransactions() helpers were
+// removed in the Phase 1.5 dedup pass — both call sites (exchangePublicToken
+// initial sync + syncNow manual mutation) now funnel through the shared
+// plaidSyncService.syncOneLinkedAccount(). Same field handling, same
+// idempotency guarantees, one place to fix bugs.
 
 // ─── Router ────────────────────────────────────────────────────────────────
 
@@ -294,6 +160,10 @@ export const plaidRouter = router({
       // Initial sync — pull all historical transactions Plaid has cached
       // for this item. Plaid's /transactions/sync starts from "first ever"
       // when cursor is null, which is what we want.
+      //
+      // Phase 1.5 dedup: delegated to plaidSyncService.syncOneLinkedAccount,
+      // which catches its own errors and writes lastSyncError to the row.
+      // No need for a try/catch wrapper here.
       for (const id of insertedIds) {
         const [row] = await db
           .select()
@@ -301,25 +171,21 @@ export const plaidRouter = router({
           .where(eq(linkedBankAccounts.id, id))
           .limit(1);
         if (row) {
-          try {
-            const result = await syncOneAccount({
-              id: row.id,
-              plaidAccessTokenEncrypted: row.plaidAccessTokenEncrypted,
-              cursor: row.cursor,
-              plaidAccountId: row.plaidAccountId,
-            });
+          const result = await syncOneLinkedAccount({
+            id: row.id,
+            plaidAccountId: row.plaidAccountId,
+            plaidAccessTokenEncrypted: row.plaidAccessTokenEncrypted,
+            cursor: row.cursor,
+          });
+          if (result.error) {
+            console.warn(
+              `[plaid] Initial sync for account ${id} failed:`,
+              result.error
+            );
+          } else {
             console.log(
               `[plaid] Initial sync for account ${id}: added=${result.added} modified=${result.modified} removed=${result.removed}`
             );
-          } catch (err) {
-            console.warn(
-              `[plaid] Initial sync for account ${id} failed:`,
-              (err as Error)?.message
-            );
-            await db
-              .update(linkedBankAccounts)
-              .set({ lastSyncError: (err as Error).message })
-              .where(eq(linkedBankAccounts.id, id));
           }
         }
       }
@@ -432,33 +298,22 @@ export const plaidRouter = router({
       }> = [];
 
       for (const acc of accounts) {
-        try {
-          const r = await syncOneAccount({
-            id: acc.id,
-            plaidAccessTokenEncrypted: acc.plaidAccessTokenEncrypted,
-            cursor: acc.cursor,
-            plaidAccountId: acc.plaidAccountId,
-          });
-          results.push({
-            linkedAccountId: acc.id,
-            added: r.added,
-            modified: r.modified,
-            removed: r.removed,
-          });
-        } catch (err) {
-          const msg = (err as Error)?.message ?? "unknown";
-          await db
-            .update(linkedBankAccounts)
-            .set({ lastSyncError: msg })
-            .where(eq(linkedBankAccounts.id, acc.id));
-          results.push({
-            linkedAccountId: acc.id,
-            added: 0,
-            modified: 0,
-            removed: 0,
-            error: msg,
-          });
-        }
+        // Phase 1.5 dedup: syncOneLinkedAccount catches its own errors,
+        // persists lastSyncError, and returns result.error. No try/catch
+        // needed here.
+        const r = await syncOneLinkedAccount({
+          id: acc.id,
+          plaidAccountId: acc.plaidAccountId,
+          plaidAccessTokenEncrypted: acc.plaidAccessTokenEncrypted,
+          cursor: acc.cursor,
+        });
+        results.push({
+          linkedAccountId: acc.id,
+          added: r.added,
+          modified: r.modified,
+          removed: r.removed,
+          ...(r.error ? { error: r.error } : {}),
+        });
       }
       return { results };
     }),
