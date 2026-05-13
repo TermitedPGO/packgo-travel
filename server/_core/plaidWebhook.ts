@@ -320,14 +320,26 @@ async function handleHostedLinkSessionFinished(payload: any): Promise<void> {
         getInstitutionByItem(accessToken),
       ]);
 
+      // Map Plaid account.type to our 5-value enum, falling back to
+      // "other" for anything we don't recognize. Plaid occasionally
+      // returns "brokerage" or "payroll" which aren't in our schema —
+      // bucketing them as "other" is fine for bookkeeping (Jeff can
+      // re-classify via override if needed).
+      const KNOWN_TYPES = new Set([
+        "depository",
+        "credit",
+        "loan",
+        "investment",
+        "other",
+      ]);
+
       const insertedIds: number[] = [];
       for (const a of accountsRes.accounts) {
-        const t = a.type as
-          | "depository"
-          | "credit"
-          | "loan"
-          | "investment"
-          | "other";
+        const rawType = String(a.type ?? "other");
+        const accountType = (
+          KNOWN_TYPES.has(rawType) ? rawType : "other"
+        ) as "depository" | "credit" | "loan" | "investment" | "other";
+
         try {
           const ins: any = await db.insert(linkedBankAccounts).values({
             userId: adminUser.id,
@@ -343,7 +355,7 @@ async function handleHostedLinkSessionFinished(payload: any): Promise<void> {
             accountMask: a.mask ?? null,
             accountName: (a.name ?? "Account").slice(0, 128),
             accountOfficialName: a.official_name?.slice(0, 256) ?? null,
-            accountType: t,
+            accountType,
             accountSubtype: a.subtype ? String(a.subtype).slice(0, 32) : null,
             currentBalance:
               a.balances.current != null ? String(a.balances.current) : null,
@@ -356,11 +368,15 @@ async function handleHostedLinkSessionFinished(payload: any): Promise<void> {
           const newId = Number(ins?.[0]?.insertId ?? 0);
           if (newId > 0) insertedIds.push(newId);
         } catch (err) {
-          const msg = (err as Error)?.message ?? "";
+          const e = err as any;
+          const msg = e?.message ?? "";
+          const code = e?.code ?? e?.cause?.code ?? "";
+          const sqlState = e?.sqlState ?? e?.cause?.sqlState ?? "";
+          const fullMsg = `${msg} | code=${code} sqlState=${sqlState} | type=${rawType} subtype=${a.subtype}`;
           if (!msg.toLowerCase().includes("duplicate")) {
-            console.warn(
+            console.error(
               `[plaid-webhook] Hosted Link insert account ${a.account_id} failed:`,
-              msg
+              fullMsg
             );
           }
         }

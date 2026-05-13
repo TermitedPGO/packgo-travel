@@ -120,9 +120,23 @@ export const plaidRouter = router({
         getInstitutionByItem(accessToken),
       ]);
 
+      // Plaid occasionally returns account.type values outside our 5-value
+      // enum (e.g. "brokerage", "payroll" from newer Plaid coverage).
+      // Bucket unknowns into "other" so the insert doesn't fail.
+      const KNOWN_TYPES = new Set([
+        "depository",
+        "credit",
+        "loan",
+        "investment",
+        "other",
+      ]);
+
       const insertedIds: number[] = [];
       for (const a of accountsRes.accounts) {
-        const t = a.type as "depository" | "credit" | "loan" | "investment" | "other";
+        const rawType = String(a.type ?? "other");
+        const accountType = (
+          KNOWN_TYPES.has(rawType) ? rawType : "other"
+        ) as "depository" | "credit" | "loan" | "investment" | "other";
         try {
           const ins = await db.insert(linkedBankAccounts).values({
             userId: ctx.user.id,
@@ -138,7 +152,7 @@ export const plaidRouter = router({
             accountMask: a.mask ?? null,
             accountName: (a.name ?? "Account").slice(0, 128),
             accountOfficialName: a.official_name?.slice(0, 256) ?? null,
-            accountType: t,
+            accountType,
             accountSubtype: a.subtype ? String(a.subtype).slice(0, 32) : null,
             currentBalance:
               a.balances.current != null ? String(a.balances.current) : null,
@@ -150,9 +164,10 @@ export const plaidRouter = router({
           });
           insertedIds.push(Number((ins as any)[0]?.insertId ?? 0));
         } catch (err) {
+          const e = err as any;
           console.warn(
             `[plaid] insert linkedBankAccount for ${a.account_id} failed:`,
-            (err as Error)?.message
+            `${e?.message} | code=${e?.code ?? e?.cause?.code} | type=${rawType}`
           );
         }
       }
