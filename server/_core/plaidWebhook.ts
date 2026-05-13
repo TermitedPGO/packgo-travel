@@ -21,12 +21,11 @@
  *   - ITEM errors → notifyOwner so Jeff knows to re-link.
  *
  * Signature verification:
- *   Plaid signs every webhook with a JWT in the `plaid-verification` header.
- *   For production we MUST verify (otherwise anyone can fake webhooks).
- *   For sandbox the header may be absent; we skip verification only when
- *   PLAID_ENV=sandbox.
- *   Real verification needs the public key from Plaid's JWKS endpoint —
- *   marked TODO for production; sandbox-first ship this iteration.
+ *   Plaid signs every production webhook with an ES256 JWT in the
+ *   `plaid-verification` header. See plaidWebhookVerify.ts for the
+ *   full implementation. Sandbox webhooks are NOT signed; we skip
+ *   verification only when PLAID_ENV=sandbox. Any other env requires
+ *   a valid signature or we 400 the request and do NOT record it.
  */
 
 import type { Request, Response } from "express";
@@ -34,14 +33,37 @@ import { getDb } from "../db";
 import { plaidWebhookEvents, linkedBankAccounts } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { notifyOwner } from "./notification";
+import { verifyPlaidWebhook } from "./plaidWebhookVerify";
 
 export async function handlePlaidWebhook(req: Request, res: Response): Promise<void> {
-  // Raw body buffer (Plaid sends JSON but we registered raw to allow future
-  // JWT signature verification). Parse manually.
+  const rawBody: Buffer = (req.body as Buffer) ?? Buffer.alloc(0);
+
+  // ─── Signature verification ─────────────────────────────────────────────
+  // Done BEFORE we parse or persist anything. If verification fails we
+  // reject with 400 and do NOT record the event (no audit-log pollution,
+  // no work for downstream handlers). Sandbox env short-circuits to
+  // "valid" since Plaid doesn't sign sandbox webhooks.
+  const jwtHeader = req.headers["plaid-verification"];
+  const verifyResult = await verifyPlaidWebhook({
+    rawBody,
+    jwt: Array.isArray(jwtHeader) ? jwtHeader[0] : jwtHeader,
+    env: process.env.PLAID_ENV ?? "sandbox",
+  });
+  if (!verifyResult.valid) {
+    console.warn(
+      `[plaid-webhook] rejected unverified request: ${verifyResult.reason} (kid=${verifyResult.kid ?? "?"})`
+    );
+    res.status(400).json({ error: "webhook verification failed" });
+    return;
+  }
+  if (verifyResult.skipped) {
+    // Sandbox path — no log spam needed for the normal case.
+  }
+
+  // ─── Parse body ─────────────────────────────────────────────────────────
   let payload: any;
   try {
-    const raw = req.body as Buffer;
-    payload = raw && raw.length > 0 ? JSON.parse(raw.toString("utf8")) : {};
+    payload = rawBody.length > 0 ? JSON.parse(rawBody.toString("utf8")) : {};
   } catch (err) {
     console.error("[plaid-webhook] failed to parse body:", err);
     res.status(400).json({ error: "invalid json" });
