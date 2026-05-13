@@ -202,8 +202,37 @@ export default function BankAccountsTab() {
     }
   }, [linkToken, ready, opened, open]);
 
+  // SDK-load watchdog: if we have a token but the Plaid script hasn't
+  // become ready within 8s, the CDN was probably blocked (ad-blocker,
+  // Honorlock, corporate firewall, DoH-resolved-to-NXDOMAIN, etc.).
+  // Surface that with an actionable toast instead of staying silent —
+  // a click with "no response" is the worst possible UX.
+  useEffect(() => {
+    if (!linkToken || ready) return;
+    const timer = setTimeout(() => {
+      if (!ready) {
+        toast.error(t("bankAccounts.errSdkBlocked"), { duration: 12000 });
+        setLinkToken(null); // reset so user can retry after fixing
+      }
+    }, 8000);
+    return () => clearTimeout(timer);
+  }, [linkToken, ready, t]);
+
   const handleStartLink = () => {
-    createLinkTokenMut.mutate();
+    // Pre-flight: ping the Plaid CDN to detect blocking BEFORE minting a
+    // link token. If the SDK won't load, no point burning a sandbox token.
+    fetch("https://cdn.plaid.com/link/v2/stable/link-initialize.js", {
+      method: "HEAD",
+      mode: "no-cors",
+    })
+      .then(() => {
+        // no-cors fetch always resolves opaque on success; the only way
+        // it rejects is a network-level block (extension, firewall, DNS).
+        createLinkTokenMut.mutate();
+      })
+      .catch(() => {
+        toast.error(t("bankAccounts.errSdkBlocked"), { duration: 12000 });
+      });
   };
 
   // Month-to-date P&L for the "本月損益" card

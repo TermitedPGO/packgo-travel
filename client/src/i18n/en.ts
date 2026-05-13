@@ -5980,6 +5980,7 @@ export const en = {
     confirmExport: 'Generate full tax-prep ZIP for {year}? Includes all transactions, Schedule C summary, 1099-NEC vendor list.',
     toastExportReady: 'ZIP ready ({count} transactions). Opening download…',
     errExport: 'Year-end export failed: ',
+    errSdkBlocked: 'Plaid SDK failed to load. Common causes: (1) Browser extension blocking cdn.plaid.com (Honorlock, AdGuard, uBlock, etc.) — try Incognito Cmd+Shift+N. (2) Corporate/school firewall. (3) Chrome Secure DNS resolving incorrectly — Settings → Privacy → disable "Use secure DNS". Fix and retry.',
   },
   posterGen: {
     title: 'Poster Composer',

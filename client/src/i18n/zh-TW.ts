@@ -5982,6 +5982,7 @@ export const zhTW = {
     confirmExport: '產出 {year} 年的完整報稅 ZIP?包含所有交易、Schedule C 彙總、1099-NEC 供應商清單。',
     toastExportReady: 'ZIP 已產生({count} 筆交易),正在開啟下載⋯',
     errExport: '年度匯出失敗:',
+    errSdkBlocked: 'Plaid SDK 無法載入。最常見原因:① 瀏覽器擴充功能擋住 cdn.plaid.com(Honorlock、AdGuard、uBlock 等)→ 試無痕模式 Cmd+Shift+N。② 公司/校園網路 firewall。③ Chrome 開啟 Secure DNS 解析錯誤 → Settings → Privacy → 關掉「Use secure DNS」。修好後重整再試。',
   },
   posterGen: {
     title: '海報 Composer',
