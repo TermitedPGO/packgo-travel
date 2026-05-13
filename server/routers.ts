@@ -4,6 +4,7 @@ import { normalizePlaceName } from "./_helpers/llmPlaceNormalizer";
 import { tourMonitorRouter } from "./routers/tourMonitorRouter";
 import { agentRouter } from "./routers/agentRouter";
 import { toolsRouter } from "./routers/toolsRouter";
+import { plaidRouter } from "./routers/plaidRouter";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, adminProcedure, router } from "./_core/trpc";
@@ -9225,6 +9226,12 @@ export const appRouter = router({
   // Claude Code skill as a server-side endpoint so admin can generate PDFs
   // without leaving the browser.
   tools: toolsRouter,
+
+  // ── Plaid bookkeeping (Phase 1.3, migration 0070) ─────────────────────
+  // Bank/credit card sync, transaction list + override, trust account
+  // marking. Mounted separately from `accounting` (which handles manual
+  // entries) so the two data sources stay disentangled.
+  plaid: plaidRouter,
 
   // ── Reviews — FTC-compliant testimonials ──────────────────────────────────
   // Round 80.7: stub endpoint that returns [] so TestimonialsCarousel doesn't
