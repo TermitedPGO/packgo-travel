@@ -32,7 +32,7 @@
 import type { Request, Response } from "express";
 import { getDb } from "../db";
 import { plaidWebhookEvents, linkedBankAccounts } from "../../drizzle/schema";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { notifyOwner } from "./notification";
 
 export async function handlePlaidWebhook(req: Request, res: Response): Promise<void> {
@@ -149,100 +149,21 @@ export async function handlePlaidWebhook(req: Request, res: Response): Promise<v
 }
 
 /**
- * Trigger an immediate sync for the given Plaid item by enqueuing
- * onto the bookingFollowupQueue's queue infrastructure pattern — but
- * for Plaid we just call syncOneAccount directly from the workersince Phase 1.5's daily worker will catch up anyway. For
- * webhook-driven syncs we want sub-minute latency.
+ * Trigger an immediate sync for the given Plaid item.
+ *
+ * Phase 1.5 refactor: delegates to the shared plaidSyncService so the
+ * webhook hot path, the daily cron worker, and the admin "Sync now"
+ * button all funnel through one tested code path.
  */
 async function enqueueImmediateSync(itemId: string | null): Promise<void> {
   if (!itemId) return;
-  // Find the linked accounts for this item, then enqueue or directly
-  // call sync. Lazy-import the worker queue to avoid circular import.
-  const db = await getDb();
-  if (!db) return;
-  const accounts = await db
-    .select()
-    .from(linkedBankAccounts)
-    .where(
-      and(
-        eq(linkedBankAccounts.plaidItemId, itemId),
-        eq(linkedBankAccounts.isActive, 1)
-      )
-    );
-
-  if (accounts.length === 0) {
-    console.warn(`[plaid-webhook] No active accounts for item ${itemId}`);
-    return;
-  }
-
-  // Lazy import to avoid pulling Plaid SDK into hot path
-  const { syncTransactions, decryptAccessToken } = await import("./plaid");
-  const { bankTransactions } = await import("../../drizzle/schema");
-
-  for (const acc of accounts) {
-    try {
-      const token = decryptAccessToken(acc.plaidAccessTokenEncrypted);
-      let cursor = acc.cursor;
-      let totalAdded = 0;
-      for (let i = 0; i < 20; i++) {
-        const page = await syncTransactions(token, cursor);
-        const added = page.added.filter(
-          (t: any) => t.account_id === acc.plaidAccountId
-        );
-        for (const t of added) {
-          try {
-            await db
-              .insert(bankTransactions)
-              .values({
-                linkedAccountId: acc.id,
-                plaidTransactionId: t.transaction_id,
-                date: t.date as any,
-                authorizedDate: (t.authorized_date as any) ?? null,
-                amount: String(t.amount),
-                isoCurrencyCode: (t.iso_currency_code ?? "USD") as string,
-                merchantName: t.merchant_name ?? t.name?.slice(0, 256) ?? null,
-                description: t.name ?? null,
-                paymentChannel: t.payment_channel ?? null,
-                plaidCategoryPrimary:
-                  (t.personal_finance_category as any)?.primary ?? null,
-                plaidCategoryDetailed:
-                  (t.personal_finance_category as any)?.detailed ?? null,
-                isPending: t.pending ? 1 : 0,
-                accountOwner: t.account_owner ?? null,
-              })
-              .onDuplicateKeyUpdate({
-                set: {
-                  amount: String(t.amount),
-                  isPending: t.pending ? 1 : 0,
-                  updatedAt: new Date(),
-                },
-              });
-            totalAdded++;
-          } catch {
-            /* upsert collisions are expected on retries */
-          }
-        }
-        cursor = page.nextCursor;
-        if (!page.hasMore) break;
-      }
-      await db
-        .update(linkedBankAccounts)
-        .set({ cursor, lastSyncedAt: new Date(), lastSyncError: null })
-        .where(eq(linkedBankAccounts.id, acc.id));
-      console.log(
-        `[plaid-webhook] Immediate sync for item ${itemId} account ${acc.id}: +${totalAdded} txns`
-      );
-    } catch (err) {
-      console.error(
-        `[plaid-webhook] Immediate sync failed for account ${acc.id}:`,
-        (err as Error)?.message
-      );
-      await db
-        .update(linkedBankAccounts)
-        .set({ lastSyncError: (err as Error).message })
-        .where(eq(linkedBankAccounts.id, acc.id));
-    }
-  }
+  const { syncAllAccountsForItem } = await import(
+    "../services/plaidSyncService"
+  );
+  const result = await syncAllAccountsForItem(itemId);
+  console.log(
+    `[plaid-webhook] item ${itemId} sync: accounts=${result.perAccount.length} +${result.totalAdded} txns (${result.failedAccounts} failed)`
+  );
 }
 
 async function handleItemError(

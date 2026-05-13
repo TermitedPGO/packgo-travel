@@ -728,3 +728,88 @@ export const bookingFollowupQueue = new Queue<
 });
 
 console.log("✅ Booking followup queue initialized");
+
+// ============================================================================
+// Plaid Daily Sync Queue — catch-up safety net (Phase 1.5).
+//
+// Webhooks deliver sub-minute latency under normal conditions, but
+// Plaid's documentation explicitly recommends a daily catch-up sync
+// against /transactions/sync for any item that hasn't received a
+// SYNC_UPDATES_AVAILABLE webhook in the last 24 hours. Reasons:
+//   - Webhooks can be missed if our server was down during a burst
+//   - HISTORICAL_UPDATE for a brand-new item can take 24h+; the daily
+//     run picks up the tail of that backfill
+//   - Some institutions only refresh nightly anyway, so polling on the
+//     same cadence is sufficient
+//
+// Cadence: 05:00 UTC daily = 22:00 PT prev day = 13:00 Taipei. After
+// US bank overnight settlement, before Jeff starts his morning.
+// ============================================================================
+
+export interface PlaidDailySyncJobData {
+  triggeredBy: "schedule" | "manual";
+}
+
+export interface PlaidDailySyncJobResult {
+  totalAccounts: number;
+  totalAdded: number;
+  totalModified: number;
+  totalRemoved: number;
+  failedAccounts: number;
+}
+
+export const plaidDailySyncQueue = new Queue<
+  PlaidDailySyncJobData,
+  PlaidDailySyncJobResult
+>("plaid-daily-sync", {
+  connection: redisBullMQ,
+  defaultJobOptions: {
+    // Plaid /transactions/sync is rate-limited per item but generous;
+    // 2 attempts with 60s backoff is enough for transient 5xx.
+    attempts: 2,
+    backoff: { type: "exponential", delay: 60_000 },
+    removeOnComplete: { age: 604_800, count: 60 }, // 7 days
+    removeOnFail: { age: 2_592_000, count: 30 },   // 30 days
+  },
+});
+
+/**
+ * Schedule daily Plaid sync at 05:00 UTC (22:00 PT prev day).
+ * Idempotent — removes existing repeatable before re-adding so
+ * boot won't accumulate dupes across restarts.
+ */
+export async function schedulePlaidDailySync() {
+  const repeatableJobs = await plaidDailySyncQueue.getRepeatableJobs();
+  for (const job of repeatableJobs) {
+    if (job.name === "plaid-daily-sync") {
+      await plaidDailySyncQueue.removeRepeatableByKey(job.key);
+    }
+  }
+  await plaidDailySyncQueue.add(
+    "plaid-daily-sync",
+    { triggeredBy: "schedule" },
+    {
+      repeat: {
+        pattern: "0 5 * * *", // 05:00 UTC = 22:00 PT prev day
+      },
+      jobId: "plaid-daily-sync-scheduled",
+    }
+  );
+  console.log(
+    "✅ Plaid daily sync scheduled: 05:00 UTC (22:00 PT prev day / 13:00 Taipei)"
+  );
+}
+
+/**
+ * Manually trigger a Plaid sync for all active accounts (admin debug).
+ */
+export async function triggerManualPlaidSync(userId?: number) {
+  const jobId = `plaid-sync-manual-${Date.now()}`;
+  return await plaidDailySyncQueue.add(
+    "plaid-daily-sync-manual",
+    { triggeredBy: "manual", triggeredByUserId: userId } as any,
+    { jobId }
+  );
+}
+
+console.log("✅ Plaid daily sync queue initialized");

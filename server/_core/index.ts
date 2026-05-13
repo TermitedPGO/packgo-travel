@@ -543,6 +543,19 @@ async function startServer() {
     console.warn('[Startup] Failed to init booking followup worker:', err);
   }
 
+  // Phase 1.5: Plaid daily sync — catch-up cron at 05:00 UTC. Webhooks
+  // give sub-minute latency during normal ops, but Plaid recommends a
+  // daily safety-net /transactions/sync against every item in case any
+  // webhook was missed. The worker is registered even if PLAID_CLIENT_ID
+  // is unset — it no-ops at runtime so dev doesn't choke on missing keys.
+  try {
+    const { schedulePlaidDailySync } = await import('../queue');
+    await schedulePlaidDailySync();
+    await import('../plaidSyncWorker');
+  } catch (err) {
+    console.warn('[Startup] Failed to schedule Plaid daily sync:', err);
+  }
+
   // Round 80.22 Phase C: Packpoint daily maintenance — auto-upgrade tier,
   // 18-month inactivity expiry, birthday bonus. Runs at 02:00 UTC (10:00
   // Taipei). Idempotent on each user-level mutation.
