@@ -1,122 +1,188 @@
 [
   {
     "file": "client/src/pages/BookTour.tsx",
-    "line": 154,
+    "line": 176,
     "text": "請先選擇出發日期",
     "score": 17
   },
   {
+    "file": "client/src/components/admin/TourEditDialog.tsx",
+    "line": 2043,
+    "text": "所有變更已同步",
+    "score": 13
+  },
+  {
     "file": "client/src/components/Footer.tsx",
-    "line": 125,
+    "line": 153,
     "text": "查看真實評價 →",
     "score": 13
   },
   {
     "file": "client/src/components/Footer.tsx",
-    "line": 138,
+    "line": 166,
     "text": "查看真實評價 →",
     "score": 13
   },
   {
-    "file": "client/src/components/admin/AiQuotesTab.tsx",
-    "line": 51,
-    "text": "已標記為轉單",
+    "file": "client/src/components/admin/TourEditDialog.tsx",
+    "line": 2042,
+    "text": "尚未儲存的變更會在關閉時遺失",
+    "score": 12
+  },
+  {
+    "file": "client/src/components/admin/PackpointTab.tsx",
+    "line": 71,
+    "text": "找不到此用戶",
     "score": 10
   },
   {
-    "file": "client/src/components/admin/AiQuotesTab.tsx",
-    "line": 55,
-    "text": "更新失敗：",
+    "file": "client/src/components/admin/PackpointTab.tsx",
+    "line": 74,
+    "text": "搜尋失敗",
     "score": 10
   },
   {
-    "file": "client/src/components/admin/InvoicesTab.tsx",
-    "line": 41,
-    "text": "狀態已更新",
+    "file": "client/src/components/admin/PostersTab.tsx",
+    "line": 214,
+    "text": "上傳失敗:",
     "score": 10
   },
   {
-    "file": "client/src/components/admin/InvoicesTab.tsx",
-    "line": 43,
-    "text": "失敗：",
+    "file": "client/src/components/admin/PostersTab.tsx",
+    "line": 410,
+    "text": "已標記為已審核",
     "score": 10
   },
   {
-    "file": "client/src/components/admin/MarketingContentTab.tsx",
-    "line": 77,
-    "text": "生成失敗：",
+    "file": "client/src/components/admin/PostersTab.tsx",
+    "line": 417,
+    "text": "已封存",
     "score": 10
   },
   {
-    "file": "client/src/components/admin/MarketingContentTab.tsx",
-    "line": 82,
-    "text": "已複製到剪貼簿",
+    "file": "client/src/components/admin/PostersTab.tsx",
+    "line": 627,
+    "text": "複製失敗",
     "score": 10
   },
   {
-    "file": "client/src/components/admin/ReconciliationTab.tsx",
-    "line": 77,
-    "text": "對帳完成",
+    "file": "client/src/components/admin/ReviewsTab.tsx",
+    "line": 58,
+    "text": "已拒絕並通知作者",
     "score": 10
   },
   {
-    "file": "client/src/components/admin/ReconciliationTab.tsx",
-    "line": 79,
-    "text": "失敗：",
+    "file": "client/src/components/admin/ReviewsTab.tsx",
+    "line": 67,
+    "text": "已隱藏",
     "score": 10
   },
   {
-    "file": "client/src/components/admin/WechatAssistTab.tsx",
-    "line": 55,
-    "text": "已生成 AI 草稿",
+    "file": "client/src/components/admin/tours/ToursTabBulkImportDialog.tsx",
+    "line": 62,
+    "text": "請選擇雄獅分類",
     "score": 10
   },
   {
-    "file": "client/src/components/admin/WechatAssistTab.tsx",
-    "line": 60,
-    "text": "失敗：",
+    "file": "client/src/components/admin/tours/ToursTabCreateDialog.tsx",
+    "line": 140,
+    "text": "請選擇雄獅分類",
     "score": 10
   },
   {
-    "file": "client/src/components/admin/WechatAssistTab.tsx",
-    "line": 69,
-    "text": "失敗：",
+    "file": "client/src/components/admin/VouchersTab.tsx",
+    "line": 71,
+    "text": "已標記為已使用",
     "score": 10
   },
   {
-    "file": "client/src/components/admin/WechatAssistTab.tsx",
-    "line": 75,
-    "text": "已略過",
+    "file": "client/src/components/admin/VouchersTab.tsx",
+    "line": 83,
+    "text": "複製 ${code}",
     "score": 10
   },
   {
-    "file": "client/src/components/admin/WechatAssistTab.tsx",
-    "line": 78,
-    "text": "失敗：",
+    "file": "client/src/pages/Profile.tsx",
+    "line": 504,
+    "text": "推薦連結已複製",
     "score": 10
   },
   {
-    "file": "client/src/components/admin/WechatAssistTab.tsx",
-    "line": 207,
-    "text": "已複製到剪貼簿",
-    "score": 10
-  },
-  {
-    "file": "client/src/pages/Tours.tsx",
-    "line": 80,
-    "text": "最多比較 3 個行程",
-    "score": 10
-  },
-  {
-    "file": "client/src/components/admin/MarketingContentTab.tsx",
-    "line": 75,
-    "text": "生成 ${data.drafts.length} 則草稿",
+    "file": "client/src/components/admin/PackpointTab.tsx",
+    "line": 45,
+    "text": "調整完成 — 新餘額 ${res.newBalance.toLocaleString()} pts",
     "score": 9
   },
   {
-    "file": "client/src/components/admin/WechatAssistTab.tsx",
-    "line": 66,
-    "text": "已核准；請複製訊息傳送至 WeChat",
+    "file": "client/src/components/admin/PackpointTab.tsx",
+    "line": 61,
+    "text": "輸入 email 才能搜尋",
+    "score": 9
+  },
+  {
+    "file": "client/src/components/admin/PostersTab.tsx",
+    "line": 186,
+    "text": "已開始生成 PACK&GO 版本(~30 秒)",
+    "score": 9
+  },
+  {
+    "file": "client/src/components/admin/PostersTab.tsx",
+    "line": 222,
+    "text": "請先放入供應商海報圖片",
+    "score": 9
+  },
+  {
+    "file": "client/src/components/admin/PostersTab.tsx",
+    "line": 403,
+    "text": "已重新提交 AI 生圖,~30 秒後完成",
+    "score": 9
+  },
+  {
+    "file": "client/src/components/admin/PostersTab.tsx",
+    "line": 624,
+    "text": "已複製 ${PLATFORM_LABEL[platform]} 文案",
+    "score": 9
+  },
+  {
+    "file": "client/src/components/admin/PostersTab.tsx",
+    "line": 645,
+    "text": "已標記 ${PLATFORM_LABEL[platform]} 為已發布",
+    "score": 9
+  },
+  {
+    "file": "client/src/components/admin/tours/ToursTabBulkImportDialog.tsx",
+    "line": 56,
+    "text": "匯入失敗：${err.message}",
+    "score": 9
+  },
+  {
+    "file": "client/src/components/admin/tours/ToursTabCreateDialog.tsx",
+    "line": 131,
+    "text": "匯入失敗：${err.message}",
+    "score": 9
+  },
+  {
+    "file": "client/src/components/PhotoUploadSection.tsx",
+    "line": 83,
+    "text": "照片 ${i + 1} 上傳失敗:${err.message || \"unknown\"}",
+    "score": 9
+  },
+  {
+    "file": "client/src/pages/BookingDetail.tsx",
+    "line": 481,
+    "text": "評論已送出,審核通過後可獲得 +50 Packpoint",
+    "score": 9
+  },
+  {
+    "file": "client/src/pages/Profile.tsx",
+    "line": 485,
+    "text": "生日已儲存!到你生日當天會自動發 100 Packpoint",
+    "score": 9
+  },
+  {
+    "file": "client/src/pages/Rewards.tsx",
+    "line": 69,
+    "text": "兌換成功!Voucher 代碼:${res.code}",
     "score": 9
   }
 ]
