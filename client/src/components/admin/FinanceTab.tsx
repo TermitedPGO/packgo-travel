@@ -8,13 +8,14 @@
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState } from "react";
-import { Calculator, Receipt, DollarSign } from "lucide-react";
+import { Calculator, Receipt, DollarSign, Landmark } from "lucide-react";
 import ReconciliationTab from "./ReconciliationTab";
 import InvoicesTab from "./InvoicesTab";
 import AccountingTab from "./AccountingTab";
+import BankAccountsTab from "./BankAccountsTab";
 import { useLocale } from "@/contexts/LocaleContext";
 
-type FinanceSubTab = "reconcile" | "invoices" | "accounting";
+type FinanceSubTab = "reconcile" | "invoices" | "accounting" | "bankAccounts";
 
 export default function FinanceTab() {
   const { t } = useLocale();
@@ -23,9 +24,10 @@ export default function FinanceTab() {
   const [activeTab, setActiveTab] = useState<FinanceSubTab>("reconcile");
 
   const tabs: { id: FinanceSubTab; icon: any; label: string; desc: string }[] = [
-    { id: "reconcile",  icon: Calculator,  label: t("financeTab.reconcileLabel"),  desc: t("financeTab.reconcileDesc") },
-    { id: "invoices",   icon: Receipt,     label: t("financeTab.invoicesLabel"),   desc: t("financeTab.invoicesDesc") },
-    { id: "accounting", icon: DollarSign,  label: t("financeTab.accountingLabel"), desc: t("financeTab.accountingDesc") },
+    { id: "reconcile",     icon: Calculator, label: t("financeTab.reconcileLabel"),     desc: t("financeTab.reconcileDesc") },
+    { id: "invoices",      icon: Receipt,    label: t("financeTab.invoicesLabel"),      desc: t("financeTab.invoicesDesc") },
+    { id: "accounting",    icon: DollarSign, label: t("financeTab.accountingLabel"),    desc: t("financeTab.accountingDesc") },
+    { id: "bankAccounts",  icon: Landmark,   label: t("financeTab.bankAccountsLabel"),  desc: t("financeTab.bankAccountsDesc") },
   ];
 
   return (
@@ -67,9 +69,10 @@ export default function FinanceTab() {
 
       {/* Tab Content */}
       <div>
-        {activeTab === "reconcile"  && <ReconciliationTab />}
-        {activeTab === "invoices"   && <InvoicesTab />}
-        {activeTab === "accounting" && <AccountingTab />}
+        {activeTab === "reconcile"     && <ReconciliationTab />}
+        {activeTab === "invoices"      && <InvoicesTab />}
+        {activeTab === "accounting"    && <AccountingTab />}
+        {activeTab === "bankAccounts"  && <BankAccountsTab />}
       </div>
     </div>
   );
