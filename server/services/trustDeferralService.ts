@@ -84,6 +84,19 @@ const AUTOMATCH_DATE_WINDOW_DAYS = Math.max(
   0,
   parseInt(process.env.PLAID_TRUST_AUTOMATCH_DATE_WINDOW_DAYS ?? "2", 10) || 2
 );
+// Q7: when departure is within this many days of the deposit, recognize
+// income on the deposit date instead of deferring to departure. Per Jeff's
+// 2026-05-13 answer (option B), this is 30 days — short-lead bookings
+// crossing year boundaries get attributed to the deposit year, not the
+// departure year. Set to 0 to disable early recognition entirely (strict
+// departure-date attribution).
+const EARLY_RECOGNITION_WINDOW_DAYS = Math.max(
+  0,
+  parseInt(
+    process.env.PLAID_TRUST_EARLY_RECOGNITION_WINDOW_DAYS ?? "30",
+    10
+  ) || 30
+);
 
 // ─── Heuristic matching ────────────────────────────────────────────────────
 //
@@ -309,8 +322,26 @@ export async function processTrustInflow(
   let expectedRecognitionDate: string | null = null;
   if (match?.departureDate) {
     const dep = new Date(match.departureDate);
-    dep.setDate(dep.getDate() + RECOGNITION_OFFSET_DAYS);
-    expectedRecognitionDate = dep.toISOString().slice(0, 10);
+    const deposit = new Date(String(row.txn.date));
+    const daysToDeparture = Math.ceil(
+      (dep.getTime() - deposit.getTime()) / 86_400_000
+    );
+
+    // Q7 early-recognition: short-lead bookings recognize on deposit date.
+    // Keeps year-end attribution simple — a 12/30 deposit for 1/5 departure
+    // is 2026 income, not 2027. Disabled by setting window to 0.
+    if (
+      EARLY_RECOGNITION_WINDOW_DAYS > 0 &&
+      daysToDeparture <= EARLY_RECOGNITION_WINDOW_DAYS
+    ) {
+      expectedRecognitionDate = deposit.toISOString().slice(0, 10);
+      console.log(
+        `[trust-deferral] txn ${row.txn.id} short-lead (${daysToDeparture}d to departure) — recognize on deposit ${expectedRecognitionDate}`
+      );
+    } else {
+      dep.setDate(dep.getDate() + RECOGNITION_OFFSET_DAYS);
+      expectedRecognitionDate = dep.toISOString().slice(0, 10);
+    }
   }
 
   // Insert (idempotent on bankTransactionId)
@@ -469,7 +500,8 @@ export async function linkInflowToBooking(opts: {
   const db = await getDb();
   if (!db) return { success: false, expectedRecognitionDate: null };
 
-  // Get departureDate via bookings → tourDepartures join
+  // Get departureDate via bookings → tourDepartures join + the deferred
+  // row's depositDate for early-recognition check
   const [booking] = await db
     .select({ departureDate: tourDepartures.departureDate })
     .from(bookings)
@@ -477,11 +509,29 @@ export async function linkInflowToBooking(opts: {
     .where(eq(bookings.id, opts.bookingId))
     .limit(1);
 
+  const [deferred] = await db
+    .select({ depositDate: trustDeferredIncome.depositDate })
+    .from(trustDeferredIncome)
+    .where(eq(trustDeferredIncome.id, opts.deferredId))
+    .limit(1);
+
   let expectedRecognitionDate: string | null = null;
-  if (booking?.departureDate) {
+  if (booking?.departureDate && deferred?.depositDate) {
     const dep = new Date(booking.departureDate as any);
-    dep.setDate(dep.getDate() + RECOGNITION_OFFSET_DAYS);
-    expectedRecognitionDate = dep.toISOString().slice(0, 10);
+    const deposit = new Date(String(deferred.depositDate));
+    const daysToDeparture = Math.ceil(
+      (dep.getTime() - deposit.getTime()) / 86_400_000
+    );
+    // Q7 short-lead → recognize on deposit
+    if (
+      EARLY_RECOGNITION_WINDOW_DAYS > 0 &&
+      daysToDeparture <= EARLY_RECOGNITION_WINDOW_DAYS
+    ) {
+      expectedRecognitionDate = deposit.toISOString().slice(0, 10);
+    } else {
+      dep.setDate(dep.getDate() + RECOGNITION_OFFSET_DAYS);
+      expectedRecognitionDate = dep.toISOString().slice(0, 10);
+    }
   }
 
   await db

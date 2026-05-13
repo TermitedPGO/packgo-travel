@@ -58,15 +58,19 @@ export const trustRecognitionWorker = new Worker<
       `[trustRecognitionWorker] ✅ run ${job.id}: scanned=${result.scanned} recognized=${result.recognized} amount=$${result.totalRecognizedAmount.toFixed(2)} skipNoDate=${result.skippedNoDepartureDate} skipNoMatch=${result.skippedNotMatched}`
     );
 
-    // Notify owner if recognition crossed a non-trivial threshold OR if
-    // there are unmatched rows piling up.
-    if (result.recognized > 0 && result.totalRecognizedAmount > 1000) {
+    // Q5 operational reminder: every day, list today's departures + the
+    // amount in trust that Jeff manually needs to move trust → operating.
+    // This is the bridge between the accounting (which is now correct in
+    // the books via recognition) and the actual bank movement.
+    if (result.recognized > 0) {
       await notifyOwner({
-        title: `💰 信託收入認列 — $${result.totalRecognizedAmount.toFixed(2)}`,
+        title: `💰 信託收入認列 — $${result.totalRecognizedAmount.toFixed(2)} 該轉了`,
         content:
-          `${result.recognized} 筆出發前已收的客戶款今天認列為收入。\n` +
-          `這些是已經出發的團 — 錢從信託帳戶 legally transition 到 PACK&GO 名下。\n` +
-          `本月 P&L 會看到對應的 income_booking 跳升。`,
+          `${result.recognized} 筆出發前已收的客戶款今天認列為收入,總額 $${result.totalRecognizedAmount.toFixed(2)}。\n\n` +
+          `📋 **今天該手動操作:**\n` +
+          `1. 從信託帳戶轉 **$${result.totalRecognizedAmount.toFixed(2)}** 到 operating 帳戶\n` +
+          `2. 銀行 app / 網銀內部轉帳即可,系統會在下次 Plaid sync 抓到\n\n` +
+          `本月 P&L 已經反映這筆 income(認列日 = 出發日)。`,
       });
     }
     if (result.skippedNotMatched > 5) {

@@ -33,9 +33,27 @@ When the AccountingAgent classifies a transaction as `income_booking` AND the or
 
 ---
 
-## Open questions for Jeff
+## Jeff's answers (2026-05-13)
 
-These are the rules I'm GUESSING. **You need to confirm or correct each one before I code it.**
+| Question | Jeff's answer | Implementation |
+|---|---|---|
+| Q1 全額 / 部分進信託 | **A**:全額(deposit + 尾款都進信託) | AccountingAgent 已自動處理 — 任何 income_booking + isTrustAccount=1 → 進 trustDeferredIncome |
+| Q2 認列時機 | **A**:出發當天 00:00 | `PLAID_TRUST_RECOGNITION_OFFSET_DAYS=0`(預設值) |
+| Q3 配對策略 + 信心門檻 | **4**:Hybrid 自動配 ≥80 + 手動隊列(80 threshold) | 已實作。`PLAID_TRUST_AUTOMATCH_MIN_CONFIDENCE=80` |
+| Q4 取消 / no-show 處理 | 全退→reverseDeferral;部分退→reverseDeferral + 手續費認列;**no-show → 不 reverse,出發日照常認列** | reverseDeferral 是 admin 手動觸發;no-show 不調用 reverse,recognition cron 會在原本 expectedRecognitionDate 自動認列 |
+| Q5 信託 ↔ Operating 轉帳 | **A**:客戶→Stripe→operating→Jeff 手動轉到 trust + cron 每天提醒「今天出發團要轉 $X 回 operating」 | Trust recognition cron 強化 — 同時在 notification 列出「今天該轉的金額」 |
+| Q6 多階段付款 / 供應商先付 | **A**:$5000 全留信託到出發日,1/5 付供應商從 operating 暫墊,1/15 轉 $2000 回 operating + 認列 $3000 | 不需 code 變更 — agent 把供應商付款分類為 cogs_tour,從 operating 帳戶出,operating ↔ trust 轉帳分類為 transfer(不影響 P&L)。Jeff 出發日從 trust 轉錢回 operating 即可 |
+| Q7 跨年邊界 | **B**:出發 ≤30 天內就當天認列(12/30 付款 1/5 出發 → 認列 2026)。短期出發直接 recognize on deposit date | 新增 `PLAID_TRUST_EARLY_RECOGNITION_WINDOW_DAYS=30`。Service 在 processTrustInflow 時檢查 (departure - deposit) ≤ window → expectedRecognitionDate = depositDate(立刻認列) |
+
+**Status:** Phase 4 implementation matches all 7 answers. Ready to flip
+`PLAID_TRUST_DEFERRAL_ENABLED=true`.
+
+---
+
+## Original questions (preserved for reference)
+
+These are the rules I was GUESSING before Jeff answered. Each one now has
+his confirmation above.
 
 ### Q1. What goes into the trust account?
 
