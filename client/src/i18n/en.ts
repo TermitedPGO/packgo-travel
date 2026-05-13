@@ -5976,6 +5976,10 @@ export const en = {
     plNet: 'Net profit',
     plMargin: 'margin',
     plNeedsReview: 'txns need your review (~{amount})',
+    yearEndExport: 'Year-end export',
+    confirmExport: 'Generate full tax-prep ZIP for {year}? Includes all transactions, Schedule C summary, 1099-NEC vendor list.',
+    toastExportReady: 'ZIP ready ({count} transactions). Opening download…',
+    errExport: 'Year-end export failed: ',
   },
   posterGen: {
     title: 'Poster Composer',

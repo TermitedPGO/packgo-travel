@@ -5978,6 +5978,10 @@ export const zhTW = {
     plNet: '淨利潤',
     plMargin: '利潤率',
     plNeedsReview: '筆交易待 Jeff 確認 (約 {amount})',
+    yearEndExport: '年度匯出',
+    confirmExport: '產出 {year} 年的完整報稅 ZIP?包含所有交易、Schedule C 彙總、1099-NEC 供應商清單。',
+    toastExportReady: 'ZIP 已產生({count} 筆交易),正在開啟下載⋯',
+    errExport: '年度匯出失敗:',
   },
   posterGen: {
     title: '海報 Composer',

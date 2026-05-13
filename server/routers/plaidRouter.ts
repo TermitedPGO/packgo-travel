@@ -677,6 +677,36 @@ export const plaidRouter = router({
       });
     }),
 
+  // ── Phase 6: Year-end export ────────────────────────────────────────────
+
+  /**
+   * Generate a ZIP with full year transaction data + Schedule C summary +
+   * 1099-NEC ready vendor list. Uploads to R2 and returns the URL.
+   * The CPA opens the ZIP; we don't auto-email — admin copies the link
+   * into whichever channel they prefer.
+   *
+   * Year must be the current year or a past year (no future exports).
+   */
+  yearEndExport: adminProcedure
+    .input(
+      z.object({
+        year: z
+          .number()
+          .int()
+          .min(2020)
+          .max(new Date().getFullYear()),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { generateYearEndExport } = await import(
+        "../services/yearEndExportService"
+      );
+      return await generateYearEndExport({
+        userId: ctx.user.id,
+        year: input.year,
+      });
+    }),
+
   // ── Phase 3: AccountingAgent ────────────────────────────────────────────
   //
   // Classify uncategorized bank transactions into PACK&GO's 10-category

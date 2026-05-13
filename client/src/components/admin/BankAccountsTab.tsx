@@ -36,6 +36,7 @@ import {
   ExternalLink,
   TrendingUp,
   TrendingDown,
+  FileArchive,
 } from "lucide-react";
 import { usePlaidLink } from "react-plaid-link";
 import { trpc } from "@/lib/trpc";
@@ -155,6 +156,19 @@ export default function BankAccountsTab() {
     onError: (err) => toast.error(t("bankAccounts.errRemove") + err.message),
   });
 
+  const yearEndMut = trpc.plaid.yearEndExport.useMutation({
+    onSuccess: (data) => {
+      toast.success(
+        t("bankAccounts.toastExportReady")
+          .replace("{count}", String(data.fileCounts.transactions))
+      );
+      // Trigger download by opening the signed URL in a new tab
+      window.open(data.url, "_blank", "noopener,noreferrer");
+    },
+    onError: (err) =>
+      toast.error(t("bankAccounts.errExport") + err.message),
+  });
+
   // Plaid Link integration — config is reactive on linkToken
   const handleSuccess = useCallback(
     (publicToken: string) => {
@@ -221,7 +235,32 @@ export default function BankAccountsTab() {
             {t("bankAccounts.subtitle")}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          {accountsList.length > 0 && (
+            <Button
+              onClick={() => {
+                const year = new Date().getFullYear();
+                if (
+                  confirm(
+                    t("bankAccounts.confirmExport").replace(
+                      "{year}",
+                      String(year)
+                    )
+                  )
+                ) {
+                  yearEndMut.mutate({ year });
+                }
+              }}
+              disabled={yearEndMut.isPending}
+              variant="outline"
+              className="rounded-lg"
+            >
+              <FileArchive
+                className={`h-4 w-4 mr-2 ${yearEndMut.isPending ? "animate-pulse" : ""}`}
+              />
+              {t("bankAccounts.yearEndExport")}
+            </Button>
+          )}
           <Button
             onClick={() => syncMut.mutate(undefined)}
             disabled={syncMut.isPending || accountsList.length === 0}
