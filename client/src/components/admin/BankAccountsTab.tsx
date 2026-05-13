@@ -34,6 +34,8 @@ import {
   AlertCircle,
   Plus,
   ExternalLink,
+  TrendingUp,
+  TrendingDown,
 } from "lucide-react";
 import { usePlaidLink } from "react-plaid-link";
 import { trpc } from "@/lib/trpc";
@@ -189,6 +191,20 @@ export default function BankAccountsTab() {
   const handleStartLink = () => {
     createLinkTokenMut.mutate();
   };
+
+  // Month-to-date P&L for the "本月損益" card
+  const monthRange = useMemo(() => {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    return {
+      startDate: start.toISOString().slice(0, 10),
+      endDate: now.toISOString().slice(0, 10),
+    };
+  }, []);
+
+  const { data: plReport } = trpc.plaid.profitLossReport.useQuery(monthRange, {
+    enabled: (accounts?.length ?? 0) > 0,
+  });
 
   const accountsList = accounts ?? [];
   const txns = txnData?.items ?? [];
@@ -389,6 +405,82 @@ export default function BankAccountsTab() {
                 </div>
               );
             })}
+        </div>
+      )}
+
+      {/* Month-to-date P&L summary */}
+      {plReport && plReport.transactionCount > 0 && (
+        <div className="mt-8">
+          <div className="flex items-end justify-between flex-wrap gap-4 mb-3">
+            <div>
+              <h3 className="text-lg font-bold text-gray-900">
+                {t("bankAccounts.mtdPLTitle")}
+              </h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {t("bankAccounts.mtdPLSubtitle")
+                  .replace("{start}", monthRange.startDate)
+                  .replace("{end}", monthRange.endDate)}
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="rounded-xl border border-gray-200 bg-white p-4">
+              <div className="flex items-center gap-1.5 text-xs text-gray-500 mb-1">
+                <TrendingUp className="h-3 w-3 text-green-600" />
+                {t("bankAccounts.plIncome")}
+              </div>
+              <div className="text-xl font-bold text-gray-900">
+                {fmtMoney(plReport.income.total)}
+              </div>
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-white p-4">
+              <div className="flex items-center gap-1.5 text-xs text-gray-500 mb-1">
+                <TrendingDown className="h-3 w-3 text-orange-600" />
+                {t("bankAccounts.plCogs")}
+              </div>
+              <div className="text-xl font-bold text-gray-900">
+                {fmtMoney(plReport.expenses.cogs)}
+              </div>
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-white p-4">
+              <div className="flex items-center gap-1.5 text-xs text-gray-500 mb-1">
+                <TrendingDown className="h-3 w-3 text-red-600" />
+                {t("bankAccounts.plOperating")}
+              </div>
+              <div className="text-xl font-bold text-gray-900">
+                {fmtMoney(plReport.expenses.operating)}
+              </div>
+            </div>
+            <div
+              className={`rounded-xl border p-4 ${
+                plReport.netProfit >= 0
+                  ? "border-green-200 bg-green-50"
+                  : "border-red-200 bg-red-50"
+              }`}
+            >
+              <div className="text-xs text-gray-600 mb-1">
+                {t("bankAccounts.plNet")}
+              </div>
+              <div
+                className={`text-xl font-bold ${
+                  plReport.netProfit >= 0 ? "text-green-700" : "text-red-700"
+                }`}
+              >
+                {fmtMoney(plReport.netProfit)}
+              </div>
+              <div className="text-xs text-gray-500 mt-0.5">
+                {plReport.profitMargin.toFixed(1)}%{" "}
+                {t("bankAccounts.plMargin")}
+              </div>
+            </div>
+          </div>
+          {plReport.needsReviewCount > 0 && (
+            <div className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+              ⚠️ {plReport.needsReviewCount}{" "}
+              {t("bankAccounts.plNeedsReview")
+                .replace("{amount}", fmtMoney(plReport.needsReviewAmount))}
+            </div>
+          )}
         </div>
       )}
 

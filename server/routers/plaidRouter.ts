@@ -627,6 +627,56 @@ export const plaidRouter = router({
       return { success: true };
     }),
 
+  // ── Phase 5: P&L from bank transactions ─────────────────────────────────
+
+  /**
+   * Build a Schedule-C-aligned P&L for a date range. Reads bankTransactions,
+   * sums by jeffOverrideCategory ?? agentCategory, returns income / expenses
+   * / gross profit / net profit / needs-review surface.
+   *
+   * Use cases:
+   *   - Admin "本月損益" card on dashboard
+   *   - Monthly digest email
+   *   - Year-end Schedule C draft input
+   */
+  profitLossReport: adminProcedure
+    .input(
+      z.object({
+        startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const { generateBankPL } = await import("../services/bankPLService");
+      return await generateBankPL({
+        userId: ctx.user.id,
+        startDate: input.startDate,
+        endDate: input.endDate,
+      });
+    }),
+
+  /**
+   * Monthly trend (income / COGS / operating / netProfit) for the last
+   * N months. Used by the dashboard chart.
+   */
+  profitLossTrend: adminProcedure
+    .input(
+      z
+        .object({
+          months: z.number().int().min(1).max(36).default(12),
+        })
+        .optional()
+    )
+    .query(async ({ ctx, input }) => {
+      const { generateBankMonthlyTrend } = await import(
+        "../services/bankPLService"
+      );
+      return await generateBankMonthlyTrend({
+        userId: ctx.user.id,
+        months: input?.months ?? 12,
+      });
+    }),
+
   // ── Phase 3: AccountingAgent ────────────────────────────────────────────
   //
   // Classify uncategorized bank transactions into PACK&GO's 10-category
