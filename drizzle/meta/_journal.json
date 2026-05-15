@@ -519,6 +519,13 @@
       "when": 1779025000000,
       "tag": "0073_audit_log_hashchain",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "5",
+      "when": 1778874085461,
+      "tag": "0074_supplier_sync",
+      "breakpoints": true
     }
   ]
 }

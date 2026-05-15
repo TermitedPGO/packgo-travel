@@ -2664,3 +2664,215 @@ export const trustDeferredIncome = mysqlTable(
 export type TrustDeferredIncome = typeof trustDeferredIncome.$inferSelect;
 export type InsertTrustDeferredIncome =
   typeof trustDeferredIncome.$inferInsert;
+
+/**
+ * ─────────────────────────────────────────────────────────────────────
+ *  Supplier Product Sync (PACK&GO 供應商產品自動同步)
+ * ─────────────────────────────────────────────────────────────────────
+ *
+ *  See `docs/SUPPLIER_SYNC_DESIGN.md` (forthcoming) and Jeff's research
+ *  PDF dated 2026-05-15. Two suppliers wired in Phase 1:
+ *    • lion  — 雄獅旅遊 (Lion Travel), TWD, 4,430+ products
+ *    • uv    — UV Bookings / ToursBMS, USD, 1,124 products
+ *
+ *  Architecture: the SUPPLIER OWNS the source of truth for product
+ *  content, price, and inventory. PACK&GO mirrors a normalized snapshot
+ *  into these tables once per day (full sync) and re-fetches "hot"
+ *  products hourly. Customer browses /catalog, clicks "詢問" → inquiry
+ *  flow (Phase 1) or "立即下單" → Playwright auto-books in BMS (Phase 3).
+ *
+ *  Pricing per Jeff's call: display 直客價 (retail). PACK&GO's margin
+ *  comes from supplier commission (同業價 < 直客價 spread), not from
+ *  per-row markup. agentPrice column kept for internal reporting only.
+ *
+ *  Availability per Jeff's call: 3-tier (available / limited / full),
+ *  computed from spareSeats. Raw seat count NEVER shown to customers
+ *  to reduce stockout disputes.
+ */
+
+/**
+ * Registry of supply sources. New supplier integrations get one row each.
+ * `credentialsEncrypted` holds BMS login / API keys for Phase 3 (Playwright
+ * auto-book). Encrypted via server/_core/tokenCrypto.ts AES-256-GCM.
+ */
+export const suppliers = mysqlTable("suppliers", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Short stable code: "lion" / "uv". Used everywhere as the FK key. */
+  code: varchar("code", { length: 32 }).notNull().unique(),
+  displayName: varchar("displayName", { length: 128 }).notNull(),
+  /** Base URL of the supplier's public catalog API. Phase 1 only reads from this. */
+  baseUrl: varchar("baseUrl", { length: 512 }).notNull(),
+  /** ISO 4217. Used for FX display; Stripe converts at checkout. */
+  defaultCurrency: varchar("defaultCurrency", { length: 3 }).notNull(),
+  /** BMS login / API token, AES-256-GCM enc (Phase 3). */
+  credentialsEncrypted: text("credentialsEncrypted"),
+  isActive: boolean("isActive").default(true).notNull(),
+  /** Last successful full-sync end timestamp; null until first run. */
+  lastFullSyncAt: timestamp("lastFullSyncAt"),
+  /** Last successful hot-product sync end timestamp; null until first run. */
+  lastHotSyncAt: timestamp("lastHotSyncAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Supplier = typeof suppliers.$inferSelect;
+export type InsertSupplier = typeof suppliers.$inferInsert;
+
+/**
+ * One row per supplier product (Lion's GroupCode, UV's productId).
+ * `rawProductJson` stores the full supplier response so renderers can read
+ * fields we haven't normalized yet (saves a migration every time we want
+ * to surface another field).
+ *
+ * `isHiddenByAdmin` is Jeff's manual override — lets him hide an
+ * inappropriate / sold-out / brand-mismatched product without waiting
+ * for the supplier to remove it.
+ */
+export const supplierProducts = mysqlTable(
+  "supplierProducts",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    supplierId: int("supplierId").notNull(),
+    /** Lion: GroupCode (e.g. "GG250715D"); UV: productId. */
+    externalProductCode: varchar("externalProductCode", { length: 128 }).notNull(),
+    title: varchar("title", { length: 512 }).notNull(),
+    days: int("days").notNull().default(0),
+    departureCity: varchar("departureCity", { length: 128 }),
+    destinationCountry: varchar("destinationCountry", { length: 128 }),
+    destinationCity: varchar("destinationCity", { length: 128 }),
+    /** Direct URL to supplier-hosted cover image. */
+    imageUrl: varchar("imageUrl", { length: 1024 }),
+    /** Inherited from supplier; can differ per-product if supplier sells multi-currency. */
+    currency: varchar("currency", { length: 3 }).notNull(),
+    /**
+     * Catalog status. 'active' shows in /catalog; 'inactive' hides
+     * (e.g. supplier removed it); 'pending' = found but missing required fields.
+     */
+    status: mysqlEnum("status", ["active", "inactive", "pending"]).default("active").notNull(),
+    /** Jeff's manual hide toggle in admin panel. ANDed with status. */
+    isHiddenByAdmin: boolean("isHiddenByAdmin").default(false).notNull(),
+    /** Full raw response from supplier — mediumtext can hold ~16MB which is plenty. */
+    rawProductJson: mediumtext("rawProductJson"),
+    lastSyncedAt: timestamp("lastSyncedAt").defaultNow().notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => ({
+    supplierExternalIdx: unique("uniq_supplier_external").on(
+      table.supplierId,
+      table.externalProductCode
+    ),
+    statusIdx: index("idx_supplier_status").on(table.supplierId, table.status, table.isHiddenByAdmin),
+    destinationIdx: index("idx_destination").on(table.destinationCountry),
+  })
+);
+
+export type SupplierProduct = typeof supplierProducts.$inferSelect;
+export type InsertSupplierProduct = typeof supplierProducts.$inferInsert;
+
+/**
+ * One row per departure date per product. This is the "team-period"
+ * (團期 / 出發日) row.
+ *
+ * `availability` is the 3-tier display bucket per Jeff's call:
+ *   - 'available'  : spareSeats > 5 (or > 30% of totalSeats)
+ *   - 'limited'    : 1 ≤ spareSeats ≤ 5
+ *   - 'full'       : spareSeats = 0 OR status="額滿"
+ *   - 'unavailable': supplier returns status="停售" / closed for sale
+ * The raw spareSeats is stored but NEVER rendered in the customer UI.
+ */
+export const supplierDepartures = mysqlTable(
+  "supplierDepartures",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    supplierProductId: int("supplierProductId").notNull(),
+    supplierId: int("supplierId").notNull(),
+    /** Lion: TeamGroupCode (e.g. "GG2507150A"); UV: departureId. */
+    externalDepartureCode: varchar("externalDepartureCode", { length: 128 }).notNull(),
+    departureDate: date("departureDate").notNull(),
+    /** 直客價 / retail price — what we show customers. */
+    retailPrice: decimal("retailPrice", { precision: 14, scale: 2 }).notNull(),
+    /** 同業價 / agent (cost) price — internal margin reporting only. */
+    agentPrice: decimal("agentPrice", { precision: 14, scale: 2 }),
+    currency: varchar("currency", { length: 3 }).notNull(),
+    totalSeats: int("totalSeats").default(0).notNull(),
+    /** Raw seat count from supplier. NEVER show in customer UI. */
+    spareSeats: int("spareSeats").default(0).notNull(),
+    availability: mysqlEnum("availability", [
+      "available",
+      "limited",
+      "full",
+      "unavailable",
+    ])
+      .default("available")
+      .notNull(),
+    rawDepartureJson: mediumtext("rawDepartureJson"),
+    lastSyncedAt: timestamp("lastSyncedAt").defaultNow().notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => ({
+    productExternalIdx: unique("uniq_product_external_dep").on(
+      table.supplierProductId,
+      table.externalDepartureCode
+    ),
+    productDateIdx: index("idx_product_date").on(
+      table.supplierProductId,
+      table.departureDate
+    ),
+    availabilityIdx: index("idx_availability").on(
+      table.availability,
+      table.departureDate
+    ),
+  })
+);
+
+export type SupplierDeparture = typeof supplierDepartures.$inferSelect;
+export type InsertSupplierDeparture = typeof supplierDepartures.$inferInsert;
+
+/**
+ * Audit log for every sync execution. One row per BullMQ job run.
+ * Lets the admin panel show a history of syncs + flag streaks of
+ * failures (e.g. when supplier changes their API format).
+ *
+ * `kind`:
+ *   - 'full'   : daily 03:00 UTC pull of all products
+ *   - 'hot'    : hourly re-pull of products with status='active' and
+ *                a departure in the next 14 days
+ *   - 'manual' : admin-triggered "Sync now" from the panel
+ *   - 'detail' : on-demand single-product detail fetch
+ */
+export const supplierSyncRuns = mysqlTable(
+  "supplierSyncRuns",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    supplierId: int("supplierId").notNull(),
+    kind: mysqlEnum("kind", ["full", "hot", "manual", "detail"]).notNull(),
+    startedAt: timestamp("startedAt").defaultNow().notNull(),
+    finishedAt: timestamp("finishedAt"),
+    productsScanned: int("productsScanned").default(0).notNull(),
+    productsAdded: int("productsAdded").default(0).notNull(),
+    productsUpdated: int("productsUpdated").default(0).notNull(),
+    productsDeactivated: int("productsDeactivated").default(0).notNull(),
+    departuresScanned: int("departuresScanned").default(0).notNull(),
+    departuresUpdated: int("departuresUpdated").default(0).notNull(),
+    status: mysqlEnum("status", ["running", "success", "failed", "partial"])
+      .default("running")
+      .notNull(),
+    durationMs: int("durationMs"),
+    errorMessage: text("errorMessage"),
+    /** Bull job id so admin panel can deep-link to a specific run. */
+    bullJobId: varchar("bullJobId", { length: 128 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (table) => ({
+    supplierStartIdx: index("idx_supplier_started").on(
+      table.supplierId,
+      table.startedAt
+    ),
+    statusIdx: index("idx_run_status").on(table.status, table.startedAt),
+  })
+);
+
+export type SupplierSyncRun = typeof supplierSyncRuns.$inferSelect;
+export type InsertSupplierSyncRun = typeof supplierSyncRuns.$inferInsert;
