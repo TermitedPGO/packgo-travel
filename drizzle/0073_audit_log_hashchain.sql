@@ -28,8 +28,18 @@
 -- VARCHAR(64) (not CHAR) to match the Drizzle schema's varchar() decl
 -- so `drizzle-kit push` doesn't report drift. SHA-256-hex is always
 -- exactly 64 chars so no padding semantics matter either way.
+--
+-- 2026-05-15: split into TWO separate ALTER TABLEs (not one ALTER with
+-- two ADDs) because TiDB Cloud rejects `AFTER previousHash` when the
+-- column was added in the same statement (MySQL accepts this, TiDB
+-- doesn't yet). The previous single-ALTER form failed with:
+--   ER_BAD_FIELD_ERROR: Unknown column 'previoushash' in 'adminAuditLog'
+-- Two separate ALTERs run sequentially and `AFTER previousHash` resolves
+-- after the first ALTER commits.
 ALTER TABLE `adminAuditLog`
-  ADD COLUMN `previousHash` VARCHAR(64) NULL AFTER `errorMessage`,
+  ADD COLUMN `previousHash` VARCHAR(64) NULL AFTER `errorMessage`;
+
+ALTER TABLE `adminAuditLog`
   ADD COLUMN `rowHash` VARCHAR(64) NULL AFTER `previousHash`;
 
 -- The verifier reads rows id-ascending and needs the hash on each row.
