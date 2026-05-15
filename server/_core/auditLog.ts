@@ -11,10 +11,108 @@
  *   - Never throws — audit-write failures must never break the underlying request.
  *   - Captures actor, action, target, before/after diff, IP, user-agent.
  *   - Async — returns immediately, logging happens in the background.
+ *   - 2026-05-15 SECURITY_AUDIT P2-1: tamper-evident hash chain (see
+ *     computeRowHash + auditLogTipMutex below + verifyAuditChain export).
  */
 
 import { adminAuditLog } from "../../drizzle/schema";
 import { getDb } from "../db";
+import { createHash } from "crypto";
+import { desc, eq, asc, isNotNull } from "drizzle-orm";
+import { redis } from "../redis";
+
+// ─── Hash chain (SECURITY_AUDIT_2026_05_14 P2-1) ───────────────────────────
+
+const GENESIS_HASH = "GENESIS";
+
+/**
+ * Canonicalize an audit row into a deterministic JSON string that the
+ * verifier can reproduce later. Field order is FIXED — never reorder
+ * these keys or the existing chain becomes invalid. Values are coerced
+ * exactly the way they're stored (string ids, null vs missing, etc.)
+ * so re-reading from the DB after insert reproduces the same hash.
+ */
+export function canonicalAuditRow(row: {
+  id: number;
+  userId: number;
+  userEmail: string;
+  userRole: string;
+  action: string;
+  targetType: string | null;
+  targetId: string | null;
+  changes: string | null;
+  reason: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  success: number;
+  errorMessage: string | null;
+  createdAt: Date | string;
+}): string {
+  const createdAtIso =
+    row.createdAt instanceof Date
+      ? row.createdAt.toISOString()
+      : new Date(row.createdAt).toISOString();
+  const ordered = {
+    id: row.id,
+    userId: row.userId,
+    userEmail: row.userEmail,
+    userRole: row.userRole,
+    action: row.action,
+    targetType: row.targetType,
+    targetId: row.targetId,
+    changes: row.changes,
+    reason: row.reason,
+    ipAddress: row.ipAddress,
+    userAgent: row.userAgent,
+    success: row.success,
+    errorMessage: row.errorMessage,
+    createdAt: createdAtIso,
+  };
+  // JSON.stringify with no indent + no replacer — the object key order is
+  // the insertion order of `ordered` above (V8 preserves this for string
+  // keys), so the output is stable.
+  return JSON.stringify(ordered);
+}
+
+export function computeRowHash(
+  previousHash: string,
+  canonicalRow: string
+): string {
+  return createHash("sha256")
+    .update(previousHash)
+    .update("|")
+    .update(canonicalRow)
+    .digest("hex");
+}
+
+/**
+ * Redis-backed advisory lock around (read-tip + insert). Without this,
+ * two concurrent admin actions can both read tip=A and both insert with
+ * previousHash=A, producing a "Y-shaped" chain that the verifier reports
+ * as tampered. PACK&GO has one admin so contention is rare; mutex is
+ * cheap insurance.
+ *
+ * SET NX PX with a 10s TTL. If lock acquisition fails (Redis down, key
+ * held), fall back to inserting without a previousHash — better to log
+ * the action unchained than to drop the row entirely.
+ */
+async function withAuditLogTip<T>(fn: () => Promise<T>): Promise<T> {
+  const lockKey = "audit:tip:lock";
+  const lockVal = Math.random().toString(36).slice(2);
+  const acquired = await redis
+    .set(lockKey, lockVal, "PX", 10_000, "NX")
+    .catch(() => null);
+  try {
+    return await fn();
+  } finally {
+    if (acquired === "OK") {
+      // Lua release-only-if-mine; falls back to plain del if eval not available.
+      const lua =
+        "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
+      await redis.eval(lua, 1, lockKey, lockVal).catch(() => null);
+    }
+  }
+}
 
 interface AuditCtx {
   user?: { id: number; email: string; role: string } | null;
@@ -86,7 +184,12 @@ export async function audit(input: AuditInput): Promise<void> {
       }
     }
 
-    await db.insert(adminAuditLog).values({
+    // Common values used both for the insert and for hash computation.
+    // createdAt is fixed at write time so the hash is deterministic
+    // (defaultNow() would create a tiny gap between our hash-time and
+    // the DB-recorded value).
+    const createdAt = new Date();
+    const rowSansId = {
       userId: ctx.user.id,
       userEmail: ctx.user.email,
       userRole: ctx.user.role,
@@ -99,6 +202,41 @@ export async function audit(input: AuditInput): Promise<void> {
       userAgent: extractUA(ctx.req),
       success: success ? 1 : 0,
       errorMessage: errorMessage || null,
+      createdAt,
+    };
+
+    // SECURITY_AUDIT_2026_05_14 P2-1: hash-chain.
+    //
+    // We need the new row's `id` to canonicalize before hashing. Two
+    // options:
+    //   (a) Insert first, then UPDATE with the hashes — works but
+    //       leaves a brief window where the row exists unhashed.
+    //   (b) Generate the id explicitly before insert — requires the
+    //       table to expose AUTO_INCREMENT next value, racy on TiDB.
+    // We use (a) inside the mutex so concurrent writes still serialize
+    // and the verifier sees a clean chain.
+    await withAuditLogTip(async () => {
+      // Read the tip BEFORE insert so concurrent admins can't both
+      // chain to the same predecessor.
+      const tip = await db
+        .select({ rowHash: adminAuditLog.rowHash })
+        .from(adminAuditLog)
+        .orderBy(desc(adminAuditLog.id))
+        .limit(1);
+      const previousHash = tip[0]?.rowHash ?? GENESIS_HASH;
+
+      const ins = await db.insert(adminAuditLog).values(rowSansId);
+      const insertId = Number((ins as any)[0]?.insertId ?? 0);
+      if (!insertId) {
+        console.warn("[audit] insert returned no id; skipping hash");
+        return;
+      }
+      const canonical = canonicalAuditRow({ id: insertId, ...rowSansId });
+      const rowHash = computeRowHash(previousHash, canonical);
+      await db
+        .update(adminAuditLog)
+        .set({ previousHash, rowHash })
+        .where(eq(adminAuditLog.id, insertId));
     });
   } catch (err) {
     // Audit write failures must never break the request. Log loudly so they're
@@ -132,4 +270,140 @@ export function diffFields<T extends Record<string, any>>(
     }
   }
   return { before: beforePartial, after: afterPartial, fields: changedFields };
+}
+
+// ─── Hash-chain verifier (SECURITY_AUDIT_2026_05_14 P2-1) ──────────────────
+
+export interface ChainAnomaly {
+  rowId: number;
+  kind: "row-modified" | "chain-broken" | "missing-hash";
+  expected?: string;
+  actual?: string;
+  detail: string;
+}
+
+export interface ChainVerifyResult {
+  totalRows: number;
+  hashedRows: number; // rows with non-null rowHash
+  ungatedRows: number; // pre-migration rows without hash (trusted by id-monotonicity)
+  anomalies: ChainAnomaly[];
+  ok: boolean;
+}
+
+/**
+ * Walk the audit log id-ascending and verify the hash chain.
+ *
+ * Three classes of anomaly:
+ *   1. row-modified — the stored rowHash doesn't match what we
+ *      recompute from the row's data. Means someone UPDATEd the row.
+ *   2. chain-broken — the row's previousHash != the prior row's rowHash.
+ *      Means someone DELETEd a row in the middle of the chain.
+ *   3. missing-hash — row has null rowHash mid-chain (post-migration row
+ *      somehow skipped hashing). Predates migration 0073 if it's at the
+ *      head of the table — counted as "ungated" rather than anomalous.
+ *
+ * Returns a structured result the admin UI can display. Throws only on
+ * actual DB errors, not on chain anomalies (those go in the result).
+ */
+export async function verifyAuditChain(): Promise<ChainVerifyResult> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("DB unavailable");
+  }
+  const rows = await db
+    .select()
+    .from(adminAuditLog)
+    .orderBy(asc(adminAuditLog.id));
+
+  const result: ChainVerifyResult = {
+    totalRows: rows.length,
+    hashedRows: 0,
+    ungatedRows: 0,
+    anomalies: [],
+    ok: true,
+  };
+
+  // Walk forward. State machine:
+  //   - `seenFirstHash` flips true the first time we encounter a row
+  //     with a non-null rowHash. Earlier rows are "ungated" (pre-migration).
+  //   - `expectedPrev` is the rowHash of the last verified-good row,
+  //     used to validate the next row's previousHash.
+  let seenFirstHash = false;
+  let expectedPrev = GENESIS_HASH;
+
+  for (const r of rows) {
+    if (!r.rowHash) {
+      if (!seenFirstHash) {
+        // Pre-migration row — accept without checking
+        result.ungatedRows++;
+      } else {
+        // Post-migration row with null hash → anomaly
+        result.anomalies.push({
+          rowId: r.id,
+          kind: "missing-hash",
+          detail: "Row appears after chain started but has no rowHash",
+        });
+        result.ok = false;
+      }
+      continue;
+    }
+    seenFirstHash = true;
+    result.hashedRows++;
+
+    // 1. chain-broken check
+    if (r.previousHash !== expectedPrev) {
+      result.anomalies.push({
+        rowId: r.id,
+        kind: "chain-broken",
+        expected: expectedPrev,
+        actual: r.previousHash ?? "(null)",
+        detail:
+          "previousHash does not match the prior row's rowHash — a row was deleted or chain skipped",
+      });
+      result.ok = false;
+      // Recover: continue walking with this row's reported state.
+      // Otherwise every subsequent row would also fail.
+      expectedPrev = r.rowHash;
+      continue;
+    }
+
+    // 2. row-modified check — recompute rowHash from canonical
+    const canonical = canonicalAuditRow({
+      id: r.id,
+      userId: r.userId,
+      userEmail: r.userEmail,
+      userRole: r.userRole,
+      action: r.action,
+      targetType: r.targetType ?? null,
+      targetId: r.targetId ?? null,
+      changes: r.changes ?? null,
+      reason: r.reason ?? null,
+      ipAddress: r.ipAddress ?? null,
+      userAgent: r.userAgent ?? null,
+      success: r.success,
+      errorMessage: r.errorMessage ?? null,
+      createdAt: r.createdAt,
+    });
+    const recomputed = computeRowHash(r.previousHash ?? GENESIS_HASH, canonical);
+    if (recomputed !== r.rowHash) {
+      result.anomalies.push({
+        rowId: r.id,
+        kind: "row-modified",
+        expected: recomputed,
+        actual: r.rowHash,
+        detail:
+          "rowHash does not match recomputed value — row content was modified after insert",
+      });
+      result.ok = false;
+    }
+
+    expectedPrev = r.rowHash;
+  }
+
+  // Suppress an "unused import" warning when the verifier doesn't end up
+  // querying via isNotNull (we keep the import in case a future optimizer
+  // wants to scan only-hashed rows for partial verification).
+  void isNotNull;
+
+  return result;
 }

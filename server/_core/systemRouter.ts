@@ -92,4 +92,23 @@ export const systemRouter = router({
 
       return { items, nextCursor };
     }),
+
+  /**
+   * SECURITY_AUDIT_2026_05_14 P2-1: verify the audit log hash chain.
+   *
+   * Admin-only. Walks every row id-ascending, recomputes each rowHash
+   * from the canonical row representation + previous hash, and reports
+   * any divergence (row modified after insert, row deleted mid-chain).
+   *
+   * Returns a structured result the UI can display verbatim:
+   *   { totalRows, hashedRows, ungatedRows, anomalies[], ok }
+   *
+   * Cost: O(N) full-table scan. The table is small (admin mutations only,
+   * ~hundreds-to-low-thousands per year) so even a 5-year scan is sub-second.
+   * If it grows beyond ~100k rows, add a cursor and run in chunks.
+   */
+  auditLogVerifyChain: adminProcedure.query(async () => {
+    const { verifyAuditChain } = await import("./auditLog");
+    return await verifyAuditChain();
+  }),
 });

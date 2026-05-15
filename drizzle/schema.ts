@@ -2137,6 +2137,16 @@ export const adminAuditLog = mysqlTable("adminAuditLog", {
   success: int("success").default(1).notNull(), // 0=failure (denied / errored), 1=success
   errorMessage: text("errorMessage"),
 
+  // SECURITY_AUDIT_2026_05_14 P2-1: tamper-evident hash chain (migration 0073).
+  // previousHash references the immediately-prior row's rowHash (literal
+  // "GENESIS" for the first chain entry). rowHash = SHA-256-hex of
+  // previousHash || canonicalRow(this row). The verifier walks the table
+  // id-ascending and recomputes — any divergence flags row modification
+  // or mid-chain deletion. NULL on pre-migration rows; those predate the
+  // chain and are trusted by id-monotonicity + createdAt alone.
+  previousHash: varchar("previousHash", { length: 64 }),
+  rowHash: varchar("rowHash", { length: 64 }),
+
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type AdminAuditLog = typeof adminAuditLog.$inferSelect;

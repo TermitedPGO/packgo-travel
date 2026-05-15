@@ -24,7 +24,14 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { LoadingRow } from "@/components/ui/spinner";
-import { Shield, Filter, Loader2, AlertCircle } from "lucide-react";
+import {
+  Shield,
+  Filter,
+  Loader2,
+  AlertCircle,
+  CheckCircle2,
+  ShieldAlert,
+} from "lucide-react";
 
 type Row = {
   id: number;
@@ -72,6 +79,14 @@ export default function AuditLogTab() {
 
   const rows: Row[] = (data?.items as Row[]) ?? [];
 
+  // SECURITY_AUDIT_2026_05_14 P2-1: hash-chain verifier. Manually triggered
+  // — running on every page load would be wasteful. Result panel appears
+  // below the filters when verification has been run.
+  const verifyChain = trpc.system.auditLogVerifyChain.useQuery(undefined, {
+    enabled: false,
+    refetchOnWindowFocus: false,
+  });
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -84,19 +99,105 @@ export default function AuditLogTab() {
             每筆 admin 變更操作的完整記錄,用於合規與爭議調查
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => refetch()}
-          className="rounded-lg"
-        >
-          {isLoading ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            "重新整理"
-          )}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => verifyChain.refetch()}
+            disabled={verifyChain.isFetching}
+            className="rounded-lg"
+            title="重新計算每筆日誌的 hash chain,偵測竄改 / 刪除"
+          >
+            {verifyChain.isFetching ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                驗證中…
+              </>
+            ) : (
+              <>
+                <Shield className="h-3.5 w-3.5 mr-1.5" />
+                驗證完整性
+              </>
+            )}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refetch()}
+            className="rounded-lg"
+          >
+            {isLoading ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              "重新整理"
+            )}
+          </Button>
+        </div>
       </div>
+
+      {/* Chain-verification result. Appears after the user clicks
+          "驗證完整性"; persists until they click again. Green = clean,
+          red = anomalies (rows modified or deleted mid-chain). */}
+      {verifyChain.data && (
+        <div
+          className={`rounded-xl border p-4 ${
+            verifyChain.data.ok
+              ? "bg-emerald-50 border-emerald-200"
+              : "bg-red-50 border-red-200"
+          }`}
+        >
+          <div className="flex items-start gap-3">
+            {verifyChain.data.ok ? (
+              <CheckCircle2 className="h-5 w-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+            ) : (
+              <ShieldAlert className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+            )}
+            <div className="flex-1 min-w-0">
+              <p
+                className={`text-sm font-semibold ${
+                  verifyChain.data.ok ? "text-emerald-900" : "text-red-900"
+                }`}
+              >
+                {verifyChain.data.ok
+                  ? "Hash chain 完整,未偵測到竄改"
+                  : `偵測到 ${verifyChain.data.anomalies.length} 個異常`}
+              </p>
+              <p className="text-xs text-gray-600 mt-0.5">
+                共 {verifyChain.data.totalRows} 筆日誌
+                {verifyChain.data.hashedRows > 0 && (
+                  <span> · 已加 hash {verifyChain.data.hashedRows}</span>
+                )}
+                {verifyChain.data.ungatedRows > 0 && (
+                  <span> · 遷移前舊資料 {verifyChain.data.ungatedRows}(無 hash)</span>
+                )}
+              </p>
+              {verifyChain.data.anomalies.length > 0 && (
+                <div className="mt-3 space-y-1.5 max-h-48 overflow-y-auto">
+                  {verifyChain.data.anomalies.slice(0, 20).map((a, i) => (
+                    <div
+                      key={i}
+                      className="text-xs bg-white rounded-md border border-red-200 px-2 py-1.5"
+                    >
+                      <span className="font-mono font-semibold text-red-700">
+                        #{a.rowId}
+                      </span>{" "}
+                      <span className="font-mono text-red-600">
+                        [{a.kind}]
+                      </span>{" "}
+                      <span className="text-gray-700">{a.detail}</span>
+                    </div>
+                  ))}
+                  {verifyChain.data.anomalies.length > 20 && (
+                    <p className="text-xs text-gray-500">
+                      …還有 {verifyChain.data.anomalies.length - 20} 個未顯示
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center gap-2 flex-wrap">
         <Filter className="h-3.5 w-3.5 text-gray-400" />
