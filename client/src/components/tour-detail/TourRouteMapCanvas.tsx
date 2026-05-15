@@ -28,15 +28,11 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { Plane } from "lucide-react";
 import {
   ComposableMap,
   Geographies,
   Geography,
-  Marker as GeoMarker,
 } from "react-simple-maps";
-import { geoContains } from "d3-geo";
-import { feature as topoFeature } from "topojson-client";
 // Round 80.21 v21: switched 110m → 50m. The 110m simplification was so
 // aggressive that countries looked like crude polygons (Jeff feedback:
 // "幾何圖形 給出來的感覺就很方方角角"). 50m gives smooth coastlines
@@ -45,238 +41,24 @@ import { feature as topoFeature } from "topojson-client";
 import countries110m from "world-atlas/countries-50m.json";
 import { translateDestination } from "@/utils/locationMapping";
 import { useLocale } from "@/contexts/LocaleContext";
-import { findHillshade } from "./baseMaps";
 
-/**
- * Convert TopoJSON → GeoJSON FeatureCollection once at module scope.
- * Used by activeCountries point-in-polygon check (geoContains) to add
- * countries the route actually traverses. Cost: ~108KB JSON parsed
- * during initial chunk load.
- */
-const COUNTRIES_FC: any = topoFeature(
-  countries110m as any,
-  (countries110m as any).objects.countries
-);
+// v359c — removed the point-in-polygon `activeCountries` machinery
+// (d3-geo geoContains + topojson-client topoFeature + COUNTRIES_FC).
+// It walked every stop × every country polygon on every render to
+// build a Set that was then ignored downstream (computeProjectionConfig
+// `void`-ed the param). Country labels were dropped from the render in
+// v357 so the walk has no visual effect. Reclaimed ~108KB JSON parse
+// at module-load + N×M geoContains calls per render.
 
-/**
- * Map common Chinese / English / alias country names → world-atlas
- * canonical name. Lets us highlight the destination regardless of how
- * the admin entered it.
- */
-const COUNTRY_NAME_MAP: Record<string, string> = {
-  // Europe
-  "瑞士": "Switzerland",
-  "Switzerland": "Switzerland",
-  "義大利": "Italy",
-  "意大利": "Italy",
-  "Italy": "Italy",
-  "法國": "France",
-  "France": "France",
-  "德國": "Germany",
-  "Germany": "Germany",
-  "奧地利": "Austria",
-  "Austria": "Austria",
-  "英國": "United Kingdom",
-  "UK": "United Kingdom",
-  "United Kingdom": "United Kingdom",
-  "西班牙": "Spain",
-  "Spain": "Spain",
-  "葡萄牙": "Portugal",
-  "Portugal": "Portugal",
-  "希臘": "Greece",
-  "Greece": "Greece",
-  "土耳其": "Turkey",
-  "Turkey": "Turkey",
-  "捷克": "Czechia",
-  "Czechia": "Czechia",
-  "Czech Republic": "Czechia",
-  "荷蘭": "Netherlands",
-  "Netherlands": "Netherlands",
-  "比利時": "Belgium",
-  "Belgium": "Belgium",
-  "丹麥": "Denmark",
-  "Denmark": "Denmark",
-  "瑞典": "Sweden",
-  "Sweden": "Sweden",
-  "挪威": "Norway",
-  "Norway": "Norway",
-  "芬蘭": "Finland",
-  "Finland": "Finland",
-  "冰島": "Iceland",
-  "Iceland": "Iceland",
-  "波蘭": "Poland",
-  "Poland": "Poland",
-  "匈牙利": "Hungary",
-  "Hungary": "Hungary",
-  "克羅埃西亞": "Croatia",
-  "Croatia": "Croatia",
-  // Asia
-  "日本": "Japan",
-  "Japan": "Japan",
-  "韓國": "South Korea",
-  "South Korea": "South Korea",
-  "Korea": "South Korea",
-  "中國": "China",
-  "China": "China",
-  "台灣": "Taiwan",
-  "Taiwan": "Taiwan",
-  "新加坡": "Singapore",
-  "Singapore": "Singapore",
-  "馬來西亞": "Malaysia",
-  "Malaysia": "Malaysia",
-  "泰國": "Thailand",
-  "Thailand": "Thailand",
-  "越南": "Vietnam",
-  "Vietnam": "Vietnam",
-  "印尼": "Indonesia",
-  "Indonesia": "Indonesia",
-  "印度": "India",
-  "India": "India",
-  "菲律賓": "Philippines",
-  "Philippines": "Philippines",
-  // Americas
-  "美國": "United States of America",
-  "USA": "United States of America",
-  "United States": "United States of America",
-  "United States of America": "United States of America",
-  "夏威夷": "United States of America",
-  "Hawaii": "United States of America",
-  "加拿大": "Canada",
-  "Canada": "Canada",
-  "墨西哥": "Mexico",
-  "Mexico": "Mexico",
-  "巴西": "Brazil",
-  "Brazil": "Brazil",
-  "阿根廷": "Argentina",
-  "Argentina": "Argentina",
-  "秘魯": "Peru",
-  "Peru": "Peru",
-  // Oceania
-  "澳洲": "Australia",
-  "Australia": "Australia",
-  "紐西蘭": "New Zealand",
-  "New Zealand": "New Zealand",
-};
-
-/**
- * Display label for the country (Chinese name shown inside the map).
- * Falls back to canonical English if we don't have a Chinese mapping.
- */
-const COUNTRY_DISPLAY_LABEL: Record<string, string> = {
-  Switzerland: "瑞士",
-  Italy: "義大利",
-  France: "法國",
-  Germany: "德國",
-  Austria: "奧地利",
-  "United Kingdom": "英國",
-  Spain: "西班牙",
-  Portugal: "葡萄牙",
-  Greece: "希臘",
-  Turkey: "土耳其",
-  Czechia: "捷克",
-  // v340 — Balkans / Eastern Europe additions surfaced by Balkans tour 990011
-  "North Macedonia": "北馬其頓",
-  "Macedonia": "北馬其頓",
-  "Kosovo": "科索沃",
-  "Moldova": "摩爾多瓦",
-  Netherlands: "荷蘭",
-  Belgium: "比利時",
-  Denmark: "丹麥",
-  Sweden: "瑞典",
-  Norway: "挪威",
-  Finland: "芬蘭",
-  Iceland: "冰島",
-  Poland: "波蘭",
-  Hungary: "匈牙利",
-  Croatia: "克羅埃西亞",
-  Slovenia: "斯洛維尼亞",
-  Slovakia: "斯洛伐克",
-  Romania: "羅馬尼亞",
-  Bulgaria: "保加利亞",
-  Serbia: "塞爾維亞",
-  "Bosnia and Herz.": "波士尼亞",
-  Montenegro: "蒙特內哥羅",
-  Albania: "阿爾巴尼亞",
-  Estonia: "愛沙尼亞",
-  Latvia: "拉脫維亞",
-  Lithuania: "立陶宛",
-  Ireland: "愛爾蘭",
-  Luxembourg: "盧森堡",
-  Liechtenstein: "列支敦斯登",
-  Monaco: "摩納哥",
-  Andorra: "安道爾",
-  Russia: "俄羅斯",
-  Ukraine: "烏克蘭",
-  Belarus: "白俄羅斯",
-  Japan: "日本",
-  "South Korea": "韓國",
-  "North Korea": "北韓",
-  // world-atlas occasionally uses different canonical names; map both.
-  "Dem. Rep. Korea": "北韓",
-  "Korea": "韓國",
-  China: "中國",
-  Taiwan: "台灣",
-  Singapore: "新加坡",
-  Malaysia: "馬來西亞",
-  Thailand: "泰國",
-  Vietnam: "越南",
-  Indonesia: "印尼",
-  India: "印度",
-  Philippines: "菲律賓",
-  Cambodia: "柬埔寨",
-  Laos: "寮國",
-  Myanmar: "緬甸",
-  Mongolia: "蒙古",
-  Nepal: "尼泊爾",
-  Bhutan: "不丹",
-  "Sri Lanka": "斯里蘭卡",
-  Pakistan: "巴基斯坦",
-  Bangladesh: "孟加拉",
-  Iran: "伊朗",
-  Iraq: "伊拉克",
-  Israel: "以色列",
-  Jordan: "約旦",
-  Egypt: "埃及",
-  Morocco: "摩洛哥",
-  Tunisia: "突尼西亞",
-  "South Africa": "南非",
-  Kenya: "肯亞",
-  Tanzania: "坦尚尼亞",
-  "United Arab Emirates": "阿拉伯聯合大公國",
-  "Saudi Arabia": "沙烏地阿拉伯",
-  "United States of America": "美國",
-  // v341 — common world-atlas variants for the US
-  "USA": "美國",
-  "U.S.A.": "美國",
-  "United States": "美國",
-  Canada: "加拿大",
-  Mexico: "墨西哥",
-  Brazil: "巴西",
-  Argentina: "阿根廷",
-  Peru: "秘魯",
-  Chile: "智利",
-  Colombia: "哥倫比亞",
-  Ecuador: "厄瓜多",
-  Bolivia: "玻利維亞",
-  Cuba: "古巴",
-  Australia: "澳洲",
-  "New Zealand": "紐西蘭",
-  Fiji: "斐濟",
-};
-
-function resolveActiveCountries(input: string | undefined): Set<string> {
-  if (!input) return new Set();
-  const tokens = input
-    .split(/[、,，/／]/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const result = new Set<string>();
-  for (const t of tokens) {
-    const canonical = COUNTRY_NAME_MAP[t];
-    if (canonical) result.add(canonical);
-  }
-  return result;
-}
+// v359c — removed `COUNTRY_NAME_MAP` (~100 entries) +
+// `COUNTRY_DISPLAY_LABEL` (~100 entries) + `resolveActiveCountries`. The
+// country-highlight / country-label features both got removed from the
+// render between v357 and v359 per Jeff's reference image (cities and
+// arrows tell the story; country silhouettes stay pure white). With the
+// activeCountries useMemo removed, every downstream consumer is gone, so
+// the alias dictionaries become bundle weight with no payoff. If we ever
+// reintroduce country highlighting, recover from git history (commit
+// 95044e4 or earlier).
 
 /**
  * Pull the destination city out of an itinerary day name.
@@ -295,6 +77,52 @@ function extractDestinationCity(name: string): string {
   const last = parts[parts.length - 1]?.trim() || beforeColon;
   return last;
 }
+
+/**
+ * v359c — hoisted out of the marker render closure. The list was previously
+ * re-allocated for every marker on every render, which on a 12-day tour
+ * meant 12× allocation per frame. The keyword set is intentionally
+ * conservative (only iconic Swiss + common European / Japan / Peru
+ * landmarks) — we'd rather miss a star than star every stop.
+ */
+const HIGHLIGHT_KEYWORDS: ReadonlyArray<string> = [
+  // Switzerland
+  "馬特洪峰",
+  "Matterhorn",
+  "冰河3000",
+  "Glacier 3000",
+  "黃金列車",
+  "GoldenPass",
+  "Golden Pass",
+  "冰河列車",
+  "Glacier Express",
+  "西庸古堡",
+  "Chillon",
+  "First Cliff Walk",
+  "懸崖步道",
+  "馬特宏峰",
+  // Italy / France iconic spots
+  "羅浮宮",
+  "Louvre",
+  "凱旋門",
+  "Arc de Triomphe",
+  "艾菲爾",
+  "鐵塔",
+  "Eiffel",
+  "蒙馬特",
+  "Montmartre",
+  "聖母院",
+  "Notre",
+  // Japan iconic
+  "富士山",
+  "Mt. Fuji",
+  "立山黑部",
+  // Peru
+  "馬丘比丘",
+  "Machu Picchu",
+  // Generic indicators of "highlight" stops
+  "古堡",
+];
 
 interface Stop {
   day: number;
@@ -365,24 +193,18 @@ function featureBbox(
   return { minLng, maxLng, minLat, maxLat };
 }
 
-function computeProjectionConfig(
-  stops: Stop[],
-  activeCountryNames: Set<string>
-) {
+function computeProjectionConfig(stops: Stop[]) {
   if (stops.length === 0) {
     return { center: [10, 47] as [number, number], scale: 200 };
   }
-  let minLng = Math.min(...stops.map((s) => s.lng));
-  let maxLng = Math.max(...stops.map((s) => s.lng));
-  let minLat = Math.min(...stops.map((s) => s.lat));
-  let maxLat = Math.max(...stops.map((s) => s.lat));
+  const minLng = Math.min(...stops.map((s) => s.lng));
+  const maxLng = Math.max(...stops.map((s) => s.lng));
+  const minLat = Math.min(...stops.map((s) => s.lat));
+  const maxLat = Math.max(...stops.map((s) => s.lat));
   // Round 80.21 v24: REVERTED the country-centroid expansion. Jeff:
   // "整張地圖不需要這麼大 需要縮放到地圖去的地方" — fit tight to
-  // the actual route. Country labels (e.g. 德國) are placed via the
-  // clamp-to-viewport logic below so they still show inside their
-  // visible country territory even when the centroid is offscreen.
-  // (Suppress unused warning — kept import for future polygon work.)
-  void activeCountryNames;
+  // the actual route. v359c: dropped the now-unused activeCountryNames
+  // parameter (was `void`-ed; country-labels render removed in v357).
   const centerLng = (minLng + maxLng) / 2;
   const centerLat = (minLat + maxLat) / 2;
   // Round 80.21 v31: asymmetric padding. Latitude stays tight (1.08×)
@@ -487,17 +309,11 @@ export default function TourRouteMapCanvas({
   // v317: transport icon hover for distance + duration tooltip
   const [transportHover, setTransportHover] = useState<number | null>(null);
 
-  /**
-   * v333 — pre-rendered sepia hillshade PNG for this region (if available).
-   * Generated once per region by `scripts/fetch-hillshade.mjs`. The PNG
-   * sits as a `<image>` layer ABOVE country fills but BELOW lakes/rivers
-   * so the painted Alpine terrain shows through the cream parchment of
-   * the surrounding lowlands.
-   */
-  const hillshade = useMemo(
-    () => findHillshade({ destinationCountry, stops }),
-    [destinationCountry, stops]
-  );
+  // v359c — removed `hillshade` useMemo + `findHillshade` import. The
+  // sepia hillshade PNG layer was dropped from render in v351 ("Removed
+  // over v340–v357: Lakes / rivers / water labels (v351), Paper grain /
+  // sepia hillshade (v351)"), but the lookup kept firing every render
+  // and the import kept ~6KB of code in the bundle for no reason.
 
   /**
    * Mobile font-scale: SVG content scales with viewBox so on a 390px-
@@ -534,43 +350,15 @@ export default function TourRouteMapCanvas({
   // For zh-TW we keep the original Chinese name as-is.
   const tCity = (s: string) => translateDestination(s, language);
 
-  /**
-   * Active countries set — combines TWO signals so multi-country tours
-   * highlight every country the route actually touches:
-   *
-   *   1. `destinationCountry` from the tour record (e.g. "瑞士") — the
-   *      primary marketing destination.
-   *   2. Geographic point-in-polygon check on every stop. If Day 1's
-   *      "慕尼黑" sits inside Germany's polygon, Germany joins the
-   *      highlighted set even if the admin only entered "瑞士" as the
-   *      destination. Fixes Jeff's feedback: "明明也有到德國為什麼
-   *      不寫上去".
-   */
-  const activeCountries = useMemo(() => {
-    const set = resolveActiveCountries(destinationCountry);
-    // Walk every stop and find which country polygon contains it.
-    // We break on first match (countries don't overlap).
-    for (const stop of stops) {
-      if (!isFinite(stop.lng) || !isFinite(stop.lat)) continue;
-      const point: [number, number] = [stop.lng, stop.lat];
-      for (const f of COUNTRIES_FC.features as any[]) {
-        try {
-          if (geoContains(f as any, point)) {
-            const cname = f.properties?.name;
-            if (cname) set.add(cname);
-            break;
-          }
-        } catch {
-          /* malformed geometry — ignore */
-        }
-      }
-    }
-    return set;
-  }, [destinationCountry, stops]);
+  // v359c — removed `activeCountries` useMemo. It walked every stop ×
+  // every country polygon on every render to build a Set that was only
+  // ever discarded (computeProjectionConfig `void`-ed the parameter and
+  // country labels were dropped from the render in v357). Reclaimed
+  // significant CPU on tours with many stops + clean dependency list.
 
   const projection = useMemo(
-    () => computeProjectionConfig(stops, activeCountries),
-    [stops, activeCountries]
+    () => computeProjectionConfig(stops),
+    [stops]
   );
 
   const dims: MapDimensions = useMemo(
@@ -1070,7 +858,7 @@ export default function TourRouteMapCanvas({
     };
     const labeledCanonical = new Set<string>();
 
-    return uniqueStops.map((p, idx) => {
+    const placements = uniqueStops.map((p, idx) => {
       const [x, y] = p.xy;
       const neigh = neighboursOf[idx];
       const rawCity = rawCities[idx];
@@ -1198,6 +986,102 @@ export default function TourRouteMapCanvas({
         useLeader,
       };
     });
+
+    // v359b — label-label collision iteration. The clustered / 8-direction
+    // placement above positions each label relative to its OWN marker but
+    // never checks whether two labels overlap each other. On dense tours
+    // (Switzerland 990015 with 6 stops in 60km, France 990014 with 3 Paris
+    // markers fanned to a ring) two labels can end up in the same screen
+    // area producing unreadable overlap.
+    //
+    // Algorithm: approximate each label's bounding box from text length ×
+    // fontSize, then iterate up to 6 rounds of pairwise AABB push-apart.
+    // Push along the SHORTER overlap axis to minimise label travel; if a
+    // label gets pushed > 1.2 × its initial radial distance, promote it to
+    // a leader line so the customer can still tell which marker it belongs
+    // to. Caps at 6 iterations — past that, accept residual overlap (rare
+    // in practice; ≤2 iters fixes Switzerland 990015).
+    const isZh = language !== "en";
+    const labelBoxes = placements.map((pl, i) => {
+      const [mx, my] = uniqueStops[i].xy;
+      const isEntry = uniqueStops[i].days.includes(1);
+      const primaryFs = (isEntry ? 17 : 15) * fontScale;
+      const altFs = (isEntry ? 11 : 10) * fontScale;
+      const altRaw =
+        isZh && pl.cityName ? translateDestination(pl.cityName, "en") : "";
+      const showAlt = isZh && altRaw && altRaw !== pl.cityName;
+      // CJK chars are ~1em wide, Latin chars ~0.55em — weight the width
+      // estimate accordingly.
+      const cjkChars =
+        (pl.cityName.match(/[一-鿿]/g) || []).length;
+      const cjkRatio = cjkChars / Math.max(1, pl.cityName.length);
+      const primaryW =
+        pl.cityName.length * primaryFs * (0.55 + 0.45 * cjkRatio);
+      const altW = showAlt ? altRaw.length * altFs * 0.55 : 0;
+      const labelW = Math.max(primaryW, altW);
+      const labelH = primaryFs * 1.1 + (showAlt ? altFs * 1.1 + 2 : 0);
+      // textAnchor decides where the text origin sits inside the box.
+      // Convert to box-centre for easier collision math.
+      const anchorOffX =
+        pl.textAnchor === "start"
+          ? labelW / 2
+          : pl.textAnchor === "end"
+            ? -labelW / 2
+            : 0;
+      return {
+        cx: mx + pl.dx + anchorOffX,
+        // text y is the baseline; centre ≈ baseline − primaryFs * 0.35
+        cy: my + pl.dy - primaryFs * 0.35 + labelH / 2,
+        w: labelW,
+        h: labelH,
+        initialMag: Math.hypot(pl.dx, pl.dy) || 1,
+      };
+    });
+
+    const PADDING = 4;
+    const MAX_ITER = 6;
+    for (let iter = 0; iter < MAX_ITER; iter++) {
+      let moved = false;
+      for (let i = 0; i < labelBoxes.length; i++) {
+        if (!placements[i].cityName) continue; // suppressed labels don't collide
+        for (let j = i + 1; j < labelBoxes.length; j++) {
+          if (!placements[j].cityName) continue;
+          const a = labelBoxes[i];
+          const b = labelBoxes[j];
+          const overlapX =
+            (a.w + b.w) / 2 + PADDING - Math.abs(a.cx - b.cx);
+          const overlapY =
+            (a.h + b.h) / 2 + PADDING - Math.abs(a.cy - b.cy);
+          if (overlapX <= 0 || overlapY <= 0) continue;
+          // Push along the SHORTER overlap axis (smallest displacement).
+          if (overlapX < overlapY) {
+            const push = overlapX / 2;
+            const dir = a.cx < b.cx ? -1 : 1;
+            a.cx += dir * push;
+            b.cx -= dir * push;
+            placements[i].dx += dir * push;
+            placements[j].dx -= dir * push;
+          } else {
+            const push = overlapY / 2;
+            const dir = a.cy < b.cy ? -1 : 1;
+            a.cy += dir * push;
+            b.cy -= dir * push;
+            placements[i].dy += dir * push;
+            placements[j].dy -= dir * push;
+          }
+          // Promote to leader when displacement exceeds 1.2 × initial radius
+          // so the marker→label association stays visually clear.
+          const newMagI = Math.hypot(placements[i].dx, placements[i].dy);
+          const newMagJ = Math.hypot(placements[j].dx, placements[j].dy);
+          if (newMagI > a.initialMag * 1.2) placements[i].useLeader = true;
+          if (newMagJ > b.initialMag * 1.2) placements[j].useLeader = true;
+          moved = true;
+        }
+      }
+      if (!moved) break;
+    }
+
+    return placements;
   }, [uniqueStops, language, fontScale]);
 
   const routePath = useMemo(
@@ -1265,73 +1149,15 @@ export default function TourRouteMapCanvas({
                 (was sepia brown; reference image uses neutral grey). */}
             <path d="M0,0 L10,5 L0,10 Z" fill="#5a5550" />
           </marker>
-          <filter
-            id="active-country-shadow"
-            x="-20%"
-            y="-20%"
-            width="140%"
-            height="140%"
-          >
-            <feGaussianBlur stdDeviation="1.5" />
-            <feOffset dx="0" dy="1" result="offset" />
-            <feFlood floodColor="#000000" floodOpacity="0.15" />
-            <feComposite in2="offset" operator="in" />
-            <feMerge>
-              <feMergeNode />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-          {/* v333 — sepia tint filter for the pre-rendered greyscale
-              hillshade PNG. Linear-LERPs greyscale pixels to:
-                L=0 (peak)     → warm brown #7a5e2e (122, 94, 46)
-                L=255 (lowland)→ cream      #f5e8c8 (245,232,200)
-              The matrix per row is [R G B A offset], where offsets
-              are 0..1 (so 122/255 = 0.478, 94/255 = 0.369, etc).
-              Slopes are (target_high - target_low) / 255 — see
-              `scripts/fetch-hillshade.mjs` comment for derivation. */}
-          <filter id="hillshade-sepia">
-            <feColorMatrix
-              type="matrix"
-              values={[
-                "0.482 0 0 0 0.478",
-                "0 0.541 0 0 0.369",
-                "0 0 0.604 0 0.180",
-                "0 0 0 1 0",
-              ].join(" ")}
-            />
-          </filter>
-          {/* v329 priority #6: paper-grain texture overlay applied
-              to the entire map. Adds the subtle vintage-print feel
-              of Jeff's reference image — like the paper has tiny
-              fibers and slight color variations across its surface. */}
-          <pattern
-            id="paper-grain"
-            x="0"
-            y="0"
-            width="200"
-            height="200"
-            patternUnits="userSpaceOnUse"
-          >
-            <rect width="200" height="200" fill="#f5e8c8" />
-            <filter id="grain-noise">
-              <feTurbulence
-                type="fractalNoise"
-                baseFrequency="0.9"
-                numOctaves="2"
-                seed="5"
-              />
-              <feColorMatrix
-                type="matrix"
-                values="0 0 0 0 0.5  0 0 0 0 0.4  0 0 0 0 0.25  0 0 0 0.06 0"
-              />
-            </filter>
-            <rect
-              width="200"
-              height="200"
-              fill="white"
-              filter="url(#grain-noise)"
-            />
-          </pattern>
+          {/* v359c — removed three unused <defs> blocks:
+                • <filter id="active-country-shadow"> — never referenced
+                  (country highlight was removed in v357)
+                • <filter id="hillshade-sepia"> — sepia hillshade dropped
+                  in v351; filter dangled
+                • <pattern id="paper-grain"> — paper grain dropped in
+                  v351; pattern dangled
+              Each was a few hundred bytes of SVG markup the browser
+              still had to parse on every mount with zero visual payoff. */}
           {/* v306: cinematic marker entrance animation. Each marker
               fades + scales in, staggered by index so the route
               "draws itself" in chronological order. Uses
@@ -1723,45 +1549,7 @@ export default function TourRouteMapCanvas({
           // v350 — detect highlight stops by scanning day names for
           // signature attractions / scenic train experiences. Returns
           // true if any of the user's days at this marker mentions a
-          // landmark keyword.
-          const HIGHLIGHT_KEYWORDS = [
-            // Switzerland
-            "馬特洪峰",
-            "Matterhorn",
-            "冰河3000",
-            "Glacier 3000",
-            "黃金列車",
-            "GoldenPass",
-            "Golden Pass",
-            "冰河列車",
-            "Glacier Express",
-            "西庸古堡",
-            "Chillon",
-            "First Cliff Walk",
-            "懸崖步道",
-            "馬特宏峰",
-            // Italy / France iconic spots
-            "羅浮宮",
-            "Louvre",
-            "凱旋門",
-            "Arc de Triomphe",
-            "艾菲爾",
-            "鐵塔",
-            "Eiffel",
-            "蒙馬特",
-            "Montmartre",
-            "聖母院",
-            "Notre",
-            // Japan iconic
-            "富士山",
-            "Mt. Fuji",
-            "立山黑部",
-            // Peru
-            "馬丘比丘",
-            "Machu Picchu",
-            // Generic indicators of "highlight" stops
-            "古堡",
-          ];
+          // landmark keyword. v359c: keyword list hoisted to module scope.
           const isHighlight = days.some((d) => {
             const dayName = stops.find((s) => s.day === d)?.name || "";
             return HIGHLIGHT_KEYWORDS.some((k) => dayName.includes(k));
@@ -1772,7 +1560,13 @@ export default function TourRouteMapCanvas({
           // v352 — slightly smaller dots per 雄獅 reference simplicity:
           // 13/11 → 11/9. Day numbers still readable, markers stop
           // dominating the map.
-          const dotR = wide ? 11 : 9;
+          // v359c — scale the dot radius with fontScale so mobile (1.7×–2.8×
+          // text) gets correspondingly larger dots. Without this, on a 360px
+          // viewport the day-number text inside the dot was 33px while the
+          // dot itself stayed at 18px diameter (Day 12 spilled outside the
+          // circle). sqrt() keeps the growth gentler than text — dots
+          // shouldn't dominate the map at small screens.
+          const dotR = (wide ? 11 : 9) * Math.max(1, Math.sqrt(fontScale));
           // v312: accessibility — descriptive aria-label spells out
           // the day(s), city, and full theme so screen readers can
           // announce each marker without users having to hover.

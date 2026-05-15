@@ -38,82 +38,16 @@ import { useMemo, useState, lazy, Suspense } from "react";
 import { trpc } from "@/lib/trpc";
 import { useLocale } from "@/contexts/LocaleContext";
 import { Map as MapIcon, ExternalLink, Loader2 } from "lucide-react";
-import { locationMapping } from "@/utils/locationMapping";
 
-/**
- * v316: theme phrase dictionary — common Chinese marketing-style
- * phrases that appear after the colon in tour day names. Translations
- * are intentionally short and travel-magazine style. Falls back to
- * raw Chinese if not in dictionary.
- */
-const themePhraseMap: Record<string, string> = {
-  飛越歐洲: "Flying across Europe",
-  飛越大洋: "Across the ocean",
-  返程啟航: "Setting off home",
-  溫暖歸鄉: "Warm homecoming",
-  跨越時空之旅: "Journey through time",
-  高山生態與森林療癒之旅: "Alpine ecology & forest retreat",
-  小火車懷舊與茶鄉風情: "Vintage train & tea country",
-  林業文化之城初探: "Forestry heritage town",
-  港灣古蹟巡禮: "Harbor heritage tour",
-  火山地質奇景: "Volcanic geology",
-  季節風情畫: "Seasonal scenery",
-  花海夢境: "Flower-field reverie",
-  神宮巡禮與千萬夜景: "Shrines & city lights",
-  修道院與朝市謝幕: "Monasteries & morning markets",
-  帝國兩都: "Imperial twin capitals",
-  沙皇遺跡與藝術殿堂: "Tsar relics & art palaces",
-  羅亞爾河谷古蹟巡禮: "Loire Valley castles",
-  巴黎經典左岸: "Classic Left Bank",
-  博物館與河岸漫步: "Museums & riverside walk",
-  巴黎左岸文藝風情: "Left Bank arts & culture",
-  聖母院與購物天堂: "Notre-Dame & shopping",
-  巴黎高地與鐵塔: "Heights & the Tower",
-  蒙馬特到凱旋門: "Montmartre to Arc de Triomphe",
-  巴黎香氣與華麗: "Parisian elegance",
-  香水歌劇購物: "Perfume, opera, shopping",
-  巴黎自由日: "Free day in Paris",
-  自選探險: "Choose-your-own adventure",
-  喀斯特奇景: "Karst wonders",
-  中世紀古城: "Medieval old town",
-  亞得里亞海濱: "Adriatic coast",
-  自由日: "Free day",
-  美食饗宴: "Culinary feast",
-  購物天堂: "Shopping paradise",
-  文化巡禮: "Cultural tour",
-};
-
-/**
- * Translate a Chinese day name like "台北 → 慕尼黑：飛越歐洲" into
- * English by token-replacing each segment via `locationMapping`. Falls
- * back to the raw Chinese for any token we don't have a translation
- * for, so partial coverage gracefully degrades. v310 introduced this;
- * v316 added a theme phrase dictionary for the text AFTER the colon.
- */
-function translateDayName(name: string): string {
-  if (!name) return "";
-  // Split on common separators: → ⇒ ↔ ⇄ -> => >  also Chinese 、 ,
-  // Keep the separator so we can rejoin in original order.
-  const SEP_RE = /(\s*(?:→|⇒|↔|⇄|->|=>|>|、|,)\s*)/g;
-  const parts = name.split(SEP_RE);
-  return parts
-    .map((part) => {
-      if (!part) return part;
-      // Don't translate the separator tokens — pass through.
-      if (/^\s*(?:→|⇒|↔|⇄|->|=>|>|、|,)\s*$/.test(part)) return part;
-      // Split on Chinese OR Western colon to separate place from theme.
-      const [place, ...rest] = part.split(/[:：]/);
-      const placeTrim = place.trim();
-      const translatedPlace = locationMapping[placeTrim] || placeTrim;
-      if (rest.length === 0) return translatedPlace;
-      // v316: try to translate theme phrases via dictionary lookup.
-      const themeRaw = rest.join(":").trim();
-      const translatedTheme =
-        themePhraseMap[themeRaw] || themeRaw;
-      return `${translatedPlace}: ${translatedTheme}`;
-    })
-    .join("");
-}
+// v359c — removed dead helpers:
+//   • themePhraseMap (35-entry dict of marketing phrase translations)
+//   • translateDayName (function that consumed themePhraseMap + locationMapping)
+// Both became dead in v353b when the day-chip list under the map was
+// removed ("下面這部分很沒有用"); the chip rendering was the only
+// caller of translateDayName. The wrapper now just renders the map
+// frame + section header — no day-name translation here. Day-name
+// translation still happens inside the canvas via translateDestination
+// from "@/utils/locationMapping" (city-level only).
 
 // react-simple-maps is heavy (~70KB) — lazy-load so the rest of the
 // detail page never waits on it. The Suspense fallback shows the
