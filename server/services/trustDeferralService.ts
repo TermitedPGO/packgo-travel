@@ -57,24 +57,18 @@ import {
 } from "../../drizzle/schema";
 import { and, eq, isNull, lte, gte } from "drizzle-orm";
 import { nanoid } from "nanoid";
+// SECURITY_AUDIT_2026_05_14 P3-3: feature flag reads come from the typed
+// featureFlags module so a typo in env-var names becomes a compile error.
+import * as featureFlags from "../_core/featureFlags";
 
 // ─── Feature flag + config ─────────────────────────────────────────────────
 
 export function isTrustDeferralEnabled(): boolean {
-  return process.env.PLAID_TRUST_DEFERRAL_ENABLED === "true";
+  return featureFlags.trustDeferralEnabled();
 }
 
-const RECOGNITION_OFFSET_DAYS = Math.max(
-  0,
-  parseInt(process.env.PLAID_TRUST_RECOGNITION_OFFSET_DAYS ?? "0", 10) || 0
-);
-const AUTOMATCH_MIN_CONFIDENCE = Math.max(
-  0,
-  Math.min(
-    100,
-    parseInt(process.env.PLAID_TRUST_AUTOMATCH_MIN_CONFIDENCE ?? "80", 10) || 80
-  )
-);
+const RECOGNITION_OFFSET_DAYS = featureFlags.trustRecognitionOffsetDays();
+const AUTOMATCH_MIN_CONFIDENCE = featureFlags.trustAutomatchMinConfidence();
 const AUTOMATCH_AMOUNT_WINDOW = Math.max(
   0,
   parseFloat(process.env.PLAID_TRUST_AUTOMATCH_AMOUNT_WINDOW_USD ?? "1.00") ||

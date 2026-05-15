@@ -1,26 +1,66 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { Link } from "wouter";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Send, Loader2, User, ThumbsUp, ThumbsDown, Sparkles, X, Minimize2,
-  MapPin, Globe, FileText, Plane, ChevronRight
+  Send, Loader2, User, ThumbsUp, ThumbsDown, Sparkles, X, Lock, Check, ArrowRight
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Streamdown } from "streamdown";
 import { useLocale } from "@/contexts/LocaleContext";
+import { useAuth } from "@/_core/hooks/useAuth";
 
-// 企鵝表情圖像 URLs (CDN)
-const PENGUIN_EXPRESSIONS = {
-  default: "https://d2xsxph8kpxj0f.cloudfront.net/310519663159191204/D3XjbQ67JpFf2y4FWefWHw/penguin-reference_5e2553b9.png",
-  thinking: "https://d2xsxph8kpxj0f.cloudfront.net/310519663159191204/D3XjbQ67JpFf2y4FWefWHw/penguin-thinking_f5ff1339.png",
-  happy: "https://d2xsxph8kpxj0f.cloudfront.net/310519663159191204/D3XjbQ67JpFf2y4FWefWHw/penguin-happy_4389eb47.png",
-  confused: "https://d2xsxph8kpxj0f.cloudfront.net/310519663159191204/D3XjbQ67JpFf2y4FWefWHw/penguin-confused_400fe74a.png",
-  waving: "https://d2xsxph8kpxj0f.cloudfront.net/310519663159191204/D3XjbQ67JpFf2y4FWefWHw/penguin-waving_c210a046.png",
-};
+// Round 80.21: replaced 5 CloudFront penguin PNGs with inline SVG that
+// renders instantly (was visibly slow on cold load — Jeff flagged).
+// One brand-aligned mark that subtly responds to state via CSS, not by
+// swapping image src every animation tick.
+type PenguinExpression = "default" | "thinking" | "happy" | "confused" | "waving";
 
-type PenguinExpression = keyof typeof PENGUIN_EXPRESSIONS;
+function BrandAvatar({
+  state = "default",
+  size = 32,
+}: {
+  state?: PenguinExpression;
+  size?: number;
+}) {
+  const isThinking = state === "thinking";
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 40 40"
+      xmlns="http://www.w3.org/2000/svg"
+      role="img"
+      aria-label="PACK&GO advisor"
+      className={isThinking ? "animate-pulse" : ""}
+    >
+      <defs>
+        <linearGradient id="pg-bg" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#0A0A0A" />
+          <stop offset="1" stopColor="#1A1A1A" />
+        </linearGradient>
+      </defs>
+      <circle cx="20" cy="20" r="20" fill="url(#pg-bg)" />
+      {/* Stylised travel-bag icon — PACK&GO brand mark */}
+      <path
+        d="M14 14 L14 12 Q14 10 16 10 L24 10 Q26 10 26 12 L26 14 L29 14 Q30 14 30 15 L30 28 Q30 30 28 30 L12 30 Q10 30 10 28 L10 15 Q10 14 11 14 Z"
+        fill="#c9a563"
+      />
+      <rect x="17" y="10" width="6" height="3" rx="0.5" fill="#0A0A0A" />
+      <line
+        x1="20"
+        y1="14"
+        x2="20"
+        y2="30"
+        stroke="#0A0A0A"
+        strokeWidth="0.5"
+        opacity="0.3"
+      />
+    </svg>
+  );
+}
 
 interface Message {
   role: "user" | "assistant";
@@ -71,23 +111,55 @@ function inferSuggestionCategory(content: string): SuggestionCategory {
 
 export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessage }: AITravelAdvisorDialogProps) {
   const { t, tArray, language } = useLocale();
+  const { user, isAuthenticated } = useAuth();
   const [sessionId] = useState(() => `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+
+  // Round 80.21: personalized greeting — anonymous users get the generic
+  // welcome, members get "歡迎回來,{name}!" with optional Plus badge.
+  // Falls back to first-token of email if user has no name set.
+  const greetingText = useMemo(() => {
+    if (!isAuthenticated || !user) {
+      return t('aiAdvisor.greeting');
+    }
+    const displayName =
+      (user.name && user.name.trim()) ||
+      (user.email ? user.email.split("@")[0] : "");
+    if (!displayName) return t('aiAdvisor.greeting');
+    return t('aiAdvisor.greetingMember', { name: displayName });
+  }, [isAuthenticated, user, t]);
+
+  // Round 80.19: AI Advisor Phase 1 — query current quota status when dialog
+  // opens so we can show the counter pill + paywall when limit hit.
+  const { data: quotaData, refetch: refetchQuota } = trpc.ai.getQuota.useQuery(
+    undefined,
+    {
+      enabled: open,
+      staleTime: 30_000,
+    }
+  );
+
+  const isPaidTier = quotaData?.tier === "plus" || quotaData?.tier === "concierge";
+  const used = quotaData?.used ?? 0;
+  const cap = quotaData?.cap ?? 5;
+  const remaining = isPaidTier ? Infinity : Math.max(0, cap - used);
+  const quotaExhausted = !isPaidTier && remaining <= 0;
   const [messages, setMessages] = useState<Message[]>(() => [
     {
       role: "assistant",
-      content: t('aiAdvisor.greeting'),
+      content: greetingText,
     },
   ]);
 
-  // Update greeting when language changes (only if still showing initial greeting)
+  // Update greeting when language OR auth state changes (only if still showing
+  // the initial greeting message).
   useEffect(() => {
     setMessages(prev => {
       if (prev.length === 1 && prev[0].role === 'assistant') {
-        return [{ role: 'assistant', content: t('aiAdvisor.greeting') }];
+        return [{ role: 'assistant', content: greetingText }];
       }
       return prev;
     });
-  }, [language]);
+  }, [language, greetingText]);
   const [input, setInput] = useState("");
   const [penguinExpression, setPenguinExpression] = useState<PenguinExpression>("waving");
   const [isAnimating, setIsAnimating] = useState(false);
@@ -107,11 +179,13 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
   const [guidedFlowData, setGuidedFlowData] = useState<GuidedFlowData>({});
 
   // i18n 快速回覆按鈕（元件內動態生成，支援多語言）
+  // Premium quick-starts: concrete, premium-feeling trip prompts
+  // (replaces generic 找行程 / 查日期 / 預算 / 其他 buttons)
   const openingSuggestions = useMemo(() => [
-    { icon: MapPin, label: t('aiAdvisor.findTours') },
-    { icon: FileText, label: t('aiAdvisor.checkDates') },
-    { icon: Globe, label: t('aiAdvisor.budgetPlanning') },
-    { icon: Plane, label: t('aiAdvisor.otherQuestions') },
+    t('aiAdvisor.quickStartJapan'),
+    t('aiAdvisor.quickStartEuropeHoneymoon'),
+    t('aiAdvisor.quickStartHawaiiFamily'),
+    t('aiAdvisor.quickStartUSWestRoadTrip'),
   ], [t]);
 
   const regionSuggestions = useMemo(() => [
@@ -241,8 +315,11 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
       clearTimeout(timeoutId);
       setIsStreaming(false);
       abortControllerRef.current = null;
+      // Round 80.19: refresh quota after each turn so the counter pill
+      // updates without dialog-reopen.
+      refetchQuota();
     }
-  }, [sessionId, t, tArray]);
+  }, [sessionId, t, tArray, refetchQuota]);
 
   const feedbackMutation = trpc.ai.recordFeedback.useMutation({
     onSuccess: () => {
@@ -263,7 +340,7 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
       setTimeout(() => updatePenguinExpression("default"), 2000);
       // Auto-send initialMessage if provided
       if (initialMessage) {
-        const greetingMsg = { role: "assistant" as const, content: t('aiAdvisor.greeting') };
+        const greetingMsg = { role: "assistant" as const, content: greetingText };
         const userMsg = { role: "user" as const, content: initialMessage };
         setMessages([greetingMsg, userMsg]);
         sendStreamMessage(initialMessage, [greetingMsg]);
@@ -357,7 +434,12 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
       )
     );
 
+    // SECURITY_AUDIT_2026_05_14 P2-5: server now requires sessionId or
+    // authenticated user to record feedback. We have sessionId in scope
+    // from useChatSession; passing it lets anonymous users keep giving
+    // feedback without authentication.
     feedbackMutation.mutate({
+      sessionId,
       usageLogIds: message.usageLogIds,
       feedback,
     });
@@ -370,7 +452,8 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
     }
   };
 
-  const currentPenguinImage = PENGUIN_EXPRESSIONS[penguinExpression];
+  // Round 80.21: penguin removed — BrandAvatar now uses penguinExpression
+  // as a state hint (only "thinking" actually changes appearance).
 
   // Show opening suggestions only when there's only the initial greeting
   const showOpeningSuggestions = messages.length === 1 && !isStreaming;
@@ -379,96 +462,77 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md w-[95vw] sm:w-full h-[85vh] sm:h-[650px] flex flex-col p-0 border-2 border-black gap-0 overflow-hidden bg-white shadow-2xl rounded-xl">
+      <DialogContent className="max-w-md w-[95vw] sm:w-full h-[85vh] sm:h-[650px] flex flex-col p-0 gap-0 overflow-hidden bg-white shadow-2xl rounded-xl border border-foreground/10">
         {/* Hidden DialogTitle and Description for accessibility */}
         <VisuallyHidden>
           <DialogTitle>{t('aiAdvisor.dialogTitle')}</DialogTitle>
           <DialogDescription>{t('aiAdvisor.dialogDescription')}</DialogDescription>
         </VisuallyHidden>
-        
-        {/* Header with Animated Penguin Character */}
-        <div className="bg-black text-white px-5 py-4 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-4">
-            {/* Penguin Avatar with Animation */}
-            <div 
-              className={`relative w-14 h-14 bg-gradient-to-br from-gray-100 to-white rounded-lg flex items-center justify-center overflow-hidden border-2 border-white shadow-lg transition-transform duration-300 ${
+
+        {/* Header — minimal black, with subtle gold accent line */}
+        <div className="relative bg-foreground text-white px-5 py-4 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-3">
+            {/* Penguin Avatar — kept but smaller, no gradient/sparkle */}
+            <div
+              className={`relative transition-transform duration-300 ${
                 isAnimating ? "scale-110" : "scale-100"
               }`}
             >
-              <img
-                src={currentPenguinImage}
-                alt={t('aiAdvisor.title')}
-                className={`w-12 h-12 object-contain transition-all duration-300 ${
-                  isStreaming ? "animate-bounce" : ""
-                }`}
-              />
-              {/* Online Status Indicator */}
-              <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 rounded-lg border-2 border-white"></div>
+              <BrandAvatar state={penguinExpression} size={40} />
             </div>
-            <div>
-              <h3 className="font-bold text-lg tracking-wide">{t('aiAdvisor.title')}</h3>
-              <p className="text-sm text-gray-300 flex items-center gap-1.5">
+            <div className="leading-tight">
+              <h3 className="font-serif text-base font-semibold tracking-wide">
+                {t('aiAdvisor.title')}
+              </h3>
+              <p className="text-[11px] text-white/60 flex items-center gap-1.5 mt-0.5">
                 {isStreaming ? (
                   <>
-                    <span className="inline-block w-1.5 h-1.5 bg-yellow-400 rounded-lg animate-pulse"></span>
+                    <span className="inline-block w-1.5 h-1.5 bg-[#c9a563] rounded-full animate-pulse"></span>
                     {t('aiAdvisor.thinking')}
                   </>
                 ) : (
                   <>
-                    <span className="inline-block w-1.5 h-1.5 bg-green-400 rounded-lg"></span>
+                    <span className="inline-block w-1.5 h-1.5 bg-[#c9a563] rounded-full"></span>
                     {t('aiAdvisor.online')} · {t('aiAdvisor.atYourService')}
                   </>
                 )}
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-9 w-9 p-0 text-white hover:bg-white/20 rounded-lg"
-              onClick={() => onOpenChange(false)}
-              aria-label={t('aiAdvisor.minimize')}
-            >
-              <Minimize2 className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-9 w-9 p-0 text-white hover:bg-white/20 rounded-lg"
-              onClick={() => onOpenChange(false)}
-              aria-label={t('aiAdvisor.close')}
-            >
-              <X className="h-5 w-5" />
-            </Button>
-          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-9 w-9 p-0 text-white/70 hover:text-white hover:bg-white/10 rounded-lg"
+            onClick={() => onOpenChange(false)}
+            aria-label={t('aiAdvisor.close')}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+          {/* Gold accent line */}
+          <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#c9a563]/50 to-transparent" aria-hidden />
         </div>
 
-        {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto px-4 py-5 space-y-5 bg-gradient-to-b from-gray-50 to-white">
+        {/* Messages Area — soft warm cream background */}
+        <div className="flex-1 overflow-y-auto px-4 py-5 space-y-5 bg-[#FAF8F2]">
           {messages.map((message, index) => (
             <div key={index}>
               <div
                 className={`flex gap-3 ${message.role === "user" ? "justify-end" : "justify-start"}`}
               >
                 {message.role === "assistant" && (
-                  <div className="flex-shrink-0 w-9 h-9 bg-gradient-to-br from-gray-100 to-white rounded-lg border border-gray-200 flex items-center justify-center overflow-hidden shadow-sm">
-                    <img
-                      src={PENGUIN_EXPRESSIONS.default}
-                      alt="AI"
-                      className="w-7 h-7 object-contain"
-                    />
+                  <div className="flex-shrink-0">
+                    <BrandAvatar size={32} />
                   </div>
                 )}
                 <div
-                  className={`max-w-[80%] px-4 py-3 shadow-sm ${
+                  className={`max-w-[80%] px-4 py-3 rounded-xl shadow-sm ${
                     message.role === "user"
-                      ? "bg-black text-white  rounded-br-md"
-                      : "bg-white border border-gray-200 text-gray-800  rounded-bl-md"
+                      ? "bg-foreground text-white"
+                      : "bg-white border border-foreground/10 text-foreground"
                   }`}
                 >
                   {message.role === "assistant" ? (
-                    <div className="text-sm prose prose-sm max-w-none leading-relaxed">
+                    <div className="text-sm prose prose-sm max-w-none leading-relaxed text-foreground prose-p:text-foreground prose-headings:text-foreground prose-headings:font-serif prose-strong:text-foreground prose-li:text-foreground prose-li:marker:text-foreground/60 prose-a:text-foreground prose-a:underline hover:prose-a:text-[#c9a563] prose-code:text-foreground prose-code:bg-foreground/5 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:font-normal">
                       <Streamdown>{message.content}</Streamdown>
                     </div>
                   ) : (
@@ -476,34 +540,33 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
                   )}
                 </div>
                 {message.role === "user" && (
-                  <div className="flex-shrink-0 w-9 h-9 bg-black text-white rounded-lg flex items-center justify-center shadow-sm">
-                    <User className="h-5 w-5" />
+                  <div className="flex-shrink-0 w-8 h-8 bg-foreground text-white rounded-full flex items-center justify-center">
+                    <User className="h-4 w-4" />
                   </div>
                 )}
               </div>
-              
-              {/* Triggered Skills & Feedback */}
+
+              {/* Triggered Skills & Feedback — minimal, edge-aligned */}
               {message.role === "assistant" && index > 0 && (
-                <div className="ml-12 mt-2 flex flex-wrap items-center gap-2">
+                <div className="ml-11 mt-2 flex flex-wrap items-center gap-2">
                   {message.triggeredSkills && message.triggeredSkills.length > 0 && (
-                    <div className="flex items-center gap-1.5 text-xs text-gray-500 bg-gray-100 px-2.5 py-1 rounded-lg">
-                      <Sparkles className="h-3 w-3 text-yellow-500" />
+                    <div className="flex items-center gap-1.5 text-[11px] text-foreground/55 bg-foreground/5 border border-foreground/10 px-2 py-0.5 rounded-md">
+                      <Sparkles className="h-3 w-3 text-[#c9a563]" />
                       <span>
                         {message.triggeredSkills.map(s => s.skillName).join(", ")}
                       </span>
                     </div>
                   )}
-                  
+
                   {message.usageLogIds && message.usageLogIds.length > 0 && (
-                    <div className="flex items-center gap-1.5 ml-auto">
-                      <span className="text-xs text-gray-400">{t('aiAdvisor.helpfulQuestion')}</span>
+                    <div className="flex items-center gap-1 ml-auto">
                       <Button
                         variant="ghost"
                         size="sm"
-                        className={`h-7 w-7 p-0 rounded-lg transition-all ${
-                          message.feedbackGiven === "positive" 
-                            ? "bg-green-100 text-green-600 border border-green-300" 
-                            : "text-gray-400 hover:text-green-600 hover:bg-green-50"
+                        className={`h-6 w-6 p-0 rounded-md transition-colors ${
+                          message.feedbackGiven === "positive"
+                            ? "text-[#c9a563]"
+                            : "text-foreground/40 hover:text-[#c9a563]"
                         }`}
                         onClick={() => handleFeedback(index, "positive")}
                         disabled={!!message.feedbackGiven || feedbackMutation.isPending}
@@ -514,10 +577,10 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
                       <Button
                         variant="ghost"
                         size="sm"
-                        className={`h-7 w-7 p-0 rounded-lg transition-all ${
-                          message.feedbackGiven === "negative" 
-                            ? "bg-red-100 text-red-600 border border-red-300" 
-                            : "text-gray-400 hover:text-red-600 hover:bg-red-50"
+                        className={`h-6 w-6 p-0 rounded-md transition-colors ${
+                          message.feedbackGiven === "negative"
+                            ? "text-foreground"
+                            : "text-foreground/40 hover:text-foreground"
                         }`}
                         onClick={() => handleFeedback(index, "negative")}
                         disabled={!!message.feedbackGiven || feedbackMutation.isPending}
@@ -532,16 +595,15 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
 
               {/* Context-aware follow-up suggestions (only for last assistant message, not streaming) */}
               {message.role === "assistant" && index === lastAssistantIndex && !isStreaming && message.suggestedReplies && message.suggestedReplies.length > 0 && (
-                <div className="ml-12 mt-3">
-                  <div className="flex flex-wrap gap-2">
+                <div className="ml-11 mt-3">
+                  <div className="flex flex-wrap gap-1.5">
                     {message.suggestedReplies.map((reply, i) => (
                       <button
                         key={i}
                         onClick={() => handleSuggestionClick(reply)}
-                        className="text-xs px-3 py-1.5 border border-gray-300 rounded-full text-gray-600 hover:border-black hover:text-black hover:bg-gray-50 transition-all flex items-center gap-1 group"
+                        className="text-xs px-3 py-1.5 rounded-full bg-foreground/5 text-foreground/80 border border-foreground/10 hover:bg-[#c9a563]/15 hover:text-[#8a6f3a] hover:border-[#c9a563]/40 transition-colors"
                       >
                         {reply}
-                        <ChevronRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                       </button>
                     ))}
                   </div>
@@ -550,42 +612,37 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
             </div>
           ))}
 
-          {/* Opening Suggestions - shown only on initial greeting */}
+          {/* Opening / Welcome — premium quick-start chips with hint */}
           {showOpeningSuggestions && (
             <div className="mt-2">
-              <p className="text-xs text-gray-400 mb-3 text-center">{t('aiAdvisor.openingPrompt')}</p>
-              <div className="grid grid-cols-2 gap-2">
-                {openingSuggestions.map((suggestion: { icon: typeof MapPin; label: string }, i: number) => (
+              <p className="text-xs text-foreground/50 mb-3 text-center">
+                {t('aiAdvisor.welcomeHint')}
+              </p>
+              <div className="flex flex-wrap gap-1.5 justify-center">
+                {openingSuggestions.map((label: string, i: number) => (
                   <button
                     key={i}
-                    onClick={() => handleSuggestionClick(suggestion.label)}
-                    className="flex items-center justify-center gap-2 px-3 py-3 border border-gray-200 rounded-lg text-center text-sm text-gray-700 hover:border-black hover:bg-gray-50 hover:text-black transition-all font-medium"
+                    onClick={() => handleSuggestionClick(label)}
+                    className="text-xs px-3.5 py-2 rounded-full bg-white text-foreground/80 border border-foreground/10 hover:bg-[#c9a563]/15 hover:text-[#8a6f3a] hover:border-[#c9a563]/40 transition-colors shadow-sm"
                   >
-                    {suggestion.label}
+                    {label}
                   </button>
                 ))}
               </div>
             </div>
           )}
-          
-          {/* Loading indicator - shown while waiting for first chunk */}
+
+          {/* Loading indicator — three dots only, no text */}
           {isStreaming && messages[messages.length - 1]?.content === "" && (
             <div className="flex gap-3 justify-start">
-              <div className="flex-shrink-0 w-9 h-9 bg-gradient-to-br from-gray-100 to-white rounded-lg border border-gray-200 flex items-center justify-center overflow-hidden shadow-sm">
-                <img
-                  src={PENGUIN_EXPRESSIONS.thinking}
-                  alt="AI"
-                  className="w-7 h-7 object-contain animate-pulse"
-                />
+              <div className="flex-shrink-0">
+                <BrandAvatar state="thinking" size={32} />
               </div>
-              <div className="bg-white border border-gray-200 px-4 py-3  rounded-bl-md shadow-sm">
-                <div className="flex items-center gap-3">
-                  <div className="flex gap-1.5">
-                    <span className="w-2 h-2 bg-gray-400 rounded-lg animate-bounce" style={{ animationDelay: "0ms" }}></span>
-                    <span className="w-2 h-2 bg-gray-400 rounded-lg animate-bounce" style={{ animationDelay: "150ms" }}></span>
-                    <span className="w-2 h-2 bg-gray-400 rounded-lg animate-bounce" style={{ animationDelay: "300ms" }}></span>
-                  </div>
-                  <span className="text-sm text-gray-500">{t('aiAdvisor.thinkingMessage')}</span>
+              <div className="bg-white border border-foreground/10 px-4 py-3 rounded-xl shadow-sm">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 bg-foreground/40 rounded-full animate-bounce" style={{ animationDelay: "0ms" }}></span>
+                  <span className="w-1.5 h-1.5 bg-foreground/40 rounded-full animate-bounce" style={{ animationDelay: "150ms" }}></span>
+                  <span className="w-1.5 h-1.5 bg-foreground/40 rounded-full animate-bounce" style={{ animationDelay: "300ms" }}></span>
                 </div>
               </div>
             </div>
@@ -593,35 +650,93 @@ export default function AITravelAdvisorDialog({ open, onOpenChange, initialMessa
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input Area */}
-        <div className="px-4 py-4 border-t border-gray-200 bg-white shrink-0">
-          <div className="flex gap-3 items-center">
-            <Input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder={t('aiAdvisor.inputPlaceholder')}
-              className="flex-1 h-11 border border-gray-300 rounded-lg px-5 focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-0 focus-visible:border-black bg-gray-50"
-              disabled={isStreaming}
-              aria-label={t('aiAdvisor.inputPlaceholder')}
-            />
-            <Button
-              onClick={handleSend}
-              disabled={!input.trim() || isStreaming}
-              className="h-11 w-11 bg-black hover:bg-gray-800 rounded-lg p-0 flex items-center justify-center shadow-lg transition-transform hover:scale-105"
-              aria-label={t('aiAdvisor.sendMessage')}
+        {/* Round 80.19: Phase 1 paywall — when free quota exhausted, replace
+            input area with upgrade card. Plus / Concierge bypass entirely. */}
+        {quotaExhausted ? (
+          <div className="px-4 py-4 border-t border-foreground/10 bg-foreground text-white shrink-0">
+            <div className="flex items-start gap-3 mb-3">
+              <div className="w-9 h-9 rounded-full bg-[#c9a563]/20 flex items-center justify-center flex-shrink-0">
+                <Lock className="w-4 h-4 text-[#c9a563]" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-white text-sm">{t('aiAdvisor.paywallTitle')}</p>
+                <p className="text-xs text-white/70 mt-0.5">{t('aiAdvisor.paywallSubtitle')}</p>
+              </div>
+            </div>
+            <ul className="space-y-1.5 mb-4 ml-1 text-xs text-white/85">
+              <li className="flex items-start gap-2">
+                <Check className="w-3 h-3 text-[#c9a563] flex-shrink-0 mt-0.5" />
+                <span>{t('aiAdvisor.paywallBenefit1')}</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <Check className="w-3 h-3 text-[#c9a563] flex-shrink-0 mt-0.5" />
+                <span>{t('aiAdvisor.paywallBenefit2')}</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <Check className="w-3 h-3 text-[#c9a563] flex-shrink-0 mt-0.5" />
+                <span>{t('aiAdvisor.paywallBenefit3')}</span>
+              </li>
+            </ul>
+            <Link
+              href="/membership"
+              onClick={() => onOpenChange(false)}
+              className="inline-flex items-center gap-2 bg-[#c9a563] text-foreground hover:bg-[#d4b478] transition-colors text-xs font-semibold px-4 py-2 rounded-lg w-full justify-center"
             >
-              {isStreaming ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              ) : (
-                <Send className="h-5 w-5" />
-              )}
-            </Button>
+              {t('aiAdvisor.paywallCta')}
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
           </div>
-          <p className="text-xs text-gray-400 mt-3 text-center">
-            {t('aiAdvisor.disclaimer')}
-          </p>
-        </div>
+        ) : (
+          <>
+            {/* Round 80.19: subtle counter pill — only shows when used >= 3
+                so first-time visitors don't feel rationed. Plus members
+                see no counter at all. */}
+            {!isPaidTier && used >= 3 && (
+              <div className="px-4 py-2 bg-foreground/[0.03] border-t border-foreground/8 flex items-center justify-between text-[11px] shrink-0">
+                <span className="text-foreground/60">
+                  {t('aiAdvisor.quotaRemaining', { remaining: String(remaining), cap: String(cap) })}
+                </span>
+                <Link
+                  href="/membership"
+                  onClick={() => onOpenChange(false)}
+                  className="text-[#8a6f3a] hover:text-[#c9a563] font-medium"
+                >
+                  {t('aiAdvisor.quotaUpgrade')}
+                </Link>
+              </div>
+            )}
+
+            {/* Input Area — clean, no gradient, brand-aligned */}
+            <div className="px-4 py-3 border-t border-foreground/10 bg-white shrink-0">
+              <div className="flex gap-2 items-center">
+                <Input
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  placeholder={t('aiAdvisor.inputPlaceholder')}
+                  className="flex-1 h-11 border border-foreground/15 rounded-lg px-4 focus-visible:ring-2 focus-visible:ring-foreground/20 focus-visible:ring-offset-0 focus-visible:border-foreground/40 bg-white text-foreground"
+                  disabled={isStreaming}
+                  aria-label={t('aiAdvisor.inputPlaceholder')}
+                />
+                <Button
+                  onClick={handleSend}
+                  disabled={!input.trim() || isStreaming}
+                  className="h-11 w-11 bg-foreground hover:bg-foreground/90 rounded-lg p-0 flex items-center justify-center shadow-sm disabled:opacity-40"
+                  aria-label={t('aiAdvisor.sendMessage')}
+                >
+                  {isStreaming ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+              <p className="text-[10px] text-foreground/40 mt-2 text-center tracking-wide">
+                {t('aiAdvisor.disclaimer')}
+              </p>
+            </div>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );

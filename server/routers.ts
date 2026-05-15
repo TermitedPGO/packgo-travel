@@ -70,6 +70,50 @@ function getStripeClient(): Stripe {
 }
 import { checkForgotPasswordRateLimitByIP, checkForgotPasswordRateLimitByEmail, checkForgotPasswordGlobalRateLimit, checkLoginRateLimitByIP, checkLoginRateLimitByEmail, isBlockedEmailDomain, checkBookingCreateRateLimit, checkCheckoutSessionRateLimit, checkAiChatRateLimit, checkAiChatDailyLimit, checkAiChatGlobalAnonymousLimit, checkAiChatUserDailyLimit, checkRateLimit } from "./rateLimit";
 
+/**
+ * SECURITY_AUDIT_2026_05_14 P2-5 helper: verify every passed-in skillUsageLog
+ * id belongs to the caller (either same userId, or same sessionId). Throws
+ * FORBIDDEN if any id doesn't match — preventing anonymous tampering with
+ * skill-performance feedback / conversion analytics.
+ */
+async function assertOwnsUsageLogs(
+  usageLogIds: number[],
+  caller: { userId?: number; sessionId?: string }
+): Promise<void> {
+  if (usageLogIds.length === 0) return;
+  if (!caller.userId && !caller.sessionId) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Provide a sessionId or sign in to record feedback.",
+    });
+  }
+  const { skillUsageLog } = await import("../drizzle/schema");
+  const { and, inArray, or, eq } = await import("drizzle-orm");
+  const { getDb } = await import("./db");
+  const dbInst = await getDb();
+  if (!dbInst) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "DB unavailable",
+    });
+  }
+  const ownClauses = [
+    caller.userId ? eq(skillUsageLog.userId, caller.userId) : null,
+    caller.sessionId ? eq(skillUsageLog.sessionId, caller.sessionId) : null,
+  ].filter(Boolean) as any[];
+  const ownership = ownClauses.length === 1 ? ownClauses[0] : or(...ownClauses);
+  const rows = await dbInst
+    .select({ id: skillUsageLog.id })
+    .from(skillUsageLog)
+    .where(and(inArray(skillUsageLog.id, usageLogIds), ownership));
+  if (rows.length !== usageLogIds.length) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "One or more usage-log ids do not belong to this session.",
+    });
+  }
+}
+
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
@@ -107,13 +151,18 @@ export const appRouter = router({
             role: user.role,
           });
           
-          // Set cookie
+          // Set cookie.
+          //
+          // SECURITY_AUDIT_2026_05_14 P2-4: maxAge was 365d while
+          // createToken defaults to a 14d JWT (server/jwt.ts), so the
+          // browser kept the cookie for 351 useless days after the JWT
+          // stopped verifying. Match the JWT TTL.
           const cookieOptions = getSessionCookieOptions(ctx.req);
-          ctx.res.cookie(COOKIE_NAME, token, { 
-            ...cookieOptions, 
-            maxAge: 365 * 24 * 60 * 60 * 1000 
+          ctx.res.cookie(COOKIE_NAME, token, {
+            ...cookieOptions,
+            maxAge: 14 * 24 * 60 * 60 * 1000,
           });
-          
+
           return { success: true, user: { id: user.id, email: user.email, name: user.name } };
         } catch (error: any) {
           throw new TRPCError({
@@ -1273,31 +1322,56 @@ export const appRouter = router({
         }
       }),
 
-    // Record user feedback for AI chat response
+    // Record user feedback for AI chat response.
+    //
+    // SECURITY_AUDIT_2026_05_14 P2-5: was an unauthenticated publicProcedure
+    // accepting any usageLogIds — anyone could pollute skill-performance
+    // analytics. Now requires either:
+    //   (a) `sessionId` matching the chat session that produced the logs, OR
+    //   (b) authenticated user whose own logs are being annotated.
+    // Server checks every passed-in id and rejects if any of them doesn't
+    // belong to the caller. Tighter than the audit's two suggested options
+    // ("session token" or "protectedProcedure") because it accepts both,
+    // which preserves anonymous-chat feedback while still gating writes.
     recordFeedback: publicProcedure
       .input(
         z.object({
+          sessionId: z.string().min(1).max(200).optional(),
           usageLogIds: z.array(z.number().int().positive()).max(100),
           feedback: z.enum(["positive", "negative"]),
           comment: mediumStr.optional(), // v73: bound 5KB max
         })
       )
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
+        await assertOwnsUsageLogs(input.usageLogIds, {
+          userId: ctx.user?.id,
+          sessionId: input.sessionId,
+        });
         const { recordChatFeedback } = await import("./services/aiChatSkillService");
         await recordChatFeedback(input.usageLogIds, input.feedback, input.comment);
         return { success: true };
       }),
 
-    // Record conversion from AI chat session
+    // Record conversion from AI chat session.
+    //
+    // SECURITY_AUDIT_2026_05_14 P2-5: same session-or-user gate as
+    // recordFeedback above. Conversion writes feed the skill-performance
+    // training loop, so anonymous tampering would poison future skill
+    // matching.
     recordConversion: publicProcedure
       .input(
         z.object({
-          usageLogIds: z.array(z.number()),
+          sessionId: z.string().min(1).max(200).optional(),
+          usageLogIds: z.array(z.number().int().positive()).max(100),
           conversionType: z.enum(["booking", "inquiry", "favorite", "share"]),
           conversionId: z.number().optional(),
         })
       )
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
+        await assertOwnsUsageLogs(input.usageLogIds, {
+          userId: ctx.user?.id,
+          sessionId: input.sessionId,
+        });
         const { recordChatConversion } = await import("./services/aiChatSkillService");
         await recordChatConversion(input.usageLogIds, input.conversionType, input.conversionId);
         return { success: true };

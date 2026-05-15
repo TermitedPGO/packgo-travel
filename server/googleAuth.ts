@@ -150,9 +150,16 @@ export function initializeGoogleAuth(app: Express) {
         const cookieOptions = getSessionCookieOptions(req);
         console.log('[Google OAuth] Cookie options:', JSON.stringify(cookieOptions));
         
+        // SECURITY_AUDIT_2026_05_14 P2-4: cookie maxAge was 365d while JWT
+        // expiry is 14d (server/jwt.ts JWT_EXPIRES_IN). After day 14 the
+        // cookie sits there for 351 more days only to fail verification on
+        // every request — useless and confusing. Match the JWT TTL so the
+        // browser drops the cookie at the same time the server stops
+        // accepting it. Longer sessions should come from a refresh-token
+        // flow, not a long-lived access token.
         res.cookie(COOKIE_NAME, token, {
           ...cookieOptions,
-          maxAge: 365 * 24 * 60 * 60 * 1000,
+          maxAge: 14 * 24 * 60 * 60 * 1000,
         });
         console.log('[Google OAuth] Cookie set with name:', COOKIE_NAME);
 

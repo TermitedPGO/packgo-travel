@@ -17,6 +17,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { logLlmUsage } from '../llmUsageService';
+import { parseLlmJson } from '../_core/parseLlmJson';
 
 // Model constants - Upgraded to Claude 4.5 Series (2026-01-30)
 export const CLAUDE_MODELS = {
@@ -52,7 +53,11 @@ export type ClaudeModel = typeof CLAUDE_MODELS[keyof typeof CLAUDE_MODELS];
  */
 function shouldUsePromptCache(text: string, model: string): boolean {
   if (!text) return false;
-  const estimatedTokens = Math.floor(text.length / 3.5);
+  // v80.24: CJK uses ~1.5 chars/token (vs 3.5 for English). Auto-detect.
+  const cjkChars = (text.match(/[぀-ヿ㐀-䶿一-鿿豈-﫿]/g) || []).length;
+  const cjkRatio = cjkChars / text.length;
+  const charsPerToken = cjkRatio > 0.5 ? 1.5 : 3.5;
+  const estimatedTokens = Math.floor(text.length / charsPerToken);
   const minTokens = model.includes("haiku") ? 2048 : 1024;
   return estimatedTokens >= minTokens;
 }
@@ -147,7 +152,12 @@ export class ClaudeAgent {
     const forgeAvailable = !!(process.env.BUILT_IN_FORGE_API_KEY && process.env.BUILT_IN_FORGE_API_URL);
     this.useForgeFirst = forgeAvailable;
     console.log(`[ClaudeAgent] Mode: ${this.useForgeFirst ? '🔀 Forge-first (production — skipping Claude direct)' : '🔵 Claude-direct (local dev)'}`);
-    console.log(`[ClaudeAgent] ANTHROPIC_API_KEY status: ${apiKey ? `SET (${apiKey.substring(0, 12)}...)` : 'NOT SET'}`);
+    // SECURITY_AUDIT_2026_05_14 P2-3: don't log the API key prefix even
+    // partial — Fly logs may be exported to contractors, shared in
+    // screen-share, etc. The prefix doesn't itself enable an attack but
+    // confirms the key format and gives a sliver of credential surface
+    // for no upside.
+    console.log(`[ClaudeAgent] ANTHROPIC_API_KEY status: ${apiKey ? 'SET' : 'NOT SET'}`);
     console.log(`[ClaudeAgent] BUILT_IN_FORGE_API_KEY status: ${process.env.BUILT_IN_FORGE_API_KEY ? 'SET' : 'NOT SET'}`);
     if (!apiKey && !forgeAvailable) {
       throw new Error('ANTHROPIC_API_KEY is not set and Forge is not available');
@@ -554,14 +564,10 @@ export class ClaudeAgent {
         });
         const forgeContent = forgeResult.choices?.[0]?.message?.content;
         const contentStr = typeof forgeContent === 'string' ? forgeContent : JSON.stringify(forgeContent);
-        let parsedData: T;
-        try {
-          parsedData = JSON.parse(contentStr) as T;
-        } catch {
-          const jsonMatch = contentStr.match(/\{[\s\S]*\}/);
-          if (!jsonMatch) throw new Error('Forge-first: no valid JSON in response');
-          parsedData = JSON.parse(jsonMatch[0]) as T;
-        }
+        // v80.24: parseLlmJson handles ```fences + leading prose. Old code
+        // crashed on `{ fenced }` because match(/\{[\s\S]*\}/) returns the
+        // raw fence contents that JSON.parse then rejected.
+        const parsedData = parseLlmJson<T>(contentStr);
         console.log(`[ClaudeAgent:${this.agentName}] ✅ Forge-first structured succeeded (${Date.now() - startTime}ms)`);
         this.updateUsageStats(forgeResult.usage?.prompt_tokens || 0, forgeResult.usage?.completion_tokens || 0);
         return {
@@ -688,16 +694,8 @@ export class ClaudeAgent {
           });
           const forgeContent = forgeResult.choices?.[0]?.message?.content;
           const contentStr = typeof forgeContent === 'string' ? forgeContent : JSON.stringify(forgeContent);
-          // 嘗試解析 JSON
-          let parsedData: T;
-          try {
-            parsedData = JSON.parse(contentStr) as T;
-          } catch {
-            // 如果不是有效 JSON，尝試提取 JSON 區塊
-            const jsonMatch = contentStr.match(/\{[\s\S]*\}/);
-            if (!jsonMatch) throw new Error('Forge fallback: no valid JSON in response');
-            parsedData = JSON.parse(jsonMatch[0]) as T;
-          }
+          // v80.24: parseLlmJson handles fences + leading prose
+          const parsedData = parseLlmJson<T>(contentStr);
           console.log(`[ClaudeAgent] Forge structured fallback succeeded (${Date.now() - startTime}ms)`);
           return {
             success: true,

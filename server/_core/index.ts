@@ -321,6 +321,32 @@ async function startServer() {
     return ip;
   }
 
+  /**
+   * SECURITY_AUDIT_2026_05_14 P3-4: was hardcoded `userId: 1`. Works
+   * today (Jeff is user 1) but breaks the moment a 2nd admin exists or
+   * the seed order changes. Resolve the first admin dynamically and
+   * cache the result for the process lifetime.
+   */
+  let cachedAdminUserId: number | null = null;
+  async function getOwnerAdminUserId(): Promise<number> {
+    if (cachedAdminUserId !== null) return cachedAdminUserId;
+    const { getDb } = await import("../db");
+    const { users } = await import("../../drizzle/schema");
+    const { eq } = await import("drizzle-orm");
+    const dbInst = await getDb();
+    if (!dbInst) throw new Error("DB unavailable");
+    const rows = await dbInst
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.role, "admin"))
+      .limit(1);
+    if (rows.length === 0) {
+      throw new Error("No admin user found — seed one before using internal endpoints");
+    }
+    cachedAdminUserId = rows[0].id;
+    return cachedAdminUserId;
+  }
+
   app.post("/api/internal/test-generate", async (req, res) => {
     try {
       const ip = await verifyInternalAuth(req, res, {
@@ -337,7 +363,7 @@ async function startServer() {
       const requestId = `gen_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
       const job = await addTourGenerationJob({
         url,
-        userId: 1, // admin user id
+        userId: await getOwnerAdminUserId(),
         requestId,
         forceRegenerate: force === true || force === "true",
         isPdf: typeof isPdf === "boolean" ? isPdf : mode === "PDF",
@@ -377,7 +403,9 @@ async function startServer() {
       let queued = 0;
       if (queueRewrite && result.imported > 0) {
         const tourIds = result.results.filter(r => r.success && r.tourId).map(r => r.tourId!);
-        ({ queued } = await queueRewriteForImportedTours(tourIds, { userId: 1 }));
+        ({ queued } = await queueRewriteForImportedTours(tourIds, {
+          userId: await getOwnerAdminUserId(),
+        }));
       }
       return res.json({ ...result, queued });
     } catch (err) {

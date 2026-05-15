@@ -9,7 +9,13 @@ export type NotificationPayload = {
 const TITLE_MAX_LENGTH = 1200;
 const CONTENT_MAX_LENGTH = 20000;
 
-const trimValue = (value: string): string => value.trim();
+// SECURITY_AUDIT_2026_05_14 P2-6: strip CRLF before the title lands in an
+// email Subject header. Nodemailer ≥6 already strips CRLF from headers as
+// a defense, so this is belt-and-suspenders — if the transport is ever
+// swapped (different mail library, or the title is forwarded through SMS /
+// Slack later), the lack of explicit \r\n stripping becomes load-bearing.
+const trimValue = (value: string): string =>
+  value.replace(/[\r\n]+/g, " ").trim();
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
 
