@@ -693,6 +693,21 @@ async function startServer() {
     console.warn('[Startup] Failed to init poster processing worker:', err);
   }
 
+  // Phase 1D supplier-sync — daily catalog mirror for Lion + UV at
+  // 03:00 UTC. See server/services/supplierSyncService.ts for the
+  // orchestrator and server/queues/supplierSyncQueue.ts for the
+  // BullMQ worker.
+  try {
+    const {
+      initSupplierSyncWorker,
+      ensureDailySupplierSyncScheduled,
+    } = await import('../queues/supplierSyncQueue');
+    initSupplierSyncWorker();
+    await ensureDailySupplierSyncScheduled();
+  } catch (err) {
+    console.warn('[Startup] Failed to init supplier sync worker:', err);
+  }
+
   const preferredPort = parseInt(process.env.PORT || "3000");
   
   // Set SO_REUSEADDR option before listening

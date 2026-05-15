@@ -5,6 +5,7 @@ import { tourMonitorRouter } from "./routers/tourMonitorRouter";
 import { agentRouter } from "./routers/agentRouter";
 import { toolsRouter } from "./routers/toolsRouter";
 import { plaidRouter } from "./routers/plaidRouter";
+import { suppliersRouter } from "./routers/suppliersRouter";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, adminProcedure, router } from "./_core/trpc";
@@ -9381,6 +9382,12 @@ export const appRouter = router({
   // marking. Mounted separately from `accounting` (which handles manual
   // entries) so the two data sources stay disentangled.
   plaid: plaidRouter,
+
+  // ── Supplier sync — daily catalog mirror for Lion + UV ────────────────────
+  // Phase 1E. Admin-only endpoints for dashboard data + manual sync trigger.
+  // See server/services/supplierSyncService.ts for the orchestrator and
+  // server/queues/supplierSyncQueue.ts for the BullMQ worker.
+  suppliers: suppliersRouter,
 
   // ── Reviews — FTC-compliant testimonials ──────────────────────────────────
   // Round 80.7: stub endpoint that returns [] so TestimonialsCarousel doesn't
