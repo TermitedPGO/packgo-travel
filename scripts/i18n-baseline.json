@@ -184,5 +184,11 @@
     "line": 69,
     "text": "兌換成功!Voucher 代碼:${res.code}",
     "score": 9
+  },
+  {
+    "file": "client/src/pages/Tours.tsx",
+    "line": 90,
+    "text": "最多比較 3 個行程",
+    "score": 10
   }
 ]
