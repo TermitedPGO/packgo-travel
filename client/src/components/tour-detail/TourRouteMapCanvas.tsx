@@ -1133,17 +1133,22 @@ export default function TourRouteMapCanvas({
         height={MAP_HEIGHT}
         style={{ width: "100%", height: "100%", display: "block" }}
       >
-        {/* Arrowhead + drop-shadow filter for active country */}
+        {/* Arrowhead marker. v359d — markerUnits="strokeWidth" so the
+            arrow grows with the route line's stroke (which scales with
+            fontScale on mobile). markerWidth/Height tuned to 4 so the
+            on-screen size at desktop stroke=1.7 is ≈6.8px (close to
+            the old 6×6 userSpaceOnUse value), while at mobile 2.85
+            stroke it grows to ≈11.4px. */}
         <defs>
           <marker
             id="route-arrow"
             viewBox="0 0 10 10"
             refX="9"
             refY="5"
-            markerWidth="6"
-            markerHeight="6"
+            markerWidth="4"
+            markerHeight="4"
             orient="auto-start-reverse"
-            markerUnits="userSpaceOnUse"
+            markerUnits="strokeWidth"
           >
             {/* v349 — grey arrowhead matches the elegant grey route line
                 (was sepia brown; reference image uses neutral grey). */}
@@ -1278,7 +1283,12 @@ export default function TourRouteMapCanvas({
               // reference. Was #1a1a1a (near-black) — reference shows
               // route lines drawn in warm brown ink, not black.
               stroke="#5a5550"
-              strokeWidth={1.7}
+              // v359d — scale stroke with fontScale so the line stays
+              // visible on mobile. At 1× the line is 1.7px (1200 viewBox);
+              // on a 360px-wide phone that's 0.51px screen — invisible.
+              // sqrt(fontScale) gives ~2.85px viewBox = 0.85px screen on
+              // mobile, still subtle but readable.
+              strokeWidth={1.7 * Math.max(1, Math.sqrt(fontScale))}
               strokeOpacity={0.92}
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -1315,6 +1325,12 @@ export default function TourRouteMapCanvas({
           // range / scenic label, so a hover popup was duplicate info.
           // Reclaimed ~30 lines of JSX + 6 unused locals per render.
           const isHovered = transportHover === i;
+          // v359d — scale the icon group with fontScale so mobile (1.7×–
+          // 2.8× text) gets correspondingly larger transport icons. Same
+          // sqrt(fontScale) factor as marker dots, so visual hierarchy
+          // stays consistent across viewport sizes. Stroke width is
+          // divided back out so its visible thickness stays constant.
+          const iconScale = Math.max(1, Math.sqrt(fontScale));
           return (
             <g
               key={`tx-${i}`}
@@ -1334,15 +1350,17 @@ export default function TourRouteMapCanvas({
                 animationDelay: `${(i + 1) * 50 + 200}ms`,
               }}
             >
-              <circle
-                r={14}
-                fill={colors.bg}
-                stroke={colors.stroke}
-                strokeWidth={isHovered ? 2 : 1.4}
-              />
-              {seg.icon === "plane" && <PlaneIcon stroke={colors.stroke} />}
-              {seg.icon === "train" && <TrainIcon stroke={colors.stroke} />}
-              {seg.icon === "bus" && <BusIcon stroke={colors.stroke} />}
+              <g transform={`scale(${iconScale})`}>
+                <circle
+                  r={14}
+                  fill={colors.bg}
+                  stroke={colors.stroke}
+                  strokeWidth={(isHovered ? 2 : 1.4) / iconScale}
+                />
+                {seg.icon === "plane" && <PlaneIcon stroke={colors.stroke} />}
+                {seg.icon === "train" && <TrainIcon stroke={colors.stroke} />}
+                {seg.icon === "bus" && <BusIcon stroke={colors.stroke} />}
+              </g>
               {/* v328: always-on time label next to icon (matches
                   reference). Range like "約 1.5-2 小時" or "約 1 小時".
                   v333 — scenic-train segments use the published duration
