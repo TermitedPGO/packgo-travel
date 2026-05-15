@@ -68,7 +68,7 @@ function getStripeClient(): Stripe {
   }
   return _stripeClient;
 }
-import { checkForgotPasswordRateLimitByIP, checkForgotPasswordRateLimitByEmail, checkForgotPasswordGlobalRateLimit, checkLoginRateLimitByIP, checkLoginRateLimitByEmail, isBlockedEmailDomain, checkBookingCreateRateLimit, checkCheckoutSessionRateLimit, checkAiChatRateLimit, checkAiChatDailyLimit, checkAiChatGlobalAnonymousLimit, checkAiChatUserDailyLimit } from "./rateLimit";
+import { checkForgotPasswordRateLimitByIP, checkForgotPasswordRateLimitByEmail, checkForgotPasswordGlobalRateLimit, checkLoginRateLimitByIP, checkLoginRateLimitByEmail, isBlockedEmailDomain, checkBookingCreateRateLimit, checkCheckoutSessionRateLimit, checkAiChatRateLimit, checkAiChatDailyLimit, checkAiChatGlobalAnonymousLimit, checkAiChatUserDailyLimit, checkRateLimit } from "./rateLimit";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -4886,18 +4886,35 @@ export const appRouter = router({
         return { translated };
       }),
 
-    // Create new inquiry
+    // Create new inquiry.
+    //
+    // SECURITY_AUDIT_2026_05_14 P1-3 hardening:
+    //   - All string fields capped with .max() so a malicious 50 MB submit
+    //     no longer fits.
+    //   - Per-IP rate limit (5 per 10 min) blocks bot floods.
     create: publicProcedure
       .input(
         z.object({
-          customerName: z.string().min(1),
-          customerEmail: z.string().email(),
-          customerPhone: z.string().optional(),
-          subject: z.string().min(1),
-          message: z.string().min(1),
+          customerName: z.string().min(1).max(100),
+          customerEmail: z.string().email().max(320),
+          customerPhone: z.string().max(40).optional(),
+          subject: z.string().min(1).max(200),
+          message: z.string().min(1).max(5000),
         })
       )
       .mutation(async ({ input, ctx }) => {
+        const ip = ctx.ip || "unknown";
+        const rl = await checkRateLimit({
+          key: `inquiry:create:ip:${ip}`,
+          limit: 5,
+          window: 600, // 10 minutes
+        });
+        if (!rl.allowed) {
+          throw new TRPCError({
+            code: "TOO_MANY_REQUESTS",
+            message: "提交過於頻繁，請稍後再試。",
+          });
+        }
         return await db.createInquiry({
           ...input,
           inquiryType: "general",
@@ -4933,6 +4950,37 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ input, ctx }) => {
+        // SECURITY_AUDIT_2026_05_14 P1-2: this procedure was unlimited and
+        // synchronously fires notifyOwner. An attacker could flood Jeff's
+        // inbox with 🆘 emails — the very channel meant for real
+        // emergencies. Layer two rate limits so real emergencies (rare,
+        // genuine) still pass while bot abuse hits a wall:
+        //   - Per-IP: 3 per 15 min  (someone abroad with one phone)
+        //   - Per-email: 5 per hour (catches stolen-IP bypass)
+        const ip = ctx.ip || "unknown";
+        const ipRl = await checkRateLimit({
+          key: `inquiry:emergency:ip:${ip}`,
+          limit: 3,
+          window: 900,
+        });
+        if (!ipRl.allowed) {
+          throw new TRPCError({
+            code: "TOO_MANY_REQUESTS",
+            message: "提交過於頻繁，若為真實緊急情況請直接撥打 +1-510-789-9999。",
+          });
+        }
+        const emailRl = await checkRateLimit({
+          key: `inquiry:emergency:email:${input.customerEmail.toLowerCase()}`,
+          limit: 5,
+          window: 3600,
+        });
+        if (!emailRl.allowed) {
+          throw new TRPCError({
+            code: "TOO_MANY_REQUESTS",
+            message: "提交過於頻繁，若為真實緊急情況請直接撥打 +1-510-789-9999。",
+          });
+        }
+
         const severityLabel: Record<typeof input.severity, string> = {
           medical: "醫療緊急",
           flight: "班機問題",
@@ -5055,21 +5103,45 @@ export const appRouter = router({
 
   // Newsletter subscription router
   newsletter: router({
-    // Subscribe to newsletter
+    // Subscribe to newsletter.
+    //
+    // SECURITY_AUDIT_2026_05_14 P1-4 hardening: this was unlimited and
+    // unconditionally fired notifyOwner — every POST = 1 owner email.
+    // Bot loop = 36,000 inbox spam per hour. New behavior:
+    //   - Email capped at RFC max (320 chars)
+    //   - Per-IP rate limit: 5 per hour
+    //   - Owner notification only fires for NEW subscribers (skip on
+    //     resubscribe / already-active duplicates) — kills the email-
+    //     spam-Jeff vector even when an attacker rotates IPs because
+    //     duplicate emails don't notify.
     subscribe: publicProcedure
-      .input(z.object({ email: z.string().email() }))
-      .mutation(async ({ input }) => {
+      .input(z.object({ email: z.string().email().max(320) }))
+      .mutation(async ({ input, ctx }) => {
+        const ip = ctx.ip || "unknown";
+        const rl = await checkRateLimit({
+          key: `newsletter:subscribe:ip:${ip}`,
+          limit: 5,
+          window: 3600, // 1 hour
+        });
+        if (!rl.allowed) {
+          throw new TRPCError({
+            code: "TOO_MANY_REQUESTS",
+            message: "訂閱請求過於頻繁，請稍後再試。",
+          });
+        }
         try {
           // Check if already subscribed
           const existing = await db.getNewsletterSubscriberByEmail(input.email);
+          let isNewSubscriber = false;
           if (existing) {
             if (existing.status === 'active') {
               return { success: true, message: '您已訂閱電子報，感謝您的支持！', alreadySubscribed: true };
             }
-            // Re-subscribe
+            // Re-subscribe — not a "new" subscriber for notification purposes
             await db.resubscribeNewsletter(input.email);
           } else {
             await db.createNewsletterSubscriber({ email: input.email });
+            isNewSubscriber = true;
           }
           // Send confirmation email (best-effort)
           try {
@@ -5078,11 +5150,14 @@ export const appRouter = router({
           } catch (emailErr) {
             console.warn('[Newsletter] Failed to send confirmation email:', emailErr);
           }
-          // Notify owner
-          try {
-            const { notifyOwner } = await import('./_core/notification');
-            await notifyOwner({ title: '新電子報訂閱', content: `新訂閱者：${input.email}` });
-          } catch {}
+          // Notify owner ONLY for genuinely new subscribers — prevents
+          // owner-inbox spam via repeated resubscribe attempts.
+          if (isNewSubscriber) {
+            try {
+              const { notifyOwner } = await import('./_core/notification');
+              await notifyOwner({ title: '新電子報訂閱', content: `新訂閱者：${input.email}` });
+            } catch {}
+          }
           return { success: true, message: '訂閱成功！感謝您的支持，我們會定期發送最新旅遊資訊。', alreadySubscribed: false };
         } catch (err: any) {
           if (err?.code === 'ER_DUP_ENTRY') {

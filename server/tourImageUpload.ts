@@ -7,8 +7,14 @@ import { Router } from "express";
 import { storagePut } from "./storage";
 import { randomBytes } from "crypto";
 import sharp from "sharp";
+import { requireAdmin } from "./_core/requireAdmin";
 
 export const tourImageUploadRouter = Router();
+
+// SECURITY_AUDIT_2026_05_14 P0-2: routes were anonymous → drained R2 +
+// allowed S3-key pollution under any tourId. All tour-image upload paths
+// are admin-only (only Jeff edits tour content).
+tourImageUploadRouter.use(requireAdmin);
 
 // 圖片尺寸配置（根據用途）
 const IMAGE_SIZES = {

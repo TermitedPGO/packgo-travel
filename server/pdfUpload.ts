@@ -7,8 +7,14 @@ import { Router, Request, Response } from "express";
 import { storagePut } from "./storage";
 import { randomBytes } from "crypto";
 import multer from "multer";
+import { requireAdmin } from "./_core/requireAdmin";
 
 export const pdfUploadRouter = Router();
+
+// SECURITY_AUDIT_2026_05_14 P0-3: 100MB PDF uploads were anonymous.
+// Tour generation from PDF is an admin-only workflow today, so locking
+// these to admin breaks nothing.
+pdfUploadRouter.use(requireAdmin);
 
 // 設定 multer 使用記憶體儲存，不限制檔案大小
 const upload = multer({

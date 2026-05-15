@@ -246,20 +246,89 @@ async function startServer() {
   // v80.24: Internal test endpoint for automated quality regression tests.
   // Protected by INTERNAL_TEST_TOKEN (set via fly secrets). Lets Claude /
   // CI scripts trigger tour generation programmatically without admin login.
+  //
+  // SECURITY_AUDIT_2026_05_14 P1-5: was a plain `===` token comparison
+  // (timing-leak risk, low practical impact but free to fix), no IP
+  // allowlist, no rate limit. New behavior layered via `verifyInternalToken`:
+  //   - `crypto.timingSafeEqual` for the token compare
+  //   - Optional IP allowlist via INTERNAL_TEST_IPS (CSV) — when set, only
+  //     listed source IPs may even attempt authentication
+  //   - Per-IP rate limit on generates / imports (5 per hour); status
+  //     endpoint stays unlimited because it's a read.
   // POST /api/internal/test-generate
   //   Headers: Authorization: Bearer <INTERNAL_TEST_TOKEN>
   //   Body: { url: string, mode?: "URL" | "PDF", isPdf?: boolean }
   // Returns: { jobId: string }
+  /**
+   * Validate the bearer token + IP + (optional) rate limit on internal
+   * endpoints. Returns the source-IP string on success; sends the
+   * appropriate 401 / 403 / 429 / 503 response and returns null otherwise.
+   */
+  async function verifyInternalAuth(
+    req: import("express").Request,
+    res: import("express").Response,
+    options: { rateLimitKey?: string; rateLimitMax?: number; windowSec?: number } = {}
+  ): Promise<string | null> {
+    const cryptoMod = await import("crypto");
+    const ip = (
+      (req.headers["fly-client-ip"] as string | undefined) ||
+      (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() ||
+      req.socket?.remoteAddress ||
+      "unknown"
+    );
+
+    // IP allowlist (optional; not enforced if env var unset to preserve
+    // the existing dev-machine workflow until Jeff registers his CI IPs).
+    const allowList = (process.env.INTERNAL_TEST_IPS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (allowList.length > 0 && !allowList.includes(ip)) {
+      res.status(403).json({ error: "IP not allowed" });
+      return null;
+    }
+
+    const expected = process.env.INTERNAL_TEST_TOKEN || "";
+    if (!expected) {
+      res.status(503).json({ error: "INTERNAL_TEST_TOKEN not configured" });
+      return null;
+    }
+    const given = (req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
+    // Constant-time compare. Length mismatch → reject without invoking
+    // timingSafeEqual (which errors when buffers differ in length).
+    const givenBuf = Buffer.from(given);
+    const expectedBuf = Buffer.from(expected);
+    if (
+      givenBuf.length !== expectedBuf.length ||
+      !cryptoMod.timingSafeEqual(givenBuf, expectedBuf)
+    ) {
+      res.status(401).json({ error: "Invalid token" });
+      return null;
+    }
+
+    if (options.rateLimitKey) {
+      const { checkRateLimit } = await import("../rateLimit");
+      const rl = await checkRateLimit({
+        key: `internal:${options.rateLimitKey}:${ip}`,
+        limit: options.rateLimitMax ?? 5,
+        window: options.windowSec ?? 3600,
+      });
+      if (!rl.allowed) {
+        res.status(429).json({ error: "Rate limit exceeded" });
+        return null;
+      }
+    }
+    return ip;
+  }
+
   app.post("/api/internal/test-generate", async (req, res) => {
     try {
-      const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
-      const expected = process.env.INTERNAL_TEST_TOKEN || "";
-      if (!expected) {
-        return res.status(503).json({ error: "INTERNAL_TEST_TOKEN not configured" });
-      }
-      if (!token || token !== expected) {
-        return res.status(401).json({ error: "Invalid token" });
-      }
+      const ip = await verifyInternalAuth(req, res, {
+        rateLimitKey: "test-generate",
+        rateLimitMax: 5,
+        windowSec: 3600,
+      });
+      if (!ip) return;
       const { url, mode, isPdf, force } = req.body || {};
       if (typeof url !== "string" || !url) {
         return res.status(400).json({ error: "Missing url" });
@@ -290,11 +359,15 @@ async function startServer() {
   //   Returns: BulkImportBatchResult + (if queueRewrite) queued: N
   app.post("/api/internal/bulk-import-lion", async (req, res) => {
     try {
-      const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
-      const expected = process.env.INTERNAL_TEST_TOKEN || "";
-      if (!expected || token !== expected) {
-        return res.status(401).json({ error: "Invalid token" });
-      }
+      // bulk-import = expensive per call (queues N LLM rewrites). Hard cap
+      // at 2 per hour per IP — strictly slower than test-generate which
+      // is 5/hr — because each call can fan out to 50+ jobs.
+      const ip = await verifyInternalAuth(req, res, {
+        rateLimitKey: "bulk-import-lion",
+        rateLimitMax: 2,
+        windowSec: 3600,
+      });
+      if (!ip) return;
       const { ids, categoryPath, limit, queueRewrite } = req.body || {};
       if (!ids?.length && !categoryPath) {
         return res.status(400).json({ error: "Provide either ids[] or categoryPath" });
@@ -313,14 +386,12 @@ async function startServer() {
     }
   });
 
-  // Status endpoint paired with test-generate
+  // Status endpoint paired with test-generate. Status is a polling read,
+  // so no rate limit (CI polls every few seconds).
   app.get("/api/internal/test-status/:jobId", async (req, res) => {
     try {
-      const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
-      const expected = process.env.INTERNAL_TEST_TOKEN || "";
-      if (!expected || token !== expected) {
-        return res.status(401).json({ error: "Invalid token" });
-      }
+      const ip = await verifyInternalAuth(req, res);
+      if (!ip) return;
       const { tourGenerationQueue } = await import("../queue");
       const job = await tourGenerationQueue.getJob(req.params.jobId);
       if (!job) return res.status(404).json({ error: "Job not found" });

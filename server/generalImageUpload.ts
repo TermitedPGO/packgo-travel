@@ -11,8 +11,14 @@ import { storagePut } from "./storage";
 import { randomBytes } from "crypto";
 import sharp from "sharp";
 import multer from "multer";
+import { requireAdmin } from "./_core/requireAdmin";
 
 export const generalImageUploadRouter = Router();
+
+// SECURITY_AUDIT_2026_05_14 P0-4: hero/destination inline-edit uploads
+// were anonymous. These feed EditableHero + EditableDestinations which
+// are admin-only UI surfaces, so gate at the router level.
+generalImageUploadRouter.use(requireAdmin);
 
 // multer 設定：記憶體存儲，最大 10MB
 const upload = multer({

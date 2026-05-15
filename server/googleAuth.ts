@@ -1,6 +1,7 @@
 import passport from 'passport';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
-import type { Express } from 'express';
+import type { Express, Request, Response } from 'express';
+import { randomBytes, timingSafeEqual } from 'crypto';
 import * as auth from './auth';
 import { createToken } from './jwt';
 import { getSessionCookieOptions } from './_core/cookies';
@@ -65,20 +66,65 @@ export function initializeGoogleAuth(app: Express) {
   // Initialize passport
   app.use(passport.initialize());
 
-  // Google OAuth routes
-  app.get(
-    '/api/auth/google',
-    passport.authenticate('google', { 
+  // Google OAuth routes.
+  //
+  // SECURITY_AUDIT_2026_05_14 P1-7: login-CSRF. Without a `state` param,
+  // an attacker could start a Google OAuth in their browser, intercept
+  // the callback URL, trick the victim into clicking it, and have the
+  // victim's browser silently complete OAuth as the attacker (the
+  // SameSite=lax cookie rides along on top-level navigation). New
+  // behavior: generate a random `state` on /api/auth/google, store it in
+  // a short-lived cookie, and on /callback compare via timingSafeEqual.
+  const STATE_COOKIE = 'pgo_oauth_state';
+  const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes — Google OAuth flow
+
+  app.get('/api/auth/google', (req: Request, res: Response, next) => {
+    const state = randomBytes(24).toString('hex');
+    // Use SameSite=lax so the cookie rides along when Google redirects
+    // back; httpOnly so JS can't read it; Secure under HTTPS.
+    const isHttps =
+      req.protocol === 'https' ||
+      (req.headers['x-forwarded-proto'] === 'https');
+    res.cookie(STATE_COOKIE, state, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: isHttps,
+      maxAge: STATE_TTL_MS,
+      path: '/api/auth/google',
+    });
+    return passport.authenticate('google', {
       scope: ['profile', 'email'],
-      session: false 
-    })
-  );
+      session: false,
+      state,
+    })(req, res, next);
+  });
 
   app.get(
     '/api/auth/google/callback',
-    passport.authenticate('google', { 
+    // Verify state BEFORE letting passport consume the code. If state is
+    // missing or mismatched we redirect to /login without exchanging the
+    // code, so the attacker can't burn a victim's OAuth code either.
+    (req: Request, res: Response, next) => {
+      const givenState = typeof req.query.state === 'string' ? req.query.state : '';
+      const expectedState = (req as any).cookies?.[STATE_COOKIE] || '';
+      // Always clear the state cookie so a single state can't be reused.
+      res.clearCookie(STATE_COOKIE, { path: '/api/auth/google' });
+      const givenBuf = Buffer.from(givenState);
+      const expectedBuf = Buffer.from(expectedState);
+      if (
+        !givenState ||
+        !expectedState ||
+        givenBuf.length !== expectedBuf.length ||
+        !timingSafeEqual(givenBuf, expectedBuf)
+      ) {
+        console.warn('[Google OAuth] state mismatch — possible CSRF');
+        return res.redirect('/login?error=state_mismatch');
+      }
+      return next();
+    },
+    passport.authenticate('google', {
       session: false,
-      failureRedirect: '/login?error=google_auth_failed' 
+      failureRedirect: '/login?error=google_auth_failed'
     }),
     async (req, res) => {
       try {
