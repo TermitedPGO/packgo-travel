@@ -22,7 +22,7 @@
  *   pointing Jeff to the env-var instructions.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Building2,
   CreditCard,
@@ -38,7 +38,6 @@ import {
   TrendingDown,
   FileArchive,
 } from "lucide-react";
-import { usePlaidLink } from "react-plaid-link";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import {
@@ -97,8 +96,6 @@ export default function BankAccountsTab() {
   const utils = trpc.useUtils();
 
   const [filterAccountId, setFilterAccountId] = useState<number | "all">("all");
-  const [linkToken, setLinkToken] = useState<string | null>(null);
-  const [hostedLinkUrl, setHostedLinkUrl] = useState<string | null>(null);
 
   const { data: accounts, isLoading: accountsLoading } =
     trpc.plaid.linkedAccountsList.useQuery();
@@ -110,25 +107,31 @@ export default function BankAccountsTab() {
       offset: 0,
     });
 
+  // 2026-05-14: Removed embedded usePlaidLink integration entirely.
+  // Jeff's Chrome has an extension that blocks cdn.plaid.com (Honorlock or
+  // similar proctoring/privacy tool), which makes the embedded SDK flow
+  // unreliable — every click would hit our 4s watchdog before falling
+  // through to Hosted Link. Instead, just redirect to secure.plaid.com
+  // directly on token creation. Plaid's own domain is much harder to
+  // block, and the UX is one redirect step rather than waiting + toast +
+  // redirect. Webhook handler (handleHostedLinkSessionFinished) takes
+  // care of exchange + persistence server-side after the user completes
+  // the flow at secure.plaid.com.
   const createLinkTokenMut = trpc.plaid.createLinkToken.useMutation({
-    onSuccess: ({ linkToken, hostedLinkUrl }) => {
-      setLinkToken(linkToken);
-      setHostedLinkUrl(hostedLinkUrl ?? null);
+    onSuccess: ({ hostedLinkUrl }) => {
+      if (!hostedLinkUrl) {
+        // Should never happen (server always passes hosted_link options
+        // to Plaid), but guard anyway so we don't leave the user stuck.
+        toast.error(t("bankAccounts.errNoHostedUrl"), { duration: 10000 });
+        return;
+      }
+      toast.info(t("bankAccounts.redirectingHostedLink"), { duration: 4000 });
+      // Brief delay so the toast is visible before the page unloads
+      setTimeout(() => {
+        window.location.href = hostedLinkUrl;
+      }, 800);
     },
     onError: (err) => toast.error(t("bankAccounts.errLinkToken") + err.message),
-  });
-
-  const exchangeMut = trpc.plaid.exchangePublicToken.useMutation({
-    onSuccess: ({ accountCount }) => {
-      toast.success(
-        t("bankAccounts.toastLinked").replace("{count}", String(accountCount))
-      );
-      setLinkToken(null);
-      utils.plaid.linkedAccountsList.invalidate();
-      utils.plaid.transactionsList.invalidate();
-    },
-    onError: (err) =>
-      toast.error(t("bankAccounts.errExchange") + err.message),
   });
 
   const syncMut = trpc.plaid.syncNow.useMutation({
@@ -172,63 +175,6 @@ export default function BankAccountsTab() {
     onError: (err) =>
       toast.error(t("bankAccounts.errExport") + err.message),
   });
-
-  // Plaid Link integration — config is reactive on linkToken
-  const handleSuccess = useCallback(
-    (publicToken: string) => {
-      exchangeMut.mutate({ publicToken });
-    },
-    [exchangeMut]
-  );
-
-  const handleExit = useCallback(() => {
-    setLinkToken(null);
-  }, []);
-
-  const plaidLinkConfig = useMemo(
-    () => ({
-      token: linkToken,
-      onSuccess: handleSuccess,
-      onExit: handleExit,
-    }),
-    [linkToken, handleSuccess, handleExit]
-  );
-
-  const { open, ready } = usePlaidLink(plaidLinkConfig);
-
-  // Auto-open when token arrives + Plaid script is ready. useEffect with
-  // a ref guard so we open exactly once per token.
-  const [opened, setOpened] = useState<string | null>(null);
-  useEffect(() => {
-    if (linkToken && ready && opened !== linkToken) {
-      setOpened(linkToken);
-      open();
-    }
-  }, [linkToken, ready, opened, open]);
-
-  // SDK-load watchdog: if embedded Plaid script doesn't become ready in
-  // 4s, fall through to Hosted Link redirect. This is the safety net for
-  // when cdn.plaid.com is blocked (ad-blocker, Honorlock, corporate
-  // firewall, DoH misroute). Hosted Link hits Plaid's own domain instead
-  // of the CDN, which is much harder to block.
-  useEffect(() => {
-    if (!linkToken || ready) return;
-    const timer = setTimeout(() => {
-      if (!ready) {
-        if (hostedLinkUrl) {
-          toast.info(t("bankAccounts.fallbackHostedLink"), { duration: 6000 });
-          // Redirect after a short delay so the toast is visible
-          setTimeout(() => {
-            window.location.href = hostedLinkUrl;
-          }, 1500);
-        } else {
-          toast.error(t("bankAccounts.errSdkBlocked"), { duration: 12000 });
-          setLinkToken(null);
-        }
-      }
-    }, 4000);
-    return () => clearTimeout(timer);
-  }, [linkToken, ready, hostedLinkUrl, t]);
 
   const handleStartLink = () => {
     createLinkTokenMut.mutate();
