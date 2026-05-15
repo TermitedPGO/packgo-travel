@@ -1287,7 +1287,7 @@ export default function TourRouteMapCanvas({
               // Per Jeff's reference image: customer reads the route
               // direction at every leg, not just at journey end.
               markerEnd="url(#route-arrow)"
-              style={{ animationDelay: `${120 + i * 80}ms` }}
+              style={{ animationDelay: `${120 + i * 50}ms` }}
             />
           );
         })}
@@ -1308,45 +1308,13 @@ export default function TourRouteMapCanvas({
               : seg.icon === "train"
                 ? { bg: "#f0e4cc", stroke: "#7a6240" }
                 : { bg: "#e8e8e8", stroke: "#5a5a5a" };
-          // v317: hoverable transport icon with distance + duration
-          // tooltip. Approx duration estimates by mode:
-          //   bus: 60 km/h average (highway + city stops)
-          //   train: 100 km/h average (regional rail)
-          //   plane: 750 km/h cruise + 90 min terminal overhead
+          // v359c — transport-icon hover state retained for the subtle
+          // circle-stroke thickening (visual feedback that the icon is
+          // interactive) but the hover tooltip block below is gone. The
+          // always-on pill below the icon already shows duration / day-
+          // range / scenic label, so a hover popup was duplicate info.
+          // Reclaimed ~30 lines of JSX + 6 unused locals per render.
           const isHovered = transportHover === i;
-          const durationMin =
-            seg.icon === "plane"
-              ? Math.round((seg.km / 750) * 60 + 90)
-              : seg.icon === "train"
-                ? Math.round((seg.km / 100) * 60)
-                : Math.round((seg.km / 60) * 60);
-          const formatDuration = (mins: number) => {
-            if (mins < 60) return `${mins} min`;
-            const h = Math.floor(mins / 60);
-            const m = mins % 60;
-            return m === 0
-              ? `${h}h`
-              : `${h}h ${m}min`;
-          };
-          const distanceText = `${Math.round(seg.km)} km · ${formatDuration(durationMin)}`;
-          const modeLabel =
-            language === "en"
-              ? seg.icon === "plane"
-                ? "Flight"
-                : seg.icon === "train"
-                  ? "Train"
-                  : "Coach"
-              : seg.icon === "plane"
-                ? "飛機"
-                : seg.icon === "train"
-                  ? "火車"
-                  : "巴士";
-          const dayLink =
-            language === "en"
-              ? `Day ${seg.fromDay}→${seg.toDay}`
-              : `第${seg.fromDay}→${seg.toDay}天`;
-          const tipText = `${dayLink} · ${modeLabel} · ${distanceText}`;
-          const tipW = tipText.length * 7 + 16;
           return (
             <g
               key={`tx-${i}`}
@@ -1356,11 +1324,14 @@ export default function TourRouteMapCanvas({
               onMouseLeave={() => setTransportHover(null)}
               style={{
                 pointerEvents: "auto",
-                cursor: "help",
+                // v359c — was cursor: "help" when hover spawned a tooltip.
+                // Tooltip removed (duplicate of pill); the icon is purely
+                // decorative now, hover just thickens the circle stroke.
+                cursor: "default",
                 // Transport icons fade in just AFTER the two adjacent
                 // markers have popped, so the eye reads city → city
                 // → connecting transport.
-                animationDelay: `${(i + 1) * 80 + 200}ms`,
+                animationDelay: `${(i + 1) * 50 + 200}ms`,
               }}
             >
               <circle
@@ -1480,35 +1451,7 @@ export default function TourRouteMapCanvas({
                   </g>
                 );
               })()}
-              {isHovered && (
-                <g style={{ pointerEvents: "none" }}>
-                  <rect
-                    x={-tipW / 2}
-                    y={-36}
-                    width={tipW}
-                    height={20}
-                    rx={4}
-                    fill="#0a0a0a"
-                    fillOpacity={0.92}
-                  />
-                  <text
-                    x={0}
-                    y={-22}
-                    textAnchor="middle"
-                    fontSize={10}
-                    fontWeight={500}
-                    fill="#ffffff"
-                    fontFamily="'Noto Sans TC', sans-serif"
-                  >
-                    {tipText}
-                  </text>
-                  <path
-                    d={`M -4 -16 L 0 -12 L 4 -16 Z`}
-                    fill="#0a0a0a"
-                    fillOpacity={0.92}
-                  />
-                </g>
-              )}
+              {/* v359c — hover tooltip JSX removed (duplicate of pill). */}
             </g>
           );
         })}
@@ -1626,8 +1569,11 @@ export default function TourRouteMapCanvas({
                 style={{
                   cursor: "pointer",
                   // Stagger marker entrance: each subsequent marker
-                  // appears 80ms after the previous, in day order.
-                  animationDelay: `${i * 80}ms`,
+                  // appears 50ms after the previous, in day order.
+                  // v359c — was 80ms; on a 12-day tour the last marker
+                  // waited 960ms which felt slow. 50ms keeps the
+                  // "draws itself" cinematic feel at 600ms total.
+                  animationDelay: `${i * 50}ms`,
                   outline: "none",
                 }}
               >
