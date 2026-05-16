@@ -18,6 +18,85 @@ import { invokeLLM } from "../_core/llm";
 
 // A/B Test Group 1: CalibrationAgent model selection
 // Group 0 (baseline): uses default Sonnet
+
+// Round 80.18: programmatic city↔country sanity check. Catches the
+// hallucinations the LLM verdict missed (e.g. tour saved as
+// "巴西/桃園" or "日本/高雄" — city's actual country differs from the
+// declared destinationCountry).
+//
+// Returns { mismatch: true, actualCountry } when city is in the lookup
+// AND its country differs from the declared one. If city or country is
+// empty, or city isn't in the lookup, returns { mismatch: false }.
+const CITY_TO_COUNTRY_LOOKUP: Record<string, string> = {
+  // Japan
+  東京: "日本", 大阪: "日本", 京都: "日本", 名古屋: "日本", 福岡: "日本",
+  廣島: "日本", 神戶: "日本", 奈良: "日本", 四國: "日本", 北海道: "日本",
+  沖繩: "日本", 沖縄: "日本", 九州: "日本", 關西: "日本", 京阪神: "日本",
+  那霸: "日本", 石垣: "日本", 宮古: "日本", 與那國: "日本", 函館: "日本",
+  札幌: "日本", 旭川: "日本", 釧路: "日本",
+  // Korea
+  首爾: "韓國", 釜山: "韓國", 濟州: "韓國",
+  // SE Asia
+  曼谷: "泰國", 清邁: "泰國", 普吉: "泰國", 蘇梅: "泰國",
+  河內: "越南", 胡志明: "越南", 峴港: "越南", 下龍灣: "越南",
+  巴里島: "印尼", 峇里島: "印尼",
+  馬尼拉: "菲律賓", 宿霧: "菲律賓", 長灘島: "菲律賓",
+  吉隆坡: "馬來西亞", 沙巴: "馬來西亞", 檳城: "馬來西亞",
+  // Europe
+  維也納: "奧地利", 薩爾斯堡: "奧地利", 哈修塔特: "奧地利",
+  布拉格: "捷克", 庫倫洛夫: "捷克",
+  蘇黎世: "瑞士", 日內瓦: "瑞士", 琉森: "瑞士", 采爾馬特: "瑞士",
+  布達佩斯: "匈牙利", 華沙: "波蘭", 克拉科夫: "波蘭",
+  羅馬: "義大利", 米蘭: "義大利", 威尼斯: "義大利", 佛羅倫斯: "義大利",
+  那不勒斯: "義大利",
+  巴黎: "法國", 尼斯: "法國", 里昂: "法國", 馬賽: "法國",
+  倫敦: "英國", 愛丁堡: "英國", 曼徹斯特: "英國",
+  柏林: "德國", 慕尼黑: "德國", 法蘭克福: "德國", 漢堡: "德國",
+  巴塞隆納: "西班牙", 馬德里: "西班牙", 塞維亞: "西班牙",
+  雅典: "希臘", 聖托里尼: "希臘", 米克諾斯: "希臘",
+  伊斯坦堡: "土耳其", 卡帕多奇亞: "土耳其",
+  阿姆斯特丹: "荷蘭", 布魯塞爾: "比利時",
+  雷克雅維克: "冰島", 奧斯陸: "挪威",
+  斯德哥爾摩: "瑞典", 哥本哈根: "丹麥", 赫爾辛基: "芬蘭",
+  // Americas
+  紐約: "美國", 華盛頓: "美國", 費城: "美國", 波士頓: "美國", 芝加哥: "美國",
+  洛杉磯: "美國", 舊金山: "美國", 拉斯維加斯: "美國", 西雅圖: "美國",
+  邁阿密: "美國", 夏威夷: "美國", 阿拉斯加: "美國",
+  溫哥華: "加拿大", 多倫多: "加拿大", 魁北克: "加拿大",
+  // Oceania
+  雪梨: "澳洲", 墨爾本: "澳洲", 黃金海岸: "澳洲", 布里斯本: "澳洲",
+  奧克蘭: "紐西蘭", 基督城: "紐西蘭", 皇后鎮: "紐西蘭",
+  // South America
+  馬丘比丘: "秘魯", 庫斯科: "秘魯", 利馬: "秘魯",
+  里約: "巴西", 聖保羅: "巴西", 布宜諾斯艾利斯: "阿根廷",
+  // Taiwan (the most commonly-confused set)
+  台北: "台灣", 新北: "台灣", 基隆: "台灣", 桃園: "台灣", 新竹: "台灣",
+  苗栗: "台灣", 台中: "台灣", 彰化: "台灣", 南投: "台灣", 雲林: "台灣",
+  嘉義: "台灣", 台南: "台灣", 高雄: "台灣", 屏東: "台灣", 宜蘭: "台灣",
+  花蓮: "台灣", 台東: "台灣", 花東: "台灣", 澎湖: "台灣", 金門: "台灣",
+  馬祖: "台灣", 阿里山: "台灣", 日月潭: "台灣", 墾丁: "台灣", 太魯閣: "台灣",
+};
+
+// Region labels that legitimately span multiple countries — these should
+// NOT be flagged. e.g. tour with country=日本 + city=北海道 (region) is fine.
+const MULTI_REGION_CITIES = new Set([
+  "北歐", "東歐", "南歐", "西歐", "中歐", "美東", "美西", "美加", "奧捷", "英愛",
+  "法瑞義", "德奧",
+]);
+
+function checkCityInCountry(city: string, country: string): {
+  mismatch: boolean;
+  actualCountry: string | null;
+} {
+  if (!city || !country) return { mismatch: false, actualCountry: null };
+  if (MULTI_REGION_CITIES.has(city)) return { mismatch: false, actualCountry: null };
+  const cityCountry = CITY_TO_COUNTRY_LOOKUP[city];
+  // City not in our lookup → can't tell, don't flag (conservative)
+  if (!cityCountry) return { mismatch: false, actualCountry: null };
+  if (cityCountry === country) return { mismatch: false, actualCountry: cityCountry };
+  return { mismatch: true, actualCountry: cityCountry };
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface CalibrationIssue {
@@ -84,24 +163,32 @@ export async function combinedQualityLLM(
 
   const prompt = `You audit a generated travel tour on TWO axes:
 
-A) FIDELITY vs SOURCE
+A) FIDELITY vs SOURCE — CRITICAL DESTINATION CHECK
 ${hasFidelityInput
   ? `SOURCE CONTENT (original URL/PDF text):
-${sourceContent!.slice(0, 6000)}
+${sourceContent!.slice(0, 8000)}
 
 GENERATED TOUR DATA:
 Title: ${tourData.title || "(missing)"}
 Poetic Title: ${(tourData as any).poeticTitle || "(none)"}
-Destination: ${(tourData as any).destinationCountry || "(missing)"}
+DestinationCountry: ${(tourData as any).destinationCountry || "(missing)"}
+DestinationCity: ${(tourData as any).destinationCity || "(missing)"}
+DepartureCity: ${(tourData as any).departureCity || "(missing)"}
 Description: ${(tourData.description || "").slice(0, 800)}
 
-SCORING RULES:
-- titleScore (0-100): Creative rewriting is encouraged. Score HIGH if destination/duration/theme are correct. Don't require exact match.
-- contentAccuracy (0-100): Are destination/activities/highlights factually correct? Enrichment with well-known local attractions is acceptable. Only penalize WRONG information.
-- overallScore (0-100): Overall creative quality preserving factual accuracy.
-- issues: ONLY clear factual errors (wrong destination, wrong country, contradicts source). Empty array if none. Do NOT include "might mislead" / "not explicitly confirmed" / soft observations.
-- A flawless tour with no factual errors → overallScore: 100. Don't default to 90-95 out of politeness.
-NOTE: Price and duration accuracy are checked by rule-based validation — DO NOT evaluate price/duration here.`
+CRITICAL FIDELITY CHECKS (Round 80.16 — calibration was too lenient):
+1. **Destination match against SOURCE** — Look at source content. What destination(s) does the SOURCE describe? Is "DestinationCountry" + "DestinationCity" actually one of those destinations? If source talks about 峇里島 but destination says "台灣/台北" → that's a CRITICAL FIDELITY VIOLATION (overallScore ≤ 40, contentAccuracy ≤ 30).
+2. **DestinationCity ≠ DepartureCity check** — Tours commonly say "X 出發前往 Y". DestinationCity must NOT equal DepartureCity in those cases. If both are 高雄 in a "高雄出發 那霸" tour, that's wrong (overallScore ≤ 60).
+3. **Title-destination consistency** — Does the title mention a country/city consistent with DestinationCountry/City? If title says "峇里島" but destination is "台灣", flag it (titleScore ≤ 40).
+4. **Source ground truth** — When in doubt, the SOURCE is the truth. The tour metadata is hallucination-prone. Be strict on this.
+
+SCORING RULES (RECALIBRATED):
+- titleScore (0-100): Creative rewriting is fine ONLY IF the destination is preserved. If title contradicts source destination → titleScore ≤ 40.
+- contentAccuracy (0-100): Hard penalty for destination mismatch with source. Enrichment with well-known local attractions is OK ONLY if the destination is correct.
+- overallScore (0-100): Reflect destination fidelity. A tour with wrong destination CANNOT score above 50, regardless of how nice the description reads.
+- issues: List EVERY destination mismatch / departure-vs-destination conflict / title-source contradiction.
+- A flawless tour: no factual errors AND destination matches source → 100.
+NOTE: Price and duration are checked by rule-based validation elsewhere — DO NOT evaluate price/duration here.`
   : `(no source content available — return titleScore=70, contentAccuracy=70, overallScore=70, issues=[])`}
 
 B) MARKETING — Title Attractiveness
@@ -385,6 +472,72 @@ Respond in JSON:
         message: issue,
         autoFixable: false,
       });
+    }
+
+    // 2026-05-16: deterministic destination-fidelity check.
+    //
+    // The LLM-driven check above ALREADY tells the model to compare
+    // destinations and "score ≤ 50 if destination contradicts source".
+    // In practice (production 2026-05-16) the LLM gave 94 / 96 to two
+    // tours where source = 沖繩 and generated title = 夏威夷 — full
+    // hallucinations the model failed to catch. This rule-based
+    // post-check guarantees those slip through.
+    //
+    // Algorithm: extract well-known destination keywords (Chinese names
+    // of major countries / regions) from BOTH the source content and
+    // the generated title. If neither shares any keyword, we have a
+    // factual drift — force score → 30 + critical issue. If they do
+    // share at least one keyword, no action (LLM check stands).
+    const DEST_KEYWORDS = [
+      "沖繩", "北海道", "東京", "京都", "大阪", "九州", "本州", "四國",
+      "夏威夷", "美國", "美東", "美西", "紐約", "洛杉磯", "舊金山", "拉斯維加斯", "黃石", "阿拉斯加",
+      "加拿大", "溫哥華", "多倫多", "墨西哥",
+      "韓國", "首爾", "釜山", "濟州",
+      "泰國", "曼谷", "普吉",
+      "越南", "新加坡", "馬來西亞",
+      "中國", "香港", "澳門", "上海", "北京", "西安",
+      "歐洲", "奧地利", "捷克", "德國", "法國", "義大利", "西班牙", "葡萄牙", "希臘", "瑞士",
+      "英國", "倫敦", "愛爾蘭", "荷蘭", "比利時", "盧森堡", "丹麥", "瑞典", "挪威", "芬蘭", "冰島",
+      "土耳其", "埃及", "摩洛哥", "南非",
+      "澳洲", "紐西蘭",
+      "印度", "尼泊爾", "斯里蘭卡",
+      "巴西", "秘魯", "阿根廷", "智利", "古巴",
+      "杜拜", "阿聯", "以色列", "約旦",
+      "台灣", "台北", "台中", "高雄", "花蓮", "墾丁",
+    ];
+    const genTitle = String(tourData.title || "");
+    const sourceKeywords = new Set<string>();
+    const genKeywords = new Set<string>();
+    for (const kw of DEST_KEYWORDS) {
+      if (sourceContent.includes(kw)) sourceKeywords.add(kw);
+      if (genTitle.includes(kw)) genKeywords.add(kw);
+    }
+    // Drift detection: source has known destinations AND generated has
+    // known destinations, but ZERO overlap → critical hallucination.
+    if (sourceKeywords.size > 0 && genKeywords.size > 0) {
+      let overlap = false;
+      for (const kw of genKeywords) {
+        if (sourceKeywords.has(kw)) {
+          overlap = true;
+          break;
+        }
+      }
+      if (!overlap) {
+        const srcList = [...sourceKeywords].slice(0, 4).join(", ");
+        const genList = [...genKeywords].slice(0, 4).join(", ");
+        issues.push({
+          check: "content",
+          severity: "critical",
+          message: `Destination drift: source mentions [${srcList}] but generated title only mentions [${genList}] — zero overlap suggests LLM hallucination.`,
+          field: "title",
+          autoFixable: false,
+        });
+        // Force well below the 60 review threshold so verdict=rejected.
+        score = Math.min(score, 30);
+        console.warn(
+          `[CalibrationAgent] destination drift detected: source=[${srcList}] vs generated=[${genList}], forcing score → 30`
+        );
+      }
     }
 
     return { score, issues };
@@ -1035,8 +1188,38 @@ export async function calibrateTour(
     scores.marketing * WEIGHTS.marketing
   );
 
-  const verdict: "approved" | "review" | "rejected" =
+  // Round 80.18: HARD RULE — destinationCity must geographically belong to
+  // destinationCountry. This is a programmatic check that runs AFTER the
+  // LLM verdict — when violated, force-downgrade to "review" regardless
+  // of LLM-assigned score. The previous Round 80.16 prompt-tightening
+  // helped but LLM still missed cases like 巴西/桃園 (city is Taiwan,
+  // country is Brazil) and gave them approved/96. This rule catches them
+  // automatically.
+  const cityCountryMismatch = checkCityInCountry(
+    fixedTourData.destinationCity || "",
+    fixedTourData.destinationCountry || ""
+  );
+  if (cityCountryMismatch.mismatch) {
+    allIssues.push({
+      check: "content",
+      severity: "critical",
+      message: `Hard-rule fail: destinationCity "${fixedTourData.destinationCity}" is not in destinationCountry "${fixedTourData.destinationCountry}" — city actually belongs to "${cityCountryMismatch.actualCountry || "unknown"}"`,
+      field: "destinationCity",
+      autoFixable: false,
+    });
+    console.warn(
+      `[CalibrationAgent] 🚨 Hard rule violated: city=${fixedTourData.destinationCity} not in country=${fixedTourData.destinationCountry}`
+    );
+  }
+
+  let verdict: "approved" | "review" | "rejected" =
     totalScore >= 85 ? "approved" : totalScore >= 60 ? "review" : "rejected";
+  // Hard-rule override: even if score is high, never auto-approve a tour
+  // with a city↔country mismatch. Force to "review" so admin sees it.
+  if (cityCountryMismatch.mismatch && verdict === "approved") {
+    console.warn(`[CalibrationAgent] 🚨 Forcing verdict approved → review due to city/country mismatch`);
+    verdict = "review";
+  }
 
   console.log(`[CalibrationAgent] Score: ${totalScore}, Verdict: ${verdict}, Issues: ${allIssues.length}, AutoFixes: ${fixes.length}`);
   console.log(`[CalibrationAgent] 📊 Final Report:`);

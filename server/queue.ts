@@ -11,6 +11,15 @@ export interface TourGenerationJobData {
   forceRegenerate?: boolean; // If true, ignore cache and regenerate
   isPdf?: boolean; // If true, treat URL as PDF file URL
   supplementUrl?: string; // 供應商官網 URL（配合 PDF 使用，用於抽取日期/人數/價格）
+  /**
+   * 2026-05-16: when a supplier-import bulk operation queues this job
+   * to re-generate a draft into a PACK&GO-style tour, this is the id
+   * of the original draft row. The worker flips that draft to
+   * status='inactive' on success so the catalog doesn't accumulate
+   * "ghost" drafts (production today has 8 stranded drafts from earlier
+   * runs of the same pipeline before this flag existed).
+   */
+  sourceDraftTourId?: number;
 }
 
 /**

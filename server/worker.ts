@@ -61,6 +61,28 @@ export const tourGenerationWorker = new Worker<TourGenerationJobData, TourGenera
 
       console.log(`✅ Tour generation job completed: ${job.id}`);
 
+      // 2026-05-16: if this job was spawned by a supplier-import rewrite
+      // (sourceDraftTourId carries the original draft's row id), flip
+      // that draft to status='inactive' now that the PACK&GO tour exists.
+      // This keeps the catalog clean — no stranded drafts after rewrite.
+      // We skip the cleanup if the result.success is false so a failed
+      // generation doesn't accidentally hide its own draft.
+      const draftId = job.data.sourceDraftTourId;
+      if (draftId && result?.success) {
+        try {
+          const { updateTour } = await import("./db");
+          await updateTour(draftId, { status: "inactive" });
+          console.log(
+            `🧹 Marked source draft tour #${draftId} as inactive after successful rewrite → new tour #${result.tourId}`
+          );
+        } catch (cleanupErr) {
+          console.warn(
+            `[tourGenerationWorker] Failed to inactive source draft #${draftId}:`,
+            cleanupErr
+          );
+        }
+      }
+
       return result;
     } catch (error) {
       console.error(`❌ Tour generation job failed: ${job.id}`, error);

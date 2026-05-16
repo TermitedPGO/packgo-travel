@@ -301,6 +301,12 @@ export async function queueRewriteForImportedTours(
           requestId,
           forceRegenerate: true,
           isPdf: false,
+          // 2026-05-16: tell masterAgent which draft this rewrite was
+          // spawned from so it can flip the source draft to status=
+          // 'inactive' on success — prevents the draft from sitting
+          // around forever after the new PACK&GO tour row has been
+          // generated (id 1080001-1080008 today's stranded drafts).
+          sourceDraftTourId: tourId,
         },
         { jobId: requestId }
       );

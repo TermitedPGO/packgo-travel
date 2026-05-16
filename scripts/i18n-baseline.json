@@ -190,5 +190,35 @@
     "line": 90,
     "text": "最多比較 3 個行程",
     "score": 10
+  },
+  {
+    "file": "client/src/components/admin/SuppliersTab.tsx",
+    "line": 90,
+    "text": "同步任務已排入佇列(jobId: ${data.jobId.slice(-20)})",
+    "score": 10
+  },
+  {
+    "file": "client/src/components/admin/SuppliersTab.tsx",
+    "line": 94,
+    "text": "同步失敗: ${err.message}",
+    "score": 9
+  },
+  {
+    "file": "client/src/components/admin/SuppliersTab.tsx",
+    "line": 107,
+    "text": "批量匯入失敗: ${err.message}",
+    "score": 9
+  },
+  {
+    "file": "client/src/components/admin/SuppliersTab.tsx",
+    "line": 121,
+    "text": "請先選擇供應商(雄獅 或 UV)",
+    "score": 12
+  },
+  {
+    "file": "client/src/components/admin/SuppliersTab.tsx",
+    "line": 135,
+    "text": "沒有符合條件的產品可匯入",
+    "score": 11
   }
 ]

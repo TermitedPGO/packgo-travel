@@ -338,6 +338,10 @@ export async function queueRewriteForImportedUvTours(
           requestId,
           forceRegenerate: true,
           isPdf: false,
+          // 2026-05-16: tell masterAgent to flip the source draft to
+          // inactive on success so we don't accumulate stranded drafts.
+          // Same flag the Lion bulk import sets.
+          sourceDraftTourId: tourId,
         },
         { jobId: requestId }
       );
