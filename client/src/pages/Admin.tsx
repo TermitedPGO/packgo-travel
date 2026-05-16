@@ -55,6 +55,7 @@ import VisaManagementTab from "@/components/admin/VisaManagementTab";
 import AffiliateTab from "@/components/admin/AffiliateTab";
 import AccountingTab from "@/components/admin/AccountingTab";
 import FinanceTab from "@/components/admin/FinanceTab";
+import SuppliersTab from "@/components/admin/SuppliersTab";
 import MonitorDashboard from "@/components/admin/MonitorDashboard";
 import AiQuotesTab from "@/components/admin/AiQuotesTab";
 import WechatAssistTab from "@/components/admin/WechatAssistTab";
@@ -80,7 +81,7 @@ type PageId =
   // Office — Inbox is the default; everything else is advanced
   | "office-inbox" | "office-chat" | "autonomous-agents" | "ai-hub" | "task-history" | "calibration-review" | "llm-cost" | "audit-log"
   // Operations
-  | "dashboard" | "inbox" | "tours" | "bookings" | "inquiries" | "tour-monitor"
+  | "dashboard" | "inbox" | "tours" | "bookings" | "inquiries" | "tour-monitor" | "suppliers"
   // Customers — now includes 中國簽證
   | "reviews" | "packpoint" | "vouchers" | "ai-quotes" | "wechat-assist" | "tool-quote" | "visa"
   // Marketing — now includes Trip.com 聯盟
@@ -119,6 +120,7 @@ const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageD
       { id: "bookings", label: "訂單" },
       { id: "inquiries", label: "詢問" },
       { id: "tour-monitor", label: "供應商監控" },
+      { id: "suppliers", label: "🔌 供應商同步" },
     ],
   },
   customers: {
@@ -337,6 +339,8 @@ function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
       return <InquiriesTab />;
     case "tour-monitor":
       return <MonitorDashboard />;
+    case "suppliers":
+      return <SuppliersTab />;
 
     // Customers
     case "reviews":
