@@ -135,13 +135,13 @@ export default function SuppliersTab() {
       toast.error("沒有符合條件的產品可匯入");
       return;
     }
-    if (
-      !confirm(
-        `將匯入 ${count} 個 ${supplierCode === "lion" ? "雄獅" : "UV"} 產品為 PACK&GO draft tours,並排入 LLM rewrite。確定?`
-      )
-    ) {
-      return;
-    }
+    // 2026-05-16: dropped native confirm() because it blocks the Chrome
+    // MCP automation pipeline and provides marginal value (toast already
+    // surfaces the result). If admin friction becomes a problem we can
+    // wire a proper shadcn AlertDialog later.
+    toast.info(
+      `開始匯入 ${count} 個 ${supplierCode === "lion" ? "雄獅" : "UV"} 產品...`
+    );
     bulkImportMut.mutate(filters);
   };
 
