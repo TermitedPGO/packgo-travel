@@ -12,7 +12,7 @@
 
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, gte, like, lte, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, like, lte, sql } from "drizzle-orm";
 import { adminProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import {
@@ -127,15 +127,23 @@ export const suppliersRouter = router({
         conditions.push(lte(productsTable.days, input.daysMax));
       }
       if (input.notYetImported) {
-        // LEFT JOIN to tours.productCode is the obvious SQL move but
-        // Drizzle's pre-SQL builder doesn't compose that cleanly with
-        // pagination — use a NOT IN subquery for clarity.
-        const imported = db
-          .select({ code: toursTable.productCode })
-          .from(toursTable)
-          .where(ne(toursTable.productCode, ""));
+        // 2026-05-16 bug fix: original code compared
+        //   supplierProducts.externalProductCode (Lion NormGroupID UUID
+        //   or UV productCode) NOT IN (SELECT tours.productCode)
+        // But tours.productCode stores Lion's `tourId` (e.g. 26AK516NCL-T)
+        // not NormGroupID, so the two columns NEVER match → filter is a
+        // no-op and the same supplier product can be imported infinitely.
+        //
+        // Real identifier comparison: tours.sourceUrl encodes the
+        // external code via either ?NormGroupID=<uuid> (Lion) or
+        // /product/detail/<productCode> (UV). Use LIKE-match against
+        // the externalProductCode embedded in sourceUrl.
         conditions.push(
-          sql`${productsTable.externalProductCode} NOT IN (${imported})`
+          sql`NOT EXISTS (
+            SELECT 1 FROM ${toursTable}
+            WHERE ${toursTable.sourceUrl} LIKE CONCAT('%NormGroupID=', ${productsTable.externalProductCode}, '%')
+               OR ${toursTable.sourceUrl} LIKE CONCAT('%/product/detail/', ${productsTable.externalProductCode}, '%')
+          )`
         );
       }
 
@@ -297,14 +305,17 @@ export const suppliersRouter = router({
 
       // Build the filter set — same as listProducts but ALWAYS
       // notYetImported=true (don't re-import existing).
+      // Same notYetImported dedup as listProducts above — compare via
+      // tours.sourceUrl LIKE not tours.productCode.
       const conditions = [
         eq(productsTable.supplierId, supRow[0].id),
         eq(productsTable.status, "active"),
         eq(productsTable.isHiddenByAdmin, false),
-        sql`${productsTable.externalProductCode} NOT IN (${db
-          .select({ code: toursTable.productCode })
-          .from(toursTable)
-          .where(ne(toursTable.productCode, ""))})`,
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${toursTable}
+          WHERE ${toursTable.sourceUrl} LIKE CONCAT('%NormGroupID=', ${productsTable.externalProductCode}, '%')
+             OR ${toursTable.sourceUrl} LIKE CONCAT('%/product/detail/', ${productsTable.externalProductCode}, '%')
+        )`,
       ];
       if (input.destinationCountry) {
         conditions.push(
