@@ -56,7 +56,10 @@ const COMMON_HEADERS = {
   "Accept-Language": "en-US,en;q=0.9,zh-TW;q=0.8",
 };
 
-const DEFAULT_TIMEOUT_MS = 15_000;
+// 2026-05-16: same bump rationale as lionClient.ts — Ctrip SOA2's
+// gateway gives sub-second responses warm but can stall past 15s when
+// the storefront API gets a burst from our paginated sync.
+const DEFAULT_TIMEOUT_MS = 60_000;
 
 async function fetchWithTimeout(
   url: string,

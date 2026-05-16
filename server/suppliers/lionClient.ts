@@ -41,10 +41,16 @@ const COMMON_HEADERS = {
 };
 
 /**
- * Network timeout. Lion's search occasionally takes >3s when the result
- * set is large; 15s is conservative. Detail calls usually return <1s.
+ * Network timeout. Production observation (2026-05-16, Fly machine
+ * 6e8263eefe1468): direct curl-equivalent fetch with PageSize=200 +
+ * 12-month window completes in 6-7s when warm, but under sustained
+ * pagination Lion's API occasionally spikes past 15s (likely TLS
+ * connection reset / rate-limit shaping on their side). The earlier
+ * 15s value hit timeouts on page 3+ even when pages 1-2 succeeded.
+ * 60s gives plenty of headroom; the upper bound on a full 23-page
+ * sync is still well under the 5-minute BullMQ job budget.
  */
-const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_TIMEOUT_MS = 60_000;
 
 async function fetchWithTimeout(
   url: string,
@@ -166,10 +172,20 @@ export async function searchProducts(
       }
     );
   } catch (err) {
+    // Surface the actual underlying error (AbortError = timeout, vs
+    // ECONNRESET / ENOTFOUND / etc.) so supplierSyncRuns.errorMessage
+    // tells ops what really happened. "network error" alone loses too
+    // much detail when debugging.
+    const e = err as Error & { cause?: { code?: string; message?: string } };
+    const detail = e.name === "AbortError"
+      ? `timeout after ${DEFAULT_TIMEOUT_MS}ms`
+      : e.cause?.code
+        ? `${e.cause.code}: ${e.cause.message ?? e.message}`
+        : e.message ?? String(err);
     throw new SupplierApiError(
       "lion",
       "search/grouplistinfojson",
-      "network error",
+      detail,
       err
     );
   }
