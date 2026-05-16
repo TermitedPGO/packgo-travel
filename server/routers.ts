@@ -3006,6 +3006,7 @@ export const appRouter = router({
           ids: input.ids,
           categoryPath: input.categoryPath,
           limit: input.limit,
+          userId: ctx.user.id,
         });
         let queued = 0;
         if (input.queueRewrite && result.imported > 0) {

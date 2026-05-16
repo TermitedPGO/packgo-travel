@@ -201,6 +201,7 @@ export const suppliersRouter = router({
       if (input.supplierCode === "lion") {
         const result = await bulkImportFromLion({
           ids: [input.externalProductCode],
+          userId: ctx.user.id,
         });
         const first = result.results[0];
         if (!first?.success) {
@@ -214,6 +215,7 @@ export const suppliersRouter = router({
       } else {
         const result = await bulkImportFromUv({
           productCodes: [input.externalProductCode],
+          userId: ctx.user.id,
         });
         const first = result.results[0];
         if (!first?.success) {
@@ -339,8 +341,11 @@ export const suppliersRouter = router({
 
       const batchResult =
         input.supplierCode === "lion"
-          ? await bulkImportFromLion({ ids: codes })
-          : await bulkImportFromUv({ productCodes: codes });
+          ? await bulkImportFromLion({ ids: codes, userId: ctx.user.id })
+          : await bulkImportFromUv({
+              productCodes: codes,
+              userId: ctx.user.id,
+            });
 
       const newTourIds = batchResult.results
         .filter((r) => r.success && r.tourId)

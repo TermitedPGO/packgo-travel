@@ -114,7 +114,8 @@ function deriveAirportCode(cityName: string): string {
  * NEVER throws — the bulk caller relies on this to filter results.
  */
 export async function importOneUvProduct(
-  productCode: string
+  productCode: string,
+  createdBy: number = 1
 ): Promise<UvBulkImportResult> {
   try {
     // Step 1: pull product main + travel detail + departures in parallel.
@@ -204,6 +205,7 @@ export async function importOneUvProduct(
       sourceUrl: `https://uvbookings.toursbms.com/en/product/detail/${productCode}`,
       sourceProvider: "uvbookings",
       dailyItinerary: rawItineraryBlob,
+      createdBy,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
@@ -281,17 +283,21 @@ export async function importOneUvProduct(
  */
 export async function bulkImportFromUv(input: {
   productCodes: string[];
+  userId?: number;
 }): Promise<UvBulkImportBatchResult> {
   const start = Date.now();
   const codes = input.productCodes;
   if (codes.length === 0) {
     return { total: 0, imported: 0, failed: 0, durationMs: 0, results: [] };
   }
+  const createdBy = input.userId ?? 1;
   const concurrency = 4;
   const results: UvBulkImportResult[] = [];
   for (let i = 0; i < codes.length; i += concurrency) {
     const batch = codes.slice(i, i + concurrency);
-    const batchResults = await Promise.all(batch.map(importOneUvProduct));
+    const batchResults = await Promise.all(
+      batch.map((code) => importOneUvProduct(code, createdBy))
+    );
     results.push(...batchResults);
   }
   const imported = results.filter((r) => r.success).length;
