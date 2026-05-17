@@ -75,12 +75,18 @@ import OfficeInboxTab from "@/components/admin/OfficeInboxTab";
 // Round 81 — per-agent Slack-like channel view; replaces legacy
 // OfficeOverviewTab as the "聊天" page. Built on agentMessages table.
 import ChatsTab from "@/components/admin/ChatsTab";
+// Round 81 (2026-05-17) — Today's-pulse landing: single-screen 5-domain
+// KPIs + triage + recent activity. Replaces office-inbox as Jeff's
+// default entry. Office-inbox stays accessible as "advanced" sub-page.
+import TodayOverview from "@/components/admin/TodayOverview";
 
 // ────────────────────────────────────────────────────────────────────────
 // Information architecture
 // ────────────────────────────────────────────────────────────────────────
 
 type PageId =
+  // Round 81 (2026-05-17) — TodayOverview is the new default landing
+  | "today"
   // Office — Inbox is the default; everything else is advanced
   | "office-inbox" | "office-chat" | "autonomous-agents" | "ai-hub" | "task-history" | "calibration-review" | "llm-cost" | "audit-log"
   // Operations
@@ -100,10 +106,11 @@ const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageD
   office: {
     domain: { id: "office", label: "辦公室", icon: Building2 },
     primary: [
+      { id: "today", label: "🏠 今日概覽" },
+      { id: "office-chat", label: "💬 Agent Chats" },
       { id: "office-inbox", label: "📥 收件匣" },
     ],
     advanced: [
-      { id: "office-chat", label: "聊天" },
       { id: "autonomous-agents", label: "練習場" },
       { id: "ai-hub", label: "AI 中心" },
       { id: "calibration-review", label: "QA 審查" },
@@ -184,7 +191,7 @@ const PAGE_TO_DOMAIN: Record<PageId, DomainId> = Object.fromEntries(
 export default function Admin() {
   const { user, loading, isAuthenticated, logout } = useAuth();
   const [, setLocation] = useLocation();
-  const [activePage, setActivePage] = useState<PageId>("office-inbox");
+  const [activePage, setActivePage] = useState<PageId>("today");
   const [paletteOpen, setPaletteOpen] = useCommandPaletteHotkey();
   const activeDomain = PAGE_TO_DOMAIN[activePage] ?? "office";
 
@@ -312,6 +319,8 @@ export default function Admin() {
 function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
   switch (page) {
     // Office
+    case "today":
+      return <TodayOverview onNavigate={(t) => setActivePage(t as PageId)} />;
     case "office-inbox":
       return <OfficeInboxTab onNavigate={(t) => setActivePage(t as PageId)} />;
     case "office-chat":
