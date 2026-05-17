@@ -97,6 +97,18 @@ export async function handleStripeWebhook(req: Request, res: Response) {
         break;
       }
 
+      // Round 81 / migration 0075 — AB 390 compliance for 10-day membership trial.
+      // Fires ~3 days before the trial ends (Stripe sends this automatically when
+      // the subscription was created with `trial_period_days`). California
+      // Auto-Renewal Law (Bus. & Prof. Code §17602) requires advance notice of
+      // the upcoming auto-charge between 3 and 21 days before — 3 days hits
+      // that window. We send the reminder via Gmail SMTP (PACK&GO brand voice).
+      case "customer.subscription.trial_will_end": {
+        const sub = event.data.object as Stripe.Subscription;
+        await handleTrialWillEnd(sub);
+        break;
+      }
+
       default:
         console.log(`[Stripe Webhook] Unhandled event type: ${event.type}`);
     }
@@ -767,6 +779,73 @@ async function handleSubscriptionUpserted(sub: Stripe.Subscription) {
     console.log(
       `[Stripe Webhook] ✓ User ${userId} → tier=${tier} expires=${expiresAt?.toISOString()}`
     );
+
+    // Round 81 / migration 0075 — Membership trial tracking.
+    // Three transitions matter:
+    //   (a) trial start (status=trialing, no existing membershipTrials row)
+    //       → create row + flip users.{plus|concierge}TrialUsedAt
+    //   (b) trial → active (status=active, existing row.converted=false)
+    //       → mark row.converted=true, convertedAt=now
+    //   (c) active → ... no trial-table action needed
+    if (tier !== "free") {
+      try {
+        const { membershipTrials } = await import("../../drizzle/schema");
+        const trialEnd = (sub as any).trial_end as number | null | undefined;
+        const isTrialing = sub.status === "trialing";
+
+        // (a) Trial start — only if user has never trialed THIS tier before
+        if (isTrialing && trialEnd) {
+          const tierFlag = tier === "plus" ? "plusTrialUsedAt" : "conciergeTrialUsedAt";
+          const usedAtCol = (users as any)[tierFlag];
+          const userRow = await db.select({ used: usedAtCol })
+            .from(users).where(eq(users.id, userId)).limit(1);
+          const alreadyTrialed = userRow[0]?.used != null;
+
+          if (!alreadyTrialed) {
+            await db.insert(membershipTrials).values({
+              userId,
+              tier,
+              endsAt: new Date(trialEnd * 1000),
+              stripeSubscriptionId: sub.id,
+              stripePriceId: priceId || null,
+            } as any);
+            await db.update(users)
+              .set({ [tierFlag]: new Date() } as any)
+              .where(eq(users.id, userId));
+            console.log(
+              `[Stripe Webhook] ✓ Trial started: user ${userId} tier=${tier}, ends ${new Date(trialEnd * 1000).toISOString()}`
+            );
+          }
+        }
+
+        // (b) Trial → active conversion — find pending row, mark converted
+        if (sub.status === "active") {
+          const { and: dAnd, eq: dEq } = await import("drizzle-orm");
+          const pendingTrial = await db
+            .select()
+            .from(membershipTrials)
+            .where(
+              dAnd(
+                dEq(membershipTrials.stripeSubscriptionId, sub.id),
+                dEq(membershipTrials.converted, false),
+              )
+            )
+            .limit(1);
+          if (pendingTrial[0]) {
+            await db
+              .update(membershipTrials)
+              .set({ converted: true, convertedAt: new Date() })
+              .where(dEq(membershipTrials.id, pendingTrial[0].id));
+            console.log(
+              `[Stripe Webhook] ✓ Trial converted to paid: user ${userId} tier=${tier}`
+            );
+          }
+        }
+      } catch (err) {
+        console.error("[Stripe Webhook] membershipTrials write failed:", (err as Error).message);
+        // Don't fail the webhook on trial-table errors
+      }
+    }
   } else {
     await db
       .update(users)
@@ -780,6 +859,97 @@ async function handleSubscriptionUpserted(sub: Stripe.Subscription) {
     console.log(
       `[Stripe Webhook] User ${userId} subscription ${sub.status} → reverted to free`
     );
+  }
+}
+
+/**
+ * Round 81 / migration 0075 — AB 390 mandatory pre-charge notification.
+ *
+ * Fires automatically by Stripe ~3 days before the trial period ends. We:
+ *   1. Find the membershipTrials row by stripeSubscriptionId
+ *   2. Send a reminder email via Gmail SMTP (PACK&GO brand voice)
+ *   3. Mark reminderSentAt so we don't double-send if Stripe retries
+ *
+ * The email MUST include: trial end date, exact charge amount, how to cancel.
+ * California Bus. & Prof. Code §17602 mandates these disclosures.
+ */
+async function handleTrialWillEnd(sub: Stripe.Subscription) {
+  console.log("[Stripe Webhook] Processing trial_will_end", sub.id);
+
+  const db = await getDb();
+  if (!db) return;
+
+  const { membershipTrials } = await import("../../drizzle/schema");
+  const trialRows = await db
+    .select()
+    .from(membershipTrials)
+    .where(eq(membershipTrials.stripeSubscriptionId, sub.id))
+    .limit(1);
+
+  const trial = trialRows[0];
+  if (!trial) {
+    console.warn(`[Stripe Webhook] trial_will_end: no membershipTrials row for ${sub.id}`);
+    return;
+  }
+
+  // Idempotency: Stripe retries on transient failures
+  if (trial.reminderSentAt) {
+    console.log(`[Stripe Webhook] trial_will_end: reminder already sent for trial ${trial.id}`);
+    return;
+  }
+
+  // Fetch user email
+  const userRows = await db
+    .select({ id: users.id, email: users.email, name: users.name })
+    .from(users)
+    .where(eq(users.id, trial.userId))
+    .limit(1);
+  const user = userRows[0];
+  if (!user) {
+    console.warn(`[Stripe Webhook] trial_will_end: user ${trial.userId} not found`);
+    return;
+  }
+
+  // Compute charge amount from the price
+  const priceId = sub.items.data[0]?.price.id;
+  const amount = sub.items.data[0]?.price.unit_amount || 0;
+  const currency = (sub.items.data[0]?.price.currency || "usd").toUpperCase();
+  const formattedAmount = `${currency} $${(amount / 100).toFixed(2)}`;
+  const interval = sub.items.data[0]?.price.recurring?.interval || "month";
+  const tierLabel = trial.tier === "plus" ? "Plus" : "Concierge";
+
+  // Send via existing Gmail SMTP pipeline. Defer the email module to keep
+  // webhook handler import-cost low.
+  try {
+    const { sendTrialEndingReminder } = await import("../email");
+    await sendTrialEndingReminder({
+      to: user.email,
+      customerName: user.name || "Traveler",
+      tierLabel,
+      trialEndsAt: trial.endsAt,
+      chargeAmount: formattedAmount,
+      chargeInterval: interval as "month" | "year",
+      cancelUrl: `${ENV.baseUrl || "https://packgoplay.com"}/membership?manage=1`,
+    });
+
+    await db
+      .update(membershipTrials)
+      .set({ reminderSentAt: new Date() })
+      .where(eq(membershipTrials.id, trial.id));
+
+    console.log(
+      `[Stripe Webhook] ✓ Trial-end reminder sent: user ${user.id} tier=${trial.tier}, charge=${formattedAmount} on ${trial.endsAt.toISOString()}`
+    );
+
+    await notifyOwner({
+      title: `Trial 即將結束: ${user.name || user.email}`,
+      content:
+        `會員: ${user.email}\nTier: ${tierLabel}\n試用結束: ${trial.endsAt.toISOString()}\n即將收費: ${formattedAmount}\nAB 390 reminder email 已發送。`,
+    }).catch(() => {});
+  } catch (err) {
+    console.error("[Stripe Webhook] trial_will_end: reminder email failed:", (err as Error).message);
+    // Re-throw so Stripe retries the webhook (we MUST send the AB 390 notification)
+    throw err;
   }
 }
 

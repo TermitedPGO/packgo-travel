@@ -474,6 +474,10 @@ export const appRouter = router({
         z.object({
           tier: z.enum(["plus", "concierge"]),
           period: z.enum(["yearly", "monthly"]).default("yearly"),
+          // Round 81 / migration 0075 — AB 390 compliant 10-day trial.
+          // Defaults to true (better UX = lower bounce); set false for
+          // promo flows that already gave the user other discounts.
+          withTrial: z.boolean().default(true),
         })
       )
       .mutation(async ({ ctx, input }) => {
@@ -523,11 +527,36 @@ export const appRouter = router({
           }
         }
 
+        // Round 81 / migration 0075 — AB 390 compliant 10-day trial.
+        //   - Allowed once per tier per user (enforced by plus/conciergeTrialUsedAt
+        //     check below; abuse via creating new accounts is the residual risk).
+        //   - Stripe handles the trial mechanics; we just say "give them 10 days
+        //     before charging". `trial_will_end` webhook (fires ~3 days before)
+        //     is what triggers our AB 390 reminder email.
+        //   - subscription_data.trial_settings.end_behavior.missing_payment_method
+        //     = 'cancel' means: if the customer somehow loses their card during
+        //     trial, Stripe cancels the trial → never charges. Safer default than
+        //     'create_invoice' which would try to charge and fail.
+        let trialPeriodDays: number | undefined = undefined;
+        let trialAlreadyUsed = false;
+        if (input.withTrial) {
+          const trialFlag = input.tier === "plus" ? "plusTrialUsedAt" : "conciergeTrialUsedAt";
+          const alreadyUsedAt = (ctx.user as any)[trialFlag];
+          if (alreadyUsedAt) {
+            trialAlreadyUsed = true;
+            console.log(
+              `[Membership] User ${ctx.user.id} already used ${input.tier} trial at ${alreadyUsedAt} — billing immediately`
+            );
+          } else {
+            trialPeriodDays = 10;
+          }
+        }
+
         const session = await stripe.checkout.sessions.create({
           mode: "subscription",
           customer: customerId,
           line_items: [{ price: priceIdForTier(input.tier, period), quantity: 1 }],
-          success_url: `${baseUrl}/membership?success=1&tier=${input.tier}&period=${period}`,
+          success_url: `${baseUrl}/membership?success=1&tier=${input.tier}&period=${period}${trialPeriodDays ? "&trial=1" : ""}`,
           cancel_url: `${baseUrl}/membership?canceled=1`,
           // Metadata so webhook can identify the user even if subscription
           // lookup fails (defensive).
@@ -537,13 +566,30 @@ export const appRouter = router({
               tier: input.tier,
               period,
             },
+            ...(trialPeriodDays ? {
+              trial_period_days: trialPeriodDays,
+              trial_settings: {
+                end_behavior: {
+                  missing_payment_method: "cancel" as const,
+                },
+              },
+            } : {}),
           },
+          // AB 390: trial users must enter a payment method upfront so
+          // auto-charge works at trial end. This is Stripe's default
+          // behavior — explicitly stating for documentation.
+          payment_method_collection: trialPeriodDays ? "always" : "always",
           // Allow customer to enter promotion code at checkout (set up in
           // Stripe Dashboard) — useful for "FRIENDS" / "EARLYBIRD" discounts.
           allow_promotion_codes: true,
         });
 
-        return { url: session.url };
+        return {
+          url: session.url,
+          // Surface to UI so it can show "free trial" badge or not
+          trialDays: trialPeriodDays || 0,
+          trialAlreadyUsed,
+        };
       }),
 
     // Customer portal — let users manage / cancel their subscription.
