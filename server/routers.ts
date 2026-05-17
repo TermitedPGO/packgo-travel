@@ -3139,7 +3139,24 @@ export const appRouter = router({
           });
         }
 
-        // Toggle status: active <-> inactive
+        // 2026-05-16 bug fix: toggleStatus is the eye-icon button on the
+        // admin tours list. Original code:
+        //   newStatus = tour.status === "active" ? "inactive" : "active"
+        // This silently PROMOTED any non-active row to active — clicking
+        // the eye on a `draft`, `pending_review`, or `soldout` tour would
+        // publish raw / unreviewed content straight to the public site.
+        // Production incident today: 11 raw supplier drafts (1080017-24,
+        // 1110001-03) reached customer-facing /tours because of this.
+        //
+        // Now toggle is STRICT: active ↔ inactive only. Other states
+        // require the dedicated flow (tours.approveTour for pending_review,
+        // bulk-import or LLM-rewrite for drafts).
+        if (tour.status !== "active" && tour.status !== "inactive") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `無法切換 status='${tour.status}' 的行程。draft / pending_review 需要用「approve」流程上架,不是這個眼睛圖示。`,
+          });
+        }
         const newStatus = tour.status === "active" ? "inactive" : "active";
 
         // Update tour status
