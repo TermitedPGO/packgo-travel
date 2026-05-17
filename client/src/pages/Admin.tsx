@@ -120,7 +120,9 @@ const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageD
       { id: "office-inbox", label: "📥 收件匣" },
     ],
     advanced: [
-      { id: "autonomous-agents", label: "練習場" },
+      // 2026-05-17: removed "練習場" (autonomous-agents) per Jeff —
+      // not needed in daily flow. Component file kept for any deep
+      // links from elsewhere but not surfaced in nav.
       { id: "ai-hub", label: "AI 中心" },
       { id: "calibration-review", label: "QA 審查" },
       { id: "task-history", label: "任務記錄" },

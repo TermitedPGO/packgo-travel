@@ -567,6 +567,51 @@ export async function generateTourFromUrlInternal(
       }
     }
     
+    // 2026-05-17: Auto-delete rejected tours per Jeff's request — don't
+    // litter DB with sub-standard PACK&GO rows. Calibration audit log
+    // (calibrationResults + #catalog agentMessages) is preserved so we
+    // can still review what went wrong; the tour itself is removed.
+    // Skip translation + skip return-success-with-tourId so the worker's
+    // cleanup hook knows to delete the source draft too.
+    if (result.calibrationReport?.verdict === "rejected") {
+      console.log(
+        `[TourGenerator] 🗑 Tour #${tour.id} rejected (cal=${result.calibrationReport.totalScore}) — auto-deleting`
+      );
+      try {
+        // Delete child rows first (FK preservation), then the tour
+        const { getDb } = await import("./db");
+        const dbInst = await getDb();
+        if (dbInst) {
+          const { tourDepartures, calibrationResults, tourMonitorLogs, tourGroupNotes } =
+            await import("../drizzle/schema");
+          const { eq } = await import("drizzle-orm");
+          await dbInst.delete(tourDepartures).where(eq(tourDepartures.tourId, tour.id)).catch(() => {});
+          await dbInst.delete(calibrationResults).where(eq(calibrationResults.tourId, tour.id)).catch(() => {});
+          await dbInst.delete(tourMonitorLogs).where(eq(tourMonitorLogs.tourId, tour.id)).catch(() => {});
+          await dbInst.delete(tourGroupNotes).where(eq(tourGroupNotes.tourDepartureId, tour.id)).catch(() => {});
+          const { tours: toursTable } = await import("../drizzle/schema");
+          await dbInst.delete(toursTable).where(eq(toursTable.id, tour.id));
+        }
+      } catch (err) {
+        console.warn(`[TourGenerator] Auto-delete of rejected tour ${tour.id} failed:`, (err as Error).message);
+      }
+      await job.updateProgress({
+        step: "completed",
+        progress: 100,
+        message: `Tour rejected (cal=${result.calibrationReport.totalScore}) — deleted.`,
+        timestamp: Date.now(),
+        overallProgress: 100,
+      });
+      // Return rejected:true so worker.ts knows to delete the source
+      // draft (not just inactive it). Tour ID is null — the row is gone.
+      return {
+        success: true,
+        tourId: null as any,
+        rejected: true,
+        rejectedScore: result.calibrationReport.totalScore,
+      } as any;
+    }
+
     await job.updateProgress({
       step: "completed",
       progress: 100,
@@ -574,7 +619,7 @@ export async function generateTourFromUrlInternal(
       timestamp: Date.now(),
       overallProgress: 100,
     });
-    
+
     // Round 71: queue translation via BullMQ instead of fire-and-forget.
     // BUG-006 added addTourTranslationJob specifically for this purpose (retries +
     // failure tracking). Previous direct translateTour() call had no retry on

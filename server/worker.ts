@@ -65,19 +65,38 @@ export const tourGenerationWorker = new Worker<TourGenerationJobData, TourGenera
       // (sourceDraftTourId carries the original draft's row id), flip
       // that draft to status='inactive' now that the PACK&GO tour exists.
       // This keeps the catalog clean — no stranded drafts after rewrite.
-      // We skip the cleanup if the result.success is false so a failed
-      // generation doesn't accidentally hide its own draft.
+      //
+      // 2026-05-17 update: if the new tour was rejected by calibration
+      // (result.rejected=true), the new tour was already auto-deleted in
+      // tourGenerator. Delete the source draft entirely too — no point
+      // keeping either copy around. Audit trail (#catalog message +
+      // calibrationResults) preserved separately.
       const draftId = job.data.sourceDraftTourId;
       if (draftId && result?.success) {
         try {
-          const { updateTour } = await import("./db");
-          await updateTour(draftId, { status: "inactive" });
-          console.log(
-            `🧹 Marked source draft tour #${draftId} as inactive after successful rewrite → new tour #${result.tourId}`
-          );
+          if ((result as any).rejected) {
+            // Both ends rejected: hard-delete the source draft.
+            const { getDb } = await import("./db");
+            const dbInst = await getDb();
+            if (dbInst) {
+              const { tours: toursTable, tourDepartures } = await import("../drizzle/schema");
+              const { eq } = await import("drizzle-orm");
+              await dbInst.delete(tourDepartures).where(eq(tourDepartures.tourId, draftId)).catch(() => {});
+              await dbInst.delete(toursTable).where(eq(toursTable.id, draftId));
+              console.log(
+                `🗑 Hard-deleted source draft tour #${draftId} (PACK&GO rewrite was rejected, cal=${(result as any).rejectedScore})`
+              );
+            }
+          } else {
+            const { updateTour } = await import("./db");
+            await updateTour(draftId, { status: "inactive" });
+            console.log(
+              `🧹 Marked source draft tour #${draftId} as inactive after successful rewrite → new tour #${result.tourId}`
+            );
+          }
         } catch (cleanupErr) {
           console.warn(
-            `[tourGenerationWorker] Failed to inactive source draft #${draftId}:`,
+            `[tourGenerationWorker] Failed to clean up source draft #${draftId}:`,
             cleanupErr
           );
         }
