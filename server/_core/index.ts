@@ -103,13 +103,15 @@ async function startServer() {
   ];
 
   // Patterns for dynamic origins
-  const allowedOriginPatterns = [
-    // Fly.io preview deploys (future, e.g. PR builds)
-    /^https:\/\/[a-z0-9-]+\.fly\.dev$/,
-    // Legacy Manus preview/production (kept during migration overlap)
-    /^https:\/\/[a-z0-9-]+\.manus\.space$/,
-    /^https:\/\/[a-z0-9-]+\.manus\.computer$/,
-    /^https:\/\/[a-z0-9-]+\.us2\.manus\.computer$/,
+  // 2026-05-17 red-team round 1 — removed wildcards for *.fly.dev, *.manus.*.
+  // Wildcards allowed any attacker who registered a subdomain on those
+  // shared platforms (e.g. evil-prankster.fly.dev) to pass CORS check
+  // against authenticated /api/* requests. Specific origins above already
+  // cover legitimate use; preview deploys can be added by exact hostname.
+  const allowedOriginPatterns: RegExp[] = [
+    // Empty. Only specific origins in `allowedOrigins` above pass CORS.
+    // Add specific preview deploy patterns here ONLY when needed, e.g.:
+    //   /^https:\/\/pr-\d+\.packgo-travel\.fly\.dev$/  // strictly your PR-N pattern
   ];
 
   app.use(
@@ -260,6 +262,22 @@ async function startServer() {
       const question = String(req.query.q ?? "").trim();
       if (!question || question.length > 2000) {
         return res.status(400).json({ error: "Question required, max 2000 chars" });
+      }
+
+      // 2026-05-17 red-team round 1 — rate limit OpsAgent SSE to prevent
+      // credit-burn if admin cookie is stolen / Jeff's machine compromised.
+      // 30 questions/hour is generous for one-person ops; abusers hit this
+      // limit ~3x faster than they'd hit Anthropic's own rate limit.
+      const { checkRateLimit } = await import("../rateLimit");
+      const rl = await checkRateLimit({
+        key: `ops-stream:${user.id}`,
+        limit: 30,
+        window: 3600, // 1 hour
+      });
+      if (!rl.allowed) {
+        return res.status(429).json({
+          error: "Rate limit exceeded — 30 OpsAgent queries per hour. Retry in 10-60min.",
+        });
       }
 
       // SSE headers

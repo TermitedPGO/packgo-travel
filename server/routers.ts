@@ -542,10 +542,62 @@ export const appRouter = router({
         if (input.withTrial) {
           const trialFlag = input.tier === "plus" ? "plusTrialUsedAt" : "conciergeTrialUsedAt";
           const alreadyUsedAt = (ctx.user as any)[trialFlag];
-          if (alreadyUsedAt) {
+
+          // 2026-05-17 red-team round 1 — also check any OTHER user account
+          // that resolves to the same physical Gmail inbox (j.e.f.f@gmail.com,
+          // jeff+tag@gmail.com, jeff@googlemail.com all → jeff@gmail.com).
+          // Without this check, attacker can register N variants and get N
+          // trials from one inbox.
+          const { normalizeEmail } = await import("./_core/emailNormalize");
+          const normalized = normalizeEmail(ctx.user.email);
+          let dotTrickAlreadyUsed = false;
+          if (normalized && normalized !== ctx.user.email.toLowerCase()) {
+            try {
+              const { getDb } = await import("./db");
+              const { users } = await import("../drizzle/schema");
+              const { ne, isNotNull, and: dAnd, sql: dSql } = await import("drizzle-orm");
+              const db = await getDb();
+              if (db) {
+                // Find any OTHER account whose normalized email matches AND
+                // has already used this tier's trial.
+                const rows = await db
+                  .select({ id: users.id, usedAt: (users as any)[trialFlag] })
+                  .from(users)
+                  .where(
+                    dAnd(
+                      ne(users.id, ctx.user.id),
+                      isNotNull((users as any)[trialFlag]),
+                      // Subquery would be cleaner but MySQL needs computed col
+                      // Cheap: load + compare in app code
+                    )
+                  );
+                for (const r of rows as any[]) {
+                  // We don't have normalizedEmail column yet — manual recompute.
+                  // For perf, future migration should add users.normalizedEmail
+                  // with unique index.
+                  const otherUser = await db
+                    .select({ email: users.email })
+                    .from(users)
+                    .where(dSql`${users.id} = ${r.id}`)
+                    .limit(1);
+                  if (otherUser[0] && normalizeEmail(otherUser[0].email) === normalized) {
+                    dotTrickAlreadyUsed = true;
+                    console.warn(
+                      `[Membership] User ${ctx.user.id} (${ctx.user.email}) blocked from trial: same physical inbox as user ${r.id} already trialed ${input.tier}`
+                    );
+                    break;
+                  }
+                }
+              }
+            } catch (err) {
+              console.warn("[Membership] dot-trick check failed (non-fatal):", err);
+            }
+          }
+
+          if (alreadyUsedAt || dotTrickAlreadyUsed) {
             trialAlreadyUsed = true;
             console.log(
-              `[Membership] User ${ctx.user.id} already used ${input.tier} trial at ${alreadyUsedAt} — billing immediately`
+              `[Membership] User ${ctx.user.id} already used ${input.tier} trial — billing immediately`
             );
           } else {
             trialPeriodDays = 10;

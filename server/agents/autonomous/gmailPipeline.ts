@@ -197,8 +197,13 @@ async function processOneEmail(
         .limit(5)
     : [];
 
-  // Compose raw message for the agent (subject + body)
-  const rawMessage = `From: ${msg.from}\nSubject: ${msg.subject}\n\n${msg.body}`;
+  // 2026-05-17 red-team round 1 — wrap customer-supplied content with
+  // promptInjectionGuard. Email body is the highest-volume untrusted-input
+  // surface; we shield it before letting any LLM see it. If the body trips
+  // injection heuristics, force-escalate (don't auto-reply).
+  const { shieldUntrustedInput } = await import("../../_core/promptInjectionGuard");
+  const shielded = shieldUntrustedInput(msg.body);
+  const rawMessage = `From: ${msg.from}\nSubject: ${msg.subject}\n\n${shielded.wrapped}`;
 
   // Run InquiryAgent
   const decision = await runInquiryAgent({
@@ -215,6 +220,20 @@ async function processOneEmail(
     })),
     policyRules: inquiryPolicy.rules,
   });
+
+  // 2026-05-17 red-team round 1 — if shieldUntrustedInput flagged the body
+  // as possibly hostile (injection markers detected), force-escalate so a
+  // human (Jeff) reviews before any auto-action.
+  if (shielded.shouldEscalate) {
+    decision.shouldEscalate = true;
+    decision.escalationReason =
+      `Prompt-injection guard tripped (patterns: ${shielded.detectedPatterns.slice(0, 3).join("; ")})` +
+      (decision.escalationReason ? ` | ${decision.escalationReason}` : "");
+    console.warn(
+      `[gmailPipeline] Force-escalated due to injection patterns in email from ${senderEmail}:`,
+      shielded.detectedPatterns
+    );
+  }
 
   // Log inbound interaction
   const urgencyMap: Record<string, number> = {
