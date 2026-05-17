@@ -526,6 +526,13 @@
       "when": 1779028600000,
       "tag": "0074_supplier_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "5",
+      "when": 1779029700000,
+      "tag": "0075_crm_ops_membership",
+      "breakpoints": true
     }
   ]
 }

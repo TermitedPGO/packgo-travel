@@ -1,4 +1,4 @@
-import { boolean, date, decimal, int, mediumtext, mysqlEnum, mysqlTable, text, timestamp, varchar, unique, index } from "drizzle-orm/mysql-core";
+import { boolean, date, decimal, int, json, mediumtext, mysqlEnum, mysqlTable, text, timestamp, varchar, unique, index } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -77,6 +77,26 @@ export const users = mysqlTable("users", {
   /** Login security fields */
   loginAttempts: int("loginAttempts").default(0).notNull(), // Number of failed login attempts
   lockoutUntil: timestamp("lockoutUntil"), // Account locked until this time
+
+  /**
+   * Round 81 / migration 0075 — repurchase trigger + trial abuse prevention.
+   *
+   * InquiryAgent detects this user's 2nd inquiry within 60 days OR 30 days
+   * after trip completion → if upgradePromptSentAt is null, appends "升級
+   * Plus 10 天試用" CTA to reply, sets upgradePromptSentAt to throttle.
+   *
+   * plusTrialUsedAt / conciergeTrialUsedAt: once-per-user per tier limit
+   * (filled when membershipTrials row is created). Prevents trial abuse.
+   *
+   * bookingCount: cached count of confirmed bookings — drives
+   * "is this a repeat customer?" check faster than COUNT(*) on bookings.
+   */
+  inquiryCount: int("inquiryCount").default(0).notNull(),
+  lastInquiryAt: timestamp("lastInquiryAt"),
+  upgradePromptSentAt: timestamp("upgradePromptSentAt"),
+  plusTrialUsedAt: timestamp("plusTrialUsedAt"),
+  conciergeTrialUsedAt: timestamp("conciergeTrialUsedAt"),
+  bookingCount: int("bookingCount").default(0).notNull(),
 
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -606,12 +626,45 @@ export const tourDepartures = mysqlTable("tourDepartures", {
   status: mysqlEnum("status", ["open", "full", "cancelled", "confirmed"]).default("open").notNull(),
   currency: varchar("currency", { length: 3 }).default("TWD").notNull(),
   notes: text("notes"), // Special notes for this departure
+  // Round 81 / migration 0075 — operational layer for "tour group" management.
+  // A departure becomes a "group" once Jeff promotes it: assigns internal code,
+  // group name (e.g. "李太太家族團 6/15 北海道"), tour leader, and operational
+  // status. OpsAgent queries on these fields when Jeff asks natural-language
+  // questions ("李太太那團幾號出發?"). internalNotes is Jeff-readable only.
+  internalCode: varchar("internalCode", { length: 64 }), // e.g. "JP-HOK-0615-Y"
+  groupName: varchar("groupName", { length: 255 }),
+  tourLeader: varchar("tourLeader", { length: 128 }),
+  opsStatus: mysqlEnum("opsStatus", ["planning", "confirmed", "departed", "completed", "cancelled"]).default("planning").notNull(),
+  internalNotes: mediumtext("internalNotes"),
+  supplierConfirmations: json("supplierConfirmations"), // {hotel:[…], transport:[…], ground:[…]}
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (table) => ({
+  opsStatusIdx: index("idx_departure_opsstatus").on(table.opsStatus, table.departureDate),
+}));
 
 export type TourDeparture = typeof tourDepartures.$inferSelect;
 export type InsertTourDeparture = typeof tourDepartures.$inferInsert;
+
+// Round 81 / migration 0075 — per-group activity log.
+// type='ops' = Jeff's running notes; 'customer' = customer-side update;
+// 'financial' = supplier payment / commission; 'followup' = post-trip;
+// 'ai_query' = OpsAgent answered a natural-language question (auditable).
+export const tourGroupNotes = mysqlTable("tourGroupNotes", {
+  id: int("id").autoincrement().primaryKey(),
+  tourDepartureId: int("tourDepartureId").notNull(),
+  type: mysqlEnum("type", ["ops", "customer", "financial", "followup", "ai_query"]).notNull(),
+  author: varchar("author", { length: 64 }).notNull(),
+  body: mediumtext("body").notNull(),
+  attachments: json("attachments"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  departureIdx: index("idx_departure").on(table.tourDepartureId, table.createdAt),
+  typeIdx: index("idx_type").on(table.type, table.createdAt),
+}));
+
+export type TourGroupNote = typeof tourGroupNotes.$inferSelect;
+export type InsertTourGroupNote = typeof tourGroupNotes.$inferInsert;
 
 /**
  * Bookings table for storing all customer reservations.
@@ -2368,6 +2421,24 @@ export const customerProfiles = mysqlTable("customerProfiles", {
   // AI observations (auto-summarized periodically)
   aiNotes: text("aiNotes"),
 
+  // Round 81 / migration 0075 — structured preference + manual note layer.
+  // `preferences` is auto-updated by CustomerProfileExtractor (background
+  // service) from every customerInteraction. Shape:
+  //   { food: { dietary, dislikes[], favorites[] },
+  //     accommodation: { roomType, floor, view },
+  //     pace, interests[], avoidances[],
+  //     pastDestinations: [{ destination, year, rating }],
+  //     wishlist[] }
+  // `keyFacts` is short structured facts AI extracts (1-line bullets).
+  // `jeffPersonalNote` is Jeff's manual private memo, NEVER shown to customer
+  // and NEVER fed back to public-facing agents — only OpsAgent uses it for
+  // context when Jeff queries.
+  preferences: json("preferences"),
+  keyFacts: text("keyFacts"),
+  jeffPersonalNote: text("jeffPersonalNote"),
+  birthDate: timestamp("birthDate"),
+  importantDates: json("importantDates"), // [{type, date, note}] anniversary/etc
+
   status: mysqlEnum("status", ["active", "dormant", "opted_out", "blocked"]).default("active").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -2381,6 +2452,60 @@ export const customerProfiles = mysqlTable("customerProfiles", {
 
 export type CustomerProfile = typeof customerProfiles.$inferSelect;
 export type InsertCustomerProfile = typeof customerProfiles.$inferInsert;
+
+// Round 81 / migration 0075 — customer documents.
+// passport / visa / insurance / medical — PII heavy.
+// Sensitive structured fields (passport number, DOB) go in `encryptedFields`
+// JSON which is AES-256-GCM encrypted using APP_ENCRYPTION_KEY before insert.
+// The R2 file itself is encrypted at rest by Cloudflare.
+export const customerDocuments = mysqlTable("customerDocuments", {
+  id: int("id").autoincrement().primaryKey(),
+  customerProfileId: int("customerProfileId").notNull(),
+  type: mysqlEnum("type", ["passport", "visa", "insurance", "medical", "other"]).notNull(),
+  fileName: varchar("fileName", { length: 255 }),
+  r2Url: varchar("r2Url", { length: 1024 }),
+  expiresAt: timestamp("expiresAt"),
+  isCurrent: boolean("isCurrent").default(true).notNull(),
+  encryptedFields: json("encryptedFields"), // {passportNumber, dob, etc} AES-256-GCM
+  uploadedBy: varchar("uploadedBy", { length: 50 }),
+  uploadedAt: timestamp("uploadedAt").defaultNow().notNull(),
+}, (table) => ({
+  customerTypeIdx: index("idx_customer_type").on(table.customerProfileId, table.type, table.isCurrent),
+  expiryIdx: index("idx_expiry").on(table.expiresAt, table.isCurrent),
+}));
+
+export type CustomerDocument = typeof customerDocuments.$inferSelect;
+export type InsertCustomerDocument = typeof customerDocuments.$inferInsert;
+
+// Round 81 / migration 0075 — 10-day membership trial tracking (AB 390 compliant).
+// Created when user clicks "免費試用 10 天" → Stripe Checkout with trial_period_days=10.
+// reminderSentAt: filled when we email "3 days before charge" (AB 390 mandate).
+// converted=TRUE means trial completed → first paid period started.
+// canceledAt: trial canceled before charge (no money taken).
+//
+// Prevents abuse: 1 trial per user per tier (uniqueness enforced application-side
+// using plusTrialUsedAt / conciergeTrialUsedAt on the users table).
+export const membershipTrials = mysqlTable("membershipTrials", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  tier: mysqlEnum("tier", ["plus", "concierge"]).notNull(),
+  startedAt: timestamp("startedAt").defaultNow().notNull(),
+  endsAt: timestamp("endsAt").notNull(),
+  reminderSentAt: timestamp("reminderSentAt"),
+  converted: boolean("converted").default(false).notNull(),
+  convertedAt: timestamp("convertedAt"),
+  canceledAt: timestamp("canceledAt"),
+  cancelReason: text("cancelReason"),
+  stripeSubscriptionId: varchar("stripeSubscriptionId", { length: 255 }),
+  stripePriceId: varchar("stripePriceId", { length: 255 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  userIdx: index("idx_user").on(table.userId),
+  endsPendingIdx: index("idx_ends_pending").on(table.endsAt, table.converted),
+}));
+
+export type MembershipTrial = typeof membershipTrials.$inferSelect;
+export type InsertMembershipTrial = typeof membershipTrials.$inferInsert;
 
 export const customerInteractions = mysqlTable("customerInteractions", {
   id: int("id").autoincrement().primaryKey(),
