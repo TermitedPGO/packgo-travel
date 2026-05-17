@@ -43,7 +43,22 @@ import {
   ThumbsUp,
   ThumbsDown,
   RefreshCw,
+  Mail,
+  PenLine,
+  UserCog,
+  Bell,
+  DollarSign,
+  AlertCircle,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 
 // Agent display metadata. Keep in sync with server/routers/agentRouter.ts
 // AGENT_NAMES enum. Unknown agents fall back to a generic style.
@@ -184,6 +199,73 @@ export default function ChatsTab() {
     },
     onError: (err) => toast.error("OpsAgent 失敗: " + err.message),
   });
+
+  // Round 81 Phase 2 (2026-05-17) — Action proposal confirmation flow.
+  // Each agentMessages row may carry a suggestedActions array in its context.
+  // We render them as chips below the message body. Click → confirmation
+  // modal → on confirm, call executeOpsAction.
+  const [pendingAction, setPendingAction] = useState<{
+    actionType: string;
+    label: string;
+    description: string;
+    args: Record<string, any>;
+    sensitivity: "safe" | "normal" | "sensitive";
+  } | null>(null);
+  const [confirmText, setConfirmText] = useState("");
+
+  const executeMutation = trpc.agent.executeOpsAction.useMutation({
+    onSuccess: (result) => {
+      if (result.ok) {
+        toast.success(result.summary);
+      } else {
+        toast.error(result.summary);
+      }
+      setPendingAction(null);
+      setConfirmText("");
+      utils.agent.listMessages.invalidate();
+    },
+    onError: (err) => toast.error("執行失敗: " + err.message),
+  });
+
+  const handleActionClick = (action: any) => {
+    // For safe actions, skip the modal and execute directly with toast confirm
+    if (action.sensitivity === "safe") {
+      const ok = window.confirm(`${action.label}?\n\n${action.description}`);
+      if (ok) {
+        executeMutation.mutate({
+          actionType: action.actionType,
+          args: action.args,
+          proposalContext: action.label.slice(0, 80),
+        });
+      }
+    } else {
+      setPendingAction(action);
+      setConfirmText("");
+    }
+  };
+
+  const handleConfirmAction = () => {
+    if (!pendingAction) return;
+    if (pendingAction.sensitivity === "sensitive" && confirmText !== "CONFIRM") {
+      toast.error('需要輸入 "CONFIRM" 才能執行');
+      return;
+    }
+    executeMutation.mutate({
+      actionType: pendingAction.actionType,
+      args: pendingAction.args,
+      proposalContext: pendingAction.label.slice(0, 80),
+    });
+  };
+
+  // Map actionType → icon for chip display
+  const ACTION_ICON: Record<string, any> = {
+    sendCustomerEmail: Mail,
+    addTourGroupNote: PenLine,
+    updateInternalNote: PenLine,
+    assignTourLeader: UserCog,
+    scheduleReminder: Bell,
+    markBookingPaid: DollarSign,
+  };
 
   const handleReplyTo = (messageId: number) => {
     if (!replyText.trim()) {
@@ -413,6 +495,51 @@ export default function ChatsTab() {
                         {m.body}
                       </p>
 
+                      {/* Round 81 Phase 3 (2026-05-17) — Action chips.
+                          Each message's context may carry suggestedActions
+                          (proposals from OpsAgent). Render as clickable chips
+                          below the body. Click → safe actions execute with a
+                          window.confirm; normal/sensitive open a modal. */}
+                      {(() => {
+                        let actions: any[] = [];
+                        try {
+                          const ctx = m.context ? JSON.parse(m.context) : {};
+                          actions = Array.isArray(ctx.suggestedActions) ? ctx.suggestedActions : [];
+                        } catch {}
+                        if (actions.length === 0) return null;
+                        return (
+                          <div className="mt-3 pt-3 border-t border-foreground/10">
+                            <div className="text-[10px] uppercase tracking-wider text-foreground/40 font-semibold mb-2">
+                              💡 建議動作
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {actions.map((action: any, idx: number) => {
+                                const Icon =
+                                  ACTION_ICON[action.actionType] ?? Sparkles;
+                                const sensitivity = action.sensitivity ?? "normal";
+                                const colorClass =
+                                  sensitivity === "sensitive"
+                                    ? "border-rose-300 text-rose-700 hover:bg-rose-50"
+                                    : sensitivity === "normal"
+                                    ? "border-amber-300 text-amber-700 hover:bg-amber-50"
+                                    : "border-emerald-300 text-emerald-700 hover:bg-emerald-50";
+                                return (
+                                  <button
+                                    key={idx}
+                                    onClick={() => handleActionClick(action)}
+                                    disabled={executeMutation.isPending}
+                                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${colorClass} disabled:opacity-50`}
+                                  >
+                                    <Icon className="w-3.5 h-3.5" />
+                                    {action.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
                       {m.context && (
                         <details className="mt-2">
                           <summary className="text-xs text-foreground/40 cursor-pointer hover:text-foreground/60">
@@ -505,6 +632,84 @@ export default function ChatsTab() {
           </>
         )}
       </div>
+
+      {/* Round 81 Phase 3 (2026-05-17) — Action confirmation modal.
+          Shown when Jeff clicks a chip for normal/sensitive actions.
+          Safe actions skip this and use window.confirm. */}
+      <Dialog
+        open={pendingAction !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingAction(null);
+            setConfirmText("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-lg rounded-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {pendingAction?.sensitivity === "sensitive" && (
+                <AlertCircle className="w-5 h-5 text-rose-600" />
+              )}
+              確認執行: {pendingAction?.label}
+            </DialogTitle>
+            <DialogDescription className="pt-2">
+              {pendingAction?.description}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            <div className="text-xs uppercase tracking-wider text-foreground/40 font-semibold">
+              動作參數
+            </div>
+            <pre className="text-[11px] bg-foreground/[0.03] p-3 rounded-md overflow-x-auto leading-relaxed">
+              {pendingAction ? JSON.stringify(pendingAction.args, null, 2) : ""}
+            </pre>
+
+            {pendingAction?.sensitivity === "sensitive" && (
+              <div>
+                <label className="text-sm font-medium block mb-1.5">
+                  此動作會影響金錢/客戶 — 請輸入 <code className="text-rose-600 font-mono">CONFIRM</code> 確認:
+                </label>
+                <Input
+                  value={confirmText}
+                  onChange={(e) => setConfirmText(e.target.value)}
+                  placeholder="輸入 CONFIRM"
+                  className="rounded-lg"
+                  autoFocus
+                />
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setPendingAction(null);
+                setConfirmText("");
+              }}
+              className="rounded-lg"
+            >
+              取消
+            </Button>
+            <Button
+              onClick={handleConfirmAction}
+              disabled={
+                executeMutation.isPending ||
+                (pendingAction?.sensitivity === "sensitive" && confirmText !== "CONFIRM")
+              }
+              className={`rounded-lg ${
+                pendingAction?.sensitivity === "sensitive"
+                  ? "bg-rose-600 hover:bg-rose-700 text-white"
+                  : ""
+              }`}
+            >
+              {executeMutation.isPending ? "執行中..." : "確認執行"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

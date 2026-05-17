@@ -17,7 +17,7 @@ let transporter: Transporter | null = null;
 /**
  * Initialize SMTP transporter
  */
-function getTransporter(): Transporter | null {
+export function getTransporter(): Transporter | null {
   if (!transporter && EMAIL_USER && EMAIL_PASSWORD) {
     transporter = nodemailer.createTransport({
       host: EMAIL_HOST,

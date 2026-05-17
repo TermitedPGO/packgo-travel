@@ -1741,25 +1741,48 @@ export const agentRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
+      // Round 81 Phase 1 (2026-05-17): pull last 10 #ops messages as
+      // conversation memory. Without this, every question is treated as
+      // standalone and Jeff has to re-specify customer/date for follow-ups.
+      const historyRows = await db
+        .select({
+          senderRole: agentMessages.senderRole,
+          body: agentMessages.body,
+          createdAt: agentMessages.createdAt,
+        })
+        .from(agentMessages)
+        .where(eq(agentMessages.agentName, "ops"))
+        .orderBy(desc(agentMessages.createdAt))
+        .limit(10);
+
+      // Reverse to chronological order
+      const history = historyRows.reverse().map((r) => ({
+        role: (r.senderRole === "jeff" ? "user" : "agent") as "user" | "agent",
+        content: r.body,
+      }));
+
       // 1. Log Jeff's question as senderRole='jeff' so the channel shows it
-      const questionInsert = await db.insert(agentMessages).values({
+      await db.insert(agentMessages).values({
         agentName: "ops",
         senderRole: "jeff",
         messageType: "question",
         title: input.question.slice(0, 80),
         body: input.question,
         priority: "normal",
+        readByJeff: 1, // Jeff's own message — pre-marked read
       } as any);
 
-      // 2. Run the agent
+      // 2. Run the agent with history context
       const { runOpsAgent } = await import("../agents/autonomous/opsAgent");
       let answer = "";
+      let suggestedActions: any[] = [];
       let error: string | null = null;
       try {
-        const result = await runOpsAgent(input.question);
+        const result = await runOpsAgent(input.question, history);
         answer = result.answer;
+        suggestedActions = result.suggestedActions;
 
-        // 3. Log agent answer
+        // 3. Log agent answer + suggestedActions (rendered as chips in UI)
         await db.insert(agentMessages).values({
           agentName: "ops",
           senderRole: "agent",
@@ -1769,6 +1792,7 @@ export const agentRouter = router({
           context: JSON.stringify({
             hintsExtracted: result.hints,
             queriesRun: Object.keys(result.contextUsed),
+            suggestedActions: result.suggestedActions,
           }),
           priority: "normal",
         } as any);
@@ -1784,7 +1808,74 @@ export const agentRouter = router({
         } as any);
       }
 
-      return { answer, error };
+      return { answer, suggestedActions, error };
+    }),
+
+  /**
+   * Round 81 Phase 2 (2026-05-17) — Execute an OpsAgent action proposal.
+   *
+   * Jeff clicks a chip in ChatsTab → frontend shows confirmation modal
+   * (with typed-confirm for sensitivity='sensitive') → on confirm, this
+   * mutation runs. The action is executed, result logged as a new
+   * #ops message, so the conversation shows "I asked X, agent suggested Y,
+   * I confirmed, agent did Z".
+   */
+  executeOpsAction: adminProcedure
+    .input(
+      z.object({
+        actionType: z.string().min(1),
+        args: z.any(),
+        // Echo back to UI for the audit log entry
+        proposalContext: z.string().max(500).optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const { executeOpsAction, ActionTypeEnum } = await import(
+        "../agents/autonomous/opsActions"
+      );
+
+      // Validate actionType is one of the known enum values
+      const parsed = ActionTypeEnum.safeParse(input.actionType);
+      if (!parsed.success) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Unknown actionType: ${input.actionType}`,
+        });
+      }
+
+      const result = await executeOpsAction(parsed.data, input.args);
+
+      // Log the execution as a new #ops message — both confirmation by Jeff
+      // (as 'jeff' role) and the result (as 'agent' role)
+      await db.insert(agentMessages).values({
+        agentName: "ops",
+        senderRole: "jeff",
+        messageType: "observation",
+        title: `→ 執行: ${input.proposalContext?.slice(0, 60) ?? parsed.data}`,
+        body: `Action type: ${parsed.data}\nArgs: ${JSON.stringify(input.args, null, 2)}`,
+        priority: "low",
+        readByJeff: 1,
+      } as any);
+
+      await db.insert(agentMessages).values({
+        agentName: "ops",
+        senderRole: "agent",
+        messageType: result.ok ? "observation" : "alert",
+        title: result.summary,
+        body: result.error
+          ? `失敗: ${result.error}\n\n${result.summary}`
+          : result.summary +
+            (result.details
+              ? `\n\nDetails:\n${JSON.stringify(result.details, null, 2)}`
+              : ""),
+        priority: result.ok ? "normal" : "high",
+        context: JSON.stringify({ executedAction: parsed.data, args: input.args }),
+      } as any);
+
+      return result;
     }),
 
   // ─────────────────────────────────────────────────────────────────

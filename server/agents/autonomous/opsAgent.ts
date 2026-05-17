@@ -290,52 +290,192 @@ async function fetchOpsContext(hints: ReturnType<typeof extractHints>) {
 }
 
 /**
- * Main entry — takes a natural-language question, returns the agent's answer.
+ * Round 81 Phase 2 (2026-05-17) — Action proposal schema.
+ * OpsAgent can suggest 1-3 follow-up actions Jeff might want to take.
+ * UI renders them as chips below the answer. Each chip is a *proposal*
+ * that requires Jeff's explicit click to execute (no auto-execute).
+ *
+ * The 'args' shape must match what executeOpsAction accepts for that
+ * actionType, so the UI can pass it through verbatim on confirm.
  */
-export async function runOpsAgent(question: string): Promise<{
+export interface OpsActionProposal {
+  actionType:
+    | "sendCustomerEmail"
+    | "addTourGroupNote"
+    | "assignTourLeader"
+    | "updateInternalNote"
+    | "markBookingPaid"
+    | "scheduleReminder";
+  label: string; // 1-line description shown on the chip (Chinese)
+  description: string; // 2-3 sentence detail shown in confirmation modal
+  args: Record<string, unknown>;
+  // Sensitivity — affects confirmation UI:
+  //   'safe'      = idempotent / undoable (e.g. add note)        → confirm dialog optional
+  //   'normal'    = creates external effect (email)               → confirmation required
+  //   'sensitive' = money / customer-facing changes               → typed confirmation
+  sensitivity: "safe" | "normal" | "sensitive";
+}
+
+export interface OpsAgentTurn {
+  role: "user" | "agent";
+  content: string;
+}
+
+/**
+ * Main entry — takes a natural-language question + optional conversation
+ * history, returns the agent's answer + suggested actions.
+ *
+ * Multi-turn memory: caller (askOps tRPC) passes the last N #ops messages
+ * so the agent has context. Without memory the agent treats every question
+ * as standalone and Jeff has to re-specify customer/date each time —
+ * frustrating for follow-up questions ("那團還剩幾位?").
+ */
+export async function runOpsAgent(
+  question: string,
+  history: OpsAgentTurn[] = []
+): Promise<{
   answer: string;
+  suggestedActions: OpsActionProposal[];
   contextUsed: Record<string, unknown>;
   hints: ReturnType<typeof extractHints>;
 }> {
-  const hints = extractHints(question);
+  // Combine hints from current question + recent user turns so follow-ups
+  // inherit context ("那團還剩幾位" picks up the team Jeff just asked about).
+  const combinedText =
+    history
+      .filter((t) => t.role === "user")
+      .slice(-3)
+      .map((t) => t.content)
+      .join(" ") +
+    " " +
+    question;
+  const hints = extractHints(combinedText);
   const ctx = await fetchOpsContext(hints);
 
-  // Estimate context size — truncate if huge to stay within 8K tokens
+  // Truncate context if huge — keep agent latency < 5s
   const ctxStr = JSON.stringify(ctx, null, 2);
   const truncated = ctxStr.length > 12000 ? ctxStr.slice(0, 12000) + "\n…(truncated)" : ctxStr;
 
+  // Build messages array — history then current question
+  const messages: any[] = [{ role: "system", content: SYSTEM_PROMPT + "\n\n" + ACTION_PROPOSAL_GUIDE }];
+
+  // Multi-turn memory: last 5 exchanges (user+agent pairs = up to 10 messages)
+  // Anthropic API needs alternating user/assistant — fold consecutive same-role
+  // turns into one message.
+  let lastRole: string | null = null;
+  for (const turn of history.slice(-10)) {
+    const role = turn.role === "agent" ? "assistant" : "user";
+    if (role === lastRole) {
+      messages[messages.length - 1].content += "\n\n" + turn.content;
+    } else {
+      messages.push({ role, content: turn.content });
+      lastRole = role;
+    }
+  }
+
+  // Current question + DB context
+  const userMessage =
+    `【Jeff 的問題】\n${question}\n\n` +
+    `【系統從你的問題 + 對話歷史抽出的線索】\n` +
+    `客戶名: ${hints.customerNameHints.join(", ") || "(無)"}\n` +
+    `目的地: ${hints.destinationHints.join(", ") || "(無)"}\n` +
+    `日期: ${hints.dateHint ? JSON.stringify(hints.dateHint) : "(無)"}\n` +
+    `天數: ${hints.daysHint ?? "(無)"}\n\n` +
+    `【DB 查詢結果】\n${truncated}\n\n` +
+    `請依此回答。回應格式必須是 JSON:\n` +
+    `{\n` +
+    `  "answer": "...自然語言回答(markdown ok, 1-3 段)...",\n` +
+    `  "suggestedActions": [ ...0-3 個動作建議, 看 ACTION_PROPOSAL_GUIDE... ]\n` +
+    `}`;
+
+  if (lastRole === "user") {
+    messages[messages.length - 1].content += "\n\n" + userMessage;
+  } else {
+    messages.push({ role: "user", content: userMessage });
+  }
+
   const response = await invokeLLM({
     model: "claude-haiku-4-5-20251001",
-    maxTokens: 1024,
+    maxTokens: 1500,
     temperature: 0.3,
-    messages: [
-      {
-        role: "system",
-        content: SYSTEM_PROMPT,
-      },
-      {
-        role: "user",
-        content:
-          `【Jeff 的問題】\n${question}\n\n` +
-          `【系統從你的問題抽出的線索】\n` +
-          `客戶名: ${hints.customerNameHints.join(", ") || "(無)"}\n` +
-          `目的地: ${hints.destinationHints.join(", ") || "(無)"}\n` +
-          `日期: ${hints.dateHint ? JSON.stringify(hints.dateHint) : "(無)"}\n` +
-          `天數: ${hints.daysHint ?? "(無)"}\n\n` +
-          `【DB 查詢結果】\n${truncated}\n\n` +
-          `請依此回答 Jeff 的問題。如果資料庫沒有相關結果,誠實說「沒查到」+建議下一步。`,
-      },
-    ],
-  });
+    messages: messages.slice(1), // exclude system from messages array
+    system: messages[0].content,
+  } as any);
 
-  const text =
+  const rawText =
     (response?.content?.[0] as any)?.text ||
     response?.choices?.[0]?.message?.content ||
     "(no response)";
 
+  // Parse JSON response — fallback to plain text if LLM didn't comply
+  let answer = "";
+  let suggestedActions: OpsActionProposal[] = [];
+  try {
+    const txt = typeof rawText === "string" ? rawText : String(rawText);
+    // Strip markdown code fences if present
+    const cleaned = txt.replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();
+    const parsed = JSON.parse(cleaned);
+    answer = parsed.answer ?? cleaned;
+    suggestedActions = Array.isArray(parsed.suggestedActions) ? parsed.suggestedActions : [];
+  } catch {
+    // LLM didn't return JSON — treat whole response as plain answer
+    answer = typeof rawText === "string" ? rawText : String(rawText);
+  }
+
   return {
-    answer: typeof text === "string" ? text : String(text),
+    answer,
+    suggestedActions,
     contextUsed: ctx,
     hints,
   };
 }
+
+const ACTION_PROPOSAL_GUIDE = `
+【建議動作 (suggestedActions) 規則】
+
+每次回答後,評估 Jeff 接下來「最可能想做的 1-3 個動作」。**不一定要建議**,沒明顯動作就回空陣列。
+
+每個動作 schema:
+{
+  "actionType": "sendCustomerEmail" | "addTourGroupNote" | "assignTourLeader" | "updateInternalNote" | "markBookingPaid" | "scheduleReminder",
+  "label": "1 行中文描述(< 30 字)",
+  "description": "2-3 句細節, 讓 Jeff 在 confirmation modal 看清楚要做什麼",
+  "args": { ...動作參數... },
+  "sensitivity": "safe" | "normal" | "sensitive"
+}
+
+【可用動作 + 參數】
+
+sendCustomerEmail (sensitivity=normal):
+  args: { customerProfileId: number, subject: string, body: string, language?: "zh-TW"|"en" }
+  用途: 寄信給客戶 (尾款提醒/特殊安排確認/感謝信)
+
+addTourGroupNote (sensitivity=safe):
+  args: { tourDepartureId: number, type: "ops"|"customer"|"financial"|"followup"|"ai_query", body: string }
+  用途: 把對話中提到的事實記進團期筆記
+
+assignTourLeader (sensitivity=normal):
+  args: { tourDepartureId: number, tourLeader: string }
+  用途: 指派/更換領隊
+
+updateInternalNote (sensitivity=safe):
+  args: { tourDepartureId: number, append: string }  // append to existing internalNotes
+  用途: 對 tourDepartures.internalNotes 追加 1 行
+
+markBookingPaid (sensitivity=sensitive):
+  args: { bookingId: number, paymentType: "deposit"|"balance"|"full", amount: number }
+  用途: 手動標記訂單已付 (繞過 Stripe webhook,慎用)
+
+scheduleReminder (sensitivity=safe):
+  args: { tourDepartureId: number, remindAt: ISO8601, message: string }
+  用途: 自定義出發前提醒
+
+【判斷規則】
+- 沒明顯動作 → suggestedActions: []
+- 只有 1 個明顯動作 (例: 答完後客戶顯然該寄信通知) → 1 個 proposal
+- 多個合理動作 (例: 答完後可寄信 OR 加筆記 OR 兩個都做) → 最多 3 個
+- 動作必須要從 DB 查詢結果有的 id 衍生 (例: 寄信給的客戶 customerProfileId 要從查詢結果取)
+- 不要建議「拿不到 id」的動作
+
+回應必須是有效 JSON,不要 markdown code fence 包覆。
+`;
