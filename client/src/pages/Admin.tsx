@@ -72,6 +72,9 @@ import OfficeOverviewTab from "@/components/admin/OfficeOverviewTab";
 import QuoteToolTab from "@/components/admin/tools/QuoteToolTab";
 // Round 81 Phase 1 of C workflow: Inbox-first default landing
 import OfficeInboxTab from "@/components/admin/OfficeInboxTab";
+// Round 81 — per-agent Slack-like channel view; replaces legacy
+// OfficeOverviewTab as the "聊天" page. Built on agentMessages table.
+import ChatsTab from "@/components/admin/ChatsTab";
 
 // ────────────────────────────────────────────────────────────────────────
 // Information architecture
@@ -312,7 +315,11 @@ function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
     case "office-inbox":
       return <OfficeInboxTab onNavigate={(t) => setActivePage(t as PageId)} />;
     case "office-chat":
-      return <OfficeOverviewTab onNavigate={(t) => setActivePage(t as PageId)} />;
+      // Round 81 (2026-05-17): swap OfficeOverviewTab → ChatsTab per Jeff's
+      // "Slack-like per-agent channel" requirement. OfficeOverviewTab still
+      // exists for now in case we need to compare; safe to delete after a
+      // week of ChatsTab usage proves it covers all the same flows.
+      return <ChatsTab />;
     case "autonomous-agents":
       return <AutonomousAgentsTab />;
     case "ai-hub":
