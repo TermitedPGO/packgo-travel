@@ -129,8 +129,15 @@ export async function runGmailPipeline(
       result.totalProcessed++;
     } catch (e) {
       result.totalFailed++;
-      result.errors.push(
-        `${msg.id}: ${e instanceof Error ? e.message : String(e)}`
+      const msgStr = e instanceof Error ? e.message : String(e);
+      result.errors.push(`${msg.id}: ${msgStr}`);
+      // 2026-05-17: log full per-message stack to fly logs so Jeff can
+      // diagnose stuck failures (e.g. 295 failed / 0 processed means
+      // SOMETHING consistently breaks — surface what).
+      console.error(
+        `[gmailPipeline] Failed thread ${msg.id} (subject: "${msg.subject?.slice(0, 60)}", from: ${msg.from}):`,
+        msgStr,
+        e instanceof Error ? e.stack?.split("\n").slice(0, 4).join(" | ") : ""
       );
     }
   }
