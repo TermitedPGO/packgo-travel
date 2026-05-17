@@ -23,6 +23,9 @@
  */
 import { useState, useMemo, useRef, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
+// Round 81 (2026-05-17) — Streamdown renders **bold**, lists, etc. instead
+// of showing raw markdown characters. Same library used by AIChatBox.
+import { Streamdown } from "streamdown";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -579,8 +582,10 @@ export default function ChatsTab() {
                       </div>
                       <span>{isStreaming ? "OpsAgent 正在回答" : "OpsAgent 已完成"}</span>
                     </div>
-                    <div className="text-sm text-foreground/85 whitespace-pre-wrap leading-relaxed">
-                      {streamingText || (
+                    <div className="text-sm text-foreground/85 leading-relaxed prose prose-sm max-w-none prose-p:my-2 prose-ul:my-2 prose-li:my-0.5 prose-strong:text-foreground">
+                      {streamingText ? (
+                        <Streamdown>{streamingText}</Streamdown>
+                      ) : (
                         <span className="text-foreground/30">思考中⋯</span>
                       )}
                       {isStreaming && (
@@ -692,9 +697,11 @@ export default function ChatsTab() {
                       {!isFromJeff && m.title && (
                         <h4 className="font-medium text-[13px] mb-1">{m.title}</h4>
                       )}
-                      <p className="text-[13px] text-foreground/85 whitespace-pre-wrap leading-relaxed">
-                        {m.body}
-                      </p>
+                      {/* 2026-05-17: render through Streamdown for **bold**,
+                          bullets, tables. Was raw <p> showing literal asterisks. */}
+                      <div className="text-[13px] text-foreground/85 leading-relaxed prose prose-sm max-w-none prose-p:my-1.5 prose-ul:my-1.5 prose-li:my-0 prose-strong:text-foreground prose-code:text-[12px]">
+                        <Streamdown>{m.body || ""}</Streamdown>
+                      </div>
 
                       {/* Round 81 Phase 3 (2026-05-17) — Action chips.
                           Each message's context may carry suggestedActions

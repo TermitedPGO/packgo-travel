@@ -12,6 +12,12 @@ import {
 } from "lucide-react";
 import { useLocale } from "@/contexts/LocaleContext";
 import { translateDestination } from "@/utils/locationMapping";
+// Round 81 (2026-05-17) — Tour compare feature (existed on /tours, now also
+// on country/destination pages so customers can compare side-by-side from
+// any browsing surface).
+import CompareBar, { addToCompare, removeFromCompare, useCompareIds } from "@/components/CompareBar";
+import { SlidersHorizontal, X as XIcon } from "lucide-react";
+import { toast } from "sonner";
 
 // Round 80.4: B&W brand normalization. Was using a 12-color rainbow
 // (emerald/amber/sky/purple/rose/blue/indigo/orange/red/pink/teal/gray) which
@@ -136,6 +142,34 @@ const countryImages: Record<string, string> = {
   "約旦": "https://images.unsplash.com/photo-1548786811-dd6e453ccca7?w=1600",
   "以色列": "https://images.unsplash.com/photo-1544967082-d9d25d867d66?w=1600",
 };
+
+// Round 81 (2026-05-17) — Reusable compare-toggle button for tour cards.
+// Mirrors the one in Tours.tsx so behavior is identical across surfaces.
+function CompareToggle({ tourId, t }: { tourId: number; t: (k: string) => string }) {
+  const ids = useCompareIds();
+  const inCompare = ids.includes(tourId);
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (inCompare) removeFromCompare(tourId);
+        else {
+          const ok = addToCompare(tourId);
+          if (!ok) toast.error(t("compareBar.maxLimitError"));
+        }
+      }}
+      className={`p-2 rounded-lg transition-colors shadow-sm ${
+        inCompare ? "bg-black text-white" : "bg-white/90 text-gray-700 hover:bg-white"
+      }`}
+      aria-label={inCompare ? t("compareBar.removeFromCompare") : t("compareBar.addToCompare")}
+      title={inCompare ? t("compareBar.inCompareList") : t("compareBar.addToCompare")}
+    >
+      {inCompare ? <XIcon className="h-5 w-5" /> : <SlidersHorizontal className="h-5 w-5" />}
+    </button>
+  );
+}
 
 export default function CountryPage() {
   const { region, country } = useParams<{ region: string; country: string }>();
@@ -283,14 +317,17 @@ export default function CountryPage() {
                           alt={getTranslatedTitle(tour)}
                           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 rounded-xl"
                         />
-                        <button
-                          onClick={(e) => toggleFavorite(e, tour.id)}
-                          className="absolute top-3 right-3 p-2 bg-white/90 rounded-lg hover:bg-white transition-colors"
-                        >
-                          <Heart 
-                            className={`h-5 w-5 ${favorites.has(tour.id) ? 'fill-red-500 text-red-500' : 'text-gray-600'}`}
-                          />
-                        </button>
+                        <div className="absolute top-3 right-3 flex gap-2">
+                          <CompareToggle tourId={tour.id} t={t} />
+                          <button
+                            onClick={(e) => toggleFavorite(e, tour.id)}
+                            className="p-2 bg-white/90 rounded-lg hover:bg-white transition-colors shadow-sm"
+                          >
+                            <Heart
+                              className={`h-5 w-5 ${favorites.has(tour.id) ? 'fill-red-500 text-red-500' : 'text-gray-600'}`}
+                            />
+                          </button>
+                        </div>
                         {tour.duration && (
                           <div className="absolute bottom-3 left-3 px-3 py-1 bg-black/70 text-white text-sm rounded-lg">
                             {tour.duration} {t('common.days')}
@@ -361,6 +398,9 @@ export default function CountryPage() {
         </section>
       </main>
       <Footer />
+      {/* Round 81 (2026-05-17) — floating compare bar at bottom-right when
+          customer has selected ≥2 tours to compare. Persists across pages. */}
+      <CompareBar />
     </div>
   );
 }

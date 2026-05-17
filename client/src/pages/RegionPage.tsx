@@ -8,6 +8,9 @@ import { trpc } from "@/lib/trpc";
 import { continentMapping, continentOrder } from "@shared/continentMapping";
 import { useLocale } from "@/contexts/LocaleContext";
 import { translate as translateKey } from "@/i18n";
+// Round 81 (2026-05-17) — Add CompareBar so customers browsing 旅遊地區
+// (region landing pages, e.g. /destinations/asia) can also compare tours.
+import CompareBar from "@/components/CompareBar";
 
 // 地區配置（與首頁 Destinations 對應）
 const regionConfig: Record<string, {
@@ -268,20 +271,34 @@ export default function RegionPage() {
           </section>
         </main>
         <Footer />
+        <CompareBar />
       </div>
     );
   }
 
   return (
     <div className="min-h-screen flex flex-col bg-white">
+      {/* Round 80.25 — non-cruise destinations were rendering with no SEO
+          component, falling back to default site meta. Now per-region. */}
+      <SEO
+        title={{
+          zh: `${translateKey(config.nameKey, 'zh-TW', (config as any).nameParams)} 旅遊行程`,
+          en: `${translateKey(config.nameKey, 'en', (config as any).nameParams)} Tours`,
+        }}
+        description={{
+          zh: `瀏覽 PACK&GO ${translateKey(config.nameKey, 'zh-TW', (config as any).nameParams)} 地區精選旅遊行程，找到最適合您的旅遊目的地。`,
+          en: `Browse PACK&GO curated tour packages in ${translateKey(config.nameKey, 'en', (config as any).nameParams)} — find the destination that fits you best.`,
+        }}
+        url={`/destinations/${region}`}
+      />
       <Header />
       <main className="flex-grow">
         {/* Hero Section */}
         <section className="relative h-[400px] overflow-hidden">
-          <img 
-            src={config.image} 
+          <img
+            src={config.image}
             alt={t(config.nameKey, (config as any).nameParams)}
-            className="w-full h-full object-cover"
+            className="w-full h-full object-cover rounded-xl"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
           <div className="absolute bottom-0 left-0 w-full p-8">
@@ -363,6 +380,7 @@ export default function RegionPage() {
         </section>
       </main>
       <Footer />
+      <CompareBar />
     </div>
   );
 }
