@@ -374,9 +374,13 @@ export default function ChatsTab() {
   const totalUnread = unreadCount.data?.total ?? 0;
 
   return (
-    <div className="flex h-[calc(100vh-120px)] gap-3">
-      {/* ──────────── Left rail: channels (Slack-like with previews) ──────────── */}
-      <div className="w-72 flex-shrink-0 border-r border-foreground/10 pr-2 overflow-hidden flex flex-col">
+    <div className="flex h-[calc(100vh-120px)] gap-3 md:flex-row flex-col">
+      {/* ──────────── Left rail: channels (Slack-like with previews) ────────────
+          Round 81 (2026-05-17) — Mobile responsive: stacks vertically below
+          md breakpoint. On mobile, channel list takes auto height (max ~40vh)
+          and main pane fills below. Tapping a channel scrolls main pane into
+          view. */}
+      <div className={`md:w-72 w-full flex-shrink-0 md:border-r md:border-b-0 border-b border-foreground/10 md:pr-2 pb-2 overflow-hidden flex flex-col ${selectedAgent ? "max-h-[38vh] md:max-h-none" : ""}`}>
         <div className="flex items-center justify-between mb-2 px-1">
           <h2 className="text-sm font-semibold flex items-center gap-1.5">
             <Inbox className="w-4 h-4 text-foreground/60" />

@@ -79,6 +79,13 @@ import ChatsTab from "@/components/admin/ChatsTab";
 // KPIs + triage + recent activity. Replaces office-inbox as Jeff's
 // default entry. Office-inbox stays accessible as "advanced" sub-page.
 import TodayOverview from "@/components/admin/TodayOverview";
+// Round 81 (2026-05-17) — 4 per-domain landing pages. Each domain (Ops,
+// Customers, Marketing, Finance) gets a dedicated at-a-glance dashboard
+// at the top of its menu, before drilling into specific sub-pages.
+import OpsLanding from "@/components/admin/landings/OpsLanding";
+import CustomersLanding from "@/components/admin/landings/CustomersLanding";
+import MarketingLanding from "@/components/admin/landings/MarketingLanding";
+import FinanceLanding from "@/components/admin/landings/FinanceLanding";
 
 // ────────────────────────────────────────────────────────────────────────
 // Information architecture
@@ -89,6 +96,8 @@ type PageId =
   | "today"
   // Office — Inbox is the default; everything else is advanced
   | "office-inbox" | "office-chat" | "autonomous-agents" | "ai-hub" | "task-history" | "calibration-review" | "llm-cost" | "audit-log"
+  // Round 81 (2026-05-17) — Per-domain landing pages
+  | "ops-landing" | "customers-landing" | "marketing-landing" | "finance-landing"
   // Operations
   | "dashboard" | "inbox" | "tours" | "bookings" | "inquiries" | "tour-monitor" | "suppliers"
   // Customers — now includes 中國簽證
@@ -122,13 +131,14 @@ const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageD
   ops: {
     domain: { id: "ops", label: "營運", icon: ClipboardList },
     primary: [
+      { id: "ops-landing", label: "🗺 總覽" },
       { id: "tours", label: "行程" },
-    ],
-    advanced: [
-      { id: "dashboard", label: "總覽" },
-      { id: "inbox", label: "收件匣" },
       { id: "bookings", label: "訂單" },
       { id: "inquiries", label: "詢問" },
+    ],
+    advanced: [
+      { id: "dashboard", label: "Dashboard" },
+      { id: "inbox", label: "舊收件匣" },
       { id: "tour-monitor", label: "供應商監控" },
       { id: "suppliers", label: "🔌 供應商同步" },
     ],
@@ -136,10 +146,11 @@ const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageD
   customers: {
     domain: { id: "customers", label: "客戶", icon: Users },
     primary: [
+      { id: "customers-landing", label: "👥 總覽" },
       { id: "reviews", label: "評價" },
+      { id: "tool-quote", label: "📄 報價單" },
     ],
     advanced: [
-      { id: "tool-quote", label: "📄 報價單" },
       { id: "ai-quotes", label: "AI 報價單" },
       { id: "packpoint", label: "Packpoint" },
       { id: "vouchers", label: "Voucher" },
@@ -150,11 +161,12 @@ const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageD
   marketing: {
     domain: { id: "marketing", label: "行銷", icon: Megaphone },
     primary: [
+      { id: "marketing-landing", label: "📢 總覽" },
       { id: "posters", label: "海報" },
+      { id: "marketing-content", label: "AI 文案" },
     ],
     advanced: [
       { id: "marketing", label: "自動化" },
-      { id: "marketing-content", label: "AI 文案" },
       { id: "analytics", label: "流量分析" },
       { id: "competitor-monitor", label: "競品" },
       { id: "affiliate", label: "Trip.com 聯盟" },
@@ -163,10 +175,11 @@ const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageD
   system: {
     domain: { id: "system", label: "財務", icon: Settings },
     primary: [
-      { id: "finance", label: "總覽" },
+      { id: "finance-landing", label: "💰 總覽" },
+      { id: "accounting", label: "帳務" },
     ],
     advanced: [
-      { id: "accounting", label: "帳務" },
+      { id: "finance", label: "舊總覽" },
       { id: "invoices", label: "發票" },
       { id: "reconciliation", label: "對帳" },
     ],
@@ -321,6 +334,15 @@ function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
     // Office
     case "today":
       return <TodayOverview onNavigate={(t) => setActivePage(t as PageId)} />;
+    // Round 81 (2026-05-17) — Per-domain landing pages
+    case "ops-landing":
+      return <OpsLanding onNavigate={(t) => setActivePage(t as PageId)} />;
+    case "customers-landing":
+      return <CustomersLanding onNavigate={(t) => setActivePage(t as PageId)} />;
+    case "marketing-landing":
+      return <MarketingLanding onNavigate={(t) => setActivePage(t as PageId)} />;
+    case "finance-landing":
+      return <FinanceLanding onNavigate={(t) => setActivePage(t as PageId)} />;
     case "office-inbox":
       return <OfficeInboxTab onNavigate={(t) => setActivePage(t as PageId)} />;
     case "office-chat":
