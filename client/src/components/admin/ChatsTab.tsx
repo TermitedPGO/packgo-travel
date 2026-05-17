@@ -189,18 +189,71 @@ export default function ChatsTab() {
   // question and OpsAgent's answer to agentMessages, so the channel
   // shows the full conversation.
   const [opsQuestion, setOpsQuestion] = useState("");
-  const askOpsMutation = trpc.agent.askOps.useMutation({
-    onSuccess: (result) => {
-      if (result.error) {
-        toast.error("OpsAgent: " + result.error);
-      } else {
-        // Don't toast — the new message in the channel IS the success signal
-        setOpsQuestion("");
+
+  // Round 81 Phase 4 (2026-05-17) — SSE streaming for OpsAgent.
+  // Instead of the blocking askOps tRPC mutation, ChatsTab opens an
+  // EventSource that streams tokens as the LLM generates. A "live"
+  // bubble accumulates tokens in real time; when the stream ends, we
+  // invalidate listMessages so the persisted message replaces the bubble.
+  const [streamingText, setStreamingText] = useState<string | null>(null);
+  const [streamingActions, setStreamingActions] = useState<any[] | null>(null);
+  const [isStreaming, setIsStreaming] = useState(false);
+
+  const sendOpsQuestion = (question: string) => {
+    if (!question.trim() || isStreaming) return;
+    setIsStreaming(true);
+    setStreamingText("");
+    setStreamingActions(null);
+
+    const url = `/api/agent/ask-ops-stream?q=${encodeURIComponent(question.trim())}`;
+    const eventSource = new EventSource(url, { withCredentials: true } as any);
+
+    eventSource.onmessage = (e) => {
+      try {
+        const event = JSON.parse(e.data);
+        if (event.type === "token") {
+          setStreamingText((prev) => (prev ?? "") + (event.text ?? ""));
+        } else if (event.type === "done") {
+          // Final parsed answer (cleaned of JSON wrapping); replace
+          // accumulated raw stream with this for the brief moment before
+          // the persisted message lands.
+          if (event.finalAnswer) {
+            setStreamingText(event.finalAnswer);
+            setStreamingActions(event.suggestedActions ?? null);
+          }
+          eventSource.close();
+          // Brief delay before refetch so server has time to commit the
+          // agentMessages row. 500ms is plenty for TiDB.
+          setTimeout(() => {
+            utils.agent.listMessages.invalidate();
+            setIsStreaming(false);
+            // Don't clear streamingText immediately — let it overlap with
+            // the new message arriving so there's no flash.
+            setTimeout(() => {
+              setStreamingText(null);
+              setStreamingActions(null);
+            }, 800);
+          }, 500);
+          setOpsQuestion("");
+        } else if (event.type === "error") {
+          toast.error("OpsAgent: " + (event.error ?? "unknown"));
+          eventSource.close();
+          setIsStreaming(false);
+          setStreamingText(null);
+        }
+      } catch {
+        // Ignore malformed event chunks
       }
-      utils.agent.listMessages.invalidate();
-    },
-    onError: (err) => toast.error("OpsAgent 失敗: " + err.message),
-  });
+    };
+
+    eventSource.onerror = () => {
+      if (eventSource.readyState === EventSource.CLOSED) return;
+      toast.error("Stream 連線中斷");
+      eventSource.close();
+      setIsStreaming(false);
+      setStreamingText(null);
+    };
+  };
 
   // Round 81 Phase 2 (2026-05-17) — Action proposal confirmation flow.
   // Each agentMessages row may carry a suggestedActions array in its context.
@@ -410,26 +463,22 @@ export default function ChatsTab() {
                     value={opsQuestion}
                     onChange={(e) => setOpsQuestion(e.target.value)}
                     className="min-h-[44px] text-sm rounded-lg bg-white"
-                    disabled={askOpsMutation.isPending}
+                    disabled={isStreaming}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                         e.preventDefault();
-                        if (opsQuestion.trim() && !askOpsMutation.isPending) {
-                          askOpsMutation.mutate({ question: opsQuestion.trim() });
-                        }
+                        sendOpsQuestion(opsQuestion);
                       }
                     }}
                   />
                   <div className="flex items-center justify-between mt-2">
                     <span className="text-[10px] text-emerald-600/70">
-                      ⌘+Enter 送出 · 自動記得上次對話 · 答案下方會有建議動作
+                      ⌘+Enter 送出 · 自動記得上次對話 · 邊想邊吐字
                     </span>
                     <Button
                       size="sm"
-                      onClick={() =>
-                        askOpsMutation.mutate({ question: opsQuestion.trim() })
-                      }
-                      disabled={!opsQuestion.trim() || askOpsMutation.isPending}
+                      onClick={() => sendOpsQuestion(opsQuestion)}
+                      disabled={!opsQuestion.trim() || isStreaming}
                       className="rounded-lg gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
                     >
                       <Send className="w-3.5 h-3.5" />
@@ -438,19 +487,68 @@ export default function ChatsTab() {
                   </div>
                 </div>
 
-                {/* Thinking indicator — visible while askOps is pending,
-                    sits right where the answer will land, so Jeff feels the
-                    response is "happening" instead of just waiting. */}
-                {askOpsMutation.isPending && (
-                  <div className="mt-2 p-3 rounded-xl border border-emerald-200/60 bg-white">
-                    <div className="flex items-center gap-2 text-sm text-emerald-700">
-                      <div className="flex gap-1">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" style={{ animationDelay: "0.15s" }} />
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" style={{ animationDelay: "0.3s" }} />
+                {/* Streaming live bubble — appears as soon as SSE connects,
+                    accumulates tokens in real time. Replaced by persisted
+                    message after stream ends + listMessages refetches.
+                    800ms overlap window prevents flash of empty content. */}
+                {streamingText !== null && (
+                  <div className="mt-2 p-4 rounded-xl border border-emerald-300/60 bg-white shadow-sm">
+                    <div className="flex items-center gap-2 mb-2 text-xs text-emerald-700 font-semibold">
+                      <div className="flex gap-0.5">
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full bg-emerald-500 ${isStreaming ? "animate-pulse" : ""}`}
+                        />
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full bg-emerald-500 ${isStreaming ? "animate-pulse" : ""}`}
+                          style={{ animationDelay: "0.15s" }}
+                        />
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full bg-emerald-500 ${isStreaming ? "animate-pulse" : ""}`}
+                          style={{ animationDelay: "0.3s" }}
+                        />
                       </div>
-                      <span className="text-xs">OpsAgent 思考中（查 DB + LLM 生成）⋯</span>
+                      <span>{isStreaming ? "OpsAgent 正在回答" : "OpsAgent 已完成"}</span>
                     </div>
+                    <div className="text-sm text-foreground/85 whitespace-pre-wrap leading-relaxed">
+                      {streamingText || (
+                        <span className="text-foreground/30">思考中⋯</span>
+                      )}
+                      {isStreaming && (
+                        <span className="inline-block w-1.5 h-4 ml-0.5 bg-emerald-500 align-text-bottom animate-pulse" />
+                      )}
+                    </div>
+
+                    {/* Surface streaming suggestedActions immediately too */}
+                    {streamingActions && streamingActions.length > 0 && (
+                      <div className="mt-3 pt-3 border-t border-emerald-100">
+                        <div className="text-[10px] uppercase tracking-wider text-emerald-700/60 font-semibold mb-2">
+                          💡 建議動作
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {streamingActions.map((action: any, idx: number) => {
+                            const Icon = ACTION_ICON[action.actionType] ?? Sparkles;
+                            const sensitivity = action.sensitivity ?? "normal";
+                            const colorClass =
+                              sensitivity === "sensitive"
+                                ? "border-rose-300 text-rose-700 hover:bg-rose-50"
+                                : sensitivity === "normal"
+                                ? "border-amber-300 text-amber-700 hover:bg-amber-50"
+                                : "border-emerald-300 text-emerald-700 hover:bg-emerald-50";
+                            return (
+                              <button
+                                key={idx}
+                                onClick={() => handleActionClick(action)}
+                                disabled={executeMutation.isPending}
+                                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors bg-white ${colorClass} disabled:opacity-50`}
+                              >
+                                <Icon className="w-3.5 h-3.5" />
+                                {action.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </>

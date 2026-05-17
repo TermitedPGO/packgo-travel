@@ -230,6 +230,136 @@ async function startServer() {
   // Gmail OAuth (Round 81 — email pipeline)
   initializeGmailOAuth(app);
   
+  // Round 81 Phase 4 (2026-05-17) — OpsAgent SSE streaming endpoint.
+  // MUST be mounted BEFORE the uploadRouters because those have
+  // `router.use(requireAuth)` at the top, which would otherwise intercept
+  // every /api/* request including this one. We do our own admin auth
+  // check inline below.
+  //
+  // Why GET (not POST): EventSource API only supports GET. The question
+  // text is passed via ?q= query param (max ~2K chars, plenty for ops Q&A).
+  app.get("/api/agent/ask-ops-stream", async (req, res) => {
+    try {
+      // Inline admin auth — copy the requireAdmin pattern. We can't import
+      // the middleware function directly because it sends 401 + returns,
+      // which terminates the stream before it begins.
+      const { COOKIE_NAME } = await import("@shared/const");
+      const { verifyToken } = await import("../jwt");
+      const { getUserById } = await import("../db");
+      const token = (req as any).cookies?.[COOKIE_NAME];
+      if (!token) {
+        return res.status(401).json({ error: "Login required" });
+      }
+      const payload = verifyToken(token);
+      if (!payload) return res.status(401).json({ error: "Invalid session" });
+      const user = await getUserById(payload.userId);
+      if (!user || user.role !== "admin") {
+        return res.status(403).json({ error: "Admin only" });
+      }
+
+      const question = String(req.query.q ?? "").trim();
+      if (!question || question.length > 2000) {
+        return res.status(400).json({ error: "Question required, max 2000 chars" });
+      }
+
+      // SSE headers
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no"); // disable nginx buffering
+      res.flushHeaders();
+
+      const send = (event: object) => {
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      };
+
+      // Load conversation history (last 10 #ops messages, chronological)
+      const { getDb } = await import("../db");
+      const { agentMessages } = await import("../../drizzle/schema");
+      const { eq, desc: drizzleDesc } = await import("drizzle-orm");
+      const db = await getDb();
+      let history: { role: "user" | "agent"; content: string }[] = [];
+      if (db) {
+        const rows = await db
+          .select({
+            senderRole: agentMessages.senderRole,
+            body: agentMessages.body,
+          })
+          .from(agentMessages)
+          .where(eq(agentMessages.agentName, "ops"))
+          .orderBy(drizzleDesc(agentMessages.createdAt))
+          .limit(10);
+        history = rows
+          .reverse()
+          .map((r) => ({
+            role: (r.senderRole === "jeff" ? "user" : "agent") as "user" | "agent",
+            content: r.body,
+          }));
+
+        // Log Jeff's question synchronously so the channel updates
+        await db.insert(agentMessages).values({
+          agentName: "ops",
+          senderRole: "jeff",
+          messageType: "question",
+          title: question.slice(0, 80),
+          body: question,
+          priority: "normal",
+          readByJeff: 1,
+        } as any);
+      }
+
+      send({ type: "start" });
+
+      // Run streaming agent
+      const { runOpsAgentStream } = await import("../agents/autonomous/opsAgentStream");
+      let finalAnswer = "";
+      let suggestedActions: any[] = [];
+      try {
+        for await (const event of runOpsAgentStream(question, history)) {
+          if (event.type === "token") {
+            send({ type: "token", text: event.text });
+          } else if (event.type === "done") {
+            finalAnswer = event.finalAnswer ?? "";
+            suggestedActions = event.suggestedActions ?? [];
+            send({ type: "done", finalAnswer, suggestedActions });
+          } else if (event.type === "error") {
+            send({ type: "error", error: event.error });
+          }
+        }
+      } catch (err) {
+        send({ type: "error", error: (err as Error).message });
+      }
+
+      // Save agent answer + suggestedActions to DB so the message is
+      // persistent (refresh loads it from listMessages).
+      if (finalAnswer && db) {
+        await db.insert(agentMessages).values({
+          agentName: "ops",
+          senderRole: "agent",
+          messageType: "observation",
+          title: question.slice(0, 80),
+          body: finalAnswer,
+          context: JSON.stringify({ suggestedActions, streamed: true }),
+          priority: "normal",
+        } as any);
+      }
+
+      res.end();
+    } catch (err) {
+      console.error("[ask-ops-stream] error:", err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: (err as Error).message });
+      } else {
+        try {
+          res.write(`data: ${JSON.stringify({ type: "error", error: (err as Error).message })}\n\n`);
+          res.end();
+        } catch {
+          /* connection probably already closed */
+        }
+      }
+    }
+  });
+
   // Manus OAuth removed - using Google OAuth + Email/Password instead
   // Avatar upload API
   app.use("/api", avatarUploadRouter);

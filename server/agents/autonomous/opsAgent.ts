@@ -289,6 +289,10 @@ async function fetchOpsContext(hints: ReturnType<typeof extractHints>) {
   return ctx;
 }
 
+// Export hints + ctx helpers so opsAgentStream can reuse them without
+// duplicating regex/SQL.
+export { extractHints, fetchOpsContext };
+
 /**
  * Round 81 Phase 2 (2026-05-17) — Action proposal schema.
  * OpsAgent can suggest 1-3 follow-up actions Jeff might want to take.
