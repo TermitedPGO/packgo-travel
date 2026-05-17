@@ -97,34 +97,44 @@ export type AccountingAgentOutput = {
   suggestedJeffNote?: string;
 };
 
+// 2026-05-16 bug fix: server/_core/llm.ts `toolsToAnthropic` reads each
+// tool as `t.function.name` (OpenAI-style nested format). The flat shape
+// { name, description, parameters } we had here meant `t.function` was
+// undefined and every classifyOne call crashed with
+// "Cannot read properties of undefined (reading 'name')". Production
+// today: 444 BofA transactions all came back with that exact error.
+// Wrapping under `.function` matches every other agent in the codebase.
 const TOOL = {
-  name: "submit_classification",
-  description:
-    "Submit a classification for one PACK&GO bank transaction. Use the 9 PACK&GO categories.",
-  parameters: {
-    type: "object",
-    properties: {
-      category: {
-        type: "string",
-        enum: ACCOUNTING_CATEGORIES as unknown as string[],
-        description: "PACK&GO category (not raw Plaid PFC).",
+  type: "function" as const,
+  function: {
+    name: "submit_classification",
+    description:
+      "Submit a classification for one PACK&GO bank transaction. Use the 9 PACK&GO categories.",
+    parameters: {
+      type: "object",
+      properties: {
+        category: {
+          type: "string",
+          enum: ACCOUNTING_CATEGORIES as unknown as string[],
+          description: "PACK&GO category (not raw Plaid PFC).",
+        },
+        confidence: {
+          type: "integer",
+          minimum: 0,
+          maximum: 100,
+          description:
+            ">= 80 = auto-apply, 60-79 = apply + flag, < 60 = mark other_review.",
+        },
+        reasoning: {
+          type: "string",
+          description:
+            "1-2 short sentences explaining the choice. PACK&GO-specific signals (e.g. 'LionTravel = our main supplier').",
+        },
+        needsHumanReview: { type: "boolean" },
+        suggestedJeffNote: { type: "string" },
       },
-      confidence: {
-        type: "integer",
-        minimum: 0,
-        maximum: 100,
-        description:
-          ">= 80 = auto-apply, 60-79 = apply + flag, < 60 = mark other_review.",
-      },
-      reasoning: {
-        type: "string",
-        description:
-          "1-2 short sentences explaining the choice. PACK&GO-specific signals (e.g. 'LionTravel = our main supplier').",
-      },
-      needsHumanReview: { type: "boolean" },
-      suggestedJeffNote: { type: "string" },
+      required: ["category", "confidence", "reasoning", "needsHumanReview"],
     },
-    required: ["category", "confidence", "reasoning", "needsHumanReview"],
   },
 };
 
