@@ -7,49 +7,37 @@
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1.0" />
-    <title>PACK&GO 旅行社 | 專業旅遊規劃、團體旅遊、客製行程</title>
+    <!-- Round 80.7: title + ALL meta tags (description / keywords / og:* /
+         twitter:*) and the duplicate Schema.org JSON-LD have been removed.
+         react-helmet-async (in client/src/components/SEO.tsx) now exclusively
+         owns these — keeping them static here was creating BOTH copies in the
+         DOM at runtime, with crawlers picking up the wrong (default) one.
+         Static title is kept as a brief flash-of-loading fallback only. -->
+    <title>PACK&GO 旅行社</title>
+    <!-- Round 80.25: removed static robots meta. Default crawler behavior is
+         index/follow when absent. <SEO noindex> in React adds the explicit
+         "noindex, nofollow" tag for private pages — having both caused
+         duplicate robots tags in DOM. -->
 
-    <!-- SEO Meta Tags -->
-    <meta name="description" content="PACK&GO 旅行社提供專業旅遊規劃服務，包含團體旅遊、客製行程、機票預訂、飯店預訂、郵輪旅遊等服務。讓我們為您打造難忘的旅行回憶。" />
-    <meta name="keywords" content="旅行社,團體旅遊,客製行程,機票預訂,飯店預訂,郵輪旅遊,歐洲旅遊,日本旅遊,小團團旅,PACK GO" />
-    <meta name="author" content="PACK&GO 旅行社" />
-    <meta name="robots" content="index, follow" />
-    <link rel="canonical" href="https://packgo-travel.fly.dev" />
-
-    <!-- Open Graph / Facebook -->
-    <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://packgo-travel.fly.dev" />
-    <meta property="og:title" content="PACK&GO 旅行社 | 專業旅遊規劃" />
-    <meta property="og:description" content="PACK&GO 旅行社提供專業旅遊規劃服務，包含團體旅遊、客製行程、機票預訂、飯店預訂、郵輪旅遊等服務。" />
-    <meta property="og:image" content="https://packgo-travel.fly.dev/og-image.jpg" />
-    <meta property="og:locale" content="zh_TW" />
-    <meta property="og:site_name" content="PACK&GO 旅行社" />
-
-    <!-- Twitter Card -->
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="PACK&GO 旅行社 | 專業旅遊規劃" />
-    <meta name="twitter:description" content="PACK&GO 旅行社提供專業旅遊規劃服務，包含團體旅遊、客製行程、機票預訂、飯店預訂、郵輪旅遊等服務。" />
-    <meta name="twitter:image" content="https://packgo-travel.fly.dev/og-image.jpg" />
 
     <!-- PWA manifest + favicon / apple touch icon -->
     <link rel="manifest" href="/manifest.json" />
-    <link rel="icon" type="image/png" href="/images/logo-bag-black-v2.png" />
-    <link rel="apple-touch-icon" href="/images/logo-bag-black-v2.png" />
-    <meta name="theme-color" content="#0D9488" />
+    <link rel="icon" type="image/png" href="/images/logo-bag-black-v3.png" />
+    <link rel="apple-touch-icon" href="/images/logo-bag-black-v3.png" />
+    <!-- Round 80.4: theme-color black, was teal #0D9488 (off-brand) -->
+    <meta name="theme-color" content="#111111" />
 
-    <!-- Schema.org JSON-LD -->
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "TravelAgency",
-      "name": "PACK&GO 旅行社",
-      "url": "https://packgo-travel.fly.dev",
-      "description": "PACK&GO 旅行社提供專業旅遊規劃服務",
-      "areaServed": "TW",
-      "availableLanguage": ["zh-TW", "en"],
-      "serviceType": ["團體旅遊", "客製行程", "機票預訂", "飯店預訂", "郵輪旅遊"]
-    }
-    </script>
+    <!-- Round 81 (2026-05-17) — iOS Add-to-Home-Screen support.
+         Without these tags, Safari's "Add to Home Screen" launches the
+         site in a browser-like view with the URL bar visible. With them,
+         the installed icon launches as a fullscreen PWA — looks and feels
+         like a native app.
+         Jeff specifically wants admin (/admin) installable on iPhone so
+         he can manage agent chats on the go without a native app build. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="PACK&GO" />
+    <meta name="mobile-web-app-capable" content="yes" />
 
     <!--
       Google tag (gtag.js) - GA4 G-91VLGFSK70
@@ -73,13 +61,28 @@
       gtag('js', new Date());
     </script>
 
+    <!-- Round 80.7: LCP optimisation — preload the home hero fallback so it
+         renders the moment the browser parses HTML, before React mounts.
+         Critical because LCP was measuring 26s on Lighthouse mobile (cold
+         tRPC + Unsplash). With this preload + fetchpriority=high, browser
+         starts the image fetch in parallel with the JS bundle. -->
+    <link
+      rel="preload"
+      as="image"
+      href="/images/hero-sakura.webp"
+      fetchpriority="high"
+      type="image/webp" />
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=Noto+Serif+TC:wght@400;600;700&display=swap" rel="stylesheet" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
+    <!-- Round 80.7: Press Start 2P removed from global font loading — only
+         used in admin AiTeamRoster. Saved 1 HTTP request + parsing on every
+         customer page load. Admin font falls back to monospace. -->
+
     <link rel="stylesheet" href="/src/print.css" media="print" />
     
   </head>
@@ -87,10 +90,11 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <script
-      defer
-      src="%VITE_ANALYTICS_ENDPOINT%/umami"
-      data-website-id="%VITE_ANALYTICS_WEBSITE_ID%"></script>
+    <!-- Round 80.7: removed dead Umami analytics script — VITE_ANALYTICS_*
+         env vars were never set, so the literal "%VITE_ANALYTICS_ENDPOINT%"
+         placeholder was being requested as a URL on every page (caught by
+         full-scan audit). Real analytics are loaded conditionally from
+         client/src/lib/analytics.ts after cookie consent (Plausible + GA4). -->
   </body>
 
 </html>

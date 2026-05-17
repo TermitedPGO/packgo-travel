@@ -4,24 +4,54 @@
   "description": "PACK&GO 旅行社提供專業旅遊規劃服務，包含團體旅遊、客製行程、機票預訂、飯店預訂、郵輪旅遊等服務。",
   "start_url": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "background_color": "#FFFFFF",
-  "theme_color": "#0D9488",
+  "theme_color": "#111111",
   "orientation": "portrait-primary",
   "scope": "/",
   "lang": "zh-TW",
-  "categories": ["travel", "lifestyle"],
+  "categories": ["travel", "lifestyle", "business"],
   "icons": [
     {
-      "src": "/images/logo-bag-black-v2.png",
+      "src": "/images/logo-bag-black-v3.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/images/logo-bag-black-v2.png",
+      "src": "/images/logo-bag-black-v3.png",
       "sizes": "512x512",
       "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/images/logo-bag-black-v3.png",
+      "sizes": "any",
+      "type": "image/png",
       "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Admin 後台",
+      "short_name": "Admin",
+      "description": "PACK&GO 後台管理 — TodayOverview + Agent Chats + OpsAgent",
+      "url": "/admin",
+      "icons": [{ "src": "/images/logo-bag-black-v3.png", "sizes": "any" }]
+    },
+    {
+      "name": "問 OpsAgent",
+      "short_name": "OpsAgent",
+      "description": "直接打開 #OpsAgent channel 問運營問題",
+      "url": "/admin",
+      "icons": [{ "src": "/images/logo-bag-black-v3.png", "sizes": "any" }]
+    },
+    {
+      "name": "搜尋行程",
+      "short_name": "Search",
+      "description": "搜尋 PACK&GO 行程目錄",
+      "url": "/tours",
+      "icons": [{ "src": "/images/logo-bag-black-v3.png", "sizes": "any" }]
     }
   ]
 }

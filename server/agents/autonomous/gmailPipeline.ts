@@ -393,6 +393,49 @@ async function processOneEmail(
       relatedInteractionId: interactionId,
       relatedCustomerProfileId: profileId,
     });
+  } else {
+    // Round 81 (2026-05-17): Post non-escalation outcomes (auto-replied,
+    // would-auto-send, drafted) to #inquiry channel as well, so the
+    // channel shows ALL email activity not just escalations.
+    // Jeff can mute the channel or filter to unread if he doesn't want
+    // every email; the per-agent unread counter handles that.
+    try {
+      const { notifyAgentMessage } = await import("../../_core/agentNotify");
+      const outcomeLabel =
+        sendOutcome === "auto_replied"
+          ? "✓ 已自動回覆"
+          : sendOutcome === "would_auto_send"
+          ? "✓ 已擬稿 (dry-run kill switch on)"
+          : "📝 Draft 已存,等你 review";
+      await notifyAgentMessage({
+        agentName: "inquiry",
+        messageType: "observation",
+        title: `${decision.classification} · ${senderEmail ?? "unknown"} · "${msg.subject.slice(0, 50)}"`,
+        body:
+          `${outcomeLabel}\n\n` +
+          `Intent: ${decision.intent}\n` +
+          `Urgency: ${decision.urgency} · Sentiment: ${decision.sentiment} · Confidence: ${decision.confidence}\n` +
+          (sendOutcome === "auto_replied"
+            ? `\nReply sent:\n${decision.draftReply.slice(0, 500)}${decision.draftReply.length > 500 ? "..." : ""}`
+            : `\nDraft:\n${decision.draftReply.slice(0, 500)}${decision.draftReply.length > 500 ? "..." : ""}`),
+        priority: decision.urgency === "high" ? "high" : "low",
+        relatedOutcomeId: outcomeId,
+        relatedInteractionId: interactionId,
+        relatedCustomerProfileId: profileId ?? undefined,
+        context: {
+          classification: decision.classification,
+          confidence: decision.confidence,
+          sendOutcome,
+          gmailThreadId: msg.threadId,
+        },
+      });
+    } catch (err) {
+      // Don't break the pipeline on notify failure
+      console.warn(
+        "[gmailPipeline] #inquiry channel notify failed:",
+        (err as Error).message
+      );
+    }
   }
 
   // If refund_request, run RefundAgent too for full triage
