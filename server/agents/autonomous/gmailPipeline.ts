@@ -228,6 +228,29 @@ async function processOneEmail(
   });
   const interactionId = Number((interactionIns as any)[0]?.insertId ?? 0);
 
+  // Round 81 / 2026-05-17 — Repurchase upgrade CTA append.
+  // Runs BEFORE auto-send decision so the augmented draft goes through the
+  // same safety regex check. If user is a returning free-tier customer who
+  // hasn't been pitched yet, append a P.S. with PACK&GO Plus 10-day trial.
+  if (decision.draftReply && senderEmail) {
+    try {
+      const { maybeAppendUpgradeCta } = await import("../../_core/repurchaseCta");
+      const result_cta = await maybeAppendUpgradeCta({
+        draftReply: decision.draftReply,
+        senderEmail,
+        language: decision.draftLanguage,
+      });
+      if (result_cta.appended) {
+        decision.draftReply = result_cta.draftReply;
+        console.log(
+          `[gmailPipeline] Appended Plus upgrade CTA to draft for ${senderEmail}`
+        );
+      }
+    } catch (err) {
+      console.warn("[gmailPipeline] maybeAppendUpgradeCta failed (non-fatal):", err);
+    }
+  }
+
   // Phase 2: respect autoSendEnabled + autoSendMinConfidence in policy
   // (When ON + conf ≥ threshold + agent says draft-not-escalate, the action
   //  is marked as "would_auto_send". Actually sending the email is gated by

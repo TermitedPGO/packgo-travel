@@ -116,11 +116,18 @@ export default function ChatsTab() {
       );
   }, [selectedAgent, allMessages.data, showRead]);
 
-  // Group all messages by agent for sidebar
+  // Group all messages by agent for sidebar.
+  // Always include canonical channels (ops, books, etc.) even if empty,
+  // so Jeff can ask OpsAgent before any agent has posted.
+  const CANONICAL_CHANNELS = ["ops", "inquiry", "books", "refund", "marketing", "followup"];
   const agentChannels = useMemo(() => {
-    if (!allMessages.data) return [];
     const grouped = new Map<string, { count: number; unread: number; lastAt: Date }>();
-    for (const m of allMessages.data) {
+    // Seed canonical channels
+    for (const name of CANONICAL_CHANNELS) {
+      grouped.set(name, { count: 0, unread: 0, lastAt: new Date(0) });
+    }
+    // Overlay actual messages
+    for (const m of allMessages.data ?? []) {
       const cur = grouped.get(m.agentName) ?? { count: 0, unread: 0, lastAt: new Date(0) };
       cur.count += 1;
       if (m.readByJeff === 0) cur.unread += 1;
@@ -131,9 +138,12 @@ export default function ChatsTab() {
     return Array.from(grouped.entries())
       .map(([name, stats]) => ({ name, ...stats }))
       .sort((a, b) => {
-        // Unread first, then by last activity
+        // Unread first, then by last activity, then alphabetical for empty channels
         if (a.unread !== b.unread) return b.unread - a.unread;
-        return b.lastAt.getTime() - a.lastAt.getTime();
+        if (a.lastAt.getTime() !== b.lastAt.getTime()) {
+          return b.lastAt.getTime() - a.lastAt.getTime();
+        }
+        return a.name.localeCompare(b.name);
       });
   }, [allMessages.data]);
 
@@ -154,6 +164,25 @@ export default function ChatsTab() {
       utils.agent.unreadMessageCount.invalidate();
     },
     onError: (err) => toast.error("回覆失敗: " + err.message),
+  });
+
+  // Round 81 / 2026-05-17 — OpsAgent ask flow.
+  // When viewing the #ops channel, Jeff can type a NEW question (not a
+  // reply to existing agent message). The mutation logs both Jeff's
+  // question and OpsAgent's answer to agentMessages, so the channel
+  // shows the full conversation.
+  const [opsQuestion, setOpsQuestion] = useState("");
+  const askOpsMutation = trpc.agent.askOps.useMutation({
+    onSuccess: (result) => {
+      if (result.error) {
+        toast.error("OpsAgent: " + result.error);
+      } else {
+        toast.success("OpsAgent 已回答");
+        setOpsQuestion("");
+      }
+      utils.agent.listMessages.invalidate();
+    },
+    onError: (err) => toast.error("OpsAgent 失敗: " + err.message),
   });
 
   const handleReplyTo = (messageId: number) => {
@@ -281,6 +310,52 @@ export default function ChatsTab() {
                 {!showRead && " (未讀)"}
               </span>
             </div>
+
+            {/* OpsAgent ask box — only shown in #ops channel */}
+            {selectedAgent === "ops" && (
+              <div className="mt-3 mb-1 p-3 bg-emerald-50/40 border border-emerald-200/60 rounded-xl">
+                <div className="text-xs font-semibold text-emerald-700 mb-1.5 flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  問 OpsAgent
+                </div>
+                <Textarea
+                  placeholder="例: 李太太那團幾號出發?  /  6 月日本團還有位嗎?  /  8/22 沖繩團 leader 誰?"
+                  value={opsQuestion}
+                  onChange={(e) => setOpsQuestion(e.target.value)}
+                  className="min-h-[44px] text-sm rounded-lg bg-white"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      if (opsQuestion.trim()) {
+                        askOpsMutation.mutate({ question: opsQuestion.trim() });
+                      }
+                    }
+                  }}
+                />
+                <div className="flex items-center justify-between mt-2">
+                  <span className="text-[10px] text-emerald-600/70">
+                    ⌘+Enter 送出 · 答案會出現在下方 channel
+                  </span>
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      askOpsMutation.mutate({ question: opsQuestion.trim() })
+                    }
+                    disabled={!opsQuestion.trim() || askOpsMutation.isPending}
+                    className="rounded-lg gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                  >
+                    {askOpsMutation.isPending ? (
+                      <span className="animate-pulse">查詢中...</span>
+                    ) : (
+                      <>
+                        <Send className="w-3.5 h-3.5" />
+                        問
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            )}
 
             <ScrollArea className="flex-1 py-4">
               {selectedMessages.length === 0 && (

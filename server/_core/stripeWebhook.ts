@@ -399,6 +399,23 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
         `金額: $${usd} ${(session.currency ?? "usd").toUpperCase()}\n` +
         `Stripe session: ${session.id}`,
     });
+
+    // Round 81 (2026-05-17): also surface in #books channel.
+    const { notifyAgentMessage } = await import("./agentNotify");
+    await notifyAgentMessage({
+      agentName: "books",
+      messageType: "observation",
+      title: `收到付款 $${usd} (${kindZh}) — ${tourTitle.slice(0, 60)}`,
+      body:
+        `Booking #${booking.id}\n` +
+        `客戶: ${booking.customerName}\n` +
+        `行程: ${tourTitle}\n` +
+        `金額: $${usd} ${(session.currency ?? "usd").toUpperCase()}\n` +
+        `付款類型: ${kindZh}\n` +
+        `已自動建 accounting income entry · category=tour_booking`,
+      priority: "normal",
+      context: { bookingId: booking.id, sessionId: session.id, paymentType, amount },
+    });
   } catch (err) {
     console.error("[Stripe Webhook] notifyOwner (payment) failed:", err);
   }
@@ -608,6 +625,8 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
   // QA Audit 2026-05-11 Phase 5 fix: notify Jeff on every refund — full or
   // initiated. Refunds are the highest-touch financial event (accounting,
   // tax, customer-relationship), so silence here was the worst gap.
+  // Round 81 (2026-05-17): ALSO post to #refund channel so ChatsTab shows
+  // the activity. Keeps notifyOwner (email) as belt-and-suspenders.
   try {
     const usd = (charge.amount_refunded / 100).toFixed(2);
     await notifyOwner({
@@ -618,6 +637,21 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
         `Refunded: $${usd} ${(charge.currency ?? "usd").toUpperCase()}\n` +
         `Original: $${(charge.amount / 100).toFixed(2)}\n` +
         `Booking: ${payment.bookingId ?? "(無對應 booking)"}`,
+    });
+
+    const { notifyAgentMessage } = await import("./agentNotify");
+    await notifyAgentMessage({
+      agentName: "refund",
+      messageType: "observation",
+      title: `Stripe 退款已完成 $${usd}`,
+      body:
+        `Booking #${payment.bookingId ?? "?"}\n` +
+        `退款金額: $${usd} ${(charge.currency ?? "usd").toUpperCase()}\n` +
+        `原始金額: $${(charge.amount / 100).toFixed(2)}\n` +
+        `Charge: ${charge.id}\n` +
+        `Payment intent: ${paymentIntentId}`,
+      priority: "normal",
+      context: { chargeId: charge.id, paymentIntentId, bookingId: payment.bookingId },
     });
   } catch (err) {
     console.error("[Stripe Webhook] notifyOwner (refund) failed:", err);
@@ -946,6 +980,22 @@ async function handleTrialWillEnd(sub: Stripe.Subscription) {
       content:
         `會員: ${user.email}\nTier: ${tierLabel}\n試用結束: ${trial.endsAt.toISOString()}\n即將收費: ${formattedAmount}\nAB 390 reminder email 已發送。`,
     }).catch(() => {});
+
+    // Round 81 (2026-05-17): #books channel — membership trial about to convert.
+    const { notifyAgentMessage } = await import("./agentNotify");
+    await notifyAgentMessage({
+      agentName: "books",
+      messageType: "observation",
+      title: `Trial 即將結束 → 即將收 ${formattedAmount}`,
+      body:
+        `客戶: ${user.name || user.email}\n` +
+        `Tier: ${tierLabel}\n` +
+        `試用結束: ${trial.endsAt.toISOString().slice(0, 10)}\n` +
+        `自動扣款: ${formattedAmount}\n` +
+        `AB 390 §17602(c) 3 天前提醒 email 已發送 ✓`,
+      priority: "low",
+      context: { userId: user.id, trialId: trial.id, stripeSubscriptionId: sub.id },
+    });
   } catch (err) {
     console.error("[Stripe Webhook] trial_will_end: reminder email failed:", (err as Error).message);
     // Re-throw so Stripe retries the webhook (we MUST send the AB 390 notification)

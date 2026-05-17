@@ -1723,6 +1723,71 @@ export const agentRouter = router({
     }),
 
   // ─────────────────────────────────────────────────────────────────
+  // Round 81 / 2026-05-17 — OpsAgent
+  //
+  // Natural-language ops queries. Jeff types in #ops channel of
+  // ChatsTab → this procedure runs OpsAgent + writes both Jeff's
+  // question and the agent answer to agentMessages so the conversation
+  // is persistent + visible to the future mobile app.
+  // ─────────────────────────────────────────────────────────────────
+
+  askOps: adminProcedure
+    .input(
+      z.object({
+        question: z.string().min(1).max(2000),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      // 1. Log Jeff's question as senderRole='jeff' so the channel shows it
+      const questionInsert = await db.insert(agentMessages).values({
+        agentName: "ops",
+        senderRole: "jeff",
+        messageType: "question",
+        title: input.question.slice(0, 80),
+        body: input.question,
+        priority: "normal",
+      } as any);
+
+      // 2. Run the agent
+      const { runOpsAgent } = await import("../agents/autonomous/opsAgent");
+      let answer = "";
+      let error: string | null = null;
+      try {
+        const result = await runOpsAgent(input.question);
+        answer = result.answer;
+
+        // 3. Log agent answer
+        await db.insert(agentMessages).values({
+          agentName: "ops",
+          senderRole: "agent",
+          messageType: "observation",
+          title: input.question.slice(0, 80),
+          body: result.answer,
+          context: JSON.stringify({
+            hintsExtracted: result.hints,
+            queriesRun: Object.keys(result.contextUsed),
+          }),
+          priority: "normal",
+        } as any);
+      } catch (err) {
+        error = (err as Error).message;
+        await db.insert(agentMessages).values({
+          agentName: "ops",
+          senderRole: "agent",
+          messageType: "alert",
+          title: `OpsAgent failed: ${input.question.slice(0, 60)}`,
+          body: `Error: ${error}\n\nQuestion was: ${input.question}`,
+          priority: "high",
+        } as any);
+      }
+
+      return { answer, error };
+    }),
+
+  // ─────────────────────────────────────────────────────────────────
   // Phase 3 (Round 81 — Learning System): Self-Retrospective
   //
   // Reads past N days of outcomes + policies, asks the retrospective
