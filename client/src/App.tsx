@@ -41,6 +41,9 @@ const FAQ = lazy(() => import("./pages/FAQ"));
 const ContactUs = lazy(() => import("./pages/ContactUs"));
 const Emergency = lazy(() => import("./pages/Emergency"));
 const Membership = lazy(() => import("./pages/Membership"));
+// Round 81 / migration 0075 — AB 390 mandatory auto-renewal disclosure page.
+// Linked from Membership.tsx pre-checkout + from Stripe Checkout cancel_url.
+const MembershipTerms = lazy(() => import("./pages/MembershipTerms"));
 const Rewards = lazy(() => import("./pages/Rewards"));
 const SearchResults = lazy(() => import("./pages/SearchResults"));
 const Tours = lazy(() => import("./pages/Tours"));
@@ -180,6 +183,7 @@ function Router() {
       <Route path={"/contact-us"} component={ContactUs} />
       <Route path={"/emergency"} component={Emergency} />
       <Route path={"/membership"} component={Membership} />
+      <Route path={"/membership-terms"} component={MembershipTerms} />
       <Route path={"/rewards"} component={Rewards} />
 
       {/* Round 80.9: internal preview routes (mockups for product decisions) */}
