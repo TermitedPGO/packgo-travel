@@ -136,20 +136,45 @@ export default function ChatsTab() {
   // Group all messages by agent for sidebar.
   // Always include canonical channels (ops, books, etc.) even if empty,
   // so Jeff can ask OpsAgent before any agent has posted.
-  const CANONICAL_CHANNELS = ["ops", "inquiry", "books", "refund", "marketing", "followup"];
+  const CANONICAL_CHANNELS = ["ops", "inquiry", "books", "refund", "marketing", "followup", "catalog"];
   const agentChannels = useMemo(() => {
-    const grouped = new Map<string, { count: number; unread: number; lastAt: Date }>();
-    // Seed canonical channels
+    const grouped = new Map<
+      string,
+      { count: number; unread: number; lastAt: Date; lastPreview: string; lastPriority: string }
+    >();
+    // Seed canonical channels (no messages yet)
     for (const name of CANONICAL_CHANNELS) {
-      grouped.set(name, { count: 0, unread: 0, lastAt: new Date(0) });
+      grouped.set(name, {
+        count: 0,
+        unread: 0,
+        lastAt: new Date(0),
+        lastPreview: "",
+        lastPriority: "normal",
+      });
     }
-    // Overlay actual messages
+    // Overlay actual messages — track latest message for preview text
     for (const m of allMessages.data ?? []) {
-      const cur = grouped.get(m.agentName) ?? { count: 0, unread: 0, lastAt: new Date(0) };
+      const cur = grouped.get(m.agentName) ?? {
+        count: 0,
+        unread: 0,
+        lastAt: new Date(0),
+        lastPreview: "",
+        lastPriority: "normal",
+      };
       cur.count += 1;
       if (m.readByJeff === 0) cur.unread += 1;
       const at = new Date(m.createdAt);
-      if (at > cur.lastAt) cur.lastAt = at;
+      if (at > cur.lastAt) {
+        cur.lastAt = at;
+        // Strip markdown, JSON, and trim for a clean preview
+        const preview = String(m.title || m.body || "")
+          .replace(/```[\s\S]*?```/g, "")
+          .replace(/[#*_`]/g, "")
+          .replace(/\s+/g, " ")
+          .trim();
+        cur.lastPreview = preview;
+        cur.lastPriority = m.priority || "normal";
+      }
       grouped.set(m.agentName, cur);
     }
     return Array.from(grouped.entries())
@@ -163,6 +188,16 @@ export default function ChatsTab() {
         return a.name.localeCompare(b.name);
       });
   }, [allMessages.data]);
+
+  // Relative-time helper for channel sidebar previews (just now / 5m / 2h / 3d)
+  const relativeTime = (date: Date): string => {
+    if (date.getTime() === 0) return "";
+    const seconds = Math.round((Date.now() - date.getTime()) / 1000);
+    if (seconds < 60) return "剛剛";
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+    return `${Math.floor(seconds / 86400)}d`;
+  };
 
   // Auto-select first channel with unread
   useMemo(() => {
@@ -339,15 +374,15 @@ export default function ChatsTab() {
   const totalUnread = unreadCount.data?.total ?? 0;
 
   return (
-    <div className="flex h-[calc(100vh-120px)] gap-4">
-      {/* ──────────── Left rail: channels ──────────── */}
-      <div className="w-64 flex-shrink-0 border-r border-foreground/10 pr-4 overflow-hidden flex flex-col">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-semibold flex items-center gap-2">
-            <Inbox className="w-4 h-4" />
+    <div className="flex h-[calc(100vh-120px)] gap-3">
+      {/* ──────────── Left rail: channels (Slack-like with previews) ──────────── */}
+      <div className="w-72 flex-shrink-0 border-r border-foreground/10 pr-2 overflow-hidden flex flex-col">
+        <div className="flex items-center justify-between mb-2 px-1">
+          <h2 className="text-sm font-semibold flex items-center gap-1.5">
+            <Inbox className="w-4 h-4 text-foreground/60" />
             Agent Chats
             {totalUnread > 0 && (
-              <span className="ml-1 inline-flex items-center justify-center min-w-[20px] h-5 text-xs font-semibold bg-red-500 text-white rounded-full px-1.5">
+              <span className="ml-1 inline-flex items-center justify-center min-w-[18px] h-[18px] text-[10px] font-bold bg-red-500 text-white rounded-full px-1">
                 {totalUnread}
               </span>
             )}
@@ -359,25 +394,23 @@ export default function ChatsTab() {
               allMessages.refetch();
               unreadCount.refetch();
             }}
-            className="h-7 w-7 p-0"
+            className="h-6 w-6 p-0"
             title="重新整理"
           >
-            <RefreshCw className="w-3.5 h-3.5" />
+            <RefreshCw className="w-3 h-3" />
           </Button>
         </div>
 
-        <ScrollArea className="flex-1">
+        <ScrollArea className="flex-1 -mr-2 pr-2">
           {agentChannels.length === 0 && !allMessages.isLoading && (
-            <div className="text-sm text-foreground/40 italic px-2 py-3">
+            <div className="text-xs text-foreground/40 italic px-2 py-3">
               還沒有 agent 訊息。
-              <br />
-              當 agent 開始工作時這裡會即時顯示。
             </div>
           )}
           {allMessages.isLoading && (
-            <div className="text-sm text-foreground/40 px-2 py-3">載入中...</div>
+            <div className="text-xs text-foreground/40 px-2 py-3">載入中⋯</div>
           )}
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             {agentChannels.map((ch) => {
               const meta = AGENT_META[ch.name] ?? {
                 label: ch.name,
@@ -385,45 +418,78 @@ export default function ChatsTab() {
                 description: "",
               };
               const isActive = selectedAgent === ch.name;
+              const hasUnread = ch.unread > 0;
               return (
                 <button
                   key={ch.name}
                   onClick={() => setSelectedAgent(ch.name)}
-                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                  className={`w-full text-left px-2.5 py-2 rounded-lg text-sm transition-colors ${
                     isActive
-                      ? "bg-foreground/[0.06] font-medium"
-                      : "hover:bg-foreground/[0.03]"
+                      ? "bg-foreground/[0.06]"
+                      : hasUnread
+                        ? "bg-amber-50/40 hover:bg-amber-50/70"
+                        : "hover:bg-foreground/[0.03]"
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="flex items-center gap-2 min-w-0 truncate">
-                      <span>{meta.emoji}</span>
-                      <span className="truncate">#{meta.label}</span>
+                    <span
+                      className={`flex items-center gap-1.5 min-w-0 truncate ${
+                        hasUnread ? "font-semibold" : "font-normal"
+                      }`}
+                    >
+                      <span className="text-base leading-none">{meta.emoji}</span>
+                      <span className="truncate text-[13px]">{meta.label}</span>
                     </span>
-                    {ch.unread > 0 && (
-                      <span className="text-xs font-semibold bg-red-500 text-white rounded-full px-1.5 py-0.5 flex-shrink-0">
-                        {ch.unread}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {ch.lastAt.getTime() > 0 && (
+                        <span className="text-[10px] text-foreground/40">
+                          {relativeTime(ch.lastAt)}
+                        </span>
+                      )}
+                      {hasUnread && (
+                        <span
+                          className={`text-[10px] font-bold text-white rounded-full px-1.5 py-0.5 ${
+                            ch.lastPriority === "critical"
+                              ? "bg-rose-600"
+                              : ch.lastPriority === "high"
+                                ? "bg-orange-500"
+                                : "bg-red-500"
+                          }`}
+                        >
+                          {ch.unread}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <div className="text-xs text-foreground/40 mt-0.5 truncate">
-                    {meta.description}
-                  </div>
+                  {ch.lastPreview && (
+                    <div
+                      className={`text-[11px] mt-0.5 truncate ${
+                        hasUnread ? "text-foreground/70" : "text-foreground/40"
+                      }`}
+                    >
+                      {ch.lastPreview}
+                    </div>
+                  )}
+                  {!ch.lastPreview && (
+                    <div className="text-[10px] text-foreground/30 mt-0.5 truncate">
+                      {meta.description}
+                    </div>
+                  )}
                 </button>
               );
             })}
           </div>
         </ScrollArea>
 
-        <div className="mt-3 pt-3 border-t border-foreground/10">
-          <label className="flex items-center gap-2 text-xs text-foreground/60 cursor-pointer">
+        <div className="mt-2 pt-2 border-t border-foreground/10 px-1">
+          <label className="flex items-center gap-2 text-[11px] text-foreground/60 cursor-pointer">
             <input
               type="checkbox"
               checked={showRead}
               onChange={(e) => setShowRead(e.target.checked)}
-              className="rounded"
+              className="rounded scale-90"
             />
-            顯示已讀訊息
+            顯示已讀
           </label>
         </div>
       </div>
@@ -554,13 +620,13 @@ export default function ChatsTab() {
               </>
             )}
 
-            <ScrollArea className="flex-1 py-4">
+            <ScrollArea className="flex-1 py-3">
               {selectedMessages.length === 0 && (
                 <div className="text-sm text-foreground/40 italic px-2 py-8 text-center">
                   {showRead ? "這個 channel 沒有訊息" : "這個 channel 沒有未讀訊息"}
                 </div>
               )}
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {selectedMessages.map((m: any) => {
                   const typeInfo = TYPE_ICON[m.messageType] ?? {
                     Icon: HelpCircle,
@@ -568,25 +634,39 @@ export default function ChatsTab() {
                     tone: "text-foreground/50",
                   };
                   const TypeIcon = typeInfo.Icon;
+                  // Round 81 / 2026-05-17 — visually distinguish Jeff's own
+                  // messages (senderRole='jeff') so #ops conversation reads
+                  // like a thread instead of all-agent-monologue.
+                  const isFromJeff = m.senderRole === "jeff";
                   return (
                     <div
                       key={m.id}
-                      className={`rounded-xl border p-4 ${
-                        m.readByJeff === 0
-                          ? "bg-amber-50/30 border-amber-200/60"
-                          : "bg-white border-foreground/10"
+                      className={`rounded-xl border p-3 ${
+                        isFromJeff
+                          ? "bg-foreground/[0.02] border-foreground/15"
+                          : m.readByJeff === 0
+                            ? "bg-amber-50/30 border-amber-200/60"
+                            : "bg-white border-foreground/10"
                       }`}
                     >
-                      <div className="flex items-start justify-between gap-3 mb-2">
-                        <div className="flex items-center gap-2">
-                          <TypeIcon className={`w-4 h-4 ${typeInfo.tone}`} />
-                          <Badge
-                            variant="outline"
-                            className={`text-[10px] uppercase tracking-wider ${PRIORITY_CHIP[m.priority] ?? PRIORITY_CHIP.normal}`}
-                          >
-                            {typeInfo.label}
-                            {m.priority !== "normal" && ` · ${m.priority}`}
-                          </Badge>
+                      <div className="flex items-start justify-between gap-2 mb-1.5">
+                        <div className="flex items-center gap-1.5">
+                          {isFromJeff ? (
+                            <span className="text-[10px] font-semibold tracking-wide text-foreground/60">
+                              你
+                            </span>
+                          ) : (
+                            <>
+                              <TypeIcon className={`w-3.5 h-3.5 ${typeInfo.tone}`} />
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] uppercase tracking-wide ${PRIORITY_CHIP[m.priority] ?? PRIORITY_CHIP.normal}`}
+                              >
+                                {typeInfo.label}
+                                {m.priority !== "normal" && ` · ${m.priority}`}
+                              </Badge>
+                            </>
+                          )}
                           {m.proposalDecision && m.proposalDecision !== "pending" && (
                             <Badge
                               variant="outline"
@@ -600,13 +680,15 @@ export default function ChatsTab() {
                             </Badge>
                           )}
                         </div>
-                        <span className="text-xs text-foreground/40 flex-shrink-0">
+                        <span className="text-[10px] text-foreground/40 flex-shrink-0">
                           {format(new Date(m.createdAt), "MM/dd HH:mm", { locale: dateLocale })}
                         </span>
                       </div>
 
-                      <h4 className="font-medium text-sm mb-1.5">{m.title}</h4>
-                      <p className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed">
+                      {!isFromJeff && m.title && (
+                        <h4 className="font-medium text-[13px] mb-1">{m.title}</h4>
+                      )}
+                      <p className="text-[13px] text-foreground/85 whitespace-pre-wrap leading-relaxed">
                         {m.body}
                       </p>
 
