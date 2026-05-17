@@ -13,62 +13,69 @@ import {
 import { useLocale } from "@/contexts/LocaleContext";
 import { translateDestination } from "@/utils/locationMapping";
 
+// Round 80.4: B&W brand normalization. Was using a 12-color rainbow
+// (emerald/amber/sky/purple/rose/blue/indigo/orange/red/pink/teal/gray) which
+// fought the brand. Now: neutral foreground for most tags + gold accent only
+// for premium / 深度遊 (the trust-positive signals).
+const TAG_NEUTRAL = "bg-foreground/[0.04] text-foreground/70 border border-foreground/15";
+const TAG_GOLD = "bg-[#c9a563]/10 text-[#8a6f3a] border border-[#c9a563]/35";
+
 // 智能標籤生成函數
 const generateSmartTags = (tour: any, t: (key: string) => string): { label: string; icon: any; color: string }[] => {
   const tags: { label: string; icon: any; color: string }[] = [];
-  
+
   // 根據天數判斷行程類型
   if (tour.duration >= 10) {
-    tags.push({ label: t('tours.filters.deepTravel'), icon: Mountain, color: "bg-emerald-100 text-emerald-700" });
+    tags.push({ label: t('tours.filters.deepTravel'), icon: Mountain, color: TAG_GOLD });
   } else if (tour.duration >= 7) {
-    tags.push({ label: t('tours.filters.classic'), icon: Star, color: "bg-amber-100 text-amber-700" });
+    tags.push({ label: t('tours.filters.classic'), icon: Star, color: TAG_NEUTRAL });
   } else if (tour.duration <= 4) {
-    tags.push({ label: t('tours.filters.shortTrip'), icon: Sparkles, color: "bg-sky-100 text-sky-700" });
+    tags.push({ label: t('tours.filters.shortTrip'), icon: Sparkles, color: TAG_NEUTRAL });
   }
-  
-  // 根據價格判斷行程等級
+
+  // 根據價格判斷行程等級 — premium 用金色,budget 中性
   if (tour.price && tour.price >= 80000) {
-    tags.push({ label: t('tours.filters.premium'), icon: Star, color: "bg-purple-100 text-purple-700" });
+    tags.push({ label: t('tours.filters.premium'), icon: Star, color: TAG_GOLD });
   } else if (tour.price && tour.price < 30000) {
-    tags.push({ label: t('tours.filters.budget'), icon: Sparkles, color: "bg-rose-100 text-rose-700" });
+    tags.push({ label: t('tours.filters.budget'), icon: Sparkles, color: TAG_NEUTRAL });
   }
-  
+
   // 根據交通方式判斷
   const category = tour.category?.toLowerCase() || "";
   const title = tour.title?.toLowerCase() || "";
   const description = tour.description?.toLowerCase() || "";
   const combinedText = `${title} ${description}`;
-  
+
   if (category === "cruise" || combinedText.includes("郵輪") || combinedText.includes("遊輪")) {
-    tags.push({ label: t('cruise.title'), icon: Ship, color: "bg-blue-100 text-blue-700" });
+    tags.push({ label: t('cruise.title'), icon: Ship, color: TAG_NEUTRAL });
   }
-  
+
   if (tour.outboundAirline || combinedText.includes("航空") || combinedText.includes("飛機")) {
-    tags.push({ label: t('flightBooking.title'), icon: Plane, color: "bg-indigo-100 text-indigo-700" });
+    tags.push({ label: t('flightBooking.title'), icon: Plane, color: TAG_NEUTRAL });
   }
-  
+
   if (combinedText.includes("高鐵") || combinedText.includes("火車") || combinedText.includes("列車")) {
-    tags.push({ label: t('tours.filters.rail'), icon: Train, color: "bg-orange-100 text-orange-700" });
+    tags.push({ label: t('tours.filters.rail'), icon: Train, color: TAG_NEUTRAL });
   }
-  
+
   if (combinedText.includes("巴士") || combinedText.includes("遊覽車")) {
-    tags.push({ label: t('tours.filters.bus'), icon: Bus, color: "bg-gray-100 text-gray-700" });
+    tags.push({ label: t('tours.filters.bus'), icon: Bus, color: TAG_NEUTRAL });
   }
-  
+
   // 根據特色活動判斷
   if (combinedText.includes("美食") || combinedText.includes("料理") || combinedText.includes("餐廳")) {
-    tags.push({ label: t('tours.filters.foodTour'), icon: Utensils, color: "bg-red-100 text-red-700" });
+    tags.push({ label: t('tours.filters.foodTour'), icon: Utensils, color: TAG_NEUTRAL });
   }
-  
+
   if (combinedText.includes("攝影") || combinedText.includes("拍照") || combinedText.includes("打卡")) {
-    tags.push({ label: t('tours.filters.photoTour'), icon: Camera, color: "bg-pink-100 text-pink-700" });
+    tags.push({ label: t('tours.filters.photoTour'), icon: Camera, color: TAG_NEUTRAL });
   }
-  
+
   // 根據行程類型判斷
   if (category === "group" || combinedText.includes("團體")) {
-    tags.push({ label: t('groupPackages.title'), icon: Users, color: "bg-teal-100 text-teal-700" });
+    tags.push({ label: t('groupPackages.title'), icon: Users, color: TAG_NEUTRAL });
   }
-  
+
   // 解析資料庫中的 tags 欄位
   if (tour.tags) {
     try {
@@ -76,7 +83,7 @@ const generateSmartTags = (tour: any, t: (key: string) => string): { label: stri
       if (Array.isArray(dbTags)) {
         dbTags.forEach((tag: string) => {
           if (!tags.some(t => t.label === tag)) {
-            tags.push({ label: tag, icon: Star, color: "bg-gray-100 text-gray-700" });
+            tags.push({ label: tag, icon: Star, color: TAG_NEUTRAL });
           }
         });
       }
@@ -84,7 +91,7 @@ const generateSmartTags = (tour: any, t: (key: string) => string): { label: stri
       // 忽略解析錯誤
     }
   }
-  
+
   return tags.slice(0, 5);
 };
 
@@ -134,7 +141,7 @@ export default function CountryPage() {
   const { region, country } = useParams<{ region: string; country: string }>();
   const [, setLocation] = useLocation();
   const [favorites, setFavorites] = useState<Set<number>>(new Set());
-  const { t, language } = useLocale();
+  const { t, language, formatPrice } = useLocale();
   
   const decodedCountry = decodeURIComponent(country || "");
   const regionConfig = getRegionConfig(t);
@@ -329,7 +336,12 @@ export default function CountryPage() {
                             <span className="text-gray-500 text-sm">{t('tours.perPerson')}</span>
                             <div className="flex items-baseline gap-1">
                               <span className="text-2xl font-bold text-primary">
-                                NT$ {tour.price?.toLocaleString() || t('common.contactUs')}
+                                {/* 2026-05-16: was hardcoded `NT$` ignoring the user's currency
+                                    pick — Jeff selected USD but saw NT$. Use LocaleContext's
+                                    formatPrice which converts via live FX rates. */}
+                                {tour.price
+                                  ? formatPrice(tour.price, ((tour as any).priceCurrency || 'TWD') as 'TWD' | 'USD')
+                                  : t('common.contactUs')}
                               </span>
                               <span className="text-gray-500 text-sm">{t('tours.priceFrom')}</span>
                             </div>
