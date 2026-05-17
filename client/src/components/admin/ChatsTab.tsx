@@ -21,7 +21,7 @@
  *     → channel detail → message thread). Same tRPC procedures power
  *     both surfaces.
  */
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -49,6 +49,8 @@ import {
   Bell,
   DollarSign,
   AlertCircle,
+  XCircle,
+  Undo2,
 } from "lucide-react";
 import {
   Dialog,
@@ -192,7 +194,7 @@ export default function ChatsTab() {
       if (result.error) {
         toast.error("OpsAgent: " + result.error);
       } else {
-        toast.success("OpsAgent 已回答");
+        // Don't toast — the new message in the channel IS the success signal
         setOpsQuestion("");
       }
       utils.agent.listMessages.invalidate();
@@ -265,6 +267,8 @@ export default function ChatsTab() {
     assignTourLeader: UserCog,
     scheduleReminder: Bell,
     markBookingPaid: DollarSign,
+    cancelBooking: XCircle,
+    triggerRefund: Undo2,
   };
 
   const handleReplyTo = (messageId: number) => {
@@ -395,48 +399,61 @@ export default function ChatsTab() {
 
             {/* OpsAgent ask box — only shown in #ops channel */}
             {selectedAgent === "ops" && (
-              <div className="mt-3 mb-1 p-3 bg-emerald-50/40 border border-emerald-200/60 rounded-xl">
-                <div className="text-xs font-semibold text-emerald-700 mb-1.5 flex items-center gap-1">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  問 OpsAgent
-                </div>
-                <Textarea
-                  placeholder="例: 李太太那團幾號出發?  /  6 月日本團還有位嗎?  /  8/22 沖繩團 leader 誰?"
-                  value={opsQuestion}
-                  onChange={(e) => setOpsQuestion(e.target.value)}
-                  className="min-h-[44px] text-sm rounded-lg bg-white"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                      e.preventDefault();
-                      if (opsQuestion.trim()) {
-                        askOpsMutation.mutate({ question: opsQuestion.trim() });
+              <>
+                <div className="mt-3 mb-1 p-3 bg-emerald-50/40 border border-emerald-200/60 rounded-xl">
+                  <div className="text-xs font-semibold text-emerald-700 mb-1.5 flex items-center gap-1">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    問 OpsAgent
+                  </div>
+                  <Textarea
+                    placeholder="例: 李太太那團幾號出發?  /  6 月日本團還有位嗎?  /  幫我提醒李太太尾款"
+                    value={opsQuestion}
+                    onChange={(e) => setOpsQuestion(e.target.value)}
+                    className="min-h-[44px] text-sm rounded-lg bg-white"
+                    disabled={askOpsMutation.isPending}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                        e.preventDefault();
+                        if (opsQuestion.trim() && !askOpsMutation.isPending) {
+                          askOpsMutation.mutate({ question: opsQuestion.trim() });
+                        }
                       }
-                    }
-                  }}
-                />
-                <div className="flex items-center justify-between mt-2">
-                  <span className="text-[10px] text-emerald-600/70">
-                    ⌘+Enter 送出 · 答案會出現在下方 channel
-                  </span>
-                  <Button
-                    size="sm"
-                    onClick={() =>
-                      askOpsMutation.mutate({ question: opsQuestion.trim() })
-                    }
-                    disabled={!opsQuestion.trim() || askOpsMutation.isPending}
-                    className="rounded-lg gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
-                  >
-                    {askOpsMutation.isPending ? (
-                      <span className="animate-pulse">查詢中...</span>
-                    ) : (
-                      <>
-                        <Send className="w-3.5 h-3.5" />
-                        問
-                      </>
-                    )}
-                  </Button>
+                    }}
+                  />
+                  <div className="flex items-center justify-between mt-2">
+                    <span className="text-[10px] text-emerald-600/70">
+                      ⌘+Enter 送出 · 自動記得上次對話 · 答案下方會有建議動作
+                    </span>
+                    <Button
+                      size="sm"
+                      onClick={() =>
+                        askOpsMutation.mutate({ question: opsQuestion.trim() })
+                      }
+                      disabled={!opsQuestion.trim() || askOpsMutation.isPending}
+                      className="rounded-lg gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      問
+                    </Button>
+                  </div>
                 </div>
-              </div>
+
+                {/* Thinking indicator — visible while askOps is pending,
+                    sits right where the answer will land, so Jeff feels the
+                    response is "happening" instead of just waiting. */}
+                {askOpsMutation.isPending && (
+                  <div className="mt-2 p-3 rounded-xl border border-emerald-200/60 bg-white">
+                    <div className="flex items-center gap-2 text-sm text-emerald-700">
+                      <div className="flex gap-1">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" style={{ animationDelay: "0.15s" }} />
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" style={{ animationDelay: "0.3s" }} />
+                      </div>
+                      <span className="text-xs">OpsAgent 思考中（查 DB + LLM 生成）⋯</span>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
 
             <ScrollArea className="flex-1 py-4">

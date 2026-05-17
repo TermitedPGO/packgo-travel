@@ -25,6 +25,9 @@ export const ActionTypeEnum = z.enum([
   "updateInternalNote",
   "markBookingPaid",
   "scheduleReminder",
+  // Round 81 Phase 4 (2026-05-17) — sensitive actions
+  "cancelBooking",
+  "triggerRefund",
 ]);
 export type ActionType = z.infer<typeof ActionTypeEnum>;
 
@@ -63,6 +66,19 @@ export const ScheduleReminderArgs = z.object({
   message: z.string().min(1).max(2000),
 });
 
+export const CancelBookingArgs = z.object({
+  bookingId: z.number().int().positive(),
+  reason: z.string().min(1).max(500),
+});
+
+export const TriggerRefundArgs = z.object({
+  bookingId: z.number().int().positive(),
+  amountUsd: z.number().positive(),
+  reason: z.string().min(1).max(500),
+  // For partial refunds; defaults to false (full refund)
+  partial: z.boolean().default(false),
+});
+
 // ────────────────────────────────────────────────────────────────────────
 // Executor — pick action type, validate, run
 // ────────────────────────────────────────────────────────────────────────
@@ -92,6 +108,10 @@ export async function executeOpsAction(
         return await doMarkBookingPaid(MarkBookingPaidArgs.parse(args));
       case "scheduleReminder":
         return await doScheduleReminder(ScheduleReminderArgs.parse(args));
+      case "cancelBooking":
+        return await doCancelBooking(CancelBookingArgs.parse(args));
+      case "triggerRefund":
+        return await doTriggerRefund(TriggerRefundArgs.parse(args));
       default:
         return { ok: false, summary: "未知動作", error: `Unknown actionType: ${actionType}` };
     }
@@ -256,4 +276,150 @@ async function doScheduleReminder(args: z.infer<typeof ScheduleReminderArgs>): P
     summary: `✓ 已排程提醒於 ${args.remindAt.slice(0, 16)} (團期 #${args.tourDepartureId})`,
     details: args,
   };
+}
+
+/**
+ * Cancel a booking.
+ *
+ * This is a sensitive operation — it updates bookingStatus='cancelled',
+ * release seats on the departure, but does NOT issue a refund. Call
+ * doTriggerRefund separately for the money side.
+ *
+ * Idempotent: if booking is already cancelled, returns success without changes.
+ */
+async function doCancelBooking(args: z.infer<typeof CancelBookingArgs>): Promise<ExecutionResult> {
+  const { getDb } = await import("../../db");
+  const { bookings, tourDepartures } = await import("../../../drizzle/schema");
+  const { eq, and, ne, sql } = await import("drizzle-orm");
+  const db = await getDb();
+  if (!db) return { ok: false, summary: "DB unavailable", error: "no_db" };
+
+  // Load booking + check not already cancelled
+  const rows = await db.select().from(bookings).where(eq(bookings.id, args.bookingId)).limit(1);
+  if (rows.length === 0) {
+    return { ok: false, summary: `Booking #${args.bookingId} 不存在`, error: "booking_not_found" };
+  }
+  const booking = rows[0];
+  if (booking.bookingStatus === "cancelled") {
+    return {
+      ok: true,
+      summary: `Booking #${args.bookingId} 早已 cancelled — 無動作`,
+      details: { alreadyCancelled: true },
+    };
+  }
+
+  // Conditional update (atomic) — only flip if not already cancelled
+  const updateResult: any = await db
+    .update(bookings)
+    .set({
+      bookingStatus: "cancelled" as any,
+      notes: sql`CONCAT(COALESCE(${bookings.notes}, ''), '\n[cancelled by OpsAgent ${new Date().toISOString().slice(0, 10)}] ', ${args.reason})`,
+    })
+    .where(and(eq(bookings.id, args.bookingId), ne(bookings.bookingStatus, "cancelled")));
+
+  const transitioned = (updateResult?.[0]?.affectedRows ?? updateResult?.affectedRows ?? 0) > 0;
+
+  // Release seats only if we won the cancel race
+  if (transitioned && booking.departureId) {
+    const seatCount =
+      (booking.numberOfAdults || 0) +
+      (booking.numberOfChildrenWithBed || 0) +
+      (booking.numberOfChildrenNoBed || 0);
+    if (seatCount > 0) {
+      await db
+        .update(tourDepartures)
+        .set({ bookedSlots: sql`GREATEST(${tourDepartures.bookedSlots} - ${seatCount}, 0)` })
+        .where(eq(tourDepartures.id, booking.departureId));
+    }
+  }
+
+  return {
+    ok: true,
+    summary: `✓ Booking #${args.bookingId} 已取消 · 釋出座位 · 原因「${args.reason.slice(0, 60)}」`,
+    details: { transitioned, customerName: booking.customerName, originalStatus: booking.bookingStatus },
+  };
+}
+
+/**
+ * Trigger a Stripe refund.
+ *
+ * Calls Stripe API directly; the resulting charge.refunded webhook will
+ * sync paymentStatus + trigger the standard accounting / notifications
+ * pipeline (already wired in stripeWebhook.ts). We don't double-write
+ * those fields here to avoid race conditions.
+ *
+ * Sensitivity: HIGH — typed CONFIRM in UI, no automatic retries.
+ */
+async function doTriggerRefund(args: z.infer<typeof TriggerRefundArgs>): Promise<ExecutionResult> {
+  const { getDb } = await import("../../db");
+  const { bookings, payments } = await import("../../../drizzle/schema");
+  const { eq, and, desc } = await import("drizzle-orm");
+  const db = await getDb();
+  if (!db) return { ok: false, summary: "DB unavailable", error: "no_db" };
+
+  // Find the most recent paid Stripe payment for this booking
+  const paymentRows = await db
+    .select()
+    .from(payments)
+    .where(
+      and(
+        eq(payments.bookingId, args.bookingId),
+        eq(payments.paymentStatus, "completed")
+      )
+    )
+    .orderBy(desc(payments.id))
+    .limit(1);
+
+  if (paymentRows.length === 0) {
+    return {
+      ok: false,
+      summary: `Booking #${args.bookingId} 找不到已付款記錄`,
+      error: "no_completed_payment",
+    };
+  }
+  const payment = paymentRows[0];
+  if (!payment.stripePaymentIntentId) {
+    return {
+      ok: false,
+      summary: `Booking #${args.bookingId} 沒有 Stripe payment intent (可能手動付款)`,
+      error: "no_stripe_intent",
+    };
+  }
+
+  // Convert USD → cents for Stripe API
+  const refundCents = Math.round(args.amountUsd * 100);
+
+  try {
+    const Stripe = (await import("stripe")).default;
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "");
+    const refund = await stripe.refunds.create({
+      payment_intent: payment.stripePaymentIntentId,
+      amount: args.partial ? refundCents : undefined, // undefined = full refund
+      reason: "requested_by_customer",
+      metadata: {
+        bookingId: String(args.bookingId),
+        reason: args.reason.slice(0, 500),
+        triggeredBy: "OpsAgent",
+      },
+    });
+
+    return {
+      ok: true,
+      summary: `✓ Stripe 退款 $${args.amountUsd.toFixed(2)} 已啟動 (refund_id: ${refund.id.slice(0, 24)}...)`,
+      details: {
+        refundId: refund.id,
+        bookingId: args.bookingId,
+        amountUsd: args.amountUsd,
+        partial: args.partial,
+        status: refund.status,
+      },
+    };
+  } catch (err) {
+    const msg = (err as Error).message;
+    return {
+      ok: false,
+      summary: `Stripe 退款失敗: ${msg.slice(0, 100)}`,
+      error: msg,
+    };
+  }
 }

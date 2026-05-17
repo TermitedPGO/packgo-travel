@@ -240,6 +240,17 @@ export async function generateTourFromUrlInternal(
       duration: tourData.days,
       nights: tourData.nights,
       price: tourData.price,
+      // Round 80.17 → 80.18: previously startDate / endDate / destinationAirportCode
+      // / destinationAirportName were never propagated → DB had dates empty +
+      // destination airport "待確認". basePrice removed (different table).
+      startDate: (tourData as any).startDate || null,
+      endDate: (tourData as any).endDate || null,
+      destinationAirportCode: (tourData as any).destinationAirportCode || null,
+      destinationAirportName: (tourData as any).destinationAirportName || null,
+      // Round 80.16 P2 fix: maxParticipants was set in masterAgent's finalData
+      // (from lionData.totalSeats / pdfData.totalSlots) but never propagated
+      // through tourGenerator → createTour, so admin form always saw null.
+      maxParticipants: (tourData as any).maxParticipants || null,
       destination: tourData.destinationCity || tourData.destinationCountry, // Legacy field for compatibility
       tags: JSON.stringify(tourData.tags),
 
@@ -325,7 +336,8 @@ export async function generateTourFromUrlInternal(
         ? 'inactive'
         : 'pending_review') as any,
       featured: 0, // 0 = false, 1 = true
-      promotionText: "",
+      // Round 80.17: was hardcoded "" — now wired from finalData
+      promotionText: (tourData as any).promotionText || "",
 
       // Metadata
       createdBy: userId,
@@ -425,12 +437,15 @@ export async function generateTourFromUrlInternal(
               if (!year || !month || !day) continue;
               const departureDate = new Date(year, month - 1, day, 8, 0, 0); // 08:00 departure
               const returnDate = new Date(year, month - 1, day + (tourData.nights || tourData.days - 1 || 0), 20, 0, 0);
-              // Map status: "報名" → "open", "客滿" → "full", "取消" → "cancelled"
+              // v80.24: extend status map. Lion uses "額滿" / "請洽專員" too.
               const statusMap: Record<string, 'open' | 'full' | 'cancelled' | 'confirmed'> = {
                 '報名': 'open',
                 '客滿': 'full',
+                '額滿': 'full',
+                '請洽專員': 'full', // sold-out via direct channel — "call us"
                 '取消': 'cancelled',
                 '確定': 'confirmed',
+                '確定出團': 'confirmed',
               };
               const mappedStatus = statusMap[dep.status] || 'open';
               // Round 61: Use LionTravel API pricing if available, otherwise apply formula
@@ -442,11 +457,18 @@ export async function generateTourFromUrlInternal(
               const childPriceWithBedFinal = childWithBedFromApi ?? Math.round(adultPriceForDep * 0.9);
               const childPriceNoBedFinal = childNoBedFromApi ?? Math.round(adultPriceForDep * 0.75);
               const infantPriceFinal = babyFromApi ?? Math.round(adultPriceForDep * 0.1);
-              // NOTE: LionTravel's public calendar API returns `AvailableVacancy` as a
-              // placeholder (always = TotalVacnacy - 1 across all dates), NOT real
-              // booking counts. Treat imported departures as 0 bookings — they are
-              // fresh scrapes and we have no authoritative sales data for them.
-              // Using availableSeats would surface the "剩 19 位" placeholder to users.
+              // v80.24: previous comment claimed AvailableVacancy is a
+              // placeholder (= TotalVacnacy - 1), but verified empirically
+              // it returns REAL availability: e.g. 0/23 (full), 0/25 (full),
+              // 25/26 (just opened). Status is also precise: "報名" / "額滿"
+              // / "客滿" / "請洽專員" / "確定" / "取消".
+              const totalSeatsForDep = dep.totalSeats || 20;
+              const availSeats = Number.isFinite(dep.availableSeats) ? dep.availableSeats : totalSeatsForDep;
+              const bookedSlots = Math.max(0, totalSeatsForDep - availSeats);
+              // Treat "請洽專員" (call agent) as effectively full — Lion uses it
+              // when seats are sold-out for direct booking.
+              const isFullByStatus = ['客滿', '額滿', '請洽專員'].includes(dep.status || '');
+              const finalStatus = isFullByStatus ? 'full' : mappedStatus;
               await createDeparture({
                 tourId: tour.id,
                 departureDate,
@@ -455,11 +477,11 @@ export async function generateTourFromUrlInternal(
                 childPriceWithBed: childPriceWithBedFinal,
                 childPriceNoBed: childPriceNoBedFinal,
                 infantPrice: infantPriceFinal,
-                totalSlots: dep.totalSeats || 20,
-                bookedSlots: 0,
-                status: mappedStatus,
+                totalSlots: totalSeatsForDep,
+                bookedSlots,
+                status: finalStatus,
                 currency: dep.currencyCode || 'TWD',
-                notes: `lionGroupId: ${dep.groupId}`,
+                notes: `lionGroupId: ${dep.groupId} · 雄獅原狀態: ${dep.status || '?'}`,
               });
               inserted++;
             } catch (singleDepErr) {
@@ -500,6 +522,49 @@ export async function generateTourFromUrlInternal(
       } as any).catch((err) => {
         console.warn('[TourGenerator] Failed to save calibration fields to tours:', err);
       });
+
+      // Round 81 (2026-05-17): Post calibration result to #catalog channel
+      // so Jeff sees every tour QA outcome live in ChatsTab. Approved =
+      // observation; review = question (needs Jeff); rejected = alert.
+      try {
+        const { notifyAgentMessage } = await import('./_core/agentNotify');
+        const verdictIcon = cr.verdict === 'approved' ? '✓' : cr.verdict === 'review' ? '⚠' : '✗';
+        const verdictLabel = cr.verdict === 'approved' ? '已上架' : cr.verdict === 'review' ? '需審查' : '已隔離';
+        const criticalIssues = cr.issues
+          .filter((i: any) => i.severity === 'critical')
+          .slice(0, 3)
+          .map((i: any) => `• ${i.message}`)
+          .join('\n');
+        await notifyAgentMessage({
+          agentName: 'catalog',
+          messageType:
+            cr.verdict === 'approved' ? 'observation' :
+            cr.verdict === 'review' ? 'question' : 'alert',
+          title: `${verdictIcon} Tour #${tour.id} · cal=${cr.totalScore} · ${verdictLabel} · ${(tourData.title || '').slice(0, 50)}`,
+          body:
+            `行程: ${tourData.title}\n` +
+            `目的地: ${tourData.destinationCountry}/${tourData.destinationCity}\n` +
+            `天數: ${tourData.days}\n` +
+            `Calibration: ${cr.totalScore}/100 → ${verdictLabel}\n` +
+            `  • Content fidelity: ${cr.contentFidelityScore}\n` +
+            `  • Translation: ${cr.translationScore}\n` +
+            `  • Image: ${cr.imageScore}\n` +
+            `  • Completeness: ${cr.completenessScore}\n` +
+            `  • Marketing: ${cr.marketingScore}\n` +
+            (criticalIssues ? `\n關鍵問題:\n${criticalIssues}` : '') +
+            (cr.autoFixesApplied.length > 0 ? `\n\n自動修復 ${cr.autoFixesApplied.length} 處` : ''),
+          priority: cr.verdict === 'rejected' ? 'high' : 'low',
+          context: {
+            tourId: tour.id,
+            verdict: cr.verdict,
+            totalScore: cr.totalScore,
+            issueCount: cr.issues.length,
+            sourceUrl: tourData.sourceUrl,
+          },
+        });
+      } catch (err) {
+        console.warn('[TourGenerator] catalog channel notify failed:', (err as Error).message);
+      }
     }
     
     await job.updateProgress({

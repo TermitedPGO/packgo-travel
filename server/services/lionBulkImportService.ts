@@ -269,6 +269,35 @@ export async function bulkImportFromLion(
     `[lionBulkImport] Imported ${imported}/${results.length} tours in ${durationMs}ms` +
       (failed > 0 ? ` (${failed} failed)` : "")
   );
+
+  // Round 81 (2026-05-17): Post bulk-import summary to #catalog channel.
+  // Jeff sees the batch result live in ChatsTab — useful when running
+  // big keyword batches in the background.
+  try {
+    const { notifyAgentMessage } = await import("../_core/agentNotify");
+    const sampleTitles = results
+      .filter((r) => r.success)
+      .slice(0, 5)
+      .map((r) => `• ${r.title?.slice(0, 60) ?? "(no title)"}`)
+      .join("\n");
+    await notifyAgentMessage({
+      agentName: "catalog",
+      messageType: imported > 0 ? "observation" : "alert",
+      title: `Lion 批次匯入 → ${imported}/${results.length} 成功 (${Math.round(durationMs / 1000)}s)`,
+      body:
+        `供應商: Lion Travel\n` +
+        `成功: ${imported} · 失敗: ${failed}\n` +
+        `耗時: ${Math.round(durationMs / 1000)}s\n\n` +
+        (imported > 0
+          ? `匯入的 tour 範例:\n${sampleTitles}\n\n下一步: LLM rewrite 已 queue 到 BullMQ,每個 tour 約 2-3 分鐘`
+          : "全部失敗,可能 Lion API 端有問題或網路超時。"),
+      priority: failed > imported ? "high" : "low",
+      context: { imported, failed, total: results.length, durationMs },
+    });
+  } catch (err) {
+    console.warn("[lionBulkImport] catalog channel notify failed:", (err as Error).message);
+  }
+
   return { total: results.length, imported, failed, durationMs, results };
 }
 

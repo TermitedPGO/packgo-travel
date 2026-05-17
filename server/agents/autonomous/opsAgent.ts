@@ -305,7 +305,9 @@ export interface OpsActionProposal {
     | "assignTourLeader"
     | "updateInternalNote"
     | "markBookingPaid"
-    | "scheduleReminder";
+    | "scheduleReminder"
+    | "cancelBooking"
+    | "triggerRefund";
   label: string; // 1-line description shown on the chip (Chinese)
   description: string; // 2-3 sentence detail shown in confirmation modal
   args: Record<string, unknown>;
@@ -469,6 +471,14 @@ markBookingPaid (sensitivity=sensitive):
 scheduleReminder (sensitivity=safe):
   args: { tourDepartureId: number, remindAt: ISO8601, message: string }
   用途: 自定義出發前提醒
+
+cancelBooking (sensitivity=sensitive):
+  args: { bookingId: number, reason: string }
+  用途: 取消訂單 + 釋出座位 (不退款,退款用 triggerRefund 另開)
+
+triggerRefund (sensitivity=sensitive):
+  args: { bookingId: number, amountUsd: number, reason: string, partial?: boolean }
+  用途: 透過 Stripe API 退款 (預設全額; partial=true + amountUsd 為部分退)
 
 【判斷規則】
 - 沒明顯動作 → suggestedActions: []
