@@ -542,8 +542,26 @@ Respond in JSON:
 
     return { score, issues };
   } catch (err) {
-    console.warn("[CalibrationAgent] checkContentFidelity LLM failed:", err);
-    return { score: 70, issues: [] };
+    // 2026-05-16: was silently returning { score: 70, issues: [] } — that
+    // bug let 63 placeholder-content Japan tours promote to active because
+    // 70 * 0.30 + 100 + 95 + 90 + 80 (other checks) ≈ 86, which crosses
+    // the 85 auto-approve threshold. When the fidelity LLM can't run, we
+    // CANNOT verify the tour — say so loudly. The orchestrator picks up
+    // the critical `_llm_failure` field marker and force-rejects.
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn("[CalibrationAgent] checkContentFidelity LLM failed:", msg);
+    return {
+      score: 0,
+      issues: [
+        {
+          check: "content",
+          severity: "critical",
+          message: `Content-fidelity LLM call failed — could not verify generated content matches source: ${msg.slice(0, 200)}`,
+          field: "_llm_failure",
+          autoFixable: false,
+        },
+      ],
+    };
   }
 }
 
@@ -1212,6 +1230,41 @@ export async function calibrateTour(
     );
   }
 
+  // 2026-05-16: ContentAnalyzer-fallback template detector.
+  //
+  // ContentAnalyzerAgent has a try/catch that returns hard-coded template
+  // strings when its LLM call fails — description="探索精彩行程，體驗難忘
+  // 旅程。" + poeticTitle=`${city}${days}日精選之旅`. The LLM-rubric
+  // calibration scored these tours 86–88 because the title/destination
+  // still match the source, but the actual user-facing content is the
+  // boilerplate fallback. 63 such tours leaked to production before this
+  // guard. Detector lives in the orchestrator (not inside checkContent-
+  // Fidelity's try block) so it runs even when the fidelity LLM throws.
+  const PLACEHOLDER_DESC = "探索精彩行程，體驗難忘旅程。";
+  const PLACEHOLDER_TITLE_RE = /^[一-鿿]+\d+日精選之旅$/;
+  const _genDesc = String(fixedTourData.description || "").trim();
+  const _genPoeticTitle = String((fixedTourData as any).poeticTitle || "").trim();
+  const templateFallbackDetected =
+    _genDesc === PLACEHOLDER_DESC || PLACEHOLDER_TITLE_RE.test(_genPoeticTitle);
+  if (templateFallbackDetected) {
+    allIssues.push({
+      check: "content",
+      severity: "critical",
+      message:
+        "ContentAnalyzer fallback template detected (description or poeticTitle is the boilerplate placeholder). LLM call most likely failed silently — tour must NOT publish.",
+      field: "_template_fallback",
+      autoFixable: false,
+    });
+    console.warn(
+      `[CalibrationAgent] 🚨 template fallback detected → desc="${_genDesc.slice(0, 30)}..." poeticTitle="${_genPoeticTitle}"`
+    );
+  }
+
+  // Detect content-fidelity LLM hard failure (catch block returned _llm_failure issue)
+  const contentLlmFailed = allIssues.some(
+    (i) => i.check === "content" && i.severity === "critical" && i.field === "_llm_failure"
+  );
+
   let verdict: "approved" | "review" | "rejected" =
     totalScore >= 85 ? "approved" : totalScore >= 60 ? "review" : "rejected";
   // Hard-rule override: even if score is high, never auto-approve a tour
@@ -1219,6 +1272,19 @@ export async function calibrateTour(
   if (cityCountryMismatch.mismatch && verdict === "approved") {
     console.warn(`[CalibrationAgent] 🚨 Forcing verdict approved → review due to city/country mismatch`);
     verdict = "review";
+  }
+  // 2026-05-16 hard-rule: any LLM-failure or template-fallback signal
+  // forces verdict='rejected' — the tour CANNOT be verified or contains
+  // a known placeholder, so it must not auto-publish under any weighted
+  // score. Auto-rejected means bulk-import keeps the source draft as
+  // inactive and Jeff can re-queue once credits / rate limit clears.
+  if (contentLlmFailed || templateFallbackDetected) {
+    if (verdict !== "rejected") {
+      console.warn(
+        `[CalibrationAgent] 🚨 Forcing verdict ${verdict} → rejected (contentLlmFailed=${contentLlmFailed}, templateFallback=${templateFallbackDetected})`
+      );
+      verdict = "rejected";
+    }
   }
 
   console.log(`[CalibrationAgent] Score: ${totalScore}, Verdict: ${verdict}, Issues: ${allIssues.length}, AutoFixes: ${fixes.length}`);
