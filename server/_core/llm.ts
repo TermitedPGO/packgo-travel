@@ -49,6 +49,11 @@ export type Message = {
   content: MessageContent | MessageContent[];
   name?: string;
   tool_call_id?: string;
+  /** Round 81: when re-sending an assistant turn back to the LLM during a
+   *  tool-use loop, pass the tool calls so Anthropic gets matching tool_use
+   *  blocks. Without these, tool_result blocks in the next user message
+   *  fail validation. */
+  tool_calls?: ToolCall[];
 };
 
 export type Tool = {
@@ -143,9 +148,15 @@ function getClient(): Anthropic {
   if (!_client) {
     _client = new Anthropic({
       apiKey: ENV.anthropicApiKey,
-      // 120s matches previous Forge-era timeout budget
-      timeout: 120_000,
-      maxRetries: 2,
+      // v80.24: bumped 120s → 240s. PDF analysis on 2MB+ scanned tour
+      // brochures was hitting the 120s ceiling with Sonnet 4.5. Haiku 4.5
+      // is 3-5× faster but we still need headroom for: long itineraries
+      // (30+ days), retries, and parallel agent calls competing for slots.
+      timeout: 240_000,
+      // v80.24: was maxRetries=2. We now have RetryManager + circuit breaker
+      // doing fine-grained retry control; the SDK retrying on top of that
+      // multiplied compute 3× during outages. Single source of retry truth.
+      maxRetries: 0,
     });
   }
   return _client;
@@ -157,6 +168,36 @@ function getClient(): Anthropic {
 
 const DEFAULT_MODEL = "claude-sonnet-4-5-20250929";
 const DEFAULT_MAX_TOKENS = 8192;
+
+/**
+ * Round 80.15: prompt-cache eligibility check.
+ *
+ * Anthropic prompt-cache requires minimum block sizes — below them, the
+ * cache_control directive is silently ignored AND you pay full price.
+ *   - Sonnet / Opus: 1024 tokens
+ *   - Haiku:         2048 tokens
+ *
+ * We estimate at 3.5 chars/token (conservative for CJK) and only attach
+ * cache_control when the system prompt is large enough to actually save.
+ *
+ * Mirrors the same logic in claudeAgent.ts so direct invokeLLM callers
+ * (calibrationAgent / learningAgent / skillLearnerAgent) get the same
+ * 90% input-token savings on cache hits.
+ */
+function shouldCacheSystemPrompt(text: string, model: string): boolean {
+  if (!text) return false;
+  // v80.24: better token estimate for Chinese-heavy prompts. Anthropic
+  // tokenizer uses ~1.5 chars/token for CJK, ~3.5 for English. PACK&GO
+  // system prompts are 90% Chinese so the old 3.5 estimate undershot
+  // by ~2.3× — many cacheable prompts were skipped, paying full price
+  // every call. Detect CJK ratio and use the right divisor.
+  const cjkChars = (text.match(/[぀-ヿ㐀-䶿一-鿿豈-﫿]/g) || []).length;
+  const cjkRatio = cjkChars / text.length;
+  const charsPerToken = cjkRatio > 0.5 ? 1.5 : 3.5;
+  const estimatedTokens = Math.floor(text.length / charsPerToken);
+  const minTokens = model.includes("haiku") ? 2048 : 1024;
+  return estimatedTokens >= minTokens;
+}
 
 const ensureArray = <T>(value: T | T[]): T[] => (Array.isArray(value) ? value : [value]);
 
@@ -257,6 +298,25 @@ function normalizeToAnthropic(messages: Message[]): {
         blocks.push(imageUrlToAnthropic(p.image_url.url));
       } else if (p.type === "file_url") {
         blocks.push(fileUrlToAnthropic(p.file_url));
+      }
+    }
+    // Round 81: assistant turns from a previous tool-use loop iteration carry
+    // tool_calls. Convert each to a tool_use block so Anthropic can match
+    // them to the following tool_result blocks.
+    if (msg.role === "assistant" && msg.tool_calls && msg.tool_calls.length > 0) {
+      for (const tc of msg.tool_calls) {
+        let input: unknown = {};
+        try {
+          input = JSON.parse(tc.function.arguments);
+        } catch {
+          input = {};
+        }
+        blocks.push({
+          type: "tool_use",
+          id: tc.id,
+          name: tc.function.name,
+          input: input as Record<string, unknown>,
+        });
       }
     }
     // Anthropic requires non-empty content.
@@ -455,6 +515,129 @@ function anthropicToInvokeResult(
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Round 80.15: Circuit breaker — protects against Anthropic outages cascading.
+//
+// State machine:
+//   CLOSED   (normal): all requests pass through
+//   OPEN     (tripped): all requests fail fast with circuit-open error
+//                       so we don't hammer Anthropic during an outage.
+//   HALF_OPEN (probe): one request allowed to test recovery; on success →
+//                      CLOSED, on failure → OPEN (with backoff).
+//
+// Configuration:
+//   - Trips after 5 consecutive failures within 30s
+//   - Stays OPEN for 30s, then enters HALF_OPEN
+//   - Counters reset after each successful response
+//
+// TODO(circuit-breaker-v2): when OPEN, fall back to OpenAI/Gemini if those
+// API keys exist. Requires: OPENAI_API_KEY secret + OpenAI client + adapter.
+// Today, OPEN simply throws a clearly-named error so callers can degrade
+// gracefully (e.g. AI generation shows "service temporarily unavailable").
+// ──────────────────────────────────────────────────────────────────────────────
+
+type CircuitState = "CLOSED" | "OPEN" | "HALF_OPEN";
+
+const CIRCUIT_CONFIG = {
+  failureThreshold: 5,           // open after 5 consecutive failures
+  failureWindowMs: 30_000,       // failures must be within 30s window
+  openDurationMs: 30_000,        // stay open for 30s
+};
+
+class CircuitBreaker {
+  private state: CircuitState = "CLOSED";
+  private failureCount = 0;
+  private firstFailureAt = 0;
+  private openedAt = 0;
+
+  /** Throws if circuit is OPEN; returns true if call should proceed. */
+  beforeCall(): void {
+    if (this.state === "OPEN") {
+      const elapsed = Date.now() - this.openedAt;
+      if (elapsed >= CIRCUIT_CONFIG.openDurationMs) {
+        // Cooldown finished — try one probe
+        this.state = "HALF_OPEN";
+        console.warn(`[CircuitBreaker] cooldown done, → HALF_OPEN`);
+        return;
+      }
+      const remaining = CIRCUIT_CONFIG.openDurationMs - elapsed;
+      const err = new Error(
+        `LLM_CIRCUIT_OPEN: Anthropic API circuit is open (auto-retry in ${Math.ceil(remaining / 1000)}s). ` +
+        `Recent failures: ${this.failureCount}.`
+      );
+      (err as any).circuitOpen = true;
+      (err as any).nonRetryable = true;
+      throw err;
+    }
+  }
+
+  recordSuccess(): void {
+    if (this.state === "HALF_OPEN") {
+      console.log(`[CircuitBreaker] probe succeeded → CLOSED`);
+    }
+    this.state = "CLOSED";
+    this.failureCount = 0;
+    this.firstFailureAt = 0;
+  }
+
+  recordFailure(err: any): void {
+    // Don't trip the circuit on user-side errors — only infra/upstream.
+    // 4xx (other than 429 rate limit) are typically caller bugs, not outages.
+    const status = err?.status;
+    const isInfraFailure =
+      !status ||
+      status === 408 ||      // request timeout
+      status === 429 ||      // rate limit (treat as upstream pressure)
+      status === 500 ||
+      status === 502 ||
+      status === 503 ||
+      status === 504 ||
+      /timeout/i.test(err?.message || "") ||
+      err?.code === "ECONNRESET" ||
+      err?.code === "ETIMEDOUT";
+
+    if (!isInfraFailure) return;
+
+    const now = Date.now();
+    if (now - this.firstFailureAt > CIRCUIT_CONFIG.failureWindowMs) {
+      // Window expired — reset counter
+      this.failureCount = 1;
+      this.firstFailureAt = now;
+    } else {
+      this.failureCount++;
+    }
+
+    if (this.state === "HALF_OPEN") {
+      // Probe failed — back to OPEN
+      this.state = "OPEN";
+      this.openedAt = now;
+      console.error(`[CircuitBreaker] probe failed → OPEN (${CIRCUIT_CONFIG.openDurationMs}ms)`);
+      bumpStat("circuit_opened", 1);
+      return;
+    }
+
+    if (this.failureCount >= CIRCUIT_CONFIG.failureThreshold) {
+      this.state = "OPEN";
+      this.openedAt = now;
+      console.error(
+        `[CircuitBreaker] ${this.failureCount} consecutive failures in ${now - this.firstFailureAt}ms → OPEN`
+      );
+      bumpStat("circuit_opened", 1);
+    }
+  }
+
+  getState(): CircuitState {
+    return this.state;
+  }
+}
+
+const circuit = new CircuitBreaker();
+
+// Exposed for diagnostics / health endpoints
+export function getCircuitState(): { state: CircuitState; failures: number } {
+  return { state: circuit.getState(), failures: (circuit as any).failureCount };
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Main entry
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -514,14 +697,37 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   const model = params.model || DEFAULT_MODEL;
   const maxTokens = params.maxTokens ?? params.max_tokens ?? DEFAULT_MAX_TOKENS;
 
-  // 3. Call Anthropic
+  // 3. Call Anthropic — guarded by circuit breaker
+  // Round 80.15: trip the breaker on cascading failures so we don't hammer
+  // a degraded API. See CircuitBreaker class above.
+  circuit.beforeCall();
+
   const client = getClient();
   const startMs = Date.now();
   console.log(
     `[invokeLLM] → Anthropic (model: ${model}, msgs: ${anthropicMessages.length}` +
       (tools?.length ? `, tools: ${tools.length}` : "") +
-      ")"
+      `, circuit: ${circuit.getState()})`
   );
+
+  // Round 80.15: wrap system prompt as content-block array with cache_control
+  // when it's large enough to qualify. Direct callers of invokeLLM (calibration
+  // agent, learning agents) didn't have this — they were passing system as a
+  // plain string and missing 90% input-token savings on repeat calls.
+  let systemPayload: string | Array<{ type: "text"; text: string; cache_control?: { type: "ephemeral" } }> | undefined =
+    system;
+  if (system && shouldCacheSystemPrompt(system, model)) {
+    systemPayload = [
+      {
+        type: "text",
+        text: system,
+        cache_control: { type: "ephemeral" },
+      },
+    ];
+    console.log(
+      `[invokeLLM] cache_control=ephemeral on system prompt (~${Math.floor(system.length / 3.5)} tokens)`
+    );
+  }
 
   let resp: Anthropic.Messages.Message;
   try {
@@ -529,11 +735,13 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
       model,
       max_tokens: maxTokens,
       messages: anthropicMessages,
-      ...(system ? { system } : {}),
+      ...(systemPayload ? { system: systemPayload as any } : {}),
       ...(tools ? { tools } : {}),
       ...(toolChoice ? { tool_choice: toolChoice } : {}),
     });
+    circuit.recordSuccess();
   } catch (err: any) {
+    circuit.recordFailure(err);
     const elapsed = Date.now() - startMs;
     // Anthropic SDK errors: err.status, err.error, err.message
     if (err?.status === 408 || /timeout/i.test(err?.message || "")) {

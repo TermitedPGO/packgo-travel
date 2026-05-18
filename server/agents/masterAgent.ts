@@ -46,7 +46,12 @@ import { TourType } from "./itineraryUnifiedAgent";
 import { applyLearnedSkills } from "./learningAgent";
 import { logAgentStart, logAgentComplete, cleanupZombieTasks } from "../agentActivityService";
 import { calibrateTour } from "./calibrationAgent";
-import { fetchLionTravelData, buildRawContentFromLionData } from "../services/lionTravelApiService";
+import { fetchLionTravelData, buildRawContentFromLionData, extractCostSectionsFromFeaturesHtml } from "../services/lionTravelApiService";
+// Round 80.20: regex-based hotel brand extractor — populates the `brand`
+// field that was always rendering "?" because Lion never sets it and we
+// never asked the LLM for it. Matches Marriott / Mercure / Novotel /
+// 君悅 / 涵碧樓 etc. without any LLM cost.
+import { extractHotelBrand } from "./_helpers/hotelBrand";
 
 export interface MasterAgentResult {
   success: boolean;
@@ -137,6 +142,39 @@ export interface MasterAgentResult {
   };
   // Round 55 Diag-C: Phase timing data
   phaseTimings?: { phases: Record<string, string>; totalMs: number; totalSec: string };
+}
+
+// Round 80.17: parseLionDate handles Lion's "2026/08/28" / "2026-08-28" /
+// already-Date / null. Returns Date or null. Used for finalData.startDate /
+// endDate fields which were previously always empty.
+// v80.24: added year-range validation. Without it, a typo like "20226-08-28"
+// parses successfully (year 20226), MySQL accepts it, and tour search filters
+// break because the tour falls outside any reasonable date window.
+function parseLionDate(value: unknown): Date | null {
+  if (!value) return null;
+  if (value instanceof Date) {
+    if (isNaN(value.getTime())) return null;
+    const y = value.getFullYear();
+    return y >= 2020 && y <= 2050 ? value : null;
+  }
+  if (typeof value !== "string") return null;
+  const cleaned = value.replace(/\//g, "-").trim();
+  if (!cleaned) return null;
+  const d = new Date(cleaned);
+  if (isNaN(d.getTime())) return null;
+  const y = d.getFullYear();
+  if (y < 2020 || y > 2050) {
+    console.warn(`[parseLionDate] Rejecting out-of-range year ${y} from input "${value}"`);
+    return null;
+  }
+  return d;
+}
+
+// Round 80.17: extract a 3-letter IATA code from any input.
+function extractAirportCodeLocal(value: unknown): string | null {
+  if (!value || typeof value !== "string") return null;
+  const m = value.toUpperCase().match(/\b[A-Z]{3}\b/);
+  return m ? m[0] : null;
 }
 
 /**
@@ -266,24 +304,72 @@ export class MasterAgent {
       // Phase 0: Check Cache for Full Result
       // If we have a cached result for this URL, return it immediately
       // Skip cache if forceRegenerate is true
+      // v80.24: throttle force-regen (1 URL × 1 hour) to prevent runaway
+      // LLM cost. During testing on 5/5 the same URL was force-regenerated
+      // 4 times in an hour ($0.80 burned). Now blocked unless > 1h passed.
       // ========================================================================
       onProgress?.("checking_cache", 5);
-      
+
+      // Throttle: track last force-regen timestamp per URL in Redis
+      let throttledForce = forceRegenerate;
       if (forceRegenerate) {
+        try {
+          const { redis } = await import("../redis");
+          const key = `force-regen-throttle:${url.slice(0, 200)}`;
+          const lastRun = await redis.get(key);
+          if (lastRun) {
+            const ageMs = Date.now() - Number(lastRun);
+            if (ageMs < 60 * 60 * 1000) {
+              const minutesAgo = Math.floor(ageMs / 60_000);
+              console.warn(
+                `[MasterAgent] 🚫 Force-regen THROTTLED for URL (last ran ${minutesAgo}m ago, < 1h cooldown). Falling back to cache. To override, wait or clear key=${key}.`
+              );
+              throttledForce = false;
+            }
+          }
+          if (throttledForce) {
+            // Mark this run; key expires in 65 minutes
+            await redis.set(key, String(Date.now()), "EX", 65 * 60);
+          }
+        } catch {
+          // Redis unavailable — proceed without throttle
+        }
+      }
+
+      if (throttledForce) {
         console.log("[MasterAgent] 🔄 Force regenerate enabled, skipping cache");
       } else {
         console.log("[MasterAgent] Checking cache for URL:", url);
       }
       
-      const cachedFullResult = forceRegenerate ? null : await generationCache.getFullResult(url);
+      const cachedFullResult = throttledForce ? null : await generationCache.getFullResult(url);
       if (cachedFullResult) {
-        console.log("[MasterAgent] 🎯 Cache HIT! Returning cached result");
+        // v80.24: cache hit returns object with Date fields stringified by
+        // JSON.stringify (Date → ISO string). Drizzle MySqlTimestamp column
+        // then crashes with "value.toISOString is not a function". Restore
+        // ISO strings back to Date for known timestamp fields before return.
+        const dateKeys = [
+          "departureDate", "returnDate", "createdAt", "updatedAt",
+          "publishedAt", "deletedAt", "scheduledAt",
+        ];
+        const restoreDates = (obj: any): any => {
+          if (!obj || typeof obj !== "object") return obj;
+          for (const k of dateKeys) {
+            if (typeof obj[k] === "string" && /^\d{4}-\d{2}-\d{2}/.test(obj[k])) {
+              const d = new Date(obj[k]);
+              if (!isNaN(d.getTime())) obj[k] = d;
+            }
+          }
+          return obj;
+        };
+        const restored = restoreDates(cachedFullResult);
+        console.log("[MasterAgent] 🎯 Cache HIT! Returning cached result (dates restored)");
         const elapsedTime = Date.now() - startTime;
         console.log(`[MasterAgent] Total time (from cache): ${elapsedTime}ms`);
-        
+
         return {
           success: true,
-          data: cachedFullResult,
+          data: restored,
           executionReport: `Cache hit - returned in ${elapsedTime}ms`,
         };
       }
@@ -594,6 +680,17 @@ export class MasterAgent {
               'LIM': '秘魯', 'SCL': '智利', 'GRU': '巴西', 'EZE': '阿根廷',
               'CAI': '埃及', 'CMN': '摩洛哥', 'JNB': '南非', 'NBO': '肯亞',
               'MEX': '墨西哥', 'HAV': '古巴',
+              // Round 80.10: Taiwan domestic — needed when API.Country is
+              // missing and tourName contains a Taiwan locality keyword.
+              '花東': '台灣', '花蓮': '台灣', '台東': '台灣',
+              '台北': '台灣', '新北': '台灣', '基隆': '台灣',
+              '桃園': '台灣', '新竹': '台灣', '苗栗': '台灣',
+              '台中': '台灣', '彰化': '台灣', '南投': '台灣', '雲林': '台灣',
+              '嘉義': '台灣', '台南': '台灣', '高雄': '台灣', '屏東': '台灣',
+              '宜蘭': '台灣', '澎湖': '台灣', '金門': '台灣', '馬祖': '台灣',
+              '阿里山': '台灣', '日月潭': '台灣', '墾丁': '台灣', '太魯閣': '台灣',
+              '七星潭': '台灣', '知本': '台灣', '蘭嶼': '台灣', '池上': '台灣',
+              '鳴日號': '台灣', // Mingri Train — explicit signal for domestic
             };
 
             // City lookup — returns a specific city/region name (distinct from country)
@@ -602,6 +699,10 @@ export class MasterAgent {
               '北海道': '北海道', '沖縄': '沖繩', '沖繩': '沖繩', '九州': '九州', '關西': '關西', '京阪神': '京阪神',
               '東京': '東京', '大阪': '大阪', '京都': '京都', '名古屋': '名古屋', '福岡': '福岡',
               '廣島': '廣島', '神戶': '神戶', '奈良': '奈良', '四國': '四國',
+              // Round 80.16 P0a fix: Okinawa sub-islands — ferry/cruise tours
+              // hit 那霸/石垣/宮古 in itinerary text but never the parent label
+              // 沖繩 directly. Map them all back to 沖繩.
+              '那霸': '沖繩', '石垣': '沖繩', '宮古': '沖繩', '與那國': '沖繩',
               // Korea
               '首爾': '首爾', '釜山': '釜山', '濟州': '濟州',
               // SE Asia
@@ -639,14 +740,75 @@ export class MasterAgent {
               // South America
               '馬丘比丘': '馬丘比丘', '庫斯科': '庫斯科',
               '里約': '里約', '聖保羅': '聖保羅', '布宜諾斯艾利斯': '布宜諾斯艾利斯',
+              // Round 80.10 → 80.16 P0a v2: Taiwan domestic — REORDERED.
+              // JS object iteration is insertion-order, and the `for…of
+              // entries(_lionCityPatterns)` loop short-circuits on first
+              // match. The order below puts:
+              //   1. Specific attractions  → their county (太魯閣→花蓮)
+              //   2. True destination counties (南投/嘉義/台南/宜蘭/...)
+              //   3. Departure / transit cities LAST (桃園/台北/高雄/台中)
+              // so a "南投旅遊..." tour whose Day 1 mentions 桃園機場
+              // doesn't get classified with city=桃園.
+              // ── Specific attractions ──
+              '太魯閣': '花蓮', '七星潭': '花蓮', '瑞穗': '花蓮',
+              '知本': '台東', '綠島': '台東', '蘭嶼': '台東', '池上': '台東',
+              '阿里山': '阿里山', '日月潭': '日月潭', '墾丁': '墾丁',
+              '礁溪': '宜蘭', '羅東': '宜蘭',
+              // ── True destination counties (rural / scenic — checked first) ──
+              '南投': '南投', '雲林': '雲林', '嘉義': '嘉義', '台南': '台南',
+              '宜蘭': '宜蘭', '花蓮': '花蓮', '台東': '台東', '花東': '花東',
+              '澎湖': '澎湖', '金門': '金門', '馬祖': '馬祖',
+              '苗栗': '苗栗', '彰化': '彰化', '屏東': '屏東',
+              '新竹': '新竹',
+              // ── Departure / transit cities (checked LAST) ──
+              '台中': '台中', '高雄': '高雄', '新北': '新北', '基隆': '基隆',
+              '桃園': '桃園', '台北': '台北',
+            };
+
+            // Round 80.10: ISO-2 country code → Chinese name (primary source).
+            // Lion Travel API exposes Country in GroupInfo; using it directly
+            // is far more reliable than keyword-scanning tourName, which
+            // misses Taiwan domestic, multi-region tours, and tours with
+            // non-standard naming.
+            const _lionISO2ToCountry: Record<string, string> = {
+              TW: '台灣', JP: '日本', KR: '韓國', CN: '中國', HK: '香港', MO: '澳門',
+              TH: '泰國', VN: '越南', PH: '菲律賓', MY: '馬來西亞', ID: '印尼',
+              SG: '新加坡', IN: '印度', NP: '尼泊爾', LK: '斯里蘭卡',
+              US: '美國', CA: '加拿大', MX: '墨西哥', CU: '古巴',
+              GB: '英國', UK: '英國', IE: '愛爾蘭', FR: '法國', IT: '義大利',
+              DE: '德國', ES: '西班牙', PT: '葡萄牙', NL: '荷蘭', BE: '比利時',
+              AT: '奧地利', CZ: '捷克', CH: '瑞士', HU: '匈牙利', PL: '波蘭',
+              GR: '希臘', TR: '土耳其', RO: '羅馬尼亞', BG: '保加利亞', HR: '克羅埃西亞',
+              IS: '冰島', NO: '挪威', SE: '瑞典', DK: '丹麥', FI: '芬蘭',
+              AU: '澳洲', NZ: '紐西蘭',
+              EG: '埃及', MA: '摩洛哥', ZA: '南非', KE: '肯亞',
+              PE: '秘魯', CL: '智利', BR: '巴西', AR: '阿根廷',
             };
 
             const _lionSearchText = lionData.tourName + ' ' + lionData.outboundFlight.arriveAirport;
             let _lionCountry = '';
+            // Round 80.16 P0a v3: REORDERED. Lion's API.Country field is the
+            // LISTING country (where the agency is registered), NOT the
+            // destination. For all Lion-Travel tours it's "TW", which would
+            // wrongly classify 北海道/紐西蘭/巴西 tours as 台灣. So:
+            //   Pass 1 (keyword scan tourName + flight airport) runs FIRST
+            //   Pass 0 (API.Country) only as last-resort fallback.
+            // Note: TW from API is now suppressed entirely if no keyword match
+            // — most TW domestic tours will be caught by '南投' / '花蓮' / etc.
+            // patterns.
             for (const [kw, country] of Object.entries(_lionCountryPatterns)) {
               if (_lionSearchText.includes(kw)) {
                 _lionCountry = country;
                 break;
+              }
+            }
+            // Pass 0 fallback: trust API.Country only when it's NOT TW (which
+            // is unreliable) and only when keyword scan found nothing.
+            if (!_lionCountry) {
+              const _apiCountryCode = (lionData as any).country?.toString().toUpperCase().trim();
+              if (_apiCountryCode && _apiCountryCode !== "TW" && _lionISO2ToCountry[_apiCountryCode]) {
+                _lionCountry = _lionISO2ToCountry[_apiCountryCode];
+                console.log(`[MasterAgent] 🦁 country fallback API.Country=${_apiCountryCode} → ${_lionCountry}`);
               }
             }
 
@@ -697,12 +859,21 @@ export class MasterAgent {
               lionData.returnFlight?.departureAirport || '',
             ].join(' ').toUpperCase().match(/\b[A-Z]{3}\b/g) || [];
 
-            const _lionCitySearchText = [
+            // Round 80.16 P0a fix: strip the departure city from the search
+            // text so phrases like "高雄出發｜那霸．石垣" don't match the
+            // departure (高雄) before reaching the actual destination (那霸/沖繩).
+            // The Lion API always exposes departureCity separately — that's
+            // the authoritative signal that this city is NOT the destination.
+            const _lionDepartureCity = (lionData.departureCity || '').trim();
+            let _lionCitySearchText = [
               lionData.tourName || '',
               _lionItineraryText,
               lionData.outboundFlight?.arriveAirport || '',
               lionData.returnFlight?.departureAirport || '',
             ].join(' ');
+            if (_lionDepartureCity) {
+              _lionCitySearchText = _lionCitySearchText.split(_lionDepartureCity).join('');
+            }
 
             // Round 66: build an inverse city→country lookup so mixed-region tours
             // (e.g. "羅馬與土耳其經典10日") don't pick a city in the WRONG country.
@@ -713,6 +884,7 @@ export class MasterAgent {
               '東京': '日本', '大阪': '日本', '京都': '日本', '名古屋': '日本', '福岡': '日本',
               '廣島': '日本', '神戶': '日本', '奈良': '日本', '四國': '日本', '北海道': '日本',
               '沖繩': '日本', '九州': '日本', '關西': '日本', '京阪神': '日本',
+              '那霸': '日本', '石垣': '日本', '宮古': '日本', '與那國': '日本',
               '首爾': '韓國', '釜山': '韓國', '濟州': '韓國',
               '曼谷': '泰國', '清邁': '泰國', '普吉': '泰國', '蘇梅': '泰國',
               '河內': '越南', '胡志明': '越南', '峴港': '越南', '下龍灣': '越南',
@@ -741,6 +913,15 @@ export class MasterAgent {
               '奧克蘭': '紐西蘭', '基督城': '紐西蘭', '皇后鎮': '紐西蘭',
               '馬丘比丘': '秘魯', '庫斯科': '秘魯',
               '里約': '巴西', '聖保羅': '巴西', '布宜諾斯艾利斯': '阿根廷',
+              // Round 80.10: Taiwan cities/counties — needed for Mingri-train,
+              // 花東 rail tours, and any other domestic itinerary.
+              '花蓮': '台灣', '台東': '台灣', '花東': '台灣',
+              '台北': '台灣', '新北': '台灣', '基隆': '台灣',
+              '桃園': '台灣', '新竹': '台灣', '苗栗': '台灣',
+              '台中': '台灣', '彰化': '台灣', '南投': '台灣', '雲林': '台灣',
+              '嘉義': '台灣', '台南': '台灣', '高雄': '台灣', '屏東': '台灣',
+              '宜蘭': '台灣', '澎湖': '台灣', '金門': '台灣', '馬祖': '台灣',
+              '阿里山': '台灣', '日月潭': '台灣', '墾丁': '台灣',
             };
 
             let _lionCity = '';
@@ -878,8 +1059,12 @@ export class MasterAgent {
               },
               highlights: lionData.tags,
               dailyItinerary: _lionDailyItinerary,
-              includes: [],
-              excludes: [],
+              // Round 80.16 P1b fix: pre-populate includes/excludes from Lion's
+              // featuresHtml (parsed bullet lists under "費用包含" / "費用不包含").
+              // Previously these were empty for URL-mode and DetailsSkill couldn't
+              // recover them reliably from raw text.
+              includes: extractCostSectionsFromFeaturesHtml(lionData.featuresHtml).includes,
+              excludes: extractCostSectionsFromFeaturesHtml(lionData.featuresHtml).excludes,
               accommodation: _lionHotels.map(h => h.name),
               hotels: _lionHotels,
               meals: _lionMeals,
@@ -895,6 +1080,22 @@ export class MasterAgent {
               extractedTourMeta: null,
               maxParticipants: lionData.totalSeats,
               departureDates: lionData.goDate ? [lionData.goDate] : [],
+              // Round 80.17: store structured fields used by finalData
+              // assembly downstream (basePrice / startDate / endDate /
+              // promotionText / destinationAirport).
+              lionGoDate: lionData.goDate || null,
+              lionBackDate: lionData.backDate || null,
+              promotionText:
+                ((lionData as any).pricing?.promotionText ||
+                  (lionData as any).promotionText ||
+                  (lionData.notices?.[0]?.chineseTitle?.includes("優惠") ? lionData.notices[0].chineseTitle : "") ||
+                  "")
+                  .toString()
+                  .slice(0, 255),
+              destinationAirportCode: lionData.outboundFlight?.arriveAirport
+                ? (lionData.outboundFlight.arriveAirport.match(/\b[A-Z]{3}\b/)?.[0] || null)
+                : null,
+              destinationAirportName: lionData.outboundFlight?.arriveAirport || null,
               // Store structured pricing for Phase 5
               lionPricing: lionData.pricing,
               lionGroupId: lionData.groupId,
@@ -1223,9 +1424,13 @@ export class MasterAgent {
               accommodation: d.HotelName || '',
             }));
             // Also extract hotel names from daytrip
+            // v80.24: was hardcoding stars=4 for every Lion-API hotel which is
+            // misleading and was a complaint Jeff raised ("幾星都沒說"). Now
+            // leave stars=0 so HotelAgent / contentAnalyzer can fill from the
+            // actual brand mapping, or UI can show "—" instead of fake "★★★★".
             const hotelNames = Array.from(new Set(days.map((d: any) => d.HotelName).filter(Boolean))) as string[];
             if (hotelNames.length > 0 && rawData.hotels.length === 0) {
-              rawData.hotels = hotelNames.map((name: string) => ({ name, type: '飯店', stars: 4 }));
+              rawData.hotels = hotelNames.map((name: string) => ({ name, type: '飯店', stars: 0 }));
             }
           }
 
@@ -1526,22 +1731,47 @@ export class MasterAgent {
       }
       
       _startPhaseTimer('P4_itinerary');
-      // Execute Itinerary (Unified: Extract + Polish in single LLM call)
-      // ItineraryUnifiedAgent replaces ItineraryExtractAgent + ItineraryPolishAgent
+      // Round 80.15-C: Itinerary + Details now run IN PARALLEL.
+      //
+      // Before: Itinerary blocked Details → Transportation. Total ~40s.
+      // After:  Itinerary || Details (parallel), then Transportation
+      //         (depends on tourType). Total ~25-30s, saves 10-15s on
+      //         every AI generation.
+      //
+      // We don't fully parallelize Transportation because its output
+      // depends on `tourType` from itinerary (TRAIN vs FLIGHT vs CRUISE
+      // produce different transportation records). Keeping Transportation
+      // sequential after itinerary preserves data fidelity.
+
+      // P3: Check Details cache before LLM call
+      // Round 60: Include sourceUrl/tourId in cache key to prevent cross-tour cache pollution
+      const _cacheDestination = rawData.location?.destinationCity || rawData.location?.destinationCountry || "unknown";
+      const _cacheSourceId = rawData.sourceUrl || rawData.normGroupId || rawData.basicInfo?.title?.slice(0, 20) || "";
+      const detailsCacheKey = `${_cacheDestination}::${_cacheSourceId}`;
+      // Round 64 Fix A: respect forceRegenerate flag (previously ignored → stale cache poisoned verification)
+      const cachedDetails = forceRegenerate ? null : await generationCache.getDetailsResult(detailsCacheKey);
+      if (forceRegenerate) {
+        console.log(`[MasterAgent] 🔄 Round 64: forceRegenerate=true — bypassing DetailsSkill cache for key "${detailsCacheKey}"`);
+      }
+
+      // Stage A: itinerary + details run in parallel.
+      // Wrapped in async IIFEs so all side effects (logging, monitor,
+      // progressTracker, image assignment) complete before the promise resolves.
       let itineraryData = "";
       let tourType: TourType = 'GENERAL'; // 預設行程類型
-      try {
+
+      const itineraryPromise = (async () => {
         this.monitor.startAgent('ItineraryUnifiedAgent');
         if (taskId) progressTracker.startPhase(taskId, 'itinerary');
-        
+
         const unifiedResult = await this.itineraryUnifiedAgent.execute(rawData);
-        
+
         if (unifiedResult.success && unifiedResult.data && unifiedResult.data.polishedItineraries.length > 0) {
           const { polishedItineraries, fidelityCheck, extractionMethod, llmCallCount, totalElapsedMs } = unifiedResult.data;
-          
+
           // 保存 tourType 供 TransportationAgent 使用
           tourType = unifiedResult.data.tourType || 'GENERAL';
-          
+
           console.log(`[MasterAgent] ✓ ItineraryUnifiedAgent completed: ${polishedItineraries.length} days`);
           console.log(`[MasterAgent] Extraction method: ${extractionMethod}, LLM calls: ${llmCallCount}, Time: ${totalElapsedMs}ms`);
           console.log(`[MasterAgent] Tour Type: ${tourType}, Transportation: ${unifiedResult.data.originalTransportation}`);
@@ -1549,14 +1779,14 @@ export class MasterAgent {
           if (fidelityCheck.issues.length > 0) {
             console.warn(`[MasterAgent] Fidelity Issues: ${fidelityCheck.issues.join(', ')}`);
           }
-          
+
           // 為每日行程配置圖片
           const { assignItineraryImages } = await import("../services/itineraryImageService");
           const itinerariesWithImages = await assignItineraryImages(
             polishedItineraries,
             { country: rawData?.location?.destinationCountry, city: rawData?.location?.destinationCity }
           );
-          
+
           itineraryData = JSON.stringify(itinerariesWithImages);
           this.monitor.completeAgent('ItineraryUnifiedAgent', unifiedResult);
           // 記錄 ItineraryUnifiedAgent 詳細工作
@@ -1578,45 +1808,47 @@ export class MasterAgent {
           console.warn("[MasterAgent] ⚠ ItineraryUnifiedAgent returned no data");
           itineraryData = JSON.stringify([]);
         }
-        
+
         if (taskId) progressTracker.completePhase(taskId, 'itinerary');
         onProgress?.("extracting_itinerary", 65); // Phase 4: Itinerary completed
-      } catch (error) {
-        console.error("[MasterAgent] Itinerary generation error:", error);
-        if (taskId) progressTracker.failPhase(taskId, 'itinerary', error instanceof Error ? error.message : 'Unknown error');
-        itineraryData = JSON.stringify([]);
+      })();
+
+      // DetailsSkill - P1 optimized: single LLM call for all 4 sub-skills
+      // P3: Skip LLM if cache hit
+      const detailsPromise = cachedDetails
+        ? Promise.resolve(cachedDetails)
+        : this.retryManager.executeWithRetry(
+            () => this.detailsSkill.executeAllCombined(rawData),
+            this.retryConfig,
+            'DetailsSkill'
+          );
+
+      // Run itinerary + details together. Promise.allSettled so one failure
+      // doesn't kill the other.
+      const [itineraryStageResult, detailsSkillResult] = await Promise.allSettled([
+        itineraryPromise,
+        detailsPromise,
+      ]);
+
+      // If the itinerary IIFE threw, surface it through progressTracker (the
+      // IIFE doesn't have its own try/catch — Promise.allSettled captures it).
+      if (itineraryStageResult.status === 'rejected') {
+        const itinErr = itineraryStageResult.reason;
+        console.error("[MasterAgent] Itinerary generation error:", itinErr);
+        if (taskId) progressTracker.failPhase(taskId, 'itinerary', itinErr instanceof Error ? itinErr.message : 'Unknown error');
+        if (!itineraryData) itineraryData = JSON.stringify([]);
       }
-      
-      // P3: Check Details cache before LLM call
-      // Round 60: Include sourceUrl/tourId in cache key to prevent cross-tour cache pollution
-      const _cacheDestination = rawData.location?.destinationCity || rawData.location?.destinationCountry || "unknown";
-      const _cacheSourceId = rawData.sourceUrl || rawData.normGroupId || rawData.basicInfo?.title?.slice(0, 20) || "";
-      const detailsCacheKey = `${_cacheDestination}::${_cacheSourceId}`;
-      // Round 64 Fix A: respect forceRegenerate flag (previously ignored → stale cache poisoned verification)
-      const cachedDetails = forceRegenerate ? null : await generationCache.getDetailsResult(detailsCacheKey);
-      if (forceRegenerate) {
-        console.log(`[MasterAgent] 🔄 Round 64: forceRegenerate=true — bypassing DetailsSkill cache for key "${detailsCacheKey}"`);
-      }
-      
-      // Execute DetailsSkill (replaces CostAgent, NoticeAgent, HotelAgent, MealAgent)
-      // and TransportationAgent in parallel
-      const [detailsSkillResult, transportationResult] = await Promise.allSettled([
-        // DetailsSkill - P1 optimized: single LLM call for all 4 sub-skills
-        // P3: Skip LLM if cache hit
-        cachedDetails
-          ? Promise.resolve(cachedDetails)
-          : this.retryManager.executeWithRetry(
-              () => this.detailsSkill.executeAllCombined(rawData),
-              this.retryConfig,
-              'DetailsSkill'
-            ),
-        // Transportation Agent - 根據行程類型選擇交通方式
+
+      // Stage B: Transportation runs after itinerary so it has the correct
+      // tourType (TRAIN / FLIGHT / CRUISE / etc.). Wrapped in Promise.allSettled
+      // so downstream code keeps consuming `transportationResult.status === ...`.
+      const transportationResult = await Promise.allSettled([
         this.retryManager.executeWithRetry(
           () => this.transportationAgent.execute(rawData, tourType),
           this.retryConfig,
           'TransportationAgent'
-        )
-      ]);
+        ),
+      ]).then(([r]) => r);
       
       if (cachedDetails) {
         console.log(`[MasterAgent] 🎯 DetailsSkill cache hit for: ${detailsCacheKey} - skipped LLM call`);
@@ -1752,6 +1984,26 @@ export class MasterAgent {
         mealData = this.fallbackManager.handleFailure('MealAgent', error);
       }
       
+      // Round 80.16 P1b fix: if DetailsSkill returned no/empty costs but
+      // rawData has Lion-extracted includes/excludes, fall back to those.
+      // Same for notices.
+      if (
+        (!costData?.includes || (Array.isArray(costData.includes) && costData.includes.length === 0)) &&
+        Array.isArray(rawData.includes) && rawData.includes.length > 0
+      ) {
+        costData = costData || {};
+        costData.includes = rawData.includes;
+        console.log(`[MasterAgent] 💡 P1b: filled costs.includes from Lion featuresHtml (${rawData.includes.length} items)`);
+      }
+      if (
+        (!costData?.excludes || (Array.isArray(costData.excludes) && costData.excludes.length === 0)) &&
+        Array.isArray(rawData.excludes) && rawData.excludes.length > 0
+      ) {
+        costData = costData || {};
+        costData.excludes = rawData.excludes;
+        console.log(`[MasterAgent] 💡 P1b: filled costs.excludes from Lion featuresHtml (${rawData.excludes.length} items)`);
+      }
+
       // Handle TransportationAgent result
       if (transportationResult.status === 'fulfilled') {
         const result = transportationResult.value as any;
@@ -1987,27 +2239,126 @@ export class MasterAgent {
       const finalTags = mergeWithExistingTags(rawData.basicInfo?.tags, allTags);
       console.log(`[MasterAgent] Generated smart tags: ${finalTags.join(', ')}`);
       
+      // Round 80.16 P0b fix: prefer the source's authoritative title.
+      // ContentAnalyzerAgent has been observed hallucinating titles (e.g.
+      // a Bali tour returned "台北五日深度之旅" because the LLM saw
+      // "台北出發" in the raw content). When we have a source title from
+      // Lion API or PDF parsing, that's the truth — keep it as the main
+      // `title`, and let `poeticTitle` carry the LLM's marketing variant
+      // for hero display only.
+      //
+      // v80.24: that policy let供應商促銷話術 leak to PACK&GO pages
+      // (「兒童最高省1萬」「春遊折3千」). New policy:
+      //   1. Strip promo phrases from sourceTitle first (regex blacklist).
+      //   2. If LLM title shares the same primary destination as cleaned
+      //      sourceTitle, prefer LLM (it's PACK&GO-style).
+      //   3. Otherwise fall back to cleaned sourceTitle.
+      const sourceTitleRaw = (rawData?.basicInfo?.title || "").trim();
+      const stripPromoText = (s: string): string => {
+        if (!s) return s;
+        return s
+          // v80.24: Lion / Phoenix / Settour promo phrases — quantifier 千萬 OPTIONAL
+          // (was requiring 千萬 → "春遊折3000" leaked through).
+          .replace(/兒童最高省\d+[千萬]?/g, "")
+          .replace(/春遊折\d+[千萬]?/g, "")
+          .replace(/最高折\d+[千萬]?/g, "")
+          .replace(/早鳥折\d+[千萬]?/g, "")
+          .replace(/折\d+[千萬]/g, "") // standalone 折X千 (still requires unit to avoid "10折")
+          .replace(/省\d+[千萬]/g, "")
+          .replace(/贈\d+[人個次晚]/g, "")
+          .replace(/送\d+[人個次晚]/g, "")
+          .replace(/玩樂\d+/g, "") // 玩樂369 (Lion's discount badge)
+          .replace(/[★☆◆◇]?保證入住/g, "")
+          .replace(/[★☆]?中餐特別安排/g, "")
+          .replace(/[★☆]?升等住\d+晚/g, "")
+          .replace(/[★☆]/g, "")
+          .replace(/(無購物|無自費|指定團|優惠團|特推|特選|促銷|破盤|早鳥|超值|爆殺)/g, "")
+          // v80.24: season/edition tags
+          .replace(/[冬夏春秋]季版/g, "")
+          .replace(/旅展[$＄]?\d*/g, "")
+          .replace(/\d+晚[五四三六七]星/g, "") // "3晚五星"
+          .replace(/[（(]最高[省折][^)）]+[)）]/g, "")
+          // Standalone "最高" at the start (e.g. 「最高│經典義大利」)
+          .replace(/^最高[│|｜]\s*/, "")
+          // Lion supplier code suffix like "(阪名)" "(YYZA)" "(26JX531CXG-T)"
+          .replace(/\([一-鿿]{1,3}\)/g, "") // (阪名)
+          .replace(/\([A-Z0-9-]{4,}\)/g, "") // (26JX531CXG-T)
+          // Tour metadata in parens like "(雙點進出)" "(高雄來回)" "(慕尼黑來回)"
+          .replace(/[（(](雙點進出|單點進出|.{2,4}來回|.{2,4}出發|餐全包|含小費|不含小費|華航直飛|長榮直飛)[)）]/g, "")
+          // Multi-pipe leading/trailing
+          .replace(/^\s*[｜|│]+/, "")
+          .replace(/[｜|│]\s*$/, "")
+          // Collapse whitespace
+          .replace(/\s{2,}/g, " ")
+          .trim();
+      };
+      const sourceTitle = stripPromoText(sourceTitleRaw);
+      const llmTitle = stripPromoText(analyzedContent.title || "");
+      // v80.24: was capping at 60 chars (too restrictive — PACK&GO titles can
+      // legitimately reach 70 chars with multi-attraction subtitles). Bump
+      // upper bound to 80 and lower to 6 (allow short city-only titles).
+      // LLM title also wins over Lion sourceTitle even when longer — Lion's
+      // title is usually noisier (full of pipe-separated promo bullets).
+      const finalTitle = (
+        llmTitle && llmTitle.length >= 6 && llmTitle.length <= 80
+      )
+        ? llmTitle
+        : (sourceTitle || llmTitle || analyzedContent.title);
+      console.log(`[MasterAgent] Title selection: source="${sourceTitleRaw.slice(0,40)}..." llm="${llmTitle.slice(0,40)}..." final="${finalTitle.slice(0,40)}..."`);
+
+      // v80.24: derive group-size range from departures so tour-level
+      // minGroupSize / maxGroupSize aren't always null (Jeff's complaint:
+      // hero「人數」shows nothing). Also propagate heroSubtitle (was missing
+      // → translation pipeline skipped it, EN page still showed Chinese).
+      const departureSlots: number[] = (Array.isArray((rawData as any).departureDates) ? (rawData as any).departureDates : [])
+        .map((d: any) => Number(d?.totalSlots ?? d?.maxParticipants ?? 0))
+        .filter((n: number) => Number.isFinite(n) && n > 0);
+      const minSlots = departureSlots.length > 0 ? Math.min(...departureSlots) : null;
+      const maxSlots = departureSlots.length > 0 ? Math.max(...departureSlots) : null;
+
       const finalData = {
         // Basic info
         poeticTitle: analyzedContent.poeticTitle, // Use ContentAnalyzerAgent's poetic title
         poeticSubtitle: (analyzedContent as any).poeticSubtitle || "",
-        title: analyzedContent.title,
+        // (heroSubtitle assigned at the Hero section below — see line ~2316)
+        title: finalTitle,
         description: analyzedContent.description,
         productCode: rawData.basicInfo?.productCode || "",
         tags: finalTags,
-        
+
         // Location
         destinationCountry: rawData.location?.destinationCountry || "",
         destinationCity: rawData.location?.destinationCity || "",
         departureCity: rawData.location?.departureCity || "",
-        
+
         // Duration
         days: rawData.duration?.days || 0,
         nights: rawData.duration?.nights || 0,
         duration: rawData.duration?.days || 0, // CalibrationAgent checks tourData.duration (not .days)
-        
+
+        // Round 80.16 P2 fix: maxParticipants was being set on rawData (from
+        // lionData.totalSeats / pdfData.totalSlots) but never propagated into
+        // the final tour record, so admin form always showed null.
+        // v80.24: prefer derived maxSlots from departure capacity if higher
+        // — gives a real number for tour cards instead of null.
+        maxParticipants:
+          (rawData as any).maxParticipants ||
+          rawData.extractedTourMeta?.capacity?.maxParticipants ||
+          maxSlots,
+
         // Pricing — Round 50: prefer lionPricing.adultPrice for liontravel URLs
         price: (rawData.lionPricing?.adultPrice || rawData.pricing?.price || 0),
+        // Round 80.18: basePrice removed — column lives in a different
+        // table, not tours. The price field is sufficient for tours.
+        // Round 80.17: startDate / endDate were always empty. Pull from Lion's
+        // GoDate / BackDate (format "2026/08/28") or first/last departureDates.
+        startDate: parseLionDate((rawData as any).lionGoDate || (Array.isArray(rawData.departureDates) ? rawData.departureDates[0] : null)),
+        endDate: parseLionDate((rawData as any).lionBackDate || (Array.isArray(rawData.departureDates) ? rawData.departureDates[rawData.departureDates.length - 1] : null)),
+        // Round 80.17: promotionText from Lion's PromotionText / OrderPrice deposit description
+        promotionText: ((rawData as any).promotionText || rawData.basicInfo?.promotionText || "").toString().slice(0, 255),
+        // Round 80.17: destinationAirport — Lion's outboundFlight.arriveAirport
+        destinationAirportCode: extractAirportCodeLocal((rawData as any).destinationAirportCode || rawData.flights?.[0]?.arrivalAirport),
+        destinationAirportName: (rawData as any).destinationAirportName || rawData.flights?.[0]?.arrivalAirport || null,
         
         // Hero section
         heroImage: heroImage.url,
@@ -2086,6 +2437,13 @@ export class MasterAgent {
           hotelsArrRaw.map((h: any, i: number) => ({
             name: h.name,
             stars: h.stars,
+            // Round 80.20: brand was always rendering "?" because Lion API
+            // doesn't return it and the LLM was never prompted for it.
+            // Now derive it via regex on the hotel name — handles Marriott,
+            // Hyatt, Mercure, 君悅, 涵碧樓 etc. Falls through to the LLM-
+            // provided value if regex misses (boutique hotels), and to
+            // null if neither — UI hides the "·brand" segment when null.
+            brand: extractHotelBrand(h.name) ?? h.brand ?? null,
             description: h.description,
             facilities: h.facilities,
             location: h.location,
@@ -2234,19 +2592,39 @@ export class MasterAgent {
       // existing value we override, because city names are more reliable than /en/ path
       // hints or LLM guesses.
       {
+        // v80.24: order matters — keyword check is FIRST-MATCH-WINS, so put
+        // longer/more specific country names BEFORE city names. Country
+        // self-map ensures "斯里蘭卡九日..." matches "斯里蘭卡" before any
+        // ambiguous city in rawText (Sri Lanka tours often transit via 吉隆坡
+        // which polluted the city field, then countryMap fell through to "日本").
         const countryMap: Record<string, string> = {
-          // Country names (self-map)
+          // Country names FIRST — these win over city names (many SE Asia
+          // tours transit through KL / Singapore / HK so the city field is
+          // unreliable; title is the source of truth).
+          '斯里蘭卡': '斯里蘭卡', '孟加拉': '孟加拉', '巴基斯坦': '巴基斯坦',
+          '不丹': '不丹', '馬爾地夫': '馬爾地夫',
           '日本': '日本', '韓國': '韓國', '泰國': '泰國', '越南': '越南',
           '義大利': '義大利', '法國': '法國', '西班牙': '西班牙', '英國': '英國',
           '德國': '德國', '瑞士': '瑞士', '奧地利': '奧地利', '荷蘭': '荷蘭',
           '土耳其': '土耳其', '希臘': '希臘', '捷克': '捷克', '克羅埃西亞': '克羅埃西亞',
+          '匈牙利': '匈牙利', '波蘭': '波蘭', '葡萄牙': '葡萄牙',
           '美國': '美國', '加拿大': '加拿大', '澳洲': '澳洲', '紐西蘭': '紐西蘭',
           '新加坡': '新加坡', '馬來西亞': '馬來西亞', '印尼': '印尼', '菲律賓': '菲律賓',
           '柬埔寨': '柬埔寨', '緬甸': '緬甸', '印度': '印度', '尼泊爾': '尼泊爾',
-          '埃及': '埃及', '摩洛哥': '摩洛哥', '南非': '南非',
-          '秘魯': '秘魯', '智利': '智利', '巴西': '巴西', '阿根廷': '阿根廷',
+          '埃及': '埃及', '摩洛哥': '摩洛哥', '南非': '南非', '肯亞': '肯亞', '坦尚尼亞': '坦尚尼亞',
+          '秘魯': '秘魯', '智利': '智利', '巴西': '巴西', '阿根廷': '阿根廷', '哥倫比亞': '哥倫比亞', '墨西哥': '墨西哥',
           '冰島': '冰島', '挪威': '挪威', '芬蘭': '芬蘭', '瑞典': '瑞典', '丹麥': '丹麥',
-          '帛琉': '帛琉', '帛琉島': '帛琉', '巴里島': '印尼', '巴里': '印尼',
+          '愛爾蘭': '愛爾蘭', '比利時': '比利時', '盧森堡': '盧森堡',
+          '俄羅斯': '俄羅斯', '蒙古': '蒙古',
+          '杜拜': '杜拜', '阿聯': '阿聯', '阿拉伯聯合大公國': '阿聯',
+          '以色列': '以色列', '約旦': '約旦', '伊朗': '伊朗',
+          '帛琉': '帛琉', '帛琉島': '帛琉', '巴里島': '印尼', '巴里': '印尼', '峇里': '印尼',
+          // Sri Lanka cities — added v80.24
+          '可倫坡': '斯里蘭卡', '康提': '斯里蘭卡', '肯迪': '斯里蘭卡',
+          '加勒': '斯里蘭卡', '迦勒': '斯里蘭卡', '雅拉': '斯里蘭卡',
+          '獅子岩': '斯里蘭卡', '丹布拉': '斯里蘭卡', '錫吉里耶': '斯里蘭卡',
+          // Malaysia cities — kept LOW priority (transit-only) to not override
+          // a Sri Lanka tour that just happens to transit through KL.
           // SE Asia cities
           '曼谷': '泰國', '清邁': '泰國', '普吉': '泰國',
           '河內': '越南', '胡志明': '越南', '峴港': '越南',
@@ -2268,12 +2646,18 @@ export class MasterAgent {
           '大分': '日本', 'Oita': '日本', '別府': '日本', '由布院': '日本', '湯布院': '日本',
           '宮崎': '日本', 'Miyazaki': '日本',
           '那霸': '日本', '石垣': '日本', '宮古島': '日本',
-          // Taiwan cities
+          // Taiwan cities + 離島 + 景點
           '台灣': '台灣', '台北': '台灣', '台中': '台灣', '台南': '台灣', '高雄': '台灣',
           '花蓮': '台灣', '宜蘭': '台灣', '嘉義': '台灣', '屏東': '台灣', '台東': '台灣',
           '新竹': '台灣', '南投': '台灣', '雲林': '台灣', '彰化': '台灣', '基隆': '台灣',
+          '苗栗': '台灣', '桃園': '台灣',
           '日月潭': '台灣', '阿里山': '台灣', '太魯閣': '台灣',
           '澎湖': '台灣', '金門': '台灣', '馬祖': '台灣',
+          // v80.24: 加台灣離島 / 知名景點 (小琉球 was missing)
+          '小琉球': '台灣', '琉球': '台灣', '綠島': '台灣', '蘭嶼': '台灣',
+          '墾丁': '台灣', '清境': '台灣', '九份': '台灣', '淡水': '台灣',
+          '北投': '台灣', '烏來': '台灣', '陽明山': '台灣', '太麻里': '台灣',
+          '七星潭': '台灣', '鯉魚潭': '台灣', '合歡山': '台灣', '玉山': '台灣',
         };
         const textToSearch = [
           finalData.destinationCity || '',
@@ -2284,12 +2668,32 @@ export class MasterAgent {
           rawData?.rawText?.slice(0, 2000) || '',
         ].join(' ');
 
+        // v80.24: was first-keyword-wins (Object.entries iteration order),
+        // which broke when title contained ambiguous landmarks like
+        // 「小瑞士花園」 (real bug: matched「瑞士」 before「南投」). New
+        // algorithm finds the EARLIEST position in textToSearch — destinationCity
+        // and title come first in the joined string, so legitimate destination
+        // keywords win over noisy rawText mentions.
         let derivedCountry = '';
+        let derivedPos = Infinity;
+        let derivedKeyword = '';
         for (const [keyword, country] of Object.entries(countryMap)) {
-          if (textToSearch.includes(keyword)) {
+          const pos = textToSearch.indexOf(keyword);
+          if (pos !== -1 && pos < derivedPos) {
+            // Defensive: skip if keyword is part of larger landmark name like
+            // 「小瑞士」(small Switzerland-themed park) or 「日本料理」(restaurant).
+            const before = textToSearch[pos - 1] || '';
+            const after = textToSearch[pos + keyword.length] || '';
+            const ambiguousPrefix = ['小', '新', '老', '舊'].includes(before);
+            const ambiguousSuffix = ['料理', '風格', '餐廳', '街', '通'].some(s => textToSearch.slice(pos + keyword.length).startsWith(s));
+            if (ambiguousPrefix || ambiguousSuffix) continue;
             derivedCountry = country;
-            break;
+            derivedPos = pos;
+            derivedKeyword = keyword;
           }
+        }
+        if (derivedKeyword) {
+          console.log(`[MasterAgent] Country derivation: matched "${derivedKeyword}" at pos ${derivedPos} → ${derivedCountry}`);
         }
 
         const currentCountry = finalData.destinationCountry;
@@ -2302,6 +2706,19 @@ export class MasterAgent {
             );
           }
           finalData.destinationCountry = derivedCountry;
+        }
+
+        // v80.24: backfill destinationCity from the matched keyword if empty
+        // (fixes 小琉球 case where Lion gave us empty city). Don't overwrite
+        // if city already set (admin may have edited).
+        if (!finalData.destinationCity && derivedKeyword) {
+          // Skip if keyword is a country name (e.g. 「日本」 itself) — only
+          // city/landmark keywords make sense as a city.
+          const isCountryKeyword = derivedKeyword === derivedCountry;
+          if (!isCountryKeyword) {
+            finalData.destinationCity = derivedKeyword;
+            console.log(`[MasterAgent] Backfilled destinationCity from keyword: ${derivedKeyword}`);
+          }
         }
       }
 
@@ -2370,23 +2787,12 @@ export class MasterAgent {
         }
       }
 
-      // Fix 5: hotels fallback — use default hotels if empty array
-      {
-        let hotelArr: any[] = [];
-        try { hotelArr = JSON.parse(finalData.hotels || '[]'); } catch { hotelArr = []; }
-        if (hotelArr.length === 0) {
-          const dest = finalData.destinationCity || finalData.destinationCountry || '目的地';
-          finalData.hotels = JSON.stringify([
-            {
-              name: `${dest}精選飯店`,
-              stars: '四星級',
-              description: `位於${dest}的優質飯店，提供舒適的住宿環境和完善的設施。地理位置優越，鄰近主要景點，交通便利。客房寬敞明亮，配備現代化設施，讓您在旅途中享受家一般的溫馨。`,
-              facilities: ['免費 WiFi', '健身房', '餐廳', '商務中心', '機場接送'],
-              location: `${dest}市中心`,
-            }
-          ]);
-        }
-      }
+      // v80.24: was injecting a fake "X 精選飯店 四星級" with fabricated description
+      // when hotels array was empty. Bad — Jeff's compliant: "幾星都沒說" / fabricated
+      // info. We now leave the hotels array empty when no real data; the UI's
+      // empty-state will say "飯店資訊將於出發前 14 天提供" rather than show fake
+      // 4-star hotel cards.
+      // (Original fallback removed — see git history if you need to restore.)
 
       // Fix 6: meals fallback — use default meals if empty array
       {

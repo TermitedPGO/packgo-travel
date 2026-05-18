@@ -1,5 +1,6 @@
 import { invokeLLM } from "../_core/llm";
 import { logLlmUsage } from "../llmUsageService";
+import { parseLlmJson } from "../_core/parseLlmJson";
 import * as skillDb from "../skillDb";
 import { InsertAgentSkill } from "../../drizzle/schema";
 
@@ -99,7 +100,11 @@ ${pdfContent.substring(0, 15000)}
 - 關鍵字必須是 PDF 中實際出現的詞彙
 - 規則必須基於 PDF 中的實際模式`;
 
+    // Round 80.15: explicitly route to Haiku — this is short-task pattern
+    // extraction, not deep reasoning. Defaulting to Sonnet was costing 12x
+    // more tokens than needed.
     const response = await invokeLLM({
+      model: "claude-haiku-4-5-20251001",
       messages: [
         { role: "system", content: "你是一個旅遊行程分析專家，專門識別行程特色和分類模式。請只回傳 JSON 格式的結果。" },
         { role: "user", content: analysisPrompt }
@@ -176,12 +181,12 @@ ${pdfContent.substring(0, 15000)}
       }).catch(() => { /* silent */ });
     }
 
-    // 2. 解析 LLM 回應
+    // 2. 解析 LLM 回應 — v80.24: use parseLlmJson to handle fences + prose
     let extractedSkills: ExtractedSkill[] = [];
     try {
       const content = response.choices[0]?.message?.content;
       if (content && typeof content === 'string') {
-        const parsed = JSON.parse(content);
+        const parsed = parseLlmJson<{ skills?: ExtractedSkill[] }>(content);
         extractedSkills = parsed.skills || [];
       }
     } catch (parseError) {

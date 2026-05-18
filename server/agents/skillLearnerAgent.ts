@@ -10,6 +10,7 @@
 
 import { invokeLLM } from "../_core/llm";
 import { logLlmUsage } from "../llmUsageService";
+import { parseLlmJson } from "../_core/parseLlmJson";
 import { getDb } from "../db";
 import { agentSkills, skillApplicationLogs } from "../../drizzle/schema";
 import { eq, and, sql } from "drizzle-orm";
@@ -200,7 +201,10 @@ ${content}
 7. 旅遊主題（蜜月、親子、銀髮族等）`;
 
     try {
+      // Round 80.15: skill keyword extraction — short classification task,
+      // route to Haiku to save 12x tokens.
       const response = await invokeLLM({
+        model: "claude-haiku-4-5-20251001",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt }
@@ -274,8 +278,18 @@ ${content}
           outputTokens: response.usage.completion_tokens,
         }).catch(() => { /* silent */ });
       }
+      // v80.24: use shared parseLlmJson — handles fences + prose
       const messageContent = response.choices[0].message.content;
-      const result = JSON.parse(typeof messageContent === 'string' ? messageContent : JSON.stringify(messageContent) || "{}");
+      const contentStr = typeof messageContent === 'string'
+        ? messageContent
+        : (messageContent ? JSON.stringify(messageContent) : "{}");
+      const result = parseLlmJson<{
+        extractedKeywords: string[];
+        matchedKeywords: string[];
+        categories: { name: string; keywords: string[]; confidence: number }[];
+        suggestedNewCategories: { name: string; description: string; keywords: string[] }[];
+        tourCharacteristics: string[];
+      }>(contentStr);
       return result;
     } catch (error) {
       console.error("[SkillLearnerAgent] AI analysis failed:", error);

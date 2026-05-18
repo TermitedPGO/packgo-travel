@@ -9,8 +9,17 @@
  * 5. 標出問題卡在哪一個環節
  */
 
-import { ItineraryExtractAgent, ExtractedItinerary } from './itineraryExtractAgent';
+// NOTE (Round 80.15-D cleanup): diagnostics still instantiates
+// `ItineraryExtractAgent` and `ItineraryPolishAgent`, but those are now
+// deprecated shells whose `execute()` methods throw. The catch blocks in
+// `testItineraryExtractAgent` / `testItineraryPolishAgent` surface the
+// deprecation as an "error" status in the diagnostic report, which is
+// the desired behaviour until we have shadow-testing infrastructure that
+// can compare `ItineraryUnifiedAgent` against historical baselines.
+// They may be removed entirely once that infrastructure is in place.
+import { ItineraryExtractAgent } from './itineraryExtractAgent';
 import { ItineraryPolishAgent } from './itineraryPolishAgent';
+import type { ExtractedItinerary } from './itineraryTypes';
 import { ContentAnalyzerAgent } from './contentAnalyzerAgent';
 import { ColorThemeAgent } from './colorThemeAgent';
 import { LionTravelPrintParser } from './parsers/lionTravelPrintParser';

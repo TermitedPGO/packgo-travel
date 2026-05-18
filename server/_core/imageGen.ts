@@ -96,6 +96,9 @@ export async function generateImage(opts: GenerateOptions): Promise<GenerateResu
   const size = opts.size || "1024x1024";
   const quality = opts.quality || "medium";
 
+  // Round 80.21 v12: gpt-image-2 doesn't accept `response_format` — it
+  // returns b64_json by default. Passing the param triggers
+  // `400 Unknown parameter: 'response_format'` from OpenAI.
   const response = (await client.images.generate(
     {
       model: MODEL_ID,
@@ -103,7 +106,6 @@ export async function generateImage(opts: GenerateOptions): Promise<GenerateResu
       size: size as any,
       quality: quality as any,
       n: 1,
-      response_format: "b64_json" as any,
     },
     { timeout: opts.timeoutMs || defaultTimeoutFor(quality) }
   )) as any;
@@ -160,6 +162,8 @@ export async function editImage(opts: EditOptions): Promise<GenerateResult> {
     ? await toFile(opts.mask, "mask.png", { type: "image/png" })
     : undefined;
 
+  // Round 80.21 v12: gpt-image-2 doesn't accept `response_format`
+  // (returns b64_json by default). Same fix as `generate` above.
   const params: any = {
     model: MODEL_ID,
     prompt: opts.prompt,
@@ -167,7 +171,6 @@ export async function editImage(opts: EditOptions): Promise<GenerateResult> {
     size,
     quality,
     n: 1,
-    response_format: "b64_json",
   };
   if (maskFile) params.mask = maskFile;
 

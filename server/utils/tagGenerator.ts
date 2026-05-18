@@ -3,7 +3,7 @@
  * 根據行程資料自動生成正確的標籤
  */
 
-import { TourType } from "../agents/itineraryExtractAgent";
+import { TourType } from "../agents/itineraryTypes";
 
 // 標籤類型定義
 export interface GeneratedTag {

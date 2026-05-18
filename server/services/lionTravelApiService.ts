@@ -78,6 +78,11 @@ export interface LionTravelApiData {
   tourDays: number;
   goDate: string;
   backDate: string;
+  // Round 80.10: API exposes ISO-2 country code (e.g. "TW", "JP", "US"). The
+  // masterAgent used to only do keyword-matching on tourName which missed
+  // Taiwan domestic / train tours / regional tour names. Now we use this as
+  // the primary source.
+  country: string;
   // Price & availability
   price: number;
   currencyCode: string;
@@ -400,6 +405,7 @@ export async function fetchLionTravelData(
       totalSeats: gi.TotalSeats ?? 0,
       spareSeats: gi.SpareSeats ?? 0,
       heroImageUrl: gi.NormGroupImg ?? '',
+      country: gi.Country ?? '', // Round 80.10: ISO-2 country code (TW/JP/US/etc.)
       tags,
       tripTypes,
       departureCity: departureCities[0] ?? '',
@@ -429,6 +435,75 @@ export async function fetchLionTravelData(
     if (err?.stack) console.error(`  stack (top 3): ${err.stack.split('\n').slice(0, 3).join(' | ')}`);
     return null;
   }
+}
+
+// ─── extractCostSectionsFromFeaturesHtml ──────────────────────────────────────
+// Round 80.16 P1b fix: Lion's `featuresHtml` contains 費用包含 / 費用不包含 /
+// 注意事項 sections as <h2>/<h3> headers followed by <ul><li> bullet lists.
+// We parse them out so DetailsSkill (or final assembly) can populate the
+// tour's `includes` / `excludes` / `notices` arrays even in URL-only mode.
+
+export interface ExtractedCostSections {
+  includes: string[];
+  excludes: string[];
+  notices: string[]; // additional notices beyond noticeinfojson
+}
+
+export function extractCostSectionsFromFeaturesHtml(html: string): ExtractedCostSections {
+  if (!html) return { includes: [], excludes: [], notices: [] };
+
+  // Find each section — match a header (any <hN> or 標題) containing the
+  // keyword, then capture the following <ul>/<ol> block until the next header.
+  const result: ExtractedCostSections = { includes: [], excludes: [], notices: [] };
+
+  // Normalise: keep tags but compress whitespace
+  const normalized = html.replace(/\s+/g, ' ');
+
+  const sections: Array<{ key: keyof ExtractedCostSections; patterns: RegExp[] }> = [
+    {
+      key: "includes",
+      patterns: [
+        /(費用[包含包括]+|費用包含|包含費用|費用所含)/,
+      ],
+    },
+    {
+      key: "excludes",
+      patterns: [
+        /(費用不[包含包括]+|不[包含包括]+費用|費用[不未][包含包括]|另需付費)/,
+      ],
+    },
+    {
+      key: "notices",
+      patterns: [/(注意事項|貼心提醒|出團須知|報名須知|溫馨提醒)/],
+    },
+  ];
+
+  for (const sec of sections) {
+    for (const pat of sec.patterns) {
+      // Look for the keyword, then capture everything until the next header
+      // or end of doc, then pull out <li> entries.
+      const re = new RegExp(
+        `${pat.source}[^<]{0,80}?<[^>]+>([\\s\\S]*?)(?=<h[1-6]|<div[^>]+title|<p[^>]+title|$)`,
+        "i"
+      );
+      const m = normalized.match(re);
+      if (!m) continue;
+      const block = m[2] || m[1] || "";
+      const items = [...block.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)]
+        .map((mm) =>
+          stripHtml(mm[1])
+            .replace(/^[\s•・·*●○\-—]+/, "")
+            .trim()
+        )
+        .filter((s) => s && s.length > 1 && s.length < 500);
+      if (items.length > 0) {
+        result[sec.key] = items.slice(0, 30);
+        break; // first matching pattern wins
+      }
+    }
+  }
+
+  return result;
 }
 
 // ─── buildRawContentFromLionData ────────────────────────────────────────────────

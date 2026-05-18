@@ -52,6 +52,9 @@ const KNOWN_ROUTE_PATTERNS: RegExp[] = [
   /^\/privacy-policy$/,
   /^\/faq$/,
   /^\/contact-us$/,
+  /^\/membership$/,                       // Round 80.19: AI Advisor Phase 1 paywall target
+  /^\/rewards$/,                          // Round 80.22 Phase F: Packpoint redemption catalog
+  /^\/preview\/[^/]+$/,                   // Round 80.9: internal preview/mockup routes
   /^\/404$/,
 ];
 
@@ -127,7 +130,21 @@ export function serveStatic(app: Express) {
     );
   }
 
-  app.use(express.static(distPath));
+  // SEO audit 2026-05-09: hashed JS/CSS bundles served with Cache-Control:
+  // max-age=0 was tanking repeat-visit performance. Hashed filenames are the
+  // entire point of immutable caching — set 1y immutable for assets, but keep
+  // index.html short-cache so deployments propagate immediately.
+  app.use(
+    express.static(distPath, {
+      maxAge: "1y",
+      immutable: true,
+      setHeaders: (res, p) => {
+        if (p.endsWith(".html")) {
+          res.setHeader("Cache-Control", "public, max-age=0, must-revalidate");
+        }
+      },
+    })
+  );
 
   // fall through to index.html if the file doesn't exist
   // 跳過 API 路徑，讓 tRPC 和其他 API router 處理

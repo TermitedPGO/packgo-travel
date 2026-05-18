@@ -4,7 +4,7 @@
  */
 
 import { searchUnsplashPhotos } from "./unsplashService";
-import { PolishedItinerary } from "../agents/itineraryPolishAgent";
+import { PolishedItinerary } from "../agents/itineraryTypes";
 
 /**
  * 為每日行程配置圖片

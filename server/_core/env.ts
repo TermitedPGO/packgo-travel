@@ -40,8 +40,15 @@ export const ENV = {
   googleCseId: process.env.GOOGLE_CSE_ID ?? "",
   stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? "",
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
+  // Round 80.20 → 80.21: Membership pricing — each tier has yearly + monthly
+  // variants. Yearly is the discounted commitment (≈ 2 months free vs monthly).
+  // Suggested: Plus $99/yr or $9.99/mo · Concierge $399/yr or $39.99/mo.
+  stripePricePlusYearlyId: process.env.STRIPE_PRICE_PLUS_YEARLY_ID ?? process.env.STRIPE_PRICE_PLUS_ID ?? "",
+  stripePricePlusMonthlyId: process.env.STRIPE_PRICE_PLUS_MONTHLY_ID ?? "",
+  stripePriceConciergeYearlyId: process.env.STRIPE_PRICE_CONCIERGE_YEARLY_ID ?? process.env.STRIPE_PRICE_CONCIERGE_ID ?? "",
+  stripePriceConciergeMonthlyId: process.env.STRIPE_PRICE_CONCIERGE_MONTHLY_ID ?? "",
   unsplashAccessKey: process.env.UNSPLASH_ACCESS_KEY ?? "",
   unsplashSecretKey: process.env.UNSPLASH_SECRET_KEY ?? "",
   // P0-4: Base URL for sitemap and other absolute URL generation
-  baseUrl: process.env.BASE_URL ?? "https://packgo-travel.fly.dev",
+  baseUrl: process.env.BASE_URL ?? "https://packgoplay.com",
 };

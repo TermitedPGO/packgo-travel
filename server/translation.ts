@@ -121,6 +121,28 @@ export async function translateText(
     let systemPrompt: string;
     let userContent: string;
 
+    // Round 80.20 — strengthened anti-CJK-leakage rules:
+    // Jeff reported English output strings like "Hokkaido的季節限定美學",
+    // "長榮直飛Paris...品味France文化深度" — i.e. proper nouns translated
+    // but Chinese particles/connectors (的, 與, 從, 到) stayed Chinese.
+    // The cause: the LLM treated mixed-input as "already partially
+    // translated" and only filled the gaps. New rules below force-translate
+    // EVERY Chinese character including particles.
+    const isTargetEnglish = targetLanguage === 'en';
+    const cjkLeakRule = isTargetEnglish
+      ? `\n\nZERO-TOLERANCE CJK RULE — CRITICAL FOR ENGLISH OUTPUT:
+- The output MUST contain ZERO Chinese, Japanese, or Korean characters.
+- This includes ALL CJK content: connectors (的, 與, 和, 或, 從, 到, 於, 之), verbs (品味, 探索, 體驗, 漫步), adjectives (美麗, 精緻), nouns (美學, 文化, 季節, 風景).
+- If the source contains both Chinese and English in one string (e.g. "Hokkaido的季節限定美學" or "長榮直飛Paris品味France文化"), TRANSLATE THE CHINESE PORTIONS to English. Do NOT preserve them as-is.
+  ✓ "Hokkaido的季節限定美學" → "Hokkaido's seasonal aesthetic"
+  ✓ "長榮直飛Paris品味France文化" → "EVA direct flight to Paris to savor French culture"
+  ✓ "從蘇黎世到Bern" → "From Zürich to Bern"
+  ✗ NEVER output: "Hokkaido的seasonal beauty" (Chinese particle 的 leaked)
+  ✗ NEVER output: "Visit Paris品味the city" (verb 品味 leaked)
+- Even rare Chinese characters (eg 之/於/處) MUST be translated.
+- Dictionary check: if your output contains any of [的, 與, 和, 或, 之, 於, 從, 到, 一, 是, 有, 在, 我, 你, 他, 她, 它, 們, 這, 那, 個, 等] — your translation is incomplete. Rewrite it.`
+      : '';
+
     if (parsedJson !== null) {
       // JSON 模式：要求 AI 保留結構，只翻譯文字值
       systemPrompt = `You are a professional translator specializing in travel and tourism content.
@@ -145,6 +167,7 @@ BILINGUAL CONTENT HANDLING (very important):
 - For star ratings like "四星級", "五星級" — translate to "4-star", "5-star"
 - For times like "待確認" — translate to "To be confirmed"
 - For meal types "早餐/午餐/晚餐" — translate to "Breakfast/Lunch/Dinner"
+${cjkLeakRule}
 
 OUTPUT: Output ONLY the JSON, no explanation, no markdown code blocks, no preamble.
 
@@ -169,6 +192,7 @@ Style guidelines:
 - Keep proper nouns appropriately translated or transliterated
 - Use industry-standard travel terminology
 - Preserve formatting (line breaks, punctuation)
+${cjkLeakRule}
 
 ${buildProperNounSystemPrompt()}`;
       userContent = text;
@@ -241,10 +265,80 @@ ${buildProperNounSystemPrompt()}`;
       // Post-processing for plain text: apply proper noun dictionary
       translatedText = applyProperNounDictionary(translatedText);
     }
-    
+
+    // Round 80.20 — CJK leakage retry:
+    // If target is English and the output STILL contains CJK characters
+    // (Chinese particles like 的/與/從/到/品味/文化 leaking through), retry
+    // ONCE with an explicit complaint listing the leaked characters. The
+    // LLM is much more likely to fully translate when shown its mistake.
+    if (targetLanguage === 'en') {
+      const cjkRegex = /[一-鿿぀-ヿ가-힯]/g;
+      const leakedChars = translatedText.match(cjkRegex);
+      if (leakedChars && leakedChars.length > 0) {
+        const uniqueLeaks = Array.from(new Set(leakedChars)).slice(0, 30).join('');
+        console.warn(
+          `[Translation Agent] CJK leak detected in EN output. Leaked chars: "${uniqueLeaks}". Input: "${text.slice(0, 60)}…". Retrying with stricter prompt.`
+        );
+        try {
+          const retrySystem = `You are a professional translator. Your previous translation incorrectly preserved Chinese characters: [${uniqueLeaks}].
+Translate the source text to PURE English with ZERO Chinese characters. Translate ALL particles (的, 與, 從, 到), verbs, and nouns into their English equivalents.
+Output ONLY the corrected English translation — no explanation, no markdown, no preamble.
+
+${buildProperNounSystemPrompt()}`;
+          const retryRes = await invokeLLM({
+            model: 'claude-haiku-4-5-20251001',
+            maxTokens: estimatedTokens,
+            messages: [
+              { role: 'system', content: retrySystem },
+              {
+                role: 'user',
+                content: parsedJson !== null ? trimmed : text,
+              },
+            ],
+          });
+          const retryContent = retryRes.choices[0]?.message?.content;
+          let retryText = typeof retryContent === 'string' ? retryContent.trim() : '';
+          if (parsedJson !== null) {
+            retryText = retryText
+              .replace(/^```json\s*/i, '')
+              .replace(/^```\s*/i, '')
+              .replace(/\s*```$/i, '')
+              .trim();
+            try {
+              const reparsed = JSON.parse(retryText);
+              retryText = JSON.stringify(applyDictionaryToJson(reparsed));
+            } catch {
+              retryText = ''; // invalid JSON → keep original
+            }
+          } else {
+            retryText = applyProperNounDictionary(retryText);
+          }
+          // Only accept retry if it has FEWER CJK chars than the first attempt
+          const retryLeaks = retryText.match(cjkRegex)?.length ?? Infinity;
+          if (retryText && retryLeaks < leakedChars.length) {
+            console.log(
+              `[Translation Agent] CJK retry improved from ${leakedChars.length} to ${retryLeaks} CJK chars`
+            );
+            translatedText = retryText;
+          }
+          if (retryRes.usage) {
+            logLlmUsage({
+              agentName: 'TranslationAgent',
+              taskType: 'translation_cjk_retry',
+              model: retryRes.model || 'claude-haiku-4-5',
+              inputTokens: retryRes.usage.prompt_tokens,
+              outputTokens: retryRes.usage.completion_tokens,
+            }).catch(() => {});
+          }
+        } catch (retryErr) {
+          console.warn('[Translation Agent] CJK retry failed:', retryErr);
+        }
+      }
+    }
+
     // 儲存到快取（Redis 持久化 + 記憶體）
     await setCachedTranslation(cacheKey, translatedText);
-    
+
     return translatedText;
   } catch (error) {
     console.error('[Translation Agent] Error:', error);

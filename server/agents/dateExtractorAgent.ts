@@ -11,6 +11,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { CLAUDE_MODELS } from './claudeAgent';
 import { logLlmUsage } from '../llmUsageService';
+import { parseLlmJson } from '../_core/parseLlmJson';
 
 export interface ExtractedTourMeta {
   departureDates: Array<{
@@ -683,14 +684,11 @@ JSON 格式：
       .join('\n');
     
     console.log(`[DateExtractor] Claude response: ${content.slice(0, 200)}...`);
-    
-    // 解析 JSON 回應
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error('No JSON found in Claude response');
-    }
-    
-    const extracted = JSON.parse(jsonMatch[0]) as ExtractedTourMeta;
+
+    // v80.24: use shared parseLlmJson — handles ```json fences and trailing
+    // prose. Old `match(/\{[\s\S]*\}/)` broke on responses that wrapped JSON
+    // in code fences or had explanatory prose before/after.
+    const extracted = parseLlmJson<ExtractedTourMeta>(content);
     
     // ============================================================
     // P0-Harness: 結構化驗證 + 5 策略 fallback chain

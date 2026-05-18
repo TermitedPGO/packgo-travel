@@ -1,9 +1,27 @@
 /**
  * 進度追蹤管理器
  * 用於追蹤 AI 自動生成行程的進度，並透過 SSE 即時回報給前端
+ *
+ * v80.24: now Redis-backed in addition to in-memory Map. The audit found
+ * the previous in-memory-only design had three failure modes:
+ *   1. Worker restart mid-generation → frontend polls forever, never gets
+ *      partial results.
+ *   2. Multi-worker production → only the worker that handled the task
+ *      knows the progress; other workers' API responses are blank.
+ *   3. Memory leak → tasks never auto-cleaned, Map grows forever.
+ *
+ * Strategy: write-through to Redis on every state change with TTL=1h.
+ * EventEmitter is still used for in-process SSE subscribers (no change for
+ * the happy path). On `getProgress` we check Redis if the local Map misses.
+ *
+ * Redis keys: `progress:{taskId}` → JSON-serialized GenerationProgress.
  */
 
 import { EventEmitter } from 'events';
+import { redis } from '../redis';
+
+const REDIS_KEY_PREFIX = 'progress:';
+const REDIS_TTL_SECONDS = 60 * 60; // 1 hour past last update
 
 // Agent 執行階段定義
 export interface AgentPhase {
@@ -89,11 +107,30 @@ const PHASE_WEIGHTS: Record<string, number> = {
 };
 
 /**
+ * Internal helper: persist current progress to Redis. Errors are swallowed
+ * so a Redis blip never breaks generation — the in-memory Map is still
+ * authoritative for the worker that owns the task.
+ */
+async function writeToRedis(taskId: string, progress: GenerationProgress): Promise<void> {
+  try {
+    await redis.set(
+      `${REDIS_KEY_PREFIX}${taskId}`,
+      JSON.stringify(progress),
+      'EX',
+      REDIS_TTL_SECONDS
+    );
+  } catch (err) {
+    // Don't crash generation if Redis is briefly unavailable
+    console.warn(`[progressTracker] Redis write failed for ${taskId}:`, (err as Error).message);
+  }
+}
+
+/**
  * 進度追蹤器類別
  */
 export class ProgressTracker extends EventEmitter {
   private progresses: Map<string, GenerationProgress> = new Map();
-  
+
   /**
    * 創建新的生成任務
    */
@@ -115,21 +152,23 @@ export class ProgressTracker extends EventEmitter {
     };
     
     this.progresses.set(taskId, progress);
+    void writeToRedis(taskId, progress);
     return progress;
   }
-  
+
   /**
    * 更新漸進式結果
    */
   updatePartialResults(taskId: string, results: Partial<PartialResults>): void {
     const progress = this.progresses.get(taskId);
     if (!progress) return;
-    
+
     progress.partialResults = {
       ...progress.partialResults,
       ...results,
     };
-    
+
+    void writeToRedis(taskId, progress);
     this.emitProgress(taskId, 'phase_progress');
   }
   
@@ -146,115 +185,137 @@ export class ProgressTracker extends EventEmitter {
     phase.status = 'running';
     phase.startTime = Date.now();
     phase.progress = 0;
-    
+
     progress.status = 'running';
     progress.currentPhase = phaseId;
-    
+
+    void writeToRedis(taskId, progress);
     this.emitProgress(taskId, 'phase_start');
   }
-  
+
   /**
    * 更新階段進度
    */
   updatePhaseProgress(taskId: string, phaseId: string, phaseProgress: number): void {
     const progress = this.progresses.get(taskId);
     if (!progress) return;
-    
+
     const phase = progress.phases.find(p => p.id === phaseId);
     if (!phase) return;
-    
+
     phase.progress = Math.min(100, Math.max(0, phaseProgress));
-    
-    // 重新計算整體進度
+
     this.recalculateOverallProgress(taskId);
-    
+    void writeToRedis(taskId, progress);
     this.emitProgress(taskId, 'phase_progress');
   }
-  
+
   /**
    * 完成某個階段
    */
   completePhase(taskId: string, phaseId: string): void {
     const progress = this.progresses.get(taskId);
     if (!progress) return;
-    
+
     const phase = progress.phases.find(p => p.id === phaseId);
     if (!phase) return;
-    
+
     phase.status = 'completed';
     phase.progress = 100;
     phase.endTime = Date.now();
     phase.duration = phase.startTime ? phase.endTime - phase.startTime : 0;
-    
-    // 重新計算整體進度
+
     this.recalculateOverallProgress(taskId);
-    
+    void writeToRedis(taskId, progress);
     this.emitProgress(taskId, 'phase_complete');
   }
-  
+
   /**
    * 標記階段失敗
    */
   failPhase(taskId: string, phaseId: string, error: string): void {
     const progress = this.progresses.get(taskId);
     if (!progress) return;
-    
+
     const phase = progress.phases.find(p => p.id === phaseId);
     if (!phase) return;
-    
+
     phase.status = 'failed';
     phase.endTime = Date.now();
     phase.duration = phase.startTime ? phase.endTime - phase.startTime : 0;
     phase.error = error;
-    
-    // 重新計算整體進度
+
     this.recalculateOverallProgress(taskId);
-    
+    void writeToRedis(taskId, progress);
     this.emitProgress(taskId, 'phase_error');
   }
-  
+
   /**
    * 完成整個生成任務
    */
   completeTask(taskId: string): void {
     const progress = this.progresses.get(taskId);
     if (!progress) return;
-    
+
     progress.status = 'completed';
     progress.overallProgress = 100;
     progress.endTime = Date.now();
     progress.totalDuration = progress.endTime - progress.startTime;
-    
+
+    void writeToRedis(taskId, progress);
     this.emitProgress(taskId, 'generation_complete');
   }
-  
+
   /**
    * 標記整個任務失敗
    */
   failTask(taskId: string, error: string): void {
     const progress = this.progresses.get(taskId);
     if (!progress) return;
-    
+
     progress.status = 'failed';
     progress.error = error;
     progress.endTime = Date.now();
     progress.totalDuration = progress.endTime - progress.startTime;
-    
+
+    void writeToRedis(taskId, progress);
     this.emitProgress(taskId, 'generation_error');
   }
-  
+
   /**
-   * 獲取任務進度
+   * 獲取任務進度（in-memory; for Redis-backed cross-worker reads use
+   * `getProgressAsync` instead — the routers layer should switch to that)
    */
   getProgress(taskId: string): GenerationProgress | undefined {
     return this.progresses.get(taskId);
   }
-  
+
+  /**
+   * 跨 worker 讀取進度 — falls back to Redis if local Map miss.
+   * v80.24: required for multi-worker production where the worker that
+   * handled the job isn't the same one serving the polling API call.
+   */
+  async getProgressAsync(taskId: string): Promise<GenerationProgress | undefined> {
+    const local = this.progresses.get(taskId);
+    if (local) return local;
+
+    try {
+      const cached = await redis.get(`${REDIS_KEY_PREFIX}${taskId}`);
+      if (cached) {
+        return JSON.parse(cached) as GenerationProgress;
+      }
+    } catch (err) {
+      console.warn(`[progressTracker] Redis read failed for ${taskId}:`, (err as Error).message);
+    }
+    return undefined;
+  }
+
   /**
    * 刪除任務進度（清理）
    */
   removeTask(taskId: string): void {
     this.progresses.delete(taskId);
+    redis.del(`${REDIS_KEY_PREFIX}${taskId}`).catch(() => { /* silent */ });
   }
   
   /**

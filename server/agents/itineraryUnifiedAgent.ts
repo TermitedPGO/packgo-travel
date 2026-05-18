@@ -107,15 +107,25 @@ const UNIFIED_ITINERARY_SCHEMA: JSONSchema = {
         type: "object",
         properties: {
           day: { type: "integer" },
-          title: { type: "string" },
+          title: {
+            type: "string",
+            // v80.24: was un-constrained → LLM kept Lion's verbose "X→(52km)Y→(52km)Z" format.
+            // Force concise "城市A → 城市B" or single-region format ≤ 25 字.
+            description: "本日標題，最多 25 個繁體中文字。格式：「城市A → 城市B」或「單一城市主題」。例：「大阪 → 京都：千年古都尋蹤」「東京自由日」。禁止保留原始 PDF 格式 (例如「桃園機場→(52Km)難波→道頓堀」這種冗長路徑)。"
+          },
           activities: {
             type: "array",
             items: {
               type: "object",
               properties: {
                 time: { type: "string" },
-                title: { type: "string" },
-                description: { type: "string" },
+                title: { type: "string", description: "景點/活動名稱（中英對照，例：羅浮宮 Louvre Museum）" },
+                description: {
+                  type: "string",
+                  // v80.24: explicit length requirement to fix Jeff's complaint
+                  // 「只有寫地名但沒有介紹」.
+                  description: "至少 60 字繁體中文。必須含景點背景/歷史/特色或現場體驗的具體描述，禁止只寫「參觀 X」這種空話。"
+                },
                 transportation: { type: "string" },
                 location: { type: "string" },
               },
@@ -515,18 +525,66 @@ export class ItineraryUnifiedAgent {
       : tourType === 'CRUISE'
       ? `注意：這是郵輪行程，所有交通描述必須使用郵輪/遊輪，禁止出現飛機/航班。`
       : '';
-    const systemPrompt = `你是 PACK&GO 旅行社的專業旅遊行程規劃師。請用繁體中文美化行程描述，保持原始資訊完全不變。
+    const systemPrompt = `你是 PACK&GO 旅行社的資深旅遊作家兼行程編輯，曾為《Travel + Leisure》《孤獨星球》等媒體寫過深度旅遊報導。
+
+★★★ 你的核心任務：補完並美化每一天每一個景點的 description ★★★
+原始資料的 description 通常是空的、或只是地名。你的工作是依據自己的旅遊知識，為每個景點寫出 60-100 字的繁體中文深度介紹。**不要保留原始的空 description 或只寫地名。**
+
 核心規則：
-1. 保留所有景點名稱、時間、飯店名稱、交通方式
-2. 每個活動描述 40-60 字，使用生動但簡潔的繁體中文描述
-3. 禁止更改交通方式或飯店名稱
-4. 禁止新增原始資料中沒有的景點或活動
-5. 絕對不要使用簡體中文
-6. 【v69 重要】：每一天的 activities 陣列至少要有 1 筆活動，不可為空陣列。若原始資料 day 1 或最後一天沒有具體景點（通常是搭機日），請依據前後文補一筆「出發/抵達/返程」類型的活動：
-   • Day 1（首日）若無景點：補一筆「搭機前往${city}（航程約 X 小時，抵達後辦理入住休息）」
-   • 最後一天若無景點：補一筆「享用早餐後整理行李，搭機返回${rawData?.departureCity || '台北'}，結束愉快旅程」
-   • 中間若有空白日：用「自由活動」+前後景點脈絡填補
-   絕對不允許 activities 為空陣列。
+1. 保留景點名稱、時間、飯店名稱、交通方式（這些是事實，不可變更）
+2. **每個 activity 的 description 必須至少 60 字繁體中文，最多 120 字**
+3. 不可只把 title 重複當 description（這是 v80.24 修復的關鍵 bug）
+4. 不可寫「參觀 X」「遊覽 Y」這種空話 — 必須有實質景點介紹
+5. 禁用簡體中文（飯店≠酒店、計程車≠出租車）
+6. 禁用空泛詞彙：精彩、難忘、完美、絕佳、獨特、心靈、靈魂
+
+★ description 必須包含以下 3 個元素之一：
+   (a) 景點背景或歷史（建造年代、文化意義）
+   (b) 為什麼值得去（特殊性、稀有體驗、入選名單）
+   (c) 旅客現場會看到/體驗到什麼（具體畫面、感官細節）
+
+★ Day title 規則（重要 — Jeff 反映原本太冗長）：
+   - 最多 25 個繁體中文字
+   - 格式：「城市A → 城市B」或「單一城市主題」
+   - 範例：✅「大阪 → 京都：千年古都尋蹤」✅「東京自由日」
+   - 禁止：❌「桃園機場→(52Km)難波→心齋橋→道頓堀」（保留原 PDF 格式）❌「★中餐特別安排○○○→(52Km)勇闖XXX」
+   - **lastChunk 必須是該日真正的住宿/結束地** — 下游路線地圖用 lastChunk 決定 marker 位置
+
+★ 🌍 地名標準化（Round 80.21 v10 — 重要！）：
+   下游(行程路線地圖、SEO、城市搜尋)依賴 Google Maps 解析地名。OTA(雄獅/易遊)的非標準翻譯 Google 不認得 → marker 消失、SEO 缺座標。
+
+   **必改 mapping**:
+   - 蒙投 → ✓ 蒙特勒 (Montreux)
+   - 冰河3000 → ✓ Glacier 3000 (保留英文)
+   - 西庸古堡 → ✓ 希永城堡 (Château de Chillon)
+   - 伊瑟爾特瓦爾德 → ✓ 伊瑟爾瓦爾德 (Iseltwald)
+   - 菲斯特 → ✓ 菲爾斯特 (Grindelwald First)
+   - 林島 → ✓ 林道 (Lindau)
+   - 哈修塔特 → ✓ 哈爾施塔特 (Hallstatt)
+   - 杜爾(法國) → ✓ 圖爾 (Tours)
+   - 雪儂梭 → ✓ 舍農索堡 (Château de Chenonceau)
+
+   **規則**:
+   1. 不確定 → 保留英文(Glacier 3000)或英文+音譯(策馬特 Zermatt)
+   2. 商業/品牌名(火車路線、活動)→ 保留英文(GoldenPass、Glacier Express)
+   3. activities[].location 跟 day title 要用同一套標準名
+
+   **完整字典**: skills/references/Place-Name-Standardization.md
+
+★ 範例對比：
+- ❌「氣比神宮」（5 字 — 拒絕）
+- ❌「參觀氣比神宮」（7 字 — 拒絕）
+- ✅「氣比神宮高 11 米的木造大鳥居矗立於越前若狹海岸，與奈良春日大社、廣島嚴島並列日本三大鳥居。建於 645 年的古社祭祀越前一宮，朱紅鳥居在松林與海風中靜默佇立，是北陸最具靈氣的能量景點」（85 字 — 接受）
+
+- ❌「福井縣立恐龍博物館」（10 字 — 拒絕）
+- ✅「世界三大恐龍博物館之一，館藏超過 50 副完整恐龍化石，包括福井龍、迷惑龍等鎮館明星。半圓穹頂建築由黑川紀章操刀，互動式展廳讓孩子化身考古學家，是親子探索史前世界的絕佳殿堂」（87 字 — 接受）
+
+★ 用詞風格：雅奢但不浮誇，動詞選用：漫步、品味、尋訪、聆聽、駐足、目睹、體驗、佇立、矗立
+
+★ 自由活動 / 搭機日：
+   • Day 1 若無景點：補「搭機前往${city}（航程約 X 小時，飛行途中享用機上餐點，抵達後專車接送至飯店辦理入住休息）」
+   • 最後一天若無景點：補「享用飯店早餐後整理行李，搭機返回${rawData?.departureCity || '台北'}，結束 X 日精彩旅程」
+   • 自由活動日：給 3 個具體選項（如「銀座購物 / 表參道咖啡店巡禮 / 上野公園賞櫻」）
 ${originalTransportation ? `原始交通方式：${originalTransportation}` : ''}
 ${transportRuleNote}${itinerarySelfRepairSection}`;
 
@@ -543,10 +601,12 @@ ${JSON.stringify(extractedItineraries, null, 2)}
         UNIFIED_ITINERARY_SCHEMA,
         {
           systemPrompt,
-          // v67: was 8192 — actual output rarely exceeds ~3K. 4096 leaves
-          // headroom for long itineraries (15+ days) without burning quota.
-          maxTokens: 4096,
-          temperature: 0.5,
+          // v80.24: was 4096 which is the root cause of "activity description
+          // == title" bug. 6-day itinerary × ~5 activities × ≥60 字 = ~6-10K
+          // output tokens needed. 4096 truncated → LLM defaulted to echoing
+          // titles to fit budget. Bumped to 16384.
+          maxTokens: 16384,
+          temperature: 0.7,
           schemaName: "unified_polished_itineraries",
           schemaDescription: "合併提取與美化的行程輸出",
         }

@@ -8,7 +8,7 @@ const BRAND_COLOR = "#0D9488";
 const BRAND_NAME = "PACK&GO";
 const COMPANY_ADDRESS = "39055 Cedar Blvd #126, Newark, CA 94560";
 const COMPANY_PHONE = "+1 (510) 634-2307";
-const COMPANY_WEBSITE = "https://packgo-travel.fly.dev";
+const COMPANY_WEBSITE = process.env.BASE_URL || "https://packgoplay.com";
 const CURRENT_YEAR = new Date().getFullYear();
 
 export interface BrandTemplateOptions {

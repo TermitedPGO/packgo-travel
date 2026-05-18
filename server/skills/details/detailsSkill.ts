@@ -102,6 +102,15 @@ const HOTEL_SCHEMA: JSONSchema = {
         properties: {
           name: { type: "string", description: "飯店名稱" },
           stars: { type: "string", description: "星級（例如：五星級）" },
+          // Round 80.20: ask LLM for brand explicitly. Most chain hotels
+          // are caught by the regex extractor in masterAgent, but boutique
+          // / local hotels (涵碧樓 / 雲品 / 鳳凰閣) are best identified by
+          // the LLM that just read the description. Empty string means
+          // "no chain affiliation, independent hotel".
+          brand: {
+            type: "string",
+            description: "飯店所屬品牌（例如：Marriott、Hyatt、文華東方、Mercure；獨立飯店請留空字串）",
+          },
           description: { type: "string", description: "飯店描述（150-200字）" },
           facilities: {
             type: "array",

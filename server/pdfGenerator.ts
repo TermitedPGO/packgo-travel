@@ -53,22 +53,47 @@ export interface TourPdfData {
   };
 }
 
+// PACK&GO brand palette: black + cream + gold (#c9a563).
+// We override callers' theme.accent with the brand gold so every PDF feels
+// like the same product — different cover heroes are still on-brand.
 const DEFAULT_COLOR_THEME = {
-  primary: '#1A1A1A',
-  secondary: '#F5F5F5',
-  accent: '#C0392B',
+  primary: '#0F0F0F',
+  secondary: '#FAF8F2',
+  accent: '#C9A563',
 };
 
+// Escape user-provided strings so titles like "AT&T Park" don't break HTML.
+function escapeHtml(s: string | undefined | null): string {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 /**
- * Generate HTML template for PDF
+ * Generate HTML template for PDF — v80.23 redesign.
+ * Brand identity: cream + gold + serif headlines, generous whitespace.
+ * Replaces the old red-accent design that felt cramped.
  */
 function generatePdfHtml(data: TourPdfData): string {
-  const theme = data.colorTheme || DEFAULT_COLOR_THEME;
-  const destinations = data.destinations.join(' · ');
+  // Always force the brand gold — callers can pass their own colors but we
+  // overlay accent so the whole catalog stays visually consistent.
+  const theme = {
+    primary: data.colorTheme?.primary || DEFAULT_COLOR_THEME.primary,
+    secondary: DEFAULT_COLOR_THEME.secondary,
+    accent: DEFAULT_COLOR_THEME.accent,
+  };
+  const destinations = data.destinations.map(escapeHtml).join(' · ');
   const daysNights = data.nights
     ? `${data.days} 天 ${data.nights} 夜`
     : `${data.days} 天`;
   const today = new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: 'long', day: 'numeric' });
+  const titleEsc = escapeHtml(data.title);
+  const subtitleEsc = escapeHtml(data.subtitle);
+  const descEsc = data.description ? escapeHtml(data.description).replace(/\n/g, '<br/>') : '';
 
   return `
 <!DOCTYPE html>
@@ -76,26 +101,28 @@ function generatePdfHtml(data: TourPdfData): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${data.title} - 行程表</title>
+  <title>${titleEsc} - 行程表</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@500;700;900&display=swap');
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
       font-family: 'Noto Sans TC', 'Microsoft JhengHei', '微軟正黑體', sans-serif;
       font-size: 10.5pt;
-      line-height: 1.7;
+      line-height: 1.75;
       color: #1a1a1a;
       background: white;
     }
 
-    /* ── Cover Page ─────────────────────────── */
+    .serif { font-family: 'Noto Serif TC', 'PingFang TC', serif; }
+
+    /* ── Cover Page (cream + gold + photo) ────────────── */
     .cover-page {
       width: 100%;
       min-height: 100vh;
-      background: #111;
-      color: white;
+      background: ${theme.secondary};
+      color: #1a1a1a;
       display: flex;
       flex-direction: column;
       page-break-after: always;
@@ -103,8 +130,8 @@ function generatePdfHtml(data: TourPdfData): string {
       overflow: hidden;
     }
 
-    .cover-accent-bar {
-      height: 5px;
+    .cover-rule-top, .cover-rule-bottom {
+      height: 3px;
       background: ${theme.accent};
       width: 100%;
     }
@@ -113,85 +140,146 @@ function generatePdfHtml(data: TourPdfData): string {
       flex: 1;
       display: flex;
       flex-direction: column;
-      padding: 48px 56px;
+      padding: 56px 64px 48px;
+    }
+
+    .cover-brand-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 36px;
     }
 
     .cover-brand {
-      font-size: 11pt;
-      font-weight: 700;
-      letter-spacing: 5px;
-      color: rgba(255,255,255,0.9);
-      margin-bottom: 48px;
+      font-family: 'Noto Serif TC', serif;
+      font-size: 13pt;
+      font-weight: 900;
+      letter-spacing: 8px;
+      color: #1a1a1a;
     }
 
-    .cover-hero-image {
-      width: 100%;
-      height: 320px;
-      object-fit: cover;
-      margin-bottom: 40px;
-    }
-
-    .cover-tag {
-      display: inline-block;
-      background: ${theme.accent};
-      color: white;
+    .cover-brand-tag {
       font-size: 8.5pt;
+      letter-spacing: 3px;
+      color: ${theme.accent};
       font-weight: 700;
-      letter-spacing: 2px;
-      padding: 4px 12px;
-      margin-bottom: 16px;
+      text-transform: uppercase;
+    }
+
+    .cover-hero-frame {
+      width: 100%;
+      height: 360px;
+      overflow: hidden;
+      position: relative;
+      margin-bottom: 36px;
+    }
+
+    .cover-hero-frame img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .cover-hero-frame::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, transparent 50%, rgba(0,0,0,0.12) 100%);
+    }
+
+    .cover-tag-line {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 18px;
+      font-size: 9pt;
+      letter-spacing: 4px;
+      color: ${theme.accent};
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .cover-tag-line::before {
+      content: "";
+      width: 36px;
+      height: 1px;
+      background: ${theme.accent};
     }
 
     .cover-title {
-      font-size: 26pt;
-      font-weight: 700;
-      color: #fff;
-      line-height: 1.25;
-      margin-bottom: 12px;
+      font-family: 'Noto Serif TC', serif;
+      font-size: 30pt;
+      font-weight: 900;
+      color: #0f0f0f;
+      line-height: 1.2;
+      margin-bottom: 14px;
+      letter-spacing: 1px;
     }
 
     .cover-subtitle {
       font-size: 13pt;
-      color: rgba(255,255,255,0.65);
-      margin-bottom: 36px;
+      color: #555;
+      line-height: 1.6;
+      margin-bottom: 40px;
+      font-weight: 400;
     }
 
     .cover-meta-row {
       display: flex;
-      gap: 40px;
+      gap: 0;
       flex-wrap: wrap;
       margin-bottom: 48px;
+      border-top: 1px solid rgba(0,0,0,0.1);
+      border-bottom: 1px solid rgba(0,0,0,0.1);
+      padding: 20px 0;
     }
 
-    .cover-meta-item { display: flex; flex-direction: column; gap: 3px; }
+    .cover-meta-item {
+      flex: 1 1 0;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      padding: 0 20px;
+      border-right: 1px solid rgba(0,0,0,0.1);
+      min-width: 130px;
+    }
+
+    .cover-meta-item:first-child { padding-left: 0; }
+    .cover-meta-item:last-child { border-right: none; }
 
     .cover-meta-label {
-      font-size: 7.5pt;
-      color: rgba(255,255,255,0.45);
-      letter-spacing: 1.5px;
+      font-size: 8pt;
+      color: #888;
+      letter-spacing: 2px;
       text-transform: uppercase;
+      font-weight: 600;
     }
 
     .cover-meta-value {
-      font-size: 12pt;
-      font-weight: 600;
-      color: #fff;
+      font-family: 'Noto Serif TC', serif;
+      font-size: 13pt;
+      font-weight: 700;
+      color: #1a1a1a;
     }
 
+    .cover-meta-value.price { color: ${theme.accent}; }
+
     .cover-footer {
-      border-top: 1px solid rgba(255,255,255,0.12);
-      padding-top: 18px;
+      margin-top: auto;
+      padding-top: 24px;
+      border-top: 1px solid rgba(0,0,0,0.08);
       display: flex;
       justify-content: space-between;
       align-items: center;
       font-size: 8.5pt;
-      color: rgba(255,255,255,0.35);
+      color: #888;
     }
 
     /* ── Content Pages ───────────────────────── */
     .page {
-      padding: 36px 50px 40px;
+      padding: 48px 56px 44px;
       page-break-after: always;
+      position: relative;
     }
 
     .page:last-child { page-break-after: auto; }
@@ -199,157 +287,175 @@ function generatePdfHtml(data: TourPdfData): string {
     .page-header {
       display: flex;
       justify-content: space-between;
-      align-items: center;
-      padding-bottom: 10px;
-      margin-bottom: 28px;
-      border-bottom: 2px solid #1a1a1a;
+      align-items: baseline;
+      padding-bottom: 14px;
+      margin-bottom: 32px;
+      border-bottom: 1px solid #e8e3d6;
     }
 
     .page-header-brand {
-      font-size: 9pt;
-      font-weight: 700;
-      letter-spacing: 3px;
+      font-family: 'Noto Serif TC', serif;
+      font-size: 10pt;
+      font-weight: 900;
+      letter-spacing: 5px;
       color: #1a1a1a;
     }
 
     .page-header-info {
-      font-size: 8pt;
-      color: #888;
+      font-size: 8.5pt;
+      color: #999;
+      letter-spacing: 1px;
     }
 
     /* ── Section ─────────────────────────────── */
-    .section { margin-bottom: 28px; }
+    .section { margin-bottom: 32px; }
 
     .section-title {
-      font-size: 14pt;
-      font-weight: 700;
+      font-family: 'Noto Serif TC', serif;
+      font-size: 16pt;
+      font-weight: 900;
       color: #1a1a1a;
-      margin-bottom: 14px;
-      padding-bottom: 7px;
-      border-bottom: 2px solid ${theme.accent};
+      margin-bottom: 18px;
+      padding-bottom: 0;
+      letter-spacing: 1px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
     }
 
-    .section-content { padding-left: 2px; }
+    .section-title::before {
+      content: "";
+      width: 28px;
+      height: 3px;
+      background: ${theme.accent};
+      flex-shrink: 0;
+    }
+
+    .section-content { padding-left: 0; }
 
     /* ── Description ─────────────────────────── */
     .description {
       text-align: justify;
-      line-height: 1.9;
-      color: #444;
-    }
-
-    /* ── Hero Image ──────────────────────────── */
-    .hero-image {
-      width: 100%;
-      height: 260px;
-      object-fit: cover;
-      margin-bottom: 24px;
+      line-height: 1.95;
+      color: #333;
+      font-size: 10.5pt;
     }
 
     /* ── Highlights ──────────────────────────── */
     .highlights-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 8px;
+      gap: 10px 14px;
     }
 
     .highlight-item {
       display: flex;
       align-items: flex-start;
-      gap: 8px;
-      padding: 9px 12px;
-      background: #f8f8f8;
+      gap: 10px;
+      padding: 11px 14px;
+      background: ${theme.secondary};
       border-left: 3px solid ${theme.accent};
     }
 
     .highlight-check {
       color: ${theme.accent};
       font-weight: 700;
-      font-size: 11pt;
+      font-size: 12pt;
       flex-shrink: 0;
+      line-height: 1.3;
     }
 
     .highlight-text {
       font-size: 9.5pt;
-      line-height: 1.5;
-      color: #333;
+      line-height: 1.55;
+      color: #2a2a2a;
     }
 
     /* ── Day Block ───────────────────────────── */
     .day-block {
-      margin-bottom: 22px;
+      margin-bottom: 26px;
       page-break-inside: avoid;
+      border: 1px solid #e8e3d6;
+      overflow: hidden;
     }
 
     .day-header {
       background: #1a1a1a;
       color: white;
-      padding: 10px 16px;
+      padding: 14px 18px;
       font-weight: 700;
       font-size: 12pt;
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 14px;
+      font-family: 'Noto Serif TC', serif;
+      letter-spacing: 0.5px;
     }
 
     .day-number {
       background: ${theme.accent};
-      color: white;
+      color: #1a1a1a;
+      font-family: 'Noto Sans TC', sans-serif;
       font-size: 9pt;
-      font-weight: 700;
-      padding: 2px 8px;
-      letter-spacing: 1px;
+      font-weight: 900;
+      padding: 3px 10px;
+      letter-spacing: 2px;
     }
 
     .day-content {
-      border: 1px solid #ddd;
       border-top: none;
-      padding: 14px 16px;
+      padding: 18px 20px;
+      background: #fefdfa;
     }
 
     .day-subtitle {
-      color: #666;
+      color: #6a5a35;
       font-size: 10pt;
-      margin-bottom: 12px;
+      margin-bottom: 14px;
       font-style: italic;
+      line-height: 1.6;
     }
 
     .activity {
-      margin-bottom: 12px;
+      margin-bottom: 14px;
       padding-left: 14px;
       border-left: 2px solid ${theme.accent};
     }
+
+    .activity:last-child { margin-bottom: 0; }
 
     .activity-time {
       font-weight: 700;
       color: ${theme.accent};
       font-size: 9pt;
+      letter-spacing: 1px;
     }
 
     .activity-title {
       font-weight: 600;
       font-size: 11pt;
-      margin: 3px 0;
+      margin: 4px 0 4px;
+      color: #1a1a1a;
     }
 
     .activity-description {
       color: #555;
       font-size: 9.5pt;
-      line-height: 1.5;
+      line-height: 1.65;
     }
 
     .activity-location {
       color: #999;
       font-size: 8.5pt;
-      margin-top: 2px;
+      margin-top: 3px;
     }
 
     .day-info {
       display: flex;
-      gap: 24px;
-      margin-top: 14px;
-      padding-top: 12px;
-      border-top: 1px dashed #e0e0e0;
+      gap: 28px;
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px dashed #e0d8c2;
       font-size: 9.5pt;
     }
 
@@ -358,46 +464,51 @@ function generatePdfHtml(data: TourPdfData): string {
     .day-info-label {
       font-weight: 700;
       color: #1a1a1a;
-      margin-bottom: 3px;
+      margin-bottom: 4px;
       font-size: 9pt;
+      letter-spacing: 0.5px;
     }
 
-    .day-info-value { color: #555; }
+    .day-info-value { color: #555; line-height: 1.65; }
 
     /* ── Info Lists ──────────────────────────── */
     .info-list { list-style: none; padding: 0; }
 
     .info-list li {
-      padding: 5px 0 5px 18px;
+      padding: 7px 0 7px 22px;
       position: relative;
-      line-height: 1.6;
+      line-height: 1.7;
       font-size: 10pt;
+      color: #2a2a2a;
     }
 
     .info-list li:before {
-      content: "▸";
+      content: "✦";
       position: absolute;
       left: 0;
+      top: 7px;
       color: ${theme.accent};
       font-weight: 700;
+      font-size: 9pt;
     }
 
     /* ── Two-column layout ───────────────────── */
     .two-col {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 32px;
+      gap: 36px;
     }
 
     /* ── Page Footer ─────────────────────────── */
     .page-footer {
-      margin-top: 32px;
-      padding-top: 14px;
-      border-top: 1px solid #e0e0e0;
+      margin-top: 36px;
+      padding-top: 16px;
+      border-top: 1px solid #e8e3d6;
       display: flex;
       justify-content: space-between;
-      font-size: 8pt;
+      font-size: 8.5pt;
       color: #aaa;
+      letter-spacing: 1px;
     }
 
     @media print {
@@ -409,15 +520,18 @@ function generatePdfHtml(data: TourPdfData): string {
 
   <!-- ══ COVER PAGE ══════════════════════════════════════ -->
   <div class="cover-page">
-    <div class="cover-accent-bar"></div>
+    <div class="cover-rule-top"></div>
     <div class="cover-inner">
-      <div class="cover-brand">PACK &amp; GO</div>
+      <div class="cover-brand-row">
+        <div class="cover-brand">PACK &amp; GO</div>
+        <div class="cover-brand-tag">Curated Travel</div>
+      </div>
 
-      ${data.heroImage ? `<img src="${data.heroImage}" alt="${data.title}" class="cover-hero-image" />` : ''}
+      ${data.heroImage ? `<div class="cover-hero-frame"><img src="${escapeHtml(data.heroImage)}" alt="${titleEsc}" /></div>` : ''}
 
-      <div class="cover-tag">旅遊行程表</div>
-      <h1 class="cover-title">${data.title}</h1>
-      ${data.subtitle ? `<div class="cover-subtitle">${data.subtitle}</div>` : ''}
+      <div class="cover-tag-line">旅遊行程表 · Itinerary</div>
+      <h1 class="cover-title">${titleEsc}</h1>
+      ${subtitleEsc ? `<div class="cover-subtitle">${subtitleEsc}</div>` : ''}
 
       <div class="cover-meta-row">
         <div class="cover-meta-item">
@@ -431,29 +545,30 @@ function generatePdfHtml(data: TourPdfData): string {
         ${data.price ? `
         <div class="cover-meta-item">
           <span class="cover-meta-label">參考價格</span>
-          <span class="cover-meta-value">${data.currency || 'NT$'} ${data.price.toLocaleString()}</span>
+          <span class="cover-meta-value price">${escapeHtml(data.currency || 'NT$')} ${data.price.toLocaleString()}</span>
         </div>` : ''}
       </div>
 
       <div class="cover-footer">
-        <span>PACK&amp;GO 旅行社 · 讓每一次旅行都成為難忘的回憶</span>
+        <span>PACK&amp;GO 旅行社 · Curated Journeys, Lasting Memories</span>
         <span>製作日期：${today}</span>
       </div>
     </div>
+    <div class="cover-rule-bottom"></div>
   </div>
 
   <!-- ══ PAGE 2: OVERVIEW ════════════════════════════════ -->
   <div class="page">
     <div class="page-header">
       <span class="page-header-brand">PACK &amp; GO</span>
-      <span class="page-header-info">${data.title} · 行程總覽</span>
+      <span class="page-header-info">${titleEsc} · 行程總覽</span>
     </div>
 
-    ${data.description ? `
+    ${descEsc ? `
     <div class="section">
       <h2 class="section-title">行程簡介</h2>
       <div class="section-content">
-        <p class="description">${data.description}</p>
+        <p class="description">${descEsc}</p>
       </div>
     </div>` : ''}
 
@@ -464,8 +579,8 @@ function generatePdfHtml(data: TourPdfData): string {
         <div class="highlights-grid">
           ${data.highlights.map(h => `
           <div class="highlight-item">
-            <span class="highlight-check">✓</span>
-            <span class="highlight-text">${h}</span>
+            <span class="highlight-check">✦</span>
+            <span class="highlight-text">${escapeHtml(h)}</span>
           </div>`).join('')}
         </div>
       </div>
@@ -482,7 +597,7 @@ function generatePdfHtml(data: TourPdfData): string {
   <div class="page">
     <div class="page-header">
       <span class="page-header-brand">PACK &amp; GO</span>
-      <span class="page-header-info">${data.title} · 每日行程</span>
+      <span class="page-header-info">${titleEsc} · 每日行程</span>
     </div>
     <div class="section">
       <h2 class="section-title">每日行程</h2>
@@ -491,38 +606,39 @@ function generatePdfHtml(data: TourPdfData): string {
         <div class="day-block">
           <div class="day-header">
             <span class="day-number">DAY ${day.day}</span>
-            ${day.title}
+            <span>${escapeHtml(day.title)}</span>
           </div>
           <div class="day-content">
-            ${day.subtitle ? `<div class="day-subtitle">${day.subtitle}</div>` : ''}
+            ${day.subtitle ? `<div class="day-subtitle">${escapeHtml(day.subtitle)}</div>` : ''}
 
             ${day.activities && day.activities.length > 0 ? `
             <div class="activities">
               ${day.activities.map(act => `
               <div class="activity">
-                ${act.time ? `<div class="activity-time">${act.time}</div>` : ''}
-                <div class="activity-title">${act.title}</div>
-                ${act.description ? `<div class="activity-description">${act.description}</div>` : ''}
-                ${act.location ? `<div class="activity-location">📍 ${act.location}</div>` : ''}
+                ${act.time ? `<div class="activity-time">${escapeHtml(act.time)}</div>` : ''}
+                <div class="activity-title">${escapeHtml(act.title)}</div>
+                ${act.description ? `<div class="activity-description">${escapeHtml(act.description)}</div>` : ''}
+                ${act.location ? `<div class="activity-location">📍 ${escapeHtml(act.location)}</div>` : ''}
               </div>`).join('')}
             </div>` : ''}
 
+            ${(day.meals || day.accommodation) ? `
             <div class="day-info">
               ${day.meals ? `
               <div class="day-info-item">
                 <div class="day-info-label">🍽 餐食</div>
                 <div class="day-info-value">
-                  ${day.meals.breakfast ? `早餐：${day.meals.breakfast}<br/>` : ''}
-                  ${day.meals.lunch ? `午餐：${day.meals.lunch}<br/>` : ''}
-                  ${day.meals.dinner ? `晚餐：${day.meals.dinner}` : ''}
+                  ${day.meals.breakfast ? `早餐：${escapeHtml(day.meals.breakfast)}<br/>` : ''}
+                  ${day.meals.lunch ? `午餐：${escapeHtml(day.meals.lunch)}<br/>` : ''}
+                  ${day.meals.dinner ? `晚餐：${escapeHtml(day.meals.dinner)}` : ''}
                 </div>
               </div>` : ''}
               ${day.accommodation ? `
               <div class="day-info-item">
                 <div class="day-info-label">🏨 住宿</div>
-                <div class="day-info-value">${day.accommodation}</div>
+                <div class="day-info-value">${escapeHtml(day.accommodation)}</div>
               </div>` : ''}
-            </div>
+            </div>` : ''}
           </div>
         </div>`).join('')}
       </div>
@@ -538,7 +654,7 @@ function generatePdfHtml(data: TourPdfData): string {
   <div class="page">
     <div class="page-header">
       <span class="page-header-brand">PACK &amp; GO</span>
-      <span class="page-header-info">${data.title} · 費用說明</span>
+      <span class="page-header-info">${titleEsc} · 費用說明</span>
     </div>
     <div class="two-col">
       ${data.inclusions && data.inclusions.length > 0 ? `
@@ -546,7 +662,7 @@ function generatePdfHtml(data: TourPdfData): string {
         <h2 class="section-title">費用包含</h2>
         <div class="section-content">
           <ul class="info-list">
-            ${data.inclusions.map(item => `<li>${item}</li>`).join('')}
+            ${data.inclusions.map(item => `<li>${escapeHtml(item)}</li>`).join('')}
           </ul>
         </div>
       </div>` : ''}
@@ -555,7 +671,7 @@ function generatePdfHtml(data: TourPdfData): string {
         <h2 class="section-title">費用不包含</h2>
         <div class="section-content">
           <ul class="info-list">
-            ${data.exclusions.map(item => `<li>${item}</li>`).join('')}
+            ${data.exclusions.map(item => `<li>${escapeHtml(item)}</li>`).join('')}
           </ul>
         </div>
       </div>` : ''}
@@ -571,13 +687,13 @@ function generatePdfHtml(data: TourPdfData): string {
   <div class="page">
     <div class="page-header">
       <span class="page-header-brand">PACK &amp; GO</span>
-      <span class="page-header-info">${data.title} · 注意事項</span>
+      <span class="page-header-info">${titleEsc} · 注意事項</span>
     </div>
     <div class="section">
       <h2 class="section-title">注意事項</h2>
       <div class="section-content">
         <ul class="info-list">
-          ${data.notes.map(note => `<li>${note}</li>`).join('')}
+          ${data.notes.map(note => `<li>${escapeHtml(note)}</li>`).join('')}
         </ul>
       </div>
     </div>

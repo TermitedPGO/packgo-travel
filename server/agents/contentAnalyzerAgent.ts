@@ -117,8 +117,38 @@ const COMBINED_OUTPUT_SCHEMA: JSONSchema = {
       items: { type: "string" },
       description: "6-10 個行程亮點，每個 10-30 個中文字"
     },
+    // v80.24: keyFeatures + poeticContent 改為 LLM 生成（之前是 hardcode 套版）
+    keyFeatures: {
+      type: "array",
+      description: "3-5 個 key features 卡片，每個有獨立關鍵字 + 詩意短語 + 描述",
+      items: {
+        type: "object",
+        properties: {
+          keyword: { type: "string", description: "1-3 字關鍵字（如「秘境」「百年」「私邸」），與本行程主題深度契合，避免「雅奢旅宿」「特別安排」這種廉價套版" },
+          phrases: {
+            type: "array",
+            items: { type: "string" },
+            description: "2-3 個詩意短語（每個 4-8 字），例：「越雪見光」「品其美饌」"
+          },
+          description: { type: "string", description: "60-100 字繁體中文描述，必須具體連結本行程實際景點/體驗，禁止泛用「現代設計與傳統美學的完美融合」這類空話" },
+        },
+        required: ["keyword", "phrases", "description"],
+      },
+    },
+    poeticContent: {
+      type: "object",
+      description: "詩意化內容區塊（5 段），每段 30-60 字繁體中文",
+      properties: {
+        intro: { type: "string", description: "開場（必須提到具體目的地特色，避免「在 X 的世界中尋找心靈的寧靜」這種泛用句）" },
+        accommodation: { type: "string", description: "住宿主題（提到實際飯店或品牌特色）" },
+        dining: { type: "string", description: "餐飲主題（提到實際菜系或必嚐料理）" },
+        experience: { type: "string", description: "體驗主題（提到實際活動）" },
+        closing: { type: "string", description: "收尾呼應全程主軸" },
+      },
+      required: ["intro", "accommodation", "dining", "experience", "closing"],
+    },
   },
-  required: ["poeticTitle", "poeticSubtitle", "title", "description", "heroSubtitle", "highlights"],
+  required: ["poeticTitle", "poeticSubtitle", "title", "description", "heroSubtitle", "highlights", "keyFeatures", "poeticContent"],
 };
 
 /**
@@ -153,13 +183,27 @@ export class ContentAnalyzerAgent {
     
     try {
       // Phase 2 優化：單一 LLM 調用生成所有內容
-      const combinedResult = await this.generateAllContent(rawData);
-      
-      // Step 5: Generate key features (不需要 LLM)
-      const keyFeatures = this.generateKeyFeatures(rawData);
-      
-      // Step 6: Generate poetic content (不需要 LLM)
-      const poeticContent = this.generatePoeticContent(rawData);
+      const combinedResult = await this.generateAllContent(rawData) as any;
+
+      // v80.24: keyFeatures + poeticContent 改由 LLM 生成（之前 hardcode 套版
+      // 「雅奢旅宿/遊/特別安排」每個 tour 都長一樣）。LLM 失敗才退回 hardcode。
+      const keyFeatures =
+        Array.isArray(combinedResult.keyFeatures) && combinedResult.keyFeatures.length > 0
+          ? combinedResult.keyFeatures.map((kf: any, i: number) => ({
+              id: i + 1,
+              keyword: kf.keyword || '',
+              keywordStyle: 'vertical',
+              image: '',
+              imageAlt: kf.keyword || '',
+              phrases: Array.isArray(kf.phrases) ? kf.phrases : [],
+              description: kf.description || '',
+            }))
+          : this.generateKeyFeatures(rawData);
+
+      const poeticContent =
+        combinedResult.poeticContent && typeof combinedResult.poeticContent === 'object'
+          ? combinedResult.poeticContent
+          : this.generatePoeticContent(rawData);
       
       // Step 7: Verify originality (簡單計算)
       const originalityScore = this.verifyOriginality({
@@ -183,7 +227,15 @@ export class ContentAnalyzerAgent {
           title: combinedResult.title,
           description: combinedResult.description,
           heroSubtitle: combinedResult.heroSubtitle,
-          highlights: combinedResult.highlights.map((h: string, i: number) => ({
+          // v80.24: defensive — Haiku occasionally returns highlights as
+          // string instead of array, or omits the field entirely (Switzerland
+          // case crashed with `highlights.map is not a function`). Coerce.
+          highlights: (Array.isArray(combinedResult.highlights)
+            ? combinedResult.highlights
+            : (typeof combinedResult.highlights === "string"
+                ? combinedResult.highlights.split(/[、，,\n]/).map(s => s.trim()).filter(Boolean)
+                : [])
+          ).map((h: string, i: number) => ({
             id: i + 1,
             image: "",
             imageAlt: h,
@@ -275,13 +327,35 @@ export class ContentAnalyzerAgent {
 飯店等級：${hotelGrade}
 特色體驗：${specialExperiences.join("、")}${selfRepairSection}
 
-請生成（全部用繁體中文）：
+★ 重要 — 原標題可能是供應商（雄獅 / 縱橫 / 鳳凰）的促銷話術，**禁止照抄**。你必須重新撰寫成 PACK&GO 自家風格。
+禁止保留以下類型的詞彙：
+- 促銷詞：「兒童最高省X萬」「春遊折X千」「無購物」「指定團」「優惠團」「升等住X晚」「特選」「特推」「促銷」「破盤」「贈X」「送X」
+- 供應商標記：「★保證入住」「★中餐特別安排」「(阪名)」「(YYZA)」等代碼
+- 廉價詞：「精選之旅」「夢幻」「絕讚」
+
+請生成（全部用繁體中文，必須緊扣本行程實際資料）：
+
 1. poeticTitle: 詩意化標題（15-25字）
 2. poeticSubtitle: 詩意副標題（12-20字，與 poeticTitle 互相呼應、帶動感或意境，例如「越山尋夢，踏野拾光」、「多瑙河畔的時光漫步」）
-3. title: 行銷標題（20-30字）
+3. title: 行銷標題（20-30字，有「賣點」感、避免「精選之旅」這種廉價詞，**禁止照抄供應商促銷話術**，例如原「兒童最高省1萬｜親子樂園｜環球影城.樂高.水族館」→ ✓「關西親子假期：環球影城・樂高樂園・恐龍王國六日」）
 4. description: 行程介紹（100-120字）
 5. heroSubtitle: Hero副標題（30-40字）
-6. highlights: 6-10個行程亮點（每個10-30字，必須為繁體中文，英文景點名請翻譯）`;
+6. highlights: 6-10個行程亮點（每個10-30字，必須具體含景點/體驗，禁止「精彩」「難忘」這種空形容詞）
+
+7. keyFeatures: 3-5 個 key feature 卡片，每個 {keyword, phrases, description}
+   - keyword: 1-3 字精煉關鍵字，必須與本行程深度契合
+   - 範例（不要照抄）：日本京都行程可用「禪境」「町家」「茶湯」；歐洲巡禮可用「百年」「秘境」「私邸」
+   - 禁止使用「雅奢旅宿」「遊」「特別安排」這種泛用套版
+   - phrases: 2-3 個詩意短語（每個 4-8 字）
+   - description: 60-100 字，必須提到本行程實際景點/體驗，不可寫「現代設計與傳統美學的完美融合」這種泛用句
+
+8. poeticContent: 5 段詩意內容 {intro, accommodation, dining, experience, closing}
+   - 每段 30-60 字
+   - intro 必須提到具體目的地特色（避免「在 X 的世界中尋找心靈寧靜」這種泛用句）
+   - accommodation 提到實際飯店或品牌
+   - dining 提到實際菜系或必嚐料理
+   - experience 提到實際活動
+   - closing 呼應全程主軸`;
 
     try {
       const response = await this.claudeAgent.sendStructuredMessage<{
@@ -291,12 +365,21 @@ export class ContentAnalyzerAgent {
         description: string;
         heroSubtitle: string;
         highlights: string[];
+        keyFeatures?: Array<{ keyword: string; phrases: string[]; description: string }>;
+        poeticContent?: {
+          intro: string;
+          accommodation: string;
+          dining: string;
+          experience: string;
+          closing: string;
+        };
       }>(
         userPrompt,
         COMBINED_OUTPUT_SCHEMA,
         {
           systemPrompt,
-          maxTokens: 2000,
+          // v80.24: bumped from 2K to 4K to fit keyFeatures + poeticContent
+          maxTokens: 4096,
           temperature: 0.7,
           schemaName: 'content_analysis_output',
           schemaDescription: '旅遊文案生成輸出',
@@ -309,6 +392,7 @@ export class ContentAnalyzerAgent {
 
       console.log(`[ContentAnalyzerAgent] Generated poetic title: ${response.data.poeticTitle}`);
       console.log(`[ContentAnalyzerAgent] Generated ${response.data.highlights?.length || 0} highlights`);
+      console.log(`[ContentAnalyzerAgent] Generated ${response.data.keyFeatures?.length || 0} key features (LLM-driven)`);
 
       return {
         poeticTitle: response.data.poeticTitle || `${destinationCity}${days}日精選之旅`,
@@ -317,7 +401,9 @@ export class ContentAnalyzerAgent {
         description: response.data.description || originalDescription || "探索精彩行程，體驗難忘旅程。",
         heroSubtitle: response.data.heroSubtitle || `${destinationCity}深度遊．${days}天${nights}夜`,
         highlights: response.data.highlights || highlights.slice(0, 6),
-      };
+        keyFeatures: response.data.keyFeatures,
+        poeticContent: response.data.poeticContent,
+      } as any;
     } catch (error) {
       console.error("[ContentAnalyzerAgent] Combined generation failed:", error);
 

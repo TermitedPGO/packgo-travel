@@ -10,6 +10,7 @@
 2. **行程亮點提煉**: 從行程內容中提取 6-10 個核心亮點
 3. **行銷文案重寫**: 創造吸引人的標題和描述
 4. **原創性驗證**: 確保生成的內容具有高度原創性
+5. **🌍 地名標準化**: 將 OTA 來源的非標準中文地名(如「蒙投」)校正為 Google Maps 認得的標準名(「蒙特勒」),保證下游地圖/SEO/搜尋全部能用
 
 ## 📚 Reference 文件
 
@@ -42,6 +43,26 @@ const europeExamples = getPoeticTitleExamples('歐洲');
 ```
 
 **使用時機**: 在生成詩意化標題和行銷文案時,參考這些文件以確保風格一致性。
+
+### 3. 地名標準化規範 ⭐ (Round 80.21 v10 必讀)
+```typescript
+// 載入完整規範
+import fs from 'fs';
+const placeRules = fs.readFileSync(
+  __dirname + '/../skills/references/Place-Name-Standardization.md',
+  'utf-8'
+);
+```
+
+**核心規則**:
+- ❌ 不要用 OTA 來源的非標準中文翻譯(蒙投、冰河3000、伊瑟爾特瓦爾德、菲斯特、西庸古堡、林島、薩爾斯堡、哈修塔特...)
+- ✓ 使用 Google Maps 認得的**標準中文**(蒙特勒、希永城堡、伊瑟爾瓦爾德、菲爾斯特、林道、薩爾茨堡、哈爾施塔特...)
+- ✓ 不確定 → 保留**英文**(Glacier 3000)或**英文+中文音譯**(策馬特 Zermatt)
+- ✓ 商業/品牌名(火車路線、活動)→ 保留英文(GoldenPass、Glacier Express)
+
+**詳細字典**: 見 `skills/references/Place-Name-Standardization.md`
+
+**為什麼**:行程路線地圖、SEO Place Schema、城市搜尋、hotel 對應全部依賴 Google geocoder。標準化後 → marker 顯示完整、SEO 收錄 → 業務全鏈路通暢。
 
 ## 輸入格式
 
