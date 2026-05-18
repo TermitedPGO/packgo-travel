@@ -821,64 +821,66 @@ async function handleSubscriptionUpserted(sub: Stripe.Subscription) {
     //   (b) trial → active (status=active, existing row.converted=false)
     //       → mark row.converted=true, convertedAt=now
     //   (c) active → ... no trial-table action needed
-    if (tier !== "free") {
-      try {
-        const { membershipTrials } = await import("../../drizzle/schema");
-        const trialEnd = (sub as any).trial_end as number | null | undefined;
-        const isTrialing = sub.status === "trialing";
+    //
+    // Phase 1 Cluster C (2026-05-18): removed redundant `if (tier !== "free")`
+    // guard — `tier` is `PaidTier` here (narrowed at L785 via tierFromPriceId),
+    // never "free". The previous comparison was dead code per TS2367.
+    try {
+      const { membershipTrials } = await import("../../drizzle/schema");
+      const trialEnd = (sub as any).trial_end as number | null | undefined;
+      const isTrialing = sub.status === "trialing";
 
-        // (a) Trial start — only if user has never trialed THIS tier before
-        if (isTrialing && trialEnd) {
-          const tierFlag = tier === "plus" ? "plusTrialUsedAt" : "conciergeTrialUsedAt";
-          const usedAtCol = (users as any)[tierFlag];
-          const userRow = await db.select({ used: usedAtCol })
-            .from(users).where(eq(users.id, userId)).limit(1);
-          const alreadyTrialed = userRow[0]?.used != null;
+      // (a) Trial start — only if user has never trialed THIS tier before
+      if (isTrialing && trialEnd) {
+        const tierFlag = tier === "plus" ? "plusTrialUsedAt" : "conciergeTrialUsedAt";
+        const usedAtCol = (users as any)[tierFlag];
+        const userRow = await db.select({ used: usedAtCol })
+          .from(users).where(eq(users.id, userId)).limit(1);
+        const alreadyTrialed = userRow[0]?.used != null;
 
-          if (!alreadyTrialed) {
-            await db.insert(membershipTrials).values({
-              userId,
-              tier,
-              endsAt: new Date(trialEnd * 1000),
-              stripeSubscriptionId: sub.id,
-              stripePriceId: priceId || null,
-            } as any);
-            await db.update(users)
-              .set({ [tierFlag]: new Date() } as any)
-              .where(eq(users.id, userId));
-            console.log(
-              `[Stripe Webhook] ✓ Trial started: user ${userId} tier=${tier}, ends ${new Date(trialEnd * 1000).toISOString()}`
-            );
-          }
+        if (!alreadyTrialed) {
+          await db.insert(membershipTrials).values({
+            userId,
+            tier,
+            endsAt: new Date(trialEnd * 1000),
+            stripeSubscriptionId: sub.id,
+            stripePriceId: priceId || null,
+          } as any);
+          await db.update(users)
+            .set({ [tierFlag]: new Date() } as any)
+            .where(eq(users.id, userId));
+          console.log(
+            `[Stripe Webhook] ✓ Trial started: user ${userId} tier=${tier}, ends ${new Date(trialEnd * 1000).toISOString()}`
+          );
         }
-
-        // (b) Trial → active conversion — find pending row, mark converted
-        if (sub.status === "active") {
-          const { and: dAnd, eq: dEq } = await import("drizzle-orm");
-          const pendingTrial = await db
-            .select()
-            .from(membershipTrials)
-            .where(
-              dAnd(
-                dEq(membershipTrials.stripeSubscriptionId, sub.id),
-                dEq(membershipTrials.converted, false),
-              )
-            )
-            .limit(1);
-          if (pendingTrial[0]) {
-            await db
-              .update(membershipTrials)
-              .set({ converted: true, convertedAt: new Date() })
-              .where(dEq(membershipTrials.id, pendingTrial[0].id));
-            console.log(
-              `[Stripe Webhook] ✓ Trial converted to paid: user ${userId} tier=${tier}`
-            );
-          }
-        }
-      } catch (err) {
-        console.error("[Stripe Webhook] membershipTrials write failed:", (err as Error).message);
-        // Don't fail the webhook on trial-table errors
       }
+
+      // (b) Trial → active conversion — find pending row, mark converted
+      if (sub.status === "active") {
+        const { and: dAnd, eq: dEq } = await import("drizzle-orm");
+        const pendingTrial = await db
+          .select()
+          .from(membershipTrials)
+          .where(
+            dAnd(
+              dEq(membershipTrials.stripeSubscriptionId, sub.id),
+              dEq(membershipTrials.converted, false),
+            )
+          )
+          .limit(1);
+        if (pendingTrial[0]) {
+          await db
+            .update(membershipTrials)
+            .set({ converted: true, convertedAt: new Date() })
+            .where(dEq(membershipTrials.id, pendingTrial[0].id));
+          console.log(
+            `[Stripe Webhook] ✓ Trial converted to paid: user ${userId} tier=${tier}`
+          );
+        }
+      }
+    } catch (err) {
+      console.error("[Stripe Webhook] membershipTrials write failed:", (err as Error).message);
+      // Don't fail the webhook on trial-table errors
     }
   } else {
     await db

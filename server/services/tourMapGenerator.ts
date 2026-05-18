@@ -382,6 +382,7 @@ export async function generateTourMap(args: {
 
   // 6. Persist the URL + prompt + timestamp.
   const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
   await db
     .update(tours)
     .set({

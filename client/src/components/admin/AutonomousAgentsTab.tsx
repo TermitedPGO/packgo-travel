@@ -224,12 +224,17 @@ type PendingItem = {
   actionTaken: string;
   confidence: number | null;
   createdAt: Date | string;
+  // Phase 1 Cluster C: align with agent.pendingForJeff tRPC return shape.
+  // The query left-joins customerInteractions + customerProfiles so all
+  // joined-table columns are nullable; interactionId is part of the row.
+  interactionId: number | null;
   channel: string | null;
   content: string | null;
   contentSummary: string | null;
   classification: string | null;
   sentiment: string | null;
-  urgency: number;
+  // urgency is nullable in the DB column → treat null as "no urgency rating".
+  urgency: number | null;
   customerProfileId: number | null;
   customerEmail: string | null;
 };
@@ -1938,12 +1943,18 @@ function RefundAgentDemo() {
 
 function RefundResult({ result }: { result: any }) {
   const d = result.decision;
-  const sevColor = {
+  const SEV_COLORS = {
     critical: "border-rose-300 bg-rose-50 text-rose-700",
     high: "border-amber-300 bg-amber-50 text-amber-700",
     medium: "border-amber-200 bg-amber-50/50 text-amber-700",
     low: "border-gray-200 bg-gray-50 text-gray-700",
-  }[d.severity];
+  } as const;
+  // Phase 1 Cluster C: d.severity comes through `any` (result is typed `any`).
+  // Cast to the SEV_COLORS key set; fall back to "low" if absent / unknown.
+  const sevKey = (d.severity as keyof typeof SEV_COLORS) in SEV_COLORS
+    ? (d.severity as keyof typeof SEV_COLORS)
+    : "low";
+  const sevColor = SEV_COLORS[sevKey];
 
   return (
     <div className="space-y-3 mt-2">

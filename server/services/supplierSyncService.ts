@@ -221,7 +221,13 @@ function lionGroupToDeparture(
     supplierProductId: productId,
     supplierId,
     externalDepartureCode: group.GroupID,
-    departureDate: dateStr,
+    // Phase 1 Cluster C (2026-05-18): keep ISO YYYY-MM-DD STRING — schema
+    // column is `date()` which accepts strings natively at the wire level.
+    // DO NOT wrap with `new Date(dateStr)` — Drizzle's default type inference
+    // says `Date`, but coercing would introduce Asia/Taipei↔UTC timezone
+    // drift on production. Phase 5A module-5A owns the proper schema type
+    // alignment (mode: "string") + DST regression tests. See audit P1-10.
+    departureDate: dateStr as unknown as Date,
     retailPrice: String(retail),
     agentPrice: Number.isFinite(agent) ? String(agent) : null,
     currency: "TWD",
@@ -508,7 +514,13 @@ function uvRowToDeparture(
     supplierProductId: productId,
     supplierId,
     externalDepartureCode: `${productCode}__${dateStr}`,
-    departureDate: dateStr,
+    // Phase 1 Cluster C (2026-05-18): keep ISO YYYY-MM-DD STRING — schema
+    // column is `date()` which accepts strings natively at the wire level.
+    // DO NOT wrap with `new Date(dateStr)` — Drizzle's default type inference
+    // says `Date`, but coercing would introduce Asia/Taipei↔UTC timezone
+    // drift on production. Phase 5A module-5A owns the proper schema type
+    // alignment (mode: "string") + DST regression tests. See audit P1-10.
+    departureDate: dateStr as unknown as Date,
     retailPrice: String(price),
     agentPrice: null, // UV public storefront doesn't expose agent price
     currency: "USD",

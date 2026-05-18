@@ -86,7 +86,9 @@ export const marketingWorker = new Worker<MarketingJobData, MarketingJobResult>(
           format,
           heroImageUrl: tour.heroImage || "",
           title: tour.title,
-          destination: tour.destination,
+          // Phase 1 Cluster C: tour.destination is nullable (legacy column);
+          // fall back through destinationCity (notNull) before empty string.
+          destination: tour.destination ?? tour.destinationCity ?? "",
           duration: `${tour.duration}天${tour.duration - 1}夜`,
           price: `USD $${tour.price.toLocaleString()} 起`,
           highlights: JSON.parse(tour.highlights || "[]").slice(0, 3),

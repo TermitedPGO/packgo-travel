@@ -26,14 +26,16 @@ import { COOKIE_NAME } from "@shared/const";
 import { verifyToken } from "../jwt";
 import { getUserById } from "../db";
 
-declare module "express-serve-static-core" {
-  interface Request {
-    authUser?: {
-      id: number;
-      email: string;
-      role: string | null;
-      name?: string | null;
-    };
+declare global {
+  namespace Express {
+    interface Request {
+      authUser?: {
+        id: number;
+        email: string;
+        role: string | null;
+        name?: string | null;
+      };
+    }
   }
 }
 
