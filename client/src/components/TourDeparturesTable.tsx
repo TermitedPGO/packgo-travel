@@ -73,11 +73,11 @@ export default function TourDeparturesTable({
   const statusConfig: Record<string, { label: string; className: string }> = {
     open: {
       label: t("tourDeparturesTable.statusAvailable"),
-      className: "bg-emerald-50 text-emerald-700 border-emerald-200",
+      className: "bg-[#c9a563]/10 text-[#8a6f3a] border-[#c9a563]/35",
     },
     confirmed: {
       label: t("tourDeparturesTable.statusConfirmed"),
-      className: "bg-blue-50 text-blue-700 border-blue-200",
+      className: "bg-foreground/[0.04] text-foreground/70 border-foreground/15",
     },
     full: {
       label: t("tourDeparturesTable.statusSoldOut"),

@@ -102,7 +102,7 @@ export default function HomeWelcomeBack() {
       <div className="container py-6">
         <div className="flex items-end justify-between flex-wrap gap-3 mb-4">
           <div>
-            <p className="text-xs font-bold tracking-wide uppercase text-emerald-600 mb-1 flex items-center gap-1.5">
+            <p className="text-xs font-bold tracking-wide uppercase text-[#8a6f3a] mb-1 flex items-center gap-1.5">
               <Clock className="h-3 w-3" />
               {t("homeWelcomeBack.recentlyViewed")}
             </p>
@@ -169,7 +169,7 @@ function RecentTourCard({
             className="w-full h-full object-cover rounded-xl group-hover:scale-105 transition-transform duration-300"
           />
         ) : (
-          <div className="w-full h-full bg-gradient-to-br from-teal-500 to-teal-700 rounded-xl" />
+          <div className="w-full h-full bg-gradient-to-br from-foreground/20 to-foreground/40 rounded-xl" />
         )}
       </div>
       <h3 className="text-sm font-semibold text-gray-900 line-clamp-2 leading-tight mb-1">

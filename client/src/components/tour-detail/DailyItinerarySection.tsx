@@ -109,7 +109,8 @@ export const DailyItinerarySection: React.FC<DailyItinerarySectionProps> = ({
             return (
               <div
                 key={day.day}
-                className="bg-gray-50 overflow-hidden rounded-xl shadow-sm hover:shadow-md transition-shadow"
+                id={`day-${day.day}`}
+                className="bg-gray-50 overflow-hidden rounded-xl shadow-sm hover:shadow-md transition-shadow scroll-mt-24"
               >
                 {/* Day Header - 可點擊展開/收合 */}
                 <button
@@ -395,7 +396,7 @@ export const DailyItinerarySection: React.FC<DailyItinerarySectionProps> = ({
                                 ) : null}
                               </div>
                             )}
-                            <div className="flex-1">
+                            <div className="flex-1 min-w-0">
                               {isEditMode && onUpdate ? (
                                 <EditableText
                                   value={day.accommodation}
@@ -409,9 +410,42 @@ export const DailyItinerarySection: React.FC<DailyItinerarySectionProps> = ({
                                   className="text-gray-700"
                                   as="p"
                                 />
-                              ) : (
-                                <p className="text-gray-700">{day.accommodation}</p>
-                              )}
+                              ) : (() => {
+                                // Round 80.20: parse "或" multi-option hotel
+                                // strings into a clean bullet list so we
+                                // stop seeing wall-of-text inline blobs.
+                                const raw = String(day.accommodation || '').trim();
+                                const parts = raw.split(/\s*或\s*/g).map((p) => p.trim()).filter(Boolean);
+                                const trailingSimilar =
+                                  parts.length > 1 && /^同級$/.test(parts[parts.length - 1]);
+                                const hotels = trailingSimilar ? parts.slice(0, -1) : parts;
+                                if (hotels.length <= 1) {
+                                  return <p className="text-gray-700 leading-relaxed">{raw}</p>;
+                                }
+                                return (
+                                  <div>
+                                    <ul className="space-y-1.5">
+                                      {hotels.map((hotel, i) => (
+                                        <li
+                                          key={i}
+                                          className="flex items-start gap-2 text-gray-800"
+                                        >
+                                          <span
+                                            className="mt-1.5 h-1.5 w-1.5 rounded-full bg-[#c9a563] flex-shrink-0"
+                                            aria-hidden
+                                          />
+                                          <span className="leading-relaxed">{hotel}</span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                    {trailingSimilar && (
+                                      <p className="text-xs text-gray-500 mt-2 pl-4">
+                                        {t('tourDetail.orSimilar')}
+                                      </p>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </div>
                           </div>
                         </div>

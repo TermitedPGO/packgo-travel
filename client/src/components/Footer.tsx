@@ -1,6 +1,7 @@
 import { Facebook, Instagram, Mail, MapPin, Phone } from "lucide-react";
 import { Link } from "wouter";
 import { useLocale } from "@/contexts/LocaleContext";
+import { CONTACT } from "@/lib/brand";
 
 export default function Footer() {
   const { t } = useLocale();
@@ -29,25 +30,47 @@ export default function Footer() {
             <p className="text-gray-400 text-sm leading-relaxed">
               {t('footer.description')}
             </p>
-            <div className="flex gap-4">
-              <a href="#" className="bg-gray-800 p-2 rounded-lg hover:bg-primary transition-colors">
-                <Facebook className="h-5 w-5" />
-              </a>
-              <a href="#" className="bg-gray-800 p-2 rounded-lg hover:bg-primary transition-colors">
-                <Instagram className="h-5 w-5" />
-              </a>
-            </div>
+            {/* Round 80.7: social icons gated by env vars to remove dead "#"
+                links. Set VITE_FACEBOOK_URL / VITE_INSTAGRAM_URL when accounts
+                are live. Until then, social row hides entirely (better than
+                shipping non-functional icons that suggest the brand is asleep). */}
+            {((import.meta as any).env?.VITE_FACEBOOK_URL || (import.meta as any).env?.VITE_INSTAGRAM_URL) && (
+              <div className="flex gap-4">
+                {(import.meta as any).env?.VITE_FACEBOOK_URL && (
+                  <a
+                    href={(import.meta as any).env.VITE_FACEBOOK_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Facebook"
+                    className="bg-gray-800 p-2 rounded-lg hover:bg-white/15 transition-colors"
+                  >
+                    <Facebook className="h-5 w-5" />
+                  </a>
+                )}
+                {(import.meta as any).env?.VITE_INSTAGRAM_URL && (
+                  <a
+                    href={(import.meta as any).env.VITE_INSTAGRAM_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Instagram"
+                    className="bg-gray-800 p-2 rounded-lg hover:bg-white/15 transition-colors"
+                  >
+                    <Instagram className="h-5 w-5" />
+                  </a>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Column 2: Quick Links */}
           <div>
             <h3 className="text-lg font-serif font-bold mb-6 text-white">{t('footer.quickLinks')}</h3>
             <ul className="space-y-4 text-sm text-gray-400">
-              <li><Link href="/about-us" className="hover:text-primary transition-colors">{t('nav.aboutUs')}</Link></li>
-              <li><Link href="/terms-of-service" className="hover:text-primary transition-colors">{t('nav.termsOfService')}</Link></li>
-              <li><Link href="/privacy-policy" className="hover:text-primary transition-colors">{t('nav.privacyPolicy')}</Link></li>
-              <li><Link href="/faq" className="hover:text-primary transition-colors">{t('nav.faq')}</Link></li>
-              <li><Link href="/contact-us" className="hover:text-primary transition-colors">{t('nav.contactUs')}</Link></li>
+              <li><Link href="/about-us" className="hover:text-white transition-colors">{t('nav.aboutUs')}</Link></li>
+              <li><Link href="/terms-of-service" className="hover:text-white transition-colors">{t('nav.termsOfService')}</Link></li>
+              <li><Link href="/privacy-policy" className="hover:text-white transition-colors">{t('nav.privacyPolicy')}</Link></li>
+              <li><Link href="/faq" className="hover:text-white transition-colors">{t('nav.faq')}</Link></li>
+              <li><Link href="/contact-us" className="hover:text-white transition-colors">{t('nav.contactUs')}</Link></li>
             </ul>
           </div>
 
@@ -55,12 +78,12 @@ export default function Footer() {
           <div>
             <h3 className="text-lg font-serif font-bold mb-6 text-white">{t('footer.services')}</h3>
             <ul className="space-y-4 text-sm text-gray-400">
-              <li><Link href="/custom-tours" className="hover:text-primary transition-colors">{t('services.customTours')}</Link></li>
-              <li><Link href="/china-visa" className="hover:text-primary transition-colors">{t('services.visaServices')}</Link></li>
-              <li><Link href="/group-packages" className="hover:text-primary transition-colors">{t('services.groupPackages')}</Link></li>
-              <li><Link href="/flight-booking" className="hover:text-primary transition-colors">{t('services.flightBooking')}</Link></li>
-              <li><Link href="/airport-transfer" className="hover:text-primary transition-colors">{t('services.airportTransfer')}</Link></li>
-              <li><Link href="/hotel-booking" className="hover:text-primary transition-colors">{t('services.hotelBooking')}</Link></li>
+              <li><Link href="/custom-tours" className="hover:text-white transition-colors">{t('services.customTours')}</Link></li>
+              <li><Link href="/china-visa" className="hover:text-white transition-colors">{t('services.visaServices')}</Link></li>
+              <li><Link href="/group-packages" className="hover:text-white transition-colors">{t('services.groupPackages')}</Link></li>
+              <li><Link href="/flight-booking" className="hover:text-white transition-colors">{t('services.flightBooking')}</Link></li>
+              <li><Link href="/airport-transfer" className="hover:text-white transition-colors">{t('services.airportTransfer')}</Link></li>
+              <li><Link href="/hotel-booking" className="hover:text-white transition-colors">{t('services.hotelBooking')}</Link></li>
             </ul>
           </div>
 
@@ -68,17 +91,19 @@ export default function Footer() {
           <div>
             <h3 className="text-lg font-serif font-bold mb-6 text-white">{t('footer.contactInfo')}</h3>
             <ul className="space-y-4 text-sm text-gray-400">
+              {/* v80.24: centralized via lib/brand.ts (was hardcoded; phone +
+                  email + address now share one source of truth). */}
               <li className="flex items-start gap-3">
                 <MapPin className="h-5 w-5 text-white shrink-0 mt-0.5" />
-                <span>39055 Cedar Blvd #126<br />Newark CA 94560</span>
+                <span>{CONTACT.address.street}<br />{CONTACT.address.city} {CONTACT.address.state} {CONTACT.address.zip}</span>
               </li>
               <li className="flex items-center gap-3">
                 <Phone className="h-5 w-5 text-white shrink-0" />
-                <a href="tel:1-510-634-2307" className="hover:text-gray-300 transition-colors">+1 (510) 634-2307</a>
+                <a href={`tel:${CONTACT.whatsapp}`} className="hover:text-gray-300 transition-colors">{CONTACT.phoneDisplay}</a>
               </li>
               <li className="flex items-center gap-3">
                 <Mail className="h-5 w-5 text-white shrink-0" />
-                <a href="mailto:Jeffhsieh09@gmail.com" className="hover:text-gray-300 transition-colors">Jeffhsieh09@gmail.com</a>
+                <a href={`mailto:${CONTACT.email}`} className="hover:text-gray-300 transition-colors">{CONTACT.email}</a>
               </li>
               <li className="flex items-start gap-3 mt-2">
                 <div className="flex gap-3">
@@ -96,17 +121,20 @@ export default function Footer() {
           </div>
         </div>
 
-        {/* Trust Credentials Row (v78i — make legal credentials prominent, not buried) */}
+        {/* Trust Credentials Row — Round 80: recoloured from emerald/blue/red
+            to monochrome (white-on-black with thin gray borders) per the
+            B&W brand baseline. Gold accent on the verified-CST badge keeps
+            it the visual anchor. */}
         <div className="border-t border-gray-800 pt-8 pb-4">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mb-4">
             <div className="flex items-center gap-2 text-sm">
-              <span className="px-2.5 py-1 rounded-md bg-emerald-900/40 border border-emerald-700 text-emerald-300 font-mono font-semibold">
+              <span className="px-2.5 py-1 rounded-md bg-white/5 border border-[#c9a563]/40 text-[#c9a563] font-mono font-semibold">
                 CST #2166984
               </span>
               <span className="text-xs text-gray-400">{t('footer.businessLicense')}</span>
             </div>
             <div className="flex items-center gap-2 text-sm">
-              <span className="px-2.5 py-1 rounded-md bg-emerald-900/40 border border-emerald-700 text-emerald-300 font-semibold text-xs">
+              <span className="px-2.5 py-1 rounded-md bg-white/5 border border-white/20 text-white/90 font-semibold text-xs tracking-wide">
                 TCRF
               </span>
               <span className="text-xs text-gray-400">{t('footer.tcrfParticipant')}</span>
@@ -117,9 +145,9 @@ export default function Footer() {
                 href={(import.meta as any).env.VITE_GOOGLE_REVIEW_URL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 text-sm text-gray-400 hover:text-emerald-300 transition-colors"
+                className="inline-flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors"
               >
-                <span className="px-2.5 py-1 rounded-md bg-blue-900/40 border border-blue-700 text-blue-300 font-semibold text-xs">
+                <span className="px-2.5 py-1 rounded-md bg-white/5 border border-white/20 text-white/90 font-semibold text-xs tracking-wide">
                   Google Reviews
                 </span>
                 <span className="text-xs">{t("footer.readReviews") || "查看真實評價 →"}</span>
@@ -130,9 +158,9 @@ export default function Footer() {
                 href={(import.meta as any).env.VITE_YELP_REVIEW_URL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 text-sm text-gray-400 hover:text-emerald-300 transition-colors"
+                className="inline-flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors"
               >
-                <span className="px-2.5 py-1 rounded-md bg-red-900/40 border border-red-700 text-red-300 font-semibold text-xs">
+                <span className="px-2.5 py-1 rounded-md bg-white/5 border border-white/20 text-white/90 font-semibold text-xs tracking-wide">
                   Yelp
                 </span>
                 <span className="text-xs">{t("footer.readReviews") || "查看真實評價 →"}</span>
@@ -145,7 +173,7 @@ export default function Footer() {
         <div className="border-t border-gray-800 pt-6 pb-6">
           <div className="text-xs text-gray-400 leading-relaxed space-y-2 max-w-4xl">
             <p className="font-semibold text-gray-300">
-              {t('footer.legalName')} &middot; 39055 Cedar Blvd #126, Newark, CA 94560
+              {t('footer.legalName')} &middot; {CONTACT.address.street}, {CONTACT.address.city}, {CONTACT.address.state} {CONTACT.address.zip}
             </p>
             <p className="text-gray-500">{t('footer.trustAccountStatement')}</p>
             <p className="text-gray-500 italic">{t('footer.stateDisclaimer')}</p>

@@ -88,21 +88,21 @@ export default function WhyChooseUs() {
         <div className="mt-12 pt-8 border-t border-gray-800">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="flex items-center gap-3 px-5 py-4 rounded-xl border border-gray-700 bg-gray-900/50">
-              <BadgeCheck className="h-8 w-8 text-emerald-400 flex-shrink-0" />
+              <BadgeCheck className="h-8 w-8 text-[#c9a563] flex-shrink-0" />
               <div>
                 <div className="text-sm font-bold text-white">{t("whyChooseUs.trustCstTitle")}</div>
                 <div className="text-xs text-gray-400 mt-0.5 font-mono">CST #2166984</div>
               </div>
             </div>
             <div className="flex items-center gap-3 px-5 py-4 rounded-xl border border-gray-700 bg-gray-900/50">
-              <Shield className="h-8 w-8 text-emerald-400 flex-shrink-0" />
+              <Shield className="h-8 w-8 text-[#c9a563] flex-shrink-0" />
               <div>
                 <div className="text-sm font-bold text-white">{t("whyChooseUs.trustTcrfTitle")}</div>
                 <div className="text-xs text-gray-400 mt-0.5">{t("whyChooseUs.trustTcrfBody")}</div>
               </div>
             </div>
             <div className="flex items-center gap-3 px-5 py-4 rounded-xl border border-gray-700 bg-gray-900/50">
-              <Lock className="h-8 w-8 text-emerald-400 flex-shrink-0" />
+              <Lock className="h-8 w-8 text-[#c9a563] flex-shrink-0" />
               <div>
                 <div className="text-sm font-bold text-white">{t("whyChooseUs.trustStripeTitle")}</div>
                 <div className="text-xs text-gray-400 mt-0.5">{t("whyChooseUs.trustStripeBody")}</div>

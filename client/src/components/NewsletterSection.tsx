@@ -39,13 +39,18 @@ export default function NewsletterSection() {
           <form onSubmit={handleSubmit} className="w-full md:w-1/2 flex flex-col sm:flex-row gap-2 sm:gap-0">
             <div className="relative flex-grow">
               <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 h-5 w-5" />
-              <input 
-                type="email" 
+              <input
+                type="email"
+                id="newsletter-email"
+                name="email"
+                aria-label={t('newsletter.placeholder')}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder={t('newsletter.placeholder')} 
+                placeholder={t('newsletter.placeholder')}
                 className="w-full h-12 pl-12 pr-4 bg-white/10 border border-white/20 text-white placeholder:text-gray-500 focus:outline-none focus:border-white focus:ring-1 focus:ring-white transition-all rounded-lg sm:rounded-l-lg sm:rounded-r-none"
                 disabled={subscribe.isPending}
+                required
+                autoComplete="email"
               />
             </div>
             <Button 

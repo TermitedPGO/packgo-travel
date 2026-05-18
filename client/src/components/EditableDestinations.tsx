@@ -82,7 +82,13 @@ export default function EditableDestinations() {
   });
 
   // Use database destinations or default. v70: defaults are now locale-aware.
-  const destinations = dbDestinations || buildDefaultDestinations(t);
+  // Round 79 follow-up: dbDestinations can be `[]` (truthy in JS), so we must
+  // explicitly check length — otherwise the regions section renders empty,
+  // which is what users were seeing on prod.
+  const destinations =
+    dbDestinations && dbDestinations.length > 0
+      ? dbDestinations
+      : buildDefaultDestinations(t);
 
   const handleDestinationClick = (region: string) => {
     if (!isEditMode) {
@@ -177,11 +183,16 @@ export default function EditableDestinations() {
     <section id="destinations" className="py-20 bg-gray-50">
       <div className="container">
         <div className="text-center mb-12">
-          <h2 className="text-3xl font-serif font-bold text-gray-900 mb-4 relative inline-block">
+          <p className="text-xs tracking-[0.3em] uppercase text-foreground/50 mb-4">
+            {t('destinations.subtitle')}
+          </p>
+          <h2 className="text-3xl md:text-4xl font-serif font-bold text-foreground tracking-tight">
             {t('destinations.title')}
-            <span className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-12 h-1 bg-primary"></span>
           </h2>
-          <p className="text-gray-500 mt-4">{t('destinations.subtitle')}</p>
+          <div
+            className="mt-6 mx-auto w-12 h-px bg-foreground/30"
+            aria-hidden
+          />
         </div>
 
         {/* Add Button */}

@@ -67,9 +67,42 @@ export default function CookieConsentBanner() {
       role="dialog"
       aria-live="polite"
       aria-label={t('common.cookieConsent')}
-      className="fixed bottom-4 left-4 right-4 md:left-6 md:right-auto md:max-w-md z-50"
+      className="fixed bottom-3 md:bottom-4 left-3 right-3 md:left-6 md:right-auto md:max-w-md z-50"
     >
-      <div className="rounded-xl border border-gray-200 bg-white shadow-2xl p-5">
+      {/* Round 80.6: split mobile vs desktop layouts. Mobile was eating ~50%
+          of fold-1 on every page (verified via puppeteer audit) — first
+          impression is the cookie box, not the brand. New mobile is a single-
+          row compact bar. Desktop keeps the original full card. */}
+
+      {/* Mobile compact bar — horizontal layout, single short line of body */}
+      <div className="md:hidden rounded-xl border border-gray-200 bg-white shadow-xl px-3 py-2.5">
+        <div className="flex items-center gap-2">
+          <Cookie className="h-4 w-4 text-foreground shrink-0" aria-hidden />
+          <div className="flex-1 min-w-0 text-xs text-foreground/80 leading-snug">
+            {t("cookieBanner.compactBody")}
+            <Link href="/privacy-policy" className="underline ml-1 text-foreground/60 hover:text-foreground">
+              {t("cookieBanner.detailsLink")}
+            </Link>
+          </div>
+        </div>
+        <div className="flex gap-2 mt-2">
+          <button
+            onClick={() => handle("necessary")}
+            className="flex-1 rounded-lg border border-gray-300 px-2 py-1.5 text-xs font-medium text-foreground/75 active:bg-gray-50 transition-colors"
+          >
+            {t("cookieBanner.necessaryOnly")}
+          </button>
+          <button
+            onClick={() => handle("all")}
+            className="flex-1 rounded-lg bg-foreground px-2 py-1.5 text-xs font-medium text-white active:bg-foreground/85 transition-colors"
+          >
+            {t("cookieBanner.acceptAll")}
+          </button>
+        </div>
+      </div>
+
+      {/* Desktop full card — original layout */}
+      <div className="hidden md:block rounded-xl border border-gray-200 bg-white shadow-2xl p-5">
         <div className="flex items-start gap-3">
           <Cookie className="h-6 w-6 text-black shrink-0 mt-0.5" aria-hidden />
           <div className="flex-1 min-w-0">

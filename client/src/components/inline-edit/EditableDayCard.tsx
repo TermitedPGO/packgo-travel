@@ -346,24 +346,67 @@ export function EditableDayCard({
             </button>
           )}
           
-          {/* Accommodation */}
-          {(day.accommodation || isEditMode) && (
-            <div className="mt-4 pt-4 border-t border-gray-100">
-              <div className="flex items-center gap-2 text-sm text-gray-600">
-                <span className="font-medium">{t('tourDetail.todayHotel')}</span>
+          {/* Accommodation — Round 80.20 redesign:
+              Same layout fix as TourDetailPeony: stacked label/value with
+              「或」 list parsing so multi-option hotels stop squeezing the
+              label. Edit mode keeps a textarea so admin can still type the
+              full Lion-format string with separators. */}
+          {(day.accommodation || isEditMode) && (() => {
+            const raw = String(day.accommodation || '').trim();
+            const parts = raw.split(/\s*或\s*/g).map((p) => p.trim()).filter(Boolean);
+            const trailingSimilar =
+              parts.length > 1 && /^同級$/.test(parts[parts.length - 1]);
+            const hotels = trailingSimilar ? parts.slice(0, -1) : parts;
+            const isMulti = hotels.length > 1;
+            return (
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="text-sm font-semibold text-gray-700">
+                    {t('tourDetail.tonightHotel')}
+                  </span>
+                  {!isEditMode && isMulti && (
+                    <span className="text-[10px] tracking-[0.2em] uppercase text-[#c9a563] font-semibold">
+                      {t('tourDetail.accommodationOptions')}
+                    </span>
+                  )}
+                </div>
                 {isEditMode ? (
                   <Input
-                    value={day.accommodation || ""}
+                    value={day.accommodation || ''}
                     onChange={(e) => onUpdate({ ...day, accommodation: e.target.value })}
                     placeholder={t('tourDetail.accommodationPlaceholder')}
-                    className="flex-1 h-8"
+                    className="w-full h-9 rounded-lg"
                   />
+                ) : isMulti ? (
+                  <div className="rounded-lg bg-gray-50 border border-gray-100 p-3">
+                    <ul className="space-y-1.5">
+                      {hotels.map((hotel, i) => (
+                        <li
+                          key={i}
+                          className="flex items-start gap-2 text-sm text-gray-800"
+                        >
+                          <span
+                            className="mt-1.5 h-1 w-1 rounded-full bg-[#c9a563] flex-shrink-0"
+                            aria-hidden
+                          />
+                          <span className="leading-relaxed">{hotel}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    {trailingSimilar && (
+                      <p className="text-[11px] text-gray-500 mt-2 pl-3">
+                        {t('tourDetail.orSimilar')}
+                      </p>
+                    )}
+                  </div>
                 ) : (
-                  <span>{day.accommodation}</span>
+                  <p className="text-sm text-gray-700 leading-relaxed">
+                    {hotels[0] || raw}
+                  </p>
                 )}
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Meals */}
           {(day.meals || isEditMode) && (

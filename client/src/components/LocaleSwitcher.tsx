@@ -101,7 +101,11 @@ export function CurrencySwitcher() {
 }
 
 // 組合組件 - 合併語言和幣值為單一緊湊下拉選單
-export function LocaleSwitcher() {
+// Round 80.12: variant prop — "light" (default, white bg) or "dark"
+// (used on Header utility bar which is bg-foreground).
+type LocaleSwitcherVariant = "light" | "dark";
+
+export function LocaleSwitcher({ variant = "light" }: { variant?: LocaleSwitcherVariant } = {}) {
   const { language, setLanguage, languageName, currency, setCurrency, t } = useLocale();
 
   // v78q: 4 languages — ja/ko fall back to en for missing keys (see i18n/index.ts)
@@ -119,19 +123,25 @@ export function LocaleSwitcher() {
     { code: 'KRW', name: 'KRW', symbol: '₩' },
   ];
 
+  const triggerClass = variant === "dark"
+    ? "h-7 px-2 text-xs font-medium text-white/85 hover:bg-white/10 hover:text-white gap-1.5"
+    : "h-8 px-2.5 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-black gap-1.5";
+
+  const dividerClass = variant === "dark" ? "text-white/30" : "text-gray-300";
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
           size="sm"
-          className="h-8 px-2.5 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-black gap-1.5"
+          className={triggerClass}
         >
           <Globe className="h-3.5 w-3.5" />
           <span>{languageName}</span>
-          <span className="text-gray-300">|</span>
+          <span className={dividerClass}>|</span>
           <span>{currency}</span>
-          <ChevronDown className="h-3 w-3 opacity-40" />
+          <ChevronDown className="h-3 w-3 opacity-50" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44 bg-white border border-gray-200 shadow-lg p-1">
