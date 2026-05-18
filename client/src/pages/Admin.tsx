@@ -79,6 +79,13 @@ import ChatsTab from "@/components/admin/ChatsTab";
 // KPIs + triage + recent activity. Replaces office-inbox as Jeff's
 // default entry. Office-inbox stays accessible as "advanced" sub-page.
 import TodayOverview from "@/components/admin/TodayOverview";
+// Round 81 (2026-05-17, evening) — UnifiedInbox replaces TodayOverview as
+// the default landing. Single vertical: actionable items → Pulse → activity.
+// TodayOverview kept under "today-legacy" PageId for fallback during
+// rollout, can be removed after a week of stable usage. FloatingOpsAgent
+// mounts OUTSIDE the page switch so it persists on every admin page.
+import UnifiedInbox from "@/components/admin/UnifiedInbox";
+import FloatingOpsAgent from "@/components/admin/FloatingOpsAgent";
 // Round 81 (2026-05-17) — 4 per-domain landing pages. Each domain (Ops,
 // Customers, Marketing, Finance) gets a dedicated at-a-glance dashboard
 // at the top of its menu, before drilling into specific sub-pages.
@@ -92,8 +99,10 @@ import FinanceLanding from "@/components/admin/landings/FinanceLanding";
 // ────────────────────────────────────────────────────────────────────────
 
 type PageId =
-  // Round 81 (2026-05-17) — TodayOverview is the new default landing
+  // Round 81 (2026-05-17) — UnifiedInbox is the new default landing.
+  // "today-legacy" preserves access to the old TodayOverview during rollout.
   | "today"
+  | "today-legacy"
   // Office — Inbox is the default; everything else is advanced
   | "office-inbox" | "office-chat" | "autonomous-agents" | "ai-hub" | "task-history" | "calibration-review" | "llm-cost" | "audit-log"
   // Round 81 (2026-05-17) — Per-domain landing pages
@@ -128,6 +137,10 @@ const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageD
       { id: "task-history", label: "任務記錄" },
       { id: "audit-log", label: "審計日誌" },
       { id: "llm-cost", label: "AI 成本" },
+      // 2026-05-17 evening — kept around for fallback during UnifiedInbox
+      // rollout. Remove in next cleanup pass if UnifiedInbox covers all
+      // the flows Jeff uses TodayOverview for.
+      { id: "today-legacy", label: "舊版總覽" },
     ],
   },
   ops: {
@@ -327,6 +340,15 @@ export default function Admin() {
           </main>
         </div>
       </div>
+
+      {/*
+        Round 81 (2026-05-17 evening) — FloatingOpsAgent is mounted OUTSIDE
+        the page-switch so it persists on every admin page. Bottom-right
+        floating button + ⌘+K shortcut → slide-out from right with full
+        OpsAgent chat. Lets Jeff ask "李太太那團幾號" while editing a
+        booking, viewing inbox, anywhere — without losing page context.
+      */}
+      <FloatingOpsAgent />
     </div>
   );
 }
@@ -335,6 +357,10 @@ function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
   switch (page) {
     // Office
     case "today":
+      // Round 81 (2026-05-17 evening) — UnifiedInbox replaces TodayOverview
+      // as the default landing. Same prop contract.
+      return <UnifiedInbox onNavigate={(t) => setActivePage(t as PageId)} />;
+    case "today-legacy":
       return <TodayOverview onNavigate={(t) => setActivePage(t as PageId)} />;
     // Round 81 (2026-05-17) — Per-domain landing pages
     case "ops-landing":
