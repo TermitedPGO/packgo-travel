@@ -233,7 +233,7 @@ export class ContentAnalyzerAgent {
           highlights: (Array.isArray(combinedResult.highlights)
             ? combinedResult.highlights
             : (typeof combinedResult.highlights === "string"
-                ? combinedResult.highlights.split(/[、，,\n]/).map(s => s.trim()).filter(Boolean)
+                ? combinedResult.highlights.split(/[、，,\n]/).map((s: string) => s.trim()).filter(Boolean)
                 : [])
           ).map((h: string, i: number) => ({
             id: i + 1,

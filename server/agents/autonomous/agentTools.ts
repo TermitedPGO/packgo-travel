@@ -288,18 +288,21 @@ export async function executeTool(
       case "list_recent_bookings": {
         const limit = Math.min(args.limit ?? 15, 30);
         const conds: any[] = [];
-        if (args.status) conds.push(eq(bookings.status, args.status));
+        if (args.status) conds.push(eq(bookings.bookingStatus, args.status));
+        // Note: projection keys (left-hand side) are the agent-facing tool API
+        // names — preserved for prompt stability. Right-hand side references
+        // the canonical schema column names.
         const query = db
           .select({
             id: bookings.id,
             tourId: bookings.tourId,
             userId: bookings.userId,
-            status: bookings.status,
+            status: bookings.bookingStatus,
             totalPrice: bookings.totalPrice,
-            adults: bookings.adults,
+            adults: bookings.numberOfAdults,
             createdAt: bookings.createdAt,
-            contactEmail: bookings.contactEmail,
-            contactName: bookings.contactName,
+            contactEmail: bookings.customerEmail,
+            contactName: bookings.customerName,
           })
           .from(bookings)
           .orderBy(desc(bookings.createdAt))

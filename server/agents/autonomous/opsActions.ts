@@ -313,7 +313,9 @@ async function doCancelBooking(args: z.infer<typeof CancelBookingArgs>): Promise
     .update(bookings)
     .set({
       bookingStatus: "cancelled" as any,
-      notes: sql`CONCAT(COALESCE(${bookings.notes}, ''), '\n[cancelled by OpsAgent ${new Date().toISOString().slice(0, 10)}] ', ${args.reason})`,
+      // bookings has no `notes` column — append audit string to `message` field.
+      // (Schema canonical: `message: text("message")` — see drizzle/schema.ts:690)
+      message: sql`CONCAT(COALESCE(${bookings.message}, ''), '\n[cancelled by OpsAgent ${new Date().toISOString().slice(0, 10)}] ', ${args.reason})`,
     })
     .where(and(eq(bookings.id, args.bookingId), ne(bookings.bookingStatus, "cancelled")));
 

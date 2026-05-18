@@ -270,7 +270,7 @@ async function fetchOpsContext(hints: ReturnType<typeof extractHints>) {
         .leftJoin(tours, eq(tourDepartures.tourId, tours.id))
         .where(
           and(
-            eq(tours.days, hints.daysHint),
+            eq(tours.duration, hints.daysHint),
             gte(tourDepartures.departureDate, new Date())
           )
         )
@@ -407,8 +407,9 @@ export async function runOpsAgent(
     system: messages[0].content,
   } as any);
 
+  // InvokeResult is OpenAI-style — content is at choices[0].message.content
+  // (server/_core/llm.ts converts Anthropic responses to this shape).
   const rawText =
-    (response?.content?.[0] as any)?.text ||
     response?.choices?.[0]?.message?.content ||
     "(no response)";
 
