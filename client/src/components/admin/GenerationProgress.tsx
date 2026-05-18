@@ -10,9 +10,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useLocale } from "@/contexts/LocaleContext";
-import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { 
   CheckCircle2, 
   XCircle, 
@@ -346,8 +344,8 @@ export function GenerationProgressComponent({
         {/* 頂部：狀態、進度、時間 */}
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
-            {currentStatus === 'running' && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
-            {currentStatus === 'completed' && <CheckCircle2 className="h-4 w-4 text-green-500" />}
+            {currentStatus === 'running' && <Loader2 className="h-4 w-4 animate-spin text-foreground" />}
+            {currentStatus === 'completed' && <CheckCircle2 className="h-4 w-4 text-foreground" />}
             {currentStatus === 'failed' && <XCircle className="h-4 w-4 text-red-500" />}
             <span className="text-sm font-medium">
               {currentStatus === 'running' && currentPhase?.currentTask}
@@ -355,17 +353,22 @@ export function GenerationProgressComponent({
               {currentStatus === 'failed' && t('generationProgress.failed')}
             </span>
           </div>
-          <div className="flex items-center gap-3 text-xs text-gray-500">
+          <div className="flex items-center gap-3 text-xs text-foreground/60">
             <span className="flex items-center gap-1">
               <Clock className="h-3 w-3" />
               {formatTime(elapsedTime)}
             </span>
-            <span className="font-medium text-primary">{overallProgress}%</span>
+            <span className="font-medium text-foreground">{overallProgress}%</span>
           </div>
         </div>
 
-        {/* 進度條 */}
-        <Progress value={overallProgress} className="h-2 mb-2" />
+        {/* 進度條 — B&W + Gold */}
+        <div className="h-2 w-full bg-foreground/10 rounded-full overflow-hidden mb-2">
+          <div
+            className="h-full bg-[#c9a563] transition-all"
+            style={{ width: `${Math.min(100, Math.max(0, overallProgress))}%` }}
+          />
+        </div>
 
         {/* Agent 狀態指示器（緊湊版） */}
         <div className="flex items-center gap-1 flex-wrap">
@@ -373,20 +376,20 @@ export function GenerationProgressComponent({
             <div
               key={phase.id}
               className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-xs transition-all ${
-                phase.status === 'running' 
-                  ? 'bg-primary/10 text-primary border border-primary/30' 
+                phase.status === 'running'
+                  ? 'bg-[#c9a563]/10 text-foreground border border-[#c9a563]/40'
                   : phase.status === 'completed'
-                  ? 'bg-green-50 text-green-600'
+                  ? 'bg-foreground/5 text-foreground/70 border border-foreground/15'
                   : phase.status === 'failed'
                   ? 'bg-red-50 text-red-600'
-                  : 'bg-gray-100 text-gray-400'
+                  : 'bg-gray-100 text-foreground/30'
               }`}
               title={`${phase.name}: ${phase.currentTask || phase.description}`}
             >
               {AGENT_ICONS[phase.id]}
               <span className="hidden sm:inline">{phase.shortName}</span>
               {phase.status === 'running' && (
-                <span className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
+                <span className="w-1.5 h-1.5 bg-[#c9a563] rounded-full animate-pulse" />
               )}
               {phase.status === 'completed' && (
                 <CheckCircle2 className="h-3 w-3" />
@@ -398,12 +401,12 @@ export function GenerationProgressComponent({
         {/* 技能學習通知 */}
         {skillNotifications.length > 0 && (
           <div className="mt-2 flex items-center gap-2 text-xs">
-            <Sparkles className="h-3 w-3 text-amber-500" />
-            <span className="text-amber-600">
+            <Sparkles className="h-3 w-3 text-[#c9a563]" />
+            <span className="text-[#8a6f3a]">
               {t('generationProgress.skillsLearned', { count: String(skillNotifications.length) })}
             </span>
             {skillNotifications.slice(-2).map((skill, idx) => (
-              <Badge key={idx} variant="outline" className="text-xs py-0 bg-amber-50 border-amber-200 text-amber-700">
+              <Badge key={idx} variant="outline" className="text-xs py-0 bg-[#FAF8F2] border-[#c9a563]/40 text-[#8a6f3a]">
                 {skill.name}
               </Badge>
             ))}
@@ -414,7 +417,7 @@ export function GenerationProgressComponent({
       {/* 展開/收合按鈕 */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full px-3 py-1.5 bg-gray-100 hover:bg-gray-200 transition-colors flex items-center justify-center gap-1 text-xs text-gray-600"
+        className="w-full px-3 py-1.5 bg-foreground/[0.04] hover:bg-foreground/[0.08] transition-colors flex items-center justify-center gap-1 text-xs text-foreground/60"
       >
         {isExpanded ? (
           <>
@@ -435,20 +438,20 @@ export function GenerationProgressComponent({
           {/* Agent 詳細列表 */}
           <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
             {displayPhases.map((phase) => (
-              <div 
+              <div
                 key={phase.id}
-                className={`flex items-center gap-2 p-2 rounded text-sm ${
-                  phase.status === 'running' ? 'bg-primary/5 border border-primary/20' : 
-                  phase.status === 'completed' ? 'bg-green-50/50' :
+                className={`flex items-center gap-2 p-2 rounded-lg text-sm ${
+                  phase.status === 'running' ? 'bg-[#c9a563]/5 border border-[#c9a563]/30' :
+                  phase.status === 'completed' ? 'bg-foreground/[0.03] border border-foreground/10' :
                   phase.status === 'failed' ? 'bg-red-50' :
                   'bg-gray-50'
                 }`}
               >
                 <div className={`p-1.5 rounded ${
-                  phase.status === 'running' ? 'bg-primary/10' :
-                  phase.status === 'completed' ? 'bg-green-100' :
-                  phase.status === 'failed' ? 'bg-red-100' :
-                  'bg-gray-100'
+                  phase.status === 'running' ? 'bg-[#c9a563]/15 text-[#8a6f3a]' :
+                  phase.status === 'completed' ? 'bg-foreground/10 text-foreground' :
+                  phase.status === 'failed' ? 'bg-red-100 text-red-600' :
+                  'bg-gray-100 text-foreground/40'
                 }`}>
                   {AGENT_ICONS[phase.id]}
                 </div>
@@ -456,17 +459,17 @@ export function GenerationProgressComponent({
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-xs">{phase.name}</span>
                     {phase.status === 'running' && (
-                      <Loader2 className="h-3 w-3 animate-spin text-primary" />
+                      <Loader2 className="h-3 w-3 animate-spin text-foreground" />
                     )}
                   </div>
-                  <p className="text-xs text-gray-500 truncate">
+                  <p className="text-xs text-foreground/50 truncate">
                     {phase.currentTask || phase.description}
                   </p>
                 </div>
                 <div className="flex-shrink-0">
-                  {phase.status === 'completed' && <CheckCircle2 className="h-4 w-4 text-green-500" />}
+                  {phase.status === 'completed' && <CheckCircle2 className="h-4 w-4 text-foreground" />}
                   {phase.status === 'failed' && <XCircle className="h-4 w-4 text-red-500" />}
-                  {phase.status === 'pending' && <Clock className="h-4 w-4 text-gray-300" />}
+                  {phase.status === 'pending' && <Clock className="h-4 w-4 text-foreground/25" />}
                 </div>
               </div>
             ))}
@@ -474,39 +477,39 @@ export function GenerationProgressComponent({
 
           {/* 漸進式結果預覽 */}
           {progress?.partialResults && Object.keys(progress.partialResults).length > 0 && (
-            <div className="p-3 bg-gradient-to-r from-blue-50 to-purple-50 rounded border border-blue-100 space-y-2">
-              <h4 className="text-xs font-semibold text-gray-700 flex items-center gap-1">
-                <Package className="h-3 w-3 text-blue-500" />
+            <div className="p-3 bg-[#FAF8F2] rounded-lg border border-[#c9a563]/30 space-y-2">
+              <h4 className="text-xs font-semibold text-foreground flex items-center gap-1">
+                <Package className="h-3 w-3 text-[#8a6f3a]" />
                 {t('generationProgress.livePreview')}
               </h4>
-              
+
               {progress.partialResults.title && (
-                <p className="text-sm font-bold text-gray-900 line-clamp-1">
-                  {typeof progress.partialResults.title === 'string' 
-                    ? progress.partialResults.title 
+                <p className="text-sm font-bold text-foreground line-clamp-1">
+                  {typeof progress.partialResults.title === 'string'
+                    ? progress.partialResults.title
                     : String(progress.partialResults.title)}
                 </p>
               )}
-              
+
               {progress.partialResults.destination && (
-                <p className="text-xs text-gray-500 flex items-center gap-1">
+                <p className="text-xs text-foreground/60 flex items-center gap-1">
                   <MapPin className="h-3 w-3" />
-                  {typeof progress.partialResults.destination === 'string' 
-                    ? progress.partialResults.destination 
+                  {typeof progress.partialResults.destination === 'string'
+                    ? progress.partialResults.destination
                     : String(progress.partialResults.destination)}
                 </p>
               )}
-              
+
               {progress.partialResults.colorTheme && typeof progress.partialResults.colorTheme === 'object' && (
                 <div className="flex items-center gap-1">
-                  <span className="text-xs text-gray-500">{t('generationProgress.colorThemeLabel')}</span>
+                  <span className="text-xs text-foreground/60">{t('generationProgress.colorThemeLabel')}</span>
                   <div className="flex gap-0.5">
                     {Object.entries(progress.partialResults.colorTheme).slice(0, 5).map(([key, color]) => {
                       const colorValue = typeof color === 'string' ? color : '#cccccc';
                       return (
                         <div
                           key={key}
-                          className="w-4 h-4 rounded-full border border-gray-200"
+                          className="w-4 h-4 rounded-full border border-foreground/15"
                           style={{ backgroundColor: colorValue }}
                           title={`${key}: ${colorValue}`}
                         />

@@ -159,12 +159,75 @@ export const locationMapping: Record<string, string> = {
   '日內瓦': 'Geneva',
   '洛桑': 'Lausanne',
   '蒙特勒': 'Montreux',
+  '蒙投': 'Montreux',     // Round 80.21 v20: alternate Chinese name
   '馬特宏峰': 'Matterhorn',
+  '馬特洪峰': 'Matterhorn',
+  '艾格峰': 'Eiger',
+  '皮拉圖斯山': 'Mount Pilatus',
+  '鐵力士山': 'Mount Titlis',
+  '布里恩茨湖': 'Lake Brienz',
+  '圖恩湖': 'Lake Thun',
+  '日內瓦湖': 'Lake Geneva',
+  '蘇黎世湖': 'Lake Zurich',
+  '盧森湖': 'Lake Lucerne',
+  '萊茵瀑布': 'Rhine Falls',
+  '伯恩高地': 'Bernese Oberland',
   '策馬特': 'Zermatt',
   '聖莫里茲': 'St. Moritz',
   '巴塞爾': 'Basel',
   '茵特拉肯': 'Interlaken',
   '冰河快車': 'Glacier Express',
+  // Round 80.21 v20: tour-specific Swiss landmarks that show up in
+  // itineraries but were missing from this dictionary so the map
+  // labels showed Chinese on the English site.
+  '冰河3000': 'Glacier 3000',
+  '瓦萊州': 'Valais',
+  '聖加侖': 'St. Gallen',
+  '伊瑟爾特瓦爾德': 'Iseltwald',
+  '菲斯特': 'First',
+  '林島': 'Lindau',
+  '黃金列車': 'Golden Pass',
+  '冰河列車': 'Glacier Express',
+  '西庸古堡': 'Château de Chillon',
+
+  // Croatia / Slovenia / Hungary (v316: Balkans + Central Europe tour)
+  '布達佩斯': 'Budapest',
+  '布達佩斯市區觀光': 'Budapest city tour',
+  '馬里博爾': 'Maribor',
+  '盧比安納': 'Ljubljana',
+  '盧比安那': 'Ljubljana',
+  '布萊德湖': 'Lake Bled',
+  '波斯托伊納': 'Postojna',
+  '歐帕提亞': 'Opatija',
+  '史賓尼克': 'Šibenik',
+  '特羅吉爾': 'Trogir',
+  '斯普利特': 'Split',
+  '札達爾': 'Zadar',
+  '十六湖國家公園': 'Plitvice Lakes National Park',
+  '札格雷布': 'Zagreb',
+  '札格雷布市區觀光': 'Zagreb city tour',
+  '杜布羅夫尼克': 'Dubrovnik',
+  '布拉格': 'Prague',
+  '克魯姆洛夫': 'Český Krumlov',
+  '卡羅維瓦利': 'Karlovy Vary',
+  '弗羅茨瓦夫': 'Wrocław',
+  '布加勒斯特': 'Bucharest',
+  '布拉索夫': 'Brașov',
+  '錫吉什瓦拉': 'Sighișoara',
+  '東歐': 'Eastern Europe',
+  '上海': 'Shanghai',
+  '杜爾': 'Tours',
+  '嘉義': 'Chiayi',
+  '阿里山': 'Alishan',
+
+  // Japan (v316: Hokkaido tour)
+  '富良野': 'Furano',
+  '洞爺湖': 'Lake Tōya',
+  '大沼': 'Ōnuma',
+  '採果體驗': 'Fruit picking experience',
+  '小樽運河': 'Otaru Canal',
+  '富田農場': 'Tomita Farm',
+  '四季彩之丘': 'Shikisai-no-Oka',
 
   // Germany
   '柏林': 'Berlin',
@@ -257,6 +320,39 @@ export const locationMapping: Record<string, string> = {
   // Korea
   '首爾': 'Seoul',
   '釜山韓國': 'Busan',
+
+  // Round 80.1: Canada (was missing — 加拿大 tour was showing 多倫多 in EN mode)
+  '多倫多': 'Toronto',
+  '蒙特婁': 'Montreal',
+  '蒙特利爾': 'Montreal',
+  '魁北克': 'Quebec',
+  '魁北克市': 'Quebec City',
+  '渥太華': 'Ottawa',
+  '溫哥華': 'Vancouver',
+  '維多利亞': 'Victoria',
+  '卡加利': 'Calgary',
+  '班夫': 'Banff',
+  '班夫國家公園': 'Banff National Park',
+  '路易斯湖': 'Lake Louise',
+  '尼加拉': 'Niagara',
+  '川普朗': 'Mont-Tremblant',
+
+  // Misc destinations seen in production tour data
+  '雪梨': 'Sydney',
+  '墨爾本': 'Melbourne',
+  '布里斯本': 'Brisbane',
+  '黃金海岸': 'Gold Coast',
+  '凱恩斯': 'Cairns',
+  '奧克蘭': 'Auckland',
+  '基督城': 'Christchurch',
+  '皇后鎮': 'Queenstown',
+  '京都': 'Kyoto',
+  '東京': 'Tokyo',
+  '大阪': 'Osaka',
+  '名古屋': 'Nagoya',
+  '神戶': 'Kobe',
+  '奈良': 'Nara',
+  '沖繩': 'Okinawa',
 };
 
 /**
@@ -274,4 +370,24 @@ export function translateDestination(destination: string, language: string): str
       return locationMapping[trimmed] || trimmed;
     })
     .join(', ');
+}
+
+/**
+ * Pull the destination city out of an itinerary day name. Used by
+ * map components to label markers with just the city, not the full
+ * "Day N · A → B → C: theme" string.
+ *   "台北 → 慕尼黑：飛越歐洲"            → "慕尼黑"
+ *   "蘇黎世 → 伊瑟爾特瓦爾德 → 菲斯特 → 伯恩" → "伯恩"
+ *   "盧森 → 林島 → 慕尼黑"               → "慕尼黑"
+ */
+export function extractDestinationCity(name: string): string {
+  if (!name) return "";
+  const cleaned = name.replace(
+    /^(day\s*\d+\s*[:\-]?\s*|第\s*\d+\s*日\s*[:\-]?\s*)/i,
+    ""
+  );
+  const beforeColon = cleaned.split(/[:：]/)[0].trim();
+  const parts = beforeColon.split(/\s*(?:→|⇒|↔|⇄|->|=>|>|、|,)\s*/);
+  const last = parts[parts.length - 1]?.trim() || beforeColon;
+  return last;
 }

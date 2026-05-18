@@ -41,27 +41,11 @@ const parseJSON = (str: string | null | undefined, defaultValue: any = null) => 
   }
 };
 
-// 根據目的地獲取主題色
-const getThemeColor = (country: string) => {
-  const countryLower = country?.toLowerCase() || "";
-  
-  if (countryLower.includes("日本") || countryLower.includes("japan")) {
-    return { primary: "#BE185D", secondary: "#EC4899", light: "#FDF2F8" };
-  }
-  if (countryLower.includes("韓國") || countryLower.includes("korea")) {
-    return { primary: "#1E40AF", secondary: "#3B82F6", light: "#EFF6FF" };
-  }
-  if (countryLower.includes("泰國") || countryLower.includes("thailand")) {
-    return { primary: "#B45309", secondary: "#F59E0B", light: "#FFFBEB" };
-  }
-  if (countryLower.includes("歐洲") || countryLower.includes("europe")) {
-    return { primary: "#0F766E", secondary: "#14B8A6", light: "#F0FDFA" };
-  }
-  if (countryLower.includes("台灣") || countryLower.includes("taiwan")) {
-    return { primary: "#991B1B", secondary: "#DC2626", light: "#FEF2F2" };
-  }
-  
-  return { primary: "#0A0A0A", secondary: "#374151", light: "#F9FAFB" };
+// PACK&GO brand: black + cream + gold across all destinations.
+// Old per-destination palettes (pink/blue/teal) felt inconsistent and
+// undermined the luxury identity.
+const getThemeColor = (_country: string) => {
+  return { primary: "#1A1A1A", secondary: "#C9A563", light: "#FAF8F2" };
 };
 
 // 格式化日期
@@ -171,9 +155,9 @@ export default function TourPrintView() {
           {/* 公司 Logo 和名稱 */}
           <div className="print-header">
             <div className="flex items-center gap-3">
-              <img 
-                src="/logo.png" 
-                alt="PACK&GO" 
+              <img
+                src="/images/logo-bag-black-v3.png"
+                alt="PACK&GO"
                 className="h-12 w-auto"
                 onError={(e) => {
                   (e.target as HTMLImageElement).style.display = 'none';
@@ -656,8 +640,20 @@ export default function TourPrintView() {
         
       </div>
       
-      {/* 列印專用樣式 */}
+      {/* 列印專用樣式 — v80.23 brand redesign: cream + gold, serif headlines */}
       <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&family=Noto+Serif+TC:wght@500;700;900&display=swap');
+
+        .print-document {
+          font-family: 'Noto Sans TC', 'Microsoft JhengHei', sans-serif;
+          color: #1a1a1a;
+        }
+
+        .print-document h1, .print-document h2, .print-document h3 {
+          font-family: 'Noto Serif TC', 'PingFang TC', serif;
+          letter-spacing: 0.5px;
+        }
+
         /* 螢幕顯示樣式 */
         @media screen {
           .print-document {
@@ -666,456 +662,527 @@ export default function TourPrintView() {
             padding: 20px;
             background: #f5f5f5;
           }
-          
+
           .print-page {
             background: white;
             margin-bottom: 20px;
-            padding: 20mm 15mm;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 22mm 16mm;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
             min-height: 297mm;
             position: relative;
           }
         }
-        
+
         /* 列印樣式 */
         @media print {
           @page {
             size: A4 portrait;
-            margin: 15mm 12mm 20mm 12mm;
+            margin: 15mm 14mm 20mm 14mm;
           }
-          
+
           body {
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
-          
+
           .print-document {
             background: white;
           }
-          
+
           .print-page {
             page-break-after: always;
             padding: 0;
             min-height: auto;
           }
-          
+
           .print-page:last-child {
             page-break-after: auto;
           }
         }
-        
+
         /* 通用樣式 */
         .print-header {
           display: flex;
           justify-content: space-between;
           align-items: flex-start;
-          margin-bottom: 15mm;
+          margin-bottom: 12mm;
           padding-bottom: 5mm;
-          border-bottom: 1px solid #e5e7eb;
+          border-bottom: 2px solid #c9a563;
         }
-        
+
         .print-page-header {
           display: flex;
           justify-content: space-between;
-          font-size: 10pt;
-          color: #6b7280;
+          font-size: 9.5pt;
+          color: #888;
           margin-bottom: 8mm;
           padding-bottom: 3mm;
-          border-bottom: 1px solid #e5e7eb;
+          border-bottom: 1px solid #e8e3d6;
+          letter-spacing: 0.5px;
         }
-        
+
         .print-page-footer {
           position: absolute;
-          bottom: 0;
-          left: 0;
-          right: 0;
+          bottom: 12mm;
+          left: 16mm;
+          right: 16mm;
           display: flex;
           justify-content: space-between;
-          font-size: 9pt;
-          color: #9ca3af;
+          font-size: 8.5pt;
+          color: #b0a886;
           padding-top: 3mm;
-          border-top: 1px solid #e5e7eb;
+          border-top: 1px solid #e8e3d6;
+          letter-spacing: 1px;
         }
-        
+
         .print-cover-image {
           position: relative;
           width: 100%;
-          height: 80mm;
-          border-radius: 8px;
+          height: 95mm;
           overflow: hidden;
           margin-bottom: 10mm;
         }
-        
+
         .print-cover-overlay {
           position: absolute;
           bottom: 0;
           left: 0;
           right: 0;
-          background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
-          padding: 15mm 8mm 8mm;
+          background: linear-gradient(to top, rgba(0,0,0,0.85), rgba(0,0,0,0.2) 60%, transparent);
+          padding: 18mm 10mm 8mm;
         }
-        
+
         .print-cover-content {
           color: white;
         }
-        
+
         .print-tour-title {
-          font-size: 18pt;
-          font-weight: bold;
-          margin-bottom: 3mm;
-          line-height: 1.3;
+          font-family: 'Noto Serif TC', serif;
+          font-size: 22pt;
+          font-weight: 900;
+          margin-bottom: 4mm;
+          line-height: 1.25;
+          letter-spacing: 1px;
         }
-        
+
         .print-tour-meta {
           display: flex;
-          gap: 15px;
+          gap: 18px;
           font-size: 10pt;
           opacity: 0.9;
         }
-        
+
         .print-section-title {
-          font-size: 14pt;
-          font-weight: bold;
+          font-family: 'Noto Serif TC', serif;
+          font-size: 15pt;
+          font-weight: 900;
           margin-bottom: 5mm;
-          padding-bottom: 2mm;
-          border-bottom: 2px solid currentColor;
+          padding-bottom: 0;
+          display: flex;
+          align-items: center;
+          gap: 4mm;
+          color: #1a1a1a !important;
+          border-bottom: none !important;
+          letter-spacing: 1px;
         }
-        
+
+        .print-section-title::before {
+          content: "";
+          width: 8mm;
+          height: 1mm;
+          background: #c9a563;
+          flex-shrink: 0;
+        }
+
         .print-subsection-title {
-          font-size: 11pt;
-          font-weight: 600;
+          font-family: 'Noto Serif TC', serif;
+          font-size: 11.5pt;
+          font-weight: 700;
           margin-bottom: 3mm;
           display: flex;
           align-items: center;
           gap: 6px;
-          color: #374151;
+          color: #1a1a1a;
+          letter-spacing: 0.5px;
         }
-        
+
         .print-intro {
           margin-bottom: 8mm;
         }
-        
+
         .print-intro-text {
           font-size: 10pt;
-          line-height: 1.7;
-          color: #4b5563;
+          line-height: 1.85;
+          color: #333;
           text-align: justify;
         }
-        
+
         .print-highlights {
           margin-bottom: 8mm;
         }
-        
+
         .print-highlights-list {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
-          gap: 2mm 8mm;
+          gap: 3mm 6mm;
         }
-        
+
         .print-highlight-item {
           display: flex;
           align-items: flex-start;
-          gap: 4px;
-          font-size: 9pt;
-          color: #4b5563;
+          gap: 6px;
+          font-size: 9.5pt;
+          color: #2a2a2a;
+          padding: 2mm 3mm;
+          background: #faf8f2;
+          border-left: 1mm solid #c9a563;
+          line-height: 1.55;
         }
         
         .print-day-header {
           display: flex;
           align-items: center;
-          gap: 10px;
+          gap: 4mm;
           padding: 4mm 5mm;
-          border-left: 4px solid;
-          margin-bottom: 5mm;
-        }
-        
-        .print-day-number {
+          background: #1a1a1a;
           color: white;
+          margin-bottom: 0;
+          border-left: none !important;
+        }
+
+        .print-day-number {
+          background: #c9a563 !important;
+          color: #1a1a1a !important;
           font-size: 10pt;
-          font-weight: bold;
-          padding: 2mm 4mm;
-          border-radius: 4px;
+          font-weight: 900;
+          padding: 1.5mm 3mm;
+          letter-spacing: 1.5px;
+          font-family: 'Noto Sans TC', sans-serif !important;
         }
-        
+
         .print-day-title h2 {
-          font-size: 12pt;
-          font-weight: bold;
-          color: #1f2937;
+          font-family: 'Noto Serif TC', serif;
+          font-size: 13pt;
+          font-weight: 700;
+          color: white !important;
+          margin: 0;
         }
-        
+
         .print-day-description {
           font-size: 10pt;
-          line-height: 1.6;
-          color: #4b5563;
-          margin-bottom: 5mm;
-          padding-left: 5mm;
-          border-left: 2px solid #e5e7eb;
+          line-height: 1.7;
+          color: #444;
+          margin: 4mm 0;
+          padding: 4mm 5mm;
+          background: #fefdfa;
+          border-left: 2mm solid #c9a563;
         }
-        
+
         .print-activities {
-          margin-bottom: 5mm;
+          margin: 5mm 0;
         }
-        
+
         .print-activities-list {
           display: flex;
           flex-direction: column;
-          gap: 2mm;
+          gap: 3mm;
         }
-        
+
         .print-activity-item {
           display: flex;
           align-items: baseline;
           gap: 8px;
           font-size: 10pt;
         }
-        
+
         .print-activity-time {
-          font-weight: 600;
-          min-width: 40px;
+          font-weight: 700;
+          min-width: 12mm;
+          color: #c9a563;
+          letter-spacing: 1px;
         }
-        
+
         .print-meals {
-          margin-bottom: 5mm;
+          margin: 5mm 0;
         }
-        
+
         .print-meals-grid {
           display: grid;
           grid-template-columns: repeat(3, 1fr);
-          gap: 5mm;
+          gap: 3mm;
         }
-        
+
         .print-meal-item {
-          background: #f9fafb;
+          background: #faf8f2;
           padding: 3mm;
-          border-radius: 4px;
           text-align: center;
+          border-top: 0.5mm solid #c9a563;
         }
-        
+
         .print-meal-label {
           display: block;
-          font-size: 9pt;
-          color: #6b7280;
+          font-size: 8.5pt;
+          color: #888;
           margin-bottom: 1mm;
+          letter-spacing: 1px;
         }
-        
+
         .print-meal-value {
           font-size: 10pt;
-          font-weight: 500;
+          font-weight: 600;
           color: #1f2937;
         }
-        
+
         .print-hotel {
-          margin-bottom: 5mm;
+          margin: 5mm 0;
         }
-        
+
         .print-hotel-info {
           font-size: 10pt;
-          padding: 3mm;
-          background: #f9fafb;
-          border-radius: 4px;
+          padding: 3mm 4mm;
+          background: #faf8f2;
+          border-left: 2mm solid #c9a563;
         }
-        
+
         .print-price-box {
-          padding: 5mm;
-          border-radius: 8px;
+          padding: 8mm 5mm;
           margin-bottom: 8mm;
           text-align: center;
+          background: #faf8f2 !important;
+          border: 1px solid #e8e3d6;
         }
-        
+
         .print-price-label {
-          font-size: 10pt;
-          color: #6b7280;
+          font-size: 9pt;
+          color: #888;
           margin-bottom: 2mm;
+          letter-spacing: 2px;
+          text-transform: uppercase;
         }
-        
+
         .print-price-value {
-          font-size: 20pt;
-          font-weight: bold;
+          font-family: 'Noto Serif TC', serif;
+          font-size: 22pt;
+          font-weight: 900;
+          color: #c9a563 !important;
         }
-        
+
         .print-inclusions,
         .print-exclusions {
           margin-bottom: 6mm;
         }
-        
+
         .print-list {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
           gap: 2mm 8mm;
         }
-        
+
         .print-list-item {
           display: flex;
           align-items: flex-start;
-          gap: 4px;
+          gap: 6px;
           font-size: 10pt;
-          color: #4b5563;
+          color: #2a2a2a;
+          line-height: 1.65;
+          padding: 1.5mm 0;
         }
         
         .print-notes-content {
           margin-bottom: 8mm;
         }
-        
+
         .print-note-section {
-          margin-bottom: 5mm;
+          margin-bottom: 6mm;
+          padding-left: 4mm;
+          border-left: 2px solid #c9a563;
         }
-        
+
         .print-note-title {
-          font-size: 11pt;
-          font-weight: 600;
-          color: #374151;
-          margin-bottom: 2mm;
+          font-family: 'Noto Serif TC', serif;
+          font-size: 11.5pt;
+          font-weight: 700;
+          color: #1a1a1a;
+          margin-bottom: 3mm;
+          letter-spacing: 0.5px;
         }
-        
+
         .print-note-list {
-          padding-left: 5mm;
+          padding-left: 6mm;
           font-size: 10pt;
-          color: #4b5563;
-          line-height: 1.6;
+          color: #2a2a2a;
+          line-height: 1.75;
         }
-        
+
         .print-note-list li {
-          margin-bottom: 1mm;
-          list-style-type: disc;
+          margin-bottom: 1.5mm;
+          list-style: none;
+          position: relative;
         }
-        
+
+        .print-note-list li::before {
+          content: "✦";
+          position: absolute;
+          left: -5mm;
+          color: #c9a563;
+          font-size: 9pt;
+          top: 0.5mm;
+        }
+
         .print-contact-box {
-          padding: 5mm;
-          border-radius: 8px;
+          padding: 6mm 7mm;
+          background: #1a1a1a !important;
+          color: white;
+          margin-top: 8mm;
         }
-        
+
+        .print-contact-box h3 {
+          color: #c9a563 !important;
+          font-family: 'Noto Serif TC', serif;
+          letter-spacing: 1px;
+        }
+
         .print-contact-grid {
           display: flex;
-          gap: 15mm;
+          gap: 12mm;
+          flex-wrap: wrap;
         }
-        
+
         .print-contact-item {
           display: flex;
           align-items: center;
-          gap: 4px;
+          gap: 6px;
           font-size: 10pt;
+          color: rgba(255,255,255,0.9);
         }
-        
+
+        .print-contact-item svg {
+          color: #c9a563 !important;
+        }
+
         /* 飯店資訊頁樣式 */
         .print-hotels-grid {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
           gap: 6mm;
         }
-        
+
         .print-hotel-card {
-          border: 1px solid #e5e7eb;
-          border-radius: 6px;
+          border: 1px solid #e8e3d6;
           overflow: hidden;
           page-break-inside: avoid;
         }
-        
+
         .print-hotel-image {
-          height: 35mm;
+          height: 38mm;
           overflow: hidden;
         }
-        
+
         .print-hotel-image img {
           width: 100%;
           height: 100%;
           object-fit: cover;
         }
-        
+
         .print-hotel-details {
-          padding: 4mm;
+          padding: 4mm 5mm;
+          background: #fefdfa;
         }
-        
+
         .print-hotel-header {
           display: flex;
           justify-content: space-between;
           align-items: center;
           margin-bottom: 2mm;
         }
-        
+
         .print-hotel-name {
+          font-family: 'Noto Serif TC', serif;
           font-size: 11pt;
-          font-weight: 600;
-          color: #1f2937;
+          font-weight: 700;
+          color: #1a1a1a;
           margin: 0;
         }
-        
+
         .print-hotel-rating {
           font-size: 10pt;
+          color: #c9a563;
         }
-        
+
         .print-hotel-address {
           font-size: 9pt;
-          color: #6b7280;
+          color: #888;
           margin: 0 0 2mm 0;
         }
-        
+
         .print-hotel-description {
-          font-size: 9pt;
-          color: #4b5563;
-          line-height: 1.4;
+          font-size: 9.5pt;
+          color: #444;
+          line-height: 1.55;
           margin: 0 0 2mm 0;
         }
-        
+
         .print-hotel-amenities {
           font-size: 9pt;
           margin-bottom: 2mm;
+          color: #555;
         }
-        
+
         .print-hotel-nights {
           font-size: 9pt;
-          color: #6b7280;
+          color: #c9a563;
           margin: 0;
+          font-weight: 600;
         }
-        
+
         /* 景點卡片樣式 */
         .print-activity-card {
           display: flex;
-          gap: 3mm;
-          padding: 3mm;
-          background: #fafafa;
-          border-radius: 4px;
-          margin-bottom: 2mm;
+          gap: 4mm;
+          padding: 3.5mm 4mm;
+          background: #fefdfa;
+          margin-bottom: 2.5mm;
+          border-left: 1mm solid #c9a563;
         }
-        
+
         .print-activity-image {
-          width: 25mm;
-          height: 20mm;
+          width: 28mm;
+          height: 22mm;
           flex-shrink: 0;
-          border-radius: 4px;
           overflow: hidden;
         }
-        
+
         .print-activity-image img {
           width: 100%;
           height: 100%;
           object-fit: cover;
         }
-        
+
         .print-activity-details {
           flex: 1;
         }
-        
+
         .print-activity-header {
           display: flex;
           align-items: baseline;
           gap: 8px;
-          margin-bottom: 1mm;
+          margin-bottom: 1.5mm;
         }
-        
+
         .print-activity-desc {
           font-size: 9pt;
-          color: #6b7280;
-          margin: 0 0 1mm 0;
-          line-height: 1.4;
+          color: #555;
+          margin: 0 0 1.5mm 0;
+          line-height: 1.55;
         }
-        
+
         .print-activity-info {
           display: flex;
-          gap: 10px;
-          font-size: 8pt;
-          color: #9ca3af;
+          gap: 12px;
+          font-size: 8.5pt;
+          color: #888;
         }
-        
+
         .print-activity-hours,
         .print-activity-price {
           display: flex;

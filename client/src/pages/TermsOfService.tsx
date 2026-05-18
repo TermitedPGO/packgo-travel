@@ -1,4 +1,5 @@
 import MarketingLayout from "@/components/layouts/MarketingLayout";
+import SEO from "@/components/SEO";
 import { useLocale } from "@/contexts/LocaleContext";
 
 /**
@@ -30,6 +31,18 @@ export default function TermsOfService() {
       title={t('termsOfService.fullTerms.title')}
       subtitle={t('termsOfService.fullTerms.subtitle')}
     >
+      <SEO
+        title={{
+          zh: "服務條款｜PACK&GO Travel LLC｜CST #2166984",
+          en: "Terms of Service | PACK&GO Travel LLC | CST #2166984",
+        }}
+        description={{
+          zh: "PACK&GO Travel LLC 服務條款：訂購、付款、退改、責任範圍、爭議處理。加州 CST #2166984 註冊旅行社合法條款。",
+          en: "PACK&GO Travel LLC terms covering booking, payments, refunds, liability, dispute resolution. California-registered, CST #2166984.",
+        }}
+        image="/images/hero-sakura.webp"
+        url="/terms-of-service"
+      />
       <p className="!text-sm !text-foreground/50 !mt-0">
         {t('termsOfService.fullTerms.effective')}: 2026-04-18
       </p>

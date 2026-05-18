@@ -8,6 +8,7 @@ import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { useRecaptcha } from "@/hooks/useRecaptcha";
 import { useLocale } from "@/contexts/LocaleContext";
+import SEO from "@/components/SEO";
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState("");
@@ -47,6 +48,12 @@ export default function ForgotPassword() {
 
   return (
     <div className="min-h-screen flex">
+      <SEO
+        title={{ zh: "忘記密碼", en: "Forgot Password" }}
+        description={{ zh: "重置 PACK&GO 帳戶密碼", en: "Reset your PACK&GO password" }}
+        url="/forgot-password"
+        noindex
+      />
       {/* Left Side - Hero Image */}
       <div className="hidden lg:flex lg:w-1/2 relative bg-black">
         <div className="absolute inset-0 bg-gradient-to-br from-black/60 to-black/20 z-10" />
@@ -68,11 +75,11 @@ export default function ForgotPassword() {
       {/* Right Side - Form */}
       <div className="flex-1 flex items-center justify-center px-8 py-12 bg-white">
         <div className="w-full max-w-md">
-          {/* Logo for mobile */}
+          {/* Logo for mobile — Round 80.7: was /logo.png (404'd) */}
           <div className="lg:hidden mb-8 text-center">
             <Link href="/" className="inline-flex items-center gap-3 text-2xl font-bold text-black">
               <img
-                src="/logo.png"
+                src="/images/logo-bag-black-v3.png"
                 alt="PACK&GO"
                 className="h-10 w-auto"
               />
@@ -153,8 +160,8 @@ export default function ForgotPassword() {
             </>
           ) : (
             <div className="text-center space-y-6">
-              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto">
-                <Mail className="w-8 h-8 text-green-600" />
+              <div className="w-16 h-16 bg-[#c9a563]/10 rounded-full flex items-center justify-center mx-auto">
+                <Mail className="w-8 h-8 text-[#c9a563]" />
               </div>
               <div>
                 <h2 className="text-2xl font-bold text-black mb-2">

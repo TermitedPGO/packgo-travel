@@ -31,7 +31,18 @@ export function useSEO(config: SEOConfig) {
       jsonLd,
     } = config;
 
-    const fullTitle = title ? `${title} | ${SITE_NAME}` : `${SITE_NAME} | 專業旅遊規劃、團體旅遊、客製行程`;
+    // Guard against double-branding. Many page-level titles already mention
+    // "PACK&GO" — either as the brand suffix ("...｜PACK&GO 旅行社") or in the
+    // topic itself ("關於 PACK&GO｜創辦人 Jeff..."). Appending another
+    // "| PACK&GO 旅行社" produces redundant titles that get truncated by
+    // Google's ~60-char limit. If the title already mentions the brand, keep
+    // it as-is; otherwise append the site name.
+    const alreadyBranded = title && /PACK\s*&\s*GO/i.test(title);
+    const fullTitle = title
+      ? alreadyBranded
+        ? title
+        : `${title} | ${SITE_NAME}`
+      : `${SITE_NAME} | 專業旅遊規劃、團體旅遊、客製行程`;
 
     // Update <title>
     document.title = fullTitle;

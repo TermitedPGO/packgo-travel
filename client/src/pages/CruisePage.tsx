@@ -51,23 +51,28 @@ export default function CruisePage() {
   function generateSmartTags(tour: any): { text: string; color: string; icon?: string }[] {
     const tags: { text: string; color: string; icon?: string }[] = [];
 
+    // Round 80.4: B&W brand normalization. premium = gold, others = neutral.
+    const TAG_NEUTRAL = "bg-foreground/[0.04] text-foreground/70 border-foreground/15";
+    const TAG_GOLD = "bg-[#c9a563]/10 text-[#8a6f3a] border-[#c9a563]/35";
+
     const days = tour.days || 0;
     if (days >= 10) {
-      tags.push({ text: TAG_LABELS.deepTravel, color: "bg-teal-100 text-teal-700 border-teal-200" });
+      tags.push({ text: TAG_LABELS.deepTravel, color: TAG_GOLD });
     } else if (days >= 7) {
-      tags.push({ text: TAG_LABELS.classicTour, color: "bg-blue-100 text-blue-700 border-blue-200" });
+      tags.push({ text: TAG_LABELS.classicTour, color: TAG_NEUTRAL });
     } else if (days <= 4 && days > 0) {
-      tags.push({ text: TAG_LABELS.lightTravel, color: "bg-green-100 text-green-700 border-green-200" });
+      tags.push({ text: TAG_LABELS.lightTravel, color: TAG_NEUTRAL });
     }
 
     const price = tour.price || 0;
     if (price >= 80000) {
-      tags.push({ text: TAG_LABELS.premiumTour, color: "bg-amber-100 text-amber-700 border-amber-200", icon: "star" });
+      tags.push({ text: TAG_LABELS.premiumTour, color: TAG_GOLD, icon: "star" });
     } else if (price <= 30000 && price > 0) {
-      tags.push({ text: TAG_LABELS.valueDeal, color: "bg-red-100 text-red-700 border-red-200", icon: "tag" });
+      tags.push({ text: TAG_LABELS.valueDeal, color: TAG_NEUTRAL, icon: "tag" });
     }
 
-    tags.push({ text: TAG_LABELS.cruise, color: "bg-cyan-100 text-cyan-700 border-cyan-200", icon: "ship" });
+    // Round 80.7: cruise tag — was cyan, normalized to gold to match brand B&W+gold baseline
+    tags.push({ text: TAG_LABELS.cruise, color: TAG_GOLD, icon: "ship" });
 
     return tags;
   }
@@ -125,9 +130,16 @@ export default function CruisePage() {
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
       <SEO
-        title={t('cruise.title')}
-        description={t('cruise.subtitle')}
-        url="/cruise"
+        title={{
+          zh: "郵輪假期｜阿拉斯加、加勒比海中文導遊｜PACK&GO",
+          en: "Cruise Vacations | Alaska & Caribbean Mandarin Service | PACK&GO",
+        }}
+        description={{
+          zh: "PACK&GO 郵輪專案：阿拉斯加冰川、加勒比海、地中海，全程中文協助登船、岸上行程客製。家庭、長輩、蜜月皆適合。",
+          en: "Alaska, Caribbean, Mediterranean cruises with Mandarin onboard support and custom shore excursions. Family-friendly, elder-friendly, honeymoon-ready.",
+        }}
+        image="/images/dest-cruise.webp"
+        url="/cruises"
       />
       <Header />
 
@@ -196,7 +208,22 @@ export default function CruisePage() {
           <div className="container">
             {isLoading ? (
               <div className="flex justify-center items-center py-20">
-                <div className="animate-spin rounded-lg h-12 w-12 border-b-2 border-primary"></div>
+                {/* Round 80.21: was rounded-lg (square) spinner with
+                    border-trick aliasing. Switched to SVG circular spinner
+                    with stroke-linecap="round" — silky smooth, brand gold. */}
+                <svg
+                  className="h-12 w-12 animate-spin"
+                  viewBox="0 0 50 50"
+                  xmlns="http://www.w3.org/2000/svg"
+                  aria-hidden
+                >
+                  <circle cx="25" cy="25" r="20" fill="none" stroke="#e5e7eb" strokeWidth="3" />
+                  <circle
+                    cx="25" cy="25" r="20" fill="none"
+                    stroke="#c9a563" strokeWidth="3" strokeLinecap="round"
+                    strokeDasharray="125.6" strokeDashoffset="94.2"
+                  />
+                </svg>
               </div>
             ) : cruiseTours.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

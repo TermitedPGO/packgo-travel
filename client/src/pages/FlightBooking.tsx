@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect } from "react";
+import { lazy, Suspense, useState, useRef, useEffect } from "react";
 import { useLocale } from "@/contexts/LocaleContext";
 import { trackAffiliateClick } from "@/lib/analytics";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import SEO from "@/components/SEO";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Link } from "wouter";
@@ -10,7 +11,8 @@ import {
   Plane, Clock, Shield, Globe, CreditCard, Headphones, ArrowRight,
   Briefcase, Crown, Star, ExternalLink, Search, Users, ArrowLeftRight
 } from "lucide-react";
-import AITravelAdvisorDialog from "@/components/AITravelAdvisorDialog";
+// Lazy: AITravelAdvisorDialog pulls in streamdown + Shiki (~600KB+).
+const AITravelAdvisorDialog = lazy(() => import("@/components/AITravelAdvisorDialog"));
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 
@@ -148,6 +150,18 @@ export default function FlightBooking() {
 
   return (
     <div className="min-h-screen flex flex-col bg-white">
+      <SEO
+        title={{
+          zh: "機票代訂｜中文客服、改票協助｜PACK&GO 旅行社",
+          en: "Flight Booking | Mandarin Support & Rebooking Help | PACK&GO",
+        }}
+        description={{
+          zh: "跨太平洋航線、商務艙、家庭機位專人代訂。改票、退票、行李問題全程中文協助,免你和航空公司客服周旋。",
+          en: "Trans-Pacific routes, business class, family seating handled by Mandarin agents. We deal with rebooking, refunds, baggage issues so you don't.",
+        }}
+        image="/images/dest-asia.webp"
+        url="/flight-booking"
+      />
       <Header />
 
       {/* ─── Full-width Trip.com-style Search Card ─── */}
@@ -471,7 +485,11 @@ export default function FlightBooking() {
       </section>
 
       <Footer />
-      <AITravelAdvisorDialog open={advisorOpen} onOpenChange={setAdvisorOpen} initialMessage={advisorInitialMsg} />
+      {advisorOpen && (
+        <Suspense fallback={null}>
+          <AITravelAdvisorDialog open={advisorOpen} onOpenChange={setAdvisorOpen} initialMessage={advisorInitialMsg} />
+        </Suspense>
+      )}
     </div>
   );
 }

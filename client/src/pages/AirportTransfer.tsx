@@ -1,5 +1,6 @@
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import SEO from "@/components/SEO";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
 import { Car, Clock, Shield, Star, ArrowRight, Phone, Truck, Bus, Plane } from "lucide-react";
@@ -64,6 +65,18 @@ export default function AirportTransfer() {
 
   return (
     <div className="min-h-screen flex flex-col bg-white">
+      <SEO
+        title={{
+          zh: "機場接送｜SFO/SJC/OAK 中文司機｜PACK&GO",
+          en: "Airport Transfer | SFO/SJC/OAK Mandarin Drivers | PACK&GO",
+        }}
+        description={{
+          zh: "灣區三大機場 SFO、SJC、OAK 中文司機接送。準時、車況優、長輩友善。可結合行程包車一路到底。",
+          en: "SFO, SJC, OAK transfers with Mandarin-speaking drivers. On-time, premium vehicles, elder-friendly. Bundles with full-trip charter.",
+        }}
+        image="/images/hero-sakura.webp"
+        url="/airport-transfer"
+      />
       <Header />
 
       {/* Advisory banner */}

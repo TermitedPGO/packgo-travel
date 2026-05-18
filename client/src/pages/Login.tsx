@@ -8,6 +8,7 @@ import { Link, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { useLocale } from "@/contexts/LocaleContext";
+import SEO from "@/components/SEO";
 
 export default function Login() {
   const [activeTab, setActiveTab] = useState<"signin" | "register">("signin");
@@ -99,6 +100,12 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex">
+      <SEO
+        title={{ zh: "登入 / 註冊", en: "Sign in / Register" }}
+        description={{ zh: "登入或註冊 PACK&GO 旅行社會員", en: "Sign in or register at PACK&GO Travel" }}
+        url="/login"
+        noindex
+      />
       {/* Left Side - Hero Image */}
       <div className="hidden lg:flex lg:w-1/2 relative bg-black">
         <div className="absolute inset-0 bg-gradient-to-br from-black/60 to-black/20 z-10" />
@@ -129,11 +136,12 @@ export default function Login() {
         </Link>
 
         <div className="w-full max-w-md">
-          {/* Logo for mobile */}
+          {/* Logo for mobile — Round 80.7: was /logo.png (404'd), now uses
+              actual brand mark. */}
           <div className="lg:hidden mb-8 text-center">
             <Link href="/" className="inline-flex items-center gap-3 text-2xl font-bold text-black">
               <img
-                src="/logo.png"
+                src="/images/logo-bag-black-v3.png"
                 alt="PACK&GO"
                 className="h-10 w-auto"
               />

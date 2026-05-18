@@ -2,20 +2,24 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
-import { 
-  Calendar, 
-  Clock, 
-  MapPin, 
-  Loader2, 
+import {
+  Calendar,
+  Clock,
+  MapPin,
+  Loader2,
   ArrowLeft,
   CheckCircle2,
   XCircle,
   CreditCard,
   User,
   Mail,
-  Phone
+  Phone,
+  Star,
 } from "lucide-react";
+import { useState } from "react";
 import { useParams, useLocation } from "wouter";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -23,6 +27,8 @@ import { toast } from "sonner";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { getLoginUrl } from "@/const";
 import { useLocale } from "@/contexts/LocaleContext";
+import PhotoUploadSection from "@/components/PhotoUploadSection";
+import SEO from "@/components/SEO";
 
 export default function BookingDetail() {
   const params = useParams();
@@ -142,9 +148,9 @@ export default function BookingDetail() {
   const getStatusBadge = (status: string) => {
     const statusConfig = {
       pending: { label: t('bookingDetail.statusPending'), className: "bg-yellow-100 text-yellow-800 border-yellow-300" },
-      confirmed: { label: t('bookingDetail.statusConfirmed'), className: "bg-blue-100 text-blue-800 border-blue-300" },
+      confirmed: { label: t('bookingDetail.statusConfirmed'), className: "bg-foreground/[0.04] text-foreground/70 border-foreground/15" },
       cancelled: { label: t('bookingDetail.statusCancelled'), className: "bg-red-100 text-red-800 border-red-300" },
-      completed: { label: t('bookingDetail.statusCompleted'), className: "bg-green-100 text-green-800 border-green-300" },
+      completed: { label: t('bookingDetail.statusCompleted'), className: "bg-[#c9a563]/10 text-[#8a6f3a] border-[#c9a563]/35" },
     };
     const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.pending;
     return <Badge className={`${config.className} border`}>{config.label}</Badge>;
@@ -161,8 +167,8 @@ export default function BookingDetail() {
   const getPaymentStatusBadge = (status: string) => {
     const statusConfig = {
       unpaid: { label: t('bookingDetail.paymentUnpaid'), className: "bg-gray-100 text-gray-800 border-gray-300", icon: Clock },
-      deposit: { label: t('bookingDetail.paymentDeposit'), className: "bg-blue-100 text-blue-800 border-blue-300", icon: CheckCircle2 },
-      paid: { label: t('bookingDetail.paymentPaid'), className: "bg-green-100 text-green-800 border-green-300", icon: CheckCircle2 },
+      deposit: { label: t('bookingDetail.paymentDeposit'), className: "bg-foreground/[0.04] text-foreground/70 border-foreground/15", icon: CheckCircle2 },
+      paid: { label: t('bookingDetail.paymentPaid'), className: "bg-[#c9a563]/10 text-[#8a6f3a] border-[#c9a563]/35", icon: CheckCircle2 },
       refunded: { label: t('bookingDetail.paymentRefunded'), className: "bg-red-100 text-red-800 border-red-300", icon: XCircle },
     };
     const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.unpaid;
@@ -181,11 +187,17 @@ export default function BookingDetail() {
 
   return (
     <div className="min-h-screen flex flex-col bg-white">
+      <SEO
+        title={{ zh: "訂單詳情", en: "Booking Detail" }}
+        description={{ zh: "PACK&GO 訂單詳情", en: "PACK&GO booking detail" }}
+        url={`/bookings/${params.id || ""}`}
+        noindex
+      />
       <Header />
-      
+
       <main className="flex-grow container py-12">
-        <Button 
-          variant="outline" 
+        <Button
+          variant="outline"
           onClick={() => navigate("/profile")}
           className="mb-6 border-2 border-black  hover:bg-black hover:text-white"
         >
@@ -327,7 +339,7 @@ export default function BookingDetail() {
                   <Separator />
                   <div className="flex justify-between items-center">
                     <span className="text-gray-600">{t('bookingDetail.paidAmount')}</span>
-                    <span className="font-bold text-green-600">NT$ {paidAmount.toLocaleString()}</span>
+                    <span className="font-bold text-[#8a6f3a]">NT$ {paidAmount.toLocaleString()}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-gray-600">{t('bookingDetail.unpaidAmount')}</span>
@@ -344,7 +356,7 @@ export default function BookingDetail() {
                       <h3 className="font-bold text-sm">{t('bookingDetail.choosePaymentMethod')}</h3>
                       {canPayDeposit && (
                         <Button 
-                          className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                          className="w-full bg-foreground hover:bg-foreground/90 text-white"
                           onClick={() => handlePayment("deposit")}
                           disabled={createCheckoutMutation.isPending}
                         >
@@ -358,7 +370,7 @@ export default function BookingDetail() {
                       )}
                       {canPayBalance && (
                         <Button 
-                          className="w-full bg-green-600 hover:bg-green-700 text-white"
+                          className="w-full bg-[#c9a563] hover:bg-[#b89352] text-white"
                           onClick={() => handlePayment("balance")}
                           disabled={createCheckoutMutation.isPending}
                         >
@@ -389,10 +401,10 @@ export default function BookingDetail() {
                 )}
 
                 {isFullyPaid && (
-                  <div className="bg-green-50 border-2 border-green-200 rounded-lg p-4 text-center">
-                    <CheckCircle2 className="h-8 w-8 text-green-600 mx-auto mb-2" />
-                    <p className="font-bold text-green-800">{t('bookingDetail.paymentCompleted')}</p>
-                    <p className="text-sm text-green-600 mt-1">{t('bookingDetail.thankYou')}</p>
+                  <div className="bg-[#c9a563]/10 border-2 border-[#c9a563]/35 rounded-lg p-4 text-center">
+                    <CheckCircle2 className="h-8 w-8 text-[#c9a563] mx-auto mb-2" />
+                    <p className="font-bold text-foreground">{t('bookingDetail.paymentCompleted')}</p>
+                    <p className="text-sm text-[#8a6f3a] mt-1">{t('bookingDetail.thankYou')}</p>
                   </div>
                 )}
 
@@ -422,6 +434,22 @@ export default function BookingDetail() {
                     </Button>
                   </>
                 )}
+
+                {/* Round 80.22 Phase E: Review form for completed bookings */}
+                {booking.bookingStatus === "completed" && (
+                  <>
+                    <Separator />
+                    <ReviewSection bookingId={booking.id} />
+                  </>
+                )}
+
+                {/* Round 80.22 Phase G: Photo upload (completed only) */}
+                {booking.bookingStatus === "completed" && (
+                  <>
+                    <Separator />
+                    <PhotoUploadSection bookingId={booking.id} />
+                  </>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -429,6 +457,158 @@ export default function BookingDetail() {
       </main>
 
       <Footer />
+    </div>
+  );
+}
+
+/**
+ * Round 80.22 Phase E: review submission UI on a completed booking.
+ * Shows existing review status if one exists, otherwise renders the form.
+ * Approval awards +50 Packpoint server-side.
+ */
+function ReviewSection({ bookingId }: { bookingId: number }) {
+  const { t } = useLocale();
+  const utils = trpc.useUtils();
+  const { data: myReviews } = trpc.reviews.myReviews.useQuery();
+  const existing = myReviews?.find((r) => r.bookingId === bookingId);
+
+  const [rating, setRating] = useState(5);
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+
+  const createMutation = trpc.reviews.create.useMutation({
+    onSuccess: () => {
+      toast.success("評論已送出,審核通過後可獲得 +50 Packpoint");
+      utils.reviews.myReviews.invalidate();
+      setTitle("");
+      setContent("");
+      setRating(5);
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  if (existing) {
+    const statusLabel: Record<string, string> = {
+      pending: t("bookingDetail.reviewStatusPending"),
+      approved: t("bookingDetail.reviewStatusApproved"),
+      rejected: t("bookingDetail.reviewStatusRejected"),
+      hidden: t("bookingDetail.reviewStatusHidden"),
+    };
+    const statusColor: Record<string, string> = {
+      pending: "text-yellow-700 bg-yellow-50 border-yellow-200",
+      approved: "text-green-700 bg-green-50 border-green-200",
+      rejected: "text-red-700 bg-red-50 border-red-200",
+      hidden: "text-gray-700 bg-gray-50 border-gray-200",
+    };
+    return (
+      <div className="space-y-3">
+        <h3 className="font-semibold text-sm">{t("bookingDetail.reviewYourReview")}</h3>
+        <div
+          className={`rounded-lg border p-3 text-sm ${
+            statusColor[existing.status] || "bg-gray-50"
+          }`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-1">
+              {[1, 2, 3, 4, 5].map((s) => (
+                <Star
+                  key={s}
+                  className={`h-3.5 w-3.5 ${
+                    s <= existing.rating ? "fill-yellow-400 text-yellow-400" : "text-gray-300"
+                  }`}
+                />
+              ))}
+            </div>
+            <span className="text-xs font-semibold">{statusLabel[existing.status]}</span>
+          </div>
+          <p className="font-semibold text-foreground">{existing.title}</p>
+          <p className="text-xs text-foreground/70 mt-1 line-clamp-3">{existing.content}</p>
+          {existing.rejectionReason && (
+            <p className="text-xs text-red-700 mt-2">
+              {t("bookingDetail.reviewRejectionReason")}：{existing.rejectionReason}
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <h3 className="font-semibold text-sm">{t("bookingDetail.reviewWriteReview")}</h3>
+        <p className="text-xs text-foreground/60 mt-0.5">
+          {t("bookingDetail.reviewBonusHint")}
+        </p>
+      </div>
+
+      <div>
+        <p className="text-xs text-foreground/70 mb-1">{t("bookingDetail.reviewRating")}</p>
+        <div className="flex items-center gap-1">
+          {[1, 2, 3, 4, 5].map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setRating(s)}
+              className="p-1 hover:scale-110 transition-transform"
+            >
+              <Star
+                className={`h-6 w-6 ${
+                  s <= rating ? "fill-yellow-400 text-yellow-400" : "text-gray-300"
+                }`}
+              />
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <Input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder={t("bookingDetail.reviewTitlePlaceholder")}
+          maxLength={200}
+          className="rounded-lg"
+        />
+      </div>
+
+      <div>
+        <Textarea
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          placeholder={t("bookingDetail.reviewContentPlaceholder")}
+          rows={5}
+          maxLength={5000}
+          className="rounded-lg"
+        />
+        <p className="text-[10px] text-foreground/50 mt-1 text-right">
+          {content.length} / 5000
+        </p>
+      </div>
+
+      <Button
+        onClick={() =>
+          createMutation.mutate({
+            bookingId,
+            rating,
+            title: title.trim(),
+            content: content.trim(),
+          })
+        }
+        disabled={
+          createMutation.isPending ||
+          title.trim().length < 3 ||
+          content.trim().length < 10
+        }
+        className="w-full rounded-lg bg-foreground text-white hover:bg-foreground/90"
+      >
+        {createMutation.isPending ? (
+          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+        ) : (
+          <Star className="h-4 w-4 mr-2" />
+        )}
+        送出評論
+      </Button>
     </div>
   );
 }

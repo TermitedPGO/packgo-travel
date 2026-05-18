@@ -43,8 +43,16 @@ export default function GroupPackages() {
   return (
     <div className="min-h-screen flex flex-col bg-white">
       <SEO
-        title={t("groupPackages.page.seoTitle")}
-        description={t("groupPackages.page.seoDescription")}
+        title={{
+          zh: "團體包團｜公司獎勵旅遊、家族出遊、社團包車｜PACK&GO",
+          en: "Group Packages | Corporate, Family Reunion, Club Tours | PACK&GO",
+        }}
+        description={{
+          zh: "10 人以上包團專案：公司獎勵、家族團聚、教會社團。獨家行程、專車專導、彈性付款，CST #2166984 合法承辦。",
+          en: "Groups of 10+: corporate incentives, family reunions, church or club trips. Private itineraries, dedicated guides, flexible billing. CST #2166984.",
+        }}
+        image="/images/dest-asia.webp"
+        url="/group-packages"
       />
       <Header />
 

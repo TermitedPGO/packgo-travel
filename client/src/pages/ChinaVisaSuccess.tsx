@@ -6,6 +6,7 @@ import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { useLocale } from "@/contexts/LocaleContext";
 import { CheckCircle, FileText, Clock, Mail, ChevronRight } from "lucide-react";
+import SEO from "@/components/SEO";
 
 export default function ChinaVisaSuccess() {
   const { t } = useLocale();
@@ -23,17 +24,17 @@ export default function ChinaVisaSuccess() {
 
   const steps = [
     {
-      icon: <Mail className="h-5 w-5 text-blue-600" />,
+      icon: <Mail className="h-5 w-5 text-foreground/70" />,
       title: t("visaSuccess.step1Title"),
       desc: t("visaSuccess.step1Desc"),
     },
     {
-      icon: <FileText className="h-5 w-5 text-purple-600" />,
+      icon: <FileText className="h-5 w-5 text-foreground/70" />,
       title: t("visaSuccess.step2Title"),
       desc: t("visaSuccess.step2Desc"),
     },
     {
-      icon: <Clock className="h-5 w-5 text-orange-600" />,
+      icon: <Clock className="h-5 w-5 text-foreground/70" />,
       title: t("visaSuccess.step3Title"),
       desc: t("visaSuccess.step3Desc"),
     },
@@ -41,13 +42,19 @@ export default function ChinaVisaSuccess() {
 
   return (
     <div className="min-h-screen flex flex-col bg-white font-sans">
+      <SEO
+        title={{ zh: "簽證申請已收到", en: "Visa Application Received" }}
+        description={{ zh: "PACK&GO 簽證申請確認", en: "PACK&GO visa application confirmation" }}
+        url="/china-visa/success"
+        noindex
+      />
       <Header />
       <main className="flex-grow">
         <div className="container max-w-2xl mx-auto px-4 py-20 text-center">
           {/* Success icon */}
           <div className="flex justify-center mb-6">
-            <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center">
-              <CheckCircle className="h-10 w-10 text-green-600" />
+            <div className="w-20 h-20 bg-[#c9a563]/10 rounded-full flex items-center justify-center">
+              <CheckCircle className="h-10 w-10 text-[#c9a563]" />
             </div>
           </div>
 
@@ -79,7 +86,7 @@ export default function ChinaVisaSuccess() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500">{t("visaSuccess.paymentStatusLabel")}</span>
-                  <span className="text-green-600 font-bold">
+                  <span className="text-[#8a6f3a] font-bold">
                     {t("visaSuccess.paidStatus")}
                   </span>
                 </div>

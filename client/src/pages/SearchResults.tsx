@@ -75,18 +75,18 @@ const generateSmartTags = (tour: any, t: (key: string) => string) => {
 
   // 1. 根據天數判斷行程類型
   if (tour.duration >= 10) {
-    tags.push({ label: t("searchResults.tagInDepth"), icon: Mountain, color: "bg-emerald-100 text-emerald-700" });
+    tags.push({ label: t("searchResults.tagInDepth"), icon: Mountain, color: "bg-foreground/[0.04] text-foreground/70" });
   } else if (tour.duration >= 7) {
-    tags.push({ label: t("searchResults.tagClassic"), icon: Star, color: "bg-amber-100 text-amber-700" });
+    tags.push({ label: t("searchResults.tagClassic"), icon: Star, color: "bg-foreground/[0.04] text-foreground/70" });
   } else if (tour.duration <= 4) {
-    tags.push({ label: t("searchResults.tagShortTrip"), icon: Sparkles, color: "bg-sky-100 text-sky-700" });
+    tags.push({ label: t("searchResults.tagShortTrip"), icon: Sparkles, color: "bg-foreground/[0.04] text-foreground/70" });
   }
 
   // 2. 根據價格判斷行程等級
   if (tour.price && tour.price >= 80000) {
-    tags.push({ label: t("searchResults.tagPremium"), icon: Star, color: "bg-purple-100 text-purple-700" });
+    tags.push({ label: t("searchResults.tagPremium"), icon: Star, color: "bg-[#c9a563]/10 text-[#8a6f3a]" });
   } else if (tour.price && tour.price < 30000) {
-    tags.push({ label: t("searchResults.tagValueDeal"), icon: Sparkles, color: "bg-rose-100 text-rose-700" });
+    tags.push({ label: t("searchResults.tagValueDeal"), icon: Sparkles, color: "bg-foreground/[0.04] text-foreground/70" });
   }
 
   // 3. 根據交通方式判斷
@@ -96,15 +96,15 @@ const generateSmartTags = (tour: any, t: (key: string) => string) => {
   const combinedText = `${title} ${description}`;
 
   if (category === "cruise" || combinedText.includes("郵輪") || combinedText.includes("遊輪") || combinedText.includes("cruise")) {
-    tags.push({ label: t("searchResults.tagCruise"), icon: Ship, color: "bg-blue-100 text-blue-700" });
+    tags.push({ label: t("searchResults.tagCruise"), icon: Ship, color: "bg-foreground/[0.04] text-foreground/70" });
   }
 
   if (tour.outboundAirline || combinedText.includes("航空") || combinedText.includes("飛機") || combinedText.includes("flight") || combinedText.includes("airline")) {
-    tags.push({ label: t("searchResults.tagFlight"), icon: Plane, color: "bg-indigo-100 text-indigo-700" });
+    tags.push({ label: t("searchResults.tagFlight"), icon: Plane, color: "bg-foreground/[0.04] text-foreground/70" });
   }
 
   if (combinedText.includes("高鐵") || combinedText.includes("火車") || combinedText.includes("列車") || combinedText.includes("train") || combinedText.includes("rail")) {
-    tags.push({ label: t("searchResults.tagRail"), icon: Train, color: "bg-orange-100 text-orange-700" });
+    tags.push({ label: t("searchResults.tagRail"), icon: Train, color: "bg-foreground/[0.04] text-foreground/70" });
   }
 
   if (combinedText.includes("巴士") || combinedText.includes("遊覽車") || combinedText.includes("bus") || combinedText.includes("coach")) {
@@ -117,12 +117,12 @@ const generateSmartTags = (tour: any, t: (key: string) => string) => {
   }
 
   if (combinedText.includes("攝影") || combinedText.includes("拍照") || combinedText.includes("打卡") || combinedText.includes("photo") || combinedText.includes("photography")) {
-    tags.push({ label: t("searchResults.tagPhotoTour"), icon: Camera, color: "bg-pink-100 text-pink-700" });
+    tags.push({ label: t("searchResults.tagPhotoTour"), icon: Camera, color: "bg-foreground/[0.04] text-foreground/70" });
   }
 
   // 5. 根據行程類型判斷
   if (category === "group" || combinedText.includes("團體") || combinedText.includes("group")) {
-    tags.push({ label: t("searchResults.tagGroupTour"), icon: Users, color: "bg-teal-100 text-teal-700" });
+    tags.push({ label: t("searchResults.tagGroupTour"), icon: Users, color: "bg-foreground/[0.04] text-foreground/70" });
   }
   
   // 6. 解析資料庫中的 tags 欄位
@@ -382,6 +382,7 @@ export default function SearchResults() {
           en: "Search PACK&GO Travel tour packages to find the itinerary that fits you best.",
         }}
         url="/search"
+        noindex
       />
       <Header />
       

@@ -177,16 +177,16 @@ export default function DeparturePreview({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl rounded-xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-lg">
-            <CalendarDays className="h-5 w-5 text-teal-600" />
+          <DialogTitle className="flex items-center gap-2 text-lg text-foreground">
+            <CalendarDays className="h-5 w-5 text-[#c9a563]" />
             {t("departurePreview.title")}
           </DialogTitle>
-          <p className="text-sm text-muted-foreground mt-1">{tourTitle}</p>
+          <p className="text-sm text-foreground/60 mt-1">{tourTitle}</p>
         </DialogHeader>
 
         {/* Source info */}
         {(sourceUrl || extractedAt) && (
-          <div className="flex flex-wrap gap-4 text-xs text-muted-foreground border border-border rounded-lg px-3 py-2 bg-muted/30">
+          <div className="flex flex-wrap gap-4 text-xs text-foreground/60 border border-foreground/10 rounded-lg px-3 py-2 bg-[#FAF8F2]">
             {sourceUrl && (
               <span className="flex items-center gap-1">
                 <span className="font-medium">{t("departurePreview.extractedFrom")}：</span>
@@ -194,7 +194,7 @@ export default function DeparturePreview({
                   href={sourceUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-teal-600 hover:underline flex items-center gap-1"
+                  className="text-[#8a6f3a] hover:underline flex items-center gap-1"
                 >
                   {sourceUrl.length > 60 ? sourceUrl.slice(0, 60) + "…" : sourceUrl}
                   <ExternalLink className="h-3 w-3" />
@@ -213,7 +213,7 @@ export default function DeparturePreview({
         {/* Loading */}
         {isLoading && (
           <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+            <Loader2 className="h-8 w-8 animate-spin text-[#c9a563]" />
           </div>
         )}
 
@@ -226,8 +226,10 @@ export default function DeparturePreview({
 
         {/* No data */}
         {!isLoading && !error && rows.length === 0 && (
-          <div className="text-center py-12 text-muted-foreground">
-            <CalendarDays className="h-12 w-12 mx-auto mb-3 opacity-30" />
+          <div className="text-center py-12 text-foreground/60">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-[#FAF8F2] mb-3">
+              <CalendarDays className="h-6 w-6 text-[#c9a563]" />
+            </div>
             <p>{t("departurePreview.noExtractedData")}</p>
           </div>
         )}
@@ -261,9 +263,9 @@ export default function DeparturePreview({
             </div>
 
             {/* Table */}
-            <div className="overflow-x-auto rounded-xl border border-border">
+            <div className="overflow-x-auto rounded-xl border border-foreground/15">
               <table className="w-full text-sm">
-                <thead className="bg-muted/50">
+                <thead className="bg-[#FAF8F2]">
                   <tr>
                     <th className="w-10 px-3 py-2 text-center">
                       <Checkbox
@@ -271,25 +273,25 @@ export default function DeparturePreview({
                         onCheckedChange={handleToggleAll}
                       />
                     </th>
-                    <th className="px-3 py-2 text-left font-medium text-muted-foreground">
+                    <th className="px-3 py-2 text-left text-[11px] font-semibold text-foreground/60 uppercase tracking-wider whitespace-nowrap">
                       {t("departurePreview.departureDate")}
                     </th>
-                    <th className="px-3 py-2 text-left font-medium text-muted-foreground">
+                    <th className="px-3 py-2 text-left text-[11px] font-semibold text-foreground/60 uppercase tracking-wider whitespace-nowrap">
                       {t("departurePreview.returnDate")}
                     </th>
-                    <th className="px-3 py-2 text-left font-medium text-muted-foreground">
+                    <th className="px-3 py-2 text-left text-[11px] font-semibold text-foreground/60 uppercase tracking-wider whitespace-nowrap">
                       {t("departurePreview.availableSpots")}
                     </th>
-                    <th className="px-3 py-2 text-left font-medium text-muted-foreground">
+                    <th className="px-3 py-2 text-left text-[11px] font-semibold text-foreground/60 uppercase tracking-wider whitespace-nowrap">
                       {t("departurePreview.adultPrice")}
                     </th>
-                    <th className="px-3 py-2 text-left font-medium text-muted-foreground">
+                    <th className="px-3 py-2 text-left text-[11px] font-semibold text-foreground/60 uppercase tracking-wider whitespace-nowrap">
                       {t("departurePreview.childPrice")}
                     </th>
-                    <th className="px-3 py-2 text-left font-medium text-muted-foreground">
+                    <th className="px-3 py-2 text-left text-[11px] font-semibold text-foreground/60 uppercase tracking-wider whitespace-nowrap">
                       {t("departurePreview.infantPrice")}
                     </th>
-                    <th className="px-3 py-2 text-left font-medium text-muted-foreground">
+                    <th className="px-3 py-2 text-left text-[11px] font-semibold text-foreground/60 uppercase tracking-wider whitespace-nowrap">
                       {t("departurePreview.colStatus")}
                     </th>
                   </tr>
@@ -298,8 +300,8 @@ export default function DeparturePreview({
                   {rows.map((row, idx) => (
                     <tr
                       key={idx}
-                      className={`border-t border-border transition-colors ${
-                        selected.has(idx) ? "bg-teal-50/50" : "opacity-50"
+                      className={`border-t border-foreground/10 transition-colors ${
+                        selected.has(idx) ? "bg-[#FAF8F2]/60" : "opacity-50"
                       }`}
                     >
                       <td className="px-3 py-2 text-center">
@@ -312,7 +314,7 @@ export default function DeparturePreview({
                         <Input
                           value={row.date}
                           onChange={(e) => handleCellEdit(idx, "date", e.target.value)}
-                          className="h-7 text-xs rounded-lg w-32"
+                          className="h-7 text-xs rounded-lg w-32 border-foreground/20"
                           placeholder={t("departurePreview.placeholderDate")}
                         />
                       </td>
@@ -320,7 +322,7 @@ export default function DeparturePreview({
                         <Input
                           value={row.returnDate || ""}
                           onChange={(e) => handleCellEdit(idx, "returnDate", e.target.value)}
-                          className="h-7 text-xs rounded-lg w-32"
+                          className="h-7 text-xs rounded-lg w-32 border-foreground/20"
                           placeholder={t("departurePreview.placeholderDate")}
                         />
                       </td>
@@ -329,7 +331,7 @@ export default function DeparturePreview({
                           type="number"
                           value={row.availableSpots ?? ""}
                           onChange={(e) => handleCellEdit(idx, "availableSpots", e.target.value)}
-                          className="h-7 text-xs rounded-lg w-20"
+                          className="h-7 text-xs rounded-lg w-20 border-foreground/20"
                           placeholder={t("departurePreview.placeholderSpots")}
                         />
                       </td>
@@ -338,7 +340,7 @@ export default function DeparturePreview({
                           type="number"
                           value={row.adultPrice ?? ""}
                           onChange={(e) => handleCellEdit(idx, "adultPrice", e.target.value)}
-                          className="h-7 text-xs rounded-lg w-24"
+                          className="h-7 text-xs rounded-lg w-24 border-foreground/20"
                           placeholder={t("departurePreview.placeholderPrice")}
                         />
                       </td>
@@ -347,7 +349,7 @@ export default function DeparturePreview({
                           type="number"
                           value={row.childWithBedPrice ?? ""}
                           onChange={(e) => handleCellEdit(idx, "childWithBedPrice", e.target.value)}
-                          className="h-7 text-xs rounded-lg w-24"
+                          className="h-7 text-xs rounded-lg w-24 border-foreground/20"
                           placeholder={t("departurePreview.placeholderPrice")}
                         />
                       </td>
@@ -356,7 +358,7 @@ export default function DeparturePreview({
                           type="number"
                           value={row.infantPrice ?? ""}
                           onChange={(e) => handleCellEdit(idx, "infantPrice", e.target.value)}
-                          className="h-7 text-xs rounded-lg w-24"
+                          className="h-7 text-xs rounded-lg w-24 border-foreground/20"
                           placeholder={t("departurePreview.placeholderPrice")}
                         />
                       </td>
@@ -364,7 +366,7 @@ export default function DeparturePreview({
                         <Input
                           value={row.status || ""}
                           onChange={(e) => handleCellEdit(idx, "status", e.target.value)}
-                          className="h-7 text-xs rounded-lg w-24"
+                          className="h-7 text-xs rounded-lg w-24 border-foreground/20"
                           placeholder={t("departurePreview.placeholderStatus")}
                         />
                       </td>
@@ -379,14 +381,14 @@ export default function DeparturePreview({
         <DialogFooter className="gap-2 pt-2">
           <Button
             variant="outline"
-            className="rounded-lg"
+            className="rounded-lg border-foreground/20"
             onClick={() => onOpenChange(false)}
           >
             {t("departurePreview.cancelButton")}
           </Button>
           {rows.length > 0 && (
             <Button
-              className="rounded-lg bg-teal-600 hover:bg-teal-700 text-white gap-2"
+              className="rounded-lg bg-foreground hover:bg-foreground/85 text-white gap-2"
               onClick={handleConfirm}
               disabled={confirmMutation.isPending || selected.size === 0}
             >

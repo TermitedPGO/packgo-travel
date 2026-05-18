@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useLocale } from "@/contexts/LocaleContext";
 import { Search, CheckCircle, Clock, AlertCircle, XCircle, FileText, Loader2 } from "lucide-react";
+import SEO from "@/components/SEO";
 
 const STATUS_CONFIG: Record<string, { color: string; icon: React.ReactElement; i18nKey: string }> = {
   draft:               { color: "gray",   icon: <FileText className="h-4 w-4" />,    i18nKey: "draft" },
@@ -23,8 +24,8 @@ const STATUS_CONFIG: Record<string, { color: string; icon: React.ReactElement; i
 
 const STATUS_COLORS: Record<string, string> = {
   gray:   "bg-gray-100 text-gray-700 border-gray-300",
-  blue:   "bg-blue-100 text-blue-700 border-blue-300",
-  green:  "bg-green-100 text-green-700 border-green-300",
+  blue:   "bg-foreground/[0.04] text-foreground/70 border-foreground/15",
+  green:  "bg-[#c9a563]/10 text-[#8a6f3a] border-[#c9a563]/35",
   yellow: "bg-yellow-100 text-yellow-700 border-yellow-300",
   red:    "bg-red-100 text-red-700 border-red-300",
 };
@@ -54,6 +55,12 @@ export default function ChinaVisaStatus() {
 
   return (
     <div className="min-h-screen flex flex-col bg-white font-sans">
+      <SEO
+        title={{ zh: "簽證辦理進度", en: "Visa Application Status" }}
+        description={{ zh: "PACK&GO 中國簽證進度追蹤", en: "PACK&GO China visa status tracking" }}
+        url={`/china-visa/status/${routeId || ""}`}
+        noindex
+      />
       <Header />
       <main className="flex-grow">
         {/* Page header */}
@@ -203,11 +210,11 @@ export default function ChinaVisaStatus() {
 
               {/* Admin notes (visible if available) */}
               {application.adminNotes && (
-                <div className="bg-blue-50 border border-blue-200 p-4 text-sm">
-                  <div className="font-bold text-blue-800 mb-1">
+                <div className="bg-foreground/[0.04] border border-foreground/15 p-4 text-sm">
+                  <div className="font-bold text-foreground mb-1">
                     {t("visaStatus.notes")}
                   </div>
-                  <p className="text-blue-700">{application.adminNotes}</p>
+                  <p className="text-foreground/70">{application.adminNotes}</p>
                 </div>
               )}
 

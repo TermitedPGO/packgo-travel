@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { trpc } from "@/lib/trpc";
 import { useLocale } from "@/contexts/LocaleContext";
 import { trackPurchase } from "@/lib/analytics";
+import SEO from "@/components/SEO";
 
 export default function PaymentSuccess() {
   const [location] = useLocation();
@@ -49,12 +50,18 @@ export default function PaymentSuccess() {
 
   return (
     <div className="min-h-screen bg-gray-50 py-12">
+      <SEO
+        title={{ zh: "付款成功", en: "Payment Successful" }}
+        description={{ zh: "PACK&GO 付款確認頁", en: "PACK&GO payment confirmation" }}
+        url="/payment/success"
+        noindex
+      />
       <div className="container max-w-2xl">
 
         {/* Success header */}
         <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center w-24 h-24 bg-green-100 rounded-full mb-5">
-            <CheckCircle className="w-14 h-14 text-green-600" />
+          <div className="inline-flex items-center justify-center w-24 h-24 bg-[#c9a563]/10 rounded-full mb-5">
+            <CheckCircle className="w-14 h-14 text-[#c9a563]" />
           </div>
           <h1 className="text-4xl font-bold text-gray-900 mb-3">{t("paymentSuccess.successTitle")}</h1>
           <p className="text-xl text-gray-600">
@@ -66,12 +73,12 @@ export default function PaymentSuccess() {
         {booking ? (
           <>
             {/* Order number callout */}
-            <div className="bg-green-50 border-2 border-green-200 rounded-xl p-6 mb-6 text-center">
-              <p className="text-base text-green-700 mb-1">{t("paymentSuccess.orderNumberLabel")}</p>
-              <p className="text-5xl font-bold text-green-800 tracking-wider">
+            <div className="bg-[#c9a563]/10 border-2 border-[#c9a563]/35 rounded-xl p-6 mb-6 text-center">
+              <p className="text-base text-[#8a6f3a] mb-1">{t("paymentSuccess.orderNumberLabel")}</p>
+              <p className="text-5xl font-bold text-foreground tracking-wider">
                 #{booking.id}
               </p>
-              <p className="text-sm text-green-600 mt-2">
+              <p className="text-sm text-[#8a6f3a] mt-2">
                 {t("paymentSuccess.saveNumberNote")}
               </p>
             </div>
@@ -85,8 +92,8 @@ export default function PaymentSuccess() {
               {/* v78w: Tour summary at top — was missing despite data being available.
                   Customer needs to see "what they bought" prominently before contact info. */}
               {((booking as any).tourTitle || (booking as any).tour?.title) && (
-                <div className="mb-6 p-4 rounded-xl bg-emerald-50 border border-emerald-200">
-                  <p className="text-xs uppercase tracking-wider text-emerald-700 font-semibold mb-1">
+                <div className="mb-6 p-4 rounded-xl bg-[#c9a563]/10 border border-[#c9a563]/35">
+                  <p className="text-xs uppercase tracking-wider text-[#8a6f3a] font-semibold mb-1">
                     {t("paymentSuccess.tourLabel") || "Tour"}
                   </p>
                   <p className="text-lg md:text-xl font-bold text-gray-900 leading-snug mb-2">
@@ -94,7 +101,7 @@ export default function PaymentSuccess() {
                   </p>
                   {(booking as any).departureDate && (
                     <p className="text-sm text-gray-700 flex items-center gap-2">
-                      <svg className="h-4 w-4 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                      <svg className="h-4 w-4 text-[#8a6f3a]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                       </svg>
                       <strong>{t("paymentSuccess.departureLabel") || "Departure"}:</strong>{" "}
@@ -159,28 +166,28 @@ export default function PaymentSuccess() {
               </div>
 
               {/* v78w: "What happens next" — concrete timeline replaces vague "email sent" */}
-              <div className="mt-6 bg-blue-50 border border-blue-200 rounded-xl p-5">
-                <h3 className="font-bold text-blue-900 mb-3">
+              <div className="mt-6 bg-foreground/[0.04] border border-foreground/15 rounded-xl p-5">
+                <h3 className="font-bold text-foreground mb-3">
                   {t("paymentSuccess.whatNextTitle") || "What happens next"}
                 </h3>
-                <ol className="space-y-2.5 text-sm text-blue-900">
+                <ol className="space-y-2.5 text-sm text-foreground/80">
                   <li className="flex items-start gap-2">
-                    <span className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold">1</span>
+                    <span className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-foreground text-white text-xs font-bold">1</span>
                     <span>
                       <strong>{t("paymentSuccess.confirmationSentLabel")}</strong>{" "}
                       {t("paymentSuccess.confirmationSentBody", { email: booking.customerEmail })}
                     </span>
                   </li>
                   <li className="flex items-start gap-2">
-                    <span className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold">2</span>
+                    <span className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-foreground text-white text-xs font-bold">2</span>
                     <span>{t("paymentSuccess.nextStep2") || "Our team confirms your seats with the supplier within 1 week and emails you the final itinerary."}</span>
                   </li>
                   <li className="flex items-start gap-2">
-                    <span className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold">3</span>
+                    <span className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-foreground text-white text-xs font-bold">3</span>
                     <span>{t("paymentSuccess.nextStep3") || "30 days before departure, we'll send pre-trip preparation reminders (visa, packing, contact info)."}</span>
                   </li>
                   <li className="flex items-start gap-2">
-                    <span className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold">4</span>
+                    <span className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-foreground text-white text-xs font-bold">4</span>
                     <span>{t("paymentSuccess.nextStep4") || "Questions? Call +1 (510) 634-2307 or reply to your confirmation email anytime."}</span>
                   </li>
                 </ol>
@@ -214,7 +221,7 @@ export default function PaymentSuccess() {
         ) : (
           /* Fallback when booking data is unavailable */
           <Card className="p-8 mb-6 text-center rounded-xl">
-            <CheckCircle className="w-16 h-16 text-green-600 mx-auto mb-4" />
+            <CheckCircle className="w-16 h-16 text-[#c9a563] mx-auto mb-4" />
             <h2 className="text-2xl font-bold text-gray-900 mb-2">{t("paymentSuccess.paymentCompleted")}</h2>
             <p className="text-gray-600 mb-6">
               {t("paymentSuccess.paymentProcessed")}

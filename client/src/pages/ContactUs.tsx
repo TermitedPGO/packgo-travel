@@ -90,7 +90,18 @@ export default function ContactUs() {
       title={t('contactUs.title')}
       subtitle={t('contactUs.subtitle')}
     >
-      <SEO title={t('contactUs.title')} description={t('contactUs.intro')} url="/contact-us" />
+      <SEO
+        title={{
+          zh: "聯絡 PACK&GO｜電話、Email、LINE、微信｜華人家庭專屬窗口",
+          en: "Contact PACK&GO | Phone, Email, LINE, WeChat | Mandarin Desk",
+        }}
+        description={{
+          zh: "灣區華人專屬聯絡管道：電話、Email、LINE、微信全開。週一至週六中文回覆，緊急行程支援 24 小時。",
+          en: "Reach us via phone, email, LINE, or WeChat. Mandarin replies Mon–Sat; 24-hour support for in-trip emergencies.",
+        }}
+        image="/images/hero-sakura.webp"
+        url="/contact-us"
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 mt-4">
 
@@ -159,7 +170,7 @@ export default function ContactUs() {
         <div className="lg:col-span-2">
           {isSubmitted ? (
             <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
-              <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
+              <CheckCircle className="h-16 w-16 text-[#c9a563] mx-auto mb-4" />
               <h3 className="text-2xl font-bold text-gray-900 mb-3">{t('contactUs.successTitle')}</h3>
               <p className="text-gray-600 mb-6">{t('contactUs.successMsg')}</p>
               <Button onClick={() => setIsSubmitted(false)} size="lg" className="rounded-lg px-8">

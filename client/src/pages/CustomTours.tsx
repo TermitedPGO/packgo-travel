@@ -65,15 +65,22 @@ export default function CustomTours() {
       />
       <Header />
 
-      {/* Hero Section */}
-      <section className="relative h-[400px] flex items-center justify-center overflow-hidden">
+      {/* Hero Section.
+          Round 80.7: was loading /images/custom-tours-hero.jpg which 404s,
+          and the onError fallback /images/hero-travel.webp ALSO 404s — that
+          loop was emitting 57 identical 404 errors per page load. Now points
+          at hero-sakura.webp which exists in client/public/images, with a
+          safe one-shot onError that sets a CSS fallback bg instead of looping. */}
+      <section className="relative h-[400px] flex items-center justify-center overflow-hidden bg-foreground">
         <div className="absolute inset-0 z-0">
           <img
-            src="/images/custom-tours-hero.jpg"
+            src="/images/hero-sakura.webp"
             alt={t('customTours.title')}
             className="w-full h-full object-cover rounded-xl"
             onError={(e) => {
-              e.currentTarget.src = "/images/hero-travel.webp";
+              // One-shot guard: hide the img element rather than swap to
+              // another potentially-broken URL.
+              e.currentTarget.style.display = "none";
             }}
           />
           <div className="absolute inset-0 bg-black/40" />

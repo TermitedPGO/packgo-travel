@@ -47,14 +47,18 @@
 }
 
 :root {
-  /* PACK&GO Travel Theme - Unified Color System */
-  /* Primary: Teal/Turquoise - 代表旅行、探索、大海 */
-  --primary: oklch(0.45 0.12 195); /* #0D7377 Teal */
+  /* PACK&GO Travel Theme - Round 80.4 B&W brand baseline.
+     Primary was previously teal (#0D7377) — now points at foreground (near
+     black) so every shadcn primitive that reads `bg-primary` / `text-primary`
+     resolves to the brand's monochrome palette. Gold (#c9a563) is used as a
+     literal hex in components for accents — it is intentionally NOT bound to
+     --primary because gold is an accent, not a primary surface color. */
+  --primary: oklch(0.15 0 0); /* Near Black — was Teal #0D7377 */
   --primary-foreground: oklch(1 0 0); /* Pure White */
-  
-  /* Secondary: Golden Amber - 代表陽光、溫暖、精緻 */
-  --accent-gold: oklch(0.75 0.15 75); /* #E8A838 Golden */
-  
+
+  /* Secondary: Golden Amber accent — used only via literal #c9a563 in components */
+  --accent-gold: oklch(0.72 0.12 78); /* #c9a563 Golden */
+
   --background: oklch(1 0 0); /* Pure White */
   --foreground: oklch(0.15 0 0); /* Near Black */
   
@@ -64,8 +68,9 @@
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0 0 0);
   
-  --secondary: oklch(0.97 0.01 195); /* Light Teal Tint */
-  --secondary-foreground: oklch(0.35 0.1 195); /* Dark Teal */
+  /* Secondary surface — neutral gray (was light teal tint) */
+  --secondary: oklch(0.96 0 0); /* Very Light Gray */
+  --secondary-foreground: oklch(0.25 0 0); /* Dark Gray */
   
   --muted: oklch(0.96 0 0); /* Warm Gray */
   --muted-foreground: oklch(0.45 0 0); /* Medium Gray */

@@ -118,27 +118,29 @@ export default function DashboardTab({ onNavigate }: DashboardTabProps = {}) {
           </div>
         </div>
 
-        {/* Quick Actions */}
+        {/* Quick Actions — Round 80.9: tabs were dead, now wired through onNavigate */}
         <div className="bg-white border border-gray-200 p-6 rounded-xl">
           <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-4">{t('admin.dashboardTab.quickActionsTitle')}</h3>
           <div className="space-y-2">
             {[
-              { icon: Plane, label: t('admin.dashboardTab.quickAddTour'), desc: t('admin.dashboardTab.quickAddTourDesc') },
-              { icon: MessageSquare, label: t('admin.dashboardTab.quickViewInquiries'), desc: t('admin.dashboardTab.quickViewInquiriesDesc') },
-              { icon: TrendingUp, label: t('admin.dashboardTab.quickViewReports'), desc: t('admin.dashboardTab.quickViewReportsDesc') },
+              { icon: Plane, label: t('admin.dashboardTab.quickAddTour'), desc: t('admin.dashboardTab.quickAddTourDesc'), tab: 'tours' },
+              { icon: MessageSquare, label: t('admin.dashboardTab.quickViewInquiries'), desc: t('admin.dashboardTab.quickViewInquiriesDesc'), tab: 'inbox' },
+              { icon: TrendingUp, label: t('admin.dashboardTab.quickViewReports'), desc: t('admin.dashboardTab.quickViewReportsDesc'), tab: 'analytics' },
             ].map((action, i) => {
               const Icon = action.icon;
               return (
                 <button
                   key={i}
-                  className="w-full flex items-center gap-4 p-4 bg-white border border-gray-200 hover:border-gray-400 hover:bg-gray-50 transition-all text-left group rounded-lg"
+                  onClick={() => onNavigate?.(action.tab)}
+                  disabled={!onNavigate}
+                  className="w-full flex items-center gap-4 p-4 bg-white border border-gray-200 hover:border-foreground hover:bg-gray-50 transition-all text-left group rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Icon className="h-5 w-5 text-gray-400 group-hover:text-gray-700 flex-shrink-0" />
+                  <Icon className="h-5 w-5 text-gray-400 group-hover:text-foreground flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-gray-900">{action.label}</p>
                     <p className="text-xs text-gray-500">{action.desc}</p>
                   </div>
-                  <ArrowRight className="h-4 w-4 text-gray-300 group-hover:text-gray-600 flex-shrink-0" />
+                  <ArrowRight className="h-4 w-4 text-gray-300 group-hover:text-foreground flex-shrink-0" />
                 </button>
               );
             })}

@@ -19,7 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Calendar, Bot, CheckCircle2, Edit, Loader2, Plus, Trash2, Users } from "lucide-react";
+import { Calendar, CheckCircle2, Edit, Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -45,7 +45,14 @@ interface DeparturesManagementProps {
   tourTitle: string;
 }
 
-export default function DeparturesManagement({ tourId, tourTitle }: DeparturesManagementProps) {
+// Format currency display: TWD shows as "NT$"; other currencies show their code.
+const formatPrice = (amount: number, currency?: string | null) => {
+  const code = (currency || "TWD").toUpperCase();
+  const symbol = code === "TWD" ? "NT$" : code;
+  return `${symbol} ${amount.toLocaleString()}`;
+};
+
+export default function DeparturesManagement({ tourId }: DeparturesManagementProps) {
   const { t } = useLocale();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -221,11 +228,26 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
     setIsDeleteDialogOpen(true);
   };
 
+  // Status chip styling — B&W + Gold palette. Only "full" keeps a muted red
+  // because it is a true error/warning state worth flagging.
   const getStatusConfig = (status: string) => {
     const config = {
-      open: { label: t('departuresTab.statusOpen'), className: "bg-green-100 text-green-800 border border-green-200" },
-      full: { label: t('departuresTab.statusFull'), className: "bg-red-100 text-red-800 border border-red-200" },
-      cancelled: { label: t('departuresTab.statusCancelled'), className: "bg-gray-100 text-gray-600 border border-gray-200" },
+      open: {
+        label: t('departuresTab.statusOpen'),
+        className: "bg-foreground/5 text-foreground",
+      },
+      full: {
+        label: t('departuresTab.statusFull'),
+        className: "bg-red-50 text-red-700",
+      },
+      confirmed: {
+        label: t('departuresTab.statusConfirmed'),
+        className: "bg-[#c9a563]/15 text-[#8a6f3a]",
+      },
+      cancelled: {
+        label: t('departuresTab.statusCancelled'),
+        className: "bg-foreground/5 text-foreground/50 line-through",
+      },
     };
     return config[status as keyof typeof config] || config.open;
   };
@@ -234,81 +256,81 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
   const renderFormFields = () => (
     <div className="grid grid-cols-2 gap-4 py-4">
       <div className="space-y-1.5">
-        <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('departuresTab.fieldDepartureDate')}</Label>
+        <Label className="text-xs font-semibold text-foreground/60 uppercase tracking-wider">{t('departuresTab.fieldDepartureDate')}</Label>
         <Input
           type="date"
           value={formData.departureDate}
           onChange={(e) => setFormData({ ...formData, departureDate: e.target.value })}
-          className="border-gray-300 rounded-lg"
+          className="border-foreground/20 rounded-lg"
         />
       </div>
       <div className="space-y-1.5">
-        <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('departuresTab.fieldReturnDate')}</Label>
+        <Label className="text-xs font-semibold text-foreground/60 uppercase tracking-wider">{t('departuresTab.fieldReturnDate')}</Label>
         <Input
           type="date"
           value={formData.returnDate}
           onChange={(e) => setFormData({ ...formData, returnDate: e.target.value })}
-          className="border-gray-300 rounded-lg"
+          className="border-foreground/20 rounded-lg"
         />
       </div>
       <div className="space-y-1.5">
-        <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('departuresTab.fieldAdultPrice')}</Label>
+        <Label className="text-xs font-semibold text-foreground/60 uppercase tracking-wider whitespace-nowrap">{t('departuresTab.fieldAdultPrice')}</Label>
         <Input
           type="number"
           value={formData.adultPrice}
           onChange={(e) => setFormData({ ...formData, adultPrice: Number(e.target.value) })}
-          className="border-gray-300 rounded-lg"
+          className="border-foreground/20 rounded-lg"
         />
       </div>
       <div className="space-y-1.5">
-        <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('departuresTab.fieldChildPriceWithBed')}</Label>
+        <Label className="text-xs font-semibold text-foreground/60 uppercase tracking-wider">{t('departuresTab.fieldChildPriceWithBed')}</Label>
         <Input
           type="number"
           value={formData.childPriceWithBed || ""}
           onChange={(e) => setFormData({ ...formData, childPriceWithBed: e.target.value ? Number(e.target.value) : undefined })}
-          className="border-gray-300 rounded-lg"
+          className="border-foreground/20 rounded-lg"
         />
       </div>
       <div className="space-y-1.5">
-        <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('departuresTab.fieldChildPriceNoBed')}</Label>
+        <Label className="text-xs font-semibold text-foreground/60 uppercase tracking-wider">{t('departuresTab.fieldChildPriceNoBed')}</Label>
         <Input
           type="number"
           value={formData.childPriceNoBed || ""}
           onChange={(e) => setFormData({ ...formData, childPriceNoBed: e.target.value ? Number(e.target.value) : undefined })}
-          className="border-gray-300 rounded-lg"
+          className="border-foreground/20 rounded-lg"
         />
       </div>
       <div className="space-y-1.5">
-        <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('departuresTab.fieldInfantPrice')}</Label>
+        <Label className="text-xs font-semibold text-foreground/60 uppercase tracking-wider">{t('departuresTab.fieldInfantPrice')}</Label>
         <Input
           type="number"
           value={formData.infantPrice || ""}
           onChange={(e) => setFormData({ ...formData, infantPrice: e.target.value ? Number(e.target.value) : undefined })}
-          className="border-gray-300 rounded-lg"
+          className="border-foreground/20 rounded-lg"
         />
       </div>
       <div className="space-y-1.5">
-        <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('departuresTab.fieldSingleRoomSupplement')}</Label>
+        <Label className="text-xs font-semibold text-foreground/60 uppercase tracking-wider">{t('departuresTab.fieldSingleRoomSupplement')}</Label>
         <Input
           type="number"
           value={formData.singleRoomSupplement || ""}
           onChange={(e) => setFormData({ ...formData, singleRoomSupplement: e.target.value ? Number(e.target.value) : undefined })}
-          className="border-gray-300 rounded-lg"
+          className="border-foreground/20 rounded-lg"
         />
       </div>
       <div className="space-y-1.5">
-        <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('departuresTab.fieldTotalSlots')}</Label>
+        <Label className="text-xs font-semibold text-foreground/60 uppercase tracking-wider">{t('departuresTab.fieldTotalSlots')}</Label>
         <Input
           type="number"
           value={formData.totalSlots}
           onChange={(e) => setFormData({ ...formData, totalSlots: Number(e.target.value) })}
-          className="border-gray-300 rounded-lg"
+          className="border-foreground/20 rounded-lg"
         />
       </div>
       <div className="space-y-1.5">
-        <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('departuresTab.fieldStatus')}</Label>
+        <Label className="text-xs font-semibold text-foreground/60 uppercase tracking-wider">{t('departuresTab.fieldStatus')}</Label>
         <Select value={formData.status} onValueChange={(value: any) => setFormData({ ...formData, status: value })}>
-          <SelectTrigger className="border-gray-300">
+          <SelectTrigger className="border-foreground/20 rounded-lg">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -319,9 +341,9 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
         </Select>
       </div>
       <div className="space-y-1.5">
-        <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('departuresTab.currencyLabel')}</Label>
+        <Label className="text-xs font-semibold text-foreground/60 uppercase tracking-wider">{t('departuresTab.currencyLabel')}</Label>
         <Select value={formData.currency} onValueChange={(value) => setFormData({ ...formData, currency: value })}>
-          <SelectTrigger className="border-gray-300 rounded-lg">
+          <SelectTrigger className="border-foreground/20 rounded-lg">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -333,13 +355,13 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
         </Select>
       </div>
       <div className="col-span-2 space-y-1.5">
-        <Label className="text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('departuresTab.fieldNotes')}</Label>
+        <Label className="text-xs font-semibold text-foreground/60 uppercase tracking-wider">{t('departuresTab.fieldNotes')}</Label>
         <Textarea
           value={formData.notes}
           onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
           rows={2}
           placeholder={t('departuresTab.notesPlaceholder')}
-          className="border-gray-300 text-sm rounded-lg"
+          className="border-foreground/20 text-sm rounded-lg"
         />
       </div>
     </div>
@@ -348,8 +370,8 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-8">
-        <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
-        <span className="ml-2 text-sm text-gray-500">{t('departuresTab.loading')}</span>
+        <Loader2 className="w-5 h-5 animate-spin text-foreground/40" />
+        <span className="ml-2 text-sm text-foreground/60">{t('departuresTab.loading')}</span>
       </div>
     );
   }
@@ -361,115 +383,148 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
         <Button
           variant="outline"
           onClick={() => setIsAiImportDialogOpen(true)}
-          className="border-gray-300 h-8 text-xs px-3 gap-1.5 rounded-lg"
+          className="border-foreground/20 h-8 text-xs px-3 gap-1.5 rounded-lg"
         >
-          <Bot className="w-3.5 h-3.5" />
+          <Sparkles className="w-3.5 h-3.5 text-[#c9a563]" />
           {t('departuresTab.aiBulkImport')}
         </Button>
         <Button
           onClick={() => { resetForm(); setIsCreateDialogOpen(true); }}
-          className="bg-black text-white hover:bg-gray-800 h-8 text-xs px-3 rounded-lg"
+          className="bg-foreground text-white hover:bg-foreground/85 h-8 text-xs px-3 rounded-lg"
         >
           <Plus className="w-3.5 h-3.5 mr-1.5" />
           {t('departuresTab.addDeparture')}
         </Button>
       </div>
 
-      {/* Departures List */}
-      <div className="border border-gray-200 overflow-hidden rounded-xl">
-        <table className="w-full">
-          <thead className="bg-gray-50 border-b border-gray-200">
-            <tr>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('departuresTab.colDepartureDate')}</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('departuresTab.colReturnDate')}</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('departuresTab.colAdultPrice')}</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('departuresTab.colSlots')}</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('departuresTab.colStatus')}</th>
-              <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">{t('departuresTab.colActions')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {departures && departures.length > 0 ? (
-              departures.map((departure) => {
-                const statusConfig = getStatusConfig(departure.status);
-                const occupancyPct = Math.round((departure.bookedSlots / departure.totalSlots) * 100);
-                return (
-                  <tr key={departure.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-4 text-sm font-semibold text-gray-900">
-                      {format(new Date(departure.departureDate), "yyyy/MM/dd")}
-                    </td>
-                    <td className="px-4 py-4 text-sm text-gray-600">
-                      {format(new Date(departure.returnDate), "yyyy/MM/dd")}
-                    </td>
-                    <td className="px-4 py-4 text-sm font-semibold text-gray-900">
-                      {departure.currency || "NT$"} {departure.adultPrice.toLocaleString()}
-                    </td>
-                    <td className="px-4 py-4">
-                      <div className="flex items-center gap-2">
-                        <Users className="h-3.5 w-3.5 text-gray-400" />
-                        <span className="text-sm text-gray-700">{departure.bookedSlots}/{departure.totalSlots}</span>
-                        <div className="w-16 h-1.5 bg-gray-200 overflow-hidden rounded-full">
-                          <div
-                            className={`h-full ${occupancyPct >= 90 ? "bg-red-500" : occupancyPct >= 70 ? "bg-amber-500" : "bg-green-500"}`}
-                            style={{ width: `${occupancyPct}%` }}
-                          />
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-4">
-                      <span className={`inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded-md ${statusConfig.className}`}>
-                        {statusConfig.label}
+      {/* Departures List — card grid replaces the cramped table.
+          Each card has its own breathing room so status pills and action icons
+          never collide. Two cards per row on desktop, one per row on mobile. */}
+      {departures && departures.length > 0 ? (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          {departures.map((departure) => {
+            const statusConfig = getStatusConfig(departure.status);
+            const totalSlots = departure.totalSlots || 0;
+            const bookedSlots = departure.bookedSlots || 0;
+            const remainingSlots = Math.max(totalSlots - bookedSlots, 0);
+            const occupancyPct = totalSlots > 0 ? Math.round((bookedSlots / totalSlots) * 100) : 0;
+            // Progress bar shifts from gold → amber → red as fill approaches cap.
+            const barColor =
+              occupancyPct >= 90
+                ? "bg-red-500"
+                : occupancyPct >= 70
+                  ? "bg-amber-500"
+                  : "bg-[#c9a563]";
+            return (
+              <div
+                key={departure.id}
+                className="group relative border border-foreground/15 bg-white hover:border-foreground/25 hover:shadow-sm transition-all rounded-xl overflow-hidden"
+              >
+                {/* Header strip — date + status, never overlap because they're on opposite sides */}
+                <div className="flex items-start justify-between gap-3 px-4 pt-4 pb-3 border-b border-foreground/10">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline gap-2 mb-0.5">
+                      <Calendar className="w-4 h-4 text-[#c9a563] flex-shrink-0" />
+                      <span className="text-base font-bold text-foreground whitespace-nowrap">
+                        {format(new Date(departure.departureDate), "yyyy/MM/dd")}
                       </span>
-                    </td>
-                    <td className="px-4 py-4 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleEdit(departure)}
-                          className="h-7 w-7 p-0 hover:bg-gray-100"
-                        >
-                          <Edit className="w-3.5 h-3.5 text-gray-500" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDelete(departure.id)}
-                          className="h-7 w-7 p-0 hover:bg-red-50"
-                        >
-                          <Trash2 className="w-3.5 h-3.5 text-red-500" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            ) : (
-              <tr>
-                <td colSpan={6} className="px-4 py-10 text-center">
-                  <Calendar className="w-10 h-10 mx-auto mb-2 text-gray-200" />
-                  <p className="text-sm font-medium text-gray-600">{t('departuresTab.noDepartures')}</p>
-                  <p className="text-xs text-gray-400 mt-1">{t('departuresTab.noDeparturesHint')}</p>
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+                    </div>
+                    <span className="text-xs text-foreground/55 ml-6">
+                      {t('departuresTab.colReturnDate')}：{format(new Date(departure.returnDate), "yyyy/MM/dd")}
+                    </span>
+                  </div>
+                  <span className={`inline-flex items-center px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap rounded-full flex-shrink-0 ${statusConfig.className}`}>
+                    {statusConfig.label}
+                  </span>
+                </div>
+
+                {/* Body — price + slots */}
+                <div className="px-4 py-3 space-y-3">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-[11px] font-semibold text-foreground/55 uppercase tracking-wider">
+                      {t('departuresTab.colAdultPrice')}
+                    </span>
+                    <span className="text-base font-bold text-foreground tabular-nums">
+                      {formatPrice(departure.adultPrice, departure.currency)}
+                    </span>
+                  </div>
+
+                  {/* Slots row — progress bar with clear "remaining / total" labels */}
+                  <div>
+                    <div className="flex items-baseline justify-between mb-1.5">
+                      <span className="text-xs font-medium text-foreground">
+                        {remainingSlots > 0
+                          ? t('departuresTab.slotsRemainingFormat', { n: String(remainingSlots) })
+                          : t('departuresTab.slotsFullLabel')}
+                      </span>
+                      <span className="text-[11px] text-foreground/50 tabular-nums">
+                        {t('departuresTab.slotsOfTotalFormat', { booked: String(bookedSlots), total: String(totalSlots) })}
+                      </span>
+                    </div>
+                    <div className="h-1.5 bg-foreground/10 overflow-hidden rounded-full">
+                      <div
+                        className={`h-full ${barColor} transition-all`}
+                        style={{ width: `${occupancyPct}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Footer — action buttons in their own row, no collisions */}
+                <div className="flex items-center justify-end gap-1 px-3 py-2 bg-[#FAF8F2]/60 border-t border-foreground/10">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleEdit(departure)}
+                    className="h-8 px-3 text-xs gap-1.5 hover:bg-foreground/5 rounded-lg"
+                  >
+                    <Edit className="w-3.5 h-3.5 text-foreground/60" />
+                    {t('departuresTab.editTitle')}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleDelete(departure.id)}
+                    className="h-8 px-3 text-xs gap-1.5 hover:bg-red-50 hover:text-red-600 rounded-lg"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    {t('common.delete')}
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="border border-foreground/15 px-4 py-12 text-center rounded-xl">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-[#FAF8F2] mb-3">
+            <Calendar className="w-6 h-6 text-[#c9a563]" />
+          </div>
+          <p className="text-sm font-medium text-foreground">{t('departuresTab.emptyStateTitle')}</p>
+          <p className="text-xs text-foreground/50 mt-1">{t('departuresTab.emptyStateHint')}</p>
+          <Button
+            onClick={() => { resetForm(); setIsCreateDialogOpen(true); }}
+            className="mt-4 bg-foreground text-white hover:bg-foreground/85 h-8 text-xs px-3 rounded-lg"
+          >
+            <Plus className="w-3.5 h-3.5 mr-1.5" />
+            {t('departuresTab.addDeparture')}
+          </Button>
+        </div>
+      )}
 
       {/* Create Dialog */}
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl">
           <DialogHeader>
-            <DialogTitle>{t('departuresTab.createTitle')}</DialogTitle>
-            <DialogDescription className="text-xs text-gray-500">{t('departuresTab.createDesc')}</DialogDescription>
+            <DialogTitle className="text-foreground">{t('departuresTab.createTitle')}</DialogTitle>
+            <DialogDescription className="text-xs text-foreground/60">{t('departuresTab.createDesc')}</DialogDescription>
           </DialogHeader>
           {renderFormFields()}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)} className="border-gray-300 rounded-lg">
+            <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)} className="border-foreground/20 rounded-lg">
               {t('common.cancel')}
             </Button>
-            <Button onClick={handleCreate} disabled={createMutation.isPending} className="bg-black text-white hover:bg-gray-800 rounded-lg">
+            <Button onClick={handleCreate} disabled={createMutation.isPending} className="bg-foreground text-white hover:bg-foreground/85 rounded-lg">
               {createMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               {t('departuresTab.create')}
             </Button>
@@ -481,15 +536,15 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl">
           <DialogHeader>
-            <DialogTitle>{t('departuresTab.editTitle')}</DialogTitle>
-            <DialogDescription className="text-xs text-gray-500">{t('departuresTab.editDesc')}</DialogDescription>
+            <DialogTitle className="text-foreground">{t('departuresTab.editTitle')}</DialogTitle>
+            <DialogDescription className="text-xs text-foreground/60">{t('departuresTab.editDesc')}</DialogDescription>
           </DialogHeader>
           {renderFormFields()}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)} className="border-gray-300 rounded-lg">
+            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)} className="border-foreground/20 rounded-lg">
               {t('common.cancel')}
             </Button>
-            <Button onClick={handleUpdate} disabled={updateMutation.isPending} className="bg-black text-white hover:bg-gray-800 rounded-lg">
+            <Button onClick={handleUpdate} disabled={updateMutation.isPending} className="bg-foreground text-white hover:bg-foreground/85 rounded-lg">
               {updateMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               {t('departuresTab.update')}
             </Button>
@@ -501,33 +556,35 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
       <Dialog open={isAiImportDialogOpen} onOpenChange={setIsAiImportDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto rounded-xl">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Bot className="w-5 h-5" />
+            <DialogTitle className="flex items-center gap-2 text-foreground">
+              <Sparkles className="w-5 h-5 text-[#c9a563]" />
               {t('departuresTab.aiImportTitle')}
             </DialogTitle>
-            <DialogDescription className="text-xs text-gray-500">
+            <DialogDescription className="text-xs text-foreground/60">
               {t('departuresTab.aiImportDesc')}
             </DialogDescription>
           </DialogHeader>
 
           {isExtractedLoading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
-              <span className="ml-2 text-sm text-gray-500">{t('departuresTab.aiImportLoading')}</span>
+              <Loader2 className="w-5 h-5 animate-spin text-foreground/40" />
+              <span className="ml-2 text-sm text-foreground/60">{t('departuresTab.aiImportLoading')}</span>
             </div>
           ) : !extractedData?.extractedDepartures ? (
             <div className="py-12 text-center">
-              <Bot className="w-12 h-12 mx-auto mb-3 text-gray-200" />
-              <p className="text-sm font-medium text-gray-600">{t('departuresTab.aiImportEmptyTitle')}</p>
-              <p className="text-xs text-gray-400 mt-1">{t('departuresTab.aiImportEmptyDesc')}</p>
+              <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-[#FAF8F2] mb-3">
+                <Sparkles className="w-6 h-6 text-[#c9a563]" />
+              </div>
+              <p className="text-sm font-medium text-foreground">{t('departuresTab.aiImportEmptyTitle')}</p>
+              <p className="text-xs text-foreground/50 mt-1">{t('departuresTab.aiImportEmptyDesc')}</p>
             </div>
           ) : (
             <div className="space-y-4 py-2">
               {/* Pricing Summary */}
               {extractedData.extractedDepartures.pricing && (
-                <div className="bg-gray-50 border border-gray-200 p-3 text-xs space-y-1 rounded-lg">
-                  <p className="font-semibold text-gray-700 mb-1.5">{t('departuresTab.aiPriceSummary')}</p>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-gray-600">
+                <div className="bg-[#FAF8F2] border border-foreground/10 p-3 text-xs space-y-1 rounded-lg">
+                  <p className="font-semibold text-foreground mb-1.5">{t('departuresTab.aiPriceSummary')}</p>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-foreground/70">
                     {extractedData.extractedDepartures.pricing.adultPrice && (
                       <span>{t('departuresTab.priceAdult', { v: extractedData.extractedDepartures.pricing.adultPrice.toLocaleString() })}</span>
                     )}
@@ -544,7 +601,7 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
                       <span>{t('departuresTab.maxParticipantsFormat', { n: String(extractedData.extractedDepartures.capacity.maxParticipants) })}</span>
                     )}
                     {extractedData.extractedDepartures.pricing.priceNote && (
-                      <span className="col-span-2 text-gray-500">{extractedData.extractedDepartures.pricing.priceNote}</span>
+                      <span className="col-span-2 text-foreground/60">{extractedData.extractedDepartures.pricing.priceNote}</span>
                     )}
                   </div>
                 </div>
@@ -565,18 +622,18 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
                         }
                       }}
                     />
-                    <label htmlFor="select-all" className="text-xs font-medium text-gray-700 cursor-pointer">
+                    <label htmlFor="select-all" className="text-xs font-medium text-foreground cursor-pointer">
                       {t('departuresTab.selectAllLabel', { n: String(extractedData.extractedDepartures.departureDates.length) })}
                     </label>
                   </div>
-                  <span className="text-xs text-gray-500">{t('departuresTab.selectedCountLabel', { n: String(selectedExtractedDates.size) })}</span>
+                  <span className="text-xs text-foreground/60">{t('departuresTab.selectedCountLabel', { n: String(selectedExtractedDates.size) })}</span>
                 </div>
               )}
 
               {/* Dates List */}
-              <div className="border border-gray-200 overflow-hidden divide-y divide-gray-100 rounded-lg">
+              <div className="border border-foreground/15 overflow-hidden divide-y divide-foreground/10 rounded-lg">
                 {extractedData.extractedDepartures.departureDates?.map((dep: any, idx: number) => (
-                  <div key={dep.date} className={`flex items-center gap-3 px-3 py-2.5 ${selectedExtractedDates.has(dep.date) ? 'bg-blue-50' : 'bg-white'}`}>
+                  <div key={dep.date} className={`flex items-center gap-3 px-3 py-2.5 ${selectedExtractedDates.has(dep.date) ? 'bg-[#FAF8F2]' : 'bg-white'}`}>
                     <Checkbox
                       id={`dep-${idx}`}
                       checked={selectedExtractedDates.has(dep.date)}
@@ -588,14 +645,14 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
                     />
                     <label htmlFor={`dep-${idx}`} className="flex-1 cursor-pointer">
                       <div className="flex items-center gap-3">
-                        <span className="text-sm font-semibold text-gray-900">
+                        <span className="text-sm font-semibold text-foreground">
                           {dep.date ? (() => { try { return format(new Date(dep.date), 'yyyy/MM/dd'); } catch { return dep.date; } })() : t('departuresTab.dateUnknown')}
                         </span>
                         {dep.status && (
-                          <span className={`text-xs px-1.5 py-0.5 font-medium rounded-md ${
-                            dep.status === 'available' ? 'bg-green-100 text-green-700' :
-                            dep.status === 'soldout' ? 'bg-red-100 text-red-700' :
-                            'bg-gray-100 text-gray-600'
+                          <span className={`text-[11px] px-1.5 py-0.5 font-medium rounded-md whitespace-nowrap ${
+                            dep.status === 'available' ? 'bg-[#c9a563]/15 text-[#8a6f3a]' :
+                            dep.status === 'soldout' ? 'bg-red-50 text-red-700' :
+                            'bg-foreground/5 text-foreground/60'
                           }`}>
                             {dep.status === 'available'
                               ? t('departuresTab.statusAvailable')
@@ -605,7 +662,7 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
                           </span>
                         )}
                         {dep.price && (
-                          <span className="text-xs text-gray-500">NT$ {dep.price.toLocaleString()}</span>
+                          <span className="text-xs text-foreground/60">{formatPrice(dep.price, 'TWD')}</span>
                         )}
                       </div>
                     </label>
@@ -617,14 +674,14 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
                           placeholder={t('departuresTab.adultPricePlaceholder')}
                           value={editedPrices[dep.date]?.adultPrice ?? extractedData.extractedDepartures.pricing?.adultPrice ?? dep.price ?? ''}
                           onChange={(e) => setEditedPrices(prev => ({ ...prev, [dep.date]: { ...prev[dep.date], adultPrice: Number(e.target.value) } }))}
-                          className="w-24 h-7 text-xs border-gray-300 rounded-lg"
+                          className="w-24 h-7 text-xs border-foreground/20 rounded-lg"
                         />
                         <Input
                           type="number"
                           placeholder={t('departuresTab.slotsPlaceholder')}
                           value={editedPrices[dep.date]?.maxParticipants ?? extractedData.extractedDepartures.capacity?.maxParticipants ?? ''}
                           onChange={(e) => setEditedPrices(prev => ({ ...prev, [dep.date]: { ...prev[dep.date], maxParticipants: Number(e.target.value) } }))}
-                          className="w-16 h-7 text-xs border-gray-300 rounded-lg"
+                          className="w-16 h-7 text-xs border-foreground/20 rounded-lg"
                         />
                       </div>
                     )}
@@ -635,13 +692,13 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
           )}
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAiImportDialogOpen(false)} className="border-gray-300 rounded-lg">
+            <Button variant="outline" onClick={() => setIsAiImportDialogOpen(false)} className="border-foreground/20 rounded-lg">
               {t('departuresTab.cancel')}
             </Button>
             <Button
               onClick={handleAiImportConfirm}
               disabled={confirmExtractedMutation.isPending || selectedExtractedDates.size === 0 || !extractedData?.extractedDepartures}
-              className="bg-black text-white hover:bg-gray-800 rounded-lg"
+              className="bg-foreground text-white hover:bg-foreground/85 rounded-lg"
             >
               {confirmExtractedMutation.isPending ? (
                 <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{t('departuresTab.creatingLabel')}</>
@@ -657,13 +714,13 @@ export default function DeparturesManagement({ tourId, tourTitle }: DeparturesMa
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <DialogContent className="max-w-sm rounded-xl">
           <DialogHeader>
-            <DialogTitle>{t('departuresTab.deleteTitle')}</DialogTitle>
-            <DialogDescription className="text-sm text-gray-500">
+            <DialogTitle className="text-foreground">{t('departuresTab.deleteTitle')}</DialogTitle>
+            <DialogDescription className="text-sm text-foreground/60">
               {t('departuresTab.deleteDesc')}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} className="border-gray-300 rounded-lg">
+            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} className="border-foreground/20 rounded-lg">
               {t('common.cancel')}
             </Button>
             <Button

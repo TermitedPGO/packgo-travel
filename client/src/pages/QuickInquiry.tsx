@@ -103,7 +103,7 @@ export default function QuickInquiry() {
         <Header />
         <main className="flex-1 flex items-center justify-center py-16 px-4">
           <div className="bg-white shadow-lg p-12 text-center max-w-lg w-full rounded-xl">
-            <CheckCircle className="h-20 w-20 text-green-500 mx-auto mb-6" />
+            <CheckCircle className="h-20 w-20 text-[#c9a563] mx-auto mb-6" />
             <h2 className="text-3xl font-serif font-bold text-gray-900 mb-4">
               {t('quickInquiry.success.title')}
             </h2>

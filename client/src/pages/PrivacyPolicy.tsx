@@ -1,4 +1,5 @@
 import MarketingLayout from "@/components/layouts/MarketingLayout";
+import SEO from "@/components/SEO";
 import { useLocale } from "@/contexts/LocaleContext";
 import { Link } from "wouter";
 
@@ -36,6 +37,18 @@ export default function PrivacyPolicy() {
       title={t('privacyPolicy.fullPolicy.title')}
       subtitle={t('privacyPolicy.fullPolicy.subtitle')}
     >
+      <SEO
+        title={{
+          zh: "隱私權政策｜PACK&GO Travel LLC｜資料保護承諾",
+          en: "Privacy Policy | PACK&GO Travel LLC | Data Protection",
+        }}
+        description={{
+          zh: "PACK&GO 蒐集、使用、保護您個資的方式,符合 CCPA 與業界標準。我們不販售客戶資料,僅用於行程服務。",
+          en: "How PACK&GO collects, uses, and protects your personal data, compliant with CCPA. We never sell customer data—used only for trip service.",
+        }}
+        image="/images/hero-sakura.webp"
+        url="/privacy-policy"
+      />
       <p className="!text-sm !text-foreground/50 !mt-0">
         {t('privacyPolicy.fullPolicy.effective')}: 2026-04-18
       </p>

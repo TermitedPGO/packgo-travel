@@ -46,6 +46,12 @@ export default function BookTour() {
   // CA B&P §17550 — buyer must affirm receipt of mandatory disclosures before
   // payment. Without this, the booking cannot be submitted.
   const [acceptedDisclosures, setAcceptedDisclosures] = useState(false);
+
+  // Round 80.22: Packpoint redemption — how many points to apply to this
+  // booking. 0 = none; max is capped at min(balance, 50% of subtotal × 100).
+  // Only USD departures honor this server-side; UI hides the input on TWD.
+  const [pointsToRedeem, setPointsToRedeem] = useState(0);
+  const { data: packpointStatus } = trpc.packpoint.getStatus.useQuery();
   
   // Participant details
   const [participants, setParticipants] = useState<any[]>([]);
@@ -96,7 +102,23 @@ export default function BookTour() {
     return total;
   };
   
-  const totalPrice = calculateTotalPrice();
+  const subtotalPrice = calculateTotalPrice();
+  // Round 80.22 Phase D: Packpoint discount supports any currency via FX.
+  // Frontend displays USD value (100 pt = $1); server converts to booking
+  // currency at the time of booking. The 50% cap uses balance × 100 (worst
+  // case: every pt redeemed even if FX makes it more than 50% of subtotal).
+  const bookingCurrency = ((selectedDeparture?.currency || "TWD") as string).toUpperCase();
+  const balance = packpointStatus?.balance ?? 0;
+  const maxRedeemableByBalance = balance;
+  // Cap at 50% of subtotal (policy §5). For TWD bookings, ~31 TWD = 100 pt;
+  // for USD bookings, $1 = 100 pt. Approximation: use 100 pt = 1 unit of
+  // booking currency for the slider cap (server enforces the real cap).
+  const maxRedeemableByPolicy = Math.floor(subtotalPrice * 50);
+  const maxRedeemable = Math.min(maxRedeemableByBalance, maxRedeemableByPolicy);
+  const safePointsToRedeem = Math.min(pointsToRedeem, maxRedeemable);
+  // Display discount in USD (100 pt = $1). Server will convert at FX time.
+  const packpointDiscount = safePointsToRedeem / 100;
+  const totalPrice = Math.max(0, subtotalPrice - packpointDiscount);
   const depositAmount = Math.round(totalPrice * 0.2);
   
   // Get locale string for date formatting
@@ -172,15 +194,20 @@ export default function BookTour() {
         specialRequests: message,
         // v78x: pass current locale so booking confirmation email matches customer's UI language
         language: language === "en" ? "en" : "zh-TW",
+        // Round 80.22: pass redemption (server validates against balance + caps)
+        pointsToRedeem: safePointsToRedeem > 0 ? safePointsToRedeem : undefined,
       });
       
       toast.success(t('bookTour.bookingSuccess'), {
         description: t('bookTour.bookingSuccessDesc').replace('{id}', booking.id.toString()),
       });
       
-      // Navigate to booking detail page after a short delay
+      // Navigate to booking detail page after a short delay.
+      // App.tsx route is "/bookings/:id" (plural). Was "/booking/" before
+      // which silently 404'd post-checkout — users got a 404 right after
+      // a successful booking submit. Fixed to plural to match the route.
       setTimeout(() => {
-        navigate(`/booking/${booking.id}`);
+        navigate(`/bookings/${booking.id}`);
       }, 1500);
     } catch (error: any) {
       toast.error(t('bookTour.bookingFailed'), {
@@ -395,8 +422,8 @@ export default function BookTour() {
                         : departure.status === "full" || availableSlots <= 0
                           ? { label: t("bookTour.soldOut"), cls: "bg-gray-100 text-gray-500 border-gray-200" }
                           : (departure as any).status === "confirmed"
-                            ? { label: language === "zh-TW" ? "確定出發" : "Confirmed", cls: "bg-blue-50 text-blue-700 border-blue-200" }
-                            : { label: language === "zh-TW" ? "可預訂" : "Available", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+                            ? { label: t("bookTour.confirmedDeparture"), cls: "bg-[#c9a563]/15 text-[#8a6f3a] border-[#c9a563]/35" }
+                            : { label: t("bookTour.availableForBooking"), cls: "bg-foreground/[0.04] text-foreground/75 border-foreground/15" };
                     const lowSeats = isAvailable && availableSlots > 0 && availableSlots <= 3;
 
                     return (
@@ -433,7 +460,7 @@ export default function BookTour() {
                                 </span>
                               )}
                               {t('bookTour.remainingSlots')}：{availableSlots} / {departure.totalSlots}
-                              {lowSeats && (language === "zh-TW" ? "（即將售完）" : " (almost full)")}
+                              {lowSeats && t("bookTour.almostFull")}
                             </div>
                           </div>
                           <div className="text-right shrink-0">
@@ -807,8 +834,74 @@ export default function BookTour() {
                 </div>
               </div>
               
+              {/* Round 80.22 Phase D: Packpoint redemption. Available for any
+                  currency (FX converted server-side). Show only when user has
+                  100+ pts. Live USD-display; server re-validates with real FX. */}
+              {balance >= 100 && subtotalPrice > 0 && (
+                <div className="border-t pt-4">
+                  <div className="rounded-xl border border-[#c9a563]/30 bg-[#FAF8F2] p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base font-semibold text-foreground">
+                          🪙 使用 Packpoint
+                        </span>
+                        <span className="text-xs text-foreground/60">
+                          餘額 {balance.toLocaleString()} 點
+                        </span>
+                      </div>
+                      {packpointDiscount > 0 && (
+                        <span className="text-sm font-semibold text-[#8a6f3a]">
+                          -${packpointDiscount.toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="range"
+                        min={0}
+                        max={maxRedeemable}
+                        step={100}
+                        value={safePointsToRedeem}
+                        onChange={(e) => setPointsToRedeem(parseInt(e.target.value, 10))}
+                        className="flex-1 accent-[#c9a563]"
+                      />
+                      <input
+                        type="number"
+                        min={0}
+                        max={maxRedeemable}
+                        step={100}
+                        value={pointsToRedeem}
+                        onChange={(e) =>
+                          setPointsToRedeem(
+                            Math.min(maxRedeemable, Math.max(0, parseInt(e.target.value, 10) || 0))
+                          )
+                        }
+                        className="w-24 h-9 px-2 rounded-lg border border-foreground/20 text-sm text-right tabular-nums"
+                      />
+                      <span className="text-xs text-foreground/60">{t("bookTour.pointsUnit")}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-foreground/50">
+                      <span>{t("bookTour.pointsMin")}</span>
+                      <span>{t("bookTour.pointsMaxLabel").replace("{max}", maxRedeemable.toLocaleString())}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="border-t pt-4">
                 <div className="space-y-2">
+                  {packpointDiscount > 0 && (
+                    <>
+                      <div className="flex justify-between text-sm text-gray-600">
+                        <span>{t('bookTour.totalAmount')}({t('bookTour.beforeDiscount') || 'before'})</span>
+                        <span>${subtotalPrice.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between text-sm text-[#8a6f3a]">
+                        <span>Packpoint 折抵({safePointsToRedeem.toLocaleString()} 點)</span>
+                        <span>-${packpointDiscount.toFixed(2)}</span>
+                      </div>
+                    </>
+                  )}
                   <div className="flex justify-between text-lg">
                     <span className="font-bold">{t('bookTour.totalAmount')}</span>
                     <span className="font-bold">${totalPrice.toLocaleString()}</span>

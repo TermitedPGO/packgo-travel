@@ -3,9 +3,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
-import { 
-  Loader2, User, Calendar, LogOut, Heart, ShoppingBag, 
-  MapPin, TrendingUp, Award, MessageSquare, ChevronRight, Package, Clock
+import {
+  Loader2, User, Calendar, LogOut, Heart, ShoppingBag,
+  MapPin, TrendingUp, Award, MessageSquare, ChevronRight, Package, Clock,
+  Coins, ArrowDownRight, ArrowUpRight, Gift, Star, RefreshCcw,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
@@ -18,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useLocale } from "@/contexts/LocaleContext";
 import { translateDestination } from "@/utils/locationMapping";
+import SEO from "@/components/SEO";
 
 export default function Profile() {
   const { user, loading, isAuthenticated, logout } = useAuth();
@@ -46,6 +48,38 @@ export default function Profile() {
       });
     }
   }, [user, reset]);
+
+  // Round 80.22 Phase D: auto-claim a referral code captured pre-signup.
+  // The code is stashed in localStorage (90-day TTL) by ReferralCapture in
+  // App.tsx; we consume it here once the user is logged in. Server is
+  // idempotent — if user already has referredBy, claimReferral is a no-op.
+  const claimReferralMutation = trpc.packpoint.claimReferral.useMutation();
+  useEffect(() => {
+    if (!user) return;
+    try {
+      const raw = localStorage.getItem("packgo_ref");
+      if (!raw) return;
+      const payload = JSON.parse(raw) as { code: string; ts: number };
+      const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
+      if (Date.now() - payload.ts > NINETY_DAYS_MS) {
+        localStorage.removeItem("packgo_ref");
+        return;
+      }
+      claimReferralMutation.mutate(
+        { code: payload.code },
+        {
+          onSettled: () => {
+            // Clear regardless of attached/skip — code is single-use per user
+            localStorage.removeItem("packgo_ref");
+          },
+        }
+      );
+    } catch {
+      // Bad JSON — clear it
+      localStorage.removeItem("packgo_ref");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
   
   // Avatar upload mutation
   const uploadAvatarMutation = trpc.auth.uploadAvatar.useMutation({
@@ -165,6 +199,12 @@ export default function Profile() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      <SEO
+        title={{ zh: "個人中心", en: "My Profile" }}
+        description={{ zh: "PACK&GO 會員個人中心", en: "PACK&GO member profile" }}
+        url="/profile"
+        noindex
+      />
       {/* Simple Header */}
       <div className="bg-white border-b border-gray-200">
         <div className="container py-8">
@@ -247,7 +287,13 @@ export default function Profile() {
                         <div className="flex-1">
                           <p className="text-gray-500 text-xs">{t('profile.memberLevel')}</p>
                           <p className="text-black font-medium">
-                            {user.role === 'admin' ? t('profile.vipMember') : t('profile.regularMember')}
+                            {/* Round 80.22: tier-driven label (was hardcoded VIP/regular). */}
+                            {(() => {
+                              const tier = (user as any).tier as 'free' | 'plus' | 'concierge' | undefined;
+                              if (tier === 'concierge') return t('profile.tierConciergeMember');
+                              if (tier === 'plus') return t('profile.tierPlusMember');
+                              return t('profile.tierFreeMember');
+                            })()}
                           </p>
                         </div>
                       </div>
@@ -356,8 +402,8 @@ export default function Profile() {
                     {bookings.slice(0, 3).map((booking: any) => (
                       <div 
                         key={booking.id}
-                        className="flex items-center justify-between p-4  border border-gray-200 hover:border-black hover:bg-gray-50 transition-all cursor-pointer"
-                        onClick={() => setLocation(`/booking/${booking.id}`)}
+                        className="flex items-center justify-between p-4 rounded-lg border border-gray-200 hover:border-black hover:bg-gray-50 transition-all cursor-pointer"
+                        onClick={() => setLocation(`/bookings/${booking.id}`)}
                       >
                         <div className="flex items-center gap-4">
                           <div className="h-12 w-12 rounded-lg bg-gray-100 flex items-center justify-center">
@@ -402,6 +448,9 @@ export default function Profile() {
               </CardContent>
             </Card>
 
+            {/* Round 80.22: Packpoint balance + recent transactions */}
+            <PackpointSection />
+
             {/* Favorites */}
             <FavoritesSection setLocation={setLocation} />
           </div>
@@ -409,6 +458,294 @@ export default function Profile() {
       </div>
     </div>
   );
+}
+
+/**
+ * Round 80.22: Packpoint section on user profile.
+ * Shows balance, lifetime earned, expiry countdown, and last 10 transactions.
+ * Empty state pushes user toward earning ways (refer / review / book promo).
+ */
+function PackpointSection() {
+  const { t, language } = useLocale();
+  const { user } = useAuth();
+  const utils = trpc.useUtils();
+  const { data: status } = trpc.packpoint.getStatus.useQuery(undefined, {
+    refetchOnWindowFocus: true,
+  });
+  const { data: history } = trpc.packpoint.getHistory.useQuery({ limit: 10 });
+  const { data: referral } = trpc.packpoint.getReferralStatus.useQuery();
+
+  // Round 80.22 Phase E: birthday capture inline in Packpoint section
+  const [birthInput, setBirthInput] = useState("");
+  const userBirthDate = (user as any)?.birthDate as string | Date | null | undefined;
+  const hasBirthday = !!userBirthDate;
+  const birthdayMutation = trpc.auth.updateProfile.useMutation({
+    onSuccess: async () => {
+      const { toast } = await import("sonner");
+      toast.success("生日已儲存!到你生日當天會自動發 100 Packpoint");
+      utils.auth.me.invalidate();
+    },
+    onError: async (e) => {
+      const { toast } = await import("sonner");
+      toast.error(e.message);
+    },
+  });
+
+  const balance = status?.balance ?? 0;
+  const lifetime = status?.lifetimeEarned ?? 0;
+  const dollarValue = (balance / 100).toFixed(2);
+
+  const handleCopyReferral = async () => {
+    if (!referral?.shareUrl) return;
+    try {
+      await navigator.clipboard.writeText(referral.shareUrl);
+      // Use toast if available; falling back to alert
+      const { toast } = await import("sonner");
+      toast.success("推薦連結已複製");
+    } catch {
+      alert("複製失敗,請手動複製");
+    }
+  };
+
+  return (
+    <Card className="border border-gray-200 bg-white shadow-sm">
+      <CardHeader className="border-b border-gray-200">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-lg text-black flex items-center gap-2">
+            <Coins className="h-5 w-5 text-[#c9a563]" />
+            Packpoint
+          </CardTitle>
+          {status?.daysUntilExpiry !== null && status?.daysUntilExpiry !== undefined && balance > 0 && (
+            <span className="text-xs text-foreground/60">
+              <Clock className="h-3 w-3 inline mr-1" />
+              {language === "en"
+                ? status.daysUntilExpiry > 30
+                  ? `Expires in ${Math.floor(status.daysUntilExpiry / 30)} months`
+                  : `Expires in ${status.daysUntilExpiry} days`
+                : status.daysUntilExpiry > 30
+                  ? `${Math.floor(status.daysUntilExpiry / 30)} 個月後失效`
+                  : `${status.daysUntilExpiry} 天後失效`}
+            </span>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="p-6">
+        {/* Balance summary */}
+        <div className="grid grid-cols-3 gap-4 mb-6 pb-6 border-b border-gray-200">
+          <div>
+            <p className="text-xs uppercase tracking-wider text-foreground/50 mb-1">{t('profile.currentBalance')}</p>
+            <p className="text-3xl font-bold tabular-nums text-black">{balance.toLocaleString()}</p>
+            <p className="text-xs text-[#8a6f3a] mt-1">{t('profile.redemptionEquivalent').replace('{amount}', String(dollarValue))}</p>
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-wider text-foreground/50 mb-1">{t('profile.lifetimeEarned')}</p>
+            <p className="text-3xl font-bold tabular-nums text-foreground/80">
+              {lifetime.toLocaleString()}
+            </p>
+            <p className="text-xs text-foreground/50 mt-1">{t('profile.neverExpires')}</p>
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-wider text-foreground/50 mb-1">{t('profile.currentTier')}</p>
+            <p className="text-xl font-bold capitalize text-black">{status?.tier ?? "free"}</p>
+            {status?.tier === "free" && (
+              <p className="text-xs text-foreground/50 mt-1">{t('profile.autoUpgradeHint')}</p>
+            )}
+          </div>
+        </div>
+
+        {/* Round 80.22 Phase D: Referral card — always shown so users see the
+            growth lever immediately. The pending count + paid count gives
+            transparency on what's "in the pipe" vs what's been awarded. */}
+        {referral?.code && (
+          <div className="bg-gradient-to-br from-[#c9a563]/12 to-foreground/[0.02] border border-[#c9a563]/30 rounded-lg p-4 mb-4">
+            <div className="flex items-start justify-between mb-2">
+              <div>
+                <p className="text-sm font-semibold text-foreground flex items-center gap-1">
+                  <Gift className="h-4 w-4 text-[#c9a563]" /> 你的推薦碼
+                </p>
+                <p className="text-xs text-foreground/60 mt-0.5">
+                  朋友透過你的連結註冊 + 完成首次付款訂單,雙方各拿 +{referral.rewardPerReferral} Packpoint
+                </p>
+              </div>
+              <div className="text-right text-xs text-foreground/60">
+                {referral.successfulCount > 0 && (
+                  <p>
+                    已成功 <strong className="text-[#8a6f3a]">{referral.successfulCount}</strong> 次
+                  </p>
+                )}
+                {referral.pendingCount > 0 && (
+                  <p>
+                    待付款 <strong className="text-foreground/80">{referral.pendingCount}</strong> 位
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 mt-3">
+              <code className="flex-1 bg-white border border-foreground/10 rounded-lg px-3 py-2 text-sm font-mono tabular-nums tracking-wider text-foreground select-all">
+                {referral.code}
+              </code>
+              <button
+                type="button"
+                onClick={handleCopyReferral}
+                className="rounded-lg border border-foreground/20 hover:bg-foreground/5 px-3 py-2 text-sm font-medium flex items-center gap-1 transition-colors"
+              >
+                <RefreshCcw className="h-3.5 w-3.5" /> 複製連結
+              </button>
+            </div>
+            {referral.shareUrl && (
+              <p className="text-[10px] text-foreground/50 mt-2 truncate">
+                {referral.shareUrl}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Round 80.22 Phase E: Birthday input — set-once. Prompts user when
+            empty, just shows the saved date when set (anti-fraud rule
+            prevents changing it via API). */}
+        {!hasBirthday ? (
+          <div className="bg-[#FAF8F2] border border-[#c9a563]/20 rounded-lg p-4 mb-4">
+            <p className="text-sm font-semibold text-foreground mb-2 flex items-center gap-1">
+              🎂 設定生日,每年領 100 Packpoint
+            </p>
+            <p className="text-xs text-foreground/60 mb-3">
+              生日當天系統會自動發放,無需操作。設定後不能更改(避免重複領取)。
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="date"
+                value={birthInput}
+                onChange={(e) => setBirthInput(e.target.value)}
+                max={new Date().toISOString().slice(0, 10)}
+                min="1900-01-01"
+                className="flex-1 h-9 px-3 rounded-lg border border-foreground/20 text-sm"
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  birthInput &&
+                  birthdayMutation.mutate({ birthDate: birthInput })
+                }
+                disabled={!birthInput || birthdayMutation.isPending}
+                className="rounded-lg bg-[#c9a563] hover:bg-[#d4b478] text-foreground px-4 py-2 text-sm font-semibold disabled:opacity-50"
+              >
+                {birthdayMutation.isPending ? "..." : "儲存"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-foreground/5 rounded-lg p-3 mb-4 text-xs text-foreground/70 flex items-center justify-between">
+            <span>
+              🎂 生日:
+              {new Date(userBirthDate as any).toLocaleDateString("zh-TW", {
+                month: "long",
+                day: "numeric",
+              })}
+            </span>
+            <span className="text-[10px] text-foreground/50">
+              當天自動發 +100 Packpoint
+            </span>
+          </div>
+        )}
+
+        {/* Earning hooks (when balance is low) */}
+        {balance < 200 && (
+          <div className="bg-[#FAF8F2] border border-[#c9a563]/20 rounded-lg p-4 mb-4">
+            <p className="text-sm font-semibold text-foreground mb-2 flex items-center gap-1">
+              <Gift className="h-4 w-4 text-[#c9a563]" /> 賺更多 Packpoint
+            </p>
+            <ul className="text-xs text-foreground/70 space-y-1">
+              <li>· 行程結束寫評論 +50 pt</li>
+              <li>· 推薦朋友訂購成功 +500 pt(雙方都拿)</li>
+              <li>· 預訂活動團 5x / 10x 加倍累積</li>
+            </ul>
+          </div>
+        )}
+
+        {/* Transaction history */}
+        <div>
+          <h4 className="text-sm font-semibold text-foreground mb-3">{t('profile.recentTransactions')}</h4>
+          {history?.items && history.items.length > 0 ? (
+            <ul className="space-y-2">
+              {history.items.map((tx) => (
+                <li
+                  key={tx.id}
+                  className="flex items-center justify-between py-2 border-b border-foreground/5 last:border-0"
+                >
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                        tx.delta > 0 ? "bg-[#c9a563]/15" : "bg-foreground/5"
+                      }`}
+                    >
+                      {tx.delta > 0 ? (
+                        <ArrowUpRight className="h-4 w-4 text-[#8a6f3a]" />
+                      ) : (
+                        <ArrowDownRight className="h-4 w-4 text-foreground/60" />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">
+                        {labelForReason(tx.reason)}
+                      </p>
+                      {tx.description && (
+                        <p className="text-xs text-foreground/50 truncate">{tx.description}</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-right flex-shrink-0 ml-3">
+                    <p
+                      className={`text-sm font-semibold tabular-nums ${
+                        tx.delta > 0 ? "text-[#8a6f3a]" : "text-foreground/70"
+                      }`}
+                    >
+                      {tx.delta > 0 ? "+" : ""}
+                      {tx.delta.toLocaleString()}
+                    </p>
+                    <p className="text-[10px] text-foreground/40">
+                      {new Date(tx.createdAt).toLocaleDateString("zh-TW", {
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-foreground/50 py-4 text-center">{t('profile.noTransactionsYet')}</p>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function labelForReason(reason: string): string {
+  switch (reason) {
+    case "booking_earn":
+      return "預訂行程累積";
+    case "signup_bonus":
+      return "註冊獎勵";
+    case "review_bonus":
+      return "評論獎勵";
+    case "referral_bonus":
+      return "推薦獎勵";
+    case "birthday_bonus":
+      return "生日獎勵";
+    case "photo_bonus":
+      return "上傳照片獎勵";
+    case "redemption":
+      return "下訂折抵";
+    case "clawback":
+      return "退款回收";
+    case "expiration":
+      return "點數失效";
+    case "admin_adjust":
+      return "管理員調整";
+    default:
+      return reason;
+  }
 }
 
 // Favorites Section Component

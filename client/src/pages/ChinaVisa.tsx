@@ -2,6 +2,7 @@ import { useState } from "react";
 import { trackVisaStart, trackVisaStep, trackVisaCheckout } from "@/lib/analytics";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import SEO from "@/components/SEO";
 import VisaPreCheck from "@/components/visa/VisaPreCheck";
 import VisaIdentitySelector from "@/components/visa/VisaIdentitySelector";
 import { trpc } from "@/lib/trpc";
@@ -166,8 +167,36 @@ export default function ChinaVisa() {
 
   // ── Landing page (step 0) ─────────────────────────────────
   if (currentStep === 0) {
+    // Round 80.25 — FAQPage Schema for /china-visa rich-result eligibility.
+    // The 5 FAQs are high-volume queries for the highest-revenue product page.
+    const visaFaqSchema = {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      mainEntity: FAQ_KEYS.map(({ q, a }) => ({
+        "@type": "Question",
+        name: t(q),
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: t(a),
+        },
+      })),
+    };
+
     return (
       <div className="min-h-screen flex flex-col bg-white font-sans">
+        <SEO
+          title={{
+            zh: "中國簽證代辦｜10 年多次、最快 5 天｜PACK&GO",
+            en: "China Visa Service | 10-Year Multi-Entry, 5-Day Express | PACK&GO",
+          }}
+          description={{
+            zh: "美國護照中國簽證代辦：10 年多次、商務、探親。Jeff SOP 流程,文件預檢、避免拒簽,舊金山領區專辦。",
+            en: "China visa for U.S. passport holders: 10-year multi, business, family. Pre-check SOP minimizes denial risk. SF consular district specialists.",
+          }}
+          image="/images/hero-sakura.webp"
+          url="/china-visa"
+          schema={visaFaqSchema}
+        />
         <Header />
         <main className="flex-grow">
           {/* Hero */}
@@ -227,7 +256,7 @@ export default function ChinaVisa() {
                       <li>✅ {t("chinaVisaPage.featureFormAssist")}</li>
                       <li>✅ {t("chinaVisaPage.featureCourier")}</li>
                     </ul>
-                    <div className="mt-3 text-xs text-green-400 font-semibold">{t("chinaVisaPage.savePerPerson")}</div>
+                    <div className="mt-3 text-xs text-[#c9a563] font-semibold">{t("chinaVisaPage.savePerPerson")}</div>
                   </div>
                 </div>
               </div>
@@ -250,10 +279,10 @@ export default function ChinaVisa() {
                   <div className="text-5xl font-bold text-[#1A1A1A] mb-1">$290</div>
                   <div className="text-sm text-gray-500 mb-6">{t("chinaVisaPage.perPerson")}</div>
                   <ul className="space-y-2 text-sm text-gray-700 mb-6">
-                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{t("chinaVisaPage.featureConsulateFee")}</li>
-                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{t("chinaVisaPage.featurePassportPhoto")}</li>
-                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{t("chinaVisaPage.featureFormAssist")}</li>
-                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{t("chinaVisaPage.featureCourier")}</li>
+                    <li className="flex items-center gap-2"><span className="text-[#c9a563]">✅</span>{t("chinaVisaPage.featureConsulateFee")}</li>
+                    <li className="flex items-center gap-2"><span className="text-[#c9a563]">✅</span>{t("chinaVisaPage.featurePassportPhoto")}</li>
+                    <li className="flex items-center gap-2"><span className="text-[#c9a563]">✅</span>{t("chinaVisaPage.featureFormAssist")}</li>
+                    <li className="flex items-center gap-2"><span className="text-[#c9a563]">✅</span>{t("chinaVisaPage.featureCourier")}</li>
                   </ul>
                   <Button onClick={() => setCurrentStep(1)} className="bg-[#1A1A1A] text-white hover:bg-gray-800 rounded-lg w-full mt-auto">
                     {t("chinaVisaPage.applyNow")}
@@ -267,12 +296,12 @@ export default function ChinaVisa() {
                   <div className="text-xs text-gray-400 tracking-widest mb-4">{t("chinaVisaPage.groupLabel")}</div>
                   <div className="text-5xl font-bold text-[#1A1A1A] mb-1">$275</div>
                   <div className="text-sm text-gray-500 mb-1">{t("chinaVisaPage.perPerson")}</div>
-                  <div className="text-xs text-green-600 font-semibold mb-6">{t("chinaVisaPage.savePerPerson")}</div>
+                  <div className="text-xs text-[#8a6f3a] font-semibold mb-6">{t("chinaVisaPage.savePerPerson")}</div>
                   <ul className="space-y-2 text-sm text-gray-700 mb-6">
-                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{t("chinaVisaPage.featureConsulateFee")}</li>
-                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{t("chinaVisaPage.featurePassportPhoto")}</li>
-                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{t("chinaVisaPage.featureFormAssist")}</li>
-                    <li className="flex items-center gap-2"><span className="text-green-600">✅</span>{t("chinaVisaPage.featureCourier")}</li>
+                    <li className="flex items-center gap-2"><span className="text-[#c9a563]">✅</span>{t("chinaVisaPage.featureConsulateFee")}</li>
+                    <li className="flex items-center gap-2"><span className="text-[#c9a563]">✅</span>{t("chinaVisaPage.featurePassportPhoto")}</li>
+                    <li className="flex items-center gap-2"><span className="text-[#c9a563]">✅</span>{t("chinaVisaPage.featureFormAssist")}</li>
+                    <li className="flex items-center gap-2"><span className="text-[#c9a563]">✅</span>{t("chinaVisaPage.featureCourier")}</li>
                   </ul>
                   <Button onClick={() => setCurrentStep(1)} className="bg-[#1A1A1A] text-white hover:bg-gray-800 rounded-lg w-full mt-auto">
                     {t("chinaVisaPage.applyNow")}
@@ -383,7 +412,7 @@ export default function ChinaVisa() {
                     i + 1 < currentStep ? "text-white/60" : "text-white/30"
                   }`}>
                     <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold ${
-                      i + 1 < currentStep ? "bg-green-500 text-white" :
+                      i + 1 < currentStep ? "bg-[#c9a563] text-white" :
                       i + 1 === currentStep ? "bg-black text-white" : "bg-white/20 text-white/40"
                     }`}>
                       {i + 1 < currentStep ? "✓" : i + 1}
@@ -443,7 +472,7 @@ export default function ChinaVisa() {
                         className="w-32 border-2 border-gray-300 rounded-lg"
                       />
                       {form.groupSize >= 2 && (
-                        <p className="text-xs text-green-600 mt-1">
+                        <p className="text-xs text-[#8a6f3a] mt-1">
                           {t("chinaVisaPage.groupDiscountNote")}
                         </p>
                       )}
@@ -757,7 +786,7 @@ export default function ChinaVisa() {
                       <span>{pricing.groupSize} {t("chinaVisaPage.personLabel")}</span>
                     </div>
                     {pricing.isGroupDiscount && (
-                      <div className="text-xs text-green-600 bg-green-50 border border-green-200 rounded-lg p-2">
+                      <div className="text-xs text-[#8a6f3a] bg-[#c9a563]/10 border border-[#c9a563]/35 rounded-lg p-2">
                         {t("chinaVisaPage.groupRateNote", { amount: String(pricing.savedPerPerson) })}
                       </div>
                     )}

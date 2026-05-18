@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect } from "react";
+import { lazy, Suspense, useState, useRef, useEffect } from "react";
 import { useLocale } from "@/contexts/LocaleContext";
 import { trackAffiliateClick } from "@/lib/analytics";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import SEO from "@/components/SEO";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Link } from "wouter";
@@ -11,7 +12,8 @@ import {
   ArrowRight, MapPin, CheckCircle, Building2, Palmtree, Waves, Flame,
   ExternalLink, Search, Users
 } from "lucide-react";
-import AITravelAdvisorDialog from "@/components/AITravelAdvisorDialog";
+// Lazy: AITravelAdvisorDialog pulls in streamdown + Shiki (~600KB+).
+const AITravelAdvisorDialog = lazy(() => import("@/components/AITravelAdvisorDialog"));
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 
@@ -141,6 +143,18 @@ export default function HotelBooking() {
 
   return (
     <div className="min-h-screen flex flex-col bg-white">
+      <SEO
+        title={{
+          zh: "飯店代訂｜獨家配額、家庭房優先｜PACK&GO 旅行社",
+          en: "Hotel Booking | Exclusive Allotments & Family Rooms | PACK&GO",
+        }}
+        description={{
+          zh: "透過 PACK&GO 訂房享旅行社配額,家庭房、連通房優先。退改條件透明,無 Booking.com 信用卡爭議風險。",
+          en: "Travel-agent allotments, priority on family and connecting rooms. Transparent cancellation, no Booking.com credit-card dispute risk.",
+        }}
+        image="/images/dest-europe.webp"
+        url="/hotel-booking"
+      />
       <Header />
 
       {/* ─── Full-width Trip.com-style Hotel Search Card ─── */}
@@ -409,7 +423,11 @@ export default function HotelBooking() {
       </section>
 
       <Footer />
-      <AITravelAdvisorDialog open={advisorOpen} onOpenChange={setAdvisorOpen} initialMessage={advisorInitialMsg} />
+      {advisorOpen && (
+        <Suspense fallback={null}>
+          <AITravelAdvisorDialog open={advisorOpen} onOpenChange={setAdvisorOpen} initialMessage={advisorInitialMsg} />
+        </Suspense>
+      )}
     </div>
   );
 }

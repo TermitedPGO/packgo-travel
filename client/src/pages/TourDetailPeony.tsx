@@ -77,15 +77,27 @@ import {
   // v78t: trust signals strip
   ShieldCheck,
   Lock,
+  // v80.24: 確定出團 / refund-policy / reviews / tour-code
+  Award,
+  CalendarCheck,
+  RefreshCw,
+  MessageSquare,
 } from "lucide-react";
+import { CONTACT, LICENSES, REFUND_POLICY } from "@/lib/brand";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
-import TourRouteMap from "@/components/tour-detail/TourRouteMap";
+// Round 80.21: TourRouteMap (raster Google Static Maps) replaced by
+// TourRouteMapSvg (true SVG world map via react-simple-maps + TopoJSON).
+// Coordinates still come from server-side Google Geocoding (accuracy
+// unchanged); we just render them on a vector basemap for premium feel
+// and zero API key dependency at the image layer.
+import TourRouteMap from "@/components/tour-detail/TourRouteMapSvg";
+import TourReviews from "@/components/tour-detail/TourReviews";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { useLocale } from "@/contexts/LocaleContext";
 import { translateDestination } from "@/utils/locationMapping";
 import { trackViewTour } from "@/lib/analytics";
-import SEO, { buildTourSchema } from "@/components/SEO";
+import SEO, { buildTourSchema, buildBreadcrumbSchema } from "@/components/SEO";
 import { EditableText, EditableImage, EditableDayCard, EditModeToggle, EditModeBanner } from "@/components/inline-edit";
 import { toast } from "sonner";
 
@@ -205,7 +217,7 @@ const DeparturePriceCalendar = ({
 
   if (isLoading) {
     return (
-      <div className="bg-gray-50 p-8 text-center mb-8">
+      <div className="bg-[#FAF8F2] border border-foreground/10 p-8 text-center mb-8 rounded-xl">
         <p className="text-gray-500">{t('tourDetail.loading')}</p>
       </div>
     );
@@ -214,7 +226,7 @@ const DeparturePriceCalendar = ({
   // 如果沒有出發日期，顯示基本價格 (v78o: 用 formatPrice 自動依使用者選的幣別轉換)
   if (!departures || departures.length === 0) {
     return (
-      <div className="bg-gray-50 p-8 text-center mb-8">
+      <div className="bg-[#FAF8F2] border border-foreground/10 p-8 text-center mb-8 rounded-xl">
         <p className="text-sm text-gray-500 mb-2">{t('tourDetail.pricePerPerson')}</p>
         <div className="flex items-baseline justify-center gap-2">
           <span className="text-5xl font-bold" style={{ color: themeColor.primary }}>
@@ -236,11 +248,13 @@ const DeparturePriceCalendar = ({
           background: `linear-gradient(135deg, ${themeColor.primary} 0%, ${themeColor.secondary} 100%)` 
         }}
       >
-        <button 
+        {/* v80.24: replaced rotated ChevronUp hacks with proper ChevronLeft/Right */}
+        <button
           onClick={prevMonth}
+          aria-label={t('tourDetail.prevMonth') || 'Previous month'}
           className="p-3 bg-white/20 hover:bg-white/30 rounded-lg transition-all duration-200 backdrop-blur-sm"
         >
-          <ChevronUp className="h-5 w-5 rotate-[-90deg] text-white" />
+          <ChevronLeft className="h-5 w-5 text-white" />
         </button>
         <div className="text-center">
           <h3 className="text-2xl font-bold text-white tracking-wide">
@@ -248,11 +262,12 @@ const DeparturePriceCalendar = ({
           </h3>
           <p className="text-white/80 text-sm mt-1">{t('tourDetail.selectDepartureDate')}</p>
         </div>
-        <button 
+        <button
           onClick={nextMonth}
+          aria-label={t('tourDetail.nextMonth') || 'Next month'}
           className="p-3 bg-white/20 hover:bg-white/30 rounded-lg transition-all duration-200 backdrop-blur-sm"
         >
-          <ChevronUp className="h-5 w-5 rotate-90 text-white" />
+          <ChevronRight className="h-5 w-5 text-white" />
         </button>
       </div>
 
@@ -272,13 +287,15 @@ const DeparturePriceCalendar = ({
         </div>
       </div>
 
-      {/* 星期標題 */}
+      {/* 星期標題 — Round 80.8: weekends were red/blue, now neutral foreground
+          to fit B&W brand. Keeping a slightly stronger weight differentiates
+          weekend vs weekday without using off-brand color. */}
       <div className="grid grid-cols-7 bg-white">
         {weekDays.map((day, idx) => (
-          <div 
-            key={day} 
+          <div
+            key={day}
             className={`py-4 text-center text-sm font-semibold border-b border-gray-100 ${
-              idx === 0 ? 'text-red-500' : idx === 6 ? 'text-blue-500' : 'text-gray-700'
+              idx === 0 || idx === 6 ? 'text-foreground' : 'text-foreground/65'
             }`}
           >
             {day}
@@ -307,7 +324,7 @@ const DeparturePriceCalendar = ({
                 ${isPast ? 'bg-gray-50/50 opacity-40' : ''}
                 ${isFull && !isPast ? 'bg-gray-100 opacity-60' : ''}
                 ${departure && !isPast && !isFull ? 'cursor-pointer hover:bg-gray-50 hover:shadow-inner' : ''}
-                ${isSelected ? 'bg-blue-50 shadow-inner' : ''}
+                ${isSelected ? 'bg-[#c9a563]/10 shadow-inner' : ''}
               `}
               style={isSelected ? { 
                 outline: `3px solid ${themeColor.secondary}`, 
@@ -323,8 +340,9 @@ const DeparturePriceCalendar = ({
               {date && (
                 <div className="flex flex-col h-full">
                   <span className={`text-base font-medium ${
-                    date.getDay() === 0 ? 'text-red-500' : 
-                    date.getDay() === 6 ? 'text-blue-500' : 'text-gray-800'
+                    date.getDay() === 0 || date.getDay() === 6
+                      ? 'text-foreground'
+                      : 'text-foreground/75'
                   }`}>
                     {date.getDate()}
                   </span>
@@ -336,7 +354,7 @@ const DeparturePriceCalendar = ({
                       ) : (
                         <>
                           {isConfirmed && (
-                            <span className="text-[9px] font-bold text-green-700 bg-green-100 px-1.5 py-0.5 rounded mb-0.5 inline-block">
+                            <span className="text-[9px] font-bold text-[#8a6f3a] bg-[#c9a563]/15 border border-[#c9a563]/35 px-1.5 py-0.5 rounded mb-0.5 inline-block">
                               ✓ {t('tourDetail.confirmed')}
                             </span>
                           )}
@@ -350,7 +368,7 @@ const DeparturePriceCalendar = ({
                               For 'open', show a subtle pill; 'confirmed' already
                               renders above as a success badge. */}
                           {departure.status === 'open' && (
-                            <p className="text-[10px] mt-1 font-medium text-emerald-600">
+                            <p className="text-[10px] mt-1 font-medium text-foreground/55">
                               {t('tourDetail.statusOpen')}
                             </p>
                           )}
@@ -387,21 +405,22 @@ const DeparturePriceCalendar = ({
                       LionTravel's public API doesn't expose real remaining seats,
                       and we hadn't taken any bookings ourselves for imported tours,
                       so the number was misleading. */}
+                  {/* v80.24 brand-coloured status pills (was amber/red — off-brand) */}
                   <p className="text-sm text-gray-500 mt-1 inline-flex items-center gap-2">
                     {dep.status === 'full' ? (
-                      <span className="px-2 py-0.5 rounded-md bg-gray-100 text-gray-500 text-xs font-medium">
+                      <span className="px-2 py-0.5 rounded-md bg-foreground/[0.04] text-foreground/55 text-xs font-medium">
                         {t('tourDetail.soldOut')}
                       </span>
                     ) : dep.status === 'confirmed' ? (
-                      <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 text-xs font-medium">
+                      <span className="px-2 py-0.5 rounded-md bg-[#c9a563]/15 text-[#8a6f3a] text-xs font-semibold">
                         ✓ {t('tourDetail.confirmed')}
                       </span>
                     ) : dep.status === 'cancelled' ? (
-                      <span className="px-2 py-0.5 rounded-md bg-red-50 text-red-600 text-xs font-medium">
+                      <span className="px-2 py-0.5 rounded-md bg-foreground/[0.04] text-foreground/55 line-through text-xs font-medium">
                         {t('tourDetail.statusCancelled')}
                       </span>
                     ) : (
-                      <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-xs font-medium">
+                      <span className="px-2 py-0.5 rounded-md bg-foreground/[0.04] text-foreground/70 border border-foreground/15 text-xs font-medium">
                         ● {t('tourDetail.statusOpen')}
                       </span>
                     )}
@@ -455,87 +474,32 @@ const DeparturePriceCalendar = ({
 };
 
 // 根據目的地生成主題色
-const getThemeColorByDestination = (country: string | null | undefined) => {
-  const countryLower = (country || "").toLowerCase();
-  
-  // 歐洲國家 - 藍色系
-  if (countryLower.includes("法國") || countryLower.includes("france") ||
-      countryLower.includes("義大利") || countryLower.includes("italy") ||
-      countryLower.includes("英國") || countryLower.includes("uk") ||
-      countryLower.includes("德國") || countryLower.includes("germany") ||
-      countryLower.includes("西班牙") || countryLower.includes("spain") ||
-      countryLower.includes("歐洲") || countryLower.includes("europe") ||
-      countryLower.includes("奧地利") || countryLower.includes("austria") ||
-      countryLower.includes("捷克") || countryLower.includes("czech") ||
-      countryLower.includes("巴爾幹") || countryLower.includes("balkan")) {
-    return {
-      primary: "#1E3A5F",      // 深藍
-      secondary: "#2563EB",    // 亮藍
-      accent: "#3B82F6",       // 藍色
-      light: "#EFF6FF",        // 淺藍背景
-      gradient: "from-blue-900 to-blue-700"
-    };
-  }
-  
-  // 日本 - 櫻花粉/紅色系
-  if (countryLower.includes("日本") || countryLower.includes("japan")) {
-    return {
-      primary: "#9D174D",      // 深粉紅
-      secondary: "#DB2777",    // 粉紅
-      accent: "#EC4899",       // 亮粉
-      light: "#FDF2F8",        // 淺粉背景
-      gradient: "from-pink-900 to-pink-700"
-    };
-  }
-  
-  // 東南亞 - 綠色系
-  if (countryLower.includes("泰國") || countryLower.includes("thailand") ||
-      countryLower.includes("越南") || countryLower.includes("vietnam") ||
-      countryLower.includes("印尼") || countryLower.includes("indonesia") ||
-      countryLower.includes("新加坡") || countryLower.includes("singapore") ||
-      countryLower.includes("馬來西亞") || countryLower.includes("malaysia")) {
-    return {
-      primary: "#065F46",      // 深綠
-      secondary: "#059669",    // 綠色
-      accent: "#10B981",       // 亮綠
-      light: "#ECFDF5",        // 淺綠背景
-      gradient: "from-emerald-900 to-emerald-700"
-    };
-  }
-  
-  // 中國/台灣 - 紅色系
-  if (countryLower.includes("中國") || countryLower.includes("china") ||
-      countryLower.includes("台灣") || countryLower.includes("taiwan")) {
-    return {
-      primary: "#991B1B",      // 深紅
-      secondary: "#DC2626",    // 紅色
-      accent: "#EF4444",       // 亮紅
-      light: "#FEF2F2",        // 淺紅背景
-      gradient: "from-red-900 to-red-700"
-    };
-  }
-  
-  // 美洲 - 橙色系
-  if (countryLower.includes("美國") || countryLower.includes("usa") ||
-      countryLower.includes("加拿大") || countryLower.includes("canada") ||
-      countryLower.includes("墨西哥") || countryLower.includes("mexico")) {
-    return {
-      primary: "#9A3412",      // 深橙
-      secondary: "#EA580C",    // 橙色
-      accent: "#F97316",       // 亮橙
-      light: "#FFF7ED",        // 淺橙背景
-      gradient: "from-orange-900 to-orange-700"
-    };
-  }
-  
-  // 預設 - 黑色系（極簡風格）
-  return {
-    primary: "#0A0A0A",      // 純黑
-    secondary: "#1F2937",    // 更深的灰色
-    accent: "#374151",       // 深灰色
-    light: "#F9FAFB",        // 淺灰背景
-    gradient: "from-gray-900 to-gray-700"
-  };
+// Round 80.8: Unified B&W + Gold brand theme — replaces the previous
+// per-country rainbow (歐洲藍 / 日本粉 / 東南亞綠 / 中國紅 / 美洲橙) which
+// directly contradicted the brand baseline. Every TourDetail page now uses
+// the same brand palette: black primary, gold accent, cream backgrounds.
+// The function signature is preserved so the 123 downstream references
+// (`themeColor.primary` / `secondary` / `light` / etc.) keep working without
+// any call-site changes.
+//
+// Mapping rationale:
+// - primary:   #0A0A0A — heading text, calendar headers, hero overlay
+// - secondary: #c9a563 — selected date, badge, gradient accent (brand gold)
+// - accent:    #8a6f3a — deep gold for hover / pressed states
+// - light:     #FAF8F2 — barely-warm cream for accent backgrounds
+// - gradient:  black-to-soft-gray for hero / day-card gradients
+const BRAND_THEME = {
+  primary: "#0A0A0A",
+  secondary: "#c9a563",
+  accent: "#8a6f3a",
+  light: "#FAF8F2",
+  gradient: "from-foreground to-foreground/85",
+};
+
+const getThemeColorByDestination = (_country: string | null | undefined) => {
+  // Country argument intentionally ignored — Round 80.8 unified all destinations
+  // to a single B&W + Gold brand theme. Param kept for API stability.
+  return BRAND_THEME;
 };
 
 // 交通類型圖標
@@ -648,11 +612,13 @@ const AttractionDetailDialog = ({
             <img
               src={images[currentImageIndex]}
               alt={name}
+              loading="lazy"
+              decoding="async"
               className="w-full h-full object-cover rounded-xl"
             />
             {images.length > 1 && (
               <>
-                <button 
+                <button
                   onClick={() => setCurrentImageIndex((prev) => (prev - 1 + images.length) % images.length)}
                   className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white rounded-lg p-2 transition-colors"
                 >
@@ -684,7 +650,7 @@ const AttractionDetailDialog = ({
           <div className="flex items-center gap-4 flex-wrap">
             {detail.rating && (
               <div className="flex items-center gap-1">
-                <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+                <Star className="h-4 w-4 fill-[#c9a563] text-[#c9a563]" />
                 <span className="font-medium">{detail.rating}</span>
               </div>
             )}
@@ -741,17 +707,17 @@ const AttractionDetailDialog = ({
             )}
           </div>
           
-          {/* 貼心提示 */}
+          {/* 貼心提示 — v80.24 brand colors (was amber) */}
           {detail.tips && detail.tips.length > 0 && (
-            <div className="bg-amber-50 rounded-lg p-4">
-              <h4 className="font-semibold text-amber-800 mb-2 flex items-center gap-2">
-                <AlertCircle className="h-4 w-4" />
+            <div className="bg-[#FAF8F2] border-l-4 border-[#c9a563] rounded-lg p-4">
+              <h4 className="font-semibold text-foreground mb-2 flex items-center gap-2">
+                <AlertCircle className="h-4 w-4" style={{ color: themeColor.secondary }} />
                 {t('tourDetail.travelTips')}
               </h4>
               <ul className="space-y-1">
                 {detail.tips.map((tip, idx) => (
-                  <li key={idx} className="text-amber-700 text-sm flex items-start gap-2">
-                    <span>•</span>
+                  <li key={idx} className="text-foreground/80 text-sm flex items-start gap-2">
+                    <span style={{ color: themeColor.secondary }}>•</span>
                     <span>{tip}</span>
                   </li>
                 ))}
@@ -776,11 +742,11 @@ const AttractionDetailDialog = ({
             {detail.website && (
               <div className="flex items-center gap-2">
                 <ExternalLink className="h-4 w-4 flex-shrink-0" style={{ color: themeColor.secondary }} />
-                <a 
-                  href={detail.website} 
-                  target="_blank" 
+                <a
+                  href={detail.website}
+                  target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-600 hover:underline"
+                  className="text-foreground underline underline-offset-2 hover:text-[#8a6f3a] transition-colors"
                 >
                   {t('tourDetail.officialWebsite')}
                 </a>
@@ -813,33 +779,36 @@ const MealCard = ({
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
   
+  // Round 80.8: meal config normalised to B&W + Gold. Each meal still has a
+  // distinct icon (Coffee / UtensilsCrossed / Wine) so the meal type is
+  // legible without per-meal colour codes that fight the brand.
   const mealConfig = {
-    breakfast: { 
-      label: t('tourDetail.breakfast'), 
+    breakfast: {
+      label: t('tourDetail.breakfast'),
       icon: Coffee,
-      borderColor: 'border-amber-300',
-      bgColor: 'bg-amber-100', 
-      textColor: 'text-amber-700',
-      iconBg: 'bg-amber-200',
-      hoverBg: 'hover:bg-amber-100/50'
+      borderColor: 'border-foreground/15',
+      bgColor: 'bg-foreground/[0.04]',
+      textColor: 'text-foreground/75',
+      iconBg: 'bg-[#c9a563]/15',
+      hoverBg: 'hover:bg-foreground/[0.06]'
     },
-    lunch: { 
-      label: t('tourDetail.lunch'), 
+    lunch: {
+      label: t('tourDetail.lunch'),
       icon: UtensilsCrossed,
-      borderColor: 'border-orange-300',
-      bgColor: 'bg-orange-100', 
-      textColor: 'text-orange-700',
-      iconBg: 'bg-orange-200',
-      hoverBg: 'hover:bg-orange-100/50'
+      borderColor: 'border-foreground/15',
+      bgColor: 'bg-foreground/[0.04]',
+      textColor: 'text-foreground/75',
+      iconBg: 'bg-[#c9a563]/15',
+      hoverBg: 'hover:bg-foreground/[0.06]'
     },
-    dinner: { 
-      label: t('tourDetail.dinner'), 
+    dinner: {
+      label: t('tourDetail.dinner'),
       icon: Wine,
-      borderColor: 'border-indigo-300',
-      bgColor: 'bg-indigo-100', 
-      textColor: 'text-indigo-700',
-      iconBg: 'bg-indigo-200',
-      hoverBg: 'hover:bg-indigo-100/50'
+      borderColor: 'border-foreground/15',
+      bgColor: 'bg-foreground/[0.04]',
+      textColor: 'text-foreground/75',
+      iconBg: 'bg-[#c9a563]/15',
+      hoverBg: 'hover:bg-foreground/[0.06]'
     }
   };
   
@@ -877,9 +846,11 @@ const MealCard = ({
       <div className="relative h-32 overflow-hidden rounded-lg bg-gray-100">
         {hasImages ? (
           <>
-            <img 
-              src={images[currentImageIndex]} 
+            <img
+              src={images[currentImageIndex]}
               alt={name}
+              loading="lazy"
+              decoding="async"
               className="w-full h-full object-cover transition-transform duration-500 rounded-xl"
               style={{ transform: isHovered ? 'scale(1.05)' : 'scale(1)' }}
             />
@@ -980,11 +951,13 @@ const MealDetailDialog = ({
             <img
               src={images[currentImageIndex]}
               alt={detail.name}
+              loading="lazy"
+              decoding="async"
               className="w-full h-full object-cover rounded-xl"
             />
             {images.length > 1 && (
               <>
-                <button 
+                <button
                   onClick={() => setCurrentImageIndex((prev) => (prev - 1 + images.length) % images.length)}
                   className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white rounded-lg p-2 transition-colors"
                 >
@@ -1016,7 +989,7 @@ const MealDetailDialog = ({
           <div className="flex items-center gap-4">
             {detail.rating && (
               <div className="flex items-center gap-1">
-                <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+                <Star className="h-4 w-4 fill-[#c9a563] text-[#c9a563]" />
                 <span className="font-medium">{detail.rating}</span>
               </div>
             )}
@@ -1131,9 +1104,11 @@ const DayCard = ({
       <div className={`flex flex-col ${isEven ? 'md:flex-row' : 'md:flex-row-reverse'} gap-0 bg-white`}>
         {/* Image Side */}
         <div className="md:w-1/2 aspect-[4/3] md:aspect-auto overflow-hidden rounded-xl img-hover-zoom">
-          <img 
+          <img
             src={dayImage}
             alt={day.title || `Day ${index + 1}`}
+            loading="lazy"
+            decoding="async"
             className="w-full h-full object-cover transition-transform duration-700 rounded-xl"
             onError={() => setImgError(true)}
           />
@@ -1146,10 +1121,14 @@ const DayCard = ({
             {day.title || day.location || `${t('tourDetail.day')} ${index + 1}`}
           </h3>
           
-          {/* Description */}
-          <p className="text-lg text-gray-600 leading-relaxed mb-6">
-            {day.description || day.summary || t('tourDetail.description')}
-          </p>
+          {/* Description — v80.24: only render when there's real content.
+              Old fallback to t('tourDetail.description') leaked the label
+              「行程介紹」into the body when day description was empty. */}
+          {(day.description || day.summary) && (
+            <p className="text-lg text-gray-600 leading-relaxed mb-6">
+              {day.description || day.summary}
+            </p>
+          )}
           
           {/* Activities Preview - 點擊可查看詳情 */}
           {day.activities && day.activities.length > 0 && (
@@ -1248,16 +1227,72 @@ const DayCard = ({
             </div>
           )}
           
-          {/* Accommodation */}
-          {day.accommodation && (
-            <div className="mt-4 pt-4 border-t border-gray-100">
-              <div className="flex items-center gap-2 text-base text-gray-800">
-                <Building className="h-5 w-5" style={{ color: themeColor.primary }} />
-                <span className="font-medium">{t('tourDetail.todayHotel')}</span>
-                <span>{day.accommodation}</span>
+          {/* Accommodation — Round 80.20 redesign:
+              Old: `flex items-center gap-2` inline → label "今晚住宿:" got
+              squeezed to 1 char/line whenever the hotel string was long
+              ("RADISSON HOTEL ZURICH AIRPORT 或 Mercure Zurich City 或 …")
+              because flex didn't wrap and the label had no flex-shrink-0.
+              New: stacked card layout. We parse the 「或」 separator into a
+              clean bullet list, treat trailing 「同級」 as a footnote
+              ("或同級飯店"), and use the meals-section eyebrow style for
+              consistency. No more vertical-text squeeze, multi-option lists
+              read like a brand-grade itinerary instead of a debug print. */}
+          {day.accommodation && (() => {
+            const raw = String(day.accommodation).trim();
+            // Split 「或」 (Chinese "or") — most Lion-format inputs look like
+            // "Hotel A 或 Hotel B 或 Hotel C 或同級". Trailing "同級" alone
+            // means "of the same class" — rendered as a separate footnote.
+            const parts = raw.split(/\s*或\s*/g).map((p) => p.trim()).filter(Boolean);
+            const trailingSimilar =
+              parts.length > 1 && /^同級$/.test(parts[parts.length - 1]);
+            const hotels = trailingSimilar ? parts.slice(0, -1) : parts;
+            const isMulti = hotels.length > 1;
+            return (
+              <div className="mt-6 pt-6 border-t border-gray-100">
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <h4 className="text-base font-semibold text-gray-800 flex items-center gap-2">
+                    <Building
+                      className="h-5 w-5"
+                      style={{ color: themeColor.primary }}
+                    />
+                    {t('tourDetail.tonightHotel')}
+                  </h4>
+                  {isMulti && (
+                    <span className="text-[10px] md:text-xs tracking-[0.2em] uppercase text-[#c9a563] font-semibold">
+                      {t('tourDetail.accommodationOptions')}
+                    </span>
+                  )}
+                </div>
+                <div className="rounded-xl bg-gray-50 border border-gray-100 p-4">
+                  {isMulti ? (
+                    <ul className="space-y-2">
+                      {hotels.map((hotel, i) => (
+                        <li
+                          key={i}
+                          className="flex items-start gap-2.5 text-sm md:text-base text-gray-800"
+                        >
+                          <span
+                            className="mt-1.5 h-1.5 w-1.5 rounded-full bg-[#c9a563] flex-shrink-0"
+                            aria-hidden
+                          />
+                          <span className="leading-relaxed">{hotel}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-sm md:text-base text-gray-800 leading-relaxed">
+                      {hotels[0] || raw}
+                    </p>
+                  )}
+                  {trailingSimilar && (
+                    <p className="text-xs text-gray-500 mt-3 pl-4">
+                      {t('tourDetail.orSimilar')}
+                    </p>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
         </div>
       </div>
     </div>
@@ -1344,7 +1379,7 @@ const HotelCard = ({ hotel, themeColor }: { hotel: any; themeColor: ReturnType<t
             {starRating > 0 && (
               <span className="flex items-center gap-0.5 ml-2">
                 {[...Array(starRating)].map((_, i) => (
-                  <Star key={i} className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+                  <Star key={i} className="h-4 w-4 fill-[#c9a563] text-[#c9a563]" />
                 ))}
               </span>
             )}
@@ -1401,7 +1436,7 @@ const HotelCard = ({ hotel, themeColor }: { hotel: any; themeColor: ReturnType<t
           <div className="flex items-center gap-4 mb-4">
             {detail.rating && (
               <div className="flex items-center gap-1">
-                <Star className="h-5 w-5 fill-yellow-400 text-yellow-400" />
+                <Star className="h-5 w-5 fill-[#c9a563] text-[#c9a563]" />
                 <span className="font-bold text-lg">{detail.rating}</span>
               </div>
             )}
@@ -1476,7 +1511,7 @@ const HotelCard = ({ hotel, themeColor }: { hotel: any; themeColor: ReturnType<t
               detail.roomTypes.map((room, idx) => (
                 <div key={idx} className="flex items-center gap-4 p-4 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">
                   {room.image && (
-                    <img src={room.image} alt={room.name} className="w-24 h-16 object-cover rounded-xl flex-shrink-0" />
+                    <img src={room.image} alt={room.name} loading="lazy" decoding="async" className="w-24 h-16 object-cover rounded-xl flex-shrink-0" />
                   )}
                   <div className="flex-grow">
                     <p className="font-medium">{room.name}</p>
@@ -1490,28 +1525,20 @@ const HotelCard = ({ hotel, themeColor }: { hotel: any; themeColor: ReturnType<t
                 </div>
               ))
             ) : (
-              <>
-                <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">
-                  <div>
-                    <p className="font-medium">{t('tourDetail.standardRoom')}</p>
-                    <p className="text-sm text-gray-500">{t('tourDetail.standardRoomDesc')}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm text-gray-500">{t('tourDetail.perNight')}</p>
-                    <p className="font-bold" style={{ color: themeColor.secondary }}>{t('tourDetail.includedInTour')}</p>
-                  </div>
+              // v80.24: only show standard "included" row when admin hasn't
+              // configured detail.roomTypes. Old code fabricated a "+NT$ 2,000
+              // upgrade" price out of thin air which exposes us to consumer
+              // complaints — removed entirely.
+              <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">
+                <div>
+                  <p className="font-medium">{t('tourDetail.standardRoom')}</p>
+                  <p className="text-sm text-gray-500">{t('tourDetail.standardRoomDesc')}</p>
                 </div>
-                <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">
-                  <div>
-                    <p className="font-medium">{t('tourDetail.upgradeRoom')}</p>
-                    <p className="text-sm text-gray-500">{t('tourDetail.upgradeRoomDesc')}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm text-gray-500">{t('tourDetail.perNightExtra')}</p>
-                    <p className="font-bold" style={{ color: themeColor.secondary }}>+{formatPrice(2000, "TWD")}</p>
-                  </div>
+                <div className="text-right">
+                  <p className="text-sm text-gray-500">{t('tourDetail.perNight')}</p>
+                  <p className="font-bold" style={{ color: themeColor.secondary }}>{t('tourDetail.includedInTour')}</p>
                 </div>
-              </>
+              </div>
             )}
           </div>
         </div>
@@ -1534,7 +1561,7 @@ const HotelCard = ({ hotel, themeColor }: { hotel: any; themeColor: ReturnType<t
                       {[...Array(5)].map((_, i) => (
                         <Star 
                           key={i} 
-                          className={`h-4 w-4 ${i < review.rating ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'}`} 
+                          className={`h-4 w-4 ${i < review.rating ? 'fill-[#c9a563] text-[#c9a563]' : 'text-gray-300'}`} 
                         />
                       ))}
                     </div>
@@ -1589,18 +1616,44 @@ const HotelCard = ({ hotel, themeColor }: { hotel: any; themeColor: ReturnType<t
       className="bg-white overflow-hidden rounded-xl shadow-lg hover:shadow-lg transition-all duration-300 group cursor-pointer card-hover-scale"
       onClick={() => setIsDialogOpen(true)}
     >
-      {/* 圖片區域 */}
-      <div className="relative aspect-[16/10] overflow-hidden rounded-xl">
-        <img 
-          src={hotel.image || "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=800"}
-          alt={hotel.imageAlt || hotel.name}
-              className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 rounded-xl"
-        />
+      {/* 圖片區域 — v80.24: removed shared Unsplash fallback (every photo-less
+          hotel was showing the same lobby image). Now we render a styled
+          placeholder with the hotel name in serif type — much more elegant. */}
+      <div className="relative aspect-[16/10] overflow-hidden rounded-xl bg-gradient-to-br from-[#FAF8F2] to-[#E5D4A8]/40">
+        {hotel.image ? (
+          <img
+            src={hotel.image}
+            alt={hotel.imageAlt || hotel.name}
+            loading="lazy"
+            decoding="async"
+            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 rounded-xl"
+          />
+        ) : (
+          <div className="w-full h-full flex flex-col items-center justify-center px-6 text-center">
+            <Building className="h-10 w-10 text-[#c9a563]/60 mb-2" />
+            {/* v80.24: dynamic font size + clamp for long bilingual names */}
+            <p
+              className={`font-serif font-bold text-foreground/80 leading-tight line-clamp-2 ${
+                (hotel.name?.length || 0) > 25 ? 'text-sm md:text-base' : 'text-base md:text-lg'
+              }`}
+              title={hotel.name}
+            >
+              {hotel.name}
+            </p>
+            {starRating > 0 && (
+              <div className="flex items-center gap-0.5 mt-2">
+                {Array.from({ length: Math.min(starRating, 5) }).map((_, i) => (
+                  <Star key={i} className="h-3 w-3 fill-[#c9a563] text-[#c9a563]" />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         {/* 星級標籤 */}
         {starRating > 0 && (
           <div className="absolute top-4 left-4 bg-white/95 backdrop-blur-sm px-3 py-1.5 flex items-center gap-1 shadow-md rounded-md">
             {[...Array(starRating)].map((_, i) => (
-              <Star key={i} className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
+              <Star key={i} className="h-3.5 w-3.5 fill-[#c9a563] text-[#c9a563]" />
             ))}
           </div>
         )}
@@ -1610,16 +1663,41 @@ const HotelCard = ({ hotel, themeColor }: { hotel: any; themeColor: ReturnType<t
       
       {/* 內容區域 */}
       <div className="p-6">
-        {/* 飯店名稱 */}
-        <h3 className="text-xl font-bold mb-2 text-gray-900 group-hover:text-primary transition-colors">
+        {/* 飯店名稱 — v80.24: dynamic font size for bilingual names + 2-line clamp.
+            Long names like "東京文華東方酒店 Mandarin Oriental Tokyo" no longer
+            get squished to one line (Jeff: 「飯店名字太長被擠壓」). */}
+        <h3
+          className={`font-bold mb-2 text-gray-900 group-hover:text-primary transition-colors leading-snug ${
+            (hotel.name?.length || 0) > 28 ? 'text-base md:text-lg' : 'text-xl'
+          }`}
+          style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+          title={hotel.name}
+        >
           {hotel.name}
         </h3>
-        
+
+        {/* 星級行（內容區也顯示一次，被覆蓋區擋住時還能看到） */}
+        {starRating > 0 && (
+          <div className="flex items-center gap-2 mb-3">
+            <div className="flex items-center gap-0.5">
+              {Array.from({ length: Math.min(starRating, 5) }).map((_, i) => (
+                <Star key={i} className="h-3.5 w-3.5 fill-[#c9a563] text-[#c9a563]" />
+              ))}
+            </div>
+            <span className="text-xs text-gray-500 font-medium">
+              {hotel.starsLabel || `${starRating} 星級`}
+            </span>
+            {hotel.brand && (
+              <span className="text-xs text-gray-400 truncate">· {hotel.brand}</span>
+            )}
+          </div>
+        )}
+
         {/* 位置 */}
         {hotel.location && hotel.location !== '待確認' && (
-          <p className="text-sm text-gray-500 mb-3 flex items-center gap-1.5">
-            <MapPin className="h-4 w-4 flex-shrink-0" style={{ color: themeColor.secondary }} />
-            <span className="truncate">{hotel.location}</span>
+          <p className="text-sm text-gray-500 mb-3 flex items-start gap-1.5">
+            <MapPin className="h-4 w-4 mt-0.5 flex-shrink-0" style={{ color: themeColor.secondary }} />
+            <span className="line-clamp-2">{hotel.location}</span>
           </p>
         )}
         
@@ -1722,7 +1800,7 @@ const PriceComparisonWidget = ({
             {item.onClick && item.value && (
               <button
                 onClick={item.onClick}
-                className="mt-2 text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 underline underline-offset-2"
+                className="mt-2 text-xs text-foreground hover:text-[#8a6f3a] flex items-center gap-1 underline underline-offset-2 transition-colors"
               >
                 {item.clickLabel} <ExternalLink className="h-3 w-3" />
               </button>
@@ -1730,11 +1808,14 @@ const PriceComparisonWidget = ({
           </div>
         ))}
       </div>
+      {/* v80.24: was hardcoding `NT$` and `.toLocaleString()` — now uses
+          formatPrice so the comparison widget honours the user's selected
+          currency just like the rest of the page. */}
       <div className="flex flex-col sm:flex-row gap-4 items-center justify-between bg-white rounded-xl border border-gray-200 p-4">
         <div>
           <p className="text-sm text-gray-500">{t('tourDetail.priceComparison.selfBookTotal')}</p>
           <p className="text-2xl font-bold text-gray-900">
-            {selfBookTotal > 0 ? `NT$ ${selfBookTotal.toLocaleString()}` : t('tourDetail.priceComparison.inquire')}
+            {selfBookTotal > 0 ? formatPrice(selfBookTotal, "TWD") : t('tourDetail.priceComparison.inquire')}
           </p>
         </div>
         <div className="text-center">
@@ -1743,14 +1824,14 @@ const PriceComparisonWidget = ({
         <div>
           <p className="text-sm text-gray-500">{t('tourDetail.priceComparison.packagePrice')}</p>
           <p className="text-2xl font-bold" style={{ color: themeColor.primary }}>
-            NT$ {tourPrice.toLocaleString()}
+            {formatPrice(tourPrice, "TWD")}
           </p>
         </div>
         {savings > 0 && (
-          <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-center">
-            <p className="text-xs text-green-700 font-medium">{t('tourDetail.priceComparison.savings')}</p>
-            <p className="text-xl font-bold text-green-700">NT$ {savings.toLocaleString()}</p>
-            <p className="text-xs text-green-600">{t('tourDetail.priceComparison.savingsPct').replace('{pct}', String(savingsPct))}</p>
+          <div className="bg-[#c9a563]/10 border border-[#c9a563]/35 rounded-xl px-4 py-3 text-center">
+            <p className="text-xs text-[#8a6f3a] font-medium">{t('tourDetail.priceComparison.savings')}</p>
+            <p className="text-xl font-bold text-[#8a6f3a]">{formatPrice(savings, "TWD")}</p>
+            <p className="text-xs text-[#8a6f3a]/85">{t('tourDetail.priceComparison.savingsPct').replace('{pct}', String(savingsPct))}</p>
           </div>
         )}
       </div>
@@ -1784,6 +1865,17 @@ export default function TourDetailPeony() {
   const { data: tourTranslations } = trpc.translation.getTourTranslations.useQuery(
     { tourId: tourId!, targetLanguage: language as 'zh-TW' | 'en' | 'ja' | 'ko' },
     { enabled: !!tourId && language !== 'zh-TW' }
+  );
+
+  // v80.24: top-level departures for hero badge + Quick Info Cards. The
+  // child DeparturePriceCalendar already fetches its own copy; React Query
+  // dedupes the request so this is effectively free.
+  const { data: heroDepartures } = trpc.departures.list.useQuery(
+    { tourId: tourId! },
+    { enabled: !!tourId, staleTime: 5 * 60 * 1000 }
+  );
+  const hasConfirmedDeparture = (heroDepartures || []).some(
+    (d: any) => d.status === 'confirmed'
   );
 
   // 取得翻譯後的欄位值（優雅降級到原始中文）
@@ -1944,10 +2036,10 @@ export default function TourDetailPeony() {
   const displayTour = isEditMode && editedTour ? editedTour : tour;
 
   const [activeTab, setActiveTab] = useState("overview");
-  // 預設展開所有天數
-  // v78n Sprint 6C: default to collapsed (only Day 1 open) so users can scan
-  // the itinerary at a glance, then expand the days they care about.
+  // v80.24: Jeff feedback — 預設要全部展開，使用者要才自己收合。
+  // (was: only Day 1 open by default — too many "查看更多" clicks needed)
   const [expandedDays, setExpandedDays] = useState<Set<number>>(() => new Set([0]));
+  const expandInitRef = useRef(false);
   const [selectedMealDetail, setSelectedMealDetail] = useState<MealDetail | null>(null);
   const [isMealDetailOpen, setIsMealDetailOpen] = useState(false);
   const [selectedAttractionDetail, setSelectedAttractionDetail] = useState<AttractionDetail | null>(null);
@@ -1982,8 +2074,14 @@ export default function TourDetailPeony() {
   };
 
   // Section refs for scroll tracking
+  // Round 80.20: added `routemap` so the 行程路線 (Tour Route Map) section
+  // is part of sticky-nav scroll tracking — previously the section rendered
+  // but had no anchor, so the active-section indicator skipped from
+  // overview straight to itinerary while the user was actually looking at
+  // the map.
   const sectionRefs = {
     overview: useRef<HTMLElement>(null),
+    routemap: useRef<HTMLElement>(null),
     itinerary: useRef<HTMLElement>(null),
     features: useRef<HTMLElement>(null),
     hotels: useRef<HTMLElement>(null),
@@ -1991,22 +2089,18 @@ export default function TourDetailPeony() {
     notes: useRef<HTMLElement>(null),
   };
 
-  // 根據目的地計算主題色
-  const themeColor = useMemo(() => {
-    if (tour?.colorTheme) {
-      const parsed = parseJSON(tour.colorTheme, null);
-      if (parsed) {
-        return {
-          primary: parsed.primary || "#0A0A0A",
-          secondary: parsed.secondary || parsed.accent || "#2563EB",
-          accent: parsed.accent || "#3B82F6",
-          light: parsed.light || "#F9FAFB",
-          gradient: "from-gray-900 to-gray-700"
-        };
-      }
-    }
-    return getThemeColorByDestination(tour?.destinationCountry);
-  }, [tour]);
+  // Round 80.8: theme is now ALWAYS the unified B&W + Gold brand theme.
+  // The previous logic read `tour.colorTheme` from the DB (an AI-generated
+  // per-country palette with reds/blues/greens) which directly overrode the
+  // brand baseline — Canada tours rendered red, Japan rendered pink, etc.
+  // We intentionally ignore the DB field here. If a tour record needs a
+  // brand-aligned variation in the future, surface it through a different
+  // mechanism (e.g. opt-in 'season' theme) rather than a free-form colour
+  // override that breaks the brand on every page load.
+  const themeColor = useMemo(
+    () => getThemeColorByDestination(tour?.destinationCountry),
+    [tour]
+  );
 
   // Scroll tracking
   useEffect(() => {
@@ -2060,7 +2154,26 @@ export default function TourDetailPeony() {
     return typeof source === 'string' ? parseJSON(source, []) : (source || []);
   }, [isEditMode, editedTour?.keyFeatures, tour?.keyFeatures, language, tourTranslations]);
 
-  const attractions = useMemo(() => parseJSON(tour?.attractions, []), [tour?.attractions]);
+  // Round 80.25 — filter out placeholder attractions ("景點 1", "景點 2",
+  // "Attraction 3", etc.) that the AI / admin templates leave when they
+  // can't extract real attraction names. Tour 990012 (Alishan) had 9 of
+  // these rendering as a generic 景點 1...景點 9 grid.
+  const attractions = useMemo(() => {
+    const raw = parseJSON(tour?.attractions, []);
+    if (!Array.isArray(raw)) return [];
+    const isPlaceholder = (name: string) =>
+      /^\s*(?:景點|Attraction|景点)\s*\d+\s*$/i.test(name) ||
+      /^\s*Place\s*\d+\s*$/i.test(name);
+    return raw.filter((a: any) => {
+      const name = typeof a === "string" ? a : (a?.name || a?.title || "");
+      const desc = typeof a === "string" ? "" : (a?.description || "");
+      // Drop if name is empty/placeholder AND description is empty.
+      if (!name || isPlaceholder(name)) {
+        return desc.trim().length > 0; // keep only if real description
+      }
+      return true;
+    });
+  }, [tour?.attractions]);
   const hotels = useMemo(() => {
     const source = getTranslated('hotels', tour?.hotels) ?? tour?.hotels;
     return parseJSON(source, []);
@@ -2086,6 +2199,22 @@ export default function TourDetailPeony() {
     getTranslated('noticeDetailed', tour?.noticeDetailed) ?? tour?.noticeDetailed, null
   ), [tour?.noticeDetailed, language, tourTranslations]);
 
+  // Round 80.25 — these AI fields were silently dropped from the rendered
+  // detail page even though masterAgent generates them. Per Jeff's request
+  // "AI 系統一字不落呈現到詳情頁面", they now have explicit memos + render
+  // sections. tour.highlights = rich gallery items {title, subtitle,
+  // description, image}; tour.poeticContent = 5 paragraph poetic descriptions.
+  // (featureImages was a 38-image mosaic — removed per Jeff feedback as
+  // redundant with the highlights gallery's curated images.)
+  const tourHighlights = useMemo(() => {
+    const source = getTranslated('highlights', tour?.highlights) ?? tour?.highlights;
+    return parseJSON(source, []);
+  }, [tour?.highlights, language, tourTranslations]);
+  const poeticContent = useMemo(() => {
+    const source = getTranslated('poeticContent', tour?.poeticContent) ?? tour?.poeticContent;
+    return parseJSON(source, null);
+  }, [tour?.poeticContent, language, tourTranslations]);
+
   // displayItinerary: 編輯模式下從 editedTour 讀取，消除 JSX 中重複 parse
   const displayItinerary = useMemo(() => {
     if (isEditMode && editedTour?.itineraryDetailed != null) {
@@ -2097,11 +2226,51 @@ export default function TourDetailPeony() {
   }, [isEditMode, editedTour?.itineraryDetailed, itineraryDetailed]);
   // ====== 結束 JSON 欄位 useMemo 快取 ======
 
+  // v80.24: auto-expand all days on first load (Jeff: 預設要全展開).
+  // Only fires once per page mount; user can still collapse individual days.
+  useEffect(() => {
+    if (!expandInitRef.current && displayItinerary.length > 0) {
+      expandInitRef.current = true;
+      setExpandedDays(new Set(displayItinerary.map((_: any, i: number) => i)));
+    }
+  }, [displayItinerary.length]);
+
   if (isLoading) {
+    // Round 80.21 — Jeff reported the spinner shows a literal SQUARE (with
+    // "LOADING" label below). Cause: previous code used `rounded-lg` (8px
+    // radius), not `rounded-full`, so the CSS border-trick rendered a
+    // rounded-square outline rotating in place — looks broken, not loading.
+    // Plus border-cap aliasing as in App.tsx PageLoader. Replaced with a
+    // proper SVG circular spinner with stroke-linecap="round" + brand gold.
     return (
       <div className="min-h-screen flex items-center justify-center bg-white">
         <div className="text-center">
-          <div className="w-12 h-12 border-2 border-black border-t-transparent rounded-lg animate-spin mx-auto"></div>
+          <svg
+            className="h-12 w-12 mx-auto animate-spin"
+            viewBox="0 0 50 50"
+            xmlns="http://www.w3.org/2000/svg"
+            aria-hidden
+          >
+            <circle
+              cx="25"
+              cy="25"
+              r="20"
+              fill="none"
+              stroke="#e5e7eb"
+              strokeWidth="3"
+            />
+            <circle
+              cx="25"
+              cy="25"
+              r="20"
+              fill="none"
+              stroke="#c9a563"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeDasharray="125.6"
+              strokeDashoffset="94.2"
+            />
+          </svg>
           <p className="mt-6 text-sm tracking-widest uppercase text-gray-500">Loading</p>
         </div>
       </div>
@@ -2147,9 +2316,15 @@ export default function TourDetailPeony() {
   const displayDescription = getTranslated('description', tour.description) ?? tour.description;
   const displayHeroSubtitle = getTranslated('heroSubtitle', (tour as any).heroSubtitle) ?? (tour as any).heroSubtitle;
   // 導覽項目
+  // Round 80.20: surface "行程路線" (Route Map) in sticky nav between
+  // overview and itinerary so users can jump straight to the map. Hidden
+  // when itinerary is empty (the map section also doesn't render then).
   const navItems = [
     // BUG-005 fix: removed duplicate 'features' tab (same section as 'overview')
     { id: "overview", label: t('tourDetail.tabs.overview') },
+    ...(displayItinerary && displayItinerary.length > 0
+      ? [{ id: "routemap", label: t('tourDetail.tabs.routeMap') }]
+      : []),
     { id: "itinerary", label: t('tourDetail.tabs.itinerary') },
     { id: "hotels", label: t('tourDetail.tabs.hotel') },
     { id: "pricing", label: t('tourDetail.tabs.pricing') },
@@ -2178,16 +2353,40 @@ export default function TourDetailPeony() {
         image={(tour as any).heroImage || (tour as any).imageUrl || undefined}
         url={`/tours/${tour.id}`}
         type="article"
-        schema={buildTourSchema({
-          id: tour.id,
-          title: displayTitle,
-          description: displayDescription,
-          price: (tour as any).price,
-          currency: (tour as any).currency ?? "TWD",
-          duration: (tour as any).duration,
-          destination: (tour as any).destinationCountry ?? (tour as any).destination,
-          images: (tour as any).images,
-        })}
+        schema={[
+          buildTourSchema({
+            id: tour.id,
+            title: displayTitle,
+            description: displayDescription,
+            price: (tour as any).price,
+            currency: (tour as any).currency ?? "USD",
+            duration: (tour as any).duration,
+            destination: (tour as any).destinationCountry ?? (tour as any).destination,
+            images: (() => {
+              const fi = parseJSON(tour?.featureImages, []) as any[];
+              const featureUrls = Array.isArray(fi)
+                ? fi.map((f) => f?.url || f?.image).filter((u) => typeof u === 'string')
+                : [];
+              const hero = (tour as any).heroImage || (tour as any).imageUrl;
+              const all = [hero, ...featureUrls].filter(Boolean) as string[];
+              return all.length > 0 ? all.slice(0, 8) : undefined;
+            })(),
+            rating: (tour as any).rating || (tour as any).averageRating,
+            totalReviews: (tour as any).totalReviews || (tour as any).reviewCount,
+            startDate: (tour as any).startDate,
+            endDate: (tour as any).endDate,
+          }),
+          // Round 80.25 — BreadcrumbList Schema. Helps Google render
+          // breadcrumb-trail rich snippets in SERPs. Dropped destination
+          // level since destination slugs aren't standardized (Chinese
+          // country names don't map to /destinations/:region routes).
+          // 3-level (Home > Tours > [tour]) is valid breadcrumb structure.
+          buildBreadcrumbSchema([
+            { name: language === "en" ? "Home" : "首頁", url: "/" },
+            { name: language === "en" ? "Tours" : "行程", url: "/tours" },
+            { name: displayTitle, url: `/tours/${tour.id}` },
+          ]),
+        ]}
       />
       {/* 編輯模式標題橫幅 */}
       {isAdmin && <EditModeBanner isEditMode={isEditMode} hasChanges={hasChanges} />}
@@ -2220,8 +2419,11 @@ export default function TourDetailPeony() {
         </div>
       </div>
 
-      {/* Hero Section — v78r: compressed (was 60vh) so the title doesn't crowd out the photo */}
-      <section className="relative h-[35vh] sm:h-[40vh] md:h-[45vh] min-h-[280px] max-h-[480px]">
+      {/* Hero Section — v80.24: bumped to 55vh / 70vh for cinematic feel
+          (was 35-45vh — title was cramped, photo barely showed).
+          Hero now uses real <img> with fetchpriority="high" instead of
+          background-image — Google can crawl it and LCP optimization works. */}
+      <section className="relative h-[55vh] md:h-[70vh] min-h-[420px] max-h-[680px]">
         {isEditMode ? (
           <div className="absolute inset-0">
             <EditableImage
@@ -2237,15 +2439,33 @@ export default function TourDetailPeony() {
             <div className={`absolute inset-0 bg-gradient-to-t ${themeColor.gradient} opacity-60 pointer-events-none`} />
           </div>
         ) : (
-          <div 
-            className="absolute inset-0 bg-cover bg-center"
-            style={{ backgroundImage: `url(${heroImage})` }}
-          >
+          <div className="absolute inset-0">
+            <img
+              src={heroImage}
+              alt={displayTitle || t('tourDetail.tourImageAlt')}
+              fetchPriority="high"
+              loading="eager"
+              decoding="async"
+              className="absolute inset-0 w-full h-full object-cover"
+            />
             <div className={`absolute inset-0 bg-gradient-to-t ${themeColor.gradient} opacity-60`} />
           </div>
         )}
         
         <div className="relative h-full max-w-7xl mx-auto px-6 flex flex-col justify-center items-center text-center">
+          {/* v80.24: tour code displayed above title — every Lion / Phoenix /
+              Settour competitor does this. Helps users reference the tour on
+              the phone / WhatsApp / screenshots. */}
+          <div className="mb-3 inline-flex items-center gap-3 text-[11px] md:text-xs tracking-[3px] uppercase text-white/75">
+            {(tour as any).tourCode || tour.productCode || `T${tour.id}`}
+            {hasConfirmedDeparture && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-[#c9a563]/95 text-[#1a1a1a] rounded-full text-[10px] md:text-[11px] font-bold tracking-wide">
+                <Award className="h-3 w-3" />
+                {t('tourDetail.guaranteedDeparture') || '確定出團'}
+              </span>
+            )}
+          </div>
+
           {/* Title */}
           {isEditMode ? (
             <EditableText
@@ -2259,7 +2479,15 @@ export default function TourDetailPeony() {
             />
           ) : (
             <>
-              <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-3 max-w-4xl leading-tight drop-shadow-lg" title={displayTitle}>
+              {/* Round 80.8: gold accent line above title — anchors brand baseline */}
+              <span
+                className="inline-block h-px w-12 bg-[#c9a563] mb-5"
+                aria-hidden
+              />
+              <h1
+                className="text-3xl md:text-4xl lg:text-5xl font-serif font-bold tracking-tight text-white mb-3 max-w-4xl leading-tight drop-shadow-lg"
+                title={displayTitle}
+              >
                 {primaryTitle}
               </h1>
               {/* v78j: highlight chips from secondary title segments */}
@@ -2284,23 +2512,37 @@ export default function TourDetailPeony() {
             </>
           )}
 
-          {/* Subtitle / Poetic Title — v78p: respect translation lookup for EN */}
-          {(displayTour.poeticTitle || isEditMode) && (
-            isEditMode ? (
-              <EditableText
-                value={displayTour.poeticTitle || ""}
-                onSave={(value) => updateField("poeticTitle", value)}
-                isEditing={isEditMode}
-                className="text-xl md:text-2xl text-white/90 mb-6 max-w-2xl"
-                placeholder={t('tourDetail.editSubtitlePlaceholder')}
-                as="p"
-                darkBackground
-              />
-            ) : (
-              <p className="text-xl md:text-2xl text-white/90 mb-6 max-w-2xl">
-                {getTranslated('poeticTitle', displayTour.poeticTitle) ?? displayTour.poeticTitle}
-              </p>
-            )
+          {/* Subtitle / Poetic Title — Round 80.25: render BOTH AI-generated
+              fields when present so neither poeticTitle (e.g. "馬特宏峰下的
+              冰雪奇蹟", 8-12 chars) nor heroSubtitle (richer 30-50 char
+              descriptive line) is dropped. They convey different things —
+              poeticTitle is the artistic eyebrow theme, heroSubtitle is the
+              descriptive subtitle. Previously the UI showed only one. */}
+          {isEditMode ? (
+            <EditableText
+              value={displayTour.poeticTitle || ""}
+              onSave={(value) => updateField("poeticTitle", value)}
+              isEditing={isEditMode}
+              className="text-xl md:text-2xl text-white/90 mb-6 max-w-2xl"
+              placeholder={t('tourDetail.editSubtitlePlaceholder')}
+              as="p"
+              darkBackground
+            />
+          ) : (
+            <>
+              {(getTranslated('poeticTitle', displayTour.poeticTitle) || displayTour.poeticTitle) && (
+                <p
+                  className="text-base md:text-lg text-white/85 italic font-serif tracking-wide mb-2 max-w-2xl"
+                >
+                  {getTranslated('poeticTitle', displayTour.poeticTitle) || displayTour.poeticTitle}
+                </p>
+              )}
+              {displayHeroSubtitle && (
+                <p className="text-xl md:text-2xl text-white/90 mb-6 max-w-2xl">
+                  {displayHeroSubtitle}
+                </p>
+              )}
+            </>
           )}
 
           {/* Meta info */}
@@ -2348,21 +2590,22 @@ export default function TourDetailPeony() {
       <section className="bg-gray-50 border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-2.5">
           <div className="flex items-center justify-center md:justify-between gap-3 md:gap-6 flex-wrap text-[11px] md:text-xs text-gray-600">
+            {/* Round 80.8: trust badge icons normalised to gold (was pink/blue/amber). */}
             <div className="inline-flex items-center gap-1.5">
-              <ShieldCheck className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0" />
+              <ShieldCheck className="h-3.5 w-3.5 text-[#c9a563] flex-shrink-0" />
               <span className="hidden sm:inline">{language === 'en' ? 'California Seller of Travel' : '加州合法旅行社'} </span>
               <span className="font-semibold text-gray-800">CST #2166984</span>
             </div>
             <div className="inline-flex items-center gap-1.5">
-              <Heart className="h-3.5 w-3.5 text-pink-600 flex-shrink-0" />
+              <Heart className="h-3.5 w-3.5 text-[#c9a563] flex-shrink-0" />
               <span>{language === 'en' ? 'TCRF Consumer Protection' : 'TCRF 消費者保障'}</span>
             </div>
             <div className="inline-flex items-center gap-1.5">
-              <Lock className="h-3.5 w-3.5 text-blue-600 flex-shrink-0" />
+              <Lock className="h-3.5 w-3.5 text-[#c9a563] flex-shrink-0" />
               <span>{language === 'en' ? 'Stripe Encrypted Payment' : 'Stripe 加密付款'}</span>
             </div>
             <div className="inline-flex items-center gap-1.5">
-              <PhoneCall className="h-3.5 w-3.5 text-amber-600 flex-shrink-0" />
+              <PhoneCall className="h-3.5 w-3.5 text-[#c9a563] flex-shrink-0" />
               <span>{language === 'en' ? '24-hour customer support' : '24 小時客服'}</span>
             </div>
           </div>
@@ -2439,7 +2682,11 @@ export default function TourDetailPeony() {
 
       {/* Sticky Navigation Tabs — v78r: Lion-Travel pattern: nav + price + Book CTA all in
           one row, always visible. Print/PDF/Share demoted to icon-only secondary actions. */}
-      <nav className="sticky top-[80px] z-40 bg-white shadow-sm border-b border-gray-100">
+      {/* v80.24: top offset matches Header's actual height. On desktop the
+          Header is utility-bar (36px) + main (80px) = 116px; on mobile only
+          the main bar shows so 80px is correct. Old `top-[80px]` overlapped
+          the bottom of the utility bar on desktop. */}
+      <nav className="sticky top-[80px] lg:top-[116px] z-40 bg-white shadow-sm border-b border-gray-100">
         <div className="max-w-7xl mx-auto px-2 md:px-6">
           <div className="flex items-center justify-between gap-2 md:gap-4">
             {/* Left: section nav */}
@@ -2529,21 +2776,73 @@ export default function TourDetailPeony() {
             {t('tourDetail.description')}
           </h2>
           
-          {/* Description */}
-          <div className="prose prose-xl max-w-none text-gray-600 leading-relaxed text-center mb-12 text-lg md:text-xl">
+          {/* Description — v80.23: parse bullet-formatted descriptions into a
+              styled list. LLM often returns "• 第一點\n• 第二點\n• 第三點" as a
+              single string; rendering as <p> showed everything on one line which
+              looked plain. We now detect bullets/line-breaks and render them as
+              an elegant card-style list. */}
+          <div className="max-w-none text-gray-700 leading-relaxed mb-12">
             {isEditMode ? (
-              <EditableText
-                value={displayTour.description || ""}
-                onSave={(value) => updateField("description", value)}
-                isEditing={isEditMode}
-                className="text-gray-600 leading-relaxed"
-                placeholder={t('tourDetail.editDescPlaceholder')}
-                multiline={true}
-                as="p"
-              />
-            ) : (
-              <p>{displayDescription}</p>
-            )}
+              <div className="prose prose-xl max-w-none text-gray-600 leading-relaxed text-center text-lg md:text-xl">
+                <EditableText
+                  value={displayTour.description || ""}
+                  onSave={(value) => updateField("description", value)}
+                  isEditing={isEditMode}
+                  className="text-gray-600 leading-relaxed"
+                  placeholder={t('tourDetail.editDescPlaceholder')}
+                  multiline={true}
+                  as="p"
+                />
+              </div>
+            ) : (() => {
+              const desc = displayDescription || "";
+              // Detect lines that start with a bullet marker (•, ‧, -, *, ・, ●, ◆)
+              // OR descriptions where multiple newlines suggest list-style content.
+              const lines = desc.split(/\r?\n/).map((l: string) => l.trim()).filter(Boolean);
+              const hasBullets = lines.some((l: string) => /^[•‧\-*・●◆▪►▸✦]\s+/.test(l));
+              const isMultiLine = lines.length >= 3;
+
+              if (hasBullets || isMultiLine) {
+                // Strip leading bullet markers and render as styled list cards
+                const items = lines.map((l: string) => l.replace(/^[•‧\-*・●◆▪►▸✦]\s+/, ""));
+                // Pull out a leading non-bullet line as an intro paragraph if the
+                // first line wasn't bulleted but later lines were.
+                const firstWasBullet = /^[•‧\-*・●◆▪►▸✦]\s+/.test(lines[0]);
+                const intro = !firstWasBullet && hasBullets ? items.shift() : null;
+
+                return (
+                  <div className="max-w-3xl mx-auto">
+                    {intro && (
+                      <p className="text-center text-lg md:text-xl text-gray-700 leading-relaxed mb-8">
+                        {intro}
+                      </p>
+                    )}
+                    <ul className="grid gap-3 md:grid-cols-2">
+                      {items.map((item: string, idx: number) => (
+                        <li
+                          key={idx}
+                          className="flex items-start gap-3 px-4 py-3 bg-[#FAF8F2] border-l-4 rounded-lg text-gray-800"
+                          style={{ borderLeftColor: themeColor.secondary }}
+                        >
+                          <Sparkles
+                            className="h-4 w-4 mt-1 flex-shrink-0"
+                            style={{ color: themeColor.secondary }}
+                          />
+                          <span className="text-sm md:text-base leading-relaxed">{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              }
+
+              // Plain prose description — keep the elegant centered look
+              return (
+                <div className="prose prose-xl max-w-none text-gray-600 leading-relaxed text-center text-lg md:text-xl">
+                  <p>{desc}</p>
+                </div>
+              );
+            })()}
           </div>
 
           {/* Key Features Grid — v78r: 2-col grid; v78t: dynamic for sparse cases.
@@ -2608,6 +2907,8 @@ export default function TourDetailPeony() {
                         <img
                           src={featureImage}
                           alt={featureTitle}
+                          loading="lazy"
+                          decoding="async"
                           className="w-full h-full object-cover rounded-xl transition-transform duration-300 group-hover:scale-110"
                         />
                         <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
@@ -2658,15 +2959,120 @@ export default function TourDetailPeony() {
             </div>
           )}
 
-          {/* Quick Info Cards */}
+          {/* Round 80.25 — AI-generated rich highlights gallery. Each item is
+              {title, subtitle, description, image} pulled from
+              ContentAnalyzerAgent. Was being saved to tour.highlights but
+              never rendered (Jeff: "AI 系統一字不落呈現到詳情頁面"). */}
+          {tourHighlights.length > 0 && (
+            <div className="mt-16">
+              <h3 className="text-2xl font-serif font-bold text-center mb-2 text-gray-900">
+                {t("tourDetail.signatureMoments") || "行程亮點"}
+              </h3>
+              <span
+                className="inline-block h-px w-12 bg-[#c9a563] mx-auto mb-10"
+                aria-hidden
+                style={{ display: "block" }}
+              />
+              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                {tourHighlights.map((h: any, idx: number) => {
+                  const title = h.title || h.name || "";
+                  const subtitle = h.subtitle || "";
+                  const description = h.description || "";
+                  const image = h.image || h.imageUrl || "";
+                  if (!title && !description) return null;
+                  return (
+                    <article
+                      key={idx}
+                      className="group bg-white rounded-xl border border-gray-100 overflow-hidden hover:shadow-lg transition-all duration-300 hover:-translate-y-1"
+                    >
+                      {image && (
+                        <div className="relative h-48 overflow-hidden rounded-xl">
+                          <img
+                            src={image}
+                            alt={h.imageAlt || title}
+                            loading="lazy"
+                            decoding="async"
+                            className="w-full h-full object-cover rounded-xl transition-transform duration-300 group-hover:scale-110"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
+                          {subtitle && (
+                            <span className="absolute bottom-3 left-3 text-xs text-white/90 italic font-serif">
+                              {subtitle}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      <div className="p-5">
+                        <h4 className="font-bold text-base md:text-lg text-gray-900 mb-2 leading-snug">
+                          {title}
+                        </h4>
+                        {description && (
+                          <p className="text-sm text-gray-700 leading-relaxed">
+                            {description}
+                          </p>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Round 80.25 — Poetic content blocks. 5-section AI-generated
+              elegant prose: intro / accommodation / dining / experience /
+              closing. Was saved to tour.poeticContent but never rendered. */}
+          {poeticContent && typeof poeticContent === "object" && (
+            <div className="mt-16 max-w-3xl mx-auto">
+              {(() => {
+                const sections: Array<[string, string, string]> = [
+                  ["intro", t("tourDetail.poeticIntro") || "啟程", poeticContent.intro || ""],
+                  ["accommodation", t("tourDetail.poeticStay") || "棲所", poeticContent.accommodation || ""],
+                  ["dining", t("tourDetail.poeticDining") || "饗宴", poeticContent.dining || ""],
+                  ["experience", t("tourDetail.poeticExperience") || "體驗", poeticContent.experience || ""],
+                  ["closing", t("tourDetail.poeticClosing") || "歸途", poeticContent.closing || ""],
+                ];
+                const filled = sections.filter(([, , text]) => text);
+                if (filled.length === 0) return null;
+                return (
+                  <div className="space-y-8">
+                    {filled.map(([key, label, text]) => (
+                      <div key={key} className="text-center">
+                        <h4
+                          className="text-xs tracking-[0.3em] uppercase mb-3 font-medium"
+                          style={{ color: "#c9a563" }}
+                        >
+                          {label}
+                        </h4>
+                        <p className="text-base md:text-lg text-gray-700 leading-relaxed font-serif italic">
+                          {text}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* Round 80.25 — REMOVED 行程影像 (Tour Gallery) per Jeff: 38-image
+              mosaic was redundant. The 行程亮點 section above already shows
+              the curated images with title + subtitle + description context;
+              additional image-grid added clutter without information. The
+              `featureImages` data is still saved by masterAgent and used
+              by the highlights section's image lookup pool. */}
+
+          {/* v80.24 Quick Info Cards — now consistent rounded-xl + brand cream
+              + only render Group Size if admin has set min/max (no more fake
+              "10-25 人" fallback). */}
           <div className="grid md:grid-cols-4 gap-4 mt-12">
-            <div className="text-center p-6 bg-gray-50">
-              <Clock className="h-10 w-10 mx-auto mb-3 text-gray-600" />
+            <div className="text-center p-6 bg-[#FAF8F2] border border-foreground/8 rounded-xl">
+              <Clock className="h-10 w-10 mx-auto mb-3" style={{ color: themeColor.secondary }} />
               <p className="text-base text-gray-700 mb-1">{t('tourDetail.duration')}</p>
               <p className="font-bold text-xl">{tour.duration || t('tourDetail.multiDayTour')}</p>
             </div>
-            <div className="text-center p-6 bg-gray-50">
-              <MapPin className="h-10 w-10 mx-auto mb-3 text-gray-600" />
+            <div className="text-center p-6 bg-[#FAF8F2] border border-foreground/8 rounded-xl">
+              <MapPin className="h-10 w-10 mx-auto mb-3" style={{ color: themeColor.secondary }} />
               <p className="text-base text-gray-700 mb-1">{t('tourDetail.destination')}</p>
               <p className="font-bold text-xl">{(() => {
                 const cities = (tour.destinationCity || tour.destinationCountry || '').split(/[,、]/).map((c: string) => c.trim()).filter(Boolean);
@@ -2677,13 +3083,35 @@ export default function TourDetailPeony() {
                 return translated.slice(0, 4).join(sep) + '…';
               })()}</p>
             </div>
-            <div className="text-center p-6 bg-gray-50">
-              <Users className="h-10 w-10 mx-auto mb-3 text-gray-600" />
-              <p className="text-base text-gray-700 mb-1">{t('tourDetail.groupSize')}</p>
-              <p className="font-bold text-xl">{(t('tourDetail.groupPeople')).replace('{min}', String((tour as any).minGroupSize || 10)).replace('{max}', String((tour as any).maxGroupSize || 25))}</p>
-            </div>
-            <div className="text-center p-6 bg-gray-50">
-              <Calendar className="h-10 w-10 mx-auto mb-3 text-gray-600" />
+            {/* v80.24: only render group size when admin populated it. Old code
+                fabricated "10-25" which exposes us to consumer complaints.
+                Now prefers maxParticipants (real schema column) — derived
+                from Lion departure totalSlots. */}
+            {((tour as any).maxParticipants || (tour as any).minGroupSize || (tour as any).maxGroupSize) ? (
+              <div className="text-center p-6 bg-[#FAF8F2] border border-foreground/8 rounded-xl">
+                <Users className="h-10 w-10 mx-auto mb-3" style={{ color: themeColor.secondary }} />
+                <p className="text-base text-gray-700 mb-1">{t('tourDetail.groupSize')}</p>
+                <p className="font-bold text-xl">
+                  {(tour as any).maxParticipants
+                    ? `≤ ${(tour as any).maxParticipants} 人`
+                    : (t('tourDetail.groupPeople'))
+                        .replace('{min}', String((tour as any).minGroupSize || (tour as any).maxGroupSize || ''))
+                        .replace('{max}', String((tour as any).maxGroupSize || (tour as any).minGroupSize || ''))}
+                </p>
+              </div>
+            ) : (
+              <div className="text-center p-6 bg-[#FAF8F2] border border-foreground/8 rounded-xl">
+                <Award className="h-10 w-10 mx-auto mb-3" style={{ color: themeColor.secondary }} />
+                <p className="text-base text-gray-700 mb-1">{t('tourDetail.guaranteedDeparture') || '確定出團'}</p>
+                <p className="font-bold text-xl">
+                  {hasConfirmedDeparture
+                    ? (t('tourDetail.confirmed') || '已確認')
+                    : (t('tourDetail.pendingConfirmation') || '報名中')}
+                </p>
+              </div>
+            )}
+            <div className="text-center p-6 bg-[#FAF8F2] border border-foreground/8 rounded-xl">
+              <Calendar className="h-10 w-10 mx-auto mb-3" style={{ color: themeColor.secondary }} />
               <p className="text-base text-gray-700 mb-1">{t('tourDetail.departureDate')}</p>
               <p className="font-bold text-xl">{t('tourDetail.multipleDates')}</p>
             </div>
@@ -2691,14 +3119,22 @@ export default function TourDetailPeony() {
         </div>
       </section>
 
-      {/* v78o: Tour Route Map — server-side geocode + Google Static Map */}
+      {/* v78o: Tour Route Map — server-side geocode + Google Static Map.
+          Round 80.20: wrapped in <section id="routemap"> with sectionRefs
+          so sticky nav can scroll to it. Without the wrapper the section
+          rendered but had no anchor — clicking 「行程路線」 in the tab bar
+          did nothing. */}
       {displayItinerary && displayItinerary.length > 0 && tour.id && (
-        <TourRouteMap
-          tourId={tour.id}
-          itinerary={displayItinerary}
-          destinationCountry={tour.destinationCountry || undefined}
-          themeColor={themeColor}
-        />
+        <section ref={sectionRefs.routemap} id="routemap">
+          <TourRouteMap
+            tourId={tour.id}
+            itinerary={displayItinerary}
+            destinationCountry={tour.destinationCountry || undefined}
+            departureCity={tour.departureCity || undefined}
+            tourTitle={tour.title || undefined}
+            themeColor={themeColor}
+          />
+        </section>
       )}
 
       {/* Itinerary Section - Zigzag Layout */}
@@ -2720,7 +3156,7 @@ export default function TourDetailPeony() {
                     setExpandedDays(new Set(displayItinerary.map((_: any, i: number) => i)));
                   }
                 }}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white border border-gray-300 hover:border-gray-400 text-sm text-gray-700 hover:text-gray-900 transition-colors"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-white border border-gray-300 hover:border-gray-400 text-sm text-gray-700 hover:text-gray-900 transition-colors"
                 style={{ borderColor: themeColor.primary, color: themeColor.primary }}
               >
                 {expandedDays.size >= displayItinerary.length
@@ -2733,10 +3169,20 @@ export default function TourDetailPeony() {
           {/* Daily Itinerary */}
           <div className="space-y-24">
             {displayItinerary.length > 0 ? (
-              displayItinerary.map((day: any, index: number) => (
-                isEditMode ? (
+              displayItinerary.map((day: any, index: number) => {
+                // Round 80.21 v24: each day wrapped with id="day-N" so
+                // the route-map chips below the map can scrollIntoView
+                // here. scroll-mt-24 leaves room for the sticky header.
+                const dayNum =
+                  typeof day?.day === "number" ? day.day : index + 1;
+                return (
+                <div
+                  key={index}
+                  id={`day-${dayNum}`}
+                  className="scroll-mt-28 transition-shadow rounded-xl"
+                >
+                {isEditMode ? (
                   <EditableDayCard
-                    key={index}
                     day={day}
                     index={index}
                     isEditMode={isEditMode}
@@ -2749,8 +3195,7 @@ export default function TourDetailPeony() {
                     themeColor={themeColor}
                   />
                 ) : (
-                  <DayCard 
-                    key={index}
+                  <DayCard
                     day={day}
                     index={index}
                     themeColor={themeColor}
@@ -2760,8 +3205,10 @@ export default function TourDetailPeony() {
                     onShowAttractionDetail={handleShowAttractionDetail}
                     destinationCountry={tour?.destinationCountry}
                   />
-                )
-              ))
+                )}
+                </div>
+                );
+              })
             ) : (
               <div className="text-center py-12 text-gray-700">
                 <Info className="h-12 w-12 mx-auto mb-4 text-gray-300" />
@@ -2833,19 +3280,19 @@ export default function TourDetailPeony() {
           {/* Cost Inclusions - 卡片式設計 */}
           {costExplanation && (
             <div className="grid md:grid-cols-2 gap-8">
-              {/* Included */}
+              {/* Included — Round 80.4: gold accent (was green) */}
               {costExplanation.included && costExplanation.included.length > 0 && (
-                <div className="bg-green-50 rounded-lg p-6 border border-green-100">
-                  <h3 className="text-xl font-bold mb-6 flex items-center gap-2 text-green-700">
-                    <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center">
-                      <Check className="h-5 w-5 text-green-600" />
+                <div className="bg-[#c9a563]/[0.08] rounded-lg p-6 border border-[#c9a563]/30">
+                  <h3 className="text-xl font-bold mb-6 flex items-center gap-2 text-[#8a6f3a]">
+                    <div className="w-8 h-8 rounded-lg bg-[#c9a563]/20 flex items-center justify-center">
+                      <Check className="h-5 w-5 text-[#c9a563]" />
                     </div>
                     {t('tourDetail.includedItems')}
                   </h3>
                   <ul className="space-y-3">
                     {ensureArray(costExplanation.included).map((item: string, index: number) => (
                       <li key={index} className="flex items-start gap-3">
-                        <Check className="h-4 w-4 text-green-600 mt-1 flex-shrink-0" />
+                        <Check className="h-4 w-4 text-[#c9a563] mt-1 flex-shrink-0" />
                         <span className="text-gray-700">{item}</span>
                       </li>
                     ))}
@@ -2853,19 +3300,19 @@ export default function TourDetailPeony() {
                 </div>
               )}
 
-              {/* Excluded */}
+              {/* Excluded — Round 80.4: neutral foreground (was red) */}
               {costExplanation.excluded && costExplanation.excluded.length > 0 && (
-                <div className="bg-red-50 rounded-lg p-6 border border-red-100">
-                  <h3 className="text-xl font-bold mb-6 flex items-center gap-2 text-red-700">
-                    <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center">
-                      <X className="h-5 w-5 text-red-600" />
+                <div className="bg-foreground/[0.04] rounded-lg p-6 border border-foreground/15">
+                  <h3 className="text-xl font-bold mb-6 flex items-center gap-2 text-foreground/75">
+                    <div className="w-8 h-8 rounded-lg bg-foreground/[0.08] flex items-center justify-center">
+                      <X className="h-5 w-5 text-foreground/60" />
                     </div>
                     {t('tourDetail.excludedItems')}
                   </h3>
                   <ul className="space-y-3">
                     {ensureArray(costExplanation.excluded).map((item: string, index: number) => (
                       <li key={index} className="flex items-start gap-3">
-                        <X className="h-4 w-4 text-red-600 mt-1 flex-shrink-0" />
+                        <X className="h-4 w-4 text-foreground/55 mt-1 flex-shrink-0" />
                         <span className="text-gray-700">{item}</span>
                       </li>
                     ))}
@@ -2901,6 +3348,10 @@ export default function TourDetailPeony() {
           </div>
         </section>
       )}
+
+      {/* v80.24: Verified customer reviews block — between Hotels and Pricing.
+          Soft empty state when no reviews yet (don't hide the section). */}
+      {tour.id && <TourReviews tourId={tour.id} themeColor={themeColor} />}
 
       {/* Pricing Section */}
       <section ref={sectionRefs.pricing} id="pricing" className="py-16 lg:py-24">
@@ -2944,16 +3395,17 @@ export default function TourDetailPeony() {
                 {t('tourDetail.costDetails')}
               </h3>
               <div className="grid md:grid-cols-2 gap-6">
+                {/* Round 80.8: cost included/excluded normalised to B&W + Gold (was green/red) */}
                 {costExplanation.included && costExplanation.included.length > 0 && (
-                  <div className="bg-green-50 rounded-xl p-6 border border-green-100">
-                    <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-green-700">
+                  <div className="bg-[#c9a563]/[0.08] rounded-xl p-6 border border-[#c9a563]/30">
+                    <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-[#8a6f3a]">
                       <Check className="h-5 w-5" />
                       {t('tourDetail.includedItems')}
                     </h4>
                     <ul className="space-y-2">
                       {ensureArray(costExplanation.included).map((item: string, index: number) => (
                         <li key={index} className="flex items-start gap-2 text-sm text-gray-700">
-                          <Check className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
+                          <Check className="h-4 w-4 text-[#c9a563] mt-0.5 flex-shrink-0" />
                           {item}
                         </li>
                       ))}
@@ -2961,15 +3413,15 @@ export default function TourDetailPeony() {
                   </div>
                 )}
                 {costExplanation.excluded && costExplanation.excluded.length > 0 && (
-                  <div className="bg-red-50 rounded-xl p-6 border border-red-100">
-                    <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-red-700">
+                  <div className="bg-foreground/[0.04] rounded-xl p-6 border border-foreground/15">
+                    <h4 className="text-lg font-bold mb-4 flex items-center gap-2 text-foreground/75">
                       <X className="h-5 w-5" />
                       {t('tourDetail.excludedItems')}
                     </h4>
                     <ul className="space-y-2">
                       {ensureArray(costExplanation.excluded).map((item: string, index: number) => (
                         <li key={index} className="flex items-start gap-2 text-sm text-gray-700">
-                          <X className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
+                          <X className="h-4 w-4 text-foreground/55 mt-0.5 flex-shrink-0" />
                           {item}
                         </li>
                       ))}
@@ -2983,17 +3435,46 @@ export default function TourDetailPeony() {
           {/* Price Comparison Widget */}
           <PriceComparisonWidget tourId={tour.id} tourPrice={tour.price || 0} themeColor={themeColor} />
 
-          {/* Contact Info */}
+          {/* v80.24: Refund Policy summary — buyers want to see this near
+              pricing. Centralized in lib/brand.ts so changes cascade. */}
+          <div className="mt-12 bg-[#FAF8F2] border border-[#c9a563]/30 rounded-xl p-6">
+            <div className="flex items-start gap-4">
+              <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-[#c9a563]/15 flex items-center justify-center">
+                <RefreshCw className="h-5 w-5 text-[#8a6f3a]" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-serif font-bold text-lg text-foreground mb-1">
+                  {language === 'en' ? 'Cancellation & Refund Policy' : '取消與退費政策'}
+                </h3>
+                <p className="text-xs text-foreground/55 mb-3">
+                  {language === 'en'
+                    ? 'Protected by California Seller of Travel laws (CST# 2166984) and TCRF Consumer Restitution Fund.'
+                    : '受加州旅行業法（CST# 2166984）與 TCRF 消費者保障基金保護。'}
+                </p>
+                <ul className="space-y-1.5 text-sm text-foreground/80">
+                  {(language === 'en' ? REFUND_POLICY.en : REFUND_POLICY.zh).map((line, idx) => (
+                    <li key={idx} className="flex items-start gap-2">
+                      <span className="text-[#c9a563] flex-shrink-0 mt-1">✦</span>
+                      <span>{line}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          {/* Contact Info — v80.24 uses centralized CONTACT constants
+              (was hardcoded personal Gmail; trust signal mismatch with CST badge) */}
           <div className="mt-12 text-center text-gray-700">
             <p className="mb-4">{t('tourDetail.contactAdvisor')}</p>
             <div className="flex flex-wrap justify-center gap-6">
-              <a href="tel:+15106342307" className="flex items-center gap-2 hover:text-black transition-colors">
+              <a href={`tel:${CONTACT.whatsapp}`} className="flex items-center gap-2 hover:text-black transition-colors">
                 <Phone className="h-4 w-4" />
-                <span>+1 (510) 634-2307</span>
+                <span>{CONTACT.phoneDisplay}</span>
               </a>
-              <a href="mailto:Jeffhsieh09@gmail.com" className="flex items-center gap-2 hover:text-black transition-colors">
+              <a href={`mailto:${CONTACT.email}`} className="flex items-center gap-2 hover:text-black transition-colors">
                 <Mail className="h-4 w-4" />
-                <span>Jeffhsieh09@gmail.com</span>
+                <span>{CONTACT.email}</span>
               </a>
             </div>
           </div>
@@ -3146,12 +3627,12 @@ export default function TourDetailPeony() {
             </div>
             <div className="flex items-center gap-3">
               <a
-                href="tel:+15106342307"
+                href={`tel:${CONTACT.whatsapp}`}
                 className="hidden md:inline-flex items-center gap-2 px-5 py-3 font-medium rounded-lg border-2 transition-colors hover:bg-primary/5"
                 style={{ borderColor: themeColor.primary, color: themeColor.primary }}
               >
                 <Phone className="h-4 w-4" />
-                <span className="hidden lg:inline">+1 (510) 634-2307</span>
+                <span className="hidden lg:inline">{CONTACT.phoneDisplay}</span>
                 <span className="lg:hidden">{t('tourDetail.contactUs')}</span>
               </a>
               <Button

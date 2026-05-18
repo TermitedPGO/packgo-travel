@@ -3,6 +3,7 @@ import { XCircle, RefreshCw, Mail, Phone, Home, Lightbulb } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useLocale } from "@/contexts/LocaleContext";
+import SEO from "@/components/SEO";
 
 export default function PaymentFailure() {
   const [location] = useLocation();
@@ -23,6 +24,12 @@ export default function PaymentFailure() {
 
   return (
     <div className="min-h-screen bg-gray-50 py-12">
+      <SEO
+        title={{ zh: "付款失敗", en: "Payment Failed" }}
+        description={{ zh: "PACK&GO 付款失敗頁", en: "PACK&GO payment failure" }}
+        url="/payment/failure"
+        noindex
+      />
       <div className="container max-w-3xl">
         {/* Error Icon */}
         <div className="text-center mb-8">

@@ -83,15 +83,17 @@ function LogRow({ log }: { log: MonitorLog }) {
           ? "bg-red-100 text-red-700"
           : "bg-gray-100 text-gray-600";
 
-  const checkedAt = new Date(log.checkedAt).toLocaleString(
-    language === 'en' ? 'en-US' : 'zh-TW',
-    {
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    }
-  );
+  // Round 80.25 — schema field is `monitoredAt` (or fallback `createdAt`),
+  // not `checkedAt`. Was rendering as "Invalid Date" for every log row.
+  const ts = (log as any).monitoredAt || (log as any).createdAt;
+  const checkedAt = ts
+    ? new Date(ts).toLocaleString(language === 'en' ? 'en-US' : 'zh-TW', {
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "—";
 
   const statusLabel =
     log.status === "ok"
@@ -268,7 +270,7 @@ export default function MonitorDashboard() {
           <span className="text-blue-700">
             {t('admin.monitorDashboard.lastRunPrefix')}
             <span className="font-medium ml-1">
-              {new Date((latestRun as any).checkedAt || Date.now()).toLocaleString(language === 'en' ? 'en-US' : 'zh-TW')}
+              {new Date((latestRun as any).monitoredAt || (latestRun as any).createdAt || (latestRun as any).checkedAt || Date.now()).toLocaleString(language === 'en' ? 'en-US' : 'zh-TW')}
             </span>
             {(latestRun as any).runId && (
               <span className="text-blue-500 ml-2 font-mono text-xs">#{(latestRun as any).runId?.slice(-8)}</span>

@@ -195,8 +195,8 @@ export default function CustomTourRequest() {
         <main className="flex-grow flex items-center justify-center py-16">
           <div className="container max-w-xl">
             <div className="bg-white rounded-xl shadow-md p-10 text-center">
-              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-100 mb-6">
-                <CheckCircle className="h-8 w-8 text-green-600" />
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-[#c9a563]/15 border border-[#c9a563]/35 mb-6">
+                <CheckCircle className="h-8 w-8 text-[#c9a563]" />
               </div>
               <h2 className="text-2xl md:text-3xl font-serif font-bold text-gray-900 mb-3">
                 {t("customTourRequest.successTitle2") || "感謝您的需求！"}
@@ -244,8 +244,8 @@ export default function CustomTourRequest() {
         <main className="flex-grow py-12">
           <div className="container max-w-2xl">
             <div className="text-center mb-8">
-              <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-emerald-100 mb-4">
-                <Sparkles className="h-7 w-7 text-emerald-600" />
+              <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-[#c9a563]/15 border border-[#c9a563]/35 mb-4">
+                <Sparkles className="h-7 w-7 text-[#c9a563]" />
               </div>
               <h1 className="text-3xl md:text-4xl font-serif font-bold text-gray-900 mb-2">
                 {isEN ? "Tell us in one sentence" : "用一句話告訴我們"}
@@ -305,7 +305,7 @@ export default function CustomTourRequest() {
               </div>
             ) : (
               <div className="bg-white rounded-xl shadow-md p-6">
-                <CheckCircle className="h-10 w-10 text-green-500 mb-3" />
+                <CheckCircle className="h-10 w-10 text-[#c9a563] mb-3" />
                 <h3 className="text-xl font-bold text-gray-900 mb-2">
                   {isEN ? "Itinerary draft ready" : "行程建議已生成"}
                 </h3>
@@ -373,12 +373,17 @@ export default function CustomTourRequest() {
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
+      {/* Round 80.7: per-page SEO meta tuned for search intent. */}
       <SEO
-        title={{ zh: "客製行程申請", en: "Custom Tour Request" }}
-        description={{
-          zh: "填寫您的旅遊需求，PACK&GO 專業顧問將為您規劃最適合的客製化行程。",
-          en: "Tell us what you want — PACK&GO will design a custom itinerary tailored to your needs.",
+        title={{
+          zh: "客製諮詢｜30 分鐘免費規劃通話｜PACK&GO 旅行社",
+          en: "Custom Tour Request | Free 30-min Planning Call | PACK&GO",
         }}
+        description={{
+          zh: "留下行程偏好，Jeff 親自 30 分鐘免費通話。預算、興趣、家庭組成皆納入規劃。一對一服務，無跟團束縛。",
+          en: "Submit preferences and book a free 30-min call with founder Jeff. Budget, interests, family needs all considered. One-on-one, no group pressure.",
+        }}
+        image="/images/hero-sakura.webp"
         url="/custom-tour-request"
       />
       <Header />
@@ -388,7 +393,7 @@ export default function CustomTourRequest() {
           <div className="text-center mb-6">
             <button
               onClick={() => setExpressMode(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm font-medium hover:bg-emerald-100 transition-colors"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#c9a563]/10 border border-[#c9a563]/35 text-[#8a6f3a] text-sm font-medium hover:bg-[#c9a563]/15 transition-colors"
             >
               <Sparkles className="h-4 w-4" />
               {isEN ? "Skip — let AI draft an itinerary" : "想快點？AI 一句話幫您整理行程"}
