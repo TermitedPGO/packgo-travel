@@ -3058,16 +3058,40 @@ export const appRouter = router({
     //   2. URL only (isPdf=false, no supplementUrl)
     //   3. PDF + URL (isPdf=true, supplementUrl provided)
     submitAsyncGeneration: adminProcedure
-      .input(z.object({ 
+      .input(z.object({
         url: z.string().url(), // PDF URL (S3) or tour page URL
         forceRegenerate: z.boolean().optional().default(false),
         isPdf: z.boolean().default(true), // true = PDF input, false = URL input
         supplementUrl: z.string().url().optional(), // 供應商官網 URL（配合 PDF 使用）
       }))
       .mutation(async ({ ctx, input }) => {
+        // 2026-05-17 red-team round 7 — SSRF defense. Even though this is
+        // adminProcedure, defense-in-depth: validate URLs are on allowlist
+        // before queuing the tour-generation job. Blocks 169.254.169.254
+        // (metadata), 127.0.0.1 (loopback), private IPs, file://, etc.
+        // If admin session is compromised, attacker can't pivot to internal
+        // services via the tour scraper.
+        const { validateUrl } = await import("./_core/urlSafetyGuard");
+        const urlCheck = validateUrl(input.url);
+        if (!urlCheck.safe) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `URL rejected: ${urlCheck.reason}`,
+          });
+        }
+        if (input.supplementUrl) {
+          const supCheck = validateUrl(input.supplementUrl);
+          if (!supCheck.safe) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: `Supplement URL rejected: ${supCheck.reason}`,
+            });
+          }
+        }
+
         const { addTourGenerationJob } = await import("./queue");
         const requestId = `gen_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-        
+
         const mode = !input.isPdf ? 'URL' : (input.supplementUrl ? 'PDF+URL' : 'PDF');
         console.log(`[SubmitGeneration] Mode: ${mode}, URL: ${input.url.slice(0, 80)}`);
         if (input.supplementUrl) {
