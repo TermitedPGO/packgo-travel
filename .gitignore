@@ -128,3 +128,8 @@ research-*
 # contains IMAGE-2.0-SPEC, agent profiles, acceptance test results).
 # Lives in this directory for convenience but is not part of the website repo.
 agents-testing/
+
+# Audit dumps — one-off JSON output from scripts (japan-sept-5-raw.json etc.)
+# Per Vibe Coding refactor decision D4 (2026-05-18): not tracked, regenerated
+# on-demand by the scripts in scripts/ when needed.
+.audit/

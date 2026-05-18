@@ -177,6 +177,64 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // Split large vendor libs into their own chunks so they can be cached
+        // independently of app code and don't bloat the main entry.
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+
+          // v80.24 PROD CRASH FIX: was 4 separate chunks (vendor-react,
+          // vendor-radix, vendor-trpc, vendor-router). Production bundle
+          // had circular imports between vendor-react ↔ vendor-radix because
+          // Radix internals + react-jsx-runtime CJS interop created cross-
+          // chunk references. ESM evaluation order then yielded
+          // `React.forwardRef === undefined` and the entire app failed to
+          // mount with a blank white screen.
+          //
+          // Consolidating into ONE vendor chunk eliminates the cycle. We
+          // lose a tiny bit of cache granularity (changing tRPC busts the
+          // whole vendor cache) but gain "the app actually loads".
+          if (
+            id.includes("/node_modules/react/") ||
+            id.includes("/node_modules/react-dom/") ||
+            id.includes("/node_modules/scheduler/") ||
+            id.includes("/node_modules/@radix-ui/") ||
+            id.includes("/node_modules/@trpc/") ||
+            id.includes("/node_modules/@tanstack/react-query") ||
+            id.includes("/node_modules/superjson/") ||
+            id.includes("/node_modules/wouter/")
+          ) {
+            return "vendor-react";
+          }
+
+          // Recharts (admin analytics only).
+          if (
+            id.includes("/node_modules/recharts/") ||
+            id.includes("/node_modules/d3-")
+          ) {
+            return "vendor-recharts";
+          }
+
+          // NOTE: do NOT bundle shiki / @shikijs / mermaid into a single
+          // vendor chunk. Their per-language grammar/diagram files are
+          // already code-split by Vite as separate dynamic-import chunks
+          // (e.g. `cpp.js`, `mermaid.core.js`) and only loaded when the AI
+          // output actually needs them. Forcing them into one chunk would
+          // pull a 12MB blob the first time the AI dialog opens.
+
+          // Heavy date / image libs that aren't on the home critical path.
+          if (
+            id.includes("/node_modules/react-day-picker/") ||
+            id.includes("/node_modules/date-fns/")
+          ) {
+            return "vendor-date";
+          }
+
+          return undefined;
+        },
+      },
+    },
   },
   server: {
     host: true,

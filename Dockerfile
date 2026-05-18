@@ -26,6 +26,13 @@ RUN pnpm install --frozen-lockfile --config.confirmModulesPurge=false
 
 # Copy source and build
 COPY . .
+
+# v320: expose GOOGLE_MAPS_BROWSER_KEY to Vite at build time so the
+# frontend can load Google Maps JS API directly. Pass via:
+#   fly deploy --build-arg GOOGLE_MAPS_BROWSER_KEY=$key
+ARG GOOGLE_MAPS_BROWSER_KEY=""
+ENV VITE_GOOGLE_MAPS_BROWSER_KEY=$GOOGLE_MAPS_BROWSER_KEY
+
 RUN pnpm build
 
 # NOTE: we intentionally do NOT run `pnpm prune --prod` here.
@@ -66,6 +73,8 @@ COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/drizzle ./drizzle
 # Migration runner invoked by Fly's release_command before new machines receive traffic
 COPY --from=builder /app/scripts ./scripts
+# Round 80.22 H2: brand assets (PACK&GO logo for poster Sharp post-process)
+COPY --from=builder /app/server/assets ./server/assets
 
 # Non-root user for runtime
 RUN useradd -m -u 1001 packgo && chown -R packgo:packgo /app

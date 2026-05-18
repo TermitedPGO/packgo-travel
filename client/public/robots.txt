@@ -2,12 +2,33 @@
 User-agent: *
 Allow: /
 
-# 禁止爬取管理後台
+# 禁止爬取管理後台 + 後台特殊路由
 Disallow: /admin
 Disallow: /admin/
+Disallow: /admin/diagnostics
+Disallow: /admin/task-history
 
 # 禁止爬取 API 路由
 Disallow: /api/
 
-# Sitemap 位置
-Sitemap: https://packgo-travel.fly.dev/sitemap.xml
+# 禁止爬取使用者私密頁
+Disallow: /profile
+Disallow: /login
+Disallow: /forgot-password
+Disallow: /reset-password
+
+# 禁止爬取訂單/付款結果頁（含敏感 ID）
+Disallow: /book/
+Disallow: /bookings/
+Disallow: /payment/
+Disallow: /china-visa/success
+Disallow: /china-visa/status/
+
+# 禁止爬取內部 mockup 預覽
+Disallow: /preview/
+
+# 禁止爬取站內搜尋結果（避免無限長尾索引）
+Disallow: /search
+
+# Sitemap 位置（已修正：原指向 fly.dev 是 308 redirect 來源，浪費抓取預算）
+Sitemap: https://packgoplay.com/sitemap.xml
