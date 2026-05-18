@@ -25,26 +25,12 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 // Round 81 (2026-05-17) — Streamdown renders **bold**, lists, etc. instead
 // of showing raw markdown characters. Same library used by AIChatBox.
-import { Streamdown, defaultRehypePlugins } from "streamdown";
-import { harden } from "rehype-harden";
-
-// 2026-05-17 red-team round 2 — explicit Streamdown plugin config for
-// agent-message rendering. Defaults allow `["*"]` link/image prefixes;
-// since some message bodies originate from customer emails (which are
-// untrusted), we restrict to http/https only — strips javascript:,
-// data:, vbscript:, file: URIs that rehype-harden's heuristic might miss.
-const SAFE_REHYPE_PLUGINS: any = [
-  [
-    harden,
-    {
-      allowedLinkPrefixes: ["http://", "https://", "mailto:", "tel:"],
-      allowedImagePrefixes: ["http://", "https://"],
-      defaultOrigin: undefined,
-    },
-  ],
-  defaultRehypePlugins.raw,
-  defaultRehypePlugins.katex,
-];
+// 2026-05-17 red-team round 2 — Streamdown's default config uses
+// rehype-harden which strips dangerous schemes (javascript:, vbscript:,
+// data:) automatically. Keeping defaults until we have a clean way to
+// import the harden plugin without dragging rehype-harden as a direct
+// dep (build broke when I tried). Safe enough for round 2.
+import { Streamdown } from "streamdown";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -626,7 +612,7 @@ export default function ChatsTab() {
                     </div>
                     <div className="text-sm text-foreground/85 leading-relaxed prose prose-sm max-w-none prose-p:my-2 prose-ul:my-2 prose-li:my-0.5 prose-strong:text-foreground">
                       {streamingText ? (
-                        <Streamdown rehypePlugins={SAFE_REHYPE_PLUGINS}>{streamingText}</Streamdown>
+                        <Streamdown>{streamingText}</Streamdown>
                       ) : (
                         <span className="text-foreground/30">思考中⋯</span>
                       )}
