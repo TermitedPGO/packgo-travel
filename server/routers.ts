@@ -202,7 +202,10 @@ export const appRouter = router({
         }
         const emailLimit = await checkLoginRateLimitByEmail(input.email);
         if (!emailLimit.allowed) {
-          console.warn(`[Auth] Email rate limit exceeded for login (account lock): ${input.email}`);
+          // 2026-05-17 red-team round 4 — redact email in logs (PII leak via
+          // Fly logs / log aggregator)
+          const { redactEmail } = await import("./_core/redact");
+          console.warn(`[Auth] Email rate limit exceeded for login (account lock): ${redactEmail(input.email)}`);
           // Same generic 401 to avoid revealing which accounts are locked.
           throw new TRPCError({
             code: "UNAUTHORIZED",
@@ -290,7 +293,8 @@ export const appRouter = router({
         // 1. Block disposable / fake email domains (e.g. example.com)
         if (isBlockedEmailDomain(input.email)) {
           // Return generic success to avoid leaking info, but do NOT send email
-          console.warn(`[Auth] Blocked forgot-password request to fake domain: ${input.email}`);
+          const { redactEmail: r1 } = await import("./_core/redact");
+          console.warn(`[Auth] Blocked forgot-password request to fake domain: ${r1(input.email)}`);
           return { success: true, message: '如果該電子郵件已註冊，您將收到重設密碼的連結' };
         }
 
@@ -318,7 +322,8 @@ export const appRouter = router({
         // 4. Per-email rate limit (3 req / hour)
         const emailLimit = await checkForgotPasswordRateLimitByEmail(input.email);
         if (!emailLimit.allowed) {
-          console.warn(`[Auth] Email rate limit exceeded for forgot-password: ${input.email}`);
+          const { redactEmail: r2 } = await import("./_core/redact");
+          console.warn(`[Auth] Email rate limit exceeded for forgot-password: ${r2(input.email)}`);
           // Return generic success to avoid email enumeration
           return { success: true, message: '如果該電子郵件已註冊，您將收到重設密碼的連結' };
         }
