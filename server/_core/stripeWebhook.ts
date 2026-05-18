@@ -7,6 +7,7 @@ import { sendVisaApplicationConfirmation } from "../services/visaEmailService";
 import { createAccountingEntry } from "../db";
 import { notifyOwner } from "./notification";
 import { redactEmail } from "./redact";
+import { claimStripeEvent, markStripeEventSucceeded, markStripeEventFailed } from "./stripeWebhookIdempotency";
 
 
 // P0-2: Lazy-load Stripe to prevent server crash when STRIPE_SECRET_KEY is not set
@@ -51,6 +52,13 @@ export async function handleStripeWebhook(req: Request, res: Response) {
   }
 
   console.log(`[Stripe Webhook] Received event: ${event.type}`);
+
+  // Phase 2: central idempotency. UNIQUE(eventId) collision = Stripe replay.
+  const claim = await claimStripeEvent(event);
+  if (claim.alreadyProcessed) {
+    console.log(`[Stripe Webhook] Idempotent skip: event ${event.id} already ${claim.existingStatus}`);
+    return res.json({ received: true, idempotent: true });
+  }
 
   try {
     switch (event.type) {
@@ -113,9 +121,13 @@ export async function handleStripeWebhook(req: Request, res: Response) {
         console.log(`[Stripe Webhook] Unhandled event type: ${event.type}`);
     }
 
+    await markStripeEventSucceeded(claim.rowId);
     res.json({ received: true });
   } catch (error: any) {
     console.error(`[Stripe Webhook] Error processing event: ${error.message}`);
+    await markStripeEventFailed(claim.rowId, error).catch((e) =>
+      console.error("[Stripe Webhook] mark-failed write failed:", (e as Error).message)
+    );
     res.status(500).json({ error: "Webhook processing failed" });
   }
 }
@@ -173,17 +185,12 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
   const paymentIntentId = session.payment_intent as string;
   const amount = session.amount_total ? session.amount_total / 100 : 0; // Convert from cents
 
-  // v70: idempotency guard — Stripe retries webhook deliveries on transient
-  // failures (timeouts, 5xx). Without this check we'd insert duplicate payment
-  // rows for the same payment_intent and double-flip the booking status, which
-  // can also trigger duplicate accounting entries below.
+  // Phase 2: idempotency now enforced centrally via stripeWebhookEvents.
+  // Lookup retained as a race-condition warning only (central guard covers replays).
   if (paymentIntentId) {
     const existing = await db.getPaymentByIntentId(paymentIntentId);
     if (existing) {
-      console.log(
-        `[Stripe Webhook] Idempotent skip: payment ${paymentIntentId} already recorded (id=${existing.id})`
-      );
-      return;
+      console.warn(`[Stripe Webhook] payment ${paymentIntentId} already exists (id=${existing.id})`);
     }
   }
 
@@ -481,12 +488,8 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
     return;
   }
 
-  // Idempotency: if already marked refunded, skip (Stripe sometimes fires this
-  // event multiple times for the same refund).
-  if (payment.paymentStatus === "refunded") {
-    console.log(`[Stripe Webhook] charge.refunded: payment ${payment.id} already marked refunded`);
-    return;
-  }
+  // Phase 2: per-handler refund-status short-circuit removed; replay
+  // dedupe handled by stripeWebhookEvents.
 
   // Update both the payment row and the booking row
   await db.updatePaymentStatus(paymentIntentId, "refunded", new Date()).catch((e) =>
@@ -928,11 +931,9 @@ async function handleTrialWillEnd(sub: Stripe.Subscription) {
     return;
   }
 
-  // Idempotency: Stripe retries on transient failures
-  if (trial.reminderSentAt) {
-    console.log(`[Stripe Webhook] trial_will_end: reminder already sent for trial ${trial.id}`);
-    return;
-  }
+  // Phase 2: per-handler `reminderSentAt` short-circuit removed; replay
+  // dedupe handled by stripeWebhookEvents. The column is still written
+  // below for analytics ("when did we send the AB 390 notice?").
 
   // Fetch user email
   const userRows = await db

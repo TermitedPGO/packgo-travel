@@ -773,6 +773,35 @@ export type Payment = typeof payments.$inferSelect;
 export type InsertPayment = typeof payments.$inferInsert;
 
 /**
+ * Central Stripe webhook idempotency table (Phase 2 of refactor 2026-05).
+ *
+ * Stripe retries webhook delivery on transient failures (timeout, 5xx).
+ * Without a central dedupe key, every handler had to implement its own
+ * "have I seen this event?" check (lines 180/486/930 of stripeWebhook.ts).
+ * This table is the single source of truth: handleStripeWebhook inserts
+ * a row at the top of dispatch (status=processing) and updates to
+ * status=succeeded|failed when the handler returns. A second delivery
+ * of the same event.id short-circuits at the insert (UNIQUE collision).
+ */
+export const stripeWebhookEvents = mysqlTable("stripeWebhookEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Stripe event.id (evt_…) — the dedupe key. */
+  eventId: varchar("eventId", { length: 255 }).notNull(),
+  /** event.type, useful for analytics and replay scoping. */
+  eventType: varchar("eventType", { length: 128 }).notNull(),
+  status: mysqlEnum("status", ["processing", "succeeded", "failed"]).notNull(),
+  /** Free-form failure detail (truncate to 1024 chars on write). */
+  errorMessage: text("errorMessage"),
+  receivedAt: timestamp("receivedAt").notNull().defaultNow(),
+  processedAt: timestamp("processedAt"),
+}, (t) => ({
+  uniqEventId: unique("uniq_stripeWebhookEvents_eventId").on(t.eventId),
+}));
+
+export type StripeWebhookEvent = typeof stripeWebhookEvents.$inferSelect;
+export type InsertStripeWebhookEvent = typeof stripeWebhookEvents.$inferInsert;
+
+/**
  * Inquiries table for customer service requests.
  * Stores all customer inquiries including quick inquiries and custom tour requests.
  */
