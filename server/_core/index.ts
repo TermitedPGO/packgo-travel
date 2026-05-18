@@ -259,6 +259,27 @@ async function startServer() {
         return res.status(403).json({ error: "Admin only" });
       }
 
+      // 2026-05-17 red-team round 2 — CSRF defense for GET-with-side-effects.
+      // SSE has to be GET (EventSource limitation) but each call writes
+      // agentMessages + bills LLM credit. Without this check, an attacker
+      // can embed `<img src="/api/agent/ask-ops-stream?q=...">` on any
+      // page Jeff visits → cookie attached (sameSite=lax allows top-level
+      // GET) → DB write + cost burn.
+      //
+      // Defense: require a fetch-only header. <img>, <iframe>, <link>, and
+      // form submissions cannot set X-Requested-With, so cross-origin
+      // simple requests fail this check. Only same-origin JS using fetch()
+      // / EventSource (which we explicitly set the header on) passes.
+      // Note: EventSource doesn't support custom headers natively, so the
+      // ChatsTab client uses fetch() with streaming instead — code updated
+      // in ChatsTab.tsx companion patch.
+      const xhrHeader = req.headers["x-requested-with"];
+      if (xhrHeader !== "XMLHttpRequest") {
+        return res.status(403).json({
+          error: "CSRF check failed: missing X-Requested-With header",
+        });
+      }
+
       const question = String(req.query.q ?? "").trim();
       if (!question || question.length > 2000) {
         return res.status(400).json({ error: "Question required, max 2000 chars" });
@@ -425,12 +446,29 @@ async function startServer() {
       "unknown"
     );
 
-    // IP allowlist (optional; not enforced if env var unset to preserve
-    // the existing dev-machine workflow until Jeff registers his CI IPs).
+    // IP allowlist.
+    // 2026-05-17 red-team round 2 — added warning when prod env has no
+    // allowlist, but kept it optional to avoid breaking existing CI.
+    // Set INTERNAL_REQUIRE_IP_ALLOWLIST=1 to enforce (defense-in-depth).
     const allowList = (process.env.INTERNAL_TEST_IPS || "")
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
+    const requireAllowlist = process.env.INTERNAL_REQUIRE_IP_ALLOWLIST === "1";
+    if (process.env.NODE_ENV === "production" && allowList.length === 0) {
+      if (requireAllowlist) {
+        res.status(503).json({
+          error: "INTERNAL_TEST_IPS required but not configured",
+        });
+        return null;
+      } else {
+        // Log once per IP to surface in fly logs — Jeff can grep + decide
+        // whether to flip the require flag.
+        console.warn(
+          `[verifyInternalAuth] WARN production has no IP allowlist; request from ${ip} would be blocked if INTERNAL_REQUIRE_IP_ALLOWLIST=1`
+        );
+      }
+    }
     if (allowList.length > 0 && !allowList.includes(ip)) {
       res.status(403).json({ error: "IP not allowed" });
       return null;

@@ -25,7 +25,26 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 // Round 81 (2026-05-17) — Streamdown renders **bold**, lists, etc. instead
 // of showing raw markdown characters. Same library used by AIChatBox.
-import { Streamdown } from "streamdown";
+import { Streamdown, defaultRehypePlugins } from "streamdown";
+import { harden } from "rehype-harden";
+
+// 2026-05-17 red-team round 2 — explicit Streamdown plugin config for
+// agent-message rendering. Defaults allow `["*"]` link/image prefixes;
+// since some message bodies originate from customer emails (which are
+// untrusted), we restrict to http/https only — strips javascript:,
+// data:, vbscript:, file: URIs that rehype-harden's heuristic might miss.
+const SAFE_REHYPE_PLUGINS: any = [
+  [
+    harden,
+    {
+      allowedLinkPrefixes: ["http://", "https://", "mailto:", "tel:"],
+      allowedImagePrefixes: ["http://", "https://"],
+      defaultOrigin: undefined,
+    },
+  ],
+  defaultRehypePlugins.raw,
+  defaultRehypePlugins.katex,
+];
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -237,60 +256,83 @@ export default function ChatsTab() {
   const [streamingActions, setStreamingActions] = useState<any[] | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
 
-  const sendOpsQuestion = (question: string) => {
+  const sendOpsQuestion = async (question: string) => {
     if (!question.trim() || isStreaming) return;
     setIsStreaming(true);
     setStreamingText("");
     setStreamingActions(null);
 
+    // 2026-05-17 red-team round 2 — switched EventSource → fetch streaming
+    // so we can attach X-Requested-With header (CSRF defense, since the
+    // SSE GET endpoint has side effects). Streaming via ReadableStream
+    // gives the same UX as EventSource.
     const url = `/api/agent/ask-ops-stream?q=${encodeURIComponent(question.trim())}`;
-    const eventSource = new EventSource(url, { withCredentials: true } as any);
-
-    eventSource.onmessage = (e) => {
-      try {
-        const event = JSON.parse(e.data);
-        if (event.type === "token") {
-          setStreamingText((prev) => (prev ?? "") + (event.text ?? ""));
-        } else if (event.type === "done") {
-          // Final parsed answer (cleaned of JSON wrapping); replace
-          // accumulated raw stream with this for the brief moment before
-          // the persisted message lands.
-          if (event.finalAnswer) {
-            setStreamingText(event.finalAnswer);
-            setStreamingActions(event.suggestedActions ?? null);
-          }
-          eventSource.close();
-          // Brief delay before refetch so server has time to commit the
-          // agentMessages row. 500ms is plenty for TiDB.
-          setTimeout(() => {
-            utils.agent.listMessages.invalidate();
-            setIsStreaming(false);
-            // Don't clear streamingText immediately — let it overlap with
-            // the new message arriving so there's no flash.
-            setTimeout(() => {
-              setStreamingText(null);
-              setStreamingActions(null);
-            }, 800);
-          }, 500);
-          setOpsQuestion("");
-        } else if (event.type === "error") {
-          toast.error("OpsAgent: " + (event.error ?? "unknown"));
-          eventSource.close();
-          setIsStreaming(false);
-          setStreamingText(null);
-        }
-      } catch {
-        // Ignore malformed event chunks
+    let cancelled = false;
+    try {
+      const resp = await fetch(url, {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          "X-Requested-With": "XMLHttpRequest",
+          Accept: "text/event-stream",
+        },
+      });
+      if (!resp.ok) {
+        const errBody = await resp.text();
+        toast.error(`OpsAgent ${resp.status}: ${errBody.slice(0, 100)}`);
+        setIsStreaming(false);
+        setStreamingText(null);
+        return;
       }
-    };
+      if (!resp.body) throw new Error("No response body");
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (!cancelled) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
 
-    eventSource.onerror = () => {
-      if (eventSource.readyState === EventSource.CLOSED) return;
-      toast.error("Stream 連線中斷");
-      eventSource.close();
+        // SSE format: events separated by \n\n, each starts with "data: "
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() ?? ""; // keep trailing incomplete chunk
+        for (const chunk of lines) {
+          const dataLine = chunk.split("\n").find((l) => l.startsWith("data: "));
+          if (!dataLine) continue;
+          try {
+            const event = JSON.parse(dataLine.slice(6));
+            if (event.type === "token") {
+              setStreamingText((prev) => (prev ?? "") + (event.text ?? ""));
+            } else if (event.type === "done") {
+              if (event.finalAnswer) {
+                setStreamingText(event.finalAnswer);
+                setStreamingActions(event.suggestedActions ?? null);
+              }
+              setOpsQuestion("");
+              setTimeout(() => {
+                utils.agent.listMessages.invalidate();
+                setIsStreaming(false);
+                setTimeout(() => {
+                  setStreamingText(null);
+                  setStreamingActions(null);
+                }, 800);
+              }, 500);
+            } else if (event.type === "error") {
+              toast.error("OpsAgent: " + (event.error ?? "unknown"));
+              cancelled = true;
+              setIsStreaming(false);
+              setStreamingText(null);
+            }
+          } catch {
+            // Ignore malformed chunk
+          }
+        }
+      }
+    } catch (err: any) {
+      toast.error("Stream 失敗: " + (err?.message ?? "unknown"));
       setIsStreaming(false);
       setStreamingText(null);
-    };
+    }
   };
 
   // Round 81 Phase 2 (2026-05-17) — Action proposal confirmation flow.
@@ -584,7 +626,7 @@ export default function ChatsTab() {
                     </div>
                     <div className="text-sm text-foreground/85 leading-relaxed prose prose-sm max-w-none prose-p:my-2 prose-ul:my-2 prose-li:my-0.5 prose-strong:text-foreground">
                       {streamingText ? (
-                        <Streamdown>{streamingText}</Streamdown>
+                        <Streamdown rehypePlugins={SAFE_REHYPE_PLUGINS}>{streamingText}</Streamdown>
                       ) : (
                         <span className="text-foreground/30">思考中⋯</span>
                       )}
