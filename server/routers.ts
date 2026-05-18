@@ -2450,7 +2450,7 @@ export const appRouter = router({
       .input(z.object({ query: z.string().max(50).default("") }))
       .query(async ({ input }) => {
         const q = input.query.trim().toLowerCase();
-        const allTours = await db.listTours();
+        const allTours = await db.getAllTours();
         const active = allTours.filter((t) => t.status === "active");
 
         type Suggestion = {
@@ -4187,7 +4187,7 @@ export const appRouter = router({
         // restarts, retries twice with exponential backoff on failure,
         // and notifyOwner alerts Jeff on terminal failure (worker is
         // wired in commit 35897de pattern).
-        const isUsd = (departure as any).currency === "USD" || tour.priceUsd != null;
+        const isUsd = (departure as any).currency === "USD" || tour.priceCurrency === "USD";
         try {
           const { bookingFollowupQueue } = await import("./queue");
           await bookingFollowupQueue.add(
@@ -5216,7 +5216,13 @@ export const appRouter = router({
           customerPhone: input.customerPhone,
           subject: `[緊急 · ${labelZh}] ${input.currentLocation}`,
           message: input.message,
-          inquiryType: "emergency",
+          // TODO(migration 0070): add "emergency" to inquiryType enum in
+          // drizzle/schema.ts + corresponding ALTER TABLE migration. Cast
+          // is a temporary type-narrowing while migration is pending Jeff
+          // approval. Runtime persists "emergency" string but DB column
+          // currently rejects values outside the existing enum — see
+          // docs/refactor/tasks/phase-1/module-3-routers-tsc.md §B6.
+          inquiryType: "emergency" as "other",
           userId: ctx.user?.id,
           status: "new",
         });
@@ -7899,7 +7905,9 @@ export const appRouter = router({
           format: input.format,
           heroImageUrl: tour.heroImage || "",
           title: tour.title,
-          destination: tour.destination,
+          // tour.destination is legacy nullable (schema v81); fall back
+          // through canonical destinationCity (notNull) before empty string.
+          destination: tour.destination ?? tour.destinationCity ?? "",
           duration: `${tour.duration}天${tour.duration - 1}夜`,
           price: `USD $${tour.price.toLocaleString()} 起`,
           highlights: JSON.parse(tour.highlights || "[]").slice(0, 3),
