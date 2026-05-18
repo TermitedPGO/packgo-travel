@@ -18,6 +18,12 @@ import { TRPCError } from "@trpc/server";
 import { renderHtmlToPdf } from "../services/skills/skillPdfService";
 import { renderQuoteHtml } from "../services/skills/quoteTemplate";
 import { renderDepositHtml } from "../services/skills/depositTemplate";
+// Round 81 (2026-05-17) — packgo-tour-comparison skill server-side port.
+// Generates a multi-option catalog PDF from live Lion Travel data for
+// customers who haven't picked a tour yet. Used by admin manual trigger
+// today; later wired into InquiryAgent for autonomous classification of
+// "comparison_request" inquiries.
+import { generateTourComparisonCatalog } from "../agents/skills/tourComparison";
 import { storagePut } from "../storage";
 
 export const toolsRouter = router({
@@ -140,6 +146,79 @@ export const toolsRouter = router({
           url: stored.url,
           key: stored.key,
           sizeKb: Math.round(pdf.byteLength / 1024),
+        };
+      } catch (e) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }),
+
+  /**
+   * Generate a multi-option tour comparison catalog PDF.
+   *
+   * Round 81 (2026-05-17) Phase B — packgo-tour-comparison skill, server port.
+   * Triggered when a customer is at "I want to go to X country in month Y"
+   * stage but hasn't picked a specific tour. Returns a curated 5-option
+   * catalog with day-by-day per option + supplier product codes.
+   *
+   * IMPORTANT: This is the PRE-DECISION skill. No prices shown. Customer picks
+   * an option → Jeff runs `generateQuote` for the formal priced quote.
+   *
+   * Cost note: ~5 LLM calls (one per option for translation), each ~2KB
+   * prompt + ~3KB completion → roughly $0.03 per catalog at Haiku 4.5 rates.
+   * Lion API calls are free (public endpoints).
+   *
+   * Time: ~30-60s end-to-end (sitemap scrape + 50-200 verifies + 5 detail
+   * fetches + 5 LLM translations + PDF render). Long enough that the admin
+   * UI should show a spinner / progress; not so long it warrants a queue.
+   */
+  generateTourComparison: adminProcedure
+    .input(
+      z.object({
+        country: z.enum([
+          "Japan",
+          "Korea",
+          "United States",
+          "Europe",
+          "China",
+        ]),
+        month: z.number().int().min(1).max(12),
+        year: z.number().int().min(2024).max(2030),
+        regionCount: z.number().int().min(2).max(8).optional(),
+        language: z.enum(["en", "zh-TW"]).optional(),
+        regionsOverride: z.array(z.string().max(40)).max(8).optional(),
+        customerHint: z.string().max(200).optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      try {
+        const result = await generateTourComparisonCatalog({
+          country: input.country,
+          month: input.month,
+          year: input.year,
+          regionCount: input.regionCount,
+          language: input.language,
+          regionsOverride: input.regionsOverride,
+          customerHint: input.customerHint,
+        });
+
+        // Persist PDF to R2/S3
+        const ts = Date.now();
+        const safe = `${input.country.replace(/\s+/g, "_")}_${input.year}_${String(input.month).padStart(2, "0")}`;
+        const stored = await storagePut(
+          `tools/comparisons/${ts}_${safe}.pdf`,
+          result.pdf,
+          "application/pdf",
+        );
+
+        return {
+          ok: true as const,
+          url: stored.url,
+          key: stored.key,
+          sizeKb: Math.round(result.pdf.byteLength / 1024),
+          meta: result.meta,
         };
       } catch (e) {
         throw new TRPCError({
