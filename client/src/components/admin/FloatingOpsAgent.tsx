@@ -225,13 +225,19 @@ export default function FloatingOpsAgent() {
 
   return (
     <>
-      {/* Floating launcher button — bottom-right, always visible */}
+      {/* Floating launcher button — bottom-right, always visible.
+          - safe-area-inset-bottom keeps it above iOS Safari URL bar /
+            home indicator.
+          - z-40 sits above main content but below Dialog/Sheet (z-50),
+            so confirmation modals can still cover it.
+          - md:bottom-5 / pinned to bottom-[max(env)+1.25rem] on small. */}
       {!open && (
         <button
           onClick={() => setOpen(true)}
           aria-label="問 OpsAgent"
           title="問 OpsAgent (⌘+K)"
-          className="fixed bottom-5 right-5 z-40 w-12 h-12 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg flex items-center justify-center transition-transform hover:scale-105"
+          className="fixed right-4 sm:right-5 z-40 w-12 h-12 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg flex items-center justify-center transition-transform hover:scale-105 active:scale-95"
+          style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 1rem)" }}
         >
           <MessageSquare className="w-5 h-5" />
         </button>

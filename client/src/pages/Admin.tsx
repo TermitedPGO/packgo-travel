@@ -123,15 +123,17 @@ type PageDef = { id: PageId; label: string };
 const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageDef[] }> = {
   office: {
     domain: { id: "office", label: "辦公室", icon: Building2 },
-    primary: [
-      { id: "today", label: "🏠 今日概覽" },
-      { id: "office-chat", label: "💬 Agent Chats" },
-      { id: "office-inbox", label: "📥 收件匣" },
-    ],
+    // 2026-05-17 evening — Office primary collapsed to just UnifiedInbox.
+    // Previously: today + office-chat + office-inbox (three entry points
+    // competing for "where do I open admin"). UnifiedInbox now covers all
+    // three (actionable triage + Pulse + activity feed), so chat + inbox
+    // are demoted to advanced (still accessible, just not first-stop).
+    // FloatingOpsAgent (mounted persistently in Admin shell) lets Jeff
+    // ask agent questions without ever leaving the inbox.
+    primary: [{ id: "today", label: "🏠 今日總覽" }],
     advanced: [
-      // 2026-05-17: removed "練習場" (autonomous-agents) per Jeff —
-      // not needed in daily flow. Component file kept for any deep
-      // links from elsewhere but not surfaced in nav.
+      { id: "office-chat", label: "💬 Agent Chats (舊)" },
+      { id: "office-inbox", label: "📥 舊收件匣" },
       { id: "ai-hub", label: "AI 中心" },
       { id: "calibration-review", label: "QA 審查" },
       { id: "task-history", label: "任務記錄" },
