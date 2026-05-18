@@ -637,7 +637,7 @@ export default function ToursTab() {
         const keyword = searchKeyword.toLowerCase();
         return (
           tour.title.toLowerCase().includes(keyword) ||
-          tour.destination.toLowerCase().includes(keyword) ||
+          (tour.destination?.toLowerCase().includes(keyword) ?? false) ||
           (tour.destinationCountry?.toLowerCase().includes(keyword)) ||
           (tour.destinationCity?.toLowerCase().includes(keyword))
         );
