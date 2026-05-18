@@ -233,8 +233,84 @@ grep -rn "object-cover" client/src --include="*.tsx" | grep -v "rounded"
 
 ---
 
-## 九、版本歷史
+## 九、Vibe Coding Workflow（2026-05-18 加，源自程序员老王 YouTube 影片，Jeff 認同）
+
+> 「Vibe Coding 不是直接讓 AI 寫，是先逼自己（用 AI 協助）把意圖拆清楚到不能再拆，才讓 AI 寫。」
+> 這套 workflow 用於避免「改 A 壞 B、最後幾百萬 token 後代碼變垃圾場」。
+
+### 9.1 任何 feature ≥ 30 行代碼必走 4 階段
+
+每個 feature 在 `docs/features/<feature-name>/` 建立：
+
+```
+docs/features/<feature-name>/
+├── proposal.md     ← Stage 1: 需求文件
+├── design.md       ← Stage 2: 概要+詳細設計（模組劃分、依賴關係）
+├── tasks/
+│   ├── module-1.md ← Stage 3: 每模組獨立 checklist
+│   ├── module-2.md
+│   └── ...
+├── progress.md     ← Stage 3: 總覽（給監工 agent 看）
+└── (實作完成後)
+```
+
+**Stage 1-3 跑完才能進 Stage 4 (coding)。** 4 階段間建議**換新對話**，舊資訊靠文件交接。
+
+### 9.2 每次 prompt 必有 4 部分
+
+跟 AI（包括我 Claude）發任何任務，prompt 應該結構化：
+
+1. **目標**（Goal）— 想達成什麼
+2. **輸入**（Input）— 既有檔案、限制、上下文
+3. **輸出**（Output）— 寫到哪、什麼格式
+4. **步驟**（Process）— 含「請主動發問，不要猜測我的意圖」
+
+Jeff 一句帶過時，Claude **應該主動補齊另 3 部分後再執行**，不要腦補。
+
+### 9.3 讓 AI 主動發問
+
+任何不確定處用提示詞：
+> 「不了解 XX，請使用提問的方式幫我確定需求。任何不明確的地方都必須向我提問，不要猜測。」
+
+對應 Claude Code 的 `AskUserQuestion` 工具 — **遇到 ambiguous 就用，不要心存「先做做看」**。
+
+### 9.4 監工 agent + 子 agents 並行架構
+
+複雜任務（多模組同步開發）用：
+- **主對話**只跑「監工 agent」— 看 progress.md，spawn 子 agents
+- **每個子 agent** 透過 `Agent tool` 並行，獨立上下文，只看自己模組的 `task.md` + `design.md`
+- **主對話絕不看實作細節** — 只審結果
+
+對應到 PACK&GO 既有 autonomous agents：InquiryAgent 應作主 agent，spawn 子 agent 執行 skill（例如 `packgo-tour-comparison`），不要塞進 InquiryAgent 自己的上下文。
+
+### 9.5 強型別 + linter + tests 三件套（強制）
+
+Python 用 mypy + ruff + pytest；PACK&GO 是 TS 所以：
+- **tsc --noEmit** 必過（commit 前跑，OOM 時用 `NODE_OPTIONS="--max-old-space-size=6144"`）
+- **Vitest 必有** — 每模組對應 `.test.ts`，新功能寫測試**不是 optional**
+- ESLint / Prettier 規範（待補）
+
+### 9.6 紅線（違反就要回頭補）
+
+- ❌ ship code 沒寫對應 Vitest
+- ❌ 一個檔案 > 300 行還沒拆模組
+- ❌ commit 前沒跑 tsc
+- ❌ session > 80 turns 還在同一對話線 — 該開新 session 用文件交接
+- ❌ 用 Edit 大改後沒 Read 一次驗證
+- ❌ AI 主動發問被跳過、用腦補代替
+
+### 9.7 何時開新對話
+
+- Stage 1→2、2→3、3→4 任一階段交接時
+- session turns > 80
+- 換完全不同的 feature / 主題
+- token 開始炸（cost meter 飆）
+
+---
+
+## 十、版本歷史
 
 | 版本 | 日期 | 主要變更 |
 |------|------|----------|
 | 1.0 | 2026-03-26 | 初版，整合所有既有設計決策和禁止事項 |
+| 1.1 | 2026-05-18 | 加第九章 Vibe Coding Workflow（4 階段 + 監工子 agent + 紅線） |

@@ -82,10 +82,14 @@ import TodayOverview from "@/components/admin/TodayOverview";
 // Round 81 (2026-05-17, evening) — UnifiedInbox replaces TodayOverview as
 // the default landing. Single vertical: actionable items → Pulse → activity.
 // TodayOverview kept under "today-legacy" PageId for fallback during
-// rollout, can be removed after a week of stable usage. FloatingOpsAgent
-// mounts OUTSIDE the page switch so it persists on every admin page.
+// rollout, can be removed after a week of stable usage.
 import UnifiedInbox from "@/components/admin/UnifiedInbox";
-import FloatingOpsAgent from "@/components/admin/FloatingOpsAgent";
+// Round 81 (2026-05-18) — AgentChatPage replaces FloatingOpsAgent (the
+// slide-out Sheet) per Jeff's preference for Claude-Code-style full-page
+// chat: document-style messages, wide content area, full markdown. The
+// FloatingOpsAgent file remains in the repo for now but is no longer
+// mounted; can be deleted in the next cleanup pass.
+import AgentChatPage from "@/components/admin/AgentChatPage";
 // Round 81 (2026-05-17) — 4 per-domain landing pages. Each domain (Ops,
 // Customers, Marketing, Finance) gets a dedicated at-a-glance dashboard
 // at the top of its menu, before drilling into specific sub-pages.
@@ -103,6 +107,8 @@ type PageId =
   // "today-legacy" preserves access to the old TodayOverview during rollout.
   | "today"
   | "today-legacy"
+  // Round 81 (2026-05-18) — Full-page agent chat (Claude-Code style)
+  | "agent-chat"
   // Office — Inbox is the default; everything else is advanced
   | "office-inbox" | "office-chat" | "autonomous-agents" | "ai-hub" | "task-history" | "calibration-review" | "llm-cost" | "audit-log"
   // Round 81 (2026-05-17) — Per-domain landing pages
@@ -123,14 +129,15 @@ type PageDef = { id: PageId; label: string };
 const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageDef[] }> = {
   office: {
     domain: { id: "office", label: "辦公室", icon: Building2 },
-    // 2026-05-17 evening — Office primary collapsed to just UnifiedInbox.
-    // Previously: today + office-chat + office-inbox (three entry points
-    // competing for "where do I open admin"). UnifiedInbox now covers all
-    // three (actionable triage + Pulse + activity feed), so chat + inbox
-    // are demoted to advanced (still accessible, just not first-stop).
-    // FloatingOpsAgent (mounted persistently in Admin shell) lets Jeff
-    // ask agent questions without ever leaving the inbox.
-    primary: [{ id: "today", label: "🏠 今日總覽" }],
+    // 2026-05-17 evening — Office primary collapsed to UnifiedInbox.
+    // 2026-05-18 — Added Agent Chat as second primary tab per Jeff's
+    // preference for Claude-Code-style full-page chat (the slide-out
+    // FloatingOpsAgent was retired). Now Office primary = inbox (state +
+    // decisions) + chat (free-form agent conversation).
+    primary: [
+      { id: "today", label: "🏠 今日總覽" },
+      { id: "agent-chat", label: "💬 Agent Chat" },
+    ],
     advanced: [
       { id: "office-chat", label: "💬 Agent Chats (舊)" },
       { id: "office-inbox", label: "📥 舊收件匣" },
@@ -337,20 +344,32 @@ export default function Admin() {
             active={activePage}
             onSelect={(id) => setActivePage(id as PageId)}
           />
-          <main className="flex-1 overflow-auto px-4 lg:px-6 py-4">
+          {/*
+            agent-chat is full-bleed (composer pinned to bottom, internal
+            scroll inside the chat component). Other pages get the standard
+            padded scrollable main. Conditional avoids double-scroll +
+            keeps composer at the viewport bottom.
+          */}
+          <main
+            className={
+              activePage === "agent-chat"
+                ? "flex-1 overflow-hidden"
+                : "flex-1 overflow-auto px-4 lg:px-6 py-4"
+            }
+          >
             {renderPage(activePage, setActivePage)}
           </main>
         </div>
       </div>
 
       {/*
-        Round 81 (2026-05-17 evening) — FloatingOpsAgent is mounted OUTSIDE
-        the page-switch so it persists on every admin page. Bottom-right
-        floating button + ⌘+K shortcut → slide-out from right with full
-        OpsAgent chat. Lets Jeff ask "李太太那團幾號" while editing a
-        booking, viewing inbox, anywhere — without losing page context.
+        Round 81 (2026-05-18) — FloatingOpsAgent retired. The slide-out
+        Sheet was Jeff's first ask but on review he preferred the
+        Claude-Code-style full-page chat. Replaced with AgentChatPage
+        rendered as the "agent-chat" PageId (Office primary tab).
+        FloatingOpsAgent.tsx file stays in the repo until next cleanup
+        pass so any deep-link callers don't break.
       */}
-      <FloatingOpsAgent />
     </div>
   );
 }
@@ -364,6 +383,10 @@ function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
       return <UnifiedInbox onNavigate={(t) => setActivePage(t as PageId)} />;
     case "today-legacy":
       return <TodayOverview onNavigate={(t) => setActivePage(t as PageId)} />;
+    case "agent-chat":
+      // Round 81 (2026-05-18) — Claude-Code-style full-page agent chat.
+      // Uses the full main area (h-full) and provides its own scrolling.
+      return <AgentChatPage />;
     // Round 81 (2026-05-17) — Per-domain landing pages
     case "ops-landing":
       return <OpsLanding onNavigate={(t) => setActivePage(t as PageId)} />;
