@@ -33,14 +33,35 @@ export async function createUser(email: string, password: string, name?: string)
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
 
+// 2026-05-17 red-team round 6 — dummy bcrypt hash for timing-attack defense.
+// When authenticateUser is called with an unregistered email, we still run
+// bcrypt.compare against this dummy to equalise wall-clock time with the
+// "user found, wrong password" branch. Without this, attackers can enumerate
+// which emails are registered by measuring response time (registered →
+// ~100ms bcrypt; unregistered → ~1ms).
+//
+// Hash of the string "PACK_AND_GO_DUMMY_PASSWORD_TIMING_2026" with cost 10.
+// Verified locally: bcrypt.compareSync('PACK_AND_GO_DUMMY_PASSWORD_TIMING_2026', DUMMY) === true
+// but no real account uses that string, so even if compare succeeds we
+// still reject (the user-not-found check above is the real gate).
+const DUMMY_BCRYPT_HASH =
+  "$2a$10$wkF/Ll4yMV4eRtmTH8PrJ.5lWFv1yQB4mLb0kQS.IpUKkr.IhYZqe";
+
 /**
  * Authenticate user with email and password
  * Implements login attempt tracking and account lockout
  */
 export async function authenticateUser(email: string, password: string) {
   const user = await db.getUserByEmail(email);
-  
+
   if (!user) {
+    // 2026-05-17 red-team round 6 — equalise timing for unregistered emails.
+    // Run a real bcrypt.compare against a dummy hash so attackers can't
+    // distinguish "no such email" (cheap) from "wrong password" (~100ms)
+    // by measuring response time. The dummy compare is ALWAYS rejected
+    // afterwards via the throw — even if cosmic-ray collision succeeds,
+    // user is null so we still error out.
+    await bcrypt.compare(password, DUMMY_BCRYPT_HASH).catch(() => false);
     throw new Error('電子郵件或密碼錯誤');
   }
 
