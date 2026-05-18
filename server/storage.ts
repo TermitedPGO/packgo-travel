@@ -81,9 +81,43 @@ async function buildReadUrl(key: string): Promise<string> {
   if (publicBase) {
     return `${publicBase}/${encodeURI(key)}`;
   }
-  // Presigned GET, 1-hour TTL
+  // v80.24: was 1-hour TTL but generationCache stores tour JSON (with these
+  // URLs embedded) for 3 DAYS. After hour 1, every cache hit served broken
+  // 403 images. Bumped to 7 days; a robust fix would require regenerating
+  // URLs on cache read but that's a bigger refactor — production sites
+  // that need long URL lifetime should set R2_PUBLIC_BASE_URL.
   const cmd = new GetObjectCommand({ Bucket: bucket, Key: key });
-  return await getSignedUrl(client, cmd, { expiresIn: 3600 });
+  if (!publicBase && process.env.NODE_ENV === "production") {
+    console.warn(
+      "[storage] R2_PUBLIC_BASE_URL is unset in production; using 7-day presigned URLs. Set the public CDN URL for stable image references."
+    );
+  }
+  return await getSignedUrl(client, cmd, { expiresIn: 7 * 24 * 60 * 60 });
+}
+
+/**
+ * 2026-05-17 red-team round 3 — short-TTL presigned URL for sensitive
+ * documents (passport scans, visa, medical records, insurance, etc.).
+ *
+ * Difference from storageGet:
+ *   - Ignores R2_PUBLIC_BASE_URL — never returns a permanent public URL,
+ *     even if the bucket has CDN. Sensitive docs MUST be ephemeral.
+ *   - 5-minute TTL by default — long enough for one admin to load + view,
+ *     short enough that screenshots / browser-history exposure has limited
+ *     value.
+ *   - Callers should regenerate the URL on every UI page-load, not cache.
+ *
+ * Use this for: customerDocuments.r2Url paths, any PII-laden file.
+ * Don't use for tour images, marketing posters, public assets.
+ */
+export async function getSecureDocumentUrl(
+  relKey: string,
+  ttlSeconds: number = 300 // 5 minutes
+): Promise<string> {
+  const { client, bucket } = getR2Client();
+  const key = normalizeKey(relKey);
+  const cmd = new GetObjectCommand({ Bucket: bucket, Key: key });
+  return await getSignedUrl(client, cmd, { expiresIn: ttlSeconds });
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

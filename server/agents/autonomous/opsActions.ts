@@ -386,22 +386,43 @@ async function doTriggerRefund(args: z.infer<typeof TriggerRefundArgs>): Promise
     };
   }
 
+  // 2026-05-17 red-team round 3 — idempotency check.
+  // Without this guard, double-clicking the chip or two admin tabs racing
+  // would create 2 Stripe refunds for the same booking. Stripe accepts both
+  // if there's enough left to refund. Catch it before the API call.
+  if (payment.paymentStatus === "refunded") {
+    return {
+      ok: false,
+      summary: `Booking #${args.bookingId} payment 已退款,無動作`,
+      error: "already_refunded",
+    };
+  }
+
   // Convert USD → cents for Stripe API
   const refundCents = Math.round(args.amountUsd * 100);
 
   try {
     const Stripe = (await import("stripe")).default;
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "");
-    const refund = await stripe.refunds.create({
-      payment_intent: payment.stripePaymentIntentId,
-      amount: args.partial ? refundCents : undefined, // undefined = full refund
-      reason: "requested_by_customer",
-      metadata: {
-        bookingId: String(args.bookingId),
-        reason: args.reason.slice(0, 500),
-        triggeredBy: "OpsAgent",
+    // 2026-05-17 red-team round 3 — Stripe idempotency-key.
+    // Same booking + same payment intent + same hour → same refund. If a
+    // duplicate request arrives within a minute (UI double-click, network
+    // retry, concurrent admin tab), Stripe returns the original refund
+    // instead of creating a new one.
+    const idempotencyKey = `refund-${args.bookingId}-${payment.stripePaymentIntentId}-${Math.floor(Date.now() / 60_000)}`;
+    const refund = await stripe.refunds.create(
+      {
+        payment_intent: payment.stripePaymentIntentId,
+        amount: args.partial ? refundCents : undefined, // undefined = full refund
+        reason: "requested_by_customer",
+        metadata: {
+          bookingId: String(args.bookingId),
+          reason: args.reason.slice(0, 500),
+          triggeredBy: "OpsAgent",
+        },
       },
-    });
+      { idempotencyKey }
+    );
 
     return {
       ok: true,
