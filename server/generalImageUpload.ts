@@ -20,15 +20,26 @@ export const generalImageUploadRouter = Router();
 // are admin-only UI surfaces, so gate at the router level.
 generalImageUploadRouter.use(requireAdmin);
 
-// multer 設定：記憶體存儲，最大 10MB
+// multer 設定:記憶體存儲,最大 10MB
+// 2026-05-17 red-team round 5 — strict MIME allowlist. `image/*` accepts
+// svg+xml which can embed <script> → stored XSS risk. Restrict to
+// raster formats that browsers can't execute code from.
+const ALLOWED_IMAGE_MIME = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+]);
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    if (file.mimetype.startsWith("image/")) {
+    if (ALLOWED_IMAGE_MIME.has(file.mimetype.toLowerCase())) {
       cb(null, true);
     } else {
-      cb(new Error("只允許上傳圖片檔案"));
+      cb(new Error("只允許 JPEG/PNG/WebP/GIF 格式"));
     }
   },
 });

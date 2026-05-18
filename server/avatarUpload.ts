@@ -14,6 +14,13 @@ avatarUploadRouter.use(requireAuth);
 // mistake or abuse, so reject pre-decode rather than after Buffer.from().
 const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
 
+// 2026-05-17 red-team round 5 — strict MIME allowlist.
+// Previous regex `data:image/(\w+);base64,` accepted ANY `image/*`
+// subtype including svg+xml, which SVG can carry `<script>` tags →
+// stored XSS on whoever loads the avatar. We restrict to raster formats
+// that can't execute code.
+const ALLOWED_AVATAR_MIME = new Set(["jpeg", "jpg", "png", "webp", "gif"]);
+
 avatarUploadRouter.post("/upload-avatar", async (req, res) => {
   try {
     const { image } = req.body;
@@ -22,13 +29,18 @@ avatarUploadRouter.post("/upload-avatar", async (req, res) => {
       return res.status(400).json({ error: "Invalid image data" });
     }
 
-    // Extract base64 data
-    const matches = image.match(/^data:image\/(\w+);base64,(.+)$/);
+    // Extract base64 data. Match only allowed types — svg+xml / html
+    // / other code-bearing formats are rejected at parse time.
+    const matches = image.match(/^data:image\/(jpeg|jpg|png|webp|gif);base64,(.+)$/);
     if (!matches) {
-      return res.status(400).json({ error: "Invalid image format" });
+      return res.status(400).json({ error: "Invalid image format — must be JPEG, PNG, WebP, or GIF" });
     }
 
     const imageType = matches[1];
+    // Extra defensive check in case the regex is ever loosened
+    if (!ALLOWED_AVATAR_MIME.has(imageType.toLowerCase())) {
+      return res.status(400).json({ error: "Image type not allowed" });
+    }
     const base64Data = matches[2];
     // Quick size check on the base64 string before we allocate a Buffer.
     // base64 is ~4/3 the binary size, so 2 MB binary ≈ 2.67 MB base64.

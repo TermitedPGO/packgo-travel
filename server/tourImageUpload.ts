@@ -137,10 +137,12 @@ tourImageUploadRouter.post("/tours/:tourId/upload-image", async (req, res) => {
       return res.status(400).json({ error: "Invalid image path" });
     }
 
-    // Extract base64 data
-    const matches = image.match(/^data:image\/(\w+);base64,(.+)$/);
+    // 2026-05-17 red-team round 5 — strict MIME allowlist (block SVG/XML/etc.
+    // which can carry executable <script>). Was `data:image/(\w+)` which
+    // accepted svg+xml → stored XSS risk on tour image surface.
+    const matches = image.match(/^data:image\/(jpeg|jpg|png|webp|gif);base64,(.+)$/);
     if (!matches) {
-      return res.status(400).json({ error: "Invalid image format" });
+      return res.status(400).json({ error: "Invalid image format — must be JPEG, PNG, WebP, or GIF" });
     }
 
     const originalType = matches[1];
