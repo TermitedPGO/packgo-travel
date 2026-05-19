@@ -1,6 +1,3 @@
-import { COOKIE_NAME } from "@shared/const";
-import { getAliases } from "./_helpers/placeNameAliases";
-import { normalizePlaceName } from "./_helpers/llmPlaceNormalizer";
 import { tourMonitorRouter } from "./routers/tourMonitorRouter";
 import { agentRouter } from "./routers/agentRouter";
 import { toolsRouter } from "./routers/toolsRouter";
@@ -64,114 +61,23 @@ import { authRouter } from "./routers/auth";
 import { membershipRouter } from "./routers/membership";
 import { photosRouter } from "./routers/photos";
 import { aiRouter } from "./routers/ai";
-import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, protectedProcedure, adminProcedure, router } from "./_core/trpc";
-import { TRPCError } from "@trpc/server";
-import { z } from "zod";
+import { router } from "./_core/trpc";
 
-// v71: bounded string helpers — all free-form text inputs MUST use one of these
-// instead of bare `z.string()`. Without max bounds, attackers can send 10MB
-// payloads per field and DoS the database / LLM pipeline. Sizes are picked to
-// be generous for legitimate content.
-//   shortStr  – names, codes, country/city, single-line metadata
-//   mediumStr – paragraphs, descriptions, comments
-//   longStr   – JSON blobs (itinerary, highlights, hotel images), poetic content
+// ────────────────────────────────────────────────────────────────────────────
+// Phase 4F · Composition shell
 //
-// v74 (security hardening): also strip ASCII control characters (NULL, BEL, ESC,
-// DEL, etc.) — live attack test confirmed `\x00`/`\x07` were persisting verbatim
-// into MySQL `tours.title`, which can corrupt log rendering, break PDF/email
-// generators that use C-style string functions, and is a known WAF-evasion
-// vector. We allow tab (0x09), LF (0x0A), CR (0x0D) since those are legitimate
-// in textarea content. Anything else in the C0 range or DEL gets stripped.
+// What used to be a 10,130-line god-file is now a thin composition layer.
+// Every domain lives in `./routers/<name>.ts` (or `./_core/systemRouter.ts`
+// for the system bridge). This file does ONE job: import each sub-router and
+// stitch them into the public `appRouter` literal under their original keys.
 //
-// Implementation note: zod's `.transform()` produces a ZodPipe which loses the
-// `.min()` / `.max()` chain methods. So instead of transforming, we use `.refine`
-// to REJECT inputs with control chars. For inputs that legitimately may include
-// stray copy-paste control chars, callers should pre-clean before submitting.
-const CONTROL_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
-const noControlChars = (s: string) => !CONTROL_CHARS.test(s);
-const shortStr = z.string().max(255).refine(noControlChars, { message: "禁止控制字元 / Control characters not allowed" });
-const mediumStr = z.string().max(5_000).refine(noControlChars, { message: "禁止控制字元 / Control characters not allowed" });
-const longStr = z.string().max(50_000).refine(noControlChars, { message: "禁止控制字元 / Control characters not allowed" });
-import * as db from "./db";
-import * as skillDb from "./skillDb";
-import { redis } from "./redis";
-import { learnFromPdfContent, initializeBuiltInSkills } from "./agents/learningAgent";
-import { SkillLearnerAgent } from "./agents/skillLearnerAgent";
-import { invokeLLM } from "./_core/llm";
-import { sendBookingConfirmationEmail } from "./email";
-import * as auth from "./auth";
-import { createToken } from "./jwt";
-import { translateText, translateBatch, translateTour, translateMultipleTours, getTourTranslations, getBatchTourTranslations, getAllTourTranslations, getTranslationJobs, getSupportedLanguages, getAllTranslationsSummary, Language } from "./translation";
-import { getExchangeRates, convertCurrency, getExchangeRate, formatCurrency, getCurrencySymbol, convertPrices, type SupportedCurrency } from "./agents/exchangeRateAgent";
-import { calculateVisaPricing, CHINA_VISA_PRICING } from "./services/visaPricingService";
-import { sendVisaStatusUpdate, sendVisaApprovedEmail, sendVisaRejectedEmail } from "./services/visaEmailService";
-import { generateFlightLink, generateHotelLink, generateHomepageLink, trackAffiliateClick } from "./services/affiliateLinkService";
-import { generateInvoiceNumber, generateInvoicePdf } from "./services/invoiceService";
-// Phase 4D: financialReportService imports moved to ./routers/accounting.ts.
-import Stripe from "stripe";
-import { ENV } from "./_core/env";
-
-// P0-1: Lazy-load Stripe to prevent server crash when STRIPE_SECRET_KEY is not set
-let _stripeClient: Stripe | null = null;
-function getStripeClient(): Stripe {
-  if (!_stripeClient) {
-    if (!ENV.stripeSecretKey) {
-      throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: "Stripe 付款服務尚未設定，請聯絡管理員",
-      });
-    }
-    _stripeClient = new Stripe(ENV.stripeSecretKey);
-  }
-  return _stripeClient;
-}
-import { checkForgotPasswordRateLimitByIP, checkForgotPasswordRateLimitByEmail, checkForgotPasswordGlobalRateLimit, checkLoginRateLimitByIP, checkLoginRateLimitByEmail, isBlockedEmailDomain, checkBookingCreateRateLimit, checkCheckoutSessionRateLimit, checkAiChatRateLimit, checkAiChatDailyLimit, checkAiChatGlobalAnonymousLimit, checkAiChatUserDailyLimit, checkRateLimit } from "./rateLimit";
-
-/**
- * SECURITY_AUDIT_2026_05_14 P2-5 helper: verify every passed-in skillUsageLog
- * id belongs to the caller (either same userId, or same sessionId). Throws
- * FORBIDDEN if any id doesn't match — preventing anonymous tampering with
- * skill-performance feedback / conversion analytics.
- */
-async function assertOwnsUsageLogs(
-  usageLogIds: number[],
-  caller: { userId?: number; sessionId?: string }
-): Promise<void> {
-  if (usageLogIds.length === 0) return;
-  if (!caller.userId && !caller.sessionId) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: "Provide a sessionId or sign in to record feedback.",
-    });
-  }
-  const { skillUsageLog } = await import("../drizzle/schema");
-  const { and, inArray, or, eq } = await import("drizzle-orm");
-  const { getDb } = await import("./db");
-  const dbInst = await getDb();
-  if (!dbInst) {
-    throw new TRPCError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: "DB unavailable",
-    });
-  }
-  const ownClauses = [
-    caller.userId ? eq(skillUsageLog.userId, caller.userId) : null,
-    caller.sessionId ? eq(skillUsageLog.sessionId, caller.sessionId) : null,
-  ].filter(Boolean) as any[];
-  const ownership = ownClauses.length === 1 ? ownClauses[0] : or(...ownClauses);
-  const rows = await dbInst
-    .select({ id: skillUsageLog.id })
-    .from(skillUsageLog)
-    .where(and(inArray(skillUsageLog.id, usageLogIds), ownership));
-  if (rows.length !== usageLogIds.length) {
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: "One or more usage-log ids do not belong to this session.",
-    });
-  }
-}
+// Where domains used to share helpers (string validators, Stripe lazy
+// initializer, ownership guards), those helpers are duplicated INTO each
+// consuming sub-router so the dependency graph stays one-way (sub-routers
+// don't import from this file, and this file doesn't import any helpers).
+// That keeps the composition trivially correct + reviewable.
+// ────────────────────────────────────────────────────────────────────────────
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
