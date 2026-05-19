@@ -1,0 +1,41 @@
+{
+  "P00100001": [
+    {
+      "groupDate": "2026-06-01",
+      "groupStock": 20,
+      "groupSaleStock": 5,
+      "stockStatus": 200,
+      "groupPrice": [
+        { "priceType": 3, "groupPrice": 1499 },
+        { "priceType": 4, "groupPrice": 1299 }
+      ],
+      "currencyNum": "USD"
+    },
+    {
+      "groupDate": "2026-06-08",
+      "groupStock": 20,
+      "groupSaleStock": 20,
+      "stockStatus": 200,
+      "groupPrice": [{ "priceType": 3, "groupPrice": 1499 }],
+      "currencyNum": "USD"
+    }
+  ],
+  "P00100002": [
+    {
+      "groupDate": "2026-07-04",
+      "groupStock": 24,
+      "groupSaleStock": 22,
+      "stockStatus": 200,
+      "groupPrice": [{ "priceType": 3, "groupPrice": 1899 }],
+      "currencyNum": "USD"
+    },
+    {
+      "groupDate": "2026-07-11",
+      "groupStock": 24,
+      "groupSaleStock": 0,
+      "stockStatus": 100,
+      "groupPrice": [{ "priceType": 3, "groupPrice": 1899 }],
+      "currencyNum": "USD"
+    }
+  ]
+}

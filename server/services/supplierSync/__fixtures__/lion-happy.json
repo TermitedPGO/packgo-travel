@@ -1,0 +1,102 @@
+{
+  "TotalCount": 2,
+  "TotalPage": 1,
+  "CurrentPage": 1,
+  "Count": 2,
+  "NormGroupList": [
+    {
+      "Index": 1,
+      "NormGroupID": "LION-NG-0001",
+      "TourName": "美西黃石9日精選遊",
+      "TourDays": 9,
+      "Img": "https://lion.example.com/img/0001.jpg",
+      "ImgM": "https://lion.example.com/img/0001-m.jpg",
+      "TravelType": 1,
+      "TourSource": "B",
+      "GroupStraightPrice": "120000",
+      "GroupIndustryPrice": "115000",
+      "GroupIsVip": false,
+      "Status": 1,
+      "ThemeID": [],
+      "TagList": [],
+      "TripTypeList": [],
+      "StartFromCityList": [{ "CityName": "台北", "CityCode": "TPE" }],
+      "GroupList": [
+        {
+          "GroupID": "GG260615A",
+          "GoDate": "2026/06/15",
+          "Status": "available",
+          "StatusText": "可報名",
+          "StraightLowestPrice": "120,000",
+          "IndustryLowestPrice": "115,000",
+          "IsVip": false
+        },
+        {
+          "GroupID": "GG260622A",
+          "GoDate": "2026/06/22",
+          "Status": "hot",
+          "StatusText": "熱賣中",
+          "StraightLowestPrice": "120,000",
+          "IndustryLowestPrice": "115,000",
+          "IsVip": false
+        },
+        {
+          "GroupID": "GG260629A",
+          "GoDate": "2026/06/29",
+          "Status": "full",
+          "StatusText": "額滿",
+          "StraightLowestPrice": "120,000",
+          "IndustryLowestPrice": "115,000",
+          "IsVip": false
+        }
+      ]
+    },
+    {
+      "Index": 2,
+      "NormGroupID": "LION-NG-0002",
+      "TourName": "東京賞櫻5日豪華遊",
+      "TourDays": 5,
+      "Img": "https://lion.example.com/img/0002.jpg",
+      "ImgM": "https://lion.example.com/img/0002-m.jpg",
+      "TravelType": 1,
+      "TourSource": "B",
+      "GroupStraightPrice": "60000",
+      "GroupIndustryPrice": "58000",
+      "GroupIsVip": false,
+      "Status": 1,
+      "ThemeID": [],
+      "TagList": [],
+      "TripTypeList": [],
+      "StartFromCityList": [{ "CityName": "台中", "CityCode": "TXG" }],
+      "GroupList": [
+        {
+          "GroupID": "GG260401B",
+          "GoDate": "2026/04/01",
+          "Status": "available",
+          "StatusText": "可報名",
+          "StraightLowestPrice": "60,000",
+          "IndustryLowestPrice": "58,000",
+          "IsVip": false
+        },
+        {
+          "GroupID": "GG260408B",
+          "GoDate": "2026/04/08",
+          "Status": "available",
+          "StatusText": "可報名",
+          "StraightLowestPrice": "62,000",
+          "IndustryLowestPrice": "59,500",
+          "IsVip": false
+        },
+        {
+          "GroupID": "GG260415B",
+          "GoDate": "2026/4/15",
+          "Status": "available",
+          "StatusText": "可報名",
+          "StraightLowestPrice": "62,000",
+          "IndustryLowestPrice": "59,500",
+          "IsVip": false
+        }
+      ]
+    }
+  ]
+}

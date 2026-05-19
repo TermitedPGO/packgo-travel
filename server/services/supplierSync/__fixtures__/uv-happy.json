@@ -1,0 +1,35 @@
+{
+  "pager": { "totalCount": 2, "pageIndex": 1, "pageSize": 200 },
+  "list": [
+    {
+      "productCode": "P00100001",
+      "productViewCode": "VC0001",
+      "groupNo": "USXLAX-A",
+      "productName": "California Coast 7-Day Tour",
+      "departCityName": "Los Angeles",
+      "destinationName": "San Francisco",
+      "tripDay": 7,
+      "nightDay": 6,
+      "groupLatelyDate": "2026-06-01",
+      "groupLatelyPrice": 1499,
+      "tempImageUrl": "https://uv.example.com/img/p1.jpg",
+      "productCurrencyNum": "USD",
+      "confirmType": 2
+    },
+    {
+      "productCode": "P00100002",
+      "productViewCode": "VC0002",
+      "groupNo": "USXNYC-A",
+      "productName": "East Coast Highlights 9-Day",
+      "departCityName": "New York",
+      "destinationName": "Washington DC",
+      "tripDay": 9,
+      "nightDay": 8,
+      "groupLatelyDate": "2026-07-04",
+      "groupLatelyPrice": 1899,
+      "tempImageUrl": "https://uv.example.com/img/p2.jpg",
+      "productCurrencyNum": "USD",
+      "confirmType": 2
+    }
+  ]
+}
