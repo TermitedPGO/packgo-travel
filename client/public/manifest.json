@@ -35,7 +35,7 @@
     {
       "name": "Admin 後台",
       "short_name": "Admin",
-      "description": "PACK&GO 後台管理 — TodayOverview + Agent Chats + OpsAgent",
+      "description": "PACK&GO 後台管理 — UnifiedInbox + Agent Chat + 5-domain ops",
       "url": "/admin",
       "icons": [{ "src": "/images/logo-bag-black-v3.png", "sizes": "any" }]
     },

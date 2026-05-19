@@ -75,14 +75,9 @@ import OfficeInboxTab from "@/components/admin/OfficeInboxTab";
 // Round 81 — per-agent Slack-like channel view; replaces legacy
 // OfficeOverviewTab as the "聊天" page. Built on agentMessages table.
 import ChatsTab from "@/components/admin/ChatsTab";
-// Round 81 (2026-05-17) — Today's-pulse landing: single-screen 5-domain
-// KPIs + triage + recent activity. Replaces office-inbox as Jeff's
-// default entry. Office-inbox stays accessible as "advanced" sub-page.
-import TodayOverview from "@/components/admin/TodayOverview";
-// Round 81 (2026-05-17, evening) — UnifiedInbox replaces TodayOverview as
-// the default landing. Single vertical: actionable items → Pulse → activity.
-// TodayOverview kept under "today-legacy" PageId for fallback during
-// rollout, can be removed after a week of stable usage.
+// Round 81 (2026-05-17) — UnifiedInbox is the default Office landing.
+// Single vertical scroll: actionable items → Domain Pulse → activity feed.
+// Replaced an earlier 3-tab split (TodayOverview + OfficeInboxTab + ChatsTab).
 import UnifiedInbox from "@/components/admin/UnifiedInbox";
 // Round 81 (2026-05-18) — full-page agent chat. Claude-Code-style
 // document messages, wide reading width, full markdown. Replaced an
@@ -101,12 +96,8 @@ import FinanceLanding from "@/components/admin/landings/FinanceLanding";
 // ────────────────────────────────────────────────────────────────────────
 
 type PageId =
-  // Round 81 (2026-05-17) — UnifiedInbox is the new default landing.
-  // "today-legacy" preserves access to the old TodayOverview during rollout.
-  | "today"
-  | "today-legacy"
-  // Round 81 (2026-05-18) — Full-page agent chat (Claude-Code style)
-  | "agent-chat"
+  | "today"           // UnifiedInbox
+  | "agent-chat"      // Full-page Claude-Code-style chat
   // Office — Inbox is the default; everything else is advanced
   | "office-inbox" | "office-chat" | "autonomous-agents" | "ai-hub" | "task-history" | "calibration-review" | "llm-cost" | "audit-log"
   // Round 81 (2026-05-17) — Per-domain landing pages
@@ -142,10 +133,6 @@ const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageD
       { id: "task-history", label: "任務記錄" },
       { id: "audit-log", label: "審計日誌" },
       { id: "llm-cost", label: "AI 成本" },
-      // 2026-05-17 evening — kept around for fallback during UnifiedInbox
-      // rollout. Remove in next cleanup pass if UnifiedInbox covers all
-      // the flows Jeff uses TodayOverview for.
-      { id: "today-legacy", label: "舊版總覽" },
     ],
   },
   ops: {
@@ -366,14 +353,9 @@ function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
   switch (page) {
     // Office
     case "today":
-      // Round 81 (2026-05-17 evening) — UnifiedInbox replaces TodayOverview
-      // as the default landing. Same prop contract.
       return <UnifiedInbox onNavigate={(t) => setActivePage(t as PageId)} />;
-    case "today-legacy":
-      return <TodayOverview onNavigate={(t) => setActivePage(t as PageId)} />;
     case "agent-chat":
-      // Round 81 (2026-05-18) — Claude-Code-style full-page agent chat.
-      // Uses the full main area (h-full) and provides its own scrolling.
+      // Full-bleed: uses h-full + provides its own scrolling.
       return <AgentChatPage />;
     // Round 81 (2026-05-17) — Per-domain landing pages
     case "ops-landing":
