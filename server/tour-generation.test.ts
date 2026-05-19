@@ -84,9 +84,10 @@ describe("Tour Generation System", () => {
     // Check worker name
     expect(tourGenerationWorker.name).toBe("tour-generation");
     
-    // Check concurrency (should be 1 - heavy AI tasks run sequentially)
+    // Check concurrency. v80.24: bumped 1 → 4 for bulk-import scenarios
+    // (Anthropic Haiku tier-1 4000 req/min cap; 4×15 LLM calls ≈ 60 req/min).
     const opts = tourGenerationWorker.opts;
-    expect(opts.concurrency).toBe(1);
+    expect(opts.concurrency).toBe(4);
     
     // Check rate limiter (should be 10 jobs per minute)
     expect(opts.limiter).toBeDefined();

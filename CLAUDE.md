@@ -191,8 +191,11 @@ grep -rn "object-cover" client/src --include="*.tsx" | grep -v "rounded"
 | 功能 | 檔案 |
 |------|------|
 | 資料庫 Schema | `drizzle/schema.ts` |
-| tRPC 路由 | `server/routers.ts` |
+| tRPC 路由（composition shell） | `server/routers.ts` (~283 LOC, 從 10,130 拆來) |
+| tRPC 路由（per-domain） | `server/routers/<domain>.ts` × 40 個 sub-routers（refactor 2026-05-19） |
 | 資料庫查詢 | `server/db.ts` |
+| Stripe webhook + idempotency | `server/_core/stripeWebhook.ts` + `server/_core/stripeWebhookIdempotency.ts` + table `stripeWebhookEvents`（refactor Phase 2） |
+| Supplier sync (Lion + UV) | `server/services/supplierSync/{lion,uv,shared,reporting,index}.ts`（refactor Phase 5A） |
 | LLM 調用 | `server/_core/llm.ts` |
 | S3 儲存 | `server/storage.ts` |
 | 認證狀態 | `client/src/_core/hooks/useAuth.ts` |
@@ -202,9 +205,11 @@ grep -rn "object-cover" client/src --include="*.tsx" | grep -v "rounded"
 | i18n 英文 | `client/src/locales/en.ts` |
 | AI 生成主控 | `server/agents/masterAgent.ts` |
 | 進度追蹤 | `server/agents/progressTracker.ts` |
-| 行程詳情頁 | `client/src/pages/TourDetailPeony.tsx` |
-| 管理後台行程 | `client/src/components/admin/ToursTab.tsx` |
+| 行程詳情頁 | `client/src/pages/TourDetailPeony.tsx`（v2 backlog: 拆 3,827 LOC） |
+| 管理後台行程 | `client/src/components/admin/ToursTab.tsx` + `client/src/components/admin/tours/*` sub-views |
+| 管理後台 agent | `client/src/components/admin/AutonomousAgentsTab.tsx` (73 LOC) + `client/src/components/admin/agents/*` sub-views（refactor Phase 5B） |
 | 行程編輯對話框 | `client/src/components/admin/TourEditDialog.tsx` |
+| Refactor 文檔 | `docs/refactor/{audit,plan,progress,completed}.md` + `docs/refactor/tasks/phase-*/*.md` |
 
 ---
 
