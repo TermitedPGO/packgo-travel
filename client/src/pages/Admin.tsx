@@ -84,11 +84,9 @@ import TodayOverview from "@/components/admin/TodayOverview";
 // TodayOverview kept under "today-legacy" PageId for fallback during
 // rollout, can be removed after a week of stable usage.
 import UnifiedInbox from "@/components/admin/UnifiedInbox";
-// Round 81 (2026-05-18) — AgentChatPage replaces FloatingOpsAgent (the
-// slide-out Sheet) per Jeff's preference for Claude-Code-style full-page
-// chat: document-style messages, wide content area, full markdown. The
-// FloatingOpsAgent file remains in the repo for now but is no longer
-// mounted; can be deleted in the next cleanup pass.
+// Round 81 (2026-05-18) — full-page agent chat. Claude-Code-style
+// document messages, wide reading width, full markdown. Replaced an
+// earlier slide-out Sheet (FloatingOpsAgent, deleted 2026-05-18).
 import AgentChatPage from "@/components/admin/AgentChatPage";
 // Round 81 (2026-05-17) — 4 per-domain landing pages. Each domain (Ops,
 // Customers, Marketing, Finance) gets a dedicated at-a-glance dashboard
@@ -129,11 +127,9 @@ type PageDef = { id: PageId; label: string };
 const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageDef[] }> = {
   office: {
     domain: { id: "office", label: "辦公室", icon: Building2 },
-    // 2026-05-17 evening — Office primary collapsed to UnifiedInbox.
-    // 2026-05-18 — Added Agent Chat as second primary tab per Jeff's
-    // preference for Claude-Code-style full-page chat (the slide-out
-    // FloatingOpsAgent was retired). Now Office primary = inbox (state +
-    // decisions) + chat (free-form agent conversation).
+    // 2026-05-18 — Office primary = UnifiedInbox (state + decisions) +
+    // Agent Chat (free-form agent conversation). Two coherent landing
+    // points; everything else lives in the advanced dropdown.
     primary: [
       { id: "today", label: "🏠 今日總覽" },
       { id: "agent-chat", label: "💬 Agent Chat" },
@@ -362,14 +358,6 @@ export default function Admin() {
         </div>
       </div>
 
-      {/*
-        Round 81 (2026-05-18) — FloatingOpsAgent retired. The slide-out
-        Sheet was Jeff's first ask but on review he preferred the
-        Claude-Code-style full-page chat. Replaced with AgentChatPage
-        rendered as the "agent-chat" PageId (Office primary tab).
-        FloatingOpsAgent.tsx file stays in the repo until next cleanup
-        pass so any deep-link callers don't break.
-      */}
     </div>
   );
 }

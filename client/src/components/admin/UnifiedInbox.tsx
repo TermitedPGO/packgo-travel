@@ -13,8 +13,9 @@
  * Clicking any pending item opens a right-side Sheet drawer with full
  * context + action buttons — NO page navigation, NO loss of inbox state.
  *
- * OpsAgent is NOT here — it lives in FloatingOpsAgent (always-accessible
- * slide-out from bottom-right button).
+ * OpsAgent is NOT here — it lives in the dedicated AgentChatPage
+ * (Office primary tab "agent-chat"). The previous FloatingOpsAgent
+ * slide-out was retired 2026-05-18 (P1-7 dead code purge).
  *
  * Design constraints:
  *   - Daily flow target: open admin → see 3 things → 2 clicks → done
