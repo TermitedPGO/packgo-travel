@@ -194,21 +194,15 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
     }
   }
 
-  await db.createPayment({
-    bookingId: parseInt(bookingId),
-    stripePaymentIntentId: paymentIntentId,
-    stripeCheckoutSessionId: session.id,
-    amount,
-    currency: session.currency || "TWD",
-    paymentMethod: "stripe",
-    paymentType: paymentType || "full",
-    paymentStatus: "completed",
-    paidAt: new Date(),
-  });
-
-  // Update booking payment status
+  // Phase 2 (2026-05-18): atomic write block.
+  // INSIDE the tx (rolled back on throw): createPayment + updateBooking +
+  // createAccountingEntry. POST-COMMIT (each guards own errors): packpoint,
+  // referral, abandonment-queue cancel, emails, notifyOwner, notifyAgentMessage.
+  // packpoint is post-commit because it opens its own internal db.transaction
+  // (nested MySQL tx is avoided per Module 2.1 guidance).
+  // Visa + subscription branches short-circuit before this block — they have
+  // their own atomicity stories (modules 2.5 / 2.4).
   let newPaymentStatus: "unpaid" | "deposit" | "paid" | "refunded" = "paid";
-
   if (paymentType === "deposit") {
     newPaymentStatus = "deposit";
   } else if (paymentType === "balance") {
@@ -222,12 +216,61 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
   const newBookingStatus: "pending" | "confirmed" =
     newPaymentStatus === "paid" ? "confirmed" : "pending";
 
-  await db.updateBooking(parseInt(bookingId), {
-    paymentStatus: newPaymentStatus,
-    bookingStatus: newBookingStatus,
+  const drizzleDbForTx = await db.getDb();
+  if (!drizzleDbForTx) {
+    throw new Error(
+      "[Stripe Webhook] Database not available for checkout.session.completed booking transaction"
+    );
+  }
+
+  await drizzleDbForTx.transaction(async (tx) => {
+    await db.createPayment(
+      {
+        bookingId: parseInt(bookingId),
+        stripePaymentIntentId: paymentIntentId,
+        stripeCheckoutSessionId: session.id,
+        amount,
+        currency: session.currency || "TWD",
+        paymentMethod: "stripe",
+        paymentType: paymentType || "full",
+        paymentStatus: "completed",
+        paidAt: new Date(),
+      },
+      tx,
+    );
+
+    await db.updateBooking(
+      parseInt(bookingId),
+      {
+        paymentStatus: newPaymentStatus,
+        bookingStatus: newBookingStatus,
+      },
+      tx,
+    );
+
+    await createAccountingEntry(
+      {
+        entryType: "income",
+        category: "tour_booking",
+        amount: String(amount),
+        currency: (session.currency ?? "usd").toUpperCase(),
+        description: `行程訂單付款 #${bookingId}${paymentType === "deposit" ? "（訂金）" : paymentType === "balance" ? "（尾款）" : "（全額）"}`,
+        bookingId: parseInt(bookingId),
+        entryDate: new Date(),
+        isTaxDeductible: 0,
+        createdBy: 1,
+      },
+      tx,
+    );
   });
 
   console.log(`[Stripe Webhook] Booking ${bookingId} payment status updated to ${newPaymentStatus}`);
+  console.log(`[Stripe Webhook] Accounting entry created for booking ${bookingId}`);
+
+  // ─── POST-COMMIT side effects ────────────────────────────────────────
+  // Anything below runs ONLY if the transaction above committed. Each side
+  // effect MUST swallow its own errors — a failed email must NOT roll back
+  // the payment. The webhook still returns 200 to Stripe.
 
   // Round 80.22: award Packpoint when booking is FULLY paid. We award on
   // the FULL subtotal (not the per-payment amount) so deposit + balance
@@ -293,23 +336,8 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
     );
   }
 
-  // Auto-create accounting income entry
-  try {
-    await createAccountingEntry({
-      entryType: "income",
-      category: "tour_booking",
-      amount: String(amount),
-      currency: (session.currency ?? "usd").toUpperCase(),
-      description: `行程訂單付款 #${bookingId}${paymentType === "deposit" ? "（訂金）" : paymentType === "balance" ? "（尾款）" : "（全額）"}`,
-      bookingId: parseInt(bookingId),
-      entryDate: new Date(),
-      isTaxDeductible: 0,
-      createdBy: 1,
-    });
-    console.log(`[Stripe Webhook] Accounting entry created for booking ${bookingId}`);
-  } catch (err) {
-    console.error("[Stripe Webhook] Failed to create accounting entry:", err);
-  }
+  // Accounting income entry: moved INTO the db.transaction above so it
+  // commits atomically with createPayment + updateBooking.
 
   // Send payment success email
   try {
@@ -431,17 +459,24 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
 async function handlePaymentIntentSucceeded(paymentIntent: Stripe.PaymentIntent) {
   console.log("[Stripe Webhook] Processing payment_intent.succeeded");
   console.log("[Stripe Webhook] Payment Intent ID:", paymentIntent.id);
-
-  // Update payment record status
-  await db.updatePaymentStatus(paymentIntent.id, "completed", new Date());
+  // Phase 2 (2026-05-18): wrap single write in db.transaction for symmetry
+  // and future multi-write expansion (e.g. accounting reversal on partial capture).
+  const drizzleDb = await db.getDb();
+  if (!drizzleDb) throw new Error("[Stripe Webhook] DB unavailable for payment_intent.succeeded");
+  await drizzleDb.transaction(async (tx) => {
+    await db.updatePaymentStatus(paymentIntent.id, "completed", new Date(), tx);
+  });
 }
 
 async function handlePaymentIntentFailed(paymentIntent: Stripe.PaymentIntent) {
   console.log("[Stripe Webhook] Processing payment_intent.payment_failed");
   console.log("[Stripe Webhook] Payment Intent ID:", paymentIntent.id);
-
-  // Update payment record status
-  await db.updatePaymentStatus(paymentIntent.id, "failed");
+  // Phase 2 (2026-05-18): wrap single write in db.transaction for symmetry.
+  const drizzleDb = await db.getDb();
+  if (!drizzleDb) throw new Error("[Stripe Webhook] DB unavailable for payment_intent.payment_failed");
+  await drizzleDb.transaction(async (tx) => {
+    await db.updatePaymentStatus(paymentIntent.id, "failed", undefined, tx);
+  });
 }
 
 /**
@@ -491,38 +526,46 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
   // Phase 2: per-handler refund-status short-circuit removed; replay
   // dedupe handled by stripeWebhookEvents.
 
-  // Update both the payment row and the booking row
-  await db.updatePaymentStatus(paymentIntentId, "refunded", new Date()).catch((e) =>
-    console.error("[Stripe Webhook] charge.refunded: updatePaymentStatus failed:", e?.message)
-  );
+  // ─────────────────────────────────────────────────────────────────────
+  // INSIDE TX (atomic writes) — payment status + conditional booking
+  // transition (race-guard preserved as a single atomic UPDATE … WHERE
+  // … ne(cancelled)) + fallback paymentStatus-only update + seat
+  // release. All-or-nothing; if any step throws, MySQL rolls back.
+  //
+  // POST-COMMIT (after tx returns) — packpoint clawback (deductPackpoint
+  // has its OWN db.transaction; nesting is not supported here) +
+  // notifyOwner + notifyAgentMessage. The clawback's pointsTransactions
+  // idempotency guard protects against double-deduct on Stripe replay.
+  // ─────────────────────────────────────────────────────────────────────
+  const drizzle = await (await import("../db")).getDb();
+  if (!drizzle) {
+    console.error(
+      "[Stripe Webhook] charge.refunded: DB unavailable, cannot process refund"
+    );
+    return;
+  }
+  const { bookings: bookingsTable } = await import("../../drizzle/schema");
+  const { and, eq, ne } = await import("drizzle-orm");
 
-  if (payment.bookingId) {
-    // QA audit 2026-05-11 Phase 8 fix + code-review v2: previously we
-    // snapshotted the booking then updated then released slots, which
-    // raced against bookings.cancel() and Stripe webhook replays
-    // (double-release the seat). Now: atomic UPDATE … WHERE
-    // bookingStatus != 'cancelled' returns affectedRows=1 only when
-    // THIS handler owned the state transition, and we release slots
-    // only in that case. Concurrent callers see affectedRows=0 and
-    // skip the release.
-    const drizzle = await (await import("../db")).getDb();
-    if (!drizzle) {
-      console.error(
-        "[Stripe Webhook] charge.refunded: DB unavailable, cannot transition booking"
-      );
-      return;
-    }
-    const { bookings: bookingsTable } = await import("../../drizzle/schema");
-    const { and, eq, ne } = await import("drizzle-orm");
+  // State captured INSIDE the tx, consumed AFTER commit (packpoint clawback +
+  // notifications need to know whether the booking has a user / seats).
+  let transitionedToCancelled = false;
+  let bookingSnap: Awaited<ReturnType<typeof db.getBookingById>> | undefined;
 
-    // Read seat counts BEFORE the conditional update so we have the
-    // numbers if we win the race. This snapshot is allowed to be
-    // stale; only the conditional update controls whether we release.
-    const bookingSnap = await db.getBookingById(payment.bookingId);
+  await drizzle.transaction(async (tx: any) => {
+    // WRITE 1: payment row → refunded
+    await db.updatePaymentStatus(paymentIntentId, "refunded", new Date(), tx);
 
-    let transitionedToCancelled = false;
-    try {
-      const result: any = await drizzle
+    if (payment.bookingId) {
+      // Snapshot booking inside the tx for seat counts. The conditional
+      // UPDATE below is the only race guard; this snapshot just feeds
+      // the seat-release path AFTER we've won the race.
+      bookingSnap = await db.getBookingById(payment.bookingId, tx);
+
+      // WRITE 2: atomic UPDATE … WHERE bookingStatus != 'cancelled'.
+      // affectedRows=1 means THIS handler owned the active→cancelled
+      // transition. Concurrent bookings.cancel paths see 0 and skip.
+      const result: any = await tx
         .update(bookingsTable)
         .set({
           paymentStatus: "refunded",
@@ -534,7 +577,6 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
             ne(bookingsTable.bookingStatus, "cancelled")
           )
         );
-      // mysql2 result shape: rows.affectedRows. Drizzle wraps it.
       const affected =
         (result?.[0]?.affectedRows ?? result?.affectedRows ?? 0) | 0;
       transitionedToCancelled = affected > 0;
@@ -542,43 +584,38 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
         `[Stripe Webhook] Booking ${payment.bookingId} refund update affected=${affected} (transitioned=${transitionedToCancelled})`
       );
 
-      // If the booking was already cancelled before we got here, we
-      // still need to ensure paymentStatus is recorded as refunded
-      // (the conditional update above skipped because of the != cancelled
-      // guard). Run an unconditional paymentStatus-only update — this
-      // is idempotent and never triggers a slot release.
+      // WRITE 2b: if the booking was already cancelled before we got
+      // here, still record paymentStatus=refunded for ops/reconciliation.
+      // Idempotent; never triggers a slot release.
       if (!transitionedToCancelled) {
-        await drizzle
+        await tx
           .update(bookingsTable)
           .set({ paymentStatus: "refunded" })
           .where(eq(bookingsTable.id, payment.bookingId));
       }
-    } catch (e) {
-      console.error(
-        "[Stripe Webhook] charge.refunded: updateBooking failed:",
-        (e as Error)?.message
-      );
-    }
 
-    // Release seats ONLY if THIS handler owned the active → cancelled
-    // transition. Replay or concurrent bookings.cancel paths skip.
-    if (transitionedToCancelled && bookingSnap?.departureId) {
-      const seatCount =
-        (bookingSnap.numberOfAdults || 0) +
-        (bookingSnap.numberOfChildrenWithBed || 0) +
-        (bookingSnap.numberOfChildrenNoBed || 0);
-      if (seatCount > 0) {
-        await db
-          .releaseDepartureSlots(bookingSnap.departureId, seatCount)
-          .catch((e) =>
-            console.error(
-              `[Stripe Webhook] charge.refunded: releaseDepartureSlots failed for booking ${payment.bookingId}:`,
-              e?.message
-            )
-          );
+      // WRITE 3: seat release — ONLY if THIS handler owned the
+      // active → cancelled transition. Replay or concurrent
+      // bookings.cancel paths see affectedRows=0 and skip.
+      if (transitionedToCancelled && bookingSnap?.departureId) {
+        const seatCount =
+          (bookingSnap.numberOfAdults || 0) +
+          (bookingSnap.numberOfChildrenWithBed || 0) +
+          (bookingSnap.numberOfChildrenNoBed || 0);
+        if (seatCount > 0) {
+          await db.releaseDepartureSlots(bookingSnap.departureId, seatCount, tx);
+        }
       }
     }
+  });
+  // ↑ db.transaction throws on rollback. We deliberately do NOT catch
+  // here so the outer handleStripeWebhook try/catch marks the central
+  // idempotency row as `failed` and returns 500 so Stripe retries.
 
+  // ─────────────────────────────────────────────────────────────────────
+  // POST-COMMIT: packpoint clawback (its own internal tx + idempotency)
+  // ─────────────────────────────────────────────────────────────────────
+  if (payment.bookingId) {
     // Round 80.22: claw back any Packpoint awarded for this booking.
     // Per docs/packpoint-policy.md §5: "取消訂單若已發點,扣回該次發放的
     // packpoint(若餘額不足,記為負餘額,需用未來訂單補回)". Our deduct
@@ -586,35 +623,31 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
     // spent the points won't get a punitive negative — but the audit trail
     // captures the clawback attempt amount.
     try {
-      const booking = await db.getBookingById(payment.bookingId);
+      const booking = bookingSnap ?? (await db.getBookingById(payment.bookingId));
       if (booking && (booking as any).userId) {
-        const { getDb } = await import("../db");
-        const drizzle = await getDb();
-        if (drizzle) {
-          const { pointsTransactions } = await import("../../drizzle/schema");
-          const { sql } = await import("drizzle-orm");
-          const [earnRow] = await drizzle
-            .select({ delta: pointsTransactions.delta })
-            .from(pointsTransactions)
-            .where(
-              sql`${pointsTransactions.referenceType} = 'booking' AND ${pointsTransactions.referenceId} = ${payment.bookingId} AND ${pointsTransactions.reason} = 'booking_earn'`
-            )
-            .limit(1);
+        const { pointsTransactions } = await import("../../drizzle/schema");
+        const { sql } = await import("drizzle-orm");
+        const [earnRow] = await drizzle
+          .select({ delta: pointsTransactions.delta })
+          .from(pointsTransactions)
+          .where(
+            sql`${pointsTransactions.referenceType} = 'booking' AND ${pointsTransactions.referenceId} = ${payment.bookingId} AND ${pointsTransactions.reason} = 'booking_earn'`
+          )
+          .limit(1);
 
-          if (earnRow && earnRow.delta > 0) {
-            const { deductPackpoint } = await import("./packpoint");
-            await deductPackpoint({
-              userId: (booking as any).userId,
-              amount: earnRow.delta,
-              reason: "clawback",
-              referenceType: "booking",
-              referenceId: payment.bookingId,
-              description: `Refund clawback for booking #${payment.bookingId}`,
-            });
-            console.log(
-              `[Stripe Webhook] Clawed back ${earnRow.delta} Packpoint from booking ${payment.bookingId} refund`
-            );
-          }
+        if (earnRow && earnRow.delta > 0) {
+          const { deductPackpoint } = await import("./packpoint");
+          await deductPackpoint({
+            userId: (booking as any).userId,
+            amount: earnRow.delta,
+            reason: "clawback",
+            referenceType: "booking",
+            referenceId: payment.bookingId,
+            description: `Refund clawback for booking #${payment.bookingId}`,
+          });
+          console.log(
+            `[Stripe Webhook] Clawed back ${earnRow.delta} Packpoint from booking ${payment.bookingId} refund`
+          );
         }
       }
     } catch (err) {
@@ -661,6 +694,29 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
   }
 }
 
+/**
+ * Phase 2 module 5 (2026-05-18): visa-payment handler wraps the
+ * payment-info UPDATE + application-status flip + accounting income entry
+ * in a single `db.transaction`. Behavior change documented:
+ *
+ *   BEFORE — the accounting INSERT was inside a `try/catch` that
+ *   swallowed errors silently. Net effect: a transient accounting
+ *   failure left the visa application marked "paid" with NO accounting
+ *   row, breaking reconciliation. Jeff had to spot the gap manually.
+ *
+ *   AFTER  — accounting failures roll back the visa status flip AND
+ *   the payment-info update. The webhook propagates the error so
+ *   `markStripeEventFailed` records it on `stripeWebhookEvents`, Stripe
+ *   retries, and either (a) the transient error clears (everything
+ *   succeeds on the next attempt) or (b) the row stays `status='failed'`
+ *   for Jeff to investigate. Strictly better for reconciliation —
+ *   the behavior change is intentional.
+ *
+ * Post-commit side effects (`sendVisaApplicationConfirmation`,
+ * `notifyOwner`) keep their existing `try/catch` so an email or
+ * notification failure can't block the webhook ack — the customer is
+ * already "paid" in both Stripe and our DB by that point.
+ */
 async function handleVisaPaymentCompleted(
   session: Stripe.Checkout.Session,
   applicationId: number
@@ -673,39 +729,64 @@ async function handleVisaPaymentCompleted(
     return;
   }
 
-  // Update payment info
-  await db.updateVisaPaymentInfo(applicationId, {
-    paymentStatus: "paid",
-    stripePaymentIntentId: session.payment_intent as string,
-    stripeCheckoutSessionId: session.id,
-    paidAt: new Date(),
-  });
+  const visaAmount = session.amount_total ? session.amount_total / 100 : 0;
+  const currency = (session.currency ?? "usd").toUpperCase();
 
-  // Update application status to paid
-  await db.updateVisaApplicationStatus(applicationId, "paid", undefined, "Stripe 付款完成");
-
-  // Auto-create accounting income entry for visa
-  try {
-    const visaAmount = session.amount_total ? session.amount_total / 100 : 0;
-    await createAccountingEntry({
-      entryType: "income",
-      category: "visa_service",
-      amount: String(visaAmount),
-      currency: (session.currency ?? "usd").toUpperCase(),
-      description: `中國簽證代辦 #${applicationId}（${application.firstName} ${application.lastName}）`,
-      visaApplicationId: applicationId,
-      entryDate: new Date(),
-      isTaxDeductible: 0,
-      createdBy: 1,
-    });
-    console.log(`[Stripe Webhook] Accounting entry created for visa application ${applicationId}`);
-  } catch (err) {
-    console.error("[Stripe Webhook] Failed to create visa accounting entry:", err);
+  const drizzleDbForTx = await db.getDb();
+  if (!drizzleDbForTx) {
+    throw new Error(
+      "[Stripe Webhook] Database not available for visa payment transaction"
+    );
   }
+
+  // Atomic write block: payment-info + application-status + accounting.
+  // Any throw inside the callback rolls back ALL three writes (plus the
+  // visaStatusHistory row written by updateVisaApplicationStatus).
+  await drizzleDbForTx.transaction(async (tx) => {
+    // WRITE 1: payment info
+    await db.updateVisaPaymentInfo(
+      applicationId,
+      {
+        paymentStatus: "paid",
+        stripePaymentIntentId: session.payment_intent as string,
+        stripeCheckoutSessionId: session.id,
+        paidAt: new Date(),
+      },
+      tx,
+    );
+
+    // WRITE 2: application status → paid (also writes visaStatusHistory row)
+    await db.updateVisaApplicationStatus(
+      applicationId,
+      "paid",
+      undefined,
+      "Stripe 付款完成",
+      tx,
+    );
+
+    // WRITE 3: accounting income entry. NO longer wrapped in try/catch —
+    // a failure here MUST roll back writes 1 and 2 so reconciliation
+    // stays consistent.
+    await createAccountingEntry(
+      {
+        entryType: "income",
+        category: "visa_service",
+        amount: String(visaAmount),
+        currency,
+        description: `中國簽證代辦 #${applicationId}（${application.firstName} ${application.lastName}）`,
+        visaApplicationId: applicationId,
+        entryDate: new Date(),
+        isTaxDeductible: 0,
+        createdBy: 1,
+      },
+      tx,
+    );
+  });
 
   console.log(`[Stripe Webhook] Visa application ${applicationId} payment confirmed`);
 
-  // Send confirmation email
+  // Post-commit side effects: email + owner notification. Failures here
+  // are logged but never propagate.
   try {
     await sendVisaApplicationConfirmation({
       toEmail: application.email,
@@ -755,13 +836,28 @@ import { getDb } from "../db";
 import { users } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
 
+/**
+ * Phase 2 Module 4 (2026-05-18) — subscription upsert handler.
+ *
+ * All user-tier writes + membershipTrials writes happen INSIDE one
+ * `db.transaction` so a crash mid-sequence rolls back atomically.
+ *
+ * Critical atomicity fix: previously the trial-start INSERT and the
+ * `users.{plus|concierge}TrialUsedAt` UPDATE were two separate writes
+ * with a try/catch swallowing failures. A crash between them left an
+ * orphan trial row with no flag on the user — letting the customer
+ * re-trial the same tier. The transaction fixes this.
+ *
+ * Side effects (logging) stay outside the tx. There are no email sends
+ * here — those live in `handleTrialWillEnd`.
+ */
 async function handleSubscriptionUpserted(sub: Stripe.Subscription) {
   console.log("[Stripe Webhook] Processing subscription upsert", sub.id, sub.status);
 
   // Identify the user — first by metadata.userId, fallback to customer
   const userIdFromMeta = sub.metadata?.userId;
   let userId: number | null = userIdFromMeta ? parseInt(userIdFromMeta, 10) : null;
-  let stripeCustomerId =
+  const stripeCustomerId =
     typeof sub.customer === "string" ? sub.customer : sub.customer?.id || null;
 
   if (!userId && stripeCustomerId) {
@@ -782,7 +878,7 @@ async function handleSubscriptionUpserted(sub: Stripe.Subscription) {
     return;
   }
 
-  // Map price to tier
+  // Map price to tier (pure compute, safe outside tx)
   const priceId = sub.items.data[0]?.price.id;
   const tier = priceId ? tierFromPriceId(priceId) : null;
   if (!tier) {
@@ -803,33 +899,31 @@ async function handleSubscriptionUpserted(sub: Stripe.Subscription) {
   const db = await getDb();
   if (!db) return;
 
-  if (isActive) {
-    await db
-      .update(users)
-      .set({
-        tier,
-        tierExpiresAt: expiresAt,
-        stripeSubscriptionId: sub.id,
-        stripeCustomerId,
-      })
-      .where(eq(users.id, userId));
-    console.log(
-      `[Stripe Webhook] ✓ User ${userId} → tier=${tier} expires=${expiresAt?.toISOString()}`
-    );
+  const { membershipTrials } = await import("../../drizzle/schema");
+  const { and: dAnd, eq: dEq } = await import("drizzle-orm");
 
-    // Round 81 / migration 0075 — Membership trial tracking.
-    // Three transitions matter:
-    //   (a) trial start (status=trialing, no existing membershipTrials row)
-    //       → create row + flip users.{plus|concierge}TrialUsedAt
-    //   (b) trial → active (status=active, existing row.converted=false)
-    //       → mark row.converted=true, convertedAt=now
-    //   (c) active → ... no trial-table action needed
-    //
-    // Phase 1 Cluster C (2026-05-18): removed redundant `if (tier !== "free")`
-    // guard — `tier` is `PaidTier` here (narrowed at L785 via tierFromPriceId),
-    // never "free". The previous comparison was dead code per TS2367.
-    try {
-      const { membershipTrials } = await import("../../drizzle/schema");
+  await db.transaction(async (tx) => {
+    if (isActive) {
+      await tx
+        .update(users)
+        .set({
+          tier,
+          tierExpiresAt: expiresAt,
+          stripeSubscriptionId: sub.id,
+          stripeCustomerId,
+        })
+        .where(eq(users.id, userId!));
+
+      // Round 81 / migration 0075 — Membership trial tracking.
+      // Three transitions matter:
+      //   (a) trial start (status=trialing, no existing membershipTrials row)
+      //       → create row + flip users.{plus|concierge}TrialUsedAt
+      //   (b) trial → active (status=active, existing row.converted=false)
+      //       → mark row.converted=true, convertedAt=now
+      //   (c) active → ... no trial-table action needed
+      //
+      // Module 4 (2026-05-18): both writes wrapped in the parent tx — no
+      // more try/catch swallowing partial-trial-write failures.
       const trialEnd = (sub as any).trial_end as number | null | undefined;
       const isTrialing = sub.status === "trialing";
 
@@ -837,31 +931,31 @@ async function handleSubscriptionUpserted(sub: Stripe.Subscription) {
       if (isTrialing && trialEnd) {
         const tierFlag = tier === "plus" ? "plusTrialUsedAt" : "conciergeTrialUsedAt";
         const usedAtCol = (users as any)[tierFlag];
-        const userRow = await db.select({ used: usedAtCol })
-          .from(users).where(eq(users.id, userId)).limit(1);
+        const userRow = await tx
+          .select({ used: usedAtCol })
+          .from(users)
+          .where(eq(users.id, userId!))
+          .limit(1);
         const alreadyTrialed = userRow[0]?.used != null;
 
         if (!alreadyTrialed) {
-          await db.insert(membershipTrials).values({
-            userId,
+          await tx.insert(membershipTrials).values({
+            userId: userId!,
             tier,
             endsAt: new Date(trialEnd * 1000),
             stripeSubscriptionId: sub.id,
             stripePriceId: priceId || null,
           } as any);
-          await db.update(users)
+          await tx
+            .update(users)
             .set({ [tierFlag]: new Date() } as any)
-            .where(eq(users.id, userId));
-          console.log(
-            `[Stripe Webhook] ✓ Trial started: user ${userId} tier=${tier}, ends ${new Date(trialEnd * 1000).toISOString()}`
-          );
+            .where(eq(users.id, userId!));
         }
       }
 
       // (b) Trial → active conversion — find pending row, mark converted
       if (sub.status === "active") {
-        const { and: dAnd, eq: dEq } = await import("drizzle-orm");
-        const pendingTrial = await db
+        const pendingTrial = await tx
           .select()
           .from(membershipTrials)
           .where(
@@ -872,29 +966,30 @@ async function handleSubscriptionUpserted(sub: Stripe.Subscription) {
           )
           .limit(1);
         if (pendingTrial[0]) {
-          await db
+          await tx
             .update(membershipTrials)
             .set({ converted: true, convertedAt: new Date() })
             .where(dEq(membershipTrials.id, pendingTrial[0].id));
-          console.log(
-            `[Stripe Webhook] ✓ Trial converted to paid: user ${userId} tier=${tier}`
-          );
         }
       }
-    } catch (err) {
-      console.error("[Stripe Webhook] membershipTrials write failed:", (err as Error).message);
-      // Don't fail the webhook on trial-table errors
+    } else {
+      await tx
+        .update(users)
+        .set({
+          tier: "free",
+          tierExpiresAt: null,
+          stripeSubscriptionId: sub.id, // keep ref for re-activate
+          stripeCustomerId,
+        })
+        .where(eq(users.id, userId!));
     }
+  });
+
+  if (isActive) {
+    console.log(
+      `[Stripe Webhook] ✓ User ${userId} → tier=${tier} expires=${expiresAt?.toISOString()}`
+    );
   } else {
-    await db
-      .update(users)
-      .set({
-        tier: "free",
-        tierExpiresAt: null,
-        stripeSubscriptionId: sub.id, // keep ref for re-activate
-        stripeCustomerId,
-      })
-      .where(eq(users.id, userId));
     console.log(
       `[Stripe Webhook] User ${userId} subscription ${sub.status} → reverted to free`
     );
@@ -915,73 +1010,115 @@ async function handleSubscriptionUpserted(sub: Stripe.Subscription) {
 async function handleTrialWillEnd(sub: Stripe.Subscription) {
   console.log("[Stripe Webhook] Processing trial_will_end", sub.id);
 
-  const db = await getDb();
-  if (!db) return;
+  const drizzleDb = await getDb();
+  if (!drizzleDb) return;
 
   const { membershipTrials } = await import("../../drizzle/schema");
-  const trialRows = await db
-    .select()
-    .from(membershipTrials)
-    .where(eq(membershipTrials.stripeSubscriptionId, sub.id))
-    .limit(1);
 
-  const trial = trialRows[0];
-  if (!trial) {
-    console.warn(`[Stripe Webhook] trial_will_end: no membershipTrials row for ${sub.id}`);
+  // ─── PHASE 1: INSIDE TX — flag the trial as "reminder sent" BEFORE we
+  // actually attempt to send the email. Lifted-state pattern. ───
+  type TrialSnapshot = {
+    id: number;
+    userId: number;
+    tier: "plus" | "concierge";
+    endsAt: Date;
+    reminderAlreadySent: boolean;
+  };
+  type UserSnapshot = { id: number; email: string; name: string | null };
+
+  let trialSnapshot: TrialSnapshot | null = null;
+  let userSnapshot: UserSnapshot | null = null;
+
+  await drizzleDb.transaction(async (tx) => {
+    const trialRows = await tx
+      .select()
+      .from(membershipTrials)
+      .where(eq(membershipTrials.stripeSubscriptionId, sub.id))
+      .limit(1);
+
+    const trial = trialRows[0];
+    if (!trial) {
+      console.warn(`[Stripe Webhook] trial_will_end: no membershipTrials row for ${sub.id}`);
+      return;
+    }
+
+    const userRows = await tx
+      .select({ id: users.id, email: users.email, name: users.name })
+      .from(users)
+      .where(eq(users.id, trial.userId))
+      .limit(1);
+    const user = userRows[0];
+    if (!user) {
+      console.warn(`[Stripe Webhook] trial_will_end: user ${trial.userId} not found`);
+      return;
+    }
+
+    trialSnapshot = {
+      id: trial.id,
+      userId: trial.userId,
+      tier: trial.tier,
+      endsAt: trial.endsAt,
+      reminderAlreadySent: trial.reminderSentAt != null,
+    };
+    userSnapshot = { id: user.id, email: user.email, name: user.name };
+
+    // FLAG FIRST: write reminderSentAt before the email send.
+    // If a previous run already set the flag (belt-and-suspenders against a
+    // lost central idempotency row), skip the write but still continue to
+    // post-commit so the test fixture can assert idempotency cleanly.
+    if (!trialSnapshot.reminderAlreadySent) {
+      await tx
+        .update(membershipTrials)
+        .set({ reminderSentAt: new Date() })
+        .where(eq(membershipTrials.id, trial.id));
+    }
+  });
+
+  // If the tx returned early (no trial or no user) we have nothing to send.
+  if (!trialSnapshot || !userSnapshot) return;
+
+  // Local non-null aliases — the closure assignments above are invisible to
+  // TS's control-flow analysis, so we copy into fresh locals to refine away
+  // the implicit-nullability.
+  const trialData: TrialSnapshot = trialSnapshot;
+  const userData: UserSnapshot = userSnapshot;
+
+  // If a prior call already flagged + sent (defensive: should normally be
+  // caught by the central idempotency row), do NOT re-send the email.
+  if (trialData.reminderAlreadySent) {
+    console.log(
+      `[Stripe Webhook] trial_will_end: reminder already sent for trial ${trialData.id}, skipping email`
+    );
     return;
   }
 
-  // Phase 2: per-handler `reminderSentAt` short-circuit removed; replay
-  // dedupe handled by stripeWebhookEvents. The column is still written
-  // below for analytics ("when did we send the AB 390 notice?").
-
-  // Fetch user email
-  const userRows = await db
-    .select({ id: users.id, email: users.email, name: users.name })
-    .from(users)
-    .where(eq(users.id, trial.userId))
-    .limit(1);
-  const user = userRows[0];
-  if (!user) {
-    console.warn(`[Stripe Webhook] trial_will_end: user ${trial.userId} not found`);
-    return;
-  }
-
-  // Compute charge amount from the price
-  const priceId = sub.items.data[0]?.price.id;
+  // ─── PHASE 2: POST-COMMIT — send the email + notify Jeff. ───
   const amount = sub.items.data[0]?.price.unit_amount || 0;
   const currency = (sub.items.data[0]?.price.currency || "usd").toUpperCase();
   const formattedAmount = `${currency} $${(amount / 100).toFixed(2)}`;
   const interval = sub.items.data[0]?.price.recurring?.interval || "month";
-  const tierLabel = trial.tier === "plus" ? "Plus" : "Concierge";
+  const tierLabel = trialData.tier === "plus" ? "Plus" : "Concierge";
 
-  // Send via existing Gmail SMTP pipeline. Defer the email module to keep
-  // webhook handler import-cost low.
   try {
     const { sendTrialEndingReminder } = await import("../email");
     await sendTrialEndingReminder({
-      to: user.email,
-      customerName: user.name || "Traveler",
+      to: userData.email,
+      customerName: userData.name || "Traveler",
       tierLabel,
-      trialEndsAt: trial.endsAt,
+      trialEndsAt: trialData.endsAt,
       chargeAmount: formattedAmount,
       chargeInterval: interval as "month" | "year",
       cancelUrl: `${ENV.baseUrl || "https://packgoplay.com"}/membership?manage=1`,
     });
 
-    await db
-      .update(membershipTrials)
-      .set({ reminderSentAt: new Date() })
-      .where(eq(membershipTrials.id, trial.id));
-
     console.log(
-      `[Stripe Webhook] ✓ Trial-end reminder sent: user ${user.id} tier=${trial.tier}, charge=${formattedAmount} on ${trial.endsAt.toISOString()}`
+      `[Stripe Webhook] ✓ Trial-end reminder sent: user ${userData.id} tier=${trialData.tier}, charge=${formattedAmount} on ${trialData.endsAt.toISOString()}`
     );
 
     await notifyOwner({
-      title: `Trial 即將結束: ${user.name || user.email}`,
+      title: `Trial 即將結束: ${userData.name || userData.email}`,
       content:
-        `會員: ${user.email}\nTier: ${tierLabel}\n試用結束: ${trial.endsAt.toISOString()}\n即將收費: ${formattedAmount}\nAB 390 reminder email 已發送。`,
+        `會員: ${userData.email}\nTier: ${tierLabel}\n試用結束: ${trialData.endsAt.toISOString()}\n即將收費: ${formattedAmount}\nAB 390 reminder email 已發送。`,
     }).catch(() => {});
 
     // Round 81 (2026-05-17): #books channel — membership trial about to convert.
@@ -991,32 +1128,78 @@ async function handleTrialWillEnd(sub: Stripe.Subscription) {
       messageType: "observation",
       title: `Trial 即將結束 → 即將收 ${formattedAmount}`,
       body:
-        `客戶: ${user.name || user.email}\n` +
+        `客戶: ${userData.name || userData.email}\n` +
         `Tier: ${tierLabel}\n` +
-        `試用結束: ${trial.endsAt.toISOString().slice(0, 10)}\n` +
+        `試用結束: ${trialData.endsAt.toISOString().slice(0, 10)}\n` +
         `自動扣款: ${formattedAmount}\n` +
         `AB 390 §17602(c) 3 天前提醒 email 已發送 ✓`,
       priority: "low",
-      context: { userId: user.id, trialId: trial.id, stripeSubscriptionId: sub.id },
+      context: { userId: userData.id, trialId: trialData.id, stripeSubscriptionId: sub.id },
     });
   } catch (err) {
-    console.error("[Stripe Webhook] trial_will_end: reminder email failed:", (err as Error).message);
-    // Re-throw so Stripe retries the webhook (we MUST send the AB 390 notification)
-    throw err;
+    // D1 (Module 4): post-commit email failure path. The flag was already
+    // set in the tx above, so a Stripe webhook retry will short-circuit at
+    // claimStripeEvent → we will NOT re-attempt this email. To preserve
+    // AB-390 compliance we alert Jeff urgently so manual follow-up can
+    // happen. We do NOT re-throw — letting the handler return success
+    // marks the idempotency row "succeeded" so Stripe stops retrying
+    // (which would only burn DB writes, not send any email).
+    console.error(
+      "[Stripe Webhook] trial_will_end: reminder email failed AFTER flag commit:",
+      (err as Error).message
+    );
+    await notifyOwner({
+      title: `[URGENT] AB-390 trial reminder email FAILED — manual follow-up needed`,
+      content:
+        `User: ${userData.email} (id=${userData.id})\n` +
+        `Tier: ${tierLabel}\n` +
+        `試用結束: ${trialData.endsAt.toISOString()}\n` +
+        `即將收費: ${formattedAmount}\n\n` +
+        `The reminderSentAt flag has been committed in the database, so Stripe will NOT retry. ` +
+        `Please manually send the AB-390 disclosure email to this customer BEFORE the charge date, ` +
+        `or AB-390 §17602 compliance is at risk.\n\n` +
+        `Original error: ${(err as Error).message}`,
+    }).catch((notifyErr) => {
+      console.error(
+        "[Stripe Webhook] trial_will_end: failure-alert notifyOwner ALSO failed:",
+        (notifyErr as Error).message
+      );
+    });
   }
 }
 
+/**
+ * Phase 2 Module 4 (2026-05-18) — subscription cancellation handler.
+ * Wrapped in db.transaction for symmetry with the other subscription
+ * handlers; the single write also benefits from being in a clear
+ * transactional boundary.
+ */
 async function handleSubscriptionDeleted(sub: Stripe.Subscription) {
   console.log("[Stripe Webhook] Processing subscription deletion", sub.id);
-  const db = await getDb();
-  if (!db) return;
-  await db
-    .update(users)
-    .set({
-      tier: "free",
-      tierExpiresAt: null,
-      stripeSubscriptionId: null,
-    })
-    .where(eq(users.stripeSubscriptionId, sub.id));
+  const drizzleDb = await getDb();
+  if (!drizzleDb) return;
+  await drizzleDb.transaction(async (tx) => {
+    await tx
+      .update(users)
+      .set({
+        tier: "free",
+        tierExpiresAt: null,
+        stripeSubscriptionId: null,
+      })
+      .where(eq(users.stripeSubscriptionId, sub.id));
+  });
   console.log(`[Stripe Webhook] ✓ Subscription ${sub.id} canceled → users reverted to free`);
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Test-only exports — Vitest reaches into the module-private handlers
+// to exercise the transaction wrapping without going through the
+// full handleStripeWebhook signature-verification + dispatch path.
+// Do NOT use these at runtime.
+// ─────────────────────────────────────────────────────────────────────
+export const __test__ = {
+  handleChargeRefunded,
+  handleSubscriptionUpserted,
+  handleSubscriptionDeleted,
+  handleTrialWillEnd,
+};
