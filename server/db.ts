@@ -37,6 +37,20 @@ import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
+/**
+ * Drizzle transaction handle.
+ *
+ * Phase 2 (2026-05-18): money-path helpers (createPayment, updateBooking,
+ * updatePaymentStatus, createAccountingEntry) now accept an optional `tx`
+ * so the stripe-webhook handlers can wrap multi-write sequences in a
+ * single `db.transaction(async (tx) => …)` for atomicity.
+ *
+ * The exported type is intentionally Parameters<…>[0] of the transaction
+ * callback so call sites stay forward-compatible with Drizzle internals.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type DrizzleTx = any;
+
 // Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
@@ -756,11 +770,13 @@ export async function tryReserveDepartureSlots(
  */
 export async function releaseDepartureSlots(
   departureId: number,
-  count: number
+  count: number,
+  tx?: DrizzleTx
 ): Promise<void> {
   const db = await getDb();
   if (!db) return;
-  await db.execute(sql`
+  const writer = tx ?? db;
+  await writer.execute(sql`
     UPDATE tourDepartures
     SET bookedSlots = GREATEST(0, bookedSlots - ${count}),
         status = CASE WHEN status = 'full' AND (bookedSlots - ${count}) < totalSlots THEN 'open' ELSE status END,
@@ -901,16 +917,25 @@ export async function getAllBookings(filters?: {
 }
 
 /**
- * Get a single booking by ID
+ * Get a single booking by ID.
+ *
+ * Phase 2 (2026-05-18): accepts an optional `tx` so reads inside a
+ * `db.transaction` (e.g. the refund handler's seat-count snapshot) see
+ * writes made earlier in the same transaction. Outside a tx the behavior
+ * is unchanged.
  */
-export async function getBookingById(id: number): Promise<Booking | undefined> {
+export async function getBookingById(
+  id: number,
+  tx?: DrizzleTx
+): Promise<Booking | undefined> {
   const db = await getDb();
   if (!db) {
     console.warn("[Database] Cannot get booking: database not available");
     return undefined;
   }
 
-  const result = await db.select().from(bookings).where(eq(bookings.id, id)).limit(1);
+  const reader = tx ?? db;
+  const result = await reader.select().from(bookings).where(eq(bookings.id, id)).limit(1);
   return result.length > 0 ? result[0] : undefined;
 }
 
@@ -935,21 +960,34 @@ export async function createBooking(booking: InsertBooking): Promise<Booking> {
 }
 
 /**
- * Update an existing booking
+ * Update an existing booking.
+ *
+ * Phase 2 (2026-05-18): accepts an optional `tx` parameter so the
+ * stripe-webhook handlers can run this write inside a `db.transaction`.
+ * When `tx` is supplied we use the transaction handle for the UPDATE;
+ * the subsequent SELECT still goes through `getDb()` because reads
+ * inside a write-only transaction don't need the same visibility
+ * guarantee, and the row is being read back for a return value, not
+ * for further mutation.
  */
-export async function updateBooking(id: number, updates: Partial<InsertBooking>): Promise<Booking> {
+export async function updateBooking(
+  id: number,
+  updates: Partial<InsertBooking>,
+  tx?: DrizzleTx,
+): Promise<Booking> {
   const db = await getDb();
   if (!db) {
     throw new Error("Database not available");
   }
 
-  await db.update(bookings).set(updates).where(eq(bookings.id, id));
-  
+  const writer = tx ?? db;
+  await writer.update(bookings).set(updates).where(eq(bookings.id, id));
+
   const updatedBooking = await getBookingById(id);
   if (!updatedBooking) {
     throw new Error("Failed to retrieve updated booking");
   }
-  
+
   return updatedBooking;
 }
 
@@ -1035,22 +1073,36 @@ export async function getBookingPayments(bookingId: number) {
 }
 
 /**
- * Create a new payment record
+ * Create a new payment record.
+ *
+ * Phase 2 (2026-05-18): accepts an optional `tx` so stripe-webhook
+ * handlers can wrap createPayment + updateBooking + createAccountingEntry
+ * in a single transaction. When `tx` is supplied, both the INSERT and
+ * the read-back SELECT use the transaction handle so we always read
+ * what we just wrote.
  */
-export async function createPayment(payment: InsertPayment): Promise<Payment> {
+export async function createPayment(
+  payment: InsertPayment,
+  tx?: DrizzleTx,
+): Promise<Payment> {
   const db = await getDb();
   if (!db) {
     throw new Error("Database not available");
   }
 
-  const result = await db.insert(payments).values(payment);
+  const writer = tx ?? db;
+  const result = await writer.insert(payments).values(payment);
   const insertId = Number(result[0].insertId);
-  
-  const paymentRecords = await db.select().from(payments).where(eq(payments.id, insertId)).limit(1);
+
+  const paymentRecords = await writer
+    .select()
+    .from(payments)
+    .where(eq(payments.id, insertId))
+    .limit(1);
   if (paymentRecords.length === 0) {
     throw new Error("Failed to retrieve created payment");
   }
-  
+
   return paymentRecords[0];
 }
 
@@ -1060,10 +1112,14 @@ export async function createPayment(payment: InsertPayment): Promise<Payment> {
  * (network blips, gateway errors), and without this check we'd insert duplicate
  * payment rows + flip booking status repeatedly.
  */
-export async function getPaymentByIntentId(stripePaymentIntentId: string): Promise<Payment | null> {
+export async function getPaymentByIntentId(
+  stripePaymentIntentId: string,
+  tx?: DrizzleTx
+): Promise<Payment | null> {
   const db = await getDb();
   if (!db) return null;
-  const rows = await db
+  const reader = tx ?? db;
+  const rows = await reader
     .select()
     .from(payments)
     .where(eq(payments.stripePaymentIntentId, stripePaymentIntentId))
@@ -1072,26 +1128,44 @@ export async function getPaymentByIntentId(stripePaymentIntentId: string): Promi
 }
 
 /**
- * Update payment status by Stripe Payment Intent ID
+ * Update payment status by Stripe Payment Intent ID.
+ *
+ * Phase 2 (2026-05-18): accepts an optional `tx` so stripe-webhook
+ * handlers can wrap the status flip in a transaction. payment_intent.*
+ * handlers are single-write today but the wrapper future-proofs them
+ * in case additional writes are added (e.g. accounting reversal entry).
  */
-export async function updatePaymentStatus(stripePaymentIntentId: string, status: string, paidAt?: Date): Promise<Payment> {
+export async function updatePaymentStatus(
+  stripePaymentIntentId: string,
+  status: string,
+  paidAt?: Date,
+  tx?: DrizzleTx,
+): Promise<Payment> {
   const db = await getDb();
   if (!db) {
     throw new Error("Database not available");
   }
 
+  const writer = tx ?? db;
   const updates: any = { paymentStatus: status };
   if (paidAt) {
     updates.paidAt = paidAt;
   }
 
-  await db.update(payments).set(updates).where(eq(payments.stripePaymentIntentId, stripePaymentIntentId));
-  
-  const paymentRecords = await db.select().from(payments).where(eq(payments.stripePaymentIntentId, stripePaymentIntentId)).limit(1);
+  await writer
+    .update(payments)
+    .set(updates)
+    .where(eq(payments.stripePaymentIntentId, stripePaymentIntentId));
+
+  const paymentRecords = await writer
+    .select()
+    .from(payments)
+    .where(eq(payments.stripePaymentIntentId, stripePaymentIntentId))
+    .limit(1);
   if (paymentRecords.length === 0) {
     throw new Error("Failed to retrieve updated payment");
   }
-  
+
   return paymentRecords[0];
 }
 
@@ -2916,12 +2990,21 @@ export async function createVisaApplication(
 }
 
 // ── 查詢單筆申請 ──────────────────────────────────────────────
+/**
+ * Phase 2 (2026-05-18): accepts an optional `tx` so visa-payment webhook
+ * handlers can read the application row inside the same transaction that
+ * later writes payment info, status, and the accounting entry. Reading
+ * via the tx handle guarantees the row hasn't been mutated by another
+ * concurrent writer between READ and WRITE inside the same tx scope.
+ */
 export async function getVisaApplicationById(
-  id: number
+  id: number,
+  tx?: DrizzleTx,
 ): Promise<VisaApplication | null> {
   const db = await getDb();
   if (!db) return null;
-  const result = await db
+  const reader = tx ?? db;
+  const result = await reader
     .select()
     .from(visaApplications)
     .where(eq(visaApplications.id, id))
@@ -2984,25 +3067,34 @@ export async function getAllVisaApplications(filters?: {
 }
 
 // ── 更新申請狀態 ──────────────────────────────────────────────
+/**
+ * Phase 2 (2026-05-18): accepts an optional `tx`. When supplied, both the
+ * status UPDATE and the `visaStatusHistory` INSERT run inside the same
+ * transaction so a status flip without an audit-history row is impossible.
+ * The current-status read also flows through the tx handle to see any
+ * uncommitted writes made earlier inside the same transaction.
+ */
 export async function updateVisaApplicationStatus(
   id: number,
   newStatus: VisaApplication["applicationStatus"],
   changedBy?: number,
-  note?: string
+  note?: string,
+  tx?: DrizzleTx,
 ): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  const current = await getVisaApplicationById(id);
+  const writer = tx ?? db;
+  const current = await getVisaApplicationById(id, tx);
   const fromStatus = current?.applicationStatus ?? null;
 
-  await db
+  await writer
     .update(visaApplications)
     .set({ applicationStatus: newStatus })
     .where(eq(visaApplications.id, id));
 
   // 記錄狀態歷程
-  await db.insert(visaStatusHistory).values({
+  await writer.insert(visaStatusHistory).values({
     applicationId: id,
     fromStatus: fromStatus ?? undefined,
     toStatus: newStatus,
@@ -3012,6 +3104,11 @@ export async function updateVisaApplicationStatus(
 }
 
 // ── 更新付款資訊 ──────────────────────────────────────────────
+/**
+ * Phase 2 (2026-05-18): accepts an optional `tx` so the visa-payment
+ * webhook handler can co-locate this UPDATE with the application-status
+ * flip and the accounting income entry under a single atomic transaction.
+ */
 export async function updateVisaPaymentInfo(
   id: number,
   data: {
@@ -3019,11 +3116,13 @@ export async function updateVisaPaymentInfo(
     stripePaymentIntentId?: string;
     stripeCheckoutSessionId?: string;
     paidAt?: Date;
-  }
+  },
+  tx?: DrizzleTx,
 ): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db
+  const writer = tx ?? db;
+  await writer
     .update(visaApplications)
     .set(data)
     .where(eq(visaApplications.id, id));
@@ -3242,12 +3341,23 @@ export async function deleteTourPriceComparison(tourId: number): Promise<void> {
 
 // ─── Accounting Entries ────────────────────────────────────────────────────────
 
-export async function createAccountingEntry(data: InsertAccountingEntry): Promise<AccountingEntry | null> {
+/**
+ * Insert a row into the accounting ledger.
+ *
+ * Phase 2 (2026-05-18): accepts an optional `tx` so the stripe-webhook
+ * booking handler can co-locate the accounting income entry with the
+ * payment + booking writes in a single atomic transaction.
+ */
+export async function createAccountingEntry(
+  data: InsertAccountingEntry,
+  tx?: DrizzleTx,
+): Promise<AccountingEntry | null> {
   const db = await getDb();
   if (!db) return null;
-  const [result] = await db.insert(accountingEntries).values(data);
+  const writer = tx ?? db;
+  const [result] = await writer.insert(accountingEntries).values(data);
   const id = (result as any).insertId;
-  const [entry] = await db.select().from(accountingEntries).where(eq(accountingEntries.id, id));
+  const [entry] = await writer.select().from(accountingEntries).where(eq(accountingEntries.id, id));
   return entry || null;
 }
 
