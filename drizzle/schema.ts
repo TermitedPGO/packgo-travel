@@ -725,7 +725,12 @@ export const bookingParticipants = mysqlTable("bookingParticipants", {
   lastName: varchar("lastName", { length: 100 }).notNull(),
   gender: mysqlEnum("gender", ["male", "female", "other"]),
   dateOfBirth: timestamp("dateOfBirth"),
-  passportNumber: varchar("passportNumber", { length: 50 }),
+  // v2 Wave 1 · Module 1.8 (migration 0078): widened from VARCHAR(50) to
+  // VARCHAR(255) to hold AES-256-GCM ciphertext (~96 chars base64) via
+  // server/_core/tokenCrypto.ts. Reads/writes go through db.ts helpers
+  // that wrap encryptToken / decryptToken; ANY direct Drizzle access to
+  // this column must do the same. See CLAUDE.md §四 forbidden patterns.
+  passportNumber: varchar("passportNumber", { length: 255 }),
   passportExpiry: timestamp("passportExpiry"),
   nationality: varchar("nationality", { length: 100 }),
   dietaryRequirements: text("dietaryRequirements"),
@@ -1856,7 +1861,12 @@ export const visaApplications = mysqlTable("visaApplications", {
   phone: varchar("phone", { length: 50 }).notNull(),
 
   // 護照資訊
-  passportNumber: varchar("passportNumber", { length: 50 }).notNull(),
+  // v2 Wave 1 · Module 1.8 (migration 0078): widened from VARCHAR(50) to
+  // VARCHAR(255) to hold AES-256-GCM ciphertext (~96 chars base64) via
+  // server/_core/tokenCrypto.ts. Reads/writes go through db.ts helpers
+  // that wrap encryptToken / decryptToken; ANY direct Drizzle access to
+  // this column must do the same. See CLAUDE.md §四 forbidden patterns.
+  passportNumber: varchar("passportNumber", { length: 255 }).notNull(),
   passportExpiry: varchar("passportExpiry", { length: 20 }).notNull(),
   passportCountry: varchar("passportCountry", { length: 100 }).default("United States").notNull(),
   dateOfBirth: varchar("dateOfBirth", { length: 20 }).notNull(),

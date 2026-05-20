@@ -533,6 +533,13 @@
       "when": 1779300000000,
       "tag": "0077_inquiry_type_emergency",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "5",
+      "when": 1779301020000,
+      "tag": "0078_passport_encryption",
+      "breakpoints": true
     }
   ]
 }

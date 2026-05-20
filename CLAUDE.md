@@ -158,6 +158,21 @@ app.listen(3000)  // 應使用 process.env.PORT
 //   （剩餘 ~1,250 sites 在 server/routers/* + services/* + 根目錄
 //    server/*.ts，Wave 4 Module 4.24 集中遷移；見
 //    docs/refactor/wave-4-deferrals.md）
+
+// ❌ 禁止：直接讀寫 `passportNumber` 未經加密
+//   bookingParticipants.passportNumber 與 visaApplications.passportNumber
+//   一律經 server/_core/passportEncryption.ts 的 encryptPassport /
+//   decryptParticipantRow / decryptVisaApplicationRow 進出。任何
+//   db.insert(...).values({passportNumber: input.passportNumber}) 或
+//   直接 SELECT 後返回，都會把明文寫入磁碟。
+//
+//   ✅ 正確：所有讀寫走 server/db.ts 已包好的函式
+//     await db.createVisaApplication({passportNumber, ...})  // 自動加密
+//     const app = await db.getVisaApplicationById(id)        // 自動解密
+//     await db.replaceBookingParticipants(bookingId, ...)    // 自動加密
+//     const ps = await db.getBookingParticipants(bookingId)  // 自動解密
+//   （v2 Wave 1 Module 1.8；同套 AES-256-GCM envelope 與 Gmail / Plaid
+//   tokens 共用，見 server/_core/tokenCrypto.ts）
 ```
 
 ---
@@ -204,6 +219,7 @@ grep -rn "object-cover" client/src --include="*.tsx" | grep -v "rounded"
 | 資料庫查詢 | `server/db.ts` |
 | Stripe webhook + idempotency | `server/_core/stripeWebhook.ts` + `server/_core/stripeWebhookIdempotency.ts` + table `stripeWebhookEvents`（refactor Phase 2） |
 | Supplier sync (Lion + UV) | `server/services/supplierSync/{lion,uv,shared,reporting,index}.ts`（refactor Phase 5A） |
+| Passport-at-rest 加密 | `server/_core/tokenCrypto.ts`（AES-256-GCM 通用 envelope）+ `server/_core/passportEncryption.ts`（passport-shape helpers）+ migration `drizzle/0078_passport_encryption.sql`（widen 50→255）+ `server/scripts/backfill-passport-encryption.ts`（idempotent 一次性回填，post-deploy 用 `fly ssh console` 執行；audit-log `passport_backfill_run` 寫入 `adminAuditLog`）— `bookingParticipants.passportNumber` + `visaApplications.passportNumber` 寫入前用 `encryptPassport` 加密，讀出時用 `decryptParticipantRow` / `decryptVisaApplicationRow` 解密。Legacy 明文行靠 `decryptToken` 的 no-prefix fallback 繼續可讀，直到 backfill 跑完。v2 Wave 1 Module 1.8，2026-05-20 |
 | Sentry 觀測（server + client） | `server/_core/sentry.ts` + `client/src/_core/SentryBoundary.tsx`（v2 Wave 1 Module 1.1，2026-05-19） |
 | Pino 結構化日誌 | `server/_core/logger.ts` + `server/_core/correlationId.ts`（v2 Wave 1 Module 1.2，2026-05-20；critical-path subset 已遷，剩餘 sites 待 Wave 4 Module 4.24） |
 | 深度健康檢查 + UptimeRobot | `server/_core/healthCheck.ts` + `/health` Express route + `system.health` tRPC query（DB+Redis+Stripe+LLM ping，Stripe 5min / LLM 1h 快取，v2 Wave 1 Module 1.3，2026-05-20） |

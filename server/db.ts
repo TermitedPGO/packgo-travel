@@ -34,6 +34,25 @@ import {
   aiQuotes, AiQuote, InsertAiQuote,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
+import {
+  encryptPassport,
+  decryptParticipantRow,
+  decryptVisaApplicationRow,
+} from './_core/passportEncryption';
+
+// ─── Passport-at-rest encryption (v2 Wave 1 · Module 1.8) ────────────────
+// `passportNumber` on `bookingParticipants` + `visaApplications` is
+// encrypted before insert/update and decrypted on read so a hypothetical
+// DB dump no longer exposes raw passport numbers. Uses the same
+// AES-256-GCM envelope as Gmail + Plaid tokens via
+// server/_core/tokenCrypto.ts. `decryptToken` returns plaintext as-is
+// when the `enc:v1:` prefix is absent, so legacy rows keep working
+// until server/scripts/backfill-passport-encryption.ts re-encrypts them.
+//
+// CRITICAL: every read/write touching `passportNumber` in this file MUST
+// flow through helpers from server/_core/passportEncryption.ts. Direct
+// `db.insert(...).values({passportNumber})` or returning a row without
+// `decryptParticipantRow` / `decryptVisaApplicationRow` leaks plaintext.
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -994,7 +1013,7 @@ export async function updateBooking(
 /**
  * Get all participants for a booking
  */
-export async function getBookingParticipants(bookingId: number) {
+export async function getBookingParticipants(bookingId: number): Promise<BookingParticipant[]> {
   const db = await getDb();
   if (!db) {
     console.warn("[Database] Cannot get participants: database not available");
@@ -1002,11 +1021,15 @@ export async function getBookingParticipants(bookingId: number) {
   }
 
   const result = await db.select().from(bookingParticipants).where(eq(bookingParticipants.bookingId, bookingId));
-  return result;
+  // v2 Module 1.8: decrypt passportNumber on the way out so callers see plaintext.
+  return result.map((row) => decryptParticipantRow(row));
 }
 
 /**
  * Create a new booking participant
+ *
+ * v2 Module 1.8: passportNumber is encrypted before insert and decrypted
+ * on the return row so callers continue to see plaintext.
  */
 export async function createBookingParticipant(participant: InsertBookingParticipant): Promise<BookingParticipant> {
   const db = await getDb();
@@ -1014,7 +1037,12 @@ export async function createBookingParticipant(participant: InsertBookingPartici
     throw new Error("Database not available");
   }
 
-  const result = await db.insert(bookingParticipants).values(participant);
+  const toInsert: InsertBookingParticipant = {
+    ...participant,
+    passportNumber: participant.passportNumber ? encryptPassport(participant.passportNumber) : participant.passportNumber,
+  };
+
+  const result = await db.insert(bookingParticipants).values(toInsert);
   const insertId = Number(result[0].insertId);
 
   const participants = await db.select().from(bookingParticipants).where(eq(bookingParticipants.id, insertId)).limit(1);
@@ -1022,7 +1050,7 @@ export async function createBookingParticipant(participant: InsertBookingPartici
     throw new Error("Failed to retrieve created participant");
   }
 
-  return participants[0];
+  return decryptParticipantRow(participants[0]);
 }
 
 /**
@@ -1033,6 +1061,9 @@ export async function createBookingParticipant(participant: InsertBookingPartici
  *
  * Implementation: delete-then-insert inside a transaction so partial failures
  * don't leave half-stale participant rows.
+ *
+ * v2 Module 1.8: passportNumber on each inserted row is encrypted; the
+ * subsequent getBookingParticipants call decrypts on the way out.
  */
 export async function replaceBookingParticipants(
   bookingId: number,
@@ -1045,9 +1076,12 @@ export async function replaceBookingParticipants(
   await db.transaction(async (tx) => {
     await tx.delete(bookingParticipants).where(eq(bookingParticipants.bookingId, bookingId));
     if (participants.length > 0) {
-      await tx.insert(bookingParticipants).values(
-        participants.map((p) => ({ ...p, bookingId }))
-      );
+      const toInsert = participants.map((p) => ({
+        ...p,
+        bookingId,
+        passportNumber: p.passportNumber ? encryptPassport(p.passportNumber) : p.passportNumber,
+      }));
+      await tx.insert(bookingParticipants).values(toInsert);
     }
   });
 
@@ -2985,7 +3019,13 @@ export async function createVisaApplication(
 ): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const result = await db.insert(visaApplications).values(data);
+  // v2 Module 1.8: encrypt passportNumber before insert. visaApplications
+  // .passportNumber is NOT NULL, so we always have a value to encrypt.
+  const toInsert: InsertVisaApplication = {
+    ...data,
+    passportNumber: encryptPassport(data.passportNumber),
+  };
+  const result = await db.insert(visaApplications).values(toInsert);
   return (result[0] as { insertId: number }).insertId;
 }
 
@@ -3009,7 +3049,10 @@ export async function getVisaApplicationById(
     .from(visaApplications)
     .where(eq(visaApplications.id, id))
     .limit(1);
-  return result[0] ?? null;
+  // v2 Module 1.8: decrypt passportNumber on the way out so admin UI,
+  // visa email service, Stripe webhook, and applicant status page all
+  // see plaintext transparently.
+  return result[0] ? decryptVisaApplicationRow(result[0]) : null;
 }
 
 // ── 依 Stripe Session 查詢 ────────────────────────────────────
@@ -3023,7 +3066,8 @@ export async function getVisaApplicationByStripeSession(
     .from(visaApplications)
     .where(eq(visaApplications.stripeCheckoutSessionId, sessionId))
     .limit(1);
-  return result[0] ?? null;
+  // v2 Module 1.8: decrypt passportNumber on the way out.
+  return result[0] ? decryptVisaApplicationRow(result[0]) : null;
 }
 
 // ── 查詢所有申請（Admin）────────────────────────────────────
@@ -3061,7 +3105,8 @@ export async function getAllVisaApplications(filters?: {
   ]);
 
   return {
-    applications,
+    // v2 Module 1.8: decrypt passportNumber on the way out for every row.
+    applications: applications.map((row) => decryptVisaApplicationRow(row)),
     total: Number(countResult[0]?.count ?? 0),
   };
 }
