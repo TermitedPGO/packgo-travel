@@ -145,7 +145,7 @@ describe.skipIf(!process.env.DATABASE_URL)('JWT Authentication System', () => {
     it('should handle invalid JWT cookie', async () => {
       const mockReq = {
         cookies: {
-          'manus-session': 'invalid.token.here',
+          'app_session_id': 'invalid.token.here',
         },
       };
 

@@ -10,7 +10,7 @@
 |------|-----|
 | 專案名稱 | PACK&GO 旅行社 |
 | 技術棧 | React 19 + Tailwind 4 + tRPC 11 + Drizzle ORM + MySQL |
-| 部署網域 | packgo09.manus.space |
+| 部署網域 | packgoplay.com（Fly.io `packgo-travel` app；legacy `*.manus.space` 子網域 301-redirect） |
 | 主要語言 | 繁體中文（預設）、英文 |
 | 用戶角色 | `user`（一般會員）、`admin`（旅行社業主） |
 
@@ -87,7 +87,7 @@
 - **認證：** Manus OAuth（`protectedProcedure` 保護需登入的 API）
 - **Admin 保護：** 使用 `adminProcedure`（檢查 `ctx.user.role === 'admin'`）
 - **Admin Rate-Limit：** 自動套用 — `adminProcedure` middleware 在 `server/_core/trpc.ts:33-66` 已包含 60 req/min throttle（per-admin user，QA audit 2026-05-11 Phase 6 P0）。Queries 不節流。新增 admin router 時無需手動加 rate-limit。
-- **檔案儲存：** S3（`server/storage.ts` 的 `storagePut`）
+- **檔案儲存：** Cloudflare R2（`server/storage.ts` 透過 `@aws-sdk/client-s3`，R2 為 S3-compatible API）
 - **AI 調用：** `server/_core/llm.ts` 的 `invokeLLM`（**只在 server 端調用**）
 
 ### 3.3 AI 行程生成架構
@@ -230,7 +230,7 @@ grep -rn "object-cover" client/src --include="*.tsx" | grep -v "rounded"
 | 深度健康檢查 + UptimeRobot | `server/_core/healthCheck.ts` + `/health` Express route + `system.health` tRPC query（DB+Redis+Stripe+LLM ping，Stripe 5min / LLM 1h 快取，v2 Wave 1 Module 1.3，2026-05-20） |
 | PostHog 轉換漏斗分析 | `client/src/_core/analytics.ts`（posthog-js + type-safe `track()` 5 events: tour_view / search / booking_start / booking_step / booking_complete；env-gated `VITE_POSTHOG_KEY`；person_profiles=identified_only；autocapture 關閉；URL PII strip；v2 Wave 1 Module 1.4，2026-05-20） |
 | LLM 調用 | `server/_core/llm.ts` |
-| S3 儲存 | `server/storage.ts` |
+| 檔案儲存 (Cloudflare R2) | `server/storage.ts`（via `@aws-sdk/client-s3`，S3-compatible API） |
 | 認證狀態 | `client/src/_core/hooks/useAuth.ts` |
 | 路由設定 | `client/src/App.tsx` |
 | 全域樣式 | `client/src/index.css` |

@@ -108,8 +108,6 @@ async function startServer() {
     const host = (req.headers.host || "").toLowerCase();
     const isLegacyHost =
       host === "packgo-travel.fly.dev" ||
-      host === "packgo09.manus.space" ||
-      host === "packgo-d3xjbq67.manus.space" ||
       host === "www.packgoplay.com";
     if (isLegacyHost) {
       return res.redirect(308, `https://packgoplay.com${req.originalUrl}`);
@@ -118,15 +116,15 @@ async function startServer() {
   });
 
   // P0-6: CORS whitelist - only allow known origins
+  // Migration to packgoplay.com complete; legacy *.manus.space origins
+  // are no longer accepted (DNS cutover finished, old hosts now 301-redirect
+  // before CORS would even apply).
   const allowedOrigins = [
     // Round 80.18: production custom domain
     "https://packgoplay.com",
     "https://www.packgoplay.com",
     // Fly.io (kept as origin alias — internal health checks + redirect source)
     "https://packgo-travel.fly.dev",
-    // Legacy Manus domains (kept during migration overlap; remove once DNS cutover completes)
-    "https://packgo09.manus.space",
-    "https://packgo-d3xjbq67.manus.space",
     // Development
     "http://localhost:3000",
     "http://localhost:5173",

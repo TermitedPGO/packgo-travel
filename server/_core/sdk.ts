@@ -14,7 +14,7 @@ import type {
   GetUserInfoResponse,
   GetUserInfoWithJwtRequest,
   GetUserInfoWithJwtResponse,
-} from "./types/manusTypes";
+} from "./types/oauthTypes";
 const log = createChildLogger({ module: "sdk" });
 // Utility function
 const isNonEmptyString = (value: unknown): value is string =>
@@ -162,7 +162,7 @@ class SDKServer {
   }
 
   /**
-   * Create a session token for a Manus user openId
+   * Create a session token for an OAuth user openId
    * @example
    * const sessionToken = await sdk.createSessionToken(userInfo.openId);
    */

@@ -6,10 +6,12 @@ describe('BASE_URL env validation', () => {
     expect(ENV.baseUrl).not.toContain('d3xjbq67');
   });
 
-  it('ENV.baseUrl fallback should use packgo09 domain when BASE_URL not set', () => {
-    // The fallback in env.ts is now packgo09.manus.space
-    const fallback = 'https://packgo09.manus.space';
+  it('ENV.baseUrl fallback should use packgoplay.com when BASE_URL not set', () => {
+    // The fallback in env.ts is now packgoplay.com (migration from
+    // *.manus.space subdomains completed; legacy hosts now 301-redirect).
+    const fallback = 'https://packgoplay.com';
     expect(fallback).not.toContain('d3xjbq67');
-    expect(fallback).toContain('packgo09');
+    expect(fallback).not.toContain('manus.space');
+    expect(fallback).toContain('packgoplay');
   });
 });

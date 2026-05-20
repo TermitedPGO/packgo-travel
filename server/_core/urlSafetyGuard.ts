@@ -42,7 +42,6 @@ const ALLOWED_HOSTNAMES = new Set<string>([
 const ALLOWED_HOST_SUFFIXES = [
   ".r2.cloudflarestorage.com",
   ".r2.dev",
-  ".manus.space",  // Legacy — kept during migration
   ".s3.amazonaws.com",
   ".s3.us-west-1.amazonaws.com",
   ".s3-website.us-west-1.amazonaws.com",
