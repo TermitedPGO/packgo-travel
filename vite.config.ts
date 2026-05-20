@@ -1,6 +1,7 @@
 import { jsxLocPlugin } from "@builder.io/vite-plugin-jsx-loc";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import { sentryVitePlugin } from "@sentry/vite-plugin";
 import fs from "node:fs";
 import path from "node:path";
 import { defineConfig, type Plugin, type PluginOption, type ViteDevServer } from "vite";
@@ -162,6 +163,32 @@ const plugins: PluginOption[] = [
   vitePluginManusDebugCollector(),
 ];
 
+// v2 Wave 1 Module 1.1 — Sentry sourcemap upload (production builds only).
+// Gated on SENTRY_AUTH_TOKEN so dev/CI without the token still builds.
+// Returns Plugin[] from sentryVitePlugin; spread into plugins array.
+if (process.env.SENTRY_AUTH_TOKEN && process.env.SENTRY_ORG && process.env.SENTRY_PROJECT) {
+  plugins.push(
+    ...sentryVitePlugin({
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+      org: process.env.SENTRY_ORG,
+      project: process.env.SENTRY_PROJECT,
+      sourcemaps: {
+        // The Vite build emits sourcemaps when build.sourcemap=true. We
+        // pass the glob explicitly so the plugin uploads only the production
+        // chunk maps, not any leftover dev artifacts.
+        assets: "./dist/public/assets/**",
+        // Delete the .map files from disk after upload so they're never
+        // served from the static dir (avoids leaking source to the
+        // public internet — Sentry resolves them server-side).
+        filesToDeleteAfterUpload: "./dist/public/assets/**/*.map",
+      },
+      release: {
+        name: process.env.FLY_MACHINE_VERSION ?? process.env.GIT_COMMIT,
+      },
+    }),
+  );
+}
+
 export default defineConfig({
   plugins,
   resolve: {
@@ -177,6 +204,13 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    // v2 Wave 1 Module 1.1 — emit sourcemaps so @sentry/vite-plugin has
+    // something to upload. Sourcemaps go to dist/public/assets/*.map and
+    // are uploaded to Sentry only when SENTRY_AUTH_TOKEN is set (see
+    // plugin gate above). They are NOT served alongside the JS bundles
+    // in production because the static file middleware would expose them
+    // — Sentry resolves them server-side via the upload.
+    sourcemap: true,
     rollupOptions: {
       output: {
         // Split large vendor libs into their own chunks so they can be cached

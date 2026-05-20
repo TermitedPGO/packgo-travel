@@ -6185,6 +6185,10 @@ export const en = {
     toastDone: 'Reconciliation complete',
     toastFailed: 'Failed: ',
   },
+  errorBoundary: {
+    fallback: 'Something went wrong. Our team has been notified. Please try again.',
+    reload: 'Reload',
+  },
   wechatAssistTab: {
     title: 'WeChat Assist',
     subtitle: 'Paste a WeChat customer message → AI drafts a reply → you review, edit, approve → copy back to WeChat.',

@@ -196,6 +196,7 @@ grep -rn "object-cover" client/src --include="*.tsx" | grep -v "rounded"
 | 資料庫查詢 | `server/db.ts` |
 | Stripe webhook + idempotency | `server/_core/stripeWebhook.ts` + `server/_core/stripeWebhookIdempotency.ts` + table `stripeWebhookEvents`（refactor Phase 2） |
 | Supplier sync (Lion + UV) | `server/services/supplierSync/{lion,uv,shared,reporting,index}.ts`（refactor Phase 5A） |
+| Sentry 觀測（server + client） | `server/_core/sentry.ts` + `client/src/_core/SentryBoundary.tsx`（v2 Wave 1 Module 1.1，2026-05-19） |
 | LLM 調用 | `server/_core/llm.ts` |
 | S3 儲存 | `server/storage.ts` |
 | 認證狀態 | `client/src/_core/hooks/useAuth.ts` |

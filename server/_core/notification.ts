@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import nodemailer, { type Transporter } from "nodemailer";
+import { captureMessage } from "./sentry";
 
 export type NotificationPayload = {
   title: string;
@@ -106,6 +107,15 @@ export async function notifyOwner(
   payload: NotificationPayload
 ): Promise<boolean> {
   const { title, content } = validatePayload(payload);
+
+  // v2 Wave 1 Module 1.1 — also surface the notification in Sentry. Belt +
+  // suspenders per CLAUDE.md §核心原則: if email delivery silently fails
+  // (SMTP misconfig, rate limit, OWNER_EMAIL typo) the trail is still in
+  // Sentry. Capture as "warning" — notifyOwner is the owner-alert channel,
+  // not an error channel; treating every alert as an error would noise up
+  // the Sentry inbox.
+  captureMessage(`[notifyOwner] ${title}\n${content}`, "warning");
+
   const transport = getNotifyTransport();
   if (!transport) {
     console.warn(

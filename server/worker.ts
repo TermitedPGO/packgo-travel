@@ -10,6 +10,7 @@ import {
 import { generateTourFromUrlInternal } from "./tourGenerator";
 import { translateTour, Language } from "./translation";
 import { notifyOwner } from "./_core/notification";
+import { captureException } from "./_core/sentry";
 
 /**
  * Worker for processing tour generation jobs
@@ -163,6 +164,17 @@ tourGenerationWorker.on("completed", (job) => {
 
 tourGenerationWorker.on("failed", (job, err) => {
   console.error(`❌ Job ${job?.id} failed:`, err.message);
+  // v2 Wave 1 Module 1.1 — Sentry capture alongside email (belt + suspenders).
+  captureException(err, {
+    tags: {
+      worker: "tour-generation",
+      jobId: String(job?.id ?? "?"),
+    },
+    extras: {
+      tourId: (job?.data as any)?.tourId ?? null,
+      url: (job?.data as any)?.url ?? null,
+    },
+  });
   notifyOwner({
     title: `[TourGeneration] Job ${job?.id ?? "?"} failed`,
     content: `Tour ID: ${(job?.data as any)?.tourId ?? "?"}\nError: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
@@ -171,6 +183,7 @@ tourGenerationWorker.on("failed", (job, err) => {
 
 tourGenerationWorker.on("error", (err) => {
   console.error("❌ Worker error:", err);
+  captureException(err, { tags: { worker: "tour-generation", phase: "worker-error" } });
 });
 
 console.log("✅ Tour generation worker initialized (optimized Redis polling)");
@@ -217,6 +230,17 @@ tourTranslationWorker.on("completed", (job) => {
 
 tourTranslationWorker.on("failed", (job, err) => {
   console.error(`❌ Translation job ${job?.id} failed:`, err.message);
+  // v2 Wave 1 Module 1.1 — Sentry capture alongside email.
+  captureException(err, {
+    tags: {
+      worker: "tour-translation",
+      jobId: String(job?.id ?? "?"),
+    },
+    extras: {
+      tourId: (job?.data as any)?.tourId ?? null,
+      targetLanguages: (job?.data as any)?.targetLanguages ?? null,
+    },
+  });
   notifyOwner({
     title: `[TourTranslation] Job ${job?.id ?? "?"} failed`,
     content: `Tour ID: ${(job?.data as any)?.tourId ?? "?"}\nError: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
@@ -225,6 +249,7 @@ tourTranslationWorker.on("failed", (job, err) => {
 
 tourTranslationWorker.on("error", (err) => {
   console.error("❌ Translation worker error:", err);
+  captureException(err, { tags: { worker: "tour-translation", phase: "worker-error" } });
 });
 
 console.log("✅ Tour translation worker initialized");

@@ -1,4 +1,10 @@
 import "dotenv/config";
+// v2 Wave 1 Module 1.1 — initSentry MUST run before express() is invoked
+// so Sentry's OpenTelemetry-based Express instrumentation can patch the
+// router. Keep this import + call at the very top.
+import { initSentry, setupExpressErrorHandler } from "./sentry";
+initSentry();
+
 import express from "express";
 import compression from "compression";
 import cors from "cors";
@@ -758,6 +764,11 @@ async function startServer() {
   } else {
     serveStatic(app);
   }
+
+  // v2 Wave 1 Module 1.1 — Sentry's Express error handler. MUST be the
+  // last app.use() so it catches anything that bubbles up from routes /
+  // tRPC / static serving. No-op when SENTRY_DSN unset (initSentry guarded).
+  setupExpressErrorHandler(app);
 
   // Schedule zombie task cleanup every 10 minutes (timeout: 25 min)
   // Round 36-Fix-2: 從 5 分鐘延長到 25 分鐘，避免誤殺正在執行的任務

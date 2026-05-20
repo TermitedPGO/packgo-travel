@@ -6187,6 +6187,10 @@ export const zhTW = {
     toastDone: '對帳完成',
     toastFailed: '失敗：',
   },
+  errorBoundary: {
+    fallback: '發生了未預期的錯誤,我們已收到通知,請稍候再試。',
+    reload: '重新載入',
+  },
   wechatAssistTab: {
     title: 'WeChat 助手',
     subtitle: '把 WeChat 客戶訊息貼進來 → AI 立刻產出草稿 → 你檢查、編輯、核准 → 複製貼回 WeChat。',
