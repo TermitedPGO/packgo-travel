@@ -7,9 +7,10 @@ if (!jwtSecret || jwtSecret.trim() === "") {
       "This is a critical security requirement. Please configure JWT_SECRET before starting in production."
     );
   } else {
-    console.warn(
-      "[Security Warning] JWT_SECRET is not set. Using empty string for development. " +
-      "This MUST be set in production."
+    // Use stderr directly — env.ts is imported BEFORE logger.ts initializes
+    // its pino instance, and there's no value in deferring this warning.
+    process.stderr.write(
+      "[Security Warning] JWT_SECRET is not set. Using empty string for development. This MUST be set in production.\n",
     );
   }
 }

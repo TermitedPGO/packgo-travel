@@ -25,6 +25,8 @@ import type { NextFunction, Request, Response } from "express";
 import { COOKIE_NAME } from "@shared/const";
 import { verifyToken } from "../jwt";
 import { getUserById } from "../db";
+import { createChildLogger } from "./logger";
+const log = createChildLogger({ module: "requireAdmin" });
 
 declare global {
   namespace Express {
@@ -67,7 +69,7 @@ async function authenticate(
     }
     return user;
   } catch (err) {
-    console.error("[auth] middleware error:", err);
+    log.error({ err }, "[auth] middleware error");
     res.status(500).json({ error: "Authentication check failed" });
     return null;
   }

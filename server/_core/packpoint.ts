@@ -18,6 +18,8 @@
 import { eq, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import { users, pointsTransactions, tours } from "../../drizzle/schema";
+import { createChildLogger } from "./logger";
+const log = createChildLogger({ module: "packpoint" });
 
 /** Tier earn-rate multiplier — applied on top of base 1 pt per $1. */
 export const TIER_MULTIPLIER: Record<"free" | "plus" | "concierge", number> = {
@@ -102,7 +104,7 @@ export async function awardPackpoint(args: {
   description?: string;
 }): Promise<number | null> {
   if (args.delta <= 0) {
-    console.warn("[Packpoint] awardPackpoint called with non-positive delta", args);
+    log.warn({ args }, "[Packpoint] awardPackpoint called with non-positive delta");
     return null;
   }
   const db = await getDb();
@@ -122,7 +124,7 @@ export async function awardPackpoint(args: {
       .limit(1);
 
     if (!user) {
-      console.error("[Packpoint] User not found:", args.userId);
+      log.error({ userId: args.userId }, "[Packpoint] User not found");
       return null;
     }
 
@@ -148,8 +150,15 @@ export async function awardPackpoint(args: {
       balanceAfter: newBalance,
     });
 
-    console.log(
-      `[Packpoint] +${args.delta} (${args.reason}) → user ${args.userId} balance=${newBalance} lifetime=${newLifetime}`
+    log.info(
+      {
+        delta: args.delta,
+        reason: args.reason,
+        userId: args.userId,
+        balance: newBalance,
+        lifetime: newLifetime,
+      },
+      "[Packpoint] award",
     );
     return newBalance;
   });
@@ -171,7 +180,7 @@ export async function deductPackpoint(args: {
   description?: string;
 }): Promise<number | null> {
   if (args.amount <= 0) {
-    console.warn("[Packpoint] deductPackpoint called with non-positive amount", args);
+    log.warn({ args }, "[Packpoint] deductPackpoint called with non-positive amount");
     return null;
   }
   const db = await getDb();
@@ -185,7 +194,7 @@ export async function deductPackpoint(args: {
       .limit(1);
 
     if (!user) {
-      console.error("[Packpoint] User not found:", args.userId);
+      log.error({ userId: args.userId }, "[Packpoint] User not found");
       return null;
     }
 
@@ -211,8 +220,14 @@ export async function deductPackpoint(args: {
       balanceAfter: newBalance,
     });
 
-    console.log(
-      `[Packpoint] -${actualDeduct} (${args.reason}) → user ${args.userId} balance=${newBalance}`
+    log.info(
+      {
+        deducted: actualDeduct,
+        reason: args.reason,
+        userId: args.userId,
+        balance: newBalance,
+      },
+      "[Packpoint] deduct",
     );
     return newBalance;
   });
@@ -243,7 +258,7 @@ export async function awardBookingPackpoint(args: {
     .limit(1);
 
   if (existing.length > 0) {
-    console.log(`[Packpoint] Booking ${args.bookingId} already awarded, skipping`);
+    log.info({ bookingId: args.bookingId }, "[Packpoint] Booking already awarded, skipping");
     return 0;
   }
 
@@ -267,7 +282,7 @@ export async function awardBookingPackpoint(args: {
   const tour = tourRows[0];
   const user = userRows[0];
   if (!tour || !user) {
-    console.warn("[Packpoint] Missing tour or user for booking", args);
+    log.warn({ args }, "[Packpoint] Missing tour or user for booking");
     return 0;
   }
 
@@ -280,8 +295,9 @@ export async function awardBookingPackpoint(args: {
   });
 
   if (points === 0) {
-    console.log(
-      `[Packpoint] Booking ${args.bookingId} → 0 pts (excluded/coupon/zero rate)`
+    log.info(
+      { bookingId: args.bookingId },
+      "[Packpoint] Booking → 0 pts (excluded/coupon/zero rate)",
     );
     return 0;
   }

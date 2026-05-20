@@ -39,6 +39,8 @@ import {
 } from "../../_core/gmail";
 import { runInquiryAgent, DEFAULT_INQUIRY_POLICY } from "./inquiryAgent";
 import { runRefundAgent, DEFAULT_REFUND_POLICY } from "./refundAgent";
+import { createChildLogger } from "../../_core/logger";
+const log = createChildLogger({ module: "gmailPipeline" });
 
 const PROCESSED_LABEL = "PACKGO_AI_PROCESSED";
 
@@ -134,10 +136,14 @@ export async function runGmailPipeline(
       // 2026-05-17: log full per-message stack to fly logs so Jeff can
       // diagnose stuck failures (e.g. 295 failed / 0 processed means
       // SOMETHING consistently breaks — surface what).
-      console.error(
-        `[gmailPipeline] Failed thread ${msg.id} (subject: "${msg.subject?.slice(0, 60)}", from: ${msg.from}):`,
-        msgStr,
-        e instanceof Error ? e.stack?.split("\n").slice(0, 4).join(" | ") : ""
+      log.error(
+        {
+          err: e,
+          messageId: msg.id,
+          subject: msg.subject?.slice(0, 60),
+          from: msg.from,
+        },
+        "[gmailPipeline] Failed thread",
       );
     }
   }
@@ -229,9 +235,9 @@ async function processOneEmail(
     decision.escalationReason =
       `Prompt-injection guard tripped (patterns: ${shielded.detectedPatterns.slice(0, 3).join("; ")})` +
       (decision.escalationReason ? ` | ${decision.escalationReason}` : "");
-    console.warn(
-      `[gmailPipeline] Force-escalated due to injection patterns in email from ${senderEmail}:`,
-      shielded.detectedPatterns
+    log.warn(
+      { senderEmail, detectedPatterns: shielded.detectedPatterns },
+      "[gmailPipeline] Force-escalated due to injection patterns in email",
     );
   }
 
@@ -268,12 +274,13 @@ async function processOneEmail(
       });
       if (result_cta.appended) {
         decision.draftReply = result_cta.draftReply;
-        console.log(
-          `[gmailPipeline] Appended Plus upgrade CTA to draft for ${senderEmail}`
+        log.info(
+          { senderEmail },
+          "[gmailPipeline] Appended Plus upgrade CTA to draft",
         );
       }
     } catch (err) {
-      console.warn("[gmailPipeline] maybeAppendUpgradeCta failed (non-fatal):", err);
+      log.warn({ err }, "[gmailPipeline] maybeAppendUpgradeCta failed (non-fatal)");
     }
   }
 
@@ -318,9 +325,9 @@ async function processOneEmail(
     ];
     const tripped = blacklist.find((re) => re.test(draft));
     if (tripped) {
-      console.warn(
+      log.warn(
+        { pattern: tripped.toString() },
         "[InquiryAgent] auto-send blocked: draft tripped safety regex",
-        tripped.toString()
       );
       decision.shouldEscalate = true;
       decision.escalationReason =
@@ -457,10 +464,7 @@ async function processOneEmail(
       });
     } catch (err) {
       // Don't break the pipeline on notify failure
-      console.warn(
-        "[gmailPipeline] #inquiry channel notify failed:",
-        (err as Error).message
-      );
+      log.warn({ err }, "[gmailPipeline] #inquiry channel notify failed");
     }
   }
 

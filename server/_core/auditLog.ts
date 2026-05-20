@@ -20,6 +20,8 @@ import { getDb } from "../db";
 import { createHash } from "crypto";
 import { desc, eq, asc, isNotNull } from "drizzle-orm";
 import { redis } from "../redis";
+import { createChildLogger } from "./logger";
+const log = createChildLogger({ module: "auditLog" });
 
 // ─── Hash chain (SECURITY_AUDIT_2026_05_14 P2-1) ───────────────────────────
 
@@ -169,7 +171,7 @@ export async function audit(input: AuditInput): Promise<void> {
     if (!ctx.user) {
       // Non-admin or anonymous calls reaching audit() shouldn't happen, but
       // log a warning if they do. Don't throw — just skip.
-      console.warn(`[audit] attempted to log without ctx.user: action=${action}`);
+      log.warn({ action }, "[audit] attempted to log without ctx.user");
       return;
     }
     const db = await getDb();
@@ -228,7 +230,7 @@ export async function audit(input: AuditInput): Promise<void> {
       const ins = await db.insert(adminAuditLog).values(rowSansId);
       const insertId = Number((ins as any)[0]?.insertId ?? 0);
       if (!insertId) {
-        console.warn("[audit] insert returned no id; skipping hash");
+        log.warn("[audit] insert returned no id; skipping hash");
         return;
       }
       const canonical = canonicalAuditRow({ id: insertId, ...rowSansId });
@@ -241,7 +243,7 @@ export async function audit(input: AuditInput): Promise<void> {
   } catch (err) {
     // Audit write failures must never break the request. Log loudly so they're
     // visible in Fly logs, but always swallow.
-    console.error("[audit] write failed (request continued):", (err as Error)?.message);
+    log.error({ err }, "[audit] write failed (request continued)");
   }
 }
 

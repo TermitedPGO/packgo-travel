@@ -20,6 +20,8 @@ import { promises as fs } from "fs";
 import { invokeLLM } from "./llm";
 import { generateImage } from "./imageGen";
 import { storagePut } from "../storage";
+import { createChildLogger } from "./logger";
+const log = createChildLogger({ module: "posterProcessor" });
 
 /**
  * Resolve the PACK&GO logo file from disk (server/assets/packgo-logo-square.png).
@@ -39,14 +41,14 @@ async function getBrandLogoBuffer(): Promise<Buffer | null> {
   for (const p of candidates) {
     try {
       const buf = await fs.readFile(p);
-      console.log(`[Poster] Loaded brand logo from ${p} (${buf.length} bytes)`);
+      log.info({ path: p, bytes: buf.length }, "[Poster] Loaded brand logo");
       _cachedLogoBuffer = buf;
       return buf;
     } catch {
       continue;
     }
   }
-  console.warn("[Poster] No brand logo file found — posters will lack logo composite");
+  log.warn("[Poster] No brand logo file found — posters will lack logo composite");
   return null;
 }
 
@@ -161,7 +163,7 @@ CRITICAL — content rules:
 - Look like Conde Nast Traveler or Wallpaper magazine quality.
 `.trim();
 
-  console.log(`[Poster] Generating PACK&GO poster via gpt-image-2 (${analysis.title})`);
+  log.info({ title: analysis.title }, "[Poster] Generating PACK&GO poster via gpt-image-2");
   const result = await generateImage({
     prompt,
     size: "1024x1792",
@@ -181,8 +183,9 @@ CRITICAL — content rules:
   const fileName = `posters/branded-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
   const { url } = await storagePut(fileName, finalBuffer, "image/png");
 
-  console.log(
-    `[Poster] ✓ Generated in ${result.durationMs}ms, $${result.cost.toFixed(3)} → ${url}`
+  log.info(
+    { durationMs: result.durationMs, cost: result.cost, url },
+    "[Poster] Generated",
   );
   return { url, cost: result.cost, durationMs: result.durationMs };
 }
@@ -240,7 +243,7 @@ async function postProcessWithBrandAssets(args: {
         left: Math.round((width - logoWidth) / 2),
       });
     } catch (err) {
-      console.error("[Poster] Logo composite failed (skipping):", err);
+      log.error({ err }, "[Poster] Logo composite failed (skipping)");
     }
   }
 
@@ -332,7 +335,7 @@ JSON 欄位:
       suitableAudience: parsed.suitableAudience,
     };
   } catch (err) {
-    console.error("[Poster] Vision JSON parse failed:", err, raw);
+    log.error({ err, raw }, "[Poster] Vision JSON parse failed");
     return {
       title: "(AI 解析失敗,請手動輸入標題)",
       highlights: [],
@@ -493,7 +496,7 @@ ${args.originalCopyText ? `供應商原宣傳文(供參考,但要重寫成 PACK&
       hashtags: parsed.hashtags,
     };
   } catch (err) {
-    console.error(`[Poster] Copy JSON parse failed for ${args.platform}:`, err, raw);
+    log.error({ err, platform: args.platform, raw }, "[Poster] Copy JSON parse failed");
     // Fallback: use raw text directly
     return { platform: args.platform, copyText: raw };
   }
@@ -527,7 +530,7 @@ export async function generateAllPlatformCopies(args: {
 
   return results.map((r, i) => {
     if (r.status === "fulfilled") return r.value;
-    console.error(`[Poster] ${PLATFORMS[i]} copy generation failed:`, r.reason);
+    log.error({ err: r.reason, platform: PLATFORMS[i] }, "[Poster] copy generation failed");
     return {
       platform: PLATFORMS[i],
       copyText: `(此平台 AI 生成失敗,請手動編輯)\n\n標題:${args.posterAnalysis.title}`,

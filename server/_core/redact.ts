@@ -1,7 +1,7 @@
 /**
  * PII redaction helpers for server logs.
  *
- * QA audit 2026-05-11 Phase 6 found 22+ console.log sites printing full
+ * QA audit 2026-05-11 Phase 6 found 22+ log sites printing full
  * customer emails / phones / names to stdout, which reaches Fly.io
  * aggregated logs and violates CCPA's "reasonable security" requirement.
  *

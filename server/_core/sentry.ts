@@ -37,8 +37,12 @@ let initialized = false;
  * Initialize Sentry. Idempotent — safe to call multiple times. After the
  * first successful call, all subsequent calls are no-ops (logged at info).
  *
- * No-ops with a console.warn if `SENTRY_DSN` is unset — keeps dev /
- * preview deploys working without forcing the env var.
+ * Writes to process.stderr if `SENTRY_DSN` is unset — keeps dev /
+ * preview deploys working without forcing the env var. Deliberately avoids
+ * the pino logger here because logger.ts imports @sentry/node for the
+ * error-bridge integration: importing logger from sentry.ts would create a
+ * circular dependency on module init (logger constructor runs sentry bridge
+ * setup → reaches into sentry.ts → which imports logger → boom).
  */
 export function initSentry(): void {
   if (initialized) {
@@ -47,8 +51,8 @@ export function initSentry(): void {
 
   const dsn = process.env.SENTRY_DSN;
   if (!dsn) {
-    console.warn(
-      "[sentry] SENTRY_DSN not set; skipping init. Errors will NOT be reported.",
+    process.stderr.write(
+      "[sentry] SENTRY_DSN not set; skipping init. Errors will NOT be reported.\n",
     );
     initialized = true; // mark so we don't spam the warning
     return;
@@ -119,8 +123,11 @@ export function captureException(
     });
   } catch (sentryErr) {
     // NEVER throw from observability. A broken Sentry transport must not
-    // crash the operation it was trying to instrument.
-    console.error("[sentry.captureException] internal error:", sentryErr);
+    // crash the operation it was trying to instrument. Use process.stderr
+    // directly to avoid recursing through the pino-Sentry bridge.
+    process.stderr.write(
+      `[sentry.captureException] internal error: ${String(sentryErr)}\n`,
+    );
   }
 }
 
@@ -134,7 +141,10 @@ export function captureMessage(
   try {
     Sentry.captureMessage(msg, level);
   } catch (sentryErr) {
-    console.error("[sentry.captureMessage] internal error:", sentryErr);
+    // Same reasoning as captureException — use stderr to avoid recursion.
+    process.stderr.write(
+      `[sentry.captureMessage] internal error: ${String(sentryErr)}\n`,
+    );
   }
 }
 

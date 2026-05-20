@@ -24,7 +24,7 @@
  * `PLAID_ENCRYPTION_KEY` (backward-compat). 32 raw bytes, base64-encoded
  * in the env var. Generate via:
  *
- *     node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+ *     node -e "process.stdout.write(require('crypto').randomBytes(32).toString('base64'))"
  */
 
 import crypto from "crypto";
@@ -41,7 +41,7 @@ function getEncryptionKey(): Buffer {
   if (!k) {
     throw new Error(
       "APP_ENCRYPTION_KEY (or PLAID_ENCRYPTION_KEY) not set. Generate via: " +
-        `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`
+        `node -e "process.stdout.write(require('crypto').randomBytes(32).toString('base64'))"`
     );
   }
   const buf = Buffer.from(k, "base64");

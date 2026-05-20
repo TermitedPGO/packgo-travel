@@ -11,6 +11,8 @@
 import { createHash } from "crypto";
 import type { InvokeParams, InvokeResult } from "./llm";
 import { redis } from "../redis";
+import { createChildLogger } from "./logger";
+const log = createChildLogger({ module: "llmCache" });
 
 // Simple in-memory cache as fallback (when Redis is not available)
 const memoryCache = new Map<string, { result: InvokeResult; expireAt: number }>();
@@ -18,7 +20,7 @@ let redisAvailable = true;
 
 // Test Redis connection on startup
 redis.ping().catch(() => {
-  console.warn("[LLMCache] Redis unavailable, using memory cache fallback");
+  log.warn("[LLMCache] Redis unavailable, using memory cache fallback");
   redisAvailable = false;
 });
 
@@ -57,28 +59,28 @@ export async function getCachedResponse(params: InvokeParams): Promise<InvokeRes
     try {
       const cached = await redis.get(cacheKey);
       if (cached) {
-        console.log(`[LLMCache] ✅ Redis cache HIT: ${cacheKey.substring(0, 32)}...`);
+        log.debug({ cacheKey: cacheKey.substring(0, 32) }, "[LLMCache] Redis cache HIT");
         return JSON.parse(cached) as InvokeResult;
       }
     } catch (error) {
-      console.warn(`[LLMCache] Redis error, falling back to memory cache:`, error);
+      log.warn({ err: error }, "[LLMCache] Redis error, falling back to memory cache");
       redisAvailable = false;
     }
   }
-  
+
   // Fallback to memory cache
   const memoryEntry = memoryCache.get(cacheKey);
   if (memoryEntry && memoryEntry.expireAt > Date.now()) {
-    console.log(`[LLMCache] Memory cache HIT: ${cacheKey.substring(0, 32)}...`);
+    log.debug({ cacheKey: cacheKey.substring(0, 32) }, "[LLMCache] Memory cache HIT");
     return memoryEntry.result;
   }
-  
+
   // Clean up expired memory cache entries
   if (memoryEntry && memoryEntry.expireAt <= Date.now()) {
     memoryCache.delete(cacheKey);
   }
-  
-  console.log(`[LLMCache] Cache MISS: ${cacheKey.substring(0, 32)}...`);
+
+  log.debug({ cacheKey: cacheKey.substring(0, 32) }, "[LLMCache] Cache MISS");
   return null;
 }
 
@@ -95,9 +97,9 @@ export async function setCachedResponse(params: InvokeParams, result: InvokeResu
   if (redisAvailable) {
     try {
       await redis.setex(cacheKey, ttl, JSON.stringify(result));
-      console.log(`[LLMCache] 💾 Cached to Redis: ${cacheKey.substring(0, 32)}... (TTL: 24h)`);
+      log.debug({ cacheKey: cacheKey.substring(0, 32), ttl }, "[LLMCache] Cached to Redis");
     } catch (error) {
-      console.warn(`[LLMCache] Redis error, falling back to memory cache:`, error);
+      log.warn({ err: error }, "[LLMCache] Redis error, falling back to memory cache");
       redisAvailable = false;
     }
   }
@@ -116,7 +118,7 @@ export async function setCachedResponse(params: InvokeParams, result: InvokeResu
       memoryCache.set(key, value);
     });
     
-    console.log(`[LLMCache] Cleaned up memory cache, current size: ${memoryCache.size}`);
+    log.debug({ size: memoryCache.size }, "[LLMCache] Cleaned up memory cache");
   }
 }
 
@@ -135,7 +137,7 @@ export async function getCacheStats() {
       const keys = await redis.keys("llm:cache:*");
       redisKeys = keys.length;
     } catch (error) {
-      console.warn(`[LLMCache] Failed to get Redis stats:`, error);
+      log.warn({ err: error }, "[LLMCache] Failed to get Redis stats");
     }
   }
   
@@ -162,14 +164,14 @@ export async function clearCache(): Promise<void> {
       const keys = await redis.keys("llm:cache:*");
       if (keys.length > 0) {
         await redis.del(...keys);
-        console.log(`[LLMCache] Cleared ${keys.length} Redis cache entries`);
+        log.info({ count: keys.length }, "[LLMCache] Cleared Redis cache entries");
       }
     } catch (error) {
-      console.warn(`[LLMCache] Failed to clear Redis cache:`, error);
+      log.warn({ err: error }, "[LLMCache] Failed to clear Redis cache");
     }
   }
-  
+
   // Clear memory cache
   memoryCache.clear();
-  console.log("[LLMCache] Memory cache cleared");
+  log.info("[LLMCache] Memory cache cleared");
 }

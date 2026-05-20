@@ -16,7 +16,7 @@
  * Security:
  *   - access_token NEVER stored in plain text. AES-256-GCM at rest.
  *   - Encryption key from env PLAID_ENCRYPTION_KEY (32-byte base64-encoded).
- *     Generate once via `node -e "console.log(require('crypto').
+ *     Generate once via `node -e "process.stdout.write(require('crypto').
  *     randomBytes(32).toString('base64'))"` and set as Fly secret.
  *   - Webhook verifier (Plaid signs JWT in webhook-verification header).
  *
@@ -40,13 +40,15 @@ import {
   type Transaction,
   type RemovedTransaction,
 } from "plaid";
+import { createChildLogger } from "./logger";
+const log = createChildLogger({ module: "plaid" });
 
 // ─── Configuration ────────────────────────────────────────────────────────
 
 function getPlaidEnv(): keyof typeof PlaidEnvironments {
   const e = (process.env.PLAID_ENV || "sandbox").toLowerCase();
   if (e === "sandbox" || e === "development" || e === "production") return e;
-  console.warn(`[plaid] unknown PLAID_ENV "${e}", defaulting to sandbox`);
+  log.warn({ env: e }, "[plaid] unknown PLAID_ENV, defaulting to sandbox");
   return "sandbox";
 }
 
@@ -73,7 +75,7 @@ export function getPlaidClient(): PlaidApi {
     },
   });
   cachedClient = new PlaidApi(cfg);
-  console.log(`[plaid] Client initialized (env=${env})`);
+  log.info({ env }, "[plaid] Client initialized");
   return cachedClient;
 }
 
@@ -95,7 +97,7 @@ function getEncryptionKey(): Buffer {
   if (!k) {
     throw new Error(
       "PLAID_ENCRYPTION_KEY not set. Generate via: " +
-        `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`
+        `node -e "process.stdout.write(require('crypto').randomBytes(32).toString('base64'))"`,
     );
   }
   const buf = Buffer.from(k, "base64");

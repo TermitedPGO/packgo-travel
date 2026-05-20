@@ -16,6 +16,8 @@ import { google } from "googleapis";
 import { OAuth2Client } from "google-auth-library";
 import { ENV } from "./env";
 import { decryptToken } from "./tokenCrypto";
+import { createChildLogger } from "./logger";
+const log = createChildLogger({ module: "gmail" });
 
 const GMAIL_SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly",
@@ -158,7 +160,7 @@ export async function listUnreadMessages(
       });
       results.push(parseMessage(full.data));
     } catch (e) {
-      console.warn("[gmail] failed to fetch message", m.id, e);
+      log.warn({ err: e, messageId: m.id }, "[gmail] failed to fetch message");
     }
   }
   return results;

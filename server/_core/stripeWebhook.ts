@@ -8,6 +8,12 @@ import { createAccountingEntry } from "../db";
 import { notifyOwner } from "./notification";
 import { redactEmail } from "./redact";
 import { claimStripeEvent, markStripeEventSucceeded, markStripeEventFailed } from "./stripeWebhookIdempotency";
+// v2 Wave 1 Module 1.2 — pino structured logger. We use a child logger so
+// every line carries module="stripeWebhook" without manual tagging.
+// Searchability: Fly's log grep matches inside JSON strings, so
+// `fly logs | grep evt_test_xyz` still works against this output.
+import { createChildLogger } from "./logger";
+const log = createChildLogger({ module: "stripeWebhook" });
 
 
 // P0-2: Lazy-load Stripe to prevent server crash when STRIPE_SECRET_KEY is not set
@@ -26,7 +32,7 @@ export async function handleStripeWebhook(req: Request, res: Response) {
   const sig = req.headers["stripe-signature"];
 
   if (!sig) {
-    console.error("[Stripe Webhook] No signature found");
+    log.error("[Stripe Webhook] No signature found");
     return res.status(400).send("No signature found");
   }
 
@@ -38,25 +44,28 @@ export async function handleStripeWebhook(req: Request, res: Response) {
       sig,
       ENV.stripeWebhookSecret
     );
-  } catch (err: any) {
-    console.error(`[Stripe Webhook] Signature verification failed: ${err.message}`);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
+  } catch (err) {
+    log.error({ err }, "[Stripe Webhook] Signature verification failed");
+    return res.status(400).send(`Webhook Error: ${(err as Error).message}`);
   }
 
   // Handle test events
   if (event.id.startsWith("evt_test_")) {
-    console.log("[Stripe Webhook] Test event detected, returning verification response");
+    log.info({ eventId: event.id }, "[Stripe Webhook] Test event detected, returning verification response");
     return res.json({
       verified: true,
     });
   }
 
-  console.log(`[Stripe Webhook] Received event: ${event.type}`);
+  log.info({ eventId: event.id, type: event.type }, "[Stripe Webhook] Received event");
 
   // Phase 2: central idempotency. UNIQUE(eventId) collision = Stripe replay.
   const claim = await claimStripeEvent(event);
   if (claim.alreadyProcessed) {
-    console.log(`[Stripe Webhook] Idempotent skip: event ${event.id} already ${claim.existingStatus}`);
+    log.info(
+      { eventId: event.id, existingStatus: claim.existingStatus },
+      "[Stripe Webhook] Idempotent skip",
+    );
     return res.json({ received: true, idempotent: true });
   }
 
@@ -118,26 +127,30 @@ export async function handleStripeWebhook(req: Request, res: Response) {
       }
 
       default:
-        console.log(`[Stripe Webhook] Unhandled event type: ${event.type}`);
+        log.info({ type: event.type }, "[Stripe Webhook] Unhandled event type");
     }
 
     await markStripeEventSucceeded(claim.rowId);
     res.json({ received: true });
-  } catch (error: any) {
-    console.error(`[Stripe Webhook] Error processing event: ${error.message}`);
-    await markStripeEventFailed(claim.rowId, error).catch((e) =>
-      console.error("[Stripe Webhook] mark-failed write failed:", (e as Error).message)
+  } catch (error) {
+    log.error({ err: error, eventId: event.id }, "[Stripe Webhook] Error processing event");
+    await markStripeEventFailed(claim.rowId, error as Error).catch((e) =>
+      log.error({ err: e }, "[Stripe Webhook] mark-failed write failed"),
     );
     res.status(500).json({ error: "Webhook processing failed" });
   }
 }
 
 async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) {
-  console.log("[Stripe Webhook] Processing checkout.session.completed");
-  console.log("[Stripe Webhook] Session ID:", session.id);
-  console.log("[Stripe Webhook] Payment Intent:", session.payment_intent);
-  console.log("[Stripe Webhook] Mode:", session.mode);
-  console.log("[Stripe Webhook] Metadata:", session.metadata);
+  log.info(
+    {
+      sessionId: session.id,
+      paymentIntent: session.payment_intent,
+      mode: session.mode,
+      metadata: session.metadata,
+    },
+    "[Stripe Webhook] Processing checkout.session.completed",
+  );
 
   // Round 80.22: subscription checkout — promote user tier here as a safety
   // net. customer.subscription.created should also fire (and reach
@@ -151,9 +164,10 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
     try {
       const sub = await getStripe().subscriptions.retrieve(subscriptionId);
       await handleSubscriptionUpserted(sub);
-    } catch (err: any) {
-      console.error(
-        `[Stripe Webhook] Failed to promote tier from checkout.session.completed: ${err.message}`
+    } catch (err) {
+      log.error(
+        { err },
+        "[Stripe Webhook] Failed to promote tier from checkout.session.completed",
       );
     }
     return;
@@ -170,14 +184,14 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
   }
 
   if (!bookingId) {
-    console.error("[Stripe Webhook] No booking_id in session metadata");
+    log.error("[Stripe Webhook] No booking_id in session metadata");
     return;
   }
 
   // Get booking
   const booking = await db.getBookingById(parseInt(bookingId));
   if (!booking) {
-    console.error(`[Stripe Webhook] Booking ${bookingId} not found`);
+    log.error({ bookingId }, "[Stripe Webhook] Booking not found");
     return;
   }
 
@@ -190,7 +204,10 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
   if (paymentIntentId) {
     const existing = await db.getPaymentByIntentId(paymentIntentId);
     if (existing) {
-      console.warn(`[Stripe Webhook] payment ${paymentIntentId} already exists (id=${existing.id})`);
+      log.warn(
+        { paymentIntentId, existingId: existing.id },
+        "[Stripe Webhook] payment already exists",
+      );
     }
   }
 
@@ -264,8 +281,11 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
     );
   });
 
-  console.log(`[Stripe Webhook] Booking ${bookingId} payment status updated to ${newPaymentStatus}`);
-  console.log(`[Stripe Webhook] Accounting entry created for booking ${bookingId}`);
+  log.info(
+    { bookingId, newPaymentStatus },
+    "[Stripe Webhook] Booking payment status updated",
+  );
+  log.info({ bookingId }, "[Stripe Webhook] Accounting entry created");
 
   // ─── POST-COMMIT side effects ────────────────────────────────────────
   // Anything below runs ONLY if the transaction above committed. Each side
@@ -292,16 +312,17 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
           tourId: booking.tourId,
           subtotalUsd: booking.totalPrice, // booking.totalPrice is in original currency
         });
-        console.log(`[Stripe Webhook] Packpoint awarded for booking ${bookingId}: ${points} pts`);
+        log.info({ bookingId, points }, "[Stripe Webhook] Packpoint awarded for booking");
       } else {
-        console.log(
-          `[Stripe Webhook] Skipped Packpoint for booking ${bookingId} (non-USD currency: ${currency})`
+        log.info(
+          { bookingId, currency },
+          "[Stripe Webhook] Skipped Packpoint (non-USD currency)",
         );
       }
     } catch (err) {
-      console.error(
-        `[Stripe Webhook] Failed to award Packpoint for booking ${bookingId}:`,
-        (err as Error).message
+      log.error(
+        { err, bookingId },
+        "[Stripe Webhook] Failed to award Packpoint for booking",
       );
       // Don't fail the webhook on point-award errors
     }
@@ -316,9 +337,9 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
         bookingId: parseInt(bookingId),
       });
     } catch (err) {
-      console.error(
-        `[Stripe Webhook] Referral payout failed for booking ${bookingId}:`,
-        (err as Error).message
+      log.error(
+        { err, bookingId },
+        "[Stripe Webhook] Referral payout failed for booking",
       );
     }
   }
@@ -330,9 +351,9 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
     );
     await cancelAbandonmentRecovery(parseInt(bookingId));
   } catch (err) {
-    console.warn(
-      "[Stripe Webhook] Failed to cancel abandonment recovery:",
-      (err as Error).message
+    log.warn(
+      { err },
+      "[Stripe Webhook] Failed to cancel abandonment recovery",
     );
   }
 
@@ -353,7 +374,10 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
         // v78y: respect the customer's chosen language stored at booking time
         language: ((booking as any).customerLanguage as 'zh-TW' | 'en' | undefined) || undefined,
       });
-      console.log(`[Stripe Webhook] Payment success email sent to ${redactEmail(booking.customerEmail)}`);
+      log.info(
+        { customerEmail: redactEmail(booking.customerEmail) },
+        "[Stripe Webhook] Payment success email sent",
+      );
 
       // v78l Sprint 4A: Auto-notify supplier if email is on file. Only on
       // FIRST paid event (deposit OR full) — skip on balance to avoid duplicates.
@@ -399,14 +423,17 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
             numberOfInfants: booking.numberOfInfants || 0,
             specialRequests: (booking as any).specialRequests || (booking as any).notes || undefined,
           });
-          console.log(`[Stripe Webhook] Supplier notification sent for booking #${booking.id}`);
+          log.info(
+            { bookingId: booking.id },
+            "[Stripe Webhook] Supplier notification sent for booking",
+          );
         } catch (supplierErr) {
-          console.error("[Stripe Webhook] Supplier notification failed:", supplierErr);
+          log.error({ err: supplierErr }, "[Stripe Webhook] Supplier notification failed");
         }
       }
     }
   } catch (error) {
-    console.error('[Stripe Webhook] Failed to send payment success email:', error);
+    log.error({ err: error }, "[Stripe Webhook] Failed to send payment success email");
     // Don't fail the webhook if email fails
   }
 
@@ -452,13 +479,15 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
       context: { bookingId: booking.id, sessionId: session.id, paymentType, amount },
     });
   } catch (err) {
-    console.error("[Stripe Webhook] notifyOwner (payment) failed:", err);
+    log.error({ err }, "[Stripe Webhook] notifyOwner (payment) failed");
   }
 }
 
 async function handlePaymentIntentSucceeded(paymentIntent: Stripe.PaymentIntent) {
-  console.log("[Stripe Webhook] Processing payment_intent.succeeded");
-  console.log("[Stripe Webhook] Payment Intent ID:", paymentIntent.id);
+  log.info(
+    { paymentIntentId: paymentIntent.id },
+    "[Stripe Webhook] Processing payment_intent.succeeded",
+  );
   // Phase 2 (2026-05-18): wrap single write in db.transaction for symmetry
   // and future multi-write expansion (e.g. accounting reversal on partial capture).
   const drizzleDb = await db.getDb();
@@ -469,8 +498,10 @@ async function handlePaymentIntentSucceeded(paymentIntent: Stripe.PaymentIntent)
 }
 
 async function handlePaymentIntentFailed(paymentIntent: Stripe.PaymentIntent) {
-  console.log("[Stripe Webhook] Processing payment_intent.payment_failed");
-  console.log("[Stripe Webhook] Payment Intent ID:", paymentIntent.id);
+  log.info(
+    { paymentIntentId: paymentIntent.id },
+    "[Stripe Webhook] Processing payment_intent.payment_failed",
+  );
   // Phase 2 (2026-05-18): wrap single write in db.transaction for symmetry.
   const drizzleDb = await db.getDb();
   if (!drizzleDb) throw new Error("[Stripe Webhook] DB unavailable for payment_intent.payment_failed");
@@ -496,22 +527,25 @@ async function handlePaymentIntentFailed(paymentIntent: Stripe.PaymentIntent) {
  *     audit trail.
  */
 async function handleChargeRefunded(charge: Stripe.Charge) {
-  console.log("[Stripe Webhook] Processing charge.refunded");
-  console.log("[Stripe Webhook] Charge:", charge.id, "amount:", charge.amount, "refunded:", charge.amount_refunded);
+  log.info(
+    { chargeId: charge.id, amount: charge.amount, refunded: charge.amount_refunded },
+    "[Stripe Webhook] Processing charge.refunded",
+  );
 
   const paymentIntentId = typeof charge.payment_intent === "string"
     ? charge.payment_intent
     : charge.payment_intent?.id;
 
   if (!paymentIntentId) {
-    console.warn("[Stripe Webhook] charge.refunded: no payment_intent on charge");
+    log.warn("[Stripe Webhook] charge.refunded: no payment_intent on charge");
     return;
   }
 
   const isFullRefund = charge.amount_refunded >= charge.amount;
   if (!isFullRefund) {
-    console.log(
-      `[Stripe Webhook] Partial refund detected (${charge.amount_refunded}/${charge.amount}) — leaving paymentStatus alone, manual reconciliation needed`
+    log.info(
+      { refunded: charge.amount_refunded, total: charge.amount },
+      "[Stripe Webhook] Partial refund detected — leaving paymentStatus alone, manual reconciliation needed",
     );
     return;
   }
@@ -519,7 +553,10 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
   // Look up our payment row by Stripe payment intent ID
   const payment = await db.getPaymentByIntentId(paymentIntentId);
   if (!payment) {
-    console.warn(`[Stripe Webhook] charge.refunded: no local payment for intent ${paymentIntentId}`);
+    log.warn(
+      { paymentIntentId },
+      "[Stripe Webhook] charge.refunded: no local payment for intent",
+    );
     return;
   }
 
@@ -539,9 +576,7 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
   // ─────────────────────────────────────────────────────────────────────
   const drizzle = await (await import("../db")).getDb();
   if (!drizzle) {
-    console.error(
-      "[Stripe Webhook] charge.refunded: DB unavailable, cannot process refund"
-    );
+    log.error("[Stripe Webhook] charge.refunded: DB unavailable, cannot process refund");
     return;
   }
   const { bookings: bookingsTable } = await import("../../drizzle/schema");
@@ -580,8 +615,9 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
       const affected =
         (result?.[0]?.affectedRows ?? result?.affectedRows ?? 0) | 0;
       transitionedToCancelled = affected > 0;
-      console.log(
-        `[Stripe Webhook] Booking ${payment.bookingId} refund update affected=${affected} (transitioned=${transitionedToCancelled})`
+      log.info(
+        { bookingId: payment.bookingId, affected, transitioned: transitionedToCancelled },
+        "[Stripe Webhook] Booking refund update",
       );
 
       // WRITE 2b: if the booking was already cancelled before we got
@@ -645,15 +681,16 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
             referenceId: payment.bookingId,
             description: `Refund clawback for booking #${payment.bookingId}`,
           });
-          console.log(
-            `[Stripe Webhook] Clawed back ${earnRow.delta} Packpoint from booking ${payment.bookingId} refund`
+          log.info(
+            { bookingId: payment.bookingId, delta: earnRow.delta },
+            "[Stripe Webhook] Clawed back Packpoint from booking refund",
           );
         }
       }
     } catch (err) {
-      console.error(
-        `[Stripe Webhook] Packpoint clawback failed for booking ${payment.bookingId}:`,
-        (err as Error).message
+      log.error(
+        { err, bookingId: payment.bookingId },
+        "[Stripe Webhook] Packpoint clawback failed for booking",
       );
     }
   }
@@ -690,7 +727,7 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
       context: { chargeId: charge.id, paymentIntentId, bookingId: payment.bookingId },
     });
   } catch (err) {
-    console.error("[Stripe Webhook] notifyOwner (refund) failed:", err);
+    log.error({ err }, "[Stripe Webhook] notifyOwner (refund) failed");
   }
 }
 
@@ -721,11 +758,11 @@ async function handleVisaPaymentCompleted(
   session: Stripe.Checkout.Session,
   applicationId: number
 ) {
-  console.log(`[Stripe Webhook] Processing visa payment for application ${applicationId}`);
+  log.info({ applicationId }, "[Stripe Webhook] Processing visa payment");
 
   const application = await db.getVisaApplicationById(applicationId);
   if (!application) {
-    console.error(`[Stripe Webhook] Visa application ${applicationId} not found`);
+    log.error({ applicationId }, "[Stripe Webhook] Visa application not found");
     return;
   }
 
@@ -783,7 +820,7 @@ async function handleVisaPaymentCompleted(
     );
   });
 
-  console.log(`[Stripe Webhook] Visa application ${applicationId} payment confirmed`);
+  log.info({ applicationId }, "[Stripe Webhook] Visa application payment confirmed");
 
   // Post-commit side effects: email + owner notification. Failures here
   // are logged but never propagate.
@@ -796,9 +833,12 @@ async function handleVisaPaymentCompleted(
       passportNumber: application.passportNumber,
       travelDate: application.travelDate ?? undefined,
     });
-    console.log(`[Stripe Webhook] Visa confirmation email sent to ${redactEmail(application.email)}`);
+    log.info(
+      { applicationEmail: redactEmail(application.email) },
+      "[Stripe Webhook] Visa confirmation email sent",
+    );
   } catch (error) {
-    console.error('[Stripe Webhook] Failed to send visa confirmation email:', error);
+    log.error({ err: error }, "[Stripe Webhook] Failed to send visa confirmation email");
   }
 
   // QA Audit Phase 5 fix: visa payment notification to Jeff.
@@ -814,7 +854,7 @@ async function handleVisaPaymentCompleted(
         `Travel date: ${application.travelDate ?? "未填"}`,
     });
   } catch (err) {
-    console.error("[Stripe Webhook] notifyOwner (visa) failed:", err);
+    log.error({ err }, "[Stripe Webhook] notifyOwner (visa) failed");
   }
 }
 
@@ -852,7 +892,10 @@ import { eq } from "drizzle-orm";
  * here — those live in `handleTrialWillEnd`.
  */
 async function handleSubscriptionUpserted(sub: Stripe.Subscription) {
-  console.log("[Stripe Webhook] Processing subscription upsert", sub.id, sub.status);
+  log.info(
+    { subscriptionId: sub.id, status: sub.status },
+    "[Stripe Webhook] Processing subscription upsert",
+  );
 
   // Identify the user — first by metadata.userId, fallback to customer
   const userIdFromMeta = sub.metadata?.userId;
@@ -874,7 +917,10 @@ async function handleSubscriptionUpserted(sub: Stripe.Subscription) {
   }
 
   if (!userId) {
-    console.error("[Stripe Webhook] Could not identify user for subscription", sub.id);
+    log.error(
+      { subscriptionId: sub.id },
+      "[Stripe Webhook] Could not identify user for subscription",
+    );
     return;
   }
 
@@ -882,8 +928,9 @@ async function handleSubscriptionUpserted(sub: Stripe.Subscription) {
   const priceId = sub.items.data[0]?.price.id;
   const tier = priceId ? tierFromPriceId(priceId) : null;
   if (!tier) {
-    console.warn(
-      `[Stripe Webhook] Subscription ${sub.id} priceId=${priceId} doesn't match any tier; skipping`
+    log.warn(
+      { subscriptionId: sub.id, priceId },
+      "[Stripe Webhook] Subscription priceId doesn't match any tier; skipping",
     );
     return;
   }
@@ -986,12 +1033,14 @@ async function handleSubscriptionUpserted(sub: Stripe.Subscription) {
   });
 
   if (isActive) {
-    console.log(
-      `[Stripe Webhook] ✓ User ${userId} → tier=${tier} expires=${expiresAt?.toISOString()}`
+    log.info(
+      { userId, tier, expiresAt: expiresAt?.toISOString() },
+      "[Stripe Webhook] User tier updated",
     );
   } else {
-    console.log(
-      `[Stripe Webhook] User ${userId} subscription ${sub.status} → reverted to free`
+    log.info(
+      { userId, status: sub.status },
+      "[Stripe Webhook] User subscription reverted to free",
     );
   }
 }
@@ -1008,7 +1057,7 @@ async function handleSubscriptionUpserted(sub: Stripe.Subscription) {
  * California Bus. & Prof. Code §17602 mandates these disclosures.
  */
 async function handleTrialWillEnd(sub: Stripe.Subscription) {
-  console.log("[Stripe Webhook] Processing trial_will_end", sub.id);
+  log.info({ subscriptionId: sub.id }, "[Stripe Webhook] Processing trial_will_end");
 
   const drizzleDb = await getDb();
   if (!drizzleDb) return;
@@ -1038,7 +1087,10 @@ async function handleTrialWillEnd(sub: Stripe.Subscription) {
 
     const trial = trialRows[0];
     if (!trial) {
-      console.warn(`[Stripe Webhook] trial_will_end: no membershipTrials row for ${sub.id}`);
+      log.warn(
+        { subscriptionId: sub.id },
+        "[Stripe Webhook] trial_will_end: no membershipTrials row",
+      );
       return;
     }
 
@@ -1049,7 +1101,10 @@ async function handleTrialWillEnd(sub: Stripe.Subscription) {
       .limit(1);
     const user = userRows[0];
     if (!user) {
-      console.warn(`[Stripe Webhook] trial_will_end: user ${trial.userId} not found`);
+      log.warn(
+        { trialUserId: trial.userId },
+        "[Stripe Webhook] trial_will_end: user not found",
+      );
       return;
     }
 
@@ -1086,8 +1141,9 @@ async function handleTrialWillEnd(sub: Stripe.Subscription) {
   // If a prior call already flagged + sent (defensive: should normally be
   // caught by the central idempotency row), do NOT re-send the email.
   if (trialData.reminderAlreadySent) {
-    console.log(
-      `[Stripe Webhook] trial_will_end: reminder already sent for trial ${trialData.id}, skipping email`
+    log.info(
+      { trialId: trialData.id },
+      "[Stripe Webhook] trial_will_end: reminder already sent, skipping email",
     );
     return;
   }
@@ -1111,8 +1167,14 @@ async function handleTrialWillEnd(sub: Stripe.Subscription) {
       cancelUrl: `${ENV.baseUrl || "https://packgoplay.com"}/membership?manage=1`,
     });
 
-    console.log(
-      `[Stripe Webhook] ✓ Trial-end reminder sent: user ${userData.id} tier=${trialData.tier}, charge=${formattedAmount} on ${trialData.endsAt.toISOString()}`
+    log.info(
+      {
+        userId: userData.id,
+        tier: trialData.tier,
+        chargeAmount: formattedAmount,
+        endsAt: trialData.endsAt.toISOString(),
+      },
+      "[Stripe Webhook] Trial-end reminder sent",
     );
 
     await notifyOwner({
@@ -1144,9 +1206,9 @@ async function handleTrialWillEnd(sub: Stripe.Subscription) {
     // happen. We do NOT re-throw — letting the handler return success
     // marks the idempotency row "succeeded" so Stripe stops retrying
     // (which would only burn DB writes, not send any email).
-    console.error(
-      "[Stripe Webhook] trial_will_end: reminder email failed AFTER flag commit:",
-      (err as Error).message
+    log.error(
+      { err },
+      "[Stripe Webhook] trial_will_end: reminder email failed AFTER flag commit",
     );
     await notifyOwner({
       title: `[URGENT] AB-390 trial reminder email FAILED — manual follow-up needed`,
@@ -1160,9 +1222,9 @@ async function handleTrialWillEnd(sub: Stripe.Subscription) {
         `or AB-390 §17602 compliance is at risk.\n\n` +
         `Original error: ${(err as Error).message}`,
     }).catch((notifyErr) => {
-      console.error(
-        "[Stripe Webhook] trial_will_end: failure-alert notifyOwner ALSO failed:",
-        (notifyErr as Error).message
+      log.error(
+        { err: notifyErr },
+        "[Stripe Webhook] trial_will_end: failure-alert notifyOwner ALSO failed",
       );
     });
   }
@@ -1175,7 +1237,7 @@ async function handleTrialWillEnd(sub: Stripe.Subscription) {
  * transactional boundary.
  */
 async function handleSubscriptionDeleted(sub: Stripe.Subscription) {
-  console.log("[Stripe Webhook] Processing subscription deletion", sub.id);
+  log.info({ subscriptionId: sub.id }, "[Stripe Webhook] Processing subscription deletion");
   const drizzleDb = await getDb();
   if (!drizzleDb) return;
   await drizzleDb.transaction(async (tx) => {
@@ -1188,7 +1250,7 @@ async function handleSubscriptionDeleted(sub: Stripe.Subscription) {
       })
       .where(eq(users.stripeSubscriptionId, sub.id));
   });
-  console.log(`[Stripe Webhook] ✓ Subscription ${sub.id} canceled → users reverted to free`);
+  log.info({ subscriptionId: sub.id }, "[Stripe Webhook] Subscription canceled → users reverted to free");
 }
 
 // ─────────────────────────────────────────────────────────────────────

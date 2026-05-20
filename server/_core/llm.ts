@@ -14,6 +14,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { ENV } from "./env";
 import { getCachedResponse, setCachedResponse } from "./llmCache";
+import { createChildLogger } from "./logger";
+const log = createChildLogger({ module: "llm" });
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Public types — unchanged so callers don't break
@@ -556,7 +558,7 @@ class CircuitBreaker {
       if (elapsed >= CIRCUIT_CONFIG.openDurationMs) {
         // Cooldown finished — try one probe
         this.state = "HALF_OPEN";
-        console.warn(`[CircuitBreaker] cooldown done, → HALF_OPEN`);
+        log.warn("[CircuitBreaker] cooldown done, → HALF_OPEN");
         return;
       }
       const remaining = CIRCUIT_CONFIG.openDurationMs - elapsed;
@@ -572,7 +574,7 @@ class CircuitBreaker {
 
   recordSuccess(): void {
     if (this.state === "HALF_OPEN") {
-      console.log(`[CircuitBreaker] probe succeeded → CLOSED`);
+      log.info("[CircuitBreaker] probe succeeded → CLOSED");
     }
     this.state = "CLOSED";
     this.failureCount = 0;
@@ -610,7 +612,10 @@ class CircuitBreaker {
       // Probe failed — back to OPEN
       this.state = "OPEN";
       this.openedAt = now;
-      console.error(`[CircuitBreaker] probe failed → OPEN (${CIRCUIT_CONFIG.openDurationMs}ms)`);
+      log.error(
+        { openDurationMs: CIRCUIT_CONFIG.openDurationMs },
+        "[CircuitBreaker] probe failed → OPEN",
+      );
       bumpStat("circuit_opened", 1);
       return;
     }
@@ -618,8 +623,9 @@ class CircuitBreaker {
     if (this.failureCount >= CIRCUIT_CONFIG.failureThreshold) {
       this.state = "OPEN";
       this.openedAt = now;
-      console.error(
-        `[CircuitBreaker] ${this.failureCount} consecutive failures in ${now - this.firstFailureAt}ms → OPEN`
+      log.error(
+        { failureCount: this.failureCount, elapsedMs: now - this.firstFailureAt },
+        "[CircuitBreaker] consecutive failures → OPEN",
       );
       bumpStat("circuit_opened", 1);
     }
@@ -669,8 +675,9 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     // v67: explicit cache-hit log so we can grep "[invokeLLM] cache=HIT" to
     // measure 24h app-cache effectiveness. Previously cache hits were silent
     // here (only the LLMCache layer logged, with a different prefix).
-    console.log(
-      `[invokeLLM] cache=HIT model=${(cached.model || "?")} elapsed=${Date.now() - t0}ms`
+    log.info(
+      { event: "cache_hit", model: cached.model ?? "?", elapsedMs: Date.now() - t0 },
+      "[invokeLLM] cache=HIT",
     );
     bumpStat("cache_hit", 1);
     return cached;
@@ -704,10 +711,14 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
 
   const client = getClient();
   const startMs = Date.now();
-  console.log(
-    `[invokeLLM] → Anthropic (model: ${model}, msgs: ${anthropicMessages.length}` +
-      (tools?.length ? `, tools: ${tools.length}` : "") +
-      `, circuit: ${circuit.getState()})`
+  log.info(
+    {
+      model,
+      messages: anthropicMessages.length,
+      tools: tools?.length ?? 0,
+      circuit: circuit.getState(),
+    },
+    "[invokeLLM] → Anthropic",
   );
 
   // Round 80.15: wrap system prompt as content-block array with cache_control
@@ -724,8 +735,9 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
         cache_control: { type: "ephemeral" },
       },
     ];
-    console.log(
-      `[invokeLLM] cache_control=ephemeral on system prompt (~${Math.floor(system.length / 3.5)} tokens)`
+    log.debug(
+      { approxTokens: Math.floor(system.length / 3.5) },
+      "[invokeLLM] cache_control=ephemeral on system prompt",
     );
   }
 
@@ -745,15 +757,16 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     const elapsed = Date.now() - startMs;
     // Anthropic SDK errors: err.status, err.error, err.message
     if (err?.status === 408 || /timeout/i.test(err?.message || "")) {
-      console.error(`[invokeLLM] ⏱ TIMEOUT after ${elapsed}ms`);
+      log.error({ err, elapsedMs: elapsed }, "[invokeLLM] TIMEOUT");
       const wrapped = new Error(
         `LLM_TIMEOUT: Anthropic API did not respond within 120s (elapsed: ${elapsed}ms)`
       );
       (wrapped as any).nonRetryable = true;
       throw wrapped;
     }
-    console.error(
-      `[invokeLLM] ❌ Anthropic error after ${elapsed}ms: ${err?.status ?? ""} ${err?.message}`
+    log.error(
+      { err, status: err?.status, elapsedMs: elapsed },
+      "[invokeLLM] Anthropic error",
     );
     throw err;
   }
@@ -768,10 +781,18 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   const cacheRead = u?.cache_read_input_tokens ?? 0;
   const inputTokens = u?.input_tokens ?? 0;
   const outputTokens = u?.output_tokens ?? 0;
-  console.log(
-    `[invokeLLM] cache=MISS model=${model} ${resp.stop_reason ?? "ok"} ${elapsed}ms ` +
-      `in=${inputTokens} out=${outputTokens} ` +
-      `prompt_cache_write=${cacheCreate} prompt_cache_read=${cacheRead}`
+  log.info(
+    {
+      event: "cache_miss",
+      model,
+      stopReason: resp.stop_reason ?? "ok",
+      elapsedMs: elapsed,
+      inputTokens,
+      outputTokens,
+      promptCacheWrite: cacheCreate,
+      promptCacheRead: cacheRead,
+    },
+    "[invokeLLM] cache=MISS",
   );
 
   // v72: bump the per-day stats hash. We track tokens per model so the daily

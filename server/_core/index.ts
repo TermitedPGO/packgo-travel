@@ -25,6 +25,12 @@ import { aiChatStreamRouter } from "../aiChatStreamRouter";
 import { generalImageUploadRouter } from "../generalImageUpload";
 import { initializeGoogleAuth } from "../googleAuth";
 import { initializeGmailOAuth } from "../gmailOAuth";
+// v2 Wave 1 Module 1.2 — pino structured logger + correlation ID. Imported
+// here so they're available to all downstream code (including the worker
+// imported below). Middleware is registered inside startServer() below.
+import { logger } from "./logger";
+import { correlationIdMiddleware } from "./correlationId";
+import pinoHttp from "pino-http";
 import "../worker"; // Initialize BullMQ worker
 
 function isPortAvailable(port: number): Promise<boolean> {
@@ -52,13 +58,35 @@ async function startServer() {
   // was being served uncompressed; gzip cuts it ~70% and fixes LCP on slow
   // connections. Added before any route handlers so all responses benefit.
   app.use(compression());
+
+  // v2 Wave 1 Module 1.2 — correlation ID + structured request logging.
+  // Order matters:
+  //   1. correlationIdMiddleware runs first so the ID is in AsyncLocalStorage
+  //      before pino-http (and anything downstream) reads it.
+  //   2. pino-http emits structured access logs with the correlationId
+  //      already tagged into the line (via logger.mixin).
+  //   3. Silence /healthz access logs — Fly hits it every ~30s. We still
+  //      want errors on /healthz to log; customLogLevel returns "silent" for
+  //      the request path specifically.
+  app.use(correlationIdMiddleware);
+  app.use(
+    pinoHttp({
+      logger,
+      customLogLevel(req, _res, err) {
+        if (req.url === "/healthz") return "silent";
+        if (err) return "error";
+        return "info";
+      },
+    }),
+  );
+
   const server = createServer(app);
-  
+
   // Enable SO_REUSEADDR to allow port reuse
   server.on('listening', () => {
     const addr = server.address();
     const port = typeof addr === 'object' ? addr?.port : addr;
-    console.log(`Server running on http://localhost:${port}/`);
+    logger.info({ port }, "Server running");
   });
   
   // Round 80.18 v2: redirect old fly.dev / Manus / www → canonical
@@ -132,7 +160,7 @@ async function startServer() {
         if (allowedOriginPatterns.some(p => p.test(origin))) {
           return callback(null, true);
         }
-        console.warn(`[CORS] Blocked request from origin: ${origin}`);
+        logger.warn({ origin }, "[CORS] Blocked request from origin");
         return callback(new Error(`CORS policy: origin ${origin} not allowed`));
       },
       credentials: true,
@@ -391,7 +419,7 @@ async function startServer() {
 
       res.end();
     } catch (err) {
-      console.error("[ask-ops-stream] error:", err);
+      logger.error({ err }, "[ask-ops-stream] error");
       if (!res.headersSent) {
         res.status(500).json({ error: (err as Error).message });
       } else {
@@ -470,8 +498,9 @@ async function startServer() {
       } else {
         // Log once per IP to surface in fly logs — Jeff can grep + decide
         // whether to flip the require flag.
-        console.warn(
-          `[verifyInternalAuth] WARN production has no IP allowlist; request from ${ip} would be blocked if INTERNAL_REQUIRE_IP_ALLOWLIST=1`
+        logger.warn(
+          { ip },
+          "[verifyInternalAuth] production has no IP allowlist; request would be blocked if INTERNAL_REQUIRE_IP_ALLOWLIST=1",
         );
       }
     }
@@ -561,10 +590,13 @@ async function startServer() {
         isPdf: typeof isPdf === "boolean" ? isPdf : mode === "PDF",
       });
       const jobId = String(job.id || requestId);
-      console.log(`[internal/test-generate] queued job=${jobId} mode=${isPdf ? "PDF" : "URL"} url=${url.slice(0, 80)}`);
+      logger.info(
+        { jobId, mode: isPdf ? "PDF" : "URL", url: url.slice(0, 80) },
+        "[internal/test-generate] queued",
+      );
       return res.json({ jobId, mode: isPdf ? "PDF" : "URL" });
     } catch (err) {
-      console.error("[internal/test-generate] error:", err);
+      logger.error({ err }, "[internal/test-generate] error");
       return res.status(500).json({ error: (err as Error).message });
     }
   });
@@ -601,7 +633,7 @@ async function startServer() {
       }
       return res.json({ ...result, queued });
     } catch (err) {
-      console.error("[internal/bulk-import-lion] error:", err);
+      logger.error({ err }, "[internal/bulk-import-lion] error");
       return res.status(500).json({ error: (err as Error).message });
     }
   });
@@ -681,7 +713,7 @@ async function startServer() {
       res.header('Content-Type', 'application/xml');
       res.send(xml);
     } catch (err) {
-      console.error('[Sitemap] Error generating sitemap:', err);
+      logger.error({ err }, "[Sitemap] Error generating sitemap");
       res.status(500).send('Error generating sitemap');
     }
   });
@@ -704,7 +736,7 @@ async function startServer() {
       res.setHeader("Cache-Control", "private, max-age=300"); // 5 min cache OK; quote rarely changes
       return res.send(quote.pdfHtml);
     } catch (err) {
-      console.error("[aiQuotes view] error:", (err as Error)?.message);
+      logger.error({ err }, "[aiQuotes view] error");
       return res.status(500).send("Internal error");
     }
   });
@@ -745,7 +777,7 @@ async function startServer() {
       res.setHeader("Cache-Control", "private, no-store"); // never cache invoices
       return res.send(invoice.pdfHtml);
     } catch (err) {
-      console.error("[invoices view] error:", (err as Error)?.message);
+      logger.error({ err }, "[invoices view] error");
       return res.status(500).send("Internal error");
     }
   });
@@ -777,15 +809,15 @@ async function startServer() {
     const { cleanupZombieTasks } = await import('../agentActivityService');
     // Run cleanup immediately on startup
     cleanupZombieTasks(30).then(count => {
-      if (count > 0) console.log(`[Startup] Cleaned up ${count} zombie task(s)`);
+      if (count > 0) logger.info({ count }, "[Startup] Cleaned up zombie task(s)");
     }).catch(() => {});
     // Then run every 10 minutes
     setInterval(() => {
       cleanupZombieTasks(30).catch(() => {});
     }, 10 * 60 * 1000);
-    console.log('[Startup] Zombie task cleanup scheduler initialized (every 10 min, timeout 30 min)');
+    logger.info("[Startup] Zombie task cleanup scheduler initialized (every 10 min, timeout 30 min)");
   } catch (err) {
-    console.warn('[Startup] Failed to initialize zombie cleanup:', err);
+    logger.warn({ err }, "[Startup] Failed to initialize zombie cleanup");
   }
 
   // Schedule daily tour monitor at 03:00 Taiwan time (19:00 UTC)
@@ -793,7 +825,7 @@ async function startServer() {
     const { scheduleDailyTourMonitor } = await import('../queue');
     await scheduleDailyTourMonitor();
   } catch (err) {
-    console.warn('[Startup] Failed to schedule daily tour monitor:', err);
+    logger.warn({ err }, "[Startup] Failed to schedule daily tour monitor");
   }
 
   // v77: Schedule daily trip-reminder scan at 09:00 Taipei (01:00 UTC). Sends
@@ -804,7 +836,7 @@ async function startServer() {
     // Also import the worker so it starts processing the queue
     await import('../tripReminderWorker');
   } catch (err) {
-    console.warn('[Startup] Failed to schedule trip reminders:', err);
+    logger.warn({ err }, "[Startup] Failed to schedule trip reminders");
   }
 
   // Round 81 Phase 3.5: Schedule weekly Self-Retrospective at Mon 01:00 UTC
@@ -815,7 +847,7 @@ async function startServer() {
     await scheduleWeeklyRetrospective();
     await import('../retrospectiveWorker');
   } catch (err) {
-    console.warn('[Startup] Failed to schedule weekly retrospective:', err);
+    logger.warn({ err }, "[Startup] Failed to schedule weekly retrospective");
   }
 
   // QA audit 2026-05-11 Phase 9 P0: Gmail poll cron. Closes the
@@ -827,7 +859,7 @@ async function startServer() {
     await scheduleGmailPoll();
     await import('../gmailPollWorker');
   } catch (err) {
-    console.warn('[Startup] Failed to schedule Gmail poll:', err);
+    logger.warn({ err }, "[Startup] Failed to schedule Gmail poll");
   }
 
   // Booking followup worker — drains the queue that bookings.create
@@ -836,7 +868,7 @@ async function startServer() {
   try {
     await import('../bookingFollowupWorker');
   } catch (err) {
-    console.warn('[Startup] Failed to init booking followup worker:', err);
+    logger.warn({ err }, "[Startup] Failed to init booking followup worker");
   }
 
   // Phase 1.5: Plaid daily sync — catch-up cron at 05:00 UTC. Webhooks
@@ -849,7 +881,7 @@ async function startServer() {
     await schedulePlaidDailySync();
     await import('../plaidSyncWorker');
   } catch (err) {
-    console.warn('[Startup] Failed to schedule Plaid daily sync:', err);
+    logger.warn({ err }, "[Startup] Failed to schedule Plaid daily sync");
   }
 
   // Phase 4: Trust account recognition cron at 06:00 UTC (1 hr after Plaid
@@ -861,7 +893,7 @@ async function startServer() {
     await scheduleDailyTrustRecognition();
     await import('../trustRecognitionWorker');
   } catch (err) {
-    console.warn('[Startup] Failed to schedule trust recognition cron:', err);
+    logger.warn({ err }, "[Startup] Failed to schedule trust recognition cron");
   }
 
   // Round 80.22 Phase C: Packpoint daily maintenance — auto-upgrade tier,
@@ -875,7 +907,7 @@ async function startServer() {
     await scheduleDailyPackpointMaintenance();
     initPackpointMaintenanceWorker();
   } catch (err) {
-    console.warn('[Startup] Failed to schedule Packpoint maintenance:', err);
+    logger.warn({ err }, "[Startup] Failed to schedule Packpoint maintenance");
   }
 
   // Round 80.22 Phase H2: Supplier poster processing worker — async
@@ -887,7 +919,7 @@ async function startServer() {
     );
     initPosterProcessingWorker();
   } catch (err) {
-    console.warn('[Startup] Failed to init poster processing worker:', err);
+    logger.warn({ err }, "[Startup] Failed to init poster processing worker");
   }
 
   // Phase 1D supplier-sync — daily catalog mirror for Lion + UV at
@@ -902,7 +934,7 @@ async function startServer() {
     initSupplierSyncWorker();
     await ensureDailySupplierSyncScheduled();
   } catch (err) {
-    console.warn('[Startup] Failed to init supplier sync worker:', err);
+    logger.warn({ err }, "[Startup] Failed to init supplier sync worker");
   }
 
   const preferredPort = parseInt(process.env.PORT || "3000");
@@ -917,19 +949,21 @@ async function startServer() {
   // Handle port already in use error
   server.on('error', async (err: any) => {
     if (err.code === 'EADDRINUSE') {
-      console.error(`Port ${preferredPort} is busy, trying to find alternative...`);
+      logger.error({ port: preferredPort }, "Port busy, trying to find alternative");
       const port = await findAvailablePort(preferredPort + 1);
-      console.log(`Using port ${port} instead`);
+      logger.info({ port }, "Using alternative port");
       server.listen({
         port,
         host: '0.0.0.0',
         exclusive: false,
       });
     } else {
-      console.error('Server error:', err);
+      logger.error({ err }, "Server error");
       throw err;
     }
   });
 }
 
-startServer().catch(console.error);
+startServer().catch((err) => {
+  logger.error({ err }, "startServer failed");
+});

@@ -34,6 +34,8 @@ import { plaidWebhookEvents, linkedBankAccounts } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { notifyOwner } from "./notification";
 import { verifyPlaidWebhook } from "./plaidWebhookVerify";
+import { createChildLogger } from "./logger";
+const log = createChildLogger({ module: "plaidWebhook" });
 
 export async function handlePlaidWebhook(req: Request, res: Response): Promise<void> {
   const rawBody: Buffer = (req.body as Buffer) ?? Buffer.alloc(0);
@@ -50,8 +52,9 @@ export async function handlePlaidWebhook(req: Request, res: Response): Promise<v
     env: process.env.PLAID_ENV ?? "sandbox",
   });
   if (!verifyResult.valid) {
-    console.warn(
-      `[plaid-webhook] rejected unverified request: ${verifyResult.reason} (kid=${verifyResult.kid ?? "?"})`
+    log.warn(
+      { reason: verifyResult.reason, kid: verifyResult.kid ?? null },
+      "[plaid-webhook] rejected unverified request",
     );
     res.status(400).json({ error: "webhook verification failed" });
     return;
@@ -65,7 +68,7 @@ export async function handlePlaidWebhook(req: Request, res: Response): Promise<v
   try {
     payload = rawBody.length > 0 ? JSON.parse(rawBody.toString("utf8")) : {};
   } catch (err) {
-    console.error("[plaid-webhook] failed to parse body:", err);
+    log.error({ err }, "[plaid-webhook] failed to parse body");
     res.status(400).json({ error: "invalid json" });
     return;
   }
@@ -77,8 +80,9 @@ export async function handlePlaidWebhook(req: Request, res: Response): Promise<v
   // Always ack quickly so Plaid doesn't retry. Log + branch happens async.
   res.status(200).json({ ok: true });
 
-  console.log(
-    `[plaid-webhook] received ${webhookType}/${webhookCode} for item ${itemId}`
+  log.info(
+    { webhookType, webhookCode, itemId },
+    "[plaid-webhook] received",
   );
 
   // Persist event for audit trail. Best-effort — webhook ack doesn't depend
@@ -96,10 +100,7 @@ export async function handlePlaidWebhook(req: Request, res: Response): Promise<v
       eventId = Number(ins?.[0]?.insertId ?? 0) || null;
     }
   } catch (err) {
-    console.warn(
-      "[plaid-webhook] failed to record event:",
-      (err as Error)?.message
-    );
+    log.warn({ err }, "[plaid-webhook] failed to record event");
   }
 
   // Branch on webhook type → actions
@@ -157,9 +158,9 @@ export async function handlePlaidWebhook(req: Request, res: Response): Promise<v
     }
   } catch (err) {
     const msg = (err as Error)?.message ?? "unknown";
-    console.error(
-      `[plaid-webhook] handler for ${webhookType}/${webhookCode} failed:`,
-      msg
+    log.error(
+      { err, webhookType, webhookCode },
+      "[plaid-webhook] handler failed",
     );
     if (eventId !== null) {
       const db = await getDb();
@@ -190,8 +191,14 @@ async function enqueueImmediateSync(itemId: string | null): Promise<void> {
     "../services/plaidSyncService"
   );
   const result = await syncAllAccountsForItem(itemId);
-  console.log(
-    `[plaid-webhook] item ${itemId} sync: accounts=${result.perAccount.length} +${result.totalAdded} txns (${result.failedAccounts} failed)`
+  log.info(
+    {
+      itemId,
+      accounts: result.perAccount.length,
+      added: result.totalAdded,
+      failedAccounts: result.failedAccounts,
+    },
+    "[plaid-webhook] item sync complete",
   );
 }
 
@@ -269,8 +276,9 @@ async function clearSyncError(itemId: string | null): Promise<void> {
  * the same SESSION_FINISHED webhook hit the duplicate-key path and skip.
  */
 async function handleHostedLinkSessionFinished(payload: any): Promise<void> {
-  console.log(
-    `[plaid-webhook] LINK/SESSION_FINISHED — link_session=${payload?.link_session_id} status=${payload?.status}`
+  log.info(
+    { linkSession: payload?.link_session_id, status: payload?.status },
+    "[plaid-webhook] LINK/SESSION_FINISHED",
   );
 
   // Pull public_tokens from inline payload first
@@ -286,20 +294,18 @@ async function handleHostedLinkSessionFinished(payload: any): Promise<void> {
     try {
       const { getLinkSessionPublicTokens } = await import("./plaid");
       publicTokens = await getLinkSessionPublicTokens(payload.link_token);
-      console.log(
-        `[plaid-webhook] fetched ${publicTokens.length} public_tokens via linkTokenGet`
+      log.info(
+        { count: publicTokens.length },
+        "[plaid-webhook] fetched public_tokens via linkTokenGet",
       );
     } catch (err) {
-      console.error(
-        "[plaid-webhook] linkTokenGet failed:",
-        (err as Error)?.message
-      );
+      log.error({ err }, "[plaid-webhook] linkTokenGet failed");
     }
   }
 
   if (publicTokens.length === 0) {
-    console.warn(
-      "[plaid-webhook] SESSION_FINISHED but no public_tokens — user may have abandoned flow"
+    log.warn(
+      "[plaid-webhook] SESSION_FINISHED but no public_tokens — user may have abandoned flow",
     );
     return;
   }
@@ -317,8 +323,8 @@ async function handleHostedLinkSessionFinished(payload: any): Promise<void> {
     .where(eq(users.role, "admin"))
     .limit(1);
   if (!adminUser) {
-    console.error(
-      "[plaid-webhook] no admin user found; cannot attribute Hosted Link result"
+    log.error(
+      "[plaid-webhook] no admin user found; cannot attribute Hosted Link result",
     );
     return;
   }
@@ -396,9 +402,9 @@ async function handleHostedLinkSessionFinished(payload: any): Promise<void> {
           const sqlState = e?.sqlState ?? e?.cause?.sqlState ?? "";
           const fullMsg = `${msg} | code=${code} sqlState=${sqlState} | type=${rawType} subtype=${a.subtype}`;
           if (!msg.toLowerCase().includes("duplicate")) {
-            console.error(
-              `[plaid-webhook] Hosted Link insert account ${a.account_id} failed:`,
-              fullMsg
+            log.error(
+              { err: e, accountId: a.account_id, fullMsg },
+              "[plaid-webhook] Hosted Link insert account failed",
             );
           }
         }
@@ -422,8 +428,9 @@ async function handleHostedLinkSessionFinished(payload: any): Promise<void> {
               plaidAccessTokenEncrypted: row.plaidAccessTokenEncrypted,
               cursor: row.cursor,
             });
-            console.log(
-              `[plaid-webhook] Hosted Link initial sync ${id}: +${r.added} txns${r.error ? ` (error: ${r.error})` : ""}`
+            log.info(
+              { id, added: r.added, error: r.error ?? null },
+              "[plaid-webhook] Hosted Link initial sync",
             );
           }
         }
@@ -439,10 +446,7 @@ async function handleHostedLinkSessionFinished(payload: any): Promise<void> {
           `\n\n進 admin → 財務 → 銀行帳戶 確認交易已抓進來。`,
       });
     } catch (err) {
-      console.error(
-        "[plaid-webhook] Hosted Link exchange failed:",
-        (err as Error)?.message
-      );
+      log.error({ err }, "[plaid-webhook] Hosted Link exchange failed");
     }
   }
 }

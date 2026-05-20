@@ -16,6 +16,9 @@
  * Idempotent: re-calling with the same email returns the same input
  * unchanged if any gate fails (no duplicate PS).
  */
+import { createChildLogger } from "./logger";
+const log = createChildLogger({ module: "repurchaseCta" });
+
 export interface MaybeAppendUpgradeArgs {
   draftReply: string;
   senderEmail: string;
@@ -108,13 +111,19 @@ export async function maybeAppendUpgradeCta(args: MaybeAppendUpgradeArgs): Promi
       .set({ upgradePromptSentAt: new Date() })
       .where(eq(users.id, user.id));
 
-    console.log(
-      `[repurchaseCta] Appended upgrade CTA for user ${user.id} (${senderEmail}) — bookingCount=${user.bookingCount} inquiryCount=${user.inquiryCount}`
+    log.info(
+      {
+        userId: user.id,
+        senderEmail,
+        bookingCount: user.bookingCount,
+        inquiryCount: user.inquiryCount,
+      },
+      "[repurchaseCta] Appended upgrade CTA",
     );
 
     return { draftReply: augmentedDraft, appended: true, reason: "appended" };
   } catch (err) {
-    console.error("[repurchaseCta] Failed:", (err as Error).message);
+    log.error({ err }, "[repurchaseCta] Failed");
     // Never fail the inquiry pipeline because of a marketing append
     return { draftReply: args.draftReply, appended: false, reason: "error" };
   }

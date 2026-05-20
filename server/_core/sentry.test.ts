@@ -135,13 +135,16 @@ describe("server/_core/sentry", () => {
       (Sentry.captureException as any).mockImplementationOnce(() => {
         throw new Error("broken transport");
       });
-      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      // Module 1.2 swapped console.error → process.stderr.write to avoid
+      // recursion through the pino→Sentry bridge.
+      const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
       const err = new Error("real error");
       expect(() => captureException(err)).not.toThrow();
-      expect(consoleErrorSpy).toHaveBeenCalled();
+      expect(stderrSpy).toHaveBeenCalled();
+      expect(stderrSpy.mock.calls[0][0]).toContain("[sentry.captureException] internal error");
 
-      consoleErrorSpy.mockRestore();
+      stderrSpy.mockRestore();
     });
 
     it("captureMessage forwards to Sentry.captureMessage with level", () => {

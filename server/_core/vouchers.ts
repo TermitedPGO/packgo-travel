@@ -18,6 +18,8 @@ import { eq, and, lte } from "drizzle-orm";
 import { getDb } from "../db";
 import { rewardVouchers, tripPhotos } from "../../drizzle/schema";
 import { deductPackpoint } from "./packpoint";
+import { createChildLogger } from "./logger";
+const log = createChildLogger({ module: "vouchers" });
 
 const VOUCHER_TTL_DAYS = 365;
 const PHOTO_BOOK_PHOTO_REQUIREMENT = 50;
@@ -197,8 +199,9 @@ export async function issueVoucher(args: {
   // Drizzle returns insert id as `result.insertId` for MySQL
   const voucherId = (insertResult as any)[0]?.insertId ?? 0;
 
-  console.log(
-    `[Vouchers] Issued ${code} to user ${args.userId} (${item.sku}, -${item.pointsCost} pt)`
+  log.info(
+    { code, userId: args.userId, sku: item.sku, pointsCost: item.pointsCost },
+    "[Vouchers] Issued",
   );
 
   return {
@@ -246,7 +249,7 @@ export async function markVoucherRedeemed(args: {
     })
     .where(eq(rewardVouchers.id, args.voucherId));
 
-  console.log(`[Vouchers] Marked redeemed ${v.code} by admin ${args.adminId}`);
+  log.info({ code: v.code, adminId: args.adminId }, "[Vouchers] Marked redeemed");
   return { ok: true };
 }
 
@@ -262,6 +265,6 @@ export async function sweepExpiredVouchers(): Promise<{ swept: number }> {
     .set({ status: "expired" })
     .where(and(eq(rewardVouchers.status, "issued"), lte(rewardVouchers.expiresAt, now)));
   const swept = (result as any)[0]?.affectedRows ?? 0;
-  if (swept > 0) console.log(`[Vouchers] Expired ${swept} unused vouchers`);
+  if (swept > 0) log.info({ swept }, "[Vouchers] Expired unused vouchers");
   return { swept };
 }

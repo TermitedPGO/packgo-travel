@@ -14,6 +14,8 @@
  * confirmation on the frontend.
  */
 import { z } from "zod";
+import { createChildLogger } from "../../_core/logger";
+const log = createChildLogger({ module: "opsActions" });
 
 // ────────────────────────────────────────────────────────────────────────
 // Action arg schemas
@@ -117,7 +119,7 @@ export async function executeOpsAction(
     }
   } catch (err) {
     const msg = (err as Error).message;
-    console.error(`[opsActions] ${actionType} failed:`, msg);
+    log.error({ err, actionType }, "[opsActions] action failed");
     return { ok: false, summary: "執行失敗: " + msg.slice(0, 100), error: msg };
   }
 }

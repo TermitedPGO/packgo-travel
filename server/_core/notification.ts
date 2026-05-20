@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import nodemailer, { type Transporter } from "nodemailer";
 import { captureMessage } from "./sentry";
+import { logger } from "./logger";
 
 export type NotificationPayload = {
   title: string;
@@ -93,7 +94,7 @@ const escapeHtml = (s: string): string =>
  * fixes every downstream call site.
  *
  * Channel: Gmail SMTP via EMAIL_USER / EMAIL_PASSWORD env vars. Falls
- * back to console.warn if SMTP isn't configured (dev / preview envs).
+ * back to logger.warn if SMTP isn't configured (dev / preview envs).
  * Return value: true on delivery success, false on missing config or
  * SMTP error. Callers should treat false as "try fallback channel" but
  * NOT as a hard failure (we never want notification gaps to crash the
@@ -118,10 +119,9 @@ export async function notifyOwner(
 
   const transport = getNotifyTransport();
   if (!transport) {
-    console.warn(
-      "[notifyOwner] SMTP not configured (EMAIL_USER/EMAIL_PASSWORD); " +
-        "notification dropped:",
-      title
+    logger.warn(
+      { title },
+      "[notifyOwner] SMTP not configured (EMAIL_USER/EMAIL_PASSWORD); notification dropped",
     );
     return false;
   }
@@ -151,13 +151,8 @@ export async function notifyOwner(
       html: htmlBody,
     });
     return true;
-  } catch (err: any) {
-    console.error(
-      "[notifyOwner] delivery failed:",
-      err?.message || err,
-      "— title:",
-      title
-    );
+  } catch (err) {
+    logger.error({ err, title }, "[notifyOwner] delivery failed");
     return false;
   }
 }

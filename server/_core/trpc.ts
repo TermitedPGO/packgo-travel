@@ -3,6 +3,8 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
 import { checkAdminMutationRateLimit } from "../rateLimit";
+import { createChildLogger } from "./logger";
+const log = createChildLogger({ module: "trpc" });
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
@@ -43,8 +45,9 @@ export const adminProcedure = t.procedure.use(
     if (type === "mutation") {
       const limit = await checkAdminMutationRateLimit(ctx.user.id);
       if (!limit.allowed) {
-        console.warn(
-          `[adminProcedure] mutation rate limit exceeded for user ${ctx.user.id}`
+        log.warn(
+          { userId: ctx.user.id },
+          "[adminProcedure] mutation rate limit exceeded",
         );
         throw new TRPCError({
           code: "TOO_MANY_REQUESTS",

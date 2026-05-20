@@ -26,6 +26,8 @@
  *     phone) as a fallback so a DB outage doesn't silence emergencies.
  */
 import { notifyOwner } from "./notification";
+import { createChildLogger } from "./logger";
+const log = createChildLogger({ module: "agentNotify" });
 
 export type AgentMessageType =
   | "observation"
@@ -75,14 +77,20 @@ export async function notifyAgentMessage(args: NotifyAgentMessageArgs): Promise<
         relatedInteractionId: args.relatedInteractionId ?? null,
         relatedCustomerProfileId: args.relatedCustomerProfileId ?? null,
       } as any);
-      console.log(
-        `[agentNotify] ${args.agentName}/${args.messageType}/${priority}: ${args.title.slice(0, 80)}`
+      log.info(
+        {
+          agentName: args.agentName,
+          messageType: args.messageType,
+          priority,
+          title: args.title.slice(0, 80),
+        },
+        "[agentNotify] message recorded",
       );
     }
   } catch (err) {
-    console.error(
-      `[agentNotify] DB insert failed for ${args.agentName}/${args.messageType}:`,
-      (err as Error).message
+    log.error(
+      { err, agentName: args.agentName, messageType: args.messageType },
+      "[agentNotify] DB insert failed",
     );
     // Don't throw — agent's primary task should still complete.
   }
@@ -97,7 +105,7 @@ export async function notifyAgentMessage(args: NotifyAgentMessageArgs): Promise<
         content: args.body,
       });
     } catch (err) {
-      console.error("[agentNotify] critical-fallback email also failed:", (err as Error).message);
+      log.error({ err }, "[agentNotify] critical-fallback email also failed");
     }
   }
 }

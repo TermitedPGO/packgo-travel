@@ -20,6 +20,8 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "../db";
 import { users } from "../../drizzle/schema";
+import { createChildLogger } from "./logger";
+const log = createChildLogger({ module: "referral" });
 
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // exclude 0/O/1/I/L
 const PREFIX = "PACK";
@@ -60,7 +62,7 @@ export async function ensureReferralCode(userId: number): Promise<string | null>
     const code = generateCode();
     try {
       await db.update(users).set({ referralCode: code }).where(eq(users.id, userId));
-      console.log(`[Referral] Assigned code ${code} to user ${userId}`);
+      log.info({ code, userId }, "[Referral] Assigned code to user");
       return code;
     } catch (err: any) {
       if (err?.code === "ER_DUP_ENTRY" || /Duplicate entry/i.test(err?.message || "")) {
@@ -69,7 +71,7 @@ export async function ensureReferralCode(userId: number): Promise<string | null>
       throw err;
     }
   }
-  console.error(`[Referral] Failed to generate unique code after 5 retries for user ${userId}`);
+  log.error({ userId }, "[Referral] Failed to generate unique code after 5 retries");
   return null;
 }
 
@@ -108,11 +110,14 @@ export async function attachReferral(args: {
 }): Promise<boolean> {
   const referrerId = await resolveReferralCode(args.referralCode);
   if (!referrerId) {
-    console.log(`[Referral] Code ${args.referralCode} not found, skipping`);
+    log.info({ referralCode: args.referralCode }, "[Referral] Code not found, skipping");
     return false;
   }
   if (referrerId === args.refereeUserId) {
-    console.warn(`[Referral] Self-referral attempt user ${args.refereeUserId}`);
+    log.warn(
+      { refereeUserId: args.refereeUserId },
+      "[Referral] Self-referral attempt",
+    );
     return false;
   }
 
@@ -127,8 +132,9 @@ export async function attachReferral(args: {
     .limit(1);
   if (!referee) return false;
   if (referee.existing) {
-    console.log(
-      `[Referral] User ${args.refereeUserId} already has referredBy=${referee.existing}, ignoring new code`
+    log.info(
+      { refereeUserId: args.refereeUserId, existing: referee.existing },
+      "[Referral] User already has referredBy, ignoring new code",
     );
     return false;
   }
@@ -141,15 +147,17 @@ export async function attachReferral(args: {
     .where(eq(users.id, referrerId))
     .limit(1);
   if (referrer && referrer.email === args.refereeEmail) {
-    console.warn(
-      `[Referral] Same email on both sides (${args.refereeEmail}) — likely self-referral, blocked`
+    log.warn(
+      { refereeEmail: args.refereeEmail },
+      "[Referral] Same email on both sides — likely self-referral, blocked",
     );
     return false;
   }
 
   await db.update(users).set({ referredBy: referrerId }).where(eq(users.id, args.refereeUserId));
-  console.log(
-    `[Referral] User ${args.refereeUserId} (${args.refereeEmail}) referred by user ${referrerId}`
+  log.info(
+    { refereeUserId: args.refereeUserId, refereeEmail: args.refereeEmail, referrerId },
+    "[Referral] User referred",
   );
   return true;
 }
@@ -211,8 +219,9 @@ export async function awardReferralOnFirstBooking(args: {
     .set({ referralBonusAwarded: true })
     .where(eq(users.id, referee.id));
 
-  console.log(
-    `[Referral] ✓ Paid +${REFERRAL_BONUS} to both user ${referee.id} (referee) and user ${referee.referredBy} (referrer)`
+  log.info(
+    { bonus: REFERRAL_BONUS, refereeId: referee.id, referrerId: referee.referredBy },
+    "[Referral] Paid bonus to both referee and referrer",
   );
   return REFERRAL_BONUS;
 }

@@ -22,6 +22,8 @@
 import { storagePut } from "server/storage";
 import { ENV } from "./env";
 import { redis } from "../redis";
+import { createChildLogger } from "./logger";
+const log = createChildLogger({ module: "imageGeneration" });
 
 export type GenerateImageOptions = {
   prompt: string;
@@ -169,9 +171,8 @@ export async function generateImage(
   options: GenerateImageOptions
 ): Promise<GenerateImageResponse> {
   if (options.originalImages && options.originalImages.length > 0) {
-    console.warn(
-      "[generateImage] originalImages is no longer supported after Forge removal; " +
-        "falling back to prompt-only search."
+    log.warn(
+      "[generateImage] originalImages is no longer supported after Forge removal; falling back to prompt-only search.",
     );
   }
 
@@ -183,12 +184,12 @@ export async function generateImage(
   try {
     items = await searchCse(query, candidates);
   } catch (err) {
-    console.error("[generateImage] CSE search error:", err);
+    log.error({ err }, "[generateImage] CSE search error");
     return { url: undefined };
   }
 
   if (items.length === 0) {
-    console.warn(`[generateImage] no CSE results for query: ${query.substring(0, 80)}`);
+    log.warn({ query: query.substring(0, 80) }, "[generateImage] no CSE results");
     return { url: undefined };
   }
 
@@ -201,18 +202,24 @@ export async function generateImage(
 
     try {
       const { url } = await storagePut(key, download.buffer, download.contentType);
-      console.log(
-        `[generateImage] ✅ "${query.substring(0, 60)}" → ${url.substring(0, 60)}... (src: ${item.image?.contextLink ?? "unknown"})`
+      log.info(
+        {
+          query: query.substring(0, 60),
+          url: url.substring(0, 60),
+          src: item.image?.contextLink ?? "unknown",
+        },
+        "[generateImage] success",
       );
       return { url, sourceUrl: item.image?.contextLink };
     } catch (err) {
-      console.error("[generateImage] R2 upload error:", err);
+      log.error({ err }, "[generateImage] R2 upload error");
       // try next candidate
     }
   }
 
-  console.warn(
-    `[generateImage] all ${items.length} candidates failed to download for query: ${query.substring(0, 80)}`
+  log.warn(
+    { itemCount: items.length, query: query.substring(0, 80) },
+    "[generateImage] all candidates failed to download",
   );
   return { url: undefined };
 }

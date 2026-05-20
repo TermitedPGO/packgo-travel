@@ -150,6 +150,14 @@ app.listen(3000)  // 應使用 process.env.PORT
 
 // ❌ 禁止：在 publicProcedure 做管理員操作
 // 應使用 adminProcedure
+
+// ❌ 禁止：在 server/_core/* 或 server/agents/autonomous/* 用 console.*
+//   應使用 import { logger } from "./logger"（相對路徑）
+//   logger.info({ event, ...fields }, "message")
+//   logger.error({ err }, "message")
+//   （剩餘 ~1,250 sites 在 server/routers/* + services/* + 根目錄
+//    server/*.ts，Wave 4 Module 4.24 集中遷移；見
+//    docs/refactor/wave-4-deferrals.md）
 ```
 
 ---
@@ -197,6 +205,7 @@ grep -rn "object-cover" client/src --include="*.tsx" | grep -v "rounded"
 | Stripe webhook + idempotency | `server/_core/stripeWebhook.ts` + `server/_core/stripeWebhookIdempotency.ts` + table `stripeWebhookEvents`（refactor Phase 2） |
 | Supplier sync (Lion + UV) | `server/services/supplierSync/{lion,uv,shared,reporting,index}.ts`（refactor Phase 5A） |
 | Sentry 觀測（server + client） | `server/_core/sentry.ts` + `client/src/_core/SentryBoundary.tsx`（v2 Wave 1 Module 1.1，2026-05-19） |
+| Pino 結構化日誌 | `server/_core/logger.ts` + `server/_core/correlationId.ts`（v2 Wave 1 Module 1.2，2026-05-20；critical-path subset 已遷，剩餘 sites 待 Wave 4 Module 4.24） |
 | LLM 調用 | `server/_core/llm.ts` |
 | S3 儲存 | `server/storage.ts` |
 | 認證狀態 | `client/src/_core/hooks/useAuth.ts` |
