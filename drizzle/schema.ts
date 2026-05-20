@@ -814,6 +814,7 @@ export const inquiries = mysqlTable("inquiries", {
     "visa",           // Visa application service
     "group_booking",  // Group booking inquiry
     "complaint",      // Complaint
+    "emergency",      // On-trip emergency (medical / flight / passport / safety) — added migration 0077
     "other"
   ]).notNull(),
   customerName: varchar("customerName", { length: 255 }).notNull(),

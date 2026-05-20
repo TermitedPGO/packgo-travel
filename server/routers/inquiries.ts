@@ -24,13 +24,10 @@
  *   addMessage       – auth: owner-or-admin guard; senderType derived
  *                      from ctx.user.role
  *
- * IMPORTANT: createEmergency uses `inquiryType: "emergency" as "other"`
- * cast — TODO(migration 0070): add "emergency" to inquiryType enum in
- * drizzle/schema.ts + corresponding ALTER TABLE migration. Cast is a
- * temporary type-narrowing while migration is pending Jeff approval.
- * Runtime persists "emergency" string but DB column currently rejects
- * values outside the existing enum — see
- * docs/refactor/tasks/phase-1/module-3-routers-tsc.md §B6.
+ * Migration 0077 applied (2026-05-20): inquiryType "emergency" is now
+ * a first-class enum value on the DB column. The prior
+ * `inquiryType: "emergency" as "other"` cast in createEmergency has
+ * been removed; rows are persisted with the correct enum value.
  *
  * Security notes (preserved from origin):
  *   - SECURITY_AUDIT_2026_05_14 P1-3: bounded string maxes + per-IP
@@ -226,13 +223,7 @@ export const inquiriesRouter = router({
           customerPhone: input.customerPhone,
           subject: `[緊急 · ${labelZh}] ${input.currentLocation}`,
           message: input.message,
-          // TODO(migration 0070): add "emergency" to inquiryType enum in
-          // drizzle/schema.ts + corresponding ALTER TABLE migration. Cast
-          // is a temporary type-narrowing while migration is pending Jeff
-          // approval. Runtime persists "emergency" string but DB column
-          // currently rejects values outside the existing enum — see
-          // docs/refactor/tasks/phase-1/module-3-routers-tsc.md §B6.
-          inquiryType: "emergency" as "other",
+          inquiryType: "emergency",
           userId: ctx.user?.id,
           status: "new",
         });
