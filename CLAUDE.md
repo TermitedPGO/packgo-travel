@@ -86,6 +86,7 @@
 - **資料庫：** MySQL via Drizzle ORM（schema 在 `drizzle/schema.ts`）
 - **認證：** Manus OAuth（`protectedProcedure` 保護需登入的 API）
 - **Admin 保護：** 使用 `adminProcedure`（檢查 `ctx.user.role === 'admin'`）
+- **Admin Rate-Limit：** 自動套用 — `adminProcedure` middleware 在 `server/_core/trpc.ts:33-66` 已包含 60 req/min throttle（per-admin user，QA audit 2026-05-11 Phase 6 P0）。Queries 不節流。新增 admin router 時無需手動加 rate-limit。
 - **檔案儲存：** S3（`server/storage.ts` 的 `storagePut`）
 - **AI 調用：** `server/_core/llm.ts` 的 `invokeLLM`（**只在 server 端調用**）
 
@@ -150,6 +151,10 @@ app.listen(3000)  // 應使用 process.env.PORT
 
 // ❌ 禁止：在 publicProcedure 做管理員操作
 // 應使用 adminProcedure
+
+// ❌ 禁止：在 admin router 重新定義自己的 procedure（繞過 rate-limit）
+//   應直接 import { adminProcedure } from "../_core/trpc"
+//   （自動套 60 req/min/admin throttle + role check）
 
 // ❌ 禁止：在 server/_core/* 或 server/agents/autonomous/* 用 console.*
 //   應使用 import { logger } from "./logger"（相對路徑）
