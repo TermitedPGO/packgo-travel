@@ -14,7 +14,7 @@
  * Design system codified in:
  *   ~/.claude/projects/-Users-jeff-Desktop---/memory/feedback_admin_design_system.md
  */
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { LoadingPage } from "@/components/ui/spinner";
@@ -37,59 +37,61 @@ import {
 } from "@/components/admin/primitives";
 import { useCommandPaletteHotkey } from "@/components/admin/primitives/CommandPalette";
 
-// All existing tab components (wrapped in the new shell — no behavior change)
-import DashboardTab from "@/components/admin/DashboardTab";
-import ToursTab from "@/components/admin/ToursTab";
-import BookingsTab from "@/components/admin/BookingsTab";
-import InquiriesTab from "@/components/admin/InquiriesTab";
-import InboxTab from "@/components/admin/InboxTab";
-import ReviewsTab from "@/components/admin/ReviewsTab";
-import AiHubTab from "@/components/admin/AiHubTab";
-import AnalyticsTab from "@/components/admin/AnalyticsTab";
-import TaskHistoryContent from "@/components/admin/TaskHistoryContent";
-import AuditLogTab from "@/components/admin/AuditLogTab";
-import CalibrationReviewTab from "@/components/admin/CalibrationReviewTab";
-import CompetitorMonitorTab from "@/components/admin/CompetitorMonitorTab";
-import MarketingTab from "@/components/admin/MarketingTab";
-import VisaManagementTab from "@/components/admin/VisaManagementTab";
-import AffiliateTab from "@/components/admin/AffiliateTab";
-import AccountingTab from "@/components/admin/AccountingTab";
-import FinanceTab from "@/components/admin/FinanceTab";
-import SuppliersTab from "@/components/admin/SuppliersTab";
-import MonitorDashboard from "@/components/admin/MonitorDashboard";
-import AiQuotesTab from "@/components/admin/AiQuotesTab";
-import WechatAssistTab from "@/components/admin/WechatAssistTab";
-import InvoicesTab from "@/components/admin/InvoicesTab";
-import ReconciliationTab from "@/components/admin/ReconciliationTab";
-import MarketingContentTab from "@/components/admin/MarketingContentTab";
-import LlmCostTab from "@/components/admin/LlmCostTab";
-import PackpointTab from "@/components/admin/PackpointTab";
-import VouchersTab from "@/components/admin/VouchersTab";
-import PostersTab from "@/components/admin/PostersTab";
-import AutonomousAgentsTab from "@/components/admin/AutonomousAgentsTab";
-import OfficeOverviewTab from "@/components/admin/OfficeOverviewTab";
+// v2 Wave 1 Module 1.5 — every tab is lazy-loaded so the Admin shell stays
+// small (was ~967 KB, target <200 KB). Vite emits each tab as its own chunk
+// loaded only on first navigation to that tab. Single <Suspense> boundary
+// at the renderPage call site shows <LoadingPage/> during the network fetch.
+const DashboardTab = lazy(() => import("@/components/admin/DashboardTab"));
+const ToursTab = lazy(() => import("@/components/admin/ToursTab"));
+const BookingsTab = lazy(() => import("@/components/admin/BookingsTab"));
+const InquiriesTab = lazy(() => import("@/components/admin/InquiriesTab"));
+const InboxTab = lazy(() => import("@/components/admin/InboxTab"));
+const ReviewsTab = lazy(() => import("@/components/admin/ReviewsTab"));
+const AiHubTab = lazy(() => import("@/components/admin/AiHubTab"));
+const AnalyticsTab = lazy(() => import("@/components/admin/AnalyticsTab"));
+const TaskHistoryContent = lazy(() => import("@/components/admin/TaskHistoryContent"));
+const AuditLogTab = lazy(() => import("@/components/admin/AuditLogTab"));
+const CalibrationReviewTab = lazy(() => import("@/components/admin/CalibrationReviewTab"));
+const CompetitorMonitorTab = lazy(() => import("@/components/admin/CompetitorMonitorTab"));
+const MarketingTab = lazy(() => import("@/components/admin/MarketingTab"));
+const VisaManagementTab = lazy(() => import("@/components/admin/VisaManagementTab"));
+const AffiliateTab = lazy(() => import("@/components/admin/AffiliateTab"));
+const AccountingTab = lazy(() => import("@/components/admin/AccountingTab"));
+const FinanceTab = lazy(() => import("@/components/admin/FinanceTab"));
+const SuppliersTab = lazy(() => import("@/components/admin/SuppliersTab"));
+const MonitorDashboard = lazy(() => import("@/components/admin/MonitorDashboard"));
+const AiQuotesTab = lazy(() => import("@/components/admin/AiQuotesTab"));
+const WechatAssistTab = lazy(() => import("@/components/admin/WechatAssistTab"));
+const InvoicesTab = lazy(() => import("@/components/admin/InvoicesTab"));
+const ReconciliationTab = lazy(() => import("@/components/admin/ReconciliationTab"));
+const MarketingContentTab = lazy(() => import("@/components/admin/MarketingContentTab"));
+const LlmCostTab = lazy(() => import("@/components/admin/LlmCostTab"));
+const PackpointTab = lazy(() => import("@/components/admin/PackpointTab"));
+const VouchersTab = lazy(() => import("@/components/admin/VouchersTab"));
+const PostersTab = lazy(() => import("@/components/admin/PostersTab"));
+const AutonomousAgentsTab = lazy(() => import("@/components/admin/AutonomousAgentsTab"));
 // Round 81 Phase A: server-side PACK&GO skill (quote PDF)
-import QuoteToolTab from "@/components/admin/tools/QuoteToolTab";
+const QuoteToolTab = lazy(() => import("@/components/admin/tools/QuoteToolTab"));
 // Round 81 Phase 1 of C workflow: Inbox-first default landing
-import OfficeInboxTab from "@/components/admin/OfficeInboxTab";
+const OfficeInboxTab = lazy(() => import("@/components/admin/OfficeInboxTab"));
 // Round 81 — per-agent Slack-like channel view; replaces legacy
 // OfficeOverviewTab as the "聊天" page. Built on agentMessages table.
-import ChatsTab from "@/components/admin/ChatsTab";
+const ChatsTab = lazy(() => import("@/components/admin/ChatsTab"));
 // Round 81 (2026-05-17) — UnifiedInbox is the default Office landing.
 // Single vertical scroll: actionable items → Domain Pulse → activity feed.
 // Replaced an earlier 3-tab split (TodayOverview + OfficeInboxTab + ChatsTab).
-import UnifiedInbox from "@/components/admin/UnifiedInbox";
+const UnifiedInbox = lazy(() => import("@/components/admin/UnifiedInbox"));
 // Round 81 (2026-05-18) — full-page agent chat. Claude-Code-style
 // document messages, wide reading width, full markdown. Replaced an
 // earlier slide-out Sheet (FloatingOpsAgent, deleted 2026-05-18).
-import AgentChatPage from "@/components/admin/AgentChatPage";
+const AgentChatPage = lazy(() => import("@/components/admin/AgentChatPage"));
 // Round 81 (2026-05-17) — 4 per-domain landing pages. Each domain (Ops,
 // Customers, Marketing, Finance) gets a dedicated at-a-glance dashboard
 // at the top of its menu, before drilling into specific sub-pages.
-import OpsLanding from "@/components/admin/landings/OpsLanding";
-import CustomersLanding from "@/components/admin/landings/CustomersLanding";
-import MarketingLanding from "@/components/admin/landings/MarketingLanding";
-import FinanceLanding from "@/components/admin/landings/FinanceLanding";
+const OpsLanding = lazy(() => import("@/components/admin/landings/OpsLanding"));
+const CustomersLanding = lazy(() => import("@/components/admin/landings/CustomersLanding"));
+const MarketingLanding = lazy(() => import("@/components/admin/landings/MarketingLanding"));
+const FinanceLanding = lazy(() => import("@/components/admin/landings/FinanceLanding"));
 
 // ────────────────────────────────────────────────────────────────────────
 // Information architecture
@@ -340,7 +342,16 @@ export default function Admin() {
                 : "flex-1 overflow-auto px-4 lg:px-6 py-4"
             }
           >
-            {renderPage(activePage, setActivePage)}
+            {/*
+              v2 Wave 1 Module 1.5 — single Suspense boundary at the
+              tab-render block. Each tab is its own lazy chunk; on first
+              navigation Vite fetches that chunk and React shows
+              <LoadingPage/> briefly. Subsequent tab switches reuse the
+              cached chunk (instant).
+            */}
+            <Suspense fallback={<LoadingPage text="載入中…" />}>
+              {renderPage(activePage, setActivePage)}
+            </Suspense>
           </main>
         </div>
       </div>
