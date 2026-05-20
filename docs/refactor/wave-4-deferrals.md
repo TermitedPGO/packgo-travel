@@ -48,3 +48,52 @@ This file inventories the **remaining sites** that Module 4.24 must finish.
 - Wave 1 Module 1.2 — landed the critical-path subset (this file's parent)
 - Wave 4 Module 4.23 — scripts/ purge (decides which scripts survive into Module 4.24's sweep scope)
 - Wave 4 Module 4.24 — the full sweep itself
+
+---
+
+# Passport Backfill Deferral
+
+**Created:** 2026-05-20 (Wave 1 Module 1.8 post-deploy)
+**Owner:** Next deploy after Wave 2 (or Wave 4 cleanup module)
+
+## Status
+
+`server/scripts/backfill-passport-encryption.ts` exists in repo but cannot be invoked in production:
+
+- The Fly container's `/app/server/` directory contains only `assets/` (static files); source `.ts` files are NOT shipped (Dockerfile builds via esbuild bundle → single `dist/index.js`).
+- The compiled `dist/index.js` is the whole-server bundle; cannot extract + invoke `backfillPassportEncryption()` directly.
+- `pnpm` is not on the container PATH, so `pnpm tsx server/scripts/...` fails too.
+
+## Why this is OK to defer
+
+1. **New writes** (post-v503 deploy 2026-05-20) automatically encrypt via `encryptPassport` in db.ts touch sites — verified.
+2. **Legacy plaintext rows** remain readable via `decryptToken`'s no-`enc:v1:` prefix fallback (returns input as-is).
+3. **TiDB at-rest encryption** + access scoped to Fly-internal credentials provides baseline protection.
+4. **Volume is small** (~<50 passport rows total estimated based on visa app + booking volume).
+
+## Fix in next deploy
+
+**Option A (recommended):** Add a pure `.mjs` version at `scripts/backfill-passport-encryption.mjs` (no TypeScript, inline AES-256-GCM logic mirroring `tokenCrypto.ts`). Dockerfile already copies `scripts/*` (per `/app/scripts/migrate.mjs` precedent). After next deploy:
+
+```bash
+fly ssh console -a packgo-travel -C "node scripts/backfill-passport-encryption.mjs"
+```
+
+**Option B (cleaner long-term):** Modify Dockerfile to also copy `server/scripts/` directory + ship `tsx` as runtime dep (not just devDep). Then original `.ts` script runs as-is via:
+
+```bash
+fly ssh console -a packgo-travel -C "/app/node_modules/.bin/tsx server/scripts/backfill-passport-encryption.ts"
+```
+
+## Verification post-backfill
+
+```sql
+-- Should return 0 rows for fully-backfilled state
+SELECT COUNT(*) FROM bookingParticipants
+  WHERE passportNumber IS NOT NULL
+  AND passportNumber NOT LIKE 'enc:v1:%';
+SELECT COUNT(*) FROM visaApplications
+  WHERE passportNumber NOT LIKE 'enc:v1:%';
+```
+
+Both backfill paths write an `adminAuditLog` row with action `passport_backfill_run` + `{rowCount, durationMs, table}` metadata.
