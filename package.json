@@ -109,6 +109,7 @@
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
     "plaid": "^42.2.0",
+    "posthog-js": "^1.374.3",
     "puppeteer": "^24.37.5",
     "puppeteer-core": "^24.40.0",
     "qrcode": "^1.5.4",

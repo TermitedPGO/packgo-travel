@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import SEO from "@/components/SEO";
 import { useParams, useLocation, useRoute } from "wouter";
 import { trpc } from "@/lib/trpc";
@@ -15,10 +15,12 @@ import { getLoginUrl } from "@/const";
 import { useLocale } from "@/contexts/LocaleContext";
 import { translateDestination } from "@/utils/locationMapping";
 import { trackBeginCheckout } from "@/lib/analytics";
+import { track as trackPosthog } from "@/_core/analytics";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 
 type BookingStep = "date" | "travelers" | "details" | "confirm";
+const BOOKING_STEP_ORDER: BookingStep[] = ["date", "travelers", "details", "confirm"];
 
 export default function BookTour() {
   const { t, language, formatPrice } = useLocale();
@@ -79,6 +81,33 @@ export default function BookTour() {
       setCustomerEmail(user.email || "");
     }
   }, [user, customerName]);
+
+  // v2 Wave 1 Module 1.4 — PostHog `booking_start`. Fires once when the
+  // tour resolves (user reached the booking page with a valid tour id).
+  // Tour price uses `tour.price` directly — the departure-specific price
+  // isn't selected yet at this point.
+  const bookingStartFiredRef = useRef(false);
+  useEffect(() => {
+    if (!tour || bookingStartFiredRef.current) return;
+    bookingStartFiredRef.current = true;
+    trackPosthog("booking_start", {
+      tourId: tour.id,
+      tourPrice: (tour as any).price ?? 0,
+    });
+  }, [tour]);
+
+  // v2 Wave 1 Module 1.4 — PostHog `booking_step` on each step transition.
+  // Step names ("date" | "travelers" | "details" | "confirm") mirror the
+  // local `BookingStep` union — keep them in sync. stepIndex is the 0-based
+  // position in `BOOKING_STEP_ORDER`.
+  useEffect(() => {
+    if (!tour) return;
+    trackPosthog("booking_step", {
+      tourId: tour.id,
+      stepName: currentStep,
+      stepIndex: BOOKING_STEP_ORDER.indexOf(currentStep),
+    });
+  }, [currentStep, tour?.id]);
   
   // Calculate total price
   const calculateTotalPrice = () => {
@@ -197,7 +226,17 @@ export default function BookTour() {
         // Round 80.22: pass redemption (server validates against balance + caps)
         pointsToRedeem: safePointsToRedeem > 0 ? safePointsToRedeem : undefined,
       });
-      
+
+      // v2 Wave 1 Module 1.4 — PostHog booking_complete. Fires only on
+      // successful mutation; bookingId comes from the server response.
+      trackPosthog("booking_complete", {
+        tourId,
+        bookingId: booking.id,
+        totalAmount: totalPrice,
+        participantCount:
+          numberOfAdults + numberOfChildrenWithBed + numberOfChildrenNoBed + numberOfInfants,
+      });
+
       toast.success(t('bookTour.bookingSuccess'), {
         description: t('bookTour.bookingSuccessDesc').replace('{id}', booking.id.toString()),
       });
