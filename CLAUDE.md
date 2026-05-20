@@ -84,7 +84,7 @@
 
 - **API 層：** tRPC（所有 API 在 `server/routers.ts`，超過 150 行時拆分到 `server/routers/`）
 - **資料庫：** MySQL via Drizzle ORM（schema 在 `drizzle/schema.ts`）
-- **認證：** Manus OAuth（`protectedProcedure` 保護需登入的 API）
+- **認證：** Google OAuth（`server/googleAuth.ts` via passport-google-oauth20）+ email/password 註冊；session 透過自簽 JWT（`server/jwt.ts` + `JWT_SECRET`）。`protectedProcedure` 保護需登入的 API
 - **Admin 保護：** 使用 `adminProcedure`（檢查 `ctx.user.role === 'admin'`）
 - **Admin Rate-Limit：** 自動套用 — `adminProcedure` middleware 在 `server/_core/trpc.ts:33-66` 已包含 60 req/min throttle（per-admin user，QA audit 2026-05-11 Phase 6 P0）。Queries 不節流。新增 admin router 時無需手動加 rate-limit。
 - **檔案儲存：** Cloudflare R2（`server/storage.ts` 透過 `@aws-sdk/client-s3`，R2 為 S3-compatible API）
