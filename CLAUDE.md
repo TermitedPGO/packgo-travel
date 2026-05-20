@@ -206,6 +206,7 @@ grep -rn "object-cover" client/src --include="*.tsx" | grep -v "rounded"
 | Supplier sync (Lion + UV) | `server/services/supplierSync/{lion,uv,shared,reporting,index}.ts`（refactor Phase 5A） |
 | Sentry 觀測（server + client） | `server/_core/sentry.ts` + `client/src/_core/SentryBoundary.tsx`（v2 Wave 1 Module 1.1，2026-05-19） |
 | Pino 結構化日誌 | `server/_core/logger.ts` + `server/_core/correlationId.ts`（v2 Wave 1 Module 1.2，2026-05-20；critical-path subset 已遷，剩餘 sites 待 Wave 4 Module 4.24） |
+| 深度健康檢查 + UptimeRobot | `server/_core/healthCheck.ts` + `/health` Express route + `system.health` tRPC query（DB+Redis+Stripe+LLM ping，Stripe 5min / LLM 1h 快取，v2 Wave 1 Module 1.3，2026-05-20） |
 | LLM 調用 | `server/_core/llm.ts` |
 | S3 儲存 | `server/storage.ts` |
 | 認證狀態 | `client/src/_core/hooks/useAuth.ts` |

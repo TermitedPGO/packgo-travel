@@ -239,6 +239,18 @@ async function startServer() {
     });
   });
 
+  // v2 Wave 1 Module 1.3 — deep health probe consumed by UptimeRobot. Unlike
+  // /healthz (shallow "process is up"), this pings DB + Redis + Stripe + LLM
+  // and returns a degraded/down verdict so UptimeRobot can alert on partial
+  // outages, not just total silence. See ./healthCheck.ts for cache rules.
+  // JSON body — no conflict with the Stripe webhook raw-body parser below.
+  app.get("/health", async (_req, res) => {
+    const { runHealthChecks } = await import("./healthCheck");
+    const result = await runHealthChecks();
+    const code = result.overall === "ok" ? 200 : 503;
+    res.status(code).json(result);
+  });
+
   // Stripe webhook must be registered BEFORE express.json() to preserve raw body
   app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), handleStripeWebhook);
 

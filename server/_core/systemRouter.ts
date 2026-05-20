@@ -1,17 +1,19 @@
 import { z } from "zod";
 import { notifyOwner } from "./notification";
+import { runHealthChecks } from "./healthCheck";
 import { adminProcedure, publicProcedure, router } from "./trpc";
 
 export const systemRouter = router({
-  health: publicProcedure
-    .input(
-      z.object({
-        timestamp: z.number().min(0, "timestamp cannot be negative"),
-      })
-    )
-    .query(() => ({
-      ok: true,
-    })),
+  /**
+   * Deep health check — pings DB + Redis + Stripe + LLM and returns a
+   * structured payload. Same data the `/health` Express route serves to
+   * UptimeRobot; exposed via tRPC for a future admin-dashboard tile.
+   *
+   * Wave 1 Module 1.3 — see `./healthCheck.ts` for cache/timeout rules.
+   */
+  health: publicProcedure.query(async () => {
+    return runHealthChecks();
+  }),
 
   notifyOwner: adminProcedure
     .input(
