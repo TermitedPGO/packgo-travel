@@ -121,6 +121,17 @@ export default function ChatsTab() {
     refetchInterval: 30_000,
   });
 
+  // Gmail integration status — 2026-05-21 inline Connect Gmail UI added
+  // after Round 81 orphaned the OfficeOverviewTab GmailMiniPanel. Backend
+  // proc was already wired (server/routers/agent/gmail.ts gmailStatus);
+  // just no UI mount point. Reconnect link goes to /api/admin/connect-gmail
+  // (server/gmailOAuth.ts handles the 302 to Google).
+  const gmailStatus = trpc.agent.gmailStatus.useQuery(undefined, {
+    refetchInterval: 60_000,
+  });
+  // utils is declared later (line ~235) for the existing reply/proposal
+  // mutations — reuse it for gmailRunNow's onSuccess via deferred lookup.
+
   // We need to know which agents have ANY messages to populate the sidebar.
   // listMessages without filters returns everyone — group client-side.
   const allMessages = trpc.agent.listMessages.useQuery(
@@ -224,6 +235,17 @@ export default function ChatsTab() {
       utils.agent.unreadMessageCount.invalidate();
     },
     onError: (err) => toast.error("回覆失敗: " + err.message),
+  });
+
+  // Gmail integration — sidebar Connect/Reconnect UI (2026-05-21).
+  // Backend (server/routers/agent/gmail.ts gmailRunNow) was already wired;
+  // declared here AFTER `utils` because onSuccess invalidates gmailStatus.
+  const gmailRunNow = trpc.agent.gmailRunNow.useMutation({
+    onSuccess: () => {
+      utils.agent.gmailStatus.invalidate();
+      toast.success("Gmail 即時抓取已觸發");
+    },
+    onError: (e) => toast.error(`抓取失敗: ${e.message}`),
   });
 
   // Round 81 / 2026-05-17 — OpsAgent ask flow.
@@ -516,8 +538,72 @@ export default function ChatsTab() {
           </div>
         </ScrollArea>
 
-        <div className="mt-2 pt-2 border-t border-foreground/10 px-1">
-          <label className="flex items-center gap-2 text-[11px] text-foreground/60 cursor-pointer">
+        {/* Gmail integration mini-panel — 2026-05-21 (Round 81 orphan fix).
+            Replaces the dead GmailMiniPanel in OfficeOverviewTab. */}
+        <div className="mt-2 pt-2 border-t border-foreground/10 px-1 space-y-2">
+          {(() => {
+            const integrations = gmailStatus.data?.integrations ?? [];
+            const active = integrations.find((i: any) => i.isActive === 1);
+            if (active) {
+              // Heuristic: error indicator when poll-tick failure count
+              // outweighs successful processing (TiDB invalid_grant churn).
+              const failed = active.messagesFailed ?? 0;
+              const processed = active.messagesProcessed ?? 0;
+              const hasError = failed > 0 && failed > processed / 4;
+              return (
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1.5 text-[11px]">
+                    <Mail
+                      className={`w-3 h-3 ${hasError ? "text-rose-600" : "text-emerald-600"}`}
+                    />
+                    <span className="font-semibold text-foreground/80 truncate flex-1">
+                      {active.emailAddress}
+                    </span>
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${hasError ? "bg-rose-500" : "bg-emerald-500"}`}
+                    />
+                  </div>
+                  {hasError && (
+                    <div className="text-[10px] text-rose-700">
+                      失敗 {failed} 次（vs 成功 {processed}）— 可能需重新授權
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2 text-[10px]">
+                    <button
+                      onClick={() =>
+                        gmailRunNow.mutate({ integrationId: active.id })
+                      }
+                      disabled={gmailRunNow.isPending}
+                      className="text-blue-700 hover:underline disabled:opacity-50 inline-flex items-center gap-0.5"
+                    >
+                      <RefreshCw
+                        className={`w-2.5 h-2.5 ${gmailRunNow.isPending ? "animate-spin" : ""}`}
+                      />
+                      立刻檢查
+                    </button>
+                    <span className="text-foreground/30">·</span>
+                    <a
+                      href="/api/admin/connect-gmail"
+                      className="text-amber-700 hover:underline inline-flex items-center gap-0.5"
+                      title="OAuth token 過期或想換信箱時用"
+                    >
+                      重新授權
+                    </a>
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <a
+                href="/api/admin/connect-gmail"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-foreground text-background px-2 py-1.5 text-[11px] font-semibold hover:bg-foreground/85 w-full justify-center"
+              >
+                <Mail className="w-3 h-3" />
+                連接 Gmail
+              </a>
+            );
+          })()}
+          <label className="flex items-center gap-2 text-[11px] text-foreground/60 cursor-pointer pt-1 border-t border-foreground/5">
             <input
               type="checkbox"
               checked={showRead}

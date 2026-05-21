@@ -2,18 +2,24 @@
  * Round 81 — Gmail OAuth callback handler (Express).
  *
  * Distinct from the user-login Google OAuth in `googleAuth.ts`. This flow:
- *   1. Admin clicks "Connect Gmail" → frontend calls trpc.agent.gmailGetAuthUrl
- *   2. Browser redirects to Google consent screen
+ *   1. Admin visits /api/admin/connect-gmail (or clicks UI button)
+ *   2. Server 302-redirects to Google consent screen
  *   3. Google calls back to /api/gmail/oauth/callback?code=...&state=...
  *   4. We exchange code for tokens, identify mailbox, save to gmailIntegration
  *   5. Redirect back to /admin?gmailConnected=1
  *
  * State parameter is signed userId to prevent CSRF. Only admin role can
  * complete the flow (verified by reading session cookie before persisting).
+ *
+ * 2026-05-21 — added /api/admin/connect-gmail as a server-side redirect
+ * shortcut. Round 81 replaced OfficeOverviewTab (which had the Connect
+ * Gmail UI) with ChatsTab, orphaning the UI button. Until ChatsTab gets
+ * its own Gmail panel, this endpoint is the canonical way to start the
+ * OAuth flow — admin bookmarks it.
  */
 
 import type { Express, Request, Response } from "express";
-import { exchangeCodeForTokens } from "./_core/gmail";
+import { exchangeCodeForTokens, getGmailAuthUrl } from "./_core/gmail";
 import { getDb, getUserById } from "./db";
 import { gmailIntegration } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
@@ -21,7 +27,48 @@ import { verifyToken } from "./jwt";
 import { COOKIE_NAME } from "@shared/const";
 import { encryptToken } from "./_core/tokenCrypto";
 
+/** Helper: extract + validate admin user from request cookie. */
+async function getAdminUserFromRequest(req: Request) {
+  const token = (req as any).cookies?.[COOKIE_NAME];
+  const payload = token ? verifyToken(token) : null;
+  const user = payload ? await getUserById(payload.userId) : null;
+  if (!user || user.role !== "admin") return null;
+  return user;
+}
+
 export function initializeGmailOAuth(app: Express) {
+  // ────────────────────────────────────────────────────────────────────
+  // GET /api/admin/connect-gmail — start Gmail OAuth flow
+  //
+  // Admin-only. Server-side redirect to Google consent screen. Replaces
+  // the orphaned client-side `trpc.agent.gmailGetAuthUrl` UI path (the
+  // OfficeOverviewTab GmailMiniPanel never mounts since Round 81 routed
+  // /admin to ChatsTab instead). Jeff can bookmark this URL for one-click
+  // re-auth when GmailPollWorker starts failing with invalid_grant.
+  // ────────────────────────────────────────────────────────────────────
+  app.get(
+    "/api/admin/connect-gmail",
+    async (req: Request, res: Response) => {
+      const user = await getAdminUserFromRequest(req);
+      if (!user) {
+        return res
+          .status(401)
+          .send(
+            "Unauthorized — admin login required. Sign in at /admin first, then revisit this URL.",
+          );
+      }
+      try {
+        const authUrl = getGmailAuthUrl(`uid:${user.id}`);
+        return res.redirect(302, authUrl);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return res
+          .status(500)
+          .send(`Failed to build Gmail auth URL: ${msg}`);
+      }
+    },
+  );
+
   app.get("/api/gmail/oauth/callback", async (req: Request, res: Response) => {
     try {
       // 1. Validate admin session
