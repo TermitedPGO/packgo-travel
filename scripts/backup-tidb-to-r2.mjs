@@ -75,18 +75,28 @@ function parseMySqlUrl(url) {
 
 async function runMysqldump(connection, outputPath) {
   const { host, port, user, password, database } = connection;
-  // --single-transaction: consistent snapshot without table locks (InnoDB)
+  // TiDB requires mysql_native_password auth plugin. MySQL 9.x removed it,
+  // so we use mysql@8.0 LTS explicitly (or override via MYSQLDUMP_BIN env).
+  // brew install mysql@8.0 → /opt/homebrew/opt/mysql@8.0/bin/mysqldump
+  const mysqldumpBin =
+    process.env.MYSQLDUMP_BIN ||
+    "/opt/homebrew/opt/mysql@8.0/bin/mysqldump";
   // --quick: don't buffer rows in memory
-  // --skip-lock-tables: no LOCK TABLES (TiDB doesn't support all flavors)
+  // --skip-lock-tables: no LOCK TABLES (TiDB doesn't support per-table locks)
   // --hex-blob: binary-safe encoding for BLOB columns (passport encryption)
   // --no-tablespaces: skip privilege we may not have on TiDB Cloud
-  // --set-gtid-purged=OFF: skip GTID stuff (TiDB ignores it)
+  // (intentionally NO --single-transaction — TiDB doesn't support SAVEPOINT
+  //  in dump-mode; we accept eventual-consistency snapshot since this is for
+  //  disaster recovery, not point-in-time accuracy. PITR is via TiDB's own
+  //  CDC if needed.)
+  // --column-statistics=0: disable mysql 8.0 ANALYZE TABLE call that TiDB
+  //  doesn't support on system tables.
   const args = [
-    "--single-transaction",
     "--quick",
     "--skip-lock-tables",
     "--hex-blob",
     "--no-tablespaces",
+    "--column-statistics=0",
     "--default-character-set=utf8mb4",
     "--routines",
     "--triggers",
@@ -98,7 +108,7 @@ async function runMysqldump(connection, outputPath) {
     database,
   ];
 
-  const cmd = `mysqldump ${args.map((a) => `"${a.replace(/"/g, '\\"')}"`).join(" ")}`;
+  const cmd = `${mysqldumpBin} ${args.map((a) => `"${a.replace(/"/g, '\\"')}"`).join(" ")}`;
 
   console.log("[backup] starting mysqldump...");
   const startedAt = Date.now();
