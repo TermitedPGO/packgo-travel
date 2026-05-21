@@ -221,7 +221,7 @@ grep -rn "object-cover" client/src --include="*.tsx" | grep -v "rounded"
 | 資料庫 Schema | `drizzle/schema.ts` |
 | tRPC 路由（composition shell） | `server/routers.ts` (~283 LOC, 從 10,130 拆來) |
 | tRPC 路由（per-domain） | `server/routers/<domain>.ts` × 40 個 sub-routers（refactor 2026-05-19） |
-| 資料庫查詢 | `server/db.ts` |
+| 資料庫查詢 | `server/db.ts`（shim + residual ~666 LOC：visa applications + inquiries + newsletter subscribers + affiliate clicks + `getDb()` + `DrizzleTx`）+ `server/db/{booking,tour,user,search,accounting}.ts`（v2 Wave 2 D2 5-file split：booking 13 fns / tour 22 fns / user 26 fns / search 39 fns / accounting 33 fns 含 marketing automation；voucher/packpoint/refund 在 `_core/`；auditLog 在 `_core/auditLog.ts`）。原 3,629 LOC monolith 拆成 5 個 domain module，2026-05-21 收尾 |
 | Stripe webhook + idempotency | `server/_core/stripeWebhook.ts` + `server/_core/stripeWebhookIdempotency.ts` + table `stripeWebhookEvents`（refactor Phase 2） |
 | Supplier sync (Lion + UV) | `server/services/supplierSync/{lion,uv,shared,reporting,index}.ts`（refactor Phase 5A） |
 | Passport-at-rest 加密 | `server/_core/tokenCrypto.ts`（AES-256-GCM 通用 envelope）+ `server/_core/passportEncryption.ts`（passport-shape helpers）+ migration `drizzle/0078_passport_encryption.sql`（widen 50→255）+ `server/scripts/backfill-passport-encryption.ts`（idempotent 一次性回填，post-deploy 用 `fly ssh console` 執行；audit-log `passport_backfill_run` 寫入 `adminAuditLog`）— `bookingParticipants.passportNumber` + `visaApplications.passportNumber` 寫入前用 `encryptPassport` 加密，讀出時用 `decryptParticipantRow` / `decryptVisaApplicationRow` 解密。Legacy 明文行靠 `decryptToken` 的 no-prefix fallback 繼續可讀，直到 backfill 跑完。v2 Wave 1 Module 1.8，2026-05-20 |
