@@ -266,7 +266,7 @@ export default function OverviewSection({
         {tourHighlights.length > 0 && (
           <div className="mt-16">
             <h3 className="text-2xl font-serif font-bold text-center mb-2 text-gray-900">
-              {t("tourDetail.signatureMoments") || "行程亮點"}
+              {t("tourDetail.signatureMoments")}
             </h3>
             <span
               className="inline-block h-px w-12 bg-[#c9a563] mx-auto mb-10"
@@ -326,11 +326,11 @@ export default function OverviewSection({
           <div className="mt-16 max-w-3xl mx-auto">
             {(() => {
               const sections: Array<[string, string, string]> = [
-                ["intro", t("tourDetail.poeticIntro") || "啟程", poeticContent.intro || ""],
-                ["accommodation", t("tourDetail.poeticStay") || "棲所", poeticContent.accommodation || ""],
-                ["dining", t("tourDetail.poeticDining") || "饗宴", poeticContent.dining || ""],
-                ["experience", t("tourDetail.poeticExperience") || "體驗", poeticContent.experience || ""],
-                ["closing", t("tourDetail.poeticClosing") || "歸途", poeticContent.closing || ""],
+                ["intro", t("tourDetail.poeticIntro"), poeticContent.intro || ""],
+                ["accommodation", t("tourDetail.poeticStay"), poeticContent.accommodation || ""],
+                ["dining", t("tourDetail.poeticDining"), poeticContent.dining || ""],
+                ["experience", t("tourDetail.poeticExperience"), poeticContent.experience || ""],
+                ["closing", t("tourDetail.poeticClosing"), poeticContent.closing || ""],
               ];
               const filled = sections.filter(([, , text]) => text);
               if (filled.length === 0) return null;

@@ -184,7 +184,7 @@ export default function PaymentSuccess() {
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-foreground text-white text-xs font-bold">3</span>
-                    <span>{t("paymentSuccess.nextStep3") || "30 days before departure, we'll send pre-trip preparation reminders (visa, packing, contact info)."}</span>
+                    <span>{t("paymentSuccess.nextStep3")}</span>
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-foreground text-white text-xs font-bold">4</span>

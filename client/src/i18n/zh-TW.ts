@@ -6086,6 +6086,7 @@ export const zhTW = {
     departureLabel: '出發日',
     whatNextTitle: '接下來會發生什麼',
     nextStep2: '我們會在 1 週內向供應商確認您的座位，並寄送最終行程表。',
+    nextStep3: '出發前 30 天，我們會寄出行前準備提醒（簽證、行李、聯絡資訊）。',
     nextStep4: '有任何問題嗎？請致電 +1 (510) 634-2307，或直接回覆您的確認信。',
   },
   // v78z-z2: Sprint 8 i18n cleanup — DailyBriefingCard / CompareBar / shared

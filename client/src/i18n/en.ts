@@ -6084,6 +6084,7 @@ export const en = {
     departureLabel: 'Departure',
     whatNextTitle: 'What happens next',
     nextStep2: 'Our team confirms your seats with the supplier within 1 week and emails you the final itinerary.',
+    nextStep3: "30 days before departure, we'll send pre-trip preparation reminders (visa, packing, contact info).",
     nextStep4: 'Questions? Call +1 (510) 634-2307 or reply to your confirmation email anytime.',
   },
   // v78z-z2: Sprint 8 i18n cleanup — DailyBriefingCard / CompareBar / shared
