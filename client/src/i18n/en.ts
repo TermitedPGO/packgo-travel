@@ -697,6 +697,33 @@ export const en = {
     },
   },
   // FAQ Pagee
+  // 24h emergency intake (QA audit Phase 5)
+  emergency: {
+    pageTitle: '24-Hour Emergency Support',
+    pageSubtitle: "If you're on a PACK&GO trip and need urgent help",
+    callFirstLabel: 'Call directly if seconds matter',
+    callerNote: 'Jeff or an on-call partner answers 24h for in-trip PACK&GO customers.',
+    receivedTitle: 'Received — Jeff has been alerted',
+    receivedBody: 'If you need an immediate response, please also call the number above.',
+    formIntro: "Tell Jeff what's happening. He'll get a high-priority email instantly.",
+    fieldName: 'Your name',
+    fieldPhone: 'Phone (with country code)',
+    fieldLocation: 'Current location (city, hotel, hospital name…)',
+    fieldLocationPlaceholder: 'e.g. Reykjavik, Hilton Nordica lobby',
+    fieldType: 'Type of emergency',
+    fieldMessage: "What's happening?",
+    fieldMessagePlaceholder: 'Describe briefly. Include any local emergency services already contacted.',
+    submitBtn: 'Send emergency alert to Jeff',
+    submitFooter: "This goes straight to Jeff's personal Gmail with high-priority flag.",
+    submitFailed: 'Submit failed: ',
+    fillAllFields: 'Please fill all fields.',
+    severityMedical: 'Medical / injury',
+    severityFlight: 'Flight issue / lost baggage',
+    severityPassport: 'Passport / document lost',
+    severitySafety: 'Personal safety',
+    severityOther: 'Other urgent',
+  },
+
   faq: {
     title: 'FAQ',
     subtitle: 'Find the answers you need quickly',

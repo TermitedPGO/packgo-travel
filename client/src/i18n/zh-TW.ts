@@ -708,6 +708,33 @@ export const zhTW = {
   },
 
   // 常見問題頁面
+  // 緊急支援頁(QA audit Phase 5)
+  emergency: {
+    pageTitle: '24 小時緊急支援',
+    pageSubtitle: '旅程中需要立即協助時的緊急聯絡',
+    callFirstLabel: '如果分秒必爭，請直接撥打',
+    callerNote: 'Jeff 本人或當地合作夥伴 24 小時待命，僅限旅程中的 PACK&GO 客戶。',
+    receivedTitle: '已收到 — Jeff 已被立即通知',
+    receivedBody: '如需立即回應，建議同時撥打上方電話。',
+    formIntro: '告訴 Jeff 發生了什麼，他會立即收到高優先級 email 通知。',
+    fieldName: '您的姓名',
+    fieldPhone: '電話（含國碼）',
+    fieldLocation: '目前位置（城市、飯店、醫院等）',
+    fieldLocationPlaceholder: '例：慕尼黑，Hilton Munich 大廳',
+    fieldType: '緊急狀況類型',
+    fieldMessage: '發生了什麼事？',
+    fieldMessagePlaceholder: '請簡述狀況。若已聯絡當地緊急服務，也請註明。',
+    submitBtn: '立即通知 Jeff',
+    submitFooter: '此表單直接寄到 Jeff 個人 Gmail，標記為高優先級。',
+    submitFailed: '送出失敗：',
+    fillAllFields: '請填寫所有欄位。',
+    severityMedical: '醫療緊急 / 受傷',
+    severityFlight: '班機問題 / 行李遺失',
+    severityPassport: '護照 / 證件遺失',
+    severitySafety: '人身安全',
+    severityOther: '其他緊急',
+  },
+
   faq: {
     title: '常見問題',
     subtitle: '快速找到您需要的答案',

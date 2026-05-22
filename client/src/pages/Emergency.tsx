@@ -12,6 +12,10 @@
  *      with "🆘 [緊急]" prefix
  *   3. Phone number is shown up top so customers don't even need to
  *      fill the form if seconds matter
+ *
+ * 2026-05-22 P9 polish: every customer-facing string moved out of
+ * ternaries into the emergency.* i18n namespace so en / zh-TW UIs stay
+ * 100% in sync with the rest of the site.
  */
 import { useState } from "react";
 import MarketingLayout from "@/components/layouts/MarketingLayout";
@@ -33,24 +37,16 @@ import { useLocale } from "@/contexts/LocaleContext";
 
 type Severity = "medical" | "flight" | "passport" | "safety" | "other";
 
-const SEVERITY_LABELS_ZH: Record<Severity, string> = {
-  medical: "醫療緊急 / 受傷",
-  flight: "班機問題 / 行李遺失",
-  passport: "護照 / 證件遺失",
-  safety: "人身安全",
-  other: "其他緊急",
-};
-const SEVERITY_LABELS_EN: Record<Severity, string> = {
-  medical: "Medical / injury",
-  flight: "Flight issue / lost baggage",
-  passport: "Passport / document lost",
-  safety: "Personal safety",
-  other: "Other urgent",
+const SEVERITY_KEYS: Record<Severity, string> = {
+  medical: "emergency.severityMedical",
+  flight: "emergency.severityFlight",
+  passport: "emergency.severityPassport",
+  safety: "emergency.severitySafety",
+  other: "emergency.severityOther",
 };
 
 export default function Emergency() {
-  const { language } = useLocale();
-  const isEN = language === "en";
+  const { t } = useLocale();
   const [submitted, setSubmitted] = useState(false);
   const [form, setForm] = useState({
     customerName: "",
@@ -64,9 +60,7 @@ export default function Emergency() {
   const mutation = trpc.inquiries.createEmergency.useMutation({
     onSuccess: () => setSubmitted(true),
     onError: (err) =>
-      alert(
-        (isEN ? "Submit failed: " : "送出失敗:") + (err.message || "unknown")
-      ),
+      alert(t("emergency.submitFailed") + (err.message || "unknown")),
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -78,22 +72,16 @@ export default function Emergency() {
       !form.currentLocation.trim() ||
       !form.message.trim()
     ) {
-      alert(isEN ? "Please fill all fields." : "請填寫所有欄位。");
+      alert(t("emergency.fillAllFields"));
       return;
     }
     mutation.mutate(form);
   };
 
-  const labels = isEN ? SEVERITY_LABELS_EN : SEVERITY_LABELS_ZH;
-
   return (
     <MarketingLayout
-      title={isEN ? "24-Hour Emergency Support" : "24 小時緊急支援"}
-      subtitle={
-        isEN
-          ? "If you're on a PACK&GO trip and need urgent help"
-          : "旅程中需要立即協助時的緊急聯絡"
-      }
+      title={t("emergency.pageTitle")}
+      subtitle={t("emergency.pageSubtitle")}
     >
       <SEO
         title={{
@@ -114,9 +102,7 @@ export default function Emergency() {
             <AlertTriangle className="h-6 w-6 text-red-600 flex-shrink-0 mt-0.5" />
             <div className="flex-1">
               <p className="text-sm font-bold text-red-900 mb-1">
-                {isEN
-                  ? "Call directly if seconds matter"
-                  : "如果分秒必爭,請直接撥打"}
+                {t("emergency.callFirstLabel")}
               </p>
               <a
                 href="tel:+15106342307"
@@ -126,9 +112,7 @@ export default function Emergency() {
                 +1 (510) 634-2307
               </a>
               <p className="text-xs text-red-800/80 mt-2">
-                {isEN
-                  ? "Jeff or an on-call partner answers 24h for in-trip PACK&GO customers."
-                  : "Jeff 本人或當地合作夥伴 24 小時待命,僅限旅程中的 PACK&GO 客戶。"}
+                {t("emergency.callerNote")}
               </p>
             </div>
           </div>
@@ -139,12 +123,10 @@ export default function Emergency() {
           <div className="bg-green-50 border border-green-200 rounded-xl p-6 text-center">
             <CheckCircle className="h-10 w-10 text-green-600 mx-auto mb-3" />
             <p className="font-semibold text-green-900 mb-1">
-              {isEN ? "Received — Jeff has been alerted" : "已收到 — Jeff 已被立即通知"}
+              {t("emergency.receivedTitle")}
             </p>
             <p className="text-sm text-green-800">
-              {isEN
-                ? "If you need an immediate response, please also call the number above."
-                : "如需立即回應,建議同時撥打上方電話。"}
+              {t("emergency.receivedBody")}
             </p>
           </div>
         ) : (
@@ -153,15 +135,13 @@ export default function Emergency() {
             className="bg-white border border-gray-200 rounded-xl p-6 space-y-4"
           >
             <p className="text-sm text-gray-600 mb-2">
-              {isEN
-                ? "Tell Jeff what's happening. He'll get a high-priority email instantly."
-                : "告訴 Jeff 發生了什麼,他會立即收到高優先級 email 通知。"}
+              {t("emergency.formIntro")}
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs">
-                  {isEN ? "Your name" : "您的姓名"} *
+                  {t("emergency.fieldName")} *
                 </Label>
                 <Input
                   className="rounded-lg mt-1"
@@ -174,7 +154,7 @@ export default function Emergency() {
               </div>
               <div>
                 <Label className="text-xs">
-                  {isEN ? "Phone (with country code)" : "電話(含國碼)"} *
+                  {t("emergency.fieldPhone")} *
                 </Label>
                 <Input
                   className="rounded-lg mt-1"
@@ -204,18 +184,11 @@ export default function Emergency() {
 
             <div>
               <Label className="text-xs">
-                {isEN
-                  ? "Current location (city, hotel, hospital name…)"
-                  : "目前位置(城市、飯店、醫院等)"}{" "}
-                *
+                {t("emergency.fieldLocation")} *
               </Label>
               <Input
                 className="rounded-lg mt-1"
-                placeholder={
-                  isEN
-                    ? "e.g. Reykjavik, Hilton Nordica lobby"
-                    : "例:慕尼黑,Hilton Munich 大廳"
-                }
+                placeholder={t("emergency.fieldLocationPlaceholder")}
                 value={form.currentLocation}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, currentLocation: e.target.value }))
@@ -226,7 +199,7 @@ export default function Emergency() {
 
             <div>
               <Label className="text-xs">
-                {isEN ? "Type of emergency" : "緊急狀況類型"} *
+                {t("emergency.fieldType")} *
               </Label>
               <Select
                 value={form.severity}
@@ -238,9 +211,9 @@ export default function Emergency() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {(Object.keys(labels) as Severity[]).map((k) => (
+                  {(Object.keys(SEVERITY_KEYS) as Severity[]).map((k) => (
                     <SelectItem key={k} value={k}>
-                      {labels[k]}
+                      {t(SEVERITY_KEYS[k])}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -249,15 +222,11 @@ export default function Emergency() {
 
             <div>
               <Label className="text-xs">
-                {isEN ? "What's happening?" : "發生了什麼事?"} *
+                {t("emergency.fieldMessage")} *
               </Label>
               <Textarea
                 className="rounded-lg mt-1 min-h-[100px]"
-                placeholder={
-                  isEN
-                    ? "Describe briefly. Include any local emergency services already contacted."
-                    : "請簡述狀況。若已聯絡當地緊急服務,也請註明。"
-                }
+                placeholder={t("emergency.fieldMessagePlaceholder")}
                 value={form.message}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, message: e.target.value }))
@@ -277,13 +246,11 @@ export default function Emergency() {
               ) : (
                 <AlertTriangle className="h-4 w-4 mr-2" />
               )}
-              {isEN ? "Send emergency alert to Jeff" : "立即通知 Jeff"}
+              {t("emergency.submitBtn")}
             </Button>
 
             <p className="text-xs text-gray-500 text-center">
-              {isEN
-                ? "This goes straight to Jeff's personal Gmail with high-priority flag."
-                : "此表單直接寄到 Jeff 個人 Gmail,標記為高優先級。"}
+              {t("emergency.submitFooter")}
             </p>
           </form>
         )}
