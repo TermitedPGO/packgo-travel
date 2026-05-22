@@ -54,7 +54,9 @@ const KNOWN_ROUTE_PATTERNS: RegExp[] = [
   /^\/privacy-policy$/,
   /^\/faq$/,
   /^\/contact-us$/,
+  /^\/emergency$/,                        // 2026-05-22 P23: 24h emergency intake (QA audit Phase 5)
   /^\/membership$/,                       // Round 80.19: AI Advisor Phase 1 paywall target
+  /^\/membership-terms$/,                 // 2026-05-22 P23: AB 390 §17602 disclosure link
   /^\/rewards$/,                          // Round 80.22 Phase F: Packpoint redemption catalog
   /^\/preview\/[^/]+$/,                   // Round 80.9: internal preview/mockup routes
   /^\/404$/,
