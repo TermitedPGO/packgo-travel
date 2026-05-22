@@ -30,7 +30,7 @@
 |---|---|---|---|---|---|---|
 | 1 | Foundation + Observability | 9 | ✅ Complete (9 / 9) | ~58 AI / ~3 Jeff | Week 1 (May 19–20) | `8b2215f` passport-at-rest |
 | 2 | God-File Splits | 13 | ✅ Complete (13 / 13) | ~96 AI / ~4 Jeff | Weeks 1–3 (May 19–21) | `c19c57e` getRouteMap extract |
-| 3 | Autonomy Thesis | 13 | 🟡 7 / 13 (3.1+3.2+3.3+3.4+3.5+3.12 + dispatcher + refund autopilot LIVE in prod) | ~110 AI / ~4 Jeff | Weeks 3–4 | `9d1001d` (v513) |
+| 3 | Autonomy Thesis | 13 | 🟡 8 / 13 (3.1+3.2+3.3+3.4+3.5+3.12+3.13 · dispatcher + refund autopilot LIVE in prod) | ~110 AI / ~4 Jeff | Weeks 3–4 | `6c17f1a` (v513) |
 | 4 | Mobile (PWA) + Polish | **18 in v2** (9 RN deferred to v3) | ⬜ Not started | ~80 AI / ~7 Jeff (v2 scope) | Weeks 4–5 | — |
 
 **Status legend:** ⬜ TODO · 🟡 IN-PROGRESS · ✅ DONE · ⚠️ BLOCKED · 🚨 DECISION-NEEDED
@@ -148,7 +148,7 @@
 | 3.10 | [Vitest — autonomous agents batch (15 files)](tasks/v2-wave-3/module-3.10-vitest-autonomous-agents-batch.md) | ⬜ | — | One per agent; mostly happy-path + 1 edge |
 | 3.11 | [Notify-owner consistency](tasks/v2-wave-3/module-3.11-notify-owner-consistency.md) | ⬜ | — | Unify Jeff-pager surface across agents |
 | 3.12 | (moved up next to 3.4 — see above) | — | — | (delisted to keep table compact) |
-| 3.13 | [Skills folder rename](tasks/v2-wave-3/module-3.13-skills-folder-rename.md) | ⬜ | — | Disambiguate 3 "skills" folders |
+| 3.13 | [Skills folder rename](tasks/v2-wave-3/module-3.13-skills-folder-rename.md) | ✅ | claude | `6c17f1a` · server/skills → server/agents/_subskills · 10 files moved · 4 imports updated · 751 vitest unchanged |
 
 **Verification gate:** All 13 modules' Vitest cases pass; `pnpm tsc --noEmit` clean; **end-to-end smoke:** a manually-crafted inbound email of each new intent type lands the right skill via auto-dispatch.
 
