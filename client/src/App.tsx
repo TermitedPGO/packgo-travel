@@ -18,6 +18,9 @@ import Login from "./pages/Login";
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const Admin = lazy(() => import("./pages/Admin"));
+// 2026-05-22 — Admin V2 redesign at /admin/v2. Parallel to /admin.
+// Jeff dailey-driver this, /admin stays as fallback until V2 covers everything.
+const AdminV2 = lazy(() => import("./pages/AdminV2"));
 const DiagnosticsPage = lazy(() => import("./pages/admin/DiagnosticsPage"));
 const Profile = lazy(() => import("./pages/Profile"));
 const TourDetailPeony = lazy(() => import("./pages/TourDetailPeony"));
@@ -157,6 +160,8 @@ function Router() {
       <Route path={"/reset-password"} component={ResetPassword} />
       <Route path={"/admin/diagnostics"} component={DiagnosticsPage} />
       <Route path={"/admin/task-history"} component={TaskHistory} />
+      {/* 2026-05-22 — V2 must be registered BEFORE /admin since Wouter matches by order */}
+      <Route path={"/admin/v2"} component={AdminV2} />
       <Route path={"/admin"} component={Admin} />
       <Route path={"/profile"} component={Profile} />
       <Route path={"/tours/:id/print"} component={TourPrintView} />
