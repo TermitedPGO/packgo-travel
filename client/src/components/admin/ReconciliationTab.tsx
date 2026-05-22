@@ -271,6 +271,80 @@ export default function ReconciliationTab() {
             </div>
           )}
 
+          {/* 2026-05-22 — Plaid bank ledger view. Surfaces actual money flow
+              from the linked bank account, grouped by category. This is the
+              answer to Jeff's "how do I go from Plaid to P&L" — the bank IS
+              the cash flow source of truth. */}
+          {report.bank && report.bank.enabled && (
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center gap-2">
+                <Receipt className="h-4 w-4 text-gray-600" />
+                <h3 className="text-sm font-semibold text-gray-900">
+                  {t("reconciliationTab.bankLedgerTitle")}
+                </h3>
+                <span className="text-xs text-gray-500">
+                  {report.bank.txCount} {t("reconciliationTab.bankTxCount")}
+                </span>
+                {report.bank.uncategorizedCount > 0 && (
+                  <span className="ml-auto inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
+                    <AlertTriangle className="h-3 w-3" />
+                    {t("reconciliationTab.bankUncategorized", { n: report.bank.uncategorizedCount })}
+                  </span>
+                )}
+              </div>
+              <div className="p-4 grid grid-cols-2 md:grid-cols-3 gap-4 text-sm border-b border-gray-100">
+                <div>
+                  <div className="text-xs text-gray-500">{t("reconciliationTab.bankInflows")}</div>
+                  <div className="font-semibold text-green-600 tabular-nums">
+                    +{fmtMoney(report.bank.inflowsTotal, "USD")}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500">{t("reconciliationTab.bankOutflows")}</div>
+                  <div className="font-semibold text-red-600 tabular-nums">
+                    -{fmtMoney(report.bank.outflowsTotal, "USD")}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500">{t("reconciliationTab.bankNetCashFlow")}</div>
+                  <div className={`font-semibold tabular-nums ${report.bank.netCashFlow >= 0 ? "text-gray-900" : "text-red-700"}`}>
+                    {report.bank.netCashFlow >= 0 ? "+" : ""}{fmtMoney(report.bank.netCashFlow, "USD")}
+                  </div>
+                </div>
+              </div>
+              {Array.isArray(report.bank.byCategory) && report.bank.byCategory.length > 0 && (
+                <div className="divide-y divide-gray-50">
+                  {report.bank.byCategory.map((row: any, i: number) => {
+                    const isIn = row.direction === "in";
+                    const sourceLabel: Record<string, string> = {
+                      jeff_override: t("reconciliationTab.bankSourceJeff"),
+                      agent: t("reconciliationTab.bankSourceAgent"),
+                      plaid_pfc: t("reconciliationTab.bankSourcePlaid"),
+                      uncategorized: t("reconciliationTab.bankSourceUncategorized"),
+                    };
+                    return (
+                      <div key={i} className="px-4 py-2.5 flex items-center gap-3 text-sm">
+                        <span className={`h-2 w-2 rounded-full flex-shrink-0 ${isIn ? "bg-green-500" : "bg-red-500"}`} />
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-gray-900 truncate">{row.category}</div>
+                          <div className="text-[11px] text-gray-500">{sourceLabel[row.source] ?? row.source} · {row.count} {t("reconciliationTab.bankRowCount")}</div>
+                        </div>
+                        <div className={`text-right tabular-nums font-semibold ${isIn ? "text-green-600" : "text-red-600"}`}>
+                          {isIn ? "+" : "-"}{fmtMoney(row.amount, "USD")}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {report.bank.excludedCount > 0 && (
+                <div className="px-4 py-2 bg-gray-50 border-t border-gray-100 text-xs text-gray-500">
+                  {t("reconciliationTab.bankExcluded", { n: report.bank.excludedCount })}
+                </div>
+              )}
+            </div>
+          )}
+
           {report.stripeCharges && (
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center gap-2">

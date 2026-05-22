@@ -14,7 +14,7 @@
 import Stripe from "stripe";
 import { ENV } from "../_core/env";
 import { getDb } from "../db";
-import { payments, accountingEntries, bookings } from "../../drizzle/schema";
+import { payments, accountingEntries, bookings, bankTransactions } from "../../drizzle/schema";
 import { and, gte, lte, sql, eq } from "drizzle-orm";
 
 let _stripe: Stripe | null = null;
@@ -52,6 +52,27 @@ export interface ReconciliationReport {
     netProfit: number;
     currency: string;
   };
+  // 2026-05-22 — Plaid bank ledger view. Source of truth = real money
+  // movement in the bank, independent of what PACK&GO recorded internally.
+  // Empty if no Plaid accounts linked OR no bank transactions in range.
+  // Categories use Jeff override → AccountingAgent → Plaid PFC (in order).
+  bank: {
+    enabled: boolean;
+    inflowsTotal: number;
+    outflowsTotal: number;
+    netCashFlow: number;
+    txCount: number;
+    uncategorizedCount: number;
+    byCategory: Array<{
+      category: string;
+      direction: "in" | "out";
+      amount: number;
+      count: number;
+      source: "jeff_override" | "agent" | "plaid_pfc" | "uncategorized";
+    }>;
+    /** Transactions excluded from accounting (personal items Jeff flagged). */
+    excludedCount: number;
+  };
   // Discrepancies
   discrepancies: Array<{
     severity: "high" | "medium" | "low";
@@ -72,6 +93,16 @@ export async function runReconciliation(start: Date, end: Date): Promise<Reconci
     stripeCharges: null,
     costs: { accounting: [], estimated: [] },
     pnl: { income: 0, stripeFees: 0, estimatedCosts: 0, netProfit: 0, currency: "USD" },
+    bank: {
+      enabled: false,
+      inflowsTotal: 0,
+      outflowsTotal: 0,
+      netCashFlow: 0,
+      txCount: 0,
+      uncategorizedCount: 0,
+      byCategory: [],
+      excludedCount: 0,
+    },
     discrepancies: [],
     warnings: [],
   };
@@ -244,6 +275,100 @@ export async function runReconciliation(start: Date, end: Date): Promise<Reconci
     amount: 0,
     note: "Run `flyctl billing` monthly; manual entry recommended",
   });
+
+  // 7) Plaid bank ledger (2026-05-22 addition).
+  //    Pulls real bank-side transactions, groups by best-available category
+  //    (Jeff override → AccountingAgent → Plaid PFC), and produces a cash-flow
+  //    breakdown. This is the "source of truth" for monthly close — the
+  //    internal payments / Stripe figures above describe SALES; the bank
+  //    section describes ALL MONEY MOVEMENT including expenses Plaid pulled in.
+  try {
+    // bankTransactions.date is a DATE column — pass Date objects (Drizzle
+    // serializes them to YYYY-MM-DD strings under the hood).
+    const txns = await db
+      .select()
+      .from(bankTransactions)
+      .where(
+        and(
+          gte(bankTransactions.date, start),
+          lte(bankTransactions.date, end),
+          eq(bankTransactions.isPending, 0),
+        ),
+      );
+
+    // Skip when no Plaid accounts have ever synced
+    if (txns.length === 0) {
+      report.bank.enabled = false;
+    } else {
+      report.bank.enabled = true;
+      const groups = new Map<
+        string,
+        { amount: number; count: number; direction: "in" | "out"; source: "jeff_override" | "agent" | "plaid_pfc" | "uncategorized" }
+      >();
+
+      for (const tx of txns) {
+        if (tx.excludeFromAccounting === 1) {
+          report.bank.excludedCount++;
+          continue;
+        }
+        const amt = Number(tx.amount) || 0;
+        // Plaid convention: positive = outflow (money leaving), negative = inflow.
+        const direction: "in" | "out" = amt >= 0 ? "out" : "in";
+        const absAmt = Math.abs(amt);
+
+        let category: string;
+        let source: "jeff_override" | "agent" | "plaid_pfc" | "uncategorized";
+        if (tx.jeffOverrideCategory) {
+          category = tx.jeffOverrideCategory;
+          source = "jeff_override";
+        } else if (tx.agentCategory) {
+          category = tx.agentCategory;
+          source = "agent";
+        } else if (tx.plaidCategoryPrimary) {
+          category = tx.plaidCategoryPrimary;
+          source = "plaid_pfc";
+        } else {
+          category = "uncategorized";
+          source = "uncategorized";
+          report.bank.uncategorizedCount++;
+        }
+
+        report.bank.txCount++;
+        if (direction === "in") report.bank.inflowsTotal += absAmt;
+        else report.bank.outflowsTotal += absAmt;
+
+        const key = `${category}::${direction}`;
+        const existing = groups.get(key);
+        if (existing) {
+          existing.amount += absAmt;
+          existing.count += 1;
+        } else {
+          groups.set(key, { amount: absAmt, count: 1, direction, source });
+        }
+      }
+
+      report.bank.netCashFlow = report.bank.inflowsTotal - report.bank.outflowsTotal;
+      report.bank.byCategory = Array.from(groups.entries())
+        .map(([key, v]) => ({
+          category: key.split("::")[0],
+          direction: v.direction,
+          amount: v.amount,
+          count: v.count,
+          source: v.source,
+        }))
+        .sort((a, b) => b.amount - a.amount);
+
+      if (report.bank.uncategorizedCount > 0) {
+        report.discrepancies.push({
+          severity: report.bank.uncategorizedCount > 10 ? "medium" : "low",
+          type: "bank_uncategorized",
+          description: `${report.bank.uncategorizedCount} bank transaction(s) in this period have no category. Run the AccountingAgent or set jeff override.`,
+        });
+      }
+    }
+  } catch (e: any) {
+    report.warnings.push(`bank ledger query failed: ${e?.message ?? String(e)}`);
+  }
 
   return report;
 }
