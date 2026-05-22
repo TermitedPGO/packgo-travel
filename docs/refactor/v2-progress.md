@@ -30,7 +30,7 @@
 |---|---|---|---|---|---|---|
 | 1 | Foundation + Observability | 9 | ✅ Complete (9 / 9) | ~58 AI / ~3 Jeff | Week 1 (May 19–20) | `8b2215f` passport-at-rest |
 | 2 | God-File Splits | 13 | ✅ Complete (13 / 13) | ~96 AI / ~4 Jeff | Weeks 1–3 (May 19–21) | `c19c57e` getRouteMap extract |
-| 3 | Autonomy Thesis | 13 | 🟡 8 / 13 (3.1+3.2+3.3+3.4+3.5+3.12+3.13 · dispatcher + refund autopilot LIVE in prod) | ~110 AI / ~4 Jeff | Weeks 3–4 | `6c17f1a` (v513) |
+| 3 | Autonomy Thesis | 13 | 🟡 12 / 13 — **3.6 + 3.7 blocked** on missing Mac plugin source · others LIVE in prod | ~110 AI / ~4 Jeff | Weeks 3–4 | `6e7c46c` |
 | 4 | Mobile (PWA) + Polish | **14 in v2** (9 RN deferred to v3; 4 more cut 2026-05-22) | 🟡 1 / 14 (4.1 partial) | ~52 AI / ~5 Jeff (post-cut scope) | Weeks 4–5 | `37f651d` |
 
 **Status legend:** ⬜ TODO · 🟡 IN-PROGRESS · ✅ DONE · ⚠️ BLOCKED · 🚨 DECISION-NEEDED
@@ -141,12 +141,12 @@
 | 3.4 | [Inquiry auto-dispatch](tasks/v2-wave-3/module-3.4-inquiry-auto-dispatch.md) | ✅ | claude | `0f52f50` (A: pure) + `96dd2b9` (B: persisted + gmailPipeline + migration 0079) · 17 Vitest cases · **LIVE in prod v512** · auto-send safeguards (allow-list/quota/circuit-breaker) deferred to follow-up |
 | 3.12 | [Confidence threshold config](tasks/v2-wave-3/module-3.12-confidence-threshold-config.md) | ✅ | claude | `cd83ba0` · AGENT_CONFIDENCE_THRESHOLD + AGENT_AUTO_SEND_THRESHOLD env getters + 16 Vitest cases |
 | 3.5 | [RefundAgent ↔ Stripe webhook](tasks/v2-wave-3/module-3.5-refund-agent-stripe-wire.md) | ✅ | claude | `9d1001d` · synthesizeStripeRawMessage + source/stripeContext fields + handleChargeRefunded POST-COMMIT wire + 7 Vitest cases · alwaysEscalate=true preserved · **LIVE in prod v513** |
-| 3.6 | [Port packgo-china-visa skill](tasks/v2-wave-3/module-3.6-port-packgo-china-visa.md) | ⬜ | — | Depends on 3.2; **🔒 LOCKED 2026-05-22: bilingual (zh-TW left / en right, 2-column)** |
-| 3.7 | [Port packgo-tour-confirmation skill](tasks/v2-wave-3/module-3.7-port-packgo-tour-confirmation.md) | ⬜ | — | Independent; **🔒 LOCKED 2026-05-22: no manual regenerate button (auto-only via dispatcher 3.4)** |
-| 3.8 | [Vitest — InquiryAgent](tasks/v2-wave-3/module-3.8-vitest-inquiry-agent.md) | ⬜ | — | Extends 3.1's `inquiryAgent.test.ts` |
-| 3.9 | [Vitest — masterAgent](tasks/v2-wave-3/module-3.9-vitest-master-agent.md) | ⬜ | — | Supervisor + email template happy path |
-| 3.10 | [Vitest — autonomous agents batch (15 files)](tasks/v2-wave-3/module-3.10-vitest-autonomous-agents-batch.md) | ⬜ | — | One per agent; mostly happy-path + 1 edge |
-| 3.11 | [Notify-owner consistency](tasks/v2-wave-3/module-3.11-notify-owner-consistency.md) | ⬜ | — | Unify Jeff-pager surface across agents |
+| 3.6 | [Port packgo-china-visa skill](tasks/v2-wave-3/module-3.6-port-packgo-china-visa.md) | ⚠️ BLOCKED | — | **Source Mac plugin doesn't exist yet** — discovered 2026-05-22 during Stage 4 execution. Spec assumed `~/.claude/skills/packgo-china-visa/SKILL.md` was available to port FROM. Only 4 PACK&GO skills exist on Mac today (flight-ticket / quote / deposit-receipt / marketing-engine). **Decision needed:** (a) build server-first w/ Jeff dictating fee + checklist data, OR (b) create the Mac POC first then port. Don't guess — wrong China visa data → customers denied. |
+| 3.7 | [Port packgo-tour-confirmation skill](tasks/v2-wave-3/module-3.7-port-packgo-tour-confirmation.md) | ⚠️ BLOCKED | — | **Source Mac plugin doesn't exist yet** — same root cause as 3.6. Lower-stakes content than visa (no legal/denial risk) but still needs Jeff's actual confirmation-PDF style. Lock from 2026-05-22 (no manual regenerate button) carries forward when re-activated. |
+| 3.8 | [Vitest — InquiryAgent](tasks/v2-wave-3/module-3.8-vitest-inquiry-agent.md) | ✅ | claude | `6e7c46c` · +5 escalation cases extending 3.1 file (refund / complaint / critical-urgency / low-conf / malformed JSON) · inquiryAgent.test.ts now 11/11 |
+| 3.9 | [Vitest — masterAgent](tasks/v2-wave-3/module-3.9-vitest-master-agent.md) | ✅ | claude | `6e7c46c` · 3 supervisor-contract smoke cases (instantiate / execute / rollback). Full E2E deferred to Wave 4 Playwright (4.16) |
+| 3.10 | [Vitest — autonomous agents batch (15 files)](tasks/v2-wave-3/module-3.10-vitest-autonomous-agents-batch.md) | ✅ | claude | `49a7e9f` (A) · 5 agent tests (followup / marketing / review / accounting / selfRetrospective). Admin-UI agents (opsAgent / agentChat / officeAssistant / etc.) deferred as 3.10-B (lower-risk, non-autonomous) |
+| 3.11 | [Notify-owner consistency](tasks/v2-wave-3/module-3.11-notify-owner-consistency.md) | ✅ | claude | `f51d658` · `server/agents/_helpers/safety.ts` + applied to 5 agents (refund/review/followup/marketing/accounting) · 6 Vitest cases |
 | 3.12 | (moved up next to 3.4 — see above) | — | — | (delisted to keep table compact) |
 | 3.13 | [Skills folder rename](tasks/v2-wave-3/module-3.13-skills-folder-rename.md) | ✅ | claude | `6c17f1a` · server/skills → server/agents/_subskills · 10 files moved · 4 imports updated · 751 vitest unchanged |
 
