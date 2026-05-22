@@ -260,6 +260,92 @@ async function processOneEmail(
   });
   const interactionId = Number((interactionIns as any)[0]?.insertId ?? 0);
 
+  // v2 Wave 3 Module 3.4-B — skill auto-dispatch.
+  //
+  // After the InquiryAgent has classified, give the skill registry a
+  // chance to produce a richer draft (e.g. a tour-comparison PDF for
+  // tour_comparison_request inquiries). The dispatcher itself gates on
+  // confidence + shouldEscalate + skill-registered-and-ported, so a
+  // skipped outcome here is normal and silent. A successful run posts
+  // a proposal-type agentMessage so the draft shows up in Jeff's office
+  // inbox; an escalated run flips `decision.shouldEscalate` so the
+  // downstream legacy escalation path picks it up.
+  try {
+    const { dispatchAndPersistFromInquiry } = await import(
+      "../skills/dispatcher"
+    );
+    const dispatchOutcome = await dispatchAndPersistFromInquiry({
+      inquiry: decision,
+      rawMessage,
+      senderEmail: senderEmail ?? undefined,
+      customerProfileId: profileId ?? undefined,
+      interactionId,
+      correlationId: `gmail-${interactionId}`,
+    });
+    if (dispatchOutcome.kind === "ran") {
+      const { result, skillRunId, pdfStoragePath } = dispatchOutcome;
+      if (result.ok) {
+        // Drop a proposal message into Jeff's inbox so the draft is
+        // reviewable + sendable from ChatsTab.
+        const { notifyAgentMessage } = await import("../../_core/agentNotify");
+        await notifyAgentMessage({
+          agentName: "inquiry",
+          messageType: "proposal",
+          title: `📋 ${decision.classification} draft ready · ${senderEmail ?? "unknown sender"}`.slice(0, 200),
+          body:
+            `${result.draftBody}\n\n` +
+            (pdfStoragePath ? `📎 PDF: ${pdfStoragePath}\n` : "") +
+            `\n_skillRunId: ${skillRunId}_`,
+          priority: decision.urgency === "critical" ? "critical" : decision.urgency === "high" ? "high" : "normal",
+          context: {
+            skillRunId,
+            classification: decision.classification,
+            confidence: decision.confidence,
+            pdfStoragePath,
+          },
+          relatedInteractionId: interactionId,
+          relatedCustomerProfileId: profileId ?? undefined,
+        });
+        log.info(
+          {
+            skillRunId,
+            intent: decision.classification,
+            pdfStoragePath,
+            senderEmail,
+          },
+          "[gmailPipeline] Skill dispatch succeeded — draft posted to inbox",
+        );
+      } else {
+        // Orchestrator returned ok=false — surface to Jeff via the same
+        // legacy escalation channel below.
+        decision.shouldEscalate = true;
+        decision.escalationReason =
+          (decision.escalationReason ?? "") +
+          ` | skill dispatch escalation (run ${skillRunId}): ${result.reason}`;
+        log.info(
+          {
+            skillRunId,
+            intent: decision.classification,
+            reason: result.reason,
+            needsJeff: result.needsJeff,
+          },
+          "[gmailPipeline] Skill dispatch returned ok=false — escalating",
+        );
+      }
+    }
+    // dispatchOutcome.kind === "skipped" → no-op; existing draftReply
+    // path handles it. Common reasons: confidence-below-threshold,
+    // no-skill-registered (refund/complaint), agent-already-escalated.
+  } catch (err) {
+    // The dispatcher itself is no-throw, but the dynamic imports above
+    // could fail if a build artifact is missing. Swallow so we don't
+    // break the customer-facing draftReply path.
+    log.warn(
+      { err },
+      "[gmailPipeline] Skill dispatch unexpectedly threw — continuing with legacy draft",
+    );
+  }
+
   // Round 81 / 2026-05-17 — Repurchase upgrade CTA append.
   // Runs BEFORE auto-send decision so the augmented draft goes through the
   // same safety regex check. If user is a returning free-tier customer who

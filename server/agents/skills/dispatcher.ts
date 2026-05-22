@@ -30,11 +30,18 @@
  * spinup. The DB writes in 3.4-B layer in additively.
  */
 
+import { eq } from "drizzle-orm";
 import { lookupSkill } from "./registry";
 import type { SkillContext, SkillResult } from "./orchestrator";
 import { safelyRun } from "./orchestrator";
 import { getConfidenceThreshold } from "./thresholds";
 import type { InquiryAgentOutput } from "../autonomous/inquiryAgent";
+import { getDb } from "../../db";
+import { skillRuns } from "../../../drizzle/schema";
+import { storagePut } from "../../storage";
+import { createChildLogger } from "../../_core/logger";
+
+const log = createChildLogger({ module: "skill-dispatcher" });
 
 export type DispatchInput = {
   /** The InquiryAgent's structured decision. */
@@ -132,4 +139,149 @@ export async function dispatchSkillFromInquiry(
   };
   const result = await safelyRun(ctx, (c) => entry.orchestrator.run(c));
   return { kind: "ran", result };
+}
+
+// ─── DB-persisting variant ──────────────────────────────────────────────
+//
+// gmailPipeline calls THIS (not the pure function above) so every
+// auto-dispatch attempt leaves an audit trail in `skillRuns`. The pure
+// function stays exported for unit tests that want to assert flow
+// without a DB.
+
+export type PersistedDispatchOutcome =
+  | { kind: "skipped"; reason: DispatchSkipReason }
+  | {
+      kind: "ran";
+      skillRunId: number;
+      result: SkillResult;
+      /** S3 path when the orchestrator returned a PDF and we uploaded it. */
+      pdfStoragePath?: string;
+    };
+
+export type PersistedDispatchInput = DispatchInput & {
+  /** customerInteractions.id — written to skillRuns row for cross-link. */
+  interactionId?: number;
+};
+
+/**
+ * Like {@link dispatchSkillFromInquiry} but persists the run to
+ * `skillRuns` and uploads any generated PDF to R2. The persisting writes
+ * are best-effort — if the DB or storage call fails, the function logs
+ * and returns the orchestrator's outcome anyway (audit hole rather than
+ * data loss; the customer-facing draft is still produced).
+ *
+ * Returns `kind: "skipped"` for the same 3 reasons as the pure function;
+ * no DB row is written in the skip case (no skill executed = nothing
+ * to audit).
+ *
+ * Returns `kind: "ran"` with `skillRunId` (0 if the initial insert
+ * failed but the orchestrator still ran), the raw `SkillResult` from
+ * the orchestrator, and `pdfStoragePath` when applicable.
+ */
+export async function dispatchAndPersistFromInquiry(
+  input: PersistedDispatchInput,
+): Promise<PersistedDispatchOutcome> {
+  // Reuse the gate logic from the pure function for the skip cases.
+  // (Mirror the same gates here rather than calling the pure function
+  // and persisting after, because we want to claim the skillRuns row
+  // BEFORE invoking the orchestrator so a crashing run still has a
+  // record of having started.)
+  if (input.inquiry.shouldEscalate) {
+    return { kind: "skipped", reason: "agent-already-escalated" };
+  }
+  if (input.inquiry.confidence < getConfidenceThreshold()) {
+    return { kind: "skipped", reason: "confidence-below-threshold" };
+  }
+  const entry = lookupSkill(input.inquiry.classification);
+  if (!entry) {
+    return { kind: "skipped", reason: "no-skill-registered" };
+  }
+
+  // Claim the row with status='running'. If insert fails we still proceed
+  // with the orchestrator — the customer-facing draft matters more than
+  // the audit trail.
+  const startedAt = Date.now();
+  let skillRunId = 0;
+  try {
+    const db = await getDb();
+    if (db) {
+      const ins = await db.insert(skillRuns).values({
+        skillId: entry.skillId,
+        intent: input.inquiry.classification,
+        interactionId: input.interactionId,
+        customerProfileId: input.customerProfileId,
+        status: "running",
+      });
+      skillRunId = Number((ins as unknown as Array<{ insertId?: number }>)[0]?.insertId ?? 0);
+    }
+  } catch (err) {
+    log.warn(
+      { err, intent: input.inquiry.classification, skillId: entry.skillId },
+      "[dispatcher] skillRuns claim insert failed — running anyway with skillRunId=0",
+    );
+  }
+
+  // Run the orchestrator.
+  const ctx: SkillContext = {
+    inquiry: input.inquiry,
+    rawMessage: input.rawMessage,
+    senderEmail: input.senderEmail,
+    customerProfileId: input.customerProfileId,
+    language: input.inquiry.draftLanguage,
+    correlationId:
+      skillRunId > 0 ? `skillRun-${skillRunId}` : input.correlationId,
+  };
+  const result = await safelyRun(ctx, (c) => entry.orchestrator.run(c));
+  const durationMs = Date.now() - startedAt;
+
+  // Persist outcome + upload PDF on success.
+  let pdfStoragePath: string | undefined;
+  try {
+    if (result.ok && result.pdf && skillRunId > 0) {
+      pdfStoragePath = `skill-runs/${skillRunId}/${entry.skillId}.pdf`;
+      await storagePut(pdfStoragePath, result.pdf, "application/pdf");
+    }
+  } catch (err) {
+    log.warn(
+      { err, skillRunId, skillId: entry.skillId },
+      "[dispatcher] PDF upload failed — orchestrator output still returned",
+    );
+    pdfStoragePath = undefined;
+  }
+
+  try {
+    const db = await getDb();
+    if (db && skillRunId > 0) {
+      if (result.ok) {
+        await db
+          .update(skillRuns)
+          .set({
+            status: "succeeded",
+            pdfStoragePath: pdfStoragePath ?? null,
+            draftBody: result.draftBody,
+            meta: result.meta as Record<string, unknown>,
+            durationMs,
+            completedAt: new Date(),
+          })
+          .where(eq(skillRuns.id, skillRunId));
+      } else {
+        await db
+          .update(skillRuns)
+          .set({
+            status: result.needsJeff ? "escalated" : "failed",
+            errorMessage: result.reason.slice(0, 1024),
+            durationMs,
+            completedAt: new Date(),
+          })
+          .where(eq(skillRuns.id, skillRunId));
+      }
+    }
+  } catch (err) {
+    log.warn(
+      { err, skillRunId },
+      "[dispatcher] skillRuns completion update failed — outcome still returned",
+    );
+  }
+
+  return { kind: "ran", skillRunId, result, pdfStoragePath };
 }

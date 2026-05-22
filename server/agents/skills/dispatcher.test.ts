@@ -28,7 +28,36 @@ vi.mock("./tourComparison", async () => {
   };
 });
 
-import { dispatchSkillFromInquiry } from "./dispatcher";
+// DB + storage mocks for the persisting variant. Both are top-level
+// imports inside dispatcher.ts so vi.mock catches them at module load.
+const dbInsertSpy = vi.fn();
+const dbUpdateSetSpy = vi.fn();
+const dbUpdateWhereSpy = vi.fn();
+const storagePutSpy = vi.fn();
+
+vi.mock("../../db", () => ({
+  // Return a fake db builder; tests reset spy behavior per case.
+  getDb: vi.fn(async () => ({
+    insert: () => ({
+      values: (vals: unknown) => dbInsertSpy(vals),
+    }),
+    update: () => ({
+      set: (set: unknown) => {
+        dbUpdateSetSpy(set);
+        return { where: (clause: unknown) => dbUpdateWhereSpy(clause) };
+      },
+    }),
+  })),
+}));
+
+vi.mock("../../storage", () => ({
+  storagePut: (...args: unknown[]) => storagePutSpy(...args),
+}));
+
+import {
+  dispatchSkillFromInquiry,
+  dispatchAndPersistFromInquiry,
+} from "./dispatcher";
 
 function makeInquiry(
   overrides: Partial<InquiryAgentOutput> = {},
@@ -269,6 +298,194 @@ describe("dispatchSkillFromInquiry — pure dispatcher (3.4-A)", () => {
         correlationId: "corr-11",
       });
       expect(outcome.kind).toBe("ran");
+    });
+  });
+});
+
+describe("dispatchAndPersistFromInquiry — DB-persisting variant (3.4-B)", () => {
+  beforeEach(() => {
+    generateCatalogSpy.mockReset();
+    dbInsertSpy.mockReset();
+    dbUpdateSetSpy.mockReset();
+    dbUpdateWhereSpy.mockReset();
+    storagePutSpy.mockReset();
+    // Default db behavior: insert returns [{insertId: 4242}]; update resolves.
+    dbInsertSpy.mockResolvedValue([{ insertId: 4242 }]);
+    dbUpdateWhereSpy.mockResolvedValue(undefined);
+    storagePutSpy.mockResolvedValue({ url: "https://r2.example/test.pdf" });
+  });
+
+  it("skip paths never write a skillRuns row (no DB calls)", async () => {
+    const outcome = await dispatchAndPersistFromInquiry({
+      inquiry: makeInquiry({ shouldEscalate: true }),
+      rawMessage: "test",
+      correlationId: "p-skip-1",
+    });
+    expect(outcome.kind).toBe("skipped");
+    expect(dbInsertSpy).not.toHaveBeenCalled();
+    expect(dbUpdateSetSpy).not.toHaveBeenCalled();
+    expect(storagePutSpy).not.toHaveBeenCalled();
+  });
+
+  it("skipped/no-skill-registered when registry returns null", async () => {
+    const outcome = await dispatchAndPersistFromInquiry({
+      inquiry: makeInquiry({
+        classification: "refund_request",
+        shouldEscalate: false,
+      }),
+      rawMessage: "test",
+      correlationId: "p-skip-2",
+    });
+    expect(outcome.kind).toBe("skipped");
+    expect(dbInsertSpy).not.toHaveBeenCalled();
+  });
+
+  it("happy path — inserts running row, calls orchestrator, uploads PDF, updates succeeded", async () => {
+    const fakePdf = Buffer.from("%PDF-1.4\nabc\n%%EOF");
+    generateCatalogSpy.mockResolvedValueOnce({
+      pdf: fakePdf,
+      meta: {
+        country: "Japan",
+        monthName: "September",
+        year: 2026,
+        optionsFound: 4,
+        departuresFound: 9,
+        supplierCodes: ["L1"],
+      },
+    });
+
+    const outcome = await dispatchAndPersistFromInquiry({
+      inquiry: makeInquiry(),
+      rawMessage: "想看日本 9 月有什麼團",
+      senderEmail: "c@example.com",
+      interactionId: 1234,
+      correlationId: "p-happy",
+    });
+
+    expect(outcome.kind).toBe("ran");
+    if (outcome.kind === "ran") {
+      expect(outcome.skillRunId).toBe(4242);
+      expect(outcome.result.ok).toBe(true);
+      expect(outcome.pdfStoragePath).toBe(
+        "skill-runs/4242/packgo-tour-comparison.pdf",
+      );
+    }
+
+    // Initial "running" claim
+    expect(dbInsertSpy).toHaveBeenCalledTimes(1);
+    expect(dbInsertSpy.mock.calls[0][0]).toMatchObject({
+      skillId: "packgo-tour-comparison",
+      intent: "tour_comparison_request",
+      interactionId: 1234,
+      status: "running",
+    });
+
+    // PDF uploaded
+    expect(storagePutSpy).toHaveBeenCalledTimes(1);
+    expect(storagePutSpy.mock.calls[0][0]).toBe(
+      "skill-runs/4242/packgo-tour-comparison.pdf",
+    );
+    expect(storagePutSpy.mock.calls[0][2]).toBe("application/pdf");
+
+    // Completion update
+    expect(dbUpdateSetSpy).toHaveBeenCalledTimes(1);
+    expect(dbUpdateSetSpy.mock.calls[0][0]).toMatchObject({
+      status: "succeeded",
+      pdfStoragePath: "skill-runs/4242/packgo-tour-comparison.pdf",
+    });
+  });
+
+  it("orchestrator returns ok=false+needsJeff=true → status='escalated'", async () => {
+    // No country in raw message → extraction fails → ok=false from orchestrator
+    const outcome = await dispatchAndPersistFromInquiry({
+      inquiry: makeInquiry({
+        intent: "Some generic question",
+      }),
+      rawMessage: "hello please help",
+      interactionId: 100,
+      correlationId: "p-esc",
+    });
+
+    expect(outcome.kind).toBe("ran");
+    if (outcome.kind === "ran") {
+      expect(outcome.result.ok).toBe(false);
+      if (!outcome.result.ok) {
+        expect(outcome.result.needsJeff).toBe(true);
+      }
+    }
+    // Should have inserted running + updated to escalated
+    expect(dbInsertSpy).toHaveBeenCalled();
+    expect(dbUpdateSetSpy).toHaveBeenCalledTimes(1);
+    expect(dbUpdateSetSpy.mock.calls[0][0]).toMatchObject({
+      status: "escalated",
+    });
+    // No PDF since orchestrator never produced one
+    expect(storagePutSpy).not.toHaveBeenCalled();
+  });
+
+  it("graceful degradation — DB insert fails but orchestrator still runs", async () => {
+    dbInsertSpy.mockRejectedValueOnce(new Error("TiDB connection refused"));
+    generateCatalogSpy.mockResolvedValueOnce({
+      pdf: Buffer.from("pdf"),
+      meta: {
+        country: "Japan",
+        monthName: "September",
+        year: 2026,
+        optionsFound: 1,
+        departuresFound: 1,
+        supplierCodes: [],
+      },
+    });
+
+    const outcome = await dispatchAndPersistFromInquiry({
+      inquiry: makeInquiry(),
+      rawMessage: "日本 9 月",
+      correlationId: "p-degrade",
+    });
+
+    expect(outcome.kind).toBe("ran");
+    if (outcome.kind === "ran") {
+      // Orchestrator still produced output
+      expect(outcome.result.ok).toBe(true);
+      // skillRunId is 0 because the claim insert failed
+      expect(outcome.skillRunId).toBe(0);
+      // No PDF upload (we skip upload when skillRunId is 0 since we'd
+      // have no row to point at it)
+      expect(outcome.pdfStoragePath).toBeUndefined();
+    }
+    expect(storagePutSpy).not.toHaveBeenCalled();
+  });
+
+  it("PDF upload failure doesn't break the outcome", async () => {
+    storagePutSpy.mockRejectedValueOnce(new Error("R2 503"));
+    generateCatalogSpy.mockResolvedValueOnce({
+      pdf: Buffer.from("pdf"),
+      meta: {
+        country: "Japan",
+        monthName: "September",
+        year: 2026,
+        optionsFound: 1,
+        departuresFound: 1,
+        supplierCodes: [],
+      },
+    });
+
+    const outcome = await dispatchAndPersistFromInquiry({
+      inquiry: makeInquiry(),
+      rawMessage: "日本 9 月",
+      correlationId: "p-r2fail",
+    });
+
+    expect(outcome.kind).toBe("ran");
+    if (outcome.kind === "ran") {
+      expect(outcome.result.ok).toBe(true);
+      expect(outcome.pdfStoragePath).toBeUndefined();
+    }
+    // Update still fires (just without pdfStoragePath)
+    expect(dbUpdateSetSpy).toHaveBeenCalledTimes(1);
+    expect(dbUpdateSetSpy.mock.calls[0][0]).toMatchObject({
+      status: "succeeded",
+      pdfStoragePath: null,
     });
   });
 });

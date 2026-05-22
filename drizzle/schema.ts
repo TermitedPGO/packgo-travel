@@ -3041,3 +3041,65 @@ export const supplierSyncRuns = mysqlTable(
 
 export type SupplierSyncRun = typeof supplierSyncRuns.$inferSelect;
 export type InsertSupplierSyncRun = typeof supplierSyncRuns.$inferInsert;
+
+// ─── v2 Wave 3 Module 3.4-B — skill execution audit ──────────────────────
+// Persists every skill-orchestrator run triggered by the gmailPipeline.
+// Migration: drizzle/0079_skill_runs.sql.
+export const skillRuns = mysqlTable(
+  "skillRuns",
+  {
+    id: int("id").autoincrement().primaryKey(),
+
+    /** Matches the SkillId union in server/agents/skills/registry.ts */
+    skillId: varchar("skillId", { length: 60 }).notNull(),
+    /** Matches the InquiryClassification union (7 legacy + 5 v2 sub-intents) */
+    intent: varchar("intent", { length: 50 }).notNull(),
+
+    /** Soft references — no FK constraints (consistent with auditLog pattern) */
+    interactionId: int("interactionId"),
+    customerProfileId: int("customerProfileId"),
+    agentMessageId: int("agentMessageId"),
+
+    status: mysqlEnum("status", [
+      "running",
+      "succeeded",
+      "failed",
+      "escalated",
+    ])
+      .default("running")
+      .notNull(),
+
+    /** Output artifacts (succeeded only) */
+    pdfStoragePath: varchar("pdfStoragePath", { length: 500 }),
+    draftBody: text("draftBody"),
+    meta: json("meta"),
+
+    /** Failure context (failed / escalated) */
+    errorMessage: varchar("errorMessage", { length: 1024 }),
+
+    /** Cost + latency for AgentMonitor / selfRetrospective */
+    llmTokensIn: int("llmTokensIn").default(0),
+    llmTokensOut: int("llmTokensOut").default(0),
+    llmCostCents: int("llmCostCents").default(0),
+    durationMs: int("durationMs"),
+
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    completedAt: timestamp("completedAt"),
+  },
+  (table) => ({
+    interactionIdx: index("idx_skillRuns_interactionId").on(
+      table.interactionId,
+    ),
+    statusCreatedIdx: index("idx_skillRuns_status_createdAt").on(
+      table.status,
+      table.createdAt,
+    ),
+    skillCreatedIdx: index("idx_skillRuns_skillId_createdAt").on(
+      table.skillId,
+      table.createdAt,
+    ),
+  }),
+);
+
+export type SkillRun = typeof skillRuns.$inferSelect;
+export type InsertSkillRun = typeof skillRuns.$inferInsert;
