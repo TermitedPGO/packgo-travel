@@ -2820,6 +2820,11 @@ export const zhTW = {
       tipNoData: '近 {days} 天無 Redis 統計資料 — 請確認 LLM 已被呼叫且 redis 連線正常。',
       tipHealthy: '一切正常 — 成本、命中率、circuit 皆在合理範圍。',
     },
+    llmCostV2: {
+      statusOk: '正常',
+      statusErr: '異常',
+      statusIdle: '無資料',
+    },
     bookingsTab: {
       title: '訂單管理',
       totalCount: '共 {n} 筆預訂',

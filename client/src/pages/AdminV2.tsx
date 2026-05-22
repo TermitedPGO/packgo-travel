@@ -51,6 +51,8 @@ const InquiriesTabV2 = lazy(() => import("@/components/admin-v2/InquiriesTabV2")
 const ReviewsTabV2 = lazy(() => import("@/components/admin-v2/ReviewsTabV2"));
 const PackpointTabV2 = lazy(() => import("@/components/admin-v2/PackpointTabV2"));
 const VouchersTabV2 = lazy(() => import("@/components/admin-v2/VouchersTabV2"));
+const LlmCostTabV2 = lazy(() => import("@/components/admin-v2/LlmCostTabV2"));
+const MonitorDashboardV2 = lazy(() => import("@/components/admin-v2/MonitorDashboardV2"));
 
 // All other tabs initially come from V1. They're consumed AS-IS; we replace
 // them one by one with V2 redesigns. Listed here for the lazy-loader.
@@ -62,7 +64,6 @@ const MarketingLanding = lazy(() => import("@/components/admin/landings/Marketin
 const FinanceLanding = lazy(() => import("@/components/admin/landings/FinanceLanding"));
 const ToursTab = lazy(() => import("@/components/admin/ToursTab"));
 const SuppliersTab = lazy(() => import("@/components/admin/SuppliersTab"));
-const MonitorDashboard = lazy(() => import("@/components/admin/MonitorDashboard"));
 const AiQuotesTab = lazy(() => import("@/components/admin/AiQuotesTab"));
 const WechatAssistTab = lazy(() => import("@/components/admin/WechatAssistTab"));
 const QuoteToolTab = lazy(() => import("@/components/admin/tools/QuoteToolTab"));
@@ -76,7 +77,6 @@ const AccountingTab = lazy(() => import("@/components/admin/AccountingTab"));
 const InvoicesTab = lazy(() => import("@/components/admin/InvoicesTab"));
 const ReconciliationTab = lazy(() => import("@/components/admin/ReconciliationTab"));
 const AiHubTab = lazy(() => import("@/components/admin/AiHubTab"));
-const LlmCostTab = lazy(() => import("@/components/admin/LlmCostTab"));
 const TaskHistoryContent = lazy(() => import("@/components/admin/TaskHistoryContent"));
 const AuditLogTab = lazy(() => import("@/components/admin/AuditLogTab"));
 const CalibrationReviewTab = lazy(() => import("@/components/admin/CalibrationReviewTab"));
@@ -351,7 +351,8 @@ function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
       // 🆕 V2 redesign #2
       return <InquiriesTabV2 />;
     case "tour-monitor":
-      return <MonitorDashboard />;
+      // 🆕 V2 redesign #7
+      return <MonitorDashboardV2 />;
     case "suppliers":
       return <SuppliersTab />;
 
@@ -404,7 +405,8 @@ function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
     case "ai-hub":
       return <AiHubTab />;
     case "llm-cost":
-      return <LlmCostTab />;
+      // 🆕 V2 redesign #6
+      return <LlmCostTabV2 />;
     case "task-history":
       return <TaskHistoryContent />;
     case "audit-log":

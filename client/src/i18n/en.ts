@@ -2852,6 +2852,11 @@ export const en = {
       tipNoData: 'No Redis stats in the last {days} days — verify LLM is being called and Redis is reachable.',
       tipHealthy: 'All clear — cost, hit rate, and circuit are within healthy ranges.',
     },
+    llmCostV2: {
+      statusOk: 'OK',
+      statusErr: 'Error',
+      statusIdle: 'Idle',
+    },
     bookingsTab: {
       title: 'Booking Management',
       totalCount: '{n} bookings total',
