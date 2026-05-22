@@ -501,9 +501,9 @@ function PackpointSection() {
       await navigator.clipboard.writeText(referral.shareUrl);
       // Use toast if available; falling back to alert
       const { toast } = await import("sonner");
-      toast.success("推薦連結已複製");
+      toast.success(t("rewards.referralCopied"));
     } catch {
-      alert("複製失敗,請手動複製");
+      alert(t("rewards.copyFailed"));
     }
   };
 
@@ -682,7 +682,7 @@ function PackpointSection() {
                     </div>
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-foreground truncate">
-                        {labelForReason(tx.reason)}
+                        {t(`rewards.reasons.${tx.reason}`) || tx.reason}
                       </p>
                       {tx.description && (
                         <p className="text-xs text-foreground/50 truncate">{tx.description}</p>
@@ -717,32 +717,9 @@ function PackpointSection() {
   );
 }
 
-function labelForReason(reason: string): string {
-  switch (reason) {
-    case "booking_earn":
-      return "預訂行程累積";
-    case "signup_bonus":
-      return "註冊獎勵";
-    case "review_bonus":
-      return "評論獎勵";
-    case "referral_bonus":
-      return "推薦獎勵";
-    case "birthday_bonus":
-      return "生日獎勵";
-    case "photo_bonus":
-      return "上傳照片獎勵";
-    case "redemption":
-      return "下訂折抵";
-    case "clawback":
-      return "退款回收";
-    case "expiration":
-      return "點數失效";
-    case "admin_adjust":
-      return "管理員調整";
-    default:
-      return reason;
-  }
-}
+// 2026-05-22 P13: labelForReason replaced by t("rewards.reasons.<reason>")
+// inline lookup with t() in PackpointSection's render path. Kept inline so
+// the function can pick up the user's UI language directly.
 
 // Favorites Section Component
 function FavoritesSection({ setLocation }: { setLocation: (path: string) => void }) {
