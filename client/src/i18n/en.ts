@@ -4677,6 +4677,15 @@ export const en = {
   // Tour Print Page
   tourPrint: {
     title: 'Itinerary',
+    // 2026-05-22 polish: customer-summary block, route map, QR back-link
+    customerName: 'Customer Name',
+    customerContact: 'Phone / Email',
+    travelDates: 'Departure / Return',
+    partySize: 'Party Size',
+    totalAmount: 'Price per Person',
+    tourRouteMap: 'Tour Route Map',
+    routeMapCaption: 'The map above shows the cities and stops along this itinerary in order. The actual route may vary based on departure date and transport arrangements.',
+    scanForLatest: 'Scan for the latest version',
     print: 'Print',
     download: 'Download PDF',
     tourInfo: 'Tour Information',

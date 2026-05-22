@@ -8,14 +8,15 @@
  * - 適合列印和 PDF 下載
  */
 
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useRef } from "react";
 import { LoadingPage } from "@/components/ui/spinner";
 import { useRoute, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { useLocale } from "@/contexts/LocaleContext";
 import { translateDestination } from "@/utils/locationMapping";
-import { 
+import { CONTACT, LICENSES, BRAND } from "@/lib/brand";
+import {
   Printer,
   ArrowLeft,
   MapPin,
@@ -28,8 +29,29 @@ import {
   X,
   Phone,
   Mail,
-  Globe
+  Globe,
 } from "lucide-react";
+
+/**
+ * Pure-URL QR via api.qrserver.com — same approach as ShareDialog. Used
+ * on the final print page so customers (or their travel-agent friend
+ * who got the printout) can scan back to the live tour page.
+ */
+const qrCodeImageUrl = (data: string, size = 110): string =>
+  `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&margin=4&data=${encodeURIComponent(data)}`;
+
+/**
+ * Format a price using the tour's own priceCurrency field instead of
+ * a hardcoded `NT$`. PACK&GO sells to a US-based Mandarin-speaking
+ * audience — most tour rows are TWD-quoted from Lion suppliers, but
+ * USD tours exist and CNY/HKD will follow.
+ */
+const formatTourPrice = (price: number | null | undefined, currency: string | null | undefined): string => {
+  if (price == null) return "";
+  const cur = (currency || "TWD").toUpperCase();
+  const symbol = cur === "USD" ? "US$" : cur === "TWD" ? "NT$" : cur === "CNY" ? "¥" : cur === "HKD" ? "HK$" : `${cur} `;
+  return `${symbol} ${price.toLocaleString()}`;
+};
 
 // 解析 JSON 字串
 const parseJSON = (str: string | null | undefined, defaultValue: any = null) => {
@@ -78,6 +100,17 @@ export default function TourPrintView() {
     { tourId: tourId!, targetLanguage: language as 'zh-TW' | 'en' | 'ja' | 'ko' },
     { enabled: language !== 'zh-TW' && !!tourId }
   );
+
+  // 2026-05-22 — fetch the branded route map (static PNG, not the
+  // heavy interactive SVG). aiMapUrl preferred (cleaner, illustrated)
+  // with staticMapUrl fallback. If neither is available we just skip
+  // the map page rather than break the print.
+  const { data: routeMapData } = trpc.tours.getRouteMap.useQuery(
+    { id: tourId! },
+    { enabled: !!tourId, staleTime: 60 * 60 * 1000 },
+  );
+  const routeMapUrl =
+    (routeMapData as any)?.aiMapUrl || routeMapData?.staticMapUrl || null;
   const displayTitle = language === 'zh-TW'
     ? (tour?.title || '')
     : (tourTranslation?.title || tour?.title || '');
@@ -86,12 +119,14 @@ export default function TourPrintView() {
     : (tourTranslation?.description || tour?.description || '');
 
   // 頁面載入後自動觸發列印
+  // 2026-05-22 — bumped 500ms → 1500ms so the route map image and QR
+  // code finish loading before the print dialog opens. The old delay
+  // raced and would print with missing imagery half the time.
   useEffect(() => {
     if (tour && !isLoading) {
-      // 延遲一下讓頁面完全渲染
       const timer = setTimeout(() => {
         window.print();
-      }, 500);
+      }, 1500);
       return () => clearTimeout(timer);
     }
   }, [tour, isLoading]);
@@ -152,7 +187,8 @@ export default function TourPrintView() {
         
         {/* ===== 封面頁 ===== */}
         <div className="print-page print-cover-page">
-          {/* 公司 Logo 和名稱 */}
+          {/* 公司 Logo 和名稱 — pull contact from brand.ts so we never
+              ship a stale phone/email/website on a printed PDF. */}
           <div className="print-header">
             <div className="flex items-center gap-3">
               <img
@@ -165,12 +201,15 @@ export default function TourPrintView() {
               />
               <div>
                 <h1 className="text-xl font-bold text-gray-900">{t('tourPrint.companyName')}</h1>
-                <p className="text-sm text-gray-500">{t('tourPrint.companySlogan')}</p>
+                <p className="text-sm text-gray-500">
+                  {language === 'zh-TW' ? BRAND.taglineZh : BRAND.tagline}
+                </p>
               </div>
             </div>
             <div className="text-right text-sm text-gray-500">
-              <p className="font-medium text-gray-700">{t('tourPrint.phone')}</p>
-              <p>Email：jeffhsieh09@gmail.com</p>
+              <p className="font-medium text-gray-700">{CONTACT.phoneDisplay}</p>
+              <p>{CONTACT.email}</p>
+              <p>{CONTACT.websiteDisplay}</p>
               <p>{t('tourPrint.tourCode')}{tour.productCode || `T${tour.id}`}</p>
               <p>{t('tourPrint.printDate')}{new Date().toLocaleDateString(language === 'en' ? 'en-US' : 'zh-TW')}</p>
             </div>
@@ -210,6 +249,40 @@ export default function TourPrintView() {
             </div>
           </div>
           
+          {/* 客戶資訊 — fillable form (印出後手寫，或未來支援 query string
+              預填 ?customer=...&date=...&total=...) */}
+          <div className="print-customer-summary">
+            <div className="print-customer-row">
+              <div className="print-customer-field">
+                <span className="print-customer-label">{t('tourPrint.customerName')}</span>
+                <span className="print-customer-line">&nbsp;</span>
+              </div>
+              <div className="print-customer-field">
+                <span className="print-customer-label">{t('tourPrint.customerContact')}</span>
+                <span className="print-customer-line">&nbsp;</span>
+              </div>
+            </div>
+            <div className="print-customer-row">
+              <div className="print-customer-field">
+                <span className="print-customer-label">{t('tourPrint.travelDates')}</span>
+                <span className="print-customer-line">&nbsp;</span>
+              </div>
+              <div className="print-customer-field">
+                <span className="print-customer-label">{t('tourPrint.partySize')}</span>
+                <span className="print-customer-line">&nbsp;</span>
+              </div>
+            </div>
+            <div className="print-customer-row">
+              <div className="print-customer-field print-customer-field-wide">
+                <span className="print-customer-label">{t('tourPrint.totalAmount')}</span>
+                <span className="print-customer-line">
+                  {formatTourPrice(tour.price, tour.priceCurrency)}
+                  {' '}/ {t('tourPrint.person')}
+                </span>
+              </div>
+            </div>
+          </div>
+
           {/* 行程簡介 */}
           <div className="print-intro">
             <h2 className="print-section-title" style={{ color: themeColor.primary }}>
@@ -232,14 +305,49 @@ export default function TourPrintView() {
               </ul>
             </div>
           )}
-          
-          {/* 頁腳 */}
+
+          {/* 頁腳 — California Seller of Travel disclosure on every page.
+              CA Business & Professions Code §17550.13 requires the CST
+              number on all travel-document advertising. Keep this on
+              EVERY .print-page (not just the cover). */}
           <div className="print-page-footer">
-            <span>{t('tourPrint.companyName')}</span>
+            <span>{BRAND.legalName} · {LICENSES.cst} · {LICENSES.tcrf} · Newark, CA</span>
             <span>{t('tourPrint.pageNum').replace('{num}', '1')}</span>
           </div>
         </div>
-        
+
+        {/* ===== 行程路線地圖頁 ===== */}
+        {routeMapUrl && (
+          <div className="print-page print-routemap-page">
+            <div className="print-page-header">
+              <span className="font-medium">{displayTitle}</span>
+              <span className="text-gray-500">{t('tourPrint.tourRouteMap')}</span>
+            </div>
+            <h2 className="print-section-title" style={{ color: themeColor.primary }}>
+              {t('tourPrint.tourRouteMap')}
+            </h2>
+            <div className="print-routemap-frame">
+              <img
+                src={routeMapUrl}
+                alt={t('tourPrint.tourRouteMap')}
+                className="print-routemap-image"
+                onError={(e) => {
+                  // Hide the whole page if the map URL 404s mid-print.
+                  const page = (e.target as HTMLImageElement).closest('.print-page');
+                  if (page) (page as HTMLElement).style.display = 'none';
+                }}
+              />
+            </div>
+            <p className="print-routemap-caption">
+              {t('tourPrint.routeMapCaption')}
+            </p>
+            <div className="print-page-footer">
+              <span>{BRAND.legalName} · {LICENSES.cst} · {LICENSES.tcrf} · Newark, CA</span>
+              <span>{t('tourPrint.pageNum').replace('{num}', '2')}</span>
+            </div>
+          </div>
+        )}
+
         {/* ===== 每日行程頁 ===== */}
         {dailyItinerary.map((day: any, dayIndex: number) => (
           <div key={dayIndex} className="print-page print-itinerary-page">
@@ -361,10 +469,10 @@ export default function TourPrintView() {
               </div>
             )}
             
-            {/* 頁腳 */}
+            {/* 頁腳 — CST disclosure (CA B&P Code §17550.13) */}
             <div className="print-page-footer">
-              <span>{t('tourPrint.companyName')}</span>
-              <span>{t('tourPrint.pageNum').replace('{num}', String(dayIndex + 2))}</span>
+              <span>{BRAND.legalName} · {LICENSES.cst} · {LICENSES.tcrf} · Newark, CA</span>
+              <span>{t('tourPrint.pageNum').replace('{num}', String(dayIndex + (routeMapUrl ? 3 : 2)))}</span>
             </div>
           </div>
         ))}
@@ -436,14 +544,14 @@ export default function TourPrintView() {
               ))}
             </div>
             
-            {/* 頁腳 */}
+            {/* 頁腳 — CST disclosure */}
             <div className="print-page-footer">
-              <span>{t('tourPrint.companyName')}</span>
-              <span>{t('tourPrint.pageNum').replace('{num}', String(itinerary.length + 2))}</span>
+              <span>{BRAND.legalName} · {LICENSES.cst} · {LICENSES.tcrf} · Newark, CA</span>
+              <span>{t('tourPrint.pageNum').replace('{num}', String(itinerary.length + (routeMapUrl ? 3 : 2)))}</span>
             </div>
           </div>
         )}
-        
+
         {/* ===== 費用說明頁 ===== */}
         <div className="print-page print-pricing-page">
           {/* 頁眉 */}
@@ -456,11 +564,14 @@ export default function TourPrintView() {
             {t('tourPrint.pricingInfo')}
           </h2>
           
-          {/* 價格資訊 */}
+          {/* 價格資訊 — currency now driven by tour.priceCurrency (TWD /
+              USD / CNY / HKD) instead of hardcoded NT$. */}
           <div className="print-price-box" style={{ backgroundColor: themeColor.light }}>
             <div className="print-price-label">{t('tourPrint.tourFee')}</div>
             <div className="print-price-value" style={{ color: themeColor.primary }}>
-              NT$ {tour.price?.toLocaleString() || t('tourPrint.inquire')}
+              {tour.price != null
+                ? formatTourPrice(tour.price, tour.priceCurrency)
+                : t('tourPrint.inquire')}
               <span className="text-sm font-normal text-gray-500"> /{t('tourPrint.person')}</span>
             </div>
           </div>
@@ -517,13 +628,13 @@ export default function TourPrintView() {
             </ul>
           </div>
           
-          {/* 頁腳 */}
+          {/* 頁腳 — CST disclosure */}
           <div className="print-page-footer">
-              <span>{t('tourPrint.companyName')}</span>
-              <span>{t('tourPrint.pageNum').replace('{num}', String(dailyItinerary.length + 2))}</span>
+              <span>{BRAND.legalName} · {LICENSES.cst} · {LICENSES.tcrf} · Newark, CA</span>
+              <span>{t('tourPrint.pageNum').replace('{num}', String(dailyItinerary.length + (routeMapUrl ? 3 : 2)))}</span>
           </div>
         </div>
-        
+
         {/* ===== 注意事項頁 ===== */}
         <div className="print-page print-notes-page">
           {/* 頁眉 */}
@@ -612,32 +723,59 @@ export default function TourPrintView() {
             )}
           </div>
           
-          {/* 聯絡資訊 */}
+          {/* 聯絡資訊 — sourced from CONTACT (brand.ts) so the printed
+              PDF always shows current phone / email / website. Old hard-
+              coded values referenced www.packgo.com which isn't even
+              our domain (packgoplay.com). */}
           <div className="print-contact-box" style={{ backgroundColor: themeColor.light }}>
             <h3 className="font-bold mb-3" style={{ color: themeColor.primary }}>{t('tourPrint.contactUs')}</h3>
-            <div className="print-contact-grid">
-              <div className="print-contact-item">
-                <Phone className="h-4 w-4" style={{ color: themeColor.secondary }} />
-                <span>+1 (510) 634-2307</span>
+            <div className="print-contact-with-qr">
+              <div className="print-contact-grid">
+                <div className="print-contact-item">
+                  <Phone className="h-4 w-4" style={{ color: themeColor.secondary }} />
+                  <span>{CONTACT.phoneDisplay}</span>
+                </div>
+                <div className="print-contact-item">
+                  <Mail className="h-4 w-4" style={{ color: themeColor.secondary }} />
+                  <span>{CONTACT.email}</span>
+                </div>
+                <div className="print-contact-item">
+                  <Globe className="h-4 w-4" style={{ color: themeColor.secondary }} />
+                  <span>{CONTACT.websiteDisplay}</span>
+                </div>
+                <div className="print-contact-item">
+                  <MapPin className="h-4 w-4" style={{ color: themeColor.secondary }} />
+                  <span>{CONTACT.address.street}, {CONTACT.address.city}, {CONTACT.address.state} {CONTACT.address.zip}</span>
+                </div>
+                <div className="print-contact-item">
+                  <Check className="h-4 w-4" style={{ color: themeColor.secondary }} />
+                  <span>{LICENSES.cstFull}</span>
+                </div>
               </div>
-              <div className="print-contact-item">
-                <Mail className="h-4 w-4" style={{ color: themeColor.secondary }} />
-                <span>jeffhsieh09@gmail.com</span>
-              </div>
-              <div className="print-contact-item">
-                <Globe className="h-4 w-4" style={{ color: themeColor.secondary }} />
-                <span>www.packgo.com</span>
+              {/* QR back-link — scan from printed PDF to live tour page.
+                  Always points to packgoplay.com (canonical domain) so
+                  the link stays valid even if the PDF was printed from
+                  a *.fly.dev preview deploy. */}
+              <div className="print-contact-qr">
+                <img
+                  src={qrCodeImageUrl(`https://packgoplay.com/tours/${tourId}`, 100)}
+                  alt="Scan to view tour online"
+                  className="print-contact-qr-img"
+                />
+                <span className="print-contact-qr-label">
+                  {t('tourPrint.scanForLatest')}
+                </span>
               </div>
             </div>
           </div>
-          
-          {/* 頁腳 */}
+
+          {/* 頁腳 — CST disclosure */}
           <div className="print-page-footer">
-              <span>{t('tourPrint.companyName')}</span>
-              <span>{t('tourPrint.pageNum').replace('{num}', String(dailyItinerary.length + 3))}</span>
+              <span>{BRAND.legalName} · {LICENSES.cst} · {LICENSES.tcrf} · Newark, CA</span>
+              <span>{t('tourPrint.pageNum').replace('{num}', String(dailyItinerary.length + (routeMapUrl ? 4 : 3)))}</span>
           </div>
         </div>
-        
+
       </div>
       
       {/* 列印專用樣式 — v80.23 brand redesign: cream + gold, serif headlines */}
@@ -1187,6 +1325,154 @@ export default function TourPrintView() {
         .print-activity-price {
           display: flex;
           align-items: center;
+        }
+
+        /* === 2026-05-22 polish: customer-summary block === */
+        .print-customer-summary {
+          margin-bottom: 8mm;
+          padding: 4mm 5mm;
+          background: #faf8f2;
+          border: 0.5mm solid #e8e3d6;
+        }
+
+        .print-customer-row {
+          display: flex;
+          gap: 6mm;
+          margin-bottom: 3mm;
+        }
+
+        .print-customer-row:last-child {
+          margin-bottom: 0;
+        }
+
+        .print-customer-field {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          gap: 1mm;
+        }
+
+        .print-customer-field-wide {
+          flex: 2;
+        }
+
+        .print-customer-label {
+          font-size: 8pt;
+          color: #888;
+          letter-spacing: 1.5px;
+          text-transform: uppercase;
+          font-weight: 600;
+        }
+
+        .print-customer-line {
+          font-size: 10pt;
+          color: #1a1a1a;
+          border-bottom: 0.4mm solid #c9a563;
+          min-height: 6mm;
+          padding: 1mm 0;
+          font-weight: 600;
+        }
+
+        /* === Route-map page === */
+        .print-routemap-page {
+          display: flex;
+          flex-direction: column;
+        }
+
+        .print-routemap-frame {
+          margin: 5mm 0;
+          padding: 4mm;
+          background: #faf8f2;
+          border: 0.5mm solid #e8e3d6;
+          page-break-inside: avoid;
+          break-inside: avoid;
+          text-align: center;
+        }
+
+        .print-routemap-image {
+          max-width: 100%;
+          max-height: 180mm;
+          height: auto;
+          object-fit: contain;
+          margin: 0 auto;
+        }
+
+        .print-routemap-caption {
+          font-size: 9.5pt;
+          color: #555;
+          text-align: center;
+          margin: 3mm 0 0 0;
+          line-height: 1.65;
+        }
+
+        /* === Contact + QR layout on final page === */
+        .print-contact-with-qr {
+          display: flex;
+          align-items: center;
+          gap: 8mm;
+        }
+
+        .print-contact-qr {
+          flex-shrink: 0;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 2mm;
+          padding: 2mm;
+          background: white;
+          border-radius: 1mm;
+        }
+
+        .print-contact-qr-img {
+          width: 25mm;
+          height: 25mm;
+          display: block;
+        }
+
+        .print-contact-qr-label {
+          font-size: 7.5pt;
+          color: #c9a563;
+          letter-spacing: 0.5px;
+          text-align: center;
+          max-width: 28mm;
+          line-height: 1.3;
+        }
+
+        /* === Page-break-inside-avoid — keep these units together,
+              don't split mid-content across pages. CLAUDE.md & Jeff
+              feedback: itinerary day blocks splitting badly. === */
+        .print-activity-card,
+        .print-hotel-card,
+        .print-note-section,
+        .print-meals,
+        .print-hotel,
+        .print-day-header,
+        .print-price-box,
+        .print-contact-box,
+        .print-customer-summary,
+        .print-highlight-item {
+          page-break-inside: avoid;
+          break-inside: avoid;
+        }
+
+        /* Day header should stick with its first activity — otherwise
+           we get an orphan DAY label at the bottom of a page. */
+        .print-day-header {
+          page-break-after: avoid;
+          break-after: avoid;
+        }
+
+        /* Subsection titles (Today's Meals, Tonight's Hotel, etc.)
+           should stay with their content. */
+        .print-subsection-title {
+          page-break-after: avoid;
+          break-after: avoid;
+        }
+
+        /* Headings should never end a page */
+        .print-section-title {
+          page-break-after: avoid;
+          break-after: avoid;
         }
       `}</style>
     </>

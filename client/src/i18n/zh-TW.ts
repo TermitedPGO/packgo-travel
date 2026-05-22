@@ -4679,6 +4679,15 @@ export const zhTW = {
   // 行程列印頁面
   tourPrint: {
     title: '行程表',
+    // 2026-05-22 polish: customer-summary block, route map, QR back-link
+    customerName: '客戶姓名',
+    customerContact: '聯絡電話 / 信箱',
+    travelDates: '出發 / 回程日期',
+    partySize: '人數',
+    totalAmount: '單人團費',
+    tourRouteMap: '行程路線地圖',
+    routeMapCaption: '上方地圖標示本行程依序停靠的城市與景點；實際路線將依出發日及交通安排為準。',
+    scanForLatest: '掃碼查看最新行程',
     print: '列印',
     download: '下載 PDF',
     tourInfo: '行程資訊',
