@@ -82,10 +82,10 @@ export default function HomeFAQ() {
               {t("homeFaq.eyebrow")}
             </p>
             <h2 className="text-3xl md:text-4xl font-serif font-bold text-black mb-4">
-              {t("homeFaq.intentTitle") || "您現在想做什麼？"}
+              {t("homeFaq.intentTitle")}
             </h2>
             <p className="text-gray-500 text-base">
-              {t("homeFaq.intentSubtitle") || "選擇一個，我們直接帶您去對的地方。"}
+              {t("homeFaq.intentSubtitle")}
             </p>
           </div>
 
@@ -132,7 +132,7 @@ export default function HomeFAQ() {
           {/* Detailed FAQ — collapsed by default for users who want specifics */}
           <div className="max-w-3xl mx-auto">
             <h3 className="text-center text-lg font-semibold text-gray-700 mb-6">
-              {t("homeFaq.detailedTitle") || "或者，瀏覽常見問題"}
+              {t("homeFaq.detailedTitle")}
             </h3>
             <div className="space-y-0 border-t border-gray-200">
               {faqs.map((faq, i) => (

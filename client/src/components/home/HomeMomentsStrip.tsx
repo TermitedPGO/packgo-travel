@@ -82,8 +82,8 @@ export default function HomeMomentsStrip() {
                   {tour.destinationCountry || tour.destination}
                 </span>
                 <span className="text-xs md:text-sm font-medium leading-tight line-clamp-2 mt-0.5">
-                  {tour.duration ? `${tour.duration}` : ""}
-                  {tour.duration && (t("homeMoments.daySuffix") || "天")} ·{" "}
+                  {tour.duration ? `${tour.duration} ${t("common.days")}` : ""}
+                  {tour.duration && " · "}
                   {tour.title.split(/[|｜]/)[0].trim()}
                 </span>
               </div>
