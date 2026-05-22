@@ -20,7 +20,7 @@
 import type { ContentAnalyzerAgent } from "../contentAnalyzerAgent";
 import type { ColorThemeAgent } from "../colorThemeAgent";
 import type { ItineraryUnifiedAgent } from "../itineraryUnifiedAgent";
-import type { DetailsSkill } from "../../skills/details/detailsSkill";
+import type { DetailsSkill } from "../_subskills/details/detailsSkill";
 import type { FlightAgent } from "../flightAgent";
 import type { TransportationAgent } from "../transportationAgent";
 import type { RetryManager, AgentMonitor, FallbackManager, RetryConfig } from "../agentOrchestration";

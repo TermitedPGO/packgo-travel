@@ -8,7 +8,7 @@
  * - 支援並行處理多個子技能
  */
 
-import { getHaikuAgent, JSONSchema, STRICT_DATA_FIDELITY_RULES } from "../../agents/claudeAgent";
+import { getHaikuAgent, JSONSchema, STRICT_DATA_FIDELITY_RULES } from "../../claudeAgent";
 import { 
   loadSkillMetadata, 
   loadSkill, 

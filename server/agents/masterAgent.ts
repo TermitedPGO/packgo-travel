@@ -29,7 +29,7 @@
 import { ContentAnalyzerAgent } from "./contentAnalyzerAgent";
 import { ColorThemeAgent } from "./colorThemeAgent";
 import { ItineraryUnifiedAgent } from "./itineraryUnifiedAgent";
-import { getDetailsSkill, DetailsSkill } from "../skills/details/detailsSkill";
+import { getDetailsSkill, DetailsSkill } from "./_subskills/details/detailsSkill";
 import { FlightAgent } from "./flightAgent";
 import { TransportationAgent } from "./transportationAgent";
 import { getKeyInstructions } from "./skillLoader";

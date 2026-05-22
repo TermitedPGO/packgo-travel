@@ -103,7 +103,7 @@ describe("P0: Security - Admin-only procedures", () => {
 // ═══════════════════════════════════════════════════════
 describe("P1: DetailsSkill combined schema structure", () => {
   it("COMBINED_DETAILS_SCHEMA should have all 4 sub-skill properties", async () => {
-    const { DetailsSkill } = await import("./skills/details/detailsSkill");
+    const { DetailsSkill } = await import("./agents/_subskills/details/detailsSkill");
     
     // Access the static schema from the class
     const skill = new (DetailsSkill as any)();
@@ -113,7 +113,7 @@ describe("P1: DetailsSkill combined schema structure", () => {
   });
 
   it("DetailsSkill should have executeAllCombined method", async () => {
-    const { getDetailsSkill } = await import("./skills/details/detailsSkill");
+    const { getDetailsSkill } = await import("./agents/_subskills/details/detailsSkill");
     const skill = getDetailsSkill();
     
     expect(skill).toBeDefined();
