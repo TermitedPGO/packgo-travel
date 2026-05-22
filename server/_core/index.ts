@@ -947,8 +947,50 @@ async function startServer() {
     logger.warn({ err }, "[Startup] Failed to init supplier sync worker");
   }
 
+  // 2026-05-22 — SIGTERM graceful shutdown.
+  //
+  // Background: fly's rolling deploy SIGTERMs the old machine while
+  // the new one is serving. Without a handler, Node tears down immediately
+  // and any in-flight HTTP response.write() throws `EPIPE` / `ECONNRESET`,
+  // surfacing as uncaughtException in Sentry. Filtering EPIPE in
+  // sentry.ts is belt-and-suspenders; this is the actual cure: stop
+  // accepting new connections, let in-flight drain, then exit.
+  //
+  // 15s drain budget: fly's default grace period is 30s, so we exit well
+  // before fly SIGKILLs us. UptimeRobot regional probes have 30s timeout,
+  // so a sub-15s drain window means probes that started before SIGTERM
+  // still complete on the old machine.
+  //
+  // Doesn't touch BullMQ workers — they share the process and will close
+  // when process.exit() runs. Mid-job retries are BullMQ's responsibility
+  // (visibility timeout + retry on the next worker).
+  let shuttingDown = false;
+  const gracefulShutdown = (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info({ signal }, "[shutdown] signal received — draining HTTP");
+
+    const FORCE_EXIT_MS = 15_000;
+    const forceTimer = setTimeout(() => {
+      logger.warn({ ms: FORCE_EXIT_MS }, "[shutdown] drain timeout — forcing exit");
+      process.exit(1);
+    }, FORCE_EXIT_MS);
+    forceTimer.unref(); // don't keep the loop alive on its own
+
+    server.close((err) => {
+      if (err) {
+        logger.error({ err }, "[shutdown] server.close error");
+        process.exit(1);
+      }
+      logger.info("[shutdown] drained cleanly");
+      process.exit(0);
+    });
+  };
+  process.once("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.once("SIGINT", () => gracefulShutdown("SIGINT"));
+
   const preferredPort = parseInt(process.env.PORT || "3000");
-  
+
   // Set SO_REUSEADDR option before listening
   server.listen({
     port: preferredPort,

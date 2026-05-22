@@ -157,4 +157,71 @@ describe("server/_core/sentry", () => {
       expect(Sentry.captureMessage).toHaveBeenCalledWith("hello", "info");
     });
   });
+
+  describe("EPIPE / ECONNRESET noise filter (2026-05-22)", () => {
+    /**
+     * Regression for the "write EPIPE" fatal email Jeff got 2026-05-22
+     * 01:00 UTC during the v510 fly deploy rolling restart. Socket-level
+     * disconnect errors have no actionable signal and were spamming
+     * Sentry on every deploy. Filter at the SDK so we don't pay the
+     * event quota nor get the "fatal" inbox alert.
+     */
+
+    beforeEach(() => {
+      process.env.SENTRY_DSN = "https://abc@example.com/1";
+      initSentry();
+    });
+
+    it("ignoreErrors list includes EPIPE / ECONNRESET messages", () => {
+      const initArgs = (Sentry.init as any).mock.calls[0][0];
+      expect(initArgs.ignoreErrors).toEqual(
+        expect.arrayContaining([
+          "write EPIPE",
+          "read ECONNRESET",
+        ]),
+      );
+    });
+
+    it("beforeSend drops events whose original exception has code=EPIPE", () => {
+      const initArgs = (Sentry.init as any).mock.calls[0][0];
+      const beforeSend = initArgs.beforeSend as (
+        event: unknown,
+        hint: { originalException?: unknown },
+      ) => unknown;
+      expect(typeof beforeSend).toBe("function");
+
+      const fakeEvent = { message: "write EPIPE", level: "fatal" };
+      const fakeErr = Object.assign(new Error("write EPIPE"), {
+        code: "EPIPE",
+      });
+
+      const result = beforeSend(fakeEvent, { originalException: fakeErr });
+      expect(result).toBeNull();
+    });
+
+    it("beforeSend drops events with code=ECONNRESET", () => {
+      const initArgs = (Sentry.init as any).mock.calls[0][0];
+      const beforeSend = initArgs.beforeSend;
+      const err = Object.assign(new Error("socket hangup"), {
+        code: "ECONNRESET",
+      });
+      expect(beforeSend({ message: "x" }, { originalException: err })).toBeNull();
+    });
+
+    it("beforeSend passes through real errors unchanged", () => {
+      const initArgs = (Sentry.init as any).mock.calls[0][0];
+      const beforeSend = initArgs.beforeSend;
+      const realErr = new Error("Cannot read properties of undefined (reading 'name')");
+      const realEvent = { message: realErr.message, level: "fatal" };
+      const result = beforeSend(realEvent, { originalException: realErr });
+      expect(result).toBe(realEvent);
+    });
+
+    it("beforeSend passes through when hint.originalException missing", () => {
+      const initArgs = (Sentry.init as any).mock.calls[0][0];
+      const beforeSend = initArgs.beforeSend;
+      const event = { message: "synthetic Sentry.captureMessage call" };
+      expect(beforeSend(event, {})).toBe(event);
+    });
+  });
 });

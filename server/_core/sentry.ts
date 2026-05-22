@@ -76,6 +76,27 @@ export function initSentry(): void {
     // Don't send default PII (req body, cookies). We can opt-in per scope
     // when needed.
     sendDefaultPii: false,
+    // 2026-05-22 — drop socket-level noise that has no actionable signal.
+    // EPIPE / ECONNRESET happen any time a peer closes mid-write (deploy
+    // rolling restart, client tab close on long-poll, mobile suspend on
+    // SSE). Filtering at the SDK keeps the project under free-tier 5K
+    // events/mo and stops "fatal" emails on every fly deploy. See also
+    // the SIGTERM graceful-shutdown handler in _core/index.ts — that
+    // reduces *occurrence*, this is belt-and-suspenders for whatever
+    // slips past graceful drain (genuine network blips, etc.).
+    ignoreErrors: [
+      "write EPIPE",
+      "read ECONNRESET",
+      "Client network socket disconnected",
+    ],
+    beforeSend(event, hint) {
+      const err = hint.originalException;
+      const code = (err as { code?: string } | undefined)?.code;
+      if (code === "EPIPE" || code === "ECONNRESET") {
+        return null; // drop
+      }
+      return event;
+    },
   });
 
   initialized = true;
