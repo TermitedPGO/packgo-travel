@@ -1222,6 +1222,10 @@ export const zhTW = {
     redeemedOn: '{date} 使用',
     referralCopied: '推薦連結已複製',
     copyFailed: '複製失敗，請手動複製',
+    redeemLoginFirst: '登入後兌換',
+    redeemUnavailable: '暫無法兌換',
+    redeemPointsShort: '還差 {points} 點',
+    redeemNow: '立即兌換',
     reasons: {
       booking_earn: '預訂行程累積',
       signup_bonus: '註冊獎勵',

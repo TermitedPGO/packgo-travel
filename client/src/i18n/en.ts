@@ -1211,6 +1211,10 @@ export const en = {
     redeemedOn: 'Redeemed {date}',
     referralCopied: 'Referral link copied',
     copyFailed: 'Copy failed — please copy manually',
+    redeemLoginFirst: 'Sign in to redeem',
+    redeemUnavailable: 'Currently unavailable',
+    redeemPointsShort: '{points} pts short',
+    redeemNow: 'Redeem now',
     reasons: {
       booking_earn: 'Booking earned',
       signup_bonus: 'Signup bonus',

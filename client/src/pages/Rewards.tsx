@@ -195,12 +195,12 @@ export default function Rewards() {
                         }`}
                       >
                         {!isAuthenticated
-                          ? "登入後兌換"
+                          ? t("rewards.redeemLoginFirst")
                           : isBlocked
-                          ? "暫無法兌換"
+                          ? t("rewards.redeemUnavailable")
                           : !canAfford
-                          ? `還差 ${(item.pointsCost - balance).toLocaleString()} 點`
-                          : "立即兌換"}
+                          ? t("rewards.redeemPointsShort", { points: (item.pointsCost - balance).toLocaleString() })
+                          : t("rewards.redeemNow")}
                       </Button>
                     </div>
                   );
