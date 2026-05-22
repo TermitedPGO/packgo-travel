@@ -17,9 +17,10 @@ import Login from "./pages/Login";
 // ─── Lazily loaded (code split) ───────────────────────────────────────────────
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
-const Admin = lazy(() => import("./pages/Admin"));
-// 2026-05-22 — Admin V2 redesign at /admin/v2. Parallel to /admin.
-// Jeff dailey-driver this, /admin stays as fallback until V2 covers everything.
+// 2026-05-22 — V1 /admin retired. /admin now redirects to /admin/v2.
+// The v1 Admin.tsx page file is kept on disk for git history / quick
+// rollback, but no Wouter route references it. All tab content lives
+// in @/components/admin/* and is consumed by AdminV2 directly.
 const AdminV2 = lazy(() => import("./pages/AdminV2"));
 const DiagnosticsPage = lazy(() => import("./pages/admin/DiagnosticsPage"));
 const Profile = lazy(() => import("./pages/Profile"));
@@ -160,9 +161,12 @@ function Router() {
       <Route path={"/reset-password"} component={ResetPassword} />
       <Route path={"/admin/diagnostics"} component={DiagnosticsPage} />
       <Route path={"/admin/task-history"} component={TaskHistory} />
-      {/* 2026-05-22 — V2 must be registered BEFORE /admin since Wouter matches by order */}
+      {/* 2026-05-22 — /admin now means /admin/v2. The v1 5-domain shell
+          is retired; AdminV2 (6 domains, Trip.com-style tabs) is canonical.
+          A standalone redirect catches /admin bare hits so old bookmarks /
+          email links still land on the admin home. */}
       <Route path={"/admin/v2"} component={AdminV2} />
-      <Route path={"/admin"} component={Admin} />
+      <Route path={"/admin"}>{() => { if (typeof window !== "undefined") window.location.replace("/admin/v2"); return null; }}</Route>
       <Route path={"/profile"} component={Profile} />
       <Route path={"/tours/:id/print"} component={TourPrintView} />
       <Route path={"/tours/:id"} component={TourDetailPeony} />
