@@ -88,8 +88,7 @@ export default function TourRouteMapSvg({
   tourTitle,
   destinationCountry,
 }: Props) {
-  const { language } = useLocale();
-  const isEN = language === "en";
+  const { t } = useLocale();
 
   // v315: two-way link between day chips below the map and red-dot
   // markers on the map. Hovering a chip pulses the matching marker
@@ -149,16 +148,9 @@ export default function TourRouteMapSvg({
           lng: 0,
         }));
 
-  const subtitleText = (() => {
-    if (mappedCount > 0) {
-      return isEN
-        ? `${itinerary.length}-day journey · ${mappedCount} mapped stops`
-        : `${itinerary.length} 天行程．${mappedCount} 個地點`;
-    }
-    return isEN
-      ? `${itinerary.length}-day journey`
-      : `${itinerary.length} 天行程`;
-  })();
+  const subtitleText = mappedCount > 0
+    ? t("reviews.mapSubtitleWithStops", { days: String(itinerary.length), stops: String(mappedCount) })
+    : t("reviews.mapSubtitle", { days: String(itinerary.length) });
 
   return (
     <section className="py-12 lg:py-16 bg-white">
@@ -170,7 +162,7 @@ export default function TourRouteMapSvg({
               style={{ color: themeColor.primary }}
             >
               <MapIcon className="inline-block h-6 w-6 mr-2 -mt-1" />
-              {isEN ? "Tour Route" : "行程路線"}
+              {t("reviews.mapTitle")}
             </h2>
             <p className="text-sm text-gray-500">{subtitleText}</p>
           </div>
@@ -185,7 +177,7 @@ export default function TourRouteMapSvg({
                 color: themeColor.primary,
               }}
             >
-              {isEN ? "Open in Google Maps" : "在 Google 地圖開啟"}
+              {t("reviews.mapOpenInGoogle")}
               <ExternalLink className="h-3.5 w-3.5" />
             </a>
           )}
@@ -196,7 +188,7 @@ export default function TourRouteMapSvg({
             <div className="aspect-[12/5] flex items-center justify-center">
               <div className="flex items-center gap-2 text-sm text-gray-500">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                {isEN ? "Loading map…" : "正在載入地圖…"}
+                {t("reviews.mapLoading")}
               </div>
             </div>
           )}
@@ -208,7 +200,7 @@ export default function TourRouteMapSvg({
           {!isLoading && mappedStops.length > 0 && aiMapUrl && (
             <img
               src={aiMapUrl}
-              alt={isEN ? "Tour route map" : "行程路線地圖"}
+              alt={t("reviews.mapAlt")}
               loading="lazy"
               className="block w-full h-auto"
             />
@@ -238,7 +230,6 @@ export default function TourRouteMapSvg({
             <RouteFlowFallback
               stops={legendStops}
               themeColor={themeColor}
-              isEN={isEN}
             />
           )}
           {!isLoading &&
@@ -247,7 +238,7 @@ export default function TourRouteMapSvg({
               <div className="aspect-[12/5] flex flex-col items-center justify-center text-gray-400 p-6 text-center">
                 <MapIcon className="h-10 w-10 mb-2" />
                 <p className="text-sm">
-                  {isEN ? "Map preview unavailable." : "暫無地圖預覽。"}
+                  {t("reviews.mapPreviewUnavailable")}
                 </p>
               </div>
             )}
@@ -270,12 +261,11 @@ export default function TourRouteMapSvg({
 function RouteFlowFallback({
   stops,
   themeColor,
-  isEN,
 }: {
   stops: Array<{ day: number; name: string; lat: number; lng: number }>;
   themeColor: { primary: string; secondary?: string };
-  isEN: boolean;
 }) {
+  const { t } = useLocale();
   const display = stops.slice(0, 14);
   return (
     <div className="aspect-[12/5] relative bg-gradient-to-br from-gray-50 via-white to-gray-50 overflow-hidden">
@@ -290,10 +280,10 @@ function RouteFlowFallback({
       />
       <div className="absolute top-4 left-4 right-4 flex items-center justify-between">
         <span className="text-[10px] md:text-xs tracking-[0.3em] uppercase text-[#c9a563] font-semibold">
-          {isEN ? "Journey Flow" : "行程動線"}
+          {t("reviews.journeyFlow")}
         </span>
         <span className="text-[10px] md:text-xs text-gray-400 font-medium">
-          {isEN ? `${display.length} stops` : `${display.length} 站行程`}
+          {t("reviews.mapStops", { count: String(display.length) })}
         </span>
       </div>
       <div className="absolute inset-0 flex items-center justify-center px-6 md:px-10 py-12">
@@ -313,7 +303,7 @@ function RouteFlowFallback({
                     {s.day}
                   </span>
                   <span className="text-[11px] md:text-xs font-medium text-gray-800 truncate max-w-[120px] md:max-w-[180px]">
-                    {s.name || (isEN ? `Day ${s.day}` : `第 ${s.day} 天`)}
+                    {s.name || t("reviews.mapDayFallback", { day: String(s.day) })}
                   </span>
                 </div>
                 {!isLast && (
@@ -332,9 +322,7 @@ function RouteFlowFallback({
       {stops.length > 14 && (
         <div className="absolute bottom-3 left-0 right-0 text-center">
           <span className="text-[10px] md:text-xs text-gray-400">
-            {isEN
-              ? `+${stops.length - 14} more stops below`
-              : `下方還有 ${stops.length - 14} 站`}
+            {t("reviews.mapMoreStops", { count: String(stops.length - 14) })}
           </span>
         </div>
       )}
