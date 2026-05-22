@@ -35,7 +35,8 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
-import { Download, RefreshCw, ShoppingCart, X } from "lucide-react";
+import { Download, RefreshCw, Search, ShoppingCart, X } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -117,6 +118,7 @@ function StatusToggle({
 export default function BookingsTabV2() {
   const { t, language } = useLocale();
   const [statusFilter, setStatusFilter] = useState<"all" | BookingStatus>("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
@@ -124,9 +126,19 @@ export default function BookingsTabV2() {
   const { data: rawBookings = [], isLoading, refetch } = trpc.bookings.adminList.useQuery();
   const bookings = useMemo(() => {
     const list = rawBookings as BookingRow[];
-    if (statusFilter === "all") return list;
-    return list.filter((b) => b.bookingStatus === statusFilter);
-  }, [rawBookings, statusFilter]);
+    let filtered = statusFilter === "all" ? list : list.filter((b) => b.bookingStatus === statusFilter);
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      filtered = filtered.filter((b) =>
+        String(b.id).includes(q) ||
+        (b.contactName ?? "").toLowerCase().includes(q) ||
+        (b.contactEmail ?? "").toLowerCase().includes(q) ||
+        (b.contactPhone ?? "").toLowerCase().includes(q) ||
+        (b.tourTitle ?? "").toLowerCase().includes(q),
+      );
+    }
+    return filtered;
+  }, [rawBookings, statusFilter, searchQuery]);
 
   const updateStatusMutation = trpc.bookings.adminUpdateStatus.useMutation({
     onSuccess: () => {
@@ -304,6 +316,25 @@ export default function BookingsTabV2() {
           />
         </div>
         <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400 pointer-events-none" />
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={t("admin.bookingsTab.searchPlaceholder")}
+              className="h-8 rounded-lg pl-8 text-xs w-56"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"
+                aria-label={t("common.clear")}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
           <Button
             variant="outline"
             size="sm"

@@ -2856,6 +2856,7 @@ export const en = {
       title: 'Booking Management',
       totalCount: '{n} bookings total',
       exportButton: 'Export Report',
+      searchPlaceholder: 'Search ID / customer / tour…',
       confirmStatusChange: {
         cancelled: 'Mark this booking as "Cancelled"? This cannot be undone.',
         completed: 'Mark this booking as "Completed"? This is a final status.',

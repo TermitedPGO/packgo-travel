@@ -2824,6 +2824,7 @@ export const zhTW = {
       title: '訂單管理',
       totalCount: '共 {n} 筆預訂',
       exportButton: '匯出報表',
+      searchPlaceholder: '搜尋訂單編號 / 客戶 / 行程…',
       confirmStatusChange: {
         cancelled: '確定要將此訂單改為「已取消」嗎？此動作無法復原。',
         completed: '確定要將此訂單改為「已完成」嗎？此狀態屬於最終狀態。',
