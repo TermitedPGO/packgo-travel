@@ -106,7 +106,7 @@ export const DeparturePriceCalendar = ({
         className="flex items-center justify-between p-6"
         style={{ background: `linear-gradient(135deg, ${themeColor.primary} 0%, ${themeColor.secondary} 100%)` }}
       >
-        <button onClick={prevMonth} aria-label={t('tourDetail.prevMonth') || 'Previous month'} className="p-3 bg-white/20 hover:bg-white/30 rounded-lg transition-all duration-200 backdrop-blur-sm">
+        <button onClick={prevMonth} aria-label={t('tourDetail.prevMonth')} className="p-3 bg-white/20 hover:bg-white/30 rounded-lg transition-all duration-200 backdrop-blur-sm">
           <ChevronLeft className="h-5 w-5 text-white" />
         </button>
         <div className="text-center">
@@ -115,7 +115,7 @@ export const DeparturePriceCalendar = ({
           </h3>
           <p className="text-white/80 text-sm mt-1">{t('tourDetail.selectDepartureDate')}</p>
         </div>
-        <button onClick={nextMonth} aria-label={t('tourDetail.nextMonth') || 'Next month'} className="p-3 bg-white/20 hover:bg-white/30 rounded-lg transition-all duration-200 backdrop-blur-sm">
+        <button onClick={nextMonth} aria-label={t('tourDetail.nextMonth')} className="p-3 bg-white/20 hover:bg-white/30 rounded-lg transition-all duration-200 backdrop-blur-sm">
           <ChevronRight className="h-5 w-5 text-white" />
         </button>
       </div>

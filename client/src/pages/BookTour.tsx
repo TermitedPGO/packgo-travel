@@ -202,7 +202,7 @@ export default function BookTour() {
     }
 
     if (!selectedDepartureId) {
-      toast.error(t('bookTour.pickDepartureFirst') || '請先選擇出發日期');
+      toast.error(t('bookTour.pickDepartureFirst'));
       return;
     }
     try {

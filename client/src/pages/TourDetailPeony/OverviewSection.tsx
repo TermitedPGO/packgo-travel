@@ -402,11 +402,11 @@ export default function OverviewSection({
           ) : (
             <div className="text-center p-6 bg-[#FAF8F2] border border-foreground/8 rounded-xl">
               <Award className="h-10 w-10 mx-auto mb-3" style={{ color: themeColor.secondary }} />
-              <p className="text-base text-gray-700 mb-1">{t('tourDetail.guaranteedDeparture') || '確定出團'}</p>
+              <p className="text-base text-gray-700 mb-1">{t('tourDetail.guaranteedDeparture')}</p>
               <p className="font-bold text-xl">
                 {hasConfirmedDeparture
-                  ? (t('tourDetail.confirmed') || '已確認')
-                  : (t('tourDetail.pendingConfirmation') || '報名中')}
+                  ? t('tourDetail.confirmed')
+                  : t('tourDetail.pendingConfirmation')}
               </p>
             </div>
           )}

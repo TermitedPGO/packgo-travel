@@ -3843,6 +3843,7 @@ export const zhTW = {
     balance: '尾款',
     deposit: '訂金',
     totalAmount: '總金額',
+    pickDepartureFirst: '請先選擇出發日期',
     steps: {     date: '選擇日期',
       selectDate: '選擇日期',
       travelers: '旅客人數',

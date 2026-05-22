@@ -3888,6 +3888,7 @@ export const en = {
     balance: 'Balance',
     deposit: 'Deposit',
     totalAmount: 'Total Amount',
+    pickDepartureFirst: 'Please select a departure date first',
     steps: {
       date: 'Select Date',
       selectDate: 'Select Date',
