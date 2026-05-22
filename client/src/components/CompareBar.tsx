@@ -85,8 +85,7 @@ export function useCompareIds(): number[] {
 }
 
 export default function CompareBar() {
-  const { language, formatPrice, t: tr } = useLocale();
-  const isEN = language === "en";
+  const { formatPrice, t: tr } = useLocale();
   const ids = useCompareIds();
   const [open, setOpen] = useState(false);
 
