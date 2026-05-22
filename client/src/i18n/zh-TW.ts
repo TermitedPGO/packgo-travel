@@ -4708,8 +4708,8 @@ export const zhTW = {
     backToTour: '返回行程',
     printOrDownload: '列印 / 下載 PDF',
     companyName: 'PACK&GO 旅行社',
-    companySlogan: '讓旅行更美好',
-    phone: '電話：+886-2-1234-5678',
+    companySlogan: '讓每一次旅行都成為難忘的回憶',
+    phone: '電話：+1 (510) 634-2307',
     tourCode: '行程編號：',
     printDate: '列印日期：',
     featuredTour: '精選行程',
@@ -4764,14 +4764,19 @@ export const zhTW = {
     travelTip4: '建議購買旅遊保險以保障旅途安全',
     travelTip5: '注意飲食衛生，避免食用生冷食物',
     cancellationPolicy: '取消政策',
-    cancel1: '出發前 31 天以上取消，退還全額團費',
-    cancel2: '出發前 21-30 天取消，收取團費 10%',
-    cancel3: '出發前 2-20 天取消，收取團費 30%',
-    cancel4: '出發前 1 天取消，收取團費 50%',
-    cancel5: '出發當天取消或未到，恕不退費',
+    // 2026-05-22: align with brand.ts REFUND_POLICY (canonical source).
+    // brand.ts comment says "If you ever change these, also update
+    // tourPrint.cancel* i18n keys" — this is that update.
+    cancel1: '出發前 30 天以上取消：全額退費（扣除已支付實際成本）',
+    cancel2: '出發前 14-29 天取消：退費 70%',
+    cancel3: '出發前 7-13 天取消：退費 50%',
+    cancel4: '出發前 1-6 天取消：退費 30%',
+    cancel5: '出發當天或行程開始後取消：恕不退費',
     emergency: '緊急聯絡',
-    emergency1: '台灣緊急電話：110（警察）/ 119（消防、救護）',
-    emergency2: '旅行社 24 小時緊急專線：+886-2-1234-5678',
+    // 2026-05-22: dropped Taiwan-specific 110/119 (PACK&GO 為 California
+    // 在地旅行社，客戶在不同國家)。改為提示撥打當地緊急服務。
+    emergency1: '境外緊急狀況：請優先撥打當地緊急電話（美國 911 · 日本 110/119 · 歐洲 112 · 韓國 112/119）',
+    emergency2: 'PACK&GO 24 小時緊急專線：+1 (510) 634-2307',
     emergency3: '領隊隨身電話將於出發前通知',
   },
 
