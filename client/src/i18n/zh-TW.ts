@@ -6082,6 +6082,10 @@ export const zhTW = {
     customerServicePhone: '客服電話',
     customerServiceEmail: '客服信箱',
     serviceHours: '服務時間:週一至週六 11:30–19:30(太平洋時間 PST),週日休息',
+    departureLabel: '出發日',
+    whatNextTitle: '接下來會發生什麼',
+    nextStep2: '我們會在 1 週內向供應商確認您的座位，並寄送最終行程表。',
+    nextStep4: '有任何問題嗎？請致電 +1 (510) 634-2307，或直接回覆您的確認信。',
   },
   // v78z-z2: Sprint 8 i18n cleanup — DailyBriefingCard / CompareBar / shared
   dailyBriefing: {

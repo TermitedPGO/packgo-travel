@@ -6080,6 +6080,10 @@ export const en = {
     customerServicePhone: 'Customer Service Phone',
     customerServiceEmail: 'Customer Service Email',
     serviceHours: 'Service hours: Monday–Saturday 11:30 AM–7:30 PM (PST); closed on Sundays.',
+    departureLabel: 'Departure',
+    whatNextTitle: 'What happens next',
+    nextStep2: 'Our team confirms your seats with the supplier within 1 week and emails you the final itinerary.',
+    nextStep4: 'Questions? Call +1 (510) 634-2307 or reply to your confirmation email anytime.',
   },
   // v78z-z2: Sprint 8 i18n cleanup — DailyBriefingCard / CompareBar / shared
   dailyBriefing: {

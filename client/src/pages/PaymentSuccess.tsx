@@ -94,7 +94,7 @@ export default function PaymentSuccess() {
               {((booking as any).tourTitle || (booking as any).tour?.title) && (
                 <div className="mb-6 p-4 rounded-xl bg-[#c9a563]/10 border border-[#c9a563]/35">
                   <p className="text-xs uppercase tracking-wider text-[#8a6f3a] font-semibold mb-1">
-                    {t("paymentSuccess.tourLabel") || "Tour"}
+                    {t("paymentSuccess.tourLabel")}
                   </p>
                   <p className="text-lg md:text-xl font-bold text-gray-900 leading-snug mb-2">
                     {((booking as any).tourTitle || (booking as any).tour?.title || "").split(/[|｜]/)[0].trim()}
@@ -104,7 +104,7 @@ export default function PaymentSuccess() {
                       <svg className="h-4 w-4 text-[#8a6f3a]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                       </svg>
-                      <strong>{t("paymentSuccess.departureLabel") || "Departure"}:</strong>{" "}
+                      <strong>{t("paymentSuccess.departureLabel")}:</strong>{" "}
                       {new Date((booking as any).departureDate).toLocaleDateString(
                         // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         (booking as any).language === "en" ? "en-US" : "zh-TW",
@@ -168,7 +168,7 @@ export default function PaymentSuccess() {
               {/* v78w: "What happens next" — concrete timeline replaces vague "email sent" */}
               <div className="mt-6 bg-foreground/[0.04] border border-foreground/15 rounded-xl p-5">
                 <h3 className="font-bold text-foreground mb-3">
-                  {t("paymentSuccess.whatNextTitle") || "What happens next"}
+                  {t("paymentSuccess.whatNextTitle")}
                 </h3>
                 <ol className="space-y-2.5 text-sm text-foreground/80">
                   <li className="flex items-start gap-2">
@@ -180,7 +180,7 @@ export default function PaymentSuccess() {
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-foreground text-white text-xs font-bold">2</span>
-                    <span>{t("paymentSuccess.nextStep2") || "Our team confirms your seats with the supplier within 1 week and emails you the final itinerary."}</span>
+                    <span>{t("paymentSuccess.nextStep2")}</span>
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-foreground text-white text-xs font-bold">3</span>
@@ -188,7 +188,7 @@ export default function PaymentSuccess() {
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-foreground text-white text-xs font-bold">4</span>
-                    <span>{t("paymentSuccess.nextStep4") || "Questions? Call +1 (510) 634-2307 or reply to your confirmation email anytime."}</span>
+                    <span>{t("paymentSuccess.nextStep4")}</span>
                   </li>
                 </ol>
               </div>
