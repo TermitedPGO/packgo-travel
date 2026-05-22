@@ -62,7 +62,6 @@ export default function CustomTourRequest() {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const { t, language, formatPrice } = useLocale();
   const dateLocale = language === "zh-TW" ? zhTW : enUS;
-  const isEN = language === "en";
 
   // Wizard state
   const [step, setStep] = useState(1);
@@ -108,9 +107,7 @@ export default function CustomTourRequest() {
   const QUICK_PEOPLE = [1, 2, 4, 6, 10].map((v) => ({
     label: v >= 10
       ? t("customTourWizard.tenPlus")
-      : isEN
-        ? `${v}${v === 1 ? " adult" : " adults"}`
-        : `${v}${t("customTourWizard.personSuffix")}`,
+      : `${v}${t(v === 1 ? "customTourWizard.adultSingular" : "customTourWizard.adultPlural")}`,
     value: v,
   }));
   // v78o: 預算 chip 用 formatPrice 自動轉換 — 使用者選 USD 自動顯示美金，選 TWD 顯示 NT$
@@ -168,7 +165,7 @@ export default function CustomTourRequest() {
   const aiQuoteMutation = trpc.aiQuotes.generate.useMutation({
     onSuccess: (data) => {
       setExpressResult(data);
-      toast.success(isEN ? "Itinerary draft ready!" : "行程建議已生成！");
+      toast.success(t("customTourRequest.toastDraftReady"));
     },
     onError: (error) => toast.error(error.message),
   });
@@ -248,25 +245,21 @@ export default function CustomTourRequest() {
                 <Sparkles className="h-7 w-7 text-[#c9a563]" />
               </div>
               <h1 className="text-3xl md:text-4xl font-serif font-bold text-gray-900 mb-2">
-                {isEN ? "Tell us in one sentence" : "用一句話告訴我們"}
+                {t("customTourRequest.expressTitle")}
               </h1>
               <p className="text-gray-600">
-                {isEN
-                  ? "Where, when, with whom, what budget — anything works. Our AI drafts an itinerary in seconds."
-                  : "目的地、日期、人數、預算 — 隨便寫，AI 立刻為您整理行程建議。"}
+                {t("customTourRequest.expressSubtitle")}
               </p>
               {/* v78j: honest expectation — AI gives ITINERARY, suppliers give PRICE */}
               <p className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg inline-block px-3 py-1.5">
-                {isEN
-                  ? "Note: AI gives a recommended itinerary. Final pricing follows within 1 week after we confirm with suppliers."
-                  : "註：AI 提供行程建議，最終報價需與供應商確認後 1 週內回覆。"}
+                {t("customTourRequest.expressNote")}
               </p>
               <div className="mt-4">
                 <button
                   onClick={() => setExpressMode(false)}
                   className="text-sm text-gray-500 hover:text-gray-700 underline"
                 >
-                  {isEN ? "Or use the step-by-step form" : "或者用一步一步的表單"}
+                  {t("customTourRequest.expressUseStepByStep")}
                 </button>
               </div>
             </div>
@@ -277,11 +270,7 @@ export default function CustomTourRequest() {
                   rows={6}
                   value={expressText}
                   onChange={(e) => setExpressText(e.target.value)}
-                  placeholder={
-                    isEN
-                      ? "E.g. 5 days in Japan in May for 2 adults and 1 kid, around USD 4000 total"
-                      : "例如：我想去日本 5 天，2 大 1 小，預算 USD 4000，五月出發"
-                  }
+                  placeholder={t("customTourRequest.expressPlaceholder")}
                   className="rounded-lg text-base"
                 />
                 <Button
@@ -294,11 +283,11 @@ export default function CustomTourRequest() {
                   }
                 >
                   {aiQuoteMutation.isPending ? (
-                    isEN ? "Generating..." : "AI 生成中…"
+                    t("customTourRequest.expressGenerating")
                   ) : (
                     <>
                       <Sparkles className="h-4 w-4" />
-                      {isEN ? "Get AI Itinerary" : "立即取得行程建議"}
+                      {t("customTourRequest.expressGetItinerary")}
                     </>
                   )}
                 </Button>
@@ -307,28 +296,24 @@ export default function CustomTourRequest() {
               <div className="bg-white rounded-xl shadow-md p-6">
                 <CheckCircle className="h-10 w-10 text-[#c9a563] mb-3" />
                 <h3 className="text-xl font-bold text-gray-900 mb-2">
-                  {isEN ? "Itinerary draft ready" : "行程建議已生成"}
+                  {t("customTourRequest.draftReadyHeading")}
                 </h3>
                 <p className="text-gray-600 mb-4">
-                  {isEN ? "Reference" : "建議書編號"}：{" "}
+                  {t("customTourRequest.referenceLabel")}{" "}
                   <span className="font-mono font-semibold">{expressResult.quoteNumber}</span>
                 </p>
                 {expressResult.matchedTourIds?.length > 0 && (
                   <p className="text-sm text-gray-700 mb-4">
-                    {isEN
-                      ? `We found ${expressResult.matchedTourIds.length} matching tour${expressResult.matchedTourIds.length > 1 ? "s" : ""}.`
-                      : `我們為您找到 ${expressResult.matchedTourIds.length} 個符合的行程。`}
+                    {t("customTourRequest.matchedToursFound", { count: String(expressResult.matchedTourIds.length) })}
                   </p>
                 )}
                 {/* v78j: honest expectation about final pricing */}
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-sm text-amber-900">
                   <p className="font-medium mb-1">
-                    {isEN ? "Next step — Final pricing within 1 week" : "下一步 — 1 週內回覆最終報價"}
+                    {t("customTourRequest.nextStepHeading")}
                   </p>
                   <p className="text-xs text-amber-800">
-                    {isEN
-                      ? "The itinerary above is our recommended draft. Our team will confirm hotel, flight, and ground costs with suppliers and email you the final price."
-                      : "上方為 AI 行程建議草稿。我們會與飯店、航空、當地供應商確認實際成本，於 1 週內 email 為您報出最終價格。"}
+                    {t("customTourRequest.nextStepBody")}
                   </p>
                 </div>
                 <div className="flex gap-3 flex-wrap">
@@ -339,7 +324,7 @@ export default function CustomTourRequest() {
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white font-semibold hover:opacity-90"
                     >
-                      {isEN ? "View Itinerary" : "查看行程建議"}
+                      {t("customTourRequest.viewItineraryLink")}
                       <ArrowRight className="h-4 w-4" />
                     </a>
                   )}
@@ -351,11 +336,11 @@ export default function CustomTourRequest() {
                       setExpressText("");
                     }}
                   >
-                    {isEN ? "Submit another" : "再來一次"}
+                    {t("customTourRequest.submitAnother")}
                   </Button>
                   <Link href="/contact-us">
                     <Button variant="outline" className="rounded-lg">
-                      {isEN ? "Contact us" : "聯絡我們"}
+                      {t("common.contactUs")}
                     </Button>
                   </Link>
                 </div>
@@ -396,7 +381,7 @@ export default function CustomTourRequest() {
               className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#c9a563]/10 border border-[#c9a563]/35 text-[#8a6f3a] text-sm font-medium hover:bg-[#c9a563]/15 transition-colors"
             >
               <Sparkles className="h-4 w-4" />
-              {isEN ? "Skip — let AI draft an itinerary" : "想快點？AI 一句話幫您整理行程"}
+              {t("customTourRequest.aiDraftCta")}
               <ArrowRight className="h-3 w-3" />
             </button>
           </div>
@@ -415,7 +400,7 @@ export default function CustomTourRequest() {
           <div className="mb-8">
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs font-bold tracking-wide uppercase text-gray-500">
-                {isEN ? `Step ${step} of ${steps.length}` : `第 ${step} / ${steps.length} 步`}
+                {t("customTourRequest.stepIndicator", { step: String(step), total: String(steps.length) })}
               </p>
               <p className="text-xs text-gray-500">
                 {Math.round((step / steps.length) * 100)}%
@@ -504,7 +489,7 @@ export default function CustomTourRequest() {
 
                   <div>
                     <Label>
-                      {t("customTourRequest.preferredDepartureDate") || "預計出發日"} <span className="text-gray-400 text-xs">({isEN ? "optional" : "可選"})</span>
+                      {t("customTourRequest.preferredDepartureDate") || "預計出發日"} <span className="text-gray-400 text-xs">({t("common.optional")})</span>
                     </Label>
                     <Controller
                       control={control}
@@ -616,7 +601,7 @@ export default function CustomTourRequest() {
                 <div className="space-y-5">
                   <div>
                     <Label htmlFor="budget">
-                      {t("customTourRequest.budget") || "預算（每人）"} <span className="text-gray-400 text-xs">({isEN ? "optional" : "可選"})</span>
+                      {t("customTourRequest.budget") || "預算（每人）"} <span className="text-gray-400 text-xs">({t("common.optional")})</span>
                     </Label>
                     <div className="flex flex-wrap gap-2 mt-2 mb-3">
                       {QUICK_BUDGETS.map((b) => (
@@ -645,16 +630,12 @@ export default function CustomTourRequest() {
 
                   <div>
                     <Label htmlFor="message">
-                      {t("customTourRequest.message") || "特殊需求"} <span className="text-gray-400 text-xs">({isEN ? "optional" : "可選"})</span>
+                      {t("customTourRequest.message") || "特殊需求"} <span className="text-gray-400 text-xs">({t("common.optional")})</span>
                     </Label>
                     <Textarea
                       id="message"
                       {...register("message")}
-                      placeholder={
-                        isEN
-                          ? "E.g. one elderly traveler, vegetarian, prefer 4-star hotels"
-                          : "例如：有一位長輩、需要素食、希望住四星級飯店"
-                      }
+                      placeholder={t("customTourRequest.notePlaceholder")}
                       rows={4}
                       className="rounded-lg mt-2"
                     />
@@ -698,7 +679,7 @@ export default function CustomTourRequest() {
 
                   <div>
                     <Label htmlFor="customerPhone">
-                      {t("customTourRequest.phone") || "電話"} <span className="text-gray-400 text-xs">({isEN ? "optional" : "可選"})</span>
+                      {t("customTourRequest.phone") || "電話"} <span className="text-gray-400 text-xs">({t("common.optional")})</span>
                     </Label>
                     <Input
                       id="customerPhone"
@@ -715,9 +696,7 @@ export default function CustomTourRequest() {
                     value={
                       watchedDestination
                         ? `${watchedDestination}${watchedDays ? ` ${watchedDays}天` : ""}${watchedPeople ? ` ${watchedPeople}人` : ""}`
-                        : isEN
-                        ? "Custom tour inquiry"
-                        : "客製化旅遊詢問"
+                        : t("customTourRequest.subjectAutoFallback")
                     }
                   />
                 </div>
@@ -734,12 +713,12 @@ export default function CustomTourRequest() {
                 className="rounded-lg gap-1"
               >
                 <ArrowLeft className="h-4 w-4" />
-                {isEN ? "Back" : "上一步"}
+                {t("customTourRequest.wizardBack")}
               </Button>
 
               {step < steps.length ? (
                 <Button type="button" onClick={goNext} className="rounded-lg gap-1 px-6">
-                  {isEN ? "Next" : "下一步"}
+                  {t("customTourRequest.wizardNext")}
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               ) : (
@@ -749,10 +728,10 @@ export default function CustomTourRequest() {
                   className="rounded-lg px-6 gap-1"
                 >
                   {createInquiry.isPending ? (
-                    isEN ? "Submitting..." : "提交中…"
+                    t("customTourRequest.submitting")
                   ) : (
                     <>
-                      {isEN ? "Submit request" : "送出需求"}
+                      {t("customTourRequest.submitRequestBtn")}
                       <CheckCircle className="h-4 w-4" />
                     </>
                   )}
