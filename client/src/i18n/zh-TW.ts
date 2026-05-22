@@ -708,6 +708,32 @@ export const zhTW = {
   },
 
   // 常見問題頁面
+  // 行程評論區塊(TourDetailPeony)
+  reviews: {
+    sectionTitle: '客人怎麼說',
+    basedOnCount: '{count} 則經驗證評價',
+    inviteFirst: '成為第一位分享旅行回憶的旅人。',
+    writeReview: '寫評論',
+    noReviewsTitle: '此行程尚無公開評價。',
+    noReviewsDesc: '成為第一位分享 PACK&GO 旅行體驗的旅人。',
+    writeFirstReview: '撰寫第一則評論',
+    journeyFlow: '行程動線',
+    mapTitle: '行程路線',
+    mapAlt: '行程路線地圖',
+    defaultAuthor: 'PACK&GO 旅人',
+    dialogTitle: '撰寫評論',
+    dialogThankNote: '無論是稱讚還是批評，每一則評論都讓我們做得更好。感謝你願意花時間誠實分享。',
+    yourRating: '您的評分',
+    titlePlaceholder: '標題（例：北海道之旅讓我念念不忘）',
+    contentPlaceholder: '分享您的體驗 — 行程、領隊、飯店、餐食、交通…（至少 10 字）',
+    moderationNote: '評論將進入審核，通過後刊登。',
+    submitReview: '送出評論',
+    submitting: '送出中…',
+    submitSuccess: '感謝你！評論已送出，待審核後刊登。',
+    titleTooShort: '標題太短（至少 3 字）',
+    contentTooShort: '內容太短（至少 10 字）',
+  },
+
   // 緊急支援頁(QA audit Phase 5)
   emergency: {
     pageTitle: '24 小時緊急支援',

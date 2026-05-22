@@ -697,6 +697,32 @@ export const en = {
     },
   },
   // FAQ Pagee
+  // Tour reviews section (TourDetailPeony)
+  reviews: {
+    sectionTitle: 'What Our Travelers Say',
+    basedOnCount: 'Based on {count} verified reviews',
+    inviteFirst: 'Be one of the first to share your journey.',
+    writeReview: 'Write a Review',
+    noReviewsTitle: 'No reviews yet for this tour.',
+    noReviewsDesc: 'Be the first to share your experience with PACK&GO.',
+    writeFirstReview: 'Write the First Review',
+    journeyFlow: 'Journey Flow',
+    mapTitle: 'Tour Route',
+    mapAlt: 'Tour route map',
+    defaultAuthor: 'PACK&GO Traveler',
+    dialogTitle: 'Write a Review',
+    dialogThankNote: "Whether it's praise or critique, every review helps us improve. Thank you for taking the time to share your honest experience.",
+    yourRating: 'Your Rating',
+    titlePlaceholder: 'Title (e.g. Unforgettable Hokkaido trip)',
+    contentPlaceholder: 'Share your experience — itinerary, guide, hotels, meals, transport… (min 10 chars)',
+    moderationNote: 'Reviews enter moderation; published once approved by our team.',
+    submitReview: 'Submit Review',
+    submitting: 'Submitting…',
+    submitSuccess: 'Thanks! Your review is awaiting moderation.',
+    titleTooShort: 'Title too short (3+ chars)',
+    contentTooShort: 'Content too short (10+ chars)',
+  },
+
   // 24h emergency intake (QA audit Phase 5)
   emergency: {
     pageTitle: '24-Hour Emergency Support',

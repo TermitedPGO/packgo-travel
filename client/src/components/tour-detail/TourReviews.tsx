@@ -36,7 +36,6 @@ interface Props {
 
 export default function TourReviews({ tourId, themeColor }: Props) {
   const { language, t } = useLocale();
-  const isEN = language === "en";
   const { user, isAuthenticated } = useAuth();
 
   const utils = trpc.useUtils();
@@ -52,11 +51,7 @@ export default function TourReviews({ tourId, themeColor }: Props) {
   const [content, setContent] = useState("");
   const createMutation = trpc.reviews.createPublic.useMutation({
     onSuccess: () => {
-      toast.success(
-        isEN
-          ? "Thanks! Your review is awaiting moderation."
-          : "感謝你！評論已送出，待審核後刊登。"
-      );
+      toast.success(t("reviews.submitSuccess"));
       setOpen(false);
       setRating(5);
       setTitle("");
@@ -70,11 +65,11 @@ export default function TourReviews({ tourId, themeColor }: Props) {
   });
   const onSubmit = () => {
     if (title.trim().length < 3) {
-      toast.error(isEN ? "Title too short (3+ chars)" : "標題太短（至少 3 字）");
+      toast.error(t("reviews.titleTooShort"));
       return;
     }
     if (content.trim().length < 10) {
-      toast.error(isEN ? "Content too short (10+ chars)" : "內容太短（至少 10 字）");
+      toast.error(t("reviews.contentTooShort"));
       return;
     }
     createMutation.mutate({
@@ -82,7 +77,7 @@ export default function TourReviews({ tourId, themeColor }: Props) {
       rating,
       title: title.trim(),
       content: content.trim(),
-      language: isEN ? "en" : "zh-TW",
+      language: language === "en" ? "en" : "zh-TW",
     });
   };
   const handleOpenChange = (next: boolean) => {
@@ -128,7 +123,7 @@ export default function TourReviews({ tourId, themeColor }: Props) {
               className="text-2xl md:text-3xl font-serif font-bold mb-2"
               style={{ color: themeColor.primary }}
             >
-              {isEN ? "What Our Travelers Say" : "客人怎麼說"}
+              {t("reviews.sectionTitle")}
             </h2>
             {list.length > 0 ? (
               <div className="flex items-center gap-3 text-sm text-foreground/70">
@@ -148,16 +143,12 @@ export default function TourReviews({ tourId, themeColor }: Props) {
                   {avgRating.toFixed(1)}
                 </span>
                 <span className="text-foreground/55">
-                  {isEN
-                    ? `Based on ${list.length} verified ${list.length === 1 ? "review" : "reviews"}`
-                    : `${list.length} 則經驗證評價`}
+                  {t("reviews.basedOnCount", { count: String(list.length) })}
                 </span>
               </div>
             ) : (
               <p className="text-sm text-foreground/55">
-                {isEN
-                  ? "Be one of the first to share your journey."
-                  : "成為第一位分享旅行回憶的旅人。"}
+                {t("reviews.inviteFirst")}
               </p>
             )}
           </div>
@@ -169,7 +160,7 @@ export default function TourReviews({ tourId, themeColor }: Props) {
             className="rounded-lg gap-2"
           >
             <Pencil className="h-4 w-4" />
-            {isEN ? "Write a Review" : "寫評論"}
+            {t("reviews.writeReview")}
           </Button>
         </div>
 
@@ -177,21 +168,17 @@ export default function TourReviews({ tourId, themeColor }: Props) {
           <div className="bg-[#FAF8F2] border border-foreground/8 rounded-xl p-8 text-center">
             <MessageSquare className="h-10 w-10 mx-auto mb-3 text-[#c9a563]" />
             <p className="text-foreground font-medium mb-1">
-              {isEN
-                ? "No reviews yet for this tour."
-                : "此行程尚無公開評價。"}
+              {t("reviews.noReviewsTitle")}
             </p>
             <p className="text-sm text-foreground/60 max-w-md mx-auto mb-4">
-              {isEN
-                ? "Be the first to share your experience with PACK&GO."
-                : "成為第一位分享 PACK&GO 旅行體驗的旅人。"}
+              {t("reviews.noReviewsDesc")}
             </p>
             <Button
               onClick={() => handleOpenChange(true)}
               className="rounded-lg"
               style={{ backgroundColor: themeColor.primary }}
             >
-              {isEN ? "Write the First Review" : "撰寫第一則評論"}
+              {t("reviews.writeFirstReview")}
             </Button>
           </div>
         ) : (
@@ -236,12 +223,12 @@ export default function TourReviews({ tourId, themeColor }: Props) {
                   </Avatar>
                   <div className="min-w-0">
                     <p className="text-xs font-medium text-foreground truncate">
-                      {r.authorName || (isEN ? "PACK&GO Traveler" : "PACK&GO 旅人")}
+                      {r.authorName || t("reviews.defaultAuthor")}
                     </p>
                     {r.publishedAt && (
                       <p className="text-[10px] text-foreground/45">
                         {new Date(r.publishedAt).toLocaleDateString(
-                          isEN ? "en-US" : "zh-TW",
+                          language === "en" ? "en-US" : "zh-TW",
                           { year: "numeric", month: "short" }
                         )}
                       </p>
@@ -259,20 +246,18 @@ export default function TourReviews({ tourId, themeColor }: Props) {
         <DialogContent className="rounded-xl max-w-lg">
           <DialogHeader>
             <DialogTitle>
-              {isEN ? "Write a Review" : "撰寫評論"}
+              {t("reviews.dialogTitle")}
             </DialogTitle>
           </DialogHeader>
           {/* Round 80.25 — thank-you note under the title. Welcomes both
               criticism and praise so customers feel safe being honest. */}
           <p className="text-sm text-foreground/65 leading-relaxed bg-[#FAF8F2] border-l-2 border-[#c9a563] px-4 py-3 rounded-lg -mt-1">
-            {isEN
-              ? "Whether it's praise or critique, every review helps us improve. Thank you for taking the time to share your honest experience."
-              : "無論是稱讚還是批評，每一則評論都讓我們做得更好。感謝你願意花時間誠實分享。"}
+            {t("reviews.dialogThankNote")}
           </p>
           <div className="space-y-4 pt-2">
             <div>
               <p className="text-xs text-foreground/70 mb-2">
-                {isEN ? "Your Rating" : "您的評分"}
+                {t("reviews.yourRating")}
               </p>
               <div className="flex items-center gap-1">
                 {[1, 2, 3, 4, 5].map((s) => (
@@ -296,22 +281,14 @@ export default function TourReviews({ tourId, themeColor }: Props) {
             <Input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder={
-                isEN
-                  ? "Title (e.g. Unforgettable Hokkaido trip)"
-                  : "標題(例:北海道之旅讓我念念不忘)"
-              }
+              placeholder={t("reviews.titlePlaceholder")}
               maxLength={200}
               className="rounded-lg"
             />
             <Textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              placeholder={
-                isEN
-                  ? "Share your experience — itinerary, guide, hotels, meals, transport… (min 10 chars)"
-                  : "分享您的體驗 — 行程、領隊、飯店、餐食、交通…(至少 10 字)"
-              }
+              placeholder={t("reviews.contentPlaceholder")}
               rows={5}
               maxLength={5000}
               className="rounded-lg"
@@ -320,9 +297,7 @@ export default function TourReviews({ tourId, themeColor }: Props) {
               {content.length} / 5000
             </p>
             <p className="text-xs text-foreground/55 bg-foreground/[0.04] rounded-lg p-3">
-              {isEN
-                ? "Reviews enter moderation; published once approved by our team."
-                : "評論將進入審核，通過後刊登。"}
+              {t("reviews.moderationNote")}
             </p>
           </div>
           <DialogFooter>
@@ -331,7 +306,7 @@ export default function TourReviews({ tourId, themeColor }: Props) {
               onClick={() => setOpen(false)}
               className="rounded-lg"
             >
-              {isEN ? "Cancel" : "取消"}
+              {t("common.cancel")}
             </Button>
             <Button
               onClick={onSubmit}
@@ -339,13 +314,7 @@ export default function TourReviews({ tourId, themeColor }: Props) {
               className="rounded-lg"
               style={{ backgroundColor: themeColor.primary }}
             >
-              {createMutation.isPending
-                ? isEN
-                  ? "Submitting…"
-                  : "送出中…"
-                : isEN
-                  ? "Submit Review"
-                  : "送出評論"}
+              {createMutation.isPending ? t("reviews.submitting") : t("reviews.submitReview")}
             </Button>
           </DialogFooter>
         </DialogContent>
