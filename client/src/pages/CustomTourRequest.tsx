@@ -196,17 +196,16 @@ export default function CustomTourRequest() {
                 <CheckCircle className="h-8 w-8 text-[#c9a563]" />
               </div>
               <h2 className="text-2xl md:text-3xl font-serif font-bold text-gray-900 mb-3">
-                {t("customTourRequest.successTitle2") || "感謝您的需求！"}
+                {t("customTourRequest.successTitle2")}
               </h2>
               <p className="text-gray-600 mb-8">
-                {t("customTourRequest.successDesc2") ||
-                  "我們已收到您的客製化需求，專業旅遊顧問將在 24 小時內與您聯繫。"}
+                {t("customTourRequest.successDesc2")}
               </p>
               <div className="flex gap-3 justify-center flex-wrap">
                 <Link href="/">
                   <Button className="rounded-lg gap-2">
                     <Home className="h-4 w-4" />
-                    {t("customTourRequest.backHome") || "返回首頁"}
+                    {t("customTourRequest.backHome")}
                   </Button>
                 </Link>
                 <Button
@@ -214,7 +213,7 @@ export default function CustomTourRequest() {
                   onClick={() => setIsSubmitted(false)}
                   className="rounded-lg"
                 >
-                  {t("customTourRequest.continuePlanning") || "再規劃一個行程"}
+                  {t("customTourRequest.continuePlanning")}
                 </Button>
               </div>
             </div>
@@ -389,10 +388,10 @@ export default function CustomTourRequest() {
           {/* Header */}
           <div className="text-center mb-8">
             <h1 className="text-3xl md:text-4xl font-serif font-bold text-gray-900 mb-2">
-              {t("customTourRequest.pageTitle") || "客製旅遊規劃"}
+              {t("customTourRequest.pageTitle")}
             </h1>
             <p className="text-gray-600">
-              {t("customTourRequest.pageSubtitle") || "告訴我們您的夢想旅程，我們為您量身打造"}
+              {t("customTourRequest.pageSubtitle")}
             </p>
           </div>
 
@@ -458,7 +457,7 @@ export default function CustomTourRequest() {
                 <div className="space-y-5">
                   <div>
                     <Label htmlFor="destination">
-                      {t("customTourRequest.destinationRequired") || "目的地"} <span className="text-red-500">*</span>
+                      {t("customTourRequest.destinationRequired")} <span className="text-red-500">*</span>
                     </Label>
                     <div className="flex flex-wrap gap-2 mt-2 mb-3">
                       {QUICK_DESTINATIONS.map((d) => (
@@ -479,7 +478,7 @@ export default function CustomTourRequest() {
                     <Input
                       id="destination"
                       {...register("destination")}
-                      placeholder={t("customTourRequest.destinationPlaceholder") || "例如：日本東京、法國巴黎"}
+                      placeholder={t("customTourRequest.destinationPlaceholder")}
                       className="rounded-lg"
                     />
                     {errors.destination && (
@@ -489,7 +488,7 @@ export default function CustomTourRequest() {
 
                   <div>
                     <Label>
-                      {t("customTourRequest.preferredDepartureDate") || "預計出發日"} <span className="text-gray-400 text-xs">({t("common.optional")})</span>
+                      {t("customTourRequest.preferredDepartureDate")} <span className="text-gray-400 text-xs">({t("common.optional")})</span>
                     </Label>
                     <Controller
                       control={control}
@@ -507,7 +506,7 @@ export default function CustomTourRequest() {
                                 format(field.value, "PPP", { locale: dateLocale })
                               ) : (
                                 <span className="text-gray-500">
-                                  {t("customTourRequest.selectDate") || "選擇日期"}
+                                  {t("customTourRequest.selectDate")}
                                 </span>
                               )}
                             </Button>
@@ -532,7 +531,7 @@ export default function CustomTourRequest() {
                 <div className="space-y-5">
                   <div>
                     <Label htmlFor="numberOfPeople">
-                      {t("customTourRequest.numberOfPeople") || "旅客人數"} <span className="text-red-500">*</span>
+                      {t("customTourRequest.numberOfPeople")} <span className="text-red-500">*</span>
                     </Label>
                     <div className="flex flex-wrap gap-2 mt-2 mb-3">
                       {QUICK_PEOPLE.map((p) => (
@@ -554,7 +553,7 @@ export default function CustomTourRequest() {
                       id="numberOfPeople"
                       type="number"
                       {...register("numberOfPeople", { valueAsNumber: true })}
-                      placeholder={t("customTourRequest.numberOfPeoplePlaceholder") || "例如：2"}
+                      placeholder={t("customTourRequest.numberOfPeoplePlaceholder")}
                       className="rounded-lg"
                     />
                     {errors.numberOfPeople && (
@@ -564,7 +563,7 @@ export default function CustomTourRequest() {
 
                   <div>
                     <Label htmlFor="numberOfDays">
-                      {t("customTourRequest.numberOfDays") || "旅遊天數"} <span className="text-red-500">*</span>
+                      {t("customTourRequest.numberOfDays")} <span className="text-red-500">*</span>
                     </Label>
                     <div className="flex flex-wrap gap-2 mt-2 mb-3">
                       {QUICK_DURATIONS.map((d) => (
@@ -586,7 +585,7 @@ export default function CustomTourRequest() {
                       id="numberOfDays"
                       type="number"
                       {...register("numberOfDays", { valueAsNumber: true })}
-                      placeholder={t("customTourRequest.numberOfDaysPlaceholder") || "例如：5"}
+                      placeholder={t("customTourRequest.numberOfDaysPlaceholder")}
                       className="rounded-lg"
                     />
                     {errors.numberOfDays && (
@@ -601,7 +600,7 @@ export default function CustomTourRequest() {
                 <div className="space-y-5">
                   <div>
                     <Label htmlFor="budget">
-                      {t("customTourRequest.budget") || "預算（每人）"} <span className="text-gray-400 text-xs">({t("common.optional")})</span>
+                      {t("customTourRequest.budget")} <span className="text-gray-400 text-xs">({t("common.optional")})</span>
                     </Label>
                     <div className="flex flex-wrap gap-2 mt-2 mb-3">
                       {QUICK_BUDGETS.map((b) => (
@@ -623,14 +622,14 @@ export default function CustomTourRequest() {
                       id="budget"
                       type="number"
                       {...register("budget", { valueAsNumber: true })}
-                      placeholder={t("customTourRequest.budgetPlaceholder") || "例如：50000"}
+                      placeholder={t("customTourRequest.budgetPlaceholder")}
                       className="rounded-lg"
                     />
                   </div>
 
                   <div>
                     <Label htmlFor="message">
-                      {t("customTourRequest.message") || "特殊需求"} <span className="text-gray-400 text-xs">({t("common.optional")})</span>
+                      {t("customTourRequest.message")} <span className="text-gray-400 text-xs">({t("common.optional")})</span>
                     </Label>
                     <Textarea
                       id="message"
@@ -648,12 +647,12 @@ export default function CustomTourRequest() {
                 <div className="space-y-5">
                   <div>
                     <Label htmlFor="customerName">
-                      {t("customTourRequest.nameRequired") || "姓名"} <span className="text-red-500">*</span>
+                      {t("customTourRequest.nameRequired")} <span className="text-red-500">*</span>
                     </Label>
                     <Input
                       id="customerName"
                       {...register("customerName")}
-                      placeholder={t("customTourRequest.namePlaceholder") || "請輸入您的姓名"}
+                      placeholder={t("customTourRequest.namePlaceholder")}
                       className="rounded-lg mt-2"
                     />
                     {errors.customerName && (
@@ -663,7 +662,7 @@ export default function CustomTourRequest() {
 
                   <div>
                     <Label htmlFor="customerEmail">
-                      {t("customTourRequest.emailRequired") || "電子郵件"} <span className="text-red-500">*</span>
+                      {t("customTourRequest.emailRequired")} <span className="text-red-500">*</span>
                     </Label>
                     <Input
                       id="customerEmail"
@@ -679,12 +678,12 @@ export default function CustomTourRequest() {
 
                   <div>
                     <Label htmlFor="customerPhone">
-                      {t("customTourRequest.phone") || "電話"} <span className="text-gray-400 text-xs">({t("common.optional")})</span>
+                      {t("customTourRequest.phone")} <span className="text-gray-400 text-xs">({t("common.optional")})</span>
                     </Label>
                     <Input
                       id="customerPhone"
                       {...register("customerPhone")}
-                      placeholder={t("customTourRequest.phonePlaceholder") || "0912-345-678"}
+                      placeholder={t("customTourRequest.phonePlaceholder")}
                       className="rounded-lg mt-2"
                     />
                   </div>
