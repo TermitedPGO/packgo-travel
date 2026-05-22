@@ -84,29 +84,81 @@ const BRAND_STYLES = [
 ];
 
 /**
- * Separate primary stops from outliers using haversine-3000km clustering.
- * Only triggers when there are >4 stops AND the resulting cluster contains
- * at least half of them (otherwise the filter doesn't help).
+ * Separate primary stops from outliers using a TWO-TIER cluster filter:
+ *
+ * Tier 1 — Median + 3000km (long-haul like TPE→ZRH→ZRH→TPE):
+ *   Drops stops more than 3000km from the cluster median. Catches the
+ *   departure/return airport on trans-continent tours.
+ *
+ * Tier 2 — Nearest-neighbour isolation (2026-05-22 fix):
+ *   For each stop, compute distance to its nearest other stop. Any stop
+ *   whose nearest neighbour is >3x the cluster's median nearest-neighbour
+ *   distance is geographically isolated and gets pulled into outliers
+ *   too. Catches the regional-haul case the median test missed:
+ *   高雄→大阪 (1,800km, within Tier-1 threshold but obviously isolated
+ *   from the Japan stops which cluster within ~300km of each other).
+ *
+ * Result: the rendered map zooms tight to the actual tour cluster;
+ * outliers shown as a separate inset / banner / chip.
  */
-function clusterStops(stops: Stop[]): { primary: Stop[]; outliers: Stop[] } {
+// Exported for renderer tests. Internal to the route-map module otherwise.
+export function clusterStops(stops: Stop[]): { primary: Stop[]; outliers: Stop[] } {
   if (stops.length <= 4) return { primary: stops, outliers: [] };
 
+  // ── Tier 1: median + 3000km ─────────────────────────────────────────
   const lats = [...stops.map((s) => s.lat)].sort((a, b) => a - b);
   const lngs = [...stops.map((s) => s.lng)].sort((a, b) => a - b);
   const medLat = lats[Math.floor(lats.length / 2)];
   const medLng = lngs[Math.floor(lngs.length / 2)];
-  const RADIUS_KM = 3000;
-  const inCluster = stops.filter(
-    (s) => haversineKm(s.lat, s.lng, medLat, medLng) <= RADIUS_KM,
+  const TIER1_RADIUS_KM = 3000;
+  let inCluster = stops.filter(
+    (s) => haversineKm(s.lat, s.lng, medLat, medLng) <= TIER1_RADIUS_KM,
   );
-  const outside = stops.filter(
-    (s) => haversineKm(s.lat, s.lng, medLat, medLng) > RADIUS_KM,
+  let outside = stops.filter(
+    (s) => haversineKm(s.lat, s.lng, medLat, medLng) > TIER1_RADIUS_KM,
   );
-  // Only filter when it actually helps (cluster has >= half of stops)
-  if (inCluster.length >= Math.max(3, Math.floor(stops.length * 0.5))) {
-    return { primary: inCluster, outliers: outside };
+  if (inCluster.length < Math.max(3, Math.floor(stops.length * 0.5))) {
+    // Tier 1 didn't help (cluster too small) — keep all as primary
+    inCluster = stops;
+    outside = [];
   }
-  return { primary: stops, outliers: [] };
+
+  // ── Tier 2: nearest-neighbour isolation ────────────────────────────
+  // Within the Tier-1-filtered cluster, find stops whose nearest neighbour
+  // is much further than the typical inter-stop distance. These are
+  // "geographically detached" even though they fit the wide Tier-1 radius.
+  if (inCluster.length >= 5) {
+    const nnDistances = inCluster.map((s) => {
+      let min = Infinity;
+      for (const other of inCluster) {
+        if (other === s) continue;
+        const d = haversineKm(s.lat, s.lng, other.lat, other.lng);
+        if (d < min) min = d;
+      }
+      return { stop: s, nn: min };
+    });
+    const sortedNn = [...nnDistances]
+      .map((x) => x.nn)
+      .sort((a, b) => a - b);
+    const medianNn = sortedNn[Math.floor(sortedNn.length / 2)];
+    // Stops with NN distance > 3× median NN are isolated. Clamp absolute
+    // threshold to >=500km so we don't flag stops in tight clusters
+    // (e.g. a city tour where everyone is <50km apart).
+    const isolationThreshold = Math.max(500, medianNn * 3);
+    const isolated = nnDistances
+      .filter((x) => x.nn > isolationThreshold)
+      .map((x) => x.stop);
+    if (isolated.length > 0 && isolated.length < inCluster.length - 2) {
+      // Move isolated stops into outliers IF removing them leaves at
+      // least 3 primary stops (avoid eviscerating short tours).
+      const isolatedSet = new Set(isolated);
+      const newPrimary = inCluster.filter((s) => !isolatedSet.has(s));
+      const newOutside = [...outside, ...isolated];
+      return { primary: newPrimary, outliers: newOutside };
+    }
+  }
+
+  return { primary: inCluster, outliers: outside };
 }
 
 /**
