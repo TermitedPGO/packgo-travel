@@ -1215,6 +1215,7 @@ export const en = {
     redeemUnavailable: 'Currently unavailable',
     redeemPointsShort: '{points} pts short',
     redeemNow: 'Redeem now',
+    deletePhotoConfirm: 'Delete this photo? (Points already earned will not be clawed back.)',
     reasons: {
       booking_earn: 'Booking earned',
       signup_bonus: 'Signup bonus',

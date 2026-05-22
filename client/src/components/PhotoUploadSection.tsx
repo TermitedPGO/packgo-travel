@@ -16,6 +16,7 @@
 import { useRef, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
+import { useLocale } from "@/contexts/LocaleContext";
 import {
   Camera,
   Upload,
@@ -34,6 +35,7 @@ const PHOTO_BONUS_CAP_PER_BOOKING = 10;
 
 export default function PhotoUploadSection({ bookingId }: PhotoUploadSectionProps) {
   const utils = trpc.useUtils();
+  const { t } = useLocale();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadingCount, setUploadingCount] = useState(0);
 
@@ -102,7 +104,7 @@ export default function PhotoUploadSection({ bookingId }: PhotoUploadSectionProp
   };
 
   const handleDelete = (photoId: number) => {
-    if (!confirm("確定要刪除這張照片?(已賺取的點數不會被回收)")) return;
+    if (!confirm(t("rewards.deletePhotoConfirm"))) return;
     deleteMutation.mutate({ photoId });
   };
 

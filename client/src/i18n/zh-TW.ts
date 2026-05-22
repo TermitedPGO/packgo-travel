@@ -1226,6 +1226,7 @@ export const zhTW = {
     redeemUnavailable: '暫無法兌換',
     redeemPointsShort: '還差 {points} 點',
     redeemNow: '立即兌換',
+    deletePhotoConfirm: '確定要刪除這張照片？（已賺取的點數不會被回收）',
     reasons: {
       booking_earn: '預訂行程累積',
       signup_bonus: '註冊獎勵',
