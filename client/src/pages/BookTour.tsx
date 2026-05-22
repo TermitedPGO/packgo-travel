@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 import SEO from "@/components/SEO";
 import { useParams, useLocation, useRoute } from "wouter";
 import { trpc } from "@/lib/trpc";
@@ -388,17 +388,17 @@ export default function BookTour() {
               { key: "travelers", label: t('bookTour.steps.travelers'), icon: Users },
               { key: "details", label: t('bookTour.steps.details'), icon: CreditCard },
               { key: "confirm", label: t('bookTour.steps.confirm'), icon: CheckCircle },
-            ].map((step, index) => {
+            ].map((step, index, arr) => {
               const Icon = step.icon;
               const isActive = currentStep === step.key;
-              const isCompleted = 
+              const isCompleted =
                 (step.key === "date" && selectedDepartureId) ||
                 (step.key === "travelers" && numberOfAdults > 0) ||
                 (step.key === "details" && customerName && customerEmail && customerPhone);
-              
+
               return (
-                <div key={step.key} className="flex-1 flex items-center">
-                  <div className="flex flex-col items-center flex-1">
+                <Fragment key={step.key}>
+                  <div className="flex flex-col items-center">
                     <div
                       className={`w-12 h-12 rounded-lg flex items-center justify-center border-2 ${
                         isActive
@@ -414,14 +414,14 @@ export default function BookTour() {
                       {step.label}
                     </span>
                   </div>
-                  {index < 3 && (
+                  {index < arr.length - 1 && (
                     <div
-                      className={`h-0.5 flex-1 ${
+                      className={`h-0.5 flex-1 mx-2 ${
                         isCompleted ? "bg-gray-800" : "bg-gray-300"
                       }`}
                     />
                   )}
-                </div>
+                </Fragment>
               );
             })}
           </div>

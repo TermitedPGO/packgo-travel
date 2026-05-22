@@ -171,13 +171,62 @@ function CompareToggle({ tourId, t }: { tourId: number; t: (k: string) => string
   );
 }
 
+// 2026-05-22: English slug → 中文 country name mapping. Header.tsx links
+// like /destinations/asia/japan must resolve to DB destination "日本".
+// Search engines and external links may also use lowercase English slugs,
+// so accept both. Keep keys lowercase for case-insensitive lookup.
+const countrySlugToChineseMap: Record<string, string> = {
+  "japan": "日本",
+  "korea": "韓國",
+  "taiwan": "台灣",
+  "china": "中國",
+  "thailand": "泰國",
+  "vietnam": "越南",
+  "singapore": "新加坡",
+  "malaysia": "馬來西亞",
+  "indonesia": "印尼",
+  "philippines": "菲律賓",
+  "india": "印度",
+  "australia": "澳洲",
+  "new-zealand": "紐西蘭",
+  "newzealand": "紐西蘭",
+  "usa": "美國",
+  "us": "美國",
+  "canada": "加拿大",
+  "mexico": "墨西哥",
+  "brazil": "巴西",
+  "argentina": "阿根廷",
+  "uk": "英國",
+  "france": "法國",
+  "germany": "德國",
+  "italy": "義大利",
+  "spain": "西班牙",
+  "portugal": "葡萄牙",
+  "netherlands": "荷蘭",
+  "belgium": "比利時",
+  "switzerland": "瑞士",
+  "austria": "奧地利",
+  "czech": "捷克",
+  "hungary": "匈牙利",
+  "greece": "希臘",
+  "turkey": "土耳其",
+  "egypt": "埃及",
+  "south-africa": "南非",
+  "morocco": "摩洛哥",
+  "israel": "以色列",
+  "jordan": "約旦",
+  "uae": "阿聯酋",
+};
+
 export default function CountryPage() {
   const { region, country } = useParams<{ region: string; country: string }>();
   const [, setLocation] = useLocation();
   const [favorites, setFavorites] = useState<Set<number>>(new Set());
   const { t, language, formatPrice } = useLocale();
-  
-  const decodedCountry = decodeURIComponent(country || "");
+
+  const rawCountry = decodeURIComponent(country || "");
+  // 若是英文 slug,轉成中文名;否則沿用原值(已是中文)
+  const decodedCountry = countrySlugToChineseMap[rawCountry.toLowerCase()] || rawCountry;
   const regionConfig = getRegionConfig(t);
   const regionInfo = regionConfig[region || ""] || { name: t('common.unknown'), label: "Unknown" };
 
@@ -259,7 +308,7 @@ export default function CountryPage() {
                 {t('common.backTo')} {regionInfo.name}
               </Button>
               <h1 className="text-4xl md:text-5xl font-serif font-bold text-white mb-2">
-                {decodedCountry}
+                {translateDestination(decodedCountry, language)}
               </h1>
               <p className="text-gray-200 text-lg">
                 {tours.length} {t('countryPage.tours')}
@@ -312,11 +361,27 @@ export default function CountryPage() {
                     >
                       {/* 圖片 */}
                       <div className="relative aspect-[16/10] overflow-hidden rounded-xl">
-                        <img
-                          src={tour.imageUrl || "https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=800"}
-                          alt={getTranslatedTitle(tour)}
-                          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 rounded-xl"
-                        />
+                        {tour.imageUrl || (tour as any).heroImage ? (
+                          <img
+                            src={tour.imageUrl || (tour as any).heroImage}
+                            alt={getTranslatedTitle(tour)}
+                            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 rounded-xl"
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                              const parent = e.currentTarget.parentElement;
+                              if (parent && !parent.querySelector('.img-fallback')) {
+                                const div = document.createElement('div');
+                                div.className = 'img-fallback absolute inset-0 bg-foreground/[0.04] border border-foreground/10 flex items-center justify-center rounded-xl';
+                                div.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="rgba(0,0,0,0.3)" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>';
+                                parent.appendChild(div);
+                              }
+                            }}
+                          />
+                        ) : (
+                          <div className="w-full h-full bg-foreground/[0.04] border border-foreground/10 flex items-center justify-center rounded-xl">
+                            <MapPin className="h-12 w-12 text-foreground/30" />
+                          </div>
+                        )}
                         <div className="absolute top-3 right-3 flex gap-2">
                           <CompareToggle tourId={tour.id} t={t} />
                           <button
