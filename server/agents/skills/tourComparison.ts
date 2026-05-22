@@ -648,3 +648,9 @@ function bestForByBucket(key: string): string {
       return "General-interest travelers";
   }
 }
+
+// v2 Wave 3 Module 3.3 — orchestrator wrapper lives in
+// `./tourComparisonOrchestrator.ts` (separate file so unit tests can mock
+// `generateTourComparisonCatalog` cleanly at the module boundary). The
+// admin tRPC `tools.generateTourComparison` endpoint still calls
+// `generateTourComparisonCatalog` directly from this file.
