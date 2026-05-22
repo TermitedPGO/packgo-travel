@@ -54,6 +54,7 @@ const VouchersTabV2 = lazy(() => import("@/components/admin-v2/VouchersTabV2"));
 const LlmCostTabV2 = lazy(() => import("@/components/admin-v2/LlmCostTabV2"));
 const MonitorDashboardV2 = lazy(() => import("@/components/admin-v2/MonitorDashboardV2"));
 const CleanupTabV2 = lazy(() => import("@/components/admin-v2/CleanupTabV2"));
+const BankLedgerV2 = lazy(() => import("@/components/admin-v2/BankLedgerV2"));
 
 // All other tabs initially come from V1. They're consumed AS-IS; we replace
 // them one by one with V2 redesigns. Listed here for the lazy-loader.
@@ -98,7 +99,7 @@ type PageId =
   // Marketing
   | "marketing-landing" | "marketing" | "marketing-content" | "posters" | "analytics" | "competitor-monitor" | "affiliate"
   // Finance
-  | "finance-landing" | "accounting" | "invoices" | "reconciliation"
+  | "finance-landing" | "accounting" | "bank-ledger" | "invoices" | "reconciliation"
   // System
   | "ai-hub" | "llm-cost" | "task-history" | "audit-log" | "calibration-review" | "autonomous-agents" | "visa" | "cleanup";
 
@@ -161,6 +162,7 @@ const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageD
     primary: [
       { id: "finance-landing", label: "💰 總覽" },
       { id: "accounting", label: "帳務" },
+      { id: "bank-ledger", label: "🏦 銀行帳本" },
     ],
     advanced: [
       { id: "invoices", label: "發票" },
@@ -398,6 +400,8 @@ function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
       return <FinanceLanding onNavigate={(t) => setActivePage(t as PageId)} />;
     case "accounting":
       return <AccountingTab />;
+    case "bank-ledger":
+      return <BankLedgerV2 />;
     case "invoices":
       return <InvoicesTab />;
     case "reconciliation":

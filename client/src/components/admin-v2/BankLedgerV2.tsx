@@ -1,0 +1,925 @@
+/**
+ * BankLedgerV2 — monthly-close bank ledger admin (Round 81 v2).
+ *
+ * Trip.com-dense pattern, same primitives as BookingsTabV2 / InquiriesTabV2.
+ * This is Jeff's core "clean up Plaid imports before P&L" workflow:
+ *
+ *   - 4 filter pills (全部 / 未分類 / 已分類 / 已排除) with live counts
+ *   - Search by merchant / description / amount string
+ *   - Date range (defaults to this month)
+ *   - 36px DataTable: date | merchant | category | amount | source | excluded
+ *   - Row click → Sheet drawer with read-only Plaid+AI sections + editable
+ *     override section (category dropdown, reason, link booking, exclude toggle)
+ *
+ * Backend wire (existing, no schema change):
+ *   - trpc.plaid.transactionsList   — paginated, supports includeExcluded
+ *   - trpc.plaid.transactionUpdate  — sets jeffOverrideCategory/Reason/exclude/relatedBookingId
+ *
+ * Sign convention (from Plaid): amount > 0 = outflow (red), amount < 0 = inflow (green).
+ *
+ * Phase C tab #8.
+ */
+import { useMemo, useState } from "react";
+import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
+import { useLocale } from "@/contexts/LocaleContext";
+import {
+  DataTable,
+  StatusDot,
+  EmptyState,
+  type Column,
+  type StatusTone,
+} from "@/components/admin/primitives";
+import { Button } from "@/components/ui/button";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
+import {
+  Landmark,
+  Loader2,
+  RefreshCw,
+  Search,
+  X,
+} from "lucide-react";
+
+// ────────────────────────────────────────────────────────────────────────
+// Categories — mirror AccountingTab so Jeff's overrides flow into the same
+// P&L bucket. Kept in-file to avoid churning AccountingTab's exports.
+// ────────────────────────────────────────────────────────────────────────
+
+const INCOME_CATEGORY_KEYS: Record<string, string> = {
+  tour_booking: "catTourBooking",
+  visa_service: "catVisaService",
+  affiliate_commission: "catAffiliateCommission",
+  flight_booking: "catFlightBooking",
+  hotel_booking: "catHotelBooking",
+  other_income: "catOtherIncome",
+};
+
+const EXPENSE_CATEGORY_KEYS: Record<string, string> = {
+  rent: "catRent",
+  utilities: "catUtilities",
+  salary: "catSalary",
+  marketing: "catMarketing",
+  travel_cost: "catTravelCost",
+  supplier_payment: "catSupplierPayment",
+  office_supplies: "catOfficeSupplies",
+  software: "catSoftware",
+  insurance: "catInsurance",
+  tax_payment: "catTaxPayment",
+  bank_fee: "catBankFee",
+  stripe_fee: "catStripeFee",
+  consulate_fee: "catConsulateFee",
+  other_expense: "catOtherExpense",
+};
+
+const CUSTOM_VALUE = "__custom__";
+
+// ────────────────────────────────────────────────────────────────────────
+// Types — mirror plaidRouter.transactionsList output (loose; backend is
+// the source of truth, this just gives the table sane intellisense).
+// ────────────────────────────────────────────────────────────────────────
+
+type TxRow = {
+  id: number;
+  linkedAccountId: number;
+  date: string | Date;
+  authorizedDate?: string | Date | null;
+  amount: string | number; // Drizzle decimal returns string
+  isoCurrencyCode?: string | null;
+  merchantName?: string | null;
+  description?: string | null;
+  plaidCategoryPrimary?: string | null;
+  plaidCategoryDetailed?: string | null;
+  agentCategory?: string | null;
+  agentConfidence?: number | null;
+  agentReasoning?: string | null;
+  jeffOverrideCategory?: string | null;
+  jeffOverrideReason?: string | null;
+  excludeFromAccounting?: number | null;
+  excludeReason?: string | null;
+  isPending?: number | null;
+  accountOwner?: string | null;
+  relatedBookingId?: number | null;
+  relatedInquiryId?: number | null;
+};
+
+type FilterTab = "all" | "uncategorized" | "categorized" | "excluded";
+
+// ────────────────────────────────────────────────────────────────────────
+// Helpers
+// ────────────────────────────────────────────────────────────────────────
+
+function thisMonthRange(): { from: string; to: string } {
+  const now = new Date();
+  const from = new Date(now.getFullYear(), now.getMonth(), 1)
+    .toISOString()
+    .slice(0, 10);
+  const to = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+    .toISOString()
+    .slice(0, 10);
+  return { from, to };
+}
+
+function toNumber(amount: string | number | null | undefined): number {
+  if (amount === null || amount === undefined) return 0;
+  return typeof amount === "number" ? amount : Number(amount);
+}
+
+function isOutflow(tx: TxRow): boolean {
+  return toNumber(tx.amount) > 0;
+}
+
+function effectiveCategory(tx: TxRow): string | null {
+  return tx.jeffOverrideCategory ?? tx.agentCategory ?? null;
+}
+
+function isExcluded(tx: TxRow): boolean {
+  return (tx.excludeFromAccounting ?? 0) === 1;
+}
+
+function isUncategorized(tx: TxRow): boolean {
+  return !tx.jeffOverrideCategory && !tx.agentCategory;
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Filter pill (matches BookingsTabV2 pattern)
+// ────────────────────────────────────────────────────────────────────────
+
+function StatusToggle({
+  label,
+  count,
+  active,
+  tone,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  tone?: StatusTone;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      type="button"
+      className={`h-7 px-2.5 rounded-md text-xs font-medium border transition-colors inline-flex items-center gap-1.5 ${
+        active
+          ? "bg-gray-900 text-white border-gray-900"
+          : "bg-white text-gray-700 border-gray-200 hover:border-gray-400"
+      }`}
+    >
+      {tone && !active && <StatusDot tone={tone} size="xs" />}
+      <span>{label}</span>
+      <span className={`tabular-nums ${active ? "text-white/70" : "text-gray-400"}`}>
+        {count}
+      </span>
+    </button>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Main
+// ────────────────────────────────────────────────────────────────────────
+
+export default function BankLedgerV2() {
+  const { t, language } = useLocale();
+  const dateLocale = language === "en" ? "en-US" : "zh-TW";
+
+  const [tab, setTab] = useState<FilterTab>("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const initialRange = thisMonthRange();
+  const [dateFrom, setDateFrom] = useState(initialRange.from);
+  const [dateTo, setDateTo] = useState(initialRange.to);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const utils = trpc.useUtils();
+  const { data, isLoading, refetch } = trpc.plaid.transactionsList.useQuery({
+    dateFrom,
+    dateTo,
+    includeExcluded: true, // we filter client-side so the "已排除" tab works
+    limit: 200,
+    offset: 0,
+  });
+
+  const rawItems = (data?.items ?? []) as TxRow[];
+
+  const counts = useMemo(() => {
+    return {
+      all: rawItems.length,
+      uncategorized: rawItems.filter((tx) => isUncategorized(tx) && !isExcluded(tx)).length,
+      categorized: rawItems.filter((tx) => !isUncategorized(tx) && !isExcluded(tx)).length,
+      excluded: rawItems.filter(isExcluded).length,
+    };
+  }, [rawItems]);
+
+  const filtered = useMemo(() => {
+    let list = rawItems;
+    if (tab === "uncategorized") {
+      list = list.filter((tx) => isUncategorized(tx) && !isExcluded(tx));
+    } else if (tab === "categorized") {
+      list = list.filter((tx) => !isUncategorized(tx) && !isExcluded(tx));
+    } else if (tab === "excluded") {
+      list = list.filter(isExcluded);
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      list = list.filter((tx) =>
+        (tx.merchantName ?? "").toLowerCase().includes(q) ||
+        (tx.description ?? "").toLowerCase().includes(q) ||
+        String(toNumber(tx.amount)).includes(q),
+      );
+    }
+    return list;
+  }, [rawItems, tab, searchQuery]);
+
+  const selected = useMemo(
+    () => (selectedId !== null ? rawItems.find((tx) => tx.id === selectedId) ?? null : null),
+    [selectedId, rawItems],
+  );
+
+  const updateMutation = trpc.plaid.transactionUpdate.useMutation({
+    onSuccess: () => {
+      utils.plaid.transactionsList.invalidate();
+      toast.success(t("admin.bankLedgerTab.toastSaved"));
+    },
+    onError: (e) =>
+      toast.error(t("admin.bankLedgerTab.toastSaveFailed", { err: e.message })),
+  });
+
+  const formatDate = (d: string | Date | null | undefined): string => {
+    if (!d) return "—";
+    return new Date(d).toLocaleDateString(dateLocale, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  };
+
+  const formatMoney = (amount: string | number | null | undefined, currency?: string | null): string => {
+    const n = toNumber(amount);
+    const cur = (currency || "USD").toUpperCase();
+    const symbol = cur === "USD" ? "$" : cur === "TWD" ? "NT$" : cur + " ";
+    // Plaid: positive = outflow (display as negative-looking), negative = inflow.
+    // We render the sign explicitly so it's never ambiguous.
+    const sign = n > 0 ? "-" : n < 0 ? "+" : "";
+    const abs = Math.abs(n);
+    return `${sign}${symbol}${abs.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  };
+
+  const categoryLabel = (key: string | null | undefined): string => {
+    if (!key) return "—";
+    const i18nKey = INCOME_CATEGORY_KEYS[key] || EXPENSE_CATEGORY_KEYS[key];
+    if (i18nKey) return t(`admin.accounting.${i18nKey}`);
+    return key; // custom override label flows through as-is
+  };
+
+  // ── Columns ───────────────────────────────────────────────────────────
+  const columns: Column<TxRow>[] = [
+    {
+      key: "date",
+      header: t("admin.bankLedgerTab.columnDate"),
+      width: "w-28",
+      sortable: true,
+      sortValue: (tx) => new Date(tx.date).getTime(),
+      render: (tx) => (
+        <span className="text-gray-700 tabular-nums">{formatDate(tx.date)}</span>
+      ),
+    },
+    {
+      key: "merchant",
+      header: t("admin.bankLedgerTab.columnMerchant"),
+      sortable: true,
+      sortValue: (tx) => tx.merchantName ?? "",
+      render: (tx) => (
+        <div className="min-w-0">
+          <div className="text-gray-900 truncate font-medium">
+            {tx.merchantName || t("admin.bankLedgerTab.unknownMerchant")}
+          </div>
+          {tx.description && (
+            <div className="text-[11px] text-gray-500 truncate">{tx.description}</div>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: "category",
+      header: t("admin.bankLedgerTab.columnCategory"),
+      width: "w-36",
+      render: (tx) => {
+        const cat = effectiveCategory(tx);
+        if (cat) {
+          return <span className="text-xs text-gray-700">{categoryLabel(cat)}</span>;
+        }
+        if (tx.plaidCategoryPrimary) {
+          return (
+            <span className="text-[11px] text-gray-400 italic">
+              {tx.plaidCategoryPrimary}
+            </span>
+          );
+        }
+        return <span className="text-gray-300">—</span>;
+      },
+    },
+    {
+      key: "amount",
+      header: t("admin.bankLedgerTab.columnAmount"),
+      width: "w-32",
+      align: "right",
+      sortable: true,
+      sortValue: (tx) => toNumber(tx.amount),
+      render: (tx) => (
+        <span
+          className={`tabular-nums font-medium ${
+            isOutflow(tx) ? "text-red-600" : "text-green-600"
+          }`}
+        >
+          {formatMoney(tx.amount, tx.isoCurrencyCode)}
+        </span>
+      ),
+    },
+    {
+      key: "source",
+      header: t("admin.bankLedgerTab.columnSource"),
+      width: "w-32",
+      render: (tx) => {
+        if (tx.jeffOverrideCategory) {
+          return (
+            <StatusDot tone="warn" label={t("admin.bankLedgerTab.sourceJeff")} />
+          );
+        }
+        if (tx.agentCategory) {
+          return (
+            <StatusDot tone="info" label={t("admin.bankLedgerTab.sourceAI")} />
+          );
+        }
+        if (tx.plaidCategoryPrimary) {
+          return (
+            <StatusDot tone="muted" label={t("admin.bankLedgerTab.sourcePlaid")} />
+          );
+        }
+        return (
+          <StatusDot tone="warn" label={t("admin.bankLedgerTab.sourceUncat")} />
+        );
+      },
+    },
+    {
+      key: "excluded",
+      header: "",
+      width: "w-20",
+      render: (tx) =>
+        isExcluded(tx) ? (
+          <Badge variant="outline" className="rounded-md text-[10px] h-5 px-1.5 border-gray-300 text-gray-600">
+            {t("admin.bankLedgerTab.excludedBadge")}
+          </Badge>
+        ) : null,
+    },
+  ];
+
+  // ── Render ────────────────────────────────────────────────────────────
+  return (
+    <div className="space-y-3">
+      {/* Header: filter pills + date range + search + refresh */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <StatusToggle
+            label={t("admin.bankLedgerTab.tabAll")}
+            count={counts.all}
+            active={tab === "all"}
+            onClick={() => setTab("all")}
+          />
+          <StatusToggle
+            label={t("admin.bankLedgerTab.tabUncategorized")}
+            count={counts.uncategorized}
+            active={tab === "uncategorized"}
+            tone="warn"
+            onClick={() => setTab("uncategorized")}
+          />
+          <StatusToggle
+            label={t("admin.bankLedgerTab.tabCategorized")}
+            count={counts.categorized}
+            active={tab === "categorized"}
+            tone="success"
+            onClick={() => setTab("categorized")}
+          />
+          <StatusToggle
+            label={t("admin.bankLedgerTab.tabExcluded")}
+            count={counts.excluded}
+            active={tab === "excluded"}
+            tone="muted"
+            onClick={() => setTab("excluded")}
+          />
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5">
+            <Input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="h-8 rounded-lg text-xs w-36"
+              aria-label={t("admin.bankLedgerTab.dateFrom")}
+            />
+            <span className="text-gray-400 text-xs">→</span>
+            <Input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="h-8 rounded-lg text-xs w-36"
+              aria-label={t("admin.bankLedgerTab.dateTo")}
+            />
+          </div>
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400 pointer-events-none" />
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={t("admin.bankLedgerTab.searchPlaceholder")}
+              className="h-8 rounded-lg pl-8 text-xs w-56"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"
+                aria-label={t("common.clear")}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refetch()}
+            className="h-8 rounded-lg gap-1.5"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            {t("common.refresh")}
+          </Button>
+        </div>
+      </div>
+
+      {/* Table */}
+      {!isLoading && filtered.length === 0 ? (
+        <EmptyState
+          icon={<Landmark className="h-8 w-8" />}
+          title={t("admin.bankLedgerTab.emptyTitle")}
+          description={t("admin.bankLedgerTab.emptyDesc")}
+        />
+      ) : (
+        <DataTable
+          data={filtered}
+          columns={columns}
+          loading={isLoading}
+          onRowClick={(tx) => {
+            setSelectedId(tx.id);
+            setDrawerOpen(true);
+          }}
+          selectedId={selectedId ?? undefined}
+        />
+      )}
+
+      {/* Detail drawer */}
+      <BankTxDrawer
+        open={drawerOpen}
+        onOpenChange={(open) => {
+          setDrawerOpen(open);
+          if (!open) setSelectedId(null);
+        }}
+        tx={selected}
+        formatDate={formatDate}
+        formatMoney={formatMoney}
+        categoryLabel={categoryLabel}
+        savePending={updateMutation.isPending}
+        onSave={(patch) =>
+          selected &&
+          updateMutation.mutate(
+            { transactionId: selected.id, ...patch },
+            {
+              onSuccess: () => {
+                setDrawerOpen(false);
+                setSelectedId(null);
+              },
+            },
+          )
+        }
+      />
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Drawer — read-only sections (Plaid + AI) + editable override form
+// ────────────────────────────────────────────────────────────────────────
+
+type DrawerSavePatch = {
+  category?: string;
+  reason?: string;
+  exclude?: boolean;
+  relatedBookingId?: number;
+};
+
+function BankTxDrawer({
+  open,
+  onOpenChange,
+  tx,
+  formatDate,
+  formatMoney,
+  categoryLabel,
+  savePending,
+  onSave,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  tx: TxRow | null;
+  formatDate: (d: string | Date | null | undefined) => string;
+  formatMoney: (amount: string | number | null | undefined, currency?: string | null) => string;
+  categoryLabel: (key: string | null | undefined) => string;
+  savePending: boolean;
+  onSave: (patch: DrawerSavePatch) => void;
+}) {
+  // Local form state — initialised from the row each time the drawer opens
+  const initialCategory = tx?.jeffOverrideCategory ?? "";
+  const isKnownCategory =
+    initialCategory in INCOME_CATEGORY_KEYS ||
+    initialCategory in EXPENSE_CATEGORY_KEYS;
+
+  const [categoryDropdown, setCategoryDropdown] = useState<string>(
+    !initialCategory ? "" : isKnownCategory ? initialCategory : CUSTOM_VALUE,
+  );
+  const [customCategory, setCustomCategory] = useState<string>(
+    !initialCategory ? "" : isKnownCategory ? "" : initialCategory,
+  );
+  const [reason, setReason] = useState<string>(tx?.jeffOverrideReason ?? "");
+  const [bookingId, setBookingId] = useState<string>(
+    tx?.relatedBookingId ? String(tx.relatedBookingId) : "",
+  );
+  const [exclude, setExclude] = useState<boolean>(
+    (tx?.excludeFromAccounting ?? 0) === 1,
+  );
+
+  // Reset form when row changes (drawer reopens with a new tx)
+  // We key on tx?.id so React resets state for us.
+  const formKey = tx?.id ?? "none";
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent className="w-full sm:max-w-md rounded-l-xl overflow-y-auto">
+        <SheetHeader className="pb-4 border-b border-gray-100">
+          <SheetTitle className="text-base flex items-center gap-2">
+            <span className="text-gray-500 tabular-nums font-normal">
+              #{tx?.id ?? ""}
+            </span>
+            <span>{tx ? formatDate(tx.date) : ""}</span>
+          </SheetTitle>
+          <SheetDescription className="sr-only">
+            {tx?.merchantName ?? ""}
+          </SheetDescription>
+        </SheetHeader>
+
+        {tx && (
+          <BankTxDrawerForm
+            key={formKey}
+            tx={tx}
+            formatMoney={formatMoney}
+            categoryLabel={categoryLabel}
+            categoryDropdown={categoryDropdown}
+            setCategoryDropdown={setCategoryDropdown}
+            customCategory={customCategory}
+            setCustomCategory={setCustomCategory}
+            reason={reason}
+            setReason={setReason}
+            bookingId={bookingId}
+            setBookingId={setBookingId}
+            exclude={exclude}
+            setExclude={setExclude}
+            savePending={savePending}
+            onSave={onSave}
+            onCancel={() => onOpenChange(false)}
+          />
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+// Inner form component — separate so `key={tx.id}` cleanly resets all
+// local state when the user opens a different row.
+function BankTxDrawerForm({
+  tx,
+  formatMoney,
+  categoryLabel,
+  categoryDropdown,
+  setCategoryDropdown,
+  customCategory,
+  setCustomCategory,
+  reason,
+  setReason,
+  bookingId,
+  setBookingId,
+  exclude,
+  setExclude,
+  savePending,
+  onSave,
+  onCancel,
+}: {
+  tx: TxRow;
+  formatMoney: (amount: string | number | null | undefined, currency?: string | null) => string;
+  categoryLabel: (key: string | null | undefined) => string;
+  categoryDropdown: string;
+  setCategoryDropdown: (v: string) => void;
+  customCategory: string;
+  setCustomCategory: (v: string) => void;
+  reason: string;
+  setReason: (v: string) => void;
+  bookingId: string;
+  setBookingId: (v: string) => void;
+  exclude: boolean;
+  setExclude: (v: boolean) => void;
+  savePending: boolean;
+  onSave: (patch: DrawerSavePatch) => void;
+  onCancel: () => void;
+}) {
+  const { t } = useLocale();
+
+  const finalCategory =
+    categoryDropdown === CUSTOM_VALUE
+      ? customCategory.trim()
+      : categoryDropdown;
+
+  const handleSave = () => {
+    const patch: DrawerSavePatch = {
+      category: finalCategory,
+      reason: reason.trim(),
+      exclude,
+    };
+    const parsed = bookingId.trim() ? Number(bookingId.trim()) : NaN;
+    if (Number.isFinite(parsed) && parsed > 0) {
+      patch.relatedBookingId = parsed;
+    }
+    onSave(patch);
+  };
+
+  const handleClearOverride = () => {
+    setCategoryDropdown("");
+    setCustomCategory("");
+    setReason("");
+    onSave({ category: "", reason: "" });
+  };
+
+  const handleClearBooking = () => setBookingId("");
+
+  return (
+    <div className="space-y-5 py-4">
+      {/* Original (Plaid) */}
+      <div className="space-y-2">
+        <SectionTitle>{t("admin.bankLedgerTab.sectionOriginal")}</SectionTitle>
+        <Field label={t("admin.bankLedgerTab.fieldMerchant")}>
+          {tx.merchantName || t("admin.bankLedgerTab.unknownMerchant")}
+        </Field>
+        {tx.description && (
+          <Field label={t("admin.bankLedgerTab.fieldDescription")}>
+            <span className="break-words">{tx.description}</span>
+          </Field>
+        )}
+        <Field label={t("admin.bankLedgerTab.fieldAmount")}>
+          <span
+            className={`font-semibold tabular-nums ${
+              toNumber(tx.amount) > 0 ? "text-red-600" : "text-green-600"
+            }`}
+          >
+            {formatMoney(tx.amount, tx.isoCurrencyCode)}
+          </span>
+        </Field>
+        <Field label={t("admin.bankLedgerTab.fieldCurrency")}>
+          {tx.isoCurrencyCode || "USD"}
+        </Field>
+        {tx.plaidCategoryPrimary && (
+          <Field label={t("admin.bankLedgerTab.fieldPlaidCategory")}>
+            {tx.plaidCategoryDetailed
+              ? `${tx.plaidCategoryPrimary} · ${tx.plaidCategoryDetailed}`
+              : tx.plaidCategoryPrimary}
+          </Field>
+        )}
+        {tx.accountOwner && (
+          <Field label={t("admin.bankLedgerTab.fieldAccountOwner")}>
+            {tx.accountOwner}
+          </Field>
+        )}
+      </div>
+
+      {/* AI categorisation */}
+      {tx.agentCategory && (
+        <div className="space-y-2">
+          <SectionTitle>{t("admin.bankLedgerTab.sectionAI")}</SectionTitle>
+          <Field label={t("admin.bankLedgerTab.fieldAgentCategory")}>
+            {categoryLabel(tx.agentCategory)}
+          </Field>
+          {typeof tx.agentConfidence === "number" && (
+            <Field label={t("admin.bankLedgerTab.fieldConfidence")}>
+              <span className="tabular-nums">{tx.agentConfidence}%</span>
+            </Field>
+          )}
+          {tx.agentReasoning && (
+            <div className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap bg-gray-50 border border-gray-100 rounded-lg p-3">
+              {tx.agentReasoning}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Override form */}
+      <div className="space-y-3">
+        <SectionTitle>{t("admin.bankLedgerTab.sectionOverride")}</SectionTitle>
+
+        <div className="space-y-1.5">
+          <Label className="text-xs text-gray-600">
+            {t("admin.bankLedgerTab.fieldCategory")}
+          </Label>
+          <Select
+            value={categoryDropdown}
+            onValueChange={(v) => setCategoryDropdown(v)}
+          >
+            <SelectTrigger className="h-8 rounded-lg text-xs">
+              <SelectValue placeholder={t("admin.bankLedgerTab.categoryPlaceholder")} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectLabel className="text-[10px] uppercase tracking-wider">
+                  {t("admin.bankLedgerTab.groupIncome")}
+                </SelectLabel>
+                {Object.keys(INCOME_CATEGORY_KEYS).map((k) => (
+                  <SelectItem key={k} value={k}>
+                    {categoryLabel(k)}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+              <SelectGroup>
+                <SelectLabel className="text-[10px] uppercase tracking-wider">
+                  {t("admin.bankLedgerTab.groupExpense")}
+                </SelectLabel>
+                {Object.keys(EXPENSE_CATEGORY_KEYS).map((k) => (
+                  <SelectItem key={k} value={k}>
+                    {categoryLabel(k)}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+              <SelectGroup>
+                <SelectLabel className="text-[10px] uppercase tracking-wider">
+                  {t("admin.bankLedgerTab.groupCustom")}
+                </SelectLabel>
+                <SelectItem value={CUSTOM_VALUE}>
+                  {t("admin.bankLedgerTab.customCategoryOption")}
+                </SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          {categoryDropdown === CUSTOM_VALUE && (
+            <Input
+              value={customCategory}
+              onChange={(e) => setCustomCategory(e.target.value)}
+              placeholder={t("admin.bankLedgerTab.customCategoryPlaceholder")}
+              className="h-8 rounded-lg text-xs"
+            />
+          )}
+        </div>
+
+        <div className="space-y-1.5">
+          <Label className="text-xs text-gray-600">
+            {t("admin.bankLedgerTab.fieldReason")}
+          </Label>
+          <Textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder={t("admin.bankLedgerTab.reasonPlaceholder")}
+            className="rounded-lg text-xs min-h-[60px]"
+            rows={2}
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label className="text-xs text-gray-600">
+            {t("admin.bankLedgerTab.fieldBookingId")}
+          </Label>
+          <div className="flex items-center gap-1.5">
+            <Input
+              type="number"
+              min={1}
+              value={bookingId}
+              onChange={(e) => setBookingId(e.target.value)}
+              placeholder={t("admin.bankLedgerTab.bookingIdPlaceholder")}
+              className="h-8 rounded-lg text-xs"
+            />
+            {bookingId && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleClearBooking}
+                className="h-8 rounded-lg px-2"
+                aria-label={t("common.clear")}
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+          <div className="space-y-0.5">
+            <Label
+              htmlFor="bank-tx-exclude"
+              className="text-xs text-gray-700 font-medium cursor-pointer"
+            >
+              {t("admin.bankLedgerTab.fieldExclude")}
+            </Label>
+            <p className="text-[10px] text-gray-500 leading-relaxed">
+              {t("admin.bankLedgerTab.excludeHint")}
+            </p>
+          </div>
+          <Switch
+            id="bank-tx-exclude"
+            checked={exclude}
+            onCheckedChange={setExclude}
+          />
+        </div>
+      </div>
+
+      {/* Footer actions */}
+      <div className="pt-3 border-t border-gray-100 flex items-center gap-2">
+        {(tx.jeffOverrideCategory || tx.jeffOverrideReason) && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={handleClearOverride}
+            className="h-8 rounded-lg text-xs text-gray-500"
+            disabled={savePending}
+          >
+            {t("admin.bankLedgerTab.clearOverride")}
+          </Button>
+        )}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onCancel}
+          className="ml-auto h-8 rounded-lg gap-1"
+          disabled={savePending}
+        >
+          <X className="h-3.5 w-3.5" />
+          {t("common.cancel")}
+        </Button>
+        <Button
+          size="sm"
+          onClick={handleSave}
+          disabled={savePending}
+          className="h-8 rounded-lg gap-1.5"
+        >
+          {savePending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          {t("common.save")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="text-[10px] uppercase tracking-[0.18em] text-gray-400 font-semibold">
+      {children}
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="text-xs text-gray-500 shrink-0">{label}</span>
+      <span className="text-xs text-gray-900 text-right break-words max-w-[60%]">
+        {children}
+      </span>
+    </div>
+  );
+}
