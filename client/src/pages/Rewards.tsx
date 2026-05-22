@@ -108,13 +108,11 @@ export default function Rewards() {
               <div className="inline-flex items-center gap-3 bg-white/[0.06] border border-[#c9a563]/30 rounded-full px-6 py-3">
                 <Coins className="h-5 w-5 text-[#c9a563]" />
                 <span className="text-sm tracking-wider">
-                  {language === "en" ? "Current balance" : "目前餘額"}{" "}
+                  {t("rewards.currentBalance")}{" "}
                   <strong className="text-white text-lg tabular-nums">
                     {balance.toLocaleString()}
                   </strong>{" "}
-                  {language === "en"
-                    ? `Packpoints (≈ $${dollarValue} value)`
-                    : `Packpoint(≈ $${dollarValue} 折抵價值)`}
+                  {t("rewards.pointsWithValue", { value: String(dollarValue) })}
                 </span>
               </div>
             )}

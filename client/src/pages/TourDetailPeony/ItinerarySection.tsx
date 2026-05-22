@@ -67,8 +67,8 @@ export default function ItinerarySection({
               style={{ borderColor: themeColor.primary, color: themeColor.primary }}
             >
               {expandedDays.size >= displayItinerary.length
-                ? (language === "en" ? "Collapse all" : "全部收合")
-                : (language === "en" ? "Expand all days" : `展開全部 ${displayItinerary.length} 天`)}
+                ? t("tourDetail.collapseAll")
+                : t("tourDetail.expandAllDays", { count: String(displayItinerary.length) })}
             </button>
           </div>
         )}

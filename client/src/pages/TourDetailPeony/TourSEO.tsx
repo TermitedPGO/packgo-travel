@@ -11,6 +11,7 @@
 import React from "react";
 import SEO, { buildTourSchema, buildBreadcrumbSchema } from "@/components/SEO";
 import { parseJSON } from "./helpers";
+import { useLocale } from "@/contexts/LocaleContext";
 
 export type TourSEOProps = {
   tour: any;
@@ -27,6 +28,7 @@ export default function TourSEO({
   displayDescription,
   language,
 }: TourSEOProps) {
+  const { t } = useLocale();
   return (
     <SEO
       title={{
@@ -69,8 +71,8 @@ export default function TourSEO({
         // country names don't map to /destinations/:region routes).
         // 3-level (Home > Tours > [tour]) is valid breadcrumb structure.
         buildBreadcrumbSchema([
-          { name: language === "en" ? "Home" : "首頁", url: "/" },
-          { name: language === "en" ? "Tours" : "行程", url: "/tours" },
+          { name: t("nav.home"), url: "/" },
+          { name: t("nav.tours"), url: "/tours" },
           { name: displayTitle, url: `/tours/${tour.id}` },
         ]),
       ]}

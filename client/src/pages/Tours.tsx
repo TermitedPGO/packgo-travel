@@ -117,7 +117,7 @@ function TourCard({
 }: {
   tour: any;
   language: string;
-  t: (key: string) => string;
+  t: (key: string, params?: Record<string, string | number>) => string;
   formatPrice: (price: number, originalCurrency?: "TWD" | "USD") => string;
 }) {
   const shouldLoadTranslation = language !== "zh-TW";
@@ -248,7 +248,7 @@ function TourCard({
           {!!tour.featured && tour.status !== "soldout" && (
             <div className="absolute top-3 left-3 inline-flex items-center gap-1 px-2 py-1 bg-[#c9a563] text-white text-[10px] font-semibold tracking-[0.15em] uppercase rounded-md shadow-md">
               <Sparkles className="h-3 w-3" />
-              {t("tours.featuredBadge") || (isEn ? "Featured" : "精選")}
+              {t("tours.featuredBadgeShort")}
             </div>
           )}
           {/* Duration badge overlay — bottom left, on the gradient */}
@@ -259,7 +259,7 @@ function TourCard({
           {/* Round 80.2: low-seats urgency badge — bottom right */}
           {seatsLeft !== null && (
             <div className="absolute bottom-3 right-3 inline-flex items-center gap-1 bg-[#c9a563]/95 text-white text-[10px] font-bold px-2 py-1 rounded-md shadow-sm backdrop-blur">
-              {isEn ? `Only ${seatsLeft} left` : `僅剩 ${seatsLeft} 席`}
+              {t("tours.seatsOnly", { n: String(seatsLeft) })}
             </div>
           )}
         </div>
@@ -644,7 +644,7 @@ export default function Tours() {
               <span className="h-px w-8 bg-[#c9a563]" aria-hidden />
               <p className="text-xs md:text-sm tracking-[0.35em] uppercase">
                 PACK&amp;GO TRAVEL · {pagination?.total ?? tours.length}{" "}
-                {language === "en" ? "CURATED ROUTES" : "條精選路線"}
+                {t("tours.curatedRoutes")}
               </p>
             </div>
             <h1 className="font-serif font-bold text-white text-3xl md:text-5xl lg:text-6xl leading-[1.05] tracking-tight">
@@ -879,7 +879,7 @@ export default function Tours() {
                 {/* Mobile-only header with close button */}
                 <div className="md:hidden flex items-center justify-between px-4 py-3 border-b bg-white sticky top-0">
                   <h3 className="font-semibold text-base">
-                    {language === "en" ? "Filters" : "篩選"}
+                    {t("tours.filtersTitle")}
                     {activeFiltersCount > 0 && (
                       <span className="ml-2 inline-flex items-center justify-center bg-gray-900 text-white text-xs font-bold rounded-full w-5 h-5">
                         {activeFiltersCount}
@@ -928,7 +928,7 @@ export default function Tours() {
                   {/* v78u: Price range chips — major missing filter, customers always ask "what's my budget" */}
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm text-gray-500 font-medium whitespace-nowrap">
-                      {language === "en" ? "Price" : "預算"}
+                      {t("tours.priceLabel")}
                     </span>
                     {PRICE_PRESETS.map((preset, idx) => (
                       <button
@@ -972,9 +972,7 @@ export default function Tours() {
                   </button>
                 )}
                 <Button onClick={() => setShowAdvanced(false)} className="ml-auto rounded-lg">
-                  {language === "en"
-                    ? `View ${pagination?.total ?? tours.length} tours`
-                    : `查看 ${pagination?.total ?? tours.length} 個行程`}
+                  {t("tours.viewNTours", { count: String(pagination?.total ?? tours.length) })}
                 </Button>
               </div>
               </div>
@@ -996,16 +994,12 @@ export default function Tours() {
                   <Search className="h-7 w-7 text-gray-400" />
                 </div>
                 <h3 className="text-xl md:text-2xl font-bold text-gray-900 mb-2">
-                  {language === "en" ? "No tours match your search" : "沒有符合的行程"}
+                  {t("tours.emptyState.title")}
                 </h3>
                 <p className="text-gray-500 mb-6 leading-relaxed">
                   {activeFiltersCount > 0
-                    ? (language === "en"
-                        ? "Try removing one of your filters, or browse other destinations below."
-                        : "試試移除一些篩選條件，或瀏覽下方其他目的地。")
-                    : (language === "en"
-                        ? "Be the first to plan a custom trip — our AI will draft an itinerary in 30 seconds."
-                        : "您可以提交客製需求 — AI 30 秒內為您草擬行程。")}
+                    ? t("tours.emptyState.hintWithFilters")
+                    : t("tours.emptyState.hintNoFilters")}
                 </p>
                 <div className="flex flex-col sm:flex-row gap-3 justify-center mb-8">
                   {activeFiltersCount > 0 && (
@@ -1016,14 +1010,14 @@ export default function Tours() {
                   )}
                   <Button onClick={() => setLocation("/custom-tour-request")} className="rounded-lg">
                     <Sparkles className="h-4 w-4 mr-1.5" />
-                    {language === "en" ? "Request a custom tour" : "客製化行程"}
+                    {t("tours.emptyState.requestCustom")}
                   </Button>
                 </div>
                 {/* Suggest popular destinations as next-best-action */}
                 {topDestinations && topDestinations.length > 0 && (
                   <div>
                     <p className="text-xs uppercase tracking-wider text-gray-400 mb-3">
-                      {language === "en" ? "Popular destinations" : "熱門目的地"}
+                      {t("tours.emptyState.popularDestinations")}
                     </p>
                     <div className="flex flex-wrap gap-2 justify-center">
                       {topDestinations.slice(0, 6).map((dest: any) => (

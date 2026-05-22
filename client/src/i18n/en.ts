@@ -1095,6 +1095,8 @@ export const en = {
   },
 
   rewards: {
+    currentBalance: 'Current balance',
+    pointsWithValue: 'Packpoints (≈ ${value} value)',
     voucherStatusIssued: 'Available',
     voucherStatusRedeemed: 'Redeemed',
     voucherStatusExpired: 'Expired',
@@ -1270,6 +1272,7 @@ export const en = {
     noReviewsYet: 'No reviews yet',
     nextDeparture: 'Next: ',
     seatsLeftSuffix: 'seats left',
+    seatsOnly: 'Only {n} left',
     categoryAll: 'All',
     categoryGroup: 'Group Tours',
     categoryTheme: 'Theme Tours',
@@ -1303,6 +1306,17 @@ export const en = {
     durationLabel: 'Duration:',
     clearAllFilters: 'Clear all filters',
     pageIndicator: 'Page {page} / {total}',
+    curatedRoutes: 'CURATED ROUTES',
+    filtersTitle: 'Filters',
+    priceLabel: 'Price',
+    viewNTours: 'View {count} tours',
+    emptyState: {
+      title: 'No tours match your search',
+      hintWithFilters: 'Try removing one of your filters, or browse other destinations below.',
+      hintNoFilters: 'Be the first to plan a custom trip — our AI will draft an itinerary in 30 seconds.',
+      requestCustom: 'Request a custom tour',
+      popularDestinations: 'Popular destinations',
+    },
   },
 
   similarTours: {
@@ -1319,6 +1333,8 @@ export const en = {
 
   // Tour Detail
   tourDetail: {
+    collapseAll: 'Collapse all',
+    expandAllDays: 'Expand all days',
     overview: 'Overview',
     highlights: 'Highlights',
     attractionIntro: 'Attraction Introduction',

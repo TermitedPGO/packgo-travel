@@ -1106,6 +1106,8 @@ export const zhTW = {
   },
 
   rewards: {
+    currentBalance: '目前餘額',
+    pointsWithValue: 'Packpoint（≈ ${value} 折抵價值）',
     voucherStatusIssued: '可使用',
     voucherStatusRedeemed: '已使用',
     voucherStatusExpired: '已過期',
@@ -1281,6 +1283,7 @@ export const zhTW = {
     noReviewsYet: '尚無評價',
     nextDeparture: '最近出發：',
     seatsLeftSuffix: '席',
+    seatsOnly: '僅剩 {n} 席',
     categoryAll: '全部',
     categoryGroup: '團體旅遊',
     categoryTheme: '主題旅遊',
@@ -1314,6 +1317,17 @@ export const zhTW = {
     durationLabel: '天數：',
     clearAllFilters: '清除所有篩選條件',
     pageIndicator: '第 {page} / {total} 頁',
+    curatedRoutes: '條精選路線',
+    filtersTitle: '篩選',
+    priceLabel: '預算',
+    viewNTours: '查看 {count} 個行程',
+    emptyState: {
+      title: '沒有符合的行程',
+      hintWithFilters: '試試移除一些篩選條件，或瀏覽下方其他目的地。',
+      hintNoFilters: '您可以提交客製需求 — AI 30 秒內為您草擬行程。',
+      requestCustom: '客製化行程',
+      popularDestinations: '熱門目的地',
+    },
   },
 
   similarTours: {
@@ -1330,6 +1344,8 @@ export const zhTW = {
 
   // 行程詳情
   tourDetail: {
+    collapseAll: '全部收合',
+    expandAllDays: '展開全部 {count} 天',
     overview: '行程概覽',
     highlights: '行程亮點',
     attractionIntro: '景點介紹',
