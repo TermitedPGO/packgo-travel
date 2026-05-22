@@ -26,35 +26,38 @@ export default function HomeFAQ() {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
   const { t } = useLocale();
 
+  // 2026-05-22 P16: dropped `|| "中文 fallback"` strings — every key
+  // exists in both zh-TW and en, and the Chinese fallbacks were
+  // leaking to en users in case of any i18n hiccup.
   const intentCards: IntentCard[] = [
     {
       icon: Search,
-      title: t("homeFaq.intent1Title") || "我想找適合的行程",
-      body: t("homeFaq.intent1Body") || "看不完所有行程？告訴我們您的偏好，AI 立刻為您推薦最合適的選擇。",
-      cta: t("homeFaq.intent1Cta") || "瀏覽行程",
+      title: t("homeFaq.intent1Title"),
+      body: t("homeFaq.intent1Body"),
+      cta: t("homeFaq.intent1Cta"),
       href: "/tours",
     },
     {
       icon: FileText,
-      title: t("homeFaq.intent2Title") || "我有客製化需求",
-      body: t("homeFaq.intent2Body") || "想要完全照您節奏走？填寫需求 30 秒拿到 AI 報價單，回覆我們確認即可成行。",
-      cta: t("homeFaq.intent2Cta") || "AI 立即報價",
+      title: t("homeFaq.intent2Title"),
+      body: t("homeFaq.intent2Body"),
+      cta: t("homeFaq.intent2Cta"),
       // v78i fix: was /quote (404). Sprint 3 will build a dedicated /quote page;
       // for now route to the existing custom-tour-request form.
       href: "/custom-tour-request",
     },
     {
       icon: Plane,
-      title: t("homeFaq.intent3Title") || "我已經訂團，要查詢",
-      body: t("homeFaq.intent3Body") || "查看您的訂單、發票、出發前須知、機場集合資訊。",
-      cta: t("homeFaq.intent3Cta") || "查詢訂單",
+      title: t("homeFaq.intent3Title"),
+      body: t("homeFaq.intent3Body"),
+      cta: t("homeFaq.intent3Cta"),
       href: "/profile",
     },
     {
       icon: MessageSquare,
-      title: t("homeFaq.intent4Title") || "我有其他問題",
-      body: t("homeFaq.intent4Body") || "不知該選哪個？跟 AI 客服聊聊，或撥打 +1 (510) 634-2307 真人接聽。",
-      cta: t("homeFaq.intent4Cta") || "聯絡我們",
+      title: t("homeFaq.intent4Title"),
+      body: t("homeFaq.intent4Body"),
+      cta: t("homeFaq.intent4Cta"),
       href: "/contact-us",
     },
   ];
