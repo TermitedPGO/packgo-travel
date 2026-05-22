@@ -14,7 +14,9 @@ export const pdfUploadRouter = Router();
 // SECURITY_AUDIT_2026_05_14 P0-3: 100MB PDF uploads were anonymous.
 // Tour generation from PDF is an admin-only workflow today, so locking
 // these to admin breaks nothing.
-pdfUploadRouter.use(requireAdmin);
+//
+// 2026-05-22 — moved from router-level to per-route middleware (see
+// avatarUpload.ts header — router was intercepting /api/trpc/*).
 
 // 設定 multer 使用記憶體儲存，不限制檔案大小
 const upload = multer({
@@ -38,7 +40,7 @@ const upload = multer({
  * Body: multipart/form-data with 'pdf' field
  * Returns: { url: string, key: string, filename: string, size: number }
  */
-pdfUploadRouter.post("/pdf/upload", upload.single("pdf"), async (req: Request, res: Response) => {
+pdfUploadRouter.post("/pdf/upload", requireAdmin, upload.single("pdf"), async (req: Request, res: Response) => {
   try {
     const file = (req as any).file as Express.Multer.File | undefined;
 
@@ -81,7 +83,7 @@ pdfUploadRouter.post("/pdf/upload", upload.single("pdf"), async (req: Request, r
  * Body: { pdf: base64 string, filename: string }
  * Returns: { url: string, key: string, filename: string, size: number }
  */
-pdfUploadRouter.post("/pdf/upload-base64", async (req, res) => {
+pdfUploadRouter.post("/pdf/upload-base64", requireAdmin, async (req, res) => {
   try {
     const { pdf, filename } = req.body;
 

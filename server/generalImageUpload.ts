@@ -18,7 +18,9 @@ export const generalImageUploadRouter = Router();
 // SECURITY_AUDIT_2026_05_14 P0-4: hero/destination inline-edit uploads
 // were anonymous. These feed EditableHero + EditableDestinations which
 // are admin-only UI surfaces, so gate at the router level.
-generalImageUploadRouter.use(requireAdmin);
+//
+// 2026-05-22 — moved from router-level to per-route middleware (see
+// avatarUpload.ts header — router was intercepting /api/trpc/*).
 
 // multer 設定:記憶體存儲,最大 10MB
 // 2026-05-17 red-team round 5 — strict MIME allowlist. `image/*` accepts
@@ -101,7 +103,7 @@ async function optimizeImage(
  * 通用圖片上傳（FormData with field name "image"）
  * 用於 inline-edit EditableImage 無 tourId 時的 fallback
  */
-generalImageUploadRouter.post("/upload/image", upload.single("image"), async (req, res) => {
+generalImageUploadRouter.post("/upload/image", requireAdmin, upload.single("image"), async (req, res) => {
   try {
     const file = req.file;
     if (!file) {
@@ -143,7 +145,7 @@ generalImageUploadRouter.post("/upload/image", upload.single("image"), async (re
  * 行程相關圖片上傳（FormData with field name "file" + body field "type"）
  * 用於 EditableHero 和 EditableDestinations
  */
-generalImageUploadRouter.post("/upload/tour-image", upload.single("file"), async (req, res) => {
+generalImageUploadRouter.post("/upload/tour-image", requireAdmin, upload.single("file"), async (req, res) => {
   try {
     const file = req.file;
     if (!file) {

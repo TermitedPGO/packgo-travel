@@ -8,7 +8,13 @@ export const avatarUploadRouter = Router();
 // SECURITY_AUDIT_2026_05_14 P0-1: was anonymous → drained R2 storage.
 // Avatar is a per-user profile photo so requireAuth (any logged-in user),
 // not requireAdmin. Customers DO upload their own avatars.
-avatarUploadRouter.use(requireAuth);
+//
+// 2026-05-22 — moved from `router.use(requireAuth)` to per-route middleware.
+// The router is mounted at `app.use("/api", ...)`, so router-level
+// middleware ran on EVERY /api/* request, including /api/trpc/*. That
+// silently broke anonymous tRPC access and made non-admin users 403.
+// Per-route applies auth only to the actual upload endpoint below.
+// (Same fix applied to tourImageUpload, generalImageUpload, pdfUpload.)
 
 // Avatars are user faces; 2 MB is plenty. Anything bigger is either a
 // mistake or abuse, so reject pre-decode rather than after Buffer.from().
@@ -21,7 +27,7 @@ const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
 // that can't execute code.
 const ALLOWED_AVATAR_MIME = new Set(["jpeg", "jpg", "png", "webp", "gif"]);
 
-avatarUploadRouter.post("/upload-avatar", async (req, res) => {
+avatarUploadRouter.post("/upload-avatar", requireAuth, async (req, res) => {
   try {
     const { image } = req.body;
 

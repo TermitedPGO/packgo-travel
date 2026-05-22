@@ -14,7 +14,10 @@ export const tourImageUploadRouter = Router();
 // SECURITY_AUDIT_2026_05_14 P0-2: routes were anonymous → drained R2 +
 // allowed S3-key pollution under any tourId. All tour-image upload paths
 // are admin-only (only Jeff edits tour content).
-tourImageUploadRouter.use(requireAdmin);
+//
+// 2026-05-22 — moved from router-level to per-route middleware (see
+// avatarUpload.ts header for the full story; router was intercepting
+// /api/trpc/* because of `app.use("/api", ...)` mount).
 
 // 圖片尺寸配置（根據用途）
 const IMAGE_SIZES = {
@@ -124,7 +127,7 @@ async function optimizeImage(
  * POST /api/tours/:tourId/upload-image
  * Body: { image: base64 string, path: string (e.g., "hero", "day-1-activity-0") }
  */
-tourImageUploadRouter.post("/tours/:tourId/upload-image", async (req, res) => {
+tourImageUploadRouter.post("/tours/:tourId/upload-image", requireAdmin, async (req, res) => {
   try {
     const { tourId } = req.params;
     const { image, path: imagePath, skipOptimization } = req.body;
@@ -202,7 +205,7 @@ tourImageUploadRouter.post("/tours/:tourId/upload-image", async (req, res) => {
  * POST /api/tours/:tourId/upload-images
  * Body: { images: [{ image: base64 string, path: string }], skipOptimization?: boolean }
  */
-tourImageUploadRouter.post("/tours/:tourId/upload-images", async (req, res) => {
+tourImageUploadRouter.post("/tours/:tourId/upload-images", requireAdmin, async (req, res) => {
   try {
     const { tourId } = req.params;
     const { images, skipOptimization } = req.body;
@@ -326,6 +329,6 @@ tourImageUploadRouter.post("/tours/:tourId/upload-images", async (req, res) => {
  * 獲取圖片尺寸配置
  * GET /api/tours/image-sizes
  */
-tourImageUploadRouter.get("/tours/image-sizes", (req, res) => {
+tourImageUploadRouter.get("/tours/image-sizes", requireAdmin, (req, res) => {
   res.json(IMAGE_SIZES);
 });
