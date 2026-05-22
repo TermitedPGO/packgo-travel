@@ -4,10 +4,10 @@
 > Each Stage 4 sub-agent updates this file when starting/completing a module.
 > Mirrors `progress.md` (v1) but covers Waves 1–4 instead of phases.
 
-**Status:** Stage 3 complete. Waves 1 + 2 shipped. Waves 3 + 4 ready for Stage 4 kickoff.
+**Status:** Stage 4 in flight — Wave 1 + 2 shipped (22 modules); Wave 3 kickoff batch landed (3.1, 3.2, 3.3 = the autonomy thesis foundation).
 **Branch:** main
-**Last commit on this tracker:** (filled at every status flip)
-**Tip commit:** `a7b53b4` (fix: SIGTERM graceful drain + Sentry EPIPE filter)
+**Last commit on this tracker:** `5002832` (Wave 3 Module 3.2 — skill registry)
+**Tip commit:** `5002832`
 **Total modules:** 62 across 4 waves (W1: 9, W2: 13, W3: 13, W4: 27 — of which **9 RN modules deferred to v3** per Jeff 2026-05-19, so v2 actual W4 scope = 18)
 **Task spec total:** ~9,769 lines of markdown across `docs/refactor/tasks/v2-wave-{1..4}/`
 
@@ -30,7 +30,7 @@
 |---|---|---|---|---|---|---|
 | 1 | Foundation + Observability | 9 | ✅ Complete (9 / 9) | ~58 AI / ~3 Jeff | Week 1 (May 19–20) | `8b2215f` passport-at-rest |
 | 2 | God-File Splits | 13 | ✅ Complete (13 / 13) | ~96 AI / ~4 Jeff | Weeks 1–3 (May 19–21) | `c19c57e` getRouteMap extract |
-| 3 | Autonomy Thesis | 13 | ⬜ Not started | ~110 AI / ~4 Jeff | Weeks 3–4 | — |
+| 3 | Autonomy Thesis | 13 | 🟡 3 / 13 (3.1+3.2+3.3) | ~110 AI / ~4 Jeff | Weeks 3–4 | `5002832` |
 | 4 | Mobile (PWA) + Polish | **18 in v2** (9 RN deferred to v3) | ⬜ Not started | ~80 AI / ~7 Jeff (v2 scope) | Weeks 4–5 | — |
 
 **Status legend:** ⬜ TODO · 🟡 IN-PROGRESS · ✅ DONE · ⚠️ BLOCKED · 🚨 DECISION-NEEDED
@@ -135,9 +135,9 @@
 
 | # | Module | Status | Owner | Notes |
 |---|---|---|---|---|
-| 3.1 | [Classifier sub-intents (5 new)](tasks/v2-wave-3/module-3.1-classifier-sub-intents.md) | ⬜ | — | 173 LOC spec; pure additive; **entry candidate** |
-| 3.2 | [Skill registry create](tasks/v2-wave-3/module-3.2-skill-registry-create.md) | ⬜ | — | 214 LOC spec; **entry candidate** |
-| 3.3 | [Skill orchestrator interface](tasks/v2-wave-3/module-3.3-skill-orchestrator-interface.md) | ⬜ | — | **entry candidate** |
+| 3.1 | [Classifier sub-intents (5 new)](tasks/v2-wave-3/module-3.1-classifier-sub-intents.md) | ✅ | claude | `2f773ba` · 5 new intents + 5 fixtures + 6 Vitest cases |
+| 3.2 | [Skill registry create](tasks/v2-wave-3/module-3.2-skill-registry-create.md) | ✅ | claude | `5002832` · Map + lookupSkill + listRegisteredIntents + 16 Vitest cases |
+| 3.3 | [Skill orchestrator interface](tasks/v2-wave-3/module-3.3-skill-orchestrator-interface.md) | ✅ | claude | `3a03480` · SkillOrchestrator + SkillResult discriminated + tourComparisonOrchestrator + 10 Vitest cases |
 | 3.4 | [Inquiry auto-dispatch](tasks/v2-wave-3/module-3.4-inquiry-auto-dispatch.md) | ⬜ | — | 369 LOC spec; depends on 3.1+3.2+3.3; **🔒 LOCKED 2026-05-19 (re-confirmed 2026-05-22): confidence-gated auto-send + env kill-switch + per-skill allow-list + daily quota + brand-damage circuit-breaker. Refund/complaint stay escalation-only.** |
 | 3.5 | [RefundAgent ↔ Stripe webhook](tasks/v2-wave-3/module-3.5-refund-agent-stripe-wire.md) | ⬜ | — | Independent; fires on `charge.refunded` |
 | 3.6 | [Port packgo-china-visa skill](tasks/v2-wave-3/module-3.6-port-packgo-china-visa.md) | ⬜ | — | Depends on 3.2; **🔒 LOCKED 2026-05-22: bilingual (zh-TW left / en right, 2-column)** |
@@ -270,3 +270,4 @@ After the opening batch lands, the supervisor pattern from Wave 2 stays: sub-age
 
 - 2026-05-22 — Created. Wave 1 + 2 marked done; Waves 3 + 4 ready for Stage 4 kickoff.
 - 2026-05-22 — Jeff ack'd W3 decisions (3.4 confidence-gated auto-send / 3.6 bilingual / 3.7 no manual regenerate); W4 RN sub-theme (4.7–4.15) marked ⏸️ v3-deferred; 4.9 retargeted Manus → Google OAuth for future v3 reactivation; pre-flight checklist fully green.
+- 2026-05-22 — Wave 3 Stage 4 kickoff. Modules 3.1 / 3.3 / 3.2 landed (`2f773ba` / `3a03480` / `5002832`). Foundation in place — `lookupSkill(intent)` returns the tourComparison orchestrator for `tour_comparison_request` and `new_inquiry`; null for everything else (pending ports). 32 new Vitest cases. Total suite 711 pass.
