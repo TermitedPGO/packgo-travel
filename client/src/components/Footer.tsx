@@ -150,7 +150,7 @@ export default function Footer() {
                 <span className="px-2.5 py-1 rounded-md bg-white/5 border border-white/20 text-white/90 font-semibold text-xs tracking-wide">
                   Google Reviews
                 </span>
-                <span className="text-xs">{t("footer.readReviews") || "查看真實評價 →"}</span>
+                <span className="text-xs">{t("footer.readReviews")}</span>
               </a>
             )}
             {(import.meta as any).env?.VITE_YELP_REVIEW_URL && (
@@ -163,7 +163,7 @@ export default function Footer() {
                 <span className="px-2.5 py-1 rounded-md bg-white/5 border border-white/20 text-white/90 font-semibold text-xs tracking-wide">
                   Yelp
                 </span>
-                <span className="text-xs">{t("footer.readReviews") || "查看真實評價 →"}</span>
+                <span className="text-xs">{t("footer.readReviews")}</span>
               </a>
             )}
           </div>

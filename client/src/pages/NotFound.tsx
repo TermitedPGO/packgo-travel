@@ -6,7 +6,7 @@ import { useLocale } from "@/contexts/LocaleContext";
 
 export default function NotFound() {
   const [, setLocation] = useLocation();
-  const { t, language } = useLocale();
+  const { t } = useLocale();
 
   return (
     <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-[#faf8f3] to-[#f0e4cc]">
@@ -51,7 +51,7 @@ export default function NotFound() {
               className="border-foreground/30 text-foreground hover:bg-foreground/5 px-6 h-11 rounded-lg gap-2"
             >
               <Compass className="w-4 h-4" />
-              {language === "en" ? "Browse Tours" : "瀏覽行程"}
+              {t("notFound.browseTours")}
             </Button>
           </div>
         </CardContent>

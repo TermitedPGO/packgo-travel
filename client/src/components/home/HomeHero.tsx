@@ -256,10 +256,10 @@ export default function HomeHero({ bgImage }: HomeHeroProps) {
                     ? translateDestination(current.destinationCountry, language)
                     : t("hero.spotlight.fallback")}
                   {current.duration
-                    ? ` · ${current.duration} ${language === "en" ? "days" : "天"}`
+                    ? ` · ${current.duration} ${t("common.days")}`
                     : ""}
                   {current.price
-                    ? ` · ${language === "en" ? "from " : ""}NT$ ${(current.price / 1000).toFixed(0)}K${language === "en" ? "" : " 起"}`
+                    ? ` · ${t("common.from")} NT$ ${(current.price / 1000).toFixed(0)}K`
                     : ""}
                 </span>
               </span>

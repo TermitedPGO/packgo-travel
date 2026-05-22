@@ -119,7 +119,7 @@ export default function HomeFeaturedSpotlight() {
                   <span className="inline-flex items-center gap-1.5">
                     <Clock className="h-4 w-4" />
                     {feature.duration}
-                    {language === "en" ? "D" : "天"}
+                    {t("common.days")}
                   </span>
                 )}
                 {feature.price && (
@@ -174,7 +174,7 @@ export default function HomeFeaturedSpotlight() {
                       <span className="inline-flex items-center gap-1.5 text-white/75">
                         <Clock className="h-3.5 w-3.5" />
                         {tour.duration}
-                        {language === "en" ? "D" : "天"}
+                        {t("common.days")}
                       </span>
                     )}
                     {tour.price && (

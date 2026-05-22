@@ -581,6 +581,7 @@ export const zhTW = {
     trustAccountStatement: '本公司為加州旅客消費補償基金 (TCRF) 之登記參與者，依加州 Business & Professions Code §17550 et seq. 提供消費者保障。',
     stateDisclaimer: '旅遊業者登記不代表加州政府之背書。',
     legalLinks: '法律聲明',
+    readReviews: '查看真實評價 →',
   },
 
   // 服務
@@ -940,6 +941,7 @@ export const zhTW = {
     subtitle: '抱歉，您要找的頁面不存在或已被移除。',
     backToHome: '返回首頁',
     contactUs: '聯絡我們',
+    browseTours: '瀏覽行程',
   },
 
   // 登入頁面

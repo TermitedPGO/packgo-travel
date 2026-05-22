@@ -571,6 +571,7 @@ export const en = {
     trustAccountStatement: 'Pack & Go, LLC is a registered participant in the California Travel Consumer Restitution Fund (TCRF), providing consumer protection under California Business & Professions Code §17550 et seq.',
     stateDisclaimer: 'Registration as a seller of travel does not constitute approval by the State of California.',
     legalLinks: 'Legal',
+    readReviews: 'Read real reviews →',
   },
 
   // Services
@@ -929,6 +930,7 @@ export const en = {
     subtitle: 'Sorry, the page you are looking for does not exist or has been removed.',
     backToHome: 'Back to Home',
     contactUs: 'Contact Us',
+    browseTours: 'Browse Tours',
   },
 
   // Authentication Pages
