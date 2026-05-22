@@ -882,10 +882,10 @@ export default function BookTour() {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <span className="text-base font-semibold text-foreground">
-                          🪙 使用 Packpoint
+                          🪙 {t("bookTour.usePackpoint")}
                         </span>
                         <span className="text-xs text-foreground/60">
-                          餘額 {balance.toLocaleString()} 點
+                          {t("bookTour.pointsBalance", { balance: balance.toLocaleString() })}
                         </span>
                       </div>
                       {packpointDiscount > 0 && (
@@ -932,11 +932,11 @@ export default function BookTour() {
                   {packpointDiscount > 0 && (
                     <>
                       <div className="flex justify-between text-sm text-gray-600">
-                        <span>{t('bookTour.totalAmount')}({t('bookTour.beforeDiscount') || 'before'})</span>
+                        <span>{t('bookTour.totalAmount')}({t('bookTour.totalBeforeDiscount')})</span>
                         <span>${subtotalPrice.toLocaleString()}</span>
                       </div>
                       <div className="flex justify-between text-sm text-[#8a6f3a]">
-                        <span>Packpoint 折抵({safePointsToRedeem.toLocaleString()} 點)</span>
+                        <span>{t('bookTour.pointsDiscountRow', { points: safePointsToRedeem.toLocaleString() })}</span>
                         <span>-${packpointDiscount.toFixed(2)}</span>
                       </div>
                     </>
