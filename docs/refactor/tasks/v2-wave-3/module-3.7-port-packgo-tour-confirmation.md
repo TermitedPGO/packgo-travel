@@ -233,7 +233,7 @@ Refs: docs/refactor/tasks/v2-wave-3/module-3.7-port-packgo-tour-confirmation.md
 ## Decisions needed (Jeff)
 
 1. **Trigger source for autonomy** — module 3.7 only PORTS the skill; does NOT wire a trigger. Should Wave 3 add a payment-succeeded-webhook → tourConfirmation orchestrator dispatch? Default: **defer to v3** (audit didn't flag it P0; Jeff currently uses `sendBookingConfirmation` email which is good-enough). Confirm or override.
-2. **Admin tRPC manual-trigger endpoint** — `tools.generateTourConfirmation({ bookingId })` for Jeff's "regenerate this confirmation PDF" use case. Default: skip in this module; if Jeff wants it, separate 1h follow-up module.
+2. **Admin tRPC manual-trigger endpoint** — `tools.generateTourConfirmation({ bookingId })` for Jeff's "regenerate this confirmation PDF" use case. **🔒 LOCKED 2026-05-22 (Jeff): skip — auto-only, no manual button.** Rationale: the dispatcher (module 3.4) auto-sends via gmail when intent matches; explicit regenerate path adds UI surface area without payback. If Jeff later finds a need, file as a separate 1h follow-up.
 3. **PDF storage** — when generated via the future autonomous trigger, where does the PDF go? S3 path `confirmations/<bookingId>/<timestamp>.pdf` proposed. Default: S3.
 
 (Module proceeds with proposed defaults if Jeff defers; #1 is the key one — without a trigger, this is pure code shelf-stock until v3.)

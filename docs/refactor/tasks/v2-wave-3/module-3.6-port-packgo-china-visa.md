@@ -248,7 +248,7 @@ Refs: docs/refactor/tasks/v2-wave-3/module-3.6-port-packgo-china-visa.md
 ## Decisions needed (Jeff)
 
 1. **Default `processingTier`** — `standard` proposed. Jeff may prefer `express` as default to push higher-margin tier. Default: standard (customer can upgrade later).
-2. **Bilingual mode** — current draft chooses one language based on `ctx.language`. Alternative: always render both languages side-by-side in a 2-column layout (Jeff's existing print PDFs may do this). Read SKILL.md to confirm; default to one-language for v2 simplicity.
+2. **Bilingual mode** — **🔒 LOCKED 2026-05-22 (Jeff):** render both languages side-by-side in a 2-column layout (zh-TW on left, en on right) regardless of `ctx.language`. Mirrors Jeff's existing print PDFs. The `ctx.language` field is still used for the cover letter / instructions section above the form.
 3. **Fee inclusion in PDF** — proposed: fee shown next to processing tier. Jeff may prefer "Fee on consultation" placeholder. Default: numeric fee.
 
-(Module proceeds with proposed defaults if Jeff defers.)
+(Module proceeds with proposed defaults if Jeff defers on #1 + #3.)

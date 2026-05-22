@@ -1,6 +1,8 @@
-# v2 · Wave 4 · Module 4.9 — Manus OAuth deep-link / Universal Link SPIKE (WAVE-4 BLOCKER)
+# v2 · Wave 4 · Module 4.9 — Google OAuth deep-link / Universal Link SPIKE (WAVE-4 BLOCKER)
 
 > ⏸️ **DEFERRED to v3** — Apple Developer Program $99/yr + Google Play $25 not committed. Task content preserved for v3 re-activation; no execution in v2.
+>
+> **🔒 LOCKED 2026-05-22 (Jeff): when reactivated in v3, target Google OAuth** (matches the current web auth — `server/googleAuth.ts` via passport-google-oauth20). The previous "Manus OAuth" framing in this file is stale; web auth migrated to Google in early May 2026. Sub-agent re-reading this file in v3 must read `server/googleAuth.ts` and Google's mobile OAuth docs (https://developers.google.com/identity/protocols/oauth2/native-app), NOT the Manus docs referenced below. **Path A redirect URI becomes `com.packgo.app://auth/callback` per Google's reverse-DNS convention.**
 
 **Parent plan:** docs/refactor/v2-plan.md (Wave 4 · Domain L2 — Admin RN Expo, §Module 4.9) + risk register #3
 **Audit ref:** v2-audit-2026-05-19.md §L (Mobile, NEW domain)

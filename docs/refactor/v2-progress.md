@@ -8,7 +8,7 @@
 **Branch:** main
 **Last commit on this tracker:** (filled at every status flip)
 **Tip commit:** `a7b53b4` (fix: SIGTERM graceful drain + Sentry EPIPE filter)
-**Total modules:** 62 across 4 waves (W1: 9, W2: 13, W3: 13, W4: 27)
+**Total modules:** 62 across 4 waves (W1: 9, W2: 13, W3: 13, W4: 27 — of which **9 RN modules deferred to v3** per Jeff 2026-05-19, so v2 actual W4 scope = 18)
 **Task spec total:** ~9,769 lines of markdown across `docs/refactor/tasks/v2-wave-{1..4}/`
 
 ---
@@ -31,7 +31,7 @@
 | 1 | Foundation + Observability | 9 | ✅ Complete (9 / 9) | ~58 AI / ~3 Jeff | Week 1 (May 19–20) | `8b2215f` passport-at-rest |
 | 2 | God-File Splits | 13 | ✅ Complete (13 / 13) | ~96 AI / ~4 Jeff | Weeks 1–3 (May 19–21) | `c19c57e` getRouteMap extract |
 | 3 | Autonomy Thesis | 13 | ⬜ Not started | ~110 AI / ~4 Jeff | Weeks 3–4 | — |
-| 4 | Mobile + Polish | 27 | ⬜ Not started | ~156 AI / ~11 Jeff | Weeks 4–6 | — |
+| 4 | Mobile (PWA) + Polish | **18 in v2** (9 RN deferred to v3) | ⬜ Not started | ~80 AI / ~7 Jeff (v2 scope) | Weeks 4–5 | — |
 
 **Status legend:** ⬜ TODO · 🟡 IN-PROGRESS · ✅ DONE · ⚠️ BLOCKED · 🚨 DECISION-NEEDED
 
@@ -138,10 +138,10 @@
 | 3.1 | [Classifier sub-intents (5 new)](tasks/v2-wave-3/module-3.1-classifier-sub-intents.md) | ⬜ | — | 173 LOC spec; pure additive; **entry candidate** |
 | 3.2 | [Skill registry create](tasks/v2-wave-3/module-3.2-skill-registry-create.md) | ⬜ | — | 214 LOC spec; **entry candidate** |
 | 3.3 | [Skill orchestrator interface](tasks/v2-wave-3/module-3.3-skill-orchestrator-interface.md) | ⬜ | — | **entry candidate** |
-| 3.4 | [Inquiry auto-dispatch](tasks/v2-wave-3/module-3.4-inquiry-auto-dispatch.md) | ⬜ | — | 369 LOC spec; depends on 3.1+3.2+3.3; **🚨 plan-locked draft-first (no auto-send)** |
+| 3.4 | [Inquiry auto-dispatch](tasks/v2-wave-3/module-3.4-inquiry-auto-dispatch.md) | ⬜ | — | 369 LOC spec; depends on 3.1+3.2+3.3; **🔒 LOCKED 2026-05-19 (re-confirmed 2026-05-22): confidence-gated auto-send + env kill-switch + per-skill allow-list + daily quota + brand-damage circuit-breaker. Refund/complaint stay escalation-only.** |
 | 3.5 | [RefundAgent ↔ Stripe webhook](tasks/v2-wave-3/module-3.5-refund-agent-stripe-wire.md) | ⬜ | — | Independent; fires on `charge.refunded` |
-| 3.6 | [Port packgo-china-visa skill](tasks/v2-wave-3/module-3.6-port-packgo-china-visa.md) | ⬜ | — | Depends on 3.2; **🚨 bilingual vs single-language — default single, Jeff override if needed** |
-| 3.7 | [Port packgo-tour-confirmation skill](tasks/v2-wave-3/module-3.7-port-packgo-tour-confirmation.md) | ⬜ | — | Independent; **🚨 draft-first (Jeff reviews) NOT auto-send post-payment** |
+| 3.6 | [Port packgo-china-visa skill](tasks/v2-wave-3/module-3.6-port-packgo-china-visa.md) | ⬜ | — | Depends on 3.2; **🔒 LOCKED 2026-05-22: bilingual (zh-TW left / en right, 2-column)** |
+| 3.7 | [Port packgo-tour-confirmation skill](tasks/v2-wave-3/module-3.7-port-packgo-tour-confirmation.md) | ⬜ | — | Independent; **🔒 LOCKED 2026-05-22: no manual regenerate button (auto-only via dispatcher 3.4)** |
 | 3.8 | [Vitest — InquiryAgent](tasks/v2-wave-3/module-3.8-vitest-inquiry-agent.md) | ⬜ | — | Extends 3.1's `inquiryAgent.test.ts` |
 | 3.9 | [Vitest — masterAgent](tasks/v2-wave-3/module-3.9-vitest-master-agent.md) | ⬜ | — | Supervisor + email template happy path |
 | 3.10 | [Vitest — autonomous agents batch (15 files)](tasks/v2-wave-3/module-3.10-vitest-autonomous-agents-batch.md) | ⬜ | — | One per agent; mostly happy-path + 1 edge |
@@ -151,10 +151,7 @@
 
 **Verification gate:** All 13 modules' Vitest cases pass; `pnpm tsc --noEmit` clean; **end-to-end smoke:** a manually-crafted inbound email of each new intent type lands the right skill via auto-dispatch.
 
-**Manual Jeff interventions during W3:**
-- 🚨 **Module 3.4 (15 min):** Confirm "draft-first never auto-send" lock — auto-send was de-scoped per the Pocket-OS 9-second-DB-wipe reflection
-- 🚨 **Module 3.6 (5 min):** Bilingual visa form output? Recommend single-language (per `ctx.language`)
-- 🚨 **Module 3.7 (10 min):** Optional admin tRPC manual-trigger endpoint (`tools.generateTourConfirmation({ bookingId })`) for "regenerate this PDF" use case — defer or include?
+**Manual Jeff interventions during W3:** All architecture-level decisions locked 2026-05-22. Remaining runtime callouts are tactical (review fixture PDFs, confirm thresholds in module 3.12, etc.) — surfaced at module-execution time, not pre-kickoff.
 
 **Risks / known landmines:**
 - v1 git-race lesson: sub-agents commit sequentially via supervisor relay
@@ -170,12 +167,14 @@
 
 **Pre-conditions:** Wave 3 must ship inbox/chat tRPC procedures the mobile app consumes. **However, the PWA half (4.1–4.6) and the polish half (4.16–4.27) are independent of W3 and can run in parallel.**
 
+**🔒 v2 scope decision 2026-05-19:** RN admin app sub-theme (4.7–4.15, 9 modules) **DEFERRED to v3.** Apple Developer ($99/yr) + Google Play ($25) not committed; revisit after mobile-traffic data lands. Module 4.9 retargeted from Manus → Google OAuth for v3 reactivation (locked 2026-05-22).
+
 ### Sub-themes
 
 ```
-PWA          (4.1–4.6)    ── independent of W3   ── start in parallel
-React Native (4.7–4.15)   ── needs W3 inbox/chat ── start after W3 ships
-Polish       (4.16–4.27)  ── mostly independent  ── trickle through wave
+PWA          (4.1–4.6)    ── independent of W3   ── start in parallel    [IN SCOPE]
+React Native (4.7–4.15)   ── needs W3 inbox/chat ── start after W3 ships [DEFERRED v3]
+Polish       (4.16–4.27)  ── mostly independent  ── trickle through wave [IN SCOPE]
 ```
 
 ### Module table
@@ -191,19 +190,19 @@ Polish       (4.16–4.27)  ── mostly independent  ── trickle through wa
 | 4.5 | [Install prompt UX](tasks/v2-wave-4/module-4.5-install-prompt-ux.md) | ⬜ | Add-to-home-screen flow |
 | 4.6 | [Lighthouse PWA gate (CI)](tasks/v2-wave-4/module-4.6-lighthouse-pwa-gate.md) | ⬜ | PWA ≥ 90, perf ≥ 70 |
 
-#### Sub-theme B — React Native admin (Expo) · needs W3 inbox API
+#### Sub-theme B — React Native admin (Expo) · **DEFERRED to v3** · needs Apple+Google dev accounts ($124/yr)
 
 | # | Module | Status | Notes |
 |---|---|---|---|
-| 4.7 | [Expo monorepo setup](tasks/v2-wave-4/module-4.7-expo-monorepo-setup.md) | ⬜ | `@packgo/shared` workspace |
-| 4.8 | [EAS build config](tasks/v2-wave-4/module-4.8-eas-build-config.md) | ⬜ | 459 LOC spec — most-detailed module |
-| 4.9 | [Manus OAuth deep-link spike](tasks/v2-wave-4/module-4.9-manus-oauth-deep-link-spike.md) | ⬜ | **🚨 Manus was replaced by Google OAuth — update spike to target Google** |
-| 4.10 | [RN inbox screen](tasks/v2-wave-4/module-4.10-rn-inbox-screen.md) | ⬜ | |
-| 4.11 | [RN agent chat screen](tasks/v2-wave-4/module-4.11-rn-agent-chat-screen.md) | ⬜ | |
-| 4.12 | [RN bookings screens](tasks/v2-wave-4/module-4.12-rn-bookings-screens.md) | ⬜ | |
-| 4.13 | [Expo Notifications + APNS/FCM](tasks/v2-wave-4/module-4.13-expo-notifications-apns-fcm.md) | ⬜ | |
-| 4.14 | [Detox smoke tests](tasks/v2-wave-4/module-4.14-rn-detox-smoke-tests.md) | ⬜ | |
-| 4.15 | [App store submission prep](tasks/v2-wave-4/module-4.15-app-store-submission-prep.md) | ⬜ | TestFlight + Play Console |
+| 4.7 | [Expo monorepo setup](tasks/v2-wave-4/module-4.7-expo-monorepo-setup.md) | ⏸️ v3 | `@packgo/shared` workspace |
+| 4.8 | [EAS build config](tasks/v2-wave-4/module-4.8-eas-build-config.md) | ⏸️ v3 | 459 LOC spec — most-detailed module |
+| 4.9 | [Google OAuth deep-link spike](tasks/v2-wave-4/module-4.9-manus-oauth-deep-link-spike.md) | ⏸️ v3 | **🔒 LOCKED 2026-05-22: target Google OAuth (was Manus, stale)** |
+| 4.10 | [RN inbox screen](tasks/v2-wave-4/module-4.10-rn-inbox-screen.md) | ⏸️ v3 | |
+| 4.11 | [RN agent chat screen](tasks/v2-wave-4/module-4.11-rn-agent-chat-screen.md) | ⏸️ v3 | |
+| 4.12 | [RN bookings screens](tasks/v2-wave-4/module-4.12-rn-bookings-screens.md) | ⏸️ v3 | |
+| 4.13 | [Expo Notifications + APNS/FCM](tasks/v2-wave-4/module-4.13-expo-notifications-apns-fcm.md) | ⏸️ v3 | |
+| 4.14 | [Detox smoke tests](tasks/v2-wave-4/module-4.14-rn-detox-smoke-tests.md) | ⏸️ v3 | |
+| 4.15 | [App store submission prep](tasks/v2-wave-4/module-4.15-app-store-submission-prep.md) | ⏸️ v3 | TestFlight + Play Console |
 
 #### Sub-theme C — Polish · mostly independent
 
@@ -247,8 +246,8 @@ Polish       (4.16–4.27)  ── mostly independent  ── trickle through wa
 - [x] Wave 1 + 2 shipped + verified in prod
 - [x] tsc clean / Vitest green on tip commit
 - [x] Husky pre-commit gate active (commits without `pnpm tsc --noEmit` succeed are blocked)
-- [ ] Jeff acks the W3 decision list (Module 3.4 draft-first lock; 3.6 bilingual; 3.7 manual-trigger opt-in)
-- [ ] Jeff acks the W4 decision list (4.1 theme; 4.3 iOS copy; 4.6 gate; 4.9 OAuth target; 4.27 stash triage)
+- [x] **Jeff W3 decisions ack'd 2026-05-22:** 3.4 confidence-gated auto-send (was draft-first; reversed via §3.4 task spec safeguards); 3.6 bilingual (zh/en 2-col); 3.7 no manual regenerate
+- [x] **Jeff W4 v2-scope decisions ack'd 2026-05-22:** 4.9 retargeted Manus → Google OAuth (deferred to v3 anyway). 4.1/4.3/4.6 runtime decisions deferred to module-execution (not kickoff blockers)
 
 **Recommended (smooth ride):**
 - [ ] R2 + Sentry credentials rotated (Jeff exposed them in chat earlier)
@@ -270,3 +269,4 @@ After the opening batch lands, the supervisor pattern from Wave 2 stays: sub-age
 ## Change log on this file
 
 - 2026-05-22 — Created. Wave 1 + 2 marked done; Waves 3 + 4 ready for Stage 4 kickoff.
+- 2026-05-22 — Jeff ack'd W3 decisions (3.4 confidence-gated auto-send / 3.6 bilingual / 3.7 no manual regenerate); W4 RN sub-theme (4.7–4.15) marked ⏸️ v3-deferred; 4.9 retargeted Manus → Google OAuth for future v3 reactivation; pre-flight checklist fully green.
