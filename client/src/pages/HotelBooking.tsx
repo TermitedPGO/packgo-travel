@@ -214,9 +214,9 @@ export default function HotelBooking() {
                       <div className="flex items-center justify-between py-2">
                         <div className="text-sm font-medium text-gray-900">{t('hero.search.hotel.room')}</div>
                         <div className="flex items-center gap-3">
-                          <button onClick={() => setRooms(Math.max(1, rooms - 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-40" disabled={rooms <= 1}>−</button>
+                          <button aria-label={t('common.decrease')} onClick={() => setRooms(Math.max(1, rooms - 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-40" disabled={rooms <= 1}>−</button>
                           <span className="w-6 text-center font-medium">{rooms}</span>
-                          <button onClick={() => setRooms(Math.min(8, rooms + 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50" disabled={rooms >= 8}>+</button>
+                          <button aria-label={t('common.increase')} onClick={() => setRooms(Math.min(8, rooms + 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50" disabled={rooms >= 8}>+</button>
                         </div>
                       </div>
                       {/* Adults */}
@@ -226,9 +226,9 @@ export default function HotelBooking() {
                           <div className="text-xs text-gray-500">{t('hero.search.hotel.perRoom')}</div>
                         </div>
                         <div className="flex items-center gap-3">
-                          <button onClick={() => setHotelAdults(Math.max(1, hotelAdults - 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-40" disabled={hotelAdults <= 1}>−</button>
+                          <button aria-label={t('common.decrease')} onClick={() => setHotelAdults(Math.max(1, hotelAdults - 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-40" disabled={hotelAdults <= 1}>−</button>
                           <span className="w-6 text-center font-medium">{hotelAdults}</span>
-                          <button onClick={() => setHotelAdults(Math.min(6, hotelAdults + 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50" disabled={hotelAdults >= 6}>+</button>
+                          <button aria-label={t('common.increase')} onClick={() => setHotelAdults(Math.min(6, hotelAdults + 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50" disabled={hotelAdults >= 6}>+</button>
                         </div>
                       </div>
                       {/* Children */}
@@ -238,9 +238,9 @@ export default function HotelBooking() {
                           <div className="text-xs text-gray-500">{t('hero.search.hotel.childrenAge')}</div>
                         </div>
                         <div className="flex items-center gap-3">
-                          <button onClick={() => setHotelChildren(Math.max(0, hotelChildren - 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-40" disabled={hotelChildren <= 0}>−</button>
+                          <button aria-label={t('common.decrease')} onClick={() => setHotelChildren(Math.max(0, hotelChildren - 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-40" disabled={hotelChildren <= 0}>−</button>
                           <span className="w-6 text-center font-medium">{hotelChildren}</span>
-                          <button onClick={() => setHotelChildren(Math.min(4, hotelChildren + 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50" disabled={hotelChildren >= 4}>+</button>
+                          <button aria-label={t('common.increase')} onClick={() => setHotelChildren(Math.min(4, hotelChildren + 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50" disabled={hotelChildren >= 4}>+</button>
                         </div>
                       </div>
                       <button onClick={() => setShowRoomPicker(false)} className="mt-3 w-full py-2 bg-black text-white text-sm font-medium rounded-lg hover:bg-gray-800">

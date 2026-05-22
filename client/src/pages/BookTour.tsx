@@ -571,7 +571,7 @@ export default function BookTour() {
                             onClick={() => row.setValue(Math.max(0, row.value - 1))}
                             disabled={row.value <= 0}
                             className="w-9 h-9 rounded-full border border-gray-300 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed text-lg font-medium text-gray-700"
-                            aria-label={`decrease ${row.label}`}
+                            aria-label={`${t('common.decrease')} ${row.label}`}
                           >
                             −
                           </button>
@@ -580,7 +580,7 @@ export default function BookTour() {
                             type="button"
                             onClick={() => row.setValue(row.value + 1)}
                             className="w-9 h-9 rounded-full border border-gray-300 hover:bg-gray-100 text-lg font-medium text-gray-700"
-                            aria-label={`increase ${row.label}`}
+                            aria-label={`${t('common.increase')} ${row.label}`}
                           >
                             +
                           </button>

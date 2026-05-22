@@ -232,9 +232,9 @@ export default function FlightBooking() {
                           <div className="text-xs text-gray-500">{t('hero.search.flight.adultsAge')}</div>
                         </div>
                         <div className="flex items-center gap-3">
-                          <button onClick={() => setAdults(Math.max(1, adults - 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-40" disabled={adults <= 1}>−</button>
+                          <button aria-label={t('common.decrease')} onClick={() => setAdults(Math.max(1, adults - 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-40" disabled={adults <= 1}>−</button>
                           <span className="w-6 text-center font-medium">{adults}</span>
-                          <button onClick={() => setAdults(Math.min(9, adults + 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50" disabled={adults >= 9}>+</button>
+                          <button aria-label={t('common.increase')} onClick={() => setAdults(Math.min(9, adults + 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50" disabled={adults >= 9}>+</button>
                         </div>
                       </div>
                       {/* Children */}
@@ -244,9 +244,9 @@ export default function FlightBooking() {
                           <div className="text-xs text-gray-500">{t('hero.search.flight.childrenAge')}</div>
                         </div>
                         <div className="flex items-center gap-3">
-                          <button onClick={() => setChildren(Math.max(0, children - 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-40" disabled={children <= 0}>−</button>
+                          <button aria-label={t('common.decrease')} onClick={() => setChildren(Math.max(0, children - 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-40" disabled={children <= 0}>−</button>
                           <span className="w-6 text-center font-medium">{children}</span>
-                          <button onClick={() => setChildren(Math.min(9, children + 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50" disabled={children >= 9}>+</button>
+                          <button aria-label={t('common.increase')} onClick={() => setChildren(Math.min(9, children + 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50" disabled={children >= 9}>+</button>
                         </div>
                       </div>
                       {/* Infants */}
@@ -256,9 +256,9 @@ export default function FlightBooking() {
                           <div className="text-xs text-gray-500">{t('hero.search.flight.infantsAge')}</div>
                         </div>
                         <div className="flex items-center gap-3">
-                          <button onClick={() => setInfants(Math.max(0, infants - 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-40" disabled={infants <= 0}>−</button>
+                          <button aria-label={t('common.decrease')} onClick={() => setInfants(Math.max(0, infants - 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-40" disabled={infants <= 0}>−</button>
                           <span className="w-6 text-center font-medium">{infants}</span>
-                          <button onClick={() => setInfants(Math.min(adults, infants + 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50" disabled={infants >= adults}>+</button>
+                          <button aria-label={t('common.increase')} onClick={() => setInfants(Math.min(adults, infants + 1))} className="w-8 h-8 rounded-lg border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-50" disabled={infants >= adults}>+</button>
                         </div>
                       </div>
                       <button onClick={() => setShowPassengerPicker(false)} className="mt-3 w-full py-2 bg-black text-white text-sm font-medium rounded-lg hover:bg-gray-800">

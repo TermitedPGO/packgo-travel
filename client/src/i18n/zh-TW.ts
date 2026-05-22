@@ -4,6 +4,8 @@ export const zhTW = {
   common: {
     greetingComma: '，',
     search: '搜尋',
+    increase: '增加',
+    decrease: '減少',
     subscribe: '訂閱',
     viewMore: '查看更多',
     viewItinerary: '查看行程',

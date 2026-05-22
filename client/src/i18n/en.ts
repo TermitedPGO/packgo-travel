@@ -4,6 +4,8 @@ export const en = {
   common: {
     greetingComma: ', ',
     search: 'Search',
+    increase: 'Increase',
+    decrease: 'Decrease',
     subscribe: 'Subscribe',
     viewMore: 'View More',
     viewItinerary: 'View Itinerary',
