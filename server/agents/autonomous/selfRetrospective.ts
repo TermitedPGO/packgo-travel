@@ -16,7 +16,7 @@
  * a weekly cron.
  */
 
-import { invokeLLM, type Message } from "../../_core/llm";
+import { invokeLLM, type Message, type Tool } from "../../_core/llm";
 
 type Outcome = {
   agentName: string;
@@ -85,87 +85,94 @@ export type RetrospectiveOutput = {
   proposals: PolicyProposal[];
 };
 
-const PROPOSAL_TOOL = {
-  name: "submit_retrospective",
-  description:
-    "Submit a structured retrospective analysis with optional policy change proposals.",
-  parameters: {
-    type: "object",
-    properties: {
-      summary: {
-        type: "string",
-        description:
-          "2-3 sentence executive summary of the week. Cite real numbers.",
-      },
-      perAgentObservations: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            agentName: { type: "string" },
-            totalActions: { type: "integer" },
-            overrides: { type: "integer" },
-            overrideRate: { type: "number" },
-            notableThemes: {
-              type: "array",
-              items: { type: "string" },
-              description: "0-3 patterns you noticed (e.g. 'refund_request often misclassified as complaint')",
+// 2026-05-21 hotfix: wrap in OpenAI-nested shape (see inquiryAgent.ts header).
+const PROPOSAL_TOOL: Tool = {
+  type: "function",
+  function: {
+    name: "submit_retrospective",
+    description:
+      "Submit a structured retrospective analysis with optional policy change proposals.",
+    parameters: {
+      type: "object",
+      properties: {
+        summary: {
+          type: "string",
+          description:
+            "2-3 sentence executive summary of the week. Cite real numbers.",
+        },
+        perAgentObservations: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              agentName: { type: "string" },
+              totalActions: { type: "integer" },
+              overrides: { type: "integer" },
+              overrideRate: { type: "number" },
+              notableThemes: {
+                type: "array",
+                items: { type: "string" },
+                description:
+                  "0-3 patterns you noticed (e.g. 'refund_request often misclassified as complaint')",
+              },
             },
+            required: [
+              "agentName",
+              "totalActions",
+              "overrides",
+              "overrideRate",
+              "notableThemes",
+            ],
           },
-          required: [
-            "agentName",
-            "totalActions",
-            "overrides",
-            "overrideRate",
-            "notableThemes",
-          ],
+        },
+        proposals: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              agentName: { type: "string" },
+              proposedRulesDiff: {
+                type: "string",
+                description:
+                  "Human-readable summary: e.g. 'lower booking_question.minConfidence from 80 to 75'",
+              },
+              proposedFullRules: {
+                type: "string",
+                description:
+                  "Full proposed policy as JSON string. Must be valid JSON parseable as object.",
+              },
+              reasoning: {
+                type: "string",
+                description: "2-4 sentence rationale citing specific data.",
+              },
+              evidence: {
+                type: "array",
+                items: { type: "string" },
+                description: "Bullets pointing to specific outcomes / patterns.",
+              },
+              confidence: {
+                type: "integer",
+                minimum: 0,
+                maximum: 100,
+                description:
+                  "How confident the proposal is right. Be conservative.",
+              },
+            },
+            required: [
+              "agentName",
+              "proposedRulesDiff",
+              "proposedFullRules",
+              "reasoning",
+              "evidence",
+              "confidence",
+            ],
+          },
+          description:
+            "0-3 policy change proposals. Empty array if data doesn't support any change. Be conservative — better to propose nothing than propose churn.",
         },
       },
-      proposals: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            agentName: { type: "string" },
-            proposedRulesDiff: {
-              type: "string",
-              description:
-                "Human-readable summary: e.g. 'lower booking_question.minConfidence from 80 to 75'",
-            },
-            proposedFullRules: {
-              type: "string",
-              description: "Full proposed policy as JSON string. Must be valid JSON parseable as object.",
-            },
-            reasoning: {
-              type: "string",
-              description: "2-4 sentence rationale citing specific data.",
-            },
-            evidence: {
-              type: "array",
-              items: { type: "string" },
-              description: "Bullets pointing to specific outcomes / patterns.",
-            },
-            confidence: {
-              type: "integer",
-              minimum: 0,
-              maximum: 100,
-              description: "How confident the proposal is right. Be conservative.",
-            },
-          },
-          required: [
-            "agentName",
-            "proposedRulesDiff",
-            "proposedFullRules",
-            "reasoning",
-            "evidence",
-            "confidence",
-          ],
-        },
-        description:
-          "0-3 policy change proposals. Empty array if data doesn't support any change. Be conservative — better to propose nothing than propose churn.",
-      },
+      required: ["summary", "perAgentObservations", "proposals"],
     },
-    required: ["summary", "perAgentObservations", "proposals"],
   },
 };
 
@@ -294,7 +301,7 @@ export async function runSelfRetrospective(
   const result = await invokeLLM({
     model: "claude-sonnet-4-5-20250929",
     messages,
-    tools: [PROPOSAL_TOOL as any],
+    tools: [PROPOSAL_TOOL],
     toolChoice: { name: "submit_retrospective" },
     maxTokens: 3000,
   });

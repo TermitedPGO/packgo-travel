@@ -13,7 +13,7 @@
  *   - suggested next action (with explicit confidence + caveats)
  */
 
-import { invokeLLM, type Message } from "../../_core/llm";
+import { invokeLLM, type Message, type Tool } from "../../_core/llm";
 
 export const DEFAULT_REFUND_POLICY = {
   alwaysEscalate: true, // hard rule — agent never replies directly
@@ -63,51 +63,56 @@ export type RefundAgentOutput = {
   reasoning: string;
 };
 
-const TOOL = {
-  name: "submit_refund_triage",
-  description: "Submit triage of a customer refund request — for Jeff's eyes only.",
-  parameters: {
-    type: "object",
-    properties: {
-      severity: { type: "string", enum: ["low", "medium", "high", "critical"] },
-      reasonCategory: {
-        type: "string",
-        enum: [
-          "service_quality",
-          "logistics_failure",
-          "weather_or_external",
-          "personal_emergency",
-          "buyer_remorse",
-          "fraud_suspected",
-          "unclear",
-        ],
-      },
-      extractedFacts: {
-        type: "object",
-        properties: {
-          bookingIdMentioned: { type: "string" },
-          amountMentioned: { type: "string" },
-          dateRangeMentioned: { type: "string" },
-          specificIncidents: { type: "array", items: { type: "string" } },
+// 2026-05-21 hotfix: wrap in OpenAI-nested shape (see inquiryAgent.ts header).
+const TOOL: Tool = {
+  type: "function",
+  function: {
+    name: "submit_refund_triage",
+    description:
+      "Submit triage of a customer refund request — for Jeff's eyes only.",
+    parameters: {
+      type: "object",
+      properties: {
+        severity: { type: "string", enum: ["low", "medium", "high", "critical"] },
+        reasonCategory: {
+          type: "string",
+          enum: [
+            "service_quality",
+            "logistics_failure",
+            "weather_or_external",
+            "personal_emergency",
+            "buyer_remorse",
+            "fraud_suspected",
+            "unclear",
+          ],
         },
-        required: ["specificIncidents"],
+        extractedFacts: {
+          type: "object",
+          properties: {
+            bookingIdMentioned: { type: "string" },
+            amountMentioned: { type: "string" },
+            dateRangeMentioned: { type: "string" },
+            specificIncidents: { type: "array", items: { type: "string" } },
+          },
+          required: ["specificIncidents"],
+        },
+        customerEmotionalState: { type: "string" },
+        jeffInternalBriefing: { type: "string" },
+        suggestedJeffActions: { type: "array", items: { type: "string" } },
+        confidence: { type: "integer", minimum: 0, maximum: 100 },
+        reasoning: { type: "string" },
       },
-      customerEmotionalState: { type: "string" },
-      jeffInternalBriefing: { type: "string" },
-      suggestedJeffActions: { type: "array", items: { type: "string" } },
-      confidence: { type: "integer", minimum: 0, maximum: 100 },
-      reasoning: { type: "string" },
+      required: [
+        "severity",
+        "reasonCategory",
+        "extractedFacts",
+        "customerEmotionalState",
+        "jeffInternalBriefing",
+        "suggestedJeffActions",
+        "confidence",
+        "reasoning",
+      ],
     },
-    required: [
-      "severity",
-      "reasonCategory",
-      "extractedFacts",
-      "customerEmotionalState",
-      "jeffInternalBriefing",
-      "suggestedJeffActions",
-      "confidence",
-      "reasoning",
-    ],
   },
 };
 
@@ -162,7 +167,7 @@ export async function runRefundAgent(
   const result = await invokeLLM({
     model: "claude-sonnet-4-5-20250929",
     messages,
-    tools: [TOOL as any],
+    tools: [TOOL],
     toolChoice: { name: "submit_refund_triage" },
     maxTokens: 1800,
   });

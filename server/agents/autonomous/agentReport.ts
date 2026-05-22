@@ -18,7 +18,7 @@
  *   - future cron:    weekly Monday morning auto-fire
  */
 
-import { invokeLLM, type Message } from "../../_core/llm";
+import { invokeLLM, type Message, type Tool } from "../../_core/llm";
 
 type Outcome = {
   agentName: string;
@@ -109,42 +109,47 @@ function aggregateStats(outcomes: Outcome[]): AgentReportOutput["stats"] {
   };
 }
 
-const REPORT_TOOL = {
-  name: "submit_status_report",
-  description:
-    "Submit a structured status report to Jeff, written in the agent's own voice.",
-  parameters: {
-    type: "object",
-    properties: {
-      summary: {
-        type: "string",
-        description: "1-2 sentences: what you've been doing + how it's going.",
+// 2026-05-21 hotfix: wrap in OpenAI-nested shape (see inquiryAgent.ts header).
+const REPORT_TOOL: Tool = {
+  type: "function",
+  function: {
+    name: "submit_status_report",
+    description:
+      "Submit a structured status report to Jeff, written in the agent's own voice.",
+    parameters: {
+      type: "object",
+      properties: {
+        summary: {
+          type: "string",
+          description:
+            "1-2 sentences: what you've been doing + how it's going.",
+        },
+        accomplishments: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "0-4 concrete things you handled well. Cite outcome counts or specific patterns. Empty array if nothing notable.",
+        },
+        concerns: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "0-4 patterns/problems you noticed. Empty array if no issues. Be honest — Jeff prefers truth over good news.",
+        },
+        questions: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "0-3 things you need Jeff's input on. Empty if you're fine. Be specific.",
+        },
+        policyProposal: {
+          type: "string",
+          description:
+            "OPTIONAL: a concrete policy change you'd suggest. Empty string if none. Frame as a suggestion, not a demand.",
+        },
       },
-      accomplishments: {
-        type: "array",
-        items: { type: "string" },
-        description:
-          "0-4 concrete things you handled well. Cite outcome counts or specific patterns. Empty array if nothing notable.",
-      },
-      concerns: {
-        type: "array",
-        items: { type: "string" },
-        description:
-          "0-4 patterns/problems you noticed. Empty array if no issues. Be honest — Jeff prefers truth over good news.",
-      },
-      questions: {
-        type: "array",
-        items: { type: "string" },
-        description:
-          "0-3 things you need Jeff's input on. Empty if you're fine. Be specific.",
-      },
-      policyProposal: {
-        type: "string",
-        description:
-          "OPTIONAL: a concrete policy change you'd suggest. Empty string if none. Frame as a suggestion, not a demand.",
-      },
+      required: ["summary", "accomplishments", "concerns", "questions"],
     },
-    required: ["summary", "accomplishments", "concerns", "questions"],
   },
 };
 
@@ -239,7 +244,7 @@ export async function runAgentReport(
   const result = await invokeLLM({
     model: "claude-sonnet-4-5-20250929",
     messages,
-    tools: [REPORT_TOOL as any],
+    tools: [REPORT_TOOL],
     toolChoice: { name: "submit_status_report" },
     maxTokens: 1500,
   });

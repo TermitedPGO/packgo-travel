@@ -10,7 +10,7 @@
  * whether these messages get warm replies vs ignored, to tune cadence.
  */
 
-import { invokeLLM, type Message } from "../../_core/llm";
+import { invokeLLM, type Message, type Tool } from "../../_core/llm";
 
 export const DEFAULT_FOLLOWUP_POLICY = {
   cadenceDaysBefore: [7, 3, 1],
@@ -47,19 +47,23 @@ export type FollowupAgentOutput = {
   reasoning: string;
 };
 
-const TOOL = {
-  name: "submit_followup_draft",
-  description: "Submit a customer care message for the given stage.",
-  parameters: {
-    type: "object",
-    properties: {
-      channel: { type: "string", enum: ["email", "whatsapp", "wechat"] },
-      subject: { type: "string" },
-      body: { type: "string" },
-      confidence: { type: "integer", minimum: 0, maximum: 100 },
-      reasoning: { type: "string" },
+// 2026-05-21 hotfix: wrap in OpenAI-nested shape (see inquiryAgent.ts header).
+const TOOL: Tool = {
+  type: "function",
+  function: {
+    name: "submit_followup_draft",
+    description: "Submit a customer care message for the given stage.",
+    parameters: {
+      type: "object",
+      properties: {
+        channel: { type: "string", enum: ["email", "whatsapp", "wechat"] },
+        subject: { type: "string" },
+        body: { type: "string" },
+        confidence: { type: "integer", minimum: 0, maximum: 100 },
+        reasoning: { type: "string" },
+      },
+      required: ["channel", "body", "confidence", "reasoning"],
     },
-    required: ["channel", "body", "confidence", "reasoning"],
   },
 };
 
@@ -111,7 +115,7 @@ export async function runFollowupAgent(
   const result = await invokeLLM({
     model: "claude-sonnet-4-5-20250929",
     messages,
-    tools: [TOOL as any],
+    tools: [TOOL],
     toolChoice: { name: "submit_followup_draft" },
     maxTokens: 1200,
   });

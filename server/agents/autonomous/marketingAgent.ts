@@ -11,7 +11,7 @@
  *     customers get worse copy" pattern
  */
 
-import { invokeLLM, type Message } from "../../_core/llm";
+import { invokeLLM, type Message, type Tool } from "../../_core/llm";
 
 export const DEFAULT_MARKETING_POLICY = {
   toneByLanguage: {
@@ -55,31 +55,35 @@ export type MarketingAgentOutput = {
   fairnessCheck: string; // explicit affirmation that copy is segment-neutral quality
 };
 
-const TOOL = {
-  name: "submit_edm_draft",
-  description: "Submit a fully drafted marketing email.",
-  parameters: {
-    type: "object",
-    properties: {
-      subject: { type: "string" },
-      preheader: { type: "string" },
-      body: { type: "string" },
-      callToAction: { type: "string" },
-      estimatedReadingTime: { type: "string" },
-      confidence: { type: "integer", minimum: 0, maximum: 100 },
-      reasoning: { type: "string" },
-      fairnessCheck: { type: "string" },
+// 2026-05-21 hotfix: wrap in OpenAI-nested shape (see inquiryAgent.ts header).
+const TOOL: Tool = {
+  type: "function",
+  function: {
+    name: "submit_edm_draft",
+    description: "Submit a fully drafted marketing email.",
+    parameters: {
+      type: "object",
+      properties: {
+        subject: { type: "string" },
+        preheader: { type: "string" },
+        body: { type: "string" },
+        callToAction: { type: "string" },
+        estimatedReadingTime: { type: "string" },
+        confidence: { type: "integer", minimum: 0, maximum: 100 },
+        reasoning: { type: "string" },
+        fairnessCheck: { type: "string" },
+      },
+      required: [
+        "subject",
+        "preheader",
+        "body",
+        "callToAction",
+        "estimatedReadingTime",
+        "confidence",
+        "reasoning",
+        "fairnessCheck",
+      ],
     },
-    required: [
-      "subject",
-      "preheader",
-      "body",
-      "callToAction",
-      "estimatedReadingTime",
-      "confidence",
-      "reasoning",
-      "fairnessCheck",
-    ],
   },
 };
 
@@ -128,7 +132,7 @@ export async function runMarketingAgent(
   const result = await invokeLLM({
     model: "claude-sonnet-4-5-20250929",
     messages,
-    tools: [TOOL as any],
+    tools: [TOOL],
     toolChoice: { name: "submit_edm_draft" },
     maxTokens: 2000,
   });

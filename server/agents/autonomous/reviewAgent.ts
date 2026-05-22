@@ -10,7 +10,7 @@
  * quality, no preferential treatment for high-LTV customers.
  */
 
-import { invokeLLM, type Message } from "../../_core/llm";
+import { invokeLLM, type Message, type Tool } from "../../_core/llm";
 
 export const DEFAULT_REVIEW_POLICY = {
   responseGoal:
@@ -52,35 +52,39 @@ export type ReviewAgentOutput = {
   reasoning: string;
 };
 
-const TOOL = {
-  name: "submit_review_analysis",
-  description: "Submit structured analysis of a customer review.",
-  parameters: {
-    type: "object",
-    properties: {
-      classification: {
-        type: "string",
-        enum: ["positive", "constructive", "negative", "spam"],
+// 2026-05-21 hotfix: wrap in OpenAI-nested shape (see inquiryAgent.ts header).
+const TOOL: Tool = {
+  type: "function",
+  function: {
+    name: "submit_review_analysis",
+    description: "Submit structured analysis of a customer review.",
+    parameters: {
+      type: "object",
+      properties: {
+        classification: {
+          type: "string",
+          enum: ["positive", "constructive", "negative", "spam"],
+        },
+        themes: { type: "array", items: { type: "string" } },
+        sentiment: {
+          type: "string",
+          enum: ["positive", "neutral", "negative"],
+        },
+        draftReply: { type: "string" },
+        draftLanguage: { type: "string", enum: ["zh-TW", "zh-CN", "en"] },
+        confidence: { type: "integer", minimum: 0, maximum: 100 },
+        reasoning: { type: "string" },
       },
-      themes: { type: "array", items: { type: "string" } },
-      sentiment: {
-        type: "string",
-        enum: ["positive", "neutral", "negative"],
-      },
-      draftReply: { type: "string" },
-      draftLanguage: { type: "string", enum: ["zh-TW", "zh-CN", "en"] },
-      confidence: { type: "integer", minimum: 0, maximum: 100 },
-      reasoning: { type: "string" },
+      required: [
+        "classification",
+        "themes",
+        "sentiment",
+        "draftReply",
+        "draftLanguage",
+        "confidence",
+        "reasoning",
+      ],
     },
-    required: [
-      "classification",
-      "themes",
-      "sentiment",
-      "draftReply",
-      "draftLanguage",
-      "confidence",
-      "reasoning",
-    ],
   },
 };
 
@@ -133,7 +137,7 @@ export async function runReviewAgent(
   const result = await invokeLLM({
     model: "claude-sonnet-4-5-20250929",
     messages,
-    tools: [TOOL as any],
+    tools: [TOOL],
     toolChoice: { name: "submit_review_analysis" },
     maxTokens: 1500,
   });

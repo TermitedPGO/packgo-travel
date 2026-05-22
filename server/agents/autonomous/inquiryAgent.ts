@@ -23,7 +23,7 @@
  * persisting outcomes to interactionOutcomes + delivering replies.
  */
 
-import { invokeLLM, type Message } from "../../_core/llm";
+import { invokeLLM, type Message, type Tool } from "../../_core/llm";
 
 export type Classification =
   | "new_inquiry"
@@ -121,73 +121,86 @@ export const DEFAULT_INQUIRY_POLICY = {
 // LLM call — structured output via tools schema
 // ────────────────────────────────────────────────────────────────────────
 
-const STRUCTURED_TOOL = {
-  name: "submit_inquiry_analysis",
-  description:
-    "Submit the structured analysis of the customer inquiry. ALL fields are required.",
-  parameters: {
-    type: "object",
-    properties: {
-      classification: {
-        type: "string",
-        enum: [
-          "new_inquiry",
-          "booking_question",
-          "complaint",
-          "refund_request",
-          "general_info",
-          "spam",
-          "other",
-        ],
-      },
-      intent: {
-        type: "string",
-        description:
-          "1-2 sentence plain-language summary of what the customer is asking or wanting.",
-      },
-      urgency: { type: "string", enum: ["low", "normal", "high", "critical"] },
-      sentiment: {
-        type: "string",
-        enum: ["positive", "neutral", "negative"],
-      },
-      draftReply: {
-        type: "string",
-        description:
-          "Full draft reply in the customer's language. Must include: acknowledgment of their concern, concrete next step, realistic timeline. Sign with the policy signature. 100-400 words.",
-      },
-      draftLanguage: { type: "string", enum: ["zh-TW", "zh-CN", "en"] },
-      extractedCustomer: {
-        type: "object",
-        properties: {
-          senderEmail: { type: "string" },
-          senderName: { type: "string" },
-          inferredPhone: { type: "string" },
+// 2026-05-21 hotfix: server/_core/llm.ts `toolsToAnthropic` reads each
+// tool as `t.function.name` (OpenAI-style nested format). The flat shape
+// we had here meant `t.function` was undefined and every runInquiryAgent
+// call crashed with "Cannot read properties of undefined (reading 'name')".
+// Production crashed on the first inbound newsletter once Gmail OAuth was
+// re-connected. Same fix accountingAgent.ts shipped 2026-05-16. The `as any`
+// cast at the invokeLLM call was suppressing the type error — removed too.
+const STRUCTURED_TOOL: Tool = {
+  type: "function",
+  function: {
+    name: "submit_inquiry_analysis",
+    description:
+      "Submit the structured analysis of the customer inquiry. ALL fields are required.",
+    parameters: {
+      type: "object",
+      properties: {
+        classification: {
+          type: "string",
+          enum: [
+            "new_inquiry",
+            "booking_question",
+            "complaint",
+            "refund_request",
+            "general_info",
+            "spam",
+            "other",
+          ],
+        },
+        intent: {
+          type: "string",
+          description:
+            "1-2 sentence plain-language summary of what the customer is asking or wanting.",
+        },
+        urgency: {
+          type: "string",
+          enum: ["low", "normal", "high", "critical"],
+        },
+        sentiment: {
+          type: "string",
+          enum: ["positive", "neutral", "negative"],
+        },
+        draftReply: {
+          type: "string",
+          description:
+            "Full draft reply in the customer's language. Must include: acknowledgment of their concern, concrete next step, realistic timeline. Sign with the policy signature. 100-400 words.",
+        },
+        draftLanguage: { type: "string", enum: ["zh-TW", "zh-CN", "en"] },
+        extractedCustomer: {
+          type: "object",
+          properties: {
+            senderEmail: { type: "string" },
+            senderName: { type: "string" },
+            inferredPhone: { type: "string" },
+          },
+        },
+        confidence: {
+          type: "integer",
+          minimum: 0,
+          maximum: 100,
+          description:
+            "0-100. Reflects: clarity of intent (40%), match to known classifications (30%), draft quality self-assessment (30%). Be conservative — under-confident is safer than over-confident.",
+        },
+        reasoning: {
+          type: "string",
+          description:
+            "2-4 sentence rationale explaining classification + urgency + recommended action. The self-retrospective agent will read this every week to improve future policies.",
         },
       },
-      confidence: {
-        type: "integer",
-        minimum: 0,
-        maximum: 100,
-        description:
-          "0-100. Reflects: clarity of intent (40%), match to known classifications (30%), draft quality self-assessment (30%). Be conservative — under-confident is safer than over-confident.",
-      },
-      reasoning: {
-        type: "string",
-        description:
-          "2-4 sentence rationale explaining classification + urgency + recommended action. The self-retrospective agent will read this every week to improve future policies.",
-      },
+      required: [
+        "classification",
+        "intent",
+        "urgency",
+        "sentiment",
+        "draftReply",
+        "draftLanguage",
+        "extractedCustomer",
+        "confidence",
+        "reasoning",
+      ],
     },
-    required: [
-      "classification",
-      "intent",
-      "urgency",
-      "sentiment",
-      "draftReply",
-      "draftLanguage",
-      "extractedCustomer",
-      "confidence",
-      "reasoning",
-    ],
   },
 };
 
@@ -292,7 +305,7 @@ export async function runInquiryAgent(
       { role: "system", content: buildSystemPrompt(policyText) },
       ...messages,
     ],
-    tools: [STRUCTURED_TOOL as any],
+    tools: [STRUCTURED_TOOL],
     toolChoice: { name: "submit_inquiry_analysis" },
     maxTokens: 2000,
   });

@@ -339,14 +339,28 @@ function normalizeToAnthropic(messages: Message[]): {
 
 function toolsToAnthropic(tools?: Tool[]): Anthropic.Messages.Tool[] | undefined {
   if (!tools || tools.length === 0) return undefined;
-  return tools.map(t => ({
-    name: t.function.name,
-    description: t.function.description,
-    input_schema: (t.function.parameters ?? {
-      type: "object",
-      properties: {},
-    }) as Anthropic.Messages.Tool.InputSchema,
-  }));
+  return tools.map((t, i) => {
+    // 2026-05-21 hotfix: if `t.function` is undefined we previously crashed
+    // with "Cannot read properties of undefined (reading 'name')" — useless
+    // when the offender is one of 7 agents. Throw something Jeff can grep.
+    // The flat-shape `{ name, description, parameters }` (instead of nested
+    // `{ type: "function", function: { ... } }`) is the recurring footgun.
+    if (!t || typeof t !== "object" || !("function" in t) || !t.function) {
+      throw new Error(
+        `toolsToAnthropic: tool[${i}] is missing the nested 'function' field. ` +
+          `Expected { type: "function", function: { name, description, parameters } }. ` +
+          `Got: ${JSON.stringify(t).slice(0, 200)}`
+      );
+    }
+    return {
+      name: t.function.name,
+      description: t.function.description,
+      input_schema: (t.function.parameters ?? {
+        type: "object",
+        properties: {},
+      }) as Anthropic.Messages.Tool.InputSchema,
+    };
+  });
 }
 
 function toolChoiceToAnthropic(
