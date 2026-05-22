@@ -2920,6 +2920,7 @@ export const en = {
       title: 'Inquiry Management',
       totalCount: '{n} inquiries total',
       filterPlaceholder: 'Filter status',
+      searchPlaceholder: 'Search ID / customer / subject…',
       statusAll: 'All statuses',
       statusNew: 'New',
       statusInProgress: 'In Progress',

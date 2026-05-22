@@ -44,8 +44,10 @@ import {
 } from "@/components/admin/primitives";
 import { useCommandPaletteHotkey } from "@/components/admin/primitives/CommandPalette";
 
-// V2 redesigned pilot — Trip.com style booking admin.
+// V2 redesigned tabs — Trip.com style. One per file so each can evolve
+// independently of the v1 counterpart.
 const BookingsTabV2 = lazy(() => import("@/components/admin-v2/BookingsTabV2"));
+const InquiriesTabV2 = lazy(() => import("@/components/admin-v2/InquiriesTabV2"));
 
 // All other tabs initially come from V1. They're consumed AS-IS; we replace
 // them one by one with V2 redesigns. Listed here for the lazy-loader.
@@ -56,7 +58,6 @@ const CustomersLanding = lazy(() => import("@/components/admin/landings/Customer
 const MarketingLanding = lazy(() => import("@/components/admin/landings/MarketingLanding"));
 const FinanceLanding = lazy(() => import("@/components/admin/landings/FinanceLanding"));
 const ToursTab = lazy(() => import("@/components/admin/ToursTab"));
-const InquiriesTab = lazy(() => import("@/components/admin/InquiriesTab"));
 const SuppliersTab = lazy(() => import("@/components/admin/SuppliersTab"));
 const MonitorDashboard = lazy(() => import("@/components/admin/MonitorDashboard"));
 const ReviewsTab = lazy(() => import("@/components/admin/ReviewsTab"));
@@ -347,7 +348,8 @@ function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
       // 🆕 V2 pilot redesign
       return <BookingsTabV2 />;
     case "inquiries":
-      return <InquiriesTab />;
+      // 🆕 V2 redesign #2
+      return <InquiriesTabV2 />;
     case "tour-monitor":
       return <MonitorDashboard />;
     case "suppliers":

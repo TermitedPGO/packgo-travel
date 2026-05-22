@@ -2888,6 +2888,7 @@ export const zhTW = {
       title: '諮詢管理',
       totalCount: '共 {n} 筆諮詢',
       filterPlaceholder: '篩選狀態',
+      searchPlaceholder: '搜尋編號 / 客戶 / 主旨…',
       statusAll: '全部狀態',
       statusNew: '新諮詢',
       statusInProgress: '處理中',
