@@ -309,7 +309,7 @@ export default function Membership() {
                               : "bg-emerald-50 text-emerald-700 border border-emerald-200"
                           }`}
                         >
-                          🎁 {language === "en" ? "10-day free trial" : "10 天免費試用"}
+                          🎁 {t("membership.freeTrialBadge")}
                         </span>
                       </div>
                     )}
@@ -438,9 +438,7 @@ export default function Membership() {
                             ) : (
                               <>
                                 {isAuthenticated
-                                  ? language === "en"
-                                    ? "Start free trial"
-                                    : "開始 10 天免費試用"
+                                  ? t("membership.startFreeTrial")
                                   : t("membership.loginToSubscribe")}
                                 <ArrowRight className="w-4 h-4" />
                               </>
@@ -461,28 +459,13 @@ export default function Membership() {
                           tier.highlight ? "text-white/55" : "text-foreground/45"
                         }`}
                       >
-                        {language === "en" ? (
-                          <>
-                            10-day free trial. Card charged automatically after trial unless
-                            cancelled. Cancel anytime online — no phone call needed.{" "}
-                            <Link
-                              href="/membership-terms"
-                              className={`underline ${tier.highlight ? "text-[#c9a563]" : "text-[#8a6f3a]"}`}
-                            >
-                              Full terms
-                            </Link>
-                          </>
-                        ) : (
-                          <>
-                            10 天免費試用,結束後自動扣款。可隨時線上取消,無需電話。{" "}
-                            <Link
-                              href="/membership-terms"
-                              className={`underline ${tier.highlight ? "text-[#c9a563]" : "text-[#8a6f3a]"}`}
-                            >
-                              完整條款
-                            </Link>
-                          </>
-                        )}
+                        {t("membership.trialDisclosure")}{" "}
+                        <Link
+                          href="/membership-terms"
+                          className={`underline ${tier.highlight ? "text-[#c9a563]" : "text-[#8a6f3a]"}`}
+                        >
+                          {t("membership.trialFullTermsLink")}
+                        </Link>
                       </p>
                     )}
                   </div>

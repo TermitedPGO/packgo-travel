@@ -176,7 +176,7 @@ function RecentTourCard({
         {displayTitle}
       </h3>
       <p className="text-xs text-gray-500">
-        {tour.duration ? `${tour.duration}${isEN ? "D" : " " + t("common.days")}` : null}
+        {tour.duration ? `${tour.duration} ${t("common.days")}` : null}
         {tour.price ? ` · ${fmtPrice(Number(tour.price), tour.priceCurrency || "TWD")}` : null}
       </p>
     </Link>

@@ -96,13 +96,13 @@ export default function Rewards() {
         <section className="bg-foreground text-white py-16 md:py-24">
           <div className="container mx-auto px-6 text-center max-w-3xl">
             <p className="text-xs tracking-[0.3em] uppercase text-[#c9a563] mb-4">
-              REWARDS
+              {t("rewards.heroEyebrow")}
             </p>
             <h1 className="font-serif font-bold text-4xl md:text-5xl mb-5 tracking-tight">
-              Packpoint 兌換中心
+              {t("rewards.heroTitle")}
             </h1>
             <p className="text-base md:text-lg text-white/80 leading-relaxed mb-6">
-              累積的 Packpoint 可兌換機票折抵券、私人旅遊相簿等獎勵。每張 voucher 12 個月內有效。
+              {t("rewards.heroSubtitle")}
             </p>
             {isAuthenticated && status && (
               <div className="inline-flex items-center gap-3 bg-white/[0.06] border border-[#c9a563]/30 rounded-full px-6 py-3">
@@ -283,7 +283,7 @@ export default function Rewards() {
                   onClick={() => setConfirmSku(null)}
                   className="rounded-lg"
                 >
-                  取消
+                  {t("common.cancel")}
                 </Button>
                 <Button
                   onClick={() => redeemMutation.mutate({ sku: confirmItem.sku })}
@@ -295,7 +295,7 @@ export default function Rewards() {
                   ) : (
                     <Check className="h-4 w-4 mr-2" />
                   )}
-                  確認兌換
+                  {t("rewards.confirmRedeem")}
                 </Button>
               </DialogFooter>
             </>
@@ -360,14 +360,14 @@ function VoucherRow({ voucher }: { voucher: any }) {
         <span className={`px-2 py-0.5 rounded font-semibold ${color}`}>{label}</span>
         {isActive && expiresIn > 0 && (
           <span className="text-foreground/50">
-            {language === "en"
-              ? `Expires in ${expiresIn} days`
-              : `${expiresIn} 天後過期`}
+            {t("rewards.expiresInDays", { days: String(expiresIn) })}
           </span>
         )}
         {voucher.redeemedAt && (
           <span className="text-foreground/50">
-            {new Date(voucher.redeemedAt).toLocaleDateString("zh-TW")} 使用
+            {t("rewards.redeemedOn", {
+              date: new Date(voucher.redeemedAt).toLocaleDateString(language === "en" ? "en-US" : "zh-TW"),
+            })}
           </span>
         )}
       </div>

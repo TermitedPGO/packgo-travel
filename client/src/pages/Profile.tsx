@@ -518,13 +518,9 @@ function PackpointSection() {
           {status?.daysUntilExpiry !== null && status?.daysUntilExpiry !== undefined && balance > 0 && (
             <span className="text-xs text-foreground/60">
               <Clock className="h-3 w-3 inline mr-1" />
-              {language === "en"
-                ? status.daysUntilExpiry > 30
-                  ? `Expires in ${Math.floor(status.daysUntilExpiry / 30)} months`
-                  : `Expires in ${status.daysUntilExpiry} days`
-                : status.daysUntilExpiry > 30
-                  ? `${Math.floor(status.daysUntilExpiry / 30)} 個月後失效`
-                  : `${status.daysUntilExpiry} 天後失效`}
+              {status.daysUntilExpiry > 30
+                ? t("rewards.expiresInMonths", { months: String(Math.floor(status.daysUntilExpiry / 30)) })
+                : t("rewards.expiresInDaysShort", { days: String(status.daysUntilExpiry) })}
             </span>
           )}
         </div>
