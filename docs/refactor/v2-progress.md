@@ -30,7 +30,7 @@
 |---|---|---|---|---|---|---|
 | 1 | Foundation + Observability | 9 | ✅ Complete (9 / 9) | ~58 AI / ~3 Jeff | Week 1 (May 19–20) | `8b2215f` passport-at-rest |
 | 2 | God-File Splits | 13 | ✅ Complete (13 / 13) | ~96 AI / ~4 Jeff | Weeks 1–3 (May 19–21) | `c19c57e` getRouteMap extract |
-| 3 | Autonomy Thesis | 13 | 🟡 6 / 13 (3.1+3.2+3.3+3.4+3.12 + dispatcher LIVE in prod) | ~110 AI / ~4 Jeff | Weeks 3–4 | `96dd2b9` (v512) |
+| 3 | Autonomy Thesis | 13 | 🟡 7 / 13 (3.1+3.2+3.3+3.4+3.5+3.12 + dispatcher + refund autopilot LIVE in prod) | ~110 AI / ~4 Jeff | Weeks 3–4 | `9d1001d` (v513) |
 | 4 | Mobile (PWA) + Polish | **18 in v2** (9 RN deferred to v3) | ⬜ Not started | ~80 AI / ~7 Jeff (v2 scope) | Weeks 4–5 | — |
 
 **Status legend:** ⬜ TODO · 🟡 IN-PROGRESS · ✅ DONE · ⚠️ BLOCKED · 🚨 DECISION-NEEDED
@@ -140,7 +140,7 @@
 | 3.3 | [Skill orchestrator interface](tasks/v2-wave-3/module-3.3-skill-orchestrator-interface.md) | ✅ | claude | `3a03480` · SkillOrchestrator + SkillResult discriminated + tourComparisonOrchestrator + 10 Vitest cases |
 | 3.4 | [Inquiry auto-dispatch](tasks/v2-wave-3/module-3.4-inquiry-auto-dispatch.md) | ✅ | claude | `0f52f50` (A: pure) + `96dd2b9` (B: persisted + gmailPipeline + migration 0079) · 17 Vitest cases · **LIVE in prod v512** · auto-send safeguards (allow-list/quota/circuit-breaker) deferred to follow-up |
 | 3.12 | [Confidence threshold config](tasks/v2-wave-3/module-3.12-confidence-threshold-config.md) | ✅ | claude | `cd83ba0` · AGENT_CONFIDENCE_THRESHOLD + AGENT_AUTO_SEND_THRESHOLD env getters + 16 Vitest cases |
-| 3.5 | [RefundAgent ↔ Stripe webhook](tasks/v2-wave-3/module-3.5-refund-agent-stripe-wire.md) | ⬜ | — | Independent; fires on `charge.refunded` |
+| 3.5 | [RefundAgent ↔ Stripe webhook](tasks/v2-wave-3/module-3.5-refund-agent-stripe-wire.md) | ✅ | claude | `9d1001d` · synthesizeStripeRawMessage + source/stripeContext fields + handleChargeRefunded POST-COMMIT wire + 7 Vitest cases · alwaysEscalate=true preserved · **LIVE in prod v513** |
 | 3.6 | [Port packgo-china-visa skill](tasks/v2-wave-3/module-3.6-port-packgo-china-visa.md) | ⬜ | — | Depends on 3.2; **🔒 LOCKED 2026-05-22: bilingual (zh-TW left / en right, 2-column)** |
 | 3.7 | [Port packgo-tour-confirmation skill](tasks/v2-wave-3/module-3.7-port-packgo-tour-confirmation.md) | ⬜ | — | Independent; **🔒 LOCKED 2026-05-22: no manual regenerate button (auto-only via dispatcher 3.4)** |
 | 3.8 | [Vitest — InquiryAgent](tasks/v2-wave-3/module-3.8-vitest-inquiry-agent.md) | ⬜ | — | Extends 3.1's `inquiryAgent.test.ts` |
@@ -272,3 +272,4 @@ After the opening batch lands, the supervisor pattern from Wave 2 stays: sub-age
 - 2026-05-22 — Created. Wave 1 + 2 marked done; Waves 3 + 4 ready for Stage 4 kickoff.
 - 2026-05-22 — Jeff ack'd W3 decisions (3.4 confidence-gated auto-send / 3.6 bilingual / 3.7 no manual regenerate); W4 RN sub-theme (4.7–4.15) marked ⏸️ v3-deferred; 4.9 retargeted Manus → Google OAuth for future v3 reactivation; pre-flight checklist fully green.
 - 2026-05-22 — Wave 3 Stage 4 kickoff. Modules 3.1 / 3.3 / 3.2 landed (`2f773ba` / `3a03480` / `5002832`). Foundation in place — `lookupSkill(intent)` returns the tourComparison orchestrator for `tour_comparison_request` and `new_inquiry`; null for everything else (pending ports). 32 new Vitest cases. Total suite 711 pass.
+- 2026-05-22 — Wave 3 continued. 3.12 thresholds (`cd83ba0`), 3.4-A pure dispatcher (`0f52f50`), 3.4-B persisted dispatcher + migration 0079 + gmailPipeline integration (`96dd2b9`, deployed v512), 3.5 RefundAgent autopilot (`9d1001d`, deployed v513). +40 new Vitest cases. Total suite 751 pass. **Autonomy thesis fully wired in prod** — InquiryAgent classifies → registry → orchestrator → skillRuns audit → ChatsTab proposal; charge.refunded → RefundAgent triage → ChatsTab proposal.
