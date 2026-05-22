@@ -32,7 +32,22 @@ export type Classification =
   | "refund_request"
   | "general_info"
   | "spam"
-  | "other";
+  | "other"
+  // v2 Wave 3 Module 3.1 — sub-intents enabling skill auto-dispatch.
+  // The skill registry (module 3.2) keys on these. Existing 7 intents
+  // route via the legacy classification → action map unchanged.
+  | "quote_request"
+  | "flight_inquiry"
+  | "tour_comparison_request"
+  | "visa_inquiry"
+  | "deposit_inquiry";
+
+/**
+ * v2 Wave 3 alias — module 3.2 (skill registry) imports `InquiryClassification`
+ * by that name per the canonical spec. Pointing both names at the same union
+ * keeps backwards compatibility for any consumer still using `Classification`.
+ */
+export type InquiryClassification = Classification;
 
 export type Urgency = "low" | "normal" | "high" | "critical";
 export type Sentiment = "positive" | "neutral" | "negative";
@@ -109,6 +124,17 @@ export const DEFAULT_INQUIRY_POLICY = {
     general_info: { action: "draft_reply", minConfidence: 60 },
     spam: { action: "discard" },
     other: { action: "escalate" },
+    // v2 Wave 3 Module 3.1 — sub-intents. Default action="draft_reply"
+    // for each; module 3.4 auto-dispatch gates execution separately via
+    // confidence + per-skill allow-list. deposit_inquiry sits slightly
+    // higher (80) because it's financially sensitive; the catalog-style
+    // tour_comparison_request sits a touch lower (70) because the skill
+    // handles missing-detail ambiguity gracefully.
+    quote_request: { action: "draft_reply", minConfidence: 75 },
+    flight_inquiry: { action: "draft_reply", minConfidence: 75 },
+    tour_comparison_request: { action: "draft_reply", minConfidence: 70 },
+    visa_inquiry: { action: "draft_reply", minConfidence: 75 },
+    deposit_inquiry: { action: "draft_reply", minConfidence: 80 },
   },
   alwaysEscalate: ["refund_request", "complaint", "critical_urgency"],
   draftMustInclude: ["acknowledgment", "next_step", "timeline"],
@@ -147,6 +173,14 @@ const STRUCTURED_TOOL: Tool = {
             "general_info",
             "spam",
             "other",
+            // v2 Wave 3 Module 3.1 — sub-intents enabling skill auto-dispatch
+            // (module 3.2 registry maps each → skill orchestrator). These are
+            // PURELY ADDITIVE — every existing intent still routes the same way.
+            "quote_request",
+            "flight_inquiry",
+            "tour_comparison_request",
+            "visa_inquiry",
+            "deposit_inquiry",
           ],
         },
         intent: {
@@ -239,7 +273,14 @@ ${policyRules}
 
 【你的任務】
 讀完客戶來信後,回傳一個 submit_inquiry_analysis tool call,內容包含:
-- classification:分類(new_inquiry / booking_question / complaint / refund_request / general_info / spam / other)
+- classification:分類。優先順序:**先看是否符合下面 5 個具體 sub-intent**(會自動觸發 PACK&GO skill),不符合再退回 7 個 legacy 分類。
+  · sub-intents(v2 Wave 3 — 自動觸發對應 skill):
+    - quote_request:客人問「8 月帶 4 人去芝加哥要多少錢」、明確要報價單
+    - flight_inquiry:客人問「比較聯航 vs 達美的價格」、要機票截圖或 PDF
+    - tour_comparison_request:客人問「日本 9 月有什麼團」、要看幾條路線比一比
+    - visa_inquiry:客人問「中國簽證怎麼辦」、要簽證 checklist 或表單
+    - deposit_inquiry:客人問「我訂金付了嗎」、要 receipt / 付款證明
+  · legacy(7 個既有分類):new_inquiry / booking_question / complaint / refund_request / general_info / spam / other
 - intent:用 1-2 句話講清楚客人到底要什麼
 - urgency:緊急程度(low/normal/high/critical)
 - sentiment:客人情感(positive/neutral/negative)
