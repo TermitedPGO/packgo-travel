@@ -64,11 +64,11 @@ export default function BookingDetail() {
   // Triggers an unrefundable warning prompt before calling the mutation.
   const cancelMutation = trpc.bookings.cancel.useMutation({
     onSuccess: () => {
-      toast.success(t('bookingDetail.cancelSuccess') || "Booking cancelled. Refund (if eligible) processed within 1 week.");
+      toast.success(t('bookingDetail.cancelSuccess'));
       refetch();
     },
     onError: (error) => {
-      toast.error(t('bookingDetail.cancelFailed') || "Failed to cancel booking", {
+      toast.error(t('bookingDetail.cancelFailed'), {
         description: error.message,
       });
     },
@@ -430,7 +430,7 @@ export default function BookingDetail() {
                       ) : (
                         <XCircle className="h-4 w-4 mr-2" />
                       )}
-                      {t('bookingDetail.cancelBookingBtn') || "Cancel booking"}
+                      {t('bookingDetail.cancelBookingBtn')}
                     </Button>
                   </>
                 )}
