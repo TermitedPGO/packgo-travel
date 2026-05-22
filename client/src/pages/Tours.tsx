@@ -984,8 +984,18 @@ export default function Tours() {
         <section id="tours-results" className="py-12 scroll-mt-20">
           <div className="container">
             {isLoading ? (
-              <div className="flex justify-center items-center py-20">
-                <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+              // 2026-05-22: skeleton grid instead of single spinner — gives users
+              // a sense of what's coming, reduces perceived latency, matches
+              // CountryPage and TourDetail load patterns.
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {[1, 2, 3, 4, 5, 6].map((i) => (
+                  <div key={i} className="animate-pulse">
+                    <div className="aspect-[4/3] bg-gray-200 rounded-xl mb-4" />
+                    <div className="h-5 bg-gray-200 rounded w-3/4 mb-2" />
+                    <div className="h-4 bg-gray-200 rounded w-1/2 mb-3" />
+                    <div className="h-6 bg-gray-200 rounded w-1/3" />
+                  </div>
+                ))}
               </div>
             ) : tours.length === 0 ? (
               // v78v: rich empty state — illustrative + actionable next steps
