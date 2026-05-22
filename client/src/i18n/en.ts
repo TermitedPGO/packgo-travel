@@ -726,6 +726,44 @@ export const en = {
         question: 'Is travel insurance included?',
         answer: 'Some tours include basic travel insurance, but we recommend purchasing additional travel insurance based on your personal needs for more comprehensive coverage.',
       },
+      // 2026-05-22: 9 additional FAQs to reach 15 public Q&As. Answers reflect
+      // PACK&GO actual operating policy (Newark CA, CST #2166984, TCRF participant).
+      mandarinSupport: {
+        question: 'Are there Mandarin-speaking tour guides?',
+        answer: 'Every tour has a bilingual leader (Mandarin + English); most departures are led personally by PACK&GO owner Jeff Hsieh. Mandarin support is available Mon–Sat 11:30–19:30 at +1 (510) 634-2307.',
+      },
+      tipping: {
+        question: 'How much should I tip?',
+        answer: 'For North American tours, suggested gratuity is $5–10/person/day for the driver and $8–12/person/day for the leader (some tours include this). Cruise gratuities are auto-billed by the cruise line (~$16/person/day) and are stated up front. Tipping is generally not expected on Japan or Taiwan tours.',
+      },
+      groupSize: {
+        question: 'How large are typical groups?',
+        answer: 'Private custom tours: 1–8 people, sized to your family. Public group tours: 10–25 people, average 15. We do not run mega-groups (30+) so every guest gets meaningful interaction with the leader.',
+      },
+      luggage: {
+        question: 'What are the luggage allowances?',
+        answer: 'Air carriers typically allow 1 checked bag at 23kg + 7kg carry-on (varies by airline). Our North American land tours use full-size motor coaches with room for 1 large checked + 1 carry-on per person. Cruise cabins are compact — pack lighter. Specifics are itemized in each booking confirmation.',
+      },
+      kids: {
+        question: 'Can children join? Any age limits?',
+        answer: 'Families welcome. Public group tours accept ages 5+. Private custom tours accept 3–5 at parental discretion. Most cruises accept babies 6+ months; Hawaii free-and-easy has no age limit. Child fare is computed by the airline + hotel age tiers (typically 75–90% of adult).',
+      },
+      dietary: {
+        question: 'Can you accommodate dietary restrictions (vegetarian / allergy / religious)?',
+        answer: 'Yes. Tell us when you book, or at minimum 14 days before departure. We pre-coordinate with restaurants and airlines. Commonly accommodated: full vegetarian / ovo-lacto, halal, gluten-free, peanut / shellfish allergy. Less common diets (keto, low-FODMAP) — we suggest packing some backup snacks.',
+      },
+      passport: {
+        question: 'How long does my passport need to be valid?',
+        answer: 'Most countries require 6+ months remaining validity at entry. US citizens travel visa-free to Japan / Korea / Canada; ESTA must be applied at least 72 hours ahead. Taiwan passport holders entering the US need a B1/B2 visa or ESTA. We will flag this at booking and offer PACK&GO\'s visa concierge (e.g., China visa).',
+      },
+      jetLag: {
+        question: 'How is jet lag handled? Do schedules adjust?',
+        answer: 'Long-haul international tours (Japan / Europe / NZ-AU) keep Day 1 light: afternoon hotel check-in and rest, official touring starts Day 2. Return travel also includes a buffer day. Private custom tours can further tailor sleep / meal rhythm — just tell Jeff.',
+      },
+      shopping: {
+        question: 'Are there forced shopping stops?',
+        answer: 'None. PACK&GO does not accept shop kickbacks. All public itineraries mark shopping stops as optional free-time; the leader will not steer you into preferred stores. If you ask about local specialties, the leader will recommend genuinely reputable shops, with no referral fee involved.',
+      },
     },
   },
 

@@ -11,6 +11,15 @@ export default function FAQ() {
     'visa',
     'customization',
     'insurance',
+    'mandarinSupport',
+    'tipping',
+    'groupSize',
+    'luggage',
+    'kids',
+    'dietary',
+    'passport',
+    'jetLag',
+    'shopping',
   ];
   // Round 80.25 — FAQPage Schema.org JSON-LD for rich result eligibility.
   // Google may surface accordion-style FAQ snippets directly in SERPs when
