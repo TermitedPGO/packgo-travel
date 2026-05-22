@@ -31,7 +31,7 @@
 | 1 | Foundation + Observability | 9 | ✅ Complete (9 / 9) | ~58 AI / ~3 Jeff | Week 1 (May 19–20) | `8b2215f` passport-at-rest |
 | 2 | God-File Splits | 13 | ✅ Complete (13 / 13) | ~96 AI / ~4 Jeff | Weeks 1–3 (May 19–21) | `c19c57e` getRouteMap extract |
 | 3 | Autonomy Thesis | 13 | 🟡 8 / 13 (3.1+3.2+3.3+3.4+3.5+3.12+3.13 · dispatcher + refund autopilot LIVE in prod) | ~110 AI / ~4 Jeff | Weeks 3–4 | `6c17f1a` (v513) |
-| 4 | Mobile (PWA) + Polish | **18 in v2** (9 RN deferred to v3) | ⬜ Not started | ~80 AI / ~7 Jeff (v2 scope) | Weeks 4–5 | — |
+| 4 | Mobile (PWA) + Polish | **14 in v2** (9 RN deferred to v3; 4 more cut 2026-05-22) | 🟡 1 / 14 (4.1 partial) | ~52 AI / ~5 Jeff (post-cut scope) | Weeks 4–5 | `37f651d` |
 
 **Status legend:** ⬜ TODO · 🟡 IN-PROGRESS · ✅ DONE · ⚠️ BLOCKED · 🚨 DECISION-NEEDED
 
@@ -184,12 +184,12 @@ Polish       (4.16–4.27)  ── mostly independent  ── trickle through wa
 
 | # | Module | Status | Notes |
 |---|---|---|---|
-| 4.1 | [PWA manifest polish](tasks/v2-wave-4/module-4.1-pwa-manifest-polish.md) | ⬜ | **🚨 theme_color teal vs black — plan recommends teal `#0D9488`** |
-| 4.2 | [Service worker (Workbox)](tasks/v2-wave-4/module-4.2-service-worker-workbox.md) | ⬜ | Stale-while-revalidate for tour pages |
-| 4.3 | [Web push subscription](tasks/v2-wave-4/module-4.3-web-push-subscription.md) | ⬜ | iOS standalone-mode banner copy decided here |
-| 4.4 | [Push notification events (3 types)](tasks/v2-wave-4/module-4.4-push-notification-events.md) | ⬜ | new_inquiry / booking_paid / tour_24h |
-| 4.5 | [Install prompt UX](tasks/v2-wave-4/module-4.5-install-prompt-ux.md) | ⬜ | Add-to-home-screen flow |
-| 4.6 | [Lighthouse PWA gate (CI)](tasks/v2-wave-4/module-4.6-lighthouse-pwa-gate.md) | ⬜ | PWA ≥ 90, perf ≥ 70 |
+| 4.1 | [PWA manifest polish](tasks/v2-wave-4/module-4.1-pwa-manifest-polish.md) | 🟡 | claude | `37f651d` · theme_color #111111 → #0D9488 teal locked 2026-05-22 · icon-set generation (5 PNG assets) deferred — needs design source |
+| 4.2 | [Service worker (Workbox)](tasks/v2-wave-4/module-4.2-service-worker-workbox.md) | ⬜ | — | Stale-while-revalidate for tour pages |
+| 4.3 | [Web push subscription](tasks/v2-wave-4/module-4.3-web-push-subscription.md) | ⬜ | — | iOS standalone-mode banner copy decided here |
+| 4.4 | [Push notification events (3 types)](tasks/v2-wave-4/module-4.4-push-notification-events.md) | ⬜ | — | new_inquiry / booking_paid / tour_24h |
+| 4.5 | [Install prompt UX](tasks/v2-wave-4/module-4.5-install-prompt-ux.md) | ⬜ | — | Add-to-home-screen flow |
+| 4.6 | [Lighthouse PWA gate (CI)](tasks/v2-wave-4/module-4.6-lighthouse-pwa-gate.md) | ❌ CUT | — | **Cut 2026-05-22 (Jeff lock):** requires CI infra setup beyond scope; revisit when CI footprint exists |
 
 #### Sub-theme B — React Native admin (Expo) · **DEFERRED to v3** · needs Apple+Google dev accounts ($124/yr)
 
@@ -211,16 +211,16 @@ Polish       (4.16–4.27)  ── mostly independent  ── trickle through wa
 |---|---|---|---|
 | 4.16 | [Playwright customer flows](tasks/v2-wave-4/module-4.16-playwright-customer-flows.md) | ⬜ | Search → Book → Pay |
 | 4.17 | [i18n restructure (zh-TW / zh-CN / en)](tasks/v2-wave-4/module-4.17-i18n-restructure-zh-en.md) | ⬜ | |
-| 4.18 | [i18n leak sweep (top ~1,200)](tasks/v2-wave-4/module-4.18-i18n-leak-sweep.md) | ⬜ | **🚨 Jeff reviews ~30 critical brand-voice strings** |
-| 4.19 | [Lazy images](tasks/v2-wave-4/module-4.19-loading-lazy-images.md) | ⬜ | |
-| 4.20 | [N+1 query fixes](tasks/v2-wave-4/module-4.20-n-plus-1-fixes.md) | ⬜ | |
-| 4.21 | [auditLog enforcement](tasks/v2-wave-4/module-4.21-auditlog-enforcement.md) | ⬜ | Lint rule: every admin mutation logs |
-| 4.22 | [AB-390 dashboard tile](tasks/v2-wave-4/module-4.22-ab390-dashboard-tile.md) | ⬜ | Trial-funnel observability |
-| 4.23 | [scripts/ folder purge](tasks/v2-wave-4/module-4.23-scripts-folder-purge.md) | ⬜ | **🚨 Jeff reviews list before delete (~20 min)** |
-| 4.24 | [Pino full sweep](tasks/v2-wave-4/module-4.24-pino-full-sweep.md) | ⬜ | ~1,250 sites (see `wave-4-deferrals.md`) |
-| 4.25 | [Storybook design system](tasks/v2-wave-4/module-4.25-storybook-design-system.md) | ⬜ | |
-| 4.26 | [Bundle analyzer in CI](tasks/v2-wave-4/module-4.26-bundle-analyzer-ci.md) | ⬜ | Per-route size budget |
-| 4.27 | [Phase-0 stash triage](tasks/v2-wave-4/module-4.27-stash-phase0-mod4-decision.md) | ⬜ | **🚨 Jeff decides per stashed file** |
+| 4.18 | [i18n leak sweep (top ~1,200)](tasks/v2-wave-4/module-4.18-i18n-leak-sweep.md) | ❌ CUT | — | **Cut 2026-05-22 (Jeff lock):** needs native-speaker review of ~30 brand-voice strings; not appropriate for single-session autonomy. Split into weekly 200-string batches under a separate process |
+| 4.19 | [Lazy images](tasks/v2-wave-4/module-4.19-loading-lazy-images.md) | ⬜ | — | |
+| 4.20 | [N+1 query fixes](tasks/v2-wave-4/module-4.20-n-plus-1-fixes.md) | ⬜ | — | |
+| 4.21 | [auditLog enforcement](tasks/v2-wave-4/module-4.21-auditlog-enforcement.md) | ⬜ | — | Lint rule: every admin mutation logs |
+| 4.22 | [AB-390 dashboard tile](tasks/v2-wave-4/module-4.22-ab390-dashboard-tile.md) | ⬜ | — | Trial-funnel observability |
+| 4.23 | [scripts/ folder purge](tasks/v2-wave-4/module-4.23-scripts-folder-purge.md) | ⬜ | — | Jeff reviews list before delete (~20 min) |
+| 4.24 | [Pino full sweep](tasks/v2-wave-4/module-4.24-pino-full-sweep.md) | ❌ CUT | — | **Cut 2026-05-22 (Jeff lock):** ~1,250 sites = pure mechanical labor; track as a backlog item to do in batches when touching the corresponding router/service |
+| 4.25 | [Storybook design system](tasks/v2-wave-4/module-4.25-storybook-design-system.md) | ❌ CUT | — | **Cut 2026-05-22 (Jeff lock):** ~2x maintenance cost (every UI change touches two codebases) and a 1-person shop doesn't get the discovery / handoff value Storybook is designed for |
+| 4.26 | [Bundle analyzer in CI](tasks/v2-wave-4/module-4.26-bundle-analyzer-ci.md) | ⬜ | — | Per-route size budget |
+| 4.27 | [Phase-0 stash triage](tasks/v2-wave-4/module-4.27-stash-phase0-mod4-decision.md) | ⬜ | — | Jeff decides per stashed file |
 
 **Verification gate:**
 - PWA: Lighthouse PWA ≥ 90, perf ≥ 70 on CI

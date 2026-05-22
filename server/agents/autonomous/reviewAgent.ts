@@ -11,6 +11,7 @@
  */
 
 import { invokeLLM, type Message, type Tool } from "../../_core/llm";
+import { withAutonomousSafety } from "../_helpers/safety";
 
 export const DEFAULT_REVIEW_POLICY = {
   responseGoal:
@@ -115,7 +116,7 @@ ${policy}
 - 100-250 字,簽名用 policy.signature`;
 }
 
-export async function runReviewAgent(
+async function _runReviewAgentInner(
   input: ReviewAgentInput
 ): Promise<ReviewAgentOutput> {
   const policyText = input.policyRules ?? JSON.stringify(DEFAULT_REVIEW_POLICY, null, 2);
@@ -184,3 +185,9 @@ function safeParsePolicy(text: string): any {
     return DEFAULT_REVIEW_POLICY;
   }
 }
+
+// v2 Wave 3 Module 3.11 — wrapped export with notifyOwner safety net.
+export const runReviewAgent = withAutonomousSafety(
+  { agentName: "review" },
+  _runReviewAgentInner,
+);

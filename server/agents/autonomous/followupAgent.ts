@@ -11,6 +11,7 @@
  */
 
 import { invokeLLM, type Message, type Tool } from "../../_core/llm";
+import { withAutonomousSafety } from "../_helpers/safety";
 
 export const DEFAULT_FOLLOWUP_POLICY = {
   cadenceDaysBefore: [7, 3, 1],
@@ -90,7 +91,7 @@ ${policy}
 - 簽名用 policy.signature`;
 }
 
-export async function runFollowupAgent(
+async function _runFollowupAgentInner(
   input: FollowupAgentInput
 ): Promise<FollowupAgentOutput> {
   const policyText = input.policyRules ?? JSON.stringify(DEFAULT_FOLLOWUP_POLICY, null, 2);
@@ -124,3 +125,9 @@ export async function runFollowupAgent(
   if (!toolCall) throw new Error("FollowupAgent: no tool_call returned");
   return JSON.parse(toolCall.function.arguments);
 }
+
+// v2 Wave 3 Module 3.11 — wrapped export with notifyOwner safety net.
+export const runFollowupAgent = withAutonomousSafety(
+  { agentName: "followup" },
+  _runFollowupAgentInner,
+);

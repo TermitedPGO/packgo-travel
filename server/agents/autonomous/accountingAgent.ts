@@ -25,6 +25,7 @@
  */
 
 import { invokeLLM, type Message } from "../../_core/llm";
+import { withAutonomousSafety } from "../_helpers/safety";
 
 export const ACCOUNTING_CATEGORIES = [
   "cogs_tour", // 旅行團成本 — supplier payments (hotel, flight, transport, guide)
@@ -192,7 +193,7 @@ function sanitizeTxnField(value: string | null | undefined): string {
     .trim() || "(無)";
 }
 
-export async function runAccountingAgent(
+async function _runAccountingAgentInner(
   input: AccountingAgentInput
 ): Promise<AccountingAgentOutput> {
   const lines: string[] = [];
@@ -279,3 +280,9 @@ export async function runAccountingAgent(
       : undefined,
   };
 }
+
+// v2 Wave 3 Module 3.11 — wrapped export with notifyOwner safety net.
+export const runAccountingAgent = withAutonomousSafety(
+  { agentName: "accounting" },
+  _runAccountingAgentInner,
+);

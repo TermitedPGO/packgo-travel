@@ -14,6 +14,7 @@
  */
 
 import { invokeLLM, type Message, type Tool } from "../../_core/llm";
+import { withAutonomousSafety } from "../_helpers/safety";
 
 export const DEFAULT_REFUND_POLICY = {
   alwaysEscalate: true, // hard rule — agent never replies directly
@@ -212,7 +213,7 @@ ${policy}
 - confidence + reasoning`;
 }
 
-export async function runRefundAgent(
+async function _runRefundAgentInner(
   input: RefundAgentInput
 ): Promise<RefundAgentOutput> {
   const policyText = input.policyRules ?? JSON.stringify(DEFAULT_REFUND_POLICY, null, 2);
@@ -245,3 +246,12 @@ export async function runRefundAgent(
   if (!toolCall) throw new Error("RefundAgent: no tool_call returned");
   return JSON.parse(toolCall.function.arguments);
 }
+
+// v2 Wave 3 Module 3.11 — wrap top-level entry with the autonomous-
+// safety net so any throw inside _runRefundAgentInner pages Jeff via
+// notifyOwner BEFORE propagating. Re-throws so the Stripe webhook path
+// + admin manual path keep their existing catch semantics.
+export const runRefundAgent = withAutonomousSafety(
+  { agentName: "refund" },
+  _runRefundAgentInner,
+);
