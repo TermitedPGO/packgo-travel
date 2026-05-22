@@ -75,3 +75,33 @@ export const SUBINTENT_FIXTURES: InquiryFixture[] = [
   FIXTURE_VISA_INQUIRY,
   FIXTURE_DEPOSIT_INQUIRY,
 ];
+
+/**
+ * v2 Wave 3 Module 3.8 — escalation-path fixtures.
+ * Cover the always-escalate intents + critical-urgency + low-confidence paths.
+ * (No `expectedIntent` — these tests assert escalation behavior, not the
+ *  intent itself, so the fixture is intent-agnostic.)
+ */
+export const FIXTURE_REFUND_REQUEST = {
+  from: "test-refund@example.com",
+  subject: "退款請求",
+  body: "我要退款,這個行程不符合我的期待。",
+};
+
+export const FIXTURE_COMPLAINT = {
+  from: "test-upset@example.com",
+  subject: "投訴",
+  body: "服務態度有問題,請給我交代。",
+};
+
+export const FIXTURE_CRITICAL_URGENCY = {
+  from: "test-emergency@example.com",
+  subject: "緊急狀況",
+  body: "在芝加哥機場錯過接機,身上沒有現金、不會說英文,怎麼辦?",
+};
+
+export const FIXTURE_LOW_CONFIDENCE = {
+  from: "test-vague@example.com",
+  subject: "?",
+  body: "嗨。",
+};

@@ -39,6 +39,10 @@ import {
   FIXTURE_TOUR_COMPARISON,
   FIXTURE_VISA_INQUIRY,
   FIXTURE_DEPOSIT_INQUIRY,
+  FIXTURE_REFUND_REQUEST,
+  FIXTURE_COMPLAINT,
+  FIXTURE_CRITICAL_URGENCY,
+  FIXTURE_LOW_CONFIDENCE,
   type InquiryFixture,
 } from "./inquiryAgent.fixtures";
 
@@ -150,5 +154,111 @@ describe("runInquiryAgent — v2 Wave 3 sub-intent classifier round-trip", () =>
     expect(arg.model).toMatch(/^claude/);
     expect(arg.tools).toHaveLength(1);
     expect(arg.toolChoice).toEqual({ name: "submit_inquiry_analysis" });
+  });
+});
+
+// ─── v2 Wave 3 Module 3.8 — escalation paths + LLM-error mode ─────────────
+
+describe("runInquiryAgent — escalation paths (module 3.8)", () => {
+  beforeEach(() => {
+    invokeLLMSpy.mockReset();
+  });
+
+  it("escalates refund_request even at high confidence", async () => {
+    invokeLLMSpy.mockResolvedValueOnce(
+      stubLLMResponse("refund_request", {
+        intent: "Customer wants refund",
+        urgency: "normal",
+        sentiment: "negative",
+        confidence: 92,
+        reasoning: "explicit refund request",
+      }),
+    );
+    const result = await runInquiryAgent({
+      rawMessage: FIXTURE_REFUND_REQUEST.body,
+      channel: "email",
+    });
+    expect(result.classification).toBe("refund_request");
+    expect(result.shouldEscalate).toBe(true);
+  });
+
+  it("escalates complaint regardless of confidence", async () => {
+    invokeLLMSpy.mockResolvedValueOnce(
+      stubLLMResponse("complaint", {
+        intent: "Customer complaining about service",
+        urgency: "high",
+        sentiment: "negative",
+        confidence: 85,
+        reasoning: "service complaint",
+      }),
+    );
+    const result = await runInquiryAgent({
+      rawMessage: FIXTURE_COMPLAINT.body,
+      channel: "email",
+    });
+    expect(result.shouldEscalate).toBe(true);
+  });
+
+  it("escalates critical urgency even on auto-draftable classification", async () => {
+    invokeLLMSpy.mockResolvedValueOnce(
+      stubLLMResponse("new_inquiry", {
+        intent: "Customer needs help urgently",
+        urgency: "critical",
+        sentiment: "negative",
+        confidence: 88,
+        reasoning: "emergency situation",
+      }),
+    );
+    const result = await runInquiryAgent({
+      rawMessage: FIXTURE_CRITICAL_URGENCY.body,
+      channel: "email",
+    });
+    expect(result.shouldEscalate).toBe(true);
+    expect(result.escalationReason ?? "").toMatch(/critical_urgency|critical/);
+  });
+
+  it("escalates when confidence < classification's minConfidence threshold", async () => {
+    invokeLLMSpy.mockResolvedValueOnce(
+      stubLLMResponse("general_info", {
+        intent: "Unclear ask",
+        urgency: "low",
+        sentiment: "neutral",
+        confidence: 30, // general_info minConfidence is 60
+        reasoning: "vague",
+      }),
+    );
+    const result = await runInquiryAgent({
+      rawMessage: FIXTURE_LOW_CONFIDENCE.body,
+      channel: "email",
+    });
+    expect(result.shouldEscalate).toBe(true);
+  });
+
+  it("throws on malformed LLM tool_call JSON", async () => {
+    invokeLLMSpy.mockResolvedValueOnce({
+      choices: [
+        {
+          message: {
+            content: "",
+            tool_calls: [
+              {
+                id: "stub",
+                type: "function" as const,
+                function: {
+                  name: "submit_inquiry_analysis",
+                  arguments: "{ not-valid-json",
+                },
+              },
+            ],
+          },
+        },
+      ],
+    });
+    await expect(
+      runInquiryAgent({
+        rawMessage: FIXTURE_LOW_CONFIDENCE.body,
+        channel: "email",
+      }),
+    ).rejects.toThrow();
   });
 });
