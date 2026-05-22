@@ -74,8 +74,9 @@ const AutonomousAgentsTab = lazy(() => import("@/components/admin/AutonomousAgen
 const QuoteToolTab = lazy(() => import("@/components/admin/tools/QuoteToolTab"));
 // Round 81 Phase 1 of C workflow: Inbox-first default landing
 const OfficeInboxTab = lazy(() => import("@/components/admin/OfficeInboxTab"));
-// Round 81 — per-agent Slack-like channel view; replaces legacy
-// OfficeOverviewTab as the "聊天" page. Built on agentMessages table.
+// Round 81 — per-agent Slack-like channel view. The "聊天" page. Built on
+// agentMessages table. (Replaced the legacy OfficeOverviewTab, deleted
+// 2026-05-22 — see commit message for that removal.)
 const ChatsTab = lazy(() => import("@/components/admin/ChatsTab"));
 // Round 81 (2026-05-17) — UnifiedInbox is the default Office landing.
 // Single vertical scroll: actionable items → Domain Pulse → activity feed.
@@ -381,9 +382,9 @@ function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
       return <OfficeInboxTab onNavigate={(t) => setActivePage(t as PageId)} />;
     case "office-chat":
       // Round 81 (2026-05-17): swap OfficeOverviewTab → ChatsTab per Jeff's
-      // "Slack-like per-agent channel" requirement. OfficeOverviewTab still
-      // exists for now in case we need to compare; safe to delete after a
-      // week of ChatsTab usage proves it covers all the same flows.
+      // "Slack-like per-agent channel" requirement. OfficeOverviewTab deleted
+      // 2026-05-22 once ChatsTab + its inline GmailPanel (47d5a8d) covered
+      // every flow the legacy tab held.
       return <ChatsTab />;
     case "autonomous-agents":
       return <AutonomousAgentsTab />;

@@ -1,8 +1,9 @@
 /**
  * Tests for server/gmailOAuth.ts — specifically the /api/admin/connect-gmail
- * endpoint added 2026-05-21 (Round 81 orphan fix; OfficeOverviewTab's
- * Connect-Gmail UI was removed when ChatsTab replaced it, leaving no path
- * to start the OAuth flow until this server-side redirect was added).
+ * endpoint added 2026-05-21 (Round 81 orphan fix; the legacy OfficeOverviewTab
+ * Connect-Gmail UI never mounted after ChatsTab replaced it. ChatsTab grew
+ * an inline Gmail panel the same day, and OfficeOverviewTab was deleted
+ * 2026-05-22 — this endpoint stays as the canonical bookmark-able entry).
  *
  * Cases:
  *   1. No session cookie     → 401

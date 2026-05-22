@@ -13,9 +13,10 @@
  *
  * 2026-05-21 — added /api/admin/connect-gmail as a server-side redirect
  * shortcut. Round 81 replaced OfficeOverviewTab (which had the Connect
- * Gmail UI) with ChatsTab, orphaning the UI button. Until ChatsTab gets
- * its own Gmail panel, this endpoint is the canonical way to start the
- * OAuth flow — admin bookmarks it.
+ * Gmail UI) with ChatsTab, orphaning the UI button. ChatsTab grew its
+ * own inline Gmail panel the same day (47d5a8d), and OfficeOverviewTab
+ * was deleted 2026-05-22 once its role was fully covered. This endpoint
+ * stays — admin can bookmark it for one-click re-auth.
  */
 
 import type { Express, Request, Response } from "express";
@@ -40,11 +41,10 @@ export function initializeGmailOAuth(app: Express) {
   // ────────────────────────────────────────────────────────────────────
   // GET /api/admin/connect-gmail — start Gmail OAuth flow
   //
-  // Admin-only. Server-side redirect to Google consent screen. Replaces
-  // the orphaned client-side `trpc.agent.gmailGetAuthUrl` UI path (the
-  // OfficeOverviewTab GmailMiniPanel never mounts since Round 81 routed
-  // /admin to ChatsTab instead). Jeff can bookmark this URL for one-click
-  // re-auth when GmailPollWorker starts failing with invalid_grant.
+  // Admin-only. Server-side redirect to Google consent screen. Created as
+  // a bookmark-able alternative to the inline ChatsTab Gmail panel — Jeff
+  // can hit this URL directly when GmailPollWorker starts failing with
+  // invalid_grant and re-auth is needed.
   // ────────────────────────────────────────────────────────────────────
   app.get(
     "/api/admin/connect-gmail",

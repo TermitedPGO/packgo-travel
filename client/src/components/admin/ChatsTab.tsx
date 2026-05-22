@@ -121,11 +121,10 @@ export default function ChatsTab() {
     refetchInterval: 30_000,
   });
 
-  // Gmail integration status — 2026-05-21 inline Connect Gmail UI added
-  // after Round 81 orphaned the OfficeOverviewTab GmailMiniPanel. Backend
-  // proc was already wired (server/routers/agent/gmail.ts gmailStatus);
-  // just no UI mount point. Reconnect link goes to /api/admin/connect-gmail
-  // (server/gmailOAuth.ts handles the 302 to Google).
+  // Gmail integration status — 2026-05-21 inline Connect Gmail UI. The
+  // original mount point lived in OfficeOverviewTab (deleted 2026-05-22
+  // once it was confirmed dead since Round 81). Reconnect link goes to
+  // /api/admin/connect-gmail (server/gmailOAuth.ts handles the 302).
   const gmailStatus = trpc.agent.gmailStatus.useQuery(undefined, {
     refetchInterval: 60_000,
   });
@@ -539,7 +538,8 @@ export default function ChatsTab() {
         </ScrollArea>
 
         {/* Gmail integration mini-panel — 2026-05-21 (Round 81 orphan fix).
-            Replaces the dead GmailMiniPanel in OfficeOverviewTab. */}
+            Inherits the role of the legacy GmailMiniPanel (OfficeOverviewTab
+            deleted 2026-05-22). */}
         <div className="mt-2 pt-2 border-t border-foreground/10 px-1 space-y-2">
           {(() => {
             const integrations = gmailStatus.data?.integrations ?? [];
