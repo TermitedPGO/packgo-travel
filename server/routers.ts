@@ -51,6 +51,7 @@ import { marketingContentRouter } from "./routers/marketingContent";
 import { opsRouter } from "./routers/ops";
 import { storageRouter } from "./routers/storage";
 import { reconciliationRouter } from "./routers/reconciliation";
+import { adminCleanupRouter } from "./routers/adminCleanup";
 import { posterGenRouter } from "./routers/posterGen";
 import { aiQuotesRouter } from "./routers/aiQuotes";
 import { invoicesRouter } from "./routers/invoices";
@@ -213,6 +214,11 @@ export const appRouter = router({
   // ──────────────────────────────────────────────────────────────────────────
   // Reconciliation router — Phase 4E extracted to ./routers/reconciliation.ts
   reconciliation: reconciliationRouter,
+
+  // 2026-05-22 — Cleanup tools for dev/test data surfacing in production:
+  // findStale tours / test-looking inquiries / agent message noise +
+  // bulk delete by explicit ID list. Surfaces in /admin/v2 → 系統 → 清理.
+  adminCleanup: adminCleanupRouter,
 
   // ──────────────────────────────────────────────────────────────────────────
   // v78: AI Quote Generator — customer free-form intent → matched tours →
