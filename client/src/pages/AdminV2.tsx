@@ -48,6 +48,9 @@ import { useCommandPaletteHotkey } from "@/components/admin/primitives/CommandPa
 // independently of the v1 counterpart.
 const BookingsTabV2 = lazy(() => import("@/components/admin-v2/BookingsTabV2"));
 const InquiriesTabV2 = lazy(() => import("@/components/admin-v2/InquiriesTabV2"));
+const ReviewsTabV2 = lazy(() => import("@/components/admin-v2/ReviewsTabV2"));
+const PackpointTabV2 = lazy(() => import("@/components/admin-v2/PackpointTabV2"));
+const VouchersTabV2 = lazy(() => import("@/components/admin-v2/VouchersTabV2"));
 
 // All other tabs initially come from V1. They're consumed AS-IS; we replace
 // them one by one with V2 redesigns. Listed here for the lazy-loader.
@@ -60,9 +63,6 @@ const FinanceLanding = lazy(() => import("@/components/admin/landings/FinanceLan
 const ToursTab = lazy(() => import("@/components/admin/ToursTab"));
 const SuppliersTab = lazy(() => import("@/components/admin/SuppliersTab"));
 const MonitorDashboard = lazy(() => import("@/components/admin/MonitorDashboard"));
-const ReviewsTab = lazy(() => import("@/components/admin/ReviewsTab"));
-const PackpointTab = lazy(() => import("@/components/admin/PackpointTab"));
-const VouchersTab = lazy(() => import("@/components/admin/VouchersTab"));
 const AiQuotesTab = lazy(() => import("@/components/admin/AiQuotesTab"));
 const WechatAssistTab = lazy(() => import("@/components/admin/WechatAssistTab"));
 const QuoteToolTab = lazy(() => import("@/components/admin/tools/QuoteToolTab"));
@@ -359,15 +359,18 @@ function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
     case "customers-landing":
       return <CustomersLanding onNavigate={(t) => setActivePage(t as PageId)} />;
     case "reviews":
-      return <ReviewsTab />;
+      // 🆕 V2 redesign #3
+      return <ReviewsTabV2 />;
     case "tool-quote":
       return <QuoteToolTab />;
     case "ai-quotes":
       return <AiQuotesTab />;
     case "packpoint":
-      return <PackpointTab />;
+      // 🆕 V2 redesign #4
+      return <PackpointTabV2 />;
     case "vouchers":
-      return <VouchersTab />;
+      // 🆕 V2 redesign #5
+      return <VouchersTabV2 />;
     case "wechat-assist":
       return <WechatAssistTab />;
 
