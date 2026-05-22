@@ -339,6 +339,29 @@ vi.mock("./stripeWebhookIdempotency", () => ({
   markStripeEventFailed: vi.fn(),
 }));
 
+// v2 Wave 3 Module 3.5 — RefundAgent is invoked POST-COMMIT inside
+// handleChargeRefunded. Mock it to a deterministic triage so the test's
+// LLM-free environment doesn't crash + so the proposal agentMessage
+// count is predictable. synthesizeStripeRawMessage is pure — passthrough.
+vi.mock("../agents/autonomous/refundAgent", async () => {
+  const actual = await vi.importActual<
+    typeof import("../agents/autonomous/refundAgent")
+  >("../agents/autonomous/refundAgent");
+  return {
+    ...actual,
+    runRefundAgent: vi.fn(async () => ({
+      severity: "medium" as const,
+      reasonCategory: "service_quality" as const,
+      extractedFacts: { specificIncidents: [] },
+      customerEmotionalState: "stub-calm",
+      jeffInternalBriefing: "stubbed triage for unit test",
+      suggestedJeffActions: ["stub action 1"],
+      confidence: 80,
+      reasoning: "stub",
+    })),
+  };
+});
+
 // Import AFTER mocks.
 import { __test__ } from "./stripeWebhook";
 const { handleChargeRefunded } = __test__;
@@ -428,9 +451,19 @@ describe("handleChargeRefunded — Phase 2 module 2.3 transaction wrap", () => {
       })
     );
 
-    // Notifications fired
+    // Notifications fired. v2 Wave 3 Module 3.5 added the RefundAgent
+    // POST-COMMIT triage step which posts a 2nd agentMessage of type
+    // "proposal" (the 1st is the legacy "observation"). notifyOwner stays
+    // at 1 because the RefundAgent mock above returns a stub triage —
+    // only the catch-block fallback would bump notifyOwner.
     expect(spies.notifyOwner).toHaveBeenCalledTimes(1);
-    expect(spies.notifyAgentMessage).toHaveBeenCalledTimes(1);
+    expect(spies.notifyAgentMessage).toHaveBeenCalledTimes(2);
+    expect(spies.notifyAgentMessage.mock.calls[0][0].messageType).toBe(
+      "observation",
+    );
+    expect(spies.notifyAgentMessage.mock.calls[1][0].messageType).toBe(
+      "proposal",
+    );
   });
 
   it("case 2: voucher restoration is NOT triggered on refund (current policy)", async () => {

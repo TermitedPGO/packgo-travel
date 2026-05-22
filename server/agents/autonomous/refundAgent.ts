@@ -38,7 +38,76 @@ export type RefundAgentInput = {
     vipScore?: number | null;
   };
   policyRules?: string | null;
+  /**
+   * v2 Wave 3 Module 3.5 — trigger source attribution.
+   *
+   * `manual_admin` is the legacy path (Jeff clicks the agent button).
+   * `stripe_webhook` is the autonomous trigger from handleChargeRefunded
+   * — rawMessage in that case is the synthesized summary from
+   * `synthesizeStripeRawMessage`, NOT a real customer email.
+   *
+   * Optional + defaults to undefined (legacy callers unchanged).
+   */
+  source?: "manual_admin" | "stripe_webhook";
+  /** Set when source==="stripe_webhook". */
+  stripeContext?: {
+    chargeId: string;
+    paymentIntentId: string;
+    refundedAmountUsd: number;
+    bookingId?: number | null;
+    currency: string;
+  };
 };
+
+/**
+ * v2 Wave 3 Module 3.5 — build a LLM-readable summary for RefundAgent
+ * when the trigger is the Stripe `charge.refunded` webhook (not a
+ * customer email). Tells the model clearly: this is backend-triggered;
+ * generate a triage for Jeff to use when drafting the proactive
+ * customer notification, not a reply.
+ */
+export function synthesizeStripeRawMessage(args: {
+  charge: {
+    id: string;
+    amount: number;
+    amount_refunded: number;
+    currency: string;
+  };
+  paymentIntentId: string;
+  bookingId?: number | null;
+  bookingSnapshot?: {
+    customerEmail?: string;
+    customerName?: string;
+    departureDate?: Date | string;
+  };
+}): string {
+  const refundedUsd = (args.charge.amount_refunded / 100).toFixed(2);
+  const originalUsd = (args.charge.amount / 100).toFixed(2);
+  const currency = (args.charge.currency || "usd").toUpperCase();
+  const departure = args.bookingSnapshot?.departureDate
+    ? typeof args.bookingSnapshot.departureDate === "string"
+      ? args.bookingSnapshot.departureDate
+      : args.bookingSnapshot.departureDate.toISOString().slice(0, 10)
+    : "(unknown)";
+  return [
+    `[STRIPE_REFUND_AUTOMATED_TRIGGER]`,
+    `Booking ID: ${args.bookingId ?? "(unknown)"}`,
+    `Customer email: ${args.bookingSnapshot?.customerEmail ?? "(unknown)"}`,
+    `Customer name: ${args.bookingSnapshot?.customerName ?? "(unknown)"}`,
+    `Departure date: ${departure}`,
+    `Refund amount: $${refundedUsd} ${currency}`,
+    `Original charge: $${originalUsd} ${currency}`,
+    `Stripe charge ID: ${args.charge.id}`,
+    `Stripe payment intent: ${args.paymentIntentId}`,
+    ``,
+    `Triggered by: Stripe charge.refunded webhook (NOT a customer email).`,
+    `The customer has not written in about this refund — Jeff needs a`,
+    `proactive notification draft. Generate a triage summary covering:`,
+    `severity (low/medium/high/critical), likely reason category,`,
+    `customer emotional state forecast, and 2-4 concrete actions Jeff`,
+    `should take to close the loop with the customer warmly.`,
+  ].join("\n");
+}
 
 export type RefundAgentOutput = {
   severity: "low" | "medium" | "high" | "critical";

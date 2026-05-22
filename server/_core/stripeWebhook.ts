@@ -729,6 +729,142 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
   } catch (err) {
     log.error({ err }, "[Stripe Webhook] notifyOwner (refund) failed");
   }
+
+  // v2 Wave 3 Module 3.5 — autonomous RefundAgent triage on every refund.
+  //
+  // RefundAgent (server/agents/autonomous/refundAgent.ts) used to run only
+  // when an admin clicked a button in agentRouter — meaning every Stripe-
+  // initiated refund left Jeff without a pre-drafted customer-comm
+  // talking-point. Per audit §A Domain A gap: "most-conspicuous
+  // autonomy gap."
+  //
+  // We invoke it AFTER the DB transaction has committed + after notifyOwner
+  // / notifyAgentMessage observation fired. If RefundAgent throws (LLM
+  // outage, etc.) the Stripe state is already persisted and the customer's
+  // refund is real — the missing triage is acceptable degradation.
+  //
+  // RefundAgent's constitution (alwaysEscalate: true, never auto-send) is
+  // already correct. This module only adds the autonomous trigger; the
+  // triage goes to the office inbox as a `proposal` message and Jeff
+  // composes the customer notification himself.
+  try {
+    const { runRefundAgent, synthesizeStripeRawMessage } = await import(
+      "../agents/autonomous/refundAgent"
+    );
+
+    // Fetch active refund policy (same row inquiry uses but agentName=refund).
+    let refundPolicyRules: string | null = null;
+    try {
+      const dbInst = await getDb();
+      if (dbInst) {
+        const { agentPolicies } = await import("../../drizzle/schema");
+        const { and, eq } = await import("drizzle-orm");
+        const policyRows = await dbInst
+          .select()
+          .from(agentPolicies)
+          .where(
+            and(
+              eq(agentPolicies.agentName, "refund"),
+              eq(agentPolicies.active, 1),
+            ),
+          )
+          .limit(1);
+        if (policyRows[0]) refundPolicyRules = policyRows[0].rules;
+      }
+    } catch (err) {
+      log.warn(
+        { err },
+        "[Stripe Webhook] RefundAgent policy fetch failed — using defaults",
+      );
+    }
+
+    const synthesizedRawMessage = synthesizeStripeRawMessage({
+      charge: {
+        id: charge.id,
+        amount: charge.amount,
+        amount_refunded: charge.amount_refunded,
+        currency: charge.currency ?? "usd",
+      },
+      paymentIntentId,
+      bookingId: payment.bookingId,
+      bookingSnapshot: bookingSnap
+        ? {
+            customerEmail:
+              (bookingSnap as { customerEmail?: string }).customerEmail,
+            customerName:
+              (bookingSnap as { customerName?: string }).customerName,
+            departureDate:
+              (bookingSnap as { departureDate?: Date | string })
+                .departureDate,
+          }
+        : undefined,
+    });
+
+    const triage = await runRefundAgent({
+      rawMessage: synthesizedRawMessage,
+      customerProfile: undefined,
+      policyRules: refundPolicyRules,
+      source: "stripe_webhook",
+      stripeContext: {
+        chargeId: charge.id,
+        paymentIntentId,
+        refundedAmountUsd: charge.amount_refunded / 100,
+        bookingId: payment.bookingId,
+        currency: charge.currency ?? "usd",
+      },
+    });
+
+    const { notifyAgentMessage: notifyTriage } = await import("./agentNotify");
+    await notifyTriage({
+      agentName: "refund",
+      messageType: "proposal",
+      title: `💰 退款 triage · Booking #${payment.bookingId ?? "?"} · severity=${triage.severity}`.slice(0, 200),
+      body:
+        `**Severity:** ${triage.severity}\n` +
+        `**Reason category:** ${triage.reasonCategory}\n` +
+        `**Customer emotional state:** ${triage.customerEmotionalState}\n\n` +
+        `**Jeff briefing:**\n${triage.jeffInternalBriefing}\n\n` +
+        `**Suggested actions:**\n` +
+        triage.suggestedJeffActions.map((a) => `- ${a}`).join("\n") +
+        `\n\n_Confidence: ${triage.confidence} · Auto-triggered by Stripe charge.refunded_`,
+      priority:
+        triage.severity === "critical"
+          ? "critical"
+          : triage.severity === "high"
+            ? "high"
+            : "normal",
+      context: {
+        chargeId: charge.id,
+        paymentIntentId,
+        bookingId: payment.bookingId,
+        source: "stripe_webhook",
+        triage,
+      },
+    });
+    log.info(
+      {
+        bookingId: payment.bookingId,
+        severity: triage.severity,
+        confidence: triage.confidence,
+      },
+      "[Stripe Webhook] RefundAgent triage posted to inbox",
+    );
+  } catch (err) {
+    // Non-fatal: refund itself succeeded; missing triage just means Jeff
+    // composes the customer-comms message without the LLM head start.
+    log.error(
+      { err, chargeId: charge.id, paymentIntentId },
+      "[Stripe Webhook] RefundAgent triage failed (non-fatal)",
+    );
+    try {
+      await notifyOwner({
+        title: "RefundAgent 自動 triage 失敗 (退款本身已完成)",
+        content:
+          `Charge ${charge.id} / payment intent ${paymentIntentId} — RefundAgent threw, no draft triage in inbox. ` +
+          `Refund itself is already processed in DB. Compose customer notification manually.`,
+      });
+    } catch {}
+  }
 }
 
 /**

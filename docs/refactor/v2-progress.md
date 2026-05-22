@@ -30,7 +30,7 @@
 |---|---|---|---|---|---|---|
 | 1 | Foundation + Observability | 9 | ✅ Complete (9 / 9) | ~58 AI / ~3 Jeff | Week 1 (May 19–20) | `8b2215f` passport-at-rest |
 | 2 | God-File Splits | 13 | ✅ Complete (13 / 13) | ~96 AI / ~4 Jeff | Weeks 1–3 (May 19–21) | `c19c57e` getRouteMap extract |
-| 3 | Autonomy Thesis | 13 | 🟡 3 / 13 (3.1+3.2+3.3) | ~110 AI / ~4 Jeff | Weeks 3–4 | `5002832` |
+| 3 | Autonomy Thesis | 13 | 🟡 6 / 13 (3.1+3.2+3.3+3.4+3.12 + dispatcher LIVE in prod) | ~110 AI / ~4 Jeff | Weeks 3–4 | `96dd2b9` (v512) |
 | 4 | Mobile (PWA) + Polish | **18 in v2** (9 RN deferred to v3) | ⬜ Not started | ~80 AI / ~7 Jeff (v2 scope) | Weeks 4–5 | — |
 
 **Status legend:** ⬜ TODO · 🟡 IN-PROGRESS · ✅ DONE · ⚠️ BLOCKED · 🚨 DECISION-NEEDED
@@ -138,7 +138,8 @@
 | 3.1 | [Classifier sub-intents (5 new)](tasks/v2-wave-3/module-3.1-classifier-sub-intents.md) | ✅ | claude | `2f773ba` · 5 new intents + 5 fixtures + 6 Vitest cases |
 | 3.2 | [Skill registry create](tasks/v2-wave-3/module-3.2-skill-registry-create.md) | ✅ | claude | `5002832` · Map + lookupSkill + listRegisteredIntents + 16 Vitest cases |
 | 3.3 | [Skill orchestrator interface](tasks/v2-wave-3/module-3.3-skill-orchestrator-interface.md) | ✅ | claude | `3a03480` · SkillOrchestrator + SkillResult discriminated + tourComparisonOrchestrator + 10 Vitest cases |
-| 3.4 | [Inquiry auto-dispatch](tasks/v2-wave-3/module-3.4-inquiry-auto-dispatch.md) | ⬜ | — | 369 LOC spec; depends on 3.1+3.2+3.3; **🔒 LOCKED 2026-05-19 (re-confirmed 2026-05-22): confidence-gated auto-send + env kill-switch + per-skill allow-list + daily quota + brand-damage circuit-breaker. Refund/complaint stay escalation-only.** |
+| 3.4 | [Inquiry auto-dispatch](tasks/v2-wave-3/module-3.4-inquiry-auto-dispatch.md) | ✅ | claude | `0f52f50` (A: pure) + `96dd2b9` (B: persisted + gmailPipeline + migration 0079) · 17 Vitest cases · **LIVE in prod v512** · auto-send safeguards (allow-list/quota/circuit-breaker) deferred to follow-up |
+| 3.12 | [Confidence threshold config](tasks/v2-wave-3/module-3.12-confidence-threshold-config.md) | ✅ | claude | `cd83ba0` · AGENT_CONFIDENCE_THRESHOLD + AGENT_AUTO_SEND_THRESHOLD env getters + 16 Vitest cases |
 | 3.5 | [RefundAgent ↔ Stripe webhook](tasks/v2-wave-3/module-3.5-refund-agent-stripe-wire.md) | ⬜ | — | Independent; fires on `charge.refunded` |
 | 3.6 | [Port packgo-china-visa skill](tasks/v2-wave-3/module-3.6-port-packgo-china-visa.md) | ⬜ | — | Depends on 3.2; **🔒 LOCKED 2026-05-22: bilingual (zh-TW left / en right, 2-column)** |
 | 3.7 | [Port packgo-tour-confirmation skill](tasks/v2-wave-3/module-3.7-port-packgo-tour-confirmation.md) | ⬜ | — | Independent; **🔒 LOCKED 2026-05-22: no manual regenerate button (auto-only via dispatcher 3.4)** |
@@ -146,7 +147,7 @@
 | 3.9 | [Vitest — masterAgent](tasks/v2-wave-3/module-3.9-vitest-master-agent.md) | ⬜ | — | Supervisor + email template happy path |
 | 3.10 | [Vitest — autonomous agents batch (15 files)](tasks/v2-wave-3/module-3.10-vitest-autonomous-agents-batch.md) | ⬜ | — | One per agent; mostly happy-path + 1 edge |
 | 3.11 | [Notify-owner consistency](tasks/v2-wave-3/module-3.11-notify-owner-consistency.md) | ⬜ | — | Unify Jeff-pager surface across agents |
-| 3.12 | [Confidence threshold config](tasks/v2-wave-3/module-3.12-confidence-threshold-config.md) | ⬜ | — | Per-intent thresholds; admin-tunable |
+| 3.12 | (moved up next to 3.4 — see above) | — | — | (delisted to keep table compact) |
 | 3.13 | [Skills folder rename](tasks/v2-wave-3/module-3.13-skills-folder-rename.md) | ⬜ | — | Disambiguate 3 "skills" folders |
 
 **Verification gate:** All 13 modules' Vitest cases pass; `pnpm tsc --noEmit` clean; **end-to-end smoke:** a manually-crafted inbound email of each new intent type lands the right skill via auto-dispatch.
