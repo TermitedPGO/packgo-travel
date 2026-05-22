@@ -16,9 +16,12 @@ export const BRAND = {
 } as const;
 
 export const CONTACT = {
-  // v80.24: dropped personal Gmail. If you don't have a domain email yet,
-  // forward `support@packgo.us` → your inbox via Google Workspace.
-  email: "support@packgo.us",
+  // 2026-05-22: Switched to support@packgoplay.com — Jeff hooked up Google
+  // Workspace + Gmail OAuth for that mailbox the same day as the v513
+  // RefundAgent autopilot deploy. Personal Gmail Jeffhsieh09@gmail.com is
+  // deprecated for buyer-facing UI; emailBackup kept only for admin/runbook
+  // use until all i18n strings are confirmed migrated.
+  email: "support@packgoplay.com",
   // Backup email shown only on internal admin pages, never on buyer-facing UI.
   emailBackup: "jeffhsieh09@gmail.com",
   phone: "+1 (510) 634-2307",

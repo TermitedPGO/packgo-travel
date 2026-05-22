@@ -760,7 +760,7 @@ export const en = {
       title: 'Privacy Policy',
       subtitle: 'How Pack & Go, LLC collects, uses, and protects your personal information.',
       effective: 'Effective date',
-      intro: 'This Privacy Policy describes how Pack & Go, LLC ("Pack & Go", "we", "us") collects and processes personal information about visitors to packgo-travel.fly.dev (the "Site") and customers of our travel services. It also explains the rights available to California residents under the California Consumer Privacy Act (CCPA), as amended by the California Privacy Rights Act (CPRA).',
+      intro: 'This Privacy Policy describes how Pack & Go, LLC ("Pack & Go", "we", "us") collects and processes personal information about visitors to packgoplay.com (the "Site") and customers of our travel services. It also explains the rights available to California residents under the California Consumer Privacy Act (CCPA), as amended by the California Privacy Rights Act (CPRA).',
       s1h: '1. Categories of personal information we collect',
       s1intro: 'In the last 12 months we have collected the following categories of personal information, as those categories are defined in Cal. Civ. Code §1798.140:',
       s1list: [
@@ -796,7 +796,7 @@ export const en = {
         'Designate an authorised agent to exercise these rights on your behalf.',
         'Appeal the denial of a request to the California Privacy Protection Agency.',
       ],
-      s4how: 'To exercise any of these rights, email privacy@packandgo.com (or Jeffhsieh09@gmail.com during our transition to a dedicated privacy mailbox). We will verify your identity and respond within 45 days, as required by §1798.130.',
+      s4how: 'To exercise any of these rights, email privacy@packandgo.com (or support@packgoplay.com during our transition to a dedicated privacy mailbox). We will verify your identity and respond within 45 days, as required by §1798.130.',
       s5h: '5. Data retention',
       s5list: [
         'Booking records: 7 years (tax and CA DOJ recordkeeping requirements).',
@@ -823,7 +823,7 @@ export const en = {
       s11h: '11. Changes',
       s11p: 'We will post any update here with a new effective date. If the change is material, we will also notify active customers by email.',
       s12h: '12. Contact',
-      s12p: 'Pack & Go, LLC · Attn: Privacy Officer · 39055 Cedar Blvd #126, Newark, CA 94560 · Jeffhsieh09@gmail.com',
+      s12p: 'Pack & Go, LLC · Attn: Privacy Officer · 39055 Cedar Blvd #126, Newark, CA 94560 · support@packgoplay.com',
       cppaPrefix: 'You may also contact the California Privacy Protection Agency at ',
     },
   },
@@ -863,7 +863,7 @@ export const en = {
       title: 'Terms of Service',
       subtitle: 'The contract governing every booking with Pack & Go, LLC.',
       effective: 'Effective date',
-      intro: 'These Terms of Service (the "Terms") govern your use of the website packgo-travel.fly.dev (the "Site") and any travel services booked through Pack & Go, LLC ("Pack & Go", "we", "us"). By booking a tour, submitting an inquiry, or creating an account, you agree to these Terms.',
+      intro: 'These Terms of Service (the "Terms") govern your use of the website packgoplay.com (the "Site") and any travel services booked through Pack & Go, LLC ("Pack & Go", "we", "us"). By booking a tour, submitting an inquiry, or creating an account, you agree to these Terms.',
       s1h: '1. Who we are',
       s1p: [
         'Pack & Go, LLC is a California limited liability company with its principal place of business at 39055 Cedar Blvd #126, Newark, CA 94560, USA.',
@@ -890,7 +890,7 @@ export const en = {
       s5p: [
         'Upon cancellation of a transportation or travel service, all sums paid to Pack & Go for services that were not provided to the passenger will be promptly paid to the passenger, provided the passenger is not at fault and has not cancelled in violation of terms previously clearly and conspicuously disclosed to, and agreed to by, the passenger.',
         'Supplier-side penalties (airline change fees, non-refundable hotel nights, cruise-line cancellation charges) are passed through at cost and will be itemised on your refund statement.',
-        'A written cancellation notice is required. Email to Jeffhsieh09@gmail.com constitutes valid written notice.',
+        'A written cancellation notice is required. Email to support@packgoplay.com constitutes valid written notice.',
       ],
       s6h: '6. Travel documents, insurance, and your responsibilities',
       s6p: [
@@ -917,7 +917,7 @@ export const en = {
       ],
       s11h: '11. Contact',
       s11p: [
-        'Pack & Go, LLC · 39055 Cedar Blvd #126, Newark, CA 94560 · +1 (510) 634-2307 · Jeffhsieh09@gmail.com',
+        'Pack & Go, LLC · 39055 Cedar Blvd #126, Newark, CA 94560 · +1 (510) 634-2307 · support@packgoplay.com',
       ],
       dojFooter: 'Seller of Travel Program · Office of the Attorney General · 300 South Spring Street, Suite 1702, Los Angeles, CA 90013 · (213) 269-6564 · sellers.travel@doj.ca.gov · https://oag.ca.gov/travel',
     },

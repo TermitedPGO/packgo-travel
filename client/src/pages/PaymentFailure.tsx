@@ -139,7 +139,7 @@ export default function PaymentFailure() {
               <Mail className="w-5 h-5 text-gray-600" />
               <div>
                 <p className="text-sm text-gray-600">{t('contactUs.email')}</p>
-                <p className="font-semibold text-gray-900">Jeffhsieh09@gmail.com</p>
+                <p className="font-semibold text-gray-900">support@packgoplay.com</p>
                 <p className="text-xs text-gray-500">{t('quickInquiry.success.description')}</p>
               </div>
             </div>

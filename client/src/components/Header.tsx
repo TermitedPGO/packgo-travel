@@ -173,7 +173,9 @@ export default function Header() {
                   className="flex items-center gap-1 hover:text-white transition-colors"
                 >
                   <User className="h-3 w-3" />
-                  <span className="truncate max-w-[120px]">{user.name || user.email}</span>
+                  {/* 2026-05-22: bumped max-w 120 → 180px so "Pack&Go LLC Support"
+                      (18 chars) shows full instead of "Pack&Go LLC Supp…". */}
+                  <span className="truncate max-w-[180px]">{user.name || user.email}</span>
                 </Link>
               </>
             ) : (

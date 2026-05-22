@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, Phone } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { useLocale } from "@/contexts/LocaleContext";
 import { translateDestination } from "@/utils/locationMapping";
@@ -291,15 +291,10 @@ export default function HomeHero({ bgImage }: HomeHeroProps) {
             </Link>
           </div>
 
-          <div className="mt-10 md:mt-14 flex items-center gap-3 text-white/70">
-            <Phone className="h-4 w-4" />
-            <a
-              href="tel:+15106342307"
-              className="text-sm tracking-wide hover:text-white transition-colors"
-            >
-              +1 (510) 634-2307 · {t("homeHero.phoneNote")}
-            </a>
-          </div>
+          {/* 2026-05-22: removed duplicate phone row — Header.tsx top utility bar
+              already shows +1 (510) 634-2307 on every page. Hero CTA buttons
+              above carry the conversion weight; phone stays a click away in
+              the persistent header. */}
         </div>
       </div>
 

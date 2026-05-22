@@ -257,10 +257,10 @@ export default function PaymentSuccess() {
               <div>
                 <p className="text-base text-gray-500">{t("paymentSuccess.customerServiceEmail")}</p>
                 <a
-                  href="mailto:Jeffhsieh09@gmail.com"
+                  href="mailto:support@packgoplay.com"
                   className="text-xl font-bold text-gray-900 hover:text-primary transition-colors"
                 >
-                  Jeffhsieh09@gmail.com
+                  support@packgoplay.com
                 </a>
               </div>
             </div>

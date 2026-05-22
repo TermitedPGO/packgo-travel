@@ -11,8 +11,11 @@ interface SEOConfig {
 }
 
 const SITE_NAME = "PACK&GO 旅行社";
-// Round 72: corrected from stale packgo09.manus.space. Fly.io is the canonical host.
-const BASE_URL = "https://packgo-travel.fly.dev";
+// 2026-05-22: canonical domain is packgoplay.com (custom domain on Fly).
+// packgo-travel.fly.dev still resolves but 308-redirects to packgoplay.com
+// per server/_core/index.ts middleware — use the canonical URL for SEO so
+// crawlers don't dilute PageRank across two hostnames.
+const BASE_URL = "https://packgoplay.com";
 const DEFAULT_IMAGE = `${BASE_URL}/og-image.jpg`;
 
 /**

@@ -771,7 +771,7 @@ export const zhTW = {
       title: '隱私權政策',
       subtitle: 'Pack & Go, LLC 如何蒐集、使用並保護您的個人資料。',
       effective: '生效日期',
-      intro: '本隱私權政策說明 Pack & Go, LLC（下稱「本公司」）如何蒐集與處理您造訪 packgo-travel.fly.dev（下稱「本網站」）及使用本公司旅遊服務時之個人資料，並載明加州居民依加州消費者隱私法（CCPA，經 CPRA 修正）所享有之權利。',
+      intro: '本隱私權政策說明 Pack & Go, LLC（下稱「本公司」）如何蒐集與處理您造訪 packgoplay.com（下稱「本網站」）及使用本公司旅遊服務時之個人資料，並載明加州居民依加州消費者隱私法（CCPA，經 CPRA 修正）所享有之權利。',
       s1h: '一、蒐集之個人資料類別',
       s1intro: '過去 12 個月內，本公司依加州民法 §1798.140 所列類別蒐集下列個人資料：',
       s1list: [
@@ -807,7 +807,7 @@ export const zhTW = {
         '指定授權代理人代為行使。',
         '對拒絕處分向加州隱私保護局（CPPA）申訴。',
       ],
-      s4how: '行使前述權利，請寄信至 privacy@packandgo.com（過渡期間請使用 Jeffhsieh09@gmail.com）。本公司將驗證您的身分後，於加州民法 §1798.130 規定之 45 日內回覆。',
+      s4how: '行使前述權利，請寄信至 privacy@packandgo.com（過渡期間請使用 support@packgoplay.com）。本公司將驗證您的身分後，於加州民法 §1798.130 規定之 45 日內回覆。',
       s5h: '五、資料保存期限',
       s5list: [
         '訂單紀錄：7 年（稅務及加州 DOJ 紀錄保存義務）。',
@@ -834,7 +834,7 @@ export const zhTW = {
       s11h: '十一、修訂',
       s11p: '任何更新將於本頁揭示並更新生效日。重大變更將另以電郵通知活躍客戶。',
       s12h: '十二、聯絡',
-      s12p: 'Pack & Go, LLC · 隱私長收 · 39055 Cedar Blvd #126, Newark, CA 94560, USA · Jeffhsieh09@gmail.com',
+      s12p: 'Pack & Go, LLC · 隱私長收 · 39055 Cedar Blvd #126, Newark, CA 94560, USA · support@packgoplay.com',
       cppaPrefix: '您亦得逕向加州隱私保護局（California Privacy Protection Agency）反映：',
     },
   },
@@ -874,7 +874,7 @@ export const zhTW = {
       title: '服務條款',
       subtitle: '與 Pack & Go, LLC 所有訂單之契約依據。',
       effective: '生效日期',
-      intro: '本服務條款（下稱「本條款」）規範您使用 packgo-travel.fly.dev 網站（下稱「本網站」）及透過 Pack & Go, LLC（下稱「本公司」、「我們」）預訂之任何旅遊服務。一旦您下單、送出諮詢或建立會員，即視為接受本條款。',
+      intro: '本服務條款（下稱「本條款」）規範您使用 packgoplay.com 網站（下稱「本網站」）及透過 Pack & Go, LLC（下稱「本公司」、「我們」）預訂之任何旅遊服務。一旦您下單、送出諮詢或建立會員，即視為接受本條款。',
       s1h: '一、公司資訊',
       s1p: [
         'Pack & Go, LLC 為依加州法律成立之有限責任公司，主事務所設於 39055 Cedar Blvd #126, Newark, CA 94560, USA。',
@@ -901,7 +901,7 @@ export const zhTW = {
       s5p: [
         '於取消運送或旅遊服務後，凡已付予本公司但未實際提供之服務款項，將即時退還旅客；但旅客須非有責方，且未違反事前已清楚揭露並經旅客同意之條款。',
         '供應商端之罰款（航空公司改票費、不可退訂飯店、郵輪取消罰金等）將依實際金額轉嫁，並於退款明細中項目化列出。',
-        '須以書面通知取消。寄至 Jeffhsieh09@gmail.com 之電子郵件視為有效書面通知。',
+        '須以書面通知取消。寄至 support@packgoplay.com 之電子郵件視為有效書面通知。',
       ],
       s6h: '六、證件、保險與旅客責任',
       s6p: [
@@ -928,7 +928,7 @@ export const zhTW = {
       ],
       s11h: '十一、聯絡我們',
       s11p: [
-        'Pack & Go, LLC · 39055 Cedar Blvd #126, Newark, CA 94560, USA · +1 (510) 634-2307 · Jeffhsieh09@gmail.com',
+        'Pack & Go, LLC · 39055 Cedar Blvd #126, Newark, CA 94560, USA · +1 (510) 634-2307 · support@packgoplay.com',
       ],
       dojFooter: '加州旅遊業者計畫 · 加州檢察總長辦公室 · 300 South Spring Street, Suite 1702, Los Angeles, CA 90013 · (213) 269-6564 · sellers.travel@doj.ca.gov · https://oag.ca.gov/travel',
     },

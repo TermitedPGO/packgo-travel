@@ -109,7 +109,7 @@ export default function AboutUs() {
       <p>
         <strong>{t('aboutUs.address')}：</strong>39055 Cedar Blvd #126, Newark, CA 94560, USA<br />
         <strong>{t('aboutUs.phone')}：</strong>+1 (510) 634-2307<br />
-        <strong>{t('aboutUs.email')}：</strong>Jeffhsieh09@gmail.com
+        <strong>{t('aboutUs.email')}：</strong>support@packgoplay.com
       </p>
       </MarketingLayout>
     </>
