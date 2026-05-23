@@ -45,6 +45,7 @@ import {
 import { useCommandPaletteHotkey } from "@/components/admin/primitives/CommandPalette";
 import { useIsMobile } from "@/_core/hooks/useIsMobile";
 import MobileShell, { type MobileNavId } from "@/components/mobile/MobileShell";
+const DailyCheckMobile = lazy(() => import("@/components/mobile/DailyCheckMobile"));
 
 // V2 redesigned tabs — Trip.com style. One per file so each can evolve
 // independently of the v1 counterpart.
@@ -316,6 +317,17 @@ export default function AdminV2() {
       .filter(Boolean)
       .join(" · ");
 
+    // Mobile-specific page render — branches off renderPage for pages
+    // that have a mobile-tuned counterpart.
+    const renderMobilePage = () => {
+      switch (activePage) {
+        case "today":
+          return <DailyCheckMobile onNavigate={(p) => setActivePage(p as PageId)} />;
+        default:
+          return renderPage(activePage, setActivePage);
+      }
+    };
+
     return (
       <div className="h-screen bg-gray-50">
         <CommandPalette
@@ -330,7 +342,7 @@ export default function AdminV2() {
           onSearchClick={() => setPaletteOpen(true)}
         >
           <Suspense fallback={<LoadingPage text="載入中…" />}>
-            {renderPage(activePage, setActivePage)}
+            {renderMobilePage()}
           </Suspense>
         </MobileShell>
       </div>
