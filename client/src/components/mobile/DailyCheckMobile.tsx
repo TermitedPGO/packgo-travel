@@ -15,7 +15,7 @@
  */
 
 import { useMemo } from "react";
-import { Sparkles, Camera, ChevronRight, Clock } from "lucide-react";
+import { Sparkles, ChevronRight, Clock } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import KpiStrip from "./KpiStrip";
 import { toast } from "sonner";
@@ -191,26 +191,32 @@ export default function DailyCheckMobile({
       <div className="grid grid-cols-2 gap-3">
         <button
           type="button"
-          onClick={() => classifyMut.mutate({ limit: 50 })}
-          disabled={classifyMut.isPending || totalReviewPile === 0}
+          onClick={() => {
+            const u = new URL(window.location.href);
+            u.searchParams.set("triage", "1");
+            window.history.replaceState({}, "", u.toString());
+            onNavigate("bank-ledger");
+          }}
+          disabled={totalReviewPile === 0}
           className="rounded-xl border border-teal-200 bg-teal-50 text-teal-700 p-4 flex flex-col items-start gap-1 text-left active:scale-95 transition-transform disabled:opacity-50"
         >
           <Sparkles className="w-5 h-5" />
-          <span className="text-sm font-semibold">
-            {classifyMut.isPending ? "AI 跑中…" : "AI 分類待 review"}
-          </span>
+          <span className="text-sm font-semibold">逐筆 swipe 分類</span>
           <span className="text-[10px] opacity-70">
-            {totalReviewPile} 筆 · 1 click 50 筆
+            {totalReviewPile} 筆 · 滑動確認
           </span>
         </button>
         <button
           type="button"
-          onClick={() => toast.info("Receipt camera 在 Phase 6 上線")}
-          className="rounded-xl border border-slate-200 bg-slate-50 text-slate-700 p-4 flex flex-col items-start gap-1 text-left active:scale-95 transition-transform"
+          onClick={() => classifyMut.mutate({ limit: 50 })}
+          disabled={classifyMut.isPending || totalReviewPile === 0}
+          className="rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 p-4 flex flex-col items-start gap-1 text-left active:scale-95 transition-transform disabled:opacity-50"
         >
-          <Camera className="w-5 h-5" />
-          <span className="text-sm font-semibold">拍收據</span>
-          <span className="text-[10px] opacity-70">Phase 6 上線</span>
+          <Sparkles className="w-5 h-5" />
+          <span className="text-sm font-semibold">
+            {classifyMut.isPending ? "AI 跑中…" : "AI 批次 50 筆"}
+          </span>
+          <span className="text-[10px] opacity-70">背景跑 ~2 分鐘</span>
         </button>
       </div>
     </div>

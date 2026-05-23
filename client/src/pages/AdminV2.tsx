@@ -47,6 +47,8 @@ import { useIsMobile } from "@/_core/hooks/useIsMobile";
 import MobileShell, { type MobileNavId } from "@/components/mobile/MobileShell";
 const DailyCheckMobile = lazy(() => import("@/components/mobile/DailyCheckMobile"));
 const GlobalSearchSheet = lazy(() => import("@/components/mobile/GlobalSearchSheet"));
+const BankTriagePage = lazy(() => import("@/components/mobile/BankTriagePage"));
+const ReceiptCameraFAB = lazy(() => import("@/components/mobile/ReceiptCameraFAB"));
 
 // V2 redesigned tabs — Trip.com style. One per file so each can evolve
 // independently of the v1 counterpart.
@@ -325,6 +327,24 @@ export default function AdminV2() {
       switch (activePage) {
         case "today":
           return <DailyCheckMobile onNavigate={(p) => setActivePage(p as PageId)} />;
+        case "bank-ledger":
+          // Mobile bank-ledger entry point: if ?triage=1 in URL OR Jeff
+          // taps "AI 分類 53 筆" we render the swipe triage; otherwise
+          // fall back to desktop BankLedgerV2 inside the mobile shell.
+          if (typeof window !== "undefined" && new URL(window.location.href).searchParams.get("triage") === "1") {
+            return (
+              <BankTriagePage
+                onExit={() => {
+                  const u = new URL(window.location.href);
+                  u.searchParams.delete("triage");
+                  u.searchParams.delete("triageIdx");
+                  window.history.replaceState({}, "", u.toString());
+                  setActivePage("today");
+                }}
+              />
+            );
+          }
+          return renderPage(activePage, setActivePage);
         default:
           return renderPage(activePage, setActivePage);
       }
@@ -353,6 +373,8 @@ export default function AdminV2() {
             onClose={() => setMobileSearchOpen(false)}
             onNavigate={(p) => setActivePage(p as PageId)}
           />
+          {/* Mobile Phase 6: persistent receipt camera FAB */}
+          <ReceiptCameraFAB />
         </Suspense>
       </div>
     );

@@ -702,7 +702,6 @@ export const plaidRouter = router({
     .mutation(async ({ input }) => {
       const { storagePut } = await import("../storage");
       const { randomBytes } = await import("crypto");
-      // Strip data-URL prefix if present
       const cleanBase64 = input.base64Data.replace(
         /^data:[^;]+;base64,/,
         ""
@@ -719,6 +718,135 @@ export const plaidRouter = router({
       const key = `receipts/${input.transactionId}-${Date.now()}-${suffix}.${ext}`;
       const { url } = await storagePut(key, buffer, input.contentType);
       return { url, key, size: buffer.length };
+    }),
+
+  /**
+   * Mobile Phase 6 (2026-05-22) — orphan receipt OCR + match. Used by
+   * the floating receipt camera FAB when Jeff snaps a meal/taxi receipt
+   * on the road.
+   *
+   * Flow:
+   *   1. Image → R2 under receipts-inbox/
+   *   2. Claude vision OCR → { amount, date, vendor, confidence }
+   *   3. Find candidate bankTransactions matching by amount + date (±3d)
+   *   4. Return uploadUrl + ocr + top 5 matches; client confirms which
+   *      txn to attach receiptUrl to via transactionUpdate
+   */
+  receiptUploadAndMatch: adminProcedure
+    .input(
+      z.object({
+        contentType: z.enum([
+          "image/jpeg",
+          "image/png",
+          "image/webp",
+          "application/pdf",
+        ]),
+        base64Data: z.string().min(1).max(15_000_000),
+        originalFilename: z.string().max(200).optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const { storagePut } = await import("../storage");
+      const { randomBytes } = await import("crypto");
+      const { ocrReceipt } = await import("../services/receiptOcrService");
+
+      const cleanBase64 = input.base64Data.replace(
+        /^data:[^;]+;base64,/,
+        ""
+      );
+      const extByType: Record<string, string> = {
+        "image/jpeg": "jpg",
+        "image/png": "png",
+        "image/webp": "webp",
+        "application/pdf": "pdf",
+      };
+      const ext = extByType[input.contentType] ?? "bin";
+      const suffix = randomBytes(6).toString("hex");
+      const key = `receipts-inbox/${Date.now()}-${suffix}.${ext}`;
+      const buffer = Buffer.from(cleanBase64, "base64");
+      const { url } = await storagePut(key, buffer, input.contentType);
+
+      // OCR — only for images, PDFs are upload-only
+      const ocr =
+        input.contentType === "application/pdf"
+          ? {
+              amount: null,
+              date: null,
+              vendor: null,
+              currency: null,
+              confidence: 0,
+              rawResponse: "(PDF — skipping OCR)",
+            }
+          : await ocrReceipt({
+              imageBase64: cleanBase64,
+              mediaType: input.contentType,
+            });
+
+      // Match candidates — amount within ±$1, date within ±3 days
+      let matches: Array<{
+        id: number;
+        date: any;
+        amount: any;
+        merchantName: string | null;
+        score: number;
+      }> = [];
+
+      if (ocr.amount !== null && ocr.amount > 0) {
+        const db = await getDb();
+        if (db) {
+          const ocrDate = ocr.date ? new Date(ocr.date) : new Date();
+          const dateLo = new Date(ocrDate);
+          dateLo.setDate(dateLo.getDate() - 3);
+          const dateHi = new Date(ocrDate);
+          dateHi.setDate(dateHi.getDate() + 3);
+
+          // Receipts are EXPENSES → positive Plaid sign. Search for
+          // outflows close to the OCR amount.
+          const rows = await db
+            .select({
+              id: bankTransactions.id,
+              date: bankTransactions.date,
+              amount: bankTransactions.amount,
+              merchantName: bankTransactions.merchantName,
+            })
+            .from(bankTransactions)
+            .where(
+              and(
+                gte(bankTransactions.date, dateLo as any),
+                lte(bankTransactions.date, dateHi as any),
+                eq(bankTransactions.excludeFromAccounting, 0)
+              )
+            )
+            .limit(50);
+
+          const target = ocr.amount;
+          matches = rows
+            .map((r) => {
+              const a = Math.abs(parseFloat(String(r.amount)) || 0);
+              const amountDiff = Math.abs(a - target);
+              const dayDiff = Math.abs(
+                (new Date(r.date as any).getTime() - ocrDate.getTime()) /
+                  86_400_000
+              );
+              // Score: amount match weighted 70%, date proximity 30%
+              const amountScore = amountDiff < 0.01 ? 100 : Math.max(0, 100 - amountDiff * 10);
+              const dateScore = Math.max(0, 100 - dayDiff * 20);
+              const score = Math.round(amountScore * 0.7 + dateScore * 0.3);
+              return {
+                id: r.id,
+                date: r.date,
+                amount: r.amount,
+                merchantName: r.merchantName,
+                score,
+              };
+            })
+            .filter((m) => m.score >= 40)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 5);
+        }
+      }
+
+      return { uploadUrl: url, key, ocr, matches };
     }),
 
   // ── Phase 5: P&L from bank transactions ─────────────────────────────────

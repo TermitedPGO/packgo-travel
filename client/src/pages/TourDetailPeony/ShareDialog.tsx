@@ -69,8 +69,15 @@ export default function ShareDialog({
     if (open) setView("main");
   }, [open]);
 
-  const pageUrl =
-    typeof window !== "undefined" ? window.location.href : "";
+  // Mobile Phase 4 (2026-05-22) — tag shared URLs with ?ref=jeff so
+  // PostHog can attribute conversions back to admin shares vs organic.
+  // If the URL already has query params, append; else add.
+  const pageUrl = (() => {
+    if (typeof window === "undefined") return "";
+    const raw = window.location.href;
+    if (raw.includes("ref=")) return raw;
+    return raw.includes("?") ? `${raw}&ref=jeff` : `${raw}?ref=jeff`;
+  })();
 
   const shareText = useMemo(
     () => t("tourDetail.lineShareText").replace("{title}", displayTitle),
@@ -199,9 +206,21 @@ export default function ShareDialog({
                 </span>
               </button>
 
-              {/* 小紅書 (sub-view: copy template) */}
+              {/* 小紅書 — Mobile Phase 4 (2026-05-22): try xhsdiscover:// deeplink
+                  first (opens native app if installed); on mobile that's much
+                  smoother than copy-then-paste. Always copy caption to clipboard
+                  as the fallback path. */}
               <button
-                onClick={() => setView("xiaohongshu")}
+                onClick={() => {
+                  // Copy caption first so even if deeplink succeeds, the user has it ready.
+                  void copyToClipboard(xiaohongshuPost, "tourDetail.xiaohongshuCopied");
+                  // Try native deeplink — silently fails on desktop (no handler), opens app on mobile.
+                  if (typeof window !== "undefined" && /Mobi|Android|iPhone/i.test(navigator.userAgent)) {
+                    window.location.href = "xhsdiscover://";
+                  } else {
+                    setView("xiaohongshu");
+                  }
+                }}
                 className="flex flex-col items-center gap-2 p-3 rounded-lg hover:bg-gray-100 transition-colors"
               >
                 <div className="w-10 h-10 bg-[#FF2E4D] rounded-lg flex items-center justify-center text-white font-bold text-base leading-none">
