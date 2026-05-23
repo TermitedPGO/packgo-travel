@@ -43,6 +43,8 @@ import {
   type SubNavItem,
 } from "@/components/admin/primitives";
 import { useCommandPaletteHotkey } from "@/components/admin/primitives/CommandPalette";
+import { useIsMobile } from "@/_core/hooks/useIsMobile";
+import MobileShell, { type MobileNavId } from "@/components/mobile/MobileShell";
 
 // V2 redesigned tabs — Trip.com style. One per file so each can evolve
 // independently of the v1 counterpart.
@@ -209,6 +211,7 @@ export default function AdminV2() {
   const [activePage, setActivePage] = useState<PageId>("today");
   const [paletteOpen, setPaletteOpen] = useCommandPaletteHotkey();
   const activeDomain = PAGE_TO_DOMAIN[activePage] ?? "office";
+  const isMobile = useIsMobile();
 
   // Badge counts — same wires as v1 admin
   const { data: statsData } = trpc.admin.getStats.useQuery();
@@ -288,6 +291,51 @@ export default function AdminV2() {
       onSelect: () => setActivePage(p.id),
     }))
   );
+
+  // Mobile Phase 1 (2026-05-22) — branch to MobileShell on narrow screens.
+  // Same data layer (renderPage / activePage); only chrome differs.
+  if (isMobile) {
+    const mobileNavActive: MobileNavId =
+      activePage === "today" ? "today"
+      : activePage === "bank-ledger" || activePage === "finance-landing" ? "bank"
+      : activeDomain === "customers" ? "customers"
+      : activePage === "agent-chat" ? "inbox"
+      : "more";
+
+    const handleMobileNav = (id: MobileNavId) => {
+      if (id === "today") setActivePage("today");
+      else if (id === "bank") setActivePage("bank-ledger");
+      else if (id === "customers") setActivePage("customers-landing");
+      else if (id === "inbox") setActivePage("agent-chat");
+      else if (id === "more") setActivePage("ai-hub"); // System landing as "more"
+    };
+
+    const mobileBreadcrumbText = breadcrumb
+      .filter((b) => !("muted" in b && b.muted))
+      .map((b) => b.label)
+      .filter(Boolean)
+      .join(" · ");
+
+    return (
+      <div className="h-screen bg-gray-50">
+        <CommandPalette
+          open={paletteOpen}
+          onOpenChange={setPaletteOpen}
+          actions={paletteActions}
+        />
+        <MobileShell
+          active={mobileNavActive}
+          onSelect={handleMobileNav}
+          breadcrumb={mobileBreadcrumbText}
+          onSearchClick={() => setPaletteOpen(true)}
+        >
+          <Suspense fallback={<LoadingPage text="載入中…" />}>
+            {renderPage(activePage, setActivePage)}
+          </Suspense>
+        </MobileShell>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen bg-gray-50 flex flex-col">
