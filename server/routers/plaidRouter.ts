@@ -216,37 +216,54 @@ export const plaidRouter = router({
    * List all linked bank accounts for the current admin. Excludes
    * plaidAccessTokenEncrypted from output (sensitive).
    */
-  linkedAccountsList: adminProcedure.query(async () => {
-    const db = await getDb();
-    if (!db) return [];
-    // 2026-05-22: previously filtered by ctx.user.id. PACK&GO is
-    // single-tenant; the admin role should see every linked account
-    // regardless of which admin login linked it. See plaidRouter
-    // transactionsList for the same change + rationale.
-    const rows = await db
-      .select({
-        id: linkedBankAccounts.id,
-        plaidItemId: linkedBankAccounts.plaidItemId,
-        plaidAccountId: linkedBankAccounts.plaidAccountId,
-        institutionName: linkedBankAccounts.institutionName,
-        institutionLogoUrl: linkedBankAccounts.institutionLogoUrl,
-        accountMask: linkedBankAccounts.accountMask,
-        accountName: linkedBankAccounts.accountName,
-        accountType: linkedBankAccounts.accountType,
-        accountSubtype: linkedBankAccounts.accountSubtype,
-        isTrustAccount: linkedBankAccounts.isTrustAccount,
-        isActive: linkedBankAccounts.isActive,
-        currentBalance: linkedBankAccounts.currentBalance,
-        availableBalance: linkedBankAccounts.availableBalance,
-        isoCurrencyCode: linkedBankAccounts.isoCurrencyCode,
-        lastSyncedAt: linkedBankAccounts.lastSyncedAt,
-        lastSyncError: linkedBankAccounts.lastSyncError,
-        createdAt: linkedBankAccounts.createdAt,
-      })
-      .from(linkedBankAccounts)
-      .orderBy(desc(linkedBankAccounts.createdAt));
-    return rows;
-  }),
+  linkedAccountsList: adminProcedure
+    .input(
+      z
+        .object({ includeInactive: z.boolean().optional() })
+        .optional(),
+    )
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      // 2026-05-22: previously filtered by ctx.user.id. PACK&GO is
+      // single-tenant; the admin role should see every linked account
+      // regardless of which admin login linked it. See plaidRouter
+      // transactionsList for the same change + rationale.
+      //
+      // Default: only return isActive=1 accounts. Sandbox cleanup leftovers
+      // (24 First Platypus Bank accounts marked inactive 2026-05-14) are
+      // hidden unless caller passes includeInactive=true.
+      const filters: any[] = [];
+      if (!input?.includeInactive) {
+        filters.push(eq(linkedBankAccounts.isActive, 1));
+      }
+      const baseQuery = db
+        .select({
+          id: linkedBankAccounts.id,
+          plaidItemId: linkedBankAccounts.plaidItemId,
+          plaidAccountId: linkedBankAccounts.plaidAccountId,
+          institutionName: linkedBankAccounts.institutionName,
+          institutionLogoUrl: linkedBankAccounts.institutionLogoUrl,
+          accountMask: linkedBankAccounts.accountMask,
+          accountName: linkedBankAccounts.accountName,
+          accountType: linkedBankAccounts.accountType,
+          accountSubtype: linkedBankAccounts.accountSubtype,
+          isTrustAccount: linkedBankAccounts.isTrustAccount,
+          isActive: linkedBankAccounts.isActive,
+          currentBalance: linkedBankAccounts.currentBalance,
+          availableBalance: linkedBankAccounts.availableBalance,
+          isoCurrencyCode: linkedBankAccounts.isoCurrencyCode,
+          lastSyncedAt: linkedBankAccounts.lastSyncedAt,
+          lastSyncError: linkedBankAccounts.lastSyncError,
+          createdAt: linkedBankAccounts.createdAt,
+        })
+        .from(linkedBankAccounts);
+      const rows = await (filters.length
+        ? baseQuery.where(and(...filters))
+        : baseQuery
+      ).orderBy(desc(linkedBankAccounts.createdAt));
+      return rows;
+    }),
 
   /**
    * Flag (or unflag) an account as the CST trust account. The Trust account
@@ -405,9 +422,15 @@ export const plaidRouter = router({
       // returned empty list while reconciliation.runReport saw all 124 txns).
       // PACK&GO is single-tenant; every admin sees every linked account.
       // If we ever go multi-tenant, gate by org_id instead.
+      //
+      // ALSO: drop accounts where isActive=0 (Plaid sandbox cleanup leftovers
+      // from First Platypus Bank — 24 accounts that were marked inactive
+      // 2026-05-14 with lastSyncError "sandbox cleanup before production
+      // switch"). Their transactions don't reflect real money flow.
       const allAccountIds = await db
         .select({ id: linkedBankAccounts.id })
-        .from(linkedBankAccounts);
+        .from(linkedBankAccounts)
+        .where(eq(linkedBankAccounts.isActive, 1));
       const ownedIds = allAccountIds.map((r) => r.id);
       if (ownedIds.length === 0) return { items: [], total: 0 };
 

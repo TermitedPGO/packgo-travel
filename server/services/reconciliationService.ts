@@ -285,16 +285,29 @@ export async function runReconciliation(start: Date, end: Date): Promise<Reconci
   try {
     // bankTransactions.date is a DATE column — pass Date objects (Drizzle
     // serializes them to YYYY-MM-DD strings under the hood).
+    // 2026-05-22: scope to active accounts only so sandbox cleanup
+    // leftovers (24 First Platypus Bank accounts deactivated 2026-05-14)
+    // don't pollute the bank ledger P&L.
+    const { linkedBankAccounts } = await import("../../drizzle/schema");
+    const activeAccountIds = (
+      await db
+        .select({ id: linkedBankAccounts.id })
+        .from(linkedBankAccounts)
+        .where(eq(linkedBankAccounts.isActive, 1))
+    ).map((r) => r.id);
+    const txnFilters: any[] = [
+      gte(bankTransactions.date, start),
+      lte(bankTransactions.date, end),
+      eq(bankTransactions.isPending, 0),
+    ];
+    if (activeAccountIds.length > 0) {
+      const { inArray } = await import("drizzle-orm");
+      txnFilters.push(inArray(bankTransactions.linkedAccountId, activeAccountIds));
+    }
     const txns = await db
       .select()
       .from(bankTransactions)
-      .where(
-        and(
-          gte(bankTransactions.date, start),
-          lte(bankTransactions.date, end),
-          eq(bankTransactions.isPending, 0),
-        ),
-      );
+      .where(and(...txnFilters));
 
     // Skip when no Plaid accounts have ever synced
     if (txns.length === 0) {
