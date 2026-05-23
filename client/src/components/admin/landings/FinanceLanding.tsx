@@ -172,7 +172,7 @@ export default function FinanceLanding({
               variant="outline"
               size="sm"
               className="w-full justify-start rounded-lg"
-              onClick={() => onNavigate("accounting")}
+              onClick={() => onNavigate("bank-ledger")}
             >
               <FileSpreadsheet className="w-4 h-4 mr-2" />
               對帳 / Plaid Transactions

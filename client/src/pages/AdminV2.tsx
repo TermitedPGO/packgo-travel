@@ -75,7 +75,7 @@ const PostersTab = lazy(() => import("@/components/admin/PostersTab"));
 const AnalyticsTab = lazy(() => import("@/components/admin/AnalyticsTab"));
 const CompetitorMonitorTab = lazy(() => import("@/components/admin/CompetitorMonitorTab"));
 const AffiliateTab = lazy(() => import("@/components/admin/AffiliateTab"));
-const AccountingTab = lazy(() => import("@/components/admin/AccountingTab"));
+// 2026-05-22 — AccountingTab retired. See finance domain comment.
 const InvoicesTab = lazy(() => import("@/components/admin/InvoicesTab"));
 const ReconciliationTab = lazy(() => import("@/components/admin/ReconciliationTab"));
 const AiHubTab = lazy(() => import("@/components/admin/AiHubTab"));
@@ -99,7 +99,7 @@ type PageId =
   // Marketing
   | "marketing-landing" | "marketing" | "marketing-content" | "posters" | "analytics" | "competitor-monitor" | "affiliate"
   // Finance
-  | "finance-landing" | "accounting" | "bank-ledger" | "invoices" | "reconciliation"
+  | "finance-landing" | "bank-ledger" | "invoices" | "reconciliation"
   // System
   | "ai-hub" | "llm-cost" | "task-history" | "audit-log" | "calibration-review" | "autonomous-agents" | "visa" | "cleanup";
 
@@ -158,10 +158,13 @@ const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageD
     ],
   },
   finance: {
+    // 2026-05-22 — Jeff: "這兩頁意義何在". Dropped legacy "帳務"
+    // (AccountingTab) tab. It read from manual financialEntries table
+    // that nobody populated (all NT$0) and had hardcoded TWD currency.
+    // Plaid → AccountingAgent → BankLedger is the single source of truth now.
     domain: { id: "finance", label: "財務", icon: Wallet },
     primary: [
       { id: "finance-landing", label: "💰 總覽" },
-      { id: "accounting", label: "帳務" },
       { id: "bank-ledger", label: "🏦 銀行帳本" },
     ],
     advanced: [
@@ -398,8 +401,6 @@ function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
     // Finance
     case "finance-landing":
       return <FinanceLanding onNavigate={(t) => setActivePage(t as PageId)} />;
-    case "accounting":
-      return <AccountingTab />;
     case "bank-ledger":
       return <BankLedgerV2 />;
     case "invoices":

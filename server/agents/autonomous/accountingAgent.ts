@@ -100,6 +100,12 @@ export type AccountingAgentInput = {
     amount: number;
     category: AccountingCategory;
   }>;
+  // 2026-05-22 — Zelle vendor learning. When true, this is a transfer-class
+  // transaction (Zelle / wire / ACH) with a known counterparty name but NO
+  // history of past classifications for that name. Agent should DEFAULT to
+  // other_review with a "新 X — Jeff 請確認" purposeNote — don't guess.
+  isUnknownVendor?: boolean;
+  candidateCounterparty?: string | null;
 };
 
 // IRS Schedule C-grade counterparty taxonomy (migration 0080, 2026-05-22).
@@ -231,6 +237,9 @@ ${catList}
 - "PAYMENT TO CHASE CARD" / "AUTOPAY" = transfer (還信用卡)。
 - Plaid PFC 只是參考,不要照抄。Plaid 把 Stripe payout 分到 "TRANSFER_IN" 但我們的正確分類是 income_booking。
 - **Jeff 在 BofA 打的備註 (Bank raw line, Payment meta reason) 是最強信號**。如果他寫 "PACKAGE TRIP DEPOSIT" 那就一定是 income_booking;寫 "REFUND TO LIN FAMILY" 就是 refund;寫 "FB AD APR" 就是 expense_marketing。Plaid 自動分類常常錯,但 Jeff 的人工備註幾乎不會錯。memo 出現時直接寫進 purposeNote 給 IRS audit 看。
+- **Zelle / wire / ACH 對方學習**:
+  - 如果【歷史分類】有紀錄, 直接套用同個 category(這位是已知對方, 跟過去模式一致)
+  - 如果【未知 Zelle/wire 對方】flag 出現, **不要猜** — 回 other_review, purposeNote 寫"新 Zelle/wire 對方 [name] — 需要 Jeff 確認是 vendor/customer/owner", confidence < 60, needsHumanReview=true。Jeff 看到 review-pile 時會手動標, 之後 agent 就學會了。
 
 【信心評分標準】
 - 90-100: 商家名 + 金額 + 帳戶類型 三者都明確指向一個類別
@@ -324,10 +333,17 @@ async function _runAccountingAgentInner(
     input.examplePastClassifications.length > 0
   ) {
     lines.push("");
-    lines.push(`【最近這個商家的歷史分類 (Jeff approved)】`);
+    lines.push(`【這個對方/商家的歷史分類 (≥1 已分類過)】`);
     for (const ex of input.examplePastClassifications.slice(0, 5)) {
       lines.push(`  ${ex.merchant} ${ex.amount} → ${ex.category}`);
     }
+    lines.push(`(若新交易的場景跟歷史一致, 套用同個 category, 信心拉到 90+)`);
+  } else if (input.isUnknownVendor && input.candidateCounterparty) {
+    lines.push("");
+    lines.push(`【⚠️ 未知 Zelle/wire 對方 — Jeff 沒分類過 "${input.candidateCounterparty}"】`);
+    lines.push(
+      `(這是 transfer-class 交易,對方 "${input.candidateCounterparty}" 在 bankTransactions 中沒有歷史分類紀錄。回 other_review,把 purposeNote 寫 "新 Zelle/wire 對方 ${input.candidateCounterparty} — 需要 Jeff 確認是 vendor/customer/owner",不要猜。)`,
+    );
   }
 
   const userPrompt = lines.join("\n");

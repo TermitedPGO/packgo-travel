@@ -659,7 +659,7 @@ function BankTxDrawer({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full sm:max-w-2xl rounded-l-xl overflow-y-auto">
+      <SheetContent className="w-full sm:max-w-3xl lg:max-w-4xl rounded-l-xl overflow-y-auto">
         <SheetHeader className="pb-4 border-b border-gray-100">
           <SheetTitle className="text-base flex items-center gap-2">
             <span className="text-gray-500 tabular-nums font-normal">

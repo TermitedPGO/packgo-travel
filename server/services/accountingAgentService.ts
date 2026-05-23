@@ -87,35 +87,113 @@ export async function classifyOne(
     };
   }
 
-  // Fetch up to 5 recent Jeff-approved classifications for the same
-  // merchant to teach the model PACK&GO's tendencies.
+  // 2026-05-22 — Zelle vendor learning. Jeff: "我會常常發 Zelle 給幾個廠家
+  // 那自然你就得學會那些人是誰 那如果不知道的話也得問我."
+  //
+  // For Zelle / Bill Pay / wire transfers the merchantName is generic
+  // ("Zelle payment from CHUNFU HSIEH"), so matching on merchant alone
+  // doesn't help. We need to extract the COUNTERPARTY (paymentMeta.payee /
+  // paymentMeta.payer) and look up past txns with the SAME counterparty.
+  //
+  // Lookup strategy (broadest to narrowest, all unioned):
+  //   1. counterparty exact match (post-classification ground truth)
+  //   2. paymentMeta JSON contains payee/payer substring match
+  //   3. merchantName exact (existing logic — kept for non-Zelle flows)
+  //
+  // Result is dedup'd by id, ranked by recency, top 5 passed to the LLM.
   let examples: AccountingAgentInput["examplePastClassifications"] = [];
-  if (row.tx.merchantName) {
-    const past = await db
+
+  // Extract candidate counterparty name from this row's paymentMeta —
+  // it's where Plaid sends "payee=CHUNFU HSIEH" for inflows.
+  const pm = (row.tx as any).paymentMeta as
+    | { payee?: string | null; payer?: string | null }
+    | null
+    | undefined;
+  const candidateCounterparty =
+    (pm?.payee || pm?.payer || "").toString().trim() || null;
+
+  const candidates: Array<{
+    id: number;
+    merchant: string | null;
+    amount: string;
+    category: string | null;
+    counterparty: string | null;
+  }> = [];
+
+  // Strategy 1+2: counterparty match (exact column OR JSON payee/payer)
+  if (candidateCounterparty) {
+    const byCounterparty = await db
       .select({
+        id: bankTransactions.id,
         merchant: bankTransactions.merchantName,
         amount: bankTransactions.amount,
         category: bankTransactions.jeffOverrideCategory,
+        agentCategory: bankTransactions.agentCategory,
+        counterparty: bankTransactions.counterparty,
       })
       .from(bankTransactions)
-      .where(
-        and(
-          eq(bankTransactions.merchantName, row.tx.merchantName),
-          // Only Jeff-approved (he overrode the agent → ground truth)
-          // OR agent classified with high confidence and not overridden
-          // (so we trust prior auto-applies)
-        )
-      )
+      .where(eq(bankTransactions.counterparty, candidateCounterparty))
       .orderBy(desc(bankTransactions.date))
-      .limit(5);
-    examples = past
-      .filter((p) => p.category)
-      .map((p) => ({
-        merchant: String(p.merchant ?? ""),
-        amount: parseFloat(p.amount as any) || 0,
-        category: p.category as any,
-      }));
+      .limit(10);
+    for (const r of byCounterparty) {
+      if (r.id === transactionId) continue;
+      candidates.push({
+        id: r.id,
+        merchant: r.merchant ?? candidateCounterparty,
+        amount: String(r.amount),
+        category: r.category ?? r.agentCategory ?? null,
+        counterparty: r.counterparty,
+      });
+    }
   }
+
+  // Strategy 3: merchant-name exact (covers card swipes / SaaS where the
+  // merchant name IS the entity, e.g. Anthropic, FedEx, McDonald's).
+  if (candidates.length < 5 && row.tx.merchantName) {
+    const byMerchant = await db
+      .select({
+        id: bankTransactions.id,
+        merchant: bankTransactions.merchantName,
+        amount: bankTransactions.amount,
+        category: bankTransactions.jeffOverrideCategory,
+        agentCategory: bankTransactions.agentCategory,
+        counterparty: bankTransactions.counterparty,
+      })
+      .from(bankTransactions)
+      .where(eq(bankTransactions.merchantName, row.tx.merchantName))
+      .orderBy(desc(bankTransactions.date))
+      .limit(10);
+    for (const r of byMerchant) {
+      if (r.id === transactionId) continue;
+      if (candidates.find((c) => c.id === r.id)) continue;
+      candidates.push({
+        id: r.id,
+        merchant: r.merchant,
+        amount: String(r.amount),
+        category: r.category ?? r.agentCategory ?? null,
+        counterparty: r.counterparty,
+      });
+    }
+  }
+
+  examples = candidates
+    .filter((p) => p.category && p.category !== "other_review")
+    .slice(0, 5)
+    .map((p) => ({
+      merchant: String(p.counterparty || p.merchant || ""),
+      amount: parseFloat(p.amount as any) || 0,
+      category: p.category as any,
+    }));
+
+  // Vendor-recognition flag: if this looks like a Zelle / transfer + we
+  // have NO past txns with this counterparty, mark as "unknown vendor".
+  // The system prompt teaches the agent to default to other_review with
+  // a "新 Zelle 對方 [name] — 需要 Jeff 確認" purposeNote.
+  const isTransferLike =
+    row.tx.paymentChannel === "other" ||
+    /zelle|wire|ach|transfer/i.test(row.tx.description ?? "");
+  const isUnknownVendor =
+    isTransferLike && !!candidateCounterparty && examples.length === 0;
 
   const agentInput: AccountingAgentInput = {
     amount: parseFloat(row.tx.amount as any) || 0,
@@ -135,6 +213,8 @@ export async function classifyOne(
     accountName: row.acct?.accountName ?? null,
     isTrustAccount: (row.acct?.isTrustAccount ?? 0) === 1,
     examplePastClassifications: examples,
+    isUnknownVendor,
+    candidateCounterparty,
   };
 
   let agentOut: AccountingAgentOutput;
