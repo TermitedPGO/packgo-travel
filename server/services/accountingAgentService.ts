@@ -151,16 +151,32 @@ export async function classifyOne(
     };
   }
 
-  // Persist result. We only write agentCategory + agentConfidence +
-  // agentReasoning. Jeff's override fields stay untouched.
+  // Persist result. agentCategory + agentConfidence + agentReasoning, plus
+  // 2026-05-22 migration 0080: counterparty + counterpartyType + purposeNote
+  // for IRS Schedule C / §274 documentation. Only write counterparty/etc.
+  // if currently NULL — never clobber a Jeff edit. Jeff override fields stay
+  // untouched as before.
+  const updateSet: Record<string, unknown> = {
+    agentCategory: agentOut.category,
+    agentConfidence: agentOut.confidence,
+    agentReasoning: agentOut.reasoning,
+    updatedAt: new Date(),
+  };
+  // Only pre-fill the IRS fields if they're currently empty — preserves any
+  // prior Jeff edit. `row.tx` was loaded at top of classifyOne.
+  if (!row.tx.counterparty && agentOut.counterparty) {
+    updateSet.counterparty = agentOut.counterparty;
+  }
+  if (!row.tx.counterpartyType && agentOut.counterpartyType) {
+    updateSet.counterpartyType = agentOut.counterpartyType;
+  }
+  if (!row.tx.purposeNote && agentOut.purposeNote) {
+    updateSet.purposeNote = agentOut.purposeNote;
+  }
+
   await db
     .update(bankTransactions)
-    .set({
-      agentCategory: agentOut.category,
-      agentConfidence: agentOut.confidence,
-      agentReasoning: agentOut.reasoning,
-      updatedAt: new Date(),
-    })
+    .set(updateSet)
     .where(eq(bankTransactions.id, transactionId));
 
   // Phase 4 hook: if classified income_booking AND on a trust account,

@@ -480,55 +480,222 @@ export const plaidRouter = router({
         reason: z.string().max(2000).optional(),
         exclude: z.boolean().optional(),
         relatedBookingId: z.number().int().positive().optional(),
+        // IRS Schedule C-grade fields (migration 0080, 2026-05-22).
+        // null = clear the field; undefined = leave unchanged.
+        counterparty: z.string().max(255).nullable().optional(),
+        counterpartyType: z
+          .enum([
+            "vendor",
+            "customer",
+            "owner",
+            "employee",
+            "refund",
+            "transfer",
+            "tax",
+            "other",
+          ])
+          .nullable()
+          .optional(),
+        purposeNote: z.string().max(2000).nullable().optional(),
+        receiptUrl: z.string().url().max(500).nullable().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-      // Verify ownership via the join
+      // Load current row (for the audit-log before/after diff)
       const [row] = await db
         .select({
           id: bankTransactions.id,
           linkedAccountId: bankTransactions.linkedAccountId,
-          ownerUserId: linkedBankAccounts.userId,
+          jeffOverrideCategory: bankTransactions.jeffOverrideCategory,
+          jeffOverrideReason: bankTransactions.jeffOverrideReason,
+          excludeFromAccounting: bankTransactions.excludeFromAccounting,
+          relatedBookingId: bankTransactions.relatedBookingId,
+          counterparty: bankTransactions.counterparty,
+          counterpartyType: bankTransactions.counterpartyType,
+          purposeNote: bankTransactions.purposeNote,
+          receiptUrl: bankTransactions.receiptUrl,
         })
         .from(bankTransactions)
-        .leftJoin(
-          linkedBankAccounts,
-          eq(bankTransactions.linkedAccountId, linkedBankAccounts.id)
-        )
         .where(eq(bankTransactions.id, input.transactionId))
         .limit(1);
       // 2026-05-22: dropped per-user ownership check. Any admin role can
       // edit any bank transaction (single-tenant PACK&GO). Audit trail
-      // (admin.cleanup.* + audit log) records who made each change.
+      // (adminAuditLog wire-up below) records who made each change.
       if (!row) {
         throw new TRPCError({ code: "NOT_FOUND" });
       }
 
+      const before: Record<string, unknown> = {};
+      const after: Record<string, unknown> = {};
       const updates: any = { updatedAt: new Date() };
+      const captureChange = (field: string, oldVal: unknown, newVal: unknown) => {
+        if (oldVal !== newVal) {
+          before[field] = oldVal ?? null;
+          after[field] = newVal ?? null;
+        }
+      };
+
       if (input.category !== undefined) {
         updates.jeffOverrideCategory = input.category;
+        captureChange("category", row.jeffOverrideCategory, input.category);
       }
       if (input.reason !== undefined) {
         updates.jeffOverrideReason = input.reason;
+        captureChange("reason", row.jeffOverrideReason, input.reason);
       }
       if (input.exclude !== undefined) {
         updates.excludeFromAccounting = input.exclude ? 1 : 0;
         if (input.exclude && !input.reason) {
           updates.excludeReason = "manually excluded by admin";
         }
+        captureChange(
+          "excludeFromAccounting",
+          row.excludeFromAccounting,
+          input.exclude ? 1 : 0
+        );
       }
       if (input.relatedBookingId !== undefined) {
         updates.relatedBookingId = input.relatedBookingId;
+        captureChange(
+          "relatedBookingId",
+          row.relatedBookingId,
+          input.relatedBookingId
+        );
+      }
+      // IRS Schedule C fields — null clears, string sets.
+      if (input.counterparty !== undefined) {
+        updates.counterparty = input.counterparty;
+        captureChange("counterparty", row.counterparty, input.counterparty);
+      }
+      if (input.counterpartyType !== undefined) {
+        updates.counterpartyType = input.counterpartyType;
+        captureChange(
+          "counterpartyType",
+          row.counterpartyType,
+          input.counterpartyType
+        );
+      }
+      if (input.purposeNote !== undefined) {
+        updates.purposeNote = input.purposeNote;
+        captureChange("purposeNote", row.purposeNote, input.purposeNote);
+      }
+      if (input.receiptUrl !== undefined) {
+        updates.receiptUrl = input.receiptUrl;
+        captureChange("receiptUrl", row.receiptUrl, input.receiptUrl);
       }
 
       await db
         .update(bankTransactions)
         .set(updates)
         .where(eq(bankTransactions.id, input.transactionId));
+
+      // IRS audit trail (migration 0080): every change to a bank transaction
+      // gets a row in adminAuditLog. Fire-and-forget — never block on the
+      // audit write. Empty-diff updates skip logging.
+      if (Object.keys(after).length > 0) {
+        const { audit } = await import("../_core/auditLog");
+        void audit({
+          ctx,
+          action: "bankTransaction.update",
+          targetType: "bankTransaction",
+          targetId: String(input.transactionId),
+          changes: { before, after },
+          reason: input.reason,
+        });
+      }
+
       return { success: true };
+    }),
+
+  /**
+   * IRS audit trail (migration 0080) — return the adminAuditLog entries
+   * referencing this bank transaction. Used by BankLedgerV2 Sheet drawer
+   * "變更歷史" section. Ordered newest-first.
+   */
+  transactionAuditHistory: adminProcedure
+    .input(z.object({ transactionId: z.number().int().positive() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      const { adminAuditLog } = await import("../../drizzle/schema");
+      const { and: drAnd, eq: drEq, desc: drDesc } = await import("drizzle-orm");
+      const rows = await db
+        .select({
+          id: adminAuditLog.id,
+          userEmail: adminAuditLog.userEmail,
+          action: adminAuditLog.action,
+          changes: adminAuditLog.changes,
+          reason: adminAuditLog.reason,
+          createdAt: adminAuditLog.createdAt,
+        })
+        .from(adminAuditLog)
+        .where(
+          drAnd(
+            drEq(adminAuditLog.targetType, "bankTransaction"),
+            drEq(adminAuditLog.targetId, String(input.transactionId))
+          )
+        )
+        .orderBy(drDesc(adminAuditLog.id))
+        .limit(50);
+      return rows.map((r) => ({
+        ...r,
+        changes: r.changes
+          ? (() => {
+              try {
+                return JSON.parse(r.changes);
+              } catch {
+                return null;
+              }
+            })()
+          : null,
+      }));
+    }),
+
+  /**
+   * Receipt upload for an IRS-grade transaction record (≥$75 expenses need
+   * supporting documentation per IRS Rev. Proc. 2017-30). Accepts base64
+   * encoded file (PDF / JPEG / PNG / WebP), stores to R2 under
+   * `receipts/<txnId>-<random>.<ext>`, returns the URL. Caller is then
+   * expected to update the transaction with this URL via transactionUpdate.
+   */
+  receiptUpload: adminProcedure
+    .input(
+      z.object({
+        transactionId: z.number().int().positive(),
+        contentType: z.enum([
+          "application/pdf",
+          "image/jpeg",
+          "image/png",
+          "image/webp",
+        ]),
+        // ~10 MB cap; PDFs that big are usually scanned receipts.
+        base64Data: z.string().min(1).max(15_000_000),
+        originalFilename: z.string().max(200).optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const { storagePut } = await import("../storage");
+      const { randomBytes } = await import("crypto");
+      // Strip data-URL prefix if present
+      const cleanBase64 = input.base64Data.replace(
+        /^data:[^;]+;base64,/,
+        ""
+      );
+      const buffer = Buffer.from(cleanBase64, "base64");
+      const extByType: Record<string, string> = {
+        "application/pdf": "pdf",
+        "image/jpeg": "jpg",
+        "image/png": "png",
+        "image/webp": "webp",
+      };
+      const ext = extByType[input.contentType] ?? "bin";
+      const suffix = randomBytes(6).toString("hex");
+      const key = `receipts/${input.transactionId}-${Date.now()}-${suffix}.${ext}`;
+      const { url } = await storagePut(key, buffer, input.contentType);
+      return { url, key, size: buffer.length };
     }),
 
   // ── Phase 5: P&L from bank transactions ─────────────────────────────────

@@ -88,6 +88,20 @@ export type AccountingAgentInput = {
   }>;
 };
 
+// IRS Schedule C-grade counterparty taxonomy (migration 0080, 2026-05-22).
+// Lets the year-end Schedule C / 1099-NEC export aggregate by type.
+export const COUNTERPARTY_TYPES = [
+  "vendor", // 供應商付款 (Lion Travel, AWS, FB Ads, 律師費 etc.)
+  "customer", // 客戶收入 (Stripe payout, ACH inflow, Zelle from customer)
+  "owner", // 業主出入 (Jeff personal ↔ company, owner draw)
+  "employee", // 員工 (salary, 1099 contractor payment)
+  "refund", // 退款進出 (customer refund out, supplier refund in, chargeback)
+  "transfer", // 內部轉帳 (own-account moves, credit card payment, trust↔operating)
+  "tax", // 政府/稅務 (IRS estimated tax, CA state, sales tax remit)
+  "other", // 不確定/其他
+] as const;
+export type CounterpartyType = (typeof COUNTERPARTY_TYPES)[number];
+
 export type AccountingAgentOutput = {
   category: AccountingCategory;
   confidence: number; // 0-100
@@ -96,6 +110,11 @@ export type AccountingAgentOutput = {
   needsHumanReview: boolean;
   // Suggested override note Jeff would use if he disagrees — empty if confident
   suggestedJeffNote?: string;
+  // IRS Schedule C / §274 documentation (2026-05-22) — agent pre-fills these
+  // so Jeff just confirms (1-click) instead of typing every time.
+  counterparty?: string; // normalized vendor/payer (Plaid raw → clean name)
+  counterpartyType?: CounterpartyType;
+  purposeNote?: string; // 1-line "why" — business purpose statement
 };
 
 // 2026-05-16 bug fix: server/_core/llm.ts `toolsToAnthropic` reads each
@@ -133,8 +152,33 @@ const TOOL = {
         },
         needsHumanReview: { type: "boolean" },
         suggestedJeffNote: { type: "string" },
+        // IRS Schedule C documentation fields (2026-05-22)
+        counterparty: {
+          type: "string",
+          description:
+            "Normalized vendor/payer name. Strip Plaid noise like 'AUTHORIZED ON 05/21 VIA WEB' / ACH reference numbers / leading 'PAYMENT TO' verbs. Examples: 'Lion Travel', 'Anthropic', 'Meta Platforms (FB Ads)', 'Bank of America (CC payment)', '林小姐 (refund)'. Keep < 80 chars. If truly unknown, leave blank.",
+        },
+        counterpartyType: {
+          type: "string",
+          enum: COUNTERPARTY_TYPES as unknown as string[],
+          description:
+            "Counterparty taxonomy for Schedule C / 1099-NEC. vendor=支付給外部公司, customer=客戶收入, owner=Jeff個人, employee=員工/外包, refund=雙向退款, transfer=自己帳戶間, tax=政府, other=不確定。",
+        },
+        purposeNote: {
+          type: "string",
+          description:
+            "Business purpose (IRS Rev. Proc. 2017-30 / §274 documentation). 1 line in 繁中, explains WHY money moved. Examples: '王先生團 Tokyo 訂金', 'FB 廣告 美西自由行', 'Jeff 個人轉公司 cash injection', 'Stripe 處理費 月結 4 月份'. Keep < 200 chars. Required for any expense_* or refund category.",
+        },
       },
-      required: ["category", "confidence", "reasoning", "needsHumanReview"],
+      required: [
+        "category",
+        "confidence",
+        "reasoning",
+        "needsHumanReview",
+        "counterparty",
+        "counterpartyType",
+        "purposeNote",
+      ],
     },
   },
 };
@@ -143,7 +187,19 @@ function buildSystem(): string {
   const catList = ACCOUNTING_CATEGORIES.map(
     (c) => `  ${c}: ${CATEGORY_DESCRIPTIONS[c]}`
   ).join("\n");
-  return `你是 PACK&GO 旅行社的 AccountingAgent。分類一筆銀行交易,目的是讓 Jeff 月底跑 P&L、年底報稅可以信任分類結果。
+  const ctList = COUNTERPARTY_TYPES.map((t) => `  ${t}`).join("\n");
+  return `你是 PACK&GO 旅行社的 AccountingAgent。分類一筆銀行交易,目的是讓 Jeff 月底跑 P&L、年底報稅、被 IRS audit 時都能信任分類結果。
+
+【IRS Schedule C-grade 文件要求】
+每筆都要回:
+1. category (10 個 PACK&GO 類別)
+2. counterparty — 對方乾淨名字。把 Plaid 原始字串清理成可讀名字。
+   範例: "AUTHORIZED ON 05/21 VIA WEB ANTHROPIC API" → "Anthropic"
+   範例: "TRANSFER TO ACCT #2174 ON 05/21" → "BofA Operating (#2174)"
+3. counterpartyType — 8 個值之一:
+${ctList}
+4. purposeNote — 一句繁中話講「為什麼這筆錢動了」,給 IRS audit 用。
+   範例: "王先生團 Tokyo 訂金"、"FB 廣告 美西自由行"、"還信用卡 CORP-9888"
 
 【你 ONLY 從這 10 個 PACK&GO 類別選一個】
 ${catList}
@@ -270,6 +326,16 @@ async function _runAccountingAgentInner(
   const finalReview =
     finalCat === "other_review" || conf < 80 || Boolean(parsed.needsHumanReview);
 
+  // IRS Schedule C fields — defensively coerce to safe defaults.
+  const cptyRaw = String(parsed.counterparty ?? "").trim();
+  const cpty = cptyRaw ? cptyRaw.slice(0, 80) : undefined;
+  const cptyTypeRaw = String(parsed.counterpartyType ?? "").trim();
+  const cptyType = COUNTERPARTY_TYPES.includes(cptyTypeRaw as CounterpartyType)
+    ? (cptyTypeRaw as CounterpartyType)
+    : undefined;
+  const purposeRaw = String(parsed.purposeNote ?? "").trim();
+  const purpose = purposeRaw ? purposeRaw.slice(0, 200) : undefined;
+
   return {
     category: finalCat,
     confidence: conf,
@@ -278,6 +344,9 @@ async function _runAccountingAgentInner(
     suggestedJeffNote: parsed.suggestedJeffNote
       ? String(parsed.suggestedJeffNote).slice(0, 500)
       : undefined,
+    counterparty: cpty,
+    counterpartyType: cptyType,
+    purposeNote: purpose,
   };
 }
 

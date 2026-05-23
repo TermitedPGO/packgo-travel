@@ -121,7 +121,25 @@ type TxRow = {
   accountOwner?: string | null;
   relatedBookingId?: number | null;
   relatedInquiryId?: number | null;
+  // IRS Schedule C-grade fields (migration 0080, 2026-05-22)
+  counterparty?: string | null;
+  counterpartyType?: string | null;
+  purposeNote?: string | null;
+  receiptUrl?: string | null;
 };
+
+// IRS counterparty taxonomy — must match server/agents/autonomous/accountingAgent.ts
+const COUNTERPARTY_TYPES = [
+  "vendor",
+  "customer",
+  "owner",
+  "employee",
+  "refund",
+  "transfer",
+  "tax",
+  "other",
+] as const;
+type CounterpartyType = (typeof COUNTERPARTY_TYPES)[number];
 
 type FilterTab = "all" | "uncategorized" | "categorized" | "excluded";
 
@@ -579,6 +597,11 @@ type DrawerSavePatch = {
   reason?: string;
   exclude?: boolean;
   relatedBookingId?: number;
+  // IRS Schedule C-grade fields (2026-05-22). null = clear, undefined = leave.
+  counterparty?: string | null;
+  counterpartyType?: CounterpartyType | null;
+  purposeNote?: string | null;
+  receiptUrl?: string | null;
 };
 
 function BankTxDrawer({
@@ -619,6 +642,16 @@ function BankTxDrawer({
   const [exclude, setExclude] = useState<boolean>(
     (tx?.excludeFromAccounting ?? 0) === 1,
   );
+  // IRS Schedule C-grade per-transaction fields (2026-05-22 migration 0080).
+  // counterparty / counterpartyType / purposeNote are AI-pre-filled when the
+  // AccountingAgent classifies; Jeff edits + confirms in the drawer. Receipt
+  // is optional R2 upload (PDF / image). Audit log captures every change.
+  const [counterparty, setCounterparty] = useState<string>(tx?.counterparty ?? "");
+  const [counterpartyType, setCounterpartyType] = useState<string>(
+    tx?.counterpartyType ?? "",
+  );
+  const [purposeNote, setPurposeNote] = useState<string>(tx?.purposeNote ?? "");
+  const [receiptUrl, setReceiptUrl] = useState<string>(tx?.receiptUrl ?? "");
 
   // Reset form when row changes (drawer reopens with a new tx)
   // We key on tx?.id so React resets state for us.
@@ -655,6 +688,14 @@ function BankTxDrawer({
             setBookingId={setBookingId}
             exclude={exclude}
             setExclude={setExclude}
+            counterparty={counterparty}
+            setCounterparty={setCounterparty}
+            counterpartyType={counterpartyType}
+            setCounterpartyType={setCounterpartyType}
+            purposeNote={purposeNote}
+            setPurposeNote={setPurposeNote}
+            receiptUrl={receiptUrl}
+            setReceiptUrl={setReceiptUrl}
             savePending={savePending}
             onSave={onSave}
             onCancel={() => onOpenChange(false)}
@@ -681,6 +722,14 @@ function BankTxDrawerForm({
   setBookingId,
   exclude,
   setExclude,
+  counterparty,
+  setCounterparty,
+  counterpartyType,
+  setCounterpartyType,
+  purposeNote,
+  setPurposeNote,
+  receiptUrl,
+  setReceiptUrl,
   savePending,
   onSave,
   onCancel,
@@ -698,6 +747,14 @@ function BankTxDrawerForm({
   setBookingId: (v: string) => void;
   exclude: boolean;
   setExclude: (v: boolean) => void;
+  counterparty: string;
+  setCounterparty: (v: string) => void;
+  counterpartyType: string;
+  setCounterpartyType: (v: string) => void;
+  purposeNote: string;
+  setPurposeNote: (v: string) => void;
+  receiptUrl: string;
+  setReceiptUrl: (v: string) => void;
   savePending: boolean;
   onSave: (patch: DrawerSavePatch) => void;
   onCancel: () => void;
@@ -719,6 +776,16 @@ function BankTxDrawerForm({
     if (Number.isFinite(parsed) && parsed > 0) {
       patch.relatedBookingId = parsed;
     }
+    // IRS Schedule C-grade fields — null when cleared so server unsets the
+    // column; populated string when Jeff filled them in.
+    patch.counterparty = counterparty.trim() || null;
+    patch.counterpartyType =
+      (counterpartyType as CounterpartyType) &&
+      (COUNTERPARTY_TYPES as readonly string[]).includes(counterpartyType)
+        ? (counterpartyType as CounterpartyType)
+        : null;
+    patch.purposeNote = purposeNote.trim() || null;
+    patch.receiptUrl = receiptUrl.trim() || null;
     onSave(patch);
   };
 
@@ -907,6 +974,26 @@ function BankTxDrawerForm({
         </div>
       </div>
 
+      {/* IRS Schedule C-grade documentation (migration 0080, 2026-05-22)
+          AI pre-fills counterparty + counterpartyType + purposeNote during
+          classifyBatch. Jeff confirms or edits here. Receipt upload optional
+          (IRS Rev. Proc. 2017-30: required for expenses >= $75). */}
+      <IRSDocumentationSection
+        txId={tx.id}
+        counterparty={counterparty}
+        setCounterparty={setCounterparty}
+        counterpartyType={counterpartyType}
+        setCounterpartyType={setCounterpartyType}
+        purposeNote={purposeNote}
+        setPurposeNote={setPurposeNote}
+        receiptUrl={receiptUrl}
+        setReceiptUrl={setReceiptUrl}
+      />
+
+      {/* Audit trail — every change to this transaction (category, override,
+          purpose, etc.) by every admin, newest first. Source: adminAuditLog. */}
+      <ChangeHistorySection txId={tx.id} />
+
       {/* Footer actions */}
       <div className="pt-3 border-t border-gray-100 flex items-center gap-2">
         {(tx.jeffOverrideCategory || tx.jeffOverrideReason) && (
@@ -962,4 +1049,290 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       </span>
     </div>
   );
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// IRS Schedule C-grade documentation section (migration 0080, 2026-05-22)
+// ────────────────────────────────────────────────────────────────────────
+
+function IRSDocumentationSection({
+  txId,
+  counterparty,
+  setCounterparty,
+  counterpartyType,
+  setCounterpartyType,
+  purposeNote,
+  setPurposeNote,
+  receiptUrl,
+  setReceiptUrl,
+}: {
+  txId: number;
+  counterparty: string;
+  setCounterparty: (v: string) => void;
+  counterpartyType: string;
+  setCounterpartyType: (v: string) => void;
+  purposeNote: string;
+  setPurposeNote: (v: string) => void;
+  receiptUrl: string;
+  setReceiptUrl: (v: string) => void;
+}) {
+  const { t } = useLocale();
+  const [uploading, setUploading] = useState(false);
+  const uploadMutation = trpc.plaid.receiptUpload.useMutation();
+
+  // Counterparty type → IRS-meaningful colour cue. vendor/customer/owner are
+  // the high-frequency ones; tax/refund/transfer are distinct enough to merit
+  // their own visual treatment.
+  const typeStyles: Record<string, string> = {
+    vendor: "bg-blue-50 text-blue-700 border-blue-200",
+    customer: "bg-green-50 text-green-700 border-green-200",
+    owner: "bg-purple-50 text-purple-700 border-purple-200",
+    employee: "bg-cyan-50 text-cyan-700 border-cyan-200",
+    refund: "bg-amber-50 text-amber-700 border-amber-200",
+    transfer: "bg-gray-50 text-gray-700 border-gray-200",
+    tax: "bg-rose-50 text-rose-700 border-rose-200",
+    other: "bg-gray-50 text-gray-700 border-gray-200",
+  };
+
+  const handleFile = async (file: File) => {
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error(t("admin.bankLedgerTab.toastReceiptTooLarge"));
+      return;
+    }
+    setUploading(true);
+    try {
+      // Read as base64
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+      // Validate content type — server enum is the source of truth.
+      const allowed = [
+        "application/pdf",
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+      ] as const;
+      const ct = file.type || "application/octet-stream";
+      if (!(allowed as readonly string[]).includes(ct)) {
+        toast.error(t("admin.bankLedgerTab.toastReceiptBadType"));
+        setUploading(false);
+        return;
+      }
+      const res = await uploadMutation.mutateAsync({
+        transactionId: txId,
+        contentType: ct as (typeof allowed)[number],
+        base64Data: dataUrl,
+        originalFilename: file.name,
+      });
+      setReceiptUrl(res.url);
+      toast.success(t("admin.bankLedgerTab.toastReceiptUploaded"));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(t("admin.bankLedgerTab.toastReceiptUploadFailed", { err: msg }));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <SectionTitle>{t("admin.bankLedgerTab.sectionIRS")}</SectionTitle>
+
+      {/* Counterparty (誰) */}
+      <div className="space-y-1.5">
+        <Label className="text-xs text-gray-600">
+          {t("admin.bankLedgerTab.fieldCounterparty")}
+        </Label>
+        <Input
+          value={counterparty}
+          onChange={(e) => setCounterparty(e.target.value)}
+          placeholder={t("admin.bankLedgerTab.counterpartyPlaceholder")}
+          maxLength={255}
+          className="h-8 rounded-lg text-xs"
+        />
+      </div>
+
+      {/* Counterparty type */}
+      <div className="space-y-1.5">
+        <Label className="text-xs text-gray-600">
+          {t("admin.bankLedgerTab.fieldCounterpartyType")}
+        </Label>
+        <div className="flex flex-wrap gap-1.5">
+          {COUNTERPARTY_TYPES.map((typ) => {
+            const active = counterpartyType === typ;
+            const styles = typeStyles[typ] ?? "bg-gray-50 text-gray-700 border-gray-200";
+            return (
+              <button
+                key={typ}
+                type="button"
+                onClick={() => setCounterpartyType(active ? "" : typ)}
+                className={`text-[10px] uppercase tracking-wider px-2 py-1 rounded-md border transition-colors ${
+                  active ? styles : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
+                }`}
+              >
+                {t(`admin.bankLedgerTab.counterpartyType_${typ}`)}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Purpose note (為什麼) */}
+      <div className="space-y-1.5">
+        <Label className="text-xs text-gray-600">
+          {t("admin.bankLedgerTab.fieldPurposeNote")}
+        </Label>
+        <Textarea
+          value={purposeNote}
+          onChange={(e) => setPurposeNote(e.target.value)}
+          placeholder={t("admin.bankLedgerTab.purposeNotePlaceholder")}
+          maxLength={2000}
+          className="rounded-lg text-xs min-h-[60px]"
+          rows={2}
+        />
+      </div>
+
+      {/* Receipt upload */}
+      <div className="space-y-1.5">
+        <Label className="text-xs text-gray-600">
+          {t("admin.bankLedgerTab.fieldReceipt")}
+        </Label>
+        {receiptUrl ? (
+          <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5">
+            <a
+              href={receiptUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-teal-700 underline truncate flex-1"
+            >
+              {t("admin.bankLedgerTab.viewReceipt")}
+            </a>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setReceiptUrl("")}
+              className="h-7 rounded-md px-2 text-xs text-gray-500"
+              aria-label={t("common.clear")}
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        ) : (
+          <label className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-3 py-3 text-xs text-gray-500 hover:bg-gray-50 cursor-pointer">
+            <input
+              type="file"
+              accept="application/pdf,image/jpeg,image/png,image/webp"
+              className="hidden"
+              disabled={uploading}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void handleFile(f);
+              }}
+            />
+            {uploading ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                {t("admin.bankLedgerTab.uploadingReceipt")}
+              </>
+            ) : (
+              t("admin.bankLedgerTab.uploadReceiptHint")
+            )}
+          </label>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Change history (adminAuditLog entries) — migration 0080 audit trail
+// ────────────────────────────────────────────────────────────────────────
+
+function ChangeHistorySection({ txId }: { txId: number }) {
+  const { t, language } = useLocale();
+  const dateLocale = language === "en" ? "en-US" : "zh-TW";
+  const { data, isLoading } = trpc.plaid.transactionAuditHistory.useQuery(
+    { transactionId: txId },
+    { staleTime: 30_000 },
+  );
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2">
+        <SectionTitle>{t("admin.bankLedgerTab.sectionHistory")}</SectionTitle>
+        <div className="text-[10px] text-gray-400">
+          {t("admin.bankLedgerTab.loadingHistory")}
+        </div>
+      </div>
+    );
+  }
+
+  const rows = data ?? [];
+  if (rows.length === 0) {
+    return (
+      <div className="space-y-2">
+        <SectionTitle>{t("admin.bankLedgerTab.sectionHistory")}</SectionTitle>
+        <div className="text-[10px] text-gray-400 italic">
+          {t("admin.bankLedgerTab.emptyHistory")}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <SectionTitle>{t("admin.bankLedgerTab.sectionHistory")}</SectionTitle>
+      <ul className="space-y-1.5">
+        {rows.map((row) => {
+          const ts = row.createdAt
+            ? new Date(row.createdAt as any).toLocaleString(dateLocale, {
+                month: "2-digit",
+                day: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : "—";
+          const changes = (row.changes as { before?: Record<string, unknown>; after?: Record<string, unknown> } | null) ?? null;
+          const fields = changes?.after ? Object.keys(changes.after) : [];
+          return (
+            <li
+              key={row.id}
+              className="text-[10px] text-gray-600 border-l-2 border-gray-200 pl-2 py-0.5"
+            >
+              <div className="flex items-baseline gap-2">
+                <span className="tabular-nums text-gray-400">{ts}</span>
+                <span className="font-medium text-gray-700">{row.userEmail}</span>
+              </div>
+              {fields.length > 0 && (
+                <div className="mt-0.5 text-gray-500 break-all">
+                  {fields
+                    .map((f) => {
+                      const before = changes?.before?.[f];
+                      const after = changes?.after?.[f];
+                      return `${f}: ${formatHistoryValue(before)} → ${formatHistoryValue(after)}`;
+                    })
+                    .join(" · ")}
+                </div>
+              )}
+              {row.reason && (
+                <div className="mt-0.5 italic text-gray-500">{`"${row.reason}"`}</div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function formatHistoryValue(v: unknown): string {
+  if (v === null || v === undefined) return "—";
+  if (typeof v === "string") {
+    return v.length > 40 ? `${v.slice(0, 37)}...` : v;
+  }
+  return String(v);
 }

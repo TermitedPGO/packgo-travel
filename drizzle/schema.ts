@@ -2729,6 +2729,16 @@ export const bankTransactions = mysqlTable("bankTransactions", {
   // Jeff override (when he disagrees with the agent)
   jeffOverrideCategory: varchar("jeffOverrideCategory", { length: 64 }),
   jeffOverrideReason: text("jeffOverrideReason"),
+  // IRS Schedule C / §274 documentation — migration 0080 (2026-05-22).
+  // counterparty: normalized vendor/payer (AI-extracted, Jeff-editable).
+  // counterpartyType: vendor|customer|owner|employee|refund|transfer|tax|other
+  //   — enum-like, kept as varchar for portability.
+  // purposeNote: business-purpose 1-liner ("why did money move?")
+  // receiptUrl: optional R2 link to receipt PDF (≥$75 expenses need it for IRS).
+  counterparty: varchar("counterparty", { length: 255 }),
+  counterpartyType: varchar("counterpartyType", { length: 32 }),
+  purposeNote: text("purposeNote"),
+  receiptUrl: varchar("receiptUrl", { length: 500 }),
   // Manually exclude personal items from accounting reports
   excludeFromAccounting: int("excludeFromAccounting").default(0).notNull(),
   excludeReason: varchar("excludeReason", { length: 256 }),
@@ -2745,6 +2755,8 @@ export const bankTransactions = mysqlTable("bankTransactions", {
   accountDateIdx: index("idx_account_date").on(table.linkedAccountId, table.date),
   agentCategoryIdx: index("idx_agent_category").on(table.agentCategory, table.date),
   pendingIdx: index("idx_pending").on(table.isPending, table.date),
+  counterpartyIdx: index("idx_bank_txn_counterparty").on(table.counterparty),
+  counterpartyTypeIdx: index("idx_bank_txn_counterparty_type").on(table.counterpartyType),
 }));
 
 export type BankTransaction = typeof bankTransactions.$inferSelect;
