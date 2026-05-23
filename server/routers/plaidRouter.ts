@@ -303,18 +303,30 @@ export const plaidRouter = router({
       z
         .object({
           linkedAccountId: z.number().int().positive().optional(),
+          /**
+           * 2026-05-22 — when true, NULL out the stored cursor before
+           * calling Plaid's transactionsSync. Plaid then re-sends every
+           * historical transaction (up to the Item's 24-month window),
+           * each one upserted via onDuplicateKeyUpdate. Used to backfill
+           * paymentMeta / originalDescription on rows that pre-date
+           * migration 0081 (Jeff: "Agent 讀 BofA notes").
+           *
+           * Cost: bigger Plaid response (~1-3min for 500-2000 txns), no
+           * additional money charge — Plaid invoices on monthly active
+           * Items not on transaction count.
+           */
+          backfill: z.boolean().optional(),
         })
         .optional()
     )
-    .mutation(async ({ ctx, input }) => {
+    .mutation(async ({ input }) => {
       requirePlaid();
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-      const filters = [
-        eq(linkedBankAccounts.userId, ctx.user.id),
-        eq(linkedBankAccounts.isActive, 1),
-      ];
+      // 2026-05-22 — drop userId scope (single-tenant). All active accounts
+      // are eligible for syncs regardless of which admin logged in.
+      const filters = [eq(linkedBankAccounts.isActive, 1)];
       if (input?.linkedAccountId) {
         filters.push(eq(linkedBankAccounts.id, input.linkedAccountId));
       }
@@ -323,6 +335,18 @@ export const plaidRouter = router({
         .select()
         .from(linkedBankAccounts)
         .where(and(...filters));
+
+      // backfill path — reset cursor to NULL first so Plaid re-streams
+      // every transaction. Each one upserts via onDuplicateKeyUpdate
+      // which now writes originalDescription + paymentMeta.
+      if (input?.backfill) {
+        for (const acc of accounts) {
+          await db
+            .update(linkedBankAccounts)
+            .set({ cursor: null, updatedAt: new Date() })
+            .where(eq(linkedBankAccounts.id, acc.id));
+        }
+      }
 
       const results: Array<{
         linkedAccountId: number;
@@ -333,14 +357,13 @@ export const plaidRouter = router({
       }> = [];
 
       for (const acc of accounts) {
-        // Phase 1.5 dedup: syncOneLinkedAccount catches its own errors,
-        // persists lastSyncError, and returns result.error. No try/catch
-        // needed here.
         const r = await syncOneLinkedAccount({
           id: acc.id,
           plaidAccountId: acc.plaidAccountId,
           plaidAccessTokenEncrypted: acc.plaidAccessTokenEncrypted,
-          cursor: acc.cursor,
+          // After backfill flag, cursor is now null in DB. Reload from
+          // there — or use null directly (same effect).
+          cursor: input?.backfill ? null : acc.cursor,
         });
         results.push({
           linkedAccountId: acc.id,
@@ -350,7 +373,7 @@ export const plaidRouter = router({
           ...(r.error ? { error: r.error } : {}),
         });
       }
-      return { results };
+      return { results, backfilled: input?.backfill === true };
     }),
 
   /**

@@ -117,6 +117,11 @@ export async function syncOneLinkedAccount(
               set: {
                 amount: String(t.amount),
                 isPending: t.pending ? 1 : 0,
+                // 2026-05-22 — backfill memo/notes on re-sync collisions.
+                // Lets the "reset cursor + re-sync" backfill route fill in
+                // historical rows that pre-date migration 0081.
+                originalDescription: t.original_description ?? null,
+                paymentMeta: t.payment_meta ?? null,
                 updatedAt: new Date(),
               },
             });
