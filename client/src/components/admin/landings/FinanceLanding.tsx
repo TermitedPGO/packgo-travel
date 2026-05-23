@@ -15,13 +15,18 @@ import {
   CreditCard,
   AlertTriangle,
   TrendingUp,
+  TrendingDown,
   FileSpreadsheet,
   Receipt,
   ArrowDownToLine,
+  DollarSign,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { zhTW } from "date-fns/locale";
 import { KpiCard, SectionCard, LandingGreeting } from "./landingPrimitives";
+
+const fmt = (n: number) =>
+  `$${Math.round(n).toLocaleString("en-US")}`;
 
 export default function FinanceLanding({
   onNavigate,
@@ -29,67 +34,78 @@ export default function FinanceLanding({
   onNavigate: (pageId: string) => void;
 }) {
   const stats = trpc.admin.getStats.useQuery(undefined, { refetchInterval: 60_000 });
+  // 2026-05-22 — Plaid-derived P&L. Previously this page read revenue from
+  // bookings table only ($0 because direct Zelle / ACH inflows never land
+  // in bookings). The financeKpi query sums bankTransactions classified by
+  // the AccountingAgent — gives real "賺多少 / 付多少" totals.
+  const kpi = trpc.plaid.financeKpi.useQuery(undefined, { refetchInterval: 60_000 });
   const booksMessages = trpc.agent.listMessages.useQuery(
     { agentName: "books" as any, limit: 8 },
     { refetchInterval: 30_000 }
   );
 
-  const thisMonth = Number(stats.data?.thisMonthRevenue ?? 0);
-  const growth = stats.data?.revenueGrowth ?? 0;
-  const ytd = Number(stats.data?.totalRevenue ?? 0);
+  const income = Number(kpi.data?.thisMonth.income ?? 0);
+  const expenses = Number(kpi.data?.thisMonth.expenses ?? 0);
+  const net = Number(kpi.data?.thisMonth.netProfit ?? 0);
+  const growth = kpi.data?.vsLastMonthGrowthPct ?? 0;
+  const ytdIncome = Number(kpi.data?.ytd.income ?? 0);
+  const ytdNet = Number(kpi.data?.ytd.netProfit ?? 0);
+  const needsReviewCount = kpi.data?.thisMonth.needsReviewCount ?? 0;
+  const needsReviewAmount = Number(kpi.data?.thisMonth.needsReviewAmount ?? 0);
 
   return (
     <div className="max-w-6xl mx-auto space-y-4">
       <LandingGreeting
         title="💰 財務"
-        subtitle={`本月 $${thisMonth.toLocaleString()} · YTD $${ytd.toLocaleString()} · BofA 對帳待處理`}
+        subtitle={`本月 賺 ${fmt(income)} · 付 ${fmt(expenses)} · 淨 ${fmt(net)} · YTD ${fmt(ytdIncome)}`}
       />
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <KpiCard
           icon={Wallet}
-          label="本月營收"
-          primary={`$${thisMonth.toLocaleString()}`}
-          secondary={
-            growth >= 0
-              ? `+${growth}% vs 上月`
-              : `${growth}% vs 上月`
-          }
+          label="本月賺多少"
+          primary={fmt(income)}
+          secondary={growth >= 0 ? `+${growth}% vs 上月` : `${growth}% vs 上月`}
           accent={growth >= 0 ? "emerald" : "rose"}
           trend={growth >= 0 ? "up" : "down"}
-          onClick={() => onNavigate("accounting")}
-          loading={stats.isLoading}
+          onClick={() => onNavigate("bank-ledger")}
+          loading={kpi.isLoading}
         />
         <KpiCard
-          icon={TrendingUp}
-          label="YTD 營收"
-          primary={`$${ytd.toLocaleString()}`}
-          secondary="2026 累計"
-          accent="indigo"
-          loading={stats.isLoading}
+          icon={TrendingDown}
+          label="本月付多少"
+          primary={fmt(expenses)}
+          secondary="COGS + 營運 + 軟體"
+          accent="rose"
+          onClick={() => onNavigate("bank-ledger")}
+          loading={kpi.isLoading}
+        />
+        <KpiCard
+          icon={DollarSign}
+          label="本月淨利"
+          primary={fmt(net)}
+          secondary={net >= 0 ? "獲利" : "虧損"}
+          accent={net >= 0 ? "emerald" : "rose"}
+          trend={net >= 0 ? "up" : "down"}
+          onClick={() => onNavigate("bank-ledger")}
+          loading={kpi.isLoading}
         />
         <KpiCard
           icon={AlertTriangle}
-          label="BofA 待分類"
-          primary="–"
-          secondary="Plaid 同步, 待 classify"
-          accent="amber"
-          onClick={() => onNavigate("accounting")}
+          label="本月待 Jeff 確認"
+          primary={needsReviewCount}
+          secondary={needsReviewCount > 0 ? `共 ${fmt(needsReviewAmount)} 金額` : "沒有未確認筆"}
+          accent={needsReviewCount > 0 ? "amber" : "slate"}
+          onClick={() => onNavigate("bank-ledger")}
+          loading={kpi.isLoading}
         />
         <KpiCard
-          icon={CreditCard}
-          label="本月 Bookings"
-          primary={stats.data?.totalBookings ?? 0}
-          secondary={`今日 ${stats.data?.todayBookings ?? 0} 個新訂單`}
-          accent="violet"
-          loading={stats.isLoading}
-        />
-        <KpiCard
-          icon={Receipt}
-          label="應收尾款"
-          primary="–"
-          secondary="待 query (deposit 已收、balance 未收)"
-          accent="slate"
+          icon={TrendingUp}
+          label="YTD 淨利"
+          primary={fmt(ytdNet)}
+          secondary={`賺 ${fmt(ytdIncome)} · 2026 累計`}
+          accent="indigo"
+          loading={kpi.isLoading}
         />
       </div>
 

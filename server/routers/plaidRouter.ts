@@ -717,10 +717,12 @@ export const plaidRouter = router({
         endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       })
     )
-    .query(async ({ ctx, input }) => {
+    .query(async ({ input }) => {
+      // 2026-05-22 — drop userId scope (single-tenant). Same rationale as
+      // transactionsList / classifyBatch: support@ was seeing $0 P&L because
+      // accounts are linked under jeffhsieh09@.
       const { generateBankPL } = await import("../services/bankPLService");
       return await generateBankPL({
-        userId: ctx.user.id,
         startDate: input.startDate,
         endDate: input.endDate,
       });
@@ -738,15 +740,82 @@ export const plaidRouter = router({
         })
         .optional()
     )
-    .query(async ({ ctx, input }) => {
+    .query(async ({ input }) => {
       const { generateBankMonthlyTrend } = await import(
         "../services/bankPLService"
       );
       return await generateBankMonthlyTrend({
-        userId: ctx.user.id,
         months: input?.months ?? 12,
       });
     }),
+
+  /**
+   * Lightweight KPI tile data for FinanceLanding — "賺多少 / 付多少 / 淨利"
+   * for current month + YTD. Cheaper than profitLossReport since callers
+   * only need 6 numbers, not the per-category breakdown.
+   *
+   * 2026-05-22 — built in response to Jeff seeing $0 on the 財務 page even
+   * after AI classified Zelle income, FedEx expenses, etc. The old card
+   * read from bookings table which was empty; this reads from Plaid +
+   * AccountingAgent classifications.
+   */
+  financeKpi: adminProcedure.query(async () => {
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+      .toISOString()
+      .slice(0, 10);
+    const startOfYear = new Date(now.getFullYear(), 0, 1)
+      .toISOString()
+      .slice(0, 10);
+    const today = now.toISOString().slice(0, 10);
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      .toISOString()
+      .slice(0, 10);
+    const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0)
+      .toISOString()
+      .slice(0, 10);
+
+    const { generateBankPL } = await import("../services/bankPLService");
+    const [thisMonth, lastMonth, ytd] = await Promise.all([
+      generateBankPL({ startDate: startOfMonth, endDate: today }),
+      generateBankPL({ startDate: lastMonthStart, endDate: lastMonthEnd }),
+      generateBankPL({ startDate: startOfYear, endDate: today }),
+    ]);
+
+    const growth =
+      lastMonth.income.total > 0
+        ? Math.round(
+            ((thisMonth.income.total - lastMonth.income.total) /
+              lastMonth.income.total) *
+              1000,
+          ) / 10
+        : thisMonth.income.total > 0
+          ? 100
+          : 0;
+
+    return {
+      thisMonth: {
+        income: thisMonth.income.total,
+        expenses: thisMonth.expenses.total,
+        netProfit: thisMonth.netProfit,
+        cogs: thisMonth.expenses.cogs,
+        operating: thisMonth.expenses.operating,
+        refunds: thisMonth.refunds,
+        needsReviewCount: thisMonth.needsReviewCount,
+        needsReviewAmount: thisMonth.needsReviewAmount,
+      },
+      ytd: {
+        income: ytd.income.total,
+        expenses: ytd.expenses.total,
+        netProfit: ytd.netProfit,
+        cogs: ytd.expenses.cogs,
+        operating: ytd.expenses.operating,
+        refunds: ytd.refunds,
+      },
+      vsLastMonthGrowthPct: growth,
+      currency: "USD",
+    };
+  }),
 
   // ── Phase 6: Year-end export ────────────────────────────────────────────
 

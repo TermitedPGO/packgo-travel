@@ -100,10 +100,15 @@ export interface BankPLReport {
 
 /**
  * Build a P&L for a date range from Plaid-synced transactions.
- * userId scopes to one admin's linked accounts.
+ *
+ * 2026-05-22 — userId is now OPTIONAL. PACK&GO is single-tenant; multi-admin
+ * login (jeffhsieh09 + support@packgoplay) means accounts linked under one
+ * userId need to be visible from every admin session. When omitted, the
+ * report aggregates across every active linked account. Pass userId only
+ * when scoping to a specific admin's accounts for debugging.
  */
 export async function generateBankPL(opts: {
-  userId: number;
+  userId?: number;
   startDate: string; // YYYY-MM-DD
   endDate: string;
   /** If true, override the agent's "other_review" verdict by treating
@@ -115,7 +120,15 @@ export async function generateBankPL(opts: {
     return emptyReport(opts.startDate, opts.endDate);
   }
 
-  // Pull all (non-excluded, non-pending) txns in window for this user
+  // Pull all (non-excluded, non-pending) txns in window across active accounts.
+  const filters: any[] = [
+    eq(linkedBankAccounts.isActive, 1),
+    gte(bankTransactions.date, opts.startDate as any),
+    lte(bankTransactions.date, opts.endDate as any),
+  ];
+  if (opts.userId) {
+    filters.push(eq(linkedBankAccounts.userId, opts.userId));
+  }
   const rows = await db
     .select({
       amount: bankTransactions.amount,
@@ -130,13 +143,7 @@ export async function generateBankPL(opts: {
       linkedBankAccounts,
       eq(bankTransactions.linkedAccountId, linkedBankAccounts.id)
     )
-    .where(
-      and(
-        eq(linkedBankAccounts.userId, opts.userId),
-        gte(bankTransactions.date, opts.startDate as any),
-        lte(bankTransactions.date, opts.endDate as any)
-      )
-    );
+    .where(and(...filters));
 
   const incomeByCategory: Record<string, number> = {};
   const expensesByCategory: Record<string, number> = {};
@@ -219,7 +226,9 @@ export async function generateBankPL(opts: {
     const { totalDeferredForUser, isTrustDeferralEnabled } = await import(
       "./trustDeferralService"
     );
-    if (isTrustDeferralEnabled()) {
+    if (isTrustDeferralEnabled() && opts.userId !== undefined) {
+      // Trust deferral is per-user; skip when no userId scope is given
+      // (single-tenant aggregate report — trust handling unchanged).
       deferredIncomeSubtracted = await totalDeferredForUser({
         userId: opts.userId,
         asOfDate: opts.endDate,
@@ -285,7 +294,7 @@ function emptyReport(startDate: string, endDate: string): BankPLReport {
  * Returns array sorted oldest → newest.
  */
 export async function generateBankMonthlyTrend(opts: {
-  userId: number;
+  userId?: number;
   months: number;
 }): Promise<
   Array<{
@@ -306,6 +315,19 @@ export async function generateBankMonthlyTrend(opts: {
   const db = await getDb();
   if (!db) return [];
 
+  // 2026-05-22 — drop userId scope. Single-tenant; aggregate across every
+  // active linked account so multi-admin login sees the full P&L.
+  const trendFilters: any[] = [
+    eq(linkedBankAccounts.isActive, 1),
+    gte(bankTransactions.date, startStr as any),
+    lte(bankTransactions.date, endStr as any),
+    eq(bankTransactions.excludeFromAccounting, 0),
+    eq(bankTransactions.isPending, 0),
+  ];
+  if (opts.userId) {
+    trendFilters.push(eq(linkedBankAccounts.userId, opts.userId));
+  }
+
   // Pull rows once, aggregate in JS — month buckets are small so this
   // is cheaper than 12 separate queries.
   const rows = await db
@@ -323,15 +345,7 @@ export async function generateBankMonthlyTrend(opts: {
       linkedBankAccounts,
       eq(bankTransactions.linkedAccountId, linkedBankAccounts.id)
     )
-    .where(
-      and(
-        eq(linkedBankAccounts.userId, opts.userId),
-        gte(bankTransactions.date, startStr as any),
-        lte(bankTransactions.date, endStr as any),
-        eq(bankTransactions.excludeFromAccounting, 0),
-        eq(bankTransactions.isPending, 0)
-      )
-    );
+    .where(and(...trendFilters));
 
   const map = new Map<
     string,
