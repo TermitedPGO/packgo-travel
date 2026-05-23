@@ -31,7 +31,7 @@ Mobile-first isn't polish, it's **operational survival**.
 
 ---
 
-## P0 use cases (Jeff confirmed all four 2026-05-22)
+## P0 use cases (Jeff 2026-05-22, original 4 + 2 added)
 
 ### 1. 每日快檢 — 5 min mobile glance
 - Single page, no scrolling beyond 1.5 viewports
@@ -41,14 +41,7 @@ Mobile-first isn't polish, it's **operational survival**.
 - Mid-fold: Last 24h activity feed (Stripe payouts, refunds, urgent Gmail)
 - Below: 1-tap actions (AI categorize, mark all read)
 
-### 2. Bank txn 快速分類 — Tinder-style triage
-- Card view: 1 transaction full-screen, AI suggestion big
-- Swipe RIGHT = confirm AI · LEFT = override (modal)
-- Bottom action bar: pause (skip) / 排除個人 (personal)
-- Progress: "53 待 review · 12 done"
-- 1 minute = 10-20 transactions cleared
-
-### 3. 客人急件 lookup + 回訊
+### 2. 客人急件 lookup + 回訊  *(promoted — high frequency)*
 - Floating search button (one thumb-reach top-right)
 - Search: name / phone / booking id / Zelle ref
 - Result: booking detail with:
@@ -57,7 +50,39 @@ Mobile-first isn't polish, it's **operational survival**.
   - Trip status, departure date, tour code
 - Fastest path: dial-pad direct → search → call within 10s
 
-### 4. Receipt 拍照上傳
+### 3. 查詢行程 + 分享 (NEW 2026-05-22)
+**Why**: Jeff meets potential customers in person (airport, restaurant,
+WeChat chat). Needs "我有這個團" → search → show on phone → share via
+WeChat / 小紅書 in 10 seconds.
+
+- **Search**: same global search as P0 #2, now indexes tours too
+  - Searches: tour title, destination country/city, tour code, tags
+  - Results grouped: tours / customers / bookings
+  - Sort: featured + active first, then recency
+- **Tour detail (mobile-optimized)**: same data as desktop TourDetailPeony
+  but vertical hierarchy, tap-to-expand sections
+  - Hero image full-width
+  - Quick facts (天數 / 城市 / 起價) in horizontal scroll
+  - Below-fold: itinerary day-by-day accordion
+- **Share** flow (one button, multiple targets):
+  - Native iOS share sheet via `navigator.share()` — opens WeChat,
+    Messages, AirDrop, Mail, etc. automatically
+  - Custom buttons for tools that don't support Web Share API:
+    - 🔵 WeChat → QR code + custom message text ready to paste
+    - 📕 小紅書 → caption template auto-copied to clipboard,
+      `xhsdiscover://` deeplink to open app
+    - 📧 Email → mailto with pre-filled subject + body
+    - 📋 Copy link
+  - Add ?ref=jeff so we track which channel converted via PostHog
+
+### 4. Bank txn 快速分類 — Tinder-style triage
+- Card view: 1 transaction full-screen, AI suggestion big
+- Swipe RIGHT = confirm AI · LEFT = override (modal)
+- Bottom action bar: pause (skip) / 排除個人 (personal)
+- Progress: "53 待 review · 12 done"
+- 1 minute = 10-20 transactions cleared
+
+### 5. Receipt 拍照上傳
 - Persistent FAB "📷 Receipt" on every page
 - Tap → device camera (HTML5 `<input capture>`)
 - Server: OCR amount + vendor (Claude vision API)
@@ -98,19 +123,25 @@ Mobile-first isn't polish, it's **operational survival**.
 
 ---
 
-## Phased plan
+## Phased plan (revised 2026-05-22, +tour search/share)
 
 | Phase | Scope | LOC est | Days |
 |-------|-------|---------|------|
-| **0** | PWA manifest + install prompt + offline fallback | ~150 | 0.5 |
+| **0** | PWA manifest + service worker + install prompt | ~150 | 0.5 |
 | **1** | Mobile shell + bottom nav + responsive KPI hero | ~400 | 1 |
 | **2** | Daily check page (P0 #1) | ~300 | 1 |
-| **3** | Bank txn triage swipe UX (P0 #2) | ~500 | 1.5 |
-| **4** | Customer lookup + 1-tap reply (P0 #3) | ~600 | 2 |
-| **5** | Receipt camera + OCR + match (P0 #4) | ~700 | 2.5 |
-| **6** | Polish, perf, A/B test on prod | ~200 | 1 |
+| **3** | Global search (customers + tours + bookings) + 1-tap reply (P0 #2) | ~700 | 2.5 |
+| **4** | Tour mobile detail + share flow (P0 #3) | ~600 | 2 |
+| **5** | Bank txn triage swipe UX (P0 #4) | ~500 | 1.5 |
+| **6** | Receipt camera + OCR + match (P0 #5) | ~700 | 2.5 |
+| **7** | Polish, perf, A/B test on prod | ~200 | 1 |
 
-Total: ~2,850 LOC, ~10 days. Realistic for 1-2 weeks of focused work.
+Total: ~3,550 LOC, ~12 days.
+
+**Re-prioritization rationale**: Bank triage moved from Phase 3 → Phase 5
+because customer search + tour share (Phases 3-4) are HIGH-FREQUENCY
+sales scenarios. Jeff hits these multiple times per day; bank triage is
+weekly. Customer-facing flows ship first to maximize daily value.
 
 Phases 0-2 (PWA + shell + daily check) ship together as a single deploy
 since they share routing/layout. After that, each phase ships independent.

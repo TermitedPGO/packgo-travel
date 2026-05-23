@@ -56,8 +56,48 @@ Each phase is a separate PR. Ship in order — earlier phases unlock later.
 
 ---
 
-## Phase 3 — Bank txn triage  `(1.5 day, ~500 LOC)`
-**Status**: ⏳ Pending
+## Phase 3 — Global search (customers + tours + bookings) + reply  `(2.5 day, ~700 LOC)`
+**Status**: ⏳ Pending — PROMOTED from Phase 4 (sales-frequency reordering)
+
+- [ ] `server/routers/searchRouter.ts` — new unified search procedure
+  - Searches: customers (name + phone fuzzy) + tours (title + dest + code) + bookings (id + ref)
+  - Returns: `{ tours: [...], customers: [...], bookings: [...] }`
+  - Limit 8 per group, total round-trip < 200ms
+- [ ] `client/src/components/mobile/GlobalSearchSheet.tsx`
+  - Floating search FAB top-right (one thumb-reach)
+  - Fullscreen modal, autofocus input
+  - Grouped results: 🗺️ 行程 / 👥 客戶 / 📋 訂單
+  - Recent contacts (last 7 days) when input empty
+  - Live results as Jeff types (debounce 300ms)
+- [ ] `client/src/lib/replyTemplates.ts` — 5 message templates per lang
+- [ ] `<CustomerDetailMobile>` — booking summary + 3 action buttons
+- [ ] Tap-to-call: `<a href="tel:...">`
+- [ ] WeChat deeplink: `weixin://...` with QR fallback
+- [ ] Vitest: template rendering, search query shape
+- [ ] Chrome MCP: search "wang", verify customer + tour + booking results
+
+---
+
+## Phase 4 — Tour mobile detail + share  `(2 day, ~600 LOC)`
+**Status**: ⏳ Pending — NEW 2026-05-22 (Jeff: "還可以查詢行程 以及 share")
+
+- [ ] `client/src/pages/TourDetailPeony/index.tsx`
+  - Audit existing responsive — most sections work, optimize hero + quick facts
+  - Mobile: hero 60vh max (was full-screen), CTAs sticky bottom
+- [ ] `client/src/pages/TourDetailPeony/ShareDialog.tsx`
+  - Native Web Share API path: `if (navigator.share)` opens iOS share sheet
+    with title + url + text — covers WeChat, Messages, AirDrop, Mail
+  - Fallback to existing custom buttons (WeChat QR / 小紅書 caption / mailto)
+  - Add `?ref=jeff` to shared URL for PostHog attribution
+- [ ] `xhsdiscover://` deeplink for 小紅書 — tries to open native app,
+    falls back to web upload page if not installed
+- [ ] Vitest: navigator.share branching, ref param added
+- [ ] Chrome MCP: open ShareDialog at 390×844, verify all 4 channels render
+
+---
+
+## Phase 5 — Bank txn triage  `(1.5 day, ~500 LOC)`
+**Status**: ⏳ Pending — DEMOTED from Phase 3
 
 - [ ] `pnpm add react-swipeable` (~3kb)
 - [ ] `client/src/components/mobile/BankTriagePage.tsx`
@@ -72,24 +112,7 @@ Each phase is a separate PR. Ship in order — earlier phases unlock later.
 
 ---
 
-## Phase 4 — Customer lookup + reply  `(2 day, ~600 LOC)`
-**Status**: ⏳ Pending
-
-- [ ] `server/routers/crmRouter.ts` — extend `searchCustomers` to fuzzy-match phone (strip non-digits)
-- [ ] `client/src/components/mobile/CustomerSearchSheet.tsx`
-  - Fullscreen modal, autofocus input
-  - Recent contacts (last 7 days) when input empty
-  - Live results as Jeff types (debounce 300ms)
-- [ ] `client/src/lib/replyTemplates.ts` — 5 template messages per lang
-- [ ] `<CustomerDetailMobile>` — booking summary + 3 action buttons
-- [ ] Tap-to-call: `<a href="tel:...">`
-- [ ] WeChat deeplink: `weixin://...` with QR fallback
-- [ ] Vitest: template rendering with customer data
-- [ ] Chrome MCP: search "wang", verify result
-
----
-
-## Phase 5 — Receipt camera + OCR  `(2.5 day, ~700 LOC)`
+## Phase 6 — Receipt camera + OCR  `(2.5 day, ~700 LOC)`
 **Status**: ⏳ Pending
 
 - [ ] `server/services/receiptOcrService.ts` — Claude Haiku 4.5 vision call
@@ -110,7 +133,7 @@ Each phase is a separate PR. Ship in order — earlier phases unlock later.
 
 ---
 
-## Phase 6 — Polish + perf  `(1 day, ~200 LOC)`
+## Phase 7 — Polish + perf  `(1 day, ~200 LOC)`
 **Status**: ⏳ Pending
 
 - [ ] Sentry Web Vitals: assert FCP < 1s, TTI < 2s on real prod traffic
