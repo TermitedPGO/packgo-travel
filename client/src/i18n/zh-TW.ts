@@ -1759,6 +1759,18 @@ export const zhTW = {
     childNoBed: '小孩不佔床',
     confirmed: '確定出發',
     infantPrice: '嬰兒',
+    // Trust badges + quick-info labels (2026-05-22 i18n cleanup, was hardcoded ternary)
+    trustCST: '加州合法旅行社',
+    trustTCRF: 'TCRF 消費者保障',
+    trustStripe: 'Stripe 加密付款',
+    trustSupport24h: '24 小時客服',
+    citiesLabel: '途經城市',
+    transportLabel: '主要交通',
+    priceFromLabel: '每人起價',
+    citiesCount: '{n} 座城市',
+    citiesCountSingle: '1 座城市',
+    cancelRefundTitle: '取消與退費政策',
+    cstFootnote: '受加州旅行業法（CST# 2166984）與 TCRF 消費者保障基金保護。',
     tabs: {
       overview: '行程特色',
       itinerary: '每日行程',

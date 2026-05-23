@@ -13,6 +13,7 @@
     "db:push": "drizzle-kit generate && drizzle-kit migrate",
     "i18n:audit": "node scripts/i18n-audit.mjs",
     "i18n:audit:json": "node scripts/i18n-audit.mjs --json",
+    "i18n:parity": "tsx scripts/audit-i18n.ts",
     "i18n:crawl": "node scripts/i18n-crawl.mjs",
     "i18n:crawl:json": "node scripts/i18n-crawl.mjs --json",
     "i18n:baseline": "node scripts/i18n-audit.mjs --json | node -e 'const d=JSON.parse(require(\"fs\").readFileSync(0,\"utf8\"));require(\"fs\").writeFileSync(\"scripts/i18n-baseline.json\",JSON.stringify(d.filter(i=>i.score>=9).map(i=>({file:i.file,line:i.line,text:i.text,score:i.score})),null,2));console.log(\"baseline updated\");'",

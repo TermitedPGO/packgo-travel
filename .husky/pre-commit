@@ -11,3 +11,10 @@ set -e
 echo "[pre-commit] running tsc --noEmit..."
 NODE_OPTIONS="--max-old-space-size=6144" pnpm tsc --noEmit
 echo "[pre-commit] ✓ tsc clean"
+
+# 2026-05-22: i18n parity gate — guarantees no key drifts between zh-TW / en / ja / ko.
+# Also catches the "language === 'en' ?  '中文' : 'English'" ternary regression
+# pattern that silently mixes languages in JSX (Jeff's reported bug).
+echo "[pre-commit] running i18n parity audit..."
+pnpm tsx scripts/audit-i18n.ts
+echo "[pre-commit] ✓ i18n parity clean"

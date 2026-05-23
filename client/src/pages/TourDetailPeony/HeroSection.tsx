@@ -59,7 +59,7 @@ export type HeroSectionProps = {
   updateField: (field: string, value: any) => void;
   getTranslated: (fieldName: string, fallback: string | null | undefined) => string | null | undefined;
   formatPrice: (value: number, currency?: any) => string;
-  t: (key: string) => string;
+  t: (key: string, params?: Record<string, string | number>) => string;
 };
 
 export default function HeroSection({
@@ -280,20 +280,20 @@ export default function HeroSection({
             {/* Round 80.8: trust badge icons normalised to gold (was pink/blue/amber). */}
             <div className="inline-flex items-center gap-1.5">
               <ShieldCheck className="h-3.5 w-3.5 text-[#c9a563] flex-shrink-0" />
-              <span className="hidden sm:inline">{language === 'en' ? 'California Seller of Travel' : '加州合法旅行社'} </span>
+              <span className="hidden sm:inline">{t('tourDetail.trustCST')} </span>
               <span className="font-semibold text-gray-800">CST #2166984</span>
             </div>
             <div className="inline-flex items-center gap-1.5">
               <Heart className="h-3.5 w-3.5 text-[#c9a563] flex-shrink-0" />
-              <span>{language === 'en' ? 'TCRF Consumer Protection' : 'TCRF 消費者保障'}</span>
+              <span>{t('tourDetail.trustTCRF')}</span>
             </div>
             <div className="inline-flex items-center gap-1.5">
               <Lock className="h-3.5 w-3.5 text-[#c9a563] flex-shrink-0" />
-              <span>{language === 'en' ? 'Stripe Encrypted Payment' : 'Stripe 加密付款'}</span>
+              <span>{t('tourDetail.trustStripe')}</span>
             </div>
             <div className="inline-flex items-center gap-1.5">
               <PhoneCall className="h-3.5 w-3.5 text-[#c9a563] flex-shrink-0" />
-              <span>{language === 'en' ? '24-hour customer support' : '24 小時客服'}</span>
+              <span>{t('tourDetail.trustSupport24h')}</span>
             </div>
           </div>
         </div>
@@ -307,7 +307,7 @@ export default function HeroSection({
             <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-100">
               <Clock className="h-4 w-4 flex-shrink-0" style={{ color: themeColor.primary }} />
               <div className="min-w-0">
-                <p className="text-[10px] uppercase tracking-wide text-gray-500 leading-none">{t('tourDetail.duration') || (language === 'en' ? 'Duration' : '行程天數')}</p>
+                <p className="text-[10px] uppercase tracking-wide text-gray-500 leading-none">{t('tourDetail.duration')}</p>
                 <p className="text-sm font-bold text-gray-900 mt-0.5 truncate">{tour.duration || t('tourDetail.multiDayTour')}</p>
               </div>
             </div>
@@ -316,13 +316,13 @@ export default function HeroSection({
             <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-100">
               <MapPin className="h-4 w-4 flex-shrink-0" style={{ color: themeColor.primary }} />
               <div className="min-w-0">
-                <p className="text-[10px] uppercase tracking-wide text-gray-500 leading-none">{language === 'en' ? 'Cities' : '途經城市'}</p>
+                <p className="text-[10px] uppercase tracking-wide text-gray-500 leading-none">{t('tourDetail.citiesLabel')}</p>
                 <p className="text-sm font-bold text-gray-900 mt-0.5 truncate">
                   {(() => {
                     const rawCities = (tour.destinationCity || tour.destinationCountry || '').split(/[,、]/).map((c: string) => c.trim()).filter(Boolean);
                     const n = rawCities.length;
                     if (n === 0) return tour.destinationCountry ? translateDestination(tour.destinationCountry, language) : '—';
-                    return language === 'en' ? `${n} ${n === 1 ? 'city' : 'cities'}` : `${n} 座城市`;
+                    return n === 1 ? t('tourDetail.citiesCountSingle') : t('tourDetail.citiesCount', { n });
                   })()}
                 </p>
               </div>
@@ -333,7 +333,7 @@ export default function HeroSection({
               <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-100">
                 <TransportIcon type={transportationInfo.type} className="h-4 w-4 flex-shrink-0" style={{ color: themeColor.primary }} />
                 <div className="min-w-0">
-                  <p className="text-[10px] uppercase tracking-wide text-gray-500 leading-none">{language === 'en' ? 'Transport' : '主要交通'}</p>
+                  <p className="text-[10px] uppercase tracking-wide text-gray-500 leading-none">{t('tourDetail.transportLabel')}</p>
                   <p className="text-sm font-bold text-gray-900 mt-0.5 truncate">
                     {language === 'en'
                       ? (TRANSPORT_TYPE_EN[transportationInfo.typeName || ''] || transportationInfo.typeName || '—')
@@ -347,7 +347,7 @@ export default function HeroSection({
             <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border" style={{ backgroundColor: `${themeColor.primary}08`, borderColor: `${themeColor.primary}30` }}>
               <DollarSign className="h-4 w-4 flex-shrink-0" style={{ color: themeColor.primary }} />
               <div className="min-w-0">
-                <p className="text-[10px] uppercase tracking-wide text-gray-500 leading-none">{language === 'en' ? 'From / person' : '每人起價'}</p>
+                <p className="text-[10px] uppercase tracking-wide text-gray-500 leading-none">{t('tourDetail.priceFromLabel')}</p>
                 <p className="text-sm font-bold mt-0.5 truncate" style={{ color: themeColor.primary }}>
                   {tour.price ? formatPrice(Number(tour.price), (tour.priceCurrency as any) || "TWD") : t('tourDetail.inquirePrice')}
                 </p>

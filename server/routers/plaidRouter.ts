@@ -663,13 +663,16 @@ export const plaidRouter = router({
         })
         .optional()
     )
-    .mutation(async ({ ctx, input }) => {
+    .mutation(async ({ input }) => {
+      // 2026-05-22 fix: drop userId scope for single-tenant PACK&GO. With
+      // multi-admin login (Jeff + future staff), accounts can be linked under
+      // different userId values; classifying only this admin's accounts left
+      // 167 txns stuck with raw Plaid PFC categories.
       const { classifyUncategorizedBatch } = await import(
         "../services/accountingAgentService"
       );
       return await classifyUncategorizedBatch({
         limit: input?.limit ?? 50,
-        userId: ctx.user.id,
       });
     }),
 

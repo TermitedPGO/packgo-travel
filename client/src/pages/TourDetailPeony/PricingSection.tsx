@@ -128,12 +128,10 @@ export default function PricingSection({
             </div>
             <div className="flex-1">
               <h3 className="font-serif font-bold text-lg text-foreground mb-1">
-                {language === 'en' ? 'Cancellation & Refund Policy' : '取消與退費政策'}
+                {t('tourDetail.cancelRefundTitle')}
               </h3>
               <p className="text-xs text-foreground/55 mb-3">
-                {language === 'en'
-                  ? 'Protected by California Seller of Travel laws (CST# 2166984) and TCRF Consumer Restitution Fund.'
-                  : '受加州旅行業法（CST# 2166984）與 TCRF 消費者保障基金保護。'}
+                {t('tourDetail.cstFootnote')}
               </p>
               <ul className="space-y-1.5 text-sm text-foreground/80">
                 {(language === 'en' ? REFUND_POLICY.en : REFUND_POLICY.zh).map((line, idx) => (
