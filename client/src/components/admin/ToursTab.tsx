@@ -135,7 +135,14 @@ export default function ToursTab() {
   const [generationError, setGenerationError] = useState<string | null>(null);
 
   const utils = trpc.useUtils();
-  const { data: tours, isLoading: toursLoading } = trpc.tours.list.useQuery();
+  // 2026-05-22 fix: getAllTours has default pageSize=100 → admin Tours tab
+  // was capped at first 100 rows. PACK&GO has 502 total tours (141 active +
+  // 361 draft); the sidebar badge showed 141 (from admin.getStats — full
+  // COUNT) but the tab list maxed at 100, causing the "141 vs 100"
+  // discrepancy. Request a larger page size that fits all admin-visible
+  // tours; pageSize is hard-capped server-side anyway if it grows past
+  // a sane bound.
+  const { data: tours, isLoading: toursLoading } = trpc.tours.list.useQuery({ pageSize: 1000 });
 
   // Round 80.20: Jeff reported sidebar badge stuck at "46" even after
   // deleting all tours, while list showed "0 筆". Cause: only

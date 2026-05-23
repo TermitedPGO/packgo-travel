@@ -306,4 +306,54 @@ export const adminCleanupRouter = router({
 
       return { affected: (result as any).affectedRows ?? input.ids.length };
     }),
+
+  /**
+   * Nuke ALL agent messages from specified agents. For PACK&GO right now
+   * this means catalog + inquiry agents (101 + 36 auto-generated test
+   * messages from the supplier sync + inquiry routing pipelines). Always
+   * keeps "ops" agent messages (Jeff's actual conversation history).
+   *
+   * Audit log captures the agent name list + delete count.
+   */
+  purgeAgentMessagesByAgent: adminProcedure
+    .input(
+      z.object({
+        agentNames: z.array(z.string().min(1).max(64)).min(1).max(20),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { getDb } = await import("../db");
+      const { agentMessages } = await import("../../drizzle/schema");
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+
+      // Safety: never let "ops" through this endpoint — Jeff's real
+      // conversation history must be cleared via the explicit-IDs
+      // deleteAgentMessages endpoint instead.
+      const safeNames = input.agentNames.filter((n) => n !== "ops");
+      if (safeNames.length === 0) {
+        throw new Error("Cannot purge ops agent via this endpoint. Use deleteAgentMessages with explicit IDs.");
+      }
+
+      const result = await db
+        .delete(agentMessages)
+        .where(inArray(agentMessages.agentName, safeNames));
+
+      const { audit } = await import("../_core/auditLog");
+      audit({
+        ctx,
+        action: "admin.cleanup.purgeAgentMessagesByAgent",
+        targetType: "agentMessage",
+        targetId: safeNames.join(","),
+        changes: {
+          agentNames: safeNames,
+          count: (result as any).affectedRows ?? 0,
+        },
+      });
+
+      return {
+        affected: (result as any).affectedRows ?? 0,
+        purgedAgents: safeNames,
+      };
+    }),
 });
