@@ -44,6 +44,14 @@ if (import.meta.env.VITE_SENTRY_DSN) {
 // Sentry. No-op when VITE_POSTHOG_KEY unset (dev / preview / test).
 initAnalytics();
 
+// Mobile Phase 0 (2026-05-22) — register PWA service worker for offline
+// shell caching + capture install prompt for later display. Both no-op
+// in dev (HMR would break under SW caching).
+import("./_core/serviceWorker").then(({ registerServiceWorker, captureInstallPrompt }) => {
+  registerServiceWorker();
+  captureInstallPrompt();
+});
+
 const queryClient = new QueryClient();
 
 const redirectToLoginIfUnauthorized = (error: unknown) => {
