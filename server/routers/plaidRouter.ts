@@ -216,9 +216,13 @@ export const plaidRouter = router({
    * List all linked bank accounts for the current admin. Excludes
    * plaidAccessTokenEncrypted from output (sensitive).
    */
-  linkedAccountsList: adminProcedure.query(async ({ ctx }) => {
+  linkedAccountsList: adminProcedure.query(async () => {
     const db = await getDb();
     if (!db) return [];
+    // 2026-05-22: previously filtered by ctx.user.id. PACK&GO is
+    // single-tenant; the admin role should see every linked account
+    // regardless of which admin login linked it. See plaidRouter
+    // transactionsList for the same change + rationale.
     const rows = await db
       .select({
         id: linkedBankAccounts.id,
@@ -240,7 +244,6 @@ export const plaidRouter = router({
         createdAt: linkedBankAccounts.createdAt,
       })
       .from(linkedBankAccounts)
-      .where(eq(linkedBankAccounts.userId, ctx.user.id))
       .orderBy(desc(linkedBankAccounts.createdAt));
     return rows;
   }),
@@ -395,12 +398,17 @@ export const plaidRouter = router({
       const db = await getDb();
       if (!db) return { items: [], total: 0 };
 
-      // Only return transactions belonging to accounts owned by this admin
-      const userAccountIds = await db
+      // 2026-05-22 fix: previously filtered by `linkedBankAccounts.userId =
+      // ctx.user.id`, which broke for one-person ops with multiple admin
+      // logins (e.g. Jeff linked Plaid as jeffhsieh09@gmail.com but daily-drives
+      // admin as support@packgoplay.com — the queries saw 0 accounts and
+      // returned empty list while reconciliation.runReport saw all 124 txns).
+      // PACK&GO is single-tenant; every admin sees every linked account.
+      // If we ever go multi-tenant, gate by org_id instead.
+      const allAccountIds = await db
         .select({ id: linkedBankAccounts.id })
-        .from(linkedBankAccounts)
-        .where(eq(linkedBankAccounts.userId, ctx.user.id));
-      const ownedIds = userAccountIds.map((r) => r.id);
+        .from(linkedBankAccounts);
+      const ownedIds = allAccountIds.map((r) => r.id);
       if (ownedIds.length === 0) return { items: [], total: 0 };
 
       const filters: any[] = [inArray(bankTransactions.linkedAccountId, ownedIds)];
@@ -469,7 +477,10 @@ export const plaidRouter = router({
         )
         .where(eq(bankTransactions.id, input.transactionId))
         .limit(1);
-      if (!row || row.ownerUserId !== ctx.user.id) {
+      // 2026-05-22: dropped per-user ownership check. Any admin role can
+      // edit any bank transaction (single-tenant PACK&GO). Audit trail
+      // (admin.cleanup.* + audit log) records who made each change.
+      if (!row) {
         throw new TRPCError({ code: "NOT_FOUND" });
       }
 
@@ -608,7 +619,9 @@ export const plaidRouter = router({
         )
         .where(eq(bankTransactions.id, input.transactionId))
         .limit(1);
-      if (!row || row.ownerUserId !== ctx.user.id) {
+      // 2026-05-22: dropped per-user check (single-tenant). Audit log
+      // captures who triggered the classify.
+      if (!row) {
         throw new TRPCError({ code: "NOT_FOUND" });
       }
       return await classifyOne(input.transactionId);
