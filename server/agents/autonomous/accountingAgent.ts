@@ -75,6 +75,20 @@ export type AccountingAgentInput = {
   plaidCategoryPrimary: string | null;
   plaidCategoryDetailed: string | null;
   isoCurrencyCode: string;
+  // 2026-05-22 — Jeff's actual BofA notes / Zelle memos / Bill Pay reasons
+  // come through Plaid's payment_meta + original_description. The agent
+  // must read these because Jeff sometimes writes the context directly
+  // ("PACKAGE TRIP DEPOSIT", "REFUND LIN FAMILY", "FB AD SPEND APR").
+  originalDescription: string | null;
+  paymentMeta: {
+    payee?: string | null;
+    payer?: string | null;
+    payment_method?: string | null;
+    reason?: string | null;
+    reference_number?: string | null;
+    by_order_of?: string | null;
+    ppd_id?: string | null;
+  } | null;
   // Account context — same merchant on a credit card vs checking can mean
   // different things (Stripe payout always lands in checking, not credit).
   accountType: "depository" | "credit" | "loan" | "investment" | "other";
@@ -216,6 +230,7 @@ ${catList}
   - Checking outflow: 可能是 transfer (還信用卡 / 轉 trust)
 - "PAYMENT TO CHASE CARD" / "AUTOPAY" = transfer (還信用卡)。
 - Plaid PFC 只是參考,不要照抄。Plaid 把 Stripe payout 分到 "TRANSFER_IN" 但我們的正確分類是 income_booking。
+- **Jeff 在 BofA 打的備註 (Bank raw line, Payment meta reason) 是最強信號**。如果他寫 "PACKAGE TRIP DEPOSIT" 那就一定是 income_booking;寫 "REFUND TO LIN FAMILY" 就是 refund;寫 "FB AD APR" 就是 expense_marketing。Plaid 自動分類常常錯,但 Jeff 的人工備註幾乎不會錯。memo 出現時直接寫進 purposeNote 給 IRS audit 看。
 
 【信心評分標準】
 - 90-100: 商家名 + 金額 + 帳戶類型 三者都明確指向一個類別
@@ -274,6 +289,29 @@ async function _runAccountingAgentInner(
   lines.push(
     `Plaid PFC: ${input.plaidCategoryPrimary ?? "?"} / ${input.plaidCategoryDetailed ?? "?"}`
   );
+  // Jeff's BofA notes — usually the most important signal. The bank
+  // memo / reason field is where Jeff types things like "PACKAGE TRIP
+  // DEPOSIT" or "REFUND LIN FAMILY". When present, weight it heavily.
+  if (input.originalDescription) {
+    lines.push(
+      `Bank raw line: <TXN_RAW>${sanitizeTxnField(input.originalDescription)}</TXN_RAW>`,
+    );
+  }
+  if (input.paymentMeta) {
+    const pm = input.paymentMeta;
+    const pieces: string[] = [];
+    if (pm.payee) pieces.push(`payee=${sanitizeTxnField(pm.payee)}`);
+    if (pm.payer) pieces.push(`payer=${sanitizeTxnField(pm.payer)}`);
+    if (pm.reason) pieces.push(`Jeff備註(reason)=${sanitizeTxnField(pm.reason)}`);
+    if (pm.reference_number)
+      pieces.push(`ref=${sanitizeTxnField(pm.reference_number)}`);
+    if (pm.by_order_of)
+      pieces.push(`by_order_of=${sanitizeTxnField(pm.by_order_of)}`);
+    if (pm.payment_method) pieces.push(`method=${pm.payment_method}`);
+    if (pieces.length > 0) {
+      lines.push(`Payment meta: ${pieces.join(" · ")}`);
+    }
+  }
   lines.push("");
   lines.push(`【帳戶詳情】`);
   lines.push(

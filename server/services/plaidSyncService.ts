@@ -98,6 +98,13 @@ export async function syncOneLinkedAccount(
               merchantName:
                 t.merchant_name ?? t.name?.slice(0, 256) ?? null,
               description: t.name ?? null,
+              // 2026-05-22 — capture Plaid's raw bank-line text + payment_meta
+              // so the AccountingAgent can read Jeff's BofA Zelle memo,
+              // Bill Pay note, wire reference, check memo, etc. Without this
+              // the agent only sees "Zelle payment from JANE DOE" and misses
+              // the "PACKAGE TRIP DEPOSIT" that Jeff typed into BofA's UI.
+              originalDescription: t.original_description ?? null,
+              paymentMeta: t.payment_meta ?? null,
               paymentChannel: t.payment_channel ?? null,
               plaidCategoryPrimary:
                 (t.personal_finance_category as any)?.primary ?? null,
@@ -147,6 +154,13 @@ export async function syncOneLinkedAccount(
               merchantName:
                 t.merchant_name ?? t.name?.slice(0, 256) ?? null,
               description: t.name ?? null,
+              // 2026-05-22 — capture Plaid's raw bank-line text + payment_meta
+              // so the AccountingAgent can read Jeff's BofA Zelle memo,
+              // Bill Pay note, wire reference, check memo, etc. Without this
+              // the agent only sees "Zelle payment from JANE DOE" and misses
+              // the "PACKAGE TRIP DEPOSIT" that Jeff typed into BofA's UI.
+              originalDescription: t.original_description ?? null,
+              paymentMeta: t.payment_meta ?? null,
               paymentChannel: t.payment_channel ?? null,
               plaidCategoryPrimary:
                 (t.personal_finance_category as any)?.primary ?? null,
@@ -162,6 +176,8 @@ export async function syncOneLinkedAccount(
                 merchantName:
                   t.merchant_name ?? t.name?.slice(0, 256) ?? null,
                 description: t.name ?? null,
+                originalDescription: t.original_description ?? null,
+                paymentMeta: t.payment_meta ?? null,
                 updatedAt: new Date(),
               },
             });

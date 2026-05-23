@@ -126,6 +126,11 @@ export async function classifyOne(
     plaidCategoryPrimary: row.tx.plaidCategoryPrimary,
     plaidCategoryDetailed: row.tx.plaidCategoryDetailed,
     isoCurrencyCode: row.tx.isoCurrencyCode ?? "USD",
+    // 2026-05-22 — Jeff's BofA notes / Zelle memo / Bill Pay reason
+    // (migration 0081). Without these the agent loses ~30% of the signal
+    // for transfer-class transactions.
+    originalDescription: (row.tx as any).originalDescription ?? null,
+    paymentMeta: ((row.tx as any).paymentMeta as any) ?? null,
     accountType: (row.acct?.accountType ?? "depository") as any,
     accountName: row.acct?.accountName ?? null,
     isTrustAccount: (row.acct?.isTrustAccount ?? 0) === 1,

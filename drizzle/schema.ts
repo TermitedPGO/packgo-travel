@@ -2718,6 +2718,14 @@ export const bankTransactions = mysqlTable("bankTransactions", {
   isoCurrencyCode: varchar("isoCurrencyCode", { length: 3 }).default("USD").notNull(),
   merchantName: varchar("merchantName", { length: 256 }),
   description: text("description"),
+  // Plaid's `original_description` — raw bank-line text including check memo,
+  // wire reference, Zelle / Bill Pay note that Jeff typed in BofA. Migration
+  // 0081 (2026-05-22) — Jeff: "Agent 要 read 我在 bofa 用的 notes".
+  originalDescription: text("originalDescription"),
+  // Plaid's `payment_meta` — JSON: { payee, payer, payment_method, reason,
+  // reference_number, by_order_of, ppd_id }. `reason` is where the BofA
+  // Zelle memo lands ("PACKAGE TRIP DEPOSIT", etc.).
+  paymentMeta: json("paymentMeta"),
   paymentChannel: varchar("paymentChannel", { length: 32 }),
   // Plaid's PFC taxonomy (Personal Finance Category) — primary + detailed
   plaidCategoryPrimary: varchar("plaidCategoryPrimary", { length: 64 }),
