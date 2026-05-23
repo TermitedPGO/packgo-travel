@@ -96,6 +96,11 @@ export interface BankPLReport {
   // Audit trail
   excludedFromAccounting: number; // count of txns user excluded
   uncategorizedCount: number; // count where agent + Jeff both null
+  // CST §17550 trust deferral — Jeff 2026-05-22:「放在trust account 是客人
+  // 訂金 不能算我的, 除非真的跑到我的checking」. trustDeferredIncome is
+  // already subtracted from income.total + netProfit; this is the separate
+  // total so the UI can show "客人訂金待 recognize" as its own KPI.
+  trustDeferredIncome: number;
 }
 
 /**
@@ -226,9 +231,13 @@ export async function generateBankPL(opts: {
     const { totalDeferredForUser, isTrustDeferralEnabled } = await import(
       "./trustDeferralService"
     );
-    if (isTrustDeferralEnabled() && opts.userId !== undefined) {
-      // Trust deferral is per-user; skip when no userId scope is given
-      // (single-tenant aggregate report — trust handling unchanged).
+    if (isTrustDeferralEnabled()) {
+      // Trust deferral: customer prepayments sitting in trust account are
+      // NOT recognized as income until the trip departs (CST §17550). When
+      // userId omitted (single-tenant aggregate), sum across all active
+      // trust accounts. Jeff 2026-05-22: 「放在trust account 是客人訂金 不
+      // 能算我的」 — this guarantees the FinanceLanding 賺多少 doesn't
+      // overstate by including un-earned trust deposits.
       deferredIncomeSubtracted = await totalDeferredForUser({
         userId: opts.userId,
         asOfDate: opts.endDate,
@@ -268,6 +277,7 @@ export async function generateBankPL(opts: {
     scheduleCMap: SCHEDULE_C_MAP,
     excludedFromAccounting,
     uncategorizedCount,
+    trustDeferredIncome: deferredIncomeSubtracted,
   };
 }
 
@@ -277,6 +287,7 @@ function emptyReport(startDate: string, endDate: string): BankPLReport {
     income: { total: 0, byCategory: {} },
     expenses: { total: 0, cogs: 0, operating: 0, byCategory: {} },
     refunds: 0,
+    trustDeferredIncome: 0,
     grossProfit: 0,
     netProfit: 0,
     profitMargin: 0,

@@ -642,15 +642,29 @@ export async function computeOutstandingTrust(
 /**
  * Total amount currently deferred (not yet recognized) — used by
  * bankPLService to subtract from monthly income when trust deferral is on.
+ *
+ * 2026-05-22 — userId now optional. Single-tenant PACK&GO aggregates across
+ * every active linked trust account. Jeff: 「放在trust account 是客人訂金
+ * 不能算我的, 除非真的跑到我的checking」 — without this the FinanceLanding KPI
+ * was inflating income with un-earned trust deposits.
  */
 export async function totalDeferredForUser(opts: {
-  userId: number;
+  userId?: number;
   asOfDate: string; // YYYY-MM-DD
 }): Promise<number> {
   if (!isTrustDeferralEnabled()) return 0;
   const db = await getDb();
   if (!db) return 0;
   // Deferred = deposited on/before asOfDate, not yet recognized, not reversed
+  const filters: any[] = [
+    eq(linkedBankAccounts.isActive, 1),
+    lte(trustDeferredIncome.depositDate, opts.asOfDate as any),
+    isNull(trustDeferredIncome.recognizedAt),
+    isNull(trustDeferredIncome.reversedAt),
+  ];
+  if (opts.userId !== undefined) {
+    filters.push(eq(linkedBankAccounts.userId, opts.userId));
+  }
   const rows = await db
     .select({
       amount: trustDeferredIncome.amount,
@@ -661,14 +675,7 @@ export async function totalDeferredForUser(opts: {
       linkedBankAccounts,
       eq(trustDeferredIncome.linkedAccountId, linkedBankAccounts.id)
     )
-    .where(
-      and(
-        eq(linkedBankAccounts.userId, opts.userId),
-        lte(trustDeferredIncome.depositDate, opts.asOfDate as any),
-        isNull(trustDeferredIncome.recognizedAt),
-        isNull(trustDeferredIncome.reversedAt)
-      )
-    );
+    .where(and(...filters));
   let total = 0;
   for (const r of rows) {
     total += parseFloat(r.amount as any) || 0;

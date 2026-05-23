@@ -803,6 +803,7 @@ export const plaidRouter = router({
         refunds: thisMonth.refunds,
         needsReviewCount: thisMonth.needsReviewCount,
         needsReviewAmount: thisMonth.needsReviewAmount,
+        trustDeferredIncome: thisMonth.trustDeferredIncome,
       },
       ytd: {
         income: ytd.income.total,
@@ -811,6 +812,7 @@ export const plaidRouter = router({
         cogs: ytd.expenses.cogs,
         operating: ytd.expenses.operating,
         refunds: ytd.refunds,
+        trustDeferredIncome: ytd.trustDeferredIncome,
       },
       vsLastMonthGrowthPct: growth,
       currency: "USD",
@@ -923,13 +925,16 @@ export const plaidRouter = router({
    * something's wrong: untracked manual withdrawals, refunded bookings
    * not yet reversed, etc.
    */
-  trustReconciliation: adminProcedure.query(async ({ ctx }) => {
+  trustReconciliation: adminProcedure.query(async () => {
     const db = await getDb();
     if (!db) return [];
     const { computeOutstandingTrust, isTrustDeferralEnabled } = await import(
       "../services/trustDeferralService"
     );
 
+    // 2026-05-22 — drop userId scope (single-tenant). Was returning [] for
+    // support@ admin because the Living Trust Account (#5442) is linked
+    // under jeffhsieh09@. Same pattern as the other route fixes.
     const trustAccounts = await db
       .select({
         id: linkedBankAccounts.id,
@@ -942,7 +947,6 @@ export const plaidRouter = router({
       .from(linkedBankAccounts)
       .where(
         and(
-          eq(linkedBankAccounts.userId, ctx.user.id),
           eq(linkedBankAccounts.isTrustAccount, 1),
           eq(linkedBankAccounts.isActive, 1)
         )

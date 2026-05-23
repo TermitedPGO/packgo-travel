@@ -20,6 +20,7 @@ import {
   Receipt,
   ArrowDownToLine,
   DollarSign,
+  Lock,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { zhTW } from "date-fns/locale";
@@ -52,15 +53,19 @@ export default function FinanceLanding({
   const ytdNet = Number(kpi.data?.ytd.netProfit ?? 0);
   const needsReviewCount = kpi.data?.thisMonth.needsReviewCount ?? 0;
   const needsReviewAmount = Number(kpi.data?.thisMonth.needsReviewAmount ?? 0);
+  // CST §17550 trust deferred — Jeff:「放在trust account 是客人訂金 不能算
+  // 我的, 除非真的跑到我的checking」. Already subtracted from `income` +
+  // `net` above; this is the standalone "客人訂金待 recognize" figure.
+  const trustDeferred = Number(kpi.data?.ytd.trustDeferredIncome ?? 0);
 
   return (
     <div className="max-w-6xl mx-auto space-y-4">
       <LandingGreeting
         title="💰 財務"
-        subtitle={`本月 賺 ${fmt(income)} · 付 ${fmt(expenses)} · 淨 ${fmt(net)} · YTD ${fmt(ytdIncome)}`}
+        subtitle={`本月 賺 ${fmt(income)} · 付 ${fmt(expenses)} · 淨 ${fmt(net)} · 訂金待 recognize ${fmt(trustDeferred)} · YTD ${fmt(ytdIncome)}`}
       />
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <KpiCard
           icon={Wallet}
           label="本月賺多少"
@@ -88,6 +93,16 @@ export default function FinanceLanding({
           accent={net >= 0 ? "emerald" : "rose"}
           trend={net >= 0 ? "up" : "down"}
           onClick={() => onNavigate("bank-ledger")}
+          loading={kpi.isLoading}
+        />
+        {/* 信託訂金 — CST §17550 negative liability. Not yours yet. */}
+        <KpiCard
+          icon={Lock}
+          label="客人訂金 (trust)"
+          primary={fmt(trustDeferred)}
+          secondary="出發後才轉成收入"
+          accent="slate"
+          onClick={() => onNavigate("reconciliation")}
           loading={kpi.isLoading}
         />
         <KpiCard
