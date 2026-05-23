@@ -766,26 +766,60 @@ function BankTxDrawerForm({
       ? customCategory.trim()
       : categoryDropdown;
 
+  // Track which fields the user actually changed vs initial. Without this,
+  // Save would always send `category: ""` and clobber an AI-assigned override
+  // whenever Jeff opens a row just to add purposeNote/counterparty.
+  // Audit-log task #39 (2026-05-22).
+  const initialCategoryRaw = tx?.jeffOverrideCategory ?? "";
+  const initialCounterparty = tx?.counterparty ?? "";
+  const initialCounterpartyType = tx?.counterpartyType ?? "";
+  const initialPurposeNote = tx?.purposeNote ?? "";
+  const initialReceiptUrl = tx?.receiptUrl ?? "";
+  const initialReason = tx?.jeffOverrideReason ?? "";
+  const initialBookingId = tx?.relatedBookingId ? String(tx.relatedBookingId) : "";
+  const initialExclude = (tx?.excludeFromAccounting ?? 0) === 1;
+
   const handleSave = () => {
-    const patch: DrawerSavePatch = {
-      category: finalCategory,
-      reason: reason.trim(),
-      exclude,
-    };
-    const parsed = bookingId.trim() ? Number(bookingId.trim()) : NaN;
-    if (Number.isFinite(parsed) && parsed > 0) {
-      patch.relatedBookingId = parsed;
+    const patch: DrawerSavePatch = {};
+
+    // Only include category/reason if Jeff actually touched them.
+    // (Pre-existing bug fix: drawer used to always send these even when
+    // unchanged, wiping any prior Jeff override on every save.)
+    if (finalCategory !== initialCategoryRaw) {
+      patch.category = finalCategory;
     }
-    // IRS Schedule C-grade fields — null when cleared so server unsets the
-    // column; populated string when Jeff filled them in.
-    patch.counterparty = counterparty.trim() || null;
-    patch.counterpartyType =
-      (counterpartyType as CounterpartyType) &&
-      (COUNTERPARTY_TYPES as readonly string[]).includes(counterpartyType)
-        ? (counterpartyType as CounterpartyType)
-        : null;
-    patch.purposeNote = purposeNote.trim() || null;
-    patch.receiptUrl = receiptUrl.trim() || null;
+    if (reason.trim() !== initialReason.trim()) {
+      patch.reason = reason.trim();
+    }
+    if (exclude !== initialExclude) {
+      patch.exclude = exclude;
+    }
+    if (bookingId.trim() !== initialBookingId) {
+      const parsed = bookingId.trim() ? Number(bookingId.trim()) : NaN;
+      if (Number.isFinite(parsed) && parsed > 0) {
+        patch.relatedBookingId = parsed;
+      }
+    }
+
+    // IRS Schedule C-grade fields — null when cleared (so server unsets),
+    // string when populated. Only send if changed.
+    if (counterparty.trim() !== initialCounterparty.trim()) {
+      patch.counterparty = counterparty.trim() || null;
+    }
+    if (counterpartyType !== initialCounterpartyType) {
+      patch.counterpartyType =
+        counterpartyType &&
+        (COUNTERPARTY_TYPES as readonly string[]).includes(counterpartyType)
+          ? (counterpartyType as CounterpartyType)
+          : null;
+    }
+    if (purposeNote.trim() !== initialPurposeNote.trim()) {
+      patch.purposeNote = purposeNote.trim() || null;
+    }
+    if (receiptUrl.trim() !== initialReceiptUrl.trim()) {
+      patch.receiptUrl = receiptUrl.trim() || null;
+    }
+
     onSave(patch);
   };
 
