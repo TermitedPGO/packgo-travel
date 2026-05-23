@@ -645,23 +645,39 @@ export async function computeOutstandingTrust(
  *
  * 2026-05-22 — userId now optional. Single-tenant PACK&GO aggregates across
  * every active linked trust account. Jeff: 「放在trust account 是客人訂金
- * 不能算我的, 除非真的跑到我的checking」 — without this the FinanceLanding KPI
- * was inflating income with un-earned trust deposits.
+ * 不能算我的, 除非真的跑到我的checking」.
+ *
+ * 2026-05-23 — added `depositSince` to scope the subtraction to a SPECIFIC
+ * period. Without it, the cumulative deferred amount (e.g. $8,908) was
+ * being subtracted from each month's gross income — incorrectly turning
+ * "本月賺" negative because prior months' deferrals got re-counted.
+ *
+ * Correct semantics:
+ *   - Per-month P&L → pass `depositSince = startDate` so we only subtract
+ *     this month's NEW trust deposits (matches the income_booking we just
+ *     summed for the period).
+ *   - YTD report → pass `depositSince = jan-1` for the same reason.
+ *   - "what's currently locked in trust" tile → omit depositSince to get
+ *     the full unrecognized cumulative balance.
  */
 export async function totalDeferredForUser(opts: {
   userId?: number;
-  asOfDate: string; // YYYY-MM-DD
+  asOfDate: string;     // YYYY-MM-DD — include deposits up to (and including) this date
+  depositSince?: string; // optional YYYY-MM-DD — only deposits ON/AFTER this date
 }): Promise<number> {
   if (!isTrustDeferralEnabled()) return 0;
   const db = await getDb();
   if (!db) return 0;
-  // Deferred = deposited on/before asOfDate, not yet recognized, not reversed
+  // Deferred = deposited within [depositSince, asOfDate], not yet recognized, not reversed
   const filters: any[] = [
     eq(linkedBankAccounts.isActive, 1),
     lte(trustDeferredIncome.depositDate, opts.asOfDate as any),
     isNull(trustDeferredIncome.recognizedAt),
     isNull(trustDeferredIncome.reversedAt),
   ];
+  if (opts.depositSince) {
+    filters.push(gte(trustDeferredIncome.depositDate, opts.depositSince as any));
+  }
   if (opts.userId !== undefined) {
     filters.push(eq(linkedBankAccounts.userId, opts.userId));
   }

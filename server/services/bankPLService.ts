@@ -232,15 +232,16 @@ export async function generateBankPL(opts: {
       "./trustDeferralService"
     );
     if (isTrustDeferralEnabled()) {
-      // Trust deferral: customer prepayments sitting in trust account are
-      // NOT recognized as income until the trip departs (CST §17550). When
-      // userId omitted (single-tenant aggregate), sum across all active
-      // trust accounts. Jeff 2026-05-22: 「放在trust account 是客人訂金 不
-      // 能算我的」 — this guarantees the FinanceLanding 賺多少 doesn't
-      // overstate by including un-earned trust deposits.
+      // 2026-05-23 — scope subtraction to deposits IN this period only.
+      // Without `depositSince`, the cumulative trust balance (e.g. $8,908)
+      // got subtracted from EVERY month's gross — flipping "本月賺"
+      // negative because prior months' deferred income kept eating into
+      // each new month. We only want to subtract the NEW deposits whose
+      // income_booking we ALSO just summed.
       deferredIncomeSubtracted = await totalDeferredForUser({
         userId: opts.userId,
         asOfDate: opts.endDate,
+        depositSince: opts.startDate,
       });
     }
   } catch (err) {

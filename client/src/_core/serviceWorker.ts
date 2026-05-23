@@ -20,8 +20,11 @@ export function registerServiceWorker(): void {
   // hot reload. Skip in import.meta.env.DEV.
   if (import.meta.env.DEV) return;
 
-  // After page load to avoid contending with initial bundle download.
-  window.addEventListener("load", () => {
+  // 2026-05-23 — Bug fix: dynamic import().then() in main.tsx resolves
+  // AFTER window 'load' fires. addEventListener('load', ...) then never
+  // runs and the SW silently never registers. Branch on readyState:
+  // if already loaded → register now; else attach listener.
+  const doRegister = () => {
     navigator.serviceWorker
       .register(SW_PATH, { scope: "/" })
       .then((registration) => {
@@ -52,7 +55,13 @@ export function registerServiceWorker(): void {
           // Sentry not init'd in test environments.
         }
       });
-  });
+  };
+
+  if (document.readyState === "complete") {
+    doRegister();
+  } else {
+    window.addEventListener("load", doRegister, { once: true });
+  }
 }
 
 /**
