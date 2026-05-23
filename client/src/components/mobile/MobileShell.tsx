@@ -41,6 +41,7 @@ export default function MobileShell({
   onSearchClick,
   onNotificationsClick,
   children,
+  onNavigate,
 }: {
   active: MobileNavId;
   onSelect: (id: MobileNavId) => void;
@@ -49,6 +50,7 @@ export default function MobileShell({
   onSearchClick: () => void;
   onNotificationsClick?: () => void;
   children: ReactNode;
+  onNavigate?: (path: string) => void;
 }) {
   return (
     <div className="h-screen flex flex-col bg-gray-50">

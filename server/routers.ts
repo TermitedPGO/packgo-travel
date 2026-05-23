@@ -2,6 +2,7 @@ import { tourMonitorRouter } from "./routers/tourMonitorRouter";
 import { agentRouter } from "./routers/agentRouter";
 import { toolsRouter } from "./routers/toolsRouter";
 import { plaidRouter } from "./routers/plaidRouter";
+import { globalSearchRouter } from "./routers/globalSearch";
 import { suppliersRouter } from "./routers/suppliersRouter";
 // Phase 4A — sub-PR 1 of 5 (refactor 2026-05-18, audit P0-1)
 // Read-mostly safe domains extracted into their own files.
@@ -284,6 +285,9 @@ export const appRouter = router({
 
   // Reviews router — Phase 4E extracted to ./routers/reviews.ts
   reviews: reviewsRouter,
+
+  // Mobile Phase 3 global search — unified tours / customers / bookings
+  globalSearch: globalSearchRouter,
 
 });
 export type AppRouter = typeof appRouter;

@@ -46,6 +46,7 @@ import { useCommandPaletteHotkey } from "@/components/admin/primitives/CommandPa
 import { useIsMobile } from "@/_core/hooks/useIsMobile";
 import MobileShell, { type MobileNavId } from "@/components/mobile/MobileShell";
 const DailyCheckMobile = lazy(() => import("@/components/mobile/DailyCheckMobile"));
+const GlobalSearchSheet = lazy(() => import("@/components/mobile/GlobalSearchSheet"));
 
 // V2 redesigned tabs — Trip.com style. One per file so each can evolve
 // independently of the v1 counterpart.
@@ -213,6 +214,7 @@ export default function AdminV2() {
   const [paletteOpen, setPaletteOpen] = useCommandPaletteHotkey();
   const activeDomain = PAGE_TO_DOMAIN[activePage] ?? "office";
   const isMobile = useIsMobile();
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
 
   // Badge counts — same wires as v1 admin
   const { data: statsData } = trpc.admin.getStats.useQuery();
@@ -339,12 +341,19 @@ export default function AdminV2() {
           active={mobileNavActive}
           onSelect={handleMobileNav}
           breadcrumb={mobileBreadcrumbText}
-          onSearchClick={() => setPaletteOpen(true)}
+          onSearchClick={() => setMobileSearchOpen(true)}
         >
           <Suspense fallback={<LoadingPage text="載入中…" />}>
             {renderMobilePage()}
           </Suspense>
         </MobileShell>
+        <Suspense fallback={null}>
+          <GlobalSearchSheet
+            open={mobileSearchOpen}
+            onClose={() => setMobileSearchOpen(false)}
+            onNavigate={(p) => setActivePage(p as PageId)}
+          />
+        </Suspense>
       </div>
     );
   }
