@@ -659,7 +659,7 @@ function BankTxDrawer({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full sm:max-w-md rounded-l-xl overflow-y-auto">
+      <SheetContent className="w-full sm:max-w-2xl rounded-l-xl overflow-y-auto">
         <SheetHeader className="pb-4 border-b border-gray-100">
           <SheetTitle className="text-base flex items-center gap-2">
             <span className="text-gray-500 tabular-nums font-normal">
@@ -858,23 +858,23 @@ function BankTxDrawerForm({
       )}
 
       {/* Override form */}
-      <div className="space-y-3">
+      <div className="space-y-4">
         <SectionTitle>{t("admin.bankLedgerTab.sectionOverride")}</SectionTitle>
 
         <div className="space-y-1.5">
-          <Label className="text-xs text-gray-600">
+          <Label className="text-sm font-medium text-gray-700">
             {t("admin.bankLedgerTab.fieldCategory")}
           </Label>
           <Select
             value={categoryDropdown}
             onValueChange={(v) => setCategoryDropdown(v)}
           >
-            <SelectTrigger className="h-8 rounded-lg text-xs">
+            <SelectTrigger className="h-10 rounded-lg text-sm">
               <SelectValue placeholder={t("admin.bankLedgerTab.categoryPlaceholder")} />
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                <SelectLabel className="text-[10px] uppercase tracking-wider">
+                <SelectLabel className="text-xs uppercase tracking-wider">
                   {t("admin.bankLedgerTab.groupIncome")}
                 </SelectLabel>
                 {Object.keys(INCOME_CATEGORY_KEYS).map((k) => (
@@ -884,7 +884,7 @@ function BankTxDrawerForm({
                 ))}
               </SelectGroup>
               <SelectGroup>
-                <SelectLabel className="text-[10px] uppercase tracking-wider">
+                <SelectLabel className="text-xs uppercase tracking-wider">
                   {t("admin.bankLedgerTab.groupExpense")}
                 </SelectLabel>
                 {Object.keys(EXPENSE_CATEGORY_KEYS).map((k) => (
@@ -894,7 +894,7 @@ function BankTxDrawerForm({
                 ))}
               </SelectGroup>
               <SelectGroup>
-                <SelectLabel className="text-[10px] uppercase tracking-wider">
+                <SelectLabel className="text-xs uppercase tracking-wider">
                   {t("admin.bankLedgerTab.groupCustom")}
                 </SelectLabel>
                 <SelectItem value={CUSTOM_VALUE}>
@@ -908,36 +908,36 @@ function BankTxDrawerForm({
               value={customCategory}
               onChange={(e) => setCustomCategory(e.target.value)}
               placeholder={t("admin.bankLedgerTab.customCategoryPlaceholder")}
-              className="h-8 rounded-lg text-xs"
+              className="h-10 rounded-lg text-sm"
             />
           )}
         </div>
 
         <div className="space-y-1.5">
-          <Label className="text-xs text-gray-600">
+          <Label className="text-sm font-medium text-gray-700">
             {t("admin.bankLedgerTab.fieldReason")}
           </Label>
           <Textarea
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder={t("admin.bankLedgerTab.reasonPlaceholder")}
-            className="rounded-lg text-xs min-h-[60px]"
-            rows={2}
+            className="rounded-lg text-sm min-h-[72px]"
+            rows={3}
           />
         </div>
 
         <div className="space-y-1.5">
-          <Label className="text-xs text-gray-600">
+          <Label className="text-sm font-medium text-gray-700">
             {t("admin.bankLedgerTab.fieldBookingId")}
           </Label>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             <Input
               type="number"
               min={1}
               value={bookingId}
               onChange={(e) => setBookingId(e.target.value)}
               placeholder={t("admin.bankLedgerTab.bookingIdPlaceholder")}
-              className="h-8 rounded-lg text-xs"
+              className="h-10 rounded-lg text-sm"
             />
             {bookingId && (
               <Button
@@ -958,11 +958,11 @@ function BankTxDrawerForm({
           <div className="space-y-0.5">
             <Label
               htmlFor="bank-tx-exclude"
-              className="text-xs text-gray-700 font-medium cursor-pointer"
+              className="text-sm text-gray-700 font-medium cursor-pointer"
             >
               {t("admin.bankLedgerTab.fieldExclude")}
             </Label>
-            <p className="text-[10px] text-gray-500 leading-relaxed">
+            <p className="text-xs text-gray-500 leading-relaxed">
               {t("admin.bankLedgerTab.excludeHint")}
             </p>
           </div>
@@ -1034,7 +1034,7 @@ function BankTxDrawerForm({
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
-    <div className="text-[10px] uppercase tracking-[0.18em] text-gray-400 font-semibold">
+    <div className="text-xs uppercase tracking-[0.18em] text-gray-500 font-semibold">
       {children}
     </div>
   );
@@ -1043,8 +1043,8 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <span className="text-xs text-gray-500 shrink-0">{label}</span>
-      <span className="text-xs text-gray-900 text-right break-words max-w-[60%]">
+      <span className="text-sm text-gray-500 shrink-0">{label}</span>
+      <span className="text-sm text-gray-900 text-right break-words max-w-[60%]">
         {children}
       </span>
     </div>
@@ -1138,12 +1138,12 @@ function IRSDocumentationSection({
   };
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <SectionTitle>{t("admin.bankLedgerTab.sectionIRS")}</SectionTitle>
 
       {/* Counterparty (誰) */}
       <div className="space-y-1.5">
-        <Label className="text-xs text-gray-600">
+        <Label className="text-sm font-medium text-gray-700">
           {t("admin.bankLedgerTab.fieldCounterparty")}
         </Label>
         <Input
@@ -1151,16 +1151,16 @@ function IRSDocumentationSection({
           onChange={(e) => setCounterparty(e.target.value)}
           placeholder={t("admin.bankLedgerTab.counterpartyPlaceholder")}
           maxLength={255}
-          className="h-8 rounded-lg text-xs"
+          className="h-10 rounded-lg text-sm"
         />
       </div>
 
       {/* Counterparty type */}
       <div className="space-y-1.5">
-        <Label className="text-xs text-gray-600">
+        <Label className="text-sm font-medium text-gray-700">
           {t("admin.bankLedgerTab.fieldCounterpartyType")}
         </Label>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap gap-2">
           {COUNTERPARTY_TYPES.map((typ) => {
             const active = counterpartyType === typ;
             const styles = typeStyles[typ] ?? "bg-gray-50 text-gray-700 border-gray-200";
@@ -1169,7 +1169,7 @@ function IRSDocumentationSection({
                 key={typ}
                 type="button"
                 onClick={() => setCounterpartyType(active ? "" : typ)}
-                className={`text-[10px] uppercase tracking-wider px-2 py-1 rounded-md border transition-colors ${
+                className={`text-xs font-medium uppercase tracking-wider px-3 py-1.5 rounded-md border transition-colors ${
                   active ? styles : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
                 }`}
               >
@@ -1182,7 +1182,7 @@ function IRSDocumentationSection({
 
       {/* Purpose note (為什麼) */}
       <div className="space-y-1.5">
-        <Label className="text-xs text-gray-600">
+        <Label className="text-sm font-medium text-gray-700">
           {t("admin.bankLedgerTab.fieldPurposeNote")}
         </Label>
         <Textarea
@@ -1190,23 +1190,23 @@ function IRSDocumentationSection({
           onChange={(e) => setPurposeNote(e.target.value)}
           placeholder={t("admin.bankLedgerTab.purposeNotePlaceholder")}
           maxLength={2000}
-          className="rounded-lg text-xs min-h-[60px]"
-          rows={2}
+          className="rounded-lg text-sm min-h-[80px]"
+          rows={3}
         />
       </div>
 
       {/* Receipt upload */}
       <div className="space-y-1.5">
-        <Label className="text-xs text-gray-600">
+        <Label className="text-sm font-medium text-gray-700">
           {t("admin.bankLedgerTab.fieldReceipt")}
         </Label>
         {receiptUrl ? (
-          <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5">
+          <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
             <a
               href={receiptUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-teal-700 underline truncate flex-1"
+              className="text-sm text-teal-700 underline truncate flex-1"
             >
               {t("admin.bankLedgerTab.viewReceipt")}
             </a>
@@ -1215,14 +1215,14 @@ function IRSDocumentationSection({
               variant="ghost"
               size="sm"
               onClick={() => setReceiptUrl("")}
-              className="h-7 rounded-md px-2 text-xs text-gray-500"
+              className="h-8 rounded-md px-2 text-sm text-gray-500"
               aria-label={t("common.clear")}
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="h-4 w-4" />
             </Button>
           </div>
         ) : (
-          <label className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-3 py-3 text-xs text-gray-500 hover:bg-gray-50 cursor-pointer">
+          <label className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-4 py-5 text-sm text-gray-500 hover:bg-gray-50 cursor-pointer">
             <input
               type="file"
               accept="application/pdf,image/jpeg,image/png,image/webp"
@@ -1235,7 +1235,7 @@ function IRSDocumentationSection({
             />
             {uploading ? (
               <>
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" />
                 {t("admin.bankLedgerTab.uploadingReceipt")}
               </>
             ) : (
@@ -1276,7 +1276,7 @@ function ChangeHistorySection({ txId }: { txId: number }) {
     return (
       <div className="space-y-2">
         <SectionTitle>{t("admin.bankLedgerTab.sectionHistory")}</SectionTitle>
-        <div className="text-[10px] text-gray-400 italic">
+        <div className="text-xs text-gray-400 italic">
           {t("admin.bankLedgerTab.emptyHistory")}
         </div>
       </div>
@@ -1286,7 +1286,7 @@ function ChangeHistorySection({ txId }: { txId: number }) {
   return (
     <div className="space-y-2">
       <SectionTitle>{t("admin.bankLedgerTab.sectionHistory")}</SectionTitle>
-      <ul className="space-y-1.5">
+      <ul className="space-y-2">
         {rows.map((row) => {
           const ts = row.createdAt
             ? new Date(row.createdAt as any).toLocaleString(dateLocale, {
@@ -1301,14 +1301,14 @@ function ChangeHistorySection({ txId }: { txId: number }) {
           return (
             <li
               key={row.id}
-              className="text-[10px] text-gray-600 border-l-2 border-gray-200 pl-2 py-0.5"
+              className="text-xs text-gray-700 border-l-2 border-gray-200 pl-3 py-1"
             >
               <div className="flex items-baseline gap-2">
                 <span className="tabular-nums text-gray-400">{ts}</span>
-                <span className="font-medium text-gray-700">{row.userEmail}</span>
+                <span className="font-medium text-gray-800">{row.userEmail}</span>
               </div>
               {fields.length > 0 && (
-                <div className="mt-0.5 text-gray-500 break-all">
+                <div className="mt-1 text-gray-600 break-all leading-relaxed">
                   {fields
                     .map((f) => {
                       const before = changes?.before?.[f];
@@ -1319,7 +1319,7 @@ function ChangeHistorySection({ txId }: { txId: number }) {
                 </div>
               )}
               {row.reason && (
-                <div className="mt-0.5 italic text-gray-500">{`"${row.reason}"`}</div>
+                <div className="mt-1 italic text-gray-500">{`"${row.reason}"`}</div>
               )}
             </li>
           );
