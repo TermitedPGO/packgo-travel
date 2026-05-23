@@ -377,6 +377,121 @@ export const plaidRouter = router({
     }),
 
   /**
+   * Historical backfill via Plaid /transactions/get — date-range bounded.
+   *
+   * 2026-05-23 — Jeff: "把記錄拉回到之前的 2025 到至今". The standard
+   * transactionsSync only returns data from cursor onwards; BofA caps that
+   * at ~90 days. /transactions/get accepts explicit start_date / end_date
+   * and may return older data (depends on institution retention; Plaid's
+   * 24-month window applies).
+   *
+   * Each Plaid transaction is upserted into bankTransactions with the
+   * same logic as the regular sync — onDuplicateKeyUpdate refreshes
+   * memos / amounts / status if the row already exists.
+   *
+   * Returns counts per account so the UI can show how many rows arrived.
+   */
+  backfillHistorical: adminProcedure
+    .input(
+      z.object({
+        startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      requirePlaid();
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const { getTransactionsByDateRange } = await import("../_core/plaid");
+
+      const accounts = await db
+        .select()
+        .from(linkedBankAccounts)
+        .where(eq(linkedBankAccounts.isActive, 1));
+
+      const results: Array<{
+        linkedAccountId: number;
+        accountName: string | null;
+        totalReturned: number;
+        added: number;
+        error?: string;
+      }> = [];
+
+      for (const acc of accounts) {
+        try {
+          const token = decryptAccessToken(acc.plaidAccessTokenEncrypted);
+          const { transactions, total } = await getTransactionsByDateRange(
+            token,
+            input.startDate,
+            input.endDate,
+            [acc.plaidAccountId],
+          );
+
+          let added = 0;
+          for (const t of transactions) {
+            try {
+              await db
+                .insert(bankTransactions)
+                .values({
+                  linkedAccountId: acc.id,
+                  plaidTransactionId: t.transaction_id,
+                  date: t.date as any,
+                  authorizedDate: (t.authorized_date as any) ?? null,
+                  amount: String(t.amount),
+                  isoCurrencyCode: (t.iso_currency_code ?? "USD") as string,
+                  merchantName: t.merchant_name ?? t.name?.slice(0, 256) ?? null,
+                  description: t.name ?? null,
+                  originalDescription: (t as any).original_description ?? null,
+                  paymentMeta: (t as any).payment_meta ?? null,
+                  paymentChannel: t.payment_channel ?? null,
+                  plaidCategoryPrimary:
+                    (t.personal_finance_category as any)?.primary ?? null,
+                  plaidCategoryDetailed:
+                    (t.personal_finance_category as any)?.detailed ?? null,
+                  isPending: t.pending ? 1 : 0,
+                  accountOwner: t.account_owner ?? null,
+                })
+                .onDuplicateKeyUpdate({
+                  set: {
+                    amount: String(t.amount),
+                    isPending: t.pending ? 1 : 0,
+                    originalDescription: (t as any).original_description ?? null,
+                    paymentMeta: (t as any).payment_meta ?? null,
+                    updatedAt: new Date(),
+                  },
+                });
+              added++;
+            } catch {
+              // duplicate / write race — skip silently
+            }
+          }
+
+          results.push({
+            linkedAccountId: acc.id,
+            accountName: acc.accountName ?? null,
+            totalReturned: total,
+            added,
+          });
+        } catch (err) {
+          results.push({
+            linkedAccountId: acc.id,
+            accountName: acc.accountName ?? null,
+            totalReturned: 0,
+            added: 0,
+            error: (err as Error)?.message ?? "unknown",
+          });
+        }
+      }
+
+      return {
+        startDate: input.startDate,
+        endDate: input.endDate,
+        results,
+      };
+    }),
+
+  /**
    * Disconnect an account: call Plaid /item/remove to invalidate the
    * access_token on Plaid's side, then mark our row inactive (soft delete).
    * Transactions are kept for historical reporting.

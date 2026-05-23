@@ -277,6 +277,50 @@ export async function syncTransactions(
 }
 
 /**
+ * Historical transactions via /transactions/get — date-range bounded.
+ *
+ * Unlike `transactionsSync` (which uses an incremental cursor), this lets
+ * us ask for a specific [startDate, endDate] window. Used by the
+ * "backfill 2025" route to pull data older than what the cursor returns.
+ *
+ * Plaid caps each response at 500 transactions; loops with offset until
+ * `total_transactions` reached.
+ *
+ * 2026-05-23 — Jeff asked to pull 2025 BofA history.
+ */
+export async function getTransactionsByDateRange(
+  accessTokenPlain: string,
+  startDate: string, // YYYY-MM-DD
+  endDate: string,
+  accountIds?: string[],
+): Promise<{ transactions: Transaction[]; total: number }> {
+  const client = getPlaidClient();
+  const allTxns: Transaction[] = [];
+  let offset = 0;
+  let total = 0;
+  const PAGE = 500;
+
+  while (true) {
+    const res = await client.transactionsGet({
+      access_token: accessTokenPlain,
+      start_date: startDate,
+      end_date: endDate,
+      options: {
+        count: PAGE,
+        offset,
+        ...(accountIds && accountIds.length > 0 ? { account_ids: accountIds } : {}),
+      },
+    });
+    total = res.data.total_transactions;
+    allTxns.push(...(res.data.transactions ?? []));
+    offset += res.data.transactions.length;
+    if (offset >= total || res.data.transactions.length === 0) break;
+  }
+
+  return { transactions: allTxns, total };
+}
+
+/**
  * Detach a Plaid Item. Use when Jeff disconnects an account from the admin UI.
  */
 export async function removeItem(accessTokenPlain: string): Promise<void> {
