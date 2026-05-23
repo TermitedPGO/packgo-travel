@@ -57,6 +57,7 @@ import {
   Loader2,
   RefreshCw,
   Search,
+  Sparkles,
   X,
 } from "lucide-react";
 
@@ -264,6 +265,28 @@ export default function BankLedgerV2() {
     },
     onError: (e) =>
       toast.error(t("admin.bankLedgerTab.toastSaveFailed", { err: e.message })),
+  });
+
+  // 2026-05-22 — Run AccountingAgent on uncategorized transactions. Server
+  // pulls all transactions where agentCategory IS NULL AND jeffOverrideCategory
+  // IS NULL, hits the LLM, writes agentCategory/agentConfidence/agentReasoning
+  // back to the row. Batch size 50 per call to stay under timeout.
+  const classifyBatchMutation = trpc.plaid.classifyBatch.useMutation({
+    onSuccess: (res) => {
+      utils.plaid.transactionsList.invalidate();
+      const succ = (res as any)?.succeeded ?? 0;
+      const failed = (res as any)?.failed ?? 0;
+      const needsReview = (res as any)?.needsReviewCount ?? 0;
+      toast.success(
+        t("admin.bankLedgerTab.toastClassifyDone", {
+          succ: String(succ),
+          failed: String(failed),
+          review: String(needsReview),
+        }),
+      );
+    },
+    onError: (e) =>
+      toast.error(t("admin.bankLedgerTab.toastClassifyFailed", { err: e.message })),
   });
 
   const formatDate = (d: string | Date | null | undefined): string => {
@@ -477,6 +500,23 @@ export default function BankLedgerV2() {
           >
             <RefreshCw className="h-3.5 w-3.5" />
             {t("common.refresh")}
+          </Button>
+          {/* AI classify — pulls uncategorized batch through accountingAgentService */}
+          <Button
+            size="sm"
+            disabled={classifyBatchMutation.isPending}
+            onClick={() => {
+              if (!confirm(t("admin.bankLedgerTab.confirmClassify"))) return;
+              classifyBatchMutation.mutate({ limit: 50 });
+            }}
+            className="h-8 rounded-lg gap-1.5 bg-[#c9a563] hover:bg-[#b8924d] text-white"
+          >
+            {classifyBatchMutation.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="h-3.5 w-3.5" />
+            )}
+            {t("admin.bankLedgerTab.classifyButton")}
           </Button>
         </div>
       </div>
