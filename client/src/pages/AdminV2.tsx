@@ -60,6 +60,7 @@ const VouchersTabV2 = lazy(() => import("@/components/admin-v2/VouchersTabV2"));
 const LlmCostTabV2 = lazy(() => import("@/components/admin-v2/LlmCostTabV2"));
 const MonitorDashboardV2 = lazy(() => import("@/components/admin-v2/MonitorDashboardV2"));
 const CleanupTabV2 = lazy(() => import("@/components/admin-v2/CleanupTabV2"));
+const SupplierEnrichmentTabV2 = lazy(() => import("@/components/admin-v2/SupplierEnrichmentTabV2"));
 const BankLedgerV2 = lazy(() => import("@/components/admin-v2/BankLedgerV2"));
 
 // All other tabs initially come from V1. They're consumed AS-IS; we replace
@@ -107,7 +108,7 @@ type PageId =
   // Finance
   | "finance-landing" | "bank-ledger" | "invoices" | "reconciliation"
   // System
-  | "ai-hub" | "llm-cost" | "task-history" | "audit-log" | "calibration-review" | "autonomous-agents" | "visa" | "cleanup";
+  | "ai-hub" | "llm-cost" | "task-history" | "audit-log" | "calibration-review" | "autonomous-agents" | "visa" | "cleanup" | "supplier-enrichment";
 
 type DomainId = "office" | "ops" | "customers" | "marketing" | "finance" | "system";
 
@@ -184,6 +185,7 @@ const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageD
       { id: "ai-hub", label: "AI 中心" },
       { id: "llm-cost", label: "AI 成本" },
       { id: "autonomous-agents", label: "自主 Agent" },
+      { id: "supplier-enrichment", label: "🌏 供應商深度同步" },
       { id: "cleanup", label: "🧹 清理" },
     ],
     advanced: [
@@ -517,6 +519,8 @@ function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
       return <VisaManagementTab />;
     case "cleanup":
       return <CleanupTabV2 />;
+    case "supplier-enrichment":
+      return <SupplierEnrichmentTabV2 />;
 
     default:
       return (
