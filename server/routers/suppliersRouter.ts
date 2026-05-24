@@ -12,12 +12,13 @@
 
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, gte, like, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, like, lt, lte, or, sql } from "drizzle-orm";
 import { adminProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import {
   suppliers as suppliersTable,
   supplierProducts as productsTable,
+  supplierProductDetails,
   tours as toursTable,
 } from "../../drizzle/schema";
 import {
@@ -33,6 +34,7 @@ import {
   bulkImportFromUv,
   queueRewriteForImportedUvTours,
 } from "../services/uvBulkImportService";
+import { supplierDetailEnrichmentQueue } from "../queue";
 
 export const suppliersRouter = router({
   /* ───────────────────────── overview + history ───────────────────────── */
@@ -378,6 +380,160 @@ export const suppliersRouter = router({
         failed: batchResult.failed,
         rewriteQueued,
         durationMs: batchResult.durationMs,
+      };
+    }),
+
+  /* ────────────────────────── detail enrichment ──────────────────────── */
+
+  /**
+   * Detail enrichment status — count of active products with each
+   * parseStatus, per supplier. Powers admin observability tab (M8).
+   * 2026-05-24: Stage 1 of supplier deep sync.
+   */
+  enrichmentOverview: adminProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+    const allSuppliers = await db
+      .select({ id: suppliersTable.id, code: suppliersTable.code, name: suppliersTable.displayName })
+      .from(suppliersTable)
+      .where(eq(suppliersTable.isActive, true));
+
+    const results: Array<{
+      code: string;
+      name: string;
+      total: number;
+      itineraryParsed: number;
+      itineraryParseFailed: number;
+      itineraryMissing: number;
+      lastEnrichedAt: Date | null;
+    }> = [];
+
+    for (const sup of allSuppliers) {
+      const [totalRow] = await db
+        .select({ c: sql<number>`COUNT(*)` })
+        .from(productsTable)
+        .where(and(eq(productsTable.supplierId, sup.id), eq(productsTable.status, "active")));
+
+      const [parsedRow] = await db
+        .select({ c: sql<number>`COUNT(*)` })
+        .from(supplierProductDetails)
+        .where(
+          and(
+            eq(supplierProductDetails.supplierId, sup.id),
+            eq(supplierProductDetails.itineraryParseStatus, "parsed"),
+          ),
+        );
+
+      const [failedRow] = await db
+        .select({ c: sql<number>`COUNT(*)` })
+        .from(supplierProductDetails)
+        .where(
+          and(
+            eq(supplierProductDetails.supplierId, sup.id),
+            eq(supplierProductDetails.itineraryParseStatus, "parse_failed"),
+          ),
+        );
+
+      const [lastRow] = await db
+        .select({ ts: sql<Date | null>`MAX(${supplierProductDetails.lastEnrichedAt})` })
+        .from(supplierProductDetails)
+        .where(eq(supplierProductDetails.supplierId, sup.id));
+
+      const total = Number(totalRow?.c ?? 0);
+      const parsed = Number(parsedRow?.c ?? 0);
+      const failed = Number(failedRow?.c ?? 0);
+
+      results.push({
+        code: sup.code,
+        name: sup.name,
+        total,
+        itineraryParsed: parsed,
+        itineraryParseFailed: failed,
+        itineraryMissing: Math.max(0, total - parsed - failed),
+        lastEnrichedAt: lastRow?.ts ?? null,
+      });
+    }
+
+    return results;
+  }),
+
+  /**
+   * Trigger full backfill — enqueues per-product enrichment jobs for
+   * all active products that have no detail row OR > 7 days stale.
+   *
+   * Replaces the `scripts/backfill-supplier-details.ts` CLI which is
+   * not bundled into the prod container. Caller flow:
+   *   1. Admin clicks "Re-enrich now" (M8 button)
+   *   2. This procedure queries products needing enrichment
+   *   3. Enqueues one BullMQ job per product
+   *   4. Worker (concurrency 5) consumes them over 1-2 hours
+   *
+   * Returns enqueued count per supplier. Idempotent: if a job with
+   * the same jobId is already queued, BullMQ silently dedups.
+   */
+  triggerFullBackfill: adminProcedure
+    .input(
+      z.object({
+        supplierCode: z.enum(["lion", "uv", "all"]).default("all"),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const allSuppliers = await db
+        .select({ id: suppliersTable.id, code: suppliersTable.code })
+        .from(suppliersTable);
+      const supplierMap = new Map<number, string>();
+      allSuppliers.forEach((s) => supplierMap.set(s.id, s.code));
+
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+      const rows = await db
+        .select({
+          id: productsTable.id,
+          supplierId: productsTable.supplierId,
+          externalCode: productsTable.externalProductCode,
+        })
+        .from(productsTable)
+        .leftJoin(
+          supplierProductDetails,
+          eq(productsTable.id, supplierProductDetails.supplierProductId),
+        )
+        .where(
+          and(
+            eq(productsTable.status, "active"),
+            or(
+              isNull(supplierProductDetails.id),
+              lt(supplierProductDetails.lastEnrichedAt, sevenDaysAgo),
+            ),
+          ),
+        );
+
+      const enqueueCounts: Record<string, number> = { lion: 0, uv: 0 };
+
+      for (const row of rows) {
+        const code = supplierMap.get(row.supplierId);
+        if (code !== "lion" && code !== "uv") continue;
+        if (input.supplierCode !== "all" && input.supplierCode !== code) continue;
+
+        await supplierDetailEnrichmentQueue.add(
+          `enrich-${code}-${row.id}`,
+          {
+            supplierProductId: row.id,
+            supplierCode: code as "lion" | "uv",
+            externalProductCode: row.externalCode,
+            triggeredBy: "manual",
+          },
+          { jobId: `backfill-${code}-${row.id}` },
+        );
+        enqueueCounts[code]++;
+      }
+
+      return {
+        enqueued: enqueueCounts,
+        total: enqueueCounts.lion + enqueueCounts.uv,
       };
     }),
 
