@@ -407,7 +407,7 @@ export default function VouchersTabV2() {
       )}
 
       <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
-        <SheetContent className="w-full sm:max-w-md rounded-l-xl overflow-y-auto">
+        <SheetContent className="w-full 2xl:max-w-5xl 2xl:rounded-l-xl overflow-y-auto">
           <SheetHeader className="pb-4 border-b border-gray-100">
             <SheetTitle className="text-base flex items-center gap-2">
               <Ticket className="h-4 w-4 text-[#c9a563]" />

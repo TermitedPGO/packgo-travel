@@ -414,7 +414,7 @@ export default function UnifiedInbox({
           if (!open) setSelectedMessage(null);
         }}
       >
-        <SheetContent className="w-full sm:max-w-xl overflow-y-auto">
+        <SheetContent className="w-full 2xl:max-w-5xl 2xl:rounded-l-xl overflow-y-auto">
           {selectedMessage && (
             <>
               <SheetHeader>
