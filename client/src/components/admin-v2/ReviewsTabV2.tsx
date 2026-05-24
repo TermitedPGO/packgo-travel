@@ -410,7 +410,7 @@ export default function ReviewsTabV2() {
       )}
 
       <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
-        <SheetContent className="w-full 2xl:max-w-5xl 2xl:rounded-l-xl overflow-y-auto">
+        <SheetContent className="w-full xl:max-w-5xl xl:rounded-l-xl overflow-y-auto">
           <SheetHeader className="pb-4 border-b border-gray-100">
             <SheetTitle className="text-base flex items-center gap-2">
               <span className="text-gray-500 tabular-nums font-normal">

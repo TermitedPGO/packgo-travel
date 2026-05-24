@@ -60,11 +60,13 @@ function SheetContent({
         className={cn(
           "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out fixed z-50 flex flex-col gap-4 shadow-lg transition ease-in-out data-[state=closed]:duration-300 data-[state=open]:duration-500",
           // 2026-05-24 — removed the shadcn `w-3/4 sm:max-w-sm` defaults.
-          // They were beating our per-Sheet `w-full 2xl:max-w-5xl` overrides
+          // They were beating our per-Sheet `w-full xl:max-w-5xl` overrides
           // via twMerge breakpoint quirks (responsive variants don't merge
           // cleanly when caller adds different breakpoint prefix). All 8
-          // admin Sheets now own their own width via className. Defaults
-          // here only handle slide direction + position.
+          // admin Sheets now own their own width via className (xl breakpoint
+          // so MacBook 1440 also caps at 1024px ≈ 71%, instead of full-screen
+          // due to 2xl=1536 cutoff). Defaults here only handle slide
+          // direction + position.
           side === "right" &&
             "data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right inset-y-0 right-0 h-full border-l",
           side === "left" &&
