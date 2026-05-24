@@ -11,9 +11,9 @@
 | M3 | Lion 5-endpoint enrichment + parsers | ✅ Done | Claude main | lionDetail.ts + 22 vitest. travelinfo synthesizes Day 1/N from flight info (daytripinfojson left for Stage 2). |
 | M4 | UV 3-endpoint enrichment + parsers | ✅ Done | Claude main | uvDetail.ts + 17 vitest. tourInfo = missing (no UV equivalent). |
 | M5 | BullMQ worker + backfill script + daily cron | ✅ Done | Claude main | Worker concurrency 5, daily-cron sentinel pattern, backfill script with ETA, _core/index.ts registered. |
-| M6 | TourDetail page rich content sections | ⏳ Blocked by M5 | Sub-agent C | Parallel M6/7/8 |
-| M7 | InquiryAgent system prompt context inject | ⏳ Blocked by M5 | Sub-agent D | |
-| M8 | Admin SupplierEnrichmentTab + /health | ⏳ Blocked by M5 | Sub-agent E | |
+| M6 | TourDetail page rich content sections | ⏳ Pending (next session) | TBD | |
+| M7 | InquiryAgent system prompt context inject | ⏳ Pending (next session) | TBD | |
+| M8 | Admin SupplierEnrichmentTab + /health | ✅ Done | Claude main | Tab live at /admin/v2 → 系統 → 🌏 供應商深度同步. Auto-refresh 10s. Re-enrich buttons wire tRPC. |
 
 ## Decisions (locked from design.md)
 
@@ -47,5 +47,17 @@
   - M5: supplierDetailEnrichmentWorker.ts + supplierDetailEnrichmentQueue + backfill script + daily-cron sentinel + _core/index.ts registration
   - Total **86 vitest passing** across supplierSync/
   - tsc clean
-  - **Ready to deploy** — migration 0083 needs to push first, then worker auto-spins on app startup
-  - Next: M6 (TourDetail render) + M7 (InquiryAgent context) + M8 (admin observability) — parallel-able
+
+- 2026-05-24 23:15 UTC — **PROD DEPLOYED** + bugs fixed
+  - Initial deploy missed migration because 0083 not in `drizzle/meta/_journal.json` — fixed in commit `48bdc48` (drizzle migrate() only runs migrations registered in journal, not just .sql files in folder)
+  - Backfill script in `scripts/` not bundled to prod container (Dockerfile copies /app/server/assets only) — replaced with `suppliers.triggerFullBackfill` tRPC mutation (commit `c94ad1a`)
+  - Migration 0083 ran cleanly after journal fix
+  - **Backfill triggered via tRPC** — 5728 jobs enqueued
+
+- 2026-05-24 23:42 UTC — **M8 shipped, backfill running**
+  - SupplierEnrichmentTabV2 live at `/admin/v2` → 系統 → 🌏 供應商深度同步
+  - Auto-refreshes every 10s. Per-supplier matrix: parsed / parse_failed / missing + progress bar + last enriched
+  - "Re-enrich now" buttons wire `suppliers.triggerFullBackfill`
+  - **Backfill status @ 23:42**: Lion 128/4590 (2.8%), UV 0/1138 (worker processes Lion first due to FIFO ordering). ETA full completion: ~3-5 hours.
+
+- Remaining: M6 (TourDetail render rich content) + M7 (InquiryAgent context inject) — defer to fresh session for context safety
