@@ -890,3 +890,56 @@ export async function triggerManualTrustRecognition() {
 }
 
 console.log("✅ Trust recognition queue initialized");
+
+// ============================================================================
+// Scaling guardrails (2026-05-23) — daily cron to archive old txns + check
+// LLM budget. Jeff: "想想可以做的事情因為往後的資料肯定會越來越大".
+//
+// Runs once a day at 07:00 UTC (after Plaid sync 05:00 + trust recognition
+// 06:00). Both guardrails are idempotent + cheap; failures just retry next day.
+// ============================================================================
+
+export interface ScalingGuardrailJobData {
+  triggeredBy: "schedule" | "manual";
+}
+
+export interface ScalingGuardrailJobResult {
+  archivedCount: number;
+  cutoffDate: string;
+  llmMonthToDateUsd: number;
+  llmThreshold: number;
+  llmAlerted: boolean;
+}
+
+export const scalingGuardrailQueue = new Queue<
+  ScalingGuardrailJobData,
+  ScalingGuardrailJobResult
+>("scaling-guardrails", {
+  connection: redisBullMQ,
+  defaultJobOptions: {
+    attempts: 2,
+    backoff: { type: "exponential", delay: 60_000 },
+    removeOnComplete: { age: 604_800, count: 30 },
+    removeOnFail: { age: 2_592_000, count: 30 },
+  },
+});
+
+export async function scheduleDailyScalingGuardrails() {
+  const repeatable = await scalingGuardrailQueue.getRepeatableJobs();
+  for (const job of repeatable) {
+    if (job.name === "scaling-guardrails-daily") {
+      await scalingGuardrailQueue.removeRepeatableByKey(job.key);
+    }
+  }
+  await scalingGuardrailQueue.add(
+    "scaling-guardrails-daily",
+    { triggeredBy: "schedule" },
+    {
+      repeat: { pattern: "0 7 * * *" }, // 07:00 UTC daily
+      jobId: "scaling-guardrails-scheduled",
+    },
+  );
+  console.log("✅ Scaling guardrails scheduled: 07:00 UTC daily");
+}
+
+console.log("✅ Scaling guardrails queue initialized");

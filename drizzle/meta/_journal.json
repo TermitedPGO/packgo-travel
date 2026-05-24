@@ -554,6 +554,13 @@
       "when": 1779410000000,
       "tag": "0081_plaid_payment_meta",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "5",
+      "when": 1779500000000,
+      "tag": "0082_scaling_guardrails",
+      "breakpoints": true
     }
   ]
 }

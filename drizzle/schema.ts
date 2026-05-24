@@ -2752,6 +2752,10 @@ export const bankTransactions = mysqlTable("bankTransactions", {
   excludeReason: varchar("excludeReason", { length: 256 }),
   isPending: int("isPending").default(0).notNull(),
   accountOwner: varchar("accountOwner", { length: 128 }),
+  // Scaling guardrail (migration 0082, 2026-05-23). When 1, txn is hidden
+  // from default ledger queries. Flipped by archiveOldTransactions cron
+  // for rows > 2 years old. Year-end export bypasses the filter.
+  archived: int("archived").default(0).notNull(),
   // Optional foreign keys to PACK&GO entities — lets the agent link e.g.
   // a Stripe payout to the originating booking.
   relatedBookingId: int("relatedBookingId"),
@@ -2765,6 +2769,7 @@ export const bankTransactions = mysqlTable("bankTransactions", {
   pendingIdx: index("idx_pending").on(table.isPending, table.date),
   counterpartyIdx: index("idx_bank_txn_counterparty").on(table.counterparty),
   counterpartyTypeIdx: index("idx_bank_txn_counterparty_type").on(table.counterpartyType),
+  archivedIdx: index("idx_bank_txn_archived").on(table.archived, table.date),
 }));
 
 export type BankTransaction = typeof bankTransactions.$inferSelect;

@@ -906,6 +906,16 @@ async function startServer() {
     logger.warn({ err }, "[Startup] Failed to schedule trust recognition cron");
   }
 
+  // Scaling guardrails (2026-05-23) — daily archive + LLM budget check at
+  // 07:00 UTC. Worker just calls the service functions; failures retry.
+  try {
+    const { scheduleDailyScalingGuardrails } = await import('../queue');
+    await scheduleDailyScalingGuardrails();
+    await import('../scalingGuardrailWorker');
+  } catch (err) {
+    logger.warn({ err }, "[Startup] Failed to schedule scaling guardrails cron");
+  }
+
   // Round 80.22 Phase C: Packpoint daily maintenance — auto-upgrade tier,
   // 18-month inactivity expiry, birthday bonus. Runs at 02:00 UTC (10:00
   // Taipei). Idempotent on each user-level mutation.

@@ -703,6 +703,9 @@ export const plaidRouter = router({
         filters.push(lte(bankTransactions.date, input.dateTo as any));
       if (!input?.includeExcluded)
         filters.push(eq(bankTransactions.excludeFromAccounting, 0));
+      // 2026-05-23 scaling guardrail: hide archived (txns > 2 years old)
+      // from default ledger view. Use admin.scaling.listArchived to see them.
+      filters.push(eq(bankTransactions.archived, 0));
 
       const limit = input?.limit ?? 50;
       const offset = input?.offset ?? 0;
@@ -1297,6 +1300,62 @@ export const plaidRouter = router({
       );
       return await classifyUncategorizedBatch({
         limit: input?.limit ?? 50,
+      });
+    }),
+
+  // ── Scaling guardrails (2026-05-23) ─────────────────────────────────────
+
+  /**
+   * Flip `archived=1` on bankTransactions > 2 years old. Default ledger
+   * queries filter archived=0, so older history is hidden from hot paths
+   * but stays available for Year-end Schedule C export.
+   */
+  scalingArchive: adminProcedure
+    .input(
+      z.object({
+        dryRun: z.boolean().default(true),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const { archiveOldTransactions } = await import(
+        "../services/scalingGuardrailsService"
+      );
+      return await archiveOldTransactions({ dryRun: input.dryRun });
+    }),
+
+  /**
+   * R2 orphan receipt cleanup placeholder (v1 stub — true reaping needs
+   * R2 List + reconcile, planned v2 once data starts piling up).
+   */
+  scalingCleanupReceipts: adminProcedure
+    .input(z.object({ dryRun: z.boolean().default(true) }))
+    .mutation(async ({ input }) => {
+      const { cleanupOrphanReceipts } = await import(
+        "../services/scalingGuardrailsService"
+      );
+      return await cleanupOrphanReceipts({ dryRun: input.dryRun });
+    }),
+
+  /**
+   * Compute month-to-date LLM cost; if > threshold ($50 default, env
+   * `LLM_BUDGET_USD` overrides) send notifyOwner email.
+   */
+  scalingCheckLlmBudget: adminProcedure
+    .input(
+      z
+        .object({
+          thresholdUsd: z.number().positive().optional(),
+          dryRun: z.boolean().default(false),
+        })
+        .optional(),
+    )
+    .mutation(async ({ input }) => {
+      const { checkLlmBudgetAndAlert } = await import(
+        "../services/scalingGuardrailsService"
+      );
+      return await checkLlmBudgetAndAlert({
+        thresholdUsd: input?.thresholdUsd,
+        dryRun: input?.dryRun,
       });
     }),
 

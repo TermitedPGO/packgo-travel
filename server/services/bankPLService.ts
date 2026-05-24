@@ -126,6 +126,9 @@ export async function generateBankPL(opts: {
   }
 
   // Pull all (non-excluded, non-pending) txns in window across active accounts.
+  // archived rows are intentionally INCLUDED here — P&L spans the supplied
+  // date window, and archived doesn't change historical income/expense math.
+  // The Year-end Schedule C export relies on archived rows still summing in.
   const filters: any[] = [
     eq(linkedBankAccounts.isActive, 1),
     gte(bankTransactions.date, opts.startDate as any),
