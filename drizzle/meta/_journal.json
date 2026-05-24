@@ -561,6 +561,13 @@
       "when": 1779500000000,
       "tag": "0082_scaling_guardrails",
       "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "5",
+      "when": 1779580000000,
+      "tag": "0083_supplier_product_details",
+      "breakpoints": true
     }
   ]
 }
