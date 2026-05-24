@@ -68,6 +68,36 @@
 - 卡片內部 padding：`p-4` 或 `p-6`
 - 頁面區塊間距：`py-16` 或 `py-20`
 
+### 2.5 Sheet / Dialog Padding（2026-05-24 加，三次踩坑教訓）
+
+> **核心**：Sheet primitive 自帶 `px-6`，body 不要再加 `px-*`。Dialog primitive 自帶 `p-6`。Caller 只負責 width + slide direction。
+
+| 容器 | Primitive 自帶 | Caller 該寫的 className |
+|------|----------------|------------------------|
+| `<SheetContent>` | `px-6` (24px L+R) + `gap-4` | `w-full xl:max-w-5xl xl:rounded-l-xl overflow-y-auto` |
+| `<SheetHeader>` | `py-4` only（無 horizontal）| 視覺需要的話加 `border-b` |
+| `<SheetFooter>` | `py-4` only | — |
+| `<DialogContent>` | `p-6` 全包 | width override 如 `max-w-2xl` |
+
+**禁止**：
+```tsx
+// ❌ Caller 在 Sheet body 加 horizontal padding (會 double-pad)
+<SheetContent className="px-4">  // 多餘，primitive 已有 px-6
+
+// ❌ 用 2xl: breakpoint (MacBook 1440 永遠不觸發，2xl=1536)
+<SheetContent className="2xl:max-w-5xl">  // 應改 xl:max-w-5xl
+
+// ❌ Body wrapper 想自己控制 padding (primitive 沒 horizontal 就會貼邊)
+<SheetContent>
+  <div className="space-y-5">  // 缺 px-* → 字貼牆
+```
+
+**Breakpoint 對照**：
+- Jeff MacBook = 1440px → `xl` 觸發（1280+），`2xl` 不觸發（1536+）
+- 所以 Sheet width cap 一律用 `xl:max-w-*` 不是 `2xl:max-w-*`
+
+**為什麼 primitive 包這麼死**：Caller 9 個地方有 9 個機率漏寫 `px-*`，2026-05-24 全 9 個漏的都是同樣的字貼邊 bug。primitive 一次包乾淨，所有 caller 自動繼承。
+
 ---
 
 ## 三、架構決策（Architecture Decisions）
