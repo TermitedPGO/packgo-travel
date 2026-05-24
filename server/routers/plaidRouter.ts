@@ -492,6 +492,126 @@ export const plaidRouter = router({
     }),
 
   /**
+   * Manual CSV import — Mobile BackfillExt v2 (2026-05-23).
+   *
+   * Plaid won't return BofA history older than ~90 days, so for 2025
+   * data Jeff downloads CSV from BofA online banking and uploads here.
+   * Each row gets a synthetic plaidTransactionId of the form
+   * `csv:<accountId>:<hash>` so re-uploads dedup, and Plaid-synced rows
+   * (which have opaque random IDs) never collide.
+   *
+   * Caller controls dryRun to preview before commit.
+   */
+  csvImport: adminProcedure
+    .input(
+      z.object({
+        linkedAccountId: z.number().int().positive(),
+        csvText: z.string().min(1).max(10_000_000),
+        dryRun: z.boolean().default(false),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      // Verify account exists + active
+      const [acc] = await db
+        .select({ id: linkedBankAccounts.id, name: linkedBankAccounts.accountName })
+        .from(linkedBankAccounts)
+        .where(
+          and(
+            eq(linkedBankAccounts.id, input.linkedAccountId),
+            eq(linkedBankAccounts.isActive, 1),
+          ),
+        )
+        .limit(1);
+      if (!acc) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "account not found" });
+      }
+
+      const { parseBofaCsv } = await import("../services/bankCsvImportService");
+      const parsed = parseBofaCsv({
+        csvText: input.csvText,
+        linkedAccountId: input.linkedAccountId,
+      });
+
+      if (input.dryRun) {
+        const dateMin = parsed.rows
+          .map((r) => r.date)
+          .sort()[0] ?? null;
+        const dateMax = parsed.rows
+          .map((r) => r.date)
+          .sort()
+          .at(-1) ?? null;
+        return {
+          dryRun: true,
+          format: parsed.format,
+          parsedCount: parsed.rows.length,
+          warnings: parsed.warnings.slice(0, 20),
+          dateMin,
+          dateMax,
+          sample: parsed.rows.slice(0, 5).map((r) => ({
+            date: r.date,
+            amount: r.amount,
+            description: r.description.slice(0, 60),
+          })),
+        };
+      }
+
+      // Real insert path — onDuplicateKeyUpdate so re-uploads dedup.
+      let inserted = 0;
+      let updated = 0;
+      for (const r of parsed.rows) {
+        try {
+          await db
+            .insert(bankTransactions)
+            .values({
+              linkedAccountId: input.linkedAccountId,
+              plaidTransactionId: r.syntheticId,
+              date: r.date as any,
+              authorizedDate: null,
+              amount: String(r.amount),
+              isoCurrencyCode: r.isoCurrencyCode,
+              merchantName: r.merchantName,
+              description: r.description,
+              originalDescription: r.description,
+              paymentMeta: r.referenceNumber
+                ? { reference_number: r.referenceNumber }
+                : null,
+              paymentChannel: null,
+              plaidCategoryPrimary: null,
+              plaidCategoryDetailed: null,
+              isPending: 0,
+              accountOwner: null,
+            })
+            .onDuplicateKeyUpdate({
+              set: {
+                amount: String(r.amount),
+                description: r.description,
+                originalDescription: r.description,
+                updatedAt: new Date(),
+              },
+            });
+          // Heuristic: count as updated if it existed (Drizzle doesn't expose
+          // affectedRows reliably; we assume mix is mostly insert on first run).
+          inserted++;
+        } catch (err) {
+          // Genuine error — log + skip
+          console.warn(`[csv import] row failed: ${(err as Error)?.message}`);
+        }
+      }
+
+      return {
+        dryRun: false,
+        format: parsed.format,
+        parsedCount: parsed.rows.length,
+        warnings: parsed.warnings.slice(0, 20),
+        upserted: inserted,
+        updated,
+      };
+    }),
+
+  /**
    * Disconnect an account: call Plaid /item/remove to invalidate the
    * access_token on Plaid's side, then mark our row inactive (soft delete).
    * Transactions are kept for historical reporting.

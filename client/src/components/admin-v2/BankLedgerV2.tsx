@@ -55,6 +55,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Landmark,
   Loader2,
+  Upload,
   RefreshCw,
   Search,
   Sparkles,
@@ -230,6 +231,7 @@ export default function BankLedgerV2() {
   const [dateTo, setDateTo] = useState(initialRange.to);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [csvImportOpen, setCsvImportOpen] = useState(false);
 
   const utils = trpc.useUtils();
   const { data, isLoading, refetch } = trpc.plaid.transactionsList.useQuery({
@@ -519,6 +521,16 @@ export default function BankLedgerV2() {
             <RefreshCw className="h-3.5 w-3.5" />
             {t("common.refresh")}
           </Button>
+          {/* CSV import — 2025 BofA history (Plaid only retains ~90 days) */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setCsvImportOpen(true)}
+            className="h-8 rounded-lg gap-1.5"
+          >
+            <Upload className="h-3.5 w-3.5" />
+            CSV 匯入
+          </Button>
           {/* AI classify — pulls uncategorized batch through accountingAgentService */}
           <Button
             size="sm"
@@ -538,6 +550,14 @@ export default function BankLedgerV2() {
           </Button>
         </div>
       </div>
+      <CsvImportDialog
+        open={csvImportOpen}
+        onClose={() => setCsvImportOpen(false)}
+        onComplete={() => {
+          utils.plaid.transactionsList.invalidate();
+          utils.plaid.financeKpi.invalidate();
+        }}
+      />
 
       {/* Table */}
       {!isLoading && filtered.length === 0 ? (
@@ -1369,4 +1389,186 @@ function formatHistoryValue(v: unknown): string {
     return v.length > 40 ? `${v.slice(0, 37)}...` : v;
   }
   return String(v);
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// CSV import dialog — 2026-05-23 (Plaid only retains ~90 days BofA history,
+// so 2025 data comes from BofA online banking CSV download)
+// ────────────────────────────────────────────────────────────────────────
+
+function CsvImportDialog({
+  open,
+  onClose,
+  onComplete,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onComplete: () => void;
+}) {
+  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
+  const [csvText, setCsvText] = useState<string>("");
+  const [filename, setFilename] = useState<string>("");
+  const [preview, setPreview] = useState<any | null>(null);
+
+  const accounts = trpc.plaid.linkedAccountsList.useQuery();
+  const importMut = trpc.plaid.csvImport.useMutation({
+    onError: (e) => toast.error(`匯入失敗: ${e.message}`),
+  });
+
+  const handleFile = (file: File) => {
+    setFilename(file.name);
+    const reader = new FileReader();
+    reader.onload = () => setCsvText(String(reader.result ?? ""));
+    reader.readAsText(file);
+  };
+
+  const handlePreview = async () => {
+    if (!selectedAccountId || !csvText) {
+      toast.error("先選帳戶 + 上傳 CSV");
+      return;
+    }
+    const r = await importMut.mutateAsync({
+      linkedAccountId: selectedAccountId,
+      csvText,
+      dryRun: true,
+    });
+    setPreview(r);
+  };
+
+  const handleCommit = async () => {
+    if (!selectedAccountId || !csvText) return;
+    const r = await importMut.mutateAsync({
+      linkedAccountId: selectedAccountId,
+      csvText,
+      dryRun: false,
+    });
+    toast.success(`匯入完成: ${r.upserted} 筆 (${r.format})`);
+    onComplete();
+    onClose();
+    setCsvText("");
+    setFilename("");
+    setPreview(null);
+    setSelectedAccountId(null);
+  };
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+      <div className="w-full max-w-2xl bg-white rounded-2xl p-5 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">BofA CSV 匯入 (2025 歷史)</h2>
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            <X className="w-5 h-5" />
+          </Button>
+        </div>
+
+        <div className="space-y-4">
+          <div className="rounded-lg bg-blue-50 border border-blue-100 p-3 text-xs text-blue-900 leading-relaxed">
+            <strong>怎麼下載 BofA CSV：</strong>
+            <ol className="list-decimal ml-4 mt-1 space-y-0.5">
+              <li>登入 BofA 網銀 → Activity → Download Account Activity</li>
+              <li>Date Range 設 2025-01-01 → 2026-02-15 (避開現有 Plaid 資料)</li>
+              <li>Format = Comma Delimited (.csv)</li>
+              <li>Download 後上傳到這裡</li>
+            </ol>
+          </div>
+
+          <div>
+            <Label className="text-sm font-medium">1. 選擇帳戶</Label>
+            <Select
+              value={selectedAccountId?.toString() ?? ""}
+              onValueChange={(v) => setSelectedAccountId(Number(v))}
+            >
+              <SelectTrigger className="h-10 rounded-lg mt-1.5">
+                <SelectValue placeholder="選帳戶..." />
+              </SelectTrigger>
+              <SelectContent>
+                {(accounts.data ?? []).map((a: any) => (
+                  <SelectItem key={a.id} value={String(a.id)}>
+                    {a.accountName} (#{a.accountMask})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div>
+            <Label className="text-sm font-medium">2. 上傳 CSV 檔</Label>
+            <div className="mt-1.5">
+              <label className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-4 py-6 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer">
+                <Upload className="w-4 h-4" />
+                <span>{filename || "選擇 .csv 檔..."}</span>
+                <input
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) handleFile(f);
+                  }}
+                />
+              </label>
+            </div>
+          </div>
+
+          {csvText && selectedAccountId && !preview && (
+            <Button
+              onClick={handlePreview}
+              disabled={importMut.isPending}
+              className="w-full h-10 rounded-lg"
+            >
+              {importMut.isPending ? (
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+              ) : null}
+              3. 預覽 (dry-run)
+            </Button>
+          )}
+
+          {preview && (
+            <div className="rounded-lg border border-gray-200 p-3 bg-gray-50 space-y-2">
+              <div className="text-sm font-semibold text-gray-900">
+                預覽結果
+              </div>
+              <div className="text-xs text-gray-700 space-y-1">
+                <div>格式: {preview.format}</div>
+                <div>解析筆數: {preview.parsedCount}</div>
+                <div>
+                  日期範圍: {preview.dateMin} → {preview.dateMax}
+                </div>
+                {preview.warnings?.length > 0 && (
+                  <div className="text-amber-700">
+                    ⚠️ {preview.warnings.length} 個 warnings (前 3 個):
+                    {preview.warnings.slice(0, 3).map((w: string, i: number) => (
+                      <div key={i} className="text-[10px] ml-2">{w}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {preview.sample?.length > 0 && (
+                <div className="text-[10px] text-gray-600 mt-2">
+                  <div className="font-semibold mb-1">前 5 筆 sample:</div>
+                  {preview.sample.map((s: any, i: number) => (
+                    <div key={i} className="tabular-nums">
+                      {s.date} · ${s.amount} · {s.description}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <Button
+                onClick={handleCommit}
+                disabled={importMut.isPending || preview.parsedCount === 0}
+                className="w-full h-10 rounded-lg bg-teal-600 hover:bg-teal-700"
+              >
+                {importMut.isPending ? (
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                ) : null}
+                4. 確認匯入 {preview.parsedCount} 筆
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
