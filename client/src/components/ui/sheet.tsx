@@ -58,7 +58,12 @@ function SheetContent({
       <SheetPrimitive.Content
         data-slot="sheet-content"
         className={cn(
-          "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out fixed z-50 flex flex-col gap-4 shadow-lg transition ease-in-out data-[state=closed]:duration-300 data-[state=open]:duration-500",
+          // 2026-05-24 — added px-6 so body content doesn't jam against edges.
+          // Previously each Sheet body wrapper had to remember `px-*` (most
+          // forgot). With px-6 here, all bodies inherit consistent gutter.
+          // SheetHeader/Footer dropped their `p-4` to `py-4` to avoid double-
+          // padding (their px-4 was redundant with this).
+          "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out fixed z-50 flex flex-col gap-4 px-6 shadow-lg transition ease-in-out data-[state=closed]:duration-300 data-[state=open]:duration-500",
           // 2026-05-24 — removed the shadcn `w-3/4 sm:max-w-sm` defaults.
           // They were beating our per-Sheet `w-full xl:max-w-5xl` overrides
           // via twMerge breakpoint quirks (responsive variants don't merge
@@ -93,7 +98,8 @@ function SheetHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="sheet-header"
-      className={cn("flex flex-col gap-1.5 p-4", className)}
+      // py-4 only — horizontal padding inherited from SheetContent's px-6
+      className={cn("flex flex-col gap-1.5 py-4", className)}
       {...props}
     />
   );
@@ -103,7 +109,8 @@ function SheetFooter({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="sheet-footer"
-      className={cn("mt-auto flex flex-col gap-2 p-4", className)}
+      // py-4 only — horizontal padding inherited from SheetContent's px-6
+      className={cn("mt-auto flex flex-col gap-2 py-4", className)}
       {...props}
     />
   );
