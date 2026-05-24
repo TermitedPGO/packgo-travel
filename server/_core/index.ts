@@ -916,6 +916,18 @@ async function startServer() {
     logger.warn({ err }, "[Startup] Failed to schedule scaling guardrails cron");
   }
 
+  // Supplier detail enrichment (2026-05-24) — Stage 1 of supplier deep
+  // sync. Daily cron at 03:00 UTC discovers products needing enrichment
+  // (new / changed / 30day-stale) and enqueues per-product jobs.
+  // Worker concurrency 5, rate-limit 1.5-2.5 sec/call.
+  try {
+    const { scheduleDailySupplierDetailEnrichment } = await import('../queue');
+    await scheduleDailySupplierDetailEnrichment();
+    await import('../supplierDetailEnrichmentWorker');
+  } catch (err) {
+    logger.warn({ err }, "[Startup] Failed to schedule supplier detail enrichment cron");
+  }
+
   // Round 80.22 Phase C: Packpoint daily maintenance — auto-upgrade tier,
   // 18-month inactivity expiry, birthday bonus. Runs at 02:00 UTC (10:00
   // Taipei). Idempotent on each user-level mutation.

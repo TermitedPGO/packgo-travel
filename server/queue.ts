@@ -943,3 +943,71 @@ export async function scheduleDailyScalingGuardrails() {
 }
 
 console.log("✅ Scaling guardrails queue initialized");
+
+// ============================================================================
+// Supplier Detail Enrichment (2026-05-24) — Stage 1 of supplier deep sync.
+// Jeff: "擴充我的商品 + 成立我自己的 API". Pulls full itinerary / hotels /
+// meals / price / notices / optional add-ons from Lion + UV detail
+// endpoints into supplierProductDetails table (migration 0083).
+//
+// Each job = one product enrichment (5 Lion or 2 UV endpoint calls).
+// Worker concurrency 5, rate-limit 1.5-2.5 sec/call → ~3-4 hr full
+// backfill of 5728 products. Daily cron at 03:00 UTC picks up
+// new + changed + 30day-stale.
+// ============================================================================
+
+export interface SupplierEnrichmentJobData {
+  supplierProductId: number;
+  supplierCode: "lion" | "uv";
+  externalProductCode: string;
+  triggeredBy: "backfill" | "daily-cron" | "manual";
+}
+
+export interface SupplierEnrichmentJobResult {
+  itineraryStatus: string;
+  priceTermsStatus: string;
+  noticesStatus: string;
+  optionalStatus: string;
+  tourInfoStatus: string;
+}
+
+export const supplierDetailEnrichmentQueue = new Queue<
+  SupplierEnrichmentJobData,
+  SupplierEnrichmentJobResult
+>("supplier-detail-enrichment", {
+  connection: redisBullMQ,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 60_000 }, // 1min, 2min, 4min
+    removeOnComplete: { age: 604_800, count: 1000 },
+    removeOnFail: { age: 2_592_000, count: 5000 },
+  },
+});
+
+export async function scheduleDailySupplierDetailEnrichment() {
+  const repeatable = await supplierDetailEnrichmentQueue.getRepeatableJobs();
+  for (const job of repeatable) {
+    if (job.name === "supplier-detail-enrichment-daily") {
+      await supplierDetailEnrichmentQueue.removeRepeatableByKey(job.key);
+    }
+  }
+  // Note: the actual "find products needing enrichment" logic lives in the
+  // worker itself — this scheduled job is a sentinel that triggers the
+  // worker's daily-cron branch. The worker enqueues per-product jobs.
+  await supplierDetailEnrichmentQueue.add(
+    "supplier-detail-enrichment-daily",
+    {
+      supplierProductId: 0, // sentinel — worker treats this as daily-cron trigger
+      supplierCode: "lion",
+      externalProductCode: "__daily-cron__",
+      triggeredBy: "daily-cron",
+    },
+    {
+      repeat: { pattern: "0 3 * * *" }, // 03:00 UTC daily
+      jobId: "supplier-detail-enrichment-scheduled",
+    },
+  );
+  console.log("✅ Supplier detail enrichment scheduled: 03:00 UTC daily");
+}
+
+console.log("✅ Supplier detail enrichment queue initialized");

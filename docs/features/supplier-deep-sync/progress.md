@@ -8,9 +8,9 @@
 |----|-------|--------|----------|-------|
 | M1 | Schema migration (0083) | ✅ Done | Claude main | drizzle/0083_supplier_product_details.sql + schema.ts updated, tsc clean |
 | M2 | sharedDetail helpers (rate-limit, retry, types) | ✅ Done | Claude main | types.ts + sharedDetail.ts + 14 vitest passing |
-| M3 | Lion 5-endpoint enrichment + parsers | ⏳ Blocked by M2 | Sub-agent A | Parallel with M4 |
-| M4 | UV 3-endpoint enrichment + parsers | ⏳ Blocked by M2 | Sub-agent B | Parallel with M3 |
-| M5 | BullMQ worker + backfill script + daily cron | ⏳ Blocked by M3+M4 | Claude main | |
+| M3 | Lion 5-endpoint enrichment + parsers | ✅ Done | Claude main | lionDetail.ts + 22 vitest. travelinfo synthesizes Day 1/N from flight info (daytripinfojson left for Stage 2). |
+| M4 | UV 3-endpoint enrichment + parsers | ✅ Done | Claude main | uvDetail.ts + 17 vitest. tourInfo = missing (no UV equivalent). |
+| M5 | BullMQ worker + backfill script + daily cron | ✅ Done | Claude main | Worker concurrency 5, daily-cron sentinel pattern, backfill script with ETA, _core/index.ts registered. |
 | M6 | TourDetail page rich content sections | ⏳ Blocked by M5 | Sub-agent C | Parallel M6/7/8 |
 | M7 | InquiryAgent system prompt context inject | ⏳ Blocked by M5 | Sub-agent D | |
 | M8 | Admin SupplierEnrichmentTab + /health | ⏳ Blocked by M5 | Sub-agent E | |
@@ -41,6 +41,11 @@
 - 2026-05-24 22:05 UTC — **M1 + M2 shipped**
   - M1: migration 0083 + schema.ts `supplierProductDetails` table + types
   - M2: types.ts (Normalized*) + sharedDetail.ts (rateLimitedCall / withRetry / ok/fail/missing / upsertProductDetail) + 14 unit tests
-  - tsc clean, vitest pass
-  - **Migration NOT yet pushed to prod** — push when M5 ready to consume
-  - Next session pick up at M3 (Lion 5-endpoint detail parsers)
+- 2026-05-24 22:35 UTC — **M3 + M4 + M5 shipped**
+  - M3: lionDetail.ts — enrichLionProduct + 5 parsers + 22 vitest
+  - M4: uvDetail.ts — enrichUvProduct + 4 parsers (tourInfo missing) + 17 vitest
+  - M5: supplierDetailEnrichmentWorker.ts + supplierDetailEnrichmentQueue + backfill script + daily-cron sentinel + _core/index.ts registration
+  - Total **86 vitest passing** across supplierSync/
+  - tsc clean
+  - **Ready to deploy** — migration 0083 needs to push first, then worker auto-spins on app startup
+  - Next: M6 (TourDetail render) + M7 (InquiryAgent context) + M8 (admin observability) — parallel-able
