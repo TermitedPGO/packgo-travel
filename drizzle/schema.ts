@@ -3021,6 +3021,131 @@ export type SupplierDeparture = typeof supplierDepartures.$inferSelect;
 export type InsertSupplierDeparture = typeof supplierDepartures.$inferInsert;
 
 /**
+ * Deep detail mirror for each supplier product. 2026-05-24 (migration 0083)
+ * Stage 1 of supplier deep sync — Jeff: "擴充我的商品 + 成立我自己的 API".
+ *
+ * One row per supplierProductId (1:1). Five detail kinds — each with
+ * raw + parsed + fetchedAt + parseStatus. Raw is the supplier's response
+ * verbatim; parsed is our normalized JSON (NormalizedItinerary,
+ * NormalizedPriceTerms, etc — see server/services/supplierSync/types.ts).
+ *
+ * `parseStatus`:
+ *   - 'parsed'       : raw + parsed both present, reader can trust parsed
+ *   - 'parse_failed' : raw present but parser couldn't extract structure
+ *                       (format change at supplier — re-fetch + log)
+ *   - 'missing'      : never fetched (or never returned by supplier)
+ *   - 'stale'        : fetched > 30 days ago, refresh scheduled
+ *
+ * `schemaVersion` + `ownerType` are forward-compat for Stage 3 public
+ * REST API: consumers know parsed-shape version; tracking lets future
+ * PACK&GO-owned + partner products use the same table without churn.
+ *
+ * Populated by server/supplierDetailEnrichmentWorker.ts. Read by
+ * client/src/pages/TourDetailPeony.tsx (via tours.getSupplierDetail)
+ * and InquiryAgent system prompt.
+ */
+export const supplierProductDetails = mysqlTable(
+  "supplierProductDetails",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    supplierProductId: int("supplierProductId").notNull(),
+    supplierId: int("supplierId").notNull(),
+
+    // Itinerary (per-day plan + hotels + meals)
+    itineraryRaw: mediumtext("itineraryRaw"),
+    itineraryParsed: mediumtext("itineraryParsed"),
+    itineraryFetchedAt: timestamp("itineraryFetchedAt"),
+    itineraryParseStatus: mysqlEnum("itineraryParseStatus", [
+      "parsed",
+      "parse_failed",
+      "missing",
+      "stale",
+    ])
+      .default("missing")
+      .notNull(),
+
+    // Price terms (included / excluded / payment / cancellation)
+    priceTermsRaw: mediumtext("priceTermsRaw"),
+    priceTermsParsed: mediumtext("priceTermsParsed"),
+    priceTermsFetchedAt: timestamp("priceTermsFetchedAt"),
+    priceTermsParseStatus: mysqlEnum("priceTermsParseStatus", [
+      "parsed",
+      "parse_failed",
+      "missing",
+      "stale",
+    ])
+      .default("missing")
+      .notNull(),
+
+    // Notices (visa / insurance / baggage / general)
+    noticesRaw: mediumtext("noticesRaw"),
+    noticesParsed: mediumtext("noticesParsed"),
+    noticesFetchedAt: timestamp("noticesFetchedAt"),
+    noticesParseStatus: mysqlEnum("noticesParseStatus", [
+      "parsed",
+      "parse_failed",
+      "missing",
+      "stale",
+    ])
+      .default("missing")
+      .notNull(),
+
+    // Optional add-ons
+    optionalRaw: mediumtext("optionalRaw"),
+    optionalParsed: mediumtext("optionalParsed"),
+    optionalFetchedAt: timestamp("optionalFetchedAt"),
+    optionalParseStatus: mysqlEnum("optionalParseStatus", [
+      "parsed",
+      "parse_failed",
+      "missing",
+      "stale",
+    ])
+      .default("missing")
+      .notNull(),
+
+    // Tour info (Lion only — UV has no equivalent)
+    tourInfoRaw: mediumtext("tourInfoRaw"),
+    tourInfoParsed: mediumtext("tourInfoParsed"),
+    tourInfoFetchedAt: timestamp("tourInfoFetchedAt"),
+    tourInfoParseStatus: mysqlEnum("tourInfoParseStatus", [
+      "parsed",
+      "parse_failed",
+      "missing",
+      "stale",
+    ])
+      .default("missing")
+      .notNull(),
+
+    // API-ready forward-compat
+    schemaVersion: int("schemaVersion").default(1).notNull(),
+    ownerType: mysqlEnum("ownerType", ["supplier", "packgo", "partner"])
+      .default("supplier")
+      .notNull(),
+
+    // Run tracking
+    lastEnrichedAt: timestamp("lastEnrichedAt"),
+    enrichmentRunCount: int("enrichmentRunCount").default(0).notNull(),
+
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => ({
+    productIdx: unique("uniq_product_detail").on(table.supplierProductId),
+    supplierEnrichedIdx: index("idx_supplier_enriched").on(
+      table.supplierId,
+      table.lastEnrichedAt
+    ),
+    itineraryStatusIdx: index("idx_itinerary_status").on(
+      table.supplierId,
+      table.itineraryParseStatus
+    ),
+  })
+);
+
+export type SupplierProductDetail = typeof supplierProductDetails.$inferSelect;
+export type InsertSupplierProductDetail = typeof supplierProductDetails.$inferInsert;
+
+/**
  * Audit log for every sync execution. One row per BullMQ job run.
  * Lets the admin panel show a history of syncs + flag streaks of
  * failures (e.g. when supplier changes their API format).
