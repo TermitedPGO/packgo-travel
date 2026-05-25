@@ -1709,6 +1709,16 @@ export const suppliersRouter = router({
       // Comprehensive keyword → country map. Order matters — more specific
       // patterns first (e.g. "澳門" before "中國").
       const COUNTRY_PATTERNS: Array<{ re: RegExp; country: string }> = [
+        // Cruise — highest priority. "郵輪" overrides region detection.
+        { re: /郵輪|遊輪|cruise|Cruise|麗星郵輪|皇家加勒比|公主郵輪|歌詩達|嘉年華郵輪|挪威郵輪|愛達郵輪|MSC|海洋航跡|地中海郵輪/, country: "郵輪" },
+        // Pacific island destinations (specific before generic)
+        { re: /帛琉|Palau/, country: "帛琉" },
+        { re: /關島|塞班島|塞班|Guam|Saipan/, country: "美國" },
+        { re: /斐濟|Fiji/, country: "斐濟" },
+        { re: /大溪地|Tahiti|Bora Bora|玻里尼西亞/, country: "大溪地" },
+        { re: /馬爾地夫|Maldives/, country: "馬爾地夫" },
+        { re: /模里西斯|Mauritius/, country: "模里西斯" },
+        { re: /賽舌爾|Seychelles/, country: "賽舌爾" },
         // Macau / Hong Kong (specific before China)
         { re: /澳門/, country: "澳門" },
         { re: /香港/, country: "香港" },
@@ -1730,7 +1740,7 @@ export const suppliersRouter = router({
         // China
         { re: /中國|北京|上海|廣州|深圳|杭州|西安|成都|重慶|蘇州|無錫|南京|張家界|九寨溝|黃山|桂林|雲南|麗江|昆明|敦煌|新疆|西藏|拉薩|內蒙古/, country: "中國" },
         // Taiwan (Lion has many domestic Taiwan products)
-        { re: /台灣|台北|高雄|台中|台南|花蓮|台東|宜蘭|新竹|苗栗|彰化|南投|雲林|嘉義|屏東|基隆|澎湖|金門|馬祖|綠島|蘭嶼|阿里山|日月潭|墾丁|九份|淡水/, country: "台灣" },
+        { re: /台灣|台北|高雄|台中|台南|花蓮|台東|宜蘭|新竹|苗栗|彰化|南投|雲林|嘉義|屏東|基隆|澎湖|金門|馬祖|綠島|蘭嶼|小琉球|龜山島|阿里山|日月潭|墾丁|九份|淡水|高鐵|台鐵|太魯閣|清境|合歡山/, country: "台灣" },
         // Europe
         { re: /義大利|羅馬|威尼斯|佛羅倫斯|米蘭|那不勒斯|西西里|龐貝|阿瑪菲/, country: "義大利" },
         { re: /法國|巴黎|尼斯|馬賽|普羅旺斯|波爾多|里昂|聖米歇爾/, country: "法國" },
@@ -1748,10 +1758,10 @@ export const suppliersRouter = router({
         { re: /東歐|波蘭|斯洛伐克|斯洛維尼亞|克羅埃西亞|塞爾維亞|保加利亞|羅馬尼亞/, country: "東歐" },
         { re: /俄羅斯|莫斯科|聖彼得堡|貝加爾湖/, country: "俄羅斯" },
         { re: /土耳其|伊斯坦堡|卡帕多奇亞|棉堡|安塔利亞/, country: "土耳其" },
-        // Americas
-        { re: /美國|美西|美東|紐約|洛杉磯|舊金山|拉斯維加斯|夏威夷|阿拉斯加|黃石|大峽谷|波士頓|華盛頓|邁阿密|奧蘭多|西雅圖|芝加哥/, country: "美國" },
-        { re: /加拿大|溫哥華|多倫多|蒙特婁|渥太華|魁北克|班夫|落磯山/, country: "加拿大" },
-        { re: /墨西哥|坎昆|墨西哥城/, country: "墨西哥" },
+        // Americas (Chinese + English city names for UV catalog)
+        { re: /美國|美西|美東|紐約|洛杉磯|舊金山|拉斯維加斯|夏威夷|阿拉斯加|黃石|大峽谷|波士頓|華盛頓|邁阿密|奧蘭多|西雅圖|芝加哥|New York|Los Angeles|Las Vegas|San Francisco|Hawaii|Alaska|Yellowstone|Grand Canyon|Boston|Washington|Miami|Orlando|Seattle|Chicago/, country: "美國" },
+        { re: /加拿大|溫哥華|多倫多|蒙特婁|渥太華|魁北克|班夫|落磯山|尼加拉|Vancouver|Toronto|Montreal|Ottawa|Quebec|Banff|Rocky|Niagara|Whistler|Jasper|Calgary|Edmonton/, country: "加拿大" },
+        { re: /墨西哥|坎昆|墨西哥城|Mexico|Cancun/, country: "墨西哥" },
         // Oceania
         { re: /澳洲|澳大利亞|雪梨|墨爾本|布里斯本|黃金海岸|凱恩斯|大堡礁|烏魯魯/, country: "澳洲" },
         { re: /紐西蘭|奧克蘭|皇后鎮|基督城|羅托魯瓦/, country: "紐西蘭" },
@@ -1769,6 +1779,10 @@ export const suppliersRouter = router({
         { re: /秘魯|庫斯科|馬丘比丘|利馬/, country: "秘魯" },
         { re: /阿根廷|布宜諾斯艾利斯|巴塔哥尼亞/, country: "阿根廷" },
         { re: /巴西|里約|聖保羅|伊瓜蘇/, country: "巴西" },
+        // Europe catch-all (after all specific Euro countries) — for
+        // multi-country tours like "歐洲十國 14 日" that don't single out
+        // one destination.
+        { re: /歐洲|歐多國|歐洲多國/, country: "歐洲" },
       ];
 
       function countryFromTitle(title: string | null | undefined): string | null {
