@@ -1686,6 +1686,168 @@ export const suppliersRouter = router({
       };
     }),
 
+  /**
+   * Backfill destinationCountry on supplierProducts from title regex.
+   * 2026-05-25: Lion's GroupInfo.Country is the DEPARTURE country (always
+   * "TW" since Lion is a Taiwanese travel agency), not destination.
+   * Extract real destination from product title using keyword regex.
+   *
+   * Coverage target: 90%+ of products via comprehensive keyword map.
+   * Remaining 10% get LLM extract later (out of scope for this pass).
+   */
+  backfillCountryFromTitle: adminProcedure
+    .input(
+      z.object({
+        supplierCode: z.enum(["lion", "uv", "all"]).default("all"),
+        dryRun: z.boolean().default(true),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const db2 = await getDb();
+      if (!db2) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      // Comprehensive keyword → country map. Order matters — more specific
+      // patterns first (e.g. "澳門" before "中國").
+      const COUNTRY_PATTERNS: Array<{ re: RegExp; country: string }> = [
+        // Macau / Hong Kong (specific before China)
+        { re: /澳門/, country: "澳門" },
+        { re: /香港/, country: "香港" },
+        // Japan — region names + cities (most common for Lion)
+        { re: /日本|北海道|沖繩|九州|本州|四國|關西|關東|北陸|東北|信州|中部|京阪神|東京|大阪|京都|奈良|神戶|名古屋|福岡|札幌|函館|仙台|富士|箱根|立山黑部|白川鄉|合掌村|上高地|飛驒|金澤|高山|輕井澤|箱根|草津|別府|長崎|鹿兒島|熊本|宮崎|沖繩|石垣|宮古|那霸|首里|岡山|廣島|姬路|倉敷|出雲|松山|高松|岩手|青森|秋田|山形|宮城|福島|新潟|長野|靜岡|岐阜|三重|和歌山|滋賀|京阪|阪神/, country: "日本" },
+        // Korea
+        { re: /韓國|首爾|釜山|濟州|江原道|大邱|仁川|慶州/, country: "韓國" },
+        // Thailand
+        { re: /泰國|曼谷|清邁|普吉|芭達雅|清萊|蘇梅島|華欣|大城/, country: "泰國" },
+        // Vietnam
+        { re: /越南|河內|胡志明|峴港|下龍灣|順化|會安|芽莊|沙壩/, country: "越南" },
+        // Malaysia / Singapore
+        { re: /馬來西亞|吉隆坡|檳城|沙巴|蘭卡威|新山/, country: "馬來西亞" },
+        { re: /新加坡|聖淘沙|濱海灣/, country: "新加坡" },
+        // Indonesia / Philippines / Cambodia
+        { re: /印尼|峇里|巴里島|雅加達|日惹|龍目島/, country: "印尼" },
+        { re: /菲律賓|長灘島|宿霧|馬尼拉|薄荷島|巴拉望/, country: "菲律賓" },
+        { re: /柬埔寨|金邊|吳哥/, country: "柬埔寨" },
+        // China
+        { re: /中國|北京|上海|廣州|深圳|杭州|西安|成都|重慶|蘇州|無錫|南京|張家界|九寨溝|黃山|桂林|雲南|麗江|昆明|敦煌|新疆|西藏|拉薩|內蒙古/, country: "中國" },
+        // Taiwan (Lion has many domestic Taiwan products)
+        { re: /台灣|台北|高雄|台中|台南|花蓮|台東|宜蘭|新竹|苗栗|彰化|南投|雲林|嘉義|屏東|基隆|澎湖|金門|馬祖|綠島|蘭嶼|阿里山|日月潭|墾丁|九份|淡水/, country: "台灣" },
+        // Europe
+        { re: /義大利|羅馬|威尼斯|佛羅倫斯|米蘭|那不勒斯|西西里|龐貝|阿瑪菲/, country: "義大利" },
+        { re: /法國|巴黎|尼斯|馬賽|普羅旺斯|波爾多|里昂|聖米歇爾/, country: "法國" },
+        { re: /英國|倫敦|愛丁堡|曼徹斯特|蘇格蘭|湖區|牛津|劍橋/, country: "英國" },
+        { re: /德國|柏林|慕尼黑|科隆|法蘭克福|海德堡|羅曼蒂克大道/, country: "德國" },
+        { re: /西班牙|巴塞隆納|馬德里|塞維亞|格拉納達/, country: "西班牙" },
+        { re: /瑞士|蘇黎世|日內瓦|盧森|少女峰|馬特洪|因特拉肯/, country: "瑞士" },
+        { re: /奧地利|維也納|薩爾斯堡|因斯布魯克|哈爾施塔特/, country: "奧地利" },
+        { re: /荷蘭|阿姆斯特丹|庫肯霍夫|風車村/, country: "荷蘭" },
+        { re: /希臘|雅典|聖托里尼|米克諾斯/, country: "希臘" },
+        { re: /葡萄牙|里斯本|波多/, country: "葡萄牙" },
+        { re: /捷克|布拉格|庫倫洛夫/, country: "捷克" },
+        { re: /匈牙利|布達佩斯/, country: "匈牙利" },
+        { re: /北歐|挪威|瑞典|丹麥|芬蘭|冰島|赫爾辛基|斯德哥爾摩|奧斯陸|哥本哈根|雷克雅維克/, country: "北歐" },
+        { re: /東歐|波蘭|斯洛伐克|斯洛維尼亞|克羅埃西亞|塞爾維亞|保加利亞|羅馬尼亞/, country: "東歐" },
+        { re: /俄羅斯|莫斯科|聖彼得堡|貝加爾湖/, country: "俄羅斯" },
+        { re: /土耳其|伊斯坦堡|卡帕多奇亞|棉堡|安塔利亞/, country: "土耳其" },
+        // Americas
+        { re: /美國|美西|美東|紐約|洛杉磯|舊金山|拉斯維加斯|夏威夷|阿拉斯加|黃石|大峽谷|波士頓|華盛頓|邁阿密|奧蘭多|西雅圖|芝加哥/, country: "美國" },
+        { re: /加拿大|溫哥華|多倫多|蒙特婁|渥太華|魁北克|班夫|落磯山/, country: "加拿大" },
+        { re: /墨西哥|坎昆|墨西哥城/, country: "墨西哥" },
+        // Oceania
+        { re: /澳洲|澳大利亞|雪梨|墨爾本|布里斯本|黃金海岸|凱恩斯|大堡礁|烏魯魯/, country: "澳洲" },
+        { re: /紐西蘭|奧克蘭|皇后鎮|基督城|羅托魯瓦/, country: "紐西蘭" },
+        // Middle East / Africa
+        { re: /杜拜|阿聯|阿布達比|沙烏地/, country: "阿聯" },
+        { re: /埃及|開羅|金字塔|尼羅河/, country: "埃及" },
+        { re: /南非|開普敦|約翰尼斯堡|克魯格/, country: "南非" },
+        { re: /摩洛哥|馬拉喀什/, country: "摩洛哥" },
+        // South Asia
+        { re: /印度|新德里|孟買|齋浦爾|阿格拉|泰姬陵|喀什米爾/, country: "印度" },
+        { re: /斯里蘭卡|可倫坡|加勒|錫吉里亞/, country: "斯里蘭卡" },
+        { re: /尼泊爾|加德滿都|波卡拉|安納普爾納|喜馬拉雅/, country: "尼泊爾" },
+        { re: /不丹|廷布|帕羅/, country: "不丹" },
+        // South America
+        { re: /秘魯|庫斯科|馬丘比丘|利馬/, country: "秘魯" },
+        { re: /阿根廷|布宜諾斯艾利斯|巴塔哥尼亞/, country: "阿根廷" },
+        { re: /巴西|里約|聖保羅|伊瓜蘇/, country: "巴西" },
+      ];
+
+      function countryFromTitle(title: string | null | undefined): string | null {
+        if (!title) return null;
+        for (const { re, country } of COUNTRY_PATTERNS) {
+          if (re.test(title)) return country;
+        }
+        return null;
+      }
+
+      const allSuppliers = await db2
+        .select({ id: suppliersTable.id, code: suppliersTable.code })
+        .from(suppliersTable);
+      const codeToId = new Map<string, number>();
+      allSuppliers.forEach((s) => codeToId.set(s.code, s.id));
+
+      const conditions = [eq(productsTable.status, "active")];
+      if (input.supplierCode !== "all") {
+        const sid = codeToId.get(input.supplierCode);
+        if (sid !== undefined) conditions.push(eq(productsTable.supplierId, sid));
+      }
+
+      const rows = await db2
+        .select({
+          id: productsTable.id,
+          title: productsTable.title,
+          currentCountry: productsTable.destinationCountry,
+        })
+        .from(productsTable)
+        .where(and(...conditions));
+
+      const toUpdate: Array<{ id: number; newCountry: string; title: string }> = [];
+      const noMatch: string[] = [];
+      const byCountry: Record<string, number> = {};
+      for (const r of rows) {
+        const matched = countryFromTitle(r.title);
+        if (!matched) {
+          if (noMatch.length < 20) noMatch.push(r.title?.slice(0, 60) ?? "");
+          continue;
+        }
+        byCountry[matched] = (byCountry[matched] || 0) + 1;
+        if (r.currentCountry !== matched) {
+          toUpdate.push({ id: r.id, newCountry: matched, title: r.title.slice(0, 60) });
+        }
+      }
+
+      if (input.dryRun) {
+        return {
+          dryRun: true,
+          totalProducts: rows.length,
+          wouldUpdate: toUpdate.length,
+          noMatchCount: rows.length - toUpdate.length - Object.values(byCountry).reduce((s, n) => s + n, 0) + toUpdate.length,
+          countryDistribution: byCountry,
+          noMatchSamples: noMatch.slice(0, 10),
+          updateSamples: toUpdate.slice(0, 5),
+        };
+      }
+
+      let updated = 0;
+      for (const u of toUpdate) {
+        try {
+          await db2
+            .update(productsTable)
+            .set({ destinationCountry: u.newCountry })
+            .where(eq(productsTable.id, u.id));
+          updated++;
+        } catch {
+          // continue
+        }
+      }
+      return {
+        dryRun: false,
+        updated,
+        countryDistribution: byCountry,
+        noMatchCount: noMatch.length,
+        noMatchSamples: noMatch.slice(0, 10),
+      };
+    }),
+
   /* ────────────────────────── visibility toggle ───────────────────────── */
 
   /**
