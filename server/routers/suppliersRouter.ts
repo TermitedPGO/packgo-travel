@@ -1558,6 +1558,11 @@ export const suppliersRouter = router({
       z.object({
         supplierCode: z.enum(["lion", "uv", "all"]).default("all"),
         dryRun: z.boolean().default(true),
+        // 2026-05-25 chunking — 45s renderer timeout can't process 4000+
+        // rewrites in one call. Caller loops offset 0,200,400,... until
+        // returned `processed` < limit.
+        offset: z.number().int().min(0).default(0),
+        limit: z.number().int().min(1).max(500).default(200),
       }),
     )
     .mutation(async ({ input }) => {
@@ -1583,7 +1588,10 @@ export const suppliersRouter = router({
           sourceUrl: toursTable.sourceUrl,
         })
         .from(toursTable)
-        .where(supplierFilter);
+        .where(supplierFilter)
+        .orderBy(toursTable.id)
+        .limit(input.limit)
+        .offset(input.offset);
 
       // Build code → supplierProduct lookup
       const allProducts = await db2
@@ -1661,16 +1669,20 @@ export const suppliersRouter = router({
       if (input.dryRun) {
         return {
           dryRun: true,
+          processed: tours.length,
           wouldUpdate: tours.length - skipped,
           skipped,
+          offset: input.offset,
         };
       }
       return {
         dryRun: false,
+        processed: tours.length,
         updated,
         skipped,
         errors: errors.length,
         errorSamples: errors.slice(0, 5),
+        offset: input.offset,
       };
     }),
 
