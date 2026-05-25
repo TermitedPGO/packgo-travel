@@ -11,8 +11,8 @@
 | M3 | Lion 5-endpoint enrichment + parsers | ✅ Done | Claude main | lionDetail.ts + 22 vitest. travelinfo synthesizes Day 1/N from flight info (daytripinfojson left for Stage 2). |
 | M4 | UV 3-endpoint enrichment + parsers | ✅ Done | Claude main | uvDetail.ts + 17 vitest. tourInfo = missing (no UV equivalent). |
 | M5 | BullMQ worker + backfill script + daily cron | ✅ Done | Claude main | Worker concurrency 5, daily-cron sentinel pattern, backfill script with ETA, _core/index.ts registered. |
-| M6 | TourDetail page rich content sections | ⏳ Pending (next session) | TBD | |
-| M7 | InquiryAgent system prompt context inject | ⏳ Pending (next session) | TBD | |
+| M6 | TourDetail page rich content sections | ✅ Done | Claude main | SupplierDetailSection.tsx, tours.getSupplierDetail tRPC, accordion-based 4 sections, i18n keys added |
+| M7 | InquiryAgent system prompt context inject | ⏳ Deferred — needs new design (InquiryAgent doesn't currently search products) | future session | |
 | M8 | Admin SupplierEnrichmentTab + /health | ✅ Done | Claude main | Tab live at /admin/v2 → 系統 → 🌏 供應商深度同步. Auto-refresh 10s. Re-enrich buttons wire tRPC. |
 
 ## Decisions (locked from design.md)
@@ -61,3 +61,15 @@
   - **Backfill status @ 23:42**: Lion 128/4590 (2.8%), UV 0/1138 (worker processes Lion first due to FIFO ordering). ETA full completion: ~3-5 hours.
 
 - Remaining: M6 (TourDetail render rich content) + M7 (InquiryAgent context inject) — defer to fresh session for context safety
+
+- 2026-05-25 00:40 UTC — **M6 shipped, end of Stage 1**
+  - SupplierDetailSection.tsx: 4 accordion sections (itinerary days / price terms / notices / optional)
+  - tRPC `tours.getSupplierDetail(tourId)`: resolves sourceUrl pattern → supplierProduct → supplierProductDetails, returns pre-parsed JSON
+  - Wired into TourDetailPeony/index.tsx after NotesSection
+  - i18n keys added for zh-TW + en (ja/ko inherit en via spread)
+  - **Visually verified** on prod tour 1230427 (關西四日): DAY 1/4 cards render with flight info + meal indicators; 費用說明 accordion expands showing 包含 (簽證費/機場稅) + 付款條件; 注意事項 accordion visible; 最後更新時間戳對齊右側
+  - Falls back silently when supplierProductDetails has no parsed data (e.g. backfill not yet processed)
+
+**Stage 1 complete: 7/8 modules (M7 deferred — needs redesign since InquiryAgent doesn't currently search products).**
+
+Backfill continues running. Customer-facing TourDetail pages now auto-show rich supplier content as backfill enriches each product.
