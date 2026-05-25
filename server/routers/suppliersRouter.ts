@@ -556,6 +556,296 @@ export const suppliersRouter = router({
       };
     }),
 
+  /* ────────────────────── mass import + cleanup (2026-05-25) ─────────── */
+
+  /**
+   * Preview mass import — counts eligible supplierProducts + empty drafts
+   * that would be cleaned up. Use this BEFORE pulling the trigger on
+   * massImportFromMirror or cleanupFailedDrafts.
+   *
+   * "Eligible" = supplierProducts that:
+   *   1. status='active' AND isHiddenByAdmin=false
+   *   2. Have a supplierProductDetails row with itineraryParseStatus='parsed'
+   *      (= deep sync has processed them; their TourDetail page will
+   *      render rich content via SupplierDetailSection)
+   *   3. Have NO existing tour pointing at their externalProductCode
+   *      (sourceUrl LIKE match — same logic as legacy bulkImport)
+   *
+   * "Failed drafts" = tours where:
+   *   1. status='draft'
+   *   2. description IS NULL or length < 30 (LLM rewrite never completed)
+   *   3. createdAt > 1 hour ago (avoid in-flight imports)
+   *   4. No supplier link in supplierProducts (truly dead — even M6
+   *      can't save them)
+   */
+  previewMassImport: adminProcedure.query(async () => {
+    const db2 = await getDb();
+    if (!db2) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+    // Eligible per supplier
+    const eligibleRows = await db2
+      .select({
+        supplierId: productsTable.supplierId,
+        c: sql<number>`COUNT(*)`,
+      })
+      .from(productsTable)
+      .innerJoin(
+        supplierProductDetails,
+        eq(supplierProductDetails.supplierProductId, productsTable.id),
+      )
+      .where(
+        and(
+          eq(productsTable.status, "active"),
+          eq(productsTable.isHiddenByAdmin, false),
+          eq(supplierProductDetails.itineraryParseStatus, "parsed"),
+          sql`NOT EXISTS (
+            SELECT 1 FROM ${toursTable}
+            WHERE ${toursTable.sourceUrl} LIKE CONCAT('%NormGroupID=', ${productsTable.externalProductCode}, '%')
+               OR ${toursTable.sourceUrl} LIKE CONCAT('%/product/detail/', ${productsTable.externalProductCode}, '%')
+          )`,
+        ),
+      )
+      .groupBy(productsTable.supplierId);
+
+    const supplierMap = new Map<number, string>();
+    const allSuppliers = await db2
+      .select({ id: suppliersTable.id, code: suppliersTable.code })
+      .from(suppliersTable);
+    allSuppliers.forEach((s) => supplierMap.set(s.id, s.code));
+
+    const eligibleBySupplier: Record<string, number> = { lion: 0, uv: 0 };
+    for (const row of eligibleRows) {
+      const code = supplierMap.get(row.supplierId);
+      if (code === "lion" || code === "uv") {
+        eligibleBySupplier[code] = Number(row.c);
+      }
+    }
+
+    // Failed drafts
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const failedDrafts = await db2
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(toursTable)
+      .where(
+        and(
+          eq(toursTable.status, "draft"),
+          sql`(${toursTable.description} IS NULL OR LENGTH(${toursTable.description}) < 30)`,
+          lt(toursTable.createdAt, oneHourAgo),
+        ),
+      );
+
+    return {
+      eligibleToImport: eligibleBySupplier,
+      eligibleTotal: eligibleBySupplier.lion + eligibleBySupplier.uv,
+      failedDrafts: Number(failedDrafts[0]?.c ?? 0),
+    };
+  }),
+
+  /**
+   * Cleanup mutation — hard-deletes empty draft tours that have been
+   * sitting > 1 hour with no description (= failed LLM rewrite from old
+   * import flow). Uses existing batchDelete which respects booking
+   * attachments (skips rather than orphan booked tours).
+   */
+  cleanupFailedDrafts: adminProcedure
+    .input(z.object({ dryRun: z.boolean().default(true) }))
+    .mutation(async ({ input }) => {
+      const db2 = await getDb();
+      if (!db2) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+      const rows = await db2
+        .select({ id: toursTable.id, title: toursTable.title })
+        .from(toursTable)
+        .where(
+          and(
+            eq(toursTable.status, "draft"),
+            sql`(${toursTable.description} IS NULL OR LENGTH(${toursTable.description}) < 30)`,
+            lt(toursTable.createdAt, oneHourAgo),
+          ),
+        );
+
+      if (input.dryRun) {
+        return {
+          dryRun: true,
+          wouldDelete: rows.length,
+          samples: rows.slice(0, 5).map((r) => ({
+            id: r.id,
+            title: r.title?.slice(0, 60) ?? "",
+          })),
+        };
+      }
+
+      // Real delete via existing batchDeleteTours (handles bookings safely)
+      const { batchDeleteTours } = await import("../db");
+      const result = await batchDeleteTours(rows.map((r) => r.id));
+      return {
+        dryRun: false,
+        deleted: result.deleted,
+        skipped: result.skipped.length,
+        skippedSamples: result.skipped.slice(0, 5),
+      };
+    }),
+
+  /**
+   * Mass import from supplier mirror. Reads supplierProducts (no external
+   * API call), creates lightweight tour rows with status='active'. Content
+   * is provided by SupplierDetailSection (M6) reading supplierProductDetails.
+   *
+   * No LLM rewrite — that path is the OLD design pre-Stage 1. With
+   * supplierProductDetails populated, tours don't need synthesized content.
+   *
+   * Speed: ~10ms per tour (DB INSERT only). 5728 in ~60 sec total.
+   *
+   * Only imports products with itineraryParseStatus='parsed' so customer-
+   * facing pages always have rich content.
+   */
+  massImportFromMirror: adminProcedure
+    .input(
+      z.object({
+        supplierCode: z.enum(["lion", "uv", "all"]).default("all"),
+        limit: z.number().int().min(1).max(10_000).default(10_000),
+        dryRun: z.boolean().default(true),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const db2 = await getDb();
+      if (!db2) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      // Find supplier ids
+      const allSuppliers = await db2
+        .select({ id: suppliersTable.id, code: suppliersTable.code })
+        .from(suppliersTable);
+      const codeToId = new Map<string, number>();
+      const idToCode = new Map<number, string>();
+      allSuppliers.forEach((s) => {
+        codeToId.set(s.code, s.id);
+        idToCode.set(s.id, s.code);
+      });
+
+      // Get eligible rows
+      const supplierFilter =
+        input.supplierCode === "all"
+          ? undefined
+          : (() => {
+              const sid = codeToId.get(input.supplierCode);
+              return sid !== undefined
+                ? eq(productsTable.supplierId, sid)
+                : undefined;
+            })();
+
+      const conditions = [
+        eq(productsTable.status, "active"),
+        eq(productsTable.isHiddenByAdmin, false),
+        eq(supplierProductDetails.itineraryParseStatus, "parsed"),
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${toursTable}
+          WHERE ${toursTable.sourceUrl} LIKE CONCAT('%NormGroupID=', ${productsTable.externalProductCode}, '%')
+             OR ${toursTable.sourceUrl} LIKE CONCAT('%/product/detail/', ${productsTable.externalProductCode}, '%')
+        )`,
+      ];
+      if (supplierFilter) conditions.push(supplierFilter);
+
+      const eligible = await db2
+        .select({
+          id: productsTable.id,
+          supplierId: productsTable.supplierId,
+          externalCode: productsTable.externalProductCode,
+          title: productsTable.title,
+          days: productsTable.days,
+          departureCity: productsTable.departureCity,
+          destinationCountry: productsTable.destinationCountry,
+          destinationCity: productsTable.destinationCity,
+          imageUrl: productsTable.imageUrl,
+          currency: productsTable.currency,
+        })
+        .from(productsTable)
+        .innerJoin(
+          supplierProductDetails,
+          eq(supplierProductDetails.supplierProductId, productsTable.id),
+        )
+        .where(and(...conditions))
+        .limit(input.limit);
+
+      if (input.dryRun) {
+        return {
+          dryRun: true,
+          wouldImport: eligible.length,
+          byCsupplier: eligible.reduce<Record<string, number>>((acc, r) => {
+            const code = idToCode.get(r.supplierId) ?? "?";
+            acc[code] = (acc[code] || 0) + 1;
+            return acc;
+          }, {}),
+          samples: eligible.slice(0, 5).map((r) => ({
+            id: r.id,
+            code: idToCode.get(r.supplierId) ?? "?",
+            title: r.title?.slice(0, 60) ?? "",
+          })),
+        };
+      }
+
+      // Real import — fetch min retailPrice per product from supplierDepartures
+      // for proper tour.price.
+      const { supplierDepartures } = await import("../../drizzle/schema");
+      const { createTour } = await import("../db");
+
+      let imported = 0;
+      const errors: Array<{ supplierProductId: number; err: string }> = [];
+
+      for (const row of eligible) {
+        try {
+          const code = idToCode.get(row.supplierId);
+          if (code !== "lion" && code !== "uv") continue;
+
+          const [priceRow] = await db2
+            .select({
+              minPrice: sql<string>`MIN(${supplierDepartures.retailPrice})`,
+            })
+            .from(supplierDepartures)
+            .where(eq(supplierDepartures.supplierProductId, row.id));
+          const price = Math.round(Number(priceRow?.minPrice ?? 0));
+
+          const sourceUrl =
+            code === "lion"
+              ? `https://travel.liontravel.com/detail?NormGroupID=${row.externalCode}`
+              : `https://www.uvbookings.com/product/detail/${row.externalCode}`;
+
+          await createTour({
+            title: row.title.slice(0, 200),
+            description: "",
+            productCode: row.externalCode.slice(0, 100),
+            destinationCountry: row.destinationCountry ?? "",
+            destinationCity: row.destinationCity ?? row.destinationCountry ?? "",
+            departureCity: row.departureCity ?? "",
+            days: row.days,
+            nights: Math.max(0, row.days - 1),
+            duration: row.days,
+            price,
+            priceCurrency: row.currency,
+            heroImage: row.imageUrl ?? "",
+            imageUrl: row.imageUrl ?? "",
+            status: "active",
+            sourceUrl,
+            sourceProvider: code === "lion" ? "liontravel" : "uvbookings",
+            createdBy: ctx.user.id,
+          } as never);
+          imported++;
+        } catch (err) {
+          errors.push({
+            supplierProductId: row.id,
+            err: err instanceof Error ? err.message.slice(0, 200) : String(err),
+          });
+        }
+      }
+
+      return {
+        dryRun: false,
+        imported,
+        errors: errors.length,
+        errorSamples: errors.slice(0, 5),
+      };
+    }),
+
   /* ────────────────────────── visibility toggle ───────────────────────── */
 
   /**
