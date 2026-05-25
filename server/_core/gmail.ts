@@ -129,7 +129,36 @@ export type GmailMessageSummary = {
   body: string;
   receivedAt: Date;
   labels: string[];
+  /**
+   * 2026-05-25 Phase 7 — parsed attachments.
+   *
+   * Each entry holds the extracted plain-text content from a single
+   * Gmail attachment. Empty array when the message has no attachments.
+   * Parsing happens lazily inside `listUnreadMessages` so the caller
+   * doesn't need to make extra Gmail API calls. Limits live in
+   * `_core/attachmentParser.ts` (MAX_RAW_BYTES, MAX_TEXT_CHARS) and the
+   * per-message cap (MAX_ATTACHMENTS_PER_MESSAGE below).
+   */
+  attachments: ParsedAttachment[];
 };
+
+export type ParsedAttachment = {
+  filename: string;
+  mimeType: string;
+  kind: string;
+  sizeBytes: number;
+  text: string;
+  parseStatus: string;
+  parseError?: string;
+};
+
+/**
+ * Defense-in-depth — Jeff's inbox is the highest-bandwidth attack vector
+ * for cost-blow-up + prompt-injection. We cap attachments per message so
+ * a single malicious email can't fan out into 100 attachment fetches +
+ * 100 LLM prompts.
+ */
+const MAX_ATTACHMENTS_PER_MESSAGE = 5;
 
 /**
  * Fetch unread messages since a given internal timestamp, with INBOX
@@ -158,7 +187,22 @@ export async function listUnreadMessages(
         id: m.id,
         format: "full",
       });
-      results.push(parseMessage(full.data));
+      const summary = parseMessage(full.data);
+      // 2026-05-25 Phase 7 — fetch + parse attachments inline.
+      // Failures don't block the message; we just log + leave attachments=[].
+      try {
+        summary.attachments = await fetchAndParseAttachments(
+          gmail,
+          m.id,
+          full.data.payload
+        );
+      } catch (attachErr) {
+        log.warn(
+          { err: attachErr, messageId: m.id },
+          "[gmail] failed to parse attachments — continuing with body only"
+        );
+      }
+      results.push(summary);
     } catch (e) {
       log.warn({ err: e, messageId: m.id }, "[gmail] failed to fetch message");
     }
@@ -181,7 +225,111 @@ function parseMessage(msg: any): GmailMessageSummary {
     body: extractBody(msg.payload) || msg.snippet || "",
     receivedAt: new Date(Number(msg.internalDate ?? Date.now())),
     labels: msg.labelIds ?? [],
+    attachments: [], // populated by fetchAndParseAttachments
   };
+}
+
+/**
+ * Walk the Gmail message payload tree, find every attachment part
+ * (parts with `body.attachmentId` and non-empty `filename`), fetch the
+ * actual bytes via gmail.users.messages.attachments.get, run each through
+ * `parseAttachment` from _core/attachmentParser.ts.
+ *
+ * Returns up to MAX_ATTACHMENTS_PER_MESSAGE entries. Skips inline-image
+ * parts (typically embedded in HTML body, filename starts with "image-")
+ * unless they're explicitly named — those are presentation, not content.
+ */
+async function fetchAndParseAttachments(
+  gmail: ReturnType<typeof buildGmailClient>,
+  messageId: string,
+  payload: any
+): Promise<ParsedAttachment[]> {
+  if (!payload) return [];
+
+  // Collect all parts that carry an attachment
+  const parts: Array<{ filename: string; mimeType: string; attachmentId: string; sizeHint: number }> = [];
+  collectAttachmentParts(payload, parts);
+
+  if (parts.length === 0) return [];
+
+  // Apply per-message cap (defense-in-depth)
+  const capped = parts.slice(0, MAX_ATTACHMENTS_PER_MESSAGE);
+  const dropped = parts.length - capped.length;
+  if (dropped > 0) {
+    log.info(
+      { messageId, dropped, kept: capped.length },
+      "[gmail] capped attachments per message"
+    );
+  }
+
+  // Dynamic import — keeps cold start light when no attachment-bearing
+  // emails come in.
+  const { parseAttachment } = await import("./attachmentParser");
+
+  const out: ParsedAttachment[] = [];
+  for (const p of capped) {
+    try {
+      const attResp = await gmail.users.messages.attachments.get({
+        userId: "me",
+        messageId,
+        id: p.attachmentId,
+      });
+      const dataB64 = attResp.data.data;
+      if (!dataB64) {
+        out.push({
+          filename: p.filename,
+          mimeType: p.mimeType,
+          kind: "unknown",
+          sizeBytes: 0,
+          text: "",
+          parseStatus: "empty",
+        });
+        continue;
+      }
+      // Gmail returns base64url-encoded bytes
+      const buf = Buffer.from(
+        dataB64.replace(/-/g, "+").replace(/_/g, "/"),
+        "base64"
+      );
+      const parsed = await parseAttachment(p.filename, p.mimeType, buf);
+      out.push(parsed);
+    } catch (err) {
+      log.warn(
+        { err, messageId, filename: p.filename },
+        "[gmail] attachment fetch/parse failed"
+      );
+      out.push({
+        filename: p.filename,
+        mimeType: p.mimeType,
+        kind: "unknown",
+        sizeBytes: p.sizeHint,
+        text: "",
+        parseStatus: "parse_error",
+        parseError: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return out;
+}
+
+function collectAttachmentParts(
+  part: any,
+  out: Array<{ filename: string; mimeType: string; attachmentId: string; sizeHint: number }>
+): void {
+  if (!part) return;
+  // A real attachment has filename + attachmentId. Inline parts (body data)
+  // are NOT attachments — they're handled by extractBody.
+  if (part.filename && part.body?.attachmentId) {
+    out.push({
+      filename: part.filename,
+      mimeType: part.mimeType || "application/octet-stream",
+      attachmentId: part.body.attachmentId,
+      sizeHint: Number(part.body.size ?? 0),
+    });
+  }
+  if (Array.isArray(part.parts)) {
+    for (const sub of part.parts) collectAttachmentParts(sub, out);
+  }
 }
 
 function extractBody(payload: any): string {

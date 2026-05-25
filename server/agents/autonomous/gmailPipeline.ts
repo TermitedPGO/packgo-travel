@@ -211,6 +211,19 @@ async function processOneEmail(
   const shielded = shieldUntrustedInput(msg.body);
   const rawMessage = `From: ${msg.from}\nSubject: ${msg.subject}\n\n${shielded.wrapped}`;
 
+  // 2026-05-25 Phase 7 — pass parsed attachments to the agent so the
+  // draft can actually reference customer-supplied PDFs/Excel/Word.
+  // gmail.ts already capped + parsed; we just forward the per-attachment
+  // shape the agent expects.
+  const attachmentsForAgent = (msg.attachments || []).map((a) => ({
+    filename: a.filename,
+    kind: a.kind,
+    sizeBytes: a.sizeBytes,
+    text: a.text,
+    parseStatus: a.parseStatus,
+    parseError: a.parseError,
+  }));
+
   // Run InquiryAgent
   const decision = await runInquiryAgent({
     rawMessage,
@@ -225,6 +238,7 @@ async function processOneEmail(
       createdAt: i.createdAt,
     })),
     policyRules: inquiryPolicy.rules,
+    attachments: attachmentsForAgent,
   });
 
   // 2026-05-17 red-team round 1 — if shieldUntrustedInput flagged the body
@@ -248,12 +262,29 @@ async function processOneEmail(
     normal: 50,
     low: 25,
   };
+  // 2026-05-25 Phase 7 — append attachment summary to interaction content
+  // so the audit trail shows what came in. Don't bloat content with full
+  // attachment text (already in the agent prompt + LLM logs); just metadata.
+  const attachmentSummary =
+    attachmentsForAgent.length > 0
+      ? "\n\n【附件】\n" +
+        attachmentsForAgent
+          .map(
+            (a, i) =>
+              `${i + 1}. ${a.filename} (${a.kind}, ${formatBytesShort(a.sizeBytes)}, ${a.parseStatus})`
+          )
+          .join("\n")
+      : "";
   const interactionIns = await db.insert(customerInteractions).values({
     customerProfileId: profileId ?? 0,
     channel: "email",
     direction: "inbound",
-    content: rawMessage,
-    contentSummary: decision.intent,
+    content: rawMessage + attachmentSummary,
+    contentSummary:
+      decision.intent +
+      (attachmentsForAgent.length > 0
+        ? ` (附 ${attachmentsForAgent.length} 個檔案)`
+        : ""),
     sentiment: decision.sentiment,
     classification: decision.classification,
     urgency: urgencyMap[decision.urgency] ?? 50,
@@ -485,14 +516,30 @@ async function processOneEmail(
     });
   }
 
+  // 2026-05-25 Phase 7 — surface attachments in inbox messages so Jeff
+  // sees right away that an email had attachments and whether they parsed.
+  const attachmentLine =
+    attachmentsForAgent.length > 0
+      ? "\n\n📎 附件: " +
+        attachmentsForAgent
+          .map((a) => {
+            const status =
+              a.parseStatus === "ok" || a.parseStatus === "ok_truncated"
+                ? "✓ 已讀取"
+                : `✗ ${a.parseStatus}`;
+            return `${a.filename} (${a.kind}, ${status})`;
+          })
+          .join(" · ")
+      : "";
+
   // If escalation, post to chatbox so Jeff sees it
   if (decision.shouldEscalate) {
     result.totalEscalated++;
     await db.insert(agentMessages).values({
       agentName: "inquiry",
       messageType: "escalation",
-      title: `${decision.classification} · ${senderEmail ?? "unknown"} · "${msg.subject.slice(0, 60)}"`,
-      body: `Agent escalated because: ${decision.escalationReason ?? "see decision"}\n\n${decision.intent}\n\n---\nDraft (供你參考,**未送出**):\n${decision.draftReply}`,
+      title: `${decision.classification} · ${senderEmail ?? "unknown"} · "${msg.subject.slice(0, 60)}"${attachmentsForAgent.length > 0 ? ` 📎×${attachmentsForAgent.length}` : ""}`,
+      body: `Agent escalated because: ${decision.escalationReason ?? "see decision"}\n\n${decision.intent}${attachmentLine}\n\n---\nDraft (供你參考,**未送出**):\n${decision.draftReply}`,
       context: JSON.stringify({
         classification: decision.classification,
         urgency: decision.urgency,
@@ -501,6 +548,12 @@ async function processOneEmail(
         reasoning: decision.reasoning,
         gmailMessageId: msg.id,
         gmailThreadId: msg.threadId,
+        attachments: attachmentsForAgent.map((a) => ({
+          filename: a.filename,
+          kind: a.kind,
+          sizeBytes: a.sizeBytes,
+          parseStatus: a.parseStatus,
+        })),
       }),
       priority:
         decision.urgency === "critical"
@@ -520,23 +573,40 @@ async function processOneEmail(
     // every email; the per-agent unread counter handles that.
     try {
       const { notifyAgentMessage } = await import("../../_core/agentNotify");
+      // 2026-05-25 Phase 7 — explain WHY we drafted-not-sent so Jeff
+      // isn't surprised that an obviously valid email got escalated.
+      // Three reasons we land in the no-sendOutcome path:
+      //   (a) autoSendEnabled = false in policy (default — Jeff hasn't
+      //       toggled it on yet)
+      //   (b) confidence < autoSendMinConfidence (e.g. 70 < 85)
+      //   (c) classification is in alwaysEscalate
+      let draftReason = "";
+      if (!sendOutcome) {
+        if (!autoSendEnabled) {
+          draftReason =
+            " · (auto-send 全站關閉 — agentPolicies.inquiry.autoSendEnabled=false)";
+        } else if (decision.confidence < autoSendThreshold) {
+          draftReason = ` · (信心 ${decision.confidence} < 門檻 ${autoSendThreshold})`;
+        }
+      }
       const outcomeLabel =
         sendOutcome === "auto_replied"
           ? "✓ 已自動回覆"
           : sendOutcome === "would_auto_send"
           ? "✓ 已擬稿 (dry-run kill switch on)"
-          : "📝 Draft 已存,等你 review";
+          : `📝 Draft 已存,等你 review${draftReason}`;
       await notifyAgentMessage({
         agentName: "inquiry",
         messageType: "observation",
-        title: `${decision.classification} · ${senderEmail ?? "unknown"} · "${msg.subject.slice(0, 50)}"`,
+        title: `${decision.classification} · ${senderEmail ?? "unknown"} · "${msg.subject.slice(0, 50)}"${attachmentsForAgent.length > 0 ? ` 📎×${attachmentsForAgent.length}` : ""}`,
         body:
           `${outcomeLabel}\n\n` +
           `Intent: ${decision.intent}\n` +
-          `Urgency: ${decision.urgency} · Sentiment: ${decision.sentiment} · Confidence: ${decision.confidence}\n` +
+          `Urgency: ${decision.urgency} · Sentiment: ${decision.sentiment} · Confidence: ${decision.confidence}` +
+          attachmentLine +
           (sendOutcome === "auto_replied"
-            ? `\nReply sent:\n${decision.draftReply.slice(0, 500)}${decision.draftReply.length > 500 ? "..." : ""}`
-            : `\nDraft:\n${decision.draftReply.slice(0, 500)}${decision.draftReply.length > 500 ? "..." : ""}`),
+            ? `\n\nReply sent:\n${decision.draftReply.slice(0, 500)}${decision.draftReply.length > 500 ? "..." : ""}`
+            : `\n\nDraft:\n${decision.draftReply.slice(0, 500)}${decision.draftReply.length > 500 ? "..." : ""}`),
         priority: decision.urgency === "high" ? "high" : "low",
         relatedOutcomeId: outcomeId,
         relatedInteractionId: interactionId,
@@ -546,6 +616,12 @@ async function processOneEmail(
           confidence: decision.confidence,
           sendOutcome,
           gmailThreadId: msg.threadId,
+          attachments: attachmentsForAgent.map((a) => ({
+            filename: a.filename,
+            kind: a.kind,
+            sizeBytes: a.sizeBytes,
+            parseStatus: a.parseStatus,
+          })),
         },
       });
     } catch (err) {
@@ -615,6 +691,12 @@ async function processOneEmail(
       .set({ lastInteractionAt: new Date() })
       .where(eq(customerProfiles.id, profileId));
   }
+}
+
+function formatBytesShort(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
 }
 
 function parseEmailAddress(fromHeader: string): string | undefined {
