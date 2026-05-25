@@ -48,8 +48,10 @@ export const toursReadRouter = router({
           status: z.string().optional(),
           featured: z.boolean().optional(),
           // 2026-05-22: admin tabs need larger pages than default 100.
-          // Capped at 2000 to prevent abuse from public endpoint.
-          pageSize: z.number().int().min(1).max(2000).optional(),
+          // 2026-05-25: raised 2000 → 10000 after mass import of 4000+ supplier
+          // tours. Admin lists all active tours in one shot; abuse risk is
+          // low since this is publicProcedure but tour data is already public.
+          pageSize: z.number().int().min(1).max(10000).optional(),
         })
         .optional()
     )

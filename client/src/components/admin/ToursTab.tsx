@@ -142,7 +142,9 @@ export default function ToursTab() {
   // discrepancy. Request a larger page size that fits all admin-visible
   // tours; pageSize is hard-capped server-side anyway if it grows past
   // a sane bound.
-  const { data: tours, isLoading: toursLoading } = trpc.tours.list.useQuery({ pageSize: 1000 });
+  // 2026-05-25 raised 1000 → 10000 after mass import of 4000+ supplier tours
+  // capped admin display at 1000 / 3982 actual.
+  const { data: tours, isLoading: toursLoading } = trpc.tours.list.useQuery({ pageSize: 10000 });
 
   // Round 80.20: Jeff reported sidebar badge stuck at "46" even after
   // deleting all tours, while list showed "0 筆". Cause: only
