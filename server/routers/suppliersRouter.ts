@@ -1762,10 +1762,10 @@ export const suppliersRouter = router({
         { re: /東歐|波蘭|斯洛伐克|斯洛維尼亞|克羅埃西亞|塞爾維亞|保加利亞|羅馬尼亞/, country: "東歐" },
         { re: /俄羅斯|莫斯科|聖彼得堡|貝加爾湖/, country: "俄羅斯" },
         { re: /土耳其|伊斯坦堡|卡帕多奇亞|棉堡|安塔利亞/, country: "土耳其" },
-        // Americas (Chinese + English city names for UV catalog)
-        { re: /美國|美西|美東|紐約|洛杉磯|舊金山|拉斯維加斯|夏威夷|阿拉斯加|黃石|大峽谷|波士頓|華盛頓|邁阿密|奧蘭多|西雅圖|芝加哥|New York|Los Angeles|Las Vegas|San Francisco|Hawaii|Alaska|Yellowstone|Grand Canyon|Boston|Washington|Miami|Orlando|Seattle|Chicago/, country: "美國" },
-        { re: /加拿大|溫哥華|多倫多|蒙特婁|渥太華|魁北克|班夫|落磯山|尼加拉|Vancouver|Toronto|Montreal|Ottawa|Quebec|Banff|Rocky|Niagara|Whistler|Jasper|Calgary|Edmonton/, country: "加拿大" },
-        { re: /墨西哥|坎昆|墨西哥城|Mexico|Cancun/, country: "墨西哥" },
+        // Americas (Chinese + English city/state/landmark names for UV catalog)
+        { re: /美國|美西|美東|紐約|洛杉磯|舊金山|拉斯維加斯|夏威夷|阿拉斯加|黃石|大峽谷|波士頓|華盛頓|邁阿密|奧蘭多|西雅圖|芝加哥|New York|NYC|Los Angeles|LA tour|Las Vegas|San Francisco|Hawaii|Alaska|Yellowstone|Grand Canyon|Boston|Washington|Miami|Orlando|Seattle|Chicago|California|Texas|Florida|Virginia|Nevada|Arizona|Utah|Colorado|Oregon|Wyoming|Sedona|Monument Valley|Bryce|Zion|Yosemite|Tahoe|Snoqualmie|Leavenworth|Key West|Shenandoah|Philadelphia|Atlantic City|Niagara Falls.*USA|Antelope|Horseshoe|Death Valley|Lake Powell|Salt Lake|Reno|Denver|Aspen|Portland|Honolulu|Maui|Big Island|Kauai|Oahu|Cape Cod|Acadia|Smoky Mountain|New Orleans|Nashville|Memphis|Austin|San Diego|Anaheim|Disneyland|Universal|Napa|Sonoma|Carmel|Monterey|San Antonio|Houston|Dallas|Phoenix|Tucson|Albuquerque|Santa Fe|Mount Rushmore|Yellowstone|Glacier|Rocky Mountain|Sequoia|Joshua Tree|Niagara/, country: "美國" },
+        { re: /加拿大|溫哥華|多倫多|蒙特婁|渥太華|魁北克|班夫|落磯山|尼加拉|Vancouver|Toronto|Montreal|Ottawa|Quebec|Banff|Rocky|Whistler|Jasper|Calgary|Edmonton|Victoria.*BC|Victoria.*Canada|British Columbia|Alberta|Manitoba|Saskatchewan|Nova Scotia|Newfoundland|Yukon|Halifax|Winnipeg|Saskatoon|Regina|Hamilton.*ON|Mississauga|Brampton|Markham|Burnaby|Surrey|Richmond.*BC|Squamish|Tofino|Okanagan|Kelowna|Kamloops|Nanaimo|PEI|Prince Edward/, country: "加拿大" },
+        { re: /墨西哥|坎昆|墨西哥城|Mexico|Cancun|Tulum|Playa del Carmen|Cabo|Riviera Maya/, country: "墨西哥" },
         // Oceania
         { re: /澳洲|澳大利亞|雪梨|墨爾本|布里斯本|黃金海岸|凱恩斯|大堡礁|烏魯魯/, country: "澳洲" },
         { re: /紐西蘭|奧克蘭|皇后鎮|基督城|羅托魯瓦/, country: "紐西蘭" },
