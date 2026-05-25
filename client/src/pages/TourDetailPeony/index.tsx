@@ -43,6 +43,7 @@ import HeroSection from "./HeroSection";
 import OverviewSection from "./OverviewSection";
 import RouteMapSection from "./RouteMapSection";
 import ItinerarySection from "./ItinerarySection";
+import SupplierDetailSection from "./SupplierDetailSection";
 import FeaturesSection from "./FeaturesSection";
 import HotelsSection from "./HotelsSection";
 import PricingSection from "./PricingSection";
@@ -517,6 +518,11 @@ export default function TourDetailPeony() {
         sectionRef={sectionRefs.notes}
         ensureArray={ensureArray}
       />
+
+      {/* M6 of supplier deep sync (2026-05-24): render rich content from
+          supplierProductDetails if the tour is linked to a Lion/UV product
+          and the backfill has processed it. Falls back silently if no data. */}
+      {tour?.id && <SupplierDetailSection tourId={tour.id} />}
 
       {/* v78m Sprint 5B: Departures + pricing table (signettours pattern) */}
       {tour?.id && (

@@ -21,8 +21,22 @@
 
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { and, eq, like, or } from "drizzle-orm";
 import { publicProcedure, router } from "../_core/trpc";
 import * as db from "../db";
+import { getDb } from "../db";
+import {
+  supplierProducts,
+  supplierProductDetails,
+  tours as toursTable,
+} from "../../drizzle/schema";
+import type {
+  NormalizedItinerary,
+  NormalizedNotices,
+  NormalizedOptional,
+  NormalizedPriceTerms,
+  NormalizedTourInfo,
+} from "../services/supplierSync/types";
 
 export const toursReadRouter = router({
   // Get all tours (public)
@@ -385,5 +399,94 @@ export const toursReadRouter = router({
         .sort((a: any, b: any) => b._score - a._score)
         .slice(0, input.limit);
       return scored.length > 0 ? scored : (allTours as any[]).slice(0, input.limit);
+    }),
+
+  /**
+   * Get supplier deep-sync detail for a tour. 2026-05-24 (M6 of supplier
+   * deep sync).
+   *
+   * Resolves the tour → supplierProduct via sourceUrl pattern matching
+   * (Lion: ?NormGroupID=xxx, UV: /product/detail/xxx), then returns the
+   * supplierProductDetails row with each detail kind's parsed JSON
+   * pre-deserialized.
+   *
+   * Returns null if tour has no linked supplier product or no detail
+   * row yet (backfill not yet processed it).
+   */
+  getSupplierDetail: publicProcedure
+    .input(z.object({ tourId: z.number().int().positive() }))
+    .query(async ({ input }) => {
+      const drizzleDb = await getDb();
+      if (!drizzleDb) return null;
+
+      // Look up the tour's sourceUrl
+      const [tour] = await drizzleDb
+        .select({ sourceUrl: toursTable.sourceUrl })
+        .from(toursTable)
+        .where(eq(toursTable.id, input.tourId))
+        .limit(1);
+      if (!tour?.sourceUrl) return null;
+
+      // Extract external product code from sourceUrl
+      const lionMatch = tour.sourceUrl.match(/[?&]NormGroupID=([^&]+)/);
+      const uvMatch = tour.sourceUrl.match(/\/product\/detail\/([^/?#]+)/);
+      const externalCode = lionMatch?.[1] || uvMatch?.[1];
+      if (!externalCode) return null;
+
+      // Find the supplierProduct row
+      const [product] = await drizzleDb
+        .select({ id: supplierProducts.id })
+        .from(supplierProducts)
+        .where(eq(supplierProducts.externalProductCode, externalCode))
+        .limit(1);
+      if (!product) return null;
+
+      // Fetch the detail row
+      const [detail] = await drizzleDb
+        .select()
+        .from(supplierProductDetails)
+        .where(eq(supplierProductDetails.supplierProductId, product.id))
+        .limit(1);
+      if (!detail) return null;
+
+      // Pre-deserialize parsed JSON so client doesn't have to
+      const tryParse = <T,>(s: string | null): T | null => {
+        if (!s) return null;
+        try {
+          return JSON.parse(s) as T;
+        } catch {
+          return null;
+        }
+      };
+
+      return {
+        itinerary: {
+          status: detail.itineraryParseStatus,
+          parsed: tryParse<NormalizedItinerary>(detail.itineraryParsed),
+          fetchedAt: detail.itineraryFetchedAt,
+        },
+        priceTerms: {
+          status: detail.priceTermsParseStatus,
+          parsed: tryParse<NormalizedPriceTerms>(detail.priceTermsParsed),
+          fetchedAt: detail.priceTermsFetchedAt,
+        },
+        notices: {
+          status: detail.noticesParseStatus,
+          parsed: tryParse<NormalizedNotices>(detail.noticesParsed),
+          fetchedAt: detail.noticesFetchedAt,
+        },
+        optional: {
+          status: detail.optionalParseStatus,
+          parsed: tryParse<NormalizedOptional>(detail.optionalParsed),
+          fetchedAt: detail.optionalFetchedAt,
+        },
+        tourInfo: {
+          status: detail.tourInfoParseStatus,
+          parsed: tryParse<NormalizedTourInfo>(detail.tourInfoParsed),
+          fetchedAt: detail.tourInfoFetchedAt,
+        },
+        lastEnrichedAt: detail.lastEnrichedAt,
+        schemaVersion: detail.schemaVersion,
+      };
     }),
 });
