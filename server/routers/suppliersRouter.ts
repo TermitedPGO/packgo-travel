@@ -851,6 +851,172 @@ export const suppliersRouter = router({
       };
     }),
 
+  /**
+   * Audit every imported tour for data quality. 2026-05-25 added after
+   * Jeff's "全部上架後 去每個都檢查" — programmatic verification across
+   * 4000+ tours since manual check isn't feasible.
+   *
+   * Checks (all must pass for "healthy"):
+   *   1. status='active' (else hidden from public)
+   *   2. title non-empty
+   *   3. price > 0
+   *   4. heroImage OR imageUrl set
+   *   5. sourceUrl set (else SupplierDetailSection can't resolve)
+   *   6. Linked supplierProduct exists in supplierProducts table
+   *   7. Linked supplierProductDetails exists with at least itinerary parsed
+   *
+   * Returns: total, healthy count, problems by category with sample IDs.
+   * Read-only — never modifies data.
+   */
+  auditAllImportedTours: adminProcedure.query(async () => {
+    const db2 = await getDb();
+    if (!db2) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+    // Get all tours that came from supplier import — filter by sourceUrl
+    // pattern since `sourceProvider` field isn't in the tours schema.
+    const rows = await db2
+      .select({
+        id: toursTable.id,
+        title: toursTable.title,
+        status: toursTable.status,
+        price: toursTable.price,
+        sourceUrl: toursTable.sourceUrl,
+        heroImage: toursTable.heroImage,
+        imageUrl: toursTable.imageUrl,
+      })
+      .from(toursTable)
+      .where(
+        or(
+          like(toursTable.sourceUrl, "%liontravel.com%"),
+          like(toursTable.sourceUrl, "%uvbookings.com%"),
+        ),
+      );
+
+    const problems = {
+      notActive: [] as Array<{ id: number; title: string; status: string }>,
+      emptyTitle: [] as Array<{ id: number }>,
+      zeroPrice: [] as Array<{ id: number; title: string }>,
+      noImage: [] as Array<{ id: number; title: string }>,
+      noSourceUrl: [] as Array<{ id: number; title: string }>,
+      noSupplierLink: [] as Array<{ id: number; title: string; sourceUrl: string }>,
+      noSupplierDetail: [] as Array<{ id: number; title: string }>,
+      noItineraryParsed: [] as Array<{
+        id: number;
+        title: string;
+        status: string;
+      }>,
+    };
+
+    // Build supplier code lookup
+    const allSupplierProductCodes = new Set<string>();
+    const detailsByCode = new Map<string, string>(); // code → parseStatus
+    const allProducts = await db2
+      .select({
+        code: productsTable.externalProductCode,
+        id: productsTable.id,
+      })
+      .from(productsTable);
+    allProducts.forEach((p) => allSupplierProductCodes.add(p.code));
+
+    const allDetails = await db2
+      .select({
+        supplierProductId: supplierProductDetails.supplierProductId,
+        itineraryParseStatus: supplierProductDetails.itineraryParseStatus,
+      })
+      .from(supplierProductDetails);
+    const productIdToStatus = new Map<number, string>();
+    allDetails.forEach((d) =>
+      productIdToStatus.set(d.supplierProductId, d.itineraryParseStatus),
+    );
+    const productIdByCode = new Map<string, number>();
+    allProducts.forEach((p) => productIdByCode.set(p.code, p.id));
+
+    let healthy = 0;
+    for (const t of rows) {
+      let isHealthy = true;
+      const title = t.title?.slice(0, 60) ?? "";
+
+      if (t.status !== "active") {
+        problems.notActive.push({ id: t.id, title, status: t.status });
+        isHealthy = false;
+      }
+      if (!t.title || t.title.trim() === "") {
+        problems.emptyTitle.push({ id: t.id });
+        isHealthy = false;
+      }
+      if (!t.price || t.price <= 0) {
+        problems.zeroPrice.push({ id: t.id, title });
+        isHealthy = false;
+      }
+      if (!t.heroImage && !t.imageUrl) {
+        problems.noImage.push({ id: t.id, title });
+        isHealthy = false;
+      }
+      if (!t.sourceUrl) {
+        problems.noSourceUrl.push({ id: t.id, title });
+        isHealthy = false;
+      } else {
+        // Extract external code
+        const lionMatch = t.sourceUrl.match(/[?&]NormGroupID=([^&]+)/);
+        const uvMatch = t.sourceUrl.match(/\/product\/detail\/([^/?#]+)/);
+        const code = lionMatch?.[1] || uvMatch?.[1];
+        if (!code || !allSupplierProductCodes.has(code)) {
+          problems.noSupplierLink.push({
+            id: t.id,
+            title,
+            sourceUrl: t.sourceUrl.slice(0, 80),
+          });
+          isHealthy = false;
+        } else {
+          const productId = productIdByCode.get(code);
+          if (productId === undefined) {
+            problems.noSupplierDetail.push({ id: t.id, title });
+            isHealthy = false;
+          } else {
+            const detailStatus = productIdToStatus.get(productId);
+            if (!detailStatus) {
+              problems.noSupplierDetail.push({ id: t.id, title });
+              isHealthy = false;
+            } else if (detailStatus !== "parsed") {
+              problems.noItineraryParsed.push({
+                id: t.id,
+                title,
+                status: detailStatus,
+              });
+              isHealthy = false;
+            }
+          }
+        }
+      }
+
+      if (isHealthy) healthy++;
+    }
+
+    return {
+      totalAudited: rows.length,
+      healthy,
+      unhealthy: rows.length - healthy,
+      problemCounts: {
+        notActive: problems.notActive.length,
+        emptyTitle: problems.emptyTitle.length,
+        zeroPrice: problems.zeroPrice.length,
+        noImage: problems.noImage.length,
+        noSourceUrl: problems.noSourceUrl.length,
+        noSupplierLink: problems.noSupplierLink.length,
+        noSupplierDetail: problems.noSupplierDetail.length,
+        noItineraryParsed: problems.noItineraryParsed.length,
+      },
+      samples: {
+        notActive: problems.notActive.slice(0, 5),
+        zeroPrice: problems.zeroPrice.slice(0, 5),
+        noImage: problems.noImage.slice(0, 5),
+        noSupplierLink: problems.noSupplierLink.slice(0, 5),
+        noSupplierDetail: problems.noSupplierDetail.slice(0, 5),
+        noItineraryParsed: problems.noItineraryParsed.slice(0, 5),
+      },
+    };
+  }),
+
   /* ────────────────────────── visibility toggle ───────────────────────── */
 
   /**
