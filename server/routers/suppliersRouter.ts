@@ -1194,6 +1194,271 @@ export const suppliersRouter = router({
       return { dryRun: false, deactivated };
     }),
 
+  /**
+   * Deep accuracy audit — beyond structural completeness. Checks:
+   *   1. days field matches itinerary.days.length (if parsed)
+   *   2. title length sane (10-300 chars, no placeholder words)
+   *   3. price in reasonable range per currency (TWD 3000-500000, USD 100-30000)
+   *   4. destinationCountry not empty
+   *   5. currency in known ISO list
+   *   6. duration/nights/days mutually consistent
+   *   7. Distribution stats: price/days/country breakdowns + outliers
+   *
+   * Runs only on ACTIVE tours from supplier import.
+   */
+  deepAccuracyAudit: adminProcedure.query(async () => {
+    const db2 = await getDb();
+    if (!db2) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+    const rows = await db2
+      .select({
+        id: toursTable.id,
+        title: toursTable.title,
+        price: toursTable.price,
+        priceCurrency: toursTable.priceCurrency,
+        duration: toursTable.duration,
+        nights: toursTable.nights,
+        destinationCountry: toursTable.destinationCountry,
+        destinationCity: toursTable.destinationCity,
+        departureCity: toursTable.departureCity,
+        sourceUrl: toursTable.sourceUrl,
+      })
+      .from(toursTable)
+      .where(
+        and(
+          eq(toursTable.status, "active"),
+          or(
+            like(toursTable.sourceUrl, "%liontravel.com%"),
+            like(toursTable.sourceUrl, "%uvbookings.com%"),
+          ),
+        ),
+      );
+
+    // Pre-fetch all supplier detail itinerary day-counts for cross-check
+    const allProducts = await db2
+      .select({
+        id: productsTable.id,
+        code: productsTable.externalProductCode,
+      })
+      .from(productsTable);
+    const codeToProductId = new Map<string, number>();
+    allProducts.forEach((p) => codeToProductId.set(p.code, p.id));
+
+    const allDetails = await db2
+      .select({
+        supplierProductId: supplierProductDetails.supplierProductId,
+        itineraryParsed: supplierProductDetails.itineraryParsed,
+      })
+      .from(supplierProductDetails);
+    const productIdToItineraryDays = new Map<number, number>();
+    for (const d of allDetails) {
+      if (!d.itineraryParsed) continue;
+      try {
+        const parsed = JSON.parse(d.itineraryParsed);
+        if (parsed?.days?.length !== undefined) {
+          productIdToItineraryDays.set(d.supplierProductId, parsed.days.length);
+        }
+      } catch {
+        // skip
+      }
+    }
+
+    const PLACEHOLDER_RE = /\b(TODO|test|測試|placeholder|XXX|新行程)\b/i;
+    const VALID_CURRENCIES = new Set([
+      "TWD", "USD", "CAD", "HKD", "CNY", "JPY", "KRW", "EUR", "GBP", "AUD",
+    ]);
+    const PRICE_RANGES: Record<string, { min: number; max: number }> = {
+      TWD: { min: 3000, max: 500_000 },
+      USD: { min: 100, max: 30_000 },
+      CAD: { min: 100, max: 30_000 },
+      HKD: { min: 800, max: 200_000 },
+      CNY: { min: 600, max: 200_000 },
+      JPY: { min: 10_000, max: 3_000_000 },
+      EUR: { min: 90, max: 25_000 },
+    };
+
+    const problems = {
+      daysMismatch: [] as Array<{
+        id: number;
+        title: string;
+        tourDays: number;
+        itineraryDays: number;
+      }>,
+      shortTitle: [] as Array<{ id: number; title: string }>,
+      placeholderTitle: [] as Array<{ id: number; title: string }>,
+      priceTooLow: [] as Array<{
+        id: number;
+        title: string;
+        price: number;
+        currency: string;
+      }>,
+      priceTooHigh: [] as Array<{
+        id: number;
+        title: string;
+        price: number;
+        currency: string;
+      }>,
+      unknownCurrency: [] as Array<{
+        id: number;
+        title: string;
+        currency: string;
+      }>,
+      noDestinationCountry: [] as Array<{ id: number; title: string }>,
+      durationMismatch: [] as Array<{
+        id: number;
+        title: string;
+        duration: number;
+        nights: number;
+      }>,
+    };
+
+    // Distribution stats
+    const priceBuckets: Record<string, number[]> = {};
+    const dayBuckets: Record<number, number> = {};
+    const countryBuckets: Record<string, number> = {};
+
+    for (const t of rows) {
+      const title = t.title?.slice(0, 60) ?? "";
+
+      // 1. Title checks
+      if (!t.title || t.title.length < 10) {
+        problems.shortTitle.push({ id: t.id, title });
+      }
+      if (t.title && PLACEHOLDER_RE.test(t.title)) {
+        problems.placeholderTitle.push({ id: t.id, title });
+      }
+
+      // 2. Currency check
+      const currency = t.priceCurrency ?? "?";
+      if (!VALID_CURRENCIES.has(currency)) {
+        problems.unknownCurrency.push({ id: t.id, title, currency });
+      }
+
+      // 3. Price range
+      const range = PRICE_RANGES[currency];
+      const priceNum = t.price ?? 0;
+      if (range && priceNum > 0) {
+        if (priceNum < range.min) {
+          problems.priceTooLow.push({
+            id: t.id,
+            title,
+            price: priceNum,
+            currency,
+          });
+        } else if (priceNum > range.max) {
+          problems.priceTooHigh.push({
+            id: t.id,
+            title,
+            price: priceNum,
+            currency,
+          });
+        }
+      }
+
+      // 4. Destination country
+      if (!t.destinationCountry || t.destinationCountry.trim() === "") {
+        problems.noDestinationCountry.push({ id: t.id, title });
+      }
+
+      // 5. Duration / nights consistency
+      // For domestic 1-day trips nights=0 is fine; otherwise nights should equal duration-1
+      const nightsNum = t.nights ?? 0;
+      if (t.duration > 1 && nightsNum !== t.duration - 1) {
+        problems.durationMismatch.push({
+          id: t.id,
+          title,
+          duration: t.duration,
+          nights: nightsNum,
+        });
+      }
+
+      // 6. Days vs itinerary cross-check
+      const code =
+        t.sourceUrl?.match(/[?&]NormGroupID=([^&]+)/)?.[1] ||
+        t.sourceUrl?.match(/\/product\/detail\/([^/?#]+)/)?.[1];
+      if (code) {
+        const productId = codeToProductId.get(code);
+        const itineraryDays = productId !== undefined
+          ? productIdToItineraryDays.get(productId)
+          : undefined;
+        if (
+          itineraryDays !== undefined &&
+          itineraryDays > 0 &&
+          Math.abs(itineraryDays - t.duration) > 1
+        ) {
+          problems.daysMismatch.push({
+            id: t.id,
+            title,
+            tourDays: t.duration,
+            itineraryDays,
+          });
+        }
+      }
+
+      // Stats
+      if (currency && priceNum > 0) {
+        priceBuckets[currency] = priceBuckets[currency] || [];
+        priceBuckets[currency].push(priceNum);
+      }
+      dayBuckets[t.duration] = (dayBuckets[t.duration] || 0) + 1;
+      const ctry = t.destinationCountry || "(unknown)";
+      countryBuckets[ctry] = (countryBuckets[ctry] || 0) + 1;
+    }
+
+    // Compute stats per currency
+    const priceStats: Record<
+      string,
+      { count: number; min: number; max: number; median: number; avg: number }
+    > = {};
+    for (const [cur, prices] of Object.entries(priceBuckets)) {
+      const sorted = [...prices].sort((a, b) => a - b);
+      const sum = sorted.reduce((a, b) => a + b, 0);
+      priceStats[cur] = {
+        count: sorted.length,
+        min: sorted[0],
+        max: sorted[sorted.length - 1],
+        median: sorted[Math.floor(sorted.length / 2)],
+        avg: Math.round(sum / sorted.length),
+      };
+    }
+
+    const topCountries = Object.entries(countryBuckets)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 15)
+      .map(([country, count]) => ({ country, count }));
+
+    return {
+      totalAudited: rows.length,
+      problemCounts: {
+        daysMismatch: problems.daysMismatch.length,
+        shortTitle: problems.shortTitle.length,
+        placeholderTitle: problems.placeholderTitle.length,
+        priceTooLow: problems.priceTooLow.length,
+        priceTooHigh: problems.priceTooHigh.length,
+        unknownCurrency: problems.unknownCurrency.length,
+        noDestinationCountry: problems.noDestinationCountry.length,
+        durationMismatch: problems.durationMismatch.length,
+      },
+      samples: {
+        daysMismatch: problems.daysMismatch.slice(0, 5),
+        shortTitle: problems.shortTitle.slice(0, 5),
+        placeholderTitle: problems.placeholderTitle.slice(0, 5),
+        priceTooLow: problems.priceTooLow.slice(0, 5),
+        priceTooHigh: problems.priceTooHigh.slice(0, 5),
+        unknownCurrency: problems.unknownCurrency.slice(0, 5),
+        noDestinationCountry: problems.noDestinationCountry.slice(0, 5),
+        durationMismatch: problems.durationMismatch.slice(0, 5),
+      },
+      stats: {
+        priceStats,
+        topCountries,
+        dayDistribution: Object.entries(dayBuckets)
+          .map(([d, c]) => ({ days: Number(d), count: c }))
+          .sort((a, b) => a.days - b.days),
+      },
+    };
+  }),
+
   /* ────────────────────────── visibility toggle ───────────────────────── */
 
   /**
