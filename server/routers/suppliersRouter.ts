@@ -529,6 +529,11 @@ export const suppliersRouter = router({
       }
 
       const maxLen = Math.max(lionRows.length, uvRows.length);
+      // 2026-05-25 bug fix: BullMQ dedups by jobId. Previous run used
+      // `backfill-${code}-${id}` which kept completed jobs around for
+      // 7 days (removeOnComplete.age=604800) — re-triggering silently
+      // dropped them all. Add timestamp to keep IDs unique per trigger.
+      const stamp = Date.now();
       for (let i = 0; i < maxLen; i++) {
         for (const [code, list] of [
           ["lion", lionRows] as const,
@@ -544,7 +549,7 @@ export const suppliersRouter = router({
               externalProductCode: row.externalCode,
               triggeredBy: "manual",
             },
-            { jobId: `backfill-${code}-${row.id}` },
+            { jobId: `backfill-${code}-${row.id}-${stamp}` },
           );
           enqueueCounts[code]++;
         }
