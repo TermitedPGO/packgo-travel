@@ -35,6 +35,17 @@ import {
   queueRewriteForImportedUvTours,
 } from "../services/uvBulkImportService";
 import { supplierDetailEnrichmentQueue } from "../queue";
+import {
+  hydrateTourFromParsed,
+  safeParseJson,
+} from "../services/supplierSync/hydration";
+import type {
+  NormalizedItinerary,
+  NormalizedPriceTerms,
+  NormalizedNotices,
+  NormalizedOptional,
+  NormalizedTourInfo,
+} from "../services/supplierSync/types";
 
 export const suppliersRouter = router({
   /* ───────────────────────── overview + history ───────────────────────── */
@@ -1683,6 +1694,148 @@ export const suppliersRouter = router({
         errors: errors.length,
         errorSamples: errors.slice(0, 5),
         offset: input.offset,
+      };
+    }),
+
+  /**
+   * 2026-05-25 — hydrate rich-content tour columns from
+   * supplierProductDetails parsed JSON. Zero LLM cost — pure
+   * transformation. Closes the gap discovered in the completeness audit:
+   * 4057/4191 (96.8%) active tours had no dailyItinerary / hotels /
+   * meals / attractions / etc., even though supplierProductDetails has
+   * 99.9% itinerary parsed coverage. Root cause: rewriteAllImportedTours
+   * only updated 9 basic fields; never copied parsed JSON into the
+   * tour's rich-content columns.
+   *
+   * Field mapping (see services/supplierSync/hydration.ts):
+   *   itineraryParsed   → dailyItinerary, itineraryDetailed, hotels[],
+   *                       meals[], attractions[], flights
+   *   tourInfoParsed    → highlights[], keyFeatures[], extractedDepartures
+   *   priceTermsParsed  → costExplanation
+   *   noticesParsed     → noticeDetailed
+   *   optionalParsed    → optionalTours[]
+   *
+   * Skips tours where `dailyItinerary` is already set (the 134 fully
+   * AI-enriched tours keep their existing rich shape). Only touches
+   * shallow supplier-imported tours.
+   *
+   * Idempotent — re-run safely after a fresh enrich.
+   */
+  hydrateFromParsed: adminProcedure
+    .input(
+      z.object({
+        supplierCode: z.enum(["lion", "uv", "all"]).default("all"),
+        dryRun: z.boolean().default(true),
+        offset: z.number().int().min(0).default(0),
+        limit: z.number().int().min(1).max(500).default(200),
+        /** Only touch tours where dailyItinerary IS NULL (default true). */
+        onlyShallow: z.boolean().default(true),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const db2 = await getDb();
+      if (!db2) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const supplierFilter =
+        input.supplierCode === "all"
+          ? or(
+              like(toursTable.sourceUrl, "%liontravel.com%"),
+              like(toursTable.sourceUrl, "%uvbookings.com%"),
+            )
+          : input.supplierCode === "lion"
+            ? like(toursTable.sourceUrl, "%liontravel.com%")
+            : like(toursTable.sourceUrl, "%uvbookings.com%");
+
+      // Chunk of tours to hydrate. JOIN to supplierProductDetails by
+      // resolving productCode → supplierProduct.id → details.
+      const rows = await db2
+        .select({
+          tourId: toursTable.id,
+          productCode: toursTable.productCode,
+          dailyItineraryExisting: toursTable.dailyItinerary,
+          supplierTitle: productsTable.title,
+          days: productsTable.days,
+          destinationCountry: productsTable.destinationCountry,
+          itineraryParsed: supplierProductDetails.itineraryParsed,
+          priceTermsParsed: supplierProductDetails.priceTermsParsed,
+          noticesParsed: supplierProductDetails.noticesParsed,
+          optionalParsed: supplierProductDetails.optionalParsed,
+          tourInfoParsed: supplierProductDetails.tourInfoParsed,
+        })
+        .from(toursTable)
+        .leftJoin(
+          productsTable,
+          eq(productsTable.externalProductCode, toursTable.productCode),
+        )
+        .leftJoin(
+          supplierProductDetails,
+          eq(supplierProductDetails.supplierProductId, productsTable.id),
+        )
+        .where(
+          input.onlyShallow
+            ? and(supplierFilter, isNull(toursTable.dailyItinerary))
+            : supplierFilter,
+        )
+        .orderBy(toursTable.id)
+        .limit(input.limit)
+        .offset(input.offset);
+
+      let updated = 0;
+      let skipped = 0;
+      const fieldCounts: Record<string, number> = {};
+      const errors: Array<{ id: number; err: string }> = [];
+
+      for (const r of rows) {
+        // Skip if there's no detail row (mass-import-only, never enriched).
+        if (!r.itineraryParsed && !r.tourInfoParsed && !r.priceTermsParsed) {
+          skipped++;
+          continue;
+        }
+
+        const hydrated = hydrateTourFromParsed({
+          itinerary: safeParseJson<NormalizedItinerary>(r.itineraryParsed),
+          priceTerms: safeParseJson<NormalizedPriceTerms>(r.priceTermsParsed),
+          notices: safeParseJson<NormalizedNotices>(r.noticesParsed),
+          optional: safeParseJson<NormalizedOptional>(r.optionalParsed),
+          tourInfo: safeParseJson<NormalizedTourInfo>(r.tourInfoParsed),
+          supplierTitle: r.supplierTitle ?? undefined,
+          days: r.days ?? undefined,
+          destinationCountry: r.destinationCountry ?? undefined,
+        });
+
+        const keys = Object.keys(hydrated) as Array<keyof typeof hydrated>;
+        if (keys.length === 0) {
+          skipped++;
+          continue;
+        }
+
+        for (const k of keys) fieldCounts[k] = (fieldCounts[k] ?? 0) + 1;
+
+        if (input.dryRun) continue;
+
+        try {
+          await db2
+            .update(toursTable)
+            .set({ ...hydrated, updatedAt: new Date() } as never)
+            .where(eq(toursTable.id, r.tourId));
+          updated++;
+        } catch (err) {
+          errors.push({
+            id: r.tourId,
+            err: err instanceof Error ? err.message.slice(0, 200) : String(err),
+          });
+        }
+      }
+
+      return {
+        dryRun: input.dryRun,
+        processed: rows.length,
+        updated: input.dryRun ? rows.length - skipped : updated,
+        skipped,
+        offset: input.offset,
+        fieldCounts,
+        errors: errors.length,
+        errorSamples: errors.slice(0, 5),
       };
     }),
 
