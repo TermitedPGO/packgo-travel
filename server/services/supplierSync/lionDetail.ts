@@ -27,11 +27,13 @@ import {
   getNoticeInfo,
   getOptionalInfo,
   getTourInfo,
+  getDayTripInfo,
   type LionTravelInfo,
   type LionPriceInfo,
   type LionNoticeInfo,
   type LionOptionalInfo,
   type LionTourInfo,
+  type LionDayTripInfo,
 } from "../../suppliers/lionClient";
 import { createChildLogger } from "../../_core/logger";
 import { fail, missing, ok, rateLimitedCall, withRetry } from "./sharedDetail";
@@ -75,15 +77,35 @@ export async function enrichLionProduct(
 
   const key = { normGroupId: externalProductCode, groupId };
 
-  // Call all 5 endpoints sequentially with rate-limit between calls.
+  // Call all 6 endpoints sequentially with rate-limit between calls.
   // If any throws, the rest still run so we capture partial data.
+  // Itinerary merges travelinfojson (flight info) + daytripinfojson
+  // (full day-by-day plan) — 2026-05-25.
   return {
-    itinerary: await safeFetch("itinerary", () =>
-      rateLimitedCall(
+    itinerary: await safeFetch("itinerary", async () => {
+      const travelRaw = await rateLimitedCall(
         () => withRetry(() => getTravelInfo(key)),
         `lion/travelinfo/${externalProductCode}`
-      ).then((raw) => ok("itinerary", raw, parseLionItinerary(raw)))
-    ),
+      );
+      // daytripinfojson is optional — if it fails, fall back to flight-info only
+      let dayTripRaw: LionDayTripInfo | null = null;
+      try {
+        dayTripRaw = await rateLimitedCall(
+          () => withRetry(() => getDayTripInfo(key)),
+          `lion/daytripinfo/${externalProductCode}`
+        );
+      } catch (err) {
+        log.warn(
+          { externalProductCode, err: err instanceof Error ? err.message : err },
+          "daytripinfojson fetch failed, using flight-info fallback",
+        );
+      }
+      return ok(
+        "itinerary",
+        { travelInfo: travelRaw, dayTripInfo: dayTripRaw },
+        parseLionItinerary(travelRaw, dayTripRaw)
+      );
+    }),
     priceTerms: await safeFetch("priceTerms", () =>
       rateLimitedCall(
         () => withRetry(() => getPriceInfo(key)),
@@ -164,54 +186,161 @@ async function resolveLionGroupId(
 /* ─────────────────── Parsers ─────────────────── */
 
 /**
- * Parse Lion's `travelinfojson` response into NormalizedItinerary.
+ * Strip simple HTML tags from a Lion API string (Lion returns HTML-escaped
+ * paragraphs in many fields). Lightweight — not a full sanitizer.
+ */
+function stripHtml(s: string | undefined | null): string {
+  if (!s) return "";
+  return s
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Map Lion's `Stars` (1-5 integer) into our type classification.
+ */
+function classifyLionHotelType(
+  stars: number | undefined,
+): NormalizedItinerary["days"][0]["hotels"][0]["type"] {
+  if (typeof stars !== "number") return "未指定";
+  if (stars >= 5) return "5星";
+  if (stars >= 4) return "4星";
+  if (stars >= 3) return "3星";
+  return "經濟";
+}
+
+/**
+ * Parse Lion's `travelinfojson` + `daytripinfojson` into NormalizedItinerary.
  *
- * NOTE: Lion's `travelinfojson` is actually flight + tour metadata
- * (NOT day-by-day itinerary — that lives in `daytripinfojson`, an
- * untyped endpoint we don't currently call). What we DO get:
- *   - Flight info (GoAirline, BackAirline, departure/arrive times)
- *   - GroupInfo metadata (tour days, country, etc.)
+ * 2026-05-25: Now merges TWO endpoints:
+ *   - travelinfojson → flight info + tour metadata (totalDays, country)
+ *   - daytripinfojson → DailyList[] with per-day attractions/hotels/meals
  *
- * So our NormalizedItinerary for Lion will have totalDays + transportation
- * info but `days[]` may be empty until we wire daytripinfojson in Stage 2.
+ * If daytripinfojson is null (call failed) or DailyList empty, falls back
+ * to synthesizing Day 1 + Day N from flight info (the original behavior).
+ *
+ * If travelinfojson missing/bad, returns null so caller marks parse_failed.
  */
 export function parseLionItinerary(
-  raw: LionTravelInfo
+  travel: LionTravelInfo,
+  dayTrip?: LionDayTripInfo | null,
 ): NormalizedItinerary | null {
-  if (!raw?.GroupInfo) return null;
-  const totalDays = raw.GroupInfo.TourDays || 0;
+  if (!travel?.GroupInfo) return null;
+  const totalDays = travel.GroupInfo.TourDays || 0;
   if (totalDays <= 0) return null;
 
   const transport: string[] = [];
-  if (raw.GoAirline)
-    transport.push(`去程: ${raw.GoAirline} ${raw.GoDepartureTime ?? ""}`.trim());
-  if (raw.BackAirline)
-    transport.push(`回程: ${raw.BackAirline} ${raw.BackDepartureTime ?? ""}`.trim());
+  if (travel.GoAirline)
+    transport.push(
+      `去程: ${travel.GoAirline} ${travel.GoDepartureTime ?? ""}`.trim(),
+    );
+  if (travel.BackAirline)
+    transport.push(
+      `回程: ${travel.BackAirline} ${travel.BackDepartureTime ?? ""}`.trim(),
+    );
 
-  // Day 1 = departure (synthesize from flight info), Day N = return.
-  // Middle days stay empty until daytripinfojson is wired.
+  const dailyList = dayTrip?.DailyList ?? [];
+
+  if (dailyList.length > 0) {
+    // Rich path: build days from daytripinfojson, augment Day 1 / Day N
+    // with flight info from travelinfojson.
+    const days: NormalizedItinerary["days"] = dailyList.map((d) => {
+      const dayNum = d.Day ?? 0;
+      const isFirst = dayNum === 1;
+      const isLast = dayNum === totalDays;
+
+      const attractions: NormalizedItinerary["days"][0]["attractions"] = (
+        d.AttractionsList ?? []
+      )
+        .map((a) => {
+          const name = stripHtml(a.Name);
+          if (!name) return null;
+          return {
+            name,
+            description: stripHtml(a.VisitWayDesc) || undefined,
+          };
+        })
+        .filter((x): x is NonNullable<typeof x> => x !== null);
+
+      const hotels: NormalizedItinerary["days"][0]["hotels"] = (
+        d.HotelList ?? []
+      )
+        .map((h) => {
+          const name = stripHtml(h.HotelName);
+          if (!name) return null;
+          return {
+            name,
+            type: classifyLionHotelType(h.Stars),
+            rating: typeof h.Stars === "number" ? h.Stars : undefined,
+          };
+        })
+        .filter((x): x is NonNullable<typeof x> => x !== null);
+      // Fallback: if HotelList empty but HotelDesc has text, parse it as one hotel
+      if (hotels.length === 0 && d.HotelDesc) {
+        const desc = stripHtml(d.HotelDesc);
+        if (desc) hotels.push({ name: desc, type: "未指定" });
+      }
+
+      const mealOrFalse = (s: string | undefined): boolean | string => {
+        const v = stripHtml(s);
+        if (!v) return false;
+        if (/敬請自理|自理|XXX|×/.test(v)) return false;
+        return v;
+      };
+
+      const transportation =
+        isFirst && transport[0]
+          ? transport[0]
+          : isLast && transport[1]
+            ? transport[1]
+            : undefined;
+
+      return {
+        dayNumber: dayNum || 0,
+        title: stripHtml(d.TravelPoint) || `Day ${dayNum}`,
+        attractions,
+        hotels,
+        meals: {
+          breakfast: mealOrFalse(d.Breakfast),
+          lunch: mealOrFalse(d.Lunch),
+          dinner: mealOrFalse(d.Dinner),
+        },
+        transportation,
+      };
+    });
+
+    return { totalDays, days };
+  }
+
+  // Fallback path: no daytripinfojson — synthesize Day 1 + Day N from
+  // flight info (original 2026-05-24 behavior).
   const days: NormalizedItinerary["days"] = [];
-  if (raw.GoAirline) {
+  if (travel.GoAirline) {
     days.push({
       dayNumber: 1,
-      title: `${raw.GoDepartureAirport ?? ""} → ${raw.GoArriveAirport ?? raw.GroupInfo.Country ?? ""}`,
+      title: `${travel.GoDepartureAirport ?? ""} → ${travel.GoArriveAirport ?? travel.GroupInfo.Country ?? ""}`,
       attractions: [],
       hotels: [],
       meals: { breakfast: false, lunch: false, dinner: false },
       transportation: transport[0],
     });
   }
-  if (raw.BackAirline && totalDays > 1) {
+  if (travel.BackAirline && totalDays > 1) {
     days.push({
       dayNumber: totalDays,
-      title: `${raw.BackDepartureAirport ?? raw.GroupInfo.Country ?? ""} → ${raw.BackArriveAirport ?? ""}`,
+      title: `${travel.BackDepartureAirport ?? travel.GroupInfo.Country ?? ""} → ${travel.BackArriveAirport ?? ""}`,
       attractions: [],
       hotels: [],
       meals: { breakfast: false, lunch: false, dinner: false },
       transportation: transport[1],
     });
   }
-
   return { totalDays, days };
 }
 

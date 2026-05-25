@@ -513,22 +513,41 @@ export const suppliersRouter = router({
 
       const enqueueCounts: Record<string, number> = { lion: 0, uv: 0 };
 
+      // 2026-05-25 fix UV starvation: interleave by supplier instead of
+      // processing one supplier's entire queue first. With FIFO + 5
+      // concurrent workers and 4590 Lion vs 1138 UV, Lion was monopolizing
+      // workers for ~2.5 hours before UV got attention. Round-robin
+      // ensures both suppliers progress in parallel.
+      const lionRows: typeof rows = [];
+      const uvRows: typeof rows = [];
       for (const row of rows) {
         const code = supplierMap.get(row.supplierId);
         if (code !== "lion" && code !== "uv") continue;
         if (input.supplierCode !== "all" && input.supplierCode !== code) continue;
+        if (code === "lion") lionRows.push(row);
+        else uvRows.push(row);
+      }
 
-        await supplierDetailEnrichmentQueue.add(
-          `enrich-${code}-${row.id}`,
-          {
-            supplierProductId: row.id,
-            supplierCode: code as "lion" | "uv",
-            externalProductCode: row.externalCode,
-            triggeredBy: "manual",
-          },
-          { jobId: `backfill-${code}-${row.id}` },
-        );
-        enqueueCounts[code]++;
+      const maxLen = Math.max(lionRows.length, uvRows.length);
+      for (let i = 0; i < maxLen; i++) {
+        for (const [code, list] of [
+          ["lion", lionRows] as const,
+          ["uv", uvRows] as const,
+        ]) {
+          const row = list[i];
+          if (!row) continue;
+          await supplierDetailEnrichmentQueue.add(
+            `enrich-${code}-${row.id}`,
+            {
+              supplierProductId: row.id,
+              supplierCode: code,
+              externalProductCode: row.externalCode,
+              triggeredBy: "manual",
+            },
+            { jobId: `backfill-${code}-${row.id}` },
+          );
+          enqueueCounts[code]++;
+        }
       }
 
       return {

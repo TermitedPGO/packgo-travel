@@ -342,9 +342,44 @@ export const getTourInfo = (key: DetailKey) =>
   callDetailEndpoint<LionTourInfo>("tourinfojson", key);
 
 /**
- * Generic escape hatch for the 7 detail endpoints we haven't hand-typed
- * (groupcalendarjson, daytripinfojson, calljson, popularinfojson,
- * stationinfojson, packageinfojson, articleinfojson). Returns raw JSON.
+ * Daytripinfojson — full day-by-day itinerary. 2026-05-25 added to supplier
+ * deep sync. Reverse-engineered from `lionTravelApiService.ts` which has
+ * been calling this via internal `postJson` for the bulk-import flow since
+ * Round 52.
+ */
+export interface LionDayTripInfo {
+  DailyList?: Array<{
+    Day?: number;
+    TravelPoint?: string;
+    Summary?: string;
+    SpecialNote?: string;
+    Breakfast?: string;
+    Lunch?: string;
+    Dinner?: string;
+    HotelDesc?: string;
+    HotelList?: Array<{
+      HotelName?: string;
+      Stars?: number;
+      [k: string]: unknown;
+    }>;
+    AttractionsList?: Array<{
+      Name?: string;
+      VisitWayDesc?: string;
+      ImgUrl?: string;
+      [k: string]: unknown;
+    }>;
+    [k: string]: unknown;
+  }>;
+  Features?: string;
+}
+
+export const getDayTripInfo = (key: DetailKey) =>
+  callDetailEndpoint<LionDayTripInfo>("daytripinfojson", key);
+
+/**
+ * Generic escape hatch for the 6 detail endpoints we haven't hand-typed
+ * (groupcalendarjson, calljson, popularinfojson, stationinfojson,
+ * packageinfojson, articleinfojson). Returns raw JSON.
  */
 export const getDetailRaw = (endpoint: string, key: DetailKey) =>
   callDetailEndpoint<unknown>(endpoint, key);
