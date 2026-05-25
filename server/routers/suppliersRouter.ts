@@ -1763,8 +1763,8 @@ export const suppliersRouter = router({
         { re: /俄羅斯|莫斯科|聖彼得堡|貝加爾湖/, country: "俄羅斯" },
         { re: /土耳其|伊斯坦堡|卡帕多奇亞|棉堡|安塔利亞/, country: "土耳其" },
         // Americas (Chinese + English city/state/landmark names for UV catalog)
-        { re: /美國|美西|美東|紐約|洛杉磯|舊金山|拉斯維加斯|夏威夷|阿拉斯加|黃石|大峽谷|波士頓|華盛頓|邁阿密|奧蘭多|西雅圖|芝加哥|New York|NYC|Los Angeles|LA tour|Las Vegas|San Francisco|Hawaii|Alaska|Yellowstone|Grand Canyon|Boston|Washington|Miami|Orlando|Seattle|Chicago|California|Texas|Florida|Virginia|Nevada|Arizona|Utah|Colorado|Oregon|Wyoming|Sedona|Monument Valley|Bryce|Zion|Yosemite|Tahoe|Snoqualmie|Leavenworth|Key West|Shenandoah|Philadelphia|Atlantic City|Niagara Falls.*USA|Antelope|Horseshoe|Death Valley|Lake Powell|Salt Lake|Reno|Denver|Aspen|Portland|Honolulu|Maui|Big Island|Kauai|Oahu|Cape Cod|Acadia|Smoky Mountain|New Orleans|Nashville|Memphis|Austin|San Diego|Anaheim|Disneyland|Universal|Napa|Sonoma|Carmel|Monterey|San Antonio|Houston|Dallas|Phoenix|Tucson|Albuquerque|Santa Fe|Mount Rushmore|Yellowstone|Glacier|Rocky Mountain|Sequoia|Joshua Tree|Niagara/, country: "美國" },
-        { re: /加拿大|溫哥華|多倫多|蒙特婁|渥太華|魁北克|班夫|落磯山|尼加拉|Vancouver|Toronto|Montreal|Ottawa|Quebec|Banff|Rocky|Whistler|Jasper|Calgary|Edmonton|Victoria.*BC|Victoria.*Canada|British Columbia|Alberta|Manitoba|Saskatchewan|Nova Scotia|Newfoundland|Yukon|Halifax|Winnipeg|Saskatoon|Regina|Hamilton.*ON|Mississauga|Brampton|Markham|Burnaby|Surrey|Richmond.*BC|Squamish|Tofino|Okanagan|Kelowna|Kamloops|Nanaimo|PEI|Prince Edward/, country: "加拿大" },
+        { re: /美國|美西|美東|紐約|洛杉磯|舊金山|拉斯維加斯|夏威夷|阿拉斯加|黃石|大峽谷|波士頓|華盛頓|邁阿密|奧蘭多|西雅圖|芝加哥|New York|NYC|Los Angeles|LA tour|Las Vegas|San Francisco|Hawaii|Alaska|Yellowstone|Grand Canyon|Boston|Washington|Miami|Orlando|Seattle|Chicago|California|Texas|Florida|Virginia|Nevada|Arizona|Utah|Colorado|Oregon|Wyoming|Sedona|Monument Valley|Bryce|Zion|Yosemite|Tahoe|Snoqualmie|Leavenworth|Key West|Shenandoah|Philadelphia|Atlantic City|Antelope|Horseshoe|Death Valley|Lake Powell|Salt Lake|Reno|Denver|Aspen|Portland|Honolulu|Maui|Big Island|Kauai|Oahu|Cape Cod|Acadia|Smoky Mountain|New Orleans|Nashville|Memphis|Austin|San Diego|Anaheim|Disneyland|Universal|Napa|Sonoma|Carmel|Monterey|San Antonio|Houston|Dallas|Phoenix|Tucson|Albuquerque|Santa Fe|Mount Rushmore|Glacier|Rocky Mountain|Sequoia|Joshua Tree|Niagara|Mount Rainier|Thousand Islands|Cornell|17 Miles|17-Miles|Pebble Beach|Valley of Fire|Walt Disney World|Sea World|Catalina|Yosemite|Olympic National/, country: "美國" },
+        { re: /加拿大|溫哥華|多倫多|蒙特婁|渥太華|魁北克|班夫|落磯山|尼加拉|Vancouver|Toronto|Montreal|Ottawa|Quebec|Banff|Rocky|Whistler|Jasper|Calgary|Edmonton|Victoria|British Columbia|Alberta|Manitoba|Saskatchewan|Nova Scotia|Newfoundland|Yukon|Halifax|Winnipeg|Saskatoon|Regina|Mississauga|Brampton|Markham|Burnaby|Surrey|Squamish|Tofino|Okanagan|Kelowna|Kamloops|Nanaimo|PEI|Prince Edward/, country: "加拿大" },
         { re: /墨西哥|坎昆|墨西哥城|Mexico|Cancun|Tulum|Playa del Carmen|Cabo|Riviera Maya/, country: "墨西哥" },
         // Oceania
         { re: /澳洲|澳大利亞|雪梨|墨爾本|布里斯本|黃金海岸|凱恩斯|大堡礁|烏魯魯/, country: "澳洲" },
@@ -1779,10 +1779,12 @@ export const suppliersRouter = router({
         { re: /斯里蘭卡|可倫坡|加勒|錫吉里亞/, country: "斯里蘭卡" },
         { re: /尼泊爾|加德滿都|波卡拉|安納普爾納|喜馬拉雅/, country: "尼泊爾" },
         { re: /不丹|廷布|帕羅/, country: "不丹" },
-        // South America
-        { re: /秘魯|庫斯科|馬丘比丘|利馬/, country: "秘魯" },
-        { re: /阿根廷|布宜諾斯艾利斯|巴塔哥尼亞/, country: "阿根廷" },
-        { re: /巴西|里約|聖保羅|伊瓜蘇/, country: "巴西" },
+        // South America (Chinese + English)
+        { re: /秘魯|庫斯科|馬丘比丘|利馬|Peru|Lima|Machu Picchu|Cusco|Sacred Valley/, country: "秘魯" },
+        { re: /阿根廷|布宜諾斯艾利斯|巴塔哥尼亞|Argentina|Buenos Aires|Patagonia/, country: "阿根廷" },
+        { re: /巴西|里約|聖保羅|伊瓜蘇|Brazil|Rio de Janeiro|São Paulo|Sao Paulo|Iguazu|Catedral Metropolitana|Brasil/, country: "巴西" },
+        { re: /智利|聖地牙哥.*智利|復活節島|Chile|Easter Island/, country: "智利" },
+        { re: /哥倫比亞|麥德林|Colombia|Bogotá|Bogota/, country: "哥倫比亞" },
         // Europe catch-all (after all specific Euro countries) — for
         // multi-country tours like "歐洲十國 14 日" that don't single out
         // one destination.
