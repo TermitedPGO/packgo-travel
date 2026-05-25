@@ -290,6 +290,10 @@ export class ContentAnalyzerAgent {
     // PACK&GO 品牌核心 + 目的地自適應風格
     const destinationStyle = getDestinationStyle(destinationCountry, destinationCity);
 
+    // 2026-05-25 cache-fix: removed per-tour `${destinationStyle}` from
+    // system prompt. System now identical across all tour generations →
+    // cache_control:ephemeral fires + ~90% input-token savings.
+    // destinationStyle moved to user prompt below.
     const systemPrompt = `你是 PACK&GO 旅行社的資深文案總監。
 
 品牌定位：美國精品華語旅行社，服務追求品質的華語旅客，行程涵蓋全球。
@@ -308,8 +312,6 @@ export class ContentAnalyzerAgent {
 4. 標題需要有文學感和詩意，讓旅客一看就心動
 5. 保持簡潔專業
 
-本次目的地風格指引：${destinationStyle}
-
 禁用詞彙：靈魂、洗滌、光影、呢喃、心靈、深度對話、完美融合、一生必去`;
 
     // P1-Self-Repair: inject selfRepairHint if provided by MasterAgent
@@ -318,6 +320,8 @@ export class ContentAnalyzerAgent {
       ? `\n\n【自我修復指令 — 請針對以下問題改善，這是第 ${rawData.selfRepairRound || 1} 次重試】：\n${selfRepairHint}\n請特別注意上述問題，確保輸出質量高於上次。`
       : '';
     const userPrompt = `請根據以下資訊生成旅遊文案（所有內容必須為繁體中文）：
+
+本次目的地風格指引：${destinationStyle}
 
 目的地：${destinationCity}, ${destinationCountry}
 天數：${days}天${nights}夜

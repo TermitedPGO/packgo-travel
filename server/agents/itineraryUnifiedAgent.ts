@@ -582,14 +582,27 @@ export class ItineraryUnifiedAgent {
 ★ 用詞風格：雅奢但不浮誇，動詞選用：漫步、品味、尋訪、聆聽、駐足、目睹、體驗、佇立、矗立
 
 ★ 自由活動 / 搭機日：
-   • Day 1 若無景點：補「搭機前往${city}（航程約 X 小時，飛行途中享用機上餐點，抵達後專車接送至飯店辦理入住休息）」
-   • 最後一天若無景點：補「享用飯店早餐後整理行李，搭機返回${rawData?.departureCity || '台北'}，結束 X 日精彩旅程」
+   • Day 1 若無景點：補「搭機前往目的地城市（航程約 X 小時，飛行途中享用機上餐點，抵達後專車接送至飯店辦理入住休息）」
+   • 最後一天若無景點：補「享用飯店早餐後整理行李，搭機返回出發地，結束 X 日精彩旅程」
    • 自由活動日：給 3 個具體選項（如「銀座購物 / 表參道咖啡店巡禮 / 上野公園賞櫻」）
-${originalTransportation ? `原始交通方式：${originalTransportation}` : ''}
-${transportRuleNote}${itinerarySelfRepairSection}`;
 
-    const userPrompt = `美化以下行程（目的地：${city}${country ? `, ${country}` : ""}）：
+${transportRuleNote}${itinerarySelfRepairSection}`;
+    // 2026-05-25 cache-fix: moved per-tour vars (city/country/departureCity/
+    // originalTransportation/extractedItineraries) out of system prompt
+    // into user prompt. System prompt is now identical across all tours
+    // → cache_control:ephemeral fires + ~90% input-token savings.
+
+    const userPrompt = `美化以下行程：
+
+【行程上下文】
+- 目的地城市：${city}
+- 目的地國家：${country || "未指定"}
+- 出發地：${rawData?.departureCity || "台北"}
+${originalTransportation ? `- 原始交通方式：${originalTransportation}` : ""}
+
+【原始行程資料】
 ${JSON.stringify(extractedItineraries, null, 2)}
+
 回傳 JSON 格式的美化行程，保持天數與原始完全一致（共 ${extractedItineraries.length} 天）。`;
 
     try {
