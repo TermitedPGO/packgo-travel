@@ -1947,6 +1947,169 @@ export const suppliersRouter = router({
       };
     }),
 
+  /**
+   * Queue LLM rewrite for top-priority tours. 2026-05-25: with $50/mo
+   * budget cap, ~250 tours/month max. Pick the most strategically
+   * important by score:
+   *   +20 isFeatured
+   *   +10 PACK&GO core destinations (美西/紐約/夏威夷/中國簽證)
+   *   +8  日本 (largest bucket, hot market)
+   *   +5  Other mainstream Asia (韓國/泰國/越南/中國)
+   *   +5  Has parsed itinerary (LLM has rich source data)
+   *   +3  Has heroImage filled (better visual)
+   *   +1  Reasonable price (TWD 20000-100000 / USD 500-3000 range)
+   *
+   * Hard budget guard: refuses if estimated cost > remaining budget.
+   * Sequential queue add — 1 BullMQ job per tour. Worker concurrency 1
+   * (heavy LLM task per the existing config). ~3 min/tour throughput.
+   *
+   * dryRun=true returns top N scored tours without queueing.
+   */
+  queuePriorityRewrites: adminProcedure
+    .input(
+      z.object({
+        limit: z.number().int().min(1).max(500).default(50),
+        dryRun: z.boolean().default(true),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const db2 = await getDb();
+      if (!db2) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      // 1. Budget check
+      const { llmUsageLogs } = await import("../../drizzle/schema");
+      const monthStart = new Date();
+      monthStart.setUTCDate(1);
+      monthStart.setUTCHours(0, 0, 0, 0);
+      const [costRow] = await db2
+        .select({
+          total: sql<string>`SUM(CAST(${llmUsageLogs.estimatedCostUsd} AS DECIMAL(20,6)))`,
+        })
+        .from(llmUsageLogs)
+        .where(gte(llmUsageLogs.createdAt, monthStart));
+      const monthSpendUsd = parseFloat(costRow?.total ?? "0");
+      const BUDGET_CAP = 40;
+      const COST_PER_TOUR = 0.2;
+      const budgetRemaining = BUDGET_CAP - monthSpendUsd;
+      const maxByBudget = Math.floor(budgetRemaining / COST_PER_TOUR);
+      const actualLimit = Math.min(input.limit, Math.max(0, maxByBudget));
+
+      if (actualLimit === 0 && !input.dryRun) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: `Budget exhausted: $${monthSpendUsd.toFixed(2)}/$${BUDGET_CAP}. Wait until next month.`,
+        });
+      }
+
+      // 2. Fetch candidate tours (active supplier-imported + not already
+      // rewritten — heuristic: empty description = supplier shell)
+      const rows = await db2
+        .select({
+          id: toursTable.id,
+          title: toursTable.title,
+          destinationCountry: toursTable.destinationCountry,
+          price: toursTable.price,
+          priceCurrency: toursTable.priceCurrency,
+          heroImage: toursTable.heroImage,
+          featured: toursTable.featured,
+          description: toursTable.description,
+          sourceUrl: toursTable.sourceUrl,
+        })
+        .from(toursTable)
+        .where(
+          and(
+            eq(toursTable.status, "active"),
+            or(
+              like(toursTable.sourceUrl, "%liontravel.com%"),
+              like(toursTable.sourceUrl, "%uvbookings.com%"),
+            ),
+            // Skip already-rewritten (has real description)
+            or(
+              isNull(toursTable.description),
+              sql`LENGTH(${toursTable.description}) < 100`,
+            ),
+          ),
+        );
+
+      // 3. Score each candidate
+      const CORE_DESTS = new Set(["美國", "夏威夷", "中國"]);
+      const TIER2_DESTS = new Set(["日本"]);
+      const TIER3_DESTS = new Set(["韓國", "泰國", "越南"]);
+
+      const scored = rows.map((t) => {
+        let score = 0;
+        if (t.featured) score += 20;
+        const country = t.destinationCountry ?? "";
+        if (CORE_DESTS.has(country)) score += 10;
+        else if (TIER2_DESTS.has(country)) score += 8;
+        else if (TIER3_DESTS.has(country)) score += 5;
+        if (t.heroImage) score += 3;
+        const price = t.price ?? 0;
+        const cur = t.priceCurrency ?? "TWD";
+        const inRange =
+          (cur === "TWD" && price >= 20000 && price <= 100000) ||
+          (cur === "USD" && price >= 500 && price <= 3000);
+        if (inRange) score += 1;
+        return { ...t, score };
+      });
+
+      // 4. Sort by score desc + take top N
+      scored.sort((a, b) => b.score - a.score);
+      const picked = scored.slice(0, actualLimit);
+
+      if (input.dryRun) {
+        return {
+          dryRun: true,
+          monthSpendUsd: monthSpendUsd.toFixed(2),
+          budgetCap: BUDGET_CAP,
+          budgetRemainingUsd: budgetRemaining.toFixed(2),
+          maxByBudget,
+          requested: input.limit,
+          actualLimit,
+          candidatePool: scored.length,
+          estimatedCostUsd: (actualLimit * COST_PER_TOUR).toFixed(2),
+          estimatedTotalMin: actualLimit * 3,
+          scoreDistribution: {
+            score20Plus: scored.filter((s) => s.score >= 20).length,
+            score10to19: scored.filter((s) => s.score >= 10 && s.score < 20).length,
+            score5to9: scored.filter((s) => s.score >= 5 && s.score < 10).length,
+            scoreBelow5: scored.filter((s) => s.score < 5).length,
+          },
+          topSamples: picked.slice(0, 10).map((t) => ({
+            id: t.id,
+            score: t.score,
+            country: t.destinationCountry,
+            title: t.title?.slice(0, 60) ?? "",
+          })),
+        };
+      }
+
+      // 5. Real queue — fire rewrite for each
+      const { queueRewriteForImportedTours } = await import(
+        "../services/lionBulkImportService"
+      );
+      const result = await queueRewriteForImportedTours(
+        picked.map((p) => p.id),
+        { userId: ctx.user.id },
+      );
+      return {
+        dryRun: false,
+        queued: result.queued,
+        budgetSpentThisCallUsd: (result.queued * COST_PER_TOUR).toFixed(2),
+        budgetRemainingAfterUsd: (
+          budgetRemaining -
+          result.queued * COST_PER_TOUR
+        ).toFixed(2),
+        estimatedTotalMin: result.queued * 3,
+        topSamples: picked.slice(0, 5).map((t) => ({
+          id: t.id,
+          score: t.score,
+          country: t.destinationCountry,
+          title: t.title?.slice(0, 60) ?? "",
+        })),
+      };
+    }),
+
   /* ────────────────────────── visibility toggle ───────────────────────── */
 
   /**
