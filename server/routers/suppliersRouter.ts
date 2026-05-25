@@ -1868,6 +1868,85 @@ export const suppliersRouter = router({
       };
     }),
 
+  /**
+   * Trigger LLM rewrite for a SINGLE tour (manual featured-only flow).
+   * 2026-05-25: After deep sync ships, supplier shells render fine via
+   * M6 SupplierDetailSection. LLM rewrite is now a curatorial decision
+   * for featured/招牌團 tours — costs ~$0.20/tour × 4191 = $1250 if
+   * mass-applied, so we restrict to manual trigger.
+   *
+   * Budget check: refuses if current month LLM spend > $40 (10% safety
+   * margin under the $50/mo scaling guardrail).
+   *
+   * Dispatches to existing tourGenerationQueue → masterAgent pipeline.
+   * On success, masterAgent creates a NEW tour row + flips the source
+   * draft to status='inactive' (per existing worker.ts logic).
+   */
+  rewriteTourWithLLM: adminProcedure
+    .input(z.object({ tourId: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const db2 = await getDb();
+      if (!db2) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const [tour] = await db2
+        .select({ id: toursTable.id, sourceUrl: toursTable.sourceUrl, title: toursTable.title })
+        .from(toursTable)
+        .where(eq(toursTable.id, input.tourId))
+        .limit(1);
+      if (!tour) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Tour not found" });
+      }
+      if (!tour.sourceUrl) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Tour has no sourceUrl — cannot rewrite via supplier pipeline",
+        });
+      }
+
+      // Budget check — refuse if monthly LLM spend > $40
+      const { llmUsageLogs } = await import("../../drizzle/schema");
+      const monthStart = new Date();
+      monthStart.setUTCDate(1);
+      monthStart.setUTCHours(0, 0, 0, 0);
+      const [costRow] = await db2
+        .select({
+          total: sql<string>`SUM(CAST(${llmUsageLogs.estimatedCostUsd} AS DECIMAL(20,6)))`,
+        })
+        .from(llmUsageLogs)
+        .where(gte(llmUsageLogs.createdAt, monthStart));
+      const monthSpendUsd = parseFloat(costRow?.total ?? "0");
+      const BUDGET_CAP = 40;
+      if (monthSpendUsd >= BUDGET_CAP) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: `LLM budget reached ($${monthSpendUsd.toFixed(2)}/$${BUDGET_CAP}). Wait until next month or raise cap.`,
+        });
+      }
+
+      // Fire rewrite via existing queue helper
+      const { queueRewriteForImportedTours } = await import(
+        "../services/lionBulkImportService"
+      );
+      const result = await queueRewriteForImportedTours([input.tourId], {
+        userId: ctx.user.id,
+      });
+      if (result.queued === 0) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Queue add failed (sourceUrl resolution or BullMQ error)",
+        });
+      }
+      return {
+        queued: result.queued,
+        tourTitle: tour.title.slice(0, 80),
+        monthSpendUsd: monthSpendUsd.toFixed(2),
+        budgetCap: BUDGET_CAP,
+        budgetRemainingUsd: (BUDGET_CAP - monthSpendUsd).toFixed(2),
+        estimatedCostUsd: "0.15-0.30",
+        estimatedTimeMin: "2-3",
+      };
+    }),
+
   /* ────────────────────────── visibility toggle ───────────────────────── */
 
   /**
