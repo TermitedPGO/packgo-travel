@@ -2270,6 +2270,25 @@ export const suppliersRouter = router({
       };
     }),
 
+  /**
+   * Manual trigger for the monthly priority-rewrite cron. Useful when Jeff
+   * tops up Anthropic credit mid-month and wants to start the next batch
+   * immediately instead of waiting for the 1st-of-month cron. Same budget
+   * checks apply.
+   */
+  triggerPriorityRewriteCron: adminProcedure
+    .input(
+      z.object({
+        limit: z.number().int().min(1).max(500).optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const { runPriorityRewriteCron } = await import(
+        "../queues/priorityRewriteCron"
+      );
+      return runPriorityRewriteCron("manual", { limit: input.limit });
+    }),
+
   /* ────────────────────────── visibility toggle ───────────────────────── */
 
   /**

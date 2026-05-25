@@ -928,6 +928,22 @@ async function startServer() {
     logger.warn({ err }, "[Startup] Failed to schedule supplier detail enrichment cron");
   }
 
+  // Monthly priority rewrite (2026-05-25) — fires 1st of month 09:00 UTC.
+  // Picks top ~225 shallow tours by destination score, pushes to
+  // tour-generation queue for full LLM/imagegen rewrite. Budget-gated at
+  // $45/run (under Jeff's $50/mo top-up). With 4057 shallow tours, this
+  // covers everything in ~18 months automated.
+  try {
+    const {
+      setupMonthlyPriorityRewriteCron,
+      startPriorityRewriteCronWorker,
+    } = await import('../queues/priorityRewriteCron');
+    await setupMonthlyPriorityRewriteCron();
+    startPriorityRewriteCronWorker();
+  } catch (err) {
+    logger.warn({ err }, "[Startup] Failed to schedule monthly priority rewrite cron");
+  }
+
   // Round 80.22 Phase C: Packpoint daily maintenance — auto-upgrade tier,
   // 18-month inactivity expiry, birthday bonus. Runs at 02:00 UTC (10:00
   // Taipei). Idempotent on each user-level mutation.
