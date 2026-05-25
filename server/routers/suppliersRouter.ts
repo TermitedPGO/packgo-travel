@@ -1459,6 +1459,221 @@ export const suppliersRouter = router({
     };
   }),
 
+  /**
+   * Force re-enrich ALL active products for a supplier, regardless of the
+   * 7-day-stale check. Use when:
+   *   - Parser code changed (e.g. daytripinfojson added 2026-05-25)
+   *   - Need fresh data from supplier
+   *
+   * Enqueues every active product with timestamp-uniqued jobId so BullMQ
+   * doesn't dedupe against previous backfill runs.
+   */
+  forceReEnrichAll: adminProcedure
+    .input(
+      z.object({
+        supplierCode: z.enum(["lion", "uv", "all"]).default("all"),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const db2 = await getDb();
+      if (!db2) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const allSuppliers = await db2
+        .select({ id: suppliersTable.id, code: suppliersTable.code })
+        .from(suppliersTable);
+      const codeToId = new Map<string, number>();
+      const idToCode = new Map<number, string>();
+      allSuppliers.forEach((s) => {
+        codeToId.set(s.code, s.id);
+        idToCode.set(s.id, s.code);
+      });
+
+      const conditions = [eq(productsTable.status, "active")];
+      if (input.supplierCode !== "all") {
+        const sid = codeToId.get(input.supplierCode);
+        if (sid !== undefined) {
+          conditions.push(eq(productsTable.supplierId, sid));
+        }
+      }
+
+      const rows = await db2
+        .select({
+          id: productsTable.id,
+          supplierId: productsTable.supplierId,
+          externalCode: productsTable.externalProductCode,
+        })
+        .from(productsTable)
+        .where(and(...conditions));
+
+      // Round-robin interleave (Lion + UV in parallel from worker's view)
+      const lionRows: typeof rows = [];
+      const uvRows: typeof rows = [];
+      for (const row of rows) {
+        const code = idToCode.get(row.supplierId);
+        if (code === "lion") lionRows.push(row);
+        else if (code === "uv") uvRows.push(row);
+      }
+
+      const stamp = Date.now();
+      const counts: Record<string, number> = { lion: 0, uv: 0 };
+      const maxLen = Math.max(lionRows.length, uvRows.length);
+      for (let i = 0; i < maxLen; i++) {
+        for (const [code, list] of [
+          ["lion", lionRows] as const,
+          ["uv", uvRows] as const,
+        ]) {
+          const row = list[i];
+          if (!row) continue;
+          await supplierDetailEnrichmentQueue.add(
+            `force-${code}-${row.id}`,
+            {
+              supplierProductId: row.id,
+              supplierCode: code,
+              externalProductCode: row.externalCode,
+              triggeredBy: "manual",
+            },
+            { jobId: `force-${code}-${row.id}-${stamp}` },
+          );
+          counts[code]++;
+        }
+      }
+
+      return { enqueued: counts, total: counts.lion + counts.uv };
+    }),
+
+  /**
+   * Rewrite all existing imported tour rows from the current
+   * supplierProducts mirror. Updates fields:
+   *   - title (latest supplier title)
+   *   - price (latest min retailPrice from supplierDepartures)
+   *   - destinationCountry/City (newly backfilled by re-enrichment)
+   *   - departureCity, days, duration, nights, imageUrl, heroImage
+   *
+   * Use after `forceReEnrichAll` finishes to propagate fresh data into
+   * customer-facing tour rows. NEVER modifies status (Jeff's manual
+   * deactivate decisions are preserved).
+   */
+  rewriteAllImportedTours: adminProcedure
+    .input(
+      z.object({
+        supplierCode: z.enum(["lion", "uv", "all"]).default("all"),
+        dryRun: z.boolean().default(true),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const db2 = await getDb();
+      if (!db2) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const { supplierDepartures } = await import("../../drizzle/schema");
+
+      // Pull all imported tours + matching supplier products
+      const supplierFilter =
+        input.supplierCode === "all"
+          ? or(
+              like(toursTable.sourceUrl, "%liontravel.com%"),
+              like(toursTable.sourceUrl, "%uvbookings.com%"),
+            )
+          : input.supplierCode === "lion"
+            ? like(toursTable.sourceUrl, "%liontravel.com%")
+            : like(toursTable.sourceUrl, "%uvbookings.com%");
+
+      const tours = await db2
+        .select({
+          id: toursTable.id,
+          sourceUrl: toursTable.sourceUrl,
+        })
+        .from(toursTable)
+        .where(supplierFilter);
+
+      // Build code → supplierProduct lookup
+      const allProducts = await db2
+        .select({
+          id: productsTable.id,
+          code: productsTable.externalProductCode,
+          title: productsTable.title,
+          days: productsTable.days,
+          departureCity: productsTable.departureCity,
+          destinationCountry: productsTable.destinationCountry,
+          destinationCity: productsTable.destinationCity,
+          imageUrl: productsTable.imageUrl,
+          currency: productsTable.currency,
+        })
+        .from(productsTable);
+      const codeToProduct = new Map<string, (typeof allProducts)[0]>();
+      allProducts.forEach((p) => codeToProduct.set(p.code, p));
+
+      let updated = 0;
+      let skipped = 0;
+      const errors: Array<{ id: number; err: string }> = [];
+
+      for (const t of tours) {
+        const code =
+          t.sourceUrl?.match(/[?&]NormGroupID=([^&]+)/)?.[1] ||
+          t.sourceUrl?.match(/\/product\/detail\/([^/?#]+)/)?.[1];
+        if (!code) {
+          skipped++;
+          continue;
+        }
+        const product = codeToProduct.get(code);
+        if (!product) {
+          skipped++;
+          continue;
+        }
+
+        // Fetch min price from supplierDepartures
+        const [priceRow] = await db2
+          .select({
+            minPrice: sql<string>`MIN(${supplierDepartures.retailPrice})`,
+          })
+          .from(supplierDepartures)
+          .where(eq(supplierDepartures.supplierProductId, product.id));
+        const price = Math.round(Number(priceRow?.minPrice ?? 0));
+
+        if (input.dryRun) continue;
+
+        try {
+          await db2
+            .update(toursTable)
+            .set({
+              title: product.title.slice(0, 200),
+              price: price > 0 ? price : undefined,
+              priceCurrency: product.currency,
+              destinationCountry: product.destinationCountry ?? "",
+              destinationCity:
+                product.destinationCity ?? product.destinationCountry ?? "",
+              departureCity: product.departureCity ?? "",
+              duration: product.days,
+              nights: Math.max(0, product.days - 1),
+              imageUrl: product.imageUrl ?? "",
+              heroImage: product.imageUrl ?? "",
+              updatedAt: new Date(),
+            } as never)
+            .where(eq(toursTable.id, t.id));
+          updated++;
+        } catch (err) {
+          errors.push({
+            id: t.id,
+            err: err instanceof Error ? err.message.slice(0, 200) : String(err),
+          });
+        }
+      }
+
+      if (input.dryRun) {
+        return {
+          dryRun: true,
+          wouldUpdate: tours.length - skipped,
+          skipped,
+        };
+      }
+      return {
+        dryRun: false,
+        updated,
+        skipped,
+        errors: errors.length,
+        errorSamples: errors.slice(0, 5),
+      };
+    }),
+
   /* ────────────────────────── visibility toggle ───────────────────────── */
 
   /**

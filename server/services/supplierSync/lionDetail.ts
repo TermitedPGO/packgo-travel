@@ -15,12 +15,54 @@
  * crashing the whole product enrichment.
  */
 
-import { and, asc, eq, gte } from "drizzle-orm";
+import { and, asc, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "../../db";
 import {
   supplierDepartures as departuresTable,
   supplierProducts as productsTable,
 } from "../../../drizzle/schema";
+
+/**
+ * Backfill helper: write country (and destination city when present) back
+ * into supplierProducts after enrichment finds it in travelinfojson.
+ * Lion's search API doesn't return country, so the only place to learn
+ * it is from the detail call.
+ */
+async function updateSupplierProductMeta(
+  supplierProductId: number,
+  meta: { destinationCountry?: string | null; destinationCity?: string | null },
+): Promise<void> {
+  if (!meta.destinationCountry && !meta.destinationCity) return;
+  const db = await getDb();
+  if (!db) return;
+  const updates: Record<string, unknown> = {};
+  if (meta.destinationCountry) updates.destinationCountry = meta.destinationCountry.slice(0, 128);
+  if (meta.destinationCity) updates.destinationCity = meta.destinationCity.slice(0, 128);
+  if (Object.keys(updates).length === 0) return;
+  try {
+    await db
+      .update(productsTable)
+      .set(updates)
+      .where(eq(productsTable.id, supplierProductId));
+  } catch {
+    // non-fatal — country backfill is best-effort
+  }
+}
+
+// Lion's ISO-2 country code map (reused from lionTravelApiService)
+const LION_COUNTRY_MAP: Record<string, string> = {
+  JP: "日本", KR: "韓國", TW: "台灣", US: "美國", CA: "加拿大",
+  GB: "英國", FR: "法國", DE: "德國", IT: "義大利", ES: "西班牙",
+  CH: "瑞士", AT: "奧地利", NL: "荷蘭", BE: "比利時", LU: "盧森堡",
+  GR: "希臘", PT: "葡萄牙", IE: "愛爾蘭", CZ: "捷克", HU: "匈牙利",
+  PL: "波蘭", SK: "斯洛伐克", SI: "斯洛維尼亞", HR: "克羅埃西亞",
+  RS: "塞爾維亞", BG: "保加利亞", RO: "羅馬尼亞", NO: "挪威",
+  SE: "瑞典", DK: "丹麥", FI: "芬蘭", IS: "冰島", RU: "俄羅斯",
+  TR: "土耳其", TH: "泰國", VN: "越南", MY: "馬來西亞", SG: "新加坡",
+  ID: "印尼", PH: "菲律賓", IN: "印度", LK: "斯里蘭卡", NP: "尼泊爾",
+  EG: "埃及", MA: "摩洛哥", ZA: "南非", AU: "澳洲", NZ: "紐西蘭",
+  MO: "澳門", HK: "香港", CN: "中國",
+};
 import {
   getTravelInfo,
   getPriceInfo,
@@ -99,6 +141,16 @@ export async function enrichLionProduct(
           { externalProductCode, err: err instanceof Error ? err.message : err },
           "daytripinfojson fetch failed, using flight-info fallback",
         );
+      }
+      // 2026-05-25: backfill destination country to supplierProducts so
+      // downstream tour imports get the country field populated. Lion's
+      // search API doesn't return country — only the detail call does.
+      const country = (travelRaw as any)?.GroupInfo?.Country;
+      if (typeof country === "string") {
+        const mapped = LION_COUNTRY_MAP[country.toUpperCase()] || country;
+        await updateSupplierProductMeta(supplierProductId, {
+          destinationCountry: mapped,
+        });
       }
       return ok(
         "itinerary",
