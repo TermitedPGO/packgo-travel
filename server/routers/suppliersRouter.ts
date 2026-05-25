@@ -1072,6 +1072,128 @@ export const suppliersRouter = router({
       return { dryRun: false, deactivated };
     }),
 
+  /**
+   * Deactivate residual unhealthy tours after mass import + audit.
+   * 2026-05-25: hides the ~95 active tours that have data-quality
+   * issues (no image / no supplier detail / parse_failed). Customer
+   * UX > catalog count.
+   *
+   * Three conditions, ANY triggers deactivation:
+   *   1. Active + no heroImage AND no imageUrl (supplier source had
+   *      no image — page Hero would render blank)
+   *   2. Active + linked supplierProduct exists but supplierProductDetails
+   *      row missing (deep sync never reached this product → no rich
+   *      content for TourDetail)
+   *   3. Active + supplierProductDetails exists but itineraryParseStatus
+   *      != 'parsed' (parser couldn't extract — no day-by-day to show)
+   */
+  deactivateResidualUnhealthy: adminProcedure
+    .input(z.object({ dryRun: z.boolean().default(true) }))
+    .mutation(async ({ input }) => {
+      const db2 = await getDb();
+      if (!db2) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      // Pull all supplier-imported active tours + side-load supplier mirror
+      const rows = await db2
+        .select({
+          id: toursTable.id,
+          title: toursTable.title,
+          heroImage: toursTable.heroImage,
+          imageUrl: toursTable.imageUrl,
+          sourceUrl: toursTable.sourceUrl,
+        })
+        .from(toursTable)
+        .where(
+          and(
+            eq(toursTable.status, "active"),
+            or(
+              like(toursTable.sourceUrl, "%liontravel.com%"),
+              like(toursTable.sourceUrl, "%uvbookings.com%"),
+            ),
+          ),
+        );
+
+      // Build code → productId / detail-status maps once
+      const allProducts = await db2
+        .select({
+          id: productsTable.id,
+          code: productsTable.externalProductCode,
+        })
+        .from(productsTable);
+      const codeToProductId = new Map<string, number>();
+      allProducts.forEach((p) => codeToProductId.set(p.code, p.id));
+
+      const allDetails = await db2
+        .select({
+          supplierProductId: supplierProductDetails.supplierProductId,
+          itineraryParseStatus: supplierProductDetails.itineraryParseStatus,
+        })
+        .from(supplierProductDetails);
+      const productIdToStatus = new Map<number, string>();
+      allDetails.forEach((d) =>
+        productIdToStatus.set(d.supplierProductId, d.itineraryParseStatus),
+      );
+
+      const toDeactivate: Array<{
+        id: number;
+        title: string;
+        reason: string;
+      }> = [];
+
+      for (const t of rows) {
+        const reasons: string[] = [];
+        if (!t.heroImage && !t.imageUrl) reasons.push("noImage");
+
+        const code =
+          t.sourceUrl?.match(/[?&]NormGroupID=([^&]+)/)?.[1] ||
+          t.sourceUrl?.match(/\/product\/detail\/([^/?#]+)/)?.[1];
+        if (code) {
+          const productId = codeToProductId.get(code);
+          if (productId === undefined) {
+            // No mirror — that's actually noSupplierLink (already 0 per audit)
+          } else {
+            const status = productIdToStatus.get(productId);
+            if (!status) reasons.push("noSupplierDetail");
+            else if (status !== "parsed") reasons.push("itineraryNotParsed");
+          }
+        }
+
+        if (reasons.length > 0) {
+          toDeactivate.push({
+            id: t.id,
+            title: t.title?.slice(0, 60) ?? "",
+            reason: reasons.join(","),
+          });
+        }
+      }
+
+      if (input.dryRun) {
+        return {
+          dryRun: true,
+          wouldDeactivate: toDeactivate.length,
+          byReason: toDeactivate.reduce<Record<string, number>>((acc, t) => {
+            acc[t.reason] = (acc[t.reason] || 0) + 1;
+            return acc;
+          }, {}),
+          samples: toDeactivate.slice(0, 5),
+        };
+      }
+
+      let deactivated = 0;
+      for (const t of toDeactivate) {
+        try {
+          await db2
+            .update(toursTable)
+            .set({ status: "inactive", updatedAt: new Date() })
+            .where(eq(toursTable.id, t.id));
+          deactivated++;
+        } catch {
+          // continue
+        }
+      }
+      return { dryRun: false, deactivated };
+    }),
+
   /* ────────────────────────── visibility toggle ───────────────────────── */
 
   /**
