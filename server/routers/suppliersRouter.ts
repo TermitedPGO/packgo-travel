@@ -1017,6 +1017,61 @@ export const suppliersRouter = router({
     };
   }),
 
+  /**
+   * Deactivate zero-price tours. 2026-05-25: UV products without
+   * supplierDepartures.retailPrice end up with price=0. Hide them from
+   * customers (status=inactive) until prices are available.
+   */
+  deactivateZeroPriceTours: adminProcedure
+    .input(z.object({ dryRun: z.boolean().default(true) }))
+    .mutation(async ({ input }) => {
+      const db2 = await getDb();
+      if (!db2) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const rows = await db2
+        .select({ id: toursTable.id, title: toursTable.title })
+        .from(toursTable)
+        .where(
+          and(
+            eq(toursTable.status, "active"),
+            or(
+              like(toursTable.sourceUrl, "%liontravel.com%"),
+              like(toursTable.sourceUrl, "%uvbookings.com%"),
+            ),
+            or(
+              sql`${toursTable.price} = 0`,
+              sql`${toursTable.price} IS NULL`,
+            ),
+          ),
+        );
+
+      if (input.dryRun) {
+        return {
+          dryRun: true,
+          wouldDeactivate: rows.length,
+          samples: rows.slice(0, 5).map((r) => ({
+            id: r.id,
+            title: r.title?.slice(0, 60) ?? "",
+          })),
+        };
+      }
+
+      // Real deactivate — batch update
+      let deactivated = 0;
+      for (const r of rows) {
+        try {
+          await db2
+            .update(toursTable)
+            .set({ status: "inactive", updatedAt: new Date() })
+            .where(eq(toursTable.id, r.id));
+          deactivated++;
+        } catch {
+          // continue on error
+        }
+      }
+      return { dryRun: false, deactivated };
+    }),
+
   /* ────────────────────────── visibility toggle ───────────────────────── */
 
   /**
