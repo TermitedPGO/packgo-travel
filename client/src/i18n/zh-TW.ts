@@ -1475,6 +1475,16 @@ export const zhTW = {
 
   // 行程詳情
   tourDetail: {
+    supplierDetail: {
+      heading: '供應商完整資訊',
+      fromSupplier: '來自供應商',
+      itinerary: '詳細行程',
+      days: '天',
+      priceTerms: '費用說明',
+      notices: '注意事項',
+      optional: '自費項目',
+      lastUpdated: '最後更新',
+    },
     collapseAll: '全部收合',
     expandAllDays: '展開全部 {count} 天',
     overview: '行程概覽',

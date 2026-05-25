@@ -1464,6 +1464,16 @@ export const en = {
 
   // Tour Detail
   tourDetail: {
+    supplierDetail: {
+      heading: 'Complete supplier information',
+      fromSupplier: 'From supplier',
+      itinerary: 'Day-by-day itinerary',
+      days: 'days',
+      priceTerms: 'Price terms',
+      notices: 'Important notices',
+      optional: 'Optional add-ons',
+      lastUpdated: 'Last updated',
+    },
     collapseAll: 'Collapse all',
     expandAllDays: 'Expand all days',
     overview: 'Overview',
