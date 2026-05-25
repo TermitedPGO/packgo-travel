@@ -1746,6 +1746,13 @@ export const suppliersRouter = router({
             ? like(toursTable.sourceUrl, "%liontravel.com%")
             : like(toursTable.sourceUrl, "%uvbookings.com%");
 
+      // status='active' filter is essential — inactive tours often have
+      // legacy short product codes (e.g. "MNKIXOWL05") that don't match
+      // supplierProducts.externalProductCode (UUIDs). Without this, the
+      // first batch returns inactive tours with broken codes and skips
+      // 100% of them, hiding real hydration progress.
+      const activeFilter = eq(toursTable.status, "active");
+
       // Chunk of tours to hydrate. JOIN to supplierProductDetails by
       // resolving productCode → supplierProduct.id → details.
       const rows = await db2
@@ -1773,8 +1780,8 @@ export const suppliersRouter = router({
         )
         .where(
           input.onlyShallow
-            ? and(supplierFilter, isNull(toursTable.dailyItinerary))
-            : supplierFilter,
+            ? and(activeFilter, supplierFilter, isNull(toursTable.dailyItinerary))
+            : and(activeFilter, supplierFilter),
         )
         .orderBy(toursTable.id)
         .limit(input.limit)
