@@ -119,12 +119,17 @@ export const tourGenerationWorker = new Worker<TourGenerationJobData, TourGenera
   },
   {
     connection: redisBullMQ, // BUG-001: use dedicated connection without commandTimeout
-    // v80.24: bulk-import scenarios queue 50-100 tours; concurrency=1 takes
-    // ~50-100 minutes serial. Anthropic Haiku 4.5 has 4000 req/min limit on
-    // tier 1, each tour fires ~10-15 LLM calls so concurrency=4 ≈ 60 req/min
-    // — well under the cap. 50-tour batch: 50 min → ~13 min. Single-tour
-    // latency unchanged.
-    concurrency: 4,
+    // 2026-05-26: was concurrency=4. The 150-tour batch I queued tonight
+    // hit Anthropic's 450k INPUT TOKEN/min cap on Haiku 4.5 (the prior
+    // math sized for REQUEST count, not tokens — translation calls are
+    // token-heavy). 4 tours × ~6 parallel sub-agents × ~20k tokens =
+    // ~480k/min peak → 429 storm → Sentry email flood.
+    //
+    // Concurrency=2 gives ~240k tokens/min peak — comfortable headroom
+    // under the 450k cap. 150-tour batch: 13 min → ~26 min, acceptable
+    // for an overnight cron. The 429 retry in invokeLLM is a belt-and-
+    // braces defense; this reduction is the suspenders.
+    concurrency: 2,
     lockDuration: 2400000, // 40 分鐘鎖定（Round 36: 從 20分鐘提升，給 SPA 爬蟲+LLM 足夠時間）
     lockRenewTime: 300000,  // 每 5 分鐘更新鎖定（Round 36: 從 10分鐘縮短，更頻繁更新避免 stall）
     maxStalledCount: 3, // 最多 3 次 stalled 重試
