@@ -12,7 +12,10 @@ import { useLocale } from "@/contexts/LocaleContext";
  */
 export default function HomeMomentsStrip() {
   const { t } = useLocale();
-  const { data: tours } = trpc.tours.list.useQuery();
+  // Prefer featured tours for the photo strip (React Query deduplicates)
+  const { data: featuredTours } = trpc.tours.list.useQuery({ status: 'active', featured: true });
+  const { data: fallbackTours } = trpc.tours.list.useQuery({ status: 'active', pageSize: 50 });
+  const tours = featuredTours && featuredTours.length >= 3 ? featuredTours : fallbackTours;
 
   const moments = useMemo(() => {
     if (!tours) return [];

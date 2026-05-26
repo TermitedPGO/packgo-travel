@@ -22,15 +22,17 @@ import { translateDestination } from "@/utils/locationMapping";
  */
 export default function HomeFeaturedSpotlight() {
   const { t, language, formatPrice } = useLocale();
-  const { data: tours } = trpc.tours.list.useQuery();
+  // Fetch featured tours specifically (not the default pageSize=100 grab bag)
+  const { data: featuredTours } = trpc.tours.list.useQuery({ status: 'active', featured: true });
+  const { data: fallbackTours } = trpc.tours.list.useQuery({ status: 'active', pageSize: 50 });
+  const tours = featuredTours && featuredTours.length >= 3 ? featuredTours : fallbackTours;
 
   const picks = useMemo(() => {
     if (!tours) return [];
     const active = tours.filter(
       (tour) => tour.status === "active" && (tour.heroImage || tour.imageUrl)
     );
-    const featured = active.filter((tour) => tour.featured === 1);
-    const pool = featured.length >= 3 ? featured : active;
+    const pool = active;
     // Pick 3 with diverse destination countries when possible
     const seen = new Set<string>();
     const diverse: typeof active = [];

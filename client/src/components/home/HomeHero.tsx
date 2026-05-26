@@ -30,7 +30,11 @@ const ROTATE_MS = 9000;
  */
 export default function HomeHero({ bgImage }: HomeHeroProps) {
   const { t, language } = useLocale();
-  const { data: tours } = trpc.tours.list.useQuery();
+  // Fetch featured tours specifically so we get all 25, not just whatever
+  // happens to fall in the default pageSize=100 window.
+  const { data: featuredTours } = trpc.tours.list.useQuery({ status: 'active', featured: true });
+  const { data: fallbackTours } = trpc.tours.list.useQuery({ status: 'active', pageSize: 50 });
+  const tours = featuredTours && featuredTours.length >= 3 ? featuredTours : fallbackTours;
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
@@ -65,9 +69,8 @@ export default function HomeHero({ bgImage }: HomeHeroProps) {
     const active = tours.filter(
       (tour) => tour.status === "active" && (tour.heroImage || tour.imageUrl)
     );
-    const featured = active.filter((tour) => tour.featured === 1);
-    const pool = featured.length >= 3 ? featured : active;
-    return pool.slice(0, 6);
+    // tours already filtered to featured-only (or fallback pool) at query level
+    return active.slice(0, 6);
   }, [tours, bgImage]);
 
   useEffect(() => {
