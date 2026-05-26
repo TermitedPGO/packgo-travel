@@ -163,14 +163,20 @@ const MAX_ATTACHMENTS_PER_MESSAGE = 5;
 /**
  * Fetch unread messages since a given internal timestamp, with INBOX
  * filter. Returns up to `maxResults` messages.
+ *
+ * When `filterLabel` is set (e.g. "PACKGO_SUPPORT"), only messages
+ * carrying that Gmail label are returned. This keeps the agent
+ * pipeline away from Jeff's personal inbox noise.
  */
 export async function listUnreadMessages(
   gmail: ReturnType<typeof buildGmailClient>,
   sinceSeconds?: number,
-  maxResults = 25
+  maxResults = 25,
+  filterLabel?: string
 ): Promise<GmailMessageSummary[]> {
   const queryParts = ["is:unread", "-from:noreply"];
   if (sinceSeconds) queryParts.push(`after:${sinceSeconds}`);
+  if (filterLabel) queryParts.push(`label:${filterLabel}`);
   const query = queryParts.join(" ");
   const listResp = await gmail.users.messages.list({
     userId: "me",

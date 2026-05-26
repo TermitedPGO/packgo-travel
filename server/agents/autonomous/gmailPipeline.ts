@@ -44,6 +44,13 @@ const log = createChildLogger({ module: "gmailPipeline" });
 
 const PROCESSED_LABEL = "PACKGO_AI_PROCESSED";
 
+/**
+ * When set, only emails carrying this Gmail label are processed.
+ * Jeff should create a Gmail filter: to:support@packgoplay.com → add label PACKGO_SUPPORT
+ * Then set this env var on Fly so the agent ignores personal inbox noise.
+ */
+const POLL_FILTER_LABEL = process.env.GMAIL_POLL_LABEL || "";
+
 export type PipelineResult = {
   ok: boolean;
   emailAddress: string;
@@ -88,7 +95,7 @@ export async function runGmailPipeline(
   // Fetch up to 25 new messages per run
   let messages: GmailMessageSummary[] = [];
   try {
-    messages = await listUnreadMessages(gmail, sinceSeconds, 25);
+    messages = await listUnreadMessages(gmail, sinceSeconds, 25, POLL_FILTER_LABEL || undefined);
   } catch (e) {
     return {
       ok: false,
@@ -106,21 +113,72 @@ export async function runGmailPipeline(
   // Filter out messages already labeled PACKGO_AI_PROCESSED
   const fresh = messages.filter((m) => !m.labels.includes(labelId));
 
+  // ── Pre-LLM spam filter: skip known non-customer senders ──
+  // These domains send automated notifications to Jeff's personal inbox.
+  // Skipping them saves LLM tokens without losing training value — they
+  // are never real customer emails. Unknown senders still go through the
+  // full InquiryAgent pipeline.
+  const KNOWN_NOISE_DOMAINS = new Set([
+    "venmo.com", "paypal.com", "cash.app",
+    "substack.com", "beehiiv.com", "mailchimp.com", "convertkit.com",
+    "mgmresorts.com", "hilton.com", "marriott.com",
+    "linkedin.com", "facebook.com", "twitter.com", "x.com",
+    "google.com", "youtube.com", "apple.com", "microsoft.com",
+    "github.com", "notion.so", "slack.com",
+    "robly.com", "constantcontact.com", "mailerlite.com",
+    "noreply", "no-reply", "donotreply",
+    "alerts@", "notifications@", "newsletter@", "digest@",
+  ]);
+
+  function isKnownNoise(from: string): boolean {
+    const lower = from.toLowerCase();
+    for (const pattern of KNOWN_NOISE_DOMAINS) {
+      if (pattern.includes("@")) {
+        // Prefix match (e.g. "noreply" matches "noreply@anything.com")
+        if (lower.includes(pattern)) return true;
+      } else {
+        // Domain match
+        if (lower.includes(`@${pattern}`) || lower.includes(`.${pattern}`)) return true;
+      }
+    }
+    return false;
+  }
+
+  const customerEmails = fresh.filter((m) => {
+    if (isKnownNoise(m.from)) {
+      log.info({ from: m.from, subject: m.subject?.slice(0, 40) }, "[gmailPipeline] skipped known noise");
+      return false;
+    }
+    return true;
+  });
+  const skippedNoise = fresh.length - customerEmails.length;
+
   const result: PipelineResult = {
     ok: true,
     emailAddress: integration.emailAddress,
-    totalFetched: fresh.length,
+    totalFetched: customerEmails.length,
     totalProcessed: 0,
     totalFailed: 0,
     totalEscalated: 0,
     errors: [],
   };
 
+  if (skippedNoise > 0) {
+    log.info({ skippedNoise, remaining: customerEmails.length }, "[gmailPipeline] pre-filtered known noise senders");
+  }
+
+  // Apply processed label to skipped noise so they don't reappear next poll
+  for (const m of fresh) {
+    if (isKnownNoise(m.from)) {
+      try { await applyLabel(gmail, m.id, labelId); } catch {}
+    }
+  }
+
   // Get/seed v1 policies for inquiry + refund
   const inquiryPolicy = await ensurePolicy(db, "inquiry", DEFAULT_INQUIRY_POLICY);
   const refundPolicy = await ensurePolicy(db, "refund", DEFAULT_REFUND_POLICY);
 
-  for (const msg of fresh) {
+  for (const msg of customerEmails) {
     try {
       await processOneEmail(db, msg, inquiryPolicy, refundPolicy, result, {
         gmail,

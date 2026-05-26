@@ -933,25 +933,25 @@ export default function BookTour() {
                     <>
                       <div className="flex justify-between text-sm text-gray-600">
                         <span>{t('bookTour.totalAmount')}({t('bookTour.totalBeforeDiscount')})</span>
-                        <span>${subtotalPrice.toLocaleString()}</span>
+                        <span>{formatPrice(subtotalPrice, bookingCurrency as any)}</span>
                       </div>
                       <div className="flex justify-between text-sm text-[#8a6f3a]">
                         <span>{t('bookTour.pointsDiscountRow', { points: safePointsToRedeem.toLocaleString() })}</span>
-                        <span>-${packpointDiscount.toFixed(2)}</span>
+                        <span>-{formatPrice(packpointDiscount, bookingCurrency as any)}</span>
                       </div>
                     </>
                   )}
                   <div className="flex justify-between text-lg">
                     <span className="font-bold">{t('bookTour.totalAmount')}</span>
-                    <span className="font-bold">${totalPrice.toLocaleString()}</span>
+                    <span className="font-bold">{formatPrice(totalPrice, bookingCurrency as any)}</span>
                   </div>
                   <div className="flex justify-between text-sm text-gray-600">
                     <span>{t('bookTour.deposit')}</span>
-                    <span>${depositAmount.toLocaleString()}</span>
+                    <span>{formatPrice(depositAmount, bookingCurrency as any)}</span>
                   </div>
                   <div className="flex justify-between text-sm text-gray-600">
                     <span>{t('bookTour.balance')}</span>
-                    <span>${(totalPrice - depositAmount).toLocaleString()}</span>
+                    <span>{formatPrice(totalPrice - depositAmount, bookingCurrency as any)}</span>
                   </div>
                 </div>
               </div>
