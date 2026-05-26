@@ -88,12 +88,32 @@ export function initSentry(): void {
       "write EPIPE",
       "read ECONNRESET",
       "Client network socket disconnected",
+      // 2026-05-26: prevent inbox storms from known-handled infra signals.
+      // Each of these is already retry-loop-aware in invokeLLM / circuit
+      // breaker / BullMQ stalled-job recovery. They are noise, not bugs.
+      "LLM_RATE_LIMITED",      // 429 retries exhausted → caller defers
+      "LLM_CIRCUIT_OPEN",      // breaker open during Anthropic outage
+      "LLM_TIMEOUT",           // 120s ceiling — retried elsewhere
+      "could not renew lock",  // BullMQ lock renew when machine under load
+      "rate_limit_error",      // raw Anthropic 429 phrasing (defensive)
     ],
     beforeSend(event, hint) {
-      const err = hint.originalException;
-      const code = (err as { code?: string } | undefined)?.code;
-      if (code === "EPIPE" || code === "ECONNRESET") {
-        return null; // drop
+      const err = hint.originalException as
+        | { code?: string; rateLimited?: boolean; circuitOpen?: boolean; message?: string }
+        | undefined;
+      if (err?.code === "EPIPE" || err?.code === "ECONNRESET") return null;
+      // Anthropic rate-limit + circuit-open are infrastructure pressure
+      // signals, already retried via invokeLLM's exponential backoff.
+      // Sentry-grade alerts here are noise — emails flood Jeff.
+      if (err?.rateLimited === true || err?.circuitOpen === true) return null;
+      const msg = err?.message ?? "";
+      if (
+        msg.includes("LLM_RATE_LIMITED") ||
+        msg.includes("LLM_CIRCUIT_OPEN") ||
+        msg.includes("rate_limit_error") ||
+        msg.includes("could not renew lock")
+      ) {
+        return null;
       }
       return event;
     },
