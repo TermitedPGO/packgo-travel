@@ -755,27 +755,88 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     );
   }
 
-  let resp: Anthropic.Messages.Message;
-  try {
-    resp = await client.messages.create({
-      model,
-      max_tokens: maxTokens,
-      messages: anthropicMessages,
-      ...(systemPayload ? { system: systemPayload as any } : {}),
-      ...(tools ? { tools } : {}),
-      ...(toolChoice ? { tool_choice: toolChoice } : {}),
-    });
-    circuit.recordSuccess();
-  } catch (err: any) {
-    circuit.recordFailure(err);
+  // 2026-05-26: 429 retry-with-backoff. Anthropic rate-limit hits (e.g.
+  // 450k input tokens/min on Haiku 4.5) used to bubble straight to the
+  // caller, which Sentry then captured and emailed Jeff for EACH job in
+  // a 150-job batch — inbox storm. The fix:
+  //   1. On 429, read `retry-after` header (Anthropic-honoured), sleep,
+  //      retry. Up to 3 attempts (cumulative ~3 min wait).
+  //   2. After exhausting attempts, swallow with a `nonRetryable` 503
+  //      message — caller's RetryManager won't re-fire, and Sentry's
+  //      issue-alert rule (high-priority only) won't trigger.
+  //   3. Still bump circuit-breaker on each failure (pre-existing logic).
+  //
+  // Why retry here vs in caller: the SDK's maxRetries was set to 0 (single
+  // source of retry truth). 429s are an INFRA pressure signal — distinct
+  // from caller-bug 4xx — and recovery is mechanical (just wait). So this
+  // layer is the right place.
+  const MAX_429_RETRIES = 3;
+  const RETRY_DEFAULT_SECONDS = [30, 60, 120]; // matches Anthropic typical retry-after
+  let resp: Anthropic.Messages.Message | undefined;
+  let lastErr: any;
+  for (let attempt = 0; attempt <= MAX_429_RETRIES; attempt++) {
+    try {
+      resp = await client.messages.create({
+        model,
+        max_tokens: maxTokens,
+        messages: anthropicMessages,
+        ...(systemPayload ? { system: systemPayload as any } : {}),
+        ...(tools ? { tools } : {}),
+        ...(toolChoice ? { tool_choice: toolChoice } : {}),
+      });
+      circuit.recordSuccess();
+      break;
+    } catch (err: any) {
+      lastErr = err;
+      circuit.recordFailure(err);
+      // Only retry on 429; everything else falls through to the throw below.
+      if (err?.status !== 429 || attempt >= MAX_429_RETRIES) break;
+      const retryAfterHeader = err?.headers?.["retry-after"];
+      const retrySeconds =
+        retryAfterHeader && /^\d+$/.test(String(retryAfterHeader))
+          ? parseInt(String(retryAfterHeader), 10)
+          : RETRY_DEFAULT_SECONDS[attempt] ?? 120;
+      log.warn(
+        {
+          event: "rate_limit_429",
+          model,
+          attempt: attempt + 1,
+          maxAttempts: MAX_429_RETRIES + 1,
+          retrySeconds,
+          retryAfterHeader,
+        },
+        `[invokeLLM] 429 rate-limit — backing off ${retrySeconds}s`,
+      );
+      bumpStat("rate_limit_429", 1);
+      await new Promise((res) => setTimeout(res, retrySeconds * 1000));
+    }
+  }
+  if (!resp) {
+    const err = lastErr;
     const elapsed = Date.now() - startMs;
-    // Anthropic SDK errors: err.status, err.error, err.message
     if (err?.status === 408 || /timeout/i.test(err?.message || "")) {
       log.error({ err, elapsedMs: elapsed }, "[invokeLLM] TIMEOUT");
       const wrapped = new Error(
-        `LLM_TIMEOUT: Anthropic API did not respond within 120s (elapsed: ${elapsed}ms)`
+        `LLM_TIMEOUT: Anthropic API did not respond within 120s (elapsed: ${elapsed}ms)`,
       );
       (wrapped as any).nonRetryable = true;
+      throw wrapped;
+    }
+    if (err?.status === 429) {
+      // Exhausted retries — degrade to non-retryable so caller skips
+      // gracefully and Sentry's "new issue" rule doesn't fire on the
+      // re-thrown 429 (rule filters on `mechanism=generic` errors;
+      // we swap message + mark nonRetryable so it falls outside).
+      log.error(
+        { elapsedMs: elapsed, attempts: MAX_429_RETRIES + 1 },
+        "[invokeLLM] 429 retries exhausted — degrading gracefully",
+      );
+      bumpStat("rate_limit_429_exhausted", 1);
+      const wrapped = new Error(
+        `LLM_RATE_LIMITED: Anthropic rate limit sustained for ${MAX_429_RETRIES + 1} attempts; caller should defer.`,
+      );
+      (wrapped as any).nonRetryable = true;
+      (wrapped as any).rateLimited = true;
       throw wrapped;
     }
     log.error(
