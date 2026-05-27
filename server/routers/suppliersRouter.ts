@@ -1084,6 +1084,57 @@ export const suppliersRouter = router({
     }),
 
   /**
+   * Deactivate tours matching a title pattern (e.g. 自由行).
+   * Sets status = 'inactive' for all matching active tours.
+   */
+  deactivateByTitlePattern: adminProcedure
+    .input(
+      z.object({
+        pattern: z.string().min(2),
+        dryRun: z.boolean().default(true),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const db2 = await getDb();
+      if (!db2) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const rows = await db2
+        .select({ id: toursTable.id, title: toursTable.title })
+        .from(toursTable)
+        .where(
+          and(
+            eq(toursTable.status, "active"),
+            like(toursTable.title, `%${input.pattern}%`),
+          ),
+        );
+
+      if (input.dryRun) {
+        return {
+          dryRun: true,
+          wouldDeactivate: rows.length,
+          samples: rows.slice(0, 15).map((r) => ({
+            id: r.id,
+            title: r.title?.slice(0, 80) ?? "",
+          })),
+        };
+      }
+
+      let deactivated = 0;
+      for (const r of rows) {
+        try {
+          await db2
+            .update(toursTable)
+            .set({ status: "inactive", updatedAt: new Date() })
+            .where(eq(toursTable.id, r.id));
+          deactivated++;
+        } catch {
+          // continue on error
+        }
+      }
+      return { dryRun: false, deactivated, pattern: input.pattern };
+    }),
+
+  /**
    * Deactivate residual unhealthy tours after mass import + audit.
    * 2026-05-25: hides the ~95 active tours that have data-quality
    * issues (no image / no supplier detail / parse_failed). Customer
