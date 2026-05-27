@@ -54,7 +54,7 @@ export default function CustomersLanding({
           primary={totalUsers}
           secondary="Free + Plus + Concierge"
           accent="violet"
-          onClick={() => onNavigate("packpoint")}
+          onClick={() => onNavigate("customers-crm")}
           loading={stats.isLoading}
         />
         <KpiCard
