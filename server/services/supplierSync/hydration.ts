@@ -80,7 +80,11 @@ export function hydrateTourFromParsed(
   // ── dailyItinerary + itineraryDetailed + per-day-derived collections
   if (input.itinerary && Array.isArray(input.itinerary.days) && input.itinerary.days.length > 0) {
     out.dailyItinerary = JSON.stringify(input.itinerary);
-    out.itineraryDetailed = renderItineraryAsText(input.itinerary);
+    // itineraryDetailed must be a JSON array matching the shape DayCard.tsx expects:
+    //   { day, title, description, activities[], meals{}, accommodation }
+    out.itineraryDetailed = JSON.stringify(
+      buildItineraryDetailedForFrontend(input.itinerary)
+    );
 
     const hotels = buildHotelsList(input.itinerary);
     if (hotels.length > 0) out.hotels = JSON.stringify(hotels);
@@ -158,6 +162,41 @@ export function hydrateTourFromParsed(
 // ────────────────────────────────────────────────────────────────────────
 // Sub-renderers
 // ────────────────────────────────────────────────────────────────────────
+
+/**
+ * Transform NormalizedItinerary → JSON array matching TourDetailPeony/DayCard.tsx props.
+ *
+ * DayCard reads: { day, title, description, activities[], meals{}, accommodation, image }
+ * Supplier has: { dayNumber, title, attractions[], hotels[], meals{}, transportation }
+ */
+function buildItineraryDetailedForFrontend(
+  itin: NormalizedItinerary
+): Array<Record<string, unknown>> {
+  return itin.days.map((d) => ({
+    day: d.dayNumber,
+    title: d.title,
+    description: d.transportation ? `交通：${d.transportation}` : "",
+    activities: (d.attractions ?? []).map((a) => ({
+      name: a.name,
+      title: a.name,
+      description: a.description ?? "",
+      duration: a.durationHours ? `${a.durationHours} 小時` : undefined,
+    })),
+    meals: {
+      breakfast: mealToDisplayString(d.meals?.breakfast),
+      lunch: mealToDisplayString(d.meals?.lunch),
+      dinner: mealToDisplayString(d.meals?.dinner),
+    },
+    accommodation: (d.hotels ?? []).map((h) => h.name).join(" 或 ") || undefined,
+  }));
+}
+
+/** Convert supplier meal value (boolean|string) to DayCard display string. */
+function mealToDisplayString(m: boolean | string | undefined): string {
+  if (m === undefined || m === null || m === false) return "自理";
+  if (m === true) return "飯店內";
+  return m;
+}
 
 function renderItineraryAsText(itin: NormalizedItinerary): string {
   // Human-readable bullet list. Each day:

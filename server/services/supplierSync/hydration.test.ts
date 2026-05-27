@@ -87,15 +87,25 @@ describe("hydrateTourFromParsed — Lion Kenya safari (real-world)", () => {
     expect(parsed.days[1].attractions[0].name).toContain("索利歐");
   });
 
-  it("renders human-readable itineraryDetailed text", () => {
+  it("renders itineraryDetailed as JSON array matching DayCard shape", () => {
     expect(out.itineraryDetailed).toBeDefined();
-    expect(out.itineraryDetailed).toContain("Day 1 — 台北");
-    expect(out.itineraryDetailed).toContain("Day 2 —");
-    expect(out.itineraryDetailed).toContain("Day 8 —");
-    expect(out.itineraryDetailed).toContain("景點: 索利歐");
-    expect(out.itineraryDetailed).toContain("住宿: Treetops Lodge");
-    expect(out.itineraryDetailed).toContain("交通: 去程: 國泰航空 13:20");
-    expect(out.itineraryDetailed).toContain("早 機上簡餐");
+    const days = JSON.parse(out.itineraryDetailed!);
+    expect(Array.isArray(days)).toBe(true);
+    expect(days).toHaveLength(3);
+    // Day numbers
+    expect(days[0].day).toBe(1);
+    expect(days[1].day).toBe(2);
+    expect(days[2].day).toBe(8);
+    // Title preserved
+    expect(days[0].title).toContain("台北");
+    // Activities from attractions
+    expect(days[1].activities[0].name).toContain("索利歐");
+    expect(days[1].activities[0].title).toContain("索利歐");
+    // Accommodation from hotels
+    expect(days[1].accommodation).toContain("Treetops Lodge");
+    // Meals as display strings
+    expect(days[0].meals.dinner).toBe("機上簡餐");
+    expect(days[0].meals.breakfast).toBe("自理");
   });
 
   it("dedupes hotels across days", () => {
