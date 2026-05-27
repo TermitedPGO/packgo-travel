@@ -62,6 +62,7 @@ const MonitorDashboardV2 = lazy(() => import("@/components/admin-v2/MonitorDashb
 const CleanupTabV2 = lazy(() => import("@/components/admin-v2/CleanupTabV2"));
 const SupplierEnrichmentTabV2 = lazy(() => import("@/components/admin-v2/SupplierEnrichmentTabV2"));
 const BankLedgerV2 = lazy(() => import("@/components/admin-v2/BankLedgerV2"));
+const CustomersTabV2 = lazy(() => import("@/components/admin-v2/CustomersTabV2"));
 
 // All other tabs initially come from V1. They're consumed AS-IS; we replace
 // them one by one with V2 redesigns. Listed here for the lazy-loader.
@@ -102,7 +103,7 @@ type PageId =
   // Operations
   | "ops-landing" | "tours" | "bookings" | "inquiries" | "tour-monitor" | "suppliers"
   // Customers
-  | "customers-landing" | "reviews" | "packpoint" | "vouchers" | "ai-quotes" | "tool-quote" | "wechat-assist"
+  | "customers-landing" | "customers-crm" | "reviews" | "packpoint" | "vouchers" | "ai-quotes" | "tool-quote" | "wechat-assist"
   // Marketing
   | "marketing-landing" | "marketing" | "marketing-content" | "posters" | "analytics" | "competitor-monitor" | "affiliate"
   // Finance
@@ -140,6 +141,7 @@ const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageD
     domain: { id: "customers", label: "客戶", icon: Users },
     primary: [
       { id: "customers-landing", label: "👥 總覽" },
+      { id: "customers-crm", label: "🔍 客戶 CRM" },
       { id: "reviews", label: "評價" },
       { id: "tool-quote", label: "📄 報價單" },
     ],
@@ -459,6 +461,8 @@ function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
     // Customers
     case "customers-landing":
       return <CustomersLanding onNavigate={(t) => setActivePage(t as PageId)} />;
+    case "customers-crm":
+      return <CustomersTabV2 />;
     case "reviews":
       // 🆕 V2 redesign #3
       return <ReviewsTabV2 />;
