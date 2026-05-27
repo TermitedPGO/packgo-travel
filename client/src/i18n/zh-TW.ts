@@ -1429,6 +1429,7 @@ export const zhTW = {
     sortPriceDesc: '價格由高至低',
     sortDaysAsc: '天數由少至多',
     sortDaysDesc: '天數由多至少',
+    featuredBadgeShort: '精選',
     fullyBooked: '已額滿',
     noReviewsYet: '尚無評價',
     nextDeparture: '最近出發：',

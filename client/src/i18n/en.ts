@@ -1418,6 +1418,7 @@ export const en = {
     sortPriceDesc: 'Price: High to Low',
     sortDaysAsc: 'Duration: Short to Long',
     sortDaysDesc: 'Duration: Long to Short',
+    featuredBadgeShort: 'Featured',
     fullyBooked: 'Fully Booked',
     noReviewsYet: 'No reviews yet',
     nextDeparture: 'Next: ',

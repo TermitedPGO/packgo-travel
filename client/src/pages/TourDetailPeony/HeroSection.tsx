@@ -145,7 +145,8 @@ export default function HeroSection({
               Settour competitor does this. Helps users reference the tour on
               the phone / WhatsApp / screenshots. */}
           <div className="mb-3 inline-flex items-center gap-3 text-[11px] md:text-xs tracking-[3px] uppercase text-white/75">
-            {(tour as any).tourCode || tour.productCode || `T${tour.id}`}
+            {/* Skip UUID-shaped productCodes from supplier sync */}
+            {(tour as any).tourCode || (tour.productCode && !/^[0-9a-f]{8}-/.test(tour.productCode) ? tour.productCode : `T${tour.id}`)}
             {hasConfirmedDeparture && (
               <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-[#c9a563]/95 text-[#1a1a1a] rounded-full text-[10px] md:text-[11px] font-bold tracking-wide">
                 <Award className="h-3 w-3" />
