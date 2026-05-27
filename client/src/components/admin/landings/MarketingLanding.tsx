@@ -96,7 +96,7 @@ export default function MarketingLanding({
           title="#marketing channel 最近動作"
           icon={Sparkles}
           iconTone="text-violet-600"
-          action={{ label: "看 #marketing", onClick: () => onNavigate("office-chat") }}
+          action={{ label: "看 #marketing", onClick: () => onNavigate("agent-chat") }}
         >
           {marketingMessages.isLoading ? (
             <div className="text-xs text-foreground/40 py-3">載入中⋯</div>
@@ -114,7 +114,7 @@ export default function MarketingLanding({
                 return (
                   <button
                     key={m.id}
-                    onClick={() => onNavigate("office-chat")}
+                    onClick={() => onNavigate("agent-chat")}
                     className="w-full text-left flex items-start gap-2 px-1.5 py-1 rounded-md hover:bg-foreground/[0.03] transition-colors"
                   >
                     <span

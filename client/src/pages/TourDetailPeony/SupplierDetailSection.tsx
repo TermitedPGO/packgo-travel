@@ -82,10 +82,10 @@ export default function SupplierDetailSection({ tourId }: Props) {
       <div className="mb-4 flex items-center gap-2">
         <Sparkles className="w-4 h-4 text-[#c9a563]" />
         <h2 className="text-lg font-semibold text-foreground">
-          {t("tourDetail.supplierDetail.heading") || "供應商完整資訊"}
+          {t("tourDetail.supplierDetail.heading")}
         </h2>
         <Badge variant="outline" className="rounded-md text-[10px] py-0 px-1.5 font-normal">
-          {t("tourDetail.supplierDetail.fromSupplier") || "來自供應商"}
+          {t("tourDetail.supplierDetail.fromSupplier")}
         </Badge>
       </div>
 
@@ -99,11 +99,11 @@ export default function SupplierDetailSection({ tourId }: Props) {
               <div className="flex items-center gap-2">
                 <Calendar className="w-4 h-4 text-[#c9a563]" />
                 <span className="font-medium">
-                  {t("tourDetail.supplierDetail.itinerary") || "詳細行程"}
+                  {t("tourDetail.supplierDetail.itinerary")}
                 </span>
                 <Badge variant="secondary" className="rounded-md text-xs">
                   {detail.itinerary.parsed!.totalDays}{" "}
-                  {t("tourDetail.supplierDetail.days") || "天"}
+                  {t("tourDetail.supplierDetail.days")}
                 </Badge>
               </div>
             </AccordionTrigger>
@@ -122,7 +122,7 @@ export default function SupplierDetailSection({ tourId }: Props) {
               <div className="flex items-center gap-2">
                 <DollarSign className="w-4 h-4 text-[#c9a563]" />
                 <span className="font-medium">
-                  {t("tourDetail.supplierDetail.priceTerms") || "費用說明"}
+                  {t("tourDetail.supplierDetail.priceTerms")}
                 </span>
               </div>
             </AccordionTrigger>
@@ -141,7 +141,7 @@ export default function SupplierDetailSection({ tourId }: Props) {
               <div className="flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-[#c9a563]" />
                 <span className="font-medium">
-                  {t("tourDetail.supplierDetail.notices") || "注意事項"}
+                  {t("tourDetail.supplierDetail.notices")}
                 </span>
               </div>
             </AccordionTrigger>
@@ -160,7 +160,7 @@ export default function SupplierDetailSection({ tourId }: Props) {
               <div className="flex items-center gap-2">
                 <FileText className="w-4 h-4 text-[#c9a563]" />
                 <span className="font-medium">
-                  {t("tourDetail.supplierDetail.optional") || "自費項目"}
+                  {t("tourDetail.supplierDetail.optional")}
                 </span>
                 <Badge variant="secondary" className="rounded-md text-xs">
                   {detail.optional.parsed!.items.length}
@@ -176,7 +176,7 @@ export default function SupplierDetailSection({ tourId }: Props) {
 
       {detail.lastEnrichedAt && (
         <p className="mt-2 text-xs text-muted-foreground text-right">
-          {t("tourDetail.supplierDetail.lastUpdated") || "最後更新"}:{" "}
+          {t("tourDetail.supplierDetail.lastUpdated")}:{" "}
           {new Date(detail.lastEnrichedAt).toLocaleDateString()}
         </p>
       )}
@@ -189,6 +189,12 @@ function ItineraryView({
 }: {
   itinerary: NonNullable<NonNullable<unknown> & { days: any[]; totalDays: number }>;
 }) {
+  const { t } = useLocale();
+  const unspecified = t("tourDetail.supplierDetail.unspecified");
+  const breakfastLabel = t("tourDetail.supplierDetail.mealBreakfast");
+  const lunchLabel = t("tourDetail.supplierDetail.mealLunch");
+  const dinnerLabel = t("tourDetail.supplierDetail.mealDinner");
+
   return (
     <div className="space-y-3 pb-3">
       {itinerary.days.map((day: any) => (
@@ -224,7 +230,7 @@ function ItineraryView({
                     <div key={i} className="flex items-center gap-1.5 text-xs">
                       <Hotel className="w-3 h-3 text-foreground/40" />
                       <span className="font-medium">{h.name}</span>
-                      {h.type && h.type !== "未指定" && (
+                      {h.type && h.type !== unspecified && (
                         <Badge variant="outline" className="rounded-md text-[10px] py-0 px-1.5">
                           {h.type}
                         </Badge>
@@ -237,9 +243,9 @@ function ItineraryView({
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Utensils className="w-3 h-3" />
                   <span>
-                    {mealLabel("早", day.meals.breakfast)} ·{" "}
-                    {mealLabel("午", day.meals.lunch)} ·{" "}
-                    {mealLabel("晚", day.meals.dinner)}
+                    {mealLabel(breakfastLabel, day.meals.breakfast)} ·{" "}
+                    {mealLabel(lunchLabel, day.meals.lunch)} ·{" "}
+                    {mealLabel(dinnerLabel, day.meals.dinner)}
                   </span>
                 </div>
               )}
@@ -262,11 +268,12 @@ function PriceTermsView({
 }: {
   priceTerms: NonNullable<NonNullable<unknown> & { included: string[]; excluded: string[]; paymentTerms: string; cancellationPolicy: any[] }>;
 }) {
+  const { t } = useLocale();
   return (
     <div className="space-y-3 pb-3 text-sm">
       {priceTerms.included.length > 0 && (
         <div>
-          <div className="font-medium text-xs text-emerald-700 mb-1.5">✓ {"包含"}</div>
+          <div className="font-medium text-xs text-emerald-700 mb-1.5">✓ {t("tourDetail.supplierDetail.included")}</div>
           <ul className="space-y-0.5 text-xs">
             {priceTerms.included.map((x: string, i: number) => (
               <li key={i} className="text-foreground/80">• {x}</li>
@@ -276,7 +283,7 @@ function PriceTermsView({
       )}
       {priceTerms.excluded.length > 0 && (
         <div>
-          <div className="font-medium text-xs text-rose-700 mb-1.5">✗ {"不含"}</div>
+          <div className="font-medium text-xs text-rose-700 mb-1.5">✗ {t("tourDetail.supplierDetail.excluded")}</div>
           <ul className="space-y-0.5 text-xs">
             {priceTerms.excluded.map((x: string, i: number) => (
               <li key={i} className="text-foreground/80">• {x}</li>
@@ -286,17 +293,17 @@ function PriceTermsView({
       )}
       {priceTerms.paymentTerms && (
         <div>
-          <div className="font-medium text-xs text-foreground/70 mb-1.5">付款條件</div>
+          <div className="font-medium text-xs text-foreground/70 mb-1.5">{t("tourDetail.supplierDetail.paymentTerms")}</div>
           <p className="text-xs text-foreground/80">{priceTerms.paymentTerms}</p>
         </div>
       )}
       {priceTerms.cancellationPolicy.length > 0 && (
         <div>
-          <div className="font-medium text-xs text-foreground/70 mb-1.5">退費政策</div>
+          <div className="font-medium text-xs text-foreground/70 mb-1.5">{t("tourDetail.supplierDetail.cancellationPolicy")}</div>
           <ul className="space-y-0.5 text-xs">
             {priceTerms.cancellationPolicy.map((p: any, i: number) => (
               <li key={i} className="text-foreground/80">
-                出發前 {p.daysBeforeDeparture} 天:退款 {p.refundPercent}%
+                {t("tourDetail.supplierDetail.cancellationLine", { days: p.daysBeforeDeparture, percent: p.refundPercent })}
                 {p.note && <span className="text-muted-foreground"> ({p.note})</span>}
               </li>
             ))}
@@ -312,12 +319,13 @@ function NoticesView({
 }: {
   notices: NonNullable<NonNullable<unknown> & { visa: string; insurance: string; baggage: string; general: string }>;
 }) {
+  const { t } = useLocale();
   return (
     <div className="space-y-3 pb-3 text-sm">
-      {notices.visa && <NoticeBlock label="簽證" content={notices.visa} />}
-      {notices.insurance && <NoticeBlock label="保險" content={notices.insurance} />}
-      {notices.baggage && <NoticeBlock label="行李" content={notices.baggage} />}
-      {notices.general && <NoticeBlock label="其他" content={notices.general} />}
+      {notices.visa && <NoticeBlock label={t("tourDetail.supplierDetail.visa")} content={notices.visa} />}
+      {notices.insurance && <NoticeBlock label={t("tourDetail.supplierDetail.insurance")} content={notices.insurance} />}
+      {notices.baggage && <NoticeBlock label={t("tourDetail.supplierDetail.baggage")} content={notices.baggage} />}
+      {notices.general && <NoticeBlock label={t("tourDetail.supplierDetail.general")} content={notices.general} />}
     </div>
   );
 }

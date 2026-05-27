@@ -111,7 +111,7 @@ export default function OfficeInboxTab({
         <Button
           variant="outline"
           size="sm"
-          onClick={() => onNavigate("office-chat")}
+          onClick={() => onNavigate("agent-chat")}
           className="rounded-lg gap-1.5 h-7"
         >
           進階:辦公群 + DM

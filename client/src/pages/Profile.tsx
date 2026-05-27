@@ -482,7 +482,7 @@ function PackpointSection() {
   const birthdayMutation = trpc.auth.updateProfile.useMutation({
     onSuccess: async () => {
       const { toast } = await import("sonner");
-      toast.success("生日已儲存!到你生日當天會自動發 100 Packpoint");
+      toast.success(t("profile.packpoint.birthdaySavedToast"));
       utils.auth.me.invalidate();
     },
     onError: async (e) => {
@@ -557,21 +557,21 @@ function PackpointSection() {
             <div className="flex items-start justify-between mb-2">
               <div>
                 <p className="text-sm font-semibold text-foreground flex items-center gap-1">
-                  <Gift className="h-4 w-4 text-[#c9a563]" /> 你的推薦碼
+                  <Gift className="h-4 w-4 text-[#c9a563]" /> {t("profile.packpoint.yourReferralCode")}
                 </p>
                 <p className="text-xs text-foreground/60 mt-0.5">
-                  朋友透過你的連結註冊 + 完成首次付款訂單,雙方各拿 +{referral.rewardPerReferral} Packpoint
+                  {t("profile.packpoint.referralDescription", { reward: String(referral.rewardPerReferral) })}
                 </p>
               </div>
               <div className="text-right text-xs text-foreground/60">
                 {referral.successfulCount > 0 && (
                   <p>
-                    已成功 <strong className="text-[#8a6f3a]">{referral.successfulCount}</strong> 次
+                    {t("profile.packpoint.successfulCount", { count: String(referral.successfulCount) })}
                   </p>
                 )}
                 {referral.pendingCount > 0 && (
                   <p>
-                    待付款 <strong className="text-foreground/80">{referral.pendingCount}</strong> 位
+                    {t("profile.packpoint.pendingCount", { count: String(referral.pendingCount) })}
                   </p>
                 )}
               </div>
@@ -585,7 +585,7 @@ function PackpointSection() {
                 onClick={handleCopyReferral}
                 className="rounded-lg border border-foreground/20 hover:bg-foreground/5 px-3 py-2 text-sm font-medium flex items-center gap-1 transition-colors"
               >
-                <RefreshCcw className="h-3.5 w-3.5" /> 複製連結
+                <RefreshCcw className="h-3.5 w-3.5" /> {t("profile.packpoint.copyLink")}
               </button>
             </div>
             {referral.shareUrl && (
@@ -602,10 +602,10 @@ function PackpointSection() {
         {!hasBirthday ? (
           <div className="bg-[#FAF8F2] border border-[#c9a563]/20 rounded-lg p-4 mb-4">
             <p className="text-sm font-semibold text-foreground mb-2 flex items-center gap-1">
-              🎂 設定生日,每年領 100 Packpoint
+              {t("profile.packpoint.setBirthdayTitle")}
             </p>
             <p className="text-xs text-foreground/60 mb-3">
-              生日當天系統會自動發放,無需操作。設定後不能更改(避免重複領取)。
+              {t("profile.packpoint.setBirthdayDesc")}
             </p>
             <div className="flex gap-2">
               <input
@@ -625,21 +625,21 @@ function PackpointSection() {
                 disabled={!birthInput || birthdayMutation.isPending}
                 className="rounded-lg bg-[#c9a563] hover:bg-[#d4b478] text-foreground px-4 py-2 text-sm font-semibold disabled:opacity-50"
               >
-                {birthdayMutation.isPending ? "..." : "儲存"}
+                {birthdayMutation.isPending ? "..." : t("profile.packpoint.save")}
               </button>
             </div>
           </div>
         ) : (
           <div className="bg-foreground/5 rounded-lg p-3 mb-4 text-xs text-foreground/70 flex items-center justify-between">
             <span>
-              🎂 生日:
-              {new Date(userBirthDate as any).toLocaleDateString("zh-TW", {
+              {t("profile.packpoint.birthdayLabel")}
+              {new Date(userBirthDate as any).toLocaleDateString(language === "en" ? "en-US" : "zh-TW", {
                 month: "long",
                 day: "numeric",
               })}
             </span>
             <span className="text-[10px] text-foreground/50">
-              當天自動發 +100 Packpoint
+              {t("profile.packpoint.birthdayAutoReward")}
             </span>
           </div>
         )}
@@ -648,12 +648,12 @@ function PackpointSection() {
         {balance < 200 && (
           <div className="bg-[#FAF8F2] border border-[#c9a563]/20 rounded-lg p-4 mb-4">
             <p className="text-sm font-semibold text-foreground mb-2 flex items-center gap-1">
-              <Gift className="h-4 w-4 text-[#c9a563]" /> 賺更多 Packpoint
+              <Gift className="h-4 w-4 text-[#c9a563]" /> {t("profile.packpoint.earnMoreTitle")}
             </p>
             <ul className="text-xs text-foreground/70 space-y-1">
-              <li>· 行程結束寫評論 +50 pt</li>
-              <li>· 推薦朋友訂購成功 +500 pt(雙方都拿)</li>
-              <li>· 預訂活動團 5x / 10x 加倍累積</li>
+              <li>{t("profile.packpoint.earnReview")}</li>
+              <li>{t("profile.packpoint.earnReferral")}</li>
+              <li>{t("profile.packpoint.earnBooking")}</li>
             </ul>
           </div>
         )}
@@ -699,7 +699,7 @@ function PackpointSection() {
                       {tx.delta.toLocaleString()}
                     </p>
                     <p className="text-[10px] text-foreground/40">
-                      {new Date(tx.createdAt).toLocaleDateString("zh-TW", {
+                      {new Date(tx.createdAt).toLocaleDateString(language === "en" ? "en-US" : "zh-TW", {
                         month: "short",
                         day: "numeric",
                       })}

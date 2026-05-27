@@ -97,7 +97,7 @@ export default function CustomersLanding({
           title="#inquiry 最近訊息"
           icon={MessageCircle}
           iconTone="text-emerald-600"
-          action={{ label: "看 #inquiry channel", onClick: () => onNavigate("office-chat") }}
+          action={{ label: "看 #inquiry channel", onClick: () => onNavigate("agent-chat") }}
         >
           {inquiryMessages.isLoading ? (
             <div className="text-xs text-foreground/40 py-3">載入中⋯</div>
@@ -115,7 +115,7 @@ export default function CustomersLanding({
                 return (
                   <button
                     key={m.id}
-                    onClick={() => onNavigate("office-chat")}
+                    onClick={() => onNavigate("agent-chat")}
                     className="w-full text-left flex items-start gap-2 px-1.5 py-1 rounded-md hover:bg-foreground/[0.03] transition-colors"
                   >
                     <span

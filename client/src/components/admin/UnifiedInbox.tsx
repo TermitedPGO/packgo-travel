@@ -475,7 +475,7 @@ export default function UnifiedInbox({
                     size="sm"
                     onClick={() => {
                       // Navigate to the agent's full channel for context history
-                      onNavigate("office-chat");
+                      onNavigate("agent-chat");
                       setSelectedMessage(null);
                     }}
                     className="rounded-lg"

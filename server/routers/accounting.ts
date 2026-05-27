@@ -73,7 +73,7 @@ export const accountingRouter = router({
         entryType: z.enum(["income", "expense"]),
         category: z.string(),
         amount: z.number().positive(),
-        currency: z.string().default("TWD"),
+        currency: z.string().default("USD"),
         description: z.string(),
         entryDate: z.date(),
         isTaxDeductible: z.boolean().default(false),

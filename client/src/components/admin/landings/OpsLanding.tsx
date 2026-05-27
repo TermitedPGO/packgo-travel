@@ -26,12 +26,14 @@ import {
 import { format, formatDistanceToNow, isAfter } from "date-fns";
 import { zhTW } from "date-fns/locale";
 import { KpiCard, SectionCard, LandingGreeting } from "./landingPrimitives";
+import { useLocale } from "@/contexts/LocaleContext";
 
 export default function OpsLanding({
   onNavigate,
 }: {
   onNavigate: (pageId: string) => void;
 }) {
+  const { t } = useLocale();
   const stats = trpc.admin.getStats.useQuery(undefined, { refetchInterval: 60_000 });
   const recentMessages = trpc.agent.listMessages.useQuery(
     { agentName: "catalog" as any, limit: 8 },
@@ -47,51 +49,51 @@ export default function OpsLanding({
   return (
     <div className="max-w-6xl mx-auto space-y-4">
       <LandingGreeting
-        title="🗺 營運"
-        subtitle={`${activeTours} 個 active tour · 今天 ${todayBookings} 個新訂單 · ${pendingInquiries} 個待回覆`}
+        title={t('admin.opsLanding.title')}
+        subtitle={t('admin.opsLanding.subtitle', { activeTours, todayBookings, pendingInquiries })}
       />
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <KpiCard
           icon={Map}
-          label="Active Tours"
+          label={t('admin.opsLanding.activeTours')}
           primary={activeTours}
-          secondary={`${draftTours} 個 draft 待處理`}
+          secondary={t('admin.opsLanding.draftPending', { n: draftTours })}
           accent="indigo"
           onClick={() => onNavigate("tours")}
           loading={stats.isLoading}
         />
         <KpiCard
           icon={Calendar}
-          label="今日 Bookings"
+          label={t('admin.opsLanding.todayBookings')}
           primary={todayBookings}
-          secondary={`本月: ${stats.data?.totalBookings ?? 0} 總計`}
+          secondary={t('admin.opsLanding.monthTotal', { n: stats.data?.totalBookings ?? 0 })}
           accent="emerald"
           onClick={() => onNavigate("bookings")}
           loading={stats.isLoading}
         />
         <KpiCard
           icon={AlertCircle}
-          label="Pending Inquiries"
+          label={t('admin.opsLanding.pendingInquiries')}
           primary={pendingInquiries}
-          secondary={pendingInquiries > 0 ? "等你回覆" : "全部已處理"}
+          secondary={pendingInquiries > 0 ? t('admin.opsLanding.awaitingReply') : t('admin.opsLanding.allProcessed')}
           accent={pendingInquiries > 0 ? "amber" : "emerald"}
           onClick={() => onNavigate("inquiries")}
           loading={stats.isLoading}
         />
         <KpiCard
           icon={Briefcase}
-          label="Suppliers"
+          label={t('admin.opsLanding.suppliers')}
           primary="Lion + UV"
-          secondary="catalog mirror live"
+          secondary={t('admin.opsLanding.catalogMirrorLive')}
           accent="sky"
           onClick={() => onNavigate("suppliers")}
         />
         <KpiCard
           icon={PlayCircle}
-          label="Tour Monitor"
-          primary="背景監控"
-          secondary="檢測供應商價格變動"
+          label={t('admin.opsLanding.tourMonitor')}
+          primary={t('admin.opsLanding.backgroundMonitor')}
+          secondary={t('admin.opsLanding.detectPriceChanges')}
           accent="slate"
           onClick={() => onNavigate("tour-monitor")}
         />
@@ -99,16 +101,16 @@ export default function OpsLanding({
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-2">
         <SectionCard
-          title="Catalog 最近動作"
+          title={t('admin.opsLanding.recentCatalogActions')}
           icon={Sparkles}
           iconTone="text-emerald-600"
-          action={{ label: "看 #catalog channel", onClick: () => onNavigate("office-chat") }}
+          action={{ label: t('admin.opsLanding.viewCatalogChannel'), onClick: () => onNavigate("agent-chat") }}
         >
           {recentMessages.isLoading ? (
-            <div className="text-xs text-foreground/40 py-3">載入中⋯</div>
+            <div className="text-xs text-foreground/40 py-3">{t('admin.opsLanding.loading')}</div>
           ) : (recentMessages.data ?? []).length === 0 ? (
             <div className="text-xs text-foreground/40 py-6 text-center">
-              還沒有 catalog 動作。觸發 bulk import 後這裡會有結果。
+              {t('admin.opsLanding.noCatalogActions')}
             </div>
           ) : (
             <div className="space-y-1.5">
@@ -120,7 +122,7 @@ export default function OpsLanding({
                 return (
                   <button
                     key={m.id}
-                    onClick={() => onNavigate("office-chat")}
+                    onClick={() => onNavigate("agent-chat")}
                     className="w-full text-left flex items-start gap-2 px-1.5 py-1 rounded-md hover:bg-foreground/[0.03] transition-colors"
                   >
                     <span
@@ -144,7 +146,7 @@ export default function OpsLanding({
         </SectionCard>
 
         <SectionCard
-          title="快速動作"
+          title={t('admin.opsLanding.quickActions')}
           icon={ClipboardList}
           iconTone="text-indigo-600"
         >
@@ -156,7 +158,7 @@ export default function OpsLanding({
               onClick={() => onNavigate("suppliers")}
             >
               <RefreshCw className="w-4 h-4 mr-2" />
-              觸發 Supplier Sync (Lion / UV)
+              {t('admin.opsLanding.triggerSupplierSync')}
             </Button>
             <Button
               variant="outline"
@@ -165,7 +167,7 @@ export default function OpsLanding({
               onClick={() => onNavigate("tours")}
             >
               <Map className="w-4 h-4 mr-2" />
-              管理 Active Tours
+              {t('admin.opsLanding.manageActiveTours')}
             </Button>
             <Button
               variant="outline"
@@ -174,16 +176,16 @@ export default function OpsLanding({
               onClick={() => onNavigate("inquiries")}
             >
               <AlertCircle className="w-4 h-4 mr-2" />
-              處理 Pending Inquiries
+              {t('admin.opsLanding.handlePendingInquiries')}
             </Button>
             <Button
               variant="outline"
               size="sm"
               className="w-full justify-start rounded-lg"
-              onClick={() => onNavigate("office-chat")}
+              onClick={() => onNavigate("agent-chat")}
             >
               <Sparkles className="w-4 h-4 mr-2" />
-              問 OpsAgent 旅團問題
+              {t('admin.opsLanding.askOpsAgent')}
             </Button>
           </div>
         </SectionCard>

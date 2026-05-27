@@ -17,6 +17,7 @@ import { trpc } from "@/lib/trpc";
  * Click goes to /membership where user can see the full breakdown.
  */
 function PackpointBadge() {
+  const { t } = useLocale();
   const { data } = trpc.packpoint.getStatus.useQuery(undefined, {
     staleTime: 60_000,
   });
@@ -26,7 +27,7 @@ function PackpointBadge() {
     <Link
       href="/rewards"
       className="flex items-center gap-1 hover:text-white transition-colors"
-      title={`Packpoint: ${data.balance.toLocaleString()} pts ($${(data.balance / 100).toFixed(2)} 折抵價值) — 點擊進入兌換中心`}
+      title={t("profile.packpoint.headerTooltip", { balance: data.balance.toLocaleString(), value: (data.balance / 100).toFixed(2) })}
     >
       <Coins className="h-3 w-3 text-[#c9a563]" />
       <span className="tabular-nums">{data.balance.toLocaleString()}</span>

@@ -85,7 +85,7 @@ const INVOICE_STATUS_KEYS: Record<string, string> = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function formatAmount(amount: string | number, currency = "TWD"): string {
+function formatAmount(amount: string | number, currency = "USD"): string {
   const n = Number(amount);
   const symbols: Record<string, string> = { USD: "$", TWD: "NT$", EUR: "€", GBP: "£", JPY: "¥", CNY: "¥" };
   const sym = symbols[currency] ?? currency + " ";
@@ -134,7 +134,7 @@ export default function AccountingTab() {
     entryType: "expense",
     category: "other_expense",
     amount: "",
-    currency: "TWD",
+    currency: "USD",
     description: "",
     entryDate: new Date().toISOString().slice(0, 10),
     isTaxDeductible: false,
@@ -148,7 +148,7 @@ export default function AccountingTab() {
     name: "",
     category: "rent",
     amount: "",
-    currency: "TWD",
+    currency: "USD",
     frequency: "monthly" as "monthly" | "quarterly" | "yearly",
     nextDueDate: new Date().toISOString().slice(0, 10),
     isTaxDeductible: false,
@@ -165,7 +165,7 @@ export default function AccountingTab() {
     description: "",
     amount: "",
     taxRate: "0",
-    currency: "TWD",
+    currency: "USD",
     notes: "",
     dueDate: "",
   });
@@ -367,7 +367,7 @@ export default function AccountingTab() {
           <Button variant="outline" size="sm" className="rounded-lg" onClick={handleExportCsv}>
             <Download className="h-4 w-4 mr-1" /> {t("admin.accounting.exportCsv")}
           </Button>
-          <Button size="sm" className="rounded-lg" onClick={() => { setEditingEntry(null); setEntryForm({ entryType: "expense", category: "other_expense", amount: "", currency: "TWD", description: "", entryDate: new Date().toISOString().slice(0, 10), isTaxDeductible: false, taxCategory: "", notes: "" }); setEntryDialog(true); }}>
+          <Button size="sm" className="rounded-lg" onClick={() => { setEditingEntry(null); setEntryForm({ entryType: "expense", category: "other_expense", amount: "", currency: "USD", description: "", entryDate: new Date().toISOString().slice(0, 10), isTaxDeductible: false, taxCategory: "", notes: "" }); setEntryDialog(true); }}>
             <Plus className="h-4 w-4 mr-1" /> {t("admin.accounting.addEntry")}
           </Button>
         </div>
@@ -613,7 +613,7 @@ export default function AccountingTab() {
         {/* Invoices Tab */}
         <TabsContent value="invoices" className="space-y-4 pt-4">
           <div className="flex justify-end">
-            <Button size="sm" className="rounded-lg" onClick={() => { setInvoiceForm({ customerName: "", customerEmail: "", customerPhone: "", description: "", amount: "", taxRate: "0", currency: "TWD", notes: "", dueDate: "" }); setInvoiceDialog(true); }}>
+            <Button size="sm" className="rounded-lg" onClick={() => { setInvoiceForm({ customerName: "", customerEmail: "", customerPhone: "", description: "", amount: "", taxRate: "0", currency: "USD", notes: "", dueDate: "" }); setInvoiceDialog(true); }}>
               <Plus className="h-4 w-4 mr-1" /> {t("admin.accounting.addInvoice")}
             </Button>
           </div>
@@ -674,7 +674,7 @@ export default function AccountingTab() {
         {/* Recurring Expenses Tab */}
         <TabsContent value="recurring" className="space-y-4 pt-4">
           <div className="flex justify-end">
-            <Button size="sm" className="rounded-lg" onClick={() => { setRecurringForm({ name: "", category: "rent", amount: "", currency: "TWD", frequency: "monthly", nextDueDate: new Date().toISOString().slice(0, 10), isTaxDeductible: false, taxCategory: "", notes: "" }); setRecurringDialog(true); }}>
+            <Button size="sm" className="rounded-lg" onClick={() => { setRecurringForm({ name: "", category: "rent", amount: "", currency: "USD", frequency: "monthly", nextDueDate: new Date().toISOString().slice(0, 10), isTaxDeductible: false, taxCategory: "", notes: "" }); setRecurringDialog(true); }}>
               <Plus className="h-4 w-4 mr-1" /> {t("admin.accounting.addRecurring")}
             </Button>
           </div>

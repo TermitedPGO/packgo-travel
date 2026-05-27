@@ -74,7 +74,7 @@ export const invoicesRouter = router({
           taxRate,
           taxAmount,
           totalAmount,
-          currency: booking.currency || "TWD",
+          currency: booking.currency || "USD",
           status: booking.paymentStatus === "paid" ? "paid" : "pending",
         });
 
@@ -89,7 +89,7 @@ export const invoicesRouter = router({
           taxRate: String(taxRate),
           taxAmount: String(taxAmount),
           totalAmount: String(totalAmount),
-          currency: booking.currency || "TWD",
+          currency: booking.currency || "USD",
           status: booking.paymentStatus === "paid" ? "paid" : "draft",
           pdfUrl: r2Url,
           pdfHtml: html,
@@ -153,7 +153,7 @@ export const invoicesRouter = router({
         taxRate: z.number().min(0).max(100).default(0),
         taxAmount: z.number().default(0),
         totalAmount: z.number(),
-        currency: z.string().default("TWD"),
+        currency: z.string().default("USD"),
         notes: z.string().optional(),
         dueDate: z.date().optional(),
         bookingId: z.number().optional(),
