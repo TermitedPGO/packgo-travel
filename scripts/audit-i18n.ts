@@ -4,7 +4,7 @@
  * Run: pnpm tsx scripts/audit-i18n.ts
  *
  * What it does:
- *  1. Loads zh-TW + en + ja + ko translation bundles
+ *  1. Loads zh-TW + en translation bundles
  *  2. Flattens nested objects to dotted key paths
  *  3. Reports keys that exist in one language but not another
  *  4. Greps client/src for hardcoded translation patterns that bypass t()
@@ -14,8 +14,6 @@
 
 import { zhTW } from "../client/src/i18n/zh-TW";
 import { en } from "../client/src/i18n/en";
-import { ja } from "../client/src/i18n/ja";
-import { ko } from "../client/src/i18n/ko";
 import { execSync } from "node:child_process";
 
 function flatten(obj: any, prefix = ""): string[] {
@@ -32,7 +30,7 @@ function flatten(obj: any, prefix = ""): string[] {
   return keys;
 }
 
-const langs = { "zh-TW": zhTW, en, ja, ko } as const;
+const langs = { "zh-TW": zhTW, en } as const;
 const keysByLang: Record<string, Set<string>> = {};
 for (const [lang, dict] of Object.entries(langs)) {
   keysByLang[lang] = new Set(flatten(dict));
@@ -45,7 +43,7 @@ let hasGaps = false;
 console.log("\n=== i18n Parity Report ===\n");
 console.log(`Reference (zh-TW): ${reference.size} keys\n`);
 
-for (const lang of ["en", "ja", "ko"] as const) {
+for (const lang of ["en"] as const) {
   const here = keysByLang[lang];
   const missing = [...reference].filter((k) => !here.has(k));
   const extra = [...here].filter((k) => !reference.has(k));

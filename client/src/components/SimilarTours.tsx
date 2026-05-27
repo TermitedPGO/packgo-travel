@@ -25,7 +25,7 @@ export default function SimilarTours({ tourId, title }: SimilarToursProps) {
     [(similarTours ?? []).map((t: any) => t.id).join(',')]
   );
   const { data: batchTranslations } = trpc.translation.getBatchTourTranslations.useQuery(
-    { tourIds, targetLanguage: language as 'zh-TW' | 'en' | 'ja' | 'ko' },
+    { tourIds, targetLanguage: language as 'zh-TW' | 'en' },
     { enabled: language !== 'zh-TW' && tourIds.length > 0 }
   );
 

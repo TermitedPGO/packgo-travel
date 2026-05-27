@@ -97,7 +97,7 @@ export default function TourPrintView() {
 
   // Fetch single-tour translation when not in Chinese mode
   const { data: tourTranslation } = trpc.translation.getTourTranslations.useQuery(
-    { tourId: tourId!, targetLanguage: language as 'zh-TW' | 'en' | 'ja' | 'ko' },
+    { tourId: tourId!, targetLanguage: language as 'zh-TW' | 'en' },
     { enabled: language !== 'zh-TW' && !!tourId }
   );
 

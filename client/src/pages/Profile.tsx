@@ -741,7 +741,7 @@ function FavoritesSection({ setLocation }: { setLocation: (path: string) => void
     [(favorites ?? []).map((t: any) => t.id).join(',')]
   );
   const { data: batchTranslations } = trpc.translation.getBatchTourTranslations.useQuery(
-    { tourIds: favoriteTourIds, targetLanguage: language as 'zh-TW' | 'en' | 'ja' | 'ko' },
+    { tourIds: favoriteTourIds, targetLanguage: language as 'zh-TW' | 'en' },
     { enabled: language !== 'zh-TW' && favoriteTourIds.length > 0 }
   );
 

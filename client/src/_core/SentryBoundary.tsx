@@ -23,11 +23,11 @@ interface Props {
  * Tailwind-only styling — no shadcn dependency. If a bad shadcn upgrade is
  * what triggered the boundary, this fallback must still render.
  */
-function readSavedLanguage(): "zh-TW" | "en" | "ja" | "ko" {
+function readSavedLanguage(): "zh-TW" | "en" {
   if (typeof window === "undefined") return "zh-TW";
   try {
     const saved = window.localStorage.getItem("packgo-language");
-    if (saved === "en" || saved === "ja" || saved === "ko" || saved === "zh-TW") {
+    if (saved === "en" || saved === "zh-TW") {
       return saved;
     }
   } catch {

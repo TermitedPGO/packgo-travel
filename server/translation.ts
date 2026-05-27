@@ -60,22 +60,18 @@ async function setCachedTranslation(cacheKey: string, value: string): Promise<vo
 }
 
 // 支援的語言
-export type Language = 'zh-TW' | 'en' | 'ja' | 'ko';
+export type Language = 'zh-TW' | 'en';
 
 // 語言名稱對應
 const languageFullNames: Record<Language, string> = {
   'zh-TW': 'Traditional Chinese (Taiwan)',
   'en': 'English',
-  'ja': 'Japanese',
-  'ko': 'Korean',
 };
 
 // 語言原生名稱
 const languageNativeNames: Record<Language, string> = {
   'zh-TW': '繁體中文',
   'en': 'English',
-  'ja': '日本語',
-  'ko': '한국어',
 };
 
 /**

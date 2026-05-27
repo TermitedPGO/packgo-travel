@@ -43,6 +43,7 @@ import { toast } from "sonner";
 import { useLocale } from "@/contexts/LocaleContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { translateDestination } from "@/utils/locationMapping";
+import { formatDualPrice } from "@/pages/TourDetailPeony/helpers";
 
 // Round 80.4: Custom (客製) removed from category chips — it doesn't fit the
 // "browse pre-made tours" model (you can't filter for custom tours; they're
@@ -122,7 +123,7 @@ function TourCard({
 }) {
   const shouldLoadTranslation = language !== "zh-TW";
   const { data: translations } = trpc.translation.getTourTranslations.useQuery(
-    { tourId: tour.id, targetLanguage: language as "en" | "ja" | "ko" },
+    { tourId: tour.id, targetLanguage: language as 'zh-TW' | 'en' },
     { enabled: shouldLoadTranslation, staleTime: 1000 * 60 * 5 }
   );
   const displayTitle = useMemo(() => {
@@ -403,9 +404,23 @@ function TourCard({
               <span className="text-[10px] uppercase tracking-[0.15em] text-foreground/45 font-medium">
                 {t("tours.startingFrom")}
               </span>
-              <span className="text-xl md:text-[22px] font-bold text-foreground leading-tight font-serif tracking-tight">
-                {formatPrice(tour.price || 0, (tour.priceCurrency || "TWD") as "TWD" | "USD")}
-              </span>
+              {tour.price && (tour.priceCurrency || 'TWD') === 'TWD' ? (() => {
+                const dual = formatDualPrice(Number(tour.price));
+                return (
+                  <>
+                    <span className="text-xl md:text-[22px] font-bold text-foreground leading-tight font-serif tracking-tight">
+                      {dual.twd}
+                    </span>
+                    <span className="text-[11px] text-foreground/50 leading-tight">
+                      (≈US${dual.usd})
+                    </span>
+                  </>
+                );
+              })() : (
+                <span className="text-xl md:text-[22px] font-bold text-foreground leading-tight font-serif tracking-tight">
+                  {formatPrice(tour.price || 0, (tour.priceCurrency || "TWD") as "TWD" | "USD")}
+                </span>
+              )}
             </div>
             {/* Tiny gold rule under price column */}
             <span className="self-end mb-1 h-px w-6 bg-[#c9a563]" aria-hidden />

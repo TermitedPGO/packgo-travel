@@ -1,8 +1,6 @@
 import * as Sentry from '@sentry/react';
 import { zhTW } from './zh-TW';
 import { en } from './en';
-import { ja } from './ja';
-import { ko } from './ko';
 import type { Language } from '@/contexts/LocaleContext';
 
 /**
@@ -49,12 +47,9 @@ function _report(level: 'missing' | 'fallback', language: Language, key: string)
   }
 }
 
-// 翻譯資源（v78q: 加入 ja + ko，先用 en 為後備）
 export const translations = {
   'zh-TW': zhTW,
   'en': en,
-  'ja': ja,
-  'ko': ko,
 } as const;
 
 export type TranslationKeys = typeof zhTW;
@@ -98,21 +93,11 @@ export function translate(
   const translation = translations[language];
   let text = getNestedValue(translation, key);
 
-  // v78q: Fallback chain — for ja/ko fall back to en (so users see English not Chinese)
-  // For en fall back to zh-TW (legacy behavior). For zh-TW just return key.
+  // Fallback chain: en → zh-TW
   if (text === undefined) {
-    if (language === 'ja' || language === 'ko') {
-      text = getNestedValue(translations['en'], key);
-      if (text === undefined) text = getNestedValue(translations['zh-TW'], key);
-      // 2026-05-22: ja/ko fall through to zh-TW means a Korean/Japanese visitor
-      // sees Chinese — definitely a bug. Report it.
-      if (text !== undefined && getNestedValue(translations['en'], key) === undefined) {
-        _report('fallback', language, key);
-      }
-    } else if (language === 'en') {
+    if (language === 'en') {
       text = getNestedValue(translations['zh-TW'], key);
       if (text !== undefined) {
-        // 2026-05-22: this is the bug Jeff saw — English UI showing Chinese.
         _report('fallback', language, key);
       }
     }
@@ -142,12 +127,9 @@ export function translateArray(
   const translation = translations[language];
   let arr = getNestedArrayValue(translation, key);
   
-  // v78q: Same fallback chain as translate() — ja/ko → en → zh-TW
+  // Fallback: en → zh-TW
   if (arr === undefined) {
-    if (language === 'ja' || language === 'ko') {
-      arr = getNestedArrayValue(translations['en'], key);
-      if (arr === undefined) arr = getNestedArrayValue(translations['zh-TW'], key);
-    } else if (language === 'en') {
+    if (language === 'en') {
       arr = getNestedArrayValue(translations['zh-TW'], key);
     }
   }
@@ -161,4 +143,4 @@ export function translateArray(
   return arr;
 }
 
-export { zhTW, en, ja, ko };
+export { zhTW, en };

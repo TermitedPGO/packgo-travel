@@ -2,9 +2,7 @@ import React, { createContext, useContext, useState, useCallback, useMemo, useEf
 import { translate, translateArray } from '@/i18n';
 import { trpc } from '@/lib/trpc';
 
-// v78q: Sprint 9 #3 — added Japanese + Korean. Server-side translator already
-// supports them; this opens up client-side switching.
-export type Language = 'zh-TW' | 'en' | 'ja' | 'ko';
+export type Language = 'zh-TW' | 'en';
 
 // 支援的幣值（v78q: 加入 JPY + KRW，搭配新語言）
 export type Currency = 'TWD' | 'USD' | 'JPY' | 'KRW';
@@ -13,8 +11,6 @@ export type Currency = 'TWD' | 'USD' | 'JPY' | 'KRW';
 export const languageNames: Record<Language, string> = {
   'zh-TW': '繁體中文',
   'en': 'English',
-  'ja': '日本語',
-  'ko': '한국어',
 };
 
 // 幣值顯示名稱和符號
@@ -67,7 +63,7 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
   const [language, setLanguageState] = useState<Language>(() => {
     if (typeof window !== 'undefined') {
       const savedLang = localStorage.getItem('packgo-language');
-      if (savedLang && ['zh-TW', 'en', 'ja', 'ko'].includes(savedLang)) {
+      if (savedLang && ['zh-TW', 'en'].includes(savedLang)) {
         return savedLang as Language;
       }
     }
@@ -94,7 +90,7 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
     const urlLang = params.get('lang');
     const urlCurrency = params.get('currency');
 
-    if (urlLang && ['en', 'zh-TW', 'ja', 'ko'].includes(urlLang)) {
+    if (urlLang && ['en', 'zh-TW'].includes(urlLang)) {
       setLanguageState(urlLang as Language);
       localStorage.setItem('packgo-language', urlLang);
     }

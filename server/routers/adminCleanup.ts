@@ -356,4 +356,116 @@ export const adminCleanupRouter = router({
         purgedAgents: safeNames,
       };
     }),
+
+  // ──────────────────────────────────────────────────────────────────────
+  // 4) Fix destination country mismatches (Lion Travel scraper errors)
+  // ──────────────────────────────────────────────────────────────────────
+
+  /**
+   * Scan all active tours for destination country mismatches between the
+   * tour title and the stored destinationCountry. Returns proposed fixes.
+   * When dryRun=true (default), no DB writes happen — just a preview.
+   * When dryRun=false, applies the fixes and audit-logs the operation.
+   *
+   * 2026-05-27 — Jeff: many Lion Travel tours have wrong destinationCountry
+   * (e.g. a New Zealand tour showing destinationCountry="日本").
+   */
+  fixDestinationCountries: adminProcedure
+    .input(z.object({ dryRun: z.boolean().default(true) }))
+    .mutation(async ({ ctx, input }) => {
+      const {
+        scanDestinationMismatches,
+        applyDestinationFixes,
+      } = await import("../scripts/fix-destination-countries");
+
+      const fixes = await scanDestinationMismatches();
+
+      if (fixes.length === 0) {
+        return { dryRun: input.dryRun, fixes: [], applied: 0 };
+      }
+
+      let applied = 0;
+      if (!input.dryRun) {
+        applied = await applyDestinationFixes(fixes);
+
+        const { audit } = await import("../_core/auditLog");
+        audit({
+          ctx,
+          action: "admin.cleanup.fixDestinationCountries",
+          targetType: "tour",
+          targetId: fixes.map((f) => f.tourId).join(","),
+          changes: {
+            count: applied,
+            fixes: fixes.map((f) => ({
+              id: f.tourId,
+              from: f.currentCountry,
+              to: f.newCountry,
+            })),
+          },
+        });
+      }
+
+      return {
+        dryRun: input.dryRun,
+        fixes: fixes.map((f) => ({
+          tourId: f.tourId,
+          title: f.title.slice(0, 80),
+          currentCountry: f.currentCountry,
+          newCountry: f.newCountry,
+        })),
+        applied,
+      };
+    }),
+
+  // ──────────────────────────────────────────────────────────────────────
+  // 5) Enrich tour ambiance — batch-fill poeticTitle, heroSubtitle, colorTheme
+  // ──────────────────────────────────────────────────────────────────────
+  enrichTourAmbiance: adminProcedure
+    .input(
+      z.object({
+        dryRun: z.boolean().default(true),
+        limit: z.number().int().min(1).max(10000).default(5000),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const {
+        scanMissingAmbiance,
+        applyAmbianceFixes,
+      } = await import("../scripts/enrich-tour-ambiance");
+
+      const fixes = await scanMissingAmbiance(input.limit);
+
+      let applied = 0;
+      if (!input.dryRun && fixes.length > 0) {
+        applied = await applyAmbianceFixes(fixes);
+
+        const { audit } = await import("../_core/auditLog");
+        audit({
+          ctx,
+          action: "admin.cleanup.enrichTourAmbiance",
+          targetType: "tours",
+          targetId: 0,
+          changes: {
+            totalFixed: applied,
+            sample: fixes.slice(0, 5).map((f) => ({
+              id: f.tourId,
+              poeticTitle: f.updates.poeticTitle,
+            })),
+          },
+        });
+      }
+
+      return {
+        dryRun: input.dryRun,
+        total: fixes.length,
+        applied,
+        sample: fixes.slice(0, 10).map((f) => ({
+          tourId: f.tourId,
+          title: f.title,
+          poeticTitle: f.updates.poeticTitle,
+          heroSubtitle: f.updates.heroSubtitle,
+          hasColorTheme: !!f.updates.colorTheme,
+        })),
+      };
+    }),
 });

@@ -11,7 +11,7 @@ import { Phone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLocale } from "@/contexts/LocaleContext";
 import { CONTACT } from "@/lib/brand";
-import type { getThemeColorByDestination } from "./helpers";
+import { formatDualPrice, type getThemeColorByDestination } from "./helpers";
 
 export type BottomCTAProps = {
   tour: any;
@@ -27,12 +27,29 @@ export default function BottomCTA({ tour, themeColor, navigate }: BottomCTAProps
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <p className="text-xs text-gray-500">{t('tourDetail.pricePerPersonFrom')}</p>
-              <p className="text-xl md:text-2xl font-bold" style={{ color: themeColor.primary }}>
-                {tour.price
-                  ? formatPrice(Number(tour.price), (tour.priceCurrency as any) || "TWD")
-                  : t('tourDetail.inquirePrice')}
-              </p>
+              {tour.price && (tour.priceCurrency || 'TWD') === 'TWD' ? (() => {
+                const dual = formatDualPrice(Number(tour.price));
+                return (
+                  <>
+                    <p className="text-[10px] text-gray-400 leading-tight">{t('tourDetail.supplierRefPrice')}</p>
+                    <p className="text-lg md:text-xl font-bold" style={{ color: themeColor.primary }}>
+                      {dual.twd}
+                    </p>
+                    <p className="text-xs text-gray-500 leading-tight">
+                      {t('tourDetail.approxUsd', { usd: dual.usd })}
+                    </p>
+                  </>
+                );
+              })() : (
+                <>
+                  <p className="text-xs text-gray-500">{t('tourDetail.pricePerPersonFrom')}</p>
+                  <p className="text-xl md:text-2xl font-bold" style={{ color: themeColor.primary }}>
+                    {tour.price
+                      ? formatPrice(Number(tour.price), (tour.priceCurrency as any) || "TWD")
+                      : t('tourDetail.inquirePrice')}
+                  </p>
+                </>
+              )}
             </div>
             <div className="flex items-center gap-3">
               <a

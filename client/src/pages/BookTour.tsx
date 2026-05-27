@@ -63,7 +63,7 @@ export default function BookTour() {
 
   // Fetch single-tour translation when not in Chinese mode
   const { data: tourTranslation } = trpc.translation.getTourTranslations.useQuery(
-    { tourId, targetLanguage: language as 'zh-TW' | 'en' | 'ja' | 'ko' },
+    { tourId, targetLanguage: language as 'zh-TW' | 'en' },
     { enabled: language !== 'zh-TW' && tourId > 0 }
   );
   const displayTitle = language === 'zh-TW'

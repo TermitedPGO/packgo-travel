@@ -242,7 +242,7 @@ export default function CountryPage() {
   // Batch fetch translations for non-Chinese languages
   const tourIds = tours.map((t: any) => t.id);
   const { data: batchTranslations } = trpc.translation.getBatchTourTranslations.useQuery(
-    { tourIds, targetLanguage: language as 'en' | 'ja' | 'ko' },
+    { tourIds, targetLanguage: language as 'zh-TW' | 'en' },
     { enabled: language !== 'zh-TW' && tourIds.length > 0, staleTime: 1000 * 60 * 5 }
   );
   const getTranslatedTitle = (tour: any): string => {

@@ -16,8 +16,6 @@ export function LanguageSwitcher() {
   const languages: { code: Language; name: string }[] = [
     { code: 'zh-TW', name: t('language.zhTW') },
     { code: 'en', name: t('language.en') },
-    { code: 'ja', name: '日本語' },
-    { code: 'ko', name: '한국어' },
   ];
 
   return (
@@ -108,12 +106,9 @@ type LocaleSwitcherVariant = "light" | "dark";
 export function LocaleSwitcher({ variant = "light" }: { variant?: LocaleSwitcherVariant } = {}) {
   const { language, setLanguage, languageName, currency, setCurrency, t } = useLocale();
 
-  // v78q: 4 languages — ja/ko fall back to en for missing keys (see i18n/index.ts)
   const languages: { code: Language; name: string }[] = [
     { code: 'zh-TW', name: '繁體中文' },
     { code: 'en', name: 'English' },
-    { code: 'ja', name: '日本語' },
-    { code: 'ko', name: '한국어' },
   ];
 
   const currencies: { code: Currency; name: string; symbol: string }[] = [

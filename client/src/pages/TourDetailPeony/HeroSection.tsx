@@ -32,6 +32,7 @@ import {
   TRANSPORT_TYPE_EN,
   TransportIcon,
   NavTabs,
+  formatDualPrice,
   type getThemeColorByDestination,
 } from "./helpers";
 
@@ -348,9 +349,23 @@ export default function HeroSection({
               <DollarSign className="h-4 w-4 flex-shrink-0" style={{ color: themeColor.primary }} />
               <div className="min-w-0">
                 <p className="text-[10px] uppercase tracking-wide text-gray-500 leading-none">{t('tourDetail.priceFromLabel')}</p>
-                <p className="text-sm font-bold mt-0.5 truncate" style={{ color: themeColor.primary }}>
-                  {tour.price ? formatPrice(Number(tour.price), (tour.priceCurrency as any) || "TWD") : t('tourDetail.inquirePrice')}
-                </p>
+                {tour.price && (tour.priceCurrency || 'TWD') === 'TWD' ? (() => {
+                  const dual = formatDualPrice(Number(tour.price));
+                  return (
+                    <>
+                      <p className="text-sm font-bold mt-0.5 truncate" style={{ color: themeColor.primary }}>
+                        {dual.twd}
+                      </p>
+                      <p className="text-[10px] text-gray-400 leading-none mt-0.5 truncate">
+                        ≈ US${dual.usd}
+                      </p>
+                    </>
+                  );
+                })() : (
+                  <p className="text-sm font-bold mt-0.5 truncate" style={{ color: themeColor.primary }}>
+                    {tour.price ? formatPrice(Number(tour.price), (tour.priceCurrency as any) || "TWD") : t('tourDetail.inquirePrice')}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -390,14 +405,33 @@ export default function HeroSection({
             <div className="flex items-center gap-2 md:gap-3 shrink-0">
               {/* Price label — desktop only, very prominent */}
               <div className="hidden lg:flex flex-col items-end leading-tight">
-                <span className="text-[10px] uppercase tracking-wide text-gray-400">
-                  {t('tourDetail.pricePerPersonFrom') || 'From / person'}
-                </span>
-                <span className="text-base font-bold" style={{ color: themeColor.primary }}>
-                  {tour.price
-                    ? formatPrice(Number(tour.price), (tour.priceCurrency as any) || 'TWD')
-                    : t('tourDetail.inquirePrice')}
-                </span>
+                {tour.price && (tour.priceCurrency || 'TWD') === 'TWD' ? (() => {
+                  const dual = formatDualPrice(Number(tour.price));
+                  return (
+                    <>
+                      <span className="text-[10px] uppercase tracking-wide text-gray-400">
+                        {t('tourDetail.supplierRefPrice')}
+                      </span>
+                      <span className="text-base font-bold" style={{ color: themeColor.primary }}>
+                        {dual.twd}
+                      </span>
+                      <span className="text-[10px] text-gray-400">
+                        ≈ US${dual.usd}
+                      </span>
+                    </>
+                  );
+                })() : (
+                  <>
+                    <span className="text-[10px] uppercase tracking-wide text-gray-400">
+                      {t('tourDetail.pricePerPersonFrom') || 'From / person'}
+                    </span>
+                    <span className="text-base font-bold" style={{ color: themeColor.primary }}>
+                      {tour.price
+                        ? formatPrice(Number(tour.price), (tour.priceCurrency as any) || 'TWD')
+                        : t('tourDetail.inquirePrice')}
+                    </span>
+                  </>
+                )}
               </div>
 
               {/* Book Now CTA — always visible (desktop + mobile) */}

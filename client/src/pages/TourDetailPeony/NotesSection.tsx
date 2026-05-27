@@ -13,15 +13,17 @@ import {
   PhoneCall,
   ChevronRight,
   Info,
+  Building2,
 } from "lucide-react";
 import { useLocale } from "@/contexts/LocaleContext";
-import type { getThemeColorByDestination } from "./helpers";
+import { detectSupplier, type getThemeColorByDestination } from "./helpers";
 
 export type NotesSectionProps = {
   noticeDetailed: any;
   themeColor: ReturnType<typeof getThemeColorByDestination>;
   sectionRef: React.RefObject<HTMLElement | null>;
   ensureArray: (val: any) => any[];
+  sourceUrl?: string | null;
 };
 
 export default function NotesSection({
@@ -29,8 +31,10 @@ export default function NotesSection({
   themeColor,
   sectionRef,
   ensureArray,
+  sourceUrl,
 }: NotesSectionProps) {
   const { t } = useLocale();
+  const supplier = detectSupplier(sourceUrl);
 
   return (
     <section ref={sectionRef} id="notes" className="py-16 lg:py-24 bg-gray-50">
@@ -39,6 +43,24 @@ export default function NotesSection({
           {t('tourDetail.notices')}
         </h2>
         <p className="text-lg text-gray-700 text-center mb-12">{t('tourDetail.noticesDesc')}</p>
+
+        {/* Supplier Disclosure — shown at top of notices for Lion/UV tours */}
+        {supplier && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 mb-8">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center flex-shrink-0">
+                <Building2 className="h-5 w-5 text-amber-700" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">
+                  {supplier === 'lion'
+                    ? t('tourDetail.supplierDisclosureLion')
+                    : t('tourDetail.supplierDisclosureUv')}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {noticeDetailed ? (
           <div className="grid md:grid-cols-2 gap-6">

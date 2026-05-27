@@ -1,16 +1,15 @@
 /**
- * i18n parity test — guarantees zh-TW / en / ja / ko always have identical key sets.
+ * i18n parity test — guarantees zh-TW / en always have identical key sets.
  *
- * If you add a key to zh-TW.ts, you MUST add it to en.ts (and let ja/ko fall through
- * the spread). This test will fail until parity is restored.
+ * If you add a key to zh-TW.ts, you MUST add it to en.ts.
+ * This test will fail until parity is restored.
  *
  * 2026-05-22: created to enforce "100% i18n coverage" guarantee Jeff asked for.
+ * 2026-05-27: removed ja/ko — Jeff only needs zh-TW + en.
  */
 import { describe, expect, it } from "vitest";
 import { zhTW } from "./zh-TW";
 import { en } from "./en";
-import { ja } from "./ja";
-import { ko } from "./ko";
 
 function flatten(obj: any, prefix = ""): string[] {
   const keys: string[] = [];
@@ -51,17 +50,5 @@ describe("i18n parity", () => {
       );
     }
     expect(orphan).toEqual([]);
-  });
-
-  it("ja.ts inherits full key set via en.ts spread", () => {
-    const jaKeys = new Set(flatten(ja));
-    const missing = [...zhKeys].filter((k) => !jaKeys.has(k));
-    expect(missing).toEqual([]);
-  });
-
-  it("ko.ts inherits full key set via en.ts spread", () => {
-    const koKeys = new Set(flatten(ko));
-    const missing = [...zhKeys].filter((k) => !koKeys.has(k));
-    expect(missing).toEqual([]);
   });
 });

@@ -40,6 +40,34 @@ export const parseJSON = (str: string | null | undefined, defaultValue: any = nu
   }
 };
 
+// ─── TWD → USD conversion constant ────────────────────────────────────────
+// Approximate rate used for display. Matches FALLBACK_RATES in LocaleContext.
+// Will be replaced by a dynamic rate fetch later.
+export const TWD_PER_USD = 32;
+
+/**
+ * Format a TWD price as "NT$xx,xxx" with an approximate USD equivalent.
+ * Returns { twd: "NT$44,440", usd: "1,388" } for downstream rendering.
+ */
+export function formatDualPrice(priceTWD: number): { twd: string; usd: string } {
+  return {
+    twd: `NT$${priceTWD.toLocaleString()}`,
+    usd: Math.round(priceTWD / TWD_PER_USD).toLocaleString(),
+  };
+}
+
+/**
+ * Detect supplier from sourceUrl.
+ * Returns 'lion' | 'uv' | null.
+ */
+export function detectSupplier(sourceUrl: string | null | undefined): 'lion' | 'uv' | null {
+  if (!sourceUrl) return null;
+  const lower = sourceUrl.toLowerCase();
+  if (lower.includes('liontravel')) return 'lion';
+  if (lower.includes('uvbookings')) return 'uv';
+  return null;
+}
+
 // 根據目的地生成主題色
 // Round 80.8: Unified B&W + Gold brand theme — replaces the previous
 // per-country rainbow (歐洲藍 / 日本粉 / 東南亞綠 / 中國紅 / 美洲橙) which

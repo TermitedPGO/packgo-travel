@@ -121,6 +121,9 @@ research-*
 *-report.md
 *-analysis.md
 
+# Temp Chrome MCP debug scripts
+check_*.mjs
+
 # Claude Code session state
 .claude/
 

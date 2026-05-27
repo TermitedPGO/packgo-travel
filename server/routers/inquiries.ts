@@ -77,7 +77,7 @@ export const inquiriesRouter = router({
     translate: adminProcedure
       .input(z.object({
         id: z.number(),
-        targetLanguage: z.enum(["en", "ja", "ko"]).default("en"),
+        targetLanguage: z.enum(["en"]).default("en"),
       }))
       .mutation(async ({ ctx, input }) => {
         const { translateEntity } = await import("../translation");
