@@ -1,18 +1,12 @@
 // PDF generation using Puppeteer
 // Generates tour itinerary PDFs from HTML templates
 
-import puppeteer, { type Browser, type Page } from 'puppeteer-core';
+import type { Page } from 'puppeteer-core';
+import { acquirePage, releasePage } from './_core/puppeteerPool';
 import { storagePut } from './storage';
 
-/**
- * Path to the system Chromium binary. Matches the pattern used by
- * dynamicScraperService / competitorScraperService / posterGeneratorService
- * — the Dockerfile installs /usr/bin/chromium and sets CHROMIUM_PATH at
- * runtime. Without this, puppeteer.launch() tries to use the bundled
- * Chromium which is skipped in CI (PUPPETEER_SKIP_DOWNLOAD=true), so PDF
- * generation silently fails in production.
- */
-const CHROMIUM_PATH = process.env.CHROMIUM_PATH || '/usr/bin/chromium';
+// Browser lifecycle is managed by the shared pool in _core/puppeteerPool.ts.
+// CHROMIUM_PATH, launch args, and concurrency limits live there.
 
 export interface TourPdfData {
   id: number;
@@ -714,23 +708,8 @@ function generatePdfHtml(data: TourPdfData): string {
  * @returns Buffer containing the PDF
  */
 export async function generateTourPdf(data: TourPdfData): Promise<Buffer> {
-  let browser: Browser | null = null;
-
+  const page = await acquirePage();
   try {
-    browser = await puppeteer.launch({
-      executablePath: CHROMIUM_PATH,
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--font-render-hinting=none',
-      ],
-    });
-
-    const page: Page = await browser.newPage();
-
     await page.setViewport({ width: 1240, height: 1754 });
 
     const html = generatePdfHtml(data);
@@ -747,13 +726,8 @@ export async function generateTourPdf(data: TourPdfData): Promise<Buffer> {
     });
 
     return Buffer.from(pdfBuffer);
-  } catch (error) {
-    console.error('[PDF Generator] Error generating PDF:', error);
-    throw error;
   } finally {
-    if (browser) {
-      await browser.close();
-    }
+    await releasePage(page);
   }
 }
 

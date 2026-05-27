@@ -261,7 +261,7 @@ export async function createNewsletterSubscriber(
   return subscriber;
 }
 
-// Get all newsletter subscribers
+// Get all newsletter subscribers (active only — used by public endpoints)
 export async function getAllNewsletterSubscribers(): Promise<NewsletterSubscriber[]> {
   const db = await getDb();
   if (!db) {
@@ -272,6 +272,19 @@ export async function getAllNewsletterSubscribers(): Promise<NewsletterSubscribe
     .select()
     .from(newsletterSubscribers)
     .where(eq(newsletterSubscribers.status, "active"))
+    .orderBy(desc(newsletterSubscribers.subscribedAt));
+}
+
+// Get all newsletter subscribers including unsubscribed (admin use)
+export async function getAllNewsletterSubscribersIncludingUnsubscribed(): Promise<NewsletterSubscriber[]> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+
+  return await db
+    .select()
+    .from(newsletterSubscribers)
     .orderBy(desc(newsletterSubscribers.subscribedAt));
 }
 

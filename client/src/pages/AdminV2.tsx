@@ -63,6 +63,8 @@ const CleanupTabV2 = lazy(() => import("@/components/admin-v2/CleanupTabV2"));
 const SupplierEnrichmentTabV2 = lazy(() => import("@/components/admin-v2/SupplierEnrichmentTabV2"));
 const BankLedgerV2 = lazy(() => import("@/components/admin-v2/BankLedgerV2"));
 const CustomersTabV2 = lazy(() => import("@/components/admin-v2/CustomersTabV2"));
+const NewsletterTabV2 = lazy(() => import("@/components/admin-v2/NewsletterTabV2"));
+const DepartureCalendarV2 = lazy(() => import("@/components/admin-v2/DepartureCalendarV2"));
 
 // All other tabs initially come from V1. They're consumed AS-IS; we replace
 // them one by one with V2 redesigns. Listed here for the lazy-loader.
@@ -101,9 +103,9 @@ type PageId =
   // Office
   | "today" | "agent-chat"
   // Operations
-  | "ops-landing" | "tours" | "bookings" | "inquiries" | "tour-monitor" | "suppliers"
+  | "ops-landing" | "tours" | "bookings" | "inquiries" | "tour-monitor" | "suppliers" | "departures-calendar"
   // Customers
-  | "customers-landing" | "customers-crm" | "reviews" | "packpoint" | "vouchers" | "ai-quotes" | "tool-quote" | "wechat-assist"
+  | "customers-landing" | "customers-crm" | "reviews" | "packpoint" | "vouchers" | "ai-quotes" | "tool-quote" | "wechat-assist" | "newsletter"
   // Marketing
   | "marketing-landing" | "marketing" | "marketing-content" | "posters" | "analytics" | "competitor-monitor" | "affiliate"
   // Finance
@@ -133,6 +135,7 @@ const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageD
       { id: "inquiries", label: "詢問" },
     ],
     advanced: [
+      { id: "departures-calendar", label: "📅 出發日曆" },
       { id: "tour-monitor", label: "供應商監控" },
       { id: "suppliers", label: "🔌 供應商同步" },
     ],
@@ -150,6 +153,7 @@ const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageD
       { id: "packpoint", label: "Packpoint" },
       { id: "vouchers", label: "Voucher" },
       { id: "wechat-assist", label: "WeChat 助手" },
+      { id: "newsletter", label: "📧 Newsletter" },
     ],
   },
   marketing: {
@@ -457,6 +461,8 @@ function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
       return <MonitorDashboardV2 />;
     case "suppliers":
       return <SuppliersTab />;
+    case "departures-calendar":
+      return <DepartureCalendarV2 />;
 
     // Customers
     case "customers-landing":
@@ -478,6 +484,8 @@ function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
       return <VouchersTabV2 />;
     case "wechat-assist":
       return <WechatAssistTab />;
+    case "newsletter":
+      return <NewsletterTabV2 />;
 
     // Marketing
     case "marketing-landing":

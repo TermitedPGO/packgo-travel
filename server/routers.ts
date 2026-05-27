@@ -25,6 +25,7 @@ import { adminPlatformRouter } from "./routers/adminPlatform";
 import { adminLlmRouter } from "./routers/adminLlm";
 import { adminAgentsRouter } from "./routers/adminAgents";
 import { adminCustomersRouter } from "./routers/adminCustomers";
+import { adminDeparturesRouter } from "./routers/adminDepartures";
 // Phase 4C — sub-PR 3 of 5 (refactor 2026-05-19, audit P0-1)
 // Customer transactional domains extracted into their own files.
 import { bookingsRouter } from "./routers/bookings";
@@ -152,6 +153,7 @@ export const appRouter = router({
     ...adminLlmRouter._def.procedures,
     ...adminAgentsRouter._def.procedures,
     ...adminCustomersRouter._def.procedures,
+    ...adminDeparturesRouter._def.procedures,
   }),
 
   // Image Library router — Phase 4C extracted to ./routers/imageLibrary.ts

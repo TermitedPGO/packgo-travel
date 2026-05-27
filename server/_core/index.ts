@@ -30,6 +30,7 @@ import { initializeGmailOAuth } from "../gmailOAuth";
 // imported below). Middleware is registered inside startServer() below.
 import { logger } from "./logger";
 import { correlationIdMiddleware } from "./correlationId";
+import { shutdownPool } from "./puppeteerPool";
 import pinoHttp from "pino-http";
 import "../worker"; // Initialize BullMQ worker
 
@@ -1017,11 +1018,13 @@ async function startServer() {
     }, FORCE_EXIT_MS);
     forceTimer.unref(); // don't keep the loop alive on its own
 
-    server.close((err) => {
+    server.close(async (err) => {
       if (err) {
         logger.error({ err }, "[shutdown] server.close error");
         process.exit(1);
       }
+      // Close shared Chromium instance before exit.
+      await shutdownPool().catch(() => {});
       logger.info("[shutdown] drained cleanly");
       process.exit(0);
     });

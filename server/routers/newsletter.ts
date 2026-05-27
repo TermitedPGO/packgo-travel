@@ -91,7 +91,7 @@ export const newsletterRouter = router({
       return { success: true };
     }),
 
-  // Admin: list all subscribers
+  // Admin: list all subscribers (including unsubscribed)
   listSubscribers: adminProcedure
     .input(z.object({
       status: z.enum(['active', 'unsubscribed', 'all']).default('active'),
@@ -99,7 +99,7 @@ export const newsletterRouter = router({
       offset: z.number().default(0),
     }))
     .query(async ({ input }) => {
-      const subscribers = await db.getAllNewsletterSubscribers();
+      const subscribers = await db.getAllNewsletterSubscribersIncludingUnsubscribed();
       const filtered = input.status === 'all'
         ? subscribers
         : subscribers.filter((s: any) => s.status === input.status);
@@ -109,14 +109,14 @@ export const newsletterRouter = router({
       };
     }),
 
-  // Admin: export subscribers as CSV
+  // Admin: export subscribers as CSV (all statuses)
   exportSubscribers: adminProcedure
     .query(async () => {
-      const subscribers = await db.getAllNewsletterSubscribers();
+      const subscribers = await db.getAllNewsletterSubscribersIncludingUnsubscribed();
       const csv = [
-        'Email,Status,Subscribed At',
+        'Email,Status,Subscribed At,Unsubscribed At',
         ...subscribers.map((s: any) =>
-          `${s.email},${s.status},${new Date(s.subscribedAt).toISOString()}`
+          `${s.email},${s.status},${new Date(s.subscribedAt).toISOString()},${s.unsubscribedAt ? new Date(s.unsubscribedAt).toISOString() : ''}`
         )
       ].join('\n');
       return { csv, count: subscribers.length };
