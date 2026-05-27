@@ -324,38 +324,40 @@ export async function applyAmbianceFixes(fixes: AmbianceFix[]): Promise<number> 
   return applied;
 }
 
-// ── CLI entry point ─────────────────────────────────────────────────
+// ── CLI entry point (only runs when executed directly, NOT when imported) ──
 
-async function main() {
-  const args = process.argv.slice(2);
-  const execute = args.includes("--execute");
-  const limitArg = args.find(a => a.startsWith("--limit"));
-  const limit = limitArg ? parseInt(limitArg.split("=")[1] || args[args.indexOf("--limit") + 1] || "99999") : undefined;
+const isCLI = process.argv[1]?.includes("enrich-tour-ambiance");
 
-  console.log(`[enrich-ambiance] scanning tours missing poeticTitle/heroSubtitle/colorTheme...`);
-  const fixes = await scanMissingAmbiance(limit);
-  console.log(`[enrich-ambiance] found ${fixes.length} tours to enrich`);
+if (isCLI) {
+  (async () => {
+    const args = process.argv.slice(2);
+    const execute = args.includes("--execute");
+    const limitArg = args.find(a => a.startsWith("--limit"));
+    const limit = limitArg ? parseInt(limitArg.split("=")[1] || args[args.indexOf("--limit") + 1] || "99999") : undefined;
 
-  // Show samples
-  fixes.slice(0, 5).forEach(f => {
-    console.log(`  tour ${f.tourId}: ${f.title}`);
-    if (f.updates.poeticTitle) console.log(`    poeticTitle: ${f.updates.poeticTitle}`);
-    if (f.updates.heroSubtitle) console.log(`    heroSubtitle: ${f.updates.heroSubtitle}`);
-    if (f.updates.colorTheme) console.log(`    colorTheme: (palette assigned)`);
-  });
+    console.log(`[enrich-ambiance] scanning tours missing poeticTitle/heroSubtitle/colorTheme...`);
+    const fixes = await scanMissingAmbiance(limit);
+    console.log(`[enrich-ambiance] found ${fixes.length} tours to enrich`);
 
-  if (!execute) {
-    console.log(`\n[enrich-ambiance] DRY RUN — pass --execute to apply changes`);
+    // Show samples
+    fixes.slice(0, 5).forEach(f => {
+      console.log(`  tour ${f.tourId}: ${f.title}`);
+      if (f.updates.poeticTitle) console.log(`    poeticTitle: ${f.updates.poeticTitle}`);
+      if (f.updates.heroSubtitle) console.log(`    heroSubtitle: ${f.updates.heroSubtitle}`);
+      if (f.updates.colorTheme) console.log(`    colorTheme: (palette assigned)`);
+    });
+
+    if (!execute) {
+      console.log(`\n[enrich-ambiance] DRY RUN — pass --execute to apply changes`);
+      process.exit(0);
+    }
+
+    console.log(`\n[enrich-ambiance] applying ${fixes.length} fixes...`);
+    const applied = await applyAmbianceFixes(fixes);
+    console.log(`[enrich-ambiance] done — ${applied}/${fixes.length} applied`);
     process.exit(0);
-  }
-
-  console.log(`\n[enrich-ambiance] applying ${fixes.length} fixes...`);
-  const applied = await applyAmbianceFixes(fixes);
-  console.log(`[enrich-ambiance] done — ${applied}/${fixes.length} applied`);
-  process.exit(0);
+  })().catch(err => {
+    console.error("[enrich-ambiance] fatal:", err);
+    process.exit(1);
+  });
 }
-
-main().catch(err => {
-  console.error("[enrich-ambiance] fatal:", err);
-  process.exit(1);
-});
