@@ -74,7 +74,7 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
     return 'zh-TW';
   });
 
-  const [currency, setCurrencyState] = useState<Currency>('TWD');
+  const [currency, setCurrencyState] = useState<Currency>('USD');
 
   // 在客戶端初始化時從 localStorage 讀取貨幣設定
   useEffect(() => {
