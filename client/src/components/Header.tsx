@@ -196,19 +196,19 @@ export default function Header() {
 
 
       {/* Main Header */}
-      <div className="container flex h-20 items-center justify-between" ref={dropdownRef}>
+      <div className="container flex h-16 md:h-20 items-center justify-between" ref={dropdownRef}>
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-3 group shrink-0">
+        <Link href="/" className="flex items-center gap-2 md:gap-3 group shrink-0">
           <img
             src="/images/logo-bag-black-v3.png"
             alt="PACK&GO Logo"
-            className="h-10 w-10 object-contain"
+            className="h-8 w-8 md:h-10 md:w-10 object-contain"
           />
-          <div className="flex flex-col justify-center pl-1">
-            <span className="text-[24px] font-bold tracking-wide text-black leading-none font-sans">
+          <div className="flex flex-col justify-center pl-0.5 md:pl-1">
+            <span className="text-[20px] md:text-[24px] font-bold tracking-wide text-black leading-none font-sans">
               PACK&amp;GO
             </span>
-            <span className="text-[13px] font-medium text-gray-600 tracking-widest mt-1">
+            <span className="text-[11px] md:text-[13px] font-medium text-gray-600 tracking-widest mt-0.5 md:mt-1">
               {t("home.slogan")}
             </span>
           </div>
@@ -462,17 +462,17 @@ export default function Header() {
             ))}
 
             {/* Mobile Bottom Bar */}
-            <div className="flex items-center justify-between pt-3 mt-2 border-t border-gray-100">
-              <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-3 mt-2 border-t border-gray-100">
+              <div className="flex items-center gap-3 min-w-0">
                 <LocaleSwitcher />
                 {isAuthenticated && user ? (
                   <Link
                     href="/profile"
-                    className="flex items-center gap-1 text-sm text-black font-medium"
+                    className="flex items-center gap-1 text-sm text-black font-medium min-w-0"
                     onClick={() => setIsMenuOpen(false)}
                   >
-                    <User className="h-4 w-4" />
-                    {user.name || user.email}
+                    <User className="h-4 w-4 shrink-0" />
+                    <span className="truncate max-w-[120px]">{user.name || user.email}</span>
                   </Link>
                 ) : (
                   <Link
@@ -480,14 +480,14 @@ export default function Header() {
                     className="flex items-center gap-1 text-sm text-gray-600"
                     onClick={() => setIsMenuOpen(false)}
                   >
-                    <User className="h-4 w-4" />
+                    <User className="h-4 w-4 shrink-0" />
                     {t("nav.memberLogin")}
                   </Link>
                 )}
               </div>
               <a
                 href="tel:1-510-634-2307"
-                className="flex items-center gap-1 text-sm font-bold text-foreground"
+                className="flex items-center gap-1 text-sm font-bold text-foreground shrink-0"
               >
                 <Phone className="h-4 w-4" />
                 1 (510) 634-2307

@@ -64,26 +64,31 @@ export default function CustomersLanding({
           loading={stats.isLoading}
         />
         <KpiCard
-          icon={Crown}
-          label="Plus / Concierge"
-          primary="–"
-          secondary="付費會員 (待 query)"
-          accent="amber"
-        />
-        <KpiCard
           icon={Star}
           label="評論"
-          primary="–"
-          secondary="待查 review 表"
+          primary={stats.data?.totalReviews ?? 0}
+          secondary={`${stats.data?.pendingReviews ?? 0} 待審核`}
           accent="emerald"
           onClick={() => onNavigate("reviews")}
+          loading={stats.isLoading}
+        />
+        <KpiCard
+          icon={Crown}
+          label="訂單"
+          primary={stats.data?.totalBookings ?? 0}
+          secondary={`本日 ${stats.data?.todayBookings ?? 0}`}
+          accent="amber"
+          onClick={() => onNavigate("bookings")}
+          loading={stats.isLoading}
         />
         <KpiCard
           icon={HeartHandshake}
-          label="VIP 客戶"
-          primary="–"
-          secondary="vipScore > 50"
+          label="詢問中"
+          primary={stats.data?.pendingInquiries ?? 0}
+          secondary="待處理 inquiries"
           accent="rose"
+          onClick={() => onNavigate("inquiries")}
+          loading={stats.isLoading}
         />
       </div>
 

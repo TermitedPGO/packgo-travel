@@ -93,7 +93,7 @@ export default function HomeHero({ bgImage }: HomeHeroProps) {
     <section
       className={cn(
         "relative w-full overflow-hidden bg-foreground",
-        "h-[82vh] min-h-[600px] max-h-[860px]",
+        "h-[75vh] md:h-[82vh] min-h-[480px] md:min-h-[600px] max-h-[860px]",
         "flex items-center"
       )}
       onMouseEnter={() => setPaused(true)}
@@ -223,7 +223,7 @@ export default function HomeHero({ bgImage }: HomeHeroProps) {
             {t("homeHero.eyebrow")}
           </p>
 
-          <h1 className="font-serif font-bold text-white text-5xl md:text-6xl lg:text-7xl leading-[1.05] tracking-tight">
+          <h1 className="font-serif font-bold text-white text-3xl sm:text-5xl md:text-6xl lg:text-7xl leading-[1.05] tracking-tight">
             {t("homeHero.title")}
           </h1>
 

@@ -15,6 +15,7 @@
  */
 import { Fragment, useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { useLocale } from "@/contexts/LocaleContext";
 import {
   Select,
   SelectContent,
@@ -50,7 +51,7 @@ type Row = {
 };
 
 const ACTION_PREFIXES = [
-  { value: "", label: "全部" },
+  { value: "", labelKey: "admin.auditLog.filterAll" },
   { value: "tour.", label: "Tour" },
   { value: "booking.", label: "Booking" },
   { value: "user.", label: "User" },
@@ -59,7 +60,7 @@ const ACTION_PREFIXES = [
 ];
 
 const TARGET_TYPES = [
-  { value: "", label: "全部" },
+  { value: "", labelKey: "admin.auditLog.filterAll" },
   { value: "tour", label: "Tour" },
   { value: "booking", label: "Booking" },
   { value: "user", label: "User" },
@@ -67,6 +68,7 @@ const TARGET_TYPES = [
 ];
 
 export default function AuditLogTab() {
+  const { t } = useLocale();
   const [actionPrefix, setActionPrefix] = useState("");
   const [targetType, setTargetType] = useState("");
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -93,10 +95,10 @@ export default function AuditLogTab() {
         <div>
           <h2 className="text-xl font-bold flex items-center gap-2">
             <Shield className="h-5 w-5 text-gray-700" />
-            審計日誌
+            {t("admin.auditLog.title")}
           </h2>
           <p className="text-xs text-gray-500 mt-0.5">
-            每筆 admin 變更操作的完整記錄,用於合規與爭議調查
+            {t("admin.auditLog.subtitle")}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -106,17 +108,17 @@ export default function AuditLogTab() {
             onClick={() => verifyChain.refetch()}
             disabled={verifyChain.isFetching}
             className="rounded-lg"
-            title="重新計算每筆日誌的 hash chain,偵測竄改 / 刪除"
+            title={t("admin.auditLog.verifyTooltip")}
           >
             {verifyChain.isFetching ? (
               <>
                 <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
-                驗證中…
+                {t("admin.auditLog.verifying")}
               </>
             ) : (
               <>
                 <Shield className="h-3.5 w-3.5 mr-1.5" />
-                驗證完整性
+                {t("admin.auditLog.verifyIntegrity")}
               </>
             )}
           </Button>
@@ -129,7 +131,7 @@ export default function AuditLogTab() {
             {isLoading ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : (
-              "重新整理"
+              t("admin.auditLog.refreshButton")
             )}
           </Button>
         </div>
@@ -159,16 +161,16 @@ export default function AuditLogTab() {
                 }`}
               >
                 {verifyChain.data.ok
-                  ? "Hash chain 完整,未偵測到竄改"
-                  : `偵測到 ${verifyChain.data.anomalies.length} 個異常`}
+                  ? t("admin.auditLog.chainOk")
+                  : t("admin.auditLog.chainAnomalies", { count: verifyChain.data.anomalies.length })}
               </p>
               <p className="text-xs text-gray-600 mt-0.5">
-                共 {verifyChain.data.totalRows} 筆日誌
+                {t("admin.auditLog.totalRows", { count: verifyChain.data.totalRows })}
                 {verifyChain.data.hashedRows > 0 && (
-                  <span> · 已加 hash {verifyChain.data.hashedRows}</span>
+                  <span> · {t("admin.auditLog.hashedRows", { count: verifyChain.data.hashedRows })}</span>
                 )}
                 {verifyChain.data.ungatedRows > 0 && (
-                  <span> · 遷移前舊資料 {verifyChain.data.ungatedRows}(無 hash)</span>
+                  <span> · {t("admin.auditLog.ungatedRows", { count: verifyChain.data.ungatedRows })}</span>
                 )}
               </p>
               {verifyChain.data.anomalies.length > 0 && (
@@ -189,7 +191,7 @@ export default function AuditLogTab() {
                   ))}
                   {verifyChain.data.anomalies.length > 20 && (
                     <p className="text-xs text-gray-500">
-                      …還有 {verifyChain.data.anomalies.length - 20} 個未顯示
+                      {t("admin.auditLog.moreAnomalies", { count: verifyChain.data.anomalies.length - 20 })}
                     </p>
                   )}
                 </div>
@@ -206,12 +208,12 @@ export default function AuditLogTab() {
           onValueChange={(v) => setActionPrefix(v === "__all__" ? "" : v)}
         >
           <SelectTrigger className="rounded-lg h-8 text-xs w-32">
-            <SelectValue placeholder="操作類別" />
+            <SelectValue placeholder={t("admin.auditLog.filterActionPlaceholder")} />
           </SelectTrigger>
           <SelectContent>
             {ACTION_PREFIXES.map((p) => (
               <SelectItem key={p.value || "all"} value={p.value || "__all__"}>
-                {p.label}
+                {p.labelKey ? t(p.labelKey) : p.label}
               </SelectItem>
             ))}
           </SelectContent>
@@ -221,12 +223,12 @@ export default function AuditLogTab() {
           onValueChange={(v) => setTargetType(v === "__all__" ? "" : v)}
         >
           <SelectTrigger className="rounded-lg h-8 text-xs w-32">
-            <SelectValue placeholder="目標類型" />
+            <SelectValue placeholder={t("admin.auditLog.filterTargetPlaceholder")} />
           </SelectTrigger>
           <SelectContent>
-            {TARGET_TYPES.map((t) => (
-              <SelectItem key={t.value || "all"} value={t.value || "__all__"}>
-                {t.label}
+            {TARGET_TYPES.map((tt) => (
+              <SelectItem key={tt.value || "all"} value={tt.value || "__all__"}>
+                {tt.labelKey ? t(tt.labelKey) : tt.label}
               </SelectItem>
             ))}
           </SelectContent>
@@ -241,11 +243,11 @@ export default function AuditLogTab() {
               setTargetType("");
             }}
           >
-            清除
+            {t("admin.auditLog.clearFilter")}
           </Button>
         )}
         <span className="text-xs text-gray-400 ml-auto">
-          {rows.length} 筆
+          {t("admin.auditLog.rowCount", { count: rows.length })}
         </span>
       </div>
 
@@ -253,19 +255,19 @@ export default function AuditLogTab() {
         <LoadingRow />
       ) : rows.length === 0 ? (
         <div className="py-12 text-center text-gray-400 text-sm">
-          沒有符合條件的審計記錄。
+          {t("admin.auditLog.emptyMessage")}
         </div>
       ) : (
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
           <table className="w-full text-xs">
             <thead className="bg-gray-50 text-gray-500 uppercase tracking-wide">
               <tr>
-                <th className="px-3 py-2 text-left font-medium">時間</th>
-                <th className="px-3 py-2 text-left font-medium">操作</th>
-                <th className="px-3 py-2 text-left font-medium">目標</th>
-                <th className="px-3 py-2 text-left font-medium">操作者</th>
-                <th className="px-3 py-2 text-left font-medium">IP</th>
-                <th className="px-3 py-2 text-left font-medium">結果</th>
+                <th className="px-3 py-2 text-left font-medium">{t("admin.auditLog.colTime")}</th>
+                <th className="px-3 py-2 text-left font-medium">{t("admin.auditLog.colAction")}</th>
+                <th className="px-3 py-2 text-left font-medium">{t("admin.auditLog.colTarget")}</th>
+                <th className="px-3 py-2 text-left font-medium">{t("admin.auditLog.colOperator")}</th>
+                <th className="px-3 py-2 text-left font-medium">{t("admin.auditLog.colIP")}</th>
+                <th className="px-3 py-2 text-left font-medium">{t("admin.auditLog.colResult")}</th>
               </tr>
             </thead>
             <tbody>
@@ -308,7 +310,7 @@ export default function AuditLogTab() {
                         ) : (
                           <span className="text-red-700 inline-flex items-center gap-1">
                             <AlertCircle className="h-3 w-3" />
-                            失敗
+                            {t("admin.auditLog.failed")}
                           </span>
                         )}
                       </td>
@@ -319,7 +321,7 @@ export default function AuditLogTab() {
                           <div className="space-y-2 text-xs">
                             {r.reason && (
                               <div>
-                                <span className="text-gray-500">原因:</span>{" "}
+                                <span className="text-gray-500">{t("admin.auditLog.reason")}</span>{" "}
                                 <span className="text-gray-800">
                                   {r.reason}
                                 </span>
@@ -327,7 +329,7 @@ export default function AuditLogTab() {
                             )}
                             {r.changes && (
                               <div>
-                                <p className="text-gray-500 mb-1">變更內容:</p>
+                                <p className="text-gray-500 mb-1">{t("admin.auditLog.changes")}</p>
                                 <pre className="bg-white border border-gray-200 rounded p-2 overflow-x-auto text-[11px] leading-relaxed text-gray-700 max-h-64">
                                   {(() => {
                                     try {
@@ -346,7 +348,7 @@ export default function AuditLogTab() {
                             {r.errorMessage && (
                               <div>
                                 <p className="text-red-600 font-semibold">
-                                  錯誤訊息:
+                                  {t("admin.auditLog.errorMessage")}
                                 </p>
                                 <p className="text-red-700 bg-red-50 border border-red-200 rounded p-2 mt-1">
                                   {r.errorMessage}

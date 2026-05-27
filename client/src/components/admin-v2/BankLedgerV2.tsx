@@ -529,7 +529,7 @@ export default function BankLedgerV2() {
             className="h-8 rounded-lg gap-1.5"
           >
             <Upload className="h-3.5 w-3.5" />
-            CSV 匯入
+            {t("admin.bankLedger.csvImportButtonLabel")}
           </Button>
           {/* AI classify — pulls uncategorized batch through accountingAgentService */}
           <Button
@@ -1405,6 +1405,7 @@ function CsvImportDialog({
   onClose: () => void;
   onComplete: () => void;
 }) {
+  const { t } = useLocale();
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
   const [csvText, setCsvText] = useState<string>("");
   const [filename, setFilename] = useState<string>("");
@@ -1412,7 +1413,7 @@ function CsvImportDialog({
 
   const accounts = trpc.plaid.linkedAccountsList.useQuery();
   const importMut = trpc.plaid.csvImport.useMutation({
-    onError: (e) => toast.error(`匯入失敗: ${e.message}`),
+    onError: (e) => toast.error(t("admin.bankLedger.csvImportToastFail", { err: e.message })),
   });
 
   const handleFile = (file: File) => {
@@ -1424,7 +1425,7 @@ function CsvImportDialog({
 
   const handlePreview = async () => {
     if (!selectedAccountId || !csvText) {
-      toast.error("先選帳戶 + 上傳 CSV");
+      toast.error(t("admin.bankLedger.csvImportToastSelectFirst"));
       return;
     }
     const r = await importMut.mutateAsync({
@@ -1442,7 +1443,7 @@ function CsvImportDialog({
       csvText,
       dryRun: false,
     });
-    toast.success(`匯入完成: ${r.upserted} 筆 (${r.format})`);
+    toast.success(t("admin.bankLedger.csvImportToastSuccess", { count: r.upserted ?? 0, format: r.format ?? "" }));
     onComplete();
     onClose();
     setCsvText("");
@@ -1457,7 +1458,7 @@ function CsvImportDialog({
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
       <div className="w-full max-w-2xl bg-white rounded-2xl p-5 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">BofA CSV 匯入 (2025 歷史)</h2>
+          <h2 className="text-lg font-semibold">{t("admin.bankLedger.csvImportTitle")}</h2>
           <Button variant="ghost" size="sm" onClick={onClose}>
             <X className="w-5 h-5" />
           </Button>
@@ -1465,23 +1466,23 @@ function CsvImportDialog({
 
         <div className="space-y-4">
           <div className="rounded-lg bg-blue-50 border border-blue-100 p-3 text-xs text-blue-900 leading-relaxed">
-            <strong>怎麼下載 BofA CSV：</strong>
+            <strong>{t("admin.bankLedger.csvImportHowTo")}</strong>
             <ol className="list-decimal ml-4 mt-1 space-y-0.5">
-              <li>登入 BofA 網銀 → Activity → Download Account Activity</li>
-              <li>Date Range 設 2025-01-01 → 2026-02-15 (避開現有 Plaid 資料)</li>
-              <li>Format = Comma Delimited (.csv)</li>
-              <li>Download 後上傳到這裡</li>
+              <li>{t("admin.bankLedger.csvImportStep1")}</li>
+              <li>{t("admin.bankLedger.csvImportStep2")}</li>
+              <li>{t("admin.bankLedger.csvImportStep3")}</li>
+              <li>{t("admin.bankLedger.csvImportStep4")}</li>
             </ol>
           </div>
 
           <div>
-            <Label className="text-sm font-medium">1. 選擇帳戶</Label>
+            <Label className="text-sm font-medium">{t("admin.bankLedger.csvImportSelectAccount")}</Label>
             <Select
               value={selectedAccountId?.toString() ?? ""}
               onValueChange={(v) => setSelectedAccountId(Number(v))}
             >
               <SelectTrigger className="h-10 rounded-lg mt-1.5">
-                <SelectValue placeholder="選帳戶..." />
+                <SelectValue placeholder={t("admin.bankLedger.csvImportSelectAccountPlaceholder")} />
               </SelectTrigger>
               <SelectContent>
                 {(accounts.data ?? []).map((a: any) => (
@@ -1494,11 +1495,11 @@ function CsvImportDialog({
           </div>
 
           <div>
-            <Label className="text-sm font-medium">2. 上傳 CSV 檔</Label>
+            <Label className="text-sm font-medium">{t("admin.bankLedger.csvImportUploadCsv")}</Label>
             <div className="mt-1.5">
               <label className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-4 py-6 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer">
                 <Upload className="w-4 h-4" />
-                <span>{filename || "選擇 .csv 檔..."}</span>
+                <span>{filename || t("admin.bankLedger.csvImportChooseFile")}</span>
                 <input
                   type="file"
                   accept=".csv,text/csv"
@@ -1521,24 +1522,24 @@ function CsvImportDialog({
               {importMut.isPending ? (
                 <Loader2 className="w-4 h-4 animate-spin mr-2" />
               ) : null}
-              3. 預覽 (dry-run)
+              {t("admin.bankLedger.csvImportPreviewButton")}
             </Button>
           )}
 
           {preview && (
             <div className="rounded-lg border border-gray-200 p-3 bg-gray-50 space-y-2">
               <div className="text-sm font-semibold text-gray-900">
-                預覽結果
+                {t("admin.bankLedger.csvImportPreviewTitle")}
               </div>
               <div className="text-xs text-gray-700 space-y-1">
-                <div>格式: {preview.format}</div>
-                <div>解析筆數: {preview.parsedCount}</div>
+                <div>{t("admin.bankLedger.csvImportFormat", { format: preview.format })}</div>
+                <div>{t("admin.bankLedger.csvImportParsedCount", { count: preview.parsedCount })}</div>
                 <div>
-                  日期範圍: {preview.dateMin} → {preview.dateMax}
+                  {t("admin.bankLedger.csvImportDateRange", { min: preview.dateMin, max: preview.dateMax })}
                 </div>
                 {preview.warnings?.length > 0 && (
                   <div className="text-amber-700">
-                    ⚠️ {preview.warnings.length} 個 warnings (前 3 個):
+                    ⚠️ {t("admin.bankLedger.csvImportWarnings", { count: preview.warnings.length })}:
                     {preview.warnings.slice(0, 3).map((w: string, i: number) => (
                       <div key={i} className="text-[10px] ml-2">{w}</div>
                     ))}
@@ -1547,7 +1548,7 @@ function CsvImportDialog({
               </div>
               {preview.sample?.length > 0 && (
                 <div className="text-[10px] text-gray-600 mt-2">
-                  <div className="font-semibold mb-1">前 5 筆 sample:</div>
+                  <div className="font-semibold mb-1">{t("admin.bankLedger.csvImportSampleTitle")}</div>
                   {preview.sample.map((s: any, i: number) => (
                     <div key={i} className="tabular-nums">
                       {s.date} · ${s.amount} · {s.description}
@@ -1563,7 +1564,7 @@ function CsvImportDialog({
                 {importMut.isPending ? (
                   <Loader2 className="w-4 h-4 animate-spin mr-2" />
                 ) : null}
-                4. 確認匯入 {preview.parsedCount} 筆
+                {t("admin.bankLedger.csvImportCommitButton", { count: preview.parsedCount })}
               </Button>
             </div>
           )}

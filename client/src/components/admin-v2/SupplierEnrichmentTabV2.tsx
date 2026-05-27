@@ -16,13 +16,17 @@
 
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { useLocale } from "@/contexts/LocaleContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Sparkles, RefreshCw, CheckCircle2, AlertTriangle, Clock } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
-import { zhTW } from "date-fns/locale";
+import { zhTW, enUS, ja, ko, type Locale } from "date-fns/locale";
+
+const DATE_FNS_LOCALE: Record<string, Locale> = { "zh-TW": zhTW, en: enUS, ja, ko };
 
 export default function SupplierEnrichmentTabV2() {
+  const { t, language } = useLocale();
   const [refreshKey, setRefreshKey] = useState(0);
 
   const overview = trpc.suppliers.enrichmentOverview.useQuery(undefined, {
@@ -36,7 +40,8 @@ export default function SupplierEnrichmentTabV2() {
   });
 
   const handleTrigger = (supplierCode: "lion" | "uv" | "all") => {
-    if (!confirm(`確定要重跑 ${supplierCode === "all" ? "全部" : supplierCode} 供應商的 detail 同步嗎? (背景跑 1-2 小時)`)) return;
+    const supplierLabel = supplierCode === "all" ? t("admin.supplierEnrichment.confirmAll") : supplierCode;
+    if (!confirm(t("admin.supplierEnrichment.confirmReEnrich", { supplier: supplierLabel }))) return;
     triggerBackfill.mutate({ supplierCode });
   };
 
@@ -44,10 +49,9 @@ export default function SupplierEnrichmentTabV2() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">🌏 供應商深度同步</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">🌏 {t("admin.supplierEnrichment.title")}</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Lion + UV 每個產品抓全部 detail (itinerary / hotels / meals / policy / notice)。
-            Worker concurrency 5,每天 03:00 UTC 自動跑;低於 7 天的不重抓。
+            {t("admin.supplierEnrichment.subtitle")}
           </p>
         </div>
         <Button
@@ -57,17 +61,17 @@ export default function SupplierEnrichmentTabV2() {
           className="rounded-lg gap-1.5"
         >
           <RefreshCw className="h-3.5 w-3.5" />
-          重整
+          {t("admin.supplierEnrichment.refresh")}
         </Button>
       </div>
 
       {overview.isLoading && (
-        <div className="text-center py-12 text-gray-400">載入中…</div>
+        <div className="text-center py-12 text-gray-400">{t("admin.supplierEnrichment.loading")}</div>
       )}
 
       {overview.error && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
-          載入失敗: {overview.error.message}
+          {t("admin.supplierEnrichment.loadError", { err: overview.error.message })}
         </div>
       )}
 
@@ -102,7 +106,7 @@ export default function SupplierEnrichmentTabV2() {
                       />
                     </div>
                     <div className="text-xs text-gray-500 tabular-nums">
-                      {parsedPct}% 完成
+                      {t("admin.supplierEnrichment.pctComplete", { pct: parsedPct })}
                     </div>
                   </div>
 
@@ -111,32 +115,32 @@ export default function SupplierEnrichmentTabV2() {
                     <div className="rounded-lg bg-green-50 p-3 text-center">
                       <CheckCircle2 className="h-4 w-4 mx-auto text-green-600 mb-1" />
                       <div className="tabular-nums font-medium">{row.itineraryParsed.toLocaleString()}</div>
-                      <div className="text-xs text-gray-500">parsed</div>
+                      <div className="text-xs text-gray-500">{t("admin.supplierEnrichment.parsed")}</div>
                     </div>
                     <div className="rounded-lg bg-amber-50 p-3 text-center">
                       <AlertTriangle className="h-4 w-4 mx-auto text-amber-600 mb-1" />
                       <div className="tabular-nums font-medium">{row.itineraryParseFailed.toLocaleString()}</div>
-                      <div className="text-xs text-gray-500">parse fail</div>
+                      <div className="text-xs text-gray-500">{t("admin.supplierEnrichment.parseFail")}</div>
                     </div>
                     <div className="rounded-lg bg-gray-50 p-3 text-center">
                       <Clock className="h-4 w-4 mx-auto text-gray-500 mb-1" />
                       <div className="tabular-nums font-medium">{row.itineraryMissing.toLocaleString()}</div>
-                      <div className="text-xs text-gray-500">missing</div>
+                      <div className="text-xs text-gray-500">{t("admin.supplierEnrichment.missing")}</div>
                     </div>
                   </div>
 
                   {/* Last enriched */}
                   <div className="text-xs text-gray-500">
-                    最後同步:{" "}
+                    {t("admin.supplierEnrichment.lastSync")}{" "}
                     {row.lastEnrichedAt ? (
                       <span className="tabular-nums">
                         {formatDistanceToNow(new Date(row.lastEnrichedAt), {
                           addSuffix: true,
-                          locale: zhTW,
+                          locale: DATE_FNS_LOCALE[language] ?? enUS,
                         })}
                       </span>
                     ) : (
-                      <span className="text-gray-400">尚未開始</span>
+                      <span className="text-gray-400">{t("admin.supplierEnrichment.notStarted")}</span>
                     )}
                   </div>
 
@@ -147,7 +151,7 @@ export default function SupplierEnrichmentTabV2() {
                     className="w-full rounded-lg gap-1.5 bg-[#c9a563] hover:bg-[#b8924d] text-white"
                   >
                     <Sparkles className="h-3.5 w-3.5" />
-                    重跑 {row.name} detail (missing + 7天 stale)
+                    {t("admin.supplierEnrichment.reEnrichSupplier", { name: row.name })}
                   </Button>
                 </CardContent>
               </Card>
@@ -166,15 +170,17 @@ export default function SupplierEnrichmentTabV2() {
           className="rounded-lg gap-2"
         >
           <Sparkles className="h-4 w-4" />
-          全部供應商 一起重跑
+          {t("admin.supplierEnrichment.reEnrichAll")}
         </Button>
       </div>
 
       {triggerBackfill.isSuccess && triggerBackfill.data && (
         <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-sm">
-          ✅ 已 enqueue {triggerBackfill.data.total.toLocaleString()} 個 jobs
-          (Lion {triggerBackfill.data.enqueued.lion.toLocaleString()} · UV {triggerBackfill.data.enqueued.uv.toLocaleString()})。
-          Worker concurrency 5,約 1-2 小時跑完。Table 每 10 秒自動 refresh。
+          ✅ {t("admin.supplierEnrichment.enqueueSuccess", {
+            total: triggerBackfill.data.total.toLocaleString(),
+            lion: triggerBackfill.data.enqueued.lion.toLocaleString(),
+            uv: triggerBackfill.data.enqueued.uv.toLocaleString(),
+          })}
         </div>
       )}
     </div>

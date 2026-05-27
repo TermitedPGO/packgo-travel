@@ -12,17 +12,17 @@ export default function Footer() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-12 mb-16">
           {/* Column 1: Brand & About */}
           <div className="space-y-6">
-            <div className="flex items-center gap-3">
-              <img 
-                src="/images/logo-bag-white-v3.png" 
-                alt="PACK&GO Logo" 
-                className="h-10 w-10 object-contain"
+            <div className="flex items-center gap-2 md:gap-3">
+              <img
+                src="/images/logo-bag-white-v3.png"
+                alt="PACK&GO Logo"
+                className="h-8 w-8 md:h-10 md:w-10 object-contain"
               />
-              <div className="flex flex-col justify-center pl-1">
-                <span className="text-[28px] font-bold tracking-wide text-white leading-none font-sans">
+              <div className="flex flex-col justify-center pl-0.5 md:pl-1">
+                <span className="text-[22px] md:text-[28px] font-bold tracking-wide text-white leading-none font-sans">
                   PACK&GO
                 </span>
-                <span className="text-[15px] font-medium text-gray-400 tracking-widest mt-1">
+                <span className="text-[13px] md:text-[15px] font-medium text-gray-400 tracking-widest mt-0.5 md:mt-1">
                   {t('footer.slogan')}
                 </span>
               </div>

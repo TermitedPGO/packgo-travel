@@ -413,7 +413,7 @@ ${JSON.stringify(dailyItinerary.slice(0, 8).map((d: any) => ({ day: d.day, title
 請生成：
 1. meals: 餐飲介紹（根據每日行程提取，包含 name/type/description/cuisine/restaurant，若有可用圖片請填入 image/imageAlt）
 2. hotels: 住宿介紹（根據住宿資料提取，包含 name/stars/description/facilities/location，若有可用圖片請填入 image/imageAlt）
-3. costs: 費用說明（包含 included/excluded/additionalCosts/notes）
+3. costs: 費用說明（包含 included/excluded/additionalCosts/notes）— 【嚴禁編造任何具體金額，所有價格必須來自上方費用資料，沒有金額的項目只寫類別名稱】
 4. notices: 注意事項（包含 preparation/culturalNotes/healthSafety/emergency，每類 3-4 條）`;
 
     try {
@@ -710,16 +710,18 @@ ${JSON.stringify(accommodationData, null, 2)}
       return { data: this.getDefaultCosts(days, destinationCountry, destinationCity) };
     }
 
-    const prompt = `請根據以下定價資訊，生成費用說明。
+    const prompt = `請根據以下定價資訊，整理費用說明。
 
 定價資訊：
 ${JSON.stringify({ ...pricingData, days, destinationCountry, destinationCity }, null, 2)}
 
 要求：
-1. 包含項目（included）：列出 5-7 項團費包含的服務
-2. 不包含項目（excluded）：列出 5-6 項團費不包含的費用
-3. 額外費用提醒（additionalCosts）：列出 3-4 項額外費用或建議
-4. 備註（notes）：簡短說明報價基準和注意事項`;
+1. 包含項目（included）：列出 5-7 項團費包含的服務（僅列出上方資料中明確提及的項目）
+2. 不包含項目（excluded）：列出 5-6 項團費不包含的費用（僅列出上方資料中明確提及的項目，其餘用通用類別如「個人消費」）
+3. 額外費用提醒（additionalCosts）：列出上方資料中明確提及的額外費用。如果資料中沒有具體金額，寫「依供應商報價為準」
+4. 備註（notes）：簡短說明注意事項
+
+【嚴禁】不可編造任何具體金額（如 NTD xxx、USD xxx）。所有金額必須來自上方定價資訊，不在資料中的金額一律不寫。報價是供應商的工作，AI 不准報價。`;
 
     try {
       const claudeAgent = getHaikuAgent();
@@ -811,7 +813,7 @@ ${JSON.stringify(locationData, null, 2)}
 
   private getCostsSection(): string {
     return loadSkillSections("details", ["costs"]) ||
-      "你是專業的旅遊業務顧問，擅長提供清晰的費用說明。";
+      "你是專業的旅遊業務顧問，擅長整理費用說明。嚴禁編造任何具體金額——所有價格必須來自供應商提供的原始資料。如果原始資料中沒有某項費用的金額，只列類別名稱並標註「依供應商報價為準」。";
   }
 
   private getNoticesSection(): string {
@@ -859,32 +861,40 @@ ${JSON.stringify(locationData, null, 2)}
     ];
   }
 
+  /**
+   * Default cost structure when supplier hasn't provided pricing details.
+   *
+   * CRITICAL BUSINESS RULE (Jeff 2026-05-27): AI 不准報價 — pricing is
+   * exclusively the supplier's job. This fallback must NEVER contain
+   * specific dollar amounts, NTD/USD figures, or any fabricated prices.
+   * Only generic category labels are allowed; actual pricing comes from
+   * the supplier quote that Jeff manually reviews.
+   */
   private getDefaultCosts(days: number, destinationCountry: string, destinationCity: string): CostData {
-    const nights = days - 1;
+    const nights = Math.max(days - 1, 1);
     return {
       included: [
         "來回經濟艙機票",
-        `${nights}晚精選飯店住宿（雙人房）`,
-        "每日早餐及行程中標註的午晚餐",
+        `${nights}晚飯店住宿`,
+        "行程中標註的餐食",
         "行程中所列景點門票",
-        "全程遊覽車交通",
+        "全程交通接送",
         "專業中文導遊服務",
         "旅遊責任保險",
       ],
       excluded: [
         "護照及簽證費用",
-        "個人旅遊平安保險（建議自行投保）",
-        "導遊、司機小費（建議每人每天 USD 10）",
+        "個人旅遊平安保險",
+        "導遊及司機小費",
         "行李超重費用",
         "個人消費（飲料、紀念品、洗衣等）",
         "行程中未標註的餐食",
       ],
       additionalCosts: [
-        "單人房差價：每人加收 NTD 8,000",
-        "建議攜帶現金：每人約 USD 300-500",
-        "建議小費：導遊每人每天 USD 5、司機每人每天 USD 5",
+        "單人房差價（實際金額依供應商報價為準）",
+        "簽證相關費用（依目的地規定）",
       ],
-      notes: `以上報價以雙人房為基準，單人報名需補單人房差價。機票及飯店價格可能因淡旺季而有所調整，實際價格以報名時確認為準。`,
+      notes: "實際費用以供應商報價為準，請聯繫我們取得最新報價。",
     };
   }
 

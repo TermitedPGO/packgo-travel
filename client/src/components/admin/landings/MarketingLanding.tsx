@@ -49,10 +49,11 @@ export default function MarketingLanding({
         <KpiCard
           icon={ImageIcon}
           label="海報 / Poster"
-          primary="–"
-          secondary="本月生成數 (待 query)"
+          primary={stats.data?.postersThisMonth ?? 0}
+          secondary="本月生成"
           accent="sky"
           onClick={() => onNavigate("posters")}
+          loading={stats.isLoading}
         />
         <KpiCard
           icon={Mail}
@@ -74,10 +75,11 @@ export default function MarketingLanding({
         <KpiCard
           icon={ExternalLink}
           label="Trip.com Aff"
-          primary="–"
-          secondary="點擊 / 佣金待 query"
+          primary={stats.data?.totalAffiliateClicks ?? 0}
+          secondary="clicks"
           accent="violet"
           onClick={() => onNavigate("affiliate")}
+          loading={stats.isLoading}
         />
         <KpiCard
           icon={Eye}

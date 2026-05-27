@@ -69,7 +69,7 @@ export const adminPlatformRouter = router({
       console.warn("[admin.getStats] cache read failed:", err);
     }
 
-    const { tours: toursTable, bookings: bookingsTable, inquiries: inquiriesTable, users: usersTable, newsletterSubscribers: newsletterTable } = await import('../../drizzle/schema');
+    const { tours: toursTable, bookings: bookingsTable, inquiries: inquiriesTable, users: usersTable, newsletterSubscribers: newsletterTable, tourReviews: tourReviewsTable, marketingMaterials: marketingMaterialsTable, affiliateClicks: affiliateClicksTable } = await import('../../drizzle/schema');
     const { sql: sqlFn, eq: eqFn, gte: gteFn, count: countFn } = await import('drizzle-orm');
     const drizzleDb = await db.getDb();
     if (!drizzleDb) {
@@ -95,6 +95,11 @@ export const adminPlatformRouter = router({
       pendingInquiriesRow,
       totalUsersRow,
       totalSubscribersRow,
+      // Landing KPI extras (review, poster, affiliate counts)
+      totalReviewsRow,
+      pendingReviewsRow,
+      totalPostersRow,
+      totalAffClicksRow,
     ] = await Promise.all([
       drizzleDb.select({ count: countFn() }).from(toursTable).then((r) => r[0]),
       drizzleDb.select({ count: countFn() }).from(toursTable).where(eqFn(toursTable.status, 'active')).then((r) => r[0]),
@@ -107,6 +112,14 @@ export const adminPlatformRouter = router({
       drizzleDb.select({ count: countFn() }).from(inquiriesTable).where(sqlFn`${inquiriesTable.status} IN ('new', 'in_progress')`).then((r) => r[0]),
       drizzleDb.select({ count: countFn() }).from(usersTable).then((r) => r[0]),
       drizzleDb.select({ count: countFn() }).from(newsletterTable).where(eqFn(newsletterTable.status, 'active')).then((r) => r[0]),
+      // Reviews: total approved
+      drizzleDb.select({ count: countFn() }).from(tourReviewsTable).where(eqFn(tourReviewsTable.status, 'approved')).then((r) => r[0]),
+      // Reviews: pending moderation
+      drizzleDb.select({ count: countFn() }).from(tourReviewsTable).where(eqFn(tourReviewsTable.status, 'pending')).then((r) => r[0]),
+      // Posters this month
+      drizzleDb.select({ count: countFn() }).from(marketingMaterialsTable).where(sqlFn`${marketingMaterialsTable.type} LIKE 'poster%' AND ${marketingMaterialsTable.createdAt} >= ${startOfThisMonth}`).then((r) => r[0]),
+      // Affiliate clicks total
+      drizzleDb.select({ count: countFn() }).from(affiliateClicksTable).then((r) => r[0]),
     ]);
     const thisMonthRevenue = Number(thisMonthRevenueRow?.total ?? 0);
     const lastMonthRevenue = Number(lastMonthRevenueRow?.total ?? 0);
@@ -123,6 +136,11 @@ export const adminPlatformRouter = router({
       pendingInquiries: Number(pendingInquiriesRow?.count ?? 0),
       totalUsers: Number(totalUsersRow?.count ?? 0),
       totalSubscribers: Number(totalSubscribersRow?.count ?? 0),
+      // Landing KPI extras
+      totalReviews: Number(totalReviewsRow?.count ?? 0),
+      pendingReviews: Number(pendingReviewsRow?.count ?? 0),
+      postersThisMonth: Number(totalPostersRow?.count ?? 0),
+      totalAffiliateClicks: Number(totalAffClicksRow?.count ?? 0),
     };
     try {
       await redis.setex(CACHE_KEY, CACHE_TTL, JSON.stringify(result));

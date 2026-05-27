@@ -225,7 +225,7 @@ export async function buildQuotePdf(opts: {
   @media print { body { padding: 16px; } }
 </style></head><body>
 <div class="header">
-  <p class="quote-number">${isEN ? "QUOTATION" : "報價單"} · ${quoteNumber}</p>
+  <p class="quote-number">${isEN ? "TOUR RECOMMENDATION" : "行程建議單"} · ${quoteNumber}</p>
   <h1>Pack & Go ${isEN ? "Travel" : "旅行社"}</h1>
   <p style="margin: 0; color: #6b7280; font-size: 13px;">CST #2166984 · 39055 Cedar Blvd #126, Newark, CA 94560 · +1 (510) 634-2307</p>
 </div>
@@ -248,7 +248,7 @@ ${estimateNote ? `<p style="margin-top: 16px; padding: 12px 16px; background: #e
   <p><strong>Pack & Go, LLC</strong> · California Seller of Travel #2166984 · TCRF Participant</p>
   <p>${isEN
     ? "Registration as a seller of travel does not constitute approval by the State of California. Estimates above are based on lowest available departure prices and are subject to availability and change until booking is confirmed with deposit."
-    : "旅遊業者登記不代表加州政府之背書。上述估算以最低可選出發日票價為基準，最終金額依實際選擇之出發日為準，需繳訂金後始確認。"}</p>
+    : "旅遊業者登記不代表加州政府之背書。本建議單之價格為目前系統參考價，非正式報價。最終費用依實際選擇之出發日及供應商確認為準，需繳訂金後始確認。"}</p>
 </div>
 </body></html>`;
 
