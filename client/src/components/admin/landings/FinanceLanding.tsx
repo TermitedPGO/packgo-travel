@@ -25,6 +25,7 @@ import {
 import { formatDistanceToNow } from "date-fns";
 import { zhTW } from "date-fns/locale";
 import { KpiCard, SectionCard, LandingGreeting } from "./landingPrimitives";
+import { useLocale } from "@/contexts/LocaleContext";
 
 const fmt = (n: number) =>
   `$${Math.round(n).toLocaleString("en-US")}`;
@@ -34,6 +35,7 @@ export default function FinanceLanding({
 }: {
   onNavigate: (pageId: string) => void;
 }) {
+  const { t } = useLocale();
   const stats = trpc.admin.getStats.useQuery(undefined, { refetchInterval: 60_000 });
   // 2026-05-22 — Plaid-derived P&L. Previously this page read revenue from
   // bookings table only ($0 because direct Zelle / ACH inflows never land
@@ -61,16 +63,16 @@ export default function FinanceLanding({
   return (
     <div className="max-w-6xl mx-auto space-y-4">
       <LandingGreeting
-        title="💰 財務"
-        subtitle={`本月 賺 ${fmt(income)} · 付 ${fmt(expenses)} · 淨 ${fmt(net)} · 訂金待 recognize ${fmt(trustDeferred)} · YTD ${fmt(ytdIncome)}`}
+        title={t('admin.financeLanding.title')}
+        subtitle={t('admin.financeLanding.subtitle', { income: fmt(income), expenses: fmt(expenses), net: fmt(net), trust: fmt(trustDeferred), ytd: fmt(ytdIncome) })}
       />
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <KpiCard
           icon={Wallet}
-          label="本月賺多少"
+          label={t('admin.financeLanding.monthlyIncome')}
           primary={fmt(income)}
-          secondary={growth >= 0 ? `+${growth}% vs 上月` : `${growth}% vs 上月`}
+          secondary={t('admin.financeLanding.vsLastMonth', { pct: growth >= 0 ? `+${growth}` : `${growth}` })}
           accent={growth >= 0 ? "emerald" : "rose"}
           trend={growth >= 0 ? "up" : "down"}
           onClick={() => onNavigate("bank-ledger")}
@@ -78,18 +80,18 @@ export default function FinanceLanding({
         />
         <KpiCard
           icon={TrendingDown}
-          label="本月付多少"
+          label={t('admin.financeLanding.monthlyExpenses')}
           primary={fmt(expenses)}
-          secondary="COGS + 營運 + 軟體"
+          secondary={t('admin.financeLanding.expensesBreakdown')}
           accent="rose"
           onClick={() => onNavigate("bank-ledger")}
           loading={kpi.isLoading}
         />
         <KpiCard
           icon={DollarSign}
-          label="本月淨利"
+          label={t('admin.financeLanding.monthlyNetProfit')}
           primary={fmt(net)}
-          secondary={net >= 0 ? "獲利" : "虧損"}
+          secondary={net >= 0 ? t('admin.financeLanding.profitable') : t('admin.financeLanding.atLoss')}
           accent={net >= 0 ? "emerald" : "rose"}
           trend={net >= 0 ? "up" : "down"}
           onClick={() => onNavigate("bank-ledger")}
@@ -98,27 +100,27 @@ export default function FinanceLanding({
         {/* 信託訂金 — CST §17550 negative liability. Not yours yet. */}
         <KpiCard
           icon={Lock}
-          label="客人訂金 (trust)"
+          label={t('admin.financeLanding.customerDeposit')}
           primary={fmt(trustDeferred)}
-          secondary="出發後才轉成收入"
+          secondary={t('admin.financeLanding.depositNote')}
           accent="slate"
           onClick={() => onNavigate("reconciliation")}
           loading={kpi.isLoading}
         />
         <KpiCard
           icon={AlertTriangle}
-          label="本月待 Jeff 確認"
+          label={t('admin.financeLanding.pendingReview')}
           primary={needsReviewCount}
-          secondary={needsReviewCount > 0 ? `共 ${fmt(needsReviewAmount)} 金額` : "沒有未確認筆"}
+          secondary={needsReviewCount > 0 ? t('admin.financeLanding.pendingAmount', { amount: fmt(needsReviewAmount) }) : t('admin.financeLanding.noPending')}
           accent={needsReviewCount > 0 ? "amber" : "slate"}
           onClick={() => onNavigate("bank-ledger")}
           loading={kpi.isLoading}
         />
         <KpiCard
           icon={TrendingUp}
-          label="YTD 淨利"
+          label={t('admin.financeLanding.ytdNetProfit')}
           primary={fmt(ytdNet)}
-          secondary={`賺 ${fmt(ytdIncome)} · 2026 累計`}
+          secondary={t('admin.financeLanding.ytdEarned', { amount: fmt(ytdIncome) })}
           accent="indigo"
           loading={kpi.isLoading}
         />
@@ -126,16 +128,16 @@ export default function FinanceLanding({
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-2">
         <SectionCard
-          title="#books channel 最近動作"
+          title={t('admin.financeLanding.recentBooksActions')}
           icon={Wallet}
           iconTone="text-emerald-600"
-          action={{ label: "看 #books", onClick: () => onNavigate("agent-chat") }}
+          action={{ label: t('admin.financeLanding.viewBooksChannel'), onClick: () => onNavigate("agent-chat") }}
         >
           {booksMessages.isLoading ? (
-            <div className="text-xs text-foreground/40 py-3">載入中⋯</div>
+            <div className="text-xs text-foreground/40 py-3">{t('admin.financeLanding.loading')}</div>
           ) : (booksMessages.data ?? []).length === 0 ? (
             <div className="text-xs text-foreground/40 py-6 text-center">
-              還沒有 BooksAgent 動作。下次有 Stripe 付款或退款會自動 post。
+              {t('admin.financeLanding.noBooksActions')}
             </div>
           ) : (
             <div className="space-y-1.5">
@@ -166,7 +168,7 @@ export default function FinanceLanding({
           )}
         </SectionCard>
 
-        <SectionCard title="快速動作" icon={Wallet} iconTone="text-emerald-600">
+        <SectionCard title={t('admin.financeLanding.quickActions')} icon={Wallet} iconTone="text-emerald-600">
           <div className="space-y-2">
             <Button
               variant="outline"
@@ -175,7 +177,7 @@ export default function FinanceLanding({
               onClick={() => onNavigate("bank-ledger")}
             >
               <FileSpreadsheet className="w-4 h-4 mr-2" />
-              對帳 / Plaid Transactions
+              {t('admin.financeLanding.reconciliation')}
             </Button>
             <Button
               variant="outline"
@@ -184,7 +186,7 @@ export default function FinanceLanding({
               onClick={() => onNavigate("reconciliation")}
             >
               <Receipt className="w-4 h-4 mr-2" />
-              對帳報表
+              {t('admin.financeLanding.reconciliationReport')}
             </Button>
             <Button
               variant="outline"
@@ -193,7 +195,7 @@ export default function FinanceLanding({
               onClick={() => onNavigate("invoices")}
             >
               <Receipt className="w-4 h-4 mr-2" />
-              發票管理
+              {t('admin.financeLanding.invoiceManagement')}
             </Button>
             <Button
               variant="outline"
@@ -202,7 +204,7 @@ export default function FinanceLanding({
               onClick={() => onNavigate("finance")}
             >
               <ArrowDownToLine className="w-4 h-4 mr-2" />
-              年度稅務匯出 (Schedule C)
+              {t('admin.financeLanding.annualTaxExport')}
             </Button>
           </div>
         </SectionCard>

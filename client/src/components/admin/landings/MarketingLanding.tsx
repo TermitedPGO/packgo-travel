@@ -23,12 +23,14 @@ import {
 import { formatDistanceToNow } from "date-fns";
 import { zhTW } from "date-fns/locale";
 import { KpiCard, SectionCard, LandingGreeting } from "./landingPrimitives";
+import { useLocale } from "@/contexts/LocaleContext";
 
 export default function MarketingLanding({
   onNavigate,
 }: {
   onNavigate: (pageId: string) => void;
 }) {
+  const { t } = useLocale();
   const stats = trpc.admin.getStats.useQuery(undefined, { refetchInterval: 60_000 });
   const competitorUnread = trpc.competitor.unreadAlertCount.useQuery(undefined, {
     refetchInterval: 60_000,
@@ -41,40 +43,40 @@ export default function MarketingLanding({
   return (
     <div className="max-w-6xl mx-auto space-y-4">
       <LandingGreeting
-        title="📢 行銷"
-        subtitle={`${stats.data?.totalSubscribers ?? 0} subscribers · ${(competitorUnread.data ?? 0)} 個競品 alert`}
+        title={t('admin.marketingLanding.title')}
+        subtitle={t('admin.marketingLanding.subtitle', { subscribers: stats.data?.totalSubscribers ?? 0, alerts: competitorUnread.data ?? 0 })}
       />
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <KpiCard
           icon={ImageIcon}
-          label="海報 / Poster"
+          label={t('admin.marketingLanding.posterLabel')}
           primary={stats.data?.postersThisMonth ?? 0}
-          secondary="本月生成"
+          secondary={t('admin.marketingLanding.generatedThisMonth')}
           accent="sky"
           onClick={() => onNavigate("posters")}
           loading={stats.isLoading}
         />
         <KpiCard
           icon={Mail}
-          label="Newsletter Subs"
+          label={t('admin.marketingLanding.newsletterSubs')}
           primary={stats.data?.totalSubscribers ?? 0}
-          secondary="待 segment 分眾"
+          secondary={t('admin.marketingLanding.pendingSegment')}
           accent="indigo"
           loading={stats.isLoading}
         />
         <KpiCard
           icon={TrendingUp}
-          label="競品 Alerts"
+          label={t('admin.marketingLanding.competitorAlerts')}
           primary={competitorUnread.data ?? 0}
-          secondary={(competitorUnread.data ?? 0) > 0 ? "未讀" : "全部看過"}
+          secondary={(competitorUnread.data ?? 0) > 0 ? t('admin.marketingLanding.unread') : t('admin.marketingLanding.allRead')}
           accent={(competitorUnread.data ?? 0) > 0 ? "amber" : "emerald"}
           onClick={() => onNavigate("competitor-monitor")}
           loading={competitorUnread.isLoading}
         />
         <KpiCard
           icon={ExternalLink}
-          label="Trip.com Aff"
+          label={t('admin.marketingLanding.tripcomAff')}
           primary={stats.data?.totalAffiliateClicks ?? 0}
           secondary="clicks"
           accent="violet"
@@ -83,9 +85,9 @@ export default function MarketingLanding({
         />
         <KpiCard
           icon={Eye}
-          label="流量分析"
+          label={t('admin.marketingLanding.trafficAnalytics')}
           primary="GA4"
-          secondary="獨立報表"
+          secondary={t('admin.marketingLanding.independentReport')}
           accent="slate"
           onClick={() => onNavigate("analytics")}
         />
@@ -93,16 +95,16 @@ export default function MarketingLanding({
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-2">
         <SectionCard
-          title="#marketing channel 最近動作"
+          title={t('admin.marketingLanding.recentMarketingActions')}
           icon={Sparkles}
           iconTone="text-violet-600"
-          action={{ label: "看 #marketing", onClick: () => onNavigate("agent-chat") }}
+          action={{ label: t('admin.marketingLanding.viewMarketingChannel'), onClick: () => onNavigate("agent-chat") }}
         >
           {marketingMessages.isLoading ? (
-            <div className="text-xs text-foreground/40 py-3">載入中⋯</div>
+            <div className="text-xs text-foreground/40 py-3">{t('admin.marketingLanding.loading')}</div>
           ) : (marketingMessages.data ?? []).length === 0 ? (
             <div className="text-xs text-foreground/40 py-6 text-center">
-              還沒有 CampaignAgent 動作。第一波 newsletter 發出後會有 log。
+              {t('admin.marketingLanding.noMarketingActions')}
             </div>
           ) : (
             <div className="space-y-1.5">
@@ -133,7 +135,7 @@ export default function MarketingLanding({
           )}
         </SectionCard>
 
-        <SectionCard title="快速動作" icon={Megaphone} iconTone="text-sky-600">
+        <SectionCard title={t('admin.marketingLanding.quickActions')} icon={Megaphone} iconTone="text-sky-600">
           <div className="space-y-2">
             <Button
               variant="outline"
@@ -142,7 +144,7 @@ export default function MarketingLanding({
               onClick={() => onNavigate("posters")}
             >
               <ImageIcon className="w-4 h-4 mr-2" />
-              生 Poster (OpenAI)
+              {t('admin.marketingLanding.generatePoster')}
             </Button>
             <Button
               variant="outline"
@@ -151,7 +153,7 @@ export default function MarketingLanding({
               onClick={() => onNavigate("marketing-content")}
             >
               <PenTool className="w-4 h-4 mr-2" />
-              AI 文案 (小紅書 / 微信 / SEO)
+              {t('admin.marketingLanding.aiCopywriting')}
             </Button>
             <Button
               variant="outline"
@@ -160,7 +162,7 @@ export default function MarketingLanding({
               onClick={() => onNavigate("marketing")}
             >
               <Sparkles className="w-4 h-4 mr-2" />
-              自動化 Campaign
+              {t('admin.marketingLanding.automatedCampaign')}
             </Button>
             <Button
               variant="outline"
@@ -169,7 +171,7 @@ export default function MarketingLanding({
               onClick={() => onNavigate("competitor-monitor")}
             >
               <Eye className="w-4 h-4 mr-2" />
-              競品價格監控
+              {t('admin.marketingLanding.competitorPriceMonitor')}
             </Button>
           </div>
         </SectionCard>

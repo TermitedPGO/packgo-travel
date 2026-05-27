@@ -23,12 +23,14 @@ import {
 import { formatDistanceToNow } from "date-fns";
 import { zhTW } from "date-fns/locale";
 import { KpiCard, SectionCard, LandingGreeting } from "./landingPrimitives";
+import { useLocale } from "@/contexts/LocaleContext";
 
 export default function CustomersLanding({
   onNavigate,
 }: {
   onNavigate: (pageId: string) => void;
 }) {
+  const { t } = useLocale();
   const stats = trpc.admin.getStats.useQuery(undefined, { refetchInterval: 60_000 });
   const inquiryMessages = trpc.agent.listMessages.useQuery(
     { agentName: "inquiry" as any, limit: 6 },
@@ -41,14 +43,14 @@ export default function CustomersLanding({
   return (
     <div className="max-w-6xl mx-auto space-y-4">
       <LandingGreeting
-        title="👥 客戶"
-        subtitle={`${totalUsers} 個會員 · ${subscribers} 個 newsletter subscribers · CRM 已啟動`}
+        title={t('admin.customersLanding.title')}
+        subtitle={t('admin.customersLanding.subtitle', { totalUsers, subscribers })}
       />
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <KpiCard
           icon={Users}
-          label="會員總數"
+          label={t('admin.customersLanding.totalMembers')}
           primary={totalUsers}
           secondary="Free + Plus + Concierge"
           accent="violet"
@@ -57,35 +59,35 @@ export default function CustomersLanding({
         />
         <KpiCard
           icon={Mail}
-          label="Newsletter Subs"
+          label={t('admin.customersLanding.newsletterSubs')}
           primary={subscribers}
-          secondary="Email 訂閱者"
+          secondary={t('admin.customersLanding.emailSubscribers')}
           accent="sky"
           loading={stats.isLoading}
         />
         <KpiCard
           icon={Star}
-          label="評論"
+          label={t('admin.customersLanding.reviews')}
           primary={stats.data?.totalReviews ?? 0}
-          secondary={`${stats.data?.pendingReviews ?? 0} 待審核`}
+          secondary={t('admin.customersLanding.pendingReview', { n: stats.data?.pendingReviews ?? 0 })}
           accent="emerald"
           onClick={() => onNavigate("reviews")}
           loading={stats.isLoading}
         />
         <KpiCard
           icon={Crown}
-          label="訂單"
+          label={t('admin.customersLanding.orders')}
           primary={stats.data?.totalBookings ?? 0}
-          secondary={`本日 ${stats.data?.todayBookings ?? 0}`}
+          secondary={t('admin.customersLanding.todayCount', { n: stats.data?.todayBookings ?? 0 })}
           accent="amber"
           onClick={() => onNavigate("bookings")}
           loading={stats.isLoading}
         />
         <KpiCard
           icon={HeartHandshake}
-          label="詢問中"
+          label={t('admin.customersLanding.inquiring')}
           primary={stats.data?.pendingInquiries ?? 0}
-          secondary="待處理 inquiries"
+          secondary={t('admin.customersLanding.pendingInquiries')}
           accent="rose"
           onClick={() => onNavigate("inquiries")}
           loading={stats.isLoading}
@@ -94,16 +96,16 @@ export default function CustomersLanding({
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-2">
         <SectionCard
-          title="#inquiry 最近訊息"
+          title={t('admin.customersLanding.recentInquiryMessages')}
           icon={MessageCircle}
           iconTone="text-emerald-600"
-          action={{ label: "看 #inquiry channel", onClick: () => onNavigate("agent-chat") }}
+          action={{ label: t('admin.customersLanding.viewInquiryChannel'), onClick: () => onNavigate("agent-chat") }}
         >
           {inquiryMessages.isLoading ? (
-            <div className="text-xs text-foreground/40 py-3">載入中⋯</div>
+            <div className="text-xs text-foreground/40 py-3">{t('admin.customersLanding.loading')}</div>
           ) : (inquiryMessages.data ?? []).length === 0 ? (
             <div className="text-xs text-foreground/40 py-6 text-center">
-              還沒有客戶來信。Gmail polling 每 10 分鐘跑一次。
+              {t('admin.customersLanding.noCustomerMessages')}
             </div>
           ) : (
             <div className="space-y-1.5">
@@ -140,7 +142,7 @@ export default function CustomersLanding({
           )}
         </SectionCard>
 
-        <SectionCard title="快速動作" icon={Users} iconTone="text-violet-600">
+        <SectionCard title={t('admin.customersLanding.quickActions')} icon={Users} iconTone="text-violet-600">
           <div className="space-y-2">
             <Button
               variant="outline"
@@ -149,7 +151,7 @@ export default function CustomersLanding({
               onClick={() => onNavigate("ai-quotes")}
             >
               <FileText className="w-4 h-4 mr-2" />
-              AI 報價單列表
+              {t('admin.customersLanding.aiQuoteList')}
             </Button>
             <Button
               variant="outline"
@@ -158,7 +160,7 @@ export default function CustomersLanding({
               onClick={() => onNavigate("tool-quote")}
             >
               <FileText className="w-4 h-4 mr-2" />
-              手動建立報價單
+              {t('admin.customersLanding.manualQuote')}
             </Button>
             <Button
               variant="outline"
@@ -167,7 +169,7 @@ export default function CustomersLanding({
               onClick={() => onNavigate("wechat-assist")}
             >
               <Globe className="w-4 h-4 mr-2" />
-              WeChat 客戶服務
+              {t('admin.customersLanding.wechatService')}
             </Button>
             <Button
               variant="outline"
@@ -176,7 +178,7 @@ export default function CustomersLanding({
               onClick={() => onNavigate("packpoint")}
             >
               <Star className="w-4 h-4 mr-2" />
-              Packpoint 管理
+              {t('admin.customersLanding.packpointManagement')}
             </Button>
           </div>
         </SectionCard>

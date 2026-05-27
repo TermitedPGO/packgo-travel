@@ -47,6 +47,7 @@ import {
 import { format } from "date-fns";
 import { zhTW } from "date-fns/locale";
 import { toast } from "sonner";
+import { useLocale } from "@/contexts/LocaleContext";
 
 const ACTION_ICON: Record<string, any> = {
   sendCustomerEmail: Mail,
@@ -60,6 +61,7 @@ const ACTION_ICON: Record<string, any> = {
 };
 
 export default function AgentChatPage() {
+  const { t } = useLocale();
   const [question, setQuestion] = useState("");
   const [streamingText, setStreamingText] = useState<string | null>(null);
   const [streamingActions, setStreamingActions] = useState<any[] | null>(null);
@@ -86,7 +88,7 @@ export default function AgentChatPage() {
       setConfirmText("");
       utils.agent.listMessages.invalidate();
     },
-    onError: (err) => toast.error("執行失敗: " + err.message),
+    onError: (err) => toast.error(t('admin.agentChat.executionFailed', { msg: err.message })),
   });
 
   // Chronological (oldest top → newest bottom — like Claude Code, not most chat apps)
@@ -175,7 +177,7 @@ export default function AgentChatPage() {
         }
       }
     } catch (err: any) {
-      toast.error("Stream 失敗: " + (err?.message ?? "unknown"));
+      toast.error(t('admin.agentChat.executionFailed', { msg: err?.message ?? "unknown" }));
       setIsStreaming(false);
       setStreamingText(null);
     }
@@ -203,7 +205,7 @@ export default function AgentChatPage() {
       pendingAction.sensitivity === "sensitive" &&
       confirmText !== "CONFIRM"
     ) {
-      toast.error('需要輸入 "CONFIRM" 才能執行');
+      toast.error(t('admin.agentChat.needConfirmInput'));
       return;
     }
     executeMutation.mutate({
@@ -219,8 +221,8 @@ export default function AgentChatPage() {
       <header className="border-b border-foreground/[0.08] px-6 py-3 flex items-center justify-between bg-white">
         <div className="flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-emerald-600" />
-          <span className="font-semibold text-sm">OpsAgent</span>
-          <span className="text-xs text-foreground/40">· 你的副手</span>
+          <span className="font-semibold text-sm">{t('admin.agentChat.opsAgent')}</span>
+          <span className="text-xs text-foreground/40">{t('admin.agentChat.yourAssistant')}</span>
         </div>
         <div className="flex items-center gap-1">
           <Button
@@ -228,10 +230,10 @@ export default function AgentChatPage() {
             size="sm"
             onClick={() => {
               utils.agent.listMessages.invalidate();
-              toast.success("已重新載入");
+              toast.success(t('admin.agentChat.reloaded'));
             }}
             className="text-xs gap-1.5 rounded-lg"
-            title="重新載入對話歷史"
+            title={t('admin.agentChat.reloadHistory')}
           >
             <RefreshCw className="w-3.5 h-3.5" />
           </Button>
@@ -246,17 +248,17 @@ export default function AgentChatPage() {
         <div className="max-w-3xl mx-auto px-4 lg:px-8 py-6">
           {messages.isLoading && conversation.length === 0 && (
             <div className="text-center text-sm text-foreground/40 py-12">
-              載入對話歷史⋯
+              {t('admin.agentChat.loadingHistory')}
             </div>
           )}
           {!messages.isLoading && conversation.length === 0 && !streamingText && (
             <div className="text-center py-16">
               <Sparkles className="w-10 h-10 text-emerald-600/40 mx-auto mb-3" />
               <p className="text-base text-foreground/55 mb-1">
-                還沒有對話。在下面開始問。
+                {t('admin.agentChat.noConversation')}
               </p>
               <p className="text-xs text-foreground/35">
-                例：「李太太那團幾號出發？」「6 月日本團還有位嗎？」
+                {t('admin.agentChat.exampleQueries')}
               </p>
             </div>
           )}
@@ -285,7 +287,7 @@ export default function AgentChatPage() {
                       isJeff ? "text-foreground/55" : "text-emerald-700"
                     }`}
                   >
-                    {isJeff ? "你" : "OpsAgent"}
+                    {isJeff ? t('admin.agentChat.you') : t('admin.agentChat.opsAgent')}
                   </span>
                   <span className="text-[10px] text-foreground/35">
                     {format(new Date(m.createdAt), "MM/dd HH:mm", {
@@ -352,7 +354,7 @@ export default function AgentChatPage() {
             >
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-[11px] uppercase tracking-wider font-semibold text-emerald-700">
-                  OpsAgent
+                  {t('admin.agentChat.opsAgent')}
                 </span>
                 <span className="flex gap-0.5">
                   <span
@@ -372,7 +374,7 @@ export default function AgentChatPage() {
                 {streamingText ? (
                   <Streamdown>{streamingText}</Streamdown>
                 ) : (
-                  <span className="text-foreground/30">思考中⋯</span>
+                  <span className="text-foreground/30">{t('admin.agentChat.thinking')}</span>
                 )}
                 {isStreaming && (
                   <span className="inline-block w-1.5 h-4 ml-0.5 bg-emerald-500 align-text-bottom animate-pulse" />
@@ -413,7 +415,7 @@ export default function AgentChatPage() {
         <div className="max-w-3xl mx-auto px-4 lg:px-8 py-4">
           <Textarea
             ref={composerRef}
-            placeholder="例: 李太太那團幾號出發?  /  6 月日本團還有位嗎?"
+            placeholder={t('admin.agentChat.composerPlaceholder')}
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             className="min-h-[72px] text-sm rounded-xl resize-none focus-visible:ring-emerald-500/50"
@@ -427,7 +429,7 @@ export default function AgentChatPage() {
           />
           <div className="flex items-center justify-between mt-2">
             <span className="text-[11px] text-foreground/40">
-              ⌘+Enter 送出
+              {t('admin.agentChat.cmdEnterSend')}
             </span>
             <Button
               size="sm"
@@ -436,7 +438,7 @@ export default function AgentChatPage() {
               className="rounded-lg gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
             >
               <Send className="w-3.5 h-3.5" />
-              送出
+              {t('admin.agentChat.send')}
             </Button>
           </div>
         </div>
@@ -458,7 +460,7 @@ export default function AgentChatPage() {
               {pendingAction?.sensitivity === "sensitive" && (
                 <AlertCircle className="w-5 h-5 text-rose-600" />
               )}
-              確認執行: {pendingAction?.label}
+              {t('admin.agentChat.confirmExecution', { label: pendingAction?.label ?? '' })}
             </DialogTitle>
             <DialogDescription className="pt-2">
               {pendingAction?.description}
@@ -467,7 +469,7 @@ export default function AgentChatPage() {
 
           <div className="space-y-3 py-2">
             <div className="text-xs uppercase tracking-wider text-foreground/40 font-semibold">
-              動作參數
+              {t('admin.agentChat.actionParams')}
             </div>
             <pre className="text-[11px] bg-foreground/[0.03] p-3 rounded-md overflow-x-auto leading-relaxed">
               {pendingAction ? JSON.stringify(pendingAction.args, null, 2) : ""}
@@ -475,14 +477,14 @@ export default function AgentChatPage() {
             {pendingAction?.sensitivity === "sensitive" && (
               <div>
                 <label className="text-sm font-medium block mb-1.5">
-                  此動作會影響金錢/客戶 — 請輸入{" "}
+                  {t('admin.agentChat.sensitiveActionWarning')}{" "}
                   <code className="text-rose-600 font-mono">CONFIRM</code>{" "}
-                  確認:
+                  {t('admin.agentChat.toConfirm')}
                 </label>
                 <Input
                   value={confirmText}
                   onChange={(e) => setConfirmText(e.target.value)}
-                  placeholder="輸入 CONFIRM"
+                  placeholder={t('admin.agentChat.inputConfirm')}
                   className="rounded-lg"
                   autoFocus
                 />
@@ -499,7 +501,7 @@ export default function AgentChatPage() {
               }}
               className="rounded-lg"
             >
-              取消
+              {t('admin.agentChat.cancel')}
             </Button>
             <Button
               onClick={handleConfirmAction}
@@ -514,7 +516,7 @@ export default function AgentChatPage() {
                   : ""
               }`}
             >
-              {executeMutation.isPending ? "執行中..." : "確認執行"}
+              {executeMutation.isPending ? t('admin.agentChat.executing') : t('admin.agentChat.confirmAction')}
             </Button>
           </DialogFooter>
         </DialogContent>

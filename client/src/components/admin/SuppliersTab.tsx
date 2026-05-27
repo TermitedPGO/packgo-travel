@@ -51,10 +51,12 @@ import {
   Eye,
   EyeOff,
 } from "lucide-react";
+import { useLocale } from "@/contexts/LocaleContext";
 
 type SupplierCode = "lion" | "uv" | "";
 
 export default function SuppliersTab() {
+  const { t } = useLocale();
   /* ─────────────────────────── filter state ─────────────────────────── */
   const [supplierCode, setSupplierCode] = useState<SupplierCode>("");
   const [destinationCountry, setDestinationCountry] = useState("");
@@ -87,24 +89,22 @@ export default function SuppliersTab() {
   /* ─────────────────────────── mutations ────────────────────────────── */
   const triggerSyncMut = trpc.suppliers.triggerSync.useMutation({
     onSuccess: (data) => {
-      toast.success(`同步任務已排入佇列(jobId: ${data.jobId.slice(-20)})`);
+      toast.success(t('admin.suppliers.syncQueued', { jobId: data.jobId.slice(-20) }));
       overview.refetch();
       recentRuns.refetch();
     },
-    onError: (err) => toast.error(`同步失敗: ${err.message}`),
+    onError: (err) => toast.error(t('admin.suppliers.syncFailed', { msg: err.message })),
   });
 
   const bulkImportMut = trpc.suppliers.bulkImport.useMutation({
     onSuccess: (data) => {
       toast.success(
-        `✅ 匯入完成:${data.imported}/${data.requested} 成功,LLM rewrite 排入 ${data.rewriteQueued} 個 · ${Math.round(
-          data.durationMs / 1000
-        )}s`
+        t('admin.suppliers.importSuccess', { imported: data.imported, requested: data.requested, queued: data.rewriteQueued, duration: Math.round(data.durationMs / 1000) })
       );
       overview.refetch();
       productsQuery.refetch();
     },
-    onError: (err) => toast.error(`批量匯入失敗: ${err.message}`),
+    onError: (err) => toast.error(t('admin.suppliers.importFailed', { msg: err.message })),
   });
 
   const setHiddenMut = trpc.suppliers.setHidden.useMutation({
@@ -118,7 +118,7 @@ export default function SuppliersTab() {
 
   const onBulkImport = () => {
     if (!supplierCode) {
-      toast.error("請先選擇供應商(雄獅 或 UV)");
+      toast.error(t('admin.suppliers.selectSupplierFirst'));
       return;
     }
     const filters = {
@@ -132,7 +132,7 @@ export default function SuppliersTab() {
     };
     const count = filters.limit;
     if (count === 0) {
-      toast.error("沒有符合條件的產品可匯入");
+      toast.error(t('admin.suppliers.noMatchingProducts'));
       return;
     }
     // 2026-05-16: dropped native confirm() because it blocks the Chrome
@@ -140,7 +140,7 @@ export default function SuppliersTab() {
     // surfaces the result). If admin friction becomes a problem we can
     // wire a proper shadcn AlertDialog later.
     toast.info(
-      `開始匯入 ${count} 個 ${supplierCode === "lion" ? "雄獅" : "UV"} 產品...`
+      t('admin.suppliers.startImport', { count, supplier: supplierCode === "lion" ? "雄獅" : "UV" })
     );
     bulkImportMut.mutate(filters);
   };
@@ -158,11 +158,10 @@ export default function SuppliersTab() {
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <Building2 className="h-6 w-6 text-teal-600" />
-            供應商同步
+            {t('admin.suppliers.title')}
           </h1>
           <p className="text-sm text-gray-500 mt-1">
-            從雄獅旅遊 + UV Bookings 自動同步產品 → 一鍵轉成 PACK&amp;GO draft
-            tour → LLM 升級為品牌風格
+            {t('admin.suppliers.description')}
           </p>
         </div>
       </div>
@@ -185,7 +184,7 @@ export default function SuppliersTab() {
                   <div>
                     <div className="text-xs uppercase tracking-wider text-gray-500">
                       {s.code === "lion" ? "TWD" : "USD"} ·{" "}
-                      {s.isActive ? "啟用中" : "停用"}
+                      {s.isActive ? t('admin.suppliers.active') : t('admin.suppliers.inactive')}
                     </div>
                     <div className="text-lg font-bold mt-0.5">
                       {s.displayName}
@@ -201,10 +200,10 @@ export default function SuppliersTab() {
                         : ""}
                     </div>
                     <div className="text-xs text-gray-400 mt-2">
-                      最後同步:
+                      {t('admin.suppliers.lastSync')}
                       {s.lastFullSyncAt
                         ? new Date(s.lastFullSyncAt).toLocaleString("zh-TW")
-                        : "尚未同步"}
+                        : t('admin.suppliers.notSynced')}
                     </div>
                   </div>
                   <Button
@@ -221,7 +220,7 @@ export default function SuppliersTab() {
                         triggerSyncMut.isPending ? "animate-spin" : ""
                       }`}
                     />
-                    立即同步
+                    {t('admin.suppliers.syncNow')}
                   </Button>
                 </div>
               </div>
@@ -232,7 +231,7 @@ export default function SuppliersTab() {
       <div className="rounded-xl border bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-end gap-3">
           <div className="flex-1 min-w-[140px]">
-            <label className="text-xs text-gray-600 mb-1 block">供應商</label>
+            <label className="text-xs text-gray-600 mb-1 block">{t('admin.suppliers.supplierFilter')}</label>
             <Select
               value={supplierCode || "all"}
               onValueChange={(v) =>
@@ -243,32 +242,32 @@ export default function SuppliersTab() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">全部</SelectItem>
+                <SelectItem value="all">{t('admin.suppliers.all')}</SelectItem>
                 <SelectItem value="lion">雄獅 (TWD)</SelectItem>
                 <SelectItem value="uv">UV (USD)</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <div className="flex-1 min-w-[140px]">
-            <label className="text-xs text-gray-600 mb-1 block">目的地國</label>
+            <label className="text-xs text-gray-600 mb-1 block">{t('admin.suppliers.destinationCountry')}</label>
             <Input
-              placeholder="美國 / 日本 / …"
+              placeholder={t('admin.suppliers.destinationPlaceholder')}
               value={destinationCountry}
               onChange={(e) => setDestinationCountry(e.target.value)}
               className="rounded-lg"
             />
           </div>
           <div className="flex-1 min-w-[140px]">
-            <label className="text-xs text-gray-600 mb-1 block">關鍵字</label>
+            <label className="text-xs text-gray-600 mb-1 block">{t('admin.suppliers.keyword')}</label>
             <Input
-              placeholder="紐約 / 郵輪 / …"
+              placeholder={t('admin.suppliers.keywordPlaceholder')}
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
               className="rounded-lg"
             />
           </div>
           <div className="w-20">
-            <label className="text-xs text-gray-600 mb-1 block">最少天</label>
+            <label className="text-xs text-gray-600 mb-1 block">{t('admin.suppliers.minDays')}</label>
             <Input
               type="number"
               min={1}
@@ -281,7 +280,7 @@ export default function SuppliersTab() {
             />
           </div>
           <div className="w-20">
-            <label className="text-xs text-gray-600 mb-1 block">最多天</label>
+            <label className="text-xs text-gray-600 mb-1 block">{t('admin.suppliers.maxDays')}</label>
             <Input
               type="number"
               min={1}
@@ -300,7 +299,7 @@ export default function SuppliersTab() {
               onChange={(e) => setNotYetImported(e.target.checked)}
               className="rounded"
             />
-            只看未匯入
+            {t('admin.suppliers.notImportedOnly')}
           </label>
           <Button
             onClick={onBulkImport}
@@ -317,12 +316,12 @@ export default function SuppliersTab() {
                 bulkImportMut.isPending ? "animate-spin" : ""
               }`}
             />
-            批量匯入 (max 50)
+            {t('admin.suppliers.bulkImport')}
           </Button>
         </div>
         <div className="text-xs text-gray-500 mt-3">
-          篩選結果: <span className="font-semibold">{total.toLocaleString()}</span> 個產品
-          {productsQuery.isFetching && " · 載入中..."}
+          {t('admin.suppliers.filterResults')} <span className="font-semibold">{t('admin.suppliers.productsCount', { n: total.toLocaleString() })}</span>
+          {productsQuery.isFetching && ` · ${t('admin.suppliers.loadingEllipsis')}`}
         </div>
       </div>
 
@@ -332,10 +331,10 @@ export default function SuppliersTab() {
           <LoadingRow />
         ) : products.length === 0 ? (
           <div className="p-12 text-center text-gray-500 text-sm">
-            沒有符合條件的產品
+            {t('admin.suppliers.noProducts')}
             {notYetImported && (
               <div className="text-xs mt-2 text-gray-400">
-                關掉「只看未匯入」可以看到所有產品(包括已經匯入過的)
+                {t('admin.suppliers.showAllHint')}
               </div>
             )}
           </div>
@@ -343,11 +342,11 @@ export default function SuppliersTab() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-xs uppercase text-gray-600">
               <tr>
-                <th className="text-left px-4 py-2.5">產品</th>
-                <th className="text-left px-4 py-2.5 w-20">天數</th>
-                <th className="text-left px-4 py-2.5 w-32">出發 → 目的</th>
-                <th className="text-left px-4 py-2.5 w-24">供應商</th>
-                <th className="text-right px-4 py-2.5 w-16">操作</th>
+                <th className="text-left px-4 py-2.5">{t('admin.suppliers.productCol')}</th>
+                <th className="text-left px-4 py-2.5 w-20">{t('admin.suppliers.daysCol')}</th>
+                <th className="text-left px-4 py-2.5 w-32">{t('admin.suppliers.routeCol')}</th>
+                <th className="text-left px-4 py-2.5 w-24">{t('admin.suppliers.supplierCol')}</th>
+                <th className="text-right px-4 py-2.5 w-16">{t('admin.suppliers.actionCol')}</th>
               </tr>
             </thead>
             <tbody>
@@ -374,7 +373,7 @@ export default function SuppliersTab() {
                       </div>
                     </td>
                     <td className="px-4 py-2.5">
-                      <Badge variant="outline">{p.days}天</Badge>
+                      <Badge variant="outline">{p.days}{t('admin.suppliers.daysSuffix')}</Badge>
                     </td>
                     <td className="px-4 py-2.5 text-xs">
                       <div className="text-gray-600">
@@ -401,7 +400,7 @@ export default function SuppliersTab() {
                         size="sm"
                         variant="ghost"
                         className="rounded-lg h-8 w-8 p-0"
-                        title="隱藏 / 顯示"
+                        title={t('admin.suppliers.hideShow')}
                         onClick={() =>
                           setHiddenMut.mutate({
                             productId: p.id,
@@ -423,7 +422,7 @@ export default function SuppliersTab() {
         {total > pageSize && (
           <div className="flex items-center justify-between p-3 border-t bg-gray-50 text-xs text-gray-600">
             <div>
-              第 {page} / {totalPages} 頁 · 共 {total.toLocaleString()} 個
+              {t('admin.suppliers.pageInfo', { page, total: totalPages, count: total.toLocaleString() })}
             </div>
             <div className="flex gap-2">
               <Button
@@ -433,7 +432,7 @@ export default function SuppliersTab() {
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 className="rounded-lg h-7"
               >
-                上一頁
+                {t('admin.suppliers.prevPage')}
               </Button>
               <Button
                 size="sm"
@@ -442,7 +441,7 @@ export default function SuppliersTab() {
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                 className="rounded-lg h-7"
               >
-                下一頁
+                {t('admin.suppliers.nextPage')}
               </Button>
             </div>
           </div>
@@ -454,7 +453,7 @@ export default function SuppliersTab() {
         <div className="flex items-center justify-between px-4 py-3 border-b bg-gray-50">
           <div className="font-semibold text-sm flex items-center gap-2">
             <Clock className="h-4 w-4" />
-            最近同步紀錄
+            {t('admin.suppliers.recentSyncRecords')}
           </div>
           <Button
             size="sm"
@@ -464,7 +463,7 @@ export default function SuppliersTab() {
             disabled={triggerSyncMut.isPending}
           >
             <Globe className="h-3.5 w-3.5 mr-1" />
-            兩家全跑
+            {t('admin.suppliers.fullSync')}
           </Button>
         </div>
         <div className="divide-y">
@@ -472,7 +471,7 @@ export default function SuppliersTab() {
             <LoadingRow />
           ) : (recentRuns.data ?? []).length === 0 ? (
             <div className="p-6 text-center text-sm text-gray-500">
-              還沒有同步紀錄
+              {t('admin.suppliers.noSyncRecords')}
             </div>
           ) : (
             (recentRuns.data ?? []).map((r) => (
