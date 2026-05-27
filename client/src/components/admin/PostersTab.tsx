@@ -272,7 +272,7 @@ function PosterComposer({ onCreated }: { onCreated: (id: number) => void }) {
             <div className="relative">
               <img
                 src={imageUrl}
-                alt="供應商海報"
+                alt={t("admin.posters.originalPoster")}
                 className="w-full h-48 md:h-full object-cover rounded-lg border border-foreground/10"
               />
               <button
@@ -625,9 +625,8 @@ function PlatformCopyEditor({
   });
 
   const platform = copy.platform;
-  const useHashtags = ["xiaohongshu", "facebook", "instagram"].includes(platform);
-
   const platformLabel = PLATFORM_KEY[platform] ? t(PLATFORM_KEY[platform]) : platform;
+  const useHashtags = ["xiaohongshu", "facebook", "instagram"].includes(platform);
 
   const handleCopyText = async () => {
     let toCopy = text.trim();
@@ -638,7 +637,7 @@ function PlatformCopyEditor({
     try {
       await navigator.clipboard.writeText(toCopy);
       setCopiedText(true);
-      toast.success(t("admin.posters.toastCopied", { platform: platformLabel }));
+      toast.success(t("admin.posters.toastCopied").replace("{platform}", platformLabel));
       setTimeout(() => setCopiedText(false), 2000);
     } catch {
       toast.error(t("admin.posters.toastCopyFail"));
@@ -659,7 +658,7 @@ function PlatformCopyEditor({
       status: "posted",
       postedUrl: postedUrl || null,
     });
-    toast.success(t("admin.posters.toastPosted", { platform: platformLabel }));
+    toast.success(t("admin.posters.toastPosted").replace("{platform}", platformLabel));
   };
 
   const markSkipped = () => {
@@ -680,7 +679,7 @@ function PlatformCopyEditor({
             rows={12}
             className="mt-1 rounded-lg text-sm font-sans"
           />
-          <p className="text-[10px] text-foreground/40 mt-1 text-right">{t("admin.posters.charCount", { count: text.length })}</p>
+          <p className="text-[10px] text-foreground/40 mt-1 text-right">{t("admin.posters.charCount").replace("{count}", String(text.length))}</p>
         </div>
         {useHashtags && (
           <div>
@@ -731,7 +730,7 @@ function PlatformCopyEditor({
         </div>
 
         <div className="rounded-lg border border-foreground/10 p-3 space-y-2 bg-foreground/[0.02]">
-          <p className="text-xs font-semibold">{t("admin.posters.afterPosting", { platform: platformLabel })}</p>
+          <p className="text-xs font-semibold">{t("admin.posters.afterPosting").replace("{platform}", platformLabel)}</p>
           <Input
             value={postedUrl}
             onChange={(e) => setPostedUrl(e.target.value)}

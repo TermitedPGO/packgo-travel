@@ -529,7 +529,7 @@ export default function BankLedgerV2() {
             className="h-8 rounded-lg gap-1.5"
           >
             <Upload className="h-3.5 w-3.5" />
-            {t("admin.bankLedger.csvImportButtonLabel")}
+            {t("admin.bankLedgerTab.csvImportButtonLabel")}
           </Button>
           {/* AI classify — pulls uncategorized batch through accountingAgentService */}
           <Button
@@ -1413,7 +1413,7 @@ function CsvImportDialog({
 
   const accounts = trpc.plaid.linkedAccountsList.useQuery();
   const importMut = trpc.plaid.csvImport.useMutation({
-    onError: (e) => toast.error(t("admin.bankLedger.csvImportToastFail", { err: e.message })),
+    onError: (e) => toast.error(t("admin.bankLedgerTab.csvImportToastFail", { err: e.message })),
   });
 
   const handleFile = (file: File) => {
@@ -1425,7 +1425,7 @@ function CsvImportDialog({
 
   const handlePreview = async () => {
     if (!selectedAccountId || !csvText) {
-      toast.error(t("admin.bankLedger.csvImportToastSelectFirst"));
+      toast.error(t("admin.bankLedgerTab.csvImportToastSelectFirst"));
       return;
     }
     const r = await importMut.mutateAsync({
@@ -1443,7 +1443,7 @@ function CsvImportDialog({
       csvText,
       dryRun: false,
     });
-    toast.success(t("admin.bankLedger.csvImportToastSuccess", { count: r.upserted ?? 0, format: r.format ?? "" }));
+    toast.success(t("admin.bankLedgerTab.csvImportToastSuccess", { count: r.upserted ?? 0, format: r.format ?? "" }));
     onComplete();
     onClose();
     setCsvText("");
@@ -1458,7 +1458,7 @@ function CsvImportDialog({
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
       <div className="w-full max-w-2xl bg-white rounded-2xl p-5 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">{t("admin.bankLedger.csvImportTitle")}</h2>
+          <h2 className="text-lg font-semibold">{t("admin.bankLedgerTab.csvImportTitle")}</h2>
           <Button variant="ghost" size="sm" onClick={onClose}>
             <X className="w-5 h-5" />
           </Button>
@@ -1466,23 +1466,23 @@ function CsvImportDialog({
 
         <div className="space-y-4">
           <div className="rounded-lg bg-blue-50 border border-blue-100 p-3 text-xs text-blue-900 leading-relaxed">
-            <strong>{t("admin.bankLedger.csvImportHowTo")}</strong>
+            <strong>{t("admin.bankLedgerTab.csvImportHowTo")}</strong>
             <ol className="list-decimal ml-4 mt-1 space-y-0.5">
-              <li>{t("admin.bankLedger.csvImportStep1")}</li>
-              <li>{t("admin.bankLedger.csvImportStep2")}</li>
-              <li>{t("admin.bankLedger.csvImportStep3")}</li>
-              <li>{t("admin.bankLedger.csvImportStep4")}</li>
+              <li>{t("admin.bankLedgerTab.csvImportStep1")}</li>
+              <li>{t("admin.bankLedgerTab.csvImportStep2")}</li>
+              <li>{t("admin.bankLedgerTab.csvImportStep3")}</li>
+              <li>{t("admin.bankLedgerTab.csvImportStep4")}</li>
             </ol>
           </div>
 
           <div>
-            <Label className="text-sm font-medium">{t("admin.bankLedger.csvImportSelectAccount")}</Label>
+            <Label className="text-sm font-medium">{t("admin.bankLedgerTab.csvImportSelectAccount")}</Label>
             <Select
               value={selectedAccountId?.toString() ?? ""}
               onValueChange={(v) => setSelectedAccountId(Number(v))}
             >
               <SelectTrigger className="h-10 rounded-lg mt-1.5">
-                <SelectValue placeholder={t("admin.bankLedger.csvImportSelectAccountPlaceholder")} />
+                <SelectValue placeholder={t("admin.bankLedgerTab.csvImportSelectAccountPlaceholder")} />
               </SelectTrigger>
               <SelectContent>
                 {(accounts.data ?? []).map((a: any) => (
@@ -1495,11 +1495,11 @@ function CsvImportDialog({
           </div>
 
           <div>
-            <Label className="text-sm font-medium">{t("admin.bankLedger.csvImportUploadCsv")}</Label>
+            <Label className="text-sm font-medium">{t("admin.bankLedgerTab.csvImportUploadCsv")}</Label>
             <div className="mt-1.5">
               <label className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-4 py-6 text-sm text-gray-600 hover:bg-gray-50 cursor-pointer">
                 <Upload className="w-4 h-4" />
-                <span>{filename || t("admin.bankLedger.csvImportChooseFile")}</span>
+                <span>{filename || t("admin.bankLedgerTab.csvImportChooseFile")}</span>
                 <input
                   type="file"
                   accept=".csv,text/csv"
@@ -1522,24 +1522,24 @@ function CsvImportDialog({
               {importMut.isPending ? (
                 <Loader2 className="w-4 h-4 animate-spin mr-2" />
               ) : null}
-              {t("admin.bankLedger.csvImportPreviewButton")}
+              {t("admin.bankLedgerTab.csvImportPreviewButton")}
             </Button>
           )}
 
           {preview && (
             <div className="rounded-lg border border-gray-200 p-3 bg-gray-50 space-y-2">
               <div className="text-sm font-semibold text-gray-900">
-                {t("admin.bankLedger.csvImportPreviewTitle")}
+                {t("admin.bankLedgerTab.csvImportPreviewTitle")}
               </div>
               <div className="text-xs text-gray-700 space-y-1">
-                <div>{t("admin.bankLedger.csvImportFormat", { format: preview.format })}</div>
-                <div>{t("admin.bankLedger.csvImportParsedCount", { count: preview.parsedCount })}</div>
+                <div>{t("admin.bankLedgerTab.csvImportFormat", { format: preview.format })}</div>
+                <div>{t("admin.bankLedgerTab.csvImportParsedCount", { count: preview.parsedCount })}</div>
                 <div>
-                  {t("admin.bankLedger.csvImportDateRange", { min: preview.dateMin, max: preview.dateMax })}
+                  {t("admin.bankLedgerTab.csvImportDateRange", { min: preview.dateMin, max: preview.dateMax })}
                 </div>
                 {preview.warnings?.length > 0 && (
                   <div className="text-amber-700">
-                    ⚠️ {t("admin.bankLedger.csvImportWarnings", { count: preview.warnings.length })}:
+                    ⚠️ {t("admin.bankLedgerTab.csvImportWarnings", { count: preview.warnings.length })}:
                     {preview.warnings.slice(0, 3).map((w: string, i: number) => (
                       <div key={i} className="text-[10px] ml-2">{w}</div>
                     ))}
@@ -1548,7 +1548,7 @@ function CsvImportDialog({
               </div>
               {preview.sample?.length > 0 && (
                 <div className="text-[10px] text-gray-600 mt-2">
-                  <div className="font-semibold mb-1">{t("admin.bankLedger.csvImportSampleTitle")}</div>
+                  <div className="font-semibold mb-1">{t("admin.bankLedgerTab.csvImportSampleTitle")}</div>
                   {preview.sample.map((s: any, i: number) => (
                     <div key={i} className="tabular-nums">
                       {s.date} · ${s.amount} · {s.description}
@@ -1564,7 +1564,7 @@ function CsvImportDialog({
                 {importMut.isPending ? (
                   <Loader2 className="w-4 h-4 animate-spin mr-2" />
                 ) : null}
-                {t("admin.bankLedger.csvImportCommitButton", { count: preview.parsedCount })}
+                {t("admin.bankLedgerTab.csvImportCommitButton", { count: preview.parsedCount })}
               </Button>
             </div>
           )}
