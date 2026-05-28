@@ -57,16 +57,14 @@ export function CurrencySwitcher() {
   const currencies: { code: Currency; name: string; symbol: string }[] = [
     { code: 'TWD', name: t('currency.twd'), symbol: 'NT$' },
     { code: 'USD', name: t('currency.usd'), symbol: '$' },
-    { code: 'JPY', name: 'JPY', symbol: '¥' },
-    { code: 'KRW', name: 'KRW', symbol: '₩' },
   ];
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button 
-          variant="ghost" 
-          size="sm" 
+        <Button
+          variant="ghost"
+          size="sm"
           className="h-8 px-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-black gap-1"
         >
           <DollarSign className="h-4 w-4" />
@@ -114,8 +112,6 @@ export function LocaleSwitcher({ variant = "light" }: { variant?: LocaleSwitcher
   const currencies: { code: Currency; name: string; symbol: string }[] = [
     { code: 'TWD', name: 'TWD', symbol: 'NT$' },
     { code: 'USD', name: 'USD', symbol: '$' },
-    { code: 'JPY', name: 'JPY', symbol: '¥' },
-    { code: 'KRW', name: 'KRW', symbol: '₩' },
   ];
 
   const triggerClass = variant === "dark"

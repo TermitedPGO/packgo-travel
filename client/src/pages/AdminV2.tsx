@@ -85,7 +85,8 @@ const PostersTab = lazy(() => import("@/components/admin/PostersTab"));
 const AnalyticsTab = lazy(() => import("@/components/admin/AnalyticsTab"));
 const CompetitorMonitorTab = lazy(() => import("@/components/admin/CompetitorMonitorTab"));
 const AffiliateTab = lazy(() => import("@/components/admin/AffiliateTab"));
-// 2026-05-22 — AccountingTab retired. See finance domain comment.
+// 2026-05-22 — AccountingTab semi-retired; kept as lazy route for Schedule C / CSV export
+const AccountingTab = lazy(() => import("@/components/admin/AccountingTab"));
 const InvoicesTab = lazy(() => import("@/components/admin/InvoicesTab"));
 const ReconciliationTab = lazy(() => import("@/components/admin/ReconciliationTab"));
 const AiHubTab = lazy(() => import("@/components/admin/AiHubTab"));
@@ -109,7 +110,7 @@ type PageId =
   // Marketing
   | "marketing-landing" | "marketing" | "marketing-content" | "posters" | "analytics" | "competitor-monitor" | "affiliate"
   // Finance
-  | "finance-landing" | "bank-ledger" | "invoices" | "reconciliation"
+  | "finance-landing" | "bank-ledger" | "invoices" | "reconciliation" | "accounting"
   // System
   | "ai-hub" | "llm-cost" | "task-history" | "audit-log" | "calibration-review" | "autonomous-agents" | "visa" | "cleanup" | "supplier-enrichment";
 
@@ -183,6 +184,7 @@ const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageD
     advanced: [
       { id: "invoices", label: "發票" },
       { id: "reconciliation", label: "對帳" },
+      { id: "accounting", label: "帳務 (Schedule C)" },
     ],
   },
   system: {
@@ -512,6 +514,8 @@ function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
       return <InvoicesTab />;
     case "reconciliation":
       return <ReconciliationTab />;
+    case "accounting":
+      return <AccountingTab />;
 
     // System
     case "ai-hub":

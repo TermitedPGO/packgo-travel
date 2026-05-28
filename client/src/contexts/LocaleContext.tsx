@@ -4,8 +4,8 @@ import { trpc } from '@/lib/trpc';
 
 export type Language = 'zh-TW' | 'en';
 
-// 支援的幣值（v78q: 加入 JPY + KRW，搭配新語言）
-export type Currency = 'TWD' | 'USD' | 'JPY' | 'KRW';
+// 支援的幣值 — 客人只需要 USD + TWD
+export type Currency = 'TWD' | 'USD';
 
 // 語言顯示名稱（用該語言的母語表示）
 export const languageNames: Record<Language, string> = {
@@ -17,16 +17,12 @@ export const languageNames: Record<Language, string> = {
 export const currencyInfo: Record<Currency, { name: string; symbol: string }> = {
   'TWD': { name: '新台幣', symbol: 'NT$' },
   'USD': { name: '美金', symbol: '$' },
-  'JPY': { name: '日圓', symbol: '¥' },
-  'KRW': { name: '韓圓', symbol: '₩' },
 };
 
 // 備用匯率（當 API 不可用時使用，per 1 USD）
 const FALLBACK_RATES: Record<string, number> = {
   USD: 1,
   TWD: 32.5,
-  JPY: 156,
-  KRW: 1380,
 };
 
 interface LocaleContextType {
@@ -76,7 +72,7 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('packgo-currency');
-      if (saved && ['TWD', 'USD', 'JPY', 'KRW'].includes(saved)) {
+      if (saved && ['TWD', 'USD'].includes(saved)) {
         setCurrencyState(saved as Currency);
       }
     }

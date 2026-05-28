@@ -43,15 +43,21 @@ export const invoicesRouter = router({
 
         // Build line items from the booking's seat counts.
         const tour = await db.getTourById(booking.tourId);
-        const tourTitle = tour?.title || `行程 #${booking.tourId}`;
+        const tourTitle = tour?.title || `Tour #${booking.tourId}`;
         const lineItems: any[] = [];
         if (booking.numberOfAdults && booking.numberOfAdults > 0) {
           const total = Number(booking.totalPrice) || 0;
           // Best-effort split — full breakdown comes from departure pricing
           // when the booking was created. For invoice display, show as one
           // aggregate line if we can't reliably split.
+          // Bilingual: adults/children labels in both EN and ZH for customer clarity
+          const adults = booking.numberOfAdults;
+          const cwb = booking.numberOfChildrenWithBed || 0;
+          const cnb = booking.numberOfChildrenNoBed || 0;
+          const infants = booking.numberOfInfants || 0;
+          const pax = [`${adults} Adult(s) 大人`, cwb ? `${cwb} Child w/ bed 童帶床` : '', cnb ? `${cnb} Child no bed 童不帶床` : '', infants ? `${infants} Infant 嬰兒` : ''].filter(Boolean).join(' / ');
           lineItems.push({
-            description: `${tourTitle} — ${booking.numberOfAdults} 大 / ${booking.numberOfChildrenWithBed || 0} 童帶床 / ${booking.numberOfChildrenNoBed || 0} 童不帶床 / ${booking.numberOfInfants || 0} 嬰`,
+            description: `${tourTitle} — ${pax}`,
             quantity: 1,
             unitPrice: total,
             amount: total,

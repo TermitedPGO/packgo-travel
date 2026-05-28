@@ -21,6 +21,7 @@ export const AGENT_NAMES = [
   "followup",
   "refund",
   "self_retrospective",
+  "books",
 ] as const;
 
 export const channelEnum = z.enum([

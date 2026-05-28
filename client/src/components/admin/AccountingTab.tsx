@@ -83,6 +83,19 @@ const INVOICE_STATUS_KEYS: Record<string, string> = {
   cancelled: "invStatusCancelled",
 };
 
+// ─── Plaid P&L category labels (Schedule C keys) ────────────────────────────
+
+const PL_CATEGORY_LABELS: Record<string, { zh: string; en: string; line: string }> = {
+  income_booking: { zh: "訂單收入", en: "Booking Income", line: "Line 1" },
+  cogs_tour:      { zh: "供應商成本", en: "Supplier Cost", line: "Line 4" },
+  cogs_other:     { zh: "手續費", en: "Processing Fees", line: "Line 4" },
+  expense_marketing: { zh: "行銷", en: "Advertising", line: "Line 8" },
+  expense_software:  { zh: "軟體", en: "Software", line: "Line 18" },
+  expense_office:    { zh: "辦公", en: "Office", line: "Line 18" },
+  expense_travel:    { zh: "差旅", en: "Travel", line: "Line 24a" },
+  refund:            { zh: "退款", en: "Refunds", line: "Line 2" },
+};
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatAmount(amount: string | number, currency = "USD"): string {
@@ -172,11 +185,26 @@ export default function AccountingTab() {
 
   const utils = trpc.useUtils();
 
-  // Queries
+  // Queries — all powered by Plaid bank data (not the dead manual entries table)
   const startDate = useMemo(() => new Date(dateRange.start + "T00:00:00"), [dateRange.start]);
   const endDate = useMemo(() => new Date(dateRange.end + "T23:59:59"), [dateRange.end]);
 
-  const dashboardQuery = trpc.accounting.dashboard.useQuery({ startDate, endDate });
+  // P&L for selected period
+  const plReport = trpc.plaid.profitLossReport.useQuery({
+    startDate: dateRange.start,
+    endDate: dateRange.end,
+  });
+  // YTD P&L for tax summary
+  const taxYear = new Date().getFullYear();
+  const startOfYear = useMemo(() => `${taxYear}-01-01`, [taxYear]);
+  const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const ytdReport = trpc.plaid.profitLossReport.useQuery({
+    startDate: startOfYear,
+    endDate: today,
+  });
+  // 6-month trend
+  const plTrend = trpc.plaid.profitLossTrend.useQuery({ months: 6 });
+  // Manual entries (kept for the Entries tab)
   const entriesQuery = trpc.accounting.list.useQuery({
     startDate,
     endDate,
@@ -186,9 +214,6 @@ export default function AccountingTab() {
   });
   const invoicesQuery = trpc.invoices.list.useQuery({ limit: 100 });
   const recurringQuery = trpc.recurringExpenses.list.useQuery();
-  const trendQuery = trpc.accounting.monthlyTrend.useQuery({ months: 6 });
-  const taxYear = new Date().getFullYear();
-  const taxQuery = trpc.accounting.taxSummary.useQuery({ year: taxYear });
 
   // Mutations
   const createEntry = trpc.accounting.create.useMutation({
@@ -353,7 +378,8 @@ export default function AccountingTab() {
     });
   };
 
-  const stats = dashboardQuery.data?.stats;
+  const pl = plReport.data;
+  const ytd = ytdReport.data;
 
   return (
     <div className="space-y-6">
@@ -361,7 +387,7 @@ export default function AccountingTab() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">{t("admin.accounting.pageTitle")}</h2>
-          <p className="text-sm text-gray-500 mt-1">{t("admin.accounting.pageDesc")}</p>
+          <p className="text-sm text-gray-500 mt-1">{language === "zh-TW" ? "Plaid 銀行資料即時損益" : "Real-time P&L from Plaid bank data"}</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" className="rounded-lg" onClick={handleExportCsv}>
@@ -382,32 +408,32 @@ export default function AccountingTab() {
         <Input type="date" value={dateRange.end} onChange={e => setDateRange(p => ({ ...p, end: e.target.value }))} className="w-40 h-8 text-sm rounded-lg" />
       </div>
 
-      {/* Stats Cards */}
-      {stats && (
+      {/* Stats Cards — from Plaid P&L */}
+      {pl && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="bg-green-50 border border-green-200 rounded-lg p-4">
             <div className="flex items-center gap-2 mb-1">
               <TrendingUp className="h-4 w-4 text-green-600" />
               <span className="text-xs text-green-700 font-medium">{t("admin.accounting.statsCurrentIncome")}</span>
             </div>
-            <div className="text-xl font-bold text-green-800">{formatAmount(stats.totalIncome)}</div>
-            <div className="text-xs text-green-600 mt-1">{t("admin.accounting.statsYearTotal", { value: formatAmount(stats.yearIncome) })}</div>
+            <div className="text-xl font-bold text-green-800">{formatAmount(pl.income.total)}</div>
+            {ytd && <div className="text-xs text-green-600 mt-1">{t("admin.accounting.statsYearTotal", { value: formatAmount(ytd.income.total) })}</div>}
           </div>
           <div className="bg-red-50 border border-red-200 rounded-lg p-4">
             <div className="flex items-center gap-2 mb-1">
               <TrendingDown className="h-4 w-4 text-red-600" />
               <span className="text-xs text-red-700 font-medium">{t("admin.accounting.statsCurrentExpenses")}</span>
             </div>
-            <div className="text-xl font-bold text-red-800">{formatAmount(stats.totalExpenses)}</div>
-            <div className="text-xs text-red-600 mt-1">{t("admin.accounting.statsYearTotal", { value: formatAmount(stats.yearExpenses) })}</div>
+            <div className="text-xl font-bold text-red-800">{formatAmount(pl.expenses.total)}</div>
+            {ytd && <div className="text-xs text-red-600 mt-1">{t("admin.accounting.statsYearTotal", { value: formatAmount(ytd.expenses.total) })}</div>}
           </div>
-          <div className={`${stats.netProfit >= 0 ? "bg-blue-50 border-blue-200" : "bg-orange-50 border-orange-200"} border rounded-lg p-4`}>
+          <div className={`${pl.netProfit >= 0 ? "bg-blue-50 border-blue-200" : "bg-orange-50 border-orange-200"} border rounded-lg p-4`}>
             <div className="flex items-center gap-2 mb-1">
-              <DollarSign className={`h-4 w-4 ${stats.netProfit >= 0 ? "text-blue-600" : "text-orange-600"}`} />
-              <span className={`text-xs font-medium ${stats.netProfit >= 0 ? "text-blue-700" : "text-orange-700"}`}>{t("admin.accounting.statsCurrentNet")}</span>
+              <DollarSign className={`h-4 w-4 ${pl.netProfit >= 0 ? "text-blue-600" : "text-orange-600"}`} />
+              <span className={`text-xs font-medium ${pl.netProfit >= 0 ? "text-blue-700" : "text-orange-700"}`}>{t("admin.accounting.statsCurrentNet")}</span>
             </div>
-            <div className={`text-xl font-bold ${stats.netProfit >= 0 ? "text-blue-800" : "text-orange-800"}`}>{formatAmount(stats.netProfit)}</div>
-            <div className={`text-xs mt-1 ${stats.netProfit >= 0 ? "text-blue-600" : "text-orange-600"}`}>{t("admin.accounting.statsYearTotal", { value: formatAmount(stats.yearNetProfit) })}</div>
+            <div className={`text-xl font-bold ${pl.netProfit >= 0 ? "text-blue-800" : "text-orange-800"}`}>{formatAmount(pl.netProfit)}</div>
+            {ytd && <div className={`text-xs mt-1 ${pl.netProfit >= 0 ? "text-blue-600" : "text-orange-600"}`}>{t("admin.accounting.statsYearTotal", { value: formatAmount(ytd.netProfit) })}</div>}
           </div>
           <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
             <div className="flex items-center gap-2 mb-1">
@@ -415,11 +441,13 @@ export default function AccountingTab() {
               <span className="text-xs text-purple-700 font-medium">{t("admin.accounting.statsProfitMargin")}</span>
             </div>
             <div className="text-xl font-bold text-purple-800">
-              {stats.totalIncome > 0 ? ((stats.netProfit / stats.totalIncome) * 100).toFixed(1) : "0"}%
+              {pl.profitMargin.toFixed(1)}%
             </div>
-            <div className="text-xs text-purple-600 mt-1">
-              {t("admin.accounting.statsYearPercent", { value: stats.yearIncome > 0 ? (((stats.yearIncome - stats.yearExpenses) / stats.yearIncome) * 100).toFixed(1) : "0" })}
-            </div>
+            {ytd && (
+              <div className="text-xs text-purple-600 mt-1">
+                {t("admin.accounting.statsYearPercent", { value: ytd.profitMargin.toFixed(1) })}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -433,7 +461,7 @@ export default function AccountingTab() {
           <TabsTrigger value="recurring" className="rounded-md">{t("admin.accounting.tabRecurring")}</TabsTrigger>
         </TabsList>
 
-        {/* Overview Tab */}
+        {/* Overview Tab — Plaid-powered P&L */}
         <TabsContent value="overview" className="space-y-6 pt-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Monthly Trend */}
@@ -441,70 +469,99 @@ export default function AccountingTab() {
               <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
                 <BarChart3 className="h-4 w-4" /> {t("admin.accounting.monthlyTrend")}
               </h3>
-              {trendQuery.data && (
+              {plTrend.data && plTrend.data.length > 0 ? (
                 <div className="space-y-2">
-                  {trendQuery.data.slice(-6).map(m => (
-                    <div key={m.month} className="flex items-center gap-2 text-sm">
-                      <span className="text-gray-500 w-16">{m.month.slice(5)}</span>
-                      <div className="flex-1 flex gap-1">
-                        <div className="h-5 bg-green-200 rounded text-xs flex items-center justify-center text-green-800 font-medium px-1"
-                          style={{ width: `${Math.max(5, (m.income / (Math.max(...trendQuery.data.map(x => x.income)) || 1)) * 100)}%`, minWidth: "40px" }}>
-                          {formatAmount(m.income)}
+                  {plTrend.data.slice(-6).map(m => {
+                    const maxIncome = Math.max(...plTrend.data!.map(x => x.income)) || 1;
+                    return (
+                      <div key={m.month} className="flex items-center gap-2 text-sm">
+                        <span className="text-gray-500 w-16">{m.month.slice(5)}</span>
+                        <div className="flex-1 flex gap-1">
+                          <div className="h-5 bg-green-200 rounded text-xs flex items-center justify-center text-green-800 font-medium px-1"
+                            style={{ width: `${Math.max(5, (m.income / maxIncome) * 100)}%`, minWidth: "40px" }}>
+                            {formatAmount(m.income)}
+                          </div>
+                        </div>
+                        <div className={`text-xs font-medium ${m.netProfit >= 0 ? "text-green-700" : "text-red-700"}`}>
+                          {m.netProfit >= 0 ? "+" : ""}{formatAmount(m.netProfit)}
                         </div>
                       </div>
-                      <div className={`text-xs font-medium ${m.netProfit >= 0 ? "text-green-700" : "text-red-700"}`}>
-                        {m.netProfit >= 0 ? "+" : ""}{formatAmount(m.netProfit)}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
+              ) : (
+                <p className="text-gray-400 text-sm py-4 text-center">{language === "zh-TW" ? "沒有趨勢資料" : "No trend data"}</p>
               )}
             </div>
 
-            {/* Tax Summary */}
+            {/* Tax Summary — YTD from Plaid P&L */}
             <div className="bg-white border rounded-xl p-4">
               <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
                 <Receipt className="h-4 w-4" /> {t("admin.accounting.taxSummaryTitle", { year: String(taxYear) })}
               </h3>
-              {taxQuery.data && (
+              {ytd ? (
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between py-1 border-b">
                     <span className="text-gray-600">{t("admin.accounting.taxYearIncome")}</span>
-                    <span className="font-medium text-green-700">{formatAmount(taxQuery.data.totalIncome)}</span>
+                    <span className="font-medium text-green-700">{formatAmount(ytd.income.total)}</span>
                   </div>
                   <div className="flex justify-between py-1 border-b">
                     <span className="text-gray-600">{t("admin.accounting.taxDeductible")}</span>
-                    <span className="font-medium text-red-700">-{formatAmount(taxQuery.data.taxDeductibleExpenses)}</span>
+                    <span className="font-medium text-red-700">-{formatAmount(ytd.expenses.total)}</span>
                   </div>
                   <div className="flex justify-between py-1 border-b">
-                    <span className="text-gray-600">{t("admin.accounting.taxNonDeductible")}</span>
-                    <span className="font-medium text-gray-600">{formatAmount(taxQuery.data.nonDeductibleExpenses)}</span>
+                    <span className="text-gray-600">{language === "zh-TW" ? "退款 (Line 2)" : "Refunds (Line 2)"}</span>
+                    <span className="font-medium text-gray-600">-{formatAmount(ytd.refunds)}</span>
                   </div>
                   <div className="flex justify-between py-2 bg-yellow-50 rounded-md px-2">
                     <span className="font-semibold text-gray-800">{t("admin.accounting.taxEstimatedTaxable")}</span>
-                    <span className="font-bold text-yellow-800">{formatAmount(taxQuery.data.estimatedTaxableIncome)}</span>
+                    <span className="font-bold text-yellow-800">{formatAmount(ytd.netProfit)}</span>
                   </div>
+                  {ytd.trustDeferredIncome > 0 && (
+                    <div className="flex justify-between py-1 text-xs text-gray-500">
+                      <span>{language === "zh-TW" ? "客人訂金 (trust, 未 recognize)" : "Trust deposits (not recognized)"}</span>
+                      <span>{formatAmount(ytd.trustDeferredIncome)}</span>
+                    </div>
+                  )}
+                  {ytd.uncategorizedCount > 0 && (
+                    <div className="flex justify-between py-1 text-xs text-amber-600">
+                      <span>{language === "zh-TW" ? "未分類交易" : "Uncategorized txns"}</span>
+                      <span>{ytd.uncategorizedCount}</span>
+                    </div>
+                  )}
                 </div>
+              ) : (
+                <p className="text-gray-400 text-sm py-4 text-center">{language === "zh-TW" ? "載入中..." : "Loading..."}</p>
               )}
             </div>
           </div>
 
-          {/* Top Categories */}
-          {dashboardQuery.data && (
+          {/* Schedule C Breakdown — from Plaid P&L byCategory */}
+          {pl && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="bg-white border rounded-xl p-4">
                 <h3 className="font-semibold text-gray-800 mb-3">{t("admin.accounting.incomeSources")}</h3>
                 <div className="space-y-2">
-                  {dashboardQuery.data.topIncomeCategories.map(c => (
-                    <div key={c.category} className="flex items-center gap-2 text-sm">
-                      <span className="text-gray-600 w-24 truncate">{getCategoryLabel(c.category)}</span>
-                      <div className="flex-1 bg-gray-100 rounded-full h-2">
-                        <div className="bg-green-500 h-2 rounded-full" style={{ width: `${c.percentage}%` }} />
-                      </div>
-                      <span className="text-gray-700 font-medium w-20 text-right">{formatAmount(c.amount)}</span>
-                    </div>
-                  ))}
-                  {dashboardQuery.data.topIncomeCategories.length === 0 && (
+                  {Object.entries(pl.income.byCategory)
+                    .filter(([, amt]) => amt > 0)
+                    .sort(([, a], [, b]) => b - a)
+                    .map(([cat, amt]) => {
+                      const meta = PL_CATEGORY_LABELS[cat];
+                      const label = meta ? (language === "zh-TW" ? meta.zh : meta.en) : cat;
+                      const line = meta?.line ?? "";
+                      const pct = pl.income.total > 0 ? (amt / pl.income.total) * 100 : 0;
+                      return (
+                        <div key={cat} className="flex items-center gap-2 text-sm">
+                          <span className="text-gray-600 w-28 truncate" title={line}>{label}</span>
+                          <div className="flex-1 bg-gray-100 rounded-full h-2">
+                            <div className="bg-green-500 h-2 rounded-full" style={{ width: `${pct}%` }} />
+                          </div>
+                          <span className="text-gray-700 font-medium w-20 text-right">{formatAmount(amt)}</span>
+                          {line && <span className="text-[10px] text-gray-400 w-14">{line}</span>}
+                        </div>
+                      );
+                    })}
+                  {Object.keys(pl.income.byCategory).length === 0 && (
                     <p className="text-gray-400 text-sm">{t("admin.accounting.emptyIncome")}</p>
                   )}
                 </div>
@@ -512,16 +569,26 @@ export default function AccountingTab() {
               <div className="bg-white border rounded-xl p-4">
                 <h3 className="font-semibold text-gray-800 mb-3">{t("admin.accounting.expenseCategories")}</h3>
                 <div className="space-y-2">
-                  {dashboardQuery.data.topExpenseCategories.map(c => (
-                    <div key={c.category} className="flex items-center gap-2 text-sm">
-                      <span className="text-gray-600 w-24 truncate">{getCategoryLabel(c.category)}</span>
-                      <div className="flex-1 bg-gray-100 rounded-full h-2">
-                        <div className="bg-red-400 h-2 rounded-full" style={{ width: `${c.percentage}%` }} />
-                      </div>
-                      <span className="text-gray-700 font-medium w-20 text-right">{formatAmount(c.amount)}</span>
-                    </div>
-                  ))}
-                  {dashboardQuery.data.topExpenseCategories.length === 0 && (
+                  {Object.entries(pl.expenses.byCategory)
+                    .filter(([, amt]) => amt > 0)
+                    .sort(([, a], [, b]) => b - a)
+                    .map(([cat, amt]) => {
+                      const meta = PL_CATEGORY_LABELS[cat];
+                      const label = meta ? (language === "zh-TW" ? meta.zh : meta.en) : cat;
+                      const line = meta?.line ?? "";
+                      const pct = pl.expenses.total > 0 ? (amt / pl.expenses.total) * 100 : 0;
+                      return (
+                        <div key={cat} className="flex items-center gap-2 text-sm">
+                          <span className="text-gray-600 w-28 truncate" title={line}>{label}</span>
+                          <div className="flex-1 bg-gray-100 rounded-full h-2">
+                            <div className="bg-red-400 h-2 rounded-full" style={{ width: `${pct}%` }} />
+                          </div>
+                          <span className="text-gray-700 font-medium w-20 text-right">{formatAmount(amt)}</span>
+                          {line && <span className="text-[10px] text-gray-400 w-14">{line}</span>}
+                        </div>
+                      );
+                    })}
+                  {Object.keys(pl.expenses.byCategory).length === 0 && (
                     <p className="text-gray-400 text-sm">{t("admin.accounting.emptyExpenses")}</p>
                   )}
                 </div>
