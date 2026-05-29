@@ -172,16 +172,12 @@ describe('Translation Agent', () => {
       expect(en?.nativeName).toBe('English');
     });
 
-    it('should include Japanese and Korean', () => {
-      const languages = getSupportedLanguages();
-      
-      const ja = languages.find(l => l.code === 'ja');
-      expect(ja).toBeDefined();
-      expect(ja?.nativeName).toBe('日本語');
-      
-      const ko = languages.find(l => l.code === 'ko');
-      expect(ko).toBeDefined();
-      expect(ko?.nativeName).toBe('한국어');
+    it('should support exactly zh-TW and en (product scope)', () => {
+      // `type Language = 'zh-TW' | 'en'` — Japanese/Korean are intentionally
+      // out of scope (PACK&GO ships 繁中 + English only). This guards against
+      // accidental additions or removals to the supported set.
+      const codes = getSupportedLanguages().map(l => l.code).sort();
+      expect(codes).toEqual(['en', 'zh-TW']);
     });
   });
 });

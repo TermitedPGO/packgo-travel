@@ -84,10 +84,12 @@ describe("Tour Generation System", () => {
     // Check worker name
     expect(tourGenerationWorker.name).toBe("tour-generation");
     
-    // Check concurrency. v80.24: bumped 1 → 4 for bulk-import scenarios
-    // (Anthropic Haiku tier-1 4000 req/min cap; 4×15 LLM calls ≈ 60 req/min).
+    // Check concurrency. 2026-05-26: lowered 4 → 2. The prior math sized for
+    // request count, but translation calls are token-heavy: 4 concurrent tours
+    // hit Anthropic's 450k input-token/min cap (429 storm). 2 gives ~240k/min
+    // peak — comfortable headroom. See server/worker.ts concurrency comment.
     const opts = tourGenerationWorker.opts;
-    expect(opts.concurrency).toBe(4);
+    expect(opts.concurrency).toBe(2);
     
     // Check rate limiter (should be 10 jobs per minute)
     expect(opts.limiter).toBeDefined();
