@@ -19,10 +19,29 @@
  *
  * Phase C tab #8.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { useLocale } from "@/contexts/LocaleContext";
+import {
+  ACCOUNTING_CATEGORY_CONFIG,
+  CATEGORY_GROUP_ORDER,
+  categoryI18nKey,
+  isAccountingCategory,
+} from "@/lib/accountingCategories";
+import {
+  txToNumber,
+  txEffectiveCategory,
+  txIsExcluded,
+  txIsUncategorized,
+  matchesTab,
+  computeLedgerCounts,
+  isAllSelected,
+  isSomeSelected,
+  toggleIdInSet,
+  toggleSelectAll,
+  type LedgerFilterTab,
+} from "@/lib/bankLedgerFilters";
 import {
   DataTable,
   StatusDot,
@@ -54,6 +73,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import {
   Landmark,
+  Layers,
   Loader2,
   Upload,
   RefreshCw,
@@ -63,38 +83,11 @@ import {
 } from "lucide-react";
 
 // ────────────────────────────────────────────────────────────────────────
-// Categories — mirror AccountingTab so Jeff's overrides flow into the same
-// P&L bucket. Kept in-file to avoid churning AccountingTab's exports.
-// ────────────────────────────────────────────────────────────────────────
-
-const INCOME_CATEGORY_KEYS: Record<string, string> = {
-  tour_booking: "catTourBooking",
-  visa_service: "catVisaService",
-  affiliate_commission: "catAffiliateCommission",
-  flight_booking: "catFlightBooking",
-  hotel_booking: "catHotelBooking",
-  other_income: "catOtherIncome",
-};
-
-const EXPENSE_CATEGORY_KEYS: Record<string, string> = {
-  rent: "catRent",
-  utilities: "catUtilities",
-  salary: "catSalary",
-  marketing: "catMarketing",
-  travel_cost: "catTravelCost",
-  supplier_payment: "catSupplierPayment",
-  office_supplies: "catOfficeSupplies",
-  software: "catSoftware",
-  insurance: "catInsurance",
-  tax_payment: "catTaxPayment",
-  bank_fee: "catBankFee",
-  stripe_fee: "catStripeFee",
-  consulate_fee: "catConsulateFee",
-  other_expense: "catOtherExpense",
-};
-
-const CUSTOM_VALUE = "__custom__";
-
+// Categories — the canonical 10 live in @/lib/accountingCategories (shared
+// with the server's accountingAgent + bankPLService). M1 (2026-05-28) removed
+// the old manual-entry taxonomy + free-text "custom" path that silently
+// dropped overrides out of P&L. The dropdown + categoryLabel below render
+// straight from ACCOUNTING_CATEGORY_CONFIG.
 // ────────────────────────────────────────────────────────────────────────
 // Types — mirror plaidRouter.transactionsList output (loose; backend is
 // the source of truth, this just gives the table sane intellisense).
@@ -142,10 +135,12 @@ const COUNTERPARTY_TYPES = [
 ] as const;
 type CounterpartyType = (typeof COUNTERPARTY_TYPES)[number];
 
-type FilterTab = "all" | "uncategorized" | "categorized" | "excluded";
+type FilterTab = LedgerFilterTab;
 
 // ────────────────────────────────────────────────────────────────────────
-// Helpers
+// Helpers — pure filter/selection logic lives in @/lib/bankLedgerFilters
+// (M3 2026-05-28, unit-tested). TxRow is structurally a LedgerTxLike, so
+// these thin aliases keep the call sites below unchanged.
 // ────────────────────────────────────────────────────────────────────────
 
 function thisMonthRange(): { from: string; to: string } {
@@ -159,25 +154,13 @@ function thisMonthRange(): { from: string; to: string } {
   return { from, to };
 }
 
-function toNumber(amount: string | number | null | undefined): number {
-  if (amount === null || amount === undefined) return 0;
-  return typeof amount === "number" ? amount : Number(amount);
-}
+const toNumber = txToNumber;
+const effectiveCategory = txEffectiveCategory;
+const isExcluded = txIsExcluded;
+const isUncategorized = txIsUncategorized;
 
 function isOutflow(tx: TxRow): boolean {
-  return toNumber(tx.amount) > 0;
-}
-
-function effectiveCategory(tx: TxRow): string | null {
-  return tx.jeffOverrideCategory ?? tx.agentCategory ?? null;
-}
-
-function isExcluded(tx: TxRow): boolean {
-  return (tx.excludeFromAccounting ?? 0) === 1;
-}
-
-function isUncategorized(tx: TxRow): boolean {
-  return !tx.jeffOverrideCategory && !tx.agentCategory;
+  return txToNumber(tx.amount) > 0;
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -233,6 +216,13 @@ export default function BankLedgerV2() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [csvImportOpen, setCsvImportOpen] = useState(false);
 
+  // M3 — multi-select + batch categorize. selectedIds holds the checked row
+  // ids; batchCategory is the category to bulk-apply. Both are cleared
+  // whenever the visible set could change (tab / search / date) so a bulk
+  // apply can never silently hit a row Jeff can't currently see.
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [batchCategory, setBatchCategory] = useState<string>("");
+
   const utils = trpc.useUtils();
   const { data, isLoading, refetch } = trpc.plaid.transactionsList.useQuery({
     dateFrom,
@@ -244,24 +234,10 @@ export default function BankLedgerV2() {
 
   const rawItems = (data?.items ?? []) as TxRow[];
 
-  const counts = useMemo(() => {
-    return {
-      all: rawItems.length,
-      uncategorized: rawItems.filter((tx) => isUncategorized(tx) && !isExcluded(tx)).length,
-      categorized: rawItems.filter((tx) => !isUncategorized(tx) && !isExcluded(tx)).length,
-      excluded: rawItems.filter(isExcluded).length,
-    };
-  }, [rawItems]);
+  const counts = useMemo(() => computeLedgerCounts(rawItems), [rawItems]);
 
   const filtered = useMemo(() => {
-    let list = rawItems;
-    if (tab === "uncategorized") {
-      list = list.filter((tx) => isUncategorized(tx) && !isExcluded(tx));
-    } else if (tab === "categorized") {
-      list = list.filter((tx) => !isUncategorized(tx) && !isExcluded(tx));
-    } else if (tab === "excluded") {
-      list = list.filter(isExcluded);
-    }
+    let list = rawItems.filter((tx) => matchesTab(tx, tab));
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       list = list.filter((tx) =>
@@ -272,6 +248,19 @@ export default function BankLedgerV2() {
     }
     return list;
   }, [rawItems, tab, searchQuery]);
+
+  // ids currently visible — drives select-all + the "all/some selected" state.
+  const filteredIds = useMemo(() => filtered.map((tx) => tx.id), [filtered]);
+
+  // Clear selection whenever the visible set could change (red-line: never
+  // bulk-apply to a row that scrolled out of the current filter).
+  useEffect(() => {
+    setSelectedIds(new Set());
+    setBatchCategory("");
+  }, [tab, searchQuery, dateFrom, dateTo]);
+
+  const allSelected = isAllSelected(filteredIds, selectedIds);
+  const someSelected = isSomeSelected(filteredIds, selectedIds);
 
   const selected = useMemo(
     () => (selectedId !== null ? rawItems.find((tx) => tx.id === selectedId) ?? null : null),
@@ -309,6 +298,24 @@ export default function BankLedgerV2() {
       toast.error(t("admin.bankLedgerTab.toastClassifyFailed", { err: e.message })),
   });
 
+  // M3 — bulk-apply one category to all selected rows. Reuses the M1-validated
+  // bulkCategorize (server z.enum + single audit-log entry). Confirmed first.
+  const bulkCategorizeMutation = trpc.plaid.bulkCategorize.useMutation({
+    onSuccess: (res) => {
+      utils.plaid.transactionsList.invalidate();
+      utils.plaid.financeKpi.invalidate();
+      setSelectedIds(new Set());
+      setBatchCategory("");
+      toast.success(
+        t("admin.bankLedgerTab.batchToastDone", {
+          count: String((res as { updated?: number })?.updated ?? 0),
+        }),
+      );
+    },
+    onError: (e) =>
+      toast.error(t("admin.bankLedgerTab.batchToastFailed", { err: e.message })),
+  });
+
   const formatDate = (d: string | Date | null | undefined): string => {
     if (!d) return "—";
     return new Date(d).toLocaleDateString(dateLocale, {
@@ -334,13 +341,60 @@ export default function BankLedgerV2() {
 
   const categoryLabel = (key: string | null | undefined): string => {
     if (!key) return "—";
-    const i18nKey = INCOME_CATEGORY_KEYS[key] || EXPENSE_CATEGORY_KEYS[key];
-    if (i18nKey) return t(`admin.accounting.${i18nKey}`);
-    return key; // custom override label flows through as-is
+    const i18nKey = categoryI18nKey(key);
+    if (i18nKey) return t(`admin.bankLedgerTab.${i18nKey}`);
+    return key; // legacy / non-canonical value shows raw so Jeff notices it
+  };
+
+  const handleBatchApply = () => {
+    if (selectedIds.size === 0 || !batchCategory) return;
+    const ids = Array.from(selectedIds);
+    // financial action — confirm with the exact category + count before firing.
+    if (
+      !confirm(
+        t("admin.bankLedgerTab.batchConfirm", {
+          count: String(ids.length),
+          category: categoryLabel(batchCategory),
+        }),
+      )
+    ) {
+      return;
+    }
+    bulkCategorizeMutation.mutate({
+      transactionIds: ids,
+      category: batchCategory as never,
+    });
   };
 
   // ── Columns ───────────────────────────────────────────────────────────
   const columns: Column<TxRow>[] = [
+    {
+      key: "select",
+      header: "",
+      width: "w-10",
+      headerRender: () => (
+        <input
+          type="checkbox"
+          aria-label={t("admin.bankLedgerTab.selectAll")}
+          className="h-4 w-4 rounded border-gray-300 accent-teal-600 cursor-pointer align-middle"
+          checked={allSelected}
+          ref={(el) => {
+            if (el) el.indeterminate = someSelected;
+          }}
+          onChange={() => setSelectedIds((prev) => toggleSelectAll(filteredIds, prev))}
+        />
+      ),
+      render: (tx) => (
+        <input
+          type="checkbox"
+          aria-label={t("admin.bankLedgerTab.selectRow")}
+          className="h-4 w-4 rounded border-gray-300 accent-teal-600 cursor-pointer align-middle"
+          checked={selectedIds.has(tx.id)}
+          onClick={(e) => e.stopPropagation()}
+          onChange={() => setSelectedIds((prev) => toggleIdInSet(prev, tx.id))}
+        />
+      ),
+    },
     {
       key: "date",
       header: t("admin.bankLedgerTab.columnDate"),
@@ -461,6 +515,13 @@ export default function BankLedgerV2() {
             onClick={() => setTab("uncategorized")}
           />
           <StatusToggle
+            label={t("admin.bankLedgerTab.tabNeedsReview")}
+            count={counts.needsReview}
+            active={tab === "needsReview"}
+            tone="warn"
+            onClick={() => setTab("needsReview")}
+          />
+          <StatusToggle
             label={t("admin.bankLedgerTab.tabCategorized")}
             count={counts.categorized}
             active={tab === "categorized"}
@@ -559,6 +620,63 @@ export default function BankLedgerV2() {
         }}
       />
 
+      {/* M3 — floating batch bar (appears when ≥1 row selected). Selection is
+          cleared on tab/search/date change so we never bulk-apply to rows that
+          scrolled out of the current filter (避免誤套). */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-lg">
+          <span className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
+            <Layers className="h-4 w-4 text-gray-400" />
+            {t("admin.bankLedgerTab.batchSelected", { count: String(selectedIds.size) })}
+          </span>
+          <Select value={batchCategory} onValueChange={(v) => setBatchCategory(v)}>
+            <SelectTrigger className="h-9 w-48 rounded-lg text-sm">
+              <SelectValue
+                placeholder={t("admin.bankLedgerTab.batchCategoryPlaceholder")}
+              />
+            </SelectTrigger>
+            <SelectContent>
+              {CATEGORY_GROUP_ORDER.map((g) => (
+                <SelectGroup key={g.group}>
+                  <SelectLabel className="text-xs uppercase tracking-wider">
+                    {t(`admin.bankLedgerTab.${g.i18nKey}`)}
+                  </SelectLabel>
+                  {ACCOUNTING_CATEGORY_CONFIG.filter(
+                    (c) => c.group === g.group,
+                  ).map((c) => (
+                    <SelectItem key={c.key} value={c.key}>
+                      {categoryLabel(c.key)}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            size="sm"
+            disabled={!batchCategory || bulkCategorizeMutation.isPending}
+            onClick={handleBatchApply}
+            className="h-9 rounded-lg gap-1.5 bg-teal-600 hover:bg-teal-700 text-white"
+          >
+            {bulkCategorizeMutation.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : null}
+            {t("admin.bankLedgerTab.batchApply", { count: String(selectedIds.size) })}
+          </Button>
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedIds(new Set());
+              setBatchCategory("");
+            }}
+            className="text-gray-400 hover:text-gray-700"
+            aria-label={t("common.clear")}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       {/* Table */}
       {!isLoading && filtered.length === 0 ? (
         <EmptyState
@@ -643,17 +761,12 @@ function BankTxDrawer({
   savePending: boolean;
   onSave: (patch: DrawerSavePatch) => void;
 }) {
-  // Local form state — initialised from the row each time the drawer opens
+  // Local form state — initialised from the row each time the drawer opens.
+  // Only canonical categories survive M1; a legacy/non-canonical stored value
+  // shows as "unselected" so saving forces Jeff onto one of the 10.
   const initialCategory = tx?.jeffOverrideCategory ?? "";
-  const isKnownCategory =
-    initialCategory in INCOME_CATEGORY_KEYS ||
-    initialCategory in EXPENSE_CATEGORY_KEYS;
-
   const [categoryDropdown, setCategoryDropdown] = useState<string>(
-    !initialCategory ? "" : isKnownCategory ? initialCategory : CUSTOM_VALUE,
-  );
-  const [customCategory, setCustomCategory] = useState<string>(
-    !initialCategory ? "" : isKnownCategory ? "" : initialCategory,
+    isAccountingCategory(initialCategory) ? initialCategory : "",
   );
   const [reason, setReason] = useState<string>(tx?.jeffOverrideReason ?? "");
   const [bookingId, setBookingId] = useState<string>(
@@ -700,8 +813,6 @@ function BankTxDrawer({
             categoryLabel={categoryLabel}
             categoryDropdown={categoryDropdown}
             setCategoryDropdown={setCategoryDropdown}
-            customCategory={customCategory}
-            setCustomCategory={setCustomCategory}
             reason={reason}
             setReason={setReason}
             bookingId={bookingId}
@@ -734,8 +845,6 @@ function BankTxDrawerForm({
   categoryLabel,
   categoryDropdown,
   setCategoryDropdown,
-  customCategory,
-  setCustomCategory,
   reason,
   setReason,
   bookingId,
@@ -759,8 +868,6 @@ function BankTxDrawerForm({
   categoryLabel: (key: string | null | undefined) => string;
   categoryDropdown: string;
   setCategoryDropdown: (v: string) => void;
-  customCategory: string;
-  setCustomCategory: (v: string) => void;
   reason: string;
   setReason: (v: string) => void;
   bookingId: string;
@@ -781,10 +888,9 @@ function BankTxDrawerForm({
 }) {
   const { t } = useLocale();
 
-  const finalCategory =
-    categoryDropdown === CUSTOM_VALUE
-      ? customCategory.trim()
-      : categoryDropdown;
+  // Dropdown is now the only source — value is always one of the canonical 10
+  // (or "" when cleared). No free-text path remains.
+  const finalCategory = categoryDropdown;
 
   // Track which fields the user actually changed vs initial. Without this,
   // Save would always send `category: ""` and clobber an AI-assigned override
@@ -845,7 +951,6 @@ function BankTxDrawerForm({
 
   const handleClearOverride = () => {
     setCategoryDropdown("");
-    setCustomCategory("");
     setReason("");
     onSave({ category: "", reason: "" });
   };
@@ -927,44 +1032,22 @@ function BankTxDrawerForm({
               <SelectValue placeholder={t("admin.bankLedgerTab.categoryPlaceholder")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectGroup>
-                <SelectLabel className="text-xs uppercase tracking-wider">
-                  {t("admin.bankLedgerTab.groupIncome")}
-                </SelectLabel>
-                {Object.keys(INCOME_CATEGORY_KEYS).map((k) => (
-                  <SelectItem key={k} value={k}>
-                    {categoryLabel(k)}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-              <SelectGroup>
-                <SelectLabel className="text-xs uppercase tracking-wider">
-                  {t("admin.bankLedgerTab.groupExpense")}
-                </SelectLabel>
-                {Object.keys(EXPENSE_CATEGORY_KEYS).map((k) => (
-                  <SelectItem key={k} value={k}>
-                    {categoryLabel(k)}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-              <SelectGroup>
-                <SelectLabel className="text-xs uppercase tracking-wider">
-                  {t("admin.bankLedgerTab.groupCustom")}
-                </SelectLabel>
-                <SelectItem value={CUSTOM_VALUE}>
-                  {t("admin.bankLedgerTab.customCategoryOption")}
-                </SelectItem>
-              </SelectGroup>
+              {CATEGORY_GROUP_ORDER.map((g) => (
+                <SelectGroup key={g.group}>
+                  <SelectLabel className="text-xs uppercase tracking-wider">
+                    {t(`admin.bankLedgerTab.${g.i18nKey}`)}
+                  </SelectLabel>
+                  {ACCOUNTING_CATEGORY_CONFIG.filter(
+                    (c) => c.group === g.group,
+                  ).map((c) => (
+                    <SelectItem key={c.key} value={c.key}>
+                      {categoryLabel(c.key)}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              ))}
             </SelectContent>
           </Select>
-          {categoryDropdown === CUSTOM_VALUE && (
-            <Input
-              value={customCategory}
-              onChange={(e) => setCustomCategory(e.target.value)}
-              placeholder={t("admin.bankLedgerTab.customCategoryPlaceholder")}
-              className="h-10 rounded-lg text-sm"
-            />
-          )}
         </div>
 
         <div className="space-y-1.5">

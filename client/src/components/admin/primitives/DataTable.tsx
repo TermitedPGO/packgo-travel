@@ -18,6 +18,8 @@ import { useState } from "react";
 export type Column<T> = {
   key: string;
   header: string;
+  /** Optional custom header cell (e.g. a select-all checkbox). Falls back to `header`. */
+  headerRender?: () => React.ReactNode;
   render: (row: T) => React.ReactNode;
   width?: string; // e.g. "w-32"
   align?: "left" | "right" | "center";
@@ -115,7 +117,7 @@ export function DataTable<T extends { id: number | string }>({
                   onClick={() => c.sortable && toggleSort(c.key)}
                 >
                   <span className="inline-flex items-center gap-1">
-                    {c.header}
+                    {c.headerRender ? c.headerRender() : c.header}
                     {sort?.key === c.key && (
                       <span className="text-gray-400">
                         {sort.dir === "asc" ? "↑" : "↓"}

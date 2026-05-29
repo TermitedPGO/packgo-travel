@@ -18,6 +18,14 @@ import { useMemo } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { toast } from "sonner";
+import {
   Wallet,
   AlertTriangle,
   TrendingDown,
@@ -27,6 +35,7 @@ import {
   FileSpreadsheet,
   Receipt,
   ArrowDownToLine,
+  Layers,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { zhTW, enUS } from "date-fns/locale";
@@ -77,6 +86,19 @@ const PL_CATEGORY_LABELS: Record<string, { zh: string; en: string }> = {
   expense_travel: { zh: "差旅", en: "Travel" },
 };
 
+const BULK_CATEGORY_OPTIONS = [
+  { value: "income_booking", zh: "訂單收入", en: "Booking Income" },
+  { value: "cogs_tour", zh: "供應商成本", en: "Supplier Cost" },
+  { value: "cogs_other", zh: "手續費", en: "Fees" },
+  { value: "expense_marketing", zh: "行銷", en: "Marketing" },
+  { value: "expense_software", zh: "軟體", en: "Software" },
+  { value: "expense_office", zh: "辦公", en: "Office" },
+  { value: "expense_travel", zh: "差旅", en: "Travel" },
+  { value: "transfer", zh: "轉帳", en: "Transfer" },
+  { value: "refund", zh: "退款", en: "Refund" },
+  { value: "exclude", zh: "排除", en: "Exclude" },
+] as const;
+
 /* ── component ───────────────────────────────────────────────────────── */
 
 export default function FinanceLanding({
@@ -110,6 +132,39 @@ export default function FinanceLanding({
     { startDate: from, endDate: to },
     { refetchInterval: 120_000 }
   );
+
+  // Uncategorized groups for batch classify
+  const uncatGroups = trpc.plaid.uncategorizedGroups.useQuery(undefined, {
+    refetchInterval: 60_000,
+  });
+
+  // Bulk categorize mutation
+  const utils = trpc.useUtils();
+  const bulkCategorize = trpc.plaid.bulkCategorize.useMutation({
+    onSuccess: (_data, variables) => {
+      const opt = BULK_CATEGORY_OPTIONS.find(
+        (o) => o.value === variables.category
+      );
+      const catLabel = opt
+        ? language === "en"
+          ? opt.en
+          : opt.zh
+        : variables.category;
+      // Extract merchant name from reason (format: "batch-classify: MERCHANT")
+      const merchant =
+        variables.reason?.replace("batch-classify: ", "") ?? "";
+      toast.success(
+        t("admin.financeLanding.bulkClassified", {
+          count: String(variables.transactionIds.length),
+          merchant: merchant || catLabel,
+        }) + ` → ${catLabel}`
+      );
+      utils.plaid.uncategorizedGroups.invalidate();
+      utils.plaid.transactionsList.invalidate();
+      utils.plaid.financeKpi.invalidate();
+      utils.plaid.profitLossReport.invalidate();
+    },
+  });
 
   // #books channel
   const booksMessages = trpc.agent.listMessages.useQuery(
@@ -226,6 +281,74 @@ export default function FinanceLanding({
           loading={kpi.isLoading}
         />
       </div>
+
+      {/* ── Batch Classify (similar groups) ── */}
+      {(uncatGroups.data?.groups?.length ?? 0) > 0 && (
+        <SectionCard
+          title={t("admin.financeLanding.batchClassify", {
+            count: uncatGroups.data!.groups.length,
+          })}
+          icon={Layers}
+          iconTone="text-teal-600"
+        >
+          <p className="text-xs text-foreground/50 -mt-1 mb-2">
+            {t("admin.financeLanding.batchClassifyDesc", {
+              count: String(uncatGroups.data!.groups.length),
+            })}
+          </p>
+          <div className="divide-y divide-foreground/5">
+            {uncatGroups.data!.groups.map((g) => {
+              const isInflow = g.totalAmount < 0;
+              return (
+                <div
+                  key={g.groupKey}
+                  className="grid grid-cols-[1fr_auto_auto] items-center gap-3 py-2.5 px-1"
+                >
+                  <span className="text-sm font-medium text-foreground/80 truncate">
+                    {g.groupKey}
+                    <span className="ml-1.5 text-xs font-normal text-foreground/40">
+                      × {g.count}
+                    </span>
+                  </span>
+                  <span
+                    className={`text-sm font-medium tabular-nums whitespace-nowrap ${
+                      isInflow ? "text-emerald-600" : "text-rose-600"
+                    }`}
+                  >
+                    {isInflow ? "+" : "-"}${Math.abs(g.totalAmount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                  <Select
+                    onValueChange={(cat) => {
+                      bulkCategorize.mutate({
+                        transactionIds: g.transactionIds,
+                        category: cat,
+                        reason: `batch-classify: ${g.groupKey}`,
+                      });
+                    }}
+                  >
+                    <SelectTrigger className="w-28 h-8 rounded-lg text-xs">
+                      <SelectValue
+                        placeholder={t("admin.financeLanding.batchClassifyPlaceholder")}
+                      />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-xl">
+                      {BULK_CATEGORY_OPTIONS.map((opt) => (
+                        <SelectItem
+                          key={opt.value}
+                          value={opt.value}
+                          className="text-xs rounded-lg"
+                        >
+                          {language === "en" ? opt.en : opt.zh}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              );
+            })}
+          </div>
+        </SectionCard>
+      )}
 
       {/* ── For Review (uncategorized transactions) ── */}
       {(uncategorized.length > 0 || needsReviewCount > 0) && (

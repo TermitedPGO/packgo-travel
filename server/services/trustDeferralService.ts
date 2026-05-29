@@ -598,28 +598,29 @@ export async function reverseDeferral(opts: {
  * If they diverge, something's wrong — un-matched deposits, manual
  * trust withdrawals not yet recorded, etc.
  */
-export async function computeOutstandingTrust(
-  linkedAccountId: number
-): Promise<{
+export interface OutstandingTrustSummary {
   totalOutstanding: number;
   rowCount: number;
   unmatchedCount: number;
   unmatchedTotal: number;
-}> {
-  const db = await getDb();
-  if (!db) {
-    return { totalOutstanding: 0, rowCount: 0, unmatchedCount: 0, unmatchedTotal: 0 };
-  }
-  const rows = await db
-    .select()
-    .from(trustDeferredIncome)
-    .where(
-      and(
-        eq(trustDeferredIncome.linkedAccountId, linkedAccountId),
-        isNull(trustDeferredIncome.recognizedAt),
-        isNull(trustDeferredIncome.reversedAt)
-      )
-    );
+}
+
+/** Minimal row shape foldOutstandingTrust reads. */
+export interface TrustDeferredRowLike {
+  amount: string | number | null;
+  bookingId?: number | null;
+}
+
+/**
+ * Pure summation over already-fetched (unrecognized, non-reversed) deferred
+ * rows. Split out from computeOutstandingTrust (M5, 2026-05-28) so the
+ * outstanding / unmatched math is unit-testable without a DB — same pattern
+ * as bankPLService.foldBankPLRows. Caller is responsible for filtering rows
+ * to recognizedAt IS NULL AND reversedAt IS NULL before passing them in.
+ */
+export function foldOutstandingTrust(
+  rows: TrustDeferredRowLike[]
+): OutstandingTrustSummary {
   let total = 0;
   let unmatchedTotal = 0;
   let unmatchedCount = 0;
@@ -637,6 +638,26 @@ export async function computeOutstandingTrust(
     unmatchedCount,
     unmatchedTotal,
   };
+}
+
+export async function computeOutstandingTrust(
+  linkedAccountId: number
+): Promise<OutstandingTrustSummary> {
+  const db = await getDb();
+  if (!db) {
+    return { totalOutstanding: 0, rowCount: 0, unmatchedCount: 0, unmatchedTotal: 0 };
+  }
+  const rows = await db
+    .select()
+    .from(trustDeferredIncome)
+    .where(
+      and(
+        eq(trustDeferredIncome.linkedAccountId, linkedAccountId),
+        isNull(trustDeferredIncome.recognizedAt),
+        isNull(trustDeferredIncome.reversedAt)
+      )
+    );
+  return foldOutstandingTrust(rows);
 }
 
 /**

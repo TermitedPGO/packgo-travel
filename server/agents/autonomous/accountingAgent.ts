@@ -26,6 +26,7 @@
 
 import { invokeLLM, type Message } from "../../_core/llm";
 import { withAutonomousSafety } from "../_helpers/safety";
+import { summarizeKnowledgeForPrompt } from "./accountingKnowledge";
 
 export const ACCOUNTING_CATEGORIES = [
   "cogs_tour", // 旅行團成本 — supplier payments (hotel, flight, transport, guide)
@@ -106,6 +107,17 @@ export type AccountingAgentInput = {
   // other_review with a "新 X — Jeff 請確認" purposeNote — don't guess.
   isUnknownVendor?: boolean;
   candidateCounterparty?: string | null;
+  // 2026-05-28 (M2) — knowledge-base hint from preClassify(). Present only
+  // when the deterministic pre-classifier found a *medium*-confidence signal
+  // (< 90; e.g. a memo keyword). High-confidence hits (>= 90) skip the LLM
+  // entirely in the service layer, so they never reach here. The hint is
+  // surfaced in the per-txn USER prompt (never the cached system prompt) as
+  // advisory context — the model still decides.
+  knowledgeHint?: {
+    category: AccountingCategory;
+    confidence: number;
+    reason: string;
+  } | null;
 };
 
 // IRS Schedule C-grade counterparty taxonomy (migration 0080, 2026-05-22).
@@ -251,7 +263,9 @@ ${catList}
 - 如果是 < 60 confidence → category 必須回 "other_review",needsHumanReview=true
 - 80+ confidence → needsHumanReview=false (除非有可疑信號如 amount > $5000)
 - reasoning 要包含 PACK&GO-specific 信號 (例如 "LionTravel = 我們的主要供應商")
-- 不要編造,如果 merchantName + description 都看不出來 → other_review`;
+- 不要編造,如果 merchantName + description 都看不出來 → other_review
+
+${summarizeKnowledgeForPrompt()}`;
 }
 
 // SECURITY_AUDIT_2026_05_14 P2-2: strip prompt-injection vectors from
@@ -343,6 +357,16 @@ async function _runAccountingAgentInner(
     lines.push(`【⚠️ 未知 Zelle/wire 對方 — Jeff 沒分類過 "${input.candidateCounterparty}"】`);
     lines.push(
       `(這是 transfer-class 交易,對方 "${input.candidateCounterparty}" 在 bankTransactions 中沒有歷史分類紀錄。回 other_review,把 purposeNote 寫 "新 Zelle/wire 對方 ${input.candidateCounterparty} — 需要 Jeff 確認是 vendor/customer/owner",不要猜。)`,
+    );
+  }
+
+  // 2026-05-28 (M2) — knowledge-base hint (medium confidence, advisory).
+  // Goes in the USER prompt (per-txn, never cached) so it can't pollute the
+  // cacheable system prompt. The model is told to weigh, not obey, the hint.
+  if (input.knowledgeHint && input.knowledgeHint.category) {
+    lines.push("");
+    lines.push(
+      `【知識庫提示(僅供參考,你仍自行判斷)】preClassify 認為這筆可能是 "${input.knowledgeHint.category}"(信心 ${input.knowledgeHint.confidence}),理由:${input.knowledgeHint.reason}。若你同意請採用並拉高信心;若不同意,請在 reasoning 說明為何。`,
     );
   }
 

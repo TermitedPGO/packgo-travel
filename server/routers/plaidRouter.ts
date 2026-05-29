@@ -43,8 +43,56 @@ import {
   linkedBankAccounts,
   bankTransactions,
 } from "../../drizzle/schema";
-import { and, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  ne,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 import { syncOneLinkedAccount } from "../services/plaidSyncService";
+import { ACCOUNTING_CATEGORIES } from "../agents/autonomous/accountingAgent";
+
+// ── Canonical category validation (M1, 2026-05-28) ────────────────────────
+// The 10 categories are owned by accountingAgent.ts. transactionUpdate +
+// bulkCategorize used to accept any z.string().max(64), so a UI override of an
+// unrecognised label silently fell out of bankPLService's P&L buckets. Lock
+// writes to the canonical enum. "" clears an override; "exclude" is the bulk
+// sentinel handled before the category write.
+const CATEGORY_ENUM = z.enum(
+  ACCOUNTING_CATEGORIES as unknown as [string, ...string[]],
+);
+
+// One-directional hint for the read-only legacy-override audit. Only obvious
+// 1:1 remaps are suggested; genuinely ambiguous old labels (salary,
+// tax_payment, other_expense) are intentionally left unmapped — 不準猜. Nothing
+// here is auto-applied; Jeff confirms each in the UI.
+const LEGACY_CATEGORY_SUGGESTION: Record<string, string> = {
+  tour_booking: "income_booking",
+  visa_service: "income_booking",
+  affiliate_commission: "income_booking",
+  flight_booking: "income_booking",
+  hotel_booking: "income_booking",
+  other_income: "income_booking",
+  supplier_payment: "cogs_tour",
+  consulate_fee: "cogs_tour",
+  stripe_fee: "cogs_other",
+  marketing: "expense_marketing",
+  software: "expense_software",
+  rent: "expense_office",
+  utilities: "expense_office",
+  office_supplies: "expense_office",
+  insurance: "expense_office",
+  bank_fee: "expense_office",
+  travel_cost: "expense_travel",
+};
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -737,7 +785,8 @@ export const plaidRouter = router({
     .input(
       z.object({
         transactionId: z.number().int().positive(),
-        category: z.string().max(64).optional(),
+        // Canonical 10 only; "" clears the override. (M1 — was z.string().max(64))
+        category: z.union([CATEGORY_ENUM, z.literal("")]).optional(),
         reason: z.string().max(2000).optional(),
         exclude: z.boolean().optional(),
         relatedBookingId: z.number().int().positive().optional(),
@@ -1303,6 +1352,196 @@ export const plaidRouter = router({
       });
     }),
 
+  // ── Bulk categorize helpers (2026-05-27) ─────────────────────────────────
+
+  /**
+   * Groups uncategorized bank transactions by normalized merchant name.
+   * Used by the admin UI to quickly bulk-categorize repeating vendors
+   * (e.g. 14 Amazon transactions all needing "supplies").
+   */
+  uncategorizedGroups: adminProcedure
+    .input(
+      z
+        .object({
+          limit: z.number().int().min(1).max(50).default(20),
+        })
+        .optional()
+    )
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { groups: [], totalUncategorized: 0 };
+
+      const uncategorizedWhere = and(
+        isNull(bankTransactions.jeffOverrideCategory),
+        or(
+          isNull(bankTransactions.agentCategory),
+          eq(bankTransactions.agentCategory, "other_review")
+        ),
+        eq(bankTransactions.excludeFromAccounting, 0),
+        eq(bankTransactions.archived, 0)
+      );
+
+      // Total uncategorized count (single + grouped)
+      const [totalRow] = await db
+        .select({ cnt: sql<number>`COUNT(*)` })
+        .from(bankTransactions)
+        .where(uncategorizedWhere);
+      const totalUncategorized = Number(totalRow?.cnt ?? 0);
+
+      // Raw SQL — Drizzle's query builder chokes on GROUP_CONCAT(... ORDER BY)
+      // and on groupBy(sql`COALESCE(...)`) in some MySQL configurations.
+      const rawRows: Array<{
+        groupKey: string;
+        cnt: number;
+        totalAmount: string;
+        sampleDate: string;
+        ids: string;
+      }> = await db.execute(sql`
+        SELECT
+          COALESCE(merchantName, counterparty, 'Unknown') AS groupKey,
+          COUNT(*) AS cnt,
+          SUM(CAST(amount AS DECIMAL(14,2))) AS totalAmount,
+          MAX(date) AS sampleDate,
+          GROUP_CONCAT(id ORDER BY date DESC) AS ids
+        FROM bankTransactions
+        WHERE jeffOverrideCategory IS NULL
+          AND (agentCategory IS NULL OR agentCategory = 'other_review')
+          AND excludeFromAccounting = 0
+          AND archived = 0
+        GROUP BY groupKey
+        HAVING cnt >= 2
+        ORDER BY cnt DESC, totalAmount DESC
+        LIMIT ${input?.limit ?? 20}
+      `) as any;
+      const rows = Array.isArray(rawRows) ? (rawRows[0] ?? []) : [];
+
+      return {
+        groups: (rows as any[]).map((r: any) => ({
+          groupKey: String(r.groupKey ?? "Unknown"),
+          count: Number(r.cnt ?? 0),
+          totalAmount: Number(r.totalAmount ?? 0),
+          sampleDate: String(r.sampleDate ?? ""),
+          transactionIds: r.ids
+            ? String(r.ids).split(",").map(Number)
+            : [],
+        })),
+        totalUncategorized,
+      };
+    }),
+
+  /**
+   * READ-ONLY audit of historical overrides whose jeffOverrideCategory is NOT
+   * one of the canonical 10 (i.e. set before M1, with the old taxonomy or a
+   * free-text custom value). These rows are invisible to bankPLService, so
+   * they're silently missing from P&L + Schedule C. We surface them with a
+   * non-binding suggestedNew hint — 不準猜: nothing is auto-remapped; Jeff
+   * re-picks each in the drawer. (M1, 2026-05-28)
+   */
+  accountingLegacyOverrideAudit: adminProcedure
+    .input(
+      z
+        .object({ limit: z.number().int().min(1).max(500).default(200) })
+        .optional()
+    )
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { total: 0, rows: [] };
+
+      const canonical = [...ACCOUNTING_CATEGORIES];
+      const whereClause = and(
+        isNotNull(bankTransactions.jeffOverrideCategory),
+        ne(bankTransactions.jeffOverrideCategory, ""),
+        notInArray(bankTransactions.jeffOverrideCategory, canonical)
+      );
+
+      const [totalRow] = await db
+        .select({ cnt: sql<number>`COUNT(*)` })
+        .from(bankTransactions)
+        .where(whereClause);
+      const total = Number(totalRow?.cnt ?? 0);
+
+      const rows = await db
+        .select({
+          id: bankTransactions.id,
+          date: bankTransactions.date,
+          amount: bankTransactions.amount,
+          merchantName: bankTransactions.merchantName,
+          description: bankTransactions.description,
+          legacyCategory: bankTransactions.jeffOverrideCategory,
+        })
+        .from(bankTransactions)
+        .where(whereClause)
+        .orderBy(desc(bankTransactions.date))
+        .limit(input?.limit ?? 200);
+
+      return {
+        total,
+        rows: rows.map((r) => ({
+          ...r,
+          suggestedNew:
+            (r.legacyCategory && LEGACY_CATEGORY_SUGGESTION[r.legacyCategory]) ||
+            null,
+        })),
+      };
+    }),
+
+  /**
+   * Bulk-apply the same jeffOverrideCategory to multiple transactions.
+   * Designed for the "verify group" flow where Jeff picks a merchant
+   * group and assigns one category to all of them at once.
+   */
+  bulkCategorize: adminProcedure
+    .input(
+      z.object({
+        transactionIds: z.array(z.number().int().positive()).min(1).max(500),
+        // Canonical 10, or "exclude" sentinel (→ excludeFromAccounting). (M1)
+        category: z.union([CATEGORY_ENUM, z.literal("exclude")]),
+        reason: z.string().max(500).optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      // "exclude" means "remove from accounting" — different column
+      const isExclude = input.category === "exclude";
+      const result = await db
+        .update(bankTransactions)
+        .set(
+          isExclude
+            ? {
+                excludeFromAccounting: 1,
+                excludeReason: input.reason ?? "bulk excluded by Jeff",
+                updatedAt: new Date(),
+              }
+            : {
+                jeffOverrideCategory: input.category,
+                jeffOverrideReason: input.reason ?? "bulk verified by Jeff",
+                updatedAt: new Date(),
+              }
+        )
+        .where(inArray(bankTransactions.id, input.transactionIds));
+
+      const updated = result[0]?.affectedRows ?? 0;
+
+      // Single audit-log entry for the bulk action — fire-and-forget.
+      const { audit } = await import("../_core/auditLog");
+      void audit({
+        ctx,
+        action: "bulk_categorize",
+        targetType: "bankTransaction",
+        targetId: String(input.transactionIds[0]),
+        changes: {
+          transactionIds: input.transactionIds,
+          category: input.category,
+          reason: input.reason ?? "bulk verified by Jeff",
+          count: input.transactionIds.length,
+        },
+      });
+
+      return { updated };
+    }),
+
   // ── Scaling guardrails (2026-05-23) ─────────────────────────────────────
 
   /**
@@ -1541,4 +1780,80 @@ export const plaidRouter = router({
     }
     return await recognizeReadyDepartures();
   }),
+
+  // ── M5: exclusion audit export ──────────────────────────────────────────
+
+  /**
+   * Audit export of the transactions EXCLUDED from the P&L — the rows whose
+   * effective category (jeffOverride ?? agent) is `transfer` (owner capital /
+   * internal moves) or `other_review` (pending classification). An accountant
+   * reviewing the Schedule-C export needs to see WHY money moved without
+   * counting as income/expense. Returns structured records, a summary, and a
+   * ready-to-download CSV string (the UI offers a user-initiated download).
+   *
+   * Money math lives in the pure foldExclusionRows (auditExportService) so the
+   * "only transfer + other_review" invariant is unit-tested without a DB.
+   */
+  auditExclusionList: adminProcedure
+    .input(
+      z.object({
+        startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      })
+    )
+    .query(async ({ input }) => {
+      const db = await getDb();
+      const { foldExclusionRows, toExclusionCsv } = await import(
+        "../services/auditExportService"
+      );
+      if (!db) {
+        return {
+          records: [],
+          summary: {
+            total: 0,
+            transferCount: 0,
+            transferTotal: 0,
+            otherReviewCount: 0,
+            otherReviewTotal: 0,
+          },
+          csv: toExclusionCsv([]),
+        };
+      }
+
+      // Active accounts only; archived txns intentionally included so a
+      // year-spanning audit still surfaces older excluded rows (same rule as
+      // bankPLService). Single-tenant: aggregate across every active account.
+      const rows = await db
+        .select({
+          id: bankTransactions.id,
+          date: bankTransactions.date,
+          amount: bankTransactions.amount,
+          merchantName: bankTransactions.merchantName,
+          description: bankTransactions.description,
+          originalDescription: bankTransactions.originalDescription,
+          counterparty: bankTransactions.counterparty,
+          counterpartyType: bankTransactions.counterpartyType,
+          purposeNote: bankTransactions.purposeNote,
+          excludeReason: bankTransactions.excludeReason,
+          agentCategory: bankTransactions.agentCategory,
+          jeffOverrideCategory: bankTransactions.jeffOverrideCategory,
+          isPending: bankTransactions.isPending,
+        })
+        .from(bankTransactions)
+        .leftJoin(
+          linkedBankAccounts,
+          eq(bankTransactions.linkedAccountId, linkedBankAccounts.id)
+        )
+        .where(
+          and(
+            eq(linkedBankAccounts.isActive, 1),
+            gte(bankTransactions.date, input.startDate as any),
+            lte(bankTransactions.date, input.endDate as any)
+          )
+        )
+        .orderBy(desc(bankTransactions.date));
+
+      const { records, summary } = foldExclusionRows(rows);
+      return { records, summary, csv: toExclusionCsv(records) };
+    }),
 });

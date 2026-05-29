@@ -86,6 +86,11 @@ export interface BankPLReport {
     byCategory: Record<string, number>;
   };
   refunds: number;
+  /** Owner capital / internal transfers — summed but EXCLUDED from income,
+   *  expenses, and netProfit. Surfaced so the UI can show it as its own tile
+   *  (Jeff 2026-05-28:「我自己拿出 不代表公司賺」). Inflow-positive convention:
+   *  money IN from owner / other accounts is positive, owner draw is negative. */
+  transfer: { total: number; count: number };
   grossProfit: number;
   netProfit: number;
   profitMargin: number;
@@ -153,12 +158,76 @@ export async function generateBankPL(opts: {
     )
     .where(and(...filters));
 
+  // Phase 4: subtract deferred-but-not-yet-recognized trust income from
+  // monthly P&L. CST §17550 says customer prepayments don't count as
+  // income until departure. Feature-flagged: when off, this is 0 and
+  // recognition matches the deposit date (Phase 3 behavior).
+  //
+  // 2026-05-23 — scope subtraction to deposits IN this period only. Without
+  // `depositSince`, the cumulative trust balance (e.g. $8,908) got subtracted
+  // from EVERY month's gross — flipping "本月賺" negative because prior months'
+  // deferred income kept eating into each new month. We only want to subtract
+  // the NEW deposits whose income_booking we ALSO just summed.
+  let deferredIncomeSubtracted = 0;
+  try {
+    const { totalDeferredForUser, isTrustDeferralEnabled } = await import(
+      "./trustDeferralService"
+    );
+    if (isTrustDeferralEnabled()) {
+      deferredIncomeSubtracted = await totalDeferredForUser({
+        userId: opts.userId,
+        asOfDate: opts.endDate,
+        depositSince: opts.startDate,
+      });
+    }
+  } catch (err) {
+    console.warn(
+      "[bankPL] trust deferral lookup failed (returning gross):",
+      (err as Error)?.message
+    );
+  }
+
+  return foldBankPLRows(rows, {
+    startDate: opts.startDate,
+    endDate: opts.endDate,
+    deferredIncomeSubtracted,
+  });
+}
+
+/** Minimal row shape foldBankPLRows reads (subset of the bankTransactions select). */
+export interface BankPLRowLike {
+  amount: string | number | null;
+  agentCategory?: string | null;
+  jeffOverrideCategory?: string | null;
+  excludeFromAccounting?: number | null;
+  isPending?: number | null;
+}
+
+/**
+ * Pure P&L fold over already-fetched rows. Split out from generateBankPL (M4,
+ * 2026-05-28) so the Schedule-C summation math — sign conventions, transfer
+ * exclusion, refund netting, trust-deferral subtraction — is unit-testable
+ * without a DB. The async trust-deferral lookup stays in generateBankPL; its
+ * result is passed in here as `deferredIncomeSubtracted`.
+ *
+ * Sign convention (Plaid): amount > 0 = outflow, amount < 0 = inflow.
+ */
+export function foldBankPLRows(
+  rows: BankPLRowLike[],
+  opts: {
+    startDate: string;
+    endDate: string;
+    deferredIncomeSubtracted?: number;
+  },
+): BankPLReport {
   const incomeByCategory: Record<string, number> = {};
   const expensesByCategory: Record<string, number> = {};
   let totalIncome = 0;
   let cogs = 0;
   let operating = 0;
   let refunds = 0;
+  let transferTotal = 0;
+  let transferCount = 0;
   let excludedFromAccounting = 0;
   let uncategorizedCount = 0;
   let needsReviewCount = 0;
@@ -191,7 +260,13 @@ export async function generateBankPL(opts: {
       continue;
     }
     if (cat === "transfer") {
-      continue; // not income, not expense
+      // Owner capital / internal transfer — NOT income, NOT expense, NEVER in
+      // netProfit (Jeff:「我自己拿出 不代表公司賺」). We still sum it (inflow-
+      // positive, same flip as income) so the UI can show owner-money movement
+      // transparently in its own tile.
+      transferTotal += -amt;
+      transferCount++;
+      continue;
     }
 
     if (cat === "refund") {
@@ -224,36 +299,7 @@ export async function generateBankPL(opts: {
   // Refunds (positive = paid out to customer) net against income.
   // grossProfit = income - cogs - refunds
   const grossIncome = totalIncome - refunds;
-
-  // Phase 4: subtract deferred-but-not-yet-recognized trust income from
-  // monthly P&L. CST §17550 says customer prepayments don't count as
-  // income until departure. Feature-flagged: when off, this is 0 and
-  // recognition matches the deposit date (Phase 3 behavior).
-  let deferredIncomeSubtracted = 0;
-  try {
-    const { totalDeferredForUser, isTrustDeferralEnabled } = await import(
-      "./trustDeferralService"
-    );
-    if (isTrustDeferralEnabled()) {
-      // 2026-05-23 — scope subtraction to deposits IN this period only.
-      // Without `depositSince`, the cumulative trust balance (e.g. $8,908)
-      // got subtracted from EVERY month's gross — flipping "本月賺"
-      // negative because prior months' deferred income kept eating into
-      // each new month. We only want to subtract the NEW deposits whose
-      // income_booking we ALSO just summed.
-      deferredIncomeSubtracted = await totalDeferredForUser({
-        userId: opts.userId,
-        asOfDate: opts.endDate,
-        depositSince: opts.startDate,
-      });
-    }
-  } catch (err) {
-    console.warn(
-      "[bankPL] trust deferral lookup failed (returning gross):",
-      (err as Error)?.message
-    );
-  }
-
+  const deferredIncomeSubtracted = opts.deferredIncomeSubtracted ?? 0;
   const netIncome = grossIncome - deferredIncomeSubtracted;
   const grossProfit = netIncome - cogs;
   const netProfit = grossProfit - operating;
@@ -272,6 +318,7 @@ export async function generateBankPL(opts: {
       byCategory: expensesByCategory,
     },
     refunds,
+    transfer: { total: transferTotal, count: transferCount },
     grossProfit,
     netProfit,
     profitMargin,
@@ -291,6 +338,7 @@ function emptyReport(startDate: string, endDate: string): BankPLReport {
     income: { total: 0, byCategory: {} },
     expenses: { total: 0, cogs: 0, operating: 0, byCategory: {} },
     refunds: 0,
+    transfer: { total: 0, count: 0 },
     trustDeferredIncome: 0,
     grossProfit: 0,
     netProfit: 0,

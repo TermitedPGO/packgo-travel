@@ -1,0 +1,422 @@
+/**
+ * AccountingAgent 知識庫 — M2 (記帳系統強化, 2026-05-28).
+ *
+ * 把 Jeff 今年人工修正過的分類知識，編成「永久、可版控、可單測」的規則。
+ * 這是一個 LEAF 模組:純常數 + 純函式,沒有 DB、沒有 LLM、沒有 side-effect。
+ * 因此可被 service 層直接 import,也容易寫 Vitest。
+ *
+ * ─────────────────────────────────────────────────────────────────────
+ * 設計鐵律(對應 Jeff「不準猜」+「我只算公司賺多少」):
+ *
+ *   1. 業主本人金流最優先 → transfer(不計營收)。Jeff 自己 Zelle / 轉帳
+ *      進出公司戶,不是收入也不是費用。命中即覆蓋一切。
+ *   2. 已知 outflow 供應商 → 指定類別(cogs_tour)。只在「出帳」(amount>0)
+ *      時套用,避免把同名進帳誤判。
+ *   3. memo 關鍵字 → 只當「中信心提示」(conf 60-75),不直接拍板,仍交 LLM
+ *      參考、仍進待審佇列讓 Jeff 確認。
+ *   4. 未知對方的進帳(無記名存款 / 無 memo)→ 回 null(不猜),交給 LLM;
+ *      LLM 若也不確定 → other_review。**絕不腦補成收入。**
+ *
+ *   短 token(如 "ann")只比對「對方欄位的完整單字」,不掃整段描述,
+ *   以免 "annual" / "channel" / "Ann Arbor" 之類誤命中。
+ *
+ * Jeff 維護方式:直接編輯下面三張表(OWNER_IDENTITIES /
+ * KNOWN_OUTFLOW_VENDORS / MEMO_HINTS)。改完跑 `pnpm vitest
+ * run server/accountingKnowledge.test.ts` 確認沒打破既有斷言即可。
+ * ─────────────────────────────────────────────────────────────────────
+ */
+
+// 型別-only import:編譯後被抹除,故與 accountingAgent.ts 之間「無 runtime
+// 循環依賴」(accountingAgent.ts 反過來 import 本檔的常數/函式)。
+import type {
+  AccountingCategory,
+  CounterpartyType,
+} from "./accountingAgent";
+
+// ── 1. 業主本人身分 ────────────────────────────────────────────────
+// 命中 → transfer(內部轉帳,不計營收/費用)。Jeff:「我自己拿出 那不代表
+// 公司賺」。比對 payee/payer + 描述,lowercase + 包含比對(中文不受影響)。
+// 拼法/大小寫變體都放進來。
+export const OWNER_IDENTITIES: readonly string[] = [
+  "chun fu hsieh",
+  "chunfu hsieh",
+  "jun fu hsieh",
+  "junfu hsieh",
+  "jeff hsieh",
+  "謝俊甫",
+] as const;
+
+// ── 2. 已知 outflow 供應商 ──────────────────────────────────────────
+// 只在出帳(amount>0)時套用。category 為確定性結果(conf 90,跳過 LLM)。
+//
+// mode:
+//   "contains"          — 名稱夠獨特,可掃 merchant+描述+對方 整段 haystack。
+//   "counterparty-word" — 短/常見 token,只比對「對方欄位」的完整單字
+//                         (\bword\b),避免誤命中描述裡的隨機字。
+//   "phrase"            — 多字片語,掃整段 haystack 但帶單字邊界(\bphrase\b)。
+//                         專治「名字只在描述裡、對方欄位是 null」的 Zelle 行
+//                         (例:"Zelle payment to Ann ...");邊界收尾擋掉
+//                         "annual" / "Ann Arbor" 這類誤命中。
+export interface KnownVendorRule {
+  /** 顯示用乾淨名稱(寫進 counterparty 欄位)。 */
+  readonly canonical: string;
+  /** lowercase 比對 token(任一命中即算)。 */
+  readonly match: readonly string[];
+  readonly mode: "contains" | "counterparty-word" | "phrase";
+  readonly category: AccountingCategory;
+  readonly counterpartyType: CounterpartyType;
+  /** 寫進 purposeNote 的業務目的說明。 */
+  readonly note: string;
+}
+
+export const KNOWN_OUTFLOW_VENDORS: readonly KnownVendorRule[] = [
+  {
+    canonical: "Jupiter Legend",
+    match: ["jupiter legend", "jupiter"],
+    mode: "contains",
+    category: "cogs_tour",
+    counterpartyType: "vendor",
+    note: "旅行團供應商付款(簽證/巴士)— 已知 vendor",
+  },
+  {
+    // Bug 2 修正(實測 2026-05-28):Ann 的進帳對方欄位是 null,名字只出現在
+    // 描述「Zelle payment to Ann for ...」裡 → 舊的 counterparty-word 永遠
+    // 漏接 24 筆 cogs_tour。改吃「片語 + 單字邊界」掃整段:命中
+    // "zelle payment to ann" 但不會誤中 "annual" / "Ann Arbor"。
+    canonical: "Ann (中國簽證 vendor)",
+    match: ["zelle payment to ann", "zelle to ann"],
+    mode: "phrase",
+    category: "cogs_tour",
+    counterpartyType: "vendor",
+    note: "中國簽證代辦付款 — 已知 vendor(Ann),Jeff 2026-05-29 確認",
+  },
+  {
+    // 付清 Wells Fargo 卡(operating 戶出帳,描述含 WELLS FARGO CARD …CCPYMT)。
+    // Jeff:WF 卡專拿來代客訂機票 → 付卡 = 代客機票成本 cogs_tour。
+    // 跟 rule 3(以帳戶名判 WF 卡本身的刷卡)互補:這條看「描述」抓 operating
+    // 戶的還款行。實測 2026-05-28,Jeff 2026-05-29 確認 3 筆。
+    canonical: "Wells Fargo 卡扣款 (代客機票)",
+    match: ["wells fargo card", "wf card ccpymt"],
+    mode: "phrase",
+    category: "cogs_tour",
+    counterpartyType: "vendor",
+    note: "付清 Wells Fargo 卡 — 代客機票成本(Expedia 點數)",
+  },
+  {
+    // 已知軟體/SaaS 訂閱 → expense_software(實測 2026-05-28,Jeff 確認 18 筆)。
+    // 固定清單比對,Jeff 可自行增刪。token 夠獨特才放 contains。
+    canonical: "軟體訂閱",
+    match: [
+      "xsolla",
+      "suno",
+      "manus ai",
+      "moises",
+      "creem",
+      "intuit",
+      "dummyflight",
+    ],
+    mode: "contains",
+    category: "expense_software",
+    counterpartyType: "vendor",
+    note: "軟體/SaaS 訂閱費 — 已知軟體 vendor 清單",
+  },
+] as const;
+
+// ── 2b. 已知旅遊 vendor 的「進帳」= 退款 ───────────────────────────────
+// 只在進帳(amount<0)時套用。航空/旅行團 vendor 把錢退回來 → refund
+// (沖銷成本,不是營收)。實測 2026-05-28,Jeff 2026-05-29 確認 4 筆。
+// 仍是確定性結果(conf 90):已知 vendor 退款風險低。**未知對方的進帳絕不
+// 走這條** — refund 只保留給這張白名單,守住「不準猜」。
+export const KNOWN_INFLOW_REFUND_VENDORS: readonly KnownVendorRule[] = [
+  {
+    canonical: "United Airlines (退款)",
+    match: ["united airlines", "united air"],
+    mode: "contains",
+    category: "refund",
+    counterpartyType: "refund",
+    note: "航空 vendor 退款進帳 — 沖銷代客機票成本",
+  },
+  {
+    canonical: "Jupiter Legend (退款)",
+    match: ["jupiter legend", "jupiter"],
+    mode: "contains",
+    category: "refund",
+    counterpartyType: "refund",
+    note: "旅行團供應商退款進帳 — 沖銷團體成本",
+  },
+] as const;
+
+// ── 3. Wells Fargo 卡規則 ───────────────────────────────────────────
+// Jeff:「Wells Fargo 都是幫客人訂機票用的(因為要急 Expedia 的點數)」。
+// → WF 卡上的「出帳」一律 cogs_tour(代客機票,旅行團直接成本)。
+// 以「帳戶名稱含 wells fargo / wf」判斷,而非帳戶 ID(ID 可能改變)。
+export const WF_CARD_ACCOUNT_PATTERNS: readonly string[] = [
+  "wells fargo",
+  "wf card",
+  "wells-fargo",
+] as const;
+
+// ── 3b. 信用卡自動扣款(還卡費)= transfer ────────────────────────────
+// 描述含 "THANK YOU" / "AUTOMATIC PAYMENT" 的「出帳」= 還公司信用卡 = 把自己
+// 的錢從支票戶搬去付卡,不是費用也不是收入。實測 2026-05-28:21 筆全是
+// Jeff 標 transfer,零例外,Jeff 2026-05-29 確認。
+//
+// **順序鐵律**:這條在 preClassify 裡排在 vendor(rule 2)+ WF 卡(rule 3)
+// 之後。WF 卡還款要走 cogs_tour(代客機票成本),描述含 "WELLS FARGO CARD"
+// 會先被 rule 2 攔成 cogs_tour;到這裡的 THANK YOU 都是還「其他」公司卡 →
+// transfer。靠執行順序保護 WF 例外,不靠這張清單判斷。
+export const CARD_PAYOFF_PATTERNS: readonly string[] = [
+  "thank you",
+  "automatic payment",
+] as const;
+
+// ── 4. memo 關鍵字提示(中信心,不拍板)──────────────────────────────
+// 只在「進帳」(amount<0)時當提示:客人付簽證/團費服務費 → 可能 income_booking。
+// conf 65 < 90 → 不跳過 LLM,只把提示塞進 user prompt 供參考,仍進待審。
+export interface MemoHintRule {
+  readonly match: readonly string[]; // lowercase 子字串
+  readonly category: AccountingCategory;
+  readonly note: string;
+}
+
+export const MEMO_HINTS: readonly MemoHintRule[] = [
+  {
+    match: ["china visa", "chinavisa", "簽證", "visa fee", "visa service"],
+    category: "income_booking",
+    note: "memo 提及簽證服務 — 可能是客人付的簽證服務費",
+  },
+  {
+    match: ["tour fee", "trip fee", "tour deposit", "團費", "訂金", "package trip"],
+    category: "income_booking",
+    note: "memo 提及團費/訂金 — 可能是客人付的旅行團款",
+  },
+] as const;
+
+// ── preClassify ─────────────────────────────────────────────────────
+
+/** 餵給 preClassify 的最小輸入(刻意不依賴 accountingAgent 的大型 input)。 */
+export interface PreClassifyInput {
+  /** Plaid 慣例:>0 = 出帳(費用), <0 = 進帳(收入)。 */
+  amount: number;
+  merchantName: string | null;
+  description: string | null;
+  originalDescription: string | null;
+  /** 候選對方(payee/payer),來自 paymentMeta。 */
+  counterparty: string | null;
+  accountName: string | null;
+  accountType: string | null; // "credit" | "depository" | ...
+}
+
+export type PreClassifySource =
+  | "owner"
+  | "vendor"
+  | "wf_card"
+  | "card_payoff"
+  | "memo"
+  | null;
+
+export interface PreClassifyResult {
+  category: AccountingCategory | null;
+  confidence: number; // 0-100;>=90 表示確定性(可跳過 LLM)
+  reason: string;
+  source: PreClassifySource;
+  /** 確定性命中時一併給出,讓 service 不必再呼叫 LLM 就能填 IRS 欄位。 */
+  counterparty?: string;
+  counterpartyType?: CounterpartyType;
+  purposeNote?: string;
+}
+
+const MISS: PreClassifyResult = {
+  category: null,
+  confidence: 0,
+  reason: "",
+  source: null,
+};
+
+/** lowercase + 收斂空白 + trim。null/undefined → ""。 */
+function norm(s: string | null | undefined): string {
+  return (s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/** \bword\b 完整單字比對(token 已是 lowercase)。 */
+function hasWord(haystack: string, token: string): boolean {
+  if (!token) return false;
+  // 轉義 regex 特殊字元;CJK 無 \b 概念,改用「前後非字母數字或邊界」判斷。
+  const esc = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (/^[\x00-\x7F]+$/.test(token)) {
+    return new RegExp(`\\b${esc}\\b`, "i").test(haystack);
+  }
+  // 非 ASCII(中文等):直接包含比對即可(無單字邊界問題)。
+  return haystack.includes(token);
+}
+
+/** 依 mode 比對一條 vendor 規則。任一 match token 命中即算。 */
+function vendorHit(
+  rule: KnownVendorRule,
+  haystack: string,
+  counterparty: string,
+): boolean {
+  return rule.match.some((m) => {
+    const token = norm(m);
+    if (!token) return false;
+    if (rule.mode === "counterparty-word") return hasWord(counterparty, token);
+    if (rule.mode === "phrase") return hasWord(haystack, token);
+    return haystack.includes(token); // "contains"
+  });
+}
+
+/**
+ * 確定性 / 提示 pre-classifier。順序就是優先級:
+ *   業主身分 → 已知供應商(出帳)→ WF 卡(出帳)→ memo 提示(進帳)→ 不猜(null)。
+ */
+export function preClassify(input: PreClassifyInput): PreClassifyResult {
+  const isOutflow = input.amount > 0;
+  const isInflow = input.amount < 0;
+
+  const counterparty = norm(input.counterparty);
+  // 完整 haystack 給 "contains" 類比對用。
+  const haystack = [
+    input.merchantName,
+    input.description,
+    input.originalDescription,
+    input.counterparty,
+  ]
+    .map(norm)
+    .filter(Boolean)
+    .join(" | ");
+
+  // 1) 業主本人 — 只在「出帳」時判 transfer(業主提取/墊款出公司戶)。
+  //    進帳側「放生」:實測 2026-05-28 證明掛業主名字的進帳(Zelle from
+  //    CHUNFU HSIEH 系列)歷史上 Jeff 全標 income_booking — 是客人用業主
+  //    個人戶付的團費,不是內部轉帳。硬判 transfer 會把 29 筆真實營收抹掉。
+  //    故進帳不在此拍板,往下交給 memo 提示 / LLM / Jeff 審(守「不準猜」)。
+  if (isOutflow) {
+    for (const id of OWNER_IDENTITIES) {
+      const token = norm(id);
+      if (!token) continue;
+      if (counterparty.includes(token) || haystack.includes(token)) {
+        return {
+          category: "transfer",
+          confidence: 95,
+          reason: `對方為業主本人(${id})— 業主提取/墊款出公司戶,內部轉帳不計損益`,
+          source: "owner",
+          counterparty: "謝俊甫(業主本人)",
+          counterpartyType: "owner",
+          purposeNote: "業主本人提取/墊款出公司戶 — 內部轉帳不影響損益",
+        };
+      }
+    }
+  }
+
+  // 2) 已知 outflow 供應商 — 只在出帳時套用。
+  if (isOutflow) {
+    for (const v of KNOWN_OUTFLOW_VENDORS) {
+      if (vendorHit(v, haystack, counterparty)) {
+        return {
+          category: v.category,
+          confidence: 90,
+          reason: `已知供應商付款(${v.canonical})`,
+          source: "vendor",
+          counterparty: v.canonical,
+          counterpartyType: v.counterpartyType,
+          purposeNote: v.note,
+        };
+      }
+    }
+  }
+
+  // 2b) 已知旅遊 vendor 的進帳 = 退款。只在進帳時套用(確定性 conf 90)。
+  if (isInflow) {
+    for (const v of KNOWN_INFLOW_REFUND_VENDORS) {
+      if (vendorHit(v, haystack, counterparty)) {
+        return {
+          category: v.category,
+          confidence: 90,
+          reason: `已知旅遊 vendor 退款進帳(${v.canonical})`,
+          source: "vendor",
+          counterparty: v.canonical,
+          counterpartyType: v.counterpartyType,
+          purposeNote: v.note,
+        };
+      }
+    }
+  }
+
+  // 3) Wells Fargo 卡出帳 = 代客訂機票 → cogs_tour。
+  if (isOutflow) {
+    const acct = norm(input.accountName);
+    const isWf = WF_CARD_ACCOUNT_PATTERNS.some((p) => acct.includes(norm(p)));
+    if (isWf) {
+      return {
+        category: "cogs_tour",
+        confidence: 90,
+        reason: "Wells Fargo 卡消費 — Jeff 規則:WF 卡都是代客訂機票",
+        source: "wf_card",
+        counterparty: input.merchantName?.trim() || "代客機票(WF 卡)",
+        counterpartyType: "vendor",
+        purposeNote: "代客訂機票 — Wells Fargo 卡(Expedia 點數)",
+      };
+    }
+  }
+
+  // 3b) 信用卡自動扣款(還卡費)= transfer。只在出帳套用,且**必須**排在
+  //     vendor(rule 2)+ WF 卡(rule 3)之後 — WF 卡還款已被前面攔成
+  //     cogs_tour,到這裡的 THANK YOU / AUTOMATIC PAYMENT 都是還其他公司卡 =
+  //     搬自己的錢。實測 21/21 全 transfer,Jeff 2026-05-29 確認。
+  if (isOutflow) {
+    for (const p of CARD_PAYOFF_PATTERNS) {
+      if (hasWord(haystack, norm(p))) {
+        return {
+          category: "transfer",
+          confidence: 90,
+          reason: `信用卡自動扣款(${p})— 還公司信用卡,內部轉帳不計損益`,
+          source: "card_payoff",
+          counterparty: "信用卡還款",
+          counterpartyType: "transfer",
+          purposeNote: "還公司信用卡卡費 — 內部轉帳,不影響損益",
+        };
+      }
+    }
+  }
+
+  // 4) memo 提示 — 只在進帳時,中信心(不拍板,交 LLM 參考)。
+  if (isInflow) {
+    for (const h of MEMO_HINTS) {
+      const hit = h.match.some((m) => haystack.includes(norm(m)));
+      if (hit) {
+        return {
+          category: h.category,
+          confidence: 65,
+          reason: h.note,
+          source: "memo",
+        };
+      }
+    }
+  }
+
+  // 5) 不猜。未知對方進帳 / 無訊號 → 交給 LLM(可能仍是 other_review)。
+  return MISS;
+}
+
+/**
+ * 給 accountingAgent.buildSystem() 注入的「知識庫摘要」。
+ * 全為靜態常數 → 每次呼叫產出 byte 相同字串,不破壞 Anthropic prompt cache。
+ */
+export function summarizeKnowledgeForPrompt(): string {
+  const owners = OWNER_IDENTITIES.join(" / ");
+  const vendors = KNOWN_OUTFLOW_VENDORS.map(
+    (v) => `${v.canonical}→${v.category}`,
+  ).join("、");
+  const refundVendors = KNOWN_INFLOW_REFUND_VENDORS.map((v) =>
+    v.canonical.replace(/\s*\(退款\)$/, ""),
+  ).join("、");
+  return `【PACK&GO 知識庫(已確認規則,優先於你的猜測)】
+- 業主本人「出帳」= transfer(業主提取/墊款,不計營收): ${owners}
+- 業主本人「進帳」不自動判 → 多半是客人用業主個人戶付的團費(income_booking),交 LLM/Jeff 確認,別硬判 transfer
+- 已知供應商出帳: ${vendors}
+- 已知旅遊 vendor 進帳 = 退款 refund(沖銷成本): ${refundVendors}
+- Wells Fargo 卡的出帳 / 付清 WF 卡 = 代客訂機票 → cogs_tour
+- 信用卡自動扣款出帳(描述含 THANK YOU / AUTOMATIC PAYMENT)= transfer(還公司卡,不計損益);WF 卡還款例外仍走 cogs_tour
+- 進帳 memo 含「簽證/團費/訂金/visa」等 → 多半是 income_booking(客人付服務費),但仍需確認
+- 未知對方的進帳(無記名、無 memo)→ 不要猜成收入,回 other_review 讓 Jeff 確認`;
+}

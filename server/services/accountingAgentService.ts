@@ -34,6 +34,7 @@ import {
   type AccountingAgentInput,
   type AccountingAgentOutput,
 } from "../agents/autonomous/accountingAgent";
+import { preClassify } from "../agents/autonomous/accountingKnowledge";
 
 const DEFAULT_BATCH_LIMIT = 50;
 const MAX_BATCH_LIMIT = 200;
@@ -195,6 +196,23 @@ export async function classifyOne(
   const isUnknownVendor =
     isTransferLike && !!candidateCounterparty && examples.length === 0;
 
+  // 2026-05-28 (M2) — deterministic knowledge-base pre-classifier. Runs
+  // BEFORE the LLM. A >= 90 hit (owner self-transfer, known vendor, WF card)
+  // is authoritative and skips the LLM entirely (cost saving + zero drift).
+  // A medium hit (< 90, e.g. memo keyword) is forwarded to the LLM as an
+  // advisory hint. No hit → unchanged pure-LLM path. Never guesses unknown
+  // inflows (returns null → LLM → likely other_review).
+  const pre = preClassify({
+    amount: parseFloat(row.tx.amount as any) || 0,
+    merchantName: row.tx.merchantName,
+    description: row.tx.description,
+    originalDescription: (row.tx as any).originalDescription ?? null,
+    counterparty: candidateCounterparty,
+    accountName: row.acct?.accountName ?? null,
+    accountType: row.acct?.accountType ?? null,
+  });
+  const deterministic = pre.category != null && pre.confidence >= 90;
+
   const agentInput: AccountingAgentInput = {
     amount: parseFloat(row.tx.amount as any) || 0,
     date: String(row.tx.date),
@@ -215,25 +233,46 @@ export async function classifyOne(
     examplePastClassifications: examples,
     isUnknownVendor,
     candidateCounterparty,
+    knowledgeHint:
+      pre.category != null && !deterministic
+        ? {
+            category: pre.category,
+            confidence: pre.confidence,
+            reason: pre.reason,
+          }
+        : null,
   };
 
   let agentOut: AccountingAgentOutput;
-  try {
-    agentOut = await runAccountingAgent(agentInput);
-  } catch (err) {
-    const msg = (err as Error)?.message ?? "unknown";
-    console.error(
-      `[accountingAgent] classify failed for txn ${transactionId}:`,
-      msg
-    );
-    // Don't write anything — leave agentCategory NULL so next batch retries.
-    return {
-      transactionId,
-      category: "other_review",
-      confidence: 0,
-      needsHumanReview: true,
-      error: msg,
+  if (deterministic) {
+    // Knowledge base is authoritative for this txn — no LLM call.
+    agentOut = {
+      category: pre.category!,
+      confidence: pre.confidence,
+      reasoning: `[知識庫] ${pre.reason}`,
+      needsHumanReview: pre.confidence < 80,
+      counterparty: pre.counterparty,
+      counterpartyType: pre.counterpartyType,
+      purposeNote: pre.purposeNote,
     };
+  } else {
+    try {
+      agentOut = await runAccountingAgent(agentInput);
+    } catch (err) {
+      const msg = (err as Error)?.message ?? "unknown";
+      console.error(
+        `[accountingAgent] classify failed for txn ${transactionId}:`,
+        msg
+      );
+      // Don't write anything — leave agentCategory NULL so next batch retries.
+      return {
+        transactionId,
+        category: "other_review",
+        confidence: 0,
+        needsHumanReview: true,
+        error: msg,
+      };
+    }
   }
 
   // Persist result. agentCategory + agentConfidence + agentReasoning, plus

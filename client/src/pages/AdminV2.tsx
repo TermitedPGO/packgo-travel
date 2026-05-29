@@ -62,6 +62,8 @@ const MonitorDashboardV2 = lazy(() => import("@/components/admin-v2/MonitorDashb
 const CleanupTabV2 = lazy(() => import("@/components/admin-v2/CleanupTabV2"));
 const SupplierEnrichmentTabV2 = lazy(() => import("@/components/admin-v2/SupplierEnrichmentTabV2"));
 const BankLedgerV2 = lazy(() => import("@/components/admin-v2/BankLedgerV2"));
+const ProfitLossV2 = lazy(() => import("@/components/admin-v2/ProfitLossV2"));
+const TrustComplianceV2 = lazy(() => import("@/components/admin-v2/TrustComplianceV2"));
 const CustomersTabV2 = lazy(() => import("@/components/admin-v2/CustomersTabV2"));
 const NewsletterTabV2 = lazy(() => import("@/components/admin-v2/NewsletterTabV2"));
 const DepartureCalendarV2 = lazy(() => import("@/components/admin-v2/DepartureCalendarV2"));
@@ -110,7 +112,7 @@ type PageId =
   // Marketing
   | "marketing-landing" | "marketing" | "marketing-content" | "posters" | "analytics" | "competitor-monitor" | "affiliate"
   // Finance
-  | "finance-landing" | "bank-ledger" | "invoices" | "reconciliation" | "accounting"
+  | "finance-landing" | "bank-ledger" | "profit-loss" | "trust-compliance" | "invoices" | "reconciliation" | "accounting"
   // System
   | "ai-hub" | "llm-cost" | "task-history" | "audit-log" | "calibration-review" | "autonomous-agents" | "visa" | "cleanup" | "supplier-enrichment";
 
@@ -180,8 +182,10 @@ const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageD
     primary: [
       { id: "finance-landing", label: "💰 總覽" },
       { id: "bank-ledger", label: "🏦 銀行帳本" },
+      { id: "profit-loss", label: "📊 損益表" },
     ],
     advanced: [
+      { id: "trust-compliance", label: "🔒 信託合規" },
       { id: "invoices", label: "發票" },
       { id: "reconciliation", label: "對帳" },
       { id: "accounting", label: "帳務 (Schedule C)" },
@@ -510,6 +514,10 @@ function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
       return <FinanceLanding onNavigate={(t) => setActivePage(t as PageId)} />;
     case "bank-ledger":
       return <BankLedgerV2 />;
+    case "profit-loss":
+      return <ProfitLossV2 />;
+    case "trust-compliance":
+      return <TrustComplianceV2 />;
     case "invoices":
       return <InvoicesTab />;
     case "reconciliation":
