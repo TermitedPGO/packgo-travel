@@ -819,6 +819,7 @@ export const plaidRouter = router({
         .select({
           id: bankTransactions.id,
           linkedAccountId: bankTransactions.linkedAccountId,
+          agentCategory: bankTransactions.agentCategory,
           jeffOverrideCategory: bankTransactions.jeffOverrideCategory,
           jeffOverrideReason: bankTransactions.jeffOverrideReason,
           excludeFromAccounting: bankTransactions.excludeFromAccounting,
@@ -917,7 +918,51 @@ export const plaidRouter = router({
         });
       }
 
-      return { success: true };
+      // Trust deferral sync (2026-05-29): the manual override path historically
+      // did NOT touch the deferral ledger, so a hand-marked trust inflow never
+      // created a trustDeferredIncome row and got counted as income immediately
+      // (violating CST §17550 for long-lead bookings). Mirror the agent path:
+      // create the deferred row when the EFFECTIVE category becomes
+      // income_booking, reverse it when it moves away or gets excluded. The
+      // create/reverse calls self-guard on trust-account + inflow + row
+      // existence, so a non-trust or non-inflow txn is a safe no-op. Best-effort
+      // — never roll back the (already committed) category change on failure.
+      let trustDeferralAction: string | null = null;
+      if (input.category !== undefined || input.exclude !== undefined) {
+        try {
+          const { effectiveCategory, syncDeferralForManualOverride } =
+            await import("../services/trustDeferralService");
+          const prevExcluded = row.excludeFromAccounting === 1;
+          const newJeff =
+            input.category !== undefined
+              ? input.category
+              : row.jeffOverrideCategory;
+          const newExcluded =
+            input.exclude !== undefined ? input.exclude : prevExcluded;
+          const sync = await syncDeferralForManualOverride({
+            bankTransactionId: input.transactionId,
+            before: {
+              effectiveCategory: effectiveCategory(
+                row.jeffOverrideCategory,
+                row.agentCategory
+              ),
+              excluded: prevExcluded,
+            },
+            after: {
+              effectiveCategory: effectiveCategory(newJeff, row.agentCategory),
+              excluded: newExcluded,
+            },
+            reason: input.reason,
+          });
+          trustDeferralAction = sync.action;
+        } catch (err) {
+          console.warn(
+            `[trust-deferral] manual-override sync failed for txn ${input.transactionId}: ${(err as Error)?.message}`
+          );
+        }
+      }
+
+      return { success: true, trustDeferral: trustDeferralAction };
     }),
 
   /**

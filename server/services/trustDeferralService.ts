@@ -588,6 +588,140 @@ export async function reverseDeferral(opts: {
   return { success: true };
 }
 
+// ─── Manual-override deferral sync (2026-05-29) ──────────────────────────────
+//
+// The AGENT path calls processTrustInflow when it classifies a trust inflow as
+// income_booking. The MANUAL override path (plaidRouter.transactionUpdate) used
+// to write jeffOverrideCategory WITHOUT touching the deferral ledger — so a
+// hand-marked trust deposit never created a deferred row and got counted as
+// income immediately, violating CST §17550 for long-lead bookings. These
+// helpers let the override path keep the ledger in step.
+//
+// Single source of truth for "should a deferred row exist?": the txn's
+// EFFECTIVE category is income_booking AND it is not excluded from accounting.
+
+/**
+ * Effective accounting category = Jeff's manual override when set, else the
+ * agent's category. An empty-string / null override falls back to the agent.
+ */
+export function effectiveCategory(
+  jeffOverride: string | null | undefined,
+  agentCategory: string | null | undefined
+): string | null {
+  if (jeffOverride && jeffOverride !== "") return jeffOverride;
+  return agentCategory ?? null;
+}
+
+/**
+ * A trust deferred-income row should exist for a bank txn iff its effective
+ * category is income_booking and it is not excluded from accounting. Pure.
+ */
+export function shouldHaveDeferral(opts: {
+  effectiveCategory: string | null;
+  excluded: boolean;
+}): boolean {
+  return !opts.excluded && opts.effectiveCategory === "income_booking";
+}
+
+export type DeferralSyncAction = "create" | "reverse" | "noop";
+
+/**
+ * Decide whether a manual override needs to create, reverse, or leave alone the
+ * deferred row, by comparing the "should-defer" predicate before vs after the
+ * edit. Pure — no DB, no env reads beyond the `enabled` flag passed in.
+ *
+ * Note: this decides INTENT from category/exclude only. The trust-account +
+ * inflow guard lives in processTrustInflow (the create side) and the
+ * row-existence check lives in reverseDeferralForTransaction (the reverse
+ * side), so a "create"/"reverse" on a non-trust or non-inflow txn is a safe
+ * no-op at the DB layer. The important invariant is that this never returns
+ * "noop" when the booking-ness of the effective category actually flipped.
+ */
+export function decideDeferralSync(opts: {
+  enabled: boolean;
+  before: { effectiveCategory: string | null; excluded: boolean };
+  after: { effectiveCategory: string | null; excluded: boolean };
+}): { action: DeferralSyncAction; reason: string } {
+  if (!opts.enabled) {
+    return { action: "noop", reason: "trust deferral disabled" };
+  }
+  const had = shouldHaveDeferral(opts.before);
+  const wants = shouldHaveDeferral(opts.after);
+  if (wants && !had) {
+    return { action: "create", reason: "now income_booking (non-excluded)" };
+  }
+  if (had && !wants) {
+    return {
+      action: "reverse",
+      reason: "no longer income_booking (changed away or excluded)",
+    };
+  }
+  return { action: "noop", reason: "deferral state unchanged" };
+}
+
+/**
+ * Reverse the active (unrecognized, unreversed) deferred row for a bank
+ * transaction, if one exists. Used when a manual override moves a trust inflow
+ * AWAY from income_booking (or excludes it). Idempotent: a second call finds no
+ * active row and no-ops. Recognized rows are left untouched — the income is
+ * already booked and reversing here would not un-recognize it.
+ */
+export async function reverseDeferralForTransaction(opts: {
+  bankTransactionId: number;
+  reason: string;
+}): Promise<{ reversed: boolean; deferredId: number | null; reason: string }> {
+  const db = await getDb();
+  if (!db) return { reversed: false, deferredId: null, reason: "db unavailable" };
+  const [existing] = await db
+    .select({ id: trustDeferredIncome.id })
+    .from(trustDeferredIncome)
+    .where(
+      and(
+        eq(trustDeferredIncome.bankTransactionId, opts.bankTransactionId),
+        isNull(trustDeferredIncome.recognizedAt),
+        isNull(trustDeferredIncome.reversedAt)
+      )
+    )
+    .limit(1);
+  if (!existing) {
+    return { reversed: false, deferredId: null, reason: "no active deferred row" };
+  }
+  await reverseDeferral({ deferredId: existing.id, reason: opts.reason });
+  return { reversed: true, deferredId: existing.id, reason: "reversed" };
+}
+
+/**
+ * Orchestrate the deferral ledger update for a manual category/exclude override.
+ * Called by plaidRouter.transactionUpdate AFTER the bank-transaction row is
+ * written. Best-effort: callers should not let a deferral-sync failure roll
+ * back the (already committed) category change.
+ */
+export async function syncDeferralForManualOverride(input: {
+  bankTransactionId: number;
+  before: { effectiveCategory: string | null; excluded: boolean };
+  after: { effectiveCategory: string | null; excluded: boolean };
+  reason?: string;
+}): Promise<{ action: DeferralSyncAction; reason: string; deferredId: number | null }> {
+  const decision = decideDeferralSync({
+    enabled: isTrustDeferralEnabled(),
+    before: input.before,
+    after: input.after,
+  });
+  if (decision.action === "create") {
+    const r = await processTrustInflow(input.bankTransactionId);
+    return { action: "create", reason: r.reason, deferredId: r.deferredId };
+  }
+  if (decision.action === "reverse") {
+    const r = await reverseDeferralForTransaction({
+      bankTransactionId: input.bankTransactionId,
+      reason:
+        input.reason ?? "manual override moved txn out of income_booking",
+    });
+    return { action: "reverse", reason: r.reason, deferredId: r.deferredId };
+  }
+  return { action: "noop", reason: decision.reason, deferredId: null };
+}
+
 /**
  * Compute outstanding (unrecognized, unreversed) trust amount for a
  * given linked account. Used for CST §17550 reconciliation:
