@@ -37,6 +37,49 @@ const shortStr = z.string().max(255).refine(noControlChars, { message: "禁止�
 const mediumStr = z.string().max(5_000).refine(noControlChars, { message: "禁止控制字元 / Control characters not allowed" });
 const longStr = z.string().max(50_000).refine(noControlChars, { message: "禁止控制字元 / Control characters not allowed" });
 
+// ─────────────────────────────────────────────────────────────────────────
+// confirmExtractedDepartures helpers (exported for unit tests)
+// PKG-2 fix: (1) honour the per-row return date edited in DeparturePreview
+// instead of always overwriting it with departureDate+1; (2) skip rows whose
+// (tourId, departureDate) already exists so re-importing can't create dupes.
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Resolve the return date for a departure row.
+ *
+ * Uses the (already-edited) `returnDateStr` when it is a non-empty, valid date.
+ * Falls back to `departureDate + 1 day` only when the return date is
+ * missing/blank/unparseable — preserving the previous behaviour as a default.
+ */
+export function resolveReturnDate(
+  departureDate: Date,
+  returnDateStr?: string | null,
+): Date {
+  if (returnDateStr != null && returnDateStr.trim() !== "") {
+    const parsed = new Date(returnDateStr);
+    if (!isNaN(parsed.getTime())) return parsed;
+  }
+  const fallback = new Date(departureDate);
+  fallback.setDate(fallback.getDate() + 1);
+  return fallback;
+}
+
+/**
+ * Normalise a departure date to a day-level key (UTC) for duplicate detection,
+ * so two rows landing on the same calendar day collide regardless of time/tz.
+ */
+export function departureDayKey(d: Date): string {
+  return `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}`;
+}
+
+/**
+ * Build the per-day key set for already-existing departures of a tour, used to
+ * skip duplicates on re-import. Accepts the raw `departureDate` column values.
+ */
+export function buildExistingDayKeySet(existing: Array<{ departureDate: Date }>): Set<string> {
+  return new Set(existing.map((row) => departureDayKey(new Date(row.departureDate))));
+}
+
 export const toursAdminRouter = router({
     // Create new tour (admin only)
     create: adminProcedure
@@ -1059,6 +1102,7 @@ export const toursAdminRouter = router({
         tourId: z.number(),
         selectedDates: z.array(z.object({
           date: z.string(), // ISO date string
+          returnDate: z.string().optional(), // ISO date string; falls back to date+1 day when empty
           status: z.string().optional().default('available'),
           adultPrice: z.number().optional(),
           childWithBedPrice: z.number().optional(),
@@ -1080,11 +1124,20 @@ export const toursAdminRouter = router({
         const [tour] = await drizzleDb.select({ id: toursTable.id, title: toursTable.title })
           .from(toursTable).where(eq(toursTable.id, input.tourId));
         if (!tour) throw new TRPCError({ code: 'NOT_FOUND', message: '行程不存在' });
-        
+
+        // PKG-2: load existing departures so re-importing can't create duplicate
+        // rows for the same (tourId, departureDate). Skip-and-count any collisions.
+        const existingDepartures = await drizzleDb
+          .select({ departureDate: departuresTable.departureDate })
+          .from(departuresTable)
+          .where(eq(departuresTable.tourId, input.tourId));
+        const existingDayKeys = buildExistingDayKeySet(existingDepartures);
+
         // Create departure records for each selected date
         const created = [];
         const errors = [];
-        
+        let skipped = 0;
+
         for (const dep of input.selectedDates) {
           try {
             const departureDate = new Date(dep.date);
@@ -1092,10 +1145,16 @@ export const toursAdminRouter = router({
               errors.push({ date: dep.date, error: '日期格式無效' });
               continue;
             }
-            // returnDate defaults to departureDate + 1 day if not specified
-            const returnDate = new Date(departureDate);
-            returnDate.setDate(returnDate.getDate() + 1);
-            
+            // PKG-2: skip rows whose (tourId, departureDate) already exists.
+            const dayKey = departureDayKey(departureDate);
+            if (existingDayKeys.has(dayKey)) {
+              skipped++;
+              continue;
+            }
+            // PKG-2: honour the per-row return date edited in the preview;
+            // fall back to departureDate + 1 day only when it's empty/invalid.
+            const returnDate = resolveReturnDate(departureDate, dep.returnDate);
+
             const result = await drizzleDb.insert(departuresTable).values([{
               tourId: input.tourId,
               departureDate,
@@ -1108,24 +1167,27 @@ export const toursAdminRouter = router({
               totalSlots: dep.maxParticipants || 30,
               notes: dep.notes || null,
             }]);
+            // Guard against in-batch duplicates too.
+            existingDayKeys.add(dayKey);
             created.push({ date: dep.date, id: (result as any).insertId });
           } catch (err: any) {
             errors.push({ date: dep.date, error: err.message });
           }
         }
-        
+
         // Clear extractedDepartures if requested
         if (input.clearExtracted) {
           await drizzleDb.update(toursTable)
             .set({ extractedDepartures: null })
             .where(eq(toursTable.id, input.tourId));
         }
-        
+
         return {
           success: true,
           created: created.length,
+          skipped,
           errors,
-          message: `已建立 ${created.length} 筆出發日期記錄${errors.length > 0 ? `，${errors.length} 筆失敗` : ''}`,
+          message: `已建立 ${created.length} 筆出發日期記錄${skipped > 0 ? `，略過 ${skipped} 筆重複` : ''}${errors.length > 0 ? `，${errors.length} 筆失敗` : ''}`,
         };
       }),
 

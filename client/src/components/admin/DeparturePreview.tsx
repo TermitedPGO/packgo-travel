@@ -100,7 +100,15 @@ export default function DeparturePreview({
 
   const confirmMutation = trpc.tours.confirmExtractedDepartures.useMutation({
     onSuccess: (result) => {
-      toast.success(t("departurePreview.departuresCreated", { count: String(result.created) }));
+      const skipped = (result as { skipped?: number }).skipped ?? 0;
+      toast.success(
+        skipped > 0
+          ? t("departurePreview.departuresCreatedWithSkipped", {
+              count: String(result.created),
+              skipped: String(skipped),
+            })
+          : t("departurePreview.departuresCreated", { count: String(result.created) })
+      );
       utils.tours.getExtractedDepartures.invalidate({ tourId });
       onConfirmed?.();
       onOpenChange(false);
@@ -158,6 +166,9 @@ export default function DeparturePreview({
       tourId,
       selectedDates: selectedRows.map((r) => ({
         date: r.date,
+        // Thread the edited 回程/returnDate through; server falls back to
+        // departureDate + 1 day only when this is left empty.
+        returnDate: r.returnDate?.trim() ? r.returnDate.trim() : undefined,
         status: r.status || "available",
         adultPrice: r.adultPrice,
         childWithBedPrice: r.childWithBedPrice,

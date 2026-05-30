@@ -6470,6 +6470,7 @@ export const en = {
     deselectAll: 'Deselect All',
     confirmCreate: 'Confirm Create',
     departuresCreated: 'Successfully created {count} departures',
+    departuresCreatedWithSkipped: 'Created {count} departures, skipped {skipped} duplicates',
     createFailed: 'Creation failed',
     selectOne: 'Please select at least one departure date',
     loadError: 'Load failed: {err}',

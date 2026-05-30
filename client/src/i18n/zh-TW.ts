@@ -6472,6 +6472,7 @@ export const zhTW = {
     deselectAll: '取消全選',
     confirmCreate: '確認建立',
     departuresCreated: '成功建立 {count} 筆出發日',
+    departuresCreatedWithSkipped: '成功建立 {count} 筆出發日，略過 {skipped} 筆重複',
     createFailed: '建立失敗',
     selectOne: '請至少選擇一筆出發日期',
     loadError: '載入失敗：{err}',
