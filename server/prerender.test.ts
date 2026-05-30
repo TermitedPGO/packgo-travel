@@ -118,4 +118,28 @@ describe("renderForBot", () => {
     expect(html).not.toContain("?v=abc123");
     expect(html).toContain("ld+json");
   });
+
+  it("de-dupes <title>, keeping the first (page-specific) and dropping the static fallback", async () => {
+    // Regression: index.html ships a static <title>PACK&GO 旅行社</title> as a
+    // flash-of-loading fallback, and react-helmet injects the page-specific
+    // title ahead of it. Both survive serialization → crawlers see TWO titles
+    // (some AI engines grab the last/generic one). Keep the first, drop the rest.
+    const page = fakePage({
+      content: vi
+        .fn()
+        .mockResolvedValue(
+          "<html><head>" +
+            "<title>江南旅遊 5日 | PACK&GO 旅行社</title>" +
+            "<title>PACK&GO 旅行社</title>" +
+            "</head><body>ld+json</body></html>",
+        ),
+    });
+    mockAcquire.mockResolvedValue(page);
+    const html = (await renderForBot("/tours/1290075")) as string;
+    const titles = html.match(/<title[^>]*>[\s\S]*?<\/title>/gi) ?? [];
+    expect(titles).toHaveLength(1);
+    expect(titles[0]).toContain("江南旅遊");
+    // the bare static fallback must not be what survives
+    expect(html).not.toMatch(/<title>PACK&GO 旅行社<\/title>/);
+  });
 });

@@ -99,9 +99,26 @@ export async function renderForBot(pathname: string): Promise<string | null> {
  * production build these are usually absent (the Manus debug collector is
  * dev-gated and the `?v=` cache-bust is added only by setupVite), but strip
  * them defensively so cached HTML never references dev endpoints.
+ *
+ * Also de-duplicates `<title>`: client/index.html ships a static
+ * `<title>PACK&GO 旅行社</title>` as a human flash-of-loading fallback, and
+ * react-helmet-async injects its own page-specific `<title>` ahead of it at
+ * runtime. Both survive into the serialized DOM, so a crawler sees TWO title
+ * tags (the correct page title first, the generic static one second). That's
+ * invalid HTML and trips SEO audits / confuses AI answer engines that grab the
+ * last title. We keep the FIRST title (the react-helmet page-specific one, per
+ * the HTML spec that the first title element wins) and drop the rest. The
+ * static fallback stays in index.html untouched so humans still get a title
+ * during the pre-hydration flash.
  */
 function stripDevArtifacts(html: string): string {
+  let seenTitle = false;
   return html
     .replace(/<script[^>]*__manus__[^>]*><\/script>/g, "")
-    .replace(/(src="\/src\/main\.tsx)\?v=[^"]*(")/g, "$1$2");
+    .replace(/(src="\/src\/main\.tsx)\?v=[^"]*(")/g, "$1$2")
+    .replace(/<title[^>]*>[\s\S]*?<\/title>/gi, (match) => {
+      if (seenTitle) return "";
+      seenTitle = true;
+      return match;
+    });
 }
