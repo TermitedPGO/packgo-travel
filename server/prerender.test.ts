@@ -42,6 +42,20 @@ describe("renderForBot", () => {
     expect(mockRelease).toHaveBeenCalledWith(page);
   });
 
+  it("navigates with domcontentloaded, never networkidle (live SPA never idles)", async () => {
+    // Regression: a live React SPA polls (refetchInterval) and auto-advances
+    // carousels (setInterval image swaps), so the network never goes idle.
+    // networkidle0/2 would burn NAV_TIMEOUT then throw, killing every prerender
+    // (prod symptom: bots got an empty shell, 0 schema). The DOM-based
+    // waitForFunction is the real readiness gate, so goto must not wait on net.
+    const page = fakePage();
+    mockAcquire.mockResolvedValue(page);
+    await renderForBot("/");
+    const opts = (page.goto as Mock).mock.calls[0][1] as { waitUntil?: string };
+    expect(opts.waitUntil).toBe("domcontentloaded");
+    expect(opts.waitUntil).not.toMatch(/networkidle/);
+  });
+
   it("uses a non-bot internal UA (loop guard)", async () => {
     const page = fakePage();
     mockAcquire.mockResolvedValue(page);

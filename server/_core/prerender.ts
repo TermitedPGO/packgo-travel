@@ -45,7 +45,14 @@ export async function renderForBot(pathname: string): Promise<string | null> {
     await page.setUserAgent(RENDER_UA);
     await page.setViewport({ width: 1280, height: 900 });
 
-    await page.goto(target, { waitUntil: "networkidle2", timeout: NAV_TIMEOUT_MS });
+    // `domcontentloaded`, NOT `networkidle2`: the live SPA polls (React Query
+    // refetchInterval) and auto-advances carousels (HomeHero / TestimonialsCarousel
+    // swap images on a setInterval), so the network NEVER goes idle — networkidle2
+    // would burn the full NAV_TIMEOUT and throw, killing every prerender. ES module
+    // scripts are deferred, so domcontentloaded already fires after the entry bundle
+    // executes (React mounted). The waitForFunction below is the real readiness gate
+    // (#root populated + schema injected), so we don't need to wait on the network.
+    await page.goto(target, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
 
     // Wait until React has mounted (#root populated) AND the SEO schema has
     // actually been injected by react-helmet — that's the whole point. Tolerate
