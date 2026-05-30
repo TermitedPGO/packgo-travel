@@ -17,6 +17,7 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { prerenderMiddleware } from "./prerenderMiddleware";
+import { buildAllowedOrigins, isOriginAllowed } from "./corsOrigins";
 import { handleStripeWebhook } from "./stripeWebhook";
 import { avatarUploadRouter } from "../avatarUpload";
 import { tourImageUploadRouter } from "../tourImageUpload";
@@ -117,47 +118,21 @@ async function startServer() {
     return next();
   });
 
-  // P0-6: CORS whitelist - only allow known origins
-  // Migration to packgoplay.com complete; legacy *.manus.space origins
-  // are no longer accepted (DNS cutover finished, old hosts now 301-redirect
-  // before CORS would even apply).
-  const allowedOrigins = [
-    // Round 80.18: production custom domain
-    "https://packgoplay.com",
-    "https://www.packgoplay.com",
-    // Fly.io (kept as origin alias — internal health checks + redirect source)
-    "https://packgo-travel.fly.dev",
-    // Development
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:5173",
-    // Allow BASE_URL from env if set
-    ...(process.env.BASE_URL ? [process.env.BASE_URL] : []),
-  ];
-
-  // Patterns for dynamic origins
-  // 2026-05-17 red-team round 1 — removed wildcards for *.fly.dev, *.manus.*.
-  // Wildcards allowed any attacker who registered a subdomain on those
-  // shared platforms (e.g. evil-prankster.fly.dev) to pass CORS check
-  // against authenticated /api/* requests. Specific origins above already
-  // cover legitimate use; preview deploys can be added by exact hostname.
-  const allowedOriginPatterns: RegExp[] = [
-    // Empty. Only specific origins in `allowedOrigins` above pass CORS.
-    // Add specific preview deploy patterns here ONLY when needed, e.g.:
-    //   /^https:\/\/pr-\d+\.packgo-travel\.fly\.dev$/  // strictly your PR-N pattern
-  ];
+  // P0-6: CORS whitelist — only allow known origins. The allowlist + decision
+  // logic live in ./corsOrigins (unit-tested there). This includes the
+  // bot-prerender loopback render origin (http://127.0.0.1:<PORT>) so the
+  // headless Chromium's asset + tRPC sub-resource requests aren't 500'd by the
+  // CORS guard — without it, React never hydrates and the prerender caches an
+  // empty, schema-less shell. legacy *.manus.space origins are gone (DNS
+  // cutover finished; old hosts 301-redirect before CORS would even apply).
+  const allowedOrigins = buildAllowedOrigins();
 
   app.use(
     cors({
       origin: (origin, callback) => {
-        // Allow requests with no origin (e.g., mobile apps, curl, Stripe webhooks)
-        if (!origin) return callback(null, true);
-        if (allowedOrigins.includes(origin)) {
-          return callback(null, true);
-        }
-        // Check pattern-based whitelist
-        if (allowedOriginPatterns.some(p => p.test(origin))) {
+        // No-origin (mobile apps, curl, Stripe webhooks, same-origin) is
+        // allowed; everything else must match the allowlist / patterns.
+        if (isOriginAllowed(origin, allowedOrigins)) {
           return callback(null, true);
         }
         logger.warn({ origin }, "[CORS] Blocked request from origin");
