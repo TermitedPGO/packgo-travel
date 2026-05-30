@@ -145,6 +145,36 @@ describe("preClassify — known outflow vendors", () => {
     expect(r.category).toBe("cogs_tour");
     expect(r.source).toBe("vendor");
   });
+
+  it("US Lion Travel outflow (Zelle, counterparty null) → cogs_tour (本檔最大供應商)", () => {
+    // 描述「Zelle payment to US LION TRAVEL for ...」,對方欄位 null → contains 掃整段。
+    const r = preClassify(
+      mk({ amount: 1080, description: "Zelle payment to US LION TRAVEL for Chen 大阪團" }),
+    );
+    expect(r.category).toBe("cogs_tour");
+    expect(r.source).toBe("vendor");
+    expect(r.counterpartyType).toBe("vendor");
+  });
+
+  it('US Lion Travel token tolerates spaced "U S LION TRAVEL"', () => {
+    const r = preClassify(mk({ amount: 2000, merchantName: "U S LION TRAVEL" }));
+    expect(r.category).toBe("cogs_tour");
+  });
+
+  it("UnitedStars International outflow → cogs_tour", () => {
+    for (const m of ["UNITEDSTARS INTERNATIONAL", "UnitedStars Intl payment"]) {
+      const r = preClassify(mk({ amount: 1500, merchantName: m }));
+      expect(r.category, m).toBe("cogs_tour");
+      expect(r.source, m).toBe("vendor");
+    }
+  });
+
+  it("COLLISION GUARD: UnitedStars token never swallows United Airlines (outflow → not cogs)", () => {
+    // "unitedstars" is NOT a substring of "united airlines" (space breaks it),
+    // so a United Airlines outflow must NOT be auto-classified as cogs_tour.
+    const r = preClassify(mk({ amount: 640, merchantName: "UNITED AIRLINES" }));
+    expect(r.category).not.toBe("cogs_tour");
+  });
 });
 
 describe("preClassify — known travel-vendor inflows → refund (2026-05-29)", () => {
@@ -164,6 +194,30 @@ describe("preClassify — known travel-vendor inflows → refund (2026-05-29)", 
   it("refund rule does NOT fire on an outflow (United outflow ≠ refund)", () => {
     const r = preClassify(mk({ amount: 640, merchantName: "UNITED AIRLINES" }));
     expect(r.category).not.toBe("refund");
+  });
+
+  it("US Lion Travel inflow → refund (取消的團退款,沖銷成本)", () => {
+    const r = preClassify(
+      mk({ amount: -1680, description: "Zelle from US LION TRAVEL 26TN309FU Refund" }),
+    );
+    expect(r.category).toBe("refund");
+    expect(r.confidence).toBe(90);
+    expect(r.counterpartyType).toBe("refund");
+  });
+
+  it("COLLISION GUARD: United Airlines inflow still → refund after UnitedStars added", () => {
+    // UnitedStars (outflow-only cogs vendor) must not steal United Airlines'
+    // inflow refund — verifies the two tokens stay disjoint in both directions.
+    const r = preClassify(mk({ amount: -640, merchantName: "UNITED AIRLINES" }));
+    expect(r.category).toBe("refund");
+    expect(r.source).toBe("vendor");
+  });
+
+  it("UnitedStars inflow → null (no UnitedStars-refund evidence; 不準猜)", () => {
+    // UnitedStars is outflow-only; an inflow has no deterministic refund rule
+    // and must fall through rather than be guessed into refund.
+    const r = preClassify(mk({ amount: -1500, merchantName: "UNITEDSTARS INTERNATIONAL" }));
+    expect(r.category).toBeNull();
   });
 });
 

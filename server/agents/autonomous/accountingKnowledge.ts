@@ -91,6 +91,31 @@ export const KNOWN_OUTFLOW_VENDORS: readonly KnownVendorRule[] = [
     note: "中國簽證代辦付款 — 已知 vendor(Ann),Jeff 2026-05-29 確認",
   },
   {
+    // US Lion Travel — 旅行團供應商(大阪/東京迪士尼/台灣團…),出帳付團費。
+    // 描述「Zelle payment to US LION TRAVEL for ...」,對方欄位常為 null →
+    // 用 contains 掃整段。token "lion travel"(兩字,夠獨特)同時涵蓋
+    // "US LION TRAVEL" 與 "U S LION TRAVEL"。Jeff 2026-05-29 確認:$30K+、
+    // 十幾筆出帳全 cogs_tour(本檔最大供應商之一)。
+    canonical: "US Lion Travel",
+    match: ["lion travel"],
+    mode: "contains",
+    category: "cogs_tour",
+    counterpartyType: "vendor",
+    note: "旅行團供應商付款(Lion Travel)— 代客團費成本",
+  },
+  {
+    // UnitedStars International — 旅行團供應商,出帳付團費。
+    // **token 用 "unitedstars"(連寫),嚴禁用 "united"** — 否則會誤命中
+    // United Airlines(退款 vendor,見下方 KNOWN_INFLOW_REFUND_VENDORS)。
+    // "united air"(含空格)不是 "unitedstars" 的子字串,故兩者不衝突。
+    canonical: "UnitedStars International",
+    match: ["unitedstars international", "unitedstars"],
+    mode: "contains",
+    category: "cogs_tour",
+    counterpartyType: "vendor",
+    note: "旅行團供應商付款(UnitedStars International)— 代客團費成本",
+  },
+  {
     // 付清 Wells Fargo 卡(operating 戶出帳,描述含 WELLS FARGO CARD …CCPYMT)。
     // Jeff:WF 卡專拿來代客訂機票 → 付卡 = 代客機票成本 cogs_tour。
     // 跟 rule 3(以帳戶名判 WF 卡本身的刷卡)互補:這條看「描述」抓 operating
@@ -143,6 +168,17 @@ export const KNOWN_INFLOW_REFUND_VENDORS: readonly KnownVendorRule[] = [
     category: "refund",
     counterpartyType: "refund",
     note: "旅行團供應商退款進帳 — 沖銷團體成本",
+  },
+  {
+    // US Lion Travel 退款 — 取消的團 Lion 把錢退回(描述含 "Refund")。
+    // 用同一 token "lion travel",但這條只在進帳(amount<0)套用 → refund。
+    // Jeff 2026-05-29 確認 1 筆($1,680, 26TN309FU Refund)。
+    canonical: "US Lion Travel (退款)",
+    match: ["lion travel"],
+    mode: "contains",
+    category: "refund",
+    counterpartyType: "refund",
+    note: "旅行團供應商退款進帳(Lion Travel)— 沖銷團體成本",
   },
 ] as const;
 
