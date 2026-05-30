@@ -22,12 +22,11 @@ const log = createChildLogger({ module: "prerender" });
 // Hard caps so a slow/stuck page can never hold a pool slot for long. Bots
 // tolerate latency; we'd rather time out and return partial HTML than block.
 const NAV_TIMEOUT_MS = 12_000;
-// 15s, not 8s: the FIRST render after a deploy/restart is cold (Chromium just
-// launched + VM cold), and on prod that pushed React mount + helmet schema
-// injection just past 8s — the ready-signal timed out and we only caught the
-// schema because page.content() happened to serialize a beat later. Warm renders
-// settle in <2s, so the extra ceiling only ever applies to the rare cold first
-// hit (cached 24h after), and it guarantees the schema is in before we serialize.
+// Ceiling for the readiness poll below, not a fixed wait. With polling:100 the
+// signal fires the instant the schema is in, so warm renders return in <2s and a
+// cold first-render (Chromium just launched) well under this. The ceiling only
+// bites for routes that never inject schema — they wait it out, then we serialize
+// whatever DOM exists. 15s gives the cold path comfortable headroom.
 const READY_TIMEOUT_MS = 15_000;
 
 // UA for the internal render request. MUST NOT match any bot pattern in
@@ -61,9 +60,14 @@ export async function renderForBot(pathname: string): Promise<string | null> {
     await page.goto(target, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
 
     // Wait until React has mounted (#root populated) AND the SEO schema has
-    // actually been injected by react-helmet — that's the whole point. Tolerate
-    // timeout: if a page never injects schema (e.g. routes that don't set one)
-    // we still return the current DOM rather than nothing.
+    // actually been injected by react-helmet — that's the real readiness gate.
+    // polling:100 (NOT the default 'raf'): headless Chromium throttles/pauses
+    // requestAnimationFrame when nothing paints, so rAF polling misses the
+    // condition and times out even though the schema is already in the DOM
+    // (observed on prod — cold renders logged a ready-signal timeout yet served
+    // full schema, because page.content() reads the real DOM regardless). A 100ms
+    // interval poll isn't tied to paint, so it detects the schema immediately.
+    // Tolerate a genuine timeout (routes with no schema): return the current DOM.
     await page
       .waitForFunction(
         () => {
@@ -74,10 +78,10 @@ export async function renderForBot(pathname: string): Promise<string | null> {
           );
           return hasContent && hasSchema;
         },
-        { timeout: READY_TIMEOUT_MS },
+        { timeout: READY_TIMEOUT_MS, polling: 100 },
       )
       .catch(() => {
-        log.warn({ pathname }, "ready-signal timeout — returning networkidle HTML");
+        log.warn({ pathname }, "ready-signal timeout — returning current DOM");
       });
 
     const html = stripDevArtifacts(await page.content());

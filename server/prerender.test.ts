@@ -56,6 +56,20 @@ describe("renderForBot", () => {
     expect(opts.waitUntil).not.toMatch(/networkidle/);
   });
 
+  it("polls the ready-signal on a fixed interval, not raf (headless throttles raf)", async () => {
+    // Regression: default 'raf' polling is throttled/paused in headless Chromium
+    // when nothing paints, so waitForFunction times out even though the schema is
+    // already in the DOM (prod: cold renders logged a timeout yet served schema).
+    // A numeric interval poll isn't tied to paint and detects the schema at once.
+    const page = fakePage();
+    mockAcquire.mockResolvedValue(page);
+    await renderForBot("/");
+    const opts = (page.waitForFunction as Mock).mock.calls[0][1] as {
+      polling?: number | string;
+    };
+    expect(opts.polling).toBe(100);
+  });
+
   it("uses a non-bot internal UA (loop guard)", async () => {
     const page = fakePage();
     mockAcquire.mockResolvedValue(page);
