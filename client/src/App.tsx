@@ -161,12 +161,11 @@ function Router() {
       <Route path={"/reset-password"} component={ResetPassword} />
       <Route path={"/admin/diagnostics"} component={DiagnosticsPage} />
       <Route path={"/admin/task-history"} component={TaskHistory} />
-      {/* 2026-05-22 — /admin now means /admin/v2. The v1 5-domain shell
-          is retired; AdminV2 (6 domains, Trip.com-style tabs) is canonical.
-          A standalone redirect catches /admin bare hits so old bookmarks /
-          email links still land on the admin home. */}
-      <Route path={"/admin/v2"} component={AdminV2} />
-      <Route path={"/admin"}>{() => { if (typeof window !== "undefined") window.location.replace("/admin/v2"); return null; }}</Route>
+      {/* 2026-05-22 — v1 5-domain shell retired; the 6-domain shell is canonical.
+          2026-05-29 — Jeff: drop the "v2" name. /admin IS the real page now;
+          /admin/v2 redirects here so old bookmarks / email links still land. */}
+      <Route path={"/admin"} component={AdminV2} />
+      <Route path={"/admin/v2"}>{() => { if (typeof window !== "undefined") window.location.replace("/admin"); return null; }}</Route>
       <Route path={"/profile"} component={Profile} />
       <Route path={"/tours/:id/print"} component={TourPrintView} />
       <Route path={"/tours/:id"} component={TourDetailPeony} />

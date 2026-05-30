@@ -519,7 +519,7 @@ export default function AccountingTab() {
                   </div>
                   {ytd.trustDeferredIncome > 0 && (
                     <div className="flex justify-between py-1 text-xs text-gray-500">
-                      <span>{language === "zh-TW" ? "客人訂金 (trust, 未 recognize)" : "Trust deposits (not recognized)"}</span>
+                      <span>{language === "zh-TW" ? "客人訂金（還沒轉收入）" : "Customer deposits (not yet income)"}</span>
                       <span>{formatAmount(ytd.trustDeferredIncome)}</span>
                     </div>
                   )}

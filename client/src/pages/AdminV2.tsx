@@ -1,21 +1,16 @@
 /**
- * PACK&GO Admin V2 — 6-domain redesign (2026-05-22).
+ * PACK&GO Admin — 6-domain shell. Canonical at /admin since 2026-05-29.
  *
- * Parallel to /admin (old). Reachable at /admin/v2. Old admin continues
- * to work; Jeff can daily-driver this until comfortable, then we delete
- * /admin entirely. No shared state, no destructive overrides.
+ * Component/file stay named AdminV2 (Jeff: keep filenames, just drop the
+ * user-facing "v2"). v1 shell is retired; /admin/v2 redirects here.
  *
- * 6 domains (Jeff split Finance OUT of System per 2026-05-22 spec):
- *   - 🏢 辦公室     today inbox, agent chat
- *   - 📋 營運       tours, bookings, inquiries, departures, suppliers
- *   - 👥 客戶       customers, reviews, packpoint, vouchers, quote tools
- *   - 📢 行銷       marketing automation, posters, content, analytics, competitor, affiliate
- *   - 💰 財務       accounting, invoices, reconciliation, finance landing
- *   - ⚙️ 系統       AI infra (cost, sessions, monitor, calibration, audit log, visa)
- *
- * Pilot redesign tab: Bookings — uses Trip.com booking admin as visual reference.
- * Other tabs initially render the existing v1 component; we polish them in
- * subsequent batches.
+ * 6 domains (Finance split OUT of System per 2026-05-22 spec):
+ *   - 🏢 辦公室   today inbox, agent chat
+ *   - 📋 營運     tours, bookings, inquiries, departures, suppliers
+ *   - 👥 客戶     customers, reviews, packpoint, vouchers, quote tools
+ *   - 📢 行銷     marketing automation, posters, content, analytics, competitor, affiliate
+ *   - 💰 財務     finance overview, bank ledger, P&L, trust, invoices, reconciliation
+ *   - ⚙️ 系統     AI infra (cost, sessions, monitor, calibration, audit log, visa)
  *
  * Design system spec:
  *   ~/.claude/projects/-Users-jeff-Desktop---/memory/feedback_admin_design_system.md
@@ -62,8 +57,10 @@ const MonitorDashboardV2 = lazy(() => import("@/components/admin-v2/MonitorDashb
 const CleanupTabV2 = lazy(() => import("@/components/admin-v2/CleanupTabV2"));
 const SupplierEnrichmentTabV2 = lazy(() => import("@/components/admin-v2/SupplierEnrichmentTabV2"));
 const BankLedgerV2 = lazy(() => import("@/components/admin-v2/BankLedgerV2"));
-const ProfitLossV2 = lazy(() => import("@/components/admin-v2/ProfitLossV2"));
-const TrustComplianceV2 = lazy(() => import("@/components/admin-v2/TrustComplianceV2"));
+// 2026-05-29 — 5 張財務報表 (損益表/對帳/發票/客人訂金/報稅匯出) 收進這個
+// hub 的內層切換。ProfitLossV2 / TrustComplianceV2 / AccountingTab /
+// InvoicesTab / ReconciliationTab 現在都由 FinanceReports 內部 lazy-import。
+const FinanceReports = lazy(() => import("@/components/admin-v2/FinanceReports"));
 const CustomersTabV2 = lazy(() => import("@/components/admin-v2/CustomersTabV2"));
 const NewsletterTabV2 = lazy(() => import("@/components/admin-v2/NewsletterTabV2"));
 const DepartureCalendarV2 = lazy(() => import("@/components/admin-v2/DepartureCalendarV2"));
@@ -87,10 +84,6 @@ const PostersTab = lazy(() => import("@/components/admin/PostersTab"));
 const AnalyticsTab = lazy(() => import("@/components/admin/AnalyticsTab"));
 const CompetitorMonitorTab = lazy(() => import("@/components/admin/CompetitorMonitorTab"));
 const AffiliateTab = lazy(() => import("@/components/admin/AffiliateTab"));
-// 2026-05-22 — AccountingTab semi-retired; kept as lazy route for Schedule C / CSV export
-const AccountingTab = lazy(() => import("@/components/admin/AccountingTab"));
-const InvoicesTab = lazy(() => import("@/components/admin/InvoicesTab"));
-const ReconciliationTab = lazy(() => import("@/components/admin/ReconciliationTab"));
 const AiHubTab = lazy(() => import("@/components/admin/AiHubTab"));
 const TaskHistoryContent = lazy(() => import("@/components/admin/TaskHistoryContent"));
 const AuditLogTab = lazy(() => import("@/components/admin/AuditLogTab"));
@@ -111,8 +104,10 @@ type PageId =
   | "customers-landing" | "customers-crm" | "reviews" | "packpoint" | "vouchers" | "ai-quotes" | "tool-quote" | "wechat-assist" | "newsletter"
   // Marketing
   | "marketing-landing" | "marketing" | "marketing-content" | "posters" | "analytics" | "competitor-monitor" | "affiliate"
-  // Finance
-  | "finance-landing" | "bank-ledger" | "profit-loss" | "trust-compliance" | "invoices" | "reconciliation" | "accounting"
+  // Finance — 3 visible tabs (總覽/帳本/報表); the 5 report ids stay as
+  // routable deep-link aliases that resolve into the 報表 hub.
+  | "finance-landing" | "bank-ledger" | "finance-reports"
+  | "profit-loss" | "trust-compliance" | "invoices" | "reconciliation" | "accounting"
   // System
   | "ai-hub" | "llm-cost" | "task-history" | "audit-log" | "calibration-review" | "autonomous-agents" | "visa" | "cleanup" | "supplier-enrichment";
 
@@ -174,22 +169,18 @@ const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageD
     ],
   },
   finance: {
-    // 2026-05-22 — Jeff: "這兩頁意義何在". Dropped legacy "帳務"
-    // (AccountingTab) tab. It read from manual financialEntries table
-    // that nobody populated (all NT$0) and had hardcoded TWD currency.
-    // Plaid → AccountingAgent → BankLedger is the single source of truth now.
+    // 2026-05-29 — Jeff: "用的更直白簡單". 7 分頁 (3 主要 + 4 進階) 收成 3：
+    // 總覽 / 帳本 / 報表。5 張報表 (損益表 / 對帳 / 發票 / 客人訂金 /
+    // 報稅匯出) 收進 FinanceReports hub 的內層切換；舊 pageId 全部保留為
+    // 可路由別名，深層連結 (FinanceLanding / DailyBriefingCard / 手機版)
+    // 仍直接落到對的那張報表，無需改 caller。
     domain: { id: "finance", label: "財務", icon: Wallet },
     primary: [
       { id: "finance-landing", label: "💰 總覽" },
-      { id: "bank-ledger", label: "🏦 銀行帳本" },
-      { id: "profit-loss", label: "📊 損益表" },
+      { id: "bank-ledger", label: "🏦 帳本" },
+      { id: "finance-reports", label: "📊 報表" },
     ],
-    advanced: [
-      { id: "trust-compliance", label: "🔒 信託合規" },
-      { id: "invoices", label: "發票" },
-      { id: "reconciliation", label: "對帳" },
-      { id: "accounting", label: "帳務 (Schedule C)" },
-    ],
+    advanced: [],
   },
   system: {
     domain: { id: "system", label: "系統", icon: Settings },
@@ -213,11 +204,35 @@ function allPages(cfg: { primary: PageDef[]; advanced: PageDef[] }): PageDef[] {
   return [...cfg.primary, ...cfg.advanced];
 }
 
-const PAGE_TO_DOMAIN: Record<PageId, DomainId> = Object.fromEntries(
-  Object.entries(IA).flatMap(([d, cfg]) =>
-    allPages(cfg).map((p) => [p.id, d])
-  )
-) as Record<PageId, DomainId>;
+const PAGE_TO_DOMAIN: Record<PageId, DomainId> = {
+  ...(Object.fromEntries(
+    Object.entries(IA).flatMap(([d, cfg]) =>
+      allPages(cfg).map((p) => [p.id, d])
+    )
+  ) as Record<PageId, DomainId>),
+  // The 5 report sub-views are no longer standalone tabs (folded into 報表),
+  // so allPages() doesn't list them. Map them back to finance so a deep-link
+  // to e.g. "reconciliation" still highlights the 財務 domain.
+  "profit-loss": "finance",
+  "trust-compliance": "finance",
+  "invoices": "finance",
+  "reconciliation": "finance",
+  "accounting": "finance",
+};
+
+// Finance report sub-views fold into the 報表 hub (FinanceReports). This maps
+// each routable alias → the hub's inner view; presence in this map also tells
+// the shell to highlight the 報表 tab + label the breadcrumb as 報表.
+const FINANCE_REPORT_VIEW: Partial<
+  Record<PageId, "pl" | "recon" | "invoices" | "trust" | "tax">
+> = {
+  "finance-reports": "pl",
+  "profit-loss": "pl",
+  "reconciliation": "recon",
+  "invoices": "invoices",
+  "trust-compliance": "trust",
+  "accounting": "tax",
+};
 
 // ────────────────────────────────────────────────────────────────────────
 // Component
@@ -293,9 +308,14 @@ export default function AdminV2() {
   const primaryItems: SubNavItem[] = IA[activeDomain].primary.map(toSubNavItem);
   const advancedItems: SubNavItem[] = IA[activeDomain].advanced.map(toSubNavItem);
 
-  const activePageMeta = allPages(IA[activeDomain]).find((p) => p.id === activePage);
+  // A deep-link can land on a finance report sub-view that no longer has its
+  // own tab. Highlight the 報表 hub tab for any of those aliases.
+  const isFinanceReportAlias =
+    activePage !== "finance-reports" && activePage in FINANCE_REPORT_VIEW;
+  const subNavActive: PageId = isFinanceReportAlias ? "finance-reports" : activePage;
+
+  const activePageMeta = allPages(IA[activeDomain]).find((p) => p.id === subNavActive);
   const breadcrumb = [
-    { label: "v2", muted: true as const },
     { label: IA[activeDomain].domain.label },
     { label: activePageMeta?.label ?? "" },
   ];
@@ -423,7 +443,7 @@ export default function AdminV2() {
           <DomainSubNav
             primaryItems={primaryItems}
             advancedItems={advancedItems}
-            active={activePage}
+            active={subNavActive}
             onSelect={(id) => setActivePage(id as PageId)}
           />
           <main
@@ -509,21 +529,24 @@ function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
     case "affiliate":
       return <AffiliateTab />;
 
-    // Finance
+    // Finance — 總覽 / 帳本 are standalone; the 5 report aliases all resolve
+    // into the FinanceReports hub at the right inner view.
     case "finance-landing":
       return <FinanceLanding onNavigate={(t) => setActivePage(t as PageId)} />;
     case "bank-ledger":
       return <BankLedgerV2 />;
+    case "finance-reports":
+      return <FinanceReports />;
     case "profit-loss":
-      return <ProfitLossV2 />;
+      return <FinanceReports initialView="pl" />;
     case "trust-compliance":
-      return <TrustComplianceV2 />;
+      return <FinanceReports initialView="trust" />;
     case "invoices":
-      return <InvoicesTab />;
+      return <FinanceReports initialView="invoices" />;
     case "reconciliation":
-      return <ReconciliationTab />;
+      return <FinanceReports initialView="recon" />;
     case "accounting":
-      return <AccountingTab />;
+      return <FinanceReports initialView="tax" />;
 
     // System
     case "ai-hub":
