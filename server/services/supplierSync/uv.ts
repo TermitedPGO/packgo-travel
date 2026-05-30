@@ -69,10 +69,14 @@ export function uvRowToDeparture(
   // preserves the supplier's published calendar day with no timezone
   // drift. See lion.ts for the full date-handling rationale.
   const dateStr = row.groupDate.slice(0, 10);
-  // First adult-priced row (priceType=3). Fallback to first row.
-  const adult = row.groupPrice?.find((p) => p.priceType === 3);
+  // priceType is ROOM OCCUPANCY, not pax type: 3=單人入住 (single, dearest,
+  // single-supplement baked in) / 4=兩人一房 (double) / 5=三人 / 6=四人 (cheapest).
+  // Store the 兩人一房 (priceType=4) per-person price as retailPrice — the
+  // industry-standard double-occupancy quote basis. priceType=3 over-quotes
+  // by ~30-37%. Fall back to the first row only if 4 is absent.
+  const double = row.groupPrice?.find((p) => p.priceType === 4);
   const fallback = row.groupPrice?.[0];
-  const price = adult?.groupPrice ?? fallback?.groupPrice ?? 0;
+  const price = double?.groupPrice ?? fallback?.groupPrice ?? 0;
   // Spare seats = totalStock - sold.
   const totalSeats = Number(row.groupStock || 0);
   const sold = Number(row.groupSaleStock || 0);

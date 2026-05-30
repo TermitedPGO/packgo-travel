@@ -1,0 +1,481 @@
+{
+  "productTravel": {
+    "productCode": "P00002255",
+    "dataVersion": 1777426870,
+    "productDay": 7,
+    "productNight": 6,
+    "travelId": 3819,
+    "productType": "PC00000067",
+    "productTypeName": "San Francisco",
+    "travelName": "不超過13人的精品小團 | 舊金山+黃石國家公園+大提頓國家公園+紀念碑谷+羚羊彩穴+拉斯維加斯 7日遊",
+    "productTravelInfoList": [
+      {
+        "isSource": 0,
+        "language": 3,
+        "dayList": [
+          {
+            "section": "San Francisco|||1+++Sacramento|||1+++Elko",
+            "todayLocation": "",
+            "dayNumber": 1,
+            "content": [
+              {
+                "contentMode": 3,
+                "productSortNum": null,
+                "relatedId": 3815,
+                "relatedDay": 1,
+                "relatedName": "【YG7-1】舊金山 - 薩克拉門托 - 州府大廈 - 艾可市",
+                "contentType": 100,
+                "sortNumber": 0,
+                "jsonContent": "{\"travelId\":3815,\"productCategory\":1,\"name\":\"【YG7-1】舊金山 - 薩克拉門托 - 州府大廈 - 艾可市\",\"productType\":\"PC00000067\",\"isAutoTeam\":null,\"expandList\":[{\"language\":3,\"isSource\":0,\"dayList\":[{\"section\":\"San Francisco|||1+++Sacramento|||1+++Elko\",\"todayLocation\":\"\",\"dayNumber\":1,\"content\":[{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":7,\"sortNumber\":0,\"jsonContent\":\"eyJkaXN0YW5jIjoiIiwiaG91cnMiOiIiLCJtaW51dGVzIjoiIiwic3RheUhvdXJzIjoiIiwic3RheU1pbnV0ZXMiOiIiLCJsaXN0SW1hZ2UiOltdLCJkZXNjcmlwdGlvbiI6IjxwPlRvZGF5IHdpbGwgZGVwYXJ0IGZyb20gU2FuIEZyYW5jaXNjbyBhbmQgaGVhZCBlYXN0IHRvd2FyZHMgTmV2YWRhISBXZSBtYWtlIHRoZSBmaXJzdCBzaWdodHNlZWluZyBzdG9wIGF0IHRoZSBTYWNyYW1lbnRvIFN0YXRlIEhvdXNlIG9mIENhbGlmb3JuaWEuIEZvbGxvd2luZyB0aGF0IHdlIHdpbGwgZHJpdmUgb3ZlciB0byB0aGUgRG9ubmVyIFBhc3MgYW5kIGVuam95IHRoZSBkZXNlcnQgdmlld3MgYWxvbmcgdGhlIHdheSEgJm5ic3A7V2Ugd2lsbCBzcGVuZCB0aGUgbmlnaHQgaW4gRWxrbyBOZXZhZGEuPC9wPiIsInRpbWUiOiIxIiwiZGlzdGFuY1VuaXQiOjF9\"},{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":2,\"sortNumber\":1,\"jsonContent\":\"eyJpbmZvcm1hdGlvbiI6IlRyYXZlbCBmcm9tIFNhbiBGcmFuY2lzY28gdG8gU2FjcmFtZW50byIsImRpc3RhbmMiOiIxMDAiLCJkaXN0YW5jVW5pdCI6MywiaG91cnMiOiIxIiwibWludXRlcyI6IjQwIiwidGltZSI6IjIifQ==\"},{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":3,\"sortNumber\":2,\"jsonContent\":\"eyJjb250ZW50IjpbeyJhY3Rpdml0eU5vIjoxLCJ0eXBlIjowLCJzb3VyY2VUeXBlIjoyLCJzY2VuaWNDb2RlIjoiU00wMDAwMTcxMyIsInNjZW5pY05hbWUiOiJDYWxpZm9ybmlhIFN0YXRlIENhcGl0b2wgTXVzZXVtIiwic2NlbmljRXhwbGFpbiI6IiIsImlzQXBwZWFyYW5jZSI6MCwibG9hZGVkIjp0cnVlLCJzY2VuaWNlRGVzYyI6IjxwPlRoZSBDYWxpZm9ybmlhIFN0YXRlIENhcGl0b2wgTXVzZXVtIGNvbnNpc3RzIG9mIGEgbXVzZXVtIGluIGFuZCBncm91bmRzIGFyb3VuZCB0aGUgQ2FsaWZvcm5pYSBTdGF0ZSBDYXBpdG9sIGluIFNhY3JhbWVudG8sIENhbGlmb3JuaWEsIFVuaXRlZCBTdGF0ZXMuIFRoZSBidWlsZGluZyBoYXMgYmVlbiB0aGUgaG9tZSBvZiB0aGUgQ2FsaWZvcm5pYSBTdGF0ZSBMZWdpc2xhdHVyZSBzaW5jZSAxODY5LiBUaGUgU3RhdGUgQ2FwaXRvbCBNdXNldW0gaGFzIGJlZW4gYSBwcm9wZXJ0eSBpbiB0aGUgQ2FsaWZvcm5pYSBTdGF0ZSBQYXJrcyBzeXN0ZW0gc2luY2UgMTk4Mi48L3A+Iiwic2NlbmljSW1hZ2VzIjpbXX1dLCJkaXN0YW5jIjoiIiwiZGlzdGFuY1VuaXQiOjEsImhvdXJzIjoiIiwibWludXRlcyI6IiIsInN0YXlIb3VycyI6IiIsInN0YXlNaW51dGVzIjoiIiwidGltZSI6IjIifQ==\"},{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":2,\"sortNumber\":3,\"jsonContent\":\"eyJpbmZvcm1hdGlvbiI6IlRyYXZlbCBieSBjYXIgZnJvbSBTYWNyYW1lbnRvIHRvIEVjY28uIiwiZGlzdGFuYyI6IjQyMCIsImRpc3RhbmNVbml0IjozLCJob3VycyI6IjYiLCJtaW51dGVzIjoiMzAiLCJ0aW1lIjoiMyJ9\"}],\"distributionFactor\":null}]}]}"
+              },
+              {
+                "contentMode": 0,
+                "productSortNum": null,
+                "relatedId": -1,
+                "relatedDay": -1,
+                "relatedName": "",
+                "contentType": 8,
+                "sortNumber": 1,
+                "jsonContent": "eyJjb250ZW50IjpbeyJhY3Rpdml0eU5vIjoxLCJzb3VyY2VUeXBlIjoyLCJob3RlbENvZGUiOiJITTAwMDAwNzA0IiwiaG90ZWxOYW1lIjoiUmFtYWRhIGJ5IFd5bmRoYW0gRWxrbyBIb3RlbCIsImxvYWRlZCI6dHJ1ZX0seyJhY3Rpdml0eU5vIjoyLCJzb3VyY2VUeXBlIjoyLCJob3RlbENvZGUiOiJITTAwMDAxODgzIiwiaG90ZWxOYW1lIjoiU3VyZVN0YXkgQnkgQmVzdCBXZXN0ZXJuIFdlbGxzIiwibG9hZGVkIjp0cnVlfSx7ImFjdGl2aXR5Tm8iOjMsInNvdXJjZVR5cGUiOjIsImhvdGVsQ29kZSI6IkhNMDAwMDA0OTIiLCJob3RlbE5hbWUiOiJzaW1pbGFyIiwibG9hZGVkIjp0cnVlfV0sInJlZ2lvbk5hbWUiOiIiLCJyZWdpb25Db2RlIjoiIiwicmVnaW9uVHlwZSI6MiwiZGVzY3JpcHRpb24iOm51bGwsInRpbWUiOiI0IiwiY3VzdG9tZXJWaXNpYmxlIjoxLCJyZWdpb25DdXN0b21lclZpc2libGUiOjF9"
+              }
+            ],
+            "isFreeTravel": null,
+            "optionalProductList": null,
+            "distributionFactor": 12
+          },
+          {
+            "section": "West Yellowstone|||1+++Yellowstone National Park|||1+++Grand Teton National Park|||1+++Jackson|||1+++Pocatello",
+            "todayLocation": "",
+            "dayNumber": 3,
+            "content": [
+              {
+                "contentMode": 3,
+                "productSortNum": null,
+                "relatedId": 3816,
+                "relatedDay": 1,
+                "relatedName": "【YG7-3】西黃石 - 黃石國家公園 - 大提頓國家公園 - 傑克遜 - 波特卡洛",
+                "contentType": 100,
+                "sortNumber": 0,
+                "jsonContent": "{\"travelId\":3816,\"productCategory\":1,\"name\":\"【YG7-3】西黃石 - 黃石國家公園 - 大提頓國家公園 - 傑克遜 - 波特卡洛\",\"productType\":\"PC00000067\",\"isAutoTeam\":null,\"expandList\":[{\"language\":3,\"isSource\":0,\"dayList\":[{\"section\":\"West Yellowstone|||1+++Yellowstone National Park|||1+++Grand Teton National Park|||1+++Jackson|||1+++Pocatello\",\"todayLocation\":\"\",\"dayNumber\":1,\"content\":[{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":7,\"sortNumber\":0,\"jsonContent\":\"eyJkaXN0YW5jIjoiIiwiZGlzdGFuY1VuaXQiOjEsImhvdXJzIjoiIiwibWludXRlcyI6IiIsInN0YXlIb3VycyI6IiIsInN0YXlNaW51dGVzIjoiIiwibGlzdEltYWdlIjpbXSwiZGVzY3JpcHRpb24iOiI8cD5Ub2RheSB3ZSB3aWxsIGNvbnRpbnVlIHRvIGV4cGxvcmUgWWVsbG93c3RvbmUgTmF0aW9uYWwgUGFyayB0aGlzIG1vcm5pbmchIEFmdGVyd2FyZHMsIHdlIHRyYXZlbCBhbG9uZyB0aGUgU25ha2UgUml2ZXIgYW5kIGFycml2ZSBhdCBHcmFuZCBUZXRvbiBOYXRpb25hbCBQYXJrLCB3aGVyZSB3ZSBzZWUgbmF0dXJlJnJzcXVvO3MgdHJ1ZSB3b25kZXJzIHdpdGggYW4gYW1hemluZyB2aWV3LiBGb2xsb3dpbmcsIHdlIHdpbGwgZHJpdmUgdG8gSmFja3NvbiwgYSBmYW1vdXMgY293Ym95IHRvd24gYXMgd2VsbCBhcyBhIHdvcmxkJnJzcXVvO3MgcmVub3duZWQgdmFjYXRpb24gZGVzdGluYXRpb24uIEJlIHN1cmUgdG8gdmlzaXQgdGhlIEphY2tzb24gVG93biBTcXVhcmUgd2l0aCBFbGsgQW50bGVyIEFyY2hlcyB3aGljaCBpcyBsb2NhdGVkIGluIHRoZSBjZW50ZXIgb2YgSmFja3NvbiEmbmJzcDs8L3A+XG48cD4mbmJzcDs8L3A+XG48cD48c3Ryb25nPkl0aW5lcmFyeTo8L3N0cm9uZz48L3A+XG48cD48c3Ryb25nPldlc3QgWWVsbG93c3RvbmUgJnJhcnI7IFllbGxvd3N0b25lIE5hdGlvbmFsIFBhcmsgPC9zdHJvbmc+KE1hbmRhdG9yeSwgNSBob3VycywgSGVhZCB0byB2aXNpdCBOb3JyaXMgR2V5c2VyIEJhc2luLCBVcHBlciBGYWxscywgQXJ0aXN0J3MgUG9pbnQsIFdlc3QgVGh1bWIgR2V5c2VyIGFuZCBvdGhlciBhdHRyYWN0aW9ucy4gUGFzc2luZyBieSBIYXlkZW4gVmFsbGV5LCBNdWQgVm9sY2FubywgRmlzaGluZyBCcmlkZ2UuIFRoZSBhcnJhbmdlbWVudCBvZiBhdHRyYWN0aW9ucyB3aWxsIGJlIGFkanVzdGVkIGFjY29yZGluZyB0byB0aGUgYWN0dWFsIHNpdHVhdGlvbiBvZiB0aGUgZGF5KSAmcmFycjsgPHN0cm9uZz5HcmFuZCBUZXRvbiBOYXRpb25hbCBQYXJrIDwvc3Ryb25nPihNYW5kYXRvcnksJm5ic3A7NjAgbWlucykgJnJhcnI7PHN0cm9uZz4gSmFja3NvbiAmcmFycjsgSmFja3NvbiBUb3duIFNxdWFyZSB3aXRoIEVsayBBbnRsZXIgQXJjaGVzPC9zdHJvbmc+Jm5ic3A7KDMwIG1pbnMpIDxzdHJvbmc+JnJhcnI7IFBvY2F0ZWxsbzwvc3Ryb25nPjwvcD5cbjxwPiZuYnNwOzwvcD5cbjxwPjxzdHJvbmc+S2luZGx5IFJlbWluZGVyOiA8L3N0cm9uZz48L3A+XG48cD4xLiBCZWZvcmUgdGhlIFNvdXRoIEVudHJhbmNlIG9mIFllbGxvd3N0b25lIG9wZW5zIG9uIE1heSAxMHRoLCBzb21lIGF0dHJhY3Rpb25zIGluIFllbGxvd3N0b25lIG1heSBiZSBjbG9zZWQgZHVlIHRvIHNub3cgYW5kIHdlYXRoZXIgY29uZGl0aW9ucy4gQWRkaXRpb25hbCBzdG9wcyB3aWxsIGJlIHJlcGxhY2VkIGFjY29yZGluZyB0byB3ZWF0aGVyIGFuZCByb2FkIGNvbmRpdGlvbnMuJm5ic3A7PC9wPlxuPHA+Mi4gVGhlIEVhc3QgR2F0ZSBvZiBZZWxsb3dzdG9uZSBOYXRpb25hbCBQYXJrIGlzIGV4cGVjdGVkIHRvIG9wZW4gb24gMDUvMDIvMjAyNi4gQmVmb3JlIHRoYXQsIHRoZSBmb2xsb3dpbmcgYXR0cmFjdGlvbnM6IFVwcGVyIGFuZCBMb3dlciBGYWxscywgQXJ0aXN0IFBvaW50LCBIYXlkZW4gQ2FueW9uLCBNdWQgVm9sY2FubywgRmlzaGluZyBCcmlkZ2UsIFdlc3QgVGh1bWIgR2V5c2VyIHdpbGwgbm90IGJlIGFjY2Vzc2libGUuIFBsZWFzZSB1bmRlcnN0YW5kLiZuYnNwOzxiciAvPjMuIFRoZSBTb3V0aCBHYXRlIG9mIFllbGxvd3N0b25lIE5hdGlvbmFsIFBhcmsgaXMgZXhwZWN0ZWQgdG8gb3BlbiBvbiAwNS8xMC8yMDI2LiBUaGVyZWZvcmUsIFdlc3QgVGh1bWIgR2V5c2VyIHdpbGwgbm90IGJlIGFjY2Vzc2libGUgZnJvbSAwNS8wMi8yMDI2IHRvIDA1LzA5LzIwMjYuIFBsZWFzZSB1bmRlcnN0YW5kLjwvcD4iLCJ0aW1lIjoiMSJ9\"},{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":3,\"sortNumber\":1,\"jsonContent\":\"eyJ0aW1lIjoiMiIsImRpc3RhbmMiOiIiLCJob3VycyI6IiIsIm1pbnV0ZXMiOiIiLCJzdGF5SG91cnMiOiIiLCJzdGF5TWludXRlcyI6IiIsInJlZ2lvbkNvZGUiOm51bGwsInJlZ2lvbk5hbWUiOm51bGwsInJlZ2lvblR5cGUiOm51bGwsImNvbnRlbnQiOlt7InR5cGUiOjAsInNvdXJjZVR5cGUiOjIsInNjZW5pY0NvZGUiOiJTTTAwMDAwMjk3Iiwic2NlbmljTmFtZSI6IlllbGxvd3N0b25lIE5hdGlvbmFsIFBhcmsiLCJzY2VuaWNFeHBsYWluIjoiIiwiaXNBcHBlYXJhbmNlIjowLCJsb2FkZWQiOnRydWUsInNjZW5pY2VEZXNjIjoiPHA+TG9jYXRlZCBpbiB0aGUgUm9ja3kgTW91bnRhaW5zLCBrbm93biBhcyB0aGUgXCJiYWNrYm9uZSBvZiBBbWVyaWNhXCIsIGl0IGlzIGxvY2F0ZWQgb24gdGhlIGxhdmEgcGxhdGVhdSBiZXR3ZWVuIHRoZSBOb3J0aGVybiBSb2NraWVzIGFuZCB0aGUgQ2VudHJhbCBSb2NraWVzIGluIHRoZSB3ZXN0ZXJuIFVuaXRlZCBTdGF0ZXMuIFRoZSBnZW90aGVybWFsIHdvbmRlcnMgYXJlIGl0cyBoYWxsbWFyaywgYSBwcmltaXRpdmUgbGFuZHNjYXBlIG9mIHRoZSBlYXJ0aCBmb3JnZWQgYnkgd2F0ZXIgYW5kIGZpcmUuIFRoZSBuYXR1cmFsIGxhbmRzY2FwZSBpbiB0aGUgcGFyayBpcyBkaXZpZGVkIGludG8gZml2ZSBtYWpvciBhcmVhcywgbmFtZWx5IHRoZSBNYW1tb3RoIEFyZWEsIHRoZSBSb29zZXZlbHQgQXJlYSwgdGhlIENhbnlvbiBBcmVhLCB0aGUgR2V5c2VyIEFyZWEgYW5kIHRoZSBMYWtlIEFyZWEsIGVhY2ggd2l0aCBpdHMgb3duIGNoYXJhY3RlcmlzdGljcy4gSXQgZXhjZWVkcyB0aGUgbGltaXRzIG9mIGh1bWFuIGFydCBhbmQgaXMgdGhlIG1vc3Qgd29uZGVyZnVsIGFuZCBzcGVjdGFjdWxhciBzY2VuZXJ5IG9uIHRoZSBzdXJmYWNlIG9mIHRoZSBlYXJ0aC48L3A+Iiwic2NlbmljSW1hZ2VzIjpbXX0seyJ0eXBlIjoyLCJzb3VyY2VUeXBlIjoyLCJzY2VuaWNDb2RlIjoiU00wMDAwMTM1MyIsInNjZW5pY05hbWUiOiJZZWxsb3dzdG9uZSBOb3JyaXMgR2V5c2VyIEJhc2luIiwic2NlbmljRXhwbGFpbiI6IiIsImlzQXBwZWFyYW5jZSI6MCwibG9hZGVkIjp0cnVlLCJzY2VuaWNlRGVzYyI6IjxwPk5vcnJpcyBHZXlzZXIgQmFzaW4sIG5hbWVkIGFmdGVyIGFuIGVhcmx5IFllbGxvd3N0b25lIFN1cGVyaW50ZW5kZW50LCBtYXkgYmUgdGhlIGhvdHRlc3QgZ2V5c2VyIGJhc2luIGluIFllbGxvd3N0b25lLiBUaGUgc3RhcmssIGJhcnJlbiBsYW5kc2NhcGUgb2YgUG9yY2VsYWluIEJhc2luIGlzIHRoZSByZXN1bHQgb2YgdGhlIGFjaWRpYyBlbnZpcm9ubWVudC4gRHVlIHRvIHRoZSBob3N0aWxlIGNvbmRpdGlvbiBwbGFudHMsIGFsZ2FlIGFuZCBiYWN0ZXJpYSBoYXZlIGRpZmZpY3VsdHkgaW4gZXN0YWJsaXNoaW5nIHRoZW1zZWx2ZXMuIEluc3RlYWQsIHRoZSBiYXNpbiBkZXJpdmVzIGl0cyBjb2xvcnMgZnJvbSBtaW5lcmFsIG94aWRlcywgaW4gc3BlY3RydW1zIG9mIHBpbmssIHJlZCwgb3JhbmdlIChpcm9uIG94aWRlcykgYW5kIHllbGxvdyAoc3VsZnVyIGFuZCBpcm9uIHN1bGZhdGVzKS4gVGhlIGxhcmdlc3QgZ2V5c2VyIGluIHRoZSB3b3JsZCBpcyBsb2NhdGVkIGhlcmUuIFN0ZWFtYm9hdCBHZXlzZXIgaGFzIGxvbmcgcGVyaW9kcyBvZiBkb3JtYW5jeSwgYnV0IHdoZW4gaXQgZG9lcyBlcnVwdCBpdCBzZW5kcyBqZXRzIG9mIHdhdGVyIG5lYXJseSAzODAgZmVldCBoaWdoIGluIGEgc3BlY3RhY3VsYXIgZGlzcGxheS48L3A+Iiwic2NlbmljSW1hZ2VzIjpbXX0seyJ0eXBlIjoyLCJzb3VyY2VUeXBlIjoyLCJzY2VuaWNDb2RlIjoiU00wMDAwMDI5OSIsInNjZW5pY05hbWUiOiJVcHBlciBZZWxsb3dzdG9uZSBGYWxscyIsInNjZW5pY0V4cGxhaW4iOiIiLCJpc0FwcGVhcmFuY2UiOjAsImxvYWRlZCI6dHJ1ZSwic2NlbmljZURlc2MiOiI8cD5UaGUgVXBwZXIgRmFsbHMgaXMgbG9jYXRlZCA0MDAgbWV0ZXJzIHVwc3RyZWFtIG9mIHRoZSBsYXJnZXIgWWVsbG93c3RvbmUgRmFsbHMuIFRoZSB3YXRlcmZhbGwgZmFsbHMgdmVydGljYWxseSBhbG9uZyB0aGUgdm9sY2FuaWMgY2xpZmYgd2l0aCBhIGRyb3Agb2YgMzMgbWV0ZXJzLiBUaGUgb3JpZ2luYWxseSB1bmV2ZW4gdm9sY2FuaWMgcm9ja3MgYmVsb3cgdGhlIHdhdGVyZmFsbCBoYXZlIGJlZW4gZXJvZGVkIGJ5IHRoZSB3YXRlcmZhbGwgZm9yIGh1bmRyZWRzIG9mIHllYXJzIGFuZCBoYXZlIGJlY29tZSB2ZXJ5IHNtb290aC48L3A+Iiwic2NlbmljSW1hZ2VzIjpbXX0seyJ0eXBlIjoyLCJzb3VyY2VUeXBlIjoyLCJzY2VuaWNDb2RlIjoiU00wMDAwMDQyNyIsInNjZW5pY05hbWUiOiJBcnRpc3QgUG9pbnQiLCJzY2VuaWNFeHBsYWluIjoiIiwiaXNBcHBlYXJhbmNlIjowLCJsb2FkZWQiOnRydWUsInNjZW5pY2VEZXNjIjoiPHA+VGhlIHNjZW5lcnkgaGVyZSBpcyBwYXJ0aWN1bGFybHkgc3BlY3RhY3VsYXIuIFRoZSBjYW55b24gaXMgbW9yZSB0aGFuIDMwMCBmZWV0IGRlZXAuIFRoZSBjYW55b24gd2FsbHMgYXJlIG1haW5seSB5ZWxsb3csIG1peGVkIHdpdGggYmxhY2ssIHJlZCBhbmQgcGluaywgYW5kIGNsdXN0ZXJzIG9mIGdyZWVuIHBpbmUgdHJlZXMuIFRoZXNlIGNvbG9ycyBhcmUgbWl4ZWQgYnV0IG5vdCBjaGFvdGljLCBsb29raW5nIGxpa2UgYSBwZWFjb2NrJ3MgdGFpbCwgYW5kIGFsc28gbGlrZSB0aGUgcG9pbnRpbGxpc20gb2YgYSByb21hbnRpYyBwYWludGVyIHdobyBhcHBsaWVkIHNldmVyYWwgbGF5ZXJzIG9mIGNvbG9yIGluIHRoZSBzYW1lIHBsYWNlLjwvcD4iLCJzY2VuaWNJbWFnZXMiOltdfSx7InR5cGUiOjIsInNvdXJjZVR5cGUiOjIsInNjZW5pY0NvZGUiOiJTTTAwMDAwMzAzIiwic2NlbmljTmFtZSI6Ik11ZCBWb2xjYW5vIEFyZWEiLCJzY2VuaWNFeHBsYWluIjoiIiwiaXNBcHBlYXJhbmNlIjowLCJsb2FkZWQiOnRydWUsInNjZW5pY2VEZXNjIjoiPHA+TG9jYXRlZCBpbiB0aGUgZWFzdGVybiBwYXJ0IG9mIFllbGxvd3N0b25lIE5hdGlvbmFsIFBhcmssIG5vdCBmYXIgZnJvbSB0aGUgbm9ydGhlcm4gcGFydCBvZiBZZWxsb3dzdG9uZSBMYWtlLiBNb3N0IG9mIHRoZSBmb3VudGFpbnMgaGVyZSBkbyBub3Qgc3ByYXkgd2F0ZXIsIGJ1dCBtdWQsIGFuZCBldmVyeSB0aW1lIHRoZXkgZXJ1cHQsIHRoZSBncm91bmQgc2hha2VzLiBOZXh0IHRvIHRoZSBtdWQgdm9sY2FubywgdGhlcmUgYXJlIGNvbG9yZnVsIGdyYXNzZXMgdGhhdCBsb29rIGV4dHJlbWVseSB0ZW5kZXIgYW5kIGdvcmdlb3VzLjwvcD4iLCJzY2VuaWNJbWFnZXMiOltdfSx7InR5cGUiOjIsInNvdXJjZVR5cGUiOjIsInNjZW5pY0NvZGUiOiJTTTAwMDAwNDI2Iiwic2NlbmljTmFtZSI6Ildlc3QgVGh1bWIgR2V5c2VyIEJhc2luIiwic2NlbmljRXhwbGFpbiI6IiIsImlzQXBwZWFyYW5jZSI6MCwibG9hZGVkIjp0cnVlLCJzY2VuaWNlRGVzYyI6IjxwPlRoZSBXZXN0IFRodW1iIEdleXNlciBCYXNpbiwgbG9jYXRlZCBvbiB0aGUgZWRnZSBvZiBZZWxsb3dzdG9uZSBMYWtlLCB3YXMgZm9ybWVkIDE1MCwwMDAgeWVhcnMgYWdvIGJ5IHRoZSBjb2xsYXBzZSBvZiB0aGUgZWFydGgncyBjcnVzdC4gVGhlIGNvbWJpbmF0aW9uIG9mIGhvdCBzcHJpbmdzIGFuZCBsYWtlIHdhdGVyIGhhcyBjcmVhdGVkIGEgd29uZGVyZnVsIG1pc3R5IGxhbmRzY2FwZTogdGhlIG1pc3R5IGFyZWEgaXMgdGhlIHN0ZWFtIG9mIGhvdCBzcHJpbmdzLCBhbmQgdGhlIGdyZWVuIHdhdmVzIGFyZSB0aGUgd2F0ZXIgb2YgWWVsbG93c3RvbmUgTGFrZSwgd2hpY2ggY29tcGxlbWVudHMgdGhlIGJsdWUgc2t5IGFuZCB3aGl0ZSBjbG91ZHMgaW4gdGhlIGJhY2tncm91bmQsIGZvcm1pbmcgYSBsYW5kc2NhcGUgZGlmZmVyZW50IGZyb20gb3RoZXIgaG90IHNwcmluZyBhcmVhcyBpbiBZZWxsb3dzdG9uZS4gVGhpcyBhcmVhIGlzIGVxdWl2YWxlbnQgdG8gdGhlIGJheSBvZiBZZWxsb3dzdG9uZSBMYWtlLCB3aGVyZSBtYW55IGdleXNlcnMgZ2F0aGVyLiBUaGUgY29sb3JzIG9mIHRoZSB3YXRlciBvdXRsZXRzIHZhcnksIHNvbWUgYXJlIHRyYW5zcGFyZW50IGdyZWVuLCBhbmQgc29tZSBhcmUgZGFyayBibGFjayBsaWtlIGNlbWVudC4gTWFueSB3YXRlciBvdXRsZXRzIHByZXNlbnQgYSBiZWF1dGlmdWwgZmFudGFzeS48L3A+Iiwic2NlbmljSW1hZ2VzIjpbXX1dLCJ0eXBlIjpudWxsLCJkZXNjcmlwdGlvbiI6bnVsbCwiYXZlUHJpY2UiOm51bGx9\"},{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":2,\"sortNumber\":2,\"jsonContent\":\"eyJpbmZvcm1hdGlvbiI6IkRyaXZlIGZyb20gWWVsbG93c3RvbmUgTmF0aW9uYWwgUGFyayB0byBHcmFuZCBUZXRvbiBOYXRpb25hbCBQYXJrIiwiZGlzdGFuYyI6IjIwMCIsImRpc3RhbmNVbml0IjozLCJob3VycyI6IjQiLCJtaW51dGVzIjoiIiwidGltZSI6IjMifQ==\"},{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":3,\"sortNumber\":3,\"jsonContent\":\"eyJ0aW1lIjoiMyIsImRpc3RhbmMiOiIiLCJob3VycyI6IiIsIm1pbnV0ZXMiOiIiLCJzdGF5SG91cnMiOiIiLCJzdGF5TWludXRlcyI6IiIsInJlZ2lvbkNvZGUiOm51bGwsInJlZ2lvbk5hbWUiOm51bGwsInJlZ2lvblR5cGUiOm51bGwsImNvbnRlbnQiOlt7InR5cGUiOjAsInNvdXJjZVR5cGUiOjIsInNjZW5pY0NvZGUiOiJTTTAwMDAwMzA1Iiwic2NlbmljTmFtZSI6IkdyYW5kIFRldG9uIE5hdGlvbmFsIFBhcmsiLCJzY2VuaWNFeHBsYWluIjoiIiwiaXNBcHBlYXJhbmNlIjowLCJsb2FkZWQiOnRydWUsInNjZW5pY2VEZXNjIjoiPHA+R3JhbmQgVGV0b24gTmF0aW9uYWwgUGFyayB3YXMgZXN0YWJsaXNoZWQgb24gRmVicnVhcnkgMjYsIDE5MjkuIFRoZXJlIGFyZSAzMDAga2lsb21ldGVycyBvZiB0cmFpbHMgaW4gR3JhbmQgVGV0b24gTmF0aW9uYWwgUGFyay4gVGhlcmUgYXJlIG1hbnkgbGFrZXMgaW4gdGhlIHBhcmssIGluY2x1ZGluZyBKYWNrc29uIExha2UgYW5kIEplbm55IExha2UuIE1vc3Qgb2YgdGhlIGFyZWEgb2YgR3JhbmQgVGV0b24gTmF0aW9uYWwgUGFyayBpcyBsb2NhdGVkIGluIHRoZSBSb2NreSBNb3VudGFpbnMsIGFuZCB0aGUgbmF0dXJhbCBzY2VuZXJ5IGlzIHZlcnkgbWFnbmlmaWNlbnQuIEluIGFkZGl0aW9uLCBHcmFuZCBUZXRvbiBOYXRpb25hbCBQYXJrIGFsc28gaGFzIGV4dHJlbWVseSByaWNoIGJpb2xvZ2ljYWwgcmVzb3VyY2VzLCBpbmNsdWRpbmcgQW1lcmljYW4gYmlzb24sIGdyaXp6bHkgYmVhcnMsIGJsYWNrIGJlYXJzLCBtb29zZSwgZXRjLjwvcD4iLCJzY2VuaWNJbWFnZXMiOltdfSx7InR5cGUiOjIsInNvdXJjZVR5cGUiOjIsInNjZW5pY0NvZGUiOiJTTTAwMDAwMjc5Iiwic2NlbmljTmFtZSI6IkphY2tzb24gVG93biBTcXVhcmUgd2l0aCBFbGsgQW50bGVyIEFyY2hlcyIsInNjZW5pY0V4cGxhaW4iOiIiLCJpc0FwcGVhcmFuY2UiOjAsImxvYWRlZCI6dHJ1ZSwic2NlbmljZURlc2MiOiI8cD5UaGUgcGFyayBpcyBub3QgYmlnLCBidXQgdGhlcmUgYXJlIGdpYW50IGFyY2hlcyBtYWRlIG9mIGRlZXIgYW50bGVycyBpbiB0aGUgZm91ciBkaXJlY3Rpb25zIG9mIGVhc3QsIHdlc3QsIHNvdXRoIGFuZCBub3J0aC4gVGhlIGFudGxlcnMgYXJlIGFsbCBzaGFycCwgYnV0IHRoZXkgYXJlIG5vdCBvYnRhaW5lZCBieSBodW50aW5nLiBFdmVyeSB3aW50ZXIsIGEgbGFyZ2UgbnVtYmVyIG9mIGVsayBjb21lIGZyb20gdGhlIG1vdW50YWlucyB0byB0aGUgXCJOYXRpb25hbCBFbGsgUmVmdWdlXCIgaW4gSmFja3NvbiB0byBzcGVuZCB0aGUgd2ludGVyLiBJbiB0aGUgc3ByaW5nLCB0aGUgYW50bGVycyBmYWxsIG9mZiBuYXR1cmFsbHkgYW5kIGFyZSByZXBsYWNlZC4gQWZ0ZXIgdGhlIGVsayBsZWF2ZSwgY291bnRsZXNzIHRyZWFzdXJlcyBhcmUgbGVmdCBldmVyeXdoZXJlLjwvcD4iLCJzY2VuaWNJbWFnZXMiOltdfV0sInR5cGUiOm51bGwsImRlc2NyaXB0aW9uIjpudWxsLCJhdmVQcmljZSI6bnVsbCwiZGlzdGFuY1VuaXQiOjF9\"},{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":2,\"sortNumber\":4,\"jsonContent\":\"eyJpbmZvcm1hdGlvbiI6IlRyYXZlbCBmcm9tIEphY2tzb24gdG8gUG9jYXRlbGxvICAgIiwiZGlzdGFuYyI6IjcwIiwiZGlzdGFuY1VuaXQiOjMsImhvdXJzIjoiMSIsIm1pbnV0ZXMiOiIyMCIsInRpbWUiOiIzIn0=\"}],\"distributionFactor\":null}]}]}"
+              },
+              {
+                "contentMode": 0,
+                "productSortNum": null,
+                "relatedId": -1,
+                "relatedDay": -1,
+                "relatedName": "",
+                "contentType": 8,
+                "sortNumber": 1,
+                "jsonContent": "eyJ0aW1lIjoiNCIsImRpc3RhbmMiOm51bGwsImhvdXJzIjpudWxsLCJtaW51dGVzIjpudWxsLCJzdGF5SG91cnMiOm51bGwsInN0YXlNaW51dGVzIjpudWxsLCJyZWdpb25Db2RlIjoiIiwicmVnaW9uTmFtZSI6IiIsInJlZ2lvblR5cGUiOjIsImNvbnRlbnQiOlt7InNvdXJjZVR5cGUiOjIsImhvdGVsQ29kZSI6IkhNMDAwMDExNTAiLCJob3RlbE5hbWUiOiJMYSBRdWludGEgYnkgV3luZGhhbSBQb2NhdGVsbG8iLCJob3RlbEFkZHIiOm51bGwsImhvdGVsRW1haWwiOm51bGwsImhvdGVsTGlua01hbiI6bnVsbCwiaG90ZWxMaW5rV2F5IjpudWxsLCJsb2FkZWQiOnRydWUsImFjdGl2aXR5Tm8iOjF9LHsic291cmNlVHlwZSI6MiwiaG90ZWxDb2RlIjoiSE0wMDAwMDQ5MiIsImhvdGVsTmFtZSI6InNpbWlsYXIiLCJob3RlbEFkZHIiOm51bGwsImhvdGVsRW1haWwiOm51bGwsImhvdGVsTGlua01hbiI6bnVsbCwiaG90ZWxMaW5rV2F5IjpudWxsLCJsb2FkZWQiOnRydWUsImFjdGl2aXR5Tm8iOjF9XSwidHlwZSI6bnVsbCwiZGVzY3JpcHRpb24iOm51bGwsImF2ZVByaWNlIjpudWxsLCJjdXN0b21lclZpc2libGUiOjEsInJlZ2lvbkN1c3RvbWVyVmlzaWJsZSI6MX0="
+              }
+            ],
+            "isFreeTravel": null,
+            "optionalProductList": null,
+            "distributionFactor": 15
+          },
+          {
+            "section": "Pocatello|||1+++Salt Lake City|||1+++Canyonlands National Park|||1+++Green River",
+            "todayLocation": "",
+            "dayNumber": 4,
+            "content": [
+              {
+                "contentMode": 3,
+                "productSortNum": null,
+                "relatedId": 3817,
+                "relatedDay": 1,
+                "relatedName": "【YG7-4】波特卡洛 - 鹽湖城 - 綠河",
+                "contentType": 100,
+                "sortNumber": 0,
+                "jsonContent": "{\"travelId\":3817,\"productCategory\":1,\"name\":\"【YG7-4】波特卡洛 - 鹽湖城 - 綠河\",\"productType\":\"PC00000067\",\"isAutoTeam\":null,\"expandList\":[{\"language\":3,\"isSource\":0,\"dayList\":[{\"section\":\"Pocatello|||1+++Salt Lake City|||1+++Canyonlands National Park|||1+++Green River\",\"todayLocation\":\"\",\"dayNumber\":1,\"content\":[{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":4,\"sortNumber\":0,\"jsonContent\":\"eyJjb250ZW50IjpbeyJzb3VyY2VUeXBlIjoyLCJyZXN0YXVyYW50TmFtZSI6IkJyZWFrZmFzdCBJbmNsdWRlZCIsInJlc3RhdXJhbnRDb2RlIjoiUkMwMDAwMDA2MiIsInJlc3RhdXJhbnRSZW1hcmsiOiIiLCJpc1BheVNlbGYiOmZhbHNlLCJhdmdQcmljZSI6IiIsImxpc3RJbWFnZSI6W10sImxvYWRlZCI6dHJ1ZX1dLCJ0eXBlIjoxLCJkaXN0YW5jIjoiIiwiaG91cnMiOiIiLCJtaW51dGVzIjoiIiwic3RheUhvdXJzIjoiIiwic3RheU1pbnV0ZXMiOiIiLCJkZXNjcmlwdGlvbiI6IiIsInRpbWUiOiIyIiwiYXZnUHJpY2UiOiIiLCJkaXN0YW5jVW5pdCI6MX0=\"},{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":7,\"sortNumber\":1,\"jsonContent\":\"eyJkaXN0YW5jIjoiIiwiaG91cnMiOiIiLCJtaW51dGVzIjoiIiwic3RheUhvdXJzIjoiIiwic3RheU1pbnV0ZXMiOiIiLCJsaXN0SW1hZ2UiOltdLCJkZXNjcmlwdGlvbiI6IjxwPk9uIHRoaXMgbG92ZWx5IG1vcm5pbmcsIHdlIHdpbGwgZGVwYXJ0IGZvciB0aGUgR3JlYXQgU2FsdCBMYWtlIFN0YXRlIE1hcmluYSB3aGljaCBpcyBhbHNvIGtub3duIGFzICZsZHF1bztBbWVyaWNhJnJzcXVvO3MgRGVhZCBTZWEuJnJkcXVvOyBGb2xsb3dpbmcsIHdlIHdpbGwgZHJpdmUgdG8gQ2FwaXRvbCBIaWxsIGFuZCB2aXNpdCB0aGUgbW9zdCBleHBlbnNpdmUgYW5kIG1hZ25pZmljZW50IFN0YXRlIEhvdXNlIGluIEFtZXJpY2EsIHRoZSBVdGFoIFN0YXRlIENhcGl0b2whIFRoZW4sIHdlIHdpbGwgdGFrZSBhIHdhbGsgaW4gdGhlIFN0YXRlIENhcGl0b2wgYnVpbGRpbmcsIHRvIGV4cGxvcmUgdGhlIGFyY2hpdGVjdHVyZSwgc2N1bHB0dXJlcyBhbmQgdGhlIHJpY2ggaGlzdG9yeSBiZWhpbmQgaXQuIEluIGFkZGl0aW9uLCB3ZSB3aWxsIGV4cGxvcmUgVGVtcGxlIFNxdWFyZSEgSGVyZSwgd2Ugd2lsbCBmb2xsb3cgdGhlIE1vcm1vbiBNaXNzaW9uYXJ5IHNpc3RlcnMmcnNxdW87IGxlYWQgYW5kIHNlZSB0aGUgdmlydHVlIGtpbmdkb20gb2YgTERTIGNodXJjaC4gV2Ugd2lsbCBsZWFybiBhbGwgYWJvdXQgdGhlIGhpc3RvcnkgYW5kIHRlYWNoaW5ncyBvZiB0aGUgTERTIENodXJjaC4gRmluYWxseSwgd2Ugd2lsbCBhcnJpdmUgYXQgQ2FueW9ubGFuZHMgTmF0aW9uYWwgUGFyay48L3A+XG48cD4mbmJzcDs8L3A+XG48cD48c3Ryb25nPkl0aW5lcmFyeTo8L3N0cm9uZz48L3A+XG48cD48c3Ryb25nPlBvY2F0ZWxsbyAmcmFycjsgR3JlYXQgU2FsdCBMYWtlPC9zdHJvbmc+IChNYW5kYXRvcnksIDIwIG1pbnMpICZyYXJyOyA8c3Ryb25nPlNhbHQgTGFrZSBDaXR5Jm5ic3A7JnJhcnI7IFV0YWggU3RhdGUgQ2FwaXRvbDwvc3Ryb25nPiAoMzAgbWlucykgJnJhcnI7PHN0cm9uZz4gVGVtcGxlIFNxdWFyZTwvc3Ryb25nPiAoNDAgbWlucyk8c3Ryb25nPiAmcmFycjsgQ2FueW9ubGFuZHMgTmF0aW9uYWwgUGFyayA8L3N0cm9uZz4oTWFuZGF0b3J5LCA2MCBtaW5zKSZuYnNwOyAmcmFycjsgPHN0cm9uZz5HcmVlbiBSaXZlcjwvc3Ryb25nPjwvcD4iLCJ0aW1lIjoiMSIsImRpc3RhbmNVbml0IjoxfQ==\"},{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":2,\"sortNumber\":2,\"jsonContent\":\"eyJpbmZvcm1hdGlvbiI6IkRyaXZlIGZyb20gUG9jYXRlbGxvIHRvIHRoZSBHcmVhdCBTYWx0IExha2UiLCJkaXN0YW5jIjoiMTYwIiwiZGlzdGFuY1VuaXQiOjMsImhvdXJzIjoiMiIsIm1pbnV0ZXMiOiIzMCIsInRpbWUiOiIyIn0=\"},{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":3,\"sortNumber\":3,\"jsonContent\":\"eyJ0aW1lIjoiMiIsImRpc3RhbmMiOiIiLCJob3VycyI6IiIsIm1pbnV0ZXMiOiIiLCJzdGF5SG91cnMiOiIiLCJzdGF5TWludXRlcyI6IiIsInJlZ2lvbkNvZGUiOm51bGwsInJlZ2lvbk5hbWUiOm51bGwsInJlZ2lvblR5cGUiOm51bGwsImNvbnRlbnQiOlt7InR5cGUiOjAsInNvdXJjZVR5cGUiOjIsInNjZW5pY0NvZGUiOiJTTTAwMDAxMzUyIiwic2NlbmljTmFtZSI6IkdyZWF0IFNhbHQgTGFrZSIsInNjZW5pY0V4cGxhaW4iOiIiLCJpc0FwcGVhcmFuY2UiOjAsImxvYWRlZCI6dHJ1ZSwic2NlbmljZURlc2MiOiI8cD5HcmVhdCBTYWx0IExha2UsIGxha2UgaW4gbm9ydGhlcm4gVXRhaCwgVS5TLiwgdGhlIGxhcmdlc3QgaW5sYW5kIGJvZHkgb2Ygc2FsdCB3YXRlciBpbiB0aGUgV2VzdGVybiBIZW1pc3BoZXJlIGFuZCBvbmUgb2YgdGhlIG1vc3Qgc2FsaW5lIGlubGFuZCBib2RpZXMgb2Ygd2F0ZXIgaW4gdGhlIHdvcmxkLiBUaGUgbGFrZSBpcyBmZWQgYnkgdGhlIEJlYXIsIFdlYmVyLCBhbmQgSm9yZGFuIHJpdmVycyBhbmQgaGFzIG5vIG91dGxldC4gVGhlIGxha2UgaGFzIGZsdWN0dWF0ZWQgZ3JlYXRseSBpbiBzaXplLCBkZXBlbmRpbmcgb24gdGhlIHJhdGVzIG9mIGV2YXBvcmF0aW9uIGFuZCB0aGUgZmxvdyBvZiB0aGUgcml2ZXJzIHRoYXQgZmVlZCBpdC4gTGlrZSB0aGUgRGVhZCBTZWEsIHRoZSBHcmVhdCBTYWx0IExha2UgZXhpc3RzIHdpdGhpbiBhbiBhcmlkIGVudmlyb25tZW50IGFuZCBoYXMgY2hlbWljYWwgY2hhcmFjdGVyaXN0aWNzIGxpa2UgdGhhdCBvZiB0aGUgb2NlYW5zLiBIb3dldmVyLCBpdCBoYXMgYSBtdWNoIGdyZWF0ZXIgc2FsaW5pdHkgdGhhbiB0aGUgb2NlYW5zLCBzaW5jZSBuYXR1cmFsIGV2YXBvcmF0aW9uIGV4Y2VlZHMgdGhlIHN1cHBseSBvZiB3YXRlciBmcm9tIHRoZSByaXZlcnMgZmVlZGluZyB0aGUgbGFrZS48L3A+Iiwic2NlbmljSW1hZ2VzIjpbXX0seyJ0eXBlIjoyLCJzb3VyY2VUeXBlIjoyLCJzY2VuaWNDb2RlIjoiU00wMDAwMTI4MiIsInNjZW5pY05hbWUiOiJVdGFoIFN0YXRlIENhcGl0b2wiLCJzY2VuaWNFeHBsYWluIjoiIiwiaXNBcHBlYXJhbmNlIjowLCJsb2FkZWQiOnRydWUsInNjZW5pY2VEZXNjIjoiPHA+VGhlIFV0YWggU3RhdGUgQ2FwaXRvbCBpcyB0aGUgaG91c2Ugb2YgZ292ZXJubWVudCBmb3IgdGhlIFUuUy4gc3RhdGUgb2YgVXRhaC4gVGhlIGJ1aWxkaW5nIGhvdXNlcyB0aGUgY2hhbWJlcnMgYW5kIG9mZmljZXMgb2YgdGhlIFV0YWggU3RhdGUgTGVnaXNsYXR1cmUsIHRoZSBvZmZpY2VzIG9mIHRoZSBHb3Zlcm5vciwgTGlldXRlbmFudCBHb3Zlcm5vciwgQXR0b3JuZXkgR2VuZXJhbCwgdGhlIFN0YXRlIEF1ZGl0b3IgYW5kIHRoZWlyIHN0YWZmcy4gVGhlIGNhcGl0YWwgaXMgdGhlIG1haW4gYnVpbGRpbmcgb2YgdGhlIFV0YWggU3RhdGUgQ2FwaXRvbCBDb21wbGV4LCB3aGljaCBpcyBsb2NhdGVkIG9uIENhcGl0b2wgSGlsbCwgb3Zlcmxvb2tpbmcgZG93bnRvd24gU2FsdCBMYWtlIENpdHkuIFRoZSBOZW9jbGFzc2ljYWwgcmV2aXZhbCwgQ29yaW50aGlhbiBzdHlsZSBidWlsZGluZyB3YXMgZGVzaWduZWQgYnkgYXJjaGl0ZWN0IFJpY2hhcmQgSy5BLiBLbGV0dGluZyBhbmQgYnVpbHQgYmV0d2VlbiAxOTEyIGFuZCAxOTE2LiBUaGUgYnVpbGRpbmcgd2FzIGFkZGVkIHRvIHRoZSBOYXRpb25hbCBSZWdpc3RlciBvZiBIaXN0b3JpYyBQbGFjZXMgaW4gMTk3OC48L3A+Iiwic2NlbmljSW1hZ2VzIjpbXX0seyJ0eXBlIjoyLCJzb3VyY2VUeXBlIjoyLCJzY2VuaWNDb2RlIjoiU00wMDAwMTI4MyIsInNjZW5pY05hbWUiOiJUZW1wbGUgU3F1YXJlIiwic2NlbmljRXhwbGFpbiI6IiIsImlzQXBwZWFyYW5jZSI6MCwibG9hZGVkIjp0cnVlLCJzY2VuaWNlRGVzYyI6IjxwPlRlbXBsZSBTcXVhcmUgaXMgYSAxMC1hY3JlICg0LjAgaGEpIGNvbXBsZXgsIG93bmVkIGJ5IFRoZSBDaHVyY2ggb2YgSmVzdXMgQ2hyaXN0IG9mIExhdHRlci1kYXkgU2FpbnRzIChMRFMgQ2h1cmNoKSwgaW4gdGhlIGNlbnRlciBvZiBTYWx0IExha2UgQ2l0eS4gQ29udGFpbmVkIHdpdGhpbiBUZW1wbGUgU3F1YXJlIGFyZSB0aGUgU2FsdCBMYWtlIFRlbXBsZSwgU2FsdCBMYWtlIFRhYmVybmFjbGUsIFNhbHQgTGFrZSBBc3NlbWJseSBIYWxsLCB0aGUgU2VhZ3VsbCBNb251bWVudCwgYW5kIHR3byB2aXNpdG9ycycgY2VudGVycy4gVGhlIHNxdWFyZSB3YXMgZGVzaWduYXRlZCBhIE5hdGlvbmFsIEhpc3RvcmljIExhbmRtYXJrIERpc3RyaWN0IGluIDE5NjQsIHJlY29nbml6aW5nIHRoZSBNb3Jtb24gYWNoaWV2ZW1lbnQgaW4gdGhlIHNldHRsZW1lbnQgb2YgVXRhaC48L3A+Iiwic2NlbmljSW1hZ2VzIjpbXX1dLCJ0eXBlIjpudWxsLCJkZXNjcmlwdGlvbiI6bnVsbCwiYXZlUHJpY2UiOm51bGwsImRpc3RhbmNVbml0IjoxfQ==\"},{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":2,\"sortNumber\":4,\"jsonContent\":\"eyJpbmZvcm1hdGlvbiI6IkRyaXZlIGZyb20gU2FsdCBMYWtlIENpdHkgdG8gQ2FueW9ubGFuZHMgTmF0aW9uYWwgUGFyay4iLCJkaXN0YW5jIjoiMjUwIiwiZGlzdGFuY1VuaXQiOjMsImhvdXJzIjoiNCIsIm1pbnV0ZXMiOiIiLCJ0aW1lIjoiMyJ9\"},{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":3,\"sortNumber\":5,\"jsonContent\":\"eyJ0aW1lIjoiMyIsImRpc3RhbmMiOiIiLCJob3VycyI6IiIsIm1pbnV0ZXMiOiIiLCJzdGF5SG91cnMiOiIiLCJzdGF5TWludXRlcyI6IiIsInJlZ2lvbkNvZGUiOm51bGwsInJlZ2lvbk5hbWUiOm51bGwsInJlZ2lvblR5cGUiOm51bGwsImNvbnRlbnQiOlt7InR5cGUiOjAsInNvdXJjZVR5cGUiOjIsInNjZW5pY0NvZGUiOiJTTTAwMDAxMjczIiwic2NlbmljTmFtZSI6IkNhbnlvbmxhbmRzIE5hdGlvbmFsIFBhcmsiLCJzY2VuaWNFeHBsYWluIjoiIiwiaXNBcHBlYXJhbmNlIjowLCJsb2FkZWQiOnRydWUsInNjZW5pY2VEZXNjIjoiPHA+Q2FueW9ubGFuZHMgTmF0aW9uYWwgUGFyayBpcyBhbiBBbWVyaWNhbiBuYXRpb25hbCBwYXJrIGxvY2F0ZWQgaW4gc291dGhlYXN0ZXJuIFV0YWggbmVhciB0aGUgdG93biBvZiBNb2FiLiBUaGUgcGFyayBwcmVzZXJ2ZXMgYSBjb2xvcmZ1bCBsYW5kc2NhcGUgZXJvZGVkIGludG8gbnVtZXJvdXMgY2FueW9ucywgbWVzYXMsIGFuZCBidXR0ZXMgYnkgdGhlIENvbG9yYWRvIFJpdmVyLCB0aGUgR3JlZW4gUml2ZXIsIGFuZCB0aGVpciByZXNwZWN0aXZlIHRyaWJ1dGFyaWVzLiBXaGlsZSB0aGVzZSBhcmVhcyBzaGFyZSBhIHByaW1pdGl2ZSBkZXNlcnQgYXRtb3NwaGVyZSwgZWFjaCByZXRhaW5zIGl0cyBvd24gY2hhcmFjdGVyLiBUaGUgSXNsYW5kIGluIHRoZSBTa3kgbWVzYSByZXN0cyBvbiBzaGVlciBzYW5kc3RvbmUgY2xpZmZzIHRvd2VyaW5nIG92ZXIgMSwwMDAgZmVldCAoMzA0IG0pIGFib3ZlIHRoZSBzdXJyb3VuZGluZyB0ZXJyYWluLiBFdmVyeSBvdmVybG9vayBvZmZlcnMgYSBkaWZmZXJlbnQgcGVyc3BlY3RpdmUgb24gQ2FueW9ubGFuZHMnIHNwZWN0YWN1bGFyIGxhbmRzY2FwZS4gSXNsYW5kIGluIHRoZSBTa3kgaXMgdGhlIGVhc2llc3QgYXJlYSBvZiBDYW55b25sYW5kcyB0byB2aXNpdCBpbiBhIHNob3J0IHBlcmlvZCBvZiB0aW1lLCBvZmZlcmluZyBtYW55IHB1bGxvdXRzIHdpdGggc3BlY3RhY3VsYXIgdmlld3MgYWxvbmcgdGhlIHBhdmVkIHNjZW5pYyBkcml2ZS48L3A+Iiwic2NlbmljSW1hZ2VzIjpbXX1dLCJ0eXBlIjpudWxsLCJkZXNjcmlwdGlvbiI6bnVsbCwiYXZlUHJpY2UiOm51bGwsImRpc3RhbmNVbml0IjoxfQ==\"}],\"distributionFactor\":null}]}]}"
+              },
+              {
+                "contentMode": 0,
+                "productSortNum": null,
+                "relatedId": -1,
+                "relatedDay": -1,
+                "relatedName": "",
+                "contentType": 8,
+                "sortNumber": 1,
+                "jsonContent": "eyJ0aW1lIjoiNCIsImRpc3RhbmMiOm51bGwsImhvdXJzIjpudWxsLCJtaW51dGVzIjpudWxsLCJzdGF5SG91cnMiOm51bGwsInN0YXlNaW51dGVzIjpudWxsLCJyZWdpb25Db2RlIjoiIiwicmVnaW9uTmFtZSI6IiIsInJlZ2lvblR5cGUiOjIsImNvbnRlbnQiOlt7InNvdXJjZVR5cGUiOjIsImhvdGVsQ29kZSI6IkhNMDAwMDEyODEiLCJob3RlbE5hbWUiOiJGaXJzdCBDaG9pY2UgSW5ucyBhdCB0aGUgU3dlbGwiLCJob3RlbEFkZHIiOm51bGwsImhvdGVsRW1haWwiOm51bGwsImhvdGVsTGlua01hbiI6bnVsbCwiaG90ZWxMaW5rV2F5IjpudWxsLCJsb2FkZWQiOnRydWUsImFjdGl2aXR5Tm8iOjF9LHsic291cmNlVHlwZSI6MiwiaG90ZWxDb2RlIjoiSE0wMDAwMDQ5MiIsImhvdGVsTmFtZSI6InNpbWlsYXIiLCJob3RlbEFkZHIiOm51bGwsImhvdGVsRW1haWwiOm51bGwsImhvdGVsTGlua01hbiI6bnVsbCwiaG90ZWxMaW5rV2F5IjpudWxsLCJsb2FkZWQiOnRydWUsImFjdGl2aXR5Tm8iOjF9XSwidHlwZSI6bnVsbCwiZGVzY3JpcHRpb24iOm51bGwsImF2ZVByaWNlIjpudWxsLCJjdXN0b21lclZpc2libGUiOjEsInJlZ2lvbkN1c3RvbWVyVmlzaWJsZSI6MX0="
+              }
+            ],
+            "isFreeTravel": null,
+            "optionalProductList": null,
+            "distributionFactor": 14
+          },
+          {
+            "section": "Page|||1+++Horseshoe Bend|||1+++Antelope Canyon|||1+++Las Vegas",
+            "todayLocation": "",
+            "dayNumber": 6,
+            "content": [
+              {
+                "contentMode": 3,
+                "productSortNum": null,
+                "relatedId": 3818,
+                "relatedDay": 1,
+                "relatedName": "【YG7-6】 馬蹄灣  - 羚羊彩穴- 拉斯維加斯",
+                "contentType": 100,
+                "sortNumber": 0,
+                "jsonContent": "{\"travelId\":3818,\"productCategory\":1,\"name\":\"【YG7-6】 馬蹄灣  - 羚羊彩穴- 拉斯維加斯\",\"productType\":\"PC00000067\",\"isAutoTeam\":null,\"expandList\":[{\"language\":3,\"isSource\":0,\"dayList\":[{\"section\":\"Page|||1+++Horseshoe Bend|||1+++Antelope Canyon|||1+++Las Vegas\",\"todayLocation\":\"\",\"dayNumber\":1,\"content\":[{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":4,\"sortNumber\":0,\"jsonContent\":\"eyJjb250ZW50IjpbeyJzb3VyY2VUeXBlIjoyLCJyZXN0YXVyYW50TmFtZSI6IkJyZWFrZmFzdCBJbmNsdWRlZCIsInJlc3RhdXJhbnRDb2RlIjoiUkMwMDAwMDA2MiIsInJlc3RhdXJhbnRSZW1hcmsiOiIiLCJpc1BheVNlbGYiOmZhbHNlLCJhdmdQcmljZSI6IiIsImxpc3RJbWFnZSI6W10sImxvYWRlZCI6dHJ1ZX1dLCJ0eXBlIjoxLCJkaXN0YW5jIjoiIiwiaG91cnMiOiIiLCJtaW51dGVzIjoiIiwic3RheUhvdXJzIjoiIiwic3RheU1pbnV0ZXMiOiIiLCJkZXNjcmlwdGlvbiI6IiIsInRpbWUiOiIyIiwiYXZnUHJpY2UiOiIiLCJkaXN0YW5jVW5pdCI6MX0=\"},{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":7,\"sortNumber\":1,\"jsonContent\":\"eyJkaXN0YW5jIjoiIiwiaG91cnMiOiIiLCJtaW51dGVzIjoiIiwic3RheUhvdXJzIjoiIiwic3RheU1pbnV0ZXMiOiIiLCJsaXN0SW1hZ2UiOltdLCJkZXNjcmlwdGlvbiI6IjxwPkVuam95IGEgc2NlbmljIHJpZGUgb24gdGhlIENvbG9yYWRvIFBsYXRlYXUgdGhpcyBtb3JuaW5nIHRvd2FyZHMgQW50ZWxvcGUgQ2FueW9uISBXZSB3aWxsIGJlIHBhc3NpbmcgYnkgdGhlIEdsZW4gQ2FueW9uIERhbSwgd2hpY2ggaG9sZHMgYmFjayBMYWtlIFBvd2VsbC4gTGFrZSBQb3dlbGwgaXMgdGhlIG5hdGlvbiZyc3F1bztzIHNlY29uZC1sYXJnZXN0IGFydGlmaWNpYWwgbGFrZSB3aGljaCBpcyBzdXJyb3VuZGVkIGJ5IDk2IHNpZGUgY2FueW9ucy4gQW5kLCBBbnRlbG9wZSBDYW55b24gaXMgb25lIG9mIHRoZSB0b3AgdGVuIHNpdGVzIGluIHRoZSB3b3JsZCBmb3IgcGhvdG9ncmFwaHkhIEl0IGlzIGNvbXBvc2VkIG9mIHVwcGVyIGFuZCBsb3dlciBjYW55b25zOyB0aGUgdXBwZXIgY2FueW9uIGlzIHRoZSBOYXZham8gd29yZCBmb3IgXCJ3YXRlciB0aHJvdWdoIHRoZSByb2Nrc1wiIGFuZCBsb3dlciBjYW55b24gbWVhbnMgXCJhcmNoLXNoYXBlZCBzcGlyYWwgcm9jay5cIiBIZXJlLCB2aXNpdG9ycyBhcmUgYWx3YXlzIGFtYXplZCBieSB0aGlzIHdhdnkgY2FueW9uIHJvY2sgZm9ybWF0aW9uISBGb2xsb3dpbmcsIHdlIHdpbGwgZHJpdmUgdG8gSG9yc2VzaG9lIEJlbmQgd2hpY2ggaXMgb25lIG9mIHRoZSB0b3AgdGVuIGxvY2F0aW9ucyBpbiB0aGUgVW5pdGVkIFN0YXRlcyBmb3IgcGhvdG9ncmFwaHkgYnkgTmF0aW9uYWwgR2VvZ3JhcGhpYyEgTmV4dCwgd2Ugd2lsbCBkcml2ZSB0byBMYWtlIFBvd2VsbCBhbmQgZW5qb3kgYSBib2F0IHRvdXIgb24gdGhpcyBwaWN0dXJlc3F1ZSBsYWtlIHN1cnJvdW5kZWQgYnkgYmx1ZSBza3kgYW5kIHJlZCByb2NrIGNhbnlvbnMhIEZpbmFsbHksIHdlIHdpbGwgYXJyaXZlIGF0IHRoZSB3b3JsZCZyc3F1bztzIGNhcGl0YWwgZm9yIEVudGVydGFpbm1lbnQgaW4gTGFzIFZlZ2FzIGluIHRoZSBhZnRlcm5vb24uJm5ic3A7PC9wPlxuPHA+Jm5ic3A7PC9wPlxuPHA+PHN0cm9uZz5JdGluZXJhcnk6PC9zdHJvbmc+PC9wPlxuPHA+PHN0cm9uZz5QYWdlICZyYXJyOyBHbGVuIENhbnlvbiA8L3N0cm9uZz4ocGFzcyBieSkgPHN0cm9uZz4mcmFycjsgTGFrZSBQb3dlbGwgS2F5YWtpbmc8L3N0cm9uZz4gKE9wdGlvbmFsLCA2MCBtaW5zKSA8c3Ryb25nPiZyYXJyOyBIb3JzZXNob2UgQmVuZCA8L3N0cm9uZz4oTWFuZGF0b3J5LCA2MCBtaW5zKSA8c3Ryb25nPiZyYXJyOyBBbnRlbG9wZSBDYW55b24gPC9zdHJvbmc+KE9wdGlvbmFsLCA5MCBtaW5zKSA8c3Ryb25nPiZyYXJyOyBMYXMgVmVnYXM8L3N0cm9uZz48L3A+IiwidGltZSI6IjEiLCJkaXN0YW5jVW5pdCI6MX0=\"},{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":3,\"sortNumber\":2,\"jsonContent\":\"eyJ0aW1lIjoiMSIsImRpc3RhbmMiOiIiLCJob3VycyI6IiIsIm1pbnV0ZXMiOiIiLCJzdGF5SG91cnMiOiIiLCJzdGF5TWludXRlcyI6IiIsInJlZ2lvbkNvZGUiOm51bGwsInJlZ2lvbk5hbWUiOm51bGwsInJlZ2lvblR5cGUiOm51bGwsImNvbnRlbnQiOlt7InR5cGUiOjAsInNvdXJjZVR5cGUiOjIsInNjZW5pY0NvZGUiOiJTTTAwMDAxMjc2Iiwic2NlbmljTmFtZSI6IkhvcnNlc2hvZSBCZW5kIiwic2NlbmljRXhwbGFpbiI6IiIsImlzQXBwZWFyYW5jZSI6MCwibG9hZGVkIjp0cnVlLCJzY2VuaWNlRGVzYyI6IjxwPkhvcnNlc2hvZSBCZW5kICZuZGFzaDsgT25lIG9mIHRoZSB0b3AgdGVuIGJlc3QgcGhvdG9ncmFwaHkgc3BvdHMgaW4gdGhlIFVuaXRlZCBTdGF0ZXMgc2VsZWN0ZWQgYnkgTmF0aW9uYWwgR2VvZ3JhcGhpYyBNYWdhemluZSEgVGhlIGRlbnNlIGFxdWF0aWMgcGxhbnRzIG9uIHRoZSBDb2xvcmFkbyBSaXZlciBiZWQgbWFrZSB0aGUgcml2ZXIgd2F0ZXIgYXBwZWFyIGZsdW9yZXNjZW50IGdyZWVuIGluIHRoZSBzdW4uIFRoZSByaXZlciB0dXJucyAzNjAgZGVncmVlcyBpbiB0aGUgcmVkZGlzaC1icm93biBjYW55b24gaGVyZSwgY3V0dGluZyBvdXQgYSBob3JzZXNob2Utc2hhcGVkIGNhbnlvbiwgaGVuY2UgdGhlIG5hbWUgSG9yc2VzaG9lIEJlbmQuIFN0YW5kaW5nIG9uIHRoZSBlZGdlIG9mIHRoZSBjbGlmZiwgeW91IHdpbGwgYmUgaW50b3hpY2F0ZWQgYnkgdGhlIGJyZWF0aHRha2luZyBiZWF1dHkgb2YgdGhlIGJsdWUgd2F0ZXIsIGJsdWUgc2t5IGFuZCByZWQgcm9ja3MuPC9wPiIsInNjZW5pY0ltYWdlcyI6W119LHsidHlwZSI6Miwic291cmNlVHlwZSI6Miwic2NlbmljQ29kZSI6IlNNMDAwMDEyNzciLCJzY2VuaWNOYW1lIjoiTG93ZXIgQW50ZWxvcGUgQ2FueW9uIiwic2NlbmljRXhwbGFpbiI6IiIsImlzQXBwZWFyYW5jZSI6MCwibG9hZGVkIjp0cnVlLCJzY2VuaWNlRGVzYyI6IjxwPlRoZSBMb3dlciBBbnRlbG9wZSBDYW55b24gaXMgbG9jYXRlZCBpbiB0aGUgbm9ydGggb2YgQXJpem9uYSwgVVNBLiBJdCBpcyBmb3JtZWQgYnkgc29mdCBzYW5kc3RvbmUgYWZ0ZXIgbWlsbGlvbnMgb2YgeWVhcnMgb2YgdmFyaW91cyBlcm9zaW9uIGZvcmNlcy4gRmxhc2ggZmxvb2RzIG9mdGVuIGZsb3cgaW50byB0aGUgY2FueW9uIGR1cmluZyB0aGUgbW9uc29vbiBzZWFzb24uIER1ZSB0byB0aGUgc3VkZGVuIGluY3JlYXNlIGluIHJhaW5mYWxsLCB0aGUgZmxvdyByYXRlIG9mIHRoZSBmbGFzaCBmbG9vZCBpcyBxdWl0ZSBmYXN0LiBJbiBhZGRpdGlvbiwgdGhlIG5hcnJvdyBjaGFubmVsIG5hcnJvd3MgdGhlIHJpdmVyIGNoYW5uZWwsIHNvIHRoZSB2ZXJ0aWNhbCBlcm9zaW9uIGZvcmNlIGlzIHJlbGF0aXZlbHkgbGFyZ2UsIGZvcm1pbmcgdGhlIGNvcnJpZG9yIGF0IHRoZSBib3R0b20gb2YgdGhlIExvd2VyIEFudGVsb3BlIENhbnlvbiBhbmQgdGhlIGhhcmQgYW5kIHNtb290aCBlZGdlcyBvbiB0aGUgdmFsbGV5IHdhbGwgdGhhdCBsb29rIGxpa2UgZmxvd2luZyB3YXRlci4gVGhlcmUgaXMgbm8gYXJ0aWZpY2lhbCBsaWdodGluZyBpbiB0aGUgTG93ZXIgQW50ZWxvcGUgQ2FueW9uLiBBbGwgdmlzaWJsZSBsaWdodCBjb21lcyBmcm9tIHRoZSBjcmFja3MgYXQgdGhlIHRvcCBvZiB0aGUgY2FueW9uLiBUaGVzZSBsaWdodHMgYXJlIHJlcGVhdGVkbHkgcmVmcmFjdGVkIGJ5IHRoZSByb2NrIHRleHR1cmUgYW5kIGVudGVyIHRoZSB2YWxsZXkgYm90dG9tLCBwcm9kdWNpbmcgYSBkcmVhbXkgYW5kIGlycmVndWxhciBjb2xvciBjaGFuZ2UuIFRoZXNlIGNvbG9ycyBhcmUgZnJvbSBkZWVwIHRvIGxpZ2h0LCBjb2xvcmZ1bCBhbmQgYmVhdXRpZnVsLjwvcD4iLCJzY2VuaWNJbWFnZXMiOltdfV0sInR5cGUiOm51bGwsImRlc2NyaXB0aW9uIjpudWxsLCJhdmVQcmljZSI6bnVsbCwiZGlzdGFuY1VuaXQiOjF9\"},{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":2,\"sortNumber\":3,\"jsonContent\":\"eyJpbmZvcm1hdGlvbiI6IlRyYXZlbCBieSBjYXIgZnJvbSBMb3dlciBBbnRlbG9wZSBDYW55b24gdG8gTGFzIFZlZ2FzLiIsImRpc3RhbmMiOiIzMDAiLCJkaXN0YW5jVW5pdCI6MywiaG91cnMiOiI1IiwibWludXRlcyI6IiIsInRpbWUiOiIzIn0=\"}],\"distributionFactor\":null}]}]}"
+              },
+              {
+                "contentMode": 0,
+                "productSortNum": null,
+                "relatedId": -1,
+                "relatedDay": -1,
+                "relatedName": "",
+                "contentType": 8,
+                "sortNumber": 1,
+                "jsonContent": "eyJ0aW1lIjoiNCIsImRpc3RhbmMiOm51bGwsImhvdXJzIjpudWxsLCJtaW51dGVzIjpudWxsLCJzdGF5SG91cnMiOm51bGwsInN0YXlNaW51dGVzIjpudWxsLCJyZWdpb25Db2RlIjoiIiwicmVnaW9uTmFtZSI6IiIsInJlZ2lvblR5cGUiOjIsImNvbnRlbnQiOlt7InNvdXJjZVR5cGUiOjIsImhvdGVsQ29kZSI6IkhNMDAwMDIwNTkiLCJob3RlbE5hbWUiOiJGb250YWluZWJsZWF1IExhcyBWZWdhcyIsImhvdGVsQWRkciI6bnVsbCwiaG90ZWxFbWFpbCI6bnVsbCwiaG90ZWxMaW5rTWFuIjpudWxsLCJob3RlbExpbmtXYXkiOm51bGwsImxvYWRlZCI6dHJ1ZSwiYWN0aXZpdHlObyI6MX0seyJzb3VyY2VUeXBlIjoyLCJob3RlbENvZGUiOiJITTAwMDAwNDkyIiwiaG90ZWxOYW1lIjoic2ltaWxhciIsImhvdGVsQWRkciI6bnVsbCwiaG90ZWxFbWFpbCI6bnVsbCwiaG90ZWxMaW5rTWFuIjpudWxsLCJob3RlbExpbmtXYXkiOm51bGwsImxvYWRlZCI6dHJ1ZSwiYWN0aXZpdHlObyI6MX1dLCJ0eXBlIjpudWxsLCJkZXNjcmlwdGlvbiI6bnVsbCwiYXZlUHJpY2UiOm51bGwsImN1c3RvbWVyVmlzaWJsZSI6MSwicmVnaW9uQ3VzdG9tZXJWaXNpYmxlIjoxfQ=="
+              }
+            ],
+            "isFreeTravel": null,
+            "optionalProductList": null,
+            "distributionFactor": 15
+          },
+          {
+            "section": "Elko|||1+++Yellowstone National Park|||1+++West Yellowstone",
+            "todayLocation": "",
+            "dayNumber": 2,
+            "content": [
+              {
+                "contentMode": 3,
+                "productSortNum": null,
+                "relatedId": 5039,
+                "relatedDay": 1,
+                "relatedName": "【YG7-2】艾可市 - 黃石國家公園 - 西黄石",
+                "contentType": 100,
+                "sortNumber": 0,
+                "jsonContent": "{\"travelId\":5039,\"productCategory\":1,\"name\":\"【YG7-2】艾可市 - 黃石國家公園 - 西黄石\",\"productType\":\"PC00000067\",\"isAutoTeam\":null,\"expandList\":[{\"language\":3,\"isSource\":0,\"dayList\":[{\"section\":\"Elko|||1+++Yellowstone National Park|||1+++West Yellowstone\",\"todayLocation\":\"\",\"dayNumber\":1,\"content\":[{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":7,\"sortNumber\":0,\"jsonContent\":\"eyJkaXN0YW5jIjoiIiwiaG91cnMiOiIiLCJtaW51dGVzIjoiIiwic3RheUhvdXJzIjoiIiwic3RheU1pbnV0ZXMiOiIiLCJsaXN0SW1hZ2UiOltdLCJkZXNjcmlwdGlvbiI6IjxwPlRvZGF5IHdlIHdpbGwgZGVwYXJ0IGZyb20gRWxrbyBhbmQgaGVhZCBlYXN0IHRvIFllbGxvd3N0b25lIE5hdGlvbmFsIFBhcmshICZuYnNwO0ZpcnN0IG9mIGl0cyBraW5kLCBZZWxsb3dzdG9uZSBpcyBob21lIHRvIHdvcmxkJnJzcXVvO3MgbGFyZ2VzdCBzdXBlciB2b2xjYW5vIGFuZCBvdmVyIDEwLDAwMCBnZW90aGVybWFsIGZlYXR1cmVzLiBIZXJlLCB5b3UgY2FuIGZpbmQgZXZlcnl0aGluZyB5b3UgZXhwZWN0IHRvIHNlZSBpbiBhIE5hdGlvbmFsIFBhcmshIFNub3cgY292ZXJlZCBtb3VudGFpbnMsIHdhdGVyZmFsbHMsIGxha2VzLCByaXZlcnMsIGNhbnlvbnMsIG1lYWRvd3MsIGhlcmRzIG9mIGJ1ZmZhbG9zLCBlbGtzIGFuZCB0aGUgbW9zdCBhbWF6aW5nIGdlb3RoZXJtYWwgZmVhdHVyZXMgaW4gdGhlIHdvcmxkISBHZXlzZXJzLCBob3Qgc3ByaW5ncywgZnVtYXJvbGVzLCBhbmQgbXVkIHBvdHMgYXJlIHRoZSB0cnVlIHdvbmRlcnMgdGhhdCBtYWtlIFllbGxvd3N0b25lIHRydWx5IHVuaXF1ZS48L3A+XG48cD4mbmJzcDs8L3A+XG48cD48c3Ryb25nPkl0aW5lcmFyeTo8L3N0cm9uZz48L3A+XG48cD48c3Ryb25nPkVsa28gJnJhcnI7IFllbGxvd3N0b25lIE5hdGlvbmFsIFBhcmsgPC9zdHJvbmc+KE1hbmRhdG9yeSwgMyBob3VycywgSGVhZCB0byB2aXNpdCBQYWxldHRlLCBHcmFuZCBQcmlzbWF0aWMgSG90IFNwcmluZywgT2xkIEZhaXRoZnVsIEdleXNlciwgRm91bnRhaW4gVHJhaWwsIE1vcm5pbmcgR2xvcnksIEJpc2N1aXQgQmFzaW4gYW5kIG90aGVyIGF0dHJhY3Rpb25zLiBUaGUgdG91ciBndWlkZSB3aWxsIGJlIGFkanVzdGVkIGFjY29yZGluZyB0byB0aGUgYWN0dWFsIHNpdHVhdGlvbiBvZiB0aGUgZGF5LCBwbGVhc2UgcmVmZXIgdG8gdGhlIGFjdHVhbCBhcnJhbmdlbWVudC4pICZyYXJyOyA8c3Ryb25nPldlc3QgWWVsbG93c3RvbmU8L3N0cm9uZz48L3A+IiwidGltZSI6IjEiLCJkaXN0YW5jVW5pdCI6MX0=\"},{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":2,\"sortNumber\":1,\"jsonContent\":\"eyJpbmZvcm1hdGlvbiI6IlRyYXZlbCBmcm9tIElrZSB0byBZZWxsb3dzdG9uZSBOYXRpb25hbCBQYXJrIiwiZGlzdGFuYyI6IjQ1MCIsImRpc3RhbmNVbml0IjozLCJob3VycyI6IjciLCJtaW51dGVzIjoiIiwidGltZSI6IjIifQ==\"},{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":3,\"sortNumber\":2,\"jsonContent\":\"eyJ0aW1lIjoiMyIsImRpc3RhbmMiOiIiLCJob3VycyI6IiIsIm1pbnV0ZXMiOiIiLCJzdGF5SG91cnMiOiIiLCJzdGF5TWludXRlcyI6IiIsInJlZ2lvbkNvZGUiOm51bGwsInJlZ2lvbk5hbWUiOm51bGwsInJlZ2lvblR5cGUiOm51bGwsImNvbnRlbnQiOlt7InR5cGUiOjAsInNvdXJjZVR5cGUiOjIsInNjZW5pY0NvZGUiOiJTTTAwMDAwMjk3Iiwic2NlbmljTmFtZSI6IlllbGxvd3N0b25lIE5hdGlvbmFsIFBhcmsiLCJzY2VuaWNFeHBsYWluIjoiIiwiaXNBcHBlYXJhbmNlIjowLCJsb2FkZWQiOnRydWUsInNjZW5pY2VEZXNjIjoiPHA+TG9jYXRlZCBpbiB0aGUgUm9ja3kgTW91bnRhaW5zLCBrbm93biBhcyB0aGUgXCJiYWNrYm9uZSBvZiBBbWVyaWNhXCIsIGl0IGlzIGxvY2F0ZWQgb24gdGhlIGxhdmEgcGxhdGVhdSBiZXR3ZWVuIHRoZSBOb3J0aGVybiBSb2NraWVzIGFuZCB0aGUgQ2VudHJhbCBSb2NraWVzIGluIHRoZSB3ZXN0ZXJuIFVuaXRlZCBTdGF0ZXMuIFRoZSBnZW90aGVybWFsIHdvbmRlcnMgYXJlIGl0cyBoYWxsbWFyaywgYSBwcmltaXRpdmUgbGFuZHNjYXBlIG9mIHRoZSBlYXJ0aCBmb3JnZWQgYnkgd2F0ZXIgYW5kIGZpcmUuIFRoZSBuYXR1cmFsIGxhbmRzY2FwZSBpbiB0aGUgcGFyayBpcyBkaXZpZGVkIGludG8gZml2ZSBtYWpvciBhcmVhcywgbmFtZWx5IHRoZSBNYW1tb3RoIEFyZWEsIHRoZSBSb29zZXZlbHQgQXJlYSwgdGhlIENhbnlvbiBBcmVhLCB0aGUgR2V5c2VyIEFyZWEgYW5kIHRoZSBMYWtlIEFyZWEsIGVhY2ggd2l0aCBpdHMgb3duIGNoYXJhY3RlcmlzdGljcy4gSXQgZXhjZWVkcyB0aGUgbGltaXRzIG9mIGh1bWFuIGFydCBhbmQgaXMgdGhlIG1vc3Qgd29uZGVyZnVsIGFuZCBzcGVjdGFjdWxhciBzY2VuZXJ5IG9uIHRoZSBzdXJmYWNlIG9mIHRoZSBlYXJ0aC48L3A+Iiwic2NlbmljSW1hZ2VzIjpbXX0seyJ0eXBlIjoyLCJzb3VyY2VUeXBlIjoyLCJzY2VuaWNDb2RlIjoiU00wMDAwMDMwMiIsInNjZW5pY05hbWUiOiJUaGUgR3JhbmQgUHJpc21hdGljIEhvdCBTcHJpbmciLCJzY2VuaWNFeHBsYWluIjoiIiwiaXNBcHBlYXJhbmNlIjowLCJsb2FkZWQiOnRydWUsInNjZW5pY2VEZXNjIjoiPHA+QWxzbyBrbm93biBhcyB0aGUgU2V2ZW4gQ29sb3IgUG9vbCwgaXQgaXMgdGhlIGxhcmdlc3QgaG90IHNwcmluZyBpbiB0aGUgVW5pdGVkIFN0YXRlcyBhbmQgdGhlIHRoaXJkIGxhcmdlc3QgaW4gdGhlIHdvcmxkLiBJdCBpcyA3NS05MSBtZXRlcnMgd2lkZSBhbmQgNDkgbWV0ZXJzIGRlZXAsIGFuZCBpdCBndXNoZXMgb3V0IGFib3V0IDIsMDAwIGxpdGVycyBvZiA3MS1kZWdyZWUgaG90IHdhdGVyIGV2ZXJ5IG1pbnV0ZS4gVGhlIGFtYXppbmcgdGhpbmcgYWJvdXQgdGhlIEdyYW5kIFByaXNtYXRpYyBTcHJpbmcgaXMgdGhhdCB0aGUgY29sb3Igb2YgdGhlIGxha2UgY2hhbmdlcyB3aXRoIHRoZSBzZWFzb25zLiBJbiBzcHJpbmcsIHRoZSBsYWtlIGNoYW5nZXMgZnJvbSBlbWVyYWxkIGdyZWVuIHRvIGdvbGRlbiBvcmFuZ2UtcmVkLCB3aGljaCBpcyBkdWUgdG8gdGhlIGFsZ2FlIGFuZCBwaWdtZW50LWNvbnRhaW5pbmcgYmFjdGVyaWEgYW5kIG90aGVyIG1pY3Jvb3JnYW5pc21zIGxpdmluZyBpbiB0aGUgbWluZXJhbC1yaWNoIHdhdGVyLiBJbiBtaWRzdW1tZXIsIHRoZSBjaGxvcm9waHlsbCBjb250ZW50IGlzIHJlbGF0aXZlbHkgbG93LCBzbyB0aGUgbGFrZSB3YXRlciBhcHBlYXJzIGJyaWxsaWFudCBvcmFuZ2UsIHJlZCBvciB5ZWxsb3cuIEJ1dCBpbiB0aGUgY29sZCB3aW50ZXIsIGR1ZSB0byB0aGUgbGFjayBvZiBsaWdodCwgdGhlc2UgbWljcm9vcmdhbmlzbXMgd2lsbCBwcm9kdWNlIG1vcmUgY2hsb3JvcGh5bGwgdG8gc3VwcHJlc3MgdGhlIGNvbG9yIG9mIGNhcm90ZW5vaWRzLCBzbyB0aGUgd2F0ZXIgd2lsbCBhcHBlYXIgZGVlcCBkYXJrIGdyZWVuLjwvcD4iLCJzY2VuaWNJbWFnZXMiOltdfSx7InR5cGUiOjIsInNvdXJjZVR5cGUiOjIsInNjZW5pY0NvZGUiOiJTTTAwMDAwMzA0Iiwic2NlbmljTmFtZSI6Ik9sZCBGYWl0aGZ1bCBHZXlzZXIiLCJzY2VuaWNFeHBsYWluIjoiIiwiaXNBcHBlYXJhbmNlIjowLCJsb2FkZWQiOnRydWUsInNjZW5pY2VEZXNjIjoiPHA+T2xkIEZhaXRoZnVsIGdleXNlciBpcyBuYW1lZCBmb3IgaXRzIGNvbnNpc3RlbnQgYW5kIHJlZ3VsYXIgZXJ1cHRpb24uIEN1cnJlbnRseSwgaXQgZXJ1cHRzIGFwcHJveGltYXRlbHkgZXZlcnkgNjAgdG8gMTEwIG1pbnV0ZXMsIGFuZCBlYWNoIGVydXB0aW9uIGxhc3RzIGZvdXIgdG8gZml2ZSBtaW51dGVzLiBUaGUgd2F0ZXIgY29sdW1uIGlzIG1vcmUgdGhhbiA0MCBtZXRlcnMgaGlnaCwgd2hpY2ggaXMgc3BlY3RhY3VsYXIgYW5kIG5ldmVyIHN0b3BzLiBUaGUgT2xkIEZhaXRoZnVsIFZpc2l0b3IgQ2VudGVyIHdpbGwgZGlzcGxheSB0aGUgZXJ1cHRpb24gc2NoZWR1bGUgaW4gYWR2YW5jZSwgc28geW91IGNhbiBjaGVjayB0aGUgZXJ1cHRpb24gdGltZSBpbiBhZHZhbmNlIGJlZm9yZSB2aXNpdGluZyB3aXRoIGNvbmZpZGVuY2UuPC9wPiIsInNjZW5pY0ltYWdlcyI6W119XSwidHlwZSI6bnVsbCwiZGVzY3JpcHRpb24iOm51bGwsImF2ZVByaWNlIjpudWxsLCJkaXN0YW5jVW5pdCI6MX0=\"}],\"distributionFactor\":null}]}]}"
+              },
+              {
+                "contentMode": 0,
+                "productSortNum": null,
+                "relatedId": -1,
+                "relatedDay": -1,
+                "relatedName": "",
+                "contentType": 8,
+                "sortNumber": 1,
+                "jsonContent": "eyJ0aW1lIjoiNCIsImRpc3RhbmMiOm51bGwsImhvdXJzIjpudWxsLCJtaW51dGVzIjpudWxsLCJzdGF5SG91cnMiOm51bGwsInN0YXlNaW51dGVzIjpudWxsLCJyZWdpb25Db2RlIjoiIiwicmVnaW9uTmFtZSI6IiIsInJlZ2lvblR5cGUiOjIsImNvbnRlbnQiOlt7InNvdXJjZVR5cGUiOjIsImhvdGVsQ29kZSI6IkhNMDAwMDA2MjgiLCJob3RlbE5hbWUiOiJXaGl0ZSBCdWZmYWxvIFdlc3QgWWVsbG93c3RvbmUiLCJob3RlbEFkZHIiOm51bGwsImhvdGVsRW1haWwiOm51bGwsImhvdGVsTGlua01hbiI6bnVsbCwiaG90ZWxMaW5rV2F5IjpudWxsLCJsb2FkZWQiOnRydWUsImFjdGl2aXR5Tm8iOjF9LHsic291cmNlVHlwZSI6MiwiaG90ZWxDb2RlIjoiSE0wMDAwMTIyOCIsImhvdGVsTmFtZSI6IlllbGxvd3N0b25lIENvdW50cnkgSW5uIiwiaG90ZWxBZGRyIjpudWxsLCJob3RlbEVtYWlsIjpudWxsLCJob3RlbExpbmtNYW4iOm51bGwsImhvdGVsTGlua1dheSI6bnVsbCwibG9hZGVkIjp0cnVlLCJhY3Rpdml0eU5vIjoxfSx7InNvdXJjZVR5cGUiOjIsImhvdGVsQ29kZSI6IkhNMDAwMDEyMjkiLCJob3RlbE5hbWUiOiJEdWRlICYgUm91bmR1cCIsImhvdGVsQWRkciI6bnVsbCwiaG90ZWxFbWFpbCI6bnVsbCwiaG90ZWxMaW5rTWFuIjpudWxsLCJob3RlbExpbmtXYXkiOm51bGwsImxvYWRlZCI6dHJ1ZSwiYWN0aXZpdHlObyI6MX0seyJzb3VyY2VUeXBlIjoyLCJob3RlbENvZGUiOiJITTAwMDAxMjMwIiwiaG90ZWxOYW1lIjoiVHJhdmVsZXJzIExvZGdlIiwiaG90ZWxBZGRyIjpudWxsLCJob3RlbEVtYWlsIjpudWxsLCJob3RlbExpbmtNYW4iOm51bGwsImhvdGVsTGlua1dheSI6bnVsbCwibG9hZGVkIjp0cnVlLCJhY3Rpdml0eU5vIjoxfSx7InNvdXJjZVR5cGUiOjIsImhvdGVsQ29kZSI6IkhNMDAwMDA0OTIiLCJob3RlbE5hbWUiOiJzaW1pbGFyIiwiaG90ZWxBZGRyIjpudWxsLCJob3RlbEVtYWlsIjpudWxsLCJob3RlbExpbmtNYW4iOm51bGwsImhvdGVsTGlua1dheSI6bnVsbCwibG9hZGVkIjp0cnVlLCJhY3Rpdml0eU5vIjoxfV0sInR5cGUiOm51bGwsImRlc2NyaXB0aW9uIjpudWxsLCJhdmVQcmljZSI6bnVsbCwiY3VzdG9tZXJWaXNpYmxlIjoxLCJyZWdpb25DdXN0b21lclZpc2libGUiOjF9"
+              }
+            ],
+            "isFreeTravel": null,
+            "optionalProductList": null,
+            "distributionFactor": 22
+          },
+          {
+            "section": "Green River |||1+++Arches National Park|||1+++Monument Valley|||1+++Page",
+            "todayLocation": "",
+            "dayNumber": 5,
+            "content": [
+              {
+                "contentMode": 3,
+                "productSortNum": null,
+                "relatedId": 5040,
+                "relatedDay": 1,
+                "relatedName": "【YG7-5】綠河 - 紀念碑谷 - 佩吉",
+                "contentType": 100,
+                "sortNumber": 0,
+                "jsonContent": "{\"travelId\":5040,\"productCategory\":1,\"name\":\"【YG7-5】綠河 - 紀念碑谷 - 佩吉\",\"productType\":\"PC00000067\",\"isAutoTeam\":null,\"expandList\":[{\"language\":3,\"isSource\":0,\"dayList\":[{\"section\":\"Green River |||1+++Arches National Park|||1+++Monument Valley|||1+++Page\",\"todayLocation\":\"\",\"dayNumber\":1,\"content\":[{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":4,\"sortNumber\":0,\"jsonContent\":\"eyJjb250ZW50IjpbeyJzb3VyY2VUeXBlIjoyLCJyZXN0YXVyYW50TmFtZSI6IkJyZWFrZmFzdCBJbmNsdWRlZCIsInJlc3RhdXJhbnRDb2RlIjoiUkMwMDAwMDA2MiIsInJlc3RhdXJhbnRSZW1hcmsiOiIiLCJpc1BheVNlbGYiOmZhbHNlLCJhdmdQcmljZSI6IiIsImxpc3RJbWFnZSI6W10sImxvYWRlZCI6dHJ1ZX1dLCJ0eXBlIjoxLCJkaXN0YW5jIjoiIiwiaG91cnMiOiIiLCJtaW51dGVzIjoiIiwic3RheUhvdXJzIjoiIiwic3RheU1pbnV0ZXMiOiIiLCJkZXNjcmlwdGlvbiI6IiIsInRpbWUiOiIyIiwiYXZnUHJpY2UiOiIiLCJkaXN0YW5jVW5pdCI6MX0=\"},{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":7,\"sortNumber\":1,\"jsonContent\":\"eyJkaXN0YW5jIjoiIiwiaG91cnMiOiIiLCJtaW51dGVzIjoiIiwic3RheUhvdXJzIjoiIiwic3RheU1pbnV0ZXMiOiIiLCJsaXN0SW1hZ2UiOltdLCJkZXNjcmlwdGlvbiI6IjxwPkluIHRoZSBtb3JuaW5nLCB3ZSB3aWxsIGJlIGhlYWRlZCB0byB0aGUgc3BlY3RhY3VsYXIgQXJjaGVzIE5hdGlvbmFsIFBhcmssIHdoZXJlIG92ZXJsYXBwaW5nIG1vdW50YWlucyBzdXJyb3VuZCB3aW5kaW5nIGNhbnlvbnMuIENvbWUgYW5kIHRha2Ugc29tZSBibG9ja2J1c3RlciBwaG90b3Mgb2YgeW91ciBvd24gaGVyZSEgQWZ0ZXIgbHVuY2gsIHdlIHdpbGwgY29udGludWUgb3VyIHRyaXAgdG8gTW9udW1lbnQgVmFsbGV5LCB3aGVyZSBodWdlIGNvbHVtbmFyIG1vbnVtZW50YWwgcm9ja3Mgc3RhbmQgc2t5IGhpZ2ghIE1vbnVtZW50IFZhbGxleSBpcyBmZWF0dXJlZCBpbiBtYW55IGZhbW91cyBtb3ZpZXMgYW5kIGFkdmVydGlzZW1lbnRzLiBZb3UgbWF5IGV2ZW4gdGFrZSBhIGplZXAgdG91ciB0byBleHBsb3JlIG1vcmUgYWJvdXQgdGhlIHZhbGxleSBhdCB5b3VyIG93biBjb3N0LjwvcD5cbjxwPiZuYnNwOzwvcD5cbjxwPjxzdHJvbmc+SXRpbmVyYXJ5Ojwvc3Ryb25nPjwvcD5cbjxwPjxzdHJvbmc+R3JlZW4gUml2ZXIgPC9zdHJvbmc+PHN0cm9uZz4mcmFycjsgQXJjaGVzIE5hdGlvbmFsIFBhcms8L3N0cm9uZz4mbmJzcDsoTWFuZGF0b3J5LCA2MCBtaW5zKSA8c3Ryb25nPiZyYXJyOzwvc3Ryb25nPjxzdHJvbmc+Jm5ic3A7TW9udW1lbnQgVmFsbGV5PC9zdHJvbmc+IChNYW5kYXRvcnksIDkwIG1pbnMpIDxzdHJvbmc+JnJhcnI7IFBhZ2U8L3N0cm9uZz48L3A+IiwidGltZSI6IjEiLCJkaXN0YW5jVW5pdCI6MX0=\"},{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":3,\"sortNumber\":2,\"jsonContent\":\"eyJjb250ZW50IjpbeyJhY3Rpdml0eU5vIjoxLCJ0eXBlIjowLCJzb3VyY2VUeXBlIjoyLCJzY2VuaWNDb2RlIjoiU00wMDAwMTI3NCIsInNjZW5pY05hbWUiOiJBcmNoZXMgTmF0aW9uYWwgUGFyayIsInNjZW5pY0V4cGxhaW4iOiIiLCJpc0FwcGVhcmFuY2UiOjAsImxvYWRlZCI6dHJ1ZSwic2NlbmljZURlc2MiOiI8cD5BcmNoZXMgTmF0aW9uYWwgUGFyayBpcyBsb2NhdGVkIG5lYXIgdGhlIHRvd24gb2YgTW9hYiBpbiBVdGFoLCBVU0EuIEl0IGNvdmVycyBhbiBhcmVhIG9mIDMwOSBzcXVhcmUga2lsb21ldGVycyBhbmQgcHJlc2VydmVzIG1vcmUgdGhhbiAyLDAwMCBuYXR1cmFsIHJvY2sgYXJjaGVzLiBBYm91dCAzMDAgbWlsbGlvbiB5ZWFycyBhZ28sIHRoaXMgc2FsdCBsYXllciB3YXMgYW4gb2NlYW4uIE1pbGxpb25zIG9mIHllYXJzIGFmdGVyIHRoZSBzZWEgZGlzYXBwZWFyZWQsIHRoZSBzYWx0IGxheWVyIHdhcyBjb3ZlcmVkIGJ5IGFpciBhbmQgd2F0ZXIgZGVicmlzLCBhbmQgc3F1ZWV6ZWQgaW50byByb2NrIHdpdGggb3RoZXIgZGVicmlzLiBMYXRlciwgYWZ0ZXIgdGhlIGNydXN0IHVwbGlmdGVkIGFuZCBuYXR1cmFsIHdlYXRoZXJpbmcsIGl0IGJlY2FtZSB0aGUgYXJjaGVzIG9mIHRvZGF5LiBUaGUgcGFyayBub3Qgb25seSBoYXMgYXJjaGVzLCBidXQgYWxzbyBudW1lcm91cyBsYXJnZSBhbmQgc21hbGwgc3BpcmVzLCBwZWRlc3RhbHMsIGJhbGFuY2luZyBzdG9uZXMgYW5kIG90aGVyIHVuaXF1ZSBnZW9sb2dpY2FsIGZlYXR1cmVzOyBhbGwgdGhlIHN0b25lcyBoYXZlIHRleHR1cmVzIHdpdGggdmVyeSBzdHJvbmcgY29sb3IgY29udHJhc3RzLjwvcD4iLCJzY2VuaWNJbWFnZXMiOltdfV0sImRpc3RhbmMiOiIiLCJkaXN0YW5jVW5pdCI6MSwiaG91cnMiOiIiLCJtaW51dGVzIjoiIiwic3RheUhvdXJzIjoiIiwic3RheU1pbnV0ZXMiOiIiLCJ0aW1lIjoiMiJ9\"},{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":2,\"sortNumber\":3,\"jsonContent\":\"eyJpbmZvcm1hdGlvbiI6IkRyaXZlIGZyb20gQXJjaGVzIE5hdGlvbmFsIFBhcmsgdG8gTW9udW1lbnQgVmFsbGV5IiwiZGlzdGFuYyI6IjE2MCIsImRpc3RhbmNVbml0IjozLCJob3VycyI6IjMiLCJtaW51dGVzIjoiIiwidGltZSI6IjIifQ==\"},{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":3,\"sortNumber\":4,\"jsonContent\":\"eyJjb250ZW50IjpbeyJhY3Rpdml0eU5vIjoxLCJ0eXBlIjowLCJzb3VyY2VUeXBlIjoyLCJzY2VuaWNDb2RlIjoiU00wMDAwMTYxNCIsInNjZW5pY05hbWUiOiJNb251bWVudCBWYWxsZXkiLCJzY2VuaWNFeHBsYWluIjoiIiwiaXNBcHBlYXJhbmNlIjowLCJsb2FkZWQiOnRydWUsInNjZW5pY2VEZXNjIjoiPHA+TW9udW1lbnQgVmFsbGV5IGlzIGEgcmVnaW9uIG9mIHRoZSBDb2xvcmFkbyBQbGF0ZWF1IGNoYXJhY3Rlcml6ZWQgYnkgYSBjbHVzdGVyIG9mIHZhc3Qgc2FuZHN0b25lIGJ1dHRlcywgdGhlIGxhcmdlc3QgcmVhY2hpbmcgMSwwMDAgZnQgYWJvdmUgdGhlIHZhbGxleSBmbG9vci4gSXQgaXMgbG9jYXRlZCBvbiB0aGUgQXJpem9uYSZuZGFzaDtVdGFoIHN0YXRlIGxpbmUsIG5lYXIgdGhlIEZvdXIgQ29ybmVycyBhcmVhLiBNb251bWVudCBWYWxsZXkgaGFzIGJlZW4gZmVhdHVyZWQgaW4gbWFueSBmb3JtcyBvZiBtZWRpYSBzaW5jZSB0aGUgMTkzMHMuIERpcmVjdG9yIEpvaG4gRm9yZCB1c2VkIHRoZSBsb2NhdGlvbiBmb3IgYSBudW1iZXIgb2YgaGlzIGJlc3Qta25vd24gZmlsbXMgYW5kIHRodXMsIGluIHRoZSB3b3JkcyBvZiBjcml0aWMgS2VpdGggUGhpcHBzLCBcIml0cyBmaXZlIHNxdWFyZSBtaWxlcyBbMTMgc3F1YXJlIGtpbG9tZXRlcnNdIGhhdmUgZGVmaW5lZCB3aGF0IGRlY2FkZXMgb2YgbW92aWVnb2VycyB0aGluayBvZiB3aGVuIHRoZXkgaW1hZ2luZSB0aGUgQW1lcmljYW4gV2VzdC5cIjwvcD4iLCJzY2VuaWNJbWFnZXMiOltdfV0sImRpc3RhbmMiOiIiLCJkaXN0YW5jVW5pdCI6MSwiaG91cnMiOiIiLCJtaW51dGVzIjoiIiwic3RheUhvdXJzIjoiIiwic3RheU1pbnV0ZXMiOiIiLCJ0aW1lIjoiMyJ9\"}],\"distributionFactor\":null}]}]}"
+              },
+              {
+                "contentMode": 0,
+                "productSortNum": null,
+                "relatedId": -1,
+                "relatedDay": -1,
+                "relatedName": "",
+                "contentType": 8,
+                "sortNumber": 1,
+                "jsonContent": "eyJjb250ZW50IjpbeyJhY3Rpdml0eU5vIjoxLCJzb3VyY2VUeXBlIjoyLCJob3RlbENvZGUiOiJITTAwMDAxODk5IiwiaG90ZWxOYW1lIjoiQ2xhcmlvbiBJbm4gUGFnZSAtIExha2UgUG93ZWxsIiwibG9hZGVkIjp0cnVlfSx7ImFjdGl2aXR5Tm8iOjIsInNvdXJjZVR5cGUiOjIsImhvdGVsQ29kZSI6IkhNMDAwMDA0OTIiLCJob3RlbE5hbWUiOiJzaW1pbGFyIiwibG9hZGVkIjp0cnVlfV0sImN1c3RvbWVyVmlzaWJsZSI6MSwicmVnaW9uQ3VzdG9tZXJWaXNpYmxlIjowLCJyZWdpb25OYW1lIjoi5L2p5ZCJIFBhZ2UiLCJyZWdpb25Db2RlIjoiQTEyMjUiLCJyZWdpb25UeXBlIjoyLCJkZXNjcmlwdGlvbiI6bnVsbCwidGltZSI6IjQifQ=="
+              }
+            ],
+            "isFreeTravel": null,
+            "optionalProductList": null,
+            "distributionFactor": 17
+          },
+          {
+            "section": "Las Vegas|||1+++San Francisco",
+            "todayLocation": "",
+            "dayNumber": 7,
+            "content": [
+              {
+                "contentMode": 3,
+                "productSortNum": null,
+                "relatedId": 5041,
+                "relatedDay": 1,
+                "relatedName": "【YG7-7】拉斯維加斯 - 舊金山",
+                "contentType": 100,
+                "sortNumber": 0,
+                "jsonContent": "{\"travelId\":5041,\"productCategory\":1,\"name\":\"【YG7-7】拉斯維加斯 - 舊金山\",\"productType\":\"PC00000067\",\"isAutoTeam\":null,\"expandList\":[{\"language\":3,\"isSource\":0,\"dayList\":[{\"section\":\"Las Vegas|||1+++San Francisco\",\"todayLocation\":\"\",\"dayNumber\":1,\"content\":[{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":7,\"sortNumber\":0,\"jsonContent\":\"eyJkaXN0YW5jIjoiIiwiZGlzdGFuY1VuaXQiOjEsImhvdXJzIjoiIiwibWludXRlcyI6IiIsInN0YXlIb3VycyI6IiIsInN0YXlNaW51dGVzIjoiIiwibGlzdEltYWdlIjpbXSwiZGVzY3JpcHRpb24iOiI8cD5Ub2RheSB3aWxsIGNvbmNsdWRlIG91ciBhbWF6aW5nIHRvdXIuIFdlIHdpbGwgYmUgZGVwYXJ0aW5nIGZyb20gTGFzIFZlZ2FzIGFuZCBoZWFkaW5nIGJhY2sgdG8gU2FuIEZyYW5jaXNjby4mbmJzcDs8L3A+XG48cD4mbmJzcDs8L3A+XG48cD48c3Ryb25nPkl0aW5lcmFyeTo8L3N0cm9uZz48L3A+XG48cD48c3Ryb25nPkxhcyBWZWdhcyAmcmFycjsgV2VsY29tZSBUbyBGYWJ1bG91cyBMYXMgVmVnYXMgU2lnbjwvc3Ryb25nPiZuYnNwOyggTWFuZGF0b3J5LCAyMC0zMCBtaW5zKSA8c3Ryb25nPiZyYXJyOyZuYnNwO1NhbiBGcmFuY2lzY288L3N0cm9uZz48L3A+IiwidGltZSI6IjEifQ==\"},{\"contentMode\":0,\"productSortNum\":null,\"relatedId\":-1,\"relatedDay\":-1,\"relatedName\":\"\",\"contentType\":2,\"sortNumber\":1,\"jsonContent\":\"eyJpbmZvcm1hdGlvbiI6IlRyYXZlbCBieSBjYXIgZnJvbSBMYXMgVmVnYXMgdG8gU2FuIEZyYW5jaXNjbyIsImRpc3RhbmMiOiI2MDAiLCJkaXN0YW5jVW5pdCI6MywiaG91cnMiOiI5IiwibWludXRlcyI6IiIsInRpbWUiOiIxIn0=\"}],\"distributionFactor\":null}]}]}"
+              }
+            ],
+            "isFreeTravel": null,
+            "optionalProductList": null,
+            "distributionFactor": 5
+          }
+        ]
+      }
+    ]
+  },
+  "productNotice": {
+    "mainLanguage": 3,
+    "productCode": "P00002255",
+    "noticeInfo": [
+      {
+        "matterCode": "AT00001415",
+        "editType": 1,
+        "noticeType": 3,
+        "matterName": "【退改政策】非木屋黃石團及美西團R/BW系列",
+        "vluesTip1": "<table style=\"border-collapse: collapse; width: 100%; height: 110px;\" border=\"1\">\n<tbody>\n<tr style=\"height: 22px;\">\n<td style=\"width: 50%; height: 22px;\">Prior to departure</td>\n<td style=\"width: 50%; height: 22px;\">Penalty charge (% of total tour fee)</td>\n</tr>\n<tr style=\"height: 22px;\">\n<td style=\"width: 50%; height: 22px;\">Less than 7 days prior to departure date (EST)&nbsp;</td>\n<td style=\"width: 50%; height: 22px;\">100%</td>\n</tr>\n<tr style=\"height: 22px;\">\n<td style=\"width: 50%; height: 22px;\">Less than 14 days but 8 days prior to departure date (EST)</td>\n<td style=\"width: 50%; height: 22px;\">50%</td>\n</tr>\n<tr style=\"height: 22px;\">\n<td style=\"width: 50%; height: 22px;\">Less than 30 days but 15 days prior to departure date (EST)</td>\n<td style=\"width: 50%; height: 22px;\">30%</td>\n</tr>\n<tr style=\"height: 22px;\">\n<td style=\"width: 50%; height: 22px;\">31 days prior to departure date (EST)</td>\n<td style=\"width: 50%; height: 22px;\">0</td>\n</tr>\n</tbody>\n</table>\n<p>&nbsp;</p>\n<p>Notes:</p>\n<p>1. Paid tour fee will NOT be refunded in the case of no-shows on the day of departure.</p>\n<p>2. If the guest quit during the trip or fails to participate in any itinerary due to personal reasons (no travel documents, late arrival, illness, accident, etc.), the paid tour fare will not be refunded, and no other services will be compensated.</p>\n<p>3. Additional hotel bookings before or after the tour as well as other services are subject to hotel cancellation policy to determine if a refund is possible.</p>\n<p>4. In the event of weather, war, strikes and other force majeure that make it impossible to tour, Jupiter Legend will try its best to protect the safety of guests and their property. Jupiter Legend reserves the right to cancel or adjust part or all of the itinerary, and will not bear any direct or indirect responsibility caused by force majeure. The paid tour fee is non-refundable.</p>",
+        "vluesTip2": "【退改政策】非木屋黃石團及美西團R/BW系列"
+      },
+      {
+        "matterCode": "AT00002699",
+        "editType": 1,
+        "noticeType": 2,
+        "matterName": "【出行提示】11大國家公園收費政策",
+        "vluesTip1": "<p>Starting January 1, 2026, 11 national parks in the United States will implement an <a href=\"https://www.uvbookings.info/upload/BMS/AdditionalFeesforNon-U.S.Residentsat11U.S.NationalParks.pdf\" target=\"_blank\" rel=\"noopener\">additional admission fee policy for non-U.S. residents </a>(Please click the blue text to view). When entering these national parks, park staff may verify visitors' identities on-site. U.S. residents are required to carry valid identification documents, such as a U.S. passport, driver's license, or green card, for verification.</p>",
+        "vluesTip2": "【出行提示】11大國家公園收費政策"
+      },
+      {
+        "matterCode": "AT00002015",
+        "editType": 1,
+        "noticeType": 1,
+        "matterName": "【預定須知】海鷗產品（不涉及跨境）",
+        "vluesTip1": "<p><strong>Know Before You Book</strong></p>\n<p>1. Customer under 18 years old MUST be accompanied by at least one adult. In consideration of the guest safety, pregnant women are only allowed to join the tour if pregnant for 24 weeks or less by the end of the trip.</p>\n<p>2. Please be sure to provide accurate and complete information upon booking. This includes name, gender, valid contact information (preferably a mobile phone), accurate flight information, tour location, etc., This helps to avoid any errors upon the reservation because errors affect travel. Any losses due to inaccurate or invalid information will be at your own cost and the company will not be held responsible.&nbsp;</p>\n<p>3. Hotels have different room types, such as a King/Queen size beds or two double size twin beds. The maximum number of people who can legally stay in a room is 2 to 4 people. <span style=\"color: #ba372a;\">According to the requirements of some hotels, each group of guests must bring at least one credit card or debit card that can be used at the destination for check-in procedure. If there is no personal consumption, the hotel will refund the deposit to the card within 7-14 working days after check-out. </span>JUPITER LEGEND Corporation and Ctour Holiday guarantee the number of rooms for guests but does not guarantee the specific room type and location. Hotel check-in time is usually after 15:00.</p>\n<p>4. This tour does not accept any City Pass or your own tickets for any of the attractions. Tour attraction admission charges and meal expenses are subject to change at any time without notification. Any purchased ticket cannot be refunded for lower prices.</p>\n<p>5. JUPITER LEGEND Corporation and Ctour Holiday have the right to make appropriate adjustments to the itinerary under the conditions of facilitating the operation for the tour group. This, however, will not reduce the items that should be included in the itinerary.</p>\n<p>6. During the actual trip, the tour guide or driver has the right to appropriately adjust the tour sequence, stay time or assembly time of scenic spots according to the weather, traffic, and other conditions to ensure the smooth progress of the trip.</p>\n<p>7. If any scenic spots are temporarily closed, including on certain holidays, the tour guide will make appropriate adjustments based on the actual situation, which may include viewing from the outside or substituting with another attraction to maintain the richness of the itinerary. Please note that the opening hours and capacity limits of certain attractions and national parks may change from time to time due to health concerns. Should such changes affect the itinerary, they will be considered force majeure. We appreciate your understanding.</p>\n<p>8. Children under the age of 8 require a booster seat in order to participate in the tour group. JUPITER LEGEND Corporation and Ctour Holiday provide the rental service for $10.00/person/day. Please make a request when booking the itinerary so that we may have the booster seat ready in advance. Please understand that the violations and fines are borne by the guests themselves. There is no need for a booster seat for bus travel on the day of travel, and the fee can be refunded to the guest.</p>\n<p>9. Normal health conditions are required to participate and enjoy our full itineraries. Contact us for specific policies or information regarding passengers with disabilities and the handicapped who do need to provide advance notification to make a reservation. JUPITER LEGEND Corporation and Ctour Holiday do not guarantee a wheelchair lift-equipped bus and/or seating availability to disabled passengers without prior notification and approval.</p>\n<p>10. We may alter these terms and conditions from time to time and post the new version on our agents&rsquo; website. It is your responsibility to check the<a title=\"[Terms &amp; Conditions]\" href=\"http://uvbookings.info/upload/terms/e.pdf\" target=\"_blank\" rel=\"noopener\"> [Terms &amp; Conditions] </a>on their website regularly and prior to making a reservation. Unless specifically stated otherwise herein or required by law, JUPITER LEGEND Corporation shall not be liable for any consequential, compensatory, indirect, incidental or punitive damages arising out of or in connection with the performance of its obligations under these terms and conditions.</p>\n<p><span style=\"color: #ba372a;\">11.&nbsp;Due to the continuous rise in fuel prices leading to a sharp increase in vehicle operating costs, effective for all tours departing on May 18, 2026, a transportation surcharge of $5 per person per day will be applied to our tour products. The fee will be collected by tour guides during the trip.</span></p>\n<p>Notes:</p>\n<p>1) No fuel surcharge will be charged on airport pick-up/drop-off days if there are no other bus services arranged.</p>\n<p>2) No fuel surcharge will be charged on days not involving bus services: for example, in Florida-related packages where guests travel to and from the theme park independently using park shuttles, or in train tour packages where the entire day's itinerary is by train without tour guide or bus services.</p>\n<p>&nbsp;</p>\n<p><strong>Know Before You Go</strong></p>\n<p>1. The maximal waiting time for any late passengers is 10 minutes beyond the meeting time announced by the Tour Guide. While JUPITER LEGEND Corporation makes every effort to provide on-time service, it does not guarantee to arrive at or depart from any point.as a specific time, which may be affected by any number of factors including weather, traffic, strikes, government shutdowns, war or terrorist attacks, or mechanical prob- lems. JUPITER LEGEND Corporation is not liable for any inconvenience or expense caused as a result of such a delay, not liable for the expense of connecting air or train or bus service missed as a result of a delay and not liable for any other travel expense caused as a result of a delay.</p>\n<p>2. JUPITER LEGEND Corporation and Ctour Holiday reserve the right, when operating conditions require, transferring passengers from one vehicle to another en route.</p>\n<p>3. The following documents are recommended to make your check-in process smooth: A valid photo ID is required to board the bus; We recommend you bring a copy of the email confirmation to board the bus.</p>\n<p>4. This product is a group activity. If you choose to leave the group, please inform in advance, and obtain the consent of the tour guide. You need to sign the departure agreement form and the unfinished part will be regarded as your own abandonment. The group fee will not be refunded.</p>\n<p>5. Gift items in the itinerary that cannot be given away due to force majeure factors such as traffic and weather conditions or personal reasons may be subject to change. Please understand that the fees will not be refunded.</p>\n<p>6. Smoking is prohibited aboard the bus in accordance with Federal law and prohibited in most hotel rooms. Customers are responsible for any penalty charged by the hotel in a non-smoking room at least $250 per night.</p>\n<p>7. Pets and animals are not allowed on the vehicle.</p>\n<p>8. Only for products with airport pick-up service: only one pick-up service within the free pick-up time range is provided for each room. If it is impossible to arrange due to weather and flight delay, etc., please pay for your own transportation costs.</p>\n<p>9. Emergency contact: (Toll Free) +1(866)585-8747.</p>",
+        "vluesTip2": "【預定須知】海鷗產品（不涉及跨境）"
+      },
+      {
+        "matterCode": "CM00001702",
+        "editType": 1,
+        "noticeType": 0,
+        "matterName": "【海鷗-美西團】多日-含行程所列早餐",
+        "vluesTip1": "<p>1. Transportation (The type of vehicle used will be based on the number of guests attending that day).</p>\n<p>2. Professional driver and guide (or driver-guide).</p>\n<p>3. Hotel (Nights are one day less than the total number of tour days).</p>\n<p>4. Breakfast included in the itinerary.</p>",
+        "vluesTip2": "<p>1. Lunch, dinner and partial breakfasts.</p>\n<p>2. Transportation to the departure boarding point.</p>\n<p>3. Service fee (minimum USD$15/person/day, any child and Infant reserving a seat have to pay the service fees as well).</p>\n<p>4. Personal expenses (such as food &amp; beverage, telephone surcharge, etc.).</p>\n<p>5. Mandatory and optional attraction admission fee (Prices are subject to change without prior notice; Tickets should be purchased from the tour guide).</p>\n<p>6. Any expenses are not listed in Fee Included.</p>"
+      }
+    ],
+    "damagesInfo": [],
+    "advanceDay": -1,
+    "advanceTime": ""
+  },
+  "productCost": {
+    "list": [
+      {
+        "id": 16195,
+        "editType": 1,
+        "expenseCode": "EM00000877",
+        "costDay": "",
+        "expIExpandName": "YG Mandatory Fee",
+        "expIExpandDesc": "<p><strong>Including: </strong>Yellowstone National Park, Grand Teton National Park, Great Salt Lake, Canyonlands National Park, Arches National Park, Monument Valley, Horseshoe Bay, Las Vegas Hotel Resort Fee/Destination Fee, Welcome To Fabulous Las Vegas Sign</p>",
+        "resourceType": 0,
+        "sortNo": 1,
+        "priceInfo": [
+          {
+            "expPriceName": "Everyone",
+            "expPriceMoney": "$215.00",
+            "sortNo": 1
+          }
+        ]
+      },
+      {
+        "id": 22634,
+        "editType": 1,
+        "expenseCode": "EM00001424",
+        "costDay": "",
+        "expIExpandName": "Lower Antelope Canyon",
+        "expIExpandDesc": "<p>Include service fee</p>",
+        "resourceType": 0,
+        "sortNo": 2,
+        "priceInfo": [
+          {
+            "expPriceName": "Adult (4+)",
+            "expPriceMoney": "$105.00",
+            "sortNo": 2
+          },
+          {
+            "expPriceName": "Child (0-3)",
+            "expPriceMoney": "$20.00",
+            "sortNo": 3
+          }
+        ]
+      },
+      {
+        "id": 17446,
+        "editType": 1,
+        "expenseCode": "EM00001062",
+        "costDay": "",
+        "expIExpandName": "Monument Valley Jeep",
+        "expIExpandDesc": "",
+        "resourceType": 0,
+        "sortNo": 3,
+        "priceInfo": [
+          {
+            "expPriceName": "Everyone",
+            "expPriceMoney": "$65.00",
+            "sortNo": 1
+          }
+        ]
+      },
+      {
+        "id": 37780,
+        "editType": 1,
+        "expenseCode": "EM00001764",
+        "costDay": "",
+        "expIExpandName": "Lake Powell Kayaking",
+        "expIExpandDesc": "<p><strong>Fee included:</strong></p>\n<p>1. Kayak, paddles, life jacket and safety course;<br />2. Each person has a pair of waterproof shoe covers, a waterproof phone case, and two bottles of water;<br />3. Professional WFA, CPR - First Aid certified tour guides.</p>\n<p>4. Professional tour guides for water activities fee $6 per person.</p>\n<p>&nbsp;</p>\n<p><strong>Notes:</strong><br />1. Minimum of 4 people is required.<br />2. Based on factors such as water flow and guest physical strength on the day, the entire time is 1-1.5 hours.<br />3. Children aged 4-13 can participate with the accompaniment of their parents. Not eligible for participation under the age of 4.</p>\n<p><span style=\"color: #ba372a;\">4. Expected opening time: 03/20/2026-10/23/2026.</span></p>",
+        "resourceType": 0,
+        "sortNo": 5,
+        "priceInfo": [
+          {
+            "expPriceName": "Everyone",
+            "expPriceMoney": "$115.00",
+            "sortNo": 1
+          }
+        ]
+      },
+      {
+        "id": 17448,
+        "editType": 1,
+        "expenseCode": "EM00000784",
+        "costDay": "",
+        "expIExpandName": "Las Vegas Night View Tour",
+        "expIExpandDesc": "<p>Same price as seat</p>",
+        "resourceType": 0,
+        "sortNo": 5,
+        "priceInfo": [
+          {
+            "expPriceName": "Everyone",
+            "expPriceMoney": "$50.00",
+            "sortNo": 2
+          }
+        ]
+      },
+      {
+        "id": 80214,
+        "editType": 1,
+        "expenseCode": "EM00002260",
+        "costDay": "",
+        "expIExpandName": "Dinner at Top of the World, the STRAT Hotel",
+        "expIExpandDesc": "<p><strong>Includes:</strong></p>\n<p>Appetizer, main course, dessert, unlimited non-alcoholic beverages (alcoholic drinks available for purchase), seating fee, taxes, service charge, and post-dinner observation deck access.</p>\n<p>&nbsp;</p>\n<p><strong>Notes:</strong></p>\n<p>1. This project cannot be booked in advance and guests need sign up directly with the tour guide on the tour.</p>\n<p>2. Due to limited seating, please confirm your reservation with the tour guide by 2:00 PM on the day of dining.</p>\n<p>3. Guests must arrive at the restaurant between 4:00 PM and 6:00 PM (the tour guide will assist with timing based on traffic conditions).</p>\n<p>4. If unforeseen circumstances (e.g., severe traffic, weather disruptions) prevent entry, a refund will be arranged for group guests.</p>",
+        "resourceType": 0,
+        "sortNo": 6,
+        "priceInfo": [
+          {
+            "expPriceName": "Everyone",
+            "expPriceMoney": "$140.00",
+            "sortNo": 1
+          }
+        ]
+      },
+      {
+        "id": 17504,
+        "editType": 1,
+        "expenseCode": "EM00001075",
+        "costDay": "",
+        "expIExpandName": "Fantasy Show",
+        "expIExpandDesc": "<p>Show ticket prices are subject to change. All rates for performances are payable at the venue based on prevailing box office pricing.</p>",
+        "resourceType": 0,
+        "sortNo": 6,
+        "priceInfo": [
+          {
+            "expPriceName": "Everyone",
+            "expPriceMoney": "$85.00",
+            "sortNo": 1
+          }
+        ]
+      },
+      {
+        "id": 17498,
+        "editType": 1,
+        "expenseCode": "EM00001077",
+        "costDay": "",
+        "expIExpandName": "Thunder from Down",
+        "expIExpandDesc": "<p>Show ticket prices are subject to change. All rates for performances are payable at the venue based on prevailing box office pricing.</p>",
+        "resourceType": 0,
+        "sortNo": 8,
+        "priceInfo": [
+          {
+            "expPriceName": "Adult",
+            "expPriceMoney": "$90.00",
+            "sortNo": 1
+          }
+        ]
+      },
+      {
+        "id": 26463,
+        "editType": 1,
+        "expenseCode": "EM00001515",
+        "costDay": "",
+        "expIExpandName": "Blue Man Group",
+        "expIExpandDesc": "<p>Show ticket prices are subject to change. All rates for performances are payable at the venue based on prevailing box office pricing.</p>",
+        "resourceType": 0,
+        "sortNo": 9,
+        "priceInfo": [
+          {
+            "expPriceName": "Everyone: ",
+            "expPriceMoney": "$99.00",
+            "sortNo": 2
+          }
+        ]
+      },
+      {
+        "id": 26464,
+        "editType": 1,
+        "expenseCode": "EM00001516",
+        "costDay": "",
+        "expIExpandName": "KA Show",
+        "expIExpandDesc": "<p>Show ticket prices are subject to change. All rates for performances are payable at the venue based on prevailing box office pricing.</p>",
+        "resourceType": 0,
+        "sortNo": 10,
+        "priceInfo": [
+          {
+            "expPriceName": "Everyone",
+            "expPriceMoney": "$135.00",
+            "sortNo": 1
+          }
+        ]
+      },
+      {
+        "id": 41742,
+        "editType": 1,
+        "expenseCode": "EM00001804",
+        "costDay": "",
+        "expIExpandName": "Tournament of Kings",
+        "expIExpandDesc": "<p>Show ticket prices are subject to change. All rates for performances are payable at the venue based on prevailing box office pricing.</p>",
+        "resourceType": 0,
+        "sortNo": 11,
+        "priceInfo": [
+          {
+            "expPriceName": "Everyone",
+            "expPriceMoney": "$106.00",
+            "sortNo": 1
+          }
+        ]
+      },
+      {
+        "id": 41749,
+        "editType": 1,
+        "expenseCode": "EM00001803",
+        "costDay": "",
+        "expIExpandName": "Michael Jackson One",
+        "expIExpandDesc": "<p>Show ticket prices are subject to change. All rates for performances are payable at the venue based on prevailing box office pricing.</p>",
+        "resourceType": 0,
+        "sortNo": 12,
+        "priceInfo": [
+          {
+            "expPriceName": "Everyone",
+            "expPriceMoney": "$162.00",
+            "sortNo": 1
+          }
+        ]
+      }
+    ],
+    "pager": null,
+    "productCostIsDay": 0
+  },
+  "productShop": {
+    "list": null,
+    "pager": null,
+    "productShopIsDay": 0
+  }
+}

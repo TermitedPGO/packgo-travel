@@ -230,7 +230,7 @@ export interface UvDepartureRow {
   groupSaleStock: number;
   stockStatus: number; // 200 = sellable
   groupPrice: Array<{
-    priceType: number; // 3=adult, 4=child, 5=infant, ...
+    priceType: number; // ROOM OCCUPANCY (not pax type): 3=單人入住 / 4=兩人一房 / 5=三人 / 6=四人
     groupPrice: number;
   }>;
   currencyNum: string;

@@ -411,7 +411,7 @@ describe("uvRowToDeparture (pure) — date edge cases", () => {
       groupStock: 20,
       groupSaleStock: 5,
       stockStatus: 200,
-      groupPrice: [{ priceType: 3, groupPrice: 1499 }],
+      groupPrice: [{ priceType: 4, groupPrice: 1499 }],
       currencyNum: "USD",
       ...overrides,
     };
@@ -578,27 +578,33 @@ describe("uvRowToDeparture (pure) — date edge cases", () => {
     expect(dep?.externalDepartureCode).toBe("P00100001__2026-06-15");
   });
 
-  it("picks adult (priceType=3) price when present; falls back to first row", () => {
-    const withAdult = uvRowToDeparture(
+  it("picks 兩人一房 (priceType=4, double-occupancy) price, not 單人入住 (priceType=3)", () => {
+    // priceType is ROOM OCCUPANCY: 3=單人入住 (single, dearest) descends to
+    // 6=四人 (cheapest). We must quote the 兩人一房 (priceType=4) per-person
+    // price; using priceType=3 (single, single-supp baked in) over-quotes.
+    const withDouble = uvRowToDeparture(
       makeRow({
         groupPrice: [
-          { priceType: 4, groupPrice: 999 },
-          { priceType: 3, groupPrice: 1499 },
+          { priceType: 3, groupPrice: 1348 }, // 單人入住 (single — must NOT pick)
+          { priceType: 4, groupPrice: 998 }, // 兩人一房 (the standard basis)
+          { priceType: 5, groupPrice: 898 }, // 三人
+          { priceType: 6, groupPrice: 868 }, // 四人
         ],
       }),
       PRODUCT_CODE,
       PRODUCT_ID,
       SUPPLIER_ID
     );
-    expect(withAdult?.retailPrice).toBe("1499");
+    expect(withDouble?.retailPrice).toBe("998");
 
-    const noAdult = uvRowToDeparture(
-      makeRow({ groupPrice: [{ priceType: 4, groupPrice: 999 }] }),
+    // Fallback: if priceType 4 is absent, use the first row.
+    const noDouble = uvRowToDeparture(
+      makeRow({ groupPrice: [{ priceType: 3, groupPrice: 1348 }] }),
       PRODUCT_CODE,
       PRODUCT_ID,
       SUPPLIER_ID
     );
-    expect(noAdult?.retailPrice).toBe("999");
+    expect(noDouble?.retailPrice).toBe("1348");
   });
 });
 

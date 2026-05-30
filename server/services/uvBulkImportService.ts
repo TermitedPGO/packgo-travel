@@ -155,11 +155,13 @@ export async function importOneUvProduct(
     const days = productMain.tripDay ?? 0;
     const nights = productMain.nightDay ?? Math.max(0, days - 1);
 
-    // Most-recent groupLatelyPrice as the headline price; fallback to
-    // the first adult-price slot in the departures we pulled.
+    // Most-recent groupLatelyPrice as the headline price; fallback to the
+    // 兩人一房 (priceType=4, double-occupancy) slot in the departures we
+    // pulled. priceType is room occupancy, not pax type — priceType=3
+    // (單人入住/single) would over-quote by ~30-37%.
     const headlinePrice =
       productMain.groupLatelyPrice ||
-      departures[0]?.groupPrice?.find((p) => p.priceType === 3)?.groupPrice ||
+      departures[0]?.groupPrice?.find((p) => p.priceType === 4)?.groupPrice ||
       departures[0]?.groupPrice?.[0]?.groupPrice ||
       0;
 
@@ -230,9 +232,11 @@ export async function importOneUvProduct(
         const totalSeats = Number(dep.groupStock || 0);
         const sold = Number(dep.groupSaleStock || 0);
         const bookedSlots = Math.max(0, sold);
-        const adult = dep.groupPrice?.find((p) => p.priceType === 3);
+        // priceType=4 = 兩人一房 (double-occupancy), the standard per-person
+        // basis. priceType=3 (單人入住/single) over-quotes by ~30-37%.
+        const double = dep.groupPrice?.find((p) => p.priceType === 4);
         const adultPrice = Math.round(
-          adult?.groupPrice ?? dep.groupPrice?.[0]?.groupPrice ?? 0
+          double?.groupPrice ?? dep.groupPrice?.[0]?.groupPrice ?? 0
         );
         const finalStatus: "open" | "full" =
           totalSeats > 0 && totalSeats - sold <= 0 ? "full" : "open";

@@ -1,5 +1,8 @@
 /**
- * Tests for uvDetail parsers.
+ * Tests for uvDetail parsers — exercised against a REAL captured
+ * getProductTravelDetail response (P00002255 / YG7 美西黃石 7-day), plus a few
+ * synthetic edge cases. The fixture is the actual Ctrip SOA2 shape, so these
+ * tests catch shape drift the old hand-written fixtures masked.
  */
 
 import { describe, expect, it } from "vitest";
@@ -9,186 +12,208 @@ import {
   parseUvOptional,
   parseUvPriceTerms,
 } from "./uvDetail";
+import uvTravelDetail from "./__fixtures__/uv-travel-detail.json";
 
-describe("parseUvItinerary", () => {
-  it("returns null when productTravel missing and main is null", () => {
+const real = uvTravelDetail as any;
+
+describe("parseUvItinerary (real fixture)", () => {
+  it("returns null when productTravel missing", () => {
     expect(parseUvItinerary({} as any, null)).toBeNull();
   });
 
-  it("parses day-list shape with attractions + hotels + meals", () => {
-    const travel = {
-      productTravel: [
-        {
-          dayNo: 1,
-          dayTitle: "桃園 → 東京",
-          attractions: [{ name: "成田機場接機" }],
-          hotels: [{ name: "東京希爾頓", city: "Tokyo", rating: 5 }],
-          meals: { breakfast: false, lunch: false, dinner: "機上餐" },
-          transportation: "華航",
-        },
-      ],
-    } as any;
-    const main = { tripDay: 5 } as any;
-    const result = parseUvItinerary(travel, main);
+  it("extracts all 7 days, sorted by dayNumber", () => {
+    const result = parseUvItinerary(real, null);
     expect(result).not.toBeNull();
-    expect(result!.totalDays).toBe(5);
-    expect(result!.days).toHaveLength(1);
-    expect(result!.days[0].title).toBe("桃園 → 東京");
-    expect(result!.days[0].hotels[0].type).toBe("5星");
-    expect(result!.days[0].meals.dinner).toBe("機上餐");
-    expect(result!.days[0].transportation).toBe("華航");
+    // raw dayList order is [1,3,4,6,2,5,7] — parser must sort
+    expect(result!.days.map((d) => d.dayNumber)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    // totalDays from productTravel.productDay when main is null
+    expect(result!.totalDays).toBe(7);
   });
 
-  it("falls back to days.length when main.tripDay is 0", () => {
-    const travel = {
-      productTravel: [
-        { dayNo: 1, dayTitle: "D1" },
-        { dayNo: 2, dayTitle: "D2" },
-      ],
-    } as any;
-    const result = parseUvItinerary(travel, null);
-    expect(result!.totalDays).toBe(2);
+  it("derives day title from relatedName, stripping the 【code】 prefix", () => {
+    const result = parseUvItinerary(real, null)!;
+    expect(result.days[0].title).toBe("舊金山 - 薩克拉門托 - 州府大廈 - 艾可市");
   });
 
-  it("handles dayList nested shape", () => {
+  it("splits the route into per-day attraction stops", () => {
+    const result = parseUvItinerary(real, null)!;
+    expect(result.days[0].attractions.map((a) => a.name)).toEqual([
+      "舊金山",
+      "薩克拉門托",
+      "州府大廈",
+      "艾可市",
+    ]);
+  });
+
+  it("extracts hotels from the base64 content block, with 同級 marker", () => {
+    const result = parseUvItinerary(real, null)!;
+    const names = result.days[0].hotels.map((h) => h.name);
+    expect(names).toContain("Ramada by Wyndham Elko Hotel");
+    expect(names).toContain("SureStay By Best Western Wells");
+    // "similar" → 同級旅館 (or-equivalent marker), not a real hotel name
+    expect(names).toContain("同級旅館");
+    expect(names).not.toContain("similar");
+  });
+
+  it("leaves meals unspecified (UV has no per-day meals)", () => {
+    const result = parseUvItinerary(real, null)!;
+    expect(result.days[0].meals).toEqual({
+      breakfast: "",
+      lunch: "",
+      dinner: "",
+    });
+  });
+
+  it("prefers main.tripDay for totalDays when provided", () => {
+    const result = parseUvItinerary(real, { tripDay: 9 } as any);
+    expect(result!.totalDays).toBe(9);
+  });
+});
+
+describe("parseUvItinerary (synthetic edge cases)", () => {
+  it("sorts an out-of-order dayList and falls back to section title", () => {
     const travel = {
       productTravel: {
-        dayList: [{ dayNo: 1, dayTitle: "Day One" }],
-      },
-    } as any;
-    const result = parseUvItinerary(travel, { tripDay: 1 } as any);
-    expect(result!.days).toHaveLength(1);
-    expect(result!.days[0].title).toBe("Day One");
-  });
-
-  it("classifies hotel type from string", () => {
-    const travel = {
-      productTravel: [
-        {
-          dayNo: 1,
-          hotels: [
-            { name: "A", type: "4 star" },
-            { name: "B", type: "民宿" },
-            { name: "C" },
-          ],
-        },
-      ],
-    } as any;
-    const result = parseUvItinerary(travel, { tripDay: 1 } as any);
-    expect(result!.days[0].hotels[0].type).toBe("4星");
-    expect(result!.days[0].hotels[1].type).toBe("民宿");
-    expect(result!.days[0].hotels[2].type).toBe("未指定");
-  });
-});
-
-describe("parseUvPriceTerms", () => {
-  it("returns null when productCost missing", () => {
-    expect(parseUvPriceTerms({} as any)).toBeNull();
-  });
-
-  it("returns null when all fields empty", () => {
-    expect(
-      parseUvPriceTerms({ productCost: { includedList: [], excludedList: [] } } as any)
-    ).toBeNull();
-  });
-
-  it("parses includedList + excludedList from strings", () => {
-    const result = parseUvPriceTerms({
-      productCost: {
-        includedList: ["機票", "住宿"],
-        excludedList: ["小費"],
-      },
-    } as any);
-    expect(result!.included).toEqual(["機票", "住宿"]);
-    expect(result!.excluded).toEqual(["小費"]);
-  });
-
-  it("parses includedList from objects with name field", () => {
-    const result = parseUvPriceTerms({
-      productCost: {
-        includedList: [{ name: "機票" }, { description: "住宿" }],
-        excludedList: [],
-      },
-    } as any);
-    expect(result!.included).toContain("機票");
-    expect(result!.included).toContain("住宿");
-  });
-
-  it("sorts cancellationPolicy by days desc", () => {
-    const result = parseUvPriceTerms({
-      productCost: {
-        includedList: ["x"],
-        cancellationPolicy: [
-          { daysBeforeDeparture: 7, refundPercent: 50 },
-          { daysBeforeDeparture: 30, refundPercent: 90 },
-          { daysBeforeDeparture: 14, refundPercent: 70 },
+        productTravelInfoList: [
+          {
+            isSource: 0,
+            dayList: [
+              { dayNumber: 2, section: "Osaka|||1+++Kyoto", content: [] },
+              { dayNumber: 1, section: "Tokyo|||1+++Hakone", content: [] },
+            ],
+          },
         ],
       },
-    } as any);
-    expect(result!.cancellationPolicy.map((p) => p.daysBeforeDeparture)).toEqual([30, 14, 7]);
+    } as any;
+    const result = parseUvItinerary(travel, null)!;
+    expect(result.days.map((d) => d.dayNumber)).toEqual([1, 2]);
+    expect(result.days[0].title).toBe("Tokyo - Hakone");
+  });
+
+  it("maps a lone 'similar' to nothing (no real hotel to anchor it)", () => {
+    const travel = {
+      productTravel: {
+        productTravelInfoList: [
+          {
+            dayList: [
+              {
+                dayNumber: 1,
+                section: "X",
+                content: [
+                  {
+                    contentType: 8,
+                    jsonContent: Buffer.from(
+                      JSON.stringify({ content: [{ hotelName: "similar" }] })
+                    ).toString("base64"),
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    } as any;
+    const result = parseUvItinerary(travel, null)!;
+    expect(result.days[0].hotels).toEqual([]);
   });
 });
 
-describe("parseUvNotices", () => {
+describe("parseUvOptional (real fixture)", () => {
+  it("returns null when productCost missing", () => {
+    expect(parseUvOptional({} as any)).toBeNull();
+  });
+
+  it("extracts all 12 cost items with USD prices", () => {
+    const result = parseUvOptional(real)!;
+    expect(result.items).toHaveLength(12);
+    const fee = result.items.find((i) => i.name === "YG Mandatory Fee")!;
+    expect(fee.price).toBe(215);
+    expect(fee.currency).toBe("USD");
+  });
+
+  it("picks the adult/everyone tier when multiple price tiers exist", () => {
+    const result = parseUvOptional(real)!;
+    const antelope = result.items.find(
+      (i) => i.name === "Lower Antelope Canyon"
+    )!;
+    // tiers: Adult (4+) $105 / Child (0-3) $20 → pick adult
+    expect(antelope.price).toBe(105);
+  });
+
+  it("strips HTML from the description", () => {
+    const result = parseUvOptional(real)!;
+    const fee = result.items.find((i) => i.name === "YG Mandatory Fee")!;
+    expect(fee.description).not.toContain("<");
+    expect(fee.description).toContain("Including");
+  });
+});
+
+describe("parseUvOptional (synthetic)", () => {
+  it("detects TWD from an NT$ price string", () => {
+    const result = parseUvOptional({
+      productCost: {
+        list: [
+          {
+            expIExpandName: "夜遊",
+            expIExpandDesc: "",
+            priceInfo: [{ expPriceName: "Adult", expPriceMoney: "NT$2,000" }],
+          },
+        ],
+      },
+    } as any)!;
+    expect(result.items[0].price).toBe(2000);
+    expect(result.items[0].currency).toBe("TWD");
+  });
+});
+
+describe("parseUvPriceTerms (real fixture)", () => {
+  it("extracts inclusions from noticeType-0 notices", () => {
+    const result = parseUvPriceTerms(real)!;
+    expect(result.included).toHaveLength(2);
+    expect(result.included.join("\n")).toContain("Transportation");
+    expect(result.included.join("\n")).toContain("Lunch");
+    expect(result.excluded).toEqual([]);
+    expect(result.cancellationPolicy).toEqual([]);
+  });
+
+  it("returns null when no inclusion notice exists", () => {
+    expect(
+      parseUvPriceTerms({
+        productNotice: { noticeInfo: [{ noticeType: 3, matterName: "退改" }] },
+      } as any)
+    ).toBeNull();
+  });
+});
+
+describe("parseUvNotices (real fixture)", () => {
+  it("buckets refund/booking/tip notices and skips inclusions", () => {
+    const result = parseUvNotices(real)!;
+    const all = [
+      result.visa,
+      result.insurance,
+      result.baggage,
+      result.general,
+    ].join("\n");
+    expect(all).toContain("退改政策");
+    expect(all).toContain("出行提示");
+    expect(all).toContain("預定須知");
+    // noticeType 0 (含…) must NOT appear here — it belongs to priceTerms
+    expect(all).not.toContain("含行程所列早餐");
+  });
+
   it("returns null when productNotice missing", () => {
     expect(parseUvNotices({} as any)).toBeNull();
   });
 
-  it("buckets notes by title keyword", () => {
+  it("routes a visa-keyworded notice to the visa bucket", () => {
     const result = parseUvNotices({
-      productNotice: [
-        { title: "簽證須知", content: "免簽 90 天" },
-        { title: "行李規定", content: "20 kg" },
-        { title: "保險", content: "200 萬" },
-        { title: "其他事項", content: "請守時" },
-      ],
-    } as any);
-    expect(result!.visa).toContain("免簽");
-    expect(result!.baggage).toContain("20 kg");
-    expect(result!.insurance).toContain("200 萬");
-    expect(result!.general).toContain("守時");
-  });
-
-  it("handles nested list shape", () => {
-    const result = parseUvNotices({
-      productNotice: { list: [{ title: "簽證", content: "需簽證" }] },
-    } as any);
-    expect(result!.visa).toContain("需簽證");
-  });
-});
-
-describe("parseUvOptional", () => {
-  it("returns empty items when no shop or optional list", () => {
-    const result = parseUvOptional({} as any);
-    expect(result).toEqual({ items: [] });
-  });
-
-  it("parses shopping stops as free items", () => {
-    const result = parseUvOptional({
-      productShop: [{ shopName: "免稅店", description: "1 小時" }],
-    } as any);
-    expect(result!.items).toHaveLength(1);
-    expect(result!.items[0].name).toBe("免稅店");
-    expect(result!.items[0].price).toBe(0);
-  });
-
-  it("parses optionalList with prices", () => {
-    const result = parseUvOptional({
-      optionalList: [
-        { name: "夜遊", price: 2000, currency: "TWD" },
-        { name: "溫泉", price: 500 },
-      ],
-    } as any);
-    expect(result!.items).toHaveLength(2);
-    expect(result!.items[0].price).toBe(2000);
-    expect(result!.items[1].currency).toBe("TWD"); // default
-  });
-
-  it("merges shop + optionalList", () => {
-    const result = parseUvOptional({
-      productShop: [{ shopName: "A" }],
-      optionalList: [{ name: "B", price: 100 }],
-    } as any);
-    expect(result!.items).toHaveLength(2);
+      productNotice: {
+        noticeInfo: [
+          { noticeType: 1, matterName: "簽證須知", vluesTip1: "<p>免簽 90 天</p>" },
+        ],
+      },
+    } as any)!;
+    expect(result.visa).toContain("免簽");
+    expect(result.general).toBe("");
   });
 });
