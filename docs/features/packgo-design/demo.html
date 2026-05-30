@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PACK&GO 設計示意圖 — 刻意 vs AI 感</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Serif+TC:wght@500;600;700;900&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --ink:#14181f; --ink-soft:#5b6370; --ink-faint:#9aa1ab;
+    --teal:#0D9488; --teal-deep:#0b756b; --teal-tint:#e9f5f3; --teal-line:#d3e9e5;
+    --paper:#ffffff; --wash:#faf9f7; --line:#ecedef; --ph:#eef0f2;
+    --r-xl:16px; --r-lg:10px; --r-md:6px; --r-3xl:26px;
+    --maxw:1200px;
+    --serif:"Noto Serif TC", Georgia, "Songti TC", serif;
+    --sans:"Inter", -apple-system, BlinkMacSystemFont, "PingFang TC", "Microsoft JhengHei", sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--sans); color:var(--ink); background:var(--paper); -webkit-font-smoothing:antialiased; line-height:1.55}
+  /* very subtle paper grain — neutral, no colour */
+  body::before{content:""; position:fixed; inset:0; z-index:9999; pointer-events:none; opacity:.025;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+  .wrap{max-width:var(--maxw); margin:0 auto; padding:0 32px}
+  .kicker{font:600 12px/1 var(--sans); letter-spacing:.24em; text-transform:uppercase; color:var(--teal)}
+  h1,h2,h3{font-family:var(--serif); font-weight:700; letter-spacing:-.01em; color:var(--ink)}
+  a{color:inherit;text-decoration:none}
+  img{display:block; width:100%; height:100%; object-fit:cover}
+  .imgbox{position:relative; background:var(--ph); border-radius:var(--r-xl); overflow:hidden}
+
+  /* topbar */
+  .topbar{border-bottom:1px solid var(--line); background:rgba(255,255,255,.86); backdrop-filter:blur(6px); position:sticky; top:0; z-index:50}
+  .topbar .wrap{display:flex; align-items:center; justify-content:space-between; height:60px}
+  .brand{font-family:var(--serif); font-weight:900; font-size:20px; letter-spacing:-.02em}
+  .brand b{color:var(--teal)}
+  .pill{font-size:12px; font-weight:600; color:var(--teal-deep); background:var(--teal-tint); border:1px solid var(--teal-line); padding:6px 12px; border-radius:999px}
+
+  section{padding:84px 0}
+  .seclead{display:flex; align-items:flex-end; justify-content:space-between; gap:24px; margin-bottom:36px; border-bottom:1px solid var(--line); padding-bottom:18px}
+  .seclead h2{font-size:clamp(26px,3vw,38px); line-height:1.08}
+  .seclead p{color:var(--ink-soft); font-size:15px; max-width:34ch}
+
+  /* A/B compare */
+  .compare{display:grid; grid-template-columns:1fr 1fr; gap:24px}
+  .panel{border-radius:var(--r-xl); overflow:hidden; border:1px solid var(--line); background:var(--paper)}
+  .panel .tag{display:flex; align-items:center; gap:8px; padding:12px 16px; font-size:13px; font-weight:600; border-bottom:1px solid var(--line)}
+  .panel.bad .tag{color:#9aa1ab; background:#f6f7f8}
+  .panel.good .tag{color:var(--teal-deep); background:var(--teal-tint)}
+  .panel .stage{padding:30px; min-height:300px; display:flex; flex-direction:column; justify-content:center}
+  /* generic "AI" mini hero */
+  .ai .center{text-align:center; max-width:360px; margin:0 auto}
+  .ai .ph{height:92px; border-radius:12px; background:var(--ph); margin:0 auto 18px; width:100%}
+  .ai h3{font-family:var(--sans); font-weight:700; font-size:23px; margin-bottom:8px; color:#3a3f48}
+  .ai p{color:#7b818b; font-size:14px; margin-bottom:16px}
+  .ai .btns{display:flex; gap:10px; justify-content:center}
+  .ai .b1{background:#7c5cff; color:#fff; border-radius:999px; padding:9px 18px; font-size:13px; font-weight:600}
+  .ai .b2{background:#fff; color:#6b7280; border:1px solid #d6d6d6; border-radius:999px; padding:9px 18px; font-size:13px; font-weight:600}
+  /* intentional mini hero */
+  .pg h3{font-size:38px; line-height:1.05; letter-spacing:-.02em; margin:14px 0}
+  .pg h3 em{font-style:normal; color:var(--teal)}
+  .pg .lede{color:var(--ink-soft); font-size:14px; max-width:30ch; margin-bottom:20px}
+  .pg .row{display:flex; align-items:center; gap:16px}
+  .pg .cta{background:var(--teal); color:#fff; font-weight:600; font-size:13px; padding:11px 20px; border-radius:var(--r-lg)}
+  .pg .meta{font-size:12px; color:var(--ink-faint); border-left:2px solid var(--teal-line); padding-left:12px; line-height:1.4}
+  .note{margin-top:14px; font-size:13px; color:var(--ink-soft); padding:0 4px}
+  .note b{color:var(--ink)}
+
+  /* hero */
+  .hero{padding-top:60px}
+  .hero-grid{display:grid; grid-template-columns:1.12fr .95fr; gap:48px; align-items:center}
+  .hero .kicker{margin-bottom:22px}
+  .hero h1{font-size:clamp(44px,6.2vw,84px); line-height:.99; font-weight:900; letter-spacing:-.025em}
+  .hero h1 em{font-style:normal; color:var(--teal)}
+  .hero .lede{margin:26px 0 32px; color:var(--ink-soft); font-size:18px; max-width:40ch}
+  .hero .actions{display:flex; align-items:center; gap:20px; flex-wrap:wrap}
+  .btn-primary{background:var(--teal); color:#fff; font-weight:600; font-size:15px; padding:14px 26px; border-radius:var(--r-lg); border:none; cursor:pointer; transition:background .18s, transform .18s}
+  .btn-primary:hover{background:var(--teal-deep); transform:translateY(-2px)}
+  .btn-ghost{font-weight:600; font-size:15px; display:inline-flex; align-items:center; gap:8px}
+  .btn-ghost .arr{color:var(--teal)}
+  .trust{display:flex; gap:26px; margin-top:40px; padding-top:26px; border-top:1px solid var(--line)}
+  .trust .n{font-family:var(--serif); font-weight:700; font-size:26px}
+  .trust .l{font-size:12px; color:var(--ink-faint)}
+  .hero .imgbox{aspect-ratio:4/5; box-shadow:0 30px 60px -34px rgba(20,24,31,.35)}
+  .hero .cap{position:absolute; left:16px; bottom:16px; z-index:2; background:rgba(255,255,255,.94); border-radius:var(--r-md); padding:8px 12px; backdrop-filter:blur(4px)}
+  .hero .cap .k{font:600 10px/1 var(--sans); letter-spacing:.18em; text-transform:uppercase; color:var(--teal)}
+  .hero .cap .t{font-family:var(--serif); font-weight:700; font-size:15px; margin-top:4px}
+
+  /* search */
+  .search{display:grid; grid-template-columns:1.1fr 1.1fr 1fr auto; align-items:stretch; background:#fff; border:1px solid var(--line); border-radius:var(--r-3xl); overflow:hidden; box-shadow:0 20px 50px -34px rgba(20,24,31,.35)}
+  .field{padding:16px 22px; border-right:1px solid var(--line)}
+  .field label{display:block; font-size:11px; font-weight:600; letter-spacing:.12em; text-transform:uppercase; color:var(--teal); margin-bottom:5px}
+  .field .v{font-size:15px; font-weight:500}
+  .field .v.ph{color:var(--ink-faint); font-weight:400}
+  .search .go{margin:10px; align-self:center}
+  .search .go button{height:100%; min-height:52px; padding:0 30px; background:var(--teal); color:#fff; font-weight:600; font-size:15px; border:none; border-radius:var(--r-lg); cursor:pointer; transition:background .18s, transform .18s; display:flex; align-items:center; gap:9px}
+  .search .go button:hover{background:var(--teal-deep); transform:translateY(-1px)}
+
+  /* tours bento — light, photo-driven */
+  .tours{display:grid; grid-template-columns:repeat(6,1fr); gap:22px}
+  .card{grid-column:span 2; background:var(--paper); border:1px solid var(--line); border-radius:var(--r-xl); overflow:hidden; transition:transform .2s, box-shadow .2s; cursor:pointer; display:flex; flex-direction:column}
+  .card:hover{transform:translateY(-5px); box-shadow:0 26px 50px -32px rgba(20,24,31,.28)}
+  .card .pic{position:relative; aspect-ratio:3/2; background:var(--ph); min-height:0}
+  .card .pic img{position:absolute; inset:0}
+  .card .pic .badge{position:absolute; top:12px; left:12px; z-index:2; font-size:11px; font-weight:600; color:var(--teal-deep); background:rgba(255,255,255,.92); backdrop-filter:blur(4px); padding:5px 10px; border-radius:var(--r-md)}
+  .card .body{padding:18px 18px 20px; display:flex; flex-direction:column; gap:8px; flex:1}
+  .card .route{font:600 11px/1 var(--sans); letter-spacing:.16em; text-transform:uppercase; color:var(--teal)}
+  .card .name{font-family:var(--serif); font-weight:700; font-size:20px; line-height:1.18}
+  .card .desc{font-size:13px; color:var(--ink-soft); line-height:1.5; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; min-height:39px}
+  .card .foot{margin-top:auto; display:flex; align-items:baseline; justify-content:space-between; padding-top:12px; border-top:1px solid var(--line)}
+  .card .price small{font-size:11px; color:var(--ink-faint); font-weight:500}
+  .card .price .amt{font-family:var(--serif); font-weight:700; font-size:23px; margin-left:2px}
+  .card .days{font-size:12px; color:var(--ink-faint)}
+  /* featured: photo left, WHITE body right (light, airy) */
+  .card.feature{grid-column:span 6; flex-direction:row}
+  .card.feature .pic{flex:0 0 50%; aspect-ratio:auto}
+  .card.feature .body{padding:40px 44px; justify-content:flex-start; gap:14px}
+  .card.feature .name{font-size:34px; line-height:1.08}
+  .card.feature .desc{font-size:15px; max-width:46ch; min-height:auto}
+  .card.feature .hl{display:flex; flex-wrap:wrap; gap:8px; margin-top:2px}
+  .card.feature .hl span{font-size:12px; color:var(--ink-soft); background:var(--wash); border:1px solid var(--line); border-radius:var(--r-md); padding:5px 11px}
+  .card.feature .fcta{margin-top:8px; align-self:flex-start; color:var(--teal); font-weight:600; font-size:14px; display:inline-flex; gap:8px; align-items:center}
+  .card.feature .foot{justify-content:flex-start; align-items:baseline; gap:24px; margin-top:24px}
+
+  /* why (light wash) */
+  .why{background:var(--wash); border-top:1px solid var(--line); border-bottom:1px solid var(--line)}
+  .why .grid{display:grid; grid-template-columns:repeat(3,1fr); gap:34px 30px}
+  .why .it .n{font-family:var(--serif); font-weight:900; font-size:30px; color:var(--teal); line-height:1}
+  .why .it h4{font-size:14px; font-weight:700; margin:12px 0 6px}
+  .why .it p{font-size:13px; color:var(--ink-soft); line-height:1.5}
+
+  /* one orchestrated entrance */
+  .reveal{opacity:0; transform:translateY(18px); animation:up .8s cubic-bezier(.2,.7,.2,1) forwards}
+  .d1{animation-delay:.05s}.d2{animation-delay:.16s}.d3{animation-delay:.27s}.d4{animation-delay:.38s}.d5{animation-delay:.49s}.d6{animation-delay:.6s}
+  @keyframes up{to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion:reduce){.reveal{animation:none;opacity:1;transform:none}}
+  @media (max-width:900px){
+    .compare,.hero-grid{grid-template-columns:1fr}
+    .search{grid-template-columns:1fr 1fr}
+    .tours,.why .grid{grid-template-columns:1fr 1fr}
+    .card,.card.feature{grid-column:span 2}
+    .card.feature{flex-direction:column}
+  }
+</style>
+</head>
+<body>
+
+  <div class="topbar"><div class="wrap">
+    <div class="brand">PACK&amp;<b>GO</b></div>
+    <span class="pill">設計示意圖 · 不影響線上頁面</span>
+  </div></div>
+
+  <!-- ===== A/B COMPARE ===== -->
+  <section class="wrap">
+    <div class="seclead reveal d1">
+      <h2>同樣的內容,<br>兩種做法</h2>
+      <p>差別不在顏色或字體選錯,在於<b>有沒有刻意</b> — 構圖、層次、留白、照片。</p>
+    </div>
+    <div class="compare">
+      <div class="panel bad reveal d2">
+        <div class="tag">✕ 常見「AI 感」版</div>
+        <div class="stage ai"><div class="center">
+          <div class="ph"></div>
+          <h3>探索美西經典路線</h3>
+          <p>我們提供各種美西旅遊行程,立即預訂屬於你的旅程。</p>
+          <div class="btns"><span class="b1">立即預訂</span><span class="b2">了解更多</span></div>
+        </div></div>
+      </div>
+      <div class="panel good reveal d3">
+        <div class="tag">✓ PACK&amp;GO 刻意版</div>
+        <div class="stage pg">
+          <div class="kicker">美西私人定制 · 2026 春夏</div>
+          <h3>把美西,<br>走成一場<em>慢旅行</em></h3>
+          <p class="lede">全程中文領隊、純玩無購物。路線為你一個家庭重新編排。</p>
+          <div class="row"><span class="cta">開始規劃我的旅程</span><span class="meta">1,200+ 家庭<br>選擇 PACK&amp;GO</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="compare" style="margin-top:14px">
+      <p class="note reveal d4">置中、無重點、紫色按鈕、藥丸鈕、Inter 當標題、灰色佔位圖 — 每個都是「安全的預設」,所以像任何一個 AI 生的網站。</p>
+      <p class="note reveal d5"><b>白底、teal 只當點綴</b>,靠:巨大 serif 字級對比、左對齊不對稱、kicker 標籤、留白。乾淨是<b>刻意選的方向</b>,顏色交給真實照片。</p>
+    </div>
+  </section>
+
+  <!-- ===== HERO ===== -->
+  <section class="wrap hero">
+    <div class="hero-grid">
+      <div>
+        <div class="kicker reveal d1">美西私人定制旅行 · Mandarin-guided</div>
+        <h1 class="reveal d2">讓西岸的光,<br>成為旅程的<br><em>主角</em>。</h1>
+        <p class="lede reveal d3">黃石的晨霧、一號公路的海風、羚羊峽谷的光束 — 我們把每條路線,為你一個家庭重新編排。全程中文領隊,純玩無購物。</p>
+        <div class="actions reveal d4">
+          <button class="btn-primary">開始規劃我的旅程</button>
+          <a class="btn-ghost">看經典路線 <span class="arr">→</span></a>
+        </div>
+        <div class="trust reveal d5">
+          <div><div class="n">1,200+</div><div class="l">家庭的選擇</div></div>
+          <div><div class="n">12 年</div><div class="l">美西在地經驗</div></div>
+          <div><div class="n">100%</div><div class="l">中文領隊隨行</div></div>
+        </div>
+      </div>
+      <div class="reveal d3">
+        <div class="imgbox">
+          <img src="https://images.unsplash.com/photo-1485738422979-f5c462d49f74?w=1400&q=80&auto=format&fit=crop" alt="美西公路風景" loading="eager" />
+          <div class="cap"><div class="k">American West</div><div class="t">把公路走成風景</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="reveal d5" style="margin-top:46px">
+      <div class="search">
+        <div class="field"><label>出發城市</label><div class="v">San Francisco</div></div>
+        <div class="field"><label>想去哪</label><div class="v ph">黃石 · 大峽谷 · 夏威夷…</div></div>
+        <div class="field"><label>出發時間</label><div class="v ph">選擇日期</div></div>
+        <div class="go"><button>搜尋路線 →</button></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== TOURS ===== -->
+  <section class="wrap">
+    <div class="seclead reveal d1">
+      <h2>本季精選路線</h2>
+      <p>小團出發,行程可依你的家庭節奏調整。</p>
+    </div>
+    <div class="tours">
+      <article class="card feature reveal d2">
+        <div class="pic"><img src="https://images.unsplash.com/photo-1507699622108-4be3abd695ad?w=1200&q=80&auto=format&fit=crop" alt="黃石大提頓" /></div>
+        <div class="body">
+          <div class="route">Yellowstone · Grand Teton</div>
+          <div class="name">黃石 + 大提頓<br>深度 8 日</div>
+          <div class="desc">追著晨霧進老忠實,在傑克森小鎮慢下來。私人嚮導帶你避開人潮,走進只有在地人知道的觀景點。</div>
+          <div class="hl"><span>老忠實間歇泉</span><span>大稜鏡溫泉</span><span>傑克森小鎮</span><span>大提頓晨拍</span></div>
+          <div class="foot">
+            <div class="price"><small>每人約</small><span class="amt">$2,180</span> <small>起</small></div>
+            <span class="fcta">查看行程 →</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="card reveal d3">
+        <div class="pic"><img src="https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?w=800&q=80&auto=format&fit=crop" alt="加州一號公路" /><span class="badge">私人定制</span></div>
+        <div class="body">
+          <div class="route">Highway 1</div>
+          <div class="name">加州一號公路 6 日</div>
+          <div class="desc">舊金山一路向南到洛杉磯,沿太平洋追海岸線,停大蘇爾與卡梅爾小鎮。</div>
+          <div class="foot"><div class="price"><small>$</small><span class="amt">1,580</span></div><div class="days">6 天 5 夜</div></div>
+        </div>
+      </article>
+
+      <article class="card reveal d4">
+        <div class="pic"><img src="https://images.unsplash.com/photo-1489749798305-4fea3ae63d43?w=800&q=80&auto=format&fit=crop" alt="大峽谷羚羊峽谷" /><span class="badge">小團 · 中文領隊</span></div>
+        <div class="body">
+          <div class="route">Grand Canyon</div>
+          <div class="name">大峽谷 + 羚羊峽谷 4 日</div>
+          <div class="desc">馬蹄灣日落、羚羊峽谷光束,一次走完美西三大經典地標。</div>
+          <div class="foot"><div class="price"><small>$</small><span class="amt">980</span></div><div class="days">4 天 3 夜</div></div>
+        </div>
+      </article>
+
+      <article class="card reveal d5">
+        <div class="pic"><img src="https://images.unsplash.com/photo-1537996194471-e657df975ab4?w=800&q=80&auto=format&fit=crop" alt="夏威夷大島" /><span class="badge">純玩無購物</span></div>
+        <div class="body">
+          <div class="route">Big Island</div>
+          <div class="name">夏威夷大島 7 日</div>
+          <div class="desc">火山國家公園、黑沙灘與高山觀星,跟著海島節奏慢慢走。</div>
+          <div class="foot"><div class="price"><small>$</small><span class="amt">2,460</span></div><div class="days">7 天 6 夜</div></div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <!-- ===== WHY ===== -->
+  <section class="why"><div class="wrap">
+    <div class="seclead reveal d1" style="border:none;padding-bottom:8px">
+      <h2>為什麼這「不像 AI 做的」</h2>
+      <p>六個刻意決定 — 這些就是要寫進 <b>packgo-design</b> skill 的規則種子。</p>
+    </div>
+    <div class="grid">
+      <div class="it reveal d1"><div class="n">01</div><h4>巨大字級對比</h4><p>Serif 標題敢到 80px+,跟 16px 內文拉開戲劇張力,不用「安全」的 36px。</p></div>
+      <div class="it reveal d2"><div class="n">02</div><h4>不對稱構圖</h4><p>左對齊、圖文 1.12:0.95 錯位,不是事事置中的對稱版面。</p></div>
+      <div class="it reveal d3"><div class="n">03</div><h4>白底 + 克制的 teal</h4><p>teal 只出現在 kicker、按鈕、價格、小標籤,不鋪大色塊。</p></div>
+      <div class="it reveal d4"><div class="n">04</div><h4>真實照片提供顏色</h4><p>顏色交給旅遊照本身,不自己編漸層 — 漸層假圖正是 AI 感來源。</p></div>
+      <div class="it reveal d5"><div class="n">05</div><h4>一次編排的進場</h4><p>單一 staggered fade-up,不是滿頁零散特效;尊重 reduced-motion。</p></div>
+      <div class="it reveal d6"><div class="n">06</div><h4>密度節奏</h4><p>每格等高、文字 clamp 行數、footer 釘底;大格按比例補內容,不留中間空洞 — 太擠或太空都是 AI 感。</p></div>
+    </div>
+  </div></section>
+
+  <div class="wrap" style="padding:40px 32px 70px; color:var(--ink-faint); font-size:13px">
+    示意圖 · 沿用既有圓角規範(卡片 <code>rounded-xl</code> / 按鈕 <code>rounded-lg</code> / 搜尋框 <code>rounded-3xl</code>)、teal <code>#0D9488</code> 僅作點綴、Noto Serif TC 標題 + Inter 內文。照片取自站上既有 Unsplash 素材,正式版換成各路線真實照片。
+  </div>
+
+</body>
+</html>
