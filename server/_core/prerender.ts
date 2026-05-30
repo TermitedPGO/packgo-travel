@@ -22,7 +22,13 @@ const log = createChildLogger({ module: "prerender" });
 // Hard caps so a slow/stuck page can never hold a pool slot for long. Bots
 // tolerate latency; we'd rather time out and return partial HTML than block.
 const NAV_TIMEOUT_MS = 12_000;
-const READY_TIMEOUT_MS = 8_000;
+// 15s, not 8s: the FIRST render after a deploy/restart is cold (Chromium just
+// launched + VM cold), and on prod that pushed React mount + helmet schema
+// injection just past 8s — the ready-signal timed out and we only caught the
+// schema because page.content() happened to serialize a beat later. Warm renders
+// settle in <2s, so the extra ceiling only ever applies to the rare cold first
+// hit (cached 24h after), and it guarantees the schema is in before we serialize.
+const READY_TIMEOUT_MS = 15_000;
 
 // UA for the internal render request. MUST NOT match any bot pattern in
 // prerenderMiddleware — otherwise the headless request would be intercepted by
@@ -56,8 +62,8 @@ export async function renderForBot(pathname: string): Promise<string | null> {
 
     // Wait until React has mounted (#root populated) AND the SEO schema has
     // actually been injected by react-helmet — that's the whole point. Tolerate
-    // timeout: if a page never injects schema we still return the networkidle
-    // HTML rather than nothing.
+    // timeout: if a page never injects schema (e.g. routes that don't set one)
+    // we still return the current DOM rather than nothing.
     await page
       .waitForFunction(
         () => {
