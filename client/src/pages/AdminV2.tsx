@@ -90,6 +90,7 @@ const AuditLogTab = lazy(() => import("@/components/admin/AuditLogTab"));
 const CalibrationReviewTab = lazy(() => import("@/components/admin/CalibrationReviewTab"));
 const AutonomousAgentsTab = lazy(() => import("@/components/admin/AutonomousAgentsTab"));
 const VisaManagementTab = lazy(() => import("@/components/admin/VisaManagementTab"));
+const SkillsTab = lazy(() => import("@/components/admin/SkillsTab"));
 
 // ────────────────────────────────────────────────────────────────────────
 // Information architecture — 6 domains
@@ -109,7 +110,7 @@ type PageId =
   | "finance-landing" | "bank-ledger" | "finance-reports"
   | "profit-loss" | "trust-compliance" | "invoices" | "reconciliation" | "accounting"
   // System
-  | "ai-hub" | "llm-cost" | "task-history" | "audit-log" | "calibration-review" | "autonomous-agents" | "visa" | "cleanup" | "supplier-enrichment";
+  | "ai-hub" | "llm-cost" | "task-history" | "audit-log" | "calibration-review" | "autonomous-agents" | "skills" | "visa" | "cleanup" | "supplier-enrichment";
 
 type DomainId = "office" | "ops" | "customers" | "marketing" | "finance" | "system";
 
@@ -193,6 +194,7 @@ const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageD
     ],
     advanced: [
       { id: "calibration-review", label: "QA 審查" },
+      { id: "skills", label: "AI 技能" },
       { id: "task-history", label: "任務記錄" },
       { id: "audit-log", label: "審計日誌" },
       { id: "visa", label: "中國簽證" },
@@ -562,6 +564,8 @@ function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
       return <CalibrationReviewTab />;
     case "autonomous-agents":
       return <AutonomousAgentsTab />;
+    case "skills":
+      return <SkillsTab />;
     case "visa":
       return <VisaManagementTab />;
     case "cleanup":

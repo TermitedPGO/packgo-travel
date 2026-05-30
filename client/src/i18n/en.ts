@@ -2995,6 +2995,8 @@ export const en = {
       toastDepositGenerated: 'Deposit invoice PDF generated',
       toastDepositFailed: 'Failed to generate deposit invoice PDF',
       toastMissingAmount: 'Booking is missing amounts, cannot generate PDF',
+      depositTbdDate: 'TBD',
+      depositDefaultCustomer: 'Customer',
     },
     inquiriesTab: {
       title: 'Inquiry Management',

@@ -2961,6 +2961,8 @@ export const zhTW = {
       toastDepositGenerated: '訂金通知 PDF 已產生',
       toastDepositFailed: '訂金通知 PDF 產生失敗',
       toastMissingAmount: '訂單缺少金額資訊，無法產生 PDF',
+      depositTbdDate: '待定',
+      depositDefaultCustomer: '貴賓',
     },
     inquiriesTab: {
       title: '諮詢管理',

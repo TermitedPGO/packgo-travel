@@ -35,7 +35,7 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
-import { Download, RefreshCw, Search, ShoppingCart, X } from "lucide-react";
+import { Download, Loader2, RefreshCw, Search, ShoppingCart, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
@@ -148,6 +148,45 @@ export default function BookingsTabV2() {
     onError: () => toast.error(t("admin.bookingsTab.toastUpdateFailed")),
     onSettled: () => setUpdatingId(null),
   });
+
+  // One-click deposit invoice PDF for the selected booking (restored from v1
+  // BookingsTab; backend = trpc.tools.generateDeposit). Opens the rendered PDF
+  // in a new tab so Jeff can sanity-check before forwarding to the customer.
+  const generateDepositMutation = trpc.tools.generateDeposit.useMutation({
+    onSuccess: (res) => {
+      toast.success(t("admin.bookingsTab.toastDepositGenerated"));
+      if (res.url) window.open(res.url, "_blank", "noopener,noreferrer");
+    },
+    onError: (err) =>
+      toast.error(err?.message || t("admin.bookingsTab.toastDepositFailed")),
+  });
+
+  const handleGenerateDeposit = (b: BookingRow) => {
+    const depUSD = Number(b.depositAmount ?? 0);
+    const totUSD = Number(b.totalAmount ?? 0);
+    if (!depUSD || !totUSD) {
+      toast.error(t("admin.bookingsTab.toastMissingAmount"));
+      return;
+    }
+    generateDepositMutation.mutate({
+      bookingId: b.id,
+      customerName: b.contactName || t("admin.bookingsTab.depositDefaultCustomer"),
+      customerEmail: b.contactEmail || undefined,
+      tripName: b.tourTitle || `Tour #${b.tourId ?? "?"}`,
+      departureDate: b.departureDate
+        ? new Date(b.departureDate).toLocaleDateString(
+            language === "en" ? "en-US" : "zh-TW",
+            { year: "numeric", month: "long", day: "numeric" },
+          )
+        : t("admin.bookingsTab.depositTbdDate"),
+      passengers:
+        b.totalPax != null
+          ? `${b.totalPax} ${t("admin.bookingsTab.paxSuffix")}`
+          : undefined,
+      totalUSD: totUSD,
+      depositUSD: depUSD,
+    });
+  };
 
   const selected = useMemo(
     () => (selectedId !== null ? (rawBookings as BookingRow[]).find((b) => b.id === selectedId) : null),
@@ -489,6 +528,24 @@ export default function BookingsTabV2() {
 
               {/* Footer actions */}
               <div className="pt-3 border-t border-gray-100 flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleGenerateDeposit(selected)}
+                  disabled={
+                    generateDepositMutation.isPending ||
+                    !selected.totalAmount ||
+                    !selected.depositAmount
+                  }
+                  className="h-8 rounded-lg gap-1.5"
+                >
+                  {generateDepositMutation.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Download className="h-3.5 w-3.5" />
+                  )}
+                  {t("admin.bookingsTab.generateDepositPdf")}
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
