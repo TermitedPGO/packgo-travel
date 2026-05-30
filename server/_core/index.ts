@@ -16,6 +16,7 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { prerenderMiddleware } from "./prerenderMiddleware";
 import { handleStripeWebhook } from "./stripeWebhook";
 import { avatarUploadRouter } from "../avatarUpload";
 import { tourImageUploadRouter } from "../tourImageUpload";
@@ -803,6 +804,11 @@ async function startServer() {
       createContext,
     })
   );
+  // Bot-UA dynamic rendering — intercept crawler/AI-bot requests BEFORE the SPA
+  // fallback so they get fully-rendered HTML (title + meta + JSON-LD), while
+  // real users fall through to the normal SPA. See docs/features/bot-prerender/.
+  app.use(prerenderMiddleware);
+
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);
