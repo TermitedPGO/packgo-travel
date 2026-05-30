@@ -260,6 +260,39 @@ export function buildBreadcrumbSchema(
   };
 }
 
+/** FAQPage schema for pages that surface Q&A content (tour notices, FAQ page).
+ *  Emits only items whose question AND answer are both non-empty, and returns
+ *  null when nothing is populated so callers can omit it entirely — an empty
+ *  FAQPage is invalid schema and trips rich-result audits.
+ *
+ *  CRITICAL: the question + answer text passed here MUST already be visible on
+ *  the page. Google requires on-page parity for FAQ structured data, and the
+ *  real payoff is AI answer engines (ChatGPT / Perplexity / Claude) citing the
+ *  matching visible content. Never synthesize Q&A that isn't on the page. */
+export function buildFAQSchema(
+  items: Array<{ question: string; answer: string }>,
+): object | null {
+  const clean = items
+    .map((it) => ({
+      question: (it.question ?? "").trim(),
+      answer: (it.answer ?? "").trim(),
+    }))
+    .filter((it) => it.question.length > 0 && it.answer.length > 0);
+  if (clean.length === 0) return null;
+  return {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: clean.map((it) => ({
+      "@type": "Question",
+      name: it.question,
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: it.answer,
+      },
+    })),
+  };
+}
+
 /** TouristTrip schema for individual tour detail pages.
  *  Round 80.25 — added aggregateRating (rich-result eligible star ratings),
  *  multi-image array, availableLanguage (Mandarin guide selling point),

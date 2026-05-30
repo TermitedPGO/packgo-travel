@@ -32,7 +32,7 @@ import { initializeGmailOAuth } from "../gmailOAuth";
 // imported below). Middleware is registered inside startServer() below.
 import { logger } from "./logger";
 import { correlationIdMiddleware } from "./correlationId";
-import { shutdownPool } from "./puppeteerPool";
+import { shutdownPool, warmUp } from "./puppeteerPool";
 import pinoHttp from "pino-http";
 import "../worker"; // Initialize BullMQ worker
 
@@ -90,6 +90,14 @@ async function startServer() {
     const addr = server.address();
     const port = typeof addr === 'object' ? addr?.port : addr;
     logger.info({ port }, "Server running");
+    // Pre-warm the headless Chromium pool so the first bot-prerender after a
+    // deploy (Redis cache wiped → guaranteed cold) doesn't eat the 2-5s launch.
+    // Fire-and-forget: warmUp() never throws and we don't await it, so serving
+    // starts immediately. Prod-only — dev rarely exercises prerender and the
+    // local box has no Chromium at CHROMIUM_PATH, so warming there is wasted.
+    if (process.env.NODE_ENV === "production") {
+      void warmUp();
+    }
   });
   
   // Round 80.18 v2: redirect old fly.dev / Manus / www → canonical

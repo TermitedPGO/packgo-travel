@@ -159,7 +159,14 @@ function vitePluginManusDebugCollector(): Plugin {
 const plugins: PluginOption[] = [
   react(),
   tailwindcss(),
-  jsxLocPlugin(),
+  // Builder.io click-to-source: injects data-loc="file:line" on every JSX
+  // element. That's a DEV-ONLY editor affordance — in a prod build it leaks
+  // source paths into the shipped HTML and bloats every element. `apply:
+  // "serve"` scopes it to the Vite dev server so prod + the bot-prerender
+  // output stay clean. (jsxLocPlugin() returns a plain Plugin object, so the
+  // spread preserves its transform hook; we can't use NODE_ENV here because
+  // the plugins array is evaluated before Vite sets the build mode.)
+  { ...jsxLocPlugin(), apply: "serve" },
   vitePluginManusDebugCollector(),
 ];
 

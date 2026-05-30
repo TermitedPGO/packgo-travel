@@ -59,34 +59,44 @@ async function ensureBrowser(): Promise<Browser> {
   if (launching) return launching;
 
   launching = (async () => {
-    // Close stale browser if it exists (TTL expired or disconnected).
-    if (browser) {
-      log.info("closing stale browser before relaunch");
-      await browser.close().catch(() => {});
-      browser = null;
-    }
-
-    log.info({ executablePath: CHROMIUM_PATH }, "launching Chromium");
-    const b = await puppeteer.launch({
-      executablePath: CHROMIUM_PATH,
-      headless: true,
-      args: LAUNCH_ARGS,
-    });
-    browserLaunchedAt = Date.now();
-
-    // Listen for unexpected disconnect so the next acquirePage relaunches.
-    b.on("disconnected", () => {
-      log.warn("browser disconnected unexpectedly");
-      if (browser === b) {
+    try {
+      // Close stale browser if it exists (TTL expired or disconnected).
+      if (browser) {
+        log.info("closing stale browser before relaunch");
+        await browser.close().catch(() => {});
         browser = null;
-        // Drain waiters — they'll get a fresh browser on retry inside acquirePage.
-        drainWaiters();
       }
-    });
 
-    browser = b;
-    launching = null;
-    return b;
+      log.info({ executablePath: CHROMIUM_PATH }, "launching Chromium");
+      const b = await puppeteer.launch({
+        executablePath: CHROMIUM_PATH,
+        headless: true,
+        args: LAUNCH_ARGS,
+      });
+      browserLaunchedAt = Date.now();
+
+      // Listen for unexpected disconnect so the next acquirePage relaunches.
+      b.on("disconnected", () => {
+        log.warn("browser disconnected unexpectedly");
+        if (browser === b) {
+          browser = null;
+          // Drain waiters — they'll get a fresh browser on retry inside acquirePage.
+          drainWaiters();
+        }
+      });
+
+      browser = b;
+      return b;
+    } finally {
+      // Always clear the in-flight latch — even if launch threw. Otherwise a
+      // single failed launch leaves `launching` holding a rejected promise that
+      // every future ensureBrowser() returns, permanently bricking the pool
+      // (only a process restart recovers). Clearing it here lets the next
+      // acquire / warm-up retry from scratch. Safe for the concurrent-launch
+      // coalescing above: on success `browser = b` runs before this finally, so
+      // a piggybacking caller sees a healthy browser via isBrowserHealthy().
+      launching = null;
+    }
   })();
 
   return launching;
@@ -148,6 +158,29 @@ export async function releasePage(page: Page): Promise<void> {
       const resolve = waitQueue.shift()!;
       resolve();
     }
+  }
+}
+
+/**
+ * Pre-launch Chromium at server boot so the first bot-prerender after a deploy
+ * doesn't pay the 2-5s cold-start. A deploy wipes the Redis prerender cache, so
+ * the first crawler hits a cold pool; warming here closes that window. Opens
+ * and immediately closes one page so the renderer subprocess is initialized
+ * too, not just the browser process.
+ *
+ * Fire-and-forget by contract: NEVER throws (a failed warm-up must not crash
+ * boot) and never blocks the server from serving. Deliberately one-shot — we do
+ * NOT keep the browser warm on an interval, because BROWSER_TTL frees it after
+ * 10min idle by design (1GB VM). The boot warm covers the post-deploy window;
+ * steady-state lazy-launch + TTL handles the rest.
+ */
+export async function warmUp(): Promise<void> {
+  try {
+    const page = await acquirePage();
+    await releasePage(page);
+    log.info("pool warmed — Chromium launched + page cycled");
+  } catch (err) {
+    log.warn({ err }, "pool warm-up failed (non-fatal — will lazy-launch on first use)");
   }
 }
 

@@ -9,7 +9,7 @@
  */
 
 import React from "react";
-import SEO, { buildTourSchema, buildBreadcrumbSchema } from "@/components/SEO";
+import SEO, { buildTourSchema, buildBreadcrumbSchema, buildFAQSchema } from "@/components/SEO";
 import { parseJSON } from "./helpers";
 import { useLocale } from "@/contexts/LocaleContext";
 
@@ -19,6 +19,13 @@ export type TourSEOProps = {
   displayTitle: string;
   displayDescription: string | null | undefined;
   language: string;
+  /**
+   * Locale-resolved noticeDetailed (already parsed + translated in index.tsx).
+   * Drives the FAQPage schema below. Same object NotesSection renders, so the
+   * schema Q&A always matches the visible on-page content (Google on-page
+   * parity requirement + what AI answer engines actually cite).
+   */
+  noticeDetailed?: any;
 };
 
 export default function TourSEO({
@@ -27,8 +34,31 @@ export default function TourSEO({
   displayTitle,
   displayDescription,
   language,
+  noticeDetailed,
 }: TourSEOProps) {
   const { t } = useLocale();
+
+  // FAQPage schema from the tour's notices. We mirror NotesSection exactly:
+  // same category keys, same i18n heading as the question (so the schema text
+  // is verbatim on-page), and the bullet items joined as the answer. Only
+  // categories with real content contribute; buildFAQSchema returns null when
+  // nothing is populated, so tours without notices emit no FAQ schema.
+  const toArr = (v: unknown): string[] =>
+    Array.isArray(v)
+      ? v.filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+      : [];
+  const faqItems =
+    noticeDetailed && typeof noticeDetailed === "object"
+      ? [
+          { question: t("tourDetail.preTrip"), answer: toArr(noticeDetailed.preparation).join("\n") },
+          { question: t("tourDetail.documents"), answer: toArr(noticeDetailed.documents).join("\n") },
+          { question: t("tourDetail.health"), answer: toArr(noticeDetailed.health).join("\n") },
+          { question: t("tourDetail.emergency"), answer: toArr(noticeDetailed.emergency).join("\n") },
+          { question: t("tourDetail.terms"), answer: toArr(noticeDetailed.terms).join("\n") },
+        ]
+      : [];
+  const faqSchema = buildFAQSchema(faqItems);
+
   return (
     <SEO
       title={{
@@ -75,6 +105,8 @@ export default function TourSEO({
           { name: t("nav.tours"), url: "/tours" },
           { name: displayTitle, url: `/tours/${tour.id}` },
         ]),
+        // FAQPage from real, on-page tour notices (null → omitted).
+        ...(faqSchema ? [faqSchema] : []),
       ]}
     />
   );

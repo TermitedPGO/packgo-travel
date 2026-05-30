@@ -398,6 +398,7 @@ export default function TourDetailPeony() {
         displayTitle={displayTitle}
         displayDescription={displayDescription}
         language={language}
+        noticeDetailed={noticeDetailed}
       />
       {/* 編輯模式標題橫幅 */}
       {isAdmin && <EditModeBanner isEditMode={isEditMode} hasChanges={hasChanges} />}
