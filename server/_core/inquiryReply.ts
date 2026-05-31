@@ -1,0 +1,120 @@
+/**
+ * inquiryReply — shared admin-reply send + thread write-back (P1-a/P1-d).
+ *
+ * The single helper BOTH callers funnel an admin reply through:
+ *   1. server/routers/inquiries.ts `addMessage` — when an admin types a reply
+ *      directly in the Inbox.
+ *   2. server/agents/autonomous/inquiryReplyExecutor.ts — when an admin
+ *      approves an InquiryAgent draft in the 指揮中心 審核箱.
+ *
+ * Both paths must do EXACTLY the same thing, so the logic lives here once
+ * instead of being copy-pasted (and drifting) in two places:
+ *   - persist the reply as an `admin` message on the thread (so the customer
+ *     sees it on the website + it shows in the conversation history),
+ *   - email the customer the branded reply (best-effort),
+ *   - advance the thread to "replied" ONLY on a successful send.
+ *
+ * Contract (mirrors the original addMessage semantics verbatim):
+ *   - NEVER throws for an expected failure — a bounced email or a missing
+ *     inquiry resolves to `{ emailSent: false, ... }`. (The executor relies on
+ *     this: ApprovalExecutor must not throw for expected failures.)
+ *   - The message is persisted BEFORE the send, so a send failure still leaves
+ *     the reply on record (identical to the pre-extraction behavior).
+ *   - A failed send does NOT advance status — the Inbox keeps showing it as
+ *     needing attention.
+ *
+ * Lives in server/_core/* so it can be imported by both the router layer and
+ * the autonomous agent layer without a cross-domain dependency. Uses the
+ * module `logger` (NOT console.*) per CLAUDE.md §4.2.
+ */
+
+import * as db from "../db";
+import { createChildLogger } from "./logger";
+
+const log = createChildLogger({ module: "inquiryReply" });
+
+export interface SendAdminInquiryReplyInput {
+  /** Thread to reply on. */
+  inquiryId: number;
+  /** The admin's (or approved draft's) reply body. */
+  body: string;
+  /**
+   * users.id to stamp on the persisted message. Optional: the 審核箱 executor
+   * may pass the approving admin's id; null is acceptable (schema allows it).
+   */
+  senderId?: number | null;
+}
+
+export interface SendAdminInquiryReplyResult {
+  /** True only when the customer email actually went out. */
+  emailSent: boolean;
+  /** The persisted inquiryMessages row id, or undefined if the thread/db was missing. */
+  messageId?: number;
+  /** Set when the helper could not proceed (inquiry/db missing); never thrown. */
+  errorMessage?: string;
+}
+
+/**
+ * Persist an admin reply on a thread + email the customer + advance status.
+ *
+ * Returns a result object; never throws for expected failures (missing
+ * inquiry, db unavailable, email bounce). An unexpected programming error
+ * (e.g. db.createInquiryMessage rejecting) WILL propagate — callers that must
+ * never throw (the executor) wrap this in their own try/catch as the spine
+ * router does, but in practice the persisted-first ordering means the common
+ * failure (email send) is already swallowed here.
+ */
+export async function sendAdminInquiryReply(
+  input: SendAdminInquiryReplyInput,
+): Promise<SendAdminInquiryReplyResult> {
+  const inquiry = await db.getInquiryById(input.inquiryId);
+  if (!inquiry) {
+    log.warn({ inquiryId: input.inquiryId }, "[inquiryReply] inquiry not found");
+    return { emailSent: false, errorMessage: "inquiry not found" };
+  }
+
+  // 1. Persist the reply as an admin message FIRST, so a later send failure
+  //    still leaves the reply on record (matches pre-extraction behavior).
+  const created = await db.createInquiryMessage({
+    inquiryId: input.inquiryId,
+    senderId: input.senderId ?? null,
+    senderType: "admin",
+    message: input.body,
+  });
+
+  // 2. Email the customer the branded reply. Best-effort: a bounce must NOT
+  //    fail the operation (the reply is already persisted above).
+  let emailSent = false;
+  if (inquiry.customerEmail) {
+    try {
+      const { sendInquiryReply } = await import("../emailService");
+      emailSent = await sendInquiryReply({
+        to: inquiry.customerEmail,
+        customerName: inquiry.customerName,
+        subject: inquiry.subject,
+        body: input.body,
+        inquiryId: input.inquiryId,
+      });
+    } catch (err) {
+      log.error(
+        { err, inquiryId: input.inquiryId },
+        "[inquiryReply] sendInquiryReply threw",
+      );
+    }
+  }
+
+  // 3. On a successful send, advance the thread to "replied" so the Inbox
+  //    reflects state. Best-effort — never block on it.
+  if (emailSent && inquiry.status !== "replied") {
+    try {
+      await db.updateInquiry(input.inquiryId, { status: "replied" });
+    } catch (err) {
+      log.error(
+        { err, inquiryId: input.inquiryId },
+        "[inquiryReply] status update failed",
+      );
+    }
+  }
+
+  return { emailSent, messageId: created?.id };
+}

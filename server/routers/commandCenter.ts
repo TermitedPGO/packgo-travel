@@ -18,6 +18,7 @@
  */
 
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { adminProcedure, router } from "../_core/trpc";
 import {
   listApprovalTasks,
@@ -30,6 +31,15 @@ import {
   type ApprovalAuditCtx,
   type ApprovalTask,
 } from "../_core/approvalTasks";
+// 指揮中心 客服頁 (P1) — registering the cs lane executor at module load.
+// This file is imported by server/routers.ts to build appRouter (loaded at
+// server boot), so importing + calling registerCsExecutors() HERE guarantees
+// the "inquiry_reply" executor is registered before any approve can dispatch.
+// Without this, approveAndExecute would find no executor and stop at
+// "approved" (never sending). See inquiryReplyExecutor.ts header.
+import { registerCsExecutors } from "../agents/autonomous/inquiryReplyExecutor";
+
+registerCsExecutors();
 
 const laneEnum = z.enum(["cs", "quote", "marketing", "finance"]);
 const statusEnum = z.enum([
@@ -188,5 +198,57 @@ export const commandCenterRouter = router({
       }
 
       return { approved, blocked };
+    }),
+
+  /**
+   * 客服頁 producer trigger (P1-b) — run InquiryAgent on an existing inquiry
+   * and drop the resulting draft into the 審核箱 as a pending cs task.
+   *
+   * Admin-only + on-demand: the LLM call lives here (NOT on the public
+   * inquiry-create hot path), so producing a draft never slows a customer
+   * submit. Jeff clicks "起草" on an inquiry → this runs the agent → producer
+   * → createApprovalTask. The draft then appears in the cs lane for review.
+   *
+   * runInquiryAgent + the producer are dynamically imported so the agent's
+   * LLM dependency graph isn't pulled into the router's eager module load.
+   */
+  produceInquiryReply: adminProcedure
+    .input(z.object({ inquiryId: z.number().int() }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await import("../db");
+      const inquiry = await db.getInquiryById(input.inquiryId);
+      if (!inquiry) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Inquiry not found" });
+      }
+
+      const { runInquiryAgent } = await import(
+        "../agents/autonomous/inquiryAgent"
+      );
+      const { produceInquiryReplyTask } = await import(
+        "../agents/autonomous/inquiryReplyProducer"
+      );
+
+      // Feed the agent the customer's own words (subject + message).
+      const agent = await runInquiryAgent({
+        rawMessage: `${inquiry.subject}\n\n${inquiry.message}`,
+        channel: "email",
+        customerProfile: inquiry.customerEmail
+          ? { id: inquiry.id, email: inquiry.customerEmail }
+          : undefined,
+      });
+
+      const { id, riskLevel } = await produceInquiryReplyTask(
+        {
+          inquiryId: inquiry.id,
+          customerEmail: inquiry.customerEmail,
+          customerName: inquiry.customerName,
+          subject: inquiry.subject,
+          inquiryText: `${inquiry.subject}\n${inquiry.message}`,
+        },
+        agent,
+        ctx as ApprovalAuditCtx,
+      );
+
+      return { taskId: id, riskLevel };
     }),
 });

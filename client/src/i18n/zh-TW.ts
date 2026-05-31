@@ -3176,6 +3176,11 @@ export const zhTW = {
       toastFailed: '執行失敗',
       toastBulkResult: '已通過 {approved} 筆，跳過 {blocked} 筆',
       toastError: '操作失敗，請重試',
+      csTo: '收件人',
+      csSubject: '主旨',
+      csDraftBody: '回覆草稿',
+      csDraftPlaceholder: '在此編輯要寄給客人的回覆內容…',
+      csDraftHint: '送出前可直接修改草稿，將以此內容寄給客人並寫回對話。',
     },
     monitorDashboard: {
       title: '供應商監控儀表板',

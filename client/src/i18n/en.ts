@@ -3210,6 +3210,11 @@ export const en = {
       toastFailed: 'Execution failed',
       toastBulkResult: 'Approved {approved}, skipped {blocked}',
       toastError: 'Action failed, please retry',
+      csTo: 'To',
+      csSubject: 'Subject',
+      csDraftBody: 'Draft reply',
+      csDraftPlaceholder: 'Edit the reply that will be sent to the customer…',
+      csDraftHint: 'Edit the draft before sending. This exact text is emailed to the customer and written back to the thread.',
     },
     monitorDashboard: {
       title: 'Supplier Monitor Dashboard',

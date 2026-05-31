@@ -22,6 +22,15 @@ vi.mock("../_core/approvalTasks", () => ({
   getApprovalExecutor: vi.fn(),
   markApprovalTaskSent: vi.fn(),
   markApprovalTaskFailed: vi.fn(),
+  registerApprovalExecutor: vi.fn(),
+}));
+
+// The router registers the cs executor at module load via
+// inquiryReplyExecutor.registerCsExecutors(). Mock that module so the router
+// test stays isolated to router orchestration (no transitive db/agent load).
+vi.mock("../agents/autonomous/inquiryReplyExecutor", () => ({
+  registerCsExecutors: vi.fn(),
+  INQUIRY_REPLY_TASK_TYPE: "inquiry_reply",
 }));
 
 vi.mock("../rateLimit", () => ({

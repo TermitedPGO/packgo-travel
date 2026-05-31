@@ -28,10 +28,24 @@ vi.mock("../rateLimit", () => ({
 vi.mock("../_core/notification", () => ({
   notifyOwner: vi.fn(() => Promise.resolve()),
 }));
-// addMessage dynamically `await import("../emailService")` — vi.mock
+// addMessage (admin) now delegates to the shared server/_core/inquiryReply
+// helper, which dynamically `await import("../emailService")`. vi.mock
 // intercepts the dynamic import so no real SendGrid/SMTP send happens.
 vi.mock("../emailService", () => ({
   sendInquiryReply: vi.fn(),
+}));
+
+// The shared helper logs send failures via the pino logger (not console.*).
+// Mock it so the failure path is assertable + no real Sentry/pretty init.
+// vi.hoisted so the mock fn exists before the hoisted vi.mock factory runs.
+const { loggerErrorMock } = vi.hoisted(() => ({ loggerErrorMock: vi.fn() }));
+vi.mock("../_core/logger", () => ({
+  createChildLogger: () => ({
+    warn: vi.fn(),
+    info: vi.fn(),
+    error: loggerErrorMock,
+    debug: vi.fn(),
+  }),
 }));
 
 import { inquiriesRouter } from "./inquiries";
@@ -186,8 +200,7 @@ describe("inquiriesRouter.addMessage — admin reply emails the customer", () =>
     (db.updateInquiry as any).mockResolvedValue({});
     // SendGrid / SMTP blows up — the mutation must swallow it.
     (sendInquiryReply as any).mockRejectedValue(new Error("smtp down"));
-    // The catch logs the failure (best-effort); suppress + assert it.
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    loggerErrorMock.mockClear();
 
     const caller = (inquiriesRouter as any).createCaller(makeAdminContext());
     // Resolves (does not throw) even though the send rejected.
@@ -197,9 +210,8 @@ describe("inquiriesRouter.addMessage — admin reply emails the customer", () =>
     expect(result.emailSent).toBe(false);
     // A failed send must NOT advance the thread.
     expect(db.updateInquiry).not.toHaveBeenCalled();
-    // The failure was logged, not silently dropped.
-    expect(errSpy).toHaveBeenCalled();
-    errSpy.mockRestore();
+    // The failure was logged via the shared helper's logger, not dropped.
+    expect(loggerErrorMock).toHaveBeenCalled();
   });
 
   it("customer posting to their own thread: no email is sent", async () => {

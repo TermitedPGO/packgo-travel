@@ -320,43 +320,38 @@ export const inquiriesRouter = router({
           });
         }
         const isAdmin = ctx.user.role === "admin";
+
+        // When an ADMIN replies, the reply must be persisted AND emailed to
+        // the customer AND the thread advanced to "replied" — the exact same
+        // work the 指揮中心 審核箱 executor does on approve. That shared logic
+        // lives in server/_core/inquiryReply.ts so both callers stay in lock-
+        // step (never copy-pasted + drifting). Email is best-effort: a bounce
+        // does NOT fail the mutation (the reply is already persisted by the
+        // helper before the send).
+        if (isAdmin) {
+          const { sendAdminInquiryReply } = await import("../_core/inquiryReply");
+          const res = await sendAdminInquiryReply({
+            inquiryId: input.inquiryId,
+            body: input.message,
+            senderId: ctx.user.id,
+          });
+          return {
+            id: res.messageId,
+            inquiryId: input.inquiryId,
+            senderId: ctx.user.id,
+            senderType: "admin" as const,
+            message: input.message,
+            emailSent: res.emailSent,
+          };
+        }
+
+        // Customer posting to their own thread: persist only, never email.
         const created = await db.createInquiryMessage({
           inquiryId: input.inquiryId,
           senderId: ctx.user.id,
-          senderType: isAdmin ? "admin" : "customer",
+          senderType: "customer",
           message: input.message,
         });
-
-        // When an ADMIN replies, the customer must actually receive the
-        // reply by email — before this they only saw it if they logged
-        // back into the website. Email is best-effort: a bounce must NOT
-        // fail the mutation (the reply is already persisted above).
-        // Customers posting to their own thread do NOT trigger a send.
-        let emailSent = false;
-        if (isAdmin && inquiry.customerEmail) {
-          try {
-            const { sendInquiryReply } = await import("../emailService");
-            emailSent = await sendInquiryReply({
-              to: inquiry.customerEmail,
-              customerName: inquiry.customerName,
-              subject: inquiry.subject,
-              body: input.message,
-              inquiryId: input.inquiryId,
-            });
-          } catch (err) {
-            console.error("[inquiries.addMessage] sendInquiryReply threw:", err);
-          }
-          // On a successful admin reply, advance the thread to "replied"
-          // so the Inbox reflects state. Best-effort — never block on it.
-          if (emailSent && inquiry.status !== "replied") {
-            try {
-              await db.updateInquiry(input.inquiryId, { status: "replied" });
-            } catch (err) {
-              console.error("[inquiries.addMessage] status update failed:", err);
-            }
-          }
-        }
-
-        return { ...created, emailSent };
+        return { ...created, emailSent: false };
        }),
   });

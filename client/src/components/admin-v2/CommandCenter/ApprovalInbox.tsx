@@ -45,7 +45,7 @@ import {
   Undo2,
 } from "lucide-react";
 import type { ApprovalLane, ApprovalTaskRow, RiskLevel } from "./types";
-import { LanePayloadPreview } from "./lanes";
+import { LanePayloadBody, laneHasEditor } from "./lanes";
 
 const RISK_TONE: Record<RiskLevel, StatusTone> = {
   auto: "muted",
@@ -79,6 +79,10 @@ export default function ApprovalInbox({ lane }: { lane?: ApprovalLane }) {
   const [selected, setSelected] = useState<ApprovalTaskRow | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [hardGateConfirmed, setHardGateConfirmed] = useState(false);
+  // Editable payload — lanes with an editor (cs) let the admin tweak the draft
+  // before sending. Holds the (possibly edited) payload string for the open
+  // task; lanes without an editor leave this at the task's original payload.
+  const [editedPayload, setEditedPayload] = useState<string>("");
 
   const approve = trpc.commandCenter.approve.useMutation();
   const reject = trpc.commandCenter.reject.useMutation();
@@ -101,6 +105,9 @@ export default function ApprovalInbox({ lane }: { lane?: ApprovalLane }) {
     setSelected(row);
     setRejectReason("");
     setHardGateConfirmed(false);
+    // Seed the editor buffer with the task's current payload. If the lane has
+    // an editor, edits mutate this; otherwise it's sent back unchanged.
+    setEditedPayload(row.payload);
   }
 
   function closeTask() {
@@ -109,7 +116,14 @@ export default function ApprovalInbox({ lane }: { lane?: ApprovalLane }) {
 
   async function handleApprove(id: number) {
     try {
-      const res = await approve.mutateAsync({ id });
+      // Send editedPayload only for editable lanes whose buffer actually
+      // changed. Read-only lanes (and an untouched draft) send nothing → the
+      // stored payload is used as-is server-side.
+      const editable = selected ? laneHasEditor(selected.lane) : false;
+      const changed = editable && editedPayload !== selected?.payload;
+      const res = await approve.mutateAsync(
+        changed ? { id, editedPayload } : { id },
+      );
       if (res.status === "sent") {
         toast.success(t("admin.commandCenter.toastSent"));
       } else if (res.status === "failed") {
@@ -291,10 +305,13 @@ export default function ApprovalInbox({ lane }: { lane?: ApprovalLane }) {
               </DialogHeader>
 
               <div className="max-h-[50vh] overflow-y-auto">
-                <LanePayloadPreview
+                {/* Lane body seam: editable (cs) where a lane provides an
+                    editor, else read-only. Inbox stays lane-agnostic. */}
+                <LanePayloadBody
                   lane={selected.lane}
                   summary={selected.summary}
-                  payload={selected.payload}
+                  payload={editedPayload}
+                  onChange={setEditedPayload}
                 />
               </div>
 
