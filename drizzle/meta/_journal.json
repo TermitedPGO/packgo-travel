@@ -568,6 +568,13 @@
       "when": 1779580000000,
       "tag": "0083_supplier_product_details",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "5",
+      "when": 1780193185370,
+      "tag": "0084_approval_tasks",
+      "breakpoints": true
     }
   ]
 }

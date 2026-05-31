@@ -3253,3 +3253,63 @@ export const skillRuns = mysqlTable(
 
 export type SkillRun = typeof skillRuns.$inferSelect;
 export type InsertSkillRun = typeof skillRuns.$inferInsert;
+
+/**
+ * approvalTasks — 指揮中心 (Command Center) 審核箱 single source of truth.
+ *
+ * Every operational lane (cs / quote / marketing / finance) emits work that
+ * needs Jeff's sign-off by writing a row here via createApprovalTask
+ * (server/_core/approvalTasks.ts). The 指揮中心 tab reads this table; approve /
+ * reject routes back to the lane executor keyed by `taskType`.
+ *
+ * riskLevel policy (proposal §3 — 鐵律):
+ *   auto      → may be batch-approved in one click
+ *   review    → per-item review before send
+ *   hard_gate → money / irreversible / customer-visible — ALWAYS per-item,
+ *               NEVER bulk-approved (bulkApprove refuses these rows).
+ *
+ * payload is a lane-specific JSON string (kept as text, same as other JSON
+ * blobs in this schema) — the executor parses it on approve.
+ */
+export const approvalTasks = mysqlTable("approvalTasks", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Which operational lane produced this task (executor namespace). */
+  lane: mysqlEnum("lane", ["cs", "quote", "marketing", "finance"]).notNull(),
+  /** Fine-grained executor route within the lane (e.g. "cs.reply_inquiry"). */
+  taskType: varchar("taskType", { length: 64 }).notNull(),
+  /** auto = batch-ok / review = per-item / hard_gate = per-item, never bulk. */
+  riskLevel: mysqlEnum("riskLevel", ["auto", "review", "hard_gate"]).notNull(),
+  status: mysqlEnum("status", [
+    "pending",
+    "approved",
+    "rejected",
+    "sent",
+    "failed",
+    "expired",
+  ])
+    .notNull()
+    .default("pending"),
+  title: varchar("title", { length: 255 }).notNull(),
+  summary: text("summary"),
+  /** Lane-specific JSON string; executor parses on approve. */
+  payload: text("payload").notNull(),
+  /** Optional back-reference to a domain row (e.g. "inquiry" + its id). */
+  relatedType: varchar("relatedType", { length: 64 }),
+  relatedId: varchar("relatedId", { length: 64 }),
+  /** Producer identity — agent name or "system"/"admin:<id>". */
+  createdBy: varchar("createdBy", { length: 64 }).notNull(),
+  /** users.id of the admin who approved/rejected (null while pending). */
+  decidedBy: int("decidedBy"),
+  decidedAt: timestamp("decidedAt"),
+  /** Free-form failure detail when status = failed. */
+  errorMessage: text("errorMessage"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (t) => ({
+  idxLaneStatus: index("idx_approvalTasks_lane_status").on(t.lane, t.status),
+  idxStatus: index("idx_approvalTasks_status").on(t.status),
+  idxCreatedAt: index("idx_approvalTasks_createdAt").on(t.createdAt),
+}));
+
+export type ApprovalTask = typeof approvalTasks.$inferSelect;
+export type InsertApprovalTask = typeof approvalTasks.$inferInsert;

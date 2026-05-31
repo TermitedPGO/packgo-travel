@@ -1,0 +1,216 @@
+/**
+ * Tests for the 指揮中心 approval-inbox spine helper (S-2).
+ *
+ * Covers the design.md S-2 contract:
+ *   - createApprovalTask writes ONE pending row, returns its id, audits
+ *     "approvalTask.create" (only when a ctx.user is present).
+ *   - decideApprovalTask flips status (+ optional payload edit), audits
+ *     approve/reject, and NEVER sends (no executor invoked here).
+ *   - decideApprovalTask guards against deciding a non-pending row.
+ *
+ * db + auditLog are mocked — no MySQL, no real audit chain.
+ */
+
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// mockDb is reconfigured per test by swapping insert/update/select.
+const mockDb: any = { insert: vi.fn(), update: vi.fn(), select: vi.fn() };
+
+vi.mock("../db", () => ({
+  getDb: vi.fn(async () => mockDb),
+}));
+
+vi.mock("./auditLog", () => ({
+  audit: vi.fn(async () => undefined),
+}));
+
+vi.mock("./logger", () => ({
+  createChildLogger: () => ({
+    warn: vi.fn(),
+    info: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  }),
+}));
+
+import {
+  createApprovalTask,
+  decideApprovalTask,
+  type ApprovalAuditCtx,
+} from "./approvalTasks";
+import { audit } from "./auditLog";
+
+const auditMock = vi.mocked(audit);
+
+const adminCtx: ApprovalAuditCtx = {
+  user: { id: 42, email: "jeff@packgo.com", role: "admin" },
+};
+
+/** Chain stub matching getApprovalTaskById: select().from().where().limit(). */
+function byIdChain(rows: any[]) {
+  return {
+    from: vi.fn(() => ({
+      where: vi.fn(() => ({
+        limit: vi.fn(() => Promise.resolve(rows)),
+      })),
+    })),
+  };
+}
+
+describe("createApprovalTask", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("inserts a pending row and returns the new id", async () => {
+    const valuesMock = vi.fn().mockResolvedValue([{ insertId: 7 }]);
+    mockDb.insert = vi.fn(() => ({ values: valuesMock }));
+
+    const result = await createApprovalTask(
+      {
+        lane: "cs",
+        taskType: "cs.reply_inquiry",
+        riskLevel: "review",
+        title: "Reply to Jane Doe",
+        payload: JSON.stringify({ inquiryId: 1, draftBody: "hi" }),
+        createdBy: "InquiryAgent",
+      },
+      adminCtx,
+    );
+
+    expect(result).toEqual({ id: 7 });
+    expect(valuesMock).toHaveBeenCalledTimes(1);
+    const row = valuesMock.mock.calls[0][0];
+    expect(row.status).toBe("pending");
+    expect(row.lane).toBe("cs");
+    expect(row.taskType).toBe("cs.reply_inquiry");
+    expect(row.riskLevel).toBe("review");
+  });
+
+  it("audits approvalTask.create when a ctx.user is present", async () => {
+    mockDb.insert = vi.fn(() => ({
+      values: vi.fn().mockResolvedValue([{ insertId: 9 }]),
+    }));
+
+    await createApprovalTask(
+      {
+        lane: "finance",
+        taskType: "finance.recognize",
+        riskLevel: "hard_gate",
+        title: "Recognize deposit",
+        payload: "{}",
+        createdBy: "system",
+      },
+      adminCtx,
+    );
+
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    const call = auditMock.mock.calls[0][0];
+    expect(call.action).toBe("approvalTask.create");
+    expect(call.targetType).toBe("approvalTask");
+    expect(call.targetId).toBe(9);
+  });
+
+  it("does NOT audit when there is no ctx (system producer)", async () => {
+    mockDb.insert = vi.fn(() => ({
+      values: vi.fn().mockResolvedValue([{ insertId: 11 }]),
+    }));
+
+    const result = await createApprovalTask({
+      lane: "marketing",
+      taskType: "marketing.post",
+      riskLevel: "auto",
+      title: "Schedule post",
+      payload: "{}",
+      createdBy: "system",
+    });
+
+    expect(result).toEqual({ id: 11 });
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("decideApprovalTask", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("approve flips status to approved and audits approvalTask.approve", async () => {
+    const pending = { id: 1, status: "pending", taskType: "cs.reply_inquiry" };
+    const approved = { ...pending, status: "approved" };
+
+    const whereMock = vi.fn().mockResolvedValue(undefined);
+    const setMock = vi.fn(() => ({ where: whereMock }));
+    mockDb.update = vi.fn(() => ({ set: setMock }));
+    mockDb.select = vi
+      .fn()
+      .mockReturnValueOnce(byIdChain([pending])) // existing-status read
+      .mockReturnValueOnce(byIdChain([approved])); // post-update read
+
+    const result = await decideApprovalTask(
+      { id: 1, decision: "approve", decidedBy: 42 },
+      adminCtx,
+    );
+
+    expect(result.status).toBe("approved");
+    const updateArg = setMock.mock.calls[0][0];
+    expect(updateArg.status).toBe("approved");
+    expect(updateArg.decidedBy).toBe(42);
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    expect(auditMock.mock.calls[0][0].action).toBe("approvalTask.approve");
+  });
+
+  it("persists editedPayload on approve", async () => {
+    const pending = { id: 2, status: "pending", taskType: "cs.reply_inquiry" };
+    const setMock = vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) }));
+    mockDb.update = vi.fn(() => ({ set: setMock }));
+    mockDb.select = vi
+      .fn()
+      .mockReturnValueOnce(byIdChain([pending]))
+      .mockReturnValueOnce(byIdChain([{ ...pending, status: "approved" }]));
+
+    await decideApprovalTask(
+      { id: 2, decision: "approve", decidedBy: 42, editedPayload: '{"x":1}' },
+      adminCtx,
+    );
+
+    expect(setMock.mock.calls[0][0].payload).toBe('{"x":1}');
+  });
+
+  it("reject flips status to rejected and audits approvalTask.reject", async () => {
+    const pending = { id: 3, status: "pending", taskType: "cs.reply_inquiry" };
+    const setMock = vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) }));
+    mockDb.update = vi.fn(() => ({ set: setMock }));
+    mockDb.select = vi
+      .fn()
+      .mockReturnValueOnce(byIdChain([pending]))
+      .mockReturnValueOnce(byIdChain([{ ...pending, status: "rejected" }]));
+
+    const result = await decideApprovalTask(
+      { id: 3, decision: "reject", decidedBy: 42, reason: "off-brand" },
+      adminCtx,
+    );
+
+    expect(result.status).toBe("rejected");
+    expect(auditMock.mock.calls[0][0].action).toBe("approvalTask.reject");
+    expect(auditMock.mock.calls[0][0].reason).toBe("off-brand");
+  });
+
+  it("throws when the task is not pending (double-decide guard)", async () => {
+    mockDb.select = vi
+      .fn()
+      .mockReturnValueOnce(byIdChain([{ id: 4, status: "approved", taskType: "x" }]));
+
+    await expect(
+      decideApprovalTask({ id: 4, decision: "approve", decidedBy: 42 }, adminCtx),
+    ).rejects.toThrow(/already approved/);
+  });
+
+  it("throws when the task does not exist", async () => {
+    mockDb.select = vi.fn().mockReturnValueOnce(byIdChain([]));
+
+    await expect(
+      decideApprovalTask({ id: 999, decision: "approve", decidedBy: 42 }, adminCtx),
+    ).rejects.toThrow(/not found/);
+  });
+});

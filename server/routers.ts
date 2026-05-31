@@ -66,6 +66,7 @@ import { membershipRouter } from "./routers/membership";
 import { photosRouter } from "./routers/photos";
 import { aiRouter } from "./routers/ai";
 import { systemRouter } from "./_core/systemRouter";
+import { commandCenterRouter } from "./routers/commandCenter";
 import { router } from "./_core/trpc";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -86,7 +87,14 @@ import { router } from "./_core/trpc";
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
-  
+
+  // 指揮中心 (Command Center) approval-inbox spine — S-3.
+  // Single API for the 審核箱: list/stats reads + approve/reject/bulkApprove
+  // routing back to lane executors keyed by taskType
+  // (server/_core/approvalTasks.ts). Lanes cs/quote/marketing/finance grow
+  // on this spine (design.md docs/features/command-center).
+  commandCenter: commandCenterRouter,
+
   // Authentication router — Phase 4E extracted to ./routers/auth.ts
   auth: authRouter,
   

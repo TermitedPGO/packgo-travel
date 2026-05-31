@@ -64,6 +64,8 @@ const FinanceReports = lazy(() => import("@/components/admin-v2/FinanceReports")
 const CustomersTabV2 = lazy(() => import("@/components/admin-v2/CustomersTabV2"));
 const NewsletterTabV2 = lazy(() => import("@/components/admin-v2/NewsletterTabV2"));
 const DepartureCalendarV2 = lazy(() => import("@/components/admin-v2/DepartureCalendarV2"));
+// 指揮中心 (Command Center) — 審核箱 spine (S-4). Four lanes grow on it (P1-P4).
+const CommandCenterTab = lazy(() => import("@/components/admin-v2/CommandCenter/CommandCenterTab"));
 
 // All other tabs initially come from V1. They're consumed AS-IS; we replace
 // them one by one with V2 redesigns. Listed here for the lazy-loader.
@@ -98,7 +100,7 @@ const SkillsTab = lazy(() => import("@/components/admin/SkillsTab"));
 
 type PageId =
   // Office
-  | "today" | "agent-chat"
+  | "command-center" | "today" | "agent-chat"
   // Operations
   | "ops-landing" | "tours" | "bookings" | "inquiries" | "tour-monitor" | "suppliers" | "departures-calendar"
   // Customers
@@ -120,6 +122,7 @@ const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageD
   office: {
     domain: { id: "office", label: "辦公室", icon: Building2 },
     primary: [
+      { id: "command-center", label: "🎛 指揮中心" },
       { id: "today", label: "🏠 今日總覽" },
       { id: "agent-chat", label: "💬 Agent Chat" },
     ],
@@ -468,6 +471,8 @@ export default function AdminV2() {
 function renderPage(page: PageId, setActivePage: (p: PageId) => void) {
   switch (page) {
     // Office
+    case "command-center":
+      return <CommandCenterTab />;
     case "today":
       return <UnifiedInbox onNavigate={(t) => setActivePage(t as PageId)} />;
     case "agent-chat":
