@@ -33,6 +33,23 @@ vi.mock("../agents/autonomous/inquiryReplyExecutor", () => ({
   INQUIRY_REPLY_TASK_TYPE: "inquiry_reply",
 }));
 
+// Same for the P2 quote executor (registered at module load by the router).
+vi.mock("../agents/autonomous/quoteExecutor", () => ({
+  registerQuoteExecutors: vi.fn(),
+  QUOTE_DRAFT_TASK_TYPE: "quote_draft",
+}));
+
+// produceQuoteDraft dynamically imports these — mock them so the router test
+// stays isolated to router orchestration (no real db / producer load).
+vi.mock("../db", () => ({
+  getTourById: vi.fn(),
+  getDb: vi.fn(),
+}));
+
+vi.mock("../agents/autonomous/quoteProducer", () => ({
+  produceQuoteDraftTask: vi.fn(),
+}));
+
 vi.mock("../rateLimit", () => ({
   checkAdminMutationRateLimit: vi.fn().mockResolvedValue({ allowed: true }),
 }));
@@ -55,6 +72,8 @@ import {
   getApprovalExecutor,
   markApprovalTaskSent,
 } from "../_core/approvalTasks";
+import { getTourById, getDb } from "../db";
+import { produceQuoteDraftTask } from "../agents/autonomous/quoteProducer";
 
 const listMock = vi.mocked(listApprovalTasks);
 const statsMock = vi.mocked(getApprovalStats);
@@ -62,6 +81,18 @@ const getByIdMock = vi.mocked(getApprovalTaskById);
 const decideMock = vi.mocked(decideApprovalTask);
 const getExecutorMock = vi.mocked(getApprovalExecutor);
 const markSentMock = vi.mocked(markApprovalTaskSent);
+const getTourByIdMock = vi.mocked(getTourById);
+const getDbMock = vi.mocked(getDb);
+const produceQuoteMock = vi.mocked(produceQuoteDraftTask);
+
+/** Build a fake drizzle select chain that resolves to `rows` at .limit(). */
+function fakeDbReturning(rows: any[]) {
+  const limit = vi.fn().mockResolvedValue(rows);
+  const where = vi.fn().mockReturnValue({ limit });
+  const from = vi.fn().mockReturnValue({ where });
+  const select = vi.fn().mockReturnValue({ from });
+  return { select } as any;
+}
 
 function adminCaller() {
   return commandCenterRouter.createCaller({
@@ -210,5 +241,79 @@ describe("commandCenter.bulkApprove", () => {
     expect(result.blocked).toContainEqual({ id: 1, reason: "not_found" });
     expect(result.blocked).toContainEqual({ id: 2, reason: "already_sent" });
     expect(decideMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("commandCenter.produceQuoteDraft", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("throws NOT_FOUND when the tour does not exist", async () => {
+    getTourByIdMock.mockResolvedValue(undefined);
+
+    const caller = adminCaller();
+    await expect(caller.produceQuoteDraft({ tourId: 999 })).rejects.toThrow(
+      /not found/i,
+    );
+    expect(produceQuoteMock).not.toHaveBeenCalled();
+  });
+
+  it("custom trip → no supplier lookup, passes isCustomTrip + tourTitle", async () => {
+    getTourByIdMock.mockResolvedValue({ id: 12, title: "歐洲蜜月客製" } as any);
+    produceQuoteMock.mockResolvedValue({ id: 88, riskLevel: "hard_gate" });
+
+    const caller = adminCaller();
+    const res = await caller.produceQuoteDraft({
+      tourId: 12,
+      isCustomTrip: true,
+    });
+
+    expect(getDbMock).not.toHaveBeenCalled();
+    expect(produceQuoteMock).toHaveBeenCalledTimes(1);
+    const arg = produceQuoteMock.mock.calls[0][0];
+    expect(arg).toMatchObject({
+      tourId: 12,
+      tourTitle: "歐洲蜜月客製",
+      isCustomTrip: true,
+    });
+    expect(arg.supplierPrice).toBeUndefined();
+    expect(res).toEqual({ taskId: 88, riskLevel: "hard_gate" });
+  });
+
+  it("supplier trip → resolves retailPrice (直客價) + currency from supplierDepartures", async () => {
+    getTourByIdMock.mockResolvedValue({
+      id: 7,
+      title: "北海道粉雪 5 日",
+    } as any);
+    produceQuoteMock.mockResolvedValue({ id: 90, riskLevel: "hard_gate" });
+    // decimal columns come back as strings — Number("1880.00") === 1880.
+    getDbMock.mockResolvedValue(
+      fakeDbReturning([{ retailPrice: "1880.00", currency: "USD" }]),
+    );
+
+    const caller = adminCaller();
+    const res = await caller.produceQuoteDraft({
+      tourId: 7,
+      departureId: 55,
+      customerChannel: "wechat",
+    });
+
+    expect(getDbMock).toHaveBeenCalled();
+    const arg = produceQuoteMock.mock.calls[0][0];
+    expect(arg.supplierPrice).toBe(1880);
+    expect(arg.currency).toBe("USD");
+    expect(arg.isCustomTrip).toBe(false);
+    expect(arg.customerChannel).toBe("wechat");
+    expect(res).toEqual({ taskId: 90, riskLevel: "hard_gate" });
+  });
+
+  it("supplier trip with no matching departure row → supplierPrice undefined", async () => {
+    getTourByIdMock.mockResolvedValue({ id: 7, title: "北海道" } as any);
+    produceQuoteMock.mockResolvedValue({ id: 91, riskLevel: "hard_gate" });
+    getDbMock.mockResolvedValue(fakeDbReturning([]));
+
+    const caller = adminCaller();
+    await caller.produceQuoteDraft({ tourId: 7, departureId: 55 });
+
+    expect(produceQuoteMock.mock.calls[0][0].supplierPrice).toBeUndefined();
   });
 });

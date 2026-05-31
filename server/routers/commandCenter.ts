@@ -18,6 +18,7 @@
  */
 
 import { z } from "zod";
+import { eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { adminProcedure, router } from "../_core/trpc";
 import {
@@ -38,8 +39,14 @@ import {
 // Without this, approveAndExecute would find no executor and stop at
 // "approved" (never sending). See inquiryReplyExecutor.ts header.
 import { registerCsExecutors } from "../agents/autonomous/inquiryReplyExecutor";
+// 指揮中心 報價頁 (P2) — same registration-at-boot wiring as the cs lane: this
+// file is on the appRouter import graph, so calling registerQuoteExecutors()
+// here guarantees the "quote_draft" executor is registered before any approve
+// can dispatch. See quoteExecutor.ts header.
+import { registerQuoteExecutors } from "../agents/autonomous/quoteExecutor";
 
 registerCsExecutors();
+registerQuoteExecutors();
 
 const laneEnum = z.enum(["cs", "quote", "marketing", "finance"]);
 const statusEnum = z.enum([
@@ -246,6 +253,92 @@ export const commandCenterRouter = router({
           inquiryText: `${inquiry.subject}\n${inquiry.message}`,
         },
         agent,
+        ctx as ApprovalAuditCtx,
+      );
+
+      return { taskId: id, riskLevel };
+    }),
+
+  /**
+   * 報價頁 producer trigger (P2) — turn a tour + optional supplier departure +
+   * customer info into a pending quote draft in the 審核箱.
+   *
+   *   - 供應商團 (isCustomTrip=false, departureId given): resolve the supplier
+   *     RETAIL price (直客價 / supplierDepartures.retailPrice — Jeff 2026-05-31,
+   *     NOT agentPrice) so the review shows the price Jeff would quote against
+   *     the (future) AI estimate.
+   *   - 客製遊 (isCustomTrip=true): no price lookup — the producer makes a
+   *     "需手動報價" 待辦 only.
+   *
+   * aiEstimate is left undefined in v1 (aiQuotes has no clean per-tour link).
+   * The producer is dynamically imported so its dependency graph isn't pulled
+   * into the router's eager module load.
+   */
+  produceQuoteDraft: adminProcedure
+    .input(
+      z.object({
+        tourId: z.number().int(),
+        departureId: z.number().int().optional(),
+        customerName: z.string().max(200).optional(),
+        customerEmail: z.string().email().max(320).optional(),
+        customerChannel: z
+          .enum(["ai_assistant", "gmail", "wechat", "line"])
+          .optional(),
+        isCustomTrip: z.boolean().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const db = await import("../db");
+      const tour = await db.getTourById(input.tourId);
+      if (!tour) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Tour not found" });
+      }
+
+      const isCustomTrip = input.isCustomTrip ?? false;
+
+      // 供應商團：拉 supplierDepartures 的 retailPrice（直客價）+ 幣別。
+      // 客製遊或無 departureId → 不撈價，supplierPrice 留 undefined。
+      let supplierPrice: number | undefined;
+      let currency: string | undefined;
+      if (!isCustomTrip && input.departureId !== undefined) {
+        const database = await db.getDb();
+        if (database) {
+          const { supplierDepartures } = await import("../../drizzle/schema");
+          const rows = await database
+            .select({
+              retailPrice: supplierDepartures.retailPrice,
+              currency: supplierDepartures.currency,
+            })
+            .from(supplierDepartures)
+            .where(eq(supplierDepartures.id, input.departureId))
+            .limit(1);
+          const dep = rows[0];
+          if (dep) {
+            // decimal columns come back as strings — coerce to number.
+            supplierPrice =
+              dep.retailPrice != null ? Number(dep.retailPrice) : undefined;
+            currency = dep.currency ?? undefined;
+          }
+        }
+      }
+
+      const { produceQuoteDraftTask } = await import(
+        "../agents/autonomous/quoteProducer"
+      );
+
+      const { id, riskLevel } = await produceQuoteDraftTask(
+        {
+          tourId: input.tourId,
+          departureId: input.departureId,
+          tourTitle: tour.title ?? `#${input.tourId}`,
+          customerName: input.customerName,
+          customerEmail: input.customerEmail,
+          customerChannel: input.customerChannel,
+          supplierPrice,
+          currency,
+          isCustomTrip,
+          // aiEstimate: v1 left undefined — aiQuotes has no clean per-tour link.
+        },
         ctx as ApprovalAuditCtx,
       );
 
