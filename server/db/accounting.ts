@@ -102,13 +102,47 @@ export async function deleteAccountingEntry(id: number): Promise<boolean> {
   return true;
 }
 
-export async function getAccountingStats(params: { startDate: Date; endDate: Date }): Promise<{
-  totalIncome: number; totalExpenses: number; netProfit: number;
-  prevTotalIncome: number; prevTotalExpenses: number; prevNetProfit: number;
-  yearIncome: number; yearExpenses: number; yearNetProfit: number;
-}> {
+export interface AccountingStats {
+  totalIncome: number; totalExpenses: number; trustDeferredIncome: number; netProfit: number;
+  prevTotalIncome: number; prevTotalExpenses: number; prevTrustDeferredIncome: number; prevNetProfit: number;
+  yearIncome: number; yearExpenses: number; yearTrustDeferredIncome: number; yearNetProfit: number;
+}
+
+/**
+ * Pure assembly of the stats envelope from already-summed period totals.
+ *
+ * Split out (PKG-C, 2026-05-30) so the trust-aware netProfit formula
+ *   netProfit = income − trustDeferred − expenses        (CST §17550)
+ * is unit-testable without a DB — mirrors bankPLService.foldBankPLRows.
+ *
+ * `totalIncome` stays GROSS so it still equals Σ(income-by-category) and the
+ * topIncomeCategories percentages; the unrecognized customer-deposit (trust)
+ * amount is subtracted only from netProfit and surfaced separately as
+ * `trustDeferredIncome`. This is the SAME convention bankPLService uses, so
+ * the ledger P&L and the Plaid P&L can never disagree on the deferred number.
+ */
+export function assembleAccountingStats(p: {
+  ti: number; te: number; pti: number; pte: number; yi: number; ye: number;
+  trustDeferred?: number; prevTrustDeferred?: number; yearTrustDeferred?: number;
+}): AccountingStats {
+  const d = p.trustDeferred ?? 0;
+  const pd = p.prevTrustDeferred ?? 0;
+  const yd = p.yearTrustDeferred ?? 0;
+  return {
+    totalIncome: p.ti, totalExpenses: p.te, trustDeferredIncome: d,
+    netProfit: p.ti - d - p.te,
+    prevTotalIncome: p.pti, prevTotalExpenses: p.pte, prevTrustDeferredIncome: pd,
+    prevNetProfit: p.pti - pd - p.pte,
+    yearIncome: p.yi, yearExpenses: p.ye, yearTrustDeferredIncome: yd,
+    yearNetProfit: p.yi - yd - p.ye,
+  };
+}
+
+const ZERO_STATS: AccountingStats = assembleAccountingStats({ ti: 0, te: 0, pti: 0, pte: 0, yi: 0, ye: 0 });
+
+export async function getAccountingStats(params: { startDate: Date; endDate: Date }): Promise<AccountingStats> {
   const db = await getDb();
-  if (!db) return { totalIncome: 0, totalExpenses: 0, netProfit: 0, prevTotalIncome: 0, prevTotalExpenses: 0, prevNetProfit: 0, yearIncome: 0, yearExpenses: 0, yearNetProfit: 0 };
+  if (!db) return { ...ZERO_STATS };
   const diff = params.endDate.getTime() - params.startDate.getTime();
   const prevStart = new Date(params.startDate.getTime() - diff);
   const prevEnd = new Date(params.endDate.getTime() - diff);
@@ -129,7 +163,34 @@ export async function getAccountingStats(params: { startDate: Date; endDate: Dat
   const ti = sum(curr, 'income'), te = sum(curr, 'expense');
   const pti = sum(prev, 'income'), pte = sum(prev, 'expense');
   const yi = sum(year, 'income'), ye = sum(year, 'expense');
-  return { totalIncome: ti, totalExpenses: te, netProfit: ti - te, prevTotalIncome: pti, prevTotalExpenses: pte, prevNetProfit: pti - pte, yearIncome: yi, yearExpenses: ye, yearNetProfit: yi - ye };
+
+  // Trust-aware (CST §17550): customer deposits sitting in the trust account
+  // are NOT revenue until departure. Subtract the unrecognized-deferred income
+  // for EACH period, scoped to deposits made WITHIN that period
+  // (depositSince=periodStart) so prior periods' balances don't re-eat every
+  // window — the same scoping bankPLService uses (2026-05-23 fix).
+  //
+  // Reuses trustDeferralService.totalDeferredForUser (single source of truth
+  // for the deferred number) via a DYNAMIC import — a static import would form
+  // a cycle (trustDeferralService → ../db → db/accounting). Flag-gated; on any
+  // error we fall back to gross (0 deferred) and never break the ledger.
+  let trustDeferred = 0, prevTrustDeferred = 0, yearTrustDeferred = 0;
+  try {
+    const { totalDeferredForUser, isTrustDeferralEnabled } = await import("../services/trustDeferralService");
+    if (isTrustDeferralEnabled()) {
+      const ymd = (dt: Date) =>
+        `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+      [trustDeferred, prevTrustDeferred, yearTrustDeferred] = await Promise.all([
+        totalDeferredForUser({ asOfDate: ymd(params.endDate), depositSince: ymd(params.startDate) }),
+        totalDeferredForUser({ asOfDate: ymd(prevEnd), depositSince: ymd(prevStart) }),
+        totalDeferredForUser({ asOfDate: ymd(yearEnd), depositSince: ymd(yearStart) }),
+      ]);
+    }
+  } catch (err) {
+    console.warn("[accounting] trust deferral lookup failed (returning gross):", (err as Error)?.message);
+  }
+
+  return assembleAccountingStats({ ti, te, pti, pte, yi, ye, trustDeferred, prevTrustDeferred, yearTrustDeferred });
 }
 
 // ─── Invoices ─────────────────────────────────────────────────────────────────

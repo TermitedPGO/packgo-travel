@@ -4,7 +4,7 @@
  * for PACK&GO Travel Agency accounting system.
  */
 
-import { getAccountingEntries, getAccountingStats } from "../db";
+import { getAccountingEntries, getAccountingStats, type AccountingStats } from "../db";
 import { AccountingEntry } from "../../drizzle/schema";
 
 export interface ProfitAndLossReport {
@@ -17,8 +17,12 @@ export interface ProfitAndLossReport {
     total: number;
     byCategory: Record<string, number>;
   };
+  /** Unrecognized customer-deposit (trust) income subtracted from netProfit
+   *  per CST §17550. `income.total` stays gross; this is surfaced so the UI
+   *  can show "客人訂金（未認列）" as its own line. */
+  trustDeferredIncome: number;
   netProfit: number;
-  profitMargin: number; // percentage
+  profitMargin: number; // percentage, on net (post-deferral) revenue
   comparison: {
     prevNetProfit: number;
     changePercent: number;
@@ -26,6 +30,7 @@ export interface ProfitAndLossReport {
   yearToDate: {
     income: number;
     expenses: number;
+    trustDeferredIncome: number;
     netProfit: number;
   };
 }
@@ -34,6 +39,9 @@ export interface MonthlyTrendData {
   month: string; // "YYYY-MM"
   income: number;
   expenses: number;
+  /** Trust-deferred income for the month (CST §17550), already subtracted
+   *  from `netProfit`. Same convention as the headline stats. */
+  trustDeferredIncome: number;
   netProfit: number;
 }
 
@@ -48,17 +56,9 @@ export interface TaxSummary {
 }
 
 export interface FinancialDashboard {
-  stats: {
-    totalIncome: number;
-    totalExpenses: number;
-    netProfit: number;
-    prevTotalIncome: number;
-    prevTotalExpenses: number;
-    prevNetProfit: number;
-    yearIncome: number;
-    yearExpenses: number;
-    yearNetProfit: number;
-  };
+  // Shares the exact getAccountingStats envelope (trust-aware netProfit +
+  // trustDeferredIncome fields) so the dashboard can never drift from it.
+  stats: AccountingStats;
   monthlyTrend: MonthlyTrendData[];
   topExpenseCategories: Array<{ category: string; amount: number; percentage: number }>;
   topIncomeCategories: Array<{ category: string; amount: number; percentage: number }>;
@@ -111,9 +111,14 @@ export async function generateProfitAndLossReport(
     }
   }
 
-  const netProfit = stats.totalIncome - stats.totalExpenses;
-  const profitMargin = stats.totalIncome > 0 ? (netProfit / stats.totalIncome) * 100 : 0;
-  const prevNetProfit = stats.prevTotalIncome - stats.prevTotalExpenses;
+  // netProfit / prevNetProfit / yearNetProfit are computed trust-aware inside
+  // getAccountingStats (income − deferred − expenses). Read them straight off
+  // `stats` rather than re-deriving — that re-derivation was the third stray
+  // formula PKG-C is collapsing. Margin is on net (post-deferral) revenue.
+  const netProfit = stats.netProfit;
+  const netRevenue = stats.totalIncome - stats.trustDeferredIncome;
+  const profitMargin = netRevenue > 0 ? (netProfit / netRevenue) * 100 : 0;
+  const prevNetProfit = stats.prevNetProfit;
   const changePercent =
     prevNetProfit !== 0 ? ((netProfit - prevNetProfit) / Math.abs(prevNetProfit)) * 100 : 0;
 
@@ -121,13 +126,15 @@ export async function generateProfitAndLossReport(
     period: { start: startDate, end: endDate },
     income: { total: stats.totalIncome, byCategory: incomeByCategory },
     expenses: { total: stats.totalExpenses, byCategory: expensesByCategory },
+    trustDeferredIncome: stats.trustDeferredIncome,
     netProfit,
     profitMargin,
     comparison: { prevNetProfit, changePercent },
     yearToDate: {
       income: stats.yearIncome,
       expenses: stats.yearExpenses,
-      netProfit: stats.yearIncome - stats.yearExpenses,
+      trustDeferredIncome: stats.yearTrustDeferredIncome,
+      netProfit: stats.yearNetProfit,
     },
   };
 }
@@ -163,14 +170,58 @@ export async function generateMonthlyTrend(months: number = 12): Promise<Monthly
     }
   }
 
-  return Object.entries(monthMap)
+  // Per-month trust-deferred (CST §17550) so the trend's netProfit uses the
+  // SAME convention as the headline stats — otherwise this service would still
+  // hold two netProfit formulas (the thing PKG-C is collapsing). Scoped to each
+  // month's own deposits (depositSince=month-01). Reuses the canonical helper
+  // via a dynamic import (db ↔ trustDeferral cycle). Flag-gated: when off, no
+  // extra queries run and every month stays gross.
+  const deferredByMonth: Record<string, number> = {};
+  try {
+    const { totalDeferredForUser, isTrustDeferralEnabled } = await import("./trustDeferralService");
+    if (isTrustDeferralEnabled()) {
+      const keys = Object.keys(monthMap);
+      const totals = await Promise.all(
+        keys.map((k) => {
+          const [y, m] = k.split("-").map(Number);
+          const lastDay = new Date(y, m, 0).getDate(); // m is 1-based → day 0 of next = last of this
+          return totalDeferredForUser({
+            depositSince: `${k}-01`,
+            asOfDate: `${k}-${String(lastDay).padStart(2, "0")}`,
+          });
+        })
+      );
+      keys.forEach((k, i) => { deferredByMonth[k] = totals[i]; });
+    }
+  } catch (err) {
+    console.warn("[financialReport] monthly trust deferral lookup failed (gross):", (err as Error)?.message);
+  }
+
+  return foldMonthlyTrend(monthMap, deferredByMonth);
+}
+
+/**
+ * Pure fold of month buckets → sorted trend rows with trust-aware netProfit.
+ * Split out (PKG-C, 2026-05-30) so the per-month formula
+ *   netProfit = income − trustDeferred − expenses
+ * is unit-testable without a DB. `deferredByMonth` defaults to empty → gross.
+ */
+export function foldMonthlyTrend(
+  buckets: Record<string, { income: number; expenses: number }>,
+  deferredByMonth: Record<string, number> = {}
+): MonthlyTrendData[] {
+  return Object.entries(buckets)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([month, { income, expenses }]) => ({
-      month,
-      income,
-      expenses,
-      netProfit: income - expenses,
-    }));
+    .map(([month, { income, expenses }]) => {
+      const trustDeferredIncome = deferredByMonth[month] ?? 0;
+      return {
+        month,
+        income,
+        expenses,
+        trustDeferredIncome,
+        netProfit: income - trustDeferredIncome - expenses,
+      };
+    });
 }
 
 /**

@@ -45,6 +45,7 @@ import {
   updateAccountingEntry,
   deleteAccountingEntry,
   getAccountingStats,
+  assembleAccountingStats,
   // Invoices (8)
   createInvoice,
   getInvoices,
@@ -149,9 +150,9 @@ describe("db/accounting — lazy-DB null read behavior", () => {
       endDate: new Date("2026-12-31"),
     });
     expect(stats).toEqual({
-      totalIncome: 0, totalExpenses: 0, netProfit: 0,
-      prevTotalIncome: 0, prevTotalExpenses: 0, prevNetProfit: 0,
-      yearIncome: 0, yearExpenses: 0, yearNetProfit: 0,
+      totalIncome: 0, totalExpenses: 0, trustDeferredIncome: 0, netProfit: 0,
+      prevTotalIncome: 0, prevTotalExpenses: 0, prevTrustDeferredIncome: 0, prevNetProfit: 0,
+      yearIncome: 0, yearExpenses: 0, yearTrustDeferredIncome: 0, yearNetProfit: 0,
     });
   });
 
@@ -219,5 +220,47 @@ describe("db/accounting — lazy-DB null write behavior", () => {
     await expect(deleteMarketingCampaign(1)).rejects.toThrow(
       "Database not available",
     );
+  });
+});
+
+/**
+ * PKG-C — trust-aware netProfit (CST §17550). The pure assembly helper is the
+ * single place the ledger P&L's netProfit math lives. RED-LINE under test:
+ * customer deposits sitting in trust are NOT income until departure, so they
+ * are subtracted from netProfit while totalIncome stays GROSS (= Σ categories).
+ */
+describe("assembleAccountingStats — trust-aware netProfit", () => {
+  it("subtracts trust-deferred from netProfit but keeps totalIncome gross", () => {
+    const s = assembleAccountingStats({
+      ti: 10000, te: 3000, pti: 0, pte: 0, yi: 0, ye: 0,
+      trustDeferred: 4000,
+    });
+    expect(s.totalIncome).toBe(10000); // gross, untouched
+    expect(s.trustDeferredIncome).toBe(4000);
+    expect(s.netProfit).toBe(3000); // 10000 − 4000 deferred − 3000 expenses
+  });
+
+  it("defaults deferred to 0 (legacy / flag-off → netProfit = gross − expenses)", () => {
+    const s = assembleAccountingStats({ ti: 10000, te: 3000, pti: 0, pte: 0, yi: 0, ye: 0 });
+    expect(s.trustDeferredIncome).toBe(0);
+    expect(s.netProfit).toBe(7000);
+  });
+
+  it("applies the per-period deferred independently to current / prev / year", () => {
+    const s = assembleAccountingStats({
+      ti: 5000, te: 1000, trustDeferred: 2000,
+      pti: 4000, pte: 800, prevTrustDeferred: 1000,
+      yi: 60000, ye: 12000, yearTrustDeferred: 9000,
+    });
+    expect(s.netProfit).toBe(2000); // 5000 − 2000 − 1000
+    expect(s.prevNetProfit).toBe(2200); // 4000 − 1000 − 800
+    expect(s.yearNetProfit).toBe(39000); // 60000 − 9000 − 12000
+    expect(s.prevTrustDeferredIncome).toBe(1000);
+    expect(s.yearTrustDeferredIncome).toBe(9000);
+  });
+
+  it("a deposit-only period (all income deferred) yields negative netProfit = −expenses", () => {
+    const s = assembleAccountingStats({ ti: 8000, te: 500, pti: 0, pte: 0, yi: 0, ye: 0, trustDeferred: 8000 });
+    expect(s.netProfit).toBe(-500); // every dollar of income is still in trust
   });
 });
