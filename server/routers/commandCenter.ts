@@ -44,9 +44,17 @@ import { registerCsExecutors } from "../agents/autonomous/inquiryReplyExecutor";
 // here guarantees the "quote_draft" executor is registered before any approve
 // can dispatch. See quoteExecutor.ts header.
 import { registerQuoteExecutors } from "../agents/autonomous/quoteExecutor";
+// 指揮中心 行銷頁 (P3) — registering the marketing lane executor at module load.
+import { registerMarketingExecutors } from "../agents/autonomous/marketingExecutor";
+// 指揮中心 財務頁 (P4) — registering the finance lane executor at module load.
+// Same pattern as P1 cs. The finance executor is acknowledge-only (marks
+// alerts as seen, NEVER moves money).
+import { registerFinanceExecutors } from "../agents/autonomous/financeExecutor";
 
 registerCsExecutors();
 registerQuoteExecutors();
+registerMarketingExecutors();
+registerFinanceExecutors();
 
 const laneEnum = z.enum(["cs", "quote", "marketing", "finance"]);
 const statusEnum = z.enum([
@@ -343,5 +351,156 @@ export const commandCenterRouter = router({
       );
 
       return { taskId: id, riskLevel };
+    }),
+
+  // ── 行銷頁 (P3) ─────────────────────────────────────────────────────────
+
+  /**
+   * 行銷頁 producer trigger (P3) — manually drop a marketing draft into the
+   * 審核箱 as a pending marketing task.
+   *
+   * Admin-only: Jeff fills in the content type, title, body, optional
+   * platform/tourId/image/hashtags → this calls the producer → creates an
+   * approval task. The draft then appears in the marketing lane for review.
+   */
+  produceMarketingDraft: adminProcedure
+    .input(
+      z.object({
+        contentType: z.enum([
+          "xhs_post",
+          "wechat_article",
+          "edm",
+          "poster_copy",
+          "social_post",
+          "other",
+        ]),
+        title: z.string().min(1).max(255),
+        body: z.string().min(1),
+        platform: z.string().max(64).optional(),
+        targetAudience: z.string().max(500).optional(),
+        tourId: z.number().int().optional(),
+        tourTitle: z.string().max(255).optional(),
+        imageUrl: z.string().url().max(2000).optional(),
+        hashtags: z.array(z.string().max(100)).max(30).optional(),
+        hasPrice: z.boolean().optional(),
+        sourceRouter: z.string().max(64).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { produceMarketingDraftTask } = await import(
+        "../agents/autonomous/marketingProducer"
+      );
+
+      const { id, riskLevel } = await produceMarketingDraftTask(
+        {
+          contentType: input.contentType,
+          title: input.title,
+          body: input.body,
+          platform: input.platform,
+          targetAudience: input.targetAudience,
+          tourId: input.tourId,
+          tourTitle: input.tourTitle,
+          imageUrl: input.imageUrl,
+          hashtags: input.hashtags,
+          hasPrice: input.hasPrice,
+          sourceRouter: input.sourceRouter,
+        },
+        ctx as ApprovalAuditCtx,
+      );
+
+      return { taskId: id, riskLevel };
+    }),
+
+  /**
+   * 行銷頁 supplier content transform (P3-v2) — paste supplier text + optional
+   * poster image → AI transforms into PACK&GO branded draft → drops into 審核箱.
+   *
+   * Reuses the existing produceMarketingDraftTask pipeline so the draft appears
+   * in the marketing lane inbox exactly like a manually composed one.
+   */
+  transformSupplierContent: adminProcedure
+    .input(
+      z.object({
+        supplierText: z.string().min(10).max(5000),
+        supplierImageUrl: z.string().url().max(2000).optional(),
+        platform: z.string().max(64).optional(),
+        notes: z.string().max(500).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { transformSupplierContent: transform } = await import(
+        "../agents/autonomous/marketingTransformer"
+      );
+      const { produceMarketingDraftTask } = await import(
+        "../agents/autonomous/marketingProducer"
+      );
+
+      // Step 1: AI transform supplier content → PACK&GO brand version
+      const result = await transform(input);
+
+      // Step 2: Feed into existing producer pipeline
+      const { id, riskLevel } = await produceMarketingDraftTask(
+        {
+          contentType: "social_post",
+          title: result.title,
+          body: result.body,
+          platform: input.platform,
+          imageUrl: input.supplierImageUrl,
+          hashtags: result.hashtags,
+          hasPrice: !!result.extractedPrice,
+          sourceRouter: "supplierTransform",
+          supplierText: input.supplierText,
+          supplierImageUrl: input.supplierImageUrl,
+        },
+        ctx as ApprovalAuditCtx,
+      );
+
+      return { taskId: id, riskLevel, transformed: result };
+    }),
+
+  // ── 財務頁 (P4) ─────────────────────────────────────────────────────────
+
+  /**
+   * Run all 5 finance alert checks and produce approval tasks for anomalies.
+   * Admin triggers this from the finance dashboard "一鍵掃描" button.
+   */
+  runFinanceAlerts: adminProcedure.mutation(async ({ ctx }) => {
+    const { produceFinanceAlerts } = await import(
+      "../agents/autonomous/financeAlertProducer"
+    );
+    return produceFinanceAlerts(ctx as ApprovalAuditCtx);
+  }),
+
+  /**
+   * AI financial advisor — Jeff asks a question, gets a data-backed answer.
+   * The advisor has read access to P&L, bank transactions, trust status,
+   * and tax summaries. It NEVER executes transactions.
+   */
+  askFinanceAdvisor: adminProcedure
+    .input(z.object({ question: z.string().min(1).max(2000) }))
+    .mutation(async ({ input }) => {
+      const { askFinanceAdvisor } = await import(
+        "../agents/autonomous/financeAdvisor"
+      );
+      const answer = await askFinanceAdvisor(input.question);
+      return { answer };
+    }),
+
+  /**
+   * Generate and return a Schedule C tax CSV for the given year.
+   * The CSV string is returned in the response (no file write); the client
+   * triggers a browser download.
+   */
+  downloadTaxCsv: adminProcedure
+    .input(z.object({ year: z.number().int().min(2020).max(2030) }))
+    .mutation(async ({ input }) => {
+      const { generateTaxCsv } = await import(
+        "../services/taxCsvService"
+      );
+      const csv = await generateTaxCsv(input.year);
+      return {
+        csv,
+        filename: `packgo-schedule-c-${input.year}.csv`,
+      };
     }),
 });

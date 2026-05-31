@@ -9,12 +9,15 @@
  * chips just swap the `lane` prop. Lanes cs/quote/marketing/finance fill in
  * their payload previews + executors in P1-P4 (server/_core/approvalTasks.ts).
  */
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
 import { trpc } from "@/lib/trpc";
 import { useLocale } from "@/contexts/LocaleContext";
 import { PageHeader, KPIStrip, type KPI } from "@/components/admin/primitives";
 import { CalendarClock } from "lucide-react";
 import ApprovalInbox from "./ApprovalInbox";
+
+const MarketingComposer = lazy(() => import("./MarketingComposer"));
+const FinanceDashboard = lazy(() => import("./FinanceDashboard"));
 
 type LaneFilter = "all" | "cs" | "quote" | "marketing" | "finance";
 
@@ -110,6 +113,17 @@ export default function CommandCenterTab() {
             })}
           </div>
         </div>
+        {lane === "marketing" && (
+          <Suspense fallback={null}>
+            <MarketingComposer />
+          </Suspense>
+        )}
+        {/* Finance dashboard — shown above the inbox when finance lane is active */}
+        {lane === "finance" && (
+          <Suspense fallback={null}>
+            <FinanceDashboard />
+          </Suspense>
+        )}
         <ApprovalInbox lane={lane === "all" ? undefined : lane} />
       </section>
 
