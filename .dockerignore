@@ -10,6 +10,15 @@ node_modules
 dist
 .vite
 
+# Claude Code agent workspace — git worktrees + task outputs (3GB+). Never part
+# of the build/runtime; including it ballooned the Docker build context past the
+# deploy timeout (2026-05-31).
+.claude
+
+# Local audit / scan artifacts (reports written by scripts/*.mjs, which are
+# themselves excluded below). Not runtime.
+.audit
+
 # Logs
 *.log
 .manus-logs
