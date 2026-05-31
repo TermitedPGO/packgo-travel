@@ -319,11 +319,44 @@ export const inquiriesRouter = router({
             message: "You don't have permission to add messages to this inquiry",
           });
         }
-        return await db.createInquiryMessage({
+        const isAdmin = ctx.user.role === "admin";
+        const created = await db.createInquiryMessage({
           inquiryId: input.inquiryId,
           senderId: ctx.user.id,
-          senderType: ctx.user.role === "admin" ? "admin" : "customer",
+          senderType: isAdmin ? "admin" : "customer",
           message: input.message,
         });
+
+        // When an ADMIN replies, the customer must actually receive the
+        // reply by email — before this they only saw it if they logged
+        // back into the website. Email is best-effort: a bounce must NOT
+        // fail the mutation (the reply is already persisted above).
+        // Customers posting to their own thread do NOT trigger a send.
+        let emailSent = false;
+        if (isAdmin && inquiry.customerEmail) {
+          try {
+            const { sendInquiryReply } = await import("../emailService");
+            emailSent = await sendInquiryReply({
+              to: inquiry.customerEmail,
+              customerName: inquiry.customerName,
+              subject: inquiry.subject,
+              body: input.message,
+              inquiryId: input.inquiryId,
+            });
+          } catch (err) {
+            console.error("[inquiries.addMessage] sendInquiryReply threw:", err);
+          }
+          // On a successful admin reply, advance the thread to "replied"
+          // so the Inbox reflects state. Best-effort — never block on it.
+          if (emailSent && inquiry.status !== "replied") {
+            try {
+              await db.updateInquiry(input.inquiryId, { status: "replied" });
+            } catch (err) {
+              console.error("[inquiries.addMessage] status update failed:", err);
+            }
+          }
+        }
+
+        return { ...created, emailSent };
        }),
   });

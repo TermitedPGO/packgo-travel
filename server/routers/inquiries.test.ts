@@ -28,10 +28,16 @@ vi.mock("../rateLimit", () => ({
 vi.mock("../_core/notification", () => ({
   notifyOwner: vi.fn(() => Promise.resolve()),
 }));
+// addMessage dynamically `await import("../emailService")` — vi.mock
+// intercepts the dynamic import so no real SendGrid/SMTP send happens.
+vi.mock("../emailService", () => ({
+  sendInquiryReply: vi.fn(),
+}));
 
 import { inquiriesRouter } from "./inquiries";
 import * as db from "../db";
 import { checkRateLimit } from "../rateLimit";
+import { sendInquiryReply } from "../emailService";
 
 describe("inquiriesRouter (Phase 4C extraction)", () => {
   it("exposes all 9 procedures from the pre-split source", () => {
@@ -93,5 +99,123 @@ describe("inquiriesRouter.createEmergency — migration 0077 behavior", () => {
     expect(rowArg.inquiryType).toBe("emergency");
     // Subject prefix unchanged — backfill in migration 0077 depends on it.
     expect(rowArg.subject).toMatch(/^\[緊急 · /);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// addMessage — admin reply emails the customer (PKG-1)
+//
+// When an ADMIN replies, the customer must actually receive the reply by
+// email. The send is best-effort: a failure must NOT fail the mutation (the
+// reply is already persisted), and only a *successful* admin send advances
+// the thread to "replied". A customer posting to their own thread never
+// triggers a send.
+// ---------------------------------------------------------------------------
+describe("inquiriesRouter.addMessage — admin reply emails the customer", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function makeAdminContext() {
+    return {
+      req: { headers: {}, socket: {} } as any,
+      res: { cookie: () => {}, clearCookie: () => {} } as any,
+      user: { id: 1, role: "admin" },
+      ip: "127.0.0.1",
+    };
+  }
+
+  function makeCustomerContext() {
+    return {
+      req: { headers: {}, socket: {} } as any,
+      res: { cookie: () => {}, clearCookie: () => {} } as any,
+      // Owns the inquiry below (userId 99) so the ownership check passes.
+      user: { id: 99, role: "user" },
+      ip: "127.0.0.1",
+    };
+  }
+
+  const inquiryRow = {
+    id: 10,
+    userId: 99,
+    customerName: "王小姐",
+    customerEmail: "customer@example.com",
+    subject: "美西行程詢問",
+    status: "new",
+  };
+
+  it("admin reply: sends the email, advances status to 'replied', returns emailSent=true", async () => {
+    (db.getInquiryById as any).mockResolvedValue({ ...inquiryRow });
+    (db.createInquiryMessage as any).mockResolvedValue({
+      id: 500,
+      inquiryId: 10,
+      senderType: "admin",
+      message: "我們已為您安排專人服務。",
+    });
+    (db.updateInquiry as any).mockResolvedValue({});
+    (sendInquiryReply as any).mockResolvedValue(true);
+
+    const caller = (inquiriesRouter as any).createCaller(makeAdminContext());
+    const result = await caller.addMessage({
+      inquiryId: 10,
+      message: "我們已為您安排專人服務。",
+    });
+
+    // Sent with the inquiry's customer details + the admin's typed body.
+    expect(sendInquiryReply).toHaveBeenCalledTimes(1);
+    expect((sendInquiryReply as any).mock.calls[0][0]).toEqual({
+      to: "customer@example.com",
+      customerName: "王小姐",
+      subject: "美西行程詢問",
+      body: "我們已為您安排專人服務。",
+      inquiryId: 10,
+    });
+    // A successful send advances the thread.
+    expect(db.updateInquiry).toHaveBeenCalledWith(10, { status: "replied" });
+    expect(result.emailSent).toBe(true);
+  });
+
+  it("send failure: never throws, leaves status untouched, returns emailSent=false", async () => {
+    (db.getInquiryById as any).mockResolvedValue({ ...inquiryRow });
+    (db.createInquiryMessage as any).mockResolvedValue({
+      id: 501,
+      inquiryId: 10,
+      senderType: "admin",
+      message: "回覆內容",
+    });
+    (db.updateInquiry as any).mockResolvedValue({});
+    // SendGrid / SMTP blows up — the mutation must swallow it.
+    (sendInquiryReply as any).mockRejectedValue(new Error("smtp down"));
+    // The catch logs the failure (best-effort); suppress + assert it.
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const caller = (inquiriesRouter as any).createCaller(makeAdminContext());
+    // Resolves (does not throw) even though the send rejected.
+    const result = await caller.addMessage({ inquiryId: 10, message: "回覆內容" });
+
+    expect(sendInquiryReply).toHaveBeenCalledTimes(1);
+    expect(result.emailSent).toBe(false);
+    // A failed send must NOT advance the thread.
+    expect(db.updateInquiry).not.toHaveBeenCalled();
+    // The failure was logged, not silently dropped.
+    expect(errSpy).toHaveBeenCalled();
+    errSpy.mockRestore();
+  });
+
+  it("customer posting to their own thread: no email is sent", async () => {
+    (db.getInquiryById as any).mockResolvedValue({ ...inquiryRow });
+    (db.createInquiryMessage as any).mockResolvedValue({
+      id: 502,
+      inquiryId: 10,
+      senderType: "customer",
+      message: "請問報價",
+    });
+
+    const caller = (inquiriesRouter as any).createCaller(makeCustomerContext());
+    const result = await caller.addMessage({ inquiryId: 10, message: "請問報價" });
+
+    expect(sendInquiryReply).not.toHaveBeenCalled();
+    expect(db.updateInquiry).not.toHaveBeenCalled();
+    expect(result.emailSent).toBe(false);
   });
 });

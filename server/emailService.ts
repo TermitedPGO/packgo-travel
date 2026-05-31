@@ -478,6 +478,163 @@ export async function sendNewsletterConfirmationEmail(to: string): Promise<boole
 }
 
 /**
+ * Escape HTML special chars so an admin's free-text reply can't break the
+ * email markup (or inject tags). Line breaks are converted to <br> by the
+ * caller AFTER escaping so the customer sees the admin's formatting intact.
+ */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
+ * Build the shared branded HTML body for an inquiry reply. The template
+ * chrome is in 繁體中文 (PACK&GO's default audience); the admin's typed
+ * message (`body`) is dropped in verbatim (HTML-escaped + line breaks
+ * preserved).
+ */
+function buildInquiryReplyHtml(params: {
+  customerName?: string | null;
+  inquirySubject: string;
+  body: string;
+}): string {
+  const greetingName = params.customerName?.trim() || "貴賓";
+  const safeBody = escapeHtml(params.body).replace(/\r?\n/g, "<br>");
+  const safeSubject = escapeHtml(params.inquirySubject);
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>PACK&GO 旅行社回覆</title>
+    </head>
+    <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f5f5f5; padding: 40px 20px;">
+        <tr>
+          <td align="center">
+            <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+              <tr>
+                <td style="background-color: #000000; padding: 30px; text-align: center;">
+                  <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: bold;">PACK&GO</h1>
+                  <p style="color: #cccccc; margin: 5px 0 0 0; font-size: 14px;">讓旅行更美好</p>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding: 40px 30px;">
+                  <h2 style="color: #333333; margin: 0 0 20px 0; font-size: 22px;">關於您的詢問，我們回覆如下</h2>
+                  <p style="color: #666666; line-height: 1.6; margin: 0 0 8px 0;">您好 <strong>${escapeHtml(greetingName)}</strong>，</p>
+                  <p style="color: #999999; line-height: 1.6; margin: 0 0 20px 0; font-size: 14px;">詢問主旨：${safeSubject}</p>
+                  <div style="background-color: #f8f9fa; border-left: 4px solid #000000; border-radius: 0 4px 4px 0; padding: 20px; margin: 0 0 24px 0;">
+                    <p style="color: #333333; line-height: 1.8; margin: 0; font-size: 15px;">${safeBody}</p>
+                  </div>
+                  <p style="color: #666666; line-height: 1.6; margin: 0 0 4px 0; font-size: 14px;">若有任何問題，歡迎直接回覆此郵件，我們會盡快為您服務。</p>
+                  <p style="color: #666666; line-height: 1.6; margin: 0; font-size: 14px;">祝您旅途愉快！</p>
+                </td>
+              </tr>
+              <tr>
+                <td style="background-color: #f8f8f8; padding: 24px 30px; text-align: center; border-top: 1px solid #eeeeee;">
+                  <p style="color: #666666; margin: 0 0 8px 0; font-size: 14px;">需要協助？請聯絡我們的客服團隊</p>
+                  <p style="color: #0066cc; margin: 0 0 8px 0; font-size: 14px;">
+                    <a href="tel:+15106342307" style="color: #0066cc; text-decoration: none;">+1 (510) 634-2307</a>
+                    &nbsp;｜&nbsp;
+                    <a href="mailto:Jeffhsieh09@gmail.com" style="color: #0066cc; text-decoration: none;">Jeffhsieh09@gmail.com</a>
+                  </p>
+                  <p style="color: #999999; margin: 12px 0 0 0; font-size: 12px;">© ${new Date().getFullYear()} PACK&amp;GO 旅行社. All rights reserved.</p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
+  `;
+}
+
+/**
+ * Send an admin reply to a customer inquiry.
+ *
+ * Triggered when an admin replies through the Inbox: previously the reply
+ * was only persisted to the DB, so the customer never heard back unless
+ * they happened to log into the website again. Mirrors the other senders:
+ * SendGrid if SENDGRID_API_KEY is set, else SMTP via getTransporter();
+ * try/catch → boolean (best-effort, never throws); redactEmail in logs.
+ *
+ * The template chrome is 繁體中文 (default audience); `body` (the admin's
+ * typed message) is rendered into the branded template verbatim, with a
+ * plain-text fallback.
+ */
+export async function sendInquiryReply(params: {
+  to: string;
+  customerName?: string | null;
+  subject: string;
+  body: string;
+  inquiryId: number;
+}): Promise<boolean> {
+  const { to, customerName, subject, body, inquiryId } = params;
+  const replySubject = `Re: ${subject}`;
+  const greetingName = customerName?.trim() || "貴賓";
+  const html = buildInquiryReplyHtml({ customerName, inquirySubject: subject, body });
+  const text =
+    `您好 ${greetingName}，\n\n` +
+    `關於您的詢問「${subject}」，我們回覆如下：\n\n` +
+    `${body}\n\n` +
+    `若有任何問題，歡迎直接回覆此郵件，我們會盡快為您服務。\n\n` +
+    `祝您旅途愉快！\n` +
+    `PACK&GO 旅行社\n` +
+    `客服專線：+1 (510) 634-2307 ｜ Jeffhsieh09@gmail.com`;
+
+  // Use SendGrid if configured
+  if (SENDGRID_API_KEY) {
+    try {
+      await sgMail.send({ to, from: EMAIL_FROM, subject: replySubject, text, html });
+      console.log(
+        `[Email] Inquiry reply (#${inquiryId}) sent via SendGrid to:`,
+        redactEmail(to),
+      );
+      return true;
+    } catch (error: any) {
+      console.error(
+        `[Email] Failed to send inquiry reply (#${inquiryId}) via SendGrid:`,
+        error.message,
+      );
+      if (error.response) {
+        console.error('[Email] SendGrid error details:', error.response.body);
+      }
+      return false;
+    }
+  }
+
+  // Fall back to SMTP
+  try {
+    const transporter = getTransporter();
+    await transporter.sendMail({
+      from: `"PACK&GO 旅行社" <${EMAIL_FROM}>`,
+      to,
+      subject: replySubject,
+      text,
+      html,
+    });
+    console.log(
+      `[Email] Inquiry reply (#${inquiryId}) sent via SMTP to:`,
+      redactEmail(to),
+    );
+    return true;
+  } catch (error) {
+    console.error(
+      `[Email] Failed to send inquiry reply (#${inquiryId}) via SMTP:`,
+      error,
+    );
+    return false;
+  }
+}
+
+/**
  * Test email configuration
  */
 export async function testEmailConfiguration(): Promise<boolean> {
