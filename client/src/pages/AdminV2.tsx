@@ -126,12 +126,14 @@ const IA: Record<
 > = {
   chat: {
     domain: { id: "chat", label: "Chat", icon: MessageSquare },
-    primary: [{ id: "agent-chat", label: "Agent Chat" }],
+    primary: [
+      { id: "agent-chat", label: "Agent Chat" },
+      { id: "inquiries", label: "詢問" },
+    ],
     advanced: [],
     hidden: [
       { id: "command-center", label: "指揮中心" },
       { id: "today", label: "今日總覽" },
-      { id: "inquiries", label: "詢問" },
     ],
   },
   ledger: {
