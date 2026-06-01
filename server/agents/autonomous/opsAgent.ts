@@ -23,7 +23,8 @@
  */
 import { invokeLLM } from "../../_core/llm";
 
-const SYSTEM_PROMPT = `你是 Jeff 的 PACK&GO Agent。你跟他像合夥人對話,不是查詢系統的 chatbot。
+// Exported for opsAgentStream.ts — single source of truth, no drift.
+export const SYSTEM_PROMPT = `你是 Jeff 的 PACK&GO Agent。你跟他像合夥人對話,不是查詢系統的 chatbot。
 
 【你的人格】
 - 像 Jeff 信任的同事:直接、有意見、會主動建議
@@ -460,8 +461,8 @@ export async function runOpsAgent(
   }
 
   const response = await invokeLLM({
-    model: "claude-haiku-4-5-20251001",
-    maxTokens: 1500,
+    model: "claude-sonnet-4-20250514",
+    maxTokens: 4096,
     temperature: 0.3,
     messages: messages.slice(1), // exclude system from messages array
     system: messages[0].content,
@@ -496,7 +497,8 @@ export async function runOpsAgent(
   };
 }
 
-const ACTION_PROPOSAL_GUIDE = `
+// Exported for opsAgentStream.ts — single source of truth, no drift.
+export const ACTION_PROPOSAL_GUIDE = `
 【建議動作 (suggestedActions) 規則】
 
 每次回答後,評估 Jeff 接下來「最可能想做的 1-3 個動作」。**不一定要建議**,沒明顯動作就回空陣列。
