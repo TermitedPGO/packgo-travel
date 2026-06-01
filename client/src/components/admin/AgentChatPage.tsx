@@ -1,23 +1,9 @@
 /**
- * Round 81 / 2026-05-18 — AgentChatPage.
- *
- * Full-page Claude-Code-style chat with OpsAgent. Replaces the slide-out
- * Sheet (FloatingOpsAgent) per Jeff's feedback: "我更prefer agents 的聊天窗
- * 跟我現在用的一樣" — i.e. full-screen, document-style messages, not
- * cramped bubbles in a side panel.
- *
- * Layout principles (matching Claude Code feel):
- *   - max-w-3xl centered content area (not full bleed; matches reading width)
- *   - Document-style messages: role label on top, content below, no bubbles
- *   - Wide markdown rendering (prose-base) with proper code blocks / lists
- *   - Composer sticks to bottom of main area
- *   - Visible token streaming with cursor
- *   - Action chips as buttons under agent responses
- *
- * Entry points: Sidebar Office domain primary tab → `agent-chat` PageId.
- * ⌘+K still goes to the existing CommandPalette (unchanged).
+ * AgentChatPage — full-page Claude-Code-style chat with OpsAgent.
+ * Compact approval strip (quote + marketing) between conversation & composer.
+ * B&W theme. Entry: Sidebar Office → `agent-chat` PageId.
  */
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -43,11 +29,22 @@ import {
   Undo2,
   AlertCircle,
   RefreshCw,
+  ChevronDown,
+  ChevronUp,
+  Check,
+  X,
 } from "lucide-react";
 import { format } from "date-fns";
 import { zhTW } from "date-fns/locale";
 import { toast } from "sonner";
 import { useLocale } from "@/contexts/LocaleContext";
+import { LanePayloadPreview } from "@/components/admin-v2/CommandCenter/lanes";
+import type { ApprovalTaskRow } from "@/components/admin-v2/CommandCenter/types";
+
+const PROSE_CLS =
+  "prose prose-sm max-w-none text-foreground/90 prose-p:my-2 prose-ul:my-2 prose-li:my-0.5 prose-strong:text-foreground prose-code:bg-foreground/[0.05] prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-foreground prose-code:font-mono prose-code:text-[0.85em] prose-pre:bg-foreground/[0.04] prose-pre:border prose-pre:border-foreground/10 prose-pre:rounded-lg prose-pre:p-3 prose-pre:text-[0.9em] prose-table:my-3 prose-th:bg-foreground/[0.04] prose-th:px-3 prose-th:py-2 prose-th:text-left prose-td:px-3 prose-td:py-1.5 prose-headings:mt-3 prose-headings:mb-1 prose-h1:text-base prose-h2:text-base prose-h3:text-sm";
+const PROSE_STREAM_CLS =
+  "prose prose-sm max-w-none text-foreground/90 prose-p:my-2 prose-ul:my-2 prose-li:my-0.5 prose-strong:text-foreground prose-code:bg-foreground/[0.05] prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-foreground prose-code:font-mono prose-code:text-[0.85em] prose-pre:bg-foreground/[0.04] prose-pre:border prose-pre:border-foreground/10 prose-pre:rounded-lg prose-pre:p-3 prose-headings:mt-3 prose-headings:mb-1";
 
 const ACTION_ICON: Record<string, any> = {
   sendCustomerEmail: Mail,
@@ -59,6 +56,187 @@ const ACTION_ICON: Record<string, any> = {
   cancelBooking: XCircle,
   triggerRefund: Undo2,
 };
+
+// ── Compact approval strip (quote + marketing only) ──────────────────────
+
+function ApprovalStrip() {
+  const { t } = useLocale();
+  const utils = trpc.useUtils();
+
+  const quoteItems = trpc.commandCenter.list.useQuery(
+    { lane: "quote", status: "pending" },
+    { refetchInterval: 15_000 },
+  );
+  const marketingItems = trpc.commandCenter.list.useQuery(
+    { lane: "marketing", status: "pending" },
+    { refetchInterval: 15_000 },
+  );
+
+  const pendingItems = useMemo(() => {
+    const combined = [
+      ...((quoteItems.data ?? []) as ApprovalTaskRow[]),
+      ...((marketingItems.data ?? []) as ApprovalTaskRow[]),
+    ];
+    return combined.sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+  }, [quoteItems.data, marketingItems.data]);
+
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [hardGateConfirmed, setHardGateConfirmed] = useState(false);
+
+  const approveMutation = trpc.commandCenter.approve.useMutation({
+    onSuccess: () => {
+      toast.success(t("admin.agentChat.itemApproved"));
+      setExpandedId(null);
+      setHardGateConfirmed(false);
+      utils.commandCenter.list.invalidate();
+      utils.commandCenter.stats.invalidate();
+    },
+    onError: (err) =>
+      toast.error(t("admin.agentChat.executionFailed", { msg: err.message })),
+  });
+
+  const rejectMutation = trpc.commandCenter.reject.useMutation({
+    onSuccess: () => {
+      toast.success(t("admin.agentChat.itemRejected"));
+      setExpandedId(null);
+      setHardGateConfirmed(false);
+      utils.commandCenter.list.invalidate();
+      utils.commandCenter.stats.invalidate();
+    },
+    onError: (err) =>
+      toast.error(t("admin.agentChat.executionFailed", { msg: err.message })),
+  });
+
+  const toggleExpand = useCallback(
+    (id: number) => {
+      setExpandedId((prev) => (prev === id ? null : id));
+      setHardGateConfirmed(false);
+    },
+    [],
+  );
+
+  if (pendingItems.length === 0) return null;
+
+  const expanded = pendingItems.find((item) => item.id === expandedId);
+  const isMutating = approveMutation.isPending || rejectMutation.isPending;
+
+  return (
+    <div className="border-t border-gray-200 bg-gray-50">
+      <div className="max-w-3xl mx-auto px-4 lg:px-8 py-3">
+        {/* Label */}
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-[11px] font-semibold text-black uppercase tracking-wider">
+            {t("admin.agentChat.pendingItems", {
+              n: String(pendingItems.length),
+            })}
+          </span>
+        </div>
+
+        {/* Scrollable card row */}
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {pendingItems.map((item) => {
+            const isExpanded = expandedId === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => toggleExpand(item.id)}
+                className={`flex-shrink-0 flex items-center gap-2 px-3 py-2 rounded-lg border text-left text-xs transition-colors ${
+                  isExpanded
+                    ? "border-gray-900 bg-white"
+                    : "border-gray-200 bg-white hover:border-gray-400"
+                }`}
+              >
+                {/* Risk dot */}
+                <span
+                  className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                    item.riskLevel === "hard_gate"
+                      ? "bg-black"
+                      : "bg-gray-400"
+                  }`}
+                />
+                {/* Title (truncated) */}
+                <span className="truncate max-w-[140px] text-gray-900">
+                  {item.title}
+                </span>
+                {/* Lane badge */}
+                <span
+                  className={`rounded-md px-1.5 py-0.5 text-[10px] font-medium text-white flex-shrink-0 ${
+                    item.lane === "quote" ? "bg-black" : "bg-gray-600"
+                  }`}
+                >
+                  {item.lane === "quote"
+                    ? t("admin.agentChat.laneQuote")
+                    : t("admin.agentChat.laneMarketing")}
+                </span>
+                {/* Expand indicator */}
+                {isExpanded ? (
+                  <ChevronUp className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                ) : (
+                  <ChevronDown className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Expanded detail panel */}
+        {expanded && (
+          <div className="mt-3 rounded-xl border border-gray-200 bg-white p-4">
+            <LanePayloadPreview
+              lane={expanded.lane}
+              summary={expanded.summary}
+              payload={expanded.payload}
+            />
+
+            {/* hard_gate checkbox */}
+            {expanded.riskLevel === "hard_gate" && (
+              <label className="flex items-center gap-2 mt-3 text-xs text-gray-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={hardGateConfirmed}
+                  onChange={(e) => setHardGateConfirmed(e.target.checked)}
+                  className="rounded"
+                />
+                {t("admin.agentChat.hardGateConfirm")}
+              </label>
+            )}
+
+            {/* Action buttons */}
+            <div className="flex items-center gap-2 mt-3">
+              <Button
+                size="sm"
+                onClick={() => approveMutation.mutate({ id: expanded.id })}
+                disabled={
+                  isMutating ||
+                  (expanded.riskLevel === "hard_gate" && !hardGateConfirmed)
+                }
+                className="rounded-lg gap-1 bg-black hover:bg-gray-800 text-white text-xs"
+              >
+                <Check className="w-3 h-3" />
+                {t("admin.agentChat.approveItem")}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => rejectMutation.mutate({ id: expanded.id })}
+                disabled={isMutating}
+                className="rounded-lg gap-1 border-gray-300 text-xs"
+              >
+                <X className="w-3 h-3" />
+                {t("admin.agentChat.rejectItem")}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Main chat page ───────────────────────────────────────────────────────
 
 export default function AgentChatPage() {
   const { t } = useLocale();
@@ -99,10 +277,7 @@ export default function AgentChatPage() {
     );
   }, [messages.data]);
 
-  // Auto-scroll to bottom when:
-  //   - new message arrives
-  //   - streaming token appended
-  //   - page opens with existing history
+  // Auto-scroll on new message / streaming token / initial load
   useEffect(() => {
     if (!scrollRef.current) return;
     scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -218,10 +393,10 @@ export default function AgentChatPage() {
   return (
     <div className="h-full flex flex-col">
       {/* ── Slim header ── */}
-      <header className="border-b border-foreground/[0.08] px-6 py-3 flex items-center justify-between bg-white">
+      <header className="border-b border-gray-200 px-6 py-3 flex items-center justify-between bg-white">
         <div className="flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-emerald-600" />
-          <span className="font-semibold text-sm">{t('admin.agentChat.opsAgent')}</span>
+          <Sparkles className="w-4 h-4 text-black" />
+          <span className="font-semibold text-sm text-black">{t('admin.agentChat.opsAgent')}</span>
           <span className="text-xs text-foreground/40">{t('admin.agentChat.yourAssistant')}</span>
         </div>
         <div className="flex items-center gap-1">
@@ -253,7 +428,7 @@ export default function AgentChatPage() {
           )}
           {!messages.isLoading && conversation.length === 0 && !streamingText && (
             <div className="text-center py-16">
-              <Sparkles className="w-10 h-10 text-emerald-600/40 mx-auto mb-3" />
+              <Sparkles className="w-10 h-10 text-black/20 mx-auto mb-3" />
               <p className="text-base text-foreground/55 mb-1">
                 {t('admin.agentChat.noConversation')}
               </p>
@@ -284,7 +459,7 @@ export default function AgentChatPage() {
                 <div className="flex items-center gap-2 mb-2">
                   <span
                     className={`text-[11px] uppercase tracking-wider font-semibold ${
-                      isJeff ? "text-foreground/55" : "text-emerald-700"
+                      isJeff ? "text-foreground/55" : "text-black"
                     }`}
                   >
                     {isJeff ? t('admin.agentChat.you') : t('admin.agentChat.opsAgent')}
@@ -297,7 +472,7 @@ export default function AgentChatPage() {
                 </div>
 
                 {/* Content */}
-                <div className="prose prose-sm max-w-none text-foreground/90 prose-p:my-2 prose-ul:my-2 prose-li:my-0.5 prose-strong:text-foreground prose-code:bg-foreground/[0.05] prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-foreground prose-code:font-mono prose-code:text-[0.85em] prose-pre:bg-foreground/[0.04] prose-pre:border prose-pre:border-foreground/10 prose-pre:rounded-lg prose-pre:p-3 prose-pre:text-[0.9em] prose-table:my-3 prose-th:bg-foreground/[0.04] prose-th:px-3 prose-th:py-2 prose-th:text-left prose-td:px-3 prose-td:py-1.5 prose-headings:mt-3 prose-headings:mb-1 prose-h1:text-base prose-h2:text-base prose-h3:text-sm">
+                <div className={PROSE_CLS}>
                   <Streamdown>{m.body || ""}</Streamdown>
                 </div>
 
@@ -320,10 +495,8 @@ export default function AgentChatPage() {
                           const sensitivity = action.sensitivity ?? "normal";
                           const colorClass =
                             sensitivity === "sensitive"
-                              ? "border-rose-300 text-rose-700 hover:bg-rose-50"
-                              : sensitivity === "normal"
-                                ? "border-amber-300 text-amber-700 hover:bg-amber-50"
-                                : "border-emerald-300 text-emerald-700 hover:bg-emerald-50";
+                              ? "border-gray-900 text-black hover:bg-gray-50"
+                              : "border-gray-300 text-gray-700 hover:bg-gray-50";
                           return (
                             <button
                               key={i}
@@ -353,31 +526,31 @@ export default function AgentChatPage() {
               }
             >
               <div className="flex items-center gap-2 mb-2">
-                <span className="text-[11px] uppercase tracking-wider font-semibold text-emerald-700">
+                <span className="text-[11px] uppercase tracking-wider font-semibold text-black">
                   {t('admin.agentChat.opsAgent')}
                 </span>
                 <span className="flex gap-0.5">
                   <span
-                    className={`w-1 h-1 rounded-full bg-emerald-500 ${isStreaming ? "animate-pulse" : ""}`}
+                    className={`w-1 h-1 rounded-full bg-black ${isStreaming ? "animate-pulse" : ""}`}
                   />
                   <span
-                    className={`w-1 h-1 rounded-full bg-emerald-500 ${isStreaming ? "animate-pulse" : ""}`}
+                    className={`w-1 h-1 rounded-full bg-black ${isStreaming ? "animate-pulse" : ""}`}
                     style={{ animationDelay: "0.15s" }}
                   />
                   <span
-                    className={`w-1 h-1 rounded-full bg-emerald-500 ${isStreaming ? "animate-pulse" : ""}`}
+                    className={`w-1 h-1 rounded-full bg-black ${isStreaming ? "animate-pulse" : ""}`}
                     style={{ animationDelay: "0.3s" }}
                   />
                 </span>
               </div>
-              <div className="prose prose-sm max-w-none text-foreground/90 prose-p:my-2 prose-ul:my-2 prose-li:my-0.5 prose-strong:text-foreground prose-code:bg-foreground/[0.05] prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-foreground prose-code:font-mono prose-code:text-[0.85em] prose-pre:bg-foreground/[0.04] prose-pre:border prose-pre:border-foreground/10 prose-pre:rounded-lg prose-pre:p-3 prose-headings:mt-3 prose-headings:mb-1">
+              <div className={PROSE_STREAM_CLS}>
                 {streamingText ? (
                   <Streamdown>{streamingText}</Streamdown>
                 ) : (
                   <span className="text-foreground/30">{t('admin.agentChat.thinking')}</span>
                 )}
                 {isStreaming && (
-                  <span className="inline-block w-1.5 h-4 ml-0.5 bg-emerald-500 align-text-bottom animate-pulse" />
+                  <span className="inline-block w-1.5 h-4 ml-0.5 bg-black align-text-bottom animate-pulse" />
                 )}
               </div>
               {streamingActions && streamingActions.length > 0 && (
@@ -387,10 +560,8 @@ export default function AgentChatPage() {
                     const sensitivity = action.sensitivity ?? "normal";
                     const colorClass =
                       sensitivity === "sensitive"
-                        ? "border-rose-300 text-rose-700 hover:bg-rose-50"
-                        : sensitivity === "normal"
-                          ? "border-amber-300 text-amber-700 hover:bg-amber-50"
-                          : "border-emerald-300 text-emerald-700 hover:bg-emerald-50";
+                        ? "border-gray-900 text-black hover:bg-gray-50"
+                        : "border-gray-300 text-gray-700 hover:bg-gray-50";
                     return (
                       <button
                         key={i}
@@ -410,15 +581,18 @@ export default function AgentChatPage() {
         </div>
       </div>
 
+      {/* ── Compact approval strip (quote + marketing) ── */}
+      <ApprovalStrip />
+
       {/* ── Composer pinned to bottom ── */}
-      <div className="border-t border-foreground/[0.08] bg-white">
+      <div className="border-t border-gray-200 bg-white">
         <div className="max-w-3xl mx-auto px-4 lg:px-8 py-4">
           <Textarea
             ref={composerRef}
             placeholder={t('admin.agentChat.composerPlaceholder')}
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
-            className="min-h-[72px] text-sm rounded-xl resize-none focus-visible:ring-emerald-500/50"
+            className="min-h-[72px] text-sm rounded-xl resize-none focus-visible:ring-gray-400"
             disabled={isStreaming}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -435,7 +609,7 @@ export default function AgentChatPage() {
               size="sm"
               onClick={sendQuestion}
               disabled={!question.trim() || isStreaming}
-              className="rounded-lg gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+              className="rounded-lg gap-1.5 bg-black hover:bg-gray-800 text-white"
             >
               <Send className="w-3.5 h-3.5" />
               {t('admin.agentChat.send')}
