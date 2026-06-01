@@ -246,7 +246,9 @@ const FINANCE_REPORT_VIEW: Partial<
 export default function AdminV2() {
   const { user, loading, isAuthenticated, logout } = useAuth();
   const [, setLocation] = useLocation();
-  const [activePage, setActivePage] = useState<PageId>("today");
+  // Default landing = Agent Chat (辦公室 domain). Jeff opens /admin and can type
+  // immediately; 今日總覽 / 指揮中心 stay reachable via the 辦公室 sidebar tabs.
+  const [activePage, setActivePage] = useState<PageId>("agent-chat");
   const [paletteOpen, setPaletteOpen] = useCommandPaletteHotkey();
   const activeDomain = PAGE_TO_DOMAIN[activePage] ?? "office";
   const isMobile = useIsMobile();
