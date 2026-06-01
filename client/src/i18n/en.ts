@@ -4466,7 +4466,7 @@ export const en = {
       triggerSupplierSync: 'Trigger Supplier Sync (Lion / UV)',
       manageActiveTours: 'Manage Active Tours',
       handlePendingInquiries: 'Handle Pending Inquiries',
-      askOpsAgent: 'Ask OpsAgent about tours',
+      askOpsAgent: 'Ask PACK&GO Agent',
     },
 
     // ── Customers Landing ──
@@ -4706,7 +4706,7 @@ export const en = {
 
     // ── Agent Chat Page ──
     agentChat: {
-      opsAgent: 'OpsAgent',
+      opsAgent: 'PACK&GO Agent',
       yourAssistant: '· Your assistant',
       reloaded: 'Reloaded',
       reloadHistory: 'Reload conversation history',

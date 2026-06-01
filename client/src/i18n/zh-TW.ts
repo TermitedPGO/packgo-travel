@@ -4419,7 +4419,7 @@ export const zhTW = {
       triggerSupplierSync: '觸發 Supplier Sync (Lion / UV)',
       manageActiveTours: '管理 Active Tours',
       handlePendingInquiries: '處理 Pending Inquiries',
-      askOpsAgent: '問 OpsAgent 旅團問題',
+      askOpsAgent: '問 PACK&GO Agent',
     },
 
     // ── Customers Landing ──
@@ -4659,7 +4659,7 @@ export const zhTW = {
 
     // ── Agent Chat Page ──
     agentChat: {
-      opsAgent: 'OpsAgent',
+      opsAgent: 'PACK&GO Agent',
       yourAssistant: '· 你的副手',
       reloaded: '已重新載入',
       reloadHistory: '重新載入對話歷史',

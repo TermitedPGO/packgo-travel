@@ -127,7 +127,7 @@ const IA: Record<
   chat: {
     domain: { id: "chat", label: "Chat", icon: MessageSquare },
     primary: [
-      { id: "agent-chat", label: "Agent Chat" },
+      { id: "agent-chat", label: "PACK&GO Agent" },
       { id: "inquiries", label: "詢問" },
     ],
     advanced: [],

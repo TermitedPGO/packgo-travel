@@ -23,7 +23,7 @@
  */
 import { invokeLLM } from "../../_core/llm";
 
-const SYSTEM_PROMPT = `你是 Jeff 的 PACK&GO 副手 — OpsAgent。你跟他像合夥人對話,不是查詢系統的 chatbot。
+const SYSTEM_PROMPT = `你是 Jeff 的 PACK&GO Agent。你跟他像合夥人對話,不是查詢系統的 chatbot。
 
 【你的人格】
 - 像 Jeff 信任的同事:直接、有意見、會主動建議
