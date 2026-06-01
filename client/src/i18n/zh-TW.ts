@@ -4689,6 +4689,9 @@ export const zhTW = {
       laneMarketing: '行銷',
       itemApproved: '已通過',
       itemRejected: '已退回',
+      attachImage: '附加圖片',
+      removeImage: '移除',
+      uploadingImages: '上傳圖片中⋯',
     },
     departureCalendar: {
       title: '出發日曆',

@@ -33,6 +33,7 @@ import {
   ChevronUp,
   Check,
   X,
+  Paperclip,
 } from "lucide-react";
 import { format } from "date-fns";
 import { zhTW } from "date-fns/locale";
@@ -244,9 +245,11 @@ export default function AgentChatPage() {
   const [streamingText, setStreamingText] = useState<string | null>(null);
   const [streamingActions, setStreamingActions] = useState<any[] | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [pendingImages, setPendingImages] = useState<File[]>([]);
   const utils = trpc.useUtils();
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load conversation history — auto-refresh while idle
   const messages = trpc.agent.listMessages.useQuery(
@@ -288,12 +291,51 @@ export default function AgentChatPage() {
     composerRef.current?.focus();
   }, []);
 
+  const addImages = useCallback((files: FileList | File[]) => {
+    const images = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    if (images.length > 0) setPendingImages((prev) => [...prev, ...images]);
+  }, []);
+
+  const removeImage = useCallback((idx: number) => {
+    setPendingImages((prev) => prev.filter((_, i) => i !== idx));
+  }, []);
+
   const sendQuestion = async () => {
-    if (!question.trim() || isStreaming) return;
+    if ((!question.trim() && pendingImages.length === 0) || isStreaming) return;
     setIsStreaming(true);
     setStreamingText("");
     setStreamingActions(null);
-    const url = `/api/agent/ask-ops-stream?q=${encodeURIComponent(question.trim())}`;
+
+    let imageUrls: string[] = [];
+    if (pendingImages.length > 0) {
+      try {
+        const uploads = await Promise.all(
+          pendingImages.map(async (file) => {
+            const fd = new FormData();
+            fd.append("image", file);
+            const res = await fetch("/api/upload-chat-image", {
+              method: "POST",
+              credentials: "include",
+              body: fd,
+            });
+            if (!res.ok) throw new Error(`Upload ${res.status}`);
+            const json = await res.json();
+            return json.url as string;
+          }),
+        );
+        imageUrls = uploads;
+      } catch (err: any) {
+        toast.error(t("admin.agentChat.uploadingImages"));
+        setIsStreaming(false);
+        setStreamingText(null);
+        return;
+      }
+      setPendingImages([]);
+    }
+
+    const qParam = question.trim();
+    const imgParam = imageUrls.length > 0 ? `&images=${encodeURIComponent(JSON.stringify(imageUrls))}` : "";
+    const url = `/api/agent/ask-ops-stream?q=${encodeURIComponent(qParam)}${imgParam}`;
     try {
       const resp = await fetch(url, {
         method: "GET",
@@ -587,6 +629,28 @@ export default function AgentChatPage() {
       {/* ── Composer pinned to bottom ── */}
       <div className="border-t border-gray-200 bg-white">
         <div className="max-w-3xl mx-auto px-4 lg:px-8 py-4">
+          {/* Image preview strip */}
+          {pendingImages.length > 0 && (
+            <div className="flex gap-2 mb-3 overflow-x-auto rounded-xl bg-foreground/[0.03] p-2">
+              {pendingImages.map((file, idx) => (
+                <div key={`${file.name}-${idx}`} className="relative flex-shrink-0">
+                  <img
+                    src={URL.createObjectURL(file)}
+                    alt=""
+                    className="h-16 w-16 rounded-lg object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeImage(idx)}
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-black text-white flex items-center justify-center"
+                    title={t("admin.agentChat.removeImage")}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <Textarea
             ref={composerRef}
             placeholder={t('admin.agentChat.composerPlaceholder')}
@@ -600,20 +664,73 @@ export default function AgentChatPage() {
                 sendQuestion();
               }
             }}
+            onPaste={(e) => {
+              const items = e.clipboardData?.items;
+              if (!items) return;
+              const imageFiles: File[] = [];
+              for (const item of Array.from(items)) {
+                if (item.type.startsWith("image/")) {
+                  const file = item.getAsFile();
+                  if (file) imageFiles.push(file);
+                }
+              }
+              if (imageFiles.length > 0) {
+                e.preventDefault();
+                addImages(imageFiles);
+              }
+            }}
+            onDrop={(e) => {
+              if (!e.dataTransfer?.files?.length) return;
+              const images = Array.from(e.dataTransfer.files).filter((f) =>
+                f.type.startsWith("image/"),
+              );
+              if (images.length > 0) {
+                e.preventDefault();
+                addImages(images);
+              }
+            }}
+            onDragOver={(e) => {
+              if (e.dataTransfer?.types?.includes("Files")) e.preventDefault();
+            }}
           />
           <div className="flex items-center justify-end md:justify-between mt-2">
             <span className="hidden md:inline text-[11px] text-foreground/40">
               {t('admin.agentChat.cmdEnterSend')}
             </span>
-            <Button
-              size="sm"
-              onClick={sendQuestion}
-              disabled={!question.trim() || isStreaming}
-              className="rounded-lg gap-1.5 bg-black hover:bg-gray-800 text-white h-10 px-4 md:h-8 md:px-3"
-            >
-              <Send className="w-3.5 h-3.5" />
-              {t('admin.agentChat.send')}
-            </Button>
+            <div className="flex items-center gap-2">
+              {/* Hidden file input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files) addImages(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isStreaming}
+                className="rounded-lg text-foreground/50 hover:text-foreground h-10 px-3 md:h-8 md:px-2"
+                title={t("admin.agentChat.attachImage")}
+              >
+                <Paperclip className="w-4 h-4" />
+              </Button>
+              <Button
+                size="sm"
+                onClick={sendQuestion}
+                disabled={(!question.trim() && pendingImages.length === 0) || isStreaming}
+                className="rounded-lg gap-1.5 bg-black hover:bg-gray-800 text-white h-10 px-4 md:h-8 md:px-3"
+              >
+                <Send className="w-3.5 h-3.5" />
+                {t('admin.agentChat.send')}
+              </Button>
+            </div>
           </div>
         </div>
       </div>

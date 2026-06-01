@@ -4736,6 +4736,9 @@ export const en = {
       laneMarketing: 'Marketing',
       itemApproved: 'Approved',
       itemRejected: 'Rejected',
+      attachImage: 'Attach image',
+      removeImage: 'Remove',
+      uploadingImages: 'Uploading images...',
     },
     departureCalendar: {
       title: 'Departure Calendar',
