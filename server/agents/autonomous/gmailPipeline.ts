@@ -119,6 +119,8 @@ export async function runGmailPipeline(
   // are never real customer emails. Unknown senders still go through the
   // full InquiryAgent pipeline.
   const KNOWN_NOISE_DOMAINS = new Set([
+    // Our own system emails (self-sent notifications, monitor alerts)
+    "packgoplay.com", "packgo-travel.fly.dev",
     "venmo.com", "paypal.com", "cash.app",
     "substack.com", "beehiiv.com", "mailchimp.com", "convertkit.com",
     "mgmresorts.com", "hilton.com", "marriott.com",
