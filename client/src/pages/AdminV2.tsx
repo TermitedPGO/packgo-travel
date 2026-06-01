@@ -4,15 +4,15 @@
  * Component/file stay named AdminV2 (Jeff: keep filenames, just drop the
  * user-facing "v2"). v1 shell is retired; /admin/v2 redirects here.
  *
- * 3 domains (2026-05-31 — collapsed 6→3 per Jeff "左邊六個圖案沒簡化"):
- *   - 💬 Chat       agent chat (home), command center, today inbox
- *   - 📋 營運+財務   daily tables: bookings, inquiries, quotes, ledger, reports
- *                    (tours/CRM/marketing in 進階 ▾; rare biz pages ⌘K-only)
- *   - ⚙️ 設定       system/AI infra, supplier sync, automations — mostly ⌘K
+ * 2 domains (2026-05-31 — Jeff "最終方案": collapsed 6→3→2, chat-first):
+ *   - 💬 Chat       agent chat (home). 指揮中心 + 今日總覽 are ⌘K-only.
+ *   - 📋 工作台      the 7 pages Jeff actually opens daily/weekly: 訂單 / 詢問 /
+ *                    帳本 / 行程 / 出發日曆 / 報表 / 客戶.
  *
- * Every page stays registered in IA (regrouped into primary/advanced/hidden),
- * so ⌘K CommandPalette still indexes all ~30 pages even when only a few show
- * in the sidebar. See IA + allPages() below.
+ * Every other page (~30: posters, AI 文案, supplier sync, packpoint, vouchers,
+ * affiliate, competitor monitor, 指揮中心, 今日, 設定…) stays registered in IA
+ * under a `hidden` tier — NOT on the sidebar, but still indexed by ⌘K
+ * CommandPalette. See IA + allPages() below.
  *
  * Design system spec:
  *   ~/.claude/projects/-Users-jeff-Desktop---/memory/feedback_admin_design_system.md
@@ -25,7 +25,6 @@ import { trpc } from "@/lib/trpc";
 import {
   MessageSquare,
   ClipboardList,
-  Settings,
 } from "lucide-react";
 
 import {
@@ -113,7 +112,7 @@ type PageId =
   // System
   | "ai-hub" | "llm-cost" | "task-history" | "audit-log" | "calibration-review" | "autonomous-agents" | "skills" | "visa" | "cleanup" | "supplier-enrichment";
 
-type DomainId = "chat" | "ops" | "settings";
+type DomainId = "chat" | "workspace";
 
 type PageDef = { id: PageId; label: string };
 
@@ -129,66 +128,59 @@ const IA: Record<
 > = {
   chat: {
     domain: { id: "chat", label: "Chat", icon: MessageSquare },
-    primary: [
-      { id: "agent-chat", label: "💬 Agent Chat" },
+    primary: [{ id: "agent-chat", label: "💬 Agent Chat" }],
+    advanced: [],
+    // Render + ⌘K-searchable, just off the sidebar (Jeff: chat 取代今日總覽；
+    // 指揮中心的財務/客服 lane 仍可從 ⌘K 進)。
+    hidden: [
       { id: "command-center", label: "🎛 指揮中心" },
       { id: "today", label: "🏠 今日總覽" },
     ],
-    advanced: [],
   },
-  ops: {
-    // 營運 + 客戶 + 行銷 + 財務 收成一個「業務」domain。
-    domain: { id: "ops", label: "營運+財務", icon: ClipboardList },
+  workspace: {
+    // 工作台 — Jeff 每天 + 每週實際在看的 7 頁（使用頻率表 2026-05-31）。
+    domain: { id: "workspace", label: "工作台", icon: ClipboardList },
     primary: [
       { id: "bookings", label: "訂單" },
       { id: "inquiries", label: "詢問" },
-      { id: "tool-quote", label: "📄 報價單" },
-      { id: "bank-ledger", label: "🏦 帳本" },
-      { id: "finance-reports", label: "📊 報表" },
-    ],
-    advanced: [
+      { id: "bank-ledger", label: "帳本" },
       { id: "tours", label: "行程" },
-      { id: "departures-calendar", label: "📅 出發日曆" },
-      { id: "customers-crm", label: "🔍 客戶 CRM" },
-      { id: "reviews", label: "評價" },
-      { id: "marketing-content", label: "AI 文案" },
-      { id: "posters", label: "海報" },
+      { id: "departures-calendar", label: "出發日曆" },
+      { id: "finance-reports", label: "報表" },
+      { id: "customers-crm", label: "客戶" },
     ],
+    advanced: [],
+    // 從沒用過 / 知道但沒在用 / 系統設定 — 留在 registry 供 ⌘K 搜尋，不上側欄。
     hidden: [
       { id: "ops-landing", label: "🗺 營運總覽" },
+      { id: "tour-monitor", label: "供應商監控" },
+      { id: "suppliers", label: "🔌 供應商同步" },
       { id: "customers-landing", label: "👥 客戶總覽" },
-      { id: "marketing-landing", label: "📢 行銷總覽" },
-      { id: "finance-landing", label: "💰 財務總覽" },
-      { id: "ai-quotes", label: "AI 報價單" },
+      { id: "reviews", label: "評價" },
       { id: "packpoint", label: "Packpoint" },
       { id: "vouchers", label: "Voucher" },
+      { id: "ai-quotes", label: "AI 報價單" },
+      { id: "tool-quote", label: "📄 報價單" },
       { id: "wechat-assist", label: "WeChat 助手" },
       { id: "newsletter", label: "📧 Newsletter" },
+      { id: "marketing-landing", label: "📢 行銷總覽" },
       { id: "marketing", label: "行銷自動化" },
+      { id: "marketing-content", label: "AI 文案" },
+      { id: "posters", label: "海報" },
       { id: "analytics", label: "流量分析" },
       { id: "competitor-monitor", label: "競品監控" },
       { id: "affiliate", label: "Trip.com 聯盟" },
-    ],
-  },
-  settings: {
-    domain: { id: "settings", label: "設定", icon: Settings },
-    primary: [
+      { id: "finance-landing", label: "💰 財務總覽" },
       { id: "ai-hub", label: "AI 中心" },
-      { id: "suppliers", label: "🔌 供應商同步" },
-      { id: "autonomous-agents", label: "自主 Agent" },
-    ],
-    advanced: [
-      { id: "supplier-enrichment", label: "🌏 供應商深度同步" },
-      { id: "tour-monitor", label: "供應商監控" },
       { id: "llm-cost", label: "AI 成本" },
-      { id: "audit-log", label: "審計日誌" },
-      { id: "visa", label: "中國簽證" },
-    ],
-    hidden: [
       { id: "task-history", label: "任務記錄" },
+      { id: "audit-log", label: "審計日誌" },
       { id: "calibration-review", label: "QA 審查" },
+      { id: "autonomous-agents", label: "自主 Agent" },
       { id: "skills", label: "AI 技能" },
+      { id: "visa", label: "中國簽證" },
       { id: "cleanup", label: "🧹 清理" },
+      { id: "supplier-enrichment", label: "🌏 供應商深度同步" },
     ],
   },
 };
@@ -210,13 +202,13 @@ const PAGE_TO_DOMAIN: Record<PageId, DomainId> = {
     )
   ) as Record<PageId, DomainId>),
   // The 5 report sub-views are no longer standalone tabs (folded into 報表),
-  // so allPages() doesn't list them. Map them to 營運+財務 so a deep-link to
+  // so allPages() doesn't list them. Map them to 工作台 so a deep-link to
   // e.g. "reconciliation" still highlights the right domain.
-  "profit-loss": "ops",
-  "trust-compliance": "ops",
-  "invoices": "ops",
-  "reconciliation": "ops",
-  "accounting": "ops",
+  "profit-loss": "workspace",
+  "trust-compliance": "workspace",
+  "invoices": "workspace",
+  "reconciliation": "workspace",
+  "accounting": "workspace",
 };
 
 // Finance report sub-views fold into the 報表 hub (FinanceReports). This maps
@@ -272,12 +264,11 @@ export default function AdminV2() {
     ? Object.values(unreadAgents).reduce((s, n) => s + n, 0)
     : 0;
   const chatBadge = totalUnreadAgents + (pendingForJeff?.length ?? 0);
-  const opsBadge = statsData?.pendingInquiries;
+  const workspaceBadge = statsData?.pendingInquiries;
 
   const domains: Domain[] = [
     { ...IA.chat.domain, badge: chatBadge > 0 ? chatBadge : undefined },
-    { ...IA.ops.domain, badge: opsBadge },
-    { ...IA.settings.domain },
+    { ...IA.workspace.domain, badge: workspaceBadge },
   ];
 
   const handleSelectDomain = (id: string) => {
@@ -314,7 +305,7 @@ export default function AdminV2() {
     { label: activePageMeta?.label ?? "" },
   ];
 
-  // CommandPalette actions: every page across all 6 domains
+  // CommandPalette actions: every page across both domains (incl. hidden)
   const paletteActions = Object.entries(IA).flatMap(([domainId, cfg]) =>
     allPages(cfg).map((p) => ({
       id: p.id,
