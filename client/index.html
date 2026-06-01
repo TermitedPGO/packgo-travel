@@ -3,10 +3,13 @@
 
   <head>
     <meta charset="UTF-8" />
-    <!-- Accessibility: no maximum-scale (WCAG 1.4.4 — users must be able to zoom) -->
+    <!-- Accessibility: no maximum-scale (WCAG 1.4.4 — users must be able to zoom).
+         interactive-widget=resizes-content: when the on-screen keyboard opens,
+         the layout viewport shrinks so a bottom-pinned composer (Agent Chat on
+         mobile) is pushed up above the keyboard instead of being covered. -->
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0" />
+      content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
     <!-- Round 80.7: title + ALL meta tags (description / keywords / og:* /
          twitter:*) and the duplicate Schema.org JSON-LD have been removed.
          react-helmet-async (in client/src/components/SEO.tsx) now exclusively

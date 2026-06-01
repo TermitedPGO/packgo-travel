@@ -592,7 +592,7 @@ export default function AgentChatPage() {
             placeholder={t('admin.agentChat.composerPlaceholder')}
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
-            className="min-h-[72px] text-sm rounded-xl resize-none focus-visible:ring-gray-400"
+            className="min-h-[56px] md:min-h-[72px] text-base md:text-sm rounded-xl resize-none focus-visible:ring-gray-400"
             disabled={isStreaming}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -601,15 +601,15 @@ export default function AgentChatPage() {
               }
             }}
           />
-          <div className="flex items-center justify-between mt-2">
-            <span className="text-[11px] text-foreground/40">
+          <div className="flex items-center justify-end md:justify-between mt-2">
+            <span className="hidden md:inline text-[11px] text-foreground/40">
               {t('admin.agentChat.cmdEnterSend')}
             </span>
             <Button
               size="sm"
               onClick={sendQuestion}
               disabled={!question.trim() || isStreaming}
-              className="rounded-lg gap-1.5 bg-black hover:bg-gray-800 text-white"
+              className="rounded-lg gap-1.5 bg-black hover:bg-gray-800 text-white h-10 px-4 md:h-8 md:px-3"
             >
               <Send className="w-3.5 h-3.5" />
               {t('admin.agentChat.send')}

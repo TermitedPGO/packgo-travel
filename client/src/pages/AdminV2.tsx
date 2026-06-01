@@ -403,6 +403,7 @@ export default function AdminV2() {
           onSelect={handleMobileNav}
           breadcrumb={mobileBreadcrumbText}
           onSearchClick={() => setMobileSearchOpen(true)}
+          fullHeight={activePage === "agent-chat"}
         >
           <Suspense fallback={<LoadingPage text="載入中…" />}>
             {renderMobilePage()}

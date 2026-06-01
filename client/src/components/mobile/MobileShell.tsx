@@ -42,6 +42,7 @@ export default function MobileShell({
   onNotificationsClick,
   children,
   onNavigate,
+  fullHeight = false,
 }: {
   active: MobileNavId;
   onSelect: (id: MobileNavId) => void;
@@ -51,6 +52,16 @@ export default function MobileShell({
   onNotificationsClick?: () => void;
   children: ReactNode;
   onNavigate?: (path: string) => void;
+  /**
+   * Full-height mode for self-contained app shells (e.g. Agent Chat) that own
+   * their internal scroll + a composer pinned above the bottom nav. Skips the
+   * default scrolling `pb-20` wrapper and hands the child a bounded,
+   * non-scrolling slot whose bottom edge clears the fixed 60px nav (+ safe
+   * area). Without this, a `h-full` child collapses inside the auto-height
+   * scroll wrapper and its composer ends up buried at the bottom of a long
+   * page instead of pinned. (Mobile Phase 7, 2026-05-31.)
+   */
+  fullHeight?: boolean;
 }) {
   return (
     <div className="h-screen flex flex-col bg-gray-50">
@@ -89,13 +100,24 @@ export default function MobileShell({
         </div>
       </header>
 
-      {/* Main scroll area — pb-20 reserves space for bottom nav (60px) +
-          safe-area-inset-bottom on iPhones with home indicator. */}
-      <main className="flex-1 overflow-y-auto overscroll-y-contain">
-        <div className="pb-20" style={{ paddingBottom: "calc(80px + env(safe-area-inset-bottom))" }}>
+      {fullHeight ? (
+        /* Full-height slot — child owns its scroll; reserve the fixed nav so
+           the child's bottom-pinned composer clears it. No page-level scroll. */
+        <main
+          className="flex-1 min-h-0 overflow-hidden"
+          style={{ paddingBottom: "calc(60px + env(safe-area-inset-bottom))" }}
+        >
           {children}
-        </div>
-      </main>
+        </main>
+      ) : (
+        /* Default scroll area — pb-20 reserves space for bottom nav (60px) +
+           safe-area-inset-bottom on iPhones with home indicator. */
+        <main className="flex-1 overflow-y-auto overscroll-y-contain">
+          <div className="pb-20" style={{ paddingBottom: "calc(80px + env(safe-area-inset-bottom))" }}>
+            {children}
+          </div>
+        </main>
+      )}
 
       {/* Bottom nav — fixed at bottom, 60px tall + safe-area inset */}
       <nav
