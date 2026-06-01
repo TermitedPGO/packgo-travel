@@ -272,6 +272,18 @@ async function startServer() {
   // Why GET (not POST): EventSource API only supports GET. The question
   // text is passed via ?q= query param (max ~2K chars, plenty for ops Q&A).
   app.get("/api/agent/ask-ops-stream", async (req, res) => {
+    // 2026-05-31 — "OpsAgent spins forever, no reply" hardening. These live at
+    // handler scope so both the try and the catch can tear them down. Root-
+    // cause writeup is in the SSE-headers block below.
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
+    let opsTimeout: ReturnType<typeof setTimeout> | undefined;
+    let terminated = false;
+    let timedOut = false;
+    const cleanup = () => {
+      terminated = true;
+      if (heartbeat) clearInterval(heartbeat);
+      if (opsTimeout) clearTimeout(opsTimeout);
+    };
     try {
       // Inline admin auth — copy the requireAdmin pattern. We can't import
       // the middleware function directly because it sends 401 + returns,
@@ -339,9 +351,55 @@ async function startServer() {
       res.setHeader("X-Accel-Buffering", "no"); // disable nginx buffering
       res.flushHeaders();
 
-      const send = (event: object) => {
-        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      // ── "spins forever, no reply" fix (2026-05-31) ──────────────────────
+      // Root cause: the global compression() middleware (app.use near the top
+      // of this file) buffers this text/event-stream response, so tokens never
+      // reach the browser live. A silent socket then trips Fly's idle timeout
+      // and the connection dies WITHOUT a terminal event — and the client
+      // (AgentChatPage) has no abnormal-close handler, so its spinner never
+      // clears. Three server-side defenses (client untouched):
+      //   1. res.flush() after every write — compression's documented SSE
+      //      workaround; pushes each chunk out now. No-op when not compressed.
+      //   2. a heartbeat comment every 15s so the socket is never idle.
+      //   3. a hard 90s timeout that ALWAYS emits a terminal error event, so a
+      //      stalled DB/LLM call can never hang the UI again.
+      const flush = () => {
+        (res as any).flush?.();
       };
+      const send = (event: object) => {
+        if (terminated) return;
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+        flush();
+      };
+      heartbeat = setInterval(() => {
+        if (terminated) return;
+        try {
+          res.write(`: ping\n\n`);
+          flush();
+        } catch {
+          /* socket already gone — req 'close' runs cleanup */
+        }
+      }, 15_000);
+      opsTimeout = setTimeout(() => {
+        timedOut = true;
+        logger.error(
+          { q: question.slice(0, 80) },
+          "[ask-ops-stream] timed out after 90s — DB or LLM call stalled",
+        );
+        send({
+          type: "error",
+          error:
+            "OpsAgent 回應逾時（90 秒）。請再試一次；若持續，可能是 LLM 或資料庫連線問題。",
+        });
+        cleanup();
+        try {
+          res.end();
+        } catch {
+          /* already closed */
+        }
+      }, 90_000);
+      // Jeff closed the tab / navigated away → stop timers + writes.
+      req.on("close", cleanup);
 
       // Load conversation history (last 10 #ops messages, chronological)
       const { getDb } = await import("../db");
@@ -384,25 +442,44 @@ async function startServer() {
       const { runOpsAgentStream } = await import("../agents/autonomous/opsAgentStream");
       let finalAnswer = "";
       let suggestedActions: any[] = [];
+      const startedAt = Date.now();
+      let firstTokenLogged = false;
       try {
         for await (const event of runOpsAgentStream(question, history)) {
+          if (terminated) break; // timed out or client disconnected
           if (event.type === "token") {
+            if (!firstTokenLogged) {
+              firstTokenLogged = true;
+              logger.info(
+                { ms: Date.now() - startedAt },
+                "[ask-ops-stream] first token",
+              );
+            }
             send({ type: "token", text: event.text });
           } else if (event.type === "done") {
             finalAnswer = event.finalAnswer ?? "";
             suggestedActions = event.suggestedActions ?? [];
             send({ type: "done", finalAnswer, suggestedActions });
+            logger.info(
+              { ms: Date.now() - startedAt, len: finalAnswer.length },
+              "[ask-ops-stream] done",
+            );
           } else if (event.type === "error") {
             send({ type: "error", error: event.error });
+            logger.error({ err: event.error }, "[ask-ops-stream] agent error");
           }
         }
       } catch (err) {
-        send({ type: "error", error: (err as Error).message });
+        if (!terminated) send({ type: "error", error: (err as Error).message });
+        logger.error({ err }, "[ask-ops-stream] stream consumption error");
       }
 
+      cleanup();
+
       // Save agent answer + suggestedActions to DB so the message is
-      // persistent (refresh loads it from listMessages).
-      if (finalAnswer && db) {
+      // persistent (refresh loads it from listMessages). Skip on timeout — no
+      // real answer, don't persist a half-baked turn.
+      if (finalAnswer && db && !timedOut) {
         await db.insert(agentMessages).values({
           agentName: "ops",
           senderRole: "agent",
@@ -414,8 +491,15 @@ async function startServer() {
         } as any);
       }
 
-      res.end();
+      if (!timedOut) {
+        try {
+          res.end();
+        } catch {
+          /* already closed by timeout/abort */
+        }
+      }
     } catch (err) {
+      cleanup();
       logger.error({ err }, "[ask-ops-stream] error");
       if (!res.headersSent) {
         res.status(500).json({ error: (err as Error).message });
