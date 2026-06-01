@@ -548,6 +548,10 @@ async function startServer() {
           body: finalAnswer,
           context: JSON.stringify({ suggestedActions, streamed: true }),
           priority: "normal",
+          // Jeff is watching this stream live — it's a reply to his own
+          // question, NOT a proactive notification. Mark read so live chatting
+          // doesn't inflate the Chat unread badge (2026-06-01 fix).
+          readByJeff: 1,
         } as any);
       }
 
