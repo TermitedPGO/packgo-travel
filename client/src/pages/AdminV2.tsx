@@ -4,15 +4,13 @@
  * Component/file stay named AdminV2 (Jeff: keep filenames, just drop the
  * user-facing "v2"). v1 shell is retired; /admin/v2 redirects here.
  *
- * 2 domains (2026-05-31 — Jeff "最終方案": collapsed 6→3→2, chat-first):
- *   - 💬 Chat       agent chat (home). 指揮中心 + 今日總覽 are ⌘K-only.
- *   - 📋 工作台      the 7 pages Jeff actually opens daily/weekly: 訂單 / 詢問 /
- *                    帳本 / 行程 / 出發日曆 / 報表 / 客戶.
+ * 3 domains (2026-05-31 v4):
+ *   - 💬 Chat       agent chat (home). 詢問 / 指揮中心 / 今日 are ⌘K-only.
+ *   - 📖 帳本       交易明細 + 報表 (Jeff 每天看帳).
+ *   - 📋 工作台      訂單 + 行程.
  *
- * Every other page (~30: posters, AI 文案, supplier sync, packpoint, vouchers,
- * affiliate, competitor monitor, 指揮中心, 今日, 設定…) stays registered in IA
- * under a `hidden` tier — NOT on the sidebar, but still indexed by ⌘K
- * CommandPalette. See IA + allPages() below.
+ * Every other page (~30) stays registered in IA under a `hidden` tier,
+ * NOT on the sidebar, but still indexed by ⌘K. See IA + allPages() below.
  *
  * Design system spec:
  *   ~/.claude/projects/-Users-jeff-Desktop---/memory/feedback_admin_design_system.md
@@ -25,6 +23,7 @@ import { trpc } from "@/lib/trpc";
 import {
   MessageSquare,
   ClipboardList,
+  BookOpen,
 } from "lucide-react";
 
 import {
@@ -93,7 +92,7 @@ const VisaManagementTab = lazy(() => import("@/components/admin/VisaManagementTa
 const SkillsTab = lazy(() => import("@/components/admin/SkillsTab"));
 
 // ────────────────────────────────────────────────────────────────────────
-// Information architecture — 6 domains
+// Information architecture — 3 domains (Chat / 帳本 / 工作台)
 // ────────────────────────────────────────────────────────────────────────
 
 type PageId =
@@ -112,13 +111,12 @@ type PageId =
   // System
   | "ai-hub" | "llm-cost" | "task-history" | "audit-log" | "calibration-review" | "autonomous-agents" | "skills" | "visa" | "cleanup" | "supplier-enrichment";
 
-type DomainId = "chat" | "workspace";
+type DomainId = "chat" | "ledger" | "workspace";
 
 type PageDef = { id: PageId; label: string };
 
-// 2026-05-31 v2: 6 domain → 2 (Chat + 工作台), sidebar 極簡。
-// 2026-05-31 v3 (Jeff): 工作台 7→3 (訂單/帳本/行程), 其餘收 hidden (CMD+K / Agent 開)。
-// Label 不帶 emoji (lucide icon 已在 domain 層)。
+// 2026-05-31 v4 (Jeff): 3 domains — Chat / 帳本 / 工作台。
+// 帳本獨立 domain (Jeff 每天看帳); 詢問整進 Chat (Gmail 回覆走 Agent 通知)。
 //   primary  = 每天手動看 → sub-nav 直接顯示
 //   advanced = 偶爾用 → 收進「進階」下拉
 //   hidden   = 幾乎不用 → 不進 sub-nav, 只留在 IA 供 CMD+K 搜尋 (見 allPages)
@@ -133,21 +131,31 @@ const IA: Record<
     hidden: [
       { id: "command-center", label: "指揮中心" },
       { id: "today", label: "今日總覽" },
+      { id: "inquiries", label: "詢問" },
+    ],
+  },
+  ledger: {
+    // 帳本 — Jeff 每天看帳, 獨立 domain。
+    domain: { id: "ledger", label: "帳本", icon: BookOpen },
+    primary: [
+      { id: "bank-ledger", label: "交易明細" },
+      { id: "finance-reports", label: "報表" },
+    ],
+    advanced: [],
+    hidden: [
+      { id: "finance-landing", label: "財務總覽" },
     ],
   },
   workspace: {
-    // 工作台 — Jeff 每天手動看的 3 頁, 其餘全靠 Agent 或 CMD+K。
+    // 工作台 — 訂單 + 行程, 其餘全靠 Agent 或 CMD+K。
     domain: { id: "workspace", label: "工作台", icon: ClipboardList },
     primary: [
       { id: "bookings", label: "訂單" },
-      { id: "bank-ledger", label: "帳本" },
       { id: "tours", label: "行程" },
     ],
     advanced: [],
     hidden: [
-      { id: "inquiries", label: "詢問" },
       { id: "departures-calendar", label: "出發日曆" },
-      { id: "finance-reports", label: "報表" },
       { id: "customers-crm", label: "客戶" },
       { id: "ops-landing", label: "營運總覽" },
       { id: "tour-monitor", label: "供應商監控" },
@@ -167,7 +175,6 @@ const IA: Record<
       { id: "analytics", label: "流量分析" },
       { id: "competitor-monitor", label: "競品監控" },
       { id: "affiliate", label: "Trip.com 聯盟" },
-      { id: "finance-landing", label: "財務總覽" },
       { id: "ai-hub", label: "AI 中心" },
       { id: "llm-cost", label: "AI 成本" },
       { id: "task-history", label: "任務記錄" },
@@ -199,13 +206,13 @@ const PAGE_TO_DOMAIN: Record<PageId, DomainId> = {
     )
   ) as Record<PageId, DomainId>),
   // The 5 report sub-views are no longer standalone tabs (folded into 報表),
-  // so allPages() doesn't list them. Map them to 工作台 so a deep-link to
+  // so allPages() doesn't list them. Map them to 帳本 so a deep-link to
   // e.g. "reconciliation" still highlights the right domain.
-  "profit-loss": "workspace",
-  "trust-compliance": "workspace",
-  "invoices": "workspace",
-  "reconciliation": "workspace",
-  "accounting": "workspace",
+  "profit-loss": "ledger",
+  "trust-compliance": "ledger",
+  "invoices": "ledger",
+  "reconciliation": "ledger",
+  "accounting": "ledger",
 };
 
 // Finance report sub-views fold into the 報表 hub (FinanceReports). This maps
@@ -261,11 +268,12 @@ export default function AdminV2() {
     ? Object.values(unreadAgents).reduce((s, n) => s + n, 0)
     : 0;
   const chatBadge = totalUnreadAgents + (pendingForJeff?.length ?? 0);
-  const workspaceBadge = statsData?.pendingInquiries;
+  const inquiryBadge = statsData?.pendingInquiries;
 
   const domains: Domain[] = [
-    { ...IA.chat.domain, badge: chatBadge > 0 ? chatBadge : undefined },
-    { ...IA.workspace.domain, badge: workspaceBadge },
+    { ...IA.chat.domain, badge: (chatBadge > 0 ? chatBadge : undefined) ?? (inquiryBadge ? inquiryBadge : undefined) },
+    { ...IA.ledger.domain },
+    { ...IA.workspace.domain },
   ];
 
   const handleSelectDomain = (id: string) => {
