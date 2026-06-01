@@ -136,6 +136,18 @@ export const READ_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "list_missing_receipts",
+    description: "List expense transactions that have NO receipt attached yet. USE THIS when Jeff asks 哪些要 receipt / 哪些需要收據 / which expenses need a receipt. Jeff needs to provide receipts for these (IRS audit trail). Returns date, merchant, amount, category — biggest first.",
+    input_schema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Max rows (default 20, max 50)" },
+        sinceDays: { type: "number", description: "Only expenses in the last N days (default: all time)" },
+      },
+      required: [],
+    },
+  },
+  {
     name: "search_supplier_inventory",
     description: "Search live Lion Travel supplier inventory by destination (for sourcing new tours to package/resell). Separate from the PACK&GO catalog.",
     input_schema: {
@@ -175,10 +187,9 @@ export async function executeReadTool(
 
 async function runTool(name: string, input: any): Promise<unknown> {
   const { getDb } = await import("../../db");
-  const { tours, tourDepartures, bookings, customerProfiles } = await import(
-    "../../../drizzle/schema"
-  );
-  const { eq, and, or, gte, lte, sql, desc, like } = await import("drizzle-orm");
+  const { tours, tourDepartures, bookings, customerProfiles, bankTransactions } =
+    await import("../../../drizzle/schema");
+  const { eq, and, or, gte, lte, sql, desc, like, isNull } = await import("drizzle-orm");
   const db = await getDb();
   if (!db) return { error: "database unavailable" };
 
@@ -414,6 +425,21 @@ async function runTool(name: string, input: any): Promise<unknown> {
         label = "this_month";
       }
       const pl = await generateBankPL({ startDate, endDate });
+      // How many expenses in this period still need a receipt (Jeff 2026-06-01:
+      // finance must proactively flag missing receipts).
+      const effCat = sql`COALESCE(${bankTransactions.jeffOverrideCategory}, ${bankTransactions.agentCategory})`;
+      const EXPENSE_CATS = ["cogs_tour", "cogs_other", "expense_marketing", "expense_software", "expense_office", "expense_travel"];
+      const [rc] = await db
+        .select({ n: sql<number>`count(*)` })
+        .from(bankTransactions)
+        .where(and(
+          eq(bankTransactions.excludeFromAccounting, 0),
+          eq(bankTransactions.isPending, 0),
+          isNull(bankTransactions.receiptUrl),
+          gte(bankTransactions.date, startDate as any),
+          lte(bankTransactions.date, endDate as any),
+          sql`${effCat} IN (${sql.join(EXPENSE_CATS.map((c) => sql`${c}`), sql`, `)})`,
+        ));
       return {
         period: label,
         range: { startDate, endDate },
@@ -422,7 +448,59 @@ async function runTool(name: string, input: any): Promise<unknown> {
         netProfit: Number(pl.netProfit.toFixed(2)),
         trustDeferredIncome: Number(pl.trustDeferredIncome.toFixed(2)),
         needsReviewCount: pl.needsReviewCount,
-        note: "trust-aware: 已扣除未認列的客人訂金 (CST §17550)",
+        missingReceiptCount: Number(rc?.n ?? 0),
+        note: "trust-aware: 已扣除未認列的客人訂金 (CST §17550)。missingReceiptCount = 這期間還沒附收據的支出筆數,提醒 Jeff 補。",
+      };
+    }
+
+    case "list_missing_receipts": {
+      const limit = clamp(input.limit, 20, 50);
+      // Expense = effective category (jeff override → agent) is an expense type.
+      const EXPENSE_CATS = [
+        "cogs_tour", "cogs_other", "expense_marketing",
+        "expense_software", "expense_office", "expense_travel",
+      ];
+      const effCat = sql`COALESCE(${bankTransactions.jeffOverrideCategory}, ${bankTransactions.agentCategory})`;
+      const conds = [
+        eq(bankTransactions.excludeFromAccounting, 0),
+        eq(bankTransactions.isPending, 0),
+        isNull(bankTransactions.receiptUrl),
+        sql`${effCat} IN (${sql.join(EXPENSE_CATS.map((c) => sql`${c}`), sql`, `)})`,
+      ];
+      if (input.sinceDays) {
+        const since = new Date(Date.now() - input.sinceDays * 86400000)
+          .toISOString().slice(0, 10);
+        conds.push(gte(bankTransactions.date, since as any));
+      }
+      // Count total missing (so the agent can say "共 N 筆")
+      const [cnt] = await db
+        .select({ n: sql<number>`count(*)` })
+        .from(bankTransactions)
+        .where(and(...conds));
+      const rows = await db
+        .select({
+          id: bankTransactions.id,
+          date: bankTransactions.date,
+          merchant: bankTransactions.merchantName,
+          description: bankTransactions.description,
+          amount: bankTransactions.amount,
+          category: effCat,
+        })
+        .from(bankTransactions)
+        .where(and(...conds))
+        .orderBy(sql`ABS(${bankTransactions.amount}) DESC`)
+        .limit(limit);
+      return {
+        totalMissing: Number(cnt?.n ?? 0),
+        showing: rows.length,
+        note: "這些支出還沒附 receipt — Jeff 需要補收據 (IRS 稽核用)",
+        transactions: rows.map((r) => ({
+          id: r.id,
+          date: r.date,
+          merchant: r.merchant || r.description?.slice(0, 40) || "(無商家名)",
+          amount: r.amount,
+          category: r.category,
+        })),
       };
     }
 

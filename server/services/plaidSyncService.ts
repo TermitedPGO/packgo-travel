@@ -264,6 +264,29 @@ export async function syncOneLinkedAccount(
 }
 
 /**
+ * After a sync pulls new transactions, auto-classify them so Jeff never has
+ * to manually press "classify" (his 2026-06-01 ask: new txns should classify
+ * themselves). Best-effort — a classify failure must never break the sync.
+ */
+async function autoClassifyAfterSync(added: number): Promise<void> {
+  if (added <= 0) return;
+  try {
+    const { classifyUncategorizedBatch } = await import(
+      "./accountingAgentService"
+    );
+    // Cap at the count we just added (plus a small buffer for stragglers).
+    const res = await classifyUncategorizedBatch({ limit: Math.min(added + 10, 200) });
+    console.log(
+      `[plaidSync] auto-classified after sync: processed=${res.processed} succeeded=${res.succeeded} needsReview=${res.needsReviewCount}`
+    );
+  } catch (err) {
+    console.warn(
+      `[plaidSync] auto-classify after sync failed (non-fatal): ${(err as Error).message}`
+    );
+  }
+}
+
+/**
  * Sync all active linkedBankAccounts. Used by the nightly cron.
  * Errors on individual accounts are caught + logged; the run continues
  * so one broken bank doesn't block the others.
@@ -314,6 +337,8 @@ export async function syncAllActiveLinkedAccounts(): Promise<{
   console.log(
     `[plaidSync] daily run done: accounts=${active.length} added=${totalAdded} modified=${totalModified} removed=${totalRemoved} failed=${failedAccounts}`
   );
+
+  await autoClassifyAfterSync(totalAdded);
 
   return {
     totalAccounts: active.length,
@@ -375,6 +400,8 @@ export async function syncAllAccountsForItem(itemId: string): Promise<{
       totalRemoved += r.removed;
     }
   }
+
+  await autoClassifyAfterSync(totalAdded);
 
   return {
     itemId,

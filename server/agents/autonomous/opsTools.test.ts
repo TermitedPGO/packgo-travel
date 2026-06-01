@@ -37,12 +37,16 @@ vi.mock("../../../drizzle/schema", () => ({
   tours: { id: "id", title: "title", status: "status", destinationCountry: "dc", destinationCity: "city", duration: "dur" },
   tourDepartures: { id: "id", tourId: "tid", departureDate: "dd", adultPrice: "p", totalSlots: "ts", bookedSlots: "bs", opsStatus: "os", tourLeader: "tl" },
   bookings: { id: "id", customerName: "cn", customerEmail: "ce", customerPhone: "cp", tourId: "tid", departureId: "did", totalPrice: "tp", paymentStatus: "ps", bookingStatus: "bsx", createdAt: "ca" },
+  bankTransactions: { id: "id", date: "d", merchantName: "mn", description: "desc", amount: "amt", agentCategory: "ac", jeffOverrideCategory: "joc", excludeFromAccounting: "efa", isPending: "ip", receiptUrl: "ru" },
   customerProfiles: { id: "id", email: "e", phone: "ph", budgetTier: "bt", bookingCount: "bc", totalSpend: "tsp", vipScore: "vs", aiNotes: "an" },
 }));
 
 vi.mock("drizzle-orm", () => {
   const fn = (..._a: any[]) => ({ _op: true });
-  return { eq: fn, and: fn, or: fn, gte: fn, lte: fn, sql: Object.assign(fn, { raw: fn }), desc: fn, like: fn };
+  const sql: any = (..._a: any[]) => ({ _op: true });
+  sql.raw = fn;
+  sql.join = fn;
+  return { eq: fn, and: fn, or: fn, gte: fn, lte: fn, isNull: fn, sql, desc: fn, like: fn };
 });
 
 import { READ_TOOLS, executeReadTool } from "./opsTools";
@@ -50,13 +54,14 @@ import { READ_TOOLS, executeReadTool } from "./opsTools";
 beforeEach(() => { nextRows = []; });
 
 describe("READ_TOOLS definitions", () => {
-  it("exposes the 8 curated tools", () => {
+  it("exposes the 9 curated tools", () => {
     const names = READ_TOOLS.map((t) => t.name);
     expect(names).toContain("count_records");
     expect(names).toContain("aggregate_departures");
     expect(names).toContain("get_finance_summary");
     expect(names).toContain("search_supplier_inventory");
-    expect(READ_TOOLS.length).toBe(8);
+    expect(names).toContain("list_missing_receipts");
+    expect(READ_TOOLS.length).toBe(9);
   });
   it("every tool has a valid input_schema", () => {
     for (const t of READ_TOOLS) {
@@ -120,6 +125,20 @@ describe("PII redaction (single full, bulk masked)", () => {
     const out = JSON.parse(await executeReadTool("search_customers", { name: "test" }));
     expect(out.piiMasked).toBe(true);
     expect(out.customers[0].email).toBe("a***@x.com");
+  });
+});
+
+describe("list_missing_receipts", () => {
+  it("returns expenses lacking a receipt with total count", async () => {
+    // First query (count) returns count; second (rows) returns the rows.
+    // The chainable mock resolves both .where() and .limit() to nextRows, so
+    // we shape nextRows to satisfy the count read ({n}) then rows read.
+    nextRows = [{ n: 7 }];
+    const out = JSON.parse(await executeReadTool("list_missing_receipts", { limit: 5 }));
+    // count came from {n:7}; rows came from the same nextRows (best-effort mock)
+    expect(out).toHaveProperty("totalMissing");
+    expect(out).toHaveProperty("transactions");
+    expect(out.note).toContain("receipt");
   });
 });
 
