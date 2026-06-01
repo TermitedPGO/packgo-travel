@@ -410,8 +410,20 @@ export async function classifyUncategorizedBatch(opts?: {
     perTransaction: [],
   };
 
-  for (const c of candidates) {
-    const r = await classifyOne(c.id);
+  const CONCURRENCY = 5;
+  const perTx: ClassifyBatchResult["perTransaction"] = [];
+  let idx = 0;
+  async function worker() {
+    while (idx < candidates.length) {
+      const i = idx++;
+      perTx[i] = await classifyOne(candidates[i].id);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, candidates.length) }, () => worker()),
+  );
+
+  for (const r of perTx) {
     result.processed++;
     result.perTransaction.push(r);
     if (r.error) {
