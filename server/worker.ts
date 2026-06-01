@@ -8,6 +8,7 @@ import {
   TourTranslationResult,
 } from "./queue";
 import { generateTourFromUrlInternal } from "./tourGenerator";
+import { rewriteSupplierTourInPlace } from "./services/supplierRewriteService";
 import { translateTour, Language } from "./translation";
 import { notifyOwner } from "./_core/notification";
 import { captureException } from "./_core/sentry";
@@ -41,66 +42,63 @@ export const tourGenerationWorker = new Worker<TourGenerationJobData, TourGenera
         timestamp: Date.now(),
       });
 
-      // Call the actual tour generation function
-      // MasterAgent 會透過 onProgress 回調更新進度
-      const result = await generateTourFromUrlInternal(
-        job.data.url,
-        job.data.userId,
-        job,
-        job.data.forceRegenerate || false,
-        job.data.isPdf || false,
-        job.data.supplementUrl
-      );
-
-      // Complete
-      await updateProgress(job, {
-        step: "completed",
-        progress: 100,
-        message: "行程生成完成！",
-        timestamp: Date.now(),
-      });
-
-      console.log(`✅ Tour generation job completed: ${job.id}`);
-
-      // 2026-05-16: if this job was spawned by a supplier-import rewrite
-      // (sourceDraftTourId carries the original draft's row id), flip
-      // that draft to status='inactive' now that the PACK&GO tour exists.
-      // This keeps the catalog clean — no stranded drafts after rewrite.
+      // Two code paths, picked by whether this is a supplier-import rewrite.
       //
-      // 2026-05-17 update: if the new tour was rejected by calibration
-      // (result.rejected=true), the new tour was already auto-deleted in
-      // tourGenerator. Delete the source draft entirely too — no point
-      // keeping either copy around. Audit trail (#catalog message +
-      // calibrationResults) preserved separately.
+      //  A. SUPPLIER REWRITE (sourceDraftTourId set) — the draft tour ALREADY
+      //     has the real price + departures + a structured itinerary blob from
+      //     the supplier import. We rewrite its PROSE in place and keep every
+      //     fact intact. We do NOT re-scrape the source URL (for UV it's an
+      //     unscrapeable JS SPA) and we do NOT create a new tour. The old path
+      //     here re-scraped + regenerated, nuking price ($598→$0) + all
+      //     departures (134→0) + producing garbage, then orphaned the good
+      //     draft. See server/services/supplierRewriteService.ts.
+      //
+      //  B. ORGANIC URL / PDF (no sourceDraftTourId) — first-time generation
+      //     from a scrapeable source. Unchanged: scrape → agents → createTour.
       const draftId = job.data.sourceDraftTourId;
-      if (draftId && result?.success) {
-        try {
-          if ((result as any).rejected) {
-            // Both ends rejected: hard-delete the source draft.
-            const { getDb } = await import("./db");
-            const dbInst = await getDb();
-            if (dbInst) {
-              const { tours: toursTable, tourDepartures } = await import("../drizzle/schema");
-              const { eq } = await import("drizzle-orm");
-              await dbInst.delete(tourDepartures).where(eq(tourDepartures.tourId, draftId)).catch(() => {});
-              await dbInst.delete(toursTable).where(eq(toursTable.id, draftId));
-              console.log(
-                `🗑 Hard-deleted source draft tour #${draftId} (PACK&GO rewrite was rejected, cal=${(result as any).rejectedScore})`
-              );
-            }
-          } else {
-            const { updateTour } = await import("./db");
-            await updateTour(draftId, { status: "inactive" });
-            console.log(
-              `🧹 Marked source draft tour #${draftId} as inactive after successful rewrite → new tour #${result.tourId}`
-            );
-          }
-        } catch (cleanupErr) {
-          console.warn(
-            `[tourGenerationWorker] Failed to clean up source draft #${draftId}:`,
-            cleanupErr
-          );
-        }
+      let result: TourGenerationResult;
+
+      if (draftId) {
+        // ── Path A: rewrite supplier draft in place (no re-scrape, no new tour) ──
+        const rewrite = await rewriteSupplierTourInPlace(draftId);
+        result = {
+          success: rewrite.success,
+          tourId: rewrite.tourId,
+          error: rewrite.error,
+        } as TourGenerationResult;
+
+        await updateProgress(job, {
+          step: rewrite.success ? "completed" : "failed",
+          progress: 100,
+          message: rewrite.success
+            ? `行程改寫完成（狀態：${rewrite.status}）`
+            : `行程改寫失敗：${rewrite.error ?? "unknown"}`,
+          timestamp: Date.now(),
+        });
+        console.log(
+          `✅ Supplier rewrite-in-place job completed: ${job.id} (tour #${draftId}, success=${rewrite.success}, status=${rewrite.status})`
+        );
+        // No draft cleanup needed — the rewrite happened IN PLACE on draftId.
+        // On calibration reject the service already set status='inactive'; it
+        // NEVER deletes the tour or its real departures.
+      } else {
+        // ── Path B: organic URL / PDF generation (unchanged) ──
+        result = await generateTourFromUrlInternal(
+          job.data.url,
+          job.data.userId,
+          job,
+          job.data.forceRegenerate || false,
+          job.data.isPdf || false,
+          job.data.supplementUrl
+        );
+
+        await updateProgress(job, {
+          step: "completed",
+          progress: 100,
+          message: "行程生成完成！",
+          timestamp: Date.now(),
+        });
+        console.log(`✅ Tour generation job completed: ${job.id}`);
       }
 
       return result;
