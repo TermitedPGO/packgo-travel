@@ -131,7 +131,8 @@ export async function* runOpsAgentStream(
     const system =
       SYSTEM_PROMPT + "\n\n" + ACTION_PROPOSAL_GUIDE +
       "\n\n【查資料 — 鐵則】你有一組唯讀查詢工具 (count_records / aggregate_departures / search_tours / search_departures / search_bookings / search_customers / get_finance_summary / search_supplier_inventory)。" +
-      "回答前一定要先用工具查真實資料,不要憑空回答數字。問「幾個 / 幾團 / 多少」一定用 count_records 拿確切總數,絕不用「我看到的筆數」當答案。問「哪個最多 / 分布」用 aggregate_departures。問淨利/財務用 get_finance_summary。查完再用自然中文回答。要建議寫入動作才用 suggest_action,純查詢問題不要附動作。";
+      "回答前一定要先用工具查真實資料,不要憑空回答數字。問「幾個 / 幾團 / 多少」一定用 count_records 拿確切總數,絕不用「我看到的筆數」當答案。問「哪個最多 / 分布」用 aggregate_departures。問淨利/財務用 get_finance_summary。\n" +
+      "【最重要】查完工具後,你一定要用**文字**把答案講給 Jeff 聽 (例:問淨利就講「這個月淨利 $X」)。**絕對不可以**只丟一個 suggest_action 動作就當作回答 — 動作只是「答完之後」的額外建議。沒有文字回答 = 失敗。純資訊問題 (幾團、淨利、哪個最多) 通常根本不需要附動作,直接講答案就好。suggest_action 只在 Jeff 明顯需要做一件寫入的事 (寄信、退款、分類帳本) 時才用,而且永遠是在文字答案之後。";
 
     const tools = [...READ_TOOLS, SUGGEST_ACTION_TOOL];
     const suggestedActions: any[] = [];
@@ -201,13 +202,37 @@ export async function* runOpsAgentStream(
       // still iterate once more so the model can produce its final text.
     }
 
-    // Empty-answer guard (the old "blank bubble" bug): if the model went
-    // straight to actions with no prose, synthesize a short line.
+    // Forced finalization: if the model ended on a tool/action call with no
+    // prose (e.g. asked "淨利多少", called get_finance_summary, then only
+    // proposed an action), it has the data but never spoke. Make ONE more
+    // call with NO tools so it MUST answer in text using what it just queried.
     if (!finalAnswer) {
-      finalAnswer =
-        suggestedActions.length > 0
-          ? "好,我準備了下面的動作,你確認要不要執行。"
-          : "我沒查到對應的資料,可以換個方式問問看。";
+      messages.push({
+        role: "user",
+        content:
+          "請直接用中文回答我上面的問題,把你剛剛查到的數字 / 結果講出來。不要再呼叫工具,就用文字回答。",
+      });
+      const fstream = getClient().messages.stream({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 2048,
+        temperature: 0.3,
+        system,
+        messages,
+      });
+      let ftext = "";
+      for await (const ev of fstream as any) {
+        if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta") {
+          ftext += ev.delta.text as string;
+          yield { type: "token", text: ev.delta.text as string };
+        }
+      }
+      await withRetry(() => fstream.finalMessage());
+      finalAnswer = ftext.trim();
+    }
+
+    // Last-resort guard (finalization also empty).
+    if (!finalAnswer) {
+      finalAnswer = "我沒查到對應的資料,可以換個方式問問看。";
     }
 
     yield { type: "done", finalAnswer, suggestedActions };
