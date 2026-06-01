@@ -43,7 +43,8 @@ export interface StreamEvent {
  */
 export async function* runOpsAgentStream(
   question: string,
-  history: { role: "user" | "agent"; content: string }[] = []
+  history: { role: "user" | "agent"; content: string }[] = [],
+  imageUrls?: string[],
 ): AsyncGenerator<StreamEvent, void, void> {
   try {
     // Lazy imports to avoid circular deps + match runOpsAgent pattern
@@ -93,10 +94,27 @@ export async function* runOpsAgentStream(
       `  "suggestedActions": [ ...0-3 個動作建議, 看 ACTION_PROPOSAL_GUIDE... ]\n` +
       `}`;
 
+    // Build user content — text + optional images (Anthropic vision)
+    const userContent: any[] = [];
+    if (imageUrls && imageUrls.length > 0) {
+      for (const url of imageUrls.slice(0, 5)) {
+        userContent.push({ type: "image", source: { type: "url", url } });
+      }
+    }
+    userContent.push({ type: "text", text: userMessage });
+
     if (lastRole === "user") {
-      messages[messages.length - 1].content += "\n\n" + userMessage;
+      const prev = messages[messages.length - 1];
+      if (typeof prev.content === "string") {
+        prev.content = [{ type: "text", text: prev.content }, ...userContent];
+      } else {
+        prev.content = [...prev.content, ...userContent];
+      }
     } else {
-      messages.push({ role: "user", content: userMessage });
+      messages.push({
+        role: "user",
+        content: imageUrls && imageUrls.length > 0 ? userContent : userMessage,
+      });
     }
 
     const fullSystemPrompt = SYSTEM_PROMPT + "\n\n" + ACTION_PROPOSAL_GUIDE;

@@ -164,3 +164,87 @@ describe("executeOpsAction — downloadTaxCsv", () => {
     expect(result.ok).toBe(false); // zod validation fails
   });
 });
+
+// ── PACK&GO Agent expansion (2026-06-01) ────────────────────────────────
+
+const mockClassifyBatch = vi.fn();
+const mockDraftReply = vi.fn();
+
+vi.mock("../../services/accountingAgentService", () => ({
+  classifyUncategorizedBatch: (...args: any[]) => mockClassifyBatch(...args),
+}));
+
+vi.mock("../../services/wechatAssistService", () => ({
+  draftReply: (...args: any[]) => mockDraftReply(...args),
+}));
+
+describe("ActionTypeEnum includes expansion types", () => {
+  it("accepts classifyBankTransactions", () => {
+    expect(ActionTypeEnum.safeParse("classifyBankTransactions").success).toBe(true);
+  });
+  it("accepts draftWechatReply", () => {
+    expect(ActionTypeEnum.safeParse("draftWechatReply").success).toBe(true);
+  });
+});
+
+describe("executeOpsAction — classifyBankTransactions", () => {
+  it("returns ok with classify results", async () => {
+    mockClassifyBatch.mockResolvedValue({
+      processed: 13,
+      succeeded: 10,
+      failed: 3,
+      needsReviewCount: 4,
+      byCategory: { cogs_tour: 5, transfer: 3, other_review: 2 },
+    });
+    const result = await executeOpsAction("classifyBankTransactions", { limit: 20 });
+    expect(result.ok).toBe(true);
+    expect(result.summary).toContain("10");
+    expect(result.details).toHaveProperty("processed", 13);
+  });
+
+  it("works with no args (default limit)", async () => {
+    mockClassifyBatch.mockResolvedValue({
+      processed: 0, succeeded: 0, failed: 0, needsReviewCount: 0, byCategory: {},
+    });
+    const result = await executeOpsAction("classifyBankTransactions", undefined);
+    expect(result.ok).toBe(true);
+  });
+
+  it("handles error gracefully", async () => {
+    mockClassifyBatch.mockRejectedValue(new Error("db down"));
+    const result = await executeOpsAction("classifyBankTransactions", {});
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("db down");
+  });
+});
+
+describe("executeOpsAction — draftWechatReply", () => {
+  it("returns ok with draft text", async () => {
+    mockDraftReply.mockResolvedValue({
+      draftText: "Hi there, thanks for your interest!",
+      confidence: 85,
+      detectedIntent: ["booking_inquiry"],
+      messageId: null,
+    });
+    const result = await executeOpsAction("draftWechatReply", {
+      customerName: "Test",
+      incomingMessage: "I want to book a tour",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.summary).toContain("Hi there");
+  });
+
+  it("validates required args", async () => {
+    const result = await executeOpsAction("draftWechatReply", {});
+    expect(result.ok).toBe(false);
+  });
+
+  it("handles service error", async () => {
+    mockDraftReply.mockRejectedValue(new Error("LLM timeout"));
+    const result = await executeOpsAction("draftWechatReply", {
+      customerName: "X",
+      incomingMessage: "Hello",
+    });
+    expect(result.ok).toBe(false);
+  });
+});

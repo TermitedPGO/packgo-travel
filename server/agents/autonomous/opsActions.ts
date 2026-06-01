@@ -37,6 +37,9 @@ export const ActionTypeEnum = z.enum([
   "askFinanceAdvisor",
   "produceInquiryReply",
   "downloadTaxCsv",
+  // PACK&GO Agent expansion (2026-06-01)
+  "classifyBankTransactions",
+  "draftWechatReply",
 ]);
 export type ActionType = z.infer<typeof ActionTypeEnum>;
 
@@ -107,6 +110,20 @@ export const DownloadTaxCsvArgs = z.object({
 });
 
 // ────────────────────────────────────────────────────────────────────────
+// PACK&GO Agent expansion (2026-06-01)
+// ────────────────────────────────────────────────────────────────────────
+
+export const ClassifyBankTransactionsArgs = z.object({
+  limit: z.number().int().min(1).max(200).default(50),
+}).optional();
+
+export const DraftWechatReplyArgs = z.object({
+  customerName: z.string().min(1).max(100),
+  incomingMessage: z.string().min(1).max(5000),
+  language: z.enum(["zh-TW", "zh-CN", "en"]).default("zh-TW"),
+});
+
+// ────────────────────────────────────────────────────────────────────────
 // Executor — pick action type, validate, run
 // ────────────────────────────────────────────────────────────────────────
 
@@ -148,6 +165,10 @@ export async function executeOpsAction(
         return await doProduceInquiryReply(ProduceInquiryReplyArgs.parse(args));
       case "downloadTaxCsv":
         return await doDownloadTaxCsv(DownloadTaxCsvArgs.parse(args));
+      case "classifyBankTransactions":
+        return await doClassifyBankTransactions(ClassifyBankTransactionsArgs.parse(args));
+      case "draftWechatReply":
+        return await doDraftWechatReply(DraftWechatReplyArgs.parse(args));
       default:
         return { ok: false, summary: "未知動作", error: `Unknown actionType: ${actionType}` };
     }
@@ -585,5 +606,64 @@ async function doDownloadTaxCsv(
   } catch (err) {
     const msg = (err as Error).message;
     return { ok: false, summary: "報稅 CSV 生成失敗", error: msg };
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// PACK&GO Agent expansion (2026-06-01)
+// ────────────────────────────────────────────────────────────────────────
+
+async function doClassifyBankTransactions(
+  args?: z.infer<typeof ClassifyBankTransactionsArgs>,
+): Promise<ExecutionResult> {
+  try {
+    const { classifyUncategorizedBatch } = await import(
+      "../../services/accountingAgentService"
+    );
+    const result = await classifyUncategorizedBatch({
+      limit: args?.limit ?? 50,
+    });
+    return {
+      ok: true,
+      summary: `✓ 已分類 ${result.succeeded} 筆${result.needsReviewCount > 0 ? ` (${result.needsReviewCount} 筆需人工審)` : ""}`,
+      details: {
+        processed: result.processed,
+        succeeded: result.succeeded,
+        failed: result.failed,
+        needsReviewCount: result.needsReviewCount,
+        byCategory: result.byCategory,
+      },
+    };
+  } catch (err) {
+    const msg = (err as Error).message;
+    return { ok: false, summary: "帳單分類失敗", error: msg };
+  }
+}
+
+async function doDraftWechatReply(
+  args: z.infer<typeof DraftWechatReplyArgs>,
+): Promise<ExecutionResult> {
+  try {
+    const { draftReply } = await import("../../services/wechatAssistService");
+    const result = await draftReply({
+      inboundText: args.incomingMessage,
+      source: "manual_paste",
+      fromDisplayName: args.customerName,
+    });
+    return {
+      ok: true,
+      summary: result.draftText.length > 200
+        ? result.draftText.slice(0, 200) + "…"
+        : result.draftText,
+      details: {
+        fullReply: result.draftText,
+        confidence: result.confidence,
+        detectedIntent: result.detectedIntent,
+        customerName: args.customerName,
+      },
+    };
+  } catch (err) {
+    const msg = (err as Error).message;
+    return { ok: false, summary: "微信草稿生成失敗", error: msg };
   }
 }

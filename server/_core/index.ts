@@ -263,6 +263,52 @@ async function startServer() {
   // Gmail OAuth (Round 81 — email pipeline)
   initializeGmailOAuth(app);
   
+  // ── Chat image upload (2026-06-01) ───────────────────────────────────
+  // Express route (not tRPC) because tRPC doesn't natively handle multipart.
+  // Admin-only: validates JWT from cookie. Uploads to R2 under chat-images/.
+  {
+    const multer = (await import("multer")).default;
+    const { nanoid } = await import("nanoid");
+    const chatUpload = multer({
+      storage: multer.memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+      fileFilter: (_req: any, file: any, cb: any) => {
+        if (file.mimetype.startsWith("image/")) cb(null, true);
+        else cb(new Error("Only image files allowed"));
+      },
+    });
+
+    app.post(
+      "/api/upload-chat-image",
+      chatUpload.single("image"),
+      async (req: any, res) => {
+        try {
+          // Admin auth check — same pattern as SSE endpoint below
+          const { verifyToken } = await import("../jwt");
+          const token =
+            req.cookies?.packgo_token || req.headers.authorization?.replace("Bearer ", "");
+          if (!token) return res.status(401).json({ error: "not authenticated" });
+          const payload = verifyToken(token);
+          if (!payload || payload.role !== "admin")
+            return res.status(403).json({ error: "admin only" });
+
+          const file = req.file;
+          if (!file) return res.status(400).json({ error: "no file" });
+
+          const ext = file.originalname.split(".").pop() || "png";
+          const key = `chat-images/${nanoid()}.${ext}`;
+          const { storagePut } = await import("../storage");
+          const { url } = await storagePut(key, file.buffer, file.mimetype);
+
+          res.json({ url });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "upload failed";
+          res.status(500).json({ error: msg });
+        }
+      },
+    );
+  }
+
   // Round 81 Phase 4 (2026-05-17) — OpsAgent SSE streaming endpoint.
   // MUST be mounted BEFORE the uploadRouters because those have
   // `router.use(requireAuth)` at the top, which would otherwise intercept
@@ -327,6 +373,16 @@ async function startServer() {
       if (!question || question.length > 2000) {
         return res.status(400).json({ error: "Question required, max 2000 chars" });
       }
+
+      // Parse optional image URLs from query (vision support, 2026-06-01)
+      let imageUrls: string[] | undefined;
+      try {
+        const raw = req.query.images as string | undefined;
+        if (raw) {
+          const parsed = JSON.parse(decodeURIComponent(raw));
+          if (Array.isArray(parsed)) imageUrls = parsed.slice(0, 5);
+        }
+      } catch { /* ignore bad images param */ }
 
       // 2026-05-17 red-team round 1 — rate limit OpsAgent SSE to prevent
       // credit-burn if admin cookie is stolen / Jeff's machine compromised.
@@ -445,7 +501,7 @@ async function startServer() {
       const startedAt = Date.now();
       let firstTokenLogged = false;
       try {
-        for await (const event of runOpsAgentStream(question, history)) {
+        for await (const event of runOpsAgentStream(question, history, imageUrls)) {
           if (terminated) break; // timed out or client disconnected
           if (event.type === "token") {
             if (!firstTokenLogged) {

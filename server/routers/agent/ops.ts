@@ -42,6 +42,7 @@ export const opsRouter = router({
     .input(
       z.object({
         question: z.string().min(1).max(2000),
+        imageUrls: z.array(z.string().url()).max(5).optional(),
       }),
     )
     .mutation(async ({ input }) => {
@@ -85,7 +86,7 @@ export const opsRouter = router({
       let suggestedActions: any[] = [];
       let error: string | null = null;
       try {
-        const result = await runOpsAgent(input.question, history);
+        const result = await runOpsAgent(input.question, history, input.imageUrls);
         answer = result.answer;
         suggestedActions = result.suggestedActions;
 

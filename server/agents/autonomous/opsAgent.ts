@@ -280,6 +280,39 @@ async function fetchOpsContext(hints: ReturnType<typeof extractHints>) {
     labels.push("groupsByDays");
   }
 
+  // (5) Supplier search — when Jeff asks about a destination, also check
+  // live Lion Travel inventory. Best-effort, never blocks other queries.
+  if (hints.destinationHints.length > 0) {
+    queries.push(
+      (async () => {
+        try {
+          const { searchProducts } = await import("../../suppliers/lionClient");
+          const now = new Date();
+          const goDateStart = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}/${String(now.getDate()).padStart(2, "0")}`;
+          const future = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
+          const goDateEnd = `${future.getFullYear()}/${String(future.getMonth() + 1).padStart(2, "0")}/${String(future.getDate()).padStart(2, "0")}`;
+          const result = await searchProducts({
+            goDateStart,
+            goDateEnd,
+            keywords: hints.destinationHints[0],
+            page: 1,
+            pageSize: 10,
+          });
+          return (result.NormGroupList ?? []).slice(0, 8).map((g: any) => ({
+            groupName: g.GroupName,
+            departureDate: g.GoDate,
+            price: g.SalePrice,
+            status: g.IsSold ? "sold" : "available",
+            days: g.Days,
+          }));
+        } catch {
+          return [];
+        }
+      })()
+    );
+    labels.push("supplierProducts");
+  }
+
   const results = await Promise.all(queries);
   const ctx: Record<string, unknown> = {};
   results.forEach((r, i) => {
@@ -315,7 +348,10 @@ export interface OpsActionProposal {
     | "runFinanceAlerts"
     | "askFinanceAdvisor"
     | "produceInquiryReply"
-    | "downloadTaxCsv";
+    | "downloadTaxCsv"
+    // PACK&GO Agent expansion (2026-06-01)
+    | "classifyBankTransactions"
+    | "draftWechatReply";
   label: string; // 1-line description shown on the chip (Chinese)
   description: string; // 2-3 sentence detail shown in confirmation modal
   args: Record<string, unknown>;
@@ -342,7 +378,8 @@ export interface OpsAgentTurn {
  */
 export async function runOpsAgent(
   question: string,
-  history: OpsAgentTurn[] = []
+  history: OpsAgentTurn[] = [],
+  imageUrls?: string[],
 ): Promise<{
   answer: string;
   suggestedActions: OpsActionProposal[];
@@ -398,10 +435,28 @@ export async function runOpsAgent(
     `  "suggestedActions": [ ...0-3 個動作建議, 看 ACTION_PROPOSAL_GUIDE... ]\n` +
     `}`;
 
+  // Build user content — text + optional images (Anthropic vision)
+  const userContent: any[] = [];
+  if (imageUrls && imageUrls.length > 0) {
+    for (const url of imageUrls.slice(0, 5)) {
+      userContent.push({ type: "image_url", image_url: { url } });
+    }
+  }
+  userContent.push({ type: "text", text: userMessage });
+
   if (lastRole === "user") {
-    messages[messages.length - 1].content += "\n\n" + userMessage;
+    // Merge into existing user message
+    const prev = messages[messages.length - 1];
+    if (typeof prev.content === "string") {
+      prev.content = [{ type: "text", text: prev.content }, ...userContent];
+    } else {
+      prev.content = [...prev.content, ...userContent];
+    }
   } else {
-    messages.push({ role: "user", content: userMessage });
+    messages.push({
+      role: "user",
+      content: imageUrls && imageUrls.length > 0 ? userContent : userMessage,
+    });
   }
 
   const response = await invokeLLM({
@@ -448,7 +503,7 @@ const ACTION_PROPOSAL_GUIDE = `
 
 每個動作 schema:
 {
-  "actionType": "sendCustomerEmail" | "addTourGroupNote" | "assignTourLeader" | "updateInternalNote" | "markBookingPaid" | "scheduleReminder" | "runFinanceAlerts" | "askFinanceAdvisor" | "produceInquiryReply" | "downloadTaxCsv",
+  "actionType": "sendCustomerEmail" | "addTourGroupNote" | "assignTourLeader" | "updateInternalNote" | "markBookingPaid" | "scheduleReminder" | "runFinanceAlerts" | "askFinanceAdvisor" | "produceInquiryReply" | "downloadTaxCsv" | "classifyBankTransactions" | "draftWechatReply",
   "label": "1 行中文描述(< 30 字)",
   "description": "2-3 句細節, 讓 Jeff 在 confirmation modal 看清楚要做什麼",
   "args": { ...動作參數... },
@@ -512,6 +567,17 @@ downloadTaxCsv (sensitivity=safe):
   args: { year: number }
   用途: 生成 Schedule C 報稅 CSV (不會直接下載, 告訴 Jeff 去財務 Dashboard 按下載鈕)
   觸發時機: Jeff 說「報稅」「Schedule C」「匯出今年帳」
+
+classifyBankTransactions (sensitivity=safe):
+  args: { limit?: number } (預設 50)
+  用途: AI 自動分類未分類的銀行交易
+  觸發時機: Jeff 說「分類帳單」「跑一下 AI 分類」「帳本有多少沒分的」「幫我分一下」
+
+draftWechatReply (sensitivity=normal):
+  args: { customerName: string, incomingMessage: string, language?: "zh-TW"|"zh-CN"|"en" }
+  用途: 產生微信回覆草稿（不會真的發出去, 只產草稿讓 Jeff 複製貼上）
+  觸發時機: Jeff 說「回覆微信」「幫我草擬微信回覆給 X」「WeChat 怎麼回」
+  注意: 需要客人名字 + 客人的原始訊息內容
 
 【判斷規則】
 - 沒明顯動作 → suggestedActions: []
