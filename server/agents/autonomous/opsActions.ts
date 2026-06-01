@@ -30,6 +30,13 @@ export const ActionTypeEnum = z.enum([
   // Round 81 Phase 4 (2026-05-17) — sensitive actions
   "cancelBooking",
   "triggerRefund",
+  // 指揮中心 integration (2026-05-31) — OpsAgent can trigger command center
+  // workflows via Jeff's confirmation chips. All are "normal" sensitivity
+  // (never auto-execute, always require Jeff's click).
+  "runFinanceAlerts",
+  "askFinanceAdvisor",
+  "produceInquiryReply",
+  "downloadTaxCsv",
 ]);
 export type ActionType = z.infer<typeof ActionTypeEnum>;
 
@@ -82,6 +89,24 @@ export const TriggerRefundArgs = z.object({
 });
 
 // ────────────────────────────────────────────────────────────────────────
+// 指揮中心 action arg schemas (2026-05-31)
+// ────────────────────────────────────────────────────────────────────────
+
+export const RunFinanceAlertsArgs = z.object({}).optional();
+
+export const AskFinanceAdvisorArgs = z.object({
+  question: z.string().min(1).max(2000),
+});
+
+export const ProduceInquiryReplyArgs = z.object({
+  inquiryId: z.number().int().positive(),
+});
+
+export const DownloadTaxCsvArgs = z.object({
+  year: z.number().int().min(2020).max(2030),
+});
+
+// ────────────────────────────────────────────────────────────────────────
 // Executor — pick action type, validate, run
 // ────────────────────────────────────────────────────────────────────────
 
@@ -114,6 +139,15 @@ export async function executeOpsAction(
         return await doCancelBooking(CancelBookingArgs.parse(args));
       case "triggerRefund":
         return await doTriggerRefund(TriggerRefundArgs.parse(args));
+      // 指揮中心 actions (2026-05-31)
+      case "runFinanceAlerts":
+        return await doRunFinanceAlerts();
+      case "askFinanceAdvisor":
+        return await doAskFinanceAdvisor(AskFinanceAdvisorArgs.parse(args));
+      case "produceInquiryReply":
+        return await doProduceInquiryReply(ProduceInquiryReplyArgs.parse(args));
+      case "downloadTaxCsv":
+        return await doDownloadTaxCsv(DownloadTaxCsvArgs.parse(args));
       default:
         return { ok: false, summary: "未知動作", error: `Unknown actionType: ${actionType}` };
     }
@@ -446,5 +480,110 @@ async function doTriggerRefund(args: z.infer<typeof TriggerRefundArgs>): Promise
       summary: `Stripe 退款失敗: ${msg.slice(0, 100)}`,
       error: msg,
     };
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// 指揮中心 action implementations (2026-05-31)
+// All use dynamic imports to avoid pulling LLM/service deps into boot graph.
+// ────────────────────────────────────────────────────────────────────────
+
+async function doRunFinanceAlerts(): Promise<ExecutionResult> {
+  try {
+    const { produceFinanceAlerts } = await import("./financeAlertProducer");
+    const result = await produceFinanceAlerts();
+    return {
+      ok: true,
+      summary: `✓ 財務掃描完成，產生 ${result.produced} 筆警示`,
+      details: { produced: result.produced },
+    };
+  } catch (err) {
+    const msg = (err as Error).message;
+    return { ok: false, summary: "財務掃描失敗", error: msg };
+  }
+}
+
+async function doAskFinanceAdvisor(
+  args: z.infer<typeof AskFinanceAdvisorArgs>,
+): Promise<ExecutionResult> {
+  try {
+    const { askFinanceAdvisor } = await import("./financeAdvisor");
+    const answer = await askFinanceAdvisor(args.question);
+    return {
+      ok: true,
+      summary: answer.length > 200 ? answer.slice(0, 200) + "…" : answer,
+      details: { fullAnswer: answer, question: args.question },
+    };
+  } catch (err) {
+    const msg = (err as Error).message;
+    return { ok: false, summary: "財務顧問暫時不可用", error: msg };
+  }
+}
+
+async function doProduceInquiryReply(
+  args: z.infer<typeof ProduceInquiryReplyArgs>,
+): Promise<ExecutionResult> {
+  try {
+    const db = await import("../../db");
+    const inquiry = await db.getInquiryById(args.inquiryId);
+    if (!inquiry) {
+      return { ok: false, summary: `詢問 #${args.inquiryId} 不存在`, error: "not_found" };
+    }
+
+    const { runInquiryAgent } = await import("./inquiryAgent");
+    const { produceInquiryReplyTask } = await import("./inquiryReplyProducer");
+
+    const agent = await runInquiryAgent({
+      rawMessage: `${inquiry.subject}\n\n${inquiry.message}`,
+      channel: "email",
+      customerProfile: inquiry.customerEmail
+        ? { id: inquiry.id, email: inquiry.customerEmail }
+        : undefined,
+    });
+
+    const { id, riskLevel } = await produceInquiryReplyTask(
+      {
+        inquiryId: inquiry.id,
+        customerEmail: inquiry.customerEmail,
+        customerName: inquiry.customerName,
+        subject: inquiry.subject,
+        inquiryText: `${inquiry.subject}\n${inquiry.message}`,
+      },
+      agent,
+    );
+
+    return {
+      ok: true,
+      summary: `✓ 已為詢問 #${args.inquiryId} 產生客服草稿 (task #${id}, ${riskLevel})`,
+      details: { taskId: id, riskLevel, inquiryId: args.inquiryId },
+    };
+  } catch (err) {
+    const msg = (err as Error).message;
+    return { ok: false, summary: "產生客服草稿失敗", error: msg };
+  }
+}
+
+async function doDownloadTaxCsv(
+  args: z.infer<typeof DownloadTaxCsvArgs>,
+): Promise<ExecutionResult> {
+  try {
+    const { generateTaxCsv } = await import("../../services/taxCsvService");
+    const csv = await generateTaxCsv(args.year);
+    // Can't trigger a browser download from server — return the CSV in details
+    // so the UI can render a download link or the agent can paste a summary.
+    return {
+      ok: true,
+      summary: `✓ ${args.year} 報稅 CSV 已生成 (${csv.length} 字元)`,
+      details: {
+        year: args.year,
+        filename: `packgo-schedule-c-${args.year}.csv`,
+        csvLength: csv.length,
+        // Don't include full CSV in details — too large for chat. The user
+        // should use the Finance Dashboard download button for the actual file.
+      },
+    };
+  } catch (err) {
+    const msg = (err as Error).message;
+    return { ok: false, summary: "報稅 CSV 生成失敗", error: msg };
   }
 }

@@ -310,7 +310,12 @@ export interface OpsActionProposal {
     | "markBookingPaid"
     | "scheduleReminder"
     | "cancelBooking"
-    | "triggerRefund";
+    | "triggerRefund"
+    // 指揮中心 actions (2026-05-31)
+    | "runFinanceAlerts"
+    | "askFinanceAdvisor"
+    | "produceInquiryReply"
+    | "downloadTaxCsv";
   label: string; // 1-line description shown on the chip (Chinese)
   description: string; // 2-3 sentence detail shown in confirmation modal
   args: Record<string, unknown>;
@@ -443,7 +448,7 @@ const ACTION_PROPOSAL_GUIDE = `
 
 每個動作 schema:
 {
-  "actionType": "sendCustomerEmail" | "addTourGroupNote" | "assignTourLeader" | "updateInternalNote" | "markBookingPaid" | "scheduleReminder",
+  "actionType": "sendCustomerEmail" | "addTourGroupNote" | "assignTourLeader" | "updateInternalNote" | "markBookingPaid" | "scheduleReminder" | "runFinanceAlerts" | "askFinanceAdvisor" | "produceInquiryReply" | "downloadTaxCsv",
   "label": "1 行中文描述(< 30 字)",
   "description": "2-3 句細節, 讓 Jeff 在 confirmation modal 看清楚要做什麼",
   "args": { ...動作參數... },
@@ -483,6 +488,30 @@ cancelBooking (sensitivity=sensitive):
 triggerRefund (sensitivity=sensitive):
   args: { bookingId: number, amountUsd: number, reason: string, partial?: boolean }
   用途: 透過 Stripe API 退款 (預設全額; partial=true + amountUsd 為部分退)
+
+=== 指揮中心動作 (2026-05-31) ===
+
+runFinanceAlerts (sensitivity=normal):
+  args: {} (無參數)
+  用途: 掃描 5 種財務異常 (Stripe 對帳/淨利急降/未分類交易/Trust 異常/供應商付款)
+  觸發時機: Jeff 說「財務掃描」「有沒有異常」「檢查一下帳」
+
+askFinanceAdvisor (sensitivity=safe):
+  args: { question: string }
+  用途: 把財務問題轉給 AI 財務顧問 (有即時 P&L/Trust/稅務數據)
+  觸發時機: Jeff 問「淨利多少」「預估稅怎麼算」「這個月賺多少」等財務分析問題
+  注意: 你自己不要猜財務數字, 轉給 advisor 它有真實數據
+
+produceInquiryReply (sensitivity=normal):
+  args: { inquiryId: number }
+  用途: 讓 InquiryAgent 讀客人詢問 → 產生回覆草稿 → 進審核箱等 Jeff 確認
+  觸發時機: Jeff 說「回覆那個客人」「幫我草擬回信」「回一下 #123 的詢問」
+  注意: 只產生草稿, Jeff 要在審核箱確認才真的寄出
+
+downloadTaxCsv (sensitivity=safe):
+  args: { year: number }
+  用途: 生成 Schedule C 報稅 CSV (不會直接下載, 告訴 Jeff 去財務 Dashboard 按下載鈕)
+  觸發時機: Jeff 說「報稅」「Schedule C」「匯出今年帳」
 
 【判斷規則】
 - 沒明顯動作 → suggestedActions: []

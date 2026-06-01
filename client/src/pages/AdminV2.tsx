@@ -116,61 +116,58 @@ type DomainId = "chat" | "workspace";
 
 type PageDef = { id: PageId; label: string };
 
-// 2026-05-31 — Jeff: 「左邊還是有六個圖案，沒有實際做到簡化」。6 domain → 3。
-// chat-first：💬 Chat 是首頁，📋 營運+財務 收所有每天/偶爾看的業務表格，
-// ⚙️ 設定 收系統/AI/供應商等幾乎不用的頁。每個 domain 三層：
-//   primary  = 每天用 → sub-nav 直接顯示
-//   advanced = 偶爾用 → 收進「進階 ▾」下拉
-//   hidden   = 幾乎不用 → 不進 sub-nav，只留在 IA 供 ⌘K 搜尋（見 allPages）
+// 2026-05-31 v2: 6 domain → 2 (Chat + 工作台), sidebar 極簡。
+// 2026-05-31 v3 (Jeff): 工作台 7→3 (訂單/帳本/行程), 其餘收 hidden (CMD+K / Agent 開)。
+// Label 不帶 emoji (lucide icon 已在 domain 層)。
+//   primary  = 每天手動看 → sub-nav 直接顯示
+//   advanced = 偶爾用 → 收進「進階」下拉
+//   hidden   = 幾乎不用 → 不進 sub-nav, 只留在 IA 供 CMD+K 搜尋 (見 allPages)
 const IA: Record<
   DomainId,
   { domain: Domain; primary: PageDef[]; advanced: PageDef[]; hidden?: PageDef[] }
 > = {
   chat: {
     domain: { id: "chat", label: "Chat", icon: MessageSquare },
-    primary: [{ id: "agent-chat", label: "💬 Agent Chat" }],
+    primary: [{ id: "agent-chat", label: "Agent Chat" }],
     advanced: [],
-    // Render + ⌘K-searchable, just off the sidebar (Jeff: chat 取代今日總覽；
-    // 指揮中心的財務/客服 lane 仍可從 ⌘K 進)。
     hidden: [
-      { id: "command-center", label: "🎛 指揮中心" },
-      { id: "today", label: "🏠 今日總覽" },
+      { id: "command-center", label: "指揮中心" },
+      { id: "today", label: "今日總覽" },
     ],
   },
   workspace: {
-    // 工作台 — Jeff 每天 + 每週實際在看的 7 頁（使用頻率表 2026-05-31）。
+    // 工作台 — Jeff 每天手動看的 3 頁, 其餘全靠 Agent 或 CMD+K。
     domain: { id: "workspace", label: "工作台", icon: ClipboardList },
     primary: [
       { id: "bookings", label: "訂單" },
-      { id: "inquiries", label: "詢問" },
       { id: "bank-ledger", label: "帳本" },
       { id: "tours", label: "行程" },
+    ],
+    advanced: [],
+    hidden: [
+      { id: "inquiries", label: "詢問" },
       { id: "departures-calendar", label: "出發日曆" },
       { id: "finance-reports", label: "報表" },
       { id: "customers-crm", label: "客戶" },
-    ],
-    advanced: [],
-    // 從沒用過 / 知道但沒在用 / 系統設定 — 留在 registry 供 ⌘K 搜尋，不上側欄。
-    hidden: [
-      { id: "ops-landing", label: "🗺 營運總覽" },
+      { id: "ops-landing", label: "營運總覽" },
       { id: "tour-monitor", label: "供應商監控" },
-      { id: "suppliers", label: "🔌 供應商同步" },
-      { id: "customers-landing", label: "👥 客戶總覽" },
+      { id: "suppliers", label: "供應商同步" },
+      { id: "customers-landing", label: "客戶總覽" },
       { id: "reviews", label: "評價" },
       { id: "packpoint", label: "Packpoint" },
       { id: "vouchers", label: "Voucher" },
       { id: "ai-quotes", label: "AI 報價單" },
-      { id: "tool-quote", label: "📄 報價單" },
+      { id: "tool-quote", label: "報價單" },
       { id: "wechat-assist", label: "WeChat 助手" },
-      { id: "newsletter", label: "📧 Newsletter" },
-      { id: "marketing-landing", label: "📢 行銷總覽" },
+      { id: "newsletter", label: "Newsletter" },
+      { id: "marketing-landing", label: "行銷總覽" },
       { id: "marketing", label: "行銷自動化" },
       { id: "marketing-content", label: "AI 文案" },
       { id: "posters", label: "海報" },
       { id: "analytics", label: "流量分析" },
       { id: "competitor-monitor", label: "競品監控" },
       { id: "affiliate", label: "Trip.com 聯盟" },
-      { id: "finance-landing", label: "💰 財務總覽" },
+      { id: "finance-landing", label: "財務總覽" },
       { id: "ai-hub", label: "AI 中心" },
       { id: "llm-cost", label: "AI 成本" },
       { id: "task-history", label: "任務記錄" },
@@ -179,8 +176,8 @@ const IA: Record<
       { id: "autonomous-agents", label: "自主 Agent" },
       { id: "skills", label: "AI 技能" },
       { id: "visa", label: "中國簽證" },
-      { id: "cleanup", label: "🧹 清理" },
-      { id: "supplier-enrichment", label: "🌏 供應商深度同步" },
+      { id: "cleanup", label: "清理" },
+      { id: "supplier-enrichment", label: "供應商深度同步" },
     ],
   },
 };
