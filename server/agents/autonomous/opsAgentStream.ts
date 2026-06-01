@@ -128,7 +128,9 @@ export async function* runOpsAgentStream(
       messages.push({ role: "user", content: userContent });
     }
 
+    const today = new Date().toISOString().slice(0, 10);
     const system =
+      `【今天日期】${today} (UTC)。任何跟年份/月份相關的判斷都以這個為準 — 例如「今年報稅」就是 ${today.slice(0, 4)} 年,「這個月」就是 ${today.slice(0, 7)},不要用舊年份。\n\n` +
       SYSTEM_PROMPT + "\n\n" + ACTION_PROPOSAL_GUIDE +
       "\n\n【查資料 — 鐵則】你有一組唯讀查詢工具 (count_records / aggregate_departures / search_tours / search_departures / search_bookings / search_customers / get_finance_summary / search_supplier_inventory)。" +
       "回答前一定要先用工具查真實資料,不要憑空回答數字。問「幾個 / 幾團 / 多少」一定用 count_records 拿確切總數,絕不用「我看到的筆數」當答案。問「哪個最多 / 分布」用 aggregate_departures。問淨利/財務用 get_finance_summary。\n" +
