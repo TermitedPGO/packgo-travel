@@ -122,9 +122,9 @@ const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageD
   office: {
     domain: { id: "office", label: "辦公室", icon: Building2 },
     primary: [
+      { id: "agent-chat", label: "💬 Agent Chat" },
       { id: "command-center", label: "🎛 指揮中心" },
       { id: "today", label: "🏠 今日總覽" },
-      { id: "agent-chat", label: "💬 Agent Chat" },
     ],
     advanced: [],
   },
