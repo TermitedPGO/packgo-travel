@@ -27,12 +27,112 @@ import {
   getProductMain,
   getProductTravelDetail,
   getDeparturesNext180Days,
-  type UvProductMain,
   type UvProductTravelDetail,
 } from "../suppliers/uvClient";
-import { createTour, createDeparture } from "../db";
+import { createTour, createDeparture, getDb } from "../db";
 import { tourGenerationQueue } from "../queue";
 import { SupplierApiError } from "../suppliers/types";
+import { createChildLogger } from "../_core/logger";
+
+const log = createChildLogger({ module: "uvBulkImport" });
+
+/**
+ * Read the already-synced supplierProducts row for a UV product. The sync
+ * service (supplierSync/uv.ts) populated clean, derived columns here —
+ * title / days / destinationCountry / destinationCity / departureCity /
+ * imageUrl — which are MORE reliable than re-deriving from getProductMain
+ * (whose response doesn't even carry destinationName/tempImageUrl). Also
+ * returns the enriched itineraryParsed when present, for a cleaner LLM blob.
+ * Returns null when the row isn't found (caller falls back to API).
+ */
+async function readUvSupplierRow(productCode: string): Promise<{
+  title: string | null;
+  days: number | null;
+  destinationCountry: string | null;
+  destinationCity: string | null;
+  departureCity: string | null;
+  imageUrl: string | null;
+  nightDay: number | null;
+  itineraryParsed: string | null;
+} | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const { supplierProducts, supplierProductDetails, suppliers } = await import(
+    "../../drizzle/schema"
+  );
+  const { eq, and } = await import("drizzle-orm");
+  const rows = await db
+    .select({
+      title: supplierProducts.title,
+      days: supplierProducts.days,
+      destinationCountry: supplierProducts.destinationCountry,
+      destinationCity: supplierProducts.destinationCity,
+      departureCity: supplierProducts.departureCity,
+      imageUrl: supplierProducts.imageUrl,
+      rawProductJson: supplierProducts.rawProductJson,
+      itineraryParsed: supplierProductDetails.itineraryParsed,
+    })
+    .from(supplierProducts)
+    .innerJoin(suppliers, eq(supplierProducts.supplierId, suppliers.id))
+    .leftJoin(
+      supplierProductDetails,
+      eq(supplierProductDetails.supplierProductId, supplierProducts.id),
+    )
+    .where(
+      and(
+        eq(suppliers.code, "uv"),
+        eq(supplierProducts.externalProductCode, productCode),
+      ),
+    )
+    .limit(1);
+  if (rows.length === 0) return null;
+  const r = rows[0];
+  let nightDay: number | null = null;
+  try {
+    const raw = r.rawProductJson ? JSON.parse(r.rawProductJson) : null;
+    if (raw && typeof raw.nightDay === "number") nightDay = raw.nightDay;
+  } catch {
+    /* rawProductJson not parseable — nightDay stays null */
+  }
+  return {
+    title: r.title,
+    days: r.days,
+    destinationCountry: r.destinationCountry,
+    destinationCity: r.destinationCity,
+    departureCity: r.departureCity,
+    imageUrl: r.imageUrl,
+    nightDay,
+    itineraryParsed: r.itineraryParsed,
+  };
+}
+
+/** Minimal departure shape the price pickers read (subset of UvDepartureRow). */
+export interface UvDepartureForPricing {
+  groupPrice?: Array<{ priceType: number; groupPrice: number }>;
+}
+
+/**
+ * Per-departure adult price = priceType=4 (兩人一房, double-occupancy = the
+ * standard per-person basis). Falls back to the first tier, then 0. Rounded.
+ * priceType=3 (單人入住/single) over-quotes ~30-37% and is NEVER preferred.
+ * Pure + exported for unit tests (Jeff rule: real getProductGroup price only).
+ */
+export function pickDepartureAdultPrice(dep: UvDepartureForPricing): number {
+  const four = dep.groupPrice?.find((g) => g.priceType === 4)?.groupPrice;
+  const fallback = dep.groupPrice?.[0]?.groupPrice;
+  return Math.round(Number(four ?? fallback ?? 0) || 0);
+}
+
+/**
+ * Headline 起價 = the LOWEST priceType=4 price across all future departures
+ * (`從 $X 起`). 0 when no departure carries a usable price. Pure + exported.
+ */
+export function pickHeadlinePrice(departures: UvDepartureForPricing[]): number {
+  return departures.reduce<number>((min, dep) => {
+    const p = pickDepartureAdultPrice(dep);
+    return p > 0 && (min === 0 || p < min) ? p : min;
+  }, 0);
+}
 
 /** Mirror of BulkImportResult from lionBulkImportService for parity. */
 export interface UvBulkImportResult {
@@ -118,100 +218,83 @@ export async function importOneUvProduct(
   createdBy: number = 1
 ): Promise<UvBulkImportResult> {
   try {
-    // Step 1: pull product main + travel detail + departures in parallel.
-    // Three concurrent API calls; each <1s on UV's gateway.
-    const [main, travelDetail, departures] = await Promise.all([
-      getProductMain(productCode).catch(() => null),
+    // Step 1: prefer the already-synced supplierProducts row (clean derived
+    // fields: title/days/destinationCountry/destinationCity/departureCity/
+    // imageUrl + enriched itineraryParsed). Pull travelDetail + departures
+    // from the API in parallel. getProductMain is now only a last-resort
+    // fallback for title (its response does NOT carry destinationName/
+    // tempImageUrl/tripDay — casting them off it yielded undefined, which is
+    // why imported tours had price/destination/days wrong).
+    const [spRow, travelDetail, departures] = await Promise.all([
+      readUvSupplierRow(productCode).catch(() => null),
       getProductTravelDetail(productCode).catch(() => null),
       getDeparturesNext180Days(productCode).catch(() => []),
     ]);
 
-    // Need at least the main response for required fields.
-    if (!main || !main.productName) {
+    // Title is required. Source of truth = supplierProducts row; fall back to
+    // getProductMain only if the row is missing.
+    let title = spRow?.title ?? null;
+    if (!title) {
+      const main = await getProductMain(productCode).catch(() => null);
+      title = main?.productName ?? null;
+    }
+    if (!title) {
       return {
         productCode,
         success: false,
-        error: "getProductMain returned null or missing productName",
+        error: "no title in supplierProducts row or getProductMain",
       };
     }
 
-    // Pull a few denormalized fields from rawProductJson in the
-    // supplierProducts row that the sync service already wrote. We
-    // don't have a direct dependency on supplierProducts here — the
-    // info we need from the list-API row (destinationName,
-    // departCityName, tempImageUrl) is duplicated in the per-product
-    // detail call, so re-derive instead.
-    const productMain = main as UvProductMain & {
-      destinationName?: string;
-      departCityName?: string;
-      tempImageUrl?: string;
-      tripDay?: number;
-      nightDay?: number;
-      groupLatelyPrice?: number;
-    };
+    const days = spRow?.days ?? 0;
+    const nights = spRow?.nightDay ?? Math.max(0, days - 1);
+    const departureCity = spRow?.departureCity || "Los Angeles";
+    // destinationCountry already inferred + stored by the sync; only re-infer
+    // from the city when the synced value is missing (the 11 NULL cases).
+    const destinationCountry =
+      spRow?.destinationCountry ||
+      inferDestinationCountry(spRow?.destinationCity || "");
+    const destinationCity = spRow?.destinationCity || destinationCountry;
+    const imageUrl = spRow?.imageUrl || null;
 
-    const destinationName = productMain.destinationName || "";
-    const departureCity = productMain.departCityName || "Los Angeles";
-    const days = productMain.tripDay ?? 0;
-    const nights = productMain.nightDay ?? Math.max(0, days - 1);
+    // Headline (起價) = lowest priceType=4 across future departures. Jeff rule:
+    // real getProductGroup price only, never flyer/groupLatelyPrice.
+    const headlinePrice = pickHeadlinePrice(departures);
 
-    // Most-recent groupLatelyPrice as the headline price; fallback to the
-    // 兩人一房 (priceType=4, double-occupancy) slot in the departures we
-    // pulled. priceType is room occupancy, not pax type — priceType=3
-    // (單人入住/single) would over-quote by ~30-37%.
-    const headlinePrice =
-      productMain.groupLatelyPrice ||
-      departures[0]?.groupPrice?.find((p) => p.priceType === 4)?.groupPrice ||
-      departures[0]?.groupPrice?.[0]?.groupPrice ||
-      0;
+    // dailyItinerary stop-gap blob for the LLM rewrite pass. Prefer the
+    // enriched itineraryParsed (clean structure); fall back to the raw
+    // travelDetail blob.
+    const rawItineraryBlob =
+      spRow?.itineraryParsed ||
+      (travelDetail
+        ? JSON.stringify({
+            productTravel: (travelDetail as UvProductTravelDetail).productTravel,
+            productNotice: (travelDetail as UvProductTravelDetail).productNotice,
+            productCost: (travelDetail as UvProductTravelDetail).productCost,
+            productShop: (travelDetail as UvProductTravelDetail).productShop,
+          })
+        : null);
 
-    const destinationCountry = inferDestinationCountry(destinationName);
-
-    // Pack a JSON blob of raw UV detail into the dailyItinerary field
-    // as a stop-gap; the LLM rewrite pass will replace this with
-    // properly structured day-by-day content.
-    const rawItineraryBlob = travelDetail
-      ? JSON.stringify({
-          productTravel: (travelDetail as UvProductTravelDetail).productTravel,
-          productNotice: (travelDetail as UvProductTravelDetail).productNotice,
-          productCost: (travelDetail as UvProductTravelDetail).productCost,
-          productShop: (travelDetail as UvProductTravelDetail).productShop,
-        })
-      : null;
-
-    const tourRecord = {
-      title: productMain.productName.slice(0, 200),
+    const tour = await createTour({
+      title: title.slice(0, 200),
       description: "", // empty until LLM rewrite — keeps draft visibly unfinished
       productCode: productCode.slice(0, 100),
       departureCountry: "美國",
       departureCity,
       departureAirportCode: deriveAirportCode(departureCity),
       destinationCountry,
-      destinationCity: destinationName || destinationCountry,
+      destinationCity,
       duration: days,
       nights,
       price: Math.round(Number(headlinePrice) || 0),
       priceCurrency: "USD",
-      heroImage: productMain.tempImageUrl,
-      imageUrl: productMain.tempImageUrl,
-      status: "draft" as const,
-      isFeatured: false,
-      qaStatus: "needs_review",
-      qaScore: 0,
-      qaIssues: JSON.stringify([
-        {
-          type: "info",
-          message: "從 UV Bookings 整批匯入 — 需要 LLM 升級為 PACK&GO 風格",
-        },
-      ]),
+      heroImage: imageUrl,
+      imageUrl,
+      status: "draft",
       sourceUrl: `https://uvbookings.toursbms.com/en/product/detail/${productCode}`,
-      sourceProvider: "uvbookings",
       dailyItinerary: rawItineraryBlob,
       createdBy,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any;
-
-    const tour = await createTour(tourRecord);
+    });
 
     // Step 2: insert departures with real bookedSlots.
     for (const dep of departures) {
@@ -232,12 +315,8 @@ export async function importOneUvProduct(
         const totalSeats = Number(dep.groupStock || 0);
         const sold = Number(dep.groupSaleStock || 0);
         const bookedSlots = Math.max(0, sold);
-        // priceType=4 = 兩人一房 (double-occupancy), the standard per-person
-        // basis. priceType=3 (單人入住/single) over-quotes by ~30-37%.
-        const double = dep.groupPrice?.find((p) => p.priceType === 4);
-        const adultPrice = Math.round(
-          double?.groupPrice ?? dep.groupPrice?.[0]?.groupPrice ?? 0
-        );
+        // priceType=4 (兩人一房) per-person basis; priceType=3 over-quotes ~30-37%.
+        const adultPrice = pickDepartureAdultPrice(dep);
         const finalStatus: "open" | "full" =
           totalSeats > 0 && totalSeats - sold <= 0 ? "full" : "open";
         await createDeparture({
@@ -260,7 +339,7 @@ export async function importOneUvProduct(
       productCode,
       success: true,
       tourId: tour.id,
-      title: productMain.productName,
+      title,
       destinationCountry,
       durationDays: days,
     };
@@ -273,9 +352,9 @@ export async function importOneUvProduct(
       : err instanceof SupplierApiError
         ? err.message
         : e.message || String(err);
-    console.error(
-      `[uvBulkImport] importOneUvProduct ${productCode} failed:`,
-      fullMessage
+    log.error(
+      { productCode, err: fullMessage },
+      "[uvBulkImport] importOneUvProduct failed",
     );
     return { productCode, success: false, error: fullMessage };
   }
@@ -307,9 +386,9 @@ export async function bulkImportFromUv(input: {
   const imported = results.filter((r) => r.success).length;
   const failed = results.length - imported;
   const durationMs = Date.now() - start;
-  console.log(
-    `[uvBulkImport] Imported ${imported}/${results.length} tours in ${durationMs}ms` +
-      (failed ? ` (${failed} failed)` : "")
+  log.info(
+    { imported, total: results.length, failed, durationMs },
+    "[uvBulkImport] batch done",
   );
   return { total: results.length, imported, failed, durationMs, results };
 }
@@ -351,9 +430,9 @@ export async function queueRewriteForImportedUvTours(
       );
       queued++;
     } catch (err) {
-      console.warn(
-        `[uvBulkImport] Failed to queue rewrite for tour ${tourId}:`,
-        err
+      log.warn(
+        { tourId, err: (err as Error).message },
+        "[uvBulkImport] failed to queue rewrite",
       );
     }
   }
