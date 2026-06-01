@@ -1,16 +1,18 @@
 /**
- * PACK&GO Admin — 6-domain shell. Canonical at /admin since 2026-05-29.
+ * PACK&GO Admin — chat-first shell. Canonical at /admin since 2026-05-29.
  *
  * Component/file stay named AdminV2 (Jeff: keep filenames, just drop the
  * user-facing "v2"). v1 shell is retired; /admin/v2 redirects here.
  *
- * 6 domains (Finance split OUT of System per 2026-05-22 spec):
- *   - 🏢 辦公室   today inbox, agent chat
- *   - 📋 營運     tours, bookings, inquiries, departures, suppliers
- *   - 👥 客戶     customers, reviews, packpoint, vouchers, quote tools
- *   - 📢 行銷     marketing automation, posters, content, analytics, competitor, affiliate
- *   - 💰 財務     finance overview, bank ledger, P&L, trust, invoices, reconciliation
- *   - ⚙️ 系統     AI infra (cost, sessions, monitor, calibration, audit log, visa)
+ * 3 domains (2026-05-31 — collapsed 6→3 per Jeff "左邊六個圖案沒簡化"):
+ *   - 💬 Chat       agent chat (home), command center, today inbox
+ *   - 📋 營運+財務   daily tables: bookings, inquiries, quotes, ledger, reports
+ *                    (tours/CRM/marketing in 進階 ▾; rare biz pages ⌘K-only)
+ *   - ⚙️ 設定       system/AI infra, supplier sync, automations — mostly ⌘K
+ *
+ * Every page stays registered in IA (regrouped into primary/advanced/hidden),
+ * so ⌘K CommandPalette still indexes all ~30 pages even when only a few show
+ * in the sidebar. See IA + allPages() below.
  *
  * Design system spec:
  *   ~/.claude/projects/-Users-jeff-Desktop---/memory/feedback_admin_design_system.md
@@ -21,11 +23,8 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { LoadingPage } from "@/components/ui/spinner";
 import { trpc } from "@/lib/trpc";
 import {
-  Building2,
+  MessageSquare,
   ClipboardList,
-  Users,
-  Megaphone,
-  Wallet,
   Settings,
 } from "lucide-react";
 
@@ -114,13 +113,22 @@ type PageId =
   // System
   | "ai-hub" | "llm-cost" | "task-history" | "audit-log" | "calibration-review" | "autonomous-agents" | "skills" | "visa" | "cleanup" | "supplier-enrichment";
 
-type DomainId = "office" | "ops" | "customers" | "marketing" | "finance" | "system";
+type DomainId = "chat" | "ops" | "settings";
 
 type PageDef = { id: PageId; label: string };
 
-const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageDef[] }> = {
-  office: {
-    domain: { id: "office", label: "辦公室", icon: Building2 },
+// 2026-05-31 — Jeff: 「左邊還是有六個圖案，沒有實際做到簡化」。6 domain → 3。
+// chat-first：💬 Chat 是首頁，📋 營運+財務 收所有每天/偶爾看的業務表格，
+// ⚙️ 設定 收系統/AI/供應商等幾乎不用的頁。每個 domain 三層：
+//   primary  = 每天用 → sub-nav 直接顯示
+//   advanced = 偶爾用 → 收進「進階 ▾」下拉
+//   hidden   = 幾乎不用 → 不進 sub-nav，只留在 IA 供 ⌘K 搜尋（見 allPages）
+const IA: Record<
+  DomainId,
+  { domain: Domain; primary: PageDef[]; advanced: PageDef[]; hidden?: PageDef[] }
+> = {
+  chat: {
+    domain: { id: "chat", label: "Chat", icon: MessageSquare },
     primary: [
       { id: "agent-chat", label: "💬 Agent Chat" },
       { id: "command-center", label: "🎛 指揮中心" },
@@ -129,84 +137,70 @@ const IA: Record<DomainId, { domain: Domain; primary: PageDef[]; advanced: PageD
     advanced: [],
   },
   ops: {
-    domain: { id: "ops", label: "營運", icon: ClipboardList },
+    // 營運 + 客戶 + 行銷 + 財務 收成一個「業務」domain。
+    domain: { id: "ops", label: "營運+財務", icon: ClipboardList },
     primary: [
-      { id: "ops-landing", label: "🗺 總覽" },
       { id: "bookings", label: "訂單" },
-      { id: "tours", label: "行程" },
       { id: "inquiries", label: "詢問" },
+      { id: "tool-quote", label: "📄 報價單" },
+      { id: "bank-ledger", label: "🏦 帳本" },
+      { id: "finance-reports", label: "📊 報表" },
     ],
     advanced: [
+      { id: "tours", label: "行程" },
       { id: "departures-calendar", label: "📅 出發日曆" },
-      { id: "tour-monitor", label: "供應商監控" },
-      { id: "suppliers", label: "🔌 供應商同步" },
-    ],
-  },
-  customers: {
-    domain: { id: "customers", label: "客戶", icon: Users },
-    primary: [
-      { id: "customers-landing", label: "👥 總覽" },
       { id: "customers-crm", label: "🔍 客戶 CRM" },
       { id: "reviews", label: "評價" },
-      { id: "tool-quote", label: "📄 報價單" },
+      { id: "marketing-content", label: "AI 文案" },
+      { id: "posters", label: "海報" },
     ],
-    advanced: [
+    hidden: [
+      { id: "ops-landing", label: "🗺 營運總覽" },
+      { id: "customers-landing", label: "👥 客戶總覽" },
+      { id: "marketing-landing", label: "📢 行銷總覽" },
+      { id: "finance-landing", label: "💰 財務總覽" },
       { id: "ai-quotes", label: "AI 報價單" },
       { id: "packpoint", label: "Packpoint" },
       { id: "vouchers", label: "Voucher" },
       { id: "wechat-assist", label: "WeChat 助手" },
       { id: "newsletter", label: "📧 Newsletter" },
-    ],
-  },
-  marketing: {
-    domain: { id: "marketing", label: "行銷", icon: Megaphone },
-    primary: [
-      { id: "marketing-landing", label: "📢 總覽" },
-      { id: "posters", label: "海報" },
-      { id: "marketing-content", label: "AI 文案" },
-    ],
-    advanced: [
-      { id: "marketing", label: "自動化" },
+      { id: "marketing", label: "行銷自動化" },
       { id: "analytics", label: "流量分析" },
-      { id: "competitor-monitor", label: "競品" },
+      { id: "competitor-monitor", label: "競品監控" },
       { id: "affiliate", label: "Trip.com 聯盟" },
     ],
   },
-  finance: {
-    // 2026-05-29 — Jeff: "用的更直白簡單". 7 分頁 (3 主要 + 4 進階) 收成 3：
-    // 總覽 / 帳本 / 報表。5 張報表 (損益表 / 對帳 / 發票 / 客人訂金 /
-    // 報稅匯出) 收進 FinanceReports hub 的內層切換；舊 pageId 全部保留為
-    // 可路由別名，深層連結 (FinanceLanding / DailyBriefingCard / 手機版)
-    // 仍直接落到對的那張報表，無需改 caller。
-    domain: { id: "finance", label: "財務", icon: Wallet },
-    primary: [
-      { id: "finance-landing", label: "💰 總覽" },
-      { id: "bank-ledger", label: "🏦 帳本" },
-      { id: "finance-reports", label: "📊 報表" },
-    ],
-    advanced: [],
-  },
-  system: {
-    domain: { id: "system", label: "系統", icon: Settings },
+  settings: {
+    domain: { id: "settings", label: "設定", icon: Settings },
     primary: [
       { id: "ai-hub", label: "AI 中心" },
-      { id: "llm-cost", label: "AI 成本" },
+      { id: "suppliers", label: "🔌 供應商同步" },
       { id: "autonomous-agents", label: "自主 Agent" },
-      { id: "supplier-enrichment", label: "🌏 供應商深度同步" },
-      { id: "cleanup", label: "🧹 清理" },
     ],
     advanced: [
-      { id: "calibration-review", label: "QA 審查" },
-      { id: "skills", label: "AI 技能" },
-      { id: "task-history", label: "任務記錄" },
+      { id: "supplier-enrichment", label: "🌏 供應商深度同步" },
+      { id: "tour-monitor", label: "供應商監控" },
+      { id: "llm-cost", label: "AI 成本" },
       { id: "audit-log", label: "審計日誌" },
       { id: "visa", label: "中國簽證" },
+    ],
+    hidden: [
+      { id: "task-history", label: "任務記錄" },
+      { id: "calibration-review", label: "QA 審查" },
+      { id: "skills", label: "AI 技能" },
+      { id: "cleanup", label: "🧹 清理" },
     ],
   },
 };
 
-function allPages(cfg: { primary: PageDef[]; advanced: PageDef[] }): PageDef[] {
-  return [...cfg.primary, ...cfg.advanced];
+function allPages(cfg: {
+  primary: PageDef[];
+  advanced: PageDef[];
+  hidden?: PageDef[];
+}): PageDef[] {
+  // hidden = pages kept in the registry for ⌘K search but NOT rendered in the
+  // sidebar sub-nav. primary/advanced render; hidden is palette-only.
+  return [...cfg.primary, ...cfg.advanced, ...(cfg.hidden ?? [])];
 }
 
 const PAGE_TO_DOMAIN: Record<PageId, DomainId> = {
@@ -216,13 +210,13 @@ const PAGE_TO_DOMAIN: Record<PageId, DomainId> = {
     )
   ) as Record<PageId, DomainId>),
   // The 5 report sub-views are no longer standalone tabs (folded into 報表),
-  // so allPages() doesn't list them. Map them back to finance so a deep-link
-  // to e.g. "reconciliation" still highlights the 財務 domain.
-  "profit-loss": "finance",
-  "trust-compliance": "finance",
-  "invoices": "finance",
-  "reconciliation": "finance",
-  "accounting": "finance",
+  // so allPages() doesn't list them. Map them to 營運+財務 so a deep-link to
+  // e.g. "reconciliation" still highlights the right domain.
+  "profit-loss": "ops",
+  "trust-compliance": "ops",
+  "invoices": "ops",
+  "reconciliation": "ops",
+  "accounting": "ops",
 };
 
 // Finance report sub-views fold into the 報表 hub (FinanceReports). This maps
@@ -246,11 +240,11 @@ const FINANCE_REPORT_VIEW: Partial<
 export default function AdminV2() {
   const { user, loading, isAuthenticated, logout } = useAuth();
   const [, setLocation] = useLocation();
-  // Default landing = Agent Chat (辦公室 domain). Jeff opens /admin and can type
-  // immediately; 今日總覽 / 指揮中心 stay reachable via the 辦公室 sidebar tabs.
+  // Default landing = Agent Chat (💬 Chat domain). Jeff opens /admin and can type
+  // immediately; 今日總覽 / 指揮中心 stay reachable via the Chat sidebar tabs.
   const [activePage, setActivePage] = useState<PageId>("agent-chat");
   const [paletteOpen, setPaletteOpen] = useCommandPaletteHotkey();
-  const activeDomain = PAGE_TO_DOMAIN[activePage] ?? "office";
+  const activeDomain = PAGE_TO_DOMAIN[activePage] ?? "chat";
   const isMobile = useIsMobile();
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
 
@@ -277,20 +271,13 @@ export default function AdminV2() {
   const totalUnreadAgents = unreadAgents
     ? Object.values(unreadAgents).reduce((s, n) => s + n, 0)
     : 0;
-  const officeBadge = totalUnreadAgents + (pendingForJeff?.length ?? 0);
+  const chatBadge = totalUnreadAgents + (pendingForJeff?.length ?? 0);
   const opsBadge = statsData?.pendingInquiries;
-  const marketingBadge =
-    typeof competitorUnread === "number" && competitorUnread > 0
-      ? competitorUnread
-      : undefined;
 
   const domains: Domain[] = [
-    { ...IA.office.domain, badge: officeBadge > 0 ? officeBadge : undefined },
+    { ...IA.chat.domain, badge: chatBadge > 0 ? chatBadge : undefined },
     { ...IA.ops.domain, badge: opsBadge },
-    { ...IA.customers.domain },
-    { ...IA.marketing.domain, badge: marketingBadge },
-    { ...IA.finance.domain },
-    { ...IA.system.domain },
+    { ...IA.settings.domain },
   ];
 
   const handleSelectDomain = (id: string) => {
@@ -344,7 +331,7 @@ export default function AdminV2() {
     const mobileNavActive: MobileNavId =
       activePage === "today" ? "today"
       : activePage === "bank-ledger" || activePage === "finance-landing" ? "bank"
-      : activeDomain === "customers" ? "customers"
+      : activePage === "customers-landing" || activePage === "customers-crm" ? "customers"
       : activePage === "agent-chat" ? "inbox"
       : "more";
 
