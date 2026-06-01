@@ -512,6 +512,10 @@ async function startServer() {
               );
             }
             send({ type: "token", text: event.text });
+          } else if (event.type === "status") {
+            // Tool-call progress (查詢中…) — keeps the UI alive during the
+            // agentic loop's multi-second tool rounds. Not persisted.
+            send({ type: "status", text: event.text });
           } else if (event.type === "done") {
             finalAnswer = event.finalAnswer ?? "";
             suggestedActions = event.suggestedActions ?? [];

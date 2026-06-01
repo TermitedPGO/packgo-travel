@@ -1,0 +1,458 @@
+/**
+ * opsTools — Read-only query tools for the PACK&GO Agent agentic loop (2026-06-01).
+ *
+ * This is the keystone that turns the agent from a "single-shot prefetch + LLM"
+ * into a real Claude-Code-style agent: it gets a set of typed read tools and
+ * calls them in a loop, deciding what to look up based on the question. This
+ * fixes the "reports 15 when there are 165" bug — now it runs an actual
+ * COUNT / GROUP BY instead of counting whatever slice was prefetched.
+ *
+ * Safety:
+ *   - Every tool is READ-ONLY (SELECT only, no writes ever).
+ *   - PII (email / phone) follows Jeff's rule (2026-06-01): a single-record
+ *     lookup shows full contact info (he needs it to reach the customer); any
+ *     multi-record result REDACTS email + phone (defends against "dump all
+ *     emails" injection + persisted-chat leakage).
+ *   - Results are capped + field-limited to keep token cost bounded.
+ *
+ * The action proposals (sendCustomerEmail, triggerRefund, classifyBank…) stay
+ * in opsActions.ts — those WRITE and require Jeff's confirmation chip. These
+ * tools only READ and run autonomously inside the loop.
+ */
+import type Anthropic from "@anthropic-ai/sdk";
+import { createChildLogger } from "../../_core/logger";
+
+const log = createChildLogger({ module: "opsTools" });
+
+// ── PII redaction (Jeff 2026-06-01: single full, bulk masked) ───────────────
+
+function maskEmail(email: string | null | undefined): string {
+  if (!email) return "";
+  const [user, domain] = email.split("@");
+  if (!domain) return "***";
+  const head = user.slice(0, 1);
+  return `${head}***@${domain}`;
+}
+
+function maskPhone(phone: string | null | undefined): string {
+  if (!phone) return "";
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length < 4) return "***";
+  return `***${digits.slice(-3)}`;
+}
+
+// ── Tool definitions (what the model sees) ──────────────────────────────────
+
+export const READ_TOOLS: Anthropic.Tool[] = [
+  {
+    name: "count_records",
+    description: "Count records of an entity, with optional filters. USE THIS whenever Jeff asks 'how many' / '幾個' / '幾團' / '多少'. Returns an exact total, not a sample.",
+    input_schema: {
+      type: "object",
+      properties: {
+        entity: { type: "string", enum: ["tours", "departures", "bookings", "customers"], description: "What to count" },
+        status: { type: "string", description: "Optional status filter (tours: active/draft; bookings: confirmed/pending/cancelled)" },
+        futureOnly: { type: "boolean", description: "departures only: count only future departures" },
+        withinDays: { type: "number", description: "departures only: count departures within the next N days" },
+        unpaidBalance: { type: "boolean", description: "bookings only: count confirmed bookings still on deposit (balance unpaid)" },
+      },
+      required: ["entity"],
+    },
+  },
+  {
+    name: "aggregate_departures",
+    description: "Group future departures by a dimension and return counts per group. USE THIS for '哪個目的地最多' / 'which destination has the most' / breakdowns.",
+    input_schema: {
+      type: "object",
+      properties: {
+        groupBy: { type: "string", enum: ["destinationCountry", "month"], description: "Dimension to group by" },
+        topN: { type: "number", description: "Return only the top N groups (default 10)" },
+      },
+      required: ["groupBy"],
+    },
+  },
+  {
+    name: "search_tours",
+    description: "Search the PACK&GO tour catalog by keyword (title/destination). Returns matching active tours.",
+    input_schema: {
+      type: "object",
+      properties: {
+        keyword: { type: "string", description: "Chinese keyword, e.g. 日本/夏威夷/京都" },
+        limit: { type: "number", description: "Max rows (default 10, max 25)" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "search_departures",
+    description: "Search tour departures with availability. Filter by destination keyword and/or month. Returns departure date, price, seats left, ops status.",
+    input_schema: {
+      type: "object",
+      properties: {
+        destination: { type: "string", description: "Chinese destination keyword" },
+        month: { type: "number", description: "Month 1-12" },
+        year: { type: "number", description: "Year, e.g. 2026 (defaults to current)" },
+        availableOnly: { type: "boolean", description: "Only departures with seats left" },
+        limit: { type: "number", description: "Max rows (default 15, max 30)" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "search_bookings",
+    description: "Search customer bookings by name and/or status. Single match shows full contact info; multiple matches redact email/phone.",
+    input_schema: {
+      type: "object",
+      properties: {
+        customerName: { type: "string", description: "Customer name (partial ok)" },
+        bookingStatus: { type: "string", description: "confirmed/pending/cancelled" },
+        paymentStatus: { type: "string", description: "deposit/paid/refunded" },
+        limit: { type: "number", description: "Max rows (default 10, max 25)" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "search_customers",
+    description: "Search the customer CRM by name. Single match shows full contact info; multiple matches redact email/phone.",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Customer name (partial ok)" },
+        limit: { type: "number", description: "Max rows (default 10, max 25)" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "get_finance_summary",
+    description: "Get a trust-aware P&L summary (income, expenses, net profit) for a period. USE THIS for '淨利多少' / 'net profit' / financial overview questions. Numbers already exclude unrecognized trust deposits (CST §17550).",
+    input_schema: {
+      type: "object",
+      properties: {
+        period: { type: "string", enum: ["this_month", "last_month", "this_year"], description: "Which period (default this_month)" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "search_supplier_inventory",
+    description: "Search live Lion Travel supplier inventory by destination (for sourcing new tours to package/resell). Separate from the PACK&GO catalog.",
+    input_schema: {
+      type: "object",
+      properties: {
+        destination: { type: "string", description: "Chinese destination keyword" },
+        monthsAhead: { type: "number", description: "Search window in months (default 3)" },
+      },
+      required: ["destination"],
+    },
+  },
+];
+
+// ── Executor ────────────────────────────────────────────────────────────────
+
+const clamp = (n: number | undefined, def: number, max: number) =>
+  Math.min(Math.max(1, n ?? def), max);
+
+/**
+ * Execute one read tool. Returns a compact JSON string the model reads as a
+ * tool_result. Never throws — returns an { error } object string instead so
+ * the loop keeps going.
+ */
+export async function executeReadTool(
+  name: string,
+  input: any,
+): Promise<string> {
+  try {
+    const result = await runTool(name, input ?? {});
+    return JSON.stringify(result);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.warn({ name, err: msg }, "[opsTools] read tool failed");
+    return JSON.stringify({ error: msg });
+  }
+}
+
+async function runTool(name: string, input: any): Promise<unknown> {
+  const { getDb } = await import("../../db");
+  const { tours, tourDepartures, bookings, customerProfiles } = await import(
+    "../../../drizzle/schema"
+  );
+  const { eq, and, or, gte, lte, sql, desc, like } = await import("drizzle-orm");
+  const db = await getDb();
+  if (!db) return { error: "database unavailable" };
+
+  switch (name) {
+    case "count_records": {
+      const entity = input.entity as string;
+      if (entity === "tours") {
+        const conds = [];
+        if (input.status) conds.push(eq(tours.status, input.status));
+        const [r] = await db
+          .select({ n: sql<number>`count(*)` })
+          .from(tours)
+          .where(conds.length ? and(...conds) : undefined);
+        return { entity, count: Number(r?.n ?? 0), filter: input.status ?? "all" };
+      }
+      if (entity === "departures") {
+        const conds = [];
+        if (input.futureOnly || input.withinDays) conds.push(gte(tourDepartures.departureDate, new Date()));
+        if (input.withinDays) {
+          const end = new Date(Date.now() + input.withinDays * 86400000);
+          conds.push(lte(tourDepartures.departureDate, end));
+        }
+        const [r] = await db
+          .select({ n: sql<number>`count(*)` })
+          .from(tourDepartures)
+          .where(conds.length ? and(...conds) : undefined);
+        return { entity, count: Number(r?.n ?? 0), filter: { futureOnly: !!input.futureOnly, withinDays: input.withinDays ?? null } };
+      }
+      if (entity === "bookings") {
+        const conds = [];
+        if (input.status) conds.push(eq(bookings.bookingStatus, input.status));
+        if (input.unpaidBalance) {
+          conds.push(eq(bookings.paymentStatus, "deposit"));
+          conds.push(eq(bookings.bookingStatus, "confirmed"));
+        }
+        const [r] = await db
+          .select({ n: sql<number>`count(*)` })
+          .from(bookings)
+          .where(conds.length ? and(...conds) : undefined);
+        return { entity, count: Number(r?.n ?? 0), filter: { status: input.status ?? "all", unpaidBalance: !!input.unpaidBalance } };
+      }
+      if (entity === "customers") {
+        const [r] = await db.select({ n: sql<number>`count(*)` }).from(customerProfiles);
+        return { entity, count: Number(r?.n ?? 0) };
+      }
+      return { error: `unknown entity: ${entity}` };
+    }
+
+    case "aggregate_departures": {
+      const topN = clamp(input.topN, 10, 30);
+      if (input.groupBy === "destinationCountry") {
+        const rows = await db
+          .select({ g: tours.destinationCountry, n: sql<number>`count(*)` })
+          .from(tourDepartures)
+          .leftJoin(tours, eq(tourDepartures.tourId, tours.id))
+          .where(gte(tourDepartures.departureDate, new Date()))
+          .groupBy(tours.destinationCountry)
+          .orderBy(desc(sql`count(*)`))
+          .limit(topN);
+        return { groupBy: "destinationCountry", groups: rows.map((r) => ({ group: r.g ?? "(未分類)", count: Number(r.n) })) };
+      }
+      // month
+      const rows = await db
+        .select({ g: sql<string>`DATE_FORMAT(${tourDepartures.departureDate}, '%Y-%m')`, n: sql<number>`count(*)` })
+        .from(tourDepartures)
+        .where(gte(tourDepartures.departureDate, new Date()))
+        .groupBy(sql`DATE_FORMAT(${tourDepartures.departureDate}, '%Y-%m')`)
+        .orderBy(sql`DATE_FORMAT(${tourDepartures.departureDate}, '%Y-%m')`)
+        .limit(topN);
+      return { groupBy: "month", groups: rows.map((r) => ({ group: r.g, count: Number(r.n) })) };
+    }
+
+    case "search_tours": {
+      const limit = clamp(input.limit, 10, 25);
+      const conds = [eq(tours.status, "active")];
+      if (input.keyword) {
+        conds.push(
+          or(
+            like(tours.title, `%${input.keyword}%`),
+            like(tours.destinationCountry, `%${input.keyword}%`),
+            like(tours.destinationCity, `%${input.keyword}%`),
+          )!,
+        );
+      }
+      const rows = await db
+        .select({ id: tours.id, title: tours.title, country: tours.destinationCountry, city: tours.destinationCity, duration: tours.duration })
+        .from(tours)
+        .where(and(...conds))
+        .limit(limit);
+      return { count: rows.length, tours: rows };
+    }
+
+    case "search_departures": {
+      const limit = clamp(input.limit, 15, 30);
+      const conds = [gte(tourDepartures.departureDate, new Date())];
+      if (input.destination) {
+        conds.push(
+          or(
+            like(tours.destinationCountry, `%${input.destination}%`),
+            like(tours.destinationCity, `%${input.destination}%`),
+            like(tours.title, `%${input.destination}%`),
+          )!,
+        );
+      }
+      if (input.month) {
+        const year = input.year ?? new Date().getFullYear();
+        const start = new Date(year, input.month - 1, 1);
+        const end = new Date(year, input.month, 0, 23, 59, 59);
+        conds.push(gte(tourDepartures.departureDate, start));
+        conds.push(lte(tourDepartures.departureDate, end));
+      }
+      let rows = await db
+        .select({
+          id: tourDepartures.id,
+          title: tours.title,
+          country: tours.destinationCountry,
+          departureDate: tourDepartures.departureDate,
+          price: tourDepartures.adultPrice,
+          totalSlots: tourDepartures.totalSlots,
+          bookedSlots: tourDepartures.bookedSlots,
+          opsStatus: tourDepartures.opsStatus,
+          tourLeader: tourDepartures.tourLeader,
+        })
+        .from(tourDepartures)
+        .leftJoin(tours, eq(tourDepartures.tourId, tours.id))
+        .where(and(...conds))
+        .orderBy(tourDepartures.departureDate)
+        .limit(input.availableOnly ? 100 : limit);
+      if (input.availableOnly) {
+        rows = rows.filter((r) => (r.totalSlots ?? 0) - (r.bookedSlots ?? 0) > 0).slice(0, limit);
+      }
+      return {
+        count: rows.length,
+        departures: rows.map((r) => ({
+          ...r,
+          seatsLeft: (r.totalSlots ?? 0) - (r.bookedSlots ?? 0),
+        })),
+      };
+    }
+
+    case "search_bookings": {
+      const limit = clamp(input.limit, 10, 25);
+      const conds = [];
+      if (input.customerName) conds.push(like(bookings.customerName, `%${input.customerName}%`));
+      if (input.bookingStatus) conds.push(eq(bookings.bookingStatus, input.bookingStatus));
+      if (input.paymentStatus) conds.push(eq(bookings.paymentStatus, input.paymentStatus));
+      const rows = await db
+        .select({
+          id: bookings.id,
+          customerName: bookings.customerName,
+          email: bookings.customerEmail,
+          phone: bookings.customerPhone,
+          totalPrice: bookings.totalPrice,
+          paymentStatus: bookings.paymentStatus,
+          bookingStatus: bookings.bookingStatus,
+          tourTitle: tours.title,
+          departureDate: tourDepartures.departureDate,
+        })
+        .from(bookings)
+        .leftJoin(tours, eq(bookings.tourId, tours.id))
+        .leftJoin(tourDepartures, eq(bookings.departureId, tourDepartures.id))
+        .where(conds.length ? and(...conds) : undefined)
+        .orderBy(desc(bookings.createdAt))
+        .limit(limit);
+      const single = rows.length === 1;
+      return {
+        count: rows.length,
+        piiMasked: !single,
+        bookings: rows.map((r) => ({
+          ...r,
+          email: single ? r.email : maskEmail(r.email),
+          phone: single ? r.phone : maskPhone(r.phone),
+        })),
+      };
+    }
+
+    case "search_customers": {
+      const limit = clamp(input.limit, 10, 25);
+      const conds = [];
+      if (input.name) {
+        conds.push(
+          or(
+            like(customerProfiles.aiNotes, `%${input.name}%`),
+            like(customerProfiles.email, `%${input.name}%`),
+          )!,
+        );
+      }
+      const rows = await db
+        .select({
+          id: customerProfiles.id,
+          email: customerProfiles.email,
+          phone: customerProfiles.phone,
+          budgetTier: customerProfiles.budgetTier,
+          bookingCount: customerProfiles.bookingCount,
+          totalSpend: customerProfiles.totalSpend,
+          vipScore: customerProfiles.vipScore,
+        })
+        .from(customerProfiles)
+        .where(conds.length ? and(...conds) : undefined)
+        .orderBy(desc(customerProfiles.vipScore))
+        .limit(limit);
+      const single = rows.length === 1;
+      return {
+        count: rows.length,
+        piiMasked: !single,
+        customers: rows.map((r) => ({
+          ...r,
+          email: single ? r.email : maskEmail(r.email),
+          phone: single ? r.phone : maskPhone(r.phone),
+        })),
+      };
+    }
+
+    case "get_finance_summary": {
+      const { generateBankPL } = await import("../../services/bankPLService");
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = now.getMonth();
+      let startDate: string, endDate: string, label: string;
+      if (input.period === "last_month") {
+        const ly = m === 0 ? y - 1 : y;
+        const lm = m === 0 ? 11 : m - 1;
+        startDate = `${ly}-${String(lm + 1).padStart(2, "0")}-01`;
+        endDate = `${ly}-${String(lm + 1).padStart(2, "0")}-${String(new Date(ly, lm + 1, 0).getDate()).padStart(2, "0")}`;
+        label = "last_month";
+      } else if (input.period === "this_year") {
+        startDate = `${y}-01-01`;
+        endDate = `${y}-12-31`;
+        label = "this_year";
+      } else {
+        startDate = `${y}-${String(m + 1).padStart(2, "0")}-01`;
+        endDate = `${y}-${String(m + 1).padStart(2, "0")}-${String(new Date(y, m + 1, 0).getDate()).padStart(2, "0")}`;
+        label = "this_month";
+      }
+      const pl = await generateBankPL({ startDate, endDate });
+      return {
+        period: label,
+        range: { startDate, endDate },
+        income: Number(pl.income.total.toFixed(2)),
+        expenses: Number(pl.expenses.total.toFixed(2)),
+        netProfit: Number(pl.netProfit.toFixed(2)),
+        trustDeferredIncome: Number(pl.trustDeferredIncome.toFixed(2)),
+        needsReviewCount: pl.needsReviewCount,
+        note: "trust-aware: 已扣除未認列的客人訂金 (CST §17550)",
+      };
+    }
+
+    case "search_supplier_inventory": {
+      const { searchProducts } = await import("../../suppliers/lionClient");
+      const now = new Date();
+      const monthsAhead = clamp(input.monthsAhead, 3, 12);
+      const future = new Date(now.getTime() + monthsAhead * 30 * 86400000);
+      const fmt = (d: Date) => `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
+      const res = await searchProducts({
+        goDateStart: fmt(now),
+        goDateEnd: fmt(future),
+        keywords: input.destination,
+        page: 1,
+        pageSize: 10,
+      });
+      return {
+        source: "Lion Travel (live)",
+        count: (res.NormGroupList ?? []).length,
+        products: (res.NormGroupList ?? []).slice(0, 8).map((g: any) => ({
+          name: g.GroupName,
+          departureDate: g.GoDate,
+          price: g.SalePrice,
+          days: g.Days,
+          status: g.IsSold ? "sold" : "available",
+        })),
+      };
+    }
+
+    default:
+      return { error: `unknown tool: ${name}` };
+  }
+}

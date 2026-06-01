@@ -243,6 +243,7 @@ export default function AgentChatPage() {
   const { t } = useLocale();
   const [question, setQuestion] = useState("");
   const [streamingText, setStreamingText] = useState<string | null>(null);
+  const [streamingStatus, setStreamingStatus] = useState<string | null>(null);
   const [streamingActions, setStreamingActions] = useState<any[] | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [pendingImages, setPendingImages] = useState<File[]>([]);
@@ -370,8 +371,12 @@ export default function AgentChatPage() {
           try {
             const event = JSON.parse(dataLine.slice(6));
             if (event.type === "token") {
+              setStreamingStatus(null);
               setStreamingText((prev) => (prev ?? "") + (event.text ?? ""));
+            } else if (event.type === "status") {
+              setStreamingStatus(event.text ?? null);
             } else if (event.type === "done") {
+              setStreamingStatus(null);
               if (event.finalAnswer) {
                 setStreamingText(event.finalAnswer);
                 setStreamingActions(event.suggestedActions ?? null);
@@ -386,9 +391,10 @@ export default function AgentChatPage() {
                 }, 600);
               }, 400);
             } else if (event.type === "error") {
-              toast.error("OpsAgent: " + (event.error ?? "unknown"));
+              toast.error("PACK&GO Agent: " + (event.error ?? "unknown"));
               setIsStreaming(false);
               setStreamingText(null);
+              setStreamingStatus(null);
             }
           } catch {}
         }
@@ -588,6 +594,11 @@ export default function AgentChatPage() {
               <div className={PROSE_STREAM_CLS}>
                 {streamingText ? (
                   <Streamdown>{streamingText}</Streamdown>
+                ) : streamingStatus ? (
+                  <span className="inline-flex items-center gap-1.5 text-foreground/40 text-sm">
+                    <RefreshCw className="w-3 h-3 animate-spin" />
+                    {streamingStatus}
+                  </span>
                 ) : (
                   <span className="text-foreground/30">{t('admin.agentChat.thinking')}</span>
                 )}
