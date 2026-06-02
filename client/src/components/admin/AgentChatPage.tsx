@@ -58,6 +58,16 @@ const ACTION_ICON: Record<string, any> = {
   triggerRefund: Undo2,
 };
 
+// Quick-prompt chips above the composer — Claude-Code-style shortcuts so Jeff
+// can fire the most common asks without typing. Each chip sends a full prompt
+// to the OpsAgent. Labels + prompts are i18n keys (no hardcoded strings).
+const QUICK_PROMPTS: Array<{ labelKey: string; promptKey: string }> = [
+  { labelKey: "admin.agentChat.quickToday", promptKey: "admin.agentChat.quickTodayPrompt" },
+  { labelKey: "admin.agentChat.quickReview", promptKey: "admin.agentChat.quickReviewPrompt" },
+  { labelKey: "admin.agentChat.quickProfit", promptKey: "admin.agentChat.quickProfitPrompt" },
+  { labelKey: "admin.agentChat.quickInquiries", promptKey: "admin.agentChat.quickInquiriesPrompt" },
+];
+
 // ── Compact approval strip (quote + marketing only) ──────────────────────
 
 function ApprovalStrip() {
@@ -301,8 +311,9 @@ export default function AgentChatPage() {
     setPendingImages((prev) => prev.filter((_, i) => i !== idx));
   }, []);
 
-  const sendQuestion = async () => {
-    if ((!question.trim() && pendingImages.length === 0) || isStreaming) return;
+  const sendQuestion = async (overrideText?: string) => {
+    const outgoing = (overrideText ?? question).trim();
+    if ((!outgoing && pendingImages.length === 0) || isStreaming) return;
     setIsStreaming(true);
     setStreamingText("");
     setStreamingActions(null);
@@ -334,7 +345,7 @@ export default function AgentChatPage() {
       setPendingImages([]);
     }
 
-    const qParam = question.trim();
+    const qParam = outgoing;
     const imgParam = imageUrls.length > 0 ? `&images=${encodeURIComponent(JSON.stringify(imageUrls))}` : "";
     const url = `/api/agent/ask-ops-stream?q=${encodeURIComponent(qParam)}${imgParam}`;
     try {
@@ -662,6 +673,20 @@ export default function AgentChatPage() {
               ))}
             </div>
           )}
+          {!question && !isStreaming && (
+            <div className="flex gap-2 mb-2 overflow-x-auto">
+              {QUICK_PROMPTS.map((q) => (
+                <button
+                  key={q.labelKey}
+                  type="button"
+                  onClick={() => sendQuestion(t(q.promptKey))}
+                  className="flex-shrink-0 px-3 py-1.5 rounded-lg border border-gray-200 text-xs text-gray-600 hover:border-gray-400 hover:text-foreground transition-colors"
+                >
+                  {t(q.labelKey)}
+                </button>
+              ))}
+            </div>
+          )}
           <Textarea
             ref={composerRef}
             placeholder={t('admin.agentChat.composerPlaceholder')}
@@ -734,7 +759,7 @@ export default function AgentChatPage() {
               </Button>
               <Button
                 size="sm"
-                onClick={sendQuestion}
+                onClick={() => sendQuestion()}
                 disabled={(!question.trim() && pendingImages.length === 0) || isStreaming}
                 className="rounded-lg gap-1.5 bg-black hover:bg-gray-800 text-white h-10 px-4 md:h-8 md:px-3"
               >
