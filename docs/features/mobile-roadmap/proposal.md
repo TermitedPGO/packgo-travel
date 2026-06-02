@@ -86,3 +86,12 @@
 
 **驗證:** 360 / 390 / 430px 截圖 + tsc 0 + Vitest(搜尋 filter 純函式 + 列表 render)。
 
+## 7. 方向更新(2026-06-01):chat-first(Claude Code 風)
+Jeff 定:手機改成「主畫面就是大窗對話、減少選單」。所以 A1 的客戶 / 訂單**不再是分頁**,而是「Agent 在對話裡長出來的卡片」(= slice 3)。手機外型先 chat-first 化,再做最有價值的「資料長在對話裡」。
+
+- **Slice 1 ✅**(commit `b60fb2f`)快捷 chip — composer 上方 4 個(今日出團 / 待審核 / 本月淨利 / 最近詢問),點一下送 prompt 給 OpsAgent。
+- **Slice 2 ✅**(本 commit)chat-first shell:拿掉底部 5 鍵 nav → 對話全螢幕當主角;左上 ≡ 開「全部功能」抽屜(分組 + 搜尋,重用 `paletteActions`,零新硬編碼);非對話頁 ← 返回對話;P logo 改黑。`buildMenuGroups` 純函式 + 5 Vitest。
+  - 註:抽屜暫用既有 3 個 domain 分組(Chat / 帳本 / 工作台),工作台清單較長;日後可重分成更細的桶(客戶&訂單 / 報價&行銷 / 財務…)。
+- **Slice 3 ⏭**(核心、最有價值)讓資料在對話裡長出卡片(客戶 / 訂單 / 出團 / 財務)。要動 **OpsAgent 後端**回傳結構化區塊(非純 markdown)+ 前端 renderer 把區塊畫成卡片(重用 §6 的卡片設計)。
+- **限制:** 真實後台是登入保護的,無法直接截圖驗證 → chat-first shell 以 v3 mockup 為視覺規格,程式以 tsc + i18n + 純函式 Vitest 把關;最終由 Jeff 在跑起來的 app 親眼驗收。
+

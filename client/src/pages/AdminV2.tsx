@@ -36,7 +36,8 @@ import {
 } from "@/components/admin/primitives";
 import { useCommandPaletteHotkey } from "@/components/admin/primitives/CommandPalette";
 import { useIsMobile } from "@/_core/hooks/useIsMobile";
-import MobileShell, { type MobileNavId } from "@/components/mobile/MobileShell";
+import MobileShell from "@/components/mobile/MobileShell";
+import MobileMenuDrawer from "@/components/mobile/MobileMenuDrawer";
 const DailyCheckMobile = lazy(() => import("@/components/mobile/DailyCheckMobile"));
 const GlobalSearchSheet = lazy(() => import("@/components/mobile/GlobalSearchSheet"));
 const BankTriagePage = lazy(() => import("@/components/mobile/BankTriagePage"));
@@ -245,6 +246,7 @@ export default function AdminV2() {
   const activeDomain = PAGE_TO_DOMAIN[activePage] ?? "chat";
   const isMobile = useIsMobile();
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Badge counts — same wires as v1 admin
   const { data: statsData } = trpc.admin.getStats.useQuery();
@@ -326,21 +328,6 @@ export default function AdminV2() {
   // Mobile Phase 1 (2026-05-22) — branch to MobileShell on narrow screens.
   // Same data layer (renderPage / activePage); only chrome differs.
   if (isMobile) {
-    const mobileNavActive: MobileNavId =
-      activePage === "today" ? "today"
-      : activePage === "bank-ledger" || activePage === "finance-landing" ? "bank"
-      : activePage === "customers-landing" || activePage === "customers-crm" ? "customers"
-      : activePage === "agent-chat" ? "inbox"
-      : "more";
-
-    const handleMobileNav = (id: MobileNavId) => {
-      if (id === "today") setActivePage("today");
-      else if (id === "bank") setActivePage("bank-ledger");
-      else if (id === "customers") setActivePage("customers-landing");
-      else if (id === "inbox") setActivePage("agent-chat");
-      else if (id === "more") setActivePage("ai-hub"); // System landing as "more"
-    };
-
     const mobileBreadcrumbText = breadcrumb
       .filter((b) => !("muted" in b && b.muted))
       .map((b) => b.label)
@@ -384,9 +371,10 @@ export default function AdminV2() {
           actions={paletteActions}
         />
         <MobileShell
-          active={mobileNavActive}
-          onSelect={handleMobileNav}
           breadcrumb={mobileBreadcrumbText}
+          onMenuClick={() => setMobileMenuOpen(true)}
+          showBack={activePage !== "agent-chat"}
+          onBack={() => setActivePage("agent-chat")}
           onSearchClick={() => setMobileSearchOpen(true)}
           fullHeight={activePage === "agent-chat"}
         >
@@ -394,6 +382,11 @@ export default function AdminV2() {
             {renderMobilePage()}
           </Suspense>
         </MobileShell>
+        <MobileMenuDrawer
+          open={mobileMenuOpen}
+          onClose={() => setMobileMenuOpen(false)}
+          actions={paletteActions}
+        />
         <Suspense fallback={null}>
           <GlobalSearchSheet
             open={mobileSearchOpen}
