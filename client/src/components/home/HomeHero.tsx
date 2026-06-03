@@ -262,7 +262,11 @@ export default function HomeHero({ bgImage }: HomeHeroProps) {
                     ? ` · ${current.duration} ${t("common.days")}`
                     : ""}
                   {current.price
-                    ? ` · ${t("common.from")} NT$ ${(current.price / 1000).toFixed(0)}K`
+                    ? ` · ${t("common.from")} ${
+                        (current as { priceCurrency?: string }).priceCurrency === "USD"
+                          ? `$${current.price.toLocaleString()}`
+                          : `NT$ ${(current.price / 1000).toFixed(0)}K`
+                      }`
                     : ""}
                 </span>
               </span>

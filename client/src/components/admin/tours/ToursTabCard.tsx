@@ -5,6 +5,7 @@
  * star overlay. Same actions as the row, just rearranged.
  */
 import { useLocale } from "@/contexts/LocaleContext";
+import { currencySymbol, type SupportedCurrency } from "@/lib/currency";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -160,7 +161,7 @@ export function ToursTabCard({
         </div>
         <div className="flex items-center justify-between pt-3 border-t border-gray-100">
           <span className="text-base font-bold text-foreground tabular-nums">
-            NT$ {tour.price.toLocaleString()}
+            {currencySymbol((tour.priceCurrency || "TWD") as SupportedCurrency)} {tour.price.toLocaleString()}
           </span>
           <div className="flex items-center gap-1">
             <Button
