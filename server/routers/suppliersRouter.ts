@@ -12,14 +12,16 @@
 
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, gte, isNull, like, lt, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, like, lt, lte, or, sql } from "drizzle-orm";
 import { adminProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import {
   suppliers as suppliersTable,
   supplierProducts as productsTable,
   supplierProductDetails,
+  supplierDepartures as supplierDeparturesTable,
   tours as toursTable,
+  tourDepartures as tourDeparturesTable,
 } from "../../drizzle/schema";
 import {
   getRecentSyncRuns,
@@ -33,6 +35,8 @@ import {
 import {
   bulkImportFromUv,
   queueRewriteForImportedUvTours,
+  buildDepartureFromMirrorRow,
+  headlineFromBuiltDepartures,
 } from "../services/uvBulkImportService";
 import { supplierDetailEnrichmentQueue } from "../queue";
 import {
@@ -1978,6 +1982,233 @@ export const suppliersRouter = router({
         fieldCounts,
         errors: errors.length,
         errorSamples: errors.slice(0, 5),
+      };
+    }),
+
+  /**
+   * 2026-06-03 — rebuild broken DRAFT UV tours IN PLACE from the synced
+   * mirror. `bulkImport` can't help (it skips products that already have a
+   * tour), and `rewriteAllImportedTours` + `hydrateFromParsed` can't either
+   * (neither creates tourDepartures; hydrate is active-only). Of 1157 UV
+   * tours, 1145 had NO departures + 1143 NO itinerary — empty shells from an
+   * earlier import.
+   *
+   * Each tour is rebuilt fully from synced data:
+   *   facts (title/price/country/city/duration/image) ← supplierProducts
+   *   itinerary + hotels/meals/notices/optional       ← supplierProductDetails (parsed)
+   *   departures (date + pt4 price + seats)           ← supplierDepartures.rawDepartureJson
+   *
+   * ZERO live re-fetch (the box-wedging cause of the outage) and ZERO LLM
+   * cost. Price is re-derived as pt4 (兩人一房) from rawDepartureJson — NEVER
+   * the polluted retailPrice column (mixes in pt3/單人, over-quotes ~30-80%).
+   * Reversible: UPDATE + departure replace, no tour deletion. Idempotent.
+   * Caller loops offset by limit until processed < limit.
+   */
+  rebuildUvFromMirror: adminProcedure
+    .input(
+      z.object({
+        dryRun: z.boolean().default(true),
+        offset: z.number().int().min(0).default(0),
+        limit: z.number().int().min(1).max(200).default(50),
+        /** Only rebuild draft tours (default true). */
+        onlyDraft: z.boolean().default(true),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const db2 = await getDb();
+      if (!db2) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const uvFilter = like(toursTable.sourceUrl, "%uvbookings%");
+      const whereClause = input.onlyDraft
+        ? and(uvFilter, eq(toursTable.status, "draft"))
+        : uvFilter;
+
+      // Chunk of UV tours + their supplier product + parsed details (1:1).
+      // Resolve code by productCode, falling back to the code embedded in the
+      // UV sourceUrl (/product/detail/<code>) for older rows missing it.
+      const rows = await db2
+        .select({
+          tourId: toursTable.id,
+          productCode: toursTable.productCode,
+          supplierProductId: productsTable.id,
+          supplierTitle: productsTable.title,
+          days: productsTable.days,
+          departureCity: productsTable.departureCity,
+          destinationCountry: productsTable.destinationCountry,
+          destinationCity: productsTable.destinationCity,
+          imageUrl: productsTable.imageUrl,
+          currency: productsTable.currency,
+          itineraryParsed: supplierProductDetails.itineraryParsed,
+          priceTermsParsed: supplierProductDetails.priceTermsParsed,
+          noticesParsed: supplierProductDetails.noticesParsed,
+          optionalParsed: supplierProductDetails.optionalParsed,
+          tourInfoParsed: supplierProductDetails.tourInfoParsed,
+        })
+        .from(toursTable)
+        .leftJoin(
+          productsTable,
+          or(
+            eq(productsTable.externalProductCode, toursTable.productCode),
+            sql`${productsTable.externalProductCode} = SUBSTRING_INDEX(SUBSTRING_INDEX(${toursTable.sourceUrl}, '/product/detail/', -1), '/', 1)`,
+          ),
+        )
+        .leftJoin(
+          supplierProductDetails,
+          eq(supplierProductDetails.supplierProductId, productsTable.id),
+        )
+        .where(whereClause)
+        .orderBy(toursTable.id)
+        .limit(input.limit)
+        .offset(input.offset);
+
+      // Batch-load every mirror departure for this chunk's products in one query.
+      const productIds = Array.from(
+        new Set(
+          rows
+            .map((r) => r.supplierProductId)
+            .filter((x): x is number => typeof x === "number"),
+        ),
+      );
+      const mirrorByProduct = new Map<number, string[]>();
+      if (productIds.length > 0) {
+        const deps = await db2
+          .select({
+            supplierProductId: supplierDeparturesTable.supplierProductId,
+            rawDepartureJson: supplierDeparturesTable.rawDepartureJson,
+          })
+          .from(supplierDeparturesTable)
+          .where(inArray(supplierDeparturesTable.supplierProductId, productIds));
+        for (const d of deps) {
+          if (!d.rawDepartureJson) continue;
+          const arr = mirrorByProduct.get(d.supplierProductId) ?? [];
+          arr.push(d.rawDepartureJson);
+          mirrorByProduct.set(d.supplierProductId, arr);
+        }
+      }
+
+      // Local midnight — drop departures already in the past.
+      const todayMs = new Date(new Date().toDateString()).getTime();
+      let updated = 0;
+      let skipped = 0;
+      let withItinerary = 0;
+      const skipReasons: Record<string, number> = {};
+      const errors: Array<{ id: number; err: string }> = [];
+      const samples: Array<{
+        id: number;
+        country: string;
+        price: number;
+        deps: number;
+        itin: boolean;
+      }> = [];
+
+      const skip = (reason: string) => {
+        skipped++;
+        skipReasons[reason] = (skipReasons[reason] ?? 0) + 1;
+      };
+
+      for (const r of rows) {
+        if (!r.supplierProductId) {
+          skip("no supplierProduct");
+          continue;
+        }
+        const country = r.destinationCountry ?? "";
+        if (!country) {
+          skip("no country");
+          continue;
+        }
+        const days = r.days ?? 0;
+
+        // Departures from the mirror: pt4 only, future-only.
+        const rawList = mirrorByProduct.get(r.supplierProductId) ?? [];
+        const built = rawList
+          .map((raw) => buildDepartureFromMirrorRow(raw, days, todayMs))
+          .filter((d): d is NonNullable<typeof d> => d !== null);
+        const headline = headlineFromBuiltDepartures(built);
+        if (headline <= 0 || built.length === 0) {
+          skip("no priced future departures");
+          continue;
+        }
+
+        // Rich content from parsed details (zero LLM).
+        const hydrated = hydrateTourFromParsed({
+          itinerary: safeParseJson<NormalizedItinerary>(r.itineraryParsed),
+          priceTerms: safeParseJson<NormalizedPriceTerms>(r.priceTermsParsed),
+          notices: safeParseJson<NormalizedNotices>(r.noticesParsed),
+          optional: safeParseJson<NormalizedOptional>(r.optionalParsed),
+          tourInfo: safeParseJson<NormalizedTourInfo>(r.tourInfoParsed),
+          supplierTitle: r.supplierTitle ?? undefined,
+          days: r.days ?? undefined,
+          destinationCountry: country,
+        });
+        const hasItin = !!hydrated.dailyItinerary;
+        if (hasItin) withItinerary++;
+
+        if (samples.length < 10) {
+          samples.push({
+            id: r.tourId,
+            country,
+            price: headline,
+            deps: built.length,
+            itin: hasItin,
+          });
+        }
+        if (input.dryRun) continue;
+
+        try {
+          await db2
+            .update(toursTable)
+            .set({
+              title: (r.supplierTitle ?? "").slice(0, 200) || undefined,
+              price: headline,
+              priceCurrency: r.currency ?? "USD",
+              destinationCountry: country,
+              destinationCity: r.destinationCity ?? country,
+              departureCity: r.departureCity ?? "Los Angeles",
+              duration: days,
+              nights: Math.max(0, days - 1),
+              imageUrl: r.imageUrl ?? "",
+              heroImage: r.imageUrl ?? "",
+              ...hydrated,
+              updatedAt: new Date(),
+            } as never)
+            .where(eq(toursTable.id, r.tourId));
+          // Replace departures: clear stale, insert fresh.
+          await db2
+            .delete(tourDeparturesTable)
+            .where(eq(tourDeparturesTable.tourId, r.tourId));
+          await db2.insert(tourDeparturesTable).values(
+            built.map((d) => ({
+              tourId: r.tourId,
+              departureDate: d.departureDate,
+              returnDate: d.returnDate,
+              adultPrice: d.adultPrice,
+              totalSlots: d.totalSlots,
+              bookedSlots: d.bookedSlots,
+              status: d.status,
+              currency: "USD",
+              notes: `uv mirror rebuild · ${r.productCode ?? ""}`,
+            })),
+          );
+          updated++;
+        } catch (err) {
+          errors.push({
+            id: r.tourId,
+            err: err instanceof Error ? err.message.slice(0, 200) : String(err),
+          });
+        }
+      }
+
+      return {
+        dryRun: input.dryRun,
+        processed: rows.length,
+        updated: input.dryRun ? rows.length - skipped : updated,
+        skipped,
+        skipReasons,
+        withItinerary,
+        offset: input.offset,
+        errors: errors.length,
+        errorSamples: errors.slice(0, 5),
+        samples,
       };
     }),
 

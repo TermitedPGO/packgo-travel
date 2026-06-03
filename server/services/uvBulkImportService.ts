@@ -54,6 +54,7 @@ async function readUvSupplierRow(productCode: string): Promise<{
   imageUrl: string | null;
   nightDay: number | null;
   itineraryParsed: string | null;
+  supplierProductId: number | null;
 } | null> {
   const db = await getDb();
   if (!db) return null;
@@ -63,6 +64,7 @@ async function readUvSupplierRow(productCode: string): Promise<{
   const { eq, and } = await import("drizzle-orm");
   const rows = await db
     .select({
+      id: supplierProducts.id,
       title: supplierProducts.title,
       days: supplierProducts.days,
       destinationCountry: supplierProducts.destinationCountry,
@@ -103,7 +105,31 @@ async function readUvSupplierRow(productCode: string): Promise<{
     imageUrl: r.imageUrl,
     nightDay,
     itineraryParsed: r.itineraryParsed,
+    supplierProductId: r.id,
   };
+}
+
+/**
+ * Headline price from the SYNCED supplierDepartures.retailPrice (verified
+ * 2026-06-02 to equal getProductGroup priceType=4 for room tours / pt1 for
+ * 1-day tours). Used instead of a live getProductGroup re-fetch, which was
+ * found to intermittently return $0. Returns the lowest priced departure.
+ */
+async function readSyncedHeadlinePrice(supplierProductId: number): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const { supplierDepartures } = await import("../../drizzle/schema");
+  const { eq, and, gt, sql } = await import("drizzle-orm");
+  const rows = await db
+    .select({ p: sql<string>`MIN(${supplierDepartures.retailPrice})` })
+    .from(supplierDepartures)
+    .where(
+      and(
+        eq(supplierDepartures.supplierProductId, supplierProductId),
+        gt(supplierDepartures.retailPrice, "0"),
+      ),
+    );
+  return Math.round(Number(rows[0]?.p ?? 0) || 0);
 }
 
 /** Minimal departure shape the price pickers read (subset of UvDepartureRow). */
@@ -112,15 +138,22 @@ export interface UvDepartureForPricing {
 }
 
 /**
- * Per-departure adult price = priceType=4 (兩人一房, double-occupancy = the
- * standard per-person basis). Falls back to the first tier, then 0. Rounded.
- * priceType=3 (單人入住/single) over-quotes ~30-37% and is NEVER preferred.
+ * Per-departure adult price. Two UV pricing schemes (verified 2026-06-02
+ * over all 639 products):
+ *   - ROOM tours (multi-day w/ hotel): priceType 3=單人入住 / 4=兩人一房 /
+ *     5=三人 / 6=四人. Adult basis = priceType=4 (double-occupancy).
+ *   - NON-ROOM (1-day tours / tickets / cruises): priceType 1=成人 / 2=兒童.
+ *     Adult = priceType=1. There is NO pt4 (no room), so pt1 is correct.
+ * So: pt4 → pt1 → (any non-single tier) → 0. priceType=3 (單人/single)
+ * over-quotes ~30-37% and is NEVER used as the adult price. Rounded.
  * Pure + exported for unit tests (Jeff rule: real getProductGroup price only).
  */
 export function pickDepartureAdultPrice(dep: UvDepartureForPricing): number {
-  const four = dep.groupPrice?.find((g) => g.priceType === 4)?.groupPrice;
-  const fallback = dep.groupPrice?.[0]?.groupPrice;
-  return Math.round(Number(four ?? fallback ?? 0) || 0);
+  const byType = (t: number) => dep.groupPrice?.find((g) => g.priceType === t)?.groupPrice;
+  const adult = byType(4) ?? byType(1);
+  // last resort: first tier that is not single-occupancy (pt3)
+  const fallback = dep.groupPrice?.find((g) => g.priceType !== 3)?.groupPrice;
+  return Math.round(Number(adult ?? fallback ?? 0) || 0);
 }
 
 /**
@@ -132,6 +165,90 @@ export function pickHeadlinePrice(departures: UvDepartureForPricing[]): number {
     const p = pickDepartureAdultPrice(dep);
     return p > 0 && (min === 0 || p < min) ? p : min;
   }, 0);
+}
+
+/** A tourDepartures-shaped row built from one synced mirror departure. */
+export interface BuiltMirrorDeparture {
+  departureDate: Date;
+  returnDate: Date;
+  adultPrice: number;
+  totalSlots: number;
+  bookedSlots: number;
+  status: "open" | "full";
+}
+
+/**
+ * Build one tourDepartures row from a synced `supplierDepartures.rawDepartureJson`
+ * blob. The blob is the SAME shape as a live getProductGroup departure
+ * (`groupDate` / `groupStock` / `groupSaleStock` / `groupPrice[]`), so this
+ * reuses `pickDepartureAdultPrice` and produces departures identical to the
+ * live importer — but from the mirror, with ZERO live re-fetch.
+ *
+ * Why this exists: the `supplierDepartures.retailPrice` COLUMN is polluted
+ * (the sync stored priceType=3 / 單人 on some dates, pt4 on others), so it
+ * cannot be trusted as the adult basis. The full tier list lives in
+ * `rawDepartureJson`, so we re-derive pt4 (→ pt1) here.
+ *
+ * Returns null when: unparseable, no date, the departure is already in the
+ * past (`< todayMs`), or there is no usable pt4/pt1 price — in which case we
+ * SKIP the date rather than fall back to single-occupancy. Never over-quotes.
+ * Pure + exported for unit tests.
+ */
+export function buildDepartureFromMirrorRow(
+  rawDepartureJson: string | null | undefined,
+  tripDays: number,
+  todayMs: number,
+): BuiltMirrorDeparture | null {
+  if (!rawDepartureJson) return null;
+  let dep: (UvDepartureForPricing & {
+    groupDate?: string;
+    groupStock?: number;
+    groupSaleStock?: number;
+  }) | null;
+  try {
+    dep = JSON.parse(rawDepartureJson);
+  } catch {
+    return null;
+  }
+  if (!dep || !dep.groupDate) return null;
+  const dateStr = String(dep.groupDate).slice(0, 10);
+  const [year, month, day] = dateStr.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  const departureDate = new Date(year, month - 1, day, 8, 0, 0);
+  if (departureDate.getTime() < todayMs) return null; // skip past departures
+  // pt4 (兩人一房) → pt1 (成人). NEVER single-occupancy. Skip the date if neither.
+  const adultPrice = pickDepartureAdultPrice(dep);
+  if (adultPrice <= 0) return null;
+  const returnDate = new Date(
+    year,
+    month - 1,
+    day + Math.max(0, tripDays - 1),
+    20,
+    0,
+    0,
+  );
+  const totalSeats = Number(dep.groupStock || 0);
+  const sold = Number(dep.groupSaleStock || 0);
+  const status: "open" | "full" =
+    totalSeats > 0 && totalSeats - sold <= 0 ? "full" : "open";
+  return {
+    departureDate,
+    returnDate,
+    adultPrice,
+    totalSlots: totalSeats > 0 ? totalSeats : 20,
+    bookedSlots: Math.max(0, sold),
+    status,
+  };
+}
+
+/** Headline 起價 across already-built mirror departures (lowest adult price). */
+export function headlineFromBuiltDepartures(
+  deps: BuiltMirrorDeparture[],
+): number {
+  return deps.reduce<number>(
+    (min, d) => (d.adultPrice > 0 && (min === 0 || d.adultPrice < min) ? d.adultPrice : min),
+    0,
+  );
 }
 
 /** Mirror of BulkImportResult from lionBulkImportService for parity. */
@@ -178,7 +295,9 @@ function inferDestinationCountry(destinationName: string): string {
   if (/london|paris|rome|barcelona|amsterdam|berlin|zurich|prague|vienna|interlaken|munich/i.test(destinationName)) return "歐洲";
   // Oceania
   if (/sydney|melbourne|brisbane|auckland|queenstown/i.test(destinationName)) return "澳洲";
-  return destinationName;
+  // Unmappable: return "" rather than the raw city, so we NEVER store a
+  // city/landmark as the destinationCountry (the "Cancún-as-country" bug).
+  return "";
   void name; // satisfy unused-var lint
 }
 
@@ -255,11 +374,28 @@ export async function importOneUvProduct(
       spRow?.destinationCountry ||
       inferDestinationCountry(spRow?.destinationCity || "");
     const destinationCity = spRow?.destinationCity || destinationCountry;
+    if (!destinationCountry) {
+      return { productCode, success: false, error: "no derivable destinationCountry" };
+    }
     const imageUrl = spRow?.imageUrl || null;
 
-    // Headline (起價) = lowest priceType=4 across future departures. Jeff rule:
-    // real getProductGroup price only, never flyer/groupLatelyPrice.
-    const headlinePrice = pickHeadlinePrice(departures);
+    // Headline price from SYNCED supplierDepartures.retailPrice (verified =
+    // priceType=4 / pt1), live getProductGroup as fallback only. The live
+    // re-fetch intermittently returned $0 for products that have a correct
+    // synced price, so synced is the source of truth.
+    const syncedHeadline = spRow?.supplierProductId
+      ? await readSyncedHeadlinePrice(spRow.supplierProductId)
+      : 0;
+    const headlinePrice =
+      syncedHeadline > 0 ? syncedHeadline : pickHeadlinePrice(departures);
+    // Never build a $0 tour — no-price products are 去掉, not imported.
+    if (headlinePrice <= 0) {
+      return {
+        productCode,
+        success: false,
+        error: "no usable price (synced + live both 0)",
+      };
+    }
 
     // dailyItinerary stop-gap blob for the LLM rewrite pass. Prefer the
     // enriched itineraryParsed (clean structure); fall back to the raw
@@ -316,7 +452,8 @@ export async function importOneUvProduct(
         const sold = Number(dep.groupSaleStock || 0);
         const bookedSlots = Math.max(0, sold);
         // priceType=4 (兩人一房) per-person basis; priceType=3 over-quotes ~30-37%.
-        const adultPrice = pickDepartureAdultPrice(dep);
+        // Fall back to the synced headline so a live $0 never becomes a $0 departure.
+        const adultPrice = pickDepartureAdultPrice(dep) || headlinePrice;
         const finalStatus: "open" | "full" =
           totalSeats > 0 && totalSeats - sold <= 0 ? "full" : "open";
         await createDeparture({
