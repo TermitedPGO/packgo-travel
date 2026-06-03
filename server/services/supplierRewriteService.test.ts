@@ -60,6 +60,7 @@ import { calibrateTour } from "../agents/calibrationAgent";
 import {
   rewriteSupplierTourInPlace,
   buildRawDataFromDraft,
+  stripEmDashes,
 } from "./supplierRewriteService";
 
 const mockGetTourById = vi.mocked(getTourById);
@@ -372,5 +373,45 @@ describe("rewriteSupplierTourInPlace — calibration verdict drives status", () 
     // prose was still saved before calibration failed
     const prosePayload = mockUpdateTour.mock.calls[0][1] as Record<string, any>;
     expect(prosePayload.title).toBe(GOOD_CONTENT.data.title);
+  });
+});
+
+describe("stripEmDashes — Jeff hard rule: no 破折號 in any text", () => {
+  it("replaces a double em dash with a Chinese comma", () => {
+    // the real defect found in #1260492
+    expect(stripEmDashes("畢爾巴鄂的當代美術館——每座城市都承載著歷史")).toBe(
+      "畢爾巴鄂的當代美術館，每座城市都承載著歷史",
+    );
+  });
+
+  it("replaces a single em dash used as a separator", () => {
+    expect(stripEmDashes("維也納—多瑙河與伏爾塔瓦河的雙城故事")).toBe(
+      "維也納，多瑙河與伏爾塔瓦河的雙城故事",
+    );
+  });
+
+  it("handles en dash and horizontal bar too", () => {
+    expect(stripEmDashes("羅馬–巴黎")).toBe("羅馬，巴黎");
+    expect(stripEmDashes("東京―大阪")).toBe("東京，大阪");
+  });
+
+  it("collapses spaces around the dash", () => {
+    expect(stripEmDashes("A — B")).toBe("A，B");
+  });
+
+  it("does not leave a comma stranded before closing punctuation", () => {
+    expect(stripEmDashes("精彩行程——。")).toBe("精彩行程。");
+  });
+
+  it("leaves text with no em dashes untouched", () => {
+    const clean = "西班牙世遺五城記：馬德里、阿維拉、薩拉曼卡";
+    expect(stripEmDashes(clean)).toBe(clean);
+  });
+
+  it("keeps a JSON-string field valid after stripping (em dash inside a value)", () => {
+    const json = JSON.stringify(["牛津——劍橋", "倫敦塔橋"]);
+    const out = stripEmDashes(json);
+    expect(() => JSON.parse(out)).not.toThrow();
+    expect(JSON.parse(out)[0]).toBe("牛津，劍橋");
   });
 });

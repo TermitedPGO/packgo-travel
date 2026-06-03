@@ -2213,6 +2213,56 @@ export const suppliersRouter = router({
     }),
 
   /**
+   * 2026-06-03 — bulk-queue LLM prose rewrite for the rebuilt UV tours
+   * (draft + pending_review that have a real price + priced departures). This
+   * is the mass-rewrite path Jeff authorized for all ~505 rebuilt UV drafts
+   * (~$61 one-time). Queues via tourGenerationQueue → rewriteSupplierTourInPlace
+   * (prose only, FACTS preserved, em-dash-stripped on save). Caller chunks by
+   * offset. NO per-call budget gate (unlike rewriteTourWithLLM) — Jeff approved
+   * the full spend; the scaling-guardrail LLM alert still fires if monthly
+   * spend crosses the line.
+   */
+  queueRewriteAllUv: adminProcedure
+    .input(
+      z.object({
+        offset: z.number().int().min(0).default(0),
+        limit: z.number().int().min(1).max(600).default(100),
+        statuses: z
+          .array(z.enum(["draft", "pending_review", "active", "inactive"]))
+          .default(["draft", "pending_review"]),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const db2 = await getDb();
+      if (!db2) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const rows = await db2
+        .select({ id: toursTable.id })
+        .from(toursTable)
+        .where(
+          and(
+            like(toursTable.sourceUrl, "%uvbookings%"),
+            inArray(toursTable.status, input.statuses),
+            gte(toursTable.price, 1),
+            sql`EXISTS (SELECT 1 FROM tourDepartures d WHERE d.tourId = tours.id AND d.adultPrice > 0)`,
+          ),
+        )
+        .orderBy(toursTable.id)
+        .limit(input.limit)
+        .offset(input.offset);
+      const ids = rows.map((r) => r.id);
+      const result = await queueRewriteForImportedUvTours(ids, {
+        userId: ctx.user.id,
+      });
+      return {
+        selected: ids.length,
+        queued: result.queued,
+        offset: input.offset,
+        firstIds: ids.slice(0, 5),
+        lastIds: ids.slice(-3),
+      };
+    }),
+
+  /**
    * Backfill destinationCountry on supplierProducts from title regex.
    * 2026-05-25: Lion's GroupInfo.Country is the DEPARTURE country (always
    * "TW" since Lion is a Taiwanese travel agency), not destination.

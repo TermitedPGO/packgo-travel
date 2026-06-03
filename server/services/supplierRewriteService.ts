@@ -224,6 +224,22 @@ export function buildRawDataFromDraft(tour: any): any {
  * preserve, and their absence means this isn't a healthy supplier draft to
  * polish (regenerating them is exactly the bug being fixed).
  */
+
+/**
+ * Jeff hard rule: NO em dashes (— —— – ―) in any customer-facing text. The LLM
+ * occasionally emits them in titles/descriptions/itinerary prose. Strip them
+ * from every saved string, replacing with a Chinese comma (Jeff's documented
+ * preference: 逗號/句號/括號 over 破折號). Safe on JSON-string fields too — an
+ * em dash inside a JSON value is just a character, so substitution keeps the
+ * JSON valid. Exported + pure for unit testing.
+ */
+export function stripEmDashes(text: string): string {
+  return text
+    .replace(/\s*[—–―]+\s*/g, "，") // em/en dash / horizontal bar (runs) → comma
+    .replace(/，{2,}/g, "，") // collapse doubled commas
+    .replace(/，(?=[。！？：；、）」』】])/g, ""); // drop comma before closing punctuation
+}
+
 export async function rewriteSupplierTourInPlace(
   draftTourId: number
 ): Promise<SupplierRewriteResult> {
@@ -314,6 +330,12 @@ export async function rewriteSupplierTourInPlace(
   // updateTour auto-dual-writes itineraryDetailed↔dailyItinerary.
   if (polishedItineraries.length > 0) {
     proseFields.itineraryDetailed = JSON.stringify(polishedItineraries);
+  }
+
+  // Enforce the no-em-dash rule on every prose field (plain + JSON-string).
+  for (const k of Object.keys(proseFields)) {
+    const v = proseFields[k];
+    if (typeof v === "string") proseFields[k] = stripEmDashes(v);
   }
 
   await updateTour(draftTourId, proseFields as any);
