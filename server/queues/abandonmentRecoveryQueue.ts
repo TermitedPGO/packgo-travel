@@ -19,9 +19,31 @@ import { notifyOwner } from "../_core/notification";
 
 const QUEUE_NAME = "abandonment-recovery";
 const RECOVERY_DELAY_MS = 30 * 60 * 1000; // 30 minutes
+// Seat-hold expiry: a booking that never receives ANY payment releases its held
+// seats after this window so abandoned checkouts don't ghost-hold inventory and
+// falsely mark a departure "full". Generous (24h) so a real customer has ample
+// time to pay.
+const EXPIRY_DELAY_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 export interface AbandonmentRecoveryJob {
   bookingId: number;
+  /** "recovery" = 30-min recovery email (default). "expiry" = 24h seat release. */
+  kind?: "recovery" | "expiry";
+}
+
+/**
+ * The ONLY condition under which the 24h job auto-cancels a booking and releases
+ * its seats: the booking never received ANY payment and isn't already cancelled.
+ * A deposit / paid / refunded booking is a real reservation — NEVER auto-cancel
+ * it. Pure + exported for unit testing — this is load-bearing: a wrong condition
+ * here would cancel paying customers' bookings.
+ */
+export function shouldExpireUnpaidBooking(booking: {
+  paymentStatus: string | null;
+  bookingStatus: string | null;
+}): boolean {
+  if (booking.bookingStatus === "cancelled") return false;
+  return booking.paymentStatus === "unpaid";
 }
 
 export const abandonmentRecoveryQueue = new Queue<AbandonmentRecoveryJob>(
@@ -56,13 +78,34 @@ export async function scheduleAbandonmentRecovery(bookingId: number) {
 }
 
 /**
- * Cancel the pending recovery (used when payment completes).
+ * Schedule the 24h seat-hold expiry when a booking is created. If the booking
+ * is still unpaid 24h later, its held seats are released (see worker). Idempotent.
+ */
+export async function scheduleSeatExpiry(bookingId: number) {
+  await abandonmentRecoveryQueue.add(
+    `expiry-${bookingId}`,
+    { bookingId, kind: "expiry" },
+    {
+      delay: EXPIRY_DELAY_MS,
+      jobId: `expiry-${bookingId}`,
+    }
+  );
+  console.log(
+    `[SeatExpiry] Scheduled 24h seat-release for booking #${bookingId}`
+  );
+}
+
+/**
+ * Cancel BOTH pending jobs (recovery email + seat expiry) — used when payment
+ * completes, so a paid booking never gets the recovery email OR its seats freed.
  */
 export async function cancelAbandonmentRecovery(bookingId: number) {
-  const job = await abandonmentRecoveryQueue.getJob(`recovery-${bookingId}`);
-  if (job) {
-    await job.remove();
-    console.log(`[AbandonmentRecovery] Cancelled for booking #${bookingId} (payment completed)`);
+  for (const id of [`recovery-${bookingId}`, `expiry-${bookingId}`]) {
+    const job = await abandonmentRecoveryQueue.getJob(id);
+    if (job) {
+      await job.remove();
+      console.log(`[AbandonmentRecovery] Cancelled job ${id} for booking #${bookingId} (payment completed)`);
+    }
   }
 }
 
@@ -78,6 +121,29 @@ export function initAbandonmentRecoveryWorker() {
       if (!booking) {
         return { skipped: "missing" };
       }
+
+      // ── 24h seat-hold expiry: release seats held by a never-paid booking ──
+      if (job.data.kind === "expiry") {
+        if (!shouldExpireUnpaidBooking(booking)) {
+          // deposit/paid/refunded or already cancelled → keep it, never auto-cancel
+          return { skipped: `kept:${booking.bookingStatus}/${booking.paymentStatus}` };
+        }
+        const seatCount =
+          (booking.numberOfAdults || 0) +
+          (booking.numberOfChildrenWithBed || 0) +
+          (booking.numberOfChildrenNoBed || 0);
+        await db.updateBooking(bookingId, { bookingStatus: "cancelled" });
+        if (seatCount > 0 && booking.departureId) {
+          await db
+            .releaseDepartureSlots(booking.departureId, seatCount)
+            .catch((e) =>
+              console.warn(`[SeatExpiry] release failed for booking ${bookingId}:`, (e as Error)?.message)
+            );
+        }
+        console.log(`[SeatExpiry] Released ${seatCount} seat(s) for unpaid booking #${bookingId} after 24h`);
+        return { expired: true, seatCount };
+      }
+
       // Skip if already paid or cancelled
       if (booking.paymentStatus === "paid") {
         return { skipped: "already_paid" };

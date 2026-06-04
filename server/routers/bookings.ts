@@ -394,12 +394,14 @@ export const bookingsRouter = router({
           );
         }
 
-        // v78n Sprint 6A: schedule 30-min abandonment recovery email
+        // v78n Sprint 6A: schedule 30-min abandonment recovery email +
+        // 24h seat-hold expiry (release seats if never paid).
         try {
-          const { scheduleAbandonmentRecovery } = await import(
+          const { scheduleAbandonmentRecovery, scheduleSeatExpiry } = await import(
             "../queues/abandonmentRecoveryQueue"
           );
           await scheduleAbandonmentRecovery(booking.id);
+          await scheduleSeatExpiry(booking.id);
         } catch (err) {
           console.warn(
             "[bookings.create] Failed to schedule abandonment recovery:",
