@@ -99,7 +99,7 @@ describe("bookingConfirmation template", () => {
       text: string;
     };
     expect(mailArgs.to).toBe("customer@example.com");
-    expect(mailArgs.subject).toContain("訂單確認");
+    expect(mailArgs.subject).toContain("訂單已收到");
     expect(mailArgs.subject).toContain("12345");
     expect(mailArgs.html).toContain("PACK&amp;GO");
     expect(mailArgs.html).toContain("NT$ 20,000");
@@ -127,8 +127,8 @@ describe("bookingConfirmation template", () => {
 
     expect(sendMailMock).toHaveBeenCalledTimes(1);
     const mailArgs = sendMailMock.mock.calls[0][0] as { subject: string; html: string };
-    expect(mailArgs.subject.startsWith("Booking confirmed")).toBe(true);
-    expect(mailArgs.html).toContain("Booking confirmed!");
+    expect(mailArgs.subject.startsWith("Booking received")).toBe(true);
+    expect(mailArgs.html).toContain("Booking received!");
     expect(mailArgs.html).toContain("1 adult");
   });
 });

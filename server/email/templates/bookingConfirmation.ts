@@ -52,8 +52,8 @@ export async function sendBookingConfirmationEmail(data: BookingEmailData) {
   // v78x: Subject + template language follows the customer's preference.
   const isEN = data.language === 'en';
   const subject = isEN
-    ? `Booking confirmed #${data.bookingId} - ${data.tourTitle}`
-    : `訂單確認 #${data.bookingId} - ${data.tourTitle}`;
+    ? `Booking received #${data.bookingId} - ${data.tourTitle}`
+    : `訂單已收到 #${data.bookingId} - ${data.tourTitle}`;
 
   // Try to send actual email to customer
   const smtp = getTransporter();
@@ -85,12 +85,12 @@ function generateBookingConfirmationHTML(data: BookingEmailData): string {
   // Owner notification text stays ZH (sees admin perspective in notifyOwner).
   const c = isEN ? {
     htmlLang: 'en',
-    title: 'Booking confirmed - PACK&GO Travel',
+    title: 'Booking received - PACK&GO Travel',
     tagline: "LET'S TRAVEL TOGETHER",
-    successHeading: 'Booking confirmed!',
+    successHeading: 'Booking received!',
     successSub: 'Thank you for choosing PACK&GO Travel',
     greeting: 'Dear',
-    intro: 'Your booking has been successfully created. Our team will reach out within <strong>1–2 business days</strong> to confirm details — please watch your phone and email.',
+    intro: 'Your booking request has been received. Our team will reach out within <strong>1-2 business days</strong> to confirm your seat. Please watch your phone and email.',
     sectionOrder: 'Order details',
     labelId: 'Order #',
     labelTour: 'Tour',
@@ -109,19 +109,19 @@ function generateBookingConfirmationHTML(data: BookingEmailData): string {
     step1: 'Our team confirms your booking by phone or email within 1–2 business days',
     step2: 'Please pay the deposit within <strong>3 days</strong> to lock in your seat',
     step3: 'You\'ll receive a balance-payment reminder 30 days before departure',
-    step4: 'Final itinerary + e-tickets sent 7 days before departure',
+    step4: 'Final itinerary and travel documents sent about 7 days before departure',
     footerName: 'PACK&GO Travel',
     footerContact: 'Tel: +1 (510) 634-2307 | Email: support@packgoplay.com',
     footerLicense: 'CST #2166984 (California Seller of Travel)',
     footerCopy: `© ${new Date().getFullYear()} PACK&GO Travel. All rights reserved.`,
   } : {
     htmlLang: 'zh-TW',
-    title: '訂單確認 - PACK&GO 旅行社',
+    title: '訂單已收到 - PACK&GO 旅行社',
     tagline: "LET'S TRAVEL TOGETHER",
-    successHeading: '訂單已確認！',
+    successHeading: '訂單已收到！',
     successSub: '感謝您選擇 PACK&GO 旅行社',
     greeting: '親愛的',
-    intro: '您的行程預訂已成功建立。我們的專員將在 <strong>1-2 個工作日內</strong>與您確認訂單詳情，請注意查收電話及電子郵件。',
+    intro: '您的預訂申請已成功送出。我們的專員將在 <strong>1-2 個工作日內</strong>與您確認訂單詳情並為您保留座位，請注意查收電話及電子郵件。',
     sectionOrder: '訂單詳情',
     labelId: '訂單編號',
     labelTour: '行程名稱',
@@ -140,7 +140,7 @@ function generateBookingConfirmationHTML(data: BookingEmailData): string {
     step1: '我們的專員將在 1-2 個工作日內以電話或電郵確認訂單',
     step2: '請於 <strong>3 天內</strong>完成訂金付款，以保留您的座位',
     step3: '出發前 30 天將收到尾款付款提醒',
-    step4: '出發前 7 天將收到完整行程資料及電子機票',
+    step4: '出發前約 7 天將收到完整行程資料與出團通知',
     footerName: 'PACK&GO 旅行社',
     footerContact: 'Tel: +1 (510) 634-2307 | Email: support@packgoplay.com',
     footerLicense: 'CST #2166984（加州合法旅行社）',
