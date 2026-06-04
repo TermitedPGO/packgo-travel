@@ -706,6 +706,20 @@ export const bookings = mysqlTable("bookings", {
   // subsequent emails (payment confirmation, reminders, cancellation, refund)
   // so we never switch languages mid-flow.
   customerLanguage: varchar("customerLanguage", { length: 8 }).default("zh-TW"),
+  // Phase 1.1 (migration 0085): supplier fulfillment state machine. Tracks where
+  // this booking sits in the supplier (UV / Lion) ordering flow. The customer
+  // "confirmed / seat secured" copy drives off `vendor_confirmed`, NOT payment —
+  // a customer paying us is not the same as the seat being secured with the
+  // supplier. An admin advances this as they place + confirm the real order.
+  supplierStatus: mysqlEnum("supplierStatus", [
+    "not_placed",       // not yet ordered from the supplier (default)
+    "placed",           // order placed, awaiting supplier reply
+    "vendor_confirmed", // supplier confirmed; seat secured
+    "vendor_rejected",  // supplier rejected / sold out
+    "waitlisted",       // on the supplier waitlist
+  ]).default("not_placed").notNull(),
+  supplierBookingRef: varchar("supplierBookingRef", { length: 128 }), // supplier's order #
+  supplierConfirmedAt: timestamp("supplierConfirmedAt"),              // when supplier confirmed
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

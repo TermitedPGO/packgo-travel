@@ -692,6 +692,63 @@ export const bookingsRouter = router({
         return { success: true };
       }),
 
+    // Admin: set the supplier fulfillment status (Phase 1.1).
+    // This is the spine of the back half. The customer "seat secured / confirmed"
+    // language drives off `vendor_confirmed`, so an admin recording the REAL
+    // supplier outcome here is what flips the customer from "processing" to
+    // "secured" — never payment alone. Any transition is allowed (operational
+    // correction is common) but every change is audit-logged. No money
+    // side-effects here on purpose: a vendor_rejected → refund is Phase 1.3 and
+    // stays a deliberate, separate step so we never auto-move money from a
+    // dropdown.
+    setSupplierStatus: adminProcedure
+      .input(
+        z.object({
+          id: z.number().int().positive().max(2_147_483_647),
+          supplierStatus: z.enum([
+            "not_placed",
+            "placed",
+            "vendor_confirmed",
+            "vendor_rejected",
+            "waitlisted",
+          ]),
+          supplierBookingRef: z.string().max(128).optional(),
+          reason: z.string().max(500).optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        const { id, supplierStatus, supplierBookingRef, reason } = input;
+
+        const before = await db.getBookingById(id).catch(() => null);
+        if (!before) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Booking not found" });
+        }
+        const previous = before.supplierStatus || "not_placed";
+
+        await db.updateBooking(id, {
+          supplierStatus,
+          ...(supplierBookingRef !== undefined
+            ? { supplierBookingRef: supplierBookingRef.trim() || null }
+            : {}),
+          // Stamp the confirmation time the first time the supplier confirms.
+          ...(supplierStatus === "vendor_confirmed" && previous !== "vendor_confirmed"
+            ? { supplierConfirmedAt: new Date() }
+            : {}),
+        });
+
+        const { audit } = await import("../_core/auditLog");
+        audit({
+          ctx,
+          action: "booking.setSupplierStatus",
+          targetType: "booking",
+          targetId: id,
+          changes: { before: previous, after: supplierStatus, ref: supplierBookingRef ?? null },
+          reason,
+        });
+
+        return { success: true };
+      }),
+
     // NOTE (Phase 4D, 2026-05-19): `adminRefund` was moved to
     // ./bookingsPayment.ts. Composition spread in routers.ts keeps the
     // client path `trpc.bookings.adminRefund` resolving identically.

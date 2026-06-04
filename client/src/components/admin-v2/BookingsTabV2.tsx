@@ -46,6 +46,20 @@ import {
 
 type BookingStatus = "pending" | "confirmed" | "cancelled" | "completed";
 type PaymentStatus = "pending" | "deposit_paid" | "paid" | "refunded";
+// Phase 1.1: where the booking sits in the supplier (UV / Lion) ordering flow.
+type SupplierStatus =
+  | "not_placed"
+  | "placed"
+  | "vendor_confirmed"
+  | "vendor_rejected"
+  | "waitlisted";
+const SUPPLIER_STATUS_ORDER: SupplierStatus[] = [
+  "not_placed",
+  "placed",
+  "vendor_confirmed",
+  "vendor_rejected",
+  "waitlisted",
+];
 
 type BookingRow = {
   id: number;
@@ -65,6 +79,9 @@ type BookingRow = {
   remainingAmount?: number | null;
   specialRequests?: string | null;
   tourId?: number | null;
+  // Phase 1.1: supplier fulfillment state machine
+  supplierStatus?: SupplierStatus | null;
+  supplierBookingRef?: string | null;
 };
 
 const STATUS_TONE: Record<BookingStatus, StatusTone> = {
@@ -79,6 +96,14 @@ const PAYMENT_TONE: Record<PaymentStatus, StatusTone> = {
   deposit_paid: "info",
   paid: "success",
   refunded: "warn",
+};
+
+const SUPPLIER_STATUS_TONE: Record<SupplierStatus, StatusTone> = {
+  not_placed: "muted",
+  placed: "info",
+  vendor_confirmed: "success",
+  vendor_rejected: "danger",
+  waitlisted: "warn",
 };
 
 // Tab pill toggle — inline since the existing FilterChip primitive serves a
@@ -122,6 +147,8 @@ export default function BookingsTabV2() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
+  // Phase 1.1: draft for the supplier order-ref input, seeded when a row opens.
+  const [refDraft, setRefDraft] = useState("");
 
   const { data: rawBookings = [], isLoading, refetch } = trpc.bookings.adminList.useQuery();
   const bookings = useMemo(() => {
@@ -144,6 +171,17 @@ export default function BookingsTabV2() {
     onSuccess: () => {
       refetch();
       toast.success(t("admin.bookingsTab.toastStatusUpdated"));
+    },
+    onError: () => toast.error(t("admin.bookingsTab.toastUpdateFailed")),
+    onSettled: () => setUpdatingId(null),
+  });
+
+  // Phase 1.1: record the REAL supplier outcome. This (not payment) is what
+  // flips the customer-facing label to "seat secured".
+  const setSupplierStatusMutation = trpc.bookings.setSupplierStatus.useMutation({
+    onSuccess: () => {
+      refetch();
+      toast.success(t("admin.bookingsTab.toastSupplierUpdated"));
     },
     onError: () => toast.error(t("admin.bookingsTab.toastUpdateFailed")),
     onSettled: () => setUpdatingId(null),
@@ -302,6 +340,23 @@ export default function BookingsTabV2() {
     updateStatusMutation.mutate({ id, status });
   };
 
+  const handleSetSupplierStatus = (
+    id: number,
+    supplierStatus: SupplierStatus,
+    supplierBookingRef?: string,
+  ) => {
+    setUpdatingId(id);
+    setSupplierStatusMutation.mutate({ id, supplierStatus, supplierBookingRef });
+  };
+
+  const SUPPLIER_STATUS_LABEL: Record<SupplierStatus, string> = {
+    not_placed: t("admin.bookingsTab.supplierNotPlaced"),
+    placed: t("admin.bookingsTab.supplierPlaced"),
+    vendor_confirmed: t("admin.bookingsTab.supplierVendorConfirmed"),
+    vendor_rejected: t("admin.bookingsTab.supplierVendorRejected"),
+    waitlisted: t("admin.bookingsTab.supplierWaitlisted"),
+  };
+
   // Stats per status for FilterChip counts
   const counts = useMemo(() => {
     const list = rawBookings as BookingRow[];
@@ -409,6 +464,7 @@ export default function BookingsTabV2() {
           loading={isLoading}
           onRowClick={(b) => {
             setSelectedId(b.id);
+            setRefDraft(b.supplierBookingRef ?? "");
             setDrawerOpen(true);
           }}
           selectedId={selectedId ?? undefined}
@@ -462,6 +518,72 @@ export default function BookingsTabV2() {
                     ))}
                   </DropdownMenuContent>
                 </DropdownMenu>
+              </div>
+
+              {/* Supplier fulfillment (Phase 1.1) — the REAL operator outcome.
+                  The customer "seat secured" label drives off vendor_confirmed,
+                  NOT payment. Recording the supplier result here is what advances
+                  the customer-facing status. */}
+              <div className="space-y-2 rounded-lg border border-gray-200 p-3">
+                <SectionTitle>{t("admin.bookingsTab.supplierSectionLabel")}</SectionTitle>
+                <div className="flex items-center justify-between gap-2">
+                  <StatusDot
+                    tone={SUPPLIER_STATUS_TONE[selected.supplierStatus ?? "not_placed"]}
+                    label={SUPPLIER_STATUS_LABEL[selected.supplierStatus ?? "not_placed"]}
+                  />
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 rounded-lg text-xs"
+                        disabled={updatingId === selected.id}
+                      >
+                        {t("admin.bookingsTab.supplierChangeLabel")}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      {SUPPLIER_STATUS_ORDER.map((s) => (
+                        <DropdownMenuItem
+                          key={s}
+                          onSelect={() =>
+                            handleSetSupplierStatus(selected.id, s, refDraft.trim() || undefined)
+                          }
+                          disabled={s === (selected.supplierStatus ?? "not_placed")}
+                        >
+                          <StatusDot tone={SUPPLIER_STATUS_TONE[s]} label={SUPPLIER_STATUS_LABEL[s]} />
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={refDraft}
+                    onChange={(e) => setRefDraft(e.target.value)}
+                    placeholder={t("admin.bookingsTab.supplierRefLabel")}
+                    className="h-8 rounded-lg text-sm"
+                    maxLength={128}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 rounded-lg text-xs whitespace-nowrap"
+                    disabled={
+                      updatingId === selected.id ||
+                      refDraft.trim() === (selected.supplierBookingRef ?? "")
+                    }
+                    onClick={() =>
+                      handleSetSupplierStatus(
+                        selected.id,
+                        selected.supplierStatus ?? "not_placed",
+                        refDraft.trim() || undefined,
+                      )
+                    }
+                  >
+                    {t("admin.bookingsTab.supplierRefSave")}
+                  </Button>
+                </div>
               </div>
 
               {/* Tour */}

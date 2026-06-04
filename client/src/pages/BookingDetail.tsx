@@ -5,6 +5,7 @@ import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
+import { bookingFulfillmentState, fulfillmentTone } from "@shared/bookingFulfillment";
 import {
   Calendar,
   Clock,
@@ -146,6 +147,16 @@ export default function BookingDetail() {
     );
   }
 
+  // Phase 1.1: the HONEST fulfillment state. "Seat secured" shows only when the
+  // supplier confirmed (supplierStatus === 'vendor_confirmed'), never off payment.
+  const fulfillmentState = bookingFulfillmentState(booking);
+  const fulfillmentToneClass: Record<string, string> = {
+    success: "bg-emerald-50 text-emerald-800 border-emerald-300",
+    warning: "bg-amber-50 text-amber-800 border-amber-300",
+    danger: "bg-red-50 text-red-800 border-red-300",
+    neutral: "bg-sky-50 text-sky-800 border-sky-200",
+  };
+
   const getStatusBadge = (status: string) => {
     const statusConfig = {
       pending: { label: t('bookingDetail.statusPending'), className: "bg-yellow-100 text-yellow-800 border-yellow-300" },
@@ -226,6 +237,20 @@ export default function BookingDetail() {
                   </div>
                 </div>
               </CardHeader>
+              {fulfillmentState !== "cancelled" && (
+                <CardContent className="pt-0">
+                  <div
+                    className={`rounded-lg border p-3 ${fulfillmentToneClass[fulfillmentTone(fulfillmentState)]}`}
+                  >
+                    <p className="font-semibold text-sm">
+                      {t(`bookingDetail.fulfillment.${fulfillmentState}.label`)}
+                    </p>
+                    <p className="text-sm mt-0.5 opacity-90">
+                      {t(`bookingDetail.fulfillment.${fulfillmentState}.note`)}
+                    </p>
+                  </div>
+                </CardContent>
+              )}
             </Card>
 
             {/* Tour Information */}

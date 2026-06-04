@@ -2990,6 +2990,17 @@ export const en = {
       quickStatusLabel: 'Quick Status Update',
       toastStatusUpdated: 'Booking status updated',
       toastUpdateFailed: 'Update failed, please retry',
+      // Phase 1.1: supplier fulfillment state machine
+      supplierSectionLabel: 'Supplier fulfillment',
+      supplierChangeLabel: 'Change status',
+      supplierNotPlaced: 'Not placed',
+      supplierPlaced: 'Order placed',
+      supplierVendorConfirmed: 'Supplier confirmed',
+      supplierVendorRejected: 'Supplier rejected',
+      supplierWaitlisted: 'Waitlisted',
+      supplierRefLabel: 'Supplier order #',
+      supplierRefSave: 'Save ref',
+      toastSupplierUpdated: 'Supplier status updated',
       toolsLabel: 'Tools',
       generateDepositPdf: 'Generate deposit invoice PDF',
       toastDepositGenerated: 'Deposit invoice PDF generated',
@@ -5390,6 +5401,25 @@ export const en = {
     paymentDeposit: 'Deposit Paid',
     paymentPaid: 'Paid in Full',
     paymentRefunded: 'Refunded',
+    // Phase 1.1: honest supplier-fulfillment status shown to the customer.
+    fulfillment: {
+      secured: {
+        label: "Seat secured",
+        note: "The operator has confirmed your seat. We look forward to traveling with you.",
+      },
+      processing: {
+        label: "Processing",
+        note: "We're securing your seat with the operator and will notify you as soon as it's confirmed.",
+      },
+      waitlisted: {
+        label: "Waitlisted",
+        note: "You're on the waitlist. We'll reach out as soon as a seat opens up.",
+      },
+      rejected: {
+        label: "Could not confirm",
+        note: "The operator can't confirm this departure right now. Our team will contact you shortly about alternatives or a refund.",
+      },
+    },
     // Toast messages
     redirectingToPayment: 'Redirecting to payment page...',
     createCheckoutFailed: 'Failed to create payment link',

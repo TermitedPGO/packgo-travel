@@ -2956,6 +2956,17 @@ export const zhTW = {
       quickStatusLabel: '快速更新狀態',
       toastStatusUpdated: '訂單狀態已更新',
       toastUpdateFailed: '更新失敗，請重試',
+      // Phase 1.1: supplier fulfillment state machine
+      supplierSectionLabel: '供應商履約',
+      supplierChangeLabel: '變更履約狀態',
+      supplierNotPlaced: '尚未下單',
+      supplierPlaced: '已下單',
+      supplierVendorConfirmed: '供應商已確認',
+      supplierVendorRejected: '供應商拒單',
+      supplierWaitlisted: '候補中',
+      supplierRefLabel: '供應商訂單編號',
+      supplierRefSave: '儲存編號',
+      toastSupplierUpdated: '供應商狀態已更新',
       toolsLabel: '工具',
       generateDepositPdf: '產生訂金通知 PDF',
       toastDepositGenerated: '訂金通知 PDF 已產生',
@@ -5390,6 +5401,26 @@ export const zhTW = {
     paymentDeposit: '已付訂金',
     paymentPaid: '已付清',
     paymentRefunded: '已退款',
+    // Phase 1.1: honest supplier-fulfillment status shown to the customer.
+    // "座位已確保" appears ONLY when the supplier confirmed, never off payment.
+    fulfillment: {
+      secured: {
+        label: '座位已確保',
+        note: '供應商已確認您的座位，期待與您同行。',
+      },
+      processing: {
+        label: '處理中',
+        note: '我們正在向供應商確認您的座位，確認後會立即通知您。',
+      },
+      waitlisted: {
+        label: '候補中',
+        note: '目前為候補，若有空位我們會盡快通知您。',
+      },
+      rejected: {
+        label: '無法確認',
+        note: '這個出發日供應商目前無法確認，我們的專員會盡快與您聯繫，安排替代方案或退款。',
+      },
+    },
     // Toast messages
     redirectingToPayment: '正在前往付款頁面...',
     createCheckoutFailed: '建立付款連結失敗',
