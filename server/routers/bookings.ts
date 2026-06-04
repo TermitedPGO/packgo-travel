@@ -32,6 +32,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
+import type { OrderPacket } from "@shared/orderPacket";
 import * as db from "../db";
 import { sendBookingConfirmationEmail } from "../email";
 import { convertCurrency, type SupportedCurrency } from "../agents/exchangeRateAgent";
@@ -747,6 +748,68 @@ export const bookingsRouter = router({
         });
 
         return { success: true };
+      }),
+
+    // Admin: supplier order packet (Phase 1.5). Assembles everything needed to
+    // place the booking with the operator (UV / Lion): tour + departure +
+    // contact + the full passenger manifest with DECRYPTED passport data. PII
+    // access is audit-logged on every call. Admin-only and fetched ON DEMAND
+    // (never auto-loaded) so passport decryption + the audit trail only happen
+    // when Jeff actually opens the packet.
+    getOrderPacket: adminProcedure
+      .input(z.object({ id: z.number().int().positive().max(2_147_483_647) }))
+      .query(async ({ ctx, input }): Promise<OrderPacket> => {
+        const booking = await db.getBookingById(input.id);
+        if (!booking) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Booking not found" });
+        }
+        const [tour, departure, participants] = await Promise.all([
+          db.getTourById(booking.tourId).catch(() => null),
+          booking.departureId
+            ? db.getDepartureById(booking.departureId).catch(() => null)
+            : Promise.resolve(null),
+          db.getBookingParticipants(booking.id).catch(() => []),
+        ]);
+
+        const { audit } = await import("../_core/auditLog");
+        audit({
+          ctx,
+          action: "booking.viewOrderPacket",
+          targetType: "booking",
+          targetId: booking.id,
+          reason: "supplier order packet (passport PII access)",
+        });
+
+        const fmtDate = (d: unknown): string | null =>
+          d ? new Date(d as string).toISOString().slice(0, 10) : null;
+
+        return {
+          bookingId: booking.id,
+          tourTitle: tour?.title ?? `Tour #${booking.tourId}`,
+          departureDate: fmtDate(departure?.departureDate),
+          supplier: (tour as { sourceVendor?: string | null } | null)?.sourceVendor ?? null,
+          supplierBookingRef: booking.supplierBookingRef ?? null,
+          contactName: booking.customerName,
+          contactEmail: booking.customerEmail,
+          contactPhone: booking.customerPhone,
+          pax: {
+            adults: booking.numberOfAdults || 0,
+            childrenWithBed: booking.numberOfChildrenWithBed || 0,
+            childrenNoBed: booking.numberOfChildrenNoBed || 0,
+            infants: booking.numberOfInfants || 0,
+          },
+          passengers: participants.map((p, i) => ({
+            index: i + 1,
+            type: p.participantType,
+            lastName: p.lastName,
+            firstName: p.firstName,
+            gender: p.gender ?? null,
+            dateOfBirth: fmtDate(p.dateOfBirth),
+            nationality: p.nationality ?? null,
+            passportNumber: p.passportNumber ?? null,
+            passportExpiry: fmtDate(p.passportExpiry),
+          })),
+        };
       }),
 
     // NOTE (Phase 4D, 2026-05-19): `adminRefund` was moved to

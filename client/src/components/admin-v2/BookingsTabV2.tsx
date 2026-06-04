@@ -18,6 +18,7 @@
  */
 import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { orderPacketToCsv, type OrderPacket } from "@shared/orderPacket";
 import { toast } from "sonner";
 import { useLocale } from "@/contexts/LocaleContext";
 import {
@@ -35,7 +36,7 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
-import { Download, Loader2, RefreshCw, Search, ShoppingCart, X } from "lucide-react";
+import { Download, FileText, Loader2, RefreshCw, Search, ShoppingCart, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
@@ -149,6 +150,9 @@ export default function BookingsTabV2() {
   const [updatingId, setUpdatingId] = useState<number | null>(null);
   // Phase 1.1: draft for the supplier order-ref input, seeded when a row opens.
   const [refDraft, setRefDraft] = useState("");
+  // Phase 1.5: order packet is fetched ON DEMAND (decrypts passport + audit-logs),
+  // never auto-loaded. Opens only when Jeff clicks the button for a booking.
+  const [packetOpen, setPacketOpen] = useState(false);
 
   const { data: rawBookings = [], isLoading, refetch } = trpc.bookings.adminList.useQuery();
   const bookings = useMemo(() => {
@@ -186,6 +190,13 @@ export default function BookingsTabV2() {
     onError: () => toast.error(t("admin.bookingsTab.toastUpdateFailed")),
     onSettled: () => setUpdatingId(null),
   });
+
+  // Phase 1.5: order packet, gated on packetOpen so the passport decryption +
+  // audit-log fire only when Jeff actually opens it for the selected booking.
+  const orderPacketQuery = trpc.bookings.getOrderPacket.useQuery(
+    { id: selectedId ?? 0 },
+    { enabled: packetOpen && selectedId != null, refetchOnWindowFocus: false },
+  );
 
   // One-click deposit invoice PDF for the selected booking (restored from v1
   // BookingsTab; backend = trpc.tools.generateDeposit). Opens the rendered PDF
@@ -349,6 +360,20 @@ export default function BookingsTabV2() {
     setSupplierStatusMutation.mutate({ id, supplierStatus, supplierBookingRef });
   };
 
+  const downloadPacketCsv = (packet: OrderPacket) => {
+    const csv = orderPacketToCsv(packet);
+    // Prepend a UTF-8 BOM so Excel opens CJK names correctly.
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `order-packet-${packet.bookingId}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   const SUPPLIER_STATUS_LABEL: Record<SupplierStatus, string> = {
     not_placed: t("admin.bookingsTab.supplierNotPlaced"),
     placed: t("admin.bookingsTab.supplierPlaced"),
@@ -465,6 +490,7 @@ export default function BookingsTabV2() {
           onRowClick={(b) => {
             setSelectedId(b.id);
             setRefDraft(b.supplierBookingRef ?? "");
+            setPacketOpen(false);
             setDrawerOpen(true);
           }}
           selectedId={selectedId ?? undefined}
@@ -584,6 +610,81 @@ export default function BookingsTabV2() {
                     {t("admin.bookingsTab.supplierRefSave")}
                   </Button>
                 </div>
+                {/* Order packet (Phase 1.5): on-demand fetch that decrypts the
+                    passenger passports + audit-logs the access. Compact preview
+                    here; the CSV download carries the full manifest for the
+                    supplier portal. */}
+                {!packetOpen ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 rounded-lg text-xs"
+                    onClick={() => setPacketOpen(true)}
+                  >
+                    <FileText className="h-3.5 w-3.5 mr-1" />
+                    {t("admin.bookingsTab.orderPacketBtn")}
+                  </Button>
+                ) : orderPacketQuery.isLoading ? (
+                  <div className="flex items-center gap-1 text-xs text-gray-500">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    {t("admin.bookingsTab.orderPacketLoading")}
+                  </div>
+                ) : orderPacketQuery.data ? (
+                  <div className="space-y-2 rounded-lg border border-gray-200 p-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold">
+                        {t("admin.bookingsTab.orderPacketTitle")}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 rounded-lg text-xs"
+                        onClick={() =>
+                          orderPacketQuery.data && downloadPacketCsv(orderPacketQuery.data)
+                        }
+                      >
+                        <Download className="h-3.5 w-3.5 mr-1" />
+                        {t("admin.bookingsTab.orderPacketDownload")}
+                      </Button>
+                    </div>
+                    {orderPacketQuery.data.passengers.length === 0 ? (
+                      <p className="text-xs text-gray-500">
+                        {t("admin.bookingsTab.orderPacketNoPax")}
+                      </p>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-left text-gray-400">
+                              <th className="pr-2 font-medium">#</th>
+                              <th className="pr-2 font-medium">
+                                {t("admin.bookingsTab.orderPacketColName")}
+                              </th>
+                              <th className="font-medium">
+                                {t("admin.bookingsTab.orderPacketColPassport")}
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {orderPacketQuery.data.passengers.map((p) => (
+                              <tr key={p.index} className="border-t border-gray-100">
+                                <td className="pr-2 py-1 tabular-nums">{p.index}</td>
+                                <td className="pr-2">
+                                  {p.lastName} {p.firstName}
+                                </td>
+                                <td className="font-mono">{p.passportNumber || "—"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs text-red-600">
+                    {t("admin.bookingsTab.orderPacketError")}
+                  </p>
+                )}
               </div>
 
               {/* Tour */}
