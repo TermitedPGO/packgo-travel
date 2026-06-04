@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { trpc } from "@/lib/trpc";
 import { useLocale } from "@/contexts/LocaleContext";
+import { currencySymbol, type SupportedCurrency } from "@/lib/currency";
 import { trackPurchase } from "@/lib/analytics";
 import SEO from "@/components/SEO";
 
@@ -27,7 +28,7 @@ export default function PaymentSuccess() {
         tourId: (booking as any).tourId ?? 0,
         tourName: (booking as any).tourTitle ?? (booking as any).tour?.title ?? "Tour",
         value: booking.totalPrice ?? 0,
-        currency: "TWD",
+        currency: (booking as { currency?: string }).currency ?? "TWD",
         numTravelers:
           (booking.numberOfAdults ?? 0) +
           (booking.numberOfChildrenWithBed ?? 0) +
@@ -36,6 +37,8 @@ export default function PaymentSuccess() {
       });
     }
   }, [booking?.id]);
+
+  const cur = (((booking as { currency?: string })?.currency) || "TWD") as SupportedCurrency;
 
   if (isLoading) {
     return (
@@ -149,18 +152,18 @@ export default function PaymentSuccess() {
                   <div className="flex justify-between text-base">
                     <span className="text-gray-600">{t("paymentSuccess.deposit20")}</span>
                     <span className="font-semibold text-gray-900">
-                      NT$ {booking.depositAmount?.toLocaleString()}
+                      {currencySymbol(cur)} {booking.depositAmount?.toLocaleString()}
                     </span>
                   </div>
                   <div className="flex justify-between text-base">
                     <span className="text-gray-600">{t("paymentSuccess.remainingPayment")}</span>
                     <span className="font-semibold text-gray-900">
-                      NT$ {booking.remainingAmount?.toLocaleString()}
+                      {currencySymbol(cur)} {booking.remainingAmount?.toLocaleString()}
                     </span>
                   </div>
                   <div className="flex justify-between text-xl font-bold pt-3 border-t-2 border-gray-300">
                     <span className="text-gray-900">{t("paymentSuccess.totalAmount")}</span>
-                    <span className="text-primary">NT$ {booking.totalPrice.toLocaleString()}</span>
+                    <span className="text-primary">{currencySymbol(cur)} {booking.totalPrice.toLocaleString()}</span>
                   </div>
                 </div>
               </div>

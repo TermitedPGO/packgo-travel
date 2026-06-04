@@ -384,6 +384,7 @@ export const bookingsRouter = router({
             totalPrice,
             depositAmount,
             remainingAmount,
+            currency: isUsd ? "USD" : "TWD",
             language: input.language,
           }).catch((e) =>
             console.error(

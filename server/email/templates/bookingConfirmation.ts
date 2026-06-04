@@ -17,6 +17,9 @@ import type { BookingEmailData } from "./types";
  * Uses SMTP to send actual email to customer, with notifyOwner as backup notification
  */
 export async function sendBookingConfirmationEmail(data: BookingEmailData) {
+  // Currency symbol: USD for UV tours, NT$ for Lion (TWD). Never hardcode NT$ —
+  // a USD customer seeing "NT$" looks fraudulent and invites chargebacks.
+  const sym = data.currency === "USD" ? "$" : data.currency === "TWD" || !data.currency ? "NT$" : data.currency + " ";
   // Always notify owner about new booking (owner reads ZH)
   const emailContent = `
 訂單確認通知
@@ -36,9 +39,9 @@ export async function sendBookingConfirmationEmail(data: BookingEmailData) {
 - 嬰兒：${data.numberOfInfants} 位
 
 費用資訊：
-- 總金額：NT$ ${data.totalPrice.toLocaleString()}
-- 訂金：NT$ ${data.depositAmount.toLocaleString()}
-- 尾款：NT$ ${data.remainingAmount.toLocaleString()}
+- 總金額：${sym} ${data.totalPrice.toLocaleString()}
+- 訂金：${sym} ${data.depositAmount.toLocaleString()}
+- 尾款：${sym} ${data.remainingAmount.toLocaleString()}
   `.trim();
 
   await notifyOwner({
@@ -77,6 +80,7 @@ export async function sendBookingConfirmationEmail(data: BookingEmailData) {
  */
 function generateBookingConfirmationHTML(data: BookingEmailData): string {
   const isEN = data.language === 'en';
+  const sym = data.currency === "USD" ? "$" : data.currency === "TWD" || !data.currency ? "NT$" : data.currency + " ";
   // v78x: All user-facing strings extracted into a single copy block + bilingual.
   // Owner notification text stays ZH (sees admin perspective in notifyOwner).
   const c = isEN ? {
@@ -203,9 +207,9 @@ function generateBookingConfirmationHTML(data: BookingEmailData): string {
               <tr><td style="background:#ea580c;padding:14px 20px;"><p style="color:#fff;margin:0;font-size:13px;font-weight:700;letter-spacing:1px;">${c.sectionFee}</p></td></tr>
               <tr><td style="padding:20px;">
                 <table width="100%" cellpadding="0" cellspacing="0">
-                  <tr><td style="padding:8px 0;border-bottom:1px solid #fed7aa;"><span style="color:#9a3412;font-size:13px;">${c.feeDeposit}</span><span style="color:#9a3412;font-size:15px;font-weight:700;float:right;">NT$ ${data.depositAmount.toLocaleString()}</span></td></tr>
-                  <tr><td style="padding:8px 0;border-bottom:1px solid #fed7aa;"><span style="color:#888;font-size:13px;">${c.feeRemaining}</span><span style="color:#666;font-size:13px;font-weight:600;float:right;">NT$ ${data.remainingAmount.toLocaleString()}</span></td></tr>
-                  <tr><td style="padding:12px 0 0 0;"><span style="color:#333;font-size:15px;font-weight:700;">${c.feeTotal}</span><span style="color:#ea580c;font-size:20px;font-weight:900;float:right;">NT$ ${data.totalPrice.toLocaleString()}</span></td></tr>
+                  <tr><td style="padding:8px 0;border-bottom:1px solid #fed7aa;"><span style="color:#9a3412;font-size:13px;">${c.feeDeposit}</span><span style="color:#9a3412;font-size:15px;font-weight:700;float:right;">${sym} ${data.depositAmount.toLocaleString()}</span></td></tr>
+                  <tr><td style="padding:8px 0;border-bottom:1px solid #fed7aa;"><span style="color:#888;font-size:13px;">${c.feeRemaining}</span><span style="color:#666;font-size:13px;font-weight:600;float:right;">${sym} ${data.remainingAmount.toLocaleString()}</span></td></tr>
+                  <tr><td style="padding:12px 0 0 0;"><span style="color:#333;font-size:15px;font-weight:700;">${c.feeTotal}</span><span style="color:#ea580c;font-size:20px;font-weight:900;float:right;">${sym} ${data.totalPrice.toLocaleString()}</span></td></tr>
                 </table>
               </td></tr>
             </table>

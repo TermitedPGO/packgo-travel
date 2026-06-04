@@ -21,6 +21,8 @@ export interface BookingEmailData {
   totalPrice: number;
   depositAmount: number;
   remainingAmount: number;
+  /** ISO currency of the booking (USD for UV tours, TWD for Lion). Defaults to TWD. */
+  currency?: string;
   /** v78x: Optional customer language preference. Defaults to 'zh-TW' for backward compat. */
   language?: "zh-TW" | "en";
   /** QA audit Phase 9: pre-generated deposit invoice PDF URL. When present

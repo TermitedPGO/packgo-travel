@@ -158,6 +158,7 @@ export const bookingFollowupWorker = new Worker<
         totalPrice: d.totalPrice,
         depositAmount: d.depositAmount,
         remainingAmount: d.remainingAmount,
+        currency: d.isUsd ? "USD" : "TWD",
         language: d.language,
         depositInvoiceUrl: depositInvoiceUrl ?? undefined,
       });

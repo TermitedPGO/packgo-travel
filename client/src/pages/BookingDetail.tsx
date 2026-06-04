@@ -27,6 +27,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { getLoginUrl } from "@/const";
 import { useLocale } from "@/contexts/LocaleContext";
+import { currencySymbol, type SupportedCurrency } from "@/lib/currency";
 import PhotoUploadSection from "@/components/PhotoUploadSection";
 import SEO from "@/components/SEO";
 
@@ -160,6 +161,7 @@ export default function BookingDetail() {
   const totalAmount = booking.totalPrice;
   const depositAmount = booking.depositAmount;
   const balanceAmount = booking.remainingAmount;
+  const cur = (((booking as { currency?: string }).currency) || "TWD") as SupportedCurrency;
   const paidAmount = booking.paymentStatus === 'unpaid' ? 0 : 
                      booking.paymentStatus === 'deposit' ? depositAmount : 
                      booking.paymentStatus === 'paid' ? totalAmount : 0;
@@ -325,26 +327,26 @@ export default function BookingDetail() {
                 <div className="space-y-3">
                   <div className="flex justify-between items-center">
                     <span className="text-gray-600">{t('bookingDetail.totalAmount')}</span>
-                    <span className="font-bold">NT$ {totalAmount.toLocaleString()}</span>
+                    <span className="font-bold">{currencySymbol(cur)} {totalAmount.toLocaleString()}</span>
                   </div>
                   <Separator />
                   <div className="flex justify-between items-center">
                     <span className="text-gray-600">{t('bookingDetail.deposit20')}</span>
-                    <span className="font-medium">NT$ {depositAmount.toLocaleString()}</span>
+                    <span className="font-medium">{currencySymbol(cur)} {depositAmount.toLocaleString()}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-gray-600">{t('bookingDetail.balance')}</span>
-                    <span className="font-medium">NT$ {balanceAmount.toLocaleString()}</span>
+                    <span className="font-medium">{currencySymbol(cur)} {balanceAmount.toLocaleString()}</span>
                   </div>
                   <Separator />
                   <div className="flex justify-between items-center">
                     <span className="text-gray-600">{t('bookingDetail.paidAmount')}</span>
-                    <span className="font-bold text-[#8a6f3a]">NT$ {paidAmount.toLocaleString()}</span>
+                    <span className="font-bold text-[#8a6f3a]">{currencySymbol(cur)} {paidAmount.toLocaleString()}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-gray-600">{t('bookingDetail.unpaidAmount')}</span>
                     <span className="font-bold text-red-600">
-                      NT$ {(totalAmount - paidAmount).toLocaleString()}
+                      {currencySymbol(cur)} {(totalAmount - paidAmount).toLocaleString()}
                     </span>
                   </div>
                 </div>
@@ -365,7 +367,7 @@ export default function BookingDetail() {
                           ) : (
                             <CreditCard className="h-4 w-4 mr-2" />
                           )}
-                          {t('bookingDetail.payDeposit')} NT$ {depositAmount.toLocaleString()}
+                          {t('bookingDetail.payDeposit')} {currencySymbol(cur)} {depositAmount.toLocaleString()}
                         </Button>
                       )}
                       {canPayBalance && (
@@ -379,7 +381,7 @@ export default function BookingDetail() {
                           ) : (
                             <CreditCard className="h-4 w-4 mr-2" />
                           )}
-                          {t('bookingDetail.payBalance')} NT$ {balanceAmount.toLocaleString()}
+                          {t('bookingDetail.payBalance')} {currencySymbol(cur)} {balanceAmount.toLocaleString()}
                         </Button>
                       )}
                       {canPayDeposit && (
@@ -393,7 +395,7 @@ export default function BookingDetail() {
                           ) : (
                             <CreditCard className="h-4 w-4 mr-2" />
                           )}
-                          {t('bookingDetail.payFull')} NT$ {totalAmount.toLocaleString()}
+                          {t('bookingDetail.payFull')} {currencySymbol(cur)} {totalAmount.toLocaleString()}
                         </Button>
                       )}
                     </div>
