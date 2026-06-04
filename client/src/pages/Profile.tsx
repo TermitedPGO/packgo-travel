@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
+import { currencySymbol, type SupportedCurrency } from "@/lib/currency";
 import {
   Loader2, User, Calendar, LogOut, Heart, ShoppingBag,
   MapPin, TrendingUp, Award, MessageSquare, ChevronRight, Package, Clock,
@@ -805,7 +806,7 @@ function FavoritesSection({ setLocation }: { setLocation: (path: string) => void
                     </span>
                   </div>
                   <p className="text-primary font-bold mt-1">
-                    NT$ {tour.price?.toLocaleString()}
+                    {currencySymbol((tour.priceCurrency || "TWD") as SupportedCurrency)} {tour.price?.toLocaleString()}
                   </p>
                 </div>
                 
