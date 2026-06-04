@@ -71,6 +71,7 @@ export default function BookTour() {
     : (tourTranslation?.title || tour?.title || '');
   const { data: departures, isLoading: departuresLoading } = trpc.departures.listByTour.useQuery({ tourId });
   const createBookingMutation = trpc.bookings.create.useMutation();
+  const saveParticipantsMutation = trpc.bookings.saveParticipants.useMutation();
   
   const selectedDeparture = departures?.find(d => d.id === selectedDepartureId);
   
@@ -196,7 +197,7 @@ export default function BookTour() {
         tourId: tour.id,
         tourName: tour.title,
         price: totalPrice,
-        currency: "TWD",
+        currency: (tour as { priceCurrency?: string }).priceCurrency || "TWD",
         numTravelers: numberOfAdults + numberOfChildrenWithBed + numberOfChildrenNoBed + numberOfInfants,
       });
     }
@@ -226,6 +227,34 @@ export default function BookTour() {
         // Round 80.22: pass redemption (server validates against balance + caps)
         pointsToRedeem: safePointsToRedeem > 0 ? safePointsToRedeem : undefined,
       });
+
+      // Persist the per-passenger detail collected in step 3 (passport name /
+      // number / expiry, DOB, nationality). This was previously NEVER saved —
+      // the wizard collected it then discarded it, leaving the supplier order
+      // with no traveler data to fulfill. Non-fatal: the booking already
+      // exists, so a save hiccup surfaces in logs rather than losing the order.
+      if (participants.length > 0) {
+        try {
+          await saveParticipantsMutation.mutateAsync({
+            bookingId: booking.id,
+            participants: participants.map((p) => ({
+              participantType: p.participantType,
+              firstName: p.firstName,
+              lastName: p.lastName,
+              gender: p.gender || undefined,
+              dateOfBirth: p.dateOfBirth || undefined,
+              passportNumber: p.passportNumber || undefined,
+              passportExpiry: p.passportExpiry || undefined,
+              nationality: p.nationality || undefined,
+            })),
+          });
+        } catch (saveErr) {
+          console.error(
+            `[BookTour] saveParticipants failed for booking ${booking.id} (booking still created):`,
+            saveErr,
+          );
+        }
+      }
 
       // v2 Wave 1 Module 1.4 — PostHog booking_complete. Fires only on
       // successful mutation; bookingId comes from the server response.
