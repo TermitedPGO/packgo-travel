@@ -720,6 +720,11 @@ export const bookings = mysqlTable("bookings", {
   ]).default("not_placed").notNull(),
   supplierBookingRef: varchar("supplierBookingRef", { length: 128 }), // supplier's order #
   supplierConfirmedAt: timestamp("supplierConfirmedAt"),              // when supplier confirmed
+  // Phase 2.5 (migration 0086): the supplier cost Jeff entered AFTER verifying
+  // it against the operator's actual order confirmation. Manual only, NEVER
+  // auto-derived (supplier pricing nuance burns auto-quotes). Same unit/currency
+  // as totalPrice. Drives the margin display. Nullable = not entered yet.
+  supplierCost: int("supplierCost"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

@@ -812,6 +812,37 @@ export const bookingsRouter = router({
         };
       }),
 
+    // Admin: record the VERIFIED supplier cost for a booking (Phase 2.5).
+    // Manual entry only — Jeff types the cost after confirming it against the
+    // operator's actual order confirmation. Never auto-derived (supplier pricing
+    // nuance burns auto-quotes). Audit-logged. Drives the margin display; this
+    // moves no money, it only records a number.
+    setSupplierCost: adminProcedure
+      .input(
+        z.object({
+          id: z.number().int().positive().max(2_147_483_647),
+          // same unit as totalPrice (int); null clears it. Bounded to a sane max.
+          supplierCost: z.number().int().min(0).max(100_000_000).nullable(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        const { id, supplierCost } = input;
+        const before = await db.getBookingById(id).catch(() => null);
+        if (!before) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Booking not found" });
+        }
+        await db.updateBooking(id, { supplierCost });
+        const { audit } = await import("../_core/auditLog");
+        audit({
+          ctx,
+          action: "booking.setSupplierCost",
+          targetType: "booking",
+          targetId: id,
+          changes: { before: before.supplierCost ?? null, after: supplierCost },
+        });
+        return { success: true };
+      }),
+
     // NOTE (Phase 4D, 2026-05-19): `adminRefund` was moved to
     // ./bookingsPayment.ts. Composition spread in routers.ts keeps the
     // client path `trpc.bookings.adminRefund` resolving identically.

@@ -19,6 +19,7 @@
 import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { orderPacketToCsv, type OrderPacket } from "@shared/orderPacket";
+import { computeMargin } from "@shared/bookingMargin";
 import { toast } from "sonner";
 import { useLocale } from "@/contexts/LocaleContext";
 import {
@@ -83,6 +84,8 @@ type BookingRow = {
   // Phase 1.1: supplier fulfillment state machine
   supplierStatus?: SupplierStatus | null;
   supplierBookingRef?: string | null;
+  // Phase 2.5: manually-entered verified supplier cost (margin source)
+  supplierCost?: number | null;
 };
 
 const STATUS_TONE: Record<BookingStatus, StatusTone> = {
@@ -153,6 +156,8 @@ export default function BookingsTabV2() {
   // Phase 1.5: order packet is fetched ON DEMAND (decrypts passport + audit-logs),
   // never auto-loaded. Opens only when Jeff clicks the button for a booking.
   const [packetOpen, setPacketOpen] = useState(false);
+  // Phase 2.5: draft for the verified supplier-cost input, seeded when a row opens.
+  const [costDraft, setCostDraft] = useState("");
 
   const { data: rawBookings = [], isLoading, refetch } = trpc.bookings.adminList.useQuery();
   const bookings = useMemo(() => {
@@ -197,6 +202,16 @@ export default function BookingsTabV2() {
     { id: selectedId ?? 0 },
     { enabled: packetOpen && selectedId != null, refetchOnWindowFocus: false },
   );
+
+  // Phase 2.5: save the verified supplier cost (manual entry).
+  const setSupplierCostMutation = trpc.bookings.setSupplierCost.useMutation({
+    onSuccess: () => {
+      refetch();
+      toast.success(t("admin.bookingsTab.toastCostUpdated"));
+    },
+    onError: () => toast.error(t("admin.bookingsTab.toastUpdateFailed")),
+    onSettled: () => setUpdatingId(null),
+  });
 
   // One-click deposit invoice PDF for the selected booking (restored from v1
   // BookingsTab; backend = trpc.tools.generateDeposit). Opens the rendered PDF
@@ -360,6 +375,17 @@ export default function BookingsTabV2() {
     setSupplierStatusMutation.mutate({ id, supplierStatus, supplierBookingRef });
   };
 
+  const handleSaveCost = (id: number) => {
+    const trimmed = costDraft.trim();
+    const parsed = trimmed === "" ? null : Math.round(Number(trimmed));
+    if (parsed !== null && (Number.isNaN(parsed) || parsed < 0)) {
+      toast.error(t("admin.bookingsTab.costInvalid"));
+      return;
+    }
+    setUpdatingId(id);
+    setSupplierCostMutation.mutate({ id, supplierCost: parsed });
+  };
+
   const downloadPacketCsv = (packet: OrderPacket) => {
     const csv = orderPacketToCsv(packet);
     // Prepend a UTF-8 BOM so Excel opens CJK names correctly.
@@ -490,6 +516,7 @@ export default function BookingsTabV2() {
           onRowClick={(b) => {
             setSelectedId(b.id);
             setRefDraft(b.supplierBookingRef ?? "");
+            setCostDraft(b.supplierCost != null ? String(b.supplierCost) : "");
             setPacketOpen(false);
             setDrawerOpen(true);
           }}
@@ -737,6 +764,55 @@ export default function BookingsTabV2() {
                     label={paymentLabel(selected.paymentStatus, t)}
                   />
                 </Field>
+                {/* Supplier cost + margin (Phase 2.5): MANUAL verified cost only,
+                    never auto-derived. Margin = sell - cost. */}
+                <div className="space-y-1.5 pt-1">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min={0}
+                      value={costDraft}
+                      onChange={(e) => setCostDraft(e.target.value)}
+                      placeholder={t("admin.bookingsTab.supplierCostLabel")}
+                      className="h-8 rounded-lg text-sm"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 rounded-lg text-xs whitespace-nowrap"
+                      disabled={
+                        updatingId === selected.id ||
+                        costDraft.trim() ===
+                          (selected.supplierCost != null ? String(selected.supplierCost) : "")
+                      }
+                      onClick={() => handleSaveCost(selected.id)}
+                    >
+                      {t("admin.bookingsTab.supplierCostSave")}
+                    </Button>
+                  </div>
+                  {(() => {
+                    const m = computeMargin(selected.totalAmount ?? 0, selected.supplierCost ?? null);
+                    if (!m.hasCost) {
+                      return (
+                        <p className="text-xs text-gray-400">
+                          {t("admin.bookingsTab.marginNoCost")}
+                        </p>
+                      );
+                    }
+                    return (
+                      <p
+                        className={`text-xs font-medium ${
+                          m.isNegative ? "text-red-600" : "text-emerald-700"
+                        }`}
+                      >
+                        {t("admin.bookingsTab.marginLabel")}:{" "}
+                        {formatMoney(m.margin, selected.currency)}
+                        {m.marginPct != null && ` (${m.marginPct}%)`}
+                        {m.isNegative && ` (${t("admin.bookingsTab.marginNegative")})`}
+                      </p>
+                    );
+                  })()}
+                </div>
               </div>
 
               {/* Special requests */}

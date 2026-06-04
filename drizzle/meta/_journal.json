@@ -582,6 +582,13 @@
       "when": 1780600000000,
       "tag": "0085_supplier_status",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "5",
+      "when": 1780600100000,
+      "tag": "0086_supplier_cost",
+      "breakpoints": true
     }
   ]
 }
