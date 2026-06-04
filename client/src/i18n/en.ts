@@ -3018,6 +3018,10 @@ export const en = {
       marginNegative: 'below cost',
       toastCostUpdated: 'Cost updated',
       costInvalid: 'Invalid cost amount',
+      // Phase 3.2: §17550 consent record
+      consentLabel: '§17550 consent',
+      consentYes: 'Accepted',
+      consentNo: 'No record',
       toolsLabel: 'Tools',
       generateDepositPdf: 'Generate deposit invoice PDF',
       toastDepositGenerated: 'Deposit invoice PDF generated',

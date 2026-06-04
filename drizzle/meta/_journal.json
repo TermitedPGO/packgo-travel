@@ -589,6 +589,13 @@
       "when": 1780600100000,
       "tag": "0086_supplier_cost",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "5",
+      "when": 1780600200000,
+      "tag": "0087_booking_consent",
+      "breakpoints": true
     }
   ]
 }

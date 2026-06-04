@@ -226,6 +226,9 @@ export default function BookTour() {
         language: language === "en" ? "en" : "zh-TW",
         // Round 80.22: pass redemption (server validates against balance + caps)
         pointsToRedeem: safePointsToRedeem > 0 ? safePointsToRedeem : undefined,
+        // Phase 3.2: persist the §17550 consent the customer affirmed (the
+        // submit button is already gated on this; now it's recorded as evidence).
+        acceptedDisclosures,
       });
 
       // Persist the per-passenger detail collected in step 3 (passport name /

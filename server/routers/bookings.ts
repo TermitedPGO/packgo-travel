@@ -33,6 +33,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
 import type { OrderPacket } from "@shared/orderPacket";
+import { consentFields } from "@shared/consent";
 import * as db from "../db";
 import { sendBookingConfirmationEmail } from "../email";
 import { convertCurrency, type SupportedCurrency } from "../agents/exchangeRateAgent";
@@ -92,6 +93,12 @@ export const bookingsRouter = router({
           // Only honored when departure currency is USD — TWD bookings
           // require FX conversion which we defer for now.
           pointsToRedeem: z.number().int().min(0).max(10_000_000).optional(),
+          // Phase 3.2: the customer's affirmative consent to the CST §17550
+          // disclosures + cancellation policy. Optional so an older cached
+          // client mid-rollout still books (records null rather than breaking);
+          // the client already gates the submit button on this. Server-side
+          // hard-enforce is a deliberate later step.
+          acceptedDisclosures: z.boolean().optional(),
         })
       )
       .mutation(async ({ ctx, input }) => {
@@ -276,6 +283,8 @@ export const bookingsRouter = router({
             // v78y: stick the customer's language to the booking row so all
             // downstream emails (payment / reminders) speak it.
             customerLanguage: input.language || "zh-TW",
+            // Phase 3.2: persist the §17550 consent as dispute evidence.
+            ...consentFields(input.acceptedDisclosures, new Date()),
           } as any);
         } catch (err) {
           // If booking row insert fails, release the slots we reserved

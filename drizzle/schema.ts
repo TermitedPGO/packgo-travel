@@ -725,6 +725,11 @@ export const bookings = mysqlTable("bookings", {
   // auto-derived (supplier pricing nuance burns auto-quotes). Same unit/currency
   // as totalPrice. Drives the margin display. Nullable = not entered yet.
   supplierCost: int("supplierCost"),
+  // Phase 3.2 (migration 0087): CA B&P §17550 consent capture. The booking
+  // form's consent checkbox was client-only; persist it as dispute evidence.
+  // disclaimerVersion stamps which disclosure-text version the customer accepted.
+  disclaimerAcceptedAt: timestamp("disclaimerAcceptedAt"),
+  disclaimerVersion: varchar("disclaimerVersion", { length: 32 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

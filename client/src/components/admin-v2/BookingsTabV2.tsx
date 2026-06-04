@@ -86,6 +86,8 @@ type BookingRow = {
   supplierBookingRef?: string | null;
   // Phase 2.5: manually-entered verified supplier cost (margin source)
   supplierCost?: number | null;
+  // Phase 3.2: §17550 consent capture (dispute evidence)
+  disclaimerAcceptedAt?: string | Date | null;
 };
 
 const STATUS_TONE: Record<BookingStatus, StatusTone> = {
@@ -727,6 +729,12 @@ export default function BookingsTabV2() {
                 </Field>
                 <Field label="Email">{selected.contactEmail || "—"}</Field>
                 <Field label={t("contactUs.phone")}>{selected.contactPhone || "—"}</Field>
+                {/* Phase 3.2: §17550 consent record — dispute evidence */}
+                <Field label={t("admin.bookingsTab.consentLabel")}>
+                  {selected.disclaimerAcceptedAt
+                    ? `${t("admin.bookingsTab.consentYes")} (${formatDate(selected.disclaimerAcceptedAt)})`
+                    : t("admin.bookingsTab.consentNo")}
+                </Field>
               </div>
 
               {/* Trip */}

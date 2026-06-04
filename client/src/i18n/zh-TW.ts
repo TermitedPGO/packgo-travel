@@ -2984,6 +2984,10 @@ export const zhTW = {
       marginNegative: '低於成本',
       toastCostUpdated: '成本已更新',
       costInvalid: '成本格式不正確',
+      // Phase 3.2: §17550 consent record
+      consentLabel: '§17550 條款同意',
+      consentYes: '已同意',
+      consentNo: '無紀錄',
       toolsLabel: '工具',
       generateDepositPdf: '產生訂金通知 PDF',
       toastDepositGenerated: '訂金通知 PDF 已產生',
