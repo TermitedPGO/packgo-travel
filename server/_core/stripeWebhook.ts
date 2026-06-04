@@ -100,6 +100,20 @@ export async function handleStripeWebhook(req: Request, res: Response) {
         break;
       }
 
+      // Phase 2.3: chargeback / dispute was previously UNhandled. A card
+      // dispute on a tour deposit (common in travel) was a silent loss with no
+      // chance to contest before Stripe's deadline. Alert the owner with the
+      // evidence-due date. Notify-only (no booking/accounting mutation, since
+      // the paymentStatus enum has no 'disputed' state; ops drives the outcome).
+      // NOTE: requires `charge.dispute.created` + `charge.dispute.closed` to be
+      // enabled in the Stripe webhook config.
+      case "charge.dispute.created":
+      case "charge.dispute.closed": {
+        const dispute = event.data.object as Stripe.Dispute;
+        await handleChargeDispute(event.type, dispute);
+        break;
+      }
+
       // Round 80.20: Membership Phase 2 — subscription lifecycle.
       // Customer subscribes → set users.tier; cancels → reset to free.
       case "customer.subscription.created":
@@ -508,6 +522,48 @@ async function handlePaymentIntentFailed(paymentIntent: Stripe.PaymentIntent) {
   await drizzleDb.transaction(async (tx) => {
     await db.updatePaymentStatus(paymentIntent.id, "failed", undefined, tx);
   });
+  // Phase 2.4: a failed payment used to go dark (log-only). Neither the
+  // customer nor Jeff heard about it, so an intended payment (esp. a balance)
+  // silently aged into the unpaid hole. Alert the owner so it can be chased.
+  const amt = paymentIntent.amount ? paymentIntent.amount / 100 : 0;
+  await notifyOwner({
+    title: `⚠️ 付款失敗 Payment failed — ${amt} ${(paymentIntent.currency ?? "").toUpperCase()}`,
+    content:
+      `Stripe payment_intent ${paymentIntent.id} failed.\n` +
+      `Reason: ${paymentIntent.last_payment_error?.message ?? "(none)"}\n` +
+      `客人的卡可能被拒,需要寄重試連結或聯絡客人。`,
+  }).catch((e) => log.error({ err: e }, "[Stripe Webhook] notifyOwner (payment failed) failed"));
+}
+
+/**
+ * Phase 2.3: chargeback / dispute alert. Notify-only. Surfaces the dispute and
+ * its evidence deadline so Jeff can contest it in the Stripe Dashboard before
+ * the window closes. No money/booking mutation here.
+ */
+async function handleChargeDispute(eventType: string, dispute: Stripe.Dispute) {
+  const amount = dispute.amount ? dispute.amount / 100 : 0;
+  const cur = (dispute.currency ?? "").toUpperCase();
+  const dueTs = dispute.evidence_details?.due_by;
+  const due = dueTs
+    ? new Date(dueTs * 1000).toISOString().slice(0, 16).replace("T", " ") + " UTC"
+    : "(unknown)";
+  const chargeId = typeof dispute.charge === "string" ? dispute.charge : dispute.charge?.id ?? "?";
+  log.warn(
+    { disputeId: dispute.id, eventType, status: dispute.status, reason: dispute.reason },
+    "[Stripe Webhook] charge dispute",
+  );
+  await notifyOwner({
+    title:
+      eventType === "charge.dispute.created"
+        ? `⚠️ 收到爭議款 chargeback — ${amount} ${cur}`
+        : `爭議款結案 dispute closed (${dispute.status}) — ${amount} ${cur}`,
+    content:
+      `Dispute ${dispute.id}\nCharge: ${chargeId}\nAmount: ${amount} ${cur}\n` +
+      `Reason: ${dispute.reason}\nStatus: ${dispute.status}\n` +
+      (eventType === "charge.dispute.created"
+        ? `證據提交截止 Evidence due: ${due}\n請到 Stripe Dashboard 上傳證據(訂單確認、取消政策同意紀錄)反駁,逾期就直接輸。`
+        : `outcome: ${dispute.status}`),
+  }).catch((e) => log.error({ err: e }, "[Stripe Webhook] notifyOwner (dispute) failed"));
 }
 
 /**
