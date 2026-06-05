@@ -136,3 +136,6 @@ agents-testing/
 # Per Vibe Coding refactor decision D4 (2026-05-18): not tracked, regenerated
 # on-demand by the scripts in scripts/ when needed.
 .audit/
+
+# Gmail classifier eval corpus (real customer PII — never commit)
+scripts/gmail-eval/data/
