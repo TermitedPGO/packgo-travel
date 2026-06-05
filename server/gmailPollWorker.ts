@@ -16,6 +16,7 @@ import { getDb } from "./db";
 import { gmailIntegration } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { notifyOwner } from "./_core/notification";
+import { handleIntegrationPollError } from "./_core/gmailAuthFailure";
 
 export const gmailPollWorker = new Worker<GmailPollJobData, GmailPollJobResult>(
   "gmail-poll",
@@ -47,10 +48,34 @@ export const gmailPollWorker = new Worker<GmailPollJobData, GmailPollJobResult>(
         errors += result.totalFailed + result.errors.length;
       } catch (err) {
         errors++;
-        console.error(
-          `[GmailPollWorker] integration ${integration.id} failed:`,
-          err
-        );
+        // 2026-06-04 — a revoked / expired OAuth grant used to fail here
+        // silently every tick (this catch swallowed it, the job still
+        // "completed", so the failed-event notifyOwner never fired). Now we
+        // detect invalid_grant specifically and alert the owner ONCE per
+        // revocation episode (deduped via disconnectReason). isActive is left
+        // at 1 on purpose (Jeff's call): keep polling, just stop spamming.
+        const outcome = await handleIntegrationPollError(integration, err, {
+          markDisconnectReason: async (id, reason) => {
+            await drizzleDb
+              .update(gmailIntegration)
+              .set({ disconnectReason: reason })
+              .where(eq(gmailIntegration.id, id));
+          },
+          notifyOwner,
+        });
+        if (outcome.revoked) {
+          console.error(
+            `[GmailPollWorker] integration ${integration.id} (${integration.emailAddress}) ` +
+              `Gmail token revoked/expired — ${
+                outcome.alerted ? "owner alerted (once)" : "already alerted this episode"
+              }; needs re-auth, isActive kept=1`
+          );
+        } else {
+          console.error(
+            `[GmailPollWorker] integration ${integration.id} failed:`,
+            err
+          );
+        }
       }
     }
 
