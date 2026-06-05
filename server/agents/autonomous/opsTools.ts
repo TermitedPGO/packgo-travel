@@ -185,6 +185,84 @@ export async function executeReadTool(
   }
 }
 
+// ── Slice 3: structured cards for the chat-first UI ────────────────────────
+// The OpsAgent renders data as cards in the conversation, not just markdown.
+// toCard() maps a read tool's structured result → a typed card the frontend
+// knows how to render. Returns null for non-cardable tools / empty results.
+export type OpsCard =
+  | { type: "departures"; items: any[] }
+  | { type: "bookings"; items: any[] }
+  | { type: "customers"; items: any[] }
+  | {
+      type: "finance";
+      period: string;
+      income: number;
+      expenses: number;
+      netProfit: number;
+      trustDeferredIncome: number;
+      missingReceiptCount: number;
+    };
+
+export function toCard(name: string, data: any): OpsCard | null {
+  if (!data || data.error) return null;
+  switch (name) {
+    case "search_departures":
+      if (!Array.isArray(data.departures) || data.departures.length === 0) return null;
+      return {
+        type: "departures",
+        items: data.departures.slice(0, 6).map((d: any) => ({
+          id: d.id,
+          title: d.title,
+          country: d.country,
+          date: d.departureDate,
+          seatsLeft: d.seatsLeft,
+          totalSlots: d.totalSlots,
+          opsStatus: d.opsStatus,
+          tourLeader: d.tourLeader,
+        })),
+      };
+    case "search_bookings":
+      if (!Array.isArray(data.bookings) || data.bookings.length === 0) return null;
+      return {
+        type: "bookings",
+        items: data.bookings.slice(0, 6).map((b: any) => ({
+          id: b.id,
+          customerName: b.customerName,
+          tourTitle: b.tourTitle,
+          date: b.departureDate,
+          totalPrice: b.totalPrice,
+          paymentStatus: b.paymentStatus,
+          bookingStatus: b.bookingStatus,
+        })),
+      };
+    case "search_customers":
+      if (!Array.isArray(data.customers) || data.customers.length === 0) return null;
+      return {
+        type: "customers",
+        items: data.customers.slice(0, 6).map((c: any) => ({
+          id: c.id,
+          email: c.email,
+          budgetTier: c.budgetTier,
+          bookingCount: c.bookingCount,
+          totalSpend: c.totalSpend,
+          vipScore: c.vipScore,
+        })),
+      };
+    case "get_finance_summary":
+      return {
+        type: "finance",
+        period: data.period,
+        income: data.income,
+        expenses: data.expenses,
+        netProfit: data.netProfit,
+        trustDeferredIncome: data.trustDeferredIncome,
+        missingReceiptCount: data.missingReceiptCount,
+      };
+    default:
+      return null;
+  }
+}
+
 async function runTool(name: string, input: any): Promise<unknown> {
   const { getDb } = await import("../../db");
   const { tours, tourDepartures, bookings, customerProfiles, bankTransactions } =

@@ -247,6 +247,129 @@ function ApprovalStrip() {
   );
 }
 
+// ── Slice 3: inline data cards (OpsAgent surfaces data as cards) ──────────
+function usd(n: number): string {
+  if (n == null || isNaN(n)) return "$0";
+  return "$" + Math.round(n).toLocaleString("en-US");
+}
+function parseCards(context: string | null | undefined): any[] {
+  try {
+    const ctx = context ? JSON.parse(context) : {};
+    return Array.isArray(ctx.cards) ? ctx.cards : [];
+  } catch {
+    return [];
+  }
+}
+function OpsCards({ cards }: { cards: any[] | null | undefined }) {
+  const { t } = useLocale();
+  if (!cards || cards.length === 0) return null;
+  const period = (p: string) =>
+    p === "last_month"
+      ? t("admin.agentChat.periodLastMonth")
+      : p === "this_year"
+        ? t("admin.agentChat.periodThisYear")
+        : t("admin.agentChat.periodThisMonth");
+  const head = (label: string) => (
+    <div className="px-3 py-1.5 bg-gray-50 border-b border-gray-100 text-[11px] font-semibold text-gray-500">
+      {label}
+    </div>
+  );
+  return (
+    <div className="mt-3 space-y-2 not-prose">
+      {cards.map((card: any, i: number) => {
+        if (card.type === "departures") {
+          return (
+            <div key={i} className="rounded-xl border border-gray-200 overflow-hidden bg-white">
+              {head(t("admin.agentChat.cardDepartures"))}
+              <div className="divide-y divide-gray-100">
+                {card.items.map((d: any, j: number) => (
+                  <div key={j} className="px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium text-gray-900 truncate">{d.title}</span>
+                      <span className="text-[11px] text-gray-500 flex-shrink-0">
+                        {d.seatsLeft}/{d.totalSlots} {t("admin.agentChat.cardSeats")}
+                      </span>
+                    </div>
+                    <div className="text-xs text-gray-400 mt-0.5">
+                      {(d.date || "").slice(0, 10)}
+                      {d.tourLeader ? " · " + d.tourLeader : ""}
+                      {d.country ? " · " + d.country : ""}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        }
+        if (card.type === "bookings") {
+          return (
+            <div key={i} className="rounded-xl border border-gray-200 overflow-hidden bg-white">
+              {head(t("admin.agentChat.cardBookings"))}
+              <div className="divide-y divide-gray-100">
+                {card.items.map((b: any, j: number) => (
+                  <div key={j} className="px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium text-gray-900 truncate">{b.tourTitle || b.customerName}</span>
+                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${b.paymentStatus === "paid" ? "bg-black" : "bg-gray-300"}`} />
+                    </div>
+                    <div className="text-xs text-gray-400 mt-0.5">
+                      {b.customerName}
+                      {b.date ? " · " + (b.date || "").slice(0, 10) : ""}
+                      {b.totalPrice != null ? " · " + usd(b.totalPrice) : ""}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        }
+        if (card.type === "customers") {
+          return (
+            <div key={i} className="rounded-xl border border-gray-200 overflow-hidden bg-white">
+              {head(t("admin.agentChat.cardCustomers"))}
+              <div className="divide-y divide-gray-100">
+                {card.items.map((c: any, j: number) => (
+                  <div key={j} className="px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium text-gray-900 truncate">{c.email}</span>
+                      {c.budgetTier ? <span className="text-[11px] text-gray-500 flex-shrink-0">{c.budgetTier}</span> : null}
+                    </div>
+                    <div className="text-xs text-gray-400 mt-0.5">
+                      {c.totalSpend != null ? usd(c.totalSpend) : ""}
+                      {c.bookingCount != null ? " · " + c.bookingCount + " " + t("admin.agentChat.cardOrders") : ""}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        }
+        if (card.type === "finance") {
+          return (
+            <div key={i} className="rounded-xl border border-gray-200 p-3 bg-white">
+              <div className="text-[11px] font-semibold text-gray-500 mb-2">
+                {t("admin.agentChat.cardFinance")} · {period(card.period)}
+              </div>
+              <div className="space-y-1 text-sm">
+                <div className="flex justify-between"><span className="text-gray-500">{t("admin.agentChat.cardRevenue")}</span><span>{usd(card.income)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">{t("admin.agentChat.cardExpenses")}</span><span>{usd(card.expenses)}</span></div>
+                <div className="flex justify-between font-semibold"><span>{t("admin.agentChat.cardNetProfit")}</span><span>{usd(card.netProfit)}</span></div>
+                {card.trustDeferredIncome > 0 ? (
+                  <div className="flex justify-between text-gray-400"><span>{t("admin.agentChat.cardTrustDeposit")}</span><span>{usd(card.trustDeferredIncome)}</span></div>
+                ) : null}
+              </div>
+              {card.missingReceiptCount > 0 ? (
+                <div className="text-[11px] text-gray-500 mt-2">{t("admin.agentChat.cardMissingReceipts", { n: String(card.missingReceiptCount) })}</div>
+              ) : null}
+            </div>
+          );
+        }
+        return null;
+      })}
+    </div>
+  );
+}
+
 // ── Main chat page ───────────────────────────────────────────────────────
 
 export default function AgentChatPage() {
@@ -255,6 +378,7 @@ export default function AgentChatPage() {
   const [streamingText, setStreamingText] = useState<string | null>(null);
   const [streamingStatus, setStreamingStatus] = useState<string | null>(null);
   const [streamingActions, setStreamingActions] = useState<any[] | null>(null);
+  const [streamingCards, setStreamingCards] = useState<any[] | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [pendingImages, setPendingImages] = useState<File[]>([]);
   const utils = trpc.useUtils();
@@ -317,6 +441,7 @@ export default function AgentChatPage() {
     setIsStreaming(true);
     setStreamingText("");
     setStreamingActions(null);
+    setStreamingCards(null);
 
     let imageUrls: string[] = [];
     if (pendingImages.length > 0) {
@@ -391,6 +516,7 @@ export default function AgentChatPage() {
               if (event.finalAnswer) {
                 setStreamingText(event.finalAnswer);
                 setStreamingActions(event.suggestedActions ?? null);
+                setStreamingCards(event.cards ?? null);
               }
               setQuestion("");
               setTimeout(() => {
@@ -399,6 +525,7 @@ export default function AgentChatPage() {
                 setTimeout(() => {
                   setStreamingText(null);
                   setStreamingActions(null);
+                  setStreamingCards(null);
                 }, 600);
               }, 400);
             } else if (event.type === "error") {
@@ -535,6 +662,9 @@ export default function AgentChatPage() {
                   <Streamdown>{m.body || ""}</Streamdown>
                 </div>
 
+                {/* Data cards (agent only) */}
+                {!isJeff && <OpsCards cards={parseCards(m.context)} />}
+
                 {/* Action chips (agent only) */}
                 {!isJeff &&
                   (() => {
@@ -617,6 +747,7 @@ export default function AgentChatPage() {
                   <span className="inline-block w-1.5 h-4 ml-0.5 bg-black align-text-bottom animate-pulse" />
                 )}
               </div>
+              <OpsCards cards={streamingCards} />
               {streamingActions && streamingActions.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   {streamingActions.map((action: any, i: number) => {

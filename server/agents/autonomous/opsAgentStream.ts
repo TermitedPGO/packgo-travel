@@ -21,7 +21,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { ENV } from "../../_core/env";
 import { createChildLogger } from "../../_core/logger";
-import { READ_TOOLS, executeReadTool } from "./opsTools";
+import { READ_TOOLS, executeReadTool, toCard } from "./opsTools";
 
 const log = createChildLogger({ module: "opsAgentStream" });
 
@@ -41,6 +41,7 @@ export interface StreamEvent {
   text?: string;
   finalAnswer?: string;
   suggestedActions?: any[];
+  cards?: any[];
   error?: string;
 }
 
@@ -139,6 +140,7 @@ export async function* runOpsAgentStream(
 
     const tools = [...READ_TOOLS, SUGGEST_ACTION_TOOL];
     const suggestedActions: any[] = [];
+    const cards: any[] = [];
     let finalAnswer = "";
 
     for (let round = 0; round < MAX_ROUNDS; round++) {
@@ -188,6 +190,12 @@ export async function* runOpsAgentStream(
         } else {
           readNames.push(block.name);
           const result = await executeReadTool(block.name, block.input);
+          try {
+            const card = toCard(block.name, JSON.parse(result));
+            if (card) cards.push(card);
+          } catch {
+            /* result not JSON or not cardable — skip */
+          }
           toolResults.push({
             type: "tool_result",
             tool_use_id: block.id,
@@ -238,7 +246,7 @@ export async function* runOpsAgentStream(
       finalAnswer = "我沒查到對應的資料,可以換個方式問問看。";
     }
 
-    yield { type: "done", finalAnswer, suggestedActions };
+    yield { type: "done", finalAnswer, suggestedActions, cards };
   } catch (err) {
     const message = (err as Error).message ?? "Unknown error";
     log.error({ err }, "[opsAgentStream] stream failed");

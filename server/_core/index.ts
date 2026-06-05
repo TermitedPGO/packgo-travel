@@ -498,6 +498,7 @@ async function startServer() {
       const { runOpsAgentStream } = await import("../agents/autonomous/opsAgentStream");
       let finalAnswer = "";
       let suggestedActions: any[] = [];
+      let cards: any[] = [];
       const startedAt = Date.now();
       let firstTokenLogged = false;
       try {
@@ -519,7 +520,8 @@ async function startServer() {
           } else if (event.type === "done") {
             finalAnswer = event.finalAnswer ?? "";
             suggestedActions = event.suggestedActions ?? [];
-            send({ type: "done", finalAnswer, suggestedActions });
+            cards = event.cards ?? [];
+            send({ type: "done", finalAnswer, suggestedActions, cards });
             logger.info(
               { ms: Date.now() - startedAt, len: finalAnswer.length },
               "[ask-ops-stream] done",
@@ -546,7 +548,7 @@ async function startServer() {
           messageType: "observation",
           title: question.slice(0, 80),
           body: finalAnswer,
-          context: JSON.stringify({ suggestedActions, streamed: true }),
+          context: JSON.stringify({ suggestedActions, cards, streamed: true }),
           priority: "normal",
           // Jeff is watching this stream live — it's a reply to his own
           // question, NOT a proactive notification. Mark read so live chatting
