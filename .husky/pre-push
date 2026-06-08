@@ -1,0 +1,22 @@
+#!/usr/bin/env sh
+# Pre-push gate — added 2026-06-08 after a drifted test reached `main`.
+#
+# Runs the full Vitest suite before every push so a red suite can't
+# silently land on `main`/production. tsc + i18n parity stay on the
+# pre-commit hook (fast, every commit); the ~75s test suite runs here,
+# on push only, to keep commits snappy.
+#
+# Why: server/routers/bookings.test.ts had drifted (asserted 8 router
+# procedures while the router had grown to 11 via the supplier-fulfillment
+# phases) and reached main, because pre-commit runs tsc + i18n but NOT
+# vitest. It was caught only by a manual pre-deploy `pnpm test`. This
+# closes that gap.
+#
+# To bypass in an emergency: git push --no-verify
+# (Needs the same local env as `pnpm test` — e.g. a running Redis.)
+
+set -e
+
+echo "[pre-push] running full test suite (pnpm test)..."
+NODE_OPTIONS="--max-old-space-size=6144" pnpm test
+echo "[pre-push] ✓ tests green — push allowed"
