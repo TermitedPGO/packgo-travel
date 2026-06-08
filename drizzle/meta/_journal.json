@@ -596,6 +596,13 @@
       "when": 1780600200000,
       "tag": "0087_booking_consent",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "5",
+      "when": 1780600300000,
+      "tag": "0088_inquiry_tour_context",
+      "breakpoints": true
     }
   ]
 }

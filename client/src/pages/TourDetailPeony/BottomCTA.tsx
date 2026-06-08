@@ -12,14 +12,16 @@ import { Button } from "@/components/ui/button";
 import { useLocale } from "@/contexts/LocaleContext";
 import { CONTACT } from "@/lib/brand";
 import { formatDualPrice, type getThemeColorByDestination } from "./helpers";
+import { type InquiryMode } from "./actionArea.helpers";
 
 export type BottomCTAProps = {
   tour: any;
   themeColor: ReturnType<typeof getThemeColorByDestination>;
   navigate: (path: string) => void;
+  onInquire: (mode: InquiryMode) => void;
 };
 
-export default function BottomCTA({ tour, themeColor, navigate }: BottomCTAProps) {
+export default function BottomCTA({ tour, themeColor, navigate, onInquire }: BottomCTAProps) {
   const { t, formatPrice } = useLocale();
   return (
     <>
@@ -61,12 +63,21 @@ export default function BottomCTA({ tour, themeColor, navigate }: BottomCTAProps
                 <span className="hidden lg:inline">{CONTACT.phoneDisplay}</span>
                 <span className="lg:hidden">{t('tourDetail.contactUs')}</span>
               </a>
-              <Button
+              {/* Online checkout kept but demoted to a low-weight text link. */}
+              <button
+                type="button"
                 onClick={() => navigate(`/book/${tour.id}`)}
-                className="px-6 md:px-10 py-3 text-white font-bold text-base md:text-lg"
+                className="hidden sm:inline text-sm text-gray-500 underline-offset-4 transition-colors hover:text-gray-700 hover:underline"
+              >
+                {t('tourDetail.action.cta.bookOnline')}
+              </button>
+              {/* Primary CTA is now "request quote" (inquiry), not online checkout. */}
+              <Button
+                onClick={() => onInquire('quote')}
+                className="px-6 md:px-10 py-3 text-white font-bold text-base md:text-lg rounded-lg"
                 style={{ backgroundColor: themeColor.primary }}
               >
-                {t('tourDetail.bookNowBtn')}
+                {t('tourDetail.action.cta.requestQuote')}
               </Button>
             </div>
           </div>

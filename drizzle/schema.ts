@@ -857,6 +857,19 @@ export const inquiries = mysqlTable("inquiries", {
   numberOfPeople: int("numberOfPeople"),
   budget: int("budget"),
   preferredDepartureDate: timestamp("preferredDepartureDate"),
+  // Tour-page redesign (migration 0088): structured context when an inquiry is
+  // raised from a tour page's "decision + action" area. Both nullable/additive.
+  //   relatedTourId: soft ref to tours.id (NULL = not raised from a tour page),
+  //     mirrors the existing userId/assignedTo soft refs (no FK constraint).
+  //   wizardAnswers: the 3-question fit wizard's language-neutral option keys.
+  //     Qualitative buckets kept honest here instead of being forced into the
+  //     typed numberOfPeople/budget/preferredDepartureDate fields above.
+  relatedTourId: int("relatedTourId"),
+  wizardAnswers: json("wizardAnswers").$type<{
+    people?: "1-2" | "3-5" | "6+";
+    timeframe?: "soon" | "school_break" | "discuss";
+    budget?: "economy" | "comfort" | "luxury";
+  }>(),
   status: mysqlEnum("status", [
     "new",           // New inquiry
     "in_progress",   // Being processed

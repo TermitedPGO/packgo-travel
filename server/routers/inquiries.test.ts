@@ -231,3 +231,91 @@ describe("inquiriesRouter.addMessage — admin reply emails the customer", () =>
     expect(result.emailSent).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// create — tour-page action area structured context (migration 0088)
+//
+// The redesigned tour page raises inquiries pre-seeded with which tour was
+// being viewed (relatedTourId) + the fit-wizard answers (wizardAnswers JSON),
+// while keeping name+email required and the per-IP rate limit unchanged.
+// ---------------------------------------------------------------------------
+describe("inquiriesRouter.create — tour-page structured context", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (checkRateLimit as any).mockResolvedValue({ allowed: true });
+    (db.createInquiry as any).mockResolvedValue({ id: 7, inquiryType: "general" });
+  });
+
+  function makeContext() {
+    return {
+      req: { headers: {}, socket: {} } as any,
+      res: { cookie: () => {}, clearCookie: () => {} } as any,
+      user: null,
+      ip: "127.0.0.1",
+    };
+  }
+
+  it("forwards relatedTourId + wizardAnswers + inquiryType to db.createInquiry", async () => {
+    const caller = (inquiriesRouter as any).createCaller(makeContext());
+    await caller.create({
+      customerName: "王小明",
+      customerEmail: "ming@example.com",
+      customerPhone: "+1-555-0100",
+      subject: "[報價] 北海道親子賞雪 5 日",
+      message: "行程詢問: 北海道親子賞雪 5 日 (Tour #1234)",
+      inquiryType: "custom_tour",
+      relatedTourId: 1234,
+      wizardAnswers: { people: "3-5", timeframe: "school_break", budget: "comfort" },
+    });
+
+    expect(db.createInquiry).toHaveBeenCalledTimes(1);
+    const row = (db.createInquiry as any).mock.calls[0][0];
+    expect(row.relatedTourId).toBe(1234);
+    expect(row.wizardAnswers).toEqual({
+      people: "3-5",
+      timeframe: "school_break",
+      budget: "comfort",
+    });
+    expect(row.inquiryType).toBe("custom_tour");
+    expect(row.status).toBe("new");
+  });
+
+  it("defaults inquiryType to 'general' and omits tour context when not from a tour page", async () => {
+    const caller = (inquiriesRouter as any).createCaller(makeContext());
+    await caller.create({
+      customerName: "Jane",
+      customerEmail: "jane@example.com",
+      subject: "General question",
+      message: "Hello",
+    });
+    const row = (db.createInquiry as any).mock.calls[0][0];
+    expect(row.inquiryType).toBe("general");
+    expect(row.relatedTourId).toBeUndefined();
+    expect(row.wizardAnswers).toBeUndefined();
+  });
+
+  it("rejects when rate limited (TOO_MANY_REQUESTS) without inserting", async () => {
+    (checkRateLimit as any).mockResolvedValue({ allowed: false });
+    const caller = (inquiriesRouter as any).createCaller(makeContext());
+    await expect(
+      caller.create({
+        customerName: "Bot",
+        customerEmail: "bot@example.com",
+        subject: "spam",
+        message: "spam",
+      }),
+    ).rejects.toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    expect(db.createInquiry).not.toHaveBeenCalled();
+  });
+
+  it("keeps name + email required (zod rejects empty name / bad email)", async () => {
+    const caller = (inquiriesRouter as any).createCaller(makeContext());
+    await expect(
+      caller.create({ customerName: "", customerEmail: "x@y.com", subject: "s", message: "m" }),
+    ).rejects.toBeTruthy();
+    await expect(
+      caller.create({ customerName: "Ok", customerEmail: "not-an-email", subject: "s", message: "m" }),
+    ).rejects.toBeTruthy();
+    expect(db.createInquiry).not.toHaveBeenCalled();
+  });
+});

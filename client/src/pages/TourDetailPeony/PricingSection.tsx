@@ -15,6 +15,7 @@ import {
   PriceComparisonWidget,
   type getThemeColorByDestination,
 } from "./helpers";
+import { type InquiryMode } from "./actionArea.helpers";
 
 export type PricingSectionProps = {
   tour: any;
@@ -24,6 +25,7 @@ export type PricingSectionProps = {
   language: string;
   navigate: (path: string) => void;
   ensureArray: (val: any) => any[];
+  onInquire: (mode: InquiryMode) => void;
 };
 
 export default function PricingSection({
@@ -34,6 +36,7 @@ export default function PricingSection({
   language,
   navigate,
   ensureArray,
+  onInquire,
 }: PricingSectionProps) {
   const { t } = useLocale();
 
@@ -53,22 +56,23 @@ export default function PricingSection({
           onSelectDeparture={(departureId) => navigate(`/book/${tour.id}?departure=${departureId}`)}
         />
 
-        {/* CTA Buttons */}
+        {/* CTA Buttons (tour-page-redesign): inquiry promoted to primary,
+            online checkout demoted to a secondary (kept, not removed). */}
         <div className="flex flex-col sm:flex-row gap-4 justify-center mt-8">
           <Button
-            onClick={() => navigate(`/book/${tour.id}`)}
-            className="px-8 py-4 text-white text-lg font-medium btn-hover-lift transition-all duration-300 hover:shadow-lg"
+            onClick={() => onInquire('quote')}
+            className="px-8 py-4 text-white text-lg font-medium rounded-lg btn-hover-lift transition-all duration-300 hover:shadow-lg"
             style={{ backgroundColor: themeColor.primary }}
           >
-            {t('tourDetail.bookNowBtn')}
+            {t('tourDetail.action.cta.requestQuote')}
           </Button>
           <Button
             variant="outline"
-            onClick={() => navigate("/contact")}
-            className="px-8 py-4 text-lg font-medium border-2 btn-hover-lift transition-all duration-300 hover:bg-gray-50"
+            onClick={() => navigate(`/book/${tour.id}`)}
+            className="px-8 py-4 text-lg font-medium border-2 rounded-lg btn-hover-lift transition-all duration-300 hover:bg-gray-50"
             style={{ borderColor: themeColor.primary, color: themeColor.primary }}
           >
-            {t('tourDetail.contactUs')}
+            {t('tourDetail.action.cta.bookOnline')}
           </Button>
         </div>
 

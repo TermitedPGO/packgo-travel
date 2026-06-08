@@ -50,6 +50,10 @@ import PricingSection from "./PricingSection";
 import NotesSection from "./NotesSection";
 import ShareDialog from "./ShareDialog";
 import BottomCTA from "./BottomCTA";
+import TourActionArea from "./TourActionArea";
+import TourInquiryDialog from "./TourInquiryDialog";
+import WeChatDialog from "./WeChatDialog";
+import { type WizardAnswers, type InquiryMode } from "./actionArea.helpers";
 import TourSEO from "./TourSEO";
 import { LoadingSpinner, NotFoundState } from "./LoadingState";
 import TourReviews from "@/components/tour-detail/TourReviews";
@@ -159,6 +163,17 @@ export default function TourDetailPeony() {
   const [isMealDetailOpen, setIsMealDetailOpen] = useState(false);
   const [selectedAttractionDetail, setSelectedAttractionDetail] = useState<AttractionDetail | null>(null);
   const [isAttractionDetailOpen, setIsAttractionDetailOpen] = useState(false);
+
+  // 行程頁「決策 + 行動區」狀態（tour-page-redesign）：小精靈答案 + 詢問/微信彈窗。
+  // 單一來源在此，供 TourActionArea / BottomCTA / PricingSection 與兩個 Dialog 共用。
+  const [wizard, setWizard] = useState<WizardAnswers>({});
+  const [inquiryOpen, setInquiryOpen] = useState(false);
+  const [inquiryMode, setInquiryMode] = useState<InquiryMode>("quote");
+  const [wechatOpen, setWechatOpen] = useState(false);
+  const openInquiry = (mode: InquiryMode) => {
+    setInquiryMode(mode);
+    setInquiryOpen(true);
+  };
 
   // 景點詳情彈窗處理
   const handleShowAttractionDetail = (activity: any) => {
@@ -443,6 +458,19 @@ export default function TourDetailPeony() {
         t={t}
       />
 
+      {/* 決策 + 行動區（tour-page-redesign）：事實條 + 小精靈 + CTA。置於 Hero 後、
+          概覽前，讓決策早出現。 */}
+      <TourActionArea
+        tour={tour}
+        departures={heroDepartures}
+        themeColor={themeColor}
+        wizard={wizard}
+        onWizardChange={setWizard}
+        onInquire={openInquiry}
+        onWeChat={() => setWechatOpen(true)}
+        navigate={navigate}
+      />
+
       <OverviewSection
         tour={tour}
         displayTour={displayTour}
@@ -511,6 +539,7 @@ export default function TourDetailPeony() {
         language={language}
         navigate={navigate}
         ensureArray={ensureArray}
+        onInquire={openInquiry}
       />
 
       <NotesSection
@@ -539,7 +568,7 @@ export default function TourDetailPeony() {
       {/* Similar Tours Recommendation */}
       {tour?.id && <SimilarTours tourId={tour.id} />}
 
-      <BottomCTA tour={tour} themeColor={themeColor} navigate={navigate} />
+      <BottomCTA tour={tour} themeColor={themeColor} navigate={navigate} onInquire={openInquiry} />
 
       {/* 餐廠詳情彈窗 */}
       <MealDetailDialog
@@ -564,6 +593,17 @@ export default function TourDetailPeony() {
         displayTitle={displayTitle}
         themeColor={themeColor}
       />
+
+      {/* 行程頁詢問表單 + 微信彈窗（tour-page-redesign） */}
+      <TourInquiryDialog
+        open={inquiryOpen}
+        onOpenChange={setInquiryOpen}
+        tour={tour}
+        wizard={wizard}
+        mode={inquiryMode}
+        themeColor={themeColor}
+      />
+      <WeChatDialog open={wechatOpen} onOpenChange={setWechatOpen} themeColor={themeColor} />
 
       <Footer />
     </div>

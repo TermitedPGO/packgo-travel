@@ -127,6 +127,21 @@ export const inquiriesRouter = router({
           customerPhone: z.string().max(40).optional(),
           subject: z.string().min(1).max(200),
           message: z.string().min(1).max(5000),
+          // Tour-page redesign (migration 0088): optional structured context
+          // when the inquiry is raised from a tour page's action area. The
+          // qualitative wizard buckets are stored as language-neutral keys; the
+          // human-readable summary is already folded into `message` client-side
+          // (buildInquiryInput) so InquiryAgent needs no change.
+          inquiryType: z.enum(["general", "custom_tour"]).default("general"),
+          relatedTourId: z.number().int().positive().optional(),
+          wizardAnswers: z
+            .object({
+              people: z.enum(["1-2", "3-5", "6+"]),
+              timeframe: z.enum(["soon", "school_break", "discuss"]),
+              budget: z.enum(["economy", "comfort", "luxury"]),
+            })
+            .partial()
+            .optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {
@@ -142,9 +157,10 @@ export const inquiriesRouter = router({
             message: "提交過於頻繁，請稍後再試。",
           });
         }
+        // inquiryType comes from input (defaults to "general"); relatedTourId +
+        // wizardAnswers ride along via ...input when present (migration 0088).
         return await db.createInquiry({
           ...input,
-          inquiryType: "general",
           userId: ctx.user?.id,
           status: "new",
         });
