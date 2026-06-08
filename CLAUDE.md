@@ -209,7 +209,7 @@ app.listen(3000)  // 應使用 process.env.PORT
 
 ### 4.3 部署禁止（Deploy Guard，2026-06-08 加，起因 v672 未授權自主部署）
 
-> **紅線：prod 部署只能透過 `pnpm deploy`（`scripts/safe-deploy.mjs`）。禁止任何 session（含 AI）直接呼叫 `flyctl deploy`。部署需 Jeff 手動放 `.deploy-approve` 一次性 token 才會放行。**
+> **紅線：prod 部署只能透過 `pnpm ship`（`scripts/safe-deploy.mjs`）。禁止任何 session（含 AI）直接呼叫 `flyctl deploy`。部署需 Jeff 手動放 `.deploy-approve` 一次性 token 才會放行。**
 
 - `.deploy-approve`（gitignored）內容須等於環境變數 `DEPLOY_TOKEN`，否則 guard BLOCK。session 無法自行湊出此 token；只有 Jeff 手動放檔能解鎖一次部署，成功後該檔自動刪除（用完即焚）。
 - `safe-deploy.mjs` 依序硬擋，任一不過即 `exit(1)` 拒絕：① 分支=main ② working tree 乾淨 ③ 不落後 `origin/main` ④ 列出本次 migration（可見性）⑤ `tsc --noEmit` 0 錯 ⑥ vitest 綠（`SKIP_DEPLOY_TESTS=1` 可略）⑦ `.deploy-approve` ↔ `DEPLOY_TOKEN`。
@@ -220,7 +220,7 @@ app.listen(3000)  // 應使用 process.env.PORT
 flyctl deploy --remote-only -a packgo-travel
 
 // ✅ 正確：唯一授權路徑（Jeff 先放 .deploy-approve + 設 DEPLOY_TOKEN）
-pnpm deploy
+pnpm ship
 ```
 
 ---
@@ -271,7 +271,7 @@ grep -rn "object-cover" client/src --include="*.tsx" | grep -v "rounded"
 | Sentry 觀測（server + client） | `server/_core/sentry.ts` + `client/src/_core/SentryBoundary.tsx` |
 | Pino 結構化日誌 | `server/_core/logger.ts` + `server/_core/correlationId.ts` |
 | 深度健康檢查 + UptimeRobot | `server/_core/healthCheck.ts` + `/health` Express route + `system.health` tRPC query（DB+Redis+Stripe+LLM ping，Stripe 5min / LLM 1h 快取） |
-| 部署硬擋 (Deploy Guard) | `scripts/safe-deploy.mjs`（`pnpm deploy` 觸發，7-gate + `.deploy-approve` 一次性 token；見 §4.3）+ `scripts/safe-deploy.test.mjs`（`pnpm deploy:test`，node:test）|
+| 部署硬擋 (Deploy Guard) | `scripts/safe-deploy.mjs`（`pnpm ship` 觸發，7-gate + `.deploy-approve` 一次性 token；見 §4.3）+ `scripts/safe-deploy.test.mjs`（`pnpm ship:test`，node:test）|
 | PostHog 轉換漏斗分析 | `client/src/_core/analytics.ts`（type-safe `track()`：tour_view / search / booking_start / booking_step / booking_complete；env-gated `VITE_POSTHOG_KEY`） |
 | LLM 調用 | `server/_core/llm.ts` |
 | 檔案儲存 (Cloudflare R2) | `server/storage.ts`（via `@aws-sdk/client-s3`，S3-compatible API） |
@@ -424,4 +424,4 @@ Python 用 mypy + ruff + pytest；PACK&GO 是 TS 所以：
 | 1.0 | 2026-03-26 | 初版，整合所有既有設計決策和禁止事項 |
 | 1.1 | 2026-05-18 | 加第九章 Vibe Coding Workflow（4 階段 + 監工子 agent + 紅線） |
 | 1.2 | 2026-05-29 | §9.4 加「何時用並行架構」三條件 + 適用表 + 不用清單（源自 Dynamic Workflows 實測）；§三/六 修剪過期狀態（LOC/Wave/日期）+ 修正 i18n 路徑 `locales/`→`i18n/` |
-| 1.3 | 2026-06-08 | 加 §4.3 部署紅線：prod 只能 `pnpm deploy`（`scripts/safe-deploy.mjs` 7-gate guard + `.deploy-approve` 一次性 token），禁止 session 直接 `flyctl deploy`（起因 v672 未授權部署） |
+| 1.3 | 2026-06-08 | 加 §4.3 部署紅線：prod 只能 `pnpm ship`（`scripts/safe-deploy.mjs` 7-gate guard + `.deploy-approve` 一次性 token），禁止 session 直接 `flyctl deploy`（起因 v672 未授權部署） |
