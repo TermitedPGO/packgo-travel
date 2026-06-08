@@ -139,3 +139,8 @@ agents-testing/
 
 # Gmail classifier eval corpus (real customer PII — never commit)
 scripts/gmail-eval/data/
+
+# Deploy authorization — one-time token Jeff places to unlock a single
+# `pnpm deploy` (see scripts/safe-deploy.mjs gate 7). Never commit; burned
+# automatically after a successful deploy.
+.deploy-approve

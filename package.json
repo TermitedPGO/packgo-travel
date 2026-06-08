@@ -10,6 +10,8 @@
     "check": "tsc --noEmit",
     "format": "prettier --write .",
     "test": "vitest run",
+    "deploy": "node scripts/safe-deploy.mjs",
+    "deploy:test": "node --test scripts/safe-deploy.test.mjs",
     "db:push": "drizzle-kit generate && drizzle-kit migrate",
     "i18n:audit": "node scripts/i18n-audit.mjs",
     "i18n:audit:json": "node scripts/i18n-audit.mjs --json",
