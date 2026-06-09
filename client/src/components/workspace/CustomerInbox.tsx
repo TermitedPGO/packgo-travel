@@ -1,22 +1,34 @@
 /**
- * CustomerInbox — 整合工作台 per-customer inbox (P2/P3).
+ * CustomerInbox — 整合工作台 per-customer inbox (P2/P3 + design rebuild).
  *
- * One customer = one inbox. Header (who) + a worklist of their OPEN items
- * (open bookings + open inquiries + pending approval tasks) merged into one
- * timeline. P3: each card has a 未處理/處理好了 toggle (workspace.setDisposition);
- * handled items dim + sink to the bottom.
+ * One customer = one inbox. Header (who + tier + stats) over a timeline of
+ * their OPEN items (open bookings + open inquiries + pending approval tasks),
+ * split 未處理 / 已處理. Cards use the shared ws-ui grammar (left-black-rule,
+ * badge, 處理好了 toggle). Faithful to admin-inbox-per-customer.html.
  */
 import { useLocale } from "@/contexts/LocaleContext";
 import { trpc } from "@/lib/trpc";
 import { LoadingPage } from "@/components/ui/spinner";
-import { Check } from "lucide-react";
 import { mergeOpenItems, type InboxItemKind } from "./customerInbox.helpers";
+import { WorkspaceCard } from "./ws-ui";
 
 const KIND_LABEL: Record<InboxItemKind, string> = {
   booking: "workspace.kindBooking",
   inquiry: "workspace.kindInquiry",
   task: "workspace.kindTask",
 };
+
+function relTime(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "";
+  const diff = Date.now() - ms;
+  const min = Math.round(diff / 60000);
+  if (min < 1) return "剛剛";
+  if (min < 60) return `${min} 分前`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr} 小時前`;
+  const d = Math.round(hr / 24);
+  return d === 1 ? "昨天" : `${d} 天前`;
+}
 
 export default function CustomerInbox({ userId }: { userId: number }) {
   const { t } = useLocale();
@@ -40,19 +52,45 @@ export default function CustomerInbox({ userId }: { userId: number }) {
   }
 
   const items = open.data ? mergeOpenItems(open.data) : [];
+  const unhandled = items.filter((it) => !it.handled);
+  const handled = items.filter((it) => it.handled);
+
+  const card = (it: (typeof items)[number]) => (
+    <WorkspaceCard
+      key={it.key}
+      type={t(KIND_LABEL[it.kind])}
+      time={relTime(it.ts)}
+      state={it.handled ? "done" : "none"}
+      handled={it.handled}
+      onToggle={() =>
+        setDisposition.mutate({
+          kind: it.kind,
+          id: it.id,
+          handled: !it.handled,
+        })
+      }
+      toggleBusy={setDisposition.isPending}
+    >
+      <div className="font-medium">{it.title}</div>
+      <div className="text-gray-500 mt-0.5 text-[12px]">{it.sub}</div>
+    </WorkspaceCard>
+  );
 
   return (
     <div className="flex flex-col h-full">
       {/* header */}
       <div className="flex items-center gap-3 border-b border-gray-200 px-5 py-3 flex-shrink-0">
-        <div className="h-10 w-10 rounded-full bg-gray-900 text-white flex items-center justify-center font-bold flex-shrink-0">
+        <div className="h-10 w-10 rounded-full bg-black text-white flex items-center justify-center font-bold flex-shrink-0">
           {(user.name || user.email || "?").charAt(0).toUpperCase()}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="font-bold truncate">{user.name || user.email}</span>
+            <span className="font-bold truncate">
+              {user.name || user.email}
+            </span>
             {user.tier && (
-              <span className="text-[11px] border border-gray-300 rounded-md px-1.5 py-0.5">
+              <span className="text-[11px] border border-gray-300 rounded-md px-1.5 py-0.5 inline-flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-black" />
                 {user.tier}
               </span>
             )}
@@ -65,62 +103,35 @@ export default function CustomerInbox({ userId }: { userId: number }) {
       </div>
 
       {/* worklist */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
-        <div className="text-[11px] font-semibold text-gray-500">
-          {t("workspace.openItems")} {open.data?.counts.total ?? 0}
-        </div>
+      <div className="flex-1 overflow-y-auto p-4">
         {items.length === 0 ? (
           <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50/40 p-8 text-center text-sm text-gray-500">
             {t("workspace.noOpenItems")}
           </div>
         ) : (
-          items.map((it) => (
-            <div
-              key={it.key}
-              className={`rounded-xl border border-gray-200 bg-white p-3 transition-opacity ${
-                it.handled ? "opacity-40" : ""
-              }`}
-              style={{ borderLeftWidth: 2, borderLeftColor: "#111827" }}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[10px] font-bold tracking-wide px-1.5 py-0.5 rounded-md border border-gray-300">
-                      {t(KIND_LABEL[it.kind])}
-                    </span>
-                    <span className="text-[10px] text-gray-400 tabular-nums">
-                      #{it.id}
-                    </span>
-                  </div>
-                  <div className="text-sm font-medium">{it.title}</div>
-                  <div className="text-[12px] text-gray-500 mt-0.5">{it.sub}</div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setDisposition.mutate({
-                      kind: it.kind,
-                      id: it.id,
-                      handled: !it.handled,
-                    })
-                  }
-                  className="flex-shrink-0 flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-900"
-                  title={it.handled ? t("workspace.handled") : t("workspace.markHandled")}
-                >
-                  <span
-                    className={`w-4 h-4 rounded-[4px] border-2 flex items-center justify-center ${
-                      it.handled
-                        ? "bg-gray-900 border-gray-900 text-white"
-                        : "border-gray-300"
-                    }`}
-                  >
-                    {it.handled && <Check className="w-3 h-3" />}
-                  </span>
-                  {it.handled && <span>{t("workspace.handled")}</span>}
-                </button>
-              </div>
+          <>
+            <div className="text-[11px] font-semibold text-gray-500 mb-2">
+              {t("workspace.openItems")} ({unhandled.length})
             </div>
-          ))
+            <div className="space-y-2.5">
+              {unhandled.length === 0 ? (
+                <div className="text-[12px] text-gray-400 py-1">
+                  {t("workspace.noOpenItems")}
+                </div>
+              ) : (
+                unhandled.map(card)
+              )}
+            </div>
+
+            {handled.length > 0 && (
+              <>
+                <div className="text-[11px] font-semibold text-gray-400 mb-2 mt-5">
+                  {t("workspace.handled")} ({handled.length})
+                </div>
+                <div className="space-y-2.5">{handled.map(card)}</div>
+              </>
+            )}
+          </>
         )}
       </div>
     </div>
