@@ -22,6 +22,7 @@ import {
   PanelLeft,
   LogOut,
 } from "lucide-react";
+import { useLocale } from "@/contexts/LocaleContext";
 
 export type CompanySub = "ledger" | "reports" | "marketing" | "suppliers";
 
@@ -33,11 +34,11 @@ export type WsView =
 
 export type SidebarCustomer = { id: number; name: string | null; email: string | null };
 
-const COMPANY_SUBS: { id: CompanySub; label: string }[] = [
-  { id: "ledger", label: "記帳" },
-  { id: "reports", label: "月報" },
-  { id: "marketing", label: "行銷" },
-  { id: "suppliers", label: "供應商" },
+const COMPANY_SUBS: { id: CompanySub; labelKey: string }[] = [
+  { id: "ledger", labelKey: "workspace.companyLedger" },
+  { id: "reports", labelKey: "workspace.companyReports" },
+  { id: "marketing", labelKey: "workspace.companyMarketing" },
+  { id: "suppliers", labelKey: "workspace.companySuppliers" },
 ];
 
 function Count({ n, light }: { n: number; light?: boolean }) {
@@ -70,6 +71,7 @@ export default function WorkspaceSidebar({
   user?: { name?: string | null; email?: string | null } | null;
   onLogout?: () => void;
 }) {
+  const { t } = useLocale();
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem("workspace.sidebar.collapsed") === "1",
   );
@@ -111,26 +113,29 @@ export default function WorkspaceSidebar({
       <div className="w-[56px] flex-shrink-0 border-r border-gray-200 bg-gray-50 flex flex-col items-center py-3">
         <button
           onClick={toggleCollapse}
-          title="展開側邊欄"
+          title={t("workspace.expandSidebar")}
           className="w-9 h-9 rounded-md hover:bg-gray-200 flex items-center justify-center text-gray-500 mb-2"
         >
           <PanelLeft className="w-4 h-4" />
         </button>
         <div className="flex-1 flex flex-col items-center gap-1.5">
-          {railBtn(view.type === "ai", <Bot className="w-4 h-4" />, "與 AI 對話", () =>
-            onSelect({ type: "ai" }),
+          {railBtn(
+            view.type === "ai",
+            <Bot className="w-4 h-4" />,
+            t("workspace.ai"),
+            () => onSelect({ type: "ai" }),
           )}
           {railBtn(
             view.type === "today",
             <Sun className="w-4 h-4" />,
-            "今日待辦",
+            t("workspace.today"),
             () => onSelect({ type: "today" }),
             todayCount > 0,
           )}
           {railBtn(
             view.type === "company",
             <Building2 className="w-4 h-4" />,
-            "全公司事務",
+            t("workspace.company"),
             () => onSelect({ type: "company", sub: "ledger" }),
           )}
         </div>
@@ -202,7 +207,7 @@ export default function WorkspaceSidebar({
         <span className="text-sm font-semibold">PACK&amp;GO</span>
         <button
           onClick={toggleCollapse}
-          title="收合側邊欄"
+          title={t("workspace.collapseSidebar")}
           className="w-7 h-7 rounded-md hover:bg-gray-200 flex items-center justify-center text-gray-500"
         >
           <PanelLeft className="w-4 h-4" />
@@ -215,7 +220,7 @@ export default function WorkspaceSidebar({
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="搜尋客人 / 事務"
+            placeholder={t("workspace.searchPlaceholder")}
             className="flex-1 bg-transparent text-xs text-gray-700 placeholder:text-gray-400 focus:outline-none"
           />
         </div>
@@ -225,23 +230,23 @@ export default function WorkspaceSidebar({
         <Row
           active={view.type === "ai"}
           icon={<Bot className="w-4 h-4" />}
-          label="與 AI 對話"
-          sub="隨手問,不綁客人"
+          label={t("workspace.ai")}
+          sub={t("workspace.aiSub")}
           onClick={() => onSelect({ type: "ai" })}
         />
         <Row
           active={view.type === "today"}
           icon={<Sun className="w-4 h-4" />}
-          label="今日待辦"
-          sub="所有客人 roll-up"
+          label={t("workspace.today")}
+          sub={t("workspace.todaySub")}
           badge={todayCount}
           onClick={() => onSelect({ type: "today" })}
         />
         <Row
           active={view.type === "company"}
           icon={<Building2 className="w-4 h-4" />}
-          label="全公司事務"
-          sub="記帳 · 月報 · 行銷 · 供應商"
+          label={t("workspace.company")}
+          sub={t("workspace.companySubLine")}
           badge={companyCount}
           onClick={() => onSelect({ type: "company", sub: "ledger" })}
         />
@@ -256,14 +261,14 @@ export default function WorkspaceSidebar({
                   on ? "bg-gray-200" : "hover:bg-gray-100"
                 }`}
               >
-                <span className="text-[12px]">{s.label}</span>
+                <span className="text-[12px]">{t(s.labelKey)}</span>
               </button>
             );
           })}
         </div>
 
         <div className="text-[10px] font-semibold text-gray-400 px-1 pt-2 pb-1">
-          客戶
+          {t("workspace.customersHeader")}
         </div>
         {filtered.map((c) => {
           const on = view.type === "customer" && view.userId === c.id;
@@ -296,7 +301,9 @@ export default function WorkspaceSidebar({
           );
         })}
         {filtered.length === 0 && (
-          <div className="px-2.5 py-3 text-[11px] text-gray-400">查無客人</div>
+          <div className="px-2.5 py-3 text-[11px] text-gray-400">
+            {t("workspace.noCustomerMatch")}
+          </div>
         )}
       </div>
 
@@ -310,7 +317,7 @@ export default function WorkspaceSidebar({
         {onLogout && (
           <button
             onClick={onLogout}
-            title="登出"
+            title={t("workspace.logout")}
             className="w-6 h-6 rounded-md hover:bg-gray-200 flex items-center justify-center text-gray-400"
           >
             <LogOut className="w-3.5 h-3.5" />

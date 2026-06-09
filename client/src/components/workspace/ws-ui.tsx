@@ -22,6 +22,7 @@ import {
   Hourglass,
   ChevronRight,
 } from "lucide-react";
+import { useLocale } from "@/contexts/LocaleContext";
 
 export type CardState = "decide" | "running" | "wait" | "done" | "err" | "none";
 
@@ -44,13 +45,21 @@ export function BadgeK({ children }: { children: ReactNode }) {
 }
 
 /** 是誰的事: @客戶名 or 🏢 全公司. */
-export function WhoChip({ who }: { who: string }) {
-  const company = who === "全公司";
+export function WhoChip({
+  who,
+  company,
+}: {
+  /** customer display name (ignored when company). */
+  who?: string;
+  /** company-wide item → 🏢 + localized 全公司 label. */
+  company?: boolean;
+}) {
+  const { t } = useLocale();
   return (
     <span
       className={`text-[11px] font-medium ${company ? "text-gray-500" : ""}`}
     >
-      {company ? "🏢 全公司" : `@${who}`}
+      {company ? `🏢 ${t("workspace.whoCompany")}` : `@${who ?? ""}`}
     </span>
   );
 }
@@ -82,25 +91,26 @@ export function StateChip({
   state: CardState;
   waitLabel?: string;
 }) {
-  if (state === "decide") return <Pill>等你決定</Pill>;
+  const { t } = useLocale();
+  if (state === "decide") return <Pill>{t("workspace.stateDecide")}</Pill>;
   if (state === "running")
     return (
       <span className="text-[10px] px-1.5 py-0.5 rounded-md border border-gray-400 inline-flex items-center gap-1">
         <span className="w-2.5 h-2.5 rounded-full border-2 border-black border-t-transparent inline-block animate-spin" />
-        處理中
+        {t("workspace.stateRunning")}
       </span>
     );
   if (state === "wait")
     return (
       <span className="text-[10px] px-1.5 py-0.5 rounded-md border border-gray-400 inline-flex items-center gap-1">
         <Hourglass className="w-3 h-3" />
-        {waitLabel ?? "等外部"}
+        {waitLabel ?? t("workspace.stateWait")}
       </span>
     );
   if (state === "err")
     return (
       <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-black text-white">
-        出錯
+        {t("workspace.stateErr")}
       </span>
     );
   return null;
@@ -187,6 +197,7 @@ export function StatusToggle({
   onToggle: () => void;
   busy?: boolean;
 }) {
+  const { t } = useLocale();
   return (
     <button
       onClick={onToggle}
@@ -204,7 +215,7 @@ export function StatusToggle({
       >
         {on && <Check className="w-3 h-3" />}
       </span>
-      <span>{on ? "處理好了" : "未處理"}</span>
+      <span>{on ? t("workspace.handled") : t("workspace.unhandled")}</span>
     </button>
   );
 }
@@ -237,8 +248,14 @@ export function Greeting({
   line: string;
   right?: ReactNode;
 }) {
+  const { t } = useLocale();
   const hour = new Date().getHours();
-  const part = hour < 12 ? "早安" : hour < 18 ? "下午好" : "晚上好";
+  const part =
+    hour < 12
+      ? t("workspace.greetMorning")
+      : hour < 18
+        ? t("workspace.greetAfternoon")
+        : t("workspace.greetEvening");
   return (
     <div className="flex items-end justify-between">
       <div>
@@ -246,7 +263,13 @@ export function Greeting({
           className="text-2xl font-bold"
           style={{ fontFamily: '"Noto Serif TC", serif' }}
         >
-          {part},{name}
+          {part}
+          {name && (
+            <>
+              {t("common.greetingComma")}
+              {name}
+            </>
+          )}
         </div>
         <div className="text-xs text-gray-500 mt-1">{line}</div>
       </div>
@@ -262,8 +285,10 @@ export type WorkspaceCardProps = {
   emphasize?: boolean;
   /** show the 🔒 lock glyph before the badge. */
   lock?: boolean;
-  /** @客戶名 or 全公司 (omit → no chip). */
+  /** customer display name for the @chip (omit → no chip unless whoCompany). */
   who?: string;
+  /** company-wide item → 🏢 全公司 chip (overrides who). */
+  whoCompany?: boolean;
   time?: string;
   state?: CardState;
   waitLabel?: string;
@@ -290,6 +315,7 @@ export function WorkspaceCard(props: WorkspaceCardProps) {
     emphasize,
     lock,
     who,
+    whoCompany,
     time,
     state = "none",
     waitLabel,
@@ -320,7 +346,9 @@ export function WorkspaceCard(props: WorkspaceCardProps) {
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             {lock && <Lock className="w-3.5 h-3.5" />}
             {emphasize ? <BadgeK>{type}</BadgeK> : <Badge>{type}</Badge>}
-            {who && <WhoChip who={who} />}
+            {(who || whoCompany) && (
+              <WhoChip who={who} company={whoCompany} />
+            )}
             {time && <span className="text-[10px] text-gray-400">{time}</span>}
             {state !== "none" && (
               <span className="ml-1">

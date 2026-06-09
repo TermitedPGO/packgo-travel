@@ -10,6 +10,7 @@ import { useLocale } from "@/contexts/LocaleContext";
 import { trpc } from "@/lib/trpc";
 import { LoadingPage } from "@/components/ui/spinner";
 import { mergeOpenItems, type InboxItemKind } from "./customerInbox.helpers";
+import { formatRelTime } from "./relTime";
 import { WorkspaceCard } from "./ws-ui";
 
 const KIND_LABEL: Record<InboxItemKind, string> = {
@@ -17,18 +18,6 @@ const KIND_LABEL: Record<InboxItemKind, string> = {
   inquiry: "workspace.kindInquiry",
   task: "workspace.kindTask",
 };
-
-function relTime(ms: number): string {
-  if (!Number.isFinite(ms) || ms <= 0) return "";
-  const diff = Date.now() - ms;
-  const min = Math.round(diff / 60000);
-  if (min < 1) return "剛剛";
-  if (min < 60) return `${min} 分前`;
-  const hr = Math.round(min / 60);
-  if (hr < 24) return `${hr} 小時前`;
-  const d = Math.round(hr / 24);
-  return d === 1 ? "昨天" : `${d} 天前`;
-}
 
 export default function CustomerInbox({ userId }: { userId: number }) {
   const { t } = useLocale();
@@ -59,7 +48,7 @@ export default function CustomerInbox({ userId }: { userId: number }) {
     <WorkspaceCard
       key={it.key}
       type={t(KIND_LABEL[it.kind])}
-      time={relTime(it.ts)}
+      time={formatRelTime(it.ts, t)}
       state={it.handled ? "done" : "none"}
       handled={it.handled}
       onToggle={() =>

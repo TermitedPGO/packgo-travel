@@ -1,13 +1,30 @@
 # 整合工作台 — Progress(監工視角)
 
-> 決策(2026-06-08):Jeff 拍板**全建 26 頁**,agent 品質**同步補**。
+> 決策(2026-06-09,取代 06-08 的 26 頁版):Jeff 拍板**全 39 個 AdminV2 分頁重設計完才切 /admin**,計畫見 redesign-39.md(8 批);執行順序 1 → 2 → 6 → 4 → 5 → 7 → 3 → 8。
 > 做法:建在**新路由(/workspace)跟現有後台並存**,分階段 ship + 切換,不打掉能跑的。每階段 tsc 0 + Vitest + guard ship,Jeff 握 token。
+
+## 2026-06-09 健檢(新 session 交接核對)
+- 屬實:v675-v684 工作、tsc 0、workspace 測試 24/24 綠、/admin=AdminV2(39 tab)、/admin-legacy 已移除、ws-ui 文法齊(jumpLabel/onJump 已預留未接)。
+- 出入 1:**admin-pages-tour.html 存在且完整**(批7 原「缺檔」卡點不成立,以現檔為準)。
+- 出入 2:redesign-39.md 漏 ops-landing、批8 有幽靈 "monitor"(已修文件:ops-landing 歸批6)。
+- 出入 3:**行程 section 在 rebuild(0190735)中消失**:b6b076f 加的全公司第 5 子項(ToursTab)現已不在 WorkspaceCompany(只剩 記帳/月報/行銷/供應商 4 子項)。行程在 /workspace 暫無入口,批7 補回。
+- 出入 4:**rebuild 系列元件硬編碼中文違反 §4.1**(ws-ui / WorkspaceToday / WorkspaceSidebar / relTime);audit-i18n.ts 只抓 key parity 抓不到 JSX 字面量。→ 還債列為批1 前置。
+- 批1 payload 實測:cs payload 有 inquiryId(inquiries.userId nullable,guest 拿不到);quote 的 relatedId 指 tour,客人僅 optional name/email;方案 = 後端 enrich 加輕量 who 欄位(向後相容,5 個既有 list 消費者不動)。
+
+## 2026-06-09 已做(同 session,Jeff 拍板順序後動工)
+- **i18n 還債**:ws-ui / WorkspaceToday / WorkspaceSidebar / CustomerInbox 全部硬編碼中文 → t()(workspace.* 約 40 個新 key,zh-TW + en);relTime 抽共用 `relTime.ts`(+6 測試);新 guard `workspaceI18n.test.ts` 掃元件引用的 workspace.* key 必須存在兩語言(audit-i18n 抓不到 code→key 斷鏈,這測試補上,批2-8 自動受保護)。
+- **批1 m1 完成**:`server/_core/approvalTaskWho.ts`(extractCustomerRef + enrichTasksWithWho,批量 inArray 零 N+1,guest/壞 payload 誠實降級 userId=null)+ commandCenter.list 回傳加 who(只加欄位,5 個消費者相容)+ WorkspaceToday @客戶 chip + 「去X」跳轉(Workspace.setView → customer inbox)。+8 測試。
+- 驗證:tsc 0;全套 vitest 1433 passed / 0 failed(91 skipped);workspace 相關 90/90。
+- **本機視覺驗證限制(誠實記錄)**:本機無 .env / DB,/workspace 有登入牆,視覺只能 ship 後在 prod 親驗。
+- 待 ship(Jeff token);ship 後 curl bundle grep 標誌字串 + Jeff 親驗 chip/跳轉。
+- m2(卡上 approve/reject)、m3(詢問視圖)見 tasks/batch-1-today.md。
 
 ## 文件
 - proposal.md(Stage 1)✓
 - design.md(Stage 2 定案:設計系統 + 9 鐵律 + shell + 18 項目矩陣 + §4.5 行銷 6 平台 + 後端接點)✓
-- 視覺:26 個完整頁 mockup(桌面 `PackGo_示意圖/admin-INDEX.html` 入口)✓
-- tasks/(Stage 3)— 待寫
+- redesign-39.md(8 批計畫 + 順序決策)✓
+- 視覺:桌面 `PackGo_示意圖/admin-INDEX.html` 入口(admin-pages-tour.html 在,2026-06-09 確認)✓
+- tasks/batch-1-today.md(Stage 3,批1)✓;批2+ 動工前逐批補
 
 ## 已上線 (2026-06-08) — 可用 v1
 
