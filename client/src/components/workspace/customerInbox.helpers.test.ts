@@ -98,4 +98,29 @@ describe("mergeOpenItems", () => {
     expect(out.find((i) => i.kind === "booking")?.title).toBe("行程");
     expect(out.find((i) => i.kind === "inquiry")?.title).toBe("詢問");
   });
+
+  it("sinks handled (處理好了) items below unhandled, even if newer", () => {
+    const out = mergeOpenItems({
+      ...empty,
+      openInquiries: [
+        // handled but NEWEST → should still sink below the unhandled one
+        { id: 1, status: "new", destination: null, subject: "已處理新的", createdAt: new Date("2026-06-10"), handled: true },
+        { id: 2, status: "new", destination: null, subject: "未處理舊的", createdAt: new Date("2026-01-01"), handled: false },
+      ],
+    });
+    expect(out[0].title).toBe("未處理舊的");
+    expect(out[0].handled).toBe(false);
+    expect(out[1].title).toBe("已處理新的");
+    expect(out[1].handled).toBe(true);
+  });
+
+  it("defaults handled to false when the field is absent", () => {
+    const out = mergeOpenItems({
+      ...empty,
+      openInquiries: [
+        { id: 1, status: "new", destination: null, subject: "Q", createdAt: 0 },
+      ],
+    });
+    expect(out[0].handled).toBe(false);
+  });
 });

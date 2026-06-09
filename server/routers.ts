@@ -67,6 +67,7 @@ import { photosRouter } from "./routers/photos";
 import { aiRouter } from "./routers/ai";
 import { systemRouter } from "./_core/systemRouter";
 import { commandCenterRouter } from "./routers/commandCenter";
+import { workspaceRouter } from "./routers/workspace";
 import { router } from "./_core/trpc";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -94,6 +95,8 @@ export const appRouter = router({
   // (server/_core/approvalTasks.ts). Lanes cs/quote/marketing/finance grow
   // on this spine (design.md docs/features/command-center).
   commandCenter: commandCenterRouter,
+  // 整合工作台 P3 — per-item「處理好了」disposition.
+  workspace: workspaceRouter,
 
   // Authentication router — Phase 4E extracted to ./routers/auth.ts
   auth: authRouter,

@@ -3350,3 +3350,22 @@ export const approvalTasks = mysqlTable("approvalTasks", {
 
 export type ApprovalTask = typeof approvalTasks.$inferSelect;
 export type InsertApprovalTask = typeof approvalTasks.$inferInsert;
+
+// ────────────────────────────────────────────────────────────────────────
+// 整合工作台 P3 — per-item「處理好了」disposition (migration 0089).
+// Jeff's manual triage marker, separate from an item's own system status.
+// Presence of a row = handled; deleting it = un-handled. (itemKind,itemId)
+// is unique so each heterogeneous item has at most one disposition.
+// ────────────────────────────────────────────────────────────────────────
+export const workspaceDispositions = mysqlTable("workspaceDispositions", {
+  id: int("id").autoincrement().primaryKey(),
+  itemKind: varchar("itemKind", { length: 32 }).notNull(),
+  itemId: int("itemId").notNull(),
+  handledBy: int("handledBy"),
+  handledAt: timestamp("handledAt").defaultNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  uqItem: unique("uq_workspace_disp_item").on(t.itemKind, t.itemId),
+}));
+
+export type WorkspaceDisposition = typeof workspaceDispositions.$inferSelect;

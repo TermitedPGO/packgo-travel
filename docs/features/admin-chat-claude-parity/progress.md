@@ -15,7 +15,7 @@
 |------|------|------|
 | P1 地基 | 新路由 /workspace + 4 區殼(重用 DomainSidebar)+ 今日待辦接 commandCenter 真資料(KPIStrip + ApprovalInbox)+ AI對話掛 AgentChatPage + 客戶清單 CustomersTabV2 + 全公司 placeholder | ✓ built(tsc 0 + i18n 綠),待 ship |
 | P2 客戶 inbox | per-customer 聚合(adminCustomers.customerOpenItems:開放訂單/詢問/待審 task)+ CustomerInbox/WorkspaceCustomers master-detail + 修 /workspace 404(vite.ts route 登記)。tsc 0 + helper 5 測試綠 | ✓ built,待 ship |
-| P3 項目卡接真資料 | 報價/訂單/詢問/付款/出團/簽證… 各 card wired | 待 |
+| P3 勾選持久化 | disposition 層(migration 0089 workspaceDispositions,有 row=處理好了)+ workspace.setDisposition + customerOpenItems 帶 handled + CustomerInbox 勾選 → 寫 DB + 淡化下沉。tsc 0 + helper 7 測試綠 | ✓ built,待 ship | 各 card 完整內容/per-item 動作(報價確認等)= P4 |
 | P4 全公司事務 | 記帳/月報/行銷/供應商 + 行程管理頁 | 待 |
 | P5 對話升級 | slash/@ + 消閃爍/Stop/步驟列 | 待 |
 | P6 一稿出 6 平台 | 海報 gen | 待 |

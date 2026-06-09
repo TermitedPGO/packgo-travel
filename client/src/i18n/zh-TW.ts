@@ -21,6 +21,8 @@ export const zhTW = {
     searchCustomers: '搜尋客人',
     noCustomers: '沒有客人',
     selectCustomer: '點左邊選一位客人',
+    handled: '處理好了',
+    markHandled: '標記處理好了',
   },
   // 通用
   common: {

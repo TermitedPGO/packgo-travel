@@ -21,6 +21,8 @@ export const en = {
     searchCustomers: 'Search customers',
     noCustomers: 'No customers',
     selectCustomer: 'Pick a customer on the left',
+    handled: 'Done',
+    markHandled: 'Mark done',
   },
   // Common
   common: {

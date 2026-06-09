@@ -1,9 +1,10 @@
 /**
- * customerInbox.helpers — 整合工作台 per-customer inbox (P2) pure logic.
+ * customerInbox.helpers — 整合工作台 per-customer inbox (P2/P3) pure logic.
  *
  * Merges the three open-item buckets returned by admin.customerOpenItems
  * (open bookings / open inquiries / pending approval tasks) into one
- * timeline, newest first. Kept pure so it is unit-testable without a DB.
+ * timeline. P3: items Jeff marked「處理好了」(handled) sink to the bottom;
+ * within each group, newest first. Kept pure so it is unit-testable.
  */
 
 export type OpenBooking = {
@@ -14,6 +15,7 @@ export type OpenBooking = {
   totalPrice: number;
   currency: string;
   createdAt: Date | string | number;
+  handled?: boolean;
 };
 
 export type OpenInquiry = {
@@ -22,6 +24,7 @@ export type OpenInquiry = {
   destination: string | null;
   subject: string | null;
   createdAt: Date | string | number;
+  handled?: boolean;
 };
 
 export type PendingTask = {
@@ -32,6 +35,7 @@ export type PendingTask = {
   title: string;
   summary: string | null;
   createdAt: Date | string | number;
+  handled?: boolean;
 };
 
 export type OpenItemsData = {
@@ -50,6 +54,7 @@ export type InboxItem = {
   title: string;
   sub: string;
   ts: number;
+  handled: boolean;
 };
 
 function toTs(v: Date | string | number): number {
@@ -58,8 +63,9 @@ function toTs(v: Date | string | number): number {
 }
 
 /**
- * Merge + sort the three buckets into one newest-first timeline.
- * Pure: same input always yields the same output.
+ * Merge + sort the three buckets into one timeline.
+ * Unhandled (未處理) first, then handled (處理好了) sunk to the bottom;
+ * within each group newest-first. Pure: same input → same output.
  */
 export function mergeOpenItems(data: OpenItemsData): InboxItem[] {
   const items: InboxItem[] = [];
@@ -72,6 +78,7 @@ export function mergeOpenItems(data: OpenItemsData): InboxItem[] {
       title: b.tourTitle ?? "行程",
       sub: `${b.bookingStatus} · ${b.paymentStatus} · ${b.currency} ${b.totalPrice}`,
       ts: toTs(b.createdAt),
+      handled: b.handled ?? false,
     });
   }
   for (const q of data.openInquiries) {
@@ -82,6 +89,7 @@ export function mergeOpenItems(data: OpenItemsData): InboxItem[] {
       title: q.subject || q.destination || "詢問",
       sub: q.status,
       ts: toTs(q.createdAt),
+      handled: q.handled ?? false,
     });
   }
   for (const t of data.pendingTasks) {
@@ -92,8 +100,12 @@ export function mergeOpenItems(data: OpenItemsData): InboxItem[] {
       title: t.title,
       sub: `${t.lane} · ${t.riskLevel}`,
       ts: toTs(t.createdAt),
+      handled: t.handled ?? false,
     });
   }
 
-  return items.sort((a, b) => b.ts - a.ts);
+  return items.sort((a, b) => {
+    if (a.handled !== b.handled) return a.handled ? 1 : -1; // unhandled first
+    return b.ts - a.ts; // newest first within a group
+  });
 }

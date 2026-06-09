@@ -184,6 +184,7 @@ export const adminCustomersRouter = router({
         inquiries: inquiriesTable,
         tours: toursTable,
         approvalTasks: approvalTasksTable,
+        workspaceDispositions: dispTable,
       } = await import("../../drizzle/schema");
 
       const openBookings = await drizzleDb
@@ -283,6 +284,41 @@ export const adminCustomersRouter = router({
           .orderBy(desc(approvalTasksTable.createdAt));
       }
 
+      // P3 — attach Jeff's「處理好了」disposition to each open item.
+      const handled = new Set<string>();
+      const dispConds = [];
+      if (openBookings.length) {
+        dispConds.push(
+          and(
+            eq(dispTable.itemKind, "booking"),
+            inArray(dispTable.itemId, openBookings.map((b) => b.id)),
+          ),
+        );
+      }
+      if (openInquiries.length) {
+        dispConds.push(
+          and(
+            eq(dispTable.itemKind, "inquiry"),
+            inArray(dispTable.itemId, openInquiries.map((q) => q.id)),
+          ),
+        );
+      }
+      if (pendingTasks.length) {
+        dispConds.push(
+          and(
+            eq(dispTable.itemKind, "task"),
+            inArray(dispTable.itemId, pendingTasks.map((t) => t.id)),
+          ),
+        );
+      }
+      if (dispConds.length) {
+        const drows = await drizzleDb
+          .select({ k: dispTable.itemKind, i: dispTable.itemId })
+          .from(dispTable)
+          .where(or(...dispConds));
+        for (const r of drows) handled.add(`${r.k}:${r.i}`);
+      }
+
       return {
         counts: {
           openBookings: openBookings.length,
@@ -291,9 +327,18 @@ export const adminCustomersRouter = router({
           total:
             openBookings.length + openInquiries.length + pendingTasks.length,
         },
-        openBookings,
-        openInquiries,
-        pendingTasks,
+        openBookings: openBookings.map((b) => ({
+          ...b,
+          handled: handled.has(`booking:${b.id}`),
+        })),
+        openInquiries: openInquiries.map((q) => ({
+          ...q,
+          handled: handled.has(`inquiry:${q.id}`),
+        })),
+        pendingTasks: pendingTasks.map((t) => ({
+          ...t,
+          handled: handled.has(`task:${t.id}`),
+        })),
       };
     }),
 });
