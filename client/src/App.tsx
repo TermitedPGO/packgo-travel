@@ -163,13 +163,11 @@ function Router() {
       <Route path={"/reset-password"} component={ResetPassword} />
       <Route path={"/admin/diagnostics"} component={DiagnosticsPage} />
       <Route path={"/admin/task-history"} component={TaskHistory} />
-      {/* 2026-06-09 — Jeff: /admin IS the new 整合工作台 (chat-first redesign,
-          mockup B&W card grammar). The previous AdminV2 shell is parked at
-          /admin-legacy — still reachable, still holds 訂單 / 行程 / agents tabs
-          not yet ported into the workspace. /admin/v2 + /workspace are aliases
-          that also land on the new shell. */}
-      <Route path={"/admin"} component={Workspace} />
-      <Route path={"/admin-legacy"} component={AdminV2} />
+      {/* 2026-06-09 — Jeff: hold /admin on the COMPLETE AdminV2 (39 tabs) until
+          the new 整合工作台 redesign covers every tab in the mockup card grammar.
+          Preview the in-progress redesign at /workspace; flip /admin to it in a
+          single switch only when all 39 are done. /admin/v2 redirects here. */}
+      <Route path={"/admin"} component={AdminV2} />
       <Route path={"/workspace"} component={Workspace} />
       <Route path={"/admin/v2"}>{() => { if (typeof window !== "undefined") window.location.replace("/admin"); return null; }}</Route>
       <Route path={"/profile"} component={Profile} />

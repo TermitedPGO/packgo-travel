@@ -10,8 +10,9 @@
  * ported from admin-cards-states.html. Design source of truth:
  *   docs/features/admin-chat-claude-parity/design.md + PackGo_示意圖/*.html
  *
- * Canonical at /admin (+ /workspace alias). The previous AdminV2 shell is
- * parked at /admin-legacy for tabs not yet ported. New nav target = WsView.
+ * Previewed at /workspace while the redesign is built out tab-by-tab. /admin
+ * stays on the complete AdminV2 until all 39 tabs are redesigned, then flips
+ * here in one switch (Jeff 2026-06-09). New nav target = WsView.
  */
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useLocation } from "wouter";
