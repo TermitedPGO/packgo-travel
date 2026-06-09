@@ -10,6 +10,17 @@ export const zhTW = {
     todayPending: '需要你決定',
     todayCaption: '所有需要你決定的事,一個地方看完',
     companyPlaceholder: '全公司事務(記帳 · 月報 · 行銷 · 供應商)P2 接入',
+    kindBooking: '訂單',
+    kindInquiry: '詢問',
+    kindTask: '待審',
+    customerNotFound: '找不到這位客人',
+    packpoint: 'PackPoint',
+    bookings: '訂單',
+    openItems: '待處理',
+    noOpenItems: '目前沒有待辦',
+    searchCustomers: '搜尋客人',
+    noCustomers: '沒有客人',
+    selectCustomer: '點左邊選一位客人',
   },
   // 通用
   common: {

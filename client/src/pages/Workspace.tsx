@@ -29,7 +29,9 @@ import {
 import { MessageSquare, Sun, Building2, Users } from "lucide-react";
 
 const AgentChatPage = lazy(() => import("@/components/admin/AgentChatPage"));
-const CustomersTabV2 = lazy(() => import("@/components/admin-v2/CustomersTabV2"));
+const WorkspaceCustomers = lazy(
+  () => import("@/components/workspace/WorkspaceCustomers"),
+);
 const ApprovalInbox = lazy(
   () => import("@/components/admin-v2/CommandCenter/ApprovalInbox"),
 );
@@ -82,11 +84,17 @@ export default function Workspace() {
               <AgentChatPage />
             </Suspense>
           </div>
+        ) : active === "customers" ? (
+          // customers = full-height master-detail (owns its own scroll)
+          <div className="flex-1 overflow-hidden">
+            <Suspense fallback={<LoadingPage text={t("workspace.loading")} />}>
+              <WorkspaceCustomers />
+            </Suspense>
+          </div>
         ) : (
           <main className="flex-1 overflow-y-auto p-4 md:p-6">
             <Suspense fallback={<LoadingPage text={t("workspace.loading")} />}>
               {active === "today" && <WorkspaceToday />}
-              {active === "customers" && <CustomersTabV2 />}
               {active === "company" && <CompanyPlaceholder />}
             </Suspense>
           </main>

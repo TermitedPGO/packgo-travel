@@ -11,7 +11,15 @@
 import { z } from "zod";
 import { adminProcedure, router } from "../_core/trpc";
 import * as db from "../db";
-import { eq, desc, sql, and } from "drizzle-orm";
+import { eq, desc, sql, and, or, inArray } from "drizzle-orm";
+
+/**
+ * 整合工作台 P2 — what counts as an OPEN item in a customer's inbox.
+ * Bookings still active (not completed/cancelled), inquiries not yet
+ * resolved/closed. Pending approval tasks linked to this customer also count.
+ */
+export const OPEN_BOOKING_STATUSES = ["pending", "confirmed"] as const;
+export const OPEN_INQUIRY_STATUSES = ["new", "in_progress"] as const;
 
 export const adminCustomersRouter = router({
   /**
@@ -154,5 +162,138 @@ export const adminCustomersRouter = router({
         .limit(20);
 
       return { user, recentBookings, recentInquiries, recentPoints };
+    }),
+
+  /**
+   * customerOpenItems — 整合工作台 per-customer inbox spine (P2).
+   *
+   * Returns this customer's OPEN items only (the worklist), unlike
+   * customerDetail which returns recent-everything. Three buckets:
+   *   - open bookings   (bookingStatus ∈ pending/confirmed)
+   *   - open inquiries  (status ∈ new/in_progress)
+   *   - pending tasks   (approvalTasks.status=pending linked to this
+   *                      customer's bookings/inquiries via relatedType/Id)
+   * The frontend merges these into one timeline. Never selects passport cols.
+   */
+  customerOpenItems: adminProcedure
+    .input(z.object({ userId: z.number().int().positive() }))
+    .query(async ({ input }) => {
+      const drizzleDb = (await db.getDb())!;
+      const {
+        bookings: bookingsTable,
+        inquiries: inquiriesTable,
+        tours: toursTable,
+        approvalTasks: approvalTasksTable,
+      } = await import("../../drizzle/schema");
+
+      const openBookings = await drizzleDb
+        .select({
+          id: bookingsTable.id,
+          tourTitle: toursTable.title,
+          bookingStatus: bookingsTable.bookingStatus,
+          paymentStatus: bookingsTable.paymentStatus,
+          totalPrice: bookingsTable.totalPrice,
+          currency: bookingsTable.currency,
+          departureId: bookingsTable.departureId,
+          createdAt: bookingsTable.createdAt,
+        })
+        .from(bookingsTable)
+        .leftJoin(toursTable, eq(bookingsTable.tourId, toursTable.id))
+        .where(
+          and(
+            eq(bookingsTable.userId, input.userId),
+            inArray(bookingsTable.bookingStatus, [...OPEN_BOOKING_STATUSES]),
+          ),
+        )
+        .orderBy(desc(bookingsTable.createdAt));
+
+      const openInquiries = await drizzleDb
+        .select({
+          id: inquiriesTable.id,
+          status: inquiriesTable.status,
+          destination: inquiriesTable.destination,
+          subject: inquiriesTable.subject,
+          createdAt: inquiriesTable.createdAt,
+        })
+        .from(inquiriesTable)
+        .where(
+          and(
+            eq(inquiriesTable.userId, input.userId),
+            inArray(inquiriesTable.status, [...OPEN_INQUIRY_STATUSES]),
+          ),
+        )
+        .orderBy(desc(inquiriesTable.createdAt));
+
+      // approvalTasks link to a customer only indirectly (relatedType +
+      // relatedId varchar). Resolve via this customer's booking + inquiry ids.
+      const [bookingIdRows, inquiryIdRows] = await Promise.all([
+        drizzleDb
+          .select({ id: bookingsTable.id })
+          .from(bookingsTable)
+          .where(eq(bookingsTable.userId, input.userId)),
+        drizzleDb
+          .select({ id: inquiriesTable.id })
+          .from(inquiriesTable)
+          .where(eq(inquiriesTable.userId, input.userId)),
+      ]);
+      const bookingIds = bookingIdRows.map((r) => String(r.id));
+      const inquiryIds = inquiryIdRows.map((r) => String(r.id));
+
+      let pendingTasks: Array<{
+        id: number;
+        lane: string;
+        taskType: string;
+        riskLevel: string;
+        title: string;
+        summary: string | null;
+        createdAt: Date;
+      }> = [];
+      const linkConds = [];
+      if (bookingIds.length) {
+        linkConds.push(
+          and(
+            eq(approvalTasksTable.relatedType, "booking"),
+            inArray(approvalTasksTable.relatedId, bookingIds),
+          ),
+        );
+      }
+      if (inquiryIds.length) {
+        linkConds.push(
+          and(
+            eq(approvalTasksTable.relatedType, "inquiry"),
+            inArray(approvalTasksTable.relatedId, inquiryIds),
+          ),
+        );
+      }
+      if (linkConds.length) {
+        pendingTasks = await drizzleDb
+          .select({
+            id: approvalTasksTable.id,
+            lane: approvalTasksTable.lane,
+            taskType: approvalTasksTable.taskType,
+            riskLevel: approvalTasksTable.riskLevel,
+            title: approvalTasksTable.title,
+            summary: approvalTasksTable.summary,
+            createdAt: approvalTasksTable.createdAt,
+          })
+          .from(approvalTasksTable)
+          .where(
+            and(eq(approvalTasksTable.status, "pending"), or(...linkConds)),
+          )
+          .orderBy(desc(approvalTasksTable.createdAt));
+      }
+
+      return {
+        counts: {
+          openBookings: openBookings.length,
+          openInquiries: openInquiries.length,
+          pendingTasks: pendingTasks.length,
+          total:
+            openBookings.length + openInquiries.length + pendingTasks.length,
+        },
+        openBookings,
+        openInquiries,
+        pendingTasks,
+      };
     }),
 });

@@ -34,6 +34,7 @@ const KNOWN_ROUTE_PATTERNS: RegExp[] = [
   /^\/forgot-password$/,
   /^\/reset-password$/,
   /^\/admin(\/.*)?$/,                     // /admin and any nested admin route
+  /^\/workspace(\/.*)?$/,                 // 整合工作台 v3 (chat-first 後台) + 巢狀
   /^\/profile$/,
   /^\/book\/[^/]+$/,                      // /book/:id
   /^\/bookings\/[^/]+$/,                  // /bookings/:id

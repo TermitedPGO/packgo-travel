@@ -14,7 +14,7 @@
 | 階段 | 內容 | 狀態 |
 |------|------|------|
 | P1 地基 | 新路由 /workspace + 4 區殼(重用 DomainSidebar)+ 今日待辦接 commandCenter 真資料(KPIStrip + ApprovalInbox)+ AI對話掛 AgentChatPage + 客戶清單 CustomersTabV2 + 全公司 placeholder | ✓ built(tsc 0 + i18n 綠),待 ship |
-| P2 客戶 inbox | per-customer 聚合 + 抬頭 + 時間軸 | 待 |
+| P2 客戶 inbox | per-customer 聚合(adminCustomers.customerOpenItems:開放訂單/詢問/待審 task)+ CustomerInbox/WorkspaceCustomers master-detail + 修 /workspace 404(vite.ts route 登記)。tsc 0 + helper 5 測試綠 | ✓ built,待 ship |
 | P3 項目卡接真資料 | 報價/訂單/詢問/付款/出團/簽證… 各 card wired | 待 |
 | P4 全公司事務 | 記帳/月報/行銷/供應商 + 行程管理頁 | 待 |
 | P5 對話升級 | slash/@ + 消閃爍/Stop/步驟列 | 待 |

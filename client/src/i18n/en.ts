@@ -10,6 +10,17 @@ export const en = {
     todayPending: 'Needs you',
     todayCaption: 'Everything that needs your decision, in one place',
     companyPlaceholder: 'Company (bookkeeping, P&L, marketing, suppliers) lands in P2',
+    kindBooking: 'Order',
+    kindInquiry: 'Inquiry',
+    kindTask: 'Approval',
+    customerNotFound: 'Customer not found',
+    packpoint: 'PackPoint',
+    bookings: 'Bookings',
+    openItems: 'Open',
+    noOpenItems: 'Nothing open right now',
+    searchCustomers: 'Search customers',
+    noCustomers: 'No customers',
+    selectCustomer: 'Pick a customer on the left',
   },
   // Common
   common: {
