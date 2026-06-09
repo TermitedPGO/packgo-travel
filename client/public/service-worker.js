@@ -28,7 +28,7 @@
  *   - Sentry, PostHog beacons — must reach origin or be dropped
  */
 
-const CACHE_VERSION = "packgo-v1-2026-05-22";
+const CACHE_VERSION = "packgo-v2-2026-06-09";
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const IMAGE_CACHE = `${CACHE_VERSION}-images`;
 
@@ -119,22 +119,24 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Shell: cache-first with network fallback. Cache hit = instant load
-  // offline. Miss = fetch + cache for next time.
+  // Shell (HTML / SPA navigations): NETWORK-FIRST so a new deploy's
+  // index.html (and thus the new hashed bundle) shows immediately. Falls
+  // back to the cached shell only when offline. (Previously cache-first,
+  // which served a stale shell + old JS bundle for a load or more after
+  // every deploy — that is why new /workspace builds "didn't change".)
   if (isShellRequest(event.request)) {
     event.respondWith(
-      caches.match("/").then((cached) => {
-        const networkFetch = fetch(event.request)
-          .then((res) => {
-            if (res && res.status === 200) {
-              const cloned = res.clone();
-              caches.open(SHELL_CACHE).then((cache) => cache.put("/", cloned));
-            }
-            return res;
-          })
-          .catch(() => cached);
-        return cached || networkFetch;
-      }),
+      fetch(event.request)
+        .then((res) => {
+          if (res && res.status === 200) {
+            const cloned = res.clone();
+            caches.open(SHELL_CACHE).then((cache) => cache.put("/", cloned));
+          }
+          return res;
+        })
+        .catch(() =>
+          caches.match("/").then((cached) => cached || Response.error()),
+        ),
     );
     return;
   }
