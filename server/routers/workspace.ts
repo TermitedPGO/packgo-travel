@@ -14,6 +14,23 @@ export const WORKSPACE_ITEM_KINDS = ["booking", "inquiry", "task"] as const;
 export type WorkspaceItemKind = (typeof WORKSPACE_ITEM_KINDS)[number];
 
 export const workspaceRouter = router({
+  /**
+   * All current dispositions as "kind:id" keys — lets any view (e.g. the
+   * 今日待辦 roll-up board) mark which items Jeff already「處理好了」without a
+   * per-item round trip. Presence of a key = handled.
+   */
+  listDispositions: adminProcedure.query(async () => {
+    const drizzleDb = (await db.getDb())!;
+    const { workspaceDispositions } = await import("../../drizzle/schema");
+    const rows = await drizzleDb
+      .select({
+        itemKind: workspaceDispositions.itemKind,
+        itemId: workspaceDispositions.itemId,
+      })
+      .from(workspaceDispositions);
+    return rows.map((r) => `${r.itemKind}:${r.itemId}`);
+  }),
+
   setDisposition: adminProcedure
     .input(
       z.object({

@@ -1,17 +1,16 @@
 /**
  * Workspace — 整合工作台 (chat-first 後台 v3).
  *
- * 跟現有 /admin 並存的新路由 /workspace。一個介面、四區檢視:
- *   與AI對話 / 今日待辦 / 全公司事務 / 客戶清單。
+ * Faithful to the mockup set in PackGo_示意圖/ (admin-full-pages.html et al):
+ * a single black-and-white app with the sidebar `navTop` shell —
+ *   與 AI 對話 / 今日待辦(roll-up) / 全公司事務(+記帳·月報·行銷·供應商)
+ *   / 客戶逐列 / Jeff footer.
  *
- * P1 (地基): 重用現有能跑的元件零新後端 —
- *   - 與AI對話  → <AgentChatPage>      (SSE 串流 ops agent)
- *   - 今日待辦  → commandCenter.stats KPIStrip + <ApprovalInbox> (審核箱)
- *   - 客戶清單  → <CustomersTabV2>
- *   - 全公司事務 → P2 placeholder
+ * The card grammar + state language live in components/workspace/ws-ui.tsx,
+ * ported from admin-cards-states.html. Design source of truth:
+ *   docs/features/admin-chat-claude-parity/design.md + PackGo_示意圖/*.html
  *
- * 設計定案: docs/features/admin-chat-claude-parity/design.md
- * 後續階段 (per-customer 聚合 / 項目卡 / slash@ / 6 平台) 見 progress.md。
+ * Coexists with /admin (untouched). New nav target = WsView.
  */
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useLocation } from "wouter";
@@ -19,34 +18,32 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { useLocale } from "@/contexts/LocaleContext";
 import { trpc } from "@/lib/trpc";
 import { LoadingPage } from "@/components/ui/spinner";
-import {
-  DomainSidebar,
-  PageHeader,
-  KPIStrip,
-  type Domain,
-  type KPI,
-} from "@/components/admin/primitives";
-import { MessageSquare, Sun, Building2, Users, Package } from "lucide-react";
+import WorkspaceSidebar, {
+  type WsView,
+  type CompanySub,
+} from "@/components/workspace/WorkspaceSidebar";
+import WorkspaceToday from "@/components/workspace/WorkspaceToday";
 
 const AgentChatPage = lazy(() => import("@/components/admin/AgentChatPage"));
-const WorkspaceCustomers = lazy(
-  () => import("@/components/workspace/WorkspaceCustomers"),
-);
-const ApprovalInbox = lazy(
-  () => import("@/components/admin-v2/CommandCenter/ApprovalInbox"),
+const CustomerInbox = lazy(
+  () => import("@/components/workspace/CustomerInbox"),
 );
 const WorkspaceCompany = lazy(
   () => import("@/components/workspace/WorkspaceCompany"),
 );
-const ToursTab = lazy(() => import("@/components/admin/ToursTab"));
-
-type SectionId = "ai" | "today" | "company" | "customers" | "tours";
 
 export default function Workspace() {
   const { user, loading, isAuthenticated, logout } = useAuth();
   const [, setLocation] = useLocation();
   const { t } = useLocale();
-  const [active, setActive] = useState<SectionId>("today");
+  const [view, setView] = useState<WsView>({ type: "today" });
+
+  const customersQ = trpc.admin.customerList.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
+  const statsQ = trpc.commandCenter.stats.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
 
   useEffect(() => {
     if (!loading && !isAuthenticated) setLocation("/login");
@@ -61,47 +58,53 @@ export default function Workspace() {
   }
   if (!isAuthenticated) return null;
 
-  const domains: Domain[] = [
-    { id: "ai", label: t("workspace.ai"), icon: MessageSquare },
-    { id: "today", label: t("workspace.today"), icon: Sun },
-    { id: "company", label: t("workspace.company"), icon: Building2 },
-    { id: "customers", label: t("workspace.customers"), icon: Users },
-    { id: "tours", label: t("workspace.tours"), icon: Package },
-  ];
+  const todayCount = statsQ.data?.totalPending ?? 0;
+  const companyCount =
+    (statsQ.data?.pendingByLane.marketing ?? 0) +
+    (statsQ.data?.pendingByLane.finance ?? 0);
 
-  const isChat = active === "ai";
+  const customers = (customersQ.data ?? []).map((c) => ({
+    id: c.id,
+    name: c.name,
+    email: c.email,
+  }));
+
+  const fallback = <LoadingPage text={t("workspace.loading")} />;
+  const fullHeight = view.type === "ai" || view.type === "customer";
 
   return (
     <div className="h-screen flex bg-white overflow-hidden">
-      <DomainSidebar
-        domains={domains}
-        active={active}
-        onSelect={(id) => setActive(id as SectionId)}
+      <WorkspaceSidebar
+        view={view}
+        onSelect={setView}
+        todayCount={todayCount}
+        companyCount={companyCount}
+        customers={customers}
         user={user ?? undefined}
         onLogout={logout}
-        onHome={() => setActive("today")}
       />
       <div className="flex-1 flex flex-col min-w-0">
-        {isChat ? (
-          // chat owns its own scroll + composer (mirror AdminV2 chat container)
+        {fullHeight ? (
           <div className="flex-1 overflow-hidden">
-            <Suspense fallback={<LoadingPage text={t("workspace.loading")} />}>
-              <AgentChatPage />
-            </Suspense>
-          </div>
-        ) : active === "customers" ? (
-          // customers = full-height master-detail (owns its own scroll)
-          <div className="flex-1 overflow-hidden">
-            <Suspense fallback={<LoadingPage text={t("workspace.loading")} />}>
-              <WorkspaceCustomers />
+            <Suspense fallback={fallback}>
+              {view.type === "ai" && <AgentChatPage />}
+              {view.type === "customer" && (
+                <CustomerInbox userId={view.userId} />
+              )}
             </Suspense>
           </div>
         ) : (
           <main className="flex-1 overflow-y-auto p-4 md:p-6">
-            <Suspense fallback={<LoadingPage text={t("workspace.loading")} />}>
-              {active === "today" && <WorkspaceToday />}
-              {active === "company" && <WorkspaceCompany />}
-              {active === "tours" && <ToursTab />}
+            <Suspense fallback={fallback}>
+              {view.type === "today" && <WorkspaceToday />}
+              {view.type === "company" && (
+                <WorkspaceCompany
+                  sub={view.sub}
+                  onSubChange={(sub: CompanySub) =>
+                    setView({ type: "company", sub })
+                  }
+                />
+              )}
             </Suspense>
           </main>
         )}
@@ -109,42 +112,3 @@ export default function Workspace() {
     </div>
   );
 }
-
-/**
- * 今日待辦 — P1 reuses the 審核箱 spine: pending-count KPIs + the generic
- * <ApprovalInbox>. The per-customer roll-up + 3-bucket grouping land in P2/P3.
- */
-function WorkspaceToday() {
-  const { t } = useLocale();
-  const { data: stats } = trpc.commandCenter.stats.useQuery();
-
-  const kpis: KPI[] = [
-    {
-      label: t("workspace.todayPending"),
-      value: stats?.totalPending ?? 0,
-      tone: (stats?.totalPending ?? 0) > 0 ? "warn" : "muted",
-    },
-    { label: t("admin.commandCenter.laneCs"), value: stats?.pendingByLane.cs ?? 0 },
-    { label: t("admin.commandCenter.laneQuote"), value: stats?.pendingByLane.quote ?? 0 },
-    {
-      label: t("admin.commandCenter.laneMarketing"),
-      value: stats?.pendingByLane.marketing ?? 0,
-    },
-    {
-      label: t("admin.commandCenter.laneFinance"),
-      value: stats?.pendingByLane.finance ?? 0,
-    },
-  ];
-
-  return (
-    <div className="space-y-5">
-      <PageHeader
-        title={t("workspace.today")}
-        caption={t("workspace.todayCaption")}
-      />
-      <KPIStrip items={kpis} />
-      <ApprovalInbox />
-    </div>
-  );
-}
-

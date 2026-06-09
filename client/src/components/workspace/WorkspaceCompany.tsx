@@ -29,9 +29,21 @@ const TABS: { id: CompanyTab; label: string }[] = [
   { id: "suppliers", label: "workspace.companySuppliers" },
 ];
 
-export default function WorkspaceCompany() {
+export default function WorkspaceCompany({
+  sub,
+  onSubChange,
+}: {
+  /** controlled active tab (driven by the workspace sidebar sub-items). */
+  sub?: CompanyTab;
+  onSubChange?: (s: CompanyTab) => void;
+} = {}) {
   const { t } = useLocale();
-  const [tab, setTab] = useState<CompanyTab>("ledger");
+  const [internalTab, setInternalTab] = useState<CompanyTab>("ledger");
+  const tab = sub ?? internalTab;
+  const setTab = (id: CompanyTab) => {
+    setInternalTab(id);
+    onSubChange?.(id);
+  };
 
   return (
     <div className="space-y-4">
