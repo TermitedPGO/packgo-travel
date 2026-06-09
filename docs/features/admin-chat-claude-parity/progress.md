@@ -9,6 +9,13 @@
 - 視覺:26 個完整頁 mockup(桌面 `PackGo_示意圖/admin-INDEX.html` 入口)✓
 - tasks/(Stage 3)— 待寫
 
+## 已上線 (2026-06-08) — 可用 v1
+
+`packgoplay.com/workspace` 是真的能用的工作台地基,跟 `/admin` 並存。
+- v675 P1 殼 + B1 講人話 · v676 P2 客戶 inbox · v677 P3 勾選持久化(migration 0089) · v678 P4 全公司事務 + P5 對話消閃爍/Stop
+- 1418 測試全過;每批 tsc 0 + guard ship + Jeff token。
+- **剩下都是 LARGE / 碰錢 / 要外部設定的,等 Jeff 指,不自動硬上**:slash/@ 指令、6 平台海報 gen(gpt-image+成本)、per-item 碰錢動作(報價確認等)、InquiryAgent 評測(要真信件 gold set)、後台行程管理頁。
+
 ## Track A — 工作台 UI
 
 | 階段 | 內容 | 狀態 |
