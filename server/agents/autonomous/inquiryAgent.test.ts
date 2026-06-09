@@ -214,7 +214,8 @@ describe("runInquiryAgent — escalation paths (module 3.8)", () => {
       channel: "email",
     });
     expect(result.shouldEscalate).toBe(true);
-    expect(result.escalationReason ?? "").toMatch(/critical_urgency|critical/);
+    // Plain-Chinese reason now (no more "critical_urgency" log-speak).
+    expect(result.escalationReason ?? "").toMatch(/很急/);
   });
 
   it("escalates when confidence < classification's minConfidence threshold", async () => {

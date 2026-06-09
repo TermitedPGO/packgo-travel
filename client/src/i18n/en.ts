@@ -1,5 +1,16 @@
 // English Translation File
 export const en = {
+  // Integrated workspace (chat-first admin v3, /workspace)
+  workspace: {
+    loading: 'Loading…',
+    ai: 'AI Chat',
+    today: 'Today',
+    company: 'Company',
+    customers: 'Customers',
+    todayPending: 'Needs you',
+    todayCaption: 'Everything that needs your decision, in one place',
+    companyPlaceholder: 'Company (bookkeeping, P&L, marketing, suppliers) lands in P2',
+  },
   // Common
   common: {
     greetingComma: ', ',
@@ -3312,6 +3323,7 @@ export const en = {
       dialogHardGateWarn: 'This item touches money or is irreversible. Confirm each one before sending.',
       dialogHardGateConfirm: 'I confirm, send anyway',
       toastSent: 'Sent',
+      toastRecorded: 'Recorded (not sent, handle manually)',
       toastApproved: 'Approved',
       toastRejected: 'Rejected',
       toastFailed: 'Execution failed',

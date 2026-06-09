@@ -540,17 +540,17 @@ export async function generateTourFromUrlInternal(
           messageType:
             cr.verdict === 'approved' ? 'observation' :
             cr.verdict === 'review' ? 'question' : 'alert',
-          title: `${verdictIcon} Tour #${tour.id} · cal=${cr.totalScore} · ${verdictLabel} · ${(tourData.title || '').slice(0, 50)}`,
+          title: `${verdictIcon} 行程 #${tour.id} · 評分 ${cr.totalScore} · ${verdictLabel} · ${(tourData.title || '').slice(0, 50)}`,
           body:
             `行程: ${tourData.title}\n` +
             `目的地: ${tourData.destinationCountry}/${tourData.destinationCity}\n` +
             `天數: ${tourData.days}\n` +
-            `Calibration: ${cr.totalScore}/100 → ${verdictLabel}\n` +
-            `  • Content fidelity: ${cr.contentFidelityScore}\n` +
-            `  • Translation: ${cr.translationScore}\n` +
-            `  • Image: ${cr.imageScore}\n` +
-            `  • Completeness: ${cr.completenessScore}\n` +
-            `  • Marketing: ${cr.marketingScore}\n` +
+            `總評分: ${cr.totalScore}/100 → ${verdictLabel}\n` +
+            `  • 內容正確度: ${cr.contentFidelityScore}\n` +
+            `  • 翻譯: ${cr.translationScore}\n` +
+            `  • 圖片: ${cr.imageScore}\n` +
+            `  • 完整度: ${cr.completenessScore}\n` +
+            `  • 行銷文案: ${cr.marketingScore}\n` +
             (criticalIssues ? `\n關鍵問題:\n${criticalIssues}` : '') +
             (cr.autoFixesApplied.length > 0 ? `\n\n自動修復 ${cr.autoFixesApplied.length} 處` : ''),
           priority: cr.verdict === 'rejected' ? 'high' : 'low',

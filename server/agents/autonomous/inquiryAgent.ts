@@ -24,6 +24,7 @@
  */
 
 import { invokeLLM, type Message, type Tool } from "../../_core/llm";
+import { escalationReasonZh } from "./inquiryLabels";
 
 export type Classification =
   | "new_inquiry"
@@ -426,11 +427,21 @@ export async function runInquiryAgent(
 
   const shouldAutoReply = !shouldEscalate && action === "draft_reply";
 
+  // Plain-Chinese, human-readable reasons (Jeff's rule: the inbox reads like
+  // a person, not a system log). The old strings leaked enum + policy jargon
+  // ("classification=X → policy.action=escalate").
   let escalationReason: string | undefined;
   if (shouldEscalate) {
-    if (action === "escalate") escalationReason = `classification=${parsed.classification} → policy.action=escalate`;
-    else if (isAlwaysEscalate) escalationReason = `policy.alwaysEscalate contains ${parsed.urgency === "critical" ? "critical_urgency" : parsed.classification}`;
-    else if (parsed.confidence < minConfidence) escalationReason = `confidence ${parsed.confidence} < minConfidence ${minConfidence}`;
+    if (action === "escalate") {
+      escalationReason = escalationReasonZh(parsed.classification);
+    } else if (isAlwaysEscalate) {
+      escalationReason =
+        parsed.urgency === "critical"
+          ? `這封很急,我一律先轉給你,不自己回。`
+          : escalationReasonZh(parsed.classification);
+    } else if (parsed.confidence < minConfidence) {
+      escalationReason = `我對這封的判斷只有 ${parsed.confidence} 分把握,不夠高,先給你確認再回。`;
+    }
   }
 
   return {

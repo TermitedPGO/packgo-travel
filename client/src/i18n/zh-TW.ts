@@ -1,5 +1,16 @@
 // 繁體中文翻譯檔案
 export const zhTW = {
+  // 整合工作台 (chat-first 後台 v3, /workspace)
+  workspace: {
+    loading: '載入中…',
+    ai: '與 AI 對話',
+    today: '今日待辦',
+    company: '全公司事務',
+    customers: '客戶清單',
+    todayPending: '需要你決定',
+    todayCaption: '所有需要你決定的事,一個地方看完',
+    companyPlaceholder: '全公司事務(記帳 · 月報 · 行銷 · 供應商)P2 接入',
+  },
   // 通用
   common: {
     greetingComma: '，',
@@ -3278,6 +3289,7 @@ export const zhTW = {
       dialogHardGateWarn: '此項目碰錢或不可逆，送出前請逐筆確認無誤。',
       dialogHardGateConfirm: '我已確認，仍要送出',
       toastSent: '已送出',
+      toastRecorded: '已記錄(尚未寄出,需你手動處理)',
       toastApproved: '已通過',
       toastRejected: '已退回',
       toastFailed: '執行失敗',

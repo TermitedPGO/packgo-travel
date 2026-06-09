@@ -158,11 +158,11 @@ async function _runReviewAgentInner(
 
   let escalationReason: string | undefined;
   if (shouldEscalate) {
-    if (input.rating === 1) escalationReason = "1-star review → always escalate";
+    if (input.rating === 1) escalationReason = "1 星負評,我一律轉給你親自處理。";
     else if (action === "escalate")
-      escalationReason = `classification=${parsed.classification} → policy.action=escalate`;
+      escalationReason = "這則評論我判斷要你親自看過,沒自動回。";
     else if (parsed.confidence < minConf)
-      escalationReason = `confidence ${parsed.confidence} < min ${minConf}`;
+      escalationReason = `我對這則的判斷只有 ${parsed.confidence} 分把握,不夠高,先給你看。`;
   }
 
   return {

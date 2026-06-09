@@ -22,6 +22,8 @@ const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 // rollback, but no Wouter route references it. All tab content lives
 // in @/components/admin/* and is consumed by AdminV2 directly.
 const AdminV2 = lazy(() => import("./pages/AdminV2"));
+// 整合工作台 v3 (chat-first) — 跟 /admin 並存,逐階段切換。design.md。
+const Workspace = lazy(() => import("./pages/Workspace"));
 const DiagnosticsPage = lazy(() => import("./pages/admin/DiagnosticsPage"));
 const Profile = lazy(() => import("./pages/Profile"));
 const TourDetailPeony = lazy(() => import("./pages/TourDetailPeony"));
@@ -165,6 +167,7 @@ function Router() {
           2026-05-29 — Jeff: drop the "v2" name. /admin IS the real page now;
           /admin/v2 redirects here so old bookmarks / email links still land. */}
       <Route path={"/admin"} component={AdminV2} />
+      <Route path={"/workspace"} component={Workspace} />
       <Route path={"/admin/v2"}>{() => { if (typeof window !== "undefined") window.location.replace("/admin"); return null; }}</Route>
       <Route path={"/profile"} component={Profile} />
       <Route path={"/tours/:id/print"} component={TourPrintView} />

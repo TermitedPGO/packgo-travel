@@ -125,7 +125,15 @@ export default function ApprovalInbox({ lane }: { lane?: ApprovalLane }) {
         changed ? { id, editedPayload } : { id },
       );
       if (res.status === "sent") {
-        toast.success(t("admin.commandCenter.toastSent"));
+        // Only the cs (inquiry-reply) lane actually emails the customer.
+        // quote / marketing / finance executors only write an audit log in
+        // v1 (Jeff still sends by hand), so claiming "已送出" there is a lie.
+        // Show an honest "已記錄" for those lanes.
+        toast.success(
+          selected?.lane === "cs"
+            ? t("admin.commandCenter.toastSent")
+            : t("admin.commandCenter.toastRecorded"),
+        );
       } else if (res.status === "failed") {
         toast.error(
           res.errorMessage

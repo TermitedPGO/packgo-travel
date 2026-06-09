@@ -331,7 +331,7 @@ export function formatRetrospectiveAsMessage(
     for (const o of retro.perAgentObservations) {
       const rate = Math.round(o.overrideRate * 100) / 100;
       lines.push(
-        `  ${o.agentName}: ${o.totalActions} 筆 · override ${o.overrides} (${rate}%)`
+        `  ${o.agentName}: ${o.totalActions} 筆 · 你改過 ${o.overrides} 次 (${rate}%)`
       );
       for (const t of o.notableThemes.slice(0, 3)) {
         lines.push(`    · ${t}`);
@@ -353,7 +353,7 @@ export function formatRetrospectiveAsMessage(
   }
 
   return {
-    title: `Retrospective · ${windowDays} 天 · ${retro.proposals.length} 個 proposal`,
+    title: `週報 · 過去 ${windowDays} 天 · ${retro.proposals.length} 個建議`,
     body: lines.join("\n"),
     context: JSON.stringify({
       source: "self_retrospective",

@@ -29,6 +29,7 @@ import {
   agentMessages,
 } from "../../../drizzle/schema";
 import { and, eq, sql } from "drizzle-orm";
+import { inquiryClassificationLabelZh } from "./inquiryLabels";
 import {
   buildGmailClient,
   listUnreadMessages,
@@ -598,8 +599,8 @@ async function processOneEmail(
     await db.insert(agentMessages).values({
       agentName: "inquiry",
       messageType: "escalation",
-      title: `${decision.classification} · ${senderEmail ?? "unknown"} · "${msg.subject.slice(0, 60)}"${attachmentsForAgent.length > 0 ? ` 📎×${attachmentsForAgent.length}` : ""}`,
-      body: `Agent escalated because: ${decision.escalationReason ?? "see decision"}\n\n${decision.intent}${attachmentLine}\n\n---\nDraft (供你參考,**未送出**):\n${decision.draftReply}`,
+      title: `${inquiryClassificationLabelZh(decision.classification)} · ${senderEmail ?? "未知寄件人"} · "${msg.subject.slice(0, 60)}"${attachmentsForAgent.length > 0 ? ` 📎×${attachmentsForAgent.length}` : ""}`,
+      body: `${decision.escalationReason ?? "這封我不確定怎麼處理,先給你看。"}\n\n客人想問:${decision.intent}${attachmentLine}\n\n---\n建議回覆(還沒送出,給你過目):\n${decision.draftReply}`,
       context: JSON.stringify({
         classification: decision.classification,
         urgency: decision.urgency,
