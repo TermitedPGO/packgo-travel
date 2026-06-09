@@ -25,7 +25,11 @@ export default function CustomerInbox({ userId }: { userId: number }) {
   const detail = trpc.admin.customerDetail.useQuery({ userId });
   const open = trpc.admin.customerOpenItems.useQuery({ userId });
   const setDisposition = trpc.workspace.setDisposition.useMutation({
-    onSuccess: () => utils.admin.customerOpenItems.invalidate({ userId }),
+    onSuccess: () => {
+      utils.admin.customerOpenItems.invalidate({ userId });
+      // 今日待辦 renders the same dispositions — keep it in sync
+      utils.workspace.listDispositions.invalidate();
+    },
   });
 
   if (detail.isLoading || open.isLoading) {
@@ -58,7 +62,11 @@ export default function CustomerInbox({ userId }: { userId: number }) {
           handled: !it.handled,
         })
       }
-      toggleBusy={setDisposition.isPending}
+      toggleBusy={
+        setDisposition.isPending &&
+        setDisposition.variables?.kind === it.kind &&
+        setDisposition.variables?.id === it.id
+      }
     >
       <div className="font-medium">{it.title}</div>
       <div className="text-gray-500 mt-0.5 text-[12px]">{it.sub}</div>

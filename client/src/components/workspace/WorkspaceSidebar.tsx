@@ -23,6 +23,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { useLocale } from "@/contexts/LocaleContext";
+import SidebarRail from "./SidebarRail";
 
 export type CompanySub = "ledger" | "reports" | "marketing" | "suppliers";
 
@@ -87,65 +88,17 @@ export default function WorkspaceSidebar({
 
   const initial = (user?.name || user?.email || "J").charAt(0).toUpperCase();
 
-  // ── collapsed icon rail ──────────────────────────────────────────────
+  // ── collapsed icon rail (extracted to SidebarRail) ───────────────────
   if (collapsed) {
-    const railBtn = (
-      active: boolean,
-      icon: ReactNode,
-      title: string,
-      onClick: () => void,
-      dot?: boolean,
-    ) => (
-      <button
-        title={title}
-        onClick={onClick}
-        className={`relative w-9 h-9 rounded-xl flex items-center justify-center ${
-          active ? "bg-black text-white" : "text-gray-500 hover:bg-gray-100"
-        }`}
-      >
-        {icon}
-        {dot && (
-          <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-black border border-white" />
-        )}
-      </button>
-    );
     return (
-      <div className="w-[56px] flex-shrink-0 border-r border-gray-200 bg-gray-50 flex flex-col items-center py-3">
-        <button
-          onClick={toggleCollapse}
-          title={t("workspace.expandSidebar")}
-          className="w-9 h-9 rounded-md hover:bg-gray-200 flex items-center justify-center text-gray-500 mb-2"
-        >
-          <PanelLeft className="w-4 h-4" />
-        </button>
-        <div className="flex-1 flex flex-col items-center gap-1.5">
-          {railBtn(
-            view.type === "ai",
-            <Bot className="w-4 h-4" />,
-            t("workspace.ai"),
-            () => onSelect({ type: "ai" }),
-          )}
-          {railBtn(
-            view.type === "today",
-            <Sun className="w-4 h-4" />,
-            t("workspace.today"),
-            () => onSelect({ type: "today" }),
-            todayCount > 0,
-          )}
-          {railBtn(
-            view.type === "company",
-            <Building2 className="w-4 h-4" />,
-            t("workspace.company"),
-            () => onSelect({ type: "company", sub: "ledger" }),
-          )}
-        </div>
-        <div
-          className="w-9 h-9 rounded-full bg-black text-white flex items-center justify-center text-[11px] font-bold"
-          title={user?.name || user?.email || "Jeff"}
-        >
-          {initial}
-        </div>
-      </div>
+      <SidebarRail
+        view={view}
+        onSelect={onSelect}
+        todayCount={todayCount}
+        onExpand={toggleCollapse}
+        initial={initial}
+        userTitle={user?.name || user?.email || "Jeff"}
+      />
     );
   }
 

@@ -6,10 +6,13 @@
  *   3 buckets: 需要你決定 / 處理中·等外部 / 看一下就好
  *   each item = ws-ui WorkspaceCard with 未處理 / 處理好了 toggle
  *
- * Data is REAL: commandCenter.list (approval tasks) bucketed by status, with
- * 處理好了 persisted via workspace.setDisposition. The mockup's customer-item
- * buckets that have no clean data source yet render an honest empty line
- * rather than fabricated demo cards.
+ * Data is REAL: commandCenter.list (approval tasks) queried PER STATUS so the
+ * 需要你決定 bucket can never silently drop an old pending task off a shared
+ * limit window (limit applies after the status filter, not before). 看一下就好
+ * is a bounded recent window (newest 20 approved + 20 failed), not a full
+ * history dump. 處理好了 persisted via workspace.setDisposition. The mockup's
+ * customer-item buckets that have no clean data source yet render an honest
+ * empty line rather than fabricated demo cards.
  */
 import { useMemo } from "react";
 import { trpc } from "@/lib/trpc";
@@ -38,19 +41,6 @@ function laneIsCompany(lane: string): boolean {
   return lane === "finance" || lane === "marketing";
 }
 
-type Task = {
-  id: number;
-  lane: string;
-  taskType: string;
-  riskLevel: string;
-  title: string;
-  summary: string | null;
-  status: string;
-  createdAt: Date | string | number;
-  /** customer label + jump target, resolved server-side (null = company-wide). */
-  who: { label: string; userId: number | null } | null;
-};
-
 /** Keep the jump chip short — long labels (emails) get an ellipsis. */
 function shortLabel(label: string, max = 12): string {
   return label.length > max ? `${label.slice(0, max)}…` : label;
@@ -64,14 +54,33 @@ export default function WorkspaceToday({
 } = {}) {
   const { t } = useLocale();
   const { user } = useAuth();
-  const listQ = trpc.commandCenter.list.useQuery({ limit: 200 });
+  const decideQ = trpc.commandCenter.list.useQuery({
+    status: "pending",
+    limit: 200,
+  });
+  const inflightQ = trpc.commandCenter.list.useQuery({
+    status: "sent",
+    limit: 200,
+  });
+  const approvedQ = trpc.commandCenter.list.useQuery({
+    status: "approved",
+    limit: 20,
+  });
+  const failedQ = trpc.commandCenter.list.useQuery({
+    status: "failed",
+    limit: 20,
+  });
   const statsQ = trpc.commandCenter.stats.useQuery();
   const dispQ = trpc.workspace.listDispositions.useQuery();
   const utils = trpc.useUtils();
 
+  type Task = NonNullable<typeof decideQ.data>[number];
+
   const setDisposition = trpc.workspace.setDisposition.useMutation({
     onSuccess: () => {
       utils.workspace.listDispositions.invalidate();
+      // per-customer inboxes render the same tasks — keep them in sync
+      utils.admin.customerOpenItems.invalidate();
     },
   });
 
@@ -80,12 +89,17 @@ export default function WorkspaceToday({
     [dispQ.data],
   );
 
-  const tasks = (listQ.data ?? []) as Task[];
-
-  const decide = tasks.filter((t) => t.status === "pending");
-  const inflight = tasks.filter((t) => t.status === "sent");
-  const fyi = tasks.filter(
-    (t) => t.status === "approved" || t.status === "failed",
+  const decide = decideQ.data ?? [];
+  const inflight = inflightQ.data ?? [];
+  const fyi = useMemo(
+    () =>
+      [...(approvedQ.data ?? []), ...(failedQ.data ?? [])]
+        .sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        )
+        .slice(0, 30),
+    [approvedQ.data, failedQ.data],
   );
 
   const pendingCount = statsQ.data?.totalPending ?? decide.length;
@@ -126,7 +140,9 @@ export default function WorkspaceToday({
         }
         handled={isHandled}
         onToggle={() => toggle(task.id, isHandled)}
-        toggleBusy={setDisposition.isPending}
+        toggleBusy={
+          setDisposition.isPending && setDisposition.variables?.id === task.id
+        }
       >
         <div className="font-medium">{task.title}</div>
         {task.summary && (
@@ -145,7 +161,7 @@ export default function WorkspaceToday({
     return ah - bh;
   };
 
-  const loading = listQ.isLoading || dispQ.isLoading;
+  const loading = decideQ.isLoading || dispQ.isLoading;
 
   return (
     <div className="space-y-5">
@@ -155,7 +171,7 @@ export default function WorkspaceToday({
         right={
           <button
             onClick={() => {
-              listQ.refetch();
+              utils.commandCenter.list.invalidate();
               statsQ.refetch();
               dispQ.refetch();
             }}
