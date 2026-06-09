@@ -16,8 +16,8 @@
 - **批1 m1 完成**:`server/_core/approvalTaskWho.ts`(extractCustomerRef + enrichTasksWithWho,批量 inArray 零 N+1,guest/壞 payload 誠實降級 userId=null)+ commandCenter.list 回傳加 who(只加欄位,5 個消費者相容)+ WorkspaceToday @客戶 chip + 「去X」跳轉(Workspace.setView → customer inbox)。+8 測試。
 - 驗證:tsc 0;全套 vitest 1433 passed / 0 failed(91 skipped);workspace 相關 90/90。
 - **本機視覺驗證限制(誠實記錄)**:本機無 .env / DB,/workspace 有登入牆,視覺只能 ship 後在 prod 親驗。
-- 待 ship(Jeff token);ship 後 curl bundle grep 標誌字串 + Jeff 親驗 chip/跳轉。
-- m2(卡上 approve/reject)、m3(詢問視圖)見 tasks/batch-1-today.md。
+- **v685 shipped(2026-06-09,Jeff go + token)**:七 gate 全過、/health 全綠(db 36ms / redis 17ms / stripe 235ms / llm 397ms)、token 用完即焚;線上 bundle grep 到「去{name}」+「timeJustNow」確認帶批1 m1 程式碼。**Jeff 親驗項:今日待辦卡 @客戶 chip、去X 跳轉切 inbox、英文模式全英文。**
+- m2(卡上 approve/reject)、m3(詢問視圖)見 tasks/batch-1-today.md;新 session 從這裡接。
 
 ## 文件
 - proposal.md(Stage 1)✓
