@@ -163,10 +163,13 @@ function Router() {
       <Route path={"/reset-password"} component={ResetPassword} />
       <Route path={"/admin/diagnostics"} component={DiagnosticsPage} />
       <Route path={"/admin/task-history"} component={TaskHistory} />
-      {/* 2026-05-22 — v1 5-domain shell retired; the 6-domain shell is canonical.
-          2026-05-29 — Jeff: drop the "v2" name. /admin IS the real page now;
-          /admin/v2 redirects here so old bookmarks / email links still land. */}
-      <Route path={"/admin"} component={AdminV2} />
+      {/* 2026-06-09 — Jeff: /admin IS the new 整合工作台 (chat-first redesign,
+          mockup B&W card grammar). The previous AdminV2 shell is parked at
+          /admin-legacy — still reachable, still holds 訂單 / 行程 / agents tabs
+          not yet ported into the workspace. /admin/v2 + /workspace are aliases
+          that also land on the new shell. */}
+      <Route path={"/admin"} component={Workspace} />
+      <Route path={"/admin-legacy"} component={AdminV2} />
       <Route path={"/workspace"} component={Workspace} />
       <Route path={"/admin/v2"}>{() => { if (typeof window !== "undefined") window.location.replace("/admin"); return null; }}</Route>
       <Route path={"/profile"} component={Profile} />

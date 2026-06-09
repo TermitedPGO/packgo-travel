@@ -33,8 +33,9 @@ const KNOWN_ROUTE_PATTERNS: RegExp[] = [
   /^\/login$/,
   /^\/forgot-password$/,
   /^\/reset-password$/,
-  /^\/admin(\/.*)?$/,                     // /admin and any nested admin route
-  /^\/workspace(\/.*)?$/,                 // 整合工作台 v3 (chat-first 後台) + 巢狀
+  /^\/admin(\/.*)?$/,                     // /admin (= 整合工作台) and nested admin routes
+  /^\/admin-legacy(\/.*)?$/,              // parked legacy AdminV2 shell (un-ported tabs)
+  /^\/workspace(\/.*)?$/,                 // 整合工作台 alias (chat-first 後台) + 巢狀
   /^\/profile$/,
   /^\/book\/[^/]+$/,                      // /book/:id
   /^\/bookings\/[^/]+$/,                  // /bookings/:id
