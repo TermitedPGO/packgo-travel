@@ -39,3 +39,30 @@
 - 每批獨立 ship 到 /workspace,Jeff 可逐批預覽喊停/改方向。
 - 監工原則(§9.4):不信文件自稱完成,每批 tsc + 親驗。
 - 碰錢頁(批 3)做好先給 Jeff 看一眼再接動作線。
+
+## 39 tab → 終點頁對照(2026-06-09,全套 PackGo_示意圖 掃描;縮編提案,不動上方已拍板批次順序)
+
+> 終點不是「39 個 tab 各自重畫」,是 **10 個整頁**:9 頁已有完整示意圖,「系統」1 頁無圖(= 批 8,乾淨黑白)。39 tab 中 21 個在示意圖裡已有家。
+
+| 終點頁 | 示意圖檔(PackGo_示意圖/) | 吸收的 AdminV2 tab |
+|---|---|---|
+| 今日待辦(首頁) | admin-inbox-integrated · full-pages ① | today · command-center(任務=卡片) · inquiries(roll-up) |
+| 與 AI 對話 | admin-chat-style-AB · chat-demos · full-pages ③ | agent-chat |
+| 客戶(每客人一個 inbox) | admin-inbox-per-customer · full-pages ② | customers-crm · packpoint |
+| 銷售(5 畫面) | admin-pages-sales | tool-quote · ai-quotes · wechat-assist |
+| 營運(5 畫面) | admin-pages-ops | bookings · departures-calendar · visa(+客服/新客 spam,新增能力) |
+| 財務(4 畫面) | admin-pages-finance | bank-ledger · finance-reports · finance-landing |
+| 行銷 | admin-pages-marketing-shell + marketing-poster | marketing-content · posters · newsletter · marketing |
+| 供應商 | admin-pages-marketing-shell(供應商畫面) | suppliers · supplier-enrichment · tour-monitor |
+| 行程管理 | admin-pages-tour | tours · calibration-review(分數內嵌) |
+| 系統(乾淨黑白) | admin-pages-system(2026-06-09 補圖完成) | autonomous-agents · skills · llm-cost · task-history · audit-log · ai-hub |
+
+### 沒入圖的 tab 處置(2026-06-09 Jeff 拍板,採預設判決)
+- **砍(設計使其失業)**:ops-landing · customers-landing · marketing-landing(今日待辦 + 客戶 inbox 取代「總覽」)
+- **拍板 6 件**:reviews=自動草稿變待辦卡片 · competitor-monitor=每週摘要卡 · vouchers=訂單卡內發 · affiliate=行銷 tile · analytics=砍,外連 PostHog · cleanup=砍,降為對話指令
+- **實質已有家**:command-center→今日待辦 · marketing→行銷 shell · supplier-enrichment→供應商
+- 示意圖資料夾已重整:admin-INDEX.html 重建為終點藍圖(10 頁 + 拍板記錄),舊版迭代與 customer 舊圖搬到 PackGo_示意圖/_archive/。
+
+### 縮編生效影響(批次順序不變)
+- 批 2 少 customers-landing;批 6 少 reviews/vouchers/ops-landing(變卡片或併入);批 5 競品監控變卡片;批 8 由 10 tab 縮為 6 tab 合一「系統」頁。
+- 驗收清單直接採 admin-INDEX.html footer 鐵則:純黑白 · 圓角 · line icon · 整齊對齊 · 碰錢先確認 · 機票你親自刷卡 · 客人訂金不算營收 · 護照末四碼 · 給客人訊息短而口語 · 無破折號。
