@@ -23,6 +23,10 @@ export const en = {
     selectCustomer: 'Pick a customer on the left',
     handled: 'Done',
     markHandled: 'Mark done',
+    companyLedger: 'Bookkeeping',
+    companyReports: 'Reports',
+    companyMarketing: 'Marketing',
+    companySuppliers: 'Suppliers',
   },
   // Common
   common: {
@@ -4875,6 +4879,7 @@ export const en = {
       periodThisYear: 'This year',
       cmdEnterSend: '⌘+Enter to send',
       send: 'Send',
+      stop: 'Stop',
       executionFailed: 'Execution failed: {msg}',
       confirmExecution: 'Confirm Action: {label}',
       actionParams: 'Action Parameters',

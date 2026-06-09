@@ -35,6 +35,9 @@ const WorkspaceCustomers = lazy(
 const ApprovalInbox = lazy(
   () => import("@/components/admin-v2/CommandCenter/ApprovalInbox"),
 );
+const WorkspaceCompany = lazy(
+  () => import("@/components/workspace/WorkspaceCompany"),
+);
 
 type SectionId = "ai" | "today" | "company" | "customers";
 
@@ -95,7 +98,7 @@ export default function Workspace() {
           <main className="flex-1 overflow-y-auto p-4 md:p-6">
             <Suspense fallback={<LoadingPage text={t("workspace.loading")} />}>
               {active === "today" && <WorkspaceToday />}
-              {active === "company" && <CompanyPlaceholder />}
+              {active === "company" && <WorkspaceCompany />}
             </Suspense>
           </main>
         )}
@@ -142,13 +145,3 @@ function WorkspaceToday() {
   );
 }
 
-function CompanyPlaceholder() {
-  const { t } = useLocale();
-  return (
-    <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50/40 p-10 text-center">
-      <div className="text-sm text-gray-500">
-        {t("workspace.companyPlaceholder")}
-      </div>
-    </div>
-  );
-}

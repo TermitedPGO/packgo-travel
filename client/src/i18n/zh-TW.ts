@@ -23,6 +23,10 @@ export const zhTW = {
     selectCustomer: '點左邊選一位客人',
     handled: '處理好了',
     markHandled: '標記處理好了',
+    companyLedger: '記帳',
+    companyReports: '月報',
+    companyMarketing: '行銷',
+    companySuppliers: '供應商',
   },
   // 通用
   common: {
@@ -4828,6 +4832,7 @@ export const zhTW = {
       periodThisYear: '今年',
       cmdEnterSend: '⌘+Enter 送出',
       send: '送出',
+      stop: '停止',
       executionFailed: '執行失敗: {msg}',
       confirmExecution: '確認執行: {label}',
       actionParams: '動作參數',

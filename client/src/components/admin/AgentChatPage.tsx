@@ -34,6 +34,7 @@ import {
   Check,
   X,
   Paperclip,
+  Square,
 } from "lucide-react";
 import { format } from "date-fns";
 import { zhTW } from "date-fns/locale";
@@ -385,6 +386,7 @@ export default function AgentChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   // Load conversation history — auto-refresh while idle
   const messages = trpc.agent.listMessages.useQuery(
@@ -473,10 +475,13 @@ export default function AgentChatPage() {
     const qParam = outgoing;
     const imgParam = imageUrls.length > 0 ? `&images=${encodeURIComponent(JSON.stringify(imageUrls))}` : "";
     const url = `/api/agent/ask-ops-stream?q=${encodeURIComponent(qParam)}${imgParam}`;
+    const ac = new AbortController();
+    abortRef.current = ac;
     try {
       const resp = await fetch(url, {
         method: "GET",
         credentials: "include",
+        signal: ac.signal,
         headers: {
           "X-Requested-With": "XMLHttpRequest",
           Accept: "text/event-stream",
@@ -519,15 +524,15 @@ export default function AgentChatPage() {
                 setStreamingCards(event.cards ?? null);
               }
               setQuestion("");
-              setTimeout(() => {
-                utils.agent.listMessages.invalidate();
-                setIsStreaming(false);
-                setTimeout(() => {
-                  setStreamingText(null);
-                  setStreamingActions(null);
-                  setStreamingCards(null);
-                }, 600);
-              }, 400);
+              setIsStreaming(false);
+              // Anti-flicker: keep the streamed bubble rendered until the
+              // refetch actually holds the persisted message, then swap. The
+              // old code raced two setTimeouts and showed both copies for
+              // ~600ms (the biggest "not smooth" tell).
+              await utils.agent.listMessages.invalidate();
+              setStreamingText(null);
+              setStreamingActions(null);
+              setStreamingCards(null);
             } else if (event.type === "error") {
               toast.error("PACK&GO Agent: " + (event.error ?? "unknown"));
               setIsStreaming(false);
@@ -538,10 +543,21 @@ export default function AgentChatPage() {
         }
       }
     } catch (err: any) {
+      if (err?.name === "AbortError") return; // user hit Stop, not an error
       toast.error(t('admin.agentChat.executionFailed', { msg: err?.message ?? "unknown" }));
       setIsStreaming(false);
       setStreamingText(null);
     }
+  };
+
+  // Stop a streaming response (AbortController cancels the fetch/reader).
+  const stopStreaming = () => {
+    abortRef.current?.abort();
+    setIsStreaming(false);
+    setStreamingStatus(null);
+    setStreamingText(null);
+    setStreamingActions(null);
+    setStreamingCards(null);
   };
 
   const handleActionClick = (action: any) => {
@@ -888,15 +904,27 @@ export default function AgentChatPage() {
               >
                 <Paperclip className="w-4 h-4" />
               </Button>
-              <Button
-                size="sm"
-                onClick={() => sendQuestion()}
-                disabled={(!question.trim() && pendingImages.length === 0) || isStreaming}
-                className="rounded-lg gap-1.5 bg-black hover:bg-gray-800 text-white h-10 px-4 md:h-8 md:px-3"
-              >
-                <Send className="w-3.5 h-3.5" />
-                {t('admin.agentChat.send')}
-              </Button>
+              {isStreaming ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={stopStreaming}
+                  className="rounded-lg gap-1.5 bg-black hover:bg-gray-800 text-white h-10 px-4 md:h-8 md:px-3"
+                >
+                  <Square className="w-3 h-3" />
+                  {t('admin.agentChat.stop')}
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  onClick={() => sendQuestion()}
+                  disabled={!question.trim() && pendingImages.length === 0}
+                  className="rounded-lg gap-1.5 bg-black hover:bg-gray-800 text-white h-10 px-4 md:h-8 md:px-3"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  {t('admin.agentChat.send')}
+                </Button>
+              )}
             </div>
           </div>
         </div>
