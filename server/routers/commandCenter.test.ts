@@ -115,7 +115,8 @@ describe("commandCenter.list", () => {
     const result = await caller.list({ lane: "cs", status: "pending" });
 
     expect(listMock).toHaveBeenCalledWith({ lane: "cs", status: "pending" });
-    expect(result).toEqual([{ id: 1 }]);
+    // rows pass through enrichTasksWithWho — non-customer rows get who: null
+    expect(result).toEqual([{ id: 1, who: null }]);
   });
 
   it("defaults to an empty filter when no input is given", async () => {
@@ -125,6 +126,26 @@ describe("commandCenter.list", () => {
     await caller.list();
 
     expect(listMock).toHaveBeenCalledWith({});
+  });
+
+  it("enriches cs rows with who from the payload (db unavailable → label only)", async () => {
+    getDbMock.mockResolvedValue(undefined as any);
+    listMock.mockResolvedValue([
+      {
+        id: 2,
+        lane: "cs",
+        payload: JSON.stringify({
+          inquiryId: 9,
+          customerName: "陳美玲",
+          customerEmail: "mei@example.com",
+        }),
+      } as any,
+    ]);
+
+    const caller = adminCaller();
+    const result = await caller.list();
+
+    expect(result[0].who).toEqual({ label: "陳美玲", userId: null });
   });
 });
 

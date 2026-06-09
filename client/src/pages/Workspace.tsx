@@ -98,7 +98,13 @@ export default function Workspace() {
         ) : (
           <main className="flex-1 overflow-y-auto p-4 md:p-6">
             <Suspense fallback={fallback}>
-              {view.type === "today" && <WorkspaceToday />}
+              {view.type === "today" && (
+                <WorkspaceToday
+                  onJumpToCustomer={(userId) =>
+                    setView({ type: "customer", userId })
+                  }
+                />
+              )}
               {view.type === "company" && (
                 <WorkspaceCompany
                   sub={view.sub}

@@ -13,7 +13,10 @@
  */
 import { useMemo } from "react";
 import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { useLocale } from "@/contexts/LocaleContext";
 import { RefreshCw } from "lucide-react";
+import { formatRelTime } from "./relTime";
 import {
   Greeting,
   GroupHeader,
@@ -23,29 +26,16 @@ import {
 
 type Lane = "cs" | "quote" | "marketing" | "finance";
 
-const LANE_BADGE: Record<Lane, string> = {
-  cs: "詢問",
-  quote: "報價",
-  marketing: "行銷",
-  finance: "財務",
+const LANE_BADGE_KEY: Record<Lane, string> = {
+  cs: "workspace.laneCs",
+  quote: "workspace.laneQuote",
+  marketing: "workspace.laneMarketing",
+  finance: "workspace.laneFinance",
 };
 
 /** finance / marketing tasks are company-wide; cs / quote belong to a customer. */
-function laneWho(lane: string): string | undefined {
-  return lane === "finance" || lane === "marketing" ? "全公司" : undefined;
-}
-
-function relTime(v: Date | string | number): string {
-  const t = v instanceof Date ? v.getTime() : new Date(v).getTime();
-  if (!Number.isFinite(t)) return "";
-  const diff = Date.now() - t;
-  const min = Math.round(diff / 60000);
-  if (min < 1) return "剛剛";
-  if (min < 60) return `${min} 分前`;
-  const hr = Math.round(min / 60);
-  if (hr < 24) return `${hr} 小時前`;
-  const d = Math.round(hr / 24);
-  return d === 1 ? "昨天" : `${d} 天前`;
+function laneIsCompany(lane: string): boolean {
+  return lane === "finance" || lane === "marketing";
 }
 
 type Task = {
@@ -57,9 +47,23 @@ type Task = {
   summary: string | null;
   status: string;
   createdAt: Date | string | number;
+  /** customer label + jump target, resolved server-side (null = company-wide). */
+  who: { label: string; userId: number | null } | null;
 };
 
-export default function WorkspaceToday() {
+/** Keep the jump chip short — long labels (emails) get an ellipsis. */
+function shortLabel(label: string, max = 12): string {
+  return label.length > max ? `${label.slice(0, max)}…` : label;
+}
+
+export default function WorkspaceToday({
+  onJumpToCustomer,
+}: {
+  /** open that customer's inbox (sidebar view switch, wired by Workspace). */
+  onJumpToCustomer?: (userId: number) => void;
+} = {}) {
+  const { t } = useLocale();
+  const { user } = useAuth();
   const listQ = trpc.commandCenter.list.useQuery({ limit: 200 });
   const statsQ = trpc.commandCenter.stats.useQuery();
   const dispQ = trpc.workspace.listDispositions.useQuery();
@@ -85,31 +89,50 @@ export default function WorkspaceToday() {
   );
 
   const pendingCount = statsQ.data?.totalPending ?? decide.length;
-  const line = `${pendingCount} 件待你決定 · ${inflight.length} 件處理中`;
+  const line = t("workspace.todayLine", {
+    decide: pendingCount,
+    inflight: inflight.length,
+  });
 
   const toggle = (id: number, currentlyHandled: boolean) =>
     setDisposition.mutate({ kind: "task", id, handled: !currentlyHandled });
 
-  const renderCard = (t: Task, baseState: CardState, waitLabel?: string) => {
-    const isHandled = handled.has(`task:${t.id}`);
-    const lane = t.lane;
+  const renderCard = (task: Task, baseState: CardState, waitLabel?: string) => {
+    const isHandled = handled.has(`task:${task.id}`);
+    const lane = task.lane;
+    const canJump = task.who?.userId != null && onJumpToCustomer != null;
     return (
       <WorkspaceCard
-        key={t.id}
-        type={LANE_BADGE[lane as Lane] ?? lane}
-        emphasize={t.riskLevel === "hard_gate"}
-        lock={t.riskLevel === "hard_gate"}
-        who={laneWho(lane)}
-        time={relTime(t.createdAt)}
-        state={isHandled ? "done" : t.status === "failed" ? "err" : baseState}
+        key={task.id}
+        type={
+          LANE_BADGE_KEY[lane as Lane] ? t(LANE_BADGE_KEY[lane as Lane]) : lane
+        }
+        emphasize={task.riskLevel === "hard_gate"}
+        lock={task.riskLevel === "hard_gate"}
+        who={task.who?.label}
+        whoCompany={laneIsCompany(lane)}
+        time={formatRelTime(task.createdAt, t)}
+        state={
+          isHandled ? "done" : task.status === "failed" ? "err" : baseState
+        }
         waitLabel={waitLabel}
+        jumpLabel={
+          canJump
+            ? t("workspace.jumpTo", { name: shortLabel(task.who!.label) })
+            : undefined
+        }
+        onJump={
+          canJump ? () => onJumpToCustomer!(task.who!.userId!) : undefined
+        }
         handled={isHandled}
-        onToggle={() => toggle(t.id, isHandled)}
+        onToggle={() => toggle(task.id, isHandled)}
         toggleBusy={setDisposition.isPending}
       >
-        <div className="font-medium">{t.title}</div>
-        {t.summary && (
-          <div className="text-gray-500 mt-0.5 text-[12px]">{t.summary}</div>
+        <div className="font-medium">{task.title}</div>
+        {task.summary && (
+          <div className="text-gray-500 mt-0.5 text-[12px]">
+            {task.summary}
+          </div>
         )}
       </WorkspaceCard>
     );
@@ -127,8 +150,8 @@ export default function WorkspaceToday() {
   return (
     <div className="space-y-5">
       <Greeting
-        name="Jeff"
-        line={loading ? "載入中…" : line}
+        name={user?.name || user?.email || ""}
+        line={loading ? t("workspace.loading") : line}
         right={
           <button
             onClick={() => {
@@ -139,46 +162,55 @@ export default function WorkspaceToday() {
             className="text-xs text-gray-500 flex items-center gap-1"
           >
             <RefreshCw className="w-3.5 h-3.5" />
-            重新整理
+            {t("workspace.refresh")}
           </button>
         }
       />
 
       <div>
-        <GroupHeader title="需要你決定" count={decide.length} />
+        <GroupHeader title={t("workspace.todayPending")} count={decide.length} />
         {decide.length === 0 ? (
           <div className="text-[12px] text-gray-400 py-2">
-            目前沒有待你決定的事 🎉
+            {t("workspace.todayEmptyDecide")}
           </div>
         ) : (
           <div className="space-y-2.5">
             {[...decide]
               .sort(sortHandled)
-              .map((t) => renderCard(t, "decide"))}
+              .map((task) => renderCard(task, "decide"))}
           </div>
         )}
       </div>
 
       <div>
-        <GroupHeader title="處理中 · 等外部" count={inflight.length} />
+        <GroupHeader
+          title={t("workspace.todayInflight")}
+          count={inflight.length}
+        />
         {inflight.length === 0 ? (
-          <div className="text-[12px] text-gray-400 py-2">目前沒有</div>
+          <div className="text-[12px] text-gray-400 py-2">
+            {t("workspace.todayEmptyBucket")}
+          </div>
         ) : (
           <div className="space-y-2.5">
             {[...inflight]
               .sort(sortHandled)
-              .map((t) => renderCard(t, "wait", "已送出"))}
+              .map((task) => renderCard(task, "wait", t("workspace.waitSent")))}
           </div>
         )}
       </div>
 
       <div>
-        <GroupHeader title="看一下就好" count={fyi.length} />
+        <GroupHeader title={t("workspace.todayFyi")} count={fyi.length} />
         {fyi.length === 0 ? (
-          <div className="text-[12px] text-gray-400 py-2">目前沒有</div>
+          <div className="text-[12px] text-gray-400 py-2">
+            {t("workspace.todayEmptyBucket")}
+          </div>
         ) : (
           <div className="space-y-2.5">
-            {[...fyi].sort(sortHandled).map((t) => renderCard(t, "none"))}
+            {[...fyi]
+              .sort(sortHandled)
+              .map((task) => renderCard(task, "none"))}
           </div>
         )}
       </div>

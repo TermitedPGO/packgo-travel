@@ -32,6 +32,7 @@ import {
   type ApprovalAuditCtx,
   type ApprovalTask,
 } from "../_core/approvalTasks";
+import { enrichTasksWithWho } from "../_core/approvalTaskWho";
 // 指揮中心 客服頁 (P1) — registering the cs lane executor at module load.
 // This file is imported by server/routers.ts to build appRouter (loaded at
 // server boot), so importing + calling registerCsExecutors() HERE guarantees
@@ -122,7 +123,12 @@ async function approveAndExecute(
 }
 
 export const commandCenterRouter = router({
-  /** Inbox list — optional lane / status filter, newest first. */
+  /**
+   * Inbox list — optional lane / status filter, newest first. Each row is
+   * enriched with `who` (customer label + jump userId, null for company-wide
+   * lanes) so the workspace 今日待辦 can render the @客戶 chip + 「去X」jump
+   * without parsing lane payloads client-side.
+   */
   list: adminProcedure
     .input(
       z
@@ -135,7 +141,8 @@ export const commandCenterRouter = router({
         .optional(),
     )
     .query(async ({ input }) => {
-      return listApprovalTasks(input ?? {});
+      const tasks = await listApprovalTasks(input ?? {});
+      return enrichTasksWithWho(tasks);
     }),
 
   /** Per-lane pending counts for the 狀態 strip. */
