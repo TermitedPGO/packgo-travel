@@ -147,6 +147,16 @@ export function serveStatic(app: Express) {
       setHeaders: (res, p) => {
         if (p.endsWith(".html")) {
           res.setHeader("Cache-Control", "public, max-age=0, must-revalidate");
+        } else if (
+          p.endsWith("service-worker.js") ||
+          p.endsWith("manifest.json")
+        ) {
+          // ROOT CAUSE FIX (2026-06-09): the SW + manifest were served with
+          // the blanket `max-age=1y, immutable`, so browsers NEVER re-fetched
+          // service-worker.js → the old cache-first SW lived forever → every
+          // deploy stayed invisible behind the stale cached app ("都沒改變").
+          // A service worker MUST revalidate so new versions get picked up.
+          res.setHeader("Cache-Control", "no-cache");
         }
       },
     })

@@ -26,8 +26,14 @@ export function registerServiceWorker(): void {
   // if already loaded → register now; else attach listener.
   const doRegister = () => {
     navigator.serviceWorker
-      .register(SW_PATH, { scope: "/" })
+      // updateViaCache:"none" → the browser bypasses the HTTP cache when
+      // checking service-worker.js for updates, so a new SW is always seen
+      // even if a CDN/proxy mis-cached it. Pair with the no-cache header.
+      .register(SW_PATH, { scope: "/", updateViaCache: "none" })
       .then((registration) => {
+        // Force an immediate update check (don't wait for the ~24h throttle)
+        // so a freshly-deployed SW is picked up on this load, not days later.
+        registration.update().catch(() => {});
         // Listen for updates so future "new version available" UX has a
         // hook. Phase 6 will wire a Toast here.
         registration.addEventListener("updatefound", () => {
