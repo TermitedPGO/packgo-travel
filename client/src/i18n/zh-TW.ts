@@ -27,6 +27,7 @@ export const zhTW = {
     companyReports: '月報',
     companyMarketing: '行銷',
     companySuppliers: '供應商',
+    tours: '行程',
   },
   // 通用
   common: {

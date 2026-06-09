@@ -27,6 +27,7 @@ export const en = {
     companyReports: 'Reports',
     companyMarketing: 'Marketing',
     companySuppliers: 'Suppliers',
+    tours: 'Tours',
   },
   // Common
   common: {

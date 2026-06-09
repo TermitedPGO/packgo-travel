@@ -26,7 +26,7 @@ import {
   type Domain,
   type KPI,
 } from "@/components/admin/primitives";
-import { MessageSquare, Sun, Building2, Users } from "lucide-react";
+import { MessageSquare, Sun, Building2, Users, Package } from "lucide-react";
 
 const AgentChatPage = lazy(() => import("@/components/admin/AgentChatPage"));
 const WorkspaceCustomers = lazy(
@@ -38,8 +38,9 @@ const ApprovalInbox = lazy(
 const WorkspaceCompany = lazy(
   () => import("@/components/workspace/WorkspaceCompany"),
 );
+const ToursTab = lazy(() => import("@/components/admin/ToursTab"));
 
-type SectionId = "ai" | "today" | "company" | "customers";
+type SectionId = "ai" | "today" | "company" | "customers" | "tours";
 
 export default function Workspace() {
   const { user, loading, isAuthenticated, logout } = useAuth();
@@ -65,6 +66,7 @@ export default function Workspace() {
     { id: "today", label: t("workspace.today"), icon: Sun },
     { id: "company", label: t("workspace.company"), icon: Building2 },
     { id: "customers", label: t("workspace.customers"), icon: Users },
+    { id: "tours", label: t("workspace.tours"), icon: Package },
   ];
 
   const isChat = active === "ai";
@@ -99,6 +101,7 @@ export default function Workspace() {
             <Suspense fallback={<LoadingPage text={t("workspace.loading")} />}>
               {active === "today" && <WorkspaceToday />}
               {active === "company" && <WorkspaceCompany />}
+              {active === "tours" && <ToursTab />}
             </Suspense>
           </main>
         )}

@@ -23,7 +23,7 @@
 | P1 地基 | 新路由 /workspace + 4 區殼(重用 DomainSidebar)+ 今日待辦接 commandCenter 真資料(KPIStrip + ApprovalInbox)+ AI對話掛 AgentChatPage + 客戶清單 CustomersTabV2 + 全公司 placeholder | ✓ built(tsc 0 + i18n 綠),待 ship |
 | P2 客戶 inbox | per-customer 聚合(adminCustomers.customerOpenItems:開放訂單/詢問/待審 task)+ CustomerInbox/WorkspaceCustomers master-detail + 修 /workspace 404(vite.ts route 登記)。tsc 0 + helper 5 測試綠 | ✓ built,待 ship |
 | P3 勾選持久化 | disposition 層(migration 0089 workspaceDispositions,有 row=處理好了)+ workspace.setDisposition + customerOpenItems 帶 handled + CustomerInbox 勾選 → 寫 DB + 淡化下沉。tsc 0 + helper 7 測試綠 | ✓ built,待 ship | 各 card 完整內容/per-item 動作(報價確認等)= P4 |
-| P4 全公司事務 | WorkspaceCompany 4 子分頁(記帳→BankLedgerV2 / 月報→FinanceReports / 行銷→NewsletterTabV2 / 供應商→SupplierEnrichmentTabV2)接現有元件,零新後端。tsc 0 | ✓ built,待 ship | 行程管理頁(後台)留後 |
+| P4 全公司事務 + 行程 | WorkspaceCompany 4 子分頁(記帳→BankLedgerV2 / 月報→FinanceReports / 行銷→NewsletterTabV2 / 供應商→SupplierEnrichmentTabV2)+ 第 5 個 section 行程(ToursTab),全接現有元件,零新後端。tsc 0 | ✓ shipped | workspace 5 section 補齊。richer 單行程詳情頁(圖/地圖/calibration 合一)= 之後 |
 | P5 對話順化 | 消閃爍(awaited invalidate 取代 racing setTimeout)+ Stop 鈕(AbortController,串流時顯示)。改共用 AgentChatPage,/admin 也受惠。tsc 0 | ✓ built(部分),待 ship | 工具步驟持續列 = P5.1;slash/@ = LARGE 留給 Jeff |
 | P6 一稿出 6 平台 | 海報 gen | 待 |
 
