@@ -38,17 +38,17 @@
 - 報價 task 卡上內容豐富化(佔床表、旺季 warn、來源 src 照 sales p2)— payload 既有欄位渲染,動作仍走 ReviewTaskDialog(改金額 = editedPayload,核准 = 既有 approve)。
 - ai-quotes 記錄 + tool-quote PDF 連結列入該客人時間軸(唯讀卡)。
 
-### m3 — per-customer 對話(LARGE,要 Jeff 拍板)
-- composer 綁客人;**架構拍板**:(a) agentMessages 加 customerUserId 欄(沿用既有表/已讀機制)vs (b) 新 customerChatSessions 表(乾淨但多一套)。
-- context 注入:open items + 偏好 + 近期訂單餵 agent;輸出卡(找團結果列/比較表/客製逐日 = sales p1/p4/p5)由對話渲染。
+### m3 — per-customer 對話(LARGE;**2026-06-10 Jeff 拍板:新 customerChatSessions 表**)
+- 拍板:不動 agentMessages,新建 customerChatSessions 表(乾淨分離;已讀/badge 機制為此表獨立建)。
+- composer 綁客人;context 注入:open items + 偏好 + 近期訂單餵 agent;輸出卡(找團結果列/比較表/客製逐日 = sales p1/p4/p5)由對話渲染。
 - 「報價」「傳客人」動作從輸出卡觸發 → 全部落回 gated approval(不新增自動送出)。
 
-### m4 — 機票面(要 Jeff 拍板)
-- 選項:(a) 建 flightOrders 最小狀態機(備訂 → 待你刷卡 → TICKETED,黑鎖條照 sales p3,刷卡永遠 Jeff 本人)(b) 先唯讀卡(手動記錄/skill 產物)(c) 批2 暫緩,等批6 營運一起。
-- 無論選哪個:系統不碰卡號/CVV/付款鈕(硬線)。
+### m4 — 機票面(**2026-06-10 Jeff 拍板:建最小 flightOrders 狀態機**)
+- 拍板:最小狀態機 備訂 → 待你刷卡 → TICKETED(黑鎖條照 sales p3),把既有人工 workflow(核件 → Trip.com 訂 → Jeff 親刷 → 確認單+短訊)數位化。
+- 硬線不變:系統不碰卡號/CVV/付款鈕;「我來刷卡」只開訂購頁。
 
-### m5 — wechat-assist 歸戶(要 Jeff 拍板)
-- 選項:(a) wechatMessages 加歸戶欄(userId nullable)+ 人工/規則配對,訊息進客人時間軸 (b) 先把現有 pending 審核清單以乾淨黑白搬進工作台(不歸戶)。
+### m5 — wechat-assist 歸戶(**2026-06-10 Jeff 拍板:加歸戶欄 + 配對**)
+- 拍板:wechatMessages 加 userId(nullable)+ 用 customerProfiles.wechatId 配對 + 人工補配;訊息進客人時間軸。
 - approve(真送微信)維持逐筆 gated。
 
 ## 驗證(每 milestone,同批1)
