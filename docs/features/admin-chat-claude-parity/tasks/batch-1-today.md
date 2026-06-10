@@ -29,12 +29,11 @@
 2. `customerInteractions`(Gmail inbound,含 classification="spam")→ 每封都留底(原始記錄不丟)但**不進今日待辦**;spam 只發 observation 到 #inquiry 頻道。
 3. `agentMessages`(escalation,B1 已講人話)→ 顯示在 agent 對話,不在今日待辦。
 
-缺口:
-- [ ] escalation(複雜/投訴/退款)進今日待辦「需要你決定」桶(parse agentMessages context 取 who)。
-- [ ] spam 匣:customerInteractions classification=spam 清單 + 計數常駐 +「其實是客人,救回」/「確定是垃圾」兩鍵(目前**後端無救回 mutation,無 spam 狀態欄**,要新增)。
-- [ ] B2 配套(task #93):InquiryAgent spam 辨識 eval,要 Jeff 給真信件 gold set。
+**2026-06-09 Jeff 拍板:救回 = (a) 建正式 inquiry + 跑 InquiryAgent 出草稿(同正常 inbound 一條路)。**
 
-**待 Jeff 拍板再動工**:「救回」的語意是什麼?(a) 救回 = 建正式 inquiry + 跑 InquiryAgent 出草稿,或 (b) 救回 = 只標記非垃圾、進客戶殼,Jeff 手動回。鐵律 4 只說「不靜默丟 + 可救回」,沒定義救回後的動作。
+- [x] **m3a spam 匣(同日完成)**:migration 0090 `customerInteractions.spamVerdict`(NULL=待判 / rescued / confirmed_spam,確認垃圾保留不刪)+ `server/_core/spamBox.ts`(listSpam / rescue / confirm,rescue 先建 inquiry 再標 rescued 才跑 LLM,重按不會重複建;agent 掛了誠實回 agentError)+ commandCenter spamList/spamRescue/spamConfirm + 今日待辦疑似垃圾匣 UI(兩鍵 BtnO 照 cards-states,判決後淡化留底)。+8 測試。
+- [ ] m3b escalation(複雜/投訴/退款)進今日待辦「需要你決定」桶(parse agentMessages context 取 who)。
+- [ ] B2 配套(task #93):InquiryAgent spam 辨識 eval,要 Jeff 給真信件 gold set。
 
 ## 驗證(每模組)
 - tsc 0;`npx vitest run client/src/components/workspace server/_core/approvalTaskWho.test.ts server/routers/commandCenter.test.ts` 綠。

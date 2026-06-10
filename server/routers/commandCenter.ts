@@ -33,6 +33,11 @@ import {
   type ApprovalTask,
 } from "../_core/approvalTasks";
 import { enrichTasksWithWho } from "../_core/approvalTaskWho";
+import {
+  listSpamInteractions,
+  rescueSpamInteraction,
+  confirmSpamInteraction,
+} from "../_core/spamBox";
 // 指揮中心 客服頁 (P1) — registering the cs lane executor at module load.
 // This file is imported by server/routers.ts to build appRouter (loaded at
 // server boot), so importing + calling registerCsExecutors() HERE guarantees
@@ -221,6 +226,36 @@ export const commandCenterRouter = router({
 
       return { approved, blocked };
     }),
+
+  /**
+   * 疑似垃圾匣 (批1 m3a, design.md §2 rule 4) — spam-classified inbound rows.
+   * Includes decided rows (rescued / confirmed) so nothing ever vanishes.
+   */
+  spamList: adminProcedure
+    .input(
+      z
+        .object({ limit: z.number().int().min(1).max(100).optional() })
+        .optional(),
+    )
+    .query(async ({ input }) => listSpamInteractions(input?.limit ?? 50)),
+
+  /**
+   * 「其實是客人,救回」— creates a real inquiry from the stored content and
+   * runs the SAME draft path as a normal inbound (agent → cs approval task).
+   * Agent failure is reported honestly in the result, never hidden.
+   */
+  spamRescue: adminProcedure
+    .input(z.object({ interactionId: z.number().int() }))
+    .mutation(async ({ ctx, input }) =>
+      rescueSpamInteraction(input.interactionId, ctx as ApprovalAuditCtx),
+    ),
+
+  /** 「確定是垃圾」— verdict only; the row is muted but never deleted. */
+  spamConfirm: adminProcedure
+    .input(z.object({ interactionId: z.number().int() }))
+    .mutation(async ({ ctx, input }) =>
+      confirmSpamInteraction(input.interactionId, ctx as ApprovalAuditCtx),
+    ),
 
   /**
    * 客服頁 producer trigger (P1-b) — run InquiryAgent on an existing inquiry

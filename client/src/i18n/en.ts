@@ -61,6 +61,16 @@ export const en = {
     timeDaysAgo: '{n}d ago',
     jumpTo: 'Open {name}',
     review: 'Review',
+    spamBox: 'Suspected spam',
+    spamBadge: 'Spam?',
+    spamRescue: 'Actually a customer, rescue',
+    spamConfirm: 'Confirm spam',
+    spamRescued: 'Rescued, draft is in Today',
+    spamConfirmed: 'Confirmed spam (kept)',
+    spamEmpty: 'No suspected spam',
+    spamNote: 'Spam is never silently dropped; confirmed junk is kept too',
+    spamRescueAgentFail: 'Inquiry created, but the AI draft failed',
+    spamUnknownSender: 'Unknown sender',
   },
   // Common
   common: {

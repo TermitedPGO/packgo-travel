@@ -2603,6 +2603,14 @@ export const customerInteractions = mysqlTable("customerInteractions", {
 
   outcomeId: int("outcomeId"),
 
+  /**
+   * Jeff's manual verdict on a "spam"-classified row (migration 0090,
+   * design.md §2 rule 4 — spam is never silently dropped):
+   *   NULL = 疑似垃圾 awaiting review · rescued = was a real customer
+   *   (inquiry created + drafted) · confirmed_spam = muted but kept.
+   */
+  spamVerdict: mysqlEnum("spamVerdict", ["rescued", "confirmed_spam"]),
+
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => ({
   customerIdx: index("idx_int_customer").on(table.customerProfileId, table.createdAt),

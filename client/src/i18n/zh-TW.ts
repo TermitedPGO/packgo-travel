@@ -61,6 +61,16 @@ export const zhTW = {
     timeDaysAgo: '{n} 天前',
     jumpTo: '去{name}',
     review: '審核',
+    spamBox: '疑似垃圾',
+    spamBadge: '疑似垃圾',
+    spamRescue: '其實是客人,救回',
+    spamConfirm: '確定是垃圾',
+    spamRescued: '已救回,草稿進今日待辦',
+    spamConfirmed: '已確認垃圾(保留不刪)',
+    spamEmpty: '沒有疑似垃圾',
+    spamNote: 'spam 永不靜默丟掉真客人,確認垃圾也保留',
+    spamRescueAgentFail: '已建詢問,但 AI 草稿失敗',
+    spamUnknownSender: '未知寄件人',
   },
   // 通用
   common: {
