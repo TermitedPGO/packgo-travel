@@ -411,6 +411,8 @@ export const adminCustomersRouter = router({
           id: customerChatMessages.id,
           senderRole: customerChatMessages.senderRole,
           body: customerChatMessages.body,
+          // m3b — cards + suggestedActions JSON for turn extras rendering
+          context: customerChatMessages.context,
           createdAt: customerChatMessages.createdAt,
         })
         .from(customerChatMessages)

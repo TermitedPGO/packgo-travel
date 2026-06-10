@@ -65,10 +65,10 @@ describe("formatCustomerContext", () => {
     expect(block).toContain("只關於這位客人");
   });
 
-  it("tells the agent this surface has NO action buttons (v1 honesty, pre-m3b)", () => {
-    // 2026-06-10 prod 驗收抓到 agent 說「點上面的按鈕」但 v1 不渲染 chips
+  it("tells the agent the true chip mechanics (m3b: click → confirm → run)", () => {
     const block = formatCustomerContext(BASE);
-    expect(block).toContain("不會顯示任何動作按鈕");
+    expect(block).toContain("再確認一次才會執行");
+    expect(block).not.toContain("不會顯示任何動作按鈕");
   });
 
   it("omits empty sections instead of printing empty headers", () => {

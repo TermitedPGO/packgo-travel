@@ -9,10 +9,10 @@
  * customer pinned in its system prompt (server-side context injection) plus
  * its usual read-only query tools.
  *
- * v1 renders TEXT turns only. suggestedActions / output cards from the agent
- * are persisted in the row's context JSON but not rendered yet — no action
- * can be triggered from this surface, so no new send path exists (m3b will
- * render them through the gated approval chips).
+ * m3b: agent turns render their data cards (shared OpsCards) and
+ * suggested-action chips. A chip click NEVER executes — it opens the gated
+ * ActionConfirmDialog (sensitive = type CONFIRM) and runs through the
+ * existing agent.executeOpsAction; zero new execution paths.
  */
 import { useRef, useState } from "react";
 import { trpc } from "@/lib/trpc";
@@ -20,6 +20,13 @@ import { toast } from "sonner";
 import { useLocale } from "@/contexts/LocaleContext";
 import { Streamdown } from "streamdown";
 import { Send, Square } from "lucide-react";
+import { OpsCards } from "@/components/admin/AgentChatPage";
+import { parseTurnExtras } from "./customerChatExtras";
+import {
+  CustomerActionChips,
+  ActionConfirmDialog,
+  type SuggestedAction,
+} from "./CustomerChatActions";
 
 export default function CustomerChat({
   userId,
@@ -33,8 +40,16 @@ export default function CustomerChat({
   const listQ = trpc.admin.customerChatList.useQuery({ userId });
   const [q, setQ] = useState("");
   const [streamingText, setStreamingText] = useState<string | null>(null);
+  const [streamingExtras, setStreamingExtras] = useState<{
+    cards: any[];
+    actions: SuggestedAction[];
+  } | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // chip clicked → gated confirm dialog (m3b)
+  const [pendingAction, setPendingAction] = useState<SuggestedAction | null>(
+    null,
+  );
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -48,6 +63,7 @@ export default function CustomerChat({
     if (!outgoing || busy) return;
     setBusy(true);
     setStreamingText("");
+    setStreamingExtras(null);
     setQ("");
     const ac = new AbortController();
     abortRef.current = ac;
@@ -100,9 +116,16 @@ export default function CustomerChat({
             } else if (event.type === "done") {
               setStatus(null);
               if (event.finalAnswer) setStreamingText(event.finalAnswer);
+              setStreamingExtras({
+                cards: Array.isArray(event.cards) ? event.cards : [],
+                actions: Array.isArray(event.suggestedActions)
+                  ? event.suggestedActions
+                  : [],
+              });
               // anti-flicker: refetch holds the persisted turn, then swap
               await utils.admin.customerChatList.invalidate({ userId });
               setStreamingText(null);
+              setStreamingExtras(null);
               setBusy(false);
               scrollDown();
             } else if (event.type === "error") {
@@ -130,6 +153,7 @@ export default function CustomerChat({
     abortRef.current?.abort();
     setBusy(false);
     setStreamingText(null);
+    setStreamingExtras(null);
     setStatus(null);
   };
 
@@ -144,24 +168,38 @@ export default function CustomerChat({
           ref={scrollRef}
           className="max-h-[40vh] overflow-y-auto px-5 py-4 space-y-4"
         >
-          {messages.map((m) => (
-            <div key={m.id}>
-              <div
-                className={`text-[10px] font-semibold mb-1 ${
-                  m.senderRole === "jeff" ? "text-gray-400" : "text-black"
-                }`}
-              >
-                {m.senderRole === "jeff" ? t("workspace.chatYou") : "PACK&GO AGENT"}
-              </div>
-              {m.senderRole === "agent" ? (
-                <div className="text-[13.5px] leading-relaxed">
-                  <Streamdown>{m.body}</Streamdown>
+          {messages.map((m) => {
+            const extras =
+              m.senderRole === "agent"
+                ? parseTurnExtras((m as { context?: string | null }).context)
+                : null;
+            return (
+              <div key={m.id}>
+                <div
+                  className={`text-[10px] font-semibold mb-1 ${
+                    m.senderRole === "jeff" ? "text-gray-400" : "text-black"
+                  }`}
+                >
+                  {m.senderRole === "jeff" ? t("workspace.chatYou") : "PACK&GO AGENT"}
                 </div>
-              ) : (
-                <div className="text-[13.5px] whitespace-pre-wrap">{m.body}</div>
-              )}
-            </div>
-          ))}
+                {m.senderRole === "agent" ? (
+                  <div className="text-[13.5px] leading-relaxed">
+                    <Streamdown>{m.body}</Streamdown>
+                  </div>
+                ) : (
+                  <div className="text-[13.5px] whitespace-pre-wrap">{m.body}</div>
+                )}
+                {/* m3b — data cards + gated action chips on agent turns */}
+                {extras && <OpsCards cards={extras.cards} />}
+                {extras && (
+                  <CustomerActionChips
+                    actions={extras.actions}
+                    onPick={setPendingAction}
+                  />
+                )}
+              </div>
+            );
+          })}
           {status && <div className="text-[12px] text-gray-400">{status}</div>}
           {streamingText !== null && streamingText !== "" && (
             <div>
@@ -171,6 +209,13 @@ export default function CustomerChat({
               <div className="text-[13.5px] leading-relaxed">
                 <Streamdown>{streamingText}</Streamdown>
               </div>
+              {streamingExtras && <OpsCards cards={streamingExtras.cards} />}
+              {streamingExtras && (
+                <CustomerActionChips
+                  actions={streamingExtras.actions}
+                  onPick={setPendingAction}
+                />
+              )}
             </div>
           )}
         </div>
@@ -209,6 +254,19 @@ export default function CustomerChat({
           )}
         </div>
       </div>
+
+      {/* m3b — gated execution: confirm dialog owns agent.executeOpsAction;
+          actions may create approval tasks → refresh the surrounding lists */}
+      <ActionConfirmDialog
+        action={pendingAction}
+        onClose={() => setPendingAction(null)}
+        onDone={() => {
+          utils.admin.customerChatList.invalidate({ userId });
+          utils.admin.customerOpenItems.invalidate({ userId });
+          utils.commandCenter.list.invalidate();
+          utils.commandCenter.stats.invalidate();
+        }}
+      />
     </div>
   );
 }

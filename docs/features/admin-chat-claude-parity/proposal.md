@@ -1,7 +1,7 @@
 # 後台主對話框 — Claude 對齊（proposal · Stage 1）
 
 > 目標：把後台主對話框（`AgentChatPage.tsx`，OpsAgent `#ops`）升級成「跟 Claude 對話」的順暢度與功能。
-> 北極星：`Desktop/PackGo_示意圖/admin-3-claude.html`（slash / @ / 工具透明 / 停止 / 對話歷史）。
+> 北極星：原 mockup `admin-3-claude.html`（slash / @ / 工具透明 / 停止 / 對話歷史）。2026-06-10 舊版迭代清理,檔已刪;要點如括號所列,功能已逐批落地。
 
 ## 1. 現況（實地診斷,不是猜）
 

@@ -253,7 +253,7 @@ function usd(n: number): string {
   if (n == null || isNaN(n)) return "$0";
   return "$" + Math.round(n).toLocaleString("en-US");
 }
-function parseCards(context: string | null | undefined): any[] {
+export function parseCards(context: string | null | undefined): any[] {
   try {
     const ctx = context ? JSON.parse(context) : {};
     return Array.isArray(ctx.cards) ? ctx.cards : [];
@@ -261,7 +261,8 @@ function parseCards(context: string | null | undefined): any[] {
     return [];
   }
 }
-function OpsCards({ cards }: { cards: any[] | null | undefined }) {
+// exported (批2 m3b): the workspace per-customer chat renders the same cards
+export function OpsCards({ cards }: { cards: any[] | null | undefined }) {
   const { t } = useLocale();
   if (!cards || cards.length === 0) return null;
   const period = (p: string) =>

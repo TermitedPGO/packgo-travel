@@ -44,7 +44,11 @@
 - [x] **共用既有 hardened SSE 管線**:`/api/agent/ask-ops-stream` 加選用 `customerId`(SSE 前驗證回 JSON 錯誤;歷史/提問/回答持久化分流到新表;auth/CSRF/30 每小時限流/心跳/90s 逾時全繼承,不開第二條管線)。
 - [x] context 注入:`server/_core/customerChatContext.ts`(pure `formatCustomerContext` +6 測試:客人 profile + 進行中訂單 + 開著詢問 + 近期報價,各 cap 5、全塊 cap 2400 字;db 掛了誠實降級成不釘人的對話)→ `runOpsAgentStream` 加 `extraSystem` 參數(ops 行為不變)。agent 原有唯讀查詢工具(search_tours 等)照用 = 找團能力天然存在。
 - [x] UI:`CustomerChat.tsx`(thread + composer 照 mockup 黑框文法;fetch-stream + Stop;Streamdown 渲染 agent turn)掛在 CustomerInbox 底部;`admin.customerChatList` 供歷史。
-- **v1 誠實範圍**:純文字對話。agent 的 suggestedActions / cards 已持久化在 context JSON 但**不渲染、不可觸發**(此面零動作 = 零新送出路徑);m3b 再把它們經 gated approval chips 渲染(找團結果列/比較表/客製逐日 = sales p1/p4/p5 的卡形態)。context 注入不查 approval-task 連結(省 2 查詢,agent 有工具可查)。
+- ~~v1 誠實範圍:純文字對話~~ → **m3b 完成(2026-06-10 同日)**:
+  - [x] agent turn 渲染 data cards(重用 AgentChatPage 的 OpsCards,只加 export 兩字,4 型:departures/bookings/customers/finance)+ suggested-action chips(歷史從 context JSON 復原 `customerChatExtras.ts` +2 測試;串流從 done 事件)。
+  - [x] **chips 全 gated**:點擊永不直接執行 → `CustomerChatActions.tsx` 確認 dialog(args 全文過目;sensitive 要打 CONFIRM;警告粗黑非紅守黑白鐵則)→ 走既有 `agent.executeOpsAction`(admin 鎖 + server audit),零新執行路徑。執行後 invalidate 對話/openItems/今日待辦。
+  - [x] customerChatList 加 context 欄(additive);context 注入改為真實機制說明(點了還要確認才執行,確認前不得假設已完成),撤 v1 無按鈕止血行。
+  - 誠實範圍:渲染的卡 = agent 既有 4 型;sales p1/p4/p5 的「找團結果列每列帶報價/傳客人鈕、比較表、客製逐日」客製卡型要 agent 端新 card type + producer 接線,歸 m4/批2 後續,不虛構。
 
 ### m4 — 機票面(**2026-06-10 Jeff 拍板:建最小 flightOrders 狀態機**)
 - 拍板:最小狀態機 備訂 → 待你刷卡 → TICKETED(黑鎖條照 sales p3),把既有人工 workflow(核件 → Trip.com 訂 → Jeff 親刷 → 確認單+短訊)數位化。
