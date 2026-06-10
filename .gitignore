@@ -144,3 +144,4 @@ scripts/gmail-eval/data/
 # `pnpm deploy` (see scripts/safe-deploy.mjs gate 7). Never commit; burned
 # automatically after a successful deploy.
 .deploy-approve
+.gstack/
