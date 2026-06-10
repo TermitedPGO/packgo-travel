@@ -374,6 +374,23 @@ async function startServer() {
         return res.status(400).json({ error: "Question required, max 2000 chars" });
       }
 
+      // 批2 m3 — optional per-customer binding. When present, the thread
+      // lives in customerChatMessages (拍板: 獨立新表,不混 agentMessages)
+      // and the system prompt pins who the conversation is about. Validated
+      // BEFORE the SSE headers so errors return as plain JSON.
+      let customerId: number | null = null;
+      const rawCustomerId = String(req.query.customerId ?? "").trim();
+      if (rawCustomerId) {
+        customerId = Number(rawCustomerId);
+        if (!Number.isInteger(customerId) || customerId <= 0) {
+          return res.status(400).json({ error: "Invalid customerId" });
+        }
+        const customer = await getUserById(customerId);
+        if (!customer) {
+          return res.status(404).json({ error: "Customer not found" });
+        }
+      }
+
       // Parse optional image URLs from query (vision support, 2026-06-01)
       let imageUrls: string[] | undefined;
       try {
@@ -457,13 +474,38 @@ async function startServer() {
       // Jeff closed the tab / navigated away → stop timers + writes.
       req.on("close", cleanup);
 
-      // Load conversation history (last 10 #ops messages, chronological)
+      // Load conversation history (last 10, chronological) — the customer's
+      // own thread when customerId is given, else the global #ops channel.
       const { getDb } = await import("../db");
-      const { agentMessages } = await import("../../drizzle/schema");
+      const { agentMessages, customerChatMessages } = await import(
+        "../../drizzle/schema"
+      );
       const { eq, desc: drizzleDesc } = await import("drizzle-orm");
       const db = await getDb();
       let history: { role: "user" | "agent"; content: string }[] = [];
-      if (db) {
+      if (db && customerId !== null) {
+        const rows = await db
+          .select({
+            senderRole: customerChatMessages.senderRole,
+            body: customerChatMessages.body,
+          })
+          .from(customerChatMessages)
+          .where(eq(customerChatMessages.customerUserId, customerId))
+          .orderBy(drizzleDesc(customerChatMessages.createdAt))
+          .limit(10);
+        history = rows
+          .reverse()
+          .map((r) => ({
+            role: (r.senderRole === "jeff" ? "user" : "agent") as "user" | "agent",
+            content: r.body,
+          }));
+
+        await db.insert(customerChatMessages).values({
+          customerUserId: customerId,
+          senderRole: "jeff",
+          body: question,
+        });
+      } else if (db) {
         const rows = await db
           .select({
             senderRole: agentMessages.senderRole,
@@ -494,6 +536,16 @@ async function startServer() {
 
       send({ type: "start" });
 
+      // 批2 m3 — pin the customer block into the system prompt. A db hiccup
+      // degrades to an unpinned chat (null → undefined), never a dead stream.
+      let extraSystem: string | undefined;
+      if (customerId !== null) {
+        const { buildCustomerChatContext } = await import(
+          "./customerChatContext"
+        );
+        extraSystem = (await buildCustomerChatContext(customerId)) ?? undefined;
+      }
+
       // Run streaming agent
       const { runOpsAgentStream } = await import("../agents/autonomous/opsAgentStream");
       let finalAnswer = "";
@@ -502,7 +554,7 @@ async function startServer() {
       const startedAt = Date.now();
       let firstTokenLogged = false;
       try {
-        for await (const event of runOpsAgentStream(question, history, imageUrls)) {
+        for await (const event of runOpsAgentStream(question, history, imageUrls, extraSystem)) {
           if (terminated) break; // timed out or client disconnected
           if (event.type === "token") {
             if (!firstTokenLogged) {
@@ -542,19 +594,30 @@ async function startServer() {
       // persistent (refresh loads it from listMessages). Skip on timeout — no
       // real answer, don't persist a half-baked turn.
       if (finalAnswer && db && !timedOut) {
-        await db.insert(agentMessages).values({
-          agentName: "ops",
-          senderRole: "agent",
-          messageType: "observation",
-          title: question.slice(0, 80),
-          body: finalAnswer,
-          context: JSON.stringify({ suggestedActions, cards, streamed: true }),
-          priority: "normal",
-          // Jeff is watching this stream live — it's a reply to his own
-          // question, NOT a proactive notification. Mark read so live chatting
-          // doesn't inflate the Chat unread badge (2026-06-01 fix).
-          readByJeff: 1,
-        } as any);
+        if (customerId !== null) {
+          // per-customer thread (批2 m3) — context JSON keeps the turn's
+          // suggestedActions/cards for the later m3b card rendering.
+          await db.insert(customerChatMessages).values({
+            customerUserId: customerId,
+            senderRole: "agent",
+            body: finalAnswer,
+            context: JSON.stringify({ suggestedActions, cards, streamed: true }),
+          });
+        } else {
+          await db.insert(agentMessages).values({
+            agentName: "ops",
+            senderRole: "agent",
+            messageType: "observation",
+            title: question.slice(0, 80),
+            body: finalAnswer,
+            context: JSON.stringify({ suggestedActions, cards, streamed: true }),
+            priority: "normal",
+            // Jeff is watching this stream live — it's a reply to his own
+            // question, NOT a proactive notification. Mark read so live chatting
+            // doesn't inflate the Chat unread badge (2026-06-01 fix).
+            readByJeff: 1,
+          } as any);
+        }
       }
 
       if (!timedOut) {

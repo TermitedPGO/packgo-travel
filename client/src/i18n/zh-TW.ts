@@ -87,6 +87,10 @@ export const zhTW = {
     quoteSrcSupplier: '單價取自供應商後台直客價',
     quoteRecords: '報價記錄',
     quoteOpenPdf: '開 PDF',
+    chatYou: '你',
+    chatPlaceholder: '跟 Agent 聊{name}的事,或叫我做事…',
+    chatStop: '停止',
+    chatSend: '送出',
   },
   // 通用
   common: {

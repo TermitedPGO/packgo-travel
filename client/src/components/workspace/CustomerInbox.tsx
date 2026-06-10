@@ -25,6 +25,7 @@ import {
 import { formatRelTime } from "./relTime";
 import { parseQuoteCard } from "./quoteTask";
 import QuoteTaskBody from "./QuoteTaskBody";
+import CustomerChat from "./CustomerChat";
 import { BtnB, BtnO, WorkspaceCard } from "./ws-ui";
 
 const ReviewTaskDialog = lazy(
@@ -261,6 +262,13 @@ export default function CustomerInbox({ userId }: { userId: number }) {
           </>
         )}
       </div>
+
+      {/* per-customer 對話 (批2 m3) — thread + composer, bound to this
+          customer; streams over the shared hardened ops SSE pipeline */}
+      <CustomerChat
+        userId={userId}
+        customerName={user.name || user.email || ""}
+      />
 
       <Suspense fallback={null}>
         {profileOpen && (

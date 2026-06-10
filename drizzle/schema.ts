@@ -3377,3 +3377,24 @@ export const workspaceDispositions = mysqlTable("workspaceDispositions", {
 }));
 
 export type WorkspaceDisposition = typeof workspaceDispositions.$inferSelect;
+
+// ── 整合工作台 批2 m3 — per-customer 對話(2026-06-10 Jeff 拍板:獨立新表,
+// 不混 agentMessages)。One thread per customer: Jeff ↔ agent messages bound
+// by customerUserId. context JSON keeps the streamed turn's suggestedActions
+// / cards for the later m3b card rendering; v1 renders body text only.
+// ────────────────────────────────────────────────────────────────────────
+export const customerChatMessages = mysqlTable("customerChatMessages", {
+  id: int("id").autoincrement().primaryKey(),
+  /** users.id of the customer this thread belongs to. */
+  customerUserId: int("customerUserId").notNull(),
+  senderRole: mysqlEnum("senderRole", ["jeff", "agent"]).notNull(),
+  body: text("body").notNull(),
+  /** JSON: { suggestedActions, cards, streamed } from the agent turn. */
+  context: text("context"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  customerIdx: index("idx_ccm_customer").on(t.customerUserId, t.createdAt),
+}));
+
+export type CustomerChatMessage = typeof customerChatMessages.$inferSelect;
+export type InsertCustomerChatMessage = typeof customerChatMessages.$inferInsert;

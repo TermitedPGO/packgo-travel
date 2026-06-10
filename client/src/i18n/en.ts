@@ -87,6 +87,10 @@ export const en = {
     quoteSrcSupplier: 'Unit price from the supplier portal retail price',
     quoteRecords: 'Quote history',
     quoteOpenPdf: 'Open PDF',
+    chatYou: 'You',
+    chatPlaceholder: 'Ask the agent about {name}, or give it a job…',
+    chatStop: 'Stop',
+    chatSend: 'Send',
   },
   // Common
   common: {

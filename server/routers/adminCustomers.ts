@@ -390,4 +390,33 @@ export const adminCustomersRouter = router({
         })),
       };
     }),
+
+  /**
+   * customerChatList — the per-customer 對話 thread (批2 m3, 拍板獨立新表).
+   * Chronological (oldest → newest) for direct render; bounded to the newest
+   * `limit` turns. Writes happen only in the SSE stream handler.
+   */
+  customerChatList: adminProcedure
+    .input(
+      z.object({
+        userId: z.number().int().positive(),
+        limit: z.number().int().min(1).max(200).optional(),
+      }),
+    )
+    .query(async ({ input }) => {
+      const drizzleDb = (await db.getDb())!;
+      const { customerChatMessages } = await import("../../drizzle/schema");
+      const rows = await drizzleDb
+        .select({
+          id: customerChatMessages.id,
+          senderRole: customerChatMessages.senderRole,
+          body: customerChatMessages.body,
+          createdAt: customerChatMessages.createdAt,
+        })
+        .from(customerChatMessages)
+        .where(eq(customerChatMessages.customerUserId, input.userId))
+        .orderBy(desc(customerChatMessages.createdAt))
+        .limit(input.limit ?? 50);
+      return rows.reverse();
+    }),
 });

@@ -617,6 +617,13 @@
       "when": 1781100000000,
       "tag": "0090_spam_verdict",
       "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "5",
+      "when": 1781450000000,
+      "tag": "0091_customer_chat_messages",
+      "breakpoints": true
     }
   ]
 }

@@ -39,10 +39,12 @@
 - [x] customerOpenItems pendingTasks 加 payload(additive);customerDetail 加 recentQuotes(aiQuotes by userId OR email,近 5 筆)→ 客戶 inbox「報價記錄」唯讀段(quoteNumber · 金額 · 狀態 · 開 PDF)。
 - **誠實範圍記錄**:(a) mockup p2 的佔床編輯表**沒做**:quoteProducer payload 無大人/兒童/單房差欄位,卡上不虛構;要做需 producer 加欄(列 m3+ 或之後)。(b) **tool-quote PDF 不在時間軸**:`tools.generateQuote` 無持久化(只回 S3 URL 不落 DB),要列須先建表;先記 gap 不硬塞。(c) 旺季 warn 同理,payload 無季節欄位。
 
-### m3 — per-customer 對話(LARGE;**2026-06-10 Jeff 拍板:新 customerChatSessions 表**)
-- 拍板:不動 agentMessages,新建 customerChatSessions 表(乾淨分離;已讀/badge 機制為此表獨立建)。
-- composer 綁客人;context 注入:open items + 偏好 + 近期訂單餵 agent;輸出卡(找團結果列/比較表/客製逐日 = sales p1/p4/p5)由對話渲染。
-- 「報價」「傳客人」動作從輸出卡觸發 → 全部落回 gated approval(不新增自動送出)。
+### m3 — per-customer 對話(LARGE;**2026-06-10 Jeff 拍板:新表,同日完成 v1**)
+- [x] 新表 `customerChatMessages`(拍板「獨立新表不混 agentMessages」的實作名;一客一線程存訊息,無 session 分段)+ migration 0091(冪等 CREATE TABLE IF NOT EXISTS + journal idx 91)。
+- [x] **共用既有 hardened SSE 管線**:`/api/agent/ask-ops-stream` 加選用 `customerId`(SSE 前驗證回 JSON 錯誤;歷史/提問/回答持久化分流到新表;auth/CSRF/30 每小時限流/心跳/90s 逾時全繼承,不開第二條管線)。
+- [x] context 注入:`server/_core/customerChatContext.ts`(pure `formatCustomerContext` +6 測試:客人 profile + 進行中訂單 + 開著詢問 + 近期報價,各 cap 5、全塊 cap 2400 字;db 掛了誠實降級成不釘人的對話)→ `runOpsAgentStream` 加 `extraSystem` 參數(ops 行為不變)。agent 原有唯讀查詢工具(search_tours 等)照用 = 找團能力天然存在。
+- [x] UI:`CustomerChat.tsx`(thread + composer 照 mockup 黑框文法;fetch-stream + Stop;Streamdown 渲染 agent turn)掛在 CustomerInbox 底部;`admin.customerChatList` 供歷史。
+- **v1 誠實範圍**:純文字對話。agent 的 suggestedActions / cards 已持久化在 context JSON 但**不渲染、不可觸發**(此面零動作 = 零新送出路徑);m3b 再把它們經 gated approval chips 渲染(找團結果列/比較表/客製逐日 = sales p1/p4/p5 的卡形態)。context 注入不查 approval-task 連結(省 2 查詢,agent 有工具可查)。
 
 ### m4 — 機票面(**2026-06-10 Jeff 拍板:建最小 flightOrders 狀態機**)
 - 拍板:最小狀態機 備訂 → 待你刷卡 → TICKETED(黑鎖條照 sales p3),把既有人工 workflow(核件 → Trip.com 訂 → Jeff 親刷 → 確認單+短訊)數位化。
