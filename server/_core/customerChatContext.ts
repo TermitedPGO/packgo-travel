@@ -69,6 +69,12 @@ export function formatCustomerContext(data: CustomerContextData): string {
   lines.push(
     "這個對話只關於這位客人。回答任何問題、找團、擬訊息都以他為對象;查資料工具查到別的客人不要混進來。",
   );
+  // v1 surface honesty (2026-06-10 MCP 驗收抓到): this chat does NOT render
+  // suggest_action chips yet (m3b will). Without this line the agent says
+  // 「點上面的按鈕」at a button that doesn't exist.
+  lines.push(
+    "注意:這個對話介面目前不會顯示任何動作按鈕或卡片。需要 Jeff 做事就用文字寫清楚步驟或把草稿直接寫在回答裡,絕對不要叫他「點按鈕」。",
+  );
 
   const ob = data.openBookings.slice(0, LIST_CAP);
   if (ob.length) {
