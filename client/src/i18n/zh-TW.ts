@@ -71,6 +71,10 @@ export const zhTW = {
     spamNote: 'spam 永不靜默丟掉真客人,確認垃圾也保留',
     spamRescueAgentFail: '已建詢問,但 AI 草稿失敗',
     spamUnknownSender: '未知寄件人',
+    escClsRefund: '退款',
+    escClsComplaint: '客訴',
+    escExpand: '看全文',
+    escCollapse: '收起',
   },
   // 通用
   common: {

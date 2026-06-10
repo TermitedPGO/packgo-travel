@@ -161,6 +161,8 @@ describe("commandCenter.stats", () => {
 
     expect(result.totalPending).toBe(3);
     expect(result.pendingByLane.cs).toBe(2);
+    // 批1 m3b additive field — db unavailable here → honest 0, never a throw
+    expect(result.escalationUnread).toBe(0);
   });
 });
 

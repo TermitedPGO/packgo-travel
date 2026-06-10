@@ -60,7 +60,9 @@ export default function Workspace() {
   }
   if (!isAuthenticated) return null;
 
-  const todayCount = statsQ.data?.totalPending ?? 0;
+  // pending approval tasks + unread escalations (批1 m3b additive field)
+  const todayCount =
+    (statsQ.data?.totalPending ?? 0) + (statsQ.data?.escalationUnread ?? 0);
   const companyCount =
     (statsQ.data?.pendingByLane.marketing ?? 0) +
     (statsQ.data?.pendingByLane.finance ?? 0);

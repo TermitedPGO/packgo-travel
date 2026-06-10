@@ -38,6 +38,11 @@ import {
   rescueSpamInteraction,
   confirmSpamInteraction,
 } from "../_core/spamBox";
+import {
+  listEscalations,
+  ackEscalation,
+  countUnreadEscalations,
+} from "../_core/escalationBox";
 // 指揮中心 客服頁 (P1) — registering the cs lane executor at module load.
 // This file is imported by server/routers.ts to build appRouter (loaded at
 // server boot), so importing + calling registerCsExecutors() HERE guarantees
@@ -150,9 +155,17 @@ export const commandCenterRouter = router({
       return enrichTasksWithWho(tasks);
     }),
 
-  /** Per-lane pending counts for the 狀態 strip. */
+  /**
+   * Per-lane pending counts for the 狀態 strip. `escalationUnread` (批1 m3b)
+   * is additive — existing consumers keep reading totalPending/pendingByLane;
+   * the workspace sidebar badge adds the unread escalations on top.
+   */
   stats: adminProcedure.query(async () => {
-    return getApprovalStats();
+    const [approval, escalationUnread] = await Promise.all([
+      getApprovalStats(),
+      countUnreadEscalations(),
+    ]);
+    return { ...approval, escalationUnread };
   }),
 
   /** Approve one task → run its lane executor (per-item; hard_gate allowed here). */
@@ -255,6 +268,29 @@ export const commandCenterRouter = router({
     .input(z.object({ interactionId: z.number().int() }))
     .mutation(async ({ ctx, input }) =>
       confirmSpamInteraction(input.interactionId, ctx as ApprovalAuditCtx),
+    ),
+
+  /**
+   * Escalations 進今日待辦 (批1 m3b) — agentMessages escalation rows for the
+   * 需要你決定 bucket: every unread one (no date window — old unread must not
+   * silently vanish) + the most recent read ones, dimmed. No send path here:
+   * acting on an escalation stays in Gmail / agent chat.
+   */
+  escalationList: adminProcedure.query(async () => listEscalations()),
+
+  /**
+   * 處理好了 toggle on an escalation card. Writes readByJeff — the same state
+   * the agent-chat unread badge reads, so one ack clears both surfaces.
+   */
+  escalationAck: adminProcedure
+    .input(
+      z.object({
+        messageId: z.number().int(),
+        handled: z.boolean(),
+      }),
+    )
+    .mutation(async ({ input }) =>
+      ackEscalation(input.messageId, input.handled),
     ),
 
   /**

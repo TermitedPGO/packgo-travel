@@ -20,7 +20,8 @@
 - **批1 m2 完成(同日)**:抽共用 ReviewTaskDialog(全文過目 + hard_gate 逐筆 confirm),ApprovalInbox 與 今日待辦 同一條核准路徑;today 卡「審核」鈕開 dialog;誠實 toast 抽 approveToast.ts(cs=已送出/他 lane=已記錄/failed=帶因)+4 測試;failed 卡顯示 errorMessage。workspaceI18n 掃描補 ws-ui/ 子目錄(拆檔後漏掃)。終點 10 頁對照(44584f3)印證方向:command-center 任務=今日待辦卡片。
 - **批1 m2 已上線 v686(同日,Jeff token,DNS 失敗重試一次成功)**:bundle 驗證 `review:"審核"` + `jumpTo:"去{name}"` 都在。
 - **批1 m3a spam 匣完成(同日,Jeff 拍板救回=建詢問+跑 agent)**:migration 0090 spamVerdict + spamBox.ts(rescue 先建 inquiry 再標 rescued 才跑 LLM,防重複;agent 失敗誠實回報)+ commandCenter 三 procedure + 今日待辦疑似垃圾匣(確認垃圾淡化保留,永不刪)。+8 測試,全綠待 ship。
-- 批1 剩 m3b(escalation 進今日待辦)+ B2 eval(要 Jeff 真信件 gold set),見 tasks/batch-1-today.md。
+- **批1 m3b escalation 進今日待辦完成(2026-06-10)**:escalationBox.ts(unread 不設日期窗永不靜默消失 + 已讀近 10 淡化留底;who 走 relatedCustomerProfileId→profiles→users 批量)+ commandCenter escalationList/escalationAck + stats 加 escalationUnread(additive,sidebar badge 含 escalation)。「需要你決定」桶 task+escalation 合併時間軸;**處理好了=readByJeff**(與 agent 對話未讀同一狀態,兩面同步,雙向可反悔);**無新送出路徑**(建議回覆只能看,動作仍在 Gmail/agent 對話)。退款卡 lock+黑 badge 照 full-pages mockup。拆檔還債:WorkspaceToday 363→282 行,抽 TodayTaskCard/TodayEscalationCard/TodaySpamBox。+12 測試;tsc 0;全套 vitest 1525 passed / 0 failed(91 skipped)。**m3a+m3b 已 commit 待 ship(Jeff token)**;視覺照舊 ship 後 prod 親驗(本機無 .env/DB)。
+- 批1 剩 B2 eval(要 Jeff 真信件 gold set),見 tasks/batch-1-today.md。
 
 ## 文件
 - proposal.md(Stage 1)✓

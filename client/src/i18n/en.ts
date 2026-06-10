@@ -71,6 +71,10 @@ export const en = {
     spamNote: 'Spam is never silently dropped; confirmed junk is kept too',
     spamRescueAgentFail: 'Inquiry created, but the AI draft failed',
     spamUnknownSender: 'Unknown sender',
+    escClsRefund: 'Refund',
+    escClsComplaint: 'Complaint',
+    escExpand: 'Full text',
+    escCollapse: 'Collapse',
   },
   // Common
   common: {
