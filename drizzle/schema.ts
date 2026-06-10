@@ -3398,3 +3398,46 @@ export const customerChatMessages = mysqlTable("customerChatMessages", {
 
 export type CustomerChatMessage = typeof customerChatMessages.$inferSelect;
 export type InsertCustomerChatMessage = typeof customerChatMessages.$inferInsert;
+
+// ── 整合工作台 批2 m4 — 代客訂機票最小狀態機(2026-06-10 Jeff 拍板)。
+// Digitizes the existing manual flow: 核件(護照名)→ Trip.com 備訂 →
+// Jeff 親自刷卡 → 出票 → 確認單。HARD LINE: the system never touches card
+// numbers / CVV / the pay button — `bookingUrl` is just a link Jeff opens.
+// passengerNames stores PASSPORT-SPELLING NAMES ONLY, never passport numbers
+// (those live encrypted elsewhere; this table deliberately has no such column).
+// ────────────────────────────────────────────────────────────────────────
+export const flightOrders = mysqlTable("flightOrders", {
+  id: int("id").autoincrement().primaryKey(),
+  /** users.id of the customer (workspace per-customer scoped, soft ref). */
+  customerUserId: int("customerUserId").notNull(),
+  /** 備訂 → 待你刷卡 → 已出票;取消只允許在未出票前。 */
+  status: mysqlEnum("status", [
+    "prepared",
+    "awaiting_payment",
+    "ticketed",
+    "cancelled",
+  ])
+    .default("prepared")
+    .notNull(),
+  airline: varchar("airline", { length: 80 }).notNull(),
+  /** e.g. "NH008 直飛 SFO⇄NRT · 9/14 去 / 9/19 回" */
+  flightSummary: varchar("flightSummary", { length: 255 }).notNull(),
+  pricePerPerson: int("pricePerPerson"),
+  passengerCount: int("passengerCount").default(1).notNull(),
+  currency: varchar("currency", { length: 3 }).default("USD").notNull(),
+  /** passport-spelling names, comma separated. NAMES ONLY — no numbers. */
+  passengerNames: varchar("passengerNames", { length: 500 }),
+  /** Trip.com 訂購頁 — Jeff opens it himself to pay. Never auto-driven. */
+  bookingUrl: varchar("bookingUrl", { length: 2000 }),
+  pnr: varchar("pnr", { length: 20 }),
+  eticketNumbers: varchar("eticketNumbers", { length: 255 }),
+  orderRef: varchar("orderRef", { length: 40 }),
+  notes: varchar("notes", { length: 1000 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (t) => ({
+  customerIdx: index("idx_fo_customer").on(t.customerUserId, t.createdAt),
+}));
+
+export type FlightOrder = typeof flightOrders.$inferSelect;
+export type InsertFlightOrder = typeof flightOrders.$inferInsert;

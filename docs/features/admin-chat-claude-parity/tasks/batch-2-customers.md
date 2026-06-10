@@ -50,9 +50,12 @@
   - [x] customerChatList 加 context 欄(additive);context 注入改為真實機制說明(點了還要確認才執行,確認前不得假設已完成),撤 v1 無按鈕止血行。
   - 誠實範圍:渲染的卡 = agent 既有 4 型;sales p1/p4/p5 的「找團結果列每列帶報價/傳客人鈕、比較表、客製逐日」客製卡型要 agent 端新 card type + producer 接線,歸 m4/批2 後續,不虛構。
 
-### m4 — 機票面(**2026-06-10 Jeff 拍板:建最小 flightOrders 狀態機**)
-- 拍板:最小狀態機 備訂 → 待你刷卡 → TICKETED(黑鎖條照 sales p3),把既有人工 workflow(核件 → Trip.com 訂 → Jeff 親刷 → 確認單+短訊)數位化。
-- 硬線不變:系統不碰卡號/CVV/付款鈕;「我來刷卡」只開訂購頁。
+### m4 — 機票面(**2026-06-10 Jeff 拍板:建最小 flightOrders 狀態機;同日完成 v1**)
+- [x] migration 0092 `flightOrders` + schema:**表上刻意沒有護照號欄位**(只存護照拼音姓名,passport 加密鐵則從結構上不可能違反)、沒有任何卡號/付款欄位。
+- [x] `flightOrderBox.ts` 狀態機(+10 測試):prepared → awaiting_payment → ticketed;create 帶 bookingUrl 直接落 awaiting(真實入口);markTicketed 允許從 prepared/awaiting(一人公司先付後記)、永不從 ticketed/cancelled;**ticketed 永不可 cancel**(退票=真退款流程,不在 v1);每個 mutation audit。
+- [x] tRPC `flightOrders.*`(list/create/markAwaitingPayment/markTicketed/cancel,adminProcedure)。
+- [x] 客戶 inbox 機票區(照 sales p3):有未結單時顯示**不可關閉黑鎖條**「付款由你本人刷卡…」;待刷卡卡帶黑底提醒 +「我來刷卡」**只開外部訂購頁**;出票 = 純記錄表單(PNR/票號/訂單編號);TICKETED 黑卡留底。建立/出票 dialog 拆 `FlightOrderDialogs.tsx`;報價記錄抽 `CustomerQuoteRecords.tsx`(行數債);零待辦客人也看得到機票區(空狀態外)。
+- 後續(不在 v1):agent 出機票選項卡(sales p3 上半)+ suggest_action 建備訂、確認單 PDF 接 flight-ticket skill、出票後客人短訊草稿。
 
 ### m5 — wechat-assist 歸戶(**2026-06-10 Jeff 拍板:加歸戶欄 + 配對**)
 - 拍板:wechatMessages 加 userId(nullable)+ 用 customerProfiles.wechatId 配對 + 人工補配;訊息進客人時間軸。

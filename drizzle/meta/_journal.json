@@ -624,6 +624,13 @@
       "when": 1781450000000,
       "tag": "0091_customer_chat_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "5",
+      "when": 1781460000000,
+      "tag": "0092_flight_orders",
+      "breakpoints": true
     }
   ]
 }

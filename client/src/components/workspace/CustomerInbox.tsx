@@ -26,6 +26,8 @@ import { formatRelTime } from "./relTime";
 import { parseQuoteCard } from "./quoteTask";
 import QuoteTaskBody from "./QuoteTaskBody";
 import CustomerChat from "./CustomerChat";
+import CustomerQuoteRecords from "./CustomerQuoteRecords";
+import CustomerFlightOrders from "./CustomerFlightOrders";
 import { BtnB, BtnO, WorkspaceCard } from "./ws-ui";
 
 const ReviewTaskDialog = lazy(
@@ -218,49 +220,14 @@ export default function CustomerInbox({ userId }: { userId: number }) {
                 <div className="space-y-2.5">{closed.map(card)}</div>
               </>
             )}
-
-            {/* 報價記錄 (批2 m2) — aiQuotes funnel facts, read-only, bounded 5.
-                tool-quote PDF 無持久化故不在此(gap 記於 batch-2 文件) */}
-            {(detail.data?.recentQuotes ?? []).length > 0 && (
-              <>
-                <div className="text-[11px] font-semibold text-gray-400 mb-2 mt-5">
-                  {t("workspace.quoteRecords")} (
-                  {detail.data!.recentQuotes.length})
-                </div>
-                <div className="space-y-2.5">
-                  {detail.data!.recentQuotes.map((q) => (
-                    <WorkspaceCard
-                      key={`aiq:${q.id}`}
-                      type={t("workspace.laneQuote")}
-                      time={formatRelTime(q.createdAt, t)}
-                      state="none"
-                    >
-                      <div className="font-medium">{q.quoteNumber}</div>
-                      <div className="text-gray-500 mt-0.5 text-[12px]">
-                        {q.estimatedTotal != null
-                          ? `${q.currency} ${Number(q.estimatedTotal).toLocaleString()} · `
-                          : ""}
-                        {q.status}
-                      </div>
-                      {q.pdfUrl && (
-                        <div className="mt-2">
-                          <a
-                            href={q.pdfUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="px-2.5 py-1 rounded-lg border border-gray-300 text-gray-700 text-[11px] font-medium inline-block"
-                          >
-                            {t("workspace.quoteOpenPdf")}
-                          </a>
-                        </div>
-                      )}
-                    </WorkspaceCard>
-                  ))}
-                </div>
-              </>
-            )}
           </>
         )}
+
+        {/* 報價記錄 (批2 m2) + 代客訂機票 (批2 m4) — outside the empty-state
+            branch: a zero-item customer must still see records and be able
+            to start a flight booking */}
+        <CustomerQuoteRecords quotes={detail.data?.recentQuotes ?? []} />
+        <CustomerFlightOrders userId={userId} />
       </div>
 
       {/* per-customer 對話 (批2 m3) — thread + composer, bound to this

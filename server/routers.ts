@@ -67,6 +67,7 @@ import { photosRouter } from "./routers/photos";
 import { aiRouter } from "./routers/ai";
 import { systemRouter } from "./_core/systemRouter";
 import { commandCenterRouter } from "./routers/commandCenter";
+import { flightOrdersRouter } from "./routers/flightOrders";
 import { workspaceRouter } from "./routers/workspace";
 import { router } from "./_core/trpc";
 
@@ -97,6 +98,8 @@ export const appRouter = router({
   commandCenter: commandCenterRouter,
   // 整合工作台 P3 — per-item「處理好了」disposition.
   workspace: workspaceRouter,
+  // 批2 m4 — 代客訂機票最小狀態機(備訂→待你刷卡→TICKETED;系統不碰付款).
+  flightOrders: flightOrdersRouter,
 
   // Authentication router — Phase 4E extracted to ./routers/auth.ts
   auth: authRouter,
