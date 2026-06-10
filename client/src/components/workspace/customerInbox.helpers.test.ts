@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { mergeOpenItems, type OpenItemsData } from "./customerInbox.helpers";
+import {
+  mergeOpenItems,
+  mergeClosedBookings,
+  type OpenItemsData,
+  type RecentBooking,
+} from "./customerInbox.helpers";
 
 const empty: OpenItemsData = {
   openBookings: [],
@@ -85,7 +90,7 @@ describe("mergeOpenItems", () => {
     expect(keys).toContain("task:1");
   });
 
-  it("falls back to a title when booking tourTitle / inquiry subject are null", () => {
+  it("null titles carry an i18n fallback key instead of hardcoded zh (批2 m1 還債)", () => {
     const out = mergeOpenItems({
       ...empty,
       openBookings: [
@@ -95,8 +100,43 @@ describe("mergeOpenItems", () => {
         { id: 6, status: "new", destination: null, subject: null, createdAt: 0 },
       ],
     });
-    expect(out.find((i) => i.kind === "booking")?.title).toBe("行程");
-    expect(out.find((i) => i.kind === "inquiry")?.title).toBe("詢問");
+    const booking = out.find((i) => i.kind === "booking")!;
+    const inquiry = out.find((i) => i.kind === "inquiry")!;
+    expect(booking.title).toBeNull();
+    expect(booking.titleKey).toBe("workspace.tours");
+    expect(inquiry.title).toBeNull();
+    expect(inquiry.titleKey).toBe("workspace.kindInquiry");
+  });
+
+  it("flags trustNote on money-received open bookings only (鐵律可見化)", () => {
+    const out = mergeOpenItems({
+      ...empty,
+      openBookings: [
+        { id: 1, tourTitle: "A", bookingStatus: "confirmed", paymentStatus: "deposit", totalPrice: 100, currency: "USD", createdAt: 0 },
+        { id: 2, tourTitle: "B", bookingStatus: "confirmed", paymentStatus: "paid", totalPrice: 100, currency: "USD", createdAt: 0 },
+        { id: 3, tourTitle: "C", bookingStatus: "pending", paymentStatus: "unpaid", totalPrice: 100, currency: "USD", createdAt: 0 },
+      ],
+    });
+    const byId = (id: number) => out.find((i) => i.id === id)!;
+    expect(byId(1).trustNote).toBe(true);
+    expect(byId(2).trustNote).toBe(true);
+    expect(byId(3).trustNote).toBe(false);
+  });
+
+  it("marks tasks reviewable and inquiries draftable (批2 m1 actions)", () => {
+    const out = mergeOpenItems({
+      ...empty,
+      openInquiries: [
+        { id: 1, status: "new", destination: null, subject: "Q", createdAt: 0 },
+      ],
+      pendingTasks: [
+        { id: 2, lane: "cs", taskType: "x", riskLevel: "review", title: "T", summary: null, createdAt: 0 },
+      ],
+    });
+    expect(out.find((i) => i.kind === "inquiry")?.draftable).toBe(true);
+    expect(out.find((i) => i.kind === "inquiry")?.reviewable).toBeUndefined();
+    expect(out.find((i) => i.kind === "task")?.reviewable).toBe(true);
+    expect(out.find((i) => i.kind === "task")?.draftable).toBeUndefined();
   });
 
   it("sinks handled (處理好了) items below unhandled, even if newer", () => {
@@ -122,5 +162,47 @@ describe("mergeOpenItems", () => {
       ],
     });
     expect(out[0].handled).toBe(false);
+  });
+});
+
+describe("mergeClosedBookings (批2 m1 已結留底)", () => {
+  const mk = (
+    id: number,
+    bookingStatus: string,
+    createdAt: string,
+  ): RecentBooking => ({
+    id,
+    tourTitle: `T${id}`,
+    bookingStatus,
+    paymentStatus: "paid",
+    totalPrice: 100,
+    currency: "USD",
+    createdAt: new Date(createdAt),
+  });
+
+  it("keeps only completed/cancelled, as locked done items", () => {
+    const out = mergeClosedBookings([
+      mk(1, "completed", "2026-06-01"),
+      mk(2, "confirmed", "2026-06-02"), // open → excluded
+      mk(3, "cancelled", "2026-06-03"),
+      mk(4, "pending", "2026-06-04"), // open → excluded
+    ]);
+    expect(out.map((i) => i.id).sort()).toEqual([1, 3]);
+    for (const it of out) {
+      expect(it.locked).toBe(true);
+      expect(it.handled).toBe(true);
+      expect(it.key.startsWith("closed:")).toBe(true); // never collides with booking:<id>
+    }
+  });
+
+  it("bounds the tail (newest first, limit)", () => {
+    const rows = Array.from({ length: 8 }, (_, i) =>
+      mk(i + 1, "completed", `2026-06-0${(i % 7) + 1}`),
+    );
+    const out = mergeClosedBookings(rows, 5);
+    expect(out).toHaveLength(5);
+    // newest first
+    const ts = out.map((i) => i.ts);
+    expect([...ts].sort((a, b) => b - a)).toEqual(ts);
   });
 });

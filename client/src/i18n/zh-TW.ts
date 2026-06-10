@@ -75,6 +75,12 @@ export const zhTW = {
     escClsComplaint: '客訴',
     escExpand: '看全文',
     escCollapse: '收起',
+    totalSpent: '總消費',
+    viewFullProfile: '看完整資料',
+    draftReply: '起草回覆',
+    draftCreated: '草稿已進待辦,審核後才會送出',
+    trustNote: '訂金已收,出發後才認列營收',
+    closedSection: '已結 · 留底',
   },
   // 通用
   common: {

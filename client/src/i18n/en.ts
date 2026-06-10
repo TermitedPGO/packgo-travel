@@ -75,6 +75,12 @@ export const en = {
     escClsComplaint: 'Complaint',
     escExpand: 'Full text',
     escCollapse: 'Collapse',
+    totalSpent: 'Total spend',
+    viewFullProfile: 'Full profile',
+    draftReply: 'Draft a reply',
+    draftCreated: 'Draft is in Today; nothing goes out until you review it',
+    trustNote: 'Deposit received; revenue recognized after departure',
+    closedSection: 'Closed · history',
   },
   // Common
   common: {

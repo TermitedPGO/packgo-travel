@@ -156,6 +156,21 @@ export const commandCenterRouter = router({
     }),
 
   /**
+   * One task by id (批2 m1) — the per-customer inbox card opens the shared
+   * ReviewTaskDialog on demand; customerOpenItems only carries a summary row,
+   * so the dialog fetches the full payload here. Read-only.
+   */
+  get: adminProcedure
+    .input(z.object({ id: z.number().int() }))
+    .query(async ({ input }) => {
+      const task = await getApprovalTaskById(input.id);
+      if (!task) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Task not found" });
+      }
+      return task;
+    }),
+
+  /**
    * Per-lane pending counts for the 狀態 strip. `escalationUnread` (批1 m3b)
    * is additive — existing consumers keep reading totalPending/pendingByLane;
    * the workspace sidebar badge adds the unread escalations on top.

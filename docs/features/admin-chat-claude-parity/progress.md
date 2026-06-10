@@ -24,6 +24,11 @@
 - **v687 shipped(2026-06-10,Jeff token,帶 m3a+m3b)**:七 gate 全過、migration 0090 隨 release 套用、/health 全綠(db 37ms / redis 16ms / stripe 212ms / llm 405ms)、token 用完即焚。線上 bundle 驗證:entry 有 escClsRefund/看全文/「其實是客人,救回」,Workspace chunk 有 escalationList/escalationAck/escalationUnread/spamRescue/spamConfirm;curl `commandCenter.escalationList` 回 FORBIDDEN(路由在、admin 鎖正常)。**Jeff 親驗項:今日待辦 escalation 卡(退款卡有鎖)、勾處理好了後 agent 對話未讀同步減、看全文展開收起、sidebar 今日待辦數字含 escalation、疑似垃圾匣兩鍵、英文模式全英文。**(先 hard refresh 清舊 SW cache 再看)
 - 批1 剩 B2 eval(要 Jeff 真信件 gold set),見 tasks/batch-1-today.md。
 
+## 2026-06-10 批2 動工(客戶 + 銷售動作)
+- **實況調查 + Stage 3 文件**(tasks/batch-2-customers.md):關鍵發現 = 銷售 5 畫面全是 per-customer 對話的輸出形態(sales mockup sidebar active 都是客人),客戶頁與銷售頁同一個面。GAP:per-customer 對話不存在(chat 全域)、機票無資料線、wechatMessages 無歸戶欄位。
+- **批2 m1 完成(同日,零新 schema)**:customerDetail 加 totalSpend(additive)+ commandCenter.get(by id 餵 dialog)+ header 照 mockup(PackPoint · 總消費 · 訂單 + 看完整資料)+ task 卡「審核」走共用 ReviewTaskDialog(同一條 gated 核准路)+ 詢問卡「起草回覆」(produceInquiryReply,審核後才送)+ 已結留底(completed/cancelled 近 5 筆,locked 無 toggle)+ 已收款 open 訂單帶 trust 註記(鐵律可見化)。抽 CustomerDetailSheet 獨立檔(CustomersTabV2 530→268 行,還 300 行債);helpers i18n 還債(titleKey fallback,.ts 零硬編碼中文)。+13 測試;tsc 0;全套 vitest 1538 passed / 0 failed。**待 ship(Jeff token)**。
+- **m2+ 拍板問題(見 batch-2-customers.md)**:① m3 per-customer 對話架構(agentMessages 加欄 vs 新表)② m4 機票面要不要建最小 flightOrders 狀態機(或先唯讀/暫緩)③ m5 wechat 歸戶方式(加欄配對 vs 先不歸戶搬清單)。
+
 ## 文件
 - proposal.md(Stage 1)✓
 - design.md(Stage 2 定案:設計系統 + 9 鐵律 + shell + 18 項目矩陣 + §4.5 行銷 6 平台 + 後端接點)✓

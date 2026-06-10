@@ -166,6 +166,20 @@ describe("commandCenter.stats", () => {
   });
 });
 
+describe("commandCenter.get (批2 m1)", () => {
+  it("returns the full task row by id", async () => {
+    getByIdMock.mockResolvedValue({ id: 9, payload: "{}" } as any);
+    const caller = adminCaller();
+    expect(await caller.get({ id: 9 })).toMatchObject({ id: 9 });
+  });
+
+  it("404s on a missing task", async () => {
+    getByIdMock.mockResolvedValue(undefined as any);
+    const caller = adminCaller();
+    await expect(caller.get({ id: 1 })).rejects.toThrow("Task not found");
+  });
+});
+
 describe("commandCenter.approve", () => {
   it("flips status then invokes the executor keyed by taskType (marks sent)", async () => {
     const task = {

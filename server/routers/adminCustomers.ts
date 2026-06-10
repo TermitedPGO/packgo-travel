@@ -113,6 +113,21 @@ export const adminCustomersRouter = router({
 
       if (!user) return null;
 
+      // Total spend (批2 m1, additive) — same口徑 as customerList: sum of
+      // non-cancelled bookings. The workspace customer header shows it.
+      const [spendRow] = await drizzleDb
+        .select({
+          totalSpend: sql<number>`COALESCE(SUM(${bookingsTable.totalPrice}), 0)`,
+        })
+        .from(bookingsTable)
+        .where(
+          and(
+            eq(bookingsTable.userId, input.userId),
+            sql`${bookingsTable.bookingStatus} NOT IN ('cancelled')`,
+          ),
+        );
+      const totalSpend = Number(spendRow?.totalSpend ?? 0);
+
       // Recent bookings (last 20)
       const recentBookings = await drizzleDb
         .select({
@@ -161,7 +176,12 @@ export const adminCustomersRouter = router({
         .orderBy(desc(pointsTransactions.createdAt))
         .limit(20);
 
-      return { user, recentBookings, recentInquiries, recentPoints };
+      return {
+        user: { ...user, totalSpend },
+        recentBookings,
+        recentInquiries,
+        recentPoints,
+      };
     }),
 
   /**
