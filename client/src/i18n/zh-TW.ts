@@ -60,6 +60,7 @@ export const zhTW = {
     timeYesterday: '昨天',
     timeDaysAgo: '{n} 天前',
     jumpTo: '去{name}',
+    review: '審核',
   },
   // 通用
   common: {

@@ -15,6 +15,7 @@ import { en } from "../../i18n/en";
 
 const COMPONENT_DIRS = [
   __dirname, // client/src/components/workspace
+  join(__dirname, "ws-ui"), // split primitives (chips / card / layout)
   join(__dirname, "..", "..", "pages"), // Workspace.tsx lives here
 ];
 

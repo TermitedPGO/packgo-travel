@@ -60,6 +60,7 @@ export const en = {
     timeYesterday: 'yesterday',
     timeDaysAgo: '{n}d ago',
     jumpTo: 'Open {name}',
+    review: 'Review',
   },
   // Common
   common: {

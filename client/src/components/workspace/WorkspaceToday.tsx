@@ -14,18 +14,26 @@
  * customer-item buckets that have no clean data source yet render an honest
  * empty line rather than fabricated demo cards.
  */
-import { useMemo } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { useLocale } from "@/contexts/LocaleContext";
 import { RefreshCw } from "lucide-react";
 import { formatRelTime } from "./relTime";
 import {
+  BtnB,
   Greeting,
   GroupHeader,
   WorkspaceCard,
   type CardState,
 } from "./ws-ui";
+
+// Shared review flow (same dialog the 指揮中心 ApprovalInbox uses): full
+// payload preview + hard_gate confirm + honest outcome toast. Lazy so the
+// dialog chunk only loads when Jeff actually reviews something.
+const ReviewTaskDialog = lazy(
+  () => import("@/components/admin-v2/CommandCenter/ReviewTaskDialog"),
+);
 
 type Lane = "cs" | "quote" | "marketing" | "finance";
 
@@ -75,6 +83,11 @@ export default function WorkspaceToday({
   const utils = trpc.useUtils();
 
   type Task = NonNullable<typeof decideQ.data>[number];
+
+  // 批1 m2 — the task whose review dialog is open (null = closed). The card
+  // button opens the SAME shared flow the 指揮中心 uses: full payload preview,
+  // hard_gate per-item confirm, honest outcome toast.
+  const [reviewing, setReviewing] = useState<Task | null>(null);
 
   const setDisposition = trpc.workspace.setDisposition.useMutation({
     onSuccess: () => {
@@ -148,6 +161,20 @@ export default function WorkspaceToday({
         {task.summary && (
           <div className="text-gray-500 mt-0.5 text-[12px]">
             {task.summary}
+          </div>
+        )}
+        {/* failed executor → show the reason honestly (bold black, not red) */}
+        {task.status === "failed" && task.errorMessage && (
+          <div className="text-[11px] font-medium mt-1">
+            {task.errorMessage}
+          </div>
+        )}
+        {/* 等你決定 → open the shared review flow right on the card */}
+        {task.status === "pending" && !isHandled && (
+          <div className="flex gap-2 mt-2">
+            <BtnB onClick={() => setReviewing(task)}>
+              {t("workspace.review")}
+            </BtnB>
           </div>
         )}
       </WorkspaceCard>
@@ -230,6 +257,20 @@ export default function WorkspaceToday({
           </div>
         )}
       </div>
+
+      {/* 批1 m2 — shared review flow (same dialog as 指揮中心 ApprovalInbox) */}
+      <Suspense fallback={null}>
+        {reviewing && (
+          <ReviewTaskDialog
+            task={reviewing}
+            onClose={() => setReviewing(null)}
+            onDecided={() => {
+              utils.commandCenter.list.invalidate();
+              utils.commandCenter.stats.invalidate();
+            }}
+          />
+        )}
+      </Suspense>
     </div>
   );
 }

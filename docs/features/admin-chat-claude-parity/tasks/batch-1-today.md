@@ -15,10 +15,12 @@
 - [x] Vitest:extractCustomerRef 全 lane + 壞 payload 案例。
 - 資料形狀依據(2026-06-09 實測):cs payload 有 `inquiryId`(inquiries.userId nullable,guest);quote payload 的 relatedId 指 tour,客人只有 optional `customerName`/`customerEmail`。
 
-### m2 — 卡片動作層(approve / reject 上卡)
-- [ ] 「等你決定」卡帶 主動作(核准)/ 次動作(退回),沿用 commandCenter.approve / reject(hard_gate 永遠逐筆,既有 router 已擋 bulk)。
-- [ ] 核准帶 executor 結果誠實回報(sent / failed toast,不假裝成功)。
-- [ ] 編輯草稿(editedPayload)入口:先 jump 到對應 lane 工具,不在卡上做 inline editor(LARGE 留批2+)。
+### m2 — 卡片動作層(2026-06-09 完成)
+- [x] 抽共用 `ReviewTaskDialog`(admin-v2/CommandCenter):全文過目(LanePayloadBody,cs 草稿可編輯)+ hard_gate 逐筆 confirm + reject reason。ApprovalInbox 與 今日待辦 共用同一條核准路徑(UI 上只有一種核准方式)。
+- [x] 今日待辦「等你決定」卡(pending 且未勾)帶「審核」主動作,開 shared dialog;沿用 commandCenter.approve / reject,零新碰錢路徑。
+- [x] executor 結果誠實回報抽純函式 `approveToast.ts`(cs sent=已送出、其他 lane=已記錄、failed=帶 errorMessage)+ 4 測試;兩處共用。
+- [x] failed 卡直接顯示 errorMessage(粗黑非紅)。
+- 設計取捨(對照 mockup):cards-states 的「動作直接在卡上」前提是過目內容已在卡上;today 卡目前只有 title+summary,直接「核准」= 沒過目就送(違鐵律 2),故動作開 dialog 過目。批2+ 把 per-lane 豐富內容上卡後,動作才照 mockup 直接上卡。
 
 ### m3 — 詢問(inquiries)workspace 視圖
 - [ ] InquiriesTab 功能 1:1:清單、AI 草稿狀態、spam 匣(救回鐵律)、緊急置頂。

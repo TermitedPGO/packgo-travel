@@ -17,7 +17,8 @@
 - 驗證:tsc 0;全套 vitest 1433 passed / 0 failed(91 skipped);workspace 相關 90/90。
 - **本機視覺驗證限制(誠實記錄)**:本機無 .env / DB,/workspace 有登入牆,視覺只能 ship 後在 prod 親驗。
 - **v685 shipped(2026-06-09,Jeff go + token)**:七 gate 全過、/health 全綠(db 36ms / redis 17ms / stripe 235ms / llm 397ms)、token 用完即焚;線上 bundle grep 到「去{name}」+「timeJustNow」確認帶批1 m1 程式碼。**Jeff 親驗項:今日待辦卡 @客戶 chip、去X 跳轉切 inbox、英文模式全英文。**
-- m2(卡上 approve/reject)、m3(詢問視圖)見 tasks/batch-1-today.md;新 session 從這裡接。
+- **批1 m2 完成(同日)**:抽共用 ReviewTaskDialog(全文過目 + hard_gate 逐筆 confirm),ApprovalInbox 與 今日待辦 同一條核准路徑;today 卡「審核」鈕開 dialog;誠實 toast 抽 approveToast.ts(cs=已送出/他 lane=已記錄/failed=帶因)+4 測試;failed 卡顯示 errorMessage。workspaceI18n 掃描補 ws-ui/ 子目錄(拆檔後漏掃)。終點 10 頁對照(44584f3)印證方向:command-center 任務=今日待辦卡片。
+- m3(詢問視圖)見 tasks/batch-1-today.md。
 
 ## 文件
 - proposal.md(Stage 1)✓
