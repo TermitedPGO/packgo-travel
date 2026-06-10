@@ -34,7 +34,9 @@
 - **MCP 瀏覽器驗收(同日,Claude in Chrome 對 prod /workspace,唯讀安全模式)**:✅ 今日待辦(greeting/計數、escalation 卡含 🔒退款 黑 badge、看全文展開含附件狀態+未送草稿、處理好了雙向 toggle 含 sidebar badge 2↔1 同步、已讀淡化下沉、誠實空桶)✅ 疑似垃圾匣(29 筆、兩鍵在、已確認垃圾淡化保留)✅ 客戶 inbox header(PackPoint·總消費·訂單+看完整資料 Sheet)✅ per-customer 對話(Jeff 實際已用:找台灣團 15 團 + 「新客 0 筆訂單」= context 注入生效、台南高雄真實班次餘位 = 唯讀工具生效、歷史跨 reload 保存 = 0091 表生效)✅ 英文模式全英(DB 內容豁免正確)。**沒資料測不到**:審核 dialog、報價卡價格塊、已結留底/報價記錄段(單元測試有蓋,真資料出現看一眼即可)。**刻意不按**:救回/確定垃圾/起草/核准。觀察 3 件:① 舊 escalation 理由行是 B1 前的 log 話(舊資料,自然淘汰)② 垃圾匣多為自家 support@ 系統監控信 → 已開 task 在 gmailPipeline 入口擋自家寄件人 ③ 詳情 Sheet 詢問數 3 vs 詢問紀錄空(users.inquiryCount 快取與 userId-link 口徑差,小資料債)。
 - **批2 m3b 完成(同日)**:客戶對話 agent turn 渲染 OpsCards(重用,AgentChatPage 只加 export)+ action chips(歷史 context JSON 復原 + 串流 done 事件);chips 點擊一律開確認 dialog(sensitive 打 CONFIRM、警告粗黑非紅)→ 既有 agent.executeOpsAction,零新執行路徑;customerChatList 加 context 欄;context 注入改真實機制說明(撤 v1 無按鈕止血)。+3 測試;tsc 0;全套 vitest 1563 passed / 0 failed。**待 ship**。
 - **批2 m4 完成(同日)**:migration 0092 flightOrders(表上無護照號/卡號欄位,結構性守鐵則)+ flightOrderBox 狀態機(備訂→待你刷卡→TICKETED;ticketed 永不可 cancel;+10 測試)+ flightOrders router + 客戶 inbox 機票區(黑鎖條、我來刷卡只開外部頁、出票純記錄、TICKETED 黑卡)。報價記錄抽檔還行數債。tsc 0;全套 vitest 1597 passed / 0 failed。**待 ship(與 m3b 同船,含 migration 0091+0092)**。
-- 批2 剩:m5 微信歸戶(已拍板);agent 機票選項卡/確認單 PDF/出票短訊 = m4 後續;客製卡型(找團結果列帶動作鈕/比較表/客製逐日)同歸後續。
+- **批2 m5 完成(同日)= 批2 全 milestone 完成**:migration 0093 wechatMessages.customerUserId + 自動歸戶(wechatCustomerMatch,openId↔wechatId,+3 測試)+ listForCustomer/assignCustomer + 客戶 inbox 微信區(核實:approve 本來就只記錄不發送,UI 照實 = 複製→你微信親貼→回來記錄)。tsc 0;全套 vitest 1613 passed / 0 failed。
+- **批2 待 ship 一覽(4 commit + migration 0092/0093)**:db19477 止血、52c3997 m3b、0805f67 m4、(m5 commit)。卡點:mobile 並行 session 未收檔(gate 2)。
+- 批2 後續(非阻擋):agent 機票選項卡/確認單 PDF 接 skill/出票短訊、客製卡型(找團列帶動作鈕/比較表/客製逐日)、微信未歸戶池 UI。
 
 ## 文件
 - proposal.md(Stage 1)✓

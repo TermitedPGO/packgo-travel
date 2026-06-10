@@ -2198,9 +2198,15 @@ export const wechatMessages = mysqlTable("wechatMessages", {
   // Linkage
   linkedQuoteId: int("linkedQuoteId"),     // if this thread led to a quote
   linkedBookingId: int("linkedBookingId"), // if it led to a booking
+  // 批2 m5 (migration 0093) — 歸戶: users.id when the sender maps to a
+  // registered customer (auto via customerProfiles.wechatId on OA inbound,
+  // else manual assign). Nullable: manual pastes often can't be matched.
+  customerUserId: int("customerUserId"),
   notes: text("notes"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (t) => ({
+  customerIdx: index("idx_wm_customer").on(t.customerUserId, t.receivedAt),
+}));
 export type WechatMessage = typeof wechatMessages.$inferSelect;
 export type InsertWechatMessage = typeof wechatMessages.$inferInsert;
 

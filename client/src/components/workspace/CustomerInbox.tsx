@@ -28,6 +28,7 @@ import QuoteTaskBody from "./QuoteTaskBody";
 import CustomerChat from "./CustomerChat";
 import CustomerQuoteRecords from "./CustomerQuoteRecords";
 import CustomerFlightOrders from "./CustomerFlightOrders";
+import CustomerWechatMessages from "./CustomerWechatMessages";
 import { BtnB, BtnO, WorkspaceCard } from "./ws-ui";
 
 const ReviewTaskDialog = lazy(
@@ -228,6 +229,8 @@ export default function CustomerInbox({ userId }: { userId: number }) {
             to start a flight booking */}
         <CustomerQuoteRecords quotes={detail.data?.recentQuotes ?? []} />
         <CustomerFlightOrders userId={userId} />
+        {/* 微信 (批2 m5) — 歸戶訊息;系統不送,複製→你微信貼→回來記錄 */}
+        <CustomerWechatMessages userId={userId} />
       </div>
 
       {/* per-customer 對話 (批2 m3) — thread + composer, bound to this

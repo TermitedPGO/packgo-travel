@@ -57,9 +57,13 @@
 - [x] 客戶 inbox 機票區(照 sales p3):有未結單時顯示**不可關閉黑鎖條**「付款由你本人刷卡…」;待刷卡卡帶黑底提醒 +「我來刷卡」**只開外部訂購頁**;出票 = 純記錄表單(PNR/票號/訂單編號);TICKETED 黑卡留底。建立/出票 dialog 拆 `FlightOrderDialogs.tsx`;報價記錄抽 `CustomerQuoteRecords.tsx`(行數債);零待辦客人也看得到機票區(空狀態外)。
 - 後續(不在 v1):agent 出機票選項卡(sales p3 上半)+ suggest_action 建備訂、確認單 PDF 接 flight-ticket skill、出票後客人短訊草稿。
 
-### m5 — wechat-assist 歸戶(**2026-06-10 Jeff 拍板:加歸戶欄 + 配對**)
-- 拍板:wechatMessages 加 userId(nullable)+ 用 customerProfiles.wechatId 配對 + 人工補配;訊息進客人時間軸。
-- approve(真送微信)維持逐筆 gated。
+### m5 — wechat-assist 歸戶(**2026-06-10 Jeff 拍板;同日完成 v1**)
+- [x] migration 0093 `wechatMessages.customerUserId`(nullable + index,冪等 guard)。
+- [x] 自動歸戶:`wechatCustomerMatch.ts`(fromOpenId ↔ customerProfiles.wechatId → users.id;查無/guest/db 掛 → null 誠實留待人工,+3 測試)接進 wechatAssistService 建立路徑(best-effort,永不擋草稿)。
+- [x] router 加 `listForCustomer`(該客人近 20 則,各狀態,決定過的淡化留底)+ `assignCustomer`(人工補配/解除,audited);抽檔守恆測試更新為 4+2。
+- [x] 客戶 inbox 微信區:來訊 + AI 草稿卡;審核 dialog 流程誠實照真實機制 = **系統不發微信**:編輯回覆 → 複製 → 你在微信親手貼出 → 回來「已在微信送出,記錄」(走既有 approve bookkeeping,audited);跳過 = skip。
+- **核實記錄**:原以為 approve 會真送微信,讀碼證實它只改 status/finalText(無發送 API)— UI 文案照實寫,不假裝自動送。
+- 後續(不在 v1):人工補配的「未歸戶池」UI(歸全域微信頁搬遷時做,批4/5);OA webhook 自動進信(現為手動貼上)。
 
 ## 驗證(每 milestone,同批1)
 - tsc 0;vitest 綠(workspace + 相關 router);新元件零 JSX/TS 硬編碼中文;Sheet padding 守 §2.5。

@@ -97,6 +97,60 @@ export const wechatAssistRouter = router({
         return { success: true };
       }),
 
+    // 批2 m5 — this customer's wechat thread for the workspace inbox
+    // (latest 20, any status — decided ones render dimmed 留底).
+    listForCustomer: adminProcedure
+      .input(z.object({ userId: z.number().int().positive() }))
+      .query(async ({ input }) => {
+        const dbi = await db.getDb();
+        if (!dbi) return [];
+        const { wechatMessages } = await import("../../drizzle/schema");
+        const { eq, desc } = await import("drizzle-orm");
+        return await dbi
+          .select({
+            id: wechatMessages.id,
+            source: wechatMessages.source,
+            fromDisplayName: wechatMessages.fromDisplayName,
+            inboundText: wechatMessages.inboundText,
+            aiDraftText: wechatMessages.aiDraftText,
+            status: wechatMessages.status,
+            finalText: wechatMessages.finalText,
+            receivedAt: wechatMessages.receivedAt,
+          })
+          .from(wechatMessages)
+          .where(eq(wechatMessages.customerUserId, input.userId))
+          .orderBy(desc(wechatMessages.receivedAt))
+          .limit(20);
+      }),
+
+    // 批2 m5 — 人工補配/解除歸戶 (manual pastes can't auto-match).
+    assignCustomer: adminProcedure
+      .input(
+        z.object({
+          messageId: z.number().int().positive().max(2_147_483_647),
+          userId: z.number().int().positive().nullable(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const dbi = await db.getDb();
+        if (!dbi) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+        const { wechatMessages } = await import("../../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        await dbi
+          .update(wechatMessages)
+          .set({ customerUserId: input.userId } as any)
+          .where(eq(wechatMessages.id, input.messageId));
+        const { audit } = await import("../_core/auditLog");
+        audit({
+          ctx,
+          action: "wechat.assignCustomer",
+          targetType: "wechatMessage",
+          targetId: input.messageId,
+          changes: { userId: input.userId },
+        });
+        return { success: true };
+      }),
+
     // Mark as skipped (don't reply)
     skip: adminProcedure
       .input(z.object({ messageId: z.number().int().positive().max(2_147_483_647) }))

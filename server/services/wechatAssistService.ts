@@ -93,11 +93,21 @@ export async function draftReply(input: DraftReplyInput): Promise<DraftReplyResu
     confidence = 0;
   }
 
-  // 3. Persist
+  // 3. Persist (批2 m5: auto-歸戶 via fromOpenId ↔ customerProfiles.wechatId;
+  //    no match / manual paste → NULL, 人工補配 later)
   let messageId: number | null = null;
   try {
     const db = await getDb();
     if (db) {
+      let customerUserId: number | null = null;
+      try {
+        const { findCustomerUserIdByOpenId } = await import(
+          "../_core/wechatCustomerMatch"
+        );
+        customerUserId = await findCustomerUserIdByOpenId(input.fromOpenId);
+      } catch {
+        /* matching is best-effort — never block the draft */
+      }
       const result = await db.insert(wechatMessages).values({
         source: input.source,
         fromOpenId: input.fromOpenId || null,
@@ -107,6 +117,7 @@ export async function draftReply(input: DraftReplyInput): Promise<DraftReplyResu
         aiDraftAt: new Date(),
         aiConfidence: String(confidence.toFixed(2)) as any,
         status: "ready_review",
+        customerUserId,
       });
       messageId = Number((result[0] as any).insertId);
     }
