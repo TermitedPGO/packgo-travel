@@ -22,9 +22,19 @@
 - [x] failed 卡直接顯示 errorMessage(粗黑非紅)。
 - 設計取捨(對照 mockup):cards-states 的「動作直接在卡上」前提是過目內容已在卡上;today 卡目前只有 title+summary,直接「核准」= 沒過目就送(違鐵律 2),故動作開 dialog 過目。批2+ 把 per-lane 豐富內容上卡後,動作才照 mockup 直接上卡。
 
-### m3 — 詢問(inquiries)workspace 視圖
-- [ ] InquiriesTab 功能 1:1:清單、AI 草稿狀態、spam 匣(救回鐵律)、緊急置頂。
-- [ ] 卡片文法 + 未處理/處理好了 disposition。
+### m3 — 詢問 roll-up + spam 匣(2026-06-09 實況調查完,動工前要 Jeff 拍板)
+
+終點藍圖:inquiries 不做獨立視圖,roll-up 進今日待辦。實測詢問有**三個資料源**:
+1. `inquiries` 表(網站表單)→ 已在客戶 inbox(customerOpenItems);有 AI 草稿的會變 cs approval task → 今日待辦卡(m1+m2 已蓋)。
+2. `customerInteractions`(Gmail inbound,含 classification="spam")→ 每封都留底(原始記錄不丟)但**不進今日待辦**;spam 只發 observation 到 #inquiry 頻道。
+3. `agentMessages`(escalation,B1 已講人話)→ 顯示在 agent 對話,不在今日待辦。
+
+缺口:
+- [ ] escalation(複雜/投訴/退款)進今日待辦「需要你決定」桶(parse agentMessages context 取 who)。
+- [ ] spam 匣:customerInteractions classification=spam 清單 + 計數常駐 +「其實是客人,救回」/「確定是垃圾」兩鍵(目前**後端無救回 mutation,無 spam 狀態欄**,要新增)。
+- [ ] B2 配套(task #93):InquiryAgent spam 辨識 eval,要 Jeff 給真信件 gold set。
+
+**待 Jeff 拍板再動工**:「救回」的語意是什麼?(a) 救回 = 建正式 inquiry + 跑 InquiryAgent 出草稿,或 (b) 救回 = 只標記非垃圾、進客戶殼,Jeff 手動回。鐵律 4 只說「不靜默丟 + 可救回」,沒定義救回後的動作。
 
 ## 驗證(每模組)
 - tsc 0;`npx vitest run client/src/components/workspace server/_core/approvalTaskWho.test.ts server/routers/commandCenter.test.ts` 綠。
