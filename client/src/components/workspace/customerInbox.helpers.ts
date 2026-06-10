@@ -38,6 +38,8 @@ export type PendingTask = {
   riskLevel: string;
   title: string;
   summary: string | null;
+  /** lane JSON (批2 m2) — quote cards render the price block from it. */
+  payload?: string;
   createdAt: Date | string | number;
   handled?: boolean;
 };
@@ -70,6 +72,9 @@ export type InboxItem = {
   reviewable?: boolean;
   /** open inquiry → card offers 起草回覆 (produceInquiryReply). */
   draftable?: boolean;
+  /** task items only (批2 m2): lane + payload for the quote price block. */
+  lane?: string;
+  payload?: string;
 };
 
 function toTs(v: Date | string | number): number {
@@ -123,6 +128,8 @@ export function mergeOpenItems(data: OpenItemsData): InboxItem[] {
       ts: toTs(t.createdAt),
       handled: t.handled ?? false,
       reviewable: true,
+      lane: t.lane,
+      payload: t.payload,
     });
   }
 

@@ -139,6 +139,18 @@ describe("mergeOpenItems", () => {
     expect(out.find((i) => i.kind === "task")?.draftable).toBeUndefined();
   });
 
+  it("passes lane + payload through on task items (批2 m2 quote block)", () => {
+    const payload = JSON.stringify({ tourTitle: "T", supplierPrice: 100 });
+    const out = mergeOpenItems({
+      ...empty,
+      pendingTasks: [
+        { id: 2, lane: "quote", taskType: "quote_draft", riskLevel: "hard_gate", title: "T", summary: null, payload, createdAt: 0 },
+      ],
+    });
+    expect(out[0].lane).toBe("quote");
+    expect(out[0].payload).toBe(payload);
+  });
+
   it("sinks handled (處理好了) items below unhandled, even if newer", () => {
     const out = mergeOpenItems({
       ...empty,

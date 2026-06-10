@@ -23,6 +23,8 @@ import {
   type InboxItem,
 } from "./customerInbox.helpers";
 import { formatRelTime } from "./relTime";
+import { parseQuoteCard } from "./quoteTask";
+import QuoteTaskBody from "./QuoteTaskBody";
 import { BtnB, BtnO, WorkspaceCard } from "./ws-ui";
 
 const ReviewTaskDialog = lazy(
@@ -112,6 +114,10 @@ export default function CustomerInbox({ userId }: { userId: number }) {
     >
       <div className="font-medium">{it.title ?? t(it.titleKey)}</div>
       <div className="text-gray-500 mt-0.5 text-[12px]">{it.sub}</div>
+      {/* quote 卡上過目層 (批2 m2):價格 + 來源,動作仍走審核 dialog */}
+      {it.lane === "quote" && it.payload && parseQuoteCard(it.payload) && (
+        <QuoteTaskBody payload={it.payload} />
+      )}
       {/* 鐵律可見化:已收錢未出發 → trust 帳,不是營收 */}
       {it.trustNote && (
         <div className="text-[11px] text-gray-500 mt-1">
@@ -209,6 +215,47 @@ export default function CustomerInbox({ userId }: { userId: number }) {
                   {t("workspace.closedSection")} ({closed.length})
                 </div>
                 <div className="space-y-2.5">{closed.map(card)}</div>
+              </>
+            )}
+
+            {/* 報價記錄 (批2 m2) — aiQuotes funnel facts, read-only, bounded 5.
+                tool-quote PDF 無持久化故不在此(gap 記於 batch-2 文件) */}
+            {(detail.data?.recentQuotes ?? []).length > 0 && (
+              <>
+                <div className="text-[11px] font-semibold text-gray-400 mb-2 mt-5">
+                  {t("workspace.quoteRecords")} (
+                  {detail.data!.recentQuotes.length})
+                </div>
+                <div className="space-y-2.5">
+                  {detail.data!.recentQuotes.map((q) => (
+                    <WorkspaceCard
+                      key={`aiq:${q.id}`}
+                      type={t("workspace.laneQuote")}
+                      time={formatRelTime(q.createdAt, t)}
+                      state="none"
+                    >
+                      <div className="font-medium">{q.quoteNumber}</div>
+                      <div className="text-gray-500 mt-0.5 text-[12px]">
+                        {q.estimatedTotal != null
+                          ? `${q.currency} ${Number(q.estimatedTotal).toLocaleString()} · `
+                          : ""}
+                        {q.status}
+                      </div>
+                      {q.pdfUrl && (
+                        <div className="mt-2">
+                          <a
+                            href={q.pdfUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-2.5 py-1 rounded-lg border border-gray-300 text-gray-700 text-[11px] font-medium inline-block"
+                          >
+                            {t("workspace.quoteOpenPdf")}
+                          </a>
+                        </div>
+                      )}
+                    </WorkspaceCard>
+                  ))}
+                </div>
               </>
             )}
           </>

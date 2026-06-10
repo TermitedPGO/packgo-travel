@@ -34,9 +34,10 @@
 - [ ] helpers i18n 還債:title fallback 改 key(零 .ts 硬編碼中文)。
 - [ ] Vitest:helpers(closed merge + locked)、commandCenter.get。
 
-### m2 — 報價深化(沿用 gated 路)
-- 報價 task 卡上內容豐富化(佔床表、旺季 warn、來源 src 照 sales p2)— payload 既有欄位渲染,動作仍走 ReviewTaskDialog(改金額 = editedPayload,核准 = 既有 approve)。
-- ai-quotes 記錄 + tool-quote PDF 連結列入該客人時間軸(唯讀卡)。
+### m2 — 報價深化(沿用 gated 路;2026-06-10 完成)
+- [x] 報價 task 卡上過目層:`quoteTask.ts`(pure parse,+5 測試)+ `QuoteTaskBody`(價格 finalPrice 優先 / 直客價 fallback、客製遊需手動報價、來源 src 行「單價取自供應商後台直客價」)。今日待辦 + 客戶 inbox 兩處共用;解析不出退回 summary。動作仍走 ReviewTaskDialog(改金額 = editedPayload,核准 = 既有 approve)。
+- [x] customerOpenItems pendingTasks 加 payload(additive);customerDetail 加 recentQuotes(aiQuotes by userId OR email,近 5 筆)→ 客戶 inbox「報價記錄」唯讀段(quoteNumber · 金額 · 狀態 · 開 PDF)。
+- **誠實範圍記錄**:(a) mockup p2 的佔床編輯表**沒做**:quoteProducer payload 無大人/兒童/單房差欄位,卡上不虛構;要做需 producer 加欄(列 m3+ 或之後)。(b) **tool-quote PDF 不在時間軸**:`tools.generateQuote` 無持久化(只回 S3 URL 不落 DB),要列須先建表;先記 gap 不硬塞。(c) 旺季 warn 同理,payload 無季節欄位。
 
 ### m3 — per-customer 對話(LARGE;**2026-06-10 Jeff 拍板:新 customerChatSessions 表**)
 - 拍板:不動 agentMessages,新建 customerChatSessions 表(乾淨分離;已讀/badge 機制為此表獨立建)。

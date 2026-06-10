@@ -27,7 +27,8 @@
 ## 2026-06-10 批2 動工(客戶 + 銷售動作)
 - **實況調查 + Stage 3 文件**(tasks/batch-2-customers.md):關鍵發現 = 銷售 5 畫面全是 per-customer 對話的輸出形態(sales mockup sidebar active 都是客人),客戶頁與銷售頁同一個面。GAP:per-customer 對話不存在(chat 全域)、機票無資料線、wechatMessages 無歸戶欄位。
 - **批2 m1 完成(同日,零新 schema)**:customerDetail 加 totalSpend(additive)+ commandCenter.get(by id 餵 dialog)+ header 照 mockup(PackPoint · 總消費 · 訂單 + 看完整資料)+ task 卡「審核」走共用 ReviewTaskDialog(同一條 gated 核准路)+ 詢問卡「起草回覆」(produceInquiryReply,審核後才送)+ 已結留底(completed/cancelled 近 5 筆,locked 無 toggle)+ 已收款 open 訂單帶 trust 註記(鐵律可見化)。抽 CustomerDetailSheet 獨立檔(CustomersTabV2 530→268 行,還 300 行債);helpers i18n 還債(titleKey fallback,.ts 零硬編碼中文)。+13 測試;tsc 0;全套 vitest 1538 passed / 0 failed。**待 ship(Jeff token)**。
-- **m2+ 拍板問題(見 batch-2-customers.md)**:① m3 per-customer 對話架構(agentMessages 加欄 vs 新表)② m4 機票面要不要建最小 flightOrders 狀態機(或先唯讀/暫緩)③ m5 wechat 歸戶方式(加欄配對 vs 先不歸戶搬清單)。
+- **m3-m5 已拍板(同日,Jeff)**:m3 對話=新 customerChatSessions 表;m4 機票=建最小 flightOrders 狀態機(系統永不碰卡號/付款);m5 微信=加歸戶欄 + wechatId 配對。記於 batch-2-customers.md。
+- **批2 m2 完成(同日)**:quote 卡上過目層(quoteTask.ts pure parse + QuoteTaskBody,finalPrice 優先/直客價 fallback/客製遊手動註記/來源 src 行,今日待辦+客戶 inbox 共用,解析不出退 summary)+ customerOpenItems.pendingTasks 加 payload(additive)+ customerDetail.recentQuotes(aiQuotes by userId OR email)→ 客戶 inbox「報價記錄」唯讀段(開 PDF)。誠實 gap 記錄:佔床表/旺季 warn 需 producer 加欄、tool-quote 無持久化,都不虛構(見 batch-2 文件)。+6 測試;tsc 0;全套 vitest 1550 passed / 0 failed。**m1+m2 待 ship(Jeff token)**。
 
 ## 文件
 - proposal.md(Stage 1)✓

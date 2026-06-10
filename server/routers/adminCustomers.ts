@@ -176,11 +176,37 @@ export const adminCustomersRouter = router({
         .orderBy(desc(pointsTransactions.createdAt))
         .limit(20);
 
+      // Recent AI quotes (批2 m2) — matched by userId OR the user's email
+      // (anonymous quotes carry only customerEmail). Read-only funnel records
+      // for the per-customer timeline; tool-quote PDFs are NOT here (the
+      // tools.generateQuote path stores no row — gap recorded in
+      // tasks/batch-2-customers.md).
+      const { aiQuotes: aiQuotesTable } = await import("../../drizzle/schema");
+      const quoteConds = [eq(aiQuotesTable.userId, input.userId)];
+      if (user.email) {
+        quoteConds.push(eq(aiQuotesTable.customerEmail, user.email));
+      }
+      const recentQuotes = await drizzleDb
+        .select({
+          id: aiQuotesTable.id,
+          quoteNumber: aiQuotesTable.quoteNumber,
+          estimatedTotal: aiQuotesTable.estimatedTotal,
+          currency: aiQuotesTable.currency,
+          pdfUrl: aiQuotesTable.pdfUrl,
+          status: aiQuotesTable.status,
+          createdAt: aiQuotesTable.createdAt,
+        })
+        .from(aiQuotesTable)
+        .where(or(...quoteConds))
+        .orderBy(desc(aiQuotesTable.createdAt))
+        .limit(5);
+
       return {
         user: { ...user, totalSpend },
         recentBookings,
         recentInquiries,
         recentPoints,
+        recentQuotes,
       };
     }),
 
@@ -267,6 +293,8 @@ export const adminCustomersRouter = router({
         riskLevel: string;
         title: string;
         summary: string | null;
+        /** lane JSON (批2 m2) — quote cards render the price block from it. */
+        payload: string;
         createdAt: Date;
       }> = [];
       const linkConds = [];
@@ -295,6 +323,7 @@ export const adminCustomersRouter = router({
             riskLevel: approvalTasksTable.riskLevel,
             title: approvalTasksTable.title,
             summary: approvalTasksTable.summary,
+            payload: approvalTasksTable.payload,
             createdAt: approvalTasksTable.createdAt,
           })
           .from(approvalTasksTable)

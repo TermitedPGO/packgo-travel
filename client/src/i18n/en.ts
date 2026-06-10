@@ -81,6 +81,12 @@ export const en = {
     draftCreated: 'Draft is in Today; nothing goes out until you review it',
     trustNote: 'Deposit received; revenue recognized after departure',
     closedSection: 'Closed · history',
+    quotePriceFinal: 'Quote total',
+    quotePriceSupplier: 'Retail price',
+    quoteManual: 'Custom trip, manual quote needed',
+    quoteSrcSupplier: 'Unit price from the supplier portal retail price',
+    quoteRecords: 'Quote history',
+    quoteOpenPdf: 'Open PDF',
   },
   // Common
   common: {

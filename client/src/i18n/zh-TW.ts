@@ -81,6 +81,12 @@ export const zhTW = {
     draftCreated: '草稿已進待辦,審核後才會送出',
     trustNote: '訂金已收,出發後才認列營收',
     closedSection: '已結 · 留底',
+    quotePriceFinal: '報價金額',
+    quotePriceSupplier: '直客價',
+    quoteManual: '客製遊,需手動報價',
+    quoteSrcSupplier: '單價取自供應商後台直客價',
+    quoteRecords: '報價記錄',
+    quoteOpenPdf: '開 PDF',
   },
   // 通用
   common: {

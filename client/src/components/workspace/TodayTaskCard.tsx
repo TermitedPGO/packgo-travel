@@ -9,6 +9,8 @@
  */
 import { useLocale } from "@/contexts/LocaleContext";
 import { formatRelTime } from "./relTime";
+import { parseQuoteCard } from "./quoteTask";
+import QuoteTaskBody from "./QuoteTaskBody";
 import { BtnB, WorkspaceCard, type CardState } from "./ws-ui";
 
 /** Structural minimum this card reads off a commandCenter.list row. */
@@ -20,6 +22,8 @@ export type TodayTaskShape = {
   status: string;
   riskLevel?: string | null;
   errorMessage?: string | null;
+  /** lane JSON — quote cards render the price block from it (批2 m2). */
+  payload?: string;
   createdAt: Date | string;
   who?: { label: string; userId: number | null } | null;
 };
@@ -85,8 +89,14 @@ export default function TodayTaskCard<T extends TodayTaskShape>({
       toggleBusy={toggleBusy}
     >
       <div className="font-medium">{task.title}</div>
-      {task.summary && (
-        <div className="text-gray-500 mt-0.5 text-[12px]">{task.summary}</div>
+      {/* quote 卡上過目層 (批2 m2): payload 解析得出來就渲染價格塊取代
+          summary(producer summary 與價格塊重複),解析不出退回 summary */}
+      {lane === "quote" && task.payload && parseQuoteCard(task.payload) ? (
+        <QuoteTaskBody payload={task.payload} />
+      ) : (
+        task.summary && (
+          <div className="text-gray-500 mt-0.5 text-[12px]">{task.summary}</div>
+        )
       )}
       {/* failed executor → show the reason honestly (bold black, not red) */}
       {task.status === "failed" && task.errorMessage && (
