@@ -10,7 +10,7 @@ import { adminProcedure, router } from "../_core/trpc";
 import * as db from "../db";
 import { and, eq } from "drizzle-orm";
 
-export const WORKSPACE_ITEM_KINDS = ["booking", "inquiry", "task"] as const;
+export const WORKSPACE_ITEM_KINDS = ["booking", "inquiry", "task", "review"] as const;
 export type WorkspaceItemKind = (typeof WORKSPACE_ITEM_KINDS)[number];
 
 export const workspaceRouter = router({

@@ -852,6 +852,70 @@ export const bookingsRouter = router({
         return { success: true };
       }),
 
+    adminGetDetail: adminProcedure
+      .input(z.object({ bookingId: z.number().int().positive().max(2_147_483_647) }))
+      .query(async ({ input }) => {
+        const booking = await db.getBookingById(input.bookingId);
+        if (!booking) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Booking not found" });
+        }
+
+        const [participants, tour, departure, vouchers] = await Promise.all([
+          db.getBookingParticipants(input.bookingId),
+          booking.tourId ? db.getTourById(booking.tourId) : Promise.resolve(undefined),
+          booking.departureId ? db.getDepartureById(booking.departureId) : Promise.resolve(undefined),
+          (async () => {
+            if (!booking.userId) return [];
+            const drizzleDb = await db.getDb();
+            if (!drizzleDb) return [];
+            const { rewardVouchers } = await import("../../drizzle/schema");
+            const { eq, and } = await import("drizzle-orm");
+            return drizzleDb
+              .select({
+                id: rewardVouchers.id,
+                type: rewardVouchers.type,
+                code: rewardVouchers.code,
+                amountUsd: rewardVouchers.amountUsd,
+                status: rewardVouchers.status,
+                expiresAt: rewardVouchers.expiresAt,
+              })
+              .from(rewardVouchers)
+              .where(and(eq(rewardVouchers.userId, booking.userId), eq(rewardVouchers.status, "issued")));
+          })(),
+        ]);
+
+        const maskedParticipants = participants.map((p) => ({
+          id: p.id,
+          participantType: p.participantType,
+          firstName: p.firstName,
+          lastName: p.lastName,
+          gender: p.gender,
+          dateOfBirth: p.dateOfBirth,
+          passportNumber: p.passportNumber ? `••••${p.passportNumber.slice(-4)}` : null,
+          passportExpiry: p.passportExpiry,
+          nationality: p.nationality,
+          dietaryRequirements: p.dietaryRequirements,
+          specialNeeds: p.specialNeeds,
+        }));
+
+        return {
+          booking,
+          tourTitle: tour?.title ?? null,
+          departure: departure
+            ? {
+                departureDate: departure.departureDate,
+                returnDate: departure.returnDate,
+                status: departure.status,
+                opsStatus: departure.opsStatus,
+                totalSlots: departure.totalSlots,
+                bookedSlots: departure.bookedSlots,
+              }
+            : null,
+          participants: maskedParticipants,
+          vouchers,
+        };
+      }),
+
     // NOTE (Phase 4D, 2026-05-19): `adminRefund` was moved to
     // ./bookingsPayment.ts. Composition spread in routers.ts keeps the
     // client path `trpc.bookings.adminRefund` resolving identically.

@@ -19,12 +19,14 @@ const NewsletterTabV2 = lazy(
 const SupplierEnrichmentTabV2 = lazy(
   () => import("@/components/admin-v2/SupplierEnrichmentTabV2"),
 );
+const DepartureList = lazy(() => import("./DepartureList"));
 
-type CompanyTab = "ledger" | "reports" | "marketing" | "suppliers";
+type CompanyTab = "ledger" | "reports" | "marketing" | "suppliers" | "departures";
 
 const TABS: { id: CompanyTab; label: string }[] = [
   { id: "ledger", label: "workspace.companyLedger" },
   { id: "reports", label: "workspace.companyReports" },
+  { id: "departures", label: "workspace.companyDepartures" },
   { id: "marketing", label: "workspace.companyMarketing" },
   { id: "suppliers", label: "workspace.companySuppliers" },
 ];
@@ -69,6 +71,7 @@ export default function WorkspaceCompany({
         {tab === "reports" && <FinanceReports />}
         {tab === "marketing" && <NewsletterTabV2 />}
         {tab === "suppliers" && <SupplierEnrichmentTabV2 />}
+        {tab === "departures" && <DepartureList />}
       </Suspense>
     </div>
   );

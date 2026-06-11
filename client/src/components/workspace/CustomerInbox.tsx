@@ -29,6 +29,7 @@ import CustomerChat from "./CustomerChat";
 import CustomerQuoteRecords from "./CustomerQuoteRecords";
 import CustomerFlightOrders from "./CustomerFlightOrders";
 import CustomerWechatMessages from "./CustomerWechatMessages";
+import CustomerVisaSection from "./CustomerVisaSection";
 import { BtnB, BtnO, WorkspaceCard } from "./ws-ui";
 
 const ReviewTaskDialog = lazy(
@@ -37,6 +38,7 @@ const ReviewTaskDialog = lazy(
 const CustomerDetailSheet = lazy(
   () => import("@/components/admin-v2/CustomerDetailSheet"),
 );
+const BookingDetailSheet = lazy(() => import("./BookingDetailSheet"));
 
 const KIND_LABEL: Record<InboxItem["kind"], string> = {
   booking: "workspace.kindBooking",
@@ -50,6 +52,7 @@ export default function CustomerInbox({ userId }: { userId: number }) {
   const detail = trpc.admin.customerDetail.useQuery({ userId });
   const open = trpc.admin.customerOpenItems.useQuery({ userId });
   const [profileOpen, setProfileOpen] = useState(false);
+  const [openBookingId, setOpenBookingId] = useState<number | null>(null);
   // 批2 m1 — task under review; the dialog needs the full payload row, which
   // customerOpenItems doesn't carry → fetch on demand.
   const [reviewingId, setReviewingId] = useState<number | null>(null);
@@ -115,6 +118,8 @@ export default function CustomerInbox({ userId }: { userId: number }) {
         setDisposition.variables?.kind === it.kind &&
         setDisposition.variables?.id === it.id
       }
+      jumpLabel={it.kind === "booking" ? t("workspace.bookingDetail") : undefined}
+      onJump={it.kind === "booking" ? () => setOpenBookingId(it.id) : undefined}
     >
       <div className="font-medium">{it.title ?? t(it.titleKey)}</div>
       <div className="text-gray-500 mt-0.5 text-[12px]">{it.sub}</div>
@@ -231,6 +236,8 @@ export default function CustomerInbox({ userId }: { userId: number }) {
         <CustomerFlightOrders userId={userId} />
         {/* 微信 (批2 m5) — 歸戶訊息;系統不送,複製→你微信貼→回來記錄 */}
         <CustomerWechatMessages userId={userId} />
+        {/* 簽證 (批6 m4) — active visa applications with 6-step stepper */}
+        <CustomerVisaSection visas={open.data?.openVisas ?? []} />
       </div>
 
       {/* per-customer 對話 (批2 m3) — thread + composer, bound to this
@@ -246,6 +253,13 @@ export default function CustomerInbox({ userId }: { userId: number }) {
             userId={userId}
             open={profileOpen}
             onClose={() => setProfileOpen(false)}
+          />
+        )}
+        {openBookingId !== null && (
+          <BookingDetailSheet
+            bookingId={openBookingId}
+            open
+            onClose={() => setOpenBookingId(null)}
           />
         )}
         {reviewingId !== null && reviewTaskQ.data && (

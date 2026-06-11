@@ -666,6 +666,28 @@ export const tourGroupNotes = mysqlTable("tourGroupNotes", {
 export type TourGroupNote = typeof tourGroupNotes.$inferSelect;
 export type InsertTourGroupNote = typeof tourGroupNotes.$inferInsert;
 
+export const preDepartureNotifications = mysqlTable("preDepartureNotifications", {
+  id: int("id").autoincrement().primaryKey(),
+  departureId: int("departureId").notNull(),
+  bookingId: int("bookingId").notNull(),
+  userId: int("userId"),
+  recipientName: varchar("recipientName", { length: 128 }).notNull(),
+  recipientEmail: varchar("recipientEmail", { length: 256 }).notNull(),
+  subject: varchar("subject", { length: 256 }).default("").notNull(),
+  content: mediumtext("content").notNull(),
+  status: mysqlEnum("status", ["draft", "approved", "sent", "skipped"]).default("draft").notNull(),
+  sentAt: timestamp("sentAt"),
+  approvedBy: int("approvedBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  departureIdx: index("idx_pdn_departure").on(table.departureId, table.status),
+  bookingIdx: index("idx_pdn_booking").on(table.bookingId),
+}));
+
+export type PreDepartureNotification = typeof preDepartureNotifications.$inferSelect;
+export type InsertPreDepartureNotification = typeof preDepartureNotifications.$inferInsert;
+
 /**
  * Bookings table for storing all customer reservations.
  * Core transaction table linking users to tour departures.

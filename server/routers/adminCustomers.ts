@@ -368,13 +368,38 @@ export const adminCustomersRouter = router({
         for (const r of drows) handled.add(`${r.k}:${r.i}`);
       }
 
+      // batch 6 m4 — visa applications for this customer
+      const { visaApplications: visaTable } = await import("../../drizzle/schema");
+      const ACTIVE_VISA = ["draft", "submitted", "paid", "documents_received", "processing"] as const;
+      const openVisas = await drizzleDb
+        .select({
+          id: visaTable.id,
+          visaType: visaTable.visaType,
+          applicationStatus: visaTable.applicationStatus,
+          firstName: visaTable.firstName,
+          lastName: visaTable.lastName,
+          trackingNumber: visaTable.trackingNumber,
+          adminNotes: visaTable.adminNotes,
+          uploadedDocuments: visaTable.uploadedDocuments,
+          createdAt: visaTable.createdAt,
+        })
+        .from(visaTable)
+        .where(
+          and(
+            eq(visaTable.userId, input.userId),
+            inArray(visaTable.applicationStatus, [...ACTIVE_VISA]),
+          ),
+        )
+        .orderBy(desc(visaTable.createdAt));
+
       return {
         counts: {
           openBookings: openBookings.length,
           openInquiries: openInquiries.length,
           pendingTasks: pendingTasks.length,
+          openVisas: openVisas.length,
           total:
-            openBookings.length + openInquiries.length + pendingTasks.length,
+            openBookings.length + openInquiries.length + pendingTasks.length + openVisas.length,
         },
         openBookings: openBookings.map((b) => ({
           ...b,
@@ -388,6 +413,7 @@ export const adminCustomersRouter = router({
           ...t,
           handled: handled.has(`task:${t.id}`),
         })),
+        openVisas,
       };
     }),
 

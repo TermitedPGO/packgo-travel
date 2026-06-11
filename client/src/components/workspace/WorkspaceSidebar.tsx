@@ -25,7 +25,7 @@ import {
 import { useLocale } from "@/contexts/LocaleContext";
 import SidebarRail from "./SidebarRail";
 
-export type CompanySub = "ledger" | "reports" | "marketing" | "suppliers";
+export type CompanySub = "ledger" | "reports" | "marketing" | "suppliers" | "departures";
 
 export type WsView =
   | { type: "ai" }
@@ -38,6 +38,7 @@ export type SidebarCustomer = { id: number; name: string | null; email: string |
 const COMPANY_SUBS: { id: CompanySub; labelKey: string }[] = [
   { id: "ledger", labelKey: "workspace.companyLedger" },
   { id: "reports", labelKey: "workspace.companyReports" },
+  { id: "departures", labelKey: "workspace.companyDepartures" },
   { id: "marketing", labelKey: "workspace.companyMarketing" },
   { id: "suppliers", labelKey: "workspace.companySuppliers" },
 ];

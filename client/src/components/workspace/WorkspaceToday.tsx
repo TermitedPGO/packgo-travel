@@ -1,22 +1,7 @@
 /**
- * WorkspaceToday — 今日待辦 roll-up board (faithful to mockup
- * admin-inbox-integrated.html / admin-full-pages.html PAGE 1).
- *
- *   serif「下午好,Jeff」greeting + date/counts line
- *   3 buckets: 需要你決定 / 處理中·等外部 / 看一下就好 + 疑似垃圾匣
- *   each item = ws-ui WorkspaceCard with 未處理 / 處理好了 toggle
- *
- * Data is REAL: commandCenter.list (approval tasks) queried PER STATUS so the
- * 需要你決定 bucket can never silently drop an old pending task off a shared
- * limit window, MERGED (批1 m3b) with commandCenter.escalationList — agent
- * escalations (客訴/退款/低信心) that previously lived only in the agent chat.
- * Escalation 處理好了 = readByJeff (same state as the chat unread badge); the
- * card dims in place (undoable) instead of vanishing. 看一下就好 is a bounded
- * recent window (newest 20 approved + 20 failed), not a full history dump.
- * Task 處理好了 persisted via workspace.setDisposition.
- *
- * Card renderers live in TodayTaskCard / TodayEscalationCard; the 疑似垃圾匣
- * is TodaySpamBox (file split per §9.6 300-line rule).
+ * WorkspaceToday — 今日待辦 roll-up board.
+ * 3 buckets (需要你決定 / 處理中 / 看一下就好) + 疑似垃圾匣.
+ * Card renderers: TodayTaskCard / TodayEscalationCard / TodayReviewCard.
  */
 import { lazy, Suspense, useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
@@ -30,6 +15,7 @@ import TodayEscalationCard, {
   type EscalationShape,
 } from "./TodayEscalationCard";
 import TodaySpamBox from "./TodaySpamBox";
+import TodayReviewCard, { type ReviewShape } from "./TodayReviewCard";
 
 // Shared review flow (same dialog the 指揮中心 ApprovalInbox uses): full
 // payload preview + hard_gate confirm + honest outcome toast. Lazy so the
@@ -66,6 +52,8 @@ export default function WorkspaceToday({
   const dispQ = trpc.workspace.listDispositions.useQuery();
   // escalations (m3b) — unread all + recent read (dimmed, undoable)
   const escQ = trpc.commandCenter.escalationList.useQuery();
+  // pending reviews (批6 m5) — tour reviews awaiting moderation
+  const reviewsQ = trpc.reviews.adminList.useQuery({ status: "pending", limit: 50 });
   const utils = trpc.useUtils();
 
   type Task = NonNullable<typeof decideQ.data>[number];
@@ -102,6 +90,7 @@ export default function WorkspaceToday({
 
   const decide = decideQ.data ?? [];
   const escalations = escQ.data ?? [];
+  const pendingReviews = reviewsQ.data?.items ?? [];
   const inflight = inflightQ.data ?? [];
   const fyi = useMemo(
     () =>
@@ -114,11 +103,12 @@ export default function WorkspaceToday({
     [approvedQ.data, failedQ.data],
   );
 
-  // 需要你決定 = pending approval tasks + escalations, one timeline. Unhandled
-  // first, then newest first (read escalations sink like handled tasks do).
+  // 需要你決定 = pending approval tasks + escalations + pending reviews, one
+  // timeline. Unhandled first, then newest first.
   type DecideItem =
     | { kind: "task"; handled: boolean; at: number; task: Task }
-    | { kind: "esc"; handled: boolean; at: number; esc: EscalationShape };
+    | { kind: "esc"; handled: boolean; at: number; esc: EscalationShape }
+    | { kind: "review"; handled: boolean; at: number; review: ReviewShape };
   const decideItems = useMemo<DecideItem[]>(() => {
     const taskItems: DecideItem[] = decide.map((task) => ({
       kind: "task",
@@ -132,14 +122,20 @@ export default function WorkspaceToday({
       at: new Date(esc.createdAt).getTime(),
       esc,
     }));
-    return [...taskItems, ...escItems].sort(
+    const reviewItems: DecideItem[] = pendingReviews.map((r) => ({
+      kind: "review",
+      handled: handled.has(`review:${r.id}`),
+      at: new Date(r.createdAt).getTime(),
+      review: r as ReviewShape,
+    }));
+    return [...taskItems, ...escItems, ...reviewItems].sort(
       (a, b) => Number(a.handled) - Number(b.handled) || b.at - a.at,
     );
-  }, [decide, escalations, handled]);
+  }, [decide, escalations, pendingReviews, handled]);
 
   const unreadEsc = escalations.filter((e) => !e.read).length;
   const pendingCount =
-    (statsQ.data?.totalPending ?? decide.length) + unreadEsc;
+    (statsQ.data?.totalPending ?? decide.length) + unreadEsc + pendingReviews.length;
   const line = t("workspace.todayLine", {
     decide: pendingCount,
     inflight: inflight.length,
@@ -200,7 +196,7 @@ export default function WorkspaceToday({
       <div>
         <GroupHeader
           title={t("workspace.todayPending")}
-          count={decide.length + unreadEsc}
+          count={decide.length + unreadEsc + pendingReviews.length}
         />
         {decideItems.length === 0 ? (
           <div className="text-[12px] text-gray-400 py-2">
@@ -211,7 +207,7 @@ export default function WorkspaceToday({
             {decideItems.map((item) =>
               item.kind === "task" ? (
                 renderTask(item.task, "decide")
-              ) : (
+              ) : item.kind === "esc" ? (
                 <TodayEscalationCard
                   key={`esc:${item.esc.id}`}
                   esc={item.esc}
@@ -223,6 +219,23 @@ export default function WorkspaceToday({
                     escAck.variables?.messageId === item.esc.id
                   }
                   onJumpToCustomer={onJumpToCustomer}
+                />
+              ) : (
+                <TodayReviewCard
+                  key={`review:${item.review.id}`}
+                  review={item.review}
+                  handled={item.handled}
+                  onToggle={() => {
+                    const isH = handled.has(`review:${item.review.id}`);
+                    setDisposition.mutate({ kind: "review", id: item.review.id, handled: !isH });
+                  }}
+                  toggleBusy={
+                    setDisposition.isPending &&
+                    setDisposition.variables?.id === item.review.id
+                  }
+                  onDecided={() => {
+                    utils.reviews.adminList.invalidate();
+                  }}
                 />
               ),
             )}

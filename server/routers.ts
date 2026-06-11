@@ -69,6 +69,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { commandCenterRouter } from "./routers/commandCenter";
 import { flightOrdersRouter } from "./routers/flightOrders";
 import { workspaceRouter } from "./routers/workspace";
+import { preDepartureNotificationsRouter } from "./routers/preDepartureNotifications";
 import { router } from "./_core/trpc";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -100,6 +101,8 @@ export const appRouter = router({
   workspace: workspaceRouter,
   // 批2 m4 — 代客訂機票最小狀態機(備訂→待你刷卡→TICKETED;系統不碰付款).
   flightOrders: flightOrdersRouter,
+  // 批6 m3 — 行前通知(LLM 擬稿 + admin 逐封審核 + email 送出)
+  preDepartureNotifications: preDepartureNotificationsRouter,
 
   // Authentication router — Phase 4E extracted to ./routers/auth.ts
   auth: authRouter,
