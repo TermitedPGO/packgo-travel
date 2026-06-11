@@ -145,3 +145,6 @@ scripts/gmail-eval/data/
 # automatically after a successful deploy.
 .deploy-approve
 .gstack/
+
+# Redis dump
+dump.rdb
