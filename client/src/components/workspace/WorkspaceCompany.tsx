@@ -16,10 +16,18 @@ const FinanceReports = lazy(
 const MarketingHub = lazy(() => import("./MarketingHub"));
 const WorkspaceSuppliers = lazy(() => import("./WorkspaceSuppliers"));
 const DepartureList = lazy(() => import("./DepartureList"));
+const WorkspaceTours = lazy(() => import("./WorkspaceTours"));
 
-type CompanyTab = "ledger" | "reports" | "marketing" | "suppliers" | "departures";
+type CompanyTab =
+  | "ledger"
+  | "reports"
+  | "marketing"
+  | "suppliers"
+  | "departures"
+  | "tours";
 
 const TABS: { id: CompanyTab; label: string }[] = [
+  { id: "tours", label: "workspace.companyTours" },
   { id: "ledger", label: "workspace.companyLedger" },
   { id: "reports", label: "workspace.companyReports" },
   { id: "departures", label: "workspace.companyDepartures" },
@@ -68,6 +76,7 @@ export default function WorkspaceCompany({
         {tab === "marketing" && <MarketingHub />}
         {tab === "suppliers" && <WorkspaceSuppliers />}
         {tab === "departures" && <DepartureList />}
+        {tab === "tours" && <WorkspaceTours />}
       </Suspense>
     </div>
   );
