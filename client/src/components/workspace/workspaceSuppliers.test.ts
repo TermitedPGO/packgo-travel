@@ -12,6 +12,8 @@ import {
   buildListProductsInput,
   EMPTY_CATALOG_FILTERS,
   enrichmentPct,
+  groupRecentAlerts,
+  alertRuleClass,
 } from "./workspaceSuppliers.helpers";
 
 describe("runStateOf (m1)", () => {
@@ -178,4 +180,49 @@ describe("enrichmentPct (m3)", () => {
   it("total=0 → 0 (no NaN)", () => expect(enrichmentPct(0, 0)).toBe(0));
   it("clamps over-100 (stale counts)", () =>
     expect(enrichmentPct(210, 200)).toBe(100));
+});
+
+describe("groupRecentAlerts (m4)", () => {
+  const NOW = new Date("2026-06-11T12:00:00Z").getTime();
+  const d = (daysAgo: number) =>
+    new Date(NOW - daysAgo * 24 * 60 * 60 * 1000).toISOString();
+
+  it("counts per type within 7 days, drops older", () => {
+    const out = groupRecentAlerts(
+      [
+        { alertType: "price_drop", createdAt: d(1) },
+        { alertType: "price_drop", createdAt: d(3) },
+        { alertType: "sold_out", createdAt: d(6) },
+        { alertType: "price_drop", createdAt: d(10) }, // outside window
+      ],
+      7,
+      NOW,
+    );
+    expect(out.byType).toEqual({ price_drop: 2, sold_out: 1 });
+    expect(out.total).toBe(3);
+  });
+
+  it("future-dated rows still count (clock skew must not hide alerts)", () => {
+    const out = groupRecentAlerts(
+      [{ alertType: "guaranteed", createdAt: d(-1) }],
+      7,
+      NOW,
+    );
+    expect(out.total).toBe(1);
+  });
+
+  it("invalid dates dropped, empty list safe", () => {
+    expect(
+      groupRecentAlerts([{ alertType: "x", createdAt: "garbage" }], 7, NOW)
+        .total,
+    ).toBe(0);
+    expect(groupRecentAlerts([], 7, NOW).total).toBe(0);
+  });
+});
+
+describe("alertRuleClass (m4)", () => {
+  it("critical → 4px", () => expect(alertRuleClass("critical")).toBe("border-l-4"));
+  it("warning → 3px", () =>
+    expect(alertRuleClass("warning")).toBe("border-l-[3px]"));
+  it("info → 1px", () => expect(alertRuleClass("info")).toBe("border-l"));
 });

@@ -64,10 +64,10 @@ suppliersRouter 3 處已用:`tours.sourceUrl LIKE '%NormGroupID=' + externalProd
 - [x] i18n · tsc 0 · Vitest(filter 參數組裝)
 
 ### m4 — 競品每週摘要卡 
-- [ ] 摘要卡:unreadAlertCount + 近 7 天告警分組統計(price_drop/sold_out/new_departure…)
-- [ ] 告警列表:severity 視覺(critical=粗黑左條)+ markAlertRead / markAllAlertsRead
-- [ ] 最小管理:競品行程列表(list)+ 新增 dialog(create)+ triggerScrape + delete(confirm)
-- [ ] i18n · tsc 0 · Vitest(告警分組統計)
+- [x] 摘要卡:unreadAlertCount + 近 7 天告警分組統計(price_drop/sold_out/new_departure…)
+- [x] 告警列表:severity 視覺(critical=粗黑左條)+ markAlertRead / markAllAlertsRead
+- [x] 最小管理:競品行程列表(list)+ 新增 dialog(create)+ triggerScrape + delete(confirm)
+- [x] i18n · tsc 0 · Vitest(告警分組統計)
 
 ### m5 — 成本毛利卡(新唯讀查詢)
 - [ ] 新 procedure `suppliers.marginAudit`(唯讀):LIKE-join tours↔supplierProducts + min 未來 departure agentPrice → margin = (price−cost)/price,flag < 15%

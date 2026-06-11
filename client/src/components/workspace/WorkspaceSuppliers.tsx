@@ -12,6 +12,7 @@ import { RefreshCw, Activity, Library, Eye } from "lucide-react";
 const SupplierSync = lazy(() => import("./SupplierSync"));
 const SupplierMonitor = lazy(() => import("./SupplierMonitor"));
 const SupplierCatalog = lazy(() => import("./SupplierCatalog"));
+const SupplierCompetitor = lazy(() => import("./SupplierCompetitor"));
 
 type SupplierView = "sync" | "monitor" | "catalog" | "competitor";
 
@@ -54,11 +55,7 @@ export default function WorkspaceSuppliers() {
         {view === "sync" && <SupplierSync />}
         {view === "monitor" && <SupplierMonitor />}
         {view === "catalog" && <SupplierCatalog />}
-        {view === "competitor" && (
-          <div className="rounded-xl border border-gray-200 bg-white p-6 text-center text-xs text-gray-400">
-            {t("workspace.supComingSoon")}
-          </div>
-        )}
+        {view === "competitor" && <SupplierCompetitor />}
       </Suspense>
     </div>
   );

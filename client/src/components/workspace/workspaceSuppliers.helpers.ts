@@ -140,3 +140,38 @@ export function enrichmentPct(parsed: number, total: number): number {
   if (total <= 0) return 0;
   return Math.min(100, Math.round((parsed / total) * 100));
 }
+
+/* ───────────────────────── m4: 競品摘要 ───────────────────────── */
+
+export type AlertLike = {
+  alertType: string;
+  createdAt: Date | string;
+};
+
+/**
+ * Count alerts per type within the last N days — the 每週摘要卡 numbers.
+ * Unknown future-dated rows still count (clock skew shouldn't hide alerts).
+ */
+export function groupRecentAlerts(
+  alerts: AlertLike[],
+  days: number,
+  now: number = Date.now(),
+): { byType: Record<string, number>; total: number } {
+  const cutoff = now - days * 24 * 60 * 60 * 1000;
+  const byType: Record<string, number> = {};
+  let total = 0;
+  for (const a of alerts) {
+    const ts = new Date(a.createdAt).getTime();
+    if (!Number.isFinite(ts) || ts < cutoff) continue;
+    byType[a.alertType] = (byType[a.alertType] ?? 0) + 1;
+    total += 1;
+  }
+  return { byType, total };
+}
+
+/** severity → left-rule width class (mockup notif(): err=4px decide=3px fyi=1px). */
+export function alertRuleClass(severity: string): string {
+  if (severity === "critical") return "border-l-4";
+  if (severity === "warning") return "border-l-[3px]";
+  return "border-l";
+}
