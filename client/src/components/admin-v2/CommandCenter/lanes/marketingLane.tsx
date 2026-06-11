@@ -6,6 +6,7 @@ import { useLocale } from "@/contexts/LocaleContext";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { GenericPayloadPreview } from "./GenericPayloadPreview";
+import { MKT_PLATFORM_I18N, MKT_TYPE_I18N } from "./marketingLabels";
 
 /** Parsed shape the marketing producer writes (marketingProducer.ts). */
 export interface MarketingPayload {
@@ -36,24 +37,6 @@ export function parseMarketingPayload(payload: string): MarketingPayload | null 
   return null;
 }
 
-/** Content type to human-readable label. */
-const MKT_TYPE_LABELS: Record<string, string> = {
-  xhs_post: "小紅書貼文",
-  wechat_article: "公眾號文章",
-  edm: "EDM",
-  poster_copy: "海報文案",
-  social_post: "社群貼文",
-  other: "行銷內容",
-};
-
-const MKT_PLATFORM_LABELS: Record<string, string> = {
-  xiaohongshu: "小紅書",
-  wechat: "微信",
-  email: "Email",
-  instagram: "Instagram",
-  facebook: "Facebook",
-};
-
 /**
  * Marketing read-only preview — shown in the inbox list or when the full
  * editor is not needed. Displays platform badge + content type + title +
@@ -64,10 +47,17 @@ export function MarketingPayloadPreview({ payload }: { payload: string }) {
   const parsed = parseMarketingPayload(payload);
   if (!parsed) return <GenericPayloadPreview summary={null} payload={payload} />;
 
+  // i18n keys via marketingLabels.ts; unknown values fall back to the raw value.
+  const platformKey = parsed.platform
+    ? MKT_PLATFORM_I18N[parsed.platform]
+    : undefined;
   const platformLabel = parsed.platform
-    ? MKT_PLATFORM_LABELS[parsed.platform] || parsed.platform
+    ? platformKey
+      ? t(platformKey)
+      : parsed.platform
     : null;
-  const typeLabel = MKT_TYPE_LABELS[parsed.contentType] || parsed.contentType;
+  const typeKey = MKT_TYPE_I18N[parsed.contentType];
+  const typeLabel = typeKey ? t(typeKey) : parsed.contentType;
 
   return (
     <div className="space-y-3">
@@ -142,10 +132,17 @@ export function MarketingEditor({
     return <GenericPayloadPreview summary={null} payload={payload} />;
   }
 
+  // i18n keys via marketingLabels.ts; unknown values fall back to the raw value.
+  const platformKey = parsed.platform
+    ? MKT_PLATFORM_I18N[parsed.platform]
+    : undefined;
   const platformLabel = parsed.platform
-    ? MKT_PLATFORM_LABELS[parsed.platform] || parsed.platform
+    ? platformKey
+      ? t(platformKey)
+      : parsed.platform
     : null;
-  const typeLabel = MKT_TYPE_LABELS[parsed.contentType] || parsed.contentType;
+  const typeKey = MKT_TYPE_I18N[parsed.contentType];
+  const typeLabel = typeKey ? t(typeKey) : parsed.contentType;
 
   function handleTitleChange(nextTitle: string) {
     onChange(JSON.stringify({ ...parsed, title: nextTitle }));
