@@ -344,6 +344,8 @@ export const zhTW = {
     mktPsSt_distributed: '已分發',
     mktPsSt_archived: '已封存',
     mktPsSt_failed: '失敗',
+    mktPsSt_posted: '已發布',
+    mktPsSt_skipped: '已略過',
     mktGenTab: 'AI 生成',
     mktGenNewPoster: '生成新海報',
     mktGenStyle: '風格預設',

@@ -344,6 +344,8 @@ export const en = {
     mktPsSt_distributed: 'Distributed',
     mktPsSt_archived: 'Archived',
     mktPsSt_failed: 'Failed',
+    mktPsSt_posted: 'Posted',
+    mktPsSt_skipped: 'Skipped',
     mktGenTab: 'AI Generate',
     mktGenNewPoster: 'Generate New Poster',
     mktGenStyle: 'Style Preset',
