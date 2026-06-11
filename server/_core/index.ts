@@ -16,6 +16,7 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { bodyParserErrorHandler } from "./bodyParserErrors";
 import { prerenderMiddleware } from "./prerenderMiddleware";
 import { buildAllowedOrigins, isOriginAllowed } from "./corsOrigins";
 import { handleStripeWebhook } from "./stripeWebhook";
@@ -253,6 +254,9 @@ async function startServer() {
   // Previous 50 MB risked OOM on the 1 GB Fly.io VM under concurrent requests.
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ limit: "10mb", extended: true }));
+  // Malformed body (bad JSON / oversized) → JSON error, never the HTML
+  // default page (which carries a stack trace in development).
+  app.use(bodyParserErrorHandler);
   
   // Cookie parser - MUST be before routes that need to read cookies
   app.use(cookieParser());
