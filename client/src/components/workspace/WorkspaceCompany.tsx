@@ -13,9 +13,7 @@ const BankLedgerV2 = lazy(() => import("@/components/admin-v2/BankLedgerV2"));
 const FinanceReports = lazy(
   () => import("@/components/admin-v2/FinanceReports"),
 );
-const NewsletterTabV2 = lazy(
-  () => import("@/components/admin-v2/NewsletterTabV2"),
-);
+const MarketingHub = lazy(() => import("./MarketingHub"));
 const SupplierEnrichmentTabV2 = lazy(
   () => import("@/components/admin-v2/SupplierEnrichmentTabV2"),
 );
@@ -69,7 +67,7 @@ export default function WorkspaceCompany({
       <Suspense fallback={<LoadingPage text={t("workspace.loading")} />}>
         {tab === "ledger" && <BankLedgerV2 />}
         {tab === "reports" && <FinanceReports />}
-        {tab === "marketing" && <NewsletterTabV2 />}
+        {tab === "marketing" && <MarketingHub />}
         {tab === "suppliers" && <SupplierEnrichmentTabV2 />}
         {tab === "departures" && <DepartureList />}
       </Suspense>
