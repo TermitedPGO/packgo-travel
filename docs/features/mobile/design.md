@@ -1,5 +1,7 @@
 # Mobile-first Admin — Design
 
+> **SUPERSEDED (2026-06-10)** → `docs/features/admin-pwa/`。本檔留存不刪:SW cache 策略的設計理由(tRPC 為何不快取等)只記在這裡。
+
 **Status**: Draft, follows `proposal.md`
 
 ---

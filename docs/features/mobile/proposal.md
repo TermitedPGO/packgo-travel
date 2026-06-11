@@ -1,5 +1,7 @@
 # Mobile-first Admin — Proposal
 
+> **SUPERSEDED (2026-06-10)** → `docs/features/admin-pwa/`。本計畫 Phase 0/1/2/5/6 實際已建(SW / MobileShell / DailyCheckMobile / BankTriagePage / ReceiptCameraFAB),後續以 admin-pwa 為準。本檔留存不刪:設計理由仍有效。
+
 **Author**: Jeff + Claude
 **Date**: 2026-05-22
 **Status**: Draft, awaiting approval

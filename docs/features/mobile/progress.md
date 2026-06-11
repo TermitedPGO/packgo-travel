@@ -1,5 +1,7 @@
 # Mobile-first Admin — Progress Tracker
 
+> **SUPERSEDED (2026-06-10)** → `docs/features/admin-pwa/`。本表狀態已嚴重過時:Phase 0/1/2/5/6 實際已建但仍標 Pending(SW 已上線至 packgo-v2-2026-06-09)。後續進度看 admin-pwa/progress.md。
+
 > Read `proposal.md` first for context, `design.md` for architecture.
 
 Each phase is a separate PR. Ship in order — earlier phases unlock later.
