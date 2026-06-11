@@ -130,22 +130,25 @@ describe("createApprovalTask", () => {
   });
 });
 
+/** Update chain stub matching db.update().set().where() → mysql2 result tuple. */
+function updateChain(affectedRows: number) {
+  const whereMock = vi.fn().mockResolvedValue([{ affectedRows }]);
+  const setMock = vi.fn(() => ({ where: whereMock }));
+  return { update: vi.fn(() => ({ set: setMock })), setMock, whereMock };
+}
+
 describe("decideApprovalTask", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it("approve flips status to approved and audits approvalTask.approve", async () => {
-    const pending = { id: 1, status: "pending", taskType: "cs.reply_inquiry" };
-    const approved = { ...pending, status: "approved" };
+    const approved = { id: 1, status: "approved", taskType: "cs.reply_inquiry" };
 
-    const whereMock = vi.fn().mockResolvedValue(undefined);
-    const setMock = vi.fn(() => ({ where: whereMock }));
-    mockDb.update = vi.fn(() => ({ set: setMock }));
-    mockDb.select = vi
-      .fn()
-      .mockReturnValueOnce(byIdChain([pending])) // existing-status read
-      .mockReturnValueOnce(byIdChain([approved])); // post-update read
+    const { update, setMock } = updateChain(1);
+    mockDb.update = update;
+    // Atomic decide: no pre-check read — only the post-update read remains.
+    mockDb.select = vi.fn().mockReturnValueOnce(byIdChain([approved]));
 
     const result = await decideApprovalTask(
       { id: 1, decision: "approve", decidedBy: 42 },
@@ -158,16 +161,17 @@ describe("decideApprovalTask", () => {
     expect(updateArg.decidedBy).toBe(42);
     expect(auditMock).toHaveBeenCalledTimes(1);
     expect(auditMock.mock.calls[0][0].action).toBe("approvalTask.approve");
+    expect(auditMock.mock.calls[0][0].changes.from).toBe("pending");
   });
 
   it("persists editedPayload on approve", async () => {
-    const pending = { id: 2, status: "pending", taskType: "cs.reply_inquiry" };
-    const setMock = vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) }));
-    mockDb.update = vi.fn(() => ({ set: setMock }));
+    const { update, setMock } = updateChain(1);
+    mockDb.update = update;
     mockDb.select = vi
       .fn()
-      .mockReturnValueOnce(byIdChain([pending]))
-      .mockReturnValueOnce(byIdChain([{ ...pending, status: "approved" }]));
+      .mockReturnValueOnce(
+        byIdChain([{ id: 2, status: "approved", taskType: "cs.reply_inquiry" }]),
+      );
 
     await decideApprovalTask(
       { id: 2, decision: "approve", decidedBy: 42, editedPayload: '{"x":1}' },
@@ -178,13 +182,13 @@ describe("decideApprovalTask", () => {
   });
 
   it("reject flips status to rejected and audits approvalTask.reject", async () => {
-    const pending = { id: 3, status: "pending", taskType: "cs.reply_inquiry" };
-    const setMock = vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) }));
-    mockDb.update = vi.fn(() => ({ set: setMock }));
+    const { update } = updateChain(1);
+    mockDb.update = update;
     mockDb.select = vi
       .fn()
-      .mockReturnValueOnce(byIdChain([pending]))
-      .mockReturnValueOnce(byIdChain([{ ...pending, status: "rejected" }]));
+      .mockReturnValueOnce(
+        byIdChain([{ id: 3, status: "rejected", taskType: "cs.reply_inquiry" }]),
+      );
 
     const result = await decideApprovalTask(
       { id: 3, decision: "reject", decidedBy: 42, reason: "off-brand" },
@@ -197,6 +201,9 @@ describe("decideApprovalTask", () => {
   });
 
   it("throws when the task is not pending (double-decide guard)", async () => {
+    // Conditional UPDATE loses (affectedRows=0) → one read for the error message.
+    const { update } = updateChain(0);
+    mockDb.update = update;
     mockDb.select = vi
       .fn()
       .mockReturnValueOnce(byIdChain([{ id: 4, status: "approved", taskType: "x" }]));
@@ -204,13 +211,50 @@ describe("decideApprovalTask", () => {
     await expect(
       decideApprovalTask({ id: 4, decision: "approve", decidedBy: 42 }, adminCtx),
     ).rejects.toThrow(/already approved/);
+    expect(auditMock).not.toHaveBeenCalled();
   });
 
   it("throws when the task does not exist", async () => {
+    const { update } = updateChain(0);
+    mockDb.update = update;
     mockDb.select = vi.fn().mockReturnValueOnce(byIdChain([]));
 
     await expect(
       decideApprovalTask({ id: 999, decision: "approve", decidedBy: 42 }, adminCtx),
     ).rejects.toThrow(/not found/);
+  });
+
+  it("race: two concurrent approves → exactly one wins, one rejects, audit once", async () => {
+    const approved = { id: 5, status: "approved", taskType: "cs.reply_inquiry" };
+
+    // First UPDATE wins (affectedRows=1), second loses (affectedRows=0).
+    const whereMock = vi
+      .fn()
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([{ affectedRows: 0 }]);
+    mockDb.update = vi.fn(() => ({ set: vi.fn(() => ({ where: whereMock })) }));
+    // Winner's post-update read + loser's error-message read.
+    mockDb.select = vi
+      .fn()
+      .mockReturnValueOnce(byIdChain([approved]))
+      .mockReturnValueOnce(byIdChain([approved]));
+
+    const results = await Promise.allSettled([
+      decideApprovalTask({ id: 5, decision: "approve", decidedBy: 42 }, adminCtx),
+      decideApprovalTask({ id: 5, decision: "approve", decidedBy: 42 }, adminCtx),
+    ]);
+
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r) => r.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((fulfilled[0] as PromiseFulfilledResult<any>).value.status).toBe(
+      "approved",
+    );
+    expect(String((rejected[0] as PromiseRejectedResult).reason)).toMatch(
+      /already approved/,
+    );
+    // The loser never audits — exactly one decision row.
+    expect(auditMock).toHaveBeenCalledTimes(1);
   });
 });

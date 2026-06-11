@@ -286,8 +286,11 @@ export async function createApprovalTask(
  * edit on approve) and writes the decision metadata. Does NOT send/execute —
  * the router runs the lane executor after this resolves on approve.
  *
- * Guards: the task must exist and be "pending"; otherwise throws so the
- * router surfaces a clear error (double-approve / race).
+ * Concurrency: the status flip is a single conditional UPDATE
+ * (`WHERE id = ? AND status = 'pending'`). Two admins (or two tabs) racing the
+ * same task → exactly ONE wins the row; the loser sees affectedRows = 0 and
+ * gets the same "already <status>" error as a stale double-decide. This is the
+ * guard that keeps a lane executor from ever running twice for one task.
  *
  * Audits action "approvalTask.approve" or "approvalTask.reject".
  */
@@ -298,16 +301,6 @@ export async function decideApprovalTask(
   const db = await getDb();
   if (!db) {
     throw new Error("Database not available");
-  }
-
-  const existing = await getApprovalTaskById(input.id);
-  if (!existing) {
-    throw new Error(`Approval task ${input.id} not found`);
-  }
-  if (existing.status !== "pending") {
-    throw new Error(
-      `Approval task ${input.id} is already ${existing.status}, cannot ${input.decision}`,
-    );
   }
 
   const nextStatus: ApprovalStatus =
@@ -324,7 +317,24 @@ export async function decideApprovalTask(
     updates.payload = input.editedPayload;
   }
 
-  await db.update(approvalTasks).set(updates).where(eq(approvalTasks.id, input.id));
+  const result: any = await db
+    .update(approvalTasks)
+    .set(updates)
+    .where(and(eq(approvalTasks.id, input.id), eq(approvalTasks.status, "pending")));
+  const affected =
+    (result?.[0]?.affectedRows ?? result?.affectedRows ?? 0) | 0;
+
+  if (affected === 0) {
+    // Lost the conditional UPDATE — either the row is gone or someone else
+    // decided it first. Fetch once purely for an honest error message.
+    const existing = await getApprovalTaskById(input.id);
+    if (!existing) {
+      throw new Error(`Approval task ${input.id} not found`);
+    }
+    throw new Error(
+      `Approval task ${input.id} is already ${existing.status}, cannot ${input.decision}`,
+    );
+  }
 
   if (ctx?.user) {
     audit({
@@ -333,7 +343,8 @@ export async function decideApprovalTask(
       targetType: "approvalTask",
       targetId: input.id,
       changes: {
-        from: existing.status,
+        // Winning the conditional UPDATE proves the row was pending.
+        from: "pending",
         to: nextStatus,
         payloadEdited:
           input.decision === "approve" && input.editedPayload !== undefined,
