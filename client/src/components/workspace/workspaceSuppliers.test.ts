@@ -7,6 +7,8 @@ import {
   runStateOf,
   latestRunBySupplier,
   fmtDuration,
+  monitorCardKind,
+  priceDeltaPct,
 } from "./workspaceSuppliers.helpers";
 
 describe("runStateOf (m1)", () => {
@@ -47,4 +49,72 @@ describe("fmtDuration (m1)", () => {
   });
   it("negative → empty (bad data stays honest)", () =>
     expect(fmtDuration(-5)).toBe(""));
+});
+
+describe("monitorCardKind (m2)", () => {
+  const base = {
+    status: "success",
+    priceChanged: 0,
+    previousStatus: "open",
+    currentStatus: "open",
+    seatsChanged: 0,
+    hasChanges: 0,
+  };
+
+  it("failed check → error even with changes recorded", () => {
+    expect(
+      monitorCardKind({ ...base, status: "failed", priceChanged: 1 }),
+    ).toBe("error");
+  });
+
+  it("price change outranks generic change", () => {
+    expect(
+      monitorCardKind({ ...base, priceChanged: 1, hasChanges: 1 }),
+    ).toBe("price");
+  });
+
+  it("newly soldout → soldout", () => {
+    expect(
+      monitorCardKind({
+        ...base,
+        previousStatus: "open",
+        currentStatus: "soldout",
+      }),
+    ).toBe("soldout");
+  });
+
+  it("already-soldout stays generic (no repeat alarm)", () => {
+    expect(
+      monitorCardKind({
+        ...base,
+        previousStatus: "soldout",
+        currentStatus: "soldout",
+        hasChanges: 1,
+      }),
+    ).toBe("change");
+  });
+
+  it("seats change → change", () => {
+    expect(monitorCardKind({ ...base, seatsChanged: 1 })).toBe("change");
+  });
+
+  it("clean check → ok (filtered out of cards)", () => {
+    expect(monitorCardKind(base)).toBe("ok");
+  });
+});
+
+describe("priceDeltaPct (m2)", () => {
+  it("computes rounded percent", () => {
+    expect(priceDeltaPct(1315, 1420)).toBe(8);
+  });
+  it("negative delta", () => {
+    expect(priceDeltaPct(1000, 900)).toBe(-10);
+  });
+  it("null when prev missing or zero", () => {
+    expect(priceDeltaPct(null, 1420)).toBeNull();
+    expect(priceDeltaPct(0, 1420)).toBeNull();
+  });
+  it("null when curr missing", () => {
+    expect(priceDeltaPct(1315, null)).toBeNull();
+  });
 });

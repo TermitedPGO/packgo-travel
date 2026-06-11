@@ -43,3 +43,39 @@ export function fmtDuration(ms: number | null | undefined): string {
   const m = Math.floor(s / 60);
   return `${m}m${Math.round(s - m * 60)}s`;
 }
+
+/* ───────────────────────── m2: 行程監控卡 ───────────────────────── */
+
+export type MonitorLogLike = {
+  status: string;
+  priceChanged: number | null;
+  previousStatus: string | null;
+  currentStatus: string | null;
+  seatsChanged: number | null;
+  hasChanges: number | null;
+};
+
+export type MonitorCardKind = "error" | "price" | "soldout" | "change" | "ok";
+
+/**
+ * Classify a monitor log row into its card type. Priority order matters:
+ * a failed check is an error card even if it also recorded changes; a price
+ * change outranks a generic change; newly-soldout outranks seats noise.
+ */
+export function monitorCardKind(log: MonitorLogLike): MonitorCardKind {
+  if (log.status === "failed") return "error";
+  if (log.priceChanged === 1) return "price";
+  if (log.currentStatus === "soldout" && log.previousStatus !== "soldout")
+    return "soldout";
+  if (log.hasChanges === 1 || log.seatsChanged === 1) return "change";
+  return "ok";
+}
+
+/** Δ% between source prices, rounded; null when not computable. */
+export function priceDeltaPct(
+  prev: number | null | undefined,
+  curr: number | null | undefined,
+): number | null {
+  if (prev == null || curr == null || prev <= 0) return null;
+  return Math.round(((curr - prev) / prev) * 100);
+}

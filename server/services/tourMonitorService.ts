@@ -446,9 +446,19 @@ async function scrapeTourPage(url: string): Promise<ScrapedTourData> {
 export async function getRecentMonitorLogs(limit = 50) {
   const db = await getDb();
   if (!db) return [];
+  // 批5 m2: LEFT JOIN tours so workspace cards can show the tour title and
+  // Jeff's current selling price next to the source-price change. Additive —
+  // all original log columns are preserved flat (MonitorDashboardV2 unaffected).
+  const { getTableColumns } = await import('drizzle-orm');
   return db
-    .select()
+    .select({
+      ...getTableColumns(tourMonitorLogs),
+      tourTitle: tours.title,
+      tourPrice: tours.price,
+      tourPriceCurrency: tours.priceCurrency,
+    })
     .from(tourMonitorLogs)
+    .leftJoin(tours, eq(tourMonitorLogs.tourId, tours.id))
     .orderBy(desc(tourMonitorLogs.createdAt))
     .limit(limit);
 }

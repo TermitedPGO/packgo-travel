@@ -10,7 +10,14 @@ import { adminProcedure, router } from "../_core/trpc";
 import * as db from "../db";
 import { and, eq } from "drizzle-orm";
 
-export const WORKSPACE_ITEM_KINDS = ["booking", "inquiry", "task", "review"] as const;
+export const WORKSPACE_ITEM_KINDS = [
+  "booking",
+  "inquiry",
+  "task",
+  "review",
+  // 批5 m2:供應商監控 log「維持原價 / 已看過」標記
+  "monitor_log",
+] as const;
 export type WorkspaceItemKind = (typeof WORKSPACE_ITEM_KINDS)[number];
 
 export const workspaceRouter = router({

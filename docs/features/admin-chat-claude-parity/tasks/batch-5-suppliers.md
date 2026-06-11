@@ -49,12 +49,12 @@ suppliersRouter 3 處已用:`tours.sourceUrl LIKE '%NormGroupID=' + externalProd
 - [x] i18n(zh-TW + en)· tsc 0 · Vitest(runState 映射 + 排序)
 
 ### m2 — 行程監控卡(變動/缺貨/錯誤 + 碰錢價格卡)
-- [ ] 監控 KPI 行(getStats:total/ok/changed/error/unmonitored)+ triggerRun
-- [ ] 價格變動卡(mockup c):原價→新價黑框 + Δ% · 更新我的售價 = 🔒 黑鎖條 confirm → tours.update({id, price})· 維持原價 = setDisposition(monitor_log)淡化
-- [ ] 缺貨/狀態變動卡(mockup d):soldout 黑 badge + 變動摘要 + 去行程跳轉(開 /tour/:id)
-- [ ] 錯誤卡:errorMessage 誠實顯示
-- [ ] workspace.setDisposition itemKind 加 "monitor_log"(additive)
-- [ ] i18n · tsc 0 · Vitest(monitorCardKind 分類 + 已處理過濾)
+- [x] 監控 KPI 行(getStats:total/ok/changed/error/unmonitored)+ triggerRun
+- [x] 價格變動卡(mockup c):原價→新價黑框 + Δ% · 更新我的售價 = 🔒 黑鎖條 confirm → tours.update({id, price})· 維持原價 = setDisposition(monitor_log)淡化
+- [x] 缺貨/狀態變動卡(mockup d):soldout 黑 badge + 變動摘要 + 去行程跳轉(開 /tour/:id)
+- [x] 錯誤卡:errorMessage 誠實顯示
+- [x] workspace.setDisposition itemKind 加 "monitor_log"(additive)
+- [x] i18n · tsc 0 · Vitest(monitorCardKind 分類 + 已處理過濾)
 
 ### m3 — Enrichment 進度 + 商品庫 
 - [ ] Enrichment 卡(enrichmentOverview):per-supplier 行程解析進度條 + triggerFullBackfill(confirm)

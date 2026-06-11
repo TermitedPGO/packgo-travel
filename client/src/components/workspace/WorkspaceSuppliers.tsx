@@ -6,7 +6,7 @@
  * 4 sub-views: 同步 / 監控 / 商品庫 / 競品 — m1 builds 同步, the rest land
  * in m2-m4 (placeholders are labeled honestly until then).
  */
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
 import { trpc } from "@/lib/trpc";
 import { useLocale } from "@/contexts/LocaleContext";
 import { toast } from "sonner";
@@ -24,6 +24,8 @@ import {
   latestRunBySupplier,
   fmtDuration,
 } from "./workspaceSuppliers.helpers";
+
+const SupplierMonitor = lazy(() => import("./SupplierMonitor"));
 
 type SupplierView = "sync" | "monitor" | "catalog" | "competitor";
 
@@ -59,7 +61,17 @@ export default function WorkspaceSuppliers() {
       </div>
 
       {view === "sync" && <SyncView />}
-      {view === "monitor" && <ComingSoon t={t} />}
+      {view === "monitor" && (
+        <Suspense
+          fallback={
+            <p className="text-xs text-gray-400 py-4">
+              {t("workspace.loading")}
+            </p>
+          }
+        >
+          <SupplierMonitor />
+        </Suspense>
+      )}
       {view === "catalog" && <ComingSoon t={t} />}
       {view === "competitor" && <ComingSoon t={t} />}
     </div>
