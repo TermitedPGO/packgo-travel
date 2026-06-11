@@ -9,9 +9,15 @@
 | 0 | 文件（proposal/design/tasks/progress） | ✅ 完成（2026-06-07） |
 | 1 | Spec 條（純函式 + 展示元件 + 測試） | ✅ 完成（2026-06-07） |
 | 2 | 小精靈（受控元件 + payload 純函式 + 測試） | ✅ 完成（2026-06-07） |
-| 3 | CTA + Dialogs + 後端接線（migration 卡 gate） | ⬜ 未開始（等 Jeff 點頭） |
-| 4 | 整合 + 線上預訂降次要 | ⬜ 未開始 |
-| 5 | Vitest + tsc + 手機/桌機視覺驗收 | ⬜ 未開始 |
+| 3 | CTA + Dialogs + 後端接線（migration 0088） | ✅ 完成（commit 78d64fa，2026-06-08；Jeff 已放行 gate） |
+| 4 | 整合 + 線上預訂降次要 | ✅ 完成（commit 78d64fa，2026-06-08） |
+| 5 | Vitest + tsc + 手機/桌機視覺驗收 | 🟡 自動化部分完成（2026-06-11 獨立複核）；**視覺驗收留 Jeff** |
+
+### Stage 3+4 交付物（commit 78d64fa）+ Stage 5 自動化複核（2026-06-11，本文件當時未同步，現補）
+- 後端：migration `0088_inquiry_tour_context.sql`（idempotent guard + `.down.sql` + journal）；schema 加 `relatedTourId` + `wizardAnswers`（json `$type`）；`inquiries.create` zod 擴充（inquiryType/relatedTourId/wizardAnswers，name+email 必填與限速 5/10min 不動）；`db.createInquiry` 為整物件 insert，自動 forward。
+- 前端：`TourActionArea`（123 行）+ `TourInquiryDialog`（265 行）+ `WeChatDialog`（53 行）；index.tsx 單一 state 來源（wizard/inquiryOpen/inquiryMode/wechatOpen），TourActionArea 置 Hero 後；BottomCTA/PricingSection 要報價升主、線上預訂降次要（`/book/:id` 保留，金流零改動）；電話/微信用 `lib/brand.ts` CONTACT + 既有 QR。
+- 獨立複核結果（2026-06-11）：`tsc --noEmit` 0 error；全套 Vitest 1613 passed / 91 skipped，0 fail（`actionArea.helpers` 30/30、`inquiries` 9/9、i18n parity 2/2）；圓角/i18n 對稱/無破折號/檔案 ≤300 行/object-cover 圓角全過。先前觀察的 `bookings.test.ts` 1 紅已被後續 supplier-cost 收尾修復，現綠。
+- 註：`drizzle-kit generate` 與本 repo 手寫 migration 慣例不相容（meta snapshot 落後，會誤產整庫 CREATE TABLE），已確認 0088 手寫 migration + journal 為正確交付，未引入 drizzle-kit 產物。
 
 ### Stage 1+2 交付物（2026-06-07）
 - 新檔：`actionArea.helpers.ts`（5 純函式）、`actionArea.helpers.test.ts`、`TourSpecBar.tsx`、`TourFitWizard.tsx`。
@@ -43,4 +49,6 @@
 - migration → gate 卡住，Jeff 點頭才跑。
 
 ## Next action
-Stage 1 + 2 完成並驗證。Stage 3 含 **DB migration（gate 2）+ 後端 procedure 改動**，等 Jeff 另外點頭才動。前端 Dialog/CTA 可先寫接口、最後接真 mutation。
+Stage 3 + 4 + 5（自動化）完成並獨立複核。剩兩件事，都在 Jeff 手上：
+1. **視覺驗收**：手機 375 + 桌機 1440 過一遍 — 行動區（SpecBar/Wizard/CTA 階層）、詢問 Dialog（必填驗證 + 成功態）、微信 QR 彈窗、BottomCTA/PricingSection 的線上預訂降次要、en 切換無中文殘留。
+2. **部署**：`pnpm ship`（migration 0088 尚未在 prod 跑，會隨部署上；idempotent 可重跑，附 `.down.sql`）。
