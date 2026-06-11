@@ -9,6 +9,9 @@ import {
   fmtDuration,
   monitorCardKind,
   priceDeltaPct,
+  buildListProductsInput,
+  EMPTY_CATALOG_FILTERS,
+  enrichmentPct,
 } from "./workspaceSuppliers.helpers";
 
 describe("runStateOf (m1)", () => {
@@ -117,4 +120,62 @@ describe("priceDeltaPct (m2)", () => {
   it("null when curr missing", () => {
     expect(priceDeltaPct(1315, null)).toBeNull();
   });
+});
+
+describe("buildListProductsInput (m3)", () => {
+  it("empty filters → only paging + notYetImported", () => {
+    const out = buildListProductsInput(EMPTY_CATALOG_FILTERS, 1);
+    expect(out).toEqual({
+      supplierCode: undefined,
+      keyword: undefined,
+      destinationCountry: undefined,
+      daysMin: undefined,
+      daysMax: undefined,
+      notYetImported: false,
+      page: 1,
+      pageSize: 25,
+    });
+  });
+
+  it("trims keyword and drops whitespace-only strings", () => {
+    const out = buildListProductsInput(
+      { ...EMPTY_CATALOG_FILTERS, keyword: "  京阪神 ", destinationCountry: "   " },
+      2,
+    );
+    expect(out.keyword).toBe("京阪神");
+    expect(out.destinationCountry).toBeUndefined();
+    expect(out.page).toBe(2);
+  });
+
+  it("parses valid day bounds, drops junk and out-of-range", () => {
+    const ok = buildListProductsInput(
+      { ...EMPTY_CATALOG_FILTERS, daysMin: "3", daysMax: "10" },
+      1,
+    );
+    expect(ok.daysMin).toBe(3);
+    expect(ok.daysMax).toBe(10);
+
+    const junk = buildListProductsInput(
+      { ...EMPTY_CATALOG_FILTERS, daysMin: "abc", daysMax: "99" },
+      1,
+    );
+    expect(junk.daysMin).toBeUndefined();
+    expect(junk.daysMax).toBeUndefined(); // 99 > 60 cap
+  });
+
+  it("passes supplierCode through when set", () => {
+    const out = buildListProductsInput(
+      { ...EMPTY_CATALOG_FILTERS, supplierCode: "lion", notYetImported: true },
+      1,
+    );
+    expect(out.supplierCode).toBe("lion");
+    expect(out.notYetImported).toBe(true);
+  });
+});
+
+describe("enrichmentPct (m3)", () => {
+  it("normal ratio", () => expect(enrichmentPct(50, 200)).toBe(25));
+  it("total=0 → 0 (no NaN)", () => expect(enrichmentPct(0, 0)).toBe(0));
+  it("clamps over-100 (stale counts)", () =>
+    expect(enrichmentPct(210, 200)).toBe(100));
 });

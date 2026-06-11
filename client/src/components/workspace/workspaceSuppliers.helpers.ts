@@ -79,3 +79,64 @@ export function priceDeltaPct(
   if (prev == null || curr == null || prev <= 0) return null;
   return Math.round(((curr - prev) / prev) * 100);
 }
+
+/* ───────────────────────── m3: 商品庫 filters ───────────────────────── */
+
+export type CatalogFilterState = {
+  supplierCode: "" | "lion" | "uv";
+  keyword: string;
+  destinationCountry: string;
+  daysMin: string;
+  daysMax: string;
+  notYetImported: boolean;
+};
+
+export const EMPTY_CATALOG_FILTERS: CatalogFilterState = {
+  supplierCode: "",
+  keyword: "",
+  destinationCountry: "",
+  daysMin: "",
+  daysMax: "",
+  notYetImported: false,
+};
+
+/**
+ * Assemble the listProducts input from raw UI state: trim strings, drop
+ * empties (undefined, not ""), parse day bounds and silently drop
+ * non-numeric / out-of-range junk instead of sending it to zod.
+ */
+export function buildListProductsInput(
+  f: CatalogFilterState,
+  page: number,
+  pageSize = 25,
+): {
+  supplierCode?: "lion" | "uv";
+  keyword?: string;
+  destinationCountry?: string;
+  daysMin?: number;
+  daysMax?: number;
+  notYetImported: boolean;
+  page: number;
+  pageSize: number;
+} {
+  const day = (s: string): number | undefined => {
+    const n = Number(s.trim());
+    return Number.isInteger(n) && n >= 1 && n <= 60 ? n : undefined;
+  };
+  return {
+    supplierCode: f.supplierCode || undefined,
+    keyword: f.keyword.trim() || undefined,
+    destinationCountry: f.destinationCountry.trim() || undefined,
+    daysMin: day(f.daysMin),
+    daysMax: day(f.daysMax),
+    notYetImported: f.notYetImported,
+    page,
+    pageSize,
+  };
+}
+
+/** Enrichment progress percentage (0-100, clamped, safe on total=0). */
+export function enrichmentPct(parsed: number, total: number): number {
+  if (total <= 0) return 0;
+  return Math.min(100, Math.round((parsed / total) * 100));
+}

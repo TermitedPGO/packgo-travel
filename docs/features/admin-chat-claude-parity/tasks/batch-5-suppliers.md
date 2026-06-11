@@ -57,11 +57,11 @@ suppliersRouter 3 處已用:`tours.sourceUrl LIKE '%NormGroupID=' + externalProd
 - [x] i18n · tsc 0 · Vitest(monitorCardKind 分類 + 已處理過濾)
 
 ### m3 — Enrichment 進度 + 商品庫 
-- [ ] Enrichment 卡(enrichmentOverview):per-supplier 行程解析進度條 + triggerFullBackfill(confirm)
-- [ ] 商品庫:listProducts 篩選(供應商/國家/關鍵字/天數/未匯入)+ 分頁列表
-- [ ] 單品匯入(importProduct + queueRewrite)+ 隱藏/顯示(setHidden)
-- [ ] 批量匯入 dialog(bulkImport:上限 + queueRewrite)→ 結果 toast(requested/imported/failed)
-- [ ] i18n · tsc 0 · Vitest(filter 參數組裝)
+- [x] Enrichment 卡(enrichmentOverview):per-supplier 行程解析進度條 + triggerFullBackfill(confirm)
+- [x] 商品庫:listProducts 篩選(供應商/國家/關鍵字/天數/未匯入)+ 分頁列表
+- [x] 單品匯入(importProduct + queueRewrite)+ 隱藏/顯示(setHidden)
+- [x] 批量匯入 dialog(bulkImport:上限 + queueRewrite)→ 結果 toast(requested/imported/failed)
+- [x] i18n · tsc 0 · Vitest(filter 參數組裝)
 
 ### m4 — 競品每週摘要卡 
 - [ ] 摘要卡:unreadAlertCount + 近 7 天告警分組統計(price_drop/sold_out/new_departure…)
