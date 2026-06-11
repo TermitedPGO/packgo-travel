@@ -158,7 +158,20 @@ export default function BookTour() {
       default: return 'zh-TW';
     }
   };
-  
+
+  // Phase 0.2 (booking-hardening): passport / DOB / nationality are required
+  // for every traveler — the supplier order cannot be placed without them and
+  // the server now rejects incomplete manifests. Checked when leaving step 3
+  // AND again at submit (the user can navigate back and clear a field).
+  const travelerDetailsComplete = participants.every(
+    (p) =>
+      p.firstName?.trim() &&
+      p.lastName?.trim() &&
+      p.dateOfBirth &&
+      p.passportNumber?.trim() &&
+      p.nationality?.trim()
+  );
+
   // Handle booking submission
   const handleSubmit = async () => {
     if (!user) {
@@ -190,7 +203,16 @@ export default function BookTour() {
       toast.error(t('bookTour.fillAllTravelers'));
       return;
     }
-    
+
+    // Phase 0.2: hard-require passport / DOB / nationality before creating the
+    // booking — otherwise saveParticipants would be rejected server-side AFTER
+    // the booking exists and the traveler data would be lost again.
+    if (!travelerDetailsComplete) {
+      toast.error(t('bookTour.travelerFieldsRequired'));
+      setCurrentStep("details");
+      return;
+    }
+
     // GA4: begin_checkout event
     if (tour) {
       trackBeginCheckout({
@@ -245,10 +267,15 @@ export default function BookTour() {
               firstName: p.firstName,
               lastName: p.lastName,
               gender: p.gender || undefined,
-              dateOfBirth: p.dateOfBirth || undefined,
-              passportNumber: p.passportNumber || undefined,
+              // Phase 0.2: required by the server now — validated above.
+              dateOfBirth: p.dateOfBirth,
+              passportNumber: p.passportNumber,
+              nationality: p.nationality,
               passportExpiry: p.passportExpiry || undefined,
-              nationality: p.nationality || undefined,
+              // Phase 0.2: these were collected in step 3 but never sent —
+              // ops needs them for meal orders / accessibility arrangements.
+              dietaryRequirements: p.dietaryRequirements || undefined,
+              specialNeeds: p.specialNeeds || undefined,
             })),
           });
         } catch (saveErr) {
@@ -256,6 +283,9 @@ export default function BookTour() {
             `[BookTour] saveParticipants failed for booking ${booking.id} (booking still created):`,
             saveErr,
           );
+          // Phase 0.2: tell the customer instead of failing silently — the
+          // booking exists, but ops must collect traveler details manually.
+          toast.error(t('bookTour.participantsSaveFailed'));
         }
       }
 
@@ -771,7 +801,7 @@ export default function BookTour() {
                           </Select>
                         </div>
                         <div>
-                          <Label>{t('bookTour.dateOfBirth')}</Label>
+                          <Label>{t('bookTour.dateOfBirth')} *</Label>
                           <Input
                             type="date"
                             value={participant.dateOfBirth}
@@ -784,7 +814,7 @@ export default function BookTour() {
                           />
                         </div>
                         <div>
-                          <Label>{t('bookTour.passportNumber')}</Label>
+                          <Label>{t('bookTour.passportNumber')} *</Label>
                           <Input
                             value={participant.passportNumber}
                             onChange={(e) => {
@@ -809,7 +839,7 @@ export default function BookTour() {
                           />
                         </div>
                         <div>
-                          <Label>{t('bookTour.nationality')}</Label>
+                          <Label>{t('bookTour.nationality')} *</Label>
                           <Input
                             value={participant.nationality}
                             onChange={(e) => {
@@ -856,7 +886,21 @@ export default function BookTour() {
                 <Button variant="outline" onClick={() => setCurrentStep("travelers")}>
                   {t('bookTour.previousStep')}
                 </Button>
-                <Button onClick={() => setCurrentStep("confirm")}>
+                <Button
+                  onClick={() => {
+                    // Phase 0.2: block the step transition until contact info +
+                    // every traveler's passport / DOB / nationality are filled.
+                    if (!customerName || !customerEmail || !customerPhone) {
+                      toast.error(t('bookTour.fillAllInfo'));
+                      return;
+                    }
+                    if (!travelerDetailsComplete) {
+                      toast.error(t('bookTour.travelerFieldsRequired'));
+                      return;
+                    }
+                    setCurrentStep("confirm");
+                  }}
+                >
                   {t('bookTour.nextStep')}
                 </Button>
               </div>

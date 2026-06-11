@@ -198,6 +198,18 @@ export const bookingsRouter = router({
         // the discounted amount. Round 80.22 Phase D: TWD bookings now
         // supported via FX conversion at the moment of booking.
         const departureCurrency = ((departure as any).currency || "TWD").toUpperCase();
+        // Phase 0.1 (booking-hardening): the booking row's currency, persisted at
+        // create. Every downstream money surface drives off booking.currency —
+        // the Stripe checkout charge (bookingsPayment.ts), the payment-success
+        // email, BookingDetail / PaymentSuccess pages. Before this, the column
+        // silently kept its schema default ("TWD") so USD (UV) bookings displayed
+        // NT$ AND charged in TWD. USD detection mirrors what the confirmation
+        // email has always used: trust an explicit USD on the departure row, else
+        // the tour headline (UV imports predating departures.currency).
+        const bookingCurrency =
+          departureCurrency === "USD" || tour.priceCurrency === "USD"
+            ? "USD"
+            : departureCurrency;
         let pointsRedeemed = 0;
         let totalPrice = grossTotalPrice;
         if (input.pointsToRedeem && input.pointsToRedeem > 0) {
@@ -278,6 +290,7 @@ export const bookingsRouter = router({
             totalPrice,
             depositAmount: Math.floor(totalPrice * 0.2),
             remainingAmount: totalPrice - Math.floor(totalPrice * 0.2),
+            currency: bookingCurrency,
             message: input.specialRequests,
             bookingStatus: "pending",
             // v78y: stick the customer's language to the booking row so all
@@ -345,7 +358,9 @@ export const bookingsRouter = router({
         // restarts, retries twice with exponential backoff on failure,
         // and notifyOwner alerts Jeff on terminal failure (worker is
         // wired in commit 35897de pattern).
-        const isUsd = (departure as any).currency === "USD" || tour.priceCurrency === "USD";
+        // Phase 0.1: single source of truth — same flag that decided the email
+        // currency now also drives the persisted booking.currency above.
+        const isUsd = bookingCurrency === "USD";
         try {
           const { bookingFollowupQueue } = await import("../queue");
           await bookingFollowupQueue.add(
@@ -458,10 +473,16 @@ export const bookingsRouter = router({
               firstName: shortStr.min(1),
               lastName: shortStr.min(1),
               gender: z.enum(["male", "female", "other"]).optional(),
-              dateOfBirth: z.string().date().optional(),       // YYYY-MM-DD
-              passportNumber: shortStr.optional(),
+              // Phase 0.2 (booking-hardening): passport / DOB / nationality are
+              // REQUIRED for every traveler. The supplier order (UV / Lion
+              // manifest) cannot be placed without them; when these were
+              // optional the wizard silently shipped empty fields and ops had
+              // to chase customers by email. BookTour gates the step-3 → 4
+              // transition on the same rule; this is the server backstop.
+              dateOfBirth: z.string().date(),                  // YYYY-MM-DD
+              passportNumber: shortStr.min(1, "護照號碼必填 / Passport number is required"),
               passportExpiry: z.string().date().optional(),    // YYYY-MM-DD
-              nationality: shortStr.optional(),
+              nationality: shortStr.min(1, "國籍必填 / Nationality is required"),
               dietaryRequirements: mediumStr.optional(),
               specialNeeds: mediumStr.optional(),
             })

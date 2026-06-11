@@ -39,6 +39,7 @@ vi.mock("../_core/redact", () => ({
 
 import * as emailModule from "./index";
 import { sendBookingConfirmationEmail } from "./templates/bookingConfirmation";
+import { sendPaymentSuccessEmail } from "./templates/paymentSuccess";
 
 describe("server/email — public surface", () => {
   it("re-exports every template sender the monolith used to expose", () => {
@@ -130,5 +131,61 @@ describe("bookingConfirmation template", () => {
     expect(mailArgs.subject.startsWith("Booking received")).toBe(true);
     expect(mailArgs.html).toContain("Booking received!");
     expect(mailArgs.html).toContain("1 adult");
+  });
+});
+
+// Phase 0.1 (booking-hardening): the payment-success email must show the
+// currency the customer was ACTUALLY charged in. UV tours charge USD — a
+// customer who paid $1,800 must never read "NT$ 1,800".
+describe("paymentSuccess template — currency", () => {
+  beforeEach(() => {
+    sendMailMock.mockClear();
+    notifyOwnerMock.mockClear();
+  });
+
+  const base = {
+    customerName: "Alice",
+    customerEmail: "alice@example.com",
+    bookingId: 555,
+    tourTitle: "Alaska Cruise 8-day",
+    paymentAmount: 1800,
+    paymentType: "deposit" as const,
+    language: "en" as const,
+  };
+
+  it("renders $ for USD payments (never NT$)", async () => {
+    await sendPaymentSuccessEmail({ ...base, currency: "USD" });
+
+    expect(sendMailMock).toHaveBeenCalledTimes(1);
+    const mailArgs = sendMailMock.mock.calls[0][0] as { html: string; text: string };
+    expect(mailArgs.html).toContain("$ 1,800");
+    expect(mailArgs.html).not.toContain("NT$");
+    expect(mailArgs.text).toContain("$ 1,800");
+    expect(mailArgs.text).not.toContain("NT$");
+  });
+
+  it("defaults to NT$ when currency is omitted (legacy TWD bookings)", async () => {
+    await sendPaymentSuccessEmail({ ...base });
+
+    const mailArgs = sendMailMock.mock.calls[0][0] as { html: string; text: string };
+    expect(mailArgs.html).toContain("NT$ 1,800");
+    expect(mailArgs.text).toContain("NT$ 1,800");
+  });
+
+  it("falls back to the ISO code prefix for other currencies", async () => {
+    await sendPaymentSuccessEmail({ ...base, currency: "EUR" });
+
+    const mailArgs = sendMailMock.mock.calls[0][0] as { html: string };
+    expect(mailArgs.html).toContain("EUR 1,800");
+    expect(mailArgs.html).not.toContain("NT$");
+  });
+
+  it("owner notification shows the charged currency too", async () => {
+    await sendPaymentSuccessEmail({ ...base, currency: "USD", language: "zh-TW" });
+
+    expect(notifyOwnerMock).toHaveBeenCalledTimes(1);
+    const ownerArgs = notifyOwnerMock.mock.calls[0][0] as { content: string };
+    expect(ownerArgs.content).toContain("$ 1,800");
+    expect(ownerArgs.content).not.toContain("NT$");
   });
 });

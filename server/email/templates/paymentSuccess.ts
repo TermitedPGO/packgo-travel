@@ -16,8 +16,21 @@ import type { PaymentSuccessEmailData } from "./types";
 /**
  * Send payment success email to customer
  */
+/**
+ * Phase 0.1 (booking-hardening): currency symbol derived from the booking's
+ * currency — same rule as bookingConfirmation.ts. Never hardcode NT$: a USD
+ * customer who paid $1,800 seeing "NT$ 1,800" looks fraudulent and invites
+ * chargebacks.
+ */
+function currencySym(currency?: string): string {
+  if (currency === "USD") return "$";
+  if (currency === "TWD" || !currency) return "NT$";
+  return currency;
+}
+
 export async function sendPaymentSuccessEmail(data: PaymentSuccessEmailData) {
   const isEN = data.language === 'en';
+  const sym = currencySym(data.currency);
   const paymentTypeText = isEN
     ? ({ deposit: 'Deposit', balance: 'Balance', full: 'Full payment' }[data.paymentType])
     : ({ deposit: '訂金', balance: '尾款', full: '全額' }[data.paymentType]);
@@ -33,7 +46,7 @@ export async function sendPaymentSuccessEmail(data: PaymentSuccessEmailData) {
 
 付款資訊：
 - 付款類型：${ isEN ? ({ deposit: '訂金', balance: '尾款', full: '全額' }[data.paymentType]) : paymentTypeText }
-- 付款金額：NT$ ${data.paymentAmount.toLocaleString()}
+- 付款金額：${sym} ${data.paymentAmount.toLocaleString()}
 
 感謝您的付款，我們將盡快為您安排行程。
   `.trim();
@@ -48,7 +61,7 @@ Order #: ${data.bookingId}
 Tour: ${data.tourTitle}
 
 Payment type: ${paymentTypeText}
-Amount: NT$ ${data.paymentAmount.toLocaleString()}
+Amount: ${sym} ${data.paymentAmount.toLocaleString()}
 
 Thank you. Our team will continue arranging your trip and will email the final itinerary once supplier confirms.`
     : ownerEmailContent;
@@ -85,6 +98,7 @@ Thank you. Our team will continue arranging your trip and will email the final i
  */
 function generatePaymentSuccessHTML(data: PaymentSuccessEmailData, paymentTypeText: string): string {
   const isEN = data.language === 'en';
+  const sym = currencySym(data.currency);
   const c = isEN ? {
     title: 'Payment confirmed',
     heading: 'Payment confirmed!',
@@ -121,7 +135,7 @@ function generatePaymentSuccessHTML(data: PaymentSuccessEmailData, paymentTypeTe
       { label: c.labelOrder, value: '#' + data.bookingId },
       { label: c.labelTour, value: data.tourTitle },
       { label: c.labelType, value: paymentTypeText },
-      { label: c.labelAmount, value: 'NT$ ' + data.paymentAmount.toLocaleString() },
+      { label: c.labelAmount, value: sym + ' ' + data.paymentAmount.toLocaleString() },
     ])}
     <p style="font-family:Arial,sans-serif;font-size:14px;color:#444;line-height:1.7;margin:0 0 8px 0;">${c.thanksLine}</p>
     <p style="font-family:Arial,sans-serif;font-size:14px;color:#444;margin:0;">${c.contactLine}</p>

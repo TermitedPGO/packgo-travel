@@ -5358,6 +5358,8 @@ export const zhTW = {
     selectTravelerFirst: '請至少選擇一位旅客',
     fillAllInfo: '請填寫完整的聯絡資訊',
     fillAllTravelers: '請填寫所有旅客資訊',
+    travelerFieldsRequired: '請完整填寫每位旅客的姓名、出生日期、護照號碼與國籍',
+    participantsSaveFailed: '旅客資料儲存失敗（訂單已成立），我們的專員將與您聯繫補齊資料',
     bookingSuccess: '預訂成功！',
     bookingSuccessDesc: '您的預訂編號是 #{id}，正在前往付款頁面...',
     bookingFailed: '預訂失敗',

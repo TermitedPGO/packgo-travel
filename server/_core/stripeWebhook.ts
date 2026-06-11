@@ -385,6 +385,10 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
         tourTitle: tour.title,
         paymentAmount: amount,
         paymentType: paymentType || "full",
+        // Phase 0.1 (booking-hardening): show the currency Stripe actually
+        // charged (session.currency), falling back to the booking row. Never
+        // let the template default to NT$ for a USD (UV) payment.
+        currency: (session.currency || (booking as any).currency || "TWD").toUpperCase(),
         // v78y: respect the customer's chosen language stored at booking time
         language: ((booking as any).customerLanguage as 'zh-TW' | 'en' | undefined) || undefined,
       });

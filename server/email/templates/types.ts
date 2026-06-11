@@ -38,6 +38,9 @@ export interface PaymentSuccessEmailData {
   tourTitle: string;
   paymentAmount: number;
   paymentType: "deposit" | "balance" | "full";
+  /** Phase 0.1 (booking-hardening): ISO currency the customer was actually
+   *  charged in (USD for UV tours, TWD for Lion). Defaults to TWD. */
+  currency?: string;
   /** v78y: customer language preference; defaults to zh-TW */
   language?: "zh-TW" | "en";
 }

@@ -5406,6 +5406,8 @@ export const en = {
     selectTravelerFirst: 'Please select at least one traveler',
     fillAllInfo: 'Please fill in complete contact information',
     fillAllTravelers: 'Please fill in all traveler information',
+    travelerFieldsRequired: "Please complete each traveler's name, date of birth, passport number and nationality",
+    participantsSaveFailed: 'Traveler details could not be saved (your booking was created) — our team will contact you to complete them',
     bookingSuccess: 'Booking Successful!',
     bookingSuccessDesc: 'Your booking number is #{id}, redirecting to payment...',
     bookingFailed: 'Booking Failed',
