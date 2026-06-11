@@ -61,27 +61,29 @@
 - [x] 路線地圖卡:staticMapUrl 縮圖 + N 景點已定位 + fallbackMode Warn(geocode 有 24h in-process cache,與公開頁同款成本)
 - [x] i18n · tsc 0 · Vitest(parseItinerary/parseCost/upcomingDepartures 共 6 組)
 
-### m3 — 動作列 + 毛利接線
-- [ ] marginAudit 加選用 tourId 過濾(additive,批5 新 procedure 自己的)→ 價格卡 cost/毛利行 + <15% 警示
-- [ ] 編輯:重用 TourEditDialog(getById 餵 tourData,tours.update 存)
-- [ ] 上下架:上架 🔒 gated confirm(客人可見)、下架輕 confirm → toggleStatus;featured toggle
-- [ ] 預覽客人頁(window.open /tour/:id)+ 重新整理供應商班次(backfillLionDepartures,Lion 來源才顯示)
-- [ ] i18n · tsc 0 · Vitest
+### m3 — 動作列 + 毛利接線 ✅
+- [x] marginAudit 加選用 tourId 過濾(additive;single-tour 模式跳過 active-only gate,草稿也能看毛利)→ 價格卡 cost/毛利行 + <15% 警示 + 幣別 mismatch 照實
+- [x] 編輯:重用 admin TourEditDialog(getById 餵 tourData,tours.update 存)
+- [x] 上下架:上架 🔒 黑鎖條 checkbox confirm、下架 inline confirm → toggleStatus(後端嚴格 active↔inactive);featured toggle;draft/soldout 顯示誠實 hint 不放死按鈕
+- [x] 預覽客人頁(window.open /tour/:id)
+- [x] **改判**:重新整理供應商班次不做 — backfillLionDepartures 是全域 mutation(掃全部 Lion 行程),無 per-tour 資料線,放進單行程頁會誤導;記 gap
+- [x] i18n · tsc 0(TourDetailActions.tsx 190 行)
 
-### m4 — calibration 內嵌(吸收 calibration-review)
-- [ ] detail 品質卡展開:getCalibrationResult 5 分項(內容忠實/翻譯/圖片/完整/行銷)+ issues 列表
-- [ ] pending_review 行程:detail 顯示 approve 🔒 / reject 動作(既有 approveTour/rejectTour)
-- [ ] 行程庫「待審核」filter pill 帶數字
-- [ ] i18n · tsc 0 · Vitest
+### m4 — calibration 內嵌(吸收 calibration-review)✅
+- [x] 品質卡展開:getCalibrationResult 5 分項 + issues 列表(壞 JSON 安全降級);未展開不打 query
+- [x] pending_review:品質卡黑框 + approve 🔒 checkbox confirm(客人立刻可見)/ reject inline confirm — 既有 approveTour/rejectTour
+- [x] 行程庫「待審核」filter pill 帶數字(m1 已含)
+- [x] i18n · tsc 0(TourCalibrationCard.tsx 210 行)
 
 ## DoD Checklist
-- [ ] tsc 0 · 全套 Vitest 綠(2049+ 基線)· i18n parity
-- [ ] 上架動作 🔒 gated;全部走既有 mutation
-- [ ] 300 行紅線;手機規則內建
+- [x] tsc 0 · 全套 Vitest 綠(2126 passed,基線 2049 → +77)· i18n parity 7223 keys
+- [x] 上架/審核通過 🔒 gated;全部走既有 mutation(update/toggleStatus/toggleFeatured/approveTour/rejectTour)
+- [x] 300 行紅線(7 檔全 ≤300);手機規則內建(min-w-0/truncate/44px/text-base/lg:grid-cols-3)
 - [ ] Jeff visual approval(prod)
 
 ## 記錄的 gaps(不虛構,後續批/feature 接)
 - 帶去報價 / 做文案 跨頁 context 帶入(無資料線)
+- per-tour 重新整理供應商班次(backfillLionDepartures 是全域掃描,非 per-tour)
 - per-image AI 補圖/重生(走編輯 dialog Photos tab 代替)
 - per-tour AI composer(批2 模式是 per-customer)
 - 路線實際路徑需 GCP Directions API(landmark-ref m4,等 Jeff)

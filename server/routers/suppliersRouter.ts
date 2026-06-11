@@ -414,6 +414,8 @@ export const suppliersRouter = router({
         limit: z.number().int().min(1).max(100).default(20),
         /** flag rows whose margin is below this (default 15% 安全線). */
         threshold: z.number().min(0).max(1).default(0.15),
+        /** 批7 m3: single-tour mode for the 行程全貌 price card. */
+        tourId: z.number().int().positive().optional(),
       })
     )
     .query(async ({ input }) => {
@@ -458,7 +460,11 @@ export const suppliersRouter = router({
         )
         .where(
           and(
-            eq(toursTable.status, "active"),
+            // single-tour mode skips the active-only gate: Jeff inspects
+            // drafts/pending tours in the 行程全貌 too.
+            input.tourId
+              ? eq(toursTable.id, input.tourId)
+              : eq(toursTable.status, "active"),
             sql`${toursTable.sourceUrl} IS NOT NULL`
           )
         )

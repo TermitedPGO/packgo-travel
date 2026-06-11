@@ -1,19 +1,20 @@
 /**
- * TourDetailPanels — 批7 m2 右欄卡片(價格 / 出發日庫存 / 內含不含 / 品質).
- *
- * Read-only. 成本/毛利行 + 動作列 land in m3; calibration 5 分項 in m4.
+ * TourDetailPanels — 批7 右欄卡片(價格+毛利 / 出發日庫存 / 內含不含 /
+ * 品質 calibration).
  */
 import { trpc } from "@/lib/trpc";
 import { useLocale } from "@/contexts/LocaleContext";
-import { Check } from "lucide-react";
-import { Kv, Pill, Src } from "./ws-ui";
+import { Check, AlertTriangle } from "lucide-react";
+import { Kv, Pill, Src, Warn } from "./ws-ui";
 import {
   parseCost,
   upcomingDepartures,
 } from "./workspaceTours.helpers";
+import TourCalibrationCard from "./TourCalibrationCard";
 
 type TourForPanels = {
   id: number;
+  status: string;
   price: number;
   priceCurrency?: string | null;
   costExplanation?: string | null;
@@ -27,17 +28,7 @@ export default function TourDetailPanels({ tour }: { tour: TourForPanels }) {
 
   return (
     <div className="space-y-4 min-w-0">
-      {/* 價格 */}
-      <div className="rounded-xl border border-gray-200 bg-white p-3">
-        <h3 className="text-[12px] font-semibold mb-1.5">
-          {t("workspace.trsPriceCard")}
-        </h3>
-        <Kv
-          k={t("workspace.trsSellPrice")}
-          v={`${tour.priceCurrency ?? ""} ${Number(tour.price).toLocaleString()}`}
-        />
-        <Src>{t("workspace.trsPriceSrc")}</Src>
-      </div>
+      <PriceCard tour={tour} />
 
       <DeparturesCard tourId={tour.id} />
 
@@ -64,26 +55,57 @@ export default function TourDetailPanels({ tour }: { tour: TourForPanels }) {
         </div>
       )}
 
-      {/* 品質 */}
-      {tour.calibrationScore != null && (
-        <div className="rounded-xl border border-gray-200 bg-white p-3">
-          <h3 className="text-[12px] font-semibold mb-1.5">
-            {t("workspace.trsQuality")}
-          </h3>
-          <Kv
-            k={t("workspace.trsCalibTotal")}
-            v={`${tour.calibrationScore} / 100`}
-          />
-          {tour.calibrationVerdict && (
-            <div className="mt-1.5">
-              <Pill>
-                {t(`workspace.trsVerdict_${tour.calibrationVerdict}`)}
-              </Pill>
-            </div>
-          )}
-          <Src>{t("workspace.trsCalibSrc")}</Src>
+      <TourCalibrationCard tour={tour} />
+    </div>
+  );
+}
+
+/* ── 價格 + 毛利 (m3: suppliers.marginAudit single-tour mode) ── */
+
+function PriceCard({ tour }: { tour: TourForPanels }) {
+  const { t } = useLocale();
+  const marginQ = trpc.suppliers.marginAudit.useQuery({
+    limit: 1,
+    threshold: 0.15,
+    tourId: tour.id,
+  });
+
+  const m = marginQ.data?.items[0];
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-3">
+      <h3 className="text-[12px] font-semibold mb-1.5">
+        {t("workspace.trsPriceCard")}
+      </h3>
+      {m?.cost != null && (
+        <Kv
+          k={t("workspace.supMgCost")}
+          v={`${m.costCurrency ?? ""} ${m.cost.toLocaleString()}`}
+        />
+      )}
+      <Kv
+        k={t("workspace.trsSellPrice")}
+        v={`${tour.priceCurrency ?? ""} ${Number(tour.price).toLocaleString()}`}
+      />
+      {m?.margin != null && (
+        <div className="flex justify-between text-[12.5px]">
+          <span className="text-gray-500">{t("workspace.supMgMargin")}</span>
+          <span className="font-bold inline-flex items-center gap-1">
+            {Math.round(m.margin * 100)}%
+            {m.belowThreshold && <AlertTriangle className="w-3.5 h-3.5" />}
+          </span>
         </div>
       )}
+      {m?.belowThreshold && <Warn>{t("workspace.supMgWarn")}</Warn>}
+      {m?.currencyMismatch && (
+        <div className="text-[11px] text-gray-500 mt-1">
+          {t("workspace.supMgMismatch", {
+            cost: m.costCurrency ?? "?",
+            price: tour.priceCurrency ?? "?",
+          })}
+        </div>
+      )}
+      <Src>{t("workspace.trsPriceSrc")}</Src>
     </div>
   );
 }

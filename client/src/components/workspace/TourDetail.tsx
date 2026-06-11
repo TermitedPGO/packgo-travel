@@ -11,6 +11,7 @@ import { ArrowLeft, Bed, Utensils, Map as MapIcon } from "lucide-react";
 import { Badge, BadgeK, BtnO, Warn } from "./ws-ui";
 import { parseItinerary } from "./workspaceTours.helpers";
 import TourDetailPanels from "./TourDetailPanels";
+import TourDetailActions from "./TourDetailActions";
 
 export default function TourDetail({
   tourId,
@@ -85,6 +86,7 @@ export default function TourDetail({
               .join(" · ")}
           </div>
         </div>
+        <TourDetailActions tour={tour} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
