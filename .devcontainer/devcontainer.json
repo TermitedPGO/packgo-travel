@@ -1,0 +1,44 @@
+{
+  "name": "PACK&GO Dev",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspace",
+
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+
+  "forwardPorts": [5173, 8080, 3306, 6379],
+  "portsAttributes": {
+    "5173": { "label": "Vite Dev", "onAutoForward": "openBrowser" },
+    "8080": { "label": "API Server" },
+    "3306": { "label": "MySQL", "onAutoForward": "ignore" },
+    "6379": { "label": "Redis", "onAutoForward": "ignore" }
+  },
+
+  "postCreateCommand": "pnpm install",
+  "postStartCommand": "pnpm db:push",
+
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.formatOnSave": true,
+        "typescript.preferences.importModuleSpecifier": "relative"
+      },
+      "extensions": [
+        "esbenp.prettier-vscode",
+        "bradlc.vscode-tailwindcss",
+        "dbaeumer.vscode-eslint",
+        "ms-azuretools.vscode-docker"
+      ]
+    }
+  },
+
+  "remoteEnv": {
+    "DATABASE_URL": "mysql://packgo:packgo_dev@db:3306/packgo",
+    "REDIS_URL": "redis://redis:6379",
+    "JWT_SECRET": "dev-secret-do-not-use-in-prod",
+    "NODE_ENV": "development"
+  }
+}
