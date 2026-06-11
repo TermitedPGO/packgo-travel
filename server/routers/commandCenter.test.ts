@@ -349,6 +349,79 @@ describe("commandCenter.bulkApprove", () => {
     expect(result.blocked).toContainEqual({ id: 2, reason: "already_sent" });
     expect(decideMock).not.toHaveBeenCalled();
   });
+
+  it("accounts for every id exactly once across chunks (7 ids > chunk of 5)", async () => {
+    getByIdMock.mockImplementation(
+      async (id: number) =>
+        ({
+          id,
+          riskLevel: id % 2 === 0 ? "auto" : "hard_gate",
+          status: "pending",
+          taskType: "marketing.post",
+        }) as any,
+    );
+    decideMock.mockImplementation(
+      async ({ id }: any) =>
+        ({ id, status: "approved", taskType: "marketing.post" }) as any,
+    );
+    getExecutorMock.mockReturnValue(undefined);
+
+    const caller = adminCaller();
+    const result = await caller.bulkApprove({ ids: [1, 2, 3, 4, 5, 6, 7] });
+
+    const seen = [
+      ...result.approved.map((o) => o.id),
+      ...result.blocked.map((b) => b.id),
+    ].sort((a, b) => a - b);
+    expect(seen).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    // evens approved (auto), odds blocked (hard_gate)
+    expect(result.approved.map((o) => o.id).sort()).toEqual([2, 4, 6]);
+    expect(result.blocked).toHaveLength(4);
+  });
+
+  it("a rejected item becomes blocked reason=error, others still approve", async () => {
+    getByIdMock.mockImplementation(
+      async (id: number) =>
+        ({
+          id,
+          riskLevel: "auto",
+          status: "pending",
+          taskType: "marketing.post",
+        }) as any,
+    );
+    decideMock.mockImplementation(async ({ id }: any) => {
+      if (id === 2) throw new Error("lost the decide race");
+      return { id, status: "approved", taskType: "marketing.post" } as any;
+    });
+    getExecutorMock.mockReturnValue(undefined);
+
+    const caller = adminCaller();
+    const result = await caller.bulkApprove({ ids: [1, 2, 3] });
+
+    expect(result.approved.map((o) => o.id).sort()).toEqual([1, 3]);
+    expect(result.blocked).toContainEqual({ id: 2, reason: "error" });
+  });
+
+  it("deduplicates repeated ids — each processed once", async () => {
+    getByIdMock.mockResolvedValue({
+      id: 4,
+      riskLevel: "auto",
+      status: "pending",
+      taskType: "marketing.post",
+    } as any);
+    decideMock.mockResolvedValue({
+      id: 4,
+      status: "approved",
+      taskType: "marketing.post",
+    } as any);
+    getExecutorMock.mockReturnValue(undefined);
+
+    const caller = adminCaller();
+    const result = await caller.bulkApprove({ ids: [4, 4, 4] });
+
+    expect(result.approved).toHaveLength(1);
+    expect(decideMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("commandCenter.produceQuoteDraft", () => {

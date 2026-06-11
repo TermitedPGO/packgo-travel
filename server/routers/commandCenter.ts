@@ -34,6 +34,7 @@ import {
   type ApprovalTask,
 } from "../_core/approvalTasks";
 import { enrichTasksWithWho } from "../_core/approvalTaskWho";
+import { createChildLogger } from "../_core/logger";
 import {
   listSpamInteractions,
   rescueSpamInteraction,
@@ -67,6 +68,8 @@ registerCsExecutors();
 registerQuoteExecutors();
 registerMarketingExecutors();
 registerFinanceExecutors();
+
+const log = createChildLogger({ module: "commandCenter" });
 
 const laneEnum = z.enum(["cs", "quote", "marketing", "finance"]);
 const statusEnum = z.enum([
@@ -259,24 +262,53 @@ export const commandCenterRouter = router({
       const approved: ApproveOutcome[] = [];
       const blocked: Array<{ id: number; reason: string }> = [];
 
-      for (const id of input.ids) {
+      // One id at most once per request — a duplicate would just lose the
+      // atomic decide race against itself and surface as a confusing error.
+      const ids = [...new Set(input.ids)];
+
+      type ItemResult =
+        | { kind: "approved"; outcome: ApproveOutcome }
+        | { kind: "blocked"; id: number; reason: string };
+
+      const processOne = async (id: number): Promise<ItemResult> => {
         const task = await getApprovalTaskById(id);
         if (!task) {
-          blocked.push({ id, reason: "not_found" });
-          continue;
+          return { kind: "blocked", id, reason: "not_found" };
         }
         if (task.riskLevel === "hard_gate") {
           // 鐵律：碰錢 / 不可逆 / 對客可見一律逐筆，不准批次。
-          blocked.push({ id, reason: "hard_gate" });
-          continue;
+          return { kind: "blocked", id, reason: "hard_gate" };
         }
         if (task.status !== "pending") {
-          blocked.push({ id, reason: `already_${task.status}` });
-          continue;
+          return { kind: "blocked", id, reason: `already_${task.status}` };
         }
-        approved.push(
-          await approveAndExecute(id, ctx as ApprovalAuditCtx, ctx.user.id),
-        );
+        return {
+          kind: "approved",
+          outcome: await approveAndExecute(id, ctx as ApprovalAuditCtx, ctx.user.id),
+        };
+      };
+
+      // Bounded concurrency: executors do real I/O (email sends), so run in
+      // chunks of 5 instead of 200-wide. The atomic decide guard makes
+      // concurrent approves of the same row safe regardless.
+      const CHUNK = 5;
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const chunk = ids.slice(i, i + CHUNK);
+        const settled = await Promise.allSettled(chunk.map(processOne));
+        settled.forEach((res, j) => {
+          if (res.status === "fulfilled") {
+            if (res.value.kind === "approved") approved.push(res.value.outcome);
+            else blocked.push({ id: res.value.id, reason: res.value.reason });
+          } else {
+            // e.g. lost the atomic-decide race between pre-check and decide —
+            // report it, never silently drop an id.
+            blocked.push({ id: chunk[j], reason: "error" });
+            log.warn(
+              { id: chunk[j], err: res.reason },
+              "[commandCenter] bulkApprove item failed",
+            );
+          }
+        });
       }
 
       return { approved, blocked };
