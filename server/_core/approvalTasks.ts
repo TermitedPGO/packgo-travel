@@ -473,7 +473,11 @@ export async function markApprovalTaskSent(id: number): Promise<void> {
   log.info({ id }, "[approvalTasks] task marked sent");
 }
 
-/** Mark an approved task as failed (executor error). Stores the message. */
+/**
+ * Mark an approved task as failed (executor error). Stores the message and
+ * raises a best-effort escalation into 今日待辦「需要你決定」(dynamic import,
+ * never throws) so failures are seen, not just dimly listed in FYI.
+ */
 export async function markApprovalTaskFailed(
   id: number,
   errorMessage: string,
@@ -487,4 +491,16 @@ export async function markApprovalTaskFailed(
     .set({ status: "failed", errorMessage: errorMessage.slice(0, 2000) })
     .where(eq(approvalTasks.id, id));
   log.warn({ id, errorMessage }, "[approvalTasks] task marked failed");
+
+  try {
+    const row = await getApprovalTaskById(id);
+    const { escalateFailedApprovalTask } = await import("./approvalEscalation");
+    await escalateFailedApprovalTask(
+      row ?? ({ id, lane: "cs", title: `#${id}`, taskType: "" } as any),
+      errorMessage,
+    );
+  } catch (err) {
+    // Escalation is notification, not state — never propagate.
+    log.warn({ err, id }, "[approvalTasks] failure escalation skipped");
+  }
 }

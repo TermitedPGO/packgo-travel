@@ -33,16 +33,25 @@ vi.mock("./logger", () => ({
   }),
 }));
 
+// markApprovalTaskFailed dynamically imports the escalation module — mock it
+// so the marker test asserts the hook without touching agentMessages.
+vi.mock("./approvalEscalation", () => ({
+  escalateFailedApprovalTask: vi.fn(),
+}));
+
 import {
   createApprovalTask,
   decideApprovalTask,
   findPendingApprovalTask,
   reopenFailedApprovalTask,
+  markApprovalTaskFailed,
   type ApprovalAuditCtx,
 } from "./approvalTasks";
 import { audit } from "./auditLog";
+import { escalateFailedApprovalTask } from "./approvalEscalation";
 
 const auditMock = vi.mocked(audit);
+const escalateMock = vi.mocked(escalateFailedApprovalTask);
 
 const adminCtx: ApprovalAuditCtx = {
   user: { id: 42, email: "jeff@packgo.com", role: "admin" },
@@ -356,5 +365,43 @@ describe("reopenFailedApprovalTask", () => {
     await expect(
       reopenFailedApprovalTask({ id: 999 }, adminCtx),
     ).rejects.toThrow(/not found/);
+  });
+});
+
+describe("markApprovalTaskFailed", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    escalateMock.mockClear();
+  });
+
+  it("sets failed + errorMessage, then escalates with the fetched row", async () => {
+    const failedRow = {
+      id: 13,
+      lane: "cs",
+      title: "x",
+      taskType: "inquiry_reply",
+      status: "failed",
+    };
+    const { update, setMock } = updateChain(1);
+    mockDb.update = update;
+    mockDb.select = vi.fn().mockReturnValueOnce(byIdChain([failedRow]));
+    escalateMock.mockResolvedValue(undefined);
+
+    await markApprovalTaskFailed(13, "smtp 550");
+
+    expect(setMock.mock.calls[0][0]).toEqual({
+      status: "failed",
+      errorMessage: "smtp 550",
+    });
+    expect(escalateMock).toHaveBeenCalledWith(failedRow, "smtp 550");
+  });
+
+  it("does not propagate escalation failures", async () => {
+    const { update } = updateChain(1);
+    mockDb.update = update;
+    mockDb.select = vi.fn().mockReturnValueOnce(byIdChain([{ id: 14 }]));
+    escalateMock.mockRejectedValue(new Error("escalation exploded"));
+
+    await expect(markApprovalTaskFailed(14, "boom")).resolves.toBeUndefined();
   });
 });
