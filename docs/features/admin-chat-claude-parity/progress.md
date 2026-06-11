@@ -47,8 +47,14 @@
   - m4 競品:縮編拍板執行 — 每週摘要卡(近 7 天分組)+ 告警列表(severity 左黑條)+ 最小管理;不重建 929 行 tab
   - m5 毛利:新唯讀 `suppliers.marginAudit`(sourceUrl SUBSTRING_INDEX 取碼 equi-join,幣別不同不換匯誠實標示)+ 毛利卡 <15% 黑框警告 + 同一條 🔒 改價路徑
 - 驗證:tsc 0;全套 vitest **2049 passed / 0 failed**(基線 1885 → +164);i18n 7149 keys 100% parity;300 行紅線 10 檔全守。
-- **批5 待辦**:marginAudit SQL 對真 DB 驗證(本機無 .env)+ Jeff prod 親驗。**待 ship(Jeff token)**。
-- 剩餘批次:7(行程管理)→ 3(財務)→ 8(系統)。
+- **批5 待辦**:marginAudit SQL 對真 DB 驗證(本機無 .env)+ Jeff prod 親驗。
+
+## 2026-06-11 批7 + 批3 + 批8 完成(同 session)= **8 批全部 built**
+- **批7 行程管理全完成**(296620e m1+m2 / 0870cc0 m3+m4):行程庫進 workspace(公司第 6 sub-item,健檢出入 3 補回)+ 單一行程全貌(圖片/路線地圖卡含 fallback 警示/每日行程 timeline/價格毛利(marginAudit tourId 模式)/出發日庫存/內含不含)+ 動作列(編輯重用 TourEditDialog、上架 🔒、下架 confirm、featured、預覽)+ calibration 內嵌(5 分項展開 + pending approve 🔒/reject,吸收 calibration-review)。誠實 gaps:帶去報價/做文案/per-image 補圖/per-tour composer/per-tour 班次重整 — 不放死按鈕。
+- **批3 財務全完成**(6f27337,碰錢批拍板:只重排版 reuse mutation):WorkspaceLedger 4 sub-views — 待分類卡(needsTriage + AI 建議信心 + canonical 10 分類,reuse transactionUpdate)/ 信託(餘額 drift 照實 + 認列卡 🔒 trustRecognizeNow + 在途明細)/ 催款唯讀(bookings 應收 + T-n 逾期排序;草稿送出無後端誠實標示)/ 全部交易 = BankLedgerV2 原樣。**版面待 Jeff 親驗後才接新動作線(催款送出等)。**
+- **批8 系統全完成**(見本 commit):WorkspaceSystem 單頁 5 段(公司第 7 sub-item)— agent 7 天統計/技能列表/AI 成本 tiles + model 分布 + 快取命中/任務記錄/審計日誌(Jeff⚫ vs agent🤖)+ cleanup 降級 note。gaps:agent 開關、技能試跑(皆無後端)。
+- 驗證:tsc 0;全套 vitest **2219 passed / 0 failed**;i18n 7296 keys 100% parity;300 行紅線全守;每批 Stage 3 文件(batch-3/7/8)。
+- **8 批狀態:1 ✓ 2 ✓ 3 ✓(版面)4 ✓ 5 ✓ 6 ✓ 7 ✓ 8 ✓ — 全部 built 待 ship + Jeff prod 親驗一輪後才談 /admin flip(切換條件見 redesign-39.md)。**
 
 ## 文件
 - proposal.md(Stage 1)✓

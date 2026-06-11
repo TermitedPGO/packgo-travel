@@ -31,7 +31,8 @@ export type CompanySub =
   | "marketing"
   | "suppliers"
   | "departures"
-  | "tours";
+  | "tours"
+  | "system";
 
 export type WsView =
   | { type: "ai" }
@@ -48,6 +49,7 @@ const COMPANY_SUBS: { id: CompanySub; labelKey: string }[] = [
   { id: "departures", labelKey: "workspace.companyDepartures" },
   { id: "marketing", labelKey: "workspace.companyMarketing" },
   { id: "suppliers", labelKey: "workspace.companySuppliers" },
+  { id: "system", labelKey: "workspace.companySystem" },
 ];
 
 function Count({ n, light }: { n: number; light?: boolean }) {
