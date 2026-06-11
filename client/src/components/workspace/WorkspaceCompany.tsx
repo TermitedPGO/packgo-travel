@@ -9,7 +9,7 @@ import { useState, lazy, Suspense } from "react";
 import { useLocale } from "@/contexts/LocaleContext";
 import { LoadingPage } from "@/components/ui/spinner";
 
-const BankLedgerV2 = lazy(() => import("@/components/admin-v2/BankLedgerV2"));
+const WorkspaceLedger = lazy(() => import("./WorkspaceLedger"));
 const FinanceReports = lazy(
   () => import("@/components/admin-v2/FinanceReports"),
 );
@@ -71,7 +71,7 @@ export default function WorkspaceCompany({
       </div>
 
       <Suspense fallback={<LoadingPage text={t("workspace.loading")} />}>
-        {tab === "ledger" && <BankLedgerV2 />}
+        {tab === "ledger" && <WorkspaceLedger />}
         {tab === "reports" && <FinanceReports />}
         {tab === "marketing" && <MarketingHub />}
         {tab === "suppliers" && <WorkspaceSuppliers />}
