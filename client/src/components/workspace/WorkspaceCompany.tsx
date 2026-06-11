@@ -14,9 +14,7 @@ const FinanceReports = lazy(
   () => import("@/components/admin-v2/FinanceReports"),
 );
 const MarketingHub = lazy(() => import("./MarketingHub"));
-const SupplierEnrichmentTabV2 = lazy(
-  () => import("@/components/admin-v2/SupplierEnrichmentTabV2"),
-);
+const WorkspaceSuppliers = lazy(() => import("./WorkspaceSuppliers"));
 const DepartureList = lazy(() => import("./DepartureList"));
 
 type CompanyTab = "ledger" | "reports" | "marketing" | "suppliers" | "departures";
@@ -68,7 +66,7 @@ export default function WorkspaceCompany({
         {tab === "ledger" && <BankLedgerV2 />}
         {tab === "reports" && <FinanceReports />}
         {tab === "marketing" && <MarketingHub />}
-        {tab === "suppliers" && <SupplierEnrichmentTabV2 />}
+        {tab === "suppliers" && <WorkspaceSuppliers />}
         {tab === "departures" && <DepartureList />}
       </Suspense>
     </div>
