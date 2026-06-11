@@ -13,6 +13,7 @@ vi.mock("../../_core/logger", () => ({
 
 vi.mock("../../_core/approvalTasks", () => ({
   createApprovalTask: vi.fn().mockResolvedValue({ id: 1 }),
+  findPendingApprovalTask: vi.fn().mockResolvedValue(undefined),
 }));
 
 // These are dynamically imported, so we mock them as modules
@@ -41,10 +42,18 @@ import {
   checkUnclassifiedPileup,
   checkTrustAnomaly,
   checkSupplierPaymentMismatch,
+  produceFinanceAlerts,
   PROFIT_DROP_THRESHOLD_PCT,
   UNCLASSIFIED_PILEUP_THRESHOLD,
   TRUST_ANOMALY_THRESHOLD_USD,
 } from "./financeAlertProducer";
+import {
+  createApprovalTask,
+  findPendingApprovalTask,
+} from "../../_core/approvalTasks";
+
+const createTaskMock = vi.mocked(createApprovalTask);
+const findPendingMock = vi.mocked(findPendingApprovalTask);
 
 function makeBankPL(overrides: Partial<BankPLReport> = {}): BankPLReport {
   return {
@@ -266,5 +275,78 @@ describe("checkSupplierPaymentMismatch", () => {
     const result = await checkSupplierPaymentMismatch();
     expect(result).not.toBeNull();
     expect(result!.alertType).toBe("supplier_mismatch");
+  });
+});
+
+describe("produceFinanceAlerts (idempotency)", () => {
+  /**
+   * The dedup loop is what's under test here — the five real checks each
+   * have their own describe above. Inject one firing check via the test
+   * seam (concurrent dynamic imports inside the real checks are not
+   * reliably mockable in aggregate under vitest).
+   */
+  const pileupPayload = {
+    alertType: "unclassified_pileup" as const,
+    severity: "critical" as const,
+    headline: "50 bank transactions need classification",
+    details: "50 transactions remain uncategorized.",
+    metric: 50,
+    threshold: 10,
+    period: "2026-06",
+  };
+  const oneFiringCheck = [
+    async () => pileupPayload,
+    async () => null,
+  ];
+
+  it("creates the task when no pending duplicate exists", async () => {
+    findPendingMock.mockResolvedValue(undefined);
+    createTaskMock.mockResolvedValue({ id: 7 });
+
+    const result = await produceFinanceAlerts(undefined, oneFiringCheck);
+
+    expect(result).toEqual({ produced: 1, skipped: 0 });
+    expect(createTaskMock).toHaveBeenCalledTimes(1);
+    const input = createTaskMock.mock.calls[0][0];
+    expect(input.lane).toBe("finance");
+    expect(input.relatedType).toBe("finance_alert");
+    expect(input.relatedId).toBe("unclassified_pileup");
+    expect(findPendingMock).toHaveBeenCalledWith(
+      input.taskType,
+      "finance_alert",
+      "unclassified_pileup",
+    );
+  });
+
+  it("skips (not duplicates) when the same alert is still pending", async () => {
+    findPendingMock.mockResolvedValue({ id: 99 } as any);
+
+    const result = await produceFinanceAlerts(undefined, oneFiringCheck);
+
+    expect(result).toEqual({ produced: 0, skipped: 1 });
+    expect(createTaskMock).not.toHaveBeenCalled();
+  });
+
+  it("swallows createApprovalTask failures (scan never throws)", async () => {
+    findPendingMock.mockResolvedValue(undefined);
+    createTaskMock.mockRejectedValue(new Error("db down"));
+
+    const result = await produceFinanceAlerts(undefined, oneFiringCheck);
+
+    expect(result).toEqual({ produced: 0, skipped: 0 });
+  });
+
+  it("a rejected check is ignored, the rest still produce", async () => {
+    findPendingMock.mockResolvedValue(undefined);
+    createTaskMock.mockResolvedValue({ id: 8 });
+
+    const result = await produceFinanceAlerts(undefined, [
+      async () => {
+        throw new Error("check exploded");
+      },
+      async () => pileupPayload,
+    ]);
+
+    expect(result).toEqual({ produced: 1, skipped: 0 });
   });
 });

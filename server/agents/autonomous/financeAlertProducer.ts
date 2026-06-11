@@ -17,6 +17,7 @@
 
 import {
   createApprovalTask,
+  findPendingApprovalTask,
   type ApprovalAuditCtx,
 } from "../../_core/approvalTasks";
 import { createChildLogger } from "../../_core/logger";
@@ -301,18 +302,28 @@ export async function checkSupplierPaymentMismatch(): Promise<FinanceAlertPayloa
 
 /**
  * Run all five finance checks and create approval tasks for any anomalies.
- * Returns the count of tasks produced.
+ * Idempotent per alertType: a re-scan while the same alert is still PENDING
+ * skips it (counted in `skipped`) instead of piling up duplicates. Returns
+ * the counts of tasks produced and skipped.
  */
 export async function produceFinanceAlerts(
   ctx?: ApprovalAuditCtx,
-): Promise<{ produced: number }> {
-  const checks = await Promise.allSettled([
-    checkStripeMismatch(),
-    checkProfitDrop(),
-    checkUnclassifiedPileup(),
-    checkTrustAnomaly(),
-    checkSupplierPaymentMismatch(),
-  ]);
+  /**
+   * Test seam: inject the check set. Production callers omit it. (The five
+   * real checks dynamically import their services; concurrent dynamic
+   * imports are unmockable-in-aggregate under vitest, so the dedup loop is
+   * tested through this override instead.)
+   */
+  checksOverride?: Array<() => Promise<FinanceAlertPayload | null>>,
+): Promise<{ produced: number; skipped: number }> {
+  const checkFns = checksOverride ?? [
+    checkStripeMismatch,
+    checkProfitDrop,
+    checkUnclassifiedPileup,
+    checkTrustAnomaly,
+    checkSupplierPaymentMismatch,
+  ];
+  const checks = await Promise.allSettled(checkFns.map((fn) => fn()));
 
   const payloads: FinanceAlertPayload[] = [];
   for (const result of checks) {
@@ -322,9 +333,24 @@ export async function produceFinanceAlerts(
   }
 
   let produced = 0;
+  let skipped = 0;
   for (const payload of payloads) {
     const { riskLevel } = classifyFinanceAlertRisk();
     try {
+      const existing = await findPendingApprovalTask(
+        FINANCE_ALERT_TASK_TYPE,
+        "finance_alert",
+        payload.alertType,
+      );
+      if (existing) {
+        log.info(
+          { existingId: existing.id, alertType: payload.alertType },
+          "[financeAlertProducer] pending alert already exists, skipping",
+        );
+        skipped++;
+        continue;
+      }
+
       const { id } = await createApprovalTask(
         {
           lane: "finance",
@@ -352,5 +378,5 @@ export async function produceFinanceAlerts(
     }
   }
 
-  return { produced };
+  return { produced, skipped };
 }

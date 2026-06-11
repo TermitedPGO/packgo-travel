@@ -515,8 +515,11 @@ async function doRunFinanceAlerts(): Promise<ExecutionResult> {
     const result = await produceFinanceAlerts();
     return {
       ok: true,
-      summary: `✓ 財務掃描完成，產生 ${result.produced} 筆警示`,
-      details: { produced: result.produced },
+      summary:
+        result.skipped > 0
+          ? `✓ 財務掃描完成，產生 ${result.produced} 筆警示（略過 ${result.skipped} 筆重複）`
+          : `✓ 財務掃描完成，產生 ${result.produced} 筆警示`,
+      details: { produced: result.produced, skipped: result.skipped },
     };
   } catch (err) {
     const msg = (err as Error).message;

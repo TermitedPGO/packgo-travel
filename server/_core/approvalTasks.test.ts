@@ -36,6 +36,7 @@ vi.mock("./logger", () => ({
 import {
   createApprovalTask,
   decideApprovalTask,
+  findPendingApprovalTask,
   type ApprovalAuditCtx,
 } from "./approvalTasks";
 import { audit } from "./auditLog";
@@ -256,5 +257,47 @@ describe("decideApprovalTask", () => {
     );
     // The loser never audits — exactly one decision row.
     expect(auditMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("findPendingApprovalTask", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns the pending row when the triple matches", async () => {
+    const row = {
+      id: 12,
+      status: "pending",
+      taskType: "finance_alert",
+      relatedType: "finance_alert",
+      relatedId: "profit_drop",
+    };
+    mockDb.select = vi.fn().mockReturnValueOnce(byIdChain([row]));
+
+    const found = await findPendingApprovalTask(
+      "finance_alert",
+      "finance_alert",
+      "profit_drop",
+    );
+
+    expect(found).toEqual(row);
+  });
+
+  it("returns undefined when nothing pending matches", async () => {
+    mockDb.select = vi.fn().mockReturnValueOnce(byIdChain([]));
+
+    const found = await findPendingApprovalTask("x", "y", "z");
+
+    expect(found).toBeUndefined();
+  });
+
+  it("returns undefined (no throw) when the database is unavailable", async () => {
+    const { getDb } = await import("../db");
+    vi.mocked(getDb).mockResolvedValueOnce(null as any);
+
+    const found = await findPendingApprovalTask("x", "y", "z");
+
+    expect(found).toBeUndefined();
   });
 });

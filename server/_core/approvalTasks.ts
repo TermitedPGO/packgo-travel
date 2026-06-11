@@ -155,6 +155,44 @@ export async function getApprovalTaskById(
   return rows.length > 0 ? rows[0] : undefined;
 }
 
+/**
+ * Producer idempotency probe — is there already a PENDING task for this
+ * (taskType, relatedType, relatedId) triple? Used by re-runnable producers
+ * (finance alert scan) to skip duplicates instead of piling up identical
+ * pending rows on every scan.
+ *
+ * Deliberately a pre-check, not a unique index: a 1-admin system's race
+ * window between check and insert is acceptable, and it avoids a migration
+ * on a live table.
+ */
+export async function findPendingApprovalTask(
+  taskType: string,
+  relatedType: string,
+  relatedId: string,
+): Promise<ApprovalTask | undefined> {
+  const db = await getDb();
+  if (!db) {
+    log.warn(
+      { taskType, relatedType, relatedId },
+      "[approvalTasks] findPendingApprovalTask: database not available",
+    );
+    return undefined;
+  }
+  const rows = await db
+    .select()
+    .from(approvalTasks)
+    .where(
+      and(
+        eq(approvalTasks.status, "pending"),
+        eq(approvalTasks.taskType, taskType),
+        eq(approvalTasks.relatedType, relatedType),
+        eq(approvalTasks.relatedId, relatedId),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0 ? rows[0] : undefined;
+}
+
 export interface ListApprovalTasksFilter {
   lane?: ApprovalLane;
   status?: ApprovalStatus;

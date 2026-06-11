@@ -3613,6 +3613,7 @@ export const zhTW = {
       finDashScan: '一鍵掃描',
       finDashDownloadCsv: '報稅 CSV',
       finScanResult: '掃描完成，產生 {n} 筆警示',
+      finScanResultSkipped: '掃描完成，產生 {n} 筆警示，略過 {skipped} 筆重複',
       finCsvDownloaded: 'CSV 已下載',
       // 財務頁 (P4) — advisor
       finAdvisorTitle: 'AI 財務顧問',

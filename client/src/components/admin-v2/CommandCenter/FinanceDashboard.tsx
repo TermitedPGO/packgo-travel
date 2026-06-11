@@ -70,7 +70,12 @@ export default function FinanceDashboard() {
     try {
       const res = await runAlerts.mutateAsync();
       toast.success(
-        t("admin.commandCenter.finScanResult", { n: String(res.produced) }),
+        res.skipped > 0
+          ? t("admin.commandCenter.finScanResultSkipped", {
+              n: String(res.produced),
+              skipped: String(res.skipped),
+            })
+          : t("admin.commandCenter.finScanResult", { n: String(res.produced) }),
       );
       utils.commandCenter.list.invalidate();
       utils.commandCenter.stats.invalidate();

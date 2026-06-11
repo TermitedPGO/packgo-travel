@@ -3647,6 +3647,7 @@ export const en = {
       finDashScan: 'Scan now',
       finDashDownloadCsv: 'Tax CSV',
       finScanResult: 'Scan complete, {n} alerts produced',
+      finScanResultSkipped: 'Scan complete, {n} alerts produced, {skipped} duplicates skipped',
       finCsvDownloaded: 'CSV downloaded',
       // Finance lane (P4) — advisor
       finAdvisorTitle: 'AI Finance Advisor',
