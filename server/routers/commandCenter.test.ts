@@ -19,6 +19,7 @@ vi.mock("../_core/approvalTasks", () => ({
   getApprovalStats: vi.fn(),
   getApprovalTaskById: vi.fn(),
   decideApprovalTask: vi.fn(),
+  reopenFailedApprovalTask: vi.fn(),
   getApprovalExecutor: vi.fn(),
   markApprovalTaskSent: vi.fn(),
   markApprovalTaskFailed: vi.fn(),
@@ -69,8 +70,10 @@ import {
   getApprovalStats,
   getApprovalTaskById,
   decideApprovalTask,
+  reopenFailedApprovalTask,
   getApprovalExecutor,
   markApprovalTaskSent,
+  markApprovalTaskFailed,
 } from "../_core/approvalTasks";
 import { getTourById, getDb } from "../db";
 import { produceQuoteDraftTask } from "../agents/autonomous/quoteProducer";
@@ -79,8 +82,10 @@ const listMock = vi.mocked(listApprovalTasks);
 const statsMock = vi.mocked(getApprovalStats);
 const getByIdMock = vi.mocked(getApprovalTaskById);
 const decideMock = vi.mocked(decideApprovalTask);
+const reopenMock = vi.mocked(reopenFailedApprovalTask);
 const getExecutorMock = vi.mocked(getApprovalExecutor);
 const markSentMock = vi.mocked(markApprovalTaskSent);
+const markFailedMock = vi.mocked(markApprovalTaskFailed);
 const getTourByIdMock = vi.mocked(getTourById);
 const getDbMock = vi.mocked(getDb);
 const produceQuoteMock = vi.mocked(produceQuoteDraftTask);
@@ -217,6 +222,71 @@ describe("commandCenter.approve", () => {
 
     expect(result).toEqual({ id: 5, status: "approved", executed: false });
     expect(markSentMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("commandCenter.retry", () => {
+  it("reopens a failed task then re-runs the executor (marks sent)", async () => {
+    const task = { id: 7, status: "approved", taskType: "inquiry_reply" } as any;
+    reopenMock.mockResolvedValue(task);
+    const executor = vi.fn().mockResolvedValue({ status: "sent" });
+    getExecutorMock.mockReturnValue(executor);
+
+    const caller = adminCaller();
+    const result = await caller.retry({ id: 7 });
+
+    expect(reopenMock).toHaveBeenCalledWith(
+      { id: 7, decidedBy: 42 },
+      expect.anything(),
+    );
+    expect(executor).toHaveBeenCalledWith(task, expect.anything());
+    expect(markSentMock).toHaveBeenCalledWith(7);
+    expect(result).toEqual({ id: 7, status: "sent", executed: true });
+  });
+
+  it("marks failed again (with the new error) when the executor fails again", async () => {
+    const task = { id: 8, status: "approved", taskType: "inquiry_reply" } as any;
+    reopenMock.mockResolvedValue(task);
+    getExecutorMock.mockReturnValue(
+      vi.fn().mockResolvedValue({ status: "failed", errorMessage: "smtp 550" }),
+    );
+
+    const caller = adminCaller();
+    const result = await caller.retry({ id: 8 });
+
+    expect(markFailedMock).toHaveBeenCalledWith(8, "smtp 550");
+    expect(result).toEqual({
+      id: 8,
+      status: "failed",
+      executed: true,
+      errorMessage: "smtp 550",
+    });
+  });
+
+  it("rejects when the task is not in failed status", async () => {
+    reopenMock.mockRejectedValue(
+      new Error("Approval task 9 is already sent, cannot retry"),
+    );
+
+    const caller = adminCaller();
+    await expect(caller.retry({ id: 9 })).rejects.toThrow(/already sent/);
+    expect(getExecutorMock).not.toHaveBeenCalled();
+  });
+
+  it("honest no-op when no executor is registered (stays approved)", async () => {
+    reopenMock.mockResolvedValue({
+      id: 10,
+      status: "approved",
+      taskType: "quote.none",
+    } as any);
+    getExecutorMock.mockReturnValue(undefined);
+
+    const caller = adminCaller();
+    const result = await caller.retry({ id: 10 });
+
+    expect(result).toEqual({ id: 10, status: "approved", executed: false });
+    expect(markSentMock).not.toHaveBeenCalled();
+    expect(markFailedMock).not.toHaveBeenCalled();
   });
 });
 

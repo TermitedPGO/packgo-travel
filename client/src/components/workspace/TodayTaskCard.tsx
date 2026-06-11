@@ -54,6 +54,8 @@ export default function TodayTaskCard<T extends TodayTaskShape>({
   toggleBusy,
   onReview,
   onJumpToCustomer,
+  onRetry,
+  retryBusy,
 }: {
   task: T;
   baseState: CardState;
@@ -64,6 +66,9 @@ export default function TodayTaskCard<T extends TodayTaskShape>({
   /** open the shared review dialog (only rendered for pending unhandled). */
   onReview?: (task: T) => void;
   onJumpToCustomer?: (userId: number) => void;
+  /** re-run the lane executor (only rendered for failed unhandled). */
+  onRetry?: (task: T) => void;
+  retryBusy?: boolean;
 }) {
   const { t } = useLocale();
   const lane = task.lane;
@@ -101,6 +106,15 @@ export default function TodayTaskCard<T extends TodayTaskShape>({
       {/* failed executor → show the reason honestly (bold black, not red) */}
       {task.status === "failed" && task.errorMessage && (
         <div className="text-[11px] font-medium mt-1">{task.errorMessage}</div>
+      )}
+      {/* failed → one-tap retry re-runs the executor through the same
+          approve send path (commandCenter.retry) */}
+      {task.status === "failed" && !handled && onRetry && (
+        <div className="flex gap-2 mt-2">
+          <BtnB onClick={() => onRetry(task)} disabled={retryBusy}>
+            {t("workspace.retry")}
+          </BtnB>
+        </div>
       )}
       {/* 等你決定 → open the shared review flow right on the card */}
       {task.status === "pending" && !handled && onReview && (

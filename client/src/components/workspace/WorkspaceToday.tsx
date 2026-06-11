@@ -16,6 +16,7 @@ import TodayEscalationCard, {
 } from "./TodayEscalationCard";
 import TodaySpamBox from "./TodaySpamBox";
 import TodayReviewCard, { type ReviewShape } from "./TodayReviewCard";
+import { approveToastFor } from "@/components/admin-v2/CommandCenter/approveToast";
 
 // Shared review flow (same dialog the 指揮中心 ApprovalInbox uses): full
 // payload preview + hard_gate confirm + honest outcome toast. Lazy so the
@@ -69,6 +70,21 @@ export default function WorkspaceToday({
       // per-customer inboxes render the same tasks — keep them in sync
       utils.admin.customerOpenItems.invalidate();
     },
+  });
+
+  // 重試 a failed executor — same send path + honest outcome toast as approve.
+  const retry = trpc.commandCenter.retry.useMutation({
+    onSuccess: (res, vars) => {
+      const lane =
+        failedQ.data?.find((task) => task.id === vars.id)?.lane ?? "cs";
+      const spec = approveToastFor(lane, res);
+      const text = spec.detail ? `${t(spec.i18nKey)}: ${spec.detail}` : t(spec.i18nKey);
+      if (spec.kind === "success") toast.success(text);
+      else toast.error(text);
+      utils.commandCenter.list.invalidate();
+      utils.commandCenter.stats.invalidate();
+    },
+    onError: (e) => toast.error(e.message),
   });
 
   // 處理好了 on an escalation = readByJeff. Update the row in place (dim +
@@ -159,6 +175,8 @@ export default function WorkspaceToday({
         }
         onReview={setReviewing}
         onJumpToCustomer={onJumpToCustomer}
+        onRetry={(failedTask) => retry.mutate({ id: failedTask.id })}
+        retryBusy={retry.isPending && retry.variables?.id === task.id}
       />
     );
   };

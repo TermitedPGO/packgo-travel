@@ -37,6 +37,7 @@ import {
   createApprovalTask,
   decideApprovalTask,
   findPendingApprovalTask,
+  reopenFailedApprovalTask,
   type ApprovalAuditCtx,
 } from "./approvalTasks";
 import { audit } from "./auditLog";
@@ -299,5 +300,61 @@ describe("findPendingApprovalTask", () => {
     const found = await findPendingApprovalTask("x", "y", "z");
 
     expect(found).toBeUndefined();
+  });
+});
+
+describe("reopenFailedApprovalTask", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("flips failed → approved and audits approvalTask.retry", async () => {
+    const reopened = {
+      id: 6,
+      status: "approved",
+      taskType: "inquiry_reply",
+      errorMessage: "smtp 550",
+    };
+    const { update, setMock } = updateChain(1);
+    mockDb.update = update;
+    mockDb.select = vi.fn().mockReturnValueOnce(byIdChain([reopened]));
+
+    const result = await reopenFailedApprovalTask(
+      { id: 6, decidedBy: 42 },
+      adminCtx,
+    );
+
+    expect(result.status).toBe("approved");
+    // Only the status flips — original decision metadata + errorMessage stay.
+    expect(setMock.mock.calls[0][0]).toEqual({ status: "approved" });
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    expect(auditMock.mock.calls[0][0].action).toBe("approvalTask.retry");
+    expect(auditMock.mock.calls[0][0].changes).toEqual({
+      from: "failed",
+      to: "approved",
+    });
+  });
+
+  it("throws when the task is not failed (already sent)", async () => {
+    const { update } = updateChain(0);
+    mockDb.update = update;
+    mockDb.select = vi
+      .fn()
+      .mockReturnValueOnce(byIdChain([{ id: 7, status: "sent", taskType: "x" }]));
+
+    await expect(
+      reopenFailedApprovalTask({ id: 7, decidedBy: 42 }, adminCtx),
+    ).rejects.toThrow(/already sent, cannot retry/);
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("throws when the task does not exist", async () => {
+    const { update } = updateChain(0);
+    mockDb.update = update;
+    mockDb.select = vi.fn().mockReturnValueOnce(byIdChain([]));
+
+    await expect(
+      reopenFailedApprovalTask({ id: 999 }, adminCtx),
+    ).rejects.toThrow(/not found/);
   });
 });

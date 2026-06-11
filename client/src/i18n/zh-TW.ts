@@ -61,6 +61,7 @@ export const zhTW = {
     timeDaysAgo: '{n} 天前',
     jumpTo: '去{name}',
     review: '審核',
+    retry: '重試',
     spamBox: '疑似垃圾',
     spamBadge: '疑似垃圾',
     spamRescue: '其實是客人,救回',

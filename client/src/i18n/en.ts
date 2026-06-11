@@ -61,6 +61,7 @@ export const en = {
     timeDaysAgo: '{n}d ago',
     jumpTo: 'Open {name}',
     review: 'Review',
+    retry: 'Retry',
     spamBox: 'Suspected spam',
     spamBadge: 'Spam?',
     spamRescue: 'Actually a customer, rescue',

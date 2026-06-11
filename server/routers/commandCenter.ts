@@ -26,6 +26,7 @@ import {
   getApprovalStats,
   getApprovalTaskById,
   decideApprovalTask,
+  reopenFailedApprovalTask,
   getApprovalExecutor,
   markApprovalTaskSent,
   markApprovalTaskFailed,
@@ -88,6 +89,43 @@ export interface ApproveOutcome {
 }
 
 /**
+ * Run the lane executor for an already-approved task and mark the row
+ * sent/failed. Shared by approve, bulkApprove AND retry so all three have
+ * identical send semantics. No executor registered → honest no-op (the row
+ * stays "approved", nothing is sent).
+ */
+async function runExecutorAndMark(
+  task: ApprovalTask,
+  ctx: ApprovalAuditCtx,
+): Promise<ApproveOutcome> {
+  const executor = getApprovalExecutor(task.taskType);
+  if (!executor) {
+    return { id: task.id, status: task.status, executed: false };
+  }
+
+  // The executor must report sent/failed rather than throw, but we still
+  // wrap to mark the row failed on an unexpected throw.
+  try {
+    const result = await executor(task, ctx);
+    if (result.status === "sent") {
+      await markApprovalTaskSent(task.id);
+      return { id: task.id, status: "sent", executed: true };
+    }
+    await markApprovalTaskFailed(task.id, result.errorMessage ?? "executor failed");
+    return {
+      id: task.id,
+      status: "failed",
+      executed: true,
+      errorMessage: result.errorMessage,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await markApprovalTaskFailed(task.id, message);
+    return { id: task.id, status: "failed", executed: true, errorMessage: message };
+  }
+}
+
+/**
  * Approve one task, then run its lane executor if registered. Centralized so
  * approve (single) and bulkApprove share identical send semantics. The caller
  * is responsible for the hard_gate / pending guards before invoking this.
@@ -98,38 +136,12 @@ async function approveAndExecute(
   decidedBy: number | undefined,
   editedPayload?: string,
 ): Promise<ApproveOutcome> {
-  // 1. Flip status → "approved" (audited). Throws if not pending.
+  // Flip status → "approved" (audited). Throws if not pending.
   const task = await decideApprovalTask(
     { id, decision: "approve", decidedBy, editedPayload },
     ctx,
   );
-
-  // 2. Look up the lane executor. None registered (v1) → stop at "approved".
-  const executor = getApprovalExecutor(task.taskType);
-  if (!executor) {
-    return { id, status: task.status, executed: false };
-  }
-
-  // 3. Run it. The executor must report sent/failed rather than throw, but we
-  //    still wrap to mark the row failed on an unexpected throw.
-  try {
-    const result = await executor(task, ctx);
-    if (result.status === "sent") {
-      await markApprovalTaskSent(id);
-      return { id, status: "sent", executed: true };
-    }
-    await markApprovalTaskFailed(id, result.errorMessage ?? "executor failed");
-    return {
-      id,
-      status: "failed",
-      executed: true,
-      errorMessage: result.errorMessage,
-    };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    await markApprovalTaskFailed(id, message);
-    return { id, status: "failed", executed: true, errorMessage: message };
-  }
+  return runExecutorAndMark(task, ctx);
 }
 
 export const commandCenterRouter = router({
@@ -198,6 +210,21 @@ export const commandCenterRouter = router({
         ctx.user.id,
         input.editedPayload,
       );
+    }),
+
+  /**
+   * Retry a FAILED task: atomic flip failed → approved (audited
+   * "approvalTask.retry"), then re-run the lane executor exactly like a
+   * fresh approve. Outcome reporting matches approve (sent / failed again).
+   */
+  retry: adminProcedure
+    .input(z.object({ id: z.number().int() }))
+    .mutation(async ({ ctx, input }) => {
+      const task = await reopenFailedApprovalTask(
+        { id: input.id, decidedBy: ctx.user.id },
+        ctx as ApprovalAuditCtx,
+      );
+      return runExecutorAndMark(task, ctx as ApprovalAuditCtx);
     }),
 
   /** Reject one task (status → rejected, audited). No executor runs. */

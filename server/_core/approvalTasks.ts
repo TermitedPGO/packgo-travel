@@ -402,6 +402,62 @@ export async function decideApprovalTask(
   return updated;
 }
 
+/**
+ * Re-open a FAILED task for another executor attempt: atomic flip
+ * failed → approved (same conditional-UPDATE race guard as decide). The
+ * router then re-runs the lane executor exactly like a fresh approve.
+ *
+ * Deliberately preserves the original decision metadata (decidedBy /
+ * decidedAt / payload) and the last errorMessage — markApprovalTaskSent
+ * clears the error on a successful retry. Audits "approvalTask.retry".
+ */
+export async function reopenFailedApprovalTask(
+  input: { id: number; decidedBy?: number },
+  ctx?: ApprovalAuditCtx,
+): Promise<ApprovalTask> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+
+  const result: any = await db
+    .update(approvalTasks)
+    .set({ status: "approved" })
+    .where(and(eq(approvalTasks.id, input.id), eq(approvalTasks.status, "failed")));
+  const affected =
+    (result?.[0]?.affectedRows ?? result?.affectedRows ?? 0) | 0;
+
+  if (affected === 0) {
+    const existing = await getApprovalTaskById(input.id);
+    if (!existing) {
+      throw new Error(`Approval task ${input.id} not found`);
+    }
+    throw new Error(
+      `Approval task ${input.id} is already ${existing.status}, cannot retry`,
+    );
+  }
+
+  if (ctx?.user) {
+    audit({
+      ctx,
+      action: "approvalTask.retry",
+      targetType: "approvalTask",
+      targetId: input.id,
+      changes: { from: "failed", to: "approved" },
+    });
+  }
+
+  const updated = await getApprovalTaskById(input.id);
+  if (!updated) {
+    throw new Error(`Failed to retrieve reopened approval task ${input.id}`);
+  }
+  log.info(
+    { id: input.id, decidedBy: input.decidedBy },
+    "[approvalTasks] failed task reopened for retry",
+  );
+  return updated;
+}
+
 // ── Executor result markers (called by the router after running) ───────────
 
 /** Mark an approved task as successfully sent by its executor. */
