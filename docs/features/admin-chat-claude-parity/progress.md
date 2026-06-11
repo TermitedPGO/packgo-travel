@@ -54,7 +54,15 @@
 - **批3 財務全完成**(6f27337,碰錢批拍板:只重排版 reuse mutation):WorkspaceLedger 4 sub-views — 待分類卡(needsTriage + AI 建議信心 + canonical 10 分類,reuse transactionUpdate)/ 信託(餘額 drift 照實 + 認列卡 🔒 trustRecognizeNow + 在途明細)/ 催款唯讀(bookings 應收 + T-n 逾期排序;草稿送出無後端誠實標示)/ 全部交易 = BankLedgerV2 原樣。**版面待 Jeff 親驗後才接新動作線(催款送出等)。**
 - **批8 系統全完成**(見本 commit):WorkspaceSystem 單頁 5 段(公司第 7 sub-item)— agent 7 天統計/技能列表/AI 成本 tiles + model 分布 + 快取命中/任務記錄/審計日誌(Jeff⚫ vs agent🤖)+ cleanup 降級 note。gaps:agent 開關、技能試跑(皆無後端)。
 - 驗證:tsc 0;全套 vitest **2219 passed / 0 failed**;i18n 7296 keys 100% parity;300 行紅線全守;每批 Stage 3 文件(batch-3/7/8)。
-- **8 批狀態:1 ✓ 2 ✓ 3 ✓(版面)4 ✓ 5 ✓ 6 ✓ 7 ✓ 8 ✓ — 全部 built 待 ship + Jeff prod 親驗一輪後才談 /admin flip(切換條件見 redesign-39.md)。**
+- **8 批狀態:1 ✓ 2 ✓ 3 ✓(版面)4 ✓ 5 ✓ 6 ✓ 7 ✓ 8 ✓ — 全部 built。**
+
+## v690 shipped(2026-06-11,Jeff 親自跑 `DEPLOY_TOKEN=… pnpm ship`)
+- 七 gate 全過:main ✓ tree 乾淨 ✓ origin 同步 ✓ migration 列表(0091-0093 隨 release 套用,含批2 待 ship 的 0092 flightOrders + 0093 wechatCustomer)✓ tsc 0 ✓ vitest 2219 passed ✓ token 核對 ✓(用完即焚)。
+- 過程記錄:第一跑被 gate 7 擋(env DEPLOY_TOKEN 不在 session shell — 設計如此),Jeff 在自己 terminal 帶 env 跑成功。
+- /health 全綠:db 41ms / redis 15ms / stripe 253ms / llm 442ms。release_command migrate 成功。
+- 線上 bundle 驗證(index-CgsaKXz2.js):supSyncNow / trsBack / ldgTriage / sysAgents / companyTours / companySystem 全部 grep 到 — 批5/7/3/8 代碼確認在線上。
+- **Jeff 親驗項(hard refresh 清 SW cache 後看 /workspace 全公司事務)**:① 行程庫(列表+點進全貌:圖/地圖/每日行程/毛利/庫存/品質;上架鎖)② 記帳四區(待分類卡/信託認列鎖/催款唯讀/全部交易)— **碰錢批,版面點頭後才接催款送出等新動作線** ③ 供應商四區(同步/監控含改價鎖/商品庫/競品摘要)+ 毛利卡對一筆真資料(marginAudit SQL 首次見真 DB)④ 行銷四區(批4 一併看)⑤ 系統頁五段 ⑥ 英文模式全英。
+- 全看過沒問題 → 切換條件達成,下一步 = App.tsx `/admin` → Workspace 一次 flip(AdminV2 留檔)。
 
 ## 文件
 - proposal.md(Stage 1)✓
