@@ -98,7 +98,7 @@ describe("buildQuoteDraftTaskInput — 供應商團", () => {
 });
 
 describe("buildQuoteDraftTaskInput — 客製遊", () => {
-  it("prefixes 📋, summary 需手動報價, omits prices from payload", () => {
+  it("plain title (no emoji), summary 需手動報價, omits prices from payload", () => {
     const input = buildQuoteDraftTaskInput({
       tourId: 12,
       tourTitle: "歐洲蜜月客製",
@@ -108,9 +108,7 @@ describe("buildQuoteDraftTaskInput — 客製遊", () => {
       isCustomTrip: true,
     });
 
-    expect(input.title.startsWith("📋")).toBe(true);
-    expect(input.title).toContain("歐洲蜜月客製");
-    expect(input.title).toContain("林小姐");
+    expect(input.title).toBe("歐洲蜜月客製 · 林小姐");
     expect(input.summary).toContain("需手動報價");
     expect(input.riskLevel).toBe("hard_gate");
 

@@ -356,7 +356,7 @@ export async function produceFinanceAlerts(
           lane: "finance",
           taskType: FINANCE_ALERT_TASK_TYPE,
           riskLevel,
-          title: `⚠️ ${payload.headline}`,
+          title: payload.headline,
           summary: `[${payload.severity}] ${payload.alertType}: ${payload.headline}`,
           payload: JSON.stringify(payload),
           relatedType: "finance_alert",

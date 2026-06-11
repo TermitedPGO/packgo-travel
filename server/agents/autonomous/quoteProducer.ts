@@ -13,8 +13,8 @@
  *     get an AI-drafted quote. payload carries the supplier price so Jeff can
  *     compare it against the (future) AI estimate side-by-side.
  *   - 客製遊 (isCustomTrip=true): NO AI draft — the task is just a 待辦
- *     ("需手動報價"); payload holds customer info + tour title only, title is
- *     prefixed 📋, and prices are omitted.
+ *     ("需手動報價"); payload holds customer info + tour title only, and
+ *     prices are omitted.
  *
  * Pricing source (Jeff 2026-05-31, overriding the work-package's agentPrice):
  *   supplierPrice = supplierDepartures.retailPrice (直客價 / customer-facing),
@@ -127,7 +127,7 @@ export function buildQuoteDraftTaskInput(
       notes: input.notes?.trim() || undefined,
       isCustomTrip: true,
     };
-    title = `📋 ${input.tourTitle} · ${who}`;
+    title = `${input.tourTitle} · ${who}`;
     summary = "客製遊 · 需手動報價";
   } else {
     // 供應商團：帶供應商直客價（+ 未來的 AI 估價）供並排比較。
