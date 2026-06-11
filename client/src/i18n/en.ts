@@ -513,6 +513,15 @@ export const en = {
     supCmpDeleteGo: 'Delete',
     supCmpDeleted: 'Deleted',
     supCmpEmpty: 'No competitor tours tracked yet',
+    supMgTitle: 'Cost & Margin Audit',
+    supMgCount: '{low} low-margin / {total} matched',
+    supMgCost: 'Backend cost (lowest future agent price)',
+    supMgPrice: 'My price',
+    supMgMargin: 'Margin',
+    supMgNA: 'N/A',
+    supMgWarn: 'Margin below the 15% safety line. Cost may have risen without a price adjustment.',
+    supMgMismatch: 'Cost ({cost}) and price ({price}) currencies differ. No auto-conversion. Verify in the supplier backend.',
+    supMgSrc: 'Verify against the supplier backend: simulated-order pricing is the source of truth. This list is a first-pass screen only.',
   },
   // Common
   common: {

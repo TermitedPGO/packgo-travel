@@ -195,11 +195,24 @@ export function MonitorLogCard({
 
 /* ─────────────── 🔒 更新我的售價 (碰錢 gated, 走既有 tours.update) ─────────────── */
 
+/**
+ * Structural subset of MonitorLog the dialog actually needs — m5's margin
+ * card reuses the same gated dialog by adapting its rows to this shape.
+ */
+export type PriceTarget = {
+  tourId: number;
+  tourTitle: string | null;
+  tourPrice: number | null;
+  tourPriceCurrency: string | null;
+  previousPrice: number | null;
+  currentPrice: number | null;
+};
+
 export function UpdatePriceDialog({
   log,
   onClose,
 }: {
-  log: MonitorLog;
+  log: PriceTarget;
   onClose: () => void;
 }) {
   const { t } = useLocale();

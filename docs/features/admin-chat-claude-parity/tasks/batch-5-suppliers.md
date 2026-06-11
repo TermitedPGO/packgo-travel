@@ -70,15 +70,17 @@ suppliersRouter 3 處已用:`tours.sourceUrl LIKE '%NormGroupID=' + externalProd
 - [x] i18n · tsc 0 · Vitest(告警分組統計)
 
 ### m5 — 成本毛利卡(新唯讀查詢)
-- [ ] 新 procedure `suppliers.marginAudit`(唯讀):LIKE-join tours↔supplierProducts + min 未來 departure agentPrice → margin = (price−cost)/price,flag < 15%
-- [ ] 毛利卡(mockup b):後台成本/建議售價/毛利% + <15% 警告 + src 行(後台模擬訂單核對提醒)
-- [ ] 更新售價從毛利卡也可走(同 m2 🔒 路徑)
-- [ ] i18n · tsc 0 · Vitest(margin 計算 + 警戒線)
+- [x] 新 procedure `suppliers.marginAudit`(唯讀):sourceUrl 取碼 SUBSTRING_INDEX equi-join(非 O(n×m) LIKE 掃描)+ min 未來 departure agentPrice → margin,flag < 15%;幣別不同不換匯 margin=null 照實標示
+- [x] 毛利卡(mockup b):後台成本/我的售價/毛利% + <15% 警告 + 幣別 mismatch 行 + src 行(後台模擬訂單核對提醒)
+- [x] 更新售價從毛利卡也可走(同 m2 🔒 路徑,UpdatePriceDialog 改收結構性 PriceTarget)
+- [x] i18n · tsc 0 · Vitest(server/services/supplierMargin.test.ts 8 測試:margin/警戒線/幣別誠實/排序)
+- [ ] marginAudit SQL 對真 DB 驗證(本機無 .env,ship 後 prod 看一眼)
 
 ## DoD Checklist
-- [ ] tsc --noEmit 0 errors
-- [ ] Vitest 全綠(1885+ 基線)
-- [ ] i18n parity:全部新 key zh-TW + en
-- [ ] 碰錢動作(更新售價)🔒 gated + 走既有 mutation
-- [ ] 手機:w-full min-w-0 / truncate / 點擊區 / text-base 內建(截圖驗證待 prod)
-- [ ] Jeff visual approval
+- [x] tsc --noEmit 0 errors
+- [x] Vitest 全綠(全套 2049 passed,基線 1885 → +164)
+- [x] i18n parity:7149 keys 100%(sup* 共 144 keys)
+- [x] 碰錢動作(更新售價)🔒 gated + 走既有 tours.update
+- [x] 手機:w-full min-w-0 / truncate / 點擊區 ≥44px / text-base 內建(截圖驗證待 prod)
+- [x] 300 行紅線:10 個元件檔全部 ≤300(shell 65 / sync 246 / monitor 156 / monitorCards 299 / catalog 166 / catalogParts 207 / enrichmentCard 93 / competitor 167 / competitorManage 221 / marginCard 122)
+- [ ] Jeff visual approval(prod 親驗)

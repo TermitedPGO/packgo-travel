@@ -513,6 +513,15 @@ export const zhTW = {
     supCmpDeleteGo: '刪除',
     supCmpDeleted: '已刪除',
     supCmpEmpty: '還沒有追蹤任何競品行程',
+    supMgTitle: '成本毛利稽核',
+    supMgCount: '低毛利 {low} / 共 {total} 筆',
+    supMgCost: '後台成本（未來班次最低同業價）',
+    supMgPrice: '我的售價',
+    supMgMargin: '毛利',
+    supMgNA: '無法計算',
+    supMgWarn: '毛利低於 15% 安全線，成本可能已漲、售價未跟。',
+    supMgMismatch: '成本（{cost}）與售價（{price}）幣別不同，不自動換匯，請後台核對。',
+    supMgSrc: '價格須對後台：以供應商後台模擬訂單為準，此處僅供初篩。',
   },
   // 通用
   common: {

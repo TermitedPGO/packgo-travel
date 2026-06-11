@@ -401,6 +401,87 @@ export const suppliersRouter = router({
   /* ────────────────────────── detail enrichment ──────────────────────── */
 
   /**
+   * 批5 m5 — 成本毛利稽核(唯讀)。Imported tours joined back to their
+   * supplier mirror via the external code embedded in sourceUrl (extracted
+   * with SUBSTRING_INDEX so the join is an equi-probe on the
+   * externalProductCode index, not an O(tours×products) LIKE scan). Cost =
+   * MIN future-departure agentPrice. Margin math + honest currency-mismatch
+   * handling live in services/supplierMargin.ts (pure, tested).
+   */
+  marginAudit: adminProcedure
+    .input(
+      z.object({
+        limit: z.number().int().min(1).max(100).default(20),
+        /** flag rows whose margin is below this (default 15% 安全線). */
+        threshold: z.number().min(0).max(1).default(0.15),
+      })
+    )
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const codeFromSourceUrl = sql<string>`CASE
+        WHEN ${toursTable.sourceUrl} LIKE '%NormGroupID=%'
+          THEN SUBSTRING_INDEX(SUBSTRING_INDEX(${toursTable.sourceUrl}, 'NormGroupID=', -1), '&', 1)
+        WHEN ${toursTable.sourceUrl} LIKE '%/product/detail/%'
+          THEN SUBSTRING_INDEX(SUBSTRING_INDEX(SUBSTRING_INDEX(${toursTable.sourceUrl}, '/product/detail/', -1), '/', 1), '?', 1)
+        END`;
+
+      const rows = await db
+        .select({
+          tourId: toursTable.id,
+          title: sql<string>`${toursTable.title}`,
+          price: toursTable.price,
+          priceCurrency: toursTable.priceCurrency,
+          externalProductCode: productsTable.externalProductCode,
+          supplierCode: suppliersTable.code,
+          minCost: sql<string | null>`MIN(${supplierDeparturesTable.agentPrice})`,
+          costCurrency: sql<string | null>`MAX(${supplierDeparturesTable.currency})`,
+        })
+        .from(toursTable)
+        .innerJoin(
+          productsTable,
+          eq(productsTable.externalProductCode, codeFromSourceUrl)
+        )
+        .innerJoin(
+          suppliersTable,
+          eq(suppliersTable.id, productsTable.supplierId)
+        )
+        .innerJoin(
+          supplierDeparturesTable,
+          and(
+            eq(supplierDeparturesTable.supplierProductId, productsTable.id),
+            gte(supplierDeparturesTable.departureDate, sql`CURDATE()`),
+            sql`${supplierDeparturesTable.agentPrice} IS NOT NULL`,
+            sql`${supplierDeparturesTable.agentPrice} > 0`
+          )
+        )
+        .where(
+          and(
+            eq(toursTable.status, "active"),
+            sql`${toursTable.sourceUrl} IS NOT NULL`
+          )
+        )
+        .groupBy(
+          toursTable.id,
+          productsTable.id,
+          suppliersTable.code
+        );
+
+      const { shapeMarginAudit } = await import("../services/supplierMargin");
+      const items = shapeMarginAudit(
+        rows.map((r) => ({ ...r, price: Number(r.price) })),
+        input.threshold
+      );
+      return {
+        items: items.slice(0, input.limit),
+        totalMatched: items.length,
+        belowThreshold: items.filter((i) => i.belowThreshold).length,
+        threshold: input.threshold,
+      };
+    }),
+
+  /**
    * Detail enrichment status — count of active products with each
    * parseStatus, per supplier. Powers admin observability tab (M8).
    * 2026-05-24: Stage 1 of supplier deep sync.

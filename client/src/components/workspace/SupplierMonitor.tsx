@@ -7,7 +7,7 @@
  * 「維持原價」= workspaceDispositions(monitor_log) — dims the card, never
  * deletes the log.
  */
-import { useMemo, useState } from "react";
+import { useMemo, useState, lazy, Suspense } from "react";
 import { trpc } from "@/lib/trpc";
 import { useLocale } from "@/contexts/LocaleContext";
 import { toast } from "sonner";
@@ -19,6 +19,10 @@ import {
   UpdatePriceDialog,
   type MonitorLog,
 } from "./SupplierMonitorCards";
+
+// m5 — 成本毛利卡 (mockup b)。Lazy: the audit query joins the whole supplier
+// mirror; only pay for it when the monitor view is actually open.
+const SupplierMarginCard = lazy(() => import("./SupplierMarginCard"));
 
 export default function SupplierMonitor() {
   const { t } = useLocale();
@@ -90,6 +94,10 @@ export default function SupplierMonitor() {
           />
         </div>
       )}
+
+      <Suspense fallback={null}>
+        <SupplierMarginCard />
+      </Suspense>
 
       {logsQ.isLoading && (
         <p className="text-xs text-gray-400 py-4">{t("workspace.loading")}</p>

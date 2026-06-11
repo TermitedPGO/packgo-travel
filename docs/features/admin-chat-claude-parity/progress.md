@@ -38,6 +38,18 @@
 - **批2 待 ship 一覽(4 commit + migration 0092/0093)**:db19477 止血、52c3997 m3b、0805f67 m4、(m5 commit)。卡點:mobile 並行 session 未收檔(gate 2)。
 - 批2 後續(非阻擋):agent 機票選項卡/確認單 PDF 接 skill/出票短訊、客製卡型(找團列帶動作鈕/比較表/客製逐日)、微信未歸戶池 UI。
 
+## 2026-06-11 批4 + 批5 完成(同 session)
+- **批4 行銷全 5 milestone 完成 + commit**(4861fc2 + aea6946):MarketingHub(campaigns/posters/newsletter/AI gen 4 sub-view)+ PosterDistribution(7 平台文案,approve/archive 🔒)+ PosterGenerator(cost gate 🔒)+ SixPlatformComposer(generate ≠ publish 鎖)。全套 vitest 抓到 2 個漏 i18n key 已補。批4 殘項:M5 價格驗證(海報價 vs 後台價)待接、手機截圖(Jeff 跳過)、Jeff 親驗。
+- **批5 供應商全 5 milestone 完成 + 逐 milestone commit**(651bee7 m1 / 7238cca m2 / e1709e6 m3 / 60066fd m4 / m5 見下):
+  - m1 同步:WorkspaceSuppliers 取代 SupplierEnrichmentTabV2;per-supplier 卡 + 最近 runs(failed 黑左條誠實帶 errorMessage)+ 立即同步 dialog
+  - m2 監控:KPI 5 格 + 卡片分類(價格變動/新缺貨/變動/錯誤,ok 過濾)+ **碰錢:更新我的售價 = 🔒 checkbox confirm → 既有 tours.update**;維持原價 = workspaceDispositions("monitor_log" additive)淡化留底;getRecentMonitorLogs LEFT JOIN tours(additive)
+  - m3 商品庫:enrichment 進度卡(吸收 SupplierEnrichmentTabV2)+ listProducts 篩選/分頁 + 單品/批量匯入 + 隱藏
+  - m4 競品:縮編拍板執行 — 每週摘要卡(近 7 天分組)+ 告警列表(severity 左黑條)+ 最小管理;不重建 929 行 tab
+  - m5 毛利:新唯讀 `suppliers.marginAudit`(sourceUrl SUBSTRING_INDEX 取碼 equi-join,幣別不同不換匯誠實標示)+ 毛利卡 <15% 黑框警告 + 同一條 🔒 改價路徑
+- 驗證:tsc 0;全套 vitest **2049 passed / 0 failed**(基線 1885 → +164);i18n 7149 keys 100% parity;300 行紅線 10 檔全守。
+- **批5 待辦**:marginAudit SQL 對真 DB 驗證(本機無 .env)+ Jeff prod 親驗。**待 ship(Jeff token)**。
+- 剩餘批次:7(行程管理)→ 3(財務)→ 8(系統)。
+
 ## 文件
 - proposal.md(Stage 1)✓
 - design.md(Stage 2 定案:設計系統 + 9 鐵律 + shell + 18 項目矩陣 + §4.5 行銷 6 平台 + 後端接點)✓
