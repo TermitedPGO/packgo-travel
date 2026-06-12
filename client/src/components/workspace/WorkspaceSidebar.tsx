@@ -38,9 +38,17 @@ export type WsView =
   | { type: "ai" }
   | { type: "today" }
   | { type: "company"; sub: CompanySub }
-  | { type: "customer"; userId: number };
+  | { type: "customer"; userId: number }
+  // 批9 m3 — email 訪客(customerProfiles row,還沒有帳號)
+  | { type: "guest"; profileId: number };
 
-export type SidebarCustomer = { id: number; name: string | null; email: string | null };
+export type SidebarCustomer = {
+  id: number;
+  name: string | null;
+  email: string | null;
+  /** 批9 m3 — "guest" rows key by profileId and render the 訪客 badge. */
+  kind?: "user" | "guest";
+};
 
 const COMPANY_SUBS: { id: CompanySub; labelKey: string }[] = [
   { id: "tours", labelKey: "workspace.companyTours" },
@@ -234,11 +242,20 @@ export default function WorkspaceSidebar({
           {t("workspace.customersHeader")}
         </div>
         {filtered.map((c) => {
-          const on = view.type === "customer" && view.userId === c.id;
+          const isGuest = c.kind === "guest";
+          const on = isGuest
+            ? view.type === "guest" && view.profileId === c.id
+            : view.type === "customer" && view.userId === c.id;
           return (
             <button
-              key={c.id}
-              onClick={() => onSelect({ type: "customer", userId: c.id })}
+              key={`${c.kind ?? "user"}:${c.id}`}
+              onClick={() =>
+                onSelect(
+                  isGuest
+                    ? { type: "guest", profileId: c.id }
+                    : { type: "customer", userId: c.id },
+                )
+              }
               className={`w-full text-left px-2.5 py-2 rounded-xl flex items-center gap-2.5 ${
                 on ? "bg-black text-white" : "hover:bg-gray-100"
               }`}
@@ -257,7 +274,7 @@ export default function WorkspaceSidebar({
                 <div
                   className={`text-[11px] truncate ${on ? "text-gray-300" : "text-gray-400"}`}
                 >
-                  {c.email}
+                  {isGuest ? t("workspace.guestBadge") : c.email}
                 </div>
               </div>
             </button>

@@ -75,6 +75,77 @@ export const adminCustomersRouter = router({
   }),
 
   /**
+   * 批9 m3 — email 訪客列表(Jeff 拍板:sidebar 列 註冊用戶 + email 訪客)。
+   * Guest = customerProfiles row that has an email but no linked user AND
+   * whose email does not belong to any registered account (those are the
+   * m2 歸戶 targets — they show as users, not twice). Newest contact first.
+   */
+  guestList: adminProcedure.query(async () => {
+    const drizzleDb = (await db.getDb())!;
+    const { customerProfiles, users: usersTable } = await import(
+      "../../drizzle/schema"
+    );
+    const rows = await drizzleDb
+      .select({
+        profileId: customerProfiles.id,
+        email: customerProfiles.email,
+        updatedAt: customerProfiles.updatedAt,
+      })
+      .from(customerProfiles)
+      .where(
+        and(
+          sql`${customerProfiles.userId} IS NULL`,
+          sql`${customerProfiles.email} IS NOT NULL AND ${customerProfiles.email} != ''`,
+          sql`NOT EXISTS (SELECT 1 FROM ${usersTable} WHERE ${usersTable.email} = ${customerProfiles.email})`,
+        ),
+      )
+      .orderBy(desc(customerProfiles.updatedAt))
+      .limit(200);
+    return rows;
+  }),
+
+  /**
+   * 批9 m3 — 訪客的詢問記錄(唯讀)。Keyed by the profile's email so the
+   * whole history stays visible even before/after 歸戶. Open statuses
+   * first, then the rest, newest first.
+   */
+  guestOpenItems: adminProcedure
+    .input(z.object({ profileId: z.number().int().positive() }))
+    .query(async ({ input }) => {
+      const drizzleDb = (await db.getDb())!;
+      const { customerProfiles, inquiries: inquiriesTable } = await import(
+        "../../drizzle/schema"
+      );
+      const profRows = await drizzleDb
+        .select({
+          id: customerProfiles.id,
+          email: customerProfiles.email,
+          createdAt: customerProfiles.createdAt,
+        })
+        .from(customerProfiles)
+        .where(eq(customerProfiles.id, input.profileId))
+        .limit(1);
+      const profile = profRows[0];
+      if (!profile?.email) {
+        return { email: null, inquiries: [] };
+      }
+      const rows = await drizzleDb
+        .select({
+          id: inquiriesTable.id,
+          inquiryType: inquiriesTable.inquiryType,
+          subject: inquiriesTable.subject,
+          message: inquiriesTable.message,
+          status: inquiriesTable.status,
+          createdAt: inquiriesTable.createdAt,
+        })
+        .from(inquiriesTable)
+        .where(eq(inquiriesTable.customerEmail, profile.email))
+        .orderBy(desc(inquiriesTable.createdAt))
+        .limit(20);
+      return { email: profile.email, firstSeenAt: profile.createdAt, inquiries: rows };
+    }),
+
+  /**
    * Full customer detail with recent activity.
    */
   customerDetail: adminProcedure

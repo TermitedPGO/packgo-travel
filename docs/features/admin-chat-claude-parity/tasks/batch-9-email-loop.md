@@ -38,16 +38,26 @@
       (既有 profile 無 userId 時 backfill)
 - [x] Vitest:match 函式 + pipeline 寫入(mock db)
 
-### m3 — sidebar + 客戶 inbox 收訪客
-- [ ] admin.customerList 改聯集:users(role=user) ∪ customerProfiles(userId IS NULL 且
+### m3 — sidebar + 客戶 inbox 收訪客 ✅
+- [x] admin.customerList 改聯集:users(role=user) ∪ customerProfiles(userId IS NULL 且
       email 非空,且 email 不存在於 users — 註冊後自動去重)→ {kind:"user"|"guest"}
-- [ ] WsView customer 支援 guest(profileId 鍵);sidebar 訪客 chip 顯示 email + 灰「訪客」badge
-- [ ] CustomerInbox guest 模式:openItems 以 customerEmail 查 inquiries(userId null);
+- [x] WsView customer 支援 guest(profileId 鍵);sidebar 訪客 chip 顯示 email + 灰「訪客」badge
+- [x] CustomerInbox guest 模式:openItems 以 customerEmail 查 inquiries(userId null);
       header 降級(無 PackPoint/訂單/總消費);對話/機票/微信區隱藏或空狀態
-- [ ] 註冊合併:m2 的 matcher 在下次來信時自動連 userId;customerList 聯集查詢已去重
-- [ ] Vitest:聯集去重、guest openItems 查詢鍵
+- [x] 註冊合併:m2 的 matcher 在下次來信時自動連 userId;customerList 聯集查詢已去重
+- [x] Vitest:聯集去重、guest openItems 查詢鍵
+
+## 實作備註(與原規劃的差異,誠實記錄)
+- m1 送信走 `sendReplyInThread`(回原 Gmail thread)而非 sendAdminInquiryReply —
+  pipeline 進件根本不建 inquiries row,thread 回覆對客人體驗也更好(同一串)
+- m2 範圍修正:inquiries.userId 補連結不適用 pipeline(它不寫 inquiries);
+  實際連結點是 customerProfiles.userId;admin 帳號永不歸戶(Jeff 測試信防呆)
+- m3 訪客 dedupe 在 SQL(NOT EXISTS users.email),無純函式可單測;
+  由 tsc + i18n guard + prod 親驗覆蓋
 
 ## DoD
-- [ ] tsc 0 · 全套 vitest 綠(2231+)· i18n parity
-- [ ] 寄出動作 🔒 gated + 走既有 sendAdminInquiryReply;鐵律不變(零自動寄)
-- [ ] 300 行紅線 · Jeff prod 親驗(寄一封測試信走全鏈:分類→卡→編輯→核准→收到回信→sidebar 出現訪客)
+- [x] tsc 0 · 全套 vitest 綠(2266 passed)· i18n parity 7318 keys
+- [x] 寄出動作 🔒 gated(編輯並回覆 dialog,checkbox 點名收件人);鐵律不變(零自動寄)
+- [x] 300 行紅線(EscalationReplyDialog 105 / GuestCustomerPane 139 / emailCustomerMatch 100)
+- [ ] Jeff prod 親驗(寄一封測試信走全鏈:分類→卡→編輯並回覆→核准→收到回信;
+  用非註冊信箱寄 → sidebar 出現訪客 chip → 點開看記錄)

@@ -30,6 +30,9 @@ const AgentChatPage = lazy(() => import("@/components/admin/AgentChatPage"));
 const CustomerInbox = lazy(
   () => import("@/components/workspace/CustomerInbox"),
 );
+const GuestCustomerPane = lazy(
+  () => import("@/components/workspace/GuestCustomerPane"),
+);
 const WorkspaceCompany = lazy(
   () => import("@/components/workspace/WorkspaceCompany"),
 );
@@ -41,6 +44,10 @@ export default function Workspace() {
   const [view, setView] = useState<WsView>({ type: "today" });
 
   const customersQ = trpc.admin.customerList.useQuery(undefined, {
+    enabled: isAuthenticated,
+  });
+  // 批9 m3 — email 訪客 (Jeff 拍板: sidebar 列 註冊用戶 + 訪客)
+  const guestsQ = trpc.admin.guestList.useQuery(undefined, {
     enabled: isAuthenticated,
   });
   const statsQ = trpc.commandCenter.stats.useQuery(undefined, {
@@ -67,14 +74,24 @@ export default function Workspace() {
     (statsQ.data?.pendingByLane.marketing ?? 0) +
     (statsQ.data?.pendingByLane.finance ?? 0);
 
-  const customers = (customersQ.data ?? []).map((c) => ({
-    id: c.id,
-    name: c.name,
-    email: c.email,
-  }));
+  const customers = [
+    ...(customersQ.data ?? []).map((c) => ({
+      id: c.id,
+      name: c.name,
+      email: c.email,
+      kind: "user" as const,
+    })),
+    ...(guestsQ.data ?? []).map((g) => ({
+      id: g.profileId,
+      name: null,
+      email: g.email,
+      kind: "guest" as const,
+    })),
+  ];
 
   const fallback = <LoadingPage text={t("workspace.loading")} />;
-  const fullHeight = view.type === "ai" || view.type === "customer";
+  const fullHeight =
+    view.type === "ai" || view.type === "customer" || view.type === "guest";
 
   return (
     <div className="h-screen flex bg-white overflow-hidden">
@@ -94,6 +111,9 @@ export default function Workspace() {
               {view.type === "ai" && <AgentChatPage />}
               {view.type === "customer" && (
                 <CustomerInbox userId={view.userId} />
+              )}
+              {view.type === "guest" && (
+                <GuestCustomerPane profileId={view.profileId} />
               )}
             </Suspense>
           </div>
