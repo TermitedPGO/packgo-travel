@@ -79,6 +79,13 @@
 - **專案總結**:39 個 AdminV2 分頁 → 10 個終點頁,8 批(v675-v693,19 個 prod 版本),全程 tsc 0 + vitest 綠(1418 → 2231 tests)+ 七 gate guard ship + Jeff 握 token;深度 UAT(17 節)+ 修復重驗兩輪。
 - 殘留 backlog 見上節(v691+v692 段);AdminV2 archive 移除時間點等 Jeff。
 
+## v694 shipped — 批9 email 迴路收尾(2026-06-12)
+- 起因:flip 後 Jeff 指出「沒有自動回客人或編輯、沒有自動增加客戶」。拍板:① 維持鐵律全核准 ② sidebar 列註冊用戶+email 訪客(profiles 當主檔,不建影子 users)。
+- m1 escalation 卡「編輯並回覆」:context 結構化(customerEmail/subject/draftReply)+ sendEscalationReply 回原 Gmail thread(sendReplyInThread 重用)+ 🔒 dialog 點名收件人;舊 row 優雅降級 view-only。
+- m2 email 歸戶:users.email 精確比對(admin 永不歸戶)+ profile.userId backfill(unique 衝突誠實跳過);pipeline best-effort 永不擋信。
+- m3 訪客:admin.guestList(NOT EXISTS users.email 去重)+ guestOpenItems(email 鍵,歸戶前後歷史不丟)+ sidebar 訪客 chip + GuestCustomerPane 唯讀 inbox。
+- /health 全綠;bundle 驗證 guestBadge/escReplyBtn 在;全套 2266 tests。**Jeff 親驗:用非註冊信箱寄詢問信 → sidebar 訪客 chip → 今日待辦卡「編輯並回覆」→ 核准 → 同一 email 串收到回信。**
+
 ## 文件
 - proposal.md(Stage 1)✓
 - design.md(Stage 2 定案:設計系統 + 9 鐵律 + shell + 18 項目矩陣 + §4.5 行銷 6 平台 + 後端接點)✓
