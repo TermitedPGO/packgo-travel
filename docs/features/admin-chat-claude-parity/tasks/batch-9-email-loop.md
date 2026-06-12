@@ -32,11 +32,11 @@
 - [x] 舊 escalation rows(無 context)優雅降級:不顯示按鈕
 - [x] Vitest:context parse、mutation(mock send)、降級
 
-### m2 — email 歸戶(微信模式平移)
-- [ ] `emailCustomerMatch.ts`:sender email → users.email 直查(註冊客人)→ 回 userId
-- [ ] gmailPipeline 進件:match 到 → inquiries.userId 補上 + customerProfiles.userId 連結
+### m2 — email 歸戶(微信模式平移) ✅
+- [x] `emailCustomerMatch.ts`:sender email → users.email 直查(註冊客人)→ 回 userId
+- [x] gmailPipeline 進件:match 到 → inquiries.userId 補上 + customerProfiles.userId 連結
       (既有 profile 無 userId 時 backfill)
-- [ ] Vitest:match 函式 + pipeline 寫入(mock db)
+- [x] Vitest:match 函式 + pipeline 寫入(mock db)
 
 ### m3 — sidebar + 客戶 inbox 收訪客
 - [ ] admin.customerList 改聯集:users(role=user) ∪ customerProfiles(userId IS NULL 且

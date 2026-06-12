@@ -252,6 +252,23 @@ async function processOneEmail(
       });
       profileId = Number((ins as any)[0]?.insertId ?? 0);
     }
+
+    // 批9 m2 — email 歸戶: when the sender is a REGISTERED customer, link
+    // the profile to their account (WeChat 歸戶 pattern moved to email).
+    // Failure here must never kill mail processing — link is best-effort.
+    if (profileId) {
+      try {
+        const { linkProfileToUserByEmail } = await import(
+          "../../_core/emailCustomerMatch"
+        );
+        await linkProfileToUserByEmail(profileId, senderEmail);
+      } catch (e) {
+        log.warn(
+          { err: e, profileId },
+          "[gmailPipeline] email→user link failed (non-fatal)",
+        );
+      }
+    }
   }
 
   // Pull recent interactions for context (last 5)
