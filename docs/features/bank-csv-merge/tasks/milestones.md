@@ -2,20 +2,19 @@
 
 > Stage 3。每 milestone:tsc 0 + Vitest + commit(green 即 commit)。
 
-## m0 — 驗證殘餘假設(不寫產品碼)
-- [ ] 人工確認標記:bankTransactions 哪個欄位代表「Jeff 確認過分類」(status?reviewedBy?)
-      — 分類重跑的保護線要對準它
-- [ ] date 欄位語義:兩源都是 posted date?(CSV parser 取哪欄、Plaid t.date 語義)
-- [ ] prod ±3 天重疊統計:30001/30004 用 matcher 規則 dry query,預估 backfill 會配到幾組
-      (決定 backfill 是「修正案」還是「空跑」)
+## m0 — 驗證殘餘假設 ✅(2026-06-12)
+- [x] 人工確認標記 = `jeffOverrideCategory`(UI 設分類寫它、報表 jeffOverride ?? agentCategory、
+      重分類資格 = IS NULL)
+- [x] date 語義:CSV「Posted Date」、Plaid `t.date` 都是 posted date(authorized_date 另存)
+- [x] prod ±3 天重疊 = **0 組 / $0**(flyctl ssh 直查)→ **無歷史重複入帳,月報不需修正**
 
-## m1 — matcher 純函式
-- [ ] `server/services/bankCsvMerge.ts`:`matchCsvRowsToPlaid(csvRows, plaidRows)` →
+## m1 — matcher 純函式 ✅
+- [x] `server/services/bankCsvMerge.ts`:`matchCsvRowsToPlaid(csvRows, plaidRows)` →
       `{ merges: [{csvRow, plaidRowId, dateDiff}], inserts: [csvRow], ambiguous: [{csvRow, reason}] }`
-- [ ] 規則:同帳戶(呼叫端保證)+ 金額相等 + |日期差| ≤3 天;最近日優先;一對一;同距多候選
-      → ambiguous;候選被配走 → 次近;全配走 → ambiguous
-- [ ] Vitest:基本配對 / 日差 1-3 / 超窗不配 / 同日同額兩筆(留兩筆)/ 金額不等不配 /
-      已合併標記(merged_from_csv 存在)→ no-op merge
+- [x] 規則:同帳戶(呼叫端保證)+ 金額相等 + |日期差| ≤3 天;最近日優先;一對一;同距多候選
+      → ambiguous;候選被配走 → 次近;全配走 → ambiguous;確定性排序(重跑同結果)
+- [x] Vitest 16 條:配對/日差邊界/超窗/同日同額兩筆/金額不等/冪等標記/他人認領不搶/
+      確定性/enrichment 欄位不變式(無 amount/date/分類鍵)
 
 ## m2 — csvImport 接 matcher
 - [ ] csvImport:解析後先撈該帳戶 ±窗內 Plaid rows → matcher → merges 走 enrich
@@ -24,7 +23,13 @@
 - [ ] enrich 寫 audit log(action: bankTxn.csvMerge)
 - [ ] Vitest:import 整合(mock db)三路徑
 
-## m3 — backfill 既有資料
+## m3 — backfill 既有資料(**m0 改判:降級**)
+
+> m0 實測歷史重疊 0 組 → 獨立 backfill procedure 不做。改為 m2 匯入路徑內建防禦分支:
+> matcher 配中且同 syntheticId 的舊 CSV row 已存在 → enrich Plaid row + 刪舊 CSV row
+> (transaction + audit)。Jeff 日後要回補 = 重新上傳舊 CSV 即可。
+
+### ~~原 m3 規劃(留檔)~~
 - [ ] `plaid.csvMergeBackfill`(dryRun 預設 true):報告配對清單 + per-月 P&L 修正額
 - [ ] 執行模式:transaction 包(enrich + 刪 CSV row + audit);斷言 SUM(amount) 變化
       == 預告修正額,不符 rollback
