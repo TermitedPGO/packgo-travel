@@ -82,9 +82,17 @@ export const adminCustomersRouter = router({
    */
   guestList: adminProcedure.query(async () => {
     const drizzleDb = (await db.getDb())!;
-    const { customerProfiles, users: usersTable } = await import(
-      "../../drizzle/schema"
-    );
+    const {
+      customerProfiles,
+      users: usersTable,
+      inquiries: inquiriesTable,
+      agentMessages,
+    } = await import("../../drizzle/schema");
+    // 訪客門檻 (v694 hotfix): 123 historical profiles were mostly noise
+    // senders (bank alerts / marketing blasts) profiled before the
+    // pipeline's noise filter existed. A guest only earns a sidebar chip
+    // when there is actual CUSTOMER content behind it — an inquiry row or
+    // an escalation — otherwise the customer list drowns in junk.
     const rows = await drizzleDb
       .select({
         profileId: customerProfiles.id,
@@ -97,6 +105,10 @@ export const adminCustomersRouter = router({
           sql`${customerProfiles.userId} IS NULL`,
           sql`${customerProfiles.email} IS NOT NULL AND ${customerProfiles.email} != ''`,
           sql`NOT EXISTS (SELECT 1 FROM ${usersTable} WHERE ${usersTable.email} = ${customerProfiles.email})`,
+          sql`(
+            EXISTS (SELECT 1 FROM ${inquiriesTable} WHERE ${inquiriesTable.customerEmail} = ${customerProfiles.email})
+            OR EXISTS (SELECT 1 FROM ${agentMessages} WHERE ${agentMessages.relatedCustomerProfileId} = ${customerProfiles.id} AND ${agentMessages.messageType} = 'escalation')
+          )`,
         ),
       )
       .orderBy(desc(customerProfiles.updatedAt))
