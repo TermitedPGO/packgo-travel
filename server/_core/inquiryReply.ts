@@ -103,6 +103,20 @@ export async function sendAdminInquiryReply(
     }
   }
 
+  // 2.5 客戶往來時間軸補「我方回覆」(2026-06-12 流程閉環;best-effort,
+  //     絕不讓記帳失敗污染已成功的寄送結果)。
+  if (emailSent && inquiry.customerEmail) {
+    const { recordOutboundEmailInteraction } = await import(
+      "./outboundInteraction"
+    );
+    await recordOutboundEmailInteraction({
+      customerEmail: inquiry.customerEmail,
+      body: input.body,
+      summary: `回覆:${inquiry.subject || "(無主旨)"}(你核准寄出)`,
+      generatedBy: "ai_draft_human_approved",
+    });
+  }
+
   // 3. On a successful send, advance the thread to "replied" so the Inbox
   //    reflects state. Best-effort — never block on it.
   if (emailSent && inquiry.status !== "replied") {

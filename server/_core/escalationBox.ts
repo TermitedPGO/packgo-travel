@@ -428,6 +428,17 @@ export async function sendEscalationReply(
     .set({ readByJeff: 1, readAt: new Date(), jeffResponse: body })
     .where(eq(agentMessages.id, messageId));
 
+  // 客戶往來時間軸補「我方回覆」(best-effort,絕不影響已寄出的結果)
+  const { recordOutboundEmailInteraction } = await import(
+    "./outboundInteraction"
+  );
+  await recordOutboundEmailInteraction({
+    customerEmail: target.customerEmail,
+    body,
+    summary: `回覆:${target.subject || "(無主旨)"}(你核准寄出)`,
+    generatedBy: "ai_draft_human_approved",
+  });
+
   log.info(
     { messageId, to: target.customerEmail },
     "[escalationBox] escalation reply sent",
