@@ -489,18 +489,47 @@ ${args.originalCopyText ? `供應商原宣傳文(供參考,但要重寫成 PACK&
   let raw = (typeof rawContent === "string" ? rawContent : "").trim() || "{}";
   raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
   try {
-    // v690 UAT B-04: the LLM sometimes answers {"text": ..., "hashtags": [...]}
-    // instead of the requested {"copyText": ..., "hashtags": "..."} — accept
-    // both shapes so a raw JSON blob never reaches the copyText column.
+    // v690 UAT B-04 (+v691 重驗): the LLM sometimes answers
+    //   {"text": ..., "hashtags": [...]}                              (shape 1)
+    //   {"copyText": ..., "hashtags": "..."}                          (shape 2)
+    //   {"platform": ..., "content": {"subject_line": ..., "body": …}} (shape 3)
+    // instead of the requested format — accept all three so a raw JSON
+    // blob never reaches the copyText column. Mirrors the client-side
+    // normalizePlatformCopy (client/src/components/workspace/platformCopy.ts).
     const parsed = JSON.parse(raw) as {
       copyText?: string;
       text?: string;
+      content?: Record<string, unknown>;
       hashtags?: string | string[];
     };
-    const copyText = parsed.copyText || parsed.text || "";
-    const hashtags = Array.isArray(parsed.hashtags)
-      ? parsed.hashtags.filter((s) => typeof s === "string").join(" ")
-      : parsed.hashtags;
+    let copyText = parsed.copyText || parsed.text || "";
+    let rawTags: unknown = parsed.hashtags;
+    if (!copyText && parsed.content && typeof parsed.content === "object") {
+      const c = parsed.content;
+      const parts: string[] = [];
+      for (const k of ["subject_line", "subject", "preview_text", "greeting",
+        "intro", "body", "body_text", "text", "copyText", "cta", "closing",
+        "signature"]) {
+        const v = c[k];
+        if (typeof v === "string" && v.trim()) parts.push(v.trim());
+        else if (Array.isArray(v)) {
+          const lines = v.filter((s): s is string => typeof s === "string");
+          if (lines.length > 0) parts.push(lines.join("\n"));
+        }
+      }
+      copyText = parts.join("\n\n");
+      if (rawTags == null) rawTags = c.hashtags;
+    }
+    const hashtags = Array.isArray(rawTags)
+      ? rawTags.filter((s): s is string => typeof s === "string").join(" ")
+      : typeof rawTags === "string"
+        ? rawTags
+        : undefined;
+    // Still nothing extractable → fall through to the raw-text fallback so
+    // the admin at least sees SOMETHING editable.
+    if (!copyText) {
+      return { platform: args.platform, copyText: raw, hashtags };
+    }
     return { platform: args.platform, copyText, hashtags };
   } catch (err) {
     log.error({ err, platform: args.platform, raw }, "[Poster] Copy JSON parse failed");

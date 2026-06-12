@@ -34,8 +34,36 @@ describe("normalizePlatformCopy", () => {
     expect(normalizePlatformCopy(blob, "column").hashtags).toBe("column");
   });
 
-  it("JSON without text/copyText keys stays raw (don't guess)", () => {
-    const blob = JSON.stringify({ subject: "x", body: "y" });
+  it("unwraps shape 3: nested content object (v691 re-verify finding)", () => {
+    const blob = JSON.stringify({
+      platform: "Email Newsletter",
+      content: {
+        subject_line: "【限時揭秘】北京-西安深度體驗",
+        body: "親愛的朋友您好，這趟行程我們親自把關…",
+        hashtags: ["北京", "西安"],
+      },
+    });
+    const out = normalizePlatformCopy(blob, null);
+    expect(out.text).toBe(
+      "【限時揭秘】北京-西安深度體驗\n\n親愛的朋友您好，這趟行程我們親自把關…",
+    );
+    expect(out.hashtags).toBe("北京 西安");
+  });
+
+  it("unwraps content fields at top level (subject + body, no wrapper)", () => {
+    const blob = JSON.stringify({ subject: "標題", body: "內文" });
+    expect(normalizePlatformCopy(blob).text).toBe("標題\n\n內文");
+  });
+
+  it("bullet-list array fields become one line per bullet", () => {
+    const blob = JSON.stringify({
+      content: { subject_line: "S", body: "B", cta: "去 packgoplay.com" },
+    });
+    expect(normalizePlatformCopy(blob).text).toBe("S\n\nB\n\n去 packgoplay.com");
+  });
+
+  it("truly unrecognisable JSON stays raw (don't guess)", () => {
+    const blob = JSON.stringify({ foo: "x", bar: 5 });
     expect(normalizePlatformCopy(blob).text).toBe(blob);
   });
 
