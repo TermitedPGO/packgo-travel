@@ -73,6 +73,12 @@
 - **下批 backlog(UAT 產出)**:B-03 海報 price-in-image guard(P2)、毛利匯率換算、行程庫 pageSize 1000 cap(2,635 筆只顯示 1000 + 8-10s 載入 → server 分頁/virtual scroll)、B-05 淨利 alert 雙桶重複、B-06 EN 模式 AI 分類標籤、批3 匯出稽核 §17550 鈕 + 「全部接受 AI 建議」鈕(mockup 缺項)、cost gate dialog a11y description×3。
 - **flip /admin 條件**:UAT 結論 = 修完 P1+P2(已完成並上線)→ 條件達成,等 Jeff 一聲令下把 /admin 指向 Workspace(AdminV2 留檔)。順帶:舊 /admin 工作台→行程已壞(badge 2635/列表 0),flip 後自然解決。
 
+## 🏁 v693 shipped — THE FLIP 完成(2026-06-12,專案收官)
+- `/admin` + 舊 `/admin/v2` → redirect `/workspace`;客人端 Header 管理後台直指 /workspace;AdminV2 留檔 `/admin-v2-archive`(信任期 fallback,穩定後移除)。
+- 線上驗證:/health 全綠(db 27ms / redis 7ms / stripe 329ms / llm 373ms)、新 bundle 含 admin-v2-archive 標誌、token 用完即焚。
+- **專案總結**:39 個 AdminV2 分頁 → 10 個終點頁,8 批(v675-v693,19 個 prod 版本),全程 tsc 0 + vitest 綠(1418 → 2231 tests)+ 七 gate guard ship + Jeff 握 token;深度 UAT(17 節)+ 修復重驗兩輪。
+- 殘留 backlog 見上節(v691+v692 段);AdminV2 archive 移除時間點等 Jeff。
+
 ## 文件
 - proposal.md(Stage 1)✓
 - design.md(Stage 2 定案:設計系統 + 9 鐵律 + shell + 18 項目矩陣 + §4.5 行銷 6 平台 + 後端接點)✓
