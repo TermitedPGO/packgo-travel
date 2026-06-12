@@ -16,12 +16,17 @@
 - [x] Vitest 16 條:配對/日差邊界/超窗/同日同額兩筆/金額不等/冪等標記/他人認領不搶/
       確定性/enrichment 欄位不變式(無 amount/date/分類鍵)
 
-## m2 — csvImport 接 matcher
-- [ ] csvImport:解析後先撈該帳戶 ±窗內 Plaid rows → matcher → merges 走 enrich
-      (design §2 欄位規則,含 merged_from_csv 冪等檢查)、inserts 照舊插入、ambiguous 照舊插入
-- [ ] 回傳加 `{merged, mergedAlready, inserted, ambiguous}`;前端 toast 同步顯示
-- [ ] enrich 寫 audit log(action: bankTxn.csvMerge)
-- [ ] Vitest:import 整合(mock db)三路徑
+## m2 — csvImport 接 matcher ✅
+- [x] csvImport:撈該帳戶 [min-3, max+3] 窗內 Plaid rows → matcher → merges 走 enrich、
+      inserts/ambiguous 照舊 upsert;dryRun 回 wouldMerge/wouldInsert/ambiguous 預覽
+- [x] 內建防禦分支(m3 降級而來):配中且舊 CSV twin row 存在 → 刪 twin + audit
+      (bankTxn.csvMergeRemoveTwin);重新上傳舊 CSV 即回補
+- [x] 回傳 {merged, mergedAlready, ambiguous, removedOldCsvRows};前端 dialog 預覽行 +
+      commit toast 顯示合併數
+- [x] enrich audit log(bankTxn.csvMerge,記 csvSyntheticId/dateDiffDays/plaid 原名)
+- [x] 誠實記錄:三路徑分流邏輯由 m1 的 16 條純測試蓋;router 膠水(SQL 窗/update/delete)
+      mock 測試 = 測 mock 本身,不寫 — 靠 tsc + 全套 + prod 親驗(同批9 m3 模式)
+- [x] matcher 改泛型 <C extends CsvRowLike>(tsc 抓到 ParsedCsvRow 流經 matcher 丟欄位)
 
 ## m3 — backfill 既有資料(**m0 改判:降級**)
 

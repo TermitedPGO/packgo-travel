@@ -1526,7 +1526,17 @@ function CsvImportDialog({
       csvText,
       dryRun: false,
     });
-    toast.success(t("admin.bankLedgerTab.csvImportToastSuccess", { count: r.upserted ?? 0, format: r.format ?? "" }));
+    const mergedN = (r as { merged?: number }).merged ?? 0;
+    if (mergedN > 0) {
+      toast.success(
+        t("admin.bankLedgerTab.csvImportToastMerged", {
+          merged: mergedN,
+          inserted: r.upserted ?? 0,
+        }),
+      );
+    } else {
+      toast.success(t("admin.bankLedgerTab.csvImportToastSuccess", { count: r.upserted ?? 0, format: r.format ?? "" }));
+    }
     onComplete();
     onClose();
     setCsvText("");
@@ -1620,6 +1630,20 @@ function CsvImportDialog({
                 <div>
                   {t("admin.bankLedgerTab.csvImportDateRange", { min: preview.dateMin, max: preview.dateMax })}
                 </div>
+                {(preview.wouldMerge > 0 ||
+                  preview.wouldMergeAlready > 0 ||
+                  preview.ambiguous > 0) && (
+                  <div className="font-medium text-gray-900">
+                    {t("admin.bankLedgerTab.csvImportMergePreview", {
+                      merge: preview.wouldMerge ?? 0,
+                      insert: preview.wouldInsert ?? 0,
+                    })}
+                    {preview.wouldMergeAlready > 0 &&
+                      ` · ${t("admin.bankLedgerTab.csvImportMergedAlready", { n: preview.wouldMergeAlready })}`}
+                    {preview.ambiguous > 0 &&
+                      ` · ${t("admin.bankLedgerTab.csvImportAmbiguous", { n: preview.ambiguous })}`}
+                  </div>
+                )}
                 {preview.warnings?.length > 0 && (
                   <div className="text-amber-700">
                     ⚠️ {t("admin.bankLedgerTab.csvImportWarnings", { count: preview.warnings.length })}:

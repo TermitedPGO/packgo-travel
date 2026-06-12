@@ -43,23 +43,23 @@ export interface PlaidRowLike {
   paymentMeta: unknown;
 }
 
-export interface MergePair {
-  csvRow: CsvRowLike;
+export interface MergePair<C extends CsvRowLike = CsvRowLike> {
+  csvRow: C;
   plaidRow: PlaidRowLike;
   dateDiffDays: number;
   /** paymentMeta.merged_from_csv already names this CSV row → no-op. */
   alreadyMerged: boolean;
 }
 
-export interface AmbiguousRow {
-  csvRow: CsvRowLike;
+export interface AmbiguousRow<C extends CsvRowLike = CsvRowLike> {
+  csvRow: C;
   reason: "multiple-equidistant" | "candidates-consumed";
 }
 
-export interface MatchResult {
-  merges: MergePair[];
-  inserts: CsvRowLike[];
-  ambiguous: AmbiguousRow[];
+export interface MatchResult<C extends CsvRowLike = CsvRowLike> {
+  merges: MergePair<C>[];
+  inserts: C[];
+  ambiguous: AmbiguousRow<C>[];
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -94,14 +94,14 @@ export function mergedFromCsvOf(paymentMeta: unknown): string | null {
   return typeof v === "string" && v ? v : null;
 }
 
-export function matchCsvRowsToPlaid(
-  csvRows: CsvRowLike[],
+export function matchCsvRowsToPlaid<C extends CsvRowLike>(
+  csvRows: C[],
   plaidRows: PlaidRowLike[],
   windowDays = 3,
-): MatchResult {
-  const merges: MergePair[] = [];
-  const inserts: CsvRowLike[] = [];
-  const ambiguous: AmbiguousRow[] = [];
+): MatchResult<C> {
+  const merges: MergePair<C>[] = [];
+  const inserts: C[] = [];
+  const ambiguous: AmbiguousRow<C>[] = [];
 
   // Index Plaid rows by amount for O(n) candidate lookup.
   const byAmount = new Map<string, PlaidRowLike[]>();

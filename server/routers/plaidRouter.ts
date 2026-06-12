@@ -558,7 +558,7 @@ export const plaidRouter = router({
         dryRun: z.boolean().default(false),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
@@ -583,14 +583,51 @@ export const plaidRouter = router({
         linkedAccountId: input.linkedAccountId,
       });
 
+      // bank-csv-merge m2 — before touching the DB, decide per CSV row
+      // whether it IS an already-synced Plaid transaction (BofA-via-Plaid
+      // strips Zelle memos down to "PURCHASE"; the CSV carries the full
+      // bank line). Matched rows ENRICH the Plaid row instead of inserting
+      // a twin.
+      const { matchCsvRowsToPlaid, buildEnrichment } = await import(
+        "../services/bankCsvMerge"
+      );
+      const sortedDates = parsed.rows.map((r) => r.date).sort();
+      const dateMin = sortedDates[0] ?? null;
+      const dateMax = sortedDates.at(-1) ?? null;
+      const shiftDay = (d: string, days: number) =>
+        new Date(Date.parse(d) + days * 86_400_000).toISOString().slice(0, 10);
+
+      type CsvRow = (typeof parsed.rows)[number];
+      let matchResult: import("../services/bankCsvMerge").MatchResult<CsvRow> = {
+        merges: [],
+        inserts: parsed.rows,
+        ambiguous: [],
+      };
+      if (parsed.rows.length > 0 && dateMin && dateMax) {
+        const plaidRows = await db
+          .select({
+            id: bankTransactions.id,
+            plaidTransactionId: bankTransactions.plaidTransactionId,
+            date: bankTransactions.date,
+            amount: bankTransactions.amount,
+            merchantName: bankTransactions.merchantName,
+            description: bankTransactions.description,
+            paymentMeta: bankTransactions.paymentMeta,
+          })
+          .from(bankTransactions)
+          .where(
+            and(
+              eq(bankTransactions.linkedAccountId, input.linkedAccountId),
+              sql`${bankTransactions.plaidTransactionId} NOT LIKE 'csv:%'`,
+              sql`${bankTransactions.plaidTransactionId} NOT LIKE 'manual_%'`,
+              sql`${bankTransactions.date} >= ${shiftDay(dateMin, -3)}`,
+              sql`${bankTransactions.date} <= ${shiftDay(dateMax, 3)}`,
+            ),
+          );
+        matchResult = matchCsvRowsToPlaid(parsed.rows, plaidRows);
+      }
+
       if (input.dryRun) {
-        const dateMin = parsed.rows
-          .map((r) => r.date)
-          .sort()[0] ?? null;
-        const dateMax = parsed.rows
-          .map((r) => r.date)
-          .sort()
-          .at(-1) ?? null;
         return {
           dryRun: true,
           format: parsed.format,
@@ -598,6 +635,14 @@ export const plaidRouter = router({
           warnings: parsed.warnings.slice(0, 20),
           dateMin,
           dateMax,
+          // merge preview so the commit step can say what will happen
+          wouldMerge: matchResult.merges.filter((m) => !m.alreadyMerged)
+            .length,
+          wouldMergeAlready: matchResult.merges.filter((m) => m.alreadyMerged)
+            .length,
+          wouldInsert:
+            matchResult.inserts.length + matchResult.ambiguous.length,
+          ambiguous: matchResult.ambiguous.length,
           sample: parsed.rows.slice(0, 5).map((r) => ({
             date: r.date,
             amount: r.amount,
@@ -606,10 +651,87 @@ export const plaidRouter = router({
         };
       }
 
-      // Real insert path — onDuplicateKeyUpdate so re-uploads dedup.
+      const { audit } = await import("../_core/auditLog");
+
+      // ── merge path: enrich the surviving Plaid row. Amount/date/category
+      // are deliberately never written here (錢的不變式 — bankCsvMerge docs).
+      let merged = 0;
+      let mergedAlready = 0;
+      let removedOldCsvRows = 0;
+      for (const m of matchResult.merges) {
+        try {
+          if (m.alreadyMerged) {
+            mergedAlready++;
+          } else {
+            const e = buildEnrichment(m.csvRow, m.plaidRow);
+            await db
+              .update(bankTransactions)
+              .set({
+                description: e.description,
+                originalDescription: e.originalDescription,
+                merchantName: e.merchantName,
+                paymentMeta: e.paymentMeta,
+                updatedAt: new Date(),
+              })
+              .where(eq(bankTransactions.id, m.plaidRow.id));
+            merged++;
+            audit({
+              ctx,
+              action: "bankTxn.csvMerge",
+              targetType: "bankTransaction",
+              targetId: m.plaidRow.id,
+              changes: {
+                csvSyntheticId: m.csvRow.syntheticId,
+                dateDiffDays: m.dateDiffDays,
+                plaidOriginalName: m.plaidRow.description,
+              },
+            });
+          }
+
+          // Defensive de-dup (descoped m3): if a PREVIOUS import already
+          // inserted this CSV row as its own twin, remove it now that the
+          // Plaid row carries the full description. Prod has 0 such pairs
+          // today (m0 verified); this keeps re-uploads of old CSVs safe.
+          const [oldTwin] = await db
+            .select({ id: bankTransactions.id })
+            .from(bankTransactions)
+            .where(
+              eq(bankTransactions.plaidTransactionId, m.csvRow.syntheticId),
+            )
+            .limit(1);
+          if (oldTwin) {
+            await db
+              .delete(bankTransactions)
+              .where(eq(bankTransactions.id, oldTwin.id));
+            removedOldCsvRows++;
+            audit({
+              ctx,
+              action: "bankTxn.csvMergeRemoveTwin",
+              targetType: "bankTransaction",
+              targetId: oldTwin.id,
+              changes: {
+                mergedIntoPlaidRowId: m.plaidRow.id,
+                csvSyntheticId: m.csvRow.syntheticId,
+              },
+            });
+          }
+        } catch (err) {
+          console.warn(
+            `[csv import] merge failed: ${(err as Error)?.message}`,
+          );
+        }
+      }
+
+      // ── insert path (unmatched + ambiguous) — unchanged upsert semantics.
+      // Ambiguous rows insert as before: two visible rows for Jeff beat a
+      // guessed-wrong merge (design §1).
+      const toInsert = [
+        ...matchResult.inserts,
+        ...matchResult.ambiguous.map((a) => a.csvRow),
+      ];
       let inserted = 0;
       let updated = 0;
-      for (const r of parsed.rows) {
+      for (const r of toInsert) {
         try {
           await db
             .insert(bankTransactions)
@@ -656,6 +778,10 @@ export const plaidRouter = router({
         warnings: parsed.warnings.slice(0, 20),
         upserted: inserted,
         updated,
+        merged,
+        mergedAlready,
+        ambiguous: matchResult.ambiguous.length,
+        removedOldCsvRows,
       };
     }),
 
