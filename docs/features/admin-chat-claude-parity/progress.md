@@ -86,6 +86,9 @@
 - m3 訪客:admin.guestList(NOT EXISTS users.email 去重)+ guestOpenItems(email 鍵,歸戶前後歷史不丟)+ sidebar 訪客 chip + GuestCustomerPane 唯讀 inbox。
 - /health 全綠;bundle 驗證 guestBadge/escReplyBtn 在;全套 2266 tests。**Jeff 親驗:用非註冊信箱寄詢問信 → sidebar 訪客 chip → 今日待辦卡「編輯並回覆」→ 核准 → 同一 email 串收到回信。**
 
+## v695 shipped — 訪客門檻 hotfix(2026-06-12)
+- prod 實測抓到:歷史訪客檔 123 個多為噪音(銀行/行銷信,噪音過濾上線前的遺留)。guestList 加內容門檻(有 inquiry 或 escalation 才列),prod 驗證 123 → 2 真訪客。/health 全綠。
+
 ## 文件
 - proposal.md(Stage 1)✓
 - design.md(Stage 2 定案:設計系統 + 9 鐵律 + shell + 18 項目矩陣 + §4.5 行銷 6 平台 + 後端接點)✓
