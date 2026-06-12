@@ -51,7 +51,7 @@ alwaysEscalate − 硬編碼排除。
 editedPayload — **歷史資料現成可算**。
 - 新唯讀 procedure `commandCenter.autoReplyReadiness`:近 14 天 per-classification
   {樣本數, 不改直接核准數, 編輯後核准數, 拒絕數, 不改率} + 影子 would_auto_send 數
-- 呈現:政策卡內嵌一張小表(達標類別亮「可開」徽章:樣本 ≥10 且不改率 ≥90%)
+- 呈現:政策卡內嵌一張小表(達標徽章門檻 **拍板:樣本 ≥20 且不改率 ≥95%**)
 
 ## 5. 政策開關 UI(批8 系統頁的 Agent 開關 placeholder 接真後端)
 

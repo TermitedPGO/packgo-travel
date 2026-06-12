@@ -39,6 +39,7 @@ import {
   type GmailMessageSummary,
 } from "../../_core/gmail";
 import { runInquiryAgent, DEFAULT_INQUIRY_POLICY } from "./inquiryAgent";
+import { evaluateAutoSend } from "./autoSendGate";
 import { runRefundAgent, DEFAULT_REFUND_POLICY } from "./refundAgent";
 import { createChildLogger } from "../../_core/logger";
 const log = createChildLogger({ module: "gmailPipeline" });
@@ -489,15 +490,39 @@ async function processOneEmail(
   } catch {
     parsedPolicy = {};
   }
-  const autoSendEnabled = parsedPolicy.autoSendEnabled === true;
-  const autoSendThreshold =
-    typeof parsedPolicy.autoSendMinConfidence === "number"
-      ? parsedPolicy.autoSendMinConfidence
-      : 85;
-  let meetsAutoSend =
-    autoSendEnabled &&
-    !decision.shouldEscalate &&
-    decision.confidence >= autoSendThreshold;
+  // email-auto-reply m1 — the eight-step gate lives in autoSendGate.ts
+  // (pure, unit-tested). The pipeline only counts today's sends and
+  // executes the verdict. Shadow evidence records even while the master
+  // switch is off (Stage A of the 信任階梯, 拍板 2026-06-12).
+  let todaysAutoSent = 0;
+  try {
+    const [capRow] = await db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(interactionOutcomes)
+      .where(
+        and(
+          eq(interactionOutcomes.agentName, "inquiry"),
+          eq(interactionOutcomes.actionTaken, "auto_replied"),
+          sql`DATE(${interactionOutcomes.createdAt}) = CURDATE()`,
+        ),
+      );
+    todaysAutoSent = Number(capRow?.c ?? 0);
+  } catch {
+    // count failure must fail SAFE: pretend the cap is hit
+    todaysAutoSent = Number.MAX_SAFE_INTEGER;
+  }
+
+  let gate = evaluateAutoSend(
+    {
+      classification: decision.classification,
+      confidence: decision.confidence,
+      shouldEscalate: decision.shouldEscalate,
+      hasAttachments: attachmentsForAgent.length > 0,
+      todaysAutoSent,
+    },
+    parsedPolicy,
+  );
+  let meetsAutoSend = gate.verdict !== "draft";
 
   // SECURITY_AUDIT_2026_05_14 P1-6: post-LLM sanity check on the draft.
   // Even with delimiters around the customer's raw email, a determined
@@ -530,13 +555,18 @@ async function processOneEmail(
         " | post-LLM safety: draft matched sensitive pattern " +
         tripped.toString();
       meetsAutoSend = false;
+      gate = { verdict: "draft", reason: "post-llm-blacklist" };
     }
   }
 
-  // Phase 2.5: if all gates pass, attempt the actual send
+  // Phase 2.5: execute the verdict. "shadow" records the evidence and
+  // sends NOTHING (decoupled from the global AGENT_DRY_RUN env, which
+  // stays as the emergency stop for REAL sends only).
   let sendOutcome: "auto_replied" | "would_auto_send" | "send_failed" | null = null;
   let sentGmailMessageId: string | undefined;
-  if (meetsAutoSend && senderEmail) {
+  if (gate.verdict === "shadow" && senderEmail) {
+    sendOutcome = "would_auto_send";
+  } else if (gate.verdict === "send" && meetsAutoSend && senderEmail) {
     try {
       const send = await sendReplyInThread(sendCtx.gmail, {
         threadId: msg.threadId,
@@ -666,18 +696,23 @@ async function processOneEmail(
       //   (c) classification is in alwaysEscalate
       let draftReason = "";
       if (!sendOutcome) {
-        if (!autoSendEnabled) {
-          draftReason =
-            " · (auto-send 全站關閉 — agentPolicies.inquiry.autoSendEnabled=false)";
-        } else if (decision.confidence < autoSendThreshold) {
-          draftReason = ` · (信心 ${decision.confidence} < 門檻 ${autoSendThreshold})`;
-        }
+        // gate.reason is machine-readable; translate the common ones
+        const reasonZh: Record<string, string> = {
+          "hard-excluded-class": "此類別永不自動(碰錢/法律)",
+          "below-confidence": `信心 ${decision.confidence} 未達門檻`,
+          "has-attachments": "帶附件,人看",
+          "daily-cap": "今日自動回上限已滿",
+          "post-llm-blacklist": "草稿含敏感內容,強制人工",
+          escalated: "已升級給你",
+        };
+        const zh = reasonZh[gate.reason];
+        if (zh) draftReason = ` · (${zh})`;
       }
       const outcomeLabel =
         sendOutcome === "auto_replied"
           ? "✓ 已自動回覆"
           : sendOutcome === "would_auto_send"
-          ? "✓ 已擬稿 (dry-run kill switch on)"
+          ? "🟦 影子:這封我本來會自動回(未寄,收證據中)"
           : `📝 Draft 已存,等你 review${draftReason}`;
       await notifyAgentMessage({
         agentName: "inquiry",

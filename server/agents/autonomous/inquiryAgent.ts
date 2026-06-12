@@ -131,7 +131,13 @@ export const DEFAULT_INQUIRY_POLICY = {
   // Phase 2 (Round 81 — Learning System workflow): auto-send controls
   // Default to OFF for safety. Jeff toggles on per-agent when confident.
   autoSendEnabled: false,
-  autoSendMinConfidence: 85,
+  autoSendMinConfidence: 90,
+  // email-auto-reply m1 (拍板 2026-06-12) — 信任階梯配套。shadowMode=true
+  // 是 Stage A:記錄「本來會自動回」,永不真寄;classes 空 = 一類都不寄。
+  autoSendShadowMode: true,
+  autoSendClasses: [] as string[],
+  autoSendDailyCap: 10,
+  autoSendBlockAttachments: true,
   responseLanguage: "match_inbound",
   tone: "warm, professional, bilingual-fluent (zh-TW primary / en secondary)",
   responseGoal:

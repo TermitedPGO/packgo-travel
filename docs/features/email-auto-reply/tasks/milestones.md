@@ -2,21 +2,23 @@
 
 > Stage 3。每 milestone:tsc 0 + Vitest + commit。Stage B 的「開」永遠是 Jeff 在 UI 親手做。
 
-## m0 — 前置驗證
-- [ ] Gmail OAuth token 狀態(閘2 重授權做了沒?gmailIntegration.tokenExpiresAt 未來 +
-      isActive=1)— 沒過這關整個 feature 紙上談兵
-- [ ] 確認 interactionOutcomes 可查「當日 auto_replied 數」(日上限的計數來源)
-- [ ] 確認 approvalTasks 的 editedPayload 留存方式(算「不改直接核准」的依據:
-      decidedAt 後 payload vs editedPayload 異同)
+## m0 — 前置驗證 ✅(2026-06-12)
+- [x] **修正前判**:Gmail token「過期」是誤讀 — tokenExpiresAt 只是 access token 舊快照,
+      runtime 自動刷新;support@ 今晨 06:50 仍正常輪詢;gmail.modify scope 涵蓋寄信
+      → **閘2 重授權不需要,寄信前置已就緒**
+- [x] interactionOutcomes 可查當日數(現況 auto_escalate 5 / auto_draft 230)
+- [x] 編輯記錄:editedPayload 核准時覆寫 payload,但 audit log 留 payloadEdited 旗標
+      → m3 readiness 用 audit join approvalTasks(payload.classification)計算
 
-## m1 — 政策 schema + 閘門改造(影子解耦)
-- [ ] DEFAULT_INQUIRY_POLICY 加四鍵(shadowMode=true / classes=[] / dailyCap=10 /
-      blockAttachments=true);ensurePolicy 對舊政策 JSON 合併補鍵(additive)
-- [ ] gmailPipeline 閘門八步(design §2):硬編碼排除 → 白名單 → 附件 → 信心 → 日上限
-      → 黑名單(既有)→ 影子 → 真寄
-- [ ] 純函式 `evaluateAutoSend(decision, policy, todaysSent, hasAttachments)` →
-      {verdict: "send"|"shadow"|"draft", reason} — 全部閘門邏輯進純函式,pipeline 只執行
-- [ ] Vitest:八步閘門逐條 + 硬編碼排除不可被白名單繞過 + cap 邊界
+## m1 — 政策 schema + 閘門改造(影子解耦)✅
+- [x] DEFAULT_INQUIRY_POLICY 加四鍵 + minConfidence 85→90;舊政策缺鍵由純函式安全預設
+      接住(missing/壞型別一律倒向安全側),不需要 ensurePolicy 改造
+- [x] autoSendGate.ts 純函式:八步閘門;影子與全域 AGENT_DRY_RUN 解耦;影子不受
+      cap 限制(證據照收);count 查詢失敗 fail-safe 視同 cap 滿
+- [x] pipeline 接線:verdict 執行 + 黑名單命中改寫 verdict=draft + 通知訊息改 gate
+      語言(影子卡標示「本來會自動回,未寄」)
+- [x] Vitest 13 條:五類硬排除塞白名單仍 draft、雙開關、影子預設、cap 邊界、
+      回歸保證(off+空白名單下任何輸入都拿不到 send)
 
 ## m2 — 可見性卡(留底)
 - [ ] pipeline:auto_replied / would_auto_send → post agentMessages observation
