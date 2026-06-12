@@ -609,6 +609,12 @@ async function processOneEmail(
         reasoning: decision.reasoning,
         gmailMessageId: msg.id,
         gmailThreadId: msg.threadId,
+        // 批9 m1 — structured fields so the workspace escalation card can
+        // offer 編輯並回覆 (Jeff-gated send via sendReplyInThread). The
+        // human-readable copy in `body` above stays unchanged.
+        customerEmail: senderEmail ?? null,
+        subject: msg.subject,
+        draftReply: decision.draftReply ?? null,
         attachments: attachmentsForAgent.map((a) => ({
           filename: a.filename,
           kind: a.kind,

@@ -4,20 +4,24 @@
  * Escalations are agentMessages the agents refuse to decide alone (客訴 /
  * 退款 / low-confidence inquiries; B1 already writes title/body in plain
  * Chinese). The card shows the title + the agent's one-line reason, with the
- * full body (incl. the suggested reply that was NEVER sent) behind a 看全文
- * toggle. There is deliberately NO send/approve action here — acting on an
- * escalation stays in Gmail / agent chat; the only mutation is the 處理好了
- * ack, which writes the same readByJeff state the agent-chat badge reads.
+ * full body behind a 看全文 toggle.
+ *
+ * 批9 m1 (Jeff 拍板「全部我核准」): replyable escalations (context carries a
+ * structured Gmail reply target) get a 編輯並回覆 button → 🔒 gated dialog →
+ * commandCenter.escalationReply sends in the original thread. Older rows
+ * stay view-only; the 處理好了 ack remains the other mutation.
  *
  * Badge mapping: refund (by classification or the refund agent) → 退款 +
  * lock (money), complaint → 客訴, spam → existing 疑似垃圾 label, anything
  * else → the cs lane label (詢問). Title/body stay as-is (DB content).
  */
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
 import { useLocale } from "@/contexts/LocaleContext";
 import { formatRelTime } from "./relTime";
 import { shortLabel } from "./TodayTaskCard";
-import { BtnO, WorkspaceCard } from "./ws-ui";
+import { BtnB, BtnO, WorkspaceCard } from "./ws-ui";
+
+const EscalationReplyDialog = lazy(() => import("./EscalationReplyDialog"));
 
 /** Structural minimum this card reads off a commandCenter.escalationList row. */
 export type EscalationShape = {
@@ -30,6 +34,9 @@ export type EscalationShape = {
   read: boolean;
   createdAt: Date | string;
   who: { label: string; userId: number | null } | null;
+  suggestedReply: string | null;
+  replyable: boolean;
+  customerEmail: string | null;
 };
 
 function isRefund(esc: EscalationShape): boolean {
@@ -48,18 +55,23 @@ export default function TodayEscalationCard({
   onAck,
   acking,
   onJumpToCustomer,
+  onReplied,
 }: {
   esc: EscalationShape;
   /** 處理好了 toggle → readByJeff (shared with the agent-chat unread badge). */
   onAck: (esc: EscalationShape, handled: boolean) => void;
   acking: boolean;
   onJumpToCustomer?: (userId: number) => void;
+  /** 批9 m1 — refresh the escalation list after a gated send. */
+  onReplied?: () => void;
 }) {
   const { t } = useLocale();
   const [expanded, setExpanded] = useState(false);
+  const [replying, setReplying] = useState(false);
 
   const refund = isRefund(esc);
   const canJump = esc.who?.userId != null && onJumpToCustomer != null;
+  const canReply = esc.replyable && esc.customerEmail != null && !esc.read;
   // body line 1 is the agent's plain-language reason (B1 contract); the rest
   // (customer intent + unsent suggested reply) lives behind 看全文.
   const reason = esc.body.split("\n")[0] ?? "";
@@ -93,12 +105,30 @@ export default function TodayEscalationCard({
           <div className="text-gray-500 mt-0.5 text-[12px]">{reason}</div>
         )
       )}
-      {hasMore && (
-        <div className="flex gap-2 mt-2">
-          <BtnO onClick={() => setExpanded((v) => !v)}>
-            {expanded ? t("workspace.escCollapse") : t("workspace.escExpand")}
-          </BtnO>
+      {(hasMore || canReply) && (
+        <div className="flex gap-2 mt-2 flex-wrap">
+          {canReply && (
+            <BtnB onClick={() => setReplying(true)}>
+              {t("workspace.escReplyBtn")}
+            </BtnB>
+          )}
+          {hasMore && (
+            <BtnO onClick={() => setExpanded((v) => !v)}>
+              {expanded ? t("workspace.escCollapse") : t("workspace.escExpand")}
+            </BtnO>
+          )}
         </div>
+      )}
+      {replying && esc.customerEmail && (
+        <Suspense fallback={null}>
+          <EscalationReplyDialog
+            messageId={esc.id}
+            customerEmail={esc.customerEmail}
+            draft={esc.suggestedReply ?? ""}
+            onClose={() => setReplying(false)}
+            onSent={() => onReplied?.()}
+          />
+        </Suspense>
       )}
     </WorkspaceCard>
   );

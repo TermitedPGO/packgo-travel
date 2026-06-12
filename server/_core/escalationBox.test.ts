@@ -29,6 +29,8 @@ import {
   countUnreadEscalations,
   ackEscalation,
   parseEscalationClassification,
+  parseEscalationReplyTarget,
+  sendEscalationReply,
 } from "./escalationBox";
 
 const getDbMock = vi.mocked(getDb);
@@ -205,5 +207,92 @@ describe("ackEscalation", () => {
     expect(res).toEqual({ id: 6, read: false });
     expect(captures[1].set.readByJeff).toBe(0);
     expect(captures[1].set.readAt).toBeNull();
+  });
+});
+
+describe("parseEscalationReplyTarget (批9 m1)", () => {
+  it("returns full target when context has the structured fields", () => {
+    const ctx = JSON.stringify({
+      classification: "complaint",
+      gmailThreadId: "t-123",
+      gmailMessageId: "m-456",
+      customerEmail: "mei@example.com",
+      subject: "行程取消",
+      draftReply: "您好,關於退費…",
+    });
+    expect(parseEscalationReplyTarget(ctx)).toEqual({
+      gmailThreadId: "t-123",
+      gmailMessageId: "m-456",
+      customerEmail: "mei@example.com",
+      subject: "行程取消",
+      draftReply: "您好,關於退費…",
+    });
+  });
+
+  it("old rows without customerEmail degrade to null (view-only)", () => {
+    const ctx = JSON.stringify({
+      classification: "other",
+      gmailThreadId: "t-123",
+      gmailMessageId: "m-456",
+    });
+    expect(parseEscalationReplyTarget(ctx)).toBeNull();
+  });
+
+  it("missing gmailThreadId degrades to null", () => {
+    const ctx = JSON.stringify({ customerEmail: "a@b.com" });
+    expect(parseEscalationReplyTarget(ctx)).toBeNull();
+  });
+
+  it("bad JSON / null context degrade to null, never throw", () => {
+    expect(parseEscalationReplyTarget("not json")).toBeNull();
+    expect(parseEscalationReplyTarget(null)).toBeNull();
+    expect(parseEscalationReplyTarget(JSON.stringify([1]))).toBeNull();
+  });
+
+  it("blank draftReply becomes null (dialog opens empty, still replyable)", () => {
+    const ctx = JSON.stringify({
+      gmailThreadId: "t-1",
+      customerEmail: "a@b.com",
+      draftReply: "   ",
+    });
+    const target = parseEscalationReplyTarget(ctx);
+    expect(target).not.toBeNull();
+    expect(target!.draftReply).toBeNull();
+    expect(target!.subject).toBe("");
+  });
+});
+
+describe("sendEscalationReply guards (批9 m1)", () => {
+  it("non-escalation message is rejected honestly", async () => {
+    getDbMock.mockResolvedValue(
+      fakeDb([[{ id: 7, messageType: "observation", context: null }]]),
+    );
+    const res = await sendEscalationReply(7, "hello");
+    expect(res.sent).toBe(false);
+    expect(res.errorMessage).toContain("不是 escalation");
+  });
+
+  it("old row without reply target is rejected with the Gmail hint", async () => {
+    getDbMock.mockResolvedValue(
+      fakeDb([
+        [
+          {
+            id: 8,
+            messageType: "escalation",
+            context: JSON.stringify({ classification: "other" }),
+          },
+        ],
+      ]),
+    );
+    const res = await sendEscalationReply(8, "hello");
+    expect(res.sent).toBe(false);
+    expect(res.errorMessage).toContain("Gmail");
+  });
+
+  it("missing message is rejected", async () => {
+    getDbMock.mockResolvedValue(fakeDb([[]]));
+    const res = await sendEscalationReply(999, "hello");
+    expect(res.sent).toBe(false);
+    expect(res.errorMessage).toContain("找不到");
   });
 });

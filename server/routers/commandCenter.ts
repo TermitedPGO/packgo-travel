@@ -309,6 +309,35 @@ export const commandCenterRouter = router({
     ),
 
   /**
+   * 批9 m1 — Jeff 編輯 AI 草稿後核准寄出(escalation 卡的 🔒 dialog)。
+   * Replies in the ORIGINAL Gmail thread via the pipeline's send helper;
+   * old rows without a structured reply target fail honestly. 鐵律不變:
+   * this is a human-approved send, never autonomous.
+   */
+  escalationReply: adminProcedure
+    .input(
+      z.object({
+        messageId: z.number().int().positive(),
+        body: z.string().min(1).max(10_000),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { sendEscalationReply } = await import("../_core/escalationBox");
+      const result = await sendEscalationReply(input.messageId, input.body);
+      if (result.sent) {
+        const { audit } = await import("../_core/auditLog");
+        audit({
+          ctx,
+          action: "escalation.reply",
+          targetType: "agentMessage",
+          targetId: input.messageId,
+          changes: { bodyLength: input.body.length },
+        });
+      }
+      return result;
+    }),
+
+  /**
    * 客服頁 producer trigger (P1-b) — run InquiryAgent on an existing inquiry
    * and drop the resulting draft into the 審核箱 as a pending cs task.
    *

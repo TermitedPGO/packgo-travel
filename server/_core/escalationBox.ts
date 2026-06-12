@@ -16,13 +16,22 @@
  *                            ack clears both surfaces (never two read-states
  *                            drifting apart).
  *
- * No send path on purpose: the suggested reply inside an escalation body is
- * NOT an approval task. Acting on it stays in Gmail / agent chat — this
- * module adds zero money-touching or customer-visible mutations.
+ * 批9 m1 (2026-06-12, Jeff 拍板「全部我核准」): escalations gained ONE
+ * send path — sendEscalationReply — and it is Jeff-gated by construction:
+ * it only fires from the workspace 編輯並回覆 dialog (🔒 checkbox confirm),
+ * replies in the ORIGINAL Gmail thread via sendReplyInThread, and only
+ * works on rows whose context carries the structured reply target
+ * (gmailThreadId + customerEmail). Older rows degrade to view-only.
+ * 鐵律不變:nothing here sends without Jeff's explicit click.
  */
 import { eq, and, desc, inArray, sql } from "drizzle-orm";
 import { getDb } from "../db";
-import { agentMessages, customerProfiles, users } from "../../drizzle/schema";
+import {
+  agentMessages,
+  customerProfiles,
+  users,
+  gmailIntegration,
+} from "../../drizzle/schema";
 import { createChildLogger } from "./logger";
 
 const log = createChildLogger({ module: "escalationBox" });
@@ -50,6 +59,60 @@ export interface EscalationRow {
   read: boolean;
   createdAt: Date;
   who: EscalationWho | null;
+  /** 批9 m1 — AI 草稿(context.draftReply);null = 舊 row 無結構化欄位. */
+  suggestedReply: string | null;
+  /** card may offer 編輯並回覆 (context has gmailThreadId + customerEmail). */
+  replyable: boolean;
+  /** recipient shown in the gated confirm (「確認寄給 X」). */
+  customerEmail: string | null;
+}
+
+/** Structured reply target parsed out of an escalation's context JSON. */
+export interface EscalationReplyTarget {
+  gmailThreadId: string;
+  gmailMessageId: string | null;
+  customerEmail: string;
+  subject: string;
+  draftReply: string | null;
+}
+
+/**
+ * 批9 m1 — best-effort reply target from context JSON. Returns null when any
+ * load-bearing field (gmailThreadId / customerEmail) is missing — old rows
+ * predate the structured fields and must degrade to view-only, never throw.
+ */
+export function parseEscalationReplyTarget(
+  context: string | null,
+): EscalationReplyTarget | null {
+  if (!context) return null;
+  try {
+    const p = JSON.parse(context) as Record<string, unknown>;
+    if (p == null || typeof p !== "object" || Array.isArray(p)) return null;
+    const gmailThreadId =
+      typeof p.gmailThreadId === "string" && p.gmailThreadId.trim()
+        ? p.gmailThreadId
+        : null;
+    const customerEmail =
+      typeof p.customerEmail === "string" && p.customerEmail.trim()
+        ? p.customerEmail.trim()
+        : null;
+    if (!gmailThreadId || !customerEmail) return null;
+    return {
+      gmailThreadId,
+      gmailMessageId:
+        typeof p.gmailMessageId === "string" && p.gmailMessageId
+          ? p.gmailMessageId
+          : null,
+      customerEmail,
+      subject: typeof p.subject === "string" ? p.subject : "",
+      draftReply:
+        typeof p.draftReply === "string" && p.draftReply.trim()
+          ? p.draftReply
+          : null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -189,6 +252,7 @@ export async function listEscalations(): Promise<EscalationRow[]> {
         ? userById.get(profile.userId)?.name?.trim()
         : undefined;
     const label = userName || profile?.email?.trim() || "";
+    const target = parseEscalationReplyTarget(r.context);
     return {
       id: r.id,
       agentName: r.agentName,
@@ -199,6 +263,9 @@ export async function listEscalations(): Promise<EscalationRow[]> {
       read: r.readByJeff !== 0,
       createdAt: r.createdAt,
       who: label ? { label, userId: profile?.userId ?? null } : null,
+      suggestedReply: target?.draftReply ?? null,
+      replyable: target != null,
+      customerEmail: target?.customerEmail ?? null,
     };
   });
 }
@@ -260,4 +327,104 @@ export async function ackEscalation(
 
   log.info({ messageId, handled }, "[escalationBox] escalation acked");
   return { id: messageId, read: handled };
+}
+
+export interface EscalationReplyResult {
+  sent: boolean;
+  /** true = a kill switch downgraded the send to a dry run (nothing left). */
+  dryRun: boolean;
+  errorMessage?: string;
+}
+
+/**
+ * 批9 m1 — Jeff 核准後把編輯過的回覆寄回原 Gmail thread。
+ *
+ * The ONLY caller is commandCenter.escalationReply, which only fires from
+ * the workspace 編輯並回覆 dialog after the 🔒 checkbox — 鐵律(永不自動送)
+ * 不變。Reuses the pipeline's sendReplyInThread (same thread, same from
+ * address); on a real send the escalation is marked read and the sent body
+ * is kept on the row (jeffResponse) for the record.
+ */
+export async function sendEscalationReply(
+  messageId: number,
+  body: string,
+): Promise<EscalationReplyResult> {
+  const db = await getDb();
+  if (!db) return { sent: false, dryRun: false, errorMessage: "資料庫不可用" };
+
+  const rows = await db
+    .select({
+      id: agentMessages.id,
+      messageType: agentMessages.messageType,
+      context: agentMessages.context,
+    })
+    .from(agentMessages)
+    .where(eq(agentMessages.id, messageId))
+    .limit(1);
+  const row = rows[0];
+  if (!row) {
+    return { sent: false, dryRun: false, errorMessage: `找不到訊息 ${messageId}` };
+  }
+  if (row.messageType !== "escalation") {
+    return { sent: false, dryRun: false, errorMessage: "此訊息不是 escalation" };
+  }
+
+  const target = parseEscalationReplyTarget(row.context);
+  if (!target) {
+    return {
+      sent: false,
+      dryRun: false,
+      errorMessage: "舊版 escalation 缺結構化收件資訊,請直接在 Gmail 回覆",
+    };
+  }
+
+  const integrations = await db
+    .select()
+    .from(gmailIntegration)
+    .where(eq(gmailIntegration.isActive, 1))
+    .limit(1);
+  const integration = integrations[0];
+  if (!integration) {
+    return { sent: false, dryRun: false, errorMessage: "Gmail 整合未啟用" };
+  }
+
+  const { buildGmailClient, sendReplyInThread } = await import("./gmail");
+  const gmail = buildGmailClient(integration);
+  const send = await sendReplyInThread(gmail, {
+    threadId: target.gmailThreadId,
+    toEmail: target.customerEmail,
+    subject: target.subject,
+    bodyText: body,
+    fromEmail: integration.emailAddress,
+    // Jeff clicked the gated confirm — this is a human-approved send, not
+    // an autonomous one. The env-level AGENT_DRY_RUN switch still applies.
+    confirmedAutoSendOk: true,
+    inReplyToMessageId: target.gmailMessageId ?? undefined,
+  });
+
+  if (!send.ok) {
+    log.error(
+      { messageId, err: send.error },
+      "[escalationBox] escalation reply send failed",
+    );
+    return { sent: false, dryRun: false, errorMessage: send.error ?? "寄送失敗" };
+  }
+  if (send.dryRun) {
+    log.warn(
+      { messageId, reason: send.reason },
+      "[escalationBox] escalation reply downgraded to dry run",
+    );
+    return { sent: false, dryRun: true, errorMessage: send.reason };
+  }
+
+  await db
+    .update(agentMessages)
+    .set({ readByJeff: 1, readAt: new Date(), jeffResponse: body })
+    .where(eq(agentMessages.id, messageId));
+
+  log.info(
+    { messageId, to: target.customerEmail },
+    "[escalationBox] escalation reply sent",
+  );
+  return { sent: true, dryRun: false };
 }

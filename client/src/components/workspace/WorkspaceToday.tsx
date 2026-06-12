@@ -219,6 +219,10 @@ export default function WorkspaceToday({
                     escAck.variables?.messageId === item.esc.id
                   }
                   onJumpToCustomer={onJumpToCustomer}
+                  onReplied={() => {
+                    utils.commandCenter.escalationList.invalidate();
+                    utils.commandCenter.stats.invalidate();
+                  }}
                 />
               ) : (
                 <TodayReviewCard
