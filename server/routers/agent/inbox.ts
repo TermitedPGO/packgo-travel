@@ -32,7 +32,12 @@ export const inboxRouter = router({
       z
         .object({
           onlyUnread: z.boolean().default(false),
-          agentName: z.enum(AGENT_NAMES).optional(),
+          // "ops" is the interactive chat channel — it writes agentMessages
+          // rows directly (varchar column) but was never in AGENT_NAMES, so
+          // this read filter rejected it with BAD_REQUEST and the chat page
+          // could never load its own history (v690 UAT B-02). Widened here
+          // only; the shared AGENT_NAMES enum (policies etc.) is unchanged.
+          agentName: z.enum([...AGENT_NAMES, "ops"]).optional(),
           limit: z.number().int().min(1).max(200).default(50),
         })
         .optional(),

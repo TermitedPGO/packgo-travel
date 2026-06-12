@@ -422,28 +422,62 @@ export const suppliersRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
+      // v690 UAT P1 fix (B-01): the CASE expression originally lived inside
+      // the JOIN ON predicate, which prod MySQL rejected with 500s. Compute
+      // the extracted code in a DERIVED TABLE projection instead, so the
+      // join is a plain column = column equi-probe.
       const codeFromSourceUrl = sql<string>`CASE
         WHEN ${toursTable.sourceUrl} LIKE '%NormGroupID=%'
           THEN SUBSTRING_INDEX(SUBSTRING_INDEX(${toursTable.sourceUrl}, 'NormGroupID=', -1), '&', 1)
         WHEN ${toursTable.sourceUrl} LIKE '%/product/detail/%'
           THEN SUBSTRING_INDEX(SUBSTRING_INDEX(SUBSTRING_INDEX(${toursTable.sourceUrl}, '/product/detail/', -1), '/', 1), '?', 1)
-        END`;
+        ELSE NULL
+      END`;
+
+      const dt = db
+        .select({
+          tourId: toursTable.id,
+          title: toursTable.title,
+          price: toursTable.price,
+          priceCurrency: toursTable.priceCurrency,
+          extractedCode: codeFromSourceUrl.as("extractedCode"),
+        })
+        .from(toursTable)
+        .where(
+          and(
+            // single-tour mode skips the active-only gate: Jeff inspects
+            // drafts/pending tours in the 行程全貌 too.
+            input.tourId
+              ? eq(toursTable.id, input.tourId)
+              : eq(toursTable.status, "active"),
+            // pre-filter to supplier-imported tours so the derived table
+            // stays small and rows with extractedCode=NULL never exist
+            or(
+              like(toursTable.sourceUrl, "%NormGroupID=%"),
+              like(toursTable.sourceUrl, "%/product/detail/%")
+            )
+          )
+        )
+        .as("dt");
 
       const rows = await db
         .select({
-          tourId: toursTable.id,
-          title: sql<string>`${toursTable.title}`,
-          price: toursTable.price,
-          priceCurrency: toursTable.priceCurrency,
+          tourId: dt.tourId,
+          // MAX() wrappers: ONLY_FULL_GROUP_BY can't infer functional
+          // dependency through a derived table, and each group has exactly
+          // one tour row anyway.
+          title: sql<string>`MAX(${dt.title})`,
+          price: sql<string | number>`MAX(${dt.price})`,
+          priceCurrency: sql<string>`MAX(${dt.priceCurrency})`,
           externalProductCode: productsTable.externalProductCode,
           supplierCode: suppliersTable.code,
           minCost: sql<string | null>`MIN(${supplierDeparturesTable.agentPrice})`,
           costCurrency: sql<string | null>`MAX(${supplierDeparturesTable.currency})`,
         })
-        .from(toursTable)
+        .from(dt)
         .innerJoin(
           productsTable,
-          eq(productsTable.externalProductCode, codeFromSourceUrl)
+          eq(productsTable.externalProductCode, dt.extractedCode)
         )
         .innerJoin(
           suppliersTable,
@@ -458,21 +492,7 @@ export const suppliersRouter = router({
             sql`${supplierDeparturesTable.agentPrice} > 0`
           )
         )
-        .where(
-          and(
-            // single-tour mode skips the active-only gate: Jeff inspects
-            // drafts/pending tours in the 行程全貌 too.
-            input.tourId
-              ? eq(toursTable.id, input.tourId)
-              : eq(toursTable.status, "active"),
-            sql`${toursTable.sourceUrl} IS NOT NULL`
-          )
-        )
-        .groupBy(
-          toursTable.id,
-          productsTable.id,
-          suppliersTable.code
-        );
+        .groupBy(dt.tourId, productsTable.id, suppliersTable.code);
 
       const { shapeMarginAudit } = await import("../services/supplierMargin");
       const items = shapeMarginAudit(

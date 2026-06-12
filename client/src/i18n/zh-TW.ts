@@ -522,6 +522,7 @@ export const zhTW = {
     supMgWarn: '毛利低於 15% 安全線，成本可能已漲、售價未跟。',
     supMgMismatch: '成本（{cost}）與售價（{price}）幣別不同，不自動換匯，請後台核對。',
     supMgSrc: '價格須對後台：以供應商後台模擬訂單為準，此處僅供初篩。',
+    supMgError: '毛利查詢暫時失敗，稍後再試（不影響其他資料）',
     companyTours: '行程庫',
     trsAll: '全部',
     trsActive: '上架中',

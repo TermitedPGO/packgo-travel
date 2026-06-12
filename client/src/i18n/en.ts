@@ -522,6 +522,7 @@ export const en = {
     supMgWarn: 'Margin below the 15% safety line. Cost may have risen without a price adjustment.',
     supMgMismatch: 'Cost ({cost}) and price ({price}) currencies differ. No auto-conversion. Verify in the supplier backend.',
     supMgSrc: 'Verify against the supplier backend: simulated-order pricing is the source of truth. This list is a first-pass screen only.',
+    supMgError: 'Margin query failed temporarily. Retry later (other data unaffected).',
     companyTours: 'Tours',
     trsAll: 'All',
     trsActive: 'Live',

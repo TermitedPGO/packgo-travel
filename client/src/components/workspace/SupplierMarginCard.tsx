@@ -14,11 +14,21 @@ import { UpdatePriceDialog, type PriceTarget } from "./SupplierMonitorCards";
 
 export default function SupplierMarginCard() {
   const { t } = useLocale();
-  const auditQ = trpc.suppliers.marginAudit.useQuery({
-    limit: 10,
-    threshold: 0.15,
-  });
+  // retry: false — v690 UAT B-01: a failing audit query retried into 21
+  // console errors and a silent blank; fail once, say so honestly.
+  const auditQ = trpc.suppliers.marginAudit.useQuery(
+    { limit: 10, threshold: 0.15 },
+    { retry: false },
+  );
   const [target, setTarget] = useState<PriceTarget | null>(null);
+
+  if (auditQ.isError) {
+    return (
+      <div className="rounded-xl border border-gray-200 bg-white p-3 text-[11px] text-gray-400">
+        {t("workspace.supMgError")}
+      </div>
+    );
+  }
 
   const data = auditQ.data;
   if (auditQ.isLoading || !data || data.items.length === 0) return null;

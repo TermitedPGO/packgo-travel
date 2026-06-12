@@ -389,9 +389,11 @@ export default function AgentChatPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  // Load conversation history — auto-refresh while idle
+  // Load conversation history — auto-refresh while idle. "ops" is a valid
+  // listMessages filter since the v690 B-02 fix; the old `as any` here was
+  // masking the server-side enum rejection that broke history loading.
   const messages = trpc.agent.listMessages.useQuery(
-    { agentName: "ops" as any, limit: 50 },
+    { agentName: "ops", limit: 50 },
     { refetchInterval: isStreaming ? false : 15_000 },
   );
 

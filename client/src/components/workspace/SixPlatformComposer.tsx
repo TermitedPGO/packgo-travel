@@ -25,6 +25,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { BtnB, BtnO, Badge } from "./ws-ui";
+import { normalizePlatformCopy } from "./platformCopy";
 
 type PlatformCopy = {
   id: number;
@@ -195,9 +196,11 @@ function PlatformCard({
   t: (k: string) => string;
   onUpdated: () => void;
 }) {
+  // v690 B-04: unwrap legacy raw-JSON copy rows before display/edit
+  const normalized = normalizePlatformCopy(copy.copyText, copy.hashtags);
   const [editing, setEditing] = useState(false);
-  const [editText, setEditText] = useState(copy.copyText);
-  const [editHashtags, setEditHashtags] = useState(copy.hashtags ?? "");
+  const [editText, setEditText] = useState(normalized.text);
+  const [editHashtags, setEditHashtags] = useState(normalized.hashtags);
 
   const updateMut = trpc.posters.updateCopy.useMutation({
     onSuccess: () => {
@@ -225,7 +228,8 @@ function PlatformCard({
   async function handleCopyText() {
     try {
       await navigator.clipboard.writeText(
-        copy.copyText + (copy.hashtags ? "\n\n" + copy.hashtags : ""),
+        normalized.text +
+          (normalized.hashtags ? "\n\n" + normalized.hashtags : ""),
       );
       toast.success(t("workspace.mkt6pCopied"));
     } catch {
@@ -273,10 +277,10 @@ function PlatformCard({
         {!editing ? (
           <>
             <p className="text-[12px] leading-relaxed line-clamp-4">
-              {copy.copyText}
+              {normalized.text}
             </p>
-            {copy.hashtags && (
-              <p className="text-[11px] text-gray-500">{copy.hashtags}</p>
+            {normalized.hashtags && (
+              <p className="text-[11px] text-gray-500">{normalized.hashtags}</p>
             )}
           </>
         ) : (

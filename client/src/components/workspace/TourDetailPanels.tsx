@@ -64,11 +64,12 @@ export default function TourDetailPanels({ tour }: { tour: TourForPanels }) {
 
 function PriceCard({ tour }: { tour: TourForPanels }) {
   const { t } = useLocale();
-  const marginQ = trpc.suppliers.marginAudit.useQuery({
-    limit: 1,
-    threshold: 0.15,
-    tourId: tour.id,
-  });
+  // retry: false — v690 UAT B-01 showed a failing audit query retrying into
+  // 21 console errors; one honest failure line beats a silent blank.
+  const marginQ = trpc.suppliers.marginAudit.useQuery(
+    { limit: 1, threshold: 0.15, tourId: tour.id },
+    { retry: false },
+  );
 
   const m = marginQ.data?.items[0];
 
@@ -103,6 +104,11 @@ function PriceCard({ tour }: { tour: TourForPanels }) {
             cost: m.costCurrency ?? "?",
             price: tour.priceCurrency ?? "?",
           })}
+        </div>
+      )}
+      {marginQ.isError && (
+        <div className="text-[11px] text-gray-400 mt-1">
+          {t("workspace.supMgError")}
         </div>
       )}
       <Src>{t("workspace.trsPriceSrc")}</Src>

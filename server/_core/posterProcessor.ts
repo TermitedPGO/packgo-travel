@@ -489,12 +489,19 @@ ${args.originalCopyText ? `供應商原宣傳文(供參考,但要重寫成 PACK&
   let raw = (typeof rawContent === "string" ? rawContent : "").trim() || "{}";
   raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
   try {
-    const parsed = JSON.parse(raw) as { copyText: string; hashtags?: string };
-    return {
-      platform: args.platform,
-      copyText: parsed.copyText || "",
-      hashtags: parsed.hashtags,
+    // v690 UAT B-04: the LLM sometimes answers {"text": ..., "hashtags": [...]}
+    // instead of the requested {"copyText": ..., "hashtags": "..."} — accept
+    // both shapes so a raw JSON blob never reaches the copyText column.
+    const parsed = JSON.parse(raw) as {
+      copyText?: string;
+      text?: string;
+      hashtags?: string | string[];
     };
+    const copyText = parsed.copyText || parsed.text || "";
+    const hashtags = Array.isArray(parsed.hashtags)
+      ? parsed.hashtags.filter((s) => typeof s === "string").join(" ")
+      : parsed.hashtags;
+    return { platform: args.platform, copyText, hashtags };
   } catch (err) {
     log.error({ err, platform: args.platform, raw }, "[Poster] Copy JSON parse failed");
     // Fallback: use raw text directly
