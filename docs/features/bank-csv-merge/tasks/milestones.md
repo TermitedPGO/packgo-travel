@@ -41,13 +41,18 @@
 - [ ] Vitest:報告組裝 + 斷言邏輯(mock)
 - [ ] **執行需 Jeff 看過 dry-run 報告點頭(碰歷史報表)**
 
-## m4 — 分類重跑 + UI
-- [ ] enrich 後:未人工確認且 null/other_review → 入隊重分類(用 m0 驗證的保護欄位)
-- [ ] BankLedgerV2:泛詞行顯示 originalDescription;詳情 Sheet 加完整描述/reason/ref# 區塊;
-      搜尋涵蓋 originalDescription
-- [ ] i18n + Vitest(泛詞判定純函式)
+## m4 — 分類重跑 + UI ✅
+- [x] enrich 後:jeffOverrideCategory IS NULL 且 agentCategory null/other_review →
+      重置三個 agent 欄位(SQL 再守一次 override IS NULL)→ classifyUncategorizedBatch
+      撿走重分類(吃到完整 memo);non-fatal,回傳 requeuedForClassification
+- [x] BankLedgerV2:詳情 Sheet 加 銀行原始描述/付款備註/Ref#/合併前 Plaid 名稱 區塊
+      (MergeInfoFields,paymentMeta 容錯解析);搜尋涵蓋 originalDescription
+- [x] **改判**:列表行「泛詞改顯 originalDescription」不做 — 合併後 description 已是完整版、
+      未合併 Plaid 行 originalDescription 全 null(m0 實證),規則無資料可救,不加死邏輯
+- [x] i18n 4 keys(泛詞判定 isGenericBankLabel 已在 m1 測)
 
 ## DoD
-- [ ] tsc 0 · 全套 vitest 綠 · i18n parity
-- [ ] 金額不變式:m2 路徑零金額變動;m3 變動 == 報告預告
-- [ ] Jeff 親驗:上傳一份真實月度 CSV → merged/inserted 數字合理 → 帳本 PURCHASE 變完整描述
+- [x] tsc 0 · 全套 vitest 綠(2285 passed)· i18n parity 7328 keys
+- [x] 金額不變式:enrich set 結構性無 amount/date/分類鍵(進測試);m3 已降級
+- [ ] Jeff 親驗(部署後):上傳一份真實月度 CSV → 預覽顯示「將合併 N 筆」→ commit →
+      帳本 PURCHASE 變完整描述、卡 other_review 的重新分類

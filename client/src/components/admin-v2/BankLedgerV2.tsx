@@ -102,6 +102,8 @@ type TxRow = {
   isoCurrencyCode?: string | null;
   merchantName?: string | null;
   description?: string | null;
+  originalDescription?: string | null;
+  paymentMeta?: unknown;
   plaidCategoryPrimary?: string | null;
   plaidCategoryDetailed?: string | null;
   agentCategory?: string | null;
@@ -243,6 +245,9 @@ export default function BankLedgerV2() {
       list = list.filter((tx) =>
         (tx.merchantName ?? "").toLowerCase().includes(q) ||
         (tx.description ?? "").toLowerCase().includes(q) ||
+        ((tx as { originalDescription?: string | null }).originalDescription ?? "")
+          .toLowerCase()
+          .includes(q) ||
         String(toNumber(tx.amount)).includes(q),
       );
     }
@@ -970,6 +975,13 @@ function BankTxDrawerForm({
             <span className="break-words">{tx.description}</span>
           </Field>
         )}
+        {tx.originalDescription &&
+          tx.originalDescription !== tx.description && (
+            <Field label={t("admin.bankLedgerTab.fieldBankLine")}>
+              <span className="break-words">{tx.originalDescription}</span>
+            </Field>
+          )}
+        <MergeInfoFields tx={tx} t={t} />
         <Field label={t("admin.bankLedgerTab.fieldAmount")}>
           <span
             className={`font-semibold tabular-nums ${
@@ -1174,6 +1186,58 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
     <div className="text-xs uppercase tracking-[0.18em] text-gray-500 font-semibold">
       {children}
     </div>
+  );
+}
+
+/**
+ * bank-csv-merge m4 — surface the merge/Zelle metadata stored in
+ * paymentMeta (reason, csv_reference_number, plaid_original_name).
+ * Renders nothing when none are present.
+ */
+function MergeInfoFields({ tx, t }: { tx: TxRow; t: (k: string) => string }) {
+  let meta: Record<string, unknown> | null = null;
+  const raw = tx.paymentMeta;
+  if (raw != null && typeof raw === "object" && !Array.isArray(raw)) {
+    meta = raw as Record<string, unknown>;
+  } else if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed != null && typeof parsed === "object" && !Array.isArray(parsed)) {
+        meta = parsed as Record<string, unknown>;
+      }
+    } catch {
+      meta = null;
+    }
+  }
+  if (!meta) return null;
+  const reason = typeof meta.reason === "string" && meta.reason ? meta.reason : null;
+  const csvRef =
+    typeof meta.csv_reference_number === "string" && meta.csv_reference_number
+      ? meta.csv_reference_number
+      : null;
+  const plaidName =
+    typeof meta.plaid_original_name === "string" && meta.plaid_original_name
+      ? meta.plaid_original_name
+      : null;
+  if (!reason && !csvRef && !plaidName) return null;
+  return (
+    <>
+      {reason && (
+        <Field label={t("admin.bankLedgerTab.fieldPaymentReason")}>
+          <span className="break-words">{reason}</span>
+        </Field>
+      )}
+      {csvRef && (
+        <Field label={t("admin.bankLedgerTab.fieldCsvRef")}>
+          <span className="tabular-nums">{csvRef}</span>
+        </Field>
+      )}
+      {plaidName && (
+        <Field label={t("admin.bankLedgerTab.fieldPlaidName")}>
+          <span className="break-words text-gray-500">{plaidName}</span>
+        </Field>
+      )}
+    </>
   );
 }
 

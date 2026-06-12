@@ -613,6 +613,9 @@ export const plaidRouter = router({
             merchantName: bankTransactions.merchantName,
             description: bankTransactions.description,
             paymentMeta: bankTransactions.paymentMeta,
+            // m4 — re-classify eligibility (read-only here)
+            agentCategory: bankTransactions.agentCategory,
+            jeffOverrideCategory: bankTransactions.jeffOverrideCategory,
           })
           .from(bankTransactions)
           .where(
@@ -658,6 +661,11 @@ export const plaidRouter = router({
       let merged = 0;
       let mergedAlready = 0;
       let removedOldCsvRows = 0;
+      // m4 — rows whose classification was stuck on the generic Plaid text
+      // get ONE more agent pass now that the full bank line is on the row.
+      // jeffOverrideCategory IS NULL is the hard guard: human-confirmed
+      // rows are never re-queued (m0 verified field semantics).
+      const reclassifyIds: number[] = [];
       for (const m of matchResult.merges) {
         try {
           if (m.alreadyMerged) {
@@ -675,6 +683,16 @@ export const plaidRouter = router({
               })
               .where(eq(bankTransactions.id, m.plaidRow.id));
             merged++;
+            const pr = m.plaidRow as typeof m.plaidRow & {
+              agentCategory?: string | null;
+              jeffOverrideCategory?: string | null;
+            };
+            if (
+              pr.jeffOverrideCategory == null &&
+              (pr.agentCategory == null || pr.agentCategory === "other_review")
+            ) {
+              reclassifyIds.push(m.plaidRow.id);
+            }
             audit({
               ctx,
               action: "bankTxn.csvMerge",
@@ -718,6 +736,42 @@ export const plaidRouter = router({
         } catch (err) {
           console.warn(
             `[csv import] merge failed: ${(err as Error)?.message}`,
+          );
+        }
+      }
+
+      // m4 — reset stuck classifications so classifyUncategorizedBatch
+      // (which only looks at agentCategory IS NULL) picks them up with the
+      // enriched description. SQL re-guards jeffOverrideCategory IS NULL.
+      let requeuedForClassification = 0;
+      if (reclassifyIds.length > 0) {
+        try {
+          await db
+            .update(bankTransactions)
+            .set({
+              agentCategory: null,
+              agentConfidence: null,
+              agentReasoning: null,
+            })
+            .where(
+              and(
+                inArray(bankTransactions.id, reclassifyIds),
+                sql`${bankTransactions.jeffOverrideCategory} IS NULL`,
+              ),
+            );
+          const { classifyUncategorizedBatch } = await import(
+            "../services/accountingAgentService"
+          );
+          const res = await classifyUncategorizedBatch({
+            limit: Math.min(reclassifyIds.length + 10, 200),
+          });
+          requeuedForClassification = reclassifyIds.length;
+          console.log(
+            `[csv import] re-classified after merge: requeued=${reclassifyIds.length} processed=${res.processed}`,
+          );
+        } catch (err) {
+          console.warn(
+            `[csv import] re-classify after merge failed (non-fatal): ${(err as Error)?.message}`,
           );
         }
       }
@@ -782,6 +836,7 @@ export const plaidRouter = router({
         mergedAlready,
         ambiguous: matchResult.ambiguous.length,
         removedOldCsvRows,
+        requeuedForClassification,
       };
     }),
 
