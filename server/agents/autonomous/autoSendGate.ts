@@ -45,7 +45,7 @@ export interface AutoSendVerdict {
 }
 
 /** Missing/garbled policy keys default to the SAFE side, every time. */
-function policyDefaults(policy: Record<string, unknown> | null | undefined) {
+export function readAutoSendPolicy(policy: Record<string, unknown> | null | undefined) {
   const p = policy ?? {};
   return {
     enabled: p.autoSendEnabled === true,
@@ -71,7 +71,7 @@ export function evaluateAutoSend(
   input: AutoSendGateInput,
   policy: Record<string, unknown> | null | undefined,
 ): AutoSendVerdict {
-  const p = policyDefaults(policy);
+  const p = readAutoSendPolicy(policy);
 
   // 0. master switch — off means not even shadow bookkeeping changes
   //    anything… EXCEPT we still want shadow evidence while OFF. Shadow is

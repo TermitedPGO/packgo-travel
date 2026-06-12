@@ -67,7 +67,7 @@ vi.mock("../../agents/autonomous/refundAgent", () => ({
 import { agentRouter } from "../agentRouter";
 
 describe("agentRouter (v2 Wave 2 Module 2.10 composition shell)", () => {
-  it("exposes all 50 procedures from the pre-split monolith", () => {
+  it("exposes all 50 pre-split procedures + later additive ones", () => {
     const procs = Object.keys((agentRouter as any)._def.procedures);
     expect(procs.sort()).toEqual(
       [
@@ -83,7 +83,9 @@ describe("agentRouter (v2 Wave 2 Module 2.10 composition shell)", () => {
         "recentOutcomes",
         "snapshot",
         // policy (8)
+        "getAutoSendPolicyFull",
         "getAutoSendSettings",
+        "setAutoSendPolicyFull",
         "setAutoSendSettings",
         "getActivePolicy",
         "upsertPolicy",
@@ -134,7 +136,9 @@ describe("agentRouter (v2 Wave 2 Module 2.10 composition shell)", () => {
         "gmailDisconnect",
       ].sort(),
     );
-    expect(procs).toHaveLength(50);
+    // 50 from the pre-split monolith + 2 from email-auto-reply m4
+    // (getAutoSendPolicyFull / setAutoSendPolicyFull, 2026-06-12)
+    expect(procs).toHaveLength(52);
   });
 });
 

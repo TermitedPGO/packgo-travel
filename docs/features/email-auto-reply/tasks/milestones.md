@@ -30,20 +30,25 @@
       observation)+ 知道了(agent.replyToMessage markRead,與 channel 未讀同步)
 - [x] i18n 10 keys · Vitest 5 條(parse)+ 批9 guard 測試跟上新契約
 
-## m3 — 數據:核准不改率
-- [ ] `commandCenter.autoReplyReadiness`(唯讀):近 14 天 per-class
-      {樣本, 不改核准, 編輯核准, 拒絕, 不改率} + 影子 would_auto_send 數
-- [ ] Vitest(比率計算純函式;edited 判定 = editedPayload 與原 draftBody 是否實質不同)
+## m3 — 數據:核准不改率 ✅
+- [x] autoReplyReadiness.ts:computeReadiness 純函式(sent/failed/approved 都算核准
+      決定;shadow-only 類也列;拍板門檻 20+95% 進常數)+ getAutoReplyReadiness
+      (approvalTasks cs 14 天 + audit payloadEdited join + observations 影子計數)
+- [x] commandCenter.autoReplyReadiness 唯讀 procedure
+- [x] Vitest 5 條(計數/門檻邊界 19↔20 封 95↔94%/failed 算核准/shadow-only/unknown)
 
-## m4 — 政策開關 UI(接上批8 系統頁 placeholder)
-- [ ] 系統頁「自動回覆政策」卡:總開關(🔒 黑鎖條才能開)/ 影子 toggle / 類別白名單
-      (附 readiness 數據 + 未達標粗黑警告)/ 門檻 / 日上限 / 全停鈕(無 confirm)
-- [ ] `agent.updateInquiryAutoSendPolicy` mutation:只准動六鍵 + audit + 版本遞增
-- [ ] i18n · Vitest(payload 白名單驗證)
+## m4 — 政策開關 UI ✅
+- [x] AutoSendPolicyCard(系統頁):成績單(達標徽章)/ 類別白名單(未達標粗黑警告,
+      硬排除五類不在候選)/ 門檻 / 日上限 / 附件擋 / 影子 toggle / 總開關 🔒 黑鎖條 /
+      全部停止鈕(無 confirm,影子照常收證據)
+- [x] agent.getAutoSendPolicyFull / setAutoSendPolicyFull:六鍵讀寫(in-place,與既有
+      setAutoSendSettings 同模式)+ zod 層擋硬排除類 + audit log(before/after)
+- [x] readAutoSendPolicy 從 gate 導出共用(預設值單一來源)
+- [x] i18n 24 keys · agent router 快照測試跟上(50→52 procedures)
 
 ## m5 — Stage A 啟動(部署後)
 - [ ] 部署 → 影子模式自動生效(shadowMode 預設 true,總開關仍 false)
-- [ ] 跑 ~2 週 → Jeff 看 readiness 表 → 達標類別親手開(Stage B)
+- [ ] 跑 ~2 週 → Jeff 看系統頁成績單 → 達標類別親手開(Stage B)
 
 ## DoD
 - [ ] tsc 0 · 全套綠 · i18n parity

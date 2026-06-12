@@ -121,6 +121,134 @@ export const policyRouter = router({
       }
     }),
 
+  // ─────────────────────────────────────────────────────────────────
+  // email-auto-reply m4 (拍板 2026-06-12) — 信任階梯政策卡的完整六鍵
+  // 讀寫。寫入只准動這六鍵(其他政策內容不經此路),audit 留底。
+  // 硬編碼排除類在 zod 層就擋(autoSendGate.AUTO_SEND_HARD_EXCLUDED)。
+  // ─────────────────────────────────────────────────────────────────
+
+  getAutoSendPolicyFull: adminProcedure
+    .input(z.object({ agentName: z.enum(AGENT_NAMES) }))
+    .query(async ({ input }) => {
+      const { readAutoSendPolicy } = await import(
+        "../../agents/autonomous/autoSendGate"
+      );
+      const db = await getDb();
+      if (!db) return { ...readAutoSendPolicy(null), version: 0 };
+      const [row] = await db
+        .select({ rules: agentPolicies.rules, version: agentPolicies.version })
+        .from(agentPolicies)
+        .where(
+          and(
+            eq(agentPolicies.agentName, input.agentName),
+            eq(agentPolicies.active, 1),
+          ),
+        )
+        .limit(1);
+      let parsed: Record<string, unknown> | null = null;
+      try {
+        parsed = row ? JSON.parse(row.rules) : null;
+      } catch {
+        parsed = null;
+      }
+      return { ...readAutoSendPolicy(parsed), version: row?.version ?? 0 };
+    }),
+
+  setAutoSendPolicyFull: adminProcedure
+    .input(
+      z.object({
+        agentName: z.enum(AGENT_NAMES),
+        enabled: z.boolean(),
+        shadowMode: z.boolean(),
+        classes: z.array(z.string().max(64)).max(20),
+        minConfidence: z.number().int().min(50).max(99),
+        dailyCap: z.number().int().min(0).max(100),
+        blockAttachments: z.boolean(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { AUTO_SEND_HARD_EXCLUDED } = await import(
+        "../../agents/autonomous/autoSendGate"
+      );
+      const blocked = input.classes.filter((c) => AUTO_SEND_HARD_EXCLUDED.has(c));
+      if (blocked.length > 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `這些類別永不自動(碰錢/法律,改碼才能動):${blocked.join(", ")}`,
+        });
+      }
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const [row] = await db
+        .select()
+        .from(agentPolicies)
+        .where(
+          and(
+            eq(agentPolicies.agentName, input.agentName),
+            eq(agentPolicies.active, 1),
+          ),
+        )
+        .limit(1);
+
+      let policy: any = {};
+      if (row) {
+        try {
+          policy = JSON.parse(row.rules);
+        } catch {
+          policy = {};
+        }
+      }
+      const before = {
+        autoSendEnabled: policy.autoSendEnabled,
+        autoSendShadowMode: policy.autoSendShadowMode,
+        autoSendClasses: policy.autoSendClasses,
+        autoSendMinConfidence: policy.autoSendMinConfidence,
+        autoSendDailyCap: policy.autoSendDailyCap,
+        autoSendBlockAttachments: policy.autoSendBlockAttachments,
+      };
+      policy.autoSendEnabled = input.enabled;
+      policy.autoSendShadowMode = input.shadowMode;
+      policy.autoSendClasses = input.classes;
+      policy.autoSendMinConfidence = input.minConfidence;
+      policy.autoSendDailyCap = input.dailyCap;
+      policy.autoSendBlockAttachments = input.blockAttachments;
+      const newRules = JSON.stringify(policy, null, 2);
+
+      const { audit } = await import("../../_core/auditLog");
+      if (row) {
+        await db
+          .update(agentPolicies)
+          .set({ rules: newRules })
+          .where(eq(agentPolicies.id, row.id));
+        audit({
+          ctx,
+          action: "agentPolicy.autoSendUpdate",
+          targetType: "agentPolicy",
+          targetId: row.id,
+          changes: { before, after: input },
+        });
+        return { ok: true, version: row.version };
+      }
+      const ins = await db.insert(agentPolicies).values({
+        agentName: input.agentName,
+        version: 1,
+        rules: newRules,
+        active: 1,
+        createdBy: "human",
+        reasonNote: "Initial v1 (created from 自動回覆政策卡)",
+      });
+      const newId = Number((ins as any)[0]?.insertId ?? 0);
+      audit({
+        ctx,
+        action: "agentPolicy.autoSendUpdate",
+        targetType: "agentPolicy",
+        targetId: newId,
+        changes: { before: null, after: input },
+      });
+      return { ok: true, version: 1, newId };
+    }),
+
   /**
    * Get the active policy for an agent. Falls back to a hardcoded v1
    * default if no row exists yet (cold-start safety).

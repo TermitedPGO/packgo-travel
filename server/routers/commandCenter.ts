@@ -318,6 +318,17 @@ export const commandCenterRouter = router({
   }),
 
   /**
+   * email-auto-reply m3 — 信任階梯成績單(per-class 不改直接核准率 +
+   * 影子數)。唯讀;達標徽章門檻 = 20 封 + 95%(拍板)。
+   */
+  autoReplyReadiness: adminProcedure.query(async () => {
+    const { getAutoReplyReadiness } = await import(
+      "../_core/autoReplyReadiness"
+    );
+    return getAutoReplyReadiness();
+  }),
+
+  /**
    * 批9 m1 — Jeff 編輯 AI 草稿後核准寄出(escalation 卡的 🔒 dialog)。
    * Replies in the ORIGINAL Gmail thread via the pipeline's send helper;
    * old rows without a structured reply target fail honestly. 鐵律不變:

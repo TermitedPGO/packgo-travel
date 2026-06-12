@@ -10,6 +10,7 @@ import { Cpu, Zap, AlertTriangle } from "lucide-react";
 import { Pill } from "./ws-ui";
 import { formatRelTime } from "./relTime";
 import SystemLogsSections from "./SystemLogsSections";
+import AutoSendPolicyCard from "./AutoSendPolicyCard";
 
 export default function WorkspaceSystem() {
   const { t } = useLocale();
@@ -17,6 +18,7 @@ export default function WorkspaceSystem() {
     <div className="space-y-5">
       <p className="text-[11px] text-gray-500">{t("workspace.sysSub")}</p>
       <AgentSection />
+      <AutoSendPolicyCard />
       <SkillsSection />
       <SystemLogsSections />
       <div className="rounded-xl bg-gray-50 border border-gray-200 p-3.5 flex items-start gap-2">
