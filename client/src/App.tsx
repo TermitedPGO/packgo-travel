@@ -163,13 +163,15 @@ function Router() {
       <Route path={"/reset-password"} component={ResetPassword} />
       <Route path={"/admin/diagnostics"} component={DiagnosticsPage} />
       <Route path={"/admin/task-history"} component={TaskHistory} />
-      {/* 2026-06-09 — Jeff: hold /admin on the COMPLETE AdminV2 (39 tabs) until
-          the new 整合工作台 redesign covers every tab in the mockup card grammar.
-          Preview the in-progress redesign at /workspace; flip /admin to it in a
-          single switch only when all 39 are done. /admin/v2 redirects here. */}
-      <Route path={"/admin"} component={AdminV2} />
+      {/* 2026-06-12 — THE FLIP (Jeff go): all 8 redesign batches shipped
+          (v685-v692), deep UAT passed, P1+P2 fixed. /admin (and the old
+          /admin/v2) now redirect to /workspace so bookmarks and muscle
+          memory land on the new 工作台. AdminV2 stays in the repo (留檔)
+          at /admin-v2-archive as a fallback while trust builds. */}
+      <Route path={"/admin"}>{() => { if (typeof window !== "undefined") window.location.replace("/workspace"); return null; }}</Route>
+      <Route path={"/admin-v2-archive"} component={AdminV2} />
       <Route path={"/workspace"} component={Workspace} />
-      <Route path={"/admin/v2"}>{() => { if (typeof window !== "undefined") window.location.replace("/admin"); return null; }}</Route>
+      <Route path={"/admin/v2"}>{() => { if (typeof window !== "undefined") window.location.replace("/workspace"); return null; }}</Route>
       <Route path={"/profile"} component={Profile} />
       <Route path={"/tours/:id/print"} component={TourPrintView} />
       <Route path={"/tours/:id"} component={TourDetailPeony} />

@@ -153,7 +153,7 @@ export default function Header() {
               <>
                 <span className="text-white/20">·</span>
                 <Link
-                  href="/admin"
+                  href="/workspace"
                   className="flex items-center gap-1 hover:text-white transition-colors"
                 >
                   <Shield className="h-3 w-3" />
