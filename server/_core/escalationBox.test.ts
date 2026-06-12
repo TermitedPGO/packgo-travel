@@ -263,13 +263,22 @@ describe("parseEscalationReplyTarget (批9 m1)", () => {
 });
 
 describe("sendEscalationReply guards (批9 m1)", () => {
-  it("non-escalation message is rejected honestly", async () => {
+  it("unsupported message types are rejected honestly (digest)", async () => {
+    getDbMock.mockResolvedValue(
+      fakeDb([[{ id: 7, messageType: "digest", context: null }]]),
+    );
+    const res = await sendEscalationReply(7, "hello");
+    expect(res.sent).toBe(false);
+    expect(res.errorMessage).toContain("不支援");
+  });
+
+  it("observation rows ARE allowed (email-auto-reply m2 跟進更正) — only the missing target blocks", async () => {
     getDbMock.mockResolvedValue(
       fakeDb([[{ id: 7, messageType: "observation", context: null }]]),
     );
     const res = await sendEscalationReply(7, "hello");
     expect(res.sent).toBe(false);
-    expect(res.errorMessage).toContain("不是 escalation");
+    expect(res.errorMessage).toContain("Gmail"); // 缺收件資訊 fallback,而非類型拒絕
   });
 
   it("old row without reply target is rejected with the Gmail hint", async () => {

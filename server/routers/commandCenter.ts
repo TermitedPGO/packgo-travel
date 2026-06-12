@@ -309,6 +309,15 @@ export const commandCenterRouter = router({
     ),
 
   /**
+   * email-auto-reply m2 — 自動回/影子留底卡(今日待辦 box)。唯讀;
+   * dismiss 走 agent.replyToMessage markRead(與 channel 未讀同一狀態)。
+   */
+  autoReplyCards: adminProcedure.query(async () => {
+    const { listAutoReplyCards } = await import("../_core/autoReplyBox");
+    return listAutoReplyCards();
+  }),
+
+  /**
    * 批9 m1 — Jeff 編輯 AI 草稿後核准寄出(escalation 卡的 🔒 dialog)。
    * Replies in the ORIGINAL Gmail thread via the pipeline's send helper;
    * old rows without a structured reply target fail honestly. 鐵律不變:

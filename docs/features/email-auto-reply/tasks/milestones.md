@@ -20,12 +20,15 @@
 - [x] Vitest 13 條:五類硬排除塞白名單仍 draft、雙開關、影子預設、cap 邊界、
       回歸保證(off+空白名單下任何輸入都拿不到 send)
 
-## m2 — 可見性卡(留底)
-- [ ] pipeline:auto_replied / would_auto_send → post agentMessages observation
-      (context 帶 autoReply/shadow + draft + thread 資訊)
-- [ ] 今日待辦:已自動回卡(看內容 + 跟進更正 → 重用 EscalationReplyDialog)+
-      影子卡(看草稿,純資訊)— 都可處理好了收掉
-- [ ] i18n · Vitest(卡片分類純函式)
+## m2 — 可見性卡(留底)✅
+- [x] pipeline 既有 per-email observation 補結構化 context(customerEmail/subject/
+      draftReply/gmailMessageId)— 不另發訊息,重用 #inquiry channel 那張
+- [x] autoReplyBox.ts:parseAutoReplyCard(純)+ listAutoReplyCards(7 天窗、
+      LIKE 預過濾 + parse 真檢、未讀優先)+ commandCenter.autoReplyCards
+- [x] TodayAutoReplyBox:已自動寄(BadgeK)/ 影子(Badge)卡 + 看內容展開 +
+      跟進更正(重用 🔒 EscalationReplyDialog,sendEscalationReply guard 放行
+      observation)+ 知道了(agent.replyToMessage markRead,與 channel 未讀同步)
+- [x] i18n 10 keys · Vitest 5 條(parse)+ 批9 guard 測試跟上新契約
 
 ## m3 — 數據:核准不改率
 - [ ] `commandCenter.autoReplyReadiness`(唯讀):近 14 天 per-class

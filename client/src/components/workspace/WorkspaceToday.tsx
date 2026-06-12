@@ -15,6 +15,7 @@ import TodayEscalationCard, {
   type EscalationShape,
 } from "./TodayEscalationCard";
 import TodaySpamBox from "./TodaySpamBox";
+import TodayAutoReplyBox from "./TodayAutoReplyBox";
 import TodayReviewCard, { type ReviewShape } from "./TodayReviewCard";
 
 // Shared review flow (same dialog the 指揮中心 ApprovalInbox uses): full
@@ -279,6 +280,7 @@ export default function WorkspaceToday({
       </div>
 
       {/* 疑似垃圾匣 (m3a) — spam 永不靜默丟,確認垃圾淡化保留,救回走正常路 */}
+      <TodayAutoReplyBox />
       <TodaySpamBox />
 
       {/* 批1 m2 — shared review flow (same dialog as 指揮中心 ApprovalInbox) */}

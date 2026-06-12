@@ -365,8 +365,14 @@ export async function sendEscalationReply(
   if (!row) {
     return { sent: false, dryRun: false, errorMessage: `找不到訊息 ${messageId}` };
   }
-  if (row.messageType !== "escalation") {
-    return { sent: false, dryRun: false, errorMessage: "此訊息不是 escalation" };
+  // email-auto-reply m2: 自動回留底卡(observation)也走同一條 Jeff-gated
+  // 跟進更正路 — 仍然只有人手點 🔒 dialog 才會觸發。
+  if (row.messageType !== "escalation" && row.messageType !== "observation") {
+    return {
+      sent: false,
+      dryRun: false,
+      errorMessage: "此訊息類型不支援回覆",
+    };
   }
 
   const target = parseEscalationReplyTarget(row.context);

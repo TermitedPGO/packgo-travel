@@ -734,6 +734,12 @@ async function processOneEmail(
           classification: decision.classification,
           confidence: decision.confidence,
           sendOutcome,
+          // email-auto-reply m2 — structured fields so the 今日待辦 自動回
+          // 留底卡 can render content + reuse the gated 跟進更正 dialog
+          customerEmail: senderEmail ?? null,
+          subject: msg.subject,
+          draftReply: decision.draftReply?.slice(0, 2000) ?? null,
+          gmailMessageId: msg.id,
           gmailThreadId: msg.threadId,
           attachments: attachmentsForAgent.map((a) => ({
             filename: a.filename,
