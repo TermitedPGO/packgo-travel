@@ -64,6 +64,15 @@
 - **Jeff 親驗項(hard refresh 清 SW cache 後看 /workspace 全公司事務)**:① 行程庫(列表+點進全貌:圖/地圖/每日行程/毛利/庫存/品質;上架鎖)② 記帳四區(待分類卡/信託認列鎖/催款唯讀/全部交易)— **碰錢批,版面點頭後才接催款送出等新動作線** ③ 供應商四區(同步/監控含改價鎖/商品庫/競品摘要)+ 毛利卡對一筆真資料(marginAudit SQL 首次見真 DB)④ 行銷四區(批4 一併看)⑤ 系統頁五段 ⑥ 英文模式全英。
 - 全看過沒問題 → 切換條件達成,下一步 = App.tsx `/admin` → Workspace 一次 flip(AdminV2 留檔)。
 
+## v691 + v692 shipped(2026-06-11 晚,UAT 修復輪)
+- **深度 UAT(獨立 session,Claude in Chrome 對 prod)**:報告 verify-v690.md(17 節 + 結論三檔)。客人端/批3/批8/批2/6 全 Pass;email 全鏈 end-to-end 過(分類「行程比較」正確、草稿品質過鐵律、Jeff 測試信 47 分鐘進待辦);AI 海報真生成 1 張($0.07,費用追蹤一致)。抓到 P1×1 + P2×3。
+- **v691(P1+P2 三修)**:B-01 marginAudit CASE-in-JOIN → derived table + 前端 retry:false/誠實錯誤行;B-02 AI 對話歷史 — 根因是 listMessages 的 AGENT_NAMES enum 沒有 "ops"(client `as any` 蓋住),歷史資料一直都在 DB;B-04 newsletter raw JSON 雙端容錯。
+- **v691 重驗(獨立 session)**:歷史 ✅;毛利 ❌ 判定為誤判(flyctl ssh 直跑 SQL 794ms 5 筆真資料;重驗分頁 console 是部署前殘留)— **教訓:重驗必須先 hard reload + 看時戳**;newsletter ❌ 為真 — 第三種 LLM 形狀(巢狀 content 物件)。
+- **v692**:normalizePlatformCopy + posterProcessor 擴充 shape 3(subject_line/body 等欄位組合,bullet array 逐行;真不認識才保 raw)。/health 全綠,token 用完即焚。
+- **毛利真資料觀察**:Lion 成本 TWD vs 售價 USD → 照設計顯示「幣別不同」;真毛利要接 exchangeRate 換算(已有 router),列下批。
+- **下批 backlog(UAT 產出)**:B-03 海報 price-in-image guard(P2)、毛利匯率換算、行程庫 pageSize 1000 cap(2,635 筆只顯示 1000 + 8-10s 載入 → server 分頁/virtual scroll)、B-05 淨利 alert 雙桶重複、B-06 EN 模式 AI 分類標籤、批3 匯出稽核 §17550 鈕 + 「全部接受 AI 建議」鈕(mockup 缺項)、cost gate dialog a11y description×3。
+- **flip /admin 條件**:UAT 結論 = 修完 P1+P2(已完成並上線)→ 條件達成,等 Jeff 一聲令下把 /admin 指向 Workspace(AdminV2 留檔)。順帶:舊 /admin 工作台→行程已壞(badge 2635/列表 0),flip 後自然解決。
+
 ## 文件
 - proposal.md(Stage 1)✓
 - design.md(Stage 2 定案:設計系統 + 9 鐵律 + shell + 18 項目矩陣 + §4.5 行銷 6 平台 + 後端接點)✓
