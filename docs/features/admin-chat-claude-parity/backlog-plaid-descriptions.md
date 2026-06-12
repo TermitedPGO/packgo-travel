@@ -31,5 +31,23 @@ prod 撈樣本對比(789 筆 Plaid / 多筆 CSV):
 - client/src/components/admin-v2/BankLedgerV2.tsx:416(UI 只顯 merchantName+description,沒曝露 originalDescription/channel/PFC)
 - server/agents/autonomous/accountingAgent.ts:251(分類靠 raw line / memo,Plaid 缺料時降信心)
 
+## 追問:為什麼 QuickBooks 拿得到完整描述?(2026-06-12 查證)
+
+**不是 QuickBooks 有特權直連 — 連它的 BofA Direct Connect 都停了**(web 查證:
+BofA no longer supports Direct Connect,連 Intuit 都沒有 2-way 直連)。
+
+QB 看到完整 Zelle memo 只可能來自兩條管道,都不是 Plaid:
+1. **最可能 — Web Connect**:從 BofA 網銀下載 .QBO/.QFX 檔匯進 QB。檔案 BofA 端
+   產生,保留完整 raw descriptor。**= 等同我們系統的 CSV import 路徑**(prod 驗證
+   CSV 那批描述完整,如本文上方)。
+2. **也可能 — Intuit 自家 aggregation(Finicity,2020 Intuit 收購)**:對 BofA 的
+   資料協議與 Plaid 不同,可能拿到較完整 descriptor。未當場查證 QB feed 具體用哪個。
+
+**結論修正**:差異不在「QB vs 我們」,在「BofA 端檔案/特殊協議(完整)vs Plaid 受限
+API(泛詞)」。我們的 CSV 路徑已與 QB 等價完整 → **不需為描述完整換 QuickBooks**。
+修法選項不變(見上),只排除了「QB 比較強」這個誤判。
+來源:quickbooks.intuit.com community(BofA Direct Connect 停用)+
+bankofamerica.com/online-banking FAQ(Web Connect vs Direct Connect)。
+
 ## 順帶觀察(非本題)
 - CSV 那批分類也不全對:「Zelle to Ann for China visa」→ other_review、「Zelle from LARRY for China VISA」→ income_booking。memo 有料但 Agent 沒穩定吃到方向(to=支出 / from=收入)。修 Plaid 描述時可一併看分類 prompt。
