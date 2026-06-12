@@ -125,9 +125,11 @@ export const adminCustomersRouter = router({
     .input(z.object({ profileId: z.number().int().positive() }))
     .query(async ({ input }) => {
       const drizzleDb = (await db.getDb())!;
-      const { customerProfiles, inquiries: inquiriesTable } = await import(
-        "../../drizzle/schema"
-      );
+      const {
+        customerProfiles,
+        inquiries: inquiriesTable,
+        customerInteractions,
+      } = await import("../../drizzle/schema");
       const profRows = await drizzleDb
         .select({
           id: customerProfiles.id,
@@ -139,7 +141,7 @@ export const adminCustomersRouter = router({
         .limit(1);
       const profile = profRows[0];
       if (!profile?.email) {
-        return { email: null, inquiries: [] };
+        return { email: null, inquiries: [], interactions: [] };
       }
       const rows = await drizzleDb
         .select({
@@ -154,7 +156,40 @@ export const adminCustomersRouter = router({
         .where(eq(inquiriesTable.customerEmail, profile.email))
         .orderBy(desc(inquiriesTable.createdAt))
         .limit(20);
-      return { email: profile.email, firstSeenAt: profile.createdAt, inquiries: rows };
+      // Gmail-originated history lives in customerInteractions, NOT
+      // inquiries (the pipeline never writes that table) — v695 親驗抓到
+      // 訪客記錄頁空白的根因. Spam-classified rows stay hidden unless
+      // Jeff rescued them (spam 永不靜默丟,但也不該污染客人記錄頁).
+      const interactions = await drizzleDb
+        .select({
+          id: customerInteractions.id,
+          direction: customerInteractions.direction,
+          channel: customerInteractions.channel,
+          content: customerInteractions.content,
+          contentSummary: customerInteractions.contentSummary,
+          classification: customerInteractions.classification,
+          createdAt: customerInteractions.createdAt,
+        })
+        .from(customerInteractions)
+        .where(
+          and(
+            eq(customerInteractions.customerProfileId, profile.id),
+            sql`NOT (${customerInteractions.classification} = 'spam' AND COALESCE(${customerInteractions.spamVerdict}, '') != 'rescued')`,
+          ),
+        )
+        .orderBy(desc(customerInteractions.createdAt))
+        .limit(20);
+      return {
+        email: profile.email,
+        firstSeenAt: profile.createdAt,
+        inquiries: rows,
+        interactions: interactions.map((i) => ({
+          ...i,
+          // full raw email (with From/Subject preamble) stays server-side;
+          // the pane needs a readable snippet only
+          content: (i.content ?? "").slice(0, 500),
+        })),
+      };
     }),
 
   /**

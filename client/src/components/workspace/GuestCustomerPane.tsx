@@ -9,7 +9,7 @@
  */
 import { trpc } from "@/lib/trpc";
 import { useLocale } from "@/contexts/LocaleContext";
-import { Mail, UserRound } from "lucide-react";
+import { Mail, UserRound, ArrowDownLeft, ArrowUpRight } from "lucide-react";
 import { Badge, Pill, Src } from "./ws-ui";
 import { formatRelTime } from "./relTime";
 
@@ -25,8 +25,11 @@ export default function GuestCustomerPane({
 
   const data = itemsQ.data;
   const inquiries = data?.inquiries ?? [];
+  // Gmail-originated history lives here (the pipeline never writes inquiries).
+  const interactions = data?.interactions ?? [];
   const open = inquiries.filter((i) => OPEN_STATUSES.has(i.status));
   const closed = inquiries.filter((i) => !OPEN_STATUSES.has(i.status));
+  const totalCount = inquiries.length + interactions.length;
 
   return (
     <div className="h-full overflow-y-auto p-4 md:p-6">
@@ -44,7 +47,7 @@ export default function GuestCustomerPane({
               <Badge>{t("workspace.guestBadge")}</Badge>
             </div>
             <div className="text-[11px] text-gray-500">
-              {t("workspace.guestSub", { n: inquiries.length })}
+              {t("workspace.guestSub", { n: totalCount })}
               {data?.firstSeenAt
                 ? ` · ${t("workspace.guestFirstSeen")} ${formatRelTime(data.firstSeenAt, t)}`
                 : ""}
@@ -60,10 +63,21 @@ export default function GuestCustomerPane({
           <p className="text-xs text-gray-400 py-4">{t("workspace.loading")}</p>
         )}
 
-        {!itemsQ.isLoading && inquiries.length === 0 && (
+        {!itemsQ.isLoading && totalCount === 0 && (
           <div className="rounded-xl border border-gray-200 bg-white p-6 text-center text-xs text-gray-400">
             {t("workspace.guestNoItems")}
           </div>
+        )}
+
+        {interactions.length > 0 && (
+          <section className="space-y-2">
+            <h3 className="text-[12px] font-semibold">
+              {t("workspace.guestEmailHistory", { n: interactions.length })}
+            </h3>
+            {interactions.map((it) => (
+              <InteractionRow key={it.id} interaction={it} />
+            ))}
+          </section>
         )}
 
         {open.length > 0 && (
@@ -88,6 +102,51 @@ export default function GuestCustomerPane({
           </section>
         )}
       </div>
+    </div>
+  );
+}
+
+function InteractionRow({
+  interaction,
+}: {
+  interaction: {
+    id: number;
+    direction: string;
+    channel: string;
+    content: string;
+    contentSummary: string | null;
+    classification: string | null;
+    createdAt: Date | string;
+  };
+}) {
+  const { t } = useLocale();
+  const inbound = interaction.direction === "inbound";
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 border-l-2 border-l-black p-3">
+      <div className="flex items-center gap-2 mb-1 flex-wrap">
+        {inbound ? (
+          <ArrowDownLeft className="w-3.5 h-3.5 text-gray-400" />
+        ) : (
+          <ArrowUpRight className="w-3.5 h-3.5 text-gray-400" />
+        )}
+        <span className="text-[11px] font-medium">
+          {inbound ? t("workspace.guestInbound") : t("workspace.guestOutbound")}
+        </span>
+        {interaction.classification && (
+          <Pill>{interaction.classification}</Pill>
+        )}
+        <span className="text-[10px] text-gray-400">
+          {formatRelTime(interaction.createdAt, t)}
+        </span>
+      </div>
+      {interaction.contentSummary && (
+        <p className="text-[12px] text-gray-700 font-medium break-words">
+          {interaction.contentSummary}
+        </p>
+      )}
+      <p className="text-[12px] text-gray-500 line-clamp-4 whitespace-pre-wrap break-words mt-0.5">
+        {interaction.content}
+      </p>
     </div>
   );
 }
