@@ -67,6 +67,22 @@ function normalizeCode(s: string): string {
   return s.trim().toUpperCase();
 }
 
+/** 抽出客人文字裡的代碼樣 token(去重、去純年份、去太短)。 */
+export function extractCodeTokens(text: string): string[] {
+  if (!text) return [];
+  const raw = text.match(CODE_TOKEN_RE) ?? [];
+  return [...new Set(raw.map(normalizeCode))].filter(
+    (t) => t.length >= 2 && !/^\d{4}$/.test(t),
+  );
+}
+
+/** 抽出客人文字裡出現的地點詞(詞庫交集)。 */
+export function extractLocationTerms(text: string): string[] {
+  if (!text) return [];
+  const lower = text.toLowerCase();
+  return LOCATION_LEXICON.filter((term) => lower.includes(term.toLowerCase()));
+}
+
 export function resolveTourReferences(
   text: string,
   tours: TourLite[],
@@ -77,10 +93,7 @@ export function resolveTourReferences(
   if (!text) return { codeMatches, keywordCandidates, unknownCodes };
 
   // 1. 代碼路 — 抽 code-shaped tokens,對 productCode + sourceUrl
-  const rawTokens = text.match(CODE_TOKEN_RE) ?? [];
-  const tokens = [...new Set(rawTokens.map(normalizeCode))]
-    // 過濾明顯非代碼的(純年份、太短的常見字)
-    .filter((t) => t.length >= 2 && !/^\d{4}$/.test(t));
+  const tokens = extractCodeTokens(text);
   const matchedCodeTourIds = new Set<number>();
   for (const tok of tokens) {
     let hit = false;
@@ -99,9 +112,7 @@ export function resolveTourReferences(
   }
 
   // 2. 關鍵字路 — 客人文字裡出現的地點詞,對 title/destinationCity
-  const presentTerms = LOCATION_LEXICON.filter((term) =>
-    text.toLowerCase().includes(term.toLowerCase()),
-  );
+  const presentTerms = extractLocationTerms(text);
   if (presentTerms.length > 0) {
     for (const t of tours) {
       if (matchedCodeTourIds.has(t.id)) continue; // 已被代碼命中,不重複列
@@ -117,4 +128,94 @@ export function resolveTourReferences(
   }
 
   return { codeMatches, keywordCandidates, unknownCodes };
+}
+
+/* ───────────────────────── DB-backed(bounded)───────────────────────── */
+
+export interface ResolvedCandidate {
+  id: number;
+  title: string;
+  status: string;
+  /** how it matched — for the prompt + card to label it. */
+  via: "code" | "keyword";
+  terms?: string[];
+}
+
+export interface ResolveFromEmailResult {
+  candidates: ResolvedCandidate[];
+  unknownCodes: string[];
+}
+
+/**
+ * Resolve tour references from a customer email against the live catalog.
+ * Bounded: extract code/location tokens in JS first (cheap); only query the
+ * DB when something is present, and only for tours matching those tokens
+ * (never the whole 6000-row catalog). active tours rank above draft.
+ */
+export async function resolveFromEmail(
+  text: string,
+): Promise<ResolveFromEmailResult> {
+  const codes = extractCodeTokens(text);
+  const terms = extractLocationTerms(text);
+  if (codes.length === 0 && terms.length === 0) {
+    return { candidates: [], unknownCodes: [] };
+  }
+
+  const { getDb } = await import("../db");
+  const db = await getDb();
+  if (!db) return { candidates: [], unknownCodes: codes };
+
+  const { tours } = await import("../../drizzle/schema");
+  const { or, like, sql } = await import("drizzle-orm");
+
+  // Build a bounded OR-filter: title/destinationCity LIKE each location term,
+  // productCode/sourceUrl LIKE each code token. Cap the row set.
+  const conds = [
+    ...terms.flatMap((t) => [
+      like(tours.title, `%${t}%`),
+      like(tours.destinationCity, `%${t}%`),
+    ]),
+    ...codes.flatMap((c) => [
+      like(tours.productCode, `%${c}%`),
+      like(tours.sourceUrl, `%${c}%`),
+    ]),
+  ];
+  if (conds.length === 0) return { candidates: [], unknownCodes: codes };
+
+  const rows = (await db
+    .select({
+      id: tours.id,
+      title: tours.title,
+      productCode: tours.productCode,
+      sourceUrl: tours.sourceUrl,
+      destinationCity: tours.destinationCity,
+      status: tours.status,
+    })
+    .from(tours)
+    .where(or(...conds))
+    // active first, then newest
+    .orderBy(sql`(${tours.status} = 'active') DESC`, sql`${tours.id} DESC`)
+    .limit(60)) as TourLite[];
+
+  const resolved = resolveTourReferences(text, rows);
+
+  // Flatten to a single ranked candidate list: code matches first (strongest
+  // signal), then keyword candidates. Cap to keep the prompt + card tight.
+  const candidates: ResolvedCandidate[] = [
+    ...resolved.codeMatches.map((t) => ({
+      id: t.id,
+      title: t.title,
+      status: t.status,
+      via: "code" as const,
+    })),
+    ...resolved.keywordCandidates.map((c) => ({
+      id: c.tour.id,
+      title: c.tour.title,
+      status: c.tour.status,
+      via: "keyword" as const,
+      terms: c.terms,
+    })),
+  ].slice(0, 8);
+
+  return { candidates, unknownCodes: resolved.unknownCodes };
 }

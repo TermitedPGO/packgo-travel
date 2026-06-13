@@ -3,7 +3,12 @@
  * 含 YG7/YL7 測試案例 + 黃石關鍵字命中。
  */
 import { describe, it, expect } from "vitest";
-import { resolveTourReferences, type TourLite } from "./tourReferenceResolver";
+import {
+  resolveTourReferences,
+  extractCodeTokens,
+  extractLocationTerms,
+  type TourLite,
+} from "./tourReferenceResolver";
 
 const tour = (over: Partial<TourLite> & { id: number }): TourLite => ({
   title: "",
@@ -70,5 +75,28 @@ describe("resolveTourReferences", () => {
   it("空字串安全", () => {
     const r = resolveTourReferences("", CATALOG);
     expect(r).toEqual({ codeMatches: [], keywordCandidates: [], unknownCodes: [] });
+  });
+});
+
+describe("extractCodeTokens / extractLocationTerms (m1 helpers)", () => {
+  it("抽代碼樣 token,去純年份", () => {
+    expect(extractCodeTokens("YG7 or YL7,2026 出發")).toEqual(["YG7", "YL7"]);
+  });
+  it("抽地點詞(詞庫交集)", () => {
+    expect(extractLocationTerms("想去黃石 還有京阪神")).toEqual(
+      expect.arrayContaining(["黃石", "京阪神"]),
+    );
+  });
+  it("無代碼無地點 → 空(resolveFromEmail 會據此不查 DB)", () => {
+    expect(extractCodeTokens("你好 想問費用")).toEqual([]);
+    expect(extractLocationTerms("你好 想問費用")).toEqual([]);
+  });
+});
+
+describe("resolveFromEmail (m1 bounded DB)", () => {
+  it("零詞零碼 → 回空、完全不碰 DB(短路在 import 之前)", async () => {
+    const { resolveFromEmail } = await import("./tourReferenceResolver");
+    const r = await resolveFromEmail("你好 想問費用 謝謝");
+    expect(r).toEqual({ candidates: [], unknownCodes: [] });
   });
 });
