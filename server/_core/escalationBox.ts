@@ -175,6 +175,14 @@ export function extractDraftFromBody(body: string | null | undefined): string | 
       return draft ? stripMarkdownForEmail(draft) : null;
     }
   }
+  // Older/English card format: "Draft (供你參考,**未送出**):\n<draft>".
+  // Match the label loosely (the parenthetical wording + ** varied) so these
+  // pre-fix cards still prefill the 編輯並回覆 dialog instead of an empty box.
+  const m = body.match(/Draft\s*\([^)]*\)\s*[:：]\s*\n?/);
+  if (m && m.index != null) {
+    const draft = body.slice(m.index + m[0].length).trim();
+    return draft ? stripMarkdownForEmail(draft) : null;
+  }
   return null;
 }
 

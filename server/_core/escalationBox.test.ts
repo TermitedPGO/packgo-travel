@@ -396,6 +396,19 @@ describe("parseEscalationReplyContext (soft) + extractDraftFromBody (2026-06-13)
     expect(draft).not.toContain("建議回覆");
   });
 
+  it("extractDraftFromBody 吃舊版英文 \"Draft (供你參考,**未送出**):\" 格式", () => {
+    const body =
+      "Agent escalated because: classification=quote_request\n\n" +
+      "客戶想要報價...\n\n---\n" +
+      "Draft (供你參考,**未送出**):\n" +
+      "Hi Jeff,\n\n謝謝您的來信!**請將行程內容**改格式重新提供。";
+    const draft = extractDraftFromBody(body);
+    expect(draft).toContain("Hi Jeff");
+    expect(draft).toContain("請將行程內容");
+    expect(draft).not.toContain("**");
+    expect(draft).not.toContain("Draft (供你參考");
+  });
+
   it("extractDraftFromBody 無 marker → null", () => {
     expect(extractDraftFromBody("沒有建議回覆段的內容")).toBeNull();
     expect(extractDraftFromBody(null)).toBeNull();
