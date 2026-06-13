@@ -53,6 +53,7 @@ function stubLLMResponse(
     intent: string;
     urgency: string;
     sentiment: string;
+    tripType: string;
     draftReply: string;
     draftLanguage: string;
     extractedCustomer: Record<string, unknown>;
@@ -65,6 +66,7 @@ function stubLLMResponse(
     intent: overrides.intent ?? "stubbed intent for unit test",
     urgency: overrides.urgency ?? "normal",
     sentiment: overrides.sentiment ?? "neutral",
+    tripType: overrides.tripType ?? "unclear",
     draftReply:
       overrides.draftReply ??
       "您好,謝謝您的來信。我們收到後會在 24 小時內回覆您具體細節。PACK&GO Travel · Jeff & 團隊",
@@ -319,5 +321,34 @@ describe("runInquiryAgent — tour candidates prompt block (m2)", () => {
     const p = capturedUserPrompt();
     expect(p).toContain("【查不到的團號");
     expect(p).toContain("YG7、YL7");
+  });
+});
+
+describe("runInquiryAgent — tripType classification (custom vs join vs free)", () => {
+  beforeEach(() => invokeLLMSpy.mockReset());
+
+  it("round-trips custom_group (私人包團/訂製)", async () => {
+    invokeLLMSpy.mockResolvedValueOnce(
+      stubLLMResponse("quote_request", { tripType: "custom_group" }),
+    );
+    const out = await runInquiryAgent({
+      rawMessage: "想為我們 10 人設計台灣團,附上行程草稿,不含機票,兩人一房",
+      channel: "email",
+    });
+    expect(out.tripType).toBe("custom_group");
+  });
+
+  it("round-trips join_scheduled (參團)", async () => {
+    invokeLLMSpy.mockResolvedValueOnce(
+      stubLLMResponse("tour_comparison_request", { tripType: "join_scheduled" }),
+    );
+    const out = await runInquiryAgent({ rawMessage: "8 月有什麼日本團可以參加", channel: "email" });
+    expect(out.tripType).toBe("join_scheduled");
+  });
+
+  it("defaults to unclear when the model omits tripType", async () => {
+    invokeLLMSpy.mockResolvedValueOnce(stubLLMResponse("complaint"));
+    const out = await runInquiryAgent({ rawMessage: "我要投訴", channel: "email" });
+    expect(out.tripType).toBe("unclear");
   });
 });

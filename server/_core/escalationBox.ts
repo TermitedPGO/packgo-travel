@@ -56,6 +56,8 @@ export interface EscalationRow {
   body: string;
   /** InquiryAgent classification parsed from context JSON (null = unknown). */
   classification: string | null;
+  /** 行程型態(context.tripType):custom_group/join_scheduled/free_independent/unclear。null=舊卡無此欄. */
+  tripType: string | null;
   priority: "low" | "normal" | "high" | "critical";
   read: boolean;
   createdAt: Date;
@@ -200,6 +202,21 @@ export function parseEscalationClassification(
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       const c = (parsed as Record<string, unknown>).classification;
       if (typeof c === "string" && c.trim()) return c.trim();
+    }
+  } catch {
+    // fall through
+  }
+  return null;
+}
+
+/** 行程型態(context.tripType);"unclear" 視為無意義 → null,卡片不顯示。 */
+export function parseEscalationTripType(context: string | null): string | null {
+  if (!context) return null;
+  try {
+    const parsed = JSON.parse(context);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const t = (parsed as Record<string, unknown>).tripType;
+      if (typeof t === "string" && t.trim() && t !== "unclear") return t.trim();
     }
   } catch {
     // fall through
@@ -377,6 +394,7 @@ export async function listEscalations(): Promise<EscalationRow[]> {
       title: r.title,
       body: r.body,
       classification: parseEscalationClassification(r.context),
+      tripType: parseEscalationTripType(r.context),
       priority: r.priority,
       read: r.readByJeff !== 0,
       createdAt: r.createdAt,

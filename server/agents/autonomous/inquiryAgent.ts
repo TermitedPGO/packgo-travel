@@ -55,6 +55,16 @@ export type Urgency = "low" | "normal" | "high" | "critical";
 export type Sentiment = "positive" | "neutral" | "negative";
 export type Language = "zh-TW" | "zh-CN" | "en";
 
+/**
+ * 2026-06-13 — 行程型態。決定報價走哪條流程:私人包團要核地接成本,
+ * 參團對現成產品目錄價,自由行客製是自助規劃。unclear = 與行程無關或看不出。
+ */
+export type TripType =
+  | "custom_group"
+  | "join_scheduled"
+  | "free_independent"
+  | "unclear";
+
 export type InquiryAgentInput = {
   rawMessage: string;
   channel: "email" | "web_form" | "whatsapp" | "wechat" | "line" | "sms";
@@ -121,6 +131,9 @@ export type InquiryAgentOutput = {
   intent: string;
   urgency: Urgency;
   sentiment: Sentiment;
+
+  /** 行程型態(私人包團 / 參團 / 自由行客製 / 看不出)。 */
+  tripType: TripType;
 
   shouldAutoReply: boolean;
   shouldEscalate: boolean;
@@ -242,6 +255,12 @@ const STRUCTURED_TOOL: Tool = {
           type: "string",
           enum: ["positive", "neutral", "negative"],
         },
+        tripType: {
+          type: "string",
+          enum: ["custom_group", "join_scheduled", "free_independent", "unclear"],
+          description:
+            "行程型態(只在跟旅遊行程有關的信才有意義,否則 unclear):custom_group=私人包團/訂製(封閉一團人、自帶行程草稿、要我們設計地接核價,如『為我這 10 人設計台灣團』);join_scheduled=參團(報名加入某個固定出團日的現成團,如『8 月有什麼日本團可以參加』);free_independent=自由行客製(個人/家庭自助行程規劃,不跟團);unclear=看不出來或與行程無關。",
+        },
         draftReply: {
           type: "string",
           description:
@@ -274,6 +293,7 @@ const STRUCTURED_TOOL: Tool = {
         "intent",
         "urgency",
         "sentiment",
+        "tripType",
         "draftReply",
         "draftLanguage",
         "extractedCustomer",
@@ -330,6 +350,12 @@ ${policyRules}
 - intent:用 1-2 句話講清楚客人到底要什麼
 - urgency:緊急程度(low/normal/high/critical)
 - sentiment:客人情感(positive/neutral/negative)
+- tripType:行程型態(custom_group / join_scheduled / free_independent / unclear)。判斷訊號:
+  · custom_group(私人包團/訂製):封閉的一團人(常見「我這 X 人」「幫我們設計」)、自帶行程草稿或海報、要我們設計地接並核價。10 人帶自己草稿要做台灣團 = 這類。
+  · join_scheduled(參團):想報名加入某個固定出團日的現成團(「8 月有什麼日本團」「我這兩人想跟你們 X/X 出發那團」)。
+  · free_independent(自由行客製):個人或家庭自助、不跟團,要行程規劃建議。
+  · unclear:看不出來,或與旅遊行程無關(投訴、訂金查詢、簽證、spam 等)。
+  這個判斷決定報價走哪條流程,務必依訊號分,不要全部丟 unclear。
 - draftReply:回覆草稿。要讓客人感覺被認真聽到,但寫法照 Jeff 的真人語氣(見下方【Jeff 的客人語氣】)。必須包含:(a) 認可客人需求 (b) 具體下一步 (c) 真實的時程承諾。對中文客戶用繁體中文(除非客人明顯用簡體則用簡體),對英文客戶用英文。
 - draftLanguage:回覆語言
 - extractedCustomer:從來信抽取的寄件人 email/姓名/電話(只填明確可見的,不要編造)
@@ -498,6 +524,7 @@ export async function runInquiryAgent(
     intent: parsed.intent,
     urgency: parsed.urgency,
     sentiment: parsed.sentiment,
+    tripType: parsed.tripType ?? "unclear",
     shouldAutoReply,
     shouldEscalate,
     escalationReason,

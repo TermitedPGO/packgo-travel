@@ -19,8 +19,25 @@ import { useState, lazy, Suspense } from "react";
 import { useLocale } from "@/contexts/LocaleContext";
 import { formatRelTime } from "./relTime";
 import { shortLabel } from "./TodayTaskCard";
-import { BtnB, BtnO, WorkspaceCard } from "./ws-ui";
+import { BtnB, BtnO, Pill, WorkspaceCard } from "./ws-ui";
 import { cleanDisplayText } from "./cleanText";
+
+/** 行程型態 → 卡片 chip 標籤(unclear / 未知 → 不顯示)。 */
+function tripTypeLabel(
+  tripType: string,
+  t: (k: string) => string,
+): string | null {
+  switch (tripType) {
+    case "custom_group":
+      return t("workspace.tripCustomGroup");
+    case "join_scheduled":
+      return t("workspace.tripJoinScheduled");
+    case "free_independent":
+      return t("workspace.tripFreeIndependent");
+    default:
+      return null;
+  }
+}
 
 const EscalationReplyDialog = lazy(() => import("./EscalationReplyDialog"));
 
@@ -31,6 +48,7 @@ export type EscalationShape = {
   title: string;
   body: string;
   classification: string | null;
+  tripType?: string | null;
   priority: "low" | "normal" | "high" | "critical";
   read: boolean;
   createdAt: Date | string;
@@ -105,6 +123,11 @@ export default function TodayEscalationCard({
       toggleBusy={acking}
     >
       <div className="font-medium">{esc.title}</div>
+      {esc.tripType && tripTypeLabel(esc.tripType, t) && (
+        <div className="mt-1">
+          <Pill>{tripTypeLabel(esc.tripType, t)}</Pill>
+        </div>
+      )}
       {expanded ? (
         <div className="text-gray-600 mt-0.5 text-[12px] whitespace-pre-wrap">
           {cleanBody}

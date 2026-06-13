@@ -677,6 +677,7 @@ async function processOneEmail(
       body: `${decision.escalationReason ?? "這封我不確定怎麼處理,先給你看。"}\n\n客人想問:${decision.intent}${attachmentLine}\n\n---\n建議回覆(還沒送出,給你過目):\n${decision.draftReply}`,
       context: JSON.stringify({
         classification: decision.classification,
+        tripType: decision.tripType,
         urgency: decision.urgency,
         sentiment: decision.sentiment,
         confidence: decision.confidence,

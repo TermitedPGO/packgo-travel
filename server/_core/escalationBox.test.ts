@@ -34,6 +34,7 @@ import {
   extractDraftFromBody,
   sendEscalationReply,
   parseResolvedTours,
+  parseEscalationTripType,
 } from "./escalationBox";
 
 const getDbMock = vi.mocked(getDb);
@@ -113,6 +114,19 @@ describe("parseResolvedTours (m3)", () => {
     );
     expect(r.resolvedTours).toEqual([{ id: 5, title: "好的", status: "" }]);
     expect(r.unknownTourCodes).toEqual(["YG7"]);
+  });
+});
+
+describe("parseEscalationTripType", () => {
+  it("reads tripType out of context", () => {
+    expect(parseEscalationTripType(JSON.stringify({ tripType: "custom_group" }))).toBe("custom_group");
+    expect(parseEscalationTripType(JSON.stringify({ tripType: "join_scheduled" }))).toBe("join_scheduled");
+  });
+  it("treats unclear / missing / malformed as null (card hides it)", () => {
+    expect(parseEscalationTripType(JSON.stringify({ tripType: "unclear" }))).toBeNull();
+    expect(parseEscalationTripType(JSON.stringify({ classification: "complaint" }))).toBeNull();
+    expect(parseEscalationTripType(null)).toBeNull();
+    expect(parseEscalationTripType("not json")).toBeNull();
   });
 });
 
