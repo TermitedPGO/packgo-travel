@@ -77,38 +77,38 @@ export interface EscalationReplyTarget {
   draftReply: string | null;
 }
 
-/**
- * 批9 m1 — best-effort reply target from context JSON. Returns null when any
- * load-bearing field (gmailThreadId / customerEmail) is missing — old rows
- * predate the structured fields and must degrade to view-only, never throw.
- */
-export function parseEscalationReplyTarget(
+/** Soft context parse: customerEmail MAY be null (recovered from the linked
+ *  profile by the caller). Requires only gmailThreadId — the one thing not
+ *  recoverable elsewhere. Returns null only on unparseable/non-object. */
+export interface EscalationReplyContext {
+  gmailThreadId: string | null;
+  gmailMessageId: string | null;
+  customerEmail: string | null;
+  subject: string;
+  draftReply: string | null;
+}
+
+export function parseEscalationReplyContext(
   context: string | null,
-): EscalationReplyTarget | null {
+): EscalationReplyContext | null {
   if (!context) return null;
   try {
     const p = JSON.parse(context) as Record<string, unknown>;
     if (p == null || typeof p !== "object" || Array.isArray(p)) return null;
-    const gmailThreadId =
-      typeof p.gmailThreadId === "string" && p.gmailThreadId.trim()
-        ? p.gmailThreadId
-        : null;
-    const customerEmail =
-      typeof p.customerEmail === "string" && p.customerEmail.trim()
-        ? p.customerEmail.trim()
-        : null;
-    if (!gmailThreadId || !customerEmail) return null;
     return {
-      gmailThreadId,
+      gmailThreadId:
+        typeof p.gmailThreadId === "string" && p.gmailThreadId.trim()
+          ? p.gmailThreadId
+          : null,
       gmailMessageId:
         typeof p.gmailMessageId === "string" && p.gmailMessageId
           ? p.gmailMessageId
           : null,
-      customerEmail,
+      customerEmail:
+        typeof p.customerEmail === "string" && p.customerEmail.trim()
+          ? p.customerEmail.trim()
+          : null,
       subject: typeof p.subject === "string" ? p.subject : "",
-      // 2026-06-13 — strip markdown on read too, so EXISTING cards whose
-      // stored draft still has ** (pre-fix data) prefill the 編輯並回覆
-      // dialog as clean text. Idempotent on already-clean new drafts.
       draftReply:
         typeof p.draftReply === "string" && p.draftReply.trim()
           ? stripMarkdownForEmail(p.draftReply)
@@ -117,6 +117,49 @@ export function parseEscalationReplyTarget(
   } catch {
     return null;
   }
+}
+
+/**
+ * 批9 m1 — strict reply target (gmailThreadId AND customerEmail present in
+ * context). Kept for callers that want context-only resolution; the live
+ * paths now recover customerEmail from the linked profile, see
+ * resolveReplyTarget / listEscalations.
+ */
+export function parseEscalationReplyTarget(
+  context: string | null,
+): EscalationReplyTarget | null {
+  const c = parseEscalationReplyContext(context);
+  if (!c || !c.gmailThreadId || !c.customerEmail) return null;
+  return {
+    gmailThreadId: c.gmailThreadId,
+    gmailMessageId: c.gmailMessageId,
+    customerEmail: c.customerEmail,
+    subject: c.subject,
+    draftReply: c.draftReply,
+  };
+}
+
+/**
+ * 2026-06-13 — old escalation cards (pre batch-9 context fields) stored the
+ * draft in the BODY, not context.draftReply. The body format (gmailPipeline)
+ * is: "<reason>\n\n客人想問:...\n\n---\n建議回覆(還沒送出,給你過目):\n<draft>".
+ * Pull the draft after that marker so the 編輯並回覆 dialog prefills it.
+ */
+export function extractDraftFromBody(body: string | null | undefined): string | null {
+  if (!body) return null;
+  const markers = [
+    "建議回覆(還沒送出,給你過目):",
+    "建議回覆(還沒送出):",
+    "建議回覆:",
+  ];
+  for (const m of markers) {
+    const i = body.indexOf(m);
+    if (i >= 0) {
+      const draft = body.slice(i + m.length).trim();
+      return draft ? stripMarkdownForEmail(draft) : null;
+    }
+  }
+  return null;
 }
 
 /**
@@ -256,7 +299,13 @@ export async function listEscalations(): Promise<EscalationRow[]> {
         ? userById.get(profile.userId)?.name?.trim()
         : undefined;
     const label = userName || profile?.email?.trim() || "";
-    const target = parseEscalationReplyTarget(r.context);
+    const ctx = parseEscalationReplyContext(r.context);
+    // 2026-06-13 — recover customerEmail from the linked profile when the
+    // context lacks it (pre-fix cards). gmailThreadId is always in context;
+    // email is the only missing piece, and it's right here on the profile.
+    const customerEmail = ctx?.customerEmail ?? profile?.email?.trim() ?? null;
+    const suggestedReply = ctx?.draftReply ?? extractDraftFromBody(r.body);
+    const replyable = Boolean(ctx?.gmailThreadId && customerEmail);
     return {
       id: r.id,
       agentName: r.agentName,
@@ -267,9 +316,9 @@ export async function listEscalations(): Promise<EscalationRow[]> {
       read: r.readByJeff !== 0,
       createdAt: r.createdAt,
       who: label ? { label, userId: profile?.userId ?? null } : null,
-      suggestedReply: target?.draftReply ?? null,
-      replyable: target != null,
-      customerEmail: target?.customerEmail ?? null,
+      suggestedReply,
+      replyable,
+      customerEmail,
     };
   });
 }
@@ -361,6 +410,7 @@ export async function sendEscalationReply(
       id: agentMessages.id,
       messageType: agentMessages.messageType,
       context: agentMessages.context,
+      relatedCustomerProfileId: agentMessages.relatedCustomerProfileId,
     })
     .from(agentMessages)
     .where(eq(agentMessages.id, messageId))
@@ -379,14 +429,39 @@ export async function sendEscalationReply(
     };
   }
 
-  const target = parseEscalationReplyTarget(row.context);
-  if (!target) {
+  const ctx = parseEscalationReplyContext(row.context);
+  if (!ctx?.gmailThreadId) {
     return {
       sent: false,
       dryRun: false,
-      errorMessage: "舊版 escalation 缺結構化收件資訊,請直接在 Gmail 回覆",
+      errorMessage: "這封缺 Gmail 對話串資訊,無法回原信,請直接在 Gmail 回覆",
     };
   }
+  // 2026-06-13 — recover customerEmail from the linked profile when context
+  // lacks it (pre-fix cards). This un-sticks every existing escalation card.
+  let customerEmail = ctx.customerEmail;
+  if (!customerEmail && row.relatedCustomerProfileId != null) {
+    const [prof] = await db
+      .select({ email: customerProfiles.email })
+      .from(customerProfiles)
+      .where(eq(customerProfiles.id, row.relatedCustomerProfileId))
+      .limit(1);
+    if (prof?.email?.trim()) customerEmail = prof.email.trim();
+  }
+  if (!customerEmail) {
+    return {
+      sent: false,
+      dryRun: false,
+      errorMessage: "找不到客人 email,無法寄出",
+    };
+  }
+  const target: EscalationReplyTarget = {
+    gmailThreadId: ctx.gmailThreadId,
+    gmailMessageId: ctx.gmailMessageId,
+    customerEmail,
+    subject: ctx.subject,
+    draftReply: ctx.draftReply,
+  };
 
   const integrations = await db
     .select()

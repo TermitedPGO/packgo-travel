@@ -30,6 +30,8 @@ import {
   ackEscalation,
   parseEscalationClassification,
   parseEscalationReplyTarget,
+  parseEscalationReplyContext,
+  extractDraftFromBody,
   sendEscalationReply,
 } from "./escalationBox";
 
@@ -303,5 +305,54 @@ describe("sendEscalationReply guards (批9 m1)", () => {
     const res = await sendEscalationReply(999, "hello");
     expect(res.sent).toBe(false);
     expect(res.errorMessage).toContain("找不到");
+  });
+});
+
+describe("parseEscalationReplyContext (soft) + extractDraftFromBody (2026-06-13)", () => {
+  it("soft parse 保留 gmailThreadId、customerEmail 可空(pre-fix 卡)", () => {
+    const ctx = JSON.stringify({
+      classification: "tour_comparison_request",
+      gmailThreadId: "19eb9498aa36d669",
+      gmailMessageId: "m-1",
+      // 沒有 customerEmail、沒有 draftReply — 就是 prod 截圖那張卡的形狀
+    });
+    const c = parseEscalationReplyContext(ctx);
+    expect(c).not.toBeNull();
+    expect(c!.gmailThreadId).toBe("19eb9498aa36d669");
+    expect(c!.customerEmail).toBeNull();
+    expect(c!.draftReply).toBeNull();
+  });
+
+  it("strict 版對同一張卡回 null(印證舊行為:context-only 不可回)", () => {
+    const ctx = JSON.stringify({ gmailThreadId: "t-1" });
+    expect(parseEscalationReplyTarget(ctx)).toBeNull();
+    expect(parseEscalationReplyContext(ctx)?.gmailThreadId).toBe("t-1");
+  });
+
+  it("soft parse 仍清 draftReply 的 markdown", () => {
+    const ctx = JSON.stringify({
+      gmailThreadId: "t-1",
+      customerEmail: "a@b.com",
+      draftReply: "關於 **差別**",
+    });
+    expect(parseEscalationReplyContext(ctx)!.draftReply).toBe("關於 差別");
+  });
+
+  it("extractDraftFromBody 從卡片 body 抽出建議回覆並清 markdown", () => {
+    const body =
+      "這封我歸成「行程比較」,超出我能自動處理的範圍。\n\n" +
+      "客人想問:比較 YG7 和 YL7\n\n" +
+      "---\n建議回覆(還沒送出,給你過目):\n" +
+      "Jeff 您好,關於 **YG7 和 YL7** 的差別...";
+    const draft = extractDraftFromBody(body);
+    expect(draft).toContain("Jeff 您好");
+    expect(draft).toContain("YG7 和 YL7 的差別");
+    expect(draft).not.toContain("**");
+    expect(draft).not.toContain("建議回覆");
+  });
+
+  it("extractDraftFromBody 無 marker → null", () => {
+    expect(extractDraftFromBody("沒有建議回覆段的內容")).toBeNull();
+    expect(extractDraftFromBody(null)).toBeNull();
   });
 });
