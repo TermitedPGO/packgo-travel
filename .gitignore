@@ -145,3 +145,9 @@ scripts/gmail-eval/data/
 # automatically after a successful deploy.
 .deploy-approve
 .gstack/
+
+# Stray PDFs dropped into the repo root — this folder doubles as Jeff's
+# Desktop drop-zone, so personal PDFs land here and keep tripping the deploy
+# clean-tree gate. Ignore root-level ones. Already-tracked PDFs (test_tour.pdf)
+# stay tracked; nested PDFs under subfolders are unaffected.
+/*.pdf
