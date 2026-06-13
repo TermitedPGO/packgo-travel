@@ -22,13 +22,13 @@ InquiryAgent 寫草稿前先解析客人信裡的團指涉 → 候選團塞進 p
       active 優先,cap 60),再跑純 resolveTourReferences 排序。零詞零碼 → 不查、回空。
 - [x] export 抽詞 helper 供測試;Vitest(抽詞、短路不碰 DB、12 tests green)
 
-### m2 — 接進 InquiryAgent 草稿
-- [ ] InquiryAgentInput 加 `tourCandidates?: {id,title,status,departureHint?}[]`
-- [ ] prompt 加【現有相關團】block + draft 指示(active 可具名講、draft 只 Jeff 看、
-      不報價不保證、對不上老實問)
-- [ ] gmailPipeline:runInquiryAgent 前 resolveFromEmail,結果傳入;escalation context
-      加 resolvedTourIds(供卡片跳轉)
-- [ ] Vitest(prompt block 組裝;draft/active 區別措辭靠 prompt,不寫死測)
+### m2 — 接進 InquiryAgent 草稿 ✅
+- [x] InquiryAgentInput 加 `tourCandidates?: {id,title,status,via,terms?}[]` + `unknownTourCodes?`
+- [x] system prompt 加【現有相關團 — 怎麼用】block(active 可具名講、draft 只 Jeff 看保守措辭、
+      不報價不保證、未知碼老實問);user prompt 加資料層【現有相關團】+【查不到的團號】block
+- [x] gmailPipeline:runInquiryAgent 前 resolveFromEmail(subject+body,best-effort 不阻斷),
+      結果傳入;escalation context 加 resolvedTours{id,title,status} + unknownTourCodes(供卡片跳轉)
+- [x] Vitest(prompt block 組裝:無候選乾淨、active/draft 標籤、未知碼;14 tests green)
 
 ### m3 — escalation 卡顯示解析到的團
 - [ ] escalationBox EscalationRow 加 resolvedTours(從 context.resolvedTourIds 撈 title/status)

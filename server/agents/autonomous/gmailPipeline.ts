@@ -303,6 +303,26 @@ async function processOneEmail(
     parseError: a.parseError,
   }));
 
+  // 2026-06-13 tour-reference-resolve m2 — resolve tour references BEFORE
+  // drafting so the agent can name real tours / honestly ask when a code
+  // (e.g. YG7) matches nothing. Bounded: extracts code/location tokens in JS
+  // first, only queries the catalog when present. Best-effort — a resolver
+  // failure must never block the reply.
+  let tourCandidates: Awaited<
+    ReturnType<typeof import("../../_core/tourReferenceResolver").resolveFromEmail>
+  >["candidates"] = [];
+  let unknownTourCodes: string[] = [];
+  try {
+    const { resolveFromEmail } = await import(
+      "../../_core/tourReferenceResolver"
+    );
+    const resolved = await resolveFromEmail(`${msg.subject}\n${msg.body}`);
+    tourCandidates = resolved.candidates;
+    unknownTourCodes = resolved.unknownCodes;
+  } catch (err) {
+    log.warn({ err, senderEmail }, "[gmailPipeline] tour resolve failed (non-fatal)");
+  }
+
   // Run InquiryAgent
   const decision = await runInquiryAgent({
     rawMessage,
@@ -318,6 +338,8 @@ async function processOneEmail(
     })),
     policyRules: inquiryPolicy.rules,
     attachments: attachmentsForAgent,
+    tourCandidates,
+    unknownTourCodes,
   });
 
   // 2026-05-17 red-team round 1 — if shieldUntrustedInput flagged the body
@@ -668,6 +690,16 @@ async function processOneEmail(
           sizeBytes: a.sizeBytes,
           parseStatus: a.parseStatus,
         })),
+        // 2026-06-13 tour-reference-resolve m3 — resolved tour candidates so
+        // the escalation card can show a chip + jump to /tour/:id. draft-state
+        // tours are included here (Jeff-only view); the customer-facing draft
+        // never promises them. Capped list already (resolveFromEmail ≤8).
+        resolvedTours: tourCandidates.map((c) => ({
+          id: c.id,
+          title: c.title,
+          status: c.status,
+        })),
+        unknownTourCodes,
       }),
       priority:
         decision.urgency === "critical"

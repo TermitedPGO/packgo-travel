@@ -263,3 +263,61 @@ describe("runInquiryAgent — escalation paths (module 3.8)", () => {
     ).rejects.toThrow();
   });
 });
+
+describe("runInquiryAgent — tour candidates prompt block (m2)", () => {
+  beforeEach(() => {
+    invokeLLMSpy.mockReset();
+  });
+
+  /** Pull the user-prompt text from the captured invokeLLM call. */
+  function capturedUserPrompt(): string {
+    const call = invokeLLMSpy.mock.calls.at(-1)?.[0];
+    const userMsg = call?.messages?.find(
+      (m: { role: string }) => m.role === "user",
+    );
+    return userMsg?.content ?? "";
+  }
+
+  it("無候選無未知碼 → prompt 不含團區塊(常見信保持乾淨)", async () => {
+    invokeLLMSpy.mockResolvedValueOnce(stubLLMResponse("new_inquiry"));
+    await runInquiryAgent({ rawMessage: "你好 想問費用", channel: "email" });
+    const p = capturedUserPrompt();
+    expect(p).not.toContain("【現有相關團");
+    expect(p).not.toContain("【查不到的團號");
+  });
+
+  it("active 候選 → 標 [active] + 可具名;draft 候選 → 標 [draft]", async () => {
+    invokeLLMSpy.mockResolvedValueOnce(stubLLMResponse("new_inquiry"));
+    await runInquiryAgent({
+      rawMessage: "想了解黃石團",
+      channel: "email",
+      tourCandidates: [
+        { id: 5, title: "Lion 黃石深度", status: "active", via: "code" },
+        {
+          id: 1,
+          title: "經典美西黃石",
+          status: "draft",
+          via: "keyword",
+          terms: ["黃石", "美西"],
+        },
+      ],
+    });
+    const p = capturedUserPrompt();
+    expect(p).toContain("【現有相關團");
+    expect(p).toContain("[active] #5 Lion 黃石深度");
+    expect(p).toContain("[draft] #1 經典美西黃石");
+    expect(p).toContain("黃石、美西"); // keyword terms surfaced
+  });
+
+  it("未知團號 → prompt 出現【查不到的團號】要求老實問", async () => {
+    invokeLLMSpy.mockResolvedValueOnce(stubLLMResponse("new_inquiry"));
+    await runInquiryAgent({
+      rawMessage: "比較 YG7 和 YL7",
+      channel: "email",
+      unknownTourCodes: ["YG7", "YL7"],
+    });
+    const p = capturedUserPrompt();
+    expect(p).toContain("【查不到的團號");
+    expect(p).toContain("YG7、YL7");
+  });
+});
