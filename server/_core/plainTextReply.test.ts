@@ -1,0 +1,85 @@
+/**
+ * Tests for stripMarkdownForEmail — 客人回覆純文字清洗。
+ * 含 2026-06-13 prod 截圖的實際 ** 案例(回歸鎖死)。
+ */
+import { describe, it, expect } from "vitest";
+import { stripMarkdownForEmail, hasResidualMarkdown } from "./plainTextReply";
+
+describe("stripMarkdownForEmail — prod 截圖實際案例", () => {
+  it("移除 **粗體** 留人話(YG7/YL7 那封)", () => {
+    const draft = [
+      "Jeff 您好,",
+      "",
+      "關於 **YG7 和 YL7 兩個團的差別**,這兩條路線在行程天數上可能不同。",
+      "至於 **費用部分**,實際價格依出發日期、人數而定。",
+      "**下一步**:我們會在 **1-2 個工作天內**整理好用 email 回覆您。",
+    ].join("\n");
+    const out = stripMarkdownForEmail(draft);
+    expect(out).not.toContain("**");
+    expect(out).toContain("YG7 和 YL7 兩個團的差別");
+    expect(out).toContain("費用部分");
+    expect(out).toContain("下一步");
+    expect(out).toContain("1-2 個工作天內");
+  });
+
+  it("hasResidualMarkdown 抓得到未清的 **", () => {
+    expect(hasResidualMarkdown("關於 **差別**")).toBe(true);
+    expect(hasResidualMarkdown(stripMarkdownForEmail("關於 **差別**"))).toBe(false);
+  });
+});
+
+describe("stripMarkdownForEmail — 各 markdown 形狀", () => {
+  it("__粗體__ 與 *斜體*", () => {
+    expect(stripMarkdownForEmail("__重要__ 和 *補充*")).toBe("重要 和 補充");
+  });
+
+  it("# 標題 去井號留字", () => {
+    expect(stripMarkdownForEmail("## 行程摘要\n內文")).toBe("行程摘要\n內文");
+  });
+
+  it("[文字](網址) → 文字 (網址)", () => {
+    expect(stripMarkdownForEmail("詳見 [官網](https://packgoplay.com)")).toBe(
+      "詳見 官網 (https://packgoplay.com)",
+    );
+  });
+
+  it("行首 - / * / + bullet → 全形點", () => {
+    const out = stripMarkdownForEmail("- 機票\n- 住宿\n* 領隊");
+    expect(out).toBe("・機票\n・住宿\n・領隊");
+  });
+
+  it("inline `code` 去反引號", () => {
+    expect(stripMarkdownForEmail("代碼 `YG7`")).toBe("代碼 YG7");
+  });
+
+  it("水平線 --- 整行移除", () => {
+    expect(stripMarkdownForEmail("上段\n\n---\n\n下段")).toBe("上段\n\n下段");
+  });
+});
+
+describe("stripMarkdownForEmail — 不可誤傷", () => {
+  it("中文全形標點原樣保留", () => {
+    const s = "您好!關於「黃石團」,我們會處理。";
+    expect(stripMarkdownForEmail(s)).toBe(s);
+  });
+
+  it("句中連字號(4-人房、台北-上海)不動", () => {
+    const s = "台北-上海來回,4-人房型";
+    expect(stripMarkdownForEmail(s)).toBe(s);
+  });
+
+  it("email 裡的底線不被當斜體吃掉", () => {
+    const s = "寄到 support_team@packgoplay.com";
+    expect(stripMarkdownForEmail(s)).toBe(s);
+  });
+
+  it("null / 空字串安全", () => {
+    expect(stripMarkdownForEmail(null)).toBe("");
+    expect(stripMarkdownForEmail("")).toBe("");
+  });
+
+  it("純人話原樣(已乾淨的草稿不被改動)", () => {
+    const s = "Jeff 您好,\n\n感謝詢問黃石團,我們 1-2 天內回覆您。\n\nPACK&GO Travel";
+    expect(stripMarkdownForEmail(s)).toBe(s);
+  });
+});

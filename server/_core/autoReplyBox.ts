@@ -15,6 +15,7 @@ import { eq, and, desc, gte, or, like, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import { agentMessages } from "../../drizzle/schema";
 import { createChildLogger } from "./logger";
+import { stripMarkdownForEmail } from "./plainTextReply";
 
 const log = createChildLogger({ module: "autoReplyBox" });
 
@@ -73,9 +74,11 @@ export function parseAutoReplyCard(
     confidence: typeof p.confidence === "number" ? p.confidence : null,
     customerEmail,
     subject: typeof p.subject === "string" ? p.subject : null,
+    // 2026-06-13 — strip markdown on read (same as escalationBox): clean
+    // the card preview + the 跟進更正 prefill even for pre-fix stored drafts.
     draftReply:
       typeof p.draftReply === "string" && p.draftReply.trim()
-        ? p.draftReply
+        ? stripMarkdownForEmail(p.draftReply)
         : null,
     replyable: customerEmail != null && gmailThreadId != null,
   };

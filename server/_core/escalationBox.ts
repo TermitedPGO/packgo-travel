@@ -33,6 +33,7 @@ import {
   gmailIntegration,
 } from "../../drizzle/schema";
 import { createChildLogger } from "./logger";
+import { stripMarkdownForEmail } from "./plainTextReply";
 
 const log = createChildLogger({ module: "escalationBox" });
 
@@ -105,9 +106,12 @@ export function parseEscalationReplyTarget(
           : null,
       customerEmail,
       subject: typeof p.subject === "string" ? p.subject : "",
+      // 2026-06-13 — strip markdown on read too, so EXISTING cards whose
+      // stored draft still has ** (pre-fix data) prefill the 編輯並回覆
+      // dialog as clean text. Idempotent on already-clean new drafts.
       draftReply:
         typeof p.draftReply === "string" && p.draftReply.trim()
-          ? p.draftReply
+          ? stripMarkdownForEmail(p.draftReply)
           : null,
     };
   } catch {

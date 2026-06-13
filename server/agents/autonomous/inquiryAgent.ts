@@ -25,6 +25,7 @@
 
 import { invokeLLM, type Message, type Tool } from "../../_core/llm";
 import { escalationReasonZh } from "./inquiryLabels";
+import { stripMarkdownForEmail } from "../../_core/plainTextReply";
 
 export type Classification =
   | "new_inquiry"
@@ -310,7 +311,7 @@ ${policyRules}
 - intent:用 1-2 句話講清楚客人到底要什麼
 - urgency:緊急程度(low/normal/high/critical)
 - sentiment:客人情感(positive/neutral/negative)
-- draftReply:完整回覆草稿。語氣溫暖專業,不要過度道歉也不要冷漠,要讓客人感覺被認真聽到。**必須包含**:(a) 認可客人需求 (b) 具體下一步 (c) 真實的時程承諾。100-400 字。對中文客戶用繁體中文(除非客人明顯用簡體則用簡體),對英文客戶用英文。
+- draftReply:回覆草稿。要讓客人感覺被認真聽到,但寫法照 Jeff 的真人語氣(見下方【Jeff 的客人語氣】)。必須包含:(a) 認可客人需求 (b) 具體下一步 (c) 真實的時程承諾。對中文客戶用繁體中文(除非客人明顯用簡體則用簡體),對英文客戶用英文。
 - draftLanguage:回覆語言
 - extractedCustomer:從來信抽取的寄件人 email/姓名/電話(只填明確可見的,不要編造)
 - confidence:0-100,要保守。低估比高估安全 — 太自信會讓奇怪信件 auto-send 出去。
@@ -329,12 +330,18 @@ ${policyRules}
 - 若 parseStatus=too_large / parse_error / unsupported / empty:draft 中說明「已收到 [filename],但檔案 [太大/格式無法解析/為空],可否改傳 [PDF / Word / Excel]?」不要假裝讀到了。
 - 若客戶提附件但 user prompt 完全沒有 <CUSTOMER_ATTACHMENT_N> 區塊:代表 Gmail 抓取失敗,在 draft 中要客戶重傳,並 escalate Jeff 人工跟進。
 
-【中文文法與標點】
-- 繁中以全形標點為主(「」『』,。、!?),英文夾雜時用半形。
-- 不要混用「您」「你」 — 同一封 draft 內一致用「您」。
-- 段落間用一個空行隔開,不要塞滿沒分段的長句。
-- 數字+量詞用半形 + 空格(如「4 人」「3 晚」「8 月底」),不要寫成「４人」「三晚」混雜。
-- 結尾簽名前留一行空行。`;
+【Jeff 的客人語氣 — 絕對遵守(這是寄給真人的信,不是行銷文)】
+- 純文字。**絕對不可用 markdown**:不要 **粗體**、不要 *斜體*、不要 # 標題、不要 \`code\`、
+  不要 [文字](連結)。要強調就用句子本身,標星號客人看到的是字面 ** 符號。
+- 越短越好。能三句講完不要寫五段。客人問什麼答什麼,不灌行銷套話。
+- 不官方、不肉麻。禁用:「感謝您的來信」「期待為您規劃美好的XX之旅」「竭誠為您服務」這類
+  罐頭句。開頭直接進正題(例:「Jeff 您好,黃石團這邊跟您說明一下」)。
+- 不用破折號(— 或 –)。範圍寫「1 到 2 個工作天」或「1-2 天」(半形連字號),不要用 –。
+- 不用打勾✓或 emoji 裝飾。
+- 繁中全形標點(「」,。、!?),英文夾雜用半形。
+- 同一封一致用「您」,不混「你」。
+- 段落間一個空行;數字+量詞半形加空格(「4 人」「3 晚」)。
+- 結尾簽名前留一行空行,簽名用 policy.signature。`;
 }
 
 export async function runInquiryAgent(
@@ -458,7 +465,11 @@ export async function runInquiryAgent(
     shouldAutoReply,
     shouldEscalate,
     escalationReason,
-    draftReply: parsed.draftReply,
+    // 2026-06-13 — strip markdown the LLM may have produced (** etc.) so a
+    // customer never sees literal asterisks in a plain-text email. The system
+    // prompt forbids markdown; this is the belt-and-suspenders guarantee at
+    // the single chokepoint every reply consumer reads from.
+    draftReply: stripMarkdownForEmail(parsed.draftReply),
     draftLanguage: parsed.draftLanguage,
     extractedCustomer: parsed.extractedCustomer ?? {},
     confidence: parsed.confidence,
