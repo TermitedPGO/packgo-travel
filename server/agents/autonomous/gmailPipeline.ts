@@ -328,6 +328,33 @@ async function processOneEmail(
     log.warn({ err, senderEmail }, "[gmailPipeline] tour resolve failed (non-fatal)");
   }
 
+  // 2026-06-13 (B) — fetch the full Gmail thread so the agent sees the whole
+  // back-and-forth (Jeff's prior replies + the customer's follow-ups), not
+  // just this one email. Best-effort; a thread-fetch failure must never block.
+  let threadHistory: Array<{
+    direction: "inbound" | "outbound";
+    from?: string;
+    body: string;
+  }> = [];
+  try {
+    if (msg.threadId) {
+      const { getThreadHistory } = await import("../../_core/gmail");
+      const hist = await getThreadHistory(
+        sendCtx.gmail,
+        msg.threadId,
+        sendCtx.fromEmail,
+        { maxMessages: 12 },
+      );
+      threadHistory = hist.map((h) => ({
+        direction: h.direction,
+        from: h.from,
+        body: h.body,
+      }));
+    }
+  } catch (err) {
+    log.warn({ err, senderEmail }, "[gmailPipeline] thread history fetch failed (non-fatal)");
+  }
+
   // Run InquiryAgent
   const decision = await runInquiryAgent({
     rawMessage,
@@ -345,6 +372,7 @@ async function processOneEmail(
     attachments: attachmentsForAgent,
     tourCandidates,
     unknownTourCodes,
+    threadHistory,
   });
 
   // 2026-05-17 red-team round 1 — if shieldUntrustedInput flagged the body

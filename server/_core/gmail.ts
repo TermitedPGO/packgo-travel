@@ -216,6 +216,56 @@ export async function listUnreadMessages(
   return results;
 }
 
+export interface ThreadHistoryMessage {
+  from: string;
+  date: Date;
+  /** outbound = sent by us (from matches the connected account). */
+  direction: "inbound" | "outbound";
+  body: string;
+}
+
+/**
+ * Fetch a Gmail thread's full message history (both directions), trimmed, so
+ * the InquiryAgent can reason about the whole back-and-forth instead of only
+ * the one triggering email. 2026-06-13 — the pipeline logged just the trigger
+ * message, leaving the agent blind to Jeff's manual replies + the customer's
+ * follow-ups. Oldest→newest; caps message count + per-message length.
+ */
+export async function getThreadHistory(
+  gmail: ReturnType<typeof buildGmailClient>,
+  threadId: string,
+  selfEmail: string,
+  opts?: { maxMessages?: number; maxCharsPerMessage?: number },
+): Promise<ThreadHistoryMessage[]> {
+  const maxMessages = opts?.maxMessages ?? 12;
+  const maxChars = opts?.maxCharsPerMessage ?? 1200;
+  const resp = await gmail.users.threads.get({
+    userId: "me",
+    id: threadId,
+    format: "full",
+  });
+  const msgs = (resp.data.messages ?? []) as any[];
+  const self = (selfEmail || "").toLowerCase();
+  const out: ThreadHistoryMessage[] = [];
+  for (const m of msgs) {
+    const headers = (m.payload?.headers ?? []) as Array<{
+      name?: string | null;
+      value?: string | null;
+    }>;
+    const hmap: Record<string, string> = {};
+    for (const h of headers) if (h.name && h.value) hmap[h.name.toLowerCase()] = h.value;
+    const from = hmap["from"] ?? "";
+    const body = (extractBody(m.payload) || m.snippet || "").trim();
+    out.push({
+      from,
+      date: new Date(Number(m.internalDate ?? Date.now())),
+      direction: self && from.toLowerCase().includes(self) ? "outbound" : "inbound",
+      body: body.length > maxChars ? body.slice(0, maxChars) + " …(略)" : body,
+    });
+  }
+  return out.slice(-maxMessages);
+}
+
 function parseMessage(msg: any): GmailMessageSummary {
   const headers = msg.payload?.headers ?? [];
   const headerMap: Record<string, string> = {};
