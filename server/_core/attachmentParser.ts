@@ -42,8 +42,15 @@ const log = createChildLogger({ module: "attachmentParser" });
 // Limits — tweak here if a real-world email blows past them
 // ────────────────────────────────────────────────────────────────────────
 
-/** Maximum raw bytes per attachment. Larger → skip (parseStatus="too_large"). */
+/** Maximum raw bytes per non-image attachment. Larger → skip ("too_large"). */
 export const MAX_RAW_BYTES = 5 * 1024 * 1024; // 5 MB
+
+/**
+ * Images get a much higher cap (2026-06-13): we downscale them with sharp
+ * before vision OCR, so a 16.6MB customer poster is fine. "File too large" is
+ * our problem to solve, not the customer's to work around (Jeff's rule).
+ */
+export const MAX_IMAGE_RAW_BYTES = 30 * 1024 * 1024; // 30 MB
 
 /** Maximum extracted text per attachment. Truncated with marker if larger. */
 export const MAX_TEXT_CHARS = 50 * 1024; // 50 KB
@@ -152,8 +159,10 @@ export async function parseAttachment(
     sizeBytes,
   };
 
-  // Guard: too large
-  if (sizeBytes > MAX_RAW_BYTES) {
+  // Guard: too large. Images get a higher cap because we downscale them
+  // before reading (see the "image" case below).
+  const rawCap = kind === "image" ? MAX_IMAGE_RAW_BYTES : MAX_RAW_BYTES;
+  if (sizeBytes > rawCap) {
     return {
       ...base,
       text: "",
@@ -189,14 +198,23 @@ export async function parseAttachment(
       case "html":
         text = stripHtml(data.toString("utf-8"));
         break;
-      case "image":
-        // No OCR yet — return descriptive placeholder so agent knows an
-        // image was present without hallucinating its contents.
+      case "image": {
+        // 2026-06-13 — actually READ the image via Claude vision (downscale
+        // first). Customers send posters / itinerary screenshots; bouncing
+        // them is bad service. Only fall back to a placeholder if reading
+        // genuinely fails (corrupt image / model error), never on size.
+        const { extractImageText } = await import("./imageOcr");
+        const ocr = await extractImageText(data, filename);
+        if (ocr.ok) {
+          text = ocr.text;
+          break;
+        }
         return {
           ...base,
-          text: `[圖片附件 / image attachment: ${filename}, ${formatBytes(sizeBytes)}]`,
+          text: `[圖片附件 / image attachment: ${filename}, ${formatBytes(sizeBytes)} — 系統暫時讀不出內容]`,
           parseStatus: "ok",
         };
+      }
       case "unknown":
         return {
           ...base,

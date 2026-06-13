@@ -16,8 +16,11 @@
  * catch) IS tested via the parse_error case.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import JSZip from "jszip";
+
+vi.mock("./imageOcr", () => ({ extractImageText: vi.fn() }));
+
 import {
   parseAttachment,
   detectAttachmentKind,
@@ -25,6 +28,9 @@ import {
   MAX_TEXT_CHARS,
   TRUNCATION_MARKER,
 } from "./attachmentParser";
+import { extractImageText } from "./imageOcr";
+
+const ocrMock = vi.mocked(extractImageText);
 
 // ──────────────────────────────────────────────────────────────────────
 // detectAttachmentKind
@@ -338,13 +344,32 @@ describe("parseAttachment — text formats", () => {
     expect(result.text).not.toContain("alert(1)");
   });
 
-  it("returns image placeholder (no OCR)", async () => {
+  it("reads image content via vision OCR when it succeeds", async () => {
+    ocrMock.mockResolvedValueOnce({ ok: true, text: "台灣 8 天\n鳴日號觀光列車\n台北 → 花蓮 → 台東" });
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const result = await parseAttachment("poster.png", "image/png", png);
+    expect(result.kind).toBe("image");
+    expect(result.parseStatus).toBe("ok");
+    expect(result.text).toContain("鳴日號");
+    expect(result.text).not.toContain("image attachment");
+  });
+
+  it("falls back to a placeholder when the image genuinely can't be read", async () => {
+    ocrMock.mockResolvedValueOnce({ ok: false, text: "" });
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     const result = await parseAttachment("photo.png", "image/png", png);
     expect(result.kind).toBe("image");
     expect(result.parseStatus).toBe("ok");
     expect(result.text).toContain("photo.png");
-    expect(result.text).toContain("image attachment");
+    expect(result.text).toContain("讀不出");
+  });
+
+  it("large image is NOT rejected as too_large (we downscale + read it)", async () => {
+    ocrMock.mockResolvedValueOnce({ ok: true, text: "16MB 海報已讀取" });
+    const big = Buffer.alloc(16 * 1024 * 1024, 1); // 16 MB, over the 5 MB non-image cap
+    const result = await parseAttachment("big-poster.png", "image/png", big);
+    expect(result.parseStatus).toBe("ok");
+    expect(result.text).toContain("16MB 海報已讀取");
   });
 });
 
