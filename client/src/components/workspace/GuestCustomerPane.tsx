@@ -15,6 +15,20 @@ import { formatRelTime } from "./relTime";
 
 const OPEN_STATUSES = new Set(["new", "in_progress"]);
 
+/**
+ * Strip the prompt-injection guard wrappers from stored interaction content
+ * before showing it to Jeff. Older records (pre-2026-06-13) stored the email
+ * body wrapped in <untrusted_input> tags (that wrapper is for the LLM only);
+ * it must never render in the admin UI. Keeps the inner text + headers.
+ */
+function cleanInteractionContent(raw: string): string {
+  return raw
+    .replace(/<\/?untrusted_input>/gi, "")
+    .replace(/<\/?CUSTOMER_RAW_EMAIL>/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export default function GuestCustomerPane({
   profileId,
 }: {
@@ -145,7 +159,7 @@ function InteractionRow({
         </p>
       )}
       <p className="text-[12px] text-gray-500 line-clamp-4 whitespace-pre-wrap break-words mt-0.5">
-        {interaction.content}
+        {cleanInteractionContent(interaction.content)}
       </p>
     </div>
   );

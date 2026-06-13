@@ -551,7 +551,14 @@ export async function sendEscalationReply(
       { messageId, err: send.error },
       "[escalationBox] escalation reply send failed",
     );
-    return { sent: false, dryRun: false, errorMessage: send.error ?? "寄送失敗" };
+    // 2026-06-13 — map a dead OAuth grant (invalid_grant) to an actionable
+    // message instead of the cryptic raw error. The token genuinely needs
+    // Jeff to reconnect Gmail; nothing retries its way out of this.
+    const { isAuthRevocationError } = await import("./gmailAuthFailure");
+    const errorMessage = isAuthRevocationError(send.error)
+      ? "Gmail 連線已失效,需要重新授權:到設定重新連接 Gmail 後再寄一次"
+      : send.error ?? "寄送失敗";
+    return { sent: false, dryRun: false, errorMessage };
   }
   if (send.dryRun) {
     log.warn(

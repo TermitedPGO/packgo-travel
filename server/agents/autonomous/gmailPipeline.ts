@@ -288,7 +288,12 @@ async function processOneEmail(
   // injection heuristics, force-escalate (don't auto-reply).
   const { shieldUntrustedInput } = await import("../../_core/promptInjectionGuard");
   const shielded = shieldUntrustedInput(msg.body);
-  const rawMessage = `From: ${msg.from}\nSubject: ${msg.subject}\n\n${shielded.wrapped}`;
+  const emailHeader = `From: ${msg.from}\nSubject: ${msg.subject}\n\n`;
+  // Wrapped version → the LLM only (injection defense). Stored/displayed
+  // content uses the CLEAN body — the <untrusted_input> wrapper must never
+  // leak into Jeff's admin UI (2026-06-13 bug: guest card showed the tag).
+  const rawMessage = `${emailHeader}${shielded.wrapped}`;
+  const cleanMessage = `${emailHeader}${msg.body}`;
 
   // 2026-05-25 Phase 7 — pass parsed attachments to the agent so the
   // draft can actually reference customer-supplied PDFs/Excel/Word.
@@ -380,7 +385,7 @@ async function processOneEmail(
     customerProfileId: profileId ?? 0,
     channel: "email",
     direction: "inbound",
-    content: rawMessage + attachmentSummary,
+    content: cleanMessage + attachmentSummary,
     contentSummary:
       decision.intent +
       (attachmentsForAgent.length > 0
