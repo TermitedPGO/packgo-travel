@@ -33,6 +33,7 @@ import {
   parseEscalationReplyContext,
   extractDraftFromBody,
   sendEscalationReply,
+  parseResolvedTours,
 } from "./escalationBox";
 
 const getDbMock = vi.mocked(getDb);
@@ -69,6 +70,50 @@ const BASE_MSG = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+describe("parseResolvedTours (m3)", () => {
+  it("pulls resolvedTours + unknownTourCodes out of context", () => {
+    const r = parseResolvedTours(
+      JSON.stringify({
+        resolvedTours: [
+          { id: 5, title: "黃石深度", status: "active" },
+          { id: 1, title: "美西草稿", status: "draft" },
+        ],
+        unknownTourCodes: ["YG7", "YL7"],
+      }),
+    );
+    expect(r.resolvedTours).toEqual([
+      { id: 5, title: "黃石深度", status: "active" },
+      { id: 1, title: "美西草稿", status: "draft" },
+    ]);
+    expect(r.unknownTourCodes).toEqual(["YG7", "YL7"]);
+  });
+
+  it("empty arrays for old cards / malformed / missing fields", () => {
+    expect(parseResolvedTours(null)).toEqual({ resolvedTours: [], unknownTourCodes: [] });
+    expect(parseResolvedTours("not json")).toEqual({ resolvedTours: [], unknownTourCodes: [] });
+    expect(parseResolvedTours(JSON.stringify({ classification: "complaint" }))).toEqual({
+      resolvedTours: [],
+      unknownTourCodes: [],
+    });
+  });
+
+  it("drops malformed tour entries, keeps the good ones", () => {
+    const r = parseResolvedTours(
+      JSON.stringify({
+        resolvedTours: [
+          { id: 5, title: "好的" },
+          { id: "nope", title: "壞的 id" },
+          { title: "缺 id" },
+          { id: 9, title: 123 },
+        ],
+        unknownTourCodes: ["YG7", "", 42],
+      }),
+    );
+    expect(r.resolvedTours).toEqual([{ id: 5, title: "好的", status: "" }]);
+    expect(r.unknownTourCodes).toEqual(["YG7"]);
+  });
 });
 
 describe("parseEscalationClassification", () => {

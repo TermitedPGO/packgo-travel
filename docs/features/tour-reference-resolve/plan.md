@@ -30,12 +30,14 @@ InquiryAgent 寫草稿前先解析客人信裡的團指涉 → 候選團塞進 p
       結果傳入;escalation context 加 resolvedTours{id,title,status} + unknownTourCodes(供卡片跳轉)
 - [x] Vitest(prompt block 組裝:無候選乾淨、active/draft 標籤、未知碼;14 tests green)
 
-### m3 — escalation 卡顯示解析到的團
-- [ ] escalationBox EscalationRow 加 resolvedTours(從 context.resolvedTourIds 撈 title/status)
-- [ ] TodayEscalationCard:顯示「相關團:黃石 5 日 #123(去看)」chip → 開 /tour/:id(或 workspace 行程庫)
-- [ ] i18n · Vitest
+### m3 — escalation 卡顯示解析到的團 ✅
+- [x] escalationBox EscalationRow 加 resolvedTours + unknownTourCodes;parseResolvedTours
+      直接從 context 撈(gmailPipeline 已寫好 {id,title,status},無需二次查 DB)
+- [x] TodayEscalationCard:「相關團」chip → 開 /tours/:id 新分頁;draft 標「未上架」;
+      查不到的團號顯示提示「請客人描述行程」
+- [x] i18n(escResolvedTours/escTourDraft/escUnknownCodes 雙語) · Vitest(parseResolvedTours 3 案)
 
 ## DoD
-- [ ] tsc 0 · 全套綠 · i18n parity
-- [ ] 鐵律:草稿零報價(既有 post-LLM 黑名單 + prompt 雙守);draft 團不對客人當可賣
-- [ ] Jeff 親驗:寄一封「黃石團 7 月」測試信 → 草稿提到真候選 + 卡片顯示團可跳轉
+- [x] tsc 0 · 全套綠(54 tests) · i18n parity(7362 keys,pre-commit 綠)
+- [x] 鐵律:草稿零報價(既有 post-LLM 黑名單 + prompt 雙守);draft 團不對客人當可賣(prompt 守 + 卡片才顯示 draft)
+- [ ] Jeff 親驗:寄一封「黃石團 7 月」測試信 → 草稿提到真候選 + 卡片顯示團可跳轉(待部署後)

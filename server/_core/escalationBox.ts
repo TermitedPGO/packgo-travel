@@ -66,6 +66,22 @@ export interface EscalationRow {
   replyable: boolean;
   /** recipient shown in the gated confirm (「確認寄給 X」). */
   customerEmail: string | null;
+  /**
+   * 2026-06-13 tour-reference-resolve m3 — tours the resolver matched to the
+   * customer's email (context.resolvedTours). Shown as a chip on the card so
+   * Jeff jumps straight to /tour/:id to quote. draft-state tours are included
+   * (Jeff-only view); the customer-facing draft never promises them.
+   */
+  resolvedTours: ResolvedTourChip[];
+  /** code-shaped tokens the customer used that matched no tour (e.g. YG7). */
+  unknownTourCodes: string[];
+}
+
+/** 批m3 — a resolved tour shown as a jump chip on the escalation card. */
+export interface ResolvedTourChip {
+  id: number;
+  title: string;
+  status: string;
 }
 
 /** Structured reply target parsed out of an escalation's context JSON. */
@@ -181,6 +197,46 @@ export function parseEscalationClassification(
     // fall through
   }
   return null;
+}
+
+/**
+ * 2026-06-13 m3 — pull resolvedTours + unknownTourCodes out of context JSON.
+ * Both default to empty arrays (old cards have no such fields). Defensive:
+ * each tour must have a numeric id + string title; status falls back to "".
+ */
+export function parseResolvedTours(context: string | null): {
+  resolvedTours: ResolvedTourChip[];
+  unknownTourCodes: string[];
+} {
+  const empty = { resolvedTours: [] as ResolvedTourChip[], unknownTourCodes: [] as string[] };
+  if (!context) return empty;
+  try {
+    const parsed = JSON.parse(context);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return empty;
+    const p = parsed as Record<string, unknown>;
+    const resolvedTours = Array.isArray(p.resolvedTours)
+      ? (p.resolvedTours as unknown[]).flatMap((t) => {
+          if (!t || typeof t !== "object") return [];
+          const o = t as Record<string, unknown>;
+          if (typeof o.id !== "number" || typeof o.title !== "string") return [];
+          return [
+            {
+              id: o.id,
+              title: o.title,
+              status: typeof o.status === "string" ? o.status : "",
+            },
+          ];
+        })
+      : [];
+    const unknownTourCodes = Array.isArray(p.unknownTourCodes)
+      ? (p.unknownTourCodes as unknown[]).filter(
+          (c): c is string => typeof c === "string" && c.trim().length > 0,
+        )
+      : [];
+    return { resolvedTours, unknownTourCodes };
+  } catch {
+    return empty;
+  }
 }
 
 type RawRow = {
@@ -306,6 +362,7 @@ export async function listEscalations(): Promise<EscalationRow[]> {
     const customerEmail = ctx?.customerEmail ?? profile?.email?.trim() ?? null;
     const suggestedReply = ctx?.draftReply ?? extractDraftFromBody(r.body);
     const replyable = Boolean(ctx?.gmailThreadId && customerEmail);
+    const { resolvedTours, unknownTourCodes } = parseResolvedTours(r.context);
     return {
       id: r.id,
       agentName: r.agentName,
@@ -319,6 +376,8 @@ export async function listEscalations(): Promise<EscalationRow[]> {
       suggestedReply,
       replyable,
       customerEmail,
+      resolvedTours,
+      unknownTourCodes,
     };
   });
 }

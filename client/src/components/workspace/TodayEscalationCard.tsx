@@ -37,6 +37,10 @@ export type EscalationShape = {
   suggestedReply: string | null;
   replyable: boolean;
   customerEmail: string | null;
+  /** 批m3 — tours the resolver matched to the customer's email (jump to quote). */
+  resolvedTours?: { id: number; title: string; status: string }[];
+  /** code-shaped tokens the customer used that matched no tour (e.g. YG7). */
+  unknownTourCodes?: string[];
 };
 
 function isRefund(esc: EscalationShape): boolean {
@@ -76,6 +80,8 @@ export default function TodayEscalationCard({
   // (customer intent + unsent suggested reply) lives behind 看全文.
   const reason = esc.body.split("\n")[0] ?? "";
   const hasMore = esc.body.trim().length > reason.trim().length;
+  const resolvedTours = esc.resolvedTours ?? [];
+  const unknownCodes = esc.unknownTourCodes ?? [];
 
   return (
     <WorkspaceCard
@@ -104,6 +110,35 @@ export default function TodayEscalationCard({
         reason && (
           <div className="text-gray-500 mt-0.5 text-[12px]">{reason}</div>
         )
+      )}
+      {(resolvedTours.length > 0 || unknownCodes.length > 0) && (
+        <div className="mt-2 flex flex-col gap-1">
+          {resolvedTours.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+              <span className="text-gray-400">{t("workspace.escResolvedTours")}</span>
+              {resolvedTours.map((tr) => (
+                <a
+                  key={tr.id}
+                  href={`/tours/${tr.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-1.5 py-0.5 rounded-md border border-gray-400 hover:bg-gray-100 inline-flex items-center gap-1 max-w-[16rem] truncate"
+                  title={tr.title}
+                >
+                  <span className="truncate">{tr.title}</span>
+                  {tr.status !== "active" && (
+                    <span className="text-gray-400">{t("workspace.escTourDraft")}</span>
+                  )}
+                </a>
+              ))}
+            </div>
+          )}
+          {unknownCodes.length > 0 && (
+            <div className="text-[11px] text-gray-400">
+              {t("workspace.escUnknownCodes", { codes: unknownCodes.join("、") })}
+            </div>
+          )}
+        </div>
       )}
       {(hasMore || canReply) && (
         <div className="flex gap-2 mt-2 flex-wrap">
