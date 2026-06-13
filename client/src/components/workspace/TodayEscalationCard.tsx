@@ -20,6 +20,7 @@ import { useLocale } from "@/contexts/LocaleContext";
 import { formatRelTime } from "./relTime";
 import { shortLabel } from "./TodayTaskCard";
 import { BtnB, BtnO, WorkspaceCard } from "./ws-ui";
+import { cleanDisplayText } from "./cleanText";
 
 const EscalationReplyDialog = lazy(() => import("./EscalationReplyDialog"));
 
@@ -77,9 +78,11 @@ export default function TodayEscalationCard({
   const canJump = esc.who?.userId != null && onJumpToCustomer != null;
   const canReply = esc.replyable && esc.customerEmail != null && !esc.read;
   // body line 1 is the agent's plain-language reason (B1 contract); the rest
-  // (customer intent + unsent suggested reply) lives behind 看全文.
-  const reason = esc.body.split("\n")[0] ?? "";
-  const hasMore = esc.body.trim().length > reason.trim().length;
+  // (customer intent + unsent suggested reply) lives behind 看全文. Strip the
+  // injection wrapper + leaked markdown for display (old cards, pre-fix).
+  const cleanBody = cleanDisplayText(esc.body);
+  const reason = cleanBody.split("\n")[0] ?? "";
+  const hasMore = cleanBody.trim().length > reason.trim().length;
   const resolvedTours = esc.resolvedTours ?? [];
   const unknownCodes = esc.unknownTourCodes ?? [];
 
@@ -104,7 +107,7 @@ export default function TodayEscalationCard({
       <div className="font-medium">{esc.title}</div>
       {expanded ? (
         <div className="text-gray-600 mt-0.5 text-[12px] whitespace-pre-wrap">
-          {esc.body}
+          {cleanBody}
         </div>
       ) : (
         reason && (
