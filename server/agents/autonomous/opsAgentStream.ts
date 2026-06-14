@@ -159,7 +159,6 @@ export async function* runOpsAgentStream(
       const stream = getClient().messages.stream({
         model: OPS_CHAT_MODEL,
         max_tokens: 4096,
-        temperature: 0.3,
         system: systemBlocks,
         messages,
         tools,
@@ -238,7 +237,6 @@ export async function* runOpsAgentStream(
       const fstream = getClient().messages.stream({
         model: OPS_CHAT_MODEL,
         max_tokens: 2048,
-        temperature: 0.3,
         system: systemBlocks,
         messages,
       });

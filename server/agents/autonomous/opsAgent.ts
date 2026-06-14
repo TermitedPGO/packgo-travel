@@ -479,7 +479,6 @@ export async function runOpsAgent(
   const response = await invokeLLM({
     model: OPS_CHAT_MODEL,
     maxTokens: 4096,
-    temperature: 0.3,
     messages: messages.slice(1), // exclude system from messages array
     system: messages[0].content,
   } as any);
