@@ -428,6 +428,9 @@ export async function runOpsAgent(
   // turns into one message.
   let lastRole: string | null = null;
   for (const turn of history.slice(-10)) {
+    // Skip empty-content turns — Anthropic rejects empty messages (a failed
+    // earlier reply can leave a blank #ops row). Mirror of opsAgentStream.
+    if (!turn.content || !turn.content.trim()) continue;
     const role = turn.role === "agent" ? "assistant" : "user";
     if (role === lastRole) {
       messages[messages.length - 1].content += "\n\n" + turn.content;

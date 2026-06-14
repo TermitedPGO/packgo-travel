@@ -105,6 +105,11 @@ export async function* runOpsAgentStream(
     const messages: Anthropic.MessageParam[] = [];
     let lastRole: string | null = null;
     for (const turn of history.slice(-10)) {
+      // Skip empty-content turns — Anthropic rejects any message with empty
+      // content ("messages.N: user messages must have non-empty content"). An
+      // earlier failed/aborted reply can leave a blank row in the #ops thread;
+      // one poison empty must not break every subsequent query.
+      if (!turn.content || !turn.content.trim()) continue;
       const role = turn.role === "agent" ? "assistant" : "user";
       if (role === lastRole) {
         const prev = messages[messages.length - 1];
