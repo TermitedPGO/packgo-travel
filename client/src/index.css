@@ -754,3 +754,17 @@
   width: 12px;
   height: 12px;
 }
+
+/* AgentChatPage — gentle mount fade for chat messages (2026-06-13).
+   Memoized rows mount once, so this runs once per message (never re-animates
+   on streaming tokens). Subtle + fast so a full history load isn't busy. */
+@keyframes agentMsgIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+.agent-msg-in {
+  animation: agentMsgIn 0.16s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-msg-in { animation: none; }
+}

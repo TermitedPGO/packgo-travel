@@ -3,7 +3,7 @@
  * Compact approval strip (quote + marketing) between conversation & composer.
  * B&W theme. Entry: Sidebar Office → `agent-chat` PageId.
  */
-import { useEffect, useRef, useState, useMemo, useCallback } from "react";
+import { useEffect, useRef, useState, useMemo, useCallback, memo } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -372,6 +372,88 @@ export function OpsCards({ cards }: { cards: any[] | null | undefined }) {
   );
 }
 
+// ── One conversation message (memoized) ──────────────────────────────────
+// 2026-06-13 — extracted + memo'd so a streaming token (which updates the
+// parent's streamingText every char) no longer re-renders + re-parses the
+// markdown of every past message. Only the live streaming bubble re-renders.
+// This was the main "卡頓/lag" source. `.agent-msg-in` fades each new message
+// in on mount (memo means it mounts once → animates once, never re-animates).
+const ChatMessage = memo(function ChatMessage({
+  m,
+  idx,
+  prevSenderRole,
+  onActionClick,
+  executePending,
+}: {
+  m: any;
+  idx: number;
+  prevSenderRole: string | null;
+  onActionClick: (action: any) => void;
+  executePending: boolean;
+}) {
+  const { t } = useLocale();
+  const isJeff = m.senderRole === "jeff";
+  const showSeparator = idx > 0 && prevSenderRole !== m.senderRole;
+  let actions: any[] = [];
+  if (!isJeff) {
+    try {
+      const ctx = m.context ? JSON.parse(m.context) : {};
+      actions = Array.isArray(ctx.suggestedActions) ? ctx.suggestedActions : [];
+    } catch {}
+  }
+  return (
+    <div
+      className={`agent-msg-in ${
+        showSeparator
+          ? "pt-6 mt-6 border-t border-foreground/[0.06]"
+          : idx === 0
+            ? ""
+            : "mt-6"
+      }`}
+    >
+      <div className="flex items-center gap-2 mb-2">
+        <span
+          className={`text-[11px] uppercase tracking-wider font-semibold ${
+            isJeff ? "text-foreground/55" : "text-black"
+          }`}
+        >
+          {isJeff ? t("admin.agentChat.you") : t("admin.agentChat.opsAgent")}
+        </span>
+        <span className="text-[10px] text-foreground/35">
+          {format(new Date(m.createdAt), "MM/dd HH:mm", { locale: zhTW })}
+        </span>
+      </div>
+      <div className={PROSE_CLS}>
+        <Streamdown>{m.body || ""}</Streamdown>
+      </div>
+      {!isJeff && <OpsCards cards={parseCards(m.context)} />}
+      {!isJeff && actions.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {actions.map((action: any, i: number) => {
+            const Icon = ACTION_ICON[action.actionType] ?? Sparkles;
+            const sensitivity = action.sensitivity ?? "normal";
+            const colorClass =
+              sensitivity === "sensitive"
+                ? "border-gray-900 text-black hover:bg-gray-50"
+                : "border-gray-300 text-gray-700 hover:bg-gray-50";
+            return (
+              <button
+                key={i}
+                onClick={() => onActionClick(action)}
+                disabled={executePending}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border bg-white transition-colors ${colorClass} disabled:opacity-50`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                {action.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+});
+
 // ── Main chat page ───────────────────────────────────────────────────────
 
 export default function AgentChatPage() {
@@ -420,10 +502,20 @@ export default function AgentChatPage() {
     );
   }, [messages.data]);
 
-  // Auto-scroll on new message / streaming token / initial load
+  // Auto-scroll on new message / streaming token / initial load.
+  // 2026-06-13 — rAF-coalesced so a fast token stream doesn't force a layout
+  // reflow on every single character (a big part of the streaming jank);
+  // multiple token updates within a frame collapse into one scroll.
+  const scrollRafRef = useRef<number | null>(null);
   useEffect(() => {
-    if (!scrollRef.current) return;
-    scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (scrollRafRef.current != null) cancelAnimationFrame(scrollRafRef.current);
+    scrollRafRef.current = requestAnimationFrame(() => {
+      const el = scrollRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    });
+    return () => {
+      if (scrollRafRef.current != null) cancelAnimationFrame(scrollRafRef.current);
+    };
   }, [conversation.length, streamingText]);
 
   // Focus composer on mount
@@ -563,21 +655,28 @@ export default function AgentChatPage() {
     setStreamingCards(null);
   };
 
-  const handleActionClick = (action: any) => {
-    if (action.sensitivity === "safe") {
-      const ok = window.confirm(`${action.label}?\n\n${action.description}`);
-      if (ok) {
-        executeMutation.mutate({
-          actionType: action.actionType,
-          args: action.args,
-          proposalContext: action.label.slice(0, 80),
-        });
+  // useCallback with the stable `mutate` ref so the prop handed to memoized
+  // ChatMessage rows doesn't change identity on every streaming token (which
+  // would defeat the memo and re-render the whole list per character).
+  const executeMutate = executeMutation.mutate;
+  const handleActionClick = useCallback(
+    (action: any) => {
+      if (action.sensitivity === "safe") {
+        const ok = window.confirm(`${action.label}?\n\n${action.description}`);
+        if (ok) {
+          executeMutate({
+            actionType: action.actionType,
+            args: action.args,
+            proposalContext: action.label.slice(0, 80),
+          });
+        }
+      } else {
+        setPendingAction(action);
+        setConfirmText("");
       }
-    } else {
-      setPendingAction(action);
-      setConfirmText("");
-    }
-  };
+    },
+    [executeMutate],
+  );
 
   const handleConfirmAction = () => {
     if (!pendingAction) return;
@@ -643,86 +742,16 @@ export default function AgentChatPage() {
             </div>
           )}
 
-          {conversation.map((m: any, idx: number) => {
-            const isJeff = m.senderRole === "jeff";
-            const prevSenderRole = idx > 0 ? conversation[idx - 1].senderRole : null;
-            const showSeparator =
-              idx > 0 && prevSenderRole !== m.senderRole;
-
-            return (
-              <div
-                key={m.id}
-                className={
-                  showSeparator
-                    ? "pt-6 mt-6 border-t border-foreground/[0.06]"
-                    : idx === 0
-                      ? ""
-                      : "mt-6"
-                }
-              >
-                {/* Role label */}
-                <div className="flex items-center gap-2 mb-2">
-                  <span
-                    className={`text-[11px] uppercase tracking-wider font-semibold ${
-                      isJeff ? "text-foreground/55" : "text-black"
-                    }`}
-                  >
-                    {isJeff ? t('admin.agentChat.you') : t('admin.agentChat.opsAgent')}
-                  </span>
-                  <span className="text-[10px] text-foreground/35">
-                    {format(new Date(m.createdAt), "MM/dd HH:mm", {
-                      locale: zhTW,
-                    })}
-                  </span>
-                </div>
-
-                {/* Content */}
-                <div className={PROSE_CLS}>
-                  <Streamdown>{m.body || ""}</Streamdown>
-                </div>
-
-                {/* Data cards (agent only) */}
-                {!isJeff && <OpsCards cards={parseCards(m.context)} />}
-
-                {/* Action chips (agent only) */}
-                {!isJeff &&
-                  (() => {
-                    let actions: any[] = [];
-                    try {
-                      const ctx = m.context ? JSON.parse(m.context) : {};
-                      actions = Array.isArray(ctx.suggestedActions)
-                        ? ctx.suggestedActions
-                        : [];
-                    } catch {}
-                    if (actions.length === 0) return null;
-                    return (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {actions.map((action: any, i: number) => {
-                          const Icon =
-                            ACTION_ICON[action.actionType] ?? Sparkles;
-                          const sensitivity = action.sensitivity ?? "normal";
-                          const colorClass =
-                            sensitivity === "sensitive"
-                              ? "border-gray-900 text-black hover:bg-gray-50"
-                              : "border-gray-300 text-gray-700 hover:bg-gray-50";
-                          return (
-                            <button
-                              key={i}
-                              onClick={() => handleActionClick(action)}
-                              disabled={executeMutation.isPending}
-                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border bg-white transition-colors ${colorClass} disabled:opacity-50`}
-                            >
-                              <Icon className="w-3.5 h-3.5" />
-                              {action.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    );
-                  })()}
-              </div>
-            );
-          })}
+          {conversation.map((m: any, idx: number) => (
+            <ChatMessage
+              key={m.id}
+              m={m}
+              idx={idx}
+              prevSenderRole={idx > 0 ? conversation[idx - 1].senderRole : null}
+              onActionClick={handleActionClick}
+              executePending={executeMutation.isPending}
+            />
+          ))}
 
           {/* Streaming bubble — same document style, with cursor */}
           {streamingText !== null && (
