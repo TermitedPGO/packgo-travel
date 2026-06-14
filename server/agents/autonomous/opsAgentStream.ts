@@ -98,7 +98,8 @@ export async function* runOpsAgentStream(
   extraSystem?: string,
 ): AsyncGenerator<StreamEvent, void, void> {
   try {
-    const { SYSTEM_PROMPT, ACTION_PROPOSAL_GUIDE } = await import("./opsAgent");
+    const { SYSTEM_PROMPT, ACTION_PROPOSAL_GUIDE, OPS_CHAT_MODEL } =
+      await import("./opsAgent");
 
     // Build conversation: history → current question (+ optional images)
     const messages: Anthropic.MessageParam[] = [];
@@ -142,6 +143,13 @@ export async function* runOpsAgentStream(
       "【最重要】查完工具後,你一定要用**文字**把答案講給 Jeff 聽 (例:問淨利就講「這個月淨利 $X」)。**絕對不可以**只丟一個 suggest_action 動作就當作回答 — 動作只是「答完之後」的額外建議。沒有文字回答 = 失敗。純資訊問題 (幾團、淨利、哪個最多) 通常根本不需要附動作,直接講答案就好。suggest_action 只在 Jeff 明顯需要做一件寫入的事 (寄信、退款、分類帳本) 時才用,而且永遠是在文字答案之後。" +
       (extraSystem ? "\n\n" + extraSystem : "");
 
+    // Cache the (large, mostly-static) system prompt so Opus 4.8's per-round
+    // re-send is read from cache (~90% cheaper) — keeps the model upgrade
+    // affordable across the 6-round loop + repeat queries the same day.
+    const systemBlocks = [
+      { type: "text" as const, text: system, cache_control: { type: "ephemeral" as const } },
+    ];
+
     const tools = [...READ_TOOLS, SUGGEST_ACTION_TOOL];
     const suggestedActions: any[] = [];
     const cards: any[] = [];
@@ -149,10 +157,10 @@ export async function* runOpsAgentStream(
 
     for (let round = 0; round < MAX_ROUNDS; round++) {
       const stream = getClient().messages.stream({
-        model: "claude-sonnet-4-20250514",
+        model: OPS_CHAT_MODEL,
         max_tokens: 4096,
         temperature: 0.3,
-        system,
+        system: systemBlocks,
         messages,
         tools,
       });
@@ -228,10 +236,10 @@ export async function* runOpsAgentStream(
           "請直接用中文回答我上面的問題,把你剛剛查到的數字 / 結果講出來。不要再呼叫工具,就用文字回答。",
       });
       const fstream = getClient().messages.stream({
-        model: "claude-sonnet-4-20250514",
+        model: OPS_CHAT_MODEL,
         max_tokens: 2048,
         temperature: 0.3,
-        system,
+        system: systemBlocks,
         messages,
       });
       let ftext = "";

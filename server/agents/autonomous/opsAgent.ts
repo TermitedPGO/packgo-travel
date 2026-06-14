@@ -23,6 +23,13 @@
  */
 import { invokeLLM } from "../../_core/llm";
 
+/**
+ * 2026-06-13 — PACK&GO 聊天機器人的腦,從 Sonnet 4(2025-05)升到 Opus 4.8
+ * (跟 Jeff 跟 Claude 聊天同一個模型),起因 Jeff:「我希望跟 claude 聊天一樣」。
+ * 單一來源,opsAgentStream + runOpsAgent 共用,避免漂移。
+ */
+export const OPS_CHAT_MODEL = "claude-opus-4-8";
+
 // Exported for opsAgentStream.ts — single source of truth, no drift.
 export const SYSTEM_PROMPT = `你是 Jeff 的 PACK&GO Agent。你跟他像合夥人對話,不是查詢系統的 chatbot。
 
@@ -470,7 +477,7 @@ export async function runOpsAgent(
   }
 
   const response = await invokeLLM({
-    model: "claude-sonnet-4-20250514",
+    model: OPS_CHAT_MODEL,
     maxTokens: 4096,
     temperature: 0.3,
     messages: messages.slice(1), // exclude system from messages array
