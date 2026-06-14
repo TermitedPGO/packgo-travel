@@ -19,7 +19,10 @@
 import { describe, it, expect, vi } from "vitest";
 import JSZip from "jszip";
 
-vi.mock("./imageOcr", () => ({ extractImageText: vi.fn() }));
+vi.mock("./imageOcr", () => ({
+  extractImageText: vi.fn(),
+  extractPdfText: vi.fn(),
+}));
 
 import {
   parseAttachment,

@@ -97,3 +97,51 @@ export async function extractImageText(
     return { ok: false, text: "" };
   }
 }
+
+const PDF_SYSTEM_PROMPT = `你是 PACK&GO 旅行社的附件閱讀助手。這是客人寄來的 PDF(可能是打字的、也可能是掃描/拍照轉成的)。
+請逐字擷取所有看得到的文字,並在最後條列旅遊重點:目的地、天數/晚數、出發日期、每日城市或景點、住宿、交通、價格(連幣別)、包含與不含項目、護照/旅客資料(若有)。
+用文件本身的語言輸出純文字,不要 markdown,不要編造看不到的內容。若完全無可辨識內容,只回一行:檔案無可辨識內容。`;
+
+/**
+ * Read a PDF via Claude's native document support — works on scanned /
+ * photographed PDFs too (no text layer), which pdf-parse can't. Used as the
+ * fallback when text extraction comes back thin. Never throws.
+ */
+export async function extractPdfText(
+  data: Buffer,
+  filename: string,
+): Promise<ImageOcrResult> {
+  try {
+    const dataUrl = `data:application/pdf;base64,${data.toString("base64")}`;
+    const result = await invokeLLM({
+      system: PDF_SYSTEM_PROMPT,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "file_url" as const, file_url: { url: dataUrl, mime_type: "application/pdf" } },
+            { type: "text" as const, text: `檔名:${filename}。請讀這份 PDF。` },
+          ],
+        },
+      ],
+      model: VISION_MODEL,
+      maxTokens: 4096,
+      purpose: "attachment_pdf_read",
+    } as Parameters<typeof invokeLLM>[0]);
+
+    const raw =
+      (result as { choices?: Array<{ message?: { content?: unknown } }> })
+        ?.choices?.[0]?.message?.content ?? "";
+    const text = (typeof raw === "string" ? raw : "").trim();
+    if (!text || /檔案無可辨識內容|no readable (text|content)/i.test(text)) {
+      return { ok: false, text: "" };
+    }
+    return { ok: true, text };
+  } catch (err) {
+    log.warn(
+      { err: err instanceof Error ? err.message : String(err), filename },
+      "[imageOcr] pdf read failed",
+    );
+    return { ok: false, text: "" };
+  }
+}

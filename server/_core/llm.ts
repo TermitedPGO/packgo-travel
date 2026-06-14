@@ -236,6 +236,15 @@ function fileUrlToAnthropic(
 ): Anthropic.Messages.DocumentBlockParam | Anthropic.Messages.TextBlockParam {
   const mime = file.mime_type;
   if (mime === "application/pdf") {
+    // base64 data: URL → base64 document source (so we can read attachment
+    // BYTES, incl scanned PDFs); plain http(s) URL → url source.
+    const dataUrl = inferMimeTypeFromDataUrl(file.url);
+    if (dataUrl) {
+      return {
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: dataUrl.data },
+      };
+    }
     return {
       type: "document",
       source: { type: "url", url: file.url },

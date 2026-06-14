@@ -42,13 +42,14 @@ const log = createChildLogger({ module: "attachmentParser" });
 // Limits — tweak here if a real-world email blows past them
 // ────────────────────────────────────────────────────────────────────────
 
-/** Maximum raw bytes per non-image attachment. Larger → skip ("too_large"). */
-export const MAX_RAW_BYTES = 5 * 1024 * 1024; // 5 MB
+/** Maximum raw bytes per plain non-image, non-PDF attachment. */
+export const MAX_RAW_BYTES = 10 * 1024 * 1024; // 10 MB
 
 /**
- * Images get a much higher cap (2026-06-13): we downscale them with sharp
- * before vision OCR, so a 16.6MB customer poster is fine. "File too large" is
- * our problem to solve, not the customer's to work around (Jeff's rule).
+ * Images + PDFs get a much higher cap (2026-06-13): images are downscaled
+ * with sharp before vision OCR; PDFs are read by Claude natively (incl
+ * scanned). "File too large" is our problem to solve, not the customer's to
+ * work around (Jeff's rule) — we never bounce a file for size.
  */
 export const MAX_IMAGE_RAW_BYTES = 30 * 1024 * 1024; // 30 MB
 
@@ -161,7 +162,8 @@ export async function parseAttachment(
 
   // Guard: too large. Images get a higher cap because we downscale them
   // before reading (see the "image" case below).
-  const rawCap = kind === "image" ? MAX_IMAGE_RAW_BYTES : MAX_RAW_BYTES;
+  const rawCap =
+    kind === "image" || kind === "pdf" ? MAX_IMAGE_RAW_BYTES : MAX_RAW_BYTES;
   if (sizeBytes > rawCap) {
     return {
       ...base,
@@ -178,9 +180,18 @@ export async function parseAttachment(
   try {
     let text = "";
     switch (kind) {
-      case "pdf":
+      case "pdf": {
         text = await parsePdf(data);
+        // Scanned / photographed PDFs have no text layer → pdf-parse returns
+        // ~nothing. Fall back to Claude reading the PDF natively so we still
+        // see the content (passports, scanned itineraries, fax-to-PDF).
+        if (normalizeWhitespace(text).length < 40) {
+          const { extractPdfText } = await import("./imageOcr");
+          const r = await extractPdfText(data, filename);
+          if (r.ok) text = r.text;
+        }
         break;
+      }
       case "xlsx":
         text = await parseXlsx(data);
         break;
