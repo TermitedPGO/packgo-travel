@@ -50,6 +50,12 @@ vi.mock("../agents/autonomous/quoteProducer", () => ({
   produceQuoteDraftTask: vi.fn(),
 }));
 
+// reply-attachments: the presigned-PUT helper is mocked so the upload test
+// stays at the router boundary (the real replyAttachments validator runs).
+vi.mock("../storage", () => ({
+  storageCreatePresignedPut: vi.fn(),
+}));
+
 vi.mock("../rateLimit", () => ({
   checkAdminMutationRateLimit: vi.fn().mockResolvedValue({ allowed: true }),
 }));
@@ -74,6 +80,9 @@ import {
 } from "../_core/approvalTasks";
 import { getTourById, getDb } from "../db";
 import { produceQuoteDraftTask } from "../agents/autonomous/quoteProducer";
+import { storageCreatePresignedPut } from "../storage";
+
+const presignMock = vi.mocked(storageCreatePresignedPut);
 
 const listMock = vi.mocked(listApprovalTasks);
 const statsMock = vi.mocked(getApprovalStats);
@@ -352,5 +361,53 @@ describe("commandCenter.produceQuoteDraft", () => {
     await caller.produceQuoteDraft({ tourId: 7, departureId: 55 });
 
     expect(produceQuoteMock.mock.calls[0][0].supplierPrice).toBeUndefined();
+  });
+});
+
+describe("commandCenter.createReplyAttachmentUpload (reply-attachments)", () => {
+  it("rejects a non-whitelisted mimeType as BAD_REQUEST (never presigns)", async () => {
+    const caller = adminCaller();
+    await expect(
+      caller.createReplyAttachmentUpload({
+        filename: "x.exe",
+        mimeType: "application/x-msdownload",
+        size: 1000,
+      }),
+    ).rejects.toThrow(/不支援|type/i);
+    expect(presignMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an oversize file (never presigns)", async () => {
+    const caller = adminCaller();
+    await expect(
+      caller.createReplyAttachmentUpload({
+        filename: "huge.pdf",
+        mimeType: "application/pdf",
+        size: 60 * 1024 * 1024,
+      }),
+    ).rejects.toThrow(/過大|large/i);
+    expect(presignMock).not.toHaveBeenCalled();
+  });
+
+  it("valid → presigns under the profile scope, returns key + putUrl + Chinese filename", async () => {
+    presignMock.mockImplementation(async (key: string) => ({
+      key,
+      putUrl: "https://r2/put?sig=1",
+    }));
+
+    const caller = adminCaller();
+    const res = await caller.createReplyAttachmentUpload({
+      filename: "報價單.pdf",
+      mimeType: "application/pdf",
+      size: 200_000,
+      profileId: 7,
+    });
+
+    expect(presignMock).toHaveBeenCalledTimes(1);
+    const [keyArg, mimeArg] = presignMock.mock.calls[0];
+    expect(keyArg.startsWith("reply-attachments/7/")).toBe(true);
+    expect(mimeArg).toBe("application/pdf");
+    expect(res.putUrl).toBe("https://r2/put?sig=1");
+    expect(res.filename).toBe("報價單.pdf");
   });
 });

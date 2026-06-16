@@ -34,6 +34,7 @@ import {
 } from "../../drizzle/schema";
 import { createChildLogger } from "./logger";
 import { stripMarkdownForEmail } from "./plainTextReply";
+import type { ReplyAttachmentRef } from "./replyAttachments";
 
 const log = createChildLogger({ module: "escalationBox" });
 
@@ -486,6 +487,7 @@ export interface EscalationReplyResult {
 export async function sendEscalationReply(
   messageId: number,
   body: string,
+  attachments?: ReplyAttachmentRef[],
 ): Promise<EscalationReplyResult> {
   const db = await getDb();
   if (!db) return { sent: false, dryRun: false, errorMessage: "資料庫不可用" };
@@ -558,18 +560,49 @@ export async function sendEscalationReply(
     return { sent: false, dryRun: false, errorMessage: "Gmail 整合未啟用" };
   }
 
+  // 2026-06-15 reply-attachments — load any attached files from R2, split into
+  // inline parts vs >25MB download links (shared resolver, identical to the
+  // inquiry path). Any failure here aborts the send with an honest message
+  // rather than silently dropping an attachment the customer is expecting.
+  let finalBody = body;
+  let inlineAttachments: import("./gmail").GmailAttachment[] | undefined;
+  if (attachments && attachments.length > 0) {
+    try {
+      const {
+        resolveReplyAttachments,
+        appendDownloadLinksToBody,
+        DOWNLOAD_LINK_TTL_SECONDS,
+      } = await import("./replyAttachments");
+      const { storageGetBytes, getSecureDocumentUrl } = await import("../storage");
+      const resolved = await resolveReplyAttachments(attachments, {
+        getBytes: (key) => storageGetBytes(key),
+        makeLink: (key) => getSecureDocumentUrl(key, DOWNLOAD_LINK_TTL_SECONDS),
+      });
+      inlineAttachments = resolved.inline.length > 0 ? resolved.inline : undefined;
+      finalBody = appendDownloadLinksToBody(body, resolved.links);
+    } catch (err) {
+      log.error({ messageId, err }, "[escalationBox] attachment resolution failed");
+      return {
+        sent: false,
+        dryRun: false,
+        errorMessage: "附件處理失敗,請重試或移除附件後再寄",
+      };
+    }
+  }
+
   const { buildGmailClient, sendReplyInThread } = await import("./gmail");
   const gmail = buildGmailClient(integration);
   const send = await sendReplyInThread(gmail, {
     threadId: target.gmailThreadId,
     toEmail: target.customerEmail,
     subject: target.subject,
-    bodyText: body,
+    bodyText: finalBody,
     fromEmail: integration.emailAddress,
     // Jeff clicked the gated confirm — this is a human-approved send, not
     // an autonomous one. The env-level AGENT_DRY_RUN switch still applies.
     confirmedAutoSendOk: true,
     inReplyToMessageId: target.gmailMessageId ?? undefined,
+    attachments: inlineAttachments,
   });
 
   if (!send.ok) {
@@ -596,7 +629,7 @@ export async function sendEscalationReply(
 
   await db
     .update(agentMessages)
-    .set({ readByJeff: 1, readAt: new Date(), jeffResponse: body })
+    .set({ readByJeff: 1, readAt: new Date(), jeffResponse: finalBody })
     .where(eq(agentMessages.id, messageId));
 
   // 客戶往來時間軸補「我方回覆」(best-effort,絕不影響已寄出的結果)
@@ -605,7 +638,7 @@ export async function sendEscalationReply(
   );
   await recordOutboundEmailInteraction({
     customerEmail: target.customerEmail,
-    body,
+    body: finalBody,
     summary: `回覆:${target.subject || "(無主旨)"}(你核准寄出)`,
     generatedBy: "ai_draft_human_approved",
   });

@@ -339,11 +339,27 @@ export const commandCenterRouter = router({
       z.object({
         messageId: z.number().int().positive(),
         body: z.string().min(1).max(10_000),
+        // 2026-06-15 reply-attachments — R2 keys (+ original filenames) of
+        // files already uploaded via createReplyAttachmentUpload. Capped at 10
+        // per reply; keys are namespace-guarded again in the resolver.
+        attachments: z
+          .array(
+            z.object({
+              key: z.string().min(1).max(500),
+              filename: z.string().min(1).max(255),
+            }),
+          )
+          .max(10)
+          .optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       const { sendEscalationReply } = await import("../_core/escalationBox");
-      const result = await sendEscalationReply(input.messageId, input.body);
+      const result = await sendEscalationReply(
+        input.messageId,
+        input.body,
+        input.attachments,
+      );
       if (result.sent) {
         const { audit } = await import("../_core/auditLog");
         audit({
@@ -351,10 +367,51 @@ export const commandCenterRouter = router({
           action: "escalation.reply",
           targetType: "agentMessage",
           targetId: input.messageId,
-          changes: { bodyLength: input.body.length },
+          changes: {
+            bodyLength: input.body.length,
+            attachmentCount: input.attachments?.length ?? 0,
+          },
         });
       }
       return result;
+    }),
+
+  /**
+   * 2026-06-15 reply-attachments — presign a browser→R2 DIRECT upload for a
+   * reply attachment (Jeff chose direct PUT over base64-through-tRPC so big
+   * files skip the 10mb Express body limit). Validates the mimeType whitelist +
+   * size cap, then returns a short-lived presigned PUT URL + the stored key.
+   * The client PUTs the file to putUrl, then passes {key, filename} to
+   * escalationReply. Admin-only (adminProcedure).
+   *
+   * Deploy note: browser→R2 PUT needs R2 bucket CORS (PUT + content-type) for
+   * the admin origin, else the PUT fails with an opaque CORS error.
+   */
+  createReplyAttachmentUpload: adminProcedure
+    .input(
+      z.object({
+        filename: z.string().min(1).max(255),
+        mimeType: z.string().min(1).max(150),
+        size: z.number().int().positive(),
+        /** Customer profile id → scopes the R2 key; absent = guest. */
+        profileId: z.number().int().positive().optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const { prepareReplyAttachmentUpload, ReplyAttachmentError } = await import(
+        "../_core/replyAttachments"
+      );
+      const { storageCreatePresignedPut } = await import("../storage");
+      try {
+        return await prepareReplyAttachmentUpload(input, {
+          presign: (key, mimeType) => storageCreatePresignedPut(key, mimeType),
+        });
+      } catch (err) {
+        if (err instanceof ReplyAttachmentError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        }
+        throw err;
+      }
     }),
 
   /**

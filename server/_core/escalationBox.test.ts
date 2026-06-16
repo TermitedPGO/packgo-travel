@@ -22,6 +22,20 @@ vi.mock("./logger", () => ({
     debug: vi.fn(),
   }),
 }));
+// reply-attachments: gmail send + storage + interaction recorder are mocked so
+// the happy-path attachment tests stay isolated. The real replyAttachments
+// resolver runs (with these injected deps), exercising the inline/link split.
+vi.mock("./gmail", () => ({
+  buildGmailClient: vi.fn(() => ({ __gmail: true })),
+  sendReplyInThread: vi.fn(),
+}));
+vi.mock("../storage", () => ({
+  storageGetBytes: vi.fn(),
+  getSecureDocumentUrl: vi.fn(),
+}));
+vi.mock("./outboundInteraction", () => ({
+  recordOutboundEmailInteraction: vi.fn(async () => {}),
+}));
 
 import { getDb } from "../db";
 import {
@@ -36,8 +50,13 @@ import {
   parseResolvedTours,
   parseEscalationTripType,
 } from "./escalationBox";
+import { sendReplyInThread } from "./gmail";
+import { storageGetBytes, getSecureDocumentUrl } from "../storage";
 
 const getDbMock = vi.mocked(getDb);
+const sendReplyMock = vi.mocked(sendReplyInThread);
+const getBytesMock = vi.mocked(storageGetBytes);
+const getSecureUrlMock = vi.mocked(getSecureDocumentUrl);
 
 /** Thenable drizzle-chain fake: every builder method returns itself and the
  *  whole chain resolves to `result` when awaited. set() captures its arg. */
@@ -426,5 +445,110 @@ describe("parseEscalationReplyContext (soft) + extractDraftFromBody (2026-06-13)
   it("extractDraftFromBody 無 marker → null", () => {
     expect(extractDraftFromBody("沒有建議回覆段的內容")).toBeNull();
     expect(extractDraftFromBody(null)).toBeNull();
+  });
+});
+
+describe("sendEscalationReply with attachments (reply-attachments)", () => {
+  const REPLYABLE_CTX = JSON.stringify({
+    gmailThreadId: "t-1",
+    gmailMessageId: "m-1",
+    customerEmail: "jenny@example.com",
+    subject: "行程詢問",
+  });
+  const msgRow = {
+    id: 5,
+    messageType: "escalation",
+    context: REPLYABLE_CTX,
+    relatedCustomerProfileId: null,
+  };
+  const integration = { emailAddress: "support@packgoplay.com", isActive: 1 };
+
+  it("small file → loaded from R2 and passed inline to sendReplyInThread", async () => {
+    const pdf = Buffer.from("%PDF small", "utf-8");
+    getBytesMock.mockResolvedValue({
+      bytes: pdf,
+      mimeType: "application/pdf",
+      contentLength: pdf.length,
+    });
+    sendReplyMock.mockResolvedValue({
+      ok: true,
+      dryRun: false,
+      messageId: "x",
+      threadId: "t-1",
+    });
+    // queue: [message row], [gmail integration], [update]
+    getDbMock.mockResolvedValue(fakeDb([[msgRow], [integration], []]));
+
+    const res = await sendEscalationReply(5, "Jenny 您好,報價如附件。", [
+      { key: "reply-attachments/7/q.pdf", filename: "報價單.pdf" },
+    ]);
+
+    expect(res.sent).toBe(true);
+    expect(getBytesMock).toHaveBeenCalledWith("reply-attachments/7/q.pdf");
+    const sendArg = sendReplyMock.mock.calls[0][1];
+    expect(sendArg.attachments).toEqual([
+      { filename: "報價單.pdf", mimeType: "application/pdf", content: pdf },
+    ]);
+    // small file → no download-link section appended to the body
+    expect(sendArg.bodyText).toBe("Jenny 您好,報價如附件。");
+    expect(getSecureUrlMock).not.toHaveBeenCalled();
+  });
+
+  it(">25MB → not attached; a download link is appended to the body instead", async () => {
+    const huge = Buffer.alloc(20 * 1024 * 1024, 1); // ~26.7MB encoded > 25MB
+    getBytesMock.mockResolvedValue({
+      bytes: huge,
+      mimeType: "application/pdf",
+      contentLength: huge.length,
+    });
+    getSecureUrlMock.mockResolvedValue("https://r2/secure?sig=abc");
+    sendReplyMock.mockResolvedValue({
+      ok: true,
+      dryRun: false,
+      messageId: "x",
+      threadId: "t-1",
+    });
+    getDbMock.mockResolvedValue(fakeDb([[msgRow], [integration], []]));
+
+    const res = await sendEscalationReply(5, "您好,報價如下。", [
+      { key: "reply-attachments/7/big.pdf", filename: "大報價.pdf" },
+    ]);
+
+    expect(res.sent).toBe(true);
+    const sendArg = sendReplyMock.mock.calls[0][1];
+    expect(sendArg.attachments).toBeUndefined(); // nothing inline
+    expect(sendArg.bodyText).toContain("大報價.pdf: https://r2/secure?sig=abc");
+    expect(sendArg.bodyText).toContain("下載連結");
+  });
+
+  it("a key outside reply-attachments/ aborts the send (never reaches Gmail)", async () => {
+    getDbMock.mockResolvedValue(fakeDb([[msgRow], [integration]]));
+
+    const res = await sendEscalationReply(5, "您好", [
+      { key: "customerDocuments/9/passport.jpg", filename: "passport.jpg" },
+    ]);
+
+    expect(res.sent).toBe(false);
+    expect(res.errorMessage).toContain("附件處理失敗");
+    expect(sendReplyMock).not.toHaveBeenCalled();
+    expect(getBytesMock).not.toHaveBeenCalled();
+  });
+
+  it("no attachments → behaves exactly as before (plain reply, no storage calls)", async () => {
+    sendReplyMock.mockResolvedValue({
+      ok: true,
+      dryRun: false,
+      messageId: "x",
+      threadId: "t-1",
+    });
+    getDbMock.mockResolvedValue(fakeDb([[msgRow], [integration], []]));
+
+    const res = await sendEscalationReply(5, "純文字回覆");
+
+    expect(res.sent).toBe(true);
+    const sendArg = sendReplyMock.mock.calls[0][1];
+    expect(sendArg.attachments).toBeUndefined();
+    expect(sendArg.bodyText).toBe("純文字回覆");
+    expect(getBytesMock).not.toHaveBeenCalled();
   });
 });

@@ -13,6 +13,7 @@ import { Mail, UserRound, ArrowDownLeft, ArrowUpRight } from "lucide-react";
 import { Badge, Pill, Src } from "./ws-ui";
 import { formatRelTime } from "./relTime";
 import { cleanDisplayText } from "./cleanText";
+import CustomerChat from "./CustomerChat";
 
 const OPEN_STATUSES = new Set(["new", "in_progress"]);
 
@@ -28,81 +29,94 @@ export default function GuestCustomerPane({
   const inquiries = data?.inquiries ?? [];
   // Gmail-originated history lives here (the pipeline never writes inquiries).
   const interactions = data?.interactions ?? [];
-  const open = inquiries.filter((i) => OPEN_STATUSES.has(i.status));
-  const closed = inquiries.filter((i) => !OPEN_STATUSES.has(i.status));
+  const open = inquiries.filter(i => OPEN_STATUSES.has(i.status));
+  const closed = inquiries.filter(i => !OPEN_STATUSES.has(i.status));
   const totalCount = inquiries.length + interactions.length;
 
   return (
-    <div className="h-full overflow-y-auto p-4 md:p-6">
-      <div className="max-w-2xl space-y-4">
-        {/* header */}
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="w-10 h-10 rounded-full bg-gray-200 text-gray-600 flex items-center justify-center flex-shrink-0">
-            <UserRound className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-base font-semibold break-all">
-                {data?.email ?? "…"}
-              </span>
-              <Badge>{t("workspace.guestBadge")}</Badge>
+    <div className="flex flex-col h-full">
+      <div className="flex-1 overflow-y-auto p-4 md:p-6">
+        <div className="max-w-2xl space-y-4">
+          {/* header */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="w-10 h-10 rounded-full bg-gray-200 text-gray-600 flex items-center justify-center flex-shrink-0">
+              <UserRound className="w-5 h-5" />
             </div>
-            <div className="text-[11px] text-gray-500">
-              {t("workspace.guestSub", { n: totalCount })}
-              {data?.firstSeenAt
-                ? ` · ${t("workspace.guestFirstSeen")} ${formatRelTime(data.firstSeenAt, t)}`
-                : ""}
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-base font-semibold break-all">
+                  {data?.email ?? "…"}
+                </span>
+                <Badge>{t("workspace.guestBadge")}</Badge>
+              </div>
+              <div className="text-[11px] text-gray-500">
+                {t("workspace.guestSub", { n: totalCount })}
+                {data?.firstSeenAt
+                  ? ` · ${t("workspace.guestFirstSeen")} ${formatRelTime(data.firstSeenAt, t)}`
+                  : ""}
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 text-[11px] text-gray-500">
-          {t("workspace.guestHint")}
-        </div>
-
-        {itemsQ.isLoading && (
-          <p className="text-xs text-gray-400 py-4">{t("workspace.loading")}</p>
-        )}
-
-        {!itemsQ.isLoading && totalCount === 0 && (
-          <div className="rounded-xl border border-gray-200 bg-white p-6 text-center text-xs text-gray-400">
-            {t("workspace.guestNoItems")}
+          <div className="rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 text-[11px] text-gray-500">
+            {t("workspace.guestHint")}
           </div>
-        )}
 
-        {interactions.length > 0 && (
-          <section className="space-y-2">
-            <h3 className="text-[12px] font-semibold">
-              {t("workspace.guestEmailHistory", { n: interactions.length })}
-            </h3>
-            {interactions.map((it) => (
-              <InteractionRow key={it.id} interaction={it} />
-            ))}
-          </section>
-        )}
+          {itemsQ.isLoading && (
+            <p className="text-xs text-gray-400 py-4">
+              {t("workspace.loading")}
+            </p>
+          )}
 
-        {open.length > 0 && (
-          <section className="space-y-2">
-            <h3 className="text-[12px] font-semibold">
-              {t("workspace.guestOpenInquiries", { n: open.length })}
-            </h3>
-            {open.map((i) => (
-              <InquiryRow key={i.id} inquiry={i} open />
-            ))}
-          </section>
-        )}
+          {!itemsQ.isLoading && totalCount === 0 && (
+            <div className="rounded-xl border border-gray-200 bg-white p-6 text-center text-xs text-gray-400">
+              {t("workspace.guestNoItems")}
+            </div>
+          )}
 
-        {closed.length > 0 && (
-          <section className="space-y-2">
-            <h3 className="text-[12px] font-semibold text-gray-500">
-              {t("workspace.guestPastInquiries", { n: closed.length })}
-            </h3>
-            {closed.map((i) => (
-              <InquiryRow key={i.id} inquiry={i} />
-            ))}
-          </section>
-        )}
+          {interactions.length > 0 && (
+            <section className="space-y-2">
+              <h3 className="text-[12px] font-semibold">
+                {t("workspace.guestEmailHistory", { n: interactions.length })}
+              </h3>
+              {interactions.map(it => (
+                <InteractionRow key={it.id} interaction={it} />
+              ))}
+            </section>
+          )}
+
+          {open.length > 0 && (
+            <section className="space-y-2">
+              <h3 className="text-[12px] font-semibold">
+                {t("workspace.guestOpenInquiries", { n: open.length })}
+              </h3>
+              {open.map(i => (
+                <InquiryRow key={i.id} inquiry={i} open />
+              ))}
+            </section>
+          )}
+
+          {closed.length > 0 && (
+            <section className="space-y-2">
+              <h3 className="text-[12px] font-semibold text-gray-500">
+                {t("workspace.guestPastInquiries", { n: closed.length })}
+              </h3>
+              {closed.map(i => (
+                <InquiryRow key={i.id} inquiry={i} />
+              ))}
+            </section>
+          )}
+        </div>
       </div>
+
+      {/* guest-customer-chat (2026-06-15) — per-guest AI workspace, scoped to
+          profileId. Internal Jeff↔Agent (NOT a send-to-guest channel; replies
+          still go through the 今日待辦 escalation cards). */}
+      <CustomerChat
+        customerProfileId={profileId}
+        customerName={data?.email ?? ""}
+        label={t("workspace.guestChatLabel")}
+      />
     </div>
   );
 }

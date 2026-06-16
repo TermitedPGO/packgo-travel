@@ -12,6 +12,7 @@
  * integration row and we handle refresh + persistence transparently.
  */
 
+import { randomBytes } from "crypto";
 import { google } from "googleapis";
 import { OAuth2Client } from "google-auth-library";
 import { ENV } from "./env";
@@ -496,6 +497,17 @@ export async function applyLabel(
 //   - Replies inside the same thread (threadId preserved)
 // ────────────────────────────────────────────────────────────────────────
 
+/**
+ * 2026-06-15 reply-attachments — one inline attachment for a multipart reply.
+ * `content` is the raw bytes; buildMimeReply base64-encodes + RFC5987-encodes
+ * the (possibly Chinese) filename.
+ */
+export type GmailAttachment = {
+  filename: string;
+  mimeType: string;
+  content: Buffer;
+};
+
 export type SendReplyInput = {
   threadId: string;
   toEmail: string;
@@ -505,6 +517,12 @@ export type SendReplyInput = {
   fromEmail: string;
   confirmedAutoSendOk: boolean;
   inReplyToMessageId?: string;
+  /**
+   * 2026-06-15 — when present + non-empty, the reply is built as
+   * multipart/mixed (body + each file). Absent/empty → plain text/plain,
+   * byte-identical to the pre-attachment behavior (regression-tested).
+   */
+  attachments?: GmailAttachment[];
 };
 
 export type SendReplyResult =
@@ -512,7 +530,39 @@ export type SendReplyResult =
   | { ok: true; dryRun: true; reason: string }
   | { ok: false; error: string };
 
-function buildMimeReply(input: SendReplyInput): string {
+/**
+ * RFC 5987 ext-value encoding for a (possibly Chinese) filename. encodeURIComponent
+ * already percent-encodes UTF-8 bytes; we additionally encode the few attr-chars
+ * it leaves (' ( ) *) so the result is a valid ext-value.
+ */
+function encodeRFC5987(str: string): string {
+  return encodeURIComponent(str).replace(
+    /['()*]/g,
+    (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase(),
+  );
+}
+
+/** ascii-only fallback for the legacy `filename=` param (modern clients prefer
+ *  filename*); non-ascii + quotes collapse to "_". */
+function asciiFilenameFallback(str: string): string {
+  const cleaned = str.replace(/[^\x20-\x7E]/g, "_").replace(/["\\]/g, "_").trim();
+  return cleaned || "attachment";
+}
+
+/** Wrap base64 at 76 chars per RFC 2045. */
+function wrapBase64(b64: string): string {
+  return b64.match(/.{1,76}/g)?.join("\r\n") ?? b64;
+}
+
+/**
+ * Build the RFC 2822 raw reply. Exported for tests.
+ *
+ * No attachments → a single text/plain part (byte-identical to the original
+ * behavior). With attachments → multipart/mixed: the body part first, then one
+ * base64 part per file. Chinese filenames are RFC5987-encoded in
+ * Content-Disposition (filename*=UTF-8'') with an ascii `filename=` fallback.
+ */
+export function buildMimeReply(input: SendReplyInput): string {
   // RFC 2822 raw email. Subject prefixed with "Re:" if not already.
   const subject = input.subject.startsWith("Re:")
     ? input.subject
@@ -535,21 +585,46 @@ function buildMimeReply(input: SendReplyInput): string {
     "本訊息由 PACK&GO AI 助理自動回覆。如需直接聯絡 Jeff,請回覆此信。\n" +
     "PACK&GO Travel · jeffhsieh09@gmail.com · +1 (510) 634-2307";
 
-  const lines = [
-    `From: ${fromHeader}`,
-    `To: ${toHeader}`,
-    `Bcc: jeffhsieh09@gmail.com`,
-    `Subject: =?UTF-8?B?${subjectB64}?=`,
-    "MIME-Version: 1.0",
-    'Content-Type: text/plain; charset="UTF-8"',
-    "Content-Transfer-Encoding: 8bit",
-  ];
+  const hasAttachments = !!input.attachments && input.attachments.length > 0;
+
+  const headers = [`From: ${fromHeader}`, `To: ${toHeader}`, `Bcc: jeffhsieh09@gmail.com`, `Subject: =?UTF-8?B?${subjectB64}?=`, "MIME-Version: 1.0"];
   if (input.inReplyToMessageId) {
-    lines.push(`In-Reply-To: ${input.inReplyToMessageId}`);
-    lines.push(`References: ${input.inReplyToMessageId}`);
+    headers.push(`In-Reply-To: ${input.inReplyToMessageId}`);
+    headers.push(`References: ${input.inReplyToMessageId}`);
   }
+
+  if (!hasAttachments) {
+    headers.push('Content-Type: text/plain; charset="UTF-8"');
+    headers.push("Content-Transfer-Encoding: 8bit");
+    return [...headers, "", body].join("\r\n");
+  }
+
+  // multipart/mixed: body part + one part per attachment.
+  const boundary = `packgo_${randomBytes(16).toString("hex")}`;
+  headers.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
+
+  const lines: string[] = [...headers, ""];
+  // Part 1 — the text body.
+  lines.push(`--${boundary}`);
+  lines.push('Content-Type: text/plain; charset="UTF-8"');
+  lines.push("Content-Transfer-Encoding: 8bit");
   lines.push("");
   lines.push(body);
+  // Parts 2..N — attachments.
+  for (const att of input.attachments!) {
+    const ascii = asciiFilenameFallback(att.filename);
+    const star = encodeRFC5987(att.filename);
+    const b64 = wrapBase64(att.content.toString("base64"));
+    lines.push(`--${boundary}`);
+    lines.push(`Content-Type: ${att.mimeType}; name="${ascii}"`);
+    lines.push(
+      `Content-Disposition: attachment; filename="${ascii}"; filename*=UTF-8''${star}`,
+    );
+    lines.push("Content-Transfer-Encoding: base64");
+    lines.push("");
+    lines.push(b64);
+  }
+  lines.push(`--${boundary}--`);
   return lines.join("\r\n");
 }
 

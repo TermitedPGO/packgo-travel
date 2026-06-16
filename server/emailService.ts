@@ -575,8 +575,14 @@ export async function sendInquiryReply(params: {
   subject: string;
   body: string;
   inquiryId: number;
+  /**
+   * 2026-06-15 reply-attachments — inline files already loaded from R2 +
+   * size-checked by the shared resolver (server/_core/replyAttachments.ts).
+   * Wired to both SendGrid + SMTP so this path matches the escalation path.
+   */
+  attachments?: { filename: string; content: Buffer; contentType: string }[];
 }): Promise<boolean> {
-  const { to, customerName, subject, body, inquiryId } = params;
+  const { to, customerName, subject, body, inquiryId, attachments } = params;
   const replySubject = `Re: ${subject}`;
   const greetingName = customerName?.trim() || "貴賓";
   const html = buildInquiryReplyHtml({ customerName, inquirySubject: subject, body });
@@ -592,7 +598,23 @@ export async function sendInquiryReply(params: {
   // Use SendGrid if configured
   if (SENDGRID_API_KEY) {
     try {
-      await sgMail.send({ to, from: EMAIL_FROM, subject: replySubject, text, html });
+      await sgMail.send({
+        to,
+        from: EMAIL_FROM,
+        subject: replySubject,
+        text,
+        html,
+        ...(attachments && attachments.length > 0
+          ? {
+              attachments: attachments.map((a) => ({
+                content: a.content.toString("base64"),
+                filename: a.filename,
+                type: a.contentType,
+                disposition: "attachment",
+              })),
+            }
+          : {}),
+      });
       console.log(
         `[Email] Inquiry reply (#${inquiryId}) sent via SendGrid to:`,
         redactEmail(to),
@@ -619,6 +641,15 @@ export async function sendInquiryReply(params: {
       subject: replySubject,
       text,
       html,
+      ...(attachments && attachments.length > 0
+        ? {
+            attachments: attachments.map((a) => ({
+              filename: a.filename,
+              content: a.content,
+              contentType: a.contentType,
+            })),
+          }
+        : {}),
     });
     console.log(
       `[Email] Inquiry reply (#${inquiryId}) sent via SMTP to:`,

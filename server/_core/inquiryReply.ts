@@ -30,6 +30,7 @@
 
 import * as db from "../db";
 import { createChildLogger } from "./logger";
+import type { ReplyAttachmentRef } from "./replyAttachments";
 
 const log = createChildLogger({ module: "inquiryReply" });
 
@@ -43,6 +44,14 @@ export interface SendAdminInquiryReplyInput {
    * may pass the approving admin's id; null is acceptable (schema allows it).
    */
   senderId?: number | null;
+  /**
+   * 2026-06-15 reply-attachments — optional R2 attachment refs. Resolved
+   * through the SAME shared splitter as the escalation path (inline vs
+   * >25MB→link) so both send paths stay consistent (design.md). The inquiry
+   * Inbox composer UI lands in a later PR; the param exists now so the two
+   * paths don't drift.
+   */
+  attachments?: ReplyAttachmentRef[];
 }
 
 export interface SendAdminInquiryReplyResult {
@@ -88,12 +97,40 @@ export async function sendAdminInquiryReply(
   if (inquiry.customerEmail) {
     try {
       const { sendInquiryReply } = await import("../emailService");
+      // Resolve attachments through the shared splitter (inline vs link),
+      // identical to the escalation path.
+      let emailBody = input.body;
+      let inlineAttachments:
+        | { filename: string; content: Buffer; contentType: string }[]
+        | undefined;
+      if (input.attachments && input.attachments.length > 0) {
+        const {
+          resolveReplyAttachments,
+          appendDownloadLinksToBody,
+          DOWNLOAD_LINK_TTL_SECONDS,
+        } = await import("./replyAttachments");
+        const { storageGetBytes, getSecureDocumentUrl } = await import("../storage");
+        const resolved = await resolveReplyAttachments(input.attachments, {
+          getBytes: (key) => storageGetBytes(key),
+          makeLink: (key) => getSecureDocumentUrl(key, DOWNLOAD_LINK_TTL_SECONDS),
+        });
+        inlineAttachments =
+          resolved.inline.length > 0
+            ? resolved.inline.map((a) => ({
+                filename: a.filename,
+                content: a.content,
+                contentType: a.mimeType,
+              }))
+            : undefined;
+        emailBody = appendDownloadLinksToBody(input.body, resolved.links);
+      }
       emailSent = await sendInquiryReply({
         to: inquiry.customerEmail,
         customerName: inquiry.customerName,
         subject: inquiry.subject,
-        body: input.body,
+        body: emailBody,
         inquiryId: input.inquiryId,
+        attachments: inlineAttachments,
       });
     } catch (err) {
       log.error(

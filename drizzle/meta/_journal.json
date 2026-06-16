@@ -638,6 +638,13 @@
       "when": 1781470000000,
       "tag": "0093_wechat_customer",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "5",
+      "when": 1781480000000,
+      "tag": "0095_guest_chat_profile",
+      "breakpoints": true
     }
   ]
 }

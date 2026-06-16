@@ -21,10 +21,28 @@ import { getDb } from "../db";
 import {
   formatCustomerContext,
   buildCustomerChatContext,
+  buildGuestChatContext,
   type CustomerContextData,
 } from "./customerChatContext";
 
 const getDbMock = vi.mocked(getDb);
+
+/** Thenable chain whose terminal await resolves the next queued result.
+ *  Mirrors the escalationBox.test.ts helper — args are ignored, so the real
+ *  drizzle eq/and/sql/desc run against the real schema without a DB. */
+function fakeChain(result: unknown) {
+  const p: any = {};
+  for (const m of ["select", "from", "where", "orderBy", "limit"]) {
+    p[m] = () => p;
+  }
+  p.then = (onOk: any, onErr: any) =>
+    Promise.resolve(result).then(onOk, onErr);
+  return p;
+}
+function fakeDb(queue: unknown[]) {
+  let i = 0;
+  return { select: () => fakeChain(queue[i++] ?? []) } as any;
+}
 
 const BASE: CustomerContextData = {
   user: {
@@ -128,5 +146,98 @@ describe("buildCustomerChatContext", () => {
   it("returns null when the db is unavailable (chat continues unpinned)", async () => {
     getDbMock.mockResolvedValue(undefined as any);
     expect(await buildCustomerChatContext(7)).toBeNull();
+  });
+});
+
+describe("formatCustomerContext — guest mode (guest-customer-chat)", () => {
+  it("renders a guest header and drops the PackPoint/booking membership line", () => {
+    const block = formatCustomerContext({
+      ...BASE,
+      user: { ...BASE.user, name: null },
+      isGuest: true,
+    });
+    expect(block).toContain("現在聊的訪客");
+    expect(block).toContain("mei@example.com");
+    expect(block).toContain("尚未註冊帳號");
+    // the membership line (PackPoint / 歷史訂單 N 筆) is meaningless for a
+    // not-yet-registered guest and must be suppressed.
+    expect(block).not.toContain("PackPoint");
+    expect(block).not.toContain("歷史訂單");
+  });
+
+  it("renders the 近期來信 section from recentInteractions", () => {
+    const block = formatCustomerContext({
+      ...BASE,
+      isGuest: true,
+      recentInteractions: [
+        { direction: "inbound", summary: "想問九月日本團報價", snippet: "Hi…" },
+        { direction: "outbound", summary: null, snippet: "我們已回覆報價" },
+      ],
+    });
+    expect(block).toContain("【近期來信】");
+    expect(block).toContain("客人來信: 想問九月日本團報價");
+    // outbound with no summary falls back to the snippet
+    expect(block).toContain("我們回覆: 我們已回覆報價");
+  });
+
+  it("registered (non-guest) mode still prints the membership line", () => {
+    const block = formatCustomerContext(BASE);
+    expect(block).toContain("PackPoint 2400");
+    expect(block).not.toContain("現在聊的訪客");
+  });
+});
+
+describe("buildGuestChatContext (guest-customer-chat)", () => {
+  it("returns null when the db is unavailable", async () => {
+    getDbMock.mockResolvedValue(undefined as any);
+    expect(await buildGuestChatContext(2550004)).toBeNull();
+  });
+
+  it("returns null when the profile is gone", async () => {
+    getDbMock.mockResolvedValue(fakeDb([[]])); // profile lookup → no row
+    expect(await buildGuestChatContext(999)).toBeNull();
+  });
+
+  it("pins the guest by profileId with email + open inquiry + 來信 history", async () => {
+    // Query order: profile → inquiries → interactions → quotes.
+    getDbMock.mockResolvedValue(
+      fakeDb([
+        [{ id: 2550004, email: "jenny@example.com" }],
+        [{ subject: "九月日本團", destination: "日本", status: "new" }],
+        [
+          {
+            direction: "inbound",
+            contentSummary: "想問九月日本團報價",
+            content: "Hi, I'd like a quote...",
+          },
+        ],
+        [], // no AI quotes
+      ]),
+    );
+    const block = await buildGuestChatContext(2550004);
+    expect(block).not.toBeNull();
+    expect(block).toContain("jenny@example.com");
+    expect(block).toContain("尚未註冊帳號");
+    expect(block).toContain("九月日本團");
+    expect(block).toContain("【近期來信】");
+    expect(block).toContain("想問九月日本團報價");
+    expect(block).not.toContain("PackPoint");
+  });
+
+  it("filters out closed inquiries from the pinned 開著的詢問 list", async () => {
+    getDbMock.mockResolvedValue(
+      fakeDb([
+        [{ id: 1, email: "jenny@example.com" }],
+        [
+          { subject: "舊的已結團", destination: "日本", status: "closed" },
+          { subject: "新的開著團", destination: "日本", status: "new" },
+        ],
+        [],
+        [],
+      ]),
+    );
+    const block = await buildGuestChatContext(1);
+    expect(block).toContain("新的開著團");
+    expect(block).not.toContain("舊的已結團");
   });
 });

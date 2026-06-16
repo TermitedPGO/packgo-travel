@@ -391,6 +391,39 @@ async function startServer() {
         }
       }
 
+      // guest-customer-chat (2026-06-15) — optional per-GUEST binding. A
+      // customerProfiles row with an email and no users.id. Mutually exclusive
+      // with customerId: the thread lives in customerChatMessages keyed on
+      // customerProfileId and the system prompt pins the guest. Validated
+      // BEFORE the SSE headers so errors return as plain JSON.
+      let customerProfileId: number | null = null;
+      const rawProfileId = String(req.query.customerProfileId ?? "").trim();
+      if (rawProfileId) {
+        if (customerId !== null) {
+          return res.status(400).json({
+            error: "Pass either customerId or customerProfileId, not both",
+          });
+        }
+        customerProfileId = Number(rawProfileId);
+        if (!Number.isInteger(customerProfileId) || customerProfileId <= 0) {
+          return res.status(400).json({ error: "Invalid customerProfileId" });
+        }
+        const { getDb } = await import("../db");
+        const dbCheck = await getDb();
+        if (dbCheck) {
+          const { customerProfiles } = await import("../../drizzle/schema");
+          const { eq } = await import("drizzle-orm");
+          const [prof] = await dbCheck
+            .select({ id: customerProfiles.id })
+            .from(customerProfiles)
+            .where(eq(customerProfiles.id, customerProfileId))
+            .limit(1);
+          if (!prof) {
+            return res.status(404).json({ error: "Guest profile not found" });
+          }
+        }
+      }
+
       // Parse optional image URLs from query (vision support, 2026-06-01)
       let imageUrls: string[] | undefined;
       try {
@@ -505,6 +538,29 @@ async function startServer() {
           senderRole: "jeff",
           body: question,
         });
+      } else if (db && customerProfileId !== null) {
+        // guest-customer-chat — the guest's own thread, scoped to profileId.
+        const rows = await db
+          .select({
+            senderRole: customerChatMessages.senderRole,
+            body: customerChatMessages.body,
+          })
+          .from(customerChatMessages)
+          .where(eq(customerChatMessages.customerProfileId, customerProfileId))
+          .orderBy(drizzleDesc(customerChatMessages.createdAt))
+          .limit(10);
+        history = rows
+          .reverse()
+          .map((r) => ({
+            role: (r.senderRole === "jeff" ? "user" : "agent") as "user" | "agent",
+            content: r.body,
+          }));
+
+        await db.insert(customerChatMessages).values({
+          customerProfileId,
+          senderRole: "jeff",
+          body: question,
+        });
       } else if (db) {
         const rows = await db
           .select({
@@ -544,6 +600,10 @@ async function startServer() {
           "./customerChatContext"
         );
         extraSystem = (await buildCustomerChatContext(customerId)) ?? undefined;
+      } else if (customerProfileId !== null) {
+        const { buildGuestChatContext } = await import("./customerChatContext");
+        extraSystem =
+          (await buildGuestChatContext(customerProfileId)) ?? undefined;
       }
 
       // Run streaming agent
@@ -599,6 +659,14 @@ async function startServer() {
           // suggestedActions/cards for the later m3b card rendering.
           await db.insert(customerChatMessages).values({
             customerUserId: customerId,
+            senderRole: "agent",
+            body: finalAnswer,
+            context: JSON.stringify({ suggestedActions, cards, streamed: true }),
+          });
+        } else if (customerProfileId !== null) {
+          // guest-customer-chat — same thread table, scoped to the guest.
+          await db.insert(customerChatMessages).values({
+            customerProfileId,
             senderRole: "agent",
             body: finalAnswer,
             context: JSON.stringify({ suggestedActions, cards, streamed: true }),

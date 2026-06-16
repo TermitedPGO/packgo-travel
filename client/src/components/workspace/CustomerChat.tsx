@@ -28,16 +28,48 @@ import {
   type SuggestedAction,
 } from "./CustomerChatActions";
 
-export default function CustomerChat({
-  userId,
-  customerName,
-}: {
-  userId: number;
-  customerName: string;
-}) {
+/**
+ * Bound to a REGISTERED customer (userId) OR an email GUEST
+ * (customerProfileId, guest-customer-chat 2026-06-15) — exactly one. Same
+ * thread UI + same hardened SSE pipeline; only the scope key differs.
+ */
+type CustomerChatProps = { customerName: string; label?: string } & (
+  | { userId: number; customerProfileId?: undefined }
+  | { customerProfileId: number; userId?: undefined }
+);
+
+export default function CustomerChat(props: CustomerChatProps) {
+  const { customerName, label } = props;
+  // One scope object drives the query input, the SSE param, and invalidation —
+  // so guest vs registered never drifts apart. The narrowed id is captured into
+  // a local inside each arm (props isn't readonly, so TS would re-widen
+  // props.* back to `number | undefined` inside the closures below).
+  const scope = ((): {
+    listInput: { userId: number } | { profileId: number };
+    streamParam: string;
+    invalidateOpenItems: (u: ReturnType<typeof trpc.useUtils>) => void;
+  } => {
+    if (props.customerProfileId != null) {
+      const profileId = props.customerProfileId;
+      return {
+        listInput: { profileId },
+        streamParam: `customerProfileId=${profileId}`,
+        invalidateOpenItems: (u) =>
+          void u.admin.guestOpenItems.invalidate({ profileId }),
+      };
+    }
+    const userId = props.userId;
+    return {
+      listInput: { userId },
+      streamParam: `customerId=${userId}`,
+      invalidateOpenItems: (u) =>
+        void u.admin.customerOpenItems.invalidate({ userId }),
+    };
+  })();
+
   const { t } = useLocale();
   const utils = trpc.useUtils();
-  const listQ = trpc.admin.customerChatList.useQuery({ userId });
+  const listQ = trpc.admin.customerChatList.useQuery(scope.listInput);
   const [q, setQ] = useState("");
   const [streamingText, setStreamingText] = useState<string | null>(null);
   const [streamingExtras, setStreamingExtras] = useState<{
@@ -48,7 +80,7 @@ export default function CustomerChat({
   const [busy, setBusy] = useState(false);
   // chip clicked → gated confirm dialog (m3b)
   const [pendingAction, setPendingAction] = useState<SuggestedAction | null>(
-    null,
+    null
   );
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -69,7 +101,7 @@ export default function CustomerChat({
     abortRef.current = ac;
     try {
       const resp = await fetch(
-        `/api/agent/ask-ops-stream?q=${encodeURIComponent(outgoing)}&customerId=${userId}`,
+        `/api/agent/ask-ops-stream?q=${encodeURIComponent(outgoing)}&${scope.streamParam}`,
         {
           method: "GET",
           credentials: "include",
@@ -78,7 +110,7 @@ export default function CustomerChat({
             "X-Requested-With": "XMLHttpRequest",
             Accept: "text/event-stream",
           },
-        },
+        }
       );
       if (!resp.ok || !resp.body) {
         toast.error(`${resp.status}: ${(await resp.text()).slice(0, 120)}`);
@@ -88,7 +120,7 @@ export default function CustomerChat({
       }
       // Jeff's question is persisted server-side before streaming — refetch
       // so his bubble appears under the thread immediately.
-      utils.admin.customerChatList.invalidate({ userId });
+      utils.admin.customerChatList.invalidate(scope.listInput);
       scrollDown();
 
       const reader = resp.body.getReader();
@@ -101,15 +133,13 @@ export default function CustomerChat({
         const chunks = buffer.split("\n\n");
         buffer = chunks.pop() ?? "";
         for (const chunk of chunks) {
-          const dataLine = chunk
-            .split("\n")
-            .find((l) => l.startsWith("data: "));
+          const dataLine = chunk.split("\n").find(l => l.startsWith("data: "));
           if (!dataLine) continue;
           try {
             const event = JSON.parse(dataLine.slice(6));
             if (event.type === "token") {
               setStatus(null);
-              setStreamingText((p) => (p ?? "") + (event.text ?? ""));
+              setStreamingText(p => (p ?? "") + (event.text ?? ""));
               scrollDown();
             } else if (event.type === "status") {
               setStatus(event.text ?? null);
@@ -123,7 +153,7 @@ export default function CustomerChat({
                   : [],
               });
               // anti-flicker: refetch holds the persisted turn, then swap
-              await utils.admin.customerChatList.invalidate({ userId });
+              await utils.admin.customerChatList.invalidate(scope.listInput);
               setStreamingText(null);
               setStreamingExtras(null);
               setBusy(false);
@@ -163,12 +193,15 @@ export default function CustomerChat({
 
   return (
     <div className="border-t border-gray-200 flex-shrink-0 bg-white">
+      {label && (
+        <div className="px-4 pt-2 text-[11px] text-gray-400">{label}</div>
+      )}
       {showThread && (
         <div
           ref={scrollRef}
           className="max-h-[40vh] overflow-y-auto px-5 py-4 space-y-4"
         >
-          {messages.map((m) => {
+          {messages.map(m => {
             const extras =
               m.senderRole === "agent"
                 ? parseTurnExtras((m as { context?: string | null }).context)
@@ -180,14 +213,18 @@ export default function CustomerChat({
                     m.senderRole === "jeff" ? "text-gray-400" : "text-black"
                   }`}
                 >
-                  {m.senderRole === "jeff" ? t("workspace.chatYou") : "PACK&GO AGENT"}
+                  {m.senderRole === "jeff"
+                    ? t("workspace.chatYou")
+                    : "PACK&GO AGENT"}
                 </div>
                 {m.senderRole === "agent" ? (
                   <div className="text-[13.5px] leading-relaxed">
                     <Streamdown>{m.body}</Streamdown>
                   </div>
                 ) : (
-                  <div className="text-[13.5px] whitespace-pre-wrap">{m.body}</div>
+                  <div className="text-[13.5px] whitespace-pre-wrap">
+                    {m.body}
+                  </div>
                 )}
                 {/* m3b — data cards + gated action chips on agent turns */}
                 {extras && <OpsCards cards={extras.cards} />}
@@ -226,8 +263,8 @@ export default function CustomerChat({
         <div className="flex items-center gap-2 border-2 border-black rounded-xl px-3 h-11">
           <input
             value={q}
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => {
+            onChange={e => setQ(e.target.value)}
+            onKeyDown={e => {
               if (e.key === "Enter" && !e.nativeEvent.isComposing) send();
             }}
             placeholder={t("workspace.chatPlaceholder", {
@@ -261,8 +298,8 @@ export default function CustomerChat({
         action={pendingAction}
         onClose={() => setPendingAction(null)}
         onDone={() => {
-          utils.admin.customerChatList.invalidate({ userId });
-          utils.admin.customerOpenItems.invalidate({ userId });
+          utils.admin.customerChatList.invalidate(scope.listInput);
+          scope.invalidateOpenItems(utils);
           utils.commandCenter.list.invalidate();
           utils.commandCenter.stats.invalidate();
         }}

@@ -3413,8 +3413,13 @@ export type WorkspaceDisposition = typeof workspaceDispositions.$inferSelect;
 // ────────────────────────────────────────────────────────────────────────
 export const customerChatMessages = mysqlTable("customerChatMessages", {
   id: int("id").autoincrement().primaryKey(),
-  /** users.id of the customer this thread belongs to. */
-  customerUserId: int("customerUserId").notNull(),
+  /** users.id of a REGISTERED customer's thread. Null for guest threads
+   *  (relaxed to nullable in 0095 — email guests have no users.id). */
+  customerUserId: int("customerUserId"),
+  /** customerProfiles.id of an EMAIL guest's thread (guest-customer-chat,
+   *  2026-06-15). Null for registered threads. Exactly one of
+   *  customerUserId / customerProfileId is set per row. */
+  customerProfileId: int("customerProfileId"),
   senderRole: mysqlEnum("senderRole", ["jeff", "agent"]).notNull(),
   body: text("body").notNull(),
   /** JSON: { suggestedActions, cards, streamed } from the agent turn. */
@@ -3422,6 +3427,7 @@ export const customerChatMessages = mysqlTable("customerChatMessages", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (t) => ({
   customerIdx: index("idx_ccm_customer").on(t.customerUserId, t.createdAt),
+  profileIdx: index("idx_ccm_profile").on(t.customerProfileId, t.createdAt),
 }));
 
 export type CustomerChatMessage = typeof customerChatMessages.$inferSelect;

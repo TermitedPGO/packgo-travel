@@ -153,6 +153,60 @@ export async function storageGet(relKey: string): Promise<{ key: string; url: st
 }
 
 /**
+ * 2026-06-15 reply-attachments — fetch an object's raw bytes + content type.
+ *
+ * storageGet only hands back a URL; building an outbound email attachment
+ * needs the actual bytes to base64 into the MIME part. Uses the AWS SDK v3
+ * streaming Body helper (`transformToByteArray`) so it reads the real R2
+ * stream and is trivially mockable in tests.
+ */
+export async function storageGetBytes(
+  relKey: string
+): Promise<{ bytes: Buffer; mimeType: string; contentLength: number }> {
+  const { client, bucket } = getR2Client();
+  const key = normalizeKey(relKey);
+  const resp = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  if (!resp.Body) {
+    throw new Error(`storageGetBytes: empty body for key "${key}"`);
+  }
+  const arr = await (
+    resp.Body as { transformToByteArray: () => Promise<Uint8Array> }
+  ).transformToByteArray();
+  const bytes = Buffer.from(arr);
+  return {
+    bytes,
+    mimeType: resp.ContentType || "application/octet-stream",
+    contentLength: resp.ContentLength ?? bytes.length,
+  };
+}
+
+/**
+ * 2026-06-15 reply-attachments — presigned PUT URL for a browser→R2 DIRECT
+ * upload (Jeff chose direct upload over base64-through-tRPC so large files
+ * never hit the 10mb Express body limit).
+ *
+ * The ContentType is baked into the signature: the browser MUST send the same
+ * `Content-Type` header on the PUT or R2 returns 403 SignatureDoesNotMatch.
+ * TTL is short (default 5 min) — just long enough to upload before the key is
+ * handed to the send mutation.
+ *
+ * DEPLOY PREREQUISITE: browser→R2 direct PUT requires the R2 bucket to allow
+ * CORS for the admin origin (AllowedMethods: PUT, AllowedHeaders: content-type).
+ * Without it the PUT fails with an opaque CORS error in the browser.
+ */
+export async function storageCreatePresignedPut(
+  relKey: string,
+  contentType: string,
+  ttlSeconds = 300
+): Promise<{ key: string; putUrl: string }> {
+  const { client, bucket } = getR2Client();
+  const key = normalizeKey(relKey);
+  const cmd = new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: contentType });
+  const putUrl = await getSignedUrl(client, cmd, { expiresIn: ttlSeconds });
+  return { key, putUrl };
+}
+
+/**
  * Delete a single object from R2.
  * Round 72: added for masterAgent rollback — previously there was no way to
  * remove orphaned images from failed tour generations.
