@@ -28,8 +28,10 @@
  */
 
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { adminProcedure, router } from "../_core/trpc";
 import * as db from "../db";
+import { getSecureDocumentUrl } from "../storage";
 import {
   generateProfitAndLossReport,
   generateMonthlyTrend,
@@ -177,4 +179,145 @@ export const accountingRouter = router({
       .query(async ({ input }) => {
         return generateTaxSummary(input.year);
       }),
+
+    // ── 待確認支出 (email-receipt-intake, 2026-06-15) ──────────────────────
+    // Gmail 自動讀出的收據,排隊給 Jeff 逐筆確認。AI 只搬不入帳:金額/算哪團/
+    // Trust-Operating/要不要真記分錄,全在 confirm 時由 Jeff 決定。
+    pendingExpenses: router({
+      // List staged receipts (default: still-pending).
+      list: adminProcedure
+        .input(
+          z.object({
+            status: z.enum(["pending", "confirmed", "rejected"]).default("pending"),
+            limit: z.number().min(1).max(200).default(100),
+            offset: z.number().min(0).default(0),
+          }),
+        )
+        .query(async ({ input }) => {
+          return db.listPendingExpenses(input);
+        }),
+
+      // Count still awaiting Jeff's decision — for the tab badge.
+      count: adminProcedure.query(async () => {
+        return { pending: await db.countPendingExpenses() };
+      }),
+
+      // Short-TTL signed URL to preview the stored receipt attachment.
+      attachmentUrl: adminProcedure
+        .input(z.object({ id: z.number() }))
+        .query(async ({ input }) => {
+          const row = await db.getPendingExpenseById(input.id);
+          if (!row || !row.attachmentKey) {
+            throw new TRPCError({ code: "NOT_FOUND", message: "No attachment for this expense" });
+          }
+          const url = await getSecureDocumentUrl(row.attachmentKey, 300);
+          return { url, filename: row.attachmentFilename ?? "receipt", mimeType: row.attachmentMimeType };
+        }),
+
+      // Confirm a pending expense. handledMode decides whether we write a real
+      // ledger entry ('ledger') or just archive the receipt ('receipt_only',
+      // because the same charge will arrive via Plaid and booking it here would
+      // double-count). Jeff may correct any AI-read field at confirm time.
+      confirm: adminProcedure
+        .input(
+          z.object({
+            id: z.number(),
+            handledMode: z.enum(["ledger", "receipt_only"]),
+            account: z.enum(["trust", "operating"]),
+            // Jeff's confirmed/corrected fields (override the AI extraction):
+            vendor: z.string().optional(),
+            amount: z.number().positive().optional(),
+            currency: z.string().optional(),
+            receiptDate: z.date().optional(),
+            description: z.string().optional(),
+            bookingId: z.number().optional(),
+            // Ledger-mode only:
+            entryCategory: z.string().optional(),
+            isTaxDeductible: z.boolean().default(false),
+            notes: z.string().optional(),
+          }),
+        )
+        .mutation(async ({ input, ctx }) => {
+          const row = await db.getPendingExpenseById(input.id);
+          if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Pending expense not found" });
+          if (row.status !== "pending") {
+            throw new TRPCError({ code: "BAD_REQUEST", message: `Already ${row.status}` });
+          }
+
+          // Resolve final values: Jeff's input wins, fall back to AI extraction.
+          const vendor = input.vendor ?? row.vendor ?? undefined;
+          const amount = input.amount ?? (row.amount != null ? Number(row.amount) : undefined);
+          const currency = input.currency ?? row.currency ?? "USD";
+          const receiptDate = input.receiptDate ?? row.receiptDate ?? new Date();
+          const description =
+            input.description ?? row.description ?? (vendor ? `收據 · ${vendor}` : "收據");
+
+          const confirmFields = {
+            vendor: vendor ?? null,
+            amount: amount != null ? String(amount) : null,
+            currency,
+            receiptDate,
+            description,
+            account: input.account,
+            handledMode: input.handledMode,
+            bookingId: input.bookingId ?? null,
+            entryCategory: input.entryCategory ?? null,
+            needsReview: 0,
+            confirmedBy: ctx.user.id,
+            confirmedAt: new Date(),
+          };
+
+          if (input.handledMode === "ledger") {
+            // Booking a real expense — amount + category are mandatory.
+            if (amount == null) {
+              throw new TRPCError({ code: "BAD_REQUEST", message: "金額必填才能入帳" });
+            }
+            if (!input.entryCategory) {
+              throw new TRPCError({ code: "BAD_REQUEST", message: "請選支出類別才能入帳" });
+            }
+            const { entry } = await db.confirmPendingExpenseToLedger({
+              pendingId: row.id,
+              entry: {
+                entryType: "expense",
+                category: input.entryCategory as any,
+                amount: String(amount),
+                currency,
+                description,
+                entryDate: receiptDate,
+                account: input.account,
+                bookingId: input.bookingId ?? null,
+                // Store the R2 KEY (not a URL) — viewed via signed URL on demand.
+                receiptUrl: row.attachmentKey ?? null,
+                isTaxDeductible: input.isTaxDeductible ? 1 : 0,
+                notes: input.notes ?? null,
+                createdBy: ctx.user.id,
+              },
+              confirmFields,
+            });
+            return { ok: true as const, handledMode: "ledger" as const, accountingEntryId: entry?.id ?? null };
+          }
+
+          // receipt_only — archive the receipt + Jeff's decisions, no ledger row.
+          await db.updatePendingExpense(row.id, { ...confirmFields, status: "confirmed" });
+          return { ok: true as const, handledMode: "receipt_only" as const, accountingEntryId: null };
+        }),
+
+      // Reject — not a real expense / misfire / duplicate.
+      reject: adminProcedure
+        .input(z.object({ id: z.number(), reason: z.string().max(500).optional() }))
+        .mutation(async ({ input, ctx }) => {
+          const row = await db.getPendingExpenseById(input.id);
+          if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Pending expense not found" });
+          if (row.status !== "pending") {
+            throw new TRPCError({ code: "BAD_REQUEST", message: `Already ${row.status}` });
+          }
+          await db.updatePendingExpense(input.id, {
+            status: "rejected",
+            rejectReason: input.reason ?? null,
+            confirmedBy: ctx.user.id,
+            confirmedAt: new Date(),
+          });
+          return { ok: true as const };
+        }),
+    }),
   });

@@ -36,8 +36,15 @@ import {
   ensureLabel,
   applyLabel,
   sendReplyInThread,
+  fetchRawAttachments,
   type GmailMessageSummary,
 } from "../../_core/gmail";
+import { detectReceipt, extractReceipt, pickReceiptAttachment } from "../../_core/receiptExtractor";
+import {
+  createPendingExpense,
+  getPendingExpenseByGmailMessageId,
+} from "../../db";
+import { storagePut } from "../../storage";
 import { runInquiryAgent, DEFAULT_INQUIRY_POLICY } from "./inquiryAgent";
 import { evaluateAutoSend } from "./autoSendGate";
 import { runRefundAgent, DEFAULT_REFUND_POLICY } from "./refundAgent";
@@ -60,6 +67,8 @@ export type PipelineResult = {
   totalProcessed: number;
   totalFailed: number;
   totalEscalated: number;
+  /** email-receipt-intake — receipts queued into pendingExpenses this run. */
+  totalReceipts: number;
   errors: string[];
 };
 
@@ -106,6 +115,7 @@ export async function runGmailPipeline(
       totalProcessed: 0,
       totalFailed: 0,
       totalEscalated: 0,
+      totalReceipts: 0,
       errors: [
         `listUnreadMessages failed: ${e instanceof Error ? e.message : String(e)}`,
       ],
@@ -114,6 +124,58 @@ export async function runGmailPipeline(
 
   // Filter out messages already labeled PACKGO_AI_PROCESSED
   const fresh = messages.filter((m) => !m.labels.includes(labelId));
+
+  const result: PipelineResult = {
+    ok: true,
+    emailAddress: integration.emailAddress,
+    totalFetched: 0,
+    totalProcessed: 0,
+    totalFailed: 0,
+    totalEscalated: 0,
+    totalReceipts: 0,
+    errors: [],
+  };
+
+  // ── email-receipt-intake: receipt pass (runs BEFORE the noise filter) ──
+  // Receipts/invoices often come from hotels, airlines, and vendors whose
+  // domains the noise filter below would drop (marriott/hilton/…), so we sniff
+  // for receipts FIRST. Detection is rules-only (no LLM); only the few that
+  // pass get the (paid) vision extraction. Receipts are queued into
+  // pendingExpenses and removed from the customer-inquiry flow — a vendor
+  // invoice must never trigger a customer reply draft.
+  const nonReceipt: GmailMessageSummary[] = [];
+  for (const m of fresh) {
+    let looksLikeReceipt = false;
+    try {
+      looksLikeReceipt = detectReceipt({
+        subject: m.subject,
+        body: m.body,
+        attachments: m.attachments ?? [],
+      }).isReceipt;
+    } catch {
+      looksLikeReceipt = false;
+    }
+    if (!looksLikeReceipt) {
+      nonReceipt.push(m);
+      continue;
+    }
+    try {
+      const queued = await processReceiptEmail(db, m, { gmail, integrationId });
+      // Only label (suppress re-poll) once the row is safely queued. The
+      // gmailMessageId dedup guard inside processReceiptEmail makes a retry
+      // after a partial failure harmless (no duplicate rows).
+      await applyLabel(gmail, m.id, labelId);
+      if (queued) result.totalReceipts++;
+    } catch (e) {
+      result.totalFailed++;
+      const msgStr = e instanceof Error ? e.message : String(e);
+      result.errors.push(`receipt ${m.id}: ${msgStr}`);
+      log.error(
+        { err: e, messageId: m.id, subject: m.subject?.slice(0, 60), from: m.from },
+        "[gmailPipeline] Failed receipt",
+      );
+    }
+  }
 
   // ── Pre-LLM spam filter: skip known non-customer senders ──
   // These domains send automated notifications to Jeff's personal inbox.
@@ -148,31 +210,22 @@ export async function runGmailPipeline(
     return false;
   }
 
-  const customerEmails = fresh.filter((m) => {
+  const customerEmails = nonReceipt.filter((m) => {
     if (isKnownNoise(m.from)) {
       log.info({ from: m.from, subject: m.subject?.slice(0, 40) }, "[gmailPipeline] skipped known noise");
       return false;
     }
     return true;
   });
-  const skippedNoise = fresh.length - customerEmails.length;
-
-  const result: PipelineResult = {
-    ok: true,
-    emailAddress: integration.emailAddress,
-    totalFetched: customerEmails.length,
-    totalProcessed: 0,
-    totalFailed: 0,
-    totalEscalated: 0,
-    errors: [],
-  };
+  const skippedNoise = nonReceipt.length - customerEmails.length;
+  result.totalFetched = customerEmails.length;
 
   if (skippedNoise > 0) {
     log.info({ skippedNoise, remaining: customerEmails.length }, "[gmailPipeline] pre-filtered known noise senders");
   }
 
   // Apply processed label to skipped noise so they don't reappear next poll
-  for (const m of fresh) {
+  for (const m of nonReceipt) {
     if (isKnownNoise(m.from)) {
       try { await applyLabel(gmail, m.id, labelId); } catch {}
     }
@@ -882,6 +935,95 @@ async function processOneEmail(
       .set({ lastInteractionAt: new Date() })
       .where(eq(customerProfiles.id, profileId));
   }
+}
+
+/**
+ * email-receipt-intake — turn one receipt email into a `pendingExpenses` row.
+ * AI ONLY receives + reads + queues. Jeff confirms each row later. Idempotent:
+ * the gmailMessageId dedup guard means a re-poll never creates a second card.
+ * Returns true when a new row was created, false when deduped.
+ */
+async function processReceiptEmail(
+  db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
+  msg: GmailMessageSummary,
+  ctx: { gmail: ReturnType<typeof buildGmailClient>; integrationId: number },
+): Promise<boolean> {
+  // Dedup — re-polling the same email must never create a second card.
+  const existing = await getPendingExpenseByGmailMessageId(msg.id);
+  if (existing) {
+    log.info({ messageId: msg.id }, "[gmailPipeline] receipt already queued — skip");
+    return false;
+  }
+
+  // The poll summary kept only parsed TEXT; vision + R2 need the raw bytes.
+  let rawAttachments: Awaited<ReturnType<typeof fetchRawAttachments>> = [];
+  try {
+    rawAttachments = await fetchRawAttachments(ctx.gmail, msg.id);
+  } catch (err) {
+    log.warn({ err, messageId: msg.id }, "[gmailPipeline] raw attachment fetch failed (non-fatal)");
+  }
+
+  // Store the primary receipt attachment in R2 (KEY only — viewed via a
+  // short-TTL signed URL; receipts can carry PII like card last-4).
+  let attachmentKey: string | undefined;
+  let attachmentFilename: string | undefined;
+  let attachmentMimeType: string | undefined;
+  const picked = pickReceiptAttachment(rawAttachments);
+  if (picked) {
+    try {
+      const safeName = (picked.filename.replace(/[^\w.\-]+/g, "_").slice(-80)) || "receipt";
+      const rand = Math.random().toString(36).slice(2, 8);
+      const key = `receipts/${ctx.integrationId}/${Date.now()}-${rand}-${safeName}`;
+      const put = await storagePut(key, picked.bytes, picked.mimeType || "application/octet-stream");
+      attachmentKey = put.key;
+      attachmentFilename = picked.filename.slice(0, 512);
+      attachmentMimeType = (picked.mimeType || "application/octet-stream").slice(0, 128);
+    } catch (err) {
+      log.warn({ err, messageId: msg.id }, "[gmailPipeline] receipt R2 upload failed (non-fatal)");
+    }
+  }
+
+  // Read vendor / amount / currency / date with vision. Never throws — on a
+  // failure it returns needsReview=true so we still queue a 請人工看 card.
+  const extraction = await extractReceipt({
+    subject: msg.subject,
+    from: msg.from,
+    body: msg.body,
+    attachments: rawAttachments,
+  });
+
+  await createPendingExpense({
+    source: "gmail",
+    gmailMessageId: msg.id,
+    gmailThreadId: msg.threadId,
+    integrationId: ctx.integrationId,
+    fromAddress: (parseEmailAddress(msg.from) ?? msg.from).slice(0, 320),
+    emailSubject: msg.subject?.slice(0, 500),
+    vendor: extraction.vendor ?? undefined,
+    amount: extraction.amount != null ? String(extraction.amount) : undefined,
+    currency: extraction.currency ?? undefined,
+    receiptDate: extraction.receiptDate ? new Date(extraction.receiptDate) : undefined,
+    description: extraction.description ?? undefined,
+    extractionConfidence: extraction.confidence,
+    needsReview: extraction.needsReview ? 1 : 0,
+    extractionRaw: extraction.raw ? extraction.raw.slice(0, 5000) : undefined,
+    attachmentKey,
+    attachmentFilename,
+    attachmentMimeType,
+    status: "pending",
+  });
+
+  log.info(
+    {
+      messageId: msg.id,
+      vendor: extraction.vendor,
+      amount: extraction.amount,
+      currency: extraction.currency,
+      needsReview: extraction.needsReview,
+    },
+    "[gmailPipeline] receipt queued to pendingExpenses",
+  );
+  return true;
 }
 
 function formatBytesShort(bytes: number): string {

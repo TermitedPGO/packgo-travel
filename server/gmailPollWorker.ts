@@ -34,6 +34,7 @@ export const gmailPollWorker = new Worker<GmailPollJobData, GmailPollJobResult>(
     let totalProcessed = 0;
     let totalAutoReplied = 0;
     let totalEscalated = 0;
+    let totalReceipts = 0;
     let errors = 0;
 
     for (const integration of activeIntegrations) {
@@ -41,6 +42,7 @@ export const gmailPollWorker = new Worker<GmailPollJobData, GmailPollJobResult>(
         const result = await runGmailPipeline(integration.id);
         totalProcessed += result.totalProcessed;
         totalEscalated += result.totalEscalated;
+        totalReceipts += result.totalReceipts;
         // PipelineResult doesn't separately count auto-replied; the
         // gmailPipeline writes interactionOutcomes with actionTaken=
         // "auto_replied" when send succeeds, which the dashboard reads
@@ -82,7 +84,7 @@ export const gmailPollWorker = new Worker<GmailPollJobData, GmailPollJobResult>(
     console.log(
       `[GmailPollWorker] ✅ Tick ${job.id} (${job.data.triggeredBy}): ` +
         `integrations=${activeIntegrations.length} processed=${totalProcessed} ` +
-        `auto=${totalAutoReplied} escalated=${totalEscalated} errors=${errors}`
+        `auto=${totalAutoReplied} escalated=${totalEscalated} receipts=${totalReceipts} errors=${errors}`
     );
 
     return {

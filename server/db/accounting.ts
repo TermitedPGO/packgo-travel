@@ -31,6 +31,7 @@
 import { eq, and, gte, lte, desc, like, sql } from "drizzle-orm";
 import {
   accountingEntries, AccountingEntry, InsertAccountingEntry,
+  pendingExpenses, PendingExpense, InsertPendingExpense,
   invoices, Invoice, InsertInvoice,
   recurringExpenses, RecurringExpense, InsertRecurringExpense,
   aiQuotes, AiQuote, InsertAiQuote,
@@ -100,6 +101,134 @@ export async function deleteAccountingEntry(id: number): Promise<boolean> {
   if (!db) return false;
   await db.delete(accountingEntries).where(eq(accountingEntries.id, id));
   return true;
+}
+
+// ─── Pending Expenses (email-receipt-intake, 2026-06-15) ────────────────────
+// Staging rows for Gmail receipts/invoices. AI fills the extracted fields;
+// Jeff confirms (→ optionally a real accountingEntries row) or rejects. The
+// gmailMessageId UNIQUE constraint makes ingestion idempotent across polls.
+
+export async function createPendingExpense(
+  data: InsertPendingExpense,
+): Promise<PendingExpense | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [result] = await db.insert(pendingExpenses).values(data);
+  const id = (result as any).insertId;
+  const [row] = await db
+    .select()
+    .from(pendingExpenses)
+    .where(eq(pendingExpenses.id, id));
+  return row || null;
+}
+
+/** Dedup guard — has this Gmail message already been queued? */
+export async function getPendingExpenseByGmailMessageId(
+  gmailMessageId: string,
+): Promise<PendingExpense | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db
+    .select()
+    .from(pendingExpenses)
+    .where(eq(pendingExpenses.gmailMessageId, gmailMessageId))
+    .limit(1);
+  return row || null;
+}
+
+export async function getPendingExpenseById(
+  id: number,
+): Promise<PendingExpense | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db
+    .select()
+    .from(pendingExpenses)
+    .where(eq(pendingExpenses.id, id))
+    .limit(1);
+  return row || null;
+}
+
+export async function listPendingExpenses(params: {
+  status?: "pending" | "confirmed" | "rejected";
+  limit?: number;
+  offset?: number;
+}): Promise<{ rows: PendingExpense[]; total: number }> {
+  const db = await getDb();
+  if (!db) return { rows: [], total: 0 };
+  const where = params.status
+    ? eq(pendingExpenses.status, params.status)
+    : undefined;
+  const [countResult] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(pendingExpenses)
+    .where(where);
+  const rows = await db
+    .select()
+    .from(pendingExpenses)
+    .where(where)
+    .orderBy(desc(pendingExpenses.createdAt))
+    .limit(params.limit ?? 100)
+    .offset(params.offset ?? 0);
+  return { rows, total: Number(countResult.count) };
+}
+
+/** Count of rows still awaiting Jeff's decision (for the tab badge). */
+export async function countPendingExpenses(): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const [row] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(pendingExpenses)
+    .where(eq(pendingExpenses.status, "pending"));
+  return Number(row?.count ?? 0);
+}
+
+export async function updatePendingExpense(
+  id: number,
+  data: Partial<InsertPendingExpense>,
+): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  await db
+    .update(pendingExpenses)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(pendingExpenses.id, id));
+  return true;
+}
+
+/**
+ * Confirm a pending expense into the real ledger ATOMICALLY: insert the
+ * accountingEntries row AND flip the pendingExpense to confirmed (with the
+ * back-link) in one transaction. Either both happen or neither — this is the
+ * money path, so a half-write (orphan ledger entry + still-pending card that
+ * Jeff re-confirms → double entry) must be impossible.
+ */
+export async function confirmPendingExpenseToLedger(params: {
+  pendingId: number;
+  entry: InsertAccountingEntry;
+  confirmFields: Partial<InsertPendingExpense>;
+}): Promise<{ entry: AccountingEntry | null }> {
+  const db = await getDb();
+  if (!db) return { entry: null };
+  return await db.transaction(async (tx) => {
+    const [res] = await tx.insert(accountingEntries).values(params.entry);
+    const entryId = (res as any).insertId;
+    const [entry] = await tx
+      .select()
+      .from(accountingEntries)
+      .where(eq(accountingEntries.id, entryId));
+    await tx
+      .update(pendingExpenses)
+      .set({
+        ...params.confirmFields,
+        accountingEntryId: entryId,
+        status: "confirmed",
+        updatedAt: new Date(),
+      })
+      .where(eq(pendingExpenses.id, params.pendingId));
+    return { entry: entry || null };
+  });
 }
 
 export interface AccountingStats {

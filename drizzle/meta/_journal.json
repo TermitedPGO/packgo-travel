@@ -645,6 +645,13 @@
       "when": 1781480000000,
       "tag": "0095_guest_chat_profile",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "5",
+      "when": 1781490000000,
+      "tag": "0096_pending_expenses",
+      "breakpoints": true
     }
   ]
 }

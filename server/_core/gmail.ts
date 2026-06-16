@@ -369,6 +369,74 @@ async function fetchAndParseAttachments(
   return out;
 }
 
+/** Raw (unparsed) attachment bytes — used by the receipt-intake path which
+ * needs the actual file to (a) store in R2 and (b) send to LLM vision. The
+ * customer-inquiry path uses ParsedAttachment (text) instead. */
+export type RawAttachment = {
+  filename: string;
+  mimeType: string;
+  bytes: Buffer;
+};
+
+/** Per-attachment byte cap for the receipt path (defense-in-depth, matches
+ * attachmentParser's image/PDF ceiling). Bigger files are skipped, not
+ * truncated, so we never feed a half file to vision. */
+const MAX_RAW_ATTACHMENT_BYTES = 30 * 1024 * 1024;
+
+/**
+ * email-receipt-intake (2026-06-15) — fetch the RAW bytes of a message's
+ * attachments (re-fetches the full message; the poll summary discards bytes).
+ * Returns up to MAX_ATTACHMENTS_PER_MESSAGE entries. Never throws on a single
+ * bad attachment — it's skipped and logged. Caller picks the receipt-looking
+ * one (PDF/image).
+ */
+export async function fetchRawAttachments(
+  gmail: ReturnType<typeof buildGmailClient>,
+  messageId: string,
+): Promise<RawAttachment[]> {
+  const full = await gmail.users.messages.get({
+    userId: "me",
+    id: messageId,
+    format: "full",
+  });
+  const parts: Array<{ filename: string; mimeType: string; attachmentId: string; sizeHint: number }> = [];
+  collectAttachmentParts(full.data.payload, parts);
+  if (parts.length === 0) return [];
+
+  const capped = parts.slice(0, MAX_ATTACHMENTS_PER_MESSAGE);
+  const out: RawAttachment[] = [];
+  for (const p of capped) {
+    if (p.sizeHint > 0 && p.sizeHint > MAX_RAW_ATTACHMENT_BYTES) {
+      log.info(
+        { messageId, filename: p.filename, sizeHint: p.sizeHint },
+        "[gmail] raw attachment too large — skipped",
+      );
+      continue;
+    }
+    try {
+      const attResp = await gmail.users.messages.attachments.get({
+        userId: "me",
+        messageId,
+        id: p.attachmentId,
+      });
+      const dataB64 = attResp.data.data;
+      if (!dataB64) continue;
+      const bytes = Buffer.from(
+        dataB64.replace(/-/g, "+").replace(/_/g, "/"),
+        "base64",
+      );
+      if (bytes.length > MAX_RAW_ATTACHMENT_BYTES) continue;
+      out.push({ filename: p.filename, mimeType: p.mimeType, bytes });
+    } catch (err) {
+      log.warn(
+        { err, messageId, filename: p.filename },
+        "[gmail] raw attachment fetch failed",
+      );
+    }
+  }
+  return out;
+}
+
 function collectAttachmentParts(
   part: any,
   out: Array<{ filename: string; mimeType: string; attachmentId: string; sizeHint: number }>

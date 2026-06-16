@@ -298,6 +298,118 @@ export default function AccountingTab() {
     onError: (e) => toast.error(e.message),
   });
 
+  // ── 待確認支出 (email-receipt-intake) ──────────────────────────────────────
+  const pendingQuery = trpc.accounting.pendingExpenses.list.useQuery({
+    status: "pending",
+    limit: 100,
+  });
+  const pendingCountQuery = trpc.accounting.pendingExpenses.count.useQuery();
+  const pendingCount = pendingCountQuery.data?.pending ?? 0;
+
+  const [pendingDialog, setPendingDialog] = useState(false);
+  const [confirmingId, setConfirmingId] = useState<number | null>(null);
+  const [bookingSearch, setBookingSearch] = useState("");
+  const [pendingForm, setPendingForm] = useState({
+    handledMode: "ledger" as "ledger" | "receipt_only",
+    account: "operating" as "trust" | "operating",
+    vendor: "",
+    amount: "",
+    currency: "USD",
+    receiptDate: new Date().toISOString().slice(0, 10),
+    description: "",
+    entryCategory: "supplier_payment",
+    isTaxDeductible: true,
+    bookingId: null as number | null,
+    bookingLabel: "",
+    notes: "",
+  });
+
+  const bookingResults = trpc.globalSearch.search.useQuery(
+    { q: bookingSearch },
+    { enabled: bookingSearch.trim().length >= 2 },
+  );
+
+  const invalidatePending = () => {
+    utils.accounting.pendingExpenses.list.invalidate();
+    utils.accounting.pendingExpenses.count.invalidate();
+  };
+
+  const confirmPending = trpc.accounting.pendingExpenses.confirm.useMutation({
+    onSuccess: (r) => {
+      toast.success(
+        r.handledMode === "ledger"
+          ? t("admin.accounting.pending.toastBooked")
+          : t("admin.accounting.pending.toastArchived"),
+      );
+      setPendingDialog(false);
+      setConfirmingId(null);
+      invalidatePending();
+      utils.accounting.list.invalidate();
+      utils.accounting.dashboard.invalidate();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const rejectPending = trpc.accounting.pendingExpenses.reject.useMutation({
+    onSuccess: () => {
+      toast.success(t("admin.accounting.pending.toastRejected"));
+      invalidatePending();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  function openConfirmDialog(row: NonNullable<typeof pendingQuery.data>["rows"][number]) {
+    setConfirmingId(row.id);
+    setBookingSearch("");
+    setPendingForm({
+      handledMode: "ledger",
+      account: "operating",
+      vendor: row.vendor ?? "",
+      amount: row.amount != null ? String(row.amount) : "",
+      currency: row.currency ?? "USD",
+      receiptDate: row.receiptDate
+        ? new Date(row.receiptDate).toISOString().slice(0, 10)
+        : new Date().toISOString().slice(0, 10),
+      description: row.description ?? "",
+      entryCategory: "supplier_payment",
+      isTaxDeductible: true,
+      bookingId: row.bookingId ?? null,
+      bookingLabel: "",
+      notes: "",
+    });
+    setPendingDialog(true);
+  }
+
+  function submitConfirm() {
+    if (confirmingId == null) return;
+    confirmPending.mutate({
+      id: confirmingId,
+      handledMode: pendingForm.handledMode,
+      account: pendingForm.account,
+      vendor: pendingForm.vendor || undefined,
+      amount: pendingForm.amount ? Number(pendingForm.amount) : undefined,
+      currency: pendingForm.currency,
+      receiptDate: pendingForm.receiptDate
+        ? new Date(pendingForm.receiptDate + "T00:00:00")
+        : undefined,
+      description: pendingForm.description || undefined,
+      bookingId: pendingForm.bookingId ?? undefined,
+      entryCategory:
+        pendingForm.handledMode === "ledger" ? pendingForm.entryCategory : undefined,
+      isTaxDeductible: pendingForm.isTaxDeductible,
+      notes: pendingForm.notes || undefined,
+    });
+  }
+
+  async function previewReceipt(id: number) {
+    try {
+      const { url } = await utils.accounting.pendingExpenses.attachmentUrl.fetch({ id });
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   // Export CSV
   const exportCsvQuery = trpc.accounting.exportCsv.useQuery(
     { startDate, endDate },
@@ -454,8 +566,16 @@ export default function AccountingTab() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid grid-cols-2 sm:grid-cols-4 w-full max-w-lg rounded-lg">
+        <TabsList className="grid grid-cols-3 sm:grid-cols-5 w-full max-w-2xl rounded-lg">
           <TabsTrigger value="overview" className="rounded-md">{t("admin.accounting.tabOverview")}</TabsTrigger>
+          <TabsTrigger value="pending" className="rounded-md flex items-center gap-1.5">
+            {t("admin.accounting.pending.tab")}
+            {pendingCount > 0 && (
+              <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full bg-amber-500 text-white text-[10px] font-semibold">
+                {pendingCount}
+              </span>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="entries" className="rounded-md">{t("admin.accounting.tabEntries")}</TabsTrigger>
           <TabsTrigger value="invoices" className="rounded-md">{t("admin.accounting.tabInvoices")}</TabsTrigger>
           <TabsTrigger value="recurring" className="rounded-md">{t("admin.accounting.tabRecurring")}</TabsTrigger>
@@ -595,6 +715,93 @@ export default function AccountingTab() {
               </div>
             </div>
           )}
+        </TabsContent>
+
+        {/* 待確認支出 Tab — Gmail 自動讀出的收據,Jeff 逐筆確認才入帳 */}
+        <TabsContent value="pending" className="space-y-4 pt-4">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs text-gray-500">{t("admin.accounting.pending.hint")}</p>
+            <Button variant="outline" size="sm" className="rounded-lg" onClick={() => invalidatePending()}>
+              <RefreshCw className="h-3 w-3" />
+            </Button>
+          </div>
+
+          <div className="bg-white border rounded-xl overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b">
+                <tr>
+                  <th className="text-left px-4 py-2 text-gray-600 font-medium">{t("admin.accounting.pending.colVendor")}</th>
+                  <th className="text-right px-4 py-2 text-gray-600 font-medium">{t("admin.accounting.pending.colAmount")}</th>
+                  <th className="text-left px-4 py-2 text-gray-600 font-medium">{t("admin.accounting.pending.colDate")}</th>
+                  <th className="text-left px-4 py-2 text-gray-600 font-medium">{t("admin.accounting.pending.colSource")}</th>
+                  <th className="text-center px-4 py-2 text-gray-600 font-medium">{t("admin.accounting.pending.colReceipt")}</th>
+                  <th className="text-center px-4 py-2 text-gray-600 font-medium">{t("admin.accounting.colActions")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingQuery.data?.rows.map((row) => (
+                  <tr key={row.id} className="border-b hover:bg-gray-50 align-top">
+                    <td className="px-4 py-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-gray-800 font-medium">{row.vendor ?? "—"}</span>
+                        {row.needsReview === 1 && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-amber-100 text-amber-700">
+                            {t("admin.accounting.pending.needsReview")}
+                          </span>
+                        )}
+                      </div>
+                      {row.description && (
+                        <div className="text-xs text-gray-400 max-w-xs truncate" title={row.description}>{row.description}</div>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-right font-semibold text-gray-800">
+                      {row.amount != null && row.currency
+                        ? formatAmount(row.amount, row.currency)
+                        : <span className="text-amber-600">{t("admin.accounting.pending.unreadable")}</span>}
+                    </td>
+                    <td className="px-4 py-2 text-gray-600">{row.receiptDate ? formatDate(row.receiptDate) : "—"}</td>
+                    <td className="px-4 py-2 text-gray-500">
+                      <div className="max-w-[14rem] truncate" title={row.fromAddress ?? ""}>{row.fromAddress ?? "—"}</div>
+                      {row.emailSubject && (
+                        <div className="text-xs text-gray-400 max-w-[14rem] truncate" title={row.emailSubject}>{row.emailSubject}</div>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-center">
+                      {row.attachmentKey ? (
+                        <Button variant="ghost" size="sm" className="h-6 px-2 rounded-md" onClick={() => previewReceipt(row.id)}>
+                          <Eye className="h-3 w-3" />
+                        </Button>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-center">
+                      <div className="flex justify-center gap-1">
+                        <Button size="sm" className="h-7 rounded-md" onClick={() => openConfirmDialog(row)}>
+                          {t("admin.accounting.pending.confirm")}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 rounded-md text-red-500 hover:text-red-700"
+                          onClick={() => {
+                            if (confirm(t("admin.accounting.pending.confirmReject"))) {
+                              rejectPending.mutate({ id: row.id });
+                            }
+                          }}
+                        >
+                          {t("admin.accounting.pending.reject")}
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {pendingQuery.data?.rows.length === 0 && (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">{t("admin.accounting.pending.empty")}</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </TabsContent>
 
         {/* Entries Tab */}
@@ -868,6 +1075,142 @@ export default function AccountingTab() {
             <Button variant="outline" className="rounded-lg" onClick={() => setEntryDialog(false)}>{t("admin.accounting.cancel")}</Button>
             <Button className="rounded-lg" onClick={handleEntrySubmit} disabled={createEntry.isPending || updateEntry.isPending}>
               {createEntry.isPending || updateEntry.isPending ? t("admin.accounting.saving") : t("admin.accounting.save")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 確認支出 Dialog (待確認支出 → 入帳/歸檔) */}
+      <Dialog open={pendingDialog} onOpenChange={setPendingDialog}>
+        <DialogContent className="max-w-md rounded-xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{t("admin.accounting.pending.dialogTitle")}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            {/* handledMode */}
+            <div>
+              <Label className="text-xs">{t("admin.accounting.pending.handledMode")}</Label>
+              <Select value={pendingForm.handledMode} onValueChange={(v) => setPendingForm({ ...pendingForm, handledMode: v as "ledger" | "receipt_only" })}>
+                <SelectTrigger className="rounded-lg"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ledger">{t("admin.accounting.pending.modeLedger")}</SelectItem>
+                  <SelectItem value="receipt_only">{t("admin.accounting.pending.modeReceiptOnly")}</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-gray-400 mt-1">
+                {pendingForm.handledMode === "ledger"
+                  ? t("admin.accounting.pending.modeLedgerHint")
+                  : t("admin.accounting.pending.modeReceiptOnlyHint")}
+              </p>
+            </div>
+
+            {/* account */}
+            <div>
+              <Label className="text-xs">{t("admin.accounting.pending.account")}</Label>
+              <Select value={pendingForm.account} onValueChange={(v) => setPendingForm({ ...pendingForm, account: v as "trust" | "operating" })}>
+                <SelectTrigger className="rounded-lg"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="operating">{t("admin.accounting.pending.accountOperating")}</SelectItem>
+                  <SelectItem value="trust">{t("admin.accounting.pending.accountTrust")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* vendor */}
+            <div>
+              <Label className="text-xs">{t("admin.accounting.pending.vendor")}</Label>
+              <Input className="rounded-lg" value={pendingForm.vendor} onChange={(e) => setPendingForm({ ...pendingForm, vendor: e.target.value })} />
+            </div>
+
+            {/* amount + currency */}
+            <div className="grid grid-cols-3 gap-2">
+              <div className="col-span-2">
+                <Label className="text-xs">{t("admin.accounting.pending.amount")}</Label>
+                <Input type="number" step="0.01" className="rounded-lg" value={pendingForm.amount} onChange={(e) => setPendingForm({ ...pendingForm, amount: e.target.value })} />
+              </div>
+              <div>
+                <Label className="text-xs">{t("admin.accounting.fieldCurrency")}</Label>
+                <Select value={pendingForm.currency} onValueChange={(v) => setPendingForm({ ...pendingForm, currency: v })}>
+                  <SelectTrigger className="rounded-lg"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {CURRENCIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* date */}
+            <div>
+              <Label className="text-xs">{t("admin.accounting.pending.date")}</Label>
+              <Input type="date" className="rounded-lg" value={pendingForm.receiptDate} onChange={(e) => setPendingForm({ ...pendingForm, receiptDate: e.target.value })} />
+            </div>
+
+            {/* description */}
+            <div>
+              <Label className="text-xs">{t("admin.accounting.pending.description")}</Label>
+              <Input className="rounded-lg" value={pendingForm.description} onChange={(e) => setPendingForm({ ...pendingForm, description: e.target.value })} />
+            </div>
+
+            {/* booking picker (算哪一團) */}
+            <div>
+              <Label className="text-xs">{t("admin.accounting.pending.booking")}</Label>
+              {pendingForm.bookingId != null ? (
+                <div className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm">
+                  <span className="text-gray-700 truncate">
+                    #{pendingForm.bookingId}{pendingForm.bookingLabel ? ` · ${pendingForm.bookingLabel}` : ""}
+                  </span>
+                  <Button variant="ghost" size="sm" className="h-6 px-2 rounded-md" onClick={() => setPendingForm({ ...pendingForm, bookingId: null, bookingLabel: "" })}>
+                    {t("admin.accounting.pending.clear")}
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <Input className="rounded-lg" placeholder={t("admin.accounting.pending.bookingSearchPlaceholder")} value={bookingSearch} onChange={(e) => setBookingSearch(e.target.value)} />
+                  {bookingSearch.trim().length >= 2 && (bookingResults.data?.bookings.length ?? 0) > 0 && (
+                    <div className="mt-1 border rounded-lg divide-y max-h-40 overflow-y-auto">
+                      {bookingResults.data!.bookings.map((b) => (
+                        <button
+                          key={b.id}
+                          type="button"
+                          className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50"
+                          onClick={() => setPendingForm({ ...pendingForm, bookingId: b.id, bookingLabel: b.customerName ?? "" })}
+                        >
+                          #{b.id} · {b.customerName ?? "—"}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* ledger-only fields */}
+            {pendingForm.handledMode === "ledger" && (
+              <>
+                <div>
+                  <Label className="text-xs">{t("admin.accounting.pending.entryCategory")}</Label>
+                  <Select value={pendingForm.entryCategory} onValueChange={(v) => setPendingForm({ ...pendingForm, entryCategory: v })}>
+                    <SelectTrigger className="rounded-lg"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {EXPENSE_CATEGORIES.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">{t("admin.accounting.fieldNotes")}</Label>
+                  <Input className="rounded-lg" value={pendingForm.notes} onChange={(e) => setPendingForm({ ...pendingForm, notes: e.target.value })} />
+                </div>
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input type="checkbox" className="rounded" checked={pendingForm.isTaxDeductible} onChange={(e) => setPendingForm({ ...pendingForm, isTaxDeductible: e.target.checked })} />
+                  {t("admin.accounting.taxDeductible")}
+                </label>
+              </>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" className="rounded-lg" onClick={() => setPendingDialog(false)}>{t("admin.accounting.cancel")}</Button>
+            <Button className="rounded-lg" disabled={confirmPending.isPending} onClick={submitConfirm}>
+              {pendingForm.handledMode === "ledger" ? t("admin.accounting.pending.doBook") : t("admin.accounting.pending.doArchive")}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -2097,6 +2097,12 @@ export const accountingEntries = mysqlTable("accountingEntries", {
   tags: varchar("tags", { length: 500 }),
   isTaxDeductible: int("isTaxDeductible").default(0).notNull(),
   taxCategory: varchar("taxCategory", { length: 100 }),
+  // email-receipt-intake (2026-06-15): which bank account this expense came
+  // out of. Trust = #5442 (客人訂金), Operating = #2174 (日常). Nullable —
+  // legacy + Plaid-side entries don't set it; only entries created from a
+  // confirmed pendingExpense (handledMode='ledger') carry it. Trust/Operating
+  // is otherwise tracked on linkedBankAccounts.isTrustAccount (Plaid side).
+  account: mysqlEnum("account", ["trust", "operating"]),
   createdBy: int("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -2155,6 +2161,84 @@ export const recurringExpenses = mysqlTable("recurringExpenses", {
 });
 export type RecurringExpense = typeof recurringExpenses.$inferSelect;
 export type InsertRecurringExpense = typeof recurringExpenses.$inferInsert;
+
+// ── 待確認支出 (email-receipt-intake, 2026-06-15) ──────────────────────
+/**
+ * Staging table for receipts/invoices auto-read from Gmail. The AI ONLY
+ * receives, reads, and queues — it NEVER books. Jeff confirms each row, and
+ * at confirm time decides the amount, which trip (bookingId), Trust vs
+ * Operating, and whether to write a real ledger entry or just archive the
+ * receipt for later Plaid reconciliation. See
+ * docs/features/email-receipt-intake/design.md.
+ *
+ * 鐵則: 讀不清楚 → needsReview=1 + amount NULL ("請人工看"), 留白不猜。
+ * Dedup: gmailMessageId is UNIQUE so re-polling the same email never
+ * creates a duplicate card.
+ */
+export const pendingExpenses = mysqlTable(
+  "pendingExpenses",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    /** Where this came from. Phase 1 = gmail only. */
+    source: mysqlEnum("source", ["gmail", "manual", "upload"]).default("gmail").notNull(),
+
+    // ── provenance (for dedup + jump-back to the source email) ──
+    gmailMessageId: varchar("gmailMessageId", { length: 128 }),
+    gmailThreadId: varchar("gmailThreadId", { length: 128 }),
+    integrationId: int("integrationId"),
+    fromAddress: varchar("fromAddress", { length: 320 }),
+    emailSubject: varchar("emailSubject", { length: 500 }),
+
+    // ── AI-extracted fields (any may be NULL if unreadable → needsReview) ──
+    vendor: varchar("vendor", { length: 255 }),
+    amount: decimal("amount", { precision: 12, scale: 2 }),
+    currency: varchar("currency", { length: 3 }),
+    receiptDate: timestamp("receiptDate"),
+    /** Line items / what was bought. Plain text. */
+    description: text("description"),
+    /** 0-100 — AI's confidence it read the receipt correctly. */
+    extractionConfidence: int("extractionConfidence").default(0).notNull(),
+    /** 1 = AI couldn't read it cleanly → show "請人工看", do not trust fields. */
+    needsReview: int("needsReview").default(0).notNull(),
+    /** Full raw LLM JSON for audit (never shown to customer). */
+    extractionRaw: text("extractionRaw"),
+
+    // ── receipt attachment in R2 (key, not URL — view via short-TTL signed URL) ──
+    attachmentKey: varchar("attachmentKey", { length: 1024 }),
+    attachmentFilename: varchar("attachmentFilename", { length: 512 }),
+    attachmentMimeType: varchar("attachmentMimeType", { length: 128 }),
+
+    // ── status + Jeff's confirm-time decisions ──
+    status: mysqlEnum("status", ["pending", "confirmed", "rejected"]).default("pending").notNull(),
+    /**
+     * Set at confirm. 'ledger' = wrote a real accountingEntries row;
+     * 'receipt_only' = just archived (this expense will/did arrive via Plaid,
+     * so booking it here would double-count).
+     */
+    handledMode: mysqlEnum("handledMode", ["ledger", "receipt_only"]),
+    /** Trust (#5442) vs Operating (#2174). Set at confirm. */
+    account: mysqlEnum("account", ["trust", "operating"]),
+    /** accountingEntries.category chosen at confirm (when handledMode='ledger'). */
+    entryCategory: varchar("entryCategory", { length: 50 }),
+    /** Which trip (bookings.id). Set at confirm. */
+    bookingId: int("bookingId"),
+    /** FK to the accountingEntries row created on confirm (handledMode='ledger'). */
+    accountingEntryId: int("accountingEntryId"),
+    rejectReason: varchar("rejectReason", { length: 500 }),
+
+    createdBy: int("createdBy"), // null = system/AI
+    confirmedBy: int("confirmedBy"),
+    confirmedAt: timestamp("confirmedAt"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => ({
+    gmailMsgIdx: unique("uniq_pending_gmail_msg").on(table.gmailMessageId),
+    statusIdx: index("idx_pending_status").on(table.status, table.createdAt),
+  }),
+);
+export type PendingExpense = typeof pendingExpenses.$inferSelect;
+export type InsertPendingExpense = typeof pendingExpenses.$inferInsert;
 
 // ── 供應商監控日誌 ──────────────────────────────────────────────────
 // Stores results of daily supplier monitoring runs (price changes, seat availability, etc.)
