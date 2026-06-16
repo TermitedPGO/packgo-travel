@@ -13,10 +13,11 @@ import { describe, it, expect } from "vitest";
 import { accountingRouter } from "./accounting";
 
 describe("accountingRouter (Phase 4D extraction)", () => {
-  it("exposes all 11 procedures from the pre-split source", () => {
+  it("exposes the 11 base procedures + 5 pendingExpenses (email-receipt-intake)", () => {
     const procs = Object.keys((accountingRouter as any)._def.procedures);
     expect(procs.sort()).toEqual(
       [
+        // Phase 4D base set (server/routers.ts L4643-4781)
         "list",
         "stats",
         "create",
@@ -28,6 +29,12 @@ describe("accountingRouter (Phase 4D extraction)", () => {
         "profitAndLoss",
         "monthlyTrend",
         "taxSummary",
+        // email-receipt-intake (2026-06-15): 待確認支出 sub-router
+        "pendingExpenses.list",
+        "pendingExpenses.count",
+        "pendingExpenses.attachmentUrl",
+        "pendingExpenses.confirm",
+        "pendingExpenses.reject",
       ].sort(),
     );
   });
