@@ -1,5 +1,5 @@
 -- batch 6 m3: pre-departure notifications (LLM-drafted, admin-reviewed, per-customer)
-CREATE TABLE `preDepartureNotifications` (
+CREATE TABLE IF NOT EXISTS `preDepartureNotifications` (
   `id` int AUTO_INCREMENT PRIMARY KEY,
   `departureId` int NOT NULL,
   `bookingId` int NOT NULL,

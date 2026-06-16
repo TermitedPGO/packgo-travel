@@ -640,6 +640,13 @@
       "breakpoints": true
     },
     {
+      "idx": 94,
+      "version": "5",
+      "when": 1781475000000,
+      "tag": "0094_pre_departure_notifications",
+      "breakpoints": true
+    },
+    {
       "idx": 95,
       "version": "5",
       "when": 1781480000000,
