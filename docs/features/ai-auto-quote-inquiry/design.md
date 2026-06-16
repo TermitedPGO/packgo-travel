@@ -68,6 +68,30 @@
 - 自動定價(永遠人決定)。
 - 把整套團型窮舉成 code 分支(靠脊椎 + AI adapt)。
 
+## Slice 1 — 已完成(2026-06-16,commit ed87e0a)
+
+InquiryAgent 加 `extractedRequirements`(結構化要素 + missing),escalation 卡 body 顯示「我理解的需求 / 還缺」。tsc 0 錯、23 測試綠。prod demoInquiry 實測 Jenny 兩輪:分類 custom_group 正確、草稿問對缺項、英文導遊只說「跟供應商確認」不報數字(紅線守住)。Slice 1 本身尚未 ship(等 Slice 2 一起或單獨)。
+
+## Slice 2 build plan(2026-06-16 調查完,給新 session 用)
+
+**結論:一般團(join_scheduled)的 auto-PDF 已存在(`tourComparison.ts`,isPorted:true),不用做。重點全在客製(custom_group)。客製紅線:AI 不發明行程、不報價;行程內容來自供應商/Jeff,售價 Jeff 填。**
+
+現成零件(都在 server,prod 可跑):
+- `server/services/skills/skillPdfService.ts` — `renderHtmlToPdf(html)`(puppeteer + 系統 Chromium + fonts-noto-cjk,prod 已用於 deposit/tourComparison)。`escapeHtml` / `fmtNum` / `LOGO_NAVY_B64` / `LOGO_WHITE_B64`(logoConstants 只有 navy+white,**沒有 black**)。
+- `server/services/skills/quoteTemplate.ts` — `renderQuoteHtml(QuoteInput)`,目前是**舊深藍金色兩頁版**(違反黑白品牌)+ `totalUSD`/`perPersonUSD` **必填**(撞「AI 不報價」)。caller:`server/routers/toolsRouter.ts:74`(admin 手動工具,不是 dormant)。
+- `server/agents/skills/dispatcher.ts` — `dispatchAndPersistFromInquiry`:registry 查到 ported skill → 跑 orchestrator → 拿 pdf buffer → `storagePut(skill-runs/…/<skillId>.pdf)` → 發 proposal 卡(notifyAgentMessage,帶 pdfStoragePath)。
+- `server/agents/skills/registry.ts:117` — `quote_request → packgo-quote`,目前 `isPorted: false`(PLACEHOLDER,被 skip)。`tourComparisonOrchestrator` 是 ported 範例。
+
+要做的(客製 quote PDF):
+1. **quoteTemplate 改黑白 + 價格可留白**:navy/gold/blue/green/red → 品牌灰階(INK #1A1A1A、#555、#888、LINE #D2D2D2、LIGHT_BG #F2F2F2);green✓/red✗ → 黑 ✓ / ※;`totalUSD`/`perPersonUSD` 改 optional,null → 渲染「待確認(報價另附)」。footer 沒黑 logo:用黑底白字 strip + LOGO_WHITE,或純文字 wordmark。
+2. **升級成高檔每日專頁版**(Jeff 要的「完整高檔版」):比照 packgo-quote skill 的 template.html(黑底標題帶 + 滿版景點照 + 每日上午/下午/傍晚 + 資訊框 + 報價頁)。景點照可選(B/W 文件 + 彩色滿版照例外);MVP 可先不自動抓照。
+3. **port packgo-quote orchestrator**:比照 `tourComparisonOrchestrator`,吃結構化行程 → `renderQuoteHtml` → `renderHtmlToPdf`。registry 那條改 `isPorted: true`。
+4. **cost_leak_check gate**:出 PDF 前比對供應商 invoice 成本數字,命中就停(見 [[feedback_no_cost_on_customer_docs]])。
+5. **wiring**:客製不是 inquiry 進來就自動出(行程要供應商給)。是 Jeff 在卡上「用這份行程出報價」觸發 → orchestrator → proposal 卡(PDF 價格留白)→ Jeff 填價 + 送。
+6. **tests + tsc 0 錯 + 全測試綠 → pnpm ship**。
+
+**還沒拿到的決定(開工前要 Jeff 回):客製的供應商行程怎麼進系統?(a) 貼文字 (b) 上傳 PDF/檔 (c) 後台建草稿團。這決定第 5 點怎麼接。**
+
 ## Rollout
 
 每刀:proposal/design 對齊 → 拆 task → 寫 + 對應 vitest → tsc 0 錯 + 測試綠 → `pnpm ship`(Jeff token)。第一刀先跑通客製這條當樣板。
