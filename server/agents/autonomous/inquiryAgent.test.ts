@@ -57,6 +57,7 @@ function stubLLMResponse(
     draftReply: string;
     draftLanguage: string;
     extractedCustomer: Record<string, unknown>;
+    extractedRequirements: Record<string, unknown>;
     confidence: number;
     reasoning: string;
   }> = {},
@@ -67,6 +68,8 @@ function stubLLMResponse(
     urgency: overrides.urgency ?? "normal",
     sentiment: overrides.sentiment ?? "neutral",
     tripType: overrides.tripType ?? "unclear",
+    // undefined → JSON.stringify drops it → exercises the coerce default path
+    extractedRequirements: overrides.extractedRequirements,
     draftReply:
       overrides.draftReply ??
       "您好,謝謝您的來信。我們收到後會在 24 小時內回覆您具體細節。PACK&GO Travel · Jeff & 團隊",
@@ -350,6 +353,57 @@ describe("runInquiryAgent — tripType classification (custom vs join vs free)",
     invokeLLMSpy.mockResolvedValueOnce(stubLLMResponse("complaint"));
     const out = await runInquiryAgent({ rawMessage: "我要投訴", channel: "email" });
     expect(out.tripType).toBe("unclear");
+  });
+});
+
+describe("runInquiryAgent — extractedRequirements (Slice 1)", () => {
+  beforeEach(() => invokeLLMSpy.mockReset());
+
+  it("carries structured requirements + missing through to the output", async () => {
+    invokeLLMSpy.mockResolvedValueOnce(
+      stubLLMResponse("quote_request", {
+        tripType: "custom_group",
+        extractedRequirements: {
+          applicable: true,
+          destination: "台灣",
+          days: "13天12夜",
+          partySize: "10 人 / 5 房",
+          roomType: "兩人一房",
+          includesFlights: "不含國際機票",
+          missing: ["出發日期"],
+        },
+      }),
+    );
+    const out = await runInquiryAgent({
+      rawMessage: "幫我這 10 人設計台灣 13 天環島,兩人一房,不含機票",
+      channel: "email",
+    });
+    expect(out.extractedRequirements.applicable).toBe(true);
+    expect(out.extractedRequirements.destination).toBe("台灣");
+    expect(out.extractedRequirements.partySize).toBe("10 人 / 5 房");
+    expect(out.extractedRequirements.missing).toEqual(["出發日期"]);
+    // fields the customer never gave stay null (搬運不生成: never fabricated)
+    expect(out.extractedRequirements.budget).toBeNull();
+  });
+
+  it("coerces empty/whitespace strings to null and defaults missing to []", async () => {
+    invokeLLMSpy.mockResolvedValueOnce(
+      stubLLMResponse("quote_request", {
+        tripType: "custom_group",
+        extractedRequirements: { applicable: true, destination: "  ", days: "" },
+      }),
+    );
+    const out = await runInquiryAgent({ rawMessage: "想做個團", channel: "email" });
+    expect(out.extractedRequirements.destination).toBeNull();
+    expect(out.extractedRequirements.days).toBeNull();
+    expect(out.extractedRequirements.missing).toEqual([]);
+  });
+
+  it("defaults to not-applicable when the model omits the block", async () => {
+    invokeLLMSpy.mockResolvedValueOnce(stubLLMResponse("complaint"));
+    const out = await runInquiryAgent({ rawMessage: "我要投訴", channel: "email" });
+    expect(out.extractedRequirements.applicable).toBe(false);
+    expect(out.extractedRequirements.missing).toEqual([]);
   });
 });
 

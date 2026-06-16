@@ -65,6 +65,26 @@ export type TripType =
   | "free_independent"
   | "unclear";
 
+/**
+ * 2026-06-16 ai-auto-quote-inquiry Slice 1 — 結構化行程要素抽取。
+ * 讓 escalation 卡顯示「我理解你要 X、還缺 Y」,並讓草稿依「缺什麼」對症下藥。
+ * applicable=false 表與行程報價無關(tripType=unclear)。欄位一律自由文字
+ * (容得下「13天12夜」「2 大 1 小」),客人沒給就 null,不要編。
+ */
+export type TripRequirements = {
+  applicable: boolean;
+  destination: string | null;
+  days: string | null;
+  partySize: string | null;
+  roomType: string | null;
+  dates: string | null;
+  includesFlights: string | null;
+  budget: string | null;
+  specialNeeds: string | null;
+  /** 要出這條報價但客人還沒給的要素(客人語言)。 */
+  missing: string[];
+};
+
 export type InquiryAgentInput = {
   rawMessage: string;
   channel: "email" | "web_form" | "whatsapp" | "wechat" | "line" | "sms";
@@ -144,6 +164,9 @@ export type InquiryAgentOutput = {
 
   /** 行程型態(私人包團 / 參團 / 自由行客製 / 看不出)。 */
   tripType: TripType;
+
+  /** 結構化行程要素 + 還缺什麼(報價類信件才 applicable)。 */
+  extractedRequirements: TripRequirements;
 
   shouldAutoReply: boolean;
   shouldEscalate: boolean;
@@ -271,6 +294,23 @@ const STRUCTURED_TOOL: Tool = {
           description:
             "行程型態(只在跟旅遊行程有關的信才有意義,否則 unclear):custom_group=私人包團/訂製(封閉一團人、自帶行程草稿、要我們設計地接核價,如『為我這 10 人設計台灣團』);join_scheduled=參團(報名加入某個固定出團日的現成團,如『8 月有什麼日本團可以參加』);free_independent=自由行客製(個人/家庭自助行程規劃,不跟團);unclear=看不出來或與行程無關。",
         },
+        extractedRequirements: {
+          type: "object",
+          description:
+            "行程要素抽取(只在 tripType≠unclear 時有意義)。把客人已給的要素填進對應欄,沒給就留空、不要編;missing 列出『要出這條報價但客人還沒給』的要素。tripType=unclear 時 applicable=false、missing=[]。",
+          properties: {
+            applicable: { type: "boolean" },
+            destination: { type: "string" },
+            days: { type: "string" },
+            partySize: { type: "string" },
+            roomType: { type: "string" },
+            dates: { type: "string" },
+            includesFlights: { type: "string" },
+            budget: { type: "string" },
+            specialNeeds: { type: "string" },
+            missing: { type: "array", items: { type: "string" } },
+          },
+        },
         draftReply: {
           type: "string",
           description:
@@ -304,6 +344,7 @@ const STRUCTURED_TOOL: Tool = {
         "urgency",
         "sentiment",
         "tripType",
+        "extractedRequirements",
         "draftReply",
         "draftLanguage",
         "extractedCustomer",
@@ -366,6 +407,7 @@ ${policyRules}
   · free_independent(自由行客製):個人或家庭自助、不跟團,要行程規劃建議。
   · unclear:看不出來,或與旅遊行程無關(投訴、訂金查詢、簽證、spam 等)。
   這個判斷決定報價走哪條流程,務必依訊號分,不要全部丟 unclear。
+- extractedRequirements:行程要素抽取(tripType≠unclear 才填,否則 applicable=false、missing=[])。把客人已給的填進去:目的地、天數(自由文字如「13天12夜」)、人數/房數、房型、出發日期、含不含國際機票、預算、特殊需求;沒給的留空不要編。missing 列出「要出這條報價但客人還沒講清楚」的要素(用客人語言,例:出發日期、房型、預算)。這是給 Jeff 一眼看懂客人要什麼、還缺什麼,也決定你草稿要問什麼。
 - draftReply:回覆草稿。要讓客人感覺被認真聽到,但寫法照 Jeff 的真人語氣(見下方【Jeff 的客人語氣】)。必須包含:(a) 認可客人需求 (b) 具體下一步 (c) 真實的時程承諾。對中文客戶用繁體中文(除非客人明顯用簡體則用簡體),對英文客戶用英文。
 - draftLanguage:回覆語言
 - extractedCustomer:從來信抽取的寄件人 email/姓名/電話(只填明確可見的,不要編造)
@@ -379,6 +421,11 @@ ${policyRules}
 - 不要用機器人式的「歡迎您的來信」開場,要像真人寫的。
 - 簽名一律用 policy.signature 那一行。
 - **絕對不可說「我會研讀您的附件」「我已詳閱您附上的資料」之類空話**,除非附件實際出現在 <CUSTOMER_ATTACHMENT_N> 且有內容。要引用就引用實際內容。
+
+【報價類信件的草稿方向 — 依 tripType + 還缺什麼對症下藥】
+- custom_group(私人包團):extractedRequirements.missing 還有要素時,草稿就具體問那幾項(例:出發日期、房型、預算),不要泛泛問「需要什麼協助」。要素齊全時,草稿認可需求、說我們會準備行程與報價,實際價格我們確認後回覆。
+- join_scheduled(參團):草稿往「我們幫您看對應的出團」方向,問清楚出發月份或日期、人數、房型以便對團。
+- 兩種都一樣:絕不報任何金額,價格永遠是我們確認後才回(鐵律不變)。
 
 【附件處理規則 — 鐵律:我們什麼檔都讀,絕不把問題推給客人】
 - 系統會自動讀所有附件:圖片(含 iPhone HEIC)走視覺、PDF(含掃描/拍照轉的)Claude 直接讀、Excel/Word/CSV 抽文字。內容放進 <CUSTOMER_ATTACHMENT_N>,當客戶意圖讀、具體引用。
@@ -406,6 +453,42 @@ ${policyRules}
 - 同一封一致用「您」,不混「你」。
 - 段落間一個空行;數字+量詞半形加空格(「4 人」「3 晚」)。
 - 結尾簽名前留一行空行,簽名用 policy.signature。`;
+}
+
+/** 把 LLM 回的 extractedRequirements 正規化:空字串→null、缺漏給安全預設。 */
+function coerceRequirements(raw: any): TripRequirements {
+  const s = (v: any): string | null =>
+    typeof v === "string" && v.trim() ? v.trim() : null;
+  if (!raw || typeof raw !== "object") {
+    return {
+      applicable: false,
+      destination: null,
+      days: null,
+      partySize: null,
+      roomType: null,
+      dates: null,
+      includesFlights: null,
+      budget: null,
+      specialNeeds: null,
+      missing: [],
+    };
+  }
+  return {
+    applicable: !!raw.applicable,
+    destination: s(raw.destination),
+    days: s(raw.days),
+    partySize: s(raw.partySize),
+    roomType: s(raw.roomType),
+    dates: s(raw.dates),
+    includesFlights: s(raw.includesFlights),
+    budget: s(raw.budget),
+    specialNeeds: s(raw.specialNeeds),
+    missing: Array.isArray(raw.missing)
+      ? raw.missing
+          .filter((x: any) => typeof x === "string" && x.trim())
+          .map((x: string) => x.trim())
+      : [],
+  };
 }
 
 export async function runInquiryAgent(
@@ -538,6 +621,7 @@ export async function runInquiryAgent(
     urgency: parsed.urgency,
     sentiment: parsed.sentiment,
     tripType: parsed.tripType ?? "unclear",
+    extractedRequirements: coerceRequirements(parsed.extractedRequirements),
     shouldAutoReply,
     shouldEscalate,
     escalationReason,

@@ -751,14 +751,36 @@ async function processOneEmail(
   // If escalation, post to chatbox so Jeff sees it
   if (decision.shouldEscalate) {
     result.totalEscalated++;
+    // ai-auto-quote-inquiry Slice 1 — surface the structured understanding
+    // ("我理解你要 X、還缺 Y") on the card so Jeff sees the AI grasped the
+    // request, not just a one-line intent. Empty when not a trip inquiry.
+    const req = decision.extractedRequirements;
+    const reqLine =
+      req && req.applicable
+        ? "\n\n我理解的需求:" +
+          ([
+            req.destination,
+            req.days,
+            req.partySize,
+            req.roomType,
+            req.dates,
+            req.includesFlights,
+            req.budget,
+            req.specialNeeds,
+          ]
+            .filter((x): x is string => !!x)
+            .join(" · ") || "(看不出具體要素)") +
+          (req.missing.length > 0 ? `\n還缺:${req.missing.join("、")}` : "")
+        : "";
     await db.insert(agentMessages).values({
       agentName: "inquiry",
       messageType: "escalation",
       title: `${inquiryClassificationLabelZh(decision.classification)} · ${senderEmail ?? "未知寄件人"} · "${msg.subject.slice(0, 60)}"${attachmentsForAgent.length > 0 ? ` 📎×${attachmentsForAgent.length}` : ""}`,
-      body: `${decision.escalationReason ?? "這封我不確定怎麼處理,先給你看。"}\n\n客人想問:${decision.intent}${attachmentLine}\n\n---\n建議回覆(還沒送出,給你過目):\n${decision.draftReply}`,
+      body: `${decision.escalationReason ?? "這封我不確定怎麼處理,先給你看。"}\n\n客人想問:${decision.intent}${reqLine}${attachmentLine}\n\n---\n建議回覆(還沒送出,給你過目):\n${decision.draftReply}`,
       context: JSON.stringify({
         classification: decision.classification,
         tripType: decision.tripType,
+        extractedRequirements: decision.extractedRequirements,
         urgency: decision.urgency,
         sentiment: decision.sentiment,
         confidence: decision.confidence,
