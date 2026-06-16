@@ -41,7 +41,13 @@ function createRedisClient(opts: {
     retryStrategy: RETRY_STRATEGY,
     reconnectOnError: RECONNECT_ON_ERROR,
     connectTimeout: 15000,        // 15s connection timeout
-    lazyConnect: false,
+    // Defer the socket until the first command instead of opening it at import.
+    // Prod connects on first use at startup (negligible delay). Critically, a
+    // test process that merely IMPORTS a module touching redis now opens ZERO
+    // sockets — so an interrupted/killed test run can't orphan connections that
+    // then poison the next run (root cause of the 2026-06-15 ~80-min suite run;
+    // steady-state is ~90s). See docs/features note + redis.test.ts.
+    lazyConnect: true,
   };
 
   // Only set commandTimeout if explicitly provided (undefined = no timeout)
@@ -79,7 +85,7 @@ function createRedisClient(opts: {
   return client;
 }
 
-console.log("🔗 Connecting to " + (upstashUrl ? "Upstash" : "local") + " Redis...");
+console.log("🔗 Redis clients created (" + (upstashUrl ? "Upstash" : "local") + ", lazyConnect — socket opens on first command)");
 
 /**
  * General-purpose Redis client
