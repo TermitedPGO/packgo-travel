@@ -9,12 +9,16 @@
  */
 import { useMemo } from "react";
 import { trpc } from "@/lib/trpc";
-import { Calendar, Users } from "lucide-react";
+import { Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
 import { useLocale } from "@/contexts/LocaleContext";
 import { format } from "date-fns";
 import { zhTW, enUS } from "date-fns/locale";
+import {
+  deriveAvailabilityBucket,
+  type AvailabilityBucket,
+} from "@/pages/TourDetailPeony/actionArea.helpers";
 
 interface Props {
   tourId: number;
@@ -143,7 +147,6 @@ export default function TourDeparturesTable({
                   // from the tour entity, which uses different naming).
                   const totalSlots = Number((dep as any).totalSlots ?? (dep as any).maxParticipants ?? 0);
                   const bookedSlots = Number((dep as any).bookedSlots ?? (dep as any).currentParticipants ?? 0);
-                  const seatsLeft = totalSlots > 0 ? totalSlots - bookedSlots : null;
                   const isConfirmed = dep.status === "confirmed";
 
                   return (
@@ -179,26 +182,22 @@ export default function TourDeparturesTable({
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        {totalSlots > 0 ? (
-                          <div className="text-sm">
-                            <div className="font-semibold text-foreground">
-                              {bookedSlots} / {totalSlots}
-                            </div>
-                            {seatsLeft !== null && seatsLeft > 0 && seatsLeft <= 3 && !isFull && (
-                              <div className="mt-0.5 text-xs text-amber-600 flex items-center gap-1">
-                                <Users className="h-3 w-3" />
-                                {t("tourDeparturesTable.seatsLeft", { n: seatsLeft, s: seatsLeft > 1 ? "s" : "" })}
-                              </div>
-                            )}
-                            {seatsLeft !== null && seatsLeft > 3 && !isFull && (
-                              <div className="mt-0.5 text-xs text-foreground/55">
-                                {t("tourDeparturesTable.seatsAvailable", { n: seatsLeft })}
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-foreground/30 text-xs">—</span>
-                        )}
+                        {/* Red line #2: bucket only, never an exact seat count. */}
+                        {(() => {
+                          const bucket = deriveAvailabilityBucket({
+                            status: dep.status,
+                            totalSlots,
+                            bookedSlots,
+                          });
+                          if (bucket === "unknown") return <span className="text-foreground/30 text-xs">—</span>;
+                          const cfg: Record<Exclude<AvailabilityBucket, "unknown">, { label: string; cls: string }> = {
+                            available: { label: t("tours.availAvailable"), cls: "text-gray-700" },
+                            limited: { label: t("tours.availLimited"), cls: "text-[#8a6f3a] font-semibold" },
+                            soldout: { label: t("tours.availSoldout"), cls: "text-gray-400 line-through decoration-1" },
+                          };
+                          const c = cfg[bucket];
+                          return <span className={`text-sm font-medium ${c.cls}`}>{c.label}</span>;
+                        })()}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="text-sm font-bold text-gray-900">

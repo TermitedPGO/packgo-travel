@@ -120,21 +120,55 @@ commit
 
 > 對線上客人目錄的實際大寫入(換 UV 批)會在程式 + 測試就緒、真要跑的那一刻先跟 Jeff 講一聲(快照可退),不悶著做。
 
-## 11. 進度(2026-06-16)
+## 11. 進度
 
-已完成(committed,tsc + 測試綠):
-- `completeness.ts` + test(上架門檻,15 測試)。commit 36a80a0。
-- `guard.ts` + test(retail-only 紅線回歸鎖,10 測試)。commit 36a80a0。
-- migration `0097_catalog_rebuild.sql` + journal entry + schema.ts(`catalogBatches`、
-  `toursCatalogArchive`、`tours.batchId/lastBatchAt`)。**hand-written 慣例**(idempotent
-  INFORMATION_SCHEMA guards;drizzle-kit generate 在本 repo 不用、會卡互動 prompt)。
+### 地基(committed 之前 session,36a80a0 + f182ee7)
+- `completeness.ts` + test(上架門檻,15 測試)。
+- `guard.ts` + test(retail-only 紅線回歸鎖,10 測試)。
+- migration `0097_catalog_rebuild.sql` + schema.ts(`catalogBatches`、`toursCatalogArchive`、
+  `tours.batchId/lastBatchAt`)。hand-written(idempotent INFORMATION_SCHEMA guards)。
 
-剩(handoff,接著做):
-- `promote.ts`:transactional promote(§5)+ `revertBatch`(用 `replacedBatchId` 翻回 live)。
-  + test(mock DrizzleTx:快照→更新→active 原子性、retire 舊團、revert 還原)。
-- `index.ts` orchestrator:`rebuildCatalog('uv')` = 跑 `syncUvCatalog` + `uvDetail` 補完整
-  → hydrate(`hydration.hydrateTourFromParsed`)成 staging → `assessTourCompleteness` 篩
-  → `promoteBatch`。每團 hydrate 出口過 `assertRetailOnly`。
-- 客人 departure 端點回歸測試(`departures.*` 用 tourDepartures;`toursRead.*` 只回 tours 欄)。
-- **實際跑 UV**(對線上大寫入,快照可退)→ 跑前知會 Jeff。
-- tsc 0 錯 + 全測試綠 → Jeff `pnpm ship`。
+### 本 session(2026-06-16,程式 + 測試綠 + tsc 0 錯)
+- `promote.ts` + `promote.test.ts`(12 測試):`promoteBatch`(快照舊列 → 就地更新 + active
+  + batchId + lastBatchAt → 退役供應商下架團 → 翻批狀態)+ `revertBatch`(快照寫回 +
+  翻回上一批 live)。mock tx 驗「快照一定先於覆蓋」的原子順序、retail-only DB 邊界、
+  壞快照跳過、`buildRestorePayload` 只還原重抓管的欄(coerce lastBatchAt、丟 id)。
+- `staging.ts` + `staging.test.ts`(6 測試):`buildStagedTour`(供應商無關純核心)=
+  hydrate(`hydrateTourFromParsed`)+ 組對客 fields + `assessTourCompleteness` +
+  `assertRetailOnly`。`costExplanation`(費用說明)是對客欄、不算成本外洩(測試驗證)。
+- `index.ts` + `index.test.ts`(3 測試):`rebuildCatalog(scope, {dryRun,limit,skipSync})`
+  總指揮 = sync(`syncUvCatalog`)→ enrich 補完整(`enrichUvProduct` + `upsertProductDetail`,
+  並發 5)→ 逐產品 staging → 分流完整/不完整 → 開 batch → `db.transaction(promoteBatch)`
+  → 刷新班期。`computeRetiredTourIds` 純函式可測 + import 煙霧測。
+- `retailOnlyEndpoints.regression.test.ts`(5 測試):schema 層(tours/tourDepartures 無成本欄
+  + 正控 supplierDepartures 被抓出)+ source 層(departures.ts/toursRead.ts 不讀鏡像表)。
+- `suppliersRouter`:`rebuildCatalog`(adminProcedure,**dryRun 預設 true**;全量真換批要
+  confirm=true 二次確認 + audit)+ `revertCatalogBatch`(txn + audit)。
+
+### 本 session 的關鍵決定(向 Jeff 報備)
+- **tourDepartures 刷新**:promote 之後 best-effort 跑(清未來班期 → 寫鏡像重建的),
+  **不**進回滾快照。理由:回滾保的是 tours 內容(SEO/FK/品質關鍵);班期是供應商機械
+  資料、可重跑鏡像重建,且即時餘位是 chunk 2 的事。
+- **全新產品**:先建 draft tours 列拿 id → 走 promote 同一條快照路徑(回滾把它退回 draft、隱形)。
+- **Lion 暫 gated**:Lion 的 tours 對映用三個不同 ID(externalProductCode=GroupCode、
+  tours.productCode=tourId、sourceUrl=NormGroupID),對不上「就地更新」。先把 UV 跑通驗證,
+  Lion 等解 NormGroupID 橋接(`loadExistingSupplierTours` 目前對非 uv scope throw)。
+- **revert 從簡**:不把當前值再快照成新批(plan §3 step5 的 redo 能力)。要重做 → 重跑
+  `rebuildCatalog`(供應商鏡像還在)。換來 revert 原子 + 簡單 + 好測。
+
+### 執行環境(2026-06-16 發現)
+- **本地 checkout 無 DB**:沒有 `.env` / `DATABASE_URL`(只有 `.env.example`),`getDb()` 回 null。
+  所以「dry-run 預覽 / 小批 / 全量換批」都得在有 DB 的地方跑(prod / Fly),不是這個本地 checkout。
+- 本機記憶體也吃緊(~240MB free),重型 orchestrator transform(經 queue/bullmq 圖)在本機不穩;
+  輕量純 SQL 診斷 OK。→ 結論:重抓執行是 prod-env 操作(經 `rebuildCatalog` mutation dry-run 起步),
+  不在本地跑。
+- 預覽改法:先用一段 read-only SQL(active UV 產品 / 對到既有 tour 的數 = 對映率 / 鏡像 itinerary
+  覆蓋 / 有未來價的班期)直接查 DB,確認對映率與完整度後再談真換批。
+
+### 剩(待辦)
+- **小批驗 promote+rollback**:`rebuildCatalog('uv', {limit: 1~3})` 真跑一小批 → 確認上架 +
+  `revertCatalogBatch(batchId)` 真退得回 → 再全量。(需 Jeff 在場/點頭,動到線上 DB。)
+- **實際全量跑 UV**(~1,144,對線上大寫入,快照可退)→ **跑前停下來知會 Jeff**(本 session
+  不自己悶著跑)。
+- Lion NormGroupID 橋接(UV 驗完再做)。
+- 全測試綠覆核 → Jeff `pnpm ship`(§4.3,我不自部署)。

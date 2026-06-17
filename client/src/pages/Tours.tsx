@@ -3,8 +3,6 @@ import { Link, useSearch, useLocation } from "wouter";
 import SEO from "@/components/SEO";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -16,13 +14,10 @@ import {
 import {
   Search,
   MapPin,
-  Calendar,
-  Loader2,
   ArrowLeft,
   ArrowRight,
   ChevronLeft,
   ChevronRight,
-  Clock,
   Users,
   Compass,
   Package,
@@ -31,10 +26,6 @@ import {
   Globe,
   SlidersHorizontal,
   X,
-  Star,
-  Plane,
-  Hotel,
-  Utensils,
 } from "lucide-react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -43,7 +34,9 @@ import { toast } from "sonner";
 import { useLocale } from "@/contexts/LocaleContext";
 import { useDebounce } from "@/hooks/useDebounce";
 import { translateDestination } from "@/utils/locationMapping";
-import { formatDualPrice } from "@/pages/TourDetailPeony/helpers";
+import { TourCard } from "@/components/site/TourCard";
+import type { TourCardData, LeanDeparture } from "@/components/site/types";
+import { toTourCardData } from "@/components/site/tourCardData";
 
 // Round 80.4: Custom (客製) removed from category chips — it doesn't fit the
 // "browse pre-made tours" model (you can't filter for custom tours; they're
@@ -107,333 +100,6 @@ function CompareToggle({ tourId }: { tourId: number }) {
     >
       {inCompare ? <X className="h-4 w-4" /> : <SlidersHorizontal className="h-4 w-4" />}
     </button>
-  );
-}
-
-function TourCard({
-  tour,
-  language,
-  t,
-  formatPrice,
-}: {
-  tour: any;
-  language: string;
-  t: (key: string, params?: Record<string, string | number>) => string;
-  formatPrice: (price: number, originalCurrency?: "TWD" | "USD") => string;
-}) {
-  const shouldLoadTranslation = language !== "zh-TW";
-  const { data: translations } = trpc.translation.getTourTranslations.useQuery(
-    { tourId: tour.id, targetLanguage: language as 'zh-TW' | 'en' },
-    { enabled: shouldLoadTranslation, staleTime: 1000 * 60 * 5 }
-  );
-  const displayTitle = useMemo(() => {
-    if (language === "zh-TW") return tour.title;
-    return translations?.title || tour.title;
-  }, [language, translations, tour.title]);
-
-  // v78p: Same fallback chain for the subtitle / description preview text shown
-  // under the tour title — was leaking ZH on EN site because we read tour.heroSubtitle
-  // directly without the translation lookup.
-  const displaySubtitle = useMemo(() => {
-    if (language === "zh-TW") return tour.heroSubtitle || tour.description;
-    return translations?.heroSubtitle || translations?.description || tour.heroSubtitle || tour.description;
-  }, [language, translations, tour.heroSubtitle, tour.description]);
-
-  // v78s: Fetch top-3 upcoming departures (Lion Travel chip pattern)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: upcomingDepartures } = (trpc.departures as any).getUpcoming.useQuery(
-    { tourId: tour.id, limit: 3 },
-    { staleTime: 1000 * 60 * 5 }
-  );
-
-  // Round 80.2: parse highlights / tags JSON from tour record so the card
-  // shows real itinerary content (was previously plain text-only).
-  const highlightChips = useMemo(() => {
-    const out: string[] = [];
-    const tryParse = (raw: unknown): string[] => {
-      if (!raw) return [];
-      if (Array.isArray(raw)) return raw.filter((s) => typeof s === "string");
-      if (typeof raw === "string") {
-        try {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) return parsed.filter((s) => typeof s === "string");
-        } catch {
-          // bare comma-separated fallback
-          return raw.split(/[,，、；;]/g).map((s) => s.trim()).filter(Boolean);
-        }
-      }
-      return [];
-    };
-    out.push(...tryParse(tour.highlights));
-    if (out.length === 0) out.push(...tryParse(tour.tags));
-    // Trim each chip to keep card tidy & dedupe
-    return Array.from(new Set(out)).slice(0, 3).map((s) =>
-      s.length > 14 ? `${s.slice(0, 13)}…` : s
-    );
-  }, [tour.highlights, tour.tags]);
-
-  // Determine included items from tour data
-  const includedTags = useMemo(() => {
-    const tags: { icon: typeof Plane; labelKey: string }[] = [];
-    const inc = tour.included || "";
-    if (inc.includes("機票") || inc.includes("flight") || inc.toLowerCase().includes("air")) {
-      tags.push({ icon: Plane, labelKey: "tours.tagFlights" });
-    }
-    if (inc.includes("飯店") || inc.includes("hotel") || inc.includes("住宿") || inc.toLowerCase().includes("hotel")) {
-      tags.push({ icon: Hotel, labelKey: "tours.tagHotels" });
-    }
-    if (inc.includes("餐") || inc.includes("meal") || inc.includes("food") || inc.toLowerCase().includes("meal")) {
-      tags.push({ icon: Utensils, labelKey: "tours.tagMeals" });
-    }
-    // Show max 3 tags now that the card has more breathing room
-    return tags.slice(0, 3);
-  }, [tour.included]);
-
-  const isEn = language === "en";
-
-  // Round 80.2: low-seats nudge for active urgency cue. We trust availableSeats
-  // when present, otherwise compute from max - current.
-  const seatsLeft = useMemo(() => {
-    const left = typeof tour.availableSeats === "number"
-      ? tour.availableSeats
-      : (typeof tour.maxParticipants === "number" && typeof tour.currentParticipants === "number"
-          ? Math.max(0, tour.maxParticipants - tour.currentParticipants)
-          : null);
-    if (left === null) return null;
-    if (left > 0 && left <= 5) return left;
-    return null;
-  }, [tour.availableSeats, tour.maxParticipants, tour.currentParticipants]);
-
-  return (
-    <Card className="relative overflow-hidden hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300 group border border-gray-200 flex flex-col rounded-xl bg-white">
-      <Link href={`/tours/${tour.id}`} className="block">
-        <div className="relative aspect-[4/3] overflow-hidden rounded-xl">
-          {tour.imageUrl || tour.heroImage ? (
-            <img
-              src={tour.imageUrl || tour.heroImage}
-              alt={displayTitle}
-              className="w-full h-full object-cover rounded-xl group-hover:scale-105 transition-transform duration-500"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-                const parent = e.currentTarget.parentElement;
-                if (parent && !parent.querySelector('.img-fallback')) {
-                  const div = document.createElement('div');
-                  div.className = 'img-fallback absolute inset-0 bg-foreground/[0.04] border border-foreground/10 flex items-center justify-center rounded-xl';
-                  div.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="rgba(255,255,255,0.4)" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>';
-                  parent.appendChild(div);
-                }
-              }}
-            />
-          ) : (
-            <div className="w-full h-full bg-foreground/[0.04] border border-foreground/10 flex items-center justify-center rounded-xl">
-              <MapPin className="h-12 w-12 text-foreground/30" />
-            </div>
-          )}
-          {/* Round 80.2: bottom gradient on image so the duration + featured
-              chips have a guaranteed contrast surface */}
-          <div
-            className="absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-t from-black/70 via-black/20 to-transparent rounded-b-xl pointer-events-none"
-            aria-hidden
-          />
-          {tour.status === "soldout" && (
-            <Badge className="absolute top-4 right-4 bg-gray-800 text-white">
-              {t("tours.fullyBooked")}
-            </Badge>
-          )}
-          {tour.status === "inactive" && (
-            <Badge className="absolute top-4 right-4 bg-red-500 text-white">
-              {t("tours.inactive")}
-            </Badge>
-          )}
-          {/* Featured ribbon — top-left, gold for premium signal */}
-          {!!tour.featured && tour.status !== "soldout" && (
-            <div className="absolute top-3 left-3 inline-flex items-center gap-1 px-2 py-1 bg-[#c9a563] text-white text-[10px] font-semibold tracking-[0.15em] uppercase rounded-md shadow-md">
-              <Sparkles className="h-3 w-3" />
-              {t("tours.featuredBadgeShort")}
-            </div>
-          )}
-          {/* Duration badge overlay — bottom left, on the gradient */}
-          <div className="absolute bottom-3 left-3 inline-flex items-center gap-1 bg-white/95 text-foreground text-xs font-bold px-2.5 py-1 rounded-md shadow-sm backdrop-blur">
-            <Clock className="h-3 w-3" />
-            {tour.duration} {t("tours.days")}{tour.nights ? ` ${tour.nights} ${t("tours.nights")}` : ""}
-          </div>
-          {/* Round 80.2: low-seats urgency badge — bottom right */}
-          {seatsLeft !== null && (
-            <div className="absolute bottom-3 right-3 inline-flex items-center gap-1 bg-[#c9a563]/95 text-white text-[10px] font-bold px-2 py-1 rounded-md shadow-sm backdrop-blur">
-              {t("tours.seatsOnly", { n: String(seatsLeft) })}
-            </div>
-          )}
-        </div>
-      </Link>
-      {/* v78j: compare toggle — small unobtrusive button overlay top-right */}
-      <CompareToggle tourId={tour.id} />
-
-      <div className="p-5 flex flex-col flex-grow">
-        {/*
-          Rating Row — FTC 16 CFR Part 465 / Act §5 compliance.
-          Previously rendered a hardcoded 5-star display with "(5.0)" on every
-          card regardless of whether any reviews existed. That is a deceptive
-          testimonial under the FTC fake review rule. We now only render real
-          ratings sourced from the tour record; otherwise show "no reviews yet".
-        */}
-        {typeof tour.rating === "number" && tour.rating > 0 && (
-          <div className="flex items-center gap-1 mb-2">
-            {[1,2,3,4,5].map(i => (
-              <Star
-                key={i}
-                className={`h-3.5 w-3.5 ${i <= Math.round(tour.rating as number) ? 'fill-[#c9a563] text-[#c9a563]' : 'text-gray-300'}`}
-              />
-            ))}
-            <span className="text-xs text-gray-500 ml-1">
-              ({(tour.rating as number).toFixed(1)})
-            </span>
-          </div>
-        )}
-
-        {/* Title */}
-        <Link href={`/tours/${tour.id}`}>
-          <h3 className="text-base md:text-[17px] font-bold mb-1.5 line-clamp-2 text-gray-900 group-hover:text-foreground transition-colors leading-snug cursor-pointer font-serif tracking-tight">
-            {displayTitle}
-          </h3>
-        </Link>
-
-        {/* v78h: 2-line selling-point preview (matches Lion Travel pattern) */}
-        {displaySubtitle && (
-          <p className="text-xs text-gray-600 mb-2.5 line-clamp-2 leading-relaxed">
-            {(displaySubtitle as string).slice(0, 90)}
-          </p>
-        )}
-
-        {/* Round 80.2: Origin → Destination meta line. Was just a single MapPin
-            location row; now shows the departure city → destination arrow so
-            travellers immediately see "where I leave from / where I go" — the
-            two questions every customer asks first. */}
-        <div className="flex items-center text-xs text-foreground/60 mb-2.5 gap-1.5">
-          {tour.departureCity && (
-            <>
-              <span className="font-medium text-foreground/75">
-                {translateDestination(tour.departureCity, language)}
-              </span>
-              <ArrowRight className="h-3 w-3 text-foreground/35" />
-            </>
-          )}
-          <MapPin className="h-3.5 w-3.5 text-foreground/45 flex-shrink-0" />
-          <span className="font-medium text-foreground/85 line-clamp-1">
-            {translateDestination(tour.destinationCountry || '', language)}{tour.destinationCity && tour.destinationCity !== tour.destinationCountry ? ` · ${translateDestination(tour.destinationCity, language)}` : ""}
-          </span>
-        </div>
-
-        {/* Round 80.2: highlights chips — pulled from tour.highlights (or tags fallback).
-            Adds real itinerary detail to the card so users see what makes the
-            trip distinctive at a glance ("古蹟 / 美食 / 溫泉" type signals). */}
-        {highlightChips.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mb-2.5">
-            {highlightChips.map((chip, i) => (
-              <span
-                key={i}
-                className="inline-flex items-center text-[11px] text-foreground/70 bg-foreground/[0.04] border border-foreground/10 px-2 py-0.5 rounded-md"
-              >
-                {chip}
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* v78s: Multi-departure chip strip — Lion-Travel pattern.
-            Shows up to 3 upcoming dates with status pill ("Available"/"Confirmed"/"Sold out").
-            More informative than single-date label, helps users see frequency at a glance. */}
-        {upcomingDepartures && (upcomingDepartures as any[]).length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mb-2.5">
-            {(upcomingDepartures as any[]).slice(0, 3).map((dep: any) => {
-              const d = new Date(dep.departureDate);
-              const dateLabel = isEn
-                ? d.toLocaleDateString("en-US", { month: "short", day: "numeric" })
-                : `${d.getMonth() + 1}/${d.getDate()}`;
-              const status = dep.status as string;
-              const statusConfig: Record<string, { label: string; cls: string }> = {
-                // Round 80.1: monochrome chips per B&W rule. Gold accent for
-                // "confirmed" (the trust-positive state); subtle gray for the
-                // rest so the chip strip doesn't compete with the price.
-                open: { label: t("tourDeparturesTable.statusAvailable"), cls: "bg-foreground/[0.04] text-foreground/75 border-foreground/15" },
-                confirmed: { label: t("tourDeparturesTable.statusConfirmed"), cls: "bg-[#c9a563]/10 text-[#8a6f3a] border-[#c9a563]/35" },
-                full: { label: t("tourDeparturesTable.statusSoldOut"), cls: "bg-foreground/5 text-foreground/40 border-foreground/10 line-through" },
-                waitlist: { label: t("tourDeparturesTable.statusWaitlist"), cls: "bg-foreground/[0.04] text-foreground/60 border-foreground/15" },
-              };
-              const sCfg = statusConfig[status] || statusConfig.open;
-              return (
-                <span
-                  key={dep.id}
-                  className={`inline-flex items-center gap-1 text-[10px] md:text-xs font-medium px-1.5 py-0.5 rounded border ${sCfg.cls}`}
-                  title={`${dateLabel} · ${sCfg.label}`}
-                >
-                  <Calendar className="h-2.5 w-2.5 md:h-3 md:w-3" />
-                  <span>{dateLabel}</span>
-                </span>
-              );
-            })}
-            {(upcomingDepartures as any[]).length > 3 && (
-              <span className="text-[10px] md:text-xs text-gray-400 px-1.5 py-0.5">
-                +{(upcomingDepartures as any[]).length - 3}
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Included Tags */}
-        {includedTags.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mb-3">
-            {includedTags.map((tag, i) => {
-              const Icon = tag.icon;
-              return (
-                <span key={i} className="inline-flex items-center gap-1 text-[11px] text-foreground/70 bg-foreground/[0.04] px-2 py-0.5 rounded-md border border-foreground/10">
-                  <Icon className="h-3 w-3 text-[#c9a563]" />
-                  {t(tag.labelKey)}
-                </span>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Spacer */}
-        <div className="flex-grow" />
-
-        {/* Price + CTA — Round 80.2: gold-accented price baseline + arrow CTA */}
-        <div className="pt-3 border-t border-foreground/10">
-          <div className="flex items-end justify-between mb-3 gap-2">
-            <div className="flex flex-col">
-              <span className="text-[10px] uppercase tracking-[0.15em] text-foreground/45 font-medium">
-                {t("tours.startingFrom")}
-              </span>
-              {tour.price && (tour.priceCurrency || 'TWD') === 'TWD' ? (() => {
-                const dual = formatDualPrice(Number(tour.price));
-                return (
-                  <>
-                    <span className="text-xl md:text-[22px] font-bold text-foreground leading-tight font-serif tracking-tight">
-                      {dual.twd}
-                    </span>
-                    <span className="text-[11px] text-foreground/50 leading-tight">
-                      (≈US${dual.usd})
-                    </span>
-                  </>
-                );
-              })() : (
-                <span className="text-xl md:text-[22px] font-bold text-foreground leading-tight font-serif tracking-tight">
-                  {formatPrice(tour.price || 0, (tour.priceCurrency || "TWD") as "TWD" | "USD")}
-                </span>
-              )}
-            </div>
-            {/* Tiny gold rule under price column */}
-            <span className="self-end mb-1 h-px w-6 bg-[#c9a563]" aria-hidden />
-          </div>
-          <Link href={`/tours/${tour.id}`} className="block">
-            <Button className="w-full bg-foreground text-white hover:bg-foreground/85 group/cta text-xs py-2 h-10 rounded-lg font-medium tracking-wide">
-              {t("tours.viewDetails")}
-              <ArrowRight className="h-3.5 w-3.5 ml-1.5 transition-transform group-hover/cta:translate-x-0.5" />
-            </Button>
-          </Link>
-        </div>
-      </div>
-    </Card>
   );
 }
 
@@ -517,7 +183,7 @@ export default function Tours() {
     setSelectedCategory(urlCategory);
     setPage(1);
   }, [urlCategory]);
-  const { t, language, formatPrice } = useLocale();
+  const { t, language } = useLocale();
 
   const debouncedSearch = useDebounce(searchInput, 400);
   const selectedDuration = DURATION_PRESETS[selectedDurationIdx];
@@ -561,12 +227,42 @@ export default function Tours() {
     sortBy: selectedSortBy as "popular" | "price_asc" | "price_desc" | "days_asc" | "days_desc",
     page,
     pageSize: 12,
+    language: language as "zh-TW" | "en",
   };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, isLoading } = trpc.tours.search.useQuery(searchParams as any);
+  // public-site-redesign P1: lean card projection (drops the heavy itinerary /
+  // gallery JSON) — shrinks the /tours payload from ~485 KB and resolves the
+  // display title server-side, so the card no longer fires a per-card query.
+  const { data, isLoading } = trpc.tours.searchCards.useQuery(searchParams);
 
-  const tours = data?.tours ?? [];
+  const rawCards = data?.tours ?? [];
   const pagination = data?.pagination;
+
+  // One batched availability lookup for the whole page (kills the old per-card
+  // N+1 — 12 cards used to fire 12 `departures.getUpcoming` calls). getNextBatch
+  // returns the soonest upcoming departure per tour; the card buckets from it.
+  const tourIds = useMemo(() => rawCards.map((c) => c.id), [rawCards]);
+  const { data: nextBatch } = trpc.departures.getNextBatch.useQuery(
+    { tourIds },
+    { enabled: tourIds.length > 0, staleTime: 1000 * 60 * 5 },
+  );
+
+  // Map lean rows + the batched soonest departure into the shared TourCard's
+  // data shape (pure helper, unit-tested, reused by /search + /destinations).
+  const cards: TourCardData[] = useMemo(
+    () =>
+      rawCards.map((c) =>
+        toTourCardData(
+          c,
+          (nextBatch as Record<number, LeanDeparture | null> | undefined)?.[
+            c.id
+          ] ?? null,
+        ),
+      ),
+    [rawCards, nextBatch],
+  );
+
+  // Lean rows kept for the result count + empty-state checks below.
+  const tours = rawCards;
 
   const activeFiltersCount = useMemo(() => {
     let count = 0;
@@ -1092,13 +788,12 @@ export default function Tours() {
                   )}
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {tours.map((tour: any) => (
+                  {cards.map((card) => (
                     <TourCard
-                      key={tour.id}
-                      tour={tour}
-                      language={language}
-                      t={t}
-                      formatPrice={formatPrice}
+                      key={card.id}
+                      tour={card}
+                      layout="card"
+                      actionSlot={<CompareToggle tourId={card.id} />}
                     />
                   ))}
                 </div>

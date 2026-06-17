@@ -2175,6 +2175,19 @@ export const zhTW = {
     nextDeparture: '最近出發：',
     seatsLeftSuffix: '席',
     seatsOnly: '僅剩 {n} 席',
+    // tour-catalog-rebuild: availability buckets only (red line — never an exact
+    // seat count). Sourced from deriveAvailabilityBucket(next departure).
+    availAvailable: '有位',
+    availLimited: '名額有限',
+    availSoldout: '已滿',
+    availConfirm: '名額待確認',
+    availNote: '下單前再確認',
+    availLabel: '餘位',
+    priceOnRequest: '價格洽詢',
+    nextShort: '最近',
+    // flight inclusion — single source via deriveFlightInclusion(costExplanation)
+    flightIncluded: '含機票',
+    flightExcluded: '不含機票',
     categoryAll: '全部',
     categoryGroup: '團體旅遊',
     categoryTheme: '主題旅遊',

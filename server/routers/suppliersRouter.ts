@@ -2835,5 +2835,76 @@ export const suppliersRouter = router({
         .where(eq(productsTable.id, input.productId));
       return { ok: true };
     }),
+
+  // ── tour-catalog-rebuild (chunk 1) — 重抓換批 + 快照回滾 ──────────────────
+  // 重抓供應商全產品 → 過完整度門檻 → 原子換上架批(就地更新,id/URL/FK/SEO 穩)。
+  // 安全預設:dryRun=true(只回報、不寫)。真換批(dryRun=false)是大寫入,全量還要
+  // confirm=true(防手滑);跑前一定先跟 Jeff 講一聲(快照可退,§4.3 / chunk-1 §10)。
+  rebuildCatalog: adminProcedure
+    .input(
+      z.object({
+        scope: z.enum(["uv", "lion"]).default("uv"),
+        dryRun: z.boolean().default(true),
+        limit: z.number().int().positive().max(10000).optional(),
+        skipSync: z.boolean().default(false),
+        /** 全量真換批的二次確認。 */
+        confirm: z.boolean().default(false),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      // 安全閥:真寫入 + 全量(無 limit)時,必須 confirm=true。
+      if (!input.dryRun && !input.limit && !input.confirm) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "全量換批是對線上目錄的大寫入,需 confirm=true(快照可回滾)。請先用 dryRun 或 limit 小批驗。",
+        });
+      }
+      const { rebuildCatalog } = await import("../services/catalogRebuild");
+      const report = await rebuildCatalog(input.scope, {
+        dryRun: input.dryRun,
+        limit: input.limit,
+        skipSync: input.skipSync,
+        createdBy: Number((ctx.user as any)?.id) || 1,
+      });
+      if (!input.dryRun) {
+        const { audit } = await import("../_core/auditLog");
+        audit({
+          ctx,
+          action: "catalog.rebuild",
+          targetType: "catalogBatch",
+          targetId: report.batchId ?? 0,
+          changes: {
+            scope: report.scope,
+            promoted: report.promoted,
+            retired: report.retired,
+            complete: report.complete,
+            incomplete: report.incomplete,
+          },
+        });
+      }
+      return report;
+    }),
+
+  // 回滾一批:把該批快照寫回 tours、翻回上一批 live。一個 txn、可稽核。
+  revertCatalogBatch: adminProcedure
+    .input(z.object({ batchId: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const { revertBatch } = await import("../services/catalogRebuild/promote");
+      const result = await db.transaction(async (tx) =>
+        revertBatch(tx, input.batchId)
+      );
+      const { audit } = await import("../_core/auditLog");
+      audit({
+        ctx,
+        action: "catalog.revert",
+        targetType: "catalogBatch",
+        targetId: input.batchId,
+        changes: { restored: result.restored, restoredLiveBatchId: result.restoredLiveBatchId },
+      });
+      return result;
+    }),
 });
 

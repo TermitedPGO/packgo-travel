@@ -8,6 +8,8 @@ import {
   deriveFlightInclusion,
   deriveStartingUsd,
   deriveGroupSize,
+  deriveAvailabilityBucket,
+  deriveAvailability,
   buildInquiryInput,
   type DepartureLike,
   type InquirySummaryLabels,
@@ -88,6 +90,13 @@ describe("deriveFlightInclusion", () => {
     expect(deriveFlightInclusion({ costExplanation: { included: ["機場接送"] } })).toBe("unknown");
   });
 
+  it("under-promises when supplier data tags flights in BOTH arrays (contradiction)", () => {
+    // The 1290075 case: dirty source listed 機票 in both. Conservative => excluded.
+    expect(
+      deriveFlightInclusion({ costExplanation: { included: ["機票"], excluded: ["國際機票"] } }),
+    ).toBe("excluded");
+  });
+
   it("returns unknown for missing / garbage data", () => {
     expect(deriveFlightInclusion({ costExplanation: null })).toBe("unknown");
     expect(deriveFlightInclusion({ costExplanation: "not json" })).toBe("unknown");
@@ -134,6 +143,50 @@ describe("deriveStartingUsd", () => {
       [dep({ adultPrice: 1800, currency: "USD" })], // exact 1800 USD
     );
     expect(res).toEqual({ usd: 1800, approx: false });
+  });
+});
+
+describe("deriveAvailabilityBucket", () => {
+  it("returns unknown for nullish / cancelled", () => {
+    expect(deriveAvailabilityBucket(null)).toBe("unknown");
+    expect(deriveAvailabilityBucket(undefined)).toBe("unknown");
+    expect(deriveAvailabilityBucket(dep({ status: "cancelled" }))).toBe("unknown");
+  });
+
+  it("maps full -> soldout and waitlist -> limited by status alone", () => {
+    expect(deriveAvailabilityBucket(dep({ status: "full" }))).toBe("soldout");
+    expect(deriveAvailabilityBucket(dep({ status: "waitlist" }))).toBe("limited");
+  });
+
+  it("refines open departures by remaining slots", () => {
+    expect(deriveAvailabilityBucket(dep({ status: "open", totalSlots: 20, bookedSlots: 2 }))).toBe("available");
+    expect(deriveAvailabilityBucket(dep({ status: "open", totalSlots: 20, bookedSlots: 17 }))).toBe("limited");
+    expect(deriveAvailabilityBucket(dep({ status: "open", totalSlots: 20, bookedSlots: 20 }))).toBe("soldout");
+  });
+
+  it("treats an open departure with no slot data as available", () => {
+    expect(deriveAvailabilityBucket(dep({ status: "open", totalSlots: null, bookedSlots: null }))).toBe("available");
+  });
+
+  it("never leaks a number (always one of the four buckets)", () => {
+    const buckets = new Set(["available", "limited", "soldout", "unknown"]);
+    for (const booked of [0, 1, 5, 16, 19, 20, 99]) {
+      expect(buckets.has(deriveAvailabilityBucket(dep({ totalSlots: 20, bookedSlots: booked })))).toBe(true);
+    }
+  });
+});
+
+describe("deriveAvailability", () => {
+  it("returns unknown bucket with null next when nothing upcoming", () => {
+    expect(deriveAvailability([], NOW)).toEqual({ next: null, isConfirmed: false, bucket: "unknown" });
+  });
+
+  it("buckets the soonest upcoming departure (consistent date + availability)", () => {
+    const soon = dep({ id: 1, departureDate: "2026-07-15T00:00:00Z", status: "open", totalSlots: 20, bookedSlots: 18 });
+    const later = dep({ id: 2, departureDate: "2026-09-01T00:00:00Z", status: "open", totalSlots: 20, bookedSlots: 0 });
+    const res = deriveAvailability([later, soon], NOW);
+    expect(res.next?.id).toBe(1);
+    expect(res.bucket).toBe("limited");
   });
 });
 

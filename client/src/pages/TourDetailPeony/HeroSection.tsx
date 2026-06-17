@@ -141,12 +141,11 @@ export default function HeroSection({
         )}
 
         <div className="relative h-full max-w-7xl mx-auto px-6 flex flex-col justify-center items-center text-center">
-          {/* v80.24: tour code displayed above title — every Lion / Phoenix /
-              Settour competitor does this. Helps users reference the tour on
-              the phone / WhatsApp / screenshots. */}
+          {/* Public reference only. We show our own T-ref (or a curated
+              tourCode), NEVER the supplier's internal product code (e.g.
+              26CC401BRC) — that is their back-office code, not for customers. */}
           <div className="mb-3 inline-flex items-center gap-3 text-[11px] md:text-xs tracking-[3px] uppercase text-white/75">
-            {/* Skip UUID-shaped productCodes from supplier sync */}
-            {(tour as any).tourCode || (tour.productCode && !/^[0-9a-f]{8}-/.test(tour.productCode) ? tour.productCode : `T${tour.id}`)}
+            {(tour as any).tourCode || `T${tour.id}`}
             {hasConfirmedDeparture && (
               <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-[#c9a563]/95 text-[#1a1a1a] rounded-full text-[10px] md:text-[11px] font-bold tracking-wide">
                 <Award className="h-3 w-3" />

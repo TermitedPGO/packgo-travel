@@ -25,6 +25,7 @@ import { and, eq, like, or } from "drizzle-orm";
 import { publicProcedure, router } from "../_core/trpc";
 import * as db from "../db";
 import { getDb } from "../db";
+import { getTourTranslations } from "../translation";
 import {
   supplierProducts,
   supplierProductDetails,
@@ -121,6 +122,96 @@ export const toursReadRouter = router({
 
       return {
         tours,
+        pagination: {
+          page,
+          pageSize,
+          total,
+          totalPages,
+          hasMore: page < totalPages,
+        },
+      };
+    }),
+
+  /**
+   * Lean card list for the public catalog (public-site-redesign P1).
+   *
+   * Same filters/pagination as `search`, but returns ONLY the fields a
+   * TourCard renders — NOT the heavy itinerary/attractions/hotels/meals/gallery
+   * JSON columns. That alone shrinks the /tours payload from ~485 KB to a few
+   * KB. It also resolves the display title server-side (per language) so the
+   * client no longer fires a per-card translation query.
+   *
+   * Availability + starting price are still derived on the client from a SINGLE
+   * batched `departures.getNextBatch` call (kills the old per-card N+1) — we
+   * keep `costExplanation` (small included/excluded arrays) + price here so the
+   * client can run deriveFlightInclusion / deriveStartingUsd without a refetch.
+   *
+   * Red line: this returns retail `price` only. agentPrice (supplier cost) is
+   * never selected here or anywhere a customer-facing query can reach.
+   */
+  searchCards: publicProcedure
+    .input(
+      z.object({
+        destination: z.string().max(100).optional(),
+        category: z.string().max(50).optional(),
+        minDays: z.number().int().min(0).max(365).optional(),
+        maxDays: z.number().int().min(0).max(365).optional(),
+        minPrice: z.number().min(0).max(1_000_000).optional(),
+        maxPrice: z.number().min(0).max(1_000_000).optional(),
+        tags: z.array(z.string().max(50)).max(20).optional(),
+        specialActivities: z.array(z.string().max(50)).max(20).optional(),
+        sortBy: z
+          .enum(["popular", "price_asc", "price_desc", "days_asc", "days_desc"])
+          .optional(),
+        page: z.number().int().min(1).max(10_000).default(1),
+        pageSize: z.number().int().min(1).max(48).default(12),
+        language: z.enum(["zh-TW", "en"]).default("zh-TW"),
+      }),
+    )
+    .query(async ({ input }) => {
+      const { page, pageSize, language, ...filters } = input;
+      const offset = (page - 1) * pageSize;
+
+      const { tours: rows, total } = await db.searchTours({
+        ...filters,
+        limit: pageSize,
+        offset,
+      });
+
+      const cards = await Promise.all(
+        rows.map(async (tr) => {
+          // Resolve display title server-side (was a per-card client query).
+          let title = tr.title;
+          if (language !== "zh-TW") {
+            try {
+              const tx = await getTourTranslations(tr.id, language);
+              if (tx.title) title = tx.title;
+            } catch {
+              /* fall back to source title */
+            }
+          }
+          return {
+            id: tr.id,
+            title,
+            destinationCountry: tr.destinationCountry ?? null,
+            destinationCity: tr.destinationCity ?? null,
+            departureCity: tr.departureCity ?? null,
+            duration: tr.duration ?? null,
+            nights: tr.nights ?? null,
+            heroImage: tr.heroImage || tr.imageUrl || null,
+            featured: tr.featured === 1,
+            status: tr.status ?? null,
+            price: tr.price ?? null,
+            priceCurrency: tr.priceCurrency ?? null,
+            // small (included/excluded arrays) — needed for deriveFlightInclusion
+            costExplanation: tr.costExplanation ?? null,
+          };
+        }),
+      );
+
+      const totalPages = Math.ceil(total / pageSize);
+      return {
+        tours: cards,
         pagination: {
           page,
           pageSize,

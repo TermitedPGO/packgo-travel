@@ -35,6 +35,7 @@ export interface DepartureLike {
   adultPrice?: number | null;
   status?: string | null;
   totalSlots?: number | null;
+  bookedSlots?: number | null;
   currency?: string | null;
 }
 
@@ -106,6 +107,13 @@ function asStringArray(v: unknown): string[] {
  * costExplanation (the one honest source). Mere presence of flight metadata
  * does not prove inclusion, so anything ambiguous returns "unknown" and the
  * caller omits the chip rather than overclaiming.
+ *
+ * Conservative ordering: we check `excluded` BEFORE `included`. For Asia tours
+ * sold to US customers, flights are almost never bundled, and over-claiming
+ * "含機票" is the dangerous error (it sets a wrong, costly expectation). So when
+ * the supplier data tags flights in BOTH arrays (the dirty-data case behind the
+ * "標題不含機票 / 快速資訊含機票" contradiction), we under-promise: "excluded".
+ * The catalog re-scrape will clean the source; until then this stays honest.
  */
 export function deriveFlightInclusion(
   tour: Pick<TourLike, "costExplanation">,
@@ -119,8 +127,8 @@ export function deriveFlightInclusion(
     }
   }
   if (!ce || typeof ce !== "object") return "unknown";
-  if (asStringArray(ce.included).some((s) => FLIGHT_RE.test(s))) return "included";
   if (asStringArray(ce.excluded).some((s) => FLIGHT_RE.test(s))) return "excluded";
+  if (asStringArray(ce.included).some((s) => FLIGHT_RE.test(s))) return "included";
   return "unknown";
 }
 
@@ -181,6 +189,70 @@ export function deriveGroupSize(
   const ts = nextDeparture?.totalSlots;
   if (typeof ts === "number" && ts > 0) return ts;
   return null;
+}
+
+// ─── Availability bucket ─────────────────────────────────────────────────────
+// Red line #2: the customer only ever sees 有位 / 名額有限 / 已滿 — never an exact
+// seat count. The threshold below picks the bucket; the NUMBER never leaves this
+// module. When we wire live supplier availability (catalog rebuild chunk 2) it
+// feeds the same DepartureLike shape, so this bucket stays the single seam.
+
+export type AvailabilityBucket = "available" | "limited" | "soldout" | "unknown";
+
+// Remaining seats at or below this read as 名額有限. Internal only — never shown.
+const LIMITED_SEATS_THRESHOLD = 4;
+
+/** Bucket a single departure. Returns a bucket string only, never a count.
+ * Only needs the availability fields (not departureDate), so callers can pass
+ * a synthetic {status,totalSlots,bookedSlots} (e.g. TourDeparturesTable). */
+export function deriveAvailabilityBucket(
+  departure:
+    | Pick<DepartureLike, "status" | "totalSlots" | "bookedSlots">
+    | null
+    | undefined,
+): AvailabilityBucket {
+  if (!departure) return "unknown";
+  const status = (departure.status ?? "").toLowerCase();
+  if (status === "cancelled") return "unknown";
+  if (status === "full") return "soldout";
+  if (status === "waitlist") return "limited";
+  const total = departure.totalSlots;
+  const booked = departure.bookedSlots;
+  if (
+    typeof total === "number" && total > 0 &&
+    typeof booked === "number" && booked >= 0
+  ) {
+    const remaining = total - booked;
+    if (remaining <= 0) return "soldout";
+    if (remaining <= LIMITED_SEATS_THRESHOLD) return "limited";
+    return "available";
+  }
+  // No slot data: an open / confirmed status still means bookable.
+  if (status === "open" || status === "confirmed") return "available";
+  return "unknown";
+}
+
+export interface AvailabilitySummary {
+  next: DepartureLike | null;
+  isConfirmed: boolean;
+  bucket: AvailabilityBucket;
+}
+
+/**
+ * One call for the card + rail: the soonest upcoming departure and its
+ * availability bucket, kept consistent (the headlined date is the one we bucket).
+ */
+export function deriveAvailability(
+  departures: DepartureLike[] | null | undefined,
+  now: Date = new Date(),
+): AvailabilitySummary {
+  const nd = deriveNextDeparture(departures, now);
+  if (!nd) return { next: null, isConfirmed: false, bucket: "unknown" };
+  return {
+    next: nd.departure,
+    isConfirmed: nd.isConfirmed,
+    bucket: deriveAvailabilityBucket(nd.departure),
+  };
 }
 
 // ─── Inquiry payload ───────────────────────────────────────────────────────
