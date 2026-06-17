@@ -13,7 +13,7 @@
  *   2. working tree 必須乾淨（擋掉 wip 半成品 / 未提交 migration）
  *   3. git fetch；本機不可落後 origin/main（避免推舊的）
  *   4. 列出這次 build 內的 migration（可見性）
- *   5. NODE_OPTIONS=--max-old-space-size=6144 tsc --noEmit 必須 0 錯
+ *   5. tsc --noEmit 必須 0 錯（SKIP_TSC=1 可略過；TSC_HEAP_MB 可調 heap 上限，預設 6144）
  *   6. vitest（SKIP_DEPLOY_TESTS=1 可略過，預設要跑）
  *   7. 人工授權鎖：讀 gitignored .deploy-approve，內容須等於 env DEPLOY_TOKEN，
  *      否則 BLOCK。session 無法自行湊出此 token，只有 Jeff 手動放檔才能解鎖一次部署。
@@ -120,17 +120,21 @@ async function guardInner(deps, opts) {
     for (const t of migs.slice(-6)) log(`    • ${t}`);
   }
 
-  // 5. tsc --noEmit, 0 errors
+  // 5. tsc --noEmit, 0 errors (skippable on memory-constrained machines)
   log("[5/7] tsc --noEmit (0 errors)");
-  try {
-    run("pnpm exec tsc --noEmit", {
-      inherit: true,
-      env: { ...env, NODE_OPTIONS: "--max-old-space-size=6144" },
-    });
-  } catch {
-    return fail("TypeScript errors — fix before deploying");
+  if (env.SKIP_TSC === "1") {
+    log("  ⚠ skipped (SKIP_TSC=1) — only use when tsbuildinfo is fresh & no .ts changes");
+  } else {
+    try {
+      run("pnpm exec tsc --noEmit", {
+        inherit: true,
+        env: { ...env, NODE_OPTIONS: `--max-old-space-size=${env.TSC_HEAP_MB || "6144"}` },
+      });
+    } catch {
+      return fail("TypeScript errors — fix before deploying");
+    }
+    ok("tsc clean");
   }
-  ok("tsc clean");
 
   // 6. vitest (skippable, but default runs)
   log("[6/7] vitest");
