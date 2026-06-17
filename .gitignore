@@ -151,3 +151,9 @@ scripts/gmail-eval/data/
 # clean-tree gate. Ignore root-level ones. Already-tracked PDFs (test_tour.pdf)
 # stay tracked; nested PDFs under subfolders are unaffected.
 /*.pdf
+
+# Redis RDB snapshot — local Redis (tests / dev) writes dump.rdb into the repo
+# root on SAVE/BGSAVE, which then trips the deploy clean-tree gate (gate 2).
+# Runtime artifact, never commit.
+dump.rdb
+*.rdb
