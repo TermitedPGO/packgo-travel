@@ -119,3 +119,22 @@ commit
 4. **不做觸發 UI、不做排程**。Claude 直接寫 pipeline + 一次性執行:把 UV 整批抓進來、驗完整度、原子換上架(快照可退),一次到位。完成後 tsc + 測試綠 → Jeff 按 `pnpm ship`。
 
 > 對線上客人目錄的實際大寫入(換 UV 批)會在程式 + 測試就緒、真要跑的那一刻先跟 Jeff 講一聲(快照可退),不悶著做。
+
+## 11. 進度(2026-06-16)
+
+已完成(committed,tsc + 測試綠):
+- `completeness.ts` + test(上架門檻,15 測試)。commit 36a80a0。
+- `guard.ts` + test(retail-only 紅線回歸鎖,10 測試)。commit 36a80a0。
+- migration `0097_catalog_rebuild.sql` + journal entry + schema.ts(`catalogBatches`、
+  `toursCatalogArchive`、`tours.batchId/lastBatchAt`)。**hand-written 慣例**(idempotent
+  INFORMATION_SCHEMA guards;drizzle-kit generate 在本 repo 不用、會卡互動 prompt)。
+
+剩(handoff,接著做):
+- `promote.ts`:transactional promote(§5)+ `revertBatch`(用 `replacedBatchId` 翻回 live)。
+  + test(mock DrizzleTx:快照→更新→active 原子性、retire 舊團、revert 還原)。
+- `index.ts` orchestrator:`rebuildCatalog('uv')` = 跑 `syncUvCatalog` + `uvDetail` 補完整
+  → hydrate(`hydration.hydrateTourFromParsed`)成 staging → `assessTourCompleteness` 篩
+  → `promoteBatch`。每團 hydrate 出口過 `assertRetailOnly`。
+- 客人 departure 端點回歸測試(`departures.*` 用 tourDepartures;`toursRead.*` 只回 tours 欄)。
+- **實際跑 UV**(對線上大寫入,快照可退)→ 跑前知會 Jeff。
+- tsc 0 錯 + 全測試綠 → Jeff `pnpm ship`。
