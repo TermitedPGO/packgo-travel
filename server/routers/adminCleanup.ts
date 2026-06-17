@@ -468,4 +468,171 @@ export const adminCleanupRouter = router({
         })),
       };
     }),
+
+  // ──────────────────────────────────────────────────────────────────────
+  // 6) Purge ALL supplier tours (UV + Lion) — Jeff: "全部刪掉重新 import"
+  // ──────────────────────────────────────────────────────────────────────
+  purgeSupplierTours: adminProcedure
+    .input(
+      z.object({
+        dryRun: z.boolean().default(true),
+        suppliers: z
+          .array(z.enum(["uv", "lion"]))
+          .min(1)
+          .default(["uv", "lion"]),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { getDb } = await import("../db");
+      const {
+        tours,
+        tourDepartures,
+        bookings,
+        bookingParticipants,
+        tourReviews,
+        userFavorites,
+        userBrowsingHistory,
+        tourStatistics,
+        preDepartureNotifications,
+        payments,
+        calibrationResults,
+        marketingMaterials,
+        tourPriceComparisons,
+        tourMonitorLogs,
+      } = await import("../../drizzle/schema");
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+
+      const conditions = [];
+      if (input.suppliers.includes("uv"))
+        conditions.push(like(tours.sourceUrl, "%uvbookings%"));
+      if (input.suppliers.includes("lion"))
+        conditions.push(like(tours.sourceUrl, "%liontravel%"));
+
+      const supplierTours = await db
+        .select({ id: tours.id, title: tours.title, sourceUrl: tours.sourceUrl })
+        .from(tours)
+        .where(or(...conditions));
+
+      const ids = supplierTours.map((t) => t.id);
+
+      if (ids.length === 0) {
+        return { dryRun: input.dryRun, tourCount: 0, message: "No supplier tours found" };
+      }
+
+      if (input.dryRun) {
+        const bookingCount = ids.length > 0
+          ? await db
+              .select({ c: sql<number>`COUNT(*)` })
+              .from(bookings)
+              .where(inArray(bookings.tourId, ids))
+              .then((r) => Number(r[0]?.c ?? 0))
+          : 0;
+        return {
+          dryRun: true,
+          tourCount: ids.length,
+          bookingCount,
+          sampleTours: supplierTours.slice(0, 10).map((t) => ({
+            id: t.id,
+            title: (t.title ?? "").slice(0, 60),
+            sourceUrl: (t.sourceUrl ?? "").slice(0, 80),
+          })),
+          message: `Would delete ${ids.length} supplier tours + ${bookingCount} bookings. Run with dryRun=false to execute.`,
+        };
+      }
+
+      // Chunked delete to avoid MySQL packet limits
+      const CHUNK = 200;
+      let deletedTours = 0;
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const chunk = ids.slice(i, i + CHUNK);
+        // Child tables first
+        const bookingIds = await db
+          .select({ id: bookings.id })
+          .from(bookings)
+          .where(inArray(bookings.tourId, chunk))
+          .then((r) => r.map((b) => b.id));
+        if (bookingIds.length > 0) {
+          await db.delete(preDepartureNotifications).where(inArray(preDepartureNotifications.bookingId, bookingIds));
+          await db.delete(payments).where(inArray(payments.bookingId, bookingIds));
+          await db.delete(bookingParticipants).where(inArray(bookingParticipants.bookingId, bookingIds));
+          await db.delete(bookings).where(inArray(bookings.id, bookingIds));
+        }
+        await db.delete(tourDepartures).where(inArray(tourDepartures.tourId, chunk));
+        await db.delete(tourReviews).where(inArray(tourReviews.tourId, chunk));
+        await db.delete(userFavorites).where(inArray(userFavorites.tourId, chunk));
+        await db.delete(userBrowsingHistory).where(inArray(userBrowsingHistory.tourId, chunk));
+        await db.delete(tourStatistics).where(inArray(tourStatistics.tourId, chunk));
+        // supplierProductDetails uses supplierProductId (not tourId) — not part of tour cascade
+        await db.delete(calibrationResults).where(inArray(calibrationResults.tourId, chunk));
+        await db.delete(marketingMaterials).where(inArray(marketingMaterials.tourId, chunk));
+        await db.delete(tourPriceComparisons).where(inArray(tourPriceComparisons.tourId, chunk));
+        await db.delete(tourMonitorLogs).where(inArray(tourMonitorLogs.tourId, chunk));
+        await db.delete(tours).where(inArray(tours.id, chunk));
+        deletedTours += chunk.length;
+      }
+
+      const { audit } = await import("../_core/auditLog");
+      audit({
+        ctx,
+        action: "admin.cleanup.purgeSupplierTours",
+        targetType: "tour",
+        targetId: `supplier-purge[${deletedTours}]`,
+        changes: { suppliers: input.suppliers, deleted: deletedTours },
+      });
+
+      return {
+        dryRun: false,
+        tourCount: deletedTours,
+        message: `Purged ${deletedTours} supplier tours and all related data.`,
+      };
+    }),
+
+  // ──────────────────────────────────────────────────────────────────────
+  // 7) Delete visitor (customerProfile) — non-customer system senders
+  // ──────────────────────────────────────────────────────────────────────
+  deleteVisitor: adminProcedure
+    .input(z.object({ profileId: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const { getDb } = await import("../db");
+      const {
+        customerProfiles,
+        customerChatMessages,
+        customerInteractions,
+        customerDocuments,
+        interactionOutcomes,
+      } = await import("../../drizzle/schema");
+      const db = await getDb();
+      if (!db) throw new Error("DB unavailable");
+
+      const [profile] = await db
+        .select({ id: customerProfiles.id, email: customerProfiles.email, userId: customerProfiles.userId })
+        .from(customerProfiles)
+        .where(eq(customerProfiles.id, input.profileId))
+        .limit(1);
+      if (!profile) {
+        throw new Error(`Profile ${input.profileId} not found`);
+      }
+      if (profile.userId) {
+        throw new Error("Cannot delete a registered user's profile. Unlink the user first.");
+      }
+
+      // Clean up related rows
+      await db.delete(customerChatMessages).where(eq(customerChatMessages.customerProfileId, input.profileId));
+      await db.delete(customerInteractions).where(eq(customerInteractions.customerProfileId, input.profileId));
+      await db.delete(customerDocuments).where(eq(customerDocuments.customerProfileId, input.profileId));
+      await db.delete(interactionOutcomes).where(eq(interactionOutcomes.customerProfileId, input.profileId));
+      await db.delete(customerProfiles).where(eq(customerProfiles.id, input.profileId));
+
+      const { audit } = await import("../_core/auditLog");
+      audit({
+        ctx,
+        action: "admin.cleanup.deleteVisitor",
+        targetType: "customerProfile",
+        targetId: input.profileId,
+        changes: { email: profile.email },
+      });
+
+      return { success: true, email: profile.email };
+    }),
 });

@@ -62,11 +62,11 @@ const DURATION_PRESETS = [
 // v78u: Price range presets (TWD-based, since most tour data is stored in TWD).
 // formatPrice in render layer handles the displayed currency conversion.
 const PRICE_PRESETS = [
-  { label: { zh: "不限", en: "Any" }, min: undefined as number | undefined, max: undefined as number | undefined },
-  { label: { zh: "$50K 以下", en: "Under $50K" }, min: undefined, max: 50000 },
-  { label: { zh: "$50K–$100K", en: "$50K–$100K" }, min: 50000, max: 100000 },
-  { label: { zh: "$100K–$150K", en: "$100K–$150K" }, min: 100000, max: 150000 },
-  { label: { zh: "$150K 以上", en: "$150K+" }, min: 150000, max: undefined },
+  { labelKey: "tours.priceAny",       min: undefined as number | undefined, max: undefined as number | undefined },
+  { labelKey: "tours.priceUnder50K",  min: undefined as number | undefined, max: 50000 },
+  { labelKey: "tours.price50K_100K",  min: 50000,  max: 100000 },
+  { labelKey: "tours.price100K_150K", min: 100000, max: 150000 },
+  { labelKey: "tours.price150KPlus",  min: 150000, max: undefined as number | undefined },
 ];
 
 // v78h: removed getFlagEmoji() — emoji flags violate the no-emoji design rule.
@@ -600,7 +600,7 @@ export default function Tours() {
                   <button
                     onClick={() => setShowAdvanced(false)}
                     className="p-1.5 -mr-1.5 rounded-full hover:bg-gray-100"
-                    aria-label="Close filters"
+                    aria-label={t("tours.closeFilters")}
                   >
                     <X className="h-5 w-5" />
                   </button>
@@ -625,7 +625,7 @@ export default function Tours() {
                       <button
                         key={idx}
                         onClick={() => handleDurationChange(idx)}
-                        className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                        className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-all ${
                           selectedDurationIdx === idx
                             ? "bg-gray-900 text-white border-gray-900"
                             : "bg-white text-gray-600 border-gray-200 hover:border-gray-400"
@@ -645,13 +645,13 @@ export default function Tours() {
                       <button
                         key={idx}
                         onClick={() => handlePriceChange(idx)}
-                        className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                        className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-all ${
                           selectedPriceIdx === idx
                             ? "bg-gray-900 text-white border-gray-900"
                             : "bg-white text-gray-600 border-gray-200 hover:border-gray-400"
                         }`}
                       >
-                        {language === "en" ? preset.label.en : preset.label.zh}
+                        {t(preset.labelKey)}
                       </button>
                     ))}
                   </div>
@@ -748,7 +748,7 @@ export default function Tours() {
                             clearAllFilters();
                             handleSearchChange(dest.country);
                           }}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-gray-200 hover:border-gray-400 hover:bg-gray-50 text-sm font-medium text-gray-700 transition-colors"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-gray-200 hover:border-gray-400 hover:bg-gray-50 text-sm font-medium text-gray-700 transition-colors"
                         >
                           <MapPin className="h-3.5 w-3.5 text-gray-400" />
                           {translateDestination(dest.country, language)}

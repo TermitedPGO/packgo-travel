@@ -54,7 +54,7 @@ function CardImage({
           alt={alt}
           loading="lazy"
           className={cn(
-            "w-full h-full object-cover transition-transform duration-500 group-hover:scale-105",
+            "w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 rounded-xl",
             imgClassName,
           )}
         />

@@ -2224,6 +2224,12 @@ export const zhTW = {
     curatedRoutes: '條精選路線',
     filtersTitle: '篩選',
     priceLabel: '預算',
+    priceAny: '不限',
+    priceUnder50K: '$50K 以下',
+    price50K_100K: '$50K–$100K',
+    price100K_150K: '$100K–$150K',
+    price150KPlus: '$150K 以上',
+    closeFilters: '關閉篩選',
     viewNTours: '查看 {count} 個行程',
     emptyState: {
       title: '沒有符合的行程',

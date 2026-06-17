@@ -38,6 +38,9 @@ import type {
   NormalizedPriceTerms,
   NormalizedTourInfo,
 } from "../services/supplierSync/types";
+import { createChildLogger } from "../_core/logger";
+
+const log = createChildLogger({ module: "toursRead" });
 
 export const toursReadRouter = router({
   // Get all tours (public)
@@ -360,7 +363,7 @@ export const toursReadRouter = router({
   generatePdf: publicProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
-      console.log(`[GeneratePDF] Starting PDF generation for tour ${input.id}`);
+      log.info({ tourId: input.id }, "Starting PDF generation");
 
       // Get tour data
       const tour = await db.getTourById(input.id);
@@ -423,7 +426,7 @@ export const toursReadRouter = router({
       const storageKey = `tours/${tour.id}/itinerary_${Date.now()}.pdf`;
       const pdfUrl = await pdfGenerator.generateAndUploadTourPdf(pdfData, storageKey);
 
-      console.log(`[GeneratePDF] PDF generated successfully: ${pdfUrl}`);
+      log.info({ tourId: input.id, pdfUrl }, "PDF generated successfully");
 
       return {
         success: true,

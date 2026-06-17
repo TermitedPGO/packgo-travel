@@ -27,6 +27,7 @@ import {
   supplierProductDetails as detailsTable,
   tours as toursTable,
   catalogBatches as batchesTable,
+  type InsertTour,
 } from "../../../drizzle/schema";
 import { createChildLogger } from "../../_core/logger";
 import { syncUvCatalog } from "../supplierSync/uv";
@@ -436,7 +437,7 @@ export async function rebuildCatalog(
         status: "draft",
         sourceUrl: `https://${UV_SOURCE_HOST}/en/product/detail/${p.externalProductCode}`,
         createdBy,
-      } as any);
+      } satisfies InsertTour);
       tourId = draft.id;
       newDrafts++;
     }
@@ -479,7 +480,8 @@ export async function rebuildCatalog(
       toursComplete: complete,
       toursIncomplete: incomplete,
     });
-  const batchId = Number((ins as any).insertId);
+  const batchId = Number((ins as { insertId: string | number }).insertId);
+  if (!batchId || Number.isNaN(batchId)) throw new Error("Failed to get batchId from insert");
   report.batchId = batchId;
 
   const promoteResult = await db.transaction(async (tx) =>

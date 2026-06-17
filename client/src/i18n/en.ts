@@ -2211,6 +2211,12 @@ export const en = {
     curatedRoutes: 'CURATED ROUTES',
     filtersTitle: 'Filters',
     priceLabel: 'Price',
+    priceAny: 'Any',
+    priceUnder50K: 'Under $50K',
+    price50K_100K: '$50K–$100K',
+    price100K_150K: '$100K–$150K',
+    price150KPlus: '$150K+',
+    closeFilters: 'Close filters',
     viewNTours: 'View {count} tours',
     emptyState: {
       title: 'No tours match your search',
