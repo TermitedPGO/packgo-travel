@@ -32,6 +32,19 @@ function stripThousands(s: string): string {
   return s.replace(/,/g, "").replace(/，/g, "");
 }
 
+/**
+ * 把「純電話/編號格式標點(空白、( ) - +)隔開的相鄰數字組」併回一條連續 run:
+ * (510) 634-2307 → 5106342307。只併「兩數字之間、中間全是這些格式標點」的情況;
+ * 中文/字母隔開的不併(34980 與 134981 仍是兩條 run)。
+ *
+ * 為什麼:digit-boundary 只看緊鄰字元,3 位數成本(如 634)會被 footer 電話裡的
+ * 片段「634-2307」誤中(前是空白、後是 -,兩邊都非數字 → 誤判命中)。把電話併成
+ * 單一 run 後,634 變成 run 中段(前 0 後 2)→ 正確地不命中。不含小數點「.」,
+ * 免得 1749.50 這種價格被併成 174950 而漏掉成本 1749。 */
+function joinFormattedDigits(s: string): string {
+  return s.replace(/(\d)[\s()+\-]+(?=\d)/g, "$1");
+}
+
 /** 純數字字串(去逗號、去非數字)。空字串代表沒有有效數字。 */
 function digitsOnly(s: string | number): string {
   return String(s).replace(/[^\d]/g, "");
@@ -80,7 +93,7 @@ export function costLeakCheck(
   customerText: string,
   costNumbers: Array<string | number>,
 ): CostLeakResult {
-  const haystack = stripThousands(customerText ?? "");
+  const haystack = joinFormattedDigits(stripThousands(customerText ?? ""));
   const hits = new Set<string>();
 
   for (const raw of costNumbers) {

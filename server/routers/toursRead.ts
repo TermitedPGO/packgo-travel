@@ -146,8 +146,9 @@ export const toursReadRouter = router({
    * keep `costExplanation` (small included/excluded arrays) + price here so the
    * client can run deriveFlightInclusion / deriveStartingUsd without a refetch.
    *
-   * Red line: this returns retail `price` only. agentPrice (supplier cost) is
-   * never selected here or anywhere a customer-facing query can reach.
+   * Red line: this returns retail `price` only. Supplier cost (同業價, which lives
+   * only in the mirror table) is never selected here or anywhere a customer-facing
+   * query can reach.
    */
   searchCards: publicProcedure
     .input(

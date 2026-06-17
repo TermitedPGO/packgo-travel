@@ -7,7 +7,7 @@
 - [x] 現況盤點 + 量測（prod, browser，數字進 design.md）
 - [x] 設計系統方向 + 關鍵版型 mockup（`/tmp/pg-cards.html`）
 - [x] Jeff 拍板：B/C/A 組合卡、右側固定欄、資料層優先
-- [ ] **P1 設計系統 + 列表 + 列表資料層**  ← 進行中
+- [x] **P1 設計系統 + 列表 + 列表資料層** — 完成 + 隔離。worktree `/Users/jeff/Desktop/packgo-p1` branch `redesign-p1` commit `2b08a5e`(off 乾淨 HEAD,無並行 WIP)。tsc 0 + 8/8 測試 + i18n parity 綠。待 Jeff `pnpm ship`(完整 gate 在 CI/Fly 跑,本機 OOM)+ prod 效能對照
 - [ ] P2 詳情頁
 - [ ] P3 首頁對齊 + 搜尋 + 目的地
 - [ ] P4 成交（/book + /custom）
