@@ -388,15 +388,16 @@ export function toTimeline(
 ): TimelineEntry[] {
   const entries: TimelineEntry[] = []
 
+  const fmt = (d: Date) =>
+    new Date(d).toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" })
+
   for (const b of bookings) {
     entries.push({
       type: "booking",
       title: b.tourTitle ?? "Booking",
       desc: b.bookingStatus,
-      time: new Date(b.createdAt).toLocaleDateString("zh-TW", {
-        month: "numeric",
-        day: "numeric",
-      }),
+      time: fmt(b.createdAt),
+      sortKey: new Date(b.createdAt).getTime(),
     })
   }
   for (const q of inquiries) {
@@ -404,10 +405,8 @@ export function toTimeline(
       type: "inquiry",
       title: q.subject ?? "Inquiry",
       desc: q.status,
-      time: new Date(q.createdAt).toLocaleDateString("zh-TW", {
-        month: "numeric",
-        day: "numeric",
-      }),
+      time: fmt(q.createdAt),
+      sortKey: new Date(q.createdAt).getTime(),
     })
   }
   for (const p of points) {
@@ -415,15 +414,11 @@ export function toTimeline(
       type: "payment",
       title: p.description ?? p.reason,
       desc: `${p.delta > 0 ? "+" : ""}${p.delta}`,
-      time: new Date(p.createdAt).toLocaleDateString("zh-TW", {
-        month: "numeric",
-        day: "numeric",
-      }),
+      time: fmt(p.createdAt),
+      sortKey: new Date(p.createdAt).getTime(),
     })
   }
 
-  entries.sort(
-    (a, b) => new Date(b.time).getTime() - new Date(a.time).getTime(),
-  )
+  entries.sort((a, b) => b.sortKey - a.sortKey)
   return entries
 }

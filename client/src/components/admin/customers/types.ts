@@ -47,6 +47,7 @@ export type TimelineEntry = {
   title: string
   desc: string
   time: string
+  sortKey: number
 }
 
 export type ListItem = {
