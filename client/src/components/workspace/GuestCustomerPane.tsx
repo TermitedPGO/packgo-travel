@@ -7,9 +7,10 @@
  * no separate send path here. Once they register, m2 歸戶 promotes them
  * to a full customer inbox automatically.
  */
+import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { useLocale } from "@/contexts/LocaleContext";
-import { Mail, UserRound, ArrowDownLeft, ArrowUpRight } from "lucide-react";
+import { Mail, UserRound, ArrowDownLeft, ArrowUpRight, Trash2 } from "lucide-react";
 import { Badge, Pill, Src } from "./ws-ui";
 import { formatRelTime } from "./relTime";
 import { cleanDisplayText } from "./cleanText";
@@ -19,11 +20,21 @@ const OPEN_STATUSES = new Set(["new", "in_progress"]);
 
 export default function GuestCustomerPane({
   profileId,
+  onDeleted,
 }: {
   profileId: number;
+  onDeleted?: () => void;
 }) {
   const { t } = useLocale();
   const itemsQ = trpc.admin.guestOpenItems.useQuery({ profileId });
+  const utils = trpc.useUtils();
+  const deleteMut = trpc.adminCleanup.deleteVisitor.useMutation({
+    onSuccess: () => {
+      utils.admin.guestList.invalidate();
+      onDeleted?.();
+    },
+  });
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const data = itemsQ.data;
   const inquiries = data?.inquiries ?? [];
@@ -42,7 +53,7 @@ export default function GuestCustomerPane({
             <div className="w-10 h-10 rounded-full bg-gray-200 text-gray-600 flex items-center justify-center flex-shrink-0">
               <UserRound className="w-5 h-5" />
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-base font-semibold break-all">
                   {data?.email ?? "…"}
@@ -56,7 +67,40 @@ export default function GuestCustomerPane({
                   : ""}
               </div>
             </div>
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(true)}
+              className="p-2 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+              title={t("workspace.deleteVisitor")}
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
           </div>
+
+          {confirmDelete && (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-3 space-y-2">
+              <p className="text-[12px] text-red-800 font-medium">
+                {t("workspace.deleteVisitorConfirm", { email: data?.email ?? "" })}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => deleteMut.mutate({ profileId })}
+                  disabled={deleteMut.isPending}
+                  className="px-3 py-1 text-[11px] font-medium rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {deleteMut.isPending ? t("workspace.deleting") : t("workspace.confirmDelete")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmDelete(false)}
+                  className="px-3 py-1 text-[11px] font-medium rounded-lg bg-white border border-gray-300 hover:bg-gray-50"
+                >
+                  {t("workspace.cancel")}
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 text-[11px] text-gray-500">
             {t("workspace.guestHint")}

@@ -24,6 +24,14 @@ const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const AdminV2 = lazy(() => import("./pages/AdminV2"));
 // 整合工作台 v3 (chat-first) — 跟 /admin 並存,逐階段切換。design.md。
 const Workspace = lazy(() => import("./pages/Workspace"));
+// v4 後台重建 — AdminShell + AdminHome (2026-06-17)
+const AdminHome = lazy(() => import("./pages/AdminHome"));
+const AdminShell = lazy(() => import("./layouts/AdminShell"));
+const AdminCustomers = lazy(() => import("./pages/AdminCustomers"));
+const AdminTours = lazy(() => import("./pages/AdminTours"));
+const AdminFinance = lazy(() => import("./pages/AdminFinance"));
+const AdminMarketing = lazy(() => import("./pages/AdminMarketing"));
+const AdminSettings = lazy(() => import("./pages/AdminSettings"));
 const DiagnosticsPage = lazy(() => import("./pages/admin/DiagnosticsPage"));
 const Profile = lazy(() => import("./pages/Profile"));
 const TourDetailPeony = lazy(() => import("./pages/TourDetailPeony"));
@@ -199,6 +207,14 @@ function Router() {
       <Route path={"/membership"} component={Membership} />
       <Route path={"/membership-terms"} component={MembershipTerms} />
       <Route path={"/rewards"} component={Rewards} />
+
+      {/* v4 後台重建 — preview at /ops while iterating */}
+      <Route path={"/ops/customers"}>{() => <AdminShell><AdminCustomers /></AdminShell>}</Route>
+      <Route path={"/ops/tours"}>{() => <AdminShell><AdminTours /></AdminShell>}</Route>
+      <Route path={"/ops/finance"}>{() => <AdminShell><AdminFinance /></AdminShell>}</Route>
+      <Route path={"/ops/marketing"}>{() => <AdminShell><AdminMarketing /></AdminShell>}</Route>
+      <Route path={"/ops/settings"}>{() => <AdminShell><AdminSettings /></AdminShell>}</Route>
+      <Route path={"/ops"}>{() => <AdminShell><AdminHome /></AdminShell>}</Route>
 
       {/* Round 80.9: internal preview routes (mockups for product decisions) */}
       <Route path={"/preview/ai-advisor-mockup"} component={AIAdvisorMockup} />

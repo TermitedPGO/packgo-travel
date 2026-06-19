@@ -586,4 +586,28 @@ export const adminCustomersRouter = router({
         .limit(input.limit ?? 50);
       return rows.reverse();
     }),
+
+  customerProfileData: adminProcedure
+    .input(z.object({ userId: z.number().int().positive() }))
+    .query(async ({ input }) => {
+      const drizzleDb = (await db.getDb())!;
+      const { customerProfiles } = await import("../../drizzle/schema");
+      const [row] = await drizzleDb
+        .select({
+          preferredLanguage: customerProfiles.preferredLanguage,
+          communicationStyle: customerProfiles.communicationStyle,
+          preferences: customerProfiles.preferences,
+          keyFacts: customerProfiles.keyFacts,
+          vipScore: customerProfiles.vipScore,
+          totalSpend: customerProfiles.totalSpend,
+          bookingCount: customerProfiles.bookingCount,
+          status: customerProfiles.status,
+          familyContext: customerProfiles.familyContext,
+          budgetTier: customerProfiles.budgetTier,
+        })
+        .from(customerProfiles)
+        .where(eq(customerProfiles.userId, input.userId))
+        .limit(1);
+      return row ?? null;
+    }),
 });

@@ -113,7 +113,10 @@ export default function Workspace() {
                 <CustomerInbox userId={view.userId} />
               )}
               {view.type === "guest" && (
-                <GuestCustomerPane profileId={view.profileId} />
+                <GuestCustomerPane
+                  profileId={view.profileId}
+                  onDeleted={() => setView({ type: "today" })}
+                />
               )}
             </Suspense>
           </div>
