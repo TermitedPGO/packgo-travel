@@ -7,7 +7,7 @@ import { describe, it, expect } from "vitest";
 import { toursReadRouter } from "./toursRead";
 
 describe("toursReadRouter (Phase 4A extraction)", () => {
-  it("exposes all 10 read-only procedures (9 pre-split + getSupplierDetail)", () => {
+  it("exposes all 11 read-only procedures", () => {
     const procs = Object.keys((toursReadRouter as any)._def.procedures);
     expect(procs.sort()).toEqual(
       [
@@ -20,6 +20,7 @@ describe("toursReadRouter (Phase 4A extraction)", () => {
         "getSupplierDetail",
         "list",
         "search",
+        "searchCards",
         "suggest",
       ].sort(),
     );
