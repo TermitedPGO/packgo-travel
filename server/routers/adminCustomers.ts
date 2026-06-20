@@ -671,15 +671,16 @@ export const adminCustomersRouter = router({
    *   3. customerInteractions    — Gmail / email / multi-channel (spam-filtered)
    *
    * Cross-customer-leakage rules (adversarially verified, do NOT relax):
-   *   - REGISTERED inquiries are keyed ONLY by inquiries.userId. We never OR-in
-   *     inquiries.customerEmail: that column is attacker-controlled free text
-   *     (publicProcedure inquiries.create), so an email match could splice a
-   *     different person's thread into this customer's pane.
-   *   - customerInteractions is keyed by a SINGLE integer customerProfileId
-   *     (registered → resolved via the unique customerProfiles.userId; guest →
-   *     the input profileId). Never by customerProfiles.email (non-unique).
-   *   - GUEST inquiries use customerEmail, but only AND userId IS NULL, and the
-   *     email is read from OUR customerProfiles row (not from client input).
+   *   - REGISTERED: keyed by inquiries.userId, PLUS the account's own pre-login
+   *     history matched by the user's VERIFIED users.email (not client input,
+   *     not the inquiry's free-text field) restricted to userId IS NULL rows.
+   *     This is safe — a verified account email is unique to that person, and
+   *     we only pull unclaimed (guest-filed) rows under it. Most real customers
+   *     emailed / inquired BEFORE registering, so userId-only returns nothing.
+   *   - GUEST inquiries use customerEmail AND userId IS NULL, email read from
+   *     OUR customerProfiles row (not from client input).
+   *   - customerInteractions is keyed by integer customerProfileId(s) resolved
+   *     from OUR DB (userId match OR verified-email match), never by raw input.
    *   - WeChat is intentionally out of scope here (M2).
    *
    * Returns string ids namespaced by source (`inq:` / `im:` / `ci:`) so React
@@ -706,6 +707,7 @@ export const adminCustomersRouter = router({
     .query(async ({ input }) => {
       const drizzleDb = (await db.getDb())!;
       const {
+        users: usersTable,
         customerProfiles,
         inquiries,
         inquiryMessages,
@@ -714,56 +716,77 @@ export const adminCustomersRouter = router({
       const lim = input.limit ?? 50;
       const isRegistered = "userId" in input;
 
-      // Resolve this customer's single customerProfileId + email from OUR DB.
-      // Registered: via the unique customerProfiles.userId (uq_cp_user).
-      // Guest: the input profileId is itself the profile row.
-      const profileRow = (
-        await drizzleDb
-          .select({ id: customerProfiles.id, email: customerProfiles.email })
+      // Resolve identity from OUR DB. For a registered user we also resolve the
+      // VERIFIED account email (users.email) so their pre-login, email-filed
+      // history (guest inquiries / email threads under that address) surfaces —
+      // most customers contacted us before registering. For a guest, the input
+      // profileId IS the row; its email comes from our profile, never input.
+      let verifiedEmail: string | null = null;
+      let guestEmail: string | null = null;
+      let profileIds: number[] = [];
+
+      if (isRegistered) {
+        verifiedEmail =
+          (
+            await drizzleDb
+              .select({ email: usersTable.email })
+              .from(usersTable)
+              .where(eq(usersTable.id, input.userId))
+              .limit(1)
+          )[0]?.email ?? null;
+        const profs = await drizzleDb
+          .select({ id: customerProfiles.id })
           .from(customerProfiles)
           .where(
-            isRegistered
-              ? eq(customerProfiles.userId, input.userId)
-              : eq(customerProfiles.id, input.profileId),
-          )
-          .limit(1)
-      )[0];
-      const resolvedProfileId = profileRow?.id ?? null;
-      const profileEmail = profileRow?.email ?? null;
+            verifiedEmail
+              ? or(
+                  eq(customerProfiles.userId, input.userId),
+                  eq(customerProfiles.email, verifiedEmail),
+                )
+              : eq(customerProfiles.userId, input.userId),
+          );
+        profileIds = profs.map((p) => p.id);
+      } else {
+        const prof = (
+          await drizzleDb
+            .select({ id: customerProfiles.id, email: customerProfiles.email })
+            .from(customerProfiles)
+            .where(eq(customerProfiles.id, input.profileId))
+            .limit(1)
+        )[0];
+        guestEmail = prof?.email ?? null;
+        if (prof) profileIds = [prof.id];
+      }
 
       // ── Source 1+2: inquiries (original message) + inquiryMessages (replies)
-      // Registered: key strictly by inquiries.userId. Guest: by customerEmail
-      // AND userId IS NULL, email sourced from our own profile row.
-      let inquiryIdRows: Array<{
-        id: number;
-        message: string;
-        createdAt: Date;
-      }> = [];
-      if (isRegistered) {
-        inquiryIdRows = await drizzleDb
-          .select({
-            id: inquiries.id,
-            message: inquiries.message,
-            createdAt: inquiries.createdAt,
-          })
-          .from(inquiries)
-          .where(eq(inquiries.userId, input.userId))
-          .orderBy(desc(inquiries.createdAt))
-          .limit(lim);
-      } else if (profileEmail) {
-        inquiryIdRows = await drizzleDb
-          .select({
-            id: inquiries.id,
-            message: inquiries.message,
-            createdAt: inquiries.createdAt,
-          })
-          .from(inquiries)
-          .where(
-            and(
+      const inquiryWhere = isRegistered
+        ? verifiedEmail
+          ? or(
+              eq(inquiries.userId, input.userId),
+              and(
+                sql`${inquiries.userId} IS NULL`,
+                eq(inquiries.customerEmail, verifiedEmail),
+              ),
+            )
+          : eq(inquiries.userId, input.userId)
+        : guestEmail
+          ? and(
               sql`${inquiries.userId} IS NULL`,
-              eq(inquiries.customerEmail, profileEmail),
-            ),
-          )
+              eq(inquiries.customerEmail, guestEmail),
+            )
+          : null;
+
+      let inquiryIdRows: Array<{ id: number; message: string; createdAt: Date }> =
+        [];
+      if (inquiryWhere) {
+        inquiryIdRows = await drizzleDb
+          .select({
+            id: inquiries.id,
+            message: inquiries.message,
+            createdAt: inquiries.createdAt,
+          })
+          .from(inquiries)
+          .where(inquiryWhere)
           .orderBy(desc(inquiries.createdAt))
           .limit(lim);
       }
@@ -788,11 +811,11 @@ export const adminCustomersRouter = router({
       }
 
       // ── Source 3: customerInteractions (Gmail / email / multi-channel).
-      // Single-profileId key only. Spam predicate is byte-for-byte the same as
-      // guestOpenItems — confirmed/unreviewed spam stays hidden, rescued shows,
-      // outbound (classification NULL) is never hidden.
+      // Keyed by the resolved profileId(s). Spam predicate is byte-for-byte the
+      // same as guestOpenItems — confirmed/unreviewed spam stays hidden, rescued
+      // shows, outbound (classification NULL) is never hidden.
       let interactionTurns: ThreadTurn[] = [];
-      if (resolvedProfileId !== null) {
+      if (profileIds.length > 0) {
         const interactions = await drizzleDb
           .select({
             id: customerInteractions.id,
@@ -803,7 +826,7 @@ export const adminCustomersRouter = router({
           .from(customerInteractions)
           .where(
             and(
-              eq(customerInteractions.customerProfileId, resolvedProfileId),
+              inArray(customerInteractions.customerProfileId, profileIds),
               sql`NOT (COALESCE(${customerInteractions.classification}, '') = 'spam' AND COALESCE(${customerInteractions.spamVerdict}, '') != 'rescued')`,
             ),
           )
