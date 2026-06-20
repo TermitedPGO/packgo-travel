@@ -666,6 +666,13 @@
       "when": 1781500000000,
       "tag": "0097_catalog_rebuild",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "5",
+      "when": 1781510000000,
+      "tag": "0098_manual_customer",
+      "breakpoints": true
     }
   ]
 }

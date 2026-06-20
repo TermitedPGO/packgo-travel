@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Search, EyeOff, RotateCcw } from "lucide-react"
+import { Search, EyeOff, RotateCcw, Plus } from "lucide-react"
 import { useLocale } from "@/contexts/LocaleContext"
 import type { ListItem } from "./types"
 
@@ -19,6 +19,7 @@ export default function CustomerList({
   onToggleHidden,
   onMarkNotCustomer,
   onRestoreCustomer,
+  onAddCustomer,
 }: {
   customers: ListItem[]
   selected: RowRef | null
@@ -27,6 +28,7 @@ export default function CustomerList({
   onToggleHidden: (v: boolean) => void
   onMarkNotCustomer: (ref: RowRef) => void
   onRestoreCustomer: (ref: RowRef) => void
+  onAddCustomer: () => void
 }) {
   const { t } = useLocale()
   const [query, setQuery] = useState("")
@@ -40,6 +42,14 @@ export default function CustomerList({
   return (
     <div className="w-[300px] flex-shrink-0 border-r border-gray-200 flex flex-col overflow-hidden">
       <div className="p-3 border-b border-gray-200 space-y-2">
+        <button
+          type="button"
+          onClick={onAddCustomer}
+          className="w-full flex items-center justify-center gap-1.5 rounded-lg bg-gray-900 text-white text-[12px] font-medium py-2 hover:bg-gray-700 transition-colors"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          {t("admin.customers.add.button")}
+        </button>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
           <input

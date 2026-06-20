@@ -39,6 +39,9 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
   }
   const markNotCustomer = trpc.admin.markNotCustomer.useMutation({ onSuccess: invalidateLists })
   const restoreCustomer = trpc.admin.restoreCustomer.useMutation({ onSuccess: invalidateLists })
+  const createManualCustomer = trpc.admin.createManualCustomer.useMutation({
+    onSuccess: invalidateLists,
+  })
 
   // Resolve the selection into the two id spaces. A guest's id is a profileId, a
   // registered customer's id is a userId — never cross them.
@@ -92,13 +95,16 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
     const guests = (guestListQ.data ?? []).map((g) => {
       const avatar = deriveAvatar(g.profileId)
       const emailName = g.email?.split("@")[0] ?? ""
+      const phone = g.phone ?? ""
+      const name =
+        g.name?.trim() || emailName || phone || t("admin.customers.unnamed")
       return {
         id: g.profileId,
         kind: "guest" as const,
-        name: emailName,
+        name,
         email: g.email ?? "",
-        phone: "",
-        initials: deriveInitials(null, g.email ?? "?"),
+        phone,
+        initials: deriveInitials(g.name ?? null, g.email || phone || "?"),
         ...avatar,
         lastContact: g.updatedAt ? formatDate(new Date(g.updatedAt)) : "",
         tag: "inquiry" as const,
@@ -114,14 +120,18 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
   const detail = useMemo<AdaptedCustomer | null>(() => {
     if (selected === null) return null
 
-    // Guest: build the detail from inquiries (no user row exists).
+    // Guest: build the detail from inquiries (no user row exists). A manual
+    // phone-only customer has no email, so we key on identity from the profile
+    // row itself, not email.
     if (selected.kind === "guest") {
       const g = guestOpenItemsQ.data
-      if (!g?.email) return null
+      if (!g) return null
       return guestToAdaptedCustomer(
         {
           profileId: selected.id,
+          name: g.name,
           email: g.email,
+          phone: g.phone,
           inquiries: g.inquiries.map((i) => ({
             id: i.id,
             subject: i.subject,
@@ -205,5 +215,7 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
       restoreCustomer.mutate(
         item.kind === "guest" ? { profileId: item.id } : { userId: item.id },
       ),
+    createManualCustomer: createManualCustomer.mutateAsync,
+    isCreating: createManualCustomer.isPending,
   }
 }

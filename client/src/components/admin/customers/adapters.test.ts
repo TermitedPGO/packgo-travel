@@ -59,8 +59,34 @@ describe("guestToAdaptedCustomer", () => {
     expect(c.timeline).toHaveLength(2)
   })
 
-  it("falls back to the raw email when it has no local part", () => {
-    const c = guestToAdaptedCustomer({ profileId: 7, email: "@oddly.com", inquiries: [] }, t)
-    expect(c.name).toBe("@oddly.com")
+  it("prefers a real (manual) name over the email local part", () => {
+    const c = guestToAdaptedCustomer(
+      { profileId: 7, name: "張美玲", email: "ml@gmail.com", inquiries: [] },
+      t,
+    )
+    expect(c.name).toBe("張美玲")
+    expect(c.initials).toBe("張美")
+    expect(c.email).toBe("ml@gmail.com")
+  })
+
+  it("supports a phone-only manual customer (no email): name, phone, no crash", () => {
+    const c = guestToAdaptedCustomer(
+      { profileId: 9, name: "Wang", email: null, phone: "+1 510 555 0000", inquiries: [] },
+      t,
+    )
+    expect(c.kind).toBe("guest")
+    expect(c.name).toBe("Wang")
+    expect(c.email).toBe("")
+    expect(c.phone).toBe("+1 510 555 0000")
+    expect(c.status.type).toBe("good") // freshly added, no open items
+  })
+
+  it("falls back to phone, then the unnamed label, when there is no name/email", () => {
+    expect(
+      guestToAdaptedCustomer({ profileId: 1, phone: "0912345678", inquiries: [] }, t).name,
+    ).toBe("0912345678")
+    expect(
+      guestToAdaptedCustomer({ profileId: 2, inquiries: [] }, t).name,
+    ).toBe("admin.customers.unnamed")
   })
 })

@@ -362,11 +362,25 @@ const GUEST_CLOSED_STATUSES = new Set([
 ])
 
 export function guestToAdaptedCustomer(
-  guest: { profileId: number; email: string; inquiries: GuestInquiry[] },
+  guest: {
+    profileId: number
+    name?: string | null
+    email?: string | null
+    phone?: string | null
+    inquiries: GuestInquiry[]
+  },
   t: TFunc,
 ): AdaptedCustomer {
   const avatar = deriveAvatar(guest.profileId)
-  const name = guest.email.split("@")[0] || guest.email
+  const email = guest.email ?? ""
+  const phone = guest.phone ?? ""
+  // Prefer the real (manual) name, fall back to the email local part, then the
+  // phone, so a phone-only manual customer still shows something identifiable.
+  const name =
+    guest.name?.trim() ||
+    email.split("@")[0] ||
+    phone ||
+    t("admin.customers.unnamed")
 
   // Synthesize the OpenItems shape deriveStatus / deriveAiSummary expect.
   const openInquiries = guest.inquiries.map((i) => ({
@@ -412,9 +426,9 @@ export function guestToAdaptedCustomer(
     id: guest.profileId,
     kind: "guest",
     name,
-    email: guest.email,
-    phone: "",
-    initials: deriveInitials(null, guest.email),
+    email,
+    phone,
+    initials: deriveInitials(guest.name ?? null, email || phone || "?"),
     ...avatar,
     aiSummary,
     status: deriveStatus(openItems, t),

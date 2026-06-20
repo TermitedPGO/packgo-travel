@@ -3,6 +3,7 @@ import { useLocale } from "@/contexts/LocaleContext"
 import CustomerList from "@/components/admin/customers/CustomerList"
 import CustomerDetail from "@/components/admin/customers/CustomerDetail"
 import CustomerChat from "@/components/admin/customers/CustomerChat"
+import AddCustomerDialog from "@/components/admin/customers/AddCustomerDialog"
 import { useCustomerData, type Selection } from "@/components/admin/customers/useCustomerData"
 import {
   CustomerListSkeleton,
@@ -14,6 +15,7 @@ export default function AdminCustomers() {
   const { t } = useLocale()
   const [selected, setSelected] = useState<Selection | null>(null)
   const [showHidden, setShowHidden] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
   const {
     customers,
     isListLoading,
@@ -23,6 +25,8 @@ export default function AdminCustomers() {
     isChatLoading,
     markNotCustomer,
     restoreCustomer,
+    createManualCustomer,
+    isCreating,
   } = useCustomerData(selected, showHidden)
 
   return (
@@ -40,6 +44,7 @@ export default function AdminCustomers() {
           onToggleHidden={setShowHidden}
           onMarkNotCustomer={markNotCustomer}
           onRestoreCustomer={restoreCustomer}
+          onAddCustomer={() => setAddOpen(true)}
         />
       )}
       {selected !== null ? (
@@ -68,6 +73,12 @@ export default function AdminCustomers() {
           {t("admin.customers.selectCustomer")}
         </div>
       )}
+      <AddCustomerDialog
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        onCreate={createManualCustomer}
+        isCreating={isCreating}
+      />
     </div>
   )
 }

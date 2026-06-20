@@ -2595,6 +2595,13 @@ export const customerProfiles = mysqlTable("customerProfiles", {
   lineId: varchar("lineId", { length: 100 }),
   whatsappPhone: varchar("whatsappPhone", { length: 32 }),
 
+  // Display name (0098). Guests were name-less (derived from email); a manually
+  // added customer carries a real name. Nullable — existing guests stay as-is.
+  name: varchar("name", { length: 255 }),
+  // Origin marker (0098). 'manual' = Jeff added this customer by hand from the
+  // customer page; such a profile shows in the list even with no inquiry yet.
+  source: varchar("source", { length: 20 }),
+
   // AI-learned communication preferences
   preferredLanguage: varchar("preferredLanguage", { length: 8 }).default("zh-TW").notNull(),
   communicationStyle: mysqlEnum("communicationStyle", ["formal", "casual", "detailed", "concise"]),

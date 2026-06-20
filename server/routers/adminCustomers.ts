@@ -9,6 +9,7 @@
  * 2026-05-27
  */
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { adminProcedure, router } from "../_core/trpc";
 import * as db from "../db";
 import { eq, desc, sql, and, or, inArray } from "drizzle-orm";
@@ -172,6 +173,73 @@ export const adminCustomersRouter = router({
     }),
 
   /**
+   * createManualCustomer — Jeff adds a customer by hand from the customer page
+   * (phone / WeChat / referral leads that never came through the website form).
+   * Stored as a guest customerProfiles row (userId NULL, source='manual') so it
+   * shows in the list immediately and any future inquiry/email keyed to the same
+   * address auto-attaches. Name is required; at least one of email/phone must be
+   * present (Jeff's call — WeChat customers often have no email). If an email is
+   * given we refuse to duplicate an existing registered account or guest profile
+   * so the list never grows two cards for the same person.
+   */
+  createManualCustomer: adminProcedure
+    .input(
+      z
+        .object({
+          name: z.string().trim().min(1).max(255),
+          email: z.string().trim().max(255).email().optional().or(z.literal("")),
+          phone: z.string().trim().max(32).optional().or(z.literal("")),
+        })
+        .refine((v) => !!v.email || !!v.phone, {
+          message: "email_or_phone_required",
+        }),
+    )
+    .mutation(async ({ input }) => {
+      const drizzleDb = (await db.getDb())!;
+      const { customerProfiles, users: usersTable } = await import(
+        "../../drizzle/schema"
+      );
+      const name = input.name.trim();
+      const email = input.email?.trim() || null;
+      const phone = input.phone?.trim() || null;
+
+      if (email) {
+        const dupUser = await drizzleDb
+          .select({ id: usersTable.id })
+          .from(usersTable)
+          .where(eq(usersTable.email, email))
+          .limit(1);
+        if (dupUser[0]) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "email_exists_registered",
+          });
+        }
+        const dupProfile = await drizzleDb
+          .select({ id: customerProfiles.id })
+          .from(customerProfiles)
+          .where(eq(customerProfiles.email, email))
+          .limit(1);
+        if (dupProfile[0]) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "email_exists_guest",
+          });
+        }
+      }
+
+      const result = await drizzleDb.insert(customerProfiles).values({
+        name,
+        email,
+        phone,
+        source: "manual",
+        status: "active",
+      });
+      const profileId = Number((result as any)[0]?.insertId ?? 0);
+      return { ok: true, profileId };
+    }),
+
+  /**
    * 批9 m3 — email 訪客列表(Jeff 拍板:sidebar 列 註冊用戶 + email 訪客)。
    * Guest = customerProfiles row that has an email but no linked user AND
    * whose email does not belong to any registered account (those are the
@@ -195,7 +263,9 @@ export const adminCustomersRouter = router({
       const rows = await drizzleDb
         .select({
           profileId: customerProfiles.id,
+          name: customerProfiles.name,
           email: customerProfiles.email,
+          phone: customerProfiles.phone,
           updatedAt: customerProfiles.updatedAt,
           status: customerProfiles.status,
         })
@@ -203,10 +273,23 @@ export const adminCustomersRouter = router({
         .where(
           and(
             sql`${customerProfiles.userId} IS NULL`,
-            sql`${customerProfiles.email} IS NOT NULL AND ${customerProfiles.email} != ''`,
-            sql`NOT EXISTS (SELECT 1 FROM ${usersTable} WHERE ${usersTable.email} = ${customerProfiles.email})`,
+            // Contactable: at least an email OR a phone (a manual WeChat/phone
+            // lead may legitimately have no email).
             sql`(
-              EXISTS (SELECT 1 FROM ${inquiriesTable} WHERE ${inquiriesTable.customerEmail} = ${customerProfiles.email})
+              (${customerProfiles.email} IS NOT NULL AND ${customerProfiles.email} != '')
+              OR (${customerProfiles.phone} IS NOT NULL AND ${customerProfiles.phone} != '')
+            )`,
+            // If an email is present it must not already belong to a registered
+            // account (歸戶 targets show as registered customers, not twice).
+            sql`(
+              ${customerProfiles.email} IS NULL OR ${customerProfiles.email} = ''
+              OR NOT EXISTS (SELECT 1 FROM ${usersTable} WHERE ${usersTable.email} = ${customerProfiles.email})
+            )`,
+            // Earns a sidebar chip when there is real customer content (an
+            // inquiry / escalation) OR Jeff added the customer by hand.
+            sql`(
+              ${customerProfiles.source} = 'manual'
+              OR EXISTS (SELECT 1 FROM ${inquiriesTable} WHERE ${inquiriesTable.customerEmail} = ${customerProfiles.email})
               OR EXISTS (SELECT 1 FROM ${agentMessages} WHERE ${agentMessages.relatedCustomerProfileId} = ${customerProfiles.id} AND ${agentMessages.messageType} = 'escalation')
             )`,
           ),
@@ -243,29 +326,42 @@ export const adminCustomersRouter = router({
       const profRows = await drizzleDb
         .select({
           id: customerProfiles.id,
+          name: customerProfiles.name,
           email: customerProfiles.email,
+          phone: customerProfiles.phone,
           createdAt: customerProfiles.createdAt,
         })
         .from(customerProfiles)
         .where(eq(customerProfiles.id, input.profileId))
         .limit(1);
       const profile = profRows[0];
-      if (!profile?.email) {
-        return { email: null, inquiries: [], interactions: [] };
+      if (!profile) {
+        return {
+          profileId: input.profileId,
+          name: null,
+          email: null,
+          phone: null,
+          inquiries: [],
+          interactions: [],
+        };
       }
-      const rows = await drizzleDb
-        .select({
-          id: inquiriesTable.id,
-          inquiryType: inquiriesTable.inquiryType,
-          subject: inquiriesTable.subject,
-          message: inquiriesTable.message,
-          status: inquiriesTable.status,
-          createdAt: inquiriesTable.createdAt,
-        })
-        .from(inquiriesTable)
-        .where(eq(inquiriesTable.customerEmail, profile.email))
-        .orderBy(desc(inquiriesTable.createdAt))
-        .limit(20);
+      // Inquiries are keyed by email — a manual phone-only customer simply has
+      // none yet (its identity + interactions still come back below).
+      const rows = profile.email
+        ? await drizzleDb
+            .select({
+              id: inquiriesTable.id,
+              inquiryType: inquiriesTable.inquiryType,
+              subject: inquiriesTable.subject,
+              message: inquiriesTable.message,
+              status: inquiriesTable.status,
+              createdAt: inquiriesTable.createdAt,
+            })
+            .from(inquiriesTable)
+            .where(eq(inquiriesTable.customerEmail, profile.email))
+            .orderBy(desc(inquiriesTable.createdAt))
+            .limit(20)
+        : [];
       // Gmail-originated history lives in customerInteractions, NOT
       // inquiries (the pipeline never writes that table) — v695 親驗抓到
       // 訪客記錄頁空白的根因. Spam-classified rows stay hidden unless
@@ -293,7 +389,10 @@ export const adminCustomersRouter = router({
         .orderBy(desc(customerInteractions.createdAt))
         .limit(20);
       return {
+        profileId: profile.id,
+        name: profile.name,
         email: profile.email,
+        phone: profile.phone,
         firstSeenAt: profile.createdAt,
         inquiries: rows,
         interactions: interactions.map((i) => ({
