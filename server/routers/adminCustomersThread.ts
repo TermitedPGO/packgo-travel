@@ -17,6 +17,26 @@ export type ThreadTurn = {
   createdAt: Date;
 };
 
+/**
+ * Strip agent-only safety markup that the email→inquiry pipeline wraps around the
+ * customer's raw text (e.g. `<untrusted_input> … </untrusted_input>`, a
+ * prompt-injection delimiter meant for the LLM). Those tags are for the agent,
+ * never for Jeff's eyes — they were leaking verbatim into the customer
+ * conversation view. Conservative on purpose: only the known wrapper tags are
+ * removed, never a generic `<…>` a customer might legitimately type (e.g.
+ * "budget < 5000 usd"). Collapses the doubled spaces the removal leaves behind
+ * but preserves newlines.
+ */
+export function stripAgentMarkup(body: string): string {
+  if (!body) return body;
+  const stripped = body.replace(/<\/?untrusted_input\s*>/gi, "");
+  // No wrapper present → return the customer's text EXACTLY as typed (preserve
+  // their spacing / leading / trailing whitespace). Only tidy the doubled space
+  // + edge whitespace the tag removal itself leaves behind.
+  if (stripped === body) return body;
+  return stripped.replace(/[ \t]{2,}/g, " ").trim();
+}
+
 /** inquiries.message — the customer's original first message. Always 'customer'. */
 export function inquiryFirstTurn(r: {
   id: number;
@@ -26,7 +46,7 @@ export function inquiryFirstTurn(r: {
   return {
     id: `inq:${r.id}`,
     senderRole: "customer",
-    body: r.message,
+    body: stripAgentMarkup(r.message),
     context: null,
     createdAt: r.createdAt,
   };
@@ -42,7 +62,7 @@ export function inquiryReplyTurn(r: {
   return {
     id: `im:${r.id}`,
     senderRole: r.senderType === "admin" ? "jeff" : "customer",
-    body: r.message,
+    body: stripAgentMarkup(r.message),
     context: null,
     createdAt: r.createdAt,
   };
@@ -58,7 +78,7 @@ export function interactionTurn(r: {
   return {
     id: `ci:${r.id}`,
     senderRole: r.direction === "inbound" ? "customer" : "jeff",
-    body: r.content,
+    body: stripAgentMarkup(r.content),
     context: null,
     createdAt: r.createdAt,
   };

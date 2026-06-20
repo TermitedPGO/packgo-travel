@@ -3,7 +3,7 @@ import { useLocale } from "@/contexts/LocaleContext"
 import CustomerList from "@/components/admin/customers/CustomerList"
 import CustomerDetail from "@/components/admin/customers/CustomerDetail"
 import CustomerChat from "@/components/admin/customers/CustomerChat"
-import { useCustomerData } from "@/components/admin/customers/useCustomerData"
+import { useCustomerData, type Selection } from "@/components/admin/customers/useCustomerData"
 import {
   CustomerListSkeleton,
   CustomerDetailSkeleton,
@@ -12,7 +12,7 @@ import {
 
 export default function AdminCustomers() {
   const { t } = useLocale()
-  const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [selected, setSelected] = useState<Selection | null>(null)
   const [showHidden, setShowHidden] = useState(false)
   const {
     customers,
@@ -23,7 +23,7 @@ export default function AdminCustomers() {
     isChatLoading,
     markNotCustomer,
     restoreCustomer,
-  } = useCustomerData(selectedId, showHidden)
+  } = useCustomerData(selected, showHidden)
 
   return (
     <div className="h-full flex">
@@ -34,15 +34,15 @@ export default function AdminCustomers() {
       ) : (
         <CustomerList
           customers={customers}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
+          selected={selected}
+          onSelect={setSelected}
           showHidden={showHidden}
           onToggleHidden={setShowHidden}
           onMarkNotCustomer={markNotCustomer}
           onRestoreCustomer={restoreCustomer}
         />
       )}
-      {selectedId !== null ? (
+      {selected !== null ? (
         <>
           {isDetailLoading ? (
             <div className="flex-1">

@@ -5,6 +5,7 @@ import type {
   Order,
   TimelineEntry,
   ListItem,
+  AdaptedCustomer,
 } from "./types"
 
 const AVATAR_PALETTE = [
@@ -335,6 +336,93 @@ export function toListItem(
     tagLabel: tagLabel[tag] ?? tag,
     notifs: 0,
     blocked: raw.blocked ?? false,
+  }
+}
+
+// ── guestToAdaptedCustomer ──────────────────────────────
+// A guest (unregistered email lead who inquired) has no user row, so
+// customerDetail returns nothing for them. Jeff's rule: an inquiry counts as a
+// customer even without an account, so they must be fully viewable. We build the
+// same AdaptedCustomer shape the detail pane expects out of the guest's
+// inquiries — REUSING the registered derive* helpers by synthesizing their
+// inputs, so guest and registered panes stay behaviourally identical.
+
+type GuestInquiry = {
+  id: number
+  subject: string | null
+  status: string
+  createdAt: Date | string
+}
+
+const GUEST_CLOSED_STATUSES = new Set([
+  "closed",
+  "resolved",
+  "completed",
+  "answered",
+])
+
+export function guestToAdaptedCustomer(
+  guest: { profileId: number; email: string; inquiries: GuestInquiry[] },
+  t: TFunc,
+): AdaptedCustomer {
+  const avatar = deriveAvatar(guest.profileId)
+  const name = guest.email.split("@")[0] || guest.email
+
+  // Synthesize the OpenItems shape deriveStatus / deriveAiSummary expect.
+  const openInquiries = guest.inquiries.map((i) => ({
+    id: i.id,
+    subject: i.subject,
+    status: i.status,
+    handled: GUEST_CLOSED_STATUSES.has(i.status),
+    createdAt: new Date(i.createdAt),
+  }))
+  const openItems: OpenItems = {
+    counts: { total: openInquiries.filter((q) => !q.handled).length },
+    openBookings: [],
+    openInquiries,
+    pendingTasks: [],
+    openVisas: [],
+  }
+
+  const aiSummary = deriveAiSummary(
+    {
+      user: { bookingCount: 0, inquiryCount: guest.inquiries.length, totalSpend: 0 },
+      recentBookings: [],
+      recentInquiries: guest.inquiries.map((i) => ({
+        subject: i.subject,
+        status: i.status,
+      })),
+      recentQuotes: [],
+    },
+    openItems,
+    t,
+  )
+
+  const timeline = toTimeline(
+    [],
+    guest.inquiries.map((i) => ({
+      subject: i.subject,
+      status: i.status,
+      createdAt: new Date(i.createdAt),
+    })),
+    [],
+  )
+
+  return {
+    id: guest.profileId,
+    kind: "guest",
+    name,
+    email: guest.email,
+    phone: "",
+    initials: deriveInitials(null, guest.email),
+    ...avatar,
+    aiSummary,
+    status: deriveStatus(openItems, t),
+    drafts: [],
+    profile: deriveProfile({ totalSpend: 0, bookingCount: 0 }, null, t),
+    orders: [],
+    docs: [],
+    timeline,
   }
 }
 

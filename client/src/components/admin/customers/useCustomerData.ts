@@ -12,13 +12,17 @@ import {
   deriveProfile,
   deriveInitials,
   deriveAvatar,
+  guestToAdaptedCustomer,
 } from "./adapters"
 
-export function useCustomerData(selectedId: number | null, showHidden = false) {
+/** Which row is selected — id alone is ambiguous (a profileId can collide with a
+ *  userId), so kind decides which routes to hit and how to read the id. */
+export type Selection = { id: number; kind: "user" | "guest" }
+
+export function useCustomerData(selected: Selection | null, showHidden = false) {
   const { t, language } = useLocale()
   const utils = trpc.useUtils()
-  const formatDate = (d: Date) =>
-    format(new Date(d), "M/d")
+  const formatDate = (d: Date) => format(new Date(d), "M/d")
 
   const tagLabels: Record<string, string> = {
     active: t("admin.customers.tagActive"),
@@ -27,30 +31,45 @@ export function useCustomerData(selectedId: number | null, showHidden = false) {
   }
 
   const customerListQ = trpc.admin.customerList.useQuery({ includeHidden: showHidden })
-  const guestListQ = trpc.admin.guestList.useQuery()
+  const guestListQ = trpc.admin.guestList.useQuery({ includeHidden: showHidden })
 
-  const invalidateList = () => {
+  const invalidateLists = () => {
     void utils.admin.customerList.invalidate()
+    void utils.admin.guestList.invalidate()
   }
-  const markNotCustomer = trpc.admin.markNotCustomer.useMutation({ onSuccess: invalidateList })
-  const restoreCustomer = trpc.admin.restoreCustomer.useMutation({ onSuccess: invalidateList })
+  const markNotCustomer = trpc.admin.markNotCustomer.useMutation({ onSuccess: invalidateLists })
+  const restoreCustomer = trpc.admin.restoreCustomer.useMutation({ onSuccess: invalidateLists })
+
+  // Resolve the selection into the two id spaces. A guest's id is a profileId, a
+  // registered customer's id is a userId — never cross them.
+  const userId = selected?.kind === "user" ? selected.id : null
+  const profileId = selected?.kind === "guest" ? selected.id : null
 
   const detailQ = trpc.admin.customerDetail.useQuery(
-    { userId: selectedId! },
-    { enabled: selectedId !== null },
+    { userId: userId! },
+    { enabled: userId !== null },
   )
   const openItemsQ = trpc.admin.customerOpenItems.useQuery(
-    { userId: selectedId! },
-    { enabled: selectedId !== null },
+    { userId: userId! },
+    { enabled: userId !== null },
   )
   const profileQ = trpc.admin.customerProfileData.useQuery(
-    { userId: selectedId! },
-    { enabled: selectedId !== null },
+    { userId: userId! },
+    { enabled: userId !== null },
   )
-  const chatQ = trpc.admin.customerConversationThread.useQuery(
-    { userId: selectedId! },
-    { enabled: selectedId !== null },
+  const guestOpenItemsQ = trpc.admin.guestOpenItems.useQuery(
+    { profileId: profileId! },
+    { enabled: profileId !== null },
   )
+  const userChatQ = trpc.admin.customerConversationThread.useQuery(
+    { userId: userId! },
+    { enabled: userId !== null },
+  )
+  const guestChatQ = trpc.admin.customerConversationThread.useQuery(
+    { profileId: profileId! },
+    { enabled: profileId !== null },
+  )
+  const chatQ = selected?.kind === "guest" ? guestChatQ : userChatQ
 
   const customers = useMemo<ListItem[]>(() => {
     const users = (customerListQ.data ?? []).map((u) =>
@@ -85,7 +104,7 @@ export function useCustomerData(selectedId: number | null, showHidden = false) {
         tag: "inquiry" as const,
         tagLabel: tagLabels.inquiry ?? "",
         notifs: 0,
-        blocked: false,
+        blocked: g.blocked ?? false,
       }
     })
 
@@ -93,8 +112,30 @@ export function useCustomerData(selectedId: number | null, showHidden = false) {
   }, [customerListQ.data, guestListQ.data, language])
 
   const detail = useMemo<AdaptedCustomer | null>(() => {
+    if (selected === null) return null
+
+    // Guest: build the detail from inquiries (no user row exists).
+    if (selected.kind === "guest") {
+      const g = guestOpenItemsQ.data
+      if (!g?.email) return null
+      return guestToAdaptedCustomer(
+        {
+          profileId: selected.id,
+          email: g.email,
+          inquiries: g.inquiries.map((i) => ({
+            id: i.id,
+            subject: i.subject,
+            status: i.status,
+            createdAt: i.createdAt,
+          })),
+        },
+        t,
+      )
+    }
+
+    // Registered customer.
     const d = detailQ.data
-    if (!d?.user || selectedId === null) return null
+    if (!d?.user) return null
 
     const avatar = deriveAvatar(d.user.id)
     const status = deriveStatus(openItemsQ.data ?? null, t)
@@ -127,7 +168,14 @@ export function useCustomerData(selectedId: number | null, showHidden = false) {
       docs: [],
       timeline,
     }
-  }, [detailQ.data, openItemsQ.data, profileQ.data, selectedId, language])
+  }, [
+    selected,
+    detailQ.data,
+    openItemsQ.data,
+    profileQ.data,
+    guestOpenItemsQ.data,
+    language,
+  ])
 
   const chatMessages = useMemo<ChatMessage[]>(() => {
     return (chatQ.data?.messages ?? []).map((m) => ({
@@ -139,14 +187,23 @@ export function useCustomerData(selectedId: number | null, showHidden = false) {
     }))
   }, [chatQ.data])
 
+  const isDetailLoading =
+    selected?.kind === "guest" ? guestOpenItemsQ.isLoading : detailQ.isLoading
+
   return {
     customers,
-    isListLoading: customerListQ.isLoading,
+    isListLoading: customerListQ.isLoading || guestListQ.isLoading,
     detail,
-    isDetailLoading: detailQ.isLoading,
+    isDetailLoading,
     chatMessages,
     isChatLoading: chatQ.isLoading,
-    markNotCustomer: (userId: number) => markNotCustomer.mutate({ userId }),
-    restoreCustomer: (userId: number) => restoreCustomer.mutate({ userId }),
+    markNotCustomer: (item: Selection) =>
+      markNotCustomer.mutate(
+        item.kind === "guest" ? { profileId: item.id } : { userId: item.id },
+      ),
+    restoreCustomer: (item: Selection) =>
+      restoreCustomer.mutate(
+        item.kind === "guest" ? { profileId: item.id } : { userId: item.id },
+      ),
   }
 }

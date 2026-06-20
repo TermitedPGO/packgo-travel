@@ -4,6 +4,7 @@ import {
   inquiryReplyTurn,
   interactionTurn,
   mergeThread,
+  stripAgentMarkup,
   type ThreadTurn,
 } from "./adminCustomersThread";
 
@@ -81,5 +82,46 @@ describe("adminCustomersThread — mergeThread", () => {
 
   it("handles all-empty sources without throwing", () => {
     expect(mergeThread([[], [], []], 50)).toEqual({ messages: [], truncated: false });
+  });
+});
+
+describe("adminCustomersThread — stripAgentMarkup (leaked safety tags)", () => {
+  it("removes the <untrusted_input> wrapper but keeps the customer's words", () => {
+    expect(
+      stripAgentMarkup("Subject: 韓國 <untrusted_input> 你們有韓國的行程嗎 </untrusted_input>"),
+    ).toBe("Subject: 韓國 你們有韓國的行程嗎");
+  });
+
+  it("is case-insensitive and tolerates the closing tag with whitespace", () => {
+    expect(stripAgentMarkup("<UNTRUSTED_INPUT >hi</UNTRUSTED_INPUT >")).toBe("hi");
+  });
+
+  it("NEVER strips generic angle brackets a customer might type", () => {
+    expect(stripAgentMarkup("預算 < 5000 usd / 人")).toBe("預算 < 5000 usd / 人");
+    expect(stripAgentMarkup("<b>bold?</b>")).toBe("<b>bold?</b>");
+  });
+
+  it("preserves newlines while collapsing the doubled spaces removal leaves", () => {
+    expect(stripAgentMarkup("a <untrusted_input>  b\nc</untrusted_input>")).toBe("a b\nc");
+  });
+
+  it("is applied by every turn builder so no source leaks the tags", () => {
+    expect(
+      inquiryFirstTurn({ id: 1, message: "<untrusted_input>嗨</untrusted_input>", createdAt: d("2026-01-01") }).body,
+    ).toBe("嗨");
+    expect(
+      inquiryReplyTurn({ id: 1, senderType: "customer", message: "<untrusted_input>謝</untrusted_input>", createdAt: d("2026-01-01") }).body,
+    ).toBe("謝");
+    expect(
+      interactionTurn({ id: 1, direction: "inbound", content: "<untrusted_input>hi</untrusted_input>", createdAt: d("2026-01-01") }).body,
+    ).toBe("hi");
+  });
+
+  it("handles empty bodies, and leaves tag-free whitespace exactly as typed", () => {
+    expect(stripAgentMarkup("")).toBe("");
+    // no wrapper → conservative: do not touch the customer's spacing at all
+    expect(stripAgentMarkup("   ")).toBe("   ");
+    expect(stripAgentMarkup("Hi   Jeff")).toBe("Hi   Jeff");
+    expect(stripAgentMarkup("  leading + trailing  ")).toBe("  leading + trailing  ");
   });
 });

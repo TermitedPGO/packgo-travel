@@ -113,10 +113,24 @@ export const adminCustomersRouter = router({
    * conversation stay intact. Upserts a minimal profile if none exists yet.
    */
   markNotCustomer: adminProcedure
-    .input(z.object({ userId: z.number().int().positive() }))
+    .input(
+      z.union([
+        z.object({ userId: z.number().int().positive() }).strict(),
+        z.object({ profileId: z.number().int().positive() }).strict(),
+      ]),
+    )
     .mutation(async ({ input }) => {
       const drizzleDb = (await db.getDb())!;
       const { customerProfiles } = await import("../../drizzle/schema");
+      // Guest path: the profileId IS the customerProfiles row — update directly.
+      if ("profileId" in input) {
+        await drizzleDb
+          .update(customerProfiles)
+          .set({ status: "blocked" })
+          .where(eq(customerProfiles.id, input.profileId));
+        return { ok: true };
+      }
+      // Registered path: upsert a minimal profile keyed by userId.
       const existing = await drizzleDb
         .select({ id: customerProfiles.id })
         .from(customerProfiles)
@@ -137,14 +151,23 @@ export const adminCustomersRouter = router({
 
   /** restoreCustomer — undo markNotCustomer (status back to 'active'). */
   restoreCustomer: adminProcedure
-    .input(z.object({ userId: z.number().int().positive() }))
+    .input(
+      z.union([
+        z.object({ userId: z.number().int().positive() }).strict(),
+        z.object({ profileId: z.number().int().positive() }).strict(),
+      ]),
+    )
     .mutation(async ({ input }) => {
       const drizzleDb = (await db.getDb())!;
       const { customerProfiles } = await import("../../drizzle/schema");
       await drizzleDb
         .update(customerProfiles)
         .set({ status: "active" })
-        .where(eq(customerProfiles.userId, input.userId));
+        .where(
+          "profileId" in input
+            ? eq(customerProfiles.id, input.profileId)
+            : eq(customerProfiles.userId, input.userId),
+        );
       return { ok: true };
     }),
 
@@ -154,41 +177,54 @@ export const adminCustomersRouter = router({
    * whose email does not belong to any registered account (those are the
    * m2 歸戶 targets — they show as users, not twice). Newest contact first.
    */
-  guestList: adminProcedure.query(async () => {
-    const drizzleDb = (await db.getDb())!;
-    const {
-      customerProfiles,
-      users: usersTable,
-      inquiries: inquiriesTable,
-      agentMessages,
-    } = await import("../../drizzle/schema");
-    // 訪客門檻 (v694 hotfix): 123 historical profiles were mostly noise
-    // senders (bank alerts / marketing blasts) profiled before the
-    // pipeline's noise filter existed. A guest only earns a sidebar chip
-    // when there is actual CUSTOMER content behind it — an inquiry row or
-    // an escalation — otherwise the customer list drowns in junk.
-    const rows = await drizzleDb
-      .select({
-        profileId: customerProfiles.id,
-        email: customerProfiles.email,
-        updatedAt: customerProfiles.updatedAt,
-      })
-      .from(customerProfiles)
-      .where(
-        and(
-          sql`${customerProfiles.userId} IS NULL`,
-          sql`${customerProfiles.email} IS NOT NULL AND ${customerProfiles.email} != ''`,
-          sql`NOT EXISTS (SELECT 1 FROM ${usersTable} WHERE ${usersTable.email} = ${customerProfiles.email})`,
-          sql`(
-            EXISTS (SELECT 1 FROM ${inquiriesTable} WHERE ${inquiriesTable.customerEmail} = ${customerProfiles.email})
-            OR EXISTS (SELECT 1 FROM ${agentMessages} WHERE ${agentMessages.relatedCustomerProfileId} = ${customerProfiles.id} AND ${agentMessages.messageType} = 'escalation')
-          )`,
-        ),
-      )
-      .orderBy(desc(customerProfiles.updatedAt))
-      .limit(200);
-    return rows;
-  }),
+  guestList: adminProcedure
+    .input(z.object({ includeHidden: z.boolean().optional() }).optional())
+    .query(async ({ input }) => {
+      const drizzleDb = (await db.getDb())!;
+      const {
+        customerProfiles,
+        users: usersTable,
+        inquiries: inquiriesTable,
+        agentMessages,
+      } = await import("../../drizzle/schema");
+      // 訪客門檻 (v694 hotfix): 123 historical profiles were mostly noise
+      // senders (bank alerts / marketing blasts) profiled before the
+      // pipeline's noise filter existed. A guest only earns a sidebar chip
+      // when there is actual CUSTOMER content behind it — an inquiry row or
+      // an escalation — otherwise the customer list drowns in junk.
+      const rows = await drizzleDb
+        .select({
+          profileId: customerProfiles.id,
+          email: customerProfiles.email,
+          updatedAt: customerProfiles.updatedAt,
+          status: customerProfiles.status,
+        })
+        .from(customerProfiles)
+        .where(
+          and(
+            sql`${customerProfiles.userId} IS NULL`,
+            sql`${customerProfiles.email} IS NOT NULL AND ${customerProfiles.email} != ''`,
+            sql`NOT EXISTS (SELECT 1 FROM ${usersTable} WHERE ${usersTable.email} = ${customerProfiles.email})`,
+            sql`(
+              EXISTS (SELECT 1 FROM ${inquiriesTable} WHERE ${inquiriesTable.customerEmail} = ${customerProfiles.email})
+              OR EXISTS (SELECT 1 FROM ${agentMessages} WHERE ${agentMessages.relatedCustomerProfileId} = ${customerProfiles.id} AND ${agentMessages.messageType} = 'escalation')
+            )`,
+          ),
+        )
+        .orderBy(desc(customerProfiles.updatedAt))
+        .limit(200);
+      // Manual hide reuses the same customerProfiles.status='blocked' switch as
+      // registered accounts (markNotCustomer/restoreCustomer by profileId).
+      // Default view drops blocked guests; the "show hidden" toggle brings them
+      // back. Nothing is deleted — a mis-hide is one click to restore.
+      const withFlags = rows.map(({ status, ...r }) => ({
+        ...r,
+        blocked: status === "blocked",
+      }));
+      return input?.includeHidden
+        ? withFlags
+        : withFlags.filter((r) => !r.blocked);
+    }),
 
   /**
    * 批9 m3 — 訪客的詢問記錄(唯讀)。Keyed by the profile's email so the

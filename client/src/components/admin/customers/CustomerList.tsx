@@ -9,9 +9,11 @@ const TAG_STYLES: Record<string, string> = {
   inquiry: "bg-gray-100 text-gray-500",
 }
 
+type RowRef = { id: number; kind: "user" | "guest" }
+
 export default function CustomerList({
   customers,
-  selectedId,
+  selected,
   onSelect,
   showHidden,
   onToggleHidden,
@@ -19,12 +21,12 @@ export default function CustomerList({
   onRestoreCustomer,
 }: {
   customers: ListItem[]
-  selectedId: number | null
-  onSelect: (id: number) => void
+  selected: RowRef | null
+  onSelect: (ref: RowRef) => void
   showHidden: boolean
   onToggleHidden: (v: boolean) => void
-  onMarkNotCustomer: (userId: number) => void
-  onRestoreCustomer: (userId: number) => void
+  onMarkNotCustomer: (ref: RowRef) => void
+  onRestoreCustomer: (ref: RowRef) => void
 }) {
   const { t } = useLocale()
   const [query, setQuery] = useState("")
@@ -61,10 +63,12 @@ export default function CustomerList({
       <div className="flex-1 overflow-y-auto">
         {filtered.map((c) => (
           <div
-            key={c.id}
-            onClick={() => onSelect(c.id)}
+            key={`${c.kind}-${c.id}`}
+            onClick={() => onSelect({ id: c.id, kind: c.kind })}
             className={`group relative flex items-center gap-2.5 px-3 py-2.5 cursor-pointer border-b border-gray-50 transition-colors hover:bg-gray-50 ${
-              selectedId === c.id ? "bg-gray-50 border-l-[3px] border-l-gray-900" : ""
+              selected?.id === c.id && selected?.kind === c.kind
+                ? "bg-gray-50 border-l-[3px] border-l-gray-900"
+                : ""
             } ${c.blocked ? "opacity-55" : ""}`}
           >
             <div className="relative flex-shrink-0">
@@ -91,21 +95,21 @@ export default function CustomerList({
               </div>
               <div className="text-[11px] text-gray-400 truncate">{c.email}</div>
             </div>
-            {/* Per-row mark / restore (registered accounts only) */}
-            {c.kind === "user" && (
-              <button
-                type="button"
-                title={c.blocked ? t("admin.customers.restoreAction") : t("admin.customers.hideAction")}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  if (c.blocked) onRestoreCustomer(c.id)
-                  else onMarkNotCustomer(c.id)
-                }}
-                className="flex-shrink-0 p-1.5 rounded-lg text-gray-400 opacity-0 group-hover:opacity-100 hover:bg-gray-200 hover:text-gray-700 transition-all"
-              >
-                {c.blocked ? <RotateCcw className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-              </button>
-            )}
+            {/* Per-row mark / restore — works for both registered accounts and
+                email guests (suppliers like uvbookings can be hidden here too). */}
+            <button
+              type="button"
+              title={c.blocked ? t("admin.customers.restoreAction") : t("admin.customers.hideAction")}
+              onClick={(e) => {
+                e.stopPropagation()
+                const ref = { id: c.id, kind: c.kind }
+                if (c.blocked) onRestoreCustomer(ref)
+                else onMarkNotCustomer(ref)
+              }}
+              className="flex-shrink-0 p-1.5 rounded-lg text-gray-400 opacity-0 group-hover:opacity-100 hover:bg-gray-200 hover:text-gray-700 transition-all"
+            >
+              {c.blocked ? <RotateCcw className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+            </button>
             <div className="text-right flex-shrink-0">
               <div className="text-[10px] text-gray-400">{c.lastContact}</div>
               <span
