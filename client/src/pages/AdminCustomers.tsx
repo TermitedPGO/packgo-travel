@@ -13,8 +13,17 @@ import {
 export default function AdminCustomers() {
   const { t } = useLocale()
   const [selectedId, setSelectedId] = useState<number | null>(null)
-  const { customers, isListLoading, detail, isDetailLoading, chatMessages, isChatLoading } =
-    useCustomerData(selectedId)
+  const [showHidden, setShowHidden] = useState(false)
+  const {
+    customers,
+    isListLoading,
+    detail,
+    isDetailLoading,
+    chatMessages,
+    isChatLoading,
+    markNotCustomer,
+    restoreCustomer,
+  } = useCustomerData(selectedId, showHidden)
 
   return (
     <div className="h-full flex">
@@ -27,6 +36,10 @@ export default function AdminCustomers() {
           customers={customers}
           selectedId={selectedId}
           onSelect={setSelectedId}
+          showHidden={showHidden}
+          onToggleHidden={setShowHidden}
+          onMarkNotCustomer={markNotCustomer}
+          onRestoreCustomer={restoreCustomer}
         />
       )}
       {selectedId !== null ? (

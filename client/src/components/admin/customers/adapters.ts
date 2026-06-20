@@ -306,6 +306,7 @@ type RawUser = {
   bookingCount: number
   inquiryCount: number
   lastSignedIn: Date | null
+  blocked?: boolean
 }
 
 export function toListItem(
@@ -333,6 +334,7 @@ export function toListItem(
     tag,
     tagLabel: tagLabel[tag] ?? tag,
     notifs: 0,
+    blocked: raw.blocked ?? false,
   }
 }
 

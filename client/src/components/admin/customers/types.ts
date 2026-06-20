@@ -63,6 +63,8 @@ export type ListItem = {
   tag: "inquiry" | "pending" | "active"
   tagLabel: string
   notifs: number
+  /** registered account manually marked 非客人 (customerProfiles.status='blocked') */
+  blocked: boolean
 }
 
 export type AdaptedCustomer = {

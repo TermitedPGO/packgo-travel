@@ -3270,6 +3270,11 @@ export const en = {
       tagInquiry: 'Inquiry',
       tagPending: 'Pending',
       selectCustomer: 'Select a customer to view details',
+      searchPlaceholder: 'Search customers...',
+      showHidden: 'Show hidden accounts',
+      hideAction: 'Mark as non-customer',
+      restoreAction: 'Restore',
+      blockedBadge: 'Hidden',
       status: {
         allClear: 'All clear',
         allClearDesc: 'No open items at this time',

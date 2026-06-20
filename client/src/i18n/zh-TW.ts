@@ -3238,6 +3238,11 @@ export const zhTW = {
       tagInquiry: '詢問中',
       tagPending: '待跟進',
       selectCustomer: '選擇一位客戶查看詳情',
+      searchPlaceholder: '搜尋客戶...',
+      showHidden: '顯示已隱藏帳號',
+      hideAction: '標記非客人',
+      restoreAction: '還原',
+      blockedBadge: '已隱藏',
       status: {
         allClear: '一切就緒',
         allClearDesc: '目前沒有待處理的事項',

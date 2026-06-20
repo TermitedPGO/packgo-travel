@@ -19,6 +19,7 @@ import {
   interactionTurn,
   mergeThread,
 } from "./adminCustomersThread";
+import { isHiddenCustomer } from "./adminCustomersFilter";
 
 /**
  * 整合工作台 P2 — what counts as an OPEN item in a customer's inbox.
@@ -34,52 +35,115 @@ export const adminCustomersRouter = router({
    * Uses cached columns (bookingCount, inquiryCount, packpointBalance)
    * plus a subquery for totalSpend.
    */
-  customerList: adminProcedure.query(async () => {
-    const drizzleDb = (await db.getDb())!;
-    const {
-      users: usersTable,
-      bookings: bookingsTable,
-    } = await import("../../drizzle/schema");
+  customerList: adminProcedure
+    .input(z.object({ includeHidden: z.boolean().optional() }).optional())
+    .query(async ({ input }) => {
+      const drizzleDb = (await db.getDb())!;
+      const {
+        users: usersTable,
+        bookings: bookingsTable,
+        customerProfiles,
+      } = await import("../../drizzle/schema");
 
-    // Subquery: total spend per user (sum of non-cancelled bookings)
-    const spendSub = drizzleDb
-      .select({
-        userId: bookingsTable.userId,
-        totalSpend: sql<number>`COALESCE(SUM(${bookingsTable.totalPrice}), 0)`.as("totalSpend"),
-      })
-      .from(bookingsTable)
-      .where(
-        and(
-          sql`${bookingsTable.userId} IS NOT NULL`,
-          sql`${bookingsTable.bookingStatus} NOT IN ('cancelled')`,
+      // Subquery: total spend per user (sum of non-cancelled bookings)
+      const spendSub = drizzleDb
+        .select({
+          userId: bookingsTable.userId,
+          totalSpend: sql<number>`COALESCE(SUM(${bookingsTable.totalPrice}), 0)`.as("totalSpend"),
+        })
+        .from(bookingsTable)
+        .where(
+          and(
+            sql`${bookingsTable.userId} IS NOT NULL`,
+            sql`${bookingsTable.bookingStatus} NOT IN ('cancelled')`,
+          )
         )
-      )
-      .groupBy(bookingsTable.userId)
-      .as("spendSub");
+        .groupBy(bookingsTable.userId)
+        .as("spendSub");
 
-    const rows = await drizzleDb
-      .select({
-        id: usersTable.id,
-        name: usersTable.name,
-        email: usersTable.email,
-        phone: usersTable.phone,
-        avatar: usersTable.avatar,
-        tier: usersTable.tier,
-        role: usersTable.role,
-        packpointBalance: usersTable.packpointBalance,
-        bookingCount: usersTable.bookingCount,
-        inquiryCount: usersTable.inquiryCount,
-        totalSpend: sql<number>`COALESCE(${spendSub.totalSpend}, 0)`,
-        createdAt: usersTable.createdAt,
-        lastSignedIn: usersTable.lastSignedIn,
-      })
-      .from(usersTable)
-      .leftJoin(spendSub, eq(usersTable.id, spendSub.userId))
-      .where(eq(usersTable.role, "user"))
-      .orderBy(desc(usersTable.lastSignedIn));
+      // leftJoin customerProfiles (1:1 via unique uq_cp_user) for the manual
+      // 'blocked' status + lastInteractionAt signal the auto-junk rule needs.
+      const rows = await drizzleDb
+        .select({
+          id: usersTable.id,
+          name: usersTable.name,
+          email: usersTable.email,
+          phone: usersTable.phone,
+          avatar: usersTable.avatar,
+          tier: usersTable.tier,
+          role: usersTable.role,
+          packpointBalance: usersTable.packpointBalance,
+          bookingCount: usersTable.bookingCount,
+          inquiryCount: usersTable.inquiryCount,
+          totalSpend: sql<number>`COALESCE(${spendSub.totalSpend}, 0)`,
+          createdAt: usersTable.createdAt,
+          lastSignedIn: usersTable.lastSignedIn,
+          profileStatus: customerProfiles.status,
+          lastInteractionAt: customerProfiles.lastInteractionAt,
+        })
+        .from(usersTable)
+        .leftJoin(spendSub, eq(usersTable.id, spendSub.userId))
+        .leftJoin(customerProfiles, eq(customerProfiles.userId, usersTable.id))
+        .where(eq(usersTable.role, "user"))
+        .orderBy(desc(usersTable.lastSignedIn));
 
-    return rows;
-  }),
+      const withFlags = rows.map(({ profileStatus, lastInteractionAt, ...r }) => {
+        const blocked = profileStatus === "blocked";
+        const hidden = isHiddenCustomer(
+          {
+            bookingCount: r.bookingCount ?? 0,
+            inquiryCount: r.inquiryCount ?? 0,
+            lastInteractionAt: lastInteractionAt ?? null,
+          },
+          blocked,
+        );
+        return { ...r, blocked, hidden };
+      });
+
+      return input?.includeHidden ? withFlags : withFlags.filter((r) => !r.hidden);
+    }),
+
+  /**
+   * markNotCustomer — hide a registered account from the default customer list
+   * by setting its customerProfiles.status to 'blocked'. Reversible
+   * (restoreCustomer) and non-destructive: no row is deleted, all history and
+   * conversation stay intact. Upserts a minimal profile if none exists yet.
+   */
+  markNotCustomer: adminProcedure
+    .input(z.object({ userId: z.number().int().positive() }))
+    .mutation(async ({ input }) => {
+      const drizzleDb = (await db.getDb())!;
+      const { customerProfiles } = await import("../../drizzle/schema");
+      const existing = await drizzleDb
+        .select({ id: customerProfiles.id })
+        .from(customerProfiles)
+        .where(eq(customerProfiles.userId, input.userId))
+        .limit(1);
+      if (existing[0]) {
+        await drizzleDb
+          .update(customerProfiles)
+          .set({ status: "blocked" })
+          .where(eq(customerProfiles.id, existing[0].id));
+      } else {
+        await drizzleDb
+          .insert(customerProfiles)
+          .values({ userId: input.userId, status: "blocked" });
+      }
+      return { ok: true };
+    }),
+
+  /** restoreCustomer — undo markNotCustomer (status back to 'active'). */
+  restoreCustomer: adminProcedure
+    .input(z.object({ userId: z.number().int().positive() }))
+    .mutation(async ({ input }) => {
+      const drizzleDb = (await db.getDb())!;
+      const { customerProfiles } = await import("../../drizzle/schema");
+      await drizzleDb
+        .update(customerProfiles)
+        .set({ status: "active" })
+        .where(eq(customerProfiles.userId, input.userId));
+      return { ok: true };
+    }),
 
   /**
    * 批9 m3 — email 訪客列表(Jeff 拍板:sidebar 列 註冊用戶 + email 訪客)。

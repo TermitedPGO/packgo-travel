@@ -14,8 +14,9 @@ import {
   deriveAvatar,
 } from "./adapters"
 
-export function useCustomerData(selectedId: number | null) {
+export function useCustomerData(selectedId: number | null, showHidden = false) {
   const { t, language } = useLocale()
+  const utils = trpc.useUtils()
   const formatDate = (d: Date) =>
     format(new Date(d), "M/d")
 
@@ -25,8 +26,14 @@ export function useCustomerData(selectedId: number | null) {
     pending: t("admin.customers.tagPending"),
   }
 
-  const customerListQ = trpc.admin.customerList.useQuery()
+  const customerListQ = trpc.admin.customerList.useQuery({ includeHidden: showHidden })
   const guestListQ = trpc.admin.guestList.useQuery()
+
+  const invalidateList = () => {
+    void utils.admin.customerList.invalidate()
+  }
+  const markNotCustomer = trpc.admin.markNotCustomer.useMutation({ onSuccess: invalidateList })
+  const restoreCustomer = trpc.admin.restoreCustomer.useMutation({ onSuccess: invalidateList })
 
   const detailQ = trpc.admin.customerDetail.useQuery(
     { userId: selectedId! },
@@ -56,6 +63,7 @@ export function useCustomerData(selectedId: number | null) {
           bookingCount: u.bookingCount,
           inquiryCount: u.inquiryCount,
           lastSignedIn: u.lastSignedIn,
+          blocked: u.blocked,
         },
         tagLabels,
         formatDate,
@@ -77,6 +85,7 @@ export function useCustomerData(selectedId: number | null) {
         tag: "inquiry" as const,
         tagLabel: tagLabels.inquiry ?? "",
         notifs: 0,
+        blocked: false,
       }
     })
 
@@ -137,5 +146,7 @@ export function useCustomerData(selectedId: number | null) {
     isDetailLoading: detailQ.isLoading,
     chatMessages,
     isChatLoading: chatQ.isLoading,
+    markNotCustomer: (userId: number) => markNotCustomer.mutate({ userId }),
+    restoreCustomer: (userId: number) => restoreCustomer.mutate({ userId }),
   }
 }
