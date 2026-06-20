@@ -14,6 +14,34 @@ import {
   deriveAvatar,
 } from "./adapters"
 
+function looksLikeJson(s: string | null): boolean {
+  if (!s) return false
+  const t = s.trim()
+  return (t.startsWith("{") && t.endsWith("}")) || (t.startsWith("[") && t.endsWith("]"))
+}
+
+function stripJsonMetadata(body: string): string {
+  let cleaned = body
+  const markers = ["suggestedActions", "streamed", "actionType"]
+  for (const m of markers) {
+    const idx = cleaned.indexOf('"' + m + '"')
+    if (idx === -1) continue
+    let start = cleaned.lastIndexOf("{", idx)
+    if (start === -1) start = idx
+    let depth = 0
+    let end = start
+    for (let i = start; i < cleaned.length; i++) {
+      if (cleaned[i] === "{") depth++
+      else if (cleaned[i] === "}") { depth--; if (depth === 0) { end = i + 1; break } }
+    }
+    if (end > start) {
+      const after = cleaned[end] === ")" ? end + 1 : end
+      cleaned = cleaned.slice(0, start) + cleaned.slice(after)
+    }
+  }
+  return cleaned.replace(/\n\n\n+/g, "\n\n").trim()
+}
+
 export function useCustomerData(selectedId: number | null) {
   const { t, language } = useLocale()
   const formatDate = (d: Date) =>
@@ -124,8 +152,8 @@ export function useCustomerData(selectedId: number | null) {
     return (chatQ.data ?? []).map((m) => ({
       id: m.id,
       senderRole: m.senderRole,
-      body: m.body,
-      context: m.context,
+      body: stripJsonMetadata(m.body),
+      context: looksLikeJson(m.context) ? null : m.context,
       createdAt: new Date(m.createdAt),
     }))
   }, [chatQ.data])

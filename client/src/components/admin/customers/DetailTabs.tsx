@@ -101,16 +101,18 @@ export function OverviewTab({ customer: c, chatMessages }: { customer: AdaptedCu
       </div>
 
       {/* Checklist */}
-      <div className="grid grid-cols-2 gap-x-8 gap-y-1.5">
-        {c.status.checklist.map((item, i) => (
-          <div key={i} className="flex items-center gap-1.5 text-[11.5px]">
-            {CHECKLIST_ICON[item.s]}
-            <span className={item.s === "muted" ? "text-gray-400" : "text-gray-700"}>
-              {item.label}
-            </span>
-          </div>
-        ))}
-      </div>
+      {c.status.checklist.length > 0 && (
+        <div className="grid grid-cols-2 gap-x-8 gap-y-1.5">
+          {c.status.checklist.map((item, i) => (
+            <div key={i} className="flex items-center gap-1.5 text-[11.5px]">
+              {CHECKLIST_ICON[item.s]}
+              <span className={item.s === "muted" ? "text-gray-400" : "text-gray-700"}>
+                {item.label}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Bundle */}
       {c.status.bundle && (
