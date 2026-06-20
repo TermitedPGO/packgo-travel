@@ -566,25 +566,58 @@ export const adminCustomersRouter = router({
     )
     .query(async ({ input }) => {
       const drizzleDb = (await db.getDb())!;
-      const { customerChatMessages } = await import("../../drizzle/schema");
-      const where =
+      const { customerChatMessages, inquiries, inquiryMessages } =
+        await import("../../drizzle/schema");
+      const lim = input.limit ?? 50;
+
+      // Source 1: customerChatMessages (agent chat in admin panel)
+      const ccmWhere =
         "userId" in input
           ? eq(customerChatMessages.customerUserId, input.userId)
           : eq(customerChatMessages.customerProfileId, input.profileId);
-      const rows = await drizzleDb
+      const agentRows = await drizzleDb
         .select({
           id: customerChatMessages.id,
           senderRole: customerChatMessages.senderRole,
           body: customerChatMessages.body,
-          // m3b — cards + suggestedActions JSON for turn extras rendering
           context: customerChatMessages.context,
           createdAt: customerChatMessages.createdAt,
         })
         .from(customerChatMessages)
-        .where(where)
+        .where(ccmWhere)
         .orderBy(desc(customerChatMessages.createdAt))
-        .limit(input.limit ?? 50);
-      return rows.reverse();
+        .limit(lim);
+
+      // Source 2: inquiryMessages (customer inquiries from the website)
+      let inquiryRows: Array<(typeof agentRows)[number]> = [];
+      if ("userId" in input) {
+        const userInquiries = await drizzleDb
+          .select({ id: inquiries.id })
+          .from(inquiries)
+          .where(eq(inquiries.userId, input.userId));
+        const inquiryIds = userInquiries.map((i) => i.id);
+        if (inquiryIds.length > 0) {
+          inquiryRows = await drizzleDb
+            .select({
+              id: inquiryMessages.id,
+              senderRole: sql<"jeff" | "agent">`
+                CASE WHEN ${inquiryMessages.senderType} = 'admin' THEN 'jeff' ELSE 'agent' END
+              `.as("senderRole"),
+              body: inquiryMessages.message,
+              context: sql<string | null>`NULL`.as("context"),
+              createdAt: inquiryMessages.createdAt,
+            })
+            .from(inquiryMessages)
+            .where(inArray(inquiryMessages.inquiryId, inquiryIds))
+            .orderBy(desc(inquiryMessages.createdAt))
+            .limit(lim);
+        }
+      }
+
+      const merged = [...agentRows, ...inquiryRows]
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+        .slice(-lim);
+      return merged;
     }),
 
   customerProfileData: adminProcedure
