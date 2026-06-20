@@ -12,6 +12,13 @@ import { z } from "zod";
 import { adminProcedure, router } from "../_core/trpc";
 import * as db from "../db";
 import { eq, desc, sql, and, or, inArray } from "drizzle-orm";
+import {
+  type ThreadTurn,
+  inquiryFirstTurn,
+  inquiryReplyTurn,
+  interactionTurn,
+  mergeThread,
+} from "./adminCustomersThread";
 
 /**
  * 整合工作台 P2 — what counts as an OPEN item in a customer's inbox.
@@ -566,58 +573,182 @@ export const adminCustomersRouter = router({
     )
     .query(async ({ input }) => {
       const drizzleDb = (await db.getDb())!;
-      const { customerChatMessages, inquiries, inquiryMessages } =
-        await import("../../drizzle/schema");
-      const lim = input.limit ?? 50;
-
-      // Source 1: customerChatMessages (agent chat in admin panel)
-      const ccmWhere =
+      const { customerChatMessages } = await import("../../drizzle/schema");
+      const where =
         "userId" in input
           ? eq(customerChatMessages.customerUserId, input.userId)
           : eq(customerChatMessages.customerProfileId, input.profileId);
-      const agentRows = await drizzleDb
+      const rows = await drizzleDb
         .select({
           id: customerChatMessages.id,
           senderRole: customerChatMessages.senderRole,
           body: customerChatMessages.body,
+          // m3b — cards + suggestedActions JSON for turn extras rendering
           context: customerChatMessages.context,
           createdAt: customerChatMessages.createdAt,
         })
         .from(customerChatMessages)
-        .where(ccmWhere)
+        .where(where)
         .orderBy(desc(customerChatMessages.createdAt))
-        .limit(lim);
+        .limit(input.limit ?? 50);
+      return rows.reverse();
+    }),
 
-      // Source 2: inquiryMessages (customer inquiries from the website)
-      let inquiryRows: Array<(typeof agentRows)[number]> = [];
-      if ("userId" in input) {
-        const userInquiries = await drizzleDb
-          .select({ id: inquiries.id })
+  /**
+   * customerConversationThread — the REAL conversation WITH the customer, for
+   * the customer page's history view. Distinct from customerChatList (which is
+   * Jeff ↔ AI-ops-agent chat). Merges three sources, newest-`limit` per source,
+   * normalized to senderRole 'customer' | 'jeff', then chronological:
+   *   1. inquiries.message       — the customer's original first message
+   *   2. inquiryMessages         — website inquiry thread replies
+   *   3. customerInteractions    — Gmail / email / multi-channel (spam-filtered)
+   *
+   * Cross-customer-leakage rules (adversarially verified, do NOT relax):
+   *   - REGISTERED inquiries are keyed ONLY by inquiries.userId. We never OR-in
+   *     inquiries.customerEmail: that column is attacker-controlled free text
+   *     (publicProcedure inquiries.create), so an email match could splice a
+   *     different person's thread into this customer's pane.
+   *   - customerInteractions is keyed by a SINGLE integer customerProfileId
+   *     (registered → resolved via the unique customerProfiles.userId; guest →
+   *     the input profileId). Never by customerProfiles.email (non-unique).
+   *   - GUEST inquiries use customerEmail, but only AND userId IS NULL, and the
+   *     email is read from OUR customerProfiles row (not from client input).
+   *   - WeChat is intentionally out of scope here (M2).
+   *
+   * Returns string ids namespaced by source (`inq:` / `im:` / `ci:`) so React
+   * keys stay unique across tables. `truncated` flags that an older slice was
+   * dropped by the per-source cap.
+   */
+  customerConversationThread: adminProcedure
+    .input(
+      z.union([
+        z
+          .object({
+            userId: z.number().int().positive(),
+            limit: z.number().int().min(1).max(200).optional(),
+          })
+          .strict(),
+        z
+          .object({
+            profileId: z.number().int().positive(),
+            limit: z.number().int().min(1).max(200).optional(),
+          })
+          .strict(),
+      ]),
+    )
+    .query(async ({ input }) => {
+      const drizzleDb = (await db.getDb())!;
+      const {
+        customerProfiles,
+        inquiries,
+        inquiryMessages,
+        customerInteractions,
+      } = await import("../../drizzle/schema");
+      const lim = input.limit ?? 50;
+      const isRegistered = "userId" in input;
+
+      // Resolve this customer's single customerProfileId + email from OUR DB.
+      // Registered: via the unique customerProfiles.userId (uq_cp_user).
+      // Guest: the input profileId is itself the profile row.
+      const profileRow = (
+        await drizzleDb
+          .select({ id: customerProfiles.id, email: customerProfiles.email })
+          .from(customerProfiles)
+          .where(
+            isRegistered
+              ? eq(customerProfiles.userId, input.userId)
+              : eq(customerProfiles.id, input.profileId),
+          )
+          .limit(1)
+      )[0];
+      const resolvedProfileId = profileRow?.id ?? null;
+      const profileEmail = profileRow?.email ?? null;
+
+      // ── Source 1+2: inquiries (original message) + inquiryMessages (replies)
+      // Registered: key strictly by inquiries.userId. Guest: by customerEmail
+      // AND userId IS NULL, email sourced from our own profile row.
+      let inquiryIdRows: Array<{
+        id: number;
+        message: string;
+        createdAt: Date;
+      }> = [];
+      if (isRegistered) {
+        inquiryIdRows = await drizzleDb
+          .select({
+            id: inquiries.id,
+            message: inquiries.message,
+            createdAt: inquiries.createdAt,
+          })
           .from(inquiries)
-          .where(eq(inquiries.userId, input.userId));
-        const inquiryIds = userInquiries.map((i) => i.id);
-        if (inquiryIds.length > 0) {
-          inquiryRows = await drizzleDb
-            .select({
-              id: inquiryMessages.id,
-              senderRole: sql<"jeff" | "agent">`
-                CASE WHEN ${inquiryMessages.senderType} = 'admin' THEN 'jeff' ELSE 'agent' END
-              `.as("senderRole"),
-              body: inquiryMessages.message,
-              context: sql<string | null>`NULL`.as("context"),
-              createdAt: inquiryMessages.createdAt,
-            })
-            .from(inquiryMessages)
-            .where(inArray(inquiryMessages.inquiryId, inquiryIds))
-            .orderBy(desc(inquiryMessages.createdAt))
-            .limit(lim);
-        }
+          .where(eq(inquiries.userId, input.userId))
+          .orderBy(desc(inquiries.createdAt))
+          .limit(lim);
+      } else if (profileEmail) {
+        inquiryIdRows = await drizzleDb
+          .select({
+            id: inquiries.id,
+            message: inquiries.message,
+            createdAt: inquiries.createdAt,
+          })
+          .from(inquiries)
+          .where(
+            and(
+              sql`${inquiries.userId} IS NULL`,
+              eq(inquiries.customerEmail, profileEmail),
+            ),
+          )
+          .orderBy(desc(inquiries.createdAt))
+          .limit(lim);
       }
 
-      const merged = [...agentRows, ...inquiryRows]
-        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-        .slice(-lim);
-      return merged;
+      const inquiryFirstTurns = inquiryIdRows.map(inquiryFirstTurn);
+
+      let inquiryReplyTurns: ThreadTurn[] = [];
+      const inquiryIds = inquiryIdRows.map((r) => r.id);
+      if (inquiryIds.length > 0) {
+        const replies = await drizzleDb
+          .select({
+            id: inquiryMessages.id,
+            senderType: inquiryMessages.senderType,
+            message: inquiryMessages.message,
+            createdAt: inquiryMessages.createdAt,
+          })
+          .from(inquiryMessages)
+          .where(inArray(inquiryMessages.inquiryId, inquiryIds))
+          .orderBy(desc(inquiryMessages.createdAt))
+          .limit(lim);
+        inquiryReplyTurns = replies.map(inquiryReplyTurn);
+      }
+
+      // ── Source 3: customerInteractions (Gmail / email / multi-channel).
+      // Single-profileId key only. Spam predicate is byte-for-byte the same as
+      // guestOpenItems — confirmed/unreviewed spam stays hidden, rescued shows,
+      // outbound (classification NULL) is never hidden.
+      let interactionTurns: ThreadTurn[] = [];
+      if (resolvedProfileId !== null) {
+        const interactions = await drizzleDb
+          .select({
+            id: customerInteractions.id,
+            direction: customerInteractions.direction,
+            content: customerInteractions.content,
+            createdAt: customerInteractions.createdAt,
+          })
+          .from(customerInteractions)
+          .where(
+            and(
+              eq(customerInteractions.customerProfileId, resolvedProfileId),
+              sql`NOT (COALESCE(${customerInteractions.classification}, '') = 'spam' AND COALESCE(${customerInteractions.spamVerdict}, '') != 'rescued')`,
+            ),
+          )
+          .orderBy(desc(customerInteractions.createdAt))
+          .limit(lim);
+        interactionTurns = interactions.map(interactionTurn);
+      }
+
+      return mergeThread(
+        [inquiryFirstTurns, inquiryReplyTurns, interactionTurns],
+        lim,
+      );
     }),
 
   customerProfileData: adminProcedure

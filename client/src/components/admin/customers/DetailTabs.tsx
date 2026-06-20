@@ -60,7 +60,7 @@ export function OverviewTab({ customer: c, chatMessages }: { customer: AdaptedCu
               </span>
               <div className="flex-1 min-w-0">
                 <span className="font-medium text-gray-900">
-                  {m.senderRole === "admin" ? t("admin.customers.followUp.me") : c.name}
+                  {m.senderRole === "jeff" ? t("admin.customers.followUp.me") : c.name}
                 </span>
                 <p className="text-gray-600 mt-0.5 line-clamp-2">{m.body}</p>
                 {m.context && (

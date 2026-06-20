@@ -92,8 +92,8 @@ export type AdaptedCustomer = {
 }
 
 export type ChatMessage = {
-  id: number
-  senderRole: string
+  id: string
+  senderRole: "customer" | "jeff"
   body: string
   context: string | null
   createdAt: Date
