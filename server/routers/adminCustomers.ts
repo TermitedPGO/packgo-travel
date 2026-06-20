@@ -45,11 +45,14 @@ export const adminCustomersRouter = router({
         customerProfiles,
       } = await import("../../drizzle/schema");
 
-      // Subquery: total spend per user (sum of non-cancelled bookings)
+      // Subquery: total spend per user (sum of non-cancelled bookings).
+      // Alias must NOT be `totalSpend`: once we leftJoin customerProfiles (which
+      // has its OWN totalSpend column), a bare `COALESCE(totalSpend,0)` in the
+      // outer select becomes ambiguous and MySQL rejects the whole query.
       const spendSub = drizzleDb
         .select({
           userId: bookingsTable.userId,
-          totalSpend: sql<number>`COALESCE(SUM(${bookingsTable.totalPrice}), 0)`.as("totalSpend"),
+          bookingSpendSum: sql<number>`COALESCE(SUM(${bookingsTable.totalPrice}), 0)`.as("bookingSpendSum"),
         })
         .from(bookingsTable)
         .where(
@@ -75,7 +78,7 @@ export const adminCustomersRouter = router({
           packpointBalance: usersTable.packpointBalance,
           bookingCount: usersTable.bookingCount,
           inquiryCount: usersTable.inquiryCount,
-          totalSpend: sql<number>`COALESCE(${spendSub.totalSpend}, 0)`,
+          totalSpend: sql<number>`COALESCE(${spendSub.bookingSpendSum}, 0)`,
           createdAt: usersTable.createdAt,
           lastSignedIn: usersTable.lastSignedIn,
           profileStatus: customerProfiles.status,
