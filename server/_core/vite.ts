@@ -6,74 +6,8 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import viteConfig from "../../vite.config";
 import { createChildLogger } from "./logger";
+import { isKnownRoute } from "./knownRoutes";
 const log = createChildLogger({ module: "vite" });
-
-/**
- * Server-side route whitelist — mirrors client/src/App.tsx routes.
- *
- * Used to decide whether the SPA fallback should return HTTP 200 (valid route,
- * React will render the page) or HTTP 404 (unknown URL — the SPA shell is still
- * served so NotFound.tsx can render, but with a real 404 status so Google does
- * not treat every garbage URL as a soft-200).
- *
- * Keep this in sync with App.tsx <Route path="..."> entries. A prefix that ends
- * with "/" matches anything below it (nested paths). An entry without a trailing
- * slash matches only the exact path.
- */
-const KNOWN_ROUTE_PATTERNS: RegExp[] = [
-  /^\/$/,
-  /^\/search$/,
-  /^\/destinations\/[^/]+$/,              // /destinations/:region
-  /^\/destinations\/[^/]+\/[^/]+$/,       // /destinations/:region/:country
-  /^\/cruises$/,
-  /^\/tours$/,
-  /^\/tours\/[^/]+$/,                     // /tours/:id
-  /^\/tours\/[^/]+\/print$/,              // /tours/:id/print
-  /^\/tour\/[^/]+$/,                      // legacy /tour/:id (seen in sitemap)
-  /^\/login$/,
-  /^\/forgot-password$/,
-  /^\/reset-password$/,
-  /^\/admin(\/.*)?$/,                     // /admin (complete AdminV2) and nested admin routes
-  /^\/workspace(\/.*)?$/,                 // 整合工作台 redesign preview (chat-first 後台) + 巢狀
-  /^\/profile$/,
-  /^\/book\/[^/]+$/,                      // /book/:id
-  /^\/bookings\/[^/]+$/,                  // /bookings/:id
-  /^\/payment\/(success|failure)$/,
-  /^\/inquiry$/,
-  /^\/custom-tour-request$/,
-  /^\/custom-tours$/,
-  /^\/china-visa$/,
-  /^\/china-visa\/success$/,
-  /^\/china-visa\/status\/[^/]+$/,
-  /^\/visa-services$/,
-  /^\/group-packages$/,
-  /^\/flight-booking$/,
-  /^\/airport-transfer$/,
-  /^\/hotel-booking$/,
-  /^\/about-us$/,
-  /^\/terms-of-service$/,
-  /^\/privacy-policy$/,
-  /^\/faq$/,
-  /^\/contact-us$/,
-  /^\/emergency$/,                        // 2026-05-22 P23: 24h emergency intake (QA audit Phase 5)
-  /^\/membership$/,                       // Round 80.19: AI Advisor Phase 1 paywall target
-  /^\/membership-terms$/,                 // 2026-05-22 P23: AB 390 §17602 disclosure link
-  /^\/rewards$/,                          // Round 80.22 Phase F: Packpoint redemption catalog
-  /^\/preview\/[^/]+$/,                   // Round 80.9: internal preview/mockup routes
-  /^\/404$/,
-];
-
-/** Strip query string + trailing slash (except for root) for pattern matching. */
-function normalizeUrlForMatch(originalUrl: string): string {
-  const pathOnly = originalUrl.split("?")[0] || "/";
-  if (pathOnly === "/") return "/";
-  return pathOnly.replace(/\/+$/, "");
-}
-
-function isKnownRoute(originalUrl: string): boolean {
-  const pathOnly = normalizeUrlForMatch(originalUrl);
-  return KNOWN_ROUTE_PATTERNS.some((re) => re.test(pathOnly));
-}
 
 export async function setupVite(app: Express, server: Server) {
   const serverOptions = {

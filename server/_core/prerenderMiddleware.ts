@@ -56,7 +56,7 @@ export function shouldPrerender(pathname: string): boolean {
   }
   if (/\.[a-z0-9]+$/i.test(pathname)) return false; // has a file extension → asset
   if (
-    /^\/(admin|profile|bookings?|book|payment|reset-password|forgot-password)\b/.test(
+    /^\/(admin|ops|workspace|profile|bookings?|book|payment|reset-password|forgot-password)\b/.test(
       pathname,
     )
   ) {
