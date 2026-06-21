@@ -403,6 +403,31 @@ type GuestInquiry = {
 // the inquiry enum grows (replied/resolved/closed all count as handled).
 export const OPEN_INQUIRY_STATUSES = new Set(["new", "in_progress"])
 
+/**
+ * Rebuild an inquiry draft's approvalTasks.payload JSON with Jeff's inline edit.
+ * THROWS rather than silently falling back — on a 碰錢碰法律 send, dropping the
+ * edit and shipping the original would be worse than an error. Guards an empty
+ * body (mirrors the server's min(1)) and a missing/unparseable payload.
+ */
+export function buildInquiryEditedPayload(
+  payloadJson: string | null,
+  editedBody: string,
+): string {
+  if (!editedBody.trim()) throw new Error("empty draft body")
+  if (!payloadJson) throw new Error("missing draft payload")
+  let p: Record<string, unknown>
+  try {
+    const parsed = JSON.parse(payloadJson)
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("bad payload shape")
+    }
+    p = parsed as Record<string, unknown>
+  } catch {
+    throw new Error("unparseable draft payload")
+  }
+  return JSON.stringify({ ...p, draftBody: editedBody })
+}
+
 export function guestToAdaptedCustomer(
   guest: {
     profileId: number

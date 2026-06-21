@@ -2,7 +2,7 @@ import { useMemo } from "react"
 import { trpc } from "@/lib/trpc"
 import { useLocale } from "@/contexts/LocaleContext"
 import { format } from "date-fns"
-import type { ListItem, AdaptedCustomer, ChatMessage, Doc } from "./types"
+import type { ListItem, AdaptedCustomer, ChatMessage, Doc, Draft } from "./types"
 import {
   toListItem,
   toOrders,
@@ -14,6 +14,7 @@ import {
   deriveAvatar,
   guestToAdaptedCustomer,
   deriveFollowup,
+  buildInquiryEditedPayload,
   OPEN_INQUIRY_STATUSES,
 } from "./adapters"
 
@@ -85,6 +86,48 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
     { enabled: profileId !== null },
   )
 
+  // Batch 2 — pending AI reply drafts for this customer (both stores, unified).
+  const userDraftsQ = trpc.admin.customerDrafts.useQuery(
+    { userId: userId! },
+    { enabled: userId !== null },
+  )
+  const guestDraftsQ = trpc.admin.customerDrafts.useQuery(
+    { profileId: profileId! },
+    { enabled: profileId !== null },
+  )
+
+  // Approve→send reuses the EXISTING audited mutations, dispatched by source.
+  const invalidateDrafts = () => {
+    void utils.admin.customerDrafts.invalidate()
+    void utils.admin.customerConversationThread.invalidate()
+  }
+  const approveInquiryDraft = trpc.commandCenter.approve.useMutation({
+    onSuccess: invalidateDrafts,
+  })
+  const sendEscalationDraft = trpc.commandCenter.escalationReply.useMutation({
+    onSuccess: invalidateDrafts,
+  })
+
+  /** Approve+send one draft. editedBody (optional) = Jeff's inline edit. */
+  const approveDraft = async (draft: Draft, editedBody?: string) => {
+    if (draft.source === "email" && draft.messageId != null) {
+      const body = editedBody ?? draft.body
+      if (!body.trim()) throw new Error("empty draft body")
+      await sendEscalationDraft.mutateAsync({ messageId: draft.messageId, body })
+      return
+    }
+    if (draft.source === "inquiry" && draft.taskId != null) {
+      // editedBody present → rebuild payload (buildInquiryEditedPayload throws on
+      // empty body / bad payload, so an edit is never silently dropped and the
+      // original 碰錢碰法律 draft is never sent in place of Jeff's correction).
+      const editedPayload =
+        editedBody != null
+          ? buildInquiryEditedPayload(draft.payload, editedBody)
+          : undefined
+      await approveInquiryDraft.mutateAsync({ id: draft.taskId, editedPayload })
+    }
+  }
+
   const customers = useMemo<ListItem[]>(() => {
     const users = (customerListQ.data ?? []).map((u) =>
       toListItem(
@@ -145,6 +188,22 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
       date: formatDate(new Date(d.createdAt)),
     }))
 
+    // Pending AI reply drafts (both stores), mapped to the UI Draft shape.
+    const rawDrafts = (selected.kind === "guest" ? guestDraftsQ.data : userDraftsQ.data) ?? []
+    const drafts: Draft[] = rawDrafts.map((d) => ({
+      id: d.id,
+      source: d.source,
+      type: d.kind,
+      to: d.to,
+      subject: d.subject,
+      attachments: d.attachments,
+      body: d.body,
+      sensitive: d.sensitive,
+      taskId: d.taskId,
+      messageId: d.messageId,
+      payload: d.payload,
+    }))
+
     // Last contact = newest message in the merged conversation thread (either
     // side), which mergeThread returns oldest→newest.
     const msgs = chatQ.data?.messages ?? []
@@ -185,6 +244,7 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
         ),
         docs,
         followup,
+        drafts,
       }
     }
 
@@ -232,7 +292,7 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
       aiSummary,
       followup,
       status,
-      drafts: [],
+      drafts,
       profile,
       orders,
       docs,
@@ -246,6 +306,8 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
     guestOpenItemsQ.data,
     userDocsQ.data,
     guestDocsQ.data,
+    userDraftsQ.data,
+    guestDraftsQ.data,
     chatQ.data,
     language,
   ])
@@ -280,5 +342,7 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
       ),
     createManualCustomer: createManualCustomer.mutateAsync,
     isCreating: createManualCustomer.isPending,
+    approveDraft,
+    isApprovingDraft: approveInquiryDraft.isPending || sendEscalationDraft.isPending,
   }
 }

@@ -28,6 +28,11 @@ import {
   flightOrderDoc,
   mergeDocs,
 } from "./adminCustomersDocs";
+import {
+  inquiryDraftCard,
+  escalationDraftCard,
+  mergeDrafts,
+} from "./adminCustomerDrafts";
 
 /**
  * 整合工作台 P2 — what counts as an OPEN item in a customer's inbox.
@@ -877,6 +882,158 @@ export const adminCustomersRouter = router({
    * keys stay unique across tables. `truncated` flags that an older slice was
    * dropped by the per-source cap.
    */
+  /**
+   * customerDrafts — pending AI reply drafts for ONE customer (Batch 2),
+   * unified across the two existing stores so Jeff can one-click approve→send
+   * from the customer page. READ-ONLY here; the actual send reuses the existing
+   * audited mutations dispatched by the card's `source`:
+   *   - source=inquiry → commandCenter.approve / reject ({ id: taskId })
+   *   - source=email   → commandCenter.escalationReply ({ messageId })
+   * Identity resolves from OUR DB exactly like customerConversationThread
+   * (verified email + profileIds, userId-IS-NULL guard) so a draft never
+   * surfaces under the wrong customer.
+   */
+  customerDrafts: adminProcedure
+    .input(
+      z.union([
+        z.object({ userId: z.number().int().positive() }).strict(),
+        z.object({ profileId: z.number().int().positive() }).strict(),
+      ]),
+    )
+    .query(async ({ input }) => {
+      const drizzleDb = (await db.getDb())!;
+      const {
+        users: usersTable,
+        customerProfiles,
+        inquiries,
+        approvalTasks,
+        agentMessages,
+      } = await import("../../drizzle/schema");
+      const isRegistered = "userId" in input;
+
+      // Identity from OUR DB (same resolution as customerConversationThread).
+      let verifiedEmail: string | null = null;
+      let guestEmail: string | null = null;
+      let profileIds: number[] = [];
+      if (isRegistered) {
+        verifiedEmail =
+          (
+            await drizzleDb
+              .select({ email: usersTable.email })
+              .from(usersTable)
+              .where(eq(usersTable.id, input.userId))
+              .limit(1)
+          )[0]?.email ?? null;
+        const profs = await drizzleDb
+          .select({ id: customerProfiles.id })
+          .from(customerProfiles)
+          .where(
+            verifiedEmail
+              ? or(
+                  eq(customerProfiles.userId, input.userId),
+                  eq(customerProfiles.email, verifiedEmail),
+                )
+              : eq(customerProfiles.userId, input.userId),
+          );
+        profileIds = profs.map((p) => p.id);
+      } else {
+        const prof = (
+          await drizzleDb
+            .select({ id: customerProfiles.id, email: customerProfiles.email })
+            .from(customerProfiles)
+            .where(eq(customerProfiles.id, input.profileId))
+            .limit(1)
+        )[0];
+        guestEmail = prof?.email ?? null;
+        if (prof) profileIds = [prof.id];
+      }
+      const fallbackEmail = verifiedEmail ?? guestEmail;
+
+      // ── Source 1: website-inquiry drafts — approvalTasks (lane=cs,
+      // taskType=inquiry_reply, status=pending) for THIS customer's inquiries.
+      // status=pending is the clean not-yet-sent signal (approve flips it).
+      const inquiryWhere = isRegistered
+        ? verifiedEmail
+          ? or(
+              eq(inquiries.userId, input.userId),
+              and(
+                sql`${inquiries.userId} IS NULL`,
+                eq(inquiries.customerEmail, verifiedEmail),
+              ),
+            )
+          : eq(inquiries.userId, input.userId)
+        : guestEmail
+          ? and(
+              sql`${inquiries.userId} IS NULL`,
+              eq(inquiries.customerEmail, guestEmail),
+            )
+          : null;
+
+      let inquiryCards: ReturnType<typeof inquiryDraftCard>[] = [];
+      if (inquiryWhere) {
+        const myInquiryIds = (
+          await drizzleDb
+            .select({ id: inquiries.id })
+            .from(inquiries)
+            .where(inquiryWhere)
+        ).map((r) => String(r.id));
+        if (myInquiryIds.length > 0) {
+          const taskRows = await drizzleDb
+            .select({
+              id: approvalTasks.id,
+              payload: approvalTasks.payload,
+              riskLevel: approvalTasks.riskLevel,
+              createdAt: approvalTasks.createdAt,
+            })
+            .from(approvalTasks)
+            .where(
+              and(
+                eq(approvalTasks.lane, "cs"),
+                eq(approvalTasks.taskType, "inquiry_reply"),
+                eq(approvalTasks.status, "pending"),
+                eq(approvalTasks.relatedType, "inquiry"),
+                inArray(approvalTasks.relatedId, myInquiryIds),
+              ),
+            )
+            .orderBy(desc(approvalTasks.createdAt))
+            .limit(50);
+          inquiryCards = taskRows.map(inquiryDraftCard);
+        }
+      }
+
+      // ── Source 2: Gmail escalation drafts — agentMessages (messageType=
+      // escalation) keyed to this customer's profile id(s). readByJeff=0 is the
+      // "still needs Jeff" proxy (acking clears it). Only rows with a draftReply
+      // + gmailThreadId become actionable cards (see escalationDraftCard).
+      let emailCards: ReturnType<typeof escalationDraftCard>[] = [];
+      if (profileIds.length > 0) {
+        const msgRows = await drizzleDb
+          .select({
+            id: agentMessages.id,
+            context: agentMessages.context,
+            createdAt: agentMessages.createdAt,
+          })
+          .from(agentMessages)
+          .where(
+            and(
+              eq(agentMessages.messageType, "escalation"),
+              eq(agentMessages.readByJeff, 0),
+              inArray(agentMessages.relatedCustomerProfileId, profileIds),
+            ),
+          )
+          .orderBy(desc(agentMessages.createdAt))
+          .limit(50);
+        emailCards = msgRows.map((r) =>
+          escalationDraftCard({ ...r, fallbackEmail }),
+        );
+      }
+
+      return mergeDrafts([
+        inquiryCards.filter((c): c is NonNullable<typeof c> => c != null),
+        emailCards.filter((c): c is NonNullable<typeof c> => c != null),
+      ]);
+    }),
+
   customerConversationThread: adminProcedure
     .input(
       z.union([

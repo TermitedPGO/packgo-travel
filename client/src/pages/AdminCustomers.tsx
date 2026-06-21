@@ -27,6 +27,8 @@ export default function AdminCustomers() {
     restoreCustomer,
     createManualCustomer,
     isCreating,
+    approveDraft,
+    isApprovingDraft,
   } = useCustomerData(selected, showHidden)
 
   return (
@@ -65,7 +67,12 @@ export default function AdminCustomers() {
               <CustomerChatSkeleton />
             </div>
           ) : (
-            <CustomerChat customer={detail} chatMessages={chatMessages} />
+            <CustomerChat
+              customer={detail}
+              chatMessages={chatMessages}
+              onApproveDraft={approveDraft}
+              isApprovingDraft={isApprovingDraft}
+            />
           )}
         </>
       ) : (

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { guestToAdaptedCustomer, deriveFollowup } from "./adapters"
+import { guestToAdaptedCustomer, deriveFollowup, buildInquiryEditedPayload } from "./adapters"
 
 // t stub: echoes the key, appending the interpolated count so assertions can see it.
 const t = (k: string, vars?: Record<string, string | number>) =>
@@ -158,5 +158,35 @@ describe("deriveFollowup", () => {
     )
     expect(r.reason).toBe("inquiry")
     expect(r.daysSinceContact).toBe(5)
+  })
+})
+
+describe("buildInquiryEditedPayload", () => {
+  const payload = JSON.stringify({
+    inquiryId: 5,
+    draftBody: "原稿",
+    customerEmail: "a@b.com",
+    classification: "refund_request",
+  })
+
+  it("replaces draftBody with the edit, preserves the other fields", () => {
+    const out = JSON.parse(buildInquiryEditedPayload(payload, "改過的內容"))
+    expect(out).toEqual({
+      inquiryId: 5,
+      draftBody: "改過的內容",
+      customerEmail: "a@b.com",
+      classification: "refund_request",
+    })
+  })
+
+  it("THROWS rather than silently dropping the edit — empty/whitespace body", () => {
+    expect(() => buildInquiryEditedPayload(payload, "")).toThrow()
+    expect(() => buildInquiryEditedPayload(payload, "   ")).toThrow()
+  })
+
+  it("THROWS on missing or unparseable payload (never sends the original)", () => {
+    expect(() => buildInquiryEditedPayload(null, "x")).toThrow()
+    expect(() => buildInquiryEditedPayload("not json", "x")).toThrow()
+    expect(() => buildInquiryEditedPayload("[1,2,3]", "x")).toThrow()
   })
 })

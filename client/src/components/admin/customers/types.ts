@@ -20,10 +20,23 @@ export type CustomerStatus = {
 }
 
 export type Draft = {
+  /** namespaced id from the server (task:<id> / esc:<id>) — stable React key */
+  id: string
+  source: "inquiry" | "email"
+  /** classification / "inquiry_reply" / "escalation" — the type label */
   type: string
   to: string
+  subject: string | null
   attachments?: string[]
   body: string
+  /** 碰錢碰法律 (refund/complaint/quote/deposit/visa) → confirm before send */
+  sensitive: boolean
+  /** source=inquiry → commandCenter.approve/reject({ id: taskId }) */
+  taskId: number | null
+  /** source=email → commandCenter.escalationReply({ messageId }) */
+  messageId: number | null
+  /** source=inquiry → original approvalTasks.payload JSON (rebuild editedPayload on edit) */
+  payload: string | null
 }
 
 export type Order = {
