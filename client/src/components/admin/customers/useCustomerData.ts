@@ -233,6 +233,8 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
             name: g.name,
             email: g.email,
             phone: g.phone,
+            source: g.source,
+            hasPassport: g.hasPassport,
             inquiries: g.inquiries.map((i) => ({
               id: i.id,
               subject: i.subject,
@@ -259,6 +261,7 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
       { totalSpend: d.user.totalSpend, bookingCount: d.user.bookingCount },
       profileQ.data ?? null,
       t,
+      profileQ.data?.hasPassport ?? false,
     )
     const orders = toOrders(d.recentBookings)
     const timeline = toTimeline(

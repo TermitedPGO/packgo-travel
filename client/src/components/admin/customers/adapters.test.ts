@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { guestToAdaptedCustomer, deriveFollowup, buildInquiryEditedPayload } from "./adapters"
+import { guestToAdaptedCustomer, deriveFollowup, buildInquiryEditedPayload, deriveProfile } from "./adapters"
 
 // t stub: echoes the key, appending the interpolated count so assertions can see it.
 const t = (k: string, vars?: Record<string, string | number>) =>
@@ -188,5 +188,57 @@ describe("buildInquiryEditedPayload", () => {
     expect(() => buildInquiryEditedPayload(null, "x")).toThrow()
     expect(() => buildInquiryEditedPayload("not json", "x")).toThrow()
     expect(() => buildInquiryEditedPayload("[1,2,3]", "x")).toThrow()
+  })
+})
+
+describe("deriveProfile — 護照 presence-only + 來源", () => {
+  const user = { totalSpend: 1200, bookingCount: 3 }
+
+  it("護照 shows 已提供 only when the server says hasPassport — never the number", () => {
+    const off = deriveProfile(user, null, t, false)
+    expect(off.passport).toBe("admin.customers.profile.notProvided")
+    const on = deriveProfile(user, null, t, true)
+    expect(on.passport).toBe("admin.customers.profile.passportOnFile")
+    // defaults to not-provided when the flag is omitted (back-compat)
+    expect(deriveProfile(user, null, t).passport).toBe(
+      "admin.customers.profile.notProvided",
+    )
+  })
+
+  it("來源 maps 'manual' → 手動新增, everything else → 未知 (never invents a channel)", () => {
+    const manual = deriveProfile(
+      user,
+      { preferredLanguage: null, communicationStyle: null, preferences: null, vipScore: null, totalSpend: null, bookingCount: null, status: null, source: "manual" },
+      t,
+    )
+    expect(manual.source).toBe("admin.customers.profile.sourceManual")
+    const unknown = deriveProfile(
+      user,
+      { preferredLanguage: null, communicationStyle: null, preferences: null, vipScore: null, totalSpend: null, bookingCount: null, status: null, source: null },
+      t,
+    )
+    expect(unknown.source).toBe("admin.customers.profile.unknownSource")
+  })
+
+  it("vip + lang + spend/trips still derive from the profile/user", () => {
+    const p = deriveProfile(
+      user,
+      { preferredLanguage: "en", communicationStyle: null, preferences: null, vipScore: 60, totalSpend: null, bookingCount: null, status: null, source: null },
+      t,
+      true,
+    )
+    expect(p.vip).toBe(true)
+    expect(p.lang).toBe("en")
+    expect(p.totalSpend).toBe(1200)
+    expect(p.trips).toBe(3)
+  })
+
+  it("a hand-added guest still gets 來源=手動新增 through guestToAdaptedCustomer", () => {
+    const c = guestToAdaptedCustomer(
+      { profileId: 7, name: "王先生", phone: "5105551234", source: "manual", inquiries: [] },
+      t,
+    )
+    expect(c.profile.source).toBe("admin.customers.profile.sourceManual")
+    expect(c.profile.passport).toBe("admin.customers.profile.notProvided")
   })
 })

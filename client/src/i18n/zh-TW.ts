@@ -3333,8 +3333,10 @@ export const zhTW = {
       },
       profile: {
         notProvided: '未提供',
+        passportOnFile: '已提供',
         noPref: '未設定',
         unknownSource: '未知',
+        sourceManual: '手動新增',
         passport: '護照',
         pref: '偏好',
         lang: '語言',

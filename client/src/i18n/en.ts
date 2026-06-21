@@ -3365,8 +3365,10 @@ export const en = {
       },
       profile: {
         notProvided: 'Not provided',
+        passportOnFile: 'On file',
         noPref: 'Not set',
         unknownSource: 'Unknown',
+        sourceManual: 'Added manually',
         passport: 'Passport',
         pref: 'Preferences',
         lang: 'Language',

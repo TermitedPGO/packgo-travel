@@ -263,6 +263,7 @@ type ProfileData = {
   totalSpend: number | null
   bookingCount: number | null
   status: string | null
+  source: string | null
 } | null
 
 type UserData = {
@@ -270,10 +271,24 @@ type UserData = {
   bookingCount: number
 }
 
+/**
+ * 來源 label. customerProfiles.source only carries 'manual' (Jeff hand-added
+ * this customer) — every other origin (inquiry / email / wechat) is not
+ * recorded at the profile level, so we say 未知 rather than inventing a channel.
+ */
+function sourceLabel(source: string | null | undefined, t: TFunc): string {
+  if (source === "manual") return t("admin.customers.profile.sourceManual")
+  return t("admin.customers.profile.unknownSource")
+}
+
 export function deriveProfile(
   user: UserData,
   profileData: ProfileData,
   t: TFunc,
+  // 護照 is presence-only — the number never reaches the client. `hasPassport`
+  // is an EXISTS result from the server (booking participant / visa application
+  // ciphertext is non-null), so 護照 shows 已提供 / 未提供, nothing else.
+  hasPassport = false,
 ): {
   passport: string
   pref: string
@@ -287,13 +302,15 @@ export function deriveProfile(
     | { pace?: string; interests?: string[] }
     | null
   return {
-    passport: t("admin.customers.profile.notProvided"),
+    passport: hasPassport
+      ? t("admin.customers.profile.passportOnFile")
+      : t("admin.customers.profile.notProvided"),
     pref: prefs?.pace ?? prefs?.interests?.[0] ?? t("admin.customers.profile.noPref"),
     totalSpend: user.totalSpend,
     trips: user.bookingCount,
     vip: (profileData?.vipScore ?? 0) >= 50,
     lang: profileData?.preferredLanguage ?? "zh-TW",
-    source: t("admin.customers.profile.unknownSource"),
+    source: sourceLabel(profileData?.source, t),
   }
 }
 
@@ -434,6 +451,8 @@ export function guestToAdaptedCustomer(
     name?: string | null
     email?: string | null
     phone?: string | null
+    source?: string | null
+    hasPassport?: boolean
     inquiries: GuestInquiry[]
   },
   t: TFunc,
@@ -503,7 +522,23 @@ export function guestToAdaptedCustomer(
     followup: { daysSinceContact: null, needsFollowup: false, reason: null },
     status: deriveStatus(openItems, t),
     drafts: [],
-    profile: deriveProfile({ totalSpend: 0, bookingCount: 0 }, null, t),
+    profile: deriveProfile(
+      { totalSpend: 0, bookingCount: 0 },
+      // Guests carry no AI profile row; only `source` (e.g. 'manual' for a
+      // hand-added customer) is meaningful for the 來源 line.
+      {
+        preferredLanguage: null,
+        communicationStyle: null,
+        preferences: null,
+        vipScore: null,
+        totalSpend: null,
+        bookingCount: null,
+        status: null,
+        source: guest.source ?? null,
+      },
+      t,
+      guest.hasPassport ?? false,
+    ),
     orders: [],
     docs: [],
     timeline,

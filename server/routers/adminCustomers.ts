@@ -44,6 +44,69 @@ import {
 export const OPEN_BOOKING_STATUSES = ["pending", "confirmed"] as const;
 export const OPEN_INQUIRY_STATUSES = ["new", "in_progress"] as const;
 
+type DrizzleDb = NonNullable<Awaited<ReturnType<typeof db.getDb>>>;
+
+/**
+ * 護照 presence for the profile 護照 line — EXISTS-only, NEVER decrypts. We
+ * check row existence / `passportNumber IS NOT NULL` on the AES-256-GCM
+ * ciphertext column, so 護照 shows 已提供 / 未提供 without the number ever
+ * leaving the server. Three real sources hold a customer's passport:
+ *   - customerDocuments type passport/visa (a filed scan) — profileId path,
+ *     covers registered + guest, and is the most customer-page-relevant signal.
+ *   - bookingParticipants.passportNumber (recorded at booking) — userId path.
+ *   - visaApplications.passportNumber    (recorded at visa apply) — userId OR
+ *     email path (a guest / logged-out applicant keys on email).
+ */
+async function hasPassportOnFile(
+  drizzleDb: DrizzleDb,
+  by: { userId?: number; email?: string | null; profileId?: number },
+): Promise<boolean> {
+  const { bookingParticipants, bookings, visaApplications, customerDocuments } =
+    await import("../../drizzle/schema");
+  if (by.profileId != null) {
+    const [d] = await drizzleDb
+      .select({ one: sql<number>`1` })
+      .from(customerDocuments)
+      .where(
+        and(
+          eq(customerDocuments.customerProfileId, by.profileId),
+          inArray(customerDocuments.type, ["passport", "visa"]),
+        ),
+      )
+      .limit(1);
+    if (d) return true;
+  }
+  if (by.userId != null) {
+    const [v] = await drizzleDb
+      .select({ one: sql<number>`1` })
+      .from(visaApplications)
+      .where(eq(visaApplications.userId, by.userId))
+      .limit(1);
+    if (v) return true;
+    const [p] = await drizzleDb
+      .select({ one: sql<number>`1` })
+      .from(bookingParticipants)
+      .innerJoin(bookings, eq(bookingParticipants.bookingId, bookings.id))
+      .where(
+        and(
+          eq(bookings.userId, by.userId),
+          sql`${bookingParticipants.passportNumber} IS NOT NULL`,
+        ),
+      )
+      .limit(1);
+    if (p) return true;
+  }
+  if (by.email) {
+    const [v] = await drizzleDb
+      .select({ one: sql<number>`1` })
+      .from(visaApplications)
+      .where(eq(visaApplications.email, by.email))
+      .limit(1);
+    if (v) return true;
+  }
+  return false;
+}
+
 export const adminCustomersRouter = router({
   /**
    * List all registered customers with aggregated stats.
@@ -367,6 +430,7 @@ export const adminCustomersRouter = router({
           name: customerProfiles.name,
           email: customerProfiles.email,
           phone: customerProfiles.phone,
+          source: customerProfiles.source,
           createdAt: customerProfiles.createdAt,
         })
         .from(customerProfiles)
@@ -379,6 +443,8 @@ export const adminCustomersRouter = router({
           name: null,
           email: null,
           phone: null,
+          source: null,
+          hasPassport: false,
           inquiries: [],
           interactions: [],
         };
@@ -426,11 +492,17 @@ export const adminCustomersRouter = router({
         )
         .orderBy(desc(customerInteractions.createdAt))
         .limit(20);
+      const hasPassport = await hasPassportOnFile(drizzleDb, {
+        profileId: profile.id,
+        email: profile.email,
+      });
       return {
         profileId: profile.id,
         name: profile.name,
         email: profile.email,
         phone: profile.phone,
+        source: profile.source,
+        hasPassport,
         firstSeenAt: profile.createdAt,
         inquiries: rows,
         interactions: interactions.map((i) => ({
@@ -1236,11 +1308,24 @@ export const adminCustomersRouter = router({
           status: customerProfiles.status,
           familyContext: customerProfiles.familyContext,
           budgetTier: customerProfiles.budgetTier,
+          // 來源 — only 'manual' (Jeff hand-added) is ever stored; else NULL.
+          source: customerProfiles.source,
+          // Resolve-only (stripped before return) — feed the passport presence
+          // check by profileId + email so a scan / logged-out visa app counts.
+          _profileId: customerProfiles.id,
+          _email: customerProfiles.email,
         })
         .from(customerProfiles)
         .where(eq(customerProfiles.userId, input.userId))
         .limit(1);
-      return row ?? null;
+      if (!row) return null;
+      const { _profileId, _email, ...profile } = row;
+      const hasPassport = await hasPassportOnFile(drizzleDb, {
+        userId: input.userId,
+        profileId: _profileId,
+        email: _email,
+      });
+      return { ...profile, hasPassport };
     }),
 
   /**
