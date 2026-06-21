@@ -3265,6 +3265,25 @@ export const zhTW = {
         submit: '新增',
         creating: '新增中…',
       },
+      docKind: {
+        quote: '報價單',
+        invoice: '發票',
+        passport: '護照',
+        visa: '簽證',
+        insurance: '保險',
+        medical: '醫療',
+        file: '文件',
+        flight: '機票',
+      },
+      followup: {
+        badge: '需跟進',
+        today: '今天剛聯絡',
+        lastContact: '上次聯絡 {n} 天前',
+        reason: {
+          inquiry: '詢問待回',
+          quote: '報價待追',
+        },
+      },
       status: {
         allClear: '一切就緒',
         allClearDesc: '目前沒有待處理的事項',

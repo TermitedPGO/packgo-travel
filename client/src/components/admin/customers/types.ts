@@ -36,9 +36,13 @@ export type Order = {
 }
 
 export type Doc = {
+  id: string
+  kind: "quote" | "invoice" | "passport" | "visa" | "insurance" | "medical" | "file" | "flight"
   name: string
-  type: string
-  size: string
+  /** download link; null = info-only row (e.g. flight order) */
+  url: string | null
+  /** short secondary line: status / amount */
+  meta: string | null
   date: string
 }
 
@@ -65,6 +69,8 @@ export type ListItem = {
   notifs: number
   /** registered account manually marked 非客人 (customerProfiles.status='blocked') */
   blocked: boolean
+  /** open inquiry >2d unanswered OR quote sent >5d (server-computed) */
+  needsFollowup: boolean
 }
 
 export type AdaptedCustomer = {
@@ -77,6 +83,11 @@ export type AdaptedCustomer = {
   color: string
   textColor: string
   aiSummary: { wants: string; actions: string; delivered: string }
+  followup: {
+    daysSinceContact: number | null
+    needsFollowup: boolean
+    reason: "inquiry" | "quote" | null
+  }
   status: CustomerStatus
   drafts: Draft[]
   profile: {

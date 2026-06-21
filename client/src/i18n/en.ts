@@ -3297,6 +3297,25 @@ export const en = {
         submit: 'Add',
         creating: 'Adding…',
       },
+      docKind: {
+        quote: 'Quote',
+        invoice: 'Invoice',
+        passport: 'Passport',
+        visa: 'Visa',
+        insurance: 'Insurance',
+        medical: 'Medical',
+        file: 'File',
+        flight: 'Flight',
+      },
+      followup: {
+        badge: 'Follow up',
+        today: 'Contacted today',
+        lastContact: 'Last contact {n}d ago',
+        reason: {
+          inquiry: 'Inquiry waiting',
+          quote: 'Quote pending',
+        },
+      },
       status: {
         allClear: 'All clear',
         allClearDesc: 'No open items at this time',

@@ -102,6 +102,11 @@ export default function CustomerList({
                     {t("admin.customers.blockedBadge")}
                   </span>
                 )}
+                {c.needsFollowup && !c.blocked && (
+                  <span className="text-[9px] px-1 py-0.5 rounded-md bg-gray-900 text-white font-normal flex-shrink-0">
+                    {t("admin.customers.followup.badge")}
+                  </span>
+                )}
               </div>
               <div className="text-[11px] text-gray-400 truncate">{c.email}</div>
             </div>

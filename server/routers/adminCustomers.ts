@@ -12,7 +12,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { adminProcedure, router } from "../_core/trpc";
 import * as db from "../db";
-import { eq, desc, sql, and, or, inArray } from "drizzle-orm";
+import { eq, desc, sql, and, or, inArray, type SQL } from "drizzle-orm";
 import {
   type ThreadTurn,
   inquiryFirstTurn,
@@ -21,6 +21,13 @@ import {
   mergeThread,
 } from "./adminCustomersThread";
 import { isHiddenCustomer } from "./adminCustomersFilter";
+import {
+  quoteDoc,
+  invoiceDoc,
+  uploadedDoc,
+  flightOrderDoc,
+  mergeDocs,
+} from "./adminCustomersDocs";
 
 /**
  * 整合工作台 P2 — what counts as an OPEN item in a customer's inbox.
@@ -44,6 +51,8 @@ export const adminCustomersRouter = router({
         users: usersTable,
         bookings: bookingsTable,
         customerProfiles,
+        inquiries: inquiriesTable,
+        aiQuotes: aiQuotesTable,
       } = await import("../../drizzle/schema");
 
       // Subquery: total spend per user (sum of non-cancelled bookings).
@@ -84,6 +93,22 @@ export const adminCustomersRouter = router({
           lastSignedIn: usersTable.lastSignedIn,
           profileStatus: customerProfiles.status,
           lastInteractionAt: customerProfiles.lastInteractionAt,
+          // 需跟進 (locked 2026-06-20): open inquiry >2d unanswered OR a
+          // sent/viewed quote >5d old. Correlated EXISTS by userId OR verified
+          // email — read-only signal, never auto-acts. Intentionally STATUS-only
+          // (a coarse sidebar nudge); the detail pane additionally subtracts
+          // Jeff's「處理好了」dispositions, so a dismissed-but-still-open item can
+          // show the list badge yet read clear on the detail — by design.
+          needsFollowup: sql<number>`(
+            EXISTS (SELECT 1 FROM ${inquiriesTable}
+              WHERE (${inquiriesTable.userId} = ${usersTable.id} OR ${inquiriesTable.customerEmail} = ${usersTable.email})
+                AND ${inquiriesTable.status} IN ('new','in_progress')
+                AND ${inquiriesTable.createdAt} < (NOW() - INTERVAL 2 DAY))
+            OR EXISTS (SELECT 1 FROM ${aiQuotesTable}
+              WHERE (${aiQuotesTable.userId} = ${usersTable.id} OR ${aiQuotesTable.customerEmail} = ${usersTable.email})
+                AND ${aiQuotesTable.status} IN ('sent','viewed')
+                AND ${aiQuotesTable.createdAt} < (NOW() - INTERVAL 5 DAY))
+          )`,
         })
         .from(usersTable)
         .leftJoin(spendSub, eq(usersTable.id, spendSub.userId))
@@ -91,7 +116,7 @@ export const adminCustomersRouter = router({
         .where(eq(usersTable.role, "user"))
         .orderBy(desc(usersTable.lastSignedIn));
 
-      const withFlags = rows.map(({ profileStatus, lastInteractionAt, ...r }) => {
+      const withFlags = rows.map(({ profileStatus, lastInteractionAt, needsFollowup, ...r }) => {
         const blocked = profileStatus === "blocked";
         const hidden = isHiddenCustomer(
           {
@@ -101,7 +126,7 @@ export const adminCustomersRouter = router({
           },
           blocked,
         );
-        return { ...r, blocked, hidden };
+        return { ...r, blocked, hidden, needsFollowup: Number(needsFollowup) === 1 };
       });
 
       return input?.includeHidden ? withFlags : withFlags.filter((r) => !r.hidden);
@@ -268,6 +293,11 @@ export const adminCustomersRouter = router({
           phone: customerProfiles.phone,
           updatedAt: customerProfiles.updatedAt,
           status: customerProfiles.status,
+          // 需跟進: an unanswered inquiry (by this profile's email) older than 2d.
+          needsFollowup: sql<number>`EXISTS (SELECT 1 FROM ${inquiriesTable}
+            WHERE ${inquiriesTable.customerEmail} = ${customerProfiles.email}
+              AND ${inquiriesTable.status} IN ('new','in_progress')
+              AND ${inquiriesTable.createdAt} < (NOW() - INTERVAL 2 DAY))`,
         })
         .from(customerProfiles)
         .where(
@@ -300,9 +330,10 @@ export const adminCustomersRouter = router({
       // registered accounts (markNotCustomer/restoreCustomer by profileId).
       // Default view drops blocked guests; the "show hidden" toggle brings them
       // back. Nothing is deleted — a mis-hide is one click to restore.
-      const withFlags = rows.map(({ status, ...r }) => ({
+      const withFlags = rows.map(({ status, needsFollowup, ...r }) => ({
         ...r,
         blocked: status === "blocked",
+        needsFollowup: Number(needsFollowup) === 1,
       }));
       return input?.includeHidden
         ? withFlags
@@ -556,12 +587,36 @@ export const adminCustomersRouter = router({
     .query(async ({ input }) => {
       const drizzleDb = (await db.getDb())!;
       const {
+        users: usersTable,
         bookings: bookingsTable,
         inquiries: inquiriesTable,
         tours: toursTable,
         approvalTasks: approvalTasksTable,
         workspaceDispositions: dispTable,
       } = await import("../../drizzle/schema");
+
+      // Resolve the account's VERIFIED email so open inquiries filed BEFORE the
+      // customer registered (userId NULL, matched by email) surface here too —
+      // keeping the detail follow-up consistent with the sidebar needsFollowup
+      // badge, which is identity-wide. Email branch is userId-IS-NULL guarded so
+      // it never claims another account's inquiry.
+      const verifiedEmail =
+        (
+          await drizzleDb
+            .select({ email: usersTable.email })
+            .from(usersTable)
+            .where(eq(usersTable.id, input.userId))
+            .limit(1)
+        )[0]?.email ?? null;
+      const inquiryIdentity: SQL = verifiedEmail
+        ? (or(
+            eq(inquiriesTable.userId, input.userId),
+            and(
+              sql`${inquiriesTable.userId} IS NULL`,
+              eq(inquiriesTable.customerEmail, verifiedEmail),
+            ),
+          ) as SQL)
+        : eq(inquiriesTable.userId, input.userId);
 
       const openBookings = await drizzleDb
         .select({
@@ -595,7 +650,7 @@ export const adminCustomersRouter = router({
         .from(inquiriesTable)
         .where(
           and(
-            eq(inquiriesTable.userId, input.userId),
+            inquiryIdentity,
             inArray(inquiriesTable.status, [...OPEN_INQUIRY_STATUSES]),
           ),
         )
@@ -998,5 +1053,161 @@ export const adminCustomersRouter = router({
         .where(eq(customerProfiles.userId, input.userId))
         .limit(1);
       return row ?? null;
+    }),
+
+  /**
+   * customerDocs — the 文件 tab. Surfaces four real sources that already exist
+   * but were never shown: aiQuotes (報價單), invoices (發票), customerDocuments
+   * (email 附件 / 護照·簽證掃描), flightOrders (機票訂單, info-only). Same safe
+   * identity resolution as customerConversationThread — quotes/invoices keyed by
+   * the account's userId OR its VERIFIED email (guest: the profile's own email);
+   * uploaded docs by the resolved profileId(s); flight orders by userId (guests
+   * have none). PII files expose only filename + download link; the encrypted
+   * passport number / DOB never leave the server.
+   */
+  customerDocs: adminProcedure
+    .input(
+      z.union([
+        z.object({ userId: z.number().int().positive() }).strict(),
+        z.object({ profileId: z.number().int().positive() }).strict(),
+      ]),
+    )
+    .query(async ({ input }) => {
+      const drizzleDb = (await db.getDb())!;
+      const {
+        users: usersTable,
+        customerProfiles,
+        aiQuotes: aiQuotesTable,
+        invoices: invoicesTable,
+        customerDocuments,
+        flightOrders,
+      } = await import("../../drizzle/schema");
+      const isRegistered = "userId" in input;
+
+      let email: string | null = null;
+      let userId: number | null = null;
+      let profileIds: number[] = [];
+      if (isRegistered) {
+        userId = input.userId;
+        email =
+          (
+            await drizzleDb
+              .select({ email: usersTable.email })
+              .from(usersTable)
+              .where(eq(usersTable.id, userId))
+              .limit(1)
+          )[0]?.email ?? null;
+        const profs = await drizzleDb
+          .select({ id: customerProfiles.id })
+          .from(customerProfiles)
+          .where(
+            email
+              ? or(eq(customerProfiles.userId, userId), eq(customerProfiles.email, email))
+              : eq(customerProfiles.userId, userId),
+          );
+        profileIds = profs.map((p) => p.id);
+      } else {
+        const prof = (
+          await drizzleDb
+            .select({ id: customerProfiles.id, email: customerProfiles.email })
+            .from(customerProfiles)
+            .where(eq(customerProfiles.id, input.profileId))
+            .limit(1)
+        )[0];
+        email = prof?.email ?? null;
+        if (prof) profileIds = [prof.id];
+      }
+
+      // Quotes (q:) — owned by this userId, OR UNATTRIBUTED rows under the
+      // verified/guest email. The email branch is guarded by userId IS NULL so a
+      // quote whose customerEmail collides with this address but is OWNED by a
+      // DIFFERENT account never leaks in (mirrors customerConversationThread).
+      const quoteConds: SQL[] = [];
+      if (userId != null) quoteConds.push(eq(aiQuotesTable.userId, userId));
+      if (email)
+        quoteConds.push(
+          and(sql`${aiQuotesTable.userId} IS NULL`, eq(aiQuotesTable.customerEmail, email)) as SQL,
+        );
+      const quoteRows = quoteConds.length
+        ? await drizzleDb
+            .select({
+              id: aiQuotesTable.id,
+              quoteNumber: aiQuotesTable.quoteNumber,
+              estimatedTotal: aiQuotesTable.estimatedTotal,
+              currency: aiQuotesTable.currency,
+              pdfUrl: aiQuotesTable.pdfUrl,
+              status: aiQuotesTable.status,
+              createdAt: aiQuotesTable.createdAt,
+            })
+            .from(aiQuotesTable)
+            .where(or(...quoteConds))
+            .orderBy(desc(aiQuotesTable.createdAt))
+            .limit(50)
+        : [];
+
+      // Invoices (inv:) — same rule: owned by userId, or UNATTRIBUTED under the
+      // email (userId IS NULL guard prevents another account's invoice leaking in).
+      const invConds: SQL[] = [];
+      if (userId != null) invConds.push(eq(invoicesTable.userId, userId));
+      if (email)
+        invConds.push(
+          and(sql`${invoicesTable.userId} IS NULL`, eq(invoicesTable.customerEmail, email)) as SQL,
+        );
+      const invoiceRows = invConds.length
+        ? await drizzleDb
+            .select({
+              id: invoicesTable.id,
+              invoiceNumber: invoicesTable.invoiceNumber,
+              totalAmount: invoicesTable.totalAmount,
+              currency: invoicesTable.currency,
+              pdfUrl: invoicesTable.pdfUrl,
+              status: invoicesTable.status,
+              createdAt: invoicesTable.createdAt,
+            })
+            .from(invoicesTable)
+            .where(or(...invConds))
+            .orderBy(desc(invoicesTable.createdAt))
+            .limit(50)
+        : [];
+
+      // Uploaded docs (cd:) — email attachments / passport·visa scans, by profileId(s).
+      const uploadedRows = profileIds.length
+        ? await drizzleDb
+            .select({
+              id: customerDocuments.id,
+              type: customerDocuments.type,
+              fileName: customerDocuments.fileName,
+              r2Url: customerDocuments.r2Url,
+              uploadedAt: customerDocuments.uploadedAt,
+            })
+            .from(customerDocuments)
+            .where(inArray(customerDocuments.customerProfileId, profileIds))
+            .orderBy(desc(customerDocuments.uploadedAt))
+            .limit(50)
+        : [];
+
+      // Flight orders (fo:) — registered only (keyed by users.id).
+      const flightRows =
+        userId != null
+          ? await drizzleDb
+              .select({
+                id: flightOrders.id,
+                airline: flightOrders.airline,
+                flightSummary: flightOrders.flightSummary,
+                status: flightOrders.status,
+                createdAt: flightOrders.createdAt,
+              })
+              .from(flightOrders)
+              .where(eq(flightOrders.customerUserId, userId))
+              .orderBy(desc(flightOrders.createdAt))
+              .limit(50)
+          : [];
+
+      return mergeDocs([
+        quoteRows.map(quoteDoc),
+        invoiceRows.map(invoiceDoc),
+        uploadedRows.map(uploadedDoc),
+        flightRows.map(flightOrderDoc),
+      ]);
     }),
 });

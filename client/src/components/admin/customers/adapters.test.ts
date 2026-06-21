@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { guestToAdaptedCustomer } from "./adapters"
+import { guestToAdaptedCustomer, deriveFollowup } from "./adapters"
 
 // t stub: echoes the key, appending the interpolated count so assertions can see it.
 const t = (k: string, vars?: Record<string, string | number>) =>
@@ -28,7 +28,7 @@ describe("guestToAdaptedCustomer", () => {
       {
         ...base,
         inquiries: [
-          { id: 1, subject: "日本團", status: "open", createdAt: "2026-06-01" },
+          { id: 1, subject: "日本團", status: "new", createdAt: "2026-06-01" },
         ],
       },
       t,
@@ -88,5 +88,75 @@ describe("guestToAdaptedCustomer", () => {
     expect(
       guestToAdaptedCustomer({ profileId: 2, inquiries: [] }, t).name,
     ).toBe("admin.customers.unnamed")
+  })
+})
+
+describe("deriveFollowup", () => {
+  const NOW = new Date("2026-06-20T00:00:00Z").getTime()
+
+  it("no contact + no open items → all clear, days null", () => {
+    expect(deriveFollowup({ lastContactAt: null, openInquiries: [], sentQuotes: [] }, NOW)).toEqual({
+      daysSinceContact: null,
+      needsFollowup: false,
+      reason: null,
+    })
+  })
+
+  it("computes whole days since last contact (never negative)", () => {
+    expect(
+      deriveFollowup({ lastContactAt: "2026-06-17T00:00:00Z", openInquiries: [], sentQuotes: [] }, NOW)
+        .daysSinceContact,
+    ).toBe(3)
+    // a future timestamp (clock skew) floors at 0, never negative
+    expect(
+      deriveFollowup({ lastContactAt: "2026-06-21T00:00:00Z", openInquiries: [], sentQuotes: [] }, NOW)
+        .daysSinceContact,
+    ).toBe(0)
+  })
+
+  it("open inquiry unanswered > 2 days → needs follow-up (reason inquiry)", () => {
+    const r = deriveFollowup(
+      { lastContactAt: null, openInquiries: [{ handled: false, createdAt: "2026-06-16T00:00:00Z" }], sentQuotes: [] },
+      NOW,
+    )
+    expect(r.needsFollowup).toBe(true)
+    expect(r.reason).toBe("inquiry")
+  })
+
+  it("a handled or <2d inquiry does NOT trigger", () => {
+    expect(
+      deriveFollowup({ lastContactAt: null, openInquiries: [{ handled: true, createdAt: "2026-06-01T00:00:00Z" }], sentQuotes: [] }, NOW)
+        .needsFollowup,
+    ).toBe(false)
+    expect(
+      deriveFollowup({ lastContactAt: null, openInquiries: [{ handled: false, createdAt: "2026-06-19T00:00:00Z" }], sentQuotes: [] }, NOW)
+        .needsFollowup,
+    ).toBe(false)
+  })
+
+  it("sent/viewed quote > 5 days → needs follow-up (reason quote)", () => {
+    const r = deriveFollowup(
+      { lastContactAt: null, openInquiries: [], sentQuotes: [{ status: "sent", createdAt: "2026-06-10T00:00:00Z" }] },
+      NOW,
+    )
+    expect(r).toMatchObject({ needsFollowup: true, reason: "quote" })
+    // a draft (not sent/viewed) quote never triggers
+    expect(
+      deriveFollowup({ lastContactAt: null, openInquiries: [], sentQuotes: [{ status: "draft", createdAt: "2026-01-01T00:00:00Z" }] }, NOW)
+        .needsFollowup,
+    ).toBe(false)
+  })
+
+  it("inquiry takes priority over quote when both are stale", () => {
+    const r = deriveFollowup(
+      {
+        lastContactAt: "2026-06-15T00:00:00Z",
+        openInquiries: [{ handled: false, createdAt: "2026-06-10T00:00:00Z" }],
+        sentQuotes: [{ status: "viewed", createdAt: "2026-06-01T00:00:00Z" }],
+      },
+      NOW,
+    )
+    expect(r.reason).toBe("inquiry")
+    expect(r.daysSinceContact).toBe(5)
   })
 })

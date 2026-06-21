@@ -2,7 +2,7 @@ import { useMemo } from "react"
 import { trpc } from "@/lib/trpc"
 import { useLocale } from "@/contexts/LocaleContext"
 import { format } from "date-fns"
-import type { ListItem, AdaptedCustomer, ChatMessage } from "./types"
+import type { ListItem, AdaptedCustomer, ChatMessage, Doc } from "./types"
 import {
   toListItem,
   toOrders,
@@ -13,6 +13,8 @@ import {
   deriveInitials,
   deriveAvatar,
   guestToAdaptedCustomer,
+  deriveFollowup,
+  OPEN_INQUIRY_STATUSES,
 } from "./adapters"
 
 /** Which row is selected — id alone is ambiguous (a profileId can collide with a
@@ -74,6 +76,15 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
   )
   const chatQ = selected?.kind === "guest" ? guestChatQ : userChatQ
 
+  const userDocsQ = trpc.admin.customerDocs.useQuery(
+    { userId: userId! },
+    { enabled: userId !== null },
+  )
+  const guestDocsQ = trpc.admin.customerDocs.useQuery(
+    { profileId: profileId! },
+    { enabled: profileId !== null },
+  )
+
   const customers = useMemo<ListItem[]>(() => {
     const users = (customerListQ.data ?? []).map((u) =>
       toListItem(
@@ -86,6 +97,7 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
           inquiryCount: u.inquiryCount,
           lastSignedIn: u.lastSignedIn,
           blocked: u.blocked,
+          needsFollowup: u.needsFollowup,
         },
         tagLabels,
         formatDate,
@@ -111,6 +123,7 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
         tagLabel: tagLabels.inquiry ?? "",
         notifs: 0,
         blocked: g.blocked ?? false,
+        needsFollowup: g.needsFollowup ?? false,
       }
     })
 
@@ -120,27 +133,59 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
   const detail = useMemo<AdaptedCustomer | null>(() => {
     if (selected === null) return null
 
+    // Documents (文件 tab) come from the dedicated customerDocs query, mapped to
+    // the UI Doc shape. Same list for guest + registered, keyed by selection.
+    const rawDocs = (selected.kind === "guest" ? guestDocsQ.data : userDocsQ.data) ?? []
+    const docs: Doc[] = rawDocs.map((d) => ({
+      id: d.id,
+      kind: d.kind,
+      name: d.name,
+      url: d.url,
+      meta: d.meta,
+      date: formatDate(new Date(d.createdAt)),
+    }))
+
+    // Last contact = newest message in the merged conversation thread (either
+    // side), which mergeThread returns oldest→newest.
+    const msgs = chatQ.data?.messages ?? []
+    const lastContactAt = msgs.length ? msgs[msgs.length - 1].createdAt : null
+
     // Guest: build the detail from inquiries (no user row exists). A manual
     // phone-only customer has no email, so we key on identity from the profile
     // row itself, not email.
     if (selected.kind === "guest") {
       const g = guestOpenItemsQ.data
       if (!g) return null
-      return guestToAdaptedCustomer(
+      const followup = deriveFollowup(
         {
-          profileId: selected.id,
-          name: g.name,
-          email: g.email,
-          phone: g.phone,
-          inquiries: g.inquiries.map((i) => ({
-            id: i.id,
-            subject: i.subject,
-            status: i.status,
+          lastContactAt,
+          openInquiries: g.inquiries.map((i) => ({
+            handled: !OPEN_INQUIRY_STATUSES.has(i.status),
             createdAt: i.createdAt,
           })),
+          sentQuotes: [],
         },
-        t,
+        Date.now(),
       )
+      return {
+        ...guestToAdaptedCustomer(
+          {
+            profileId: selected.id,
+            name: g.name,
+            email: g.email,
+            phone: g.phone,
+            inquiries: g.inquiries.map((i) => ({
+              id: i.id,
+              subject: i.subject,
+              status: i.status,
+              createdAt: i.createdAt,
+            })),
+          },
+          t,
+        ),
+        docs,
+        followup,
+      }
     }
 
     // Registered customer.
@@ -161,6 +206,20 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
       d.recentInquiries,
       d.recentPoints,
     )
+    const followup = deriveFollowup(
+      {
+        lastContactAt,
+        openInquiries: (openItemsQ.data?.openInquiries ?? []).map((q) => ({
+          handled: q.handled,
+          createdAt: q.createdAt,
+        })),
+        sentQuotes: (d.recentQuotes ?? []).map((q) => ({
+          status: q.status,
+          createdAt: q.createdAt,
+        })),
+      },
+      Date.now(),
+    )
 
     return {
       id: d.user.id,
@@ -171,11 +230,12 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
       initials: deriveInitials(d.user.name, d.user.email),
       ...avatar,
       aiSummary,
+      followup,
       status,
       drafts: [],
       profile,
       orders,
-      docs: [],
+      docs,
       timeline,
     }
   }, [
@@ -184,6 +244,9 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
     openItemsQ.data,
     profileQ.data,
     guestOpenItemsQ.data,
+    userDocsQ.data,
+    guestDocsQ.data,
+    chatQ.data,
     language,
   ])
 

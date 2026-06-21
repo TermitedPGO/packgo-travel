@@ -308,6 +308,7 @@ type RawUser = {
   inquiryCount: number
   lastSignedIn: Date | null
   blocked?: boolean
+  needsFollowup?: boolean
 }
 
 export function toListItem(
@@ -336,7 +337,49 @@ export function toListItem(
     tagLabel: tagLabel[tag] ?? tag,
     notifs: 0,
     blocked: raw.blocked ?? false,
+    needsFollowup: raw.needsFollowup ?? false,
   }
+}
+
+// ── deriveFollowup ──────────────────────────────────────
+// "上次聯絡 X 天前" + 是否「需跟進」. Jeff's rule (locked 2026-06-20):
+//   - an OPEN inquiry unanswered for > 2 days, OR
+//   - a quote sent (sent/viewed) > 5 days ago with no movement.
+// Pure + now-injected so it is deterministic to test.
+
+export const FOLLOWUP_INQUIRY_DAYS = 2
+export const FOLLOWUP_QUOTE_DAYS = 5
+const DAY_MS = 86_400_000
+
+export type Followup = {
+  daysSinceContact: number | null
+  needsFollowup: boolean
+  reason: "inquiry" | "quote" | null
+}
+
+export function deriveFollowup(
+  input: {
+    lastContactAt: Date | string | null
+    openInquiries: { handled: boolean; createdAt: Date | string }[]
+    sentQuotes: { status: string; createdAt: Date | string }[]
+  },
+  now: number,
+): Followup {
+  const daysSinceContact =
+    input.lastContactAt != null
+      ? Math.max(0, Math.floor((now - new Date(input.lastContactAt).getTime()) / DAY_MS))
+      : null
+
+  const inquiryOverdue = input.openInquiries.some(
+    (q) => !q.handled && now - new Date(q.createdAt).getTime() > FOLLOWUP_INQUIRY_DAYS * DAY_MS,
+  )
+  const quoteStale = input.sentQuotes.some(
+    (q) =>
+      (q.status === "sent" || q.status === "viewed") &&
+      now - new Date(q.createdAt).getTime() > FOLLOWUP_QUOTE_DAYS * DAY_MS,
+  )
+  const reason: Followup["reason"] = inquiryOverdue ? "inquiry" : quoteStale ? "quote" : null
+  return { daysSinceContact, needsFollowup: reason !== null, reason }
 }
 
 // ── guestToAdaptedCustomer ──────────────────────────────
@@ -354,12 +397,11 @@ type GuestInquiry = {
   createdAt: Date | string
 }
 
-const GUEST_CLOSED_STATUSES = new Set([
-  "closed",
-  "resolved",
-  "completed",
-  "answered",
-])
+// An inquiry still needs action only while new / in_progress — the SAME
+// allow-list the server's needsFollowup EXISTS uses (OPEN_INQUIRY_STATUSES in
+// adminCustomers.ts), so the list badge and the detail recompute can't drift as
+// the inquiry enum grows (replied/resolved/closed all count as handled).
+export const OPEN_INQUIRY_STATUSES = new Set(["new", "in_progress"])
 
 export function guestToAdaptedCustomer(
   guest: {
@@ -387,7 +429,7 @@ export function guestToAdaptedCustomer(
     id: i.id,
     subject: i.subject,
     status: i.status,
-    handled: GUEST_CLOSED_STATUSES.has(i.status),
+    handled: !OPEN_INQUIRY_STATUSES.has(i.status),
     createdAt: new Date(i.createdAt),
   }))
   const openItems: OpenItems = {
@@ -431,6 +473,9 @@ export function guestToAdaptedCustomer(
     initials: deriveInitials(guest.name ?? null, email || phone || "?"),
     ...avatar,
     aiSummary,
+    // overridden by the hook with the conversation-thread-based value; default
+    // here keeps guestToAdaptedCustomer self-contained + testable.
+    followup: { daysSinceContact: null, needsFollowup: false, reason: null },
     status: deriveStatus(openItems, t),
     drafts: [],
     profile: deriveProfile({ totalSpend: 0, bookingCount: 0 }, null, t),

@@ -32,6 +32,25 @@ export default function CustomerDetail({ customer, chatMessages = [] }: { custom
           <p className="text-[11px] text-gray-500 mt-0.5">
             {c.email} · {c.phone}
           </p>
+          <div className="flex items-center gap-2 mt-1">
+            {c.followup.daysSinceContact !== null && (
+              <span className="text-[11px] text-gray-500">
+                {c.followup.daysSinceContact === 0
+                  ? t("admin.customers.followup.today")
+                  : t("admin.customers.followup.lastContact", {
+                      n: c.followup.daysSinceContact,
+                    })}
+              </span>
+            )}
+            {c.followup.needsFollowup && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-gray-900 text-white">
+                {t("admin.customers.followup.badge")}
+                {c.followup.reason
+                  ? ` · ${t(`admin.customers.followup.reason.${c.followup.reason}`)}`
+                  : ""}
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex gap-1.5 flex-shrink-0">
           <button

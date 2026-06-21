@@ -2,6 +2,7 @@ import {
   FileText, DollarSign, CheckCircle2,
   CircleDot, CircleAlert, TriangleAlert, CircleX,
   Circle, Clock, MessageSquare, Calendar, HelpCircle, Bot,
+  Download, Plane,
 } from "lucide-react"
 import { useLocale } from "@/contexts/LocaleContext"
 import type { AdaptedCustomer, ChecklistItem, TimelineEntry, ChatMessage } from "./types"
@@ -201,19 +202,42 @@ export function DocsTab({ customer: c }: { customer: AdaptedCustomer }) {
   }
   return (
     <div className="p-6 space-y-2">
-      {c.docs.map((d, i) => (
-        <div
-          key={i}
-          className="flex items-center gap-3 p-3 rounded-lg border border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors"
-        >
-          <FileText className="w-4 h-4 text-gray-400 flex-shrink-0" />
-          <div className="flex-1 min-w-0">
-            <div className="text-[12px] font-medium text-gray-900 truncate">{d.name}</div>
-            <div className="text-[10px] text-gray-400">{d.size}</div>
+      {c.docs.map((d) => {
+        const Icon = d.kind === "flight" ? Plane : FileText
+        const row = (
+          <>
+            <Icon className="w-4 h-4 text-gray-400 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="text-[12px] font-medium text-gray-900 truncate">
+                <span className="text-[10px] text-gray-400 mr-1.5">
+                  {t(`admin.customers.docKind.${d.kind}`)}
+                </span>
+                {d.name}
+              </div>
+              {d.meta && <div className="text-[10px] text-gray-400 truncate">{d.meta}</div>}
+            </div>
+            <div className="text-[10px] text-gray-400 flex-shrink-0">{d.date}</div>
+            {d.url && <Download className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />}
+          </>
+        )
+        const cls =
+          "flex items-center gap-3 p-3 rounded-lg border border-gray-100 transition-colors"
+        return d.url ? (
+          <a
+            key={d.id}
+            href={d.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`${cls} hover:bg-gray-50 cursor-pointer`}
+          >
+            {row}
+          </a>
+        ) : (
+          <div key={d.id} className={cls}>
+            {row}
           </div>
-          <div className="text-[10px] text-gray-400 flex-shrink-0">{d.date}</div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
