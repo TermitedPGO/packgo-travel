@@ -137,6 +137,57 @@ export function escalationDraftCard(row: {
   };
 }
 
+type ObservationCtx = EscalationCtx & { sendOutcome?: string | null };
+
+/**
+ * agentMessages (messageType=observation) row → draft card, or null.
+ *
+ * The Gmail pipeline stores its NON-escalated AI replies as observations:
+ *   - sendOutcome="would_auto_send" (shadow) = 「準備發、本來會自動發但沒發」
+ *   - sendOutcome=null + a draftReply        = plain "draft" verdict awaiting Jeff
+ *   - sendOutcome="auto_replied"             = ALREADY SENT → NOT awaiting send
+ * Only the first two are "AI 準備發草稿要發"; auto_replied is excluded (it lives in
+ * the 自動回覆留底 surface, not the awaiting-send drafts panel). Same actionable
+ * gate as escalations (draftReply + gmailThreadId) and the same send path
+ * (commandCenter.escalationReply, which accepts messageType=observation).
+ */
+export function observationDraftCard(row: {
+  id: number;
+  context: string | null;
+  createdAt: Date;
+  fallbackEmail?: string | null;
+}): CustomerDraft | null {
+  if (!row.context) return null;
+  let c: ObservationCtx;
+  try {
+    const parsed = JSON.parse(row.context);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    c = parsed as ObservationCtx;
+  } catch {
+    return null;
+  }
+  if (c.sendOutcome === "auto_replied") return null; // already sent
+  const body = typeof c.draftReply === "string" ? c.draftReply.trim() : "";
+  const gmailThreadId = typeof c.gmailThreadId === "string" ? c.gmailThreadId.trim() : "";
+  if (!body || !gmailThreadId) return null;
+  const to =
+    (typeof c.customerEmail === "string" && c.customerEmail.trim()) || row.fallbackEmail || "";
+  return {
+    id: `obs:${row.id}`,
+    source: "email",
+    kind: typeof c.classification === "string" && c.classification ? c.classification : "draft",
+    to,
+    subject: typeof c.subject === "string" && c.subject ? c.subject : null,
+    body,
+    sensitive: isSensitiveClass(c.classification),
+    attachments: [],
+    createdAt: row.createdAt,
+    taskId: null,
+    messageId: row.id,
+    payload: null,
+  };
+}
+
 /** Merge both source groups into one list, newest first, capped to `lim`. */
 export function mergeDrafts(groups: CustomerDraft[][], lim = 50): CustomerDraft[] {
   return groups

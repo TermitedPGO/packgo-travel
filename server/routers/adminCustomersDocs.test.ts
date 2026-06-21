@@ -5,6 +5,7 @@ import {
   uploadedDoc,
   flightOrderDoc,
   mergeDocs,
+  signDocUrl,
 } from "./adminCustomersDocs";
 
 const d = (iso: string) => new Date(iso);
@@ -111,5 +112,34 @@ describe("adminCustomersDocs — source normalization", () => {
     expect(
       quoteDoc({ id: 1, quoteNumber: "Q", estimatedTotal: null, currency: "USD", pdfUrl: null, status: null, createdAt: d("2026-01-01") }).meta,
     ).toBeNull();
+  });
+});
+
+describe("signDocUrl — PII docs are signed on read, never served raw", () => {
+  const sign = async (key: string) => `https://r2.example/${key}?sig=abc`;
+
+  it("bare R2 key → signed short-TTL url", async () => {
+    expect(await signDocUrl("customer-docs/42/x.pdf", sign)).toBe(
+      "https://r2.example/customer-docs/42/x.pdf?sig=abc",
+    );
+  });
+
+  it("already-full http(s) url → passed through, signer not invoked", async () => {
+    let called = false;
+    const spy = async (k: string) => {
+      called = true;
+      return k;
+    };
+    const url = "https://cdn.example/q5.pdf";
+    expect(await signDocUrl(url, spy)).toBe(url);
+    expect(called).toBe(false);
+  });
+
+  it("null url stays null; signer failure degrades to null (no broken/leaky link)", async () => {
+    expect(await signDocUrl(null, sign)).toBeNull();
+    const boom = async () => {
+      throw new Error("R2 down");
+    };
+    expect(await signDocUrl("customer-docs/42/x.pdf", boom)).toBeNull();
   });
 });

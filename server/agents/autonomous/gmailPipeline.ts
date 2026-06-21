@@ -27,6 +27,7 @@ import {
   interactionOutcomes,
   agentPolicies,
   agentMessages,
+  customerDocuments,
 } from "../../../drizzle/schema";
 import { and, eq, sql } from "drizzle-orm";
 import { inquiryClassificationLabelZh } from "./inquiryLabels";
@@ -477,6 +478,71 @@ async function processOneEmail(
     urgency: urgencyMap[decision.urgency] ?? 50,
   });
   const interactionId = Number((interactionIns as any)[0]?.insertId ?? 0);
+
+  // 2026-06-21 — file inbound DOCUMENT attachments (pdf/docx/xlsx/csv, or a
+  // sizeable image such as a passport scan) as customerDocuments so they show
+  // in the customer page 文件 tab. Previously attachments were parsed to text
+  // only and the bytes discarded → the tab was always empty for email
+  // customers. Best-effort: a filing failure must never block mail processing.
+  // The R2 KEY is stored (not a URL); the docs route signs a short-TTL URL on
+  // read since these can carry PII.
+  if (profileId && (msg.attachments?.length ?? 0) > 0) {
+    try {
+      const [{ isCustomerDocAttachment, customerDocR2Key }, { detectAttachmentKind }] =
+        await Promise.all([
+          import("../../_core/customerDocFiling"),
+          import("../../_core/attachmentParser"),
+        ]);
+      // Pre-filter on the cheap, already-parsed summary metadata (kind +
+      // sizeBytes) so we only pay the heavy raw-bytes re-fetch when something
+      // actually qualifies — an inline-logo-only email never triggers a fetch.
+      const wanted = (msg.attachments ?? []).some((a) =>
+        isCustomerDocAttachment(a.kind, a.sizeBytes),
+      );
+      if (wanted) {
+        const raw = await fetchRawAttachments(sendCtx.gmail, msg.id);
+        for (const a of raw) {
+          const kind = detectAttachmentKind(a.filename, a.mimeType);
+          if (!isCustomerDocAttachment(kind, a.bytes.length)) continue;
+          // No filename dedup: a re-sent DIFFERENT file under the same name
+          // (renewed passport.pdf, generic scan.pdf) must NOT be silently
+          // dropped. Re-poll can't double-file — the worker is concurrency-1
+          // and labels each message processed once. Per-attachment try/catch
+          // so one failed upload/insert never drops the others.
+          try {
+            const key = customerDocR2Key(
+              profileId,
+              a.filename,
+              Date.now(),
+              Math.random().toString(36).slice(2, 8),
+            );
+            const put = await storagePut(
+              key,
+              a.bytes,
+              a.mimeType || "application/octet-stream",
+            );
+            await db.insert(customerDocuments).values({
+              customerProfileId: profileId,
+              type: "other",
+              fileName: a.filename.slice(0, 255),
+              r2Url: put.key,
+              uploadedBy: "email",
+            });
+          } catch (e) {
+            log.warn(
+              { err: e, profileId },
+              "[gmailPipeline] one customer-doc attachment failed (non-fatal)",
+            );
+          }
+        }
+      }
+    } catch (e) {
+      log.warn(
+        { err: e, profileId },
+        "[gmailPipeline] customer-doc filing failed (non-fatal)",
+      );
+    }
+  }
 
   // v2 Wave 3 Module 3.4-B — skill auto-dispatch.
   //

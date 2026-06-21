@@ -27,10 +27,12 @@ import {
   uploadedDoc,
   flightOrderDoc,
   mergeDocs,
+  signDocUrl,
 } from "./adminCustomersDocs";
 import {
   inquiryDraftCard,
   escalationDraftCard,
+  observationDraftCard,
   mergeDrafts,
 } from "./adminCustomerDrafts";
 
@@ -1028,9 +1030,38 @@ export const adminCustomersRouter = router({
         );
       }
 
+      // ── Source 3: Gmail NON-escalated drafts — agentMessages (messageType=
+      // observation). This is where the pipeline stores "AI 準備發、還沒發" replies
+      // (sendOutcome would_auto_send / plain draft); observationDraftCard drops
+      // the already-sent (auto_replied) ones. Same customer key + send path as
+      // escalation. (Was missing in Batch 2 — only escalations were surfaced.)
+      let obsCards: ReturnType<typeof observationDraftCard>[] = [];
+      if (profileIds.length > 0) {
+        const obsRows = await drizzleDb
+          .select({
+            id: agentMessages.id,
+            context: agentMessages.context,
+            createdAt: agentMessages.createdAt,
+          })
+          .from(agentMessages)
+          .where(
+            and(
+              eq(agentMessages.messageType, "observation"),
+              eq(agentMessages.readByJeff, 0),
+              inArray(agentMessages.relatedCustomerProfileId, profileIds),
+            ),
+          )
+          .orderBy(desc(agentMessages.createdAt))
+          .limit(50);
+        obsCards = obsRows.map((r) =>
+          observationDraftCard({ ...r, fallbackEmail }),
+        );
+      }
+
       return mergeDrafts([
         inquiryCards.filter((c): c is NonNullable<typeof c> => c != null),
         emailCards.filter((c): c is NonNullable<typeof c> => c != null),
+        obsCards.filter((c): c is NonNullable<typeof c> => c != null),
       ]);
     }),
 
@@ -1360,10 +1391,22 @@ export const adminCustomersRouter = router({
               .limit(50)
           : [];
 
+      // customerDocuments store the R2 KEY (these can be passport/visa scans);
+      // sign each to a short-TTL URL on read so the download link works without
+      // ever serving the object publicly (signDocUrl: bare key → signed,
+      // full URL → passthrough, sign failure → null/info-only).
+      const { getSecureDocumentUrl } = await import("../storage");
+      const uploadedDocs = await Promise.all(
+        uploadedRows.map(uploadedDoc).map(async (d) => ({
+          ...d,
+          url: await signDocUrl(d.url, getSecureDocumentUrl),
+        })),
+      );
+
       return mergeDocs([
         quoteRows.map(quoteDoc),
         invoiceRows.map(invoiceDoc),
-        uploadedRows.map(uploadedDoc),
+        uploadedDocs,
         flightRows.map(flightOrderDoc),
       ]);
     }),

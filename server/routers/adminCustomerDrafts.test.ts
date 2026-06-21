@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { inquiryDraftCard, escalationDraftCard, mergeDrafts } from "./adminCustomerDrafts";
+import { inquiryDraftCard, escalationDraftCard, observationDraftCard, mergeDrafts } from "./adminCustomerDrafts";
 
 const d = (iso: string) => new Date(iso);
 const j = (o: unknown) => JSON.stringify(o);
@@ -109,6 +109,56 @@ describe("adminCustomerDrafts — normalization", () => {
     });
     expect(card!.to).toBe("recovered@x.com");
     expect(card!.sensitive).toBe(true); // refund_request is 碰錢碰法律
+  });
+
+  it("observation draft (shadow would_auto_send) → obs: card, sends via escalation path", () => {
+    const card = observationDraftCard({
+      id: 4,
+      createdAt: d("2026-06-18"),
+      context: j({
+        sendOutcome: "would_auto_send",
+        draftReply: "您好，我們已收到您的詢問，這是回覆。",
+        gmailThreadId: "t-9",
+        customerEmail: "jenny@gmail.com",
+        classification: "general_inquiry",
+      }),
+    });
+    expect(card).toMatchObject({
+      id: "obs:4",
+      source: "email",
+      to: "jenny@gmail.com",
+      sensitive: false,
+      taskId: null,
+      messageId: 4,
+    });
+  });
+
+  it("observation plain draft (no sendOutcome) with a draftReply is included", () => {
+    const card = observationDraftCard({
+      id: 5,
+      createdAt: d("2026-06-18"),
+      context: j({ draftReply: "hi", gmailThreadId: "t" }),
+    });
+    expect(card!.id).toBe("obs:5");
+  });
+
+  it("observation already-sent (auto_replied) → null (not awaiting send)", () => {
+    expect(
+      observationDraftCard({
+        id: 6,
+        createdAt: d("2026-06-18"),
+        context: j({ sendOutcome: "auto_replied", draftReply: "sent already", gmailThreadId: "t" }),
+      }),
+    ).toBeNull();
+  });
+
+  it("observation needs a gmailThreadId + draftReply, else null", () => {
+    expect(
+      observationDraftCard({ id: 1, createdAt: d("2026-06-18"), context: j({ draftReply: "hi" }) }),
+    ).toBeNull();
+    expect(
+      observationDraftCard({ id: 1, createdAt: d("2026-06-18"), context: j({ gmailThreadId: "t" }) }),
+    ).toBeNull();
   });
 
   it("mergeDrafts: newest-first across both stores, capped, no id collision", () => {

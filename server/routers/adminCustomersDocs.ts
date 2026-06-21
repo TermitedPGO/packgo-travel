@@ -122,6 +122,26 @@ export function flightOrderDoc(r: {
   };
 }
 
+/**
+ * Resolve a customerDocuments url for display. These rows store the R2 KEY (the
+ * files can be passport/visa scans), so a bare key is signed to a short-TTL URL
+ * on read; an already-full http(s) URL (legacy / other sources) is passed
+ * through untouched; a sign failure degrades to null (info-only row) rather than
+ * a broken or leaky link. Pure (signer injected) so the branch is testable.
+ */
+export async function signDocUrl(
+  url: string | null,
+  sign: (key: string) => Promise<string>,
+): Promise<string | null> {
+  if (!url) return url;
+  if (/^https?:\/\//i.test(url)) return url;
+  try {
+    return await sign(url);
+  } catch {
+    return null;
+  }
+}
+
 /** Merge the source groups into one list, newest first, capped to `lim`. */
 export function mergeDocs(groups: CustomerDoc[][], lim = 50): CustomerDoc[] {
   return groups
