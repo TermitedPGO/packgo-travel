@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { MessageSquare, Send, FileText } from "lucide-react"
 import { useLocale } from "@/contexts/LocaleContext"
 import type { AdaptedCustomer, ChatMessage, Draft } from "./types"
@@ -17,6 +17,10 @@ export default function CustomerChat({
   const { t } = useLocale()
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<{ role: "user" | "ai"; text: string }[]>([])
+  // AI 助手 streaming state. `busy` gates the send button; abortRef tears down
+  // the in-flight SSE if Jeff switches customer mid-answer.
+  const [busy, setBusy] = useState(false)
+  const abortRef = useRef<AbortController | null>(null)
 
   // Draft approve/edit/confirm state (keyed by draft id).
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -39,7 +43,15 @@ export default function CustomerChat({
     setConfirmBody(undefined)
     setError(null)
     setEditText("")
+    // The AI 助手 thread is per-customer — abort any in-flight stream and clear
+    // the Q&A so customer A's answers never linger while viewing customer B.
+    abortRef.current?.abort()
+    setMessages([])
+    setBusy(false)
   }, [customer?.id, customer?.kind])
+
+  // Tear down any in-flight stream on unmount.
+  useEffect(() => () => abortRef.current?.abort(), [])
 
   // Sensitive (碰錢碰法律) drafts go through a confirm step; others send directly.
   // On failure: surface an error and KEEP the dialog open — never silently clear
@@ -68,15 +80,86 @@ export default function CustomerChat({
     }
   }
 
-  const handleSend = () => {
-    if (!input.trim()) return
+  // Stream a customer-scoped answer over the SAME hardened SSE pipeline the
+  // global ops chat uses (/api/agent/ask-ops-stream + customerId/profileId):
+  // admin-auth + CSRF + the system prompt pinned to THIS customer's real data
+  // (搬運 facts, not invented). Read-only — it never sends or edits anything.
+  const handleSend = async () => {
     const q = input.trim()
+    if (!q || busy || !customer) return
     setInput("")
-    setMessages((prev) => [
-      ...prev,
-      { role: "user", text: q },
-      { role: "ai", text: `收到你關於 ${customer?.name ?? ""} 的問題：「${q}」\n\n這是 mock 回覆，接 AI 後會有真正的回答。` },
-    ])
+    setBusy(true)
+    // registered → customerId (userId); guest → customerProfileId.
+    const scopeParam =
+      customer.kind === "guest"
+        ? `customerProfileId=${customer.id}`
+        : `customerId=${customer.id}`
+    // Optimistic user bubble + an empty AI bubble we stream tokens into.
+    setMessages((prev) => [...prev, { role: "user", text: q }, { role: "ai", text: "" }])
+    const setAiText = (next: (prev: string) => string) =>
+      setMessages((prev) => {
+        const copy = [...prev]
+        const last = copy[copy.length - 1]
+        if (last?.role === "ai") copy[copy.length - 1] = { role: "ai", text: next(last.text) }
+        return copy
+      })
+
+    const ac = new AbortController()
+    abortRef.current = ac
+    let sawToken = false
+    try {
+      const resp = await fetch(
+        `/api/agent/ask-ops-stream?q=${encodeURIComponent(q)}&${scopeParam}`,
+        {
+          method: "GET",
+          credentials: "include",
+          signal: ac.signal,
+          headers: { "X-Requested-With": "XMLHttpRequest", Accept: "text/event-stream" },
+        },
+      )
+      if (!resp.ok || !resp.body) {
+        setAiText(() => t("admin.customers.drafts.askFailed"))
+        setBusy(false)
+        return
+      }
+      const reader = resp.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ""
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const chunks = buffer.split("\n\n")
+        buffer = chunks.pop() ?? ""
+        for (const chunk of chunks) {
+          const dataLine = chunk.split("\n").find((l) => l.startsWith("data: "))
+          if (!dataLine) continue
+          try {
+            const event = JSON.parse(dataLine.slice(6))
+            if (event.type === "token") {
+              // first real token clears any "查詢中…" status placeholder
+              if (!sawToken) { sawToken = true; setAiText(() => "") }
+              setAiText((p) => p + (event.text ?? ""))
+            } else if (event.type === "status") {
+              if (!sawToken) setAiText(() => event.text ?? "")
+            } else if (event.type === "done") {
+              if (event.finalAnswer) setAiText(() => event.finalAnswer)
+            } else if (event.type === "error") {
+              setAiText(() => event.error ?? t("admin.customers.drafts.askFailed"))
+            }
+          } catch {
+            /* ignore a malformed SSE chunk */
+          }
+        }
+      }
+    } catch (err) {
+      // a deliberate abort (customer switch / unmount) is not an error
+      if ((err as { name?: string })?.name !== "AbortError") {
+        setAiText(() => t("admin.customers.drafts.askFailed"))
+      }
+    } finally {
+      setBusy(false)
+    }
   }
 
   const drafts = customer?.drafts ?? []
@@ -239,12 +322,14 @@ export default function CustomerChat({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSend()}
+            disabled={busy || !customer}
             placeholder={t("admin.customers.drafts.askPlaceholder")}
-            className="flex-1 text-[12px] outline-none bg-transparent"
+            className="flex-1 text-[12px] outline-none bg-transparent disabled:opacity-60"
           />
           <button
             onClick={handleSend}
-            className="w-6 h-6 rounded-md bg-gray-900 text-white flex items-center justify-center hover:bg-gray-700 transition-colors flex-shrink-0"
+            disabled={busy || !customer || !input.trim()}
+            className="w-6 h-6 rounded-md bg-gray-900 text-white flex items-center justify-center hover:bg-gray-700 transition-colors flex-shrink-0 disabled:opacity-40 disabled:hover:bg-gray-900"
           >
             <Send className="w-3 h-3" />
           </button>

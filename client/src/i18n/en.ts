@@ -3332,6 +3332,7 @@ export const en = {
         sending: 'Sending…',
         sendFailed: 'Send failed, please try again.',
         askPlaceholder: 'About this customer...',
+        askFailed: 'Query failed, please try again.',
       },
       status: {
         allClear: 'All clear',
