@@ -54,14 +54,24 @@ export default function CustomerDetail({ customer, chatMessages = [] }: { custom
         </div>
         <div className="flex gap-1.5 flex-shrink-0">
           <button
-            onClick={() => alert(t("admin.customers.action.call"))}
-            className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors"
+            onClick={() => {
+              if (c.phone) window.location.href = `tel:${c.phone.replace(/[^\d+]/g, "")}`
+            }}
+            disabled={!c.phone}
+            title={c.phone || t("admin.customers.action.call")}
+            aria-label={t("admin.customers.action.call")}
+            className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
           >
             <Phone className="w-3.5 h-3.5" />
           </button>
           <button
-            onClick={() => alert(t("admin.customers.action.email"))}
-            className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors"
+            onClick={() => {
+              if (c.email) window.location.href = `mailto:${c.email}`
+            }}
+            disabled={!c.email}
+            title={c.email || t("admin.customers.action.email")}
+            aria-label={t("admin.customers.action.email")}
+            className="p-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
           >
             <Mail className="w-3.5 h-3.5" />
           </button>
