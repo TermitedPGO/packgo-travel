@@ -3367,6 +3367,9 @@ export const zhTW = {
         aiPending: '跟進中（M2 自動生成）',
         expandAll: '展開全部 {n} 則',
         collapse: '收合',
+        fullChat: '完整對話',
+        events: '事件',
+        noHistory: '尚無往來紀錄',
       },
       bundle: {
         title: 'AI 已準備的文件',

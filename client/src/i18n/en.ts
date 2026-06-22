@@ -3399,6 +3399,9 @@ export const en = {
         aiPending: 'Following up (M2 auto-generate)',
         expandAll: 'Expand all {n}',
         collapse: 'Collapse',
+        fullChat: 'Full conversation',
+        events: 'Events',
+        noHistory: 'No history yet',
       },
       bundle: {
         title: 'AI-prepared documents',

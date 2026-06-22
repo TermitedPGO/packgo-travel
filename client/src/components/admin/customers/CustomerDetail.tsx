@@ -132,7 +132,7 @@ export default function CustomerDetail({ customer, chatMessages = [] }: { custom
         {tab === "overview" && <OverviewTab customer={c} chatMessages={chatMessages} />}
         {tab === "orders" && <OrdersTab customer={c} />}
         {tab === "docs" && <DocsTab customer={c} />}
-        {tab === "history" && <TimelineTab customer={c} />}
+        {tab === "history" && <TimelineTab customer={c} chatMessages={chatMessages} />}
       </div>
     </div>
   )

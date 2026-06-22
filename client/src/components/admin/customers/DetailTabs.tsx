@@ -319,24 +319,61 @@ export function DocsTab({ customer: c }: { customer: AdaptedCustomer }) {
   )
 }
 
-export function TimelineTab({ customer: c }: { customer: AdaptedCustomer }) {
+export function TimelineTab({ customer: c, chatMessages = [] }: { customer: AdaptedCustomer; chatMessages?: ChatMessage[] }) {
+  const { t } = useLocale()
+  const hasChat = chatMessages.length > 0
+  const hasEvents = c.timeline.length > 0
   return (
-    <div className="p-6">
-      <div className="relative pl-7">
-        <div className="absolute left-[7px] top-2 bottom-2 w-px bg-gray-200" />
-        {c.timeline.map((t, i) => (
-          <div key={i} className="relative flex gap-3 pb-5 last:pb-0">
-            <div className="absolute left-[-21px] w-4 h-4 rounded-full bg-white border border-gray-300 flex items-center justify-center text-gray-500">
-              {TL_ICON[t.type]}
-            </div>
-            <div>
-              <div className="text-[12px] font-medium text-gray-900">{t.title}</div>
-              <div className="text-[11px] text-gray-500 mt-0.5">{t.desc}</div>
-              <div className="text-[10px] text-gray-400 mt-1">{t.time}</div>
-            </div>
+    <div className="p-6 space-y-6">
+      {/* full conversation (oldest→newest, full text) */}
+      {hasChat && (
+        <div className="space-y-3">
+          <div className="text-[11px] font-semibold text-gray-900">
+            {t("admin.customers.followUp.fullChat")}
           </div>
-        ))}
-      </div>
+          {chatMessages.map((m) => (
+            <div key={m.id} className="flex gap-2.5 text-[12px]">
+              <span className="flex-shrink-0 text-[10px] text-gray-400 w-10 pt-0.5">
+                {m.createdAt.toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" })}
+              </span>
+              <div className="flex-1 min-w-0">
+                <span className="font-medium text-gray-900">
+                  {m.senderRole === "jeff" ? t("admin.customers.followUp.me") : c.name}
+                </span>
+                <p className="text-gray-600 mt-0.5 whitespace-pre-wrap break-words">{m.body}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* event timeline (orders / payments / docs) */}
+      {hasEvents && (
+        <div>
+          <div className="text-[11px] font-semibold text-gray-900 mb-3">
+            {t("admin.customers.followUp.events")}
+          </div>
+          <div className="relative pl-7">
+            <div className="absolute left-[7px] top-2 bottom-2 w-px bg-gray-200" />
+            {c.timeline.map((tl, i) => (
+              <div key={i} className="relative flex gap-3 pb-5 last:pb-0">
+                <div className="absolute left-[-21px] w-4 h-4 rounded-full bg-white border border-gray-300 flex items-center justify-center text-gray-500">
+                  {TL_ICON[tl.type]}
+                </div>
+                <div>
+                  <div className="text-[12px] font-medium text-gray-900">{tl.title}</div>
+                  <div className="text-[11px] text-gray-500 mt-0.5">{tl.desc}</div>
+                  <div className="text-[10px] text-gray-400 mt-1">{tl.time}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!hasChat && !hasEvents && (
+        <div className="text-sm text-gray-400">{t("admin.customers.followUp.noHistory")}</div>
+      )}
     </div>
   )
 }
