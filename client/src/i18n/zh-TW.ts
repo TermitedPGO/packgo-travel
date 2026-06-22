@@ -3436,6 +3436,7 @@ export const zhTW = {
         attach: '掛上',
         attached: '已掛上',
         dropPdf: '拖曳 PDF 到這裡,或點擊選檔',
+        dropPdfCreates: '拖曳報價 PDF:自動建單並掛上',
         uploading: '上傳中…',
         uploadFailed: '上傳失敗,請再試',
         orPasteUrl: '或貼上連結',

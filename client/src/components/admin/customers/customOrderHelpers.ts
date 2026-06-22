@@ -58,3 +58,34 @@ export function todayLocal(): string {
 export function localDateAtNoon(ymd: string): Date {
   return new Date(`${ymd}T12:00:00`)
 }
+
+/**
+ * Upload a PDF File to R2 via a presigned PUT and return the durable read URL.
+ * `presign` is the createPdfUpload mutation's mutateAsync. Shared by the order
+ * detail (attach to existing order) and the new-order form (create + attach).
+ */
+export async function uploadPdfViaPresign(
+  presign: (args: {
+    orderId: number
+    kind: "quote" | "confirmation"
+    filename: string
+    size: number
+  }) => Promise<{ putUrl: string; fileUrl: string }>,
+  orderId: number,
+  kind: "quote" | "confirmation",
+  file: File,
+): Promise<string> {
+  const { putUrl, fileUrl } = await presign({
+    orderId,
+    kind,
+    filename: file.name,
+    size: file.size,
+  })
+  const put = await fetch(putUrl, {
+    method: "PUT",
+    headers: { "Content-Type": "application/pdf" },
+    body: file,
+  })
+  if (!put.ok) throw new Error(`R2 PUT ${put.status}`)
+  return fileUrl
+}

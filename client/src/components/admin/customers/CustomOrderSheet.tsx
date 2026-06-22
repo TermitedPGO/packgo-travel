@@ -9,8 +9,9 @@ import {
 import { useLocale } from "@/contexts/LocaleContext"
 import { trpc } from "@/lib/trpc"
 import type { AdaptedCustomer } from "./types"
-import { toSelection, num, suggestedDeposit } from "./customOrderHelpers"
+import { toSelection, num, suggestedDeposit, uploadPdfViaPresign } from "./customOrderHelpers"
 import CustomOrderFields, {
+  PdfDrop,
   emptyForm,
   type OrderFormState,
 } from "./CustomOrderFields"
@@ -85,22 +86,51 @@ export default function CustomOrderSheet({
     })
 
   const validEmail = /^\S+@\S+\.\S+$/.test(customer.email)
-  const submitCreate = () =>
-    create.mutate({
-      selection: sel,
-      title: form.title.trim(),
-      destination: form.destination.trim() || undefined,
-      needsQuote: form.needsQuote,
-      totalPrice: num(form.totalPrice) ?? undefined,
-      depositAmount: num(form.depositAmount) ?? undefined,
-      currency: form.currency || "USD",
-      departureDate: form.departureDate || undefined,
-      returnDate: form.returnDate || undefined,
-      supplierCost: num(form.supplierCost) ?? undefined,
-      customerName: customer.name || undefined,
-      customerEmail: validEmail ? customer.email : undefined,
-      notes: form.notes.trim() || undefined,
-    })
+  const buildCreateInput = (titleOverride?: string) => ({
+    selection: sel,
+    title: titleOverride ?? form.title.trim(),
+    destination: form.destination.trim() || undefined,
+    needsQuote: form.needsQuote,
+    totalPrice: num(form.totalPrice) ?? undefined,
+    depositAmount: num(form.depositAmount) ?? undefined,
+    currency: form.currency || "USD",
+    departureDate: form.departureDate || undefined,
+    returnDate: form.returnDate || undefined,
+    supplierCost: num(form.supplierCost) ?? undefined,
+    customerName: customer.name || undefined,
+    customerEmail: validEmail ? customer.email : undefined,
+    notes: form.notes.trim() || undefined,
+  })
+  const submitCreate = () => create.mutate(buildCreateInput())
+
+  // Drop a PDF on the new-order form → auto-create the order (default title if
+  // blank) + upload + attach as the quote, then jump to the order detail. Saves
+  // the "create order first, then find the dropzone" hunt.
+  const createPdfUpload = trpc.customerOrders.createPdfUpload.useMutation()
+  const attachQuote = trpc.customerOrders.attachQuote.useMutation()
+  const [dropBusy, setDropBusy] = useState(false)
+  async function handleCreateDrop(file: File) {
+    if (file.type && file.type !== "application/pdf") {
+      window.alert(k("notPdf"))
+      return
+    }
+    if (dropBusy || create.isPending) return
+    setDropBusy(true)
+    try {
+      const title = form.title.trim() || `${customer.name || "客戶"} 訂製單`
+      const created = await create.mutateAsync(buildCreateInput(title))
+      if (!created?.id) throw new Error("create failed")
+      const url = await uploadPdfViaPresign(createPdfUpload.mutateAsync, created.id, "quote", file)
+      await attachQuote.mutateAsync({ orderId: created.id, quotePdfUrl: url })
+      utils.customerOrders.listForCustomer.invalidate(sel)
+      utils.customerOrders.get.invalidate({ orderId: created.id })
+      setSelected(created.id)
+    } catch {
+      window.alert(k("uploadFailed"))
+    } finally {
+      setDropBusy(false)
+    }
+  }
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
@@ -142,6 +172,11 @@ export default function CustomOrderSheet({
         <div className="pb-6">
           {selected === "new" ? (
             <div className="space-y-3">
+              <PdfDrop
+                label={dropBusy ? k("uploading") : k("dropPdfCreates")}
+                busy={dropBusy}
+                onFile={handleCreateDrop}
+              />
               <CustomOrderFields value={form} onChange={patchForm} />
               {create.error && (
                 <p className="text-[11px] text-red-600">{create.error.message}</p>

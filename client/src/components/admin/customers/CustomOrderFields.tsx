@@ -1,3 +1,5 @@
+import { useState } from "react"
+import { Upload, Loader2 } from "lucide-react"
 import { useLocale } from "@/contexts/LocaleContext"
 import { shortDate } from "./customOrderHelpers"
 
@@ -58,6 +60,53 @@ export function formFromOrder(o: {
     supplierCost: o.supplierCost ?? "",
     notes: o.notes ?? "",
   }
+}
+
+/** Drag-drop / click-to-pick a PDF. Shared by the new-order form + order detail. */
+export function PdfDrop({
+  label,
+  busy,
+  onFile,
+}: {
+  label: string
+  busy: boolean
+  onFile: (f: File) => void
+}) {
+  const [over, setOver] = useState(false)
+  return (
+    <label
+      onDragOver={(e) => {
+        e.preventDefault()
+        setOver(true)
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault()
+        setOver(false)
+        const f = e.dataTransfer.files?.[0]
+        if (f) onFile(f)
+      }}
+      className={`flex items-center justify-center gap-1.5 rounded-lg border border-dashed px-3 py-2.5 text-[11px] cursor-pointer transition-colors ${
+        over
+          ? "border-gray-900 bg-gray-50 text-gray-900"
+          : "border-gray-300 text-gray-500 hover:bg-gray-50"
+      }`}
+    >
+      {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+      {label}
+      <input
+        type="file"
+        accept="application/pdf,.pdf"
+        className="hidden"
+        disabled={busy}
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          if (f) onFile(f)
+          e.target.value = ""
+        }}
+      />
+    </label>
+  )
 }
 
 const inputCls =

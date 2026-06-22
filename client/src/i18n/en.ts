@@ -3468,6 +3468,7 @@ export const en = {
         attach: 'Attach',
         attached: 'Attached',
         dropPdf: 'Drag a PDF here, or click to choose',
+        dropPdfCreates: 'Drop a quote PDF: creates the order and attaches',
         uploading: 'Uploading…',
         uploadFailed: 'Upload failed, try again',
         orPasteUrl: 'Or paste a link',

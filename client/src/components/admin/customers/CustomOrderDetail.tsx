@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react"
-import { FileText, DollarSign, FileCheck, Loader2, Upload } from "lucide-react"
+import { FileText, DollarSign, FileCheck, Loader2 } from "lucide-react"
 import { useLocale } from "@/contexts/LocaleContext"
 import { trpc, type RouterOutputs } from "@/lib/trpc"
 import CustomOrderFields, {
+  PdfDrop,
   type OrderFormState,
   formFromOrder,
 } from "./CustomOrderFields"
@@ -13,6 +14,7 @@ import {
   suggestedDeposit,
   todayLocal,
   localDateAtNoon,
+  uploadPdfViaPresign,
 } from "./customOrderHelpers"
 
 type Order = NonNullable<RouterOutputs["customerOrders"]["get"]>
@@ -90,18 +92,7 @@ export default function CustomOrderDetail({
     }
     setUploading(kind)
     try {
-      const { putUrl, fileUrl } = await createPdfUpload.mutateAsync({
-        orderId: order.id,
-        kind,
-        filename: file.name,
-        size: file.size,
-      })
-      const put = await fetch(putUrl, {
-        method: "PUT",
-        headers: { "Content-Type": "application/pdf" },
-        body: file,
-      })
-      if (!put.ok) throw new Error(`R2 PUT ${put.status}`)
+      const fileUrl = await uploadPdfViaPresign(createPdfUpload.mutateAsync, order.id, kind, file)
       if (kind === "quote") {
         await attachQuote.mutateAsync({ orderId: order.id, quotePdfUrl: fileUrl })
         setQuoteUrl(fileUrl)
@@ -416,48 +407,3 @@ function Stat({ label, value }: { label: string; value: string }) {
   )
 }
 
-function PdfDrop({
-  label,
-  busy,
-  onFile,
-}: {
-  label: string
-  busy: boolean
-  onFile: (f: File) => void
-}) {
-  const [over, setOver] = useState(false)
-  return (
-    <label
-      onDragOver={(e) => {
-        e.preventDefault()
-        setOver(true)
-      }}
-      onDragLeave={() => setOver(false)}
-      onDrop={(e) => {
-        e.preventDefault()
-        setOver(false)
-        const f = e.dataTransfer.files?.[0]
-        if (f) onFile(f)
-      }}
-      className={`flex items-center justify-center gap-1.5 rounded-lg border border-dashed px-3 py-2.5 text-[11px] cursor-pointer transition-colors ${
-        over
-          ? "border-gray-900 bg-gray-50 text-gray-900"
-          : "border-gray-300 text-gray-500 hover:bg-gray-50"
-      }`}
-    >
-      {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-      {label}
-      <input
-        type="file"
-        accept="application/pdf,.pdf"
-        className="hidden"
-        disabled={busy}
-        onChange={(e) => {
-          const f = e.target.files?.[0]
-          if (f) onFile(f)
-          e.target.value = ""
-        }}
-      />
-    </label>
-  )
-}
