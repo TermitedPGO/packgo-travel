@@ -16,8 +16,20 @@ vi.mock("./logger", () => ({
     debug: vi.fn(),
   }),
 }));
+// 批3 m4 — docs are loaded + extracted via these; default to empty so the
+// existing pin-block tests are unaffected, override per-test to prove appension.
+vi.mock("./customerDocsLoader", () => ({
+  loadCustomerDocs: vi.fn().mockResolvedValue([]),
+}));
+vi.mock("./customerDocsText", () => ({
+  buildCustomerDocsText: vi
+    .fn()
+    .mockResolvedValue({ list: "", fullText: "", readCount: 0 }),
+}));
 
 import { getDb } from "../db";
+import { loadCustomerDocs } from "./customerDocsLoader";
+import { buildCustomerDocsText } from "./customerDocsText";
 import {
   formatCustomerContext,
   buildCustomerChatContext,
@@ -239,5 +251,31 @@ describe("buildGuestChatContext (guest-customer-chat)", () => {
     const block = await buildGuestChatContext(1);
     expect(block).toContain("新的開著團");
     expect(block).not.toContain("舊的已結團");
+  });
+
+  it("appends the document list + PDF content to the pinned block (m4)", async () => {
+    getDbMock.mockResolvedValue(
+      fakeDb([[{ id: 2550004, email: "jenny@example.com" }], [], [], []]),
+    );
+    vi.mocked(loadCustomerDocs).mockResolvedValueOnce([
+      {
+        id: "co-quote:1",
+        kind: "quote",
+        name: "台灣12天報價",
+        url: "k1",
+        meta: null,
+        createdAt: new Date("2026-06-01"),
+      },
+    ]);
+    vi.mocked(buildCustomerDocsText).mockResolvedValueOnce({
+      list: "【文件清單】\n- 台灣12天報價(quote)",
+      fullText: "Day1 台北 Day3 阿里山日出",
+      readCount: 1,
+    });
+    const block = await buildGuestChatContext(2550004);
+    expect(block).toContain("台灣12天報價");
+    expect(block).toContain("Day3 阿里山日出");
+    // the cost-firewall instruction rides with the doc content
+    expect(block).toContain("成本/同業價是內部數字");
   });
 });

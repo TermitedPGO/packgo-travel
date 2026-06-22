@@ -19,8 +19,43 @@
 import { eq, desc, or, and, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import { createChildLogger } from "./logger";
+import { loadCustomerDocs, type CustomerDocsScope } from "./customerDocsLoader";
+import { buildCustomerDocsText } from "./customerDocsText";
 
 const log = createChildLogger({ module: "customerChatContext" });
+
+/**
+ * 批3 m4 — append the customer's document list + PDF content (報價/行程) to the
+ * pinned chat block. Jeff 拍板「每次都全讀」(Stage 2 Q2): the AI reads the actual
+ * itinerary/quote text so it can answer 「行程第幾天去哪」. Lands in the cached
+ * system block (opsAgentStream cache_control), so repeat turns in one
+ * conversation reuse it cheaply. PII rule: extracted text only flows into the
+ * prompt here — never persisted (customerDocsText reads, never writes). Degrades
+ * to "" on any failure so a doc hiccup never breaks the chat.
+ */
+async function buildDocsBlock(scope: CustomerDocsScope): Promise<string> {
+  try {
+    const docs = await loadCustomerDocs(scope); // raw R2 keys (no signing)
+    if (!docs.length) return "";
+    const { list, fullText } = await buildCustomerDocsText(
+      docs.map((d) => ({ kind: d.kind, name: d.name, url: d.url, meta: d.meta })),
+    );
+    const parts = ["\n\n" + list];
+    if (fullText) {
+      parts.push(
+        "\n\n【以下是這位客人文件的內容,回答行程/報價問題時據此回答;成本/同業價是內部數字,絕不寫進給客人的草稿】\n" +
+          fullText,
+      );
+    }
+    return parts.join("");
+  } catch (err) {
+    log.warn(
+      { err: (err as Error).message },
+      "[customerChatContext] docs block failed — chat continues without docs",
+    );
+    return "";
+  }
+}
 
 /** Per-list cap — keeps the block small even for heavy customers. */
 const LIST_CAP = 5;
@@ -210,12 +245,13 @@ export async function buildCustomerChatContext(
     .orderBy(desc(aiQuotes.createdAt))
     .limit(LIST_CAP);
 
-  return formatCustomerContext({
+  const base = formatCustomerContext({
     user,
     openBookings: open,
     openInquiries: openInq,
     recentQuotes,
   });
+  return base + (await buildDocsBlock({ userId: customerUserId }));
 }
 
 /**
@@ -299,7 +335,7 @@ export async function buildGuestChatContext(
         .limit(LIST_CAP)
     : [];
 
-  return formatCustomerContext({
+  const base = formatCustomerContext({
     user: {
       id: profile.id,
       name: null,
@@ -318,4 +354,5 @@ export async function buildGuestChatContext(
       snippet: (i.content ?? "").slice(0, 200),
     })),
   });
+  return base + (await buildDocsBlock({ profileId }));
 }

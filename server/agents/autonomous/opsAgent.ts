@@ -30,6 +30,14 @@ import { invokeLLM } from "../../_core/llm";
  */
 export const OPS_CHAT_MODEL = "claude-opus-4-8";
 
+/**
+ * 2026-06-22 — 客人頁右側對話框(customerId / customerProfileId 綁定)用 Haiku,
+ * 不用 Opus。Jeff 拍板(customer-ai-sessions §五.3):客人對話多是「搬運這位客人
+ * 的事實」(信/訂單/報價/文件已 pin 進 system prompt),不需最豪模型;Haiku 又快
+ * 又便宜,首 token 更快,對話框體感即時。全域 #ops 對話維持 OPS_CHAT_MODEL。
+ */
+export const OPS_CUSTOMER_CHAT_MODEL = "claude-haiku-4-5";
+
 // Exported for opsAgentStream.ts — single source of truth, no drift.
 export const SYSTEM_PROMPT = `你是 Jeff 的 PACK&GO Agent。你跟他像合夥人對話,不是查詢系統的 chatbot。
 

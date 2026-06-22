@@ -615,15 +615,20 @@ async function startServer() {
           (await buildGuestChatContext(customerProfileId)) ?? undefined;
       }
 
-      // Run streaming agent
+      // Run streaming agent. Customer-scoped chats (customerId / profileId) run
+      // on Haiku (fast + cheap, 批3 m4); global #ops stays on Opus.
       const { runOpsAgentStream } = await import("../agents/autonomous/opsAgentStream");
+      const streamModel =
+        customerId !== null || customerProfileId !== null
+          ? (await import("../agents/autonomous/opsAgent")).OPS_CUSTOMER_CHAT_MODEL
+          : undefined;
       let finalAnswer = "";
       let suggestedActions: any[] = [];
       let cards: any[] = [];
       const startedAt = Date.now();
       let firstTokenLogged = false;
       try {
-        for await (const event of runOpsAgentStream(question, history, imageUrls, extraSystem)) {
+        for await (const event of runOpsAgentStream(question, history, imageUrls, extraSystem, streamModel)) {
           if (terminated) break; // timed out or client disconnected
           if (event.type === "token") {
             if (!firstTokenLogged) {

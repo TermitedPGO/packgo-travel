@@ -96,10 +96,14 @@ export async function* runOpsAgentStream(
   /** 批2 m3 — per-customer chat pins WHO the thread is about (appended to
    *  the system prompt). Plain ops chat passes nothing; behavior unchanged. */
   extraSystem?: string,
+  /** 批3 m4 — override the model for this stream. Customer-scoped chats pass
+   *  Haiku (fast + cheap); global #ops passes nothing → Opus. */
+  model?: string,
 ): AsyncGenerator<StreamEvent, void, void> {
   try {
     const { SYSTEM_PROMPT, ACTION_PROPOSAL_GUIDE, OPS_CHAT_MODEL } =
       await import("./opsAgent");
+    const chatModel = model || OPS_CHAT_MODEL;
 
     // Build conversation: history → current question (+ optional images)
     const messages: Anthropic.MessageParam[] = [];
@@ -163,7 +167,7 @@ export async function* runOpsAgentStream(
 
     for (let round = 0; round < MAX_ROUNDS; round++) {
       const stream = getClient().messages.stream({
-        model: OPS_CHAT_MODEL,
+        model: chatModel,
         max_tokens: 4096,
         system: systemBlocks,
         messages,
@@ -241,7 +245,7 @@ export async function* runOpsAgentStream(
           "請直接用中文回答我上面的問題,把你剛剛查到的數字 / 結果講出來。不要再呼叫工具,就用文字回答。",
       });
       const fstream = getClient().messages.stream({
-        model: OPS_CHAT_MODEL,
+        model: chatModel,
         max_tokens: 2048,
         system: systemBlocks,
         messages,
