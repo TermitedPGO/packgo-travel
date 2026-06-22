@@ -178,7 +178,20 @@ export async function listUnreadMessages(
   const queryParts = ["is:unread", "-from:noreply"];
   if (sinceSeconds) queryParts.push(`after:${sinceSeconds}`);
   if (filterLabel) queryParts.push(`label:${filterLabel}`);
-  const query = queryParts.join(" ");
+  return fetchSummariesForQuery(gmail, queryParts.join(" "), maxResults);
+}
+
+/**
+ * Run a Gmail search query and hydrate each hit into a GmailMessageSummary
+ * (full headers + parsed attachments). Shared by listUnreadMessages (inbound)
+ * and listSentWithAttachments (outbound). Per-message failures are logged and
+ * skipped, never fatal.
+ */
+async function fetchSummariesForQuery(
+  gmail: ReturnType<typeof buildGmailClient>,
+  query: string,
+  maxResults: number
+): Promise<GmailMessageSummary[]> {
   const listResp = await gmail.users.messages.list({
     userId: "me",
     q: query,
@@ -195,8 +208,6 @@ export async function listUnreadMessages(
         format: "full",
       });
       const summary = parseMessage(full.data);
-      // 2026-05-25 Phase 7 — fetch + parse attachments inline.
-      // Failures don't block the message; we just log + leave attachments=[].
       try {
         summary.attachments = await fetchAndParseAttachments(
           gmail,
@@ -215,6 +226,23 @@ export async function listUnreadMessages(
     }
   }
   return results;
+}
+
+/**
+ * 2026-06-22 sent-mail capture — list OUTBOUND messages WITH attachments that
+ * we haven't filed yet (Jeff sends quotes / itineraries to customers straight
+ * from Gmail; those never enter the system). `excludeLabel` carries the
+ * bookkeeping label so already-filed messages are skipped; `newerThanDays`
+ * caps the backfill window. Mirrors listUnreadMessages' hydration.
+ */
+export async function listSentWithAttachments(
+  gmail: ReturnType<typeof buildGmailClient>,
+  opts?: { maxResults?: number; excludeLabel?: string; newerThanDays?: number }
+): Promise<GmailMessageSummary[]> {
+  const parts = ["in:sent", "has:attachment"];
+  if (opts?.newerThanDays) parts.push(`newer_than:${opts.newerThanDays}d`);
+  if (opts?.excludeLabel) parts.push(`-label:${opts.excludeLabel}`);
+  return fetchSummariesForQuery(gmail, parts.join(" "), opts?.maxResults ?? 25);
 }
 
 export interface ThreadHistoryMessage {

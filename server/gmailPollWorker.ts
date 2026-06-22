@@ -12,6 +12,7 @@ import { Worker } from "bullmq";
 import { redisBullMQ } from "./redis";
 import { GmailPollJobData, GmailPollJobResult } from "./queue";
 import { runGmailPipeline } from "./agents/autonomous/gmailPipeline";
+import { runSentMailCapture } from "./_core/sentMailFiling";
 import { getDb } from "./db";
 import { gmailIntegration } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
@@ -48,6 +49,24 @@ export const gmailPollWorker = new Worker<GmailPollJobData, GmailPollJobResult>(
         // "auto_replied" when send succeeds, which the dashboard reads
         // directly. We just surface totalFailed + free-text errors here.
         errors += result.totalFailed + result.errors.length;
+
+        // 2026-06-22 — also file OUTBOUND sent-mail attachments + record our
+        // side of the thread. Separate lighter pass; isolated so a failure
+        // here never fails the inbound tick.
+        try {
+          const sent = await runSentMailCapture(integration.id);
+          if (sent.docsFiled || sent.interactions) {
+            console.log(
+              `[GmailPollWorker] sent-capture ${integration.emailAddress}: ` +
+                `docs=${sent.docsFiled} interactions=${sent.interactions} scanned=${sent.scanned}`
+            );
+          }
+        } catch (e) {
+          console.error(
+            `[GmailPollWorker] sent-capture ${integration.id} failed (non-fatal):`,
+            e
+          );
+        }
       } catch (err) {
         errors++;
         // 2026-06-04 — a revoked / expired OAuth grant used to fail here
