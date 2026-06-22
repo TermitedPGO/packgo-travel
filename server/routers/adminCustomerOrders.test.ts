@@ -103,6 +103,7 @@ describe("surface", () => {
         "attachQuote",
         "cancel",
         "create",
+        "createPdfUpload",
         "get",
         "listForCustomer",
         "recordPayment",

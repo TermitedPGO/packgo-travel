@@ -243,6 +243,31 @@ export const adminCustomerOrdersRouter = router({
       return updated;
     }),
 
+  // ── PDF 上傳(拖曳)──────────────────────────────────────────────────────
+  // Presign a browser→R2 DIRECT PUT for a quote / confirmation PDF (big files
+  // skip the Express body limit). Client PUTs the file to putUrl, then calls
+  // attachQuote / attachConfirmation with fileUrl. PDF-only. Mirrors the
+  // reply-attachment upload pattern. R2 bucket needs CORS (PUT) for the admin
+  // origin. fileUrl is the durable read URL (public base when configured).
+  createPdfUpload: adminProcedure
+    .input(
+      z.object({
+        orderId: z.number().int().positive(),
+        kind: z.enum(["quote", "confirmation"]),
+        filename: z.string().trim().min(1).max(255),
+        size: z.number().int().positive().max(25 * 1024 * 1024),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      await loadOrder(input.orderId);
+      const { storageCreatePresignedPut, storageGet } = await import("../storage");
+      const safe = input.filename.replace(/[^\w.\-]+/g, "_").slice(-80);
+      const key = `custom-orders/${input.orderId}/${input.kind}-${Date.now()}-${safe}`;
+      const { key: storedKey, putUrl } = await storageCreatePresignedPut(key, "application/pdf");
+      const { url: fileUrl } = await storageGet(storedKey);
+      return { putUrl, fileUrl };
+    }),
+
   // ── 報價 ──────────────────────────────────────────────────────────────────
   attachQuote: adminProcedure
     .input(

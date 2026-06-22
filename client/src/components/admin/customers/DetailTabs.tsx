@@ -60,7 +60,7 @@ export function OverviewTab({ customer: c, chatMessages }: { customer: AdaptedCu
                 {lastMsg.createdAt.toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" })}
               </span>
             </div>
-            {chatMessages.length > 3 && (
+            {chatMessages.length > 0 && (
               <button
                 onClick={() => setShowAllChat((v) => !v)}
                 className="text-[10px] font-medium text-gray-500 hover:text-gray-900 transition-colors"

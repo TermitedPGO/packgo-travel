@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { FileText, DollarSign, FileCheck, Loader2 } from "lucide-react"
+import { FileText, DollarSign, FileCheck, Loader2, Upload } from "lucide-react"
 import { useLocale } from "@/contexts/LocaleContext"
 import { trpc, type RouterOutputs } from "@/lib/trpc"
 import CustomOrderFields, {
@@ -79,6 +79,42 @@ export default function CustomOrderDetail({
   const attachConfirmation = trpc.customerOrders.attachConfirmation.useMutation(mutOpts)
   const sendConfirmation = trpc.customerOrders.sendConfirmation.useMutation(mutOpts)
   const cancel = trpc.customerOrders.cancel.useMutation(mutOpts)
+  const createPdfUpload = trpc.customerOrders.createPdfUpload.useMutation()
+
+  // ── drag-drop PDF upload (presign → browser PUT to R2 → attach) ──
+  const [uploading, setUploading] = useState<null | "quote" | "confirmation">(null)
+  async function handlePdf(file: File, kind: "quote" | "confirmation") {
+    if (file.type && file.type !== "application/pdf") {
+      window.alert(k("notPdf"))
+      return
+    }
+    setUploading(kind)
+    try {
+      const { putUrl, fileUrl } = await createPdfUpload.mutateAsync({
+        orderId: order.id,
+        kind,
+        filename: file.name,
+        size: file.size,
+      })
+      const put = await fetch(putUrl, {
+        method: "PUT",
+        headers: { "Content-Type": "application/pdf" },
+        body: file,
+      })
+      if (!put.ok) throw new Error(`R2 PUT ${put.status}`)
+      if (kind === "quote") {
+        await attachQuote.mutateAsync({ orderId: order.id, quotePdfUrl: fileUrl })
+        setQuoteUrl(fileUrl)
+      } else {
+        await attachConfirmation.mutateAsync({ orderId: order.id, confirmationPdfUrl: fileUrl })
+        setConfirmUrl(fileUrl)
+      }
+    } catch {
+      window.alert(k("uploadFailed"))
+    } finally {
+      setUploading(null)
+    }
+  }
 
   // ── editable trip/money fields ──
   const [form, setForm] = useState<OrderFormState>(formFromOrder(order))
@@ -201,6 +237,12 @@ export default function CustomOrderDetail({
 
       {/* 報價 */}
       <Section title={k("quoteSection")} icon={<FileText className="w-3.5 h-3.5" />} innerRef={quoteRef}>
+        <PdfDrop
+          label={uploading === "quote" ? k("uploading") : k("dropPdf")}
+          busy={uploading === "quote"}
+          onFile={(f) => handlePdf(f, "quote")}
+        />
+        <div className="text-[10px] text-gray-400">{k("orPasteUrl")}</div>
         <div className="flex gap-2">
           <input
             className={inputCls}
@@ -308,6 +350,12 @@ export default function CustomOrderDetail({
 
       {/* 確認書 */}
       <Section title={k("confirmSection")} icon={<FileCheck className="w-3.5 h-3.5" />} innerRef={confirmRef}>
+        <PdfDrop
+          label={uploading === "confirmation" ? k("uploading") : k("dropPdf")}
+          busy={uploading === "confirmation"}
+          onFile={(f) => handlePdf(f, "confirmation")}
+        />
+        <div className="text-[10px] text-gray-400">{k("orPasteUrl")}</div>
         <div className="flex gap-2">
           <input
             className={inputCls}
@@ -365,5 +413,51 @@ function Stat({ label, value }: { label: string; value: string }) {
       <div className="text-[10px] text-gray-500">{label}</div>
       <div className="text-[12px] font-semibold text-gray-900 mt-0.5">{value}</div>
     </div>
+  )
+}
+
+function PdfDrop({
+  label,
+  busy,
+  onFile,
+}: {
+  label: string
+  busy: boolean
+  onFile: (f: File) => void
+}) {
+  const [over, setOver] = useState(false)
+  return (
+    <label
+      onDragOver={(e) => {
+        e.preventDefault()
+        setOver(true)
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault()
+        setOver(false)
+        const f = e.dataTransfer.files?.[0]
+        if (f) onFile(f)
+      }}
+      className={`flex items-center justify-center gap-1.5 rounded-lg border border-dashed px-3 py-2.5 text-[11px] cursor-pointer transition-colors ${
+        over
+          ? "border-gray-900 bg-gray-50 text-gray-900"
+          : "border-gray-300 text-gray-500 hover:bg-gray-50"
+      }`}
+    >
+      {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+      {label}
+      <input
+        type="file"
+        accept="application/pdf,.pdf"
+        className="hidden"
+        disabled={busy}
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          if (f) onFile(f)
+          e.target.value = ""
+        }}
+      />
+    </label>
   )
 }
