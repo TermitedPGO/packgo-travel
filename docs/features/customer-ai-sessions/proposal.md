@@ -87,4 +87,18 @@
 
 ## 七、下一步
 
-Jeff 對 §一架構 + §三範圍 + §五四個決策點頭後 → 進 Stage 2 design(模組劃分、prompt 設計、快取策略、診斷 AI 對話框)→ Stage 3 拆模組 → Stage 4 寫。
+Jeff 已點頭(2026-06-22),AI 引擎在**新 session** 做。進 Stage 2 design(模組劃分、prompt 設計、快取策略、診斷 AI 對話框)→ Stage 3 拆模組 → Stage 4 寫。
+
+## 八、Stage 2 起點:code 入口(新 session 直接看這裡,不用重找)
+
+| 積木 | 現在的 code | 要做的 |
+|------|------------|--------|
+| AI 摘要(規則版) | `client/src/components/admin/customers/adapters.ts:195` `deriveAiSummary`(+ `useCustomerData.ts:263` 也呼叫一份) | 換成讀「背景算好的 AI 摘要快取」;規則版可留作 fallback |
+| AI 下一步 placeholder | i18n `zh-TW.ts:3367` `aiPending: '跟進中(M2 自動生成)'`、`:3366` `aiNextStep` | 接 AI 生成的一句下一步 |
+| AI 對話框(壞的) | `server/_core/index.ts:320` `GET /api/agent/ask-ops-stream`,**:493 有 90s timeout、log「DB or LLM call stalled」** | 15 秒沒回 = 卡在 DB 或 LLM call,不是路由不見。先看 prod log 這行有沒有跳;再查那段 DB 撈/LLM 呼叫為何 stall(Opus gotchas:memory `reference_opus_llm_gotchas`) |
+| 客人長期記憶 | `drizzle/schema.ts:2714` `aiNotes`、`:2724` `keyFacts`、`preferences`(CustomerProfileExtractor 背景更新) | 摘要快取可存這裡,或新加欄;keyFacts 可當 AI 上下文輸入 |
+| LLM 呼叫 | `server/_core/llm.ts:692` `invokeLLM`(已有 24h cache、prompt caching) | 摘要/對話走這支,model 帶便宜快的(Haiku) |
+| 文件(要抽 PDF 文字) | `customerDocuments`(R2 KEY)、`server/storage.ts` 讀、`server/_core/attachmentParser.ts` 已有 kind 偵測 | 新增 PDF 文字抽取(§五.2 決定要讀內容);抽出文字只進 prompt 不另存(§四 PII) |
+| 共用經驗注入 | `server/agents/skills/*`、品牌規則 | 摘要/對話 system prompt 帶 Jeff 口氣 + 紅線 |
+
+**新 session 第一步建議**:先查 prod log 確認 `ask-ops-stream` 到底卡在哪(DB 還是 LLM),那是最快點亮對話框的線頭,也順帶驗證整條 AI 上下文撈得到資料。
