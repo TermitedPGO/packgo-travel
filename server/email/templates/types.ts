@@ -159,3 +159,39 @@ export interface TrialEndingReminderData {
   cancelUrl: string;
   language?: "zh-TW" | "en";
 }
+
+// ── 訂製單 (custom-orders) ──────────────────────────────────────────────
+// 三封信:報價 / 催款 / 確認書。客人面,Jeff 口語聲音:短、不官腔、不用
+// 破折號、不用打勾。絕不出現供應商成本,只出現直客售價。語言依 language。
+// 信不自動發 — 只有 adminCustomerOrders 的 send* mutation(Jeff 親自按)呼叫。
+
+interface CustomOrderEmailBase {
+  customerEmail: string;
+  customerName?: string | null;
+  orderNumber: string;
+  /** 行程名(直客面標題),例「台灣12天+越南5天」 */
+  title: string;
+  /** ISO currency,直客通常 USD */
+  currency?: string;
+  language?: "zh-TW" | "en";
+}
+
+export interface CustomOrderQuoteEmailData extends CustomOrderEmailBase {
+  /** Jeff 用 skill 出好的報價 PDF 連結 */
+  quotePdfUrl?: string | null;
+}
+
+export interface CustomOrderCollectionEmailData extends CustomOrderEmailBase {
+  kind: "deposit" | "balance";
+  /** 直客售價金額(絕不含成本) */
+  amount: number;
+  /** Square 付款連結(本批 Jeff 手貼) */
+  paymentLink?: string | null;
+}
+
+export interface CustomOrderConfirmationEmailData extends CustomOrderEmailBase {
+  /** Jeff 上傳的確認書 PDF 連結 */
+  confirmationPdfUrl?: string | null;
+  /** 出發日(已格式化字串),選填 */
+  departureDate?: string | null;
+}

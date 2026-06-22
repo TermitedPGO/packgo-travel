@@ -17,7 +17,7 @@
 export type CustomerDoc = {
   id: string;
   /** stable code → client i18n label */
-  kind: "quote" | "invoice" | "passport" | "visa" | "insurance" | "medical" | "file" | "flight";
+  kind: "quote" | "invoice" | "passport" | "visa" | "insurance" | "medical" | "file" | "flight" | "confirmation";
   name: string;
   /** download link; null for info-only rows (flight orders carry no file) */
   url: string | null;
@@ -120,6 +120,49 @@ export function flightOrderDoc(r: {
     meta: r.status,
     createdAt: r.createdAt,
   };
+}
+
+/**
+ * 訂製單 (custom-orders) → docs。一筆訂單可貢獻兩列:
+ *   - 確認書 PDF (co-confirm:) — kind "confirmation"
+ *   - 報價 PDF   (co-quote:)   — 僅當沒有對應 aiQuotes 列(quoteId == null),否則
+ *     aiQuotes 的 q: 列已涵蓋,不重複上架。
+ * name 用 orderNumber(client 以 kind 對應 i18n label),meta 放行程名。url 是
+ * 引用 PDF(Jeff 上傳/貼),純展示,絕不洩成本。
+ */
+export function customOrderDocs(r: {
+  id: number;
+  orderNumber: string;
+  title: string | null;
+  quotePdfUrl: string | null;
+  quoteId: number | null;
+  confirmationPdfUrl: string | null;
+  quoteSentAt: Date | null;
+  confirmedAt: Date | null;
+  createdAt: Date;
+}): CustomerDoc[] {
+  const docs: CustomerDoc[] = [];
+  if (r.confirmationPdfUrl) {
+    docs.push({
+      id: `co-confirm:${r.id}`,
+      kind: "confirmation",
+      name: r.orderNumber,
+      url: r.confirmationPdfUrl,
+      meta: r.title || null,
+      createdAt: r.confirmedAt ?? r.createdAt,
+    });
+  }
+  if (r.quotePdfUrl && r.quoteId == null) {
+    docs.push({
+      id: `co-quote:${r.id}`,
+      kind: "quote",
+      name: r.orderNumber,
+      url: r.quotePdfUrl,
+      meta: r.title || null,
+      createdAt: r.quoteSentAt ?? r.createdAt,
+    });
+  }
+  return docs;
 }
 
 /**

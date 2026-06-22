@@ -117,6 +117,7 @@ export * from "./db/tour";
 export * from "./db/user";
 export * from "./db/search";
 export * from "./db/accounting";
+export * from "./db/customOrder";
 
 // ============================================
 // Inquiry Management Functions (residual — own domain)

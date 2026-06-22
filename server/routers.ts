@@ -25,6 +25,7 @@ import { adminPlatformRouter } from "./routers/adminPlatform";
 import { adminLlmRouter } from "./routers/adminLlm";
 import { adminAgentsRouter } from "./routers/adminAgents";
 import { adminCustomersRouter } from "./routers/adminCustomers";
+import { adminCustomerOrdersRouter } from "./routers/adminCustomerOrders";
 import { adminDeparturesRouter } from "./routers/adminDepartures";
 // Phase 4C — sub-PR 3 of 5 (refactor 2026-05-19, audit P0-1)
 // Customer transactional domains extracted into their own files.
@@ -258,6 +259,10 @@ export const appRouter = router({
 
   // Invoices router — Phase 4E extracted to ./routers/invoices.ts
   invoices: invoicesRouter,
+
+  // 訂製單 (custom-orders) — 一筆訂製單做成系統真正一筆訂單(報價/收款/確認的
+  // 送 + 狀態機)。客戶頁三顆按鈕落在這上面。docs/features/custom-orders/。
+  customerOrders: adminCustomerOrdersRouter,
 
   // Recurring expenses router — Phase 4E extracted to ./routers/recurringExpenses.ts
   recurringExpenses: recurringExpensesRouter,

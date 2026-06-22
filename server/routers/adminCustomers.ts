@@ -26,6 +26,7 @@ import {
   invoiceDoc,
   uploadedDoc,
   flightOrderDoc,
+  customOrderDocs,
   mergeDocs,
   signDocUrl,
 } from "./adminCustomersDocs";
@@ -1354,6 +1355,7 @@ export const adminCustomersRouter = router({
         invoices: invoicesTable,
         customerDocuments,
         flightOrders,
+        customOrders: customOrdersTable,
       } = await import("../../drizzle/schema");
       const isRegistered = "userId" in input;
 
@@ -1476,6 +1478,28 @@ export const adminCustomersRouter = router({
               .limit(50)
           : [];
 
+      // Custom orders (co-confirm: / co-quote:) — confirmation + quote PDFs,
+      // by profileId(s). These are referenced PDFs (Jeff uploads/pastes); the
+      // catalogue list never carries supplier cost.
+      const orderRows = profileIds.length
+        ? await drizzleDb
+            .select({
+              id: customOrdersTable.id,
+              orderNumber: customOrdersTable.orderNumber,
+              title: customOrdersTable.title,
+              quotePdfUrl: customOrdersTable.quotePdfUrl,
+              quoteId: customOrdersTable.quoteId,
+              confirmationPdfUrl: customOrdersTable.confirmationPdfUrl,
+              quoteSentAt: customOrdersTable.quoteSentAt,
+              confirmedAt: customOrdersTable.confirmedAt,
+              createdAt: customOrdersTable.createdAt,
+            })
+            .from(customOrdersTable)
+            .where(inArray(customOrdersTable.customerProfileId, profileIds))
+            .orderBy(desc(customOrdersTable.createdAt))
+            .limit(50)
+        : [];
+
       // customerDocuments store the R2 KEY (these can be passport/visa scans);
       // sign each to a short-TTL URL on read so the download link works without
       // ever serving the object publicly (signDocUrl: bare key → signed,
@@ -1493,6 +1517,7 @@ export const adminCustomersRouter = router({
         invoiceRows.map(invoiceDoc),
         uploadedDocs,
         flightRows.map(flightOrderDoc),
+        orderRows.flatMap(customOrderDocs),
       ]);
     }),
 });

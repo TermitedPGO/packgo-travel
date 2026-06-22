@@ -4,11 +4,64 @@ import {
   invoiceDoc,
   uploadedDoc,
   flightOrderDoc,
+  customOrderDocs,
   mergeDocs,
   signDocUrl,
 } from "./adminCustomersDocs";
 
 const d = (iso: string) => new Date(iso);
+
+describe("customOrderDocs — confirmation + quote normalization", () => {
+  const base = {
+    id: 7,
+    orderNumber: "ORD-2026-0001",
+    title: "台灣12天",
+    quotePdfUrl: null as string | null,
+    quoteId: null as number | null,
+    confirmationPdfUrl: null as string | null,
+    quoteSentAt: null as Date | null,
+    confirmedAt: null as Date | null,
+    createdAt: d("2026-06-21"),
+  };
+
+  it("confirmation PDF → co-confirm: id, kind confirmation, orderNumber name, title meta", () => {
+    const docs = customOrderDocs({ ...base, confirmationPdfUrl: "https://x/c.pdf", confirmedAt: d("2026-06-22") });
+    expect(docs).toHaveLength(1);
+    expect(docs[0]).toMatchObject({
+      id: "co-confirm:7",
+      kind: "confirmation",
+      name: "ORD-2026-0001",
+      url: "https://x/c.pdf",
+      meta: "台灣12天",
+    });
+    expect(docs[0].createdAt).toEqual(d("2026-06-22"));
+  });
+
+  it("quote PDF surfaces only when not already an aiQuotes row (quoteId null)", () => {
+    const withFunnel = customOrderDocs({ ...base, quotePdfUrl: "https://x/q.pdf", quoteId: 99 });
+    expect(withFunnel).toHaveLength(0); // q: already covers it, no double listing
+    const standalone = customOrderDocs({ ...base, quotePdfUrl: "https://x/q.pdf", quoteId: null });
+    expect(standalone).toHaveLength(1);
+    expect(standalone[0]).toMatchObject({ id: "co-quote:7", kind: "quote", url: "https://x/q.pdf" });
+  });
+
+  it("both PDFs → two docs with non-colliding namespaced ids", () => {
+    const docs = customOrderDocs({ ...base, quotePdfUrl: "https://x/q.pdf", confirmationPdfUrl: "https://x/c.pdf" });
+    const ids = docs.map((x) => x.id);
+    expect(new Set(ids).size).toBe(2);
+    expect(ids).toContain("co-confirm:7");
+    expect(ids).toContain("co-quote:7");
+  });
+
+  it("no PDFs → no docs", () => {
+    expect(customOrderDocs(base)).toEqual([]);
+  });
+
+  it("never carries a cost field", () => {
+    const docs = customOrderDocs({ ...base, confirmationPdfUrl: "https://x/c.pdf" });
+    expect(JSON.stringify(docs)).not.toMatch(/cost|supplier|成本/i);
+  });
+});
 
 describe("adminCustomersDocs — source normalization", () => {
   it("quote → q: id, download via pdfUrl, amount+status meta", () => {

@@ -50,7 +50,7 @@ export type Order = {
 
 export type Doc = {
   id: string
-  kind: "quote" | "invoice" | "passport" | "visa" | "insurance" | "medical" | "file" | "flight"
+  kind: "quote" | "invoice" | "passport" | "visa" | "insurance" | "medical" | "file" | "flight" | "confirmation"
   name: string
   /** download link; null = info-only row (e.g. flight order) */
   url: string | null

@@ -1,11 +1,15 @@
+import { useState } from "react"
 import {
   FileText, DollarSign, CheckCircle2,
   CircleDot, CircleAlert, TriangleAlert, CircleX,
   Circle, Clock, MessageSquare, Calendar, HelpCircle, Bot,
-  Download, Plane,
+  Download, Plane, Plus,
 } from "lucide-react"
 import { useLocale } from "@/contexts/LocaleContext"
+import { trpc } from "@/lib/trpc"
 import type { AdaptedCustomer, ChecklistItem, TimelineEntry, ChatMessage } from "./types"
+import CustomOrderSheet from "./CustomOrderSheet"
+import { toSelection, fmtMoney, shortDate } from "./customOrderHelpers"
 
 const CHECKLIST_ICON: Record<ChecklistItem["s"], React.ReactNode> = {
   done: <CheckCircle2 className="w-3.5 h-3.5 text-gray-900" />,
@@ -146,17 +150,74 @@ export function OverviewTab({ customer: c, chatMessages }: { customer: AdaptedCu
   )
 }
 
+function CustomOrdersSection({ customer: c }: { customer: AdaptedCustomer }) {
+  const { t } = useLocale()
+  const k = (s: string) => t(`admin.customers.order.${s}`)
+  const [sheet, setSheet] = useState<{ open: boolean }>({ open: false })
+  const orders = trpc.customerOrders.listForCustomer.useQuery(toSelection(c))
+
+  const payLabel = (s: string) =>
+    s === "paid" ? t("admin.customers.payment.paid")
+      : s === "partial" ? t("admin.customers.payment.partial")
+        : t("admin.customers.payment.unpaid")
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="text-[11px] font-semibold text-gray-900">{k("section")}</div>
+        <button
+          onClick={() => setSheet({ open: true })}
+          className="inline-flex items-center gap-1 text-[11px] font-medium text-gray-600 hover:text-gray-900 transition-colors"
+        >
+          <Plus className="w-3 h-3" />
+          {k("new")}
+        </button>
+      </div>
+      {orders.data && orders.data.length > 0 ? (
+        <div className="rounded-xl border border-gray-200 divide-y divide-gray-100">
+          {orders.data.map((o) => (
+            <button
+              key={o.id}
+              onClick={() => setSheet({ open: true })}
+              className="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-50 transition-colors"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="text-[12px] font-medium text-gray-900 truncate">
+                  <span className="text-[10px] text-gray-400 mr-1.5">{o.orderNumber}</span>
+                  {o.title}
+                </div>
+                <div className="text-[10px] text-gray-400">
+                  {o.departureDate ? shortDate(o.departureDate) : ""}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-[12px] text-gray-900">{fmtMoney(o.totalPrice, o.currency)}</div>
+                <div className="text-[10px] text-gray-400">{payLabel(o.paymentStatus)}</div>
+              </div>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-gray-900 text-white flex-shrink-0">
+                {t(`admin.customers.order.status.${o.status}`)}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="text-[12px] text-gray-400 py-2">{k("empty")}</div>
+      )}
+      <CustomOrderSheet open={sheet.open} onClose={() => setSheet({ open: false })} customer={c} />
+    </div>
+  )
+}
+
 export function OrdersTab({ customer: c }: { customer: AdaptedCustomer }) {
   const { t } = useLocale()
-  if (c.orders.length === 0) {
-    return <div className="p-6 text-sm text-gray-400">{t("admin.customers.empty.noOrders")}</div>
-  }
   const statusLabel = (s: string) =>
     s === "paid" ? t("admin.customers.payment.paid")
       : s === "partial" ? t("admin.customers.payment.partial")
         : t("admin.customers.payment.unpaid")
   return (
-    <div className="p-6">
+    <div className="p-6 space-y-6">
+      <CustomOrdersSection customer={c} />
+      {c.orders.length > 0 && (
       <table className="w-full text-[12px]">
         <thead>
           <tr className="border-b border-gray-200 text-gray-500">
@@ -191,6 +252,7 @@ export function OrdersTab({ customer: c }: { customer: AdaptedCustomer }) {
           ))}
         </tbody>
       </table>
+      )}
     </div>
   )
 }

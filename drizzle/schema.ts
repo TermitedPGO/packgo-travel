@@ -2124,6 +2124,9 @@ export const invoices = mysqlTable("invoices", {
   customerAddress: text("customerAddress"),
   bookingId: int("bookingId"),
   visaApplicationId: int("visaApplicationId"),
+  // custom-orders (0099): reverse FK so one 訂製單 can carry its 訂金 + 尾款 invoices.
+  // Nullable — package/visa invoices leave it null.
+  customOrderId: int("customOrderId"),
   userId: int("userId"),
   subtotal: decimal("subtotal", { precision: 12, scale: 2 }).notNull(),
   taxRate: decimal("taxRate", { precision: 5, scale: 2 }).default("0"),
@@ -2142,7 +2145,10 @@ export const invoices = mysqlTable("invoices", {
   createdBy: int("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (t) => ({
+  // custom-orders (0099): listInvoicesForCustomOrder filters on this reverse FK.
+  customOrderIdx: index("idx_inv_custom_order").on(t.customOrderId),
+}));
 export type Invoice = typeof invoices.$inferSelect;
 export type InsertInvoice = typeof invoices.$inferInsert;
 
@@ -2354,6 +2360,92 @@ export const aiQuotes = mysqlTable("aiQuotes", {
 });
 export type AiQuote = typeof aiQuotes.$inferSelect;
 export type InsertAiQuote = typeof aiQuotes.$inferInsert;
+
+// ── 訂製單 (custom-orders, migration 0099, 2026-06-21) ───────────────────────
+// PACK&GO 的生意是訂製單 (bespoke),不是套裝跟團。一筆訂製單 = 這裡一列,把
+// 報價 → 收款(訂金/尾款)→ 確認 串成系統裡真正的一筆訂單。客戶頁 (CustomerDetail)
+// 三顆 header 按鈕(報價/催款/確認書)落在這列上。送出一律 Jeff 親自按 (confirm
+// gate);系統/agent 不自動發。設計見 docs/features/custom-orders/design.md。
+//
+// 錢與法遵紅線(編碼在欄位 + 註解):
+//   - supplierCost 手動、絕不自動填、絕不上任何 customer-facing payload / email。
+//   - depositPaidAt/balancePaidAt 只記「已收金額與時間」,不是營收認列。CA B&P
+//     §17550:訂金 ≠ 營收,出發後才認列。Trust #5442 對帳走銀行 + 會計,不在此表。
+//     recognizedAt 只是佔位,本批不寫 accountingEntries。
+export const customOrders = mysqlTable("customOrders", {
+  id: int("id").autoincrement().primaryKey(),
+  orderNumber: varchar("orderNumber", { length: 32 }).notNull().unique(), // ORD-2026-0001
+
+  // 歸戶:customerProfileId 是 canonical anchor(guest 本來就有一列;registered
+  // 在 createOrder 時 find-or-create)。userId 去正規化方便欄。name/email 快照
+  // (同 invoices 做法),profile 之後改名不影響歷史單。
+  customerProfileId: int("customerProfileId").notNull(),
+  userId: int("userId"),
+  customerName: varchar("customerName", { length: 200 }).notNull(),
+  customerEmail: varchar("customerEmail", { length: 320 }),
+
+  // 行程
+  title: varchar("title", { length: 200 }).notNull(),
+  destination: varchar("destination", { length: 200 }),
+  // string mode ("YYYY-MM-DD") — pure calendar dates, no tz games.
+  departureDate: date("departureDate", { mode: "string" }),
+  returnDate: date("returnDate", { mode: "string" }),
+
+  // 狀態機(design §3)。報價是可選步驟:needsQuote=0 走 draft→arranged。
+  status: mysqlEnum("status", [
+    "draft", "quoted", "arranged",
+    "deposit_paid", "paid", "confirmed",
+    "departed", "completed", "cancelled",
+  ]).default("draft").notNull(),
+  needsQuote: int("needsQuote").default(1).notNull(),
+
+  // 報價:引用 Jeff skill 出的 PDF(主);quoteId 選連 aiQuotes funnel 紀錄。
+  quotePdfUrl: varchar("quotePdfUrl", { length: 1024 }),
+  quoteId: int("quoteId"),
+  quoteSentAt: timestamp("quoteSentAt"),
+
+  // 金額(售價,直客價)
+  totalPrice: decimal("totalPrice", { precision: 12, scale: 2 }),
+  depositAmount: decimal("depositAmount", { precision: 12, scale: 2 }),
+  balanceAmount: decimal("balanceAmount", { precision: 12, scale: 2 }),
+  currency: varchar("currency", { length: 3 }).default("USD").notNull(),
+
+  // 成本(手動、絕不自動、絕不上客人文件;只 admin 算 margin)
+  supplierCost: decimal("supplierCost", { precision: 12, scale: 2 }),
+
+  // 收款(只記已收金額+時間,不做 Trust 分錄)
+  depositPaidAt: timestamp("depositPaidAt"),
+  balancePaidAt: timestamp("balancePaidAt"),
+  // 「已收」金額,與 depositAmount/balanceAmount(=應收/契約價)分開存,絕不混用。
+  // recordPayment 寫這兩欄;應收欄維持契約價(決策 A)。received 顯示用這兩欄。
+  depositPaidAmount: decimal("depositPaidAmount", { precision: 12, scale: 2 }),
+  balancePaidAmount: decimal("balancePaidAmount", { precision: 12, scale: 2 }),
+  depositPaymentLink: varchar("depositPaymentLink", { length: 2048 }),
+  balancePaymentLink: varchar("balancePaymentLink", { length: 2048 }),
+  collectionSentAt: timestamp("collectionSentAt"),
+  paymentMethod: varchar("paymentMethod", { length: 20 }),
+
+  // 確認書:引用 PDF(Jeff 上傳/貼)
+  confirmationPdfUrl: varchar("confirmationPdfUrl", { length: 1024 }),
+  confirmedAt: timestamp("confirmedAt"),
+
+  // 出發 / 認列(留下一段;本批只存)
+  recognizedAt: timestamp("recognizedAt"),
+
+  // 橋接 / 雜項。bookingId nullable 備用(決策 C),預設 null,邏輯不耦合。
+  bookingId: int("bookingId"),
+  notes: text("notes"),
+
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (t) => ({
+  profileIdx: index("idx_co_profile").on(t.customerProfileId, t.createdAt),
+  userIdx: index("idx_co_user").on(t.userId),
+  statusIdx: index("idx_co_status").on(t.status, t.createdAt),
+}));
+export type CustomOrder = typeof customOrders.$inferSelect;
+export type InsertCustomOrder = typeof customOrders.$inferInsert;
 
 // ── 管理員操作審計日誌（v73）─────────────────────────────────────────────────
 // Tracks WHO did WHAT WHEN. Required for compliance + dispute resolution +
