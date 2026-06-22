@@ -1,9 +1,9 @@
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import {
   FileText, DollarSign, CheckCircle2,
   CircleDot, CircleAlert, TriangleAlert, CircleX,
   Circle, Clock, MessageSquare, Calendar, HelpCircle, Bot,
-  Download, Plane, Plus,
+  Download, Plane, Plus, RefreshCw,
 } from "lucide-react"
 import { useLocale } from "@/contexts/LocaleContext"
 import { trpc } from "@/lib/trpc"
@@ -32,6 +32,21 @@ const TL_ICON: Record<TimelineEntry["type"], React.ReactNode> = {
   chat: <MessageSquare className="w-4 h-4" />,
 }
 
+/** Compact localized "updated N ago" for the AI summary header. Accepts a Date
+ *  or an ISO string (tRPC may serialize either). */
+function relativeUpdated(
+  d: Date | string,
+  t: ReturnType<typeof useLocale>["t"],
+): string {
+  const ms = Date.now() - new Date(d).getTime()
+  const min = Math.floor(ms / 60000)
+  if (min < 1) return t("admin.customers.summary.updatedJustNow")
+  if (min < 60) return t("admin.customers.summary.updatedMinAgo", { n: min })
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return t("admin.customers.summary.updatedHrAgo", { n: hr })
+  return t("admin.customers.summary.updatedDayAgo", { n: Math.floor(hr / 24) })
+}
+
 export function OverviewTab({ customer: c, chatMessages }: { customer: AdaptedCustomer; chatMessages: ChatMessage[] }) {
   const { t } = useLocale()
   const [showAllChat, setShowAllChat] = useState(false)
@@ -39,13 +54,65 @@ export function OverviewTab({ customer: c, chatMessages }: { customer: AdaptedCu
   // expanded → the whole thread (oldest→newest), full text; collapsed → last 3 preview
   const shownMsgs = showAllChat ? chatMessages : chatMessages.slice(-3)
 
+  // 批3 m3/m5 — the real AI summary. Read the cache (秒開), fall back to the
+  // rule-based c.aiSummary while it computes / if the LLM fails, and lazily
+  // recompute once when the cache is stale (missing / >24h / newer activity).
+  const utils = trpc.useUtils()
+  const scopeInput = c.kind === "guest" ? { profileId: c.id } : { userId: c.id }
+  const summaryQ = trpc.admin.customerAiSummary.useQuery(scopeInput, {
+    staleTime: 60_000,
+  })
+  const refreshSummary = trpc.admin.refreshCustomerAiSummary.useMutation({
+    onSuccess: () => utils.admin.customerAiSummary.invalidate(scopeInput),
+  })
+  const refreshedFor = useRef<string | null>(null)
+  useEffect(() => {
+    const key = `${c.kind}:${c.id}`
+    const d = summaryQ.data
+    if (!d) return
+    if (d.stale && refreshedFor.current !== key && !refreshSummary.isPending) {
+      refreshedFor.current = key
+      refreshSummary.mutate(scopeInput)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [c.kind, c.id, summaryQ.data])
+
+  const cached = summaryQ.data?.summary
+  const busy = refreshSummary.isPending || summaryQ.isFetching
+  const aiWants = cached?.wants || c.aiSummary.wants
+  const aiActions = cached?.actions || c.aiSummary.actions
+  const aiDelivered = cached?.delivered || c.aiSummary.delivered
+  const aiNextStep = cached?.nextStep || c.aiSummary.nextStep || ""
+  const generatedAt = summaryQ.data?.generatedAt ?? null
+
   return (
     <div className="p-6 space-y-4">
       {/* AI Summary */}
       <div className="rounded-xl bg-gray-50 border border-gray-200 p-4 space-y-2">
-        <SummaryRow label={t("admin.customers.summary.wantsLabel")} value={c.aiSummary.wants} />
-        <SummaryRow label={t("admin.customers.summary.actionsLabel")} value={c.aiSummary.actions} />
-        <SummaryRow label={t("admin.customers.summary.deliveredLabel")} value={c.aiSummary.delivered} />
+        <div className="flex items-center justify-between">
+          <div className="text-[11px] text-gray-400 font-medium flex items-center gap-1.5">
+            <Bot className="w-3 h-3" />
+            {t("admin.customers.summary.aiLabel")}
+            {busy ? (
+              <span className="text-gray-400">· {t("admin.customers.summary.generating")}</span>
+            ) : (
+              generatedAt && (
+                <span className="text-gray-300">· {relativeUpdated(generatedAt, t)}</span>
+              )
+            )}
+          </div>
+          <button
+            onClick={() => refreshSummary.mutate(scopeInput)}
+            disabled={busy}
+            className="text-[10px] font-medium text-gray-500 hover:text-gray-900 transition-colors flex items-center gap-1 rounded-lg px-1.5 py-0.5 hover:bg-gray-100 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3 h-3 ${busy ? "animate-spin" : ""}`} />
+            {t("admin.customers.summary.refresh")}
+          </button>
+        </div>
+        <SummaryRow label={t("admin.customers.summary.wantsLabel")} value={aiWants} />
+        <SummaryRow label={t("admin.customers.summary.actionsLabel")} value={aiActions} />
+        <SummaryRow label={t("admin.customers.summary.deliveredLabel")} value={aiDelivered} />
       </div>
 
       {/* Follow-up context */}
@@ -94,7 +161,7 @@ export function OverviewTab({ customer: c, chatMessages }: { customer: AdaptedCu
           <div className="pt-2 border-t border-gray-100 text-[11px] text-gray-500 flex items-center gap-1">
             <Bot className="w-3 h-3" />
             <span className="text-gray-400">{t("admin.customers.followUp.aiNextStep")}</span>
-            <span>{t("admin.customers.followUp.aiPending")}</span>
+            <span>{aiNextStep || t("admin.customers.followUp.aiPending")}</span>
           </div>
         </div>
       )}

@@ -95,7 +95,7 @@ export type AdaptedCustomer = {
   initials: string
   color: string
   textColor: string
-  aiSummary: { wants: string; actions: string; delivered: string }
+  aiSummary: { wants: string; actions: string; delivered: string; nextStep?: string }
   followup: {
     daysSinceContact: number | null
     needsFollowup: boolean

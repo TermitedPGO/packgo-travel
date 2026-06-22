@@ -3364,6 +3364,13 @@ export const en = {
         wantsLabel: 'What they want',
         actionsLabel: 'What we did',
         deliveredLabel: 'What we gave',
+        aiLabel: 'AI summary',
+        refresh: 'Refresh',
+        generating: 'Generating…',
+        updatedJustNow: 'Updated just now',
+        updatedMinAgo: 'Updated {n}m ago',
+        updatedHrAgo: 'Updated {n}h ago',
+        updatedDayAgo: 'Updated {n}d ago',
       },
       profile: {
         notProvided: 'Not provided',

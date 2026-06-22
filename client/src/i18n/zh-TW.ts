@@ -3332,6 +3332,13 @@ export const zhTW = {
         wantsLabel: '客人要什麼',
         actionsLabel: '做了什麼',
         deliveredLabel: '給了什麼',
+        aiLabel: 'AI 摘要',
+        refresh: '重新整理',
+        generating: '產生中…',
+        updatedJustNow: '剛剛更新',
+        updatedMinAgo: '{n} 分鐘前更新',
+        updatedHrAgo: '{n} 小時前更新',
+        updatedDayAgo: '{n} 天前更新',
       },
       profile: {
         notProvided: '未提供',
