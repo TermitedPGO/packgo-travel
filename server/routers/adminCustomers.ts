@@ -23,6 +23,10 @@ import {
 import { isHiddenCustomer } from "./adminCustomersFilter";
 import { loadCustomerDocs } from "../_core/customerDocsLoader";
 import {
+  readCachedSummary,
+  refreshAndStoreSummary,
+} from "../_core/customerAiSummary";
+import {
   inquiryDraftCard,
   escalationDraftCard,
   observationDraftCard,
@@ -1344,5 +1348,39 @@ export const adminCustomersRouter = router({
       // exact same documents. signUrls=true → uploaded docs get a signed
       // download link for the browser list.
       return loadCustomerDocs(input, { signUrls: true });
+    }),
+
+  /**
+   * customerAiSummary (批3 m3) — read the cached AI summary for the card. Fast
+   * (no LLM): returns the four-field business summary + when it was generated +
+   * whether it's stale (never computed / >24h / newer activity since). The card
+   * shows the cache instantly and lazily triggers a refresh when stale.
+   */
+  customerAiSummary: adminProcedure
+    .input(
+      z.union([
+        z.object({ userId: z.number().int().positive() }).strict(),
+        z.object({ profileId: z.number().int().positive() }).strict(),
+      ]),
+    )
+    .query(async ({ input }) => {
+      return readCachedSummary(input);
+    }),
+
+  /**
+   * refreshCustomerAiSummary (批3 m3) — the 重新整理 button + lazy-on-open. Runs
+   * the Haiku engine over this customer's real data and stores the result. Read-
+   * only w.r.t. the customer (only writes the summary cache). adminProcedure auto
+   * rate-limits (60/min/admin), so a refresh-spam can't burn LLM credit.
+   */
+  refreshCustomerAiSummary: adminProcedure
+    .input(
+      z.union([
+        z.object({ userId: z.number().int().positive() }).strict(),
+        z.object({ profileId: z.number().int().positive() }).strict(),
+      ]),
+    )
+    .mutation(async ({ input }) => {
+      return refreshAndStoreSummary(input);
     }),
 });

@@ -2731,6 +2731,13 @@ export const customerProfiles = mysqlTable("customerProfiles", {
   birthDate: timestamp("birthDate"),
   importantDates: json("importantDates"), // [{type, date, note}] anniversary/etc
 
+  // customer-ai-sessions 批3 m3 — AI 摘要快取(背景算 / 開卡算 + 快取 + 重算鈕)。
+  // 只存 business 結論四欄 { wants, actions, delivered, nextStep };絕不存 PDF 原文 /
+  // PII(那些只進 prompt,見 customerDocsText)。aiSummaryAt=null → 從沒算過 → 開卡時
+  // lazy 算;cron 暖最近有動靜的。
+  aiSummary: json("aiSummary"),
+  aiSummaryAt: timestamp("aiSummaryAt"),
+
   status: mysqlEnum("status", ["active", "dormant", "opted_out", "blocked"]).default("active").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
