@@ -67,12 +67,15 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
     { profileId: profileId! },
     { enabled: profileId !== null },
   )
+  // limit 200 (server max) — the default 50 truncated long histories, so the
+  // detail thread looked like it "didn't read all the messages". 200 covers the
+  // full conversation for virtually every customer.
   const userChatQ = trpc.admin.customerConversationThread.useQuery(
-    { userId: userId! },
+    { userId: userId!, limit: 200 },
     { enabled: userId !== null },
   )
   const guestChatQ = trpc.admin.customerConversationThread.useQuery(
-    { profileId: profileId! },
+    { profileId: profileId!, limit: 200 },
     { enabled: profileId !== null },
   )
   const chatQ = selected?.kind === "guest" ? guestChatQ : userChatQ
