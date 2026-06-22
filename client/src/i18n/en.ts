@@ -3397,6 +3397,8 @@ export const en = {
         me: 'Jeff (me)',
         aiNextStep: 'AI next step: ',
         aiPending: 'Following up (M2 auto-generate)',
+        expandAll: 'Expand all {n}',
+        collapse: 'Collapse',
       },
       bundle: {
         title: 'AI-prepared documents',

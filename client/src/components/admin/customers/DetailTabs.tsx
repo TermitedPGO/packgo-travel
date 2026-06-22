@@ -34,8 +34,10 @@ const TL_ICON: Record<TimelineEntry["type"], React.ReactNode> = {
 
 export function OverviewTab({ customer: c, chatMessages }: { customer: AdaptedCustomer; chatMessages: ChatMessage[] }) {
   const { t } = useLocale()
+  const [showAllChat, setShowAllChat] = useState(false)
   const lastMsg = chatMessages.length > 0 ? chatMessages[chatMessages.length - 1] : null
-  const recentMsgs = chatMessages.slice(-3)
+  // expanded → the whole thread (oldest→newest), full text; collapsed → last 3 preview
+  const shownMsgs = showAllChat ? chatMessages : chatMessages.slice(-3)
 
   return (
     <div className="p-6 space-y-4">
@@ -53,12 +55,23 @@ export function OverviewTab({ customer: c, chatMessages }: { customer: AdaptedCu
             <div className="text-[11px] text-gray-400 font-medium flex items-center gap-1.5">
               <Clock className="w-3 h-3" />
               {t("admin.customers.followUp.recentChat")}
+              <span className="text-gray-300">·</span>
+              <span className="text-gray-400">
+                {lastMsg.createdAt.toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" })}
+              </span>
             </div>
-            <div className="text-[10px] text-gray-400">
-              {lastMsg.createdAt.toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" })}
-            </div>
+            {chatMessages.length > 3 && (
+              <button
+                onClick={() => setShowAllChat((v) => !v)}
+                className="text-[10px] font-medium text-gray-500 hover:text-gray-900 transition-colors"
+              >
+                {showAllChat
+                  ? t("admin.customers.followUp.collapse")
+                  : t("admin.customers.followUp.expandAll", { n: chatMessages.length })}
+              </button>
+            )}
           </div>
-          {recentMsgs.map((m) => (
+          {shownMsgs.map((m) => (
             <div key={m.id} className="flex gap-2.5 text-[12px]">
               <span className="flex-shrink-0 text-[10px] text-gray-400 w-10 pt-0.5">
                 {m.createdAt.toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" })}
@@ -67,9 +80,11 @@ export function OverviewTab({ customer: c, chatMessages }: { customer: AdaptedCu
                 <span className="font-medium text-gray-900">
                   {m.senderRole === "jeff" ? t("admin.customers.followUp.me") : c.name}
                 </span>
-                <p className="text-gray-600 mt-0.5 line-clamp-2">{m.body}</p>
+                <p className={`text-gray-600 mt-0.5 whitespace-pre-wrap break-words ${showAllChat ? "" : "line-clamp-2"}`}>
+                  {m.body}
+                </p>
                 {m.context && (
-                  <span className="inline-block mt-1 text-[10px] text-orange-600 bg-orange-50 rounded px-1.5 py-0.5">
+                  <span className="inline-block mt-1 text-[10px] text-orange-600 bg-orange-50 rounded-md px-1.5 py-0.5">
                     {m.context}
                   </span>
                 )}

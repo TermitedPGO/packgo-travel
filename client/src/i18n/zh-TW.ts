@@ -3365,6 +3365,8 @@ export const zhTW = {
         me: 'Jeff（我）',
         aiNextStep: 'AI 下一步建議：',
         aiPending: '跟進中（M2 自動生成）',
+        expandAll: '展開全部 {n} 則',
+        collapse: '收合',
       },
       bundle: {
         title: 'AI 已準備的文件',
