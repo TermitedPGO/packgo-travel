@@ -452,7 +452,16 @@ async function startServer() {
 
       // SSE headers
       res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
+      // 2026-06-22 — "對話框打字 15 秒沒回" root fix. The global compression()
+      // middleware was Brotli-compressing this text/event-stream response
+      // (prod log showed `content-encoding: br`), buffering tokens until the
+      // stream ended ~8s later — so the browser saw nothing live even though
+      // the server emitted its first token at 1.3s. The 2026-05-31 res.flush()
+      // workaround was unreliable for brotli + Fly's edge. `no-transform` makes
+      // compression@1.8.1 skip this response entirely (it honors the directive,
+      // see node_modules/compression/index.js shouldTransform). SSE is tiny
+      // incremental events — compression buys nothing here anyway.
+      res.setHeader("Cache-Control", "no-cache, no-transform");
       res.setHeader("Connection", "keep-alive");
       res.setHeader("X-Accel-Buffering", "no"); // disable nginx buffering
       res.flushHeaders();
