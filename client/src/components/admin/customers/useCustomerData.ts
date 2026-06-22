@@ -3,6 +3,7 @@ import { trpc } from "@/lib/trpc"
 import { useLocale } from "@/contexts/LocaleContext"
 import { format } from "date-fns"
 import type { ListItem, AdaptedCustomer, ChatMessage, Doc, Draft } from "./types"
+import { stripQuotedReply } from "./conversationText"
 import {
   toListItem,
   toOrders,
@@ -322,7 +323,8 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
     return (chatQ.data?.messages ?? []).map((m) => ({
       id: m.id,
       senderRole: m.senderRole,
-      body: m.body,
+      // show only this turn's text, not the whole thread quoted back
+      body: stripQuotedReply(m.body),
       context: m.context,
       createdAt: new Date(m.createdAt),
     }))
