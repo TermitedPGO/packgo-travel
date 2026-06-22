@@ -154,6 +154,9 @@ export async function runSentMailCapture(
               contentSummary: (msg.subject || "").slice(0, 200),
               generatedBy: "human",
               urgency: 50,
+              // stamp with the email's actual sent time, not capture time, so the
+              // conversation stays in chronological order with the inbound mail.
+              createdAt: msg.receivedAt,
             });
             interactions++;
           } catch (e) {
