@@ -687,6 +687,13 @@
 			"when": 1781530000000,
 			"tag": "0100_customer_ai_summary",
 			"breakpoints": true
+		},
+		{
+			"idx": 101,
+			"version": "5",
+			"when": 1781540000000,
+			"tag": "0101_interaction_external_id",
+			"breakpoints": true
 		}
 	]
 }

@@ -2833,12 +2833,22 @@ export const customerInteractions = mysqlTable("customerInteractions", {
    */
   spamVerdict: mysqlEnum("spamVerdict", ["rescued", "confirmed_spam"]),
 
+  // gmail-full-thread-filing (migration 0101) — idempotent dedup key + thread link.
+  // externalId = RFC822 Message-ID (same across mailboxes for one email → cross-account
+  // dedup); falls back to the Gmail internal id when the header is missing. gmailThreadId
+  // is reserved for the identity layer's same_thread signal. Existing 453 rows are NULL
+  // until server/_core/threadFiling.ts claim-or-insert backfills them. NULL is not
+  // mutually exclusive under a MySQL unique index, so the legacy rows never collide.
+  externalId: varchar("externalId", { length: 255 }),
+  gmailThreadId: varchar("gmailThreadId", { length: 255 }),
+
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => ({
   customerIdx: index("idx_int_customer").on(table.customerProfileId, table.createdAt),
   channelIdx: index("idx_int_channel").on(table.channel, table.direction),
   classIdx: index("idx_int_class").on(table.classification),
   outcomeIdx: index("idx_int_outcome").on(table.outcomeId),
+  profileExternalUq: unique("uq_ci_profile_external").on(table.customerProfileId, table.externalId),
 }));
 
 export type CustomerInteraction = typeof customerInteractions.$inferSelect;
