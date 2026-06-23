@@ -18,6 +18,10 @@
 
 兩條都不做「整條 thread 補齊」。影響全部客人,不只 Jenny。且我剛上線的 AI 摘要/對話讀同一份(半條),所以摘要會偏。
 
+**時間/日期錯(2026-06-22 Jeff 追加)**:`gmailPipeline.ts:466` inbound insert 沒設 `createdAt` → 吃 schema `defaultNow()` = 歸檔當下,不是信的實際時間。輪詢落後或補抓的信就全標「今天」→ 客戶頁時間/日期都不對、順序也亂。寄件側 `sentMailFiling.ts:159` 已用 `msg.receivedAt`(2262304 修過),收件側漏了。
+- **已修(本批)**:inbound insert 加 `createdAt: msg.receivedAt`(Gmail internalDate)。新進的信時間正確。
+- **待 backfill 修舊列**:既有 453 列裡被標成歸檔時間的,要在 §四.3 sync 的 claim-or-insert 一併把 `createdAt` 改回 Gmail internalDate(認領 legacy 列時連 createdAt 一起更新)。
+
 連線帳號(prod 實測):jeffhsieh09@gmail.com(2026-05-11)+ support@packgoplay.com(2026-05-27)。Jenny 在前者,已連線 → backfill 抓得到。
 
 ## 二、目標
@@ -49,8 +53,9 @@ UNIQUE (customerProfileId, externalId)    -- 同一客人同一封只一列;NULL
 1. 抓整條 thread。
 2. 對每封 Gmail 訊息,**claim-or-insert**(冪等 + 不重複既有 453 列):
    - 已有列 `externalId = msgId` → skip。
-   - 否則找這個 profile 既有、`externalId IS NULL`、`direction` 同、`createdAt` 在 Gmail date ±2 分鐘、content 前綴相符的 legacy 列 → **UPDATE 補 externalId(認領)**。
-   - 找不到 → **INSERT** 新列(channel=email、direction、content=body、generatedBy=human、classification=NULL)。
+   - 否則找這個 profile 既有、`externalId IS NULL`、`direction` 同、content 前綴相符、`createdAt` 在 Gmail date 寬窗(±1 天,因為舊列的 createdAt 可能是歸檔時間而非實際時間)內的 legacy 列 → **UPDATE 補 externalId + 把 createdAt 改回 Gmail internalDate(認領 + 修時間)**。
+   - 找不到 → **INSERT** 新列(channel=email、direction、content=body、generatedBy=human、classification=NULL、`createdAt = Gmail internalDate`)。
+   - 注意:既有舊列 createdAt 可能本來就錯(=歸檔時間),所以比對時間窗要寬,且認領後一定覆蓋成正確時間。
 3. 純搬運:**不對歷史信跑 LLM 分類/摘要**(避免成本爆);spam 維持現行 `spamVerdict` 流程,backfill 歷史信不自動標 spam。
 
 ### 4.4 觸發

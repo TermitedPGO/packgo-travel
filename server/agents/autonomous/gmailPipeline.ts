@@ -476,6 +476,12 @@ async function processOneEmail(
     sentiment: decision.sentiment,
     classification: decision.classification,
     urgency: urgencyMap[decision.urgency] ?? 50,
+    // Stamp with the email's actual received time, not the poll/filing time, so
+    // the conversation shows the real date and stays in chronological order.
+    // Without this it defaults to now() — a backlogged or late-polled email
+    // showed "today" (the 時間/日期都不對 bug). Mirrors sentMailFiling's outbound
+    // fix. msg.receivedAt = Gmail internalDate.
+    createdAt: msg.receivedAt,
   });
   const interactionId = Number((interactionIns as any)[0]?.insertId ?? 0);
 
