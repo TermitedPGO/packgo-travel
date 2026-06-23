@@ -684,6 +684,56 @@ export async function scheduleGmailPoll() {
 console.log("✅ Gmail poll queue initialized");
 
 // ============================================================================
+// Customer AI Summary Queue — nightly warm-up of the customer-card AI summary
+// (customer-ai-sessions 批3 m3). Recomputes summaries for ACTIVE + STALE
+// customers so opening their card is instant; lazy-on-open covers the rest.
+// Jeff Q1「兩者都要」. Only stale rows are recomputed → bounded LLM cost.
+// ============================================================================
+
+export interface CustomerSummaryJobData {
+  triggeredBy: "schedule" | "manual";
+}
+
+export interface CustomerSummaryJobResult {
+  scanned: number;
+  refreshed: number;
+  errors: number;
+}
+
+export const customerSummaryQueue = new Queue<
+  CustomerSummaryJobData,
+  CustomerSummaryJobResult
+>("customer-summary", {
+  connection: redisBullMQ,
+  defaultJobOptions: {
+    attempts: 1, // a missed night just recomputes next run; no retry storms
+    removeOnComplete: { age: 604800, count: 30 },
+    removeOnFail: { age: 2592000, count: 30 },
+  },
+});
+
+/** Schedule the daily customer-summary warm-up at 02:00 UTC (off-peak). */
+export async function scheduleDailyCustomerSummaries() {
+  const repeatableJobs = await customerSummaryQueue.getRepeatableJobs();
+  for (const job of repeatableJobs) {
+    if (job.name === "customer-summary-tick") {
+      await customerSummaryQueue.removeRepeatableByKey(job.key);
+    }
+  }
+  await customerSummaryQueue.add(
+    "customer-summary-tick",
+    { triggeredBy: "schedule" },
+    {
+      repeat: { pattern: "0 2 * * *" }, // daily 02:00 UTC
+      jobId: "customer-summary-scheduled",
+    },
+  );
+  console.log("✅ Customer AI summary warm-up scheduled: daily 02:00 UTC");
+}
+
+console.log("✅ Customer summary queue initialized");
+
+// ============================================================================
 // Booking Followup Queue — async deposit PDF generation + confirmation
 // email AFTER bookings.create commits.
 //

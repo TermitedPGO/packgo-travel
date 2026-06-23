@@ -195,6 +195,95 @@ export function isSummaryStale(
   return false;
 }
 
+// ── cron warm-up (批3 m3, Jeff Q1「兩者都要」) ──────────────────────────────
+// A nightly scan recomputes the summary for ACTIVE customers whose cache is
+// stale (newer activity than the summary, or never computed). The lazy-on-open
+// path (M5) covers everyone else Jeff actually opens. Only stale rows are
+// recomputed, so the cron never re-reads PDFs for unchanged customers → bounded.
+
+export interface ScanRow {
+  id: number;
+  userId: number | null;
+  lastInteractionAt: Date | null;
+  aiSummaryAt: Date | null;
+}
+
+export interface SummaryScanResult {
+  scanned: number;
+  refreshed: number;
+  errors: number;
+}
+
+/** Pure — pick the stale rows to recompute (capped), resolved to scopes. A row
+ *  with a userId is a registered customer (use the registered context builder);
+ *  otherwise it's an email guest. Exported for tests. */
+export function pickStaleProfiles(
+  rows: ScanRow[],
+  now: number,
+  maxRefresh: number,
+): SummaryScope[] {
+  return rows
+    .filter((r) => isSummaryStale(r.aiSummaryAt, r.lastInteractionAt, now))
+    .slice(0, maxRefresh)
+    .map((r) => (r.userId ? { userId: r.userId } : { profileId: r.id }));
+}
+
+/** Recompute summaries for active + stale customers. Single-flight, gently
+ *  paced; one failure never aborts the batch. */
+export async function runCustomerSummaryScan(opts?: {
+  activeDays?: number;
+  maxRefresh?: number;
+}): Promise<SummaryScanResult> {
+  const activeDays = opts?.activeDays ?? 30;
+  const maxRefresh = opts?.maxRefresh ?? 50;
+  const db = await getDb();
+  if (!db) return { scanned: 0, refreshed: 0, errors: 0 };
+
+  const { customerProfiles } = await import("../../drizzle/schema");
+  const { gte, desc } = await import("drizzle-orm");
+  const since = new Date(Date.now() - activeDays * 24 * 60 * 60 * 1000);
+
+  const rows = await db
+    .select({
+      id: customerProfiles.id,
+      userId: customerProfiles.userId,
+      lastInteractionAt: customerProfiles.lastInteractionAt,
+      aiSummaryAt: customerProfiles.aiSummaryAt,
+    })
+    .from(customerProfiles)
+    .where(gte(customerProfiles.lastInteractionAt, since))
+    .orderBy(desc(customerProfiles.lastInteractionAt))
+    .limit(300);
+
+  const scopes = pickStaleProfiles(
+    rows.map((r) => ({
+      id: r.id,
+      userId: r.userId,
+      lastInteractionAt: r.lastInteractionAt ? new Date(r.lastInteractionAt) : null,
+      aiSummaryAt: r.aiSummaryAt ? new Date(r.aiSummaryAt) : null,
+    })),
+    Date.now(),
+    maxRefresh,
+  );
+
+  let refreshed = 0;
+  let errors = 0;
+  for (const scope of scopes) {
+    try {
+      await refreshAndStoreSummary(scope);
+      refreshed++;
+      await new Promise((res) => setTimeout(res, 300)); // gentle LLM pacing
+    } catch (err) {
+      errors++;
+      log.warn(
+        { scope, err: (err as Error).message },
+        "[customerSummaryScan] one customer failed — continuing",
+      );
+    }
+  }
+  return { scanned: rows.length, refreshed, errors };
+}
+
 /** Read the cached summary for a scope (no compute). */
 export async function readCachedSummary(
   scope: SummaryScope,

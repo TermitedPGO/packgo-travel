@@ -1147,6 +1147,17 @@ async function startServer() {
     logger.warn({ err }, "[Startup] Failed to schedule weekly retrospective");
   }
 
+  // customer-ai-sessions 批3 m3 — nightly customer-card AI summary warm-up at
+  // 02:00 UTC. Recomputes summaries for active + stale customers so opening
+  // their card is instant; lazy-on-open (DetailTabs) covers everyone else.
+  try {
+    const { scheduleDailyCustomerSummaries } = await import('../queue');
+    await scheduleDailyCustomerSummaries();
+    await import('../customerSummaryWorker');
+  } catch (err) {
+    logger.warn({ err }, "[Startup] Failed to schedule customer summary warm-up");
+  }
+
   // QA audit 2026-05-11 Phase 9 P0: Gmail poll cron. Closes the
   // "customer asks at 10am, Jeff sees at 2pm" gap by polling every 10
   // minutes and running InquiryAgent pipeline on new threads. autoSend

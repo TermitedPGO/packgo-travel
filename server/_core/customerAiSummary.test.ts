@@ -25,7 +25,9 @@ import {
   parseSummaryResult,
   isSummaryStale,
   generateCustomerAiSummary,
+  pickStaleProfiles,
   SUMMARY_TTL_MS,
+  type ScanRow,
 } from "./customerAiSummary";
 
 const invokeLLMMock = vi.mocked(invokeLLM);
@@ -89,6 +91,29 @@ describe("isSummaryStale", () => {
     const gen = new Date(now - 1000);
     const olderActivity = new Date(now - 5000);
     expect(isSummaryStale(gen, olderActivity, now)).toBe(false);
+  });
+});
+
+describe("pickStaleProfiles (cron selection)", () => {
+  const now = 2_000_000_000_000;
+  const fresh = new Date(now - 1000);
+  const old = new Date(now - SUMMARY_TTL_MS - 1000);
+  const rows: ScanRow[] = [
+    // registered, never computed → stale → {userId}
+    { id: 10, userId: 7, lastInteractionAt: fresh, aiSummaryAt: null },
+    // guest, summary older than its activity → stale → {profileId}
+    { id: 11, userId: null, lastInteractionAt: fresh, aiSummaryAt: old },
+    // fresh summary, no newer activity → NOT stale → skipped
+    { id: 12, userId: null, lastInteractionAt: old, aiSummaryAt: fresh },
+  ];
+
+  it("returns scopes only for stale rows, mapping userId vs profileId", () => {
+    const scopes = pickStaleProfiles(rows, now, 50);
+    expect(scopes).toEqual([{ userId: 7 }, { profileId: 11 }]);
+  });
+
+  it("caps at maxRefresh", () => {
+    expect(pickStaleProfiles(rows, now, 1)).toEqual([{ userId: 7 }]);
   });
 });
 
