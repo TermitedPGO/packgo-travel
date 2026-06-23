@@ -18,6 +18,16 @@
 
 兩條都不做「整條 thread 補齊」。影響全部客人,不只 Jenny。且我剛上線的 AI 摘要/對話讀同一份(半條),所以摘要會偏。
 
+**更嚴重:沒被 profile 的活躍客戶整個隱形(2026-06-22 實測 Emerald)**:
+Emerald Young(eyoung@axt.com,AXT 公司的訂票窗口,Jeff 長期代訂機票)在連線 Gmail
+(jeffhsieh09)有 4 個月、15+ 封往來。但系統 **完全沒有她的 profile、0 筆 interaction**
+(唯一沾邊的是 Leslie 轉寄信被歸到 profile 2460001)。原因:filing pipeline 只在
+把信「分類成客戶詢問/簽證詢問」時才建 profile;Emerald 的信是公司訂票指示(「幫我員工
+訂這班、卡號附上」),分類器不當成詢問 → 永遠不建檔。
+- **這打破原 backfill 設計**:§四.4 原本「對每個既有 customerProfile sync」會整個跳過
+  Emerald(她沒 profile)。→ backfill 必須改成 **Gmail-thread 驅動**:走連線信箱的真人
+  通訊對象,ensure-or-create profile,再 file 整條 thread。見修訂後 §四.4。
+
 **時間/日期錯(2026-06-22 Jeff 追加)**:`gmailPipeline.ts:466` inbound insert 沒設 `createdAt` → 吃 schema `defaultNow()` = 歸檔當下,不是信的實際時間。輪詢落後或補抓的信就全標「今天」→ 客戶頁時間/日期都不對、順序也亂。寄件側 `sentMailFiling.ts:159` 已用 `msg.receivedAt`(2262304 修過),收件側漏了。
 - **已修(本批)**:inbound insert 加 `createdAt: msg.receivedAt`(Gmail internalDate)。新進的信時間正確。
 - **待 backfill 修舊列**:既有 453 列裡被標成歸檔時間的,要在 §四.3 sync 的 claim-or-insert 一併把 `createdAt` 改回 Gmail internalDate(認領 legacy 列時連 createdAt 一起更新)。
@@ -60,7 +70,12 @@ UNIQUE (customerProfileId, externalId)    -- 同一客人同一封只一列;NULL
 
 ### 4.4 觸發
 - 收件 poll:處理完一封 inbound 後,呼 `syncThreadToInteractions(它的 thread)`→ 連帶補純文字回覆 + 早於 poll 的訊息。
-- Backfill job(BullMQ,沿用既有 schedule 模式):對每個有 email 的 customerProfile,在每個連線帳號用 `from:/to:<email>` 找 thread,逐條 sync。一次性 +（可選)定期。per-thread cap(如 200 封)。
+- Backfill job(BullMQ,沿用既有 schedule 模式)— **Gmail-thread 驅動,不是 profile 驅動**(因為 Emerald 這種活躍客戶根本沒 profile):
+  1. 走連線信箱(per-integration)近 N 個月的 thread(排除 noreply/電子報/系統信)。
+  2. 對每條 thread 認出「對方真人 email」(非自己帳號那方);ensure-or-create customerProfile(by email)。
+  3. file 整條 thread(claim-or-insert,§四.3)。per-thread cap(如 200 封)。
+  - 既有「對每個 profile sync」可留作補充,但主力是 thread 驅動,才補得到沒建檔的客戶。
+  - ⚠ 建 profile 要避免把純供應商/noreply 當客戶 → 用寄件域/已知供應商清單過濾(reference_packgo_suppliers);拿不準的先建 profile 但標來源待 Jeff 確認,不自動對外。
 
 ## 五、紅線
 
