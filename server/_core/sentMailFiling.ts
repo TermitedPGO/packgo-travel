@@ -33,6 +33,7 @@ import {
   fetchRawAttachments,
 } from "./gmail";
 import { storagePut } from "../storage";
+import { scrubPii } from "./piiScrub";
 import { isCustomerDocAttachment, customerDocR2Key } from "./customerDocFiling";
 import { detectAttachmentKind } from "./attachmentParser";
 
@@ -148,9 +149,10 @@ export async function runSentMailCapture(
               customerProfileId: p.id,
               channel: "email",
               direction: "outbound",
-              content:
+              content: scrubPii(
                 (msg.body || "").slice(0, 20000) +
-                (attachNames ? `\n\n【附件】${attachNames}` : ""),
+                  (attachNames ? `\n\n【附件】${attachNames}` : ""),
+              ),
               contentSummary: (msg.subject || "").slice(0, 200),
               generatedBy: "human",
               urgency: 50,

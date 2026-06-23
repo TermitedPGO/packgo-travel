@@ -41,6 +41,7 @@ import {
   type GmailMessageSummary,
 } from "../../_core/gmail";
 import { detectReceipt, extractReceipt, pickReceiptAttachment } from "../../_core/receiptExtractor";
+import { scrubPii } from "../../_core/piiScrub";
 import {
   createPendingExpense,
   getPendingExpenseByGmailMessageId,
@@ -467,7 +468,9 @@ async function processOneEmail(
     customerProfileId: profileId ?? 0,
     channel: "email",
     direction: "inbound",
-    content: cleanMessage + attachmentSummary,
+    // scrubPii: never store a live card number (PAN) at rest — customers paste
+    // them in booking emails. See server/_core/piiScrub.ts (audit 2026-06-22).
+    content: scrubPii(cleanMessage + attachmentSummary),
     contentSummary:
       decision.intent +
       (attachmentsForAgent.length > 0
@@ -796,7 +799,7 @@ async function processOneEmail(
       customerProfileId: profileId,
       channel: "email",
       direction: "outbound",
-      content: decision.draftReply,
+      content: scrubPii(decision.draftReply),
       contentSummary: `Auto-reply (conf=${decision.confidence})`,
       generatedBy: "ai_auto",
       agentName: "inquiry",
