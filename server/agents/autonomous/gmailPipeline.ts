@@ -464,29 +464,63 @@ async function processOneEmail(
           )
           .join("\n")
       : "";
-  const interactionIns = await db.insert(customerInteractions).values({
-    customerProfileId: profileId ?? 0,
-    channel: "email",
-    direction: "inbound",
-    // scrubPii: never store a live card number (PAN) at rest — customers paste
-    // them in booking emails. See server/_core/piiScrub.ts (audit 2026-06-22).
-    content: scrubPii(cleanMessage + attachmentSummary),
-    contentSummary:
-      decision.intent +
-      (attachmentsForAgent.length > 0
-        ? ` (附 ${attachmentsForAgent.length} 個檔案)`
-        : ""),
-    sentiment: decision.sentiment,
-    classification: decision.classification,
-    urgency: urgencyMap[decision.urgency] ?? 50,
-    // Stamp with the email's actual received time, not the poll/filing time, so
-    // the conversation shows the real date and stays in chronological order.
-    // Without this it defaults to now() — a backlogged or late-polled email
-    // showed "today" (the 時間/日期都不對 bug). Mirrors sentMailFiling's outbound
-    // fix. msg.receivedAt = Gmail internalDate.
-    createdAt: msg.receivedAt,
-  });
-  const interactionId = Number((interactionIns as any)[0]?.insertId ?? 0);
+  // gmail-full-thread-filing [3] — stamp the dedup key (RFC822 Message-ID) +
+  // thread id at write time so (a) the end-of-poll thread sync recognises THIS
+  // row and skips it instead of inserting a duplicate, and (b) a cross-account
+  // copy of the same email collapses to one row via UNIQUE(profile, externalId).
+  let interactionId = 0;
+  try {
+    const interactionIns = await db.insert(customerInteractions).values({
+      customerProfileId: profileId ?? 0,
+      channel: "email",
+      direction: "inbound",
+      // scrubPii: never store a live card number (PAN) at rest — customers paste
+      // them in booking emails. See server/_core/piiScrub.ts (audit 2026-06-22).
+      content: scrubPii(cleanMessage + attachmentSummary),
+      contentSummary:
+        decision.intent +
+        (attachmentsForAgent.length > 0
+          ? ` (附 ${attachmentsForAgent.length} 個檔案)`
+          : ""),
+      sentiment: decision.sentiment,
+      classification: decision.classification,
+      urgency: urgencyMap[decision.urgency] ?? 50,
+      externalId: msg.messageId,
+      gmailThreadId: msg.threadId,
+      // Stamp with the email's actual received time, not the poll/filing time, so
+      // the conversation shows the real date and stays in chronological order.
+      // Without this it defaults to now() — a backlogged or late-polled email
+      // showed "today" (the 時間/日期都不對 bug). Mirrors sentMailFiling's outbound
+      // fix. msg.receivedAt = Gmail internalDate.
+      createdAt: msg.receivedAt,
+    });
+    interactionId = Number((interactionIns as any)[0]?.insertId ?? 0);
+  } catch (e: any) {
+    // UNIQUE(customerProfileId, externalId) tripped — this exact email is already
+    // filed (a retry after a mid-message failure left the row but never applied
+    // the processed label, or a cross-account duplicate). Reuse the existing
+    // row's id so the rest of processing (outcome, escalation) proceeds instead
+    // of re-throwing every poll and getting permanently stuck. See plan §七 race note.
+    if (e?.code === "ER_DUP_ENTRY" && profileId) {
+      const [dup] = await db
+        .select({ id: customerInteractions.id })
+        .from(customerInteractions)
+        .where(
+          and(
+            eq(customerInteractions.customerProfileId, profileId),
+            eq(customerInteractions.externalId, msg.messageId),
+          ),
+        )
+        .limit(1);
+      interactionId = dup?.id ?? 0;
+      log.info(
+        { profileId, externalId: msg.messageId },
+        "[gmailPipeline] inbound already filed (dup key) — reusing row",
+      );
+    } else {
+      throw e;
+    }
+  }
 
   // 2026-06-21 — file inbound DOCUMENT attachments (pdf/docx/xlsx/csv, or a
   // sizeable image such as a passport scan) as customerDocuments so they show
