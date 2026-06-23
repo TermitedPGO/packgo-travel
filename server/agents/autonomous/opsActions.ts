@@ -40,6 +40,9 @@ export const ActionTypeEnum = z.enum([
   // PACK&GO Agent expansion (2026-06-01)
   "classifyBankTransactions",
   "draftWechatReply",
+  // gmail-full-thread-filing — Jeff 指名「收某客人」的整串 Gmail 對話。
+  // 唯讀候選確認 (preview_customer_threads) 後出 chip,Jeff 點才執行。
+  "collectCustomerThreads",
 ]);
 export type ActionType = z.infer<typeof ActionTypeEnum>;
 
@@ -123,6 +126,15 @@ export const DraftWechatReplyArgs = z.object({
   language: z.enum(["zh-TW", "zh-CN", "en"]).default("zh-TW"),
 });
 
+// gmail-full-thread-filing — collect one named customer's whole Gmail history.
+// email is required (the AI must have confirmed WHICH email with Jeff first via
+// the read-only preview); profileId is optional — omitted for a not-yet-filed
+// contact, in which case the executor ensure-creates the profile by email.
+export const CollectCustomerThreadsArgs = z.object({
+  email: z.string().email(),
+  profileId: z.number().int().positive().optional(),
+});
+
 // ────────────────────────────────────────────────────────────────────────
 // Executor — pick action type, validate, run
 // ────────────────────────────────────────────────────────────────────────
@@ -169,6 +181,8 @@ export async function executeOpsAction(
         return await doClassifyBankTransactions(ClassifyBankTransactionsArgs.parse(args));
       case "draftWechatReply":
         return await doDraftWechatReply(DraftWechatReplyArgs.parse(args));
+      case "collectCustomerThreads":
+        return await doCollectCustomerThreads(CollectCustomerThreadsArgs.parse(args));
       default:
         return { ok: false, summary: "未知動作", error: `Unknown actionType: ${actionType}` };
     }
@@ -666,4 +680,75 @@ async function doDraftWechatReply(
     const msg = (err as Error).message;
     return { ok: false, summary: "微信草稿生成失敗", error: msg };
   }
+}
+
+/**
+ * gmail-full-thread-filing — collect one named customer's entire Gmail history
+ * into customerInteractions. Runs only after Jeff clicks the chip (the agent
+ * confirmed WHICH email via the read-only preview first). Pure搬運: reuses
+ * backfillCustomerByEmail (claim-or-insert, scrubPii, idempotent) across every
+ * connected mailbox. Ensure-creates the profile for a not-yet-filed contact.
+ */
+async function doCollectCustomerThreads(
+  args: z.infer<typeof CollectCustomerThreadsArgs>,
+): Promise<ExecutionResult> {
+  const { getDb } = await import("../../db");
+  const db = await getDb();
+  if (!db) return { ok: false, summary: "DB unavailable", error: "no_db" };
+
+  const { gmailIntegration } = await import("../../../drizzle/schema");
+  const { eq } = await import("drizzle-orm");
+  const { buildGmailClient } = await import("../../_core/gmail");
+  const { backfillCustomerByEmail } = await import("../../_core/customerBackfill");
+  const { ensureCustomerByEmail } = await import("../../routers/agent/_shared");
+
+  const email = args.email.trim().toLowerCase();
+
+  // Resolve the profile. A not-yet-filed contact (e.g. Emerald) has none →
+  // ensure-create by email. We deliberately do NOT bump lastInteractionAt: this
+  // backfills HISTORICAL mail, and bumping "active now" would (a) be wrong and
+  // (b) push the customer into the nightly AI-summary scan, burning LLM.
+  let profileId = args.profileId;
+  let created = false;
+  if (!profileId) {
+    const ensured = await ensureCustomerByEmail(db, email);
+    profileId = ensured.id;
+    created = ensured.created;
+  }
+
+  const integrations = await db
+    .select()
+    .from(gmailIntegration)
+    .where(eq(gmailIntegration.isActive, 1));
+  if (integrations.length === 0) {
+    return { ok: false, summary: "沒有連線中的 Gmail 帳號", error: "no_gmail_integration" };
+  }
+
+  const totals = { threadsSeen: 0, inserted: 0, claimed: 0, skipped: 0, trashSkipped: 0 };
+  const perMailbox: Array<{ mailbox: string; threadsSeen: number; inserted: number; claimed: number }> = [];
+  for (const integ of integrations) {
+    try {
+      const gmail = buildGmailClient(integ);
+      const r = await backfillCustomerByEmail(db, gmail, integ.emailAddress, profileId, email);
+      totals.threadsSeen += r.threadsSeen;
+      totals.inserted += r.inserted;
+      totals.claimed += r.claimed;
+      totals.skipped += r.skipped;
+      totals.trashSkipped += r.trashSkipped;
+      perMailbox.push({ mailbox: integ.emailAddress, threadsSeen: r.threadsSeen, inserted: r.inserted, claimed: r.claimed });
+    } catch (e) {
+      log.warn(
+        { err: e, mailbox: integ.emailAddress, email },
+        "[opsActions] collectCustomerThreads one mailbox failed (non-fatal)",
+      );
+    }
+  }
+
+  return {
+    ok: true,
+    summary:
+      `✓ 已收 ${email}${created ? "(新建檔)" : ""} · ${totals.threadsSeen} 條 thread → ` +
+      `新增 ${totals.inserted}、認領 ${totals.claimed}、跳過 ${totals.skipped}(${integrations.length} 個信箱)`,
+    details: { profileId, email, created, ...totals, perMailbox },
+  };
 }

@@ -159,6 +159,20 @@ export const READ_TOOLS: Anthropic.Tool[] = [
       required: ["destination"],
     },
   },
+  {
+    name: "preview_customer_threads",
+    description:
+      "唯讀預覽某個 email 在連線 Gmail 裡的往來(不寫入任何東西)。回傳找到幾條 thread + 最近一條的對話樣本(已遮卡號)。" +
+      "用在 Jeff 說「收/歸檔某客人的記錄」時:先用這個確認那個 email 是不是要收的人,把 thread 數 + 樣本講給 Jeff 聽,再出 collectCustomerThreads 動作讓他點。" +
+      "絕不要自己猜 email — 名字先用 search_customers 查;查不到就請 Jeff 給 email。",
+    input_schema: {
+      type: "object",
+      properties: {
+        email: { type: "string", description: "客人的 email(必須是 Jeff 給的或 search_customers 查到的,不要編)" },
+      },
+      required: ["email"],
+    },
+  },
 ];
 
 // ── Executor ────────────────────────────────────────────────────────────────
@@ -605,6 +619,55 @@ async function runTool(name: string, input: any): Promise<unknown> {
           days: g.Days,
           status: g.IsSold ? "sold" : "available",
         })),
+      };
+    }
+
+    case "preview_customer_threads": {
+      const email = String(input.email ?? "").trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return { error: "需要一個有效的 email(請 Jeff 提供,不要自己編)" };
+      }
+      const { gmailIntegration } = await import("../../../drizzle/schema");
+      const { buildGmailClient } = await import("../../_core/gmail");
+      const { previewCustomerThreads } = await import("../../_core/customerBackfill");
+      const integrations = await db
+        .select()
+        .from(gmailIntegration)
+        .where(eq(gmailIntegration.isActive, 1));
+      if (integrations.length === 0) {
+        return { email, threadsSeen: 0, mailboxes: [], sample: [], note: "沒有連線中的 Gmail 帳號" };
+      }
+      let threadsSeen = 0;
+      const mailboxes: Array<{ mailbox: string; threadsSeen: number }> = [];
+      let sample: Array<{ date: string; direction: string; snippet: string }> = [];
+      for (const integ of integrations) {
+        try {
+          const gmail = buildGmailClient(integ);
+          const pv = await previewCustomerThreads(gmail, integ.emailAddress, email);
+          threadsSeen += pv.threadsSeen;
+          mailboxes.push({ mailbox: integ.emailAddress, threadsSeen: pv.threadsSeen });
+          // Show one sample (from the first mailbox that has any).
+          if (sample.length === 0 && pv.sample.length > 0) {
+            sample = pv.sample.map((s) => ({
+              date: s.date.toISOString().slice(0, 10),
+              direction: s.direction,
+              snippet: s.snippet,
+            }));
+          }
+        } catch (e) {
+          mailboxes.push({ mailbox: integ.emailAddress, threadsSeen: 0 });
+          log.warn({ name, email, err: e instanceof Error ? e.message : String(e) }, "[opsTools] preview one mailbox failed");
+        }
+      }
+      return {
+        email,
+        threadsSeen,
+        mailboxes,
+        sample,
+        note:
+          threadsSeen === 0
+            ? "這個 email 在連線信箱裡找不到往來,可能拼錯或不在這兩個帳號。"
+            : undefined,
       };
     }
 

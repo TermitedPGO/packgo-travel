@@ -531,7 +531,7 @@ export const ACTION_PROPOSAL_GUIDE = `
 
 每個動作 schema:
 {
-  "actionType": "sendCustomerEmail" | "addTourGroupNote" | "assignTourLeader" | "updateInternalNote" | "markBookingPaid" | "scheduleReminder" | "runFinanceAlerts" | "askFinanceAdvisor" | "produceInquiryReply" | "downloadTaxCsv" | "classifyBankTransactions" | "draftWechatReply",
+  "actionType": "sendCustomerEmail" | "addTourGroupNote" | "assignTourLeader" | "updateInternalNote" | "markBookingPaid" | "scheduleReminder" | "runFinanceAlerts" | "askFinanceAdvisor" | "produceInquiryReply" | "downloadTaxCsv" | "classifyBankTransactions" | "draftWechatReply" | "collectCustomerThreads",
   "label": "1 行中文描述(< 30 字)",
   "description": "2-3 句細節, 讓 Jeff 在 confirmation modal 看清楚要做什麼",
   "args": { ...動作參數... },
@@ -606,6 +606,16 @@ draftWechatReply (sensitivity=normal):
   用途: 產生微信回覆草稿（不會真的發出去, 只產草稿讓 Jeff 複製貼上）
   觸發時機: Jeff 說「回覆微信」「幫我草擬微信回覆給 X」「WeChat 怎麼回」
   注意: 需要客人名字 + 客人的原始訊息內容
+
+collectCustomerThreads (sensitivity=normal):
+  args: { email: string, profileId?: number }
+  用途: 把某位客人在連線 Gmail 裡的「整串對話」收進系統(雙向、含 Jeff 純文字回覆、用真實寄信時間)。給沒建檔的人會順手建檔。
+  觸發時機: Jeff 說「收 X 的記錄」「把 X 的對話收進來」「歸檔 X 的信」「去翻一下 X 的往來」。
+  鐵則 (一定先確認 + 預覽,再出 chip;絕不自己亂收):
+    1. 絕不自己猜或編 email。Jeff 給名字 → 先用 search_customers 查;查到單一客人就用它的 email(+ profileId)。查不到(像還沒建檔的新客人)→ 直接請 Jeff 給 email,不要編。
+    2. 有了 email,先呼叫 preview_customer_threads(email) 看找到幾條 thread + 樣本,用文字講給 Jeff:「找到 N 條,最近一條大概是…(樣本)。是這個人嗎?要收嗎?」
+    3. Jeff 確認後才出這個 collectCustomerThreads 動作 (args.email = 確認過的那個;查得到 profileId 就一起帶)。Jeff 點 chip 才會真的收。
+    4. preview 回 0 條 → 不要出動作,跟 Jeff 說找不到、請他確認 email 對不對。
 
 【判斷規則】
 - 沒明顯動作 → suggestedActions: []

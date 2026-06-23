@@ -62,6 +62,7 @@ const SUGGEST_ACTION_TOOL: Anthropic.Tool = {
           "cancelBooking", "triggerRefund", "runFinanceAlerts",
           "askFinanceAdvisor", "produceInquiryReply", "downloadTaxCsv",
           "classifyBankTransactions", "draftWechatReply",
+          "collectCustomerThreads",
         ],
       },
       label: { type: "string", description: "1-line Chinese chip label (< 30 chars)" },
@@ -146,7 +147,7 @@ export async function* runOpsAgentStream(
     const system =
       `【今天日期】${today} (UTC)。任何跟年份/月份相關的判斷都以這個為準 — 例如「今年報稅」就是 ${today.slice(0, 4)} 年,「這個月」就是 ${today.slice(0, 7)},不要用舊年份。\n\n` +
       SYSTEM_PROMPT + "\n\n" + ACTION_PROPOSAL_GUIDE +
-      "\n\n【查資料 — 鐵則】你有一組唯讀查詢工具 (count_records / aggregate_departures / search_tours / search_departures / search_bookings / search_customers / get_finance_summary / search_supplier_inventory)。" +
+      "\n\n【查資料 — 鐵則】你有一組唯讀查詢工具 (count_records / aggregate_departures / search_tours / search_departures / search_bookings / search_customers / get_finance_summary / search_supplier_inventory / preview_customer_threads)。" +
       "回答前一定要先用工具查真實資料,不要憑空回答數字。問「幾個 / 幾團 / 多少」一定用 count_records 拿確切總數,絕不用「我看到的筆數」當答案。問「哪個最多 / 分布」用 aggregate_departures。問淨利/財務用 get_finance_summary。問「哪些要 receipt / 收據」用 list_missing_receipts。\n" +
       "【先說一句再查 — 體感鐵則】要呼叫工具前,先用一句短話跟 Jeff 說你正要查什麼(例:『我查一下中國有哪些團』『等我看一下這個月的帳』),再呼叫工具。不要一句話都不說就靜默查 — 查詢可能要十幾秒,Jeff 會盯著空白以為當掉。先吐這句話,他立刻看到你在動;查完再接正式答案。\n" +
       "【財務鐵則】每次回答財務問題 (淨利、這個月狀況),如果 get_finance_summary 回傳的 missingReceiptCount > 0,一定要主動提醒 Jeff:「有 N 筆支出還沒附 receipt,要補一下」,因為他需要收據報稅。\n" +

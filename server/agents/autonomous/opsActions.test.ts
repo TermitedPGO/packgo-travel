@@ -248,3 +248,25 @@ describe("executeOpsAction — draftWechatReply", () => {
     expect(result.ok).toBe(false);
   });
 });
+
+// ── gmail-full-thread-filing: 指名收客人 ─────────────────────────────────
+
+describe("ActionTypeEnum includes collectCustomerThreads", () => {
+  it("accepts collectCustomerThreads", () => {
+    expect(ActionTypeEnum.safeParse("collectCustomerThreads").success).toBe(true);
+  });
+});
+
+describe("executeOpsAction — collectCustomerThreads", () => {
+  it("rejects a bad email arg (zod)", async () => {
+    const result = await executeOpsAction("collectCustomerThreads", { email: "not-an-email" });
+    expect(result.ok).toBe(false);
+  });
+
+  it("degrades gracefully when the DB is unavailable", async () => {
+    // ../../db getDb is mocked to resolve null in this file.
+    const result = await executeOpsAction("collectCustomerThreads", { email: "eyoung@axt.com" });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("no_db");
+  });
+});

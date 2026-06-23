@@ -27,6 +27,7 @@ import {
   DollarSign,
   XCircle,
   Undo2,
+  Inbox,
   AlertCircle,
   RefreshCw,
   ChevronDown,
@@ -57,6 +58,7 @@ const ACTION_ICON: Record<string, any> = {
   markBookingPaid: DollarSign,
   cancelBooking: XCircle,
   triggerRefund: Undo2,
+  collectCustomerThreads: Inbox,
 };
 
 // Quick-prompt chips above the composer — Claude-Code-style shortcuts so Jeff
