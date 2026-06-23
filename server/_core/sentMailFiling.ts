@@ -8,9 +8,13 @@
  *   2. 收件人 email 對到「既有」客戶 profile(只比對,不新建,避免供應商/雜信
  *      製造垃圾 profile)。
  *   3. 把符合的附件(pdf/docx/xlsx/圖檔等)存成 customerDocuments(文件 tab)。
- *   4. 記一筆 outbound customerInteraction(讓對話顯示我方那一邊)。
- *   5. 給訊息打上 SENT_FILED_LABEL,下次查詢 -label 排除,避免重複歸檔
+ *   4. 給訊息打上 SENT_FILED_LABEL,下次查詢 -label 排除,避免重複歸檔
  *      (沿用 inbound markAsRead 同樣「打標記=已處理」的去重法)。
+ *
+ * gmail-full-thread-filing [6] 降級:這支不再寫 outbound customerInteraction —
+ * 我方那一邊(含純文字回覆)改由 threadFiling.syncThreadToInteractions 一條路徑收齊
+ * (claim-or-insert 冪等),避免和 thread sync 雙寫同一封。這裡只負責「附件 → R2 →
+ * 文件 tab」這個 thread sync 不做的部分。
  *
  * 全程 best-effort:任何一步失敗都只 log、不中斷整批(寄信早就送出了,歸檔
  * 失敗不該變成錯誤)。附件存的是 R2 KEY(同 inbound),文件路由讀時簽短連結。
@@ -22,7 +26,6 @@ import { createChildLogger } from "./logger";
 import {
   gmailIntegration,
   customerProfiles,
-  customerInteractions,
   customerDocuments,
 } from "../../drizzle/schema";
 import {
@@ -33,7 +36,6 @@ import {
   fetchRawAttachments,
 } from "./gmail";
 import { storagePut } from "../storage";
-import { scrubPii } from "./piiScrub";
 import { isCustomerDocAttachment, customerDocR2Key } from "./customerDocFiling";
 import { detectAttachmentKind } from "./attachmentParser";
 
@@ -59,6 +61,11 @@ export function parseRecipientEmails(toHeader: string | null | undefined): strin
 export interface SentMailCaptureResult {
   scanned: number;
   docsFiled: number;
+  /**
+   * Always 0 since [6] — outbound interactions are now filed solely by
+   * threadFiling's thread sync (no double-write). Kept for result-shape
+   * stability (gmailPollWorker logs it).
+   */
   interactions: number;
 }
 
@@ -90,7 +97,7 @@ export async function runSentMailCapture(
   });
 
   let docsFiled = 0;
-  let interactions = 0;
+  const interactions = 0; // [6] outbound interactions moved to threadFiling thread sync
 
   for (const msg of messages) {
     try {
@@ -142,31 +149,8 @@ export async function runSentMailCapture(
             }
           }
 
-          // ── record our outbound message so the thread shows both sides ──
-          try {
-            const attachNames = raw.map((a) => a.filename).join(", ");
-            await db.insert(customerInteractions).values({
-              customerProfileId: p.id,
-              channel: "email",
-              direction: "outbound",
-              content: scrubPii(
-                (msg.body || "").slice(0, 20000) +
-                  (attachNames ? `\n\n【附件】${attachNames}` : ""),
-              ),
-              contentSummary: (msg.subject || "").slice(0, 200),
-              generatedBy: "human",
-              urgency: 50,
-              // stamp with the email's actual sent time, not capture time, so the
-              // conversation stays in chronological order with the inbound mail.
-              createdAt: msg.receivedAt,
-            });
-            interactions++;
-          } catch (e) {
-            log.warn(
-              { err: e, profileId: p.id },
-              "[sentMailFiling] interaction insert failed (non-fatal)",
-            );
-          }
+          // [6] 降級:outbound customerInteraction 不再在此寫入 — 由 threadFiling 的
+          // thread sync 一條路徑收齊我方訊息(避免雙寫)。這裡只做附件 → R2。
         }
       }
 
