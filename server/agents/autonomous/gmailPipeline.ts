@@ -237,11 +237,16 @@ export async function runGmailPipeline(
   const inquiryPolicy = await ensurePolicy(db, "inquiry", DEFAULT_INQUIRY_POLICY);
   const refundPolicy = await ensurePolicy(db, "refund", DEFAULT_REFUND_POLICY);
 
+  // gmail-full-thread-filing [5] — per-poll set so several emails sharing one
+  // thread only trigger a single (idempotent) thread sync this cycle.
+  const syncedThreads = new Set<string>();
+
   for (const msg of customerEmails) {
     try {
       await processOneEmail(db, msg, inquiryPolicy, refundPolicy, result, {
         gmail,
         fromEmail,
+        syncedThreads,
       });
       // Apply processed label so this won't be picked up again
       await applyLabel(gmail, msg.id, labelId);
@@ -287,6 +292,8 @@ async function processOneEmail(
   sendCtx: {
     gmail: ReturnType<typeof buildGmailClient>;
     fromEmail: string;
+    /** Thread ids already synced this poll cycle (in-memory dedup). */
+    syncedThreads: Set<string>;
   }
 ): Promise<void> {
   // Extract sender email
@@ -1065,6 +1072,39 @@ async function processOneEmail(
       .update(customerProfiles)
       .set({ lastInteractionAt: new Date() })
       .where(eq(customerProfiles.id, profileId));
+  }
+
+  // gmail-full-thread-filing [5] — file the WHOLE thread, not just this email:
+  // Jeff's plain-text replies (which the has:attachment sent gate misses) and
+  // any earlier messages that predate this poll. claim-or-insert keeps it
+  // idempotent — the inbound row inserted above already carries its Message-ID,
+  // so the sync recognises it instead of duplicating. The per-cycle Set above
+  // dedups when several emails in one poll share a thread. Best-effort: a sync
+  // failure must never break mail processing (the email is already handled).
+  if (profileId && msg.threadId && !sendCtx.syncedThreads.has(msg.threadId)) {
+    sendCtx.syncedThreads.add(msg.threadId);
+    try {
+      const [{ listThreadMessagesForFiling }, { syncThreadToInteractions }] =
+        await Promise.all([
+          import("../../_core/gmail"),
+          import("../../_core/threadFiling"),
+        ]);
+      const filingMsgs = await listThreadMessagesForFiling(
+        sendCtx.gmail,
+        msg.threadId,
+        sendCtx.fromEmail,
+      );
+      const synced = await syncThreadToInteractions(db, profileId, filingMsgs);
+      log.info(
+        { profileId, threadId: msg.threadId, ...synced },
+        "[gmailPipeline] thread sync done",
+      );
+    } catch (e) {
+      log.warn(
+        { err: e, profileId, threadId: msg.threadId },
+        "[gmailPipeline] thread sync failed (non-fatal)",
+      );
+    }
   }
 }
 
