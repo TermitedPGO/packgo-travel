@@ -123,6 +123,14 @@ export function buildGmailClient(integration: {
 
 export type GmailMessageSummary = {
   id: string;
+  /**
+   * RFC822 `Message-ID` header (angle-brackets stripped), the cross-mailbox
+   * idempotency key for filing — the SAME email carries the SAME Message-ID in
+   * every mailbox it lands in, whereas the Gmail internal `id` differs per
+   * account. Falls back to the Gmail `id` when the header is absent. See
+   * `parseRfcMessageId`.
+   */
+  messageId: string;
   threadId: string;
   from: string;
   to: string;
@@ -295,6 +303,112 @@ export async function getThreadHistory(
   return out.slice(-maxMessages);
 }
 
+/**
+ * Normalize an RFC822 `Message-ID` header value (strip the surrounding `<>`,
+ * trim) into the cross-mailbox dedup key. When the header is missing we fall
+ * back to the Gmail internal id — that loses cross-account dedup for that one
+ * message but keeps the key non-empty so the UNIQUE(profile, externalId) index
+ * still works. Pure → unit-tested.
+ */
+export function parseRfcMessageId(
+  raw: string | undefined | null,
+  fallbackGmailId: string,
+): string {
+  const cleaned = (raw ?? "").trim().replace(/^<|>$/g, "").trim();
+  return cleaned || fallbackGmailId;
+}
+
+/** Extract the bare email address from a `From`/`To` header value, lowercased. */
+function extractEmailAddr(header: string): string {
+  const m = header.match(/<([^>]+)>/) || header.match(/([^\s]+@[^\s]+)/);
+  return m ? m[1].trim().toLowerCase() : "";
+}
+
+/**
+ * Decide a message's direction relative to the connected mailbox. Uses an
+ * EXACT email-address match (parse the address out of the `From` header, then
+ * `===`), not a substring test — a customer whose display name happens to
+ * contain the self address must not be misread as outbound. Pure → unit-tested.
+ */
+export function resolveDirection(
+  fromHeader: string,
+  selfEmail: string,
+): "inbound" | "outbound" {
+  const from = extractEmailAddr(fromHeader);
+  const self = (selfEmail || "").trim().toLowerCase();
+  return !!from && !!self && from === self ? "outbound" : "inbound";
+}
+
+/**
+ * Flat per-message shape consumed by the thread-filing reconciler
+ * (`server/_core/threadFiling.ts`). Distinct from `ThreadHistoryMessage`
+ * (LLM context) — this carries the durable dedup key + Trash flag.
+ */
+export interface FilingMessage {
+  /** Gmail internal message id (per-mailbox). */
+  id: string;
+  /** RFC822 Message-ID (cross-mailbox dedup key); Gmail id fallback. */
+  messageId: string;
+  threadId: string;
+  from: string;
+  /** Gmail internalDate — the message's real send/receive time. */
+  date: Date;
+  direction: "inbound" | "outbound";
+  body: string;
+  /** True when the message carries the TRASH label; the reconciler skips it. */
+  inTrash: boolean;
+}
+
+/**
+ * gmail-full-thread-filing [2] — fetch EVERY message in a thread (both
+ * directions, including Jeff's plain-text replies that the `has:attachment`
+ * sent-mail gate misses) as a flat `FilingMessage[]` for durable filing.
+ *
+ * Deliberately separate from `getThreadHistory` (which is tuned for LLM context:
+ * last 12 messages, body trimmed to 1200) and leaves it untouched. Here we keep
+ * the whole thread (per-thread cap 200), allow long bodies (cap 20000), carry the
+ * `messageId` dedup key, and flag Trash so the reconciler can exclude it. Oldest
+ * → newest. Per-message direction via `resolveDirection(selfEmail)`.
+ */
+export async function listThreadMessagesForFiling(
+  gmail: ReturnType<typeof buildGmailClient>,
+  threadId: string,
+  selfEmail: string,
+  opts?: { maxMessages?: number; maxCharsPerMessage?: number },
+): Promise<FilingMessage[]> {
+  const maxMessages = opts?.maxMessages ?? 200;
+  const maxChars = opts?.maxCharsPerMessage ?? 20000;
+  const resp = await gmail.users.threads.get({
+    userId: "me",
+    id: threadId,
+    format: "full",
+  });
+  const msgs = (resp.data.messages ?? []) as any[];
+  const out: FilingMessage[] = [];
+  for (const m of msgs) {
+    const headers = (m.payload?.headers ?? []) as Array<{
+      name?: string | null;
+      value?: string | null;
+    }>;
+    const hmap: Record<string, string> = {};
+    for (const h of headers) if (h.name && h.value) hmap[h.name.toLowerCase()] = h.value;
+    const from = hmap["from"] ?? "";
+    const body = (extractBody(m.payload) || m.snippet || "").trim();
+    const labelIds = (m.labelIds ?? []) as string[];
+    out.push({
+      id: m.id,
+      messageId: parseRfcMessageId(hmap["message-id"], m.id),
+      threadId: m.threadId ?? threadId,
+      from,
+      date: new Date(Number(m.internalDate ?? Date.now())),
+      direction: resolveDirection(from, selfEmail),
+      body: body.length > maxChars ? body.slice(0, maxChars) : body,
+      inTrash: labelIds.includes("TRASH"),
+    });
+  }
+  return out.slice(-maxMessages);
+}
+
 function parseMessage(msg: any): GmailMessageSummary {
   const headers = msg.payload?.headers ?? [];
   const headerMap: Record<string, string> = {};
@@ -303,6 +417,7 @@ function parseMessage(msg: any): GmailMessageSummary {
   }
   return {
     id: msg.id,
+    messageId: parseRfcMessageId(headerMap["message-id"], msg.id),
     threadId: msg.threadId,
     from: headerMap["from"] ?? "",
     to: headerMap["to"] ?? "",

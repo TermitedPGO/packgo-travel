@@ -22,7 +22,12 @@ vi.mock("./logger", () => ({
   createChildLogger: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
-import { buildMimeReply, type SendReplyInput } from "./gmail";
+import {
+  buildMimeReply,
+  parseRfcMessageId,
+  resolveDirection,
+  type SendReplyInput,
+} from "./gmail";
 
 const BASE: SendReplyInput = {
   threadId: "t-1",
@@ -48,6 +53,53 @@ function firstAttachmentBytes(mime: string): Buffer {
   const body = attPart.split("\r\n\r\n")[1] ?? "";
   return Buffer.from(body.replace(/\r\n/g, ""), "base64");
 }
+
+describe("parseRfcMessageId — cross-mailbox dedup key", () => {
+  it("strips the surrounding angle brackets", () => {
+    expect(parseRfcMessageId("<CADabc123@mail.gmail.com>", "gmail-internal-1")).toBe(
+      "CADabc123@mail.gmail.com",
+    );
+  });
+  it("trims whitespace around the header value", () => {
+    expect(parseRfcMessageId("  <m-9@x>  ", "fallback")).toBe("m-9@x");
+  });
+  it("falls back to the Gmail internal id when the header is missing/blank", () => {
+    expect(parseRfcMessageId(undefined, "gid-1")).toBe("gid-1");
+    expect(parseRfcMessageId(null, "gid-2")).toBe("gid-2");
+    expect(parseRfcMessageId("", "gid-3")).toBe("gid-3");
+    expect(parseRfcMessageId("<>", "gid-4")).toBe("gid-4");
+  });
+  it("yields the SAME key for the same header seen in two mailboxes", () => {
+    const header = "<unique-id@sender.example>";
+    expect(parseRfcMessageId(header, "jeff-internal")).toBe(
+      parseRfcMessageId(header, "support-internal"),
+    );
+  });
+});
+
+describe("resolveDirection — exact self-email match", () => {
+  const self = "jeffhsieh09@gmail.com";
+  it("marks a message FROM the connected account as outbound", () => {
+    expect(resolveDirection("Jeff Hsieh <jeffhsieh09@gmail.com>", self)).toBe("outbound");
+    expect(resolveDirection("jeffhsieh09@gmail.com", self)).toBe("outbound");
+    expect(resolveDirection("JEFFHSIEH09@GMAIL.COM", self)).toBe("outbound"); // case-insensitive
+  });
+  it("marks a message from anyone else as inbound", () => {
+    expect(resolveDirection("Jenny Chang <jenny.chang.info@gmail.com>", self)).toBe("inbound");
+    expect(resolveDirection("eyoung@axt.com", self)).toBe("inbound");
+  });
+  it("does NOT use substring matching (display name containing self ≠ outbound)", () => {
+    // A customer whose display text mentions the self address but sends from
+    // their own address must stay inbound.
+    expect(
+      resolveDirection("jeffhsieh09@gmail.com via List <customer@evil.com>", self),
+    ).toBe("inbound");
+  });
+  it("defaults to inbound when self email is blank or address unparseable", () => {
+    expect(resolveDirection("jeffhsieh09@gmail.com", "")).toBe("inbound");
+    expect(resolveDirection("no address here", self)).toBe("inbound");
+  });
+});
 
 describe("buildMimeReply — no attachments (regression)", () => {
   it("is a single text/plain part, no multipart", () => {
