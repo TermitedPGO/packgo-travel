@@ -35,6 +35,29 @@ Emerald(eyoung@axt.com)8 條 thread、重度 **inbound**(不是「mostly outboun
 - ⚠ 限制:[5] 需要該 thread 有「未讀 inbound」觸發 poll。若 Jenny 整串已讀,要等她下次來信
   (或 [8] 主動掃)才回填。proactive 掃既有靜止 thread = [8]。
 
+## 加做:用講的收客人(on-demand 指名回填,2026-06-23,未部署)
+
+Jeff 選「用講的」+「只收他本人的信」。把「指名收一個客人的整串 Gmail」接上既有 ops chat
+(提案→點擊→執行,跟 sendCustomerEmail/triggerRefund 同一套,零新繞道)。研究見背景並行
+workflow(wf_4a66328c-ab5)。
+
+| 步 | 內容 | 狀態 | 檔案 |
+|----|------|------|------|
+| T1 | customerBackfill.ts:backfillCustomerByEmail(write)+ previewCustomerThreads(read,遮卡號)+ searchThreadIds | ✅ 7 測綠 | `server/_core/customerBackfill.ts` |
+| T2 | opsTools:唯讀 preview_customer_threads 工具 + runTool case | ✅ | `opsTools.ts` (+test READ_TOOLS=10) |
+| T3 | opsActions:collectCustomerThreads 動作(ensure-create profile、迴圈 active 信箱、不寫 lastInteractionAt) | ✅ | `opsActions.ts` (+enum/email/no-DB 測) |
+| T4 | opsAgentStream:suggest_action enum + 工具清單 | ✅ | `opsAgentStream.ts` |
+| T5 | opsAgent:ACTION_PROPOSAL_GUIDE 加 collectCustomerThreads + 鐵則(不猜 email、先 preview 再出 chip) | ✅ | `opsAgent.ts` |
+| - | chip icon | ✅ | `AgentChatPage.tsx` |
+
+安全(架構性):agent 手上只有唯讀 preview;真正歸檔是 WRITE action,只能經 chip + Jeff 點。
+名字→search_customers 查;查不到(Emerald)請 Jeff 給 email,絕不猜。preview 樣本 scrubPii。
+回填刻意不寫 lastInteractionAt → 不污染活躍窗、不二階燒摘要 LLM(burn=0)。
+全測試 2831 passed / 0 failed;tsc 0。**與 MVP 綁一起上**(同一次 pnpm ship)。
+
+決策待 Jeff:名字多筆候選 UX、maxThreads 50 上限(老客戶上百條 thread 可能 tRPC timeout)、
+回填客人要不要也生 AI 摘要(預設不生)。供應商/航空 thread = 只收指名 email,要收就另外指名。
+
 ## 延後 [7]-[13](未做)
 見 plan.md §四。下一批先 [7] senderClassifier → [8] backfill worker(thread 驅動,**先暫停
 customerSummaryQueue**,dry-run 先給 Jeff)→ ... → [11] 讀取側 cap 提高 → [12] 身分層。
