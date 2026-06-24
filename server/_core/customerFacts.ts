@@ -15,6 +15,9 @@
  *   aiQuotes.status (generated/sent/viewed/converted/expired)
  *   invoices.status (draft/sent/paid/overdue/cancelled)
  *   customerInteractions.direction (inbound/outbound)
+ *   customerDocuments (uploadedBy="email_sent") — files we emailed the customer.
+ *     詢問階段的交付幾乎只活在這裡(行程表 / 報價 PDF 當 email 附件),沒有訂製單
+ *     也算交付。少了它,Jenny 那種純詢問客人會被誤報「還沒交付任何文件」。
  *
  * Identity resolution mirrors loadCustomerDocs / customerChatContext exactly
  * (userId → profileIds + verified email), so the facts cover the same canonical
@@ -55,12 +58,22 @@ export interface InvoiceFact {
   paidAt: Date | null;
 }
 
+/** A file we emailed the customer (customerDocuments, uploadedBy="email_sent").
+ *  Metadata only — the fileName, never the contents (PII never enters a prompt). */
+export interface DocFact {
+  fileName: string;
+  sentAt: Date | null;
+}
+
 /** Everything the deterministic fields are computed from. All counts/dates are
  *  authoritative DB facts — no inference. */
 export interface CustomerFacts {
   orders: OrderFact[];
   quotes: QuoteFact[];
   invoices: InvoiceFact[];
+  /** Files we emailed the customer (行程表 / 報價 PDF 等附件). The delivery
+   *  signal for inquiry-stage customers who have no order/quote/invoice yet. */
+  deliveredDocs: DocFact[];
   /** Emails / messages WE sent the customer (never spam — outbound is ours). */
   outboundCount: number;
   outboundLastAt: Date | null;
@@ -75,6 +88,7 @@ export const EMPTY_FACTS: CustomerFacts = {
   orders: [],
   quotes: [],
   invoices: [],
+  deliveredDocs: [],
   outboundCount: 0,
   outboundLastAt: null,
   inboundCount: 0,
@@ -90,6 +104,12 @@ export type FactsScope = { userId: number } | { profileId: number };
 function md(d: Date | null): string {
   if (!d) return "";
   return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+/** Drop a trailing file extension so the 給了什麼 line reads like the 文件 tab
+ *  ("…報價與行程_2026.pdf" → "…報價與行程_2026"). Only the last .ext. */
+function stripDocExt(name: string): string {
+  return name.replace(/\.[A-Za-z0-9]{1,6}$/, "").trim();
 }
 
 /** aiQuotes statuses that mean the quote actually reached the customer. */
@@ -157,6 +177,13 @@ export function deriveDelivered(facts: CustomerFacts): string {
   for (const inv of facts.invoices) {
     if (INVOICE_DELIVERED.has(inv.status)) parts.push(`發票 ${inv.invoiceNumber}`);
   }
+  // Files we emailed the customer (行程表 / 報價 PDF 當附件). For inquiry-stage
+  // customers with no order/quote/invoice these ARE the delivery — listing them
+  // by name (per Jeff) matches the 文件 tab exactly. joinFacts dedupes + caps.
+  for (const d of facts.deliveredDocs) {
+    const name = stripDocExt(d.fileName);
+    if (name) parts.push(name);
+  }
 
   return joinFacts(parts, "目前還沒有交付任何文件給客人");
 }
@@ -186,6 +213,13 @@ export function formatFactsLedger(facts: CustomerFacts): string {
   }
   const sentQuotes = facts.quotes.filter((q) => QUOTE_DELIVERED.has(q.status));
   if (sentQuotes.length) lines.push(`- 已送出報價單:${sentQuotes.map((q) => q.quoteNumber).join("、")}`);
+  if (facts.deliveredDocs.length)
+    lines.push(
+      `- 已 email 寄給客人的文件:${facts.deliveredDocs
+        .map((d) => stripDocExt(d.fileName))
+        .filter(Boolean)
+        .join("、")}`,
+    );
   lines.push(
     `- 來往信件:我們回了 ${facts.outboundCount} 封,客人來了 ${facts.inboundCount} 封` +
       (facts.outboundLastAt ? `(我們最後回信 ${md(facts.outboundLastAt)})` : ""),
@@ -258,6 +292,7 @@ export async function gatherCustomerFacts(scope: FactsScope): Promise<CustomerFa
       aiQuotes,
       invoices,
       customerInteractions,
+      customerDocuments,
       bookings,
     } = await import("../../drizzle/schema");
     const { desc } = await import("drizzle-orm");
@@ -348,6 +383,32 @@ export async function gatherCustomerFacts(scope: FactsScope): Promise<CustomerFa
         }))
       : [];
 
+    // Files we emailed the customer — uploadedBy="email_sent" (sentMailFiling)
+    // is definitively outbound; type="other" double-guards PII (passport / visa /
+    // insurance / medical are inbound scans, never "我們給的"). Metadata only:
+    // we read fileName, never the bytes, so nothing PII enters a prompt.
+    const deliveredDocs: DocFact[] = profileIds.length
+      ? (
+          await db
+            .select({
+              fileName: customerDocuments.fileName,
+              uploadedAt: customerDocuments.uploadedAt,
+            })
+            .from(customerDocuments)
+            .where(
+              and(
+                inArray(customerDocuments.customerProfileId, profileIds),
+                eq(customerDocuments.uploadedBy, "email_sent"),
+                eq(customerDocuments.type, "other"),
+              ),
+            )
+            .orderBy(desc(customerDocuments.uploadedAt))
+            .limit(20)
+        )
+          .filter((d) => d.fileName != null)
+          .map((d) => ({ fileName: d.fileName as string, sentAt: toDate(d.uploadedAt) }))
+      : [];
+
     // Email/message direction counts (authoritative, aggregated in SQL so a
     // heavy customer isn't undercounted by a row cap).
     let outboundCount = 0;
@@ -392,6 +453,7 @@ export async function gatherCustomerFacts(scope: FactsScope): Promise<CustomerFa
       orders,
       quotes,
       invoices: invoiceFacts,
+      deliveredDocs,
       outboundCount,
       outboundLastAt,
       inboundCount,
