@@ -10,6 +10,8 @@ import {
   buildCustomerDocsText,
   formatDocsList,
   deriveFilename,
+  makeCachedExtract,
+  clearDocTextCache,
   MAX_DOCS_TOTAL_CHARS,
   type DocRef,
   type DocsTextDeps,
@@ -125,5 +127,52 @@ describe("buildCustomerDocsText", () => {
     const r = await buildCustomerDocsText(docs, deps);
     expect(r.readCount).toBe(1);
     expect(r.fullText).toContain("行程內容");
+  });
+});
+
+describe("makeCachedExtract (in-memory doc-text cache)", () => {
+  const doc = (url: string | null): DocRef => ({ kind: "quote", name: "Q", url });
+
+  it("parses once then serves the cache on repeat (no re-fetch / re-parse)", async () => {
+    clearDocTextCache();
+    const fetchBytes = vi.fn(async () => ({ bytes: Buffer.from("x"), mimeType: "application/pdf" }));
+    const parse = vi.fn(async () => ({ text: "ITINERARY", parseStatus: "ok" }));
+    const extract = makeCachedExtract(fetchBytes, parse);
+
+    const a = await extract(doc("r2://quote-1.pdf"));
+    const b = await extract(doc("r2://quote-1.pdf"));
+    expect(a?.text).toBe("ITINERARY");
+    expect(b?.text).toBe("ITINERARY");
+    expect(fetchBytes).toHaveBeenCalledTimes(1);
+    expect(parse).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not share text across different urls", async () => {
+    clearDocTextCache();
+    const fetchBytes = vi.fn(async () => ({ bytes: Buffer.from("x"), mimeType: "application/pdf" }));
+    const parse = vi.fn(async () => ({ text: "T", parseStatus: "ok" }));
+    const extract = makeCachedExtract(fetchBytes, parse);
+    await extract(doc("r2://a.pdf"));
+    await extract(doc("r2://b.pdf"));
+    expect(parse).toHaveBeenCalledTimes(2);
+  });
+
+  it("does NOT cache a failed / empty parse (so a later fix can succeed)", async () => {
+    clearDocTextCache();
+    const fetchBytes = vi.fn(async () => ({ bytes: Buffer.from("x"), mimeType: "application/pdf" }));
+    const parse = vi.fn(async () => ({ text: "", parseStatus: "parse_error" }));
+    const extract = makeCachedExtract(fetchBytes, parse);
+    await extract(doc("r2://broken.pdf"));
+    await extract(doc("r2://broken.pdf"));
+    expect(parse).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns null without fetching for a doc that has no url", async () => {
+    clearDocTextCache();
+    const fetchBytes = vi.fn(async () => null);
+    const parse = vi.fn(async () => ({ text: "", parseStatus: "empty" }));
+    const extract = makeCachedExtract(fetchBytes, parse);
+    expect(await extract(doc(null))).toBe(null);
+    expect(fetchBytes).not.toHaveBeenCalled();
   });
 });

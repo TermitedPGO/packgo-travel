@@ -63,6 +63,13 @@ export interface DocsTextDeps {
     mimeType: string,
     data: Buffer,
   ) => Promise<{ text: string; parseStatus: string }>;
+  /** Optional combined fetch+parse for one doc. Prod sets this to a cached
+   *  version (in-memory) so a doc-heavy customer's PDFs aren't re-fetched +
+   *  re-parsed on every chat message. Tests omit it → fall back to
+   *  fetchBytes+parse, so their behavior is unchanged. */
+  extract?: (
+    doc: DocRef,
+  ) => Promise<{ text: string; parseStatus: string } | null>;
 }
 
 function shouldExtract(doc: DocRef): boolean {
@@ -87,37 +94,89 @@ export function formatDocsList(docs: DocRef[]): string {
   return ["【文件清單】", ...lines].join("\n");
 }
 
-const realDeps: DocsTextDeps = {
-  async fetchBytes(url) {
-    try {
-      if (/^https?:\/\//i.test(url)) {
-        const key = extractR2KeyFromUrl(url);
-        if (key) {
-          const r = await storageGetBytes(key);
-          return { bytes: r.bytes, mimeType: r.mimeType };
-        }
-        const resp = await fetch(url);
-        if (!resp.ok) return null;
-        const ab = await resp.arrayBuffer();
-        return {
-          bytes: Buffer.from(ab),
-          mimeType: resp.headers.get("content-type") || "application/octet-stream",
-        };
-      }
-      const r = await storageGetBytes(url); // bare R2 key
-      return { bytes: r.bytes, mimeType: r.mimeType };
-    } catch (err) {
-      log.warn(
-        { url: url.slice(0, 80), err: (err as Error).message },
-        "[customerDocsText] fetch failed — skipping doc",
-      );
-      return null;
+// ── extracted-text cache (customer-cockpit) ─────────────────────────────
+// In-memory LRU of url → extracted text. Process RAM only — NEVER written to
+// DB or disk, so it honors the PII no-persist rule (same as the prompt itself,
+// which already holds this text transiently). Avoids re-fetching + re-parsing
+// the same PDF on every chat message (a doc-heavy customer like Jenny carries
+// ~11MB of itinerary/quote PDFs). A doc's content at a stable R2 key never
+// changes, so the url is a sufficient, safe cache key.
+
+const DOC_TEXT_CACHE_MAX = 300;
+const docTextCache = new Map<string, string>();
+
+/** Test seam: drop all cached extractions. */
+export function clearDocTextCache(): void {
+  docTextCache.clear();
+}
+
+/** Wrap fetch+parse with the in-memory LRU. Exported so the cache hit/miss +
+ *  eviction is unit-tested with fake IO (no R2 / pdf-parse). */
+export function makeCachedExtract(
+  fetchBytes: DocsTextDeps["fetchBytes"],
+  parse: DocsTextDeps["parse"],
+): NonNullable<DocsTextDeps["extract"]> {
+  return async (doc) => {
+    const url = doc.url;
+    if (!url) return null;
+    const cached = docTextCache.get(url);
+    if (cached !== undefined) {
+      docTextCache.delete(url);
+      docTextCache.set(url, cached); // LRU: move to most-recent
+      return { text: cached, parseStatus: "ok" };
     }
-  },
-  async parse(filename, mimeType, data) {
-    const r = await parseAttachment(filename, mimeType, data);
-    return { text: r.text, parseStatus: r.parseStatus };
-  },
+    const fetched = await fetchBytes(url);
+    if (!fetched) return null;
+    const parsed = await parse(deriveFilename(doc), fetched.mimeType, fetched.bytes);
+    const ok = parsed.parseStatus === "ok" || parsed.parseStatus === "ok_truncated";
+    if (ok && parsed.text.trim()) {
+      docTextCache.set(url, parsed.text);
+      while (docTextCache.size > DOC_TEXT_CACHE_MAX) {
+        const oldest = docTextCache.keys().next().value;
+        if (oldest === undefined) break;
+        docTextCache.delete(oldest);
+      }
+    }
+    return parsed;
+  };
+}
+
+const realFetchBytes: DocsTextDeps["fetchBytes"] = async (url) => {
+  try {
+    if (/^https?:\/\//i.test(url)) {
+      const key = extractR2KeyFromUrl(url);
+      if (key) {
+        const r = await storageGetBytes(key);
+        return { bytes: r.bytes, mimeType: r.mimeType };
+      }
+      const resp = await fetch(url);
+      if (!resp.ok) return null;
+      const ab = await resp.arrayBuffer();
+      return {
+        bytes: Buffer.from(ab),
+        mimeType: resp.headers.get("content-type") || "application/octet-stream",
+      };
+    }
+    const r = await storageGetBytes(url); // bare R2 key
+    return { bytes: r.bytes, mimeType: r.mimeType };
+  } catch (err) {
+    log.warn(
+      { url: url.slice(0, 80), err: (err as Error).message },
+      "[customerDocsText] fetch failed — skipping doc",
+    );
+    return null;
+  }
+};
+
+const realParse: DocsTextDeps["parse"] = async (filename, mimeType, data) => {
+  const r = await parseAttachment(filename, mimeType, data);
+  return { text: r.text, parseStatus: r.parseStatus };
+};
+
+const realDeps: DocsTextDeps = {
+  fetchBytes: realFetchBytes,
+  parse: realParse,
+  extract: makeCachedExtract(realFetchBytes, realParse),
 };
 
 /**
@@ -132,15 +191,19 @@ export async function buildCustomerDocsText(
   const list = formatDocsList(docs);
 
   const extractable = docs.filter(shouldExtract);
-  const extracted = await Promise.all(
-    extractable.map(async (doc) => {
+  // Prefer the (cached) combined extractor; fall back to fetch+parse so tests
+  // that inject only fetchBytes/parse keep working unchanged.
+  const extractOne: NonNullable<DocsTextDeps["extract"]> =
+    deps.extract ??
+    (async (doc) => {
       const fetched = await deps.fetchBytes(doc.url!);
       if (!fetched) return null;
-      const parsed = await deps.parse(
-        deriveFilename(doc),
-        fetched.mimeType,
-        fetched.bytes,
-      );
+      return deps.parse(deriveFilename(doc), fetched.mimeType, fetched.bytes);
+    });
+  const extracted = await Promise.all(
+    extractable.map(async (doc) => {
+      const parsed = await extractOne(doc);
+      if (!parsed) return null;
       if (parsed.parseStatus !== "ok" && parsed.parseStatus !== "ok_truncated") {
         return null;
       }

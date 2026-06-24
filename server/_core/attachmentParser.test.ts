@@ -27,6 +27,7 @@ vi.mock("./imageOcr", () => ({
 import {
   parseAttachment,
   detectAttachmentKind,
+  resolvePdfParse,
   MAX_RAW_BYTES,
   MAX_TEXT_CHARS,
   TRUNCATION_MARKER,
@@ -425,5 +426,24 @@ describe("parseAttachment — limits", () => {
     );
     expect(result.parseStatus).toBe("parse_error");
     expect(result.parseError).toBeTruthy();
+  });
+});
+
+describe("resolvePdfParse — bundler interop", () => {
+  const fn = async () => ({ text: "ok" });
+
+  it("returns the module itself when it is the function (CJS)", () => {
+    expect(resolvePdfParse(fn)).toBe(fn);
+  });
+  it("unwraps a single default (ESM)", () => {
+    expect(resolvePdfParse({ default: fn })).toBe(fn);
+  });
+  it("unwraps a double-wrapped default (the prod-bundle shape that broke)", () => {
+    expect(resolvePdfParse({ default: { default: fn } })).toBe(fn);
+  });
+  it("returns null when nothing is callable (so the caller throws clearly)", () => {
+    expect(resolvePdfParse({ default: { notAFn: 1 } })).toBe(null);
+    expect(resolvePdfParse(null)).toBe(null);
+    expect(resolvePdfParse({})).toBe(null);
   });
 });

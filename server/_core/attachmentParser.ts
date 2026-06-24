@@ -266,14 +266,29 @@ export async function parseAttachment(
 // PDF — pdf-parse already installed (used elsewhere for receipt OCR)
 // ────────────────────────────────────────────────────────────────────────
 
+type PdfParseFn = (data: Buffer, opts?: { max?: number }) => Promise<{ text?: string }>;
+
+/**
+ * Resolve pdf-parse's callable across bundler interop shapes. The old code did
+ * `module.default ?? module`, which broke in the prod esbuild bundle: there the
+ * import is double-wrapped as `{ default: { default: fn } }`, so `.default` is a
+ * truthy OBJECT (not the function) and `??` picks it → "pdfParse is not a
+ * function" at call time, silently killing all PDF reading. Walk the chain and
+ * typeof-check instead. Pure + exported so the resolution is unit-tested.
+ */
+export function resolvePdfParse(mod: any): PdfParseFn | null {
+  if (typeof mod === "function") return mod;
+  if (typeof mod?.default === "function") return mod.default;
+  if (typeof mod?.default?.default === "function") return mod.default.default;
+  return null;
+}
+
 async function parsePdf(data: Buffer): Promise<string> {
   // Dynamic import — pdf-parse pulls in a heavy debug fixture on require;
-  // dynamic load avoids slowing cold start. v2.4.5 ships ESM with both
-  // `default` and module-level exports, hence the `?? pdfParseModule`
-  // fallback (same pattern as server/agents/pdfTextExtractor.ts).
-  const pdfParseModule = await import("pdf-parse");
-  const pdfParse: any =
-    (pdfParseModule as any).default ?? pdfParseModule;
+  // dynamic load avoids slowing cold start.
+  const mod = await import("pdf-parse");
+  const pdfParse = resolvePdfParse(mod);
+  if (!pdfParse) throw new Error("pdf-parse export is not callable");
   const result = await pdfParse(data, { max: 50 }); // cap at 50 pages
   return result.text ?? "";
 }
