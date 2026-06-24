@@ -3317,6 +3317,19 @@ export const en = {
           quote: 'Quote pending',
         },
       },
+      truth: {
+        ballUs: 'Your move',
+        ballCustomer: 'Waiting on them',
+        next: {
+          reply: 'Reply to them',
+          followup: 'Time to follow up',
+          waiting: 'Waiting for reply',
+          none: 'No conversation yet',
+        },
+        quiet: '{n}d quiet',
+        today: 'Contacted today',
+        noConvo: 'No conversation yet',
+      },
       drafts: {
         heading: 'AI assistant',
         intro: 'AI drafted {n} repl(ies) for {name} — review then send:',

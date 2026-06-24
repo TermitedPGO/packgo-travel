@@ -3285,6 +3285,19 @@ export const zhTW = {
           quote: '報價待追',
         },
       },
+      truth: {
+        ballUs: '球在你手上',
+        ballCustomer: '球在客人手上',
+        next: {
+          reply: '該你回覆',
+          followup: '可以跟進',
+          waiting: '等客人回',
+          none: '尚無對話',
+        },
+        quiet: '{n} 天沒往來',
+        today: '今天剛聯絡',
+        noConvo: '尚無對話紀錄',
+      },
       drafts: {
         heading: 'AI 助手',
         intro: 'AI 為 {name} 準備了 {n} 則回覆草稿，審核後可直接發送：',

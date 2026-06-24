@@ -4,6 +4,7 @@ import { useLocale } from "@/contexts/LocaleContext"
 import type { AdaptedCustomer, ChatMessage } from "./types"
 import { OverviewTab, OrdersTab, DocsTab, TimelineTab } from "./DetailTabs"
 import CustomOrderSheet from "./CustomOrderSheet"
+import { deriveBallInCourt, deriveNextMove } from "./adapters"
 
 const TAB_KEYS = ["overview", "orders", "docs", "history"] as const
 type TabKey = (typeof TAB_KEYS)[number]
@@ -17,6 +18,12 @@ export default function CustomerDetail({ customer, chatMessages = [] }: { custom
   const c = customer
 
   const tabLabel = (k: TabKey) => t(`admin.customers.tab.${k}`)
+
+  // 五秒真相條 (Step 1): all deterministic — ball-in-court from who spoke last,
+  // days from the existing followup signal, next move from the two combined.
+  const ball = deriveBallInCourt(chatMessages)
+  const nextMove = deriveNextMove(ball, c.followup)
+  const truthDays = c.followup.daysSinceContact
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -101,6 +108,39 @@ export default function CustomerDetail({ customer, chatMessages = [] }: { custom
             {t("admin.customers.action.confirm")}
           </button>
         </div>
+      </div>
+
+      {/* 五秒真相條 (Step 1): 球在誰 · 幾天沒往來 · 下一步。全部 deterministic,不靠 LLM。 */}
+      <div className="px-6 py-2 border-b border-gray-200 bg-gray-50 flex items-center gap-2 text-[11px]">
+        {ball === null ? (
+          <span className="text-gray-400">{t("admin.customers.truth.noConvo")}</span>
+        ) : (
+          <>
+            <span
+              className={`px-1.5 py-0.5 rounded-md font-medium ${
+                ball === "us" ? "bg-gray-900 text-white" : "bg-gray-200 text-gray-700"
+              }`}
+            >
+              {ball === "us"
+                ? t("admin.customers.truth.ballUs")
+                : t("admin.customers.truth.ballCustomer")}
+            </span>
+            {truthDays !== null && (
+              <>
+                <span className="text-gray-300">·</span>
+                <span className="text-gray-500">
+                  {truthDays === 0
+                    ? t("admin.customers.truth.today")
+                    : t("admin.customers.truth.quiet", { n: truthDays })}
+                </span>
+              </>
+            )}
+            <span className="text-gray-300">·</span>
+            <span className="text-gray-700 font-medium">
+              {t(`admin.customers.truth.next.${nextMove}`)}
+            </span>
+          </>
+        )}
       </div>
 
       <CustomOrderSheet

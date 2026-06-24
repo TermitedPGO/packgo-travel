@@ -399,6 +399,39 @@ export function deriveFollowup(
   return { daysSinceContact, needsFollowup: reason !== null, reason }
 }
 
+// ── deriveBallInCourt / deriveNextMove (五秒真相條, Step 1) ─────────────
+// 「球在誰、下一步」: deterministic from the REAL conversation + the existing
+// followup signal. Pure, no LLM, no `now` — trivially testable. The truth strip
+// at the top of the customer page is built only from these (facts, not guesses).
+
+export type BallInCourt = "us" | "customer" | null
+export type NextMove = "reply" | "followup" | "waiting" | "none"
+
+/**
+ * Who spoke last → whose move it is. Newest message from Jeff means the ball is
+ * in the CUSTOMER's court (we are waiting on them); newest from the customer
+ * means the ball is on US (we owe a reply). No messages → null.
+ * `messages` is oldest-first (the order the panel renders the thread).
+ */
+export function deriveBallInCourt(
+  messages: { senderRole: "customer" | "jeff" }[],
+): BallInCourt {
+  if (messages.length === 0) return null
+  const last = messages[messages.length - 1]
+  return last.senderRole === "jeff" ? "customer" : "us"
+}
+
+/**
+ * The single next move, from ball + the existing followup signal. Customer spoke
+ * last → reply. We spoke last → follow up if overdue (followup.needsFollowup),
+ * otherwise just wait.
+ */
+export function deriveNextMove(ball: BallInCourt, followup: Followup): NextMove {
+  if (ball === null) return "none"
+  if (ball === "us") return "reply"
+  return followup.needsFollowup ? "followup" : "waiting"
+}
+
 // ── guestToAdaptedCustomer ──────────────────────────────
 // A guest (unregistered email lead who inquired) has no user row, so
 // customerDetail returns nothing for them. Jeff's rule: an inquiry counts as a

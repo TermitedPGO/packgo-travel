@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { guestToAdaptedCustomer, deriveFollowup, buildInquiryEditedPayload, deriveProfile } from "./adapters"
+import { guestToAdaptedCustomer, deriveFollowup, buildInquiryEditedPayload, deriveProfile, deriveBallInCourt, deriveNextMove } from "./adapters"
 
 // t stub: echoes the key, appending the interpolated count so assertions can see it.
 const t = (k: string, vars?: Record<string, string | number>) =>
@@ -240,5 +240,41 @@ describe("deriveProfile — 護照 presence-only + 來源", () => {
     )
     expect(c.profile.source).toBe("admin.customers.profile.sourceManual")
     expect(c.profile.passport).toBe("admin.customers.profile.notProvided")
+  })
+})
+
+describe("deriveBallInCourt", () => {
+  it("null when there are no messages", () => {
+    expect(deriveBallInCourt([])).toBe(null)
+  })
+  it("customer's court when Jeff spoke last", () => {
+    expect(
+      deriveBallInCourt([{ senderRole: "customer" }, { senderRole: "jeff" }]),
+    ).toBe("customer")
+  })
+  it("our court when the customer spoke last", () => {
+    expect(
+      deriveBallInCourt([{ senderRole: "jeff" }, { senderRole: "customer" }]),
+    ).toBe("us")
+  })
+})
+
+describe("deriveNextMove", () => {
+  const fu = (needsFollowup: boolean) => ({
+    daysSinceContact: needsFollowup ? 6 : 1,
+    needsFollowup,
+    reason: (needsFollowup ? "quote" : null) as "quote" | null,
+  })
+  it("none when there is no ball (no conversation)", () => {
+    expect(deriveNextMove(null, fu(false))).toBe("none")
+  })
+  it("reply when the ball is on us", () => {
+    expect(deriveNextMove("us", fu(false))).toBe("reply")
+  })
+  it("followup when ball on customer and overdue", () => {
+    expect(deriveNextMove("customer", fu(true))).toBe("followup")
+  })
+  it("waiting when ball on customer and not overdue", () => {
+    expect(deriveNextMove("customer", fu(false))).toBe("waiting")
   })
 })
