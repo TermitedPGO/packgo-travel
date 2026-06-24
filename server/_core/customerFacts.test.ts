@@ -43,8 +43,11 @@ function order(over: Partial<OrderFact> = {}): OrderFact {
   };
 }
 
-const JUN18 = new Date(2026, 5, 18); // month is 0-based → 6/18
-const JUN22 = new Date(2026, 5, 22);
+// Fixed instants whose Pacific (business tz) calendar date is unambiguous on any
+// CI runner: 18:00Z = 11:00 PDT, same day in both UTC and LA — so md() renders
+// 6/18 / 6/22 regardless of the runner's own timezone.
+const JUN18 = new Date("2026-06-18T18:00:00Z"); // → 6/18
+const JUN22 = new Date("2026-06-22T18:00:00Z"); // → 6/22
 
 describe("deriveActions (做了什麼)", () => {
   it("empty facts → friendly fallback, never blank", () => {
@@ -137,7 +140,7 @@ describe("deriveDelivered (給了什麼)", () => {
     expect(r.match(/報價單 QUOTE-1/g)?.length ?? 0).toBe(1);
   });
 
-  it("lists files we emailed the customer, by name with the extension stripped", () => {
+  it("lists files we emailed the customer, by name (extension stripped) + send date", () => {
     const r = deriveDelivered(
       facts({
         deliveredDocs: [
@@ -146,8 +149,8 @@ describe("deriveDelivered (給了什麼)", () => {
         ],
       }),
     );
-    expect(r).toContain("Jenny_台灣環島13天12夜_報價與行程_2026");
-    expect(r).toContain("2026_Taiwan_Group_Tour_Itinerary_EN");
+    expect(r).toContain("Jenny_台灣環島13天12夜_報價與行程_2026(6/22)");
+    expect(r).toContain("2026_Taiwan_Group_Tour_Itinerary_EN(6/22)");
     expect(r).not.toContain(".pdf");
   });
 
@@ -156,7 +159,18 @@ describe("deriveDelivered (給了什麼)", () => {
       facts({ deliveredDocs: [{ fileName: "Jenny_報價與行程_2026.pdf", sentAt: JUN22 }] }),
     );
     expect(r).not.toContain("還沒有交付");
-    expect(r).toContain("Jenny_報價與行程_2026");
+    expect(r).toContain("Jenny_報價與行程_2026(6/22)");
+  });
+
+  it("dates the docs in PACK&GO's business tz, not the server's UTC", () => {
+    // 02:00Z on 6/23 = 19:00 PDT on 6/22 — Jeff's calendar day, and the 文件 tab,
+    // both say 6/22. A naive UTC getDate() would wrongly print 6/23.
+    const lateEveningPdt = new Date("2026-06-23T02:00:00Z");
+    const r = deriveDelivered(
+      facts({ deliveredDocs: [{ fileName: "報價.pdf", sentAt: lateEveningPdt }] }),
+    );
+    expect(r).toContain("報價(6/22)");
+    expect(r).not.toContain("6/23");
   });
 
   it("combines a sent order quote with separately-emailed docs", () => {
@@ -167,7 +181,7 @@ describe("deriveDelivered (給了什麼)", () => {
       }),
     );
     expect(r).toContain("報價(ORD-2026-0001,6/18)");
-    expect(r).toContain("英文行程表");
+    expect(r).toContain("英文行程表(6/22)");
   });
 });
 
@@ -202,7 +216,7 @@ describe("formatFactsLedger (LLM grounding)", () => {
       facts({ deliveredDocs: [{ fileName: "Jenny_報價與行程_2026.pdf", sentAt: JUN22 }] }),
     );
     expect(r).toContain("已 email 寄給客人的文件");
-    expect(r).toContain("Jenny_報價與行程_2026");
+    expect(r).toContain("Jenny_報價與行程_2026(6/22)");
   });
 });
 

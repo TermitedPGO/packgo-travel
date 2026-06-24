@@ -100,16 +100,34 @@ export type FactsScope = { userId: number } | { profileId: number };
 
 // ── pure formatting helpers ────────────────────────────────────────────────
 
-/** M/D from a Date, local-agnostic (calendar month/day only — no tz games). */
+/** M/D in PACK&GO's business timezone (Newark CA = America/Los_Angeles). The
+ *  summary is computed server-side (Fly = UTC) but READ by Jeff in Pacific, and
+ *  the 文件 tab renders its dates client-side in his local clock — so we must
+ *  format the instant in Pacific or a late-evening send shows up a day off and
+ *  stops lining up. Same calendar Jeff sees, every time. */
+const MD_LA = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Los_Angeles",
+  month: "numeric",
+  day: "numeric",
+});
 function md(d: Date | null): string {
   if (!d) return "";
-  return `${d.getMonth() + 1}/${d.getDate()}`;
+  return MD_LA.format(d); // "6/22"
 }
 
 /** Drop a trailing file extension so the 給了什麼 line reads like the 文件 tab
  *  ("…報價與行程_2026.pdf" → "…報價與行程_2026"). Only the last .ext. */
 function stripDocExt(name: string): string {
   return name.replace(/\.[A-Za-z0-9]{1,6}$/, "").trim();
+}
+
+/** "檔名(6/22)" — a file we emailed the customer + the date it went out, dated
+ *  in business tz so it aligns with the 文件 tab. Empty name → "". */
+function docLabel(d: DocFact): string {
+  const name = stripDocExt(d.fileName);
+  if (!name) return "";
+  const date = md(d.sentAt);
+  return date ? `${name}(${date})` : name;
 }
 
 /** aiQuotes statuses that mean the quote actually reached the customer. */
@@ -179,10 +197,10 @@ export function deriveDelivered(facts: CustomerFacts): string {
   }
   // Files we emailed the customer (行程表 / 報價 PDF 當附件). For inquiry-stage
   // customers with no order/quote/invoice these ARE the delivery — listing them
-  // by name (per Jeff) matches the 文件 tab exactly. joinFacts dedupes + caps.
+  // by name + date (per Jeff) matches the 文件 tab exactly. joinFacts dedupes + caps.
   for (const d of facts.deliveredDocs) {
-    const name = stripDocExt(d.fileName);
-    if (name) parts.push(name);
+    const label = docLabel(d);
+    if (label) parts.push(label);
   }
 
   return joinFacts(parts, "目前還沒有交付任何文件給客人");
@@ -216,7 +234,7 @@ export function formatFactsLedger(facts: CustomerFacts): string {
   if (facts.deliveredDocs.length)
     lines.push(
       `- 已 email 寄給客人的文件:${facts.deliveredDocs
-        .map((d) => stripDocExt(d.fileName))
+        .map(docLabel)
         .filter(Boolean)
         .join("、")}`,
     );
