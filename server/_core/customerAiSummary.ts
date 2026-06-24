@@ -26,6 +26,12 @@ import {
   buildCustomerChatContext,
   buildGuestChatContext,
 } from "./customerChatContext";
+import {
+  gatherCustomerFacts,
+  deriveActions,
+  deriveDelivered,
+  formatFactsLedger,
+} from "./customerFacts";
 
 const log = createChildLogger({ module: "customerAiSummary" });
 
@@ -43,21 +49,21 @@ export const SUMMARY_TTL_MS = 24 * 60 * 60 * 1000;
 
 const HAIKU = "claude-haiku-4-5";
 
+// 「做了什麼 / 給了什麼」改由 customerFacts 從系統時間戳算出(搬運不生成),不再
+// 經 LLM。這裡只請 Haiku 出兩個「判斷」欄位:wants(客人想要什麼)和 nextStep
+// (下一步)。事實清單會一起餵進去墊底,所以 nextStep 不會叫你做已經做完的事
+// (Jenny 的「待交付」就是 LLM 沒讀時間戳腦補出來的)。
 const SUMMARY_SYSTEM = `你是 Jeff 的 PACK&GO(美國旅行社)後台助理,只服務 Jeff 本人(admin 內部)。
-你的工作:看完下面這位客人的真實資料,濃縮成四句話的摘要,給 Jeff 一眼看懂這位客人的狀態。
+你會拿到這位客人的真實資料,以及一份「系統事實」清單(已寄報價、已收款、已出確認書等真實記錄)。
+你的工作只有兩件:判斷客人現在想要什麼(wants),以及下一步該做什麼(nextStep)。
 
 鐵則:
-1. 只搬運下面提供的事實,不杜撰價格、日期、行程。資料沒有就說「目前沒有」,絕不腦補。
-2. 口語、自然、簡短,像跟同事講話。不要用破折號,不要用打勾符號,不要官方腔。
-3. 供應商成本、同業價是內部數字,不要寫進摘要(這摘要日後可能給客人看到)。
-4. 護照號、生日這類個資絕對不要出現在摘要裡。
-5. 訂金不等於營收(出發前的訂金是代管),談錢就照資料寫,不要自己改規則。
-
-四個欄位各一兩句:
-- wants:這位客人現在想要什麼(從對話、開著的詢問、進行中的單推斷)
-- actions:我們為他做了什麼(已回信、已報價、已訂…)
-- delivered:已經交付給他什麼(寄出的報價/行程/確認書)
-- nextStep:下一步該做什麼,一句可執行的(例:補寄 12 月台灣團含早鳥價)`;
+1. 只根據提供的資料判斷,不杜撰價格、日期、行程。資料沒有就說「目前看不出來」,絕不腦補。
+2. nextStep 必須跟「系統事實」一致:事實說報價已寄,就不要再叫 Jeff 寄報價;
+   該催款就催款,該等客人回就說等回覆。給一句可執行的下一步。
+3. 口語、自然、簡短,像跟同事講話。不要用破折號,不要用打勾符號,不要官方腔。
+4. 供應商成本、同業價、護照號、生日這類內部/個資絕對不要出現。
+5. 訂金不等於營收(出發前的訂金是代管),談錢照資料寫,不要自己改規則。`;
 
 const SUMMARY_SCHEMA = {
   name: "customer_summary",
@@ -66,11 +72,12 @@ const SUMMARY_SCHEMA = {
     additionalProperties: false,
     properties: {
       wants: { type: "string", description: "客人現在想要什麼,一兩句" },
-      actions: { type: "string", description: "我們做了什麼,一兩句" },
-      delivered: { type: "string", description: "已交付什麼,一兩句" },
-      nextStep: { type: "string", description: "下一步該做什麼,一句可執行" },
+      nextStep: {
+        type: "string",
+        description: "下一步該做什麼,一句可執行,且要跟系統事實一致",
+      },
     },
-    required: ["wants", "actions", "delivered", "nextStep"],
+    required: ["wants", "nextStep"],
   },
   strict: true,
 };
@@ -92,7 +99,13 @@ export function parseSummaryResult(rawContent: unknown): AiSummary {
   };
 }
 
-/** Run the LLM over this customer's context. Throws if context is unavailable. */
+/**
+ * Build the summary. The two FACTUAL fields (actions / delivered) are computed
+ * deterministically from system facts — never narrated by the LLM, so they
+ * cannot lie (Jenny's「待交付」bug). Only wants + nextStep come from Haiku, and
+ * the same facts ledger is fed in so nextStep stays consistent with reality.
+ * Throws if the conversation context is unavailable (db down / customer gone).
+ */
 export async function generateCustomerAiSummary(
   scope: SummaryScope,
 ): Promise<AiSummary> {
@@ -104,20 +117,27 @@ export async function generateCustomerAiSummary(
     throw new Error("customerAiSummary: no context (db down or customer gone)");
   }
 
+  // Deterministic half — computed from authoritative rows, not the model.
+  const facts = await gatherCustomerFacts(scope);
+  const actions = deriveActions(facts);
+  const delivered = deriveDelivered(facts);
+  const ledger = formatFactsLedger(facts);
+
   const result = await invokeLLM({
     model: HAIKU,
-    maxTokens: 1024,
+    maxTokens: 512,
     outputSchema: SUMMARY_SCHEMA,
     messages: [
       { role: "system", content: SUMMARY_SYSTEM },
       {
         role: "user",
-        content: `下面是這位客人的真實資料,請據此產出四欄摘要。\n\n${context}`,
+        content: `下面是這位客人的真實資料。請只判斷 wants 與 nextStep 兩欄,nextStep 必須跟「系統事實」一致。\n\n${ledger}\n\n${context}`,
       },
     ],
   });
 
-  return parseSummaryResult(result.choices[0]?.message?.content);
+  const llm = parseSummaryResult(result.choices[0]?.message?.content);
+  return { wants: llm.wants, actions, delivered, nextStep: llm.nextStep };
 }
 
 /** Resolve a scope to the customerProfiles.id to store the cache on, creating a
@@ -174,6 +194,40 @@ export async function refreshAndStoreSummary(
     log.warn({ err: (err as Error).message }, "[customerAiSummary] cache write failed");
   }
   return summary;
+}
+
+/**
+ * Resolve a profileId to its canonical summary scope. Event-driven refreshes
+ * enqueue a profileId (from an order / interaction / email), but a REGISTERED
+ * customer's profile (userId set) must recompute with {userId} so it gets the
+ * real bookings + membership context — not the guest builder, which would render
+ * 「尚未註冊」for an actual member. An email-only guest stays {profileId}.
+ * Degrades to {profileId} when the DB is down (safe default).
+ */
+export async function resolveSummaryScope(
+  profileId: number,
+): Promise<SummaryScope> {
+  const db = await getDb();
+  if (!db) return { profileId };
+  const { customerProfiles } = await import("../../drizzle/schema");
+  const { eq } = await import("drizzle-orm");
+  const row = (
+    await db
+      .select({ userId: customerProfiles.userId })
+      .from(customerProfiles)
+      .where(eq(customerProfiles.id, profileId))
+      .limit(1)
+  )[0];
+  return row?.userId ? { userId: row.userId } : { profileId };
+}
+
+/** Event-driven single-customer refresh: resolve the right scope first, then
+ *  recompute + cache. Used by the worker when an order/interaction enqueues a
+ *  profileId. */
+export async function refreshSummaryForProfile(
+  profileId: number,
+): Promise<AiSummary> {
+  return refreshAndStoreSummary(await resolveSummaryScope(profileId));
 }
 
 export interface CachedSummary {

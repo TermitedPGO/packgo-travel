@@ -17,6 +17,7 @@ vi.mock("./logger", () => ({
 }));
 
 import { invokeLLM } from "./llm";
+import { getDb } from "../db";
 import {
   buildCustomerChatContext,
   buildGuestChatContext,
@@ -26,11 +27,23 @@ import {
   isSummaryStale,
   generateCustomerAiSummary,
   pickStaleProfiles,
+  resolveSummaryScope,
   SUMMARY_TTL_MS,
   type ScanRow,
 } from "./customerAiSummary";
 
 const invokeLLMMock = vi.mocked(invokeLLM);
+const getDbMock = vi.mocked(getDb);
+
+/** Minimal drizzle chain whose terminal .limit() resolves to `rows`. */
+function fakeDb(rows: unknown[]) {
+  const chain: Record<string, unknown> = {};
+  chain.select = () => chain;
+  chain.from = () => chain;
+  chain.where = () => chain;
+  chain.limit = () => Promise.resolve(rows);
+  return chain;
+}
 const buildCustomerChatContextMock = vi.mocked(buildCustomerChatContext);
 const buildGuestChatContextMock = vi.mocked(buildGuestChatContext);
 
@@ -153,5 +166,22 @@ describe("generateCustomerAiSummary", () => {
   it("throws when no context (db down / customer gone)", async () => {
     buildGuestChatContextMock.mockResolvedValue(null);
     await expect(generateCustomerAiSummary({ profileId: 1 })).rejects.toThrow();
+  });
+});
+
+describe("resolveSummaryScope (event-refresh scope)", () => {
+  it("uses {userId} for a registered customer's profile (real bookings context)", async () => {
+    getDbMock.mockResolvedValueOnce(fakeDb([{ userId: 7 }]) as any);
+    expect(await resolveSummaryScope(2550004)).toEqual({ userId: 7 });
+  });
+
+  it("stays {profileId} for an email-only guest (no userId)", async () => {
+    getDbMock.mockResolvedValueOnce(fakeDb([{ userId: null }]) as any);
+    expect(await resolveSummaryScope(2550004)).toEqual({ profileId: 2550004 });
+  });
+
+  it("falls back to {profileId} when the DB is down", async () => {
+    // default mock resolves null
+    expect(await resolveSummaryScope(99)).toEqual({ profileId: 99 });
   });
 });

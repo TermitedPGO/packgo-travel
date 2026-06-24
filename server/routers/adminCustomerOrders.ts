@@ -73,6 +73,20 @@ function assertNotTerminal(o: CustomOrder, what: string): void {
   }
 }
 
+/**
+ * Custom-order mutations change the customer's DETERMINISTIC summary facts
+ * (quoteSentAt / collectionSentAt / paid timestamps / confirmedAt / status), and
+ * 「做了什麼 / 給了什麼」are computed from those (server/_core/customerFacts.ts).
+ * Nudge that customer's AI summary to recompute so the card reflects the action
+ * immediately — otherwise it lags until the 24h TTL (the「跟進到最新進度」gap).
+ * Fire-forget: a refresh hiccup must never fail the order action that succeeded.
+ */
+function bumpCustomerSummary(profileId: number): void {
+  void import("../queue")
+    .then((m) => m.enqueueCustomerSummaryRefresh(profileId))
+    .catch(() => {});
+}
+
 /** Recompute balance when total/deposit are known. null when total unknown. */
 function computeBalance(
   total: number | null | undefined,
@@ -191,6 +205,7 @@ export const adminCustomerOrdersRouter = router({
         targetId: order?.id,
         changes: { orderNumber, title: input.title, needsQuote: input.needsQuote },
       });
+      bumpCustomerSummary(profileId);
       return order;
     }),
 
@@ -335,10 +350,12 @@ export const adminCustomerOrdersRouter = router({
         targetType: "customOrder",
         targetId: input.orderId,
       });
-      return db.updateCustomOrder(input.orderId, {
+      const updated = await db.updateCustomOrder(input.orderId, {
         quoteSentAt: new Date(),
         ...(advance ? { status: "quoted" as const } : {}),
       });
+      bumpCustomerSummary(o.customerProfileId);
+      return updated;
     }),
 
   // ── 催款(送 ask)+ 記已收(money truth) ───────────────────────────────────
@@ -428,6 +445,7 @@ export const adminCustomerOrdersRouter = router({
           ? { depositPaymentLink: link }
           : { balancePaymentLink: link }),
       });
+      bumpCustomerSummary(o.customerProfileId);
       return { order: updated, paymentLink: link, invoiceUrl };
     }),
 
@@ -468,7 +486,9 @@ export const adminCustomerOrdersRouter = router({
         targetId: input.orderId,
         changes: { kind: input.kind, amount: received, paidAt: when },
       });
-      return db.updateCustomOrder(input.orderId, patch);
+      const updated = await db.updateCustomOrder(input.orderId, patch);
+      bumpCustomerSummary(o.customerProfileId);
+      return updated;
     }),
 
   // ── 確認書 ────────────────────────────────────────────────────────────────
@@ -537,10 +557,12 @@ export const adminCustomerOrdersRouter = router({
         targetType: "customOrder",
         targetId: input.orderId,
       });
-      return db.updateCustomOrder(input.orderId, {
+      const updated = await db.updateCustomOrder(input.orderId, {
         confirmedAt: new Date(),
         ...(advance ? { status: "confirmed" as const } : {}),
       });
+      bumpCustomerSummary(o.customerProfileId);
+      return updated;
     }),
 
   // ── lifecycle 手動覆寫 + 取消 ────────────────────────────────────────────
@@ -568,6 +590,7 @@ export const adminCustomerOrdersRouter = router({
         changes: { from: o.status, to: input.status },
         reason: input.reason,
       });
+      bumpCustomerSummary(o.customerProfileId);
       return updated;
     }),
 
@@ -596,6 +619,7 @@ export const adminCustomerOrdersRouter = router({
         targetId: input.orderId,
         reason: input.reason,
       });
+      bumpCustomerSummary(o.customerProfileId);
       return updated;
     }),
 });

@@ -13,7 +13,7 @@ import type {
   CustomerSummaryJobData,
   CustomerSummaryJobResult,
 } from "./queue";
-import { runCustomerSummaryScan, refreshAndStoreSummary } from "./_core/customerAiSummary";
+import { runCustomerSummaryScan, refreshSummaryForProfile } from "./_core/customerAiSummary";
 
 export const customerSummaryWorker = new Worker<
   CustomerSummaryJobData,
@@ -25,7 +25,7 @@ export const customerSummaryWorker = new Worker<
     if (job.data.profileId) {
       const pid = job.data.profileId;
       try {
-        await refreshAndStoreSummary({ profileId: pid });
+        await refreshSummaryForProfile(pid);
         console.log(`[CustomerSummaryWorker] event refresh done (profile ${pid})`);
         return { scanned: 1, refreshed: 1, errors: 0 };
       } catch (e) {
