@@ -13,7 +13,7 @@ import type {
   CustomerSummaryJobData,
   CustomerSummaryJobResult,
 } from "./queue";
-import { runCustomerSummaryScan } from "./_core/customerAiSummary";
+import { runCustomerSummaryScan, refreshAndStoreSummary } from "./_core/customerAiSummary";
 
 export const customerSummaryWorker = new Worker<
   CustomerSummaryJobData,
@@ -21,6 +21,19 @@ export const customerSummaryWorker = new Worker<
 >(
   "customer-summary",
   async (job: Job<CustomerSummaryJobData, CustomerSummaryJobResult>) => {
+    // Event-driven (new activity): recompute just that one customer's card.
+    if (job.data.profileId) {
+      const pid = job.data.profileId;
+      try {
+        await refreshAndStoreSummary({ profileId: pid });
+        console.log(`[CustomerSummaryWorker] event refresh done (profile ${pid})`);
+        return { scanned: 1, refreshed: 1, errors: 0 };
+      } catch (e) {
+        console.error(`[CustomerSummaryWorker] event refresh failed (profile ${pid}):`, e);
+        return { scanned: 1, refreshed: 0, errors: 1 };
+      }
+    }
+    // Scheduled / manual full scan.
     console.log(
       `[CustomerSummaryWorker] Starting scan ${job.id} (triggered by: ${job.data.triggeredBy})`,
     );

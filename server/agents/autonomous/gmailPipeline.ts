@@ -1127,6 +1127,21 @@ async function processOneEmail(
       );
     }
   }
+
+  // customer-cockpit Step 3 — this email changed the conversation, so the card
+  // summary may be stale: refresh it now (debounced) instead of waiting for the
+  // nightly cron. Fire-forget; never breaks mail processing.
+  if (profileId) {
+    try {
+      const { enqueueCustomerSummaryRefresh } = await import("../../queue");
+      await enqueueCustomerSummaryRefresh(profileId);
+    } catch (e) {
+      log.warn(
+        { err: e, profileId },
+        "[gmailPipeline] summary refresh enqueue failed (non-fatal)",
+      );
+    }
+  }
 }
 
 /**

@@ -233,6 +233,19 @@ export const profilesRouter = router({
         .update(customerProfiles)
         .set({ lastInteractionAt: new Date() })
         .where(eq(customerProfiles.id, input.customerProfileId));
+
+      // customer-cockpit Step 3 — a new interaction means the card may be stale:
+      // refresh the AI summary now (debounced) instead of waiting for the nightly
+      // cron. Fire-forget; never blocks the write.
+      void (async () => {
+        try {
+          const { enqueueCustomerSummaryRefresh } = await import("../../queue");
+          await enqueueCustomerSummaryRefresh(input.customerProfileId);
+        } catch {
+          /* non-fatal */
+        }
+      })();
+
       return { interactionId };
     }),
 });

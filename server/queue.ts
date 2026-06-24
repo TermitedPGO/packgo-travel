@@ -691,7 +691,9 @@ console.log("✅ Gmail poll queue initialized");
 // ============================================================================
 
 export interface CustomerSummaryJobData {
-  triggeredBy: "schedule" | "manual";
+  triggeredBy: "schedule" | "manual" | "event";
+  /** event-driven refresh: recompute just this one customer (omit → full scan). */
+  profileId?: number;
 }
 
 export interface CustomerSummaryJobResult {
@@ -729,6 +731,27 @@ export async function scheduleDailyCustomerSummaries() {
     },
   );
   console.log("✅ Customer AI summary warm-up scheduled: daily 02:00 UTC");
+}
+
+/**
+ * customer-cockpit Step 3 — event-driven summary refresh. A new interaction
+ * (incoming mail, AI action) means the card may be stale, so recompute it now
+ * instead of waiting for the 02:00 cron. Debounced: at most one refresh per
+ * customer per 5s (Redis NX key), so a burst of messages doesn't fire N Haiku
+ * calls. Fire-forget — never throws into the caller.
+ */
+export async function enqueueCustomerSummaryRefresh(profileId: number): Promise<void> {
+  if (!profileId) return;
+  try {
+    const ok = await redisBullMQ.set(`summary:enqueued:${profileId}`, "1", "EX", 5, "NX");
+    if (ok !== "OK") return; // already enqueued within the debounce window
+    await customerSummaryQueue.add("customer-summary-event", {
+      triggeredBy: "event",
+      profileId,
+    });
+  } catch {
+    /* fire-forget: a Redis / queue blip must never break the interaction write */
+  }
 }
 
 console.log("✅ Customer summary queue initialized");
