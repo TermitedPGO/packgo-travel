@@ -187,6 +187,19 @@ export const READ_TOOLS: Anthropic.Tool[] = [
       required: ["customer"],
     },
   },
+  {
+    name: "list_followups_needed",
+    description:
+      "列出『我們最後寄出、客人安靜超過幾天沒回』的客人(報價/行程發了沒下文,球在客人手上)。" +
+      "Jeff 問「誰需要跟進 / 哪些客人沒回我 / 有哪些卡住的」用這個,讀真實對話算出來,絕不憑印象。回每位客人的 email + 幾天沒回。",
+    input_schema: {
+      type: "object",
+      properties: {
+        days: { type: "number", description: "至少安靜幾天才算(預設 3)" },
+      },
+      required: [],
+    },
+  },
 ];
 
 // ── Executor ────────────────────────────────────────────────────────────────
@@ -772,6 +785,24 @@ async function runTool(name: string, input: any): Promise<unknown> {
           date: new Date(r.createdAt).toISOString().slice(0, 10),
           snippet: snippet(r),
         })),
+      };
+    }
+
+    case "list_followups_needed": {
+      const { findStaleQuotedCustomers } = await import("../../_core/followupScan");
+      const minDays = clamp(input.days, 3, 60);
+      const list = await findStaleQuotedCustomers(db, { minDays });
+      return {
+        count: list.length,
+        customers: list.map((c) => ({
+          email: c.email,
+          daysSilent: c.daysSince,
+          lastContact: c.lastDate.toISOString().slice(0, 10),
+        })),
+        note:
+          list.length === 0
+            ? "目前沒有卡住的客人(最近寄出的都還在合理等待範圍內,或客人都有回)。"
+            : "這些是我們最後寄出、客人還沒回的。要跟進哪一個就跟我說,我可以幫你草擬。",
       };
     }
 

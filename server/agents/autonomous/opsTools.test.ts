@@ -47,7 +47,7 @@ vi.mock("drizzle-orm", () => {
   const sql: any = (..._a: any[]) => ({ _op: true });
   sql.raw = fn;
   sql.join = fn;
-  return { eq: fn, and: fn, or: fn, gte: fn, lte: fn, isNull: fn, sql, desc: fn, like: fn };
+  return { eq: fn, and: fn, or: fn, gte: fn, lte: fn, isNull: fn, inArray: fn, sql, desc: fn, like: fn };
 });
 
 import { READ_TOOLS, executeReadTool } from "./opsTools";
@@ -55,7 +55,7 @@ import { READ_TOOLS, executeReadTool } from "./opsTools";
 beforeEach(() => { nextRows = []; });
 
 describe("READ_TOOLS definitions", () => {
-  it("exposes the 11 curated tools", () => {
+  it("exposes the 12 curated tools", () => {
     const names = READ_TOOLS.map((t) => t.name);
     expect(names).toContain("count_records");
     expect(names).toContain("aggregate_departures");
@@ -64,7 +64,8 @@ describe("READ_TOOLS definitions", () => {
     expect(names).toContain("list_missing_receipts");
     expect(names).toContain("preview_customer_threads");
     expect(names).toContain("read_customer_conversation");
-    expect(READ_TOOLS.length).toBe(11);
+    expect(names).toContain("list_followups_needed");
+    expect(READ_TOOLS.length).toBe(12);
   });
   it("every tool has a valid input_schema", () => {
     for (const t of READ_TOOLS) {
@@ -120,6 +121,26 @@ describe("read_customer_conversation — reads real filed data, never guesses", 
     expect(out.found).toBe(false);
     expect(out.note).toContain("collectCustomerThreads");
     expect(out.note).toContain("不要憑印象");
+  });
+});
+
+describe("list_followups_needed — quiet customers we spoke to last", () => {
+  it("returns customers whose last message was outbound and silent", async () => {
+    // Combined row satisfies both the interactions scan and the profile-email
+    // lookup (the chainable mock returns the same nextRows for every query).
+    nextRows = [
+      {
+        customerProfileId: 1,
+        direction: "outbound",
+        createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+        id: 1,
+        email: "jenny@example.com",
+      },
+    ];
+    const out = JSON.parse(await executeReadTool("list_followups_needed", {}));
+    expect(out.count).toBe(1);
+    expect(out.customers[0].email).toBe("jenny@example.com");
+    expect(out.customers[0].daysSilent).toBe(7);
   });
 });
 
