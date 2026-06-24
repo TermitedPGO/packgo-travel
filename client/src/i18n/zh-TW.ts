@@ -3286,17 +3286,14 @@ export const zhTW = {
         },
       },
       truth: {
-        ballUs: '球在你手上',
-        ballCustomer: '球在客人手上',
         next: {
-          reply: '該你回覆',
-          followup: '可以跟進',
+          reply: '換你回',
+          followup: '該跟進了',
           waiting: '等客人回',
           none: '尚無對話',
         },
         quiet: '{n} 天沒往來',
         today: '今天剛聯絡',
-        noConvo: '尚無對話紀錄',
       },
       drafts: {
         heading: 'AI 助手',

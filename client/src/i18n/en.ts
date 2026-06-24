@@ -3318,17 +3318,14 @@ export const en = {
         },
       },
       truth: {
-        ballUs: 'Your move',
-        ballCustomer: 'Waiting on them',
         next: {
-          reply: 'Reply to them',
+          reply: 'Your turn',
           followup: 'Time to follow up',
-          waiting: 'Waiting for reply',
+          waiting: 'Waiting on them',
           none: 'No conversation yet',
         },
         quiet: '{n}d quiet',
         today: 'Contacted today',
-        noConvo: 'No conversation yet',
       },
       drafts: {
         heading: 'AI assistant',
