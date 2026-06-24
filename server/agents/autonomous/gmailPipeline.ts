@@ -314,6 +314,27 @@ async function processOneEmail(
         email: senderEmail,
       });
       profileId = Number((ins as any)[0]?.insertId ?? 0);
+
+      // customer-cockpit Step 2 — a brand-new sender: auto-collect their entire
+      // Gmail history into customerInteractions (fire-forget) so Jeff never has
+      // to type「收」. Only NEW profiles reach this branch, so existing customers
+      // are never re-backfilled; the backfill core is idempotent so a retry is
+      // harmless. A queue hiccup must never break mail processing.
+      if (profileId) {
+        try {
+          const { customerBackfillQueue } = await import("../../queue");
+          void customerBackfillQueue.add(
+            "auto-collect",
+            { profileId, email: senderEmail },
+            { jobId: `auto-collect-${profileId}` },
+          );
+        } catch (e) {
+          log.warn(
+            { err: e, profileId },
+            "[gmailPipeline] auto-collect enqueue failed (non-fatal)",
+          );
+        }
+      }
     }
 
     // 批9 m2 — email 歸戶: when the sender is a REGISTERED customer, link

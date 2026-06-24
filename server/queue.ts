@@ -734,6 +734,42 @@ export async function scheduleDailyCustomerSummaries() {
 console.log("✅ Customer summary queue initialized");
 
 // ============================================================================
+// Customer Backfill Queue — customer-cockpit Step 2 (auto-collect). When the
+// Gmail pipeline first creates a profile for a NEW sender, it enqueues a one-off
+// job here to backfill that customer's ENTIRE Gmail history into
+// customerInteractions, so Jeff never has to type「收」. Pure 搬運; the backfill
+// core is idempotent (claim-or-insert + RFC822 dedup), so a retry / double-run
+// is harmless — no flag column or migration needed. Only NEW profiles enqueue.
+// ============================================================================
+
+export interface CustomerBackfillJobData {
+  profileId: number;
+  email: string;
+}
+
+export interface CustomerBackfillJobResult {
+  threadsSeen: number;
+  inserted: number;
+  claimed: number;
+  skipped: number;
+}
+
+export const customerBackfillQueue = new Queue<
+  CustomerBackfillJobData,
+  CustomerBackfillJobResult
+>("customer-backfill", {
+  connection: redisBullMQ,
+  defaultJobOptions: {
+    attempts: 2, // idempotent core → safe to retry once on a transient Gmail blip
+    backoff: { type: "exponential", delay: 30_000 },
+    removeOnComplete: { age: 604800, count: 50 },
+    removeOnFail: { age: 2592000, count: 50 },
+  },
+});
+
+console.log("✅ Customer backfill queue initialized");
+
+// ============================================================================
 // Followup Scan Queue — gmail-thread-filing layer 2. Nightly: surface customers
 // who went quiet after WE spoke last (quote / itinerary sent, no reply) into
 // Jeff's office inbox so he gets reminded to follow up. Read-only on customers;

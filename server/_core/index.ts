@@ -1158,6 +1158,15 @@ async function startServer() {
     logger.warn({ err }, "[Startup] Failed to schedule customer summary warm-up");
   }
 
+  // customer-cockpit Step 2 — boot the worker that auto-collects a brand-new
+  // customer's full Gmail history when the pipeline first creates their profile
+  // (enqueued from gmailPipeline). Pure 搬運; never emails the customer.
+  try {
+    await import('../customerBackfillWorker');
+  } catch (err) {
+    logger.warn({ err }, "[Startup] Failed to init customer backfill worker");
+  }
+
   // gmail-thread-filing layer 2 — nightly stale-customer follow-up scan at
   // 05:00 UTC. Surfaces customers who went quiet after we spoke last (quote /
   // itinerary sent, no reply) into Jeff's office inbox. Never emails them.
