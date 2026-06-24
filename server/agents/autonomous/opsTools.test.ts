@@ -39,6 +39,7 @@ vi.mock("../../../drizzle/schema", () => ({
   bookings: { id: "id", customerName: "cn", customerEmail: "ce", customerPhone: "cp", tourId: "tid", departureId: "did", totalPrice: "tp", paymentStatus: "ps", bookingStatus: "bsx", createdAt: "ca" },
   bankTransactions: { id: "id", date: "d", merchantName: "mn", description: "desc", amount: "amt", agentCategory: "ac", jeffOverrideCategory: "joc", excludeFromAccounting: "efa", isPending: "ip", receiptUrl: "ru" },
   customerProfiles: { id: "id", email: "e", phone: "ph", budgetTier: "bt", bookingCount: "bc", totalSpend: "tsp", vipScore: "vs", aiNotes: "an" },
+  customerInteractions: { customerProfileId: "cpid", direction: "dir", content: "c", contentSummary: "cs", createdAt: "ca" },
 }));
 
 vi.mock("drizzle-orm", () => {
@@ -54,7 +55,7 @@ import { READ_TOOLS, executeReadTool } from "./opsTools";
 beforeEach(() => { nextRows = []; });
 
 describe("READ_TOOLS definitions", () => {
-  it("exposes the 10 curated tools", () => {
+  it("exposes the 11 curated tools", () => {
     const names = READ_TOOLS.map((t) => t.name);
     expect(names).toContain("count_records");
     expect(names).toContain("aggregate_departures");
@@ -62,13 +63,63 @@ describe("READ_TOOLS definitions", () => {
     expect(names).toContain("search_supplier_inventory");
     expect(names).toContain("list_missing_receipts");
     expect(names).toContain("preview_customer_threads");
-    expect(READ_TOOLS.length).toBe(10);
+    expect(names).toContain("read_customer_conversation");
+    expect(READ_TOOLS.length).toBe(11);
   });
   it("every tool has a valid input_schema", () => {
     for (const t of READ_TOOLS) {
       expect(t.input_schema.type).toBe("object");
       expect(t.input_schema).toHaveProperty("properties");
     }
+  });
+});
+
+describe("read_customer_conversation — reads real filed data, never guesses", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+
+  it("reports ball-in-court=customer when WE sent the last message", async () => {
+    // Combined row satisfies both the profile lookup and the interactions read
+    // (the chainable mock returns the same nextRows for every query).
+    nextRows = [
+      {
+        id: 100,
+        email: "jenny@example.com",
+        direction: "outbound",
+        content: "From: Jeff\nSubject: 報價\n\n英文導遊全程多 US$2,260",
+        contentSummary: "英文導遊報價",
+        createdAt: new Date(Date.now() - 7 * DAY),
+      },
+    ];
+    const out = JSON.parse(await executeReadTool("read_customer_conversation", { customer: "jenny@example.com" }));
+    expect(out.found).toBe(true);
+    expect(out.lastMessage.direction).toBe("outbound");
+    expect(out.ballInCourt).toBe("customer");
+    expect(out.lastMessage.daysSinceLast).toBe(7);
+    expect(out.ballHint).toContain("等客人回");
+  });
+
+  it("reports ball-in-court=us when the CUSTOMER sent the last message", async () => {
+    nextRows = [
+      {
+        id: 100,
+        email: "jenny@example.com",
+        direction: "inbound",
+        content: "Thank you",
+        contentSummary: null,
+        createdAt: new Date(Date.now() - 2 * DAY),
+      },
+    ];
+    const out = JSON.parse(await executeReadTool("read_customer_conversation", { customer: "jenny@example.com" }));
+    expect(out.ballInCourt).toBe("us");
+    expect(out.ballHint).toContain("還沒回");
+  });
+
+  it("refuses to guess when the customer has no filed conversation", async () => {
+    nextRows = []; // no profile match
+    const out = JSON.parse(await executeReadTool("read_customer_conversation", { customer: "nobody@example.com" }));
+    expect(out.found).toBe(false);
+    expect(out.note).toContain("collectCustomerThreads");
+    expect(out.note).toContain("不要憑印象");
   });
 });
 

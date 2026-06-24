@@ -173,6 +173,20 @@ export const READ_TOOLS: Anthropic.Tool[] = [
       required: ["email"],
     },
   },
+  {
+    name: "read_customer_conversation",
+    description:
+      "讀某個客人在系統裡【已歸檔的真實對話】,回最後一封是誰寄的、哪天、幾天沒回、球在誰手上 (waiting on customer / waiting on us)、以及最近幾封訊息摘要。" +
+      "Jeff 問「某客人什麼時候回我 / 進度到哪 / 上次聊到哪 / 要不要跟進」時【一定先用這個查真資料再回】,絕不憑印象編時間或進度。" +
+      "查不到資料(系統還沒收他的對話)就老實跟 Jeff 說,並建議先用 collectCustomerThreads(收這個 email)把對話收進來。可用名字或 email 查。",
+    input_schema: {
+      type: "object",
+      properties: {
+        customer: { type: "string", description: "客人的名字或 email" },
+      },
+      required: ["customer"],
+    },
+  },
 ];
 
 // ── Executor ────────────────────────────────────────────────────────────────
@@ -668,6 +682,96 @@ async function runTool(name: string, input: any): Promise<unknown> {
           threadsSeen === 0
             ? "這個 email 在連線信箱裡找不到往來,可能拼錯或不在這兩個帳號。"
             : undefined,
+      };
+    }
+
+    case "read_customer_conversation": {
+      const q = String(input.customer ?? "").trim();
+      if (!q) return { error: "需要客人名字或 email" };
+      const { customerInteractions } = await import("../../../drizzle/schema");
+      const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(q);
+
+      // Resolve to a single profile (never guess; ask Jeff to disambiguate).
+      let profile: { id: number; email: string | null } | undefined;
+      if (isEmail) {
+        profile = (
+          await db
+            .select({ id: customerProfiles.id, email: customerProfiles.email })
+            .from(customerProfiles)
+            .where(eq(customerProfiles.email, q.toLowerCase()))
+            .limit(1)
+        )[0];
+      } else {
+        const matches = await db
+          .select({ id: customerProfiles.id, email: customerProfiles.email })
+          .from(customerProfiles)
+          .where(or(like(customerProfiles.aiNotes, `%${q}%`), like(customerProfiles.email, `%${q}%`))!)
+          .limit(5);
+        if (matches.length === 1) profile = matches[0];
+        else if (matches.length > 1) {
+          return {
+            found: false,
+            note: "對到多位客人,請改用 email 指定(或先 search_customers 確認),不要自己挑。",
+            candidates: matches.map((m) => ({ profileId: m.id, email: maskEmail(m.email) })),
+          };
+        }
+      }
+      if (!profile) {
+        return {
+          found: false,
+          note: `系統裡還沒有「${q}」的對話。先用 collectCustomerThreads(收這個 email)把對話收進來,我才讀得到。在收進來之前,不要憑印象回答他的進度或回信時間。`,
+        };
+      }
+
+      const rows = await db
+        .select({
+          direction: customerInteractions.direction,
+          content: customerInteractions.content,
+          contentSummary: customerInteractions.contentSummary,
+          createdAt: customerInteractions.createdAt,
+        })
+        .from(customerInteractions)
+        .where(eq(customerInteractions.customerProfileId, profile.id))
+        .orderBy(desc(customerInteractions.createdAt))
+        .limit(40);
+
+      if (rows.length === 0) {
+        return {
+          found: true,
+          profileId: profile.id,
+          email: profile.email,
+          totalMessages: 0,
+          note: "這位客人有檔案但系統裡沒有任何對話訊息;可能還沒收 Gmail。不要編進度。",
+        };
+      }
+
+      const snippet = (r: { content: string; contentSummary: string | null }) =>
+        (r.contentSummary || r.content || "").replace(/\s+/g, " ").trim().slice(0, 140);
+      const newest = rows[0]; // newest-first
+      const dayMs = 24 * 60 * 60 * 1000;
+      const daysSinceLast = Math.floor((Date.now() - new Date(newest.createdAt).getTime()) / dayMs);
+      const ballInCourt = newest.direction === "outbound" ? "customer" : "us";
+      return {
+        found: true,
+        profileId: profile.id,
+        email: profile.email,
+        totalMessages: rows.length >= 40 ? "40+" : rows.length,
+        lastMessage: {
+          direction: newest.direction,
+          date: new Date(newest.createdAt).toISOString().slice(0, 10),
+          daysSinceLast,
+          snippet: snippet(newest),
+        },
+        ballInCourt,
+        ballHint:
+          ballInCourt === "customer"
+            ? `最後一封是我們寄出的,在等客人回(已 ${daysSinceLast} 天沒下文)`
+            : `最後一封是客人寄來的,我們還沒回他(已 ${daysSinceLast} 天)`,
+        recent: rows.slice(0, 6).map((r) => ({
+          direction: r.direction,
+          date: new Date(r.createdAt).toISOString().slice(0, 10),
+          snippet: snippet(r),
+        })),
       };
     }
 
