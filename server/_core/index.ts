@@ -1158,6 +1158,17 @@ async function startServer() {
     logger.warn({ err }, "[Startup] Failed to schedule customer summary warm-up");
   }
 
+  // gmail-thread-filing layer 2 — nightly stale-customer follow-up scan at
+  // 05:00 UTC. Surfaces customers who went quiet after we spoke last (quote /
+  // itinerary sent, no reply) into Jeff's office inbox. Never emails them.
+  try {
+    const { scheduleDailyFollowupScan } = await import('../queue');
+    await scheduleDailyFollowupScan();
+    await import('../followupScanWorker');
+  } catch (err) {
+    logger.warn({ err }, "[Startup] Failed to schedule followup scan");
+  }
+
   // QA audit 2026-05-11 Phase 9 P0: Gmail poll cron. Closes the
   // "customer asks at 10am, Jeff sees at 2pm" gap by polling every 10
   // minutes and running InquiryAgent pipeline on new threads. autoSend

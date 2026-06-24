@@ -734,6 +734,55 @@ export async function scheduleDailyCustomerSummaries() {
 console.log("✅ Customer summary queue initialized");
 
 // ============================================================================
+// Followup Scan Queue — gmail-thread-filing layer 2. Nightly: surface customers
+// who went quiet after WE spoke last (quote / itinerary sent, no reply) into
+// Jeff's office inbox so he gets reminded to follow up. Read-only on customers;
+// never emails them (Jeff decides + sends).
+// ============================================================================
+
+export interface FollowupScanJobData {
+  triggeredBy: "schedule" | "manual";
+}
+export interface FollowupScanJobResult {
+  candidates: number;
+  posted: number;
+  skipped: number;
+}
+
+export const followupScanQueue = new Queue<FollowupScanJobData, FollowupScanJobResult>(
+  "followup-scan",
+  {
+    connection: redisBullMQ,
+    defaultJobOptions: {
+      attempts: 1, // a missed night just re-scans next run; no retry storms
+      removeOnComplete: { age: 604800, count: 30 },
+      removeOnFail: { age: 2592000, count: 30 },
+    },
+  },
+);
+
+/** Schedule the daily stale-customer follow-up scan at 05:00 UTC (off-peak). */
+export async function scheduleDailyFollowupScan() {
+  const repeatableJobs = await followupScanQueue.getRepeatableJobs();
+  for (const job of repeatableJobs) {
+    if (job.name === "followup-scan-tick") {
+      await followupScanQueue.removeRepeatableByKey(job.key);
+    }
+  }
+  await followupScanQueue.add(
+    "followup-scan-tick",
+    { triggeredBy: "schedule" },
+    {
+      repeat: { pattern: "0 5 * * *" }, // daily 05:00 UTC
+      jobId: "followup-scan-scheduled",
+    },
+  );
+  console.log("✅ Followup scan scheduled: daily 05:00 UTC");
+}
+
+console.log("✅ Followup scan queue initialized");
+
+// ============================================================================
 // Booking Followup Queue — async deposit PDF generation + confirmation
 // email AFTER bookings.create commits.
 //
