@@ -121,13 +121,15 @@ function stripDocExt(name: string): string {
   return name.replace(/\.[A-Za-z0-9]{1,6}$/, "").trim();
 }
 
-/** "檔名(6/22)" — a file we emailed the customer + the date it went out, dated
- *  in business tz so it aligns with the 文件 tab. Empty name → "". */
+/**
+ * 給了什麼 lists filed docs by NAME ONLY — deliberately no date. customerDocuments
+ * has no real "sent" timestamp: uploadedAt is when the filing/backfill ran, not
+ * when Jeff emailed it (Jenny's whole thread was backfilled 6/22 but really went
+ * out 6/10–6/15). A filing-time date reads as a send date and lies, so we don't
+ * show one. Order/quote dates are different — those come from authoritative action
+ * timestamps (quoteSentAt) and keep their date. */
 function docLabel(d: DocFact): string {
-  const name = stripDocExt(d.fileName);
-  if (!name) return "";
-  const date = md(d.sentAt);
-  return date ? `${name}(${date})` : name;
+  return stripDocExt(d.fileName);
 }
 
 /** aiQuotes statuses that mean the quote actually reached the customer. */
