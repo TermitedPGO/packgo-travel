@@ -31,6 +31,7 @@ import {
   escalationDraftCard,
   observationDraftCard,
   mergeDrafts,
+  isDraftCurrent,
 } from "./adminCustomerDrafts";
 
 /**
@@ -979,6 +980,7 @@ export const adminCustomersRouter = router({
         inquiries,
         approvalTasks,
         agentMessages,
+        customerInteractions,
       } = await import("../../drizzle/schema");
       const isRegistered = "userId" in input;
 
@@ -1019,6 +1021,23 @@ export const adminCustomersRouter = router({
         if (prof) profileIds = [prof.id];
       }
       const fallbackEmail = verifiedEmail ?? guestEmail;
+
+      // Newest real message in this customer's conversation. A draft older than
+      // this is STALE (Jeff replied, or the customer wrote again) and must be
+      // hidden — see isDraftCurrent. Email channel only (the actual back-and-forth).
+      let latestMsgAt: Date | null = null;
+      if (profileIds.length > 0) {
+        const [row] = await drizzleDb
+          .select({ m: sql<string | null>`max(${customerInteractions.createdAt})` })
+          .from(customerInteractions)
+          .where(
+            and(
+              inArray(customerInteractions.customerProfileId, profileIds),
+              eq(customerInteractions.channel, "email"),
+            ),
+          );
+        latestMsgAt = row?.m ? new Date(row.m) : null;
+      }
 
       // ── Source 1: website-inquiry drafts — approvalTasks (lane=cs,
       // taskType=inquiry_reply, status=pending) for THIS customer's inquiries.
@@ -1131,7 +1150,7 @@ export const adminCustomersRouter = router({
         inquiryCards.filter((c): c is NonNullable<typeof c> => c != null),
         emailCards.filter((c): c is NonNullable<typeof c> => c != null),
         obsCards.filter((c): c is NonNullable<typeof c> => c != null),
-      ]);
+      ]).filter((c) => isDraftCurrent(c.createdAt, latestMsgAt));
     }),
 
   customerConversationThread: adminProcedure

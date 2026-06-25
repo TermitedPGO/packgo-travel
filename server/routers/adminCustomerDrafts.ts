@@ -195,3 +195,22 @@ export function mergeDrafts(groups: CustomerDraft[][], lim = 50): CustomerDraft[
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     .slice(0, lim);
 }
+
+/**
+ * A draft is "current" only while it is still the latest move in the thread. A
+ * draft is the AI's proposed reply to the customer's most recent message AT THE
+ * TIME it was produced; once Jeff replies (a newer outbound) OR the customer
+ * writes again (a newer inbound, which also yields a newer draft), the old draft
+ * is STALE — it would promise/offer the previous state (e.g. "I'll send the
+ * English version" after it was already sent, or "let me check the status" after
+ * Jeff already gave the answer). We therefore surface a draft only when no real
+ * message is newer than it. `latestMsgAt` = MAX(customerInteractions.createdAt)
+ * for the customer (email channel). Pure → unit-tested.
+ */
+export function isDraftCurrent(
+  draftCreatedAt: Date | string,
+  latestMsgAt: Date | string | null,
+): boolean {
+  if (!latestMsgAt) return true; // no conversation yet → nothing can supersede it
+  return new Date(draftCreatedAt).getTime() >= new Date(latestMsgAt).getTime();
+}

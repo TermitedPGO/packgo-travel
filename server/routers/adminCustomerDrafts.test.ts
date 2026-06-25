@@ -1,8 +1,31 @@
 import { describe, it, expect } from "vitest";
-import { inquiryDraftCard, escalationDraftCard, observationDraftCard, mergeDrafts } from "./adminCustomerDrafts";
+import { inquiryDraftCard, escalationDraftCard, observationDraftCard, mergeDrafts, isDraftCurrent } from "./adminCustomerDrafts";
 
 const d = (iso: string) => new Date(iso);
 const j = (o: unknown) => JSON.stringify(o);
+
+describe("isDraftCurrent — hide a draft once the conversation moves past it", () => {
+  it("shows a draft that is the latest move (no newer message)", () => {
+    // draft generated right after the inbound it replies to; nothing newer yet
+    expect(isDraftCurrent(d("2026-06-15T22:20:00Z"), d("2026-06-15T22:19:00Z"))).toBe(true);
+  });
+  it("hides a draft after Jeff replied (a newer outbound exists)", () => {
+    // Jenny's "I'll send the English version" draft, but the EN was sent an hour later
+    expect(isDraftCurrent(d("2026-06-15T22:20:00Z"), d("2026-06-16T01:34:00Z"))).toBe(false);
+  });
+  it("hides a draft after the customer wrote again (a newer inbound exists)", () => {
+    expect(isDraftCurrent(d("2026-06-24T18:00:00Z"), d("2026-06-24T22:50:00Z"))).toBe(false);
+  });
+  it("shows a draft when there is no conversation yet (latestMsgAt null)", () => {
+    expect(isDraftCurrent(d("2026-06-15T22:20:00Z"), null)).toBe(true);
+  });
+  it("shows a draft exactly at the latest message time (>= boundary)", () => {
+    expect(isDraftCurrent(d("2026-06-15T22:20:00Z"), d("2026-06-15T22:20:00Z"))).toBe(true);
+  });
+  it("accepts ISO strings as well as Date objects", () => {
+    expect(isDraftCurrent("2026-06-15T22:20:00Z", "2026-06-16T01:34:00Z")).toBe(false);
+  });
+});
 
 describe("adminCustomerDrafts — normalization", () => {
   it("inquiry draft → task: id, body from payload.draftBody, review = not sensitive", () => {
