@@ -724,7 +724,7 @@ async function doCollectCustomerThreads(
     return { ok: false, summary: "沒有連線中的 Gmail 帳號", error: "no_gmail_integration" };
   }
 
-  const totals = { threadsSeen: 0, inserted: 0, claimed: 0, skipped: 0, trashSkipped: 0 };
+  const totals = { threadsSeen: 0, inserted: 0, claimed: 0, restamped: 0, skipped: 0, trashSkipped: 0 };
   const perMailbox: Array<{ mailbox: string; threadsSeen: number; inserted: number; claimed: number }> = [];
   for (const integ of integrations) {
     try {
@@ -733,6 +733,7 @@ async function doCollectCustomerThreads(
       totals.threadsSeen += r.threadsSeen;
       totals.inserted += r.inserted;
       totals.claimed += r.claimed;
+      totals.restamped += r.restamped;
       totals.skipped += r.skipped;
       totals.trashSkipped += r.trashSkipped;
       perMailbox.push({ mailbox: integ.emailAddress, threadsSeen: r.threadsSeen, inserted: r.inserted, claimed: r.claimed });
@@ -748,7 +749,9 @@ async function doCollectCustomerThreads(
     ok: true,
     summary:
       `✓ 已收 ${email}${created ? "(新建檔)" : ""} · ${totals.threadsSeen} 條 thread → ` +
-      `新增 ${totals.inserted}、認領 ${totals.claimed}、跳過 ${totals.skipped}(${integrations.length} 個信箱)`,
+      `新增 ${totals.inserted}、認領 ${totals.claimed}` +
+      `${totals.restamped ? `、修正 ${totals.restamped} 個日期` : ""}` +
+      `、跳過 ${totals.skipped}(${integrations.length} 個信箱)`,
     details: { profileId, email, created, ...totals, perMailbox },
   };
 }
