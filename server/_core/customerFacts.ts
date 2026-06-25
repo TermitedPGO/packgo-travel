@@ -59,10 +59,12 @@ export interface InvoiceFact {
 }
 
 /** A file we emailed the customer (customerDocuments, uploadedBy="email_sent").
- *  Metadata only — the fileName, never the contents (PII never enters a prompt). */
+ *  fileName only, never the contents (PII never enters a prompt). No date field
+ *  on purpose: customerDocuments has no real send timestamp (uploadedAt is filing
+ *  time), and a `sentAt` here would invite rendering filing time as a send date,
+ *  the exact bug fixed in 0fd04cf. */
 export interface DocFact {
   fileName: string;
-  sentAt: Date | null;
 }
 
 /** Everything the deterministic fields are computed from. All counts/dates are
@@ -122,12 +124,12 @@ function stripDocExt(name: string): string {
 }
 
 /**
- * 給了什麼 lists filed docs by NAME ONLY — deliberately no date. customerDocuments
+ * 給了什麼 lists filed docs by NAME ONLY, deliberately no date. customerDocuments
  * has no real "sent" timestamp: uploadedAt is when the filing/backfill ran, not
  * when Jeff emailed it (Jenny's whole thread was backfilled 6/22 but really went
- * out 6/10–6/15). A filing-time date reads as a send date and lies, so we don't
- * show one. Order/quote dates are different — those come from authoritative action
- * timestamps (quoteSentAt) and keep their date. */
+ * out 6/10 to 6/15). A filing-time date reads as a send date and lies, so we show
+ * none. Order/quote dates stay, because those come from authoritative action
+ * timestamps (quoteSentAt), not filing time. */
 function docLabel(d: DocFact): string {
   return stripDocExt(d.fileName);
 }
@@ -410,10 +412,7 @@ export async function gatherCustomerFacts(scope: FactsScope): Promise<CustomerFa
     const deliveredDocs: DocFact[] = profileIds.length
       ? (
           await db
-            .select({
-              fileName: customerDocuments.fileName,
-              uploadedAt: customerDocuments.uploadedAt,
-            })
+            .select({ fileName: customerDocuments.fileName })
             .from(customerDocuments)
             .where(
               and(
@@ -422,11 +421,13 @@ export async function gatherCustomerFacts(scope: FactsScope): Promise<CustomerFa
                 eq(customerDocuments.type, "other"),
               ),
             )
+            // Order by uploadedAt (filing time) just for a stable most-recent-first
+            // list; the timestamp is never rendered (see DocFact).
             .orderBy(desc(customerDocuments.uploadedAt))
             .limit(20)
         )
           .filter((d) => d.fileName != null)
-          .map((d) => ({ fileName: d.fileName as string, sentAt: toDate(d.uploadedAt) }))
+          .map((d) => ({ fileName: d.fileName as string }))
       : [];
 
     // Email/message direction counts (authoritative, aggregated in SQL so a

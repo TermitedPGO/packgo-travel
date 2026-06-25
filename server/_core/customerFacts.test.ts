@@ -148,8 +148,8 @@ describe("deriveDelivered (給了什麼)", () => {
     const r = deriveDelivered(
       facts({
         deliveredDocs: [
-          { fileName: "Jenny_台灣環島13天12夜_報價與行程_2026.pdf", sentAt: JUN22 },
-          { fileName: "2026_Taiwan_Group_Tour_Itinerary_EN.pdf", sentAt: JUN22 },
+          { fileName: "Jenny_台灣環島13天12夜_報價與行程_2026.pdf" },
+          { fileName: "2026_Taiwan_Group_Tour_Itinerary_EN.pdf" },
         ],
       }),
     );
@@ -161,7 +161,7 @@ describe("deriveDelivered (給了什麼)", () => {
 
   it("an inquiry customer with only email-sent docs is NOT reported as 還沒交付 (the Jenny regression)", () => {
     const r = deriveDelivered(
-      facts({ deliveredDocs: [{ fileName: "Jenny_報價與行程_2026.pdf", sentAt: JUN22 }] }),
+      facts({ deliveredDocs: [{ fileName: "Jenny_報價與行程_2026.pdf" }] }),
     );
     expect(r).not.toContain("還沒有交付");
     expect(r).toContain("Jenny_報價與行程_2026");
@@ -183,7 +183,7 @@ describe("deriveDelivered (給了什麼)", () => {
     const r = deriveDelivered(
       facts({
         orders: [order({ quoteSentAt: JUN18 })],
-        deliveredDocs: [{ fileName: "英文行程表.pdf", sentAt: JUN22 }],
+        deliveredDocs: [{ fileName: "英文行程表.pdf" }],
       }),
     );
     expect(r).toContain("報價(ORD-2026-0001,6/18)");
@@ -220,7 +220,7 @@ describe("formatFactsLedger (LLM grounding)", () => {
 
   it("surfaces emailed docs so nextStep cannot re-suggest sending them", () => {
     const r = formatFactsLedger(
-      facts({ deliveredDocs: [{ fileName: "Jenny_報價與行程_2026.pdf", sentAt: JUN22 }] }),
+      facts({ deliveredDocs: [{ fileName: "Jenny_報價與行程_2026.pdf" }] }),
     );
     expect(r).toContain("已 email 寄給客人的文件");
     expect(r).toContain("Jenny_報價與行程_2026");
