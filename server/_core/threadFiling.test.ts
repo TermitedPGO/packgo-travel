@@ -66,6 +66,8 @@ function apply(
       const row = next.find((r) => r.id === a.rowId)!;
       row.externalId = a.messageId;
       row.createdAt = a.createdAt;
+    } else if (a.kind === "restamp") {
+      next.find((r) => r.id === a.rowId)!.createdAt = a.createdAt;
     } else if (a.kind === "insert") {
       next.push({
         id: nextId++,
@@ -216,6 +218,40 @@ describe("planThreadFiling — dedup by externalId", () => {
   });
 });
 
+describe("planThreadFiling — re-stamp a stale already-filed date", () => {
+  it("corrects a filed row whose stored date is far from the real Gmail time (legacy outbound bug)", () => {
+    // Jenny's reply really went out 6/15 but the pre-[6] sentMailFiling stamped
+    // it 6/22 (the day filing ran) AND set externalId, so the plain skip locked
+    // 6/22 in forever. Now it re-stamps createdAt to the truth.
+    const messages = [
+      msg({ messageId: "m-out", direction: "outbound", from: SELF, body: "Quote attached", date: new Date("2026-06-15T21:34:00Z") }),
+    ];
+    const existing = [
+      legacy({ id: 7, externalId: "m-out", direction: "outbound", content: "Quote attached", createdAt: new Date("2026-06-22T18:00:00Z") }),
+    ];
+    const actions = planThreadFiling(messages, existing);
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({ kind: "restamp", rowId: 7, messageId: "m-out" });
+    expect(actions[0].kind === "restamp" && actions[0].createdAt).toEqual(messages[0].date);
+  });
+
+  it("does NOT re-stamp a filed row already near the right time (delta within 2h → skip)", () => {
+    const messages = [msg({ messageId: "m-1", date: new Date("2026-06-15T10:00:00Z") })];
+    const existing = [legacy({ id: 3, externalId: "m-1", createdAt: new Date("2026-06-15T10:30:00Z") })];
+    const actions = planThreadFiling(messages, existing);
+    expect(actions[0].kind === "skip" && actions[0].reason).toBe("already_filed");
+  });
+
+  it("is idempotent: after a re-stamp the row is correct → re-plan skips it", () => {
+    const messages = [msg({ messageId: "m-out", direction: "outbound", from: SELF, body: "x", date: new Date("2026-06-15T21:34:00Z") })];
+    const existing = [legacy({ id: 7, externalId: "m-out", direction: "outbound", content: "x", createdAt: new Date("2026-06-22T18:00:00Z") })];
+    const first = planThreadFiling(messages, existing);
+    expect(first[0].kind).toBe("restamp");
+    const second = planThreadFiling(messages, apply(existing, first));
+    expect(second[0].kind === "skip" && second[0].reason).toBe("already_filed");
+  });
+});
+
 describe("planThreadFiling — Trash excluded", () => {
   it("skips a trashed message (never inserts or claims it)", () => {
     const messages = [msg({ messageId: "m-trash", inTrash: true })];
@@ -249,10 +285,10 @@ describe("syncThreadToInteractions — executor", () => {
   it("returns zeros and never touches the db for empty input", async () => {
     const throwing = new Proxy({}, { get() { throw new Error("db should not be touched"); } });
     expect(await syncThreadToInteractions(throwing as any, 2550004, [])).toEqual({
-      inserted: 0, claimed: 0, skipped: 0, trashSkipped: 0,
+      inserted: 0, claimed: 0, restamped: 0, skipped: 0, trashSkipped: 0,
     });
     expect(await syncThreadToInteractions(throwing as any, 0, [msg({})])).toEqual({
-      inserted: 0, claimed: 0, skipped: 0, trashSkipped: 0,
+      inserted: 0, claimed: 0, restamped: 0, skipped: 0, trashSkipped: 0,
     });
   });
 
@@ -263,7 +299,7 @@ describe("syncThreadToInteractions — executor", () => {
       msg({ messageId: "m-out", direction: "outbound", from: SELF, body: "Done, booked." }),
     ];
     const r1 = await syncThreadToInteractions(db1, 2550004, messages);
-    expect(r1).toEqual({ inserted: 2, claimed: 0, skipped: 0, trashSkipped: 0 });
+    expect(r1).toEqual({ inserted: 2, claimed: 0, restamped: 0, skipped: 0, trashSkipped: 0 });
     expect(db1.inserts).toHaveLength(2);
     // PAN scrubbed at rest
     expect(db1.inserts[0].content).toContain("card redacted ****4242");
@@ -282,14 +318,14 @@ describe("syncThreadToInteractions — executor", () => {
     }));
     const db2 = fakeDb(filed);
     const r2 = await syncThreadToInteractions(db2, 2550004, messages);
-    expect(r2).toEqual({ inserted: 0, claimed: 0, skipped: 2, trashSkipped: 0 });
+    expect(r2).toEqual({ inserted: 0, claimed: 0, restamped: 0, skipped: 2, trashSkipped: 0 });
     expect(db2.inserts).toHaveLength(0);
   });
 
   it("claims a legacy row by updating only key columns + createdAt (never content)", async () => {
     const db = fakeDb([legacy({ id: 42 })]);
     const r = await syncThreadToInteractions(db, 2550004, [msg({ messageId: "m-1" })]);
-    expect(r).toEqual({ inserted: 0, claimed: 1, skipped: 0, trashSkipped: 0 });
+    expect(r).toEqual({ inserted: 0, claimed: 1, restamped: 0, skipped: 0, trashSkipped: 0 });
     expect(db.inserts).toHaveLength(0);
     expect(db.updates).toHaveLength(1);
     expect(db.updates[0]).toHaveProperty("externalId", "m-1");
@@ -298,10 +334,25 @@ describe("syncThreadToInteractions — executor", () => {
     expect(db.updates[0]).not.toHaveProperty("content");
   });
 
+  it("re-stamps a stale filed row by updating only createdAt (by id, never content)", async () => {
+    const db = fakeDb([
+      legacy({ id: 7, externalId: "m-out", direction: "outbound", content: "x", createdAt: new Date("2026-06-22T18:00:00Z") }),
+    ]);
+    const r = await syncThreadToInteractions(db, 2550004, [
+      msg({ messageId: "m-out", direction: "outbound", from: SELF, body: "x", date: new Date("2026-06-15T21:34:00Z") }),
+    ]);
+    expect(r).toEqual({ inserted: 0, claimed: 0, restamped: 1, skipped: 0, trashSkipped: 0 });
+    expect(db.inserts).toHaveLength(0);
+    expect(db.updates).toHaveLength(1);
+    expect(db.updates[0]).toHaveProperty("createdAt");
+    expect(db.updates[0]).not.toHaveProperty("externalId");
+    expect(db.updates[0]).not.toHaveProperty("content");
+  });
+
   it("counts a trashed message as trashSkipped with no writes", async () => {
     const db = fakeDb([]);
     const r = await syncThreadToInteractions(db, 2550004, [msg({ messageId: "t", inTrash: true })]);
-    expect(r).toEqual({ inserted: 0, claimed: 0, skipped: 0, trashSkipped: 1 });
+    expect(r).toEqual({ inserted: 0, claimed: 0, restamped: 0, skipped: 0, trashSkipped: 1 });
     expect(db.inserts).toHaveLength(0);
     expect(db.updates).toHaveLength(0);
   });

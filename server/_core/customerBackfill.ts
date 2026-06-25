@@ -47,6 +47,8 @@ export interface BackfillResult {
   threadsSeen: number;
   inserted: number;
   claimed: number;
+  /** Legacy rows whose filing-time date was corrected to the real Gmail time. */
+  restamped: number;
   skipped: number;
   trashSkipped: number;
   threadIds: string[];
@@ -128,6 +130,7 @@ export async function backfillCustomerByEmail(
     threadsSeen: threadIds.length,
     inserted: 0,
     claimed: 0,
+    restamped: 0,
     skipped: 0,
     trashSkipped: 0,
     threadIds,
@@ -138,6 +141,7 @@ export async function backfillCustomerByEmail(
       const r = await syncThreadToInteractions(db, profileId, msgs);
       result.inserted += r.inserted;
       result.claimed += r.claimed;
+      result.restamped += r.restamped;
       result.skipped += r.skipped;
       result.trashSkipped += r.trashSkipped;
     } catch (e) {
