@@ -30,14 +30,14 @@ export const customerBackfillWorker = new Worker<
   async (job: Job<CustomerBackfillJobData, CustomerBackfillJobResult>) => {
     const { profileId, email } = job.data;
     const db = await getDb();
-    if (!db) return { threadsSeen: 0, inserted: 0, claimed: 0, skipped: 0 };
+    if (!db) return { threadsSeen: 0, inserted: 0, claimed: 0, restamped: 0, skipped: 0 };
 
     const integrations = await db
       .select()
       .from(gmailIntegration)
       .where(eq(gmailIntegration.isActive, 1));
 
-    const totals = { threadsSeen: 0, inserted: 0, claimed: 0, skipped: 0 };
+    const totals = { threadsSeen: 0, inserted: 0, claimed: 0, restamped: 0, skipped: 0 };
     for (const integ of integrations) {
       try {
         const r = await backfillCustomerByEmail(
@@ -50,6 +50,7 @@ export const customerBackfillWorker = new Worker<
         totals.threadsSeen += r.threadsSeen;
         totals.inserted += r.inserted;
         totals.claimed += r.claimed;
+        totals.restamped += r.restamped;
         totals.skipped += r.skipped;
       } catch (e) {
         console.error(
@@ -60,7 +61,8 @@ export const customerBackfillWorker = new Worker<
     }
     console.log(
       `[CustomerBackfillWorker] auto-collected ${email} (profile ${profileId}): ` +
-        `threads=${totals.threadsSeen} inserted=${totals.inserted} claimed=${totals.claimed} skipped=${totals.skipped}`,
+        `threads=${totals.threadsSeen} inserted=${totals.inserted} claimed=${totals.claimed} ` +
+        `restamped=${totals.restamped} skipped=${totals.skipped}`,
     );
     return totals;
   },

@@ -774,6 +774,8 @@ export interface CustomerBackfillJobResult {
   threadsSeen: number;
   inserted: number;
   claimed: number;
+  /** Legacy rows whose filing-time date was corrected to the real Gmail time. */
+  restamped: number;
   skipped: number;
 }
 
