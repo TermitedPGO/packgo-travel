@@ -18,6 +18,29 @@
  */
 
 /**
+ * Em / en / figure dash / horizontal bar (‒–—―) are not part of Jeff's style
+ * (hard rule: no em dashes in any message). Normalize so none reaches a reader:
+ *   1. digit–digit is a numeric range → ASCII hyphen ("US$174–226" → "-")
+ *   2. CJK on both sides → full-width comma, no spaces ("行程——報價" → "，")
+ *   3. any remaining em/en/bar dash is a clause break → ", "
+ * The ASCII hyphen-minus (compound words, "1-2", "台北-上海") is NEVER touched.
+ * Shared by stripMarkdownForEmail (customer email) and stripChatAnswer (ops chat).
+ * (　-鿿 + ＀-￯ = CJK punctuation/ideographs + full-width forms.)
+ */
+function normalizeUnicodeDashes(input: string): string {
+  let s = input;
+  s = s.replace(/(\d)\s*[‒-―]+\s*(\d)/g, "$1-$2");
+  s = s.replace(/([　-鿿＀-￯])\s*[‒-―]+\s*([　-鿿＀-￯])/g, "$1，$2");
+  s = s.replace(/\s*[‒-―]+\s*/g, ", ");
+  // Tidy the comma-swap artifacts (leading clause-comma, doubled comma,
+  // comma immediately before a sentence stop).
+  s = s.replace(/(^|\n), /g, "$1");
+  s = s.replace(/,\s*,/g, ", ");
+  s = s.replace(/,(\s*)([.!?。！？,])/g, "$2");
+  return s;
+}
+
+/**
  * Strip the markdown that renders as literal noise in a plain-text email,
  * leaving the human text intact. Conservative on purpose: only touches
  * unambiguous markdown syntax, never Chinese punctuation or hyphenated
@@ -59,28 +82,8 @@ export function stripMarkdownForEmail(input: string | null | undefined): string 
   // Markdown horizontal rule line (--- / *** / ___) on its own → blank.
   s = s.replace(/^\s*([-*_])\1{2,}\s*$/gm, "");
 
-  // Em / en / horizontal-bar dashes (—–―) are NOT part of Jeff's customer
-  // style (hard rule: no em dashes in any customer text). The system prompt
-  // forbids them but the LLM still emits them. Normalize so none reaches a
-  // customer. Order matters:
-  //   1. digit–digit is a numeric range → ASCII hyphen ("US$174–226" → "-")
-  //   2. CJK on both sides → full-width comma, no spaces ("行程——報價" → "，")
-  //   3. any remaining em/en/bar dash is a clause break → ", "
-  // The ASCII hyphen-minus (compound words, "1-2", "台北-上海") is never
-  // touched — only the three Unicode dashes above are.
-  // ‒-― = figure dash / en dash / em dash / horizontal bar.
-  // 　-鿿 + ＀-￯ = CJK punctuation/ideographs + full-width.
-  s = s.replace(/(\d)\s*[‒-―]+\s*(\d)/g, "$1-$2");
-  s = s.replace(
-    /([　-鿿＀-￯])\s*[‒-―]+\s*([　-鿿＀-￯])/g,
-    "$1，$2",
-  );
-  s = s.replace(/\s*[‒-―]+\s*/g, ", ");
-  // Tidy the comma-swap artifacts (leading clause-comma, doubled comma,
-  // comma immediately before a sentence stop).
-  s = s.replace(/(^|\n), /g, "$1");
-  s = s.replace(/,\s*,/g, ", ");
-  s = s.replace(/,(\s*)([.!?。！？,])/g, "$2");
+  // No em dashes ever reach a customer (shared with stripChatAnswer).
+  s = normalizeUnicodeDashes(s);
 
   // Collapse 3+ blank lines to 2 (markdown stripping can leave gaps).
   s = s.replace(/\n{3,}/g, "\n\n");
@@ -105,4 +108,37 @@ export function hasResidualMarkdown(s: string): boolean {
  */
 export function hasEmDash(s: string): boolean {
   return /[‒-―]/.test(s);
+}
+
+/**
+ * Clean an ops-chat answer (shown to Jeff; the UI renders raw symbols, so
+ * markdown leaks as literal noise). Jeff's rule: no markdown bold/italic/
+ * headers, no em dashes, no emoji or check marks. The ops system prompt forbids
+ * these but Opus still emits ** and the odd 👍, so this is the program-level
+ * guarantee at the runOpsAgent / opsAgentStream answer chokepoint. Lighter than
+ * stripMarkdownForEmail: leaves bullets and links alone (internal chat, not an
+ * email). Pure → unit-tested.
+ */
+export function stripChatAnswer(input: string | null | undefined): string {
+  if (!input) return "";
+  let s = input;
+  // markdown emphasis (** __ *) and headers / inline code — UI shows raw symbols
+  s = s.replace(/\*\*([^*\n]+?)\*\*/g, "$1");
+  s = s.replace(/__([^_\n]+?)__/g, "$1");
+  s = s.replace(/\*([^*\n]+?)\*/g, "$1");
+  s = s.replace(/^#{1,6}\s+/gm, "");
+  s = s.replace(/`([^`\n]+)`/g, "$1");
+  // no em dashes
+  s = normalizeUnicodeDashes(s);
+  // decorative emoji / dingbats / check marks (Jeff: no emoji, no 打勾).
+  // No `u` flag (project targets pre-ES6). Astral emoji via surrogate pairs,
+  // high surrogate limited to \uD83C-\uD83E (U+1F000–1FBFF emoji planes) so
+  // CJK-extension characters (\uD840+) are never touched.
+  s = s.replace(/[\uD83C-\uD83E][\uDC00-\uDFFF]/g, "");
+  // BMP misc symbols + dingbats (incl ✓✔✅✘) + emoji variation selector. Never
+  // CJK, Latin, or the bullet 「•」(U+2022, below this range).
+  s = s.replace(/[☀-➿⬀-⯿️]/g, "");
+  // tidy spaces a removed emoji can leave
+  s = s.replace(/[ \t]{2,}/g, " ").replace(/ +\n/g, "\n").replace(/\n{3,}/g, "\n\n");
+  return s.trim();
 }

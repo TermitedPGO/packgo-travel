@@ -22,6 +22,7 @@
  * shows up in #ops channel and Jeff can ask follow-ups.
  */
 import { invokeLLM } from "../../_core/llm";
+import { stripChatAnswer } from "../../_core/plainTextReply";
 
 /**
  * 2026-06-13 — PACK&GO 聊天機器人的腦,從 Sonnet 4(2025-05)升到 Opus 4.8
@@ -557,7 +558,9 @@ export async function runOpsAgent(
   }
 
   return {
-    answer,
+    // Program-level guarantee: no markdown ** / em dash / emoji reaches Jeff,
+    // even when Opus ignores the prompt's no-markdown rule.
+    answer: stripChatAnswer(answer),
     suggestedActions,
     contextUsed: ctx,
     hints,

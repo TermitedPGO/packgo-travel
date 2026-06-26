@@ -22,6 +22,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { ENV } from "../../_core/env";
 import { createChildLogger } from "../../_core/logger";
 import { READ_TOOLS, executeReadTool, toCard } from "./opsTools";
+import { stripChatAnswer } from "../../_core/plainTextReply";
 
 const log = createChildLogger({ module: "opsAgentStream" });
 
@@ -267,6 +268,11 @@ export async function* runOpsAgentStream(
     if (!finalAnswer) {
       finalAnswer = "我沒查到對應的資料,可以換個方式問問看。";
     }
+
+    // Clean the saved answer: no markdown ** / em dash / emoji (the live tokens
+    // already streamed; this guarantees the persisted + re-shown answer is clean
+    // even when Opus ignores the prompt's no-markdown rule).
+    finalAnswer = stripChatAnswer(finalAnswer);
 
     yield { type: "done", finalAnswer, suggestedActions, cards };
   } catch (err) {
