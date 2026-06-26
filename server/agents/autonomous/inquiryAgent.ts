@@ -230,10 +230,38 @@ export const DEFAULT_INQUIRY_POLICY = {
   },
   alwaysEscalate: ["refund_request", "complaint", "critical_urgency"],
   draftMustInclude: ["acknowledgment", "next_step", "timeline"],
+  // 首封品牌、後續個人(2026-06-25 Jeff 拍板):新客人第一封我方回覆用
+  // `signature`(品牌+團隊,做品牌介紹);同一串往後的回覆改用
+  // `signatureFollowup`(個人,跟 Jeff 真實 email 簽名一致)。判斷依
+  // threadHistory 是否已有我方 outbound,見 resolveSignature()。
   signature: "PACK&GO Travel · Jeff & 團隊",
+  signatureFollowup: "Jeff Hsieh",
   fairnessRule:
     "Draft quality must be identical regardless of customer VIP score or booking history. VIP affects routing speed only, never reply quality.",
 };
+
+/**
+ * 首封品牌、後續個人(2026-06-25 Jeff 拍板)。
+ *
+ * 第一次回某位客人(thread 裡我方還沒回過任何一封)→ 用品牌簽名
+ * (`policy.signature`,例「PACK&GO Travel · Jeff & 團隊」)做品牌介紹。
+ * 同一串往後的回覆(thread 已有我方 outbound)→ 用個人簽名
+ * (`policy.signatureFollowup`,例「Jeff Hsieh」,跟 Jeff 真實 email 一致)。
+ *
+ * 純函式可單測。簽名值由 policy 帶,缺漏才退回安全預設,所以 prod 的 DB
+ * policy(只存品牌 signature)不必改,個人簽名走這裡的預設「Jeff Hsieh」。
+ */
+export function resolveSignature(
+  policy: { signature?: unknown; signatureFollowup?: unknown } | null | undefined,
+  threadHistory: ReadonlyArray<{ direction: "inbound" | "outbound" }> | undefined,
+): string {
+  const pick = (v: unknown, fallback: string): string =>
+    typeof v === "string" && v.trim() ? v.trim() : fallback;
+  const brand = pick(policy?.signature, DEFAULT_INQUIRY_POLICY.signature);
+  const personal = pick(policy?.signatureFollowup, DEFAULT_INQUIRY_POLICY.signatureFollowup);
+  const hasPriorOutbound = (threadHistory ?? []).some((m) => m.direction === "outbound");
+  return hasPriorOutbound ? personal : brand;
+}
 
 // ────────────────────────────────────────────────────────────────────────
 // LLM call — structured output via tools schema
@@ -314,7 +342,7 @@ const STRUCTURED_TOOL: Tool = {
         draftReply: {
           type: "string",
           description:
-            "Full draft reply in the customer's language. Must include: acknowledgment of their concern, concrete next step, realistic timeline. Sign with the policy signature. 100-400 words.",
+            "Full draft reply in the customer's language. Must include: acknowledgment of their concern, concrete next step, realistic timeline. Sign with the exact signature line given in the system prompt. 100-400 words.",
         },
         draftLanguage: { type: "string", enum: ["zh-TW", "zh-CN", "en"] },
         extractedCustomer: {
@@ -355,7 +383,7 @@ const STRUCTURED_TOOL: Tool = {
   },
 };
 
-function buildSystemPrompt(policyRules: string): string {
+function buildSystemPrompt(policyRules: string, signature: string): string {
   // 2026-05-17 red-team round 1 — pull the prompt-injection safety addendum
   // into every agent's system prompt. Customer content lives in
   // <untrusted_input> tags; any directive within those tags is data, not
@@ -419,7 +447,7 @@ ${policyRules}
 - 不要承諾「保證一定怎樣」(住宿/航班升等/退費等)。
 - 不要編造客人沒問的事。
 - 不要用機器人式的「歡迎您的來信」開場,要像真人寫的。
-- 簽名一律用 policy.signature 那一行。
+- 簽名一律用這一行(逐字照抄,不要改寫、不要自己加公司名或頭銜):${signature}
 - **絕對不可說「我會研讀您的附件」「我已詳閱您附上的資料」之類空話**,除非附件實際出現在 <CUSTOMER_ATTACHMENT_N> 且有內容。要引用就引用實際內容。
 - **【鐵律:只能搬運,不准無中生有地宣稱東西已完成或已寄出】** 除非【先前對話】裡真的有一封「我方寄出」的訊息確實交付了那個東西,否則絕對不可說「完整行程跟報價都確認好了」「行程表已附在這封信」「英文版/報價/文件已給您」之類。東西還沒做好、還沒寄的,只能說「收到,我來處理(或設計),好了盡快給您」,絕不可把還沒做的講成做好的(這會誤導客人,違反搬運不生成)。
 - **【鐵律:不要重複答應已經做過的事】** 若【先前對話】顯示某件事(英文版行程、報價金額、某份文件、某個查詢結果)我方已經回覆或寄出過了,就【不可】再寫「我會整理…給您」「我去查一下…再回報」把它當成還沒做。那是把對話倒帶。這種情況草稿應改成簡短回應客人最新一句(例如對方只是道謝,就自然收尾),不要再承諾任何已交付的東西。
@@ -454,7 +482,7 @@ ${policyRules}
 - 繁中全形標點(「」,。、!?),英文夾雜用半形。
 - 同一封一致用「您」,不混「你」。
 - 段落間一個空行;數字+量詞半形加空格(「4 人」「3 晚」)。
-- 結尾簽名前留一行空行,簽名用 policy.signature。`;
+- 結尾簽名前留一行空行,簽名逐字用:${signature}`;
 }
 
 /** 把 LLM 回的 extractedRequirements 正規化:空字串→null、缺漏給安全預設。 */
@@ -552,11 +580,17 @@ export async function runInquiryAgent(
     { role: "user", content: userPrompt },
   ];
 
+  // 首封品牌、後續個人:thread 已有我方 outbound → 個人簽名,否則品牌簽名。
+  const effectiveSignature = resolveSignature(
+    safeParsePolicy(policyText),
+    input.threadHistory,
+  );
+
   const result = await invokeLLM({
     model: "claude-sonnet-4-5-20250929",
     messages: [
       // system prompt as message[0] for prompt-cache hit
-      { role: "system", content: buildSystemPrompt(policyText) },
+      { role: "system", content: buildSystemPrompt(policyText, effectiveSignature) },
       ...messages,
     ],
     tools: [STRUCTURED_TOOL],

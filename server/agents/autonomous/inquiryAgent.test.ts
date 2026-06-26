@@ -32,7 +32,7 @@ vi.mock("../../_core/llm", async () => {
   };
 });
 
-import { runInquiryAgent } from "./inquiryAgent";
+import { runInquiryAgent, resolveSignature, DEFAULT_INQUIRY_POLICY } from "./inquiryAgent";
 import {
   FIXTURE_QUOTE_REQUEST,
   FIXTURE_FLIGHT_INQUIRY,
@@ -456,5 +456,55 @@ describe("runInquiryAgent — thread history context (B)", () => {
     const p = capturedUserPrompt();
     expect(p).toContain("【先前對話");
     expect(p).not.toContain("</untrusted_input>");
+  });
+});
+
+describe("resolveSignature — 首封品牌、後續個人 (Cut 4)", () => {
+  const brand = DEFAULT_INQUIRY_POLICY.signature; // "PACK&GO Travel · Jeff & 團隊"
+  const personal = DEFAULT_INQUIRY_POLICY.signatureFollowup; // "Jeff Hsieh"
+
+  it("首封(沒有 thread / 我方還沒回過)→ 品牌簽名", () => {
+    expect(resolveSignature(DEFAULT_INQUIRY_POLICY, undefined)).toBe(brand);
+    expect(resolveSignature(DEFAULT_INQUIRY_POLICY, [])).toBe(brand);
+  });
+
+  it("客人連寫好幾封、但我方一封都還沒回 → 仍算首封 → 品牌簽名", () => {
+    const history = [
+      { direction: "inbound" as const },
+      { direction: "inbound" as const },
+    ];
+    expect(resolveSignature(DEFAULT_INQUIRY_POLICY, history)).toBe(brand);
+  });
+
+  it("thread 已有我方 outbound(後續回覆)→ 個人簽名 Jeff Hsieh", () => {
+    const history = [
+      { direction: "inbound" as const },
+      { direction: "outbound" as const },
+      { direction: "inbound" as const },
+    ];
+    expect(resolveSignature(DEFAULT_INQUIRY_POLICY, history)).toBe(personal);
+    expect(personal).toBe("Jeff Hsieh");
+  });
+
+  it("policy 只有品牌 signature(prod DB 現況)→ 個人簽名退回程式預設 Jeff Hsieh", () => {
+    // prod 的 agentPolicies row 只存 signature(品牌),沒有 signatureFollowup
+    const prodLikePolicy = { signature: "PACK&GO Travel · Jeff & 團隊" };
+    const followup = [{ direction: "outbound" as const }];
+    expect(resolveSignature(prodLikePolicy, followup)).toBe("Jeff Hsieh");
+    expect(resolveSignature(prodLikePolicy, [])).toBe("PACK&GO Travel · Jeff & 團隊");
+  });
+
+  it("policy 可覆寫 signatureFollowup", () => {
+    const policy = { signature: "Brand", signatureFollowup: "Jeff" };
+    expect(resolveSignature(policy, [{ direction: "outbound" as const }])).toBe("Jeff");
+    expect(resolveSignature(policy, [])).toBe("Brand");
+  });
+
+  it("policy 缺漏 / 空白簽名 → 安全退回 DEFAULT", () => {
+    expect(resolveSignature(null, [])).toBe(brand);
+    expect(resolveSignature({ signature: "  " }, [])).toBe(brand);
+    expect(resolveSignature({ signatureFollowup: "" }, [{ direction: "outbound" as const }])).toBe(
+      personal,
+    );
   });
 });
