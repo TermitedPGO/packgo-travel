@@ -112,8 +112,41 @@ describe("surface", () => {
         "sendQuote",
         "update",
         "updateStatus",
+        "watchdogForCustomer",
       ].sort(),
     );
+  });
+});
+
+describe("watchdogForCustomer — Step 5 漏價看門狗(admin-only,只攤數字)", () => {
+  it("回賠錢 / 毛利過薄的單,紅在前;成本/售價齊全才算", async () => {
+    (db.findCustomerProfileId as any).mockResolvedValue(5);
+    (db.listCustomOrdersByProfile as any).mockResolvedValue([
+      { ...baseOrder, id: 1, totalPrice: "5000", supplierCost: "4500", status: "quoted" }, // 黃 10%
+      { ...baseOrder, id: 2, totalPrice: "5000", supplierCost: "4000", status: "quoted" }, // 健康 20%
+      { ...baseOrder, id: 3, totalPrice: "5000", supplierCost: "5600", status: "arranged" }, // 紅 loss
+      { ...baseOrder, id: 4, totalPrice: "5000", supplierCost: "9999", status: "draft" }, // draft 跳過
+    ]);
+    const out = await caller().watchdogForCustomer({ profileId: 5 });
+    expect(out.map((f: any) => f.orderId)).toEqual([3, 1]);
+    expect(out[0].level).toBe("red");
+    expect(out[0].reason).toBe("loss");
+    expect(out[1].level).toBe("yellow");
+  });
+
+  it("找不到客人 → 空陣列(不打 DB)", async () => {
+    (db.findCustomerProfileId as any).mockResolvedValue(null);
+    const out = await caller().watchdogForCustomer({ userId: 999 });
+    expect(out).toEqual([]);
+    expect(db.listCustomOrdersByProfile).not.toHaveBeenCalled();
+  });
+
+  it("全健康 → 空陣列(不亂叫)", async () => {
+    (db.findCustomerProfileId as any).mockResolvedValue(5);
+    (db.listCustomOrdersByProfile as any).mockResolvedValue([
+      { ...baseOrder, id: 1, totalPrice: "5000", supplierCost: "4000", status: "paid" },
+    ]);
+    expect(await caller().watchdogForCustomer({ profileId: 5 })).toEqual([]);
   });
 });
 

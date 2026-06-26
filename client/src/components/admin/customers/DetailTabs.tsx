@@ -47,6 +47,68 @@ function relativeUpdated(
   return t("admin.customers.summary.updatedDayAgo", { n: Math.floor(hr / 24) })
 }
 
+/** Margin as a compact percent string. -0.12 → "-12%", 0.149 → "14.9%". */
+function formatMarginPct(p: number): string {
+  const v = p * 100
+  return `${Number.isInteger(v) ? v : Number(v.toFixed(1))}%`
+}
+
+/**
+ * Step 5 看門狗:售價對不上後台成本(賠錢 / 毛利過薄)時,打開客人最上面跳一條警示,
+ * 把售價/成本/毛利三個數字直接攤給 Jeff。純規則(server),admin-only,不改不送。
+ */
+function MarginWatchdogBanner({ customer: c }: { customer: AdaptedCustomer }) {
+  const { t } = useLocale()
+  const k = (s: string) => t(`admin.customers.watchdog.${s}`)
+  const q = trpc.customerOrders.watchdogForCustomer.useQuery(toSelection(c))
+  const findings = q.data ?? []
+  if (findings.length === 0) return null
+  return (
+    <div className="space-y-2">
+      {findings.map((f) => {
+        const red = f.level === "red"
+        return (
+          <div
+            key={f.orderId}
+            className={`rounded-xl border p-3 flex items-start gap-2.5 ${
+              red ? "border-red-300 bg-red-50/50" : "border-amber-300 bg-amber-50/50"
+            }`}
+          >
+            <TriangleAlert
+              className={`w-5 h-5 flex-shrink-0 mt-0.5 ${red ? "text-red-600" : "text-amber-600"}`}
+            />
+            <div className="flex-1 min-w-0">
+              <div className="text-[13px] font-semibold text-gray-900">
+                {k("title")}
+                <span className="text-[10px] text-gray-400 font-normal ml-1.5">{f.orderNumber}</span>
+              </div>
+              <div className="text-[11.5px] text-gray-600 mt-0.5 truncate">
+                {f.title} · {k(`reason.${f.reason}`)}
+              </div>
+              <div className="flex flex-wrap gap-x-5 gap-y-1 mt-1.5 text-[12px] text-gray-700">
+                <span>
+                  {k("sell")}{" "}
+                  <span className="font-semibold text-gray-900">{fmtMoney(f.totalPrice, f.currency)}</span>
+                </span>
+                <span>
+                  {k("cost")}{" "}
+                  <span className="font-semibold text-gray-900">{fmtMoney(f.supplierCost, f.currency)}</span>
+                </span>
+                <span>
+                  {k("margin")}{" "}
+                  <span className={`font-semibold ${red ? "text-red-600" : "text-amber-600"}`}>
+                    {formatMarginPct(f.marginPct)}
+                  </span>
+                </span>
+              </div>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 export function OverviewTab({ customer: c, chatMessages }: { customer: AdaptedCustomer; chatMessages: ChatMessage[] }) {
   const { t } = useLocale()
   const [showAllChat, setShowAllChat] = useState(false)
@@ -87,6 +149,9 @@ export function OverviewTab({ customer: c, chatMessages }: { customer: AdaptedCu
 
   return (
     <div className="p-6 space-y-4">
+      {/* Step 5 看門狗:漏價警示(打開客人最上面就看到) */}
+      <MarginWatchdogBanner customer={c} />
+
       {/* AI Summary */}
       <div className="rounded-xl bg-gray-50 border border-gray-200 p-4 space-y-2">
         <div className="flex items-center justify-between">

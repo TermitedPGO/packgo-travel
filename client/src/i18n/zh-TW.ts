@@ -3350,6 +3350,17 @@ export const zhTW = {
         updatedHrAgo: '{n} 小時前更新',
         updatedDayAgo: '{n} 天前更新',
       },
+      watchdog: {
+        title: '漏價警示',
+        sell: '售價',
+        cost: '成本',
+        margin: '毛利',
+        reason: {
+          loss: '虧損',
+          breakeven: '零毛利',
+          thin: '毛利過薄',
+        },
+      },
       profile: {
         notProvided: '未提供',
         passportOnFile: '已提供',

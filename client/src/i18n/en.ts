@@ -3382,6 +3382,17 @@ export const en = {
         updatedHrAgo: 'Updated {n}h ago',
         updatedDayAgo: 'Updated {n}d ago',
       },
+      watchdog: {
+        title: 'Margin alert',
+        sell: 'Sell',
+        cost: 'Cost',
+        margin: 'Margin',
+        reason: {
+          loss: 'Loss',
+          breakeven: 'Break-even',
+          thin: 'Thin margin',
+        },
+      },
       profile: {
         notProvided: 'Not provided',
         passportOnFile: 'On file',

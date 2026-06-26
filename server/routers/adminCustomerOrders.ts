@@ -35,6 +35,10 @@ import {
   generateInvoiceNumber,
   generateInvoicePdf,
 } from "../services/invoiceService";
+import {
+  findOrderMarginIssues,
+  WATCHDOG_MARGIN_THRESHOLD,
+} from "../services/customOrderWatchdog";
 import type { CustomOrder } from "../../drizzle/schema";
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -144,6 +148,21 @@ export const adminCustomerOrdersRouter = router({
   get: adminProcedure
     .input(z.object({ orderId: z.number().int().positive() }))
     .query(async ({ input }) => loadOrder(input.orderId)),
+
+  /**
+   * 看門狗(Step 5):這個客人所有訂製單裡售價對不上後台成本(賠錢 / 毛利過薄)的那幾張。
+   * admin-only(adminProcedure),內部把售價/成本/毛利三個數字攤給 Jeff —— 供應商成本
+   * 絕不上客人文件,這支不投影到任何客戶面查詢。純 deterministic 規則,不改不送。
+   * 規則見 server/services/customOrderWatchdog.ts。
+   */
+  watchdogForCustomer: adminProcedure
+    .input(selectionSchema)
+    .query(async ({ input }) => {
+      const profileId = await db.findCustomerProfileId(selToArgs(input));
+      if (profileId == null) return [];
+      const rows = await db.listCustomOrdersByProfile(profileId);
+      return findOrderMarginIssues(rows, WATCHDOG_MARGIN_THRESHOLD);
+    }),
 
   create: adminProcedure
     .input(
