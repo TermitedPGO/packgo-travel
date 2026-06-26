@@ -3,7 +3,7 @@
  * 含 2026-06-13 prod 截圖的實際 ** 案例(回歸鎖死)。
  */
 import { describe, it, expect } from "vitest";
-import { stripMarkdownForEmail, hasResidualMarkdown } from "./plainTextReply";
+import { stripMarkdownForEmail, hasResidualMarkdown, hasEmDash } from "./plainTextReply";
 
 describe("stripMarkdownForEmail — prod 截圖實際案例", () => {
   it("移除 **粗體** 留人話(YG7/YL7 那封)", () => {
@@ -54,6 +54,54 @@ describe("stripMarkdownForEmail — 各 markdown 形狀", () => {
 
   it("水平線 --- 整行移除", () => {
     expect(stripMarkdownForEmail("上段\n\n---\n\n下段")).toBe("上段\n\n下段");
+  });
+});
+
+describe("stripMarkdownForEmail — 破折號正規化(Jeff 鐵律:客人訊息不用破折號)", () => {
+  it("英文無空格 em dash(prod AFTER 實例 Leslie 草稿)→ 逗號", () => {
+    const out = stripMarkdownForEmail(
+      "I'll send a message as soon as it arrives—expecting it around Friday.",
+    );
+    expect(out).toBe(
+      "I'll send a message as soon as it arrives, expecting it around Friday.",
+    );
+    expect(hasEmDash(out)).toBe(false);
+  });
+
+  it("英文有空格 em dash → 逗號(不留雙空格)", () => {
+    expect(stripMarkdownForEmail("We can do A — or B works too.")).toBe(
+      "We can do A, or B works too.",
+    );
+  });
+
+  it("數字間 en dash 視為範圍 → ASCII 連字號", () => {
+    expect(stripMarkdownForEmail("英文導遊全程約 US$174–226。")).toBe(
+      "英文導遊全程約 US$174-226。",
+    );
+    expect(stripMarkdownForEmail("1–2 個工作天內回覆")).toBe("1-2 個工作天內回覆");
+  });
+
+  it("中文夾 em dash → 全形逗號(不插 ASCII 逗號/空格)", () => {
+    expect(stripMarkdownForEmail("行程——報價都在確認裡")).toBe(
+      "行程，報價都在確認裡",
+    );
+  });
+
+  it("ASCII 連字號(複合字/範圍)永不被破折號規則動到", () => {
+    const s = "台北-上海來回,4-人房型,1-2 天回覆";
+    expect(stripMarkdownForEmail(s)).toBe(s);
+  });
+
+  it("已乾淨、無破折號的草稿完全不動", () => {
+    const s = "Hi Leslie,\n\nWill do! I'll let you know as soon as it arrives.\n\nJeff Hsieh";
+    expect(stripMarkdownForEmail(s)).toBe(s);
+  });
+
+  it("hasEmDash 抓 em/en dash,放過 ASCII 連字號", () => {
+    expect(hasEmDash("arrives—expecting")).toBe(true);
+    expect(hasEmDash("US$174–226")).toBe(true);
+    expect(hasEmDash("台北-上海,1-2 天")).toBe(false);
+    expect(hasEmDash(stripMarkdownForEmail("arrives—expecting"))).toBe(false);
   });
 });
 

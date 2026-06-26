@@ -8,7 +8,13 @@
  *
  * 系統提示已叫 LLM 別產 markdown,但 LLM 偶爾無視 — 這道程式層清洗是
  * 「絕對到不了客人」的保證:任何進客人信箱的草稿都先過這裡。
- * 純函式,可單測。只動 markdown 標記,不碰中文標點、不碰正常連字號。
+ *
+ * 2026-06-25:同一道出口再加「破折號正規化」。Jeff 鐵律:客人訊息不用破折號
+ * (—)。系統提示有講,但 LLM 仍偶爾吐出(prod AFTER 測試:Leslie 草稿
+ * "arrives—expecting")。em/en/橫線在這裡一律換成逗號(夾在數字間的視為範圍
+ * → ASCII 連字號)。永不動 ASCII 連字號(-,複合字/範圍如 1-2、台北-上海)。
+ *
+ * 純函式,可單測。
  */
 
 /**
@@ -53,6 +59,29 @@ export function stripMarkdownForEmail(input: string | null | undefined): string 
   // Markdown horizontal rule line (--- / *** / ___) on its own → blank.
   s = s.replace(/^\s*([-*_])\1{2,}\s*$/gm, "");
 
+  // Em / en / horizontal-bar dashes (—–―) are NOT part of Jeff's customer
+  // style (hard rule: no em dashes in any customer text). The system prompt
+  // forbids them but the LLM still emits them. Normalize so none reaches a
+  // customer. Order matters:
+  //   1. digit–digit is a numeric range → ASCII hyphen ("US$174–226" → "-")
+  //   2. CJK on both sides → full-width comma, no spaces ("行程——報價" → "，")
+  //   3. any remaining em/en/bar dash is a clause break → ", "
+  // The ASCII hyphen-minus (compound words, "1-2", "台北-上海") is never
+  // touched — only the three Unicode dashes above are.
+  // ‒-― = figure dash / en dash / em dash / horizontal bar.
+  // 　-鿿 + ＀-￯ = CJK punctuation/ideographs + full-width.
+  s = s.replace(/(\d)\s*[‒-―]+\s*(\d)/g, "$1-$2");
+  s = s.replace(
+    /([　-鿿＀-￯])\s*[‒-―]+\s*([　-鿿＀-￯])/g,
+    "$1，$2",
+  );
+  s = s.replace(/\s*[‒-―]+\s*/g, ", ");
+  // Tidy the comma-swap artifacts (leading clause-comma, doubled comma,
+  // comma immediately before a sentence stop).
+  s = s.replace(/(^|\n), /g, "$1");
+  s = s.replace(/,\s*,/g, ", ");
+  s = s.replace(/,(\s*)([.!?。！？,])/g, "$2");
+
   // Collapse 3+ blank lines to 2 (markdown stripping can leave gaps).
   s = s.replace(/\n{3,}/g, "\n\n");
 
@@ -66,4 +95,14 @@ export function stripMarkdownForEmail(input: string | null | undefined): string 
  */
 export function hasResidualMarkdown(s: string): boolean {
   return /\*\*|__|\[[^\]]+\]\([^)]*\)|^#{1,6}\s/m.test(s);
+}
+
+/**
+ * True when the text still contains an em / en / figure dash or horizontal bar
+ * (‒–—―). Jeff's hard rule forbids these in any customer message; the ASCII
+ * hyphen-minus (-) is allowed and NOT matched here. Mirror of
+ * hasResidualMarkdown for tests + a pipeline regression assertion.
+ */
+export function hasEmDash(s: string): boolean {
+  return /[‒-―]/.test(s);
 }
