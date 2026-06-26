@@ -13,6 +13,7 @@ import { redisBullMQ } from "./redis";
 import type { FollowupScanJobData, FollowupScanJobResult } from "./queue";
 import { getDb } from "./db";
 import { runFollowupScan } from "./_core/followupScan";
+import { runFollowupDraftScan } from "./agents/autonomous/followupDraftProducer";
 
 export const followupScanWorker = new Worker<FollowupScanJobData, FollowupScanJobResult>(
   "followup-scan",
@@ -22,9 +23,16 @@ export const followupScanWorker = new Worker<FollowupScanJobData, FollowupScanJo
     );
     const db = await getDb();
     if (!db) return { candidates: 0, posted: 0, skipped: 0 };
-    const result = await runFollowupScan(db);
+    // Step 4: first auto-DRAFT a gentle follow-up for every draftable stale
+    // customer (lands in the cockpit 待審草稿 panel, never sent). Then the inbox
+    // reminder covers only the NON-draftable ones (no thread / sensitive),
+    // excluding the drafted set so nothing double-surfaces.
+    const draftRes = await runFollowupDraftScan(db);
+    const result = await runFollowupScan(db, {
+      excludeProfileIds: draftRes.draftedProfileIds,
+    });
     console.log(
-      `[FollowupScanWorker] Scan ${job.id}: candidates=${result.candidates} posted=${result.posted} skipped=${result.skipped}`,
+      `[FollowupScanWorker] Scan ${job.id}: drafted=${draftRes.drafted} candidates=${result.candidates} posted=${result.posted} skipped=${result.skipped}`,
     );
     return result;
   },

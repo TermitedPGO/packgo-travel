@@ -132,9 +132,16 @@ export interface FollowupScanResult {
  */
 export async function runFollowupScan(
   db: Db,
-  opts?: { minDays?: number; maxDays?: number; limit?: number },
+  opts?: { minDays?: number; maxDays?: number; limit?: number; excludeProfileIds?: number[] },
 ): Promise<FollowupScanResult> {
-  const cands = await findStaleQuotedCustomers(db, opts);
+  let cands = await findStaleQuotedCustomers(db, opts);
+  // Step 4: customers already drafted by the followup-draft producer are passed
+  // here as excludes, so a customer with a ready draft isn't ALSO posted as a
+  // "go draft one" inbox reminder (would be contradictory).
+  if (opts?.excludeProfileIds?.length) {
+    const ex = new Set(opts.excludeProfileIds);
+    cands = cands.filter((c) => !ex.has(c.profileId));
+  }
   if (cands.length === 0) return { candidates: 0, posted: 0, skipped: 0 };
 
   const { agentMessages } = await import("../../drizzle/schema");
