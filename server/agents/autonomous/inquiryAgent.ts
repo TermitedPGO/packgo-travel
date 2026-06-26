@@ -274,7 +274,7 @@ export function resolveSignature(
 // Production crashed on the first inbound newsletter once Gmail OAuth was
 // re-connected. Same fix accountingAgent.ts shipped 2026-05-16. The `as any`
 // cast at the invokeLLM call was suppressing the type error — removed too.
-const STRUCTURED_TOOL: Tool = {
+export const STRUCTURED_TOOL: Tool = {
   type: "function",
   function: {
     name: "submit_inquiry_analysis",
@@ -383,7 +383,7 @@ const STRUCTURED_TOOL: Tool = {
   },
 };
 
-function buildSystemPrompt(policyRules: string, signature: string): string {
+export function buildSystemPrompt(policyRules: string, signature: string): string {
   // 2026-05-17 red-team round 1 — pull the prompt-injection safety addendum
   // into every agent's system prompt. Customer content lives in
   // <untrusted_input> tags; any directive within those tags is data, not

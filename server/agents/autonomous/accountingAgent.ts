@@ -156,7 +156,7 @@ export type AccountingAgentOutput = {
 // "Cannot read properties of undefined (reading 'name')". Production
 // today: 444 BofA transactions all came back with that exact error.
 // Wrapping under `.function` matches every other agent in the codebase.
-const TOOL = {
+export const TOOL = {
   type: "function" as const,
   function: {
     name: "submit_classification",
@@ -188,7 +188,7 @@ const TOOL = {
         counterparty: {
           type: "string",
           description:
-            "Normalized vendor/payer name. Strip Plaid noise like 'AUTHORIZED ON 05/21 VIA WEB' / ACH reference numbers / leading 'PAYMENT TO' verbs. Examples: 'Lion Travel', 'Anthropic', 'Meta Platforms (FB Ads)', 'Bank of America (CC payment)', '林小姐 (refund)'. Keep < 80 chars. If truly unknown, leave blank.",
+            "Normalized vendor/payer name. Strip Plaid noise like 'AUTHORIZED ON 05/21 VIA WEB' / ACH reference numbers / leading 'PAYMENT TO' verbs. Recurring real vendors: 'Lion Travel', 'Anthropic', 'Meta Platforms (FB Ads)', 'Bank of America (CC payment)'. For a customer, use only the name actually visible on the transaction, e.g. '<客人姓> (refund)'; never invent one. Keep < 80 chars. If truly unknown, leave blank.",
         },
         counterpartyType: {
           type: "string",
@@ -199,7 +199,7 @@ const TOOL = {
         purposeNote: {
           type: "string",
           description:
-            "Business purpose (IRS Rev. Proc. 2017-30 / §274 documentation). 1 line in 繁中, explains WHY money moved. Examples: '王先生團 Tokyo 訂金', 'FB 廣告 美西自由行', 'Jeff 個人轉公司 cash injection', 'Stripe 處理費 月結 4 月份'. Keep < 200 chars. Required for any expense_* or refund category.",
+            "Business purpose (IRS Rev. Proc. 2017-30 / §274 documentation). 1 line in 繁中, explains WHY money moved. Use the names/dates actually visible on the transaction, never invent. Shape examples (placeholders): '<客人>團 <目的地> 訂金', 'FB 廣告 美西自由行', 'Jeff 個人轉公司 cash injection', 'Stripe 處理費 月結 <月份>份'. Keep < 200 chars. Required for any expense_* or refund category.",
         },
       },
       required: [
@@ -215,7 +215,7 @@ const TOOL = {
   },
 };
 
-function buildSystem(): string {
+export function buildSystem(): string {
   const catList = ACCOUNTING_CATEGORIES.map(
     (c) => `  ${c}: ${CATEGORY_DESCRIPTIONS[c]}`
   ).join("\n");
@@ -231,7 +231,8 @@ function buildSystem(): string {
 3. counterpartyType — 8 個值之一:
 ${ctList}
 4. purposeNote — 一句繁中話講「為什麼這筆錢動了」,給 IRS audit 用。
-   範例: "王先生團 Tokyo 訂金"、"FB 廣告 美西自由行"、"還信用卡 CORP-9888"
+   只用交易上真的看得到的名字/編號/日期,沒看到就別編。範例(佔位符):
+   "<客人>團 <目的地> 訂金"、"FB 廣告 美西自由行"、"還信用卡 <卡號末四碼>"
 
 【你 ONLY 從這 10 個 PACK&GO 類別選一個】
 ${catList}

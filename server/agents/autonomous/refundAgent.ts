@@ -134,7 +134,7 @@ export type RefundAgentOutput = {
 };
 
 // 2026-05-21 hotfix: wrap in OpenAI-nested shape (see inquiryAgent.ts header).
-const TOOL: Tool = {
+export const TOOL: Tool = {
   type: "function",
   function: {
     name: "submit_refund_triage",
@@ -186,7 +186,7 @@ const TOOL: Tool = {
   },
 };
 
-function buildSystem(policy: string): string {
+export function buildSystem(policy: string): string {
   return `你是 PACK&GO 旅行社的 RefundAgent。你的工作 ONLY 是 triage — 給 Jeff 30 秒 context,讓他在 2 分鐘內做決定。
 
 【絕對原則 — 寫進骨子裡的硬規則】
@@ -206,9 +206,9 @@ ${policy}
 - extractedFacts:抽取訂單編號、金額、日期、具體事件(只填明確可見的,不要編造)
 - customerEmotionalState:1 句話形容情緒(冷靜 / 失望 / 憤怒 / 焦慮 etc)
 - jeffInternalBriefing:給 Jeff 看的 3-5 句摘要 — 客觀事實 + 你的觀察。**不要寫給客戶看的草稿**。
-- suggestedJeffActions:bulleted 下一步建議,例如:
-  - 確認訂單 PG-1234 在 8/15 是否確實有飯店降級
-  - 查供應商 LionTravel 的服務紀錄
+- suggestedJeffActions:bulleted 下一步建議。範例值一律用佔位符,真實的編號/日期只能照客戶來信寫的填,信裡沒有就別編。例如:
+  - 確認訂單 <訂單編號> 在 <日期> 是否確實有飯店降級
+  - 查供應商 <供應商名> 的服務紀錄
   - 親自打電話而非回 email(emotional state = 憤怒)
 - confidence + reasoning`;
 }
