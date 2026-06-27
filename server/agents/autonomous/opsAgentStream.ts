@@ -77,6 +77,16 @@ const SUGGEST_ACTION_TOOL: Anthropic.Tool = {
   },
 };
 
+/** Customer-page chat only: produce a follow-up draft card for THIS customer
+ * (the resolved profile is held by the stream, not passed by the model). The
+ * draft lands in the 待審草稿 panel for Jeff to review + one-click send. */
+const DRAFT_FOLLOWUP_TOOL: Anthropic.Tool = {
+  name: "draft_followup",
+  description:
+    "為「目前正在看的這位客人」備好一封專業跟進信草稿。會讀這位客人的真實對話、用 Jeff 的接待語氣(延用稱呼、用您、先噓寒問暖、低壓力、不催)寫好,放進客戶頁的待審草稿區,Jeff 看過一鍵就能寄。當 Jeff 要你回信 / 跟進 / 寫信給這位客人時呼叫;呼叫後用一兩句話跟 Jeff 說重點即可,不要自己長篇寫整封信。",
+  input_schema: { type: "object", properties: {}, required: [] },
+};
+
 async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
@@ -103,6 +113,10 @@ export async function* runOpsAgentStream(
   /** 批3 m4 — override the model for this stream. Customer-scoped chats pass
    *  Haiku (fast + cheap); global #ops passes nothing → Opus. */
   model?: string,
+  /** Customer-page chat only: the resolved customerProfileId, which unlocks the
+   *  draft_followup tool (produce a follow-up draft card for THIS customer).
+   *  Global #ops passes nothing → the tool is absent. */
+  draftProfileId?: number,
 ): AsyncGenerator<StreamEvent, void, void> {
   try {
     const { SYSTEM_PROMPT, ACTION_PROPOSAL_GUIDE, OPS_CHAT_MODEL } =
@@ -156,6 +170,9 @@ export async function* runOpsAgentStream(
       "【先說一句再查 — 體感鐵則】要呼叫工具前,先用一句短話跟 Jeff 說你正要查什麼(例:『我查一下中國有哪些團』『等我看一下這個月的帳』),再呼叫工具。不要一句話都不說就靜默查 — 查詢可能要十幾秒,Jeff 會盯著空白以為當掉。先吐這句話,他立刻看到你在動;查完再接正式答案。\n" +
       "【財務鐵則】每次回答財務問題 (淨利、這個月狀況),如果 get_finance_summary 回傳的 missingReceiptCount > 0,一定要主動提醒 Jeff:「有 N 筆支出還沒附 receipt,要補一下」,因為他需要收據報稅。\n" +
       "【最重要】查完工具後,你一定要用**文字**把答案講給 Jeff 聽 (例:問淨利就講「這個月淨利 $X」)。**絕對不可以**只丟一個 suggest_action 動作就當作回答 — 動作只是「答完之後」的額外建議。沒有文字回答 = 失敗。純資訊問題 (幾團、淨利、哪個最多) 通常根本不需要附動作,直接講答案就好。suggest_action 只在 Jeff 明顯需要做一件寫入的事 (寄信、退款、分類帳本) 時才用,而且永遠是在文字答案之後。" +
+      (draftProfileId != null
+        ? "\n【要回信 / 跟進這位客人 — 直接備好草稿】當 Jeff 叫你回信 / 跟進 / 幫忙寫信給「目前這位客人」,呼叫 draft_followup 把專業跟進信草稿備好(它會出現在客戶頁待審草稿區,看過一鍵就能寄)。呼叫後只要用一兩句話跟 Jeff 說重點(誰、卡在哪、幾天沒回),不要自己把整封信長篇寫在聊天裡。"
+        : "") +
       (extraSystem ? "\n\n" + extraSystem : "");
 
     // Cache the (large, mostly-static) system prompt so Opus 4.8's per-round
@@ -165,7 +182,10 @@ export async function* runOpsAgentStream(
       { type: "text" as const, text: system, cache_control: { type: "ephemeral" as const } },
     ];
 
-    const tools = [...READ_TOOLS, SUGGEST_ACTION_TOOL];
+    const tools =
+      draftProfileId != null
+        ? [...READ_TOOLS, SUGGEST_ACTION_TOOL, DRAFT_FOLLOWUP_TOOL]
+        : [...READ_TOOLS, SUGGEST_ACTION_TOOL];
     const suggestedActions: any[] = [];
     const cards: any[] = [];
     let finalAnswer = "";
@@ -225,6 +245,33 @@ export async function* runOpsAgentStream(
             type: "tool_result",
             tool_use_id: block.id,
             content: "proposed",
+          });
+        } else if (block.name === "draft_followup") {
+          // Produce a follow-up draft card for the current customer (the resolved
+          // profile is held by the stream, not trusted from the model). It lands
+          // in the 待審草稿 panel for Jeff to review + send; AI never sends.
+          let outcome = "無法草擬:沒有這位客人的資料。";
+          try {
+            const { getDb } = await import("../../db");
+            const { produceFollowupDraftForProfile } = await import(
+              "./followupDraftOnDemand"
+            );
+            const dbInst = await getDb();
+            if (dbInst && draftProfileId != null) {
+              const res = await produceFollowupDraftForProfile(dbInst, draftProfileId);
+              outcome =
+                res.status === "drafted"
+                  ? "跟進信草稿已備好,顯示在客戶頁待審草稿區,Jeff 看過一鍵就能寄。"
+                  : `沒有自動草擬(原因:${res.reason}),請 Jeff 人工處理。`;
+            }
+          } catch (e) {
+            log.warn({ err: e, draftProfileId }, "[opsAgentStream] draft_followup failed");
+            outcome = "草擬時出錯,請再試一次。";
+          }
+          toolResults.push({
+            type: "tool_result",
+            tool_use_id: block.id,
+            content: outcome,
           });
         } else {
           readNames.push(block.name);

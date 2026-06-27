@@ -10,6 +10,7 @@ import {
   Check,
 } from "lucide-react"
 import { Streamdown } from "streamdown"
+import { trpc } from "@/lib/trpc"
 import { useLocale } from "@/contexts/LocaleContext"
 import type { AdaptedCustomer, ChatMessage, Draft } from "./types"
 import {
@@ -43,6 +44,7 @@ export default function CustomerChat({
   isApprovingDraft: boolean
 }) {
   const { t } = useLocale()
+  const utils = trpc.useUtils()
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<ChatMsg[]>([])
   // AI 助手 streaming state. `busy` gates the send button; abortRef tears down
@@ -170,15 +172,30 @@ export default function CustomerChat({
       }
     } finally {
       setBusy(false)
+      // The agent may have produced a follow-up draft (draft_followup); refresh
+      // the 待審草稿 cards so a new one shows without a manual reload.
+      void utils.admin.customerDrafts.invalidate()
     }
   }
 
   const drafts = customer?.drafts ?? []
 
   return (
-    <div
-      className={`${expanded ? "w-[620px]" : "w-[340px]"} border-l border-gray-200 flex flex-col overflow-hidden transition-[width] duration-200`}
-    >
+    <>
+      {expanded && (
+        <div
+          className="fixed inset-0 z-40 bg-black/20"
+          onClick={() => setExpanded(false)}
+          aria-hidden="true"
+        />
+      )}
+      <div
+        className={
+          expanded
+            ? "fixed inset-y-0 right-0 z-50 w-[min(960px,72vw)] bg-white border-l border-gray-200 flex flex-col overflow-hidden shadow-2xl"
+            : "w-[340px] border-l border-gray-200 flex flex-col overflow-hidden"
+        }
+      >
       {/* Header */}
       <div className="px-4 py-2.5 border-b border-gray-200 text-[13px] font-medium flex items-center justify-between">
         <div className="flex items-center gap-1.5">
@@ -391,5 +408,6 @@ export default function CustomerChat({
         </div>
       </div>
     </div>
+    </>
   )
 }

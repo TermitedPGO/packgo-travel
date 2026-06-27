@@ -622,13 +622,22 @@ async function startServer() {
         customerId !== null || customerProfileId !== null
           ? (await import("../agents/autonomous/opsAgent")).OPS_CUSTOMER_CHAT_MODEL
           : undefined;
+      // Customer-scoped chats unlock draft_followup — resolve the profileId so
+      // "回信/跟進" produces a draft card for THIS customer. Global #ops: undefined.
+      let draftProfileId: number | undefined;
+      if (customerProfileId !== null) {
+        draftProfileId = customerProfileId;
+      } else if (customerId !== null) {
+        const { findCustomerProfileId } = await import("../db/customOrder");
+        draftProfileId = (await findCustomerProfileId({ userId: customerId })) ?? undefined;
+      }
       let finalAnswer = "";
       let suggestedActions: any[] = [];
       let cards: any[] = [];
       const startedAt = Date.now();
       let firstTokenLogged = false;
       try {
-        for await (const event of runOpsAgentStream(question, history, imageUrls, extraSystem, streamModel)) {
+        for await (const event of runOpsAgentStream(question, history, imageUrls, extraSystem, streamModel, draftProfileId)) {
           if (terminated) break; // timed out or client disconnected
           if (event.type === "token") {
             if (!firstTokenLogged) {
