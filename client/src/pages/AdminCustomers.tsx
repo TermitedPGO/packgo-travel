@@ -69,7 +69,6 @@ export default function AdminCustomers() {
           ) : (
             <CustomerChat
               customer={detail}
-              chatMessages={chatMessages}
               onApproveDraft={approveDraft}
               isApprovingDraft={isApprovingDraft}
             />

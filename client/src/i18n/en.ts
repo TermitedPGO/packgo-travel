@@ -3347,8 +3347,6 @@ export const en = {
         chatExpand: 'Expand',
         chatCollapse: 'Collapse',
         chatStop: 'Stop',
-        chatShowHistory: '{n} older messages',
-        chatHideHistory: 'Hide older messages',
       },
       status: {
         allClear: 'All clear',

@@ -8,13 +8,12 @@ import {
   Minimize2,
   Loader2,
   Check,
-  ChevronDown,
-  ChevronUp,
+  Lightbulb,
 } from "lucide-react"
 import { Streamdown } from "streamdown"
 import { trpc } from "@/lib/trpc"
 import { useLocale } from "@/contexts/LocaleContext"
-import type { AdaptedCustomer, ChatMessage, Draft } from "./types"
+import type { AdaptedCustomer, Draft } from "./types"
 import {
   emptyTurn,
   reduceChatEvent,
@@ -63,12 +62,10 @@ function useSmoothStream(target: string, streamKey: number): string {
 
 export default function CustomerChat({
   customer,
-  chatMessages,
   onApproveDraft,
   isApprovingDraft,
 }: {
   customer: AdaptedCustomer | null
-  chatMessages: ChatMessage[]
   onApproveDraft: (draft: Draft, editedBody?: string) => Promise<void>
   isApprovingDraft: boolean
 }) {
@@ -80,12 +77,9 @@ export default function CustomerChat({
   // the in-flight SSE if Jeff switches customer mid-answer or hits stop.
   const [busy, setBusy] = useState(false)
   const [expanded, setExpanded] = useState(false)
-  const [showHistory, setShowHistory] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
-  const hydratedRef = useRef<string | null>(null)
-  const hydratedCountRef = useRef(0)
 
   // Draft approve/edit/confirm state (keyed by draft id).
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -119,25 +113,7 @@ export default function CustomerChat({
     abortRef.current?.abort()
     setMessages([])
     setBusy(false)
-    setShowHistory(false)
-    hydratedRef.current = null
-    hydratedCountRef.current = 0
   }, [customer?.id, customer?.kind])
-
-  // Hydrate chat panel from persisted DB history (customerChatMessages) so past
-  // conversations survive page refresh. Only runs once per customer select.
-  useEffect(() => {
-    const key = customer ? `${customer.kind}-${customer.id}` : null
-    if (!key || hydratedRef.current === key || chatMessages.length === 0) return
-    hydratedRef.current = key
-    const history: ChatMsg[] = chatMessages.map((m) =>
-      m.senderRole === "jeff"
-        ? { role: "user" as const, text: m.body }
-        : { role: "ai" as const, turn: { steps: [], live: "", answer: m.body, error: null } },
-    )
-    hydratedCountRef.current = history.length
-    setMessages(history)
-  }, [customer?.id, customer?.kind, chatMessages])
 
   // Keep the latest streamed token in view.
   useEffect(() => {
@@ -279,6 +255,14 @@ export default function CustomerChat({
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
+        {/* AI nudge — surface the "next step" so Jeff sees it without scrolling overview */}
+        {customer?.aiSummary?.nextStep && messages.length === 0 && (
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-[12px] text-gray-700 leading-relaxed flex gap-2">
+            <Lightbulb className="w-3.5 h-3.5 text-gray-400 flex-shrink-0 mt-0.5" />
+            <span>{customer.aiSummary.nextStep}</span>
+          </div>
+        )}
+
         {/* Intro card */}
         {customer && drafts.length > 0 && (
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-[12px] text-gray-700 leading-relaxed">
@@ -404,34 +388,12 @@ export default function CustomerChat({
           </div>
         ))}
 
-        {/* History toggle — old conversations collapsed by default */}
-        {hydratedCountRef.current > 0 && (
-          <button
-            onClick={() => setShowHistory((v) => !v)}
-            className="w-full flex items-center justify-center gap-1.5 text-[11px] text-gray-400 hover:text-gray-600 py-1 transition-colors"
-          >
-            {showHistory ? (
-              <>
-                <ChevronUp className="w-3 h-3" />
-                {t("admin.customers.drafts.chatHideHistory")}
-              </>
-            ) : (
-              <>
-                <ChevronDown className="w-3 h-3" />
-                {t("admin.customers.drafts.chatShowHistory", { n: hydratedCountRef.current })}
-              </>
-            )}
-          </button>
-        )}
-
         {/* Chat: user bubbles + AI turns (dim thinking steps, then clean answer) */}
-        {messages.map((m, i) => {
-          const isHistoryMsg = i < hydratedCountRef.current
-          if (isHistoryMsg && !showHistory) return null
-          return m.role === "user" ? (
+        {messages.map((m, i) =>
+          m.role === "user" ? (
             <div
               key={i}
-              className={`text-[13px] leading-relaxed rounded-xl px-3 py-2 max-w-[88%] whitespace-pre-wrap ml-auto ${isHistoryMsg ? "bg-gray-400 text-white" : "bg-gray-900 text-white"}`}
+              className="text-[13px] leading-relaxed rounded-xl px-3 py-2 max-w-[88%] whitespace-pre-wrap ml-auto bg-gray-900 text-white"
             >
               {m.text}
             </div>
@@ -447,11 +409,10 @@ export default function CustomerChat({
               {(() => {
                 const isLast = i === messages.length - 1
                 const fullText = m.turn.answer || m.turn.live
-                const isSessionMsg = i >= hydratedCountRef.current
-                const shown = isLast && isSessionMsg ? smoothed : fullText
+                const shown = isLast ? smoothed : fullText
                 if (shown) {
                   return (
-                    <div className={`text-[13px] leading-[1.7] prose-chat ${isHistoryMsg ? "text-gray-400" : "text-gray-800"}`}>
+                    <div className="text-[13px] leading-[1.7] prose-chat text-gray-800">
                       <Streamdown>{shown}</Streamdown>
                       {isLast && (busy || smoothed !== fullText) && (
                         <span className="inline-block w-1.5 h-3.5 bg-gray-400 ml-0.5 align-text-bottom animate-pulse" />
@@ -475,8 +436,8 @@ export default function CustomerChat({
                 </div>
               )}
             </div>
-          )
-        })}
+          ),
+        )}
       </div>
 
       {/* Input */}
