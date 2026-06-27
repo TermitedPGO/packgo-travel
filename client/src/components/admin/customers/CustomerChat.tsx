@@ -13,7 +13,7 @@ import {
 import { Streamdown } from "streamdown"
 import { trpc } from "@/lib/trpc"
 import { useLocale } from "@/contexts/LocaleContext"
-import type { AdaptedCustomer, Draft } from "./types"
+import type { AdaptedCustomer, ChatMessage, Draft } from "./types"
 import {
   emptyTurn,
   reduceChatEvent,
@@ -62,10 +62,12 @@ function useSmoothStream(target: string, streamKey: number): string {
 
 export default function CustomerChat({
   customer,
+  chatMessages,
   onApproveDraft,
   isApprovingDraft,
 }: {
   customer: AdaptedCustomer | null
+  chatMessages: ChatMessage[]
   onApproveDraft: (draft: Draft, editedBody?: string) => Promise<void>
   isApprovingDraft: boolean
 }) {
@@ -80,6 +82,7 @@ export default function CustomerChat({
   const abortRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
+  const hydratedRef = useRef<string | null>(null)
 
   // Draft approve/edit/confirm state (keyed by draft id).
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -113,7 +116,22 @@ export default function CustomerChat({
     abortRef.current?.abort()
     setMessages([])
     setBusy(false)
+    hydratedRef.current = null
   }, [customer?.id, customer?.kind])
+
+  // Hydrate Jeff ↔ AI chat from DB so conversation survives page refresh.
+  // Only Jeff-AI interactions are stored; customer email exchanges live in 最近對話.
+  useEffect(() => {
+    const key = customer ? `${customer.kind}-${customer.id}` : null
+    if (!key || hydratedRef.current === key || chatMessages.length === 0) return
+    hydratedRef.current = key
+    const history: ChatMsg[] = chatMessages.map((m) =>
+      m.senderRole === "jeff"
+        ? { role: "user" as const, text: m.body }
+        : { role: "ai" as const, turn: { steps: [], live: "", answer: m.body, error: null } },
+    )
+    setMessages(history)
+  }, [customer?.id, customer?.kind, chatMessages])
 
   // Keep the latest streamed token in view.
   useEffect(() => {
