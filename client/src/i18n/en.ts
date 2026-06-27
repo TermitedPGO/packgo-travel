@@ -8300,20 +8300,6 @@ export const en = {
     nextStep4: 'Questions? Call +1 (510) 634-2307 or reply to your confirmation email anytime.',
   },
   // v78z-z2: Sprint 8 i18n cleanup — DailyBriefingCard / CompareBar / shared
-  dailyBriefing: {
-    header: 'PACK&GO Daily Briefing',
-    actionsToday: 'Actions today',
-    allClear: 'All clear. AI is handling the rest.',
-    wechatTitle: '{count} WeChat draft{s} ready for review',
-    wechatSub: 'AI generated replies. One click to send.',
-    quotesTitle: '{count} new quote{s} to follow up',
-    quotesSub: 'Customers expecting your reply within 24h.',
-    inquiryTitle: '{count} new inquir{ies}',
-    inquirySub: 'Direct questions from website contact form.',
-    tileAiQuotes: 'AI Quotes',
-    tileInvoices: 'Invoices',
-    tileReconciliation: 'Reconciliation',
-  },
   financeTab: {
     title: 'Finance',
     subtitle: 'Stripe + bookings + manual entries — one place for the money question.',

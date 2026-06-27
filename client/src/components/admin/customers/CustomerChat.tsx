@@ -32,6 +32,32 @@ function stepLabel(s: ChatStep): string {
   return "…"
 }
 
+/** Smooth the streamed answer: reveal characters at a steady cadence (rAF) so the
+ * text flows in like Claude Code instead of jumping in token-sized bursts. The
+ * cadence scales mildly with backlog so it never lags, but stays smooth on a
+ * trickle. `streamKey` resets the buffer when a new turn starts. */
+function useSmoothStream(target: string, streamKey: number): string {
+  const [displayed, setDisplayed] = useState("")
+  useEffect(() => {
+    setDisplayed("")
+  }, [streamKey])
+  useEffect(() => {
+    if (displayed === target) return
+    // The cleaned final answer can diverge from the raw stream — snap, don't stall.
+    if (!target.startsWith(displayed)) {
+      setDisplayed(target)
+      return
+    }
+    const backlog = target.length - displayed.length
+    const step = Math.max(2, Math.min(Math.ceil(backlog / 10), 40))
+    const id = requestAnimationFrame(() =>
+      setDisplayed(target.slice(0, Math.min(target.length, displayed.length + step))),
+    )
+    return () => cancelAnimationFrame(id)
+  }, [target, displayed, streamKey])
+  return displayed
+}
+
 export default function CustomerChat({
   customer,
   chatMessages,
@@ -53,6 +79,7 @@ export default function CustomerChat({
   const [expanded, setExpanded] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const taRef = useRef<HTMLTextAreaElement>(null)
 
   // Draft approve/edit/confirm state (keyed by draft id).
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -60,6 +87,14 @@ export default function CustomerChat({
   const [confirmId, setConfirmId] = useState<string | null>(null)
   const [confirmBody, setConfirmBody] = useState<string | undefined>(undefined)
   const [error, setError] = useState<{ id: string; msg: string } | null>(null)
+
+  // Smooth the active (last) AI turn so the answer flows in at a steady cadence
+  // instead of token-sized jumps (Claude Code feel). Older turns render directly.
+  const lastMsg = messages[messages.length - 1]
+  const smoothed = useSmoothStream(
+    lastMsg && lastMsg.role === "ai" ? lastMsg.turn.answer || lastMsg.turn.live : "",
+    messages.length,
+  )
 
   const reset = () => {
     setEditingId(null)
@@ -89,6 +124,14 @@ export default function CustomerChat({
 
   // Tear down any in-flight stream on unmount.
   useEffect(() => () => abortRef.current?.abort(), [])
+
+  // Auto-grow the composer textarea (1 line up to ~5), like Claude Code.
+  useEffect(() => {
+    const el = taRef.current
+    if (!el) return
+    el.style.height = "0px"
+    el.style.height = Math.min(el.scrollHeight, 120) + "px"
+  }, [input])
 
   // Sensitive (碰錢碰法律) drafts go through a confirm step; others send directly.
   // On failure: surface an error and KEEP the dialog open — never silently clear
@@ -357,22 +400,29 @@ export default function CustomerChat({
                 </div>
               ))}
 
-              {m.turn.answer ? (
-                <div className="text-[13px] text-gray-700 leading-relaxed bg-gray-100 rounded-xl px-3 py-2 prose-chat">
-                  <Streamdown>{m.turn.answer}</Streamdown>
-                </div>
-              ) : m.turn.live ? (
-                <div className="text-[13px] text-gray-700 leading-relaxed bg-gray-100 rounded-xl px-3 py-2 prose-chat">
-                  <Streamdown>{m.turn.live}</Streamdown>
-                  {busy && i === messages.length - 1 && (
-                    <span className="inline-block w-1.5 h-3.5 bg-gray-400 ml-0.5 align-text-bottom animate-pulse" />
-                  )}
-                </div>
-              ) : busy && i === messages.length - 1 && !m.turn.error ? (
-                <div className="flex items-center gap-1.5 text-[12px] text-gray-400 px-1">
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                </div>
-              ) : null}
+              {(() => {
+                const isLast = i === messages.length - 1
+                const fullText = m.turn.answer || m.turn.live
+                const shown = isLast ? smoothed : fullText
+                if (shown) {
+                  return (
+                    <div className="text-[13px] text-gray-700 leading-relaxed bg-gray-100 rounded-xl px-3 py-2 prose-chat">
+                      <Streamdown>{shown}</Streamdown>
+                      {isLast && (busy || smoothed !== fullText) && (
+                        <span className="inline-block w-1.5 h-3.5 bg-gray-400 ml-0.5 align-text-bottom animate-pulse" />
+                      )}
+                    </div>
+                  )
+                }
+                if (busy && isLast && !m.turn.error) {
+                  return (
+                    <div className="flex items-center gap-1.5 text-[12px] text-gray-400 px-1">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    </div>
+                  )
+                }
+                return null
+              })()}
 
               {m.turn.error && (
                 <div className="text-[12px] text-gray-700 bg-gray-100 rounded-xl px-3 py-2">
@@ -386,22 +436,28 @@ export default function CustomerChat({
 
       {/* Input */}
       <div className="border-t border-gray-200 p-2">
-        <div className="flex items-center gap-2 border border-gray-200 rounded-xl px-3 py-1.5">
-          <input
-            type="text"
+        <div className="flex items-end gap-2 border border-gray-200 rounded-xl px-3 py-1.5">
+          <textarea
+            ref={taRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSend()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault()
+                handleSend()
+              }
+            }}
             disabled={!customer}
+            rows={1}
             placeholder={t("admin.customers.drafts.askPlaceholder")}
-            className="flex-1 text-[12px] outline-none bg-transparent disabled:opacity-60"
+            className="flex-1 text-[12px] leading-relaxed outline-none bg-transparent resize-none max-h-[120px] py-0.5 disabled:opacity-60"
           />
           <button
             onClick={busy ? () => abortRef.current?.abort() : handleSend}
             disabled={!customer || (!busy && !input.trim())}
             aria-label={busy ? t("admin.customers.drafts.chatStop") : t("admin.customers.drafts.send")}
             title={busy ? t("admin.customers.drafts.chatStop") : undefined}
-            className="w-6 h-6 rounded-md bg-gray-900 text-white flex items-center justify-center hover:bg-gray-700 transition-colors flex-shrink-0 disabled:opacity-40 disabled:hover:bg-gray-900"
+            className="w-6 h-6 mb-0.5 rounded-md bg-gray-900 text-white flex items-center justify-center hover:bg-gray-700 transition-colors flex-shrink-0 disabled:opacity-40 disabled:hover:bg-gray-900"
           >
             {busy ? <Square className="w-2.5 h-2.5" /> : <Send className="w-3 h-3" />}
           </button>

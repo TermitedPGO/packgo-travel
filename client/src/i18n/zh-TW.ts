@@ -8304,21 +8304,6 @@ export const zhTW = {
     nextStep3: '出發前 30 天，我們會寄出行前準備提醒（簽證、行李、聯絡資訊）。',
     nextStep4: '有任何問題嗎？請致電 +1 (510) 634-2307，或直接回覆您的確認信。',
   },
-  // v78z-z2: Sprint 8 i18n cleanup — DailyBriefingCard / CompareBar / shared
-  dailyBriefing: {
-    header: 'PACK&GO 早報',
-    actionsToday: '今日待處理',
-    allClear: '所有事項已處理完畢，AI 正在處理其餘的訊息。',
-    wechatTitle: '{count} 則 WeChat 草稿等您 approve',
-    wechatSub: 'AI 已生成回覆，一鍵核准傳送',
-    quotesTitle: '{count} 張新報價單需要跟進',
-    quotesSub: '客戶等您 24 小時內回覆',
-    inquiryTitle: '{count} 則新客戶詢問',
-    inquirySub: '網站聯絡表單來信',
-    tileAiQuotes: 'AI 報價',
-    tileInvoices: '發票',
-    tileReconciliation: '對帳',
-  },
   financeTab: {
     title: '財務管理',
     subtitle: 'Stripe + 訂單 + 手動入帳，一個地方回答「這個月賺多少」。',
