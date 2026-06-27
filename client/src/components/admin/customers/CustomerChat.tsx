@@ -392,7 +392,7 @@ export default function CustomerChat({
               {m.text}
             </div>
           ) : (
-            <div key={i} className="space-y-1.5 max-w-[94%]">
+            <div key={i} className="space-y-1.5 max-w-[60ch]">
               {m.turn.steps.map((s, j) => (
                 <div key={j} className="flex items-start gap-1.5 text-[11px] text-gray-400 leading-snug">
                   <Check className="w-3 h-3 mt-0.5 text-gray-300 flex-shrink-0" />
@@ -406,7 +406,7 @@ export default function CustomerChat({
                 const shown = isLast ? smoothed : fullText
                 if (shown) {
                   return (
-                    <div className="text-[13px] text-gray-700 leading-relaxed bg-gray-100 rounded-xl px-3 py-2 prose-chat">
+                    <div className="text-[13px] text-gray-800 leading-[1.7] prose-chat">
                       <Streamdown>{shown}</Streamdown>
                       {isLast && (busy || smoothed !== fullText) && (
                         <span className="inline-block w-1.5 h-3.5 bg-gray-400 ml-0.5 align-text-bottom animate-pulse" />
