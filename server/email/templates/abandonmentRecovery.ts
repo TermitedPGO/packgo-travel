@@ -23,12 +23,12 @@ export async function sendAbandonmentRecoveryEmail(data: AbandonmentRecoveryData
   const code = data.recoveryCode || "BACK5";
 
   const subject = isEN
-    ? `Your spot is still waiting — ${data.tourTitle}`
-    : `您的座位還為您保留中 — ${data.tourTitle}`;
+    ? `Your spot is still waiting｜${data.tourTitle}`
+    : `您的座位還為您保留中｜${data.tourTitle}`;
 
   const text = isEN
-    ? `Hello ${data.customerName},\n\nWe noticed you started booking ${data.tourTitle} (departing ${data.departureDate}) but didn't complete payment.\n\nYour seat is reserved for 24 more hours. Total: ${priceStr}\n\nUse code ${code} at checkout for 5% off.\n\n${BASE_URL}/bookings/${data.bookingId}\n\nQuestions? Reply or call +1 (510) 634-2307.\n\n— PACK&GO Travel`
-    : `親愛的 ${data.customerName} 您好：\n\n您剛才開始預訂「${data.tourTitle}」（出發日 ${data.departureDate}），但似乎還沒完成付款。\n\n您的座位我們已為您保留 24 小時。總金額：${priceStr}\n\n結帳時使用優惠碼 ${code}，享 5% 折扣。\n\n${BASE_URL}/bookings/${data.bookingId}\n\n有任何問題？回覆此 email 或撥打 +1 (510) 634-2307\n\n— PACK&GO 旅行社`;
+    ? `Hello ${data.customerName},\n\nWe noticed you started booking ${data.tourTitle} (departing ${data.departureDate}) but didn't complete payment.\n\nYour seat is reserved for 24 more hours. Total: ${priceStr}\n\nUse code ${code} at checkout for 5% off.\n\n${BASE_URL}/bookings/${data.bookingId}\n\nQuestions? Reply or call +1 (510) 634-2307.\n\nPACK&GO Travel`
+    : `親愛的 ${data.customerName} 您好：\n\n您剛才開始預訂「${data.tourTitle}」（出發日 ${data.departureDate}），但似乎還沒完成付款。\n\n您的座位我們已為您保留 24 小時。總金額：${priceStr}\n\n結帳時使用優惠碼 ${code}，享 5% 折扣。\n\n${BASE_URL}/bookings/${data.bookingId}\n\n有任何問題？回覆此 email 或撥打 +1 (510) 634-2307\n\nPACK&GO 旅行社`;
 
   const bodyHtml = `
     <h2 style="color:#0d9488; margin-bottom: 16px;">${isEN ? "Your spot is still waiting" : "您的座位仍為您保留中"}</h2>

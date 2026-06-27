@@ -26,8 +26,8 @@ export async function sendWinbackEmail(data: WinbackEmailData) {
     : `還記得我們陪您去的「${data.pastTourTitle}」嗎?`;
 
   const text = isEN
-    ? `Hello ${data.customerName},\n\nIt's been a month since your ${data.pastTourTitle} trip. We hope the memories are still vivid.\n\nIf you're thinking about your next trip — maybe a different season, a new region, or bringing family this time — Jeff would love to plan it with you personally.\n\nAs a returning customer, your next custom itinerary gets 7% off (code ${code}).\n\nWhat caught your eye? Just reply with a destination or a date range and Jeff will draft a quote within 24 hours.\n\n— Jeff @ PACK&GO Travel\n  jeffhsieh09@gmail.com · +1 (510) 634-2307`
-    : `親愛的 ${data.customerName} 您好:\n\n您從「${data.pastTourTitle}」回來剛好滿一個月了,旅程的回憶還鮮明嗎?\n\n如果您開始想下一趟 — 或許不同季節、不同地區,或這次帶家人 — Jeff 想親自陪您規劃。\n\n回頭客專屬,下次客製行程享 7% 優惠(代碼 ${code})。\n\n有什麼想去的地方?回信告訴我目的地或日期區間,Jeff 24 小時內幫您起草報價。\n\n— Jeff @ PACK&GO 旅行社\n  jeffhsieh09@gmail.com · +1 (510) 634-2307`;
+    ? `Hello ${data.customerName},\n\nIt's been a month since your ${data.pastTourTitle} trip. We hope the memories are still vivid.\n\nIf you're thinking about your next trip, maybe a different season, a new region, or bringing family this time, Jeff would love to plan it with you personally.\n\nAs a returning customer, your next custom itinerary gets 7% off (code ${code}).\n\nWhat caught your eye? Just reply with a destination or a date range and Jeff will draft a quote within 24 hours.\n\nJeff @ PACK&GO Travel\n  jeffhsieh09@gmail.com · +1 (510) 634-2307`
+    : `親愛的 ${data.customerName} 您好:\n\n您從「${data.pastTourTitle}」回來剛好滿一個月了,旅程的回憶還鮮明嗎?\n\n如果您開始想下一趟,或許不同季節、不同地區,或這次帶家人,Jeff 想親自陪您規劃。\n\n回頭客專屬,下次客製行程享 7% 優惠(代碼 ${code})。\n\n有什麼想去的地方?回信告訴我目的地或日期區間,Jeff 24 小時內幫您起草報價。\n\nJeff @ PACK&GO 旅行社\n  jeffhsieh09@gmail.com · +1 (510) 634-2307`;
 
   const bodyHtml = `
     <h2 style="color:#0d9488; margin-bottom: 16px;">${isEN ? "We miss you" : "想念您"}</h2>
@@ -39,19 +39,19 @@ export async function sendWinbackEmail(data: WinbackEmailData) {
     }</p>
     <p>${
       isEN
-        ? "If you're thinking about your next trip — maybe a different season, a new region, or bringing family this time — Jeff would love to plan it with you personally."
-        : "如果您開始想下一趟 — 或許不同季節、不同地區,或這次帶家人 — Jeff 想親自陪您規劃。"
+        ? "If you're thinking about your next trip, maybe a different season, a new region, or bringing family this time, Jeff would love to plan it with you personally."
+        : "如果您開始想下一趟,或許不同季節、不同地區,或這次帶家人,Jeff 想親自陪您規劃。"
     }</p>
     ${emailHighlightBox(
       `<strong>${isEN ? "Returning customer bonus" : "回頭客專屬"}:</strong> ${
         isEN
-          ? `7% off your next custom itinerary — code <code style="font-family:monospace;letter-spacing:1px;">${code}</code>`
-          : `下次客製行程享 7% 優惠 — 代碼 <code style="font-family:monospace;letter-spacing:1px;">${code}</code>`
+          ? `7% off your next custom itinerary, code <code style="font-family:monospace;letter-spacing:1px;">${code}</code>`
+          : `下次客製行程享 7% 優惠,代碼 <code style="font-family:monospace;letter-spacing:1px;">${code}</code>`
       }`
     )}
     <p style="margin-top:18px;">${
       isEN
-        ? "Just reply with a destination or date range — Jeff will draft a quote within 24 hours."
+        ? "Just reply with a destination or date range, Jeff will draft a quote within 24 hours."
         : "回信告訴 Jeff 目的地或日期區間,24 小時內幫您起草報價。"
     }</p>
     <div style="margin: 24px 0;">${emailButton(

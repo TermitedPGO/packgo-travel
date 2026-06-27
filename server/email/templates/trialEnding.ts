@@ -47,7 +47,7 @@ export async function sendTrialEndingReminder(data: TrialEndingReminderData) {
   const text = isEN
     ? `Hi ${data.customerName},
 
-Just a heads-up — your 10-day PACK&GO ${data.tierLabel} trial ends on ${endDateStr}.
+Just a heads-up, your 10-day PACK&GO ${data.tierLabel} trial ends on ${endDateStr}.
 
 After that, your card will be automatically charged ${data.chargeAmount} ${intervalLabel.trim()} for the ${data.tierLabel} membership.
 
@@ -60,12 +60,12 @@ ${data.cancelUrl}
 
 Thanks for trying PACK&GO ${data.tierLabel}!
 
-— PACK&GO Travel
+PACK&GO Travel
 CST #2166984 · +1 (510) 634-2307
 This message complies with California Business & Professions Code §17602.`
     : `${data.customerName} 您好,
 
-提醒一下 — 您 10 天的 PACK&GO ${data.tierLabel} 試用將於 ${endDateStr} 結束。
+提醒一下,您 10 天的 PACK&GO ${data.tierLabel} 試用將於 ${endDateStr} 結束。
 
 之後您的卡將自動扣款 ${data.chargeAmount} ${intervalLabel}（${data.tierLabel} 會員費)。
 
@@ -78,7 +78,7 @@ ${data.cancelUrl}
 
 感謝您體驗 PACK&GO ${data.tierLabel}!
 
-— PACK&GO 旅行社
+PACK&GO 旅行社
 CST #2166984 · +1 (510) 634-2307
 本通知符合加州 Business & Professions Code §17602。`;
 
@@ -99,8 +99,8 @@ CST #2166984 · +1 (510) 634-2307
 
     <p style="font-size:14px; margin-top:20px;">
       ${isEN
-        ? "If you'd like to continue, you don't need to do anything. To cancel, click below — takes 10 seconds, no phone call needed."
-        : "若想繼續使用無需任何動作。想取消請點下方連結 — 10 秒完成,無需打電話。"}
+        ? "If you'd like to continue, you don't need to do anything. To cancel, click below, takes 10 seconds, no phone call needed."
+        : "若想繼續使用無需任何動作。想取消請點下方連結,10 秒完成,無需打電話。"}
     </p>
 
     <div style="margin: 24px 0;">${emailButton(cta, data.cancelUrl)}</div>

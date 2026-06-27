@@ -30,8 +30,8 @@ export async function sendVoucherIssuedEmail(data: VoucherIssuedEmailData) {
     day: "numeric",
   });
   const text = isEN
-    ? `Hi ${data.customerName},\n\nThanks for redeeming ${data.pointsCost.toLocaleString()} Packpoint for ${data.voucherTitle}.\n\nYour voucher code:\n  ${data.voucherCode}\n\nValue: $${data.amountUsd}\nExpires: ${expiryStr}\n\nHow to use: present this code when booking with PACK&GO. We'll apply it to your next eligible booking.\n\nQuestions? Reply this email or call +1 (510) 634-2307.\n\n— PACK&GO Travel`
-    : `${data.customerName} 您好,\n\n感謝您用 ${data.pointsCost.toLocaleString()} Packpoint 兌換 ${data.voucherTitle}。\n\n您的 voucher 代碼:\n  ${data.voucherCode}\n\n價值:$${data.amountUsd}\n到期日:${expiryStr}\n\n使用方式:預訂時告訴 PACK&GO 此 voucher code,我們會自動套用到符合條件的訂單上。\n\n如有問題請回覆此 email 或致電 +1 (510) 634-2307。\n\n— PACK&GO 旅行社`;
+    ? `Hi ${data.customerName},\n\nThanks for redeeming ${data.pointsCost.toLocaleString()} Packpoint for ${data.voucherTitle}.\n\nYour voucher code:\n  ${data.voucherCode}\n\nValue: $${data.amountUsd}\nExpires: ${expiryStr}\n\nHow to use: present this code when booking with PACK&GO. We'll apply it to your next eligible booking.\n\nQuestions? Reply this email or call +1 (510) 634-2307.\n\nPACK&GO Travel`
+    : `${data.customerName} 您好,\n\n感謝您用 ${data.pointsCost.toLocaleString()} Packpoint 兌換 ${data.voucherTitle}。\n\n您的 voucher 代碼:\n  ${data.voucherCode}\n\n價值:$${data.amountUsd}\n到期日:${expiryStr}\n\n使用方式:預訂時告訴 PACK&GO 此 voucher code,我們會自動套用到符合條件的訂單上。\n\n如有問題請回覆此 email 或致電 +1 (510) 634-2307。\n\nPACK&GO 旅行社`;
 
   const bodyHtml = `
     <h2 style="color:#8a6f3a; margin-bottom: 16px;">${isEN ? "Voucher Issued 🎁" : "兌換成功 🎁"}</h2>

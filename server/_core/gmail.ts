@@ -792,7 +792,7 @@ export function buildMimeReply(input: SendReplyInput): string {
   const body =
     input.bodyText.trim() +
     "\n\n" +
-    "—\n" +
+    "" +
     "本訊息由 PACK&GO AI 助理自動回覆。如需直接聯絡 Jeff,請回覆此信。\n" +
     "PACK&GO Travel · jeffhsieh09@gmail.com · +1 (510) 634-2307";
 
@@ -860,7 +860,7 @@ export async function sendReplyInThread(
     return {
       ok: true,
       dryRun: true,
-      reason: "confirmedAutoSendOk=false — pipeline did not authorize send",
+      reason: "confirmedAutoSendOk=false - pipeline did not authorize send",
     };
   }
 

@@ -23,12 +23,12 @@ export async function sendCheckinEmail(data: CheckinEmailData) {
   const code = data.promoCode || "FRIENDS10";
 
   const subject = isEN
-    ? `Three months on — quick hello from Jeff @ PACK&GO`
-    : `三個月過去了 — Jeff 跟您打聲招呼`;
+    ? `Three months on｜quick hello from Jeff @ PACK&GO`
+    : `三個月過去了｜Jeff 跟您打聲招呼`;
 
   const text = isEN
-    ? `Hello ${data.customerName},\n\nThree months ago you went on ${data.pastTourTitle} with us. I hope it still feels recent.\n\nI'm not pitching anything — just a quick check-in. If you ever want to recommend a friend or family member to PACK&GO, they get 10% off their first trip (code ${code}) and you get a $100 credit toward your next one.\n\nIf you've been daydreaming about another trip, you know where to find me.\n\n— Jeff @ PACK&GO Travel\n  jeffhsieh09@gmail.com · +1 (510) 634-2307`
-    : `親愛的 ${data.customerName} 您好:\n\n三個月前我陪您走了「${data.pastTourTitle}」,希望那段時光還鮮明。\n\n這封信不推銷什麼 — 純粹打聲招呼。如果您身邊有朋友或家人想試試 PACK&GO,他們第一趟享 10% 優惠(代碼 ${code}),您也會收到 $100 信用額度抵下次行程。\n\n如果您自己在想下趟旅行,您知道去哪裡找我。\n\n— Jeff @ PACK&GO 旅行社\n  jeffhsieh09@gmail.com · +1 (510) 634-2307`;
+    ? `Hello ${data.customerName},\n\nThree months ago you went on ${data.pastTourTitle} with us. I hope it still feels recent.\n\nI'm not pitching anything, just a quick check-in. If you ever want to recommend a friend or family member to PACK&GO, they get 10% off their first trip (code ${code}) and you get a $100 credit toward your next one.\n\nIf you've been daydreaming about another trip, you know where to find me.\n\nJeff @ PACK&GO Travel\n  jeffhsieh09@gmail.com · +1 (510) 634-2307`
+    : `親愛的 ${data.customerName} 您好:\n\n三個月前我陪您走了「${data.pastTourTitle}」,希望那段時光還鮮明。\n\n這封信不推銷什麼,純粹打聲招呼。如果您身邊有朋友或家人想試試 PACK&GO,他們第一趟享 10% 優惠(代碼 ${code}),您也會收到 $100 信用額度抵下次行程。\n\n如果您自己在想下趟旅行,您知道去哪裡找我。\n\nJeff @ PACK&GO 旅行社\n  jeffhsieh09@gmail.com · +1 (510) 634-2307`;
 
   const bodyHtml = `
     <h2 style="color:#0d9488; margin-bottom: 16px;">${isEN ? "Three months on" : "三個月過去了"}</h2>
@@ -40,8 +40,8 @@ export async function sendCheckinEmail(data: CheckinEmailData) {
     }</p>
     <p>${
       isEN
-        ? "I'm not pitching anything — just a quick check-in."
-        : "這封信不推銷什麼 — 純粹打聲招呼。"
+        ? "I'm not pitching anything, just a quick check-in."
+        : "這封信不推銷什麼,純粹打聲招呼。"
     }</p>
     ${emailHighlightBox(
       isEN
@@ -53,7 +53,7 @@ export async function sendCheckinEmail(data: CheckinEmailData) {
         ? "If you've been daydreaming about another trip, you know where to find me."
         : "如果您自己在想下趟旅行,您知道去哪裡找我。"
     }</p>
-    <p style="margin-top:18px;font-style:italic;color:#666;">${isEN ? "— Jeff" : "— Jeff"}</p>
+    <p style="margin-top:18px;font-style:italic;color:#666;">${isEN ? "Jeff" : "Jeff"}</p>
     <p style="font-size:12px; color:#999; margin-top:24px;">PACK&GO Travel · CST #2166984 · +1 (510) 634-2307</p>
   `;
   const html = wrapInBrandTemplate({ title: subject, bodyHtml });

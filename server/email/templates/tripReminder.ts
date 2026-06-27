@@ -116,8 +116,8 @@ PACK & GO 旅行社（CST #2166984）
   // Notify owner (Slack/email fallback) so ops sees activity (always ZH for owner)
   const ownerCopy = REMINDER_COPY[data.daysOut].zh;
   await notifyOwner({
-    title: `行程提醒 (${data.daysOut}d) #${data.bookingId} — ${data.customerName}`,
-    content: `${ownerCopy.subject}\n\n${ownerCopy.body}\n\n訂單 #${data.bookingId} — ${data.tourTitle}`,
+    title: `行程提醒 (${data.daysOut}d) #${data.bookingId}｜${data.customerName}`,
+    content: `${ownerCopy.subject}\n\n${ownerCopy.body}\n\n訂單 #${data.bookingId}｜${data.tourTitle}`,
   }).catch(() => {});
 
   const smtp = getTransporter();
@@ -127,7 +127,7 @@ PACK & GO 旅行社（CST #2166984）
     await smtp.sendMail({
       from: `"PACK&GO Travel" <${EMAIL_FROM}>`,
       to: data.to,
-      subject: `${copy.subject} — ${data.tourTitle}`,
+      subject: `${copy.subject}｜${data.tourTitle}`,
       html: generateTripReminderHTML(data, copy),
       text: emailText.trim(),
     });

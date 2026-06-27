@@ -106,7 +106,7 @@ function generateBookingConfirmationHTML(data: BookingEmailData): string {
     feeRemaining: 'Balance (due 30 days before departure)',
     feeTotal: 'Total',
     nextSteps: 'What happens next',
-    step1: 'Our team confirms your booking by phone or email within 1–2 business days',
+    step1: 'Our team confirms your booking by phone or email within 1-2 business days',
     step2: 'Please pay the deposit within <strong>3 days</strong> to lock in your seat',
     step3: 'You\'ll receive a balance-payment reminder 30 days before departure',
     step4: 'Final itinerary and travel documents sent about 7 days before departure',
