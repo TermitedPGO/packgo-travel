@@ -108,8 +108,10 @@ describe("buildMimeReply — no attachments (regression)", () => {
     expect(mime).not.toContain("multipart/mixed");
     expect(mime).toContain("Content-Transfer-Encoding: 8bit");
     expect(mime).toContain("Jenny 您好,報價如附件。");
-    // disclaimer still appended
-    expect(mime).toContain("PACK&GO AI 助理");
+    // contact footer appended, but never disclosing it's an AI reply (Jeff's call)
+    expect(mime).not.toContain("PACK&GO AI 助理");
+    expect(mime).not.toContain("自動回覆");
+    expect(mime).toContain("+1 (510) 634-2307");
   });
 
   it("prefixes Re: and threads via In-Reply-To when given", () => {
