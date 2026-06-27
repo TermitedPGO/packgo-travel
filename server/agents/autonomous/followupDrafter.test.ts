@@ -52,6 +52,20 @@ describe("buildSystem — hard rules are present", () => {
   it("names the submit tool", () => {
     expect(sys).toContain("submit_followup_draft");
   });
+  it("puts Jeff's rules at the top as a layered override", () => {
+    expect(sys).toContain("最高優先");
+    expect(sys).toContain("一律以這些為準");
+  });
+  it("teaches by ❌ bad vs ✅ good pairs, not abstract rules alone", () => {
+    expect(sys).toContain("壞例子 ❌ vs 好例子 ✅");
+    // both a forbidden form and its corrected form are shown
+    expect(sys).toContain("名額有限");
+    expect(sys).toContain("您慢慢看");
+  });
+  it("ships a pre-send self-check for drift symptoms", () => {
+    expect(sys).toContain("寄出前自檢");
+    expect(sys).toContain("跑偏");
+  });
 });
 
 describe("buildUserPrompt", () => {
