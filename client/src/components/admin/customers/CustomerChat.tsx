@@ -8,6 +8,8 @@ import {
   Minimize2,
   Loader2,
   Check,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react"
 import { Streamdown } from "streamdown"
 import { trpc } from "@/lib/trpc"
@@ -78,6 +80,7 @@ export default function CustomerChat({
   // the in-flight SSE if Jeff switches customer mid-answer or hits stop.
   const [busy, setBusy] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
@@ -116,6 +119,7 @@ export default function CustomerChat({
     abortRef.current?.abort()
     setMessages([])
     setBusy(false)
+    setShowHistory(false)
     hydratedRef.current = null
     hydratedCountRef.current = 0
   }, [customer?.id, customer?.kind])
@@ -400,12 +404,34 @@ export default function CustomerChat({
           </div>
         ))}
 
+        {/* History toggle — old conversations collapsed by default */}
+        {hydratedCountRef.current > 0 && (
+          <button
+            onClick={() => setShowHistory((v) => !v)}
+            className="w-full flex items-center justify-center gap-1.5 text-[11px] text-gray-400 hover:text-gray-600 py-1 transition-colors"
+          >
+            {showHistory ? (
+              <>
+                <ChevronUp className="w-3 h-3" />
+                {t("admin.customers.drafts.chatHideHistory")}
+              </>
+            ) : (
+              <>
+                <ChevronDown className="w-3 h-3" />
+                {t("admin.customers.drafts.chatShowHistory", { n: hydratedCountRef.current })}
+              </>
+            )}
+          </button>
+        )}
+
         {/* Chat: user bubbles + AI turns (dim thinking steps, then clean answer) */}
-        {messages.map((m, i) =>
-          m.role === "user" ? (
+        {messages.map((m, i) => {
+          const isHistoryMsg = i < hydratedCountRef.current
+          if (isHistoryMsg && !showHistory) return null
+          return m.role === "user" ? (
             <div
               key={i}
-              className="text-[13px] leading-relaxed rounded-xl px-3 py-2 max-w-[88%] whitespace-pre-wrap bg-gray-900 text-white ml-auto"
+              className={`text-[13px] leading-relaxed rounded-xl px-3 py-2 max-w-[88%] whitespace-pre-wrap ml-auto ${isHistoryMsg ? "bg-gray-400 text-white" : "bg-gray-900 text-white"}`}
             >
               {m.text}
             </div>
@@ -425,7 +451,7 @@ export default function CustomerChat({
                 const shown = isLast && isSessionMsg ? smoothed : fullText
                 if (shown) {
                   return (
-                    <div className="text-[13px] text-gray-800 leading-[1.7] prose-chat">
+                    <div className={`text-[13px] leading-[1.7] prose-chat ${isHistoryMsg ? "text-gray-400" : "text-gray-800"}`}>
                       <Streamdown>{shown}</Streamdown>
                       {isLast && (busy || smoothed !== fullText) && (
                         <span className="inline-block w-1.5 h-3.5 bg-gray-400 ml-0.5 align-text-bottom animate-pulse" />
@@ -449,8 +475,8 @@ export default function CustomerChat({
                 </div>
               )}
             </div>
-          ),
-        )}
+          )
+        })}
       </div>
 
       {/* Input */}

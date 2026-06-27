@@ -3315,6 +3315,8 @@ export const zhTW = {
         chatExpand: '展開',
         chatCollapse: '收合',
         chatStop: '停止',
+        chatShowHistory: '查看 {n} 則舊對話',
+        chatHideHistory: '收起舊對話',
       },
       status: {
         allClear: '一切就緒',
