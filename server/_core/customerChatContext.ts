@@ -59,8 +59,10 @@ async function buildDocsBlock(scope: CustomerDocsScope): Promise<string> {
 
 /** Per-list cap — keeps the block small even for heavy customers. */
 const LIST_CAP = 5;
-/** Hard cap on the whole block (chars). */
-const BLOCK_CAP = 2400;
+/** Hard cap on the whole block (chars). Raised from 2400 → 4000 (2026-06-27)
+ *  because heavy customers' context was silently truncated, causing the agent
+ *  to miss bookings/inquiries and answer as if data was complete. */
+const BLOCK_CAP = 4000;
 
 export interface CustomerContextData {
   user: {
@@ -165,7 +167,10 @@ export function formatCustomerContext(data: CustomerContextData): string {
   }
 
   const block = lines.join("\n");
-  return block.length > BLOCK_CAP ? block.slice(0, BLOCK_CAP) : block;
+  if (block.length > BLOCK_CAP) {
+    return block.slice(0, BLOCK_CAP) + "\n…(資料已截斷,需要更多細節請用工具查)";
+  }
+  return block;
 }
 
 /** IO assembly. Returns null when the DB is unavailable or the user is gone. */

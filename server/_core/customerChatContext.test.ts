@@ -137,7 +137,7 @@ describe("formatCustomerContext", () => {
         currency: "USD",
       })),
     });
-    expect(block.length).toBeLessThanOrEqual(2400);
+    expect(block.length).toBeLessThanOrEqual(4100);
   });
 
   it("falls back to email / #id when the name is missing", () => {

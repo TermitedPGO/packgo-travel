@@ -55,7 +55,7 @@ import { READ_TOOLS, executeReadTool } from "./opsTools";
 beforeEach(() => { nextRows = []; });
 
 describe("READ_TOOLS definitions", () => {
-  it("exposes the 12 curated tools", () => {
+  it("exposes the 14 curated tools", () => {
     const names = READ_TOOLS.map((t) => t.name);
     expect(names).toContain("count_records");
     expect(names).toContain("aggregate_departures");
@@ -65,7 +65,9 @@ describe("READ_TOOLS definitions", () => {
     expect(names).toContain("preview_customer_threads");
     expect(names).toContain("read_customer_conversation");
     expect(names).toContain("list_followups_needed");
-    expect(READ_TOOLS.length).toBe(12);
+    expect(names).toContain("get_customer_documents");
+    expect(names).toContain("get_payment_history");
+    expect(READ_TOOLS.length).toBe(14);
   });
   it("every tool has a valid input_schema", () => {
     for (const t of READ_TOOLS) {

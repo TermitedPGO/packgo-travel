@@ -48,6 +48,8 @@ const TOOL_LABELS: Record<string, string> = {
   draft_followup: "草擬跟進信",
   update_customer_note: "更新備註",
   update_booking_status: "更新訂單狀態",
+  get_customer_documents: "查看證件狀態",
+  get_payment_history: "查看付款紀錄",
 };
 
 export function humanizeToolName(name: string): string {

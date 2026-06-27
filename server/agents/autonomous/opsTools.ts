@@ -200,6 +200,40 @@ export const READ_TOOLS: Anthropic.Tool[] = [
       required: [],
     },
   },
+  {
+    name: "get_customer_documents",
+    description:
+      "Check a customer's documents (passport, visa, insurance) expiry status. " +
+      "Use when Jeff asks '護照還有效嗎' / '簽證到期了嗎' / '文件狀態'. " +
+      "NEVER expose passport numbers — only show expiry date + whether it's current.",
+    input_schema: {
+      type: "object",
+      properties: {
+        profileId: {
+          type: "number",
+          description: "customerProfileId (get from search_customers first)",
+        },
+      },
+      required: ["profileId"],
+    },
+  },
+  {
+    name: "get_payment_history",
+    description:
+      "Get payment timeline for a booking — when deposits/balances were paid, " +
+      "by what method, how much. Use when Jeff asks '付了沒' / '幾時收到' / " +
+      "'還欠多少'. Requires bookingId from search_bookings.",
+    input_schema: {
+      type: "object",
+      properties: {
+        bookingId: {
+          type: "number",
+          description: "Booking ID (from search_bookings)",
+        },
+      },
+      required: ["bookingId"],
+    },
+  },
 ];
 
 // ── Write tools (Jeff 2026-06-27: 「說了就做」— direct execution, no chip) ───
@@ -853,6 +887,86 @@ async function runTool(name: string, input: any): Promise<unknown> {
           list.length === 0
             ? "目前沒有卡住的客人(最近寄出的都還在合理等待範圍內,或客人都有回)。"
             : "這些是我們最後寄出、客人還沒回的。要跟進哪一個就跟我說,我可以幫你草擬。",
+      };
+    }
+
+    case "get_customer_documents": {
+      const { customerDocuments } = await import("../../../drizzle/schema");
+      const profileId = input.profileId;
+      if (!profileId) return { error: "missing profileId" };
+      const docs = await db
+        .select({
+          type: customerDocuments.type,
+          fileName: customerDocuments.fileName,
+          expiresAt: customerDocuments.expiresAt,
+          isCurrent: customerDocuments.isCurrent,
+        })
+        .from(customerDocuments)
+        .where(eq(customerDocuments.customerProfileId, profileId))
+        .orderBy(desc(customerDocuments.uploadedAt))
+        .limit(20);
+      if (!docs.length) return { found: false, note: "這位客人沒有上傳過證件文件。" };
+      const now = new Date();
+      return {
+        found: true,
+        documents: docs.map((d) => ({
+          type: d.type,
+          fileName: d.fileName,
+          expiresAt: d.expiresAt ? new Date(d.expiresAt).toISOString().slice(0, 10) : null,
+          isCurrent: d.isCurrent,
+          isExpired: d.expiresAt ? new Date(d.expiresAt) < now : null,
+        })),
+      };
+    }
+
+    case "get_payment_history": {
+      const { payments, bookings: bk } = await import("../../../drizzle/schema");
+      const bookingId = input.bookingId;
+      if (!bookingId) return { error: "missing bookingId" };
+      const [booking] = await db
+        .select({
+          totalPrice: bk.totalPrice,
+          currency: bk.currency,
+          paymentStatus: bk.paymentStatus,
+          bookingStatus: bk.bookingStatus,
+        })
+        .from(bk)
+        .where(eq(bk.id, bookingId))
+        .limit(1);
+      if (!booking) return { error: `booking #${bookingId} not found` };
+      const paymentRows = await db
+        .select({
+          amount: payments.amount,
+          currency: payments.currency,
+          paymentMethod: payments.paymentMethod,
+          paymentType: payments.paymentType,
+          paymentStatus: payments.paymentStatus,
+          paidAt: payments.paidAt,
+          notes: payments.notes,
+        })
+        .from(payments)
+        .where(eq(payments.bookingId, bookingId))
+        .orderBy(payments.paidAt);
+      const totalPaid = paymentRows
+        .filter((p) => p.paymentStatus === "completed")
+        .reduce((s, p) => s + p.amount, 0);
+      const totalPrice = Number(booking.totalPrice) || 0;
+      return {
+        bookingId,
+        bookingStatus: booking.bookingStatus,
+        paymentStatus: booking.paymentStatus,
+        totalPrice,
+        currency: booking.currency,
+        totalPaid,
+        balance: totalPrice - totalPaid,
+        payments: paymentRows.map((p) => ({
+          type: p.paymentType,
+          amount: p.amount,
+          method: p.paymentMethod,
+          status: p.paymentStatus,
+          paidAt: p.paidAt ? new Date(p.paidAt).toISOString().slice(0, 10) : null,
+          notes: p.notes,
+        })),
       };
     }
 
