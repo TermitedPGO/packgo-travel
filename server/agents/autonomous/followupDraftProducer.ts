@@ -38,10 +38,12 @@ export const FOLLOWUP_DRAFT_CLASSIFICATION = "followup";
 /** Re-draft suppression: same customer won't be re-drafted within this window. */
 export const FOLLOWUP_DRAFT_DEDUP_DAYS = 7;
 const DAY_MS = 24 * 60 * 60 * 1000;
-/** How many recent email turns to feed the drafter as grounding. */
-const EXCERPT_TURNS = 6;
+/** How many recent email turns to feed the drafter as grounding. A professional
+ * follow-up needs the real relationship + the actual open decisions, so we feed
+ * a generous slice of the thread, not just the last couple of turns. */
+const EXCERPT_TURNS = 12;
 /** Per-turn char cap so the prompt stays bounded. */
-const TURN_CHARS = 300;
+const TURN_CHARS = 600;
 
 export type InteractionDetailRow = {
   direction: "inbound" | "outbound";
@@ -230,7 +232,7 @@ export async function runFollowupDraftScan(
           ),
         )
         .orderBy(desc(customerInteractions.createdAt))
-        .limit(8)) as InteractionDetailRow[];
+        .limit(20)) as InteractionDetailRow[];
 
       const gmailThreadId = pickGmailThreadId(rows);
       const excerpt = buildConversationExcerpt(rows);

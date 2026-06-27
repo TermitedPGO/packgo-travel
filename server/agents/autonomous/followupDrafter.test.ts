@@ -22,14 +22,32 @@ describe("buildSystem — hard rules are present", () => {
   });
   it("forbids fabrication (only use the real conversation)", () => {
     expect(sys).toContain("捏造");
-    expect(sys).toContain("真實的往來摘錄");
+    expect(sys).toContain("真實的完整往來");
+  });
+  it("forbids inferring unstated relationships (e.g. 10 people is not a family)", () => {
+    expect(sys).toContain("不准推斷");
+    expect(sys).toContain("10 人");
   });
   it("forbids internal cost / supplier leakage", () => {
     expect(sys).toContain("成本");
     expect(sys).toContain("同業價");
   });
+  it("requires the respectful 您, not 你", () => {
+    expect(sys).toContain("全程用「您」");
+  });
+  it("mirrors Jeff's existing address (姊姊/哥), not a default", () => {
+    expect(sys).toContain("延用");
+    expect(sys).toContain("姊姊");
+    expect(sys).toContain("不要對每個人都套");
+  });
+  it("greets warmly before raising the matter", () => {
+    expect(sys).toContain("噓寒問暖");
+  });
   it("is a low-pressure check-in, not a sales push", () => {
-    expect(sys).toContain("不是催單");
+    expect(sys).toContain("催單");
+  });
+  it("writes as the professional hospitality consultant", () => {
+    expect(sys).toContain("接待顧問");
   });
   it("names the submit tool", () => {
     expect(sys).toContain("submit_followup_draft");
