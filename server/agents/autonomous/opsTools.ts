@@ -202,6 +202,56 @@ export const READ_TOOLS: Anthropic.Tool[] = [
   },
 ];
 
+// ── Write tools (Jeff 2026-06-27: 「說了就做」— direct execution, no chip) ───
+
+export const WRITE_TOOLS: Anthropic.Tool[] = [
+  {
+    name: "update_customer_note",
+    description:
+      "Update Jeff's private note (jeffPersonalNote) for the current customer. " +
+      "Jeff says '備註加上…' or '備註改成…' → use this. The note is Jeff-only " +
+      "(never shown to customer). Pass the FULL desired note text — to append, " +
+      "read the current note first (search_customers), then concatenate.",
+    input_schema: {
+      type: "object",
+      properties: {
+        note: {
+          type: "string",
+          description: "Full note content (replaces existing note entirely)",
+        },
+      },
+      required: ["note"],
+    },
+  },
+  {
+    name: "update_booking_status",
+    description:
+      "Update a booking's bookingStatus and/or paymentStatus. Use when Jeff " +
+      "says '這筆確認了' / '標記已付款' / '取消這筆訂單'. Get the bookingId " +
+      "from a prior search_bookings call first.",
+    input_schema: {
+      type: "object",
+      properties: {
+        bookingId: {
+          type: "number",
+          description: "Booking ID (from search_bookings)",
+        },
+        bookingStatus: {
+          type: "string",
+          enum: ["pending", "confirmed", "completed", "cancelled"],
+        },
+        paymentStatus: {
+          type: "string",
+          enum: ["unpaid", "deposit", "paid", "refunded"],
+        },
+      },
+      required: ["bookingId"],
+    },
+  },
+];
+
+export const WRITE_TOOL_NAMES = new Set(WRITE_TOOLS.map((t) => t.name));
+
 // ── Executor ────────────────────────────────────────────────────────────────
 
 const clamp = (n: number | undefined, def: number, max: number) =>
@@ -808,5 +858,69 @@ async function runTool(name: string, input: any): Promise<unknown> {
 
     default:
       return { error: `unknown tool: ${name}` };
+  }
+}
+
+// ── Write tool executor ───────────────────────────────────────────────────
+
+export async function executeWriteTool(
+  name: string,
+  input: any,
+  profileId: number | undefined,
+): Promise<string> {
+  try {
+    const result = await runWriteTool(name, input, profileId);
+    return JSON.stringify(result);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.warn({ name, err: msg }, "[opsTools] write tool failed");
+    return JSON.stringify({ error: msg });
+  }
+}
+
+async function runWriteTool(
+  name: string,
+  input: any,
+  profileId: number | undefined,
+): Promise<unknown> {
+  const { getDb } = await import("../../db");
+  const { customerProfiles } = await import("../../../drizzle/schema");
+  const { eq } = await import("drizzle-orm");
+  const db = await getDb();
+  if (!db) return { error: "database unavailable" };
+
+  switch (name) {
+    case "update_customer_note": {
+      if (!profileId) return { error: "no customer selected" };
+      const note = (input.note ?? "").trim();
+      await db
+        .update(customerProfiles)
+        .set({ jeffPersonalNote: note || null, updatedAt: new Date() })
+        .where(eq(customerProfiles.id, profileId));
+      log.info({ profileId, noteLen: note.length }, "update_customer_note executed");
+      return { success: true, message: "備註已更新" };
+    }
+
+    case "update_booking_status": {
+      const bookingId = input.bookingId;
+      if (!bookingId) return { error: "missing bookingId" };
+      const updates: Record<string, any> = {};
+      if (input.bookingStatus) updates.bookingStatus = input.bookingStatus;
+      if (input.paymentStatus) updates.paymentStatus = input.paymentStatus;
+      if (Object.keys(updates).length === 0)
+        return { error: "no status fields provided" };
+      const { updateBooking } = await import("../../db/booking");
+      const updated = await updateBooking(bookingId, updates);
+      log.info({ bookingId, updates }, "update_booking_status executed");
+      return {
+        success: true,
+        message: `訂單 #${bookingId} 已更新`,
+        bookingStatus: updated.bookingStatus,
+        paymentStatus: updated.paymentStatus,
+      };
+    }
+
+    default:
+      return { error: `unknown write tool: ${name}` };
   }
 }

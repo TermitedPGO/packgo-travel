@@ -17,6 +17,7 @@ import {
   emptyTurn,
   reduceChatEvent,
   parseSseChunk,
+  humanizeToolName,
   type ChatTurn,
   type ChatStep,
 } from "./chatStream"
@@ -28,7 +29,7 @@ type ChatMsg = { role: "user"; text: string } | { role: "ai"; turn: ChatTurn }
 function stepLabel(s: ChatStep): string {
   const text = s.text.trim()
   if (text) return text.length > 48 ? text.slice(0, 48) + "…" : text
-  if (s.tools.length) return s.tools.join(", ")
+  if (s.tools.length) return s.tools.map(humanizeToolName).join("、")
   return "…"
 }
 
@@ -80,6 +81,8 @@ export default function CustomerChat({
   const abortRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
+  const hydratedRef = useRef<string | null>(null)
+  const hydratedCountRef = useRef(0)
 
   // Draft approve/edit/confirm state (keyed by draft id).
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -110,12 +113,27 @@ export default function CustomerChat({
     setConfirmBody(undefined)
     setError(null)
     setEditText("")
-    // The AI 助手 thread is per-customer — abort any in-flight stream and clear
-    // the Q&A so customer A's answers never linger while viewing customer B.
     abortRef.current?.abort()
     setMessages([])
     setBusy(false)
+    hydratedRef.current = null
+    hydratedCountRef.current = 0
   }, [customer?.id, customer?.kind])
+
+  // Hydrate chat panel from persisted DB history (customerChatMessages) so past
+  // conversations survive page refresh. Only runs once per customer select.
+  useEffect(() => {
+    const key = customer ? `${customer.kind}-${customer.id}` : null
+    if (!key || hydratedRef.current === key || chatMessages.length === 0) return
+    hydratedRef.current = key
+    const history: ChatMsg[] = chatMessages.map((m) =>
+      m.senderRole === "jeff"
+        ? { role: "user" as const, text: m.body }
+        : { role: "ai" as const, turn: { steps: [], live: "", answer: m.body, error: null } },
+    )
+    hydratedCountRef.current = history.length
+    setMessages(history)
+  }, [customer?.id, customer?.kind, chatMessages])
 
   // Keep the latest streamed token in view.
   useEffect(() => {
@@ -403,7 +421,8 @@ export default function CustomerChat({
               {(() => {
                 const isLast = i === messages.length - 1
                 const fullText = m.turn.answer || m.turn.live
-                const shown = isLast ? smoothed : fullText
+                const isSessionMsg = i >= hydratedCountRef.current
+                const shown = isLast && isSessionMsg ? smoothed : fullText
                 if (shown) {
                   return (
                     <div className="text-[13px] text-gray-800 leading-[1.7] prose-chat">

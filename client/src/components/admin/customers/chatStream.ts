@@ -32,6 +32,28 @@ export type ChatStreamEvent =
   | { type: "done"; finalAnswer?: string }
   | { type: "error"; error?: string };
 
+const TOOL_LABELS: Record<string, string> = {
+  count_records: "統計資料",
+  aggregate_departures: "匯總出團",
+  search_tours: "搜尋行程",
+  search_departures: "查詢出團",
+  search_bookings: "查詢訂單",
+  search_customers: "搜尋客戶",
+  get_finance_summary: "查看財務",
+  list_missing_receipts: "缺收據清單",
+  search_supplier_inventory: "查詢供應商庫存",
+  preview_customer_threads: "預覽郵件",
+  read_customer_conversation: "讀取對話紀錄",
+  list_followups_needed: "待跟進清單",
+  draft_followup: "草擬跟進信",
+  update_customer_note: "更新備註",
+  update_booking_status: "更新訂單狀態",
+};
+
+export function humanizeToolName(name: string): string {
+  return TOOL_LABELS[name] ?? name;
+}
+
 export function emptyTurn(): ChatTurn {
   return { steps: [], live: "", answer: "", error: null };
 }
