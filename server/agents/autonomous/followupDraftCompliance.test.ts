@@ -1,0 +1,79 @@
+/**
+ * followupDraftCompliance — the deterministic "測 AI 回應" guard. Every
+ * follow-up draft must pass these hard rules; a regression breaks the suite.
+ * The real professional draft (the packgo-hospitality output for Jenny) is
+ * pinned here as the positive case, so the rules can never drift away from a
+ * draft Jeff actually approved.
+ */
+import { describe, it, expect } from "vitest";
+import {
+  checkFollowupDraftCompliance,
+  summarizeCompliance,
+  type ComplianceViolation,
+} from "./followupDraftCompliance";
+
+// The real hospitality-skill draft for Jenny (grounded in her Gmail thread).
+const JENNY_DRAFT = `Jenny 姊姊 您好,
+
+最近一切都還好嗎?天氣慢慢熱起來了,您和家人都要記得多喝水。前陣子在 EBTA 聚餐見到您很開心,後來我把台灣的行程初稿整理好寄給您,一直惦記著不曉得您看了感覺如何。
+
+完全不用著急,我知道帶一個十人的大家庭出遊,光是要喬大家的時間和意見就很費心,我這邊隨時都在,不趕您。
+
+行程那邊我都幫您留著,有兩個小地方等您方便的時候給我一聲就好。一個是英文導遊要不要加;另一個是 Day 8 花蓮那天,您想選池上伯朗大道,還是在花蓮附近輕鬆走走,這兩個都很好,看您和家人的心意。其他細節我都會幫您打點好,您只要決定這兩件,我就能往下幫您安排。
+
+真的不急,您先忙您的,等有空再回我一句就行。有任何想法或想調整的地方,也都隨時跟我說。
+
+祝您和家人這幾天都順心,
+
+Jeff
+PACK&GO Travel`;
+
+const violations = (b: string): ComplianceViolation[] =>
+  checkFollowupDraftCompliance(b).violations;
+
+describe("checkFollowupDraftCompliance — positive case", () => {
+  it("the real professional Jenny draft passes every hard rule", () => {
+    const r = checkFollowupDraftCompliance(JENNY_DRAFT);
+    expect(r.ok).toBe(true);
+    expect(r.violations).toEqual([]);
+    expect(summarizeCompliance(r)).toBe("compliant");
+  });
+  it("a short clean draft using 您 passes", () => {
+    expect(checkFollowupDraftCompliance("林哥 您好,最近還好嗎?您方便時再回我一聲就好。").ok).toBe(true);
+  });
+});
+
+describe("checkFollowupDraftCompliance — hard violations", () => {
+  it("flags an em dash", () => {
+    expect(violations("您好。— 後面的話")).toContain("em_dash");
+    expect(violations("您好。– 後面")).toContain("em_dash"); // en dash too
+  });
+  it("does NOT flag an ASCII hyphen (compounds / phone numbers are fine)", () => {
+    const r = checkFollowupDraftCompliance("您好,電話 +1 (510) 634-2307,A-B 兩個方案。");
+    expect(r.violations).not.toContain("em_dash");
+  });
+  it("flags the informal 你 (must be 您)", () => {
+    expect(violations("你好,最近還好嗎?")).toContain("informal_ni");
+  });
+  it("flags a body that never uses 您", () => {
+    expect(violations("林先生好,行程幫忙留著了。")).toContain("missing_formal_you");
+  });
+  it("flags markdown bold and headings", () => {
+    expect(violations("您好,**重點**在這。")).toContain("markdown");
+    expect(violations("# 標題\n您好")).toContain("markdown");
+  });
+  it("flags check marks and emoji", () => {
+    expect(violations("您好 ✓ 已確認")).toContain("emoji_or_check");
+    expect(violations("您好 🎁 兌換成功")).toContain("emoji_or_check");
+  });
+  it("collects multiple violations at once", () => {
+    const v = violations("你好 ✓ **重點** — 結束");
+    expect(v).toEqual(
+      expect.arrayContaining(["informal_ni", "emoji_or_check", "markdown", "em_dash", "missing_formal_you"]),
+    );
+    expect(checkFollowupDraftCompliance("你好 ✓").ok).toBe(false);
+  });
+  it("empty body has no violations (caught upstream, not a content rule)", () => {
+    expect(checkFollowupDraftCompliance("").violations).toEqual([]);
+  });
+});

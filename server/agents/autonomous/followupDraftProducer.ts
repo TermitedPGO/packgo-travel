@@ -26,6 +26,7 @@ import {
   type FollowupDrafterInput,
 } from "./followupDrafter";
 import { AUTO_SEND_HARD_EXCLUDED } from "./autoSendGate";
+import { checkFollowupDraftCompliance } from "./followupDraftCompliance";
 
 const log = createChildLogger({ module: "followupDraftProducer" });
 
@@ -256,6 +257,18 @@ export async function runFollowupDraftScan(
       if (!body) {
         result.skipped.error++;
         continue;
+      }
+
+      // Hard-rule guard (測 AI 回應): a draft that breaks the no-em-dash / 您 /
+      // plain-text rules is surfaced in logs so the eval catches drift. We don't
+      // block it (Jeff reviews every draft, and the send path strips markdown),
+      // but a clean model should never trip this.
+      const compliance = checkFollowupDraftCompliance(body);
+      if (!compliance.ok) {
+        log.warn(
+          { profileId: c.profileId, violations: compliance.violations },
+          "[followupDraftProducer] draft tripped hard-rule guard",
+        );
       }
 
       await db.insert(agentMessages).values(
