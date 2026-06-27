@@ -3344,6 +3344,9 @@ export const en = {
         sendFailed: 'Send failed, please try again.',
         askPlaceholder: 'About this customer...',
         askFailed: 'Query failed, please try again.',
+        chatExpand: 'Expand',
+        chatCollapse: 'Collapse',
+        chatStop: 'Stop',
       },
       status: {
         allClear: 'All clear',

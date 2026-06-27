@@ -643,6 +643,10 @@ async function startServer() {
             // Tool-call progress (查詢中…) — keeps the UI alive during the
             // agentic loop's multi-second tool rounds. Not persisted.
             send({ type: "status", text: event.text });
+          } else if (event.type === "round_thinking") {
+            // A "thinking out loud" round + its tool calls — the frontend
+            // snapshots it as a dim step so thinking never jams into the answer.
+            send({ type: "round_thinking", text: event.text, tools: event.tools });
           } else if (event.type === "done") {
             finalAnswer = event.finalAnswer ?? "";
             suggestedActions = event.suggestedActions ?? [];

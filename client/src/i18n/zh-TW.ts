@@ -3312,6 +3312,9 @@ export const zhTW = {
         sendFailed: '送出失敗，請再試一次。',
         askPlaceholder: '關於這位客戶...',
         askFailed: '查詢失敗，請再試一次。',
+        chatExpand: '展開',
+        chatCollapse: '收合',
+        chatStop: '停止',
       },
       status: {
         allClear: '一切就緒',

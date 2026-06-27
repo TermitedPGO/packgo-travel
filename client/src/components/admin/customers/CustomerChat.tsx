@@ -1,7 +1,35 @@
 import { useEffect, useRef, useState } from "react"
-import { MessageSquare, Send, FileText } from "lucide-react"
+import {
+  MessageSquare,
+  Send,
+  FileText,
+  Square,
+  Maximize2,
+  Minimize2,
+  Loader2,
+  Check,
+} from "lucide-react"
+import { Streamdown } from "streamdown"
 import { useLocale } from "@/contexts/LocaleContext"
 import type { AdaptedCustomer, ChatMessage, Draft } from "./types"
+import {
+  emptyTurn,
+  reduceChatEvent,
+  parseSseChunk,
+  type ChatTurn,
+  type ChatStep,
+} from "./chatStream"
+
+type ChatMsg = { role: "user"; text: string } | { role: "ai"; turn: ChatTurn }
+
+/** Dim "thinking" step label: the bridge sentence the model spoke, or the tools
+ * it ran when it spoke nothing. */
+function stepLabel(s: ChatStep): string {
+  const text = s.text.trim()
+  if (text) return text.length > 48 ? text.slice(0, 48) + "…" : text
+  if (s.tools.length) return s.tools.join(", ")
+  return "…"
+}
 
 export default function CustomerChat({
   customer,
@@ -16,11 +44,13 @@ export default function CustomerChat({
 }) {
   const { t } = useLocale()
   const [input, setInput] = useState("")
-  const [messages, setMessages] = useState<{ role: "user" | "ai"; text: string }[]>([])
+  const [messages, setMessages] = useState<ChatMsg[]>([])
   // AI 助手 streaming state. `busy` gates the send button; abortRef tears down
-  // the in-flight SSE if Jeff switches customer mid-answer.
+  // the in-flight SSE if Jeff switches customer mid-answer or hits stop.
   const [busy, setBusy] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
 
   // Draft approve/edit/confirm state (keyed by draft id).
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -49,6 +79,11 @@ export default function CustomerChat({
     setMessages([])
     setBusy(false)
   }, [customer?.id, customer?.kind])
+
+  // Keep the latest streamed token in view.
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
+  }, [messages])
 
   // Tear down any in-flight stream on unmount.
   useEffect(() => () => abortRef.current?.abort(), [])
@@ -80,33 +115,29 @@ export default function CustomerChat({
     }
   }
 
-  // Stream a customer-scoped answer over the SAME hardened SSE pipeline the
-  // global ops chat uses (/api/agent/ask-ops-stream + customerId/profileId):
-  // admin-auth + CSRF + the system prompt pinned to THIS customer's real data
-  // (搬運 facts, not invented). Read-only — it never sends or edits anything.
+  // Update the in-flight AI turn (always the last message) immutably.
+  const updateLastAi = (fn: (turn: ChatTurn) => ChatTurn) =>
+    setMessages((prev) => {
+      const copy = [...prev]
+      const last = copy[copy.length - 1]
+      if (last && last.role === "ai") copy[copy.length - 1] = { role: "ai", turn: fn(last.turn) }
+      return copy
+    })
+
+  // Stream a customer-scoped answer over the hardened SSE pipeline the global ops
+  // chat uses (/api/agent/ask-ops-stream + customerId/profileId). Thinking rounds
+  // collapse into dim steps; the answer streams clean (no 斷句). Read-only.
   const handleSend = async () => {
     const q = input.trim()
     if (!q || busy || !customer) return
     setInput("")
     setBusy(true)
-    // registered → customerId (userId); guest → customerProfileId.
     const scopeParam =
-      customer.kind === "guest"
-        ? `customerProfileId=${customer.id}`
-        : `customerId=${customer.id}`
-    // Optimistic user bubble + an empty AI bubble we stream tokens into.
-    setMessages((prev) => [...prev, { role: "user", text: q }, { role: "ai", text: "" }])
-    const setAiText = (next: (prev: string) => string) =>
-      setMessages((prev) => {
-        const copy = [...prev]
-        const last = copy[copy.length - 1]
-        if (last?.role === "ai") copy[copy.length - 1] = { role: "ai", text: next(last.text) }
-        return copy
-      })
+      customer.kind === "guest" ? `customerProfileId=${customer.id}` : `customerId=${customer.id}`
+    setMessages((prev) => [...prev, { role: "user", text: q }, { role: "ai", turn: emptyTurn() }])
 
     const ac = new AbortController()
     abortRef.current = ac
-    let sawToken = false
     try {
       const resp = await fetch(
         `/api/agent/ask-ops-stream?q=${encodeURIComponent(q)}&${scopeParam}`,
@@ -118,7 +149,7 @@ export default function CustomerChat({
         },
       )
       if (!resp.ok || !resp.body) {
-        setAiText(() => t("admin.customers.drafts.askFailed"))
+        updateLastAi((turn) => ({ ...turn, error: t("admin.customers.drafts.askFailed") }))
         setBusy(false)
         return
       }
@@ -129,33 +160,13 @@ export default function CustomerChat({
         const { done, value } = await reader.read()
         if (done) break
         buffer += decoder.decode(value, { stream: true })
-        const chunks = buffer.split("\n\n")
-        buffer = chunks.pop() ?? ""
-        for (const chunk of chunks) {
-          const dataLine = chunk.split("\n").find((l) => l.startsWith("data: "))
-          if (!dataLine) continue
-          try {
-            const event = JSON.parse(dataLine.slice(6))
-            if (event.type === "token") {
-              // first real token clears any "查詢中…" status placeholder
-              if (!sawToken) { sawToken = true; setAiText(() => "") }
-              setAiText((p) => p + (event.text ?? ""))
-            } else if (event.type === "status") {
-              if (!sawToken) setAiText(() => event.text ?? "")
-            } else if (event.type === "done") {
-              if (event.finalAnswer) setAiText(() => event.finalAnswer)
-            } else if (event.type === "error") {
-              setAiText(() => event.error ?? t("admin.customers.drafts.askFailed"))
-            }
-          } catch {
-            /* ignore a malformed SSE chunk */
-          }
-        }
+        const { events, rest } = parseSseChunk(buffer)
+        buffer = rest
+        for (const ev of events) updateLastAi((turn) => reduceChatEvent(turn, ev))
       }
     } catch (err) {
-      // a deliberate abort (customer switch / unmount) is not an error
       if ((err as { name?: string })?.name !== "AbortError") {
-        setAiText(() => t("admin.customers.drafts.askFailed"))
+        updateLastAi((turn) => ({ ...turn, error: t("admin.customers.drafts.askFailed") }))
       }
     } finally {
       setBusy(false)
@@ -165,15 +176,27 @@ export default function CustomerChat({
   const drafts = customer?.drafts ?? []
 
   return (
-    <div className="w-[340px] border-l border-gray-200 flex flex-col overflow-hidden">
+    <div
+      className={`${expanded ? "w-[620px]" : "w-[340px]"} border-l border-gray-200 flex flex-col overflow-hidden transition-[width] duration-200`}
+    >
       {/* Header */}
-      <div className="px-4 py-2.5 border-b border-gray-200 text-[13px] font-medium flex items-center gap-1.5">
-        <MessageSquare className="w-3.5 h-3.5 text-gray-500" />
-        {t("admin.customers.drafts.heading")}
+      <div className="px-4 py-2.5 border-b border-gray-200 text-[13px] font-medium flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <MessageSquare className="w-3.5 h-3.5 text-gray-500" />
+          {t("admin.customers.drafts.heading")}
+        </div>
+        <button
+          onClick={() => setExpanded((e) => !e)}
+          aria-label={expanded ? t("admin.customers.drafts.chatCollapse") : t("admin.customers.drafts.chatExpand")}
+          title={expanded ? t("admin.customers.drafts.chatCollapse") : t("admin.customers.drafts.chatExpand")}
+          className="w-6 h-6 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 flex items-center justify-center transition-colors"
+        >
+          {expanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+        </button>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
         {/* Intro card */}
         {customer && drafts.length > 0 && (
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-[12px] text-gray-700 leading-relaxed">
@@ -299,19 +322,49 @@ export default function CustomerChat({
           </div>
         ))}
 
-        {/* Chat messages */}
-        {messages.map((m, i) => (
-          <div
-            key={i}
-            className={`text-[12px] leading-relaxed rounded-xl px-3 py-2 max-w-[90%] whitespace-pre-wrap ${
-              m.role === "user"
-                ? "bg-gray-900 text-white ml-auto"
-                : "bg-gray-100 text-gray-700"
-            }`}
-          >
-            {m.text}
-          </div>
-        ))}
+        {/* Chat: user bubbles + AI turns (dim thinking steps, then clean answer) */}
+        {messages.map((m, i) =>
+          m.role === "user" ? (
+            <div
+              key={i}
+              className="text-[13px] leading-relaxed rounded-xl px-3 py-2 max-w-[88%] whitespace-pre-wrap bg-gray-900 text-white ml-auto"
+            >
+              {m.text}
+            </div>
+          ) : (
+            <div key={i} className="space-y-1.5 max-w-[94%]">
+              {m.turn.steps.map((s, j) => (
+                <div key={j} className="flex items-start gap-1.5 text-[11px] text-gray-400 leading-snug">
+                  <Check className="w-3 h-3 mt-0.5 text-gray-300 flex-shrink-0" />
+                  <span className="truncate">{stepLabel(s)}</span>
+                </div>
+              ))}
+
+              {m.turn.answer ? (
+                <div className="text-[13px] text-gray-700 leading-relaxed bg-gray-100 rounded-xl px-3 py-2 prose-chat">
+                  <Streamdown>{m.turn.answer}</Streamdown>
+                </div>
+              ) : m.turn.live ? (
+                <div className="text-[13px] text-gray-700 leading-relaxed bg-gray-100 rounded-xl px-3 py-2 prose-chat">
+                  <Streamdown>{m.turn.live}</Streamdown>
+                  {busy && i === messages.length - 1 && (
+                    <span className="inline-block w-1.5 h-3.5 bg-gray-400 ml-0.5 align-text-bottom animate-pulse" />
+                  )}
+                </div>
+              ) : busy && i === messages.length - 1 && !m.turn.error ? (
+                <div className="flex items-center gap-1.5 text-[12px] text-gray-400 px-1">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                </div>
+              ) : null}
+
+              {m.turn.error && (
+                <div className="text-[12px] text-gray-700 bg-gray-100 rounded-xl px-3 py-2">
+                  {m.turn.error}
+                </div>
+              )}
+            </div>
+          ),
+        )}
       </div>
 
       {/* Input */}
@@ -322,16 +375,18 @@ export default function CustomerChat({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSend()}
-            disabled={busy || !customer}
+            disabled={!customer}
             placeholder={t("admin.customers.drafts.askPlaceholder")}
             className="flex-1 text-[12px] outline-none bg-transparent disabled:opacity-60"
           />
           <button
-            onClick={handleSend}
-            disabled={busy || !customer || !input.trim()}
+            onClick={busy ? () => abortRef.current?.abort() : handleSend}
+            disabled={!customer || (!busy && !input.trim())}
+            aria-label={busy ? t("admin.customers.drafts.chatStop") : t("admin.customers.drafts.send")}
+            title={busy ? t("admin.customers.drafts.chatStop") : undefined}
             className="w-6 h-6 rounded-md bg-gray-900 text-white flex items-center justify-center hover:bg-gray-700 transition-colors flex-shrink-0 disabled:opacity-40 disabled:hover:bg-gray-900"
           >
-            <Send className="w-3 h-3" />
+            {busy ? <Square className="w-2.5 h-2.5" /> : <Send className="w-3 h-3" />}
           </button>
         </div>
       </div>

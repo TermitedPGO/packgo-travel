@@ -613,6 +613,12 @@ export default function AgentChatPage() {
               setStreamingText((prev) => (prev ?? "") + (event.text ?? ""));
             } else if (event.type === "status") {
               setStreamingStatus(event.text ?? null);
+            } else if (event.type === "round_thinking") {
+              // A "thinking out loud" round + its tools finished: show the bridge
+              // sentence as a transient status and clear the answer buffer, so
+              // thinking and the real answer never jam together (the 斷句 bug).
+              setStreamingStatus(event.text || null);
+              setStreamingText(null);
             } else if (event.type === "done") {
               setStreamingStatus(null);
               if (event.finalAnswer) {

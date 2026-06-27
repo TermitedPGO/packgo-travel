@@ -22,7 +22,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { ENV } from "../../_core/env";
 import { createChildLogger } from "../../_core/logger";
 import { READ_TOOLS, executeReadTool, toCard } from "./opsTools";
-import { stripChatAnswer } from "../../_core/plainTextReply";
+import { cleanChatAnswerKeepMarkdown } from "../../_core/plainTextReply";
 
 const log = createChildLogger({ module: "opsAgentStream" });
 
@@ -38,8 +38,10 @@ function getClient(): Anthropic {
 }
 
 export interface StreamEvent {
-  type: "token" | "status" | "done" | "error";
+  type: "token" | "status" | "round_thinking" | "done" | "error";
   text?: string;
+  /** read tools this round is about to run (for the dim thinking step). */
+  tools?: string[];
   finalAnswer?: string;
   suggestedActions?: any[];
   cards?: any[];
@@ -197,6 +199,19 @@ export async function* runOpsAgentStream(
         break;
       }
 
+      // The model spoke, then called tools: that text was thinking out loud (a
+      // bridge sentence like 「我查一下中國有哪些團」), NOT the answer. Snapshot it
+      // as a dim "thinking" step BEFORE running the tools, so it collapses out of
+      // the way instead of jamming into the answer bubble. The old behavior
+      // streamed both into one bubble with no break, which read as 斷句.
+      const roundTools = final.content
+        .filter(
+          (b): b is Anthropic.ToolUseBlock =>
+            b.type === "tool_use" && b.name !== "suggest_action",
+        )
+        .map((b) => b.name);
+      yield { type: "round_thinking", text: roundText.trim(), tools: roundTools };
+
       // Model called tools — must return a tool_result for EVERY tool_use block.
       messages.push({ role: "assistant", content: final.content });
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
@@ -226,10 +241,6 @@ export async function* runOpsAgentStream(
             content: result,
           });
         }
-      }
-
-      if (readNames.length > 0) {
-        yield { type: "status", text: `查詢中: ${readNames.join(", ")}` };
       }
 
       messages.push({ role: "user", content: toolResults });
@@ -272,7 +283,7 @@ export async function* runOpsAgentStream(
     // Clean the saved answer: no markdown ** / em dash / emoji (the live tokens
     // already streamed; this guarantees the persisted + re-shown answer is clean
     // even when Opus ignores the prompt's no-markdown rule).
-    finalAnswer = stripChatAnswer(finalAnswer);
+    finalAnswer = cleanChatAnswerKeepMarkdown(finalAnswer);
 
     yield { type: "done", finalAnswer, suggestedActions, cards };
   } catch (err) {

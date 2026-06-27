@@ -142,3 +142,18 @@ export function stripChatAnswer(input: string | null | undefined): string {
   s = s.replace(/[ \t]{2,}/g, " ").replace(/ +\n/g, "\n").replace(/\n{3,}/g, "\n\n");
   return s.trim();
 }
+
+/**
+ * Like stripChatAnswer but KEEPS markdown. The cockpit chat renders the answer
+ * with Streamdown (bold / lists / code are wanted, Claude-Code style), so we do
+ * NOT flatten emphasis / headers / inline code here. We still strip what must
+ * never show to Jeff either: em dashes (his rule) and decorative emoji / 打勾.
+ */
+export function cleanChatAnswerKeepMarkdown(input: string | null | undefined): string {
+  if (!input) return "";
+  let s = normalizeUnicodeDashes(input);
+  s = s.replace(/[\uD83C-\uD83E][\uDC00-\uDFFF]/g, "");
+  s = s.replace(/[☀-➿⬀-⯿️]/g, "");
+  s = s.replace(/[ \t]{2,}/g, " ").replace(/ +\n/g, "\n").replace(/\n{3,}/g, "\n\n");
+  return s.trim();
+}
