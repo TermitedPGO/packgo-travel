@@ -28,22 +28,11 @@ export const tourMonitorWorker = new Worker<TourMonitorJobData, TourMonitorJobRe
         changesCount: result.changes.length,
       };
       
-      // Notify owner if there are changes
-      if (result.changedTours > 0) {
-        const changesSummary = result.changes
-          .slice(0, 10) // Limit to first 10 changes in notification
-          .map(c => `• ${c.tourTitle}: ${c.summary}`)
-          .join('\n');
-        
-        await notifyOwner({
-          title: `🔔 供應商監控：${result.changedTours} 個行程有變動`,
-          content: `監控執行時間：${result.completedAt.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}\n\n` +
-            `📊 統計：共檢查 ${result.checkedTours} 個行程，發現 ${result.changedTours} 個有變動，${result.failedTours} 個失敗\n\n` +
-            `📋 變動摘要：\n${changesSummary}` +
-            (result.changes.length > 10 ? `\n\n...及其他 ${result.changes.length - 10} 個變動` : ''),
-        }).catch(err => console.warn('[TourMonitorWorker] Failed to notify owner:', err));
-      }
-      
+      // 行程變動 owner email — removed 2026-06-27 per Jeff (found tour-change
+      // notifications pointless). The scan still runs + changes are still logged
+      // (visible in the monitor dashboard); only the email stops. The job-failed
+      // crash alert below is kept.
+
       console.log(`[TourMonitorWorker] ✅ Monitor job ${job.id} completed: ${result.checkedTours} checked, ${result.changedTours} changed`);
       return jobResult;
       

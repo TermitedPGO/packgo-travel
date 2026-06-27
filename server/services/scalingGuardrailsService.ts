@@ -22,7 +22,6 @@
 import { and, eq, lte, sql, gte } from "drizzle-orm";
 import { getDb } from "../db";
 import { bankTransactions, llmUsageLogs } from "../../drizzle/schema";
-import { notifyOwner } from "../_core/notification";
 
 const RETENTION_YEARS = 2;
 const RECEIPTS_INBOX_PURGE_DAYS = 7;
@@ -154,17 +153,9 @@ export async function checkLlmBudgetAndAlert(opts?: {
 
   const alerted = total >= threshold;
 
-  if (alerted && !opts?.dryRun) {
-    // Format breakdown
-    const breakdown = Object.entries(byAgent)
-      .sort(([, a], [, b]) => b - a)
-      .map(([agent, cost]) => `  ${agent}: $${cost.toFixed(2)}`)
-      .join("\n");
-    await notifyOwner({
-      title: `LLM 月度花費 $${total.toFixed(2)} 超過預算 $${threshold}`,
-      content: `本月到今天累計 LLM 開銷已達 $${total.toFixed(2)},超過警報線 $${threshold}。\n\n按 agent 拆分:\n${breakdown}\n\n建議檢查:\n- /admin/v2 → 系統 → LLM 成本 tab\n- 高消耗 agent 是否真的需要這麼多 prompt?\n- vendor cache (P0-B) 上了沒? 可省 80%`,
-    });
-  }
+  // 月度花費 LLM-budget owner email — removed 2026-06-27 per Jeff (found the
+  // monthly-spend alert pointless). month-to-date total + `alerted` flag are
+  // still computed + returned for the admin LLM-cost tab / callers.
 
   return { monthToDateUsd: total, threshold, alerted, byAgent };
 }

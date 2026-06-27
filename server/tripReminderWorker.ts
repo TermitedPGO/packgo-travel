@@ -53,22 +53,9 @@ export const tripReminderWorker = new Worker<TripReminderJobData, TripReminderJo
         console.error(`[TripReminderWorker] Check-in scan failed:`, checkinErr);
       }
 
-      // v78m Sprint 5A: daily ops digest email to owner
-      try {
-        const { runDailyDigestJob } = await import("./services/dailyDigestService");
-        const digestResult = await runDailyDigestJob();
-        console.log(
-          `[TripReminderWorker] Daily digest: sent=${digestResult.sent} actions=${
-            digestResult.data
-              ? digestResult.data.pendingWechat.length +
-                digestResult.data.newQuotesToFollowUp.length +
-                digestResult.data.newInquiries
-              : 0
-          }`
-        );
-      } catch (digestErr) {
-        console.error(`[TripReminderWorker] Daily digest failed:`, digestErr);
-      }
+      // 早報 daily ops digest email to owner — removed 2026-06-27 per Jeff
+      // (found the morning briefing pointless). The customer trip-reminder /
+      // winback / 90-day check-in scans above are untouched.
 
       return result;
     } catch (error) {
