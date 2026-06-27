@@ -68,6 +68,40 @@ describe("buildSystem — hard rules are present", () => {
   });
 });
 
+describe("buildSystem — live A/B arms", () => {
+  // The trap-fixture gate: BOTH arms must keep every customer-facing hard rule.
+  // A new arm that drops a guardrail must fail HERE, not in a real send.
+  it.each([["A"], ["B"]] as const)("arm %s keeps the hard-rule contract", (variant) => {
+    const sys = buildSystem(variant);
+    expect(sys).toContain("不用破折號"); // no em dash
+    expect(sys).toContain("捏造"); // no fabrication
+    expect(sys).toContain("真實的完整往來");
+    expect(sys).toContain("不准推斷"); // no inferring unstated identity
+    expect(sys).toContain("10 人");
+    expect(sys).toContain("成本"); // no internal cost leak
+    expect(sys).toContain("同業價");
+    expect(sys).toContain("全程用「您」");
+    expect(sys).toContain("延用"); // mirror Jeff's existing address
+    expect(sys).toContain("姊姊");
+    expect(sys).toContain("噓寒問暖"); // greet before raising the matter
+    expect(sys).toContain("催單"); // low-pressure, not a sales push
+    expect(sys).toContain("submit_followup_draft");
+  });
+
+  it("default arm is B (the distilled prompt)", () => {
+    expect(buildSystem()).toBe(buildSystem("B"));
+  });
+
+  it("the two arms are genuinely different — only B has the distillation layer", () => {
+    expect(buildSystem("A")).not.toBe(buildSystem("B"));
+    expect(buildSystem("A")).not.toContain("壞例子 ❌ vs 好例子 ✅");
+    expect(buildSystem("B")).toContain("壞例子 ❌ vs 好例子 ✅");
+    // A is the frozen baseline: it must NOT carry the new layers
+    expect(buildSystem("A")).not.toContain("最高優先");
+    expect(buildSystem("A")).not.toContain("寄出前自檢");
+  });
+});
+
 describe("buildUserPrompt", () => {
   it("renders the real conversation with 我們/客人 prefixes, oldest-first", () => {
     const p = buildUserPrompt({

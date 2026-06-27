@@ -22,6 +22,7 @@ import {
   detectLanguage,
   detectDraftSkip,
   buildFollowupDraftRow,
+  pickFollowupVariant,
   FOLLOWUP_DRAFT_AGENT,
   FOLLOWUP_DRAFT_CLASSIFICATION,
   type InteractionDetailRow,
@@ -119,6 +120,11 @@ describe("buildFollowupDraftRow — surfaces AND sends through the real consumer
     gmailThreadId: "t-123",
     subject: "跟進:a@b.co",
     draftBody: "嗨,還在考慮嗎?有想再多看哪邊我都可以幫你。",
+    promptVariant: "B",
+  });
+
+  it("stamps the A/B prompt arm into context for later attribution", () => {
+    expect(JSON.parse(built.context).promptVariant).toBe("B");
   });
 
   it("is an observation row keyed to the customer, unread", () => {
@@ -151,5 +157,24 @@ describe("buildFollowupDraftRow — surfaces AND sends through the real consumer
     expect(target!.gmailThreadId).toBe("t-123");
     expect(target!.customerEmail).toBe("a@b.co");
     expect(target!.draftReply).toContain("還在考慮嗎");
+  });
+});
+
+describe("live prompt A/B — assignment + both arms safe", () => {
+  it("pickFollowupVariant returns A below 0.5, B at/above", () => {
+    expect(pickFollowupVariant(() => 0.0)).toBe("A");
+    expect(pickFollowupVariant(() => 0.49)).toBe("A");
+    expect(pickFollowupVariant(() => 0.5)).toBe("B");
+    expect(pickFollowupVariant(() => 0.99)).toBe("B");
+  });
+
+  it("splits roughly 50/50 over many draws", () => {
+    let a = 0;
+    const N = 1000;
+    // deterministic sweep across [0,1) — exactly half land below 0.5
+    for (let i = 0; i < N; i++) {
+      if (pickFollowupVariant(() => i / N) === "A") a++;
+    }
+    expect(a).toBe(N / 2);
   });
 });

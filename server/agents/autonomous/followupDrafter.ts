@@ -40,6 +40,17 @@ import { withAutonomousSafety } from "../_helpers/safety";
 
 export type FollowupDraftLanguage = "zh-TW" | "zh-CN" | "en";
 
+/**
+ * Live A/B arm. "A" = the frozen pre-2026-06-26 baseline; "B" = the
+ * voice-distilled prompt (layered override + ❌/✅ pairs + self-check). The
+ * producer assigns one per draft and stamps it on the row; the send path joins
+ * it to Jeff's edit distance to measure which prompt he edits less.
+ */
+export type FollowupPromptVariant = "A" | "B";
+
+/** The shipped default arm. buildSystem() and the drafter fall back to this. */
+export const FOLLOWUP_PROMPT_DEFAULT: FollowupPromptVariant = "B";
+
 export type FollowupDrafterInput = {
   customerName?: string | null;
   daysSince: number;
@@ -48,6 +59,8 @@ export type FollowupDrafterInput = {
   conversationExcerpt: Array<{ direction: "inbound" | "outbound"; text: string }>;
   /** Thread subject, for display + light grounding. */
   lastSubject?: string | null;
+  /** Which prompt arm to draft with. Omitted → FOLLOWUP_PROMPT_DEFAULT. */
+  promptVariant?: FollowupPromptVariant;
 };
 
 export type FollowupDrafterOutput = {
@@ -81,8 +94,44 @@ export const TOOL: Tool = {
   },
 };
 
-export function buildSystem(): string {
-  return `你是 PACK&GO 旅行社的資深接待顧問,代表老闆 Jeff 寫一封跟進信,給一位收到報價/行程後安靜下來的客人。這封信會由 Jeff 過目後才寄出。你的標準是「一位真正用心的高端定制旅遊顧問會怎麼寫」,不是罐頭信,也不是隨手傳的訊息。
+/**
+ * Arm A — the frozen pre-2026-06-26 baseline. This is the control in the live
+ * A/B. DO NOT edit it: it must stay byte-stable so the bake-off compares B
+ * against a fixed reference. Prompt improvements land in SYSTEM_V2_DISTILLED.
+ */
+const SYSTEM_V1_BASELINE = `你是 PACK&GO 旅行社的資深接待顧問,代表老闆 Jeff 寫一封跟進信,給一位收到報價/行程後安靜下來的客人。這封信會由 Jeff 過目後才寄出。你的標準是「一位真正用心的高端定制旅遊顧問會怎麼寫」,不是罐頭信,也不是隨手傳的訊息。
+
+【最重要:只搬真實對話,絕不編】
+- 下面給你這位客人跟我們「真實的完整往來」。只能用裡面真的有的東西:他問過什麼、我們給過什麼方向、有哪幾件還沒決定、你們在哪裡認識的、行程的真實選項。
+- 絕對不可以捏造:價格、日期、行程名稱、景點、人數、任何對話裡沒有的細節。
+- 對話沒明說的關係或身分,一律不准推斷。例如看到「10 人」不要寫成「一家人 / 大家庭」,可能只是朋友;沒寫怎麼認識就不要編。不確定的就不要寫。
+- 絕對不可以出現任何內部成本、同業價、供應商名稱。
+
+【稱呼:延用 Jeff 本來怎麼喊這位客人】
+- 從真實對話看 Jeff 之前怎麼稱呼他/她,就延用同樣的稱呼(他喊「姊姊」就 X 姊姊,喊「哥」就 X 哥,喊「先生 / 小姐」就照那個)。
+- 不要對每個人都套「姊姊」。看不出來就用客人的名字加「您」,保持禮貌親切。
+
+【口氣:專業 + 有溫度 + 得體】
+- 全程用「您」,不要用「你」。
+- 先噓寒問暖再帶事:開頭先真誠問候近況(最近還好嗎、天氣、家人),關心在前、事情在後。一上來就問問題是錯的。
+- 低壓力:語感是「不急、您方便再回我一聲就好」,絕不像催單或審問。把還沒決定的事輕輕包進關心裡,不要冷冰冰一條一條列出來像審問。
+- 自然、真誠、得體,像一位記得客人、用心的顧問。不要官腔,也不要過度熱情。
+- 長度看內容拿捏:該暖該完整就寫完整,不必硬壓到很短(這是經營關係的信,不是快速答覆)。
+
+【格式硬規定】
+- 不用破折號(—)。要分隔就用句號或換行。
+- 不用打勾符號、不用 emoji 條列、不用 markdown 符號。純文字。
+- 用客人在對話裡用的語言寫(zh-TW 繁體 / zh-CN 簡體 / en 英文)。
+- 結尾自然署名(Jeff / PACK&GO Travel),不要一整塊制式公司簽名檔。
+
+回傳 submit_followup_draft(subject, body, confidence, reasoning)。subject 溫暖不制式,只給後台顯示;body 是真正要寄給客人的那封,要完全符合以上全部。`;
+
+/**
+ * Arm B — the voice-distilled prompt (ported from the hung-yi-lee skill's
+ * prompt design): layered override at the top, ❌ bad vs ✅ good pairs, and a
+ * pre-send drift self-check. This is where prompt improvements land.
+ */
+const SYSTEM_V2_DISTILLED = `你是 PACK&GO 旅行社的資深接待顧問,代表老闆 Jeff 寫一封跟進信,給一位收到報價/行程後安靜下來的客人。這封信會由 Jeff 過目後才寄出。你的標準是「一位真正用心的高端定制旅遊顧問會怎麼寫」,不是罐頭信,也不是隨手傳的訊息。
 
 【最高優先:這些是 Jeff 本人對客人訊息的硬性要求】
 下面所有規則代表 Jeff 親自定的客人訊息風格。任何時候你想寫得更完整、更專業、更熱情,只要和這些衝突,一律以這些為準。寧可短而對,不要長而跑偏。
@@ -141,6 +190,10 @@ export function buildSystem(): string {
 - 結尾掛一整塊公司簽名檔 → 太制式。
 
 回傳 submit_followup_draft(subject, body, confidence, reasoning)。subject 溫暖不制式,只給後台顯示;body 是真正要寄給客人的那封,要完全符合以上全部。`;
+
+/** System prompt for the requested A/B arm (defaults to the shipped arm). */
+export function buildSystem(variant: FollowupPromptVariant = FOLLOWUP_PROMPT_DEFAULT): string {
+  return variant === "A" ? SYSTEM_V1_BASELINE : SYSTEM_V2_DISTILLED;
 }
 
 export function buildUserPrompt(input: FollowupDrafterInput): string {
@@ -166,7 +219,7 @@ async function _draftFollowupInner(
   input: FollowupDrafterInput,
 ): Promise<FollowupDrafterOutput> {
   const messages: Message[] = [
-    { role: "system", content: buildSystem() },
+    { role: "system", content: buildSystem(input.promptVariant ?? FOLLOWUP_PROMPT_DEFAULT) },
     { role: "user", content: buildUserPrompt(input) },
   ];
 

@@ -24,6 +24,7 @@ import {
   draftFollowup,
   type FollowupDraftLanguage,
   type FollowupDrafterInput,
+  type FollowupPromptVariant,
 } from "./followupDrafter";
 import { AUTO_SEND_HARD_EXCLUDED } from "./autoSendGate";
 import { checkFollowupDraftCompliance } from "./followupDraftCompliance";
@@ -38,6 +39,13 @@ export const FOLLOWUP_DRAFT_AGENT = "followup_draft";
 export const FOLLOWUP_DRAFT_CLASSIFICATION = "followup";
 /** Re-draft suppression: same customer won't be re-drafted within this window. */
 export const FOLLOWUP_DRAFT_DEDUP_DAYS = 7;
+
+/** Live prompt A/B: assign one arm per draft, 50/50. Injectable rng keeps the
+ * split unit-testable. The chosen arm is stamped on the row (context.promptVariant)
+ * so the send path can later join it to Jeff's edit distance. */
+export function pickFollowupVariant(rand: () => number = Math.random): FollowupPromptVariant {
+  return rand() < 0.5 ? "A" : "B";
+}
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** How many recent email turns to feed the drafter as grounding. A professional
  * follow-up needs the real relationship + the actual open decisions, so we feed
@@ -120,6 +128,8 @@ export interface FollowupDraftRowInput {
   gmailThreadId: string;
   subject: string;
   draftBody: string;
+  /** Which prompt arm drafted this, for the live A/B. */
+  promptVariant: FollowupPromptVariant;
 }
 
 export interface FollowupDraftRow {
@@ -140,6 +150,9 @@ export function buildFollowupDraftRow(input: FollowupDraftRowInput): FollowupDra
     customerEmail: input.customerEmail,
     subject: input.subject,
     classification: FOLLOWUP_DRAFT_CLASSIFICATION,
+    // Live prompt A/B arm that produced draftReply. The send path joins this to
+    // the edit distance between draftReply and what Jeff actually sent.
+    promptVariant: input.promptVariant,
     // sendOutcome intentionally omitted (null) → observationDraftCard treats it
     // as awaiting send, not already-sent.
   });
@@ -247,10 +260,12 @@ export async function runFollowupDraftScan(
         continue;
       }
 
+      const promptVariant = pickFollowupVariant();
       const drafterInput: FollowupDrafterInput = {
         daysSince: c.daysSince,
         language: detectLanguage(rows[0]?.content ?? null),
         conversationExcerpt: excerpt,
+        promptVariant,
       };
       const draft = await draftFollowup(drafterInput);
       const body = draft.body?.trim();
@@ -279,6 +294,7 @@ export async function runFollowupDraftScan(
           gmailThreadId: gmailThreadId as string, // non-null past detectDraftSkip
           subject: draft.subject?.trim() || `跟進:${c.email}`,
           draftBody: body,
+          promptVariant,
         }),
       );
       result.drafted++;
