@@ -15,8 +15,9 @@
  * Returns a department-grouped tree that the OfficeOverview tab renders
  * as the "office floor plan."
  *
- * Procedures (1):
+ * Procedures (2):
  *   - officeOverview
+ *   - followupAbReport — live scoreboard for the followupDrafter prompt A/B
  */
 
 import { sql } from "drizzle-orm";
@@ -26,8 +27,15 @@ import {
   interactionOutcomes,
   agentActivityLogs,
 } from "../../../drizzle/schema";
+import { getFollowupAbReport } from "../../_core/followupAbReport";
 
 export const overviewRouter = router({
+  /**
+   * Live A/B scoreboard for the followup-draft prompt (arm A = frozen baseline,
+   * arm B = voice-distilled). Headline metric meanEditRatioSent: among drafts
+   * Jeff actually sent, how much he rewrote — lower is the better arm.
+   */
+  followupAbReport: adminProcedure.query(() => getFollowupAbReport()),
   officeOverview: adminProcedure.query(async () => {
     const db = await getDb();
     if (!db) return { departments: [] };

@@ -37,6 +37,8 @@ export type CustomerDraft = {
   messageId: number | null;
   /** source=inquiry → original approvalTasks.payload JSON (rebuild editedPayload on edit) */
   payload: string | null;
+  /** followup-draft A/B arm (context.promptVariant); null for non-A/B drafts. */
+  promptVariant?: "A" | "B" | null;
 };
 
 const isSensitiveClass = (c: string | null | undefined): boolean =>
@@ -137,7 +139,10 @@ export function escalationDraftCard(row: {
   };
 }
 
-type ObservationCtx = EscalationCtx & { sendOutcome?: string | null };
+type ObservationCtx = EscalationCtx & {
+  sendOutcome?: string | null;
+  promptVariant?: "A" | "B" | null;
+};
 
 /**
  * agentMessages (messageType=observation) row → draft card, or null.
@@ -185,6 +190,7 @@ export function observationDraftCard(row: {
     taskId: null,
     messageId: row.id,
     payload: null,
+    promptVariant: c.promptVariant === "A" || c.promptVariant === "B" ? c.promptVariant : null,
   };
 }
 

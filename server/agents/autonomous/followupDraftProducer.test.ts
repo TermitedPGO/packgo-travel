@@ -149,6 +149,7 @@ describe("buildFollowupDraftRow — surfaces AND sends through the real consumer
     expect(card!.to).toBe("a@b.co");
     expect(card!.kind).toBe(FOLLOWUP_DRAFT_CLASSIFICATION);
     expect(card!.sensitive).toBe(false); // benign follow-up → one-click send
+    expect(card!.promptVariant).toBe("B"); // A/B arm surfaces for the cockpit tag
   });
 
   it("carries the exact target escalationReply needs to send", () => {
