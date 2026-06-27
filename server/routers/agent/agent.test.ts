@@ -134,11 +134,14 @@ describe("agentRouter (v2 Wave 2 Module 2.10 composition shell)", () => {
         "gmailVerify",
         "gmailRunNow",
         "gmailDisconnect",
+        // followup A/B experiment readout (additive, 2026-06)
+        "followupAbReport",
       ].sort(),
     );
     // 50 from the pre-split monolith + 2 from email-auto-reply m4
     // (getAutoSendPolicyFull / setAutoSendPolicyFull, 2026-06-12)
-    expect(procs).toHaveLength(52);
+    // + 1 followupAbReport (followup A/B experiment readout, 2026-06)
+    expect(procs).toHaveLength(53);
   });
 });
 
