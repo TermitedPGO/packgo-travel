@@ -281,6 +281,57 @@ export default function CustomerChat({
           </div>
         )}
 
+        {/* Chat: user bubbles + AI turns (dim thinking steps, then clean answer) */}
+        {messages.map((m, i) =>
+          m.role === "user" ? (
+            <div
+              key={i}
+              className="text-[13px] leading-relaxed rounded-xl px-3 py-2 max-w-[88%] whitespace-pre-wrap ml-auto bg-gray-900 text-white"
+            >
+              {m.text}
+            </div>
+          ) : (
+            <div key={i} className="space-y-1.5 max-w-[60ch]">
+              {m.turn.steps.map((s, j) => (
+                <div key={j} className="flex items-start gap-1.5 text-[11px] text-gray-400 leading-snug">
+                  <Check className="w-3 h-3 mt-0.5 text-gray-300 flex-shrink-0" />
+                  <span className="truncate">{stepLabel(s)}</span>
+                </div>
+              ))}
+
+              {(() => {
+                const isLast = i === messages.length - 1
+                const fullText = m.turn.answer || m.turn.live
+                const shown = isLast ? smoothed : fullText
+                if (shown) {
+                  return (
+                    <div className="text-[13px] leading-[1.7] prose-chat text-gray-800">
+                      <Streamdown>{shown}</Streamdown>
+                      {isLast && (busy || smoothed !== fullText) && (
+                        <span className="inline-block w-1.5 h-3.5 bg-gray-400 ml-0.5 align-text-bottom animate-pulse" />
+                      )}
+                    </div>
+                  )
+                }
+                if (busy && isLast && !m.turn.error) {
+                  return (
+                    <div className="flex items-center gap-1.5 text-[12px] text-gray-400 px-1">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    </div>
+                  )
+                }
+                return null
+              })()}
+
+              {m.turn.error && (
+                <div className="text-[12px] text-gray-700 bg-gray-100 rounded-xl px-3 py-2">
+                  {m.turn.error}
+                </div>
+              )}
+            </div>
+          ),
+        )}
+
         {/* Intro card */}
         {customer && drafts.length > 0 && (
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-[12px] text-gray-700 leading-relaxed">
@@ -406,56 +457,6 @@ export default function CustomerChat({
           </div>
         ))}
 
-        {/* Chat: user bubbles + AI turns (dim thinking steps, then clean answer) */}
-        {messages.map((m, i) =>
-          m.role === "user" ? (
-            <div
-              key={i}
-              className="text-[13px] leading-relaxed rounded-xl px-3 py-2 max-w-[88%] whitespace-pre-wrap ml-auto bg-gray-900 text-white"
-            >
-              {m.text}
-            </div>
-          ) : (
-            <div key={i} className="space-y-1.5 max-w-[60ch]">
-              {m.turn.steps.map((s, j) => (
-                <div key={j} className="flex items-start gap-1.5 text-[11px] text-gray-400 leading-snug">
-                  <Check className="w-3 h-3 mt-0.5 text-gray-300 flex-shrink-0" />
-                  <span className="truncate">{stepLabel(s)}</span>
-                </div>
-              ))}
-
-              {(() => {
-                const isLast = i === messages.length - 1
-                const fullText = m.turn.answer || m.turn.live
-                const shown = isLast ? smoothed : fullText
-                if (shown) {
-                  return (
-                    <div className="text-[13px] leading-[1.7] prose-chat text-gray-800">
-                      <Streamdown>{shown}</Streamdown>
-                      {isLast && (busy || smoothed !== fullText) && (
-                        <span className="inline-block w-1.5 h-3.5 bg-gray-400 ml-0.5 align-text-bottom animate-pulse" />
-                      )}
-                    </div>
-                  )
-                }
-                if (busy && isLast && !m.turn.error) {
-                  return (
-                    <div className="flex items-center gap-1.5 text-[12px] text-gray-400 px-1">
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                    </div>
-                  )
-                }
-                return null
-              })()}
-
-              {m.turn.error && (
-                <div className="text-[12px] text-gray-700 bg-gray-100 rounded-xl px-3 py-2">
-                  {m.turn.error}
-                </div>
-              )}
-            </div>
-          ),
-        )}
       </div>
 
       {/* Input */}
