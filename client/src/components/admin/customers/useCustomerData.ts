@@ -2,7 +2,7 @@ import { useMemo } from "react"
 import { trpc } from "@/lib/trpc"
 import { useLocale } from "@/contexts/LocaleContext"
 import { format } from "date-fns"
-import type { ListItem, AdaptedCustomer, ChatMessage, Doc, Draft } from "./types"
+import type { ListItem, AdaptedCustomer, ChatMessage, AiChatMessage, Doc, Draft } from "./types"
 import { stripQuotedReply } from "./conversationText"
 import {
   toListItem,
@@ -80,6 +80,17 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
     { enabled: profileId !== null },
   )
   const chatQ = selected?.kind === "guest" ? guestChatQ : userChatQ
+
+  // Jeff ↔ AI ops-agent chat (distinct from customer conversation thread above).
+  const userAiChatQ = trpc.admin.customerChatList.useQuery(
+    { userId: userId!, limit: 200 },
+    { enabled: userId !== null },
+  )
+  const guestAiChatQ = trpc.admin.customerChatList.useQuery(
+    { profileId: profileId!, limit: 200 },
+    { enabled: profileId !== null },
+  )
+  const aiChatQ = selected?.kind === "guest" ? guestAiChatQ : userAiChatQ
 
   const userDocsQ = trpc.admin.customerDocs.useQuery(
     { userId: userId! },
@@ -319,11 +330,22 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
     language,
   ])
 
-  const chatMessages = useMemo<ChatMessage[]>(() => {
+  // Jeff ↔ AI ops chat (for CustomerChat panel)
+  const chatMessages = useMemo<AiChatMessage[]>(() => {
+    return (aiChatQ.data ?? []).map((m) => ({
+      id: String(m.id),
+      senderRole: m.senderRole,
+      body: m.body,
+      context: m.context,
+      createdAt: new Date(m.createdAt),
+    }))
+  }, [aiChatQ.data])
+
+  // Real customer conversation thread (for CustomerDetail 最近對話 + ball-in-court)
+  const conversationMessages = useMemo<ChatMessage[]>(() => {
     return (chatQ.data?.messages ?? []).map((m) => ({
       id: m.id,
       senderRole: m.senderRole,
-      // show only this turn's text, not the whole thread quoted back
       body: stripQuotedReply(m.body),
       context: m.context,
       createdAt: new Date(m.createdAt),
@@ -339,7 +361,8 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
     detail,
     isDetailLoading,
     chatMessages,
-    isChatLoading: chatQ.isLoading,
+    conversationMessages,
+    isChatLoading: aiChatQ.isLoading,
     markNotCustomer: (item: Selection) =>
       markNotCustomer.mutate(
         item.kind === "guest" ? { profileId: item.id } : { userId: item.id },

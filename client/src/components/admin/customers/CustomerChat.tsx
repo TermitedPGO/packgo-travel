@@ -13,7 +13,7 @@ import {
 import { Streamdown } from "streamdown"
 import { trpc } from "@/lib/trpc"
 import { useLocale } from "@/contexts/LocaleContext"
-import type { AdaptedCustomer, ChatMessage, Draft } from "./types"
+import type { AdaptedCustomer, AiChatMessage, Draft } from "./types"
 import {
   emptyTurn,
   reduceChatEvent,
@@ -67,7 +67,7 @@ export default function CustomerChat({
   isApprovingDraft,
 }: {
   customer: AdaptedCustomer | null
-  chatMessages: ChatMessage[]
+  chatMessages: AiChatMessage[]
   onApproveDraft: (draft: Draft, editedBody?: string) => Promise<void>
   isApprovingDraft: boolean
 }) {

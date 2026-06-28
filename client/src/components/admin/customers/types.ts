@@ -124,3 +124,11 @@ export type ChatMessage = {
   context: string | null
   createdAt: Date
 }
+
+export type AiChatMessage = {
+  id: string
+  senderRole: "jeff" | "agent"
+  body: string
+  context: string | null
+  createdAt: Date
+}

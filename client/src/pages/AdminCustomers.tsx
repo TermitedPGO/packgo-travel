@@ -22,6 +22,7 @@ export default function AdminCustomers() {
     detail,
     isDetailLoading,
     chatMessages,
+    conversationMessages,
     isChatLoading,
     markNotCustomer,
     restoreCustomer,
@@ -56,7 +57,7 @@ export default function AdminCustomers() {
               <CustomerDetailSkeleton />
             </div>
           ) : detail ? (
-            <CustomerDetail customer={detail} chatMessages={chatMessages} />
+            <CustomerDetail customer={detail} chatMessages={conversationMessages} />
           ) : (
             <div className="flex-1 flex items-center justify-center text-sm text-gray-400">
               {t("admin.customers.selectCustomer")}
