@@ -340,6 +340,12 @@ export default function CustomerChat({
       // Refresh the persisted thread so this turn is in the DB snapshot the next
       // time Jeff opens this customer (switching away and back keeps the chat).
       void utils.admin.customerChatList.invalidate()
+      // The agent may have just collected this customer's Gmail history ("收") or
+      // changed a note — refresh the real conversation + profile so the 歷史 tab
+      // and AI 理解 panel show it immediately, no manual reload.
+      void utils.admin.customerConversationThread.invalidate()
+      void utils.admin.customerProfileData.invalidate()
+      void utils.admin.customerLearnedPreferences.invalidate()
     }
   }
 
