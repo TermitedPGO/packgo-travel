@@ -42,6 +42,8 @@ import {
 export const OPEN_BOOKING_STATUSES = ["pending", "confirmed"] as const;
 export const OPEN_INQUIRY_STATUSES = ["new", "in_progress"] as const;
 
+const extractionInflight = new Set<number>();
+
 type DrizzleDb = NonNullable<Awaited<ReturnType<typeof db.getDb>>>;
 
 /**
@@ -1441,6 +1443,10 @@ export const adminCustomersRouter = router({
         };
       }
 
+      if (extractionInflight.has(row.id)) {
+        return { aiNotes: null, keyFacts: null, preferences: null, extracting: true };
+      }
+
       const [countRow] = await drizzleDb
         .select({ c: sql<number>`count(*)` })
         .from(customerInteractions)
@@ -1450,9 +1456,11 @@ export const adminCustomersRouter = router({
         return { aiNotes: null, keyFacts: null, preferences: null, extracting: false };
       }
 
+      extractionInflight.add(row.id);
       import("../_core/customerPreferenceExtractor")
         .then(({ extractAfterReply }) => extractAfterReply(row.id))
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => extractionInflight.delete(row.id));
 
       return { aiNotes: null, keyFacts: null, preferences: null, extracting: true };
     }),

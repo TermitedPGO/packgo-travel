@@ -115,25 +115,13 @@ function LearnedPreferencesSection({ customer: c }: { customer: AdaptedCustomer 
   const scopeInput = c.kind === "guest" ? { profileId: c.id } : { userId: c.id }
   const q = trpc.admin.customerLearnedPreferences.useQuery(scopeInput, {
     staleTime: 30_000,
+    refetchInterval: q => q.state.data?.extracting ? 5000 : false,
   })
   const trigger = trpc.admin.triggerPreferenceExtraction.useMutation({
     onSuccess: () => {
       setTimeout(() => utils.admin.customerLearnedPreferences.invalidate(scopeInput), 8000)
     },
   })
-
-  const autoTriggered = useRef<string | null>(null)
-  useEffect(() => {
-    const key = `${c.kind}:${c.id}`
-    if (q.data?.extracting && autoTriggered.current !== key) {
-      autoTriggered.current = key
-      const timer = setTimeout(
-        () => utils.admin.customerLearnedPreferences.invalidate(scopeInput),
-        10000,
-      )
-      return () => clearTimeout(timer)
-    }
-  }, [c.kind, c.id, q.data?.extracting])
 
   const d = q.data
   if (!d) return null
