@@ -1402,4 +1402,85 @@ export const adminCustomersRouter = router({
     .mutation(async ({ input }) => {
       return refreshAndStoreSummary(input);
     }),
+
+  customerLearnedPreferences: adminProcedure
+    .input(
+      z.union([
+        z.object({ userId: z.number().int().positive() }).strict(),
+        z.object({ profileId: z.number().int().positive() }).strict(),
+      ]),
+    )
+    .query(async ({ input }) => {
+      const drizzleDb = (await db.getDb())!;
+      const { customerProfiles, customerInteractions } = await import(
+        "../../drizzle/schema"
+      );
+      const pidCond =
+        "userId" in input
+          ? eq(customerProfiles.userId, input.userId)
+          : eq(customerProfiles.id, input.profileId);
+      const [row] = await drizzleDb
+        .select({
+          id: customerProfiles.id,
+          aiNotes: customerProfiles.aiNotes,
+          keyFacts: customerProfiles.keyFacts,
+          preferences: customerProfiles.preferences,
+        })
+        .from(customerProfiles)
+        .where(pidCond)
+        .limit(1);
+      if (!row) return { aiNotes: null, keyFacts: null, preferences: null, extracting: false };
+
+      const hasData = row.aiNotes || row.keyFacts || row.preferences;
+      if (hasData) {
+        return {
+          aiNotes: row.aiNotes as string | null,
+          keyFacts: row.keyFacts as string | null,
+          preferences: row.preferences as Record<string, unknown> | null,
+          extracting: false,
+        };
+      }
+
+      const [countRow] = await drizzleDb
+        .select({ c: sql<number>`count(*)` })
+        .from(customerInteractions)
+        .where(eq(customerInteractions.customerProfileId, row.id));
+      const interactionCount = Number(countRow?.c ?? 0);
+      if (interactionCount === 0) {
+        return { aiNotes: null, keyFacts: null, preferences: null, extracting: false };
+      }
+
+      import("../_core/customerPreferenceExtractor")
+        .then(({ extractAfterReply }) => extractAfterReply(row.id))
+        .catch(() => {});
+
+      return { aiNotes: null, keyFacts: null, preferences: null, extracting: true };
+    }),
+
+  triggerPreferenceExtraction: adminProcedure
+    .input(
+      z.union([
+        z.object({ userId: z.number().int().positive() }).strict(),
+        z.object({ profileId: z.number().int().positive() }).strict(),
+      ]),
+    )
+    .mutation(async ({ input }) => {
+      const drizzleDb = (await db.getDb())!;
+      const { customerProfiles } = await import("../../drizzle/schema");
+      const pidCond =
+        "userId" in input
+          ? eq(customerProfiles.userId, input.userId)
+          : eq(customerProfiles.id, input.profileId);
+      const [row] = await drizzleDb
+        .select({ id: customerProfiles.id })
+        .from(customerProfiles)
+        .where(pidCond)
+        .limit(1);
+      if (!row) return { triggered: false };
+      const { extractAfterReply } = await import(
+        "../_core/customerPreferenceExtractor"
+      );
+      await extractAfterReply(row.id);
+      return { triggered: true };
+    }),
 });

@@ -3387,6 +3387,11 @@ export const en = {
         updatedHrAgo: 'Updated {n}h ago',
         updatedDayAgo: 'Updated {n}d ago',
       },
+      learned: {
+        title: 'AI Customer Insights',
+        extracting: 'Analyzing...',
+        refresh: 'Re-analyze',
+      },
       watchdog: {
         title: 'Margin alert',
         sell: 'Sell',

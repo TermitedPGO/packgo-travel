@@ -3355,6 +3355,11 @@ export const zhTW = {
         updatedHrAgo: '{n} 小時前更新',
         updatedDayAgo: '{n} 天前更新',
       },
+      learned: {
+        title: 'AI 客人理解',
+        extracting: '分析中…',
+        refresh: '重新分析',
+      },
       watchdog: {
         title: '漏價警示',
         sell: '售價',

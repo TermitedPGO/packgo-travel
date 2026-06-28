@@ -3,7 +3,7 @@ import {
   FileText, DollarSign, CheckCircle2,
   CircleDot, CircleAlert, TriangleAlert, CircleX,
   Circle, Clock, MessageSquare, Calendar, HelpCircle, Bot,
-  Download, Plane, Plus, RefreshCw,
+  Download, Plane, Plus, RefreshCw, Sparkles, Loader2,
 } from "lucide-react"
 import { useLocale } from "@/contexts/LocaleContext"
 import { trpc } from "@/lib/trpc"
@@ -109,6 +109,81 @@ function MarginWatchdogBanner({ customer: c }: { customer: AdaptedCustomer }) {
   )
 }
 
+function LearnedPreferencesSection({ customer: c }: { customer: AdaptedCustomer }) {
+  const { t } = useLocale()
+  const utils = trpc.useUtils()
+  const scopeInput = c.kind === "guest" ? { profileId: c.id } : { userId: c.id }
+  const q = trpc.admin.customerLearnedPreferences.useQuery(scopeInput, {
+    staleTime: 30_000,
+  })
+  const trigger = trpc.admin.triggerPreferenceExtraction.useMutation({
+    onSuccess: () => {
+      setTimeout(() => utils.admin.customerLearnedPreferences.invalidate(scopeInput), 8000)
+    },
+  })
+
+  const autoTriggered = useRef<string | null>(null)
+  useEffect(() => {
+    const key = `${c.kind}:${c.id}`
+    if (q.data?.extracting && autoTriggered.current !== key) {
+      autoTriggered.current = key
+      const timer = setTimeout(
+        () => utils.admin.customerLearnedPreferences.invalidate(scopeInput),
+        10000,
+      )
+      return () => clearTimeout(timer)
+    }
+  }, [c.kind, c.id, q.data?.extracting])
+
+  const d = q.data
+  if (!d) return null
+  const empty = !d.aiNotes && !d.keyFacts && !d.preferences
+  if (empty && !d.extracting && !trigger.isPending) return null
+
+  const busy = d.extracting || trigger.isPending
+
+  return (
+    <div className="rounded-xl bg-gray-50 border border-gray-200 p-4 space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="text-[11px] text-gray-400 font-medium flex items-center gap-1.5">
+          <Sparkles className="w-3 h-3" />
+          {t("admin.customers.learned.title")}
+          {busy && (
+            <span className="text-gray-400 flex items-center gap-1">
+              · <Loader2 className="w-3 h-3 animate-spin" />
+              {t("admin.customers.learned.extracting")}
+            </span>
+          )}
+        </div>
+        <button
+          onClick={() => trigger.mutate(scopeInput)}
+          disabled={busy}
+          className="text-[10px] font-medium text-gray-500 hover:text-gray-900 transition-colors flex items-center gap-1 rounded-lg px-1.5 py-0.5 hover:bg-gray-100 disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3 h-3 ${busy ? "animate-spin" : ""}`} />
+          {t("admin.customers.learned.refresh")}
+        </button>
+      </div>
+      {d.aiNotes && (
+        <div className="text-[12px] text-gray-700 leading-relaxed">{d.aiNotes}</div>
+      )}
+      {d.keyFacts && (
+        <div className="space-y-1 mt-1">
+          {d.keyFacts
+            .split("\n")
+            .filter((l) => l.trim())
+            .map((line, i) => (
+              <div key={i} className="text-[11.5px] text-gray-600 flex gap-1.5">
+                <span className="text-gray-400 flex-shrink-0">·</span>
+                <span>{line.replace(/^-\s*/, "")}</span>
+              </div>
+            ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function OverviewTab({ customer: c, chatMessages }: { customer: AdaptedCustomer; chatMessages: ChatMessage[] }) {
   const { t } = useLocale()
   const [showAllChat, setShowAllChat] = useState(false)
@@ -179,6 +254,9 @@ export function OverviewTab({ customer: c, chatMessages }: { customer: AdaptedCu
         <SummaryRow label={t("admin.customers.summary.actionsLabel")} value={aiActions} />
         <SummaryRow label={t("admin.customers.summary.deliveredLabel")} value={aiDelivered} />
       </div>
+
+      {/* AI-learned preferences */}
+      <LearnedPreferencesSection customer={c} />
 
       {/* Follow-up context */}
       {lastMsg && (
