@@ -3348,6 +3348,7 @@ export const en = {
         chatCollapse: 'Collapse',
         chatStop: 'Stop',
         dropFile: 'Drop files here',
+        globalPlaceholder: 'Add customer, drop files...',
       },
       status: {
         allClear: 'All clear',

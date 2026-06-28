@@ -284,7 +284,25 @@ export const WRITE_TOOLS: Anthropic.Tool[] = [
   },
 ];
 
-export const WRITE_TOOL_NAMES = new Set(WRITE_TOOLS.map((t) => t.name));
+export const CREATE_CUSTOMER_TOOL: Anthropic.Tool = {
+  name: "create_customer",
+  description:
+    "Create a new customer profile. Use when Jeff says '新增客人' / " +
+    "'加一個客人' / drags a file with customer info. Extract name + at " +
+    "least one of email or phone from the conversation or attached file. " +
+    "Returns the new profile id on success.",
+  input_schema: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "Customer display name" },
+      email: { type: "string", description: "Email (optional if phone given)" },
+      phone: { type: "string", description: "Phone (optional if email given)" },
+    },
+    required: ["name"],
+  },
+};
+
+export const WRITE_TOOL_NAMES = new Set([...WRITE_TOOLS, CREATE_CUSTOMER_TOOL].map((t) => t.name));
 
 // ── Executor ────────────────────────────────────────────────────────────────
 
@@ -1032,6 +1050,27 @@ async function runWriteTool(
         bookingStatus: updated.bookingStatus,
         paymentStatus: updated.paymentStatus,
       };
+    }
+
+    case "create_customer": {
+      const cName = (input.name ?? "").trim();
+      if (!cName) return { error: "name is required" };
+      const cEmail = (input.email ?? "").trim() || undefined;
+      const cPhone = (input.phone ?? "").trim() || undefined;
+      if (!cEmail && !cPhone) return { error: "email or phone required" };
+      if (cEmail && !/^\S+@\S+\.\S+$/.test(cEmail))
+        return { error: "invalid email format" };
+      const [row] = await db
+        .insert(customerProfiles)
+        .values({
+          name: cName,
+          email: cEmail ?? null,
+          phone: cPhone ?? null,
+          source: "manual",
+        } as any)
+        .$returningId();
+      log.info({ profileId: row.id, name: cName }, "create_customer executed");
+      return { success: true, profileId: row.id, message: `已新增客人「${cName}」` };
     }
 
     default:

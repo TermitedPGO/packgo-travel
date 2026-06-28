@@ -25,6 +25,7 @@ import {
   READ_TOOLS,
   WRITE_TOOLS,
   WRITE_TOOL_NAMES,
+  CREATE_CUSTOMER_TOOL,
   executeReadTool,
   executeWriteTool,
   toCard,
@@ -182,6 +183,7 @@ export async function* runOpsAgentStream(
       "【先說一句再查 — 體感鐵則】要呼叫工具前,先用一句短話跟 Jeff 說你正要查什麼(例:『我查一下中國有哪些團』『等我看一下這個月的帳』),再呼叫工具。不要一句話都不說就靜默查 — 查詢可能要十幾秒,Jeff 會盯著空白以為當掉。先吐這句話,他立刻看到你在動;查完再接正式答案。\n" +
       "【財務鐵則】每次回答財務問題 (淨利、這個月狀況),如果 get_finance_summary 回傳的 missingReceiptCount > 0,一定要主動提醒 Jeff:「有 N 筆支出還沒附 receipt,要補一下」,因為他需要收據報稅。\n" +
       "【最重要】查完工具後,你一定要用**文字**把答案講給 Jeff 聽 (例:問淨利就講「這個月淨利 $X」)。**絕對不可以**只丟一個 suggest_action 動作就當作回答 — 動作只是「答完之後」的額外建議。沒有文字回答 = 失敗。純資訊問題 (幾團、淨利、哪個最多) 通常根本不需要附動作,直接講答案就好。suggest_action 只在 Jeff 明顯需要做一件寫入的事 (寄信、退款、分類帳本) 時才用,而且永遠是在文字答案之後。" +
+      "\n【新增客人】Jeff 說「新增客人」「加一個客人」或拖放了客人資訊檔案時,從對話或附件中提取姓名 + email 或手機,呼叫 create_customer。建好後告訴 Jeff 已新增。" +
       (draftProfileId != null
         ? "\n【要回信 / 跟進這位客人 — 直接備好草稿】當 Jeff 叫你回信 / 跟進 / 幫忙寫信給「目前這位客人」,呼叫 draft_followup 把專業跟進信草稿備好(它會出現在客戶頁待審草稿區,看過一鍵就能寄)。呼叫後只要用一兩句話跟 Jeff 說重點(誰、卡在哪、幾天沒回),不要自己把整封信長篇寫在聊天裡。" +
           "\n【說了就做 — 寫入工具】你有 update_customer_note 和 update_booking_status 兩個寫入工具。Jeff 說「備註加上…」「標記已付款」「這筆確認了」時,直接呼叫對應工具執行,不用再問確認。但碰錢的變更(退款、調價)和寄信給客人的,仍然走 suggest_action 或 draft_followup 讓 Jeff 審核。update_customer_note 改的是 Jeff 私人備忘(客人看不到)。update_booking_status 要先用 search_bookings 拿到 bookingId。"
@@ -197,8 +199,8 @@ export async function* runOpsAgentStream(
 
     const tools =
       draftProfileId != null
-        ? [...READ_TOOLS, ...WRITE_TOOLS, SUGGEST_ACTION_TOOL, DRAFT_FOLLOWUP_TOOL]
-        : [...READ_TOOLS, SUGGEST_ACTION_TOOL];
+        ? [...READ_TOOLS, ...WRITE_TOOLS, CREATE_CUSTOMER_TOOL, SUGGEST_ACTION_TOOL, DRAFT_FOLLOWUP_TOOL]
+        : [...READ_TOOLS, CREATE_CUSTOMER_TOOL, SUGGEST_ACTION_TOOL];
     const suggestedActions: any[] = [];
     const cards: any[] = [];
     let finalAnswer = "";

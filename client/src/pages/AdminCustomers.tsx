@@ -1,9 +1,8 @@
-import { useState } from "react"
+import { useState, useRef } from "react"
 import { useLocale } from "@/contexts/LocaleContext"
 import CustomerList from "@/components/admin/customers/CustomerList"
 import CustomerDetail from "@/components/admin/customers/CustomerDetail"
 import CustomerChat from "@/components/admin/customers/CustomerChat"
-import AddCustomerDialog from "@/components/admin/customers/AddCustomerDialog"
 import { useCustomerData, type Selection } from "@/components/admin/customers/useCustomerData"
 import {
   CustomerListSkeleton,
@@ -15,7 +14,7 @@ export default function AdminCustomers() {
   const { t } = useLocale()
   const [selected, setSelected] = useState<Selection | null>(null)
   const [showHidden, setShowHidden] = useState(false)
-  const [addOpen, setAddOpen] = useState(false)
+  const chatFocusRef = useRef<() => void>(null)
   const {
     customers,
     isListLoading,
@@ -26,8 +25,6 @@ export default function AdminCustomers() {
     isChatLoading,
     markNotCustomer,
     restoreCustomer,
-    createManualCustomer,
-    isCreating,
     approveDraft,
     isApprovingDraft,
   } = useCustomerData(selected, showHidden)
@@ -47,7 +44,7 @@ export default function AdminCustomers() {
           onToggleHidden={setShowHidden}
           onMarkNotCustomer={markNotCustomer}
           onRestoreCustomer={restoreCustomer}
-          onAddCustomer={() => setAddOpen(true)}
+          onAddCustomer={() => chatFocusRef.current?.()}
         />
       )}
       {selected !== null ? (
@@ -77,16 +74,19 @@ export default function AdminCustomers() {
           )}
         </>
       ) : (
-        <div className="flex-1 flex items-center justify-center text-sm text-gray-400">
-          {t("admin.customers.selectCustomer")}
-        </div>
+        <>
+          <div className="flex-1 flex items-center justify-center text-sm text-gray-400">
+            {t("admin.customers.selectCustomer")}
+          </div>
+          <CustomerChat
+            customer={null}
+            chatMessages={[]}
+            onApproveDraft={async () => {}}
+            isApprovingDraft={false}
+            onFocusReady={(fn) => { chatFocusRef.current = fn }}
+          />
+        </>
       )}
-      <AddCustomerDialog
-        open={addOpen}
-        onClose={() => setAddOpen(false)}
-        onCreate={createManualCustomer}
-        isCreating={isCreating}
-      />
     </div>
   )
 }

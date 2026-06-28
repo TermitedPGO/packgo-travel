@@ -74,11 +74,13 @@ export default function CustomerChat({
   chatMessages,
   onApproveDraft,
   isApprovingDraft,
+  onFocusReady,
 }: {
   customer: AdaptedCustomer | null
   chatMessages: AiChatMessage[]
   onApproveDraft: (draft: Draft, editedBody?: string) => Promise<void>
   isApprovingDraft: boolean
+  onFocusReady?: (fn: () => void) => void
 }) {
   const { t } = useLocale()
   const utils = trpc.useUtils()
@@ -189,6 +191,11 @@ export default function CustomerChat({
   // Tear down any in-flight stream on unmount.
   useEffect(() => () => abortRef.current?.abort(), [])
 
+  // Register focus callback so parent can focus the chat input (e.g. "新增客人").
+  useEffect(() => {
+    onFocusReady?.(() => taRef.current?.focus())
+  }, [onFocusReady])
+
   // Auto-grow the composer textarea (1 line up to ~5), like Claude Code.
   useEffect(() => {
     const el = taRef.current
@@ -238,7 +245,7 @@ export default function CustomerChat({
   // collapse into dim steps; the answer streams clean (no 斷句). Read-only.
   const handleSend = async () => {
     const q = input.trim()
-    if (!q || busy || !customer) return
+    if (!q || busy) return
     const files = attachments
     setInput("")
     setAttachments([])
@@ -253,7 +260,8 @@ export default function CustomerChat({
     abortRef.current = ac
     try {
       const hasFiles = files.length > 0
-      const scopeKey = customer.kind === "guest" ? "customerProfileId" : "customerId"
+      const scopeKey = customer ? (customer.kind === "guest" ? "customerProfileId" : "customerId") : null
+      const scopeParam = scopeKey ? { [scopeKey]: customer!.id } : {}
       const resp = hasFiles
         ? await fetch("/api/agent/ask-ops-stream", {
             method: "POST",
@@ -266,12 +274,12 @@ export default function CustomerChat({
             },
             body: JSON.stringify({
               q,
-              [scopeKey]: customer.id,
+              ...scopeParam,
               fileContext: { name: files.map((f) => f.name).join(", "), content: files.map((f) => `--- ${f.name} ---\n${f.content}`).join("\n\n") },
             }),
           })
         : await fetch(
-            `/api/agent/ask-ops-stream?q=${encodeURIComponent(q)}&${scopeKey}=${customer.id}`,
+            `/api/agent/ask-ops-stream?q=${encodeURIComponent(q)}${scopeKey ? `&${scopeKey}=${customer!.id}` : ""}`,
             {
               method: "GET",
               credentials: "include",
@@ -576,14 +584,13 @@ export default function CustomerChat({
                 handleSend()
               }
             }}
-            disabled={!customer}
             rows={1}
-            placeholder={t("admin.customers.drafts.askPlaceholder")}
+            placeholder={customer ? t("admin.customers.drafts.askPlaceholder") : t("admin.customers.drafts.globalPlaceholder")}
             className="flex-1 text-[12px] leading-relaxed outline-none bg-transparent resize-none max-h-[120px] py-0.5 disabled:opacity-60"
           />
           <button
             onClick={busy ? () => abortRef.current?.abort() : handleSend}
-            disabled={!customer || (!busy && !input.trim())}
+            disabled={!busy && !input.trim()}
             aria-label={busy ? t("admin.customers.drafts.chatStop") : t("admin.customers.drafts.send")}
             title={busy ? t("admin.customers.drafts.chatStop") : undefined}
             className="w-6 h-6 mb-0.5 rounded-md bg-gray-900 text-white flex items-center justify-center hover:bg-gray-700 transition-colors flex-shrink-0 disabled:opacity-40 disabled:hover:bg-gray-900"
