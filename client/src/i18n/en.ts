@@ -3347,6 +3347,7 @@ export const en = {
         chatExpand: 'Expand',
         chatCollapse: 'Collapse',
         chatStop: 'Stop',
+        dropFile: 'Drop files here',
       },
       status: {
         allClear: 'All clear',

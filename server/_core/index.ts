@@ -317,7 +317,11 @@ async function startServer() {
   //
   // Why GET (not POST): EventSource API only supports GET. The question
   // text is passed via ?q= query param (max ~2K chars, plenty for ops Q&A).
-  app.get("/api/agent/ask-ops-stream", async (req, res) => {
+  app.all("/api/agent/ask-ops-stream", async (req, res) => {
+    if (req.method !== "GET" && req.method !== "POST") {
+      return res.status(405).json({ error: "Method not allowed" });
+    }
+    const isPost = req.method === "POST";
     // 2026-05-31 — "OpsAgent spins forever, no reply" hardening. These live at
     // handler scope so both the try and the catch can tear them down. Root-
     // cause writeup is in the SSE-headers block below.
@@ -369,17 +373,22 @@ async function startServer() {
         });
       }
 
-      const question = String(req.query.q ?? "").trim();
+      const question = String(isPost ? req.body?.q : req.query.q ?? "").trim();
       if (!question || question.length > 2000) {
         return res.status(400).json({ error: "Question required, max 2000 chars" });
       }
+
+      // File context — POST-only, text content the client read via FileReader.
+      const fileContext = isPost && req.body?.fileContext
+        ? { name: String(req.body.fileContext.name ?? "file"), content: String(req.body.fileContext.content ?? "").slice(0, 100_000) }
+        : undefined;
 
       // 批2 m3 — optional per-customer binding. When present, the thread
       // lives in customerChatMessages (拍板: 獨立新表,不混 agentMessages)
       // and the system prompt pins who the conversation is about. Validated
       // BEFORE the SSE headers so errors return as plain JSON.
       let customerId: number | null = null;
-      const rawCustomerId = String(req.query.customerId ?? "").trim();
+      const rawCustomerId = String((isPost ? req.body?.customerId : req.query.customerId) ?? "").trim();
       if (rawCustomerId) {
         customerId = Number(rawCustomerId);
         if (!Number.isInteger(customerId) || customerId <= 0) {
@@ -397,7 +406,7 @@ async function startServer() {
       // customerProfileId and the system prompt pins the guest. Validated
       // BEFORE the SSE headers so errors return as plain JSON.
       let customerProfileId: number | null = null;
-      const rawProfileId = String(req.query.customerProfileId ?? "").trim();
+      const rawProfileId = String((isPost ? req.body?.customerProfileId : req.query.customerProfileId) ?? "").trim();
       if (rawProfileId) {
         if (customerId !== null) {
           return res.status(400).json({
@@ -613,6 +622,12 @@ async function startServer() {
         const { buildGuestChatContext } = await import("./customerChatContext");
         extraSystem =
           (await buildGuestChatContext(customerProfileId)) ?? undefined;
+      }
+
+      // Append file context so the agent can reference the dragged-in file.
+      if (fileContext) {
+        const fileBlock = `\n\n<attached-file name="${fileContext.name}">\n${fileContext.content}\n</attached-file>`;
+        extraSystem = extraSystem ? extraSystem + fileBlock : fileBlock;
       }
 
       // Run streaming agent. Customer-scoped chats (customerId / profileId) run

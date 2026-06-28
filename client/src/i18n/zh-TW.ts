@@ -3315,6 +3315,7 @@ export const zhTW = {
         chatExpand: '展開',
         chatCollapse: '收合',
         chatStop: '停止',
+        dropFile: '拖放文件到這裡',
       },
       status: {
         allClear: '一切就緒',

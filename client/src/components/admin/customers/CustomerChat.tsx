@@ -9,6 +9,8 @@ import {
   Loader2,
   Check,
   Lightbulb,
+  X,
+  Paperclip,
 } from "lucide-react"
 import { Streamdown } from "streamdown"
 import { trpc } from "@/lib/trpc"
@@ -24,6 +26,13 @@ import {
 } from "./chatStream"
 
 type ChatMsg = { role: "user"; text: string } | { role: "ai"; turn: ChatTurn }
+type Attachment = { name: string; content: string; size: number }
+
+const TEXT_EXTS = new Set([
+  "txt", "html", "htm", "css", "js", "ts", "tsx", "jsx",
+  "json", "csv", "md", "xml", "svg", "yaml", "yml", "sql",
+])
+const MAX_FILE_SIZE = 500_000
 
 /** Dim "thinking" step label: the bridge sentence the model spoke, or the tools
  * it ran when it spoke nothing. */
@@ -83,6 +92,45 @@ export default function CustomerChat({
   const scrollRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const hydratedRef = useRef<string | null>(null)
+
+  // File drag-and-drop attachments (Claude-style).
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [dragging, setDragging] = useState(false)
+  const dragCounter = useRef(0)
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault()
+    dragCounter.current++
+    if (e.dataTransfer.types.includes("Files")) setDragging(true)
+  }
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    dragCounter.current--
+    if (dragCounter.current === 0) setDragging(false)
+  }
+  const handleDragOver = (e: React.DragEvent) => e.preventDefault()
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    dragCounter.current = 0
+    setDragging(false)
+    const files = Array.from(e.dataTransfer.files)
+    for (const file of files) {
+      const ext = file.name.split(".").pop()?.toLowerCase() ?? ""
+      if (!TEXT_EXTS.has(ext)) continue
+      if (file.size > MAX_FILE_SIZE) continue
+      if (attachments.length >= 5) break
+      const reader = new FileReader()
+      reader.onload = () => {
+        setAttachments((prev) => {
+          if (prev.some((a) => a.name === file.name) || prev.length >= 5) return prev
+          return [...prev, { name: file.name, content: reader.result as string, size: file.size }]
+        })
+      }
+      reader.readAsText(file)
+    }
+  }
+  const removeAttachment = (name: string) =>
+    setAttachments((prev) => prev.filter((a) => a.name !== name))
 
   // Draft approve/edit/confirm state (keyed by draft id).
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -191,24 +239,46 @@ export default function CustomerChat({
   const handleSend = async () => {
     const q = input.trim()
     if (!q || busy || !customer) return
+    const files = attachments
     setInput("")
+    setAttachments([])
     setBusy(true)
-    const scopeParam =
-      customer.kind === "guest" ? `customerProfileId=${customer.id}` : `customerId=${customer.id}`
-    setMessages((prev) => [...prev, { role: "user", text: q }, { role: "ai", turn: emptyTurn() }])
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", text: files.length ? `${q}\n\n${files.map((f) => `📎 ${f.name}`).join("\n")}` : q },
+      { role: "ai", turn: emptyTurn() },
+    ])
 
     const ac = new AbortController()
     abortRef.current = ac
     try {
-      const resp = await fetch(
-        `/api/agent/ask-ops-stream?q=${encodeURIComponent(q)}&${scopeParam}`,
-        {
-          method: "GET",
-          credentials: "include",
-          signal: ac.signal,
-          headers: { "X-Requested-With": "XMLHttpRequest", Accept: "text/event-stream" },
-        },
-      )
+      const hasFiles = files.length > 0
+      const scopeKey = customer.kind === "guest" ? "customerProfileId" : "customerId"
+      const resp = hasFiles
+        ? await fetch("/api/agent/ask-ops-stream", {
+            method: "POST",
+            credentials: "include",
+            signal: ac.signal,
+            headers: {
+              "X-Requested-With": "XMLHttpRequest",
+              Accept: "text/event-stream",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              q,
+              [scopeKey]: customer.id,
+              fileContext: { name: files.map((f) => f.name).join(", "), content: files.map((f) => `--- ${f.name} ---\n${f.content}`).join("\n\n") },
+            }),
+          })
+        : await fetch(
+            `/api/agent/ask-ops-stream?q=${encodeURIComponent(q)}&${scopeKey}=${customer.id}`,
+            {
+              method: "GET",
+              credentials: "include",
+              signal: ac.signal,
+              headers: { "X-Requested-With": "XMLHttpRequest", Accept: "text/event-stream" },
+            },
+          )
       if (!resp.ok || !resp.body) {
         updateLastAi((turn) => ({ ...turn, error: t("admin.customers.drafts.askFailed") }))
         setBusy(false)
@@ -249,10 +319,14 @@ export default function CustomerChat({
         />
       )}
       <div
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
         className={
           expanded
-            ? "fixed inset-y-0 right-0 z-50 w-[min(960px,72vw)] bg-white border-l border-gray-200 flex flex-col overflow-hidden shadow-2xl"
-            : "w-[340px] border-l border-gray-200 flex flex-col overflow-hidden"
+            ? "fixed inset-y-0 right-0 z-50 w-[min(960px,72vw)] bg-white border-l border-gray-200 flex flex-col overflow-hidden shadow-2xl relative"
+            : "w-[340px] border-l border-gray-200 flex flex-col overflow-hidden relative"
         }
       >
       {/* Header */}
@@ -459,8 +533,38 @@ export default function CustomerChat({
 
       </div>
 
+      {/* Drag overlay */}
+      {dragging && (
+        <div className="absolute inset-0 z-30 bg-white/80 border-2 border-dashed border-gray-400 rounded-xl flex items-center justify-center pointer-events-none">
+          <div className="flex flex-col items-center gap-1.5 text-gray-500">
+            <Paperclip className="w-5 h-5" />
+            <span className="text-[12px] font-medium">{t("admin.customers.drafts.dropFile")}</span>
+          </div>
+        </div>
+      )}
+
       {/* Input */}
       <div className="border-t border-gray-200 p-2">
+        {/* Attachment chips */}
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-1 px-1 pb-1.5">
+            {attachments.map((a) => (
+              <span
+                key={a.name}
+                className="inline-flex items-center gap-1 text-[10px] bg-gray-100 text-gray-600 pl-2 pr-1 py-0.5 rounded-md"
+              >
+                <FileText className="w-2.5 h-2.5" />
+                {a.name}
+                <button
+                  onClick={() => removeAttachment(a.name)}
+                  className="w-3.5 h-3.5 rounded-sm hover:bg-gray-200 flex items-center justify-center"
+                >
+                  <X className="w-2.5 h-2.5" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         <div className="flex items-end gap-2 border border-gray-200 rounded-xl px-3 py-1.5">
           <textarea
             ref={taRef}
