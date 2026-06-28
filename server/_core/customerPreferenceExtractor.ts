@@ -30,7 +30,9 @@ export interface ExtractionResult {
   preferences: ExtractedPreferences;
 }
 
-const EXTRACT_SYSTEM = `你是 PACK&GO 旅行社的客戶分析師,幫 Jeff(老闆)從對話中提取客人的偏好和重要事實。
+const EXTRACT_SYSTEM = `【重要】所有輸出必須使用繁體中文。不管對話原文是什麼語言,你的 aiNotes、keyFacts、preferences 值全部用繁體中文寫。
+
+你是 PACK&GO 旅行社的客戶分析師,幫 Jeff(老闆)從對話中提取客人的偏好和重要事實。
 
 你會拿到:
 1. 這位客人最近的對話紀錄
@@ -115,7 +117,7 @@ export async function extractCustomerPreferences(opts: {
     "【最近對話】",
     conversationText,
     "",
-    "請提取/更新這位客人的偏好。輸出 JSON。",
+    "請提取/更新這位客人的偏好。輸出 JSON。全部用繁體中文。",
   ].join("\n");
 
   try {
