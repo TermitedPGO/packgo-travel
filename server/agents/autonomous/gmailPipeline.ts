@@ -29,7 +29,7 @@ import {
   agentMessages,
   customerDocuments,
 } from "../../../drizzle/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, sql, gt, isNotNull } from "drizzle-orm";
 import { inquiryClassificationLabelZh } from "./inquiryLabels";
 import {
   buildGmailClient,
@@ -61,6 +61,12 @@ const PROCESSED_LABEL = "PACKGO_AI_PROCESSED";
  * Then set this env var on Fly so the agent ignores personal inbox noise.
  */
 const POLL_FILTER_LABEL = process.env.GMAIL_POLL_LABEL || "";
+
+// gmail-trailing-reconcile — re-sync customer threads active within this window
+// every poll, regardless of read state, to back-fill already-read trailing
+// replies the is:unread poll can never re-see. Bounded per cycle to stay cheap.
+const RECONCILE_WINDOW_MS = 4 * 24 * 60 * 60 * 1000; // 4 days
+const RECONCILE_MAX_THREADS = 40;
 
 export type PipelineResult = {
   ok: boolean;
@@ -268,6 +274,71 @@ export async function runGmailPipeline(
         "[gmailPipeline] Failed thread",
       );
     }
+  }
+
+  // ── gmail-trailing-reconcile ──────────────────────────────────────────────
+  // The unread poll (is:unread) never re-sees a message Jeff already opened, and
+  // the per-inbound thread sync (processOneEmail [5]) only fires when a NEW
+  // inbound arrives. So a thread whose LAST message is an already-read reply —
+  // e.g. a customer's closing「謝謝🙏」read before the next 10-min tick — silently
+  // never gets filed (root cause of "還是少了一則訊息"). Re-sync every recently
+  // active customer thread regardless of read state. syncThreadToInteractions is
+  // idempotent (claim-or-insert on Message-ID), so re-running only back-fills the
+  // gap. Best-effort: a failure here must never break mail processing. Cheap at
+  // PACK&GO scale (≤40 threads × 1 thread.get, 6×/hr ≪ Gmail quota).
+  try {
+    const since = new Date(Date.now() - RECONCILE_WINDOW_MS);
+    const recentThreads = await db
+      .selectDistinct({
+        profileId: customerInteractions.customerProfileId,
+        threadId: customerInteractions.gmailThreadId,
+      })
+      .from(customerInteractions)
+      .where(
+        and(
+          isNotNull(customerInteractions.gmailThreadId),
+          gt(customerInteractions.createdAt, since),
+        ),
+      )
+      .limit(RECONCILE_MAX_THREADS);
+
+    const [{ listThreadMessagesForFiling }, { syncThreadToInteractions }] =
+      await Promise.all([
+        import("../../_core/gmail"),
+        import("../../_core/threadFiling"),
+      ]);
+
+    let reconciled = 0;
+    let backfilled = 0;
+    for (const t of recentThreads) {
+      // Skip threads already synced this cycle off a fresh inbound (dedup).
+      if (!t.threadId || syncedThreads.has(t.threadId)) continue;
+      syncedThreads.add(t.threadId);
+      try {
+        const filingMsgs = await listThreadMessagesForFiling(
+          gmail,
+          t.threadId,
+          fromEmail,
+        );
+        const synced = await syncThreadToInteractions(db, t.profileId, filingMsgs);
+        reconciled++;
+        backfilled += synced.inserted + synced.claimed;
+      } catch {
+        // A thread id from a different mailbox 404s on this client, or a
+        // transient Gmail error — skip it, the next tick retries.
+      }
+    }
+    if (backfilled > 0) {
+      log.info(
+        { reconciled, backfilled },
+        "[gmailPipeline] trailing-reconcile back-filled read-but-unfiled messages",
+      );
+    }
+  } catch (e) {
+    log.warn(
+      { err: e },
+      "[gmailPipeline] trailing-reconcile failed (non-fatal)",
+    );
   }
 
   // Update integration counters
