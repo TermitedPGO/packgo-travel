@@ -157,7 +157,7 @@ export default function FinanceDashboard() {
             placeholder={t("admin.commandCenter.finAdvisorPlaceholder")}
             className="h-8 rounded-lg text-xs flex-1"
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 handleAskAdvisor();
               }

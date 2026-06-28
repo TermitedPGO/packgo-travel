@@ -220,7 +220,7 @@ export default function AdminHome() {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
+              onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && handleSend()}
               placeholder={t("admin.chatPlaceholder")}
               className="flex-1 text-sm outline-none bg-transparent"
             />
