@@ -93,7 +93,6 @@ export default function CustomerChat({
   const abortRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
-  const hydratedRef = useRef<string | null>(null)
 
   // File drag-and-drop attachments (Claude-style).
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -157,6 +156,8 @@ export default function CustomerChat({
 
   // Drop any in-flight edit / confirm / error state when the selected customer
   // changes — a money/legal send surface must never carry state across customers.
+  // Clearing messages here lets the hydrate effect below repopulate from THIS
+  // customer's persisted thread, so switching never bleeds A's turns into B.
   useEffect(() => {
     setEditingId(null)
     setConfirmId(null)
@@ -166,22 +167,25 @@ export default function CustomerChat({
     abortRef.current?.abort()
     setMessages([])
     setBusy(false)
-    hydratedRef.current = null
   }, [customer?.id, customer?.kind])
 
-  // Hydrate Jeff ↔ AI chat from DB so conversation survives page refresh.
-  // Only Jeff-AI interactions are stored; customer email exchanges live in 最近對話.
+  // Hydrate / re-hydrate from the persisted per-customer thread. Each customer's
+  // Jeff↔AI chat is independent and durable (saved server-side per turn), so
+  // switching away and back must restore the FULL thread, not a stale snapshot.
+  // Re-applies whenever the DB history has turns we're not showing yet (fresh
+  // open, or returning after new turns were saved). Guards: never while a stream
+  // is live (busy), and never shrink a longer local list — so a just-streamed
+  // turn (rich steps) is not clobbered by its own answer-only DB copy.
   useEffect(() => {
-    const key = customer ? `${customer.kind}-${customer.id}` : null
-    if (!key || hydratedRef.current === key || chatMessages.length === 0) return
-    hydratedRef.current = key
+    if (!customer || busy) return
+    if (chatMessages.length === 0 || chatMessages.length <= messages.length) return
     const history: ChatMsg[] = chatMessages.map((m) =>
       m.senderRole === "jeff"
         ? { role: "user" as const, text: m.body }
         : { role: "ai" as const, turn: { steps: [], live: "", answer: m.body, error: null } },
     )
     setMessages(history)
-  }, [customer?.id, customer?.kind, chatMessages])
+  }, [customer?.id, customer?.kind, chatMessages, busy, messages.length])
 
   // Keep the latest streamed token in view.
   useEffect(() => {
@@ -312,6 +316,9 @@ export default function CustomerChat({
       // The agent may have produced a follow-up draft (draft_followup); refresh
       // the 待審草稿 cards so a new one shows without a manual reload.
       void utils.admin.customerDrafts.invalidate()
+      // Refresh the persisted thread so this turn is in the DB snapshot the next
+      // time Jeff opens this customer (switching away and back keeps the chat).
+      void utils.admin.customerChatList.invalidate()
     }
   }
 
