@@ -282,6 +282,25 @@ export const WRITE_TOOLS: Anthropic.Tool[] = [
       required: ["bookingId"],
     },
   },
+  {
+    name: "collect_customer_threads",
+    description:
+      "收/歸檔某個客人的 Gmail 往來到系統。用在 Jeff 在某客人的對話框說「收」/「收進來」/" +
+      "「歸檔他的記錄」時:直接呼叫這個工具把該客人 email 的所有 thread 收進他的檔案" +
+      "(idempotent,重收只補不漏)。收完用一句話跟 Jeff 報結果(收了幾條、新增幾條)。" +
+      "email 用目前這位客人的 email(系統已釘在上面),不要自己編。**收完直接報結果," +
+      "不要叫 Jeff 點任何按鈕**(這個對話框沒有可點的按鈕)。",
+    input_schema: {
+      type: "object",
+      properties: {
+        email: {
+          type: "string",
+          description: "目前這位客人的 email(從釘住的客人資料拿,不要編)",
+        },
+      },
+      required: ["email"],
+    },
+  },
 ];
 
 export const CREATE_CUSTOMER_TOOL: Anthropic.Tool = {
@@ -1071,6 +1090,17 @@ async function runWriteTool(
         .$returningId();
       log.info({ profileId: row.id, name: cName }, "create_customer executed");
       return { success: true, profileId: row.id, message: `已新增客人「${cName}」` };
+    }
+
+    case "collect_customer_threads": {
+      const cEmail = (input.email ?? "").trim().toLowerCase();
+      if (!/^\S+@\S+\.\S+$/.test(cEmail))
+        return { error: "需要一個有效的客人 email(不要自己編)" };
+      const { doCollectCustomerThreads } = await import("./opsActions");
+      const r = await doCollectCustomerThreads({ email: cEmail });
+      log.info({ email: cEmail, ok: r.ok }, "collect_customer_threads executed");
+      if (!r.ok) return { error: r.summary || r.error || "收進失敗" };
+      return { success: true, message: r.summary, details: r.details };
     }
 
     default:

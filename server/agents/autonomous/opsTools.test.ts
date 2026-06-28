@@ -50,9 +50,17 @@ vi.mock("drizzle-orm", () => {
   return { eq: fn, and: fn, or: fn, gte: fn, lte: fn, isNull: fn, inArray: fn, sql, desc: fn, like: fn };
 });
 
-import { READ_TOOLS, executeReadTool } from "./opsTools";
+const { mockCollect } = vi.hoisted(() => ({ mockCollect: vi.fn() }));
+vi.mock("./opsActions", () => ({ doCollectCustomerThreads: mockCollect }));
 
-beforeEach(() => { nextRows = []; });
+import {
+  READ_TOOLS,
+  WRITE_TOOLS,
+  executeReadTool,
+  executeWriteTool,
+} from "./opsTools";
+
+beforeEach(() => { nextRows = []; mockCollect.mockReset(); });
 
 describe("READ_TOOLS definitions", () => {
   it("exposes the 14 curated tools", () => {
@@ -221,5 +229,34 @@ describe("error safety", () => {
   it("never throws — returns error string for unknown tool", async () => {
     const out = JSON.parse(await executeReadTool("nonexistent_tool", {}));
     expect(out.error).toContain("unknown tool");
+  });
+});
+
+describe("collect_customer_threads — 收 runs the backfill directly", () => {
+  it("is a write tool with an email param", () => {
+    const tool = WRITE_TOOLS.find((t) => t.name === "collect_customer_threads");
+    expect(tool).toBeTruthy();
+    expect((tool!.input_schema as any).required).toContain("email");
+  });
+
+  it("rejects an invalid email without touching the backfill", async () => {
+    const out = JSON.parse(await executeWriteTool("collect_customer_threads", { email: "not-an-email" }, undefined));
+    expect(out.error).toBeTruthy();
+    expect(mockCollect).not.toHaveBeenCalled();
+  });
+
+  it("routes a valid email to doCollectCustomerThreads and reports its summary", async () => {
+    mockCollect.mockResolvedValue({ ok: true, summary: "✓ 已收 eyoung@axt.com · 8 條 thread", details: { inserted: 8 } });
+    const out = JSON.parse(await executeWriteTool("collect_customer_threads", { email: "eyoung@axt.com" }, undefined));
+    expect(mockCollect).toHaveBeenCalledWith({ email: "eyoung@axt.com" });
+    expect(out.success).toBe(true);
+    expect(out.message).toContain("8 條");
+  });
+
+  it("surfaces a backfill failure as an error (never fakes success)", async () => {
+    mockCollect.mockResolvedValue({ ok: false, summary: "沒有連線中的 Gmail 帳號" });
+    const out = JSON.parse(await executeWriteTool("collect_customer_threads", { email: "eyoung@axt.com" }, undefined));
+    expect(out.success).toBeUndefined();
+    expect(out.error).toContain("Gmail");
   });
 });

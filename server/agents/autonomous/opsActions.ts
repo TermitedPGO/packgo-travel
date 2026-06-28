@@ -689,7 +689,7 @@ async function doDraftWechatReply(
  * backfillCustomerByEmail (claim-or-insert, scrubPii, idempotent) across every
  * connected mailbox. Ensure-creates the profile for a not-yet-filed contact.
  */
-async function doCollectCustomerThreads(
+export async function doCollectCustomerThreads(
   args: z.infer<typeof CollectCustomerThreadsArgs>,
 ): Promise<ExecutionResult> {
   const { getDb } = await import("../../db");
