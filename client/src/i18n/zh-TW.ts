@@ -3316,6 +3316,8 @@ export const zhTW = {
         chatCollapse: '收合',
         chatStop: '停止',
         dropFile: '拖放文件到這裡',
+        dropUnsupported: 'PDF / 圖片還讀不了(目前只支援文字檔)。客人的 email 往來請在對話打「收」收進系統。',
+        dropTooBig: '檔案太大,上限 500KB。',
         globalPlaceholder: '新增客人、拖放文件...',
       },
       status: {

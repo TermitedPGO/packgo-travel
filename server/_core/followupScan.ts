@@ -178,7 +178,7 @@ export async function runFollowupScan(
         messageType: "proposal",
         title: `跟進提醒:${c.email} 報價發了 ${c.daysSince} 天沒回`,
         body:
-          `最後一封是你寄給 ${c.email} 的,到現在 ${c.daysSince} 天沒下文,球在客人手上。\n\n` +
+          `最後一封是你寄給 ${c.email} 的,到現在 ${c.daysSince} 天沒下文,現在輪到客人回。\n\n` +
           `要不要跟進一下?在對話裡打「收 ${c.email}」可以先把完整往來收進來看清楚,再請我照真實內容幫你草擬一封溫和的跟進信。`,
         priority: "normal",
         relatedCustomerProfileId: c.profileId,

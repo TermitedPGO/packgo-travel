@@ -3348,6 +3348,8 @@ export const en = {
         chatCollapse: 'Collapse',
         chatStop: 'Stop',
         dropFile: 'Drop files here',
+        dropUnsupported: 'PDFs / images can\'t be read yet (text files only). To pull a customer\'s email history into the system, type 收 in the chat.',
+        dropTooBig: 'File too large, 500KB max.',
         globalPlaceholder: 'Add customer, drop files...',
       },
       status: {

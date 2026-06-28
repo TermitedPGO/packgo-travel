@@ -176,7 +176,7 @@ export const READ_TOOLS: Anthropic.Tool[] = [
   {
     name: "read_customer_conversation",
     description:
-      "讀某個客人在系統裡【已歸檔的真實對話】,回最後一封是誰寄的、哪天、幾天沒回、球在誰手上 (waiting on customer / waiting on us)、以及最近幾封訊息摘要。" +
+      "讀某個客人在系統裡【已歸檔的真實對話】,回最後一封是誰寄的、哪天、幾天沒回、現在輪到誰回 (waiting on customer / waiting on us)、以及最近幾封訊息摘要。" +
       "Jeff 問「某客人什麼時候回我 / 進度到哪 / 上次聊到哪 / 要不要跟進」時【一定先用這個查真資料再回】,絕不憑印象編時間或進度。" +
       "查不到資料(系統還沒收他的對話)就老實跟 Jeff 說,並建議先用 collectCustomerThreads(收這個 email)把對話收進來。可用名字或 email 查。",
     input_schema: {
@@ -190,7 +190,7 @@ export const READ_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_followups_needed",
     description:
-      "列出『我們最後寄出、客人安靜超過幾天沒回』的客人(報價/行程發了沒下文,球在客人手上)。" +
+      "列出『我們最後寄出、客人安靜超過幾天沒回』的客人(報價/行程發了沒下文,輪到客人回)。" +
       "Jeff 問「誰需要跟進 / 哪些客人沒回我 / 有哪些卡住的」用這個,讀真實對話算出來,絕不憑印象。回每位客人的 email + 幾天沒回。",
     input_schema: {
       type: "object",

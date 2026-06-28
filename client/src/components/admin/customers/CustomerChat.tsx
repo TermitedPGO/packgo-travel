@@ -97,6 +97,7 @@ export default function CustomerChat({
   // File drag-and-drop attachments (Claude-style).
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [dragging, setDragging] = useState(false)
+  const [dropNotice, setDropNotice] = useState<string | null>(null)
   const dragCounter = useRef(0)
 
   const handleDragEnter = (e: React.DragEvent) => {
@@ -115,11 +116,15 @@ export default function CustomerChat({
     dragCounter.current = 0
     setDragging(false)
     const files = Array.from(e.dataTransfer.files)
+    let accepted = 0
+    let rejectedType = false
+    let rejectedSize = false
     for (const file of files) {
       const ext = file.name.split(".").pop()?.toLowerCase() ?? ""
-      if (!TEXT_EXTS.has(ext)) continue
-      if (file.size > MAX_FILE_SIZE) continue
+      if (!TEXT_EXTS.has(ext)) { rejectedType = true; continue }
+      if (file.size > MAX_FILE_SIZE) { rejectedSize = true; continue }
       if (attachments.length >= 5) break
+      accepted++
       const reader = new FileReader()
       reader.onload = () => {
         setAttachments((prev) => {
@@ -128,6 +133,15 @@ export default function CustomerChat({
         })
       }
       reader.readAsText(file)
+    }
+    // Don't leave a dropped file as a silent no-op: tell Jeff why nothing happened
+    // and point him at the path that works (收). Auto-clears after a few seconds.
+    if (accepted === 0 && (rejectedType || rejectedSize)) {
+      setDropNotice(
+        rejectedType
+          ? t("admin.customers.drafts.dropUnsupported")
+          : t("admin.customers.drafts.dropTooBig"),
+      )
     }
   }
   const removeAttachment = (name: string) =>
@@ -153,6 +167,13 @@ export default function CustomerChat({
     setConfirmId(null)
     setConfirmBody(undefined)
   }
+
+  // Auto-dismiss the dropped-file notice after a few seconds.
+  useEffect(() => {
+    if (!dropNotice) return
+    const id = setTimeout(() => setDropNotice(null), 6000)
+    return () => clearTimeout(id)
+  }, [dropNotice])
 
   // Drop any in-flight edit / confirm / error state when the selected customer
   // changes — a money/legal send surface must never carry state across customers.
@@ -560,6 +581,13 @@ export default function CustomerChat({
 
       {/* Input */}
       <div className="border-t border-gray-200 p-2">
+        {/* Dropped-file notice (unsupported type / too big) */}
+        {dropNotice && (
+          <div className="mx-1 mb-1.5 flex items-start gap-1.5 rounded-md bg-amber-50 border border-amber-200 px-2 py-1.5 text-[11px] text-amber-800 leading-relaxed">
+            <Paperclip className="w-3 h-3 flex-shrink-0 mt-0.5" />
+            <span>{dropNotice}</span>
+          </div>
+        )}
         {/* Attachment chips */}
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-1 px-1 pb-1.5">
