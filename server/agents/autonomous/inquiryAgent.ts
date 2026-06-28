@@ -95,6 +95,8 @@ export type InquiryAgentInput = {
     communicationStyle?: string | null;
     familyContext?: string | null;
     aiNotes?: string | null;
+    keyFacts?: string | null;
+    preferences?: Record<string, unknown> | null;
     vipScore?: number | null;
     bookingCount?: number | null;
   };
@@ -686,6 +688,9 @@ function buildCustomerContext(input: InquiryAgentInput): string {
   if (p.vipScore != null) lines.push(`- vipScore: ${p.vipScore} (僅影響回覆速度,不影響回覆品質)`);
   if (p.bookingCount != null) lines.push(`- bookingCount: ${p.bookingCount}`);
   if (p.aiNotes) lines.push(`- AI 觀察筆記: ${p.aiNotes}`);
+  if (p.keyFacts) lines.push(`- 重要事實:\n${p.keyFacts}`);
+  if (p.preferences && Object.keys(p.preferences).length > 0)
+    lines.push(`- 偏好: ${JSON.stringify(p.preferences)}`);
   if (input.recentInteractions && input.recentInteractions.length > 0) {
     lines.push("- 最近互動摘要:");
     for (const i of input.recentInteractions.slice(0, 5)) {

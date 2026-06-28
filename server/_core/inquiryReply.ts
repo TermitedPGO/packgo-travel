@@ -167,5 +167,28 @@ export async function sendAdminInquiryReply(
     }
   }
 
+  // 4. Fire-and-forget: extract customer preferences from the conversation.
+  if (inquiry.customerEmail) {
+    resolveAndExtract(inquiry.customerEmail).catch((err) =>
+      log.warn({ err }, "preference extraction background failed"),
+    );
+  }
+
   return { emailSent, messageId: created?.id };
+}
+
+async function resolveAndExtract(email: string): Promise<void> {
+  const { getDb } = await import("../db");
+  const d = await getDb();
+  if (!d) return;
+  const { customerProfiles } = await import("../../drizzle/schema");
+  const { eq } = await import("drizzle-orm");
+  const [row] = await d
+    .select({ id: customerProfiles.id })
+    .from(customerProfiles)
+    .where(eq(customerProfiles.email, email))
+    .limit(1);
+  if (!row) return;
+  const { extractAfterReply } = await import("./customerPreferenceExtractor");
+  await extractAfterReply(row.id);
 }

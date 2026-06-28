@@ -443,7 +443,28 @@ async function processOneEmail(
     rawMessage,
     channel: "email",
     customerProfile: profileId
-      ? { id: profileId, email: senderEmail }
+      ? await (async () => {
+          const [p] = await db
+            .select({
+              id: customerProfiles.id,
+              email: customerProfiles.email,
+              preferredLanguage: customerProfiles.preferredLanguage,
+              communicationStyle: customerProfiles.communicationStyle,
+              familyContext: customerProfiles.familyContext,
+              aiNotes: customerProfiles.aiNotes,
+              keyFacts: customerProfiles.keyFacts,
+              preferences: customerProfiles.preferences,
+              vipScore: customerProfiles.vipScore,
+            })
+            .from(customerProfiles)
+            .where(eq(customerProfiles.id, profileId!))
+            .limit(1);
+          if (!p) return { id: profileId!, email: senderEmail };
+          return {
+            ...p,
+            preferences: (p.preferences ?? null) as Record<string, unknown> | null,
+          };
+        })()
       : undefined,
     recentInteractions: recentInteractions.map((i) => ({
       direction: i.direction,
@@ -1141,6 +1162,15 @@ async function processOneEmail(
         "[gmailPipeline] summary refresh enqueue failed (non-fatal)",
       );
     }
+  }
+
+  // Extract/update customer preferences from the conversation (fire-forget).
+  if (profileId) {
+    import("../../_core/customerPreferenceExtractor")
+      .then(({ extractAfterReply }) => extractAfterReply(profileId!))
+      .catch((e) =>
+        log.warn({ err: e, profileId }, "[gmailPipeline] preference extraction failed (non-fatal)"),
+      );
   }
 }
 

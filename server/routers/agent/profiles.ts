@@ -174,6 +174,8 @@ export const profilesRouter = router({
         budgetTier: z.number().int().min(1).max(5).optional(),
         vipScore: z.number().int().min(0).max(100).optional(),
         aiNotes: z.string().max(5000).optional(),
+        keyFacts: z.string().max(5000).optional(),
+        preferences: z.record(z.string(), z.unknown()).optional(),
       }),
     )
     .mutation(async ({ input }) => {
