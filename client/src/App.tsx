@@ -17,11 +17,7 @@ import Login from "./pages/Login";
 // ─── Lazily loaded (code split) ───────────────────────────────────────────────
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
-// 2026-05-22 — V1 /admin retired. /admin now redirects to /admin/v2.
-// The v1 Admin.tsx page file is kept on disk for git history / quick
-// rollback, but no Wouter route references it. All tab content lives
-// in @/components/admin/* and is consumed by AdminV2 directly.
-const AdminV2 = lazy(() => import("./pages/AdminV2"));
+// 2026-06-29: archived AdminV2 admin removed (Jeff: collapse to admin + test).
 // 整合工作台 v3 (chat-first) — 跟 /admin 並存,逐階段切換。design.md。
 const Workspace = lazy(() => import("./pages/Workspace"));
 // v4 後台重建 — AdminShell + AdminHome (2026-06-17)
@@ -171,13 +167,11 @@ function Router() {
       <Route path={"/reset-password"} component={ResetPassword} />
       <Route path={"/admin/diagnostics"} component={DiagnosticsPage} />
       <Route path={"/admin/task-history"} component={TaskHistory} />
-      {/* 2026-06-12 — THE FLIP (Jeff go): all 8 redesign batches shipped
-          (v685-v692), deep UAT passed, P1+P2 fixed. /admin (and the old
-          /admin/v2) now redirect to /workspace so bookmarks and muscle
-          memory land on the new 工作台. AdminV2 stays in the repo (留檔)
-          at /admin-v2-archive as a fallback while trust builds. */}
+      {/* THE FLIP (2026-06-12, Jeff go): redesign batches shipped, UAT passed.
+          /admin and old /admin/v2 redirect to /workspace. 2026-06-29: archived
+          AdminV2 (/admin-v2-archive) deleted per Jeff (collapse to admin + test).
+          Live admin = /workspace; new build = /ops/*. */}
       <Route path={"/admin"}>{() => { if (typeof window !== "undefined") window.location.replace("/workspace"); return null; }}</Route>
-      <Route path={"/admin-v2-archive"} component={AdminV2} />
       <Route path={"/workspace"} component={Workspace} />
       <Route path={"/admin/v2"}>{() => { if (typeof window !== "undefined") window.location.replace("/workspace"); return null; }}</Route>
       <Route path={"/profile"} component={Profile} />
