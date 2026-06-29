@@ -80,7 +80,10 @@ export default function CustomerChat({
   chatMessages: AiChatMessage[]
   onApproveDraft: (draft: Draft, editedBody?: string) => Promise<void>
   isApprovingDraft: boolean
-  onFocusReady?: (fn: () => void) => void
+  /** Hand the parent a function to focus the composer. An optional `prefill`
+   * seeds the input (e.g. the "新增客人" starter template) and parks the cursor
+   * at the end so Jeff can keep typing. */
+  onFocusReady?: (focus: (prefill?: string) => void) => void
 }) {
   const { t } = useLocale()
   const utils = trpc.useUtils()
@@ -217,8 +220,20 @@ export default function CustomerChat({
   useEffect(() => () => abortRef.current?.abort(), [])
 
   // Register focus callback so parent can focus the chat input (e.g. "新增客人").
+  // An optional prefill seeds the composer with a starter template so clicking
+  // "叫 AI 新增客人" lands Jeff on an obvious next step instead of a blank box.
   useEffect(() => {
-    onFocusReady?.(() => taRef.current?.focus())
+    onFocusReady?.((prefill?: string) => {
+      if (prefill !== undefined) setInput(prefill)
+      const el = taRef.current
+      if (!el) return
+      el.focus()
+      // Defer so the value/auto-grow effects flush before we park the caret.
+      requestAnimationFrame(() => {
+        const end = el.value.length
+        el.setSelectionRange(end, end)
+      })
+    })
   }, [onFocusReady])
 
   // Auto-grow the composer textarea (1 line up to ~5), like Claude Code.

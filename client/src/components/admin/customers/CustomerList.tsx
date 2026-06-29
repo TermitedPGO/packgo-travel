@@ -45,6 +45,7 @@ export default function CustomerList({
         <button
           type="button"
           onClick={onAddCustomer}
+          title={t("admin.customers.add.buttonTooltip")}
           className="w-full flex items-center justify-center gap-1.5 rounded-lg bg-gray-900 text-white text-[12px] font-medium py-2 hover:bg-gray-700 transition-colors"
         >
           <Plus className="w-3.5 h-3.5" />

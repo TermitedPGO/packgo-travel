@@ -3277,7 +3277,9 @@ export const en = {
       blockedBadge: 'Hidden',
       unnamed: 'Unnamed customer',
       add: {
-        button: 'Add customer',
+        button: 'Ask AI to add',
+        buttonTooltip: 'Click to ask the AI assistant to add a customer (enter name + email or phone in the chat on the right)',
+        chatPrefill: 'Add customer: name / email or phone ',
         title: 'Add customer',
         subtitle: 'Manually add a customer (phone, WeChat, referral)',
         name: 'Name',
@@ -3312,6 +3314,10 @@ export const en = {
         badge: 'Follow up',
         today: 'Contacted today',
         lastContact: 'Last contact {n}d ago',
+        dueToday: 'Follow up today',
+        scheduled: 'Follow-up {date}',
+        setDate: 'Set follow-up',
+        clearDate: 'Clear follow-up',
         reason: {
           inquiry: 'Inquiry waiting',
           quote: 'Quote pending',

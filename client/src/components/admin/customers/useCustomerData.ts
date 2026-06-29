@@ -238,6 +238,7 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
             createdAt: i.createdAt,
           })),
           sentQuotes: [],
+          followUpDate: g.followUpDate ?? null,
         },
         Date.now(),
       )
@@ -295,6 +296,7 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
           status: q.status,
           createdAt: q.createdAt,
         })),
+        followUpDate: d.followUpDate ?? null,
       },
       Date.now(),
     )

@@ -268,6 +268,67 @@ export const adminCustomersRouter = router({
     }),
 
   /**
+   * setFollowUpDate (Q4-A) — set OR clear a customer's manual follow-up date.
+   * `followUpDate` is a "YYYY-MM-DD" calendar day (null = clear). When set and
+   * due (<= today, America/Los_Angeles) the cockpit raises「今天該跟進」. Mirrors
+   * markNotCustomer's upsert-by-userId / direct-by-profileId resolution so a
+   * registered customer with no profile row yet gets one created.
+   */
+  setFollowUpDate: adminProcedure
+    .input(
+      z.union([
+        z
+          .object({
+            userId: z.number().int().positive(),
+            followUpDate: z
+              .string()
+              .regex(/^\d{4}-\d{2}-\d{2}$/)
+              .nullable(),
+          })
+          .strict(),
+        z
+          .object({
+            profileId: z.number().int().positive(),
+            followUpDate: z
+              .string()
+              .regex(/^\d{4}-\d{2}-\d{2}$/)
+              .nullable(),
+          })
+          .strict(),
+      ]),
+    )
+    .mutation(async ({ input }) => {
+      const drizzleDb = (await db.getDb())!;
+      const { customerProfiles } = await import("../../drizzle/schema");
+      const value = input.followUpDate; // string | null
+      // Guest path: the profileId IS the customerProfiles row — update directly.
+      if ("profileId" in input) {
+        await drizzleDb
+          .update(customerProfiles)
+          .set({ followUpDate: value })
+          .where(eq(customerProfiles.id, input.profileId));
+        return { ok: true, followUpDate: value };
+      }
+      // Registered path: upsert a minimal profile keyed by userId.
+      const existing = await drizzleDb
+        .select({ id: customerProfiles.id })
+        .from(customerProfiles)
+        .where(eq(customerProfiles.userId, input.userId))
+        .limit(1);
+      if (existing[0]) {
+        await drizzleDb
+          .update(customerProfiles)
+          .set({ followUpDate: value })
+          .where(eq(customerProfiles.id, existing[0].id));
+      } else {
+        await drizzleDb
+          .insert(customerProfiles)
+          .values({ userId: input.userId, followUpDate: value });
+      }
+      return { ok: true, followUpDate: value };
+    }),
+
+  /**
    * createManualCustomer — Jeff adds a customer by hand from the customer page
    * (phone / WeChat / referral leads that never came through the website form).
    * Stored as a guest customerProfiles row (userId NULL, source='manual') so it
@@ -431,6 +492,7 @@ export const adminCustomersRouter = router({
           email: customerProfiles.email,
           phone: customerProfiles.phone,
           source: customerProfiles.source,
+          followUpDate: customerProfiles.followUpDate,
           createdAt: customerProfiles.createdAt,
         })
         .from(customerProfiles)
@@ -444,6 +506,7 @@ export const adminCustomersRouter = router({
           email: null,
           phone: null,
           source: null,
+          followUpDate: null,
           hasPassport: false,
           inquiries: [],
           interactions: [],
@@ -502,6 +565,7 @@ export const adminCustomersRouter = router({
         email: profile.email,
         phone: profile.phone,
         source: profile.source,
+        followUpDate: profile.followUpDate,
         hasPassport,
         firstSeenAt: profile.createdAt,
         inquiries: rows,
@@ -527,6 +591,7 @@ export const adminCustomersRouter = router({
         inquiries: inquiriesTable,
         pointsTransactions,
         tours: toursTable,
+        customerProfiles,
       } = await import("../../drizzle/schema");
 
       // User profile
@@ -641,8 +706,17 @@ export const adminCustomersRouter = router({
         .orderBy(desc(aiQuotesTable.createdAt))
         .limit(5);
 
+      // Q4-A — the customer's manual follow-up date (customerProfiles, 1:1 by
+      // userId). "YYYY-MM-DD" string (date mode) or null when none set / no profile.
+      const [profileRow] = await drizzleDb
+        .select({ followUpDate: customerProfiles.followUpDate })
+        .from(customerProfiles)
+        .where(eq(customerProfiles.userId, input.userId))
+        .limit(1);
+
       return {
         user: { ...user, totalSpend },
+        followUpDate: profileRow?.followUpDate ?? null,
         recentBookings,
         recentInquiries,
         recentPoints,

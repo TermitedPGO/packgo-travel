@@ -226,6 +226,24 @@ export default function ChatsTab() {
   }, [agentChannels, selectedAgent]);
 
   const utils = trpc.useUtils();
+
+  // Refresh the unread badge the moment Jeff returns to the tab, instead of
+  // waiting up to 30s for the next poll. Customer replies are ingested by the
+  // Gmail poll (server side); this just makes the red dot catch up on focus.
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState !== "visible") return;
+      utils.agent.unreadMessageCount.invalidate();
+      utils.agent.listMessages.invalidate();
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [utils]);
+
   const replyMutation = trpc.agent.replyToMessage.useMutation({
     onSuccess: () => {
       toast.success("已回覆 + 標記已讀");

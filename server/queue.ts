@@ -626,9 +626,10 @@ console.log("✅ Retrospective queue initialized");
 // fired when Jeff manually clicked "Run now" in admin. A customer asks at
 // 10am, Jeff opens admin at 2pm → 4-hour cold reply.
 //
-// Cadence: every 10 minutes. Jeff can tune via cron pattern; tighter than
-// 5 min adds Gmail API quota pressure without proportional customer
-// benefit since most inquiries don't need sub-15-min response.
+// Cadence: every 2 minutes. This poll is the real latency floor for a
+// customer reply showing up in admin — nothing ingests the reply into the
+// DB until the next tick. For a one-person agency the Gmail API quota is a
+// non-issue at this cadence, so we poll tight to keep replies fresh.
 // ============================================================================
 
 export interface GmailPollJobData {
@@ -657,7 +658,7 @@ export const gmailPollQueue = new Queue<GmailPollJobData, GmailPollJobResult>(
 );
 
 /**
- * Schedule Gmail polling every 10 minutes. Each tick runs the full
+ * Schedule Gmail polling every 2 minutes. Each tick runs the full
  * pipeline (fetch new threads → classify → optionally auto-reply) for
  * every active gmailIntegration row.
  */
@@ -673,12 +674,12 @@ export async function scheduleGmailPoll() {
     { triggeredBy: "schedule" },
     {
       repeat: {
-        pattern: "*/10 * * * *", // every 10 minutes
+        pattern: "*/2 * * * *", // every 2 minutes
       },
       jobId: "gmail-poll-scheduled",
     }
   );
-  console.log("✅ Gmail poll scheduled: every 10 minutes");
+  console.log("✅ Gmail poll scheduled: every 2 minutes");
 }
 
 console.log("✅ Gmail poll queue initialized");

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { guestToAdaptedCustomer, deriveFollowup, buildInquiryEditedPayload, deriveProfile, deriveBallInCourt, deriveNextMove } from "./adapters"
+import { guestToAdaptedCustomer, deriveFollowup, buildInquiryEditedPayload, deriveProfile, deriveBallInCourt, deriveNextMove, isFollowUpDue, laToday } from "./adapters"
 
 // t stub: echoes the key, appending the interpolated count so assertions can see it.
 const t = (k: string, vars?: Record<string, string | number>) =>
@@ -99,6 +99,8 @@ describe("deriveFollowup", () => {
       daysSinceContact: null,
       needsFollowup: false,
       reason: null,
+      followUpDate: null,
+      isDue: false,
     })
   })
 
@@ -158,6 +160,54 @@ describe("deriveFollowup", () => {
     )
     expect(r.reason).toBe("inquiry")
     expect(r.daysSinceContact).toBe(5)
+  })
+
+  // Q4-A — manual per-customer follow-up date threaded through deriveFollowup.
+  it("threads followUpDate + derives isDue (independent of the inquiry/quote signals)", () => {
+    // a past/today date with NO open items → not "needsFollowup" but IS due
+    const due = deriveFollowup(
+      { lastContactAt: null, openInquiries: [], sentQuotes: [], followUpDate: "2026-06-19" },
+      NOW,
+    )
+    expect(due.followUpDate).toBe("2026-06-19")
+    expect(due.isDue).toBe(true)
+    expect(due.needsFollowup).toBe(false)
+
+    // a future date → carried through, not yet due
+    const future = deriveFollowup(
+      { lastContactAt: null, openInquiries: [], sentQuotes: [], followUpDate: "2026-07-01" },
+      NOW,
+    )
+    expect(future.followUpDate).toBe("2026-07-01")
+    expect(future.isDue).toBe(false)
+
+    // omitted → null + not due
+    const none = deriveFollowup({ lastContactAt: null, openInquiries: [], sentQuotes: [] }, NOW)
+    expect(none.followUpDate).toBeNull()
+    expect(none.isDue).toBe(false)
+  })
+})
+
+describe("isFollowUpDue / laToday — America/Los_Angeles, no UTC drift", () => {
+  it("null is never due", () => {
+    expect(isFollowUpDue(null, Date.now())).toBe(false)
+  })
+
+  it("today (LA) and earlier are due; tomorrow is not", () => {
+    // 2026-06-20T05:00:00Z = 2026-06-19 22:00 PDT → LA calendar day is the 19th,
+    // proving the compare uses LA local date, not the UTC date (the 20th).
+    const now = new Date("2026-06-20T05:00:00Z").getTime()
+    expect(laToday(now)).toBe("2026-06-19")
+    expect(isFollowUpDue("2026-06-19", now)).toBe(true) // == today (LA)
+    expect(isFollowUpDue("2026-06-18", now)).toBe(true) // past
+    expect(isFollowUpDue("2026-06-20", now)).toBe(false) // tomorrow (LA)
+  })
+
+  it("at LA midnight crossing, the day rolls in LA not UTC", () => {
+    // 2026-06-20T07:30:00Z = 2026-06-20 00:30 PDT → LA day is the 20th already.
+    const now = new Date("2026-06-20T07:30:00Z").getTime()
+    expect(laToday(now)).toBe("2026-06-20")
+    expect(isFollowUpDue("2026-06-20", now)).toBe(true)
   })
 })
 

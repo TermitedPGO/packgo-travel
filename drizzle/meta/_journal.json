@@ -694,6 +694,13 @@
 			"when": 1781540000000,
 			"tag": "0101_interaction_external_id",
 			"breakpoints": true
+		},
+		{
+			"idx": 102,
+			"version": "5",
+			"when": 1781550000000,
+			"tag": "0102_customer_follow_up_date",
+			"breakpoints": true
 		}
 	]
 }

@@ -100,6 +100,10 @@ export type AdaptedCustomer = {
     daysSinceContact: number | null
     needsFollowup: boolean
     reason: "inquiry" | "quote" | null
+    /** Q4-A 客人跟進日 (customerProfiles.followUpDate, "YYYY-MM-DD") or null. */
+    followUpDate: string | null
+    /** followUpDate set and <= today in America/Los_Angeles. */
+    isDue: boolean
   }
   status: CustomerStatus
   drafts: Draft[]

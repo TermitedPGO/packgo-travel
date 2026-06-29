@@ -14,7 +14,7 @@ export default function AdminCustomers() {
   const { t } = useLocale()
   const [selected, setSelected] = useState<Selection | null>(null)
   const [showHidden, setShowHidden] = useState(false)
-  const chatFocusRef = useRef<() => void>(null)
+  const chatFocusRef = useRef<((prefill?: string) => void) | null>(null)
   const {
     customers,
     isListLoading,
@@ -44,7 +44,7 @@ export default function AdminCustomers() {
           onToggleHidden={setShowHidden}
           onMarkNotCustomer={markNotCustomer}
           onRestoreCustomer={restoreCustomer}
-          onAddCustomer={() => chatFocusRef.current?.()}
+          onAddCustomer={() => chatFocusRef.current?.(t("admin.customers.add.chatPrefill"))}
         />
       )}
       {selected !== null ? (
@@ -70,6 +70,7 @@ export default function AdminCustomers() {
               chatMessages={chatMessages}
               onApproveDraft={approveDraft}
               isApprovingDraft={isApprovingDraft}
+              onFocusReady={(fn) => { chatFocusRef.current = fn }}
             />
           )}
         </>

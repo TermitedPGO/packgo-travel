@@ -2739,6 +2739,13 @@ export const customerProfiles = mysqlTable("customerProfiles", {
   aiSummaryAt: timestamp("aiSummaryAt"),
 
   status: mysqlEnum("status", ["active", "dormant", "opted_out", "blocked"]).default("active").notNull(),
+
+  // Q4-A — Jeff's manual per-customer follow-up date (migration 0102). A plain
+  // calendar DATE (no time / tz): the cockpit surfaces「今天該跟進」when this is
+  // set and <= today in America/Los_Angeles. `mode: "string"` round-trips as
+  // "YYYY-MM-DD" so the client compares dates without UTC drift. Nullable = none set.
+  followUpDate: date("followUpDate", { mode: "string" }),
+
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, (table) => ({

@@ -1,21 +1,31 @@
 import { useState } from "react"
-import { Phone, Mail, FileText, FileCheck, DollarSign, Star } from "lucide-react"
+import { Phone, Mail, Star, CalendarClock, X } from "lucide-react"
 import { useLocale } from "@/contexts/LocaleContext"
+import { trpc } from "@/lib/trpc"
 import type { AdaptedCustomer, ChatMessage } from "./types"
 import { OverviewTab, OrdersTab, DocsTab, TimelineTab } from "./DetailTabs"
-import CustomOrderSheet from "./CustomOrderSheet"
 import { deriveBallInCourt, deriveNextMove } from "./adapters"
+import { toSelection } from "./customOrderHelpers"
 
 const TAB_KEYS = ["overview", "orders", "docs", "history"] as const
 type TabKey = (typeof TAB_KEYS)[number]
-type FocusSection = "quote" | "collect" | "confirm" | null
 
 export default function CustomerDetail({ customer, chatMessages = [] }: { customer: AdaptedCustomer; chatMessages?: ChatMessage[] }) {
   const { t } = useLocale()
   const [tab, setTab] = useState<TabKey>("overview")
-  const [orderSheet, setOrderSheet] = useState<{ open: boolean; focus: FocusSection }>({ open: false, focus: null })
-  const openOrders = (focus: FocusSection) => setOrderSheet({ open: true, focus })
   const c = customer
+
+  // Q4-A — per-customer follow-up date. Set/clear writes go through the same
+  // selection key the rest of the customer page uses; on success we invalidate
+  // the detail query so the truth bar re-reads followUpDate without a manual
+  // refresh. All deterministic — no LLM.
+  const utils = trpc.useUtils()
+  const sel = toSelection(c)
+  const invalidateDetail = () => {
+    if (c.kind === "guest") void utils.admin.guestOpenItems.invalidate({ profileId: c.id })
+    else void utils.admin.customerDetail.invalidate({ userId: c.id })
+  }
+  const setFollowUp = trpc.admin.setFollowUpDate.useMutation({ onSuccess: invalidateDetail })
 
   const tabLabel = (k: TabKey) => t(`admin.customers.tab.${k}`)
 
@@ -86,32 +96,12 @@ export default function CustomerDetail({ customer, chatMessages = [] }: { custom
           >
             <Mail className="w-3.5 h-3.5" />
           </button>
-          <button
-            onClick={() => openOrders("quote")}
-            className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-gray-900 text-white hover:bg-gray-700 transition-colors"
-          >
-            <FileText className="w-3 h-3 inline mr-1 -mt-px" />
-            {t("admin.customers.action.quote")}
-          </button>
-          <button
-            onClick={() => openOrders("collect")}
-            className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium border border-gray-400 text-gray-700 hover:bg-gray-50 transition-colors"
-          >
-            <DollarSign className="w-3 h-3 inline mr-1 -mt-px" />
-            {t("admin.customers.action.collect")}
-          </button>
-          <button
-            onClick={() => openOrders("confirm")}
-            className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium border border-gray-400 text-gray-700 hover:bg-gray-50 transition-colors"
-          >
-            <FileCheck className="w-3 h-3 inline mr-1 -mt-px" />
-            {t("admin.customers.action.confirm")}
-          </button>
         </div>
       </div>
 
       {/* 五秒真相條 (Step 1): 下一步 · N 天沒往來。換你回/該跟進=深色提醒,其餘灰。
-          下一步本身就是「輪到誰」,不用「球」這種比喻。全部 deterministic,不靠 LLM。 */}
+          下一步本身就是「輪到誰」,不用「球」這種比喻。全部 deterministic,不靠 LLM。
+          右側是 Q4-A 客人跟進日:設了且到期 → 深色「今天該跟進」;設了但未來 → 淺色顯示日期。 */}
       <div className="px-6 py-2 border-b border-gray-200 bg-gray-50 flex items-center gap-2 text-[11px]">
         <span
           className={`px-1.5 py-0.5 rounded-md font-medium ${
@@ -132,14 +122,64 @@ export default function CustomerDetail({ customer, chatMessages = [] }: { custom
             </span>
           </>
         )}
-      </div>
 
-      <CustomOrderSheet
-        open={orderSheet.open}
-        onClose={() => setOrderSheet({ open: false, focus: null })}
-        customer={c}
-        focusSection={orderSheet.focus}
-      />
+        {/* 客人跟進日 (Q4-A) — set/clear + due indicator, pushed to the right */}
+        <div className="ml-auto flex items-center gap-1.5">
+          {c.followup.followUpDate ? (
+            <>
+              {c.followup.isDue ? (
+                <span className="px-1.5 py-0.5 rounded-md font-medium bg-gray-900 text-white inline-flex items-center gap-1">
+                  <CalendarClock className="w-3 h-3" />
+                  {t("admin.customers.followup.dueToday")}
+                </span>
+              ) : (
+                <span className="text-gray-500 inline-flex items-center gap-1">
+                  <CalendarClock className="w-3 h-3" />
+                  {t("admin.customers.followup.scheduled", { date: c.followup.followUpDate })}
+                </span>
+              )}
+              <input
+                type="date"
+                value={c.followup.followUpDate}
+                disabled={setFollowUp.isPending}
+                onChange={(e) =>
+                  setFollowUp.mutate(
+                    e.target.value
+                      ? { ...sel, followUpDate: e.target.value }
+                      : { ...sel, followUpDate: null },
+                  )
+                }
+                aria-label={t("admin.customers.followup.setDate")}
+                className="rounded-lg border border-gray-300 px-1.5 py-0.5 text-[11px] text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+              />
+              <button
+                onClick={() => setFollowUp.mutate({ ...sel, followUpDate: null })}
+                disabled={setFollowUp.isPending}
+                title={t("admin.customers.followup.clearDate")}
+                aria-label={t("admin.customers.followup.clearDate")}
+                className="p-1 rounded-lg border border-gray-300 text-gray-500 hover:bg-gray-50 transition-colors disabled:opacity-40"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </>
+          ) : (
+            <label className="inline-flex items-center gap-1 text-gray-500 hover:text-gray-700 cursor-pointer">
+              <CalendarClock className="w-3 h-3" />
+              {t("admin.customers.followup.setDate")}
+              <input
+                type="date"
+                disabled={setFollowUp.isPending}
+                onChange={(e) =>
+                  e.target.value &&
+                  setFollowUp.mutate({ ...sel, followUpDate: e.target.value })
+                }
+                aria-label={t("admin.customers.followup.setDate")}
+                className="rounded-lg border border-gray-300 px-1.5 py-0.5 text-[11px] text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+              />
+            </label>
+          )}
+        </div>
+      </div>
 
       {/* Tab bar */}
       <div className="flex border-b border-gray-200 px-6">

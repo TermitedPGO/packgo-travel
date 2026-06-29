@@ -3245,7 +3245,9 @@ export const zhTW = {
       blockedBadge: '已隱藏',
       unnamed: '未命名客人',
       add: {
-        button: '新增客人',
+        button: '叫 AI 新增客人',
+        buttonTooltip: '點一下，讓 AI 幫你新增一位客人（在右側對話框輸入姓名＋email 或電話）',
+        chatPrefill: '新增客人：姓名 / email 或電話 ',
         title: '新增客人',
         subtitle: '手動加一位客人（電話、微信、轉介紹來的）',
         name: '姓名',
@@ -3280,6 +3282,10 @@ export const zhTW = {
         badge: '需跟進',
         today: '今天剛聯絡',
         lastContact: '上次聯絡 {n} 天前',
+        dueToday: '今天該跟進',
+        scheduled: '跟進日 {date}',
+        setDate: '設跟進日',
+        clearDate: '清除跟進日',
         reason: {
           inquiry: '詢問待回',
           quote: '報價待追',

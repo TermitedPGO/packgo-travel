@@ -372,6 +372,34 @@ export type Followup = {
   daysSinceContact: number | null
   needsFollowup: boolean
   reason: "inquiry" | "quote" | null
+  // Q4-A — Jeff's manually-set per-customer follow-up date. `followUpDate` is the
+  // stored "YYYY-MM-DD" (or null = none set); `isDue` is true when it is set and
+  // on or before today in America/Los_Angeles (Newark CA), so a date 沒到期 still
+  // shows lightly but only a due date raises the dark「今天該跟進」banner.
+  followUpDate: string | null
+  isDue: boolean
+}
+
+/**
+ * Today's calendar date in America/Los_Angeles as "YYYY-MM-DD". Deterministic —
+ * uses Intl with an explicit timeZone so it never depends on the server/browser
+ * UTC offset (Jeff is in Newark CA; a UTC getDate would flip a day early/late).
+ */
+export function laToday(now: number): string {
+  // en-CA renders ISO-shaped YYYY-MM-DD; the timeZone does the offset work.
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(now))
+}
+
+/** A follow-up date is due when set and its calendar day <= today (LA). Pure
+ *  lexical compare — both sides are zero-padded "YYYY-MM-DD", so string <= works. */
+export function isFollowUpDue(followUpDate: string | null, now: number): boolean {
+  if (!followUpDate) return false
+  return followUpDate <= laToday(now)
 }
 
 export function deriveFollowup(
@@ -379,6 +407,8 @@ export function deriveFollowup(
     lastContactAt: Date | string | null
     openInquiries: { handled: boolean; createdAt: Date | string }[]
     sentQuotes: { status: string; createdAt: Date | string }[]
+    /** customerProfiles.followUpDate as "YYYY-MM-DD" (or null). */
+    followUpDate?: string | null
   },
   now: number,
 ): Followup {
@@ -396,7 +426,14 @@ export function deriveFollowup(
       now - new Date(q.createdAt).getTime() > FOLLOWUP_QUOTE_DAYS * DAY_MS,
   )
   const reason: Followup["reason"] = inquiryOverdue ? "inquiry" : quoteStale ? "quote" : null
-  return { daysSinceContact, needsFollowup: reason !== null, reason }
+  const followUpDate = input.followUpDate ?? null
+  return {
+    daysSinceContact,
+    needsFollowup: reason !== null,
+    reason,
+    followUpDate,
+    isDue: isFollowUpDue(followUpDate, now),
+  }
 }
 
 // ── deriveBallInCourt / deriveNextMove (五秒真相條, Step 1) ─────────────
@@ -552,7 +589,7 @@ export function guestToAdaptedCustomer(
     aiSummary,
     // overridden by the hook with the conversation-thread-based value; default
     // here keeps guestToAdaptedCustomer self-contained + testable.
-    followup: { daysSinceContact: null, needsFollowup: false, reason: null },
+    followup: { daysSinceContact: null, needsFollowup: false, reason: null, followUpDate: null, isDue: false },
     status: deriveStatus(openItems, t),
     drafts: [],
     profile: deriveProfile(
