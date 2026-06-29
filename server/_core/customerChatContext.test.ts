@@ -32,6 +32,8 @@ import { loadCustomerDocs } from "./customerDocsLoader";
 import { buildCustomerDocsText } from "./customerDocsText";
 import {
   formatCustomerContext,
+  formatPreferences,
+  formatMemoryBlock,
   buildCustomerChatContext,
   buildGuestChatContext,
   type CustomerContextData,
@@ -151,6 +153,97 @@ describe("formatCustomerContext", () => {
       user: { ...BASE.user, name: null, email: null },
     });
     expect(bare).toContain("#7");
+  });
+});
+
+describe("customer-memory — formatPreferences (Stage 1)", () => {
+  it("compresses the preferences JSON into one readable line", () => {
+    const line = formatPreferences({
+      food: { dietary: "素食", dislikes: ["辣"], favorites: ["海鮮"] },
+      accommodation: { roomType: "家庭房", floor: "高樓層", view: "海景" },
+      pace: "慢步調",
+      interests: ["博物館", "自然"],
+      avoidances: ["購物團", "紅眼班機"],
+      pastDestinations: [{ destination: "日本", year: 2024, rating: "很喜歡" }],
+      wishlist: ["極光"],
+    });
+    expect(line).toContain("素食");
+    expect(line).toContain("不吃 辣");
+    expect(line).toContain("住宿 家庭房/高樓層/海景");
+    expect(line).toContain("步調 慢步調");
+    expect(line).toContain("避免 購物團、紅眼班機");
+    expect(line).toContain("去過 日本(2024) 很喜歡");
+    expect(line).toContain("想去 極光");
+  });
+
+  it("accepts a JSON string and ignores garbage", () => {
+    expect(formatPreferences('{"pace":"緊湊"}')).toContain("步調 緊湊");
+    expect(formatPreferences("not json")).toBe("");
+    expect(formatPreferences(null)).toBe("");
+    expect(formatPreferences({})).toBe("");
+  });
+});
+
+describe("customer-memory — formatMemoryBlock (Stage 1)", () => {
+  it("renders hard facts/preferences with a draft-OK hint", () => {
+    const mem = formatMemoryBlock({
+      keyFacts: "- 吃素\n- 怕高",
+      preferences: { accommodation: { floor: "高樓層" } },
+      aiNotes: null,
+    });
+    expect(mem).toContain("【這位客人的記憶");
+    expect(mem).toContain("吃素");
+    expect(mem).toContain("怕高");
+    expect(mem).toContain("高樓層");
+    expect(mem).toContain("擬給客人的草稿可據此");
+  });
+
+  it("flags soft aiNotes as Jeff-only, never asserted to the customer", () => {
+    const mem = formatMemoryBlock({
+      keyFacts: null,
+      preferences: null,
+      aiNotes: "似乎願意為好一點的住宿加價。",
+    });
+    expect(mem).toContain("軟性觀察");
+    expect(mem).toContain("只供 Jeff 參考");
+    expect(mem).toContain("絕不可當成事實");
+    expect(mem).toContain("願意為好一點的住宿加價");
+  });
+
+  it("returns empty when there is no memory", () => {
+    expect(formatMemoryBlock(undefined)).toBe("");
+    expect(
+      formatMemoryBlock({ keyFacts: null, preferences: null, aiNotes: null }),
+    ).toBe("");
+    expect(
+      formatMemoryBlock({ keyFacts: "  ", preferences: {}, aiNotes: "" }),
+    ).toBe("");
+  });
+
+  it("caps the memory block so it can't blow up the context", () => {
+    const mem = formatMemoryBlock({
+      keyFacts: "- 事實 ".repeat(2000),
+      preferences: null,
+      aiNotes: null,
+    });
+    expect(mem).toContain("記憶已截斷");
+    expect(mem.length).toBeLessThan(1300);
+  });
+});
+
+describe("formatCustomerContext — memory pinned into context (Stage 1)", () => {
+  it("appends the memory block after the main block", () => {
+    const block = formatCustomerContext({
+      ...BASE,
+      memory: { keyFacts: "- 吃素", preferences: null, aiNotes: null },
+    });
+    expect(block).toContain("北海道溫泉"); // main block still present
+    expect(block).toContain("【這位客人的記憶");
+    expect(block).toContain("吃素");
+  });
+
+  it("omits the memory section entirely when there is no memory", () => {
+    expect(formatCustomerContext(BASE)).not.toContain("【這位客人的記憶");
   });
 });
 

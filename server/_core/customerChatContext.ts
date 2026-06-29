@@ -102,6 +102,99 @@ export interface CustomerContextData {
     summary: string | null;
     snippet: string;
   }>;
+  /** customer-memory (Stage 1) — the accumulated per-customer profile the
+   *  extractor built. keyFacts + preferences are HARD (may inform drafts);
+   *  aiNotes are SOFT observations (Jeff-only, never asserted to the customer).
+   *  Pinned so the chat is grounded in what the AI already learned. */
+  memory?: {
+    keyFacts: string | null;
+    preferences: unknown | null;
+    aiNotes: string | null;
+  };
+}
+
+/** Memory cap — separate from BLOCK_CAP so memory is ADDITIVE and never steals
+ *  the booking/interaction budget of the main block. */
+const MEMORY_CAP = 1200;
+
+/** customer-memory (Stage 1) — compress the preferences JSON into one readable
+ *  line. Defensive: the column may come back as object or string; partial
+ *  fields are normal. Returns "" when there's nothing usable. */
+export function formatPreferences(raw: unknown): string {
+  let p: any = raw;
+  if (typeof raw === "string") {
+    try {
+      p = JSON.parse(raw);
+    } catch {
+      return "";
+    }
+  }
+  if (!p || typeof p !== "object") return "";
+  const arr = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter(Boolean).map(String) : [];
+  const seg: string[] = [];
+  if (p.food) {
+    const f = p.food;
+    const fparts: string[] = [];
+    if (f.dietary) fparts.push(String(f.dietary));
+    if (arr(f.dislikes).length) fparts.push("不吃 " + arr(f.dislikes).join("、"));
+    if (arr(f.favorites).length) fparts.push("愛 " + arr(f.favorites).join("、"));
+    if (fparts.length) seg.push("飲食 " + fparts.join("/"));
+  }
+  if (p.accommodation) {
+    const a = p.accommodation;
+    const aparts = [a.roomType, a.floor, a.view].filter(Boolean).map(String);
+    if (aparts.length) seg.push("住宿 " + aparts.join("/"));
+  }
+  if (p.pace) seg.push("步調 " + String(p.pace));
+  if (arr(p.interests).length) seg.push("喜歡 " + arr(p.interests).join("、"));
+  if (arr(p.avoidances).length) seg.push("避免 " + arr(p.avoidances).join("、"));
+  if (Array.isArray(p.pastDestinations) && p.pastDestinations.length) {
+    seg.push(
+      "去過 " +
+        p.pastDestinations
+          .filter((d: any) => d && d.destination)
+          .map(
+            (d: any) =>
+              String(d.destination) +
+              (d.year ? `(${d.year})` : "") +
+              (d.rating ? ` ${d.rating}` : ""),
+          )
+          .join("、"),
+    );
+  }
+  if (arr(p.wishlist).length) seg.push("想去 " + arr(p.wishlist).join("、"));
+  return seg.join(" · ");
+}
+
+/** customer-memory (Stage 1) — render the per-customer memory the extractor
+ *  built. Hard facts (keyFacts/preferences) may inform drafts; soft aiNotes are
+ *  flagged Jeff-only and must never be asserted to the customer. "" if empty. */
+export function formatMemoryBlock(memory: CustomerContextData["memory"]): string {
+  if (!memory) return "";
+  const facts = (memory.keyFacts ?? "").trim();
+  const prefLine = formatPreferences(memory.preferences ?? null);
+  const notes = (memory.aiNotes ?? "").trim();
+  if (!facts && !prefLine && !notes) return "";
+  const lines: string[] = ["【這位客人的記憶 — 你之前學到的】"];
+  if (facts) {
+    lines.push("重要事實:");
+    lines.push(facts);
+  }
+  if (prefLine) lines.push("偏好: " + prefLine);
+  if (facts || prefLine) {
+    lines.push(
+      "(以上是硬事實/偏好,擬給客人的草稿可據此 — 例如吃素就避葷、怕高就別排高空項目。)",
+    );
+  }
+  if (notes) {
+    lines.push("軟性觀察(只供 Jeff 參考,是推測,絕不可當成事實寫進給客人的文字):");
+    lines.push(notes);
+  }
+  const block = lines.join("\n");
+  return block.length > MEMORY_CAP
+    ? block.slice(0, MEMORY_CAP) + "\n…(記憶已截斷)"
+    : block;
 }
 
 /** Pure formatter — same input, same block. Lists capped, total capped. */
@@ -167,10 +260,14 @@ export function formatCustomerContext(data: CustomerContextData): string {
   }
 
   const block = lines.join("\n");
-  if (block.length > BLOCK_CAP) {
-    return block.slice(0, BLOCK_CAP) + "\n…(資料已截斷,需要更多細節請用工具查)";
-  }
-  return block;
+  const capped =
+    block.length > BLOCK_CAP
+      ? block.slice(0, BLOCK_CAP) + "\n…(資料已截斷,需要更多細節請用工具查)"
+      : block;
+  // Memory is appended AFTER the main block's own cap so it never steals the
+  // booking/interaction budget (它自己有 MEMORY_CAP).
+  const mem = formatMemoryBlock(data.memory);
+  return mem ? capped + "\n\n" + mem : capped;
 }
 
 /** IO assembly. Returns null when the DB is unavailable or the user is gone. */
@@ -182,9 +279,8 @@ export async function buildCustomerChatContext(
     log.warn("[customerChatContext] db unavailable — chat continues unpinned");
     return null;
   }
-  const { users, bookings, tours, inquiries, aiQuotes } = await import(
-    "../../drizzle/schema"
-  );
+  const { users, bookings, tours, inquiries, aiQuotes, customerProfiles } =
+    await import("../../drizzle/schema");
 
   const [user] = await db
     .select({
@@ -250,11 +346,24 @@ export async function buildCustomerChatContext(
     .orderBy(desc(aiQuotes.createdAt))
     .limit(LIST_CAP);
 
+  // customer-memory (Stage 1) — the profile linked to this user (uq_cp_user).
+  // Absent for users with no profile row yet → memory simply omitted.
+  const [profMem] = await db
+    .select({
+      keyFacts: customerProfiles.keyFacts,
+      preferences: customerProfiles.preferences,
+      aiNotes: customerProfiles.aiNotes,
+    })
+    .from(customerProfiles)
+    .where(eq(customerProfiles.userId, customerUserId))
+    .limit(1);
+
   const base = formatCustomerContext({
     user,
     openBookings: open,
     openInquiries: openInq,
     recentQuotes,
+    memory: profMem ?? undefined,
   });
   return base + (await buildDocsBlock({ userId: customerUserId }));
 }
@@ -279,7 +388,13 @@ export async function buildGuestChatContext(
     await import("../../drizzle/schema");
 
   const [profile] = await db
-    .select({ id: customerProfiles.id, email: customerProfiles.email })
+    .select({
+      id: customerProfiles.id,
+      email: customerProfiles.email,
+      keyFacts: customerProfiles.keyFacts,
+      preferences: customerProfiles.preferences,
+      aiNotes: customerProfiles.aiNotes,
+    })
     .from(customerProfiles)
     .where(eq(customerProfiles.id, profileId))
     .limit(1);
@@ -358,6 +473,11 @@ export async function buildGuestChatContext(
       summary: i.contentSummary,
       snippet: (i.content ?? "").slice(0, 200),
     })),
+    memory: {
+      keyFacts: profile.keyFacts,
+      preferences: profile.preferences,
+      aiNotes: profile.aiNotes,
+    },
   });
   return base + (await buildDocsBlock({ profileId }));
 }
