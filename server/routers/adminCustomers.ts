@@ -476,6 +476,14 @@ export const adminCustomersRouter = router({
           return { ok: false, reason: parsed.parseStatus };
         }
 
+        // An unreadable image still comes back as parseStatus:"ok" carrying a
+        // placeholder sentinel (attachmentParser falls back rather than bounce
+        // on OCR failure). Treat that as unreadable so the user gets the
+        // friendly "讀不出這個檔案" notice instead of three silently-empty fields.
+        if (text.startsWith("[圖片附件 / image attachment:")) {
+          return { ok: false, reason: "parse_error" };
+        }
+
         // 4. Extract fields via Haiku (cheap). The system prompt is anti-
         //    fabrication: 只「搬運」文件裡真的有的,沒有就留空,絕不編造。
         //    invokeLLM param-name gotcha (see customerPreferenceExtractor): the

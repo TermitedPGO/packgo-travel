@@ -3279,7 +3279,6 @@ export const en = {
       add: {
         button: 'Add customer',
         buttonTooltip: 'Add a customer (drop a PDF / image / text file to let AI fill it in, or enter manually)',
-        chatPrefill: 'Add customer: name / email or phone ',
         title: 'Add customer',
         subtitle: 'Manually add a customer (phone, WeChat, referral)',
         name: 'Name',

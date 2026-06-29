@@ -3247,7 +3247,6 @@ export const zhTW = {
       add: {
         button: '新增客人',
         buttonTooltip: '新增一位客人(可拖 PDF / 圖片 / 文字檔讓 AI 代填，或手動輸入)',
-        chatPrefill: '新增客人：姓名 / email 或電話 ',
         title: '新增客人',
         subtitle: '手動加一位客人（電話、微信、轉介紹來的）',
         name: '姓名',
