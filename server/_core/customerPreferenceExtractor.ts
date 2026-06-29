@@ -12,7 +12,12 @@ import { createChildLogger } from "./logger";
 
 const log = createChildLogger({ module: "customerPreferenceExtractor" });
 
-const OPUS = "claude-opus-4-2025-04-16";
+// Match the proven customer-facing ops model. NOTE: this was previously a
+// non-existent id ("claude-opus-4-2025-04-16") passed via a `_model` field that
+// invokeLLM ignores — so the extractor silently ran DEFAULT_MODEL (Sonnet) with
+// the anti-fabrication system prompt never sent. Fixed to a valid id + real
+// `model`/system-message wiring below.
+const OPUS = "claude-opus-4-6";
 
 export interface ExtractedPreferences {
   food?: { dietary?: string; dislikes?: string[]; favorites?: string[] };
@@ -129,7 +134,14 @@ export async function extractCustomerPreferences(opts: {
 
   try {
     const result = await invokeLLM({
-      messages: [{ role: "user", content: userPrompt }],
+      model: OPUS,
+      // EXTRACT_SYSTEM carries the anti-fabrication 鐵律. It MUST go as a
+      // role:"system" message — invokeLLM only collects system text from system
+      // messages (a top-level `_system`/`system` field is ignored).
+      messages: [
+        { role: "system", content: EXTRACT_SYSTEM },
+        { role: "user", content: userPrompt },
+      ],
       maxTokens: 2000,
       outputSchema: {
         name: "customer_preferences",
@@ -143,9 +155,7 @@ export async function extractCustomerPreferences(opts: {
           required: ["aiNotes", "keyFacts", "preferences"],
         },
       },
-      _system: EXTRACT_SYSTEM,
-      _model: OPUS,
-    } as any);
+    });
 
     const text =
       result.choices?.[0]?.message?.content ??
@@ -184,41 +194,54 @@ export async function extractCustomerPreferences(opts: {
   }
 }
 
-/** In-flight dedup (cost control): a burst of inbound emails for the same
- *  customer fires several fire-and-forget extractAfterReply calls. Skip
- *  overlapping runs so we never pay for N concurrent Opus passes over the same
- *  conversation. Cleared in finally → the next real change still re-extracts. */
+/** In-flight dedup with COALESCING (cost control + no lost update): a burst of
+ *  inbound emails for the same customer fires several fire-and-forget
+ *  extractAfterReply calls. We run at most one at a time, but if a trigger
+ *  arrives mid-run we remember it and re-run exactly once after — so the final
+ *  snapshot always includes the latest message (a plain "skip" could drop the
+ *  last message's preference update if it landed after the snapshot read). */
 const extractInflight = new Set<number>();
+const extractPending = new Set<number>();
 
 /**
  * Convenience: gather recent messages for a profile from inquiryMessages +
- * customerInteractions, then run extraction. Fire-and-forget safe. Deduped per
- * profileId so overlapping inbound triggers don't double-bill Opus.
+ * customerInteractions, then run extraction. Fire-and-forget safe. Deduped +
+ * coalesced per profileId so overlapping inbound triggers don't double-bill
+ * Opus yet never drop the newest message. Returns true if preferences were
+ * written (used by the back-fill to count real successes, not attempts).
  */
-export async function extractAfterReply(profileId: number): Promise<void> {
-  if (extractInflight.has(profileId)) return;
+export async function extractAfterReply(profileId: number): Promise<boolean> {
+  if (extractInflight.has(profileId)) {
+    extractPending.add(profileId); // re-run once after the current pass finishes
+    return false;
+  }
   extractInflight.add(profileId);
   try {
-    await runExtraction(profileId);
+    return await runExtraction(profileId);
   } finally {
     extractInflight.delete(profileId);
+    if (extractPending.delete(profileId)) {
+      // A trigger arrived during this run → run once more so the snapshot picks
+      // it up. Fire-and-forget (best effort); never throw to this caller.
+      void extractAfterReply(profileId).catch(() => {});
+    }
   }
 }
 
-async function runExtraction(profileId: number): Promise<void> {
+async function runExtraction(profileId: number): Promise<boolean> {
   const db = await getDb();
-  if (!db) return;
+  if (!db) return false;
 
   const { customerInteractions, inquiryMessages, inquiries, customerProfiles } =
     await import("../../drizzle/schema");
-  const { eq, desc, and } = await import("drizzle-orm");
+  const { eq, desc, and, sql } = await import("drizzle-orm");
 
   const [profile] = await db
     .select({ userId: customerProfiles.userId, email: customerProfiles.email })
     .from(customerProfiles)
     .where(eq(customerProfiles.id, profileId))
     .limit(1);
-  if (!profile) return;
+  if (!profile) return false;
 
   const messages: { role: "customer" | "admin"; content: string; at?: Date }[] = [];
 
@@ -229,7 +252,15 @@ async function runExtraction(profileId: number): Promise<void> {
       createdAt: customerInteractions.createdAt,
     })
     .from(customerInteractions)
-    .where(eq(customerInteractions.customerProfileId, profileId))
+    .where(
+      and(
+        eq(customerInteractions.customerProfileId, profileId),
+        // Don't learn a customer's "preferences" from spam — mirror the same
+        // filter buildGuestChatContext uses for 近期來信. NULL-safe: outbound
+        // replies have no classification (→ excluded only when真是未 rescued spam).
+        sql`NOT (COALESCE(${customerInteractions.classification}, '') = 'spam' AND COALESCE(${customerInteractions.spamVerdict}, '') != 'rescued')`,
+      ),
+    )
     .orderBy(desc(customerInteractions.createdAt))
     .limit(20);
 
@@ -279,9 +310,13 @@ async function runExtraction(profileId: number): Promise<void> {
   });
 
   const unique = messages.slice(-20);
-  if (unique.length === 0) return;
+  if (unique.length === 0) return false;
 
-  await extractCustomerPreferences({ profileId, recentMessages: unique });
+  const result = await extractCustomerPreferences({
+    profileId,
+    recentMessages: unique,
+  });
+  return result !== null; // true only when preferences were actually written
 }
 
 /**
@@ -299,9 +334,12 @@ export async function backfillMissingPreferences(
   const { customerProfiles, customerInteractions } = await import(
     "../../drizzle/schema"
   );
-  const { and, isNull, isNotNull, inArray } = await import("drizzle-orm");
+  const { and, isNull, isNotNull, inArray, desc } = await import("drizzle-orm");
 
-  // Profiles with at least one interaction but no preferences yet.
+  // Profiles with at least one interaction but no preferences yet. Order by most
+  // recent activity so genuinely-active customers get memory first and a handful
+  // of "never extractable" zombies (extraction keeps failing → stays NULL) can't
+  // permanently hog the nightly budget and starve newcomers.
   const rows = await db
     .select({ id: customerProfiles.id })
     .from(customerProfiles)
@@ -317,16 +355,24 @@ export async function backfillMissingPreferences(
         ),
       ),
     )
+    .orderBy(desc(customerProfiles.lastInteractionAt))
     .limit(limit);
 
-  let extracted = 0;
+  let extracted = 0; // real successes (preferences written), not attempts
   for (const r of rows) {
     try {
-      await extractAfterReply(r.id); // deduped + idempotent
-      extracted++;
+      if (await extractAfterReply(r.id)) extracted++;
     } catch (err) {
       log.warn({ err, profileId: r.id }, "backfill extraction failed (non-fatal)");
     }
+  }
+  if (rows.length > 0 && extracted === 0) {
+    // Scanned customers but wrote nothing → extraction may be systematically
+    // failing (e.g. truncation / model errors). Surface it instead of a rosy log.
+    log.warn(
+      { scanned: rows.length },
+      "back-fill scanned customers but wrote 0 — extraction may be systematically failing",
+    );
   }
   log.info({ scanned: rows.length, extracted }, "preference back-fill done");
   return { scanned: rows.length, extracted };

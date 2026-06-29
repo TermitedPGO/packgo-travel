@@ -5,6 +5,7 @@ const { mockInvokeLLM, mockDb, selectChain, updateChain } = vi.hoisted(() => {
   const selectChain = {
     from: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
+    orderBy: vi.fn().mockReturnThis(),
     limit: vi.fn(),
   };
   const updateChain = {
@@ -49,6 +50,7 @@ beforeEach(() => {
   mockDb.update.mockReturnValue(updateChain);
   selectChain.from.mockReturnThis();
   selectChain.where.mockReturnThis();
+  selectChain.orderBy.mockReturnThis();
   selectChain.limit.mockResolvedValue([{ aiNotes: null, keyFacts: null, preferences: null }]);
   updateChain.set.mockReturnThis();
   updateChain.where.mockResolvedValue(undefined);
@@ -113,7 +115,9 @@ describe("extractCustomerPreferences", () => {
       recentMessages: [{ role: "customer", content: "想帶全家去歐洲走走" }],
     });
 
-    const prompt = mockInvokeLLM.mock.calls[0][0].messages[0].content;
+    // messages[0] is now the system message; the user prompt is messages[1].
+    const msgs = mockInvokeLLM.mock.calls[0][0].messages;
+    const prompt = msgs[msgs.length - 1].content;
     expect(prompt).toContain("客人很注重隱私");
     expect(prompt).toContain("VIP 老客戶");
   });
@@ -141,7 +145,7 @@ describe("extractCustomerPreferences", () => {
     expect(result).toBeNull();
   });
 
-  it("uses Opus model", async () => {
+  it("uses Opus model AND actually sends the anti-fabrication system prompt", async () => {
     mockInvokeLLM.mockResolvedValue({
       choices: [{ message: { content: JSON.stringify({
         aiNotes: "test", keyFacts: "- test", preferences: {},
@@ -154,19 +158,26 @@ describe("extractCustomerPreferences", () => {
     });
 
     const params = mockInvokeLLM.mock.calls[0][0];
-    expect(params._model).toContain("opus");
+    // Real `model` field (not the ignored `_model`) so it doesn't fall to Sonnet.
+    expect(params.model).toContain("opus");
+    expect(params._model).toBeUndefined();
+    // EXTRACT_SYSTEM must ride a role:"system" message, or the 鐵律 never reaches
+    // the model (invokeLLM ignores any top-level system field).
+    expect(params.messages[0].role).toBe("system");
+    expect(params.messages[0].content).toContain("絕對鐵律");
   });
 });
 
-describe("extractAfterReply — dedup (M2 cost control)", () => {
-  it("skips an overlapping extraction for the same customer", async () => {
-    // First call reaches getDb (resolves null → runExtraction no-ops); the
-    // concurrent second call must short-circuit BEFORE touching getDb.
-    vi.mocked(getDb).mockResolvedValueOnce(undefined as any);
+describe("extractAfterReply — dedup + coalescing (M2 cost control)", () => {
+  it("coalesces an overlapping trigger into exactly one extra run (no lost update)", async () => {
+    // getDb resolves null → runExtraction no-ops cleanly (no DB chain).
+    vi.mocked(getDb).mockResolvedValue(undefined as any);
     const p1 = extractAfterReply(7);
-    const p2 = extractAfterReply(7);
+    const p2 = extractAfterReply(7); // arrives mid-run → remembered, not dropped
     await Promise.all([p1, p2]);
-    expect(getDb).toHaveBeenCalledTimes(1);
+    // one original run + one coalesced re-run = 2. NOT 1 (would drop p2's data),
+    // NOT 3+ (would mean no dedup, paying per overlapping trigger).
+    expect(getDb).toHaveBeenCalledTimes(2);
   });
 
   it("re-extracts a later change (the lock clears in finally)", async () => {
