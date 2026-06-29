@@ -327,6 +327,8 @@ type RawUser = {
   blocked?: boolean
   needsFollowup?: boolean
   followUpDate?: string | null
+  /** unread agentMessages filed against this customer (server COUNT, readByJeff=0) */
+  unread?: number
 }
 
 export function toListItem(
@@ -353,7 +355,7 @@ export function toListItem(
     lastContact: raw.lastSignedIn ? formatDate(raw.lastSignedIn) : "",
     tag,
     tagLabel: tagLabel[tag] ?? tag,
-    notifs: 0,
+    notifs: raw.unread ?? 0,
     blocked: raw.blocked ?? false,
     // Light up the sidebar 需跟進 badge for an auto-detected stale inquiry/quote
     // (server flag) OR a manually-set follow-up date that is due today (Q4-A).

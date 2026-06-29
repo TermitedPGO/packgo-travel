@@ -156,6 +156,7 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
           lastSignedIn: u.lastSignedIn,
           blocked: u.blocked,
           needsFollowup: u.needsFollowup,
+          unread: u.unread,
         },
         tagLabels,
         formatDate,
@@ -179,7 +180,7 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
         lastContact: g.updatedAt ? formatDate(new Date(g.updatedAt)) : "",
         tag: "inquiry" as const,
         tagLabel: tagLabels.inquiry ?? "",
-        notifs: 0,
+        notifs: g.unread ?? 0,
         blocked: g.blocked ?? false,
         needsFollowup: g.needsFollowup ?? false,
       }

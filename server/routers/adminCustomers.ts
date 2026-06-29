@@ -123,6 +123,7 @@ export const adminCustomersRouter = router({
         customerProfiles,
         inquiries: inquiriesTable,
         aiQuotes: aiQuotesTable,
+        agentMessages,
       } = await import("../../drizzle/schema");
 
       // Subquery: total spend per user (sum of non-cancelled bookings).
@@ -180,6 +181,10 @@ export const adminCustomersRouter = router({
                 AND ${aiQuotesTable.status} IN ('sent','viewed')
                 AND ${aiQuotesTable.createdAt} < (NOW() - INTERVAL 5 DAY))
           )`,
+          // 紅點: unread agent messages filed against this customer's profile —
+          // the same readByJeff=0 signal the ops ChatsTab red dot uses. NULL when
+          // a registered user has no customerProfiles row yet (COUNT → 0).
+          unread: sql<number>`(SELECT COUNT(*) FROM ${agentMessages} WHERE ${agentMessages.relatedCustomerProfileId} = ${customerProfiles.id} AND ${agentMessages.readByJeff} = 0)`,
         })
         .from(usersTable)
         .leftJoin(spendSub, eq(usersTable.id, spendSub.userId))
@@ -187,7 +192,7 @@ export const adminCustomersRouter = router({
         .where(eq(usersTable.role, "user"))
         .orderBy(desc(usersTable.lastSignedIn));
 
-      const withFlags = rows.map(({ profileStatus, lastInteractionAt, needsFollowup, ...r }) => {
+      const withFlags = rows.map(({ profileStatus, lastInteractionAt, needsFollowup, unread, ...r }) => {
         const blocked = profileStatus === "blocked";
         const hidden = isHiddenCustomer(
           {
@@ -197,7 +202,7 @@ export const adminCustomersRouter = router({
           },
           blocked,
         );
-        return { ...r, blocked, hidden, needsFollowup: Number(needsFollowup) === 1 };
+        return { ...r, blocked, hidden, needsFollowup: Number(needsFollowup) === 1, unread: Number(unread) };
       });
 
       return input?.includeHidden ? withFlags : withFlags.filter((r) => !r.hidden);
@@ -430,6 +435,9 @@ export const adminCustomersRouter = router({
             WHERE ${inquiriesTable.customerEmail} = ${customerProfiles.email}
               AND ${inquiriesTable.status} IN ('new','in_progress')
               AND ${inquiriesTable.createdAt} < (NOW() - INTERVAL 2 DAY))`,
+          // 紅點: unread agent messages filed against this guest's profile (the
+          // profileId IS the customerProfiles row), same readByJeff=0 signal.
+          unread: sql<number>`(SELECT COUNT(*) FROM ${agentMessages} WHERE ${agentMessages.relatedCustomerProfileId} = ${customerProfiles.id} AND ${agentMessages.readByJeff} = 0)`,
         })
         .from(customerProfiles)
         .where(
@@ -462,10 +470,11 @@ export const adminCustomersRouter = router({
       // registered accounts (markNotCustomer/restoreCustomer by profileId).
       // Default view drops blocked guests; the "show hidden" toggle brings them
       // back. Nothing is deleted — a mis-hide is one click to restore.
-      const withFlags = rows.map(({ status, needsFollowup, ...r }) => ({
+      const withFlags = rows.map(({ status, needsFollowup, unread, ...r }) => ({
         ...r,
         blocked: status === "blocked",
         needsFollowup: Number(needsFollowup) === 1,
+        unread: Number(unread),
       }));
       return input?.includeHidden
         ? withFlags

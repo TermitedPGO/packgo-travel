@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { guestToAdaptedCustomer, deriveFollowup, buildInquiryEditedPayload, deriveProfile, deriveBallInCourt, deriveNextMove, isFollowUpDue, laToday } from "./adapters"
+import { guestToAdaptedCustomer, toListItem, deriveFollowup, buildInquiryEditedPayload, deriveProfile, deriveBallInCourt, deriveNextMove, isFollowUpDue, laToday } from "./adapters"
 
 // t stub: echoes the key, appending the interpolated count so assertions can see it.
 const t = (k: string, vars?: Record<string, string | number>) =>
@@ -88,6 +88,32 @@ describe("guestToAdaptedCustomer", () => {
     expect(
       guestToAdaptedCustomer({ profileId: 2, inquiries: [] }, t).name,
     ).toBe("admin.customers.unnamed")
+  })
+})
+
+describe("toListItem — notifs (red dot) maps from the server unread count", () => {
+  const tagLabel = { active: "active", inquiry: "inquiry", pending: "pending" }
+  const formatDate = (d: Date) => d.toISOString().slice(0, 10)
+  const base = {
+    id: 7,
+    name: "Wu",
+    email: "wu@example.com",
+    phone: null,
+    bookingCount: 0,
+    inquiryCount: 1,
+    lastSignedIn: null,
+  }
+
+  it("threads a positive unread count straight into notifs (3 → 3)", () => {
+    expect(toListItem({ ...base, unread: 3 }, tagLabel, formatDate).notifs).toBe(3)
+  })
+
+  it("falls back to 0 when the server omits unread (undefined → 0)", () => {
+    expect(toListItem(base, tagLabel, formatDate).notifs).toBe(0)
+  })
+
+  it("0 unread reads as a clean 0 (no red dot)", () => {
+    expect(toListItem({ ...base, unread: 0 }, tagLabel, formatDate).notifs).toBe(0)
   })
 })
 

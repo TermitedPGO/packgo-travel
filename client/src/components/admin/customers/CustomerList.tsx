@@ -89,10 +89,8 @@ export default function CustomerList({
               >
                 {c.initials}
               </div>
-              {c.notifs > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 rounded-full bg-gray-900 text-white text-[9px] font-semibold flex items-center justify-center px-1 border-2 border-white">
-                  {c.notifs}
-                </span>
+              {c.notifs > 0 && !c.blocked && (
+                <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-rose-500 border-2 border-white" />
               )}
             </div>
             <div className="flex-1 min-w-0">
