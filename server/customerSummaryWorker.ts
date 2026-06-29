@@ -14,6 +14,7 @@ import type {
   CustomerSummaryJobResult,
 } from "./queue";
 import { runCustomerSummaryScan, refreshSummaryForProfile } from "./_core/customerAiSummary";
+import { backfillMissingPreferences } from "./_core/customerPreferenceExtractor";
 
 export const customerSummaryWorker = new Worker<
   CustomerSummaryJobData,
@@ -41,6 +42,20 @@ export const customerSummaryWorker = new Worker<
     console.log(
       `[CustomerSummaryWorker] Scan ${job.id}: scanned=${result.scanned} refreshed=${result.refreshed} errors=${result.errors}`,
     );
+    // customer-memory M2 — back-fill preferences for never-extracted customers
+    // (bounded + deduped). Non-fatal: a failure here must not fail the summary
+    // job; the summary result is what the queue reports.
+    try {
+      const bf = await backfillMissingPreferences(25);
+      console.log(
+        `[CustomerSummaryWorker] preference back-fill: scanned=${bf.scanned} extracted=${bf.extracted}`,
+      );
+    } catch (e) {
+      console.error(
+        "[CustomerSummaryWorker] preference back-fill failed (non-fatal):",
+        e,
+      );
+    }
     return result;
   },
   { connection: redisBullMQ, concurrency: 1 },

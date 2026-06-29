@@ -31,12 +31,20 @@ vi.mock("drizzle-orm", () => ({
   desc: vi.fn((c: any) => c),
   and: vi.fn((...a: any[]) => a),
   inArray: vi.fn((...a: any[]) => a),
+  isNull: vi.fn((c: any) => c),
+  isNotNull: vi.fn((c: any) => c),
 }));
 
-import { extractCustomerPreferences } from "./customerPreferenceExtractor";
+import {
+  extractCustomerPreferences,
+  extractAfterReply,
+  backfillMissingPreferences,
+} from "./customerPreferenceExtractor";
+import { getDb } from "../db";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(getDb).mockResolvedValue(mockDb as any);
   mockDb.select.mockReturnValue(selectChain);
   mockDb.update.mockReturnValue(updateChain);
   selectChain.from.mockReturnThis();
@@ -147,5 +155,42 @@ describe("extractCustomerPreferences", () => {
 
     const params = mockInvokeLLM.mock.calls[0][0];
     expect(params._model).toContain("opus");
+  });
+});
+
+describe("extractAfterReply — dedup (M2 cost control)", () => {
+  it("skips an overlapping extraction for the same customer", async () => {
+    // First call reaches getDb (resolves null → runExtraction no-ops); the
+    // concurrent second call must short-circuit BEFORE touching getDb.
+    vi.mocked(getDb).mockResolvedValueOnce(undefined as any);
+    const p1 = extractAfterReply(7);
+    const p2 = extractAfterReply(7);
+    await Promise.all([p1, p2]);
+    expect(getDb).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-extracts a later change (the lock clears in finally)", async () => {
+    vi.mocked(getDb).mockResolvedValue(undefined as any);
+    await extractAfterReply(7);
+    await extractAfterReply(7);
+    expect(getDb).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("backfillMissingPreferences (M2 back-fill)", () => {
+  it("returns zero when the db is unavailable", async () => {
+    vi.mocked(getDb).mockResolvedValueOnce(undefined as any);
+    expect(await backfillMissingPreferences()).toEqual({
+      scanned: 0,
+      extracted: 0,
+    });
+  });
+
+  it("no-ops when no customer is missing preferences", async () => {
+    selectChain.limit.mockResolvedValueOnce([]); // scan → none to back-fill
+    expect(await backfillMissingPreferences(25)).toEqual({
+      scanned: 0,
+      extracted: 0,
+    });
   });
 });

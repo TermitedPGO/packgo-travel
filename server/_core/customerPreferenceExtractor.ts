@@ -184,11 +184,28 @@ export async function extractCustomerPreferences(opts: {
   }
 }
 
+/** In-flight dedup (cost control): a burst of inbound emails for the same
+ *  customer fires several fire-and-forget extractAfterReply calls. Skip
+ *  overlapping runs so we never pay for N concurrent Opus passes over the same
+ *  conversation. Cleared in finally → the next real change still re-extracts. */
+const extractInflight = new Set<number>();
+
 /**
  * Convenience: gather recent messages for a profile from inquiryMessages +
- * customerInteractions, then run extraction. Fire-and-forget safe.
+ * customerInteractions, then run extraction. Fire-and-forget safe. Deduped per
+ * profileId so overlapping inbound triggers don't double-bill Opus.
  */
 export async function extractAfterReply(profileId: number): Promise<void> {
+  if (extractInflight.has(profileId)) return;
+  extractInflight.add(profileId);
+  try {
+    await runExtraction(profileId);
+  } finally {
+    extractInflight.delete(profileId);
+  }
+}
+
+async function runExtraction(profileId: number): Promise<void> {
   const db = await getDb();
   if (!db) return;
 
@@ -265,4 +282,52 @@ export async function extractAfterReply(profileId: number): Promise<void> {
   if (unique.length === 0) return;
 
   await extractCustomerPreferences({ profileId, recentMessages: unique });
+}
+
+/**
+ * customer-memory M2 — back-fill preferences for customers who have history but
+ * were never extracted (predate the extractor, or never triggered it). Bounded
+ * + deduped so the nightly run's LLM cost is capped. Going forward every inbound
+ * email keeps memory fresh; this catches the long tail. Returns counts.
+ */
+export async function backfillMissingPreferences(
+  limit = 25,
+): Promise<{ scanned: number; extracted: number }> {
+  const db = await getDb();
+  if (!db) return { scanned: 0, extracted: 0 };
+
+  const { customerProfiles, customerInteractions } = await import(
+    "../../drizzle/schema"
+  );
+  const { and, isNull, isNotNull, inArray } = await import("drizzle-orm");
+
+  // Profiles with at least one interaction but no preferences yet.
+  const rows = await db
+    .select({ id: customerProfiles.id })
+    .from(customerProfiles)
+    .where(
+      and(
+        isNull(customerProfiles.preferences),
+        inArray(
+          customerProfiles.id,
+          db
+            .select({ pid: customerInteractions.customerProfileId })
+            .from(customerInteractions)
+            .where(isNotNull(customerInteractions.customerProfileId)),
+        ),
+      ),
+    )
+    .limit(limit);
+
+  let extracted = 0;
+  for (const r of rows) {
+    try {
+      await extractAfterReply(r.id); // deduped + idempotent
+      extracted++;
+    } catch (err) {
+      log.warn({ err, profileId: r.id }, "backfill extraction failed (non-fatal)");
+    }
+  }
+  log.info({ scanned: rows.length, extracted }, "preference back-fill done");
+  return { scanned: rows.length, extracted };
 }

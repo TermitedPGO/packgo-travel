@@ -20,13 +20,23 @@
 - Token：memory 另起一個 block，掛 `cache_control: ephemeral`（跟現有 system prompt 同模式），
   避免每輪重付。BLOCK_CAP 不動主 block，memory 另算上限 ~1200 字。
 
-### M2 — 抽取保鮮（Phase 2 選做，待 Jeff 點頭）
-**檔**：`server/_core/customerPreferenceExtractor.ts` + `gmailPipeline.ts`
-- 現在只在 Jeff 回信後 `extractAfterReply`。改成：收到「客人來訊」也排一次抽取
-  （fire-and-forget，去重鎖避免同客人並跑）。
-- 排程：每日掃「最近有新訊息但記憶過期」的客人，補抽。
-- 重客人放寬 last-20 視窗（分批摘要）。
-- 注意：本機無 DATABASE_URL/ANTHROPIC_API_KEY，抽取只在 prod 跑得動，本地只能測格式。
+### M2 — 抽取保鮮（已做，2026-06-28）
+**檔**：`server/_core/customerPreferenceExtractor.ts` + `server/customerSummaryWorker.ts`
+
+校正：原假設「只在 Jeff 回信後抽取」是錯的。[gmailPipeline.ts:1241](../../../server/agents/autonomous/gmailPipeline.ts)
+其實每封客人來訊都已 fire-forget 觸發 `extractAfterReply` → 來訊保鮮早就有了。
+真正缺的是兩件：
+
+1. **去重（省錢）**：同客人連續來訊會並發多個 `extractAfterReply` → 重複燒 Opus。
+   在 extractor 內加 module-level in-flight Set，重入直接跳過；body 抽成 `runExtraction`，
+   `extractAfterReply` 變薄包一層 try/finally（lock 用完即清，下次有變動照樣重抽）。
+2. **老客人補抽**：有歷史但從沒抽過（preferences IS NULL）的客人沒記憶。
+   加 `backfillMissingPreferences(limit=25)`：掃「有 interaction 但 preferences 為 null」，
+   逐一 `extractAfterReply`（去重 + 有界）。搭現有夜間 `customerSummaryWorker`（02:00 cron）
+   跑完 summary 後順手補抽，不開新 queue、不加 migration。
+
+不做：放寬 last-20 視窗（價值低、加批次複雜度，§9.6 不過度建設）。
+注意：本機無 DATABASE_URL/ANTHROPIC_API_KEY，抽取只在 prod 跑得動，本地只測格式 + dedup 邏輯。
 
 ## 依賴關係
 M1 完全獨立、可單獨上線（最高 CP）。M2 依賴 M1 無，但價值低於 M1，分開做。
