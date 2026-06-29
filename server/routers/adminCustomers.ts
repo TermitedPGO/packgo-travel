@@ -12,6 +12,12 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { adminProcedure, router } from "../_core/trpc";
 import * as db from "../db";
+import { createChildLogger } from "../_core/logger";
+import {
+  isIntakeTooLarge,
+  normalizeExtractedCustomer,
+  MAX_EXTRACT_TEXT_CHARS,
+} from "../_core/customerIntakeExtract";
 import { eq, desc, sql, and, or, inArray, type SQL } from "drizzle-orm";
 import {
   type ThreadTurn,
@@ -43,6 +49,8 @@ export const OPEN_BOOKING_STATUSES = ["pending", "confirmed"] as const;
 export const OPEN_INQUIRY_STATUSES = ["new", "in_progress"] as const;
 
 const extractionInflight = new Set<number>();
+
+const log = createChildLogger({ module: "adminCustomers" });
 
 type DrizzleDb = NonNullable<Awaited<ReturnType<typeof db.getDb>>>;
 
@@ -395,6 +403,148 @@ export const adminCustomersRouter = router({
       const profileId = Number((result as any)[0]?.insertId ?? 0);
       return { ok: true, profileId };
     }),
+
+  /**
+   * extractCustomerFromFile — Jeff drops a PDF / image / text file (a name card,
+   * a forwarded itinerary, a WeChat screenshot) and we「搬運」the customer's
+   * name / email / phone out of it so the add-customer modal pre-fills. This is
+   * EXTRACTION ONLY — it never writes a customer row (the modal still confirms
+   * and calls createManualCustomer). Per the admin AI boundary: AI only carries
+   * facts that are literally in the document, never invents.
+   *
+   * Pipeline: base64 → Buffer (size-guarded) → parseAttachment (the existing
+   * PDF/OCR/xlsx/docx/… parser, NOT reimplemented) → Haiku extraction with an
+   * anti-fabrication system prompt + structured output. Never throws on a bad
+   * file: every failure path returns { ok:false, reason } so the modal can show
+   * a clean message and let Jeff type the fields by hand.
+   */
+  extractCustomerFromFile: adminProcedure
+    .input(
+      z.object({
+        filename: z.string().min(1).max(255),
+        mimeType: z.string().max(200),
+        dataBase64: z.string().min(1),
+      }),
+    )
+    .mutation(
+      async ({
+        input,
+      }): Promise<
+        | {
+            ok: true;
+            extracted: { name: string; email: string | null; phone: string | null };
+            sourceText: string;
+            parseStatus: string;
+          }
+        | { ok: false; reason: string }
+      > => {
+        // 1. Decode + size guard (never throw on a bad/huge file).
+        let buffer: Buffer;
+        try {
+          buffer = Buffer.from(input.dataBase64, "base64");
+        } catch {
+          return { ok: false, reason: "decode_failed" };
+        }
+        if (isIntakeTooLarge(buffer.length)) {
+          return { ok: false, reason: "too_large" };
+        }
+
+        // 2. Parse to text via the EXISTING attachment parser (PDF + scanned-PDF
+        //    vision fallback, image OCR, text/csv/json/html/xlsx/docx). We do not
+        //    reimplement any of it.
+        let parsed: Awaited<
+          ReturnType<typeof import("../_core/attachmentParser").parseAttachment>
+        >;
+        try {
+          const { parseAttachment } = await import("../_core/attachmentParser");
+          parsed = await parseAttachment(input.filename, input.mimeType, buffer);
+        } catch (err) {
+          log.warn(
+            { err, filename: input.filename },
+            "extractCustomerFromFile: parse threw",
+          );
+          return { ok: false, reason: "parse_error" };
+        }
+
+        const text = parsed.text ?? "";
+        // 3. Bounce anything not cleanly readable (unsupported / empty / errored /
+        //    whitespace-only) — there is nothing to extract from.
+        if (
+          (parsed.parseStatus !== "ok" && parsed.parseStatus !== "ok_truncated") ||
+          text.trim().length === 0
+        ) {
+          return { ok: false, reason: parsed.parseStatus };
+        }
+
+        // 4. Extract fields via Haiku (cheap). The system prompt is anti-
+        //    fabrication: 只「搬運」文件裡真的有的,沒有就留空,絕不編造。
+        //    invokeLLM param-name gotcha (see customerPreferenceExtractor): the
+        //    system prompt MUST be a role:"system" message inside `messages`
+        //    (a top-level `system`/`_system` field is ignored), model goes in
+        //    `model`, structured output in `outputSchema:{name,schema}`.
+        const EXTRACT_SYSTEM = `你從文件文字中「搬運」出客人的姓名、email、電話。
+
+【絕對鐵律 — 不可編造】
+- 只抄文件裡真的有的;文件沒有的就留空字串,絕對不要編造、推測或填入範例值。
+- 姓名可能是中文或英文,逐字照抄文件裡寫的。
+- email 與電話要逐字照抄,不要改格式、不要補區碼、不要猜。
+- 找不到某個欄位就把它留成空字串 ""。寧可少寫,不可亂寫。
+
+只輸出這三個欄位:name、email、phone。`;
+
+        const userMessage = `以下是文件文字,請從中搬運客人的姓名、email、電話(沒有的留空字串):
+
+${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
+
+        let raw: { name?: string; email?: string; phone?: string };
+        try {
+          const { invokeLLM } = await import("../_core/llm");
+          const result = await invokeLLM({
+            model: "claude-haiku-4-5",
+            messages: [
+              { role: "system", content: EXTRACT_SYSTEM },
+              { role: "user", content: userMessage },
+            ],
+            maxTokens: 500,
+            outputSchema: {
+              name: "extracted_customer",
+              schema: {
+                type: "object",
+                properties: {
+                  name: { type: "string" },
+                  email: { type: "string" },
+                  phone: { type: "string" },
+                },
+                required: ["name"],
+              },
+            },
+          });
+          const content =
+            result.choices?.[0]?.message?.content ??
+            result.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments ??
+            "";
+          raw =
+            typeof content === "string" && content
+              ? JSON.parse(content)
+              : (content as { name?: string; email?: string; phone?: string });
+        } catch (err) {
+          log.warn(
+            { err, filename: input.filename },
+            "extractCustomerFromFile: LLM extraction failed",
+          );
+          return { ok: false, reason: "extract_failed" };
+        }
+
+        // 5. Normalize (trim; empty email/phone → null; missing name → "").
+        const extracted = normalizeExtractedCustomer(raw);
+        return {
+          ok: true,
+          extracted,
+          sourceText: text.slice(0, 4000),
+          parseStatus: parsed.parseStatus,
+        };
+      },
+    ),
 
   /**
    * 批9 m3 — email 訪客列表(Jeff 拍板:sidebar 列 註冊用戶 + email 訪客)。

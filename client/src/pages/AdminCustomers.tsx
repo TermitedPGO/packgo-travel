@@ -3,6 +3,7 @@ import { useLocale } from "@/contexts/LocaleContext"
 import CustomerList from "@/components/admin/customers/CustomerList"
 import CustomerDetail from "@/components/admin/customers/CustomerDetail"
 import CustomerChat from "@/components/admin/customers/CustomerChat"
+import AddCustomerModal from "@/components/admin/customers/AddCustomerModal"
 import { useCustomerData, type Selection } from "@/components/admin/customers/useCustomerData"
 import {
   CustomerListSkeleton,
@@ -14,6 +15,7 @@ export default function AdminCustomers() {
   const { t } = useLocale()
   const [selected, setSelected] = useState<Selection | null>(null)
   const [showHidden, setShowHidden] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
   const chatFocusRef = useRef<((prefill?: string) => void) | null>(null)
   const {
     customers,
@@ -30,6 +32,7 @@ export default function AdminCustomers() {
   } = useCustomerData(selected, showHidden)
 
   return (
+    <>
     <div className="h-full flex">
       {isListLoading ? (
         <div className="w-[300px] flex-shrink-0 border-r border-gray-200">
@@ -44,7 +47,7 @@ export default function AdminCustomers() {
           onToggleHidden={setShowHidden}
           onMarkNotCustomer={markNotCustomer}
           onRestoreCustomer={restoreCustomer}
-          onAddCustomer={() => chatFocusRef.current?.(t("admin.customers.add.chatPrefill"))}
+          onAddCustomer={() => setAddOpen(true)}
         />
       )}
       {selected !== null ? (
@@ -89,5 +92,14 @@ export default function AdminCustomers() {
         </>
       )}
     </div>
+    <AddCustomerModal
+      open={addOpen}
+      onClose={() => setAddOpen(false)}
+      onCreated={(sel) => {
+        setAddOpen(false)
+        setSelected(sel)
+      }}
+    />
+    </>
   )
 }
