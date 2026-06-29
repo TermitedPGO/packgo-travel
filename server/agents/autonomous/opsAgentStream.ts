@@ -169,8 +169,13 @@ export async function* runOpsAgentStream(
     }
 
     const today = new Date().toISOString().slice(0, 10);
-    const system =
-      `【今天日期】${today} (UTC)。任何跟年份/月份相關的判斷都以這個為準 — 例如「今年報稅」就是 ${today.slice(0, 4)} 年,「這個月」就是 ${today.slice(0, 7)},不要用舊年份。\n\n` +
+    // Cache split (cost + speed, 2026-06-29): the big static prompt is identical
+    // for every customer/session, so it gets its OWN cache block → a HIT on every
+    // request no matter which customer. Only the small per-customer/per-day tail
+    // (date + pinned context) goes in a second block. Before, both shared one
+    // block, so each new customer busted the cache on the whole static bulk (the
+    // expensive part). Same total content, just two cache prefixes.
+    const staticSystem =
       SYSTEM_PROMPT + "\n\n" + ACTION_PROPOSAL_GUIDE +
       "\n\n【訂單狀態三層 — 讀法】bookings 有三個獨立狀態,不要混淆:\n" +
       "1. bookingStatus (pending/confirmed/completed/cancelled) = 客人承諾狀態\n" +
@@ -188,14 +193,18 @@ export async function* runOpsAgentStream(
         ? "\n【要回信 / 跟進這位客人 — 直接備好草稿】當 Jeff 叫你回信 / 跟進 / 幫忙寫信給「目前這位客人」,呼叫 draft_followup 把專業跟進信草稿備好(它會出現在客戶頁待審草稿區,看過一鍵就能寄)。呼叫後只要用一兩句話跟 Jeff 說重點(誰、卡在哪、幾天沒回),不要自己把整封信長篇寫在聊天裡。" +
           "\n【說了就做 — 寫入工具】你有 update_customer_note 和 update_booking_status 兩個寫入工具。Jeff 說「備註加上…」「標記已付款」「這筆確認了」時,直接呼叫對應工具執行,不用再問確認。但碰錢的變更(退款、調價)和寄信給客人的,仍然走 suggest_action 或 draft_followup 讓 Jeff 審核。update_customer_note 改的是 Jeff 私人備忘(客人看不到)。update_booking_status 要先用 search_bookings 拿到 bookingId。" +
           "\n【收 / 歸檔這位客人 — 直接做完報結果】Jeff 在這位客人的對話框說「收」「收進來」「歸檔他的記錄」時,直接呼叫 collect_customer_threads(email = 目前這位客人的 email),它會把這個 email 的 Gmail 往來全收進他的檔案。收完用一句話報結果(收了幾條、新增幾條)。**這個對話框沒有可點的按鈕,絕對不要叫 Jeff『點上面那個按鈕』或說『按鈕出來了』** — 你就是執行的人,收完直接報數字。工具失敗就老實說「系統忙,稍後再試」,不要假裝收好了。"
-        : "") +
+        : "");
+    const dynamicSystem =
+      `【今天日期】${today} (UTC)。任何跟年份/月份相關的判斷都以這個為準 — 例如「今年報稅」就是 ${today.slice(0, 4)} 年,「這個月」就是 ${today.slice(0, 7)},不要用舊年份。` +
       (extraSystem ? "\n\n" + extraSystem : "");
 
-    // Cache the (large, mostly-static) system prompt so Opus 4.8's per-round
-    // re-send is read from cache (~90% cheaper) — keeps the model upgrade
-    // affordable across the 6-round loop + repeat queries the same day.
+    // staticSystem (big, stable) = its own cached prefix → hits across ALL
+    // customers/sessions. dynamicSystem (date + this customer's pinned context) =
+    // the small tail; its breakpoint also caches the full prefix for the same
+    // conversation's later rounds. Two breakpoints, same total content as before.
     const systemBlocks = [
-      { type: "text" as const, text: system, cache_control: { type: "ephemeral" as const } },
+      { type: "text" as const, text: staticSystem, cache_control: { type: "ephemeral" as const } },
+      { type: "text" as const, text: dynamicSystem, cache_control: { type: "ephemeral" as const } },
     ];
 
     const tools =
