@@ -3286,6 +3286,7 @@ export const zhTW = {
         scheduled: '跟進日 {date}',
         setDate: '設跟進日',
         clearDate: '清除跟進日',
+        saveFailed: '跟進日存檔失敗，請再試一次',
         reason: {
           inquiry: '詢問待回',
           quote: '報價待追',

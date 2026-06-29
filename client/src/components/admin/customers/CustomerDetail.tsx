@@ -2,6 +2,7 @@ import { useState } from "react"
 import { Phone, Mail, Star, CalendarClock, X } from "lucide-react"
 import { useLocale } from "@/contexts/LocaleContext"
 import { trpc } from "@/lib/trpc"
+import { toast } from "sonner"
 import type { AdaptedCustomer, ChatMessage } from "./types"
 import { OverviewTab, OrdersTab, DocsTab, TimelineTab } from "./DetailTabs"
 import { deriveBallInCourt, deriveNextMove } from "./adapters"
@@ -25,7 +26,10 @@ export default function CustomerDetail({ customer, chatMessages = [] }: { custom
     if (c.kind === "guest") void utils.admin.guestOpenItems.invalidate({ profileId: c.id })
     else void utils.admin.customerDetail.invalidate({ userId: c.id })
   }
-  const setFollowUp = trpc.admin.setFollowUpDate.useMutation({ onSuccess: invalidateDetail })
+  const setFollowUp = trpc.admin.setFollowUpDate.useMutation({
+    onSuccess: invalidateDetail,
+    onError: () => toast.error(t("admin.customers.followup.saveFailed")),
+  })
 
   const tabLabel = (k: TabKey) => t(`admin.customers.tab.${k}`)
 

@@ -163,6 +163,7 @@ export const adminCustomersRouter = router({
           lastSignedIn: usersTable.lastSignedIn,
           profileStatus: customerProfiles.status,
           lastInteractionAt: customerProfiles.lastInteractionAt,
+          followUpDate: customerProfiles.followUpDate,
           // 需跟進 (locked 2026-06-20): open inquiry >2d unanswered OR a
           // sent/viewed quote >5d old. Correlated EXISTS by userId OR verified
           // email — read-only signal, never auto-acts. Intentionally STATUS-only

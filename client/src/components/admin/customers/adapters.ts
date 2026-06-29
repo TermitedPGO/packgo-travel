@@ -326,6 +326,7 @@ type RawUser = {
   lastSignedIn: Date | null
   blocked?: boolean
   needsFollowup?: boolean
+  followUpDate?: string | null
 }
 
 export function toListItem(
@@ -354,7 +355,10 @@ export function toListItem(
     tagLabel: tagLabel[tag] ?? tag,
     notifs: 0,
     blocked: raw.blocked ?? false,
-    needsFollowup: raw.needsFollowup ?? false,
+    // Light up the sidebar 需跟進 badge for an auto-detected stale inquiry/quote
+    // (server flag) OR a manually-set follow-up date that is due today (Q4-A).
+    // isFollowUpDue is LA-correct so the list dot matches the per-card truth bar.
+    needsFollowup: (raw.needsFollowup ?? false) || isFollowUpDue(raw.followUpDate ?? null, Date.now()),
   }
 }
 

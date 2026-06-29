@@ -3318,6 +3318,7 @@ export const en = {
         scheduled: 'Follow-up {date}',
         setDate: 'Set follow-up',
         clearDate: 'Clear follow-up',
+        saveFailed: 'Could not save follow-up date, please try again',
         reason: {
           inquiry: 'Inquiry waiting',
           quote: 'Quote pending',

@@ -285,7 +285,7 @@ export async function runGmailPipeline(
   // active customer thread regardless of read state. syncThreadToInteractions is
   // idempotent (claim-or-insert on Message-ID), so re-running only back-fills the
   // gap. Best-effort: a failure here must never break mail processing. Cheap at
-  // PACK&GO scale (≤40 threads × 1 thread.get, 6×/hr ≪ Gmail quota).
+  // PACK&GO scale (≤40 threads × 1 thread.get, 20×/hr ≪ Gmail quota).
   try {
     const since = new Date(Date.now() - RECONCILE_WINDOW_MS);
     const recentThreads = await db

@@ -4,7 +4,7 @@
  * QA audit 2026-05-11 Phase 9 #1 churn gap: InquiryAgent had the auto-send
  * path wired in gmailPipeline.ts but nothing called runGmailPipeline on a
  * schedule. Customers asked at 10am, Jeff opened admin at 2pm → 4-hour
- * cold reply. This worker fires every 10 minutes (per scheduleGmailPoll)
+ * cold reply. This worker fires every 3 minutes (per scheduleGmailPoll)
  * and runs the pipeline for every active gmailIntegration row.
  */
 
