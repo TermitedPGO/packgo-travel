@@ -58,6 +58,7 @@ import {
   WRITE_TOOLS,
   executeReadTool,
   executeWriteTool,
+  resolveFollowUpDateArg,
 } from "./opsTools";
 
 beforeEach(() => { nextRows = []; mockCollect.mockReset(); });
@@ -82,6 +83,46 @@ describe("READ_TOOLS definitions", () => {
       expect(t.input_schema.type).toBe("object");
       expect(t.input_schema).toHaveProperty("properties");
     }
+  });
+});
+
+describe("set_follow_up_date — AI sets the cockpit follow-up date", () => {
+  it("is exposed as a customer-page write tool", () => {
+    expect(WRITE_TOOLS.map((t) => t.name)).toContain("set_follow_up_date");
+  });
+
+  describe("resolveFollowUpDateArg", () => {
+    it("accepts a real YYYY-MM-DD day", () => {
+      expect(resolveFollowUpDateArg({ followUpDate: "2026-07-15" })).toEqual({
+        ok: true,
+        value: "2026-07-15",
+      });
+    });
+    it("clear:true → null (clear), ignoring any date", () => {
+      expect(resolveFollowUpDateArg({ clear: true })).toEqual({ ok: true, value: null });
+      expect(resolveFollowUpDateArg({ clear: true, followUpDate: "2026-07-15" })).toEqual({
+        ok: true,
+        value: null,
+      });
+    });
+    it("trims surrounding whitespace", () => {
+      expect(resolveFollowUpDateArg({ followUpDate: "  2026-07-15 " })).toEqual({
+        ok: true,
+        value: "2026-07-15",
+      });
+    });
+    it("rejects a non-calendar day (2026-02-30)", () => {
+      const r = resolveFollowUpDateArg({ followUpDate: "2026-02-30" });
+      expect(r.ok).toBe(false);
+    });
+    it("rejects a malformed date", () => {
+      expect(resolveFollowUpDateArg({ followUpDate: "next wed" }).ok).toBe(false);
+      expect(resolveFollowUpDateArg({ followUpDate: "2026/07/15" }).ok).toBe(false);
+    });
+    it("rejects missing input (no date, no clear) so the model retries", () => {
+      expect(resolveFollowUpDateArg({}).ok).toBe(false);
+      expect(resolveFollowUpDateArg(null).ok).toBe(false);
+    });
   });
 });
 

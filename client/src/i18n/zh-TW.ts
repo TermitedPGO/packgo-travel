@@ -3427,6 +3427,7 @@ export const zhTW = {
         expandAll: '展開全部 {n} 則',
         collapse: '收合',
         fullChat: '完整對話',
+        allDates: '全部',
         events: '事件',
         noHistory: '尚無往來紀錄',
       },

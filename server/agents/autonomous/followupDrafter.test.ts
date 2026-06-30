@@ -113,12 +113,13 @@ describe("buildUserPrompt", () => {
       ],
     });
     expect(p).toContain("已靜默】9 天");
-    expect(p).toContain("語言】zh-TW");
+    expect(p).toContain("整封信務必用繁體中文撰寫");
     expect(p).toContain("客人:想去東京 5 天");
     expect(p).toContain("我們:報價附上,5 天 4 晚");
   });
-  it("falls back to a generic, low-pressure instruction when no excerpt", () => {
+  it("emits a forceful English directive when the customer's language is en", () => {
     const p = buildUserPrompt({ daysSince: 5, language: "en", conversationExcerpt: [] });
+    expect(p).toContain("Write the ENTIRE reply in English");
     expect(p).toContain("沒有可用的對話摘錄");
   });
 });

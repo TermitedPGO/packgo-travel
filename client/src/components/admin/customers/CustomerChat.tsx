@@ -361,6 +361,11 @@ export default function CustomerChat({
       void utils.admin.customerConversationThread.invalidate()
       void utils.admin.customerProfileData.invalidate()
       void utils.admin.customerLearnedPreferences.invalidate()
+      // The agent may have set/cleared the follow-up date (set_follow_up_date) —
+      // refresh the detail / guest-open-items queries the 真相條 reads so the
+      // 跟進日 surfaces up top right after Jeff types it, no reload.
+      void utils.admin.customerDetail.invalidate()
+      void utils.admin.guestOpenItems.invalidate()
     }
   }
 

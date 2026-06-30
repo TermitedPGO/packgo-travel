@@ -20,6 +20,7 @@ import {
   pickGmailThreadId,
   buildConversationExcerpt,
   detectLanguage,
+  detectCustomerLanguage,
   detectDraftSkip,
   buildFollowupDraftRow,
   pickFollowupVariant,
@@ -85,6 +86,42 @@ describe("detectLanguage", () => {
   });
   it("defaults to zh-TW for empty", () => {
     expect(detectLanguage(null)).toBe("zh-TW");
+  });
+});
+
+describe("detectCustomerLanguage", () => {
+  it("uses the customer's last INBOUND turn, not the newest turn (the bug)", () => {
+    // newest-first: we replied in Chinese after the customer wrote English.
+    // detectLanguage(rows[0]) would wrongly say zh-TW; we must reply in English.
+    expect(
+      detectCustomerLanguage([
+        row({ direction: "outbound", content: "您好,報價附上,有問題再跟我說" }), // newest = ours
+        row({ direction: "inbound", content: "Hi, can you send a quote for our July trip?" }),
+      ]),
+    ).toBe("en");
+  });
+  it("matches a Chinese inbound even when our latest reply was English", () => {
+    expect(
+      detectCustomerLanguage([
+        row({ direction: "outbound", content: "Sure, sending it over now." }),
+        row({ direction: "inbound", content: "想跟您確認七月那團還有沒有位" }),
+      ]),
+    ).toBe("zh-TW");
+  });
+  it("falls back to contentSummary when inbound content is blank", () => {
+    expect(
+      detectCustomerLanguage([
+        row({ direction: "inbound", content: "  ", contentSummary: "Customer asking about availability" }),
+      ]),
+    ).toBe("en");
+  });
+  it("falls back to the newest turn when there is no inbound", () => {
+    expect(
+      detectCustomerLanguage([row({ direction: "outbound", content: "Following up on your trip" })]),
+    ).toBe("en");
+  });
+  it("defaults to zh-TW for an empty thread", () => {
+    expect(detectCustomerLanguage([])).toBe("zh-TW");
   });
 });
 

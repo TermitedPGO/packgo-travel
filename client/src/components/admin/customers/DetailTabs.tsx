@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import {
   FileText, DollarSign, CheckCircle2,
   CircleDot, CircleAlert, TriangleAlert, CircleX,
@@ -517,19 +517,66 @@ export function DocsTab({ customer: c }: { customer: AdaptedCustomer }) {
   )
 }
 
+const ALL_DATES = "__all__"
+/** Local calendar day key (YYYY-MM-DD) for grouping conversation turns by date. */
+const convoDayKey = (d: Date) => d.toLocaleDateString("en-CA")
+
 export function TimelineTab({ customer: c, chatMessages = [] }: { customer: AdaptedCustomer; chatMessages?: ChatMessage[] }) {
   const { t } = useLocale()
   const hasChat = chatMessages.length > 0
   const hasEvents = c.timeline.length > 0
+
+  // Distinct conversation days, newest first, for the date jump. chatMessages is
+  // oldest→newest so we reverse. Default lands on the newest day (Jeff:默認最新的先);
+  // 「全部」shows the whole thread in natural oldest→newest reading order.
+  const days = useMemo(() => {
+    const seen = new Set<string>()
+    const out: string[] = []
+    for (const m of chatMessages) {
+      const k = convoDayKey(m.createdAt)
+      if (!seen.has(k)) { seen.add(k); out.push(k) }
+    }
+    return out.reverse()
+  }, [chatMessages])
+
+  const [selDay, setSelDay] = useState<string>(ALL_DATES)
+  // Land on the newest day whenever the customer changes (默認最新的先). Keyed on
+  // c.id only, so Jeff's manual date pick survives a new incoming message.
+  useEffect(() => {
+    setSelDay(days[0] ?? ALL_DATES)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [c.id])
+
+  const shownChat =
+    selDay === ALL_DATES ? chatMessages : chatMessages.filter((m) => convoDayKey(m.createdAt) === selDay)
+  const chipCls = (active: boolean) =>
+    `px-2 py-0.5 rounded-md text-[11px] whitespace-nowrap border transition-colors ${
+      active ? "bg-gray-900 text-white border-gray-900" : "border-gray-300 text-gray-600 hover:bg-gray-50"
+    }`
+  const fmtChip = (k: string) =>
+    new Date(`${k}T00:00:00`).toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" })
+
   return (
     <div className="p-6 space-y-6">
-      {/* full conversation (oldest→newest, full text) */}
+      {/* full conversation — date jump (newest first, default newest day), then turns */}
       {hasChat && (
         <div className="space-y-3">
           <div className="text-[11px] font-semibold text-gray-900">
             {t("admin.customers.followUp.fullChat")}
           </div>
-          {chatMessages.map((m) => (
+          {days.length > 1 && (
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+              <button onClick={() => setSelDay(ALL_DATES)} className={chipCls(selDay === ALL_DATES)}>
+                {t("admin.customers.followUp.allDates")}
+              </button>
+              {days.map((d) => (
+                <button key={d} onClick={() => setSelDay(d)} className={chipCls(selDay === d)}>
+                  {fmtChip(d)}
+                </button>
+              ))}
+            </div>
+          )}
+          {shownChat.map((m) => (
             <div key={m.id} className="flex gap-2.5 text-[12px]">
               <span className="flex-shrink-0 text-[10px] text-gray-400 w-10 pt-0.5">
                 {m.createdAt.toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" })}

@@ -301,6 +301,25 @@ export const WRITE_TOOLS: Anthropic.Tool[] = [
       required: ["email"],
     },
   },
+  {
+    name: "set_follow_up_date",
+    description:
+      "設定或清除『目前這位客人』的跟進日(只對釘住的這位客人生效)。Jeff 說「跟進日設下週三」" +
+      "「下週五跟進他」「三天後提醒我跟進」「月底跟進」時用這個。把相對講法用系統給的【今天日期】" +
+      "換算成絕對日期 YYYY-MM-DD,換算後自己核對星期對不對;清除就傳 clear=true。設定後跟進日會顯示" +
+      "在客戶頁真相條,到日當天跳『今天該跟進』。設完用一句話跟 Jeff 確認(設了哪天 / 已清除)。",
+    input_schema: {
+      type: "object",
+      properties: {
+        followUpDate: {
+          type: "string",
+          description: "跟進日 YYYY-MM-DD(從【今天日期】把『下週三/三天後/月底』換算成絕對日期)。清除時免填。",
+        },
+        clear: { type: "boolean", description: "true = 清除這位客人的跟進日" },
+      },
+      required: [],
+    },
+  },
 ];
 
 export const CREATE_CUSTOMER_TOOL: Anthropic.Tool = {
@@ -1014,6 +1033,27 @@ async function runTool(name: string, input: any): Promise<unknown> {
 
 // ── Write tool executor ───────────────────────────────────────────────────
 
+/**
+ * Pure validator for set_follow_up_date input. `clear:true` → null (clear);
+ * otherwise `followUpDate` must be a REAL YYYY-MM-DD calendar day (rejects e.g.
+ * 2026-02-30). Returned errors are fed back to the model as a tool_result so it
+ * can correct itself (e.g. recompute the date) without a hard failure. Pure so
+ * the date guard is unit-tested without a DB (local has no DATABASE_URL).
+ */
+export function resolveFollowUpDateArg(
+  input: { followUpDate?: unknown; clear?: unknown } | null | undefined,
+): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (input?.clear === true) return { ok: true, value: null };
+  const raw = typeof input?.followUpDate === "string" ? input.followUpDate.trim() : "";
+  if (!raw) return { ok: false, error: "需要 followUpDate(YYYY-MM-DD),或傳 clear=true 清除" };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw))
+    return { ok: false, error: `日期格式要 YYYY-MM-DD,收到「${raw}」` };
+  const d = new Date(`${raw}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== raw)
+    return { ok: false, error: `不是有效日期:${raw}` };
+  return { ok: true, value: raw };
+}
+
 export async function executeWriteTool(
   name: string,
   input: any,
@@ -1101,6 +1141,22 @@ async function runWriteTool(
       log.info({ email: cEmail, ok: r.ok }, "collect_customer_threads executed");
       if (!r.ok) return { error: r.summary || r.error || "收進失敗" };
       return { success: true, message: r.summary, details: r.details };
+    }
+
+    case "set_follow_up_date": {
+      if (!profileId) return { error: "no customer selected" };
+      const parsed = resolveFollowUpDateArg(input);
+      if (!parsed.ok) return { error: parsed.error };
+      await db
+        .update(customerProfiles)
+        .set({ followUpDate: parsed.value })
+        .where(eq(customerProfiles.id, profileId));
+      log.info({ profileId, followUpDate: parsed.value }, "set_follow_up_date executed");
+      return {
+        success: true,
+        followUpDate: parsed.value,
+        message: parsed.value ? `跟進日設為 ${parsed.value}` : "跟進日已清除",
+      };
     }
 
     default:

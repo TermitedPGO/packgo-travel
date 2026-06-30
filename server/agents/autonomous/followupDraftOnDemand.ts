@@ -16,7 +16,7 @@ import {
   buildConversationExcerpt,
   detectDraftSkip,
   pickGmailThreadId,
-  detectLanguage,
+  detectCustomerLanguage,
   buildFollowupDraftRow,
   pickFollowupVariant,
   type InteractionDetailRow,
@@ -87,7 +87,7 @@ export async function produceFollowupDraftForProfile(
   const promptVariant = pickFollowupVariant();
   const drafterInput: FollowupDrafterInput = {
     daysSince,
-    language: detectLanguage(rows[0]?.content ?? null),
+    language: detectCustomerLanguage(rows),
     conversationExcerpt: excerpt,
     promptVariant,
   };

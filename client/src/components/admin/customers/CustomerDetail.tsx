@@ -127,62 +127,33 @@ export default function CustomerDetail({ customer, chatMessages = [] }: { custom
           </>
         )}
 
-        {/* 客人跟進日 (Q4-A) — set/clear + due indicator, pushed to the right */}
-        <div className="ml-auto flex items-center gap-1.5">
-          {c.followup.followUpDate ? (
-            <>
-              {c.followup.isDue ? (
-                <span className="px-1.5 py-0.5 rounded-md font-medium bg-gray-900 text-white inline-flex items-center gap-1">
-                  <CalendarClock className="w-3 h-3" />
-                  {t("admin.customers.followup.dueToday")}
-                </span>
-              ) : (
-                <span className="text-gray-500 inline-flex items-center gap-1">
-                  <CalendarClock className="w-3 h-3" />
-                  {t("admin.customers.followup.scheduled", { date: c.followup.followUpDate })}
-                </span>
-              )}
-              <input
-                type="date"
-                value={c.followup.followUpDate}
-                disabled={setFollowUp.isPending}
-                onChange={(e) =>
-                  setFollowUp.mutate(
-                    e.target.value
-                      ? { ...sel, followUpDate: e.target.value }
-                      : { ...sel, followUpDate: null },
-                  )
-                }
-                aria-label={t("admin.customers.followup.setDate")}
-                className="rounded-lg border border-gray-300 px-1.5 py-0.5 text-[11px] text-gray-700 hover:bg-gray-50 disabled:opacity-40"
-              />
-              <button
-                onClick={() => setFollowUp.mutate({ ...sel, followUpDate: null })}
-                disabled={setFollowUp.isPending}
-                title={t("admin.customers.followup.clearDate")}
-                aria-label={t("admin.customers.followup.clearDate")}
-                className="p-1 rounded-lg border border-gray-300 text-gray-500 hover:bg-gray-50 transition-colors disabled:opacity-40"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            </>
-          ) : (
-            <label className="inline-flex items-center gap-1 text-gray-500 hover:text-gray-700 cursor-pointer">
-              <CalendarClock className="w-3 h-3" />
-              {t("admin.customers.followup.setDate")}
-              <input
-                type="date"
-                disabled={setFollowUp.isPending}
-                onChange={(e) =>
-                  e.target.value &&
-                  setFollowUp.mutate({ ...sel, followUpDate: e.target.value })
-                }
-                aria-label={t("admin.customers.followup.setDate")}
-                className="rounded-lg border border-gray-300 px-1.5 py-0.5 text-[11px] text-gray-700 hover:bg-gray-50 disabled:opacity-40"
-              />
-            </label>
-          )}
-        </div>
+        {/* 客人跟進日 (Q4-A) — display + quick clear only. 設定改由右欄 ops AI chat
+            打字(例「跟進日設下週三」),AI 解析後寫入 → 真相條這裡浮出。刻意不放原生
+            date picker(Jeff:不要 default ui/ux)。未設時不顯示任何控制項。 */}
+        {c.followup.followUpDate && (
+          <div className="ml-auto flex items-center gap-1.5">
+            {c.followup.isDue ? (
+              <span className="px-1.5 py-0.5 rounded-md font-medium bg-gray-900 text-white inline-flex items-center gap-1">
+                <CalendarClock className="w-3 h-3" />
+                {t("admin.customers.followup.dueToday")}
+              </span>
+            ) : (
+              <span className="text-gray-500 inline-flex items-center gap-1">
+                <CalendarClock className="w-3 h-3" />
+                {t("admin.customers.followup.scheduled", { date: c.followup.followUpDate })}
+              </span>
+            )}
+            <button
+              onClick={() => setFollowUp.mutate({ ...sel, followUpDate: null })}
+              disabled={setFollowUp.isPending}
+              title={t("admin.customers.followup.clearDate")}
+              aria-label={t("admin.customers.followup.clearDate")}
+              className="p-1 rounded-lg border border-gray-300 text-gray-500 hover:bg-gray-50 transition-colors disabled:opacity-40"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Tab bar */}

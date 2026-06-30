@@ -196,6 +196,16 @@ export function buildSystem(variant: FollowupPromptVariant = FOLLOWUP_PROMPT_DEF
   return variant === "A" ? SYSTEM_V1_BASELINE : SYSTEM_V2_DISTILLED;
 }
 
+/** Forceful, unambiguous reply-language directive. The system prompt is written
+ * in Chinese, which biases the model toward Chinese output even when the customer
+ * wrote in English, so we restate the target language as a hard instruction in
+ * the customer's own language. Shared by both A/B arms → no bake-off bias. */
+const LANGUAGE_DIRECTIVE: Record<FollowupDraftLanguage, string> = {
+  "zh-TW": "【回信語言】整封信務必用繁體中文撰寫。",
+  "zh-CN": "【回信语言】整封信务必用简体中文撰写。",
+  en: "【Reply language】Write the ENTIRE reply in English. The customer wrote to us in English, so reply in English, not Chinese.",
+};
+
 export function buildUserPrompt(input: FollowupDrafterInput): string {
   const convo =
     input.conversationExcerpt.length > 0
@@ -208,7 +218,7 @@ export function buildUserPrompt(input: FollowupDrafterInput): string {
     input.customerName ? `【客人】${input.customerName}` : null,
     input.lastSubject ? `【主旨】${input.lastSubject}` : null,
     `【已靜默】${input.daysSince} 天`,
-    `【語言】${input.language}`,
+    LANGUAGE_DIRECTIVE[input.language],
     `【真實往來(舊到新;從這裡看 Jeff 怎麼稱呼客人、有哪些還沒決定的事)】\n${convo}`,
   ]
     .filter(Boolean)

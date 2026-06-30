@@ -3459,6 +3459,7 @@ export const en = {
         expandAll: 'Expand all {n}',
         collapse: 'Collapse',
         fullChat: 'Full conversation',
+        allDates: 'All',
         events: 'Events',
         noHistory: 'No history yet',
       },

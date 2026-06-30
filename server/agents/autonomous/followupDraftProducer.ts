@@ -101,6 +101,27 @@ export function detectLanguage(text: string | null | undefined): FollowupDraftLa
   return "zh-TW";
 }
 
+/**
+ * Language to REPLY in = the CUSTOMER's language, i.e. the most recent INBOUND
+ * turn's language. detectLanguage(rows[0]) alone is wrong for follow-ups: rows
+ * are newest-first and the newest turn is usually OUR outbound (the quote we
+ * sent), so a customer who wrote in English but got a Chinese reply from us
+ * would be drafted to in Chinese. Scan newest-first for the latest inbound turn;
+ * fall back to the newest turn, then zh-TW (detectLanguage handles null).
+ */
+export function detectCustomerLanguage(
+  rowsNewestFirst: Array<Pick<InteractionDetailRow, "direction" | "content" | "contentSummary">>,
+): FollowupDraftLanguage {
+  const lastInbound = rowsNewestFirst.find((r) => r.direction === "inbound");
+  const source =
+    lastInbound?.content?.trim() ||
+    lastInbound?.contentSummary?.trim() ||
+    rowsNewestFirst[0]?.content?.trim() ||
+    rowsNewestFirst[0]?.contentSummary?.trim() ||
+    null;
+  return detectLanguage(source);
+}
+
 /** Why this stale customer is NOT draftable (→ falls back to inbox reminder),
  * or null when a draft should be produced. */
 export function detectDraftSkip(input: {
@@ -263,7 +284,7 @@ export async function runFollowupDraftScan(
       const promptVariant = pickFollowupVariant();
       const drafterInput: FollowupDrafterInput = {
         daysSince: c.daysSince,
-        language: detectLanguage(rows[0]?.content ?? null),
+        language: detectCustomerLanguage(rows),
         conversationExcerpt: excerpt,
         promptVariant,
       };

@@ -192,6 +192,7 @@ export async function* runOpsAgentStream(
       (draftProfileId != null
         ? "\n【要回信 / 跟進這位客人 — 直接備好草稿】當 Jeff 叫你回信 / 跟進 / 幫忙寫信給「目前這位客人」,呼叫 draft_followup 把專業跟進信草稿備好(它會出現在客戶頁待審草稿區,看過一鍵就能寄)。呼叫後只要用一兩句話跟 Jeff 說重點(誰、卡在哪、幾天沒回),不要自己把整封信長篇寫在聊天裡。" +
           "\n【說了就做 — 寫入工具】你有 update_customer_note 和 update_booking_status 兩個寫入工具。Jeff 說「備註加上…」「標記已付款」「這筆確認了」時,直接呼叫對應工具執行,不用再問確認。但碰錢的變更(退款、調價)和寄信給客人的,仍然走 suggest_action 或 draft_followup 讓 Jeff 審核。update_customer_note 改的是 Jeff 私人備忘(客人看不到)。update_booking_status 要先用 search_bookings 拿到 bookingId。" +
+          "\n【跟進日 — 說了就設】Jeff 說「跟進日設下週三」「下週五跟進他」「三天後提醒我跟進」「月底跟進」時,用上面【今天日期】把相對講法換算成絕對日期 YYYY-MM-DD(換算後自己核對星期對不對),呼叫 set_follow_up_date 直接設好(不用再問確認)。要清除就傳 clear=true。設定後跟進日會顯示在客戶頁真相條,到日當天跳「今天該跟進」。設完用一句話跟 Jeff 確認設了哪天。" +
           "\n【收 / 歸檔這位客人 — 直接做完報結果】Jeff 在這位客人的對話框說「收」「收進來」「歸檔他的記錄」時,直接呼叫 collect_customer_threads(email = 目前這位客人的 email),它會把這個 email 的 Gmail 往來全收進他的檔案。收完用一句話報結果(收了幾條、新增幾條)。**這個對話框沒有可點的按鈕,絕對不要叫 Jeff『點上面那個按鈕』或說『按鈕出來了』** — 你就是執行的人,收完直接報數字。工具失敗就老實說「系統忙,稍後再試」,不要假裝收好了。"
         : "");
     const dynamicSystem =
