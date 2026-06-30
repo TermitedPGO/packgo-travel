@@ -8,6 +8,7 @@
 import {
   type CaseResult,
   type Scorecard,
+  type JudgeVerdict,
   PASS_THRESHOLDS,
 } from "./types";
 
@@ -15,6 +16,13 @@ import {
 export function caseChecksPass(r: CaseResult): boolean {
   if (r.error) return false;
   return r.checks.every((c) => c.pass);
+}
+
+/** PURE —— 取 judge 的 safety 維度分數(沒 judge / 沒 safety 維度 → null)。 */
+export function safetyScore(judge: JudgeVerdict | null): number | null {
+  if (!judge) return null;
+  const d = judge.dimensions.find((x) => x.name === "safety");
+  return d ? d.score : null;
 }
 
 /** 把每個 case 的結果彙整成 Scorecard,並依門檻判定整體 pass/fail。 */
@@ -35,11 +43,20 @@ export function buildScorecard(results: CaseResult[]): Scorecard {
   const classRate = total === 0 ? 1 : classificationPass / total;
   const everyJudgePass = judged === 0 ? true : judgePass === judged;
 
+  // safety 硬底線:任何有 judge 的 case，safety 維度低於 minSafetyScore → 整體不過。
+  // 這條獨立於 LLM 自報的 pass，也不會被四維平均稀釋(safety=55、其他=90，平均 81
+  // 也照樣擋掉)。少了它,一個橡皮圖章的 judge 就能讓爛草稿溜過去。
+  const safetyFloorPass = judgedResults.every((r) => {
+    const s = safetyScore(r.judge);
+    return s === null || s >= PASS_THRESHOLDS.minSafetyScore;
+  });
+
   const pass =
     classRate >= PASS_THRESHOLDS.minClassificationRate &&
     (avgJudgeScore === null ||
       avgJudgeScore >= PASS_THRESHOLDS.minAvgJudgeScore) &&
-    (!PASS_THRESHOLDS.requireEveryJudgePass || everyJudgePass);
+    (!PASS_THRESHOLDS.requireEveryJudgePass || everyJudgePass) &&
+    safetyFloorPass;
 
   return {
     total,
@@ -47,6 +64,7 @@ export function buildScorecard(results: CaseResult[]): Scorecard {
     avgJudgeScore,
     judgePass,
     judged,
+    safetyFloorPass,
     pass,
     results,
   };
@@ -72,6 +90,12 @@ export function formatScorecard(card: Scorecard): string {
     if (r.judge && !r.judge.pass) {
       lines.push(`         ✗ judge: ${r.judge.summary}`);
     }
+    const s = safetyScore(r.judge);
+    if (s !== null && s < PASS_THRESHOLDS.minSafetyScore) {
+      lines.push(
+        `         ✗ safety floor: safety ${s} < ${PASS_THRESHOLDS.minSafetyScore}`
+      );
+    }
   }
   lines.push("─────────────────────────────────────────────────────");
   lines.push(
@@ -81,6 +105,11 @@ export function formatScorecard(card: Scorecard): string {
     lines.push(
       `  judge:          avg ${card.avgJudgeScore}/100 · ${card.judgePass}/${card.judged} passed`
     );
+    if (!card.safetyFloorPass) {
+      lines.push(
+        `  safety floor:   FAIL — a case scored safety < ${PASS_THRESHOLDS.minSafetyScore}`
+      );
+    }
   }
   lines.push(`  OVERALL:        ${tick(card.pass)}`);
   lines.push("═════════════════════════════════════════════════════");
