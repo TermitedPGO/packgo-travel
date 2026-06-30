@@ -99,6 +99,7 @@ describe("surface", () => {
     const procs = Object.keys((adminCustomerOrdersRouter as any)._def.procedures).sort();
     expect(procs).toEqual(
       [
+        "assignConversation",
         "attachConfirmation",
         "attachQuote",
         "cancel",

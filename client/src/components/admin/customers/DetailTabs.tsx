@@ -4,12 +4,15 @@ import {
   CircleDot, CircleAlert, TriangleAlert, CircleX,
   Circle, Clock, MessageSquare, Calendar, HelpCircle, Bot,
   Download, Plane, Plus, RefreshCw, Sparkles, Loader2,
+  Inbox, FolderInput,
 } from "lucide-react"
+import { toast } from "sonner"
 import { useLocale } from "@/contexts/LocaleContext"
 import { trpc } from "@/lib/trpc"
-import type { AdaptedCustomer, ChecklistItem, TimelineEntry, ChatMessage } from "./types"
+import type { AdaptedCustomer, ChecklistItem, TimelineEntry, ChatMessage, Project } from "./types"
 import CustomOrderSheet from "./CustomOrderSheet"
 import { toSelection, fmtMoney, shortDate } from "./customOrderHelpers"
+import { stripQuotedReply } from "./conversationText"
 
 const CHECKLIST_ICON: Record<ChecklistItem["s"], React.ReactNode> = {
   done: <CheckCircle2 className="w-3.5 h-3.5 text-gray-900" />,
@@ -363,7 +366,7 @@ export function OverviewTab({ customer: c, chatMessages }: { customer: AdaptedCu
   )
 }
 
-function CustomOrdersSection({ customer: c }: { customer: AdaptedCustomer }) {
+function CustomOrdersSection({ customer: c, activeProjectId }: { customer: AdaptedCustomer; activeProjectId?: number | null }) {
   const { t } = useLocale()
   const k = (s: string) => t(`admin.customers.order.${s}`)
   const [sheet, setSheet] = useState<{ open: boolean }>({ open: false })
@@ -392,7 +395,9 @@ function CustomOrdersSection({ customer: c }: { customer: AdaptedCustomer }) {
             <button
               key={o.id}
               onClick={() => setSheet({ open: true })}
-              className="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-50 transition-colors"
+              className={`w-full flex items-center gap-3 p-3 text-left transition-colors ${
+                o.id === activeProjectId ? "bg-gray-50" : "hover:bg-gray-50"
+              }`}
             >
               <div className="flex-1 min-w-0">
                 <div className="text-[12px] font-medium text-gray-900 truncate">
@@ -421,7 +426,14 @@ function CustomOrdersSection({ customer: c }: { customer: AdaptedCustomer }) {
   )
 }
 
-export function OrdersTab({ customer: c }: { customer: AdaptedCustomer }) {
+export function OrdersTab({
+  customer: c,
+  activeProjectId,
+}: {
+  customer: AdaptedCustomer
+  activeProjectId?: number | null
+  onSelectProject?: (id: number | null) => void
+}) {
   const { t } = useLocale()
   const statusLabel = (s: string) =>
     s === "paid" ? t("admin.customers.payment.paid")
@@ -429,7 +441,7 @@ export function OrdersTab({ customer: c }: { customer: AdaptedCustomer }) {
         : t("admin.customers.payment.unpaid")
   return (
     <div className="p-6 space-y-6">
-      <CustomOrdersSection customer={c} />
+      <CustomOrdersSection customer={c} activeProjectId={activeProjectId} />
       {c.orders.length > 0 && (
       <table className="w-full text-[12px]">
         <thead>
@@ -521,34 +533,142 @@ const ALL_DATES = "__all__"
 /** Local calendar day key (YYYY-MM-DD) for grouping conversation turns by date. */
 const convoDayKey = (d: Date) => d.toLocaleDateString("en-CA")
 
-export function TimelineTab({ customer: c, chatMessages = [] }: { customer: AdaptedCustomer; chatMessages?: ChatMessage[] }) {
+/** customer-projects (0104) — the per-message「歸到專案 / 退回未分類」control.
+ *  Only rendered on real-conversation (customerInteractions) rows. Files the
+ *  whole Gmail thread when a threadId is present (the natural unit), else the
+ *  single row. Inline chips (no overlay) keep it robust inside the scroll area. */
+function AssignControl({
+  customer: c,
+  projects,
+  assign,
+}: {
+  customer: AdaptedCustomer
+  projects: Project[]
+  assign: NonNullable<ConvoMsg["assign"]>
+}) {
   const { t } = useLocale()
-  const hasChat = chatMessages.length > 0
+  const utils = trpc.useUtils()
+  const sel = toSelection(c)
+  const [open, setOpen] = useState(false)
+  const assignM = trpc.customerOrders.assignConversation.useMutation({
+    onSuccess: () => {
+      toast.success(t("admin.customers.projects.assigned"))
+      void utils.admin.customerConversationThread.invalidate()
+      void utils.customerOrders.listForCustomer.invalidate(sel)
+      setOpen(false)
+    },
+    onError: () => toast.error(t("admin.customers.projects.assignFailed")),
+  })
+  const go = (orderId: number | null) =>
+    assignM.mutate({
+      selection: sel,
+      orderId,
+      gmailThreadId: assign.gmailThreadId ?? undefined,
+      interactionId: assign.interactionId,
+    })
+  const targets = projects.filter((p) => p.id !== assign.customOrderId)
+
+  return (
+    <div className="mt-1">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="text-[10px] text-gray-400 hover:text-gray-700 inline-flex items-center gap-1 transition-colors"
+      >
+        <FolderInput className="w-3 h-3" />
+        {t("admin.customers.projects.assignTo")}
+      </button>
+      {open && (
+        <div className="flex flex-wrap gap-1 mt-1">
+          {targets.map((p) => (
+            <button
+              key={p.id}
+              disabled={assignM.isPending}
+              onClick={() => go(p.id)}
+              className="text-[10px] px-1.5 py-0.5 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
+            >
+              {p.title}
+            </button>
+          ))}
+          {assign.customOrderId !== null && (
+            <button
+              disabled={assignM.isPending}
+              onClick={() => go(null)}
+              className="text-[10px] px-1.5 py-0.5 rounded-md border border-dashed border-gray-300 text-gray-500 hover:bg-gray-50 inline-flex items-center gap-1 transition-colors disabled:opacity-50"
+            >
+              <Inbox className="w-2.5 h-2.5" />
+              {t("admin.customers.projects.backToUnfiled")}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+type ConvoMsg = {
+  id: string
+  senderRole: "customer" | "jeff"
+  body: string
+  createdAt: Date
+  assign?: { interactionId: number; gmailThreadId: string | null; customOrderId: number | null }
+}
+
+export function TimelineTab({
+  customer: c,
+  projects = [],
+  activeProjectId = null,
+}: {
+  customer: AdaptedCustomer
+  /** kept for call-site compat; the tab now reads its own project-scoped query. */
+  chatMessages?: ChatMessage[]
+  projects?: Project[]
+  activeProjectId?: number | null
+}) {
+  const { t } = useLocale()
+  const sel = toSelection(c)
+  // customer-projects (0104) — own query, scoped to the active project. A
+  // project → that order's filed turns; 未分類 → unfiledOnly (IS NULL) basket.
+  const scope = activeProjectId !== null ? { orderId: activeProjectId } : { unfiledOnly: true }
+  const threadInput =
+    "userId" in sel
+      ? { userId: sel.userId, limit: 200, ...scope }
+      : { profileId: sel.profileId, limit: 200, ...scope }
+  const threadQ = trpc.admin.customerConversationThread.useQuery(threadInput)
+
+  const messages = useMemo<ConvoMsg[]>(
+    () =>
+      (threadQ.data?.messages ?? []).map((m) => ({
+        id: m.id,
+        senderRole: m.senderRole,
+        body: stripQuotedReply(m.body),
+        createdAt: new Date(m.createdAt),
+        assign: m.assign,
+      })),
+    [threadQ.data],
+  )
+  const hasChat = messages.length > 0
   const hasEvents = c.timeline.length > 0
 
-  // Distinct conversation days, newest first, for the date jump. chatMessages is
-  // oldest→newest so we reverse. Default lands on the newest day (Jeff:默認最新的先);
-  // 「全部」shows the whole thread in natural oldest→newest reading order.
+  // Distinct conversation days, newest first, for the date jump.
   const days = useMemo(() => {
     const seen = new Set<string>()
     const out: string[] = []
-    for (const m of chatMessages) {
+    for (const m of messages) {
       const k = convoDayKey(m.createdAt)
       if (!seen.has(k)) { seen.add(k); out.push(k) }
     }
     return out.reverse()
-  }, [chatMessages])
+  }, [messages])
 
   const [selDay, setSelDay] = useState<string>(ALL_DATES)
-  // Land on the newest day whenever the customer changes (默認最新的先). Keyed on
-  // c.id only, so Jeff's manual date pick survives a new incoming message.
+  // Land on the newest day when the customer OR the active project changes.
   useEffect(() => {
     setSelDay(days[0] ?? ALL_DATES)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [c.id])
+  }, [c.id, activeProjectId])
 
   const shownChat =
-    selDay === ALL_DATES ? chatMessages : chatMessages.filter((m) => convoDayKey(m.createdAt) === selDay)
+    selDay === ALL_DATES ? messages : messages.filter((m) => convoDayKey(m.createdAt) === selDay)
   const chipCls = (active: boolean) =>
     `px-2 py-0.5 rounded-md text-[11px] whitespace-nowrap border transition-colors ${
       active ? "bg-gray-900 text-white border-gray-900" : "border-gray-300 text-gray-600 hover:bg-gray-50"
@@ -586,6 +706,7 @@ export function TimelineTab({ customer: c, chatMessages = [] }: { customer: Adap
                   {m.senderRole === "jeff" ? t("admin.customers.followUp.me") : c.name}
                 </span>
                 <p className="text-gray-600 mt-0.5 whitespace-pre-wrap break-words">{m.body}</p>
+                {m.assign && <AssignControl customer={c} projects={projects} assign={m.assign} />}
               </div>
             </div>
           ))}

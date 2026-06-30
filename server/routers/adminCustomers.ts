@@ -1414,11 +1414,16 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
           .object({
             userId: z.number().int().positive(),
             limit: z.number().int().min(1).max(200).optional(),
-            // customer-projects (0104) — scope to one project. Set → only that
-            // project's filed Gmail/email turns (inquiries/inquiryMessages are
-            // hidden: first-contact predates any order). Omitted → the「未分類」
-            // view (interactions with customOrderId IS NULL) + inquiries.
+            // customer-projects (0104) — three views:
+            //   orderId set     → that project only (inquiries hidden, they
+            //                     predate any order).
+            //   unfiledOnly     → the「未分類」basket (customOrderId IS NULL) +
+            //                     inquiries.
+            //   neither         → customer-wide ALL (every interaction +
+            //                     inquiries) — Overview / 真相條 / followup read
+            //                     this, so it must stay whole.
             orderId: z.number().int().positive().optional(),
+            unfiledOnly: z.boolean().optional(),
           })
           .strict(),
         z
@@ -1426,6 +1431,7 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
             profileId: z.number().int().positive(),
             limit: z.number().int().min(1).max(200).optional(),
             orderId: z.number().int().positive().optional(),
+            unfiledOnly: z.boolean().optional(),
           })
           .strict(),
       ]),
@@ -1547,12 +1553,18 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
       // shows, outbound (classification NULL) is never hidden.
       let interactionTurns: ThreadTurn[] = [];
       if (profileIds.length > 0) {
-        // customer-projects (0104) — project view: this order's turns;
-        // 未分類 view: only unassigned (customOrderId IS NULL).
-        const orderFilter =
-          input.orderId !== undefined
-            ? eq(customerInteractions.customOrderId, input.orderId)
-            : isNull(customerInteractions.customOrderId);
+        // customer-projects (0104) — three views (see input schema):
+        //   project (orderId) → that order; 未分類 (unfiledOnly) → IS NULL;
+        //   neither → no customOrderId filter (customer-wide ALL).
+        const conds = [
+          inArray(customerInteractions.customerProfileId, profileIds),
+          sql`NOT (COALESCE(${customerInteractions.classification}, '') = 'spam' AND COALESCE(${customerInteractions.spamVerdict}, '') != 'rescued')`,
+        ];
+        if (input.orderId !== undefined) {
+          conds.push(eq(customerInteractions.customOrderId, input.orderId));
+        } else if (input.unfiledOnly) {
+          conds.push(isNull(customerInteractions.customOrderId));
+        }
         const interactions = await drizzleDb
           .select({
             id: customerInteractions.id,
@@ -1563,13 +1575,7 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
             customOrderId: customerInteractions.customOrderId,
           })
           .from(customerInteractions)
-          .where(
-            and(
-              inArray(customerInteractions.customerProfileId, profileIds),
-              orderFilter,
-              sql`NOT (COALESCE(${customerInteractions.classification}, '') = 'spam' AND COALESCE(${customerInteractions.spamVerdict}, '') != 'rescued')`,
-            ),
-          )
+          .where(and(...conds))
           .orderBy(desc(customerInteractions.createdAt))
           .limit(lim);
         interactionTurns = interactions.map(interactionTurn);
