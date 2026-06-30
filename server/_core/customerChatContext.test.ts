@@ -425,6 +425,7 @@ describe("buildGuestChatContext (guest-customer-chat)", () => {
 const ORDER: OrderContextData = {
   orderNumber: "ORD-2026-0142",
   title: "北京來回機票",
+  category: "flight",
   status: "deposit_paid",
   destination: "北京",
   departureDate: "2026-07-04",
@@ -448,6 +449,11 @@ describe("formatOrderContext", () => {
     expect(block).toContain("2026-07-04");
     expect(block).toContain("只談這一單");
     expect(block).toContain("客人其他訂單不在此脈絡內");
+  });
+
+  it("shows the 總類 label when set, omits it when null (0105)", () => {
+    expect(formatOrderContext(ORDER)).toContain("總類:機票");
+    expect(formatOrderContext({ ...ORDER, category: null })).not.toContain("總類");
   });
 
   it("shows sell price + received, NEVER supplierCost", () => {
@@ -497,6 +503,7 @@ describe("buildOrderContextBlock", () => {
           {
             orderNumber: "ORD-2026-0142",
             title: "北京來回機票",
+            category: "flight",
             status: "deposit_paid",
             destination: "北京",
             departureDate: "2026-07-04",
@@ -515,6 +522,7 @@ describe("buildOrderContextBlock", () => {
     );
     const block = await buildOrderContextBlock(142);
     expect(block).toContain("ORD-2026-0142");
+    expect(block).toContain("總類:機票");
     expect(block).toContain("已歸入 2 則往來");
     expect(block).toContain("售價 USD 4,015");
   });

@@ -379,6 +379,7 @@ export function useCustomerData(
         id: o.id,
         orderNumber: o.orderNumber,
         title: o.title,
+        category: o.category,
         status: o.status,
         departureDate: o.departureDate,
       })),

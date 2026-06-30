@@ -715,6 +715,13 @@
 			"when": 1781570000000,
 			"tag": "0104_customer_projects",
 			"breakpoints": true
+		},
+		{
+			"idx": 105,
+			"version": "5",
+			"when": 1781580000000,
+			"tag": "0105_project_category",
+			"breakpoints": true
 		}
 	]
 }

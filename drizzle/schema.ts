@@ -2387,6 +2387,13 @@ export const customOrders = mysqlTable("customOrders", {
   // 行程
   title: varchar("title", { length: 200 }).notNull(),
   destination: varchar("destination", { length: 200 }),
+  // customer-projects (0105) — 總類: what KIND of case this project is
+  // (flight / quote / visa / general), so each project reads 時間·總類·幹嘛.
+  // A coordinator like Emerald (AXT) sends many different cases under one inbox;
+  // the category lets Jeff tell them apart at a glance. varchar (not enum) so
+  // categories can be added without a migration — the UI offers a fixed set of
+  // keys mapped to i18n labels. NULL = 未標.
+  category: varchar("category", { length: 32 }),
   // string mode ("YYYY-MM-DD") — pure calendar dates, no tz games.
   departureDate: date("departureDate", { mode: "string" }),
   returnDate: date("returnDate", { mode: "string" }),

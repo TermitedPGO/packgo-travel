@@ -9,7 +9,7 @@ import {
 import { useLocale } from "@/contexts/LocaleContext"
 import { trpc } from "@/lib/trpc"
 import type { AdaptedCustomer } from "./types"
-import { toSelection, num, suggestedDeposit, uploadPdfViaPresign } from "./customOrderHelpers"
+import { toSelection, num, suggestedDeposit, uploadPdfViaPresign, type ProjectCategory } from "./customOrderHelpers"
 import CustomOrderFields, {
   PdfDrop,
   emptyForm,
@@ -89,6 +89,7 @@ export default function CustomOrderSheet({
   const buildCreateInput = (titleOverride?: string) => ({
     selection: sel,
     title: titleOverride ?? form.title.trim(),
+    category: (form.category || undefined) as ProjectCategory | undefined,
     destination: form.destination.trim() || undefined,
     needsQuote: form.needsQuote,
     totalPrice: num(form.totalPrice) ?? undefined,

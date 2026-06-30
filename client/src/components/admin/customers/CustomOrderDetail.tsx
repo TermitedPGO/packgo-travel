@@ -15,6 +15,7 @@ import {
   todayLocal,
   localDateAtNoon,
   uploadPdfViaPresign,
+  type ProjectCategory,
 } from "./customOrderHelpers"
 
 type Order = NonNullable<RouterOutputs["customerOrders"]["get"]>
@@ -125,6 +126,7 @@ export default function CustomOrderDetail({
     update.mutate({
       orderId: order.id,
       title: form.title.trim() || order.title,
+      category: (form.category || null) as ProjectCategory | null,
       destination: form.destination.trim() || null,
       departureDate: form.departureDate || null,
       returnDate: form.returnDate || null,

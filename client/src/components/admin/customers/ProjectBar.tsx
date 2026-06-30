@@ -89,17 +89,36 @@ export default function ProjectBar({
             key={p.id}
             onClick={() => onSelect(p.id)}
             onDoubleClick={() => active && startEdit(p)}
-            title={p.departureDate ? shortDate(p.departureDate) : t("admin.customers.projects.renameHint")}
-            className={`${chip} ${
+            title={
+              [
+                p.departureDate ? shortDate(p.departureDate) : null,
+                p.category ? t(`admin.customers.projects.category.${p.category}`) : null,
+                t("admin.customers.projects.renameHint"),
+              ]
+                .filter(Boolean)
+                .join(" · ")
+            }
+            className={`${chip} inline-flex items-center gap-1.5 ${
               active
                 ? "bg-gray-900 text-white"
                 : "border border-gray-300 text-gray-600 hover:bg-gray-50"
             }`}
           >
-            <span className={`mr-1.5 ${active ? "text-gray-500" : "text-gray-400"}`}>
-              {p.orderNumber}
+            {p.category && (
+              <span
+                className={`text-[10px] px-1 py-px rounded ${
+                  active ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500"
+                }`}
+              >
+                {t(`admin.customers.projects.category.${p.category}`)}
+              </span>
+            )}
+            <span>
+              <span className={`mr-1.5 ${active ? "text-gray-400" : "text-gray-400"}`}>
+                {p.orderNumber}
+              </span>
+              {p.title}
             </span>
-            {p.title}
           </button>
         )
       })}

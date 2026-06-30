@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { Upload, Loader2 } from "lucide-react"
 import { useLocale } from "@/contexts/LocaleContext"
-import { shortDate } from "./customOrderHelpers"
+import { shortDate, PROJECT_CATEGORY_KEYS } from "./customOrderHelpers"
 
 // Controlled trip/money fields, shared by the create form (CustomOrderSheet)
 // and the edit form (CustomOrderDetail). All money as plain strings; the parent
@@ -10,6 +10,8 @@ import { shortDate } from "./customOrderHelpers"
 
 export type OrderFormState = {
   title: string
+  /** 總類 key (flight/quote/visa/general) or "" = 未標 (0105). */
+  category: string
   destination: string
   departureDate: string
   returnDate: string
@@ -24,6 +26,7 @@ export type OrderFormState = {
 export function emptyForm(): OrderFormState {
   return {
     title: "",
+    category: "",
     destination: "",
     departureDate: "",
     returnDate: "",
@@ -38,6 +41,7 @@ export function emptyForm(): OrderFormState {
 
 export function formFromOrder(o: {
   title: string
+  category: string | null
   destination: string | null
   departureDate: string | null
   returnDate: string | null
@@ -50,6 +54,7 @@ export function formFromOrder(o: {
 }): OrderFormState {
   return {
     title: o.title,
+    category: o.category ?? "",
     destination: o.destination ?? "",
     departureDate: shortDate(o.departureDate),
     returnDate: shortDate(o.returnDate),
@@ -141,6 +146,27 @@ export default function CustomOrderFields({
           placeholder={k("fldTitlePh")}
           onChange={(e) => onChange({ title: e.target.value })}
         />
+      </Field>
+      <Field label={k("fldCategory")}>
+        <div className="flex flex-wrap gap-1.5">
+          {PROJECT_CATEGORY_KEYS.map((key) => {
+            const sel = value.category === key
+            return (
+              <button
+                type="button"
+                key={key}
+                onClick={() => onChange({ category: sel ? "" : key })}
+                className={`text-[11px] px-2.5 py-1 rounded-lg border transition-colors ${
+                  sel
+                    ? "bg-gray-900 text-white border-gray-900"
+                    : "border-gray-300 text-gray-600 hover:bg-gray-50"
+                }`}
+              >
+                {t(`admin.customers.projects.category.${key}`)}
+              </button>
+            )
+          })}
+        </div>
       </Field>
       <Field label={k("fldDestination")}>
         <input

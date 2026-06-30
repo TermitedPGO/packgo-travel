@@ -7,6 +7,12 @@ export function toSelection(c: AdaptedCustomer): { userId: number } | { profileI
   return c.kind === "user" ? { userId: c.id } : { profileId: c.id }
 }
 
+/** customer-projects (0105) — 總類 keys. Label via
+ *  t(`admin.customers.projects.category.${key}`). varchar on the server so new
+ *  keys只要在這裡 + i18n 加,免 migration. */
+export const PROJECT_CATEGORY_KEYS = ["flight", "quote", "visa", "general"] as const
+export type ProjectCategory = (typeof PROJECT_CATEGORY_KEYS)[number]
+
 /** Currency symbol — USD for direct customers; never bare $ for TWD. */
 export function currencySymbol(currency?: string | null): string {
   const c = (currency || "USD").toUpperCase()

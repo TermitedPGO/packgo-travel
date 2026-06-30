@@ -3490,6 +3490,12 @@ export const en = {
         backToUnfiled: 'Move to unfiled',
         assigned: 'Filed',
         assignFailed: 'Assign failed',
+        category: {
+          flight: 'Flight',
+          quote: 'Quote / itinerary',
+          visa: 'Visa',
+          general: 'General',
+        },
       },
       order: {
         section: 'Custom orders',
@@ -3510,6 +3516,7 @@ export const en = {
         sheetTitleNew: 'New custom order',
         editDetails: 'Edit details',
         fldTitle: 'Trip name',
+        fldCategory: 'Category',
         fldTitlePh: 'e.g. Taiwan 12 days + Vietnam 5 days',
         fldDestination: 'Destination',
         fldDeparture: 'Departure',

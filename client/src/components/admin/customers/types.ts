@@ -128,6 +128,8 @@ export type Project = {
   id: number
   orderNumber: string
   title: string
+  /** 總類 key (flight/quote/visa/general) → i18n label; null = 未標 (0105). */
+  category: string | null
   status: string
   departureDate: string | null
 }

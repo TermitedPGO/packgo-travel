@@ -521,9 +521,18 @@ const ORDER_STATUS_ZH: Record<string, string> = {
   cancelled: "已取消",
 };
 
+// customer-projects (0105) — 總類 key → 中文(prompt 是中文)。
+const ORDER_CATEGORY_ZH: Record<string, string> = {
+  flight: "機票",
+  quote: "報價/行程",
+  visa: "簽證",
+  general: "一般諮詢",
+};
+
 export interface OrderContextData {
   orderNumber: string;
   title: string;
+  category: string | null;
   status: string;
   destination: string | null;
   departureDate: string | null;
@@ -550,7 +559,8 @@ export function formatOrderContext(o: OrderContextData): string {
   };
   const lines: string[] = [];
   lines.push("\n\n【目前這條對話綁定的專案(只談這一單)】");
-  lines.push(`單號 ${o.orderNumber} · ${o.title}`);
+  const catZh = o.category ? ORDER_CATEGORY_ZH[o.category] ?? o.category : null;
+  lines.push(`單號 ${o.orderNumber}${catZh ? ` · 總類:${catZh}` : ""} · ${o.title}`);
   const statusZh = ORDER_STATUS_ZH[o.status] ?? o.status;
   lines.push(`狀態:${statusZh}${o.destination ? ` · 目的地:${o.destination}` : ""}`);
   if (o.departureDate || o.returnDate) {
@@ -591,6 +601,7 @@ export async function buildOrderContextBlock(
     .select({
       orderNumber: customOrders.orderNumber,
       title: customOrders.title,
+      category: customOrders.category,
       status: customOrders.status,
       destination: customOrders.destination,
       departureDate: customOrders.departureDate,

@@ -48,6 +48,13 @@ const dec = (n?: number | null): string | null => (n == null ? null : String(n))
 /** decimal column → number | null for math. */
 const num = (s?: string | null): number | null => (s == null ? null : Number(s));
 
+// customer-projects (0105) — 總類 keys. Stored as varchar so new categories need
+// no migration; we still validate the known set on write. UI maps key → i18n label
+// (機票 / 報價行程 / 簽證 / 一般諮詢). A coordinator like Emerald (AXT) sends many
+// different kinds of cases under one inbox; the category tells them apart.
+export const PROJECT_CATEGORY_KEYS = ["flight", "quote", "visa", "general"] as const;
+const categorySchema = z.enum(PROJECT_CATEGORY_KEYS);
+
 const selectionSchema = z.union([
   z.object({ userId: z.number().int().positive() }).strict(),
   z.object({ profileId: z.number().int().positive() }).strict(),
@@ -110,6 +117,7 @@ function toListItem(o: CustomOrder) {
     id: o.id,
     orderNumber: o.orderNumber,
     title: o.title,
+    category: o.category,
     destination: o.destination,
     status: o.status,
     needsQuote: o.needsQuote === 1,
@@ -169,6 +177,7 @@ export const adminCustomerOrdersRouter = router({
       z.object({
         selection: selectionSchema,
         title: z.string().trim().min(1).max(200),
+        category: categorySchema.optional(),
         destination: z.string().trim().max(200).optional(),
         needsQuote: z.boolean().default(true),
         totalPrice: z.number().nonnegative().max(99_999_999).optional(),
@@ -204,6 +213,7 @@ export const adminCustomerOrdersRouter = router({
         customerName: name,
         customerEmail: email,
         title: input.title,
+        category: input.category ?? null,
         destination: input.destination ?? null,
         needsQuote: input.needsQuote ? 1 : 0,
         status: "draft",
@@ -233,6 +243,7 @@ export const adminCustomerOrdersRouter = router({
       z.object({
         orderId: z.number().int().positive(),
         title: z.string().trim().min(1).max(200).optional(),
+        category: categorySchema.nullable().optional(),
         destination: z.string().trim().max(200).nullable().optional(),
         needsQuote: z.boolean().optional(),
         totalPrice: z.number().nonnegative().max(99_999_999).nullable().optional(),
@@ -249,6 +260,7 @@ export const adminCustomerOrdersRouter = router({
       assertNotTerminal(o, "edit");
       const patch: Record<string, unknown> = {};
       if (input.title !== undefined) patch.title = input.title;
+      if (input.category !== undefined) patch.category = input.category;
       if (input.destination !== undefined) patch.destination = input.destination;
       if (input.needsQuote !== undefined) patch.needsQuote = input.needsQuote ? 1 : 0;
       if (input.currency !== undefined) patch.currency = input.currency;

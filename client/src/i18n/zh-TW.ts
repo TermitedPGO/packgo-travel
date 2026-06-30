@@ -3458,6 +3458,12 @@ export const zhTW = {
         backToUnfiled: '退回未分類',
         assigned: '已歸檔',
         assignFailed: '指派失敗',
+        category: {
+          flight: '機票',
+          quote: '報價/行程',
+          visa: '簽證',
+          general: '一般諮詢',
+        },
       },
       order: {
         section: '訂製單',
@@ -3479,6 +3485,7 @@ export const zhTW = {
         editDetails: '編輯內容',
         fldTitle: '行程名稱',
         fldTitlePh: '例：台灣12天+越南5天',
+        fldCategory: '總類',
         fldDestination: '目的地',
         fldDeparture: '出發日',
         fldReturn: '回程日',
