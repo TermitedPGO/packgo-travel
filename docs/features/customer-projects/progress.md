@@ -12,16 +12,17 @@ m1 schema+migration ──┬──> m2 chat scope ──┐
 
 | 模組 | 範圍 | 狀態 |
 |------|------|------|
-| m1 | schema 兩欄 + 0103 migration + 型別 | ☐ todo |
-| m2 | ask-ops-stream orderId + buildOrderContextBlock + customerChatList orderId + test | ☐ todo |
-| m3 | customerConversationThread orderId + assignConversation mutation + test | ☐ todo |
-| m4 | ProjectBar.tsx + AdminCustomers state 提升 + Detail/Chat 接線 + 改名 + i18n | ☐ todo |
-| m5 | 歷史 tab 指派 UI + 各 tab 隨選 + i18n parity + 收尾驗證 | ☐ todo |
+| m1 | schema 兩欄 + 0104 migration + 型別 | ✅ done |
+| m2 | ask-ops-stream orderId + buildOrderContextBlock + customerChatList orderId + test | ✅ done |
+| m3 | customerConversationThread orderId + assignConversation mutation + test | ✅ done |
+| m4 | ProjectBar.tsx + AdminCustomers state 提升 + Detail/Chat 接線 + 改名 + i18n | ✅ done |
+| m5 | 歷史 tab 指派 UI + 各 tab 隨選 + i18n parity + 收尾驗證 | ✅ done |
 
-## 收尾紅線(全綠才算完)
-- [ ] `tsc --noEmit` 0 錯(OOM 用 NODE_OPTIONS=--max-old-space-size=6144)
-- [ ] vitest 綠(每模組對應 test)
-- [ ] i18n zh-TW + en parity(pre-commit 會擋)
-- [ ] 圓角 / Sheet padding 紅線
-- [ ] supplierCost 不外洩到任何客戶面投影
-- [ ] 不部署(分支開發 → 給 Jeff 看 → 同意才 pnpm ship)
+分支:`feat/customer-projects`(5 commits)。本地無 DATABASE_URL → 客人頁 preview 驗不了真資料,走 tsc + vitest + 給 Jeff 看。
+
+## 收尾紅線(全綠)
+- [x] `tsc --noEmit` 0 錯(OOM 用 NODE_OPTIONS=--max-old-space-size=6144)
+- [x] vitest 綠(customerChatContext / adminCustomersThread / customOrder / adapters / adminCustomerOrders;server/_core 594 + server/routers 246 全過)
+- [x] i18n zh-TW + en parity(pre-commit clean)
+- [x] 圓角(chip rounded-md、改名 input rounded-lg)/ supplierCost 不外洩(order block 只售價已收;list 投影不含成本)
+- [ ] 給 Jeff 看 → 同意才 pnpm ship(本期不部署)
