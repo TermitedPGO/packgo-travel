@@ -1119,6 +1119,28 @@ async function runWriteTool(
       if (!cEmail && !cPhone) return { error: "email or phone required" };
       if (cEmail && !/^\S+@\S+\.\S+$/.test(cEmail))
         return { error: "invalid email format" };
+      // Dedup before insert — the tRPC createManualCustomer guards against a
+      // same-email/phone profile, but THIS agent path was missing it, so asking
+      // the AI to「新增客人」for someone we already have made a duplicate empty
+      // profile (Emerald Young, 2026-06-30). Return the existing one (oldest
+      // first = the original, with the real history) instead of creating a 2nd.
+      if (cEmail || cPhone) {
+        const [dup] = await db
+          .select({ id: customerProfiles.id, name: customerProfiles.name })
+          .from(customerProfiles)
+          .where(cEmail ? eq(customerProfiles.email, cEmail) : eq(customerProfiles.phone, cPhone!))
+          .orderBy(customerProfiles.createdAt)
+          .limit(1);
+        if (dup) {
+          log.info({ profileId: dup.id, name: cName }, "create_customer deduped → existing");
+          return {
+            success: true,
+            profileId: dup.id,
+            deduped: true,
+            message: `客人「${dup.name ?? cName}」已經有檔案了,直接用既有的(沒有重複建立)`,
+          };
+        }
+      }
       const [row] = await db
         .insert(customerProfiles)
         .values({
