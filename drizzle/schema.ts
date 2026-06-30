@@ -2849,12 +2849,19 @@ export const customerInteractions = mysqlTable("customerInteractions", {
   externalId: varchar("externalId", { length: 255 }),
   gmailThreadId: varchar("gmailThreadId", { length: 255 }),
 
+  // customer-projects (0104) — which customOrder (專案) this real-conversation
+  // turn is filed under. NULL = 「未分類」(today's behavior + Gmail filing's
+  // default; threadFiling.ts is unchanged so new mail lands here). Jeff assigns
+  // a whole gmailThreadId to a project from the 歷史 tab. Soft ref (no FK).
+  customOrderId: int("customOrderId"),
+
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => ({
   customerIdx: index("idx_int_customer").on(table.customerProfileId, table.createdAt),
   channelIdx: index("idx_int_channel").on(table.channel, table.direction),
   classIdx: index("idx_int_class").on(table.classification),
   outcomeIdx: index("idx_int_outcome").on(table.outcomeId),
+  orderIdx: index("idx_int_order").on(table.customOrderId, table.createdAt),
   profileExternalUq: unique("uq_ci_profile_external").on(table.customerProfileId, table.externalId),
 }));
 
@@ -3701,10 +3708,16 @@ export const customerChatMessages = mysqlTable("customerChatMessages", {
   body: text("body").notNull(),
   /** JSON: { suggestedActions, cards, streamed } from the agent turn. */
   context: text("context"),
+  /** customer-projects (0104) — which customOrder (專案) this turn belongs to.
+   *  NULL = 「未分類」basket (the customer-wide thread; today's behavior). Each
+   *  project gets its own chat line so a repeat customer's orders don't pile
+   *  into one history. Soft ref (no FK), mirrors bookingId/quoteId convention. */
+  customOrderId: int("customOrderId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (t) => ({
   customerIdx: index("idx_ccm_customer").on(t.customerUserId, t.createdAt),
   profileIdx: index("idx_ccm_profile").on(t.customerProfileId, t.createdAt),
+  orderIdx: index("idx_ccm_order").on(t.customOrderId, t.createdAt),
 }));
 
 export type CustomerChatMessage = typeof customerChatMessages.$inferSelect;
