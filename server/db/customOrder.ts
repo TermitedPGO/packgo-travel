@@ -243,7 +243,10 @@ export async function getCustomOrderById(id: number): Promise<CustomOrder | null
   return row || null;
 }
 
-/** All of a customer's orders, newest first. */
+/** All of a customer's orders, newest first by departureDate (fallback createdAt
+ *  when no departure date yet) — design.md §2 ProjectBar ordering contract. A
+ *  later-departing order built earlier must still sort ahead of an
+ *  earlier-departing order built later. */
 export async function listCustomOrdersByProfile(
   customerProfileId: number,
 ): Promise<CustomOrder[]> {
@@ -253,7 +256,7 @@ export async function listCustomOrdersByProfile(
     .select()
     .from(customOrders)
     .where(eq(customOrders.customerProfileId, customerProfileId))
-    .orderBy(desc(customOrders.createdAt));
+    .orderBy(sql`coalesce(${customOrders.departureDate}, ${customOrders.createdAt}) desc`);
 }
 
 export async function updateCustomOrder(

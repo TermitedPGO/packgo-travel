@@ -148,3 +148,47 @@ describe("assignInteractionsToOrder — guards never run an unscoped UPDATE", ()
     expect(captured).toBeTruthy(); // a WHERE (scope + target) was applied
   });
 });
+
+describe("listCustomOrdersByProfile — ordering contract (customer-projects 0104, design.md §2)", () => {
+  // design.md §2: ProjectBar sorts "departureDate ?? createdAt, newest first" — a
+  // later-departing order built earlier must still sort ahead of an
+  // earlier-departing order built later. Regression risk: reverting to plain
+  // `desc(createdAt)` compiles fine and returns *something*, so a coarse
+  // "truthy" assertion wouldn't catch it — inspect the actual SQL chunks.
+  it("orders by coalesce(departureDate, createdAt) desc, not createdAt alone", async () => {
+    let capturedOrderBy: unknown;
+    getDbMock.mockResolvedValueOnce({
+      select() {
+        return {
+          from() {
+            return {
+              where() {
+                return {
+                  orderBy(o: unknown) {
+                    capturedOrderBy = o;
+                    return Promise.resolve([]);
+                  },
+                };
+              },
+            };
+          },
+        };
+      },
+    } as any);
+
+    await listCustomOrdersByProfile(1);
+
+    const chunks = (capturedOrderBy as any)?.queryChunks ?? [];
+    const literalText = chunks
+      .filter((c: any) => Array.isArray(c?.value))
+      .flatMap((c: any) => c.value)
+      .join(" ")
+      .toLowerCase();
+    expect(literalText).toContain("coalesce");
+    expect(literalText).toContain("desc");
+
+    const referencedColumns = chunks.map((c: any) => c?.name).filter(Boolean);
+    expect(referencedColumns).toContain("departureDate");
+    expect(referencedColumns).toContain("createdAt");
+  });
+});
