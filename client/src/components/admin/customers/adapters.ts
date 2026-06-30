@@ -728,3 +728,16 @@ export function shouldCommitRename(current: string, draft: string): boolean {
   const next = draft.trim()
   return next.length > 0 && next !== current
 }
+
+/**
+ * ProjectBar quick filter (audit fix, 2026-06-30) — case-insensitive substring
+ * match on title or order number. Empty query → show everything (the filter
+ * input is a convenience, not a hard gate).
+ */
+export function filterProjects(projects: Project[], query: string): Project[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return projects
+  return projects.filter(
+    (p) => p.title.toLowerCase().includes(q) || p.orderNumber.toLowerCase().includes(q),
+  )
+}

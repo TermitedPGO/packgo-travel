@@ -504,14 +504,23 @@ async function startServer() {
           if (!ord) {
             return res.status(404).json({ error: "Order not found" });
           }
-          // Resolve the customer's canonical profileId and assert the order
-          // belongs to them (no cross-customer leakage).
-          let scopeProfileId: number | null = customerProfileId;
-          if (scopeProfileId === null && customerId !== null) {
-            const { findCustomerProfileId } = await import("../db/customOrder");
-            scopeProfileId = (await findCustomerProfileId({ userId: customerId })) ?? null;
+          // Resolve ALL of the customer's profileIds and assert the order
+          // belongs to one of them (no cross-customer leakage). A registered
+          // customer can own more than one profileId (their own row PLUS any
+          // pre-registration guest row filed under their verified email) — a
+          // single-profile lookup here would falsely 403 an order that was
+          // created back when the customer was still a guest. Mirrors the
+          // resolution assignConversation already uses (server/db/customOrder.ts
+          // resolveCustomerProfileIds).
+          let scopeProfileIds: number[];
+          if (customerProfileId !== null) {
+            scopeProfileIds = [customerProfileId];
+          } else {
+            const { resolveCustomerProfileIds } = await import("../db/customOrder");
+            scopeProfileIds = await resolveCustomerProfileIds({ userId: customerId! });
           }
-          if (scopeProfileId === null || ord.customerProfileId !== scopeProfileId) {
+          const { orderBelongsToProfiles } = await import("../db/customOrder");
+          if (!orderBelongsToProfiles(ord.customerProfileId, scopeProfileIds)) {
             return res.status(403).json({ error: "Order does not belong to this customer" });
           }
         }
@@ -1308,6 +1317,20 @@ async function startServer() {
     await import('../followupScanWorker');
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to schedule followup scan");
+  }
+
+  // customer-projects audit fix (2026-06-30) — weekly duplicate-customer-
+  // profile reconciliation scan (Sunday 08:00 UTC). customerProfiles has no
+  // DB-level unique constraint on email/phone; this is the backstop that
+  // catches a duplicate (like the Emerald Young incident) if a future insert
+  // site forgets to select-by-identity first. Posts a digest to Jeff's office
+  // inbox, never auto-merges.
+  try {
+    const { scheduleWeeklyDuplicateProfileScan } = await import('../queue');
+    await scheduleWeeklyDuplicateProfileScan();
+    await import('../duplicateProfileScanWorker');
+  } catch (err) {
+    logger.warn({ err }, "[Startup] Failed to schedule duplicate-profile scan");
   }
 
   // QA audit 2026-05-11 Phase 9 P0: Gmail poll cron. Closes the

@@ -140,13 +140,22 @@ export async function generateCustomerAiSummary(
   return { wants: llm.wants, actions, delivered, nextStep: llm.nextStep };
 }
 
-/** Resolve a scope to the customerProfiles.id to store the cache on, creating a
- *  minimal profile for a registered user that doesn't have one yet. */
-async function ensureProfileId(scope: SummaryScope): Promise<number | null> {
+/**
+ * Resolve a scope to the customerProfiles.id to store the cache on, creating a
+ * minimal profile for a registered user that doesn't have one yet.
+ *
+ * Audit fix (2026-06-30, same bug class as the Emerald Young duplicate): before
+ * inserting a brand-new row, check whether a GUEST profile (userId IS NULL)
+ * already exists under this user's email — most customers contact us before
+ * registering. Claim it (UPDATE userId) instead of inserting a duplicate,
+ * mirroring server/_core/emailCustomerMatch.ts linkProfileToUserByEmail's
+ * claim pattern.
+ */
+export async function ensureProfileId(scope: SummaryScope): Promise<number | null> {
   const db = await getDb();
   if (!db) return null;
   const { customerProfiles, users } = await import("../../drizzle/schema");
-  const { eq } = await import("drizzle-orm");
+  const { eq, and, isNull } = await import("drizzle-orm");
 
   if ("profileId" in scope) return scope.profileId;
 
@@ -157,16 +166,37 @@ async function ensureProfileId(scope: SummaryScope): Promise<number | null> {
     .limit(1);
   if (existing[0]) return existing[0].id;
 
-  // No profile yet — create a minimal one keyed to the user (the profile
-  // extractor would create one eventually anyway). email is best-effort.
   const u = await db
     .select({ email: users.email })
     .from(users)
     .where(eq(users.id, scope.userId))
     .limit(1);
+  const email = u[0]?.email ?? null;
+
+  if (email) {
+    // oldest first — if more than one guest profile already shares this email
+    // (the exact corrupted state this audit-fix family targets), claim the
+    // ORIGINAL one (real history), never a non-deterministic row. Mirrors the
+    // same ordering in server/agents/autonomous/opsTools.ts create_customer.
+    const guestRow = await db
+      .select({ id: customerProfiles.id })
+      .from(customerProfiles)
+      .where(and(eq(customerProfiles.email, email), isNull(customerProfiles.userId)))
+      .orderBy(customerProfiles.createdAt)
+      .limit(1);
+    if (guestRow[0]) {
+      await db
+        .update(customerProfiles)
+        .set({ userId: scope.userId })
+        .where(eq(customerProfiles.id, guestRow[0].id));
+      return guestRow[0].id;
+    }
+  }
+
+  // No profile anywhere for this email — create a minimal one keyed to the user.
   const res = await db
     .insert(customerProfiles)
-    .values({ userId: scope.userId, email: u[0]?.email ?? null } as any);
+    .values({ userId: scope.userId, email } as any);
   // mysql2: insertId on the result
   const insertId = (res as any)?.[0]?.insertId ?? (res as any)?.insertId;
   return insertId ? Number(insertId) : null;

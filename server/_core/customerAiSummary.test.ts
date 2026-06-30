@@ -28,6 +28,7 @@ import {
   generateCustomerAiSummary,
   pickStaleProfiles,
   resolveSummaryScope,
+  ensureProfileId,
   SUMMARY_TTL_MS,
   type ScanRow,
 } from "./customerAiSummary";
@@ -43,6 +44,65 @@ function fakeDb(rows: unknown[]) {
   chain.where = () => chain;
   chain.limit = () => Promise.resolve(rows);
   return chain;
+}
+
+/**
+ * Sequenced fake db for ensureProfileId (audit fix, 2026-06-30): each call
+ * issues several SELECTs in order (existing-by-userId, then users.email, then
+ * guest-by-email), so a single fixed `rows` isn't enough — this pops the next
+ * queued result on each terminal `.limit()`/`.where()` call, and records any
+ * `.update()`/`.insert()` so the test can assert what was written.
+ */
+function fakeSequencedDb(selectQueue: unknown[][]) {
+  let i = 0;
+  const updates: Array<{ table: string; set: unknown }> = [];
+  const inserts: Array<{ table: string; values: unknown }> = [];
+  // Records which queue index, if any, was reached via .orderBy() — so a test
+  // can assert the guest-claim lookup specifically used it (audit fix,
+  // 2026-06-30), catching a regression that quietly drops .orderBy() and goes
+  // back to non-deterministic ordering (the .limit() path alone would still
+  // "work" in this fake, masking exactly that regression).
+  const orderedCallIndexes: number[] = [];
+  const selectChain: Record<string, unknown> = {};
+  selectChain.select = () => selectChain;
+  selectChain.from = () => selectChain;
+  selectChain.where = () => {
+    const idx = i;
+    const next = () => Promise.resolve(selectQueue[idx] ?? []);
+    return {
+      limit: () => {
+        i++;
+        return next();
+      },
+      orderBy: () => ({
+        limit: () => {
+          orderedCallIndexes.push(idx);
+          i++;
+          return next();
+        },
+      }),
+    };
+  };
+  return {
+    select: () => selectChain,
+    update: (table: { _: { name?: string } } | unknown) => ({
+      set: (set: unknown) => ({
+        where: () => {
+          updates.push({ table: String(table), set });
+          return Promise.resolve([{ affectedRows: 1 }]);
+        },
+      }),
+    }),
+    insert: (table: unknown) => ({
+      values: (values: unknown) => {
+        inserts.push({ table: String(table), values });
+        return Promise.resolve([{ insertId: 9001 }]);
+      },
+    }),
+    __updates: updates,
+    __inserts: inserts,
+    __orderedCallIndexes: orderedCallIndexes,
+  } as any;
 }
 const buildCustomerChatContextMock = vi.mocked(buildCustomerChatContext);
 const buildGuestChatContextMock = vi.mocked(buildGuestChatContext);
@@ -183,5 +243,83 @@ describe("resolveSummaryScope (event-refresh scope)", () => {
   it("falls back to {profileId} when the DB is down", async () => {
     // default mock resolves null
     expect(await resolveSummaryScope(99)).toEqual({ profileId: 99 });
+  });
+});
+
+/**
+ * ensureProfileId — audit fix (2026-06-30, same bug class as the duplicate
+ * Emerald Young customerProfiles row). Before this fix, a registered userId
+ * with no profile row yet always INSERTed a fresh one, even when a guest
+ * profile (userId IS NULL) already existed under that same email — creating a
+ * second row for the same person. Covers all three branches: already has a
+ * profile (no-op), claims a matching guest profile (UPDATE, no insert), and
+ * truly nothing exists (INSERT).
+ */
+describe("ensureProfileId (duplicate-profile audit fix)", () => {
+  it("a {profileId} scope passes through untouched (no select/update/insert)", async () => {
+    const db = fakeSequencedDb([]);
+    getDbMock.mockResolvedValueOnce(db as any);
+    expect(await ensureProfileId({ profileId: 42 })).toBe(42);
+    expect(db.__updates).toHaveLength(0);
+    expect(db.__inserts).toHaveLength(0);
+  });
+
+  it("returns the existing profile when one is already linked to this userId", async () => {
+    getDbMock.mockResolvedValueOnce(
+      fakeSequencedDb([[{ id: 5 }]]) as any, // existing-by-userId hit
+    );
+    expect(await ensureProfileId({ userId: 7 })).toBe(5);
+  });
+
+  it("claims a pre-existing GUEST profile by email (UPDATE, never a duplicate INSERT)", async () => {
+    const db = fakeSequencedDb([
+      [], // no profile linked to userId yet
+      [{ email: "mei@example.com" }], // users.email lookup
+      [{ id: 88 }], // guest profile found by email, userId IS NULL
+    ]);
+    getDbMock.mockResolvedValueOnce(db as any);
+    const id = await ensureProfileId({ userId: 7 });
+    expect(id).toBe(88);
+    expect(db.__updates).toHaveLength(1);
+    expect(db.__updates[0].set).toEqual({ userId: 7 });
+    expect(db.__inserts).toHaveLength(0); // the regression this fix prevents
+    // the guest-claim lookup (3rd select, index 2) must go through .orderBy()
+    // — catches a regression that quietly drops it (verification-pass catch,
+    // 2026-06-30): without it, claiming among 2+ duplicate guest rows is
+    // non-deterministic and can grab a thin new duplicate over the real one.
+    expect(db.__orderedCallIndexes).toEqual([2]);
+  });
+
+  it("claims the OLDEST guest profile when several already share the email — the exact corrupted state this audit-fix family targets", async () => {
+    // The fake can't re-sort for us (it just returns what's queued for that
+    // call); this asserts the function (a) actually issues the lookup via
+    // .orderBy() and (b) returns whatever that ordered query's first row is —
+    // i.e. it trusts the DB's ORDER BY, not a hand-picked array index.
+    const db = fakeSequencedDb([
+      [], // no profile linked to userId
+      [{ email: "dup@axt.com" }], // users.email lookup
+      [{ id: 16016 }], // ORDER BY createdAt ASC LIMIT 1 → the oldest of several dup guest rows
+    ]);
+    getDbMock.mockResolvedValueOnce(db as any);
+    const id = await ensureProfileId({ userId: 9 });
+    expect(id).toBe(16016);
+    expect(db.__orderedCallIndexes).toEqual([2]);
+  });
+
+  it("inserts a fresh profile only when no guest profile exists for the email either", async () => {
+    const db = fakeSequencedDb([
+      [], // no profile linked to userId
+      [{ email: "new@example.com" }], // users.email lookup
+      [], // no guest profile under that email
+    ]);
+    getDbMock.mockResolvedValueOnce(db as any);
+    const id = await ensureProfileId({ userId: 7 });
+    expect(id).toBe(9001);
+    expect(db.__inserts).toHaveLength(1);
+  });
+
+  it("returns null when the DB is unavailable", async () => {
+    // default beforeEach mock resolves null
+    expect(await ensureProfileId({ userId: 7 })).toBeNull();
   });
 });

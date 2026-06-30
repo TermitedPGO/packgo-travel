@@ -5,7 +5,12 @@ import { useLocale } from "@/contexts/LocaleContext"
 import { toast } from "sonner"
 import type { AdaptedCustomer, Project } from "./types"
 import { toSelection, shortDate } from "./customOrderHelpers"
-import { shouldCommitRename } from "./adapters"
+import { shouldCommitRename, filterProjects } from "./adapters"
+
+/** Projects beyond this count get a quick filter input (audit fix, 2026-06-30 —
+ *  a heavy customer like Emerald is expected to accumulate 10-20+ over a year;
+ *  pure horizontal scroll alone stops being usable well before that). */
+const FILTER_THRESHOLD = 8
 
 /**
  * customer-projects (0104) — the「標題列下方一排」project switcher. Projects
@@ -34,6 +39,23 @@ export default function ProjectBar({
   const [draft, setDraft] = useState("")
   const inputRef = useRef<HTMLInputElement>(null)
 
+  // audit fix (2026-06-30) — quick client-side filter, only shown once the
+  // chip row is heavy enough that pure horizontal scroll stops being usable.
+  // 未分類 is never filtered out — it's the fixed anchor.
+  const [filter, setFilter] = useState("")
+  // Reset on customer switch — CustomerDetail/ProjectBar don't always unmount
+  // on switch (React Query can keep the new customer's detail query already
+  // cached, so isDetailLoading stays false and this component is reused).
+  // Without this, a typed filter (e.g. "機票") silently carries over and hides
+  // chips on the NEXT customer with no obvious cause (verification-pass catch,
+  // 2026-06-30 — same failure mode the BulkAssignBar selection reset in
+  // DetailTabs.tsx already guards against).
+  useEffect(() => {
+    setFilter("")
+  }, [customer.id])
+  const showFilter = projects.length > FILTER_THRESHOLD
+  const visibleProjects = showFilter ? filterProjects(projects, filter) : projects
+
   const rename = trpc.customerOrders.update.useMutation({
     onSuccess: () => {
       void utils.customerOrders.listForCustomer.invalidate(sel)
@@ -57,12 +79,20 @@ export default function ProjectBar({
     }
   }
 
-  const chip =
-    "flex-shrink-0 text-[11px] px-2.5 py-1 rounded-md whitespace-nowrap transition-colors"
+  const chip = "flex-shrink-0 text-[11px] px-2.5 py-1 rounded-md transition-colors"
 
   return (
-    <div className="px-6 py-2 border-b border-gray-200 flex items-center gap-1.5 overflow-x-auto">
-      {projects.map((p) => {
+    <div className="px-6 py-2 border-b border-gray-200 flex items-center gap-2">
+      {showFilter && (
+        <input
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder={t("admin.customers.projects.filterPlaceholder")}
+          className="flex-shrink-0 w-24 text-[11px] px-2 py-1 rounded-lg border border-gray-300 outline-none focus:border-gray-900"
+        />
+      )}
+      <div className="flex items-center gap-1.5 overflow-x-auto min-w-0">
+      {visibleProjects.map((p) => {
         const active = p.id === activeProjectId
         if (editingId === p.id) {
           return (
@@ -106,18 +136,16 @@ export default function ProjectBar({
           >
             {p.category && (
               <span
-                className={`text-[10px] px-1 py-px rounded ${
+                className={`text-[10px] px-1 py-px rounded-md ${
                   active ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500"
                 }`}
               >
                 {t(`admin.customers.projects.category.${p.category}`)}
               </span>
             )}
-            <span>
-              <span className={`mr-1.5 ${active ? "text-gray-400" : "text-gray-400"}`}>
-                {p.orderNumber}
-              </span>
-              {p.title}
+            <span className="flex items-center min-w-0">
+              <span className="mr-1.5 flex-shrink-0 text-gray-400">{p.orderNumber}</span>
+              <span className="truncate max-w-[160px]">{p.title}</span>
             </span>
           </button>
         )
@@ -135,6 +163,7 @@ export default function ProjectBar({
         <Inbox className="w-3 h-3" />
         {t("admin.customers.projects.unfiled")}
       </button>
+      </div>
     </div>
   )
 }

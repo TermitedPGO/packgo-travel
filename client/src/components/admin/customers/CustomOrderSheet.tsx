@@ -118,7 +118,11 @@ export default function CustomOrderSheet({
     if (dropBusy || create.isPending) return
     setDropBusy(true)
     try {
-      const title = form.title.trim() || `${customer.name || "客戶"} 訂製單`
+      const title =
+        form.title.trim() ||
+        t("admin.customers.order.defaultTitle", {
+          name: customer.name || t("admin.customers.unnamed"),
+        })
       const created = await create.mutateAsync(buildCreateInput(title))
       if (!created?.id) throw new Error("create failed")
       const url = await uploadPdfViaPresign(createPdfUpload.mutateAsync, created.id, "quote", file)

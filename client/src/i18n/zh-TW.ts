@@ -3458,6 +3458,10 @@ export const zhTW = {
         backToUnfiled: '退回未分類',
         assigned: '已歸檔',
         assignFailed: '指派失敗',
+        selectedCount: '已選 {n} 則',
+        selectForBulk: '選取以批次指派',
+        clearSelection: '取消選取',
+        filterPlaceholder: '篩選',
         category: {
           flight: '機票',
           quote: '報價/行程',
@@ -3484,7 +3488,10 @@ export const zhTW = {
         sheetTitleNew: '新訂製單',
         editDetails: '編輯內容',
         fldTitle: '行程名稱',
-        fldTitlePh: '例：台灣12天+越南5天',
+        // audit fix (2026-06-30): 出遊人跟聯絡人不同時(像 Emerald 名下訂單,
+        // 實際出遊是 Morris),範例直接示範寫法,不用另外提示。
+        fldTitlePh: '例：Morris Young 北京↔鳳凰城來回',
+        defaultTitle: '{name} 訂製單',
         fldCategory: '總類',
         fldDestination: '目的地',
         fldDeparture: '出發日',

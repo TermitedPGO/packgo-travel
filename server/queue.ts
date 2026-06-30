@@ -938,6 +938,54 @@ export async function scheduleDailyFollowupScan() {
 console.log("✅ Followup scan queue initialized");
 
 // ============================================================================
+// Duplicate-profile reconciliation scan (audit fix, 2026-06-30) — weekly scan
+// that finds customerProfiles rows sharing the same email/phone (the bug class
+// behind the Emerald Young duplicate) and posts ONE digest into Jeff's office
+// inbox if any are found. Never auto-merges. See server/_core/duplicateProfileScan.ts.
+// ============================================================================
+
+export interface DuplicateProfileScanJobData {
+  triggeredBy: "schedule" | "manual";
+}
+export interface DuplicateProfileScanJobResult {
+  groups: number;
+  posted: boolean;
+}
+
+export const duplicateProfileScanQueue = new Queue<
+  DuplicateProfileScanJobData,
+  DuplicateProfileScanJobResult
+>("duplicate-profile-scan", {
+  connection: redisBullMQ,
+  defaultJobOptions: {
+    attempts: 1, // a missed week just re-scans next run; no retry storms
+    removeOnComplete: { age: 2592000, count: 10 },
+    removeOnFail: { age: 2592000, count: 10 },
+  },
+});
+
+/** Schedule the weekly duplicate-profile scan: Sunday 08:00 UTC (off-peak, low priority). */
+export async function scheduleWeeklyDuplicateProfileScan() {
+  const repeatableJobs = await duplicateProfileScanQueue.getRepeatableJobs();
+  for (const job of repeatableJobs) {
+    if (job.name === "duplicate-profile-scan-tick") {
+      await duplicateProfileScanQueue.removeRepeatableByKey(job.key);
+    }
+  }
+  await duplicateProfileScanQueue.add(
+    "duplicate-profile-scan-tick",
+    { triggeredBy: "schedule" },
+    {
+      repeat: { pattern: "0 8 * * 0" }, // weekly, Sunday 08:00 UTC
+      jobId: "duplicate-profile-scan-scheduled",
+    },
+  );
+  console.log("✅ Duplicate-profile scan scheduled: weekly Sunday 08:00 UTC");
+}
+
+console.log("✅ Duplicate-profile scan queue initialized");
+
+// ============================================================================
 // Booking Followup Queue — async deposit PDF generation + confirmation
 // email AFTER bookings.create commits.
 //

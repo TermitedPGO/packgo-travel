@@ -3490,6 +3490,10 @@ export const en = {
         backToUnfiled: 'Move to unfiled',
         assigned: 'Filed',
         assignFailed: 'Assign failed',
+        selectedCount: '{n} selected',
+        selectForBulk: 'Select for bulk assign',
+        clearSelection: 'Clear selection',
+        filterPlaceholder: 'Filter',
         category: {
           flight: 'Flight',
           quote: 'Quote / itinerary',
@@ -3517,7 +3521,11 @@ export const en = {
         editDetails: 'Edit details',
         fldTitle: 'Trip name',
         fldCategory: 'Category',
-        fldTitlePh: 'e.g. Taiwan 12 days + Vietnam 5 days',
+        // audit fix (2026-06-30): when the traveler differs from the contact
+        // (e.g. an order under Emerald's profile but Morris is the one flying),
+        // the example shows the pattern directly instead of a separate hint.
+        fldTitlePh: 'e.g. Morris Young PEK ↔ PHX round trip',
+        defaultTitle: "{name}'s custom order",
         fldDestination: 'Destination',
         fldDeparture: 'Departure',
         fldReturn: 'Return',

@@ -20,6 +20,15 @@ vi.mock("../db", () => ({
   generateOrderNumber: vi.fn(async () => "ORD-2026-0001"),
   createInvoice: vi.fn(),
   updateInvoice: vi.fn(),
+  // customer-projects (0104, batch-assign audit fix) — assignConversation deps.
+  resolveCustomerProfileIds: vi.fn(),
+  assignInteractionsToOrder: vi.fn(async () => 0),
+  // Real (trivial) implementation, matches server/db/customOrder.ts exactly —
+  // mirrors the existing file convention of inline-reimplementing simple
+  // collaborators (see updateCustomOrder above) rather than importing the real
+  // module, so this mock can never silently mask a guard regression.
+  orderBelongsToProfiles: (orderProfileId: number | null, profileIds: number[]) =>
+    orderProfileId != null && profileIds.includes(orderProfileId),
 }));
 vi.mock("../rateLimit", () => ({
   checkAdminMutationRateLimit: vi.fn(async () => ({ allowed: true, remaining: 59 })),
@@ -187,6 +196,75 @@ describe("create", () => {
     expect(arg.orderNumber).toBe("ORD-2026-0001");
     expect(audit).toHaveBeenCalled();
   });
+
+  it("passes category (0105 總類) through to createCustomOrder, null when omitted", async () => {
+    (db.ensureCustomerProfileId as any).mockResolvedValue(5);
+    (db.createCustomOrder as any).mockResolvedValue({ ...baseOrder, id: 11 });
+    await caller().create({ selection: { profileId: 5 }, title: "X", category: "flight" });
+    expect((db.createCustomOrder as any).mock.calls[0][0].category).toBe("flight");
+
+    await caller().create({ selection: { profileId: 5 }, title: "Y" });
+    expect((db.createCustomOrder as any).mock.calls[1][0].category).toBeNull();
+  });
+
+  it("rejects an unknown category key (zod enum)", async () => {
+    (db.ensureCustomerProfileId as any).mockResolvedValue(5);
+    await expect(
+      caller().create({ selection: { profileId: 5 }, title: "X", category: "not-a-real-category" } as any),
+    ).rejects.toBeTruthy();
+  });
+});
+
+/**
+ * update — audit fix (2026-06-30): had zero test coverage (only the procedure
+ * surface was asserted). Covers terminal-guard, partial-patch field mapping,
+ * balance recompute, and the category (0105) patch added alongside the
+ * customer-projects feature.
+ */
+describe("update", () => {
+  it("rejects editing a terminal (completed/cancelled) order", async () => {
+    (db.getCustomOrderById as any).mockResolvedValue({ ...baseOrder, status: "completed" });
+    await expect(caller().update({ orderId: 7, title: "新標題" })).rejects.toThrow(/edit/);
+    expect(db.updateCustomOrder).not.toHaveBeenCalled();
+  });
+
+  it("only patches the fields actually provided (sparse patch)", async () => {
+    (db.getCustomOrderById as any).mockResolvedValue({ ...baseOrder, status: "arranged" });
+    await caller().update({ orderId: 7, title: "新標題" });
+    const patch = (db.updateCustomOrder as any).mock.calls[0][1];
+    expect(patch).toEqual({ title: "新標題" });
+  });
+
+  it("recomputes balanceAmount when totalPrice or depositAmount changes", async () => {
+    (db.getCustomOrderById as any).mockResolvedValue({ ...baseOrder, status: "arranged", totalPrice: "5000", depositAmount: "1500" });
+    await caller().update({ orderId: 7, depositAmount: 2000 });
+    const patch = (db.updateCustomOrder as any).mock.calls[0][1];
+    expect(patch.balanceAmount).toBe("3000"); // existing total 5000 - new deposit 2000
+  });
+
+  it("sets category (0105 總類), including clearing it back to null", async () => {
+    (db.getCustomOrderById as any).mockResolvedValue({ ...baseOrder, status: "arranged" });
+    await caller().update({ orderId: 7, category: "visa" });
+    expect((db.updateCustomOrder as any).mock.calls[0][1].category).toBe("visa");
+
+    await caller().update({ orderId: 7, category: null });
+    expect((db.updateCustomOrder as any).mock.calls[1][1].category).toBeNull();
+  });
+
+  it("rejects an unknown category key on update too", async () => {
+    (db.getCustomOrderById as any).mockResolvedValue({ ...baseOrder, status: "arranged" });
+    await expect(
+      caller().update({ orderId: 7, category: "not-a-real-category" } as any),
+    ).rejects.toBeTruthy();
+  });
+
+  it("audits the patch", async () => {
+    (db.getCustomOrderById as any).mockResolvedValue({ ...baseOrder, status: "arranged" });
+    await caller().update({ orderId: 7, title: "改名" });
+    expect(audit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "customOrder.update", targetId: 7 }),
+    );
+  });
 });
 
 describe("sendQuote — confirm gate + preconditions", () => {
@@ -318,5 +396,134 @@ describe("sendQuote — terminal guard", () => {
     (db.getCustomOrderById as any).mockResolvedValue({ ...baseOrder, status: "cancelled", quotePdfUrl: "https://x/q.pdf" });
     await expect(caller().sendQuote({ orderId: 7, confirm: true })).rejects.toThrow(/cancelled/);
     expect(sendCustomOrderQuoteEmail).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * customer-projects (0104, batch-assign audit fix) — assignConversation had
+ * ZERO test coverage before this (an audit on 2026-06-30 flagged it: a
+ * cross-customer FORBIDDEN guard and a missing terminal guard, both unverified).
+ * Covers: input validation, 未分類 (orderId null), cross-customer FORBIDDEN,
+ * the cancelled-vs-completed terminal split (deliberately narrower than
+ * assertNotTerminal — see the router's own comment), and batch arrays.
+ */
+describe("assignConversation", () => {
+  it("rejects when neither gmailThreadIds nor interactionIds is given", async () => {
+    await expect(
+      caller().assignConversation({ selection: { userId: 9 }, orderId: null }),
+    ).rejects.toThrow();
+  });
+
+  it("PRECONDITION_FAILED when the customer cannot be resolved (no DB)", async () => {
+    (db.resolveCustomerProfileIds as any).mockResolvedValue([]);
+    await expect(
+      caller().assignConversation({
+        selection: { userId: 9 },
+        orderId: null,
+        interactionIds: [1],
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("files into 未分類 (orderId null) without checking order ownership", async () => {
+    (db.resolveCustomerProfileIds as any).mockResolvedValue([5]);
+    (db.assignInteractionsToOrder as any).mockResolvedValue(1);
+    const res = await caller().assignConversation({
+      selection: { userId: 9 },
+      orderId: null,
+      interactionIds: [101],
+    });
+    expect(res.updated).toBe(1);
+    expect(db.getCustomOrderById).not.toHaveBeenCalled();
+    expect(audit).toHaveBeenCalled();
+  });
+
+  it("files into an order that belongs to the customer", async () => {
+    (db.resolveCustomerProfileIds as any).mockResolvedValue([5]);
+    (db.getCustomOrderById as any).mockResolvedValue({ ...baseOrder, customerProfileId: 5, status: "arranged" });
+    (db.assignInteractionsToOrder as any).mockResolvedValue(3);
+    const res = await caller().assignConversation({
+      selection: { userId: 9 },
+      orderId: 7,
+      gmailThreadIds: ["thread-a"],
+    });
+    expect(res.updated).toBe(3);
+  });
+
+  it("FORBIDDEN when the order belongs to a DIFFERENT customer (cross-customer guard)", async () => {
+    (db.resolveCustomerProfileIds as any).mockResolvedValue([5]);
+    (db.getCustomOrderById as any).mockResolvedValue({ ...baseOrder, customerProfileId: 999, status: "arranged" });
+    await expect(
+      caller().assignConversation({
+        selection: { userId: 9 },
+        orderId: 7,
+        interactionIds: [101],
+      }),
+    ).rejects.toThrow(/belong/);
+    expect(db.assignInteractionsToOrder).not.toHaveBeenCalled();
+  });
+
+  it("a customer with TWO profileIds (registered + pre-registration guest) can still file into an order owned by either", async () => {
+    (db.resolveCustomerProfileIds as any).mockResolvedValue([5, 9]);
+    (db.getCustomOrderById as any).mockResolvedValue({ ...baseOrder, customerProfileId: 5, status: "arranged" });
+    (db.assignInteractionsToOrder as any).mockResolvedValue(1);
+    const res = await caller().assignConversation({
+      selection: { userId: 9 },
+      orderId: 7,
+      interactionIds: [101],
+    });
+    expect(res.updated).toBe(1);
+  });
+
+  it("rejects filing into a CANCELLED order", async () => {
+    (db.resolveCustomerProfileIds as any).mockResolvedValue([5]);
+    (db.getCustomOrderById as any).mockResolvedValue({ ...baseOrder, customerProfileId: 5, status: "cancelled" });
+    await expect(
+      caller().assignConversation({
+        selection: { userId: 9 },
+        orderId: 7,
+        interactionIds: [101],
+      }),
+    ).rejects.toThrow(/cancelled/);
+    expect(db.assignInteractionsToOrder).not.toHaveBeenCalled();
+  });
+
+  it("ALLOWS filing into a COMPLETED order (deliberately narrower than assertNotTerminal — post-trip correspondence is legitimate)", async () => {
+    (db.resolveCustomerProfileIds as any).mockResolvedValue([5]);
+    (db.getCustomOrderById as any).mockResolvedValue({ ...baseOrder, customerProfileId: 5, status: "completed" });
+    (db.assignInteractionsToOrder as any).mockResolvedValue(1);
+    const res = await caller().assignConversation({
+      selection: { userId: 9 },
+      orderId: 7,
+      interactionIds: [101],
+    });
+    expect(res.updated).toBe(1);
+  });
+
+  it("batch: passes both gmailThreadIds and interactionIds arrays through in one call", async () => {
+    (db.resolveCustomerProfileIds as any).mockResolvedValue([5]);
+    (db.assignInteractionsToOrder as any).mockResolvedValue(4);
+    await caller().assignConversation({
+      selection: { userId: 9 },
+      orderId: null,
+      gmailThreadIds: ["t1", "t2"],
+      interactionIds: [201],
+    });
+    const args = (db.assignInteractionsToOrder as any).mock.calls[0][0];
+    expect(args.gmailThreadIds).toEqual(["t1", "t2"]);
+    expect(args.interactionIds).toEqual([201]);
+    expect(args.profileIds).toEqual([5]);
+  });
+
+  it("退回未分類 (orderId: null) is accepted by the schema (nullable, not optional)", async () => {
+    (db.resolveCustomerProfileIds as any).mockResolvedValue([5]);
+    (db.assignInteractionsToOrder as any).mockResolvedValue(1);
+    await expect(
+      caller().assignConversation({
+        selection: { profileId: 5 },
+        orderId: null,
+        interactionIds: [101],
+      }),
+    ).resolves.toEqual({ updated: 1 });
   });
 });

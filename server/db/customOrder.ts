@@ -128,27 +128,47 @@ export async function resolveCustomerProfileIds(sel: {
 }
 
 /**
- * customer-projects (0104) — file real-conversation turns under a project (or
- * back to 未分類 when orderId is null). Scoped to the given profileIds so a
- * turn can NEVER be moved across customers. Targets a whole Gmail thread when
- * gmailThreadId is given (the natural unit), else a single interaction row.
- * Returns the number of rows updated. No-op (0) on no DB / empty scope.
+ * customer-projects (0104) — true when an order's owning profileId is one of a
+ * customer's resolved profileIds (no cross-customer leakage). Pure, shared by
+ * every cross-customer guard that pins an order to a customer (ask-ops-stream's
+ * orderId scoping AND assignConversation) so the rule is defined once and is
+ * trivially testable — an audit (2026-06-30) found the ask-ops-stream guard had
+ * drifted to a single-profile lookup (false-403'd a customer whose order was
+ * filed under a pre-registration guest profileId) and that neither guard had a
+ * direct test. This function is the one place that rule now lives.
+ */
+export function orderBelongsToProfiles(
+  orderProfileId: number | null,
+  profileIds: number[],
+): boolean {
+  return orderProfileId != null && profileIds.includes(orderProfileId);
+}
+
+/**
+ * customer-projects (0104, batch-assign audit fix) — file real-conversation
+ * turns under a project (or back to 未分類 when orderId is null). Scoped to the
+ * given profileIds so a turn can NEVER be moved across customers. Targets whole
+ * Gmail threads (the natural unit) and/or individual interaction rows in ONE
+ * call — the 歷史 tab's multi-select bulk-assign passes both arrays at once
+ * instead of one row at a time. Returns the number of rows updated. No-op (0)
+ * on no DB / empty scope / nothing to target.
  */
 export async function assignInteractionsToOrder(args: {
   profileIds: number[];
   orderId: number | null;
-  gmailThreadId?: string | null;
-  interactionId?: number | null;
+  gmailThreadIds?: string[];
+  interactionIds?: number[];
 }): Promise<number> {
   const db = await getDb();
   if (!db || args.profileIds.length === 0) return 0;
-  const target =
-    args.gmailThreadId != null
-      ? eq(customerInteractions.gmailThreadId, args.gmailThreadId)
-      : args.interactionId != null
-        ? eq(customerInteractions.id, args.interactionId)
-        : null;
-  if (!target) return 0;
+  const threadIds = args.gmailThreadIds ?? [];
+  const rowIds = args.interactionIds ?? [];
+  const targets = [
+    threadIds.length > 0 ? inArray(customerInteractions.gmailThreadId, threadIds) : null,
+    rowIds.length > 0 ? inArray(customerInteractions.id, rowIds) : null,
+  ].filter((c): c is NonNullable<typeof c> => c != null);
+  if (targets.length === 0) return 0;
+  const target = targets.length === 1 ? targets[0] : or(...targets);
   const res = await db
     .update(customerInteractions)
     .set({ customOrderId: args.orderId })
@@ -160,18 +180,6 @@ export async function assignInteractionsToOrder(args: {
     );
   // mysql2 returns affectedRows on the result header.
   return Number((res as any)?.[0]?.affectedRows ?? (res as any)?.affectedRows ?? 0);
-}
-
-/** Load just an order's owning profileId (for the assignment cross-customer guard). */
-export async function getCustomOrderProfileId(orderId: number): Promise<number | null> {
-  const db = await getDb();
-  if (!db) return null;
-  const [o] = await db
-    .select({ profileId: customOrders.customerProfileId })
-    .from(customOrders)
-    .where(eq(customOrders.id, orderId))
-    .limit(1);
-  return o?.profileId ?? null;
 }
 
 /** Customer's preferred email language for the three sends. Defaults zh-TW. */

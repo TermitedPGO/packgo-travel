@@ -1,11 +1,12 @@
 import { describe, it, expect } from "vitest"
-import { guestToAdaptedCustomer, toListItem, deriveFollowup, buildInquiryEditedPayload, deriveProfile, deriveBallInCourt, deriveNextMove, isFollowUpDue, laToday, pickDefaultProject, shouldCommitRename } from "./adapters"
+import { guestToAdaptedCustomer, toListItem, deriveFollowup, buildInquiryEditedPayload, deriveProfile, deriveBallInCourt, deriveNextMove, isFollowUpDue, laToday, pickDefaultProject, shouldCommitRename, filterProjects } from "./adapters"
 import type { Project } from "./types"
 
 const mkProject = (id: number, title = `t${id}`): Project => ({
   id,
   orderNumber: `ORD-2026-${String(id).padStart(4, "0")}`,
   title,
+  category: null,
   status: "draft",
   departureDate: null,
 })
@@ -30,6 +31,31 @@ describe("shouldCommitRename (customer-projects 0104)", () => {
   it("skips an empty / whitespace-only draft", () => {
     expect(shouldCommitRename("北京機票", "")).toBe(false)
     expect(shouldCommitRename("北京機票", "   ")).toBe(false)
+  })
+})
+
+describe("filterProjects (ProjectBar quick filter, audit fix 2026-06-30)", () => {
+  const projects = [
+    mkProject(1, "北京來回機票"),
+    mkProject(2, "東京賞櫻"),
+    mkProject(3, "首爾自由行"),
+  ]
+
+  it("empty query returns everything unchanged", () => {
+    expect(filterProjects(projects, "")).toEqual(projects)
+    expect(filterProjects(projects, "   ")).toEqual(projects)
+  })
+
+  it("matches by title substring, case-insensitive", () => {
+    expect(filterProjects(projects, "機票")).toEqual([projects[0]])
+  })
+
+  it("matches by order number substring", () => {
+    expect(filterProjects(projects, "0002")).toEqual([projects[1]])
+  })
+
+  it("returns an empty array when nothing matches", () => {
+    expect(filterProjects(projects, "完全不存在")).toEqual([])
   })
 })
 

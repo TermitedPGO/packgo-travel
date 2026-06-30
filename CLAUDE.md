@@ -205,6 +205,18 @@ app.listen(3000)  // 應使用 process.env.PORT
 //     const ps = await db.getBookingParticipants(bookingId)  // 自動解密
 //   （同套 AES-256-GCM envelope 與 Gmail / Plaid tokens 共用，
 //   見 server/_core/tokenCrypto.ts）
+
+// ❌ 禁止：新增 customerProfiles insert site 沒先查重複（2026-06-30 加，
+//   起因 Emerald Young 重複客人事件）
+//   customerProfiles 的 email/phone 在 DB 層沒有 unique 約束（兩欄都 nullable，
+//   故意允許多筆 NULL / 多渠道客人），完全靠應用層記得先查再插。任何新的
+//   `db.insert(customerProfiles).values(...)` 之前，一律先 SELECT 同 email/phone
+//   是否已有 row，找到就重用/認領,找不到才插。參考寫法:
+//   server/routers/agent/profiles.ts upsertByIdentifier（OR 多 identifier 查找,
+//   最完整）、server/_core/customerAiSummary.ts ensureProfileId（先查 userId,
+//   再查同 email 的訪客 row 認領,最後才插）。
+//   備援：server/_core/duplicateProfileScan.ts 每週掃一次抓漏網的重複,
+//   寫進 Jeff 的 office inbox（agentMessages），但這是事後抓,不是防線。
 ```
 
 ### 4.3 部署禁止（Deploy Guard，2026-06-08 加，起因 v672 未授權自主部署）

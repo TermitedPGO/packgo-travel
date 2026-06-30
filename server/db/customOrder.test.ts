@@ -7,6 +7,8 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
+import { and, or, inArray } from "drizzle-orm";
+import { customerInteractions } from "../../drizzle/schema";
 
 vi.mock("../db", () => ({
   getDb: vi.fn(async () => null),
@@ -25,7 +27,7 @@ import {
   listInvoicesForCustomOrder,
   resolveCustomerProfileIds,
   assignInteractionsToOrder,
-  getCustomOrderProfileId,
+  orderBelongsToProfiles,
 } from "./customOrder";
 
 describe("db/customOrder — surface", () => {
@@ -40,10 +42,32 @@ describe("db/customOrder — surface", () => {
       listInvoicesForCustomOrder,
       resolveCustomerProfileIds,
       assignInteractionsToOrder,
-      getCustomOrderProfileId,
+      orderBelongsToProfiles,
     ]) {
       expect(typeof fn).toBe("function");
     }
+  });
+});
+
+describe("orderBelongsToProfiles (audit fix, 0104) — the one shared cross-customer rule", () => {
+  it("true when the order's profileId is in the customer's resolved profileIds", () => {
+    expect(orderBelongsToProfiles(7, [3, 7, 9])).toBe(true);
+  });
+  it("false when it is not in the list", () => {
+    expect(orderBelongsToProfiles(5, [3, 7, 9])).toBe(false);
+  });
+  it("false for a customer with only ONE registered profileId — the exact bug class this audit found: a customer who contacted as a guest before registering has TWO profileIds, and a single-profile lookup would wrongly reject their own pre-registration order", () => {
+    // the registered profileId (9) does NOT cover the pre-registration guest
+    // profileId (5) the order was actually filed under — caller must pass ALL
+    // resolved profileIds (via resolveCustomerProfileIds), not just one.
+    expect(orderBelongsToProfiles(5, [9])).toBe(false);
+    expect(orderBelongsToProfiles(5, [5, 9])).toBe(true);
+  });
+  it("false when the order has no owning profile (null)", () => {
+    expect(orderBelongsToProfiles(null, [3, 7])).toBe(false);
+  });
+  it("false for an empty profileIds list (unresolvable customer, never silently allow)", () => {
+    expect(orderBelongsToProfiles(7, [])).toBe(false);
   });
 });
 
@@ -92,11 +116,8 @@ describe("db/customOrder — lazy-DB null path (soft fail)", () => {
   });
   it("assignInteractionsToOrder returns 0 (customer-projects 0104)", async () => {
     expect(
-      await assignInteractionsToOrder({ profileIds: [1], orderId: 5, gmailThreadId: "t" }),
+      await assignInteractionsToOrder({ profileIds: [1], orderId: 5, gmailThreadIds: ["t"] }),
     ).toBe(0);
-  });
-  it("getCustomOrderProfileId returns null (customer-projects 0104)", async () => {
-    expect(await getCustomOrderProfileId(1)).toBeNull();
   });
 });
 
@@ -113,16 +134,28 @@ describe("assignInteractionsToOrder — guards never run an unscoped UPDATE", ()
   it("no-op (0) when profileIds is empty (db present, update never called)", async () => {
     getDbMock.mockResolvedValueOnce(explodingDb());
     expect(
-      await assignInteractionsToOrder({ profileIds: [], orderId: 5, gmailThreadId: "t" }),
+      await assignInteractionsToOrder({ profileIds: [], orderId: 5, gmailThreadIds: ["t"] }),
     ).toBe(0);
   });
 
-  it("no-op (0) when neither gmailThreadId nor interactionId is given", async () => {
+  it("no-op (0) when neither gmailThreadIds nor interactionIds is given", async () => {
     getDbMock.mockResolvedValueOnce(explodingDb());
     expect(await assignInteractionsToOrder({ profileIds: [1], orderId: 5 })).toBe(0);
   });
 
-  it("scoped UPDATE runs (returns affectedRows) when target + scope are present", async () => {
+  it("no-op (0) when gmailThreadIds and interactionIds are both empty arrays", async () => {
+    getDbMock.mockResolvedValueOnce(explodingDb());
+    expect(
+      await assignInteractionsToOrder({
+        profileIds: [1],
+        orderId: 5,
+        gmailThreadIds: [],
+        interactionIds: [],
+      }),
+    ).toBe(0);
+  });
+
+  it("scoped UPDATE runs (returns affectedRows) when target + scope are present, customerProfileId scope is the OUTER AND (not nested inside an OR)", async () => {
     let captured: unknown;
     getDbMock.mockResolvedValueOnce({
       update() {
@@ -142,9 +175,51 @@ describe("assignInteractionsToOrder — guards never run an unscoped UPDATE", ()
     const n = await assignInteractionsToOrder({
       profileIds: [1, 2],
       orderId: 142,
-      gmailThreadId: "thread-abc",
+      gmailThreadIds: ["thread-abc"],
     });
     expect(n).toBe(2);
-    expect(captured).toBeTruthy(); // a WHERE (scope + target) was applied
+    // Structural equality, not just truthy (verification-pass catch, 2026-06-30:
+    // `expect(captured).toBeTruthy()` alone would still pass even if a future
+    // regression swapped the top-level and() for or() — exactly the
+    // cross-customer leak class this rule exists to prevent). Built from the
+    // SAME real drizzle-orm builders + schema columns as the production code.
+    const expected = and(
+      inArray(customerInteractions.customerProfileId, [1, 2]),
+      inArray(customerInteractions.gmailThreadId, ["thread-abc"]),
+    );
+    expect(captured).toEqual(expected);
+  });
+
+  it("batch: multiple gmailThreadIds AND interactionIds combine into one UPDATE — customerProfileId scope wraps the WHOLE or(), never sits inside it", async () => {
+    let captured: unknown;
+    getDbMock.mockResolvedValueOnce({
+      update() {
+        return {
+          set() {
+            return {
+              where(w: unknown) {
+                captured = w;
+                return Promise.resolve([{ affectedRows: 5 }]);
+              },
+            };
+          },
+        };
+      },
+    } as any);
+    const n = await assignInteractionsToOrder({
+      profileIds: [1],
+      orderId: 142,
+      gmailThreadIds: ["thread-a", "thread-b"],
+      interactionIds: [101, 102],
+    });
+    expect(n).toBe(5);
+    const expected = and(
+      inArray(customerInteractions.customerProfileId, [1]),
+      or(
+        inArray(customerInteractions.gmailThreadId, ["thread-a", "thread-b"]),
+        inArray(customerInteractions.id, [101, 102]),
+      ),
+    );
+    expect(captured).toEqual(expected);
   });
 });

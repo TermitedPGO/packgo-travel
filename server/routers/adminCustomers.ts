@@ -25,6 +25,8 @@ import {
   inquiryReplyTurn,
   interactionTurn,
   mergeThread,
+  resolveConversationThreadScope,
+  includesInquiries,
 } from "./adminCustomersThread";
 import { isHiddenCustomer } from "./adminCustomersFilter";
 import { loadCustomerDocs } from "../_core/customerDocsLoader";
@@ -1447,8 +1449,9 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
       } = await import("../../drizzle/schema");
       const lim = input.limit ?? 50;
       const isRegistered = "userId" in input;
-      // Project-scoped view hides first-contact inquiries (they predate the order).
-      const projectScoped = input.orderId !== undefined;
+      // customer-projects (0104) — which of the three views applies (pure,
+      // unit-tested in adminCustomersThread.ts).
+      const scope = resolveConversationThreadScope(input);
 
       // Resolve identity from OUR DB. For a registered user we also resolve the
       // VERIFIED account email (users.email) so their pre-login, email-filed
@@ -1494,7 +1497,7 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
 
       // ── Source 1+2: inquiries (original message) + inquiryMessages (replies)
       // Skipped entirely in a project-scoped view (first contact isn't an order).
-      const inquiryWhere = projectScoped
+      const inquiryWhere = !includesInquiries(scope)
         ? null
         : isRegistered
         ? verifiedEmail
@@ -1560,9 +1563,9 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
           inArray(customerInteractions.customerProfileId, profileIds),
           sql`NOT (COALESCE(${customerInteractions.classification}, '') = 'spam' AND COALESCE(${customerInteractions.spamVerdict}, '') != 'rescued')`,
         ];
-        if (input.orderId !== undefined) {
-          conds.push(eq(customerInteractions.customOrderId, input.orderId));
-        } else if (input.unfiledOnly) {
+        if (scope.mode === "project") {
+          conds.push(eq(customerInteractions.customOrderId, scope.orderId));
+        } else if (scope.mode === "unfiled") {
           conds.push(isNull(customerInteractions.customOrderId));
         }
         const interactions = await drizzleDb

@@ -563,8 +563,8 @@ function AssignControl({
     assignM.mutate({
       selection: sel,
       orderId,
-      gmailThreadId: assign.gmailThreadId ?? undefined,
-      interactionId: assign.interactionId,
+      gmailThreadIds: assign.gmailThreadId ? [assign.gmailThreadId] : undefined,
+      interactionIds: assign.gmailThreadId ? undefined : [assign.interactionId],
     })
   const targets = projects.filter((p) => p.id !== assign.customOrderId)
 
@@ -611,6 +611,90 @@ type ConvoMsg = {
   body: string
   createdAt: Date
   assign?: { interactionId: number; gmailThreadId: string | null; customOrderId: number | null }
+}
+
+/**
+ * customer-projects (0104, batch-assign audit fix) — sticky bar that appears
+ * once 2+ assignable messages are checked, so a backlog (Emerald has 28 unsorted
+ * historical turns) can be filed in one click instead of one row at a time.
+ * Distinct gmailThreadIds (the natural assign unit) are collected from the
+ * selection; any selected row with no thread id falls back to its interactionId.
+ * Both arrays go to assignConversation in a single mutation call.
+ */
+function BulkAssignBar({
+  customer: c,
+  projects,
+  selected,
+  onDone,
+}: {
+  customer: AdaptedCustomer
+  projects: Project[]
+  selected: ConvoMsg[]
+  onDone: () => void
+}) {
+  const { t } = useLocale()
+  const utils = trpc.useUtils()
+  const sel = toSelection(c)
+  const assignM = trpc.customerOrders.assignConversation.useMutation({
+    onSuccess: () => {
+      toast.success(t("admin.customers.projects.assigned"))
+      void utils.admin.customerConversationThread.invalidate()
+      void utils.customerOrders.listForCustomer.invalidate(sel)
+      onDone()
+    },
+    onError: () => toast.error(t("admin.customers.projects.assignFailed")),
+  })
+  const go = (orderId: number | null) => {
+    const threadIds = Array.from(
+      new Set(
+        selected
+          .map((m) => m.assign?.gmailThreadId)
+          .filter((x): x is string => x != null),
+      ),
+    )
+    const interactionIds = selected
+      .filter((m) => m.assign && m.assign.gmailThreadId == null)
+      .map((m) => m.assign!.interactionId)
+    assignM.mutate({
+      selection: sel,
+      orderId,
+      gmailThreadIds: threadIds.length ? threadIds : undefined,
+      interactionIds: interactionIds.length ? interactionIds : undefined,
+    })
+  }
+
+  return (
+    <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 rounded-xl border border-gray-300 bg-white px-3 py-2 shadow-sm">
+      <span className="text-[11px] font-medium text-gray-700">
+        {t("admin.customers.projects.selectedCount", { n: selected.length })}
+      </span>
+      <span className="text-gray-300">·</span>
+      {projects.map((p) => (
+        <button
+          key={p.id}
+          disabled={assignM.isPending}
+          onClick={() => go(p.id)}
+          className="text-[10px] px-1.5 py-0.5 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
+        >
+          {p.title}
+        </button>
+      ))}
+      <button
+        disabled={assignM.isPending}
+        onClick={() => go(null)}
+        className="text-[10px] px-1.5 py-0.5 rounded-md border border-dashed border-gray-300 text-gray-500 hover:bg-gray-50 inline-flex items-center gap-1 transition-colors disabled:opacity-50"
+      >
+        <Inbox className="w-2.5 h-2.5" />
+        {t("admin.customers.projects.backToUnfiled")}
+      </button>
+      <button
+        onClick={onDone}
+        className="ml-auto text-[10px] text-gray-400 hover:text-gray-700 transition-colors"
+      >
+        {t("admin.customers.projects.clearSelection")}
+      </button>
+    </div>
+  )
 }
 
 export function TimelineTab({
@@ -667,6 +751,22 @@ export function TimelineTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [c.id, activeProjectId])
 
+  // customer-projects (0104, batch-assign audit fix) — multi-select for bulk
+  // filing. Cleared whenever the customer/project/day view changes so a stale
+  // selection can never carry into a different scope.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    setSelectedIds(new Set())
+  }, [c.id, activeProjectId, selDay])
+  const toggleSelect = (id: string) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  const selectedMsgs = messages.filter((m) => selectedIds.has(m.id))
+
   const shownChat =
     selDay === ALL_DATES ? messages : messages.filter((m) => convoDayKey(m.createdAt) === selDay)
   const chipCls = (active: boolean) =>
@@ -696,8 +796,27 @@ export function TimelineTab({
               ))}
             </div>
           )}
+          {selectedMsgs.length > 1 && (
+            <BulkAssignBar
+              customer={c}
+              projects={projects}
+              selected={selectedMsgs}
+              onDone={() => setSelectedIds(new Set())}
+            />
+          )}
           {shownChat.map((m) => (
             <div key={m.id} className="flex gap-2.5 text-[12px]">
+              {m.assign ? (
+                <input
+                  type="checkbox"
+                  className="flex-shrink-0 mt-0.5 rounded border-gray-300"
+                  checked={selectedIds.has(m.id)}
+                  onChange={() => toggleSelect(m.id)}
+                  aria-label={t("admin.customers.projects.selectForBulk")}
+                />
+              ) : (
+                <span className="flex-shrink-0 w-3.5" />
+              )}
               <span className="flex-shrink-0 text-[10px] text-gray-400 w-10 pt-0.5">
                 {m.createdAt.toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" })}
               </span>

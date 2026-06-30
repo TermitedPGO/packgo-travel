@@ -290,12 +290,24 @@ export const adminCustomerOrdersRouter = router({
     }),
 
   /**
-   * customer-projects (0104) — file a real-conversation turn (Gmail/email) under
-   * a project, or send it back to 未分類 (orderId: null). Whole-thread by
-   * gmailThreadId (the natural unit), else one interaction row. Cross-customer
-   * guard: scoped to the selection's profileIds; when filing INTO an order, the
-   * order must belong to the same customer. New mail keeps landing in 未分類
+   * customer-projects (0104, batch-assign audit fix) — file real-conversation
+   * turns (Gmail/email) under a project, or send them back to 未分類
+   * (orderId: null). Whole-thread by gmailThreadId (the natural unit) and/or
+   * individual interaction rows, BOTH as arrays so the 歷史 tab can multi-select
+   * and assign everything in one call instead of one row at a time (a customer
+   * like Emerald can have 20+ unsorted historical turns — one-by-one doesn't
+   * scale). Cross-customer guard: scoped to the selection's profileIds via the
+   * shared orderBelongsToProfiles rule; when filing INTO an order, the order
+   * must belong to the same customer. New mail keeps landing in 未分類
    * (threadFiling.ts unchanged) — this is the manual assignment Jeff drives.
+   *
+   * Terminal-status rule: blocks filing into a CANCELLED order (a dead order —
+   * Jeff almost certainly meant a different one) but deliberately ALLOWS a
+   * COMPLETED order (post-trip correspondence, e.g. thank-you notes or photo
+   * shares, legitimately belongs on a finished project's record). This is
+   * narrower than assertNotTerminal (which also blocks completed) on purpose —
+   * filing a conversation reference doesn't mutate the order's facts the way
+   * `update` does, so the same lockdown doesn't apply.
    */
   assignConversation: adminProcedure
     .input(
@@ -303,12 +315,13 @@ export const adminCustomerOrdersRouter = router({
         .object({
           selection: selectionSchema,
           orderId: z.number().int().positive().nullable(),
-          gmailThreadId: z.string().trim().min(1).max(255).optional(),
-          interactionId: z.number().int().positive().optional(),
+          gmailThreadIds: z.array(z.string().trim().min(1).max(255)).max(100).optional(),
+          interactionIds: z.array(z.number().int().positive()).max(200).optional(),
         })
-        .refine((v) => v.gmailThreadId != null || v.interactionId != null, {
-          message: "pass gmailThreadId or interactionId",
-        }),
+        .refine(
+          (v) => (v.gmailThreadIds?.length ?? 0) + (v.interactionIds?.length ?? 0) > 0,
+          { message: "pass gmailThreadIds or interactionIds" },
+        ),
     )
     .mutation(async ({ input, ctx }) => {
       const profileIds = await db.resolveCustomerProfileIds(
@@ -320,21 +333,28 @@ export const adminCustomerOrdersRouter = router({
           message: "cannot resolve customer (no database?)",
         });
       }
-      // Filing INTO an order: it must belong to THIS customer (no cross-customer).
+      // Filing INTO an order: it must belong to THIS customer (no cross-customer),
+      // and must not be cancelled (dead order).
       if (input.orderId !== null) {
-        const ownerProfileId = await db.getCustomOrderProfileId(input.orderId);
-        if (ownerProfileId == null || !profileIds.includes(ownerProfileId)) {
+        const order = await loadOrder(input.orderId);
+        if (!db.orderBelongsToProfiles(order.customerProfileId, profileIds)) {
           throw new TRPCError({
             code: "FORBIDDEN",
             message: "order does not belong to this customer",
+          });
+        }
+        if (order.status === "cancelled") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "cannot file a conversation into a cancelled order",
           });
         }
       }
       const updated = await db.assignInteractionsToOrder({
         profileIds,
         orderId: input.orderId,
-        gmailThreadId: input.gmailThreadId ?? null,
-        interactionId: input.interactionId ?? null,
+        gmailThreadIds: input.gmailThreadIds,
+        interactionIds: input.interactionIds,
       });
       await audit({
         ctx,
@@ -343,8 +363,8 @@ export const adminCustomerOrdersRouter = router({
         targetId: input.orderId ?? undefined,
         changes: {
           orderId: input.orderId,
-          gmailThreadId: input.gmailThreadId,
-          interactionId: input.interactionId,
+          gmailThreadIds: input.gmailThreadIds,
+          interactionIds: input.interactionIds,
           updated,
         },
       });

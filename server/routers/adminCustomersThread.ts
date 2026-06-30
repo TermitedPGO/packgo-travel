@@ -104,6 +104,37 @@ export function interactionTurn(r: {
 }
 
 /**
+ * customer-projects (0104) — which of the THREE customerConversationThread
+ * views applies, extracted as a pure decision so the branching is directly
+ * unit-testable (audit fix, 2026-06-30 — this had zero coverage; the router
+ * itself only does I/O once the scope is known). orderId set → that single
+ * project; unfiledOnly → the「未分類」basket; neither → the customer-wide ALL
+ * view that Overview / 真相條 / followup depend on staying whole.
+ */
+export type ConversationThreadScope =
+  | { mode: "project"; orderId: number }
+  | { mode: "unfiled" }
+  | { mode: "all" };
+
+export function resolveConversationThreadScope(input: {
+  orderId?: number;
+  unfiledOnly?: boolean;
+}): ConversationThreadScope {
+  if (input.orderId !== undefined) return { mode: "project", orderId: input.orderId };
+  if (input.unfiledOnly) return { mode: "unfiled" };
+  return { mode: "all" };
+}
+
+/**
+ * Pure: whether first-contact sources (inquiries / inquiryMessages) belong in
+ * this view. Hidden ONLY in the project-scoped view — first contact predates
+ * any order, so it can never legitimately belong to one specific project.
+ */
+export function includesInquiries(scope: ConversationThreadScope): boolean {
+  return scope.mode !== "project";
+}
+
+/**
  * Merge per-source turn groups into one chronological thread (oldest → newest),
  * capped to the newest `lim`. `truncated` is true when ANY source already hit
  * its own cap — i.e. an older slice may have been dropped — so the caller can

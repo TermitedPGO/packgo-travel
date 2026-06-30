@@ -5,6 +5,8 @@ import {
   interactionTurn,
   mergeThread,
   stripAgentMarkup,
+  resolveConversationThreadScope,
+  includesInquiries,
   type ThreadTurn,
 } from "./adminCustomersThread";
 
@@ -145,5 +147,51 @@ describe("adminCustomersThread — stripAgentMarkup (leaked safety tags)", () =>
     expect(stripAgentMarkup("   ")).toBe("   ");
     expect(stripAgentMarkup("Hi   Jeff")).toBe("Hi   Jeff");
     expect(stripAgentMarkup("  leading + trailing  ")).toBe("  leading + trailing  ");
+  });
+});
+
+/**
+ * resolveConversationThreadScope / includesInquiries — customer-projects
+ * (0104) audit fix (2026-06-30): customerConversationThread's three-state
+ * branching had zero test coverage before this. This is the exact decision
+ * the router's query makes I/O off of.
+ */
+describe("resolveConversationThreadScope (customer-projects three-state)", () => {
+  it("orderId set → project mode, carries the orderId", () => {
+    expect(resolveConversationThreadScope({ orderId: 142 })).toEqual({
+      mode: "project",
+      orderId: 142,
+    });
+  });
+
+  it("unfiledOnly true, no orderId → unfiled mode", () => {
+    expect(resolveConversationThreadScope({ unfiledOnly: true })).toEqual({ mode: "unfiled" });
+  });
+
+  it("neither set → all mode (the customer-wide view Overview/真相條 depend on)", () => {
+    expect(resolveConversationThreadScope({})).toEqual({ mode: "all" });
+  });
+
+  it("orderId wins when BOTH orderId and unfiledOnly are somehow set", () => {
+    expect(resolveConversationThreadScope({ orderId: 7, unfiledOnly: true })).toEqual({
+      mode: "project",
+      orderId: 7,
+    });
+  });
+
+  it("unfiledOnly: false is the same as omitted → all mode", () => {
+    expect(resolveConversationThreadScope({ unfiledOnly: false })).toEqual({ mode: "all" });
+  });
+});
+
+describe("includesInquiries", () => {
+  it("hidden ONLY in project mode (first contact predates any order)", () => {
+    expect(includesInquiries({ mode: "project", orderId: 7 })).toBe(false);
+  });
+  it("included in unfiled mode", () => {
+    expect(includesInquiries({ mode: "unfiled" })).toBe(true);
+  });
+  it("included in all mode", () => {
+    expect(includesInquiries({ mode: "all" })).toBe(true);
   });
 });
