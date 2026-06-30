@@ -7,12 +7,14 @@
 // 紅線:supplierCost 是普通欄位,這層「不做」任何自動填(手動由 admin 給)。
 // depositPaidAt/balancePaidAt 只記已收時間,不是營收認列(§17550)。
 
-import { eq, desc, gte, sql } from "drizzle-orm";
+import { eq, desc, gte, sql, and, or, inArray } from "drizzle-orm";
 import {
   customOrders,
   InsertCustomOrder,
   CustomOrder,
   customerProfiles,
+  customerInteractions,
+  users,
 } from "../../drizzle/schema";
 import { getDb } from "../db";
 
@@ -81,6 +83,95 @@ export async function findCustomerProfileId(sel: {
     .where(eq(customerProfiles.userId, sel.userId))
     .limit(1);
   return rows[0]?.id ?? null;
+}
+
+/**
+ * customer-projects (0104) — resolve a selection into ALL of the customer's
+ * profileIds (a registered customer can own several: their own row PLUS
+ * pre-registration guest rows filed under their verified email). Mirrors the
+ * identity resolution in customerConversationThread so assignment scopes to the
+ * exact same rows the 歷史 tab shows. Guest selection → just that one row.
+ */
+export async function resolveCustomerProfileIds(sel: {
+  userId?: number | null;
+  profileId?: number | null;
+}): Promise<number[]> {
+  const db = await getDb();
+  if (!db) return [];
+  if (sel.profileId != null) {
+    const rows = await db
+      .select({ id: customerProfiles.id })
+      .from(customerProfiles)
+      .where(eq(customerProfiles.id, sel.profileId))
+      .limit(1);
+    return rows.map((r) => r.id);
+  }
+  if (sel.userId == null) return [];
+  const [u] = await db
+    .select({ email: users.email })
+    .from(users)
+    .where(eq(users.id, sel.userId))
+    .limit(1);
+  const email = u?.email ?? null;
+  const rows = await db
+    .select({ id: customerProfiles.id })
+    .from(customerProfiles)
+    .where(
+      email
+        ? or(
+            eq(customerProfiles.userId, sel.userId),
+            eq(customerProfiles.email, email),
+          )
+        : eq(customerProfiles.userId, sel.userId),
+    );
+  return rows.map((r) => r.id);
+}
+
+/**
+ * customer-projects (0104) — file real-conversation turns under a project (or
+ * back to 未分類 when orderId is null). Scoped to the given profileIds so a
+ * turn can NEVER be moved across customers. Targets a whole Gmail thread when
+ * gmailThreadId is given (the natural unit), else a single interaction row.
+ * Returns the number of rows updated. No-op (0) on no DB / empty scope.
+ */
+export async function assignInteractionsToOrder(args: {
+  profileIds: number[];
+  orderId: number | null;
+  gmailThreadId?: string | null;
+  interactionId?: number | null;
+}): Promise<number> {
+  const db = await getDb();
+  if (!db || args.profileIds.length === 0) return 0;
+  const target =
+    args.gmailThreadId != null
+      ? eq(customerInteractions.gmailThreadId, args.gmailThreadId)
+      : args.interactionId != null
+        ? eq(customerInteractions.id, args.interactionId)
+        : null;
+  if (!target) return 0;
+  const res = await db
+    .update(customerInteractions)
+    .set({ customOrderId: args.orderId })
+    .where(
+      and(
+        inArray(customerInteractions.customerProfileId, args.profileIds),
+        target,
+      ),
+    );
+  // mysql2 returns affectedRows on the result header.
+  return Number((res as any)?.[0]?.affectedRows ?? (res as any)?.affectedRows ?? 0);
+}
+
+/** Load just an order's owning profileId (for the assignment cross-customer guard). */
+export async function getCustomOrderProfileId(orderId: number): Promise<number | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [o] = await db
+    .select({ profileId: customOrders.customerProfileId })
+    .from(customOrders)
+    .where(eq(customOrders.id, orderId))
+    .limit(1);
+  return o?.profileId ?? null;
 }
 
 /** Customer's preferred email language for the three sends. Defaults zh-TW. */

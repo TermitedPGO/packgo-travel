@@ -277,6 +277,68 @@ export const adminCustomerOrdersRouter = router({
       return updated;
     }),
 
+  /**
+   * customer-projects (0104) — file a real-conversation turn (Gmail/email) under
+   * a project, or send it back to 未分類 (orderId: null). Whole-thread by
+   * gmailThreadId (the natural unit), else one interaction row. Cross-customer
+   * guard: scoped to the selection's profileIds; when filing INTO an order, the
+   * order must belong to the same customer. New mail keeps landing in 未分類
+   * (threadFiling.ts unchanged) — this is the manual assignment Jeff drives.
+   */
+  assignConversation: adminProcedure
+    .input(
+      z
+        .object({
+          selection: selectionSchema,
+          orderId: z.number().int().positive().nullable(),
+          gmailThreadId: z.string().trim().min(1).max(255).optional(),
+          interactionId: z.number().int().positive().optional(),
+        })
+        .refine((v) => v.gmailThreadId != null || v.interactionId != null, {
+          message: "pass gmailThreadId or interactionId",
+        }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const profileIds = await db.resolveCustomerProfileIds(
+        selToArgs(input.selection),
+      );
+      if (profileIds.length === 0) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "cannot resolve customer (no database?)",
+        });
+      }
+      // Filing INTO an order: it must belong to THIS customer (no cross-customer).
+      if (input.orderId !== null) {
+        const ownerProfileId = await db.getCustomOrderProfileId(input.orderId);
+        if (ownerProfileId == null || !profileIds.includes(ownerProfileId)) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "order does not belong to this customer",
+          });
+        }
+      }
+      const updated = await db.assignInteractionsToOrder({
+        profileIds,
+        orderId: input.orderId,
+        gmailThreadId: input.gmailThreadId ?? null,
+        interactionId: input.interactionId ?? null,
+      });
+      await audit({
+        ctx,
+        action: "customOrder.assignConversation",
+        targetType: "customOrder",
+        targetId: input.orderId ?? undefined,
+        changes: {
+          orderId: input.orderId,
+          gmailThreadId: input.gmailThreadId,
+          interactionId: input.interactionId,
+          updated,
+        },
+      });
+      return { updated };
+    }),
+
   // ── PDF 上傳(拖曳)──────────────────────────────────────────────────────
   // Presign a browser→R2 DIRECT PUT for a quote / confirmation PDF (big files
   // skip the Express body limit). Client PUTs the file to putUrl, then calls

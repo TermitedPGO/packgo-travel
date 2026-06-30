@@ -31,6 +31,28 @@ describe("adminCustomersThread — sender normalization", () => {
     expect(interactionTurn({ id: 5, direction: "inbound", content: "hi", createdAt: d("2026-01-03") }).senderRole).toBe("customer");
     expect(interactionTurn({ id: 6, direction: "outbound", content: "reply", createdAt: d("2026-01-03") }).senderRole).toBe("jeff");
   });
+
+  it("customer-projects (0104): interaction turns carry an assignment handle", () => {
+    const t = interactionTurn({
+      id: 9,
+      direction: "inbound",
+      content: "票出了嗎",
+      createdAt: d("2026-07-01"),
+      gmailThreadId: "thread-abc",
+      customOrderId: 142,
+    });
+    expect(t.assign).toEqual({ interactionId: 9, gmailThreadId: "thread-abc", customOrderId: 142 });
+  });
+
+  it("assignment handle defaults to nulls for rows that predate thread filing", () => {
+    const t = interactionTurn({ id: 10, direction: "inbound", content: "x", createdAt: d("2026-01-01") });
+    expect(t.assign).toEqual({ interactionId: 10, gmailThreadId: null, customOrderId: null });
+  });
+
+  it("inquiry turns are NOT assignable (no handle — first contact predates orders)", () => {
+    expect(inquiryFirstTurn({ id: 1, message: "嗨", createdAt: d("2026-01-01") }).assign).toBeUndefined();
+    expect(inquiryReplyTurn({ id: 1, senderType: "admin", message: "好", createdAt: d("2026-01-01") }).assign).toBeUndefined();
+  });
 });
 
 describe("adminCustomersThread — source key namespacing (no cross-table collision)", () => {

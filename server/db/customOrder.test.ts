@@ -12,6 +12,9 @@ vi.mock("../db", () => ({
   getDb: vi.fn(async () => null),
 }));
 
+import { getDb } from "../db";
+const getDbMock = vi.mocked(getDb);
+
 import {
   generateOrderNumber,
   ensureCustomerProfileId,
@@ -20,6 +23,9 @@ import {
   listCustomOrdersByProfile,
   updateCustomOrder,
   listInvoicesForCustomOrder,
+  resolveCustomerProfileIds,
+  assignInteractionsToOrder,
+  getCustomOrderProfileId,
 } from "./customOrder";
 
 describe("db/customOrder — surface", () => {
@@ -32,6 +38,9 @@ describe("db/customOrder — surface", () => {
       listCustomOrdersByProfile,
       updateCustomOrder,
       listInvoicesForCustomOrder,
+      resolveCustomerProfileIds,
+      assignInteractionsToOrder,
+      getCustomOrderProfileId,
     ]) {
       expect(typeof fn).toBe("function");
     }
@@ -76,5 +85,66 @@ describe("db/customOrder — lazy-DB null path (soft fail)", () => {
   });
   it("listInvoicesForCustomOrder returns []", async () => {
     expect(await listInvoicesForCustomOrder(1)).toEqual([]);
+  });
+  it("resolveCustomerProfileIds returns [] (customer-projects 0104)", async () => {
+    expect(await resolveCustomerProfileIds({ userId: 9 })).toEqual([]);
+    expect(await resolveCustomerProfileIds({ profileId: 42 })).toEqual([]);
+  });
+  it("assignInteractionsToOrder returns 0 (customer-projects 0104)", async () => {
+    expect(
+      await assignInteractionsToOrder({ profileIds: [1], orderId: 5, gmailThreadId: "t" }),
+    ).toBe(0);
+  });
+  it("getCustomOrderProfileId returns null (customer-projects 0104)", async () => {
+    expect(await getCustomOrderProfileId(1)).toBeNull();
+  });
+});
+
+describe("assignInteractionsToOrder — guards never run an unscoped UPDATE", () => {
+  // A db whose .update() throws — so the assertions below prove the guard
+  // returned 0 WITHOUT touching the table (not just because getDb was null).
+  const explodingDb = () =>
+    ({
+      update() {
+        throw new Error("UPDATE must not run when the assignment is unscoped");
+      },
+    }) as any;
+
+  it("no-op (0) when profileIds is empty (db present, update never called)", async () => {
+    getDbMock.mockResolvedValueOnce(explodingDb());
+    expect(
+      await assignInteractionsToOrder({ profileIds: [], orderId: 5, gmailThreadId: "t" }),
+    ).toBe(0);
+  });
+
+  it("no-op (0) when neither gmailThreadId nor interactionId is given", async () => {
+    getDbMock.mockResolvedValueOnce(explodingDb());
+    expect(await assignInteractionsToOrder({ profileIds: [1], orderId: 5 })).toBe(0);
+  });
+
+  it("scoped UPDATE runs (returns affectedRows) when target + scope are present", async () => {
+    let captured: unknown;
+    getDbMock.mockResolvedValueOnce({
+      update() {
+        return {
+          set() {
+            return {
+              where(w: unknown) {
+                captured = w;
+                // mysql2 shape: [ResultSetHeader, undefined]
+                return Promise.resolve([{ affectedRows: 2 }]);
+              },
+            };
+          },
+        };
+      },
+    } as any);
+    const n = await assignInteractionsToOrder({
+      profileIds: [1, 2],
+      orderId: 142,
+      gmailThreadId: "thread-abc",
+    });
+    expect(n).toBe(2);
+    expect(captured).toBeTruthy(); // a WHERE (scope + target) was applied
   });
 });

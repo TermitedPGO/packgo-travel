@@ -15,6 +15,15 @@ export type ThreadTurn = {
   body: string;
   context: string | null;
   createdAt: Date;
+  /** customer-projects (0104) — assignment handle, present ONLY on
+   *  customerInteractions turns (the assignable real-conversation unit). The
+   *  歷史 tab uses it to file a whole Gmail thread under a project. inquiries /
+   *  inquiryMessages turns omit it (not assignable in Phase 1). */
+  assign?: {
+    interactionId: number;
+    gmailThreadId: string | null;
+    customOrderId: number | null;
+  };
 };
 
 /**
@@ -68,12 +77,17 @@ export function inquiryReplyTurn(r: {
   };
 }
 
-/** customerInteractions — inbound is from the customer, outbound is from us. */
+/** customerInteractions — inbound is from the customer, outbound is from us.
+ *  Carries the assignment handle (0104) so the 歷史 tab can file the row's whole
+ *  Gmail thread under a project. gmailThreadId / customOrderId default to null
+ *  for older callers / rows that predate thread filing. */
 export function interactionTurn(r: {
   id: number;
   direction: string;
   content: string;
   createdAt: Date;
+  gmailThreadId?: string | null;
+  customOrderId?: number | null;
 }): ThreadTurn {
   return {
     id: `ci:${r.id}`,
@@ -81,6 +95,11 @@ export function interactionTurn(r: {
     body: stripAgentMarkup(r.content),
     context: null,
     createdAt: r.createdAt,
+    assign: {
+      interactionId: r.id,
+      gmailThreadId: r.gmailThreadId ?? null,
+      customOrderId: r.customOrderId ?? null,
+    },
   };
 }
 

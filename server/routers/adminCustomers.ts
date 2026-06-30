@@ -1414,12 +1414,18 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
           .object({
             userId: z.number().int().positive(),
             limit: z.number().int().min(1).max(200).optional(),
+            // customer-projects (0104) — scope to one project. Set → only that
+            // project's filed Gmail/email turns (inquiries/inquiryMessages are
+            // hidden: first-contact predates any order). Omitted → the「未分類」
+            // view (interactions with customOrderId IS NULL) + inquiries.
+            orderId: z.number().int().positive().optional(),
           })
           .strict(),
         z
           .object({
             profileId: z.number().int().positive(),
             limit: z.number().int().min(1).max(200).optional(),
+            orderId: z.number().int().positive().optional(),
           })
           .strict(),
       ]),
@@ -1435,6 +1441,8 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
       } = await import("../../drizzle/schema");
       const lim = input.limit ?? 50;
       const isRegistered = "userId" in input;
+      // Project-scoped view hides first-contact inquiries (they predate the order).
+      const projectScoped = input.orderId !== undefined;
 
       // Resolve identity from OUR DB. For a registered user we also resolve the
       // VERIFIED account email (users.email) so their pre-login, email-filed
@@ -1479,7 +1487,10 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
       }
 
       // ── Source 1+2: inquiries (original message) + inquiryMessages (replies)
-      const inquiryWhere = isRegistered
+      // Skipped entirely in a project-scoped view (first contact isn't an order).
+      const inquiryWhere = projectScoped
+        ? null
+        : isRegistered
         ? verifiedEmail
           ? or(
               eq(inquiries.userId, input.userId),
@@ -1536,17 +1547,26 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
       // shows, outbound (classification NULL) is never hidden.
       let interactionTurns: ThreadTurn[] = [];
       if (profileIds.length > 0) {
+        // customer-projects (0104) — project view: this order's turns;
+        // 未分類 view: only unassigned (customOrderId IS NULL).
+        const orderFilter =
+          input.orderId !== undefined
+            ? eq(customerInteractions.customOrderId, input.orderId)
+            : isNull(customerInteractions.customOrderId);
         const interactions = await drizzleDb
           .select({
             id: customerInteractions.id,
             direction: customerInteractions.direction,
             content: customerInteractions.content,
             createdAt: customerInteractions.createdAt,
+            gmailThreadId: customerInteractions.gmailThreadId,
+            customOrderId: customerInteractions.customOrderId,
           })
           .from(customerInteractions)
           .where(
             and(
               inArray(customerInteractions.customerProfileId, profileIds),
+              orderFilter,
               sql`NOT (COALESCE(${customerInteractions.classification}, '') = 'spam' AND COALESCE(${customerInteractions.spamVerdict}, '') != 'rescued')`,
             ),
           )
