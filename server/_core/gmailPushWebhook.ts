@@ -98,11 +98,39 @@ export async function verifyPushAuth(
   return { ok: true, email: payload.email };
 }
 
+/**
+ * Fail-CLOSED config gate. BOTH the audience and the service account must be set,
+ * else the OIDC check skips the audience assertion (audience unset) and/or the SA
+ * assertion (SA unset) — together that accepts ANY Google-signed token (any GCP
+ * project's service account) on any internet-reachable deploy, not just prod.
+ * Returns an error reason when unconfigured, null when safe. Pure + exported so
+ * the gate is unit-tested without express/DB, and env-INDEPENDENT (a reachable
+ * staging/preview host must fail closed too — NOT gated on NODE_ENV).
+ */
+export function pushConfigError(
+  audience: string | undefined,
+  serviceAccount: string | undefined,
+): string | null {
+  if (!audience || !serviceAccount) {
+    return "GMAIL_PUSH_AUDIENCE / GMAIL_PUSH_SA unset — refusing (fail-closed)";
+  }
+  return null;
+}
+
 export async function handleGmailPushWebhook(req: Request, res: Response) {
   const expectedAudience = process.env.GMAIL_PUSH_AUDIENCE || undefined;
   const expectedServiceAccount = process.env.GMAIL_PUSH_SA || undefined;
 
-  // 1. Verify the request really came from Google's Pub/Sub.
+  // 0. Fail closed if the push identity isn't fully configured — BEFORE verifying,
+  // so an unconfigured-but-reachable deploy can never process a single request.
+  const configErr = pushConfigError(expectedAudience, expectedServiceAccount);
+  if (configErr) {
+    log.error({}, `[gmailPush] ${configErr}`);
+    return res.status(500).send("push not configured");
+  }
+
+  // 1. Verify the request really came from Google's Pub/Sub (signature + audience
+  // + expiry + the exact service account — both guaranteed set past the gate).
   const auth = await verifyPushAuth(req.headers["authorization"], {
     expectedAudience,
     expectedServiceAccount,
@@ -112,16 +140,6 @@ export async function handleGmailPushWebhook(req: Request, res: Response) {
     // 401 → Pub/Sub treats as failure and (per its policy) retries; that's fine
     // for a transient key fetch, and a forged request just keeps getting 401.
     return res.status(401).send("unauthorized");
-  }
-
-  // Hard-require an audience in production — verifying signature alone would let
-  // ANY Google-signed token through (e.g. from another project's SA).
-  if (process.env.NODE_ENV === "production" && !expectedAudience) {
-    log.error(
-      {},
-      "[gmailPush] GMAIL_PUSH_AUDIENCE is unset in production — refusing to process",
-    );
-    return res.status(500).send("push audience not configured");
   }
 
   // 2. Parse the envelope. Malformed → 204 (drop, don't make Pub/Sub redeliver).

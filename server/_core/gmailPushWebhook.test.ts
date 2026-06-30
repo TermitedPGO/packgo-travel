@@ -28,7 +28,7 @@ vi.mock("./logger", () => ({
   }),
 }));
 
-import { verifyPushAuth } from "./gmailPushWebhook";
+import { verifyPushAuth, pushConfigError } from "./gmailPushWebhook";
 
 /** A fake OAuth2Client.verifyIdToken. Returns a ticket whose getPayload() is
  *  the supplied claims, OR throws when `throwWith` is set (simulates a bad
@@ -127,7 +127,7 @@ describe("verifyPushAuth", () => {
     if (out.ok) expect(out.email).toBe(SA);
   });
 
-  it("accepts when no service account is configured (SA check skipped) but still requires email_verified", async () => {
+  it("primitive accepts when no SA is passed (SA check skipped) — enforcement of a configured SA lives in the handler's pushConfigError gate, not here", async () => {
     const v = fakeVerifier({
       claims: { email: SA, email_verified: true },
     });
@@ -146,5 +146,20 @@ describe("verifyPushAuth", () => {
     });
     expect(out.ok).toBe(false);
     if (!out.ok) expect(out.reason).toMatch(/empty jwt payload/i);
+  });
+});
+
+describe("pushConfigError — fail-closed gate (handler refuses if unconfigured)", () => {
+  it("passes only when BOTH audience and service account are set", () => {
+    expect(pushConfigError(AUD, SA)).toBeNull();
+  });
+  it("rejects when the audience is unset (would skip the audience assertion)", () => {
+    expect(pushConfigError(undefined, SA)).toMatch(/fail-closed/);
+  });
+  it("rejects when the service account is unset (would accept any GCP project's SA)", () => {
+    expect(pushConfigError(AUD, undefined)).toMatch(/fail-closed/);
+  });
+  it("rejects when both are unset", () => {
+    expect(pushConfigError(undefined, undefined)).toMatch(/fail-closed/);
   });
 });

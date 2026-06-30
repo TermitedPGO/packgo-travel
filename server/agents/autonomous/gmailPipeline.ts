@@ -36,6 +36,7 @@ import {
   listUnreadMessages,
   listMessagesByIds,
   listHistoryMessageIds,
+  selectIngestableMessages,
   ensureLabel,
   applyLabel,
   sendReplyInThread,
@@ -490,11 +491,18 @@ export async function runGmailPipelineForMessageIds(
   }
 
   // Hydrate the added ids → summaries, drop anything already PACKGO_AI_PROCESSED
-  // (poll may have beaten us to it), then run the shared ingest gates.
+  // (poll may have beaten us to it). CRITICAL: also mirror the poll's
+  // GMAIL_POLL_LABEL firewall. The 3-min poll scopes its Gmail query to
+  // POLL_FILTER_LABEL (line ~119) so the agent never reads Jeff's PERSONAL mail;
+  // the push diff sees the whole INBOX, so without the same gate push would
+  // ingest every personal email. When POLL_FILTER_LABEL is unset, neither path
+  // filters (whole inbox) — they stay behaviorally identical.
   const summaries = diff.messageIds.length
     ? await listMessagesByIds(gmail, diff.messageIds)
     : [];
-  const fresh = summaries.filter((m) => !m.labels.includes(labelId));
+  const filterLabelId =
+    summaries.length && POLL_FILTER_LABEL ? await ensureLabel(gmail, POLL_FILTER_LABEL) : null;
+  const fresh = selectIngestableMessages(summaries, labelId, filterLabelId);
 
   if (fresh.length > 0) {
     await ingestFreshMessages(db, fresh, result, {

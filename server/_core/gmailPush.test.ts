@@ -26,6 +26,7 @@ import {
   decodePubSubPushBody,
   extractBearerToken,
   listHistoryMessageIds,
+  selectIngestableMessages,
 } from "./gmail";
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -236,5 +237,55 @@ describe("listHistoryMessageIds", () => {
     expect(out.messageIds).toEqual([]);
     expect(out.latestHistoryId).toBe("500");
     expect(out.expired).toBe(false);
+  });
+});
+
+// ── selectIngestableMessages (push/poll inbox-firewall parity) ───────────────
+describe("selectIngestableMessages", () => {
+  const PROCESSED = "Label_PROCESSED";
+  const SUPPORT = "Label_SUPPORT";
+  const msg = (id: string, labels: string[]) => ({ id, labels });
+
+  it("drops messages already PACKGO_AI_PROCESSED", () => {
+    const out = selectIngestableMessages(
+      [msg("a", ["INBOX"]), msg("b", ["INBOX", PROCESSED])],
+      PROCESSED,
+      null,
+    );
+    expect(out.map((m) => m.id)).toEqual(["a"]);
+  });
+
+  it("with a support label set, keeps ONLY messages carrying it (push never reads personal mail)", () => {
+    const out = selectIngestableMessages(
+      [
+        msg("support", ["INBOX", SUPPORT]),
+        msg("personal", ["INBOX"]), // Jeff's personal mail — must be dropped
+      ],
+      PROCESSED,
+      SUPPORT,
+    );
+    expect(out.map((m) => m.id)).toEqual(["support"]);
+  });
+
+  it("with no support label (firewall off), keeps all non-processed (whole inbox, == poll)", () => {
+    const out = selectIngestableMessages(
+      [msg("a", ["INBOX"]), msg("b", ["INBOX"])],
+      PROCESSED,
+      null,
+    );
+    expect(out.map((m) => m.id)).toEqual(["a", "b"]);
+  });
+
+  it("applies both gates together (support label AND not processed)", () => {
+    const out = selectIngestableMessages(
+      [
+        msg("keep", ["INBOX", SUPPORT]),
+        msg("done", ["INBOX", SUPPORT, PROCESSED]), // labeled but already processed
+        msg("personal", ["INBOX"]),
+      ],
+      PROCESSED,
+      SUPPORT,
+    );
+    expect(out.map((m) => m.id)).toEqual(["keep"]);
   });
 });

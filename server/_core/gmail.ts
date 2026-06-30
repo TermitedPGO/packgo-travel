@@ -283,6 +283,27 @@ export async function listMessagesByIds(
 }
 
 /**
+ * gmail-push — the shared inbox-firewall + dedup gate, mirroring the poll. Keep a
+ * hydrated message ONLY if it is not already processed (PACKGO_AI_PROCESSED) AND,
+ * when a support label is configured, it carries that label. `filterLabelId` null
+ * = no firewall (whole inbox), matching an unset GMAIL_POLL_LABEL. The poll
+ * enforces the same firewall at the Gmail-query level (label:NAME); the push diff
+ * sees the whole INBOX, so it MUST filter here or it would ingest Jeff's personal
+ * mail. Pure so the push/poll parity is unit-tested.
+ */
+export function selectIngestableMessages<T extends { labels: string[] }>(
+  summaries: T[],
+  processedLabelId: string,
+  filterLabelId: string | null,
+): T[] {
+  return summaries.filter(
+    (m) =>
+      !m.labels.includes(processedLabelId) &&
+      (!filterLabelId || m.labels.includes(filterLabelId)),
+  );
+}
+
+/**
  * 2026-06-22 sent-mail capture — list OUTBOUND messages WITH attachments that
  * we haven't filed yet (Jeff sends quotes / itineraries to customers straight
  * from Gmail; those never enter the system). `excludeLabel` carries the
