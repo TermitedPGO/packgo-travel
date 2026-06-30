@@ -1,4 +1,4 @@
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { useLocale } from "@/contexts/LocaleContext"
 import CustomerList from "@/components/admin/customers/CustomerList"
 import CustomerDetail from "@/components/admin/customers/CustomerDetail"
@@ -16,12 +16,15 @@ export default function AdminCustomers() {
   const [selected, setSelected] = useState<Selection | null>(null)
   const [showHidden, setShowHidden] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
+  // customer-projects (0104) — the active project (=customOrder). null =「未分類」.
+  const [activeProjectId, setActiveProjectId] = useState<number | null>(null)
   const chatFocusRef = useRef<((prefill?: string) => void) | null>(null)
   const {
     customers,
     isListLoading,
     detail,
     isDetailLoading,
+    projects,
     chatMessages,
     conversationMessages,
     isChatLoading,
@@ -29,7 +32,17 @@ export default function AdminCustomers() {
     restoreCustomer,
     approveDraft,
     isApprovingDraft,
-  } = useCustomerData(selected, showHidden)
+  } = useCustomerData(selected, showHidden, activeProjectId)
+
+  // Default to the newest project when the customer or their project set
+  // changes; no projects → 未分類 (null). Keyed on the project ids so a manual
+  // pick survives a background refetch (e.g. rename, which keeps the same ids),
+  // and a just-created order (new id) jumps the bar to it.
+  const projectIdsKey = projects.map((p) => p.id).join(",")
+  useEffect(() => {
+    setActiveProjectId(projects[0]?.id ?? null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id, selected?.kind, projectIdsKey])
 
   return (
     <>
@@ -57,7 +70,13 @@ export default function AdminCustomers() {
               <CustomerDetailSkeleton />
             </div>
           ) : detail ? (
-            <CustomerDetail customer={detail} chatMessages={conversationMessages} />
+            <CustomerDetail
+              customer={detail}
+              chatMessages={conversationMessages}
+              projects={projects}
+              activeProjectId={activeProjectId}
+              onSelectProject={setActiveProjectId}
+            />
           ) : (
             <div className="flex-1 flex items-center justify-center text-sm text-gray-400">
               {t("admin.customers.selectCustomer")}
@@ -71,6 +90,7 @@ export default function AdminCustomers() {
             <CustomerChat
               customer={detail}
               chatMessages={chatMessages}
+              activeProjectId={activeProjectId}
               onApproveDraft={approveDraft}
               isApprovingDraft={isApprovingDraft}
               onFocusReady={(fn) => { chatFocusRef.current = fn }}

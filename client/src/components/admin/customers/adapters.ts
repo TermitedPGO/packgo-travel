@@ -6,6 +6,7 @@ import type {
   TimelineEntry,
   ListItem,
   AdaptedCustomer,
+  Project,
 } from "./types"
 
 const AVATAR_PALETTE = [
@@ -706,4 +707,24 @@ export function toTimeline(
 
   entries.sort((a, b) => b.sortKey - a.sortKey)
   return entries
+}
+
+// ── customer-projects (0104) — ProjectBar pure rules ────────────────────────
+
+/**
+ * Default project when a customer (or their project set) loads: the newest one
+ * (the list arrives createdAt-desc, so [0]), else 未分類 (null) when they have
+ * no projects. Jeff's daily landing — see design.md §12.2.
+ */
+export function pickDefaultProject(projects: Project[]): number | null {
+  return projects[0]?.id ?? null
+}
+
+/**
+ * Whether an inline rename should fire: only when the trimmed text is non-empty
+ * AND actually changed. Empty / unchanged → no-op (don't write the order title).
+ */
+export function shouldCommitRename(current: string, draft: string): boolean {
+  const next = draft.trim()
+  return next.length > 0 && next !== current
 }

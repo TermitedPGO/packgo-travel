@@ -3449,6 +3449,16 @@ export const zhTW = {
         statusCol: '狀態',
         dateCol: '日期',
       },
+      projects: {
+        unfiled: '未分類',
+        renameHint: '雙擊改名',
+        renameFailed: '改名失敗',
+        assignTo: '歸到專案',
+        assignToActive: '歸到這個專案',
+        backToUnfiled: '退回未分類',
+        assigned: '已歸檔',
+        assignFailed: '指派失敗',
+      },
       order: {
         section: '訂製單',
         new: '新訂單',

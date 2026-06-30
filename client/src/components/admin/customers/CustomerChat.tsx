@@ -74,12 +74,16 @@ function useSmoothStream(target: string, streamKey: number): string {
 export default function CustomerChat({
   customer,
   chatMessages,
+  activeProjectId = null,
   onApproveDraft,
   isApprovingDraft,
   onFocusReady,
 }: {
   customer: AdaptedCustomer | null
   chatMessages: AiChatMessage[]
+  /** customer-projects (0104) — the active project (=customOrder) this chat line
+   *  is scoped to. null =「未分類」basket. Pins the order into the AI's context. */
+  activeProjectId?: number | null
   onApproveDraft: (draft: Draft, editedBody?: string) => Promise<void>
   isApprovingDraft: boolean
   /** Hand the parent a function to focus the composer. An optional `prefill`
@@ -192,6 +196,9 @@ export default function CustomerChat({
   // changes — a money/legal send surface must never carry state across customers.
   // Clearing messages here lets the hydrate effect below repopulate from THIS
   // customer's persisted thread, so switching never bleeds A's turns into B.
+  // Also reset on project switch (0104): each project is its own chat line, so
+  // switching clears the in-memory turns and the hydrate effect below repopulates
+  // from THIS project's persisted thread (chatMessages is already orderId-scoped).
   useEffect(() => {
     setEditingId(null)
     setConfirmId(null)
@@ -201,7 +208,7 @@ export default function CustomerChat({
     abortRef.current?.abort()
     setMessages([])
     setBusy(false)
-  }, [customer?.id, customer?.kind])
+  }, [customer?.id, customer?.kind, activeProjectId])
 
   // Hydrate / re-hydrate from the persisted per-customer thread. Each customer's
   // Jeff↔AI chat is independent and durable (saved server-side per turn), so
@@ -312,6 +319,10 @@ export default function CustomerChat({
       const hasFiles = files.length > 0
       const scopeKey = customer ? (customer.kind === "guest" ? "customerProfileId" : "customerId") : null
       const scopeParam = scopeKey ? { [scopeKey]: customer!.id } : {}
+      // customer-projects (0104) — pin the active project so the thread + AI
+      // context scope to this one order. null =「未分類」→ no orderId sent.
+      const orderParam = scopeKey && activeProjectId !== null ? { orderId: activeProjectId } : {}
+      const orderQs = scopeKey && activeProjectId !== null ? `&orderId=${activeProjectId}` : ""
       const resp = hasFiles
         ? await fetch("/api/agent/ask-ops-stream", {
             method: "POST",
@@ -325,6 +336,7 @@ export default function CustomerChat({
             body: JSON.stringify({
               q,
               ...scopeParam,
+              ...orderParam,
               fileAttachments: files.map((f) => ({
                 name: f.name,
                 mimeType: f.mimeType,
@@ -333,7 +345,7 @@ export default function CustomerChat({
             }),
           })
         : await fetch(
-            `/api/agent/ask-ops-stream?q=${encodeURIComponent(q)}${scopeKey ? `&${scopeKey}=${customer!.id}` : ""}`,
+            `/api/agent/ask-ops-stream?q=${encodeURIComponent(q)}${scopeKey ? `&${scopeKey}=${customer!.id}` : ""}${orderQs}`,
             {
               method: "GET",
               credentials: "include",

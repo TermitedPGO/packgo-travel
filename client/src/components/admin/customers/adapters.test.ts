@@ -1,5 +1,37 @@
 import { describe, it, expect } from "vitest"
-import { guestToAdaptedCustomer, toListItem, deriveFollowup, buildInquiryEditedPayload, deriveProfile, deriveBallInCourt, deriveNextMove, isFollowUpDue, laToday } from "./adapters"
+import { guestToAdaptedCustomer, toListItem, deriveFollowup, buildInquiryEditedPayload, deriveProfile, deriveBallInCourt, deriveNextMove, isFollowUpDue, laToday, pickDefaultProject, shouldCommitRename } from "./adapters"
+import type { Project } from "./types"
+
+const mkProject = (id: number, title = `t${id}`): Project => ({
+  id,
+  orderNumber: `ORD-2026-${String(id).padStart(4, "0")}`,
+  title,
+  status: "draft",
+  departureDate: null,
+})
+
+describe("pickDefaultProject (customer-projects 0104)", () => {
+  it("picks the newest project (list is createdAt-desc → [0])", () => {
+    expect(pickDefaultProject([mkProject(9), mkProject(3), mkProject(1)])).toBe(9)
+  })
+  it("falls back to 未分類 (null) when there are no projects", () => {
+    expect(pickDefaultProject([])).toBeNull()
+  })
+})
+
+describe("shouldCommitRename (customer-projects 0104)", () => {
+  it("commits only a non-empty, changed title", () => {
+    expect(shouldCommitRename("北京機票", "北京來回機票")).toBe(true)
+  })
+  it("skips an unchanged title (ignoring surrounding whitespace)", () => {
+    expect(shouldCommitRename("北京機票", "北京機票")).toBe(false)
+    expect(shouldCommitRename("北京機票", "  北京機票  ")).toBe(false)
+  })
+  it("skips an empty / whitespace-only draft", () => {
+    expect(shouldCommitRename("北京機票", "")).toBe(false)
+    expect(shouldCommitRename("北京機票", "   ")).toBe(false)
+  })
+})
 
 // t stub: echoes the key, appending the interpolated count so assertions can see it.
 const t = (k: string, vars?: Record<string, string | number>) =>

@@ -3,15 +3,28 @@ import { Phone, Mail, Star, CalendarClock, X } from "lucide-react"
 import { useLocale } from "@/contexts/LocaleContext"
 import { trpc } from "@/lib/trpc"
 import { toast } from "sonner"
-import type { AdaptedCustomer, ChatMessage } from "./types"
+import type { AdaptedCustomer, ChatMessage, Project } from "./types"
 import { OverviewTab, OrdersTab, DocsTab, TimelineTab } from "./DetailTabs"
 import { deriveBallInCourt, deriveNextMove } from "./adapters"
 import { toSelection } from "./customOrderHelpers"
+import ProjectBar from "./ProjectBar"
 
 const TAB_KEYS = ["overview", "orders", "docs", "history"] as const
 type TabKey = (typeof TAB_KEYS)[number]
 
-export default function CustomerDetail({ customer, chatMessages = [] }: { customer: AdaptedCustomer; chatMessages?: ChatMessage[] }) {
+export default function CustomerDetail({
+  customer,
+  chatMessages = [],
+  projects = [],
+  activeProjectId = null,
+  onSelectProject,
+}: {
+  customer: AdaptedCustomer
+  chatMessages?: ChatMessage[]
+  projects?: Project[]
+  activeProjectId?: number | null
+  onSelectProject?: (id: number | null) => void
+}) {
   const { t } = useLocale()
   const [tab, setTab] = useState<TabKey>("overview")
   const c = customer
@@ -155,6 +168,17 @@ export default function CustomerDetail({ customer, chatMessages = [] }: { custom
           </div>
         )}
       </div>
+
+      {/* 專案切換器 (customer-projects 0104) — 標題列下方一排。只在有專案時顯示
+          (沒專案的客人只有未分類,不必占一排)。驅動右側 AI 聊天 + 歷史 tab。 */}
+      {projects.length > 0 && onSelectProject && (
+        <ProjectBar
+          customer={c}
+          projects={projects}
+          activeProjectId={activeProjectId}
+          onSelect={onSelectProject}
+        />
+      )}
 
       {/* Tab bar */}
       <div className="flex border-b border-gray-200 px-6">

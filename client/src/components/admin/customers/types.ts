@@ -121,6 +121,17 @@ export type AdaptedCustomer = {
   timeline: TimelineEntry[]
 }
 
+/** customer-projects (0104) — one project = one customOrder. The ProjectBar
+ *  lists these by date; selecting one scopes the chat + 歷史 to it. id=null is
+ *  the「未分類」basket (no project). Lean projection from customerOrders.listForCustomer. */
+export type Project = {
+  id: number
+  orderNumber: string
+  title: string
+  status: string
+  departureDate: string | null
+}
+
 export type ChatMessage = {
   id: string
   senderRole: "customer" | "jeff"

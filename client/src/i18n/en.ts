@@ -3481,6 +3481,16 @@ export const en = {
         statusCol: 'Status',
         dateCol: 'Date',
       },
+      projects: {
+        unfiled: 'Unfiled',
+        renameHint: 'Double-click to rename',
+        renameFailed: 'Rename failed',
+        assignTo: 'File under project',
+        assignToActive: 'File under this project',
+        backToUnfiled: 'Move to unfiled',
+        assigned: 'Filed',
+        assignFailed: 'Assign failed',
+      },
       order: {
         section: 'Custom orders',
         new: 'New order',

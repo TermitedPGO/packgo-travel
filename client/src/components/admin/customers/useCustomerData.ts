@@ -2,7 +2,7 @@ import { useMemo } from "react"
 import { trpc } from "@/lib/trpc"
 import { useLocale } from "@/contexts/LocaleContext"
 import { format } from "date-fns"
-import type { ListItem, AdaptedCustomer, ChatMessage, AiChatMessage, Doc, Draft } from "./types"
+import type { ListItem, AdaptedCustomer, ChatMessage, AiChatMessage, Doc, Draft, Project } from "./types"
 import { stripQuotedReply } from "./conversationText"
 import {
   toListItem,
@@ -23,7 +23,14 @@ import {
  *  userId), so kind decides which routes to hit and how to read the id. */
 export type Selection = { id: number; kind: "user" | "guest" }
 
-export function useCustomerData(selected: Selection | null, showHidden = false) {
+export function useCustomerData(
+  selected: Selection | null,
+  showHidden = false,
+  // customer-projects (0104) — the active project (=customOrder) scopes the AI
+  // chat thread. null =「未分類」basket (customOrderId IS NULL). The real
+  // conversation thread (Overview / 真相條 / followup) stays customer-wide.
+  activeProjectId: number | null = null,
+) {
   const { t, language } = useLocale()
   const utils = trpc.useUtils()
   const formatDate = (d: Date) => format(new Date(d), "M/d")
@@ -82,15 +89,25 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
   const chatQ = selected?.kind === "guest" ? guestChatQ : userChatQ
 
   // Jeff ↔ AI ops-agent chat (distinct from customer conversation thread above).
+  // customer-projects (0104) — scoped to the active project; orderId omitted →
+  // the「未分類」basket (customOrderId IS NULL).
+  const orderId = activeProjectId ?? undefined
   const userAiChatQ = trpc.admin.customerChatList.useQuery(
-    { userId: userId!, limit: 200 },
+    { userId: userId!, limit: 200, orderId },
     { enabled: userId !== null },
   )
   const guestAiChatQ = trpc.admin.customerChatList.useQuery(
-    { profileId: profileId!, limit: 200 },
+    { profileId: profileId!, limit: 200, orderId },
     { enabled: profileId !== null },
   )
   const aiChatQ = selected?.kind === "guest" ? guestAiChatQ : userAiChatQ
+
+  // customer-projects (0104) — this customer's projects (=customOrders) for the
+  // ProjectBar. Newest first (server orders createdAt desc).
+  const projectsQ = trpc.customerOrders.listForCustomer.useQuery(
+    userId !== null ? { userId } : { profileId: profileId! },
+    { enabled: selected !== null },
+  )
 
   const userDocsQ = trpc.admin.customerDocs.useQuery(
     { userId: userId! },
@@ -355,6 +372,19 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
     }))
   }, [chatQ.data])
 
+  // customer-projects (0104) — lean projection for the ProjectBar.
+  const projects = useMemo<Project[]>(
+    () =>
+      (projectsQ.data ?? []).map((o) => ({
+        id: o.id,
+        orderNumber: o.orderNumber,
+        title: o.title,
+        status: o.status,
+        departureDate: o.departureDate,
+      })),
+    [projectsQ.data],
+  )
+
   const isDetailLoading =
     selected?.kind === "guest" ? guestOpenItemsQ.isLoading : detailQ.isLoading
 
@@ -363,6 +393,7 @@ export function useCustomerData(selected: Selection | null, showHidden = false) 
     isListLoading: customerListQ.isLoading || guestListQ.isLoading,
     detail,
     isDetailLoading,
+    projects,
     chatMessages,
     conversationMessages,
     isChatLoading: aiChatQ.isLoading,
