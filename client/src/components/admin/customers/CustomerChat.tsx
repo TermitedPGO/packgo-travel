@@ -26,13 +26,15 @@ import {
 } from "./chatStream"
 
 type ChatMsg = { role: "user"; text: string } | { role: "ai"; turn: ChatTurn }
-type Attachment = { name: string; content: string; size: number }
+/** A dropped file, kept as base64 so the server parses it with the SAME parser
+ * the 新增客人 modal uses (PDF + OCR, image vision, docx / xlsx / csv / txt) —
+ * the chat reads PDFs and images like Claude, not text-only. */
+type Attachment = { name: string; mimeType: string; dataBase64: string; size: number }
 
-const TEXT_EXTS = new Set([
-  "txt", "html", "htm", "css", "js", "ts", "tsx", "jsx",
-  "json", "csv", "md", "xml", "svg", "yaml", "yml", "sql",
-])
-const MAX_FILE_SIZE = 500_000
+/** Per-file and total raw-byte caps. The SSE endpoint body limit is 10 MB and
+ * base64 inflates ~1.37×, so keep the total under ~6 MB of raw bytes. */
+const MAX_FILE_SIZE = 6_000_000
+const MAX_TOTAL_BYTES = 6_000_000
 
 /** Dim "thinking" step label: the bridge sentence the model spoke, or the tools
  * it ran when it spoke nothing. */
@@ -119,33 +121,41 @@ export default function CustomerChat({
     dragCounter.current = 0
     setDragging(false)
     const files = Array.from(e.dataTransfer.files)
-    let accepted = 0
-    let rejectedType = false
     let rejectedSize = false
+    // Running raw-byte budget so a base64 payload of N files stays under the
+    // endpoint's 10 MB body limit. Any type is accepted now (server parses it).
+    let usedBudget = attachments.reduce((s, a) => s + a.size, 0)
     for (const file of files) {
-      const ext = file.name.split(".").pop()?.toLowerCase() ?? ""
-      if (!TEXT_EXTS.has(ext)) { rejectedType = true; continue }
-      if (file.size > MAX_FILE_SIZE) { rejectedSize = true; continue }
       if (attachments.length >= 5) break
-      accepted++
+      if (file.size > MAX_FILE_SIZE || usedBudget + file.size > MAX_TOTAL_BYTES) {
+        rejectedSize = true
+        continue
+      }
+      usedBudget += file.size
       const reader = new FileReader()
       reader.onload = () => {
+        // readAsDataURL → "data:<mime>;base64,<b64>"; strip the prefix.
+        const result = reader.result as string
+        const comma = result.indexOf(",")
+        const b64 = comma >= 0 ? result.slice(comma + 1) : result
         setAttachments((prev) => {
           if (prev.some((a) => a.name === file.name) || prev.length >= 5) return prev
-          return [...prev, { name: file.name, content: reader.result as string, size: file.size }]
+          return [
+            ...prev,
+            {
+              name: file.name,
+              mimeType: file.type || "application/octet-stream",
+              dataBase64: b64,
+              size: file.size,
+            },
+          ]
         })
       }
-      reader.readAsText(file)
+      reader.readAsDataURL(file)
     }
-    // Don't leave a dropped file as a silent no-op: tell Jeff why nothing happened
-    // and point him at the path that works (收). Auto-clears after a few seconds.
-    if (accepted === 0 && (rejectedType || rejectedSize)) {
-      setDropNotice(
-        rejectedType
-          ? t("admin.customers.drafts.dropUnsupported")
-          : t("admin.customers.drafts.dropTooBig"),
-      )
-    }
+    // Only size/count now bounce a file (any TYPE is read server-side). Tell Jeff
+    // why a too-big file did nothing instead of leaving a silent no-op.
+    if (rejectedSize) setDropNotice(t("admin.customers.drafts.dropTooBig"))
   }
   const removeAttachment = (name: string) =>
     setAttachments((prev) => prev.filter((a) => a.name !== name))
@@ -315,7 +325,11 @@ export default function CustomerChat({
             body: JSON.stringify({
               q,
               ...scopeParam,
-              fileContext: { name: files.map((f) => f.name).join(", "), content: files.map((f) => `--- ${f.name} ---\n${f.content}`).join("\n\n") },
+              fileAttachments: files.map((f) => ({
+                name: f.name,
+                mimeType: f.mimeType,
+                dataBase64: f.dataBase64,
+              })),
             }),
           })
         : await fetch(

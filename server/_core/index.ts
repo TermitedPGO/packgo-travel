@@ -392,10 +392,38 @@ async function startServer() {
         return res.status(400).json({ error: "Question required, max 2000 chars" });
       }
 
-      // File context — POST-only, text content the client read via FileReader.
-      const fileContext = isPost && req.body?.fileContext
+      // File context — POST-only. Legacy: text the client read via FileReader.
+      let fileContext = isPost && req.body?.fileContext
         ? { name: String(req.body.fileContext.name ?? "file"), content: String(req.body.fileContext.content ?? "").slice(0, 100_000) }
         : undefined;
+
+      // File attachments — POST-only base64 raw bytes the client dropped. Parse
+      // them server-side via the SAME parser the 新增客人 modal uses (PDF + OCR,
+      // image vision, docx / xlsx / csv / txt) so the chat reads PDFs and images
+      // like Claude, not text-only. A bad/oversized attachment is skipped, not
+      // fatal. Capped at 5 files; parseAttachment applies its own size guards.
+      if (isPost && Array.isArray(req.body?.fileAttachments) && req.body.fileAttachments.length > 0) {
+        const { parseAttachment, buildFileContextText } = await import("./attachmentParser");
+        const atts = req.body.fileAttachments.slice(0, 5);
+        const results = [];
+        for (const a of atts) {
+          try {
+            const name = String(a?.name ?? "file").slice(0, 200);
+            const mime = String(a?.mimeType ?? "application/octet-stream");
+            const b64 = String(a?.dataBase64 ?? "");
+            if (!b64) continue;
+            results.push(await parseAttachment(name, mime, Buffer.from(b64, "base64")));
+          } catch (e) {
+            logger.warn({ err: e }, "[ask-ops-stream] one attachment failed to parse");
+          }
+        }
+        if (results.length > 0) {
+          fileContext = {
+            name: results.map((r) => r.filename).join(", "),
+            content: buildFileContextText(results).slice(0, 100_000),
+          };
+        }
+      }
 
       // 批2 m3 — optional per-customer binding. When present, the thread
       // lives in customerChatMessages (拍板: 獨立新表,不混 agentMessages)

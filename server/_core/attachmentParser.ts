@@ -95,6 +95,35 @@ export type AttachmentParseResult = {
   parseError?: string;
 };
 
+/**
+ * Assemble the combined fileContext text the ops chat feeds the agent from a set
+ * of parsed attachments — so the chat reads PDFs / images / docx like Claude,
+ * routed through the SAME parser the 新增客人 modal uses. Each file gets a
+ * `--- name ---` header; a file we couldn't read gets a short human note (not a
+ * silent drop) so the model knows a file was attached but unreadable. Pure +
+ * unit-tested (no DB / LLM). Returns "" when there is nothing readable.
+ */
+export function buildFileContextText(results: AttachmentParseResult[]): string {
+  return results
+    .map((r) => {
+      const header = `--- ${r.filename} ---`;
+      if ((r.parseStatus === "ok" || r.parseStatus === "ok_truncated") && r.text.trim()) {
+        return `${header}\n${r.text.trim()}`;
+      }
+      const note =
+        r.parseStatus === "too_large"
+          ? "(檔案太大,讀不了)"
+          : r.parseStatus === "empty"
+            ? "(空檔)"
+            : r.parseStatus === "unsupported"
+              ? "(不支援的檔案類型)"
+              : "(這個檔讀不出內容)";
+      return `${header}\n${note}`;
+    })
+    .filter((block) => block.length > 0)
+    .join("\n\n");
+}
+
 // ────────────────────────────────────────────────────────────────────────
 // Format detection — filename extension first (more reliable than Gmail's
 // mimeType which often comes back as application/octet-stream for .xlsx)

@@ -28,9 +28,11 @@ import {
   parseAttachment,
   detectAttachmentKind,
   resolvePdfParse,
+  buildFileContextText,
   MAX_RAW_BYTES,
   MAX_TEXT_CHARS,
   TRUNCATION_MARKER,
+  type AttachmentParseResult,
 } from "./attachmentParser";
 import { extractImageText } from "./imageOcr";
 
@@ -445,5 +447,49 @@ describe("resolvePdfParse — bundler interop", () => {
     expect(resolvePdfParse({ default: { notAFn: 1 } })).toBe(null);
     expect(resolvePdfParse(null)).toBe(null);
     expect(resolvePdfParse({})).toBe(null);
+  });
+});
+
+describe("buildFileContextText — assembles the chat fileContext from parsed files", () => {
+  const r = (o: Partial<AttachmentParseResult>): AttachmentParseResult => ({
+    filename: "f.txt",
+    mimeType: "text/plain",
+    kind: "txt",
+    sizeBytes: 1,
+    text: "",
+    parseStatus: "ok",
+    ...o,
+  });
+
+  it("headers each readable file with --- name --- + its text", () => {
+    const out = buildFileContextText([
+      r({ filename: "quote.pdf", kind: "pdf", text: "Taipei 5 days $1200" }),
+      r({ filename: "pax.csv", kind: "csv", text: "name,dob\nWang,1990" }),
+    ]);
+    expect(out).toContain("--- quote.pdf ---\nTaipei 5 days $1200");
+    expect(out).toContain("--- pax.csv ---\nname,dob");
+    expect(out.split("\n\n").length).toBe(2);
+  });
+
+  it("keeps ok_truncated text", () => {
+    const out = buildFileContextText([r({ filename: "big.txt", parseStatus: "ok_truncated", text: "first part" })]);
+    expect(out).toContain("--- big.txt ---\nfirst part");
+  });
+
+  it("notes an unreadable file instead of dropping it silently", () => {
+    const out = buildFileContextText([
+      r({ filename: "huge.pdf", kind: "pdf", parseStatus: "too_large", text: "" }),
+      r({ filename: "blank.txt", parseStatus: "empty", text: "" }),
+      r({ filename: "weird.bin", kind: "unknown", parseStatus: "unsupported", text: "" }),
+      r({ filename: "broken.docx", kind: "docx", parseStatus: "parse_error", text: "" }),
+    ]);
+    expect(out).toContain("--- huge.pdf ---\n(檔案太大,讀不了)");
+    expect(out).toContain("--- blank.txt ---\n(空檔)");
+    expect(out).toContain("--- weird.bin ---\n(不支援的檔案類型)");
+    expect(out).toContain("--- broken.docx ---\n(這個檔讀不出內容)");
+  });
+
+  it("returns empty string for no files", () => {
+    expect(buildFileContextText([])).toBe("");
   });
 });
