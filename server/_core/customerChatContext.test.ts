@@ -36,7 +36,10 @@ import {
   formatMemoryBlock,
   buildCustomerChatContext,
   buildGuestChatContext,
+  formatOrderContext,
+  buildOrderContextBlock,
   type CustomerContextData,
+  type OrderContextData,
 } from "./customerChatContext";
 
 const getDbMock = vi.mocked(getDb);
@@ -414,5 +417,105 @@ describe("buildGuestChatContext (guest-customer-chat)", () => {
     expect(block).toContain("Day3 阿里山日出");
     // the cost-firewall instruction rides with the doc content
     expect(block).toContain("成本/同業價是內部數字");
+  });
+});
+
+// ── customer-projects (0104) — per-project chat context ─────────────────────
+
+const ORDER: OrderContextData = {
+  orderNumber: "ORD-2026-0142",
+  title: "北京來回機票",
+  status: "deposit_paid",
+  destination: "北京",
+  departureDate: "2026-07-04",
+  returnDate: "2026-07-18",
+  currency: "USD",
+  totalPrice: "4015.00",
+  depositAmount: "1200.00",
+  balanceAmount: "2815.00",
+  depositPaidAmount: "1200.00",
+  balancePaidAmount: null,
+  notes: "Emerald 太太 + 2 孩",
+  conversationCount: 3,
+};
+
+describe("formatOrderContext", () => {
+  it("pins THIS order with number, title, status, dates", () => {
+    const block = formatOrderContext(ORDER);
+    expect(block).toContain("ORD-2026-0142");
+    expect(block).toContain("北京來回機票");
+    expect(block).toContain("已收訂金"); // status zh-label
+    expect(block).toContain("2026-07-04");
+    expect(block).toContain("只談這一單");
+    expect(block).toContain("客人其他訂單不在此脈絡內");
+  });
+
+  it("shows sell price + received, NEVER supplierCost", () => {
+    const block = formatOrderContext(ORDER);
+    expect(block).toContain("售價 USD 4,015");
+    expect(block).toContain("已收訂金 USD 1,200");
+    // cost is never a field here — the block is built from sell-side facts only
+    expect(block).not.toContain("成本 USD");
+    expect(block).not.toContain("supplierCost");
+  });
+
+  it("omits money line + dates when unknown (no empty scaffolding)", () => {
+    const block = formatOrderContext({
+      ...ORDER,
+      totalPrice: null,
+      depositPaidAmount: null,
+      balancePaidAmount: null,
+      balanceAmount: null,
+      departureDate: null,
+      returnDate: null,
+    });
+    expect(block).not.toContain("售價");
+    expect(block).not.toContain("行程:");
+  });
+
+  it("counts filed conversations only when > 0", () => {
+    expect(formatOrderContext(ORDER)).toContain("已歸入 3 則往來");
+    expect(formatOrderContext({ ...ORDER, conversationCount: 0 })).not.toContain("已歸入");
+  });
+});
+
+describe("buildOrderContextBlock", () => {
+  it("returns null when db is down", async () => {
+    getDbMock.mockResolvedValue(null as any);
+    expect(await buildOrderContextBlock(142)).toBeNull();
+  });
+
+  it("returns null when the order vanished", async () => {
+    getDbMock.mockResolvedValue(fakeDb([[]]));
+    expect(await buildOrderContextBlock(999)).toBeNull();
+  });
+
+  it("loads the order + conversation count → block", async () => {
+    getDbMock.mockResolvedValue(
+      fakeDb([
+        [
+          {
+            orderNumber: "ORD-2026-0142",
+            title: "北京來回機票",
+            status: "deposit_paid",
+            destination: "北京",
+            departureDate: "2026-07-04",
+            returnDate: "2026-07-18",
+            currency: "USD",
+            totalPrice: "4015.00",
+            depositAmount: "1200.00",
+            balanceAmount: "2815.00",
+            depositPaidAmount: "1200.00",
+            balancePaidAmount: null,
+            notes: "Emerald 太太 + 2 孩",
+          },
+        ],
+        [{ n: 2 }],
+      ]),
+    );
+    const block = await buildOrderContextBlock(142);
+    expect(block).toContain("ORD-2026-0142");
+    expect(block).toContain("已歸入 2 則往來");
+    expect(block).toContain("售價 USD 4,015");
   });
 });

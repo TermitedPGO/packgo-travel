@@ -501,3 +501,117 @@ export async function buildGuestChatContext(
   });
   return base + (await buildDocsBlock({ profileId }));
 }
+
+// ── customer-projects (0104) — per-project (=customOrder) chat context ───────
+// When the chat is scoped to one project, append THIS order's facts after the
+// customer block so the agent talks about「這一單」, not the customer's whole
+// history. RED LINE: never surface supplierCost (cost never enters the prompt);
+// only the customer-facing sell price + received amounts. formatOrderContext is
+// pure (unit-tested); buildOrderContextBlock does the IO + degrades to null.
+
+const ORDER_STATUS_ZH: Record<string, string> = {
+  draft: "草稿（未報價）",
+  quoted: "已報價",
+  arranged: "已安排",
+  deposit_paid: "已收訂金",
+  paid: "已全額付清",
+  confirmed: "已確認",
+  departed: "已出發",
+  completed: "已完成",
+  cancelled: "已取消",
+};
+
+export interface OrderContextData {
+  orderNumber: string;
+  title: string;
+  status: string;
+  destination: string | null;
+  departureDate: string | null;
+  returnDate: string | null;
+  currency: string;
+  totalPrice: string | null;
+  depositAmount: string | null;
+  balanceAmount: string | null;
+  depositPaidAmount: string | null;
+  balancePaidAmount: string | null;
+  notes: string | null;
+  /** # of real-conversation turns (Gmail/email) filed under this project. */
+  conversationCount: number;
+}
+
+/** Compact, pure → the project block. No cost; sell price + received only. */
+export function formatOrderContext(o: OrderContextData): string {
+  const money = (v: string | null): string | null => {
+    if (v == null || v === "") return null;
+    const n = Number(v);
+    if (!Number.isFinite(n)) return null;
+    const body = Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    return `${o.currency} ${body}`;
+  };
+  const lines: string[] = [];
+  lines.push("\n\n【目前這條對話綁定的專案(只談這一單)】");
+  lines.push(`單號 ${o.orderNumber} · ${o.title}`);
+  const statusZh = ORDER_STATUS_ZH[o.status] ?? o.status;
+  lines.push(`狀態:${statusZh}${o.destination ? ` · 目的地:${o.destination}` : ""}`);
+  if (o.departureDate || o.returnDate) {
+    lines.push(`行程:${o.departureDate ?? "?"}${o.returnDate ? ` 至 ${o.returnDate}` : ""}`);
+  }
+  const total = money(o.totalPrice);
+  const depPaid = money(o.depositPaidAmount);
+  const balPaid = money(o.balancePaidAmount);
+  const bal = money(o.balanceAmount);
+  const moneyBits: string[] = [];
+  if (total) moneyBits.push(`售價 ${total}`);
+  if (depPaid) moneyBits.push(`已收訂金 ${depPaid}`);
+  if (balPaid) moneyBits.push(`已收尾款 ${balPaid}`);
+  if (bal) moneyBits.push(`應收餘額 ${bal}`);
+  if (moneyBits.length) lines.push(moneyBits.join(" · ") + "(售價是直客價;成本/同業價是內部數字,絕不寫進給客人的草稿)");
+  if (o.notes && o.notes.trim()) lines.push(`備註:${o.notes.trim().slice(0, 300)}`);
+  if (o.conversationCount > 0) lines.push(`本專案已歸入 ${o.conversationCount} 則往來。`);
+  lines.push("客人其他訂單不在此脈絡內;要談別單請切換專案。");
+  return lines.join("\n");
+}
+
+/**
+ * IO: load one customOrder + its filed-conversation count → the project block.
+ * Returns null (chat continues with just the customer block) when the DB is
+ * down or the order vanished. Caller appends to extraSystem after the customer
+ * block, same pattern as buildDocsBlock.
+ */
+export async function buildOrderContextBlock(
+  orderId: number,
+): Promise<string | null> {
+  const db = await getDb();
+  if (!db) {
+    log.warn("[customerChatContext] db unavailable — order block skipped");
+    return null;
+  }
+  const { customOrders, customerInteractions } = await import("../../drizzle/schema");
+  const [order] = await db
+    .select({
+      orderNumber: customOrders.orderNumber,
+      title: customOrders.title,
+      status: customOrders.status,
+      destination: customOrders.destination,
+      departureDate: customOrders.departureDate,
+      returnDate: customOrders.returnDate,
+      currency: customOrders.currency,
+      totalPrice: customOrders.totalPrice,
+      depositAmount: customOrders.depositAmount,
+      balanceAmount: customOrders.balanceAmount,
+      depositPaidAmount: customOrders.depositPaidAmount,
+      balancePaidAmount: customOrders.balancePaidAmount,
+      notes: customOrders.notes,
+    })
+    .from(customOrders)
+    .where(eq(customOrders.id, orderId))
+    .limit(1);
+  if (!order) return null;
+
+  const [{ n: conversationCount } = { n: 0 }] = await db
+    .select({ n: sql<number>`COUNT(*)` })
+    .from(customerInteractions)
+    .where(eq(customerInteractions.customOrderId, orderId));
+
+  return formatOrderContext({ ...order, conversationCount: Number(conversationCount) });
+}

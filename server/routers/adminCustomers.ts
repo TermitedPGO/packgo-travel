@@ -18,7 +18,7 @@ import {
   normalizeExtractedCustomer,
   MAX_EXTRACT_TEXT_CHARS,
 } from "../_core/customerIntakeExtract";
-import { eq, desc, sql, and, or, inArray, type SQL } from "drizzle-orm";
+import { eq, desc, sql, and, or, inArray, isNull, type SQL } from "drizzle-orm";
 import {
   type ThreadTurn,
   inquiryFirstTurn,
@@ -1139,12 +1139,16 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
           .object({
             userId: z.number().int().positive(),
             limit: z.number().int().min(1).max(200).optional(),
+            // customer-projects (0104) — scope to one project; omitted → the
+            //「未分類」basket (customOrderId IS NULL).
+            orderId: z.number().int().positive().optional(),
           })
           .strict(),
         z
           .object({
             profileId: z.number().int().positive(),
             limit: z.number().int().min(1).max(200).optional(),
+            orderId: z.number().int().positive().optional(),
           })
           .strict(),
       ]),
@@ -1152,10 +1156,16 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
     .query(async ({ input }) => {
       const drizzleDb = (await db.getDb())!;
       const { customerChatMessages } = await import("../../drizzle/schema");
-      const where =
+      const customerScope =
         "userId" in input
           ? eq(customerChatMessages.customerUserId, input.userId)
           : eq(customerChatMessages.customerProfileId, input.profileId);
+      const where = and(
+        customerScope,
+        input.orderId !== undefined
+          ? eq(customerChatMessages.customOrderId, input.orderId)
+          : isNull(customerChatMessages.customOrderId),
+      );
       const rows = await drizzleDb
         .select({
           id: customerChatMessages.id,

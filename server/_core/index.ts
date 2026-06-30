@@ -475,6 +475,48 @@ async function startServer() {
         }
       }
 
+      // customer-projects (0104) — optional per-PROJECT (=customOrder) binding.
+      // Scopes the thread to one order so a repeat customer's orders don't pile
+      // into one history. Requires a customer scope (a project has no meaning on
+      // global #ops). Cross-customer guard: the order's customerProfileId MUST
+      // match the resolved customer's profileId — never let Jeff's chat for
+      // customer A pin customer B's order. Validated BEFORE SSE headers.
+      let orderId: number | null = null;
+      const rawOrderId = String((isPost ? req.body?.orderId : req.query.orderId) ?? "").trim();
+      if (rawOrderId) {
+        if (customerId === null && customerProfileId === null) {
+          return res.status(400).json({ error: "orderId requires a customer scope" });
+        }
+        orderId = Number(rawOrderId);
+        if (!Number.isInteger(orderId) || orderId <= 0) {
+          return res.status(400).json({ error: "Invalid orderId" });
+        }
+        const { getDb } = await import("../db");
+        const dbCheck = await getDb();
+        if (dbCheck) {
+          const { customOrders } = await import("../../drizzle/schema");
+          const { eq } = await import("drizzle-orm");
+          const [ord] = await dbCheck
+            .select({ customerProfileId: customOrders.customerProfileId })
+            .from(customOrders)
+            .where(eq(customOrders.id, orderId))
+            .limit(1);
+          if (!ord) {
+            return res.status(404).json({ error: "Order not found" });
+          }
+          // Resolve the customer's canonical profileId and assert the order
+          // belongs to them (no cross-customer leakage).
+          let scopeProfileId: number | null = customerProfileId;
+          if (scopeProfileId === null && customerId !== null) {
+            const { findCustomerProfileId } = await import("../db/customOrder");
+            scopeProfileId = (await findCustomerProfileId({ userId: customerId })) ?? null;
+          }
+          if (scopeProfileId === null || ord.customerProfileId !== scopeProfileId) {
+            return res.status(403).json({ error: "Order does not belong to this customer" });
+          }
+        }
+      }
+
       // Parse optional image URLs from query (vision support, 2026-06-01)
       let imageUrls: string[] | undefined;
       try {
@@ -573,8 +615,15 @@ async function startServer() {
       const { agentMessages, customerChatMessages } = await import(
         "../../drizzle/schema"
       );
-      const { eq, desc: drizzleDesc } = await import("drizzle-orm");
+      const { eq, and, isNull, desc: drizzleDesc } = await import("drizzle-orm");
       const db = await getDb();
+      // customer-projects (0104) — scope the chat thread to one project. orderId
+      // set → only that order's turns; orderId null on a customer-scoped chat →
+      // the「未分類」basket (customOrderId IS NULL, today's whole-customer thread).
+      const orderFilter = () =>
+        orderId !== null
+          ? eq(customerChatMessages.customOrderId, orderId)
+          : isNull(customerChatMessages.customOrderId);
       let history: { role: "user" | "agent"; content: string }[] = [];
       if (db && customerId !== null) {
         const rows = await db
@@ -583,7 +632,7 @@ async function startServer() {
             body: customerChatMessages.body,
           })
           .from(customerChatMessages)
-          .where(eq(customerChatMessages.customerUserId, customerId))
+          .where(and(eq(customerChatMessages.customerUserId, customerId), orderFilter()))
           .orderBy(drizzleDesc(customerChatMessages.createdAt))
           .limit(10);
         history = rows
@@ -595,6 +644,7 @@ async function startServer() {
 
         await db.insert(customerChatMessages).values({
           customerUserId: customerId,
+          customOrderId: orderId,
           senderRole: "jeff",
           body: question,
         });
@@ -606,7 +656,7 @@ async function startServer() {
             body: customerChatMessages.body,
           })
           .from(customerChatMessages)
-          .where(eq(customerChatMessages.customerProfileId, customerProfileId))
+          .where(and(eq(customerChatMessages.customerProfileId, customerProfileId), orderFilter()))
           .orderBy(drizzleDesc(customerChatMessages.createdAt))
           .limit(10);
         history = rows
@@ -618,6 +668,7 @@ async function startServer() {
 
         await db.insert(customerChatMessages).values({
           customerProfileId,
+          customOrderId: orderId,
           senderRole: "jeff",
           body: question,
         });
@@ -664,6 +715,15 @@ async function startServer() {
         const { buildGuestChatContext } = await import("./customerChatContext");
         extraSystem =
           (await buildGuestChatContext(customerProfileId)) ?? undefined;
+      }
+
+      // customer-projects (0104) — when scoped to a project, pin THIS order's
+      // facts after the customer block so the agent talks about「這一單」. Null
+      // (db hiccup / order gone) degrades to the customer-only block.
+      if (orderId !== null) {
+        const { buildOrderContextBlock } = await import("./customerChatContext");
+        const orderBlock = await buildOrderContextBlock(orderId);
+        if (orderBlock) extraSystem = (extraSystem ?? "") + orderBlock;
       }
 
       // Append file context so the agent can reference the dragged-in file.
@@ -743,6 +803,7 @@ async function startServer() {
           // suggestedActions/cards for the later m3b card rendering.
           await db.insert(customerChatMessages).values({
             customerUserId: customerId,
+            customOrderId: orderId,
             senderRole: "agent",
             body: finalAnswer,
             context: JSON.stringify({ suggestedActions, cards, streamed: true }),
@@ -751,6 +812,7 @@ async function startServer() {
           // guest-customer-chat — same thread table, scoped to the guest.
           await db.insert(customerChatMessages).values({
             customerProfileId,
+            customOrderId: orderId,
             senderRole: "agent",
             body: finalAnswer,
             context: JSON.stringify({ suggestedActions, cards, streamed: true }),
