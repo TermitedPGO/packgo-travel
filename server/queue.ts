@@ -685,6 +685,99 @@ export async function scheduleGmailPoll() {
 console.log("✅ Gmail poll queue initialized");
 
 // ============================================================================
+// gmail-push (2026-06-29) — Gmail push (Pub/Sub) queues.
+//
+// Two queues:
+//   1. gmail-push     — the webhook (POST /api/gmail/push) enqueues ONE job per
+//      Pub/Sub notification (integrationId + the notified historyId) and 204-acks
+//      immediately. The worker does the heavy history.list diff + ingest off the
+//      HTTP path, so a slow ingest never makes Pub/Sub time out + redeliver.
+//   2. gmail-watch-renew — a daily cron re-arms every active watch (Gmail watch
+//      expires after ~7 days; Google recommends renewing daily). The worker
+//      calls users.watch again and stores the fresh historyId + expiration.
+//
+// Both sit ALONGSIDE the every-3-min poll, which stays as fallback +
+// reconciliation. See server/gmailPushWorker.ts.
+// ============================================================================
+
+export interface GmailPushJobData {
+  integrationId: number;
+  /** historyId carried in the Pub/Sub notification (string). Optional: the
+   *  worker diffs from the stored lastHistoryId, using this only to seed a
+   *  first baseline / advance on expiry. */
+  notifiedHistoryId?: string;
+  /** email the notification was for — diagnostics only (worker keys on id). */
+  emailAddress?: string;
+}
+
+export interface GmailPushJobResult {
+  processed: number;
+  receipts: number;
+  errors: number;
+}
+
+export const gmailPushQueue = new Queue<GmailPushJobData, GmailPushJobResult>(
+  "gmail-push",
+  {
+    connection: redisBullMQ,
+    defaultJobOptions: {
+      attempts: 3,
+      backoff: { type: "exponential", delay: 10000 },
+      removeOnComplete: { age: 86400, count: 200 }, // 1 day
+      removeOnFail: { age: 604800, count: 100 }, // 7 days
+    },
+  }
+);
+
+export interface GmailWatchRenewJobData {
+  triggeredBy: "schedule" | "manual";
+}
+
+export interface GmailWatchRenewJobResult {
+  scanned: number;
+  renewed: number;
+  errors: number;
+}
+
+export const gmailWatchRenewQueue = new Queue<
+  GmailWatchRenewJobData,
+  GmailWatchRenewJobResult
+>("gmail-watch-renew", {
+  connection: redisBullMQ,
+  defaultJobOptions: {
+    attempts: 2,
+    backoff: { type: "exponential", delay: 60000 },
+    removeOnComplete: { age: 604800, count: 30 },
+    removeOnFail: { age: 2592000, count: 30 },
+  },
+});
+
+/**
+ * Schedule the daily Gmail watch renewal. Gmail's users.watch expires after
+ * ~7 days; renewing daily keeps a comfortable margin so a single missed cron
+ * never drops push. 04:30 UTC (off-peak, away from the 05:00 cluster).
+ */
+export async function scheduleGmailWatchRenew() {
+  const repeatableJobs = await gmailWatchRenewQueue.getRepeatableJobs();
+  for (const job of repeatableJobs) {
+    if (job.name === "gmail-watch-renew-tick") {
+      await gmailWatchRenewQueue.removeRepeatableByKey(job.key);
+    }
+  }
+  await gmailWatchRenewQueue.add(
+    "gmail-watch-renew-tick",
+    { triggeredBy: "schedule" },
+    {
+      repeat: { pattern: "30 4 * * *" }, // daily 04:30 UTC
+      jobId: "gmail-watch-renew-scheduled",
+    }
+  );
+  console.log("✅ Gmail watch renew scheduled: daily 04:30 UTC");
+}
+
+console.log("✅ Gmail push + watch-renew queues initialized");
+
+// ============================================================================
 // Customer AI Summary Queue — nightly warm-up of the customer-card AI summary
 // (customer-ai-sessions 批3 m3). Recomputes summaries for ACTIVE + STALE
 // customers so opening their card is instant; lazy-on-open covers the rest.

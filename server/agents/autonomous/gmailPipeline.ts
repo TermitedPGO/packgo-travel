@@ -34,6 +34,8 @@ import { inquiryClassificationLabelZh } from "./inquiryLabels";
 import {
   buildGmailClient,
   listUnreadMessages,
+  listMessagesByIds,
+  listHistoryMessageIds,
   ensureLabel,
   applyLabel,
   sendReplyInThread,
@@ -144,6 +146,122 @@ export async function runGmailPipeline(
     errors: [],
   };
 
+  // gmail-push (2026-06-29) — the receipt pass + noise filter + per-email
+  // ingest loop is now shared with the push path (runGmailPipelineForMessageIds)
+  // via ingestFreshMessages. Behavior is byte-identical to the previous inline
+  // block; it mutates `result` in place and returns the per-cycle syncedThreads
+  // set so the poll-only trailing-reconcile below can dedup against it.
+  const syncedThreads = await ingestFreshMessages(db, fresh, result, {
+    gmail,
+    labelId,
+    fromEmail,
+    integrationId,
+  });
+
+  // ── gmail-trailing-reconcile ──────────────────────────────────────────────
+  // The unread poll (is:unread) never re-sees a message Jeff already opened, and
+  // the per-inbound thread sync (processOneEmail [5]) only fires when a NEW
+  // inbound arrives. So a thread whose LAST message is an already-read reply —
+  // e.g. a customer's closing「謝謝🙏」read before the next 10-min tick — silently
+  // never gets filed (root cause of "還是少了一則訊息"). Re-sync every recently
+  // active customer thread regardless of read state. syncThreadToInteractions is
+  // idempotent (claim-or-insert on Message-ID), so re-running only back-fills the
+  // gap. Best-effort: a failure here must never break mail processing. Cheap at
+  // PACK&GO scale (≤40 threads × 1 thread.get, 20×/hr ≪ Gmail quota).
+  try {
+    const since = new Date(Date.now() - RECONCILE_WINDOW_MS);
+    const recentThreads = await db
+      .selectDistinct({
+        profileId: customerInteractions.customerProfileId,
+        threadId: customerInteractions.gmailThreadId,
+      })
+      .from(customerInteractions)
+      .where(
+        and(
+          isNotNull(customerInteractions.gmailThreadId),
+          gt(customerInteractions.createdAt, since),
+        ),
+      )
+      .limit(RECONCILE_MAX_THREADS);
+
+    const [{ listThreadMessagesForFiling }, { syncThreadToInteractions }] =
+      await Promise.all([
+        import("../../_core/gmail"),
+        import("../../_core/threadFiling"),
+      ]);
+
+    let reconciled = 0;
+    let backfilled = 0;
+    for (const t of recentThreads) {
+      // Skip threads already synced this cycle off a fresh inbound (dedup).
+      if (!t.threadId || syncedThreads.has(t.threadId)) continue;
+      syncedThreads.add(t.threadId);
+      try {
+        const filingMsgs = await listThreadMessagesForFiling(
+          gmail,
+          t.threadId,
+          fromEmail,
+        );
+        const synced = await syncThreadToInteractions(db, t.profileId, filingMsgs);
+        reconciled++;
+        backfilled += synced.inserted + synced.claimed;
+      } catch {
+        // A thread id from a different mailbox 404s on this client, or a
+        // transient Gmail error — skip it, the next tick retries.
+      }
+    }
+    if (backfilled > 0) {
+      log.info(
+        { reconciled, backfilled },
+        "[gmailPipeline] trailing-reconcile back-filled read-but-unfiled messages",
+      );
+    }
+  } catch (e) {
+    log.warn(
+      { err: e },
+      "[gmailPipeline] trailing-reconcile failed (non-fatal)",
+    );
+  }
+
+  // Update integration counters
+  await db
+    .update(gmailIntegration)
+    .set({
+      lastPollAt: new Date(),
+      messagesProcessed: integration.messagesProcessed + result.totalProcessed,
+      messagesFailed: integration.messagesFailed + result.totalFailed,
+    })
+    .where(eq(gmailIntegration.id, integrationId));
+
+  return result;
+}
+
+/**
+ * gmail-push — shared ingest core. Takes a set of fresh (not-yet-labeled)
+ * GmailMessageSummary and runs the SAME three gates the poll always used:
+ *   1. receipt pass (rules-only sniff → vision extract → pendingExpenses)
+ *   2. known-noise sender filter (saves LLM tokens)
+ *   3. per-email InquiryAgent pipeline (processOneEmail) + PACKGO_AI_PROCESSED
+ *      label so the same email is never re-processed (the idempotency gate that
+ *      makes push + poll safe to both touch one message).
+ *
+ * Mutates `result` in place (counters + errors) and returns the per-cycle
+ * `syncedThreads` set so the poll's trailing-reconcile can dedup against it.
+ * Pure-logic-wise identical to the old inline block in runGmailPipeline.
+ */
+async function ingestFreshMessages(
+  db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
+  fresh: GmailMessageSummary[],
+  result: PipelineResult,
+  ctx: {
+    gmail: ReturnType<typeof buildGmailClient>;
+    labelId: string;
+    fromEmail: string;
+    integrationId: number;
+  },
+): Promise<Set<string>> {
+  const { gmail, labelId, fromEmail, integrationId } = ctx;
+
   // ── email-receipt-intake: receipt pass (runs BEFORE the noise filter) ──
   // Receipts/invoices often come from hotels, airlines, and vendors whose
   // domains the noise filter below would drop (marriott/hilton/…), so we sniff
@@ -243,7 +361,7 @@ export async function runGmailPipeline(
   const inquiryPolicy = await ensurePolicy(db, "inquiry", DEFAULT_INQUIRY_POLICY);
   const refundPolicy = await ensurePolicy(db, "refund", DEFAULT_REFUND_POLICY);
 
-  // gmail-full-thread-filing [5] — per-poll set so several emails sharing one
+  // gmail-full-thread-filing [5] — per-cycle set so several emails sharing one
   // thread only trigger a single (idempotent) thread sync this cycle.
   const syncedThreads = new Set<string>();
 
@@ -276,80 +394,137 @@ export async function runGmailPipeline(
     }
   }
 
-  // ── gmail-trailing-reconcile ──────────────────────────────────────────────
-  // The unread poll (is:unread) never re-sees a message Jeff already opened, and
-  // the per-inbound thread sync (processOneEmail [5]) only fires when a NEW
-  // inbound arrives. So a thread whose LAST message is an already-read reply —
-  // e.g. a customer's closing「謝謝🙏」read before the next 10-min tick — silently
-  // never gets filed (root cause of "還是少了一則訊息"). Re-sync every recently
-  // active customer thread regardless of read state. syncThreadToInteractions is
-  // idempotent (claim-or-insert on Message-ID), so re-running only back-fills the
-  // gap. Best-effort: a failure here must never break mail processing. Cheap at
-  // PACK&GO scale (≤40 threads × 1 thread.get, 20×/hr ≪ Gmail quota).
-  try {
-    const since = new Date(Date.now() - RECONCILE_WINDOW_MS);
-    const recentThreads = await db
-      .selectDistinct({
-        profileId: customerInteractions.customerProfileId,
-        threadId: customerInteractions.gmailThreadId,
-      })
-      .from(customerInteractions)
-      .where(
-        and(
-          isNotNull(customerInteractions.gmailThreadId),
-          gt(customerInteractions.createdAt, since),
-        ),
-      )
-      .limit(RECONCILE_MAX_THREADS);
+  return syncedThreads;
+}
 
-    const [{ listThreadMessagesForFiling }, { syncThreadToInteractions }] =
-      await Promise.all([
-        import("../../_core/gmail"),
-        import("../../_core/threadFiling"),
-      ]);
+/**
+ * gmail-push (2026-06-29) — incremental ingest driven by a Gmail push
+ * notification. Given the historyId carried in the Pub/Sub message, diff via
+ * history.list to get the message ids added since lastHistoryId, hydrate them,
+ * and run the SAME ingest gates as the poll (ingestFreshMessages). Updates
+ * lastHistoryId to the newest seen so the next push diffs forward.
+ *
+ * Backward-compatible: the every-3-min runGmailPipeline is untouched and still
+ * the fallback. This path is best-effort and idempotent — the PACKGO_AI_PROCESSED
+ * label means a message touched by both push and poll is processed once.
+ *
+ * If history.list reports the stored historyId is expired (404, outside Gmail's
+ * retention), we DON'T try to ingest a partial diff; we just advance the
+ * baseline (when available) and let the time-window poll catch up. Returns
+ * counters for the worker log.
+ */
+export async function runGmailPipelineForMessageIds(
+  integrationId: number,
+  notifiedHistoryId?: string,
+): Promise<PipelineResult> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not initialized");
 
-    let reconciled = 0;
-    let backfilled = 0;
-    for (const t of recentThreads) {
-      // Skip threads already synced this cycle off a fresh inbound (dedup).
-      if (!t.threadId || syncedThreads.has(t.threadId)) continue;
-      syncedThreads.add(t.threadId);
-      try {
-        const filingMsgs = await listThreadMessagesForFiling(
-          gmail,
-          t.threadId,
-          fromEmail,
-        );
-        const synced = await syncThreadToInteractions(db, t.profileId, filingMsgs);
-        reconciled++;
-        backfilled += synced.inserted + synced.claimed;
-      } catch {
-        // A thread id from a different mailbox 404s on this client, or a
-        // transient Gmail error — skip it, the next tick retries.
-      }
+  const [integration] = await db
+    .select()
+    .from(gmailIntegration)
+    .where(eq(gmailIntegration.id, integrationId))
+    .limit(1);
+  if (!integration) throw new Error("Gmail integration not found");
+  if (integration.isActive !== 1) throw new Error("Integration is disabled");
+
+  const gmail = buildGmailClient(integration);
+  const labelId = await ensureLabel(gmail, PROCESSED_LABEL);
+  const fromEmail = integration.emailAddress;
+
+  const result: PipelineResult = {
+    ok: true,
+    emailAddress: integration.emailAddress,
+    totalFetched: 0,
+    totalProcessed: 0,
+    totalFailed: 0,
+    totalEscalated: 0,
+    totalReceipts: 0,
+    errors: [],
+  };
+
+  // Baseline to diff from: prefer the stored lastHistoryId. If we have none yet
+  // (e.g. watch registered but no prior diff), seed from the notification's
+  // historyId so the NEXT push has a baseline; nothing to ingest this round.
+  const startHistoryId = integration.lastHistoryId ?? null;
+  if (!startHistoryId) {
+    if (notifiedHistoryId) {
+      await db
+        .update(gmailIntegration)
+        .set({ lastHistoryId: notifiedHistoryId })
+        .where(eq(gmailIntegration.id, integrationId));
     }
-    if (backfilled > 0) {
-      log.info(
-        { reconciled, backfilled },
-        "[gmailPipeline] trailing-reconcile back-filled read-but-unfiled messages",
-      );
-    }
-  } catch (e) {
-    log.warn(
-      { err: e },
-      "[gmailPipeline] trailing-reconcile failed (non-fatal)",
+    log.info(
+      { integrationId, notifiedHistoryId },
+      "[gmailPipeline] push: no baseline historyId yet — seeded, deferring to poll",
     );
+    return result;
   }
 
-  // Update integration counters
+  let diff: Awaited<ReturnType<typeof listHistoryMessageIds>>;
+  try {
+    diff = await listHistoryMessageIds(gmail, startHistoryId, { labelId: "INBOX" });
+  } catch (e) {
+    result.ok = false;
+    result.errors.push(
+      `history.list failed: ${e instanceof Error ? e.message : String(e)}`,
+    );
+    return result;
+  }
+
+  // Advance the baseline regardless of whether there were messages, so we never
+  // re-diff the same window. On expiry (404) the poll's time-window covers the
+  // gap; we still advance to the latest historyId when Gmail returned one.
+  const newBaseline = diff.latestHistoryId ?? notifiedHistoryId ?? startHistoryId;
+
+  if (diff.expired) {
+    await db
+      .update(gmailIntegration)
+      .set({ lastHistoryId: newBaseline })
+      .where(eq(gmailIntegration.id, integrationId));
+    log.warn(
+      { integrationId, startHistoryId },
+      "[gmailPipeline] push: historyId expired — re-baselined, poll will reconcile",
+    );
+    return result;
+  }
+
+  // Hydrate the added ids → summaries, drop anything already PACKGO_AI_PROCESSED
+  // (poll may have beaten us to it), then run the shared ingest gates.
+  const summaries = diff.messageIds.length
+    ? await listMessagesByIds(gmail, diff.messageIds)
+    : [];
+  const fresh = summaries.filter((m) => !m.labels.includes(labelId));
+
+  if (fresh.length > 0) {
+    await ingestFreshMessages(db, fresh, result, {
+      gmail,
+      labelId,
+      fromEmail,
+      integrationId,
+    });
+  }
+
   await db
     .update(gmailIntegration)
     .set({
       lastPollAt: new Date(),
+      lastHistoryId: newBaseline,
       messagesProcessed: integration.messagesProcessed + result.totalProcessed,
       messagesFailed: integration.messagesFailed + result.totalFailed,
     })
     .where(eq(gmailIntegration.id, integrationId));
+
+  log.info(
+    {
+      integrationId,
+      added: diff.messageIds.length,
+      ingested: fresh.length,
+      processed: result.totalProcessed,
+      receipts: result.totalReceipts,
+    },
+    "[gmailPipeline] push incremental ingest done",
+  );
 
   return result;
 }

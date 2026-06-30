@@ -1,4 +1,4 @@
-import { boolean, date, decimal, int, json, mediumtext, mysqlEnum, mysqlTable, text, timestamp, varchar, unique, index } from "drizzle-orm/mysql-core";
+import { bigint, boolean, date, decimal, int, json, mediumtext, mysqlEnum, mysqlTable, text, timestamp, varchar, unique, index } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -2923,6 +2923,12 @@ export const gmailIntegration = mysqlTable("gmailIntegration", {
   tokenExpiresAt: timestamp("tokenExpiresAt"),
   lastPollAt: timestamp("lastPollAt"),
   lastHistoryId: varchar("lastHistoryId", { length: 100 }),
+  // gmail-push (2026-06-29) — epoch milliseconds when the current Gmail
+  // users.watch expires (Gmail returns ms-since-epoch). NULL = no active
+  // watch. The daily renew cron (scheduleGmailWatchRenew) re-arms watches
+  // whose expiration is within the renew window. bigint because epoch-ms
+  // overflows INT.
+  watchExpiration: bigint("watchExpiration", { mode: "number" }),
   messagesProcessed: int("messagesProcessed").default(0).notNull(),
   messagesFailed: int("messagesFailed").default(0).notNull(),
   isActive: int("isActive").default(1).notNull(),

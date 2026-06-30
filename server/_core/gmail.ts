@@ -20,6 +20,17 @@ import { decryptToken } from "./tokenCrypto";
 import { createChildLogger } from "./logger";
 const log = createChildLogger({ module: "gmail" });
 
+// gmail-push (2026-06-29) — NOTE on scopes + users.watch:
+//   The Gmail `users.watch` method (push-notification registration) is
+//   authorized by ANY of: https://mail.google.com/ , gmail.modify ,
+//   gmail.readonly , gmail.metadata (verified against the METHOD reference at
+//   developers.google.com/workspace/gmail/api/reference/rest/v1/users/watch
+//   #authorization-scopes — NOT the push guide page, which loosely claims
+//   "modify or settings"; that is wrong for watch). We already request
+//   gmail.readonly + gmail.modify below, so watch needs NO new scope and Jeff
+//   does NOT have to re-authorize. We deliberately do NOT add gmail.settings* —
+//   it is unnecessary and would force a fresh consent + re-grant. The push
+//   runbook records this.
 const GMAIL_SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/gmail.modify",
@@ -209,31 +220,66 @@ async function fetchSummariesForQuery(
   const results: GmailMessageSummary[] = [];
   for (const m of messages) {
     if (!m.id || !m.threadId) continue;
-    try {
-      const full = await gmail.users.messages.get({
-        userId: "me",
-        id: m.id,
-        format: "full",
-      });
-      const summary = parseMessage(full.data);
-      try {
-        summary.attachments = await fetchAndParseAttachments(
-          gmail,
-          m.id,
-          full.data.payload
-        );
-      } catch (attachErr) {
-        log.warn(
-          { err: attachErr, messageId: m.id },
-          "[gmail] failed to parse attachments — continuing with body only"
-        );
-      }
-      results.push(summary);
-    } catch (e) {
-      log.warn({ err: e, messageId: m.id }, "[gmail] failed to fetch message");
-    }
+    const summary = await hydrateMessageById(gmail, m.id);
+    if (summary) results.push(summary);
   }
   return results;
+}
+
+/**
+ * Fetch + parse ONE message id into a full GmailMessageSummary (headers, body,
+ * parsed attachments). Returns null on any per-message failure (logged, never
+ * throws) so callers can keep going. Shared by the query path
+ * (fetchSummariesForQuery) and the push path (listMessagesByIds).
+ */
+async function hydrateMessageById(
+  gmail: ReturnType<typeof buildGmailClient>,
+  id: string,
+): Promise<GmailMessageSummary | null> {
+  try {
+    const full = await gmail.users.messages.get({
+      userId: "me",
+      id,
+      format: "full",
+    });
+    const summary = parseMessage(full.data);
+    try {
+      summary.attachments = await fetchAndParseAttachments(
+        gmail,
+        id,
+        full.data.payload
+      );
+    } catch (attachErr) {
+      log.warn(
+        { err: attachErr, messageId: id },
+        "[gmail] failed to parse attachments — continuing with body only"
+      );
+    }
+    return summary;
+  } catch (e) {
+    log.warn({ err: e, messageId: id }, "[gmail] failed to fetch message");
+    return null;
+  }
+}
+
+/**
+ * gmail-push — hydrate a known set of message ids (from history.list) into full
+ * summaries, mirroring listUnreadMessages' shape so the ingest path is reused
+ * verbatim. Per-message failures are skipped (hydrateMessageById returns null).
+ * INBOX filter is applied in JS: history.list already scoped to the INBOX
+ * label, but a defensive `labels.includes("INBOX")` keeps Trash/Sent edge
+ * cases out of the customer-inquiry flow.
+ */
+export async function listMessagesByIds(
+  gmail: ReturnType<typeof buildGmailClient>,
+  ids: string[],
+): Promise<GmailMessageSummary[]> {
+  const out: GmailMessageSummary[] = [];
+  for (const id of ids) {
+    const summary = await hydrateMessageById(gmail, id);
+    if (summary && summary.labels.includes("INBOX")) out.push(summary);
+  }
+  return out;
 }
 
 /**
@@ -910,4 +956,190 @@ export async function verifyConnection(
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// gmail-push (2026-06-29) — Gmail push notifications via Cloud Pub/Sub.
+//
+// Flow:  users.watch(topic) → Gmail publishes to the Pub/Sub topic whenever
+// the mailbox changes → Pub/Sub push-delivers a JSON envelope to
+// POST /api/gmail/push → we diff via history.list(startHistoryId) → ingest.
+//
+// This is layered ON TOP of the existing every-3-min poll, which stays as
+// fallback + reconciliation: push can miss messages, and a watch expires
+// after ~7 days (must be renewed daily). See queue.ts (scheduleGmailWatchRenew)
+// and the runbook docs/features/customer-cockpit/gmail-push-runbook.md.
+// ════════════════════════════════════════════════════════════════════════
+
+export type GmailWatchResult = {
+  /** Mailbox historyId at the moment watch was (re)registered. */
+  historyId: string;
+  /** Epoch milliseconds when this watch expires (Gmail returns ms-since-epoch). */
+  expirationMs: number;
+};
+
+/**
+ * Register (or refresh) a Gmail push watch on the INBOX. Idempotent on Gmail's
+ * side — calling watch again before expiry simply extends it and returns a
+ * fresh historyId/expiration. `topicName` MUST be the fully-qualified Pub/Sub
+ * topic, e.g. "projects/<gcp-project>/topics/<topic>".
+ *
+ * Returns the historyId (store as gmailIntegration.lastHistoryId — it is the
+ * baseline the next history.list diffs from) and expirationMs (store as
+ * gmailIntegration.watchExpiration so the renew cron knows when to re-arm).
+ */
+export async function registerGmailWatch(
+  gmail: ReturnType<typeof buildGmailClient>,
+  topicName: string,
+): Promise<GmailWatchResult> {
+  const resp = await gmail.users.watch({
+    userId: "me",
+    requestBody: {
+      topicName,
+      labelIds: ["INBOX"],
+      // Only notify on INBOX changes (not every label flip across the mailbox).
+      labelFilterBehavior: "INCLUDE",
+    },
+  });
+  const historyId = resp.data.historyId;
+  const expiration = resp.data.expiration; // string, ms-since-epoch
+  if (!historyId || !expiration) {
+    throw new Error(
+      `Gmail watch returned incomplete response (historyId=${historyId}, expiration=${expiration})`,
+    );
+  }
+  return { historyId: String(historyId), expirationMs: Number(expiration) };
+}
+
+/**
+ * Stop an active Gmail watch (best-effort cleanup, e.g. on disconnect). Never
+ * throws — a stop on an already-expired/absent watch is a no-op upstream.
+ */
+export async function stopGmailWatch(
+  gmail: ReturnType<typeof buildGmailClient>,
+): Promise<void> {
+  try {
+    await gmail.users.stop({ userId: "me" });
+  } catch (e) {
+    log.warn({ err: e }, "[gmail] users.stop failed (non-fatal)");
+  }
+}
+
+/**
+ * Incremental fetch: given the last-seen historyId, return the Gmail message
+ * IDs added since then plus the newest historyId to persist as the next
+ * baseline. Walks every history.list page (messagesAdded), de-dupes, and caps
+ * at `maxMessages` to bound a burst. Only returns ids — the caller hydrates
+ * each via the existing per-message path (so attachment parsing / dedup label
+ * gating are reused unchanged).
+ *
+ * NOTE: a 404 from history.list means startHistoryId is too old (Gmail only
+ * retains a limited window). The caller must treat that as "fall back to the
+ * time-window poll" rather than a hard failure — surfaced via `expired: true`.
+ */
+export async function listHistoryMessageIds(
+  gmail: ReturnType<typeof buildGmailClient>,
+  startHistoryId: string,
+  opts?: { maxMessages?: number; labelId?: string },
+): Promise<{ messageIds: string[]; latestHistoryId: string | null; expired: boolean }> {
+  const maxMessages = opts?.maxMessages ?? 100;
+  const ids = new Set<string>();
+  let latestHistoryId: string | null = null;
+  let pageToken: string | undefined;
+
+  try {
+    do {
+      const resp = await gmail.users.history.list({
+        userId: "me",
+        startHistoryId,
+        historyTypes: ["messageAdded"],
+        ...(opts?.labelId ? { labelId: opts.labelId } : {}),
+        ...(pageToken ? { pageToken } : {}),
+        maxResults: 500,
+      });
+      if (resp.data.historyId) latestHistoryId = String(resp.data.historyId);
+      for (const h of resp.data.history ?? []) {
+        for (const added of h.messagesAdded ?? []) {
+          const id = added.message?.id;
+          if (id) ids.add(id);
+        }
+      }
+      pageToken = resp.data.nextPageToken ?? undefined;
+      if (ids.size >= maxMessages) break;
+    } while (pageToken);
+  } catch (e: any) {
+    // 404 → startHistoryId outside Gmail's retention window. Signal expiry so
+    // the caller re-baselines + leans on the time-window poll instead.
+    const status = e?.code ?? e?.response?.status;
+    if (status === 404) {
+      log.warn({ startHistoryId }, "[gmail] history.list 404 — historyId expired, falling back to poll");
+      return { messageIds: [], latestHistoryId: null, expired: true };
+    }
+    throw e;
+  }
+
+  return {
+    messageIds: Array.from(ids).slice(0, maxMessages),
+    latestHistoryId,
+    expired: false,
+  };
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Pure parsers for the Pub/Sub push webhook — extracted so the route stays
+// thin and these can be unit-tested with zero network / DB / googleapis deps.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** The decoded inner payload Gmail publishes inside the Pub/Sub message data. */
+export type GmailPushNotification = {
+  emailAddress: string;
+  /** historyId is a string in the decoded JSON; we keep it as-is. */
+  historyId: string;
+};
+
+/**
+ * Parse a Pub/Sub push envelope (the raw HTTP body) into the Gmail
+ * notification. Pub/Sub wraps the payload as:
+ *   { message: { data: base64(JSON), messageId, publishTime }, subscription }
+ * and the base64-decoded `data` is { emailAddress, historyId }.
+ *
+ * Returns null for any malformed shape (so the webhook can 204-ack and move on
+ * rather than throw — a poison message must not wedge the subscription). Pure.
+ */
+export function decodePubSubPushBody(
+  rawBody: string | Buffer,
+): GmailPushNotification | null {
+  let envelope: any;
+  try {
+    const text = Buffer.isBuffer(rawBody) ? rawBody.toString("utf8") : rawBody;
+    envelope = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  const dataB64 = envelope?.message?.data;
+  if (typeof dataB64 !== "string" || dataB64.length === 0) return null;
+  let inner: any;
+  try {
+    // Pub/Sub uses standard base64 (not base64url) for message.data.
+    inner = JSON.parse(Buffer.from(dataB64, "base64").toString("utf8"));
+  } catch {
+    return null;
+  }
+  const emailAddress = inner?.emailAddress;
+  const historyId = inner?.historyId;
+  if (typeof emailAddress !== "string" || !emailAddress) return null;
+  if (historyId === undefined || historyId === null) return null;
+  return { emailAddress, historyId: String(historyId) };
+}
+
+/**
+ * Extract the bare JWT from an `Authorization: Bearer <jwt>` header value.
+ * Returns null when the header is absent or not a Bearer token. Pure.
+ */
+export function extractBearerToken(
+  authHeader: string | undefined | null,
+): string | null {
+  if (!authHeader) return null;
+  const m = authHeader.match(/^Bearer\s+(.+)$/i);
+  return m ? m[1].trim() : null;
 }

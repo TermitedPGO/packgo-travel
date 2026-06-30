@@ -20,13 +20,61 @@
  */
 
 import type { Express, Request, Response } from "express";
-import { exchangeCodeForTokens, getGmailAuthUrl } from "./_core/gmail";
+import {
+  exchangeCodeForTokens,
+  getGmailAuthUrl,
+  buildGmailClient,
+  registerGmailWatch,
+} from "./_core/gmail";
 import { getDb, getUserById } from "./db";
 import { gmailIntegration } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { verifyToken } from "./jwt";
 import { COOKIE_NAME } from "@shared/const";
 import { encryptToken } from "./_core/tokenCrypto";
+
+/**
+ * gmail-push (2026-06-29) — best-effort: register a Gmail push watch right after
+ * a successful connect so notifications start without waiting for the daily
+ * renew cron. No-ops (logs) when GMAIL_PUBSUB_TOPIC is unset (push not set up
+ * yet) or when watch fails (the poll + renew cron cover it). NEVER throws — a
+ * watch hiccup must not break the OAuth connect flow.
+ */
+async function tryRegisterWatchOnConnect(
+  db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
+  integrationId: number,
+  tokens: { accessToken: string; refreshToken: string; expiresAt: Date },
+): Promise<void> {
+  const topicName = process.env.GMAIL_PUBSUB_TOPIC;
+  if (!topicName) {
+    console.log(
+      "[gmail oauth] GMAIL_PUBSUB_TOPIC unset — skipping watch registration (poll still active)",
+    );
+    return;
+  }
+  try {
+    // buildGmailClient decrypts internally; pass the plaintext tokens we just
+    // exchanged (encryptToken is version-aware so plaintext reads fine too).
+    const gmail = buildGmailClient({
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      tokenExpiresAt: tokens.expiresAt,
+    });
+    const watch = await registerGmailWatch(gmail, topicName);
+    await db
+      .update(gmailIntegration)
+      .set({
+        lastHistoryId: watch.historyId,
+        watchExpiration: watch.expirationMs,
+      })
+      .where(eq(gmailIntegration.id, integrationId));
+    console.log(
+      `[gmail oauth] watch registered (expires ${new Date(watch.expirationMs).toISOString()})`,
+    );
+  } catch (e) {
+    console.error("[gmail oauth] watch registration failed (non-fatal):", e);
+  }
+}
 
 /** Helper: extract + validate admin user from request cookie. */
 async function getAdminUserFromRequest(req: Request) {
@@ -115,6 +163,7 @@ export function initializeGmailOAuth(app: Express) {
       const encryptedAccess = encryptToken(tokens.accessToken);
       const encryptedRefresh = encryptToken(tokens.refreshToken);
 
+      let integrationId: number;
       if (existing[0]) {
         await db
           .update(gmailIntegration)
@@ -127,8 +176,9 @@ export function initializeGmailOAuth(app: Express) {
             disconnectReason: null,
           })
           .where(eq(gmailIntegration.id, existing[0].id));
+        integrationId = existing[0].id;
       } else {
-        await db.insert(gmailIntegration).values({
+        const ins = await db.insert(gmailIntegration).values({
           userId: user.id,
           emailAddress: tokens.emailAddress,
           accessToken: encryptedAccess,
@@ -136,6 +186,16 @@ export function initializeGmailOAuth(app: Express) {
           scope: tokens.scope,
           tokenExpiresAt: tokens.expiresAt,
           isActive: 1,
+        });
+        integrationId = Number((ins as any)[0]?.insertId ?? 0);
+      }
+
+      // gmail-push — fire up the push watch now (best-effort, never throws).
+      if (integrationId) {
+        await tryRegisterWatchOnConnect(db, integrationId, {
+          accessToken: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+          expiresAt: tokens.expiresAt,
         });
       }
 

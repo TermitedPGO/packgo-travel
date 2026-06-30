@@ -247,7 +247,21 @@ async function startServer() {
       await handlePlaidWebhook(req, res);
     }
   );
-  
+
+  // gmail-push (2026-06-29) — Gmail push (Cloud Pub/Sub) webhook. raw body so we
+  // decode the base64 Pub/Sub envelope exactly. The handler verifies the Google
+  // OIDC bearer token (signature + aud + service account), enqueues the heavy
+  // ingest to BullMQ, and 204-acks fast (Pub/Sub demands a quick response).
+  // See server/_core/gmailPushWebhook.ts + the push runbook.
+  app.post(
+    "/api/gmail/push",
+    express.raw({ type: "application/json" }),
+    async (req, res) => {
+      const { handleGmailPushWebhook } = await import("./gmailPushWebhook");
+      await handleGmailPushWebhook(req, res);
+    }
+  );
+
   // Configure body parser — 10 MB is generous for JSON payloads.
   // File uploads (PDF, avatar, tour images) use multer with their own limits.
   // Previous 50 MB risked OOM on the 1 GB Fly.io VM under concurrent requests.
@@ -1216,6 +1230,19 @@ async function startServer() {
     await import('../gmailPollWorker');
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to schedule Gmail poll");
+  }
+
+  // gmail-push (2026-06-29) — Gmail push (Pub/Sub) workers + daily watch-renew
+  // cron. Sits ALONGSIDE the 3-min poll above (fallback). The push webhook
+  // enqueues; gmailPushWorker drains the ingest; gmailWatchRenewWorker re-arms
+  // each watch daily (watch expires ~7 days). No-ops gracefully when
+  // GMAIL_PUBSUB_TOPIC is unset (push not configured yet).
+  try {
+    const { scheduleGmailWatchRenew } = await import('../queue');
+    await scheduleGmailWatchRenew();
+    await import('../gmailPushWorker');
+  } catch (err) {
+    logger.warn({ err }, "[Startup] Failed to init Gmail push workers");
   }
 
   // Booking followup worker — drains the queue that bookings.create
