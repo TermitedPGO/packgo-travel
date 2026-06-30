@@ -30,6 +30,10 @@ vi.mock("./customerDocsText", () => ({
 import { getDb } from "../db";
 import { loadCustomerDocs } from "./customerDocsLoader";
 import { buildCustomerDocsText } from "./customerDocsText";
+vi.mock("../db/customOrder", () => ({
+  findCustomerProfileId: vi.fn(),
+}));
+
 import {
   formatCustomerContext,
   formatPreferences,
@@ -38,9 +42,13 @@ import {
   buildGuestChatContext,
   formatOrderContext,
   buildOrderContextBlock,
+  resolveOrderScope,
   type CustomerContextData,
   type OrderContextData,
 } from "./customerChatContext";
+import { findCustomerProfileId } from "../db/customOrder";
+
+const findCustomerProfileIdMock = vi.mocked(findCustomerProfileId);
 
 const getDbMock = vi.mocked(getDb);
 
@@ -517,5 +525,132 @@ describe("buildOrderContextBlock", () => {
     expect(block).toContain("ORD-2026-0142");
     expect(block).toContain("已歸入 2 則往來");
     expect(block).toContain("售價 USD 4,015");
+  });
+});
+
+describe("resolveOrderScope (customer-projects 0104 — ask-ops-stream cross-customer guard)", () => {
+  it("passes through with orderId:null when rawOrderId is empty (no DB hit, doesn't block scope-less chat)", async () => {
+    const result = await resolveOrderScope({
+      rawOrderId: "",
+      customerId: null,
+      customerProfileId: null,
+    });
+    expect(result).toEqual({ ok: true, orderId: null });
+    expect(getDbMock).not.toHaveBeenCalled();
+  });
+
+  it("400s when orderId is given but there's no customer scope at all", async () => {
+    const result = await resolveOrderScope({
+      rawOrderId: "142",
+      customerId: null,
+      customerProfileId: null,
+    });
+    expect(result).toEqual({
+      ok: false,
+      status: 400,
+      error: "orderId requires a customer scope",
+    });
+  });
+
+  it("400s on a malformed orderId (non-positive-integer string)", async () => {
+    for (const bad of ["abc", "0", "-3", "1.5"]) {
+      const result = await resolveOrderScope({
+        rawOrderId: bad,
+        customerId: 7,
+        customerProfileId: null,
+      });
+      expect(result).toEqual({ ok: false, status: 400, error: "Invalid orderId" });
+    }
+  });
+
+  it("404s when the order doesn't exist", async () => {
+    getDbMock.mockResolvedValue(fakeDb([[]])); // order lookup → no row
+    const result = await resolveOrderScope({
+      rawOrderId: "999",
+      customerId: 7,
+      customerProfileId: null,
+    });
+    expect(result).toEqual({ ok: false, status: 404, error: "Order not found" });
+  });
+
+  it("403s — order belongs to a DIFFERENT customer (the cross-customer guard)", async () => {
+    // Order is owned by profileId 999; the requesting customer's own profile
+    // resolves to 7. Must never let customer A pin customer B's order.
+    getDbMock.mockResolvedValue(fakeDb([[{ customerProfileId: 999 }]]));
+    findCustomerProfileIdMock.mockResolvedValueOnce(7);
+    const result = await resolveOrderScope({
+      rawOrderId: "142",
+      customerId: 7,
+      customerProfileId: null,
+    });
+    expect(result).toEqual({
+      ok: false,
+      status: 403,
+      error: "Order does not belong to this customer",
+    });
+  });
+
+  it("403s the guest path too — order belongs to a different guest profileId", async () => {
+    getDbMock.mockResolvedValue(fakeDb([[{ customerProfileId: 999 }]]));
+    const result = await resolveOrderScope({
+      rawOrderId: "142",
+      customerId: null,
+      customerProfileId: 5,
+    });
+    expect(result).toEqual({
+      ok: false,
+      status: 403,
+      error: "Order does not belong to this customer",
+    });
+    // Guest path uses customerProfileId directly — never needs the userId lookup.
+    expect(findCustomerProfileIdMock).not.toHaveBeenCalled();
+  });
+
+  it("403s when the registered customer has no resolvable profile at all", async () => {
+    getDbMock.mockResolvedValue(fakeDb([[{ customerProfileId: 7 }]]));
+    findCustomerProfileIdMock.mockResolvedValueOnce(null);
+    const result = await resolveOrderScope({
+      rawOrderId: "142",
+      customerId: 7,
+      customerProfileId: null,
+    });
+    expect(result).toEqual({
+      ok: false,
+      status: 403,
+      error: "Order does not belong to this customer",
+    });
+  });
+
+  it("ok — guest path: order's customerProfileId matches the given customerProfileId directly", async () => {
+    getDbMock.mockResolvedValue(fakeDb([[{ customerProfileId: 5 }]]));
+    const result = await resolveOrderScope({
+      rawOrderId: "142",
+      customerId: null,
+      customerProfileId: 5,
+    });
+    expect(result).toEqual({ ok: true, orderId: 142 });
+    expect(findCustomerProfileIdMock).not.toHaveBeenCalled();
+  });
+
+  it("ok — registered customer path: order's customerProfileId matches findCustomerProfileId({ userId }) resolution", async () => {
+    getDbMock.mockResolvedValue(fakeDb([[{ customerProfileId: 7 }]]));
+    findCustomerProfileIdMock.mockResolvedValueOnce(7);
+    const result = await resolveOrderScope({
+      rawOrderId: "142",
+      customerId: 99, // the users.id — resolved to profileId 7 via the mock
+      customerProfileId: null,
+    });
+    expect(result).toEqual({ ok: true, orderId: 142 });
+    expect(findCustomerProfileIdMock).toHaveBeenCalledWith({ userId: 99 });
+  });
+
+  it("skips the order/cross-customer check when the DB is unavailable (matches original fail-open-on-down-DB behavior)", async () => {
+    getDbMock.mockResolvedValue(undefined as any);
+    const result = await resolveOrderScope({
+      rawOrderId: "142",
+      customerId: 7,
+      customerProfileId: null,
+    });
+    expect(result).toEqual({ ok: true, orderId: 142 });
   });
 });

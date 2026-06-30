@@ -481,41 +481,15 @@ async function startServer() {
       // global #ops). Cross-customer guard: the order's customerProfileId MUST
       // match the resolved customer's profileId — never let Jeff's chat for
       // customer A pin customer B's order. Validated BEFORE SSE headers.
-      let orderId: number | null = null;
+      // Logic lives in resolveOrderScope (customerChatContext.ts) so it's unit
+      // tested directly instead of only via this route handler.
+      const { resolveOrderScope } = await import("./customerChatContext");
       const rawOrderId = String((isPost ? req.body?.orderId : req.query.orderId) ?? "").trim();
-      if (rawOrderId) {
-        if (customerId === null && customerProfileId === null) {
-          return res.status(400).json({ error: "orderId requires a customer scope" });
-        }
-        orderId = Number(rawOrderId);
-        if (!Number.isInteger(orderId) || orderId <= 0) {
-          return res.status(400).json({ error: "Invalid orderId" });
-        }
-        const { getDb } = await import("../db");
-        const dbCheck = await getDb();
-        if (dbCheck) {
-          const { customOrders } = await import("../../drizzle/schema");
-          const { eq } = await import("drizzle-orm");
-          const [ord] = await dbCheck
-            .select({ customerProfileId: customOrders.customerProfileId })
-            .from(customOrders)
-            .where(eq(customOrders.id, orderId))
-            .limit(1);
-          if (!ord) {
-            return res.status(404).json({ error: "Order not found" });
-          }
-          // Resolve the customer's canonical profileId and assert the order
-          // belongs to them (no cross-customer leakage).
-          let scopeProfileId: number | null = customerProfileId;
-          if (scopeProfileId === null && customerId !== null) {
-            const { findCustomerProfileId } = await import("../db/customOrder");
-            scopeProfileId = (await findCustomerProfileId({ userId: customerId })) ?? null;
-          }
-          if (scopeProfileId === null || ord.customerProfileId !== scopeProfileId) {
-            return res.status(403).json({ error: "Order does not belong to this customer" });
-          }
-        }
+      const orderScope = await resolveOrderScope({ rawOrderId, customerId, customerProfileId });
+      if (!orderScope.ok) {
+        return res.status(orderScope.status).json({ error: orderScope.error });
       }
+      const orderId: number | null = orderScope.orderId;
 
       // Parse optional image URLs from query (vision support, 2026-06-01)
       let imageUrls: string[] | undefined;

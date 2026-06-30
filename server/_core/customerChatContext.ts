@@ -615,3 +615,81 @@ export async function buildOrderContextBlock(
 
   return formatOrderContext({ ...order, conversationCount: Number(conversationCount) });
 }
+
+// ── customer-projects (0104) — orderId scope guard ───────────────────────────
+// Extracted from the ask-ops-stream route handler (server/_core/index.ts) so
+// the cross-customer guard — the first, most directly client-input-facing gate
+// against one customer's chat pinning ANOTHER customer's order — can be unit
+// tested. Pure decision logic + the one DB round trip; the caller (index.ts)
+// owns translating the result into res.status(...).json(...) with the SAME
+// error strings as before (never change the text — other tests / the client
+// may assert on it).
+
+export type OrderScopeResult =
+  | { ok: true; orderId: number | null }
+  | { ok: false; status: 400 | 403 | 404; error: string };
+
+/**
+ * Resolve + guard the optional `orderId` (customer-projects "project" scope)
+ * for a chat request. Mirrors the inline logic that used to live in
+ * ask-ops-stream 1:1:
+ * - rawOrderId empty → not scoped, pass through (`orderId: null`), no DB hit.
+ * - orderId present but no customer scope (customerId/customerProfileId both
+ *   null) → 400 "orderId requires a customer scope".
+ * - orderId not a positive integer string → 400 "Invalid orderId".
+ * - order not found → 404 "Order not found".
+ * - order's customerProfileId doesn't match the resolved scope profileId →
+ *   403 "Order does not belong to this customer" (the cross-customer guard).
+ * - otherwise → ok with the resolved numeric orderId.
+ *
+ * When the DB is unavailable, mirrors the original "skip the check" behavior
+ * (the rest of the route already treats a down DB as best-effort elsewhere).
+ */
+export async function resolveOrderScope(params: {
+  rawOrderId: string;
+  customerId: number | null;
+  customerProfileId: number | null;
+}): Promise<OrderScopeResult> {
+  const rawOrderId = params.rawOrderId.trim();
+  if (!rawOrderId) return { ok: true, orderId: null };
+
+  if (params.customerId === null && params.customerProfileId === null) {
+    return { ok: false, status: 400, error: "orderId requires a customer scope" };
+  }
+
+  const orderId = Number(rawOrderId);
+  if (!Number.isInteger(orderId) || orderId <= 0) {
+    return { ok: false, status: 400, error: "Invalid orderId" };
+  }
+
+  const db = await getDb();
+  if (!db) {
+    // Same as the original inline `if (dbCheck) { ... }` — when the DB is
+    // down, the order/cross-customer check is skipped entirely and the
+    // resolved orderId passes through.
+    return { ok: true, orderId };
+  }
+
+  const { customOrders } = await import("../../drizzle/schema");
+  const [ord] = await db
+    .select({ customerProfileId: customOrders.customerProfileId })
+    .from(customOrders)
+    .where(eq(customOrders.id, orderId))
+    .limit(1);
+  if (!ord) {
+    return { ok: false, status: 404, error: "Order not found" };
+  }
+
+  // Resolve the customer's canonical profileId and assert the order belongs
+  // to them (no cross-customer leakage).
+  let scopeProfileId: number | null = params.customerProfileId;
+  if (scopeProfileId === null && params.customerId !== null) {
+    const { findCustomerProfileId } = await import("../db/customOrder");
+    scopeProfileId = (await findCustomerProfileId({ userId: params.customerId })) ?? null;
+  }
+  if (scopeProfileId === null || ord.customerProfileId !== scopeProfileId) {
+    return { ok: false, status: 403, error: "Order does not belong to this customer" };
+  }
+
+  return { ok: true, orderId };
+}
