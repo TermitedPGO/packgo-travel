@@ -7,6 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { TRPCError } from "@trpc/server";
 
 vi.mock("../db", () => ({
   getCustomOrderById: vi.fn(),
@@ -20,6 +21,9 @@ vi.mock("../db", () => ({
   generateOrderNumber: vi.fn(async () => "ORD-2026-0001"),
   createInvoice: vi.fn(),
   updateInvoice: vi.fn(),
+  resolveCustomerProfileIds: vi.fn(),
+  getCustomOrderProfileId: vi.fn(),
+  assignInteractionsToOrder: vi.fn(async () => 0),
 }));
 vi.mock("../rateLimit", () => ({
   checkAdminMutationRateLimit: vi.fn(async () => ({ allowed: true, remaining: 59 })),
@@ -318,5 +322,146 @@ describe("sendQuote — terminal guard", () => {
     (db.getCustomOrderById as any).mockResolvedValue({ ...baseOrder, status: "cancelled", quotePdfUrl: "https://x/q.pdf" });
     await expect(caller().sendQuote({ orderId: 7, confirm: true })).rejects.toThrow(/cancelled/);
     expect(sendCustomOrderQuoteEmail).not.toHaveBeenCalled();
+  });
+});
+
+describe("assignConversation — customer-projects (0104) design.md §5.2", () => {
+  it("跨客人擋下:orderId 的 owner profileId 不在呼叫者 selection 解析出的 profileIds 內 → FORBIDDEN", async () => {
+    (db.resolveCustomerProfileIds as any).mockResolvedValue([5, 6]); // 王先生的所有 profileIds
+    (db.getCustomOrderProfileId as any).mockResolvedValue(99); // 訂單其實屬於別的客人
+    const err = await caller()
+      .assignConversation({
+        selection: { profileId: 5 },
+        orderId: 7,
+        gmailThreadId: "thread-abc",
+      })
+      .catch((e: any) => e);
+    expect(err).toBeInstanceOf(TRPCError);
+    expect(err.code).toBe("FORBIDDEN");
+    expect(db.assignInteractionsToOrder).not.toHaveBeenCalled();
+  });
+
+  it("orderId 解析不到 owner(null)也視為跨客人 → FORBIDDEN", async () => {
+    (db.resolveCustomerProfileIds as any).mockResolvedValue([5]);
+    (db.getCustomOrderProfileId as any).mockResolvedValue(null);
+    const err = await caller()
+      .assignConversation({ selection: { profileId: 5 }, orderId: 7, interactionId: 1 })
+      .catch((e: any) => e);
+    expect(err).toBeInstanceOf(TRPCError);
+    expect(err.code).toBe("FORBIDDEN");
+    expect(db.assignInteractionsToOrder).not.toHaveBeenCalled();
+  });
+
+  it("gmailThreadId 給了 → 整串一起指派,assignInteractionsToOrder 收到正確參數", async () => {
+    (db.resolveCustomerProfileIds as any).mockResolvedValue([5, 6]);
+    (db.getCustomOrderProfileId as any).mockResolvedValue(5); // 訂單屬於同一個客人
+    (db.assignInteractionsToOrder as any).mockResolvedValue(3);
+    const out = await caller().assignConversation({
+      selection: { profileId: 5 },
+      orderId: 7,
+      gmailThreadId: "thread-abc",
+    });
+    expect(db.assignInteractionsToOrder).toHaveBeenCalledWith({
+      profileIds: [5, 6],
+      orderId: 7,
+      gmailThreadId: "thread-abc",
+      interactionId: null,
+    });
+    expect(out).toEqual({ updated: 3 });
+  });
+
+  it("沒給 gmailThreadId、給了 interactionId → 單列退路", async () => {
+    (db.resolveCustomerProfileIds as any).mockResolvedValue([5]);
+    (db.getCustomOrderProfileId as any).mockResolvedValue(5);
+    (db.assignInteractionsToOrder as any).mockResolvedValue(1);
+    await caller().assignConversation({
+      selection: { profileId: 5 },
+      orderId: 7,
+      interactionId: 42,
+    });
+    expect(db.assignInteractionsToOrder).toHaveBeenCalledWith({
+      profileIds: [5],
+      orderId: 7,
+      gmailThreadId: null,
+      interactionId: 42,
+    });
+  });
+
+  it("orderId 給 null → 退回未分類(跳過 owner 比對,直接指派)", async () => {
+    (db.resolveCustomerProfileIds as any).mockResolvedValue([5]);
+    (db.assignInteractionsToOrder as any).mockResolvedValue(1);
+    await caller().assignConversation({
+      selection: { profileId: 5 },
+      orderId: null,
+      gmailThreadId: "thread-abc",
+    });
+    expect(db.getCustomOrderProfileId).not.toHaveBeenCalled();
+    expect(db.assignInteractionsToOrder).toHaveBeenCalledWith({
+      profileIds: [5],
+      orderId: null,
+      gmailThreadId: "thread-abc",
+      interactionId: null,
+    });
+  });
+
+  it("成功路徑寫 audit()", async () => {
+    (db.resolveCustomerProfileIds as any).mockResolvedValue([5]);
+    (db.assignInteractionsToOrder as any).mockResolvedValue(1);
+    await caller().assignConversation({
+      selection: { profileId: 5 },
+      orderId: null,
+      gmailThreadId: "thread-abc",
+    });
+    expect(audit).toHaveBeenCalled();
+    const call = (audit as any).mock.calls[0][0];
+    expect(call.action).toBe("customOrder.assignConversation");
+  });
+
+  it("selection 解析不到客人(無 DB)→ PRECONDITION_FAILED,不打 assignInteractionsToOrder", async () => {
+    (db.resolveCustomerProfileIds as any).mockResolvedValue([]);
+    const err = await caller()
+      .assignConversation({ selection: { profileId: 5 }, orderId: null, gmailThreadId: "t" })
+      .catch((e: any) => e);
+    expect(err).toBeInstanceOf(TRPCError);
+    expect(err.code).toBe("PRECONDITION_FAILED");
+    expect(db.assignInteractionsToOrder).not.toHaveBeenCalled();
+  });
+});
+
+describe("update — rename (customer-projects 0104)", () => {
+  it("title 傳空字串 → zod min(1) 擋下(invalid input)", async () => {
+    const err = await caller()
+      .update({ orderId: 7, title: "" })
+      .catch((e: any) => e);
+    expect(err).toBeTruthy();
+    expect(db.getCustomOrderById).not.toHaveBeenCalled();
+    expect(db.updateCustomOrder).not.toHaveBeenCalled();
+  });
+
+  it("title 傳純空白字串 → trim 後同樣被 min(1) 擋下", async () => {
+    const err = await caller()
+      .update({ orderId: 7, title: "   " })
+      .catch((e: any) => e);
+    expect(err).toBeTruthy();
+    expect(db.updateCustomOrder).not.toHaveBeenCalled();
+  });
+
+  it("terminal 單(cancelled)呼叫 update 改 title → assertNotTerminal 擋下", async () => {
+    (db.getCustomOrderById as any).mockResolvedValue({ ...baseOrder, status: "cancelled" });
+    await expect(caller().update({ orderId: 7, title: "新名字" })).rejects.toThrow(/cancelled/);
+    expect(db.updateCustomOrder).not.toHaveBeenCalled();
+  });
+
+  it("terminal 單(completed)呼叫 update 改 title → assertNotTerminal 擋下", async () => {
+    (db.getCustomOrderById as any).mockResolvedValue({ ...baseOrder, status: "completed" });
+    await expect(caller().update({ orderId: 7, title: "新名字" })).rejects.toThrow(/completed/);
+    expect(db.updateCustomOrder).not.toHaveBeenCalled();
+  });
+
+  it("非 terminal 單成功改名,patch 帶新 title", async () => {
+    (db.getCustomOrderById as any).mockResolvedValue({ ...baseOrder, status: "arranged" });
+    await caller().update({ orderId: 7, title: "新名字" });
+    const patch = (db.updateCustomOrder as any).mock.calls[0][1];
+    expect(patch.title).toBe("新名字");
   });
 });
