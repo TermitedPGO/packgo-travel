@@ -52,3 +52,7 @@ curl -sL https://packgoplay.com/ | grep -c 'ld+json'                            
 
 - Chromium + CJK 字型已在 prod image、Redis 已在跑、puppeteerPool 已存在 → 不需新依賴/build/router 變更。
 - 上線後：更新 memory `project_seo_clientside_invisible`（該記憶註明「prerender 上線即作廢」），並讓 packgo-ai-citation agent 重跑 baseline 量 citation 改善。
+
+---
+## 2026-07-01 部署查證(Claude)
+已上線且驗證生效:Googlebot UA 打 https://packgoplay.com/ 拿到 86KB prerendered HTML(含完整 title/內容),一般 UA 拿 6KB SPA shell,分流正確。prod = v771。本檔先前「待部署驗證」狀態已過期。後續:更新 memory project_seo_clientside_invisible、跑 packgo-ai-citation baseline。

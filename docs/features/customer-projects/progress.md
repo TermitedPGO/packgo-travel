@@ -26,3 +26,7 @@ m1 schema+migration ──┬──> m2 chat scope ──┐
 - [x] i18n zh-TW + en parity(pre-commit clean)
 - [x] 圓角(chip rounded-md、改名 input rounded-lg)/ supplierCost 不外洩(order block 只售價已收;list 投影不含成本)
 - [ ] 給 Jeff 看 → 同意才 pnpm ship(本期不部署)
+
+---
+## 2026-07-01 部署查證(Claude)
+「本期不部署」已過期:m1-m5 + 0106 全部隨 v766/v767 上線,Emerald 實測通過(AI 建 4 張單、邊界全守住)。摘要三行/客人理解跟專案走隨 v770 上線。prod = v771。

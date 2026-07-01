@@ -62,3 +62,7 @@ R2 bucket CORS（packgoplay.com 來源）：
 3. `pnpm ship`（Jeff 放 .deploy-approve）。
 4. 先驗 Jenny 的 escalation 回信：拖一份桌面 PDF → 送出 → Jenny 收到附件。
 5. 下一個 PR：inquiry Inbox composer + 報價 PDF 產生後自動附件。
+
+---
+## 2026-07-01 部署查證(Claude)
+server 端已隨 6 月部署上線(commandCenter.escalationReply 收 attachments)。注意:/ops/customers 駕駛艙的 approveDraft 一鍵送尚未帶附件(useCustomerData 只送 messageId+body),草稿卡顯示附件但送出會靜默丟,列入收斂待定三項一起裁決。

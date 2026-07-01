@@ -61,3 +61,7 @@ workflow(wf_4a66328c-ab5)。
 ## 延後 [7]-[13](未做)
 見 plan.md §四。下一批先 [7] senderClassifier → [8] backfill worker(thread 驅動,**先暫停
 customerSummaryQueue**,dry-run 先給 Jeff)→ ... → [11] 讀取側 cap 提高 → [12] 身分層。
+
+---
+## 2026-07-01 部署查證(Claude)
+[0]-[6] 已隨 6 月部署上線且在跑(push+poll 雙路徑,2026-07-01 v771 加 per-message Redis 鎖防雙處理)。[7]-[13] 照 plan.md §四排程,[8] backfill 仍待做(Emerald 舊信補收依賴它)。

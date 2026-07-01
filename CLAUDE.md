@@ -112,7 +112,7 @@
 
 ### 3.2 後端架構
 
-- **API 層：** tRPC（所有 API 在 `server/routers.ts`，超過 150 行時拆分到 `server/routers/`）
+- **API 層：** tRPC（`server/routers.ts` 是 composition shell；所有 domain API 一律放 `server/routers/<domain>.ts`，不要往 shell 塞邏輯）
 - **資料庫：** MySQL via Drizzle ORM（schema 在 `drizzle/schema.ts`）
 - **認證：** Google OAuth（`server/googleAuth.ts` via passport-google-oauth20）+ email/password 註冊；session 透過自簽 JWT（`server/jwt.ts` + `JWT_SECRET`）。`protectedProcedure` 保護需登入的 API
 - **Admin 保護：** 使用 `adminProcedure`（檢查 `ctx.user.role === 'admin'`）
@@ -294,7 +294,7 @@ grep -rn "object-cover" client/src --include="*.tsx" | grep -v "rounded"
 | i18n 英文 | `client/src/i18n/en.ts` |
 | AI 生成主控 | `server/agents/masterAgent.ts` |
 | 進度追蹤 | `server/agents/progressTracker.ts` |
-| 行程詳情頁 | `client/src/pages/TourDetailPeony.tsx`（v2 backlog: 待拆大檔） |
+| 行程詳情頁 | `client/src/pages/TourDetailPeony/`（2026-05-21 Wave 2 已拆分目錄） |
 | 管理後台行程 | `client/src/components/admin/ToursTab.tsx` + `client/src/components/admin/tours/*` sub-views |
 | 管理後台 agent | `client/src/components/admin/AutonomousAgentsTab.tsx` + `client/src/components/admin/agents/*` sub-views |
 | 行程編輯對話框 | `client/src/components/admin/TourEditDialog.tsx` |
@@ -323,7 +323,7 @@ grep -rn "object-cover" client/src --include="*.tsx" | grep -v "rounded"
 **Checkpoint 前必須確認：**
 1. TypeScript 0 errors（`pnpm build` 通過）
 2. 所有新功能有對應的 Vitest 測試
-3. todo.md 中已完成的項目標記為 `[x]`
+3. 對應 feature 的 `docs/features/<name>/progress.md` 已回寫實際狀態（含「已部署 vN」；todo.md 已於 2026-07-01 歸檔 `docs/archive/`，不再維護）
 
 ---
 
@@ -414,7 +414,7 @@ Python 用 mypy + ruff + pytest；PACK&GO 是 TS 所以：
 ### 9.6 紅線（違反就要回頭補）
 
 - ❌ ship code 沒寫對應 Vitest
-- ❌ 一個檔案 > 300 行還沒拆模組
+- ❌ 新檔案 > 300 行還沒拆模組（存量大檔不追殺，按 churn 熱度排程拆：目前熱點 `server/routers/adminCustomers.ts`、`server/agents/autonomous/gmailPipeline.ts`、`server/_core/index.ts`）
 - ❌ commit 前沒跑 tsc
 - ❌ session > 80 turns 還在同一對話線 — 該開新 session 用文件交接
 - ❌ 用 Edit 大改後沒 Read 一次驗證
