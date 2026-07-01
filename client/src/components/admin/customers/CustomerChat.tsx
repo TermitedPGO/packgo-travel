@@ -401,6 +401,9 @@ export default function CustomerChat({
       // The agent may have just created a project (create_custom_order) — refresh
       // the ProjectBar so a「補進去」的新專案 shows up without reopening the customer.
       void utils.customerOrders.listForCustomer.invalidate()
+      // A dropped file is now filed as a customerDocument (0106) — refresh the
+      // 文件 tab so it shows without a manual reload.
+      void utils.admin.customerDocs.invalidate()
       // The agent may have set/cleared the follow-up date (set_follow_up_date) —
       // refresh the detail / guest-open-items queries the 真相條 reads so the
       // 跟進日 surfaces up top right after Jeff types it, no reload.

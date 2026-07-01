@@ -402,6 +402,11 @@ async function startServer() {
       // image vision, docx / xlsx / csv / txt) so the chat reads PDFs and images
       // like Claude, not text-only. A bad/oversized attachment is skipped, not
       // fatal. Capped at 5 files; parseAttachment applies its own size guards.
+      // Raw dropped files captured here so that AFTER the customer/project scope
+      // is resolved (below) we can persist them to R2 + customerDocuments filed
+      // under the active project — the「給 AI 一資料夾 → 幫你歸檔進專案」flow. The
+      // parse-for-context (fed to the model) and the persist share the same bytes.
+      const droppedFiles: { name: string; mime: string; buffer: Buffer }[] = [];
       if (isPost && Array.isArray(req.body?.fileAttachments) && req.body.fileAttachments.length > 0) {
         const { parseAttachment, buildFileContextText } = await import("./attachmentParser");
         const atts = req.body.fileAttachments.slice(0, 5);
@@ -412,7 +417,9 @@ async function startServer() {
             const mime = String(a?.mimeType ?? "application/octet-stream");
             const b64 = String(a?.dataBase64 ?? "");
             if (!b64) continue;
-            results.push(await parseAttachment(name, mime, Buffer.from(b64, "base64")));
+            const buffer = Buffer.from(b64, "base64");
+            droppedFiles.push({ name, mime, buffer });
+            results.push(await parseAttachment(name, mime, buffer));
           } catch (e) {
             logger.warn({ err: e }, "[ask-ops-stream] one attachment failed to parse");
           }
@@ -523,6 +530,62 @@ async function startServer() {
           if (!orderBelongsToProfiles(ord.customerProfileId, scopeProfileIds)) {
             return res.status(403).json({ error: "Order does not belong to this customer" });
           }
+        }
+      }
+
+      // customer-projects (0106) — persist dropped files as customerDocuments
+      // filed under this customer AND the active project (customOrderId), so a
+      // PDF the AI just read also lands in the 文件 tab instead of being read-once
+      // and discarded (the「給 AI 一資料夾 → 幫你歸檔進專案」flow). Only when there
+      // is a customer scope to file under. Best-effort: a failed upload/insert
+      // logs and never breaks the chat. Same R2 + row shape as sentMailFiling.
+      if (droppedFiles.length > 0 && (customerProfileId !== null || customerId !== null)) {
+        try {
+          const { getDb } = await import("../db");
+          const dbDoc = await getDb();
+          if (dbDoc) {
+            let persistProfileId: number | null = customerProfileId;
+            if (persistProfileId === null && customerId !== null) {
+              const { findCustomerProfileId } = await import("../db/customOrder");
+              persistProfileId = (await findCustomerProfileId({ userId: customerId })) ?? null;
+            }
+            if (persistProfileId !== null) {
+              const { storagePut } = await import("../storage");
+              const { customerDocR2Key } = await import("./customerDocFiling");
+              const { customerDocuments } = await import("../../drizzle/schema");
+              let filed = 0;
+              for (const f of droppedFiles) {
+                try {
+                  const key = customerDocR2Key(
+                    persistProfileId,
+                    f.name,
+                    Date.now(),
+                    Math.random().toString(36).slice(2, 8),
+                  );
+                  const put = await storagePut(key, f.buffer, f.mime || "application/octet-stream");
+                  await dbDoc.insert(customerDocuments).values({
+                    customerProfileId: persistProfileId,
+                    customOrderId: orderId,
+                    type: "other",
+                    fileName: f.name.slice(0, 255),
+                    r2Url: put.key,
+                    uploadedBy: "chat_upload",
+                  } as any);
+                  filed++;
+                } catch (e) {
+                  logger.warn({ err: e }, "[ask-ops-stream] one dropped file failed to file (non-fatal)");
+                }
+              }
+              if (filed > 0) {
+                logger.info(
+                  { filed, profileId: persistProfileId, orderId },
+                  "[ask-ops-stream] filed dropped files to customerDocuments",
+                );
+              }
+            }
+          }
+        } catch (e) {
+          logger.warn({ err: e }, "[ask-ops-stream] file persistence block failed (non-fatal)");
         }
       }
 
