@@ -398,7 +398,7 @@ export function OverviewTab({
           ...deriveProjectDelivered(projectOrder).map(
             (d) => `${t(`admin.customers.summary.projDelivered.${d.key}`)} ${md(d.at)}`,
           ),
-          ...projectDeliveredDocNames(c.docs, activeProjectId),
+          ...projectDeliveredDocNames(c.docs, activeProjectId, projectOrder),
         ]
       : []
   const aiWants = projectOrder

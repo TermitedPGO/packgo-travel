@@ -67,29 +67,66 @@ describe("projectSummary — per-project deterministic 摘要三行", () => {
       { kind: "confirmation", name: "確認書_ORD-7", customOrderId: 7 },
       { kind: "passport", name: "王小明護照", customOrderId: 7 }, // inbound PII
       { kind: "visa", name: "簽證掃描", customOrderId: 7 }, // inbound PII
-      { kind: "file", name: "隨手上傳", customOrderId: 7 }, // ambiguous
+      { kind: "file", name: "隨手上傳", customOrderId: 7 }, // ambiguous (chat_upload / email attachments land here)
       { kind: "quote", name: "別的專案報價", customOrderId: 9 }, // other project
       { kind: "flight", name: "機票_未分類", customOrderId: null }, // unfiled
     ]
+    // both stamps fired → quote + confirmation docs are real deliveries
+    const SENT = { quoteSentAt: "2026-06-18T10:00:00Z", confirmedAt: "2026-06-25T10:00:00Z" }
+    const UNSENT = { quoteSentAt: null, confirmedAt: null }
 
     it("lists only outbound-kind docs filed to THIS project", () => {
-      expect(projectDeliveredDocNames(docs, 7)).toEqual(["日本行程表_2026", "確認書_ORD-7"])
+      expect(projectDeliveredDocNames(docs, 7, SENT)).toEqual(["日本行程表_2026", "確認書_ORD-7"])
     })
 
     it("never leaks an inbound passport/visa scan as「給了客人」", () => {
-      const names = projectDeliveredDocNames(docs, 7)
+      const names = projectDeliveredDocNames(docs, 7, SENT)
       expect(names).not.toContain("王小明護照")
       expect(names).not.toContain("簽證掃描")
     })
 
-    it("excludes ambiguous generic uploads (kind=file)", () => {
-      expect(projectDeliveredDocNames(docs, 7)).not.toContain("隨手上傳")
+    it("excludes ambiguous generic uploads (kind=file, incl. chat_upload drops)", () => {
+      // chat_upload / email-attachment rows are type="other" → kind="file" on the
+      // client, so a file Jeff dropped into chat can never read as 給了客人.
+      expect(projectDeliveredDocNames(docs, 7, SENT)).not.toContain("隨手上傳")
     })
 
     it("scopes to the active project only (other projects + 未分類 excluded)", () => {
-      expect(projectDeliveredDocNames(docs, 9)).toEqual(["別的專案報價"])
+      expect(projectDeliveredDocNames(docs, 9, SENT)).toEqual(["別的專案報價"])
       // an unfiled outbound doc (customOrderId null) is not any project's delivery
-      expect(projectDeliveredDocNames(docs, 7)).not.toContain("機票_未分類")
+      expect(projectDeliveredDocNames(docs, 7, SENT)).not.toContain("機票_未分類")
+    })
+
+    describe("已寄出 gate — uploaded-but-unsent PDFs are NOT deliveries", () => {
+      it("hides an uploaded quote PDF while quoteSentAt is still null", () => {
+        // quotePdfUrl set → co-quote doc exists, but Jeff has not sent it yet.
+        // Must match deriveProjectDelivered (empty) — the two halves can't disagree.
+        expect(projectDeliveredDocNames(docs, 7, UNSENT)).toEqual([])
+        expect(deriveProjectDelivered({ ...NONE })).toEqual([])
+      })
+
+      it("lists the quote PDF once quoteSentAt fired (confirmation still gated)", () => {
+        const names = projectDeliveredDocNames(docs, 7, {
+          quoteSentAt: "2026-06-18T10:00:00Z",
+          confirmedAt: null,
+        })
+        expect(names).toEqual(["日本行程表_2026"])
+        expect(names).not.toContain("確認書_ORD-7")
+      })
+
+      it("lists the confirmation PDF only once confirmedAt fired", () => {
+        const names = projectDeliveredDocNames(docs, 7, {
+          quoteSentAt: null,
+          confirmedAt: "2026-06-25T10:00:00Z",
+        })
+        expect(names).toEqual(["確認書_ORD-7"])
+        expect(names).not.toContain("日本行程表_2026")
+      })
+
+      it("does not gate other outbound kinds (invoice keeps its own lifecycle)", () => {
+        const withInvoice = [...docs, { kind: "invoice", name: "INV-001", customOrderId: 7 }]
+        expect(projectDeliveredDocNames(withInvoice, 7, UNSENT)).toEqual(["INV-001"])
+      })
     })
   })
 })

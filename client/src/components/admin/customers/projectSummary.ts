@@ -73,15 +73,26 @@ const OUTBOUND_DOC_KINDS = new Set(["quote", "invoice", "confirmation", "flight"
 /**
  * 給了什麼 (doc half) — names of docs filed to THIS project that we actually gave
  * the customer. Inbound PII scans (passport / visa / insurance / medical) and
- * ambiguous generic uploads (kind="file") are excluded, so a customer's uploaded
- * passport can never be mislabeled「給了客人」. Pure — safety gate lives here so
- * it is unit-tested, not buried in JSX.
+ * ambiguous generic uploads (kind="file", which is where chat_upload / email
+ * attachments land) are excluded, so a customer's uploaded passport can never be
+ * mislabeled「給了客人」. Quote / confirmation PDFs additionally require the
+ * order's own 已寄出 stamp (quoteSentAt / confirmedAt) — a PDF Jeff uploaded but
+ * has not sent yet (quotePdfUrl set, stamp still null) is NOT a delivery, and
+ * without this gate the card contradicts deriveProjectDelivered / Actions right
+ * above it. Pure — safety gates live here so they are unit-tested, not buried
+ * in JSX.
  */
 export function projectDeliveredDocNames(
   docs: { kind: string; name: string; customOrderId: number | null }[],
   projectId: number,
+  order: Pick<ProjectOrderFacts, "quoteSentAt" | "confirmedAt">,
 ): string[] {
   return docs
-    .filter((d) => (d.customOrderId ?? null) === projectId && OUTBOUND_DOC_KINDS.has(d.kind))
+    .filter((d) => {
+      if ((d.customOrderId ?? null) !== projectId || !OUTBOUND_DOC_KINDS.has(d.kind)) return false
+      if (d.kind === "quote") return Boolean(order.quoteSentAt)
+      if (d.kind === "confirmation") return Boolean(order.confirmedAt)
+      return true
+    })
     .map((d) => d.name)
 }
