@@ -10,22 +10,30 @@ vi.mock("../../_core/logger", () => ({
 }));
 
 // Chainable Drizzle query-builder mock. Each terminal (limit/groupBy/orderBy)
-// resolves to whatever we queue in `nextRows`.
+// resolves to whatever we queue in `nextRows`. Multi-query flows (e.g.
+// create_customer: dedup lookup → users lookup → insert) can instead queue
+// per-query results in `rowQueue`; each `.limit()` shifts one entry off.
+// `lastDb` captures the chain so tests can assert what was written.
 let nextRows: any[] = [];
+let rowQueue: any[][] = [];
+let lastDb: any = null;
+const takeRows = () => (rowQueue.length ? rowQueue.shift()! : nextRows);
 function makeDb() {
   const chain: any = {};
-  for (const m of ["select", "from", "leftJoin", "where", "orderBy", "groupBy"]) {
+  for (const m of ["select", "from", "leftJoin", "where", "orderBy", "groupBy", "insert", "values", "update", "set"]) {
     chain[m] = vi.fn(() => chain);
   }
-  chain.limit = vi.fn(() => Promise.resolve(nextRows));
+  chain.limit = vi.fn(() => Promise.resolve(takeRows()));
+  chain.$returningId = vi.fn(async () => [{ id: 991 }]);
   // For COUNT queries that end at .where(...) with no limit, make where awaitable too.
   chain.where = vi.fn(() => {
     const p: any = Promise.resolve(nextRows);
     p.orderBy = () => chain;
     p.groupBy = () => chain;
-    p.limit = () => Promise.resolve(nextRows);
+    p.limit = () => Promise.resolve(takeRows());
     return p;
   });
+  lastDb = chain;
   return chain;
 }
 
@@ -38,16 +46,22 @@ vi.mock("../../../drizzle/schema", () => ({
   tourDepartures: { id: "id", tourId: "tid", departureDate: "dd", adultPrice: "p", totalSlots: "ts", bookedSlots: "bs", opsStatus: "os", tourLeader: "tl" },
   bookings: { id: "id", customerName: "cn", customerEmail: "ce", customerPhone: "cp", tourId: "tid", departureId: "did", totalPrice: "tp", paymentStatus: "ps", bookingStatus: "bsx", createdAt: "ca" },
   bankTransactions: { id: "id", date: "d", merchantName: "mn", description: "desc", amount: "amt", agentCategory: "ac", jeffOverrideCategory: "joc", excludeFromAccounting: "efa", isPending: "ip", receiptUrl: "ru" },
-  customerProfiles: { id: "id", email: "e", phone: "ph", budgetTier: "bt", bookingCount: "bc", totalSpend: "tsp", vipScore: "vs", aiNotes: "an" },
+  customerProfiles: { id: "id", name: "n", email: "e", phone: "ph", jeffPersonalNote: "jpn", createdAt: "ca", budgetTier: "bt", bookingCount: "bc", totalSpend: "tsp", vipScore: "vs", aiNotes: "an" },
   customerInteractions: { customerProfileId: "cpid", direction: "dir", content: "c", contentSummary: "cs", createdAt: "ca" },
+  users: { id: "id", email: "e", name: "n" },
 }));
 
 vi.mock("drizzle-orm", () => {
-  const fn = (..._a: any[]) => ({ _op: true });
-  const sql: any = (..._a: any[]) => ({ _op: true });
-  sql.raw = fn;
-  sql.join = fn;
-  return { eq: fn, and: fn, or: fn, gte: fn, lte: fn, isNull: fn, inArray: fn, sql, desc: fn, like: fn };
+  // Operators are tagged with their name + args so tests can assert the SHAPE
+  // of a where clause (e.g. create_customer dedup must OR email + phone).
+  const tag = (op: string) => (...args: any[]) => ({ _op: op, args });
+  const sql: any = (...args: any[]) => ({ _op: "sql", args });
+  sql.raw = tag("raw");
+  sql.join = tag("join");
+  return {
+    eq: tag("eq"), and: tag("and"), or: tag("or"), gte: tag("gte"), lte: tag("lte"),
+    isNull: tag("isNull"), inArray: tag("inArray"), sql, desc: tag("desc"), like: tag("like"),
+  };
 });
 
 const { mockCollect, mockGetBookingById, mockUpdateBooking, mockSnapshot, mockAudit } =
@@ -85,10 +99,14 @@ import {
   resolveBookingStatusArgs,
   bookingBelongsToCustomer,
   CUSTOM_ORDER_CATEGORIES,
+  mergeCustomerNote,
+  normalizePhoneForMatch,
 } from "./opsTools";
 
 beforeEach(() => {
   nextRows = [];
+  rowQueue = [];
+  lastDb = null;
   mockCollect.mockReset();
   mockGetBookingById.mockReset();
   mockUpdateBooking.mockReset();
@@ -791,5 +809,182 @@ describe("collect_customer_threads — 收 runs the backfill directly", () => {
     const out = JSON.parse(await executeWriteTool("collect_customer_threads", { email: "eyoung@axt.com" }, undefined));
     expect(out.success).toBeUndefined();
     expect(out.error).toContain("Gmail");
+  });
+});
+
+describe("collect_customer_threads — pin guard (P2 2026-07-01: cc 第三方地址會收錯人)", () => {
+  it("rejects an email that doesn't match the pinned customer's, naming BOTH addresses", async () => {
+    mockSnapshot.mockResolvedValue({ name: "Emerald", email: "eyoung@axt.com", userId: null });
+    const out = JSON.parse(
+      await executeWriteTool("collect_customer_threads", { email: "third@party.com" }, 123),
+    );
+    expect(out.error).toContain("eyoung@axt.com");
+    expect(out.error).toContain("third@party.com");
+    expect(mockCollect).not.toHaveBeenCalled();
+  });
+
+  it("case/whitespace differences are NOT a mismatch; collect runs pinned to the profile", async () => {
+    mockSnapshot.mockResolvedValue({ name: "Emerald", email: "  EYoung@AXT.com ", userId: null });
+    mockCollect.mockResolvedValue({ ok: true, summary: "✓ 已收 eyoung@axt.com · 8 條 thread", details: {} });
+    const out = JSON.parse(
+      await executeWriteTool("collect_customer_threads", { email: "eyoung@axt.com" }, 123),
+    );
+    expect(mockCollect).toHaveBeenCalledWith({ email: "eyoung@axt.com", profileId: 123 });
+    expect(out.success).toBe(true);
+  });
+
+  it("phone-only pinned profile → free email allowed, message says it files into THIS customer", async () => {
+    mockSnapshot.mockResolvedValue({ name: "陳先生", email: null, userId: null });
+    mockCollect.mockResolvedValue({ ok: true, summary: "✓ 已收 someone@x.com · 3 條 thread", details: {} });
+    const out = JSON.parse(
+      await executeWriteTool("collect_customer_threads", { email: "someone@x.com" }, 77),
+    );
+    expect(mockCollect).toHaveBeenCalledWith({ email: "someone@x.com", profileId: 77 });
+    expect(out.success).toBe(true);
+    expect(out.message).toContain("收進目前這位客人");
+    expect(out.message).toContain("someone@x.com");
+  });
+});
+
+describe("create_customer — §4.2 dedup red line (email OR phone + registered-member guard)", () => {
+  it("dedup lookup ORs BOTH identifiers when email and phone are given (not email-only)", async () => {
+    rowQueue = [[], []]; // dedup miss → users miss → insert
+    await executeWriteTool("create_customer", {
+      name: "王小姐",
+      email: "wang@x.com",
+      phone: "510-333-1234",
+    });
+    const firstWhere = lastDb.where.mock.calls[0][0];
+    expect(firstWhere._op).toBe("or");
+    expect(firstWhere.args).toHaveLength(2);
+    expect(firstWhere.args[0]._op).toBe("eq"); // email equality
+    expect(firstWhere.args[1]._op).toBe("sql"); // normalized-phone comparison
+  });
+
+  it("a hit (e.g. same phone, different email) returns the existing profile and does NOT insert", async () => {
+    rowQueue = [[{ id: 55, name: "王小姐" }]];
+    const out = JSON.parse(
+      await executeWriteTool("create_customer", {
+        name: "王小姐",
+        email: "brand-new@x.com",
+        phone: "5103331234",
+      }),
+    );
+    expect(out.success).toBe(true);
+    expect(out.deduped).toBe(true);
+    expect(out.profileId).toBe(55);
+    expect(lastDb.insert).not.toHaveBeenCalled();
+  });
+
+  it("phone-only input dedups by normalized phone (single condition, no or-wrapper)", async () => {
+    rowQueue = [[{ id: 9, name: "陳先生" }]];
+    const out = JSON.parse(
+      await executeWriteTool("create_customer", { name: "陳先生", phone: "(510) 333-1234" }),
+    );
+    expect(out.deduped).toBe(true);
+    expect(out.profileId).toBe(9);
+    expect(lastDb.where.mock.calls[0][0]._op).toBe("sql");
+  });
+
+  it("a registered member's email is rejected — no guest profile created (email_exists_registered parity)", async () => {
+    rowQueue = [[], [{ id: 7 }]]; // no profile dup, but a users row exists
+    const out = JSON.parse(
+      await executeWriteTool("create_customer", { name: "Jeff Green", email: "member@x.com" }),
+    );
+    expect(out.error).toContain("註冊會員");
+    expect(out.error).toContain("member@x.com");
+    expect(lastDb.insert).not.toHaveBeenCalled();
+  });
+
+  it("no hit anywhere → inserts a manual guest profile", async () => {
+    rowQueue = [[], []];
+    const out = JSON.parse(
+      await executeWriteTool("create_customer", {
+        name: "新客",
+        email: "fresh@x.com",
+        phone: "111-2222",
+      }),
+    );
+    expect(out.success).toBe(true);
+    expect(out.profileId).toBe(991);
+    expect(lastDb.values).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "新客", email: "fresh@x.com", source: "manual" }),
+    );
+  });
+
+  it("normalizePhoneForMatch strips formatting but keeps '+' (country code is a real difference)", () => {
+    expect(normalizePhoneForMatch("(510) 333-1234")).toBe("5103331234");
+    expect(normalizePhoneForMatch("510.333.1234")).toBe("5103331234");
+    expect(normalizePhoneForMatch("+1 510-333-1234")).toBe("+15103331234");
+  });
+});
+
+describe("update_customer_note — append semantics (P2 2026-07-01: 覆寫毀掉舊備註)", () => {
+  const LA_NOON = new Date("2026-07-01T12:00:00-07:00");
+
+  describe("mergeCustomerNote (pure)", () => {
+    it("appends under a non-empty old note as a dated [M/D] line", () => {
+      expect(mergeCustomerNote("愛吃辣", "對蝦過敏", false, LA_NOON)).toBe(
+        "愛吃辣\n[7/1] 對蝦過敏",
+      );
+    });
+    it("dates the appended line by the LA calendar day, not UTC", () => {
+      // 02:00 UTC on 7/2 is still the evening of 7/1 in LA.
+      expect(mergeCustomerNote("A", "B", false, new Date("2026-07-02T02:00:00Z"))).toBe(
+        "A\n[7/1] B",
+      );
+    });
+    it("replace:true overwrites the whole note", () => {
+      expect(mergeCustomerNote("愛吃辣", "全新內容", true, LA_NOON)).toBe("全新內容");
+    });
+    it("empty old note → new text becomes the note, no date tag", () => {
+      expect(mergeCustomerNote(null, "第一條", false, LA_NOON)).toBe("第一條");
+      expect(mergeCustomerNote("   ", "第一條", false, LA_NOON)).toBe("第一條");
+    });
+    it("empty new text without replace keeps the old note untouched", () => {
+      expect(mergeCustomerNote("舊的", "", false, LA_NOON)).toBe("舊的");
+    });
+    it("replace:true with empty text clears the note", () => {
+      expect(mergeCustomerNote("舊的", "", true, LA_NOON)).toBe("");
+    });
+  });
+
+  it("executor appends: the old note survives and the write carries the merged text", async () => {
+    rowQueue = [[{ note: "愛吃辣" }]];
+    const out = JSON.parse(await executeWriteTool("update_customer_note", { note: "對蝦過敏" }, 5));
+    expect(out.success).toBe(true);
+    expect(out.note).toMatch(/^愛吃辣\n\[\d{1,2}\/\d{1,2}\] 對蝦過敏$/);
+    expect(lastDb.set).toHaveBeenCalledWith(
+      expect.objectContaining({ jeffPersonalNote: out.note }),
+    );
+  });
+
+  it("the chip message echoes the FULL merged note so Jeff sees what it says now", async () => {
+    rowQueue = [[{ note: "愛吃辣" }]];
+    const out = JSON.parse(await executeWriteTool("update_customer_note", { note: "對蝦過敏" }, 5));
+    expect(out.message).toContain("愛吃辣");
+    expect(out.message).toContain("對蝦過敏");
+  });
+
+  it("executor replace:true overwrites the field entirely", async () => {
+    rowQueue = [[{ note: "舊的內容" }]];
+    const out = JSON.parse(
+      await executeWriteTool("update_customer_note", { note: "全新", replace: true }, 5),
+    );
+    expect(out.note).toBe("全新");
+    expect(lastDb.set).toHaveBeenCalledWith(
+      expect.objectContaining({ jeffPersonalNote: "全新" }),
+    );
+  });
+
+  it("still refuses without a pinned customer", async () => {
+    const out = JSON.parse(await executeWriteTool("update_customer_note", { note: "x" }, undefined));
+    expect(out.error).toBeTruthy();
+  });
+
+  it("the tool schema exposes the replace flag and describes append semantics", () => {
+    const tool = WRITE_TOOLS.find((t) => t.name === "update_customer_note")!;
+    expect((tool.input_schema as any).properties.replace).toBeTruthy();
+    expect(tool.description).toContain("append");
   });
 });

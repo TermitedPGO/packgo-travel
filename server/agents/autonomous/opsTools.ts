@@ -242,16 +242,28 @@ export const WRITE_TOOLS: Anthropic.Tool[] = [
   {
     name: "update_customer_note",
     description:
-      "Update Jeff's private note (jeffPersonalNote) for the current customer. " +
-      "Jeff says '備註加上…' or '備註改成…' → use this. The note is Jeff-only " +
-      "(never shown to customer). Pass the FULL desired note text — to append, " +
-      "read the current note first (search_customers), then concatenate.",
+      "Add to Jeff's private note (jeffPersonalNote) for the current customer. " +
+      "Jeff says '備註加上…' → pass ONLY the new text; the tool itself appends " +
+      "it under the existing note as a dated line, so the old note is always " +
+      "preserved (you don't need to — and can't — read it first). Jeff says " +
+      "'備註改成…' / '整個換掉' / '清掉備註' → pass replace:true to overwrite " +
+      "the whole field. The note is Jeff-only (never shown to customer). The " +
+      "result message echoes the FULL note after the change so Jeff sees what " +
+      "it now says.",
     input_schema: {
       type: "object",
       properties: {
         note: {
           type: "string",
-          description: "Full note content (replaces existing note entirely)",
+          description:
+            "New note text. Appended to the existing note by default; with " +
+            "replace:true it becomes the entire note.",
+        },
+        replace: {
+          type: "boolean",
+          description:
+            "true = overwrite the ENTIRE note with `note` (only when Jeff " +
+            "explicitly says 改成/換掉/清掉). Default false = append.",
         },
       },
       required: ["note"],
@@ -291,8 +303,9 @@ export const WRITE_TOOLS: Anthropic.Tool[] = [
       "收/歸檔某個客人的 Gmail 往來到系統。用在 Jeff 在某客人的對話框說「收」/「收進來」/" +
       "「歸檔他的記錄」時:直接呼叫這個工具把該客人 email 的所有 thread 收進他的檔案" +
       "(idempotent,重收只補不漏)。收完用一句話跟 Jeff 報結果(收了幾條、新增幾條)。" +
-      "email 用目前這位客人的 email(系統已釘在上面),不要自己編。**收完直接報結果," +
-      "不要叫 Jeff 點任何按鈕**(這個對話框沒有可點的按鈕)。",
+      "email 用目前這位客人的 email(系統已釘在上面),不要自己編 — 釘住的客人檔案上有 " +
+      "email 時只收得了那一個,給別的地址(例如轉寄信裡的 cc / 第三方寄件人)會被拒。" +
+      "**收完直接報結果,不要叫 Jeff 點任何按鈕**(這個對話框沒有可點的按鈕)。",
     input_schema: {
       type: "object",
       properties: {
@@ -412,7 +425,11 @@ export const CREATE_CUSTOMER_TOOL: Anthropic.Tool = {
     "Create a new customer profile. Use when Jeff says '新增客人' / " +
     "'加一個客人' / drags a file with customer info. Extract name + at " +
     "least one of email or phone from the conversation or attached file. " +
-    "Returns the new profile id on success.",
+    "Returns the new profile id on success. Dedup is built in: if a profile " +
+    "already exists with the same email OR phone, the existing profile is " +
+    "returned (never a duplicate); an email that belongs to a registered " +
+    "member is rejected — tell Jeff to open that member from the customer " +
+    "list instead.",
   input_schema: {
     type: "object",
     properties: {
@@ -1177,6 +1194,42 @@ export function resolveFollowUpDateArg(
   return { ok: true, value: valid };
 }
 
+/**
+ * Merge Jeff's private note (2026-07-01 P2 fix). The model has NO read path to
+ * the old note, so a whole-field overwrite meant the second「備註加上X」silently
+ * destroyed the first. The tool now owns the merge: a non-empty old note is
+ * PRESERVED and the new text is appended as a dated line ([M/D], LA calendar —
+ * the timezone Jeff operates in, per requirements §4.1). `replace:true` is the
+ * only way to overwrite the whole field. Pure (clock injected via `now`) so
+ * it's unit-tested without a DB.
+ */
+export function mergeCustomerNote(
+  oldNote: string | null | undefined,
+  newNote: string,
+  replace: boolean,
+  now: Date = new Date(),
+): string {
+  const next = newNote.trim();
+  if (replace) return next;
+  const prev = (oldNote ?? "").trim();
+  if (!prev) return next;
+  if (!next) return prev;
+  const [, m, d] = laToday(now).split("-");
+  return `${prev}\n[${Number(m)}/${Number(d)}] ${next}`;
+}
+
+/**
+ * Normalize a phone number for duplicate matching (CLAUDE.md §4.2 red line —
+ * customerProfiles has no DB-level unique constraint, dedup is application
+ * code). Strips pure formatting (spaces / dashes / parens / dots) so
+ * "510-333-1234", "(510) 333.1234" and "5103331234" all collide. Leading "+"
+ * is kept: "+1510…" vs "510…" genuinely differ and we'd rather miss than merge
+ * two different people.
+ */
+export function normalizePhoneForMatch(phone: string): string {
+  return phone.replace(/[\s\-().]/g, "");
+}
+
 /** The four project categories a customOrder can carry (mirrors the tRPC
  *  create's PROJECT_CATEGORY_KEYS — flight/quote/visa/general). */
 export const CUSTOM_ORDER_CATEGORIES = ["flight", "visa", "quote", "general"] as const;
@@ -1474,12 +1527,31 @@ async function runWriteTool(
     case "update_customer_note": {
       if (!profileId) return { error: "no customer selected" };
       const note = (input.note ?? "").trim();
+      const replace = input.replace === true;
+      // Read-before-write (2026-07-01 P2 fix): the model can't see the old
+      // note, so blind overwrite destroyed it. Default = append as a dated
+      // line; replace:true is the only whole-field overwrite.
+      const [existing] = await db
+        .select({ note: customerProfiles.jeffPersonalNote })
+        .from(customerProfiles)
+        .where(eq(customerProfiles.id, profileId))
+        .limit(1);
+      const merged = mergeCustomerNote(existing?.note ?? null, note, replace);
       await db
         .update(customerProfiles)
-        .set({ jeffPersonalNote: note || null, updatedAt: new Date() })
+        .set({ jeffPersonalNote: merged || null, updatedAt: new Date() })
         .where(eq(customerProfiles.id, profileId));
-      log.info({ profileId, noteLen: note.length }, "update_customer_note executed");
-      return { success: true, message: "備註已更新" };
+      log.info(
+        { profileId, noteLen: merged.length, replace },
+        "update_customer_note executed",
+      );
+      // The message becomes a tool_result chip — echo the full note so Jeff
+      // sees exactly what it says now (requirements §3: tool憑證,嘴上宣稱不算).
+      return {
+        success: true,
+        note: merged || null,
+        message: merged ? `備註已更新,目前全文:\n${merged}` : "備註已清空",
+      };
     }
 
     case "update_booking_status": {
@@ -1541,13 +1613,25 @@ async function runWriteTool(
       // Dedup before insert — the tRPC createManualCustomer guards against a
       // same-email/phone profile, but THIS agent path was missing it, so asking
       // the AI to「新增客人」for someone we already have made a duplicate empty
-      // profile (Emerald Young, 2026-06-30). Return the existing one (oldest
+      // profile (Emerald Young, 2026-06-30). CLAUDE.md §4.2 red line: check
+      // BOTH identifiers (OR, like agent/profiles.ts upsertByIdentifier) —
+      // "email misses but phone hits" is still the same person. Phone compares
+      // formatting-normalized on both sides. Return the existing one (oldest
       // first = the original, with the real history) instead of creating a 2nd.
-      if (cEmail || cPhone) {
+      {
+        const { or, sql } = await import("drizzle-orm");
+        const conds: any[] = [];
+        if (cEmail) conds.push(eq(customerProfiles.email, cEmail));
+        if (cPhone) {
+          const normPhone = normalizePhoneForMatch(cPhone);
+          conds.push(
+            sql`REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(${customerProfiles.phone}, ' ', ''), '-', ''), '(', ''), ')', ''), '.', '') = ${normPhone}`,
+          );
+        }
         const [dup] = await db
           .select({ id: customerProfiles.id, name: customerProfiles.name })
           .from(customerProfiles)
-          .where(cEmail ? eq(customerProfiles.email, cEmail) : eq(customerProfiles.phone, cPhone!))
+          .where(conds.length === 1 ? conds[0] : or(...conds))
           .orderBy(customerProfiles.createdAt)
           .limit(1);
         if (dup) {
@@ -1557,6 +1641,29 @@ async function runWriteTool(
             profileId: dup.id,
             deduped: true,
             message: `客人「${dup.name ?? cName}」已經有檔案了,直接用既有的(沒有重複建立)`,
+          };
+        }
+      }
+      // Registered-member guard (same rule as tRPC createManualCustomer's
+      // email_exists_registered): an email that belongs to a users row must
+      // never become a guest profile — the member's file attaches to the
+      // account, a parallel guest card would split their history.
+      if (cEmail) {
+        const { users } = await import("../../../drizzle/schema");
+        const [registered] = await db
+          .select({ id: users.id })
+          .from(users)
+          .where(eq(users.email, cEmail))
+          .limit(1);
+        if (registered) {
+          log.info(
+            { email: cEmail, userId: registered.id },
+            "create_customer rejected — email belongs to a registered member",
+          );
+          return {
+            error:
+              `這個 email(${cEmail})是註冊會員的帳號,不建訪客檔 — ` +
+              `請 Jeff 直接在客人清單搜尋這位會員操作(跟後台手動新增同一條規則)`,
           };
         }
       }
@@ -1577,11 +1684,37 @@ async function runWriteTool(
       const cEmail = (input.email ?? "").trim().toLowerCase();
       if (!/^\S+@\S+\.\S+$/.test(cEmail))
         return { error: "需要一個有效的客人 email(不要自己編)" };
+      // Pin guard (2026-07-01 P2 fix): the model sometimes grabs a third-party
+      // address out of thread text (a cc, a forwarded sender) and would file
+      // the WRONG person's mail. When this chat is pinned to a profile that
+      // has an email, the input MUST equal it. A phone-only profile has no
+      // email to check against — collect the given address INTO this customer
+      // and say so explicitly.
+      let pinnedWithoutEmail = false;
+      if (profileId) {
+        const { getCustomerProfileSnapshot } = await import("../../db/customOrder");
+        const snap = await getCustomerProfileSnapshot(profileId);
+        const pinnedEmail = (snap.email ?? "").trim().toLowerCase();
+        if (pinnedEmail && pinnedEmail !== cEmail) {
+          return {
+            error:
+              `這位客人檔案上的 email 是 ${pinnedEmail},你要收的卻是 ${cEmail} — ` +
+              `對不上,不收(避免把別人的信收進這位客人)。要收 ${cEmail} 的往來,` +
+              `請 Jeff 開那位客人的頁面再收。`,
+          };
+        }
+        pinnedWithoutEmail = !pinnedEmail;
+      }
       const { doCollectCustomerThreads } = await import("./opsActions");
-      const r = await doCollectCustomerThreads({ email: cEmail });
-      log.info({ email: cEmail, ok: r.ok }, "collect_customer_threads executed");
+      const r = await doCollectCustomerThreads(
+        profileId ? { email: cEmail, profileId } : { email: cEmail },
+      );
+      log.info({ email: cEmail, profileId, ok: r.ok }, "collect_customer_threads executed");
       if (!r.ok) return { error: r.summary || r.error || "收進失敗" };
-      return { success: true, message: r.summary, details: r.details };
+      const message = pinnedWithoutEmail
+        ? `這位客人檔案沒有 email,已把 ${cEmail} 的往來收進目前這位客人的檔案。${r.summary}`
+        : r.summary;
+      return { success: true, message, details: r.details };
     }
 
     case "set_follow_up_date": {
