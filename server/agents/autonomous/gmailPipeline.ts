@@ -291,6 +291,75 @@ export async function runGmailPipeline(
   return result;
 }
 
+// ── Pre-LLM noise filtering (module-scope pure functions, unit-tested in
+//    gmailPipeline.noise.test.ts) ────────────────────────────────────────────
+
+/**
+ * gmail-push noreply firewall (P2, 2026-07-01) — pure sender check shared by
+ * the push path (runGmailPipelineForMessageIds) and the isKnownNoise fallback
+ * below. The 3-min poll's Gmail query already carries `-from:noreply`
+ * (listUnreadMessages, server/_core/gmail.ts), so noreply notifications never
+ * reach the pipeline via poll; the push history-diff has no Gmail query, so
+ * it must apply the same gate in JS — otherwise, with GMAIL_POLL_LABEL unset,
+ * every noreply notification (noreply@united.com …) enters the full
+ * InquiryAgent pipeline seconds after arrival: one LLM chain burned per
+ * email + a junk card in the office inbox.
+ *
+ * Matches the LOCALPART (before the @) containing noreply / no-reply /
+ * no_reply, case-insensitive. Deliberately narrow — noreply-class only, no
+ * broader blacklist (that's KNOWN_NOISE_DOMAINS' job below).
+ */
+export function isNoreplySender(from: string): boolean {
+  // From header may be `Name <local@domain>` or bare `local@domain`;
+  // parseEmailAddress extracts + lowercases, falls back for malformed input.
+  const email = parseEmailAddress(from) ?? from.toLowerCase();
+  const at = email.indexOf("@");
+  const localpart = at === -1 ? email : email.slice(0, at);
+  return /no[-_]?reply/.test(localpart);
+}
+
+// ── Pre-LLM spam filter: skip known non-customer senders ──
+// These domains send automated notifications to Jeff's personal inbox.
+// Skipping them saves LLM tokens without losing training value — they
+// are never real customer emails. Unknown senders still go through the
+// full InquiryAgent pipeline.
+const KNOWN_NOISE_DOMAINS = new Set([
+  // Our own system emails (self-sent notifications, monitor alerts)
+  "packgoplay.com", "packgo-travel.fly.dev",
+  "venmo.com", "paypal.com", "cash.app",
+  "substack.com", "beehiiv.com", "mailchimp.com", "convertkit.com",
+  "mgmresorts.com", "hilton.com", "marriott.com",
+  "linkedin.com", "facebook.com", "twitter.com", "x.com",
+  "google.com", "youtube.com", "apple.com", "microsoft.com",
+  "github.com", "notion.so", "slack.com",
+  "robly.com", "constantcontact.com", "mailerlite.com",
+  // NOTE: these three only ever match DOMAIN forms (@noreply…/.noreply…) via
+  // the loop below; noreply-class LOCALPARTS (noreply@united.com) are handled
+  // by the isNoreplySender check at the top of isKnownNoise.
+  "noreply", "no-reply", "donotreply",
+  "alerts@", "notifications@", "newsletter@", "digest@",
+]);
+
+export function isKnownNoise(from: string): boolean {
+  // noreply-class localparts (noreply@united.com, no-reply@delta.com …) —
+  // shared pure check with the push-path firewall. P2 fix (2026-07-01): the
+  // domain-match branch below (`@noreply` / `.noreply`) can never match a
+  // noreply LOCALPART, which let these leak into the LLM pipeline whenever a
+  // message bypassed the poll's `-from:noreply` query (the push path).
+  if (isNoreplySender(from)) return true;
+  const lower = from.toLowerCase();
+  for (const pattern of KNOWN_NOISE_DOMAINS) {
+    if (pattern.includes("@")) {
+      // Prefix match (e.g. "alerts@" matches "alerts@anything.com")
+      if (lower.includes(pattern)) return true;
+    } else {
+      // Domain match
+      if (lower.includes(`@${pattern}`) || lower.includes(`.${pattern}`)) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * gmail-push — shared ingest core. Takes a set of fresh (not-yet-labeled)
  * GmailMessageSummary and runs the SAME three gates the poll always used:
@@ -358,39 +427,9 @@ async function ingestFreshMessages(
     }
   }
 
-  // ── Pre-LLM spam filter: skip known non-customer senders ──
-  // These domains send automated notifications to Jeff's personal inbox.
-  // Skipping them saves LLM tokens without losing training value — they
-  // are never real customer emails. Unknown senders still go through the
-  // full InquiryAgent pipeline.
-  const KNOWN_NOISE_DOMAINS = new Set([
-    // Our own system emails (self-sent notifications, monitor alerts)
-    "packgoplay.com", "packgo-travel.fly.dev",
-    "venmo.com", "paypal.com", "cash.app",
-    "substack.com", "beehiiv.com", "mailchimp.com", "convertkit.com",
-    "mgmresorts.com", "hilton.com", "marriott.com",
-    "linkedin.com", "facebook.com", "twitter.com", "x.com",
-    "google.com", "youtube.com", "apple.com", "microsoft.com",
-    "github.com", "notion.so", "slack.com",
-    "robly.com", "constantcontact.com", "mailerlite.com",
-    "noreply", "no-reply", "donotreply",
-    "alerts@", "notifications@", "newsletter@", "digest@",
-  ]);
-
-  function isKnownNoise(from: string): boolean {
-    const lower = from.toLowerCase();
-    for (const pattern of KNOWN_NOISE_DOMAINS) {
-      if (pattern.includes("@")) {
-        // Prefix match (e.g. "noreply" matches "noreply@anything.com")
-        if (lower.includes(pattern)) return true;
-      } else {
-        // Domain match
-        if (lower.includes(`@${pattern}`) || lower.includes(`.${pattern}`)) return true;
-      }
-    }
-    return false;
-  }
-
+  // ── Pre-LLM spam filter — isKnownNoise + KNOWN_NOISE_DOMAINS live at
+  // module scope (above) so the noreply check is shared with the push-path
+  // firewall and unit-testable.
   const customerEmails = nonReceipt.filter((m) => {
     if (isKnownNoise(m.from)) {
       log.info({ from: m.from, subject: m.subject?.slice(0, 40) }, "[gmailPipeline] skipped known noise");
@@ -562,7 +601,21 @@ export async function runGmailPipelineForMessageIds(
     : [];
   const filterLabelId =
     summaries.length && POLL_FILTER_LABEL ? await ensureLabel(gmail, POLL_FILTER_LABEL) : null;
-  const fresh = selectIngestableMessages(summaries, labelId, filterLabelId);
+  // P2 noreply firewall (2026-07-01) — the poll's Gmail query ALSO carries
+  // `-from:noreply`; mirror it here, BEFORE any ingest gate (receipt pass
+  // included), so push/poll parity is exact: the poll never even sees these
+  // messages. Without this, with GMAIL_POLL_LABEL unset, every noreply
+  // notification pushed via Pub/Sub burned a full InquiryAgent LLM chain +
+  // spammed the office inbox (isKnownNoise's localpart bug let them through).
+  // Deliberately narrow: noreply-class senders only (see isNoreplySender).
+  const fresh = selectIngestableMessages(summaries, labelId, filterLabelId).filter((m) => {
+    if (!isNoreplySender(m.from)) return true;
+    log.info(
+      { from: m.from, subject: m.subject?.slice(0, 40) },
+      "[gmailPipeline] push: skipped noreply sender (poll-parity firewall)",
+    );
+    return false;
+  });
 
   if (fresh.length > 0) {
     await ingestFreshMessages(db, fresh, result, {
