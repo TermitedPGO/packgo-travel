@@ -129,19 +129,41 @@ describe("surface", () => {
 });
 
 describe("watchdogForCustomer — Step 5 漏價看門狗(admin-only,只攤數字)", () => {
-  it("回賠錢 / 毛利過薄的單,紅在前;成本/售價齊全才算", async () => {
+  it("回賠錢 / 毛利過薄的單,紅在前;成本/售價齊全才算;draft 的漏價跳過但過期報價承諾會叫", async () => {
     (db.findCustomerProfileId as any).mockResolvedValue(5);
     (db.listCustomOrdersByProfile as any).mockResolvedValue([
       { ...baseOrder, id: 1, totalPrice: "5000", supplierCost: "4500", status: "quoted" }, // 黃 10%
       { ...baseOrder, id: 2, totalPrice: "5000", supplierCost: "4000", status: "quoted" }, // 健康 20%
       { ...baseOrder, id: 3, totalPrice: "5000", supplierCost: "5600", status: "arranged" }, // 紅 loss
-      { ...baseOrder, id: 4, totalPrice: "5000", supplierCost: "9999", status: "draft" }, // draft 跳過
+      // draft:漏價規則跳過(數字還在喬),但 needsQuote+10 天沒寄 → promise 黃燈
+      { ...baseOrder, id: 4, totalPrice: "5000", supplierCost: "9999", status: "draft", createdAt: new Date(Date.now() - 10 * 86_400_000) },
     ]);
     const out = await caller().watchdogForCustomer({ profileId: 5 });
-    expect(out.map((f: any) => f.orderId)).toEqual([3, 1]);
+    expect(out.map((f: any) => f.orderId)).toEqual([3, 1, 4]);
+    expect(out.map((f: any) => f.kind)).toEqual(["margin", "margin", "promise"]);
     expect(out[0].level).toBe("red");
-    expect(out[0].reason).toBe("loss");
+    expect((out[0] as any).reason).toBe("loss");
     expect(out[1].level).toBe("yellow");
+    expect((out[2] as any).reason).toBe("quoteUnsent");
+  });
+
+  it("promise 類(v2)走同一個 endpoint:訂金收了 5 天沒確認書 → confirmationUnsent", async () => {
+    (db.findCustomerProfileId as any).mockResolvedValue(5);
+    (db.listCustomOrdersByProfile as any).mockResolvedValue([
+      {
+        ...baseOrder,
+        id: 9,
+        status: "deposit_paid",
+        supplierCost: null, // 漏價規則資料缺不叫,只剩 promise
+        depositPaidAt: new Date(Date.now() - 5 * 86_400_000),
+        confirmedAt: null,
+      },
+    ]);
+    const out = await caller().watchdogForCustomer({ profileId: 5 });
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe("promise");
+    expect((out[0] as any).reason).toBe("confirmationUnsent");
+    expect((out[0] as any).daysWaiting).toBeGreaterThan(3);
   });
 
   it("找不到客人 → 空陣列(不打 DB)", async () => {
@@ -151,7 +173,7 @@ describe("watchdogForCustomer — Step 5 漏價看門狗(admin-only,只攤數字
     expect(db.listCustomOrdersByProfile).not.toHaveBeenCalled();
   });
 
-  it("全健康 → 空陣列(不亂叫)", async () => {
+  it("全健康 → 空陣列(不亂叫;paid 但沒 depositPaidAt = 資料缺,承諾規則也不叫)", async () => {
     (db.findCustomerProfileId as any).mockResolvedValue(5);
     (db.listCustomOrdersByProfile as any).mockResolvedValue([
       { ...baseOrder, id: 1, totalPrice: "5000", supplierCost: "4000", status: "paid" },

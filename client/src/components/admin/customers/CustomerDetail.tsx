@@ -5,7 +5,7 @@ import { trpc } from "@/lib/trpc"
 import { toast } from "sonner"
 import type { AdaptedCustomer, ChatMessage, Project } from "./types"
 import { OverviewTab, OrdersTab, DocsTab, TimelineTab } from "./DetailTabs"
-import { deriveBallInCourt, deriveNextMove } from "./adapters"
+import { countUnkeptPromises, deriveBallInCourt, deriveNextMove } from "./adapters"
 import { toSelection } from "./customOrderHelpers"
 import ProjectBar from "./ProjectBar"
 
@@ -51,6 +51,12 @@ export default function CustomerDetail({
   const ball = deriveBallInCourt(chatMessages)
   const nextMove = deriveNextMove(ball, c.followup)
   const truthDays = c.followup.daysSinceContact
+
+  // 未兌現承諾 (watchdog v2): the same watchdogForCustomer query OverviewTab's
+  // banner uses (React Query dedupes) — promise-kind findings (說好的報價/確認書
+  // 還沒寄) surface as a count here. Deterministic server rules, zero LLM.
+  const watchdog = trpc.customerOrders.watchdogForCustomer.useQuery(sel)
+  const unkeptPromises = countUnkeptPromises(watchdog.data)
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -138,6 +144,17 @@ export default function CustomerDetail({
                 : t("admin.customers.truth.quiet", { n: truthDays })}
             </span>
           </>
+        )}
+
+        {/* 未兌現承諾 (watchdog v2) — promise 類 findings 的數量。到期感 = 黑底
+            (同跟進日徽章),點了切到訂單 tab 看是哪張單。沒 findings 就完全不出現。 */}
+        {unkeptPromises > 0 && (
+          <button
+            onClick={() => setTab("orders")}
+            className="px-1.5 py-0.5 rounded-md font-medium bg-gray-900 text-white hover:bg-gray-700 transition-colors"
+          >
+            {t("admin.customers.truth.unkeptPromises", { n: unkeptPromises })}
+          </button>
         )}
 
         {/* 客人跟進日 (Q4-A) — display + quick clear only. 設定改由右欄 ops AI chat

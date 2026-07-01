@@ -16,6 +16,7 @@ import { stripQuotedReply } from "./conversationText"
 import {
   deriveProjectActions,
   deriveProjectDelivered,
+  deriveProjectSummaryState,
   projectDeliveredDocNames,
 } from "./projectSummary"
 
@@ -68,15 +69,18 @@ function md(d: string | Date): string {
 }
 
 /**
- * Step 5 看門狗:售價對不上後台成本(賠錢 / 毛利過薄)時,打開客人最上面跳一條警示,
- * 把售價/成本/毛利三個數字直接攤給 Jeff。純規則(server),admin-only,不改不送。
+ * Step 5 看門狗:打開客人最上面跳警示卡。純規則(server),admin-only,不改不送。
+ *   - margin 類:售價對不上後台成本(賠錢 / 毛利過薄),售價/成本/毛利三個數字直接攤給 Jeff。
+ *   - promise 類(v2):答應了還沒寄(說好的報價 7 天 / 訂金收了確認書 3 天)。
  */
 function MarginWatchdogBanner({ customer: c }: { customer: AdaptedCustomer }) {
   const { t } = useLocale()
   const k = (s: string) => t(`admin.customers.watchdog.${s}`)
   const q = trpc.customerOrders.watchdogForCustomer.useQuery(toSelection(c))
-  const findings = q.data ?? []
-  if (findings.length === 0) return null
+  const all = q.data ?? []
+  const findings = all.filter((f) => f.kind === "margin")
+  const promises = all.filter((f) => f.kind === "promise")
+  if (all.length === 0) return null
   return (
     <div className="space-y-2">
       {findings.map((f) => {
@@ -119,6 +123,24 @@ function MarginWatchdogBanner({ customer: c }: { customer: AdaptedCustomer }) {
           </div>
         )
       })}
+      {/* promise 類(答應了還沒寄)— 一律黃燈提醒,講白話,不用術語。 */}
+      {promises.map((f) => (
+        <div
+          key={`promise-${f.orderId}-${f.reason}`}
+          className="rounded-xl border border-amber-300 bg-amber-50/50 p-3 flex items-start gap-2.5"
+        >
+          <TriangleAlert className="w-5 h-5 flex-shrink-0 mt-0.5 text-amber-600" />
+          <div className="flex-1 min-w-0">
+            <div className="text-[13px] font-semibold text-gray-900">
+              {k(`promise.${f.reason}`)}
+              <span className="text-[10px] text-gray-400 font-normal ml-1.5">{f.orderNumber}</span>
+            </div>
+            <div className="text-[11.5px] text-gray-600 mt-0.5 truncate">
+              {f.title} · {t("admin.customers.watchdog.promise.days", { n: f.daysWaiting })}
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -339,14 +361,22 @@ export function OverviewTab({
   const [showAllChat, setShowAllChat] = useState(false)
   // customer-projects (§5) — when a ProjectBar chip is active, show that project's
   // OWN deterministic facts at the top (title/category/status/售價/dates/docs/notes),
-  // straight from the order row — no LLM, no fabrication. The AI summary below is
-  // customer-level (labeled 整體) so the blended narrative is never mistaken for
-  // this one project.
+  // straight from the order row — no LLM, no fabrication. The 摘要三行 below
+  // follow the same order; only when the order is unavailable do they fall back
+  // to the customer-level blend, explicitly labeled 整體 (see projState).
   const projectOrderQ = trpc.customerOrders.get.useQuery(
     { orderId: activeProjectId ?? 0 },
     { enabled: activeProjectId != null, staleTime: 30_000 },
   )
-  const projectOrder = activeProjectId != null ? projectOrderQ.data : null
+  const projectOrder = activeProjectId != null ? (projectOrderQ.data ?? null) : null
+  // 誤讀防護 — loading → skeleton (never unlabeled whole-customer text posing as
+  // this project); settled without an order (query failed / order gone) → the
+  // whole-customer summary renders WITH the 整體 caption. Pure + unit-tested.
+  const projState = deriveProjectSummaryState({
+    activeProjectId,
+    hasOrder: projectOrder != null,
+    isFetching: projectOrderQ.isFetching,
+  })
   const projectDocCount =
     activeProjectId != null
       ? c.docs.filter((d) => (d.customOrderId ?? null) === activeProjectId).length
@@ -385,8 +415,8 @@ export function OverviewTab({
 
   // customer-projects — when a project chip is active AND its order has loaded, the
   // 摘要三行 describe THAT project, computed deterministically from the order row +
-  // its outbound docs (搬運不生成, no LLM). Otherwise the whole-customer LLM summary.
-  const projActive = projectOrder != null
+  // its outbound docs (搬運不生成, no LLM). Otherwise the whole-customer LLM summary
+  // (labeled 整體 when a chip is active but the order is unavailable — projState).
   const projActionParts = projectOrder
     ? deriveProjectActions(projectOrder).map(
         (a) => `${t(`admin.customers.summary.projAction.${a.key}`)} ${md(a.at)}`,
@@ -419,20 +449,32 @@ export function OverviewTab({
       <MarginWatchdogBanner customer={c} />
 
       {/* 本專案(§5)— 選了專案 chip 時,頂端出這張單自己的事實卡;下方的 AI 摘要
-          三行也跟著這張單走(deterministic,計算在 OverviewTab 上方),所以不再標
-          「以下為整體摘要」——那條 caption 拿掉了。 */}
+          三行也跟著這張單走(deterministic,計算在 OverviewTab 上方)。載入中先出
+          skeleton 佔位,拿不到單(失敗/被刪)就不出卡 — 摘要那邊會標「整體」。 */}
+      {projState === "loading" && (
+        <div className="rounded-xl bg-white border border-gray-200 p-4 space-y-2.5 animate-pulse">
+          <div className="h-3 w-40 rounded-md bg-gray-200" />
+          <div className="h-4 w-56 rounded-md bg-gray-200" />
+          <div className="h-3 w-full rounded-md bg-gray-200" />
+        </div>
+      )}
       {projectOrder && <ProjectOverviewCard order={projectOrder} docCount={projectDocCount} />}
 
       {/* AI Summary — whole-customer LLM blend, OR (project active) that project's
           deterministic 摘要三行. 重算鈕 + 更新時間 only apply to the LLM version;
-          the per-project one is 搬運 from the order row so there is nothing to refresh. */}
+          the per-project one is 搬運 from the order row so there is nothing to
+          refresh. projState=loading → skeleton rows; projState=fallback → the
+          whole-customer rows are explicitly labeled 整體 (overallCaption), never
+          silently posing as this project. */}
       <div className="rounded-xl bg-gray-50 border border-gray-200 p-4 space-y-2">
         <div className="flex items-center justify-between">
           <div className="text-[11px] text-gray-400 font-medium flex items-center gap-1.5">
             <Bot className="w-3 h-3" />
             {t("admin.customers.summary.aiLabel")}
-            {projActive ? (
+            {projState === "project" || projState === "loading" ? (
               <span className="text-gray-300">· {t("admin.customers.summary.projectHeader")}</span>
+            ) : projState === "fallback" ? (
+              <span className="text-gray-300">· {t("admin.customers.summary.overallCaption")}</span>
             ) : busy ? (
               <span className="text-gray-400">· {t("admin.customers.summary.generating")}</span>
             ) : (
@@ -441,7 +483,7 @@ export function OverviewTab({
               )
             )}
           </div>
-          {!projActive && (
+          {(projState === "none" || projState === "fallback") && (
             <button
               onClick={() => refreshSummary.mutate(scopeInput)}
               disabled={busy}
@@ -452,9 +494,19 @@ export function OverviewTab({
             </button>
           )}
         </div>
-        <SummaryRow label={t("admin.customers.summary.wantsLabel")} value={aiWants} />
-        <SummaryRow label={t("admin.customers.summary.actionsLabel")} value={aiActions} />
-        <SummaryRow label={t("admin.customers.summary.deliveredLabel")} value={aiDelivered} />
+        {projState === "loading" ? (
+          <div className="space-y-2 pt-1 animate-pulse">
+            <div className="h-3 w-3/4 rounded-md bg-gray-200" />
+            <div className="h-3 w-2/3 rounded-md bg-gray-200" />
+            <div className="h-3 w-1/2 rounded-md bg-gray-200" />
+          </div>
+        ) : (
+          <>
+            <SummaryRow label={t("admin.customers.summary.wantsLabel")} value={aiWants} />
+            <SummaryRow label={t("admin.customers.summary.actionsLabel")} value={aiActions} />
+            <SummaryRow label={t("admin.customers.summary.deliveredLabel")} value={aiDelivered} />
+          </>
+        )}
       </div>
 
       {/* AI-learned preferences — a 報價/訂製/包團 project shows THAT trip's
@@ -586,7 +638,9 @@ export function OverviewTab({
 function CustomOrdersSection({ customer: c, activeProjectId }: { customer: AdaptedCustomer; activeProjectId?: number | null }) {
   const { t } = useLocale()
   const k = (s: string) => t(`admin.customers.order.${s}`)
-  const [sheet, setSheet] = useState<{ open: boolean }>({ open: false })
+  // orderId = which order the sheet opens on (row click). Absent (新增 button)
+  // → the sheet's own default (newest order).
+  const [sheet, setSheet] = useState<{ open: boolean; orderId?: number | null }>({ open: false })
   const orders = trpc.customerOrders.listForCustomer.useQuery(toSelection(c))
 
   const payLabel = (s: string) =>
@@ -611,7 +665,7 @@ function CustomOrdersSection({ customer: c, activeProjectId }: { customer: Adapt
           {orders.data.map((o) => (
             <button
               key={o.id}
-              onClick={() => setSheet({ open: true })}
+              onClick={() => setSheet({ open: true, orderId: o.id })}
               className={`w-full flex items-center gap-3 p-3 text-left transition-colors ${
                 o.id === activeProjectId ? "bg-gray-50" : "hover:bg-gray-50"
               }`}
@@ -638,7 +692,12 @@ function CustomOrdersSection({ customer: c, activeProjectId }: { customer: Adapt
       ) : (
         <div className="text-[12px] text-gray-400 py-2">{k("empty")}</div>
       )}
-      <CustomOrderSheet open={sheet.open} onClose={() => setSheet({ open: false })} customer={c} />
+      <CustomOrderSheet
+        open={sheet.open}
+        initialOrderId={sheet.orderId ?? null}
+        onClose={() => setSheet({ open: false })}
+        customer={c}
+      />
     </div>
   )
 }

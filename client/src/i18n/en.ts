@@ -3298,19 +3298,6 @@ export const en = {
         submit: 'Add',
         creating: 'Adding…',
       },
-      addModal: {
-        dropZone: 'Drop a PDF / image / text file here, or paste the details below',
-        pastePlaceholder: "Paste or type the customer's info (name, email, phone…)",
-        read: 'Read',
-        extracting: 'Reading…',
-        sourceText: 'Source text',
-        errTooLarge: 'File too large (10 MB max). Use a smaller file or type the info manually',
-        errUnsupported: "This file type isn't supported. Paste text or type the info manually",
-        errParse: "Couldn't read this file. Please type the info manually",
-        errEmpty: 'Nothing to read. Paste some details or type the info manually',
-        errExtractFailed: 'Automatic reading failed. Please fill in the fields below manually',
-        errGeneric: "That didn't work. Please type the info manually",
-      },
       docKind: {
         quote: 'Quote',
         invoice: 'Invoice',
@@ -3345,6 +3332,9 @@ export const en = {
         },
         quiet: '{n}d quiet',
         today: 'Contacted today',
+        // watchdog v2 — count of promise-kind findings (promised but not sent);
+        // clicking switches to the orders tab.
+        unkeptPromises: '{n} promised, not sent',
       },
       drafts: {
         heading: 'AI assistant',
@@ -3474,6 +3464,12 @@ export const en = {
           loss: 'Loss',
           breakeven: 'Break-even',
           thin: 'Thin margin',
+        },
+        // v2 — promised but not sent (plain talk, no jargon).
+        promise: {
+          quoteUnsent: 'Quote promised, still not sent',
+          confirmationUnsent: 'Deposit received, confirmation still not sent',
+          days: '{n} days now',
         },
       },
       profile: {

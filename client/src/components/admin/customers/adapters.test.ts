@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { guestToAdaptedCustomer, toListItem, deriveFollowup, buildInquiryEditedPayload, deriveProfile, deriveBallInCourt, deriveNextMove, isFollowUpDue, laToday, pickDefaultProject, shouldCommitRename, filterProjects } from "./adapters"
+import { guestToAdaptedCustomer, toListItem, deriveFollowup, buildInquiryEditedPayload, deriveProfile, deriveBallInCourt, deriveNextMove, isFollowUpDue, laToday, pickDefaultProject, shouldCommitRename, filterProjects, countUnkeptPromises } from "./adapters"
 import type { Project } from "./types"
 
 const mkProject = (id: number, title = `t${id}`): Project => ({
@@ -390,6 +390,29 @@ describe("deriveBallInCourt", () => {
     expect(
       deriveBallInCourt([{ senderRole: "jeff" }, { senderRole: "customer" }]),
     ).toBe("us")
+  })
+})
+
+describe("countUnkeptPromises — 真相條「未兌現承諾」徽章 (watchdog v2)", () => {
+  it("只數 promise 類,margin(漏價)不算", () => {
+    expect(
+      countUnkeptPromises([
+        { kind: "margin" },
+        { kind: "promise" },
+        { kind: "promise" },
+      ]),
+    ).toBe(2)
+  })
+  it("沒 findings → 0(query 還沒回 / 空陣列都不亮)", () => {
+    expect(countUnkeptPromises(undefined)).toBe(0)
+    expect(countUnkeptPromises(null)).toBe(0)
+    expect(countUnkeptPromises([])).toBe(0)
+  })
+  it("全 margin → 0(漏價卡歸 OverviewTab,真相條不重複叫)", () => {
+    expect(countUnkeptPromises([{ kind: "margin" }])).toBe(0)
+  })
+  it("kind 缺(舊 payload)→ 0,寧可漏報", () => {
+    expect(countUnkeptPromises([{}])).toBe(0)
   })
 })
 

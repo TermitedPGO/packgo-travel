@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import { FileText, DollarSign, FileCheck, Loader2 } from "lucide-react"
 import { useLocale } from "@/contexts/LocaleContext"
 import { trpc, type RouterOutputs } from "@/lib/trpc"
@@ -19,7 +19,6 @@ import {
 } from "./customOrderHelpers"
 
 type Order = NonNullable<RouterOutputs["customerOrders"]["get"]>
-type FocusSection = "quote" | "collect" | "confirm" | null
 
 const PRIMARY_BTN =
   "px-3 py-1.5 rounded-lg text-[11px] font-medium bg-gray-900 text-white hover:bg-gray-700 transition-colors disabled:opacity-40 disabled:hover:bg-gray-900"
@@ -40,16 +39,14 @@ function StatusPill({ status }: { status: string }) {
 function Section({
   title,
   icon,
-  innerRef,
   children,
 }: {
   title: string
   icon: React.ReactNode
-  innerRef?: React.RefObject<HTMLDivElement | null>
   children: React.ReactNode
 }) {
   return (
-    <div ref={innerRef} className="rounded-xl border border-gray-200 p-4 space-y-2.5">
+    <div className="rounded-xl border border-gray-200 p-4 space-y-2.5">
       <div className="flex items-center gap-1.5 text-[12px] font-semibold text-gray-900">
         {icon}
         {title}
@@ -61,11 +58,9 @@ function Section({
 
 export default function CustomOrderDetail({
   order,
-  focusSection,
   onChanged,
 }: {
   order: Order
-  focusSection?: FocusSection
   onChanged: () => void
 }) {
   const { t } = useLocale()
@@ -154,16 +149,6 @@ export default function CustomOrderDetail({
     setRecAmount((kind === "deposit" ? order.depositAmount : order.balanceAmount) ?? "")
   }, [kind, order.id, order.depositAmount, order.balanceAmount])
 
-  // focus the section that opened the sheet
-  const quoteRef = useRef<HTMLDivElement | null>(null)
-  const collectRef = useRef<HTMLDivElement | null>(null)
-  const confirmRef = useRef<HTMLDivElement | null>(null)
-  useEffect(() => {
-    const map = { quote: quoteRef, collect: collectRef, confirm: confirmRef }
-    const ref = focusSection ? map[focusSection] : null
-    ref?.current?.scrollIntoView({ behavior: "smooth", block: "start" })
-  }, [focusSection, order.id])
-
   const total = num(order.totalPrice)
   const deposit = num(order.depositAmount)
   const balance = num(order.balanceAmount)
@@ -229,7 +214,7 @@ export default function CustomOrderDetail({
       </details>
 
       {/* 報價 */}
-      <Section title={k("quoteSection")} icon={<FileText className="w-3.5 h-3.5" />} innerRef={quoteRef}>
+      <Section title={k("quoteSection")} icon={<FileText className="w-3.5 h-3.5" />}>
         <PdfDrop
           label={uploading === "quote" ? k("uploading") : k("dropPdf")}
           busy={uploading === "quote"}
@@ -267,7 +252,7 @@ export default function CustomOrderDetail({
       </Section>
 
       {/* 催款 */}
-      <Section title={k("collectSection")} icon={<DollarSign className="w-3.5 h-3.5" />} innerRef={collectRef}>
+      <Section title={k("collectSection")} icon={<DollarSign className="w-3.5 h-3.5" />}>
         <div className="flex gap-1.5">
           {(["deposit", "balance"] as const).map((kd) => (
             <button
@@ -342,7 +327,7 @@ export default function CustomOrderDetail({
       </Section>
 
       {/* 確認書 */}
-      <Section title={k("confirmSection")} icon={<FileCheck className="w-3.5 h-3.5" />} innerRef={confirmRef}>
+      <Section title={k("confirmSection")} icon={<FileCheck className="w-3.5 h-3.5" />}>
         <PdfDrop
           label={uploading === "confirmation" ? k("uploading") : k("dropPdf")}
           busy={uploading === "confirmation"}

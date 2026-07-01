@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef } from "react"
 import { useLocale } from "@/contexts/LocaleContext"
 import CustomerList from "@/components/admin/customers/CustomerList"
 import CustomerDetail from "@/components/admin/customers/CustomerDetail"
@@ -36,11 +36,21 @@ export default function AdminCustomers() {
   // changes; no projects → 未分類 (null). Keyed on the project ids so a manual
   // pick survives a background refetch (e.g. rename, which keeps the same ids),
   // and a just-created order (new id) jumps the bar to it.
+  //
+  // Runs DURING render behind a prev-key guard (React's adjust-state-on-props
+  // pattern), NOT in a useEffect: the effect version ran after paint, so one
+  // committed frame still carried the PREVIOUS customer's activeProjectId —
+  // OverviewTab hit the React Query cache with that stale orderId and flashed
+  // the previous customer's 售價/已收 facts card on the new customer (P3 防閃).
+  // React re-renders synchronously on the render-phase setState, so no frame
+  // with the stale id ever commits.
   const projectIdsKey = projects.map((p) => p.id).join(",")
-  useEffect(() => {
+  const resetKey = `${selected?.kind ?? "none"}:${selected?.id ?? "none"}:${projectIdsKey}`
+  const [prevResetKey, setPrevResetKey] = useState<string | null>(null)
+  if (resetKey !== prevResetKey) {
+    setPrevResetKey(resetKey)
     setActiveProjectId(projects[0]?.id ?? null)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected?.id, selected?.kind, projectIdsKey])
+  }
 
   return (
     <div className="h-full flex">

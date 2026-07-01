@@ -16,6 +16,7 @@ import { Streamdown } from "streamdown"
 import { trpc } from "@/lib/trpc"
 import { useLocale } from "@/contexts/LocaleContext"
 import type { AdaptedCustomer, AiChatMessage, Draft } from "./types"
+import { replyAttachmentDisplayName } from "./adapters"
 import {
   emptyTurn,
   reduceChatEvent,
@@ -448,8 +449,14 @@ export default function CustomerChat({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         className={
+          // `relative` only when collapsed (it anchors the drag overlay in the
+          // flex column). Expanded must be `fixed` ALONE: with both classes the
+          // compiled CSS let `relative` win, so the "overlay" stayed in flow
+          // and squeezed the middle column instead of covering the viewport.
+          // (position:fixed is itself a containing block, so the overlay still
+          // anchors correctly when expanded.)
           expanded
-            ? "fixed inset-y-0 right-0 z-50 w-[min(960px,72vw)] bg-white border-l border-gray-200 flex flex-col overflow-hidden shadow-2xl relative"
+            ? "fixed inset-y-0 right-0 z-50 w-[min(960px,72vw)] bg-white border-l border-gray-200 flex flex-col overflow-hidden shadow-2xl"
             : "w-[340px] border-l border-gray-200 flex flex-col overflow-hidden relative"
         }
       >
@@ -597,7 +604,9 @@ export default function CustomerChat({
                     className="inline-flex items-center gap-1 text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md"
                   >
                     <FileText className="w-2.5 h-2.5" />
-                    {a}
+                    {/* Same derived filename buildEscalationReplyInput sends —
+                        the chip and the outgoing attachment can never diverge. */}
+                    {replyAttachmentDisplayName(a)}
                   </span>
                 ))}
               </div>

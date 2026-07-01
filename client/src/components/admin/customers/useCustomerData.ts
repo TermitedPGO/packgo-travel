@@ -16,6 +16,7 @@ import {
   guestToAdaptedCustomer,
   deriveFollowup,
   buildInquiryEditedPayload,
+  buildEscalationReplyInput,
   OPEN_INQUIRY_STATUSES,
 } from "./adapters"
 
@@ -50,9 +51,6 @@ export function useCustomerData(
   }
   const markNotCustomer = trpc.admin.markNotCustomer.useMutation({ onSuccess: invalidateLists })
   const restoreCustomer = trpc.admin.restoreCustomer.useMutation({ onSuccess: invalidateLists })
-  const createManualCustomer = trpc.admin.createManualCustomer.useMutation({
-    onSuccess: invalidateLists,
-  })
 
   // Resolve the selection into the two id spaces. A guest's id is a profileId, a
   // registered customer's id is a userId — never cross them.
@@ -143,9 +141,11 @@ export function useCustomerData(
   /** Approve+send one draft. editedBody (optional) = Jeff's inline edit. */
   const approveDraft = async (draft: Draft, editedBody?: string) => {
     if (draft.source === "email" && draft.messageId != null) {
-      const body = editedBody ?? draft.body
-      if (!body.trim()) throw new Error("empty draft body")
-      await sendEscalationDraft.mutateAsync({ messageId: draft.messageId, body })
+      // buildEscalationReplyInput throws on empty body and carries the draft's
+      // attachments in the server zod shape ({key, filename}[]) — the card's
+      // chips and what actually goes out must be the same files, never a
+      // silent body-only send.
+      await sendEscalationDraft.mutateAsync(buildEscalationReplyInput(draft, editedBody))
       return
     }
     if (draft.source === "inquiry" && draft.taskId != null) {
@@ -407,8 +407,6 @@ export function useCustomerData(
       restoreCustomer.mutate(
         item.kind === "guest" ? { profileId: item.id } : { userId: item.id },
       ),
-    createManualCustomer: createManualCustomer.mutateAsync,
-    isCreating: createManualCustomer.isPending,
     approveDraft,
     isApprovingDraft: approveInquiryDraft.isPending || sendEscalationDraft.isPending,
   }

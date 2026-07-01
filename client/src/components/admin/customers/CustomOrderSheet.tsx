@@ -17,7 +17,6 @@ import CustomOrderFields, {
 } from "./CustomOrderFields"
 import CustomOrderDetail from "./CustomOrderDetail"
 
-type FocusSection = "quote" | "collect" | "confirm" | null
 type Selected = number | "new" | null
 
 const PRIMARY_BTN =
@@ -27,12 +26,14 @@ export default function CustomOrderSheet({
   open,
   onClose,
   customer,
-  focusSection,
+  initialOrderId,
 }: {
   open: boolean
   onClose: () => void
   customer: AdaptedCustomer
-  focusSection?: FocusSection
+  /** Open on THIS order (list row click). null/undefined → newest, else the
+   *  new-order form — so clicking a card opens that card, not always the latest. */
+  initialOrderId?: number | null
 }) {
   const { t } = useLocale()
   const k = (s: string) => t(`admin.customers.order.${s}`)
@@ -48,17 +49,21 @@ export default function CustomOrderSheet({
     { enabled: open && typeof selected === "number" },
   )
 
-  // default to the newest order, else the new-order form
+  // default to the clicked order (initialOrderId), else the newest, else the
+  // new-order form
   useEffect(() => {
     if (!open) {
       setSelected(null)
       setForm(emptyForm())
       return
     }
-    if (selected === null && list.data) {
+    if (selected !== null) return
+    if (initialOrderId != null) {
+      setSelected(initialOrderId)
+    } else if (list.data) {
       setSelected(list.data[0]?.id ?? "new")
     }
-  }, [open, list.data, selected])
+  }, [open, list.data, selected, initialOrderId])
 
   const refresh = () => {
     utils.customerOrders.listForCustomer.invalidate(sel)
@@ -201,7 +206,7 @@ export default function CustomOrderSheet({
               <Loader2 className="w-5 h-5 animate-spin" />
             </div>
           ) : detail.data ? (
-            <CustomOrderDetail order={detail.data} focusSection={focusSection} onChanged={refresh} />
+            <CustomOrderDetail order={detail.data} onChanged={refresh} />
           ) : (
             <div className="py-12 text-center text-sm text-gray-400">{k("empty")}</div>
           )}

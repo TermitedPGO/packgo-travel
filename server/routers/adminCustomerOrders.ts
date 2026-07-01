@@ -37,7 +37,9 @@ import {
 } from "../services/invoiceService";
 import {
   findOrderMarginIssues,
+  findOrderPromiseIssues,
   WATCHDOG_MARGIN_THRESHOLD,
+  type WatchdogFinding,
 } from "../services/customOrderWatchdog";
 import type { CustomOrder } from "../../drizzle/schema";
 
@@ -158,18 +160,24 @@ export const adminCustomerOrdersRouter = router({
     .query(async ({ input }) => loadOrder(input.orderId)),
 
   /**
-   * 看門狗(Step 5):這個客人所有訂製單裡售價對不上後台成本(賠錢 / 毛利過薄)的那幾張。
-   * admin-only(adminProcedure),內部把售價/成本/毛利三個數字攤給 Jeff —— 供應商成本
-   * 絕不上客人文件,這支不投影到任何客戶面查詢。純 deterministic 規則,不改不送。
-   * 規則見 server/services/customOrderWatchdog.ts。
+   * 看門狗(Step 5 + v2):這個客人所有訂製單的 deterministic findings。
+   *   - margin 類:售價對不上後台成本(賠錢 / 毛利過薄)。內部把售價/成本/毛利三個
+   *     數字攤給 Jeff —— 供應商成本絕不上客人文件,這支不投影到任何客戶面查詢。
+   *   - promise 類(v2):答應了還沒寄(報價 7 天 / 確認書 3 天)。
+   * admin-only(adminProcedure)。純 deterministic 規則,不改不送。
+   * 規則見 server/services/customOrderWatchdog.ts。回傳 kind 判別的聯集陣列,
+   * margin(錢)在前。
    */
   watchdogForCustomer: adminProcedure
     .input(selectionSchema)
-    .query(async ({ input }) => {
+    .query(async ({ input }): Promise<WatchdogFinding[]> => {
       const profileId = await db.findCustomerProfileId(selToArgs(input));
       if (profileId == null) return [];
       const rows = await db.listCustomOrdersByProfile(profileId);
-      return findOrderMarginIssues(rows, WATCHDOG_MARGIN_THRESHOLD);
+      return [
+        ...findOrderMarginIssues(rows, WATCHDOG_MARGIN_THRESHOLD),
+        ...findOrderPromiseIssues(rows, new Date()),
+      ];
     }),
 
   create: adminProcedure

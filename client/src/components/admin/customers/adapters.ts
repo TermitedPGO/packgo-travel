@@ -443,6 +443,18 @@ export function deriveFollowup(
   }
 }
 
+// ── countUnkeptPromises (真相條「未兌現承諾」徽章, watchdog v2) ──────────
+// watchdogForCustomer 回 kind 判別的聯集(margin=漏價 / promise=答應了還沒寄)。
+// 真相條只浮出 promise 類的數量(黑底到期感,樣式同跟進日徽章);漏價卡留在
+// OverviewTab。純函式、零 LLM — server 已做完 deterministic 判斷,這裡只數數。
+
+export function countUnkeptPromises(
+  findings: Array<{ kind?: string }> | null | undefined,
+): number {
+  if (!findings) return 0
+  return findings.filter((f) => f.kind === "promise").length
+}
+
 // ── deriveBallInCourt / deriveNextMove (五秒真相條, Step 1) ─────────────
 // 「球在誰、下一步」: deterministic from the REAL conversation + the existing
 // followup signal. Pure, no LLM, no `now` — trivially testable. The truth strip
@@ -520,6 +532,61 @@ export function buildInquiryEditedPayload(
     throw new Error("unparseable draft payload")
   }
   return JSON.stringify({ ...p, draftBody: editedBody })
+}
+
+/** commandCenter.escalationReply input (mirror of the server zod; the call site
+ *  in useCustomerData type-checks this against the tRPC-inferred input, so a
+ *  server shape change breaks compile, not a send). */
+export type EscalationReplyInput = {
+  messageId: number
+  body: string
+  attachments?: { key: string; filename: string }[]
+}
+
+/**
+ * Human filename for a reply-attachment R2 key
+ * (reply-attachments/<scope>/<ts>-<rand>-<safeName> → safeName). Falls back to
+ * the last path segment / the raw string, so it never returns empty (the server
+ * zod requires filename min(1)).
+ */
+export function replyAttachmentDisplayName(keyOrName: string): string {
+  const base = keyOrName.split("/").pop() ?? keyOrName
+  const m = base.match(/^\d{10,}-[a-z0-9]{4,8}-(.+)$/)
+  return ((m ? m[1] : base).trim() || "file").slice(0, 255)
+}
+
+/**
+ * Build the escalationReply mutation input from an email draft card. The
+ * draft's attachments ride along — before this builder the email branch sent
+ * only {messageId, body}, so a card SHOWING attachment chips silently sent
+ * without them. Attachment strings are the R2 keys the draft was stored with
+ * (reply-attachments/ namespace); the display filename is derived from the key.
+ * A key outside the namespace makes the server ABORT the send with an honest
+ * error (resolveReplyAttachments guard) — never a silent drop. THROWS on empty
+ * body / missing messageId, same honesty rule as buildInquiryEditedPayload.
+ */
+export function buildEscalationReplyInput(
+  draft: { messageId: number | null; body: string; attachments?: string[] },
+  editedBody?: string,
+): EscalationReplyInput {
+  if (draft.messageId == null) throw new Error("missing messageId")
+  const body = editedBody ?? draft.body
+  if (!body.trim()) throw new Error("empty draft body")
+  const refs = (draft.attachments ?? []).filter((a) => a.trim().length > 0)
+  return {
+    messageId: draft.messageId,
+    body,
+    // No slice(0, 10): the server zod caps at 10 and rejecting loudly beats
+    // silently mailing fewer files than the card promised.
+    ...(refs.length > 0
+      ? {
+          attachments: refs.map((key) => ({
+            key,
+            filename: replyAttachmentDisplayName(key),
+          })),
+        }
+      : {}),
+  }
 }
 
 export function guestToAdaptedCustomer(

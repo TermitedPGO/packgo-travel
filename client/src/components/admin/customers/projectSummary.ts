@@ -67,6 +67,32 @@ export function deriveProjectDelivered(o: ProjectOrderFacts): ProjDelivered[] {
   return out
 }
 
+/**
+ * 誤讀防護 — which summary the 概覽 tab may show for the active ProjectBar chip.
+ *
+ *   none     — no chip → whole-customer LLM blend, no caption needed.
+ *   project  — the order row loaded → THIS project's deterministic 摘要三行.
+ *   loading  — chip active but the order hasn't arrived yet → skeleton. The
+ *              whole-customer text must NOT render here: unlabeled, it would
+ *              impersonate the project for a frame (or seconds on a slow net).
+ *   fallback — chip active but the query settled without an order (failed /
+ *              deleted) → whole-customer text is allowed ONLY with an explicit
+ *              整體 caption (summary.overallCaption), never unlabeled.
+ *
+ * Pure so the "silently 退回整戶內容" bug class is unit-tested, not buried in JSX.
+ */
+export type ProjectSummaryState = "none" | "project" | "loading" | "fallback"
+
+export function deriveProjectSummaryState(s: {
+  activeProjectId: number | null
+  hasOrder: boolean
+  isFetching: boolean
+}): ProjectSummaryState {
+  if (s.activeProjectId == null) return "none"
+  if (s.hasOrder) return "project"
+  return s.isFetching ? "loading" : "fallback"
+}
+
 /** Doc kinds that are unambiguously things WE produced for the customer. */
 const OUTBOUND_DOC_KINDS = new Set(["quote", "invoice", "confirmation", "flight"])
 

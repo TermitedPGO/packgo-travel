@@ -3266,19 +3266,6 @@ export const zhTW = {
         submit: '新增',
         creating: '新增中…',
       },
-      addModal: {
-        dropZone: '把 PDF / 圖片 / 文字檔拖進來，或在下面貼上資料',
-        pastePlaceholder: '直接貼上或輸入客人資料（姓名、email、電話…）',
-        read: '讀取',
-        extracting: '讀取中…',
-        sourceText: '原文對照',
-        errTooLarge: '檔案太大（上限 10 MB），請改用較小的檔案或直接手動輸入',
-        errUnsupported: '看不懂這種檔案，請改貼文字或直接手動輸入',
-        errParse: '讀不出這個檔案的內容，請直接手動輸入',
-        errEmpty: '沒有可讀取的內容，請貼上資料或直接手動輸入',
-        errExtractFailed: '自動讀取失敗，請直接手動輸入下面的欄位',
-        errGeneric: '讀取沒有成功，請直接手動輸入',
-      },
       docKind: {
         quote: '報價單',
         invoice: '發票',
@@ -3313,6 +3300,8 @@ export const zhTW = {
         },
         quiet: '{n} 天沒往來',
         today: '今天剛聯絡',
+        // watchdog v2 — promise 類 findings 的數量(答應了還沒寄),點了切到訂單 tab。
+        unkeptPromises: '{n} 件答應了還沒寄',
       },
       drafts: {
         heading: 'AI 助手',
@@ -3440,6 +3429,12 @@ export const zhTW = {
           loss: '虧損',
           breakeven: '零毛利',
           thin: '毛利過薄',
+        },
+        // v2 — 答應了還沒寄(白話,不用術語)。
+        promise: {
+          quoteUnsent: '說好的報價還沒寄',
+          confirmationUnsent: '訂金收了確認書還沒寄',
+          days: '過了 {n} 天',
         },
       },
       profile: {

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   deriveProjectActions,
   deriveProjectDelivered,
+  deriveProjectSummaryState,
   projectDeliveredDocNames,
 } from "./projectSummary"
 
@@ -127,6 +128,43 @@ describe("projectSummary — per-project deterministic 摘要三行", () => {
         const withInvoice = [...docs, { kind: "invoice", name: "INV-001", customOrderId: 7 }]
         expect(projectDeliveredDocNames(withInvoice, 7, UNSENT)).toEqual(["INV-001"])
       })
+    })
+  })
+
+  describe("deriveProjectSummaryState — 誤讀防護 (chip active, order not there yet)", () => {
+    it("no chip → none (whole-customer summary, no caption needed)", () => {
+      expect(
+        deriveProjectSummaryState({ activeProjectId: null, hasOrder: false, isFetching: false }),
+      ).toBe("none")
+    })
+
+    it("chip + order loaded → project (the deterministic 摘要三行)", () => {
+      expect(
+        deriveProjectSummaryState({ activeProjectId: 7, hasOrder: true, isFetching: false }),
+      ).toBe("project")
+    })
+
+    it("chip + order still loading → loading (skeleton), NEVER unlabeled whole-customer text", () => {
+      // The bug: customerOrders.get in flight → projectOrder undefined → the
+      // three summary rows silently rendered the whole-customer blend as if it
+      // were this project. loading forces a skeleton instead.
+      expect(
+        deriveProjectSummaryState({ activeProjectId: 7, hasOrder: false, isFetching: true }),
+      ).toBe("loading")
+    })
+
+    it("chip + query settled without an order (failed/deleted) → fallback (整體 caption)", () => {
+      // Whole-customer content may render here ONLY because the JSX labels it
+      // with summary.overallCaption — it must never pose as the project.
+      expect(
+        deriveProjectSummaryState({ activeProjectId: 7, hasOrder: false, isFetching: false }),
+      ).toBe("fallback")
+    })
+
+    it("a loaded order beats a background refetch (no skeleton flicker on refresh)", () => {
+      expect(
+        deriveProjectSummaryState({ activeProjectId: 7, hasOrder: true, isFetching: true }),
+      ).toBe("project")
     })
   })
 })
