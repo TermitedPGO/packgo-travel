@@ -201,7 +201,7 @@ export default function CustomerDetail({
       <div className="flex-1 overflow-y-auto">
         {tab === "overview" && <OverviewTab customer={c} chatMessages={chatMessages} />}
         {tab === "orders" && <OrdersTab customer={c} activeProjectId={activeProjectId} onSelectProject={onSelectProject} />}
-        {tab === "docs" && <DocsTab customer={c} />}
+        {tab === "docs" && <DocsTab customer={c} activeProjectId={activeProjectId} />}
         {tab === "history" && (
           <TimelineTab
             customer={c}

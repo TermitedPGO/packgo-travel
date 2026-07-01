@@ -56,6 +56,9 @@ export type Doc = {
   url: string | null
   /** short secondary line: status / amount */
   meta: string | null
+  /** customer-projects (0106) — which project (customOrder) this doc belongs to;
+   *  null = 未分類. The 文件 tab filters by the active ProjectBar chip. */
+  customOrderId: number | null
   date: string
 }
 

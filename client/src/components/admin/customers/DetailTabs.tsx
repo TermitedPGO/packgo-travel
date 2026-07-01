@@ -482,14 +482,24 @@ export function OrdersTab({
   )
 }
 
-export function DocsTab({ customer: c }: { customer: AdaptedCustomer }) {
+export function DocsTab({
+  customer: c,
+  activeProjectId = null,
+}: {
+  customer: AdaptedCustomer
+  activeProjectId?: number | null
+}) {
   const { t } = useLocale()
-  if (c.docs.length === 0) {
+  // customer-projects (0106) — scope to the active ProjectBar chip, same as the
+  // 歷史 tab: a project chip shows that project's docs; 未分類 (null) shows docs
+  // not filed under any project (passport, general uploads).
+  const docs = c.docs.filter((d) => (d.customOrderId ?? null) === activeProjectId)
+  if (docs.length === 0) {
     return <div className="p-6 text-sm text-gray-400">{t("admin.customers.empty.noDocs")}</div>
   }
   return (
     <div className="p-6 space-y-2">
-      {c.docs.map((d) => {
+      {docs.map((d) => {
         const Icon = d.kind === "flight" ? Plane : FileText
         const row = (
           <>

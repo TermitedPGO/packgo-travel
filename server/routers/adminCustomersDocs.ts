@@ -23,6 +23,10 @@ export type CustomerDoc = {
   url: string | null;
   /** short secondary line: status / amount / etc. */
   meta: string | null;
+  /** customer-projects (0106) — which customOrder (專案) this doc belongs to, so
+   *  the 文件 tab can filter by the active ProjectBar chip. null = 未分類
+   *  (customer-level doc, or a source with no clean order link). */
+  customOrderId: number | null;
   createdAt: Date;
 };
 
@@ -53,6 +57,10 @@ export function quoteDoc(r: {
     name: r.quoteNumber || `Quote #${r.id}`,
     url: r.pdfUrl || null,
     meta: [money(r.estimatedTotal, r.currency), r.status].filter(Boolean).join(" · ") || null,
+    // aiQuotes link to an order the other way (customOrders.quoteId) — no direct
+    // column here, so quote PDFs stay 未分類 unless surfaced via the order's own
+    // co-quote row.
+    customOrderId: null,
     createdAt: r.createdAt,
   };
 }
@@ -64,6 +72,7 @@ export function invoiceDoc(r: {
   currency: string | null;
   pdfUrl: string | null;
   status: string | null;
+  customOrderId?: number | null;
   createdAt: Date;
 }): CustomerDoc {
   return {
@@ -72,6 +81,7 @@ export function invoiceDoc(r: {
     name: r.invoiceNumber,
     url: r.pdfUrl || null,
     meta: [money(r.totalAmount, r.currency), r.status].filter(Boolean).join(" · ") || null,
+    customOrderId: r.customOrderId ?? null,
     createdAt: r.createdAt,
   };
 }
@@ -89,6 +99,7 @@ export function uploadedDoc(r: {
   type: string;
   fileName: string | null;
   r2Url: string | null;
+  customOrderId?: number | null;
   uploadedAt: Date;
 }): CustomerDoc {
   return {
@@ -99,6 +110,8 @@ export function uploadedDoc(r: {
     name: r.fileName || r.type,
     url: r.r2Url || null,
     meta: null,
+    // 0106 — a file dropped in a project-scoped chat carries the order id.
+    customOrderId: r.customOrderId ?? null,
     createdAt: r.uploadedAt,
   };
 }
@@ -118,6 +131,8 @@ export function flightOrderDoc(r: {
     // download link in a read-only docs list.
     url: null,
     meta: r.status,
+    // flightOrders are a separate legacy table, not customOrders → 未分類.
+    customOrderId: null,
     createdAt: r.createdAt,
   };
 }
@@ -149,6 +164,8 @@ export function customOrderDocs(r: {
       name: r.orderNumber,
       url: r.confirmationPdfUrl,
       meta: r.title || null,
+      // these PDFs ARE the order's own docs → filed under it.
+      customOrderId: r.id,
       createdAt: r.confirmedAt ?? r.createdAt,
     });
   }
@@ -159,6 +176,7 @@ export function customOrderDocs(r: {
       name: r.orderNumber,
       url: r.quotePdfUrl,
       meta: r.title || null,
+      customOrderId: r.id,
       createdAt: r.quoteSentAt ?? r.createdAt,
     });
   }

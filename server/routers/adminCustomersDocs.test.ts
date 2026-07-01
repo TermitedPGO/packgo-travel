@@ -61,6 +61,66 @@ describe("customOrderDocs — confirmation + quote normalization", () => {
     const docs = customOrderDocs({ ...base, confirmationPdfUrl: "https://x/c.pdf" });
     expect(JSON.stringify(docs)).not.toMatch(/cost|supplier|成本/i);
   });
+
+  it("0106 — an order's own PDFs are filed under that order (customOrderId = order id)", () => {
+    const docs = customOrderDocs({
+      ...base,
+      quotePdfUrl: "https://x/q.pdf",
+      confirmationPdfUrl: "https://x/c.pdf",
+    });
+    expect(docs.every((x) => x.customOrderId === 7)).toBe(true);
+  });
+});
+
+describe("customOrderId propagation (0106 — 文件 tab per-project scope)", () => {
+  it("uploadedDoc carries the customOrderId when the file was dropped in a project chat", () => {
+    const filed = uploadedDoc({
+      id: 3,
+      type: "other",
+      fileName: "morris_ua.pdf",
+      r2Url: "customer-docs/1/x.pdf",
+      customOrderId: 42,
+      uploadedAt: d("2026-06-30"),
+    });
+    expect(filed.customOrderId).toBe(42);
+  });
+
+  it("uploadedDoc without an order → 未分類 (null), never undefined", () => {
+    const passport = uploadedDoc({
+      id: 4,
+      type: "passport",
+      fileName: "passport.pdf",
+      r2Url: "customer-docs/1/p.pdf",
+      uploadedAt: d("2026-06-30"),
+    });
+    expect(passport.customOrderId).toBeNull();
+  });
+
+  it("invoiceDoc carries its customOrderId; quote/flight sources stay 未分類", () => {
+    expect(
+      invoiceDoc({
+        id: 9,
+        invoiceNumber: "INV-1",
+        totalAmount: "290",
+        currency: "USD",
+        pdfUrl: "https://x/i.pdf",
+        status: "paid",
+        customOrderId: 42,
+        createdAt: d("2026-06-30"),
+      }).customOrderId,
+    ).toBe(42);
+    expect(
+      quoteDoc({
+        id: 1,
+        quoteNumber: "Q1",
+        estimatedTotal: 100,
+        currency: "USD",
+        pdfUrl: "https://x/q.pdf",
+        status: "sent",
+        createdAt: d("2026-06-30"),
+      }).customOrderId,
+    ).toBeNull();
+  });
 });
 
 describe("adminCustomersDocs — source normalization", () => {

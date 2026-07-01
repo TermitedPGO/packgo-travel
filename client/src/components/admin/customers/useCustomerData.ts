@@ -218,6 +218,7 @@ export function useCustomerData(
       name: d.name,
       url: d.url,
       meta: d.meta,
+      customOrderId: d.customOrderId ?? null,
       date: formatDate(new Date(d.createdAt)),
     }))
 

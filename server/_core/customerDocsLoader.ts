@@ -124,6 +124,7 @@ export async function loadCustomerDocs(
           currency: invoicesTable.currency,
           pdfUrl: invoicesTable.pdfUrl,
           status: invoicesTable.status,
+          customOrderId: invoicesTable.customOrderId,
           createdAt: invoicesTable.createdAt,
         })
         .from(invoicesTable)
@@ -140,6 +141,7 @@ export async function loadCustomerDocs(
           type: customerDocuments.type,
           fileName: customerDocuments.fileName,
           r2Url: customerDocuments.r2Url,
+          customOrderId: customerDocuments.customOrderId,
           uploadedAt: customerDocuments.uploadedAt,
         })
         .from(customerDocuments)
