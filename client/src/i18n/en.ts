@@ -3376,6 +3376,32 @@ export const en = {
         // (drag a file or type — no more separate form modal that could break).
         addCustomerPrefill: 'Add customer: ',
       },
+      chat: {
+        // Tool display names for the ops-chat step list (chatStream.ts
+        // TOOL_LABEL_KEYS; key names = backend tool names). Unlisted tools
+        // render their raw name.
+        tools: {
+          count_records: 'Counting records',
+          aggregate_departures: 'Aggregating departures',
+          search_tours: 'Searching tours',
+          search_departures: 'Searching departures',
+          search_bookings: 'Searching bookings',
+          search_customers: 'Searching customers',
+          get_finance_summary: 'Checking finances',
+          list_missing_receipts: 'Listing missing receipts',
+          search_supplier_inventory: 'Checking supplier inventory',
+          preview_customer_threads: 'Previewing emails',
+          read_customer_conversation: 'Reading conversation',
+          list_followups_needed: 'Listing follow-ups',
+          draft_followup: 'Drafting follow-up',
+          update_customer_note: 'Updating note',
+          update_booking_status: 'Updating booking status',
+          get_customer_documents: 'Checking documents',
+          get_payment_history: 'Checking payment history',
+        },
+        // Generic error bubble when the backend error event carried no message.
+        errorFallback: 'Something went wrong, please try again.',
+      },
       status: {
         allClear: 'All clear',
         allClearDesc: 'No open items at this time',

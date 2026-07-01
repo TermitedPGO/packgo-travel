@@ -21,6 +21,7 @@ import {
   reduceChatEvent,
   parseSseChunk,
   humanizeToolName,
+  CHAT_ERROR_FALLBACK_KEY,
   type ChatTurn,
   type ChatStep,
 } from "./chatStream"
@@ -37,11 +38,12 @@ const MAX_FILE_SIZE = 6_000_000
 const MAX_TOTAL_BYTES = 6_000_000
 
 /** Dim "thinking" step label: the bridge sentence the model spoke, or the tools
- * it ran when it spoke nothing. */
-function stepLabel(s: ChatStep): string {
+ * it ran when it spoke nothing. Tool names resolve through t() (chatStream maps
+ * them to i18n keys; it's a pure module with no hook access). */
+function stepLabel(s: ChatStep, t: (key: string) => string): string {
   const text = s.text.trim()
   if (text) return text.length > 48 ? text.slice(0, 48) + "…" : text
-  if (s.tools.length) return s.tools.map(humanizeToolName).join("、")
+  if (s.tools.length) return s.tools.map((name) => humanizeToolName(name, t)).join("、")
   return "…"
 }
 
@@ -199,6 +201,8 @@ export default function CustomerChat({
   // Also reset on project switch (0104): each project is its own chat line, so
   // switching clears the in-memory turns and the hydrate effect below repopulates
   // from THIS project's persisted thread (chatMessages is already orderId-scoped).
+  // Unsent attachments + the typed draft belong to the PREVIOUS customer/project
+  // too — clear them, or A's dropped passport gets filed into B on the next send.
   useEffect(() => {
     setEditingId(null)
     setConfirmId(null)
@@ -208,6 +212,8 @@ export default function CustomerChat({
     abortRef.current?.abort()
     setMessages([])
     setBusy(false)
+    setAttachments([])
+    setInput("")
   }, [customer?.id, customer?.kind, activeProjectId])
 
   // Hydrate / re-hydrate from the persisted per-customer thread. Each customer's
@@ -474,7 +480,7 @@ export default function CustomerChat({
               {m.turn.steps.map((s, j) => (
                 <div key={j} className="flex items-start gap-1.5 text-[11px] text-gray-400 leading-snug">
                   <Check className="w-3 h-3 mt-0.5 text-gray-300 flex-shrink-0" />
-                  <span className="truncate">{stepLabel(s)}</span>
+                  <span className="truncate">{stepLabel(s, t)}</span>
                 </div>
               ))}
 
@@ -504,7 +510,10 @@ export default function CustomerChat({
 
               {m.turn.error && (
                 <div className="text-[12px] text-gray-700 bg-gray-100 rounded-xl px-3 py-2">
-                  {m.turn.error}
+                  {/* The reducer stores the i18n KEY when the backend sent no
+                      message (pure module, no t()); resolve it here. A real
+                      server-provided error message renders as-is. */}
+                  {m.turn.error === CHAT_ERROR_FALLBACK_KEY ? t(CHAT_ERROR_FALLBACK_KEY) : m.turn.error}
                 </div>
               )}
             </div>

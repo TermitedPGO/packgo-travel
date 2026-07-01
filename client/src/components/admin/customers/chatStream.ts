@@ -32,28 +32,40 @@ export type ChatStreamEvent =
   | { type: "done"; finalAnswer?: string }
   | { type: "error"; error?: string };
 
-const TOOL_LABELS: Record<string, string> = {
-  count_records: "統計資料",
-  aggregate_departures: "匯總出團",
-  search_tours: "搜尋行程",
-  search_departures: "查詢出團",
-  search_bookings: "查詢訂單",
-  search_customers: "搜尋客戶",
-  get_finance_summary: "查看財務",
-  list_missing_receipts: "缺收據清單",
-  search_supplier_inventory: "查詢供應商庫存",
-  preview_customer_threads: "預覽郵件",
-  read_customer_conversation: "讀取對話紀錄",
-  list_followups_needed: "待跟進清單",
-  draft_followup: "草擬跟進信",
-  update_customer_note: "更新備註",
-  update_booking_status: "更新訂單狀態",
-  get_customer_documents: "查看證件狀態",
-  get_payment_history: "查看付款紀錄",
+/** Tool name → i18n key. This is a pure module (no hook access), so it maps to
+ * KEYS and the render site resolves them via t() — the display strings live in
+ * zh-TW.ts / en.ts under admin.customers.chat.tools.* (i18n 紅線: no hardcoded
+ * UI Chinese here). */
+export const TOOL_LABEL_KEYS: Record<string, string> = {
+  count_records: "admin.customers.chat.tools.count_records",
+  aggregate_departures: "admin.customers.chat.tools.aggregate_departures",
+  search_tours: "admin.customers.chat.tools.search_tours",
+  search_departures: "admin.customers.chat.tools.search_departures",
+  search_bookings: "admin.customers.chat.tools.search_bookings",
+  search_customers: "admin.customers.chat.tools.search_customers",
+  get_finance_summary: "admin.customers.chat.tools.get_finance_summary",
+  list_missing_receipts: "admin.customers.chat.tools.list_missing_receipts",
+  search_supplier_inventory: "admin.customers.chat.tools.search_supplier_inventory",
+  preview_customer_threads: "admin.customers.chat.tools.preview_customer_threads",
+  read_customer_conversation: "admin.customers.chat.tools.read_customer_conversation",
+  list_followups_needed: "admin.customers.chat.tools.list_followups_needed",
+  draft_followup: "admin.customers.chat.tools.draft_followup",
+  update_customer_note: "admin.customers.chat.tools.update_customer_note",
+  update_booking_status: "admin.customers.chat.tools.update_booking_status",
+  get_customer_documents: "admin.customers.chat.tools.get_customer_documents",
+  get_payment_history: "admin.customers.chat.tools.get_payment_history",
 };
 
-export function humanizeToolName(name: string): string {
-  return TOOL_LABELS[name] ?? name;
+/** i18n key the reducer stores when the backend sent an error event with no
+ * message; the render site translates it (see CustomerChat). */
+export const CHAT_ERROR_FALLBACK_KEY = "admin.customers.chat.errorFallback";
+
+/** Resolve a tool name to its display label via the caller's t(). Tool names
+ * without an i18n key fall back to the raw name (t is never called with an
+ * unknown key, so no missing-key Sentry noise). */
+export function humanizeToolName(name: string, t: (key: string) => string): string {
+  const key = TOOL_LABEL_KEYS[name];
+  return key ? t(key) : name;
 }
 
 export function emptyTurn(): ChatTurn {
@@ -86,7 +98,7 @@ export function reduceChatEvent(t: ChatTurn, ev: ChatStreamEvent): ChatTurn {
       return { ...t, answer: (ev.finalAnswer ?? t.live).trim(), live: "" };
 
     case "error":
-      return { ...t, error: ev.error ?? "出錯了,請再試一次。", live: "" };
+      return { ...t, error: ev.error ?? CHAT_ERROR_FALLBACK_KEY, live: "" };
 
     case "status":
     default:

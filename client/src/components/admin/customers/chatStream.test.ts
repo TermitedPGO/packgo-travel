@@ -3,13 +3,28 @@
  * case: an agentic turn (bridge sentence → tool round → real answer) keeps the
  * thinking as a separate dim step and never concatenates it into the answer.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   emptyTurn,
   reduceChatEvent,
   parseSseChunk,
+  humanizeToolName,
+  TOOL_LABEL_KEYS,
+  CHAT_ERROR_FALLBACK_KEY,
   type ChatTurn,
 } from "./chatStream";
+import { zhTW } from "../../../i18n/zh-TW";
+import { en } from "../../../i18n/en";
+
+/** Dotted-path lookup into an i18n bundle (same shape as translate()'s). */
+function lookup(bundle: Record<string, unknown>, dotted: string): unknown {
+  return dotted
+    .split(".")
+    .reduce<unknown>(
+      (o, k) => (o && typeof o === "object" ? (o as Record<string, unknown>)[k] : undefined),
+      bundle,
+    );
+}
 
 const run = (events: Parameters<typeof reduceChatEvent>[1][]): ChatTurn =>
   events.reduce(reduceChatEvent, emptyTurn());
@@ -82,10 +97,62 @@ describe("reduceChatEvent", () => {
     expect(t.live).toBe("");
   });
 
+  it("error without a message stores the i18n fallback KEY, not hardcoded Chinese", () => {
+    const t = run([{ type: "token", text: "x" }, { type: "error" }]);
+    // The reducer is a pure module (no t()); it stores the key and the render
+    // site translates it — so the English UI never shows a Chinese error.
+    expect(t.error).toBe(CHAT_ERROR_FALLBACK_KEY);
+    expect(t.live).toBe("");
+  });
+
   it("status is ignored (superseded by round_thinking)", () => {
     const t = run([{ type: "token", text: "a" }, { type: "status", text: "查詢中" }]);
     expect(t.live).toBe("a");
     expect(t.steps).toEqual([]);
+  });
+});
+
+/**
+ * i18n 紅線 (Finding: TOOL_LABELS 硬編碼中文) — tool labels + error fallback
+ * must resolve through i18n keys that exist in BOTH bundles, so the English UI
+ * shows English steps instead of Chinese.
+ */
+describe("humanizeToolName (i18n)", () => {
+  it("known tools resolve through the caller's t() with an admin.customers.chat.tools.* key", () => {
+    const t = (key: string) => `T(${key})`;
+    expect(humanizeToolName("search_bookings", t)).toBe(
+      "T(admin.customers.chat.tools.search_bookings)",
+    );
+  });
+
+  it("unknown tool names fall back to the raw name without calling t()", () => {
+    const t = vi.fn((key: string) => `T(${key})`);
+    expect(humanizeToolName("brand_new_tool", t)).toBe("brand_new_tool");
+    expect(t).not.toHaveBeenCalled(); // no missing-key Sentry noise
+  });
+
+  it.each(Object.entries(TOOL_LABEL_KEYS))(
+    "%s → %s exists in zh-TW and en (en not Chinese)",
+    (_tool, key) => {
+      const zh = lookup(zhTW, key);
+      const enVal = lookup(en, key);
+      expect(zh, `${key} missing in zh-TW`).toBeTypeOf("string");
+      expect(enVal, `${key} missing in en`).toBeTypeOf("string");
+      // The whole point of the finding: English UI must not show Chinese.
+      expect(enVal as string).not.toMatch(/[一-鿿]/);
+    },
+  );
+
+  it("the zh-TW labels keep the original display strings", () => {
+    expect(lookup(zhTW, TOOL_LABEL_KEYS.search_bookings)).toBe("查詢訂單");
+    expect(lookup(zhTW, TOOL_LABEL_KEYS.draft_followup)).toBe("草擬跟進信");
+  });
+
+  it("the error fallback key exists in both bundles (en not Chinese)", () => {
+    expect(lookup(zhTW, CHAT_ERROR_FALLBACK_KEY)).toBe("出錯了,請再試一次。");
+    const enVal = lookup(en, CHAT_ERROR_FALLBACK_KEY);
+    expect(enVal).toBeTypeOf("string");
+    expect(enVal as string).not.toMatch(/[一-鿿]/);
   });
 });
 
