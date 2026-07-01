@@ -3335,7 +3335,9 @@ export const zhTW = {
         chatCollapse: '收合',
         chatStop: '停止',
         dropFile: '拖放文件到這裡',
-        dropTooBig: '檔案太大,上限 500KB。',
+        dropTooBig: '檔案太大,上限 6MB。',
+        // 只丟檔案不打字時,送出去的預設問句(伺服器要求 q 不能空)。
+        filesOnlyPrompt: '幫我讀這個檔案,整理裡面的重點。',
         globalPlaceholder: '新增客人、拖放文件...',
         // audit fix (2026-06-30) — 「新增客人」按鈕改成直接聚焦這個聊天框(拖檔案/打字
         // 都能讀,不用再開一個獨立、會壞掉的表單彈窗)。

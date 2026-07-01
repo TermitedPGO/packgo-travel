@@ -301,15 +301,26 @@ export default function CustomerChat({
   // chat uses (/api/agent/ask-ops-stream + customerId/profileId). Thinking rounds
   // collapse into dim steps; the answer streams clean (no 斷句). Read-only.
   const handleSend = async () => {
-    const q = input.trim()
-    if (!q || busy) return
+    const typed = input.trim()
     const files = attachments
+    // Files-only send: dropping a file with no typed text must still send — Jeff's
+    // whole point is「省得我一個一個打字」. The server rejects an empty q, so when
+    // there's no text we send a default「讀這個檔案」prompt alongside the file.
+    if ((!typed && files.length === 0) || busy) return
+    const q = typed || t("admin.customers.drafts.filesOnlyPrompt")
     setInput("")
     setAttachments([])
     setBusy(true)
     setMessages((prev) => [
       ...prev,
-      { role: "user", text: files.length ? `${q}\n\n${files.map((f) => `📎 ${f.name}`).join("\n")}` : q },
+      {
+        role: "user",
+        text: files.length
+          ? typed
+            ? `${typed}\n\n${files.map((f) => `📎 ${f.name}`).join("\n")}`
+            : files.map((f) => `📎 ${f.name}`).join("\n")
+          : q,
+      },
       { role: "ai", turn: emptyTurn() },
     ])
 
@@ -387,6 +398,9 @@ export default function CustomerChat({
       void utils.admin.customerConversationThread.invalidate()
       void utils.admin.customerProfileData.invalidate()
       void utils.admin.customerLearnedPreferences.invalidate()
+      // The agent may have just created a project (create_custom_order) — refresh
+      // the ProjectBar so a「補進去」的新專案 shows up without reopening the customer.
+      void utils.customerOrders.listForCustomer.invalidate()
       // The agent may have set/cleared the follow-up date (set_follow_up_date) —
       // refresh the detail / guest-open-items queries the 真相條 reads so the
       // 跟進日 surfaces up top right after Jeff types it, no reload.
@@ -677,7 +691,7 @@ export default function CustomerChat({
           />
           <button
             onClick={busy ? () => abortRef.current?.abort() : handleSend}
-            disabled={!busy && !input.trim()}
+            disabled={!busy && !input.trim() && attachments.length === 0}
             aria-label={busy ? t("admin.customers.drafts.chatStop") : t("admin.customers.drafts.send")}
             title={busy ? t("admin.customers.drafts.chatStop") : undefined}
             className="w-6 h-6 mb-0.5 rounded-md bg-gray-900 text-white flex items-center justify-center hover:bg-gray-700 transition-colors flex-shrink-0 disabled:opacity-40 disabled:hover:bg-gray-900"

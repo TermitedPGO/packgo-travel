@@ -3367,7 +3367,10 @@ export const en = {
         chatCollapse: 'Collapse',
         chatStop: 'Stop',
         dropFile: 'Drop files here',
-        dropTooBig: 'File too large, 500KB max.',
+        dropTooBig: 'File too large, 6MB max.',
+        // Default question sent when files are dropped with no typed text
+        // (the server requires a non-empty q).
+        filesOnlyPrompt: 'Please read this file and summarize the key points.',
         globalPlaceholder: 'Add customer, drop files...',
         // audit fix (2026-06-30) — "Add customer" now just focuses this chat
         // (drag a file or type — no more separate form modal that could break).
