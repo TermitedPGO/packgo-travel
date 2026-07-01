@@ -705,7 +705,7 @@ async function startServer() {
           })
           .from(customerChatMessages)
           .where(and(eq(customerChatMessages.customerUserId, customerId), orderFilter()))
-          .orderBy(drizzleDesc(customerChatMessages.createdAt))
+          .orderBy(drizzleDesc(customerChatMessages.createdAt), drizzleDesc(customerChatMessages.id))
           .limit(10);
         history = rows
           .reverse()
@@ -714,12 +714,10 @@ async function startServer() {
             content: r.body,
           }));
 
-        await db.insert(customerChatMessages).values({
-          customerUserId: customerId,
-          customOrderId: orderId,
-          senderRole: "jeff",
-          body: question,
-        });
+        // orphan-fix: Jeff's question is NOT persisted here — it co-persists
+        // with the answer at stream completion (see opsChatPersist), so an
+        // interrupted stream leaves no lone-jeff turn. history above (pre-insert)
+        // is what the LLM sees; the current question is passed as its own arg.
       } else if (db && customerProfileId !== null) {
         // guest-customer-chat — the guest's own thread, scoped to profileId.
         const rows = await db
@@ -729,7 +727,7 @@ async function startServer() {
           })
           .from(customerChatMessages)
           .where(and(eq(customerChatMessages.customerProfileId, customerProfileId), orderFilter()))
-          .orderBy(drizzleDesc(customerChatMessages.createdAt))
+          .orderBy(drizzleDesc(customerChatMessages.createdAt), drizzleDesc(customerChatMessages.id))
           .limit(10);
         history = rows
           .reverse()
@@ -738,12 +736,8 @@ async function startServer() {
             content: r.body,
           }));
 
-        await db.insert(customerChatMessages).values({
-          customerProfileId,
-          customOrderId: orderId,
-          senderRole: "jeff",
-          body: question,
-        });
+        // orphan-fix: guest question also co-persists with the answer at
+        // completion (see opsChatPersist), never early.
       } else if (db) {
         const rows = await db
           .select({
@@ -866,44 +860,53 @@ async function startServer() {
 
       cleanup();
 
-      // Save agent answer + suggestedActions to DB so the message is
-      // persistent (refresh loads it from listMessages). Skip on timeout — no
-      // real answer, don't persist a half-baked turn.
-      if (finalAnswer && db && !timedOut) {
-        if (customerId !== null) {
-          // per-customer thread (批2 m3) — context JSON keeps the turn's
-          // suggestedActions/cards for the later m3b card rendering.
-          await db.insert(customerChatMessages).values({
-            customerUserId: customerId,
-            customOrderId: orderId,
-            senderRole: "agent",
-            body: finalAnswer,
-            context: JSON.stringify({ suggestedActions, cards, streamed: true }),
-          });
-        } else if (customerProfileId !== null) {
-          // guest-customer-chat — same thread table, scoped to the guest.
-          await db.insert(customerChatMessages).values({
-            customerProfileId,
-            customOrderId: orderId,
-            senderRole: "agent",
-            body: finalAnswer,
-            context: JSON.stringify({ suggestedActions, cards, streamed: true }),
-          });
-        } else {
-          await db.insert(agentMessages).values({
-            agentName: "ops",
-            senderRole: "agent",
-            messageType: "observation",
-            title: question.slice(0, 80),
-            body: finalAnswer,
-            context: JSON.stringify({ suggestedActions, cards, streamed: true }),
-            priority: "normal",
-            // Jeff is watching this stream live — it's a reply to his own
-            // question, NOT a proactive notification. Mark read so live chatting
-            // doesn't inflate the Chat unread badge (2026-06-01 fix).
-            readByJeff: 1,
-          } as any);
-        }
+      // Persist the turn to the durable thread — only on a REAL completion
+      // (refresh loads it from listMessages). orphan-fix (2026-06-30): for the
+      // two customer-scoped branches, Jeff's question co-persists with the answer
+      // HERE, so an interrupted stream (client abort on project/page switch, 90s
+      // timeout, agent error, LLM throw) writes NEITHER row — never a lone jeff
+      // turn (the hanging SENT bubble). The live LLM already saw the question via
+      // the `question` arg + pre-insert `history`, so deferring the write changes
+      // nothing it sees; jeff is emitted before agent and the readers add an
+      // id-desc tiebreak so a same-second createdAt keeps jeff-before-agent.
+      // Global #ops keeps its early question echo (its UI renders the question
+      // only from the DB) and only appends the answer below.
+      const turnCtx = JSON.stringify({ suggestedActions, cards, streamed: true });
+      const { customerChatCompletionRows } = await import("./opsChatPersist");
+      if (db && customerId !== null) {
+        const rows = customerChatCompletionRows(
+          { kind: "user", customerUserId: customerId },
+          orderId,
+          question,
+          finalAnswer,
+          timedOut,
+          turnCtx,
+        );
+        for (const row of rows) await db.insert(customerChatMessages).values(row as any);
+      } else if (db && customerProfileId !== null) {
+        const rows = customerChatCompletionRows(
+          { kind: "guest", customerProfileId },
+          orderId,
+          question,
+          finalAnswer,
+          timedOut,
+          turnCtx,
+        );
+        for (const row of rows) await db.insert(customerChatMessages).values(row as any);
+      } else if (finalAnswer && db && !timedOut) {
+        await db.insert(agentMessages).values({
+          agentName: "ops",
+          senderRole: "agent",
+          messageType: "observation",
+          title: question.slice(0, 80),
+          body: finalAnswer,
+          context: turnCtx,
+          priority: "normal",
+          // Jeff is watching this stream live — it's a reply to his own
+          // question, NOT a proactive notification. Mark read so live chatting
+          // doesn't inflate the Chat unread badge (2026-06-01 fix).
+          readByJeff: 1,
+        } as any);
       }
 
       if (!timedOut) {

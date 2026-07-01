@@ -1179,7 +1179,10 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
         })
         .from(customerChatMessages)
         .where(where)
-        .orderBy(desc(customerChatMessages.createdAt))
+        // id tiebreak: jeff+agent of one turn now co-persist in the same
+        // createdAt second (orphan-fix), so order by id too to keep jeff-before
+        // -agent deterministically (else a same-second tie could invert them).
+        .orderBy(desc(customerChatMessages.createdAt), desc(customerChatMessages.id))
         .limit(input.limit ?? 50);
       return rows.reverse();
     }),
