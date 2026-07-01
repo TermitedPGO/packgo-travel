@@ -11,25 +11,30 @@
  */
 import { createChildLogger } from "../../_core/logger";
 import type { Db } from "../../_core/followupScan";
+import { stripMarkdownForEmail } from "../../_core/plainTextReply";
 import { draftFollowup, type FollowupDrafterInput } from "./followupDrafter";
 import {
   buildConversationExcerpt,
   detectDraftSkip,
   pickGmailThreadId,
+  pickLatestInboundClassification,
   detectCustomerLanguage,
   buildFollowupDraftRow,
   pickFollowupVariant,
+  sanitizeFollowupDraftBody,
   type InteractionDetailRow,
   type DraftSkipReason,
 } from "./followupDraftProducer";
-import { checkFollowupDraftCompliance } from "./followupDraftCompliance";
 
 const log = createChildLogger({ module: "followupDraftOnDemand" });
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type OnDemandDraftResult =
   | { status: "drafted"; daysSince: number }
-  | { status: "skipped"; reason: DraftSkipReason | "no_email" | "no_history" | "empty_draft" };
+  | {
+      status: "skipped";
+      reason: DraftSkipReason | "no_email" | "no_history" | "empty_draft" | "unclean_draft";
+    };
 
 export async function produceFollowupDraftForProfile(
   db: Db,
@@ -75,7 +80,7 @@ export async function produceFollowupDraftForProfile(
   const excerpt = buildConversationExcerpt(rows);
   const skip = detectDraftSkip({
     gmailThreadId,
-    lastClassification: rows[0]?.classification ?? null,
+    lastInboundClassification: pickLatestInboundClassification(rows),
     conversationLen: excerpt.length,
   });
   if (skip) return { status: "skipped", reason: skip };
@@ -99,13 +104,20 @@ export async function produceFollowupDraftForProfile(
     log.warn({ err: e, profileId }, "[followupDraftOnDemand] draftFollowup failed");
     return { status: "skipped", reason: "empty_draft" };
   }
-  const body = draft.body?.trim();
-  if (!body) return { status: "skipped", reason: "empty_draft" };
-
-  const compliance = checkFollowupDraftCompliance(body);
-  if (!compliance.ok) {
+  // Same wash as the nightly scan: the stored body is what the one-click send
+  // chain sends verbatim, so it must already be clean (no markdown, no em dash).
+  const cleaned = sanitizeFollowupDraftBody(draft.body);
+  if (!cleaned.body) return { status: "skipped", reason: "empty_draft" };
+  if (cleaned.blocked) {
+    log.error(
+      { profileId, violations: cleaned.violations },
+      "[followupDraftOnDemand] draft still dirty after wash, not storing",
+    );
+    return { status: "skipped", reason: "unclean_draft" };
+  }
+  if (cleaned.violations.length > 0) {
     log.warn(
-      { profileId, violations: compliance.violations },
+      { profileId, violations: cleaned.violations },
       "[followupDraftOnDemand] draft tripped hard-rule guard",
     );
   }
@@ -116,8 +128,8 @@ export async function produceFollowupDraftForProfile(
       customerEmail: email,
       daysSince,
       gmailThreadId: gmailThreadId as string, // non-null past detectDraftSkip
-      subject: draft.subject?.trim() || `跟進:${email}`,
-      draftBody: body,
+      subject: stripMarkdownForEmail(draft.subject) || `跟進:${email}`,
+      draftBody: cleaned.body,
       promptVariant,
     }),
   );

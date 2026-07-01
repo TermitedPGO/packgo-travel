@@ -20,14 +20,17 @@
 
 import { createChildLogger } from "../../_core/logger";
 import { findStaleQuotedCustomers, type Db } from "../../_core/followupScan";
+import { stripMarkdownForEmail } from "../../_core/plainTextReply";
 import {
   draftFollowup,
   type FollowupDraftLanguage,
   type FollowupDrafterInput,
   type FollowupPromptVariant,
 } from "./followupDrafter";
-import { AUTO_SEND_HARD_EXCLUDED } from "./autoSendGate";
-import { checkFollowupDraftCompliance } from "./followupDraftCompliance";
+import {
+  checkFollowupDraftCompliance,
+  type ComplianceViolation,
+} from "./followupDraftCompliance";
 
 const log = createChildLogger({ module: "followupDraftProducer" });
 
@@ -122,22 +125,92 @@ export function detectCustomerLanguage(
   return detectLanguage(source);
 }
 
+/**
+ * Sensitive gate for follow-ups: never draft a warm「還在考慮嗎」nudge while the
+ * customer's CURRENT state is a dispute. Deliberately NARROWER than
+ * AUTO_SEND_HARD_EXCLUDED: that set is about never AUTO-ANSWERING money/legal
+ * questions (quote / deposit / visa need Jeff's numbers), but a follow-up
+ * answers nothing — and quote_request is the very state this feature exists to
+ * follow up on (stale-QUOTED = they asked for a quote, we sent it). Only the
+ * conflict classes make the nudge tone itself wrong → human handles those
+ * (mirrors inquiryAgent alwaysEscalate: refund_request / complaint).
+ */
+export const FOLLOWUP_SENSITIVE_CLASSES: ReadonlySet<string> = new Set([
+  "refund_request",
+  "complaint",
+]);
+
+/**
+ * The customer's current state = the classification of their most recent
+ * CLASSIFIED inbound turn. rows[0] is, by stale-quoted definition, OUR
+ * outbound, and no outbound write site stamps classification (always null), so
+ * reading rows[0].classification made the sensitive gate dead. We scan
+ * newest-first for the first INBOUND row; backfilled rows (threadFiling files
+ * without an LLM pass) carry classification=null, so we walk past unclassified
+ * inbounds to the newest one that HAS a classification — an unclassified
+ * "here's my account number" follow-up must not hide the refund_request under
+ * it. Window = the rows the caller fetched (recent 20), so a long-resolved
+ * complaint naturally ages out of the window instead of skipping forever.
+ */
+export function pickLatestInboundClassification(
+  rowsNewestFirst: Array<Pick<InteractionDetailRow, "direction" | "classification">>,
+): string | null {
+  for (const r of rowsNewestFirst) {
+    if (r.direction !== "inbound") continue;
+    const c = r.classification?.trim();
+    if (c) return c;
+  }
+  return null;
+}
+
 /** Why this stale customer is NOT draftable (→ falls back to inbox reminder),
  * or null when a draft should be produced. */
 export function detectDraftSkip(input: {
   gmailThreadId: string | null;
-  lastClassification: string | null;
+  /** From pickLatestInboundClassification — the customer's latest classified
+   * inbound, NOT rows[0] (which is our own outbound, classification null). */
+  lastInboundClassification: string | null;
   conversationLen: number;
 }): DraftSkipReason | null {
   if (!input.gmailThreadId) return "no_thread"; // can't send → don't make a dead card
   if (
-    typeof input.lastClassification === "string" &&
-    AUTO_SEND_HARD_EXCLUDED.has(input.lastClassification)
+    typeof input.lastInboundClassification === "string" &&
+    FOLLOWUP_SENSITIVE_CLASSES.has(input.lastInboundClassification)
   ) {
-    return "sensitive"; // refund / complaint / quote / deposit / visa → human
+    return "sensitive"; // refund / complaint → human, never a warm nudge
   }
   if (input.conversationLen === 0) return "empty_conversation";
   return null;
+}
+
+/**
+ * Wash an LLM draft body BEFORE it is stored on the card (Finding: the one-click
+ * send chain — observationDraftCard → approveDraft → sendEscalationReply — sends
+ * the stored body verbatim, it never strips). stripMarkdownForEmail includes the
+ * em-dash normalization (Leslie case), so the card shows exactly the clean text
+ * that will be sent. `blocked` = em dash / markdown SURVIVED the wash
+ * (theoretically impossible) → caller must skip the draft and log.error.
+ * Remaining soft violations (你/您, emoji) are returned for the warn log only —
+ * Jeff reviews every draft. Pure → unit-tested; both A/B prompt arms and both
+ * producers (nightly scan + on-demand) go through this one function.
+ */
+export interface SanitizedFollowupDraft {
+  /** Cleaned, trimmed body. Empty string when the raw draft was empty. */
+  body: string;
+  /** True when em dash / markdown remain AFTER the wash → do not store. */
+  blocked: boolean;
+  /** All compliance violations found on the CLEANED body. */
+  violations: ComplianceViolation[];
+}
+
+export function sanitizeFollowupDraftBody(
+  raw: string | null | undefined,
+): SanitizedFollowupDraft {
+  const body = stripMarkdownForEmail(raw);
+  if (!body) return { body: "", blocked: false, violations: [] };
+  const { violations } = checkFollowupDraftCompliance(body);
+  const blocked = violations.some((v) => v === "em_dash" || v === "markdown");
+  return { body, blocked, violations };
 }
 
 /** The exact agentMessages insert. Pure so tests can run it through the REAL
@@ -273,7 +346,7 @@ export async function runFollowupDraftScan(
       const excerpt = buildConversationExcerpt(rows);
       const skip = detectDraftSkip({
         gmailThreadId,
-        lastClassification: rows[0]?.classification ?? null,
+        lastInboundClassification: pickLatestInboundClassification(rows),
         conversationLen: excerpt.length,
       });
       if (skip) {
@@ -289,20 +362,29 @@ export async function runFollowupDraftScan(
         promptVariant,
       };
       const draft = await draftFollowup(drafterInput);
-      const body = draft.body?.trim();
-      if (!body) {
+      // Wash BEFORE storing: the card must show exactly what the one-click send
+      // chain will send (that chain sends the stored body verbatim, no strip).
+      const cleaned = sanitizeFollowupDraftBody(draft.body);
+      if (!cleaned.body) {
         result.skipped.error++;
         continue;
       }
-
-      // Hard-rule guard (測 AI 回應): a draft that breaks the no-em-dash / 您 /
-      // plain-text rules is surfaced in logs so the eval catches drift. We don't
-      // block it (Jeff reviews every draft, and the send path strips markdown),
-      // but a clean model should never trip this.
-      const compliance = checkFollowupDraftCompliance(body);
-      if (!compliance.ok) {
+      if (cleaned.blocked) {
+        // em dash / markdown survived the wash — theoretically impossible; never
+        // land a dirty draft on a one-click-sendable card.
+        log.error(
+          { profileId: c.profileId, violations: cleaned.violations },
+          "[followupDraftProducer] draft still dirty after wash, not storing",
+        );
+        result.skipped.error++;
+        continue;
+      }
+      // Hard-rule guard (測 AI 回應): remaining soft violations (你/您, emoji)
+      // are surfaced in logs so the eval catches drift. Not blocked — Jeff
+      // reviews every draft before it can be sent.
+      if (cleaned.violations.length > 0) {
         log.warn(
-          { profileId: c.profileId, violations: compliance.violations },
+          { profileId: c.profileId, violations: cleaned.violations },
           "[followupDraftProducer] draft tripped hard-rule guard",
         );
       }
@@ -313,8 +395,9 @@ export async function runFollowupDraftScan(
           customerEmail: c.email,
           daysSince: c.daysSince,
           gmailThreadId: gmailThreadId as string, // non-null past detectDraftSkip
-          subject: draft.subject?.trim() || `跟進:${c.email}`,
-          draftBody: body,
+          // Subject rides the send too (sendReplyInThread subject) → same wash.
+          subject: stripMarkdownForEmail(draft.subject) || `跟進:${c.email}`,
+          draftBody: cleaned.body,
           promptVariant,
         }),
       );
