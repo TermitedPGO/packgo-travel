@@ -13,7 +13,52 @@ vi.mock("../db", () => ({ getDb: vi.fn().mockResolvedValue(null) }));
 vi.mock("./logger", () => ({
   createChildLogger: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() }),
 }));
+// Marker-object mocks so the spam-filter test can assert WHICH condition was
+// attached to WHICH query (same pattern as customerPreferenceExtractor.test.ts).
+vi.mock("drizzle-orm", () => ({
+  eq: vi.fn((a: any, b: any) => ({ kind: "eq", a, b })),
+  or: vi.fn((...args: any[]) => ({ kind: "or", args })),
+  and: vi.fn((...args: any[]) => ({ kind: "and", args })),
+  inArray: vi.fn((a: any, b: any) => ({ kind: "inArray", a, b })),
+  desc: vi.fn((c: any) => c),
+  sql: vi.fn((strings: TemplateStringsArray, ...vals: any[]) => ({
+    kind: "sql",
+    text: strings.join("?"),
+    vals,
+  })),
+}));
+vi.mock("../../drizzle/schema", () => ({
+  users: { id: "u.id", email: "u.email" },
+  customerProfiles: { id: "cp.id", userId: "cp.userId", email: "cp.email" },
+  customOrders: {
+    orderNumber: "co.orderNumber", title: "co.title", status: "co.status",
+    currency: "co.currency", quoteSentAt: "co.quoteSentAt",
+    collectionSentAt: "co.collectionSentAt", depositPaidAt: "co.depositPaidAt",
+    balancePaidAt: "co.balancePaidAt", confirmedAt: "co.confirmedAt",
+    customerProfileId: "co.customerProfileId", createdAt: "co.createdAt",
+  },
+  aiQuotes: {
+    quoteNumber: "aq.quoteNumber", status: "aq.status", createdAt: "aq.createdAt",
+    userId: "aq.userId", customerEmail: "aq.customerEmail",
+  },
+  invoices: {
+    invoiceNumber: "inv.invoiceNumber", status: "inv.status", sentAt: "inv.sentAt",
+    paidAt: "inv.paidAt", userId: "inv.userId", customerEmail: "inv.customerEmail",
+    createdAt: "inv.createdAt",
+  },
+  customerInteractions: {
+    customerProfileId: "ci.customerProfileId", direction: "ci.direction",
+    createdAt: "ci.createdAt", classification: "ci.classification",
+    spamVerdict: "ci.spamVerdict",
+  },
+  customerDocuments: {
+    customerProfileId: "cd.customerProfileId", uploadedBy: "cd.uploadedBy",
+    type: "cd.type", fileName: "cd.fileName", uploadedAt: "cd.uploadedAt",
+  },
+  bookings: { userId: "b.userId", bookingStatus: "b.bookingStatus" },
+}));
 
+import { getDb } from "../db";
 import {
   deriveActions,
   deriveDelivered,
@@ -231,5 +276,63 @@ describe("gatherCustomerFacts (IO)", () => {
   it("returns EMPTY_FACTS when the DB is unavailable (summary still renders)", async () => {
     expect(await gatherCustomerFacts({ profileId: 1 })).toEqual(EMPTY_FACTS);
     expect(await gatherCustomerFacts({ userId: 7 })).toEqual(EMPTY_FACTS);
+  });
+});
+
+describe("inbound counts exclude unrescued spam (ledger must match what Jeff sees)", () => {
+  /** Minimal fake db: records each query's target table + where clause, resolves
+   *  the profile lookup so the run reaches the interactions aggregation, and
+   *  returns aggRows for the customerInteractions groupBy query. */
+  function makeFakeDb(schema: any, aggRows: any[]) {
+    const captured: { table: any; where: any }[] = [];
+    const db = {
+      select: () => {
+        const rec: { table: any; where: any } = { table: null, where: null };
+        const chain: any = {
+          from(t: any) { rec.table = t; captured.push(rec); return chain; },
+          where(w: any) { rec.where = w; return chain; },
+          orderBy() { return chain; },
+          limit() {
+            return Promise.resolve(
+              rec.table === schema.customerProfiles ? [{ id: 11, email: null }] : [],
+            );
+          },
+          groupBy() {
+            return Promise.resolve(
+              rec.table === schema.customerInteractions ? aggRows : [],
+            );
+          },
+        };
+        return chain;
+      },
+    };
+    return { db, captured };
+  }
+
+  it("applies the same NULL-safe spam filter as the sister readers (customerChatContext / adminCustomers) to the direction aggregation", async () => {
+    const schema: any = await import("../../drizzle/schema");
+    const { db, captured } = makeFakeDb(schema, [
+      { direction: "inbound", cnt: 3, last: "2026-06-18T18:00:00.000Z" },
+    ]);
+    vi.mocked(getDb).mockResolvedValueOnce(db as any);
+
+    const result = await gatherCustomerFacts({ profileId: 11 });
+    // counts flow from the (filtered) SQL aggregation — if the fake db shape
+    // drifted, gather would swallow the error and return EMPTY_FACTS instead.
+    expect(result.inboundCount).toBe(3);
+
+    const agg = captured.find((c) => c.table === schema.customerInteractions);
+    expect(agg).toBeDefined();
+    // Must be inArray AND the spam exclusion — a bare inArray lets unrescued
+    // spam inflate inboundCount/inboundLastAt with mail Jeff never sees.
+    const where: any = agg!.where;
+    expect(where?.kind).toBe("and");
+    const spam = (where.args as any[]).find((a: any) => a?.kind === "sql");
+    expect(spam).toBeDefined();
+    expect(spam.text).toContain("NOT (COALESCE(");
+    expect(spam.text).toContain("= 'spam'");
+    expect(spam.text).toContain("!= 'rescued'");
+    expect(spam.vals).toContain(schema.customerInteractions.classification);
+    expect(spam.vals).toContain(schema.customerInteractions.spamVerdict);
   });
 });

@@ -444,7 +444,17 @@ export async function gatherCustomerFacts(scope: FactsScope): Promise<CustomerFa
           last: sql<string>`max(${customerInteractions.createdAt})`,
         })
         .from(customerInteractions)
-        .where(inArray(customerInteractions.customerProfileId, profileIds))
+        .where(
+          and(
+            inArray(customerInteractions.customerProfileId, profileIds),
+            // Exclude spam that was never rescued — Jeff never sees those mails
+            // (近期來信/歷史 filter them out), so the ledger's inboundCount /
+            // inboundLastAt must not be inflated by them either. Same NULL-safe
+            // condition as customerChatContext / adminCustomers: outbound rows
+            // have no classification → unaffected.
+            sql`NOT (COALESCE(${customerInteractions.classification}, '') = 'spam' AND COALESCE(${customerInteractions.spamVerdict}, '') != 'rescued')`,
+          ),
+        )
         .groupBy(customerInteractions.direction);
       for (const row of agg) {
         const n = Number(row.cnt) || 0;
