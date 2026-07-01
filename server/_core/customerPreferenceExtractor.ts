@@ -377,3 +377,110 @@ export async function backfillMissingPreferences(
   log.info({ scanned: rows.length, extracted }, "preference back-fill done");
   return { scanned: rows.length, extracted };
 }
+
+/**
+ * customer-projects — per-project (訂製/包團) 客人理解. On-the-fly, NO storage:
+ * gather the conversation FILED to THIS project (customerInteractions.customOrderId)
+ * and run the SAME anti-fabrication extraction, but for this ONE trip. Reuses
+ * EXTRACT_SYSTEM (the 不可編造 鐵律) + the whole-customer schema, so the per-trip
+ * understanding obeys the same「客人沒明講就不准寫」rule.
+ *
+ * Cost guard: returns null WITHOUT spending an LLM call when the project has no
+ * filed conversation yet (an empty / just-created project can never bill Opus).
+ * The caller (a tRPC query, quote-category only) caches the result client-side —
+ * Jeff 憲法「一人後台要簡單」: no per-order table, no cron, just compute-on-open
+ * for the travel-planning 訂製/包團 單 where trip-level understanding actually pays.
+ */
+export async function extractProjectUnderstanding(
+  customOrderId: number,
+): Promise<ExtractionResult | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  const { customerInteractions } = await import("../../drizzle/schema");
+  const { eq, and, desc, sql } = await import("drizzle-orm");
+
+  const interactions = await db
+    .select({
+      direction: customerInteractions.direction,
+      content: customerInteractions.content,
+      createdAt: customerInteractions.createdAt,
+    })
+    .from(customerInteractions)
+    .where(
+      and(
+        eq(customerInteractions.customOrderId, customOrderId),
+        // Same spam guard as runExtraction — never learn from unrescued spam.
+        sql`NOT (COALESCE(${customerInteractions.classification}, '') = 'spam' AND COALESCE(${customerInteractions.spamVerdict}, '') != 'rescued')`,
+      ),
+    )
+    .orderBy(desc(customerInteractions.createdAt))
+    .limit(20);
+
+  const messages = interactions
+    .map((i) => ({
+      role: (i.direction === "inbound" ? "customer" : "admin") as "customer" | "admin",
+      content: (i.content ?? "").slice(0, 3000),
+      at: (i.createdAt ?? undefined) as Date | undefined,
+    }))
+    .sort((a, b) => (a.at?.getTime() ?? 0) - (b.at?.getTime() ?? 0));
+
+  // Empty / unfiled project → nothing to understand, and crucially NO LLM spend.
+  if (messages.length === 0) return null;
+
+  const conversationText = messages
+    .map((m) => {
+      const label = m.role === "customer" ? "客人" : "Jeff";
+      const ts = m.at ? ` (${m.at.toISOString().slice(0, 10)})` : "";
+      return `${label}${ts}: ${m.content}`;
+    })
+    .join("\n\n");
+
+  const userPrompt = [
+    "（這是單一專案/行程的對話。請只針對「這一趟旅程」提取理解,不要混入客人其他訂單的事)",
+    "",
+    "【這個專案的對話】",
+    conversationText,
+    "",
+    "請提取客人對這一趟旅程的偏好、在意的點與重點。輸出 JSON。全部用繁體中文。",
+  ].join("\n");
+
+  try {
+    const result = await invokeLLM({
+      model: OPUS,
+      messages: [
+        { role: "system", content: EXTRACT_SYSTEM },
+        { role: "user", content: userPrompt },
+      ],
+      maxTokens: 2000,
+      outputSchema: {
+        name: "customer_preferences",
+        schema: {
+          type: "object",
+          properties: {
+            aiNotes: { type: "string" },
+            keyFacts: { type: "string" },
+            preferences: { type: "object" },
+          },
+          required: ["aiNotes", "keyFacts", "preferences"],
+        },
+      },
+    });
+
+    const text =
+      result.choices?.[0]?.message?.content ??
+      result.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments ??
+      "";
+    if (!text) return null;
+
+    const parsed: ExtractionResult = typeof text === "string" ? JSON.parse(text) : text;
+    return {
+      aiNotes: (parsed.aiNotes || "").slice(0, 5000),
+      keyFacts: (parsed.keyFacts || "").slice(0, 5000),
+      preferences: parsed.preferences ?? {},
+    };
+  } catch (err) {
+    log.error({ err, customOrderId }, "project understanding extraction failed");
+    return null;
+  }
+}

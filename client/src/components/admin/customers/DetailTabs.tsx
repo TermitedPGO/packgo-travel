@@ -187,6 +187,68 @@ function LearnedPreferencesSection({ customer: c }: { customer: AdaptedCustomer 
 }
 
 /**
+ * customer-projects — per-project 客人理解 for 報價/訂製/包團 (category='quote'). Reads
+ * the on-the-fly customerProjectUnderstanding query (no storage; computed from THIS
+ * trip's filed conversation — empty project → nothing, and no LLM spent). Mirrors
+ * LearnedPreferencesSection's look; 重新分析 re-runs the extraction. Non-quote and
+ * whole-customer views keep the shared LearnedPreferencesSection (the person's persona,
+ * which Jeff said stays shared — 機票 專案不需要 project 理解).
+ */
+function ProjectUnderstandingSection({ orderId }: { orderId: number }) {
+  const { t } = useLocale()
+  const q = trpc.admin.customerProjectUnderstanding.useQuery(
+    { orderId },
+    { staleTime: Infinity, refetchOnWindowFocus: false },
+  )
+  const d = q.data
+  const busy = q.isFetching
+  // Nothing filed to understand yet (and not mid-compute) → render nothing, same as
+  // the whole-customer section hides when empty.
+  if (!busy && (!d || (!d.aiNotes && !d.keyFacts))) return null
+  return (
+    <div className="rounded-xl bg-gray-50 border border-gray-200 p-4 space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="text-[11px] text-gray-400 font-medium flex items-center gap-1.5">
+          <Sparkles className="w-3 h-3" />
+          {t("admin.customers.learned.title")}
+          <span className="text-gray-300">· {t("admin.customers.summary.projectHeader")}</span>
+          {busy && (
+            <span className="text-gray-400 flex items-center gap-1">
+              · <Loader2 className="w-3 h-3 animate-spin" />
+              {t("admin.customers.learned.extracting")}
+            </span>
+          )}
+        </div>
+        <button
+          onClick={() => void q.refetch()}
+          disabled={busy}
+          className="text-[10px] font-medium text-gray-500 hover:text-gray-900 transition-colors flex items-center gap-1 rounded-lg px-1.5 py-0.5 hover:bg-gray-100 disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3 h-3 ${busy ? "animate-spin" : ""}`} />
+          {t("admin.customers.learned.refresh")}
+        </button>
+      </div>
+      {d?.aiNotes && (
+        <div className="text-[12px] text-gray-700 leading-relaxed">{d.aiNotes}</div>
+      )}
+      {d?.keyFacts && (
+        <div className="space-y-1 mt-1">
+          {d.keyFacts
+            .split("\n")
+            .filter((l) => l.trim())
+            .map((line, i) => (
+              <div key={i} className="text-[11.5px] text-gray-600 flex gap-1.5">
+                <span className="text-gray-400 flex-shrink-0">·</span>
+                <span>{line.replace(/^-\s*/, "")}</span>
+              </div>
+            ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
  * customer-projects (§5) — deterministic per-project facts card for the 概覽 tab.
  * Reads straight from the order row (no LLM, no fabrication). Shows 售價 (totalPrice)
  * + 已收 (depositPaidAmount+balancePaidAmount) + dates + doc count + notes. NEVER
@@ -395,8 +457,14 @@ export function OverviewTab({
         <SummaryRow label={t("admin.customers.summary.deliveredLabel")} value={aiDelivered} />
       </div>
 
-      {/* AI-learned preferences */}
-      <LearnedPreferencesSection customer={c} />
+      {/* AI-learned preferences — a 報價/訂製/包團 project shows THAT trip's
+          understanding (per-project); otherwise the shared person-level persona
+          (機票/簽證/一般 專案,或未選專案). Jeff: 機票不需要 project 理解,人物理解共用. */}
+      {projectOrder?.category === "quote" && activeProjectId != null ? (
+        <ProjectUnderstandingSection orderId={activeProjectId} />
+      ) : (
+        <LearnedPreferencesSection customer={c} />
+      )}
 
       {/* Follow-up context */}
       {lastMsg && (

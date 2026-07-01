@@ -1749,6 +1749,38 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
       return { aiNotes: null, keyFacts: null, preferences: null, extracting: true };
     }),
 
+  // customer-projects — per-project 客人理解 for 報價/訂製/包團 (category='quote').
+  // On-the-fly, NO storage (Jeff「一人後台要簡單」): compute the understanding for
+  // THIS trip from its filed conversation and return it directly; the client caches
+  // it (staleTime) so a re-open doesn't recompute. We re-check category='quote'
+  // here so a non-quote orderId can never spend an Opus call even if mis-asked, and
+  // extractProjectUnderstanding itself returns null (no LLM) when the project has no
+  // filed conversation yet.
+  customerProjectUnderstanding: adminProcedure
+    .input(z.object({ orderId: z.number().int().positive() }).strict())
+    .query(async ({ input }) => {
+      const drizzleDb = await db.getDb();
+      if (!drizzleDb) return { aiNotes: null, keyFacts: null, preferences: null };
+      const { customOrders } = await import("../../drizzle/schema");
+      const [order] = await drizzleDb
+        .select({ category: customOrders.category })
+        .from(customOrders)
+        .where(eq(customOrders.id, input.orderId))
+        .limit(1);
+      if (!order || order.category !== "quote") {
+        return { aiNotes: null, keyFacts: null, preferences: null };
+      }
+      const { extractProjectUnderstanding } = await import(
+        "../_core/customerPreferenceExtractor"
+      );
+      const r = await extractProjectUnderstanding(input.orderId);
+      return {
+        aiNotes: r?.aiNotes || null,
+        keyFacts: r?.keyFacts || null,
+        preferences: (r?.preferences ?? null) as Record<string, unknown> | null,
+      };
+    }),
+
   triggerPreferenceExtraction: adminProcedure
     .input(
       z.union([

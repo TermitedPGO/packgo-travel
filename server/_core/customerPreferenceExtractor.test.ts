@@ -23,7 +23,7 @@ vi.mock("./llm", () => ({ invokeLLM: mockInvokeLLM }));
 vi.mock("../db", () => ({ getDb: vi.fn().mockResolvedValue(mockDb) }));
 vi.mock("../../drizzle/schema", () => ({
   customerProfiles: { id: "id", aiNotes: "aiNotes", keyFacts: "keyFacts", preferences: "preferences", email: "email", userId: "userId" },
-  customerInteractions: { customerProfileId: "cpId", direction: "dir", content: "c", createdAt: "ca" },
+  customerInteractions: { customerProfileId: "cpId", direction: "dir", content: "c", createdAt: "ca", customOrderId: "coId", classification: "cls", spamVerdict: "sv" },
   inquiryMessages: { inquiryId: "iId", senderType: "st", message: "m", createdAt: "ca" },
   inquiries: { id: "id", customerEmail: "ce" },
 }));
@@ -34,12 +34,14 @@ vi.mock("drizzle-orm", () => ({
   inArray: vi.fn((...a: any[]) => a),
   isNull: vi.fn((c: any) => c),
   isNotNull: vi.fn((c: any) => c),
+  sql: vi.fn((...a: any[]) => a),
 }));
 
 import {
   extractCustomerPreferences,
   extractAfterReply,
   backfillMissingPreferences,
+  extractProjectUnderstanding,
 } from "./customerPreferenceExtractor";
 import { getDb } from "../db";
 
@@ -203,5 +205,56 @@ describe("backfillMissingPreferences (M2 back-fill)", () => {
       scanned: 0,
       extracted: 0,
     });
+  });
+});
+
+describe("extractProjectUnderstanding — per-project (訂製/包團), on-the-fly, no storage", () => {
+  it("spends NO LLM call on an empty / unfiled project (cost guard)", async () => {
+    selectChain.limit.mockResolvedValueOnce([]); // no conversation filed to this order
+    const r = await extractProjectUnderstanding(7);
+    expect(r).toBeNull();
+    expect(mockInvokeLLM).not.toHaveBeenCalled();
+  });
+
+  it("extracts THIS trip's understanding from filed conversation, and never stores it", async () => {
+    selectChain.limit.mockResolvedValueOnce([
+      { direction: "inbound", content: "想帶爸媽去日本賞櫻,步調要慢一點", createdAt: new Date("2026-03-01") },
+    ]);
+    mockInvokeLLM.mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              aiNotes: "似乎希望慢步調,顧慮長輩體力",
+              keyFacts: "- 帶爸媽同行\n- 想賞櫻",
+              preferences: { pace: "慢步調" },
+            }),
+          },
+        },
+      ],
+    });
+
+    const r = await extractProjectUnderstanding(7);
+
+    expect(mockInvokeLLM).toHaveBeenCalledOnce();
+    expect(r).not.toBeNull();
+    expect(r!.aiNotes).toContain("慢步調");
+    expect(r!.keyFacts).toContain("賞櫻");
+    // on-the-fly: NEVER writes to any table (no per-order storage).
+    expect(mockDb.update).not.toHaveBeenCalled();
+    // still carries the anti-fabrication 鐵律 as a role:"system" message.
+    const params = mockInvokeLLM.mock.calls[0][0];
+    expect(params.model).toContain("opus");
+    expect(params.messages[0].role).toBe("system");
+    expect(params.messages[0].content).toContain("絕對鐵律");
+  });
+
+  it("returns null (no crash) when the LLM throws", async () => {
+    selectChain.limit.mockResolvedValueOnce([
+      { direction: "inbound", content: "hi", createdAt: new Date() },
+    ]);
+    mockInvokeLLM.mockRejectedValueOnce(new Error("API timeout"));
+    expect(await extractProjectUnderstanding(7)).toBeNull();
+    expect(mockDb.update).not.toHaveBeenCalled();
   });
 });
