@@ -2781,10 +2781,17 @@ export const customerDocuments = mysqlTable("customerDocuments", {
   isCurrent: boolean("isCurrent").default(true).notNull(),
   encryptedFields: json("encryptedFields"), // {passportNumber, dob, etc} AES-256-GCM
   uploadedBy: varchar("uploadedBy", { length: 50 }),
+  // customer-projects (0106) — which customOrder (專案) this document is filed
+  // under. NULL = 「未分類」(customer-level doc: passport, general upload). A file
+  // dropped in a project-scoped chat lands on that order; the 文件 tab filters by
+  // this when a project chip is active. Soft ref (no FK), mirrors
+  // customerInteractions.customOrderId (0104).
+  customOrderId: int("customOrderId"),
   uploadedAt: timestamp("uploadedAt").defaultNow().notNull(),
 }, (table) => ({
   customerTypeIdx: index("idx_customer_type").on(table.customerProfileId, table.type, table.isCurrent),
   expiryIdx: index("idx_expiry").on(table.expiresAt, table.isCurrent),
+  orderIdx: index("idx_doc_order").on(table.customOrderId, table.uploadedAt),
 }));
 
 export type CustomerDocument = typeof customerDocuments.$inferSelect;
