@@ -22,6 +22,33 @@ export type CustomerChatScope =
   | { kind: "user"; customerUserId: number }
   | { kind: "guest"; customerProfileId: number };
 
+/** One write-tool outcome (mirrors opsAgentStream.WriteToolResult) — persisted
+ * so the chat history re-renders the deterministic chips AND future debugging
+ * has ground truth of what the agent actually executed (2026-07-01 事故). */
+export interface PersistedToolResult {
+  name: string;
+  ok: boolean;
+  message: string;
+}
+
+/**
+ * Build the context JSON persisted on the agent row. `tools` (write-tool
+ * outcomes) is included only when at least one write ran, so pure-read turns
+ * keep the lean shape they always had. Pure → unit-tested without a DB.
+ */
+export function opsTurnContextJson(
+  suggestedActions: unknown[],
+  cards: unknown[],
+  tools: PersistedToolResult[] = [],
+): string {
+  return JSON.stringify({
+    suggestedActions,
+    cards,
+    streamed: true,
+    ...(tools.length > 0 ? { tools } : {}),
+  });
+}
+
 export interface CustomerChatTurnRow {
   customerUserId?: number;
   customerProfileId?: number;

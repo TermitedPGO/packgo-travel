@@ -156,6 +156,61 @@ describe("set_follow_up_date — AI sets the cockpit follow-up date", () => {
       expect(resolveFollowUpDateArg({}).ok).toBe(false);
       expect(resolveFollowUpDateArg(null).ok).toBe(false);
     });
+
+    describe("M/D shorthand (2026-07-01 事故 — model 傳「7/21」被拒後吞掉失敗)", () => {
+      // LA noon on 2026-07-01 — the incident day.
+      const now = new Date("2026-07-01T12:00:00-07:00");
+
+      it('"7/21" → 2026-07-21 (該月日還沒過 → 今年)', () => {
+        expect(resolveFollowUpDateArg({ followUpDate: "7/21" }, now)).toEqual({
+          ok: true,
+          value: "2026-07-21",
+        });
+      });
+      it('"MM/DD" and "M-D" spellings normalize the same way', () => {
+        expect(resolveFollowUpDateArg({ followUpDate: "07/21" }, now)).toEqual({
+          ok: true,
+          value: "2026-07-21",
+        });
+        expect(resolveFollowUpDateArg({ followUpDate: "7-21" }, now)).toEqual({
+          ok: true,
+          value: "2026-07-21",
+        });
+      });
+      it('"1/5" → 2027-01-05 (今年已過 → 明年)', () => {
+        expect(resolveFollowUpDateArg({ followUpDate: "1/5" }, now)).toEqual({
+          ok: true,
+          value: "2027-01-05",
+        });
+      });
+      it("today itself counts as this year", () => {
+        expect(resolveFollowUpDateArg({ followUpDate: "7/1" }, now)).toEqual({
+          ok: true,
+          value: "2026-07-01",
+        });
+      });
+      it('"2/30" still rejected after year inference (非法日照樣拒)', () => {
+        const r = resolveFollowUpDateArg({ followUpDate: "2/30" }, now);
+        expect(r.ok).toBe(false);
+      });
+      it("an impossible month is rejected", () => {
+        expect(resolveFollowUpDateArg({ followUpDate: "13/5" }, now).ok).toBe(false);
+      });
+      it("year inference uses the LA calendar day, not UTC", () => {
+        // 02:00 UTC on 7/2 is still 19:00 on 7/1 in LA → "7/1" is today, this year.
+        const utcAhead = new Date("2026-07-02T02:00:00Z");
+        expect(resolveFollowUpDateArg({ followUpDate: "7/1" }, utcAhead)).toEqual({
+          ok: true,
+          value: "2026-07-01",
+        });
+      });
+      it("full YYYY-MM-DD input is untouched by the shorthand path", () => {
+        expect(resolveFollowUpDateArg({ followUpDate: "2026-07-21" }, now)).toEqual({
+          ok: true,
+          value: "2026-07-21",
+        });
+      });
+    });
   });
 });
 

@@ -45,14 +45,50 @@ function getClient(): Anthropic {
   return _client;
 }
 
+/** Outcome of one WRITE tool execution — the deterministic echo (2026-07-01
+ * 事故: model 吞掉 set_follow_up_date 失敗宣稱已設好). `message` is carried
+ * VERBATIM from the tool's own message/error field — 純搬運不生成 — so the chip
+ * Jeff sees is ground truth, not the model's claim. */
+export interface WriteToolResult {
+  name: string;
+  ok: boolean;
+  message: string;
+}
+
+/**
+ * Parse executeWriteTool's JSON-string result into the deterministic echo.
+ * ok = the tool itself said `success: true`; message = its `message` (success)
+ * or `error` (failure) field, untouched. Pure so it's unit-tested without an
+ * LLM. A non-JSON result (defensive; executeWriteTool always stringifies) is
+ * reported as a failure carrying the raw text.
+ */
+export function parseWriteToolResult(name: string, resultJson: string): WriteToolResult {
+  try {
+    const parsed = JSON.parse(resultJson);
+    const ok = parsed?.success === true && parsed?.error === undefined;
+    const message = ok
+      ? String(parsed?.message ?? "")
+      : String(parsed?.error ?? parsed?.message ?? "");
+    return { name, ok, message };
+  } catch {
+    return { name, ok: false, message: resultJson.slice(0, 200) };
+  }
+}
+
 export interface StreamEvent {
-  type: "token" | "status" | "round_thinking" | "done" | "error";
+  type: "token" | "status" | "round_thinking" | "tool_result" | "done" | "error";
   text?: string;
   /** read tools this round is about to run (for the dim thinking step). */
   tools?: string[];
+  /** tool_result — deterministic write-tool echo (name/ok/message). */
+  name?: string;
+  ok?: boolean;
+  message?: string;
   finalAnswer?: string;
   suggestedActions?: any[];
   cards?: any[];
+  /** done — every write-tool outcome of the turn, for persistence (context.tools). */
+  toolResults?: WriteToolResult[];
   error?: string;
 }
 
@@ -193,6 +229,7 @@ export async function* runOpsAgentStream(
       "【財務鐵則】每次回答財務問題 (淨利、這個月狀況),如果 get_finance_summary 回傳的 missingReceiptCount > 0,一定要主動提醒 Jeff:「有 N 筆支出還沒附 receipt,要補一下」,因為他需要收據報稅。\n" +
       "【最重要】查完工具後,你一定要用**文字**把答案講給 Jeff 聽 (例:問淨利就講「這個月淨利 $X」)。**絕對不可以**只丟一個 suggest_action 動作就當作回答 — 動作只是「答完之後」的額外建議。沒有文字回答 = 失敗。純資訊問題 (幾團、淨利、哪個最多) 通常根本不需要附動作,直接講答案就好。suggest_action 只在 Jeff 明顯需要做一件寫入的事 (寄信、退款、分類帳本) 時才用,而且永遠是在文字答案之後。" +
       "\n【新增客人】Jeff 說「新增客人」「加一個客人」或拖放了客人資訊檔案時,從對話或附件中提取姓名 + email 或手機,呼叫 create_customer。建好後告訴 Jeff 已新增。" +
+      "\n【寫入誠實鐵律 — 只有工具說 success 才算做了】寫入類動作(改跟進日、改備註、建單、改單、改訂單狀態、收信、新增客人)只有「這一輪工具真的回傳 success」才可以說已完成。工具回傳 error、或你根本沒呼叫工具,就必須照實告訴 Jeff 沒做成跟失敗原因,絕對不准宣稱已完成或含糊帶過。畫面上每個寫入都會顯示工具的真實結果,你嘴上說做了但沒有 chip,Jeff 一眼就看穿。" +
       (draftProfileId != null
         ? "\n【要回信 / 跟進這位客人 — 直接備好草稿】當 Jeff 叫你回信 / 跟進 / 幫忙寫信給「目前這位客人」,呼叫 draft_followup 把專業跟進信草稿備好(它會出現在客戶頁待審草稿區,看過一鍵就能寄)。呼叫後只要用一兩句話跟 Jeff 說重點(誰、卡在哪、幾天沒回),不要自己把整封信長篇寫在聊天裡。" +
           "\n【說了就做 — 寫入工具】你有 update_customer_note 和 update_booking_status 兩個寫入工具。Jeff 說「備註加上…」「標記已付款」「這筆確認了」時,直接呼叫對應工具執行,不用再問確認。但碰錢的變更(退款、調價)和寄信給客人的,仍然走 suggest_action 或 draft_followup 讓 Jeff 審核。update_customer_note 改的是 Jeff 私人備忘(客人看不到)。update_booking_status 要先用 search_bookings 拿到 bookingId。" +
@@ -220,6 +257,7 @@ export async function* runOpsAgentStream(
         : [...READ_TOOLS, CREATE_CUSTOMER_TOOL, SUGGEST_ACTION_TOOL];
     const suggestedActions: any[] = [];
     const cards: any[] = [];
+    const writeToolResults: WriteToolResult[] = [];
     let finalAnswer = "";
 
     for (let round = 0; round < MAX_ROUNDS; round++) {
@@ -312,6 +350,12 @@ export async function* runOpsAgentStream(
             draftProfileId,
             adminUserId,
           );
+          // Deterministic echo (2026-07-01 事故修法): every WRITE tool's real
+          // outcome is emitted as its own SSE event AND kept for persistence,
+          // so「做沒做」看 chip,不看 model 嘴上怎麼說。message 純搬運工具回傳。
+          const echo = parseWriteToolResult(block.name, result);
+          writeToolResults.push(echo);
+          yield { type: "tool_result", name: echo.name, ok: echo.ok, message: echo.message };
           toolResults.push({
             type: "tool_result",
             tool_use_id: block.id,
@@ -376,7 +420,7 @@ export async function* runOpsAgentStream(
     // even when Opus ignores the prompt's no-markdown rule).
     finalAnswer = cleanChatAnswerKeepMarkdown(finalAnswer);
 
-    yield { type: "done", finalAnswer, suggestedActions, cards };
+    yield { type: "done", finalAnswer, suggestedActions, cards, toolResults: writeToolResults };
   } catch (err) {
     const message = (err as Error).message ?? "Unknown error";
     log.error({ err }, "[opsAgentStream] stream failed");

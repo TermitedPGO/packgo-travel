@@ -3364,6 +3364,11 @@ export const zhTW = {
           update_booking_status: '更新訂單狀態',
           get_customer_documents: '查看證件狀態',
           get_payment_history: '查看付款紀錄',
+          set_follow_up_date: '設定跟進日',
+          create_custom_order: '建立專案',
+          update_custom_order: '更新專案',
+          collect_customer_threads: '收進郵件往來',
+          create_customer: '新增客人',
         },
         // 後端 error 事件沒帶訊息時的通用錯誤氣泡。
         errorFallback: '出錯了,請再試一次。',

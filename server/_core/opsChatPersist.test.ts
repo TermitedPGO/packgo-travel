@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { shouldPersistOpsTurn, customerChatCompletionRows } from "./opsChatPersist";
+import {
+  shouldPersistOpsTurn,
+  customerChatCompletionRows,
+  opsTurnContextJson,
+} from "./opsChatPersist";
 
 describe("opsChatPersist — orphan-free ops chat persistence", () => {
   describe("shouldPersistOpsTurn", () => {
@@ -73,6 +77,39 @@ describe("opsChatPersist — orphan-free ops chat persistence", () => {
 
     it("an interrupted guest turn also persists nothing", () => {
       expect(customerChatCompletionRows(scope, 3, "q", "", false, "{}")).toEqual([]);
+    });
+  });
+
+  describe("opsTurnContextJson — write-tool ground truth persisted (2026-07-01 事故)", () => {
+    it("includes tools when a write ran, verbatim", () => {
+      const ctx = JSON.parse(
+        opsTurnContextJson([], [], [
+          { name: "set_follow_up_date", ok: true, message: "跟進日設為 2026-07-21" },
+        ]),
+      );
+      expect(ctx.tools).toEqual([
+        { name: "set_follow_up_date", ok: true, message: "跟進日設為 2026-07-21" },
+      ]);
+      expect(ctx.streamed).toBe(true);
+    });
+
+    it("pure-read turns keep the lean legacy shape (no tools key)", () => {
+      const ctx = JSON.parse(opsTurnContextJson([{ actionType: "x" }], [{ type: "y" }]));
+      expect(ctx).toEqual({
+        suggestedActions: [{ actionType: "x" }],
+        cards: [{ type: "y" }],
+        streamed: true,
+      });
+      expect(ctx).not.toHaveProperty("tools");
+    });
+
+    it("a FAILED write is persisted too — the debug ground truth of the incident", () => {
+      const ctx = JSON.parse(
+        opsTurnContextJson([], [], [
+          { name: "set_follow_up_date", ok: false, message: "不是有效日期:「7/21」" },
+        ]),
+      );
+      expect(ctx.tools[0].ok).toBe(false);
     });
   });
 });

@@ -9,6 +9,7 @@ import {
   reduceChatEvent,
   parseSseChunk,
   humanizeToolName,
+  toolResultsFromContext,
   TOOL_LABEL_KEYS,
   CHAT_ERROR_FALLBACK_KEY,
   type ChatTurn,
@@ -109,6 +110,104 @@ describe("reduceChatEvent", () => {
     const t = run([{ type: "token", text: "a" }, { type: "status", text: "查詢中" }]);
     expect(t.live).toBe("a");
     expect(t.steps).toEqual([]);
+  });
+
+  // 2026-07-01 跟進日事故: the model claimed「跟進日已設在 7/21」while the write
+  // never landed. tool_result is the deterministic echo — 做沒做看 chip。
+  describe("tool_result — write-tool ground-truth chips", () => {
+    it("appends a chip without touching live / answer / steps", () => {
+      const t = run([
+        { type: "token", text: "我設一下" },
+        { type: "tool_result", name: "set_follow_up_date", ok: true, message: "跟進日設為 2026-07-21" },
+      ]);
+      expect(t.toolResults).toEqual([
+        { name: "set_follow_up_date", ok: true, message: "跟進日設為 2026-07-21" },
+      ]);
+      expect(t.live).toBe("我設一下");
+      expect(t.steps).toEqual([]);
+    });
+
+    it("a failed write keeps ok:false and the server error verbatim", () => {
+      const t = run([
+        {
+          type: "tool_result",
+          name: "set_follow_up_date",
+          ok: false,
+          message: "日期格式要 YYYY-MM-DD 或 M/D 簡寫,收到「下週二」",
+        },
+      ]);
+      expect(t.toolResults[0].ok).toBe(false);
+      expect(t.toolResults[0].message).toContain("日期格式");
+    });
+
+    it("the incident turn: chips survive done — the AI's claim never becomes a chip", () => {
+      const t = run([
+        { type: "tool_result", name: "set_follow_up_date", ok: false, message: "不是有效日期" },
+        { type: "token", text: "跟進日已設在 7/21(週二)。" }, // the model's false claim
+        { type: "done", finalAnswer: "跟進日已設在 7/21(週二)。" },
+      ]);
+      // The chip shows the FAILURE regardless of what the answer text claims.
+      expect(t.toolResults).toEqual([
+        { name: "set_follow_up_date", ok: false, message: "不是有效日期" },
+      ]);
+      expect(t.answer).toContain("已設在");
+    });
+
+    it("multiple writes → one chip each, in execution order", () => {
+      const t = run([
+        { type: "tool_result", name: "create_custom_order", ok: true, message: "已建立專案「A」(PG-1)" },
+        { type: "tool_result", name: "update_customer_note", ok: true, message: "備註已更新" },
+      ]);
+      expect(t.toolResults.map((r) => r.name)).toEqual([
+        "create_custom_order",
+        "update_customer_note",
+      ]);
+    });
+
+    it("a pure-read turn keeps toolResults empty (沒 chip = 沒寫入)", () => {
+      const t = run([
+        { type: "token", text: "中國有 5 團。" },
+        { type: "done", finalAnswer: "中國有 5 團。" },
+      ]);
+      expect(t.toolResults).toEqual([]);
+    });
+
+    it("missing fields coerce safely (name/message '' , ok false)", () => {
+      const t = run([{ type: "tool_result" }]);
+      expect(t.toolResults).toEqual([{ name: "", ok: false, message: "" }]);
+    });
+  });
+});
+
+describe("toolResultsFromContext — history reload re-renders the same chips", () => {
+  it("reads context.tools back from a persisted agent row", () => {
+    const context = JSON.stringify({
+      suggestedActions: [],
+      cards: [],
+      streamed: true,
+      tools: [{ name: "set_follow_up_date", ok: true, message: "跟進日設為 2026-07-21" }],
+    });
+    expect(toolResultsFromContext(context)).toEqual([
+      { name: "set_follow_up_date", ok: true, message: "跟進日設為 2026-07-21" },
+    ]);
+  });
+
+  it("legacy rows (no tools field) and null/malformed context → []", () => {
+    expect(toolResultsFromContext(JSON.stringify({ suggestedActions: [], cards: [] }))).toEqual([]);
+    expect(toolResultsFromContext(null)).toEqual([]);
+    expect(toolResultsFromContext(undefined)).toEqual([]);
+    expect(toolResultsFromContext("not json")).toEqual([]);
+    expect(toolResultsFromContext(JSON.stringify({ tools: "nope" }))).toEqual([]);
+  });
+
+  it("drops non-object entries and coerces loose fields", () => {
+    const context = JSON.stringify({
+      tools: [null, "x", { name: 1, ok: "yes", message: 2 }, { name: "a", ok: true, message: "b" }],
+    });
+    expect(toolResultsFromContext(context)).toEqual([
+      { name: "", ok: false, message: "" },
+      { name: "a", ok: true, message: "b" },
+    ]);
   });
 });
 

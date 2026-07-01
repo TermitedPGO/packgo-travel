@@ -3398,6 +3398,11 @@ export const en = {
           update_booking_status: 'Updating booking status',
           get_customer_documents: 'Checking documents',
           get_payment_history: 'Checking payment history',
+          set_follow_up_date: 'Setting follow-up date',
+          create_custom_order: 'Creating project',
+          update_custom_order: 'Updating project',
+          collect_customer_threads: 'Collecting email threads',
+          create_customer: 'Adding customer',
         },
         // Generic error bubble when the backend error event carried no message.
         errorFallback: 'Something went wrong, please try again.',

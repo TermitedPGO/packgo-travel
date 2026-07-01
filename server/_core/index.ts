@@ -817,6 +817,9 @@ async function startServer() {
       let finalAnswer = "";
       let suggestedActions: any[] = [];
       let cards: any[] = [];
+      // Deterministic write-tool echoes (2026-07-01 事故) — forwarded live as
+      // SSE `tool_result` events AND persisted in the turn's context.tools.
+      let toolResults: { name: string; ok: boolean; message: string }[] = [];
       const startedAt = Date.now();
       let firstTokenLogged = false;
       try {
@@ -839,10 +842,15 @@ async function startServer() {
             // A "thinking out loud" round + its tool calls — the frontend
             // snapshots it as a dim step so thinking never jams into the answer.
             send({ type: "round_thinking", text: event.text, tools: event.tools });
+          } else if (event.type === "tool_result") {
+            // A WRITE tool just ran — forward its REAL outcome so the UI shows
+            // a deterministic chip (做沒做看 chip,不看 model 嘴上怎麼說).
+            send({ type: "tool_result", name: event.name, ok: event.ok, message: event.message });
           } else if (event.type === "done") {
             finalAnswer = event.finalAnswer ?? "";
             suggestedActions = event.suggestedActions ?? [];
             cards = event.cards ?? [];
+            toolResults = event.toolResults ?? [];
             send({ type: "done", finalAnswer, suggestedActions, cards });
             logger.info(
               { ms: Date.now() - startedAt, len: finalAnswer.length },
@@ -871,8 +879,10 @@ async function startServer() {
       // id-desc tiebreak so a same-second createdAt keeps jeff-before-agent.
       // Global #ops keeps its early question echo (its UI renders the question
       // only from the DB) and only appends the answer below.
-      const turnCtx = JSON.stringify({ suggestedActions, cards, streamed: true });
-      const { customerChatCompletionRows } = await import("./opsChatPersist");
+      const { customerChatCompletionRows, opsTurnContextJson } = await import("./opsChatPersist");
+      // context.tools = the write-tool ground truth of this turn (chips re-render
+      // from it on history reload; also the debug trail for「說做了但沒做」).
+      const turnCtx = opsTurnContextJson(suggestedActions, cards, toolResults);
       if (db && customerId !== null) {
         const rows = customerChatCompletionRows(
           { kind: "user", customerUserId: customerId },

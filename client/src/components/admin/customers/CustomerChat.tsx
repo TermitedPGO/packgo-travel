@@ -21,6 +21,7 @@ import {
   reduceChatEvent,
   parseSseChunk,
   humanizeToolName,
+  toolResultsFromContext,
   CHAT_ERROR_FALLBACK_KEY,
   type ChatTurn,
   type ChatStep,
@@ -229,7 +230,19 @@ export default function CustomerChat({
     const history: ChatMsg[] = chatMessages.map((m) =>
       m.senderRole === "jeff"
         ? { role: "user" as const, text: m.body }
-        : { role: "ai" as const, turn: { steps: [], live: "", answer: m.body, error: null } },
+        : {
+            role: "ai" as const,
+            turn: {
+              steps: [],
+              live: "",
+              answer: m.body,
+              // Re-render the write-tool ground-truth chips from the persisted
+              // context.tools (2026-07-01 事故) — history shows the same chips
+              // the live stream did.
+              toolResults: toolResultsFromContext(m.context),
+              error: null,
+            },
+          },
     )
     setMessages(history)
   }, [customer?.id, customer?.kind, chatMessages, busy, messages.length])
@@ -507,6 +520,34 @@ export default function CustomerChat({
                 }
                 return null
               })()}
+
+              {/* Write-tool ground truth (2026-07-01 事故修法): one chip per WRITE
+                  tool the agent actually executed. The text is the tool's own
+                  message/error verbatim (server 動態資料 — i18n 硬編碼規則的動態
+                  內容例外);沒 chip = 沒做,AI 嘴上說什麼不算。 */}
+              {m.turn.toolResults.length > 0 && (
+                <div className="flex flex-wrap gap-1 pt-0.5">
+                  {m.turn.toolResults.map((r, j) =>
+                    r.ok ? (
+                      <span
+                        key={j}
+                        className="inline-flex items-center gap-1 text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md"
+                      >
+                        <Check className="w-2.5 h-2.5 flex-shrink-0" />
+                        {r.message || humanizeToolName(r.name, t)}
+                      </span>
+                    ) : (
+                      <span
+                        key={j}
+                        className="inline-flex items-center gap-1 text-[10px] bg-red-50 text-red-700 px-2 py-0.5 rounded-md"
+                      >
+                        <X className="w-2.5 h-2.5 flex-shrink-0" />
+                        {r.message || humanizeToolName(r.name, t)}
+                      </span>
+                    ),
+                  )}
+                </div>
+              )}
 
               {m.turn.error && (
                 <div className="text-[12px] text-gray-700 bg-gray-100 rounded-xl px-3 py-2">

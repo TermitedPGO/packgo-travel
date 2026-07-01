@@ -316,7 +316,10 @@ export const WRITE_TOOLS: Anthropic.Tool[] = [
       properties: {
         followUpDate: {
           type: "string",
-          description: "跟進日 YYYY-MM-DD(從【今天日期】把『下週三/三天後/月底』換算成絕對日期)。清除時免填。",
+          description:
+            "跟進日。首選 YYYY-MM-DD(從【今天日期】把『下週三/三天後/月底』換算成絕對日期);" +
+            "也接受 M/D、MM/DD、M-D 簡寫(例「7/21」),年份會以洛杉磯的今天自動推:該月日還沒過(或就是今天)算今年,已過算明年。" +
+            "非法日(例 2/30)會被拒。清除時免填。",
         },
         clear: { type: "boolean", description: "true = 清除這位客人的跟進日" },
       },
@@ -1114,25 +1117,64 @@ async function runTool(name: string, input: any): Promise<unknown> {
 
 // ── Write tool executor ───────────────────────────────────────────────────
 
+/** Today's calendar date in America/Los_Angeles as "YYYY-MM-DD" (en-CA formats
+ *  ISO-style). Jeff operates on LA time, so「7/21 還沒過」is judged in LA, not
+ *  UTC — a late-evening LA chat must not roll the shorthand into next year. */
+function laToday(now: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Los_Angeles",
+  }).format(now);
+}
+
+/** Validate a strict YYYY-MM-DD string is a REAL calendar day (2026-02-30 is
+ *  rejected by the ISO round-trip). Returns the normalized string or null. */
+function realCalendarDay(s: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const d = new Date(`${s}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s) return null;
+  return s;
+}
+
 /**
  * Pure validator for set_follow_up_date input. `clear:true` → null (clear);
- * otherwise `followUpDate` must be a REAL YYYY-MM-DD calendar day (rejects e.g.
- * 2026-02-30). Returned errors are fed back to the model as a tool_result so it
- * can correct itself (e.g. recompute the date) without a hard failure. Pure so
- * the date guard is unit-tested without a DB (local has no DATABASE_URL).
+ * otherwise `followUpDate` must be a REAL calendar day (rejects e.g.
+ * 2026-02-30). Accepted formats (事故 2026-07-01: model 傳「7/21」被拒,然後
+ * 吞掉失敗宣稱已設好 — 簡寫直接收下,降低工具失敗率):
+ *   - "YYYY-MM-DD"                         → as-is
+ *   - "M/D" / "MM/DD" / "M-D" / "MM-DD"    → year inferred from TODAY in
+ *     America/Los_Angeles: that month/day still ahead (or today) → this year,
+ *     already past → next year.
+ * Returned errors are fed back to the model as a tool_result so it can correct
+ * itself (e.g. recompute the date) without a hard failure. Pure (clock injected
+ * via `now`) so the date guard is unit-tested without a DB.
  */
 export function resolveFollowUpDateArg(
   input: { followUpDate?: unknown; clear?: unknown } | null | undefined,
+  now: Date = new Date(),
 ): { ok: true; value: string | null } | { ok: false; error: string } {
   if (input?.clear === true) return { ok: true, value: null };
   const raw = typeof input?.followUpDate === "string" ? input.followUpDate.trim() : "";
-  if (!raw) return { ok: false, error: "需要 followUpDate(YYYY-MM-DD),或傳 clear=true 清除" };
+  if (!raw) return { ok: false, error: "需要 followUpDate(YYYY-MM-DD 或 M/D),或傳 clear=true 清除" };
+
+  // Shorthand "M/D" / "MM/DD" / "M-D" — infer the year from LA-today.
+  const short = raw.match(/^(\d{1,2})[/-](\d{1,2})$/);
+  if (short) {
+    const m = Number(short[1]);
+    const d = Number(short[2]);
+    const [ty, tm, td] = laToday(now).split("-").map(Number);
+    const alreadyPast = m < tm || (m === tm && d < td);
+    const year = alreadyPast ? ty + 1 : ty;
+    const candidate = `${year}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const valid = realCalendarDay(candidate);
+    if (!valid) return { ok: false, error: `不是有效日期:「${raw}」(換算成 ${candidate})` };
+    return { ok: true, value: valid };
+  }
+
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw))
-    return { ok: false, error: `日期格式要 YYYY-MM-DD,收到「${raw}」` };
-  const d = new Date(`${raw}T00:00:00Z`);
-  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== raw)
-    return { ok: false, error: `不是有效日期:${raw}` };
-  return { ok: true, value: raw };
+    return { ok: false, error: `日期格式要 YYYY-MM-DD 或 M/D 簡寫,收到「${raw}」` };
+  const valid = realCalendarDay(raw);
+  if (!valid) return { ok: false, error: `不是有效日期:${raw}` };
+  return { ok: true, value: valid };
 }
 
 /** The four project categories a customOrder can carry (mirrors the tRPC
