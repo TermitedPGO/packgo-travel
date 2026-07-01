@@ -3382,6 +3382,19 @@ export const zhTW = {
         projectHeader: '本專案',
         overallCaption: '以下為整體摘要(跨所有專案)',
         docsCount: '文件 {n} 份',
+        projAction: {
+          quoteSent: '寄了報價',
+          collectionSent: '寄了付款連結',
+          depositPaid: '收了訂金',
+          balancePaid: '收了尾款',
+          confirmed: '出了確認書',
+        },
+        projDelivered: {
+          quote: '報價',
+          confirm: '確認書',
+        },
+        projActionsEmpty: '這個專案還沒有對外動作',
+        projDeliveredEmpty: '這個專案還沒有交付文件',
       },
       learned: {
         title: 'AI 客人理解',

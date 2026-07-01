@@ -13,6 +13,11 @@ import type { AdaptedCustomer, ChecklistItem, TimelineEntry, ChatMessage, Projec
 import CustomOrderSheet from "./CustomOrderSheet"
 import { toSelection, fmtMoney, shortDate } from "./customOrderHelpers"
 import { stripQuotedReply } from "./conversationText"
+import {
+  deriveProjectActions,
+  deriveProjectDelivered,
+  projectDeliveredDocNames,
+} from "./projectSummary"
 
 const CHECKLIST_ICON: Record<ChecklistItem["s"], React.ReactNode> = {
   done: <CheckCircle2 className="w-3.5 h-3.5 text-gray-900" />,
@@ -54,6 +59,12 @@ function relativeUpdated(
 function formatMarginPct(p: number): string {
   const v = p * 100
   return `${Number.isInteger(v) ? v : Number(v.toFixed(1))}%`
+}
+
+/** M/D in the viewer's local clock (Jeff = Pacific), matching the chat-row dates
+ *  elsewhere in this tab. Accepts a Date or ISO string (tRPC may serialize either). */
+function md(d: string | Date): string {
+  return new Date(d).toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" })
 }
 
 /**
@@ -307,30 +318,60 @@ export function OverviewTab({
 
   const cached = summaryQ.data?.summary
   const busy = refreshSummary.isPending || summaryQ.isFetching
-  const aiWants = cached?.wants || c.aiSummary.wants
-  const aiActions = cached?.actions || c.aiSummary.actions
-  const aiDelivered = cached?.delivered || c.aiSummary.delivered
   const aiNextStep = cached?.nextStep || c.aiSummary.nextStep || ""
   const generatedAt = summaryQ.data?.generatedAt ?? null
+
+  // customer-projects — when a project chip is active AND its order has loaded, the
+  // 摘要三行 describe THAT project, computed deterministically from the order row +
+  // its outbound docs (搬運不生成, no LLM). Otherwise the whole-customer LLM summary.
+  const projActive = projectOrder != null
+  const projActionParts = projectOrder
+    ? deriveProjectActions(projectOrder).map(
+        (a) => `${t(`admin.customers.summary.projAction.${a.key}`)} ${md(a.at)}`,
+      )
+    : []
+  const projDeliveredParts =
+    projectOrder && activeProjectId != null
+      ? [
+          ...deriveProjectDelivered(projectOrder).map(
+            (d) => `${t(`admin.customers.summary.projDelivered.${d.key}`)} ${md(d.at)}`,
+          ),
+          ...projectDeliveredDocNames(c.docs, activeProjectId),
+        ]
+      : []
+  const aiWants = projectOrder
+    ? projectOrder.category
+      ? t(`admin.customers.projects.category.${projectOrder.category}`)
+      : projectOrder.title
+    : cached?.wants || c.aiSummary.wants
+  const aiActions = projectOrder
+    ? projActionParts.join("、") || t("admin.customers.summary.projActionsEmpty")
+    : cached?.actions || c.aiSummary.actions
+  const aiDelivered = projectOrder
+    ? projDeliveredParts.join("、") || t("admin.customers.summary.projDeliveredEmpty")
+    : cached?.delivered || c.aiSummary.delivered
 
   return (
     <div className="p-6 space-y-4">
       {/* Step 5 看門狗:漏價警示(打開客人最上面就看到) */}
       <MarginWatchdogBanner customer={c} />
 
-      {/* 本專案(§5)— 選了專案 chip 時,頂端出這張單自己的事實卡 */}
+      {/* 本專案(§5)— 選了專案 chip 時,頂端出這張單自己的事實卡;下方的 AI 摘要
+          三行也跟著這張單走(deterministic,計算在 OverviewTab 上方),所以不再標
+          「以下為整體摘要」——那條 caption 拿掉了。 */}
       {projectOrder && <ProjectOverviewCard order={projectOrder} docCount={projectDocCount} />}
-      {activeProjectId != null && (
-        <div className="text-[10px] text-gray-400 px-0.5">{t("admin.customers.summary.overallCaption")}</div>
-      )}
 
-      {/* AI Summary */}
+      {/* AI Summary — whole-customer LLM blend, OR (project active) that project's
+          deterministic 摘要三行. 重算鈕 + 更新時間 only apply to the LLM version;
+          the per-project one is 搬運 from the order row so there is nothing to refresh. */}
       <div className="rounded-xl bg-gray-50 border border-gray-200 p-4 space-y-2">
         <div className="flex items-center justify-between">
           <div className="text-[11px] text-gray-400 font-medium flex items-center gap-1.5">
             <Bot className="w-3 h-3" />
             {t("admin.customers.summary.aiLabel")}
-            {busy ? (
+            {projActive ? (
+              <span className="text-gray-300">· {t("admin.customers.summary.projectHeader")}</span>
+            ) : busy ? (
               <span className="text-gray-400">· {t("admin.customers.summary.generating")}</span>
             ) : (
               generatedAt && (
@@ -338,14 +379,16 @@ export function OverviewTab({
               )
             )}
           </div>
-          <button
-            onClick={() => refreshSummary.mutate(scopeInput)}
-            disabled={busy}
-            className="text-[10px] font-medium text-gray-500 hover:text-gray-900 transition-colors flex items-center gap-1 rounded-lg px-1.5 py-0.5 hover:bg-gray-100 disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3 h-3 ${busy ? "animate-spin" : ""}`} />
-            {t("admin.customers.summary.refresh")}
-          </button>
+          {!projActive && (
+            <button
+              onClick={() => refreshSummary.mutate(scopeInput)}
+              disabled={busy}
+              className="text-[10px] font-medium text-gray-500 hover:text-gray-900 transition-colors flex items-center gap-1 rounded-lg px-1.5 py-0.5 hover:bg-gray-100 disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3 h-3 ${busy ? "animate-spin" : ""}`} />
+              {t("admin.customers.summary.refresh")}
+            </button>
+          )}
         </div>
         <SummaryRow label={t("admin.customers.summary.wantsLabel")} value={aiWants} />
         <SummaryRow label={t("admin.customers.summary.actionsLabel")} value={aiActions} />

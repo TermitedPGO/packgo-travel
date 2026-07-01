@@ -3415,6 +3415,19 @@ export const en = {
         projectHeader: 'This project',
         overallCaption: 'Below: overall summary (across all projects)',
         docsCount: '{n} document(s)',
+        projAction: {
+          quoteSent: 'Sent quote',
+          collectionSent: 'Sent payment link',
+          depositPaid: 'Received deposit',
+          balancePaid: 'Received balance',
+          confirmed: 'Issued confirmation',
+        },
+        projDelivered: {
+          quote: 'Quote',
+          confirm: 'Confirmation',
+        },
+        projActionsEmpty: 'No outbound activity on this project yet',
+        projDeliveredEmpty: 'No documents delivered on this project yet',
       },
       learned: {
         title: 'AI Customer Insights',
