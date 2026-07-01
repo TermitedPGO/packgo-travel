@@ -53,10 +53,64 @@ import { storagePut } from "../../storage";
 import { runInquiryAgent, DEFAULT_INQUIRY_POLICY } from "./inquiryAgent";
 import { evaluateAutoSend } from "./autoSendGate";
 import { runRefundAgent, DEFAULT_REFUND_POLICY } from "./refundAgent";
+import { redis } from "../../redis";
 import { createChildLogger } from "../../_core/logger";
 const log = createChildLogger({ module: "gmailPipeline" });
 
 const PROCESSED_LABEL = "PACKGO_AI_PROCESSED";
+
+// ── push/poll cross-worker dedup (2026-07-01) ────────────────────────────────
+// push (Pub/Sub) and the 3-min poll are two independent BullMQ workers with no
+// shared lock. The PACKGO_AI_PROCESSED label is check-then-act: it's applied
+// only AFTER processOneEmail's full LLM chain finishes (30–120s), so inside
+// that window the other path still sees the same message as fresh and would
+// double-process it (double LLM spend + duplicate office-inbox cards). A
+// per-message Redis SET NX lock closes the window. TTL covers the slowest LLM
+// chain. No explicit unlock: once processed the label gates every later cycle,
+// and after a crash the lock simply expires so the next poll retries.
+// FAIL-OPEN — a Redis blip must never drop customer mail; on error we process
+// anyway (an occasional duplicate beats a lost email). Same SET NX pattern as
+// enqueueCustomerSummaryRefresh in server/queue.ts.
+const MESSAGE_LOCK_TTL_SECONDS = 300;
+
+/**
+ * Run `fn` only when this worker wins the per-message lock. Returns true when
+ * fn ran (lock won, or Redis unavailable → fail-open), false when the other
+ * push/poll path already holds the lock — the caller should SKIP, not retry:
+ * the winner applies the processed label when it finishes. Errors from `fn`
+ * propagate unchanged so the caller's existing failure accounting still works.
+ */
+export async function processWithMessageLock(
+  messageId: string,
+  fn: () => Promise<void>,
+): Promise<boolean> {
+  let acquired = true;
+  try {
+    const ok = await redis.set(
+      `gmail:msg-lock:${messageId}`,
+      "1",
+      "EX",
+      MESSAGE_LOCK_TTL_SECONDS,
+      "NX",
+    );
+    acquired = ok === "OK";
+  } catch (e) {
+    log.warn(
+      { err: e, messageId },
+      "[gmailPipeline] message lock unavailable — fail-open, processing anyway",
+    );
+    acquired = true;
+  }
+  if (!acquired) {
+    log.info(
+      { messageId },
+      "[gmailPipeline] message locked by concurrent push/poll worker — skip",
+    );
+    return false;
+  }
+  await fn();
+  return true;
+}
 
 /**
  * When set, only emails carrying this Gmail label are processed.
@@ -368,11 +422,17 @@ async function ingestFreshMessages(
 
   for (const msg of customerEmails) {
     try {
-      await processOneEmail(db, msg, inquiryPolicy, refundPolicy, result, {
-        gmail,
-        fromEmail,
-        syncedThreads,
-      });
+      const ran = await processWithMessageLock(msg.id, () =>
+        processOneEmail(db, msg, inquiryPolicy, refundPolicy, result, {
+          gmail,
+          fromEmail,
+          syncedThreads,
+        }),
+      );
+      // Lock held → the OTHER path (push vs poll) is mid-processing this exact
+      // message. Skip, don't retry: the winner applies PACKGO_AI_PROCESSED when
+      // it finishes, which gates every later cycle.
+      if (!ran) continue;
       // Apply processed label so this won't be picked up again
       await applyLabel(gmail, msg.id, labelId);
       result.totalProcessed++;
