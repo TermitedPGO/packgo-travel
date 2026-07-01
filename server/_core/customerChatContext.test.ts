@@ -436,6 +436,8 @@ const ORDER: OrderContextData = {
   balanceAmount: "2815.00",
   depositPaidAmount: "1200.00",
   balancePaidAmount: null,
+  depositPaidAt: new Date("2026-06-15T18:00:00Z"),
+  balancePaidAt: null,
   notes: "Emerald 太太 + 2 孩",
   conversationCount: 3,
 };
@@ -472,6 +474,8 @@ describe("formatOrderContext", () => {
       depositPaidAmount: null,
       balancePaidAmount: null,
       balanceAmount: null,
+      depositPaidAt: null,
+      balancePaidAt: null,
       departureDate: null,
       returnDate: null,
     });
@@ -482,6 +486,55 @@ describe("formatOrderContext", () => {
   it("counts filed conversations only when > 0", () => {
     expect(formatOrderContext(ORDER)).toContain("已歸入 3 則往來");
     expect(formatOrderContext({ ...ORDER, conversationCount: 0 })).not.toContain("已歸入");
+  });
+
+  // 決策 A: balanceAmount = 契約應收價,永不歸零;「已收」的真相是 *PaidAt。
+  // 尾款收完後 prompt 不准同時喊「已收尾款」+「應收餘額」(自打架 → AI 催已付清的錢)。
+  it("paid in full → no 應收餘額, received amounts shown", () => {
+    const block = formatOrderContext({
+      ...ORDER,
+      status: "paid",
+      balancePaidAmount: "2815.00",
+      balancePaidAt: new Date("2026-06-20T18:00:00Z"),
+    });
+    expect(block).not.toContain("應收餘額");
+    expect(block).toContain("已收訂金 USD 1,200");
+    expect(block).toContain("已收尾款 USD 2,815");
+  });
+
+  it("unpaid → 應收餘額 shown as before", () => {
+    const block = formatOrderContext({
+      ...ORDER,
+      status: "quoted",
+      depositPaidAmount: null,
+      depositPaidAt: null,
+    });
+    expect(block).toContain("應收餘額 USD 2,815");
+    expect(block).not.toContain("已收尾款");
+    expect(block).not.toContain("尾款已收");
+  });
+
+  it("partial (deposit in, balance outstanding) → 應收 only for the unpaid slice", () => {
+    const block = formatOrderContext(ORDER); // depositPaidAt set, balancePaidAt null
+    expect(block).toContain("已收訂金 USD 1,200");
+    expect(block).toContain("應收餘額 USD 2,815");
+    expect(block).not.toContain("已收尾款");
+    expect(block).not.toContain("尾款已收");
+  });
+
+  it("balancePaidAt set but amount column empty (legacy row) → 尾款已收 marker, no 應收餘額", () => {
+    const block = formatOrderContext({
+      ...ORDER,
+      balancePaidAmount: null,
+      balancePaidAt: new Date("2026-06-20T18:00:00Z"),
+    });
+    expect(block).toContain("尾款已收");
+    expect(block).not.toContain("應收餘額");
+  });
+
+  it("depositPaidAt set but amount column empty → 訂金已收 marker (同理)", () => {
+    const block = formatOrderContext({ ...ORDER, depositPaidAmount: null });
+    expect(block).toContain("訂金已收");
   });
 });
 
@@ -514,6 +567,8 @@ describe("buildOrderContextBlock", () => {
             balanceAmount: "2815.00",
             depositPaidAmount: "1200.00",
             balancePaidAmount: null,
+            depositPaidAt: new Date("2026-06-15T18:00:00Z"),
+            balancePaidAt: null,
             notes: "Emerald 太太 + 2 孩",
           },
         ],

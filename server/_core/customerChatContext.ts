@@ -543,6 +543,10 @@ export interface OrderContextData {
   balanceAmount: string | null;
   depositPaidAmount: string | null;
   balancePaidAmount: string | null;
+  /** Money-truth timestamps (recordPayment 寫)。決策 A:depositAmount/
+   *  balanceAmount 是契約應收價、永不歸零;「收到沒」只看這兩個時間戳。 */
+  depositPaidAt: Date | null;
+  balancePaidAt: Date | null;
   notes: string | null;
   /** # of real-conversation turns (Gmail/email) filed under this project. */
   conversationCount: number;
@@ -573,8 +577,13 @@ export function formatOrderContext(o: OrderContextData): string {
   const moneyBits: string[] = [];
   if (total) moneyBits.push(`售價 ${total}`);
   if (depPaid) moneyBits.push(`已收訂金 ${depPaid}`);
+  else if (o.depositPaidAt) moneyBits.push("訂金已收");
   if (balPaid) moneyBits.push(`已收尾款 ${balPaid}`);
-  if (bal) moneyBits.push(`應收餘額 ${bal}`);
+  else if (o.balancePaidAt) moneyBits.push("尾款已收");
+  // balanceAmount = 契約應收價,尾款收完也不歸零(決策 A)。balancePaidAt 一設,
+  // 這裡就不准再喊「應收餘額」— 否則 prompt 同時出現「已收尾款」+「應收餘額」
+  // 自打架,AI 會替 Jeff 擬信催一筆已付清的尾款。
+  if (bal && !o.balancePaidAt) moneyBits.push(`應收餘額 ${bal}`);
   if (moneyBits.length) lines.push(moneyBits.join(" · ") + "(售價是直客價;成本/同業價是內部數字,絕不寫進給客人的草稿)");
   if (o.notes && o.notes.trim()) lines.push(`備註:${o.notes.trim().slice(0, 300)}`);
   if (o.conversationCount > 0) lines.push(`本專案已歸入 ${o.conversationCount} 則往來。`);
@@ -612,6 +621,8 @@ export async function buildOrderContextBlock(
       balanceAmount: customOrders.balanceAmount,
       depositPaidAmount: customOrders.depositPaidAmount,
       balancePaidAmount: customOrders.balancePaidAmount,
+      depositPaidAt: customOrders.depositPaidAt,
+      balancePaidAt: customOrders.balancePaidAt,
       notes: customOrders.notes,
     })
     .from(customOrders)
