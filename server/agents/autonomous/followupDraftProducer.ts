@@ -205,10 +205,14 @@ export interface SanitizedFollowupDraft {
 
 export function sanitizeFollowupDraftBody(
   raw: string | null | undefined,
+  /** detectCustomerLanguage result — "en" skips the 你/您 address-form rules
+   * (an English letter never contains 您); omitted → compliance falls back to
+   * content-based CJK detection. */
+  language?: FollowupDraftLanguage,
 ): SanitizedFollowupDraft {
   const body = stripMarkdownForEmail(raw);
   if (!body) return { body: "", blocked: false, violations: [] };
-  const { violations } = checkFollowupDraftCompliance(body);
+  const { violations } = checkFollowupDraftCompliance(body, language);
   const blocked = violations.some((v) => v === "em_dash" || v === "markdown");
   return { body, blocked, violations };
 }
@@ -364,7 +368,8 @@ export async function runFollowupDraftScan(
       const draft = await draftFollowup(drafterInput);
       // Wash BEFORE storing: the card must show exactly what the one-click send
       // chain will send (that chain sends the stored body verbatim, no strip).
-      const cleaned = sanitizeFollowupDraftBody(draft.body);
+      // Pass the detected language so en drafts skip the 你/您 rules.
+      const cleaned = sanitizeFollowupDraftBody(draft.body, drafterInput.language);
       if (!cleaned.body) {
         result.skipped.error++;
         continue;

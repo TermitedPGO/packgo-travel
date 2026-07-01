@@ -106,7 +106,8 @@ export async function produceFollowupDraftForProfile(
   }
   // Same wash as the nightly scan: the stored body is what the one-click send
   // chain sends verbatim, so it must already be clean (no markdown, no em dash).
-  const cleaned = sanitizeFollowupDraftBody(draft.body);
+  // Pass the detected language so en drafts skip the 你/您 rules.
+  const cleaned = sanitizeFollowupDraftBody(draft.body, drafterInput.language);
   if (!cleaned.body) return { status: "skipped", reason: "empty_draft" };
   if (cleaned.blocked) {
     log.error(

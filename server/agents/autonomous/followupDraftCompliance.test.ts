@@ -77,3 +77,50 @@ describe("checkFollowupDraftCompliance — hard violations", () => {
     expect(checkFollowupDraftCompliance("").violations).toEqual([]);
   });
 });
+
+// A correct English follow-up (an English letter never contains 您). Before the
+// language-aware fix this tripped missing_formal_you on EVERY correct English
+// draft, drowning real drift signals in the eval.
+const EN_DRAFT =
+  "Hi Jenny, just checking in on the Taiwan itinerary I sent last week. No rush at all, whenever you have a moment.";
+
+describe("checkFollowupDraftCompliance — language awareness (English drafts)", () => {
+  it("explicit en: a correct English draft does NOT trip missing_formal_you", () => {
+    const r = checkFollowupDraftCompliance(EN_DRAFT, "en");
+    expect(r.violations).not.toContain("missing_formal_you");
+    expect(r.ok).toBe(true);
+  });
+  it("explicit en: dash / markdown / emoji rules still run regardless of language", () => {
+    const dash = checkFollowupDraftCompliance("Hi Jenny — checking in.", "en");
+    expect(dash.violations).toContain("em_dash");
+    expect(dash.violations).not.toContain("missing_formal_you");
+    expect(checkFollowupDraftCompliance("**Hi** Jenny", "en").violations).toContain("markdown");
+    expect(checkFollowupDraftCompliance("Hi Jenny ✓ confirmed", "en").violations).toContain(
+      "emoji_or_check",
+    );
+  });
+  it("explicit zh-TW: 你/您 rules still enforced", () => {
+    expect(checkFollowupDraftCompliance("你好,最近還好嗎?", "zh-TW").violations).toEqual(
+      expect.arrayContaining(["informal_ni", "missing_formal_you"]),
+    );
+    expect(
+      checkFollowupDraftCompliance("林先生好,行程幫忙留著了。", "zh-TW").violations,
+    ).toContain("missing_formal_you");
+  });
+  it("explicit zh-CN: 你/您 rules still enforced", () => {
+    expect(checkFollowupDraftCompliance("你好,这个行程还好吗?", "zh-CN").violations).toContain(
+      "informal_ni",
+    );
+  });
+  it("no language param: zero-CJK body falls back to English → no 你/您 rules", () => {
+    const r = checkFollowupDraftCompliance(EN_DRAFT);
+    expect(r.violations).not.toContain("missing_formal_you");
+    expect(r.ok).toBe(true);
+  });
+  it("no language param: CJK body still enforces 你/您 (fallback stays Chinese)", () => {
+    expect(violations("你好,最近還好嗎?")).toEqual(
+      expect.arrayContaining(["informal_ni", "missing_formal_you"]),
+    );
+    expect(violations("林先生好,行程幫忙留著了。")).toContain("missing_formal_you");
+  });
+});

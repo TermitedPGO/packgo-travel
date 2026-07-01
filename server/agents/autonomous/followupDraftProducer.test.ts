@@ -314,6 +314,22 @@ describe("sanitizeFollowupDraftBody (Finding B: wash BEFORE the card, send chain
     expect(out.violations).toContain("informal_ni");
     expect(out.body).toBe("嗨,你最近還好嗎");
   });
+  it("English draft with language=en passes clean — no missing_formal_you noise", () => {
+    const out = sanitizeFollowupDraftBody(
+      "Hi Jenny, just checking in on the Taiwan itinerary I sent last week. No rush at all.",
+      "en",
+    );
+    expect(out.blocked).toBe(false);
+    expect(out.violations).toEqual([]);
+  });
+  it("English draft without language param falls back to CJK detection → still clean", () => {
+    const out = sanitizeFollowupDraftBody("Hi Jenny, just checking in. No rush at all.");
+    expect(out.violations).toEqual([]);
+  });
+  it("Chinese draft with language=zh-TW still enforces 您", () => {
+    const out = sanitizeFollowupDraftBody("林先生好,行程幫忙留著了。", "zh-TW");
+    expect(out.violations).toContain("missing_formal_you");
+  });
 });
 
 describe("dirty LLM output → clean card, both A/B arms (Finding B end-to-end)", () => {
