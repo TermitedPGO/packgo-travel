@@ -3335,9 +3335,11 @@ export const zhTW = {
         chatCollapse: '收合',
         chatStop: '停止',
         dropFile: '拖放文件到這裡',
-        dropUnsupported: 'PDF / 圖片還讀不了(目前只支援文字檔)。客人的 email 往來請在對話打「收」收進系統。',
         dropTooBig: '檔案太大,上限 500KB。',
         globalPlaceholder: '新增客人、拖放文件...',
+        // audit fix (2026-06-30) — 「新增客人」按鈕改成直接聚焦這個聊天框(拖檔案/打字
+        // 都能讀,不用再開一個獨立、會壞掉的表單彈窗)。
+        addCustomerPrefill: '新增客人：',
       },
       status: {
         allClear: '一切就緒',

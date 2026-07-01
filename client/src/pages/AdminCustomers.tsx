@@ -3,7 +3,6 @@ import { useLocale } from "@/contexts/LocaleContext"
 import CustomerList from "@/components/admin/customers/CustomerList"
 import CustomerDetail from "@/components/admin/customers/CustomerDetail"
 import CustomerChat from "@/components/admin/customers/CustomerChat"
-import AddCustomerModal from "@/components/admin/customers/AddCustomerModal"
 import { useCustomerData, type Selection } from "@/components/admin/customers/useCustomerData"
 import {
   CustomerListSkeleton,
@@ -15,7 +14,6 @@ export default function AdminCustomers() {
   const { t } = useLocale()
   const [selected, setSelected] = useState<Selection | null>(null)
   const [showHidden, setShowHidden] = useState(false)
-  const [addOpen, setAddOpen] = useState(false)
   // customer-projects (0104) — the active project (=customOrder). null =「未分類」.
   const [activeProjectId, setActiveProjectId] = useState<number | null>(null)
   const chatFocusRef = useRef<((prefill?: string) => void) | null>(null)
@@ -45,7 +43,6 @@ export default function AdminCustomers() {
   }, [selected?.id, selected?.kind, projectIdsKey])
 
   return (
-    <>
     <div className="h-full flex">
       {isListLoading ? (
         <div className="w-[300px] flex-shrink-0 border-r border-gray-200">
@@ -60,7 +57,7 @@ export default function AdminCustomers() {
           onToggleHidden={setShowHidden}
           onMarkNotCustomer={markNotCustomer}
           onRestoreCustomer={restoreCustomer}
-          onAddCustomer={() => setAddOpen(true)}
+          onAddCustomer={() => chatFocusRef.current?.(t("admin.customers.drafts.addCustomerPrefill"))}
         />
       )}
       {selected !== null ? (
@@ -112,14 +109,5 @@ export default function AdminCustomers() {
         </>
       )}
     </div>
-    <AddCustomerModal
-      open={addOpen}
-      onClose={() => setAddOpen(false)}
-      onCreated={(sel) => {
-        setAddOpen(false)
-        setSelected(sel)
-      }}
-    />
-    </>
   )
 }
