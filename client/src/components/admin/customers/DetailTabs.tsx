@@ -175,9 +175,109 @@ function LearnedPreferencesSection({ customer: c }: { customer: AdaptedCustomer 
   )
 }
 
-export function OverviewTab({ customer: c, chatMessages }: { customer: AdaptedCustomer; chatMessages: ChatMessage[] }) {
+/**
+ * customer-projects (§5) — deterministic per-project facts card for the 概覽 tab.
+ * Reads straight from the order row (no LLM, no fabrication). Shows 售價 (totalPrice)
+ * + 已收 (depositPaidAmount+balancePaidAmount) + dates + doc count + notes. NEVER
+ * shows supplierCost (成本 stays internal, off customer-facing anything).
+ */
+function ProjectOverviewCard({
+  order,
+  docCount,
+}: {
+  order: {
+    orderNumber: string
+    title: string
+    category: string | null
+    status: string
+    totalPrice: string | null
+    currency: string
+    departureDate: string | null
+    returnDate: string | null
+    depositPaidAmount: string | null
+    balancePaidAmount: string | null
+    notes: string | null
+  }
+  docCount: number
+}) {
+  const { t } = useLocale()
+  const received = Number(order.depositPaidAmount ?? 0) + Number(order.balancePaidAmount ?? 0)
+  const rows: { label: string; value: string }[] = []
+  if (order.totalPrice != null && order.totalPrice !== "")
+    rows.push({ label: t("admin.customers.order.fldTotal"), value: fmtMoney(order.totalPrice, order.currency) })
+  if (received > 0)
+    rows.push({ label: t("admin.customers.order.received"), value: fmtMoney(received, order.currency) })
+  if (order.departureDate)
+    rows.push({ label: t("admin.customers.order.fldDeparture"), value: shortDate(order.departureDate) })
+  if (order.returnDate)
+    rows.push({ label: t("admin.customers.order.fldReturn"), value: shortDate(order.returnDate) })
+
+  return (
+    <div className="rounded-xl bg-white border border-gray-200 p-4 space-y-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[11px] text-gray-400 font-medium">
+          {t("admin.customers.summary.projectHeader")} · {order.orderNumber}
+        </div>
+        <span className="text-[10px] text-gray-500 bg-gray-100 rounded-md px-1.5 py-0.5 flex-shrink-0">
+          {t(`admin.customers.order.status.${order.status}`)}
+        </span>
+      </div>
+      <div className="flex items-center gap-2 min-w-0">
+        <div className="text-sm font-semibold text-gray-900 truncate">{order.title}</div>
+        {order.category && (
+          <span className="text-[10px] text-gray-500 bg-gray-100 rounded-md px-1.5 py-0.5 flex-shrink-0">
+            {t(`admin.customers.projects.category.${order.category}`)}
+          </span>
+        )}
+      </div>
+      {rows.length > 0 && (
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+          {rows.map((r) => (
+            <div key={r.label} className="flex items-baseline justify-between gap-2 text-[12px]">
+              <span className="text-gray-400">{r.label}</span>
+              <span className="text-gray-900 font-medium">{r.value}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex items-center gap-1.5 text-[11px] text-gray-400">
+        <FileText className="w-3 h-3" />
+        {t("admin.customers.summary.docsCount", { n: docCount })}
+      </div>
+      {order.notes && (
+        <div className="text-[11px] text-gray-500 border-t border-gray-100 pt-2 whitespace-pre-wrap">
+          {t("admin.customers.order.notes")}: {order.notes}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function OverviewTab({
+  customer: c,
+  chatMessages,
+  activeProjectId = null,
+}: {
+  customer: AdaptedCustomer
+  chatMessages: ChatMessage[]
+  activeProjectId?: number | null
+}) {
   const { t } = useLocale()
   const [showAllChat, setShowAllChat] = useState(false)
+  // customer-projects (§5) — when a ProjectBar chip is active, show that project's
+  // OWN deterministic facts at the top (title/category/status/售價/dates/docs/notes),
+  // straight from the order row — no LLM, no fabrication. The AI summary below is
+  // customer-level (labeled 整體) so the blended narrative is never mistaken for
+  // this one project.
+  const projectOrderQ = trpc.customerOrders.get.useQuery(
+    { orderId: activeProjectId ?? 0 },
+    { enabled: activeProjectId != null, staleTime: 30_000 },
+  )
+  const projectOrder = activeProjectId != null ? projectOrderQ.data : null
+  const projectDocCount =
+    activeProjectId != null
+      ? c.docs.filter((d) => (d.customOrderId ?? null) === activeProjectId).length
+      : 0
   const lastMsg = chatMessages.length > 0 ? chatMessages[chatMessages.length - 1] : null
   // expanded → the whole thread (oldest→newest), full text; collapsed → last 3 preview
   const shownMsgs = showAllChat ? chatMessages : chatMessages.slice(-3)
@@ -217,6 +317,12 @@ export function OverviewTab({ customer: c, chatMessages }: { customer: AdaptedCu
     <div className="p-6 space-y-4">
       {/* Step 5 看門狗:漏價警示(打開客人最上面就看到) */}
       <MarginWatchdogBanner customer={c} />
+
+      {/* 本專案(§5)— 選了專案 chip 時,頂端出這張單自己的事實卡 */}
+      {projectOrder && <ProjectOverviewCard order={projectOrder} docCount={projectDocCount} />}
+      {activeProjectId != null && (
+        <div className="text-[10px] text-gray-400 px-0.5">{t("admin.customers.summary.overallCaption")}</div>
+      )}
 
       {/* AI Summary */}
       <div className="rounded-xl bg-gray-50 border border-gray-200 p-4 space-y-2">

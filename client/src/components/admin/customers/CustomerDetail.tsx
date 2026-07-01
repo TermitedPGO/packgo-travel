@@ -199,7 +199,7 @@ export default function CustomerDetail({
 
       {/* Tab content */}
       <div className="flex-1 overflow-y-auto">
-        {tab === "overview" && <OverviewTab customer={c} chatMessages={chatMessages} />}
+        {tab === "overview" && <OverviewTab customer={c} chatMessages={chatMessages} activeProjectId={activeProjectId} />}
         {tab === "orders" && <OrdersTab customer={c} activeProjectId={activeProjectId} onSelectProject={onSelectProject} />}
         {tab === "docs" && <DocsTab customer={c} activeProjectId={activeProjectId} />}
         {tab === "history" && (

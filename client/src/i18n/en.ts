@@ -3412,6 +3412,9 @@ export const en = {
         updatedMinAgo: 'Updated {n}m ago',
         updatedHrAgo: 'Updated {n}h ago',
         updatedDayAgo: 'Updated {n}d ago',
+        projectHeader: 'This project',
+        overallCaption: 'Below: overall summary (across all projects)',
+        docsCount: '{n} document(s)',
       },
       learned: {
         title: 'AI Customer Insights',

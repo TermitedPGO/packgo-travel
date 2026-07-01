@@ -3379,6 +3379,9 @@ export const zhTW = {
         updatedMinAgo: '{n} 分鐘前更新',
         updatedHrAgo: '{n} 小時前更新',
         updatedDayAgo: '{n} 天前更新',
+        projectHeader: '本專案',
+        overallCaption: '以下為整體摘要(跨所有專案)',
+        docsCount: '文件 {n} 份',
       },
       learned: {
         title: 'AI 客人理解',
