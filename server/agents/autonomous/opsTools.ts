@@ -262,7 +262,10 @@ export const WRITE_TOOLS: Anthropic.Tool[] = [
     description:
       "Update a booking's bookingStatus and/or paymentStatus. Use when Jeff " +
       "says '這筆確認了' / '標記已付款' / '取消這筆訂單'. Get the bookingId " +
-      "from a prior search_bookings call first.",
+      "from a prior search_bookings call first. Only works on bookings that " +
+      "belong to the CURRENT pinned customer — other customers' bookings are " +
+      "rejected. Refunds can NEVER be marked here: propose them via " +
+      "suggest_action so Jeff reviews.",
     input_schema: {
       type: "object",
       properties: {
@@ -276,7 +279,7 @@ export const WRITE_TOOLS: Anthropic.Tool[] = [
         },
         paymentStatus: {
           type: "string",
-          enum: ["unpaid", "deposit", "paid", "refunded"],
+          enum: ["unpaid", "deposit", "paid"],
         },
       },
       required: ["bookingId"],
@@ -1320,6 +1323,83 @@ export function resolveUpdateCustomOrderArgs(
   return { ok: true, value: { orderId, patch } };
 }
 
+/** Booking statuses the agent may write (mirrors drizzle bookings.bookingStatus). */
+export const AGENT_BOOKING_STATUS_VALUES = [
+  "pending",
+  "confirmed",
+  "completed",
+  "cancelled",
+] as const;
+/** Payment statuses the agent may write. "refunded" is DELIBERATELY absent:
+ *  refunds are money-moving and always go through suggest_action for Jeff's
+ *  review (same rule the system prompt teaches) — never a direct agent write. */
+export const AGENT_PAYMENT_STATUS_VALUES = ["unpaid", "deposit", "paid"] as const;
+
+export interface BookingStatusUpdates {
+  bookingStatus?: (typeof AGENT_BOOKING_STATUS_VALUES)[number];
+  paymentStatus?: (typeof AGENT_PAYMENT_STATUS_VALUES)[number];
+}
+
+/**
+ * Pure validator for the update_booking_status tool. Server-side enum
+ * whitelist — the enums in the tool schema are only a hint to the model, so
+ * an off-enum string (or "refunded") must be rejected HERE, not by MySQL
+ * strict mode. Errors flow back to the model as a tool_result so it can
+ * self-correct or explain to Jeff. Pure so it's unit-tested without a DB.
+ */
+export function resolveBookingStatusArgs(
+  input: any,
+): { ok: true; value: { bookingId: number; updates: BookingStatusUpdates } } | { ok: false; error: string } {
+  const bookingId = Number(input?.bookingId);
+  if (!Number.isInteger(bookingId) || bookingId <= 0)
+    return { ok: false, error: "missing bookingId" };
+  const updates: BookingStatusUpdates = {};
+  if (input?.bookingStatus !== undefined) {
+    if (!AGENT_BOOKING_STATUS_VALUES.includes(input.bookingStatus))
+      return {
+        ok: false,
+        error: `bookingStatus 只能是 ${AGENT_BOOKING_STATUS_VALUES.join("/")},收到「${input.bookingStatus}」`,
+      };
+    updates.bookingStatus = input.bookingStatus;
+  }
+  if (input?.paymentStatus !== undefined) {
+    if (input.paymentStatus === "refunded")
+      return {
+        ok: false,
+        error:
+          "退款不能由 AI 直接標 — 退款碰錢,一律用 suggest_action 提案,讓 Jeff 審核後手動操作",
+      };
+    if (!AGENT_PAYMENT_STATUS_VALUES.includes(input.paymentStatus))
+      return {
+        ok: false,
+        error: `paymentStatus 只能是 ${AGENT_PAYMENT_STATUS_VALUES.join("/")},收到「${input.paymentStatus}」`,
+      };
+    updates.paymentStatus = input.paymentStatus;
+  }
+  if (Object.keys(updates).length === 0)
+    return { ok: false, error: "no status fields provided" };
+  return { ok: true, value: { bookingId, updates } };
+}
+
+/**
+ * Cross-customer ownership rule for bookings (2026-07-01 P1 fix — parity with
+ * orderBelongsToProfiles for customOrders). bookings carry no
+ * customerProfileId, so ownership is derived from what they DO carry:
+ * bookings.userId ↔ the pinned profile's linked userId, or
+ * bookings.customerEmail ↔ the profile's email (guest bookings have no
+ * userId). Pure so the guard is trivially testable without a DB.
+ */
+export function bookingBelongsToCustomer(
+  booking: { userId: number | null; customerEmail: string | null },
+  owner: { userId: number | null; email: string | null },
+): boolean {
+  if (owner.userId != null && booking.userId != null && booking.userId === owner.userId)
+    return true;
+  const bookingEmail = (booking.customerEmail ?? "").trim().toLowerCase();
+  const ownerEmail = (owner.email ?? "").trim().toLowerCase();
+  return bookingEmail !== "" && bookingEmail === ownerEmail;
+}
+
 export async function executeWriteTool(
   name: string,
   input: any,
@@ -1361,16 +1441,45 @@ async function runWriteTool(
     }
 
     case "update_booking_status": {
-      const bookingId = input.bookingId;
-      if (!bookingId) return { error: "missing bookingId" };
-      const updates: Record<string, any> = {};
-      if (input.bookingStatus) updates.bookingStatus = input.bookingStatus;
-      if (input.paymentStatus) updates.paymentStatus = input.paymentStatus;
-      if (Object.keys(updates).length === 0)
-        return { error: "no status fields provided" };
-      const { updateBooking } = await import("../../db/booking");
+      // Cross-customer guard + enum whitelist + audit (2026-07-01 P1 fix).
+      // Booking status touches money, so this write gets the same three
+      // protections the human admin path (routers/bookings.ts
+      // adminUpdateStatus) has: the booking MUST belong to the pinned
+      // customer, the values MUST be whitelisted server-side (the tool-schema
+      // enum is only a hint to the model), and every change is audit-logged.
+      if (!profileId)
+        return { error: "沒有選定客人 — 這個工具只能在某位客人的對話框裡用" };
+      if (!adminUserId) return { error: "缺少操作者(系統沒帶到 admin userId)" };
+      const parsed = resolveBookingStatusArgs(input);
+      if (!parsed.ok) return { error: parsed.error };
+      const { bookingId, updates } = parsed.value;
+      const { getBookingById, updateBooking } = await import("../../db/booking");
+      const booking = await getBookingById(bookingId);
+      if (!booking) return { error: `找不到訂單 #${bookingId}` };
+      const { getCustomerProfileSnapshot } = await import("../../db/customOrder");
+      const snap = await getCustomerProfileSnapshot(profileId);
+      if (
+        !bookingBelongsToCustomer(
+          { userId: booking.userId ?? null, customerEmail: booking.customerEmail ?? null },
+          { userId: snap.userId, email: snap.email },
+        )
+      )
+        return { error: `訂單 #${bookingId} 不是這位客人的,不能改` };
+      const before = {
+        bookingStatus: booking.bookingStatus,
+        paymentStatus: booking.paymentStatus,
+      };
       const updated = await updateBooking(bookingId, updates);
-      log.info({ bookingId, updates }, "update_booking_status executed");
+      const { audit } = await import("../../_core/auditLog");
+      await audit({
+        ctx: { user: { id: adminUserId, email: "ops-agent", role: "admin" } },
+        action: "booking.updateStatus",
+        targetType: "booking",
+        targetId: bookingId,
+        changes: { before, after: updates },
+        reason: `ops-agent write tool (customer chat, profileId=${profileId})`,
+      });
+      log.info({ profileId, bookingId, updates }, "update_booking_status executed");
       return {
         success: true,
         message: `訂單 #${bookingId} 已更新`,

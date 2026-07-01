@@ -50,8 +50,29 @@ vi.mock("drizzle-orm", () => {
   return { eq: fn, and: fn, or: fn, gte: fn, lte: fn, isNull: fn, inArray: fn, sql, desc: fn, like: fn };
 });
 
-const { mockCollect } = vi.hoisted(() => ({ mockCollect: vi.fn() }));
+const { mockCollect, mockGetBookingById, mockUpdateBooking, mockSnapshot, mockAudit } =
+  vi.hoisted(() => ({
+    mockCollect: vi.fn(),
+    mockGetBookingById: vi.fn(),
+    mockUpdateBooking: vi.fn(),
+    mockSnapshot: vi.fn(),
+    mockAudit: vi.fn(),
+  }));
 vi.mock("./opsActions", () => ({ doCollectCustomerThreads: mockCollect }));
+vi.mock("../../db/booking", () => ({
+  getBookingById: mockGetBookingById,
+  updateBooking: mockUpdateBooking,
+}));
+vi.mock("../../db/customOrder", () => ({
+  getCustomerProfileSnapshot: mockSnapshot,
+  getCustomOrderById: vi.fn(),
+  updateCustomOrder: vi.fn(),
+  createCustomOrder: vi.fn(),
+  generateOrderNumber: vi.fn(),
+  resolveCustomerProfileIds: vi.fn(),
+  orderBelongsToProfiles: vi.fn(),
+}));
+vi.mock("../../_core/auditLog", () => ({ audit: mockAudit }));
 
 import {
   READ_TOOLS,
@@ -61,10 +82,19 @@ import {
   resolveFollowUpDateArg,
   resolveCreateCustomOrderArgs,
   resolveUpdateCustomOrderArgs,
+  resolveBookingStatusArgs,
+  bookingBelongsToCustomer,
   CUSTOM_ORDER_CATEGORIES,
 } from "./opsTools";
 
-beforeEach(() => { nextRows = []; mockCollect.mockReset(); });
+beforeEach(() => {
+  nextRows = [];
+  mockCollect.mockReset();
+  mockGetBookingById.mockReset();
+  mockUpdateBooking.mockReset();
+  mockSnapshot.mockReset();
+  mockAudit.mockReset();
+});
 
 describe("READ_TOOLS definitions", () => {
   it("exposes the 14 curated tools", () => {
@@ -310,6 +340,226 @@ describe("update_custom_order — AI patches an existing project for this custom
     );
     expect(out.success).toBeUndefined();
     expect(out.error).toContain("沒有要改的欄位");
+  });
+});
+
+describe("update_booking_status — cross-customer guard + enum whitelist + audit (P1 2026-07-01)", () => {
+  const PROFILE_ID = 500;
+  const ADMIN_ID = 42;
+
+  it("tool schema does NOT offer refunded (refunds go through suggest_action)", () => {
+    const tool = WRITE_TOOLS.find((t) => t.name === "update_booking_status")!;
+    const pay = (tool.input_schema as any).properties.paymentStatus;
+    expect(pay.enum).toEqual(["unpaid", "deposit", "paid"]);
+    expect(pay.enum).not.toContain("refunded");
+  });
+
+  it("blocks with no customer selected (global chat can never write bookings)", async () => {
+    const out = JSON.parse(
+      await executeWriteTool(
+        "update_booking_status",
+        { bookingId: 9, paymentStatus: "paid" },
+        undefined,
+        ADMIN_ID,
+      ),
+    );
+    expect(out.success).toBeUndefined();
+    expect(out.error).toContain("客人");
+    expect(mockUpdateBooking).not.toHaveBeenCalled();
+  });
+
+  it("blocks with no admin userId (the audit trail requires an actor)", async () => {
+    const out = JSON.parse(
+      await executeWriteTool(
+        "update_booking_status",
+        { bookingId: 9, paymentStatus: "paid" },
+        PROFILE_ID,
+        undefined,
+      ),
+    );
+    expect(out.success).toBeUndefined();
+    expect(out.error).toContain("操作者");
+    expect(mockUpdateBooking).not.toHaveBeenCalled();
+  });
+
+  it("rejects someone ELSE's booking (userId and email both mismatch) without writing", async () => {
+    mockGetBookingById.mockResolvedValue({
+      id: 9,
+      userId: 777,
+      customerEmail: "other@x.com",
+      bookingStatus: "confirmed",
+      paymentStatus: "deposit",
+    });
+    mockSnapshot.mockResolvedValue({ name: "Jenny", email: "jenny@example.com", userId: 111 });
+    const out = JSON.parse(
+      await executeWriteTool(
+        "update_booking_status",
+        { bookingId: 9, paymentStatus: "paid" },
+        PROFILE_ID,
+        ADMIN_ID,
+      ),
+    );
+    expect(out.success).toBeUndefined();
+    expect(out.error).toContain("不是這位客人的");
+    expect(mockUpdateBooking).not.toHaveBeenCalled();
+    expect(mockAudit).not.toHaveBeenCalled();
+  });
+
+  it("rejects an off-enum bookingStatus string BEFORE touching the DB", async () => {
+    const out = JSON.parse(
+      await executeWriteTool(
+        "update_booking_status",
+        { bookingId: 9, bookingStatus: "definitely-paid" },
+        PROFILE_ID,
+        ADMIN_ID,
+      ),
+    );
+    expect(out.success).toBeUndefined();
+    expect(out.error).toContain("bookingStatus");
+    expect(mockGetBookingById).not.toHaveBeenCalled();
+    expect(mockUpdateBooking).not.toHaveBeenCalled();
+  });
+
+  it("rejects paymentStatus=refunded — refunds are Jeff-review only", async () => {
+    const out = JSON.parse(
+      await executeWriteTool(
+        "update_booking_status",
+        { bookingId: 9, paymentStatus: "refunded" },
+        PROFILE_ID,
+        ADMIN_ID,
+      ),
+    );
+    expect(out.success).toBeUndefined();
+    expect(out.error).toContain("suggest_action");
+    expect(mockUpdateBooking).not.toHaveBeenCalled();
+  });
+
+  it("happy path: pinned customer's own booking → paid, with an audit row (old→new)", async () => {
+    mockGetBookingById.mockResolvedValue({
+      id: 9,
+      userId: 111,
+      customerEmail: "jenny@example.com",
+      bookingStatus: "confirmed",
+      paymentStatus: "deposit",
+    });
+    mockSnapshot.mockResolvedValue({ name: "Jenny", email: "jenny@example.com", userId: 111 });
+    mockUpdateBooking.mockResolvedValue({
+      id: 9,
+      bookingStatus: "confirmed",
+      paymentStatus: "paid",
+    });
+    const out = JSON.parse(
+      await executeWriteTool(
+        "update_booking_status",
+        { bookingId: 9, paymentStatus: "paid" },
+        PROFILE_ID,
+        ADMIN_ID,
+      ),
+    );
+    expect(out.success).toBe(true);
+    expect(out.paymentStatus).toBe("paid");
+    expect(mockUpdateBooking).toHaveBeenCalledWith(9, { paymentStatus: "paid" });
+    expect(mockAudit).toHaveBeenCalledTimes(1);
+    const arg = mockAudit.mock.calls[0][0];
+    expect(arg.action).toBe("booking.updateStatus");
+    expect(arg.targetType).toBe("booking");
+    expect(arg.targetId).toBe(9);
+    expect(arg.ctx.user.id).toBe(ADMIN_ID);
+    expect(arg.changes.before.paymentStatus).toBe("deposit");
+    expect(arg.changes.after.paymentStatus).toBe("paid");
+    expect(arg.reason).toContain(`profileId=${PROFILE_ID}`);
+  });
+
+  it("guest booking (no userId) matches by customerEmail, case-insensitively", async () => {
+    mockGetBookingById.mockResolvedValue({
+      id: 12,
+      userId: null,
+      customerEmail: "Jenny@Example.com",
+      bookingStatus: "pending",
+      paymentStatus: "unpaid",
+    });
+    mockSnapshot.mockResolvedValue({ name: "Jenny", email: "jenny@example.com", userId: null });
+    mockUpdateBooking.mockResolvedValue({
+      id: 12,
+      bookingStatus: "confirmed",
+      paymentStatus: "unpaid",
+    });
+    const out = JSON.parse(
+      await executeWriteTool(
+        "update_booking_status",
+        { bookingId: 12, bookingStatus: "confirmed" },
+        PROFILE_ID,
+        ADMIN_ID,
+      ),
+    );
+    expect(out.success).toBe(true);
+    expect(mockUpdateBooking).toHaveBeenCalledWith(12, { bookingStatus: "confirmed" });
+  });
+
+  describe("resolveBookingStatusArgs (pure)", () => {
+    it("requires a positive bookingId", () => {
+      expect(resolveBookingStatusArgs({ paymentStatus: "paid" }).ok).toBe(false);
+      expect(resolveBookingStatusArgs({ bookingId: 0, paymentStatus: "paid" }).ok).toBe(false);
+      expect(resolveBookingStatusArgs({ bookingId: -2, paymentStatus: "paid" }).ok).toBe(false);
+    });
+
+    it("requires at least one status field", () => {
+      expect(resolveBookingStatusArgs({ bookingId: 5 }).ok).toBe(false);
+    });
+
+    it("whitelists both enums server-side (schema enum is only a hint)", () => {
+      expect(resolveBookingStatusArgs({ bookingId: 5, bookingStatus: "shipped" }).ok).toBe(false);
+      expect(resolveBookingStatusArgs({ bookingId: 5, paymentStatus: "partial" }).ok).toBe(false);
+      const r = resolveBookingStatusArgs({ bookingId: 5, bookingStatus: "cancelled", paymentStatus: "deposit" });
+      expect(r).toEqual({
+        ok: true,
+        value: { bookingId: 5, updates: { bookingStatus: "cancelled", paymentStatus: "deposit" } },
+      });
+    });
+
+    it("rejects refunded with a suggest_action pointer", () => {
+      const r = resolveBookingStatusArgs({ bookingId: 5, paymentStatus: "refunded" });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toContain("suggest_action");
+    });
+  });
+
+  describe("bookingBelongsToCustomer (pure ownership rule)", () => {
+    it("matches on userId", () => {
+      expect(
+        bookingBelongsToCustomer(
+          { userId: 111, customerEmail: "whatever@x.com" },
+          { userId: 111, email: null },
+        ),
+      ).toBe(true);
+    });
+
+    it("matches on email (trimmed, case-insensitive) for guest bookings", () => {
+      expect(
+        bookingBelongsToCustomer(
+          { userId: null, customerEmail: " Jenny@Example.com " },
+          { userId: null, email: "jenny@example.com" },
+        ),
+      ).toBe(true);
+    });
+
+    it("never matches when both sides have no usable identity (empty ≠ empty)", () => {
+      expect(
+        bookingBelongsToCustomer(
+          { userId: null, customerEmail: "" },
+          { userId: null, email: null },
+        ),
+      ).toBe(false);
+    });
+
+    it("rejects a different customer's booking", () => {
+      expect(
+        bookingBelongsToCustomer(
+          { userId: 777, customerEmail: "other@x.com" },
+          { userId: 111, email: "jenny@example.com" },
+        ),
+      ).toBe(false);
+    });
   });
 });
 
