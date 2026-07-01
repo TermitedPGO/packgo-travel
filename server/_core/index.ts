@@ -763,7 +763,7 @@ async function startServer() {
       const startedAt = Date.now();
       let firstTokenLogged = false;
       try {
-        for await (const event of runOpsAgentStream(question, history, imageUrls, extraSystem, streamModel, draftProfileId)) {
+        for await (const event of runOpsAgentStream(question, history, imageUrls, extraSystem, streamModel, draftProfileId, user.id)) {
           if (terminated) break; // timed out or client disconnected
           if (event.type === "token") {
             if (!firstTokenLogged) {

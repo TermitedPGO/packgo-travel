@@ -59,6 +59,8 @@ import {
   executeReadTool,
   executeWriteTool,
   resolveFollowUpDateArg,
+  resolveCreateCustomOrderArgs,
+  CUSTOM_ORDER_CATEGORIES,
 } from "./opsTools";
 
 beforeEach(() => { nextRows = []; mockCollect.mockReset(); });
@@ -123,6 +125,113 @@ describe("set_follow_up_date — AI sets the cockpit follow-up date", () => {
       expect(resolveFollowUpDateArg({}).ok).toBe(false);
       expect(resolveFollowUpDateArg(null).ok).toBe(false);
     });
+  });
+});
+
+describe("create_custom_order — AI builds a standalone project for this customer", () => {
+  it("is exposed as a customer-page write tool", () => {
+    expect(WRITE_TOOLS.map((t) => t.name)).toContain("create_custom_order");
+  });
+
+  it("the tool's category enum matches CUSTOM_ORDER_CATEGORIES", () => {
+    const tool = WRITE_TOOLS.find((t) => t.name === "create_custom_order")!;
+    const enumVals = (tool.input_schema as any).properties.category.enum;
+    expect(enumVals).toEqual([...CUSTOM_ORDER_CATEGORIES]);
+  });
+
+  describe("resolveCreateCustomOrderArgs", () => {
+    it("accepts a minimal order (title only) → sensible defaults", () => {
+      const r = resolveCreateCustomOrderArgs({ title: "劉衛國 PEK-SFO 商務艙機票" });
+      expect(r).toEqual({
+        ok: true,
+        value: {
+          title: "劉衛國 PEK-SFO 商務艙機票",
+          category: null,
+          destination: null,
+          totalPrice: null,
+          supplierCost: null,
+          departureDate: null,
+          returnDate: null,
+          needsQuote: 0,
+          notes: null,
+        },
+      });
+    });
+
+    it("normalizes money to a decimal string and keeps a valid category", () => {
+      const r = resolveCreateCustomOrderArgs({
+        title: "Jeff Green 中國簽證",
+        category: "visa",
+        totalPrice: 290,
+        supplierCost: 180,
+      });
+      expect(r.ok).toBe(true);
+      if (r.ok) {
+        expect(r.value.category).toBe("visa");
+        expect(r.value.totalPrice).toBe("290");
+        expect(r.value.supplierCost).toBe("180");
+      }
+    });
+
+    it("trims title and rejects an empty / whitespace-only title", () => {
+      expect(resolveCreateCustomOrderArgs({ title: "  Air China 機票 " })).toMatchObject({
+        ok: true,
+        value: { title: "Air China 機票" },
+      });
+      expect(resolveCreateCustomOrderArgs({ title: "   " }).ok).toBe(false);
+      expect(resolveCreateCustomOrderArgs({}).ok).toBe(false);
+      expect(resolveCreateCustomOrderArgs(null).ok).toBe(false);
+    });
+
+    it("rejects a category outside the whitelist so the model retries", () => {
+      const r = resolveCreateCustomOrderArgs({ title: "x", category: "hotel" });
+      expect(r.ok).toBe(false);
+    });
+
+    it("rejects negative or non-numeric money (never silently coerces to 0)", () => {
+      expect(resolveCreateCustomOrderArgs({ title: "x", totalPrice: -5 }).ok).toBe(false);
+      expect(resolveCreateCustomOrderArgs({ title: "x", supplierCost: "abc" }).ok).toBe(false);
+    });
+
+    it("empty-string money → null (not 0), so a blank stays blank", () => {
+      const r = resolveCreateCustomOrderArgs({ title: "x", totalPrice: "", supplierCost: null });
+      expect(r.ok).toBe(true);
+      if (r.ok) {
+        expect(r.value.totalPrice).toBeNull();
+        expect(r.value.supplierCost).toBeNull();
+      }
+    });
+
+    it("accepts a real YYYY-MM-DD but rejects a non-calendar / malformed date", () => {
+      expect(resolveCreateCustomOrderArgs({ title: "x", departureDate: "2026-07-04" })).toMatchObject({
+        ok: true,
+        value: { departureDate: "2026-07-04" },
+      });
+      expect(resolveCreateCustomOrderArgs({ title: "x", departureDate: "2026-02-30" }).ok).toBe(false);
+      expect(resolveCreateCustomOrderArgs({ title: "x", returnDate: "07/04/2026" }).ok).toBe(false);
+    });
+
+    it("needsQuote defaults to 0 and is only 1 when explicitly true", () => {
+      expect((resolveCreateCustomOrderArgs({ title: "x" }) as any).value.needsQuote).toBe(0);
+      expect((resolveCreateCustomOrderArgs({ title: "x", needsQuote: false }) as any).value.needsQuote).toBe(0);
+      expect((resolveCreateCustomOrderArgs({ title: "x", needsQuote: true }) as any).value.needsQuote).toBe(1);
+    });
+  });
+
+  it("executeWriteTool blocks create_custom_order with no customer selected", async () => {
+    const out = JSON.parse(
+      await executeWriteTool("create_custom_order", { title: "x" }, undefined, 42),
+    );
+    expect(out.success).toBeUndefined();
+    expect(out.error).toContain("客人");
+  });
+
+  it("executeWriteTool blocks create_custom_order with no admin userId (createdBy)", async () => {
+    const out = JSON.parse(
+      await executeWriteTool("create_custom_order", { title: "x" }, 2760016, undefined),
+    );
+    expect(out.success).toBeUndefined();
+    expect(out.error).toContain("建立者");
   });
 });
 

@@ -320,6 +320,52 @@ export const WRITE_TOOLS: Anthropic.Tool[] = [
       required: [],
     },
   },
+  {
+    name: "create_custom_order",
+    description:
+      "為『目前這位客人』建立一張獨立訂製單(=客戶頁上的一個專案 / ProjectBar 一個 chip)。" +
+      "用在 Jeff 說「幫這幾筆機票建單」「補進去」「開一張簽證單」「這個案子開個專案」時。" +
+      "適用單獨的機票 / 簽證 / 報價 / 一般諮詢 — 這類不需要掛在出團團期(tourDeparture)上," +
+      "所以不要用 booking / update_booking_status,直接用這個工具建 customOrder。" +
+      "一次只建一張;要建多張(例如同一位協調人底下好幾筆機票)就連續呼叫多次,每筆各一張。" +
+      "title 用一眼看懂的短描述(例:『劉衛國 PEK-SFO 商務艙機票』『Jeff Green 中國簽證』)。" +
+      "category 分四類:flight=機票 / visa=簽證 / quote=報價行程 / general=一般諮詢。" +
+      "totalPrice 是直客售價(選填);supplierCost 是成本(選填,只給 Jeff 算毛利,絕不上客人文件)。" +
+      "**金額一律不要自己編,對話/附件裡有才填,沒有就留空。** 單一律建成 draft(草稿)狀態;" +
+      "就算 Jeff 說『已付清』也不要在這裡標成已付款 — 碰錢的狀態改由 Jeff 之後在客戶頁手動標。" +
+      "建好用一句話跟 Jeff 報:建了哪張、單號。",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          description: "短描述,一眼看懂這張單是什麼(例:『劉衛國 PEK-SFO 商務艙機票』)",
+        },
+        category: {
+          type: "string",
+          enum: ["flight", "visa", "quote", "general"],
+          description: "總類:flight=機票 / visa=簽證 / quote=報價行程 / general=一般諮詢",
+        },
+        destination: { type: "string", description: "目的地(選填)" },
+        totalPrice: {
+          type: "number",
+          description: "直客售價(選填,不確定就留空,絕不編)",
+        },
+        supplierCost: {
+          type: "number",
+          description: "成本(選填,只給 Jeff 算毛利,絕不上客人文件,絕不編)",
+        },
+        departureDate: { type: "string", description: "出發日 YYYY-MM-DD(選填)" },
+        returnDate: { type: "string", description: "回程日 YYYY-MM-DD(選填)" },
+        needsQuote: {
+          type: "boolean",
+          description: "是否還要報價。補歷史/已成交的單傳 false(預設);全新還沒報價的案子才傳 true。",
+        },
+        notes: { type: "string", description: "內部備註(選填,例如『客人說已付清,待 Jeff 標記』)" },
+      },
+      required: ["title"],
+    },
+  },
 ];
 
 export const CREATE_CUSTOMER_TOOL: Anthropic.Tool = {
@@ -1054,13 +1100,109 @@ export function resolveFollowUpDateArg(
   return { ok: true, value: raw };
 }
 
+/** The four project categories a customOrder can carry (mirrors the tRPC
+ *  create's PROJECT_CATEGORY_KEYS — flight/quote/visa/general). */
+export const CUSTOM_ORDER_CATEGORIES = ["flight", "visa", "quote", "general"] as const;
+
+export interface CreateCustomOrderFields {
+  title: string;
+  category: string | null;
+  destination: string | null;
+  totalPrice: string | null;
+  supplierCost: string | null;
+  departureDate: string | null;
+  returnDate: string | null;
+  needsQuote: number;
+  notes: string | null;
+}
+
+/**
+ * Pure validator/normalizer for the create_custom_order tool. Turns the model's
+ * loose args into the exact insert-shape fields (money → decimal string, dates →
+ * validated YYYY-MM-DD, category → whitelisted). Pure so it is unit-tested with
+ * no DB (local has no DATABASE_URL). DB-derived fields (orderNumber, profile
+ * snapshot, createdBy) are added by the executor, not here. Errors flow back to
+ * the model as a tool_result so it can self-correct (e.g. drop a bad date).
+ */
+export function resolveCreateCustomOrderArgs(
+  input: any,
+): { ok: true; value: CreateCustomOrderFields } | { ok: false; error: string } {
+  const title = typeof input?.title === "string" ? input.title.trim() : "";
+  if (!title) return { ok: false, error: "title 必填(一眼看懂這張單是什麼)" };
+  if (title.length > 200) return { ok: false, error: "title 太長(上限 200 字)" };
+
+  const cat = typeof input?.category === "string" ? input.category.trim() : "";
+  if (cat && !CUSTOM_ORDER_CATEGORIES.includes(cat as any))
+    return { ok: false, error: `category 只能是 ${CUSTOM_ORDER_CATEGORIES.join("/")},收到「${cat}」` };
+  const category = cat || null;
+
+  const money = (
+    v: unknown,
+    label: string,
+  ): { ok: true; value: string | null } | { ok: false; error: string } => {
+    if (v == null || v === "") return { ok: true, value: null };
+    const n = typeof v === "number" ? v : Number(v);
+    if (!Number.isFinite(n) || n < 0) return { ok: false, error: `${label} 要是 >= 0 的數字` };
+    if (n > 99_999_999) return { ok: false, error: `${label} 數字太大` };
+    return { ok: true, value: String(n) };
+  };
+  const total = money(input?.totalPrice, "totalPrice");
+  if (!total.ok) return total;
+  const cost = money(input?.supplierCost, "supplierCost");
+  if (!cost.ok) return cost;
+
+  const dateArg = (
+    v: unknown,
+    label: string,
+  ): { ok: true; value: string | null } | { ok: false; error: string } => {
+    if (v == null || v === "") return { ok: true, value: null };
+    const s = String(v).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s))
+      return { ok: false, error: `${label} 格式要 YYYY-MM-DD,收到「${s}」` };
+    const d = new Date(`${s}T00:00:00Z`);
+    if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s)
+      return { ok: false, error: `${label} 不是有效日期:${s}` };
+    return { ok: true, value: s };
+  };
+  const dep = dateArg(input?.departureDate, "departureDate");
+  if (!dep.ok) return dep;
+  const ret = dateArg(input?.returnDate, "returnDate");
+  if (!ret.ok) return ret;
+
+  const destination =
+    typeof input?.destination === "string" && input.destination.trim()
+      ? input.destination.trim().slice(0, 200)
+      : null;
+  const notes =
+    typeof input?.notes === "string" && input.notes.trim()
+      ? input.notes.trim().slice(0, 5000)
+      : null;
+  const needsQuote = input?.needsQuote === true ? 1 : 0;
+
+  return {
+    ok: true,
+    value: {
+      title,
+      category,
+      destination,
+      totalPrice: total.value,
+      supplierCost: cost.value,
+      departureDate: dep.value,
+      returnDate: ret.value,
+      needsQuote,
+      notes,
+    },
+  };
+}
+
 export async function executeWriteTool(
   name: string,
   input: any,
   profileId: number | undefined,
+  adminUserId?: number,
 ): Promise<string> {
   try {
-    const result = await runWriteTool(name, input, profileId);
+    const result = await runWriteTool(name, input, profileId, adminUserId);
     return JSON.stringify(result);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -1073,6 +1215,7 @@ async function runWriteTool(
   name: string,
   input: any,
   profileId: number | undefined,
+  adminUserId?: number,
 ): Promise<unknown> {
   const { getDb } = await import("../../db");
   const { customerProfiles } = await import("../../../drizzle/schema");
@@ -1178,6 +1321,55 @@ async function runWriteTool(
         success: true,
         followUpDate: parsed.value,
         message: parsed.value ? `跟進日設為 ${parsed.value}` : "跟進日已清除",
+      };
+    }
+
+    case "create_custom_order": {
+      if (!profileId) return { error: "沒有選定客人 — 這個工具只能在某位客人的對話框裡用" };
+      if (!adminUserId) return { error: "缺少建立者(系統沒帶到 admin userId)" };
+      const parsed = resolveCreateCustomOrderArgs(input);
+      if (!parsed.ok) return { error: parsed.error };
+      const v = parsed.value;
+      const { createCustomOrder, generateOrderNumber, getCustomerProfileSnapshot } =
+        await import("../../db/customOrder");
+      const snap = await getCustomerProfileSnapshot(profileId);
+      const orderNumber = await generateOrderNumber();
+      const order = await createCustomOrder({
+        orderNumber,
+        customerProfileId: profileId,
+        userId: snap.userId ?? null,
+        customerName: snap.name || snap.email || "客戶",
+        customerEmail: snap.email ?? null,
+        title: v.title,
+        category: v.category,
+        destination: v.destination,
+        needsQuote: v.needsQuote,
+        status: "draft",
+        currency: "USD",
+        totalPrice: v.totalPrice,
+        supplierCost: v.supplierCost,
+        departureDate: v.departureDate,
+        returnDate: v.returnDate,
+        notes: v.notes,
+        createdBy: adminUserId,
+      });
+      if (!order) return { error: "建立失敗(資料庫沒回傳)" };
+      // Recompute the customer's driver-bar / summary so the new project shows
+      // up in「做了什麼」immediately (same bump the tRPC create does).
+      void import("../../queue")
+        .then((m) => m.enqueueCustomerSummaryRefresh(profileId))
+        .catch(() => {});
+      log.info(
+        { profileId, orderId: order.id, orderNumber, category: v.category },
+        "create_custom_order executed",
+      );
+      return {
+        success: true,
+        orderId: order.id,
+        orderNumber,
+        title: v.title,
+        category: v.category,
+        message: `已建立專案「${v.title}」(${orderNumber})`,
       };
     }
 
