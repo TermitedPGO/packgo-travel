@@ -366,6 +366,38 @@ export const WRITE_TOOLS: Anthropic.Tool[] = [
       required: ["title"],
     },
   },
+  {
+    name: "update_custom_order",
+    description:
+      "改『目前這位客人』既有的一張訂製單(專案)。用在 Jeff 說「這張補上票價」「把這筆改成簽證」" +
+      "「填一下出發日」「這單標題改成…」,或你從剛丟進來的 PDF 讀到既有單缺的資料要補回去時。" +
+      "先從帳務/專案列表拿到那張單的 orderId,再只傳「要改的欄位」— 沒傳的欄位不會動(這是補丁,不是覆蓋," +
+      "補一個票價不會把標題洗掉)。可改:title / category(flight|visa|quote|general)/ destination / " +
+      "totalPrice(直客售價)/ supplierCost(成本,只給 Jeff 算毛利,絕不上客人文件)/ departureDate / " +
+      "returnDate / needsQuote / notes。**金額一律不編,PDF/對話裡有才填。** " +
+      "**不能在這改付款/狀態** — 標已付款、確認、取消這種碰錢的仍由 Jeff 手動。只能改屬於這位客人的單。" +
+      "改完用一句話報:改了哪張、動了哪些欄位。",
+    input_schema: {
+      type: "object",
+      properties: {
+        orderId: { type: "number", description: "要改的訂製單 id(從帳務/專案列表拿,不要編)" },
+        title: { type: "string", description: "新標題(選填)" },
+        category: {
+          type: "string",
+          enum: ["flight", "visa", "quote", "general"],
+          description: "改總類(選填):flight=機票 / visa=簽證 / quote=報價行程 / general=一般諮詢",
+        },
+        destination: { type: "string", description: "目的地(選填;傳空字串=清除)" },
+        totalPrice: { type: "number", description: "直客售價(選填,不確定就別傳這欄,絕不編)" },
+        supplierCost: { type: "number", description: "成本(選填,只給 Jeff 算毛利,絕不編)" },
+        departureDate: { type: "string", description: "出發日 YYYY-MM-DD(選填)" },
+        returnDate: { type: "string", description: "回程日 YYYY-MM-DD(選填)" },
+        needsQuote: { type: "boolean", description: "是否還要報價(選填)" },
+        notes: { type: "string", description: "內部備註(選填;傳空字串=清除)" },
+      },
+      required: ["orderId"],
+    },
+  },
 ];
 
 export const CREATE_CUSTOMER_TOOL: Anthropic.Tool = {
@@ -1116,6 +1148,40 @@ export interface CreateCustomOrderFields {
   notes: string | null;
 }
 
+type ArgResult<T> = { ok: true; value: T } | { ok: false; error: string };
+
+/** Shared money normalizer for create/update custom-order tools: blank → null
+ *  (leave unset, never coerce to 0), otherwise a >=0 finite number → decimal
+ *  string. Rejects negatives / NaN / absurdly large so the model self-corrects. */
+function moneyArg(v: unknown, label: string): ArgResult<string | null> {
+  if (v == null || v === "") return { ok: true, value: null };
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n) || n < 0) return { ok: false, error: `${label} 要是 >= 0 的數字` };
+  if (n > 99_999_999) return { ok: false, error: `${label} 數字太大` };
+  return { ok: true, value: String(n) };
+}
+
+/** Shared date normalizer: blank → null, otherwise a REAL YYYY-MM-DD calendar
+ *  day (rejects 2026-02-30 etc.). */
+function dateArg(v: unknown, label: string): ArgResult<string | null> {
+  if (v == null || v === "") return { ok: true, value: null };
+  const s = String(v).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s))
+    return { ok: false, error: `${label} 格式要 YYYY-MM-DD,收到「${s}」` };
+  const d = new Date(`${s}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s)
+    return { ok: false, error: `${label} 不是有效日期:${s}` };
+  return { ok: true, value: s };
+}
+
+/** Shared category validator: blank → null, otherwise must be whitelisted. */
+function categoryArg(v: unknown): ArgResult<string | null> {
+  const cat = typeof v === "string" ? v.trim() : "";
+  if (cat && !CUSTOM_ORDER_CATEGORIES.includes(cat as any))
+    return { ok: false, error: `category 只能是 ${CUSTOM_ORDER_CATEGORIES.join("/")},收到「${cat}」` };
+  return { ok: true, value: cat || null };
+}
+
 /**
  * Pure validator/normalizer for the create_custom_order tool. Turns the model's
  * loose args into the exact insert-shape fields (money → decimal string, dates →
@@ -1131,39 +1197,15 @@ export function resolveCreateCustomOrderArgs(
   if (!title) return { ok: false, error: "title 必填(一眼看懂這張單是什麼)" };
   if (title.length > 200) return { ok: false, error: "title 太長(上限 200 字)" };
 
-  const cat = typeof input?.category === "string" ? input.category.trim() : "";
-  if (cat && !CUSTOM_ORDER_CATEGORIES.includes(cat as any))
-    return { ok: false, error: `category 只能是 ${CUSTOM_ORDER_CATEGORIES.join("/")},收到「${cat}」` };
-  const category = cat || null;
+  const catRes = categoryArg(input?.category);
+  if (!catRes.ok) return catRes;
+  const category = catRes.value;
 
-  const money = (
-    v: unknown,
-    label: string,
-  ): { ok: true; value: string | null } | { ok: false; error: string } => {
-    if (v == null || v === "") return { ok: true, value: null };
-    const n = typeof v === "number" ? v : Number(v);
-    if (!Number.isFinite(n) || n < 0) return { ok: false, error: `${label} 要是 >= 0 的數字` };
-    if (n > 99_999_999) return { ok: false, error: `${label} 數字太大` };
-    return { ok: true, value: String(n) };
-  };
-  const total = money(input?.totalPrice, "totalPrice");
+  const total = moneyArg(input?.totalPrice, "totalPrice");
   if (!total.ok) return total;
-  const cost = money(input?.supplierCost, "supplierCost");
+  const cost = moneyArg(input?.supplierCost, "supplierCost");
   if (!cost.ok) return cost;
 
-  const dateArg = (
-    v: unknown,
-    label: string,
-  ): { ok: true; value: string | null } | { ok: false; error: string } => {
-    if (v == null || v === "") return { ok: true, value: null };
-    const s = String(v).trim();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(s))
-      return { ok: false, error: `${label} 格式要 YYYY-MM-DD,收到「${s}」` };
-    const d = new Date(`${s}T00:00:00Z`);
-    if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s)
-      return { ok: false, error: `${label} 不是有效日期:${s}` };
-    return { ok: true, value: s };
-  };
   const dep = dateArg(input?.departureDate, "departureDate");
   if (!dep.ok) return dep;
   const ret = dateArg(input?.returnDate, "returnDate");
@@ -1193,6 +1235,89 @@ export function resolveCreateCustomOrderArgs(
       notes,
     },
   };
+}
+
+/** The fields update_custom_order may patch. Only the keys the model actually
+ *  supplies land in the patch (a missing field is left untouched — this is a
+ *  PATCH, not a replace, so「補一個票價」never blanks the title). Deliberately
+ *  excludes status / payment — money-touching lifecycle changes stay manual
+ *  (Jeff advances status; see the admin-AI boundary). */
+export interface UpdateCustomOrderPatch {
+  title?: string;
+  category?: string | null;
+  destination?: string | null;
+  totalPrice?: string | null;
+  supplierCost?: string | null;
+  departureDate?: string | null;
+  returnDate?: string | null;
+  needsQuote?: number;
+  notes?: string | null;
+}
+
+/**
+ * Pure validator/normalizer for update_custom_order. Requires a positive orderId
+ * and at least one field to change; builds a PARTIAL patch of ONLY the provided
+ * fields (so unspecified fields are never overwritten). Same normalizers as
+ * create (money → decimal string, dates validated, category whitelisted). Pure →
+ * unit-tested with no DB. The cross-customer guard (order must belong to THIS
+ * customer) lives in the executor, not here.
+ */
+export function resolveUpdateCustomOrderArgs(
+  input: any,
+): { ok: true; value: { orderId: number; patch: UpdateCustomOrderPatch } } | { ok: false; error: string } {
+  const orderId = typeof input?.orderId === "number" ? input.orderId : Number(input?.orderId);
+  if (!Number.isInteger(orderId) || orderId <= 0)
+    return { ok: false, error: "需要要改的 orderId(正整數;先從帳務/專案列表拿單號對應的 id)" };
+
+  const patch: UpdateCustomOrderPatch = {};
+
+  if (input?.title !== undefined) {
+    const title = typeof input.title === "string" ? input.title.trim() : "";
+    if (!title) return { ok: false, error: "title 不能改成空的" };
+    if (title.length > 200) return { ok: false, error: "title 太長(上限 200 字)" };
+    patch.title = title;
+  }
+  if (input?.category !== undefined) {
+    const catRes = categoryArg(input.category);
+    if (!catRes.ok) return catRes;
+    patch.category = catRes.value;
+  }
+  if (input?.destination !== undefined) {
+    const d = typeof input.destination === "string" ? input.destination.trim() : "";
+    patch.destination = d ? d.slice(0, 200) : null;
+  }
+  if (input?.totalPrice !== undefined) {
+    const r = moneyArg(input.totalPrice, "totalPrice");
+    if (!r.ok) return r;
+    patch.totalPrice = r.value;
+  }
+  if (input?.supplierCost !== undefined) {
+    const r = moneyArg(input.supplierCost, "supplierCost");
+    if (!r.ok) return r;
+    patch.supplierCost = r.value;
+  }
+  if (input?.departureDate !== undefined) {
+    const r = dateArg(input.departureDate, "departureDate");
+    if (!r.ok) return r;
+    patch.departureDate = r.value;
+  }
+  if (input?.returnDate !== undefined) {
+    const r = dateArg(input.returnDate, "returnDate");
+    if (!r.ok) return r;
+    patch.returnDate = r.value;
+  }
+  if (input?.needsQuote !== undefined) {
+    patch.needsQuote = input.needsQuote === true ? 1 : 0;
+  }
+  if (input?.notes !== undefined) {
+    const n = typeof input.notes === "string" ? input.notes.trim() : "";
+    patch.notes = n ? n.slice(0, 5000) : null;
+  }
+
+  if (Object.keys(patch).length === 0)
+    return { ok: false, error: "沒有要改的欄位 — 至少給一個(title/category/totalPrice/supplierCost/日期/notes…)" };
+
+  return { ok: true, value: { orderId, patch } };
 }
 
 export async function executeWriteTool(
@@ -1370,6 +1495,47 @@ async function runWriteTool(
         title: v.title,
         category: v.category,
         message: `已建立專案「${v.title}」(${orderNumber})`,
+      };
+    }
+
+    case "update_custom_order": {
+      if (!profileId) return { error: "沒有選定客人 — 這個工具只能在某位客人的對話框裡用" };
+      const parsed = resolveUpdateCustomOrderArgs(input);
+      if (!parsed.ok) return { error: parsed.error };
+      const { orderId, patch } = parsed.value;
+      const {
+        getCustomOrderById,
+        updateCustomOrder,
+        getCustomerProfileSnapshot,
+        resolveCustomerProfileIds,
+        orderBelongsToProfiles,
+      } = await import("../../db/customOrder");
+      const order = await getCustomOrderById(orderId);
+      if (!order) return { error: `找不到訂單 #${orderId}` };
+      // Cross-customer guard (same rule as ask-ops-stream + assignConversation):
+      // the order MUST belong to this customer's profile set, never another's.
+      const snap = await getCustomerProfileSnapshot(profileId);
+      const scopeIds =
+        snap.userId != null
+          ? await resolveCustomerProfileIds({ userId: snap.userId })
+          : [profileId];
+      if (!scopeIds.includes(profileId)) scopeIds.push(profileId);
+      if (!orderBelongsToProfiles(order.customerProfileId, scopeIds))
+        return { error: `訂單 #${orderId} 不是這位客人的,不能改` };
+
+      const updated = await updateCustomOrder(orderId, patch as any);
+      if (!updated) return { error: "更新失敗(資料庫沒回傳)" };
+      void import("../../queue")
+        .then((m) => m.enqueueCustomerSummaryRefresh(profileId))
+        .catch(() => {});
+      const changed = Object.keys(patch);
+      log.info({ profileId, orderId, changed }, "update_custom_order executed");
+      return {
+        success: true,
+        orderId,
+        orderNumber: updated.orderNumber,
+        changed,
+        message: `已更新單 ${updated.orderNumber}(改了:${changed.join("、")})`,
       };
     }
 

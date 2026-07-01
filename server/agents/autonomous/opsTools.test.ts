@@ -60,6 +60,7 @@ import {
   executeWriteTool,
   resolveFollowUpDateArg,
   resolveCreateCustomOrderArgs,
+  resolveUpdateCustomOrderArgs,
   CUSTOM_ORDER_CATEGORIES,
 } from "./opsTools";
 
@@ -232,6 +233,83 @@ describe("create_custom_order — AI builds a standalone project for this custom
     );
     expect(out.success).toBeUndefined();
     expect(out.error).toContain("建立者");
+  });
+});
+
+describe("update_custom_order — AI patches an existing project for this customer", () => {
+  it("is exposed as a customer-page write tool", () => {
+    expect(WRITE_TOOLS.map((t) => t.name)).toContain("update_custom_order");
+  });
+
+  describe("resolveUpdateCustomOrderArgs", () => {
+    it("requires a positive orderId", () => {
+      expect(resolveUpdateCustomOrderArgs({ title: "x" }).ok).toBe(false);
+      expect(resolveUpdateCustomOrderArgs({ orderId: 0, title: "x" }).ok).toBe(false);
+      expect(resolveUpdateCustomOrderArgs({ orderId: -3, title: "x" }).ok).toBe(false);
+    });
+
+    it("requires at least one field to change", () => {
+      expect(resolveUpdateCustomOrderArgs({ orderId: 5 }).ok).toBe(false);
+    });
+
+    it("builds a PARTIAL patch of only the provided fields (missing = untouched)", () => {
+      // The Morris-Young case: fill only the blank price, leave title/etc alone.
+      const r = resolveUpdateCustomOrderArgs({ orderId: 42, totalPrice: 1234 });
+      expect(r).toEqual({ ok: true, value: { orderId: 42, patch: { totalPrice: "1234" } } });
+    });
+
+    it("accepts orderId as a numeric string", () => {
+      const r = resolveUpdateCustomOrderArgs({ orderId: "42", notes: "已付清待標記" });
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.value.orderId).toBe(42);
+    });
+
+    it("normalizes multiple fields and keeps a valid category", () => {
+      const r = resolveUpdateCustomOrderArgs({
+        orderId: 7,
+        category: "flight",
+        totalPrice: 6635,
+        departureDate: "2026-07-15",
+      });
+      expect(r).toEqual({
+        ok: true,
+        value: {
+          orderId: 7,
+          patch: { category: "flight", totalPrice: "6635", departureDate: "2026-07-15" },
+        },
+      });
+    });
+
+    it("empty-string destination/notes → null (explicit clear)", () => {
+      const r = resolveUpdateCustomOrderArgs({ orderId: 7, destination: "", notes: "" });
+      expect(r).toEqual({ ok: true, value: { orderId: 7, patch: { destination: null, notes: null } } });
+    });
+
+    it("rejects a blank title (cannot clear the title)", () => {
+      expect(resolveUpdateCustomOrderArgs({ orderId: 7, title: "   " }).ok).toBe(false);
+    });
+
+    it("rejects bad category / negative money / non-calendar date, model retries", () => {
+      expect(resolveUpdateCustomOrderArgs({ orderId: 7, category: "hotel" }).ok).toBe(false);
+      expect(resolveUpdateCustomOrderArgs({ orderId: 7, supplierCost: -1 }).ok).toBe(false);
+      expect(resolveUpdateCustomOrderArgs({ orderId: 7, departureDate: "2026-02-30" }).ok).toBe(false);
+    });
+  });
+
+  it("executeWriteTool blocks update_custom_order with no customer selected", async () => {
+    const out = JSON.parse(
+      await executeWriteTool("update_custom_order", { orderId: 1, notes: "x" }, undefined),
+    );
+    expect(out.success).toBeUndefined();
+    expect(out.error).toContain("客人");
+  });
+
+  it("executeWriteTool surfaces the validator error (no field to change)", async () => {
+    const out = JSON.parse(
+      await executeWriteTool("update_custom_order", { orderId: 1 }, 2760016),
+    );
+    expect(out.success).toBeUndefined();
+    expect(out.error).toContain("沒有要改的欄位");
   });
 });
 
