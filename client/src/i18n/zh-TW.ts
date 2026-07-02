@@ -3358,6 +3358,7 @@ export const zhTW = {
           update_custom_order: '更新專案',
           collect_customer_threads: '收進郵件往來',
           create_customer: '新增客人',
+          merge_into_customer: '合併客人',
         },
         // 後端 error 事件沒帶訊息時的通用錯誤氣泡。
         errorFallback: '出錯了,請再試一次。',

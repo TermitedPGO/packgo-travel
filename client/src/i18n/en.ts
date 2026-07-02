@@ -3393,6 +3393,7 @@ export const en = {
           update_custom_order: 'Updating project',
           collect_customer_threads: 'Collecting email threads',
           create_customer: 'Adding customer',
+          merge_into_customer: 'Merging customer',
         },
         // Generic error bubble when the backend error event carried no message.
         errorFallback: 'Something went wrong, please try again.',

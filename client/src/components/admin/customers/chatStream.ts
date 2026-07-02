@@ -71,6 +71,7 @@ export const TOOL_LABEL_KEYS: Record<string, string> = {
   update_custom_order: "admin.customers.chat.tools.update_custom_order",
   collect_customer_threads: "admin.customers.chat.tools.collect_customer_threads",
   create_customer: "admin.customers.chat.tools.create_customer",
+  merge_into_customer: "admin.customers.chat.tools.merge_into_customer",
 };
 
 /** i18n key the reducer stores when the backend sent an error event with no

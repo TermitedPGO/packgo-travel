@@ -417,6 +417,31 @@ export const WRITE_TOOLS: Anthropic.Tool[] = [
       required: ["orderId"],
     },
   },
+  {
+    name: "merge_into_customer",
+    description:
+      "把「目前釘住的這位客人」整份併入另一位既有客人。用在同案聯絡人被誤建成獨立客人時" +
+      "(同公司同一個案子、替某案協調的人,例如 leslie@ 其實是 Emerald(AXT 案)的聯絡窗口)。" +
+      "**只有 Jeff 明說「把這位併進某某」才呼叫;你察覺到疑似同案聯絡人時只能提醒,絕不自行合併。** " +
+      "target 用 targetEmail(精確比對客人檔案上的 email)或 targetProfileId 指定;" +
+      "來源固定是目前釘住的這位,系統釘死,你不用也不能指定。" +
+      "工具會把互動紀錄、文件、專案(訂製單)、聊天訊息全搬到 target 名下,再把這個重複檔隱藏並留備註。" +
+      "目前這位是註冊會員、target 不存在、或 target 就是本人都會被拒;搬完照工具回傳的筆數報結果。",
+    input_schema: {
+      type: "object",
+      properties: {
+        targetEmail: {
+          type: "string",
+          description: "要併入的那位客人的 email(精確比對客人檔案,不要編)",
+        },
+        targetProfileId: {
+          type: "number",
+          description: "要併入的那位客人的檔案編號(知道編號時用,優先於 targetEmail)",
+        },
+      },
+      required: [],
+    },
+  },
 ];
 
 export const CREATE_CUSTOMER_TOOL: Anthropic.Tool = {
@@ -1219,6 +1244,41 @@ export function mergeCustomerNote(
 }
 
 /**
+ * Pure validator for merge_into_customer's TARGET argument. The SOURCE is
+ * always the pinned profileId (never model-supplied); the model only names the
+ * target, by profile id (preferred when given) or by exact profile email.
+ * Errors flow back as a tool_result so the model can ask Jeff / self-correct.
+ * Pure so it's unit-tested without a DB.
+ */
+export function resolveMergeTargetArgs(
+  input: any,
+):
+  | { ok: true; value: { targetProfileId: number | null; targetEmail: string | null } }
+  | { ok: false; error: string } {
+  const rawId = input?.targetProfileId;
+  if (rawId !== undefined && rawId !== null && rawId !== "") {
+    const id = Number(rawId);
+    if (!Number.isInteger(id) || id <= 0)
+      return { ok: false, error: "targetProfileId 要是正整數(客人檔案編號)" };
+    return { ok: true, value: { targetProfileId: id, targetEmail: null } };
+  }
+  const email = typeof input?.targetEmail === "string" ? input.targetEmail.trim() : "";
+  if (!email)
+    return { ok: false, error: "需要 targetEmail 或 targetProfileId 指定要併入哪位客人" };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+    return { ok: false, error: `targetEmail 不是有效 email:「${email}」` };
+  return { ok: true, value: { targetProfileId: null, targetEmail: email.toLowerCase() } };
+}
+
+/** mysql2-via-drizzle update/delete result → affected row count. The result
+ *  shape varies by call path ([ResultSetHeader, …] or a bare header), so probe
+ *  both. Non-numeric → 0 (never NaN into a count Jeff reads). */
+function countAffected(r: any): number {
+  const n = r?.[0]?.affectedRows ?? r?.affectedRows;
+  return typeof n === "number" ? n : 0;
+}
+
+/**
  * Normalize a phone number for duplicate matching (CLAUDE.md §4.2 red line —
  * customerProfiles has no DB-level unique constraint, dedup is application
  * code). Strips pure formatting (spaces / dashes / parens / dots) so
@@ -1820,6 +1880,187 @@ async function runWriteTool(
         orderNumber: updated.orderNumber,
         changed,
         message: `已更新單 ${updated.orderNumber}(改了:${changed.join("、")})`,
+      };
+    }
+
+    case "merge_into_customer": {
+      // 同案聯絡人合併 (2026-07-01, leslie@greencommunicationsllc.com 其實是
+      // Emerald Young(AXT 案)的聯絡窗口卻被建成獨立客人)。SOURCE 永遠是釘住
+      // 的 profileId — 絕不信 model 給的 source;model 只指定 target。
+      if (!profileId)
+        return { error: "沒有選定客人 — 這個工具只能在某位客人的對話框裡用" };
+      if (!adminUserId) return { error: "缺少操作者(系統沒帶到 admin userId)" };
+      const parsed = resolveMergeTargetArgs(input);
+      if (!parsed.ok) return { error: parsed.error };
+      const { and, inArray, isNotNull } = await import("drizzle-orm");
+      const {
+        customerInteractions,
+        customerDocuments,
+        customOrders,
+        customerChatMessages,
+      } = await import("../../../drizzle/schema");
+
+      // Resolve the target (must exist). Email lookup takes the OLDEST match —
+      // same rule as create_customer dedup: the original row has the history.
+      const targetFields = {
+        id: customerProfiles.id,
+        name: customerProfiles.name,
+        email: customerProfiles.email,
+      };
+      let target: { id: number; name: string | null; email: string | null } | undefined;
+      if (parsed.value.targetProfileId != null) {
+        [target] = await db
+          .select(targetFields)
+          .from(customerProfiles)
+          .where(eq(customerProfiles.id, parsed.value.targetProfileId))
+          .limit(1);
+      } else {
+        [target] = await db
+          .select(targetFields)
+          .from(customerProfiles)
+          .where(eq(customerProfiles.email, parsed.value.targetEmail!))
+          .orderBy(customerProfiles.createdAt)
+          .limit(1);
+      }
+      if (!target) {
+        const who = parsed.value.targetEmail ?? `#${parsed.value.targetProfileId}`;
+        return { error: `找不到要併入的客人(${who}),確認 email 或編號後再試,不要編` };
+      }
+      if (target.id === profileId)
+        return { error: "目標就是目前這位客人,不能把自己併進自己" };
+
+      const [source] = await db
+        .select({
+          id: customerProfiles.id,
+          userId: customerProfiles.userId,
+          name: customerProfiles.name,
+          email: customerProfiles.email,
+          status: customerProfiles.status,
+          jeffPersonalNote: customerProfiles.jeffPersonalNote,
+        })
+        .from(customerProfiles)
+        .where(eq(customerProfiles.id, profileId))
+        .limit(1);
+      if (!source) return { error: `找不到目前這位客人的檔案(#${profileId})` };
+      if (source.userId != null)
+        return {
+          error:
+            "這位客人是註冊會員,不能整份併進別人(會員的歷史要留在帳號上)。" +
+            "要合併請反過來:開那個重複的訪客檔,把訪客併進這位會員,或人工處理。",
+        };
+
+      // customerInteractions carries uq(customerProfileId, externalId) — a cc'd
+      // 同案聯絡人 often has the SAME email thread filed on both profiles, so a
+      // blind move would hit a duplicate key. Drop the source's copies of
+      // anything the target already has, then move the rest.
+      const targetExt = await db
+        .select({ externalId: customerInteractions.externalId })
+        .from(customerInteractions)
+        .where(
+          and(
+            eq(customerInteractions.customerProfileId, target.id),
+            isNotNull(customerInteractions.externalId),
+          ),
+        )
+        .limit(5000);
+      const extIds = targetExt
+        .map((r) => r.externalId)
+        .filter((e): e is string => typeof e === "string" && e.length > 0);
+      let duplicatesDropped = 0;
+      if (extIds.length > 0) {
+        const del = await db
+          .delete(customerInteractions)
+          .where(
+            and(
+              eq(customerInteractions.customerProfileId, profileId),
+              inArray(customerInteractions.externalId, extIds),
+            ),
+          );
+        duplicatesDropped = countAffected(del);
+      }
+
+      // Move the four tables. Idempotent by construction: a re-run finds the
+      // source already empty and moves 0 rows, still成功.
+      const moved = {
+        interactions: countAffected(
+          await db
+            .update(customerInteractions)
+            .set({ customerProfileId: target.id })
+            .where(eq(customerInteractions.customerProfileId, profileId)),
+        ),
+        documents: countAffected(
+          await db
+            .update(customerDocuments)
+            .set({ customerProfileId: target.id })
+            .where(eq(customerDocuments.customerProfileId, profileId)),
+        ),
+        orders: countAffected(
+          await db
+            .update(customOrders)
+            .set({ customerProfileId: target.id })
+            .where(eq(customOrders.customerProfileId, profileId)),
+        ),
+        chatMessages: countAffected(
+          await db
+            .update(customerChatMessages)
+            .set({ customerProfileId: target.id })
+            .where(eq(customerChatMessages.customerProfileId, profileId)),
+        ),
+      };
+
+      // Hide the duplicate + leave a dated trace in Jeff's note (append via
+      // mergeCustomerNote — the existing note is never destroyed).
+      const targetLabel = target.name || target.email || `#${target.id}`;
+      const sourceLabel = source.name || source.email || `#${profileId}`;
+      const mergedNote = mergeCustomerNote(
+        source.jeffPersonalNote ?? null,
+        `已併入 ${targetLabel} (#${target.id})`,
+        false,
+      );
+      await db
+        .update(customerProfiles)
+        .set({
+          status: "blocked",
+          jeffPersonalNote: mergedNote || null,
+          updatedAt: new Date(),
+        })
+        .where(eq(customerProfiles.id, profileId));
+
+      // Audit trail (same pattern as update_booking_status).
+      const { audit } = await import("../../_core/auditLog");
+      await audit({
+        ctx: { user: { id: adminUserId, email: "ops-agent", role: "admin" } },
+        action: "customer.mergeInto",
+        targetType: "customerProfile",
+        targetId: profileId,
+        changes: {
+          before: { status: source.status },
+          after: { status: "blocked", mergedInto: target.id, moved, duplicatesDropped },
+        },
+        reason: `ops-agent merge_into_customer (customer chat, source=${profileId} target=${target.id})`,
+      });
+
+      // Refresh the target's driver-bar / summary so the merged history shows
+      // up immediately (same bump create_custom_order does).
+      void import("../../queue")
+        .then((m) => m.enqueueCustomerSummaryRefresh(target!.id))
+        .catch(() => {});
+
+      log.info(
+        { sourceProfileId: profileId, targetProfileId: target.id, moved, duplicatesDropped },
+        "merge_into_customer executed",
+      );
+      return {
+        success: true,
+        targetProfileId: target.id,
+        moved,
+        duplicatesDropped,
+        message:
+          `已把「${sourceLabel}」併入「${targetLabel}」(#${target.id}):` +
+          `互動 ${moved.interactions} 筆、文件 ${moved.documents} 筆、` +
+          `專案 ${moved.orders} 筆、聊天 ${moved.chatMessages} 筆` +
+          (duplicatesDropped > 0 ? `,略過 ${duplicatesDropped} 筆兩邊都有的重複互動` : "") +
+          "。原檔已隱藏。",
       };
     }
 

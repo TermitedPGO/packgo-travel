@@ -20,7 +20,7 @@ let lastDb: any = null;
 const takeRows = () => (rowQueue.length ? rowQueue.shift()! : nextRows);
 function makeDb() {
   const chain: any = {};
-  for (const m of ["select", "from", "leftJoin", "where", "orderBy", "groupBy", "insert", "values", "update", "set"]) {
+  for (const m of ["select", "from", "leftJoin", "where", "orderBy", "groupBy", "insert", "values", "update", "set", "delete"]) {
     chain[m] = vi.fn(() => chain);
   }
   chain.limit = vi.fn(() => Promise.resolve(takeRows()));
@@ -46,8 +46,11 @@ vi.mock("../../../drizzle/schema", () => ({
   tourDepartures: { id: "id", tourId: "tid", departureDate: "dd", adultPrice: "p", totalSlots: "ts", bookedSlots: "bs", opsStatus: "os", tourLeader: "tl" },
   bookings: { id: "id", customerName: "cn", customerEmail: "ce", customerPhone: "cp", tourId: "tid", departureId: "did", totalPrice: "tp", paymentStatus: "ps", bookingStatus: "bsx", createdAt: "ca" },
   bankTransactions: { id: "id", date: "d", merchantName: "mn", description: "desc", amount: "amt", agentCategory: "ac", jeffOverrideCategory: "joc", excludeFromAccounting: "efa", isPending: "ip", receiptUrl: "ru" },
-  customerProfiles: { id: "id", name: "n", email: "e", phone: "ph", jeffPersonalNote: "jpn", createdAt: "ca", budgetTier: "bt", bookingCount: "bc", totalSpend: "tsp", vipScore: "vs", aiNotes: "an" },
-  customerInteractions: { customerProfileId: "cpid", direction: "dir", content: "c", contentSummary: "cs", createdAt: "ca" },
+  customerProfiles: { id: "id", name: "n", email: "e", phone: "ph", userId: "uid", status: "st", jeffPersonalNote: "jpn", createdAt: "ca", budgetTier: "bt", bookingCount: "bc", totalSpend: "tsp", vipScore: "vs", aiNotes: "an" },
+  customerInteractions: { customerProfileId: "cpid", direction: "dir", content: "c", contentSummary: "cs", createdAt: "ca", externalId: "eid" },
+  customerDocuments: { customerProfileId: "cpid", type: "t", fileName: "fn", expiresAt: "ea", isCurrent: "ic", uploadedAt: "ua" },
+  customOrders: { customerProfileId: "cpid" },
+  customerChatMessages: { customerProfileId: "cpid" },
   users: { id: "id", email: "e", name: "n" },
 }));
 
@@ -60,7 +63,8 @@ vi.mock("drizzle-orm", () => {
   sql.join = tag("join");
   return {
     eq: tag("eq"), and: tag("and"), or: tag("or"), gte: tag("gte"), lte: tag("lte"),
-    isNull: tag("isNull"), inArray: tag("inArray"), sql, desc: tag("desc"), like: tag("like"),
+    isNull: tag("isNull"), isNotNull: tag("isNotNull"), inArray: tag("inArray"),
+    sql, desc: tag("desc"), like: tag("like"),
   };
 });
 
@@ -87,6 +91,9 @@ vi.mock("../../db/customOrder", () => ({
   orderBelongsToProfiles: vi.fn(),
 }));
 vi.mock("../../_core/auditLog", () => ({ audit: mockAudit }));
+// merge_into_customer's fire-and-forget summary refresh must not pull the real
+// BullMQ/Redis queue into a unit test.
+vi.mock("../../queue", () => ({ enqueueCustomerSummaryRefresh: vi.fn() }));
 
 import {
   READ_TOOLS,
@@ -97,6 +104,7 @@ import {
   resolveCreateCustomOrderArgs,
   resolveUpdateCustomOrderArgs,
   resolveBookingStatusArgs,
+  resolveMergeTargetArgs,
   bookingBelongsToCustomer,
   CUSTOM_ORDER_CATEGORIES,
   mergeCustomerNote,
@@ -986,5 +994,245 @@ describe("update_customer_note — append semantics (P2 2026-07-01: 覆寫毀掉
     const tool = WRITE_TOOLS.find((t) => t.name === "update_customer_note")!;
     expect((tool.input_schema as any).properties.replace).toBeTruthy();
     expect(tool.description).toContain("append");
+  });
+});
+
+describe("merge_into_customer — 同案聯絡人併檔 (2026-07-01: leslie@ 其實是 Emerald/AXT 的聯絡窗口)", () => {
+  const SOURCE_ID = 5;
+  const ADMIN_ID = 42;
+  const TARGET = { id: 9, name: "Emerald Young", email: "eyoung@axt.com" };
+  const SOURCE = {
+    id: SOURCE_ID,
+    userId: null,
+    name: "Leslie",
+    email: "leslie@greencommunicationsllc.com",
+    status: "active",
+    jeffPersonalNote: null,
+  };
+
+  it("is exposed as a customer-page write tool (only pinned chats get WRITE_TOOLS)", () => {
+    const tool = WRITE_TOOLS.find((t) => t.name === "merge_into_customer");
+    expect(tool).toBeTruthy();
+    // The model names only the TARGET; there is no source field to lie about.
+    const props = (tool!.input_schema as any).properties;
+    expect(props.targetEmail).toBeTruthy();
+    expect(props.targetProfileId).toBeTruthy();
+    expect(props.source).toBeUndefined();
+    expect(props.sourceProfileId).toBeUndefined();
+  });
+
+  describe("resolveMergeTargetArgs (pure)", () => {
+    it("requires targetEmail or targetProfileId", () => {
+      expect(resolveMergeTargetArgs({}).ok).toBe(false);
+      expect(resolveMergeTargetArgs(null).ok).toBe(false);
+      expect(resolveMergeTargetArgs({ targetEmail: "   " }).ok).toBe(false);
+    });
+    it("targetProfileId must be a positive integer (numeric string ok)", () => {
+      expect(resolveMergeTargetArgs({ targetProfileId: 0 }).ok).toBe(false);
+      expect(resolveMergeTargetArgs({ targetProfileId: -2 }).ok).toBe(false);
+      expect(resolveMergeTargetArgs({ targetProfileId: 1.5 }).ok).toBe(false);
+      expect(resolveMergeTargetArgs({ targetProfileId: 9 })).toEqual({
+        ok: true,
+        value: { targetProfileId: 9, targetEmail: null },
+      });
+      expect(resolveMergeTargetArgs({ targetProfileId: "9" })).toEqual({
+        ok: true,
+        value: { targetProfileId: 9, targetEmail: null },
+      });
+    });
+    it("targetEmail is trimmed + lowercased and must look like an email", () => {
+      expect(resolveMergeTargetArgs({ targetEmail: "not-an-email" }).ok).toBe(false);
+      expect(resolveMergeTargetArgs({ targetEmail: "  EYoung@AXT.com " })).toEqual({
+        ok: true,
+        value: { targetProfileId: null, targetEmail: "eyoung@axt.com" },
+      });
+    });
+    it("targetProfileId wins when both are given", () => {
+      expect(resolveMergeTargetArgs({ targetProfileId: 9, targetEmail: "x@y.com" })).toEqual({
+        ok: true,
+        value: { targetProfileId: 9, targetEmail: null },
+      });
+    });
+  });
+
+  it("rejects when no customer is pinned (source is NEVER model-chosen)", async () => {
+    const out = JSON.parse(
+      await executeWriteTool(
+        "merge_into_customer",
+        { targetEmail: "eyoung@axt.com" },
+        undefined,
+        ADMIN_ID,
+      ),
+    );
+    expect(out.success).toBeUndefined();
+    expect(out.error).toContain("客人");
+    expect(lastDb.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects with no admin userId (the audit trail requires an actor)", async () => {
+    const out = JSON.parse(
+      await executeWriteTool(
+        "merge_into_customer",
+        { targetEmail: "eyoung@axt.com" },
+        SOURCE_ID,
+        undefined,
+      ),
+    );
+    expect(out.error).toContain("操作者");
+    expect(lastDb.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the target does not exist, without moving anything", async () => {
+    rowQueue = [[]]; // target lookup misses
+    const out = JSON.parse(
+      await executeWriteTool(
+        "merge_into_customer",
+        { targetEmail: "nobody@nowhere.com" },
+        SOURCE_ID,
+        ADMIN_ID,
+      ),
+    );
+    expect(out.success).toBeUndefined();
+    expect(out.error).toContain("找不到");
+    expect(out.error).toContain("nobody@nowhere.com");
+    expect(lastDb.update).not.toHaveBeenCalled();
+    expect(mockAudit).not.toHaveBeenCalled();
+  });
+
+  it("rejects a self-merge (target resolves to the pinned customer)", async () => {
+    rowQueue = [[{ id: SOURCE_ID, name: "Leslie", email: "leslie@greencommunicationsllc.com" }]];
+    const out = JSON.parse(
+      await executeWriteTool(
+        "merge_into_customer",
+        { targetProfileId: SOURCE_ID },
+        SOURCE_ID,
+        ADMIN_ID,
+      ),
+    );
+    expect(out.success).toBeUndefined();
+    expect(out.error).toContain("自己");
+    expect(lastDb.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a registered-member SOURCE (a member's history stays on the account)", async () => {
+    rowQueue = [[TARGET], [{ ...SOURCE, userId: 777 }]];
+    const out = JSON.parse(
+      await executeWriteTool(
+        "merge_into_customer",
+        { targetProfileId: TARGET.id },
+        SOURCE_ID,
+        ADMIN_ID,
+      ),
+    );
+    expect(out.success).toBeUndefined();
+    expect(out.error).toContain("註冊會員");
+    expect(lastDb.update).not.toHaveBeenCalled();
+    expect(lastDb.delete).not.toHaveBeenCalled();
+    expect(mockAudit).not.toHaveBeenCalled();
+  });
+
+  it("happy path: moves the four tables to the target, hides the source, audits", async () => {
+    // target lookup → source lookup → dup-scan (no shared threads)
+    rowQueue = [[TARGET], [{ ...SOURCE }], []];
+    nextRows = [{ affectedRows: 2 }]; // each UPDATE ... WHERE reports 2 rows moved
+    const out = JSON.parse(
+      await executeWriteTool(
+        "merge_into_customer",
+        { targetEmail: "eyoung@axt.com" },
+        SOURCE_ID,
+        ADMIN_ID,
+      ),
+    );
+    expect(out.success).toBe(true);
+    expect(out.targetProfileId).toBe(TARGET.id);
+    expect(out.moved).toEqual({ interactions: 2, documents: 2, orders: 2, chatMessages: 2 });
+    // No shared threads → nothing deleted.
+    expect(lastDb.delete).not.toHaveBeenCalled();
+    // The four moves re-point customerProfileId to the target.
+    expect(lastDb.set).toHaveBeenCalledWith({ customerProfileId: TARGET.id });
+    // The source profile is hidden and Jeff's note gets the dated merge line.
+    expect(lastDb.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "blocked",
+        jeffPersonalNote: expect.stringContaining("已併入 Emerald Young (#9)"),
+      }),
+    );
+    // Chip message carries the real counts (工具憑證,不是 model 嘴上說).
+    expect(out.message).toContain("已把「Leslie」併入「Emerald Young」(#9)");
+    expect(out.message).toContain("互動 2 筆");
+    expect(out.message).toContain("原檔已隱藏");
+    // Audit row (same pattern as update_booking_status).
+    expect(mockAudit).toHaveBeenCalledTimes(1);
+    const arg = mockAudit.mock.calls[0][0];
+    expect(arg.action).toBe("customer.mergeInto");
+    expect(arg.targetType).toBe("customerProfile");
+    expect(arg.targetId).toBe(SOURCE_ID);
+    expect(arg.ctx.user.id).toBe(ADMIN_ID);
+    expect(arg.changes.after.mergedInto).toBe(TARGET.id);
+    expect(arg.reason).toContain(`source=${SOURCE_ID}`);
+    expect(arg.reason).toContain(`target=${TARGET.id}`);
+  });
+
+  it("an existing note survives: the merge line is APPENDED with a [M/D] date tag", async () => {
+    rowQueue = [[TARGET], [{ ...SOURCE, jeffPersonalNote: "同案聯絡人,先觀察" }], []];
+    nextRows = [{ affectedRows: 0 }];
+    const out = JSON.parse(
+      await executeWriteTool(
+        "merge_into_customer",
+        { targetProfileId: TARGET.id },
+        SOURCE_ID,
+        ADMIN_ID,
+      ),
+    );
+    expect(out.success).toBe(true);
+    expect(lastDb.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jeffPersonalNote: expect.stringMatching(
+          /^同案聯絡人,先觀察\n\[\d{1,2}\/\d{1,2}\] 已併入 Emerald Young \(#9\)$/,
+        ),
+      }),
+    );
+  });
+
+  it("shared email threads (uq profile+externalId) are dropped from the source first", async () => {
+    // dup-scan finds one thread the target already filed.
+    rowQueue = [[TARGET], [{ ...SOURCE }], [{ externalId: "<msg-1@mail.gmail.com>" }]];
+    nextRows = [{ affectedRows: 1 }];
+    const out = JSON.parse(
+      await executeWriteTool(
+        "merge_into_customer",
+        { targetEmail: "eyoung@axt.com" },
+        SOURCE_ID,
+        ADMIN_ID,
+      ),
+    );
+    expect(out.success).toBe(true);
+    expect(lastDb.delete).toHaveBeenCalledTimes(1);
+    expect(out.duplicatesDropped).toBe(1);
+    expect(out.message).toContain("略過 1 筆");
+  });
+
+  it("re-run is safe: an already-emptied source moves 0 rows and still succeeds", async () => {
+    rowQueue = [[TARGET], [{ ...SOURCE, status: "blocked" }], []];
+    nextRows = [{ affectedRows: 0 }];
+    const out = JSON.parse(
+      await executeWriteTool(
+        "merge_into_customer",
+        { targetEmail: "eyoung@axt.com" },
+        SOURCE_ID,
+        ADMIN_ID,
+      ),
+    );
+    expect(out.success).toBe(true);
+    expect(out.moved).toEqual({ interactions: 0, documents: 0, orders: 0, chatMessages: 0 });
+    expect(out.message).toContain("互動 0 筆");
+  });
+
+  it("surfaces the validator error when neither target field is given", async () => {
+    const out = JSON.parse(
+      await executeWriteTool("merge_into_customer", {}, SOURCE_ID, ADMIN_ID),
+    );
+    expect(out.success).toBeUndefined();
+    expect(out.error).toContain("targetEmail");
   });
 });
