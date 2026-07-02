@@ -352,7 +352,9 @@ const KNOWN_NOISE_DOMAINS = new Set([
  */
 const OWN_EMAILS = new Set([
   "jeffhsieh09@gmail.com",
-  "jeffhsieh0909@gmail.com",
+  // jeffhsieh0909 刻意「不在」黑名單:它是專職 E2E 測試客人(Google 顯示名
+  // Better way To survive,Jeff 2026-07-02 拍板)。從它寄進來的信要走完整
+  // 客人管線(建卡/歸檔/摘要/草稿),用來對客戶頁做真實驗收。
   "support@packgoplay.com",
 ]);
 

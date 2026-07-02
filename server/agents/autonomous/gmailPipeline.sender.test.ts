@@ -71,11 +71,10 @@ import { isOwnEmail, parseSenderName, dupRecoveryLookupId } from "./gmailPipelin
 describe("isOwnEmail (自家信箱黑名單,exact-match、case-insensitive)", () => {
   it.each([
     "jeffhsieh09@gmail.com",
-    "jeffhsieh0909@gmail.com",
     "support@packgoplay.com",
     // case-insensitive + trims (parseEmailAddress already lowercases, but the
     // guard must not depend on that)
-    "JeffHsieh0909@Gmail.com",
+    "JEFFHSIEH09@Gmail.com",
     "  SUPPORT@PACKGOPLAY.COM  ",
   ])("blocks own address %s", (email) => {
     expect(isOwnEmail(email)).toBe(true);
@@ -87,6 +86,8 @@ describe("isOwnEmail (自家信箱黑名單,exact-match、case-insensitive)", ()
     "jeffhsieh09999@gmail.com",
     "jeffhsieh09@yahoo.com",
     "info@packgoplay.com",
+    // 0909 = 專職 E2E 測試客人(Better way To survive),刻意放行走完整客人管線
+    "jeffhsieh0909@gmail.com",
   ])("lets customer address %s through", (email) => {
     expect(isOwnEmail(email)).toBe(false);
   });
