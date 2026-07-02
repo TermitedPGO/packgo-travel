@@ -669,6 +669,9 @@ async function processOneEmail(
 
   // Upsert customer profile
   let profileId: number | undefined;
+  /** the card whose email literally equals the sender — user-account linking
+   * must target THIS card, never a merge-canonicalized one (0109). */
+  let emailMatchedProfileId: number | undefined;
   if (senderEmail) {
     const existing = await db
       .select()
@@ -676,12 +679,20 @@ async function processOneEmail(
       .where(eq(customerProfiles.email, senderEmail))
       .limit(1);
     if (existing[0]) {
-      profileId = existing[0].id;
+      // 0109:這張卡可能已被併進別人(隱藏卡),跟指標走到最終卡再落資料,
+      // 否則被併走的 email 之後來信會消失在列表外(leslie→Emerald 案)。
+      const { followMergePointer } = await import("../../_core/mergedProfile");
+      profileId = await followMergePointer(db, existing[0].id);
+      // 帳號連結只准綁「email 真正對上的那張卡」:指標走過之後 profileId 是
+      // 別人的卡,綁上去會把整張同案卡變成寄件人的會員卡(review:跨身分
+      // 汙染)。所以記下原卡 id,下面 linkProfileToUserByEmail 用它。
+      emailMatchedProfileId = existing[0].id;
     } else {
       const ins = await db.insert(customerProfiles).values({
         email: senderEmail,
       });
       profileId = Number((ins as any)[0]?.insertId ?? 0);
+      emailMatchedProfileId = profileId;
 
       // customer-cockpit Step 2 — a brand-new sender: auto-collect their entire
       // Gmail history into customerInteractions (fire-forget) so Jeff never has
@@ -708,12 +719,12 @@ async function processOneEmail(
     // 批9 m2 — email 歸戶: when the sender is a REGISTERED customer, link
     // the profile to their account (WeChat 歸戶 pattern moved to email).
     // Failure here must never kill mail processing — link is best-effort.
-    if (profileId) {
+    if (emailMatchedProfileId) {
       try {
         const { linkProfileToUserByEmail } = await import(
           "../../_core/emailCustomerMatch"
         );
-        await linkProfileToUserByEmail(profileId, senderEmail);
+        await linkProfileToUserByEmail(emailMatchedProfileId, senderEmail);
       } catch (e) {
         log.warn(
           { err: e, profileId },

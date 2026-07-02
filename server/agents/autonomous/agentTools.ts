@@ -242,11 +242,24 @@ export async function executeTool(
       case "get_customer_by_email": {
         const email = String(args.email ?? "").trim().toLowerCase();
         if (!email) return { ok: false, error: "email is required" };
-        const [profile] = await db
+        let [profile] = await db
           .select()
           .from(customerProfiles)
           .where(eq(customerProfiles.email, email))
           .limit(1);
+        if (profile) {
+          // 0109:這個 email 的卡已被併走 → 回合併後的最終卡(歷史都在那)。
+          const { followMergePointer } = await import("../../_core/mergedProfile");
+          const canonicalId = await followMergePointer(db, profile.id);
+          if (canonicalId !== profile.id) {
+            const [canonical] = await db
+              .select()
+              .from(customerProfiles)
+              .where(eq(customerProfiles.id, canonicalId))
+              .limit(1);
+            if (canonical) profile = canonical;
+          }
+        }
         if (!profile) {
           return { ok: true, data: { found: false, email } };
         }

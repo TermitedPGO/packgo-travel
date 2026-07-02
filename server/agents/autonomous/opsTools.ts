@@ -1720,13 +1720,25 @@ async function runWriteTool(
             sql`REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(${customerProfiles.phone}, ' ', ''), '-', ''), '(', ''), ')', ''), '.', '') = ${normPhone}`,
           );
         }
-        const [dup] = await db
+        let [dup] = await db
           .select({ id: customerProfiles.id, name: customerProfiles.name })
           .from(customerProfiles)
           .where(conds.length === 1 ? conds[0] : or(...conds))
           .orderBy(customerProfiles.createdAt)
           .limit(1);
         if (dup) {
+          // 0109:命中的可能是被併走的隱藏卡(email/phone 還留著)→ 跟指標
+          // 走到最終卡,不然回給 model 一張列表上看不到的空卡(review P2)。
+          const { followMergePointer } = await import("../../_core/mergedProfile");
+          const canonicalId = await followMergePointer(db, dup.id);
+          if (canonicalId !== dup.id) {
+            const [canon] = await db
+              .select({ id: customerProfiles.id, name: customerProfiles.name })
+              .from(customerProfiles)
+              .where(eq(customerProfiles.id, canonicalId))
+              .limit(1);
+            if (canon) dup = canon;
+          }
           log.info({ profileId: dup.id, name: cName }, "create_customer deduped → existing");
           return {
             success: true,
@@ -1788,12 +1800,26 @@ async function runWriteTool(
         const snap = await getCustomerProfileSnapshot(profileId);
         const pinnedEmail = (snap.email ?? "").trim().toLowerCase();
         if (pinnedEmail && pinnedEmail !== cEmail) {
-          return {
-            error:
-              `這位客人檔案上的 email 是 ${pinnedEmail},你要收的卻是 ${cEmail} — ` +
-              `對不上,不收(避免把別人的信收進這位客人)。要收 ${cEmail} 的往來,` +
-              `請 Jeff 開那位客人的頁面再收。`,
-          };
+          // 0109 例外:cEmail 的卡若已「整份併進」目前釘住的客人(同案聯絡人,
+          // 例 leslie 併進 Emerald),那收它的信本來就該進這位客人 — 放行。
+          let mergedIntoPinned = false;
+          const [emailCard] = await db
+            .select({ id: customerProfiles.id })
+            .from(customerProfiles)
+            .where(eq(customerProfiles.email, cEmail))
+            .limit(1);
+          if (emailCard) {
+            const { followMergePointer } = await import("../../_core/mergedProfile");
+            mergedIntoPinned = (await followMergePointer(db, emailCard.id)) === profileId;
+          }
+          if (!mergedIntoPinned) {
+            return {
+              error:
+                `這位客人檔案上的 email 是 ${pinnedEmail},你要收的卻是 ${cEmail} — ` +
+                `對不上,不收(避免把別人的信收進這位客人)。要收 ${cEmail} 的往來,` +
+                `請 Jeff 開那位客人的頁面再收。`,
+            };
+          }
         }
         pinnedWithoutEmail = !pinnedEmail;
       }
@@ -1938,8 +1964,11 @@ async function runWriteTool(
         id: customerProfiles.id,
         name: customerProfiles.name,
         email: customerProfiles.email,
+        mergedIntoProfileId: customerProfiles.mergedIntoProfileId,
       };
-      let target: { id: number; name: string | null; email: string | null } | undefined;
+      let target:
+        | { id: number; name: string | null; email: string | null; mergedIntoProfileId: number | null }
+        | undefined;
       if (parsed.value.targetProfileId != null) {
         [target] = await db
           .select(targetFields)
@@ -1986,6 +2015,25 @@ async function runWriteTool(
       }
       if (target.id === profileId)
         return { error: "目標就是目前這位客人,不能把自己併進自己" };
+
+      // 目標自己也被併走過(舊卡)→ 跟著 0109 指標走到最終卡,避免把人併進
+      // 一張已經空掉的隱藏卡;走完若繞回來源就是循環,拒絕。
+      if (target.mergedIntoProfileId != null) {
+        const { followMergePointer } = await import("../../_core/mergedProfile");
+        const canonicalId = await followMergePointer(db, target.id);
+        if (canonicalId === profileId)
+          return {
+            error: `「${target.name || target.email || `#${target.id}`}」已經被併進目前這位客人,不能再反著併回去(會成循環)`,
+          };
+        if (canonicalId !== target.id) {
+          [target] = await db
+            .select(targetFields)
+            .from(customerProfiles)
+            .where(eq(customerProfiles.id, canonicalId))
+            .limit(1);
+          if (!target) return { error: `合併鏈指向的最終卡(#${canonicalId})不存在,請人工確認` };
+        }
+      }
 
       const [source] = await db
         .select({
@@ -2079,6 +2127,10 @@ async function runWriteTool(
         .update(customerProfiles)
         .set({
           status: "blocked",
+          // 0109 結構化指標:歸檔入口(收信/寄信/附件/詢問)認到這張卡時,
+          // followMergePointer 會轉到目標卡落資料 — 沒有它,leslie 這種被併走
+          // 的 email 之後來信會掉進隱藏卡,列表永遠看不到。
+          mergedIntoProfileId: target.id,
           jeffPersonalNote: mergedNote || null,
           updatedAt: new Date(),
         })

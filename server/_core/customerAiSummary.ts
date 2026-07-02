@@ -181,7 +181,16 @@ export async function ensureProfileId(scope: SummaryScope): Promise<number | nul
     const guestRow = await db
       .select({ id: customerProfiles.id })
       .from(customerProfiles)
-      .where(and(eq(customerProfiles.email, email), isNull(customerProfiles.userId)))
+      .where(
+        and(
+          eq(customerProfiles.email, email),
+          isNull(customerProfiles.userId),
+          // 0109:被併走的卡絕不認領 — 它的歷史已搬去別人(同案)的卡上,
+          // 綁 userId 上去會把會員帳號黏在一張隱藏空卡(或更糟,之後
+          // restoreCustomer 會復活分裂狀態)。寧可往下走新開一張乾淨卡。
+          isNull(customerProfiles.mergedIntoProfileId),
+        ),
+      )
       .orderBy(customerProfiles.createdAt)
       .limit(1);
     if (guestRow[0]) {

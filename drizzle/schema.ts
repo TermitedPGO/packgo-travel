@@ -2763,6 +2763,12 @@ export const customerProfiles = mysqlTable("customerProfiles", {
   lastInboundAt: timestamp("lastInboundAt"),
   jeffViewedAt: timestamp("jeffViewedAt"),
 
+  // mergedIntoProfileId (migration 0109): 這張卡已整份併入哪張卡(merge_into_customer
+  // 設,restoreCustomer 清)。歸檔入口認人後必須經 server/_core/mergedProfile.ts 的
+  // followMergePointer 走到最終卡再落資料 — 否則被併走的 email 之後來信會歸到
+  // 隱藏卡上,永遠不會出現在客人列表。NULL = 沒被併過。
+  mergedIntoProfileId: int("mergedIntoProfileId"),
+
   // Q4-A — Jeff's manual per-customer follow-up date (migration 0102). A plain
   // calendar DATE (no time / tz): the cockpit surfaces「今天該跟進」when this is
   // set and <= today in America/Los_Angeles. `mode: "string"` round-trips as

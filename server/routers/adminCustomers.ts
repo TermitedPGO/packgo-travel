@@ -289,9 +289,11 @@ export const adminCustomersRouter = router({
     .mutation(async ({ input }) => {
       const drizzleDb = (await db.getDb())!;
       const { customerProfiles } = await import("../../drizzle/schema");
+      // 同時清 0109 合併指標:Jeff 明確復原這張卡 = 這個 email 之後的信要
+      // 回來歸這裡,不再轉寄到合併目標。
       await drizzleDb
         .update(customerProfiles)
-        .set({ status: "active" })
+        .set({ status: "active", mergedIntoProfileId: null })
         .where(
           "profileId" in input
             ? eq(customerProfiles.id, input.profileId)
@@ -501,6 +503,12 @@ export const adminCustomersRouter = router({
       await drizzleDb
         .delete(customerProfiles)
         .where(eq(customerProfiles.id, input.profileId));
+      // 0109:別張卡的合併指標若指著這張被刪的卡,會變懸空(歸檔走到鬼卡)。
+      // 一併清掉 — followMergePointer 也有懸空防守,這裡是根治。
+      await drizzleDb
+        .update(customerProfiles)
+        .set({ mergedIntoProfileId: null })
+        .where(eq(customerProfiles.mergedIntoProfileId, input.profileId));
 
       const { audit } = await import("../_core/auditLog");
       audit({

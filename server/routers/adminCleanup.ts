@@ -623,6 +623,11 @@ export const adminCleanupRouter = router({
       await db.delete(customerDocuments).where(eq(customerDocuments.customerProfileId, input.profileId));
       await db.delete(interactionOutcomes).where(eq(interactionOutcomes.customerProfileId, input.profileId));
       await db.delete(customerProfiles).where(eq(customerProfiles.id, input.profileId));
+      // 0109:清掉指向這張卡的合併指標,避免懸空指標把歸檔導進鬼卡。
+      await db
+        .update(customerProfiles)
+        .set({ mergedIntoProfileId: null })
+        .where(eq(customerProfiles.mergedIntoProfileId, input.profileId));
 
       const { audit } = await import("../_core/auditLog");
       audit({

@@ -189,6 +189,9 @@ async function resolveAndExtract(email: string): Promise<void> {
     .where(eq(customerProfiles.email, email))
     .limit(1);
   if (!row) return;
+  // 0109:被併走的卡 → 偏好萃取跑在合併後的最終卡上。
+  const { followMergePointer } = await import("./mergedProfile");
+  const canonicalId = await followMergePointer(d, row.id);
   const { extractAfterReply } = await import("./customerPreferenceExtractor");
-  await extractAfterReply(row.id);
+  await extractAfterReply(canonicalId);
 }

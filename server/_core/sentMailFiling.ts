@@ -102,12 +102,25 @@ export async function runSentMailCapture(
   for (const msg of messages) {
     try {
       const emails = parseRecipientEmails(msg.to);
-      const profiles = emails.length
+      const rawProfiles = emails.length
         ? await db
             .select({ id: customerProfiles.id, email: customerProfiles.email })
             .from(customerProfiles)
             .where(inArray(customerProfiles.email, emails))
         : [];
+      // 0109:被併走的收件人卡 → 檔到最終卡;兩個收件地址若併到同一張卡,
+      // 去重避免同一附件檔兩份。
+      const profiles: Array<{ id: number; email: string | null }> = [];
+      if (rawProfiles.length) {
+        const { followMergePointer } = await import("./mergedProfile");
+        const seen = new Set<number>();
+        for (const p of rawProfiles) {
+          const canonicalId = await followMergePointer(db, p.id);
+          if (seen.has(canonicalId)) continue;
+          seen.add(canonicalId);
+          profiles.push({ ...p, id: canonicalId });
+        }
+      }
 
       if (profiles.length) {
         // Only pay the raw-bytes re-fetch when something actually qualifies.

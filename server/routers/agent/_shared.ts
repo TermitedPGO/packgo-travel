@@ -86,7 +86,12 @@ export async function ensureCustomerByEmail(
     .from(customerProfiles)
     .where(eq(customerProfiles.email, email))
     .limit(1);
-  if (existing[0]) return { id: existing[0].id, created: false };
+  if (existing[0]) {
+    // 0109:這張卡可能已整份併進別人(隱藏卡)。collect/backfill 走這裡認人,
+    // 不跟指標的話「收」會把整段 Gmail 歷史堆回隱藏卡(review P1)。
+    const { followMergePointer } = await import("../../_core/mergedProfile");
+    return { id: await followMergePointer(db, existing[0].id), created: false };
+  }
   const ins = await db.insert(customerProfiles).values({ email });
   return { id: Number((ins as any)[0]?.insertId ?? 0), created: true };
 }

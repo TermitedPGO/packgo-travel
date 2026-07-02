@@ -36,6 +36,11 @@ export async function recordOutboundEmailInteraction(args: {
       .from(customerProfiles)
       .where(eq(customerProfiles.email, email))
       .limit(1);
+    if (profile) {
+      // 0109:被併走的卡 → 檔到合併後的最終卡上。
+      const { followMergePointer } = await import("./mergedProfile");
+      profile.id = await followMergePointer(db, profile.id);
+    }
     if (!profile) {
       // No profile yet (e.g. website-form inquiry from an address that never
       // hit the gmail pipeline) — nothing to attach to; honest skip.
