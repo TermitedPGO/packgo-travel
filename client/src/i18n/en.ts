@@ -3386,6 +3386,8 @@ export const en = {
         confirmSend: 'Confirm send',
         sending: 'Sending…',
         sendFailed: 'Send failed, please try again.',
+        // Honest notice when the kill switch downgraded the send to a dry run.
+        dryRun: 'Dry-run mode: this reply was NOT actually sent.',
         askPlaceholder: 'About this customer...',
         askFailed: 'Query failed, please try again.',
         chatExpand: 'Expand',

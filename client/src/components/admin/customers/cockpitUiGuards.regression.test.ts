@@ -191,3 +191,25 @@ describe("H — slash 指令選單取代新增客人按鈕 (2026-07-01, Jeff:「
     }
   })
 })
+
+describe("I — 送信失敗必須浮出 (2026-07-02 multi-Gmail misroute:200 + {sent:false} 曾被當成功靜默)", () => {
+  it("useCustomerData checks BOTH mutation results and throws DraftSendFailedError", () => {
+    expect(useCustomerDataSrc).toContain("escalationSendFailure")
+    expect(useCustomerDataSrc).toContain("inquiryApproveFailure")
+    expect(useCustomerDataSrc).toContain("DraftSendFailedError")
+  })
+
+  it("invalidation is success-only — no onSuccess:invalidateDrafts that can drop a failed card", () => {
+    expect(useCustomerDataSrc).not.toMatch(/onSuccess:\s*invalidateDrafts/)
+  })
+
+  it("CustomerChat renders the server's honest message via draftSendErrorText (unit-tested in draftSendOutcome.test.ts)", () => {
+    expect(customerChat).toContain("draftSendErrorText")
+    expect(customerChat).toContain("admin.customers.drafts.dryRun")
+  })
+
+  it("i18n: drafts.dryRun exists in BOTH locales", () => {
+    expect(zh).toMatch(/\bdryRun:/)
+    expect(en).toMatch(/\bdryRun:/)
+  })
+})

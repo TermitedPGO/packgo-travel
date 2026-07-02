@@ -592,6 +592,66 @@ export function buildEscalationReplyInput(
   }
 }
 
+/**
+ * 2026-07-02 送信結果誠實化 — commandCenter.escalationReply 和
+ * commandCenter.approve 失敗時都是 HTTP 200 + 結果物件({sent:false,
+ * errorMessage} / {status:"failed", errorMessage}),mutateAsync 不會 throw,
+ * 所以 approveDraft 從前把「寄失敗」當成功收掉(prod 實錄:回信炸
+ * "Requested entity was not found",UI 什麼都沒顯示,Jeff 以為寄出去了)。
+ * 這兩個純函式把結果物件翻成「失敗描述或 null」,useCustomerData 據此
+ * throw DraftSendFailedError,CustomerChat 顯示伺服器的誠實訊息。
+ */
+export type DraftSendFailure = {
+  kind: "failed" | "dryRun"
+  /** 伺服器的誠實訊息(動態內容);空 → UI 用 i18n fallback。 */
+  serverMessage: string | null
+}
+
+export class DraftSendFailedError extends Error {
+  readonly failure: DraftSendFailure
+  constructor(failure: DraftSendFailure) {
+    super(failure.serverMessage ?? failure.kind)
+    this.name = "DraftSendFailedError"
+    this.failure = failure
+  }
+}
+
+/** escalationReply 結果 → 失敗描述(sent=true → null)。 */
+export function escalationSendFailure(res: {
+  sent: boolean
+  dryRun: boolean
+  errorMessage?: string | null
+}): DraftSendFailure | null {
+  if (res.sent) return null
+  const msg = res.errorMessage?.trim() || null
+  return { kind: res.dryRun ? "dryRun" : "failed", serverMessage: msg }
+}
+
+/** commandCenter.approve 結果 → 失敗描述(只有 status="failed" 算失敗)。 */
+export function inquiryApproveFailure(res: {
+  status: string
+  errorMessage?: string | null
+}): DraftSendFailure | null {
+  if (res.status !== "failed") return null
+  return { kind: "failed", serverMessage: res.errorMessage?.trim() || null }
+}
+
+/**
+ * catch 到的東西 → 卡片上顯示的文字。DraftSendFailedError 且伺服器有話
+ * → 原話直出(伺服器訊息已經是給人看的);沒話 → 對應 i18n fallback;
+ * 其他 throw(網路 / zod)→ 通用 sendFailed。純函式 → 單元測試。
+ */
+export function draftSendErrorText(
+  err: unknown,
+  t: { sendFailed: string; dryRun: string },
+): string {
+  if (err instanceof DraftSendFailedError) {
+    if (err.failure.serverMessage) return err.failure.serverMessage
+    return err.failure.kind === "dryRun" ? t.dryRun : t.sendFailed
+  }
+  return t.sendFailed
+}
+
 export function guestToAdaptedCustomer(
   guest: {
     profileId: number

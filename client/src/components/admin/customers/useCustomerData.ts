@@ -18,6 +18,9 @@ import {
   deriveFollowup,
   buildInquiryEditedPayload,
   buildEscalationReplyInput,
+  escalationSendFailure,
+  inquiryApproveFailure,
+  DraftSendFailedError,
   OPEN_INQUIRY_STATUSES,
 } from "./adapters"
 
@@ -173,25 +176,33 @@ export function useCustomerData(
   )
 
   // Approve→send reuses the EXISTING audited mutations, dispatched by source.
+  // 2026-07-02 — invalidation moved INTO approveDraft, success-only: both
+  // mutations resolve HTTP 200 even when the send FAILED ({sent:false} /
+  // {status:"failed"}), and refetching drafts on a failed send could drop the
+  // card Jeff still needs to retry from.
   const invalidateDrafts = () => {
     void utils.admin.customerDrafts.invalidate()
     void utils.admin.customerConversationThread.invalidate()
   }
-  const approveInquiryDraft = trpc.commandCenter.approve.useMutation({
-    onSuccess: invalidateDrafts,
-  })
-  const sendEscalationDraft = trpc.commandCenter.escalationReply.useMutation({
-    onSuccess: invalidateDrafts,
-  })
+  const approveInquiryDraft = trpc.commandCenter.approve.useMutation()
+  const sendEscalationDraft = trpc.commandCenter.escalationReply.useMutation()
 
-  /** Approve+send one draft. editedBody (optional) = Jeff's inline edit. */
+  /** Approve+send one draft. editedBody (optional) = Jeff's inline edit.
+   *  THROWS DraftSendFailedError on a resolved-but-failed send (the server
+   *  answers 200 with an honest errorMessage; prod 實錄:回信炸
+   *  "Requested entity was not found" 而 UI 靜默) — the caller shows it. */
   const approveDraft = async (draft: Draft, editedBody?: string) => {
     if (draft.source === "email" && draft.messageId != null) {
       // buildEscalationReplyInput throws on empty body and carries the draft's
       // attachments in the server zod shape ({key, filename}[]) — the card's
       // chips and what actually goes out must be the same files, never a
       // silent body-only send.
-      await sendEscalationDraft.mutateAsync(buildEscalationReplyInput(draft, editedBody))
+      const res = await sendEscalationDraft.mutateAsync(
+        buildEscalationReplyInput(draft, editedBody),
+      )
+      const failure = escalationSendFailure(res)
+      if (failure) throw new DraftSendFailedError(failure)
+      invalidateDrafts()
       return
     }
     if (draft.source === "inquiry" && draft.taskId != null) {
@@ -202,7 +213,13 @@ export function useCustomerData(
         editedBody != null
           ? buildInquiryEditedPayload(draft.payload, editedBody)
           : undefined
-      await approveInquiryDraft.mutateAsync({ id: draft.taskId, editedPayload })
+      const res = await approveInquiryDraft.mutateAsync({
+        id: draft.taskId,
+        editedPayload,
+      })
+      const failure = inquiryApproveFailure(res)
+      if (failure) throw new DraftSendFailedError(failure)
+      invalidateDrafts()
     }
   }
 

@@ -550,15 +550,65 @@ export async function sendEscalationReply(
     draftReply: ctx.draftReply,
   };
 
+  // 2026-07-02 multi-account routing — the thread lives in WHICHEVER connected
+  // account received the mail (poll/push iterate all active integrations), and
+  // Gmail threadIds are per-mailbox. The old `.limit(1)` grabbed the first
+  // active row regardless, so replying to a support@ thread through the other
+  // account failed with "Requested entity was not found" while the UI showed
+  // nothing. Order by id = the exact row the old limit(1) default picked, so
+  // the previously-working case costs at most ONE probe; a single connected
+  // account skips probing entirely (zero extra API calls).
   const integrations = await db
     .select()
     .from(gmailIntegration)
     .where(eq(gmailIntegration.isActive, 1))
-    .limit(1);
-  const integration = integrations[0];
-  if (!integration) {
+    .orderBy(gmailIntegration.id);
+  const { buildGmailClient, sendReplyInThread, threadExists } = await import(
+    "./gmail"
+  );
+  const { resolveThreadOwner, describeNoThreadOwner } = await import(
+    "./gmailAccountRouting"
+  );
+  const resolution = await resolveThreadOwner(integrations, (integ) =>
+    threadExists(buildGmailClient(integ), target.gmailThreadId),
+  );
+  if (resolution.kind === "no_accounts") {
     return { sent: false, dryRun: false, errorMessage: "Gmail 整合未啟用" };
   }
+  if (resolution.kind === "none") {
+    log.error(
+      {
+        messageId,
+        threadId: target.gmailThreadId,
+        checked: resolution.checked,
+        probeErrors: resolution.probeErrors,
+      },
+      "[escalationBox] no connected account owns the reply thread",
+    );
+    const { isAuthRevocationError } = await import("./gmailAuthFailure");
+    const revoked = resolution.probeErrors.filter((p) =>
+      isAuthRevocationError(p.message),
+    );
+    const base = describeNoThreadOwner(
+      resolution.checked,
+      resolution.probeErrors,
+    );
+    const errorMessage =
+      revoked.length > 0
+        ? `${base}(${revoked.map((p) => p.emailAddress).join("、")} 連線已失效,需要到設定重新連接 Gmail)`
+        : base;
+    return { sent: false, dryRun: false, errorMessage };
+  }
+  const integration = resolution.integration;
+  log.info(
+    {
+      messageId,
+      threadId: target.gmailThreadId,
+      mailbox: integration.emailAddress,
+      probed: resolution.kind === "owner",
+    },
+    "[escalationBox] reply routed to owning account",
+  );
 
   // 2026-06-15 reply-attachments — load any attached files from R2, split into
   // inline parts vs >25MB download links (shared resolver, identical to the
@@ -590,7 +640,6 @@ export async function sendEscalationReply(
     }
   }
 
-  const { buildGmailClient, sendReplyInThread } = await import("./gmail");
   const gmail = buildGmailClient(integration);
   const send = await sendReplyInThread(gmail, {
     threadId: target.gmailThreadId,

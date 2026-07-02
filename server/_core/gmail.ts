@@ -371,6 +371,35 @@ export async function getThreadHistory(
 }
 
 /**
+ * 2026-07-02 multi-account thread routing — does THIS mailbox own the thread?
+ *
+ * Gmail threadIds are per-mailbox: the same customer email lands in each
+ * connected account with a DIFFERENT threadId, so a thread-specific send must
+ * first find the owning account (see gmailAccountRouting.resolveThreadOwner).
+ * `format: "minimal"` keeps the probe as cheap as the API allows. 404 /
+ * "Requested entity was not found" = not this account → false; any other
+ * error (auth, network) rethrows — swallowing it would misread a dead token
+ * as "not my thread".
+ */
+export async function threadExists(
+  gmail: ReturnType<typeof buildGmailClient>,
+  threadId: string,
+): Promise<boolean> {
+  const { isGmailNotFoundError } = await import("./gmailAccountRouting");
+  try {
+    await gmail.users.threads.get({
+      userId: "me",
+      id: threadId,
+      format: "minimal",
+    });
+    return true;
+  } catch (err) {
+    if (isGmailNotFoundError(err)) return false;
+    throw err;
+  }
+}
+
+/**
  * Normalize an RFC822 `Message-ID` header value (strip the surrounding `<>`,
  * trim) into the cross-mailbox dedup key. When the header is missing we fall
  * back to the Gmail internal id — that loses cross-account dedup for that one

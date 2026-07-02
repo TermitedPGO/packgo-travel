@@ -26,8 +26,12 @@ vi.mock("./logger", () => ({
 // the happy-path attachment tests stay isolated. The real replyAttachments
 // resolver runs (with these injected deps), exercising the inline/link split.
 vi.mock("./gmail", () => ({
-  buildGmailClient: vi.fn(() => ({ __gmail: true })),
+  buildGmailClient: vi.fn((integ: { emailAddress?: string }) => ({
+    __gmail: true,
+    __mailbox: integ?.emailAddress,
+  })),
   sendReplyInThread: vi.fn(),
+  threadExists: vi.fn(),
 }));
 vi.mock("../storage", () => ({
   storageGetBytes: vi.fn(),
@@ -50,11 +54,12 @@ import {
   parseResolvedTours,
   parseEscalationTripType,
 } from "./escalationBox";
-import { sendReplyInThread } from "./gmail";
+import { sendReplyInThread, threadExists } from "./gmail";
 import { storageGetBytes, getSecureDocumentUrl } from "../storage";
 
 const getDbMock = vi.mocked(getDb);
 const sendReplyMock = vi.mocked(sendReplyInThread);
+const threadExistsMock = vi.mocked(threadExists);
 const getBytesMock = vi.mocked(storageGetBytes);
 const getSecureUrlMock = vi.mocked(getSecureDocumentUrl);
 
@@ -550,5 +555,139 @@ describe("sendEscalationReply with attachments (reply-attachments)", () => {
     expect(sendArg.attachments).toBeUndefined();
     expect(sendArg.bodyText).toBe("純文字回覆");
     expect(getBytesMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 2026-07-02 multi-account routing — prod 實錄:客人的信在 support@ 的
+ * mailbox,舊 code limit(1) 抓到另一個帳號,送信炸 "Requested entity was
+ * not found" 兩次而 UI 靜默。這組測資鎖:thread 屬於誰就從誰寄、單帳號
+ * 不 probe、全都不是就誠實列出查過的帳號且絕不叫 Gmail 寄。
+ */
+describe("sendEscalationReply multi-account routing (2026-07-02)", () => {
+  const REPLYABLE_CTX = JSON.stringify({
+    gmailThreadId: "thread-support",
+    gmailMessageId: "m-1",
+    customerEmail: "jenny@example.com",
+    subject: "行程詢問",
+  });
+  const msgRow = {
+    id: 9,
+    messageType: "escalation",
+    context: REPLYABLE_CTX,
+    relatedCustomerProfileId: null,
+  };
+  const jeffAcct = { id: 1, emailAddress: "jeffhsieh09@gmail.com", isActive: 1 };
+  const supportAcct = {
+    id: 2,
+    emailAddress: "support@packgoplay.com",
+    isActive: 1,
+  };
+
+  it("thread lives in the SECOND account → probes in order and sends from it", async () => {
+    // jeff's mailbox doesn't have the thread; support does.
+    threadExistsMock.mockImplementation(async (gmail: any) =>
+      gmail.__mailbox === supportAcct.emailAddress,
+    );
+    sendReplyMock.mockResolvedValue({
+      ok: true,
+      dryRun: false,
+      messageId: "x",
+      threadId: "thread-support",
+    });
+    getDbMock.mockResolvedValue(fakeDb([[msgRow], [jeffAcct, supportAcct], []]));
+
+    const res = await sendEscalationReply(9, "您好");
+
+    expect(res.sent).toBe(true);
+    expect(threadExistsMock).toHaveBeenCalledTimes(2);
+    const sendArg = sendReplyMock.mock.calls[0][1];
+    expect(sendArg.fromEmail).toBe("support@packgoplay.com");
+    const sendGmail = sendReplyMock.mock.calls[0][0] as any;
+    expect(sendGmail.__mailbox).toBe("support@packgoplay.com");
+  });
+
+  it("first account owns it → exactly ONE probe (previous default stays cheap)", async () => {
+    threadExistsMock.mockResolvedValue(true);
+    sendReplyMock.mockResolvedValue({
+      ok: true,
+      dryRun: false,
+      messageId: "x",
+      threadId: "thread-support",
+    });
+    getDbMock.mockResolvedValue(fakeDb([[msgRow], [jeffAcct, supportAcct], []]));
+
+    const res = await sendEscalationReply(9, "您好");
+
+    expect(res.sent).toBe(true);
+    expect(threadExistsMock).toHaveBeenCalledTimes(1);
+    expect(sendReplyMock.mock.calls[0][1].fromEmail).toBe(
+      "jeffhsieh09@gmail.com",
+    );
+  });
+
+  it("single active account → NO probe at all (zero extra API calls)", async () => {
+    sendReplyMock.mockResolvedValue({
+      ok: true,
+      dryRun: false,
+      messageId: "x",
+      threadId: "thread-support",
+    });
+    getDbMock.mockResolvedValue(fakeDb([[msgRow], [supportAcct], []]));
+
+    const res = await sendEscalationReply(9, "您好");
+
+    expect(res.sent).toBe(true);
+    expect(threadExistsMock).not.toHaveBeenCalled();
+  });
+
+  it("no account owns the thread → honest error naming BOTH accounts, Gmail never called", async () => {
+    threadExistsMock.mockResolvedValue(false);
+    getDbMock.mockResolvedValue(fakeDb([[msgRow], [jeffAcct, supportAcct]]));
+
+    const res = await sendEscalationReply(9, "您好");
+
+    expect(res.sent).toBe(false);
+    expect(res.errorMessage).toContain("jeffhsieh09@gmail.com");
+    expect(res.errorMessage).toContain("support@packgoplay.com");
+    expect(sendReplyMock).not.toHaveBeenCalled();
+  });
+
+  it("one account's probe dies (invalid_grant) but the other owns it → still sends", async () => {
+    threadExistsMock.mockImplementation(async (gmail: any) => {
+      if (gmail.__mailbox === jeffAcct.emailAddress)
+        throw new Error("invalid_grant");
+      return true;
+    });
+    sendReplyMock.mockResolvedValue({
+      ok: true,
+      dryRun: false,
+      messageId: "x",
+      threadId: "thread-support",
+    });
+    getDbMock.mockResolvedValue(fakeDb([[msgRow], [jeffAcct, supportAcct], []]));
+
+    const res = await sendEscalationReply(9, "您好");
+
+    expect(res.sent).toBe(true);
+    expect(sendReplyMock.mock.calls[0][1].fromEmail).toBe(
+      "support@packgoplay.com",
+    );
+  });
+
+  it("owner unfindable because a probe died with invalid_grant → error mentions reconnect", async () => {
+    threadExistsMock.mockImplementation(async (gmail: any) => {
+      if (gmail.__mailbox === supportAcct.emailAddress)
+        throw new Error("invalid_grant");
+      return false;
+    });
+    getDbMock.mockResolvedValue(fakeDb([[msgRow], [jeffAcct, supportAcct]]));
+
+    const res = await sendEscalationReply(9, "您好");
+
+    expect(res.sent).toBe(false);
+    expect(res.errorMessage).toContain("support@packgoplay.com");
+    expect(res.errorMessage).toContain("重新連接");
+    expect(sendReplyMock).not.toHaveBeenCalled();
   });
 });

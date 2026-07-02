@@ -17,7 +17,7 @@ import { Streamdown } from "streamdown"
 import { trpc } from "@/lib/trpc"
 import { useLocale } from "@/contexts/LocaleContext"
 import type { AdaptedCustomer, AiChatMessage, Draft } from "./types"
-import { replyAttachmentDisplayName } from "./adapters"
+import { replyAttachmentDisplayName, draftSendErrorText } from "./adapters"
 import {
   emptyTurn,
   reduceChatEvent,
@@ -313,7 +313,15 @@ export default function CustomerChat({
 
   // Sensitive (碰錢碰法律) drafts go through a confirm step; others send directly.
   // On failure: surface an error and KEEP the dialog open — never silently clear
-  // (a failed send must not look like a success).
+  // (a failed send must not look like a success). 2026-07-02 — approveDraft now
+  // throws DraftSendFailedError when the server resolves 200 with {sent:false}
+  // (multi-account misroute, dry run, dead OAuth…); the server's honest message
+  // is shown verbatim instead of the generic fallback.
+  const sendFailureText = (e: unknown) =>
+    draftSendErrorText(e, {
+      sendFailed: t("admin.customers.drafts.sendFailed"),
+      dryRun: t("admin.customers.drafts.dryRun"),
+    })
   const submit = async (draft: Draft, body?: string) => {
     setError(null)
     if (draft.sensitive) {
@@ -324,8 +332,8 @@ export default function CustomerChat({
     try {
       await onApproveDraft(draft, body)
       reset()
-    } catch {
-      setError({ id: draft.id, msg: t("admin.customers.drafts.sendFailed") })
+    } catch (e) {
+      setError({ id: draft.id, msg: sendFailureText(e) })
     }
   }
   const doConfirm = async (draft: Draft) => {
@@ -333,8 +341,8 @@ export default function CustomerChat({
     try {
       await onApproveDraft(draft, confirmBody)
       reset()
-    } catch {
-      setError({ id: draft.id, msg: t("admin.customers.drafts.sendFailed") })
+    } catch (e) {
+      setError({ id: draft.id, msg: sendFailureText(e) })
     }
   }
 

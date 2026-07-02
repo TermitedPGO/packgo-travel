@@ -3351,6 +3351,8 @@ export const zhTW = {
         confirmSend: '確定送出',
         sending: '送出中…',
         sendFailed: '送出失敗，請再試一次。',
+        // 系統 kill switch 把送出降級成演練（沒有真的寄出）時的誠實提示。
+        dryRun: '目前是演練模式，這封沒有真的寄出。',
         askPlaceholder: '關於這位客戶...',
         askFailed: '查詢失敗，請再試一次。',
         chatExpand: '展開',
