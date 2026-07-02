@@ -203,6 +203,19 @@ export function mergeDrafts(groups: CustomerDraft[][], lim = 50): CustomerDraft[
 }
 
 /**
+ * One pending draft per customer (Jeff, 2026-07-02, leslie repro:「如果我要新的
+ * 草稿就應該給我新的 舊的應該就直接刪掉」). The panel had the 7/1 escalation
+ * draft AND the fresh 7/2 on-demand draft stacked; a new draft must supersede
+ * everything older. Input is mergeDrafts output (already newest-first), so
+ * keeping the head IS keeping the newest. Older rows stay in the DB (office
+ * inbox untouched) — they just stop surfacing on the customer page. Pure →
+ * unit-tested.
+ */
+export function onlyNewestDraft(drafts: CustomerDraft[]): CustomerDraft[] {
+  return drafts.slice(0, 1);
+}
+
+/**
  * A draft is "current" only while it is still the latest move in the thread. A
  * draft is the AI's proposed reply to the customer's most recent message AT THE
  * TIME it was produced; once Jeff replies (a newer outbound) OR the customer

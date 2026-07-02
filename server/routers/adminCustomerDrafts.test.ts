@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { inquiryDraftCard, escalationDraftCard, observationDraftCard, mergeDrafts, isDraftCurrent } from "./adminCustomerDrafts";
+import { inquiryDraftCard, escalationDraftCard, observationDraftCard, mergeDrafts, isDraftCurrent, onlyNewestDraft } from "./adminCustomerDrafts";
 
 const d = (iso: string) => new Date(iso);
 const j = (o: unknown) => JSON.stringify(o);
@@ -195,3 +195,32 @@ describe("adminCustomerDrafts — normalization", () => {
     expect(out.map((x) => x.id)).toEqual(["esc:1", "task:1"]); // newest first; ids don't collide
   });
 });
+
+describe("onlyNewestDraft — 一個客人同時只留最新一張草稿卡(2026-07-02 leslie 疊卡)", () => {
+  const card = (id: string, iso: string) =>
+    ({ id, createdAt: new Date(iso) }) as unknown as Parameters<typeof onlyNewestDraft>[0][number]
+
+  it("多張卡只留 mergeDrafts 排序後的第一張(最新)", () => {
+    // mergeDrafts sorts newest-first; feed it pre-sorted like the endpoint does.
+    const drafts = [card("obs:2", "2026-07-02T06:01:00Z"), card("esc:1", "2026-07-01T23:03:00Z")]
+    const kept = onlyNewestDraft(drafts)
+    expect(kept).toHaveLength(1)
+    expect(kept[0].id).toBe("obs:2")
+  })
+
+  it("空清單回空,不炸", () => {
+    expect(onlyNewestDraft([])).toEqual([])
+  })
+
+  it("單張卡原樣保留", () => {
+    const drafts = [card("task:9", "2026-07-01T00:00:00Z")]
+    expect(onlyNewestDraft(drafts)).toEqual(drafts)
+  })
+
+  it("與 mergeDrafts 串起來:新 followup 卡壓過舊 escalation 卡(leslie repro)", () => {
+    const esc = card("esc:old", "2026-07-01T23:03:20Z")
+    const obs = card("obs:new", "2026-07-02T06:01:39Z")
+    const kept = onlyNewestDraft(mergeDrafts([[esc], [obs]]))
+    expect(kept.map((c) => c.id)).toEqual(["obs:new"])
+  })
+})

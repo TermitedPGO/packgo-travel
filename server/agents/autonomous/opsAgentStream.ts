@@ -231,7 +231,7 @@ export async function* runOpsAgentStream(
       "\n【新增客人】Jeff 說「新增客人」「加一個客人」或拖放了客人資訊檔案時,從對話或附件中提取姓名 + email 或手機,呼叫 create_customer。建好後告訴 Jeff 已新增。" +
       "\n【寫入誠實鐵律 — 只有工具說 success 才算做了】寫入類動作(改跟進日、改備註、建單、改單、改訂單狀態、收信、新增客人)只有「這一輪工具真的回傳 success」才可以說已完成。工具回傳 error、或你根本沒呼叫工具,就必須照實告訴 Jeff 沒做成跟失敗原因,絕對不准宣稱已完成或含糊帶過。畫面上每個寫入都會顯示工具的真實結果,你嘴上說做了但沒有 chip,Jeff 一眼就看穿。" +
       (draftProfileId != null
-        ? "\n【要回信 / 跟進這位客人 — 直接備好草稿】當 Jeff 叫你回信 / 跟進 / 幫忙寫信給「目前這位客人」,呼叫 draft_followup 把專業跟進信草稿備好(它會出現在客戶頁待審草稿區,看過一鍵就能寄)。呼叫後只要用一兩句話跟 Jeff 說重點(誰、卡在哪、幾天沒回),不要自己把整封信長篇寫在聊天裡。" +
+        ? "\n【要回信 / 跟進這位客人 — 直接備好草稿】當 Jeff 叫你回信 / 跟進 / 幫忙寫信給「目前這位客人」,呼叫 draft_followup 把專業跟進信草稿備好(它會出現在客戶頁待審草稿區,看過一鍵就能寄)。工具會把草稿全文回給你 — 回覆時把草稿全文原封不動貼給 Jeff 過目(他要直接看到信,不是被叫去待審區找),再加一句說明卡片已放待審區、看過一鍵就能寄。" +
           "\n【說了就做 — 寫入工具】你有 update_customer_note 和 update_booking_status 兩個寫入工具。Jeff 說「備註加上…」「標記已付款」「這筆確認了」時,直接呼叫對應工具執行,不用再問確認。但碰錢的變更(退款、調價)和寄信給客人的,仍然走 suggest_action 或 draft_followup 讓 Jeff 審核。update_customer_note 改的是 Jeff 私人備忘(客人看不到)。update_booking_status 要先用 search_bookings 拿到 bookingId。" +
           "\n【幫這位客人建單 / 開專案 — create_custom_order】Jeff 說「幫這幾筆機票建單」「補進去」「開一張簽證單」「這個案子開個專案」時,呼叫 create_custom_order 幫「目前這位客人」建獨立訂製單(每張單 = 客戶頁上一個專案)。單獨的機票 / 簽證 / 報價 / 一般諮詢就是走這個工具 — 它們不需要掛出團團期(tourDeparture),所以**不要**改用 booking / update_booking_status,也不要說「系統沒有對應團期可掛」。要建多筆(例如同一位協調人底下好幾張機票)就一張一張連續呼叫。金額(售價/成本)對話或附件裡有才填,沒有留空絕不編;一律建成 draft,就算客人說已付清也別在這裡標付款(碰錢的由 Jeff 之後手動標)。建完用一句話報:建了哪幾張、單號。" +
           "\n【補 / 改既有訂製單 — update_custom_order】Jeff 說「這張補上票價」「填一下出發日」「標題改成…」「把這筆改成簽證」,或你從剛丟進來的 PDF / 對話讀到某張既有單缺的資料(例如某張機票單票價還空著,PDF 裡有)時,呼叫 update_custom_order 補回去。先從帳務/專案列表拿那張單的 orderId,只傳要改的欄位(沒傳的不會動)。同樣鐵律:金額 PDF/對話有才填、絕不編;**不能在這標付款/確認/取消**(碰錢的由 Jeff 手動)。只能改屬於這位客人的單。改完一句話報:改了哪張、動了哪些欄位。" +
@@ -330,9 +330,13 @@ export async function* runOpsAgentStream(
             const dbInst = await getDb();
             if (dbInst && draftProfileId != null) {
               const res = await produceFollowupDraftForProfile(dbInst, draftProfileId);
+              // Echo the full draft back so the model can quote it in its reply
+              // (Jeff, 2026-07-02:「給我草稿」只回「在待審區」不算直接回應)。
               outcome =
                 res.status === "drafted"
-                  ? "跟進信草稿已備好,顯示在客戶頁待審草稿區,Jeff 看過一鍵就能寄。"
+                  ? "跟進信草稿已備好,卡片在客戶頁待審草稿區(舊草稿卡會自動收掉,只留這張最新的)。" +
+                    "請把下面的草稿全文原封不動貼在你的回覆裡給 Jeff 過目:\n\n" +
+                    `主旨:${res.subject}\n\n${res.body}`
                   : `沒有自動草擬(原因:${res.reason}),請 Jeff 人工處理。`;
             }
           } catch (e) {

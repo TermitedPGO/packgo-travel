@@ -30,7 +30,9 @@ const log = createChildLogger({ module: "followupDraftOnDemand" });
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type OnDemandDraftResult =
-  | { status: "drafted"; daysSince: number }
+  // subject/body echoed back so the ops chat can quote the draft IN its reply
+  // (Jeff, 2026-07-02:「給我草稿」時 AI 只回「在待審區」不算直接回應)。
+  | { status: "drafted"; daysSince: number; subject: string; body: string }
   | {
       status: "skipped";
       reason: DraftSkipReason | "no_email" | "no_history" | "empty_draft" | "unclean_draft";
@@ -123,17 +125,18 @@ export async function produceFollowupDraftForProfile(
     );
   }
 
+  const finalSubject = stripMarkdownForEmail(draft.subject) || `跟進:${email}`;
   await db.insert(agentMessages).values(
     buildFollowupDraftRow({
       profileId,
       customerEmail: email,
       daysSince,
       gmailThreadId: gmailThreadId as string, // non-null past detectDraftSkip
-      subject: stripMarkdownForEmail(draft.subject) || `跟進:${email}`,
+      subject: finalSubject,
       draftBody: cleaned.body,
       promptVariant,
     }),
   );
   log.info({ profileId, daysSince }, "[followupDraftOnDemand] drafted on demand");
-  return { status: "drafted", daysSince };
+  return { status: "drafted", daysSince, subject: finalSubject, body: cleaned.body };
 }

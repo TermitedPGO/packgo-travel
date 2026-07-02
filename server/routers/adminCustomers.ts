@@ -40,6 +40,7 @@ import {
   observationDraftCard,
   mergeDrafts,
   isDraftCurrent,
+  onlyNewestDraft,
 } from "./adminCustomerDrafts";
 
 /**
@@ -1405,11 +1406,14 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
         );
       }
 
-      return mergeDrafts([
-        inquiryCards.filter((c): c is NonNullable<typeof c> => c != null),
-        emailCards.filter((c): c is NonNullable<typeof c> => c != null),
-        obsCards.filter((c): c is NonNullable<typeof c> => c != null),
-      ]).filter((c) => isDraftCurrent(c.createdAt, latestMsgAt));
+      // 一個客人同時只留最新一張草稿卡(2026-07-02 leslie 疊卡 repro)。
+      return onlyNewestDraft(
+        mergeDrafts([
+          inquiryCards.filter((c): c is NonNullable<typeof c> => c != null),
+          emailCards.filter((c): c is NonNullable<typeof c> => c != null),
+          obsCards.filter((c): c is NonNullable<typeof c> => c != null),
+        ]).filter((c) => isDraftCurrent(c.createdAt, latestMsgAt)),
+      );
     }),
 
   customerConversationThread: adminProcedure
