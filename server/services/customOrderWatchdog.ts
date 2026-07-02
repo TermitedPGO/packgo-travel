@@ -16,7 +16,8 @@
  *   - totalPrice <= 0 → 停(防除以零 / 壞資料)。
  *   - 同一張單售價跟成本共用 currency 欄,沒有跨幣別問題(若日後拆,照 supplierMargin
  *     的 currencyMismatch:不換匯不假算)。
- *   - 承諾規則:日期缺就不叫;狀態被手動推進(= 事情已在系統外處理)就不叫。
+ *   - 承諾規則:日期缺就不叫;狀態被手動推進(= 事情已在系統外處理)就不叫;
+ *     visa 單確認書規則豁免(沒有確認單交付物,見 WATCHDOG_CONFIRMATION_EXEMPT_CATEGORIES)。
  *
  * 算法 + 門檻沿用 server/services/supplierMargin.ts。
  */
@@ -29,6 +30,28 @@ export const WATCHDOG_QUOTE_PROMISE_DAYS = 7;
 
 /** 訂金收了超過幾天確認書沒寄 = 黃燈。以 depositPaidAt 起算,LA 曆日。 */
 export const WATCHDOG_CONFIRMATION_PROMISE_DAYS = 3;
+
+/**
+ * 確認書規則(規則三)的 category 豁免(2026-07-02 加,起因 ORD-2026-0004
+ * Jeff Green 中國旅遊簽證誤報):
+ *   - visa:簽證單「沒有確認單這種交付物」— 交付物是簽證/護照本身,進度在系統外
+ *     手動追。deposit_paid 之後 confirmedAt 永遠不會被寫,叫了就是永遠誤報
+ *     (違反本檔第一原則「寧可漏報不可誤報」)。→ 豁免。
+ *   - flight 不豁免:機票有出票憑證(確認書即 e-ticket/出票確認),規則照跑。
+ *   - quote 不豁免:報價行程單收了訂金本來就該寄確認書。
+ *   - general 不豁免(刻意決定,fail-visible):general = 一般諮詢是雜項桶,
+ *     一張 general 單真的收到訂金,代表背後有真交付物,確認承諾大概率適用;
+ *     豁免它會讓沒分類好的真單永遠沉默。schema(drizzle/schema.ts customOrders.
+ *     category)也說 category 是可擴充 varchar、NULL = 未標 — 未標/未知一律照跑,
+ *     寧可 Jeff 看一眼手動判定,也不要整桶盲掉。
+ *   - category 是 varchar 不是 enum(值由 opsTools CUSTOM_ORDER_CATEGORIES 白名單:
+ *     flight/visa/quote/general),未來新 category 預設不豁免,要豁免得回來這裡加。
+ * 只影響 confirmationUnsent;quoteUnsent(規則二)不看 category — 簽證單答應了
+ * 報價一樣要寄。
+ */
+export const WATCHDOG_CONFIRMATION_EXEMPT_CATEGORIES: ReadonlySet<string> = new Set([
+  "visa",
+]);
 
 /** 不檢查的狀態:draft(數字還在喬)、cancelled(不相關)。其餘 quoted→completed 都查。 */
 const SKIP_STATUSES = new Set(["draft", "cancelled"]);
@@ -163,6 +186,10 @@ export type OrderPromiseInput = {
   orderNumber: string;
   title: string;
   status: string;
+  /** flight/visa/quote/general(opsTools 白名單)或 NULL = 未標。確認書規則的
+   *  category 豁免看這欄;必填(不是 optional)— 逼 caller 把欄位餵進來,
+   *  漏餵就 compile error,而不是默默退回未豁免行為。 */
+  category: string | null;
   /** DB 是 int 0/1;list 投影是 boolean。兩種都吃。 */
   needsQuote: number | boolean | null;
   quoteSentAt: Date | string | null;
@@ -207,7 +234,8 @@ function laDayDiff(from: Date, to: Date): number {
  * 規則三(訂金收了確認書還沒寄):depositPaidAt 有(recordPayment 寫的錢的真相)、
  * confirmedAt 空(sendConfirmation 從沒跑過),超過 3 天。只看 deposit_paid / paid ——
  * confirmed+ 表示確認已處理(手動推進不寫 confirmedAt);departed/completed 出發後
- * 確認書已無意義,叫了只是噪音。
+ * 確認書已無意義,叫了只是噪音。category 在豁免名單(visa)→ 不叫:簽證單沒有
+ * 確認單交付物,叫了是永遠誤報(見 WATCHDOG_CONFIRMATION_EXEMPT_CATEGORIES)。
  */
 export function evaluateOrderPromise(
   order: OrderPromiseInput,
@@ -233,6 +261,12 @@ export function evaluateOrderPromise(
   }
 
   if (order.status === "deposit_paid" || order.status === "paid") {
+    // category 豁免:visa 沒有確認單交付物(交付物 = 簽證/護照本身,手動追),
+    // confirmedAt 永遠不會寫 → 不豁免就是永遠誤報。NULL/未知 category 照跑
+    // (fail-visible,見 WATCHDOG_CONFIRMATION_EXEMPT_CATEGORIES 的完整決策)。
+    if (order.category != null && WATCHDOG_CONFIRMATION_EXEMPT_CATEGORIES.has(order.category)) {
+      return null;
+    }
     if (order.confirmedAt != null) return null;
     const paid = toDate(order.depositPaidAt);
     if (paid == null) return null; // 沒收過訂金 / 日期缺 → 不適用

@@ -82,6 +82,7 @@ const baseOrder = {
   customerEmail: "w@x.co",
   title: "台灣12天",
   destination: null,
+  category: null, // 未標;看門狗確認書豁免只認明確 visa
   status: "arranged",
   needsQuote: 1,
   quotePdfUrl: null,
@@ -172,6 +173,25 @@ describe("watchdogForCustomer — Step 5 漏價看門狗(admin-only,只攤數字
     expect(out[0].kind).toBe("promise");
     expect((out[0] as any).reason).toBe("confirmationUnsent");
     expect((out[0] as any).daysWaiting).toBeGreaterThan(3);
+  });
+
+  it("category 從 DB row 一路餵進承諾規則:visa 單免確認書誤報,flight 照叫(ORD-2026-0004)", async () => {
+    (db.findCustomerProfileId as any).mockResolvedValue(5);
+    const overdue = {
+      ...baseOrder,
+      status: "deposit_paid",
+      supplierCost: null, // 漏價規則資料缺不叫,只剩 promise
+      depositPaidAt: new Date(Date.now() - 5 * 86_400_000),
+      confirmedAt: null,
+    };
+    (db.listCustomOrdersByProfile as any).mockResolvedValue([
+      { ...overdue, id: 11, category: "visa" }, // 簽證:沒有確認單交付物 → 豁免
+      { ...overdue, id: 12, category: "flight" }, // 機票:有出票憑證 → 照叫
+    ]);
+    const out = await caller().watchdogForCustomer({ profileId: 5 });
+    expect(out).toHaveLength(1);
+    expect((out[0] as any).orderId).toBe(12);
+    expect((out[0] as any).reason).toBe("confirmationUnsent");
   });
 
   it("找不到客人 → 空陣列(不打 DB)", async () => {

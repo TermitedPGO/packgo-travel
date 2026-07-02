@@ -6,7 +6,9 @@
  * 排序(紅在前最差在前)。
  *
  * 規則二/三(v2 答應了還沒寄)蓋:due / not-due 邊界 / 日期缺不叫 / draft·手動推進·
- * cancelled 跳過 / LA 曆日(不是 UTC)/ 排序(等最久在前)。
+ * cancelled 跳過 / LA 曆日(不是 UTC)/ 排序(等最久在前)/ category 豁免
+ * (visa 免確認書規則,ORD-2026-0004;flight/quote/general/NULL 照跑;
+ * visa 的報價規則不豁免)。
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -17,6 +19,7 @@ import {
   WATCHDOG_MARGIN_THRESHOLD,
   WATCHDOG_QUOTE_PROMISE_DAYS,
   WATCHDOG_CONFIRMATION_PROMISE_DAYS,
+  WATCHDOG_CONFIRMATION_EXEMPT_CATEGORIES,
   type OrderMarginInput,
   type OrderPromiseInput,
 } from "./customOrderWatchdog";
@@ -163,6 +166,7 @@ function promiseOrder(over: Partial<OrderPromiseInput> = {}): OrderPromiseInput 
     orderNumber: "ORD-2026-0001",
     title: "台灣12天",
     status: "draft",
+    category: null, // 未標(schema NULL);豁免只認明確的 visa
     needsQuote: 1,
     quoteSentAt: null,
     depositPaidAt: null,
@@ -308,6 +312,61 @@ describe("evaluateOrderPromise — 訂金收了確認書還沒寄", () => {
       NOW,
     );
     expect(f!.daysWaiting).toBe(5);
+  });
+});
+
+describe("evaluateOrderPromise — category 豁免(visa 沒有確認單交付物)", () => {
+  const paidOrder = (over: Partial<OrderPromiseInput> = {}) =>
+    promiseOrder({ status: "deposit_paid", depositPaidAt: daysAgo(4), ...over });
+
+  it("visa + deposit_paid 超過 3 天沒確認書 → 豁免不叫(ORD-2026-0004 那種)", () => {
+    // 簽證單交付物是簽證/護照本身(手動追),confirmedAt 永遠不會寫;
+    // 不豁免就是從第 4 天起永遠誤報。
+    expect(evaluateOrderPromise(paidOrder({ category: "visa" }), NOW)).toBeNull();
+    // 拖再久也一樣豁免(不是門檻問題,是規則不適用)
+    expect(
+      evaluateOrderPromise(paidOrder({ category: "visa", depositPaidAt: daysAgo(60) }), NOW),
+    ).toBeNull();
+  });
+
+  it("visa + paid(尾款也收了)一樣豁免", () => {
+    expect(
+      evaluateOrderPromise(paidOrder({ category: "visa", status: "paid" }), NOW),
+    ).toBeNull();
+  });
+
+  it("flight 同狀態照叫(機票有出票憑證,確認書規則適用)", () => {
+    const f = evaluateOrderPromise(paidOrder({ category: "flight" }), NOW);
+    expect(f).not.toBeNull();
+    expect(f!.reason).toBe("confirmationUnsent");
+    expect(f!.daysWaiting).toBe(4);
+  });
+
+  it("quote / general / NULL(未標)照叫 — fail-visible,只有明確 visa 才豁免", () => {
+    expect(evaluateOrderPromise(paidOrder({ category: "quote" }), NOW)!.reason).toBe(
+      "confirmationUnsent",
+    );
+    // general 是雜項桶:收得到訂金代表背後有真交付物,豁免會讓真單永遠沉默
+    expect(evaluateOrderPromise(paidOrder({ category: "general" }), NOW)!.reason).toBe(
+      "confirmationUnsent",
+    );
+    expect(evaluateOrderPromise(paidOrder({ category: null }), NOW)!.reason).toBe(
+      "confirmationUnsent",
+    );
+  });
+
+  it("visa 的報價規則(quoteUnsent)不豁免 — 答應了報價一樣要寄", () => {
+    const f = evaluateOrderPromise(
+      promiseOrder({ category: "visa", createdAt: daysAgo(8) }),
+      NOW,
+    );
+    expect(f).not.toBeNull();
+    expect(f!.reason).toBe("quoteUnsent");
+    expect(f!.daysWaiting).toBe(8);
+  });
+
+  it("豁免名單目前只有 visa(新 category 預設不豁免)", () => {
+    expect([...WATCHDOG_CONFIRMATION_EXEMPT_CATEGORIES]).toEqual(["visa"]);
   });
 });
 
