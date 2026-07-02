@@ -2754,6 +2754,15 @@ export const customerProfiles = mysqlTable("customerProfiles", {
 
   status: mysqlEnum("status", ["active", "dormant", "opted_out", "blocked"]).default("active").notNull(),
 
+  // customer-unread (migration 0108) — 來訊未讀紅點的兩根指針。
+  // lastInboundAt: 最近一封 inbound customerInteraction 的時間(寫入點經
+  //   server/_core/customerUnread.ts touchLastInbound,只往新更新不倒退;
+  //   migration 從既有 inbound rows backfill MAX(createdAt))。NULL = 沒來過訊。
+  // jeffViewedAt: Jeff 上次打開這位客人的時間(markCustomerSeen 設 NOW)。
+  // unread = lastInboundAt 非空 且 (jeffViewedAt 空 或 lastInboundAt > jeffViewedAt)。
+  lastInboundAt: timestamp("lastInboundAt"),
+  jeffViewedAt: timestamp("jeffViewedAt"),
+
   // Q4-A — Jeff's manual per-customer follow-up date (migration 0102). A plain
   // calendar DATE (no time / tz): the cockpit surfaces「今天該跟進」when this is
   // set and <= today in America/Los_Angeles. `mode: "string"` round-trips as

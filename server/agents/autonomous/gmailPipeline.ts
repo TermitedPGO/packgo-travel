@@ -45,6 +45,7 @@ import {
 } from "../../_core/gmail";
 import { detectReceipt, extractReceipt, pickReceiptAttachment } from "../../_core/receiptExtractor";
 import { scrubPii } from "../../_core/piiScrub";
+import { touchLastInbound } from "../../_core/customerUnread";
 import {
   createPendingExpense,
   getPendingExpenseByGmailMessageId,
@@ -937,6 +938,12 @@ async function processOneEmail(
       throw e;
     }
   }
+
+  // customer-unread (0108) — a customer message just landed: advance the
+  // profile's lastInboundAt so the cockpit red dot lights up. Monotonic +
+  // best-effort (never throws), and safe to call on the dup-key path too
+  // (re-touching the same receivedAt matches 0 rows).
+  if (profileId) await touchLastInbound(db, profileId, msg.receivedAt);
 
   // 2026-06-21 — file inbound DOCUMENT attachments (pdf/docx/xlsx/csv, or a
   // sizeable image such as a passport scan) as customerDocuments so they show

@@ -21,6 +21,7 @@ import { TRPCError } from "@trpc/server";
 import { eq, and } from "drizzle-orm";
 import { router, adminProcedure } from "../../_core/trpc";
 import { getDb } from "../../db";
+import { touchLastInbound } from "../../_core/customerUnread";
 import {
   customerProfiles,
   customerInteractions,
@@ -155,6 +156,8 @@ export const demoRouter = router({
           urgency: urgencyMap[decision.urgency] ?? 50,
         });
         interactionId = Number((ins as any)[0]?.insertId ?? 0);
+        // customer-unread (0108) — inbound landed, advance the red-dot pointer.
+        await touchLastInbound(db, profileId, new Date());
       }
 
       // 5. Record outcome (demo mode — no actual send)
@@ -230,6 +233,8 @@ export const demoRouter = router({
           urgency: input.rating === 1 ? 80 : 40,
         });
         interactionId = Number((ins as any)[0]?.insertId ?? 0);
+        // customer-unread (0108) — inbound landed, advance the red-dot pointer.
+        await touchLastInbound(db, profileId, new Date());
       }
 
       let outcomeId: number | undefined;
@@ -371,6 +376,8 @@ export const demoRouter = router({
           urgency: urgencyMap[decision.severity] ?? 60,
         });
         interactionId = Number((ins as any)[0]?.insertId ?? 0);
+        // customer-unread (0108) — inbound landed, advance the red-dot pointer.
+        await touchLastInbound(db, profileId, new Date());
       }
 
       let outcomeId: number | undefined;

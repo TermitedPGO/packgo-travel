@@ -27,9 +27,17 @@ export default function AdminCustomers() {
     isChatLoading,
     markNotCustomer,
     restoreCustomer,
+    deleteGuest,
     approveDraft,
     isApprovingDraft,
   } = useCustomerData(selected, showHidden, activeProjectId)
+
+  // 訪客刪除 — the deleted row may be the open one; drop the selection so the
+  // detail pane never keeps rendering a customer that no longer exists.
+  const handleDeleteGuest = (profileId: number) => {
+    deleteGuest(profileId)
+    if (selected?.kind === "guest" && selected.id === profileId) setSelected(null)
+  }
 
   // Default to the newest project when the customer or their project set
   // changes; no projects → 未分類 (null). Keyed on the project ids so a manual
@@ -66,6 +74,7 @@ export default function AdminCustomers() {
           onToggleHidden={setShowHidden}
           onMarkNotCustomer={markNotCustomer}
           onRestoreCustomer={restoreCustomer}
+          onDeleteGuest={handleDeleteGuest}
         />
       )}
       {selected !== null ? (

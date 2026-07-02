@@ -29,6 +29,8 @@ import {
   includesInquiries,
 } from "./adminCustomersThread";
 import { isHiddenCustomer } from "./adminCustomersFilter";
+import { guestDeleteGate } from "./adminCustomersGuestDelete";
+import { isUnreadInbound, markCustomerSeen } from "../_core/customerUnread";
 import { loadCustomerDocs } from "../_core/customerDocsLoader";
 import {
   readCachedSummary,
@@ -176,6 +178,9 @@ export const adminCustomersRouter = router({
           profileStatus: customerProfiles.status,
           lastInteractionAt: customerProfiles.lastInteractionAt,
           followUpDate: customerProfiles.followUpDate,
+          // customer-unread (0108) — 來訊未讀紅點的兩根指針(NULL 當沒 profile row)。
+          lastInboundAt: customerProfiles.lastInboundAt,
+          jeffViewedAt: customerProfiles.jeffViewedAt,
           // 需跟進 (locked 2026-06-20): open inquiry >2d unanswered OR a
           // sent/viewed quote >5d old. Correlated EXISTS by userId OR verified
           // email — read-only signal, never auto-acts. Intentionally STATUS-only
@@ -203,18 +208,29 @@ export const adminCustomersRouter = router({
         .where(eq(usersTable.role, "user"))
         .orderBy(desc(usersTable.lastSignedIn));
 
-      const withFlags = rows.map(({ profileStatus, lastInteractionAt, needsFollowup, unread, ...r }) => {
-        const blocked = profileStatus === "blocked";
-        const hidden = isHiddenCustomer(
-          {
-            bookingCount: r.bookingCount ?? 0,
-            inquiryCount: r.inquiryCount ?? 0,
-            lastInteractionAt: lastInteractionAt ?? null,
-          },
-          blocked,
-        );
-        return { ...r, blocked, hidden, needsFollowup: Number(needsFollowup) === 1, unread: Number(unread) };
-      });
+      const withFlags = rows.map(
+        ({ profileStatus, lastInteractionAt, needsFollowup, unread, lastInboundAt, jeffViewedAt, ...r }) => {
+          const blocked = profileStatus === "blocked";
+          const hidden = isHiddenCustomer(
+            {
+              bookingCount: r.bookingCount ?? 0,
+              inquiryCount: r.inquiryCount ?? 0,
+              lastInteractionAt: lastInteractionAt ?? null,
+            },
+            blocked,
+          );
+          return {
+            ...r,
+            blocked,
+            hidden,
+            needsFollowup: Number(needsFollowup) === 1,
+            unread: Number(unread),
+            // customer-unread (0108) — 客人來訊 Jeff 還沒看(名字粗體 + 頭像紅點)。
+            // 與既有 `unread`(agentMessages count)是兩個訊號,不合併。
+            unreadInbound: isUnreadInbound(lastInboundAt ?? null, jeffViewedAt ?? null),
+          };
+        },
+      );
 
       return input?.includeHidden ? withFlags : withFlags.filter((r) => !r.hidden);
     }),
@@ -281,6 +297,227 @@ export const adminCustomersRouter = router({
             ? eq(customerProfiles.id, input.profileId)
             : eq(customerProfiles.userId, input.userId),
         );
+      return { ok: true };
+    }),
+
+  /**
+   * markCustomerSeen (customer-unread, 0108) — Jeff opened this customer:
+   * jeffViewedAt = NOW, the row's red dot goes out. Mirrors markNotCustomer's
+   * upsert-by-userId / direct-by-profileId resolution (a registered customer
+   * with no profile row yet gets a minimal one).
+   */
+  markCustomerSeen: adminProcedure
+    .input(
+      z.union([
+        z.object({ userId: z.number().int().positive() }).strict(),
+        z.object({ profileId: z.number().int().positive() }).strict(),
+      ]),
+    )
+    .mutation(async ({ input }) => {
+      const drizzleDb = (await db.getDb())!;
+      await markCustomerSeen(drizzleDb, input);
+      return { ok: true };
+    }),
+
+  /**
+   * customerUnreadCount (customer-unread, 0108) — how many customers have an
+   * unseen inbound message, for the /ops nav rail badge. Applies the SAME
+   * noise gates as the two lists (registered: isHiddenCustomer auto-junk +
+   * blocked; guests: guestList's contactable / not-registered / real-content
+   * SQL conditions + blocked), so the badge count and the visible red dots
+   * can never disagree.
+   */
+  customerUnreadCount: adminProcedure.query(async () => {
+    const drizzleDb = (await db.getDb())!;
+    const {
+      customerProfiles,
+      users: usersTable,
+      inquiries: inquiriesTable,
+      agentMessages,
+    } = await import("../../drizzle/schema");
+
+    // Registered customers — profile row required (that's where the pointers
+    // live); SQL prefilters lastInboundAt, TS applies the shared gates.
+    const registered = await drizzleDb
+      .select({
+        bookingCount: usersTable.bookingCount,
+        inquiryCount: usersTable.inquiryCount,
+        lastInteractionAt: customerProfiles.lastInteractionAt,
+        status: customerProfiles.status,
+        lastInboundAt: customerProfiles.lastInboundAt,
+        jeffViewedAt: customerProfiles.jeffViewedAt,
+      })
+      .from(usersTable)
+      .innerJoin(customerProfiles, eq(customerProfiles.userId, usersTable.id))
+      .where(
+        and(
+          eq(usersTable.role, "user"),
+          sql`${customerProfiles.lastInboundAt} IS NOT NULL`,
+        ),
+      );
+    const registeredUnread = registered.filter(
+      (r) =>
+        !isHiddenCustomer(
+          {
+            bookingCount: r.bookingCount ?? 0,
+            inquiryCount: r.inquiryCount ?? 0,
+            lastInteractionAt: r.lastInteractionAt ?? null,
+          },
+          r.status === "blocked",
+        ) && isUnreadInbound(r.lastInboundAt, r.jeffViewedAt),
+    ).length;
+
+    // Guests — mirror guestList's WHERE (雜訊 profile 不算數) + unread pointers.
+    const guests = await drizzleDb
+      .select({
+        status: customerProfiles.status,
+        lastInboundAt: customerProfiles.lastInboundAt,
+        jeffViewedAt: customerProfiles.jeffViewedAt,
+      })
+      .from(customerProfiles)
+      .where(
+        and(
+          sql`${customerProfiles.userId} IS NULL`,
+          sql`${customerProfiles.lastInboundAt} IS NOT NULL`,
+          sql`(
+            (${customerProfiles.email} IS NOT NULL AND ${customerProfiles.email} != '')
+            OR (${customerProfiles.phone} IS NOT NULL AND ${customerProfiles.phone} != '')
+          )`,
+          sql`(
+            ${customerProfiles.email} IS NULL OR ${customerProfiles.email} = ''
+            OR NOT EXISTS (SELECT 1 FROM ${usersTable} WHERE ${usersTable.email} = ${customerProfiles.email})
+          )`,
+          sql`(
+            ${customerProfiles.source} = 'manual'
+            OR EXISTS (SELECT 1 FROM ${inquiriesTable} WHERE ${inquiriesTable.customerEmail} = ${customerProfiles.email})
+            OR EXISTS (SELECT 1 FROM ${agentMessages} WHERE ${agentMessages.relatedCustomerProfileId} = ${customerProfiles.id} AND ${agentMessages.messageType} = 'escalation')
+          )`,
+        ),
+      );
+    const guestUnread = guests.filter(
+      (g) =>
+        g.status !== "blocked" &&
+        isUnreadInbound(g.lastInboundAt, g.jeffViewedAt),
+    ).length;
+
+    return { count: registeredUnread + guestUnread };
+  }),
+
+  /**
+   * deleteGuestCustomer (customer-cockpit, 2026-07-01) — Jeff:「不只是隱藏 也可
+   * 以選擇刪除」。HARD delete of a pure-noise GUEST profile + its interactions /
+   * chat / documents (R2 files best-effort). Gated by guestDeleteGate (pure,
+   * unit-tested): guests only (registered accounts must use hide), and any
+   * business trace (customOrders / totalSpend / bookingCount) refuses — those
+   * histories are irreversible, hide instead. Audited like update_booking_status.
+   */
+  deleteGuestCustomer: adminProcedure
+    .input(z.object({ profileId: z.number().int().positive() }).strict())
+    .mutation(async ({ ctx, input }) => {
+      const drizzleDb = (await db.getDb())!;
+      const {
+        customerProfiles,
+        customOrders,
+        customerInteractions,
+        customerChatMessages,
+        customerDocuments,
+      } = await import("../../drizzle/schema");
+
+      const [profile] = await drizzleDb
+        .select({
+          id: customerProfiles.id,
+          userId: customerProfiles.userId,
+          email: customerProfiles.email,
+          phone: customerProfiles.phone,
+          name: customerProfiles.name,
+          totalSpend: customerProfiles.totalSpend,
+          bookingCount: customerProfiles.bookingCount,
+        })
+        .from(customerProfiles)
+        .where(eq(customerProfiles.id, input.profileId))
+        .limit(1);
+
+      const [orderCountRow] = await drizzleDb
+        .select({ n: sql<number>`COUNT(*)` })
+        .from(customOrders)
+        .where(eq(customOrders.customerProfileId, input.profileId));
+
+      const verdict = guestDeleteGate(
+        profile ?? null,
+        Number(orderCountRow?.n ?? 0),
+      );
+      if (!verdict.ok) {
+        throw new TRPCError({ code: verdict.code, message: verdict.message });
+      }
+
+      // Documents first: collect R2 refs, best-effort delete the bytes (a
+      // storage failure must never leave the DB half-deleted — warn + continue).
+      const docs = await drizzleDb
+        .select({ id: customerDocuments.id, r2Url: customerDocuments.r2Url })
+        .from(customerDocuments)
+        .where(eq(customerDocuments.customerProfileId, input.profileId));
+      for (const doc of docs) {
+        if (!doc.r2Url) continue;
+        try {
+          const { storageDelete, extractR2KeyFromUrl } = await import("../storage");
+          const key = /^https?:\/\//i.test(doc.r2Url)
+            ? extractR2KeyFromUrl(doc.r2Url)
+            : doc.r2Url;
+          if (key) {
+            await storageDelete(key);
+          } else {
+            log.warn(
+              { docId: doc.id, profileId: input.profileId },
+              "[deleteGuestCustomer] cannot derive R2 key from r2Url, skipping bytes",
+            );
+          }
+        } catch (err) {
+          log.warn(
+            { err, docId: doc.id, profileId: input.profileId },
+            "[deleteGuestCustomer] R2 delete failed, continuing with DB delete",
+          );
+        }
+      }
+
+      // Count rows for the audit trail BEFORE deleting.
+      const [interactionCountRow] = await drizzleDb
+        .select({ n: sql<number>`COUNT(*)` })
+        .from(customerInteractions)
+        .where(eq(customerInteractions.customerProfileId, input.profileId));
+      const [chatCountRow] = await drizzleDb
+        .select({ n: sql<number>`COUNT(*)` })
+        .from(customerChatMessages)
+        .where(eq(customerChatMessages.customerProfileId, input.profileId));
+
+      await drizzleDb
+        .delete(customerInteractions)
+        .where(eq(customerInteractions.customerProfileId, input.profileId));
+      await drizzleDb
+        .delete(customerChatMessages)
+        .where(eq(customerChatMessages.customerProfileId, input.profileId));
+      await drizzleDb
+        .delete(customerDocuments)
+        .where(eq(customerDocuments.customerProfileId, input.profileId));
+      await drizzleDb
+        .delete(customerProfiles)
+        .where(eq(customerProfiles.id, input.profileId));
+
+      const { audit } = await import("../_core/auditLog");
+      audit({
+        ctx,
+        action: "admin.customers.deleteGuest",
+        targetType: "customerProfile",
+        targetId: input.profileId,
+        changes: {
+          email: profile?.email ?? null,
+          phone: profile?.phone ?? null,
+          name: profile?.name ?? null,
+          interactions: Number(interactionCountRow?.n ?? 0),
+          chatMessages: Number(chatCountRow?.n ?? 0),
+          documents: docs.length,
+        },
+      });
+
       return { ok: true };
     }),
 
@@ -591,6 +828,9 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
           phone: customerProfiles.phone,
           updatedAt: customerProfiles.updatedAt,
           status: customerProfiles.status,
+          // customer-unread (0108) — 來訊未讀紅點的兩根指針。
+          lastInboundAt: customerProfiles.lastInboundAt,
+          jeffViewedAt: customerProfiles.jeffViewedAt,
           // 需跟進: an unanswered inquiry (by this profile's email) older than 2d.
           needsFollowup: sql<number>`EXISTS (SELECT 1 FROM ${inquiriesTable}
             WHERE ${inquiriesTable.customerEmail} = ${customerProfiles.email}
@@ -631,12 +871,16 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
       // registered accounts (markNotCustomer/restoreCustomer by profileId).
       // Default view drops blocked guests; the "show hidden" toggle brings them
       // back. Nothing is deleted — a mis-hide is one click to restore.
-      const withFlags = rows.map(({ status, needsFollowup, unread, ...r }) => ({
-        ...r,
-        blocked: status === "blocked",
-        needsFollowup: Number(needsFollowup) === 1,
-        unread: Number(unread),
-      }));
+      const withFlags = rows.map(
+        ({ status, needsFollowup, unread, lastInboundAt, jeffViewedAt, ...r }) => ({
+          ...r,
+          blocked: status === "blocked",
+          needsFollowup: Number(needsFollowup) === 1,
+          unread: Number(unread),
+          // customer-unread (0108) — 客人來訊 Jeff 還沒看(名字粗體 + 頭像紅點)。
+          unreadInbound: isUnreadInbound(lastInboundAt ?? null, jeffViewedAt ?? null),
+        }),
+      );
       return input?.includeHidden
         ? withFlags
         : withFlags.filter((r) => !r.blocked);

@@ -1,4 +1,5 @@
-import { useMemo } from "react"
+import { useEffect, useMemo } from "react"
+import { toast } from "sonner"
 import { trpc } from "@/lib/trpc"
 import { useLocale } from "@/contexts/LocaleContext"
 import { format } from "date-fns"
@@ -42,8 +43,16 @@ export function useCustomerData(
     pending: t("admin.customers.tagPending"),
   }
 
-  const customerListQ = trpc.admin.customerList.useQuery({ includeHidden: showHidden })
-  const guestListQ = trpc.admin.guestList.useQuery({ includeHidden: showHidden })
+  // customer-unread — 60s refetch so a customer message lights the red dot
+  // without F5 (Jeff:「每當客人來訊息 我還沒看到明顯得notification」).
+  const customerListQ = trpc.admin.customerList.useQuery(
+    { includeHidden: showHidden },
+    { refetchInterval: 60_000 },
+  )
+  const guestListQ = trpc.admin.guestList.useQuery(
+    { includeHidden: showHidden },
+    { refetchInterval: 60_000 },
+  )
 
   const invalidateLists = () => {
     void utils.admin.customerList.invalidate()
@@ -51,6 +60,43 @@ export function useCustomerData(
   }
   const markNotCustomer = trpc.admin.markNotCustomer.useMutation({ onSuccess: invalidateLists })
   const restoreCustomer = trpc.admin.restoreCustomer.useMutation({ onSuccess: invalidateLists })
+
+  // customer-unread — opening a customer marks them seen (jeffViewedAt=NOW).
+  // Optimistically clear that row's unread flag so the dot dies on click, not
+  // on the next refetch; the rail badge recount follows the server truth.
+  const markSeen = trpc.admin.markCustomerSeen.useMutation({
+    onSuccess: () => void utils.admin.customerUnreadCount.invalidate(),
+  })
+  const markSeenMutate = markSeen.mutate
+  useEffect(() => {
+    if (!selected) return
+    const input = { includeHidden: showHidden }
+    if (selected.kind === "user") {
+      utils.admin.customerList.setData(input, (old) =>
+        old?.map((r) => (r.id === selected.id ? { ...r, unreadInbound: false } : r)),
+      )
+      markSeenMutate({ userId: selected.id })
+    } else {
+      utils.admin.guestList.setData(input, (old) =>
+        old?.map((r) => (r.profileId === selected.id ? { ...r, unreadInbound: false } : r)),
+      )
+      markSeenMutate({ profileId: selected.id })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id, selected?.kind])
+
+  // 訪客刪除 (Jeff:「不只是隱藏 也可以選擇刪除」) — guests only; the server
+  // refuses registered accounts and anyone with orders/spend (hide instead).
+  const deleteGuestCustomer = trpc.admin.deleteGuestCustomer.useMutation({
+    onSuccess: () => {
+      invalidateLists()
+      void utils.admin.customerUnreadCount.invalidate()
+    },
+    // The server gate speaks the honest reason (registered account / has
+    // orders or spend → hide instead) — surface it, never fail silently.
+    onError: (err) =>
+      toast.error(err.message || t("admin.customers.deleteConfirm.failed")),
+  })
 
   // Resolve the selection into the two id spaces. A guest's id is a profileId, a
   // registered customer's id is a userId — never cross them.
@@ -174,6 +220,7 @@ export function useCustomerData(
           blocked: u.blocked,
           needsFollowup: u.needsFollowup,
           unread: u.unread,
+          unreadInbound: u.unreadInbound,
         },
         tagLabels,
         formatDate,
@@ -198,6 +245,7 @@ export function useCustomerData(
         tag: "inquiry" as const,
         tagLabel: tagLabels.inquiry ?? "",
         notifs: g.unread ?? 0,
+        unread: g.unreadInbound ?? false,
         blocked: g.blocked ?? false,
         needsFollowup: g.needsFollowup ?? false,
       }
@@ -407,6 +455,8 @@ export function useCustomerData(
       restoreCustomer.mutate(
         item.kind === "guest" ? { profileId: item.id } : { userId: item.id },
       ),
+    deleteGuest: (profileId: number) =>
+      deleteGuestCustomer.mutate({ profileId }),
     approveDraft,
     isApprovingDraft: approveInquiryDraft.isPending || sendEscalationDraft.isPending,
   }

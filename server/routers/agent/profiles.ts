@@ -22,6 +22,7 @@ import { router, adminProcedure } from "../../_core/trpc";
 import { getDb } from "../../db";
 import { customerProfiles, customerInteractions } from "../../../drizzle/schema";
 import { AGENT_NAMES, channelEnum } from "./_shared";
+import { touchLastInbound } from "../../_core/customerUnread";
 
 export const profilesRouter = router({
   /**
@@ -235,6 +236,12 @@ export const profilesRouter = router({
         .update(customerProfiles)
         .set({ lastInteractionAt: new Date() })
         .where(eq(customerProfiles.id, input.customerProfileId));
+
+      // customer-unread (0108) — inbound = the customer spoke: advance the
+      // profile's lastInboundAt pointer (monotonic, best-effort).
+      if (input.direction === "inbound") {
+        await touchLastInbound(db, input.customerProfileId, new Date());
+      }
 
       // customer-cockpit Step 3 — a new interaction means the card may be stale:
       // refresh the AI summary now (debounced) instead of waiting for the nightly

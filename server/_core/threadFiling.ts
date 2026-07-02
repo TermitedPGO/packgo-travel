@@ -30,6 +30,7 @@ import type { getDb } from "../db";
 import { customerInteractions } from "../../drizzle/schema";
 import { scrubPii } from "./piiScrub";
 import { createChildLogger } from "./logger";
+import { touchLastInbound } from "./customerUnread";
 import type { FilingMessage } from "./gmail";
 
 const log = createChildLogger({ module: "threadFiling" });
@@ -217,6 +218,11 @@ export async function syncThreadToInteractions(
 
   const actions = planThreadFiling(messages, existing);
 
+  // customer-unread (0108) — newest inbound message this sync actually FILED
+  // (inserted). Touched once after the loop; touchLastInbound is monotonic, so
+  // backfilling an old thread never regresses a fresher lastInboundAt.
+  let newestInboundAt: Date | null = null;
+
   for (const a of actions) {
     if (a.kind === "skip") {
       if (a.reason === "in_trash") result.trashSkipped++;
@@ -276,7 +282,18 @@ export async function syncThreadToInteractions(
         set: { gmailThreadId: a.message.threadId },
       });
     result.inserted++;
+    if (
+      a.message.direction === "inbound" &&
+      (newestInboundAt == null || a.message.date > newestInboundAt)
+    ) {
+      newestInboundAt = a.message.date;
+    }
   }
+
+  // customer-unread (0108) — advance the profile's lastInboundAt pointer.
+  // Best-effort (touchLastInbound never throws), monotonic (old mail can't
+  // regress it), after the loop so one thread touches at most once.
+  if (newestInboundAt) await touchLastInbound(db, profileId, newestInboundAt);
 
   log.info({ profileId, ...result }, "[threadFiling] thread reconciled");
   return result;

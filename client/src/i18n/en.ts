@@ -3276,6 +3276,15 @@ export const en = {
       restoreAction: 'Restore',
       blockedBadge: 'Hidden',
       unnamed: 'Unnamed customer',
+      // Guest delete confirm card (2026-07-01)
+      deleteConfirm: {
+        action: 'Delete guest',
+        title: 'Delete {name}?',
+        warning: 'Deleting also removes all conversation records and documents. This cannot be undone. Use hide for customers with orders or spend history.',
+        cancel: 'Cancel',
+        confirm: 'Confirm delete',
+        failed: 'Delete failed',
+      },
       // slash command menu (2026-07-01) — the Add customer button is gone;
       // typing "/" in the chat composer pops the command menu instead.
       // template = text inserted into the composer; help has no template

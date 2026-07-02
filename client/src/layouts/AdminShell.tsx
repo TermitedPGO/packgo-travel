@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 import { useLocation, Link } from "wouter";
 import { useLocale } from "@/contexts/LocaleContext";
+import { trpc } from "@/lib/trpc";
 import {
   Home,
   Users,
@@ -22,6 +23,13 @@ export default function AdminShell({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const { t } = useLocale();
 
+  // customer-unread (0108) — 未讀客人數 badge on the 客人 rail icon.
+  // 60s poll matches the customer lists, so the badge and the red dots agree.
+  const unreadQ = trpc.admin.customerUnreadCount.useQuery(undefined, {
+    refetchInterval: 60_000,
+  });
+  const customerUnread = unreadQ.data?.count ?? 0;
+
   const isActive = (path: string) => {
     if (path === "/ops") return location === "/ops";
     return location.startsWith(path);
@@ -40,7 +48,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
             <Link key={item.path} href={item.path}>
               <button
                 type="button"
-                className={`w-10 h-10 rounded-lg flex items-center justify-center transition-colors ${
+                className={`relative w-10 h-10 rounded-lg flex items-center justify-center transition-colors ${
                   active
                     ? "bg-white text-gray-950"
                     : "text-gray-400 hover:text-white hover:bg-white/10"
@@ -48,6 +56,12 @@ export default function AdminShell({ children }: { children: ReactNode }) {
                 title={t(item.labelKey)}
               >
                 <item.icon className="w-[18px] h-[18px]" />
+                {/* customer-unread — 未讀客人數紅底白字小圓 badge(只掛「客人」) */}
+                {item.path === "/ops/customers" && customerUnread > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-semibold flex items-center justify-center">
+                    {customerUnread > 99 ? "99+" : customerUnread}
+                  </span>
+                )}
               </button>
             </Link>
           );

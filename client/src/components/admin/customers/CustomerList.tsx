@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Search, EyeOff, RotateCcw } from "lucide-react"
+import { Search, EyeOff, RotateCcw, Trash2 } from "lucide-react"
 import { useLocale } from "@/contexts/LocaleContext"
 import type { ListItem } from "./types"
 
@@ -19,6 +19,7 @@ export default function CustomerList({
   onToggleHidden,
   onMarkNotCustomer,
   onRestoreCustomer,
+  onDeleteGuest,
 }: {
   customers: ListItem[]
   selected: RowRef | null
@@ -27,9 +28,12 @@ export default function CustomerList({
   onToggleHidden: (v: boolean) => void
   onMarkNotCustomer: (ref: RowRef) => void
   onRestoreCustomer: (ref: RowRef) => void
+  onDeleteGuest: (profileId: number) => void
 }) {
   const { t } = useLocale()
   const [query, setQuery] = useState("")
+  // 訪客刪除確認小卡(自製,非原生 confirm)— 存待刪列,null = 關閉。
+  const [confirmDelete, setConfirmDelete] = useState<ListItem | null>(null)
 
   const filtered = customers.filter(
     (c) =>
@@ -78,12 +82,16 @@ export default function CustomerList({
               >
                 {c.initials}
               </div>
-              {c.notifs > 0 && !c.blocked && (
+              {/* customer-unread (0108) — 客人來訊未讀:實心紅點(優先於 agent 訊息點) */}
+              {c.unread && !c.blocked && (
+                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-red-500 rounded-full" />
+              )}
+              {!c.unread && c.notifs > 0 && !c.blocked && (
                 <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-rose-500 border-2 border-white" />
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-[13px] font-medium truncate flex items-center gap-1.5">
+              <div className={`text-[13px] truncate flex items-center gap-1.5 ${c.unread && !c.blocked ? "font-semibold" : "font-medium"}`}>
                 {c.name}
                 {c.blocked && (
                   <span className="text-[9px] px-1 py-0.5 rounded-md bg-gray-200 text-gray-500 font-normal flex-shrink-0">
@@ -113,6 +121,22 @@ export default function CustomerList({
             >
               {c.blocked ? <RotateCcw className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
             </button>
+            {/* 訪客刪除 (guests only) — opens the in-app rounded-xl confirm
+                card, never the native browser dialog. Registered accounts can
+                only be hidden. */}
+            {c.kind === "guest" && (
+              <button
+                type="button"
+                title={t("admin.customers.deleteConfirm.action")}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setConfirmDelete(c)
+                }}
+                className="flex-shrink-0 p-1.5 rounded-lg text-gray-400 opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:text-red-600 transition-all"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
             <div className="text-right flex-shrink-0">
               <div className="text-[10px] text-gray-400">{c.lastContact}</div>
               <span
@@ -124,6 +148,45 @@ export default function CustomerList({
           </div>
         ))}
       </div>
+
+      {/* 訪客刪除確認小卡 — 自製 overlay(rounded-xl),不用原生 confirm。 */}
+      {confirmDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
+          onClick={() => setConfirmDelete(null)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-lg border border-gray-200 p-4 w-72"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-[13px] font-semibold text-gray-900 mb-1">
+              {t("admin.customers.deleteConfirm.title", { name: confirmDelete.name })}
+            </div>
+            <div className="text-[12px] text-gray-500 mb-4">
+              {t("admin.customers.deleteConfirm.warning")}
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(null)}
+                className="px-3 py-1.5 rounded-lg text-[12px] text-gray-600 hover:bg-gray-100 transition-colors"
+              >
+                {t("admin.customers.deleteConfirm.cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onDeleteGuest(confirmDelete.id)
+                  setConfirmDelete(null)
+                }}
+                className="px-3 py-1.5 rounded-lg text-[12px] font-medium text-red-600 hover:bg-red-50 transition-colors"
+              >
+                {t("admin.customers.deleteConfirm.confirm")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

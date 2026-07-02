@@ -83,6 +83,8 @@ export type ListItem = {
   tag: "inquiry" | "pending" | "active"
   tagLabel: string
   notifs: number
+  /** customer-unread (0108) — 客人來訊 Jeff 還沒看:頭像紅點 + 名字粗體 */
+  unread: boolean
   /** registered account manually marked 非客人 (customerProfiles.status='blocked') */
   blocked: boolean
   /** open inquiry >2d unanswered OR quote sent >5d (server-computed) */

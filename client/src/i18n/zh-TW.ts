@@ -3244,6 +3244,15 @@ export const zhTW = {
       restoreAction: '還原',
       blockedBadge: '已隱藏',
       unnamed: '未命名客人',
+      // 訪客刪除確認小卡(2026-07-01,Jeff:「不只是隱藏 也可以選擇刪除」)
+      deleteConfirm: {
+        action: '刪除訪客',
+        title: '刪除 {name}?',
+        warning: '刪除後往來紀錄與文件一併刪除,無法復原。有訂單或消費紀錄的客人請用隱藏。',
+        cancel: '取消',
+        confirm: '確認刪除',
+        failed: '刪除失敗',
+      },
       // slash 指令選單(2026-07-01)—「新增客人」按鈕已拆,聊天框打「/」浮出指令。
       // template = 選取後放進輸入框的模板文字;help 沒有 template(開操作說明面板)。
       slash: {
