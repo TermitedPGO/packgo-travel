@@ -114,7 +114,9 @@ export const READ_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "search_customers",
-    description: "Search the customer CRM by name. Single match shows full contact info; multiple matches redact email/phone.",
+    description:
+      "Search the customer CRM by name (matches 檔案名字 / email / AI 筆記). Single match shows full contact info; multiple matches redact email/phone. " +
+      "合併場景注意:查不到目標客人不代表不存在(可能是已隱藏的檔案),merge_into_customer 可直接用 targetName / targetProfileId 指定,含隱藏檔。",
     input_schema: {
       type: "object",
       properties: {
@@ -423,7 +425,10 @@ export const WRITE_TOOLS: Anthropic.Tool[] = [
       "把「目前釘住的這位客人」整份併入另一位既有客人。用在同案聯絡人被誤建成獨立客人時" +
       "(同公司同一個案子、替某案協調的人,例如 leslie@ 其實是 Emerald(AXT 案)的聯絡窗口)。" +
       "**只有 Jeff 明說「把這位併進某某」才呼叫;你察覺到疑似同案聯絡人時只能提醒,絕不自行合併。** " +
-      "target 用 targetEmail(精確比對客人檔案上的 email)或 targetProfileId 指定;" +
+      "target 用 targetEmail(精確比對客人檔案上的 email)、targetProfileId(檔案編號)或 targetName(名字精確比對)指定;" +
+      "targetName / targetProfileId 直接查客人檔案本身,連已隱藏(blocked)的檔案也找得到 — " +
+      "search_customers 找不到目標時不要放棄,直接用 Jeff 講的名字傳 targetName。" +
+      "targetName 撞到多位同名會回候選清單(編號+名字),把清單唸給 Jeff,請他用編號指定。" +
       "來源固定是目前釘住的這位,系統釘死,你不用也不能指定。" +
       "工具會把互動紀錄、文件、專案(訂製單)、聊天訊息全搬到 target 名下,再把這個重複檔隱藏並留備註。" +
       "目前這位是註冊會員、target 不存在、或 target 就是本人都會被拒;搬完照工具回傳的筆數報結果。",
@@ -437,6 +442,11 @@ export const WRITE_TOOLS: Anthropic.Tool[] = [
         targetProfileId: {
           type: "number",
           description: "要併入的那位客人的檔案編號(知道編號時用,優先於 targetEmail)",
+        },
+        targetName: {
+          type: "string",
+          description:
+            "要併入的那位客人的名字(檔案名字精確比對,含已隱藏的檔案;沒有 email/編號時用。重名會回候選清單請 Jeff 指定)",
         },
       },
       required: [],
@@ -757,6 +767,9 @@ async function runTool(name: string, input: any): Promise<unknown> {
       if (input.name) {
         conds.push(
           or(
+            // 檔案名字也要比對 (2026-07-01 實測:「測試三號」只存在 name 欄,
+            // aiNotes/email 都比不到 → 查無此人)。
+            like(customerProfiles.name, `%${input.name}%`),
             like(customerProfiles.aiNotes, `%${input.name}%`),
             like(customerProfiles.email, `%${input.name}%`),
           )!,
@@ -765,6 +778,7 @@ async function runTool(name: string, input: any): Promise<unknown> {
       const rows = await db
         .select({
           id: customerProfiles.id,
+          name: customerProfiles.name,
           email: customerProfiles.email,
           phone: customerProfiles.phone,
           budgetTier: customerProfiles.budgetTier,
@@ -1246,28 +1260,46 @@ export function mergeCustomerNote(
 /**
  * Pure validator for merge_into_customer's TARGET argument. The SOURCE is
  * always the pinned profileId (never model-supplied); the model only names the
- * target, by profile id (preferred when given) or by exact profile email.
+ * target, by profile id (preferred), exact profile email, or exact profile
+ * name (2026-07-01 實測補:目標 status=blocked 被客人搜尋濾掉,名字要能直達檔案)。
  * Errors flow back as a tool_result so the model can ask Jeff / self-correct.
  * Pure so it's unit-tested without a DB.
  */
 export function resolveMergeTargetArgs(
   input: any,
 ):
-  | { ok: true; value: { targetProfileId: number | null; targetEmail: string | null } }
+  | {
+      ok: true;
+      value: {
+        targetProfileId: number | null;
+        targetEmail: string | null;
+        targetName: string | null;
+      };
+    }
   | { ok: false; error: string } {
   const rawId = input?.targetProfileId;
   if (rawId !== undefined && rawId !== null && rawId !== "") {
     const id = Number(rawId);
     if (!Number.isInteger(id) || id <= 0)
       return { ok: false, error: "targetProfileId 要是正整數(客人檔案編號)" };
-    return { ok: true, value: { targetProfileId: id, targetEmail: null } };
+    return { ok: true, value: { targetProfileId: id, targetEmail: null, targetName: null } };
   }
   const email = typeof input?.targetEmail === "string" ? input.targetEmail.trim() : "";
-  if (!email)
-    return { ok: false, error: "需要 targetEmail 或 targetProfileId 指定要併入哪位客人" };
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-    return { ok: false, error: `targetEmail 不是有效 email:「${email}」` };
-  return { ok: true, value: { targetProfileId: null, targetEmail: email.toLowerCase() } };
+  if (email) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      return { ok: false, error: `targetEmail 不是有效 email:「${email}」` };
+    return {
+      ok: true,
+      value: { targetProfileId: null, targetEmail: email.toLowerCase(), targetName: null },
+    };
+  }
+  const name = typeof input?.targetName === "string" ? input.targetName.trim() : "";
+  if (name)
+    return { ok: true, value: { targetProfileId: null, targetEmail: null, targetName: name } };
+  return {
+    ok: false,
+    error: "需要 targetEmail、targetProfileId 或 targetName 指定要併入哪位客人",
+  };
 }
 
 /** mysql2-via-drizzle update/delete result → affected row count. The result
@@ -1914,17 +1946,43 @@ async function runWriteTool(
           .from(customerProfiles)
           .where(eq(customerProfiles.id, parsed.value.targetProfileId))
           .limit(1);
-      } else {
+      } else if (parsed.value.targetEmail != null) {
         [target] = await db
           .select(targetFields)
           .from(customerProfiles)
-          .where(eq(customerProfiles.email, parsed.value.targetEmail!))
+          .where(eq(customerProfiles.email, parsed.value.targetEmail))
           .orderBy(customerProfiles.createdAt)
           .limit(1);
+      } else {
+        // targetName — 直接查 customerProfiles 做名字精確比對,刻意「不」濾
+        // status(含 blocked/已隱藏)。2026-07-01 實測:「把這位併進 測試三號」
+        // 失敗,因為目標已被隱藏,客人搜尋工具看不到;合併目標本來就常是
+        // 隱藏過的重複檔,名字解析必須繞過可見性濾網。命中多筆 → 回候選清單
+        // 請 Jeff 用編號指定,絕不自己挑。
+        const matches = await db
+          .select(targetFields)
+          .from(customerProfiles)
+          .where(eq(customerProfiles.name, parsed.value.targetName!))
+          .orderBy(customerProfiles.createdAt)
+          .limit(10);
+        if (matches.length > 1) {
+          const candidates = matches
+            .map((m) => `#${m.id} ${m.name ?? "(無名)"}${m.email ? ` <${m.email}>` : ""}`)
+            .join("、");
+          return {
+            error:
+              `同名「${parsed.value.targetName}」有 ${matches.length} 位,不能自己挑。` +
+              `請 Jeff 指定編號(targetProfileId):${candidates}`,
+          };
+        }
+        target = matches[0];
       }
       if (!target) {
-        const who = parsed.value.targetEmail ?? `#${parsed.value.targetProfileId}`;
-        return { error: `找不到要併入的客人(${who}),確認 email 或編號後再試,不要編` };
+        const who =
+          parsed.value.targetEmail ??
+          parsed.value.targetName ??
+          `#${parsed.value.targetProfileId}`;
+        return { error: `找不到要併入的客人(${who}),確認名字、email 或編號後再試,不要編` };
       }
       if (target.id === profileId)
         return { error: "目標就是目前這位客人,不能把自己併進自己" };

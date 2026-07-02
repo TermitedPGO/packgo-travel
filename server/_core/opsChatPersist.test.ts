@@ -3,6 +3,7 @@ import {
   shouldPersistOpsTurn,
   customerChatCompletionRows,
   opsTurnContextJson,
+  rebindScopeAfterMerge,
 } from "./opsChatPersist";
 
 describe("opsChatPersist — orphan-free ops chat persistence", () => {
@@ -77,6 +78,67 @@ describe("opsChatPersist — orphan-free ops chat persistence", () => {
 
     it("an interrupted guest turn also persists nothing", () => {
       expect(customerChatCompletionRows(scope, 3, "q", "", false, "{}")).toEqual([]);
+    });
+  });
+
+  describe("rebindScopeAfterMerge — merge 那輪的對話跟著搬去 target (2026-07-02 實測)", () => {
+    const guest = { kind: "guest" as const, customerProfileId: 5 };
+    const okMerge = {
+      name: "merge_into_customer",
+      ok: true,
+      message: "已把「Leslie」併入「Emerald Young」(#9)",
+      targetProfileId: 9,
+    };
+
+    it("a successful merge rebinds the guest scope to the TARGET profile", () => {
+      expect(rebindScopeAfterMerge(guest, [okMerge])).toEqual({
+        kind: "guest",
+        customerProfileId: 9,
+      });
+    });
+
+    it("end to end: the turn's rows land under the target, not the hidden source", () => {
+      const rows = customerChatCompletionRows(
+        rebindScopeAfterMerge(guest, [okMerge]),
+        null,
+        "把這位客人併進 測試三號",
+        "已併入,原檔已隱藏。",
+        false,
+        "{}",
+      );
+      expect(rows).toHaveLength(2);
+      expect(rows[0].customerProfileId).toBe(9);
+      expect(rows[1].customerProfileId).toBe(9);
+    });
+
+    it("a FAILED merge leaves the scope on the source (nothing moved)", () => {
+      const failed = { name: "merge_into_customer", ok: false, message: "找不到要併入的客人" };
+      expect(rebindScopeAfterMerge(guest, [failed])).toBe(guest);
+    });
+
+    it("no merge in the turn → scope unchanged", () => {
+      expect(
+        rebindScopeAfterMerge(guest, [
+          { name: "set_follow_up_date", ok: true, message: "跟進日設為 2026-07-21" },
+        ]),
+      ).toBe(guest);
+      expect(rebindScopeAfterMerge(guest, [])).toBe(guest);
+    });
+
+    it("a merge echo missing/garbage targetProfileId is ignored (never bind to NaN/0)", () => {
+      expect(
+        rebindScopeAfterMerge(guest, [{ name: "merge_into_customer", ok: true, message: "ok" }]),
+      ).toBe(guest);
+      expect(
+        rebindScopeAfterMerge(guest, [
+          { name: "merge_into_customer", ok: true, message: "ok", targetProfileId: 0 },
+        ]),
+      ).toBe(guest);
+    });
+
+    it("registered scope is never rebound (the tool rejects registered sources)", () => {
+      const user = { kind: "user" as const, customerUserId: 42 };
+      expect(rebindScopeAfterMerge(user, [okMerge])).toBe(user);
     });
   });
 

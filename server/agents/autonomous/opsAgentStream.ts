@@ -53,6 +53,10 @@ export interface WriteToolResult {
   name: string;
   ok: boolean;
   message: string;
+  /** merge_into_customer success only — the profile everything was merged INTO.
+   * Persistence rebinds this turn's chat rows to it (2026-07-02 實測:merge 那輪
+   * 的 jeff+agent 訊息留在已隱藏的來源檔底下)。 */
+  targetProfileId?: number;
 }
 
 /**
@@ -60,7 +64,9 @@ export interface WriteToolResult {
  * ok = the tool itself said `success: true`; message = its `message` (success)
  * or `error` (failure) field, untouched. Pure so it's unit-tested without an
  * LLM. A non-JSON result (defensive; executeWriteTool always stringifies) is
- * reported as a failure carrying the raw text.
+ * reported as a failure carrying the raw text. A successful merge additionally
+ * carries the tool-reported targetProfileId (never model-supplied) so the
+ * turn's persistence can follow the moved rows to the target profile.
  */
 export function parseWriteToolResult(name: string, resultJson: string): WriteToolResult {
   try {
@@ -69,7 +75,12 @@ export function parseWriteToolResult(name: string, resultJson: string): WriteToo
     const message = ok
       ? String(parsed?.message ?? "")
       : String(parsed?.error ?? parsed?.message ?? "");
-    return { name, ok, message };
+    const echo: WriteToolResult = { name, ok, message };
+    if (ok && name === "merge_into_customer") {
+      const t = Number(parsed?.targetProfileId);
+      if (Number.isInteger(t) && t > 0) echo.targetProfileId = t;
+    }
+    return echo;
   } catch {
     return { name, ok: false, message: resultJson.slice(0, 200) };
   }
@@ -237,7 +248,7 @@ export async function* runOpsAgentStream(
           "\n【補 / 改既有訂製單 — update_custom_order】Jeff 說「這張補上票價」「填一下出發日」「標題改成…」「把這筆改成簽證」,或你從剛丟進來的 PDF / 對話讀到某張既有單缺的資料(例如某張機票單票價還空著,PDF 裡有)時,呼叫 update_custom_order 補回去。先從帳務/專案列表拿那張單的 orderId,只傳要改的欄位(沒傳的不會動)。同樣鐵律:金額 PDF/對話有才填、絕不編;**不能在這標付款/確認/取消**(碰錢的由 Jeff 手動)。只能改屬於這位客人的單。改完一句話報:改了哪張、動了哪些欄位。" +
           "\n【跟進日 — 說了就設】Jeff 說「跟進日設下週三」「下週五跟進他」「三天後提醒我跟進」「月底跟進」時,用上面【今天日期】把相對講法換算成絕對日期 YYYY-MM-DD(換算後自己核對星期對不對),呼叫 set_follow_up_date 直接設好(不用再問確認)。要清除就傳 clear=true。設定後跟進日會顯示在客戶頁真相條,到日當天跳「今天該跟進」。設完用一句話跟 Jeff 確認設了哪天。" +
           "\n【收 / 歸檔這位客人 — 直接做完報結果】Jeff 在這位客人的對話框說「收」「收進來」「歸檔他的記錄」時,直接呼叫 collect_customer_threads(email = 目前這位客人的 email),它會把這個 email 的 Gmail 往來全收進他的檔案。收完用一句話報結果(收了幾條、新增幾條)。**這個對話框沒有可點的按鈕,絕對不要叫 Jeff『點上面那個按鈕』或說『按鈕出來了』** — 你就是執行的人,收完直接報數字。工具失敗就老實說「系統忙,稍後再試」,不要假裝收好了。" +
-          "\n【同案聯絡人 — 察覺要講,合併只聽 Jeff 的】讀這位客人的記憶/aiNotes/keyFacts/對話時,若跡象顯示他其實是另一位客人的同案聯絡人(同公司同一個案子、替某個案子做協調、某案的次要聯絡窗口)被建成了獨立客人,主動用一句話提醒 Jeff,並告訴他可以說「把這位併進某某」來合併(例:『這位看起來是 Emerald(AXT 案)的同案聯絡人,要合併的話跟我說「把這位併進 Emerald」』)。**絕不自行合併** — 只有 Jeff 明說要併,才呼叫 merge_into_customer(用 targetEmail 或 targetProfileId 指定要併入哪位;來源固定是目前這位,系統釘死,你不用給)。工具會把互動、文件、專案、聊天全搬到那位名下並隱藏這個重複檔;被拒(目前這位是註冊會員、目標找不到、目標就是本人)就照實回報原因,不要硬做。"
+          "\n【同案聯絡人 — 察覺要講,合併只聽 Jeff 的】讀這位客人的記憶/aiNotes/keyFacts/對話時,若跡象顯示他其實是另一位客人的同案聯絡人(同公司同一個案子、替某個案子做協調、某案的次要聯絡窗口)被建成了獨立客人,主動用一句話提醒 Jeff,並告訴他可以說「把這位併進某某」來合併(例:『這位看起來是 Emerald(AXT 案)的同案聯絡人,要合併的話跟我說「把這位併進 Emerald」』)。**絕不自行合併** — 只有 Jeff 明說要併,才呼叫 merge_into_customer(用 targetEmail、targetProfileId 或 targetName 指定要併入哪位;目標可能是已隱藏的檔案,search_customers 查不到也沒關係,直接用 Jeff 講的名字傳 targetName,重名時工具會回候選清單請 Jeff 挑;來源固定是目前這位,系統釘死,你不用給)。工具會把互動、文件、專案、聊天全搬到那位名下並隱藏這個重複檔;被拒(目前這位是註冊會員、目標找不到、目標就是本人)就照實回報原因,不要硬做。"
         : "");
     const dynamicSystem =
       `【今天日期】${today} (UTC)。任何跟年份/月份相關的判斷都以這個為準 — 例如「今年報稅」就是 ${today.slice(0, 4)} 年,「這個月」就是 ${today.slice(0, 7)},不要用舊年份。` +

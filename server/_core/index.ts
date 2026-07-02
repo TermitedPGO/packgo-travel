@@ -819,7 +819,13 @@ async function startServer() {
       let cards: any[] = [];
       // Deterministic write-tool echoes (2026-07-01 事故) — forwarded live as
       // SSE `tool_result` events AND persisted in the turn's context.tools.
-      let toolResults: { name: string; ok: boolean; message: string }[] = [];
+      // targetProfileId: merge_into_customer success only (merge-rebind).
+      let toolResults: {
+        name: string;
+        ok: boolean;
+        message: string;
+        targetProfileId?: number;
+      }[] = [];
       const startedAt = Date.now();
       let firstTokenLogged = false;
       try {
@@ -879,7 +885,8 @@ async function startServer() {
       // id-desc tiebreak so a same-second createdAt keeps jeff-before-agent.
       // Global #ops keeps its early question echo (its UI renders the question
       // only from the DB) and only appends the answer below.
-      const { customerChatCompletionRows, opsTurnContextJson } = await import("./opsChatPersist");
+      const { customerChatCompletionRows, opsTurnContextJson, rebindScopeAfterMerge } =
+        await import("./opsChatPersist");
       // context.tools = the write-tool ground truth of this turn (chips re-render
       // from it on history reload; also the debug trail for「說做了但沒做」).
       const turnCtx = opsTurnContextJson(suggestedActions, cards, toolResults);
@@ -894,8 +901,13 @@ async function startServer() {
         );
         for (const row of rows) await db.insert(customerChatMessages).values(row as any);
       } else if (db && customerProfileId !== null) {
+        // merge-rebind (2026-07-02): a successful merge_into_customer in this
+        // turn just emptied + hid the pinned source profile — write this turn's
+        // rows under the TARGET so the merge conversation follows the moved
+        // history instead of stranding on the hidden duplicate. No merge (or a
+        // failed one) → scope unchanged.
         const rows = customerChatCompletionRows(
-          { kind: "guest", customerProfileId },
+          rebindScopeAfterMerge({ kind: "guest", customerProfileId }, toolResults),
           orderId,
           question,
           finalAnswer,

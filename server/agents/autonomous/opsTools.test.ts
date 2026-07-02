@@ -1017,15 +1017,21 @@ describe("merge_into_customer — 同案聯絡人併檔 (2026-07-01: leslie@ 其
     const props = (tool!.input_schema as any).properties;
     expect(props.targetEmail).toBeTruthy();
     expect(props.targetProfileId).toBeTruthy();
+    expect(props.targetName).toBeTruthy();
     expect(props.source).toBeUndefined();
     expect(props.sourceProfileId).toBeUndefined();
+    // 2026-07-01 實測:目標是隱藏檔時搜尋不到 — 工具說明必須告訴 model
+    // targetName/targetProfileId 直達檔案(含隱藏),別在搜尋失敗後放棄。
+    expect(tool!.description).toContain("targetName");
+    expect(tool!.description).toContain("隱藏");
   });
 
   describe("resolveMergeTargetArgs (pure)", () => {
-    it("requires targetEmail or targetProfileId", () => {
+    it("requires targetEmail, targetProfileId or targetName", () => {
       expect(resolveMergeTargetArgs({}).ok).toBe(false);
       expect(resolveMergeTargetArgs(null).ok).toBe(false);
       expect(resolveMergeTargetArgs({ targetEmail: "   " }).ok).toBe(false);
+      expect(resolveMergeTargetArgs({ targetName: "   " }).ok).toBe(false);
     });
     it("targetProfileId must be a positive integer (numeric string ok)", () => {
       expect(resolveMergeTargetArgs({ targetProfileId: 0 }).ok).toBe(false);
@@ -1033,25 +1039,42 @@ describe("merge_into_customer — 同案聯絡人併檔 (2026-07-01: leslie@ 其
       expect(resolveMergeTargetArgs({ targetProfileId: 1.5 }).ok).toBe(false);
       expect(resolveMergeTargetArgs({ targetProfileId: 9 })).toEqual({
         ok: true,
-        value: { targetProfileId: 9, targetEmail: null },
+        value: { targetProfileId: 9, targetEmail: null, targetName: null },
       });
       expect(resolveMergeTargetArgs({ targetProfileId: "9" })).toEqual({
         ok: true,
-        value: { targetProfileId: 9, targetEmail: null },
+        value: { targetProfileId: 9, targetEmail: null, targetName: null },
       });
     });
     it("targetEmail is trimmed + lowercased and must look like an email", () => {
       expect(resolveMergeTargetArgs({ targetEmail: "not-an-email" }).ok).toBe(false);
       expect(resolveMergeTargetArgs({ targetEmail: "  EYoung@AXT.com " })).toEqual({
         ok: true,
-        value: { targetProfileId: null, targetEmail: "eyoung@axt.com" },
+        value: { targetProfileId: null, targetEmail: "eyoung@axt.com", targetName: null },
       });
     });
-    it("targetProfileId wins when both are given", () => {
+    it("targetName is trimmed and kept verbatim (exact-match key, never fuzzed)", () => {
+      expect(resolveMergeTargetArgs({ targetName: " 測試三號 " })).toEqual({
+        ok: true,
+        value: { targetProfileId: null, targetEmail: null, targetName: "測試三號" },
+      });
+    });
+    it("precedence: targetProfileId > targetEmail > targetName", () => {
       expect(resolveMergeTargetArgs({ targetProfileId: 9, targetEmail: "x@y.com" })).toEqual({
         ok: true,
-        value: { targetProfileId: 9, targetEmail: null },
+        value: { targetProfileId: 9, targetEmail: null, targetName: null },
       });
+      expect(
+        resolveMergeTargetArgs({ targetEmail: "x@y.com", targetName: "測試三號" }),
+      ).toEqual({
+        ok: true,
+        value: { targetProfileId: null, targetEmail: "x@y.com", targetName: null },
+      });
+    });
+    it("an invalid email still errors even when a name is also given (never silently fall through)", () => {
+      expect(resolveMergeTargetArgs({ targetEmail: "not-an-email", targetName: "測試三號" }).ok).toBe(
+        false,
+      );
     });
   });
 
@@ -1234,5 +1257,69 @@ describe("merge_into_customer — 同案聯絡人併檔 (2026-07-01: leslie@ 其
     );
     expect(out.success).toBeUndefined();
     expect(out.error).toContain("targetEmail");
+  });
+
+  describe("targetName resolution (2026-07-01 實測:目標 status=blocked 被搜尋濾掉,改名字直達)", () => {
+    it("finds a HIDDEN (blocked) target by exact name — no status filter in the lookup", async () => {
+      // name lookup → source lookup → dup-scan
+      rowQueue = [[{ id: 9, name: "測試三號", email: "t3@example.com" }], [{ ...SOURCE }], []];
+      nextRows = [{ affectedRows: 1 }];
+      const out = JSON.parse(
+        await executeWriteTool(
+          "merge_into_customer",
+          { targetName: "測試三號" },
+          SOURCE_ID,
+          ADMIN_ID,
+        ),
+      );
+      expect(out.success).toBe(true);
+      expect(out.targetProfileId).toBe(9);
+      expect(out.message).toContain("測試三號");
+      // The name lookup is a bare eq(name, …) — no status/blocked condition,
+      // so a hidden profile resolves. (customerProfiles.name is mocked as "n".)
+      expect(lastDb.where.mock.calls[0][0]).toEqual({ _op: "eq", args: ["n", "測試三號"] });
+    });
+
+    it("multiple same-name profiles → error listing the candidates (id+名字), never auto-picks", async () => {
+      rowQueue = [
+        [
+          { id: 9, name: "測試三號", email: "t3@example.com" },
+          { id: 31, name: "測試三號", email: null },
+        ],
+      ];
+      const out = JSON.parse(
+        await executeWriteTool(
+          "merge_into_customer",
+          { targetName: "測試三號" },
+          SOURCE_ID,
+          ADMIN_ID,
+        ),
+      );
+      expect(out.success).toBeUndefined();
+      expect(out.error).toContain("同名");
+      expect(out.error).toContain("#9 測試三號 <t3@example.com>");
+      expect(out.error).toContain("#31 測試三號");
+      expect(out.error).toContain("targetProfileId");
+      // Nothing moved, nothing hidden, no audit row.
+      expect(lastDb.update).not.toHaveBeenCalled();
+      expect(lastDb.delete).not.toHaveBeenCalled();
+      expect(mockAudit).not.toHaveBeenCalled();
+    });
+
+    it("no profile with that exact name → 找不到 error naming the name", async () => {
+      rowQueue = [[]];
+      const out = JSON.parse(
+        await executeWriteTool(
+          "merge_into_customer",
+          { targetName: "查無此人" },
+          SOURCE_ID,
+          ADMIN_ID,
+        ),
+      );
+      expect(out.success).toBeUndefined();
+      expect(out.error).toContain("找不到");
+      expect(out.error).toContain("查無此人");
+      expect(lastDb.update).not.toHaveBeenCalled();
+    });
   });
 });

@@ -385,8 +385,9 @@ export const adminCustomerOrdersRouter = router({
    *
    * 只有這顆按鈕會燒 LLM(概覽卡讀 customOrders.get 回來的快取欄位,絕不自動算)。
    * 歸屬驗證同 assignConversation:這張單必須屬於這位客人(orderBelongsToProfiles),
-   * 不是就 FORBIDDEN。素材全部確定性讀取(order 欄位 + 歸檔對話 + 文件檔名,見
-   * analyzeOrderAiUnderstanding);素材為空 → analyzed:false,不燒 LLM。
+   * 不是就 FORBIDDEN。素材全部確定性讀取(order 欄位 + 歸檔對話 + 文件檔名與可讀
+   * 內文摘錄,RAM only 不落地,見 analyzeOrderAiUnderstanding);素材為空 →
+   * analyzed:false,不燒 LLM。
    * 紅線:supplierCost 不在素材型別裡,成本永遠進不了 prompt / 輸出。
    */
   analyzeOrder: adminProcedure

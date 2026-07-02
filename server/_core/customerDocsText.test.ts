@@ -12,6 +12,7 @@ import {
   deriveFilename,
   makeCachedExtract,
   clearDocTextCache,
+  extractDocTextCached,
   MAX_DOCS_TOTAL_CHARS,
   type DocRef,
   type DocsTextDeps,
@@ -174,5 +175,34 @@ describe("makeCachedExtract (in-memory doc-text cache)", () => {
     const extract = makeCachedExtract(fetchBytes, parse);
     expect(await extract(doc(null))).toBe(null);
     expect(fetchBytes).not.toHaveBeenCalled();
+  });
+});
+
+describe("extractDocTextCached (order-ai-understanding 的單檔入口)", () => {
+  it("PII 證件掃描 list-only:passport/visa/insurance/medical 一律 null,不碰 IO", async () => {
+    for (const kind of ["passport", "visa", "insurance", "medical"]) {
+      expect(
+        await extractDocTextCached({ kind, name: "scan.jpg", url: "r2://scan.jpg" }),
+      ).toBe(null);
+    }
+  });
+
+  it("沒有 url 的資訊列 → null,不碰 IO", async () => {
+    expect(await extractDocTextCached({ kind: "quote", name: "Q-001", url: null })).toBe(null);
+  });
+
+  it("走同一個 module 級快取:預熱過的 url 直接回快取文字,零 IO", async () => {
+    clearDocTextCache();
+    // 用注入的 fake IO 預熱 module 快取(makeCachedExtract 寫的是同一個 Map)。
+    const warm = makeCachedExtract(
+      vi.fn(async () => ({ bytes: Buffer.from("x"), mimeType: "application/pdf" })),
+      vi.fn(async () => ({ text: "行程第 2 天去日月潭", parseStatus: "ok" })),
+    );
+    await warm({ kind: "quote", name: "行程.pdf", url: "r2://itinerary.pdf" });
+    // extractDocTextCached 用 realDeps,但快取命中 → 不會走到真 R2/pdf-parse。
+    expect(
+      await extractDocTextCached({ kind: "quote", name: "行程.pdf", url: "r2://itinerary.pdf" }),
+    ).toBe("行程第 2 天去日月潭");
+    clearDocTextCache();
   });
 });

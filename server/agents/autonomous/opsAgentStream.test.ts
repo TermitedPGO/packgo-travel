@@ -109,6 +109,41 @@ describe("parseWriteToolResult — pure echo of executeWriteTool's JSON", () => 
     expect(r.ok).toBe(false);
     expect(r.message).toBe("boom");
   });
+
+  describe("merge-rebind echo (2026-07-02 實測:merge 那輪對話留在已隱藏的來源檔底下)", () => {
+    it("a successful merge carries the tool-reported targetProfileId", () => {
+      const r = parseWriteToolResult(
+        "merge_into_customer",
+        '{"success":true,"targetProfileId":9,"moved":{"interactions":2},"message":"已把「Leslie」併入「Emerald Young」(#9)"}',
+      );
+      expect(r.ok).toBe(true);
+      expect(r.targetProfileId).toBe(9);
+    });
+    it("a FAILED merge never carries a target (nothing moved, nothing to rebind)", () => {
+      const r = parseWriteToolResult(
+        "merge_into_customer",
+        '{"error":"找不到要併入的客人(測試三號)"}',
+      );
+      expect(r.ok).toBe(false);
+      expect(r.targetProfileId).toBeUndefined();
+    });
+    it("other tools never grow a targetProfileId even if their JSON has one", () => {
+      const r = parseWriteToolResult(
+        "update_customer_note",
+        '{"success":true,"targetProfileId":9,"message":"備註已更新"}',
+      );
+      expect(r.ok).toBe(true);
+      expect(r.targetProfileId).toBeUndefined();
+    });
+    it("a garbage targetProfileId on a successful merge is dropped, not propagated", () => {
+      const r = parseWriteToolResult(
+        "merge_into_customer",
+        '{"success":true,"targetProfileId":"not-a-number","message":"ok"}',
+      );
+      expect(r.ok).toBe(true);
+      expect(r.targetProfileId).toBeUndefined();
+    });
+  });
 });
 
 describe("the incident, replayed through the REAL loop + REAL consumers", () => {

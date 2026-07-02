@@ -29,6 +29,36 @@ export interface PersistedToolResult {
   name: string;
   ok: boolean;
   message: string;
+  /** merge_into_customer success only — the profile the source was merged INTO
+   * (tool-reported, never model-supplied). */
+  targetProfileId?: number;
+}
+
+/**
+ * merge-rebind (2026-07-02 實測): when this turn's writes include a SUCCESSFUL
+ * merge_into_customer, the pinned SOURCE profile was just emptied + hidden
+ * (status=blocked) mid-turn — persisting the turn's rows under it would leave
+ * the merge conversation stranded on the hidden duplicate. Rebind the scope to
+ * the merge target so the rows land where all the moved history now lives.
+ * Guest scope only: a registered source is always rejected by the tool itself
+ * (a member's history stays on the account), so the "user" scope never merges.
+ * Pure so it's unit-tested without a DB.
+ */
+export function rebindScopeAfterMerge(
+  scope: CustomerChatScope,
+  tools: PersistedToolResult[],
+): CustomerChatScope {
+  if (scope.kind !== "guest") return scope;
+  const merge = tools.find(
+    (t) =>
+      t.name === "merge_into_customer" &&
+      t.ok &&
+      typeof t.targetProfileId === "number" &&
+      Number.isInteger(t.targetProfileId) &&
+      t.targetProfileId > 0,
+  );
+  if (!merge) return scope;
+  return { kind: "guest", customerProfileId: merge.targetProfileId! };
 }
 
 /**

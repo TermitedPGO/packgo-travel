@@ -180,6 +180,32 @@ const realDeps: DocsTextDeps = {
 };
 
 /**
+ * Extract ONE document's text through the shared in-memory cache (order-ai-
+ * understanding, 2026-07-02 — the per-project「重新分析」reads the actual PDFs
+ * filed under the order instead of just their filenames). Same PII discipline
+ * as the chat path: extracted text lives in process RAM only, is returned for
+ * prompt assembly and NEVER persisted; passport/visa/insurance/medical scans
+ * and info-only rows return null (list-only). Any fetch/parse failure → null
+ * (caller lists the doc as unreadable), never a throw.
+ */
+export async function extractDocTextCached(doc: DocRef): Promise<string | null> {
+  if (!shouldExtract(doc)) return null;
+  try {
+    const parsed = await realDeps.extract!(doc);
+    if (!parsed) return null;
+    if (parsed.parseStatus !== "ok" && parsed.parseStatus !== "ok_truncated") return null;
+    const text = parsed.text.trim();
+    return text || null;
+  } catch (err) {
+    log.warn(
+      { name: doc.name, err: (err as Error).message },
+      "[customerDocsText] single-doc extract failed — treating as unreadable",
+    );
+    return null;
+  }
+}
+
+/**
  * Build the doc list + concatenated readable text for a customer's documents.
  * Fetch+parse run in parallel; assembly is sequential to honor the total cap
  * while preserving the input order. Nothing here is persisted.
