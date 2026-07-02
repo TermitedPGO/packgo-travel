@@ -3,6 +3,8 @@ import {
   deriveProjectActions,
   deriveProjectDelivered,
   deriveProjectSummaryState,
+  deriveOrderUnderstandingState,
+  splitOrderUnderstanding,
   projectDeliveredDocNames,
 } from "./projectSummary"
 
@@ -165,6 +167,102 @@ describe("projectSummary — per-project deterministic 摘要三行", () => {
       expect(
         deriveProjectSummaryState({ activeProjectId: 7, hasOrder: true, isFetching: true }),
       ).toBe("project")
+    })
+  })
+
+  // order-ai-understanding (0107) — Jeff:「AI 客人理解 每一個專案都應該是專門的」。
+  describe("deriveOrderUnderstandingState — 專案理解卡 vs 整體理解卡", () => {
+    const base = { activeProjectId: 7, hasOrder: true, isFetching: false }
+
+    it("no chip → profile (the whole-customer card renders ONLY here)", () => {
+      expect(
+        deriveOrderUnderstandingState({
+          activeProjectId: null,
+          hasOrder: false,
+          isFetching: false,
+          aiUnderstanding: null,
+        }),
+      ).toBe("profile")
+    })
+
+    it("chip + cached understanding → cached", () => {
+      expect(
+        deriveOrderUnderstandingState({ ...base, aiUnderstanding: "客人想去台灣" }),
+      ).toBe("cached")
+    })
+
+    it("chip + no cache → empty (honest empty state, NEVER auto-computes)", () => {
+      expect(deriveOrderUnderstandingState({ ...base, aiUnderstanding: null })).toBe("empty")
+      // whitespace-only cache is not a cache
+      expect(deriveOrderUnderstandingState({ ...base, aiUnderstanding: "   " })).toBe("empty")
+    })
+
+    it("chip + order still loading → loading (the profile card must not impersonate the project)", () => {
+      expect(
+        deriveOrderUnderstandingState({
+          activeProjectId: 7,
+          hasOrder: false,
+          isFetching: true,
+          aiUnderstanding: null,
+        }),
+      ).toBe("loading")
+    })
+
+    it("chip + query settled without an order → hidden (no order row, and the profile card stays off)", () => {
+      expect(
+        deriveOrderUnderstandingState({
+          activeProjectId: 7,
+          hasOrder: false,
+          isFetching: false,
+          aiUnderstanding: null,
+        }),
+      ).toBe("hidden")
+    })
+
+    it("a loaded order beats a background refetch (no flicker)", () => {
+      expect(
+        deriveOrderUnderstandingState({
+          ...base,
+          isFetching: true,
+          aiUnderstanding: "有快取",
+        }),
+      ).toBe("cached")
+    })
+  })
+
+  describe("splitOrderUnderstanding — 一段敘述 + 條列 key facts 的渲染切分", () => {
+    it("splits narrative paragraphs from ・ bullet lines (the sanitizer's bullet form)", () => {
+      const { paragraphs, facts } = splitOrderUnderstanding(
+        "客人想帶爸媽去台灣,步調要慢。預算未提及。\n\n・帶爸媽同行\n・想賞櫻",
+      )
+      expect(paragraphs).toEqual(["客人想帶爸媽去台灣,步調要慢。預算未提及。"])
+      expect(facts).toEqual(["帶爸媽同行", "想賞櫻"])
+    })
+
+    it("also accepts - and • bullets (rows that predate the wash)", () => {
+      const { facts } = splitOrderUnderstanding("- 吃素\n• 怕高")
+      expect(facts).toEqual(["吃素", "怕高"])
+    })
+
+    it("drops blank lines and keeps multi-paragraph narratives in order", () => {
+      const { paragraphs, facts } = splitOrderUnderstanding("第一段。\n\n第二段。\n\n・事實")
+      expect(paragraphs).toEqual(["第一段。", "第二段。"])
+      expect(facts).toEqual(["事實"])
+    })
+
+    it("all-facts text yields no paragraphs (and vice versa)", () => {
+      expect(splitOrderUnderstanding("・只有事實")).toEqual({
+        paragraphs: [],
+        facts: ["只有事實"],
+      })
+      expect(splitOrderUnderstanding("只有敘述")).toEqual({
+        paragraphs: ["只有敘述"],
+        facts: [],
+      })
+    })
+
+    it("a bare bullet marker with no content is ignored (not an empty fact)", () => {
+      expect(splitOrderUnderstanding("・ \n・真事實").facts).toEqual(["真事實"])
     })
   })
 })

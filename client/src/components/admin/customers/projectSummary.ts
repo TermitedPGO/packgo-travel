@@ -93,6 +93,68 @@ export function deriveProjectSummaryState(s: {
   return s.isFetching ? "loading" : "fallback"
 }
 
+/**
+ * order-ai-understanding (0107) — which AI 客人理解 card the 概覽 tab may show.
+ * Jeff:「AI 客人理解 每一個專案都應該是專門的 太多會太亂」。
+ *
+ *   profile — no chip → the whole-customer LearnedPreferencesSection (only then).
+ *   loading — chip active but the order row hasn't arrived → skeleton. The
+ *             whole-customer card must NOT render here (would impersonate the
+ *             project, same bug class as deriveProjectSummaryState).
+ *   hidden  — chip active but the query settled without an order (failed /
+ *             deleted) → render nothing (no order row = nothing to analyze,
+ *             and the profile card is not allowed while a chip is active).
+ *   cached  — order loaded and it HAS a stored aiUnderstanding → show it +
+ *             generated-at caption + 重新分析.
+ *   empty   — order loaded, no stored understanding → honest empty state +
+ *             重新分析 button. NEVER auto-computes (no silent LLM spend).
+ *
+ * Pure so the render decision is unit-tested, not buried in JSX.
+ */
+export type OrderUnderstandingState =
+  | "profile"
+  | "loading"
+  | "hidden"
+  | "cached"
+  | "empty"
+
+export function deriveOrderUnderstandingState(s: {
+  activeProjectId: number | null
+  hasOrder: boolean
+  isFetching: boolean
+  aiUnderstanding: string | null
+}): OrderUnderstandingState {
+  if (s.activeProjectId == null) return "profile"
+  if (!s.hasOrder) return s.isFetching ? "loading" : "hidden"
+  return s.aiUnderstanding && s.aiUnderstanding.trim() ? "cached" : "empty"
+}
+
+/**
+ * Split a stored aiUnderstanding text into narrative paragraphs + key-fact
+ * bullet lines for rendering. The server stores 一段敘述 + 條列 key facts in ONE
+ * TEXT column; bullets survive the sanitizer as lines starting with ・ (or the
+ * raw -/• if a row predates the wash). Pure + unit-tested.
+ */
+export function splitOrderUnderstanding(text: string): {
+  paragraphs: string[]
+  facts: string[]
+} {
+  const paragraphs: string[] = []
+  const facts: string[] = []
+  for (const raw of text.split("\n")) {
+    const line = raw.trim()
+    if (!line) continue
+    const m = line.match(/^[・•-]\s*(.*)$/)
+    if (m) {
+      const fact = m[1].trim()
+      if (fact) facts.push(fact) // a bare marker is noise, not an empty fact
+      continue
+    }
+    paragraphs.push(line)
+  }
+  return { paragraphs, facts }
+}
+
 /** Doc kinds that are unambiguously things WE produced for the customer. */
 const OUTBOUND_DOC_KINDS = new Set(["quote", "invoice", "confirmation", "flight"])
 

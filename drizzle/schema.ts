@@ -2443,6 +2443,13 @@ export const customOrders = mysqlTable("customOrders", {
   bookingId: int("bookingId"),
   notes: text("notes"),
 
+  // order-ai-understanding (0107) — 這個專案專屬的 AI 客人理解(Jeff:「每一個專案
+  // 都應該是專門的 太多會太亂」)。一段敘述 + 條列 key facts,繁中,只搬運素材裡的
+  // 事實。手動 analyzeOrder(重新分析鈕)才算,算完存這裡當快取 — 絕不自動燒 LLM。
+  // NULL = 還沒分析(客戶頁顯示誠實空狀態)。
+  aiUnderstanding: text("aiUnderstanding"),
+  aiUnderstandingAt: timestamp("aiUnderstandingAt"),
+
   createdBy: int("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),

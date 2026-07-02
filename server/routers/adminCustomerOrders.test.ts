@@ -46,10 +46,17 @@ vi.mock("../services/invoiceService", () => ({
   generateInvoiceNumber: vi.fn(async () => "INV-2026-0001"),
   generateInvoicePdf: vi.fn(async () => ({ html: "<i>x</i>", r2Url: "https://r2/inv.html" })),
 }));
+// order-ai-understanding (0107) — analyzeOrder delegates the LLM pipeline here;
+// the router test only proves gating + passthrough (the pipeline has its own
+// tests in server/_core/customerPreferenceExtractor.test.ts).
+vi.mock("../_core/customerPreferenceExtractor", () => ({
+  analyzeOrderAiUnderstanding: vi.fn(),
+}));
 
 import { adminCustomerOrdersRouter } from "./adminCustomerOrders";
 import * as db from "../db";
 import { audit } from "../_core/auditLog";
+import { analyzeOrderAiUnderstanding } from "../_core/customerPreferenceExtractor";
 import {
   sendCustomOrderQuoteEmail,
   sendCustomOrderCollectionEmail,
@@ -108,6 +115,7 @@ describe("surface", () => {
     const procs = Object.keys((adminCustomerOrdersRouter as any)._def.procedures).sort();
     expect(procs).toEqual(
       [
+        "analyzeOrder",
         "assignConversation",
         "attachConfirmation",
         "attachQuote",
@@ -547,5 +555,78 @@ describe("assignConversation", () => {
         interactionIds: [101],
       }),
     ).resolves.toEqual({ updated: 1 });
+  });
+});
+
+/**
+ * order-ai-understanding (0107) — analyzeOrder. 歸屬驗證(cross-customer
+ * FORBIDDEN)+ 素材傳遞(supplierCost 絕不進 pipeline input)+ 素材為空 →
+ * analyzed:false(不炸、不假裝成功)。LLM 管線本身在
+ * customerPreferenceExtractor.test.ts 蓋。
+ */
+describe("analyzeOrder — 本專案客人理解(手動重新分析,絕不自動燒 LLM)", () => {
+  it("PRECONDITION_FAILED when the customer cannot be resolved", async () => {
+    (db.resolveCustomerProfileIds as any).mockResolvedValue([]);
+    await expect(
+      caller().analyzeOrder({ selection: { userId: 9 }, orderId: 7 }),
+    ).rejects.toThrow();
+    expect(analyzeOrderAiUnderstanding).not.toHaveBeenCalled();
+  });
+
+  it("FORBIDDEN when the order belongs to a DIFFERENT customer (歸屬驗證)", async () => {
+    (db.resolveCustomerProfileIds as any).mockResolvedValue([5]);
+    (db.getCustomOrderById as any).mockResolvedValue({ ...baseOrder, customerProfileId: 999 });
+    await expect(
+      caller().analyzeOrder({ selection: { userId: 9 }, orderId: 7 }),
+    ).rejects.toThrow(/belong/);
+    expect(analyzeOrderAiUnderstanding).not.toHaveBeenCalled();
+  });
+
+  it("NOT_FOUND when the order does not exist", async () => {
+    (db.resolveCustomerProfileIds as any).mockResolvedValue([5]);
+    (db.getCustomOrderById as any).mockResolvedValue(undefined);
+    await expect(
+      caller().analyzeOrder({ selection: { profileId: 5 }, orderId: 404 }),
+    ).rejects.toThrow(/not found/);
+  });
+
+  it("passes ONLY the safe deterministic fields to the pipeline — supplierCost never leaves the router", async () => {
+    (db.resolveCustomerProfileIds as any).mockResolvedValue([5]);
+    (db.getCustomOrderById as any).mockResolvedValue({
+      ...baseOrder,
+      category: "quote",
+      departureDate: "2026-12-20",
+      returnDate: "2027-01-02",
+    });
+    (analyzeOrderAiUnderstanding as any).mockResolvedValue({
+      aiUnderstanding: "客人想帶家人去台灣,在意步調。\n\n・預算未提及",
+      aiUnderstandingAt: new Date("2026-07-01T18:00:00Z"),
+    });
+    const r = await caller().analyzeOrder({ selection: { profileId: 5 }, orderId: 7 });
+    expect(r.analyzed).toBe(true);
+    expect(r.aiUnderstanding).toContain("台灣");
+    const arg = (analyzeOrderAiUnderstanding as any).mock.calls[0][0];
+    expect(arg).toEqual({
+      id: 7,
+      title: "台灣12天",
+      category: "quote",
+      status: "arranged",
+      departureDate: "2026-12-20",
+      returnDate: "2027-01-02",
+      totalPrice: "5000.00",
+      currency: "USD",
+      notes: null,
+    });
+    // 紅線:成本(4000)絕不進 pipeline input。
+    expect(JSON.stringify(arg)).not.toContain("4000");
+    expect(arg).not.toHaveProperty("supplierCost");
+  });
+
+  it("素材為空(pipeline 回 null)→ analyzed:false,誠實不假裝", async () => {
+    (db.resolveCustomerProfileIds as any).mockResolvedValue([5]);
+    (db.getCustomOrderById as any).mockResolvedValue({ ...baseOrder });
+    (analyzeOrderAiUnderstanding as any).mockResolvedValue(null);
+    const r = await caller().analyzeOrder({ selection: { profileId: 5 }, orderId: 7 });
+    expect(r).toEqual({ analyzed: false, aiUnderstanding: null, aiUnderstandingAt: null });
   });
 });

@@ -3419,6 +3419,9 @@ export const zhTW = {
         title: 'AI 客人理解',
         extracting: '分析中…',
         refresh: '重新分析',
+        projectEmpty: '這個專案還沒有分析',
+        projectNoMaterial: '這次沒有產出分析,這個專案可能還沒有歸檔的對話或文件',
+        analyzeFailed: '分析失敗,請再試一次',
       },
       watchdog: {
         title: '漏價警示',

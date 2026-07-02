@@ -3454,6 +3454,9 @@ export const en = {
         title: 'AI Customer Insights',
         extracting: 'Analyzing...',
         refresh: 'Re-analyze',
+        projectEmpty: 'This project has not been analyzed yet',
+        projectNoMaterial: 'No analysis produced. This project may have no filed conversation or documents yet',
+        analyzeFailed: 'Analysis failed, please try again',
       },
       watchdog: {
         title: 'Margin alert',

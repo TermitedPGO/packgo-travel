@@ -379,6 +379,68 @@ export const adminCustomerOrdersRouter = router({
       return { updated };
     }),
 
+  /**
+   * order-ai-understanding (0107) — 這個專案專屬的 AI 客人理解,手動「重新分析」。
+   * Jeff:「AI 客人理解 每一個專案都應該是專門的 太多會太亂」。
+   *
+   * 只有這顆按鈕會燒 LLM(概覽卡讀 customOrders.get 回來的快取欄位,絕不自動算)。
+   * 歸屬驗證同 assignConversation:這張單必須屬於這位客人(orderBelongsToProfiles),
+   * 不是就 FORBIDDEN。素材全部確定性讀取(order 欄位 + 歸檔對話 + 文件檔名,見
+   * analyzeOrderAiUnderstanding);素材為空 → analyzed:false,不燒 LLM。
+   * 紅線:supplierCost 不在素材型別裡,成本永遠進不了 prompt / 輸出。
+   */
+  analyzeOrder: adminProcedure
+    .input(
+      z.object({
+        selection: selectionSchema,
+        orderId: z.number().int().positive(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const profileIds = await db.resolveCustomerProfileIds(
+        selToArgs(input.selection),
+      );
+      if (profileIds.length === 0) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "cannot resolve customer (no database?)",
+        });
+      }
+      const order = await loadOrder(input.orderId);
+      if (!db.orderBelongsToProfiles(order.customerProfileId, profileIds)) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "order does not belong to this customer",
+        });
+      }
+      const { analyzeOrderAiUnderstanding } = await import(
+        "../_core/customerPreferenceExtractor"
+      );
+      const r = await analyzeOrderAiUnderstanding({
+        id: order.id,
+        title: order.title,
+        category: order.category,
+        status: order.status,
+        departureDate: order.departureDate,
+        returnDate: order.returnDate,
+        totalPrice: order.totalPrice,
+        currency: order.currency,
+        notes: order.notes,
+      });
+      if (!r) {
+        return {
+          analyzed: false as const,
+          aiUnderstanding: null,
+          aiUnderstandingAt: null,
+        };
+      }
+      return {
+        analyzed: true as const,
+        aiUnderstanding: r.aiUnderstanding,
+        aiUnderstandingAt: r.aiUnderstandingAt,
+      };
+    }),
+
   // ── PDF 上傳(拖曳)──────────────────────────────────────────────────────
   // Presign a browser→R2 DIRECT PUT for a quote / confirmation PDF (big files
   // skip the Express body limit). Client PUTs the file to putUrl, then calls
