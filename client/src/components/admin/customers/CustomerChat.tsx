@@ -429,6 +429,12 @@ export default function CustomerChat({
       // 跟進日 surfaces up top right after Jeff types it, no reload.
       void utils.admin.customerDetail.invalidate()
       void utils.admin.guestOpenItems.invalidate()
+      // The agent may have just created a brand-new customer (create_customer) —
+      // refresh the left-column lists or the new person stays invisible until a
+      // full reload, which reads as「新增客人沒用」even though the profile was
+      // created (2026-07-01 prod repro: tool chip green, list unchanged).
+      void utils.admin.customerList.invalidate()
+      void utils.admin.guestList.invalidate()
     }
   }
 

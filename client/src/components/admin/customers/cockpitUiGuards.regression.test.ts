@@ -109,3 +109,18 @@ describe("F — dead code removed", () => {
     expect(en).not.toMatch(/\baddModal:/)
   })
 })
+
+describe("G — create_customer 之後左欄清單要刷新(2026-07-01「新增客人也沒用」)", () => {
+  // prod repro: chat「新增客人:測試二號…」→ create_customer 成功(tool chip 綠、
+  // DB 有 row),但左欄 customerList/guestList 沒被 invalidate,新客人要 F5 才
+  // 出現 → Jeff 讀成「沒用」。handleSend 的 finally 必須連清單一起刷新。
+  const finallyBlock = customerChat.slice(customerChat.indexOf("} finally {"))
+
+  it("handleSend finally invalidates admin.customerList", () => {
+    expect(finallyBlock).toContain("utils.admin.customerList.invalidate()")
+  })
+
+  it("handleSend finally invalidates admin.guestList", () => {
+    expect(finallyBlock).toContain("utils.admin.guestList.invalidate()")
+  })
+})
