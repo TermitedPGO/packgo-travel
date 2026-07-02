@@ -124,3 +124,25 @@ describe("checkFollowupDraftCompliance — language awareness (English drafts)",
     expect(violations("林先生好,行程幫忙留著了。")).toContain("missing_formal_you");
   });
 });
+
+describe("checkFollowupDraftCompliance — cjk_in_en_draft(2026-07-02 Leslie 中文跟進卡)", () => {
+  it("language=en 且草稿含中文字 → cjk_in_en_draft 違規", () => {
+    const r = checkFollowupDraftCompliance("Hi Leslie, 希望您一切都好. Best, Jeff", "en")
+    expect(r.violations).toContain("cjk_in_en_draft")
+  })
+
+  it("language=en 純英文草稿 → 無此違規", () => {
+    const r = checkFollowupDraftCompliance("Hi Leslie, hope you are well. Best, Jeff", "en")
+    expect(r.violations).not.toContain("cjk_in_en_draft")
+  })
+
+  it("language=zh-TW 中文草稿 → 不觸發(zh 不設限)", () => {
+    const r = checkFollowupDraftCompliance("您好,跟您問候一聲,祝順心", "zh-TW")
+    expect(r.violations).not.toContain("cjk_in_en_draft")
+  })
+
+  it("未傳 language(內容 fallback)→ 不觸發此規則", () => {
+    const r = checkFollowupDraftCompliance("您好,跟您問候一聲")
+    expect(r.violations).not.toContain("cjk_in_en_draft")
+  })
+})

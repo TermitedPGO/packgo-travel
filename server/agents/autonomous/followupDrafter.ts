@@ -35,6 +35,7 @@
  * contract is unit-tested without an LLM call (local has no ANTHROPIC_API_KEY).
  */
 
+import { hasCjk } from "./customerLanguage";
 import { invokeLLM, type Message, type Tool } from "../../_core/llm";
 import { withAutonomousSafety } from "../_helpers/safety";
 
@@ -61,6 +62,12 @@ export type FollowupDrafterInput = {
   lastSubject?: string | null;
   /** Which prompt arm to draft with. Omitted → FOLLOWUP_PROMPT_DEFAULT. */
   promptVariant?: FollowupPromptVariant;
+  /** Jeff 口述的信件內容/指示(2026-07-02:「給我草稿」曾無視 Jeff 在聊天裡
+   * 交代的內容,自己寫了封通用問候)。有值時信必須照做。 */
+  jeffInstruction?: string | null;
+  /** 第二次嘗試旗標:第一稿對 en 客人吐了中文,加重語言指令重打(見
+   * draftFollowupEnforcingLanguage)。 */
+  hardLanguageRetry?: boolean;
 };
 
 export type FollowupDrafterOutput = {
@@ -214,11 +221,18 @@ export function buildUserPrompt(input: FollowupDrafterInput): string {
           .join("\n")
       : "(沒有可用的對話摘錄,請寫得通用、低壓力,不要編任何細節)";
 
+  const instruction = input.jeffInstruction?.trim();
   return [
     input.customerName ? `【客人】${input.customerName}` : null,
     input.lastSubject ? `【主旨】${input.lastSubject}` : null,
     `【已靜默】${input.daysSince} 天`,
     LANGUAGE_DIRECTIVE[input.language],
+    input.hardLanguageRetry && input.language === "en"
+      ? "【SECOND ATTEMPT】Your previous draft contained Chinese characters. That is a hard failure. Rewrite the ENTIRE letter in English only. Zero Chinese characters."
+      : null,
+    instruction
+      ? `【Jeff 的指示(這封信的內容必須照這個寫;下面的對話摘錄只拿來對口氣與稱呼,不要自己另編主題)】\n${instruction}`
+      : null,
     `【真實往來(舊到新;從這裡看 Jeff 怎麼稱呼客人、有哪些還沒決定的事)】\n${convo}`,
   ]
     .filter(Boolean)
@@ -251,3 +265,18 @@ export const draftFollowup = withAutonomousSafety(
   { agentName: "followup_draft" },
   _draftFollowupInner,
 );
+
+/**
+ * Language-enforcing wrapper(2026-07-02 Leslie 中文跟進卡斷根):en 客人的
+ * 第一稿含 CJK → 帶加重語言指令重打一次;第二稿還髒就原樣回傳,交給
+ * sanitizeFollowupDraftBody 的 cjk_in_en_draft 硬擋(blocked → 不落卡)。
+ * draftFn 可注入,純邏輯可測不燒 LLM。
+ */
+export async function draftFollowupEnforcingLanguage(
+  input: FollowupDrafterInput,
+  draftFn: (i: FollowupDrafterInput) => Promise<FollowupDrafterOutput> = draftFollowup,
+): Promise<FollowupDrafterOutput> {
+  const first = await draftFn(input);
+  if (input.language !== "en" || !hasCjk(first.body ?? "")) return first;
+  return draftFn({ ...input, hardLanguageRetry: true });
+}

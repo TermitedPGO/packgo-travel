@@ -12,7 +12,7 @@
 import { createChildLogger } from "../../_core/logger";
 import type { Db } from "../../_core/followupScan";
 import { stripMarkdownForEmail } from "../../_core/plainTextReply";
-import { draftFollowup, type FollowupDrafterInput } from "./followupDrafter";
+import { draftFollowupEnforcingLanguage, type FollowupDrafterInput } from "./followupDrafter";
 import {
   buildConversationExcerpt,
   detectDraftSkip,
@@ -41,6 +41,8 @@ export type OnDemandDraftResult =
 export async function produceFollowupDraftForProfile(
   db: Db,
   profileId: number,
+  /** Jeff 在聊天口述的信件內容(「寫信說星期四領事館取件」);有值時草稿必須照做。 */
+  jeffInstruction?: string,
 ): Promise<OnDemandDraftResult> {
   const { agentMessages, customerInteractions, customerProfiles } = await import(
     "../../../drizzle/schema"
@@ -97,11 +99,12 @@ export async function produceFollowupDraftForProfile(
     language: detectCustomerLanguage(rows),
     conversationExcerpt: excerpt,
     promptVariant,
+    jeffInstruction: jeffInstruction?.trim() || null,
   };
 
   let draft;
   try {
-    draft = await draftFollowup(drafterInput);
+    draft = await draftFollowupEnforcingLanguage(drafterInput);
   } catch (e) {
     log.warn({ err: e, profileId }, "[followupDraftOnDemand] draftFollowup failed");
     return { status: "skipped", reason: "empty_draft" };

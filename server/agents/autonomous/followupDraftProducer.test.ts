@@ -326,6 +326,12 @@ describe("sanitizeFollowupDraftBody (Finding B: wash BEFORE the card, send chain
     const out = sanitizeFollowupDraftBody("Hi Jenny, just checking in. No rush at all.");
     expect(out.violations).toEqual([]);
   });
+  it("en 草稿含中文 → cjk_in_en_draft 硬擋(blocked),不落卡", () => {
+    const out = sanitizeFollowupDraftBody("Hi Leslie, 希望您一切都好. Best, Jeff", "en");
+    expect(out.blocked).toBe(true);
+    expect(out.violations).toContain("cjk_in_en_draft");
+  });
+
   it("Chinese draft with language=zh-TW still enforces 您", () => {
     const out = sanitizeFollowupDraftBody("林先生好,行程幫忙留著了。", "zh-TW");
     expect(out.violations).toContain("missing_formal_you");

@@ -13,7 +13,14 @@ vi.mock("../_helpers/safety", () => ({
   withAutonomousSafety: (_cfg: unknown, fn: unknown) => fn,
 }));
 
-import { buildSystem, buildUserPrompt, TOOL } from "./followupDrafter";
+import {
+  buildSystem,
+  buildUserPrompt,
+  TOOL,
+  draftFollowupEnforcingLanguage,
+  type FollowupDrafterInput,
+  type FollowupDrafterOutput,
+} from "./followupDrafter";
 
 describe("buildSystem — hard rules are present", () => {
   const sys = buildSystem();
@@ -132,3 +139,86 @@ describe("TOOL", () => {
     );
   });
 });
+
+describe("buildUserPrompt — Jeff 口述指示(2026-07-02 給我草稿沒照做)", () => {
+  it("有 jeffInstruction 時,指示原文與『必須照這個寫』進 prompt", () => {
+    const p = buildUserPrompt({
+      daysSince: 0,
+      language: "en",
+      conversationExcerpt: [],
+      jeffInstruction: "寫信說星期四會去中國領事館拿回來 週五可以過來領",
+    })
+    expect(p).toContain("Jeff 的指示")
+    expect(p).toContain("星期四會去中國領事館")
+    expect(p).toContain("必須照這個寫")
+  })
+
+  it("沒有指示時不出現該段", () => {
+    const p = buildUserPrompt({ daysSince: 1, language: "zh-TW", conversationExcerpt: [] })
+    expect(p).not.toContain("Jeff 的指示")
+  })
+
+  it("hardLanguageRetry + en 時出現加重英文指令", () => {
+    const p = buildUserPrompt({
+      daysSince: 1,
+      language: "en",
+      conversationExcerpt: [],
+      hardLanguageRetry: true,
+    })
+    expect(p).toContain("SECOND ATTEMPT")
+  })
+})
+
+describe("draftFollowupEnforcingLanguage — en 客人中文稿重打一次", () => {
+  const out = (body: string): FollowupDrafterOutput => ({
+    subject: "s",
+    body,
+    confidence: 80,
+    reasoning: "",
+  })
+
+  it("en 第一稿含中文 → 帶 hardLanguageRetry 重打一次,回第二稿", async () => {
+    const calls: FollowupDrafterInput[] = []
+    const fake = async (i: FollowupDrafterInput) => {
+      calls.push(i)
+      return calls.length === 1 ? out("Hi Leslie, 希望您一切都好") : out("Hi Leslie, hope all is well")
+    }
+    const r = await draftFollowupEnforcingLanguage(
+      { daysSince: 0, language: "en", conversationExcerpt: [] },
+      fake,
+    )
+    expect(calls).toHaveLength(2)
+    expect(calls[1].hardLanguageRetry).toBe(true)
+    expect(r.body).toBe("Hi Leslie, hope all is well")
+  })
+
+  it("en 第一稿乾淨 → 不重打", async () => {
+    let n = 0
+    const fake = async () => (n++, out("Hi Leslie, checking in."))
+    const r = await draftFollowupEnforcingLanguage(
+      { daysSince: 0, language: "en", conversationExcerpt: [] },
+      fake,
+    )
+    expect(n).toBe(1)
+    expect(r.body).toContain("checking in")
+  })
+
+  it("zh 客人不觸發語言重打", async () => {
+    let n = 0
+    const fake = async () => (n++, out("您好,跟您問候一聲"))
+    await draftFollowupEnforcingLanguage(
+      { daysSince: 0, language: "zh-TW", conversationExcerpt: [] },
+      fake,
+    )
+    expect(n).toBe(1)
+  })
+
+  it("兩稿都髒 → 回第二稿(交給 sanitize 的 cjk_in_en_draft 硬擋,不落卡)", async () => {
+    const fake = async () => out("Hi Leslie, 您好")
+    const r = await draftFollowupEnforcingLanguage(
+      { daysSince: 0, language: "en", conversationExcerpt: [] },
+      fake,
+    )
+    expect(r.body).toContain("您好")
+  })
+})

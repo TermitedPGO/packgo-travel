@@ -22,7 +22,7 @@ import { createChildLogger } from "../../_core/logger";
 import { findStaleQuotedCustomers, type Db } from "../../_core/followupScan";
 import { stripMarkdownForEmail } from "../../_core/plainTextReply";
 import {
-  draftFollowup,
+  draftFollowupEnforcingLanguage,
   type FollowupDraftLanguage,
   type FollowupDrafterInput,
   type FollowupPromptVariant,
@@ -213,7 +213,9 @@ export function sanitizeFollowupDraftBody(
   const body = stripMarkdownForEmail(raw);
   if (!body) return { body: "", blocked: false, violations: [] };
   const { violations } = checkFollowupDraftCompliance(body, language);
-  const blocked = violations.some((v) => v === "em_dash" || v === "markdown");
+  const blocked = violations.some(
+    (v) => v === "em_dash" || v === "markdown" || v === "cjk_in_en_draft",
+  );
   return { body, blocked, violations };
 }
 
@@ -365,7 +367,7 @@ export async function runFollowupDraftScan(
         conversationExcerpt: excerpt,
         promptVariant,
       };
-      const draft = await draftFollowup(drafterInput);
+      const draft = await draftFollowupEnforcingLanguage(drafterInput);
       // Wash BEFORE storing: the card must show exactly what the one-click send
       // chain will send (that chain sends the stored body verbatim, no strip).
       // Pass the detected language so en drafts skip the 你/您 rules.

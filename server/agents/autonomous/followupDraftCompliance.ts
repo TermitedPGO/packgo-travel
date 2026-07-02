@@ -26,7 +26,12 @@ export type ComplianceViolation =
   | "informal_ni"
   | "missing_formal_you"
   | "markdown"
-  | "emoji_or_check";
+  | "emoji_or_check"
+  // 2026-07-02 Leslie 中文跟進卡:客人被偵測為 en(inbound 零 CJK)時,
+  // 草稿含任何 CJK 字 = 語言錯,與 customerLanguage.checkDraftLanguage 同規則。
+  // 只在 caller 明確傳 language="en" 時檢查(內容 fallback 推出的 en 本身
+  // 就代表零 CJK,檢查恆過,無意義)。
+  | "cjk_in_en_draft";
 
 export interface ComplianceResult {
   ok: boolean;
@@ -68,6 +73,7 @@ export function checkFollowupDraftCompliance(
   if (MARKDOWN.test(text)) violations.push("markdown");
   if (CHECK_OR_EMOJI.test(text)) violations.push("emoji_or_check");
   const isEnglish = language ? language === "en" : !CJK.test(text);
+  if (language === "en" && CJK.test(text)) violations.push("cjk_in_en_draft");
   if (!isEnglish) {
     if (INFORMAL_NI.test(text)) violations.push("informal_ni");
     // A real letter addresses the customer; if it never says 您 (and isn't
