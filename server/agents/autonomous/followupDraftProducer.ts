@@ -31,6 +31,7 @@ import {
   checkFollowupDraftCompliance,
   type ComplianceViolation,
 } from "./followupDraftCompliance";
+import { detectLanguageFromText } from "./customerLanguage";
 
 const log = createChildLogger({ module: "followupDraftProducer" });
 
@@ -95,13 +96,12 @@ export function buildConversationExcerpt(
 }
 
 /** Crude language guess; the drafter also matches the conversation's language,
- * so this only needs to be roughly right. */
+ * so this only needs to be roughly right.
+ * 2026-07-01:實作抽到 customerLanguage.ts(detectLanguageFromText),讓
+ * inquiry 升級/observation 草稿鏈共用同一套規則(客人 inbound 零 CJK → en)。
+ * 這裡保留同名 export 委派過去,既有 caller / 測試不動。 */
 export function detectLanguage(text: string | null | undefined): FollowupDraftLanguage {
-  if (!text) return "zh-TW";
-  if (!/[一-鿿]/.test(text)) return "en";
-  // A few high-frequency simplified-only forms → zh-CN; default繁中.
-  if (/[这国说会们对应实现关闭东买卖优齐适会议]/.test(text)) return "zh-CN";
-  return "zh-TW";
+  return detectLanguageFromText(text);
 }
 
 /**

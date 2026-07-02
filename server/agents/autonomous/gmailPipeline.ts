@@ -1106,7 +1106,9 @@ async function processOneEmail(
       const result_cta = await maybeAppendUpgradeCta({
         draftReply: decision.draftReply,
         senderEmail,
-        language: decision.draftLanguage,
+        // 2026-07-01 語言 gate — en 客人以 code 層偵測為準,免得 LLM 自報的
+        // draftLanguage 標錯,讓通過語言 gate 的英文草稿又被貼上中文 CTA。
+        language: decision.expectedLanguage === "en" ? "en" : decision.draftLanguage,
       });
       if (result_cta.appended) {
         decision.draftReply = result_cta.draftReply;
@@ -1304,11 +1306,19 @@ async function processOneEmail(
             .join(" · ") || "(看不出具體要素)") +
           (req.missing.length > 0 ? `\n還缺:${req.missing.join("、")}` : "")
         : "";
+    // 2026-07-01 語言 gate — en 客人的草稿兩次都夾中文時,inquiryAgent 已把
+    // draftReply 丟成空字串(decision.draftDropped 帶人話理由,escalationReason
+    // 也已含)。卡片仍浮出,但不掛髒草稿、也不渲染一個空的「建議回覆」區塊。
+    const draftBlock = decision.draftReply
+      ? `\n\n---\n建議回覆(還沒送出,給你過目):\n${decision.draftReply}`
+      : decision.draftDropped
+        ? `\n\n---\n(這封沒有附草稿:${decision.draftDropped.reason})`
+        : "";
     await db.insert(agentMessages).values({
       agentName: "inquiry",
       messageType: "escalation",
       title: `${inquiryClassificationLabelZh(decision.classification)} · ${senderEmail ?? "未知寄件人"} · "${msg.subject.slice(0, 60)}"${attachmentsForAgent.length > 0 ? ` 📎×${attachmentsForAgent.length}` : ""}`,
-      body: `${decision.escalationReason ?? "這封我不確定怎麼處理,先給你看。"}\n\n客人想問:${decision.intent}${reqLine}${attachmentLine}\n\n---\n建議回覆(還沒送出,給你過目):\n${decision.draftReply}`,
+      body: `${decision.escalationReason ?? "這封我不確定怎麼處理,先給你看。"}\n\n客人想問:${decision.intent}${reqLine}${attachmentLine}${draftBlock}`,
       context: JSON.stringify({
         classification: decision.classification,
         tripType: decision.tripType,
@@ -1324,7 +1334,11 @@ async function processOneEmail(
         // human-readable copy in `body` above stays unchanged.
         customerEmail: senderEmail ?? null,
         subject: msg.subject,
-        draftReply: decision.draftReply ?? null,
+        // `|| null`(不是 ??):語言 gate 丟稿後是空字串,存 null 讓
+        // workspace 卡不會拿一個空草稿去開「編輯並回覆」。
+        draftReply: decision.draftReply || null,
+        // 語言 gate 丟稿理由(有才帶)— 卡片/除錯都看得到為什麼沒草稿。
+        draftDroppedReason: decision.draftDropped?.reason ?? null,
         attachments: attachmentsForAgent.map((a) => ({
           filename: a.filename,
           kind: a.kind,

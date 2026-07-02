@@ -26,6 +26,15 @@
 import { invokeLLM, type Message, type Tool } from "../../_core/llm";
 import { escalationReasonZh } from "./inquiryLabels";
 import { stripMarkdownForEmail } from "../../_core/plainTextReply";
+import { createChildLogger } from "../../_core/logger";
+import {
+  detectInquiryCustomerLanguage,
+  checkDraftLanguage,
+  buildLanguageDirective,
+  buildLanguageRetryDirective,
+} from "./customerLanguage";
+
+const log = createChildLogger({ module: "inquiryAgent" });
 
 export type Classification =
   | "new_inquiry"
@@ -176,6 +185,18 @@ export type InquiryAgentOutput = {
 
   draftReply: string;
   draftLanguage: Language;
+
+  /**
+   * 2026-07-01 語言 code gate — 我們自己(code 層,非 LLM)偵測到的客人語言:
+   * 客人最新 inbound 零 CJK 字 → "en"。en 客人的草稿經 checkDraftLanguage
+   * gate;zh 客人不設限。Optional 保持 additive(既有測試 fixture 不用補)。
+   */
+  expectedLanguage?: Language;
+  /**
+   * en 客人的草稿含中文、重試一次仍沒過 → draftReply 被丟棄成空字串,
+   * 這裡帶人話理由(卡片訊息用)。絕不讓中文稿掛到英文客人卡上。
+   */
+  draftDropped?: { reason: string };
 
   extractedCustomer: {
     senderEmail?: string;
@@ -588,34 +609,80 @@ export async function runInquiryAgent(
     input.threadHistory,
   );
 
-  const result = await invokeLLM({
-    model: "claude-sonnet-4-5-20250929",
-    messages: [
-      // system prompt as message[0] for prompt-cache hit
-      { role: "system", content: buildSystemPrompt(policyText, effectiveSignature) },
-      ...messages,
-    ],
-    tools: [STRUCTURED_TOOL],
-    toolChoice: { name: "submit_inquiry_analysis" },
-    maxTokens: 2000,
+  // 2026-07-01 語言 gate(code 層,非 LLM 自報)— 客人最新 inbound 零 CJK
+  // 字 → en。en 客人:prompt 注入硬性語言指示 + 產出後 checkDraftLanguage
+  // gate(含重試一次);zh 客人兩者皆不動(不設限)。
+  const expectedLanguage = detectInquiryCustomerLanguage({
+    rawMessage: input.rawMessage,
+    threadHistory: input.threadHistory,
   });
+  const languageDirective = buildLanguageDirective(expectedLanguage);
+  const systemBase =
+    buildSystemPrompt(policyText, effectiveSignature) +
+    (languageDirective ? `\n\n${languageDirective}` : "");
 
-  const toolCall = result.choices[0]?.message?.tool_calls?.[0];
-  if (!toolCall) {
-    throw new Error(
-      "InquiryAgent: LLM did not return a tool_call. raw=" +
-        JSON.stringify(result.choices[0]?.message?.content)
-    );
-  }
+  const invokeOnce = async (systemPrompt: string): Promise<any> => {
+    const result = await invokeLLM({
+      model: "claude-sonnet-4-5-20250929",
+      messages: [
+        // system prompt as message[0] for prompt-cache hit
+        { role: "system", content: systemPrompt },
+        ...messages,
+      ],
+      tools: [STRUCTURED_TOOL],
+      toolChoice: { name: "submit_inquiry_analysis" },
+      maxTokens: 2000,
+    });
 
-  let parsed: any;
-  try {
-    parsed = JSON.parse(toolCall.function.arguments);
-  } catch (e) {
-    throw new Error(
-      "InquiryAgent: tool_call arguments not valid JSON: " +
-        toolCall.function.arguments
-    );
+    const toolCall = result.choices[0]?.message?.tool_calls?.[0];
+    if (!toolCall) {
+      throw new Error(
+        "InquiryAgent: LLM did not return a tool_call. raw=" +
+          JSON.stringify(result.choices[0]?.message?.content)
+      );
+    }
+    try {
+      return JSON.parse(toolCall.function.arguments);
+    } catch (e) {
+      throw new Error(
+        "InquiryAgent: tool_call arguments not valid JSON: " +
+          toolCall.function.arguments
+      );
+    }
+  };
+
+  let parsed: any = await invokeOnce(systemBase);
+
+  // Code gate:en 客人的草稿不准帶任何 CJK 字(簽名行白名單)。第一次
+  // 違規 → 帶加重語言指令重試一次;再違規 → 丟棄草稿(空字串),卡片仍
+  // 浮出但不掛髒草稿。zh 客人 checkDraftLanguage 恆 ok,整段跳過。
+  let draftDroppedReason: string | undefined;
+  {
+    const gate = checkDraftLanguage(expectedLanguage, parsed.draftReply, {
+      ignore: [effectiveSignature],
+    });
+    if (!gate.ok) {
+      log.warn(
+        { event: "inquiry_draft_language_violation", sample: gate.sample },
+        "en customer draft contains Chinese — retrying once with hard language directive",
+      );
+      const retryParsed = await invokeOnce(
+        `${systemBase}\n\n${buildLanguageRetryDirective()}`,
+      );
+      const retryGate = checkDraftLanguage(expectedLanguage, retryParsed.draftReply, {
+        ignore: [effectiveSignature],
+      });
+      parsed = retryParsed;
+      if (!retryGate.ok) {
+        parsed.draftReply = "";
+        draftDroppedReason =
+          "這位客人全程用英文,但我兩次產的草稿都夾了中文,草稿我丟掉了,麻煩你直接用英文回。";
+        log.warn(
+          { event: "inquiry_draft_language_dropped", sample: retryGate.sample },
+          "retry draft still contains Chinese — draftReply dropped, escalating without draft",
+        );
+      }
+    }
   }
 
   // Apply policy gates AFTER LLM returns (LLM proposes, policy decides)
@@ -632,7 +699,9 @@ export async function runInquiryAgent(
   const shouldEscalate =
     action === "escalate" ||
     isAlwaysEscalate ||
-    parsed.confidence < minConfidence;
+    parsed.confidence < minConfidence ||
+    // 語言 gate 兩次都沒過 → 草稿已丟,一定升級給 Jeff 親自回,絕不 auto-send。
+    !!draftDroppedReason;
 
   const shouldAutoReply = !shouldEscalate && action === "draft_reply";
 
@@ -650,6 +719,12 @@ export async function runInquiryAgent(
           : escalationReasonZh(parsed.classification);
     } else if (parsed.confidence < minConfidence) {
       escalationReason = `我對這封的判斷只有 ${parsed.confidence} 分把握,不夠高,先給你確認再回。`;
+    }
+    // 語言 gate 丟稿的理由要讓 Jeff 在卡片上看到(可與其他理由並存)。
+    if (draftDroppedReason) {
+      escalationReason = escalationReason
+        ? `${escalationReason} 另外,${draftDroppedReason}`
+        : draftDroppedReason;
     }
   }
 
@@ -669,6 +744,8 @@ export async function runInquiryAgent(
     // the single chokepoint every reply consumer reads from.
     draftReply: stripMarkdownForEmail(parsed.draftReply),
     draftLanguage: parsed.draftLanguage,
+    expectedLanguage,
+    ...(draftDroppedReason ? { draftDropped: { reason: draftDroppedReason } } : {}),
     extractedCustomer: parsed.extractedCustomer ?? {},
     confidence: parsed.confidence,
     reasoning: parsed.reasoning,

@@ -444,7 +444,9 @@ describe("runInquiryAgent — thread history context (B)", () => {
   });
 
   it("strips injection-wrapper tags from thread bodies", async () => {
-    invokeLLMSpy.mockResolvedValueOnce(stubLLMResponse("new_inquiry"));
+    // rawMessage "hi" 零 CJK → en 客人;stub 的預設中文草稿會觸發語言 gate
+    // 重試(第二次 LLM call),所以用持久 mock 而不是 Once。
+    invokeLLMSpy.mockResolvedValue(stubLLMResponse("new_inquiry"));
     await runInquiryAgent({
       rawMessage: "hi",
       channel: "email",
@@ -506,5 +508,93 @@ describe("resolveSignature — 首封品牌、後續個人 (Cut 4)", () => {
     expect(resolveSignature({ signatureFollowup: "" }, [{ direction: "outbound" as const }])).toBe(
       personal,
     );
+  });
+});
+
+describe("runInquiryAgent — 英文客人語言 gate(2026-07-01,Leslie 反例)", () => {
+  beforeEach(() => invokeLLMSpy.mockReset());
+
+  const EN_RAW = "Hi Jeff, we would like to upgrade our room to ocean view for the Hawaii trip. Could you check the price difference?";
+  const ZH_RAW = "Jeff 您好,想把夏威夷的房型升等成海景房,麻煩幫我們看一下差價。";
+  const EN_DRAFT =
+    "Hi Leslie,\n\nThanks for reaching out. We will confirm the upgrade options with the hotel and get back to you within 1-2 business days.\n\nPACK&GO Travel · Jeff & 團隊";
+  const ZH_DRAFT =
+    "Hi Leslie,\n\n關於您的升等需求,我們會跟飯店確認後回覆您,大約 1-2 個工作天。\n\nPACK&GO Travel · Jeff & 團隊";
+
+  const systemPromptOfCall = (n: number): string => {
+    const call = invokeLLMSpy.mock.calls[n]?.[0] as {
+      messages: { role: string; content: string }[];
+    };
+    return call.messages.find((m) => m.role === "system")?.content ?? "";
+  };
+
+  it("en 客人 → system prompt 帶硬性語言指示;zh 客人不帶", async () => {
+    invokeLLMSpy.mockResolvedValueOnce(
+      stubLLMResponse("new_inquiry", { draftReply: EN_DRAFT, draftLanguage: "en" }),
+    );
+    const out = await runInquiryAgent({ rawMessage: EN_RAW, channel: "email" });
+    expect(out.expectedLanguage).toBe("en");
+    expect(systemPromptOfCall(0)).toContain("English only");
+
+    invokeLLMSpy.mockReset();
+    invokeLLMSpy.mockResolvedValueOnce(
+      stubLLMResponse("new_inquiry", { draftReply: ZH_DRAFT, draftLanguage: "zh-TW" }),
+    );
+    const outZh = await runInquiryAgent({ rawMessage: ZH_RAW, channel: "email" });
+    expect(outZh.expectedLanguage).toBe("zh-TW");
+    expect(systemPromptOfCall(0)).not.toContain("English only");
+  });
+
+  it("en 客人 + 英文草稿(帶中文品牌簽名)→ 一次過,不重試,草稿保留", async () => {
+    invokeLLMSpy.mockResolvedValueOnce(
+      stubLLMResponse("new_inquiry", { draftReply: EN_DRAFT, draftLanguage: "en" }),
+    );
+    const out = await runInquiryAgent({ rawMessage: EN_RAW, channel: "email" });
+    expect(invokeLLMSpy).toHaveBeenCalledTimes(1);
+    expect(out.draftReply).toContain("Thanks for reaching out");
+    expect(out.draftDropped).toBeUndefined();
+  });
+
+  it("en 客人 + 中文草稿 → 重試一次(帶加重語言指令),第二版英文 → 用第二版", async () => {
+    invokeLLMSpy
+      .mockResolvedValueOnce(
+        stubLLMResponse("new_inquiry", { draftReply: ZH_DRAFT, draftLanguage: "zh-TW" }),
+      )
+      .mockResolvedValueOnce(
+        stubLLMResponse("new_inquiry", { draftReply: EN_DRAFT, draftLanguage: "en" }),
+      );
+    const out = await runInquiryAgent({ rawMessage: EN_RAW, channel: "email" });
+    expect(invokeLLMSpy).toHaveBeenCalledTimes(2);
+    expect(systemPromptOfCall(1)).toContain("LANGUAGE VIOLATION");
+    expect(out.draftReply).toContain("Thanks for reaching out");
+    expect(out.draftDropped).toBeUndefined();
+    expect(out.shouldEscalate).toBe(false);
+  });
+
+  it("en 客人 + 兩次都中文 → 丟棄草稿(空字串)+ 強制升級 + 理由進 escalationReason", async () => {
+    invokeLLMSpy
+      .mockResolvedValueOnce(
+        stubLLMResponse("new_inquiry", { draftReply: ZH_DRAFT, draftLanguage: "zh-TW" }),
+      )
+      .mockResolvedValueOnce(
+        stubLLMResponse("new_inquiry", { draftReply: ZH_DRAFT, draftLanguage: "zh-TW" }),
+      );
+    const out = await runInquiryAgent({ rawMessage: EN_RAW, channel: "email" });
+    expect(invokeLLMSpy).toHaveBeenCalledTimes(2);
+    expect(out.draftReply).toBe("");
+    expect(out.draftDropped?.reason).toContain("英文");
+    expect(out.shouldEscalate).toBe(true);
+    expect(out.shouldAutoReply).toBe(false);
+    expect(out.escalationReason).toContain("英文");
+  });
+
+  it("zh 客人不設限:中文草稿一次過,絕不重試、絕不丟稿", async () => {
+    invokeLLMSpy.mockResolvedValueOnce(
+      stubLLMResponse("new_inquiry", { draftReply: ZH_DRAFT, draftLanguage: "zh-TW" }),
+    );
+    const out = await runInquiryAgent({ rawMessage: ZH_RAW, channel: "email" });
+    expect(invokeLLMSpy).toHaveBeenCalledTimes(1);
+    expect(out.draftReply).toContain("升等需求");
+    expect(out.draftDropped).toBeUndefined();
   });
 });

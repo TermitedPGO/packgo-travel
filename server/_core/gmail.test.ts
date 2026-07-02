@@ -183,3 +183,27 @@ describe("buildMimeReply — with attachments", () => {
     expect(mime).toContain("spreadsheetml.sheet");
   });
 });
+
+describe("buildMimeReply — footer 跟客人語言相容(2026-07-01 英文客人事件)", () => {
+  // 6/26 事故:自動回覆本文英文,footer 卻掛死中文「本訊息由 PACK&GO AI 助理
+  // 自動回覆…」(還帶破折號)。a0a22c4 已把 footer 精簡成單行語言中立聯絡資訊
+  // (客人也不該被告知是 AI 寫的,見 requirements.md 硬邊界)。這組測試鎖住:
+  // footer 永遠語言中立 — 純英文信的 footer 不得出現任何中文字、不得有破折號。
+  it("純英文 body → footer 無任何 CJK 字(英文客人永遠不會收到中文 footer)", () => {
+    const enBody =
+      "Hi Leslie,\n\nThanks for reaching out. We will get back to you within 1-2 business days.\n\nJeff Hsieh";
+    const mime = buildMimeReply({ ...BASE, bodyText: enBody });
+    // body 之後附加的部分(= footer)不得引入中文
+    const afterBody = mime.slice(mime.indexOf(enBody) + enBody.length);
+    expect(/[一-鿿]/.test(afterBody)).toBe(false);
+    expect(afterBody).toContain("+1 (510) 634-2307");
+  });
+
+  it("footer 無破折號(em/en dash)、無 AI 揭露(兩語言都適用)", () => {
+    const mime = buildMimeReply(BASE);
+    const afterBody = mime.slice(mime.indexOf(BASE.bodyText) + BASE.bodyText.length);
+    expect(afterBody).not.toMatch(/—|–/);
+    expect(afterBody).not.toContain("AI");
+    expect(afterBody).not.toContain("自動回覆");
+  });
+});
