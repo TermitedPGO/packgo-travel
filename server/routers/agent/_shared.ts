@@ -89,8 +89,12 @@ export async function ensureCustomerByEmail(
   if (existing[0]) {
     // 0109:這張卡可能已整份併進別人(隱藏卡)。collect/backfill 走這裡認人,
     // 不跟指標的話「收」會把整段 Gmail 歷史堆回隱藏卡(review P1)。
-    const { followMergePointer } = await import("../../_core/mergedProfile");
-    return { id: await followMergePointer(db, existing[0].id), created: false };
+    // 0702 auto-heal(G2):resolveCanonicalForFiling = followMergePointer +
+    // 同 email 訪客卡+會員卡並存自癒(訪客先問價、後來註冊 → 訪客卡整份併進
+    // 會員卡再落資料;heal 失敗自動退回原卡,「收」不會斷)。0909 那對卡免
+    // 遷移 — 下一次進這裡就自癒。
+    const { resolveCanonicalForFiling } = await import("../../_core/customerMerge");
+    return { id: await resolveCanonicalForFiling(db, existing[0].id, email), created: false };
   }
   const ins = await db.insert(customerProfiles).values({ email });
   return { id: Number((ins as any)[0]?.insertId ?? 0), created: true };

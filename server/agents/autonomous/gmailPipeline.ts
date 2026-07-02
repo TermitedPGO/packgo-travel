@@ -706,8 +706,17 @@ async function processOneEmail(
     if (existing[0]) {
       // 0109:這張卡可能已被併進別人(隱藏卡),跟指標走到最終卡再落資料,
       // 否則被併走的 email 之後來信會消失在列表外(leslie→Emerald 案)。
-      const { followMergePointer } = await import("../../_core/mergedProfile");
-      profileId = await followMergePointer(db, existing[0].id);
+      // 0702 auto-heal(G2):resolveCanonicalForFiling = followMergePointer
+      // + 同 email「訪客卡+會員卡」並存自癒。真實事故:jeffhsieh0909 的訪客卡
+      // #2730001(userId NULL,吃掉所有來信)與會員卡 #2760017(userId 60001)
+      // 並存 → 列表只看得到會員卡,紅點永遠不亮。進信解析到訪客卡且恰有一張
+      // 同 email 會員卡時,當場把訪客卡整份併進會員卡(與 chat 合併工具同一套
+      // mergeCustomerProfiles 語意),新訊息 file 到會員卡。heal 失敗 helper
+      // 內部 log.warn 後照舊回訪客卡 — 收信絕不因 heal 斷掉。0909 那對卡不需
+      // 要資料遷移:下一封來信進來就自癒(heal 完訪客卡帶 0109 指標,之後
+      // followMergePointer 直接轉到會員卡,不會併第二次)。
+      const { resolveCanonicalForFiling } = await import("../../_core/customerMerge");
+      profileId = await resolveCanonicalForFiling(db, existing[0].id, senderEmail);
       // 帳號連結只准綁「email 真正對上的那張卡」:指標走過之後 profileId 是
       // 別人的卡,綁上去會把整張同案卡變成寄件人的會員卡(review:跨身分
       // 汙染)。所以記下原卡 id,下面 linkProfileToUserByEmail 用它。

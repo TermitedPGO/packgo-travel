@@ -21,6 +21,12 @@
  */
 import type Anthropic from "@anthropic-ai/sdk";
 import { createChildLogger } from "../../_core/logger";
+// laToday / mergeCustomerNote moved to _core/customerMerge (2026-07-02 G2)
+// with the merge core; re-exported below so existing importers/tests keep
+// their `from "./opsTools"` path.
+import { laToday, mergeCustomerNote } from "../../_core/customerMerge";
+
+export { mergeCustomerNote };
 
 const log = createChildLogger({ module: "opsTools" });
 
@@ -1173,15 +1179,6 @@ async function runTool(name: string, input: any): Promise<unknown> {
 
 // ── Write tool executor ───────────────────────────────────────────────────
 
-/** Today's calendar date in America/Los_Angeles as "YYYY-MM-DD" (en-CA formats
- *  ISO-style). Jeff operates on LA time, so「7/21 還沒過」is judged in LA, not
- *  UTC — a late-evening LA chat must not roll the shorthand into next year. */
-function laToday(now: Date): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Los_Angeles",
-  }).format(now);
-}
-
 /** Validate a strict YYYY-MM-DD string is a REAL calendar day (2026-02-30 is
  *  rejected by the ISO round-trip). Returns the normalized string or null. */
 function realCalendarDay(s: string): string | null {
@@ -1234,30 +1231,6 @@ export function resolveFollowUpDateArg(
 }
 
 /**
- * Merge Jeff's private note (2026-07-01 P2 fix). The model has NO read path to
- * the old note, so a whole-field overwrite meant the second「備註加上X」silently
- * destroyed the first. The tool now owns the merge: a non-empty old note is
- * PRESERVED and the new text is appended as a dated line ([M/D], LA calendar —
- * the timezone Jeff operates in, per requirements §4.1). `replace:true` is the
- * only way to overwrite the whole field. Pure (clock injected via `now`) so
- * it's unit-tested without a DB.
- */
-export function mergeCustomerNote(
-  oldNote: string | null | undefined,
-  newNote: string,
-  replace: boolean,
-  now: Date = new Date(),
-): string {
-  const next = newNote.trim();
-  if (replace) return next;
-  const prev = (oldNote ?? "").trim();
-  if (!prev) return next;
-  if (!next) return prev;
-  const [, m, d] = laToday(now).split("-");
-  return `${prev}\n[${Number(m)}/${Number(d)}] ${next}`;
-}
-
-/**
  * Pure validator for merge_into_customer's TARGET argument. The SOURCE is
  * always the pinned profileId (never model-supplied); the model only names the
  * target, by profile id (preferred), exact profile email, or exact profile
@@ -1300,14 +1273,6 @@ export function resolveMergeTargetArgs(
     ok: false,
     error: "需要 targetEmail、targetProfileId 或 targetName 指定要併入哪位客人",
   };
-}
-
-/** mysql2-via-drizzle update/delete result → affected row count. The result
- *  shape varies by call path ([ResultSetHeader, …] or a bare header), so probe
- *  both. Non-numeric → 0 (never NaN into a count Jeff reads). */
-function countAffected(r: any): number {
-  const n = r?.[0]?.affectedRows ?? r?.affectedRows;
-  return typeof n === "number" ? n : 0;
 }
 
 /**
@@ -1950,13 +1915,6 @@ async function runWriteTool(
       if (!adminUserId) return { error: "缺少操作者(系統沒帶到 admin userId)" };
       const parsed = resolveMergeTargetArgs(input);
       if (!parsed.ok) return { error: parsed.error };
-      const { and, inArray, isNotNull, sql: sqlRaw } = await import("drizzle-orm");
-      const {
-        customerInteractions,
-        customerDocuments,
-        customOrders,
-        customerChatMessages,
-      } = await import("../../../drizzle/schema");
 
       // Resolve the target (must exist). Email lookup takes the OLDEST match —
       // same rule as create_customer dedup: the original row has the history.
@@ -2055,136 +2013,22 @@ async function runWriteTool(
             "要合併請反過來:開那個重複的訪客檔,把訪客併進這位會員,或人工處理。",
         };
 
-      // customerInteractions carries uq(customerProfileId, externalId) — a cc'd
-      // 同案聯絡人 often has the SAME email thread filed on both profiles, so a
-      // blind move would hit a duplicate key. Drop the source's copies of
-      // anything the target already has, then move the rest.
-      const targetExt = await db
-        .select({ externalId: customerInteractions.externalId })
-        .from(customerInteractions)
-        .where(
-          and(
-            eq(customerInteractions.customerProfileId, target.id),
-            isNotNull(customerInteractions.externalId),
-          ),
-        )
-        .limit(5000);
-      const extIds = targetExt
-        .map((r) => r.externalId)
-        .filter((e): e is string => typeof e === "string" && e.length > 0);
-      let duplicatesDropped = 0;
-      if (extIds.length > 0) {
-        const del = await db
-          .delete(customerInteractions)
-          .where(
-            and(
-              eq(customerInteractions.customerProfileId, profileId),
-              inArray(customerInteractions.externalId, extIds),
-            ),
-          );
-        duplicatesDropped = countAffected(del);
-      }
-
-      // Move the four tables. Idempotent by construction: a re-run finds the
-      // source already empty and moves 0 rows, still成功.
-      const moved = {
-        interactions: countAffected(
-          await db
-            .update(customerInteractions)
-            .set({ customerProfileId: target.id })
-            .where(eq(customerInteractions.customerProfileId, profileId)),
-        ),
-        documents: countAffected(
-          await db
-            .update(customerDocuments)
-            .set({ customerProfileId: target.id })
-            .where(eq(customerDocuments.customerProfileId, profileId)),
-        ),
-        orders: countAffected(
-          await db
-            .update(customOrders)
-            .set({ customerProfileId: target.id })
-            .where(eq(customOrders.customerProfileId, profileId)),
-        ),
-        chatMessages: countAffected(
-          await db
-            .update(customerChatMessages)
-            .set({ customerProfileId: target.id })
-            .where(eq(customerChatMessages.customerProfileId, profileId)),
-        ),
-      };
-
-      // customer-unread (0108) — 被併進來的互動裡可能有比目標卡現值更新的
-      // inbound(實案:leslie 7/1 護照信併進 Emerald 後紅點沒亮):合併後重算
-      // 目標卡 lastInboundAt = MAX(inbound createdAt),再交給 touchLastInbound
-      // 條件式 UPDATE — 只往前推、永不倒退(跟各收信入口同一套 semantics)。
-      // best-effort:紅點指針壞了不准弄死已經搬完資料的合併主流程。
-      try {
-        const [inboundMax] = await db
-          .select({
-            maxAt: sqlRaw<Date | string | null>`MAX(${customerInteractions.createdAt})`,
-          })
-          .from(customerInteractions)
-          .where(
-            and(
-              eq(customerInteractions.customerProfileId, target.id),
-              eq(customerInteractions.direction, "inbound"),
-            ),
-          );
-        const maxAt = inboundMax?.maxAt;
-        if (maxAt != null) {
-          const ts = maxAt instanceof Date ? maxAt : new Date(maxAt);
-          const { touchLastInbound } = await import("../../_core/customerUnread");
-          await touchLastInbound(db, target.id, ts);
-        }
-      } catch (err) {
-        log.warn(
-          { err, targetProfileId: target.id },
-          "[opsTools] merge: lastInboundAt recompute failed (non-fatal, red dot only)",
-        );
-      }
-
-      // Hide the duplicate + leave a dated trace in Jeff's note (append via
-      // mergeCustomerNote — the existing note is never destroyed).
-      const targetLabel = target.name || target.email || `#${target.id}`;
-      const sourceLabel = source.name || source.email || `#${profileId}`;
-      const mergedNote = mergeCustomerNote(
-        source.jeffPersonalNote ?? null,
-        `已併入 ${targetLabel} (#${target.id})`,
-        false,
-      );
-      await db
-        .update(customerProfiles)
-        .set({
-          status: "blocked",
-          // 0109 結構化指標:歸檔入口(收信/寄信/附件/詢問)認到這張卡時,
-          // followMergePointer 會轉到目標卡落資料 — 沒有它,leslie 這種被併走
-          // 的 email 之後來信會掉進隱藏卡,列表永遠看不到。
-          mergedIntoProfileId: target.id,
-          jeffPersonalNote: mergedNote || null,
-          updatedAt: new Date(),
-        })
-        .where(eq(customerProfiles.id, profileId));
-
-      // Audit trail (same pattern as update_booking_status).
-      const { audit } = await import("../../_core/auditLog");
-      await audit({
-        ctx: { user: { id: adminUserId, email: "ops-agent", role: "admin" } },
-        action: "customer.mergeInto",
-        targetType: "customerProfile",
-        targetId: profileId,
-        changes: {
-          before: { status: source.status },
-          after: { status: "blocked", mergedInto: target.id, moved, duplicatesDropped },
-        },
+      // Mechanical merge (dup-drop by externalId, 4-table move, block+0109
+      // pointer, dated note, audit, touchLastInbound recompute, summary
+      // refresh) extracted to _core/customerMerge (2026-07-02 G2) so the
+      // filing-entrance auto-heal shares the exact same semantics. The
+      // preloaded source/target rows keep the query sequence identical to the
+      // pre-extraction inline code.
+      const { mergeCustomerProfiles } = await import("../../_core/customerMerge");
+      const outcome = await mergeCustomerProfiles(db, {
+        sourceProfileId: profileId,
+        targetProfileId: target.id,
+        actor: { id: adminUserId, email: "ops-agent", role: "admin" },
         reason: `ops-agent merge_into_customer (customer chat, source=${profileId} target=${target.id})`,
+        source,
+        target: { id: target.id, name: target.name, email: target.email },
       });
-
-      // Refresh the target's driver-bar / summary so the merged history shows
-      // up immediately (same bump create_custom_order does).
-      void import("../../queue")
-        .then((m) => m.enqueueCustomerSummaryRefresh(target!.id))
-        .catch(() => {});
+      const { moved, duplicatesDropped, sourceLabel, targetLabel } = outcome;
 
       log.info(
         { sourceProfileId: profileId, targetProfileId: target.id, moved, duplicatesDropped },
