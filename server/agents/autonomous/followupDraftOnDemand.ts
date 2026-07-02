@@ -22,6 +22,7 @@ import {
   buildFollowupDraftRow,
   pickFollowupVariant,
   sanitizeFollowupDraftBody,
+  applyFollowupHonestyGate,
   type InteractionDetailRow,
   type DraftSkipReason,
 } from "./followupDraftProducer";
@@ -35,7 +36,14 @@ export type OnDemandDraftResult =
   | { status: "drafted"; daysSince: number; subject: string; body: string }
   | {
       status: "skipped";
-      reason: DraftSkipReason | "no_email" | "no_history" | "empty_draft" | "unclean_draft";
+      reason:
+        | DraftSkipReason
+        | "no_email"
+        | "no_history"
+        | "empty_draft"
+        | "unclean_draft"
+        // 誠實度 gate:草稿吹牛(無證據的「已寄」宣稱)或抬頭喊錯人 → 不落卡。
+        | "dishonest_draft";
     };
 
 export async function produceFollowupDraftForProfile(
@@ -128,16 +136,29 @@ export async function produceFollowupDraftForProfile(
     );
   }
 
-  const finalSubject = stripMarkdownForEmail(draft.subject) || `跟進:${email}`;
+  // 誠實度 gate (same shared path as the nightly scan): unverified 已寄 claims
+  // or a greeting to someone not in this conversation → no card (寧可沒卡).
+  const honesty = await applyFollowupHonestyGate(db, {
+    profileId,
+    profileEmail: email,
+    rowsNewestFirst: rows,
+    draftBody: cleaned.body,
+  });
+  if (!honesty.ok) return { status: "skipped", reason: "dishonest_draft" };
+
+  const finalSubject = stripMarkdownForEmail(draft.subject) || `跟進:${honesty.counterpartyEmail}`;
   await db.insert(agentMessages).values(
     buildFollowupDraftRow({
       profileId,
-      customerEmail: email,
+      // The thread's real counterparty (newest inbound From) — display + To:
+      // finally agree for merged cards (leslie→Emerald).
+      customerEmail: honesty.counterpartyEmail,
       daysSince,
       gmailThreadId: gmailThreadId as string, // non-null past detectDraftSkip
       subject: finalSubject,
       draftBody: cleaned.body,
       promptVariant,
+      hasQuoteEvidence: honesty.hasQuoteEvidence,
     }),
   );
   log.info({ profileId, daysSince }, "[followupDraftOnDemand] drafted on demand");

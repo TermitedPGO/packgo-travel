@@ -119,6 +119,76 @@ export async function findStaleQuotedCustomers(
     .filter((c): c is StaleCandidate & { email: string } => !!c.email);
 }
 
+/**
+ * Reminder wording, deterministic (誠實度 gate 3): the old title said
+ * 「報價發了 N 天沒回」unconditionally, even for customers who never got a
+ * quote (6/29 Emerald: no quote record anywhere, card still claimed 報價).
+ * hasQuoteEvidence comes from real records (customOrders.quoteSentAt / sent
+ * aiQuotes); without it the wording stays neutral. Pure → unit-tested.
+ */
+export function buildFollowupReminderText(input: {
+  email: string;
+  daysSince: number;
+  hasQuoteEvidence: boolean;
+}): { title: string; body: string } {
+  const staleLabel = input.hasQuoteEvidence
+    ? `報價發了 ${input.daysSince} 天沒回`
+    : `上次聯絡後 ${input.daysSince} 天沒回`;
+  return {
+    title: `跟進提醒:${input.email} ${staleLabel}`,
+    body:
+      `最後一封是你寄給 ${input.email} 的,到現在 ${input.daysSince} 天沒下文,現在輪到客人回。\n\n` +
+      `要不要跟進一下?在對話裡打「收 ${input.email}」可以先把完整往來收進來看清楚,再請我照真實內容幫你草擬一封溫和的跟進信。`,
+  };
+}
+
+/**
+ * Batch: which of these candidates provably received a quote (any
+ * customOrders.quoteSentAt, or an aiQuotes row in sent/viewed/converted under
+ * their email)? Returns the profileId set. A failed lookup returns the empty
+ * set + warn — wording then stays neutral (never claim 報價 without a record),
+ * and nothing blocks the scan.
+ */
+async function findQuoteEvidenceProfileIds(
+  db: Db,
+  cands: Array<{ profileId: number; email: string }>,
+): Promise<Set<number>> {
+  const out = new Set<number>();
+  if (cands.length === 0) return out;
+  try {
+    const { customOrders, aiQuotes } = await import("../../drizzle/schema");
+    const { and, inArray, isNotNull } = await import("drizzle-orm");
+
+    const ids = cands.map((c) => c.profileId);
+    const orderRows = (await db
+      .select({ pid: customOrders.customerProfileId })
+      .from(customOrders)
+      .where(
+        and(inArray(customOrders.customerProfileId, ids), isNotNull(customOrders.quoteSentAt)),
+      )) as Array<{ pid: number | null }>;
+    for (const r of orderRows) if (r.pid != null) out.add(r.pid);
+
+    const emails = [...new Set(cands.map((c) => c.email))];
+    const quoteRows = (await db
+      .select({ email: aiQuotes.customerEmail })
+      .from(aiQuotes)
+      .where(
+        and(
+          inArray(aiQuotes.customerEmail, emails),
+          inArray(aiQuotes.status, ["sent", "viewed", "converted"]),
+        ),
+      )) as Array<{ email: string | null }>;
+    const sentEmails = new Set(
+      quoteRows.map((r) => r.email?.toLowerCase()).filter((e): e is string => !!e),
+    );
+    for (const c of cands) if (sentEmails.has(c.email.toLowerCase())) out.add(c.profileId);
+    return out;
+  } catch (e) {
+    log.warn({ err: e }, "[followupScan] quote-evidence lookup failed — neutral wording for all");
+    return out;
+  }
+}
+
 export interface FollowupScanResult {
   candidates: number;
   posted: number;
@@ -165,6 +235,9 @@ export async function runFollowupScan(
     )) as Array<{ pid: number | null }>;
   const already = new Set(existing.map((e) => e.pid));
 
+  // 誠實度 gate 3:只有真的寄過報價的客人,提醒才能說「報價發了」。
+  const quoteEvidence = await findQuoteEvidenceProfileIds(db, cands);
+
   let posted = 0;
   let skipped = 0;
   for (const c of cands) {
@@ -173,13 +246,16 @@ export async function runFollowupScan(
       continue;
     }
     try {
+      const { title, body } = buildFollowupReminderText({
+        email: c.email,
+        daysSince: c.daysSince,
+        hasQuoteEvidence: quoteEvidence.has(c.profileId),
+      });
       await db.insert(agentMessages).values({
         agentName: "followup",
         messageType: "proposal",
-        title: `跟進提醒:${c.email} 報價發了 ${c.daysSince} 天沒回`,
-        body:
-          `最後一封是你寄給 ${c.email} 的,到現在 ${c.daysSince} 天沒下文,現在輪到客人回。\n\n` +
-          `要不要跟進一下?在對話裡打「收 ${c.email}」可以先把完整往來收進來看清楚,再請我照真實內容幫你草擬一封溫和的跟進信。`,
+        title,
+        body,
         priority: "normal",
         relatedCustomerProfileId: c.profileId,
       });

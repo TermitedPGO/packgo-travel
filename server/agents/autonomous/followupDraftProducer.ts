@@ -31,6 +31,13 @@ import {
   checkFollowupDraftCompliance,
   type ComplianceViolation,
 } from "./followupDraftCompliance";
+import {
+  checkFollowupDraftHonesty,
+  collectAllowedGreetingNames,
+  pickCounterpartyEmail,
+  type DeliveryEvidence,
+  type HonestyViolation,
+} from "./followupDraftHonesty";
 import { detectLanguageFromText } from "./customerLanguage";
 
 const log = createChildLogger({ module: "followupDraftProducer" });
@@ -219,10 +226,198 @@ export function sanitizeFollowupDraftBody(
   return { body, blocked, violations };
 }
 
+/** aiQuotes statuses meaning the quote actually reached the customer
+ * (mirrors customerFacts.QUOTE_DELIVERED). */
+const QUOTE_SENT_STATUSES = ["sent", "viewed", "converted"] as const;
+
+/**
+ * 誠實度 gate evidence (吹牛 gate) — deterministic delivery records for ONE
+ * customer, same sources as customerFacts.deriveDelivered: customOrders'
+ * quoteSentAt/confirmedAt, sent aiQuotes, and customerDocuments we emailed
+ * (uploadedBy="email_sent", fileName only — never the bytes). Any query
+ * failure → evidence:null = UNKNOWN → the claim gate fails OPEN (a lookup
+ * hiccup must never break drafting). profileName rides along for the 抬頭
+ * gate's allowed-name set — in its OWN try/catch, so an evidence failure never
+ * nulls the name (which would silently shrink the allowed-name set and flip
+ * the greeting gate to a false block). When the name lookup itself fails,
+ * profileNameUnknown:true tells the greeting gate to fail open too — UNKNOWN
+ * must never block on EITHER gate.
+ */
+export async function gatherDeliveryEvidence(
+  db: Db,
+  profileId: number,
+  email: string | null,
+): Promise<{
+  evidence: DeliveryEvidence | null;
+  profileName: string | null;
+  /** true = the name lookup FAILED (≠ "profile has no name") → greeting gate
+   * must fail open rather than judge against an incomplete allowed set. */
+  profileNameUnknown: boolean;
+}> {
+  let schema: typeof import("../../../drizzle/schema");
+  let orm: typeof import("drizzle-orm");
+  try {
+    schema = await import("../../../drizzle/schema");
+    orm = await import("drizzle-orm");
+  } catch (e) {
+    log.warn(
+      { err: e, profileId },
+      "[followupDraftProducer] honesty-gate imports failed — both gates fail open",
+    );
+    return { evidence: null, profileName: null, profileNameUnknown: true };
+  }
+  const { customOrders, customerDocuments, aiQuotes, customerProfiles } = schema;
+  const { and, eq, inArray } = orm;
+
+  let evidence: DeliveryEvidence | null = null;
+  try {
+    const orders = (await db
+      .select({ quoteSentAt: customOrders.quoteSentAt, confirmedAt: customOrders.confirmedAt })
+      .from(customOrders)
+      .where(eq(customOrders.customerProfileId, profileId))
+      .limit(50)) as Array<{ quoteSentAt: unknown; confirmedAt: unknown }>;
+
+    const docs = (await db
+      .select({ fileName: customerDocuments.fileName })
+      .from(customerDocuments)
+      .where(
+        and(
+          eq(customerDocuments.customerProfileId, profileId),
+          eq(customerDocuments.uploadedBy, "email_sent"),
+          eq(customerDocuments.type, "other"),
+        ),
+      )
+      .limit(20)) as Array<{ fileName: string | null }>;
+
+    const sentQuotes = email
+      ? ((await db
+          .select({ id: aiQuotes.id })
+          .from(aiQuotes)
+          .where(
+            and(
+              eq(aiQuotes.customerEmail, email),
+              inArray(aiQuotes.status, [...QUOTE_SENT_STATUSES]),
+            ),
+          )
+          .limit(5)) as Array<{ id: number }>)
+      : [];
+
+    evidence = {
+      quoteSent: orders.some((o) => o.quoteSentAt != null) || sentQuotes.length > 0,
+      confirmed: orders.some((o) => o.confirmedAt != null),
+      deliveredDocFileNames: docs
+        .map((d) => d.fileName)
+        .filter((f): f is string => !!f && f.trim().length > 0),
+    };
+  } catch (e) {
+    log.warn(
+      { err: e, profileId },
+      "[followupDraftProducer] delivery-evidence lookup failed — claim gate fails open",
+    );
+  }
+
+  let profileName: string | null = null;
+  let profileNameUnknown = false;
+  try {
+    const prof = (await db
+      .select({ name: customerProfiles.name })
+      .from(customerProfiles)
+      .where(eq(customerProfiles.id, profileId))
+      .limit(1)) as Array<{ name: string | null }>;
+    profileName = prof[0]?.name ?? null;
+  } catch (e) {
+    profileNameUnknown = true;
+    log.warn(
+      { err: e, profileId },
+      "[followupDraftProducer] profile-name lookup failed — greeting gate fails open",
+    );
+  }
+
+  return { evidence, profileName, profileNameUnknown };
+}
+
+/** Outcome of the shared 誠實度 gate (both producers go through this one path). */
+export interface FollowupHonestyGateOutcome {
+  /** false = draft blocked, card must NOT be stored (寧可沒卡). */
+  ok: boolean;
+  violations: HonestyViolation[];
+  /** Deterministic: this customer really has a sent-quote record → the card /
+   * reminder may say 報價; false → neutral 上次聯絡 wording. */
+  hasQuoteEvidence: boolean;
+  /** The thread's real counterparty (newest inbound From) — what the card
+   * displays as 收件 AND what the send puts in To:. Falls back to the profile
+   * email. Fixes the merged-card mismatch (卡顯示 eyoung,信喊 Leslie). */
+  counterpartyEmail: string;
+}
+
+/**
+ * 誠實度三 gate的共用執行路徑(nightly scan + on-demand 都走這裡):查交付
+ * 證據 → 組允許稱呼名單 → 吹牛 gate + 抬頭 gate。blocked 時 caller 不落卡。
+ */
+export async function applyFollowupHonestyGate(
+  db: Db,
+  input: {
+    profileId: number;
+    profileEmail: string;
+    rowsNewestFirst: InteractionDetailRow[];
+    draftBody: string;
+  },
+): Promise<FollowupHonestyGateOutcome> {
+  const { evidence, profileName, profileNameUnknown } = await gatherDeliveryEvidence(
+    db,
+    input.profileId,
+    input.profileEmail,
+  );
+  const allowedGreetingNames = collectAllowedGreetingNames({
+    rowsNewestFirst: input.rowsNewestFirst,
+    profileName,
+    profileEmail: input.profileEmail,
+  });
+  const res = checkFollowupDraftHonesty({
+    body: input.draftBody,
+    evidence,
+    allowedGreetingNames,
+    // Name lookup failed → the set may be missing the vouching name → the
+    // greeting gate fails open (UNKNOWN ≠ mismatch), mirroring evidence:null.
+    allowedNamesIncomplete: profileNameUnknown,
+  });
+  if (res.claimWithUnknownEvidence) {
+    log.warn(
+      { profileId: input.profileId },
+      "[followupDraft] delivery claim with UNKNOWN evidence — failing open, not blocking",
+    );
+  }
+  if (res.greetingWithUnknownNames) {
+    log.warn(
+      { profileId: input.profileId, greetingName: res.greetingName },
+      "[followupDraft] greeting unmatched but allowed-name lookup failed — failing open, not blocking",
+    );
+  }
+  if (!res.ok) {
+    log.warn(
+      {
+        profileId: input.profileId,
+        violations: res.violations,
+        greetingName: res.greetingName,
+      },
+      "[followupDraft] honesty gate blocked draft — card not stored",
+    );
+  }
+  return {
+    ok: res.ok,
+    violations: res.violations,
+    hasQuoteEvidence: evidence?.quoteSent === true,
+    counterpartyEmail: pickCounterpartyEmail(input.rowsNewestFirst, input.profileEmail),
+  };
+}
+
 /** The exact agentMessages insert. Pure so tests can run it through the REAL
  * consumers (observationDraftCard + parseEscalationReplyContext). */
 export interface FollowupDraftRowInput {
   profileId: number;
+  /** The thread's REAL counterparty (applyFollowupHonestyGate.counterpartyEmail),
+   * not necessarily the profile email — this is both the 收件 display and the
+   * To: of the eventual send. */
   customerEmail: string;
   daysSince: number;
   gmailThreadId: string;
@@ -230,6 +425,10 @@ export interface FollowupDraftRowInput {
   draftBody: string;
   /** Which prompt arm drafted this, for the live A/B. */
   promptVariant: FollowupPromptVariant;
+  /** Deterministic (gate 1 evidence): true = a quote really went out →
+   * title/body may say 報價; false → neutral 上次聯絡後 wording. 6/29:卡片
+   * 無條件寫「報價 N 天沒回」,但系統根本沒有報價寄出記錄。 */
+  hasQuoteEvidence: boolean;
 }
 
 export interface FollowupDraftRow {
@@ -256,11 +455,15 @@ export function buildFollowupDraftRow(input: FollowupDraftRowInput): FollowupDra
     // sendOutcome intentionally omitted (null) → observationDraftCard treats it
     // as awaiting send, not already-sent.
   });
+  // 報價 wording only when a quote provably went out; otherwise neutral.
+  const staleLabel = input.hasQuoteEvidence
+    ? `報價 ${input.daysSince} 天沒回`
+    : `上次聯絡後 ${input.daysSince} 天沒回`;
   return {
     agentName: FOLLOWUP_DRAFT_AGENT,
     messageType: "observation",
-    title: `跟進草稿:${input.customerEmail} 報價 ${input.daysSince} 天沒回`.slice(0, 200),
-    body: `已幫你把給 ${input.customerEmail} 的跟進信草擬好(報價 ${input.daysSince} 天沒回),在客戶頁待審草稿區,看過就能一鍵寄。`,
+    title: `跟進草稿:${input.customerEmail} ${staleLabel}`.slice(0, 200),
+    body: `已幫你把給 ${input.customerEmail} 的跟進信草擬好(${staleLabel}),在客戶頁待審草稿區,看過就能一鍵寄。`,
     priority: "normal",
     relatedCustomerProfileId: input.profileId,
     readByJeff: 0,
@@ -274,14 +477,14 @@ export interface FollowupDraftScanResult {
   /** profileIds we produced a draft for — pass to runFollowupScan as excludes
    * so the same customer isn't ALSO posted as an inbox reminder. */
   draftedProfileIds: number[];
-  skipped: { no_thread: number; sensitive: number; empty_conversation: number; already_drafted: number; error: number };
+  skipped: { no_thread: number; sensitive: number; empty_conversation: number; already_drafted: number; dishonest: number; error: number };
 }
 
 const EMPTY_RESULT: FollowupDraftScanResult = {
   candidates: 0,
   drafted: 0,
   draftedProfileIds: [],
-  skipped: { no_thread: 0, sensitive: 0, empty_conversation: 0, already_drafted: 0, error: 0 },
+  skipped: { no_thread: 0, sensitive: 0, empty_conversation: 0, already_drafted: 0, dishonest: 0, error: 0 },
 };
 
 /**
@@ -321,7 +524,7 @@ export async function runFollowupDraftScan(
     candidates: cands.length,
     drafted: 0,
     draftedProfileIds: [],
-    skipped: { no_thread: 0, sensitive: 0, empty_conversation: 0, already_drafted: 0, error: 0 },
+    skipped: { no_thread: 0, sensitive: 0, empty_conversation: 0, already_drafted: 0, dishonest: 0, error: 0 },
   };
 
   for (const c of cands) {
@@ -395,17 +598,32 @@ export async function runFollowupDraftScan(
           "[followupDraftProducer] draft tripped hard-rule guard",
         );
       }
+      // 誠實度 gate (6/29 Emerald/Leslie): unverified 已寄 claims or a greeting
+      // to someone not in this conversation → the card is NOT stored (寧可沒卡).
+      const honesty = await applyFollowupHonestyGate(db, {
+        profileId: c.profileId,
+        profileEmail: c.email,
+        rowsNewestFirst: rows,
+        draftBody: cleaned.body,
+      });
+      if (!honesty.ok) {
+        result.skipped.dishonest++;
+        continue;
+      }
 
       await db.insert(agentMessages).values(
         buildFollowupDraftRow({
           profileId: c.profileId,
-          customerEmail: c.email,
+          // The thread's real counterparty (newest inbound From), so the 收件
+          // display and the send To: match where the letter actually lands.
+          customerEmail: honesty.counterpartyEmail,
           daysSince: c.daysSince,
           gmailThreadId: gmailThreadId as string, // non-null past detectDraftSkip
           // Subject rides the send too (sendReplyInThread subject) → same wash.
-          subject: stripMarkdownForEmail(draft.subject) || `跟進:${c.email}`,
+          subject: stripMarkdownForEmail(draft.subject) || `跟進:${honesty.counterpartyEmail}`,
           draftBody: cleaned.body,
           promptVariant,
+          hasQuoteEvidence: honesty.hasQuoteEvidence,
         }),
       );
       result.drafted++;

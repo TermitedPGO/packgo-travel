@@ -11,7 +11,11 @@ vi.mock("./logger", () => ({
   createChildLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-import { selectStaleQuoted, type InteractionRow } from "./followupScan";
+import {
+  selectStaleQuoted,
+  buildFollowupReminderText,
+  type InteractionRow,
+} from "./followupScan";
 
 const NOW = new Date("2026-06-23T00:00:00Z").getTime();
 const daysAgo = (d: number) => new Date(NOW - d * 24 * 60 * 60 * 1000);
@@ -54,5 +58,30 @@ describe("selectStaleQuoted", () => {
     const out = selectStaleQuoted(rows, NOW, OPTS);
     expect(out.map((c) => c.profileId)).toEqual([5, 1]);
     expect(out.map((c) => c.daysSince)).toEqual([14, 7]);
+  });
+});
+
+describe("buildFollowupReminderText — 報價 wording only with real quote evidence (誠實度 gate 3)", () => {
+  it("with quote evidence: keeps the 報價發了 N 天沒回 title", () => {
+    const { title, body } = buildFollowupReminderText({
+      email: "a@b.co",
+      daysSince: 6,
+      hasQuoteEvidence: true,
+    });
+    expect(title).toBe("跟進提醒:a@b.co 報價發了 6 天沒回");
+    expect(body).toContain("最後一封是你寄給 a@b.co 的");
+    expect(body).toContain("6 天沒下文");
+  });
+
+  it("WITHOUT quote evidence: neutral 上次聯絡後 wording, never claims 報價", () => {
+    const { title, body } = buildFollowupReminderText({
+      email: "eyoung@axt.com", // the 6/29 case: no quote record anywhere
+      daysSince: 6,
+      hasQuoteEvidence: false,
+    });
+    expect(title).toBe("跟進提醒:eyoung@axt.com 上次聯絡後 6 天沒回");
+    expect(title).not.toContain("報價");
+    expect(body).not.toContain("報價");
+    expect(body).toContain("6 天沒下文");
   });
 });

@@ -26,11 +26,15 @@ import {
   sanitizeFollowupDraftBody,
   buildFollowupDraftRow,
   pickFollowupVariant,
+  gatherDeliveryEvidence,
+  applyFollowupHonestyGate,
   FOLLOWUP_DRAFT_AGENT,
   FOLLOWUP_DRAFT_CLASSIFICATION,
   FOLLOWUP_SENSITIVE_CLASSES,
   type InteractionDetailRow,
 } from "./followupDraftProducer";
+import type { Db } from "../../_core/followupScan";
+import { pickCounterpartyEmail } from "./followupDraftHonesty";
 import { observationDraftCard } from "../../routers/adminCustomerDrafts";
 import { parseEscalationReplyContext } from "../../_core/escalationBox";
 import { hasEmDash, hasResidualMarkdown } from "../../_core/plainTextReply";
@@ -243,6 +247,7 @@ describe("buildFollowupDraftRow — surfaces AND sends through the real consumer
     subject: "跟進:a@b.co",
     draftBody: "嗨,還在考慮嗎?有想再多看哪邊我都可以幫你。",
     promptVariant: "B",
+    hasQuoteEvidence: true,
   });
 
   it("stamps the A/B prompt arm into context for later attribution", () => {
@@ -280,6 +285,63 @@ describe("buildFollowupDraftRow — surfaces AND sends through the real consumer
     expect(target!.gmailThreadId).toBe("t-123");
     expect(target!.customerEmail).toBe("a@b.co");
     expect(target!.draftReply).toContain("還在考慮嗎");
+  });
+
+  it("with quote evidence the card may say 報價 N 天沒回", () => {
+    expect(built.title).toContain("報價 9 天沒回");
+    expect(built.body).toContain("報價 9 天沒回");
+  });
+
+  it("WITHOUT quote evidence the wording turns neutral (誠實度 gate 3)", () => {
+    const neutral = buildFollowupDraftRow({
+      profileId: 7,
+      customerEmail: "a@b.co",
+      daysSince: 9,
+      gmailThreadId: "t-123",
+      subject: "跟進:a@b.co",
+      draftBody: "嗨,還在考慮嗎?",
+      promptVariant: "A",
+      hasQuoteEvidence: false,
+    });
+    expect(neutral.title).toContain("上次聯絡後 9 天沒回");
+    expect(neutral.body).toContain("上次聯絡後 9 天沒回");
+    expect(neutral.title).not.toContain("報價");
+    expect(neutral.body).not.toContain("報價");
+  });
+
+  it("收件人顯示修正:counterparty email 上卡後,card 的 to 跟信落點一致 (leslie→Emerald)", () => {
+    // The producer passes applyFollowupHonestyGate.counterpartyEmail (newest
+    // inbound From = leslie@axt.com) instead of the profile email — the card
+    // used to show 收件 eyoung@axt.com while the letter addressed Leslie.
+    const counterparty = pickCounterpartyEmail(
+      [
+        row({ direction: "outbound", content: "報價附上" }),
+        row({
+          direction: "inbound",
+          content: "From: Leslie Green <leslie@axt.com>\nSubject: quote\n\ncan you quote?",
+        }),
+      ],
+      "eyoung@axt.com", // profile email (the merged-away target)
+    );
+    const merged = buildFollowupDraftRow({
+      profileId: 8,
+      customerEmail: counterparty,
+      daysSince: 5,
+      gmailThreadId: "t-le",
+      subject: "跟進:leslie@axt.com",
+      draftBody: "Hi Leslie, just checking in.",
+      promptVariant: "A",
+      hasQuoteEvidence: false,
+    });
+    const card = observationDraftCard({
+      id: 42,
+      context: merged.context,
+      createdAt: new Date(),
+      fallbackEmail: null,
+    });
+    expect(card!.to).toBe("leslie@axt.com");
+    const target = parseEscalationReplyContext(merged.context);
+    expect(target!.customerEmail).toBe("leslie@axt.com");
   });
 });
 
@@ -356,6 +418,7 @@ describe("dirty LLM output → clean card, both A/B arms (Finding B end-to-end)"
         subject: "跟進:a@b.co",
         draftBody: cleaned.body,
         promptVariant,
+        hasQuoteEvidence: true,
       });
 
       // The card Jeff sees = the body the one-click send chain sends verbatim.
@@ -375,6 +438,116 @@ describe("dirty LLM output → clean card, both A/B arms (Finding B end-to-end)"
       expect(hasResidualMarkdown(target!.draftReply ?? "")).toBe(false);
     },
   );
+});
+
+describe("gatherDeliveryEvidence / applyFollowupHonestyGate — split fail-open (a lookup hiccup never blocks)", () => {
+  // Stub db distinguishing the profile-name query ({ name }) from the three
+  // evidence queries ({ quoteSentAt,… } / { fileName } / { id }) by the shape
+  // of the selected fields — no real connection, drizzle eq() only builds SQL.
+  const makeDb = (opts: {
+    failEvidence?: boolean;
+    failProfile?: boolean;
+    profileName?: string | null;
+  }): Db => {
+    const { failEvidence = false, failProfile = false, profileName = "Emerald Young" } = opts;
+    return {
+      select: (fields: Record<string, unknown>) => {
+        const isProfileQuery = "name" in fields;
+        const chain = {
+          from: () => chain,
+          where: () => chain,
+          limit: async () => {
+            if (isProfileQuery) {
+              if (failProfile) throw new Error("db down (profile)");
+              return [{ name: profileName }];
+            }
+            if (failEvidence) throw new Error("db down (evidence)");
+            return [];
+          },
+        };
+        return chain;
+      },
+    } as unknown as Db;
+  };
+
+  it("evidence queries fail → evidence null, but the profile name SURVIVES (own try/catch)", async () => {
+    const out = await gatherDeliveryEvidence(makeDb({ failEvidence: true }), 7, "eyoung@axt.com");
+    expect(out.evidence).toBeNull();
+    expect(out.profileName).toBe("Emerald Young");
+    expect(out.profileNameUnknown).toBe(false);
+  });
+
+  it("profile-name lookup fails → flagged UNKNOWN, evidence still gathered", async () => {
+    const out = await gatherDeliveryEvidence(makeDb({ failProfile: true }), 7, "eyoung@axt.com");
+    expect(out.evidence).toEqual({
+      quoteSent: false,
+      confirmed: false,
+      deliveredDocFileNames: [],
+    });
+    expect(out.profileName).toBeNull();
+    expect(out.profileNameUnknown).toBe(true);
+  });
+
+  it("healthy lookups → evidence + name, nothing unknown", async () => {
+    const out = await gatherDeliveryEvidence(makeDb({}), 7, "eyoung@axt.com");
+    expect(out.evidence).not.toBeNull();
+    expect(out.profileName).toBe("Emerald Young");
+    expect(out.profileNameUnknown).toBe(false);
+  });
+
+  // The confirmed finding scenario: From headers are bare addresses (no display
+  // name), the greeting is only vouched for by customerProfiles.name.
+  const bareHeaderRows: InteractionDetailRow[] = [
+    row({ direction: "outbound", content: "Quote attached, let me know.", gmailThreadId: "t-9" }),
+    row({
+      direction: "inbound",
+      content: "From: eyoung@axt.com\nSubject: quote\n\nCan you quote Taiwan for 4?",
+      gmailThreadId: "t-9",
+    }),
+  ];
+  const gateInput = (draftBody: string) => ({
+    profileId: 7,
+    profileEmail: "eyoung@axt.com",
+    rowsNewestFirst: bareHeaderRows,
+    draftBody,
+  });
+
+  it("finding scenario: transient EVIDENCE failure no longer flips the greeting gate to block", async () => {
+    const res = await applyFollowupHonestyGate(
+      makeDb({ failEvidence: true }),
+      gateInput("Hi Emerald, just checking in on the Taiwan quote. No rush at all."),
+    );
+    expect(res.ok).toBe(true);
+    expect(res.violations).toEqual([]);
+    expect(res.hasQuoteEvidence).toBe(false); // UNKNOWN evidence → neutral wording
+  });
+
+  it("profile-NAME failure → greeting gate fails OPEN (UNKNOWN ≠ mismatch)", async () => {
+    const res = await applyFollowupHonestyGate(
+      makeDb({ failProfile: true }),
+      gateInput("Hi Emerald, just checking in on the Taiwan quote. No rush at all."),
+    );
+    expect(res.ok).toBe(true);
+    expect(res.violations).toEqual([]);
+  });
+
+  it("healthy DB + a truly wrong greeting still blocks (fail-open is lookup-failure only)", async () => {
+    const res = await applyFollowupHonestyGate(
+      makeDb({}),
+      gateInput("Hi Leslie, just checking in on the quote."),
+    );
+    expect(res.ok).toBe(false);
+    expect(res.violations).toContain("greeting_unknown_recipient");
+  });
+
+  it("counterpartyEmail always derives from the thread's newest inbound From", async () => {
+    const res = await applyFollowupHonestyGate(
+      makeDb({ failEvidence: true, failProfile: true }),
+      gateInput("您好,想跟您確認一下上次的行程還有沒有興趣。"),
+    );
+    expect(res.ok).toBe(true); // no-name greeting + double lookup failure → still drafts
+    expect(res.counterpartyEmail).toBe("eyoung@axt.com");
+  });
 });
 
 describe("live prompt A/B — assignment + both arms safe", () => {
