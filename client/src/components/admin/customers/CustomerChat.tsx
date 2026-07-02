@@ -11,6 +11,7 @@ import {
   Lightbulb,
   X,
   Paperclip,
+  HelpCircle,
 } from "lucide-react"
 import { Streamdown } from "streamdown"
 import { trpc } from "@/lib/trpc"
@@ -27,6 +28,13 @@ import {
   type ChatTurn,
   type ChatStep,
 } from "./chatStream"
+import {
+  SLASH_COMMANDS,
+  filterSlashCommands,
+  resolveSlashSelection,
+  moveSlashIndex,
+  type SlashCommandDef,
+} from "./slashCommands"
 
 type ChatMsg = { role: "user"; text: string } | { role: "ai"; turn: ChatTurn }
 /** A dropped file, kept as base64 so the server parses it with the SAME parser
@@ -81,7 +89,6 @@ export default function CustomerChat({
   activeProjectId = null,
   onApproveDraft,
   isApprovingDraft,
-  onFocusReady,
 }: {
   customer: AdaptedCustomer | null
   chatMessages: AiChatMessage[]
@@ -90,10 +97,6 @@ export default function CustomerChat({
   activeProjectId?: number | null
   onApproveDraft: (draft: Draft, editedBody?: string) => Promise<void>
   isApprovingDraft: boolean
-  /** Hand the parent a function to focus the composer. An optional `prefill`
-   * seeds the input (e.g. the "新增客人" starter template) and parks the cursor
-   * at the end so Jeff can keep typing. */
-  onFocusReady?: (focus: (prefill?: string) => void) => void
 }) {
   const { t } = useLocale()
   const utils = trpc.useUtils()
@@ -256,22 +259,49 @@ export default function CustomerChat({
   // Tear down any in-flight stream on unmount.
   useEffect(() => () => abortRef.current?.abort(), [])
 
-  // Register focus callback so parent can focus the chat input (e.g. "新增客人").
-  // An optional prefill seeds the composer with a starter template so clicking
-  // "叫 AI 新增客人" lands Jeff on an obvious next step instead of a blank box.
-  useEffect(() => {
-    onFocusReady?.((prefill?: string) => {
-      if (prefill !== undefined) setInput(prefill)
-      const el = taRef.current
-      if (!el) return
-      el.focus()
-      // Defer so the value/auto-grow effects flush before we park the caret.
-      requestAnimationFrame(() => {
-        const end = el.value.length
-        el.setSelectionRange(end, end)
-      })
+  // Slash command menu (2026-07-01) — typing "/" pops a command list above the
+  // composer (打字驅動: the 新增客人 button is gone, this replaces it). Esc
+  // dismisses until the input changes; selection state lives in slashIndex.
+  const [slashDismissed, setSlashDismissed] = useState(false)
+  const [slashIndex, setSlashIndex] = useState(0)
+  const [helpOpen, setHelpOpen] = useState(false)
+  const slashMatches = slashDismissed
+    ? []
+    : filterSlashCommands(input, customer !== null, t)
+  // Keep the highlighted row in range as typing narrows the matches.
+  const safeSlashIndex = Math.min(slashIndex, Math.max(slashMatches.length - 1, 0))
+
+  const pickSlashCommand = (cmd: SlashCommandDef) => {
+    const sel = resolveSlashSelection(cmd, t)
+    if (sel.kind === "help") {
+      setHelpOpen(true)
+      setInput("")
+      setSlashIndex(0)
+      return
+    }
+    // Replace the "/" token with the template, keep focus, park the caret at
+    // the template's end so Jeff just keeps typing the specifics.
+    setInput(sel.text)
+    setSlashIndex(0)
+    const el = taRef.current
+    if (!el) return
+    el.focus()
+    // Defer so the value/auto-grow effects flush before we park the caret.
+    requestAnimationFrame(() => {
+      const end = el.value.length
+      el.setSelectionRange(end, end)
     })
-  }, [onFocusReady])
+  }
+
+  // Esc closes the 操作說明 overlay from anywhere (focus may be in the panel).
+  useEffect(() => {
+    if (!helpOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setHelpOpen(false)
+    }
+    document.addEventListener("keydown", onKey)
+    return () => document.removeEventListener("keydown", onKey)
+  }, [helpOpen])
 
   // Auto-grow the composer textarea (1 line up to ~5), like Claude Code.
   useEffect(() => {
@@ -703,6 +733,54 @@ export default function CustomerChat({
 
       </div>
 
+      {/* 操作說明 overlay — the /說明 command opens this. Esc (document
+          listener above) or clicking outside closes it. */}
+      {helpOpen && (
+        <div
+          className="absolute inset-0 z-30 bg-black/10 flex items-end justify-center p-3"
+          onClick={() => setHelpOpen(false)}
+        >
+          <div
+            className="w-full rounded-xl border border-gray-200 bg-white shadow-sm p-4 space-y-3 max-h-full overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-[13px] font-medium text-gray-900">
+                <HelpCircle className="w-3.5 h-3.5 text-gray-500" />
+                {t("admin.customers.slash.helpPanel.title")}
+              </div>
+              <button
+                type="button"
+                onClick={() => setHelpOpen(false)}
+                aria-label={t("admin.customers.drafts.cancel")}
+                className="w-5 h-5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 flex items-center justify-center transition-colors"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+            <div>
+              <div className="text-[11px] font-medium text-gray-700 mb-1">
+                {t("admin.customers.slash.helpPanel.commandsHeading")}
+              </div>
+              <div className="space-y-0.5">
+                {SLASH_COMMANDS.map((cmd) => (
+                  <div key={cmd.id} className="flex items-baseline gap-2 text-[11px] leading-relaxed">
+                    <span className="font-medium text-gray-900 flex-shrink-0">{t(cmd.nameKey)}</span>
+                    <span className="text-gray-500">{t(cmd.descKey)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <ul className="space-y-1 text-[11px] text-gray-600 leading-relaxed list-disc pl-4">
+              <li>{t("admin.customers.slash.helpPanel.dragFiles")}</li>
+              <li>{t("admin.customers.slash.helpPanel.projectChips")}</li>
+              <li>{t("admin.customers.slash.helpPanel.draftsGate")}</li>
+              <li>{t("admin.customers.slash.helpPanel.toolChips")}</li>
+            </ul>
+          </div>
+        </div>
+      )}
+
       {/* Drag overlay */}
       {dragging && (
         <div className="absolute inset-0 z-30 bg-white/80 border-2 border-dashed border-gray-400 rounded-xl flex items-center justify-center pointer-events-none">
@@ -714,7 +792,38 @@ export default function CustomerChat({
       )}
 
       {/* Input */}
-      <div className="border-t border-gray-200 p-2">
+      <div className="border-t border-gray-200 p-2 relative">
+        {/* Slash command menu — floats above the composer, covers the message
+            area (z-30, same layer as the drag overlay; nothing in the message
+            list has a z-index). Data-driven from SLASH_COMMANDS. */}
+        {slashMatches.length > 0 && (
+          <div
+            role="listbox"
+            className="absolute bottom-full left-2 right-2 mb-1.5 z-30 rounded-xl border border-gray-200 bg-white shadow-sm py-1 overflow-hidden"
+          >
+            {slashMatches.map((cmd, i) => (
+              <button
+                key={cmd.id}
+                type="button"
+                role="option"
+                aria-selected={i === safeSlashIndex}
+                // preventDefault on mousedown keeps the textarea focused, so
+                // the click inserts the template with the caret ready to type.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => pickSlashCommand(cmd)}
+                onMouseEnter={() => setSlashIndex(i)}
+                className={`w-full flex items-baseline gap-2 px-3 py-1.5 text-left transition-colors ${
+                  i === safeSlashIndex ? "bg-gray-100" : ""
+                }`}
+              >
+                <span className="text-[12px] font-medium text-gray-900 flex-shrink-0">
+                  {t(cmd.nameKey)}
+                </span>
+                <span className="text-[11px] text-gray-500 truncate">{t(cmd.descKey)}</span>
+              </button>
+            ))}
+          </div>
+        )}
         {/* Dropped-file notice (unsupported type / too big) */}
         {dropNotice && (
           <div className="mx-1 mb-1.5 flex items-start gap-1.5 rounded-md bg-amber-50 border border-amber-200 px-2 py-1.5 text-[11px] text-amber-800 leading-relaxed">
@@ -746,9 +855,39 @@ export default function CustomerChat({
           <textarea
             ref={taRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value)
+              // Typing re-opens an Esc-dismissed menu and re-anchors the
+              // highlight on the first match.
+              setSlashDismissed(false)
+              setSlashIndex(0)
+            }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              // IME 組字中 (isComposing) — never intercept Enter/arrows.
+              if (e.nativeEvent.isComposing) return
+              if (slashMatches.length > 0) {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault()
+                  setSlashIndex(moveSlashIndex(safeSlashIndex, 1, slashMatches.length))
+                  return
+                }
+                if (e.key === "ArrowUp") {
+                  e.preventDefault()
+                  setSlashIndex(moveSlashIndex(safeSlashIndex, -1, slashMatches.length))
+                  return
+                }
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  pickSlashCommand(slashMatches[safeSlashIndex])
+                  return
+                }
+                if (e.key === "Escape") {
+                  e.preventDefault()
+                  setSlashDismissed(true)
+                  return
+                }
+              }
+              if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault()
                 handleSend()
               }

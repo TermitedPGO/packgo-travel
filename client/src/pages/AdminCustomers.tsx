@@ -1,4 +1,4 @@
-import { useState, useRef } from "react"
+import { useState } from "react"
 import { useLocale } from "@/contexts/LocaleContext"
 import CustomerList from "@/components/admin/customers/CustomerList"
 import CustomerDetail from "@/components/admin/customers/CustomerDetail"
@@ -16,7 +16,6 @@ export default function AdminCustomers() {
   const [showHidden, setShowHidden] = useState(false)
   // customer-projects (0104) — the active project (=customOrder). null =「未分類」.
   const [activeProjectId, setActiveProjectId] = useState<number | null>(null)
-  const chatFocusRef = useRef<((prefill?: string) => void) | null>(null)
   const {
     customers,
     isListLoading,
@@ -67,7 +66,6 @@ export default function AdminCustomers() {
           onToggleHidden={setShowHidden}
           onMarkNotCustomer={markNotCustomer}
           onRestoreCustomer={restoreCustomer}
-          onAddCustomer={() => chatFocusRef.current?.(t("admin.customers.drafts.addCustomerPrefill"))}
         />
       )}
       {selected !== null ? (
@@ -100,7 +98,6 @@ export default function AdminCustomers() {
               activeProjectId={activeProjectId}
               onApproveDraft={approveDraft}
               isApprovingDraft={isApprovingDraft}
-              onFocusReady={(fn) => { chatFocusRef.current = fn }}
             />
           )}
         </>
@@ -114,7 +111,6 @@ export default function AdminCustomers() {
             chatMessages={[]}
             onApproveDraft={async () => {}}
             isApprovingDraft={false}
-            onFocusReady={(fn) => { chatFocusRef.current = fn }}
           />
         </>
       )}

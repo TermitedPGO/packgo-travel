@@ -3244,27 +3244,51 @@ export const zhTW = {
       restoreAction: '還原',
       blockedBadge: '已隱藏',
       unnamed: '未命名客人',
-      add: {
-        button: '新增客人',
-        buttonTooltip: '新增一位客人(可拖 PDF / 圖片 / 文字檔讓 AI 代填，或手動輸入)',
-        title: '新增客人',
-        subtitle: '手動加一位客人（電話、微信、轉介紹來的）',
-        name: '姓名',
-        namePlaceholder: '客人姓名',
-        email: 'Email',
-        emailPlaceholder: '選填',
-        phone: '電話',
-        phonePlaceholder: '選填',
-        contactHint: 'Email 和電話至少填一個',
-        nameRequired: '請填姓名',
-        contactRequired: 'Email 和電話至少填一個',
-        emailInvalid: 'Email 格式不正確',
-        emailExistsRegistered: '這個 email 已經是註冊客人了',
-        emailExistsGuest: '已經有同 email 的客人，不重複建立',
-        genericError: '新增失敗，請再試一次',
-        cancel: '取消',
-        submit: '新增',
-        creating: '新增中…',
+      // slash 指令選單(2026-07-01)—「新增客人」按鈕已拆,聊天框打「/」浮出指令。
+      // template = 選取後放進輸入框的模板文字;help 沒有 template(開操作說明面板)。
+      slash: {
+        addCustomer: {
+          name: '新增客人',
+          desc: '建一位新客人,冒號後打姓名和聯絡方式',
+          template: '新增客人：',
+        },
+        collect: {
+          name: '收信',
+          desc: '收齊這位客人的 Gmail 往來',
+          template: '收齊這位客人的對話',
+        },
+        followup: {
+          name: '跟進日',
+          desc: '設定跟進日,後面接日期',
+          template: '跟進日設 ',
+        },
+        note: {
+          name: '備註',
+          desc: '在這位客人的備註加一條',
+          template: '備註加上：',
+        },
+        createOrder: {
+          name: '建單',
+          desc: '幫這位客人建一張訂製單,冒號後打內容',
+          template: '幫這位客人建一張訂製單：',
+        },
+        merge: {
+          name: '合併',
+          desc: '把這位客人併進另一位,後面接對方名字或 email',
+          template: '把這位客人併進 ',
+        },
+        help: {
+          name: '說明',
+          desc: '看這個工作台能做什麼',
+        },
+        helpPanel: {
+          title: '操作說明',
+          commandsHeading: '打「/」下指令',
+          dragFiles: '拖檔案進來:PDF、圖片、文字檔都會讀懂,自動歸檔進文件 tab、需要時建單',
+          projectChips: '上方專案 chips:選了哪個專案,概覽、文件、歷史、這裡的對話全部跟著走',
+          draftsGate: '草稿只是備好:你按了「確認發送」才會寄,AI 不會自己寄任何東西給客人',
+          toolChips: 'AI 說做了會附灰色憑證 chip:沒有 chip 就是沒做,嘴上說的不算',
+        },
       },
       docKind: {
         quote: '報價單',
@@ -3327,10 +3351,7 @@ export const zhTW = {
         dropTooBig: '檔案太大,上限 6MB。',
         // 只丟檔案不打字時,送出去的預設問句(伺服器要求 q 不能空)。
         filesOnlyPrompt: '幫我讀這個檔案,整理裡面的重點。',
-        globalPlaceholder: '新增客人、拖放文件...',
-        // audit fix (2026-06-30) — 「新增客人」按鈕改成直接聚焦這個聊天框(拖檔案/打字
-        // 都能讀,不用再開一個獨立、會壞掉的表單彈窗)。
-        addCustomerPrefill: '新增客人：',
+        globalPlaceholder: '打「/」下指令、新增客人、拖放文件...',
       },
       chat: {
         // ops-chat 步驟列的 tool 顯示名(chatStream.ts TOOL_LABEL_KEYS 對照,

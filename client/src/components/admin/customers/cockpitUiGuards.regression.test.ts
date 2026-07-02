@@ -18,6 +18,7 @@ import { join } from "node:path"
 const read = (rel: string) => readFileSync(join(__dirname, rel), "utf8")
 const adminCustomers = read("../../../pages/AdminCustomers.tsx")
 const customerChat = read("CustomerChat.tsx")
+const customerList = read("CustomerList.tsx")
 const detailTabs = read("DetailTabs.tsx")
 const orderSheet = read("CustomOrderSheet.tsx")
 const orderDetail = read("CustomOrderDetail.tsx")
@@ -122,5 +123,71 @@ describe("G — create_customer 之後左欄清單要刷新(2026-07-01「新增�
 
   it("handleSend finally invalidates admin.guestList", () => {
     expect(finallyBlock).toContain("utils.admin.guestList.invalidate()")
+  })
+})
+
+describe("H — slash 指令選單取代新增客人按鈕 (2026-07-01, Jeff:「slash 指令其實也ok…不需要新增客人按鈕」)", () => {
+  it("CustomerList: the 新增客人 button and its onAddCustomer prop are gone", () => {
+    expect(customerList).not.toContain("onAddCustomer")
+    expect(customerList).not.toContain("admin.customers.add.")
+  })
+
+  it("AdminCustomers: chatFocusRef / onAddCustomer / onFocusReady wiring removed", () => {
+    expect(adminCustomers).not.toContain("chatFocusRef")
+    expect(adminCustomers).not.toContain("onAddCustomer")
+    expect(adminCustomers).not.toContain("onFocusReady")
+  })
+
+  it("CustomerChat: onFocusReady prop fully removed (slash menu replaced its only use)", () => {
+    expect(customerChat).not.toContain("onFocusReady")
+  })
+
+  it("CustomerChat: composer wires the unit-tested slash logic (filter + resolve + wrap-around nav)", () => {
+    expect(customerChat).toContain("filterSlashCommands")
+    expect(customerChat).toContain("resolveSlashSelection")
+    expect(customerChat).toContain("moveSlashIndex")
+  })
+
+  it("keyboard: ArrowUp/ArrowDown/Enter/Escape are handled while the menu is open", () => {
+    for (const key of ['"ArrowDown"', '"ArrowUp"', '"Enter"', '"Escape"']) {
+      expect(customerChat).toContain(`e.key === ${key}`)
+    }
+  })
+
+  it("IME 組字中 (isComposing) never intercepts keys — early return BEFORE the menu branch", () => {
+    // The composing guard must run first, or Enter mid-組字 picks a command.
+    const kd = customerChat.indexOf("e.nativeEvent.isComposing")
+    const menuBranch = customerChat.indexOf("slashMatches.length > 0) {")
+    expect(kd).toBeGreaterThan(-1)
+    expect(menuBranch).toBeGreaterThan(-1)
+    expect(kd).toBeLessThan(menuBranch)
+  })
+
+  it("menu card: rounded-xl overlay above the composer (bottom-full + z + shadow)", () => {
+    expect(customerChat).toMatch(
+      /role="listbox"[\s\S]{0,300}?absolute bottom-full[^"]*rounded-xl[^"]*border[^"]*bg-white[^"]*shadow-sm/,
+    )
+  })
+
+  it("mouse: rows are clickable and mousedown keeps the textarea focused", () => {
+    expect(customerChat).toContain("onClick={() => pickSlashCommand(cmd)}")
+    expect(customerChat).toContain("onMouseDown={(e) => e.preventDefault()}")
+  })
+
+  it("操作說明 panel: rounded-xl overlay, closes on outside click and Esc", () => {
+    expect(customerChat).toContain("admin.customers.slash.helpPanel.title")
+    expect(customerChat).toMatch(/helpOpen[\s\S]{0,400}?onClick=\{\(\) => setHelpOpen\(false\)\}/)
+    expect(customerChat).toMatch(/if \(e\.key === "Escape"\) setHelpOpen\(false\)/)
+  })
+
+  it("i18n: the slash block exists in BOTH locales, orphan add/addCustomerPrefill keys are gone", () => {
+    for (const src of [zh, en]) {
+      expect(src).toMatch(/\bslash:/)
+      expect(src).toMatch(/\bhelpPanel:/)
+      // Whole 新增客人 modal/button block is orphan now (modal died earlier,
+      // button died with the slash menu).
+      expect(src).not.toMatch(/\bbuttonTooltip:/)
+      expect(src).not.toContain("addCustomerPrefill")
+    }
   })
 })

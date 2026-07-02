@@ -3276,27 +3276,53 @@ export const en = {
       restoreAction: 'Restore',
       blockedBadge: 'Hidden',
       unnamed: 'Unnamed customer',
-      add: {
-        button: 'Add customer',
-        buttonTooltip: 'Add a customer (drop a PDF / image / text file to let AI fill it in, or enter manually)',
-        title: 'Add customer',
-        subtitle: 'Manually add a customer (phone, WeChat, referral)',
-        name: 'Name',
-        namePlaceholder: 'Customer name',
-        email: 'Email',
-        emailPlaceholder: 'Optional',
-        phone: 'Phone',
-        phonePlaceholder: 'Optional',
-        contactHint: 'Enter at least an email or a phone',
-        nameRequired: 'Name is required',
-        contactRequired: 'Enter at least an email or a phone',
-        emailInvalid: 'Invalid email format',
-        emailExistsRegistered: 'This email is already a registered customer',
-        emailExistsGuest: 'A customer with this email already exists',
-        genericError: 'Could not add customer, please try again',
-        cancel: 'Cancel',
-        submit: 'Add',
-        creating: 'Adding…',
+      // slash command menu (2026-07-01) — the Add customer button is gone;
+      // typing "/" in the chat composer pops the command menu instead.
+      // template = text inserted into the composer; help has no template
+      // (it opens the how-to panel).
+      slash: {
+        addCustomer: {
+          name: 'Add customer',
+          desc: 'Create a new customer, type name and contact after the colon',
+          template: 'Add customer: ',
+        },
+        collect: {
+          name: 'Collect emails',
+          desc: 'Pull in this customer\'s full Gmail history',
+          template: 'Collect this customer\'s conversation',
+        },
+        followup: {
+          name: 'Follow-up date',
+          desc: 'Set the follow-up date, type the date after it',
+          template: 'Set the follow-up date to ',
+        },
+        note: {
+          name: 'Add note',
+          desc: 'Append a note to this customer',
+          template: 'Add a note: ',
+        },
+        createOrder: {
+          name: 'Create order',
+          desc: 'Create a custom order for this customer, type details after the colon',
+          template: 'Create a custom order for this customer: ',
+        },
+        merge: {
+          name: 'Merge',
+          desc: 'Merge this customer into another, type their name or email after it',
+          template: 'Merge this customer into ',
+        },
+        help: {
+          name: 'Help',
+          desc: 'See what this workbench can do',
+        },
+        helpPanel: {
+          title: 'How this works',
+          commandsHeading: 'Type "/" for commands',
+          dragFiles: 'Drop files in: PDFs, images and text files are read, filed into the Docs tab, and turned into orders when needed',
+          projectChips: 'Project chips up top: the selected project scopes the overview, docs, history and this chat',
+          draftsGate: 'Drafts are only prepared: nothing is sent until you hit Send, the AI never messages customers on its own',
+          toolChips: 'When the AI says it did something, a gray proof chip appears; no chip means it did not happen',
+        },
       },
       docKind: {
         quote: 'Quote',
@@ -3361,10 +3387,7 @@ export const en = {
         // Default question sent when files are dropped with no typed text
         // (the server requires a non-empty q).
         filesOnlyPrompt: 'Please read this file and summarize the key points.',
-        globalPlaceholder: 'Add customer, drop files...',
-        // audit fix (2026-06-30) — "Add customer" now just focuses this chat
-        // (drag a file or type — no more separate form modal that could break).
-        addCustomerPrefill: 'Add customer: ',
+        globalPlaceholder: 'Type "/" for commands, add customers, drop files...',
       },
       chat: {
         // Tool display names for the ops-chat step list (chatStream.ts
