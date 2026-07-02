@@ -68,14 +68,21 @@ vi.mock("drizzle-orm", () => {
   };
 });
 
-const { mockCollect, mockGetBookingById, mockUpdateBooking, mockSnapshot, mockAudit } =
+const { mockCollect, mockGetBookingById, mockUpdateBooking, mockSnapshot, mockAudit, mockTouchLastInbound } =
   vi.hoisted(() => ({
     mockCollect: vi.fn(),
     mockGetBookingById: vi.fn(),
     mockUpdateBooking: vi.fn(),
     mockSnapshot: vi.fn(),
     mockAudit: vi.fn(),
+    mockTouchLastInbound: vi.fn(),
   }));
+// merge_into_customer recomputes the target's unread pointer via the shared
+// touchLastInbound helper (forward-only semantics live + are unit-tested in
+// server/_core/customerUnread).
+vi.mock("../../_core/customerUnread", () => ({
+  touchLastInbound: mockTouchLastInbound,
+}));
 vi.mock("./opsActions", () => ({ doCollectCustomerThreads: mockCollect }));
 vi.mock("../../db/booking", () => ({
   getBookingById: mockGetBookingById,
@@ -120,6 +127,7 @@ beforeEach(() => {
   mockUpdateBooking.mockReset();
   mockSnapshot.mockReset();
   mockAudit.mockReset();
+  mockTouchLastInbound.mockReset();
 });
 
 describe("READ_TOOLS definitions", () => {
@@ -1233,6 +1241,63 @@ describe("merge_into_customer — 同案聯絡人併檔 (2026-07-01: leslie@ 其
     expect(lastDb.delete).toHaveBeenCalledTimes(1);
     expect(out.duplicatesDropped).toBe(1);
     expect(out.message).toContain("略過 1 筆");
+  });
+
+  it("merge 後紅點 (2026-07-02): recomputes the target's lastInboundAt from MAX(inbound createdAt) via touchLastInbound", async () => {
+    // 實案:leslie 7/1 的護照 inbound 併進 Emerald 後,Emerald 的未讀紅點
+    // 沒亮 — 合併只搬 rows,沒人推 lastInboundAt。
+    rowQueue = [[TARGET], [{ ...SOURCE }], []];
+    // Shared terminal rows: the four moves read affectedRows, the MAX(inbound
+    // createdAt) recompute reads maxAt off the same row.
+    const MAX_AT = new Date("2026-07-01T18:30:00Z");
+    nextRows = [{ affectedRows: 2, maxAt: MAX_AT }];
+    const out = JSON.parse(
+      await executeWriteTool(
+        "merge_into_customer",
+        { targetEmail: "eyoung@axt.com" },
+        SOURCE_ID,
+        ADMIN_ID,
+      ),
+    );
+    expect(out.success).toBe(true);
+    // Forward-only semantics are delegated to the shared helper — the tool
+    // must hand it the TARGET profile + the recomputed max inbound time.
+    expect(mockTouchLastInbound).toHaveBeenCalledTimes(1);
+    expect(mockTouchLastInbound).toHaveBeenCalledWith(expect.anything(), TARGET.id, MAX_AT);
+  });
+
+  it("merge 後紅點: no inbound on the target (MAX is NULL) → pointer untouched", async () => {
+    rowQueue = [[TARGET], [{ ...SOURCE }], []];
+    nextRows = [{ affectedRows: 0, maxAt: null }];
+    const out = JSON.parse(
+      await executeWriteTool(
+        "merge_into_customer",
+        { targetEmail: "eyoung@axt.com" },
+        SOURCE_ID,
+        ADMIN_ID,
+      ),
+    );
+    expect(out.success).toBe(true);
+    expect(mockTouchLastInbound).not.toHaveBeenCalled();
+  });
+
+  it("merge 後紅點: a string timestamp from the driver is normalized to a Date", async () => {
+    rowQueue = [[TARGET], [{ ...SOURCE }], []];
+    nextRows = [{ affectedRows: 1, maxAt: "2026-07-01T18:30:00Z" }];
+    const out = JSON.parse(
+      await executeWriteTool(
+        "merge_into_customer",
+        { targetEmail: "eyoung@axt.com" },
+        SOURCE_ID,
+        ADMIN_ID,
+      ),
+    );
+    expect(out.success).toBe(true);
+    expect(mockTouchLastInbound).toHaveBeenCalledWith(
+      expect.anything(),
+      TARGET.id,
+      new Date("2026-07-01T18:30:00Z"),
+    );
   });
 
   it("re-run is safe: an already-emptied source moves 0 rows and still succeeds", async () => {

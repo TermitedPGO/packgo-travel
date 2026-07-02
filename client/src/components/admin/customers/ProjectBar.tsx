@@ -91,7 +91,10 @@ export default function ProjectBar({
           className="flex-shrink-0 w-24 text-[11px] px-2 py-1 rounded-lg border border-gray-300 outline-none focus:border-gray-900"
         />
       )}
-      <div className="flex items-center gap-1.5 overflow-x-auto min-w-0">
+      {/* 捲軸不蓋 chips (2026-07-02):pb-2 讓橫向捲軸落在 chips 下方 8px 的
+          自己空間、-mb-2 抵銷高度讓列高不變;pr-4 給最後一顆 chip(未分類)
+          捲到底時的右側呼吸空間,尾端不再被捲軸/邊緣壓住點不到。 */}
+      <div className="flex items-center gap-1.5 overflow-x-auto min-w-0 pb-2 -mb-2 pr-4">
       {visibleProjects.map((p) => {
         const active = p.id === activeProjectId
         if (editingId === p.id) {

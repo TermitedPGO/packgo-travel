@@ -341,6 +341,26 @@ const KNOWN_NOISE_DOMAINS = new Set([
   "alerts@", "notifications@", "newsletter@", "digest@",
 ]);
 
+/**
+ * 自家信箱防火牆 (2026-07-02) — Jeff 自己/系統的寄件地址絕不建客人檔。真實
+ * 案例:jeffhsieh0909@gmail.com 寄的「Better way To survive」信被建成幽靈
+ * 客人卡。這不是 noise filter(KNOWN_NOISE_DOMAINS 是整封信直接跳過,而且
+ * 它只能擋整個網域 — 自家 gmail 地址擋 gmail.com 會誤殺所有 gmail 客人;
+ * support@packgoplay.com 的網域雖已在該表,防線仍以這裡的全字比對為準)。
+ * 命中時信照常跑 receipt/inquiry 流程,只跳過 profile 建檔+歸戶 — 行為
+ * 等同寄件人解析不到(profileId undefined)那條既有路徑。
+ */
+const OWN_EMAILS = new Set([
+  "jeffhsieh09@gmail.com",
+  "jeffhsieh0909@gmail.com",
+  "support@packgoplay.com",
+]);
+
+/** Case-insensitive own-address check (pure; unit-tested in gmailPipeline.sender.test.ts). */
+export function isOwnEmail(email: string | null | undefined): boolean {
+  return typeof email === "string" && OWN_EMAILS.has(email.trim().toLowerCase());
+}
+
 export function isKnownNoise(from: string): boolean {
   // noreply-class localparts (noreply@united.com, no-reply@delta.com …) —
   // shared pure check with the push-path firewall. P2 fix (2026-07-01): the
@@ -672,7 +692,10 @@ async function processOneEmail(
   /** the card whose email literally equals the sender — user-account linking
    * must target THIS card, never a merge-canonicalized one (0109). */
   let emailMatchedProfileId: number | undefined;
-  if (senderEmail) {
+  // 自家信箱 gate (2026-07-02):自己寄的信絕不建客人卡、不歸戶 — profileId
+  // 留 undefined,下游(互動 filed 到 0、不 touch 紅點、不收文件、不連會員)
+  // 全部走既有的「寄件人解析不到」路徑,信本身照常處理。
+  if (senderEmail && !isOwnEmail(senderEmail)) {
     const existing = await db
       .select()
       .from(customerProfiles)
@@ -688,8 +711,13 @@ async function processOneEmail(
       // 汙染)。所以記下原卡 id,下面 linkProfileToUserByEmail 用它。
       emailMatchedProfileId = existing[0].id;
     } else {
+      // 建檔帶 Gmail 顯示名 (2026-07-02) — brand-new sender 的卡片直接帶 From
+      // header 的顯示名("Leslie Green <l@x>" → name: Leslie Green),列表不再
+      // 只剩一串 email。只在「全新 INSERT」這一枝:既有卡的 name 絕不覆寫。
+      const senderName = parseSenderName(msg.from);
       const ins = await db.insert(customerProfiles).values({
         email: senderEmail,
+        ...(senderName ? { name: senderName.slice(0, 255) } : {}),
       });
       profileId = Number((ins as any)[0]?.insertId ?? 0);
       emailMatchedProfileId = profileId;
@@ -929,20 +957,25 @@ async function processOneEmail(
     // the processed label, or a cross-account duplicate). Reuse the existing
     // row's id so the rest of processing (outcome, escalation) proceeds instead
     // of re-throwing every poll and getting permanently stuck. See plan §七 race note.
-    if (e?.code === "ER_DUP_ENTRY" && profileId) {
+    // The lookup key must mirror what the INSERT wrote — (profileId ?? 0,
+    // messageId) — so the own-email / unparseable-From path (profileId
+    // undefined → row filed at profile 0) recovers too instead of rethrowing
+    // every poll forever (dupRecoveryLookupId, G3 review P2).
+    const dupLookupId = dupRecoveryLookupId(e, profileId);
+    if (dupLookupId !== null) {
       const [dup] = await db
         .select({ id: customerInteractions.id })
         .from(customerInteractions)
         .where(
           and(
-            eq(customerInteractions.customerProfileId, profileId),
+            eq(customerInteractions.customerProfileId, dupLookupId),
             eq(customerInteractions.externalId, msg.messageId),
           ),
         )
         .limit(1);
       interactionId = dup?.id ?? 0;
       log.info(
-        { profileId, externalId: msg.messageId },
+        { profileId: dupLookupId, externalId: msg.messageId },
         "[gmailPipeline] inbound already filed (dup key) — reusing row",
       );
     } else {
@@ -1676,6 +1709,54 @@ function parseEmailAddress(fromHeader: string): string | undefined {
   const email = match[1].trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return undefined;
   return email;
+}
+
+/**
+ * Display name from a From header (2026-07-02) —
+ * "Leslie Green <leslie@x.com>" → "Leslie Green". Returns undefined when the
+ * header carries no usable name: bare-address form, empty/quotes-only name,
+ * or a "name" that is just the address again (equals/contains the email, or
+ * is itself email-shaped) — a profile name must never be a duplicated email.
+ * Pure; unit-tested in gmailPipeline.sender.test.ts.
+ */
+export function parseSenderName(fromHeader: string): string | undefined {
+  const angle = fromHeader.indexOf("<");
+  if (angle < 0) return undefined; // bare "lisa@example.com" — no display name
+  let name = fromHeader.slice(0, angle).trim();
+  // Strip RFC 5322 quoted display names: "Green, Leslie" → Green, Leslie
+  if (
+    name.length >= 2 &&
+    ((name.startsWith('"') && name.endsWith('"')) ||
+      (name.startsWith("'") && name.endsWith("'")))
+  ) {
+    name = name.slice(1, -1).trim();
+  }
+  if (!name) return undefined;
+  const email = parseEmailAddress(fromHeader);
+  if (email && name.toLowerCase().includes(email)) return undefined;
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(name)) return undefined;
+  return name;
+}
+
+/**
+ * ER_DUP_ENTRY 回復鍵 (2026-07-02, G3 review P2) — inbound interaction 的
+ * dup-key 回復以前 gate 在 `e.code === "ER_DUP_ENTRY" && profileId`,但自家
+ * 信箱/寄件人解析不到那條路徑 profileId 是 undefined,row 是 filed 到
+ * customerProfileId 0 的。第一輪 filed 了 row 但在 PACKGO_AI_PROCESSED
+ * label 前掛掉的信,之後每輪 poll 重跑整條 LLM、撞 dup、rethrow — 永久
+ * 卡死+每輪燒 LLM。回復查詢的 key 必須跟 INSERT 寫的一模一樣
+ * (profileId ?? 0),所以這裡回傳「該用哪個 profile id 去撈既有 row」,
+ * 非 dup 錯誤回 null(caller rethrow)。Pure; unit-tested in
+ * gmailPipeline.sender.test.ts.
+ */
+export function dupRecoveryLookupId(
+  e: unknown,
+  profileId: number | undefined,
+): number | null {
+  if ((e as { code?: unknown } | null | undefined)?.code !== "ER_DUP_ENTRY") {
+    return null;
+  }
+  return profileId ?? 0;
 }
 
 async function ensurePolicy(

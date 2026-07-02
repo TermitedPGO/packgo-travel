@@ -1950,7 +1950,7 @@ async function runWriteTool(
       if (!adminUserId) return { error: "缺少操作者(系統沒帶到 admin userId)" };
       const parsed = resolveMergeTargetArgs(input);
       if (!parsed.ok) return { error: parsed.error };
-      const { and, inArray, isNotNull } = await import("drizzle-orm");
+      const { and, inArray, isNotNull, sql: sqlRaw } = await import("drizzle-orm");
       const {
         customerInteractions,
         customerDocuments,
@@ -2113,6 +2113,36 @@ async function runWriteTool(
             .where(eq(customerChatMessages.customerProfileId, profileId)),
         ),
       };
+
+      // customer-unread (0108) — 被併進來的互動裡可能有比目標卡現值更新的
+      // inbound(實案:leslie 7/1 護照信併進 Emerald 後紅點沒亮):合併後重算
+      // 目標卡 lastInboundAt = MAX(inbound createdAt),再交給 touchLastInbound
+      // 條件式 UPDATE — 只往前推、永不倒退(跟各收信入口同一套 semantics)。
+      // best-effort:紅點指針壞了不准弄死已經搬完資料的合併主流程。
+      try {
+        const [inboundMax] = await db
+          .select({
+            maxAt: sqlRaw<Date | string | null>`MAX(${customerInteractions.createdAt})`,
+          })
+          .from(customerInteractions)
+          .where(
+            and(
+              eq(customerInteractions.customerProfileId, target.id),
+              eq(customerInteractions.direction, "inbound"),
+            ),
+          );
+        const maxAt = inboundMax?.maxAt;
+        if (maxAt != null) {
+          const ts = maxAt instanceof Date ? maxAt : new Date(maxAt);
+          const { touchLastInbound } = await import("../../_core/customerUnread");
+          await touchLastInbound(db, target.id, ts);
+        }
+      } catch (err) {
+        log.warn(
+          { err, targetProfileId: target.id },
+          "[opsTools] merge: lastInboundAt recompute failed (non-fatal, red dot only)",
+        );
+      }
 
       // Hide the duplicate + leave a dated trace in Jeff's note (append via
       // mergeCustomerNote — the existing note is never destroyed).
