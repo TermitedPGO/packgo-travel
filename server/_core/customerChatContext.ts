@@ -364,6 +364,7 @@ export async function buildCustomerChatContext(
   // Absent for users with no profile row yet → memory simply omitted.
   const [profMem] = await db
     .select({
+      id: customerProfiles.id,
       keyFacts: customerProfiles.keyFacts,
       preferences: customerProfiles.preferences,
       aiNotes: customerProfiles.aiNotes,
@@ -379,7 +380,13 @@ export async function buildCustomerChatContext(
     recentQuotes,
     memory: profMem ?? undefined,
   });
-  return base + (await buildDocsBlock({ userId: customerUserId }));
+  // Phase5 學習閉環 — same-caseType/destination lessons from past closed cases,
+  // only when this customer currently has an in-progress order (see
+  // caseLearning.ts's getCaseLearningsForProfiles). No profile row yet → no
+  // order to check → naturally skipped.
+  const { buildCaseLearningsContextBlock } = await import("./caseLearning");
+  const caseLearnings = await buildCaseLearningsContextBlock(profMem ? [profMem.id] : []);
+  return base + (await buildDocsBlock({ userId: customerUserId })) + (caseLearnings ? "\n\n" + caseLearnings : "");
 }
 
 /**
@@ -499,7 +506,10 @@ export async function buildGuestChatContext(
         }
       : undefined,
   });
-  return base + (await buildDocsBlock({ profileId }));
+  // Phase5 學習閉環 — same as the registered-member path above.
+  const { buildCaseLearningsContextBlock } = await import("./caseLearning");
+  const caseLearnings = await buildCaseLearningsContextBlock([profile.id]);
+  return base + (await buildDocsBlock({ profileId })) + (caseLearnings ? "\n\n" + caseLearnings : "");
 }
 
 // ── customer-projects (0104) — per-project (=customOrder) chat context ───────

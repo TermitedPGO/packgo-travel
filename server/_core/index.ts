@@ -1705,6 +1705,18 @@ async function startServer() {
     logger.warn({ err }, "[Startup] Failed to schedule duplicate-profile scan");
   }
 
+  // customer-cockpit Phase5 學習閉環(2026-07-03)— nightly backlog scan at
+  // 04:00 UTC. Catches any completed/cancelled order whose fire-and-forget
+  // distillation hook (adminCustomerOrders.ts) missed. Read/insert only on
+  // caseLearnings; never touches customer-visible data, never emails.
+  try {
+    const { scheduleNightlyCaseLearningBacklog } = await import('../queue');
+    await scheduleNightlyCaseLearningBacklog();
+    await import('../caseLearningWorker');
+  } catch (err) {
+    logger.warn({ err }, "[Startup] Failed to schedule case-learning backlog scan");
+  }
+
   // QA audit 2026-05-11 Phase 9 P0: Gmail poll cron. Closes the
   // "customer asks at 10am, Jeff sees at 2pm" gap by polling every 10
   // minutes and running InquiryAgent pipeline on new threads. autoSend

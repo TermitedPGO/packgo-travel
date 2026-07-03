@@ -115,6 +115,17 @@ function bumpCustomerSummary(profileId: number): void {
     .catch(() => {});
 }
 
+/** customer-cockpit Phase5 學習閉環 — fire-and-forget best-effort distillation
+ *  when an order reaches a terminal state (completed/cancelled). Never blocks
+ *  or breaks the status mutation itself: distillCaseLearning already swallows
+ *  its own errors internally, this wrapper keeps the dynamic import + call
+ *  fully async and silent on top (same shape as bumpCustomerSummary above). */
+function triggerCaseLearningDistillation(orderId: number): void {
+  void import("../_core/caseLearning")
+    .then((m) => m.distillCaseLearning(orderId))
+    .catch(() => {});
+}
+
 /**
  * 2a:對這個客人非 draft/cancelled 的訂單,查底下 customerDocuments(type="other"
  * —— 業務文件/報價/發票/確認書一律落在這個 DB enum 值,靠 customOrderId 歸戶,
@@ -1273,6 +1284,9 @@ export const adminCustomerOrdersRouter = router({
         reason: input.reason,
       });
       bumpCustomerSummary(o.customerProfileId);
+      if (input.status === "completed" || input.status === "cancelled") {
+        triggerCaseLearningDistillation(o.id);
+      }
       return updated;
     }),
 
@@ -1302,6 +1316,7 @@ export const adminCustomerOrdersRouter = router({
         reason: input.reason,
       });
       bumpCustomerSummary(o.customerProfileId);
+      triggerCaseLearningDistillation(o.id);
       return updated;
     }),
 });

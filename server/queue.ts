@@ -986,6 +986,58 @@ export async function scheduleWeeklyDuplicateProfileScan() {
 console.log("✅ Duplicate-profile scan queue initialized");
 
 // ============================================================================
+// Case-learning backlog scan (customer-cockpit Phase5 學習閉環, 2026-07-03) —
+// nightly reconciliation for orders whose fire-and-forget distillation hook
+// (adminCustomerOrders.ts's updateStatus/cancel) might have missed — a server
+// restart mid-flight, a transient LLM failure. Scans the last 7 days of
+// completed/cancelled orders, distills any without an existing caseLearnings
+// row (idempotent — the same dedup check the live hook uses). See
+// server/_core/caseLearning.ts.
+// ============================================================================
+
+export interface CaseLearningBacklogJobData {
+  triggeredBy: "schedule" | "manual";
+}
+export interface CaseLearningBacklogJobResult {
+  scanned: number;
+  distilled: number;
+  skipped: number;
+}
+
+export const caseLearningBacklogQueue = new Queue<
+  CaseLearningBacklogJobData,
+  CaseLearningBacklogJobResult
+>("case-learning-backlog", {
+  connection: redisBullMQ,
+  defaultJobOptions: {
+    attempts: 1, // a missed night just re-scans next run; no retry storms
+    removeOnComplete: { age: 604800, count: 30 },
+    removeOnFail: { age: 604800, count: 30 },
+  },
+});
+
+/** Schedule the nightly case-learning backlog scan: 04:00 UTC (off-peak). */
+export async function scheduleNightlyCaseLearningBacklog() {
+  const repeatableJobs = await caseLearningBacklogQueue.getRepeatableJobs();
+  for (const job of repeatableJobs) {
+    if (job.name === "case-learning-backlog-tick") {
+      await caseLearningBacklogQueue.removeRepeatableByKey(job.key);
+    }
+  }
+  await caseLearningBacklogQueue.add(
+    "case-learning-backlog-tick",
+    { triggeredBy: "schedule" },
+    {
+      repeat: { pattern: "0 4 * * *" }, // daily 04:00 UTC
+      jobId: "case-learning-backlog-scheduled",
+    },
+  );
+  console.log("✅ Case-learning backlog scan scheduled: daily 04:00 UTC");
+}
+
+console.log("✅ Case-learning backlog queue initialized");
+
+// ============================================================================
 // Booking Followup Queue — async deposit PDF generation + confirmation
 // email AFTER bookings.create commits.
 //

@@ -2942,6 +2942,26 @@ export const customerPromises = mysqlTable("customerPromises", {
 export type CustomerPromise = typeof customerPromises.$inferSelect;
 export type InsertCustomerPromise = typeof customerPromises.$inferInsert;
 
+// customer-cockpit Phase5(2026-07-03)— 學習閉環。案子完結(completed/
+// cancelled)後蒸餾出的「這一類案子」可複用教訓(供應商雷/路線經驗/定價經驗),
+// 供新同類案第一回合注入。internal admin-only;lesson 文字紀律:不寫客人全名
+// (distillCaseLearning prompt 規則,PII)。sourceOrderId 概念上指向
+// customOrders.id(no FK,同慣例),查重用 — 一張單只蒸餾一次。
+export const caseLearnings = mysqlTable("caseLearnings", {
+  id: int("id").autoincrement().primaryKey(),
+  caseType: varchar("caseType", { length: 32 }),
+  destination: varchar("destination", { length: 200 }),
+  lesson: text("lesson").notNull(),
+  sourceOrderId: int("sourceOrderId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  typeDestCreatedIdx: index("idx_cl_type_dest_created").on(table.caseType, table.destination, table.createdAt),
+  sourceOrderIdx: index("idx_cl_source_order").on(table.sourceOrderId),
+}));
+
+export type CaseLearning = typeof caseLearnings.$inferSelect;
+export type InsertCaseLearning = typeof caseLearnings.$inferInsert;
+
 // Round 81 — Agent ↔ Jeff chatbox (Layer 1.5)
 export const agentMessages = mysqlTable("agentMessages", {
   id: int("id").autoincrement().primaryKey(),
