@@ -447,12 +447,6 @@ import { handleStripeWebhook } from "./stripeWebhook";
 // Test helpers
 // ─────────────────────────────────────────────────────────────────────
 
-/** Flush the customer-cockpit 任務7c fire-and-forget `void (async () => {...})()`
- *  chain before asserting — handleStripeWebhook responds before that IIFE settles. */
-async function flushMicrotasks() {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-}
-
 function buildReqRes(event: any): { req: Request; res: Response; statusFn: ReturnType<typeof vi.fn>; jsonFn: ReturnType<typeof vi.fn>; sendFn: ReturnType<typeof vi.fn> } {
   const statusFn = vi.fn().mockImplementation(() => res);
   const jsonFn = vi.fn().mockImplementation(() => res);
@@ -513,9 +507,12 @@ describe("stripeWebhook booking handlers — transaction atomicity", () => {
     expect(jsonFn).toHaveBeenCalledWith({ received: true });
 
     // customer-cockpit 任務7c: fire-and-forget booking interaction — settles
-    // AFTER the webhook already responded, so flush before asserting.
-    await flushMicrotasks();
-    expect(store.websiteInteractionCalls).toHaveLength(1);
+    // AFTER the webhook already responded. vi.waitFor polls instead of a
+    // fixed-delay flush (a single setTimeout(0) flake under full-suite load
+    // with many concurrent test files — poll is robust to that).
+    await vi.waitFor(() => {
+      expect(store.websiteInteractionCalls).toHaveLength(1);
+    });
     expect(store.websiteInteractionCalls[0]).toMatchObject({
       profileId: 555,
       direction: "inbound",
@@ -561,7 +558,10 @@ describe("stripeWebhook booking handlers — transaction atomicity", () => {
 
     // customer-cockpit 任務7c: the tx threw before the function ever reached
     // the post-commit section, so the booking-interaction hook never fires.
-    await flushMicrotasks();
+    // This is a structural guarantee (the throw happens before that code is
+    // even reached), not a race to wait out — a short real-time wait is
+    // enough to catch a regression that made it fire erroneously.
+    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(store.websiteInteractionCalls).toHaveLength(0);
   });
 

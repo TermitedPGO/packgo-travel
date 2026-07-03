@@ -444,7 +444,9 @@ export const inquiriesRouter = router({
                 profileId,
                 direction: "inbound",
                 content: input.message,
-                contentSummary: `站內留言:${inquiry.subject || "(無主旨)"}`,
+                // 2026-07-03 監工確認修復(同 create procedure 那條)— 原本只放
+                // 主旨,時間軸看不出客人這則留言實際說了什麼,補上本文前 120 字。
+                contentSummary: `站內留言:${input.message.slice(0, 120)}`,
                 agentName: "website_inquiry_message",
               });
             }

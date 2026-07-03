@@ -304,7 +304,33 @@ describe("inquiriesRouter.addMessage — admin reply emails the customer", () =>
         profileId: 888,
         direction: "inbound",
         content: "請問報價",
+        // 2026-07-03 監工確認修復(同 create procedure 那條)— contentSummary
+        // 不再只放主旨,補上這則留言本文,不然時間軸只看得到「站內留言:美西
+        // 行程詢問」看不出客人這則到底問了什麼。
+        contentSummary: "站內留言:請問報價",
         agentName: "website_inquiry_message",
+      }),
+    );
+  });
+
+  it("2026-07-03 監工確認修復:addMessage 的 contentSummary 本文也截在前 120 字(跟 create procedure 同一套規則)", async () => {
+    (db.getInquiryById as any).mockResolvedValue({ ...inquiryRow });
+    (db.createInquiryMessage as any).mockResolvedValue({
+      id: 505,
+      inquiryId: 10,
+      senderType: "customer",
+      message: "x".repeat(200),
+    });
+    mockEnsureProfile.mockResolvedValue(888);
+    const longMessage = "x".repeat(200);
+
+    const caller = (inquiriesRouter as any).createCaller(makeCustomerContext());
+    await caller.addMessage({ inquiryId: 10, message: longMessage });
+    await flushMicrotasks();
+
+    expect(mockRecordInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contentSummary: `站內留言:${longMessage.slice(0, 120)}`,
       }),
     );
   });
