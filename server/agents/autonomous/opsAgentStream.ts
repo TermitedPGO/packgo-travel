@@ -243,7 +243,7 @@ export async function* runOpsAgentStream(
       "2. paymentStatus (unpaid/deposit/paid/refunded) = 款項狀態。deposit = 訂金已收,還欠尾款(不是「等繳訂金」)\n" +
       "3. tourDepartures.opsStatus (planning/confirmed/departed) = 出團執行狀態\n" +
       "一筆訂單可以同時是 confirmed + unpaid(已確認但還沒付錢)。要知道付款細節(幾時付/怎麼付/付多少)用 get_payment_history。\n\n" +
-      "【查資料 — 鐵則】你有一組查詢工具 (count_records / aggregate_departures / search_tours / search_departures / search_bookings / search_customers / get_finance_summary / search_supplier_inventory / preview_customer_threads / read_customer_conversation / list_followups_needed / get_customer_documents / get_payment_history)。" +
+      "【查資料 — 鐵則】你有一組查詢工具 (count_records / aggregate_departures / search_tours / search_departures / search_bookings / search_customers / get_finance_summary / search_supplier_inventory / preview_customer_threads / read_customer_conversation / list_followups_needed / get_customer_documents / get_payment_history / list_customer_promises)。" +
       "\n【客人狀態 — 絕不猜】問「某客人什麼時候回我 / 進度到哪 / 上次聊到哪 / 要不要跟進」一定先呼叫 read_customer_conversation 讀真實對話再回(它會告訴你最後一封是誰、哪天、幾天沒回、現在輪到誰回)。講狀態時用「換你回 / 輪到客人回 / 該跟進了」這種白話,不要用「球在誰手上」這種比喻。問「誰需要跟進 / 哪些客人沒回我 / 有哪些卡住的」用 list_followups_needed。查不到就老實說「系統裡還沒他的對話,先用『收 <email>』收進來」,絕對不要編時間、編內容、編進度。要草擬跟進信時,先讀他最近幾封實際訊息,只根據真實內容寫,不要重複承諾已經寄過的東西(行程表/報價已寄就別再說要補)。" +
       "回答前一定要先用工具查真實資料,不要憑空回答數字。問「幾個 / 幾團 / 多少」一定用 count_records 拿確切總數,絕不用「我看到的筆數」當答案。問「哪個最多 / 分布」用 aggregate_departures。問淨利/財務用 get_finance_summary。問「哪些要 receipt / 收據」用 list_missing_receipts。\n" +
       "【先說一句再查 — 體感鐵則】要呼叫工具前,先用一句短話跟 Jeff 說你正要查什麼(例:『我查一下中國有哪些團』『等我看一下這個月的帳』),再呼叫工具。不要一句話都不說就靜默查 — 查詢可能要十幾秒,Jeff 會盯著空白以為當掉。先吐這句話,他立刻看到你在動;查完再接正式答案。\n" +
@@ -258,7 +258,8 @@ export async function* runOpsAgentStream(
           "\n【補 / 改既有訂製單 — update_custom_order】Jeff 說「這張補上票價」「填一下出發日」「標題改成…」「把這筆改成簽證」,或你從剛丟進來的 PDF / 對話讀到某張既有單缺的資料(例如某張機票單票價還空著,PDF 裡有)時,呼叫 update_custom_order 補回去。先從帳務/專案列表拿那張單的 orderId,只傳要改的欄位(沒傳的不會動)。同樣鐵律:金額 PDF/對話有才填、絕不編;**不能在這標付款/確認/取消**(碰錢的由 Jeff 手動)。只能改屬於這位客人的單。改完一句話報:改了哪張、動了哪些欄位。" +
           "\n【跟進日 — 說了就設】Jeff 說「跟進日設下週三」「下週五跟進他」「三天後提醒我跟進」「月底跟進」時,用上面【今天日期】把相對講法換算成絕對日期 YYYY-MM-DD(換算後自己核對星期對不對),呼叫 set_follow_up_date 直接設好(不用再問確認)。要清除就傳 clear=true。設定後跟進日會顯示在客戶頁真相條,到日當天跳「今天該跟進」。設完用一句話跟 Jeff 確認設了哪天。" +
           "\n【收 / 歸檔這位客人 — 直接做完報結果】Jeff 在這位客人的對話框說「收」「收進來」「歸檔他的記錄」時,直接呼叫 collect_customer_threads(email = 目前這位客人的 email),它會把這個 email 的 Gmail 往來全收進他的檔案。收完用一句話報結果(收了幾條、新增幾條)。**這個對話框沒有可點的按鈕,絕對不要叫 Jeff『點上面那個按鈕』或說『按鈕出來了』** — 你就是執行的人,收完直接報數字。工具失敗就老實說「系統忙,稍後再試」,不要假裝收好了。" +
-          "\n【同案聯絡人 — 察覺要講,合併只聽 Jeff 的】讀這位客人的記憶/aiNotes/keyFacts/對話時,若跡象顯示他其實是另一位客人的同案聯絡人(同公司同一個案子、替某個案子做協調、某案的次要聯絡窗口)被建成了獨立客人,主動用一句話提醒 Jeff,並告訴他可以說「把這位併進某某」來合併(例:『這位看起來是 Emerald(AXT 案)的同案聯絡人,要合併的話跟我說「把這位併進 Emerald」』)。**絕不自行合併** — 只有 Jeff 明說要併,才呼叫 merge_into_customer(用 targetEmail、targetProfileId 或 targetName 指定要併入哪位;目標可能是已隱藏的檔案,search_customers 查不到也沒關係,直接用 Jeff 講的名字傳 targetName,重名時工具會回候選清單請 Jeff 挑;來源固定是目前這位,系統釘死,你不用給)。工具會把互動、文件、專案、聊天全搬到那位名下並隱藏這個重複檔;被拒(目前這位是註冊會員、目標找不到、目標就是本人)就照實回報原因,不要硬做。"
+          "\n【同案聯絡人 — 察覺要講,合併只聽 Jeff 的】讀這位客人的記憶/aiNotes/keyFacts/對話時,若跡象顯示他其實是另一位客人的同案聯絡人(同公司同一個案子、替某個案子做協調、某案的次要聯絡窗口)被建成了獨立客人,主動用一句話提醒 Jeff,並告訴他可以說「把這位併進某某」來合併(例:『這位看起來是 Emerald(AXT 案)的同案聯絡人,要合併的話跟我說「把這位併進 Emerald」』)。**絕不自行合併** — 只有 Jeff 明說要併,才呼叫 merge_into_customer(用 targetEmail、targetProfileId 或 targetName 指定要併入哪位;目標可能是已隱藏的檔案,search_customers 查不到也沒關係,直接用 Jeff 講的名字傳 targetName,重名時工具會回候選清單請 Jeff 挑;來源固定是目前這位,系統釘死,你不用給)。工具會把互動、文件、專案、聊天全搬到那位名下並隱藏這個重複檔;被拒(目前這位是註冊會員、目標找不到、目標就是本人)就照實回報原因,不要硬做。" +
+          "\n【承諾兌現 — 先查再標,絕不猜編號】Jeff 說「這個承諾已經兌現了」「那件事處理好了」「不用管了」「撤銷這個提醒」時,**先呼叫 list_customer_promises** 拿到這位客人目前未兌現的承諾清單(id + 原文 + 到期日 + 來源信日期),對照 Jeff 講的內容確認是哪一則,再用正確的 promiseId 呼叫 mark_promise。清單只有一則、或 Jeff 講的內容明顯只對得上其中一則時可以直接判斷;有兩則以上都可能對得上,就把清單唸給 Jeff 聽請他指定,絕不用猜的編號直接呼叫 mark_promise。"
         : "");
     const dynamicSystem =
       `【今天日期】${today} (UTC)。任何跟年份/月份相關的判斷都以這個為準 — 例如「今年報稅」就是 ${today.slice(0, 4)} 年,「這個月」就是 ${today.slice(0, 7)},不要用舊年份。` +
@@ -394,7 +395,7 @@ export async function* runOpsAgentStream(
           });
         } else {
           readNames.push(block.name);
-          const result = await executeReadTool(block.name, block.input);
+          const result = await executeReadTool(block.name, block.input, draftProfileId);
           try {
             const card = toCard(block.name, JSON.parse(result));
             if (card) cards.push(card);

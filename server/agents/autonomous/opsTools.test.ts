@@ -47,11 +47,20 @@ vi.mock("../../../drizzle/schema", () => ({
   bookings: { id: "id", customerName: "cn", customerEmail: "ce", customerPhone: "cp", tourId: "tid", departureId: "did", totalPrice: "tp", paymentStatus: "ps", bookingStatus: "bsx", createdAt: "ca" },
   bankTransactions: { id: "id", date: "d", merchantName: "mn", description: "desc", amount: "amt", agentCategory: "ac", jeffOverrideCategory: "joc", excludeFromAccounting: "efa", isPending: "ip", receiptUrl: "ru" },
   customerProfiles: { id: "id", name: "n", email: "e", phone: "ph", userId: "uid", status: "st", jeffPersonalNote: "jpn", createdAt: "ca", budgetTier: "bt", bookingCount: "bc", totalSpend: "tsp", vipScore: "vs", aiNotes: "an" },
-  customerInteractions: { customerProfileId: "cpid", direction: "dir", content: "c", contentSummary: "cs", createdAt: "ca", externalId: "eid" },
+  customerInteractions: { id: "id", customerProfileId: "cpid", direction: "dir", content: "c", contentSummary: "cs", createdAt: "ca", externalId: "eid" },
   customerDocuments: { customerProfileId: "cpid", type: "t", fileName: "fn", expiresAt: "ea", isCurrent: "ic", uploadedAt: "ua" },
   customOrders: { customerProfileId: "cpid" },
   customerChatMessages: { customerProfileId: "cpid" },
-  customerPromises: { id: "id", customerProfileId: "cpid", fulfilledAt: "fa", dismissedAt: "da" },
+  customerPromises: {
+    id: "id",
+    customerProfileId: "cpid",
+    promiseText: "pt",
+    dueDate: "dd",
+    sourceInteractionId: "siid",
+    extractedAt: "ea",
+    fulfilledAt: "fa",
+    dismissedAt: "da",
+  },
   users: { id: "id", email: "e", name: "n" },
 }));
 
@@ -162,7 +171,7 @@ beforeEach(() => {
 });
 
 describe("READ_TOOLS definitions", () => {
-  it("exposes the 14 curated tools", () => {
+  it("exposes the 15 curated tools", () => {
     const names = READ_TOOLS.map((t) => t.name);
     expect(names).toContain("count_records");
     expect(names).toContain("aggregate_departures");
@@ -174,7 +183,8 @@ describe("READ_TOOLS definitions", () => {
     expect(names).toContain("list_followups_needed");
     expect(names).toContain("get_customer_documents");
     expect(names).toContain("get_payment_history");
-    expect(READ_TOOLS.length).toBe(14);
+    expect(names).toContain("list_customer_promises");
+    expect(READ_TOOLS.length).toBe(15);
   });
   it("every tool has a valid input_schema", () => {
     for (const t of READ_TOOLS) {
@@ -1630,5 +1640,101 @@ describe("mark_promise — customer-cockpit Phase3 3a 承諾兌現/撤銷 (2026-
     const props = (tool.input_schema as any).properties;
     expect(props.promiseId).toBeTruthy();
     expect(props.action).toBeTruthy();
+  });
+});
+
+describe("get_customer_documents — dual-source profileId regression (2026-07-03 對抗審查)", () => {
+  // executeReadTool/runTool grew a 3rd `profileId` param (the trusted pinned
+  // customer, used by list_customer_promises). get_customer_documents predates
+  // that change and reads profileId from LLM-supplied `input` instead — this
+  // locks in that the two sources stay independent and don't get confused.
+  it("still resolves using input.profileId when no pinned profileId is passed", async () => {
+    rowQueue = [[{ type: "passport", fileName: "passport.pdf", expiresAt: null, isCurrent: true }]];
+    const out = JSON.parse(
+      await executeReadTool("get_customer_documents", { profileId: 55 }, undefined),
+    );
+    expect(out.found).toBe(true);
+  });
+
+  it("does NOT fall back to the pinned 3rd-arg profileId when input.profileId is missing", async () => {
+    const out = JSON.parse(
+      await executeReadTool("get_customer_documents", {}, 55 /* pinned, but irrelevant here */),
+    );
+    expect(out.error).toBe("missing profileId");
+  });
+});
+
+describe("list_customer_promises — customer-cockpit Phase0b 唯讀查詢 (2026-07-03)", () => {
+  const PINNED_PROFILE_ID = 42;
+
+  it("回傳未兌現/未撤銷的承諾,含 id / 原文 / 到期日 / 來源信日期", async () => {
+    rowQueue = [
+      [
+        {
+          id: 3,
+          promiseText: "7/8之前可以取件",
+          dueDate: "2026-07-08",
+          sourceDate: new Date("2026-07-03T12:00:00Z"),
+        },
+      ],
+    ];
+    const out = JSON.parse(await executeReadTool("list_customer_promises", {}, PINNED_PROFILE_ID));
+    expect(out.count).toBe(1);
+    expect(out.promises[0]).toMatchObject({
+      id: 3,
+      promiseText: "7/8之前可以取件",
+      dueDate: "2026-07-08",
+      sourceDate: "2026-07-03",
+    });
+  });
+
+  it("沒有未兌現承諾 → 誠實回空陣列,不是省略欄位", async () => {
+    rowQueue = [[]];
+    const out = JSON.parse(await executeReadTool("list_customer_promises", {}, PINNED_PROFILE_ID));
+    expect(out.count).toBe(0);
+    expect(out.promises).toEqual([]);
+    expect(out.note).toBeTruthy();
+  });
+
+  it("dueDate 是 null 時原樣回傳(承諾仍列出,只是看門狗不會因它跳卡)", async () => {
+    rowQueue = [[{ id: 5, promiseText: "會盡快處理", dueDate: null, sourceDate: null }]];
+    const out = JSON.parse(await executeReadTool("list_customer_promises", {}, PINNED_PROFILE_ID));
+    expect(out.promises[0].dueDate).toBeNull();
+    expect(out.promises[0].sourceDate).toBeNull();
+  });
+
+  it("沒有釘住客人 → 拒絕,不查 DB", async () => {
+    const out = JSON.parse(await executeReadTool("list_customer_promises", {}, undefined));
+    expect(out.error).toBeTruthy();
+    expect(lastDb.select).not.toHaveBeenCalled();
+  });
+
+  it("工具 schema 不宣告 profileId 欄位(靜態保證,防日後不小心加回去)", () => {
+    const tool = READ_TOOLS.find((t) => t.name === "list_customer_promises")!;
+    expect((tool.input_schema as any).properties).toEqual({});
+  });
+
+  it("2026-07-03 對抗審查:input 帶了假冒的 profileId 在執行時也會被忽略 — 只認第三個參數(釘住的這位)", async () => {
+    rowQueue = [[{ id: 3, promiseText: "測試承諾", dueDate: "2026-07-08", sourceDate: null }]];
+    // A rogue profileId inside `input` (as if the LLM tried to specify a
+    // DIFFERENT customer) must be a no-op at runtime — runTool's case never
+    // reads input.profileId, only the trusted 3rd positional param.
+    const out = JSON.parse(
+      await executeReadTool("list_customer_promises", { profileId: 999, customerProfileId: 999 }, PINNED_PROFILE_ID),
+    );
+    expect(out.error).toBeUndefined();
+    expect(out.count).toBe(1);
+    // The WHERE clause was built from PINNED_PROFILE_ID, not the rogue 999 —
+    // inspect the actual (tagged) condition object passed to .where(...).
+    const whereArg = JSON.stringify(lastDb.where.mock.calls[0][0]);
+    expect(whereArg).toContain(String(PINNED_PROFILE_ID));
+    expect(whereArg).not.toContain("999");
+  });
+
+  it("工具描述教 LLM 先查再標記,不要用猜的編號呼叫 mark_promise", () => {
+    const tool = READ_TOOLS.find((t) => t.name === "list_customer_promises")!;
+    expect(tool).toBeTruthy();
+    expect(tool.description).toContain("mark_promise");
+    expect(tool.description).toContain("猜");
   });
 });

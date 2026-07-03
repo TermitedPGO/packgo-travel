@@ -242,6 +242,21 @@ export const READ_TOOLS: Anthropic.Tool[] = [
       required: ["bookingId"],
     },
   },
+  {
+    name: "list_customer_promises",
+    description:
+      "列出『目前釘住的這位客人』所有還沒兌現、也沒被撤銷的承諾(系統從寄出的信裡自動抽出的)," +
+      "每則附 id、承諾原文、到期日(dueDate,可能是 null——代表系統解不出具體日期,承諾仍存在只是" +
+      "看門狗不會因為它跳卡)、來源信的寄出日期。" +
+      "**Jeff 說『這個承諾兌現了』『那件事處理好了』『不用管了』『撤銷這個提醒』時,先呼叫這個工具" +
+      "拿到正確的 promiseId,再呼叫 mark_promise —— 絕不用猜的編號直接呼叫 mark_promise。** " +
+      "只看目前釘住的這位客人,不接受、也不需要指定其他客人。清單是空的就老實說沒有未兌現的承諾。",
+    input_schema: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+  },
 ];
 
 // ── Write tools (Jeff 2026-06-27: 「說了就做」— direct execution, no chip) ───
@@ -490,8 +505,9 @@ export const WRITE_TOOLS: Anthropic.Tool[] = [
       "把系統從寄出的信裡自動抽出的一則『承諾』標記成已兌現(fulfilled)或撤銷/不用管了(dismissed)。" +
       "用在 Jeff 在聊天裡說類似『這個承諾已經兌現了』『那件事處理好了』『不用管了』『撤銷這個提醒』的時候 —— " +
       "只有 Jeff 明確這樣講才呼叫,絕不自己判斷承諾是否完成就自動呼叫。" +
-      "需要先知道 promiseId:通常從看門狗黃卡(commitment 類 finding,帶 promiseId 欄位)或 " +
-      "read_customer_conversation 讀到的承諾清單取得;如果不確定 promiseId,先跟 Jeff 確認是哪一則承諾," +
+      "需要先知道 promiseId:先呼叫 list_customer_promises 拿到這位客人目前未兌現的承諾清單" +
+      "(id + 原文 + 到期日 + 來源信日期),對照 Jeff 講的內容確認是哪一則,也可能來自看門狗黃卡" +
+      "(commitment 類 finding,帶 promiseId 欄位);如果不確定 promiseId,先跟 Jeff 確認是哪一則承諾," +
       "不要用猜的編號呼叫。這個工具只能操作『目前釘住的這位客人』名下的承諾 —— 屬於別的客人的 promiseId 會被拒絕。",
     input_schema: {
       type: "object",
@@ -548,9 +564,10 @@ const clamp = (n: number | undefined, def: number, max: number) =>
 export async function executeReadTool(
   name: string,
   input: any,
+  profileId?: number,
 ): Promise<string> {
   try {
-    const result = await runTool(name, input ?? {});
+    const result = await runTool(name, input ?? {}, profileId);
     return JSON.stringify(result);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -637,7 +654,7 @@ export function toCard(name: string, data: any): OpsCard | null {
   }
 }
 
-async function runTool(name: string, input: any): Promise<unknown> {
+async function runTool(name: string, input: any, profileId?: number): Promise<unknown> {
   const { getDb } = await import("../../db");
   const { tours, tourDepartures, bookings, customerProfiles, bankTransactions } =
     await import("../../../drizzle/schema");
@@ -1220,6 +1237,49 @@ async function runTool(name: string, input: any): Promise<unknown> {
           paidAt: p.paidAt ? new Date(p.paidAt).toISOString().slice(0, 10) : null,
           notes: p.notes,
         })),
+      };
+    }
+
+    case "list_customer_promises": {
+      // customer-cockpit Phase0b — 跨客戶守門沿用 mark_promise 同款:只認
+      // 「目前釘住的這位客人」的 profileId(呼叫端從 pinned customer 傳進來,
+      // 不是 LLM input 的一部分),不接受也不需要指定其他客人。
+      if (!profileId)
+        return { error: "沒有選定客人 — 這個工具只能在某位客人的對話框裡用" };
+      const { customerPromises, customerInteractions } = await import("../../../drizzle/schema");
+      const rows = await db
+        .select({
+          id: customerPromises.id,
+          promiseText: customerPromises.promiseText,
+          dueDate: customerPromises.dueDate,
+          sourceDate: customerInteractions.createdAt,
+        })
+        .from(customerPromises)
+        .leftJoin(
+          customerInteractions,
+          eq(customerPromises.sourceInteractionId, customerInteractions.id),
+        )
+        .where(
+          and(
+            eq(customerPromises.customerProfileId, profileId),
+            isNull(customerPromises.fulfilledAt),
+            isNull(customerPromises.dismissedAt),
+          ),
+        )
+        .orderBy(desc(customerPromises.extractedAt))
+        .limit(50);
+      if (!rows.length) {
+        return { count: 0, promises: [], note: "這位客人目前沒有未兌現的承諾。" };
+      }
+      return {
+        count: rows.length,
+        promises: rows.map((r) => ({
+          id: r.id,
+          promiseText: r.promiseText,
+          dueDate: r.dueDate,
+          sourceDate: r.sourceDate ? new Date(r.sourceDate).toISOString().slice(0, 10) : null,
+        })),
+        note: "Jeff 說某則承諾已經兌現/撤銷時,用這裡的 id 呼叫 mark_promise,不要用猜的編號。",
       };
     }
 
