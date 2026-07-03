@@ -3,6 +3,7 @@ import { useLocale } from "@/contexts/LocaleContext"
 import CustomerList from "@/components/admin/customers/CustomerList"
 import CustomerDetail from "@/components/admin/customers/CustomerDetail"
 import CustomerChat from "@/components/admin/customers/CustomerChat"
+import TodayList from "@/components/admin/customers/TodayList"
 import { useCustomerData, type Selection } from "@/components/admin/customers/useCustomerData"
 import {
   CustomerListSkeleton,
@@ -112,9 +113,7 @@ export default function AdminCustomers() {
         </>
       ) : (
         <>
-          <div className="flex-1 flex items-center justify-center text-sm text-gray-400">
-            {t("admin.customers.selectCustomer")}
-          </div>
+          <TodayList onSelect={setSelected} />
           <CustomerChat
             customer={null}
             chatMessages={[]}

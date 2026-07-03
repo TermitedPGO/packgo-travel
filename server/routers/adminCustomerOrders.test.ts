@@ -129,11 +129,23 @@ describe("surface", () => {
         "sendCollection",
         "sendConfirmation",
         "sendQuote",
+        "todayList",
         "update",
         "updateStatus",
         "watchdogForCustomer",
       ].sort(),
     );
+  });
+});
+
+describe("todayList — Phase4 公司層級今日清單(查詢失敗回空陣列,不 500)", () => {
+  it("db.getDb 不存在(mock 沒提供)→ loadTodayListItems 內部拋錯,外層 catch 回空陣列", async () => {
+    // 這個測試檔的 ../db mock 沒有 getDb 匯出(只 mock 了 watchdogForCustomer 用得到
+    // 的函式),loadTodayListItems 呼叫 (await import("../db")).getDb() 會因為
+    // getDb is not a function 拋錯 —— 剛好驗證紅線:查詢失敗要回空陣列,不能讓
+    // 整個 todayList endpoint 500。
+    const out = await caller().todayList();
+    expect(out).toEqual([]);
   });
 });
 

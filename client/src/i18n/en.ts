@@ -3270,6 +3270,18 @@ export const en = {
       tagInquiry: 'Inquiry',
       tagPending: 'Pending',
       selectCustomer: 'Select a customer to view details',
+      // customer-cockpit Phase4 — today's to-do list in the middle-column empty state (2026-07-03).
+      todayList: {
+        heading: "Today's to-dos",
+        empty: 'Nothing due today',
+        category: {
+          followUpDue: 'Follow-up due',
+          quoteExpiring: 'Quote expiring',
+          commitment: 'Unfulfilled promise',
+          departureCountdown: 'Departure countdown',
+          balanceDue: 'Balance due',
+        },
+      },
       searchPlaceholder: 'Search customers...',
       showHidden: 'Show hidden accounts',
       hideAction: 'Mark as non-customer',

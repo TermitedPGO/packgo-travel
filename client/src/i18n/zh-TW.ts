@@ -3238,6 +3238,18 @@ export const zhTW = {
       tagInquiry: '詢問中',
       tagPending: '待跟進',
       selectCustomer: '選擇一位客戶查看詳情',
+      // customer-cockpit Phase4 — 中欄空狀態的今日待辦清單(2026-07-03)。
+      todayList: {
+        heading: '今天該做的事',
+        empty: '今天沒有待辦',
+        category: {
+          followUpDue: '到期跟進',
+          quoteExpiring: '報價將過期',
+          commitment: '承諾未兌現',
+          departureCountdown: '出發倒數',
+          balanceDue: '尾款到期',
+        },
+      },
       searchPlaceholder: '搜尋客戶...',
       showHidden: '顯示已隱藏帳號',
       hideAction: '標記非客人',

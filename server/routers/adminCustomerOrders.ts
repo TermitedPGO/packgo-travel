@@ -48,6 +48,14 @@ import {
   type OrderPaymentMatchFinding,
   type CustomerPromiseFinding,
 } from "../services/customOrderWatchdog";
+import {
+  evaluateFollowUpDue,
+  evaluateQuoteExpiring,
+  commitmentToTodayItem,
+  evaluateDepartureCountdown,
+  evaluateBalanceDue,
+  type TodayListItem,
+} from "../services/todayList";
 import type { CustomOrder } from "../../drizzle/schema";
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -314,6 +322,241 @@ async function loadCommitmentFindings(profileId: number): Promise<CustomerPromis
   }
 }
 
+/**
+ * customer-cockpit Phase4 — 公司層級今日清單資料組裝。查五個來源、餵給
+ * server/services/todayList.ts 的純函式、合併回傳。任一子查詢失敗都不該讓
+ * 整支掛掉,所以每個區塊各自 try/catch(呼叫端 todayList router 外層也包了
+ * 一層,這裡是雙保險 —— 單一區塊掛了,其餘區塊的項目還是要看得到)。
+ */
+async function loadTodayListItems(): Promise<TodayListItem[]> {
+  const { getDb } = await import("../db");
+  const drizzleDb = await getDb();
+  if (!drizzleDb) return [];
+
+  const { todayLA } = await import("../_core/customerFacts");
+  const today = todayLA();
+  const items: TodayListItem[] = [];
+
+  const {
+    customerProfiles,
+    customOrders,
+    customerInteractions,
+    customerPromises,
+  } = await import("../../drizzle/schema");
+  const { and, eq, isNull, isNotNull, notInArray, inArray, sql } = await import(
+    "drizzle-orm"
+  );
+
+  // customerProfileId → userId(customerProfiles.userId,null = 訪客/guest)。
+  // 前端選客機制(CustomerList.tsx onSelect)用 {id, kind} 定位客人:guest 的 id
+  // 是 profileId 本身,registered user 的 id 卻是 userId — 兩個不同的 id 空間,
+  // 每一類規則(quote/departure/balance 都是查 customOrders,沒有 userId 欄)
+  // 都需要這張 map 才能讓前端組出正確的跳轉 ref。單一查詢,全部規則共用。
+  let userIdByProfile = new Map<number, number | null>();
+  try {
+    const profileRows = await drizzleDb
+      .select({ id: customerProfiles.id, userId: customerProfiles.userId })
+      .from(customerProfiles);
+    userIdByProfile = new Map(profileRows.map((r) => [r.id, r.userId]));
+  } catch (err) {
+    console.warn("[customOrder] todayList userId map failed:", err);
+  }
+
+  // 1) 到期跟進 — followUpDate 不為 null 的所有客人。
+  try {
+    const profiles = await drizzleDb
+      .select({
+        id: customerProfiles.id,
+        userId: customerProfiles.userId,
+        name: customerProfiles.name,
+        followUpDate: customerProfiles.followUpDate,
+      })
+      .from(customerProfiles)
+      .where(isNotNull(customerProfiles.followUpDate));
+    for (const p of profiles) {
+      const item = evaluateFollowUpDue(p, today);
+      if (item) items.push(item);
+    }
+  } catch (err) {
+    console.warn("[customOrder] todayList followUpDue failed:", err);
+  }
+
+  // 2) 報價將過期 — quoteSentAt 不為 null、狀態仍在「等客人回覆報價」階段的訂單,
+  //    對應客人最後一次 inbound 互動日期(evaluateQuoteExpiring 用來判斷客人是否
+  //    已回覆)。狀態機(design §3)quoted 之後一旦推進到 arranged 以上(訂金/尾款/
+  //    確認/出發/完成),代表客人已經回覆並往前走了 —— quoteSentAt 若忘了清,
+  //    繼續拿舊 quoteSentAt 算天數會對已成交的單永久誤報「報價快過期」,只保留
+  //    draft/quoted 這兩個「報價還在等回覆」的狀態。
+  try {
+    const orders = await drizzleDb
+      .select({
+        customerProfileId: customOrders.customerProfileId,
+        customerName: customOrders.customerName,
+        quoteSentAt: customOrders.quoteSentAt,
+      })
+      .from(customOrders)
+      .where(
+        and(
+          isNotNull(customOrders.quoteSentAt),
+          inArray(customOrders.status, ["draft", "quoted"]),
+        ),
+      );
+    if (orders.length > 0) {
+      const profileIds = [...new Set(orders.map((o) => o.customerProfileId))];
+      // 每位客人最後一次 inbound 互動日期(LA 曆日字串),一次查完存 Map。
+      // inArray 限縮在這批訂單涉及的客人(避免全表 GROUP BY 掃描不相干客人)。
+      const lastInboundRows = await drizzleDb
+        .select({
+          customerProfileId: customerInteractions.customerProfileId,
+          lastInboundAt: sql<string>`DATE(MAX(${customerInteractions.createdAt}))`,
+        })
+        .from(customerInteractions)
+        .where(
+          and(
+            eq(customerInteractions.direction, "inbound"),
+            inArray(customerInteractions.customerProfileId, profileIds),
+          ),
+        )
+        .groupBy(customerInteractions.customerProfileId);
+      const lastInboundByProfile = new Map<number, string>();
+      for (const r of lastInboundRows) {
+        if (r.lastInboundAt) lastInboundByProfile.set(r.customerProfileId, r.lastInboundAt);
+      }
+      for (const o of orders) {
+        const quoteSentAtStr = toDateOnlyString(o.quoteSentAt);
+        if (!quoteSentAtStr) continue;
+        const item = evaluateQuoteExpiring(
+          {
+            customerProfileId: o.customerProfileId,
+            userId: userIdByProfile.get(o.customerProfileId) ?? null,
+            customerName: o.customerName,
+            quoteSentAt: quoteSentAtStr,
+            lastInboundAt: lastInboundByProfile.get(o.customerProfileId) ?? null,
+          },
+          today,
+        );
+        if (item) items.push(item);
+      }
+    }
+  } catch (err) {
+    console.warn("[customOrder] todayList quoteExpiring failed:", err);
+  }
+
+  // 3) 承諾未兌現 — 複用 Phase3a findCommitmentIssues,這次是全公司範圍
+  //    (不只是某一個 profileId)。轉換函式 commitmentToTodayItem 只做形狀轉換。
+  try {
+    const promiseRows = await drizzleDb
+      .select({
+        id: customerPromises.id,
+        customerProfileId: customerPromises.customerProfileId,
+        customOrderId: customerPromises.customOrderId,
+        promiseText: customerPromises.promiseText,
+        dueDate: customerPromises.dueDate,
+        fulfilledAt: customerPromises.fulfilledAt,
+        dismissedAt: customerPromises.dismissedAt,
+        sourceInteractionId: customerPromises.sourceInteractionId,
+      })
+      .from(customerPromises)
+      .where(
+        and(
+          isNull(customerPromises.fulfilledAt),
+          isNull(customerPromises.dismissedAt),
+          isNotNull(customerPromises.dueDate),
+        ),
+      );
+    if (promiseRows.length > 0) {
+      const findings = findCommitmentIssues(promiseRows, today);
+      if (findings.length > 0) {
+        const profileIds = [...new Set(findings.map((f) => f.customerProfileId))];
+        const nameRows = await drizzleDb
+          .select({ id: customerProfiles.id, name: customerProfiles.name })
+          .from(customerProfiles)
+          .where(sql`${customerProfiles.id} IN ${profileIds}`);
+        const nameByProfile = new Map(nameRows.map((r) => [r.id, r.name]));
+        for (const f of findings) {
+          items.push(
+            commitmentToTodayItem(
+              f,
+              nameByProfile.get(f.customerProfileId) ?? null,
+              userIdByProfile.get(f.customerProfileId) ?? null,
+            ),
+          );
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("[customOrder] todayList commitment failed:", err);
+  }
+
+  // 4) 出發倒數 + 5) 尾款到期 — 都需要 departureDate 不為 null、非 draft/cancelled
+  //    的訂單,totalPrice/depositPaidAt/balancePaidAt 一併取出給兩條規則各自判斷。
+  try {
+    const orders = await drizzleDb
+      .select({
+        customerProfileId: customOrders.customerProfileId,
+        customerName: customOrders.customerName,
+        departureDate: customOrders.departureDate,
+        totalPrice: customOrders.totalPrice,
+        depositPaidAt: customOrders.depositPaidAt,
+        balancePaidAt: customOrders.balancePaidAt,
+      })
+      .from(customOrders)
+      .where(
+        and(
+          isNotNull(customOrders.departureDate),
+          notInArray(customOrders.status, ["draft", "cancelled"]),
+        ),
+      );
+    for (const o of orders) {
+      const userId = userIdByProfile.get(o.customerProfileId) ?? null;
+      const departureItem = evaluateDepartureCountdown(
+        {
+          customerProfileId: o.customerProfileId,
+          userId,
+          customerName: o.customerName,
+          departureDate: o.departureDate,
+        },
+        today,
+      );
+      if (departureItem) items.push(departureItem);
+
+      const balanceItem = evaluateBalanceDue(
+        {
+          customerProfileId: o.customerProfileId,
+          userId,
+          customerName: o.customerName,
+          totalPrice: o.totalPrice,
+          depositPaidAt: toDateOnlyString(o.depositPaidAt),
+          balancePaidAt: toDateOnlyString(o.balancePaidAt),
+          departureDate: o.departureDate,
+        },
+        today,
+      );
+      if (balanceItem) items.push(balanceItem);
+    }
+  } catch (err) {
+    console.warn("[customOrder] todayList departure/balance failed:", err);
+  }
+
+  return items;
+}
+
+/** timestamp 欄位落到 America/Los_Angeles 曆日(YYYY-MM-DD),給只吃純日期
+ *  字串的 todayList 規則函式用(這些字串要跟 todayLA() 同一個曆法比較,兩邊
+ *  時區不一致會讓 UTC 00:00-06:59 這段時間寫入的 timestamp 早算一天,天天
+ *  誤報/漏報)。null/解不出來一律回 null(誠實,不猜)。跟 customerFacts.ts
+ *  laDay()/customOrderWatchdog.ts laDay() 同一套 Intl.DateTimeFormat 寫法,
+ *  不重新發明時區數學。 */
+const DATE_ONLY_LA = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/Los_Angeles",
+});
+function toDateOnlyString(v: Date | string | null | undefined): string | null {
+  if (v == null) return null;
+  const d = v instanceof Date ? v : new Date(v);
+  if (Number.isNaN(d.getTime())) return null;
+  return DATE_ONLY_LA.format(d); // "2026-07-02"
+}
+
 /** Recompute balance when total/deposit are known. null when total unknown. */
 function computeBalance(
   total: number | null | undefined,
@@ -413,6 +656,27 @@ export const adminCustomerOrdersRouter = router({
         ...commitmentFindings,
       ];
     }),
+
+  /**
+   * customer-cockpit Phase4(design-phase3-4.md「Phase4:今日清單」)— 公司層級
+   * 今日待辦清單(不是單客人查詢,watchdogForCustomer 才是)。中欄空狀態(沒選
+   * 客人時)呼叫這支,取代舊的「選擇一位客戶查看詳情」純文字空狀態。
+   *
+   * 五條規則全部零 LLM、純規則計算(server/services/todayList.ts),查詢失敗
+   * 整段包 try/catch 回空陣列 —— 這是儀表板性質的功能,查詢失敗不該讓整頁掛掉,
+   * 但要記 log 讓 Jeff/監工能發現(不是靜默吞掉)。
+   *
+   * 不需要輸入(input 是 z.void() 隱含,adminProcedure 沒有 .input() 呼叫時
+   * tRPC 允許 query 不帶參數)。
+   */
+  todayList: adminProcedure.query(async (): Promise<TodayListItem[]> => {
+    try {
+      return await loadTodayListItems();
+    } catch (err) {
+      console.warn("[customOrder] todayList failed:", err);
+      return [];
+    }
+  }),
 
   create: adminProcedure
     .input(
