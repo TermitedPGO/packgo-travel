@@ -179,7 +179,11 @@ export type OrderPromiseFinding = {
 };
 
 /** 看門狗 findings 聯集(watchdogForCustomer 回傳的元素型別)。 */
-export type WatchdogFinding = OrderMarginFinding | OrderPromiseFinding | OrderInvoiceMismatchFinding;
+export type WatchdogFinding =
+  | OrderMarginFinding
+  | OrderPromiseFinding
+  | OrderInvoiceMismatchFinding
+  | OrderPaymentMatchFinding;
 
 export type OrderPromiseInput = {
   id: number;
@@ -473,4 +477,195 @@ export function findInvoiceMismatchIssues(
   return findings.sort(
     (a, b) => Math.abs(b.systemAmount - b.documentAmount) - Math.abs(a.systemAmount - a.documentAmount),
   );
+}
+
+// ── 2c:Plaid 收款建議(docs/features/customer-cockpit/design-phase2.md §2c)─────
+//
+// 用既有的銀行流水(bankTransactions,記帳功能已在用)比對訂單應收金額。近期
+// 入帳金額吻合某張未收款訂單 → 黃卡建議「疑似這張單收款了」。零 LLM、零 IO——
+// 呼叫端已經查好資料餵進來,這支只做純數字比對。AI 絕不自動標記付款狀態:這支
+// 只產生 finding,標記收款永遠是 Jeff 在訂單頁自己點 recordPayment。
+//
+// 頭號地雷(務必記住):bankTransactions.amount 正 = 支出、負 = 入帳(schema 自己
+// 的註解證實)。收款要找的是「錢流進來」,所以只認 amount < 0 的交易,
+// Math.abs() 取金額比對——絕對不能把方向搞反,不然會把「付錢給供應商」誤判成
+// 「客人付錢給我們」。
+
+export type OrderPaymentMatchLegKind = "deposit" | "balance" | "total";
+
+export type OrderPaymentMatchFinding = {
+  /** 判別欄:Plaid 收款建議類 finding。 */
+  kind: "paymentMatch";
+  orderId: number;
+  orderNumber: string;
+  title: string;
+  status: string;
+  /** 一律黃燈:是建議不是財務事實,Jeff 自己核對後才點「標記已收款」。 */
+  level: "yellow";
+  /** 這筆入帳被拿去比對訂單的哪一段欠款(訂金/尾款/全額)。 */
+  legKind: OrderPaymentMatchLegKind;
+  /** 吻合的交易金額(已轉正數)。 */
+  matchedAmount: number;
+  /** 交易發生日(YYYY-MM-DD,Plaid date 欄位原樣帶出)。 */
+  transactionDate: string;
+  /** 帳戶末四碼(顯示用,查無則 null)。 */
+  accountMask: string | null;
+  /** 這筆交易金額同時吻合的所有 orderId(含自己)。>1 代表模糊,Jeff 要自己判斷
+   *  是哪一張單,系統不猜。 */
+  candidateOrderIds: number[];
+};
+
+/** 收款金額比對容差(四捨五入誤差)。 */
+const PAYMENT_MATCH_TOLERANCE = 0.01;
+
+export type OrderPaymentMatchInput = {
+  id: number;
+  orderNumber: string;
+  title: string;
+  status: string;
+  currency: string;
+  totalPrice: string | number | null;
+  depositAmount: string | number | null;
+  balanceAmount: string | number | null;
+  depositPaidAt: Date | string | null;
+  balancePaidAt: Date | string | null;
+};
+
+/** 呼叫端已經篩好的交易資料:只信任輸入已經乾淨(近 30 天、isPending=0、
+ *  excludeFromAccounting=0、archived=0 已經在呼叫端篩掉),這支不重複做這些過濾。 */
+export type BankTransactionInput = {
+  id: number;
+  amount: string | number;
+  date: string;
+  accountMask: string | null;
+};
+
+/**
+ * 決定一張單「還欠哪一段錢」。回傳 null = 這張單不適用(不參與比對,不算模糊)。
+ *
+ * 判斷依據(依序,互斥):
+ *   1. depositPaidAt 空且 depositAmount 有值 → 訂金還沒收,目標是 depositAmount。
+ *   2. 承上一條不成立(訂金已收 or 沒填訂金金額),balancePaidAt 空且 balanceAmount
+ *      有值 → 尾款還沒收,目標是 balanceAmount。
+ *   3. 上面兩條都不適用(這張單沒有分期欄位,depositAmount/balanceAmount 都沒填)
+ *      —— 用 depositPaidAt 跟 balancePaidAt 是否都空,當作「這張單財務上還沒收
+ *      完」的判斷依據(而非用 status,因為 status 可能因為出發/完團等其他理由
+ *      推進,不代表錢真的收了;两个 paidAt 都空最貼近「真的還沒收到任何錢」的
+ *      事實)—— totalPrice 有值就拿它當目標,legKind:"total"。
+ *   4. 都不適用(depositPaidAt/balancePaidAt 任一有值,但沒有可用的 totalPrice/
+ *      depositAmount/balanceAmount 组合)→ null,這張單不參與比對。
+ */
+function resolveUnpaidLeg(
+  order: OrderPaymentMatchInput,
+): { legKind: OrderPaymentMatchLegKind; targetAmount: number } | null {
+  const deposit = toNum(order.depositAmount);
+  const balance = toNum(order.balanceAmount);
+  const total = toNum(order.totalPrice);
+
+  if (order.depositPaidAt == null && deposit != null && deposit > 0) {
+    return { legKind: "deposit", targetAmount: deposit };
+  }
+  if (order.balancePaidAt == null && balance != null && balance > 0) {
+    return { legKind: "balance", targetAmount: balance };
+  }
+  // 沒有分期欄位可用:兩個 paidAt 都空 = 財務上還沒收到任何一筆錢,拿 totalPrice
+  // 當整單的目標金額。任一 paidAt 有值,代表這張單已經在用分期路徑收款
+  // (deposit/balance 走過 recordPayment),不該回頭拿 totalPrice 誤配。
+  if (order.depositPaidAt == null && order.balancePaidAt == null && total != null && total > 0) {
+    return { legKind: "total", targetAmount: total };
+  }
+  return null;
+}
+
+/**
+ * 純函式、零 LLM、零 IO。輸入已經是呼叫端篩好的資料(orders 已排除 draft/
+ * cancelled 以外?—— 不,這支自己再擋一次 SKIP_STATUSES,跟其他規則一致,防呼叫端
+ * 漏篩;transactions 已排除 isPending/excludeFromAccounting/archived/非近 30 天)。
+ *
+ * 對每張單決定目標金額(見 resolveUnpaidLeg);非 USD 訂單跳過(比對的是美金銀行
+ * 流水,幣別不同不能比)。對每筆交易只認 amount < 0(入帳);amount >= 0(支出或
+ * 0)一律跳過,不比對——這是本規則最容易踩的地雷,測試要鎖死。
+ *
+ * 一筆交易可能同時吻合這個客人底下多張訂單(同額且同一段欠款)——對每一張都各出
+ * 一條 finding,candidateOrderIds 列出所有「同金額+同 legKind」候選的 orderId,
+ * 讓 Jeff 自己判斷是哪一張單。分組刻意把 legKind 併進去:金額只是巧合相同、但
+ * 一張欠 deposit 一張欠 total 的兩張單,不算真正模糊,不該互相牽連進候選清單。
+ *
+ * 一張訂單如果被多筆交易命中(理論上異常——同一張單同一段錢被兩筆不同交易對上),
+ * 只取日期最新的那筆交易產生 finding。選「最新」不是精準判斷,是為了避免噪音的
+ * 取捨:同一張單重複跳兩張幾乎一樣的黃卡沒有增量資訊,而越近期的入帳跟訂單狀態
+ * 變化的時間關聯性通常越高,所以留最新一筆、丟棄其餘。
+ */
+export function matchPaymentsToOrders(
+  orders: OrderPaymentMatchInput[],
+  transactions: BankTransactionInput[],
+): OrderPaymentMatchFinding[] {
+  // 只認入帳(amount < 0)。amount >= 0(支出或零)或轉不出數字一律跳過,絕不能
+  // 拿來比對收款——這是本規則的方向守門,務必先判斷再轉正數,不能顛倒順序。
+  const inflows: (BankTransactionInput & { amountAbs: number })[] = [];
+  for (const t of transactions) {
+    const raw = toNum(t.amount);
+    if (raw == null || raw >= 0) continue;
+    inflows.push({ ...t, amountAbs: -raw });
+  }
+
+  type Applicable = { order: OrderPaymentMatchInput; legKind: OrderPaymentMatchLegKind; targetAmount: number };
+  const applicable: Applicable[] = [];
+  for (const order of orders) {
+    if (SKIP_STATUSES.has(order.status)) continue;
+    if (order.currency !== "USD") continue;
+    const leg = resolveUnpaidLeg(order);
+    if (leg == null) continue;
+    applicable.push({ order, legKind: leg.legKind, targetAmount: leg.targetAmount });
+  }
+
+  // orderId → 每筆吻合的交易(可能多筆,理論上異常)
+  const hitsByOrderId = new Map<number, { txn: (typeof inflows)[number]; legKind: OrderPaymentMatchLegKind }[]>();
+  // amount+legKind 當 key → 命中這個「金額+欠款段別」組合的所有 orderId,判斷「同額
+  // 多單」用。務必把 legKind 併進 key:兩張完全無關的單,一張欠 deposit $1000、
+  // 另一張欠 total $1000 純屬巧合同額,不該被併成同一組候選(那樣會誤導 Jeff 以為
+  // 這兩張單彼此相關要挑一張)——只有「同一段欠款、同一金額」才算真的模糊。
+  const orderIdsByAmountKey = new Map<string, Set<number>>();
+
+  for (const { order, legKind, targetAmount } of applicable) {
+    for (const txn of inflows) {
+      if (Math.abs(txn.amountAbs - targetAmount) >= PAYMENT_MATCH_TOLERANCE) continue;
+      const list = hitsByOrderId.get(order.id) ?? [];
+      list.push({ txn, legKind });
+      hitsByOrderId.set(order.id, list);
+
+      const amountKey = `${legKind}:${targetAmount.toFixed(2)}`;
+      const set = orderIdsByAmountKey.get(amountKey) ?? new Set<number>();
+      set.add(order.id);
+      orderIdsByAmountKey.set(amountKey, set);
+    }
+  }
+
+  const findings: OrderPaymentMatchFinding[] = [];
+  for (const { order, legKind, targetAmount } of applicable) {
+    const hits = hitsByOrderId.get(order.id);
+    if (!hits || hits.length === 0) continue;
+
+    // 多筆交易命中同一張單同一段錢 → 只取日期最新那筆(見上方函式註解的取捨理由)。
+    const latest = hits.reduce((a, b) => (a.txn.date >= b.txn.date ? a : b));
+
+    const amountKey = `${legKind}:${targetAmount.toFixed(2)}`;
+    const candidateOrderIds = [...(orderIdsByAmountKey.get(amountKey) ?? new Set<number>([order.id]))];
+
+    findings.push({
+      kind: "paymentMatch",
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      title: order.title,
+      status: order.status,
+      level: "yellow",
+      legKind,
+      matchedAmount: Math.round(latest.txn.amountAbs * 100) / 100,
+      transactionDate: latest.txn.date,
+      accountMask: latest.txn.accountMask,
+      candidateOrderIds,
+    });
+  }
+
+  return findings;
 }

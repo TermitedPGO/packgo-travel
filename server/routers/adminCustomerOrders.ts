@@ -40,9 +40,11 @@ import {
   findOrderPromiseIssues,
   findInvoiceMismatchIssues,
   extractInvoiceTotal,
+  matchPaymentsToOrders,
   WATCHDOG_MARGIN_THRESHOLD,
   type WatchdogFinding,
   type OrderInvoiceMismatchFinding,
+  type OrderPaymentMatchFinding,
 } from "../services/customOrderWatchdog";
 import type { CustomOrder } from "../../drizzle/schema";
 
@@ -180,6 +182,88 @@ async function loadInvoiceMismatchFindings(
   }
 }
 
+/**
+ * 2c:對這個客人的訂單,查「全公司」近 30 天、已入帳(amount<0)、非 pending、
+ * 未被排除記帳、未封存的銀行流水,跟這批訂單的未收金額比對(matchPaymentsToOrders,
+ * 純函式,見 customOrderWatchdog.ts)。銀行流水本來就不綁特定客人(公司所有連結
+ * 帳戶共用一個 Plaid 同步),查詢範圍刻意不篩 linkedAccountId —— 是拿公司整體的
+ * 近期入帳跟這一位客人的欠款金額比對,不是反過來限定某個帳戶。
+ *
+ * AI 絕不自動標記付款狀態:這支只讀 bankTransactions 產生「建議」,不寫任何欄位、
+ * 不呼叫 recordPayment。標記收款永遠是 Jeff 在訂單頁自己點。
+ *
+ * DB/IO 全包 try/catch,理由同 loadInvoiceMismatchFindings——單一客人查詢失敗
+ * (DB 逾時等)不該讓整個 watchdogForCustomer 掛掉,沒有可信匹配本來就该誠實不叫。
+ */
+async function loadPaymentMatchFindings(
+  orders: CustomOrder[],
+): Promise<OrderPaymentMatchFinding[]> {
+  if (orders.length === 0) return [];
+
+  try {
+    const { getDb } = await import("../db");
+    const drizzleDb = await getDb();
+    if (!drizzleDb) return [];
+    const { bankTransactions } = await import("../../drizzle/schema");
+    const { and, eq, gte } = await import("drizzle-orm");
+
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000);
+    const cutoff = thirtyDaysAgo.toISOString().slice(0, 10); // date 欄位是 YYYY-MM-DD
+
+    // orderBy 務必加:matchPaymentsToOrders 的「同一張單被多筆交易命中→取最新日期」
+    // tie-break 對同日期交易是用 reduce 遍歷順序決定(見 customOrderWatchdog.ts),
+    // 純函式本身是 deterministic,但如果 DB 回傳順序每次不保證一致,同一天入帳兩筆
+    // 巧合同額交易就會讓兩次執行選到不同一筆,呈現給 Jeff 的結果不穩定。用 id 排序
+    // 鎖住查詢結果的順序,讓整條鏈路(DB → 純函式)都是確定性的。
+    const txnRows = await drizzleDb
+      .select({
+        id: bankTransactions.id,
+        amount: bankTransactions.amount,
+        date: bankTransactions.date,
+        linkedAccountId: bankTransactions.linkedAccountId,
+      })
+      .from(bankTransactions)
+      .where(
+        and(
+          gte(bankTransactions.date, cutoff as any),
+          eq(bankTransactions.isPending, 0),
+          eq(bankTransactions.excludeFromAccounting, 0),
+          eq(bankTransactions.archived, 0),
+        ),
+      )
+      .orderBy(bankTransactions.id);
+    if (txnRows.length === 0) return [];
+
+    // accountMask 是顯示用欄位,存在 linkedBankAccounts 不是 bankTransactions
+    // (見 drizzle/schema.ts)—— 另查一次映射 linkedAccountId → accountMask。
+    const { linkedBankAccounts } = await import("../../drizzle/schema");
+    const { inArray } = await import("drizzle-orm");
+    const accountIds = [...new Set(txnRows.map((r) => r.linkedAccountId))];
+    const accountRows = accountIds.length
+      ? await drizzleDb
+          .select({ id: linkedBankAccounts.id, accountMask: linkedBankAccounts.accountMask })
+          .from(linkedBankAccounts)
+          .where(inArray(linkedBankAccounts.id, accountIds))
+      : [];
+    const maskByAccountId = new Map(accountRows.map((r) => [r.id, r.accountMask ?? null]));
+
+    // bankTransactions.date 是 mysql DATE 欄位,drizzle 用 Date 物件表示(非
+    // string mode)——轉成 YYYY-MM-DD 給純函式(BankTransactionInput.date 是 string,
+    // 跟 customOrders 的 timestamp 欄位不同,不要混用同一個轉換方式)。
+    const transactions = txnRows.map((r) => ({
+      id: r.id,
+      amount: r.amount,
+      date: r.date instanceof Date ? r.date.toISOString().slice(0, 10) : String(r.date),
+      accountMask: maskByAccountId.get(r.linkedAccountId) ?? null,
+    }));
+
+    return matchPaymentsToOrders(orders, transactions);
+  } catch (err) {
+    console.warn("[customOrder] loadPaymentMatchFindings failed:", err);
+    return [];
+  }
+}
+
 /** Recompute balance when total/deposit are known. null when total unknown. */
 function computeBalance(
   total: number | null | undefined,
@@ -240,7 +324,7 @@ export const adminCustomerOrdersRouter = router({
     .query(async ({ input }) => loadOrder(input.orderId)),
 
   /**
-   * 看門狗(Step 5 + v2 + 2a):這個客人所有訂製單的 deterministic findings。
+   * 看門狗(Step 5 + v2 + 2a + 2c):這個客人所有訂製單的 deterministic findings。
    *   - margin 類:售價對不上後台成本(賠錢 / 毛利過薄)。內部把售價/成本/毛利三個
    *     數字攤給 Jeff —— 供應商成本絕不上客人文件,這支不投影到任何客戶面查詢。
    *   - promise 類(v2):答應了還沒寄(報價 7 天 / 確認書 3 天)。
@@ -248,6 +332,11 @@ export const adminCustomerOrdersRouter = router({
    *     對不上(scorecard 真實案例:劉偉國訂單 $6,635 vs invoice $6,621.40)。
    *     零 LLM 純字串抓取,見 customOrderWatchdog.extractInvoiceTotal。單一客人
    *     的文件讀取失敗不讓整支查詢掛掉(loadInvoiceMismatchFindings 自己 try/catch)。
+   *   - paymentMatch 類(2c):公司近 30 天入帳的銀行流水(Plaid)金額吻合這個客人
+   *     某張未收款訂單的欠款 → 黃卡建議「疑似這張單收款了」。零 LLM 純數字比對,
+   *     見 customOrderWatchdog.matchPaymentsToOrders。AI 絕不自動標記付款狀態,
+   *     只出建議,Jeff 在訂單頁自己點「標記已收款」才算數。查詢失敗不讓整支查詢
+   *     掛掉(loadPaymentMatchFindings 自己 try/catch)。
    * admin-only(adminProcedure)。純 deterministic 規則,不改不送。
    * 規則見 server/services/customOrderWatchdog.ts。回傳 kind 判別的聯集陣列,
    * margin(錢)在前。
@@ -259,10 +348,12 @@ export const adminCustomerOrdersRouter = router({
       if (profileId == null) return [];
       const rows = await db.listCustomOrdersByProfile(profileId);
       const invoiceMismatchFindings = await loadInvoiceMismatchFindings(rows);
+      const paymentMatchFindings = await loadPaymentMatchFindings(rows);
       return [
         ...findOrderMarginIssues(rows, WATCHDOG_MARGIN_THRESHOLD),
         ...findOrderPromiseIssues(rows, new Date()),
         ...invoiceMismatchFindings,
+        ...paymentMatchFindings,
       ];
     }),
 

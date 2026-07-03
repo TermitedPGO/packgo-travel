@@ -3515,6 +3515,20 @@ export const en = {
           systemAmount: 'System shows',
           documentAmount: 'Document shows',
         },
+        // 2c — a Plaid bank deposit matches this order's outstanding amount.
+        // Suggestion only, AI never auto-marks payment status — Jeff confirms.
+        paymentMatch: {
+          title: 'Possible payment received',
+          amount: 'Deposit amount',
+          date: 'Deposit date',
+          account: 'Account',
+          leg: {
+            deposit: 'Deposit still owed',
+            balance: 'Balance still owed',
+            total: 'Full amount still owed',
+          },
+          ambiguous: 'This deposit could match any of these {n} orders — please confirm',
+        },
       },
       profile: {
         notProvided: 'Not provided',

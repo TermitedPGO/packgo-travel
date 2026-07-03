@@ -83,6 +83,10 @@ function MarginWatchdogBanner({ customer: c }: { customer: AdaptedCustomer }) {
   const findings = all.filter((f) => f.kind === "margin")
   const promises = all.filter((f) => f.kind === "promise")
   const invoiceMismatches = all.filter((f) => f.kind === "invoiceMismatch")
+  const paymentMatches = all.filter((f) => f.kind === "paymentMatch")
+  // 2c — 點卡片導去那張訂單:沿用 CustomOrdersSection 既有的「本地 sheet 狀態 +
+  // CustomOrderSheet」模式(同檔案 717 行附近),不發明新的導航機制。
+  const [sheet, setSheet] = useState<{ open: boolean; orderId?: number | null }>({ open: false })
   if (all.length === 0) return null
   return (
     <div className="space-y-2">
@@ -171,6 +175,55 @@ function MarginWatchdogBanner({ customer: c }: { customer: AdaptedCustomer }) {
           </div>
         </div>
       ))}
+      {/* paymentMatch 類(2c)— 銀行流水入帳金額吻合這張單的欠款,黃卡建議「疑似
+          收款了」。純建議,AI 絕不自動標記付款狀態 —— 點卡片只導去訂單頁,標記
+          已收款永遠是 Jeff 自己點 recordPayment。candidateOrderIds > 1 時誠實講
+          「可能是這幾張單其中一張」,不暗示系統已經確定是哪一張。 */}
+      {paymentMatches.map((f) => (
+        <button
+          key={`paymentMatch-${f.orderId}`}
+          onClick={() => setSheet({ open: true, orderId: f.orderId })}
+          className="w-full text-left rounded-xl border border-amber-300 bg-amber-50/50 p-3 flex items-start gap-2.5 hover:bg-amber-50 transition-colors"
+        >
+          <TriangleAlert className="w-5 h-5 flex-shrink-0 mt-0.5 text-amber-600" />
+          <div className="flex-1 min-w-0">
+            <div className="text-[13px] font-semibold text-gray-900">
+              {k("paymentMatch.title")}
+              <span className="text-[10px] text-gray-400 font-normal ml-1.5">{f.orderNumber}</span>
+            </div>
+            <div className="text-[11.5px] text-gray-600 mt-0.5 truncate">
+              {f.title} · {k(`paymentMatch.leg.${f.legKind}`)}
+            </div>
+            <div className="flex flex-wrap gap-x-5 gap-y-1 mt-1.5 text-[12px] text-gray-700">
+              <span>
+                {k("paymentMatch.amount")}{" "}
+                <span className="font-semibold text-amber-600">{fmtMoney(f.matchedAmount, "USD")}</span>
+              </span>
+              <span>
+                {k("paymentMatch.date")}{" "}
+                <span className="font-semibold text-gray-900">{shortDate(f.transactionDate)}</span>
+              </span>
+              {f.accountMask && (
+                <span>
+                  {k("paymentMatch.account")}{" "}
+                  <span className="font-semibold text-gray-900">···{f.accountMask}</span>
+                </span>
+              )}
+            </div>
+            {f.candidateOrderIds.length > 1 && (
+              <div className="text-[11px] text-amber-700 mt-1">
+                {t("admin.customers.watchdog.paymentMatch.ambiguous", { n: f.candidateOrderIds.length })}
+              </div>
+            )}
+          </div>
+        </button>
+      ))}
+      <CustomOrderSheet
+        open={sheet.open}
+        initialOrderId={sheet.orderId ?? null}
+        onClose={() => setSheet({ open: false })}
+        customer={c}
+      />
     </div>
   )
 }

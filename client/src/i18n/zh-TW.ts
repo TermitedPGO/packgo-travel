@@ -3478,6 +3478,20 @@ export const zhTW = {
           systemAmount: '系統顯示',
           documentAmount: '文件顯示',
         },
+        // 2c — 銀行流水(Plaid)入帳金額吻合這張單的欠款,黃卡建議「疑似收款
+        // 了」。純建議,AI 絕不自動標記付款狀態,Jeff 自己點才算數。
+        paymentMatch: {
+          title: '疑似收款了',
+          amount: '入帳金額',
+          date: '入帳日期',
+          account: '帳戶',
+          leg: {
+            deposit: '訂金還沒收',
+            balance: '尾款還沒收',
+            total: '全額還沒收',
+          },
+          ambiguous: '這筆入帳可能是這 {n} 張單其中一張，請自行確認',
+        },
       },
       profile: {
         notProvided: '未提供',

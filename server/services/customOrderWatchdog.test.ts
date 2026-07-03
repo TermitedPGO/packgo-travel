@@ -23,9 +23,12 @@ import {
   extractInvoiceTotal,
   evaluateInvoiceMismatch,
   findInvoiceMismatchIssues,
+  matchPaymentsToOrders,
   type OrderMarginInput,
   type OrderPromiseInput,
   type OrderInvoiceMismatchInput,
+  type OrderPaymentMatchInput,
+  type BankTransactionInput,
 } from "./customOrderWatchdog";
 
 function order(over: Partial<OrderMarginInput> = {}): OrderMarginInput {
@@ -577,5 +580,238 @@ describe("findInvoiceMismatchIssues — 多張單混合", () => {
     expect(
       findInvoiceMismatchIssues([invoiceOrder()], new Map()),
     ).toEqual([]);
+  });
+});
+
+// ── 2c:matchPaymentsToOrders(Plaid 收款建議) ────────────────────────────────
+
+function payOrder(over: Partial<OrderPaymentMatchInput> = {}): OrderPaymentMatchInput {
+  return {
+    id: 1,
+    orderNumber: "ORD-2026-0001",
+    title: "台灣12天",
+    status: "quoted",
+    currency: "USD",
+    totalPrice: "5000.00",
+    depositAmount: "1000.00",
+    balanceAmount: "4000.00",
+    depositPaidAt: null,
+    balancePaidAt: null,
+    ...over,
+  };
+}
+
+function txn(over: Partial<BankTransactionInput> = {}): BankTransactionInput {
+  return {
+    id: 1,
+    amount: "-1000.00", // 入帳
+    date: "2026-06-15",
+    accountMask: "1234",
+    ...over,
+  };
+}
+
+describe("matchPaymentsToOrders — 方向守門(頭號地雷)", () => {
+  it("amount 為正(支出)絕不匹配,就算絕對值剛好吻合", () => {
+    const out = matchPaymentsToOrders(
+      [payOrder({ depositAmount: "1000.00" })],
+      [txn({ amount: "1000.00" })], // 正號 = 支出
+    );
+    expect(out).toEqual([]);
+  });
+
+  it("amount 為 0 也不匹配(只認嚴格 < 0)", () => {
+    const out = matchPaymentsToOrders(
+      [payOrder({ depositAmount: "0.00" })],
+      [txn({ amount: "0.00" })],
+    );
+    expect(out).toEqual([]);
+  });
+
+  it("amount 為負(入帳)且金額吻合 → 匹配成功", () => {
+    const out = matchPaymentsToOrders(
+      [payOrder({ depositAmount: "1000.00" })],
+      [txn({ amount: "-1000.00" })],
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].legKind).toBe("deposit");
+    expect(out[0].matchedAmount).toBe(1000);
+  });
+});
+
+describe("matchPaymentsToOrders — 決定還欠哪一段", () => {
+  it("depositPaidAt 空且 depositAmount 有值 → 比對 deposit", () => {
+    const out = matchPaymentsToOrders(
+      [payOrder({ depositAmount: "1000.00", balanceAmount: "4000.00" })],
+      [txn({ amount: "-1000.00" })],
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].legKind).toBe("deposit");
+  });
+
+  it("depositPaidAt 已填、balancePaidAt 空且 balanceAmount 有值 → 比對 balance", () => {
+    const out = matchPaymentsToOrders(
+      [payOrder({ depositPaidAt: "2026-05-01", balanceAmount: "4000.00" })],
+      [txn({ amount: "-4000.00" })],
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].legKind).toBe("balance");
+  });
+
+  it("沒有分期欄位、兩個 paidAt 都空、totalPrice 有值 → 比對 total", () => {
+    const out = matchPaymentsToOrders(
+      [
+        payOrder({
+          depositAmount: null,
+          balanceAmount: null,
+          totalPrice: "5000.00",
+        }),
+      ],
+      [txn({ amount: "-5000.00" })],
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].legKind).toBe("total");
+  });
+
+  it("已收款那條腿不再叫:depositPaidAt 已填,即使交易金額吻合 depositAmount 也不出現 deposit finding(轉去比對 balance,balance 也已收完 → 完全不叫)", () => {
+    const out = matchPaymentsToOrders(
+      [
+        payOrder({
+          depositAmount: "1000.00",
+          balanceAmount: "4000.00",
+          depositPaidAt: "2026-05-01",
+          balancePaidAt: "2026-05-20",
+        }),
+      ],
+      [txn({ amount: "-1000.00" })], // 剛好等於 depositAmount,但訂金早已收完
+    );
+    expect(out).toEqual([]);
+  });
+
+  it("兩段都收完(depositPaidAt/balancePaidAt 都有值)且沒有其他欄位可用 → 不參與比對", () => {
+    const out = matchPaymentsToOrders(
+      [
+        payOrder({
+          depositPaidAt: "2026-05-01",
+          balancePaidAt: "2026-05-20",
+        }),
+      ],
+      [txn({ amount: "-5000.00" })],
+    );
+    expect(out).toEqual([]);
+  });
+});
+
+describe("matchPaymentsToOrders — 同額多單", () => {
+  it("兩張訂單都欠同一金額,同一筆交易吻合兩張 → 兩條 finding,candidateOrderIds 都含兩張單", () => {
+    const orders = [
+      payOrder({ id: 1, orderNumber: "ORD-1", depositAmount: "1000.00" }),
+      payOrder({ id: 2, orderNumber: "ORD-2", depositAmount: "1000.00" }),
+    ];
+    const out = matchPaymentsToOrders(orders, [txn({ amount: "-1000.00" })]);
+    expect(out).toHaveLength(2);
+    expect(out.map((f) => f.orderId).sort()).toEqual([1, 2]);
+    for (const f of out) {
+      expect(f.candidateOrderIds.sort()).toEqual([1, 2]);
+    }
+  });
+
+  it("三張以上同額訂單 → candidateOrderIds 含全部三張", () => {
+    const orders = [
+      payOrder({ id: 1, orderNumber: "ORD-1", depositAmount: "1000.00" }),
+      payOrder({ id: 2, orderNumber: "ORD-2", depositAmount: "1000.00" }),
+      payOrder({ id: 3, orderNumber: "ORD-3", depositAmount: "1000.00" }),
+    ];
+    const out = matchPaymentsToOrders(orders, [txn({ amount: "-1000.00" })]);
+    expect(out).toHaveLength(3);
+    for (const f of out) {
+      expect(f.candidateOrderIds.sort()).toEqual([1, 2, 3]);
+    }
+  });
+
+  it("同金額但不同 legKind(一張欠 deposit、一張欠 total)純屬巧合同額 → 不應互相牽連,candidateOrderIds 各自只含自己", () => {
+    const orders = [
+      // 訂單1:deposit 還沒收,目標金額 1000(deposit leg)
+      payOrder({
+        id: 1,
+        orderNumber: "ORD-1",
+        depositAmount: "1000.00",
+        balanceAmount: "4000.00",
+      }),
+      // 訂單2:沒有分期欄位,total 剛好也是 1000(total leg)—— 純屬巧合同額
+      payOrder({
+        id: 2,
+        orderNumber: "ORD-2",
+        totalPrice: "1000.00",
+        depositAmount: null,
+        balanceAmount: null,
+      }),
+    ];
+    const out = matchPaymentsToOrders(orders, [txn({ amount: "-1000.00" })]);
+    expect(out).toHaveLength(2);
+    const byId = new Map(out.map((f) => [f.orderId, f]));
+    expect(byId.get(1)!.legKind).toBe("deposit");
+    expect(byId.get(1)!.candidateOrderIds).toEqual([1]);
+    expect(byId.get(2)!.legKind).toBe("total");
+    expect(byId.get(2)!.candidateOrderIds).toEqual([2]);
+  });
+});
+
+describe("matchPaymentsToOrders — 無吻合金額沉默 / 非 USD 跳過 / draft·cancelled 不參與", () => {
+  it("無吻合金額 → 完全沉默(不出現在結果陣列)", () => {
+    const out = matchPaymentsToOrders(
+      [payOrder({ depositAmount: "1000.00" })],
+      [txn({ amount: "-950.00" })],
+    );
+    expect(out).toEqual([]);
+  });
+
+  it("非 USD 訂單 → 沉默跳過,即使金額數字剛好吻合", () => {
+    const out = matchPaymentsToOrders(
+      [payOrder({ currency: "TWD", depositAmount: "1000.00" })],
+      [txn({ amount: "-1000.00" })],
+    );
+    expect(out).toEqual([]);
+  });
+
+  it("draft 狀態不參與", () => {
+    const out = matchPaymentsToOrders(
+      [payOrder({ status: "draft", depositAmount: "1000.00" })],
+      [txn({ amount: "-1000.00" })],
+    );
+    expect(out).toEqual([]);
+  });
+
+  it("cancelled 狀態不參與", () => {
+    const out = matchPaymentsToOrders(
+      [payOrder({ status: "cancelled", depositAmount: "1000.00" })],
+      [txn({ amount: "-1000.00" })],
+    );
+    expect(out).toEqual([]);
+  });
+});
+
+describe("matchPaymentsToOrders — 一張單被多筆交易命中,只取最新日期", () => {
+  it("兩筆交易都吻合同一張單的目標金額 → 只出一條 finding,用日期較新的那筆", () => {
+    const out = matchPaymentsToOrders(
+      [payOrder({ depositAmount: "1000.00" })],
+      [
+        txn({ id: 1, amount: "-1000.00", date: "2026-06-01", accountMask: "1111" }),
+        txn({ id: 2, amount: "-1000.00", date: "2026-06-20", accountMask: "2222" }),
+      ],
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].transactionDate).toBe("2026-06-20");
+    expect(out[0].accountMask).toBe("2222");
+  });
+});
+
+describe("matchPaymentsToOrders — 空輸入", () => {
+  it("空訂單 → 空陣列", () => {
+    expect(matchPaymentsToOrders([], [txn()])).toEqual([]);
+  });
+
+  it("空交易 → 空陣列", () => {
+    expect(matchPaymentsToOrders([payOrder()], [])).toEqual([]);
   });
 });
