@@ -139,6 +139,77 @@ migration 特別決策:0104-0109 的先例都是欄位新增用 INFORMATION_SCHE
 
 ---
 
-## Phase 5-6、收尾
+## 任務0:承諾日期解析三層修復(P1 prod 事故,commit 8323d65)— 已完成,待 ship
 
-尚未開始。裁示已收(2026-07-02):14 案存量進場 Jeff 先手拖 1-2 案驗流程(Phase1b 工具已就緒待 ship 後試跑)、Plaid 收款建議做(Phase2c 已完成)、今日清單放中欄空狀態(Phase4 已完成)、報價出手前案子要在系統裡的規矩已立。Phase6 自我體檢範圍已擴充(月度 scorecard 桌機腳本 + 每週 0909 E2E canary 含新增客人鏈 + 每週正確性稽核回饋迴圈),詳見 `roadmap-100.md`。
+**做了什麼**:prod `customerPromises` id 1、2 的 `dueDate` 全 `null`(監工實測抓到),根因是 LLM 抽出的 `rawDateText` 帶「7/8之前」「今天(星期五)」這種修飾詞/附註,`resolveEventDate` 認不得整條判 `null`,看門狗承諾追蹤功能核心落空。三層修復:
+1. `promiseExtraction.ts` 的 `EXTRACT_SYSTEM` prompt 教 LLM 只回日期本體,拿掉之前/以前/左右/前後/大概/最晚/預計等修飾詞與「(星期X)」附註。
+2. 新增 `stripDateModifierSuffix`(純函式,`buildPromiseRows` 呼叫 `resolveEventDate` 前先剝)——**迴圈剝**(不是單次 pass),防「7/8(星期三)之前」這種括號+修飾詞疊加組合漏網;涵蓋簡繁修飾詞、開頭概數詞(大概/最晚/預計)、尾端語氣詞(吧/囉)。
+3. `resolveEventDate`(`chatLogImport.ts`)新增純 code 相對日推算:今天/明天/後天、星期X(=下一個該星期,含今天)、下週X(=一定跨過本週)。
+
+**額外發現並修的深層 bug**:`resolveEventDate` 原本只有「past bias」(chatLogImport 的回溯語意:日期換算成今年若落在未來就當作去年),但承諾到期日是**未來導向**——沿用 past bias 會把「7/8」(今天 7/3 之後 5 天)誤判成去年同期,整整錯一年。新增 `opts.bias`("past" 預設 / "future"),`promiseExtraction.ts` 改用 future bias。既有 2 參數呼叫(chatLogImport 自己)行為完全不變。
+
+**對抗審查(六路)抓到並修復**:
+- P1:兩個 bias 分支的「換算年份」fast path 都沒有驗證換算後的年份是否合法——閏年 2/29 換算到非閏年會吐出不存在的日期(如 2029-02-29)寫進 DB。已修:兩分支都補上驗證,不合法就回 `null`。
+- P1:`stripDateModifierSuffix` 單次 pass 剝不掉疊加修飾詞(括號+尾綴組合)。已修:改迴圈剝到收斂。
+- P2:mark_promise 工具描述過時(還提「read_customer_conversation 讀到的承諾清單」,已改指向新工具)。
+- P2/P3:多項測試覆蓋缺口(空字串 after 剝除、weekday regex 亂碼容錯)已補測試。
+
+**驗證**:`tsc --noEmit` 0 錯;`chatLogImport.test.ts` 68 test、`promiseExtraction.test.ts` 33 test 全綠;完整套件 285 files / 4192 tests 全綠。
+
+**已知限制**:跨年邊界的「近期過去」判斷(例:今天 1/2、承諾寫 12/30)目前一律往未來滾一年(~11 個月後),這是「promise 不可能已經過期」規則下唯一合理選擇,但比較極端;真正嚴謹解法要改成「取離今天最近的候選日期」而非單純二元前後判斷,牽動共用函式,列為 backlog、非本次阻擋項。自然語言修飾詞覆蓋仍非窮舉(例如「禮拜五(7/10)之前」這種嵌套會漏),已擴大覆蓋但非 100%。
+
+**尚未做**:真實 prod 資料回填(舊 2 列 dueDate 仍是 null,不回填,是測試資料;下一則真實承諾寄出後應該正確解出到期日,建議 ship 後用 0909 測試一輪)。
+
+**狀態**:已 commit,待 `pnpm ship`。
+
+---
+
+## 任務0b:list_customer_promises 唯讀工具(commit 323d92e)— 已完成,待 ship
+
+**做了什麼**:補缺口——mark_promise 需要 `promiseId` 但 LLM 之前完全沒有管道查到,只能用猜的編號(違反工具描述自己講的規矩)。新增唯讀工具 `list_customer_promises`,列出「目前釘住的這位客人」未兌現/未撤銷的承諾(id + 原文 + 到期日 + 來源信日期)。`executeReadTool`/`runTool` 加第三個 `profileId` 參數(呼叫端傳入釘住的客人,不是 LLM input 的一部分)——跨客戶守門沿用 `mark_promise` 同款模式。`opsAgentStream.ts` 的 staticSystem 教學段落同步:Jeff 說「兌現了」→ 先 list 再 mark_promise。
+
+**對抗審查抓到並修復**:mark_promise 描述過時已同步更新(見上);測試補強兩項——① 原本只驗證 schema 沒有 `profileId` 欄位(靜態），加一條驗證**執行期**真的用釘住的 profileId、忽略 input 裡假冒的編號；② 補 `get_customer_documents` 的雙來源 profileId 回歸測試（避免未來把「LLM 指定」跟「呼叫端釘住」兩種來源搞混）。
+
+**驗證**:`opsTools.test.ts` 138 test 全綠(新增 8 個)。
+
+**狀態**:已 commit,待 `pnpm ship`。
+
+---
+
+## 任務5:學習閉環 caseLearnings(commit 177448d)— 已完成,待 ship
+
+**做了什麼**:案子完結(completed/cancelled)時 fire-and-forget 蒸餾一條「這一類案子」可複用教訓(供應商雷/路線經驗/定價經驗),存新表 `caseLearnings`(migration 0111,沿用 0110 的 `CREATE TABLE IF NOT EXISTS` 原生 DDL 決策,新表不套 ALTER TABLE 的 PREPARE 包裝)。
+
+三層職責分離(照抄 `promiseExtraction.ts` pattern):`extractCaseLesson`(LLM best-effort)→ `buildCaseLearningRow`(純函式)→ `distillCaseLearning`(唯一碰 DB 的協調函式,查重短路——一張單只蒸餾一次)。**PII 紀律**:lesson 文字不寫客人真實姓名,一律用「某 12 月北海道家庭案」式指代(prompt 規則,internal admin-only)。
+
+**Hook 點**:`adminCustomerOrders.ts` 的 `updateStatus`(轉 completed/cancelled)與 `cancel` 兩個既有狀態轉換點,fire-and-forget 不擋主流程(照抄 `escalationBox.ts` 的 fire-and-forget 寫法)。**晚間批次補漏**:新 cron `case-learning-backlog-tick`(04:00 UTC daily,`server/queue.ts` + `server/caseLearningWorker.ts`,照抄 `duplicateProfileScanWorker.ts` 的 Queue+Worker+schedule 三件套),掃近 7 天完結單,查重補漏。
+
+**注入**:`buildCustomerChatContext` / `buildGuestChatContext`(`customerChatContext.ts`,即 ops chat 的「目前釘住客人」context block,不是客人自己的網站聊天)在客人有進行中訂單(非 draft、非終態)時,查同 caseType(+目的地有值一併比對)的教訓取最新 3 條,獨立 cap(800 字)不搶主 block 額度,照 `formatMemoryBlock` 慣例包成不可執行的參考資料標「【同類案過往教訓(內部參考)】」。**誠實邊界**:教訓庫空 / 沒有進行中訂單 / 蒸餾失敗 → 一個字都不注入,絕不硬湊。
+
+**驗證**:`caseLearning.test.ts` 30 個新測試全綠;完整套件 tsc 0 錯 + 4192 測試全綠。
+
+**已知限制**:
+- caseType/destination 用字面完全比對(exact string equality),無同義詞/模糊比對——不同措辭的同目的地(如「北海道」vs「Hokkaido」)不會互相匹配。
+- 真實效果目前系統裡完結案太少驗不出來,要等 14 案存量匯入 + 一段時間累積後由監工驗。
+- 晚間批次補漏的 `runCaseLearningBacklogScan` 沒有對批次本身的失敗發 office inbox 卡(靜默 log,跟其他背景 scan 一致慣例)。
+
+**狀態**:已 commit,待 `pnpm ship`。
+
+---
+
+## Phase 6、收尾 — 尚未開始(下一個 session 接續)
+
+裁示已收(2026-07-02,詳見 `roadmap-100.md`):14 案存量進場 Jeff 先手拖 1-2 案驗流程、Plaid 收款建議做(已完成)、今日清單放中欄空狀態(已完成)、報價出手前案子要在系統裡的規矩已立。Phase6 自我體檢範圍已擴充(月度 scorecard + 每週 0909 E2E canary 含新增客人鏈 + 每週正確性稽核回饋迴圈)。
+
+**本 session 已完成的研究(下一個 session 直接用,不用重查)**:
+- 6a 收斂:客人入口已經指向 `/ops/customers`(`AdminShell.tsx:16`),`/admin` 已 redirect 到 `/workspace`——**入口這件事其實已經做完,不用改**。真正要做的是刪除 `client/src/components/workspace/` 下的客人專屬元件(CustomerInbox/CustomerChat/CustomerVisaSection/CustomerFlightOrders/CustomerWechatMessages/WechatApproveDialog/CustomerQuoteRecords/GuestCustomerPane/BookingDetailSheet/CustomerChatActions/FlightOrderDialogs + 對應 helper/test 檔,共約 20 個檔案)+ `admin-v2/CustomerDetailSheet.tsx`。**⚠️ 陷阱(consolidation-plan.md 沒抓到)**:`EscalationReplyDialog.tsx` 雖然在 workspace/ 目錄下,但是被 `TodayEscalationCard.tsx`/`TodayAutoReplyBox.tsx`(公司層級的 WorkspaceToday 頁面,不在刪除範圍)引用,**不可以刪**。`AutoSendPolicyCard.tsx` 也不可以刪(公司層級設定)。`workspace/CustomerChat.tsx` 跟 `admin/customers/` 下自己的 `CustomerChat.tsx`是兩個不同檔案(同名陷阱,注意別刪錯)。刪除後要改 `Workspace.tsx` 的路由邏輯(拿掉 `view.type === "customer"|"guest"` 分支+對應 lazy import),非客人的 tab(WorkspaceToday/WorkspaceCompany/AgentChatPage)不能動。`knownRoutes.ts` 不用改(/admin 與 /ops 都已在白名單)。
+- 6b 自我體檢:`gatherCustomerFacts`(`customerFacts.ts:318`)+ `customerAiSummary.ts` 的 `AiSummary`(wants/actions/delivered/nextStep,後兩個是 deterministic 不是 LLM)是稽核比對的兩端。`scorecard-20260701.md` 的五維度評分邏輯已讀懂(見該文件)。office inbox 卡片寫法範例:`server/retrospectiveWorker.ts:155-169`(`db.insert(agentMessages).values({agentName, senderRole, messageType, title, body, priority})`)。Cron 註冊三件套範例:`server/queue.ts` 的 `scheduleDailyFollowupScan`/`followupScanWorker.ts`(本 session 的 `caseLearningBacklogQueue`/`caseLearningWorker.ts` 是最新示範,直接照抄)。Canary 安全性:`runInquiryAgent` 是純函式零副作用零寄信,`caseFileImport.ts` 的 `dry_run`/`confirm` 兩態模式是「合成不碰真實」的範本。
+- 6c 清舊帳逐項現況查證(**部分已經做完,不要重做**):
+  - ✅ **已完成**:`customerChatContext.ts` 應收餘額已付清不顯示(commit b357b54,2026-07-01,`formatOrderContext` line 586 已有 `!o.balancePaidAt` guard)。
+  - ✅ **已完成**:`preferenceExtractor.ts` 的 maxTokens 截斷防護(`finish_reason==="length"` → abort、回 null、既有記憶不動,3 處呼叫點都已有這套,跟 chatLogImport 同款)。
+  - ✅ **已完成**:`update_customer_note` 已經是 append 語意(`opsTools.ts` 2026-07-01 P2 修復,見 `mergeCustomerNote` 函式),不是整欄覆蓋——**這條也不用重做**。
+  - ⬜ **真的要做**:專案歸屬斷層——收信 AI 判斷信件屬於哪張進行中訂單寫 `customerInteractions.customOrderId`(候選=該客人 active 單的標題/旅客名/日期,LLM 只選不編,不確定回 null);聊天加「把這串掛到某單」指令。
+  - ⬜ **真的要做**:自家信箱(`gmailPipeline.ts` 的 `OWN_EMAILS`/`isOwnEmail`,已存在)信件目前仍會跑滿整條 `runInquiryAgent` LLM 分類(`processOneEmail` 函式,~line 860 `const decision = await runInquiryAgent({...})` 無條件呼叫,只有 profileId 略過建卡,LLM 分類沒省)——要在 `isOwnEmail(senderEmail)` 為 true 時跳過分類直接標處理完畢,省成本。**注意**:要保留原本「信本身照常處理/不建卡」的行為,只省 LLM 呼叫這一步,並確認 result 的計數/標記邏輯不會因為跳過分類而出錯(需讀 `processOneEmail` 後半段目前怎麼用 `decision`)。
+  - ⬜ **真的要做,已定位根因**:nav badge 與列表 limit-200 口徑不對齊。`adminCustomers.ts` 的 `guestList`(line 816-877)可見列表有 `.orderBy(desc(customerProfiles.updatedAt)).limit(200)`;但 `customerUnreadCount`(line 332-406)算未讀數時,guest 那段子查詢(line 373-398)**沒有同樣的 order+limit**,理論上超過 200 位 guest 時,badge 可能數到一個「排在第 200 名之後、列表看不到」的未讀 guest——doc comment(line 326-330)聲稱「badge count 跟可見紅點不可能對不上」,但沒有真的做到(只對齊了篩選條件,沒對齊筆數上限)。`customerList`(registered,line 129 起)本身有沒有上限還沒查。修法:讓 `customerUnreadCount` 的 guest 子查詢套用同一個 `orderBy+limit(200)` 視窗再算未讀數,registered 那段若 `customerList` 也有上限要一併對齊。
+
+**下一個 session 開工建議順序**:6c 的兩個「已完成」項目直接在 T6 報告勾掉不用碰;先做 6c 剩餘 3 項(小、快、可各自獨立 commit),再做 6a(照上面陷阱清單,grep 引用點歸零才刪),最後 6b(範圍最大,三個 cron)。
