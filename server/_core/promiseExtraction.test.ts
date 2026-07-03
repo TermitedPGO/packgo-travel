@@ -46,6 +46,7 @@ import {
   extractPromisesFromEmail,
   buildPromiseRows,
   recordPromisesForInteraction,
+  stripDateModifierSuffix,
 } from "./promiseExtraction";
 
 beforeEach(() => {
@@ -129,26 +130,146 @@ describe("extractPromisesFromEmail", () => {
 });
 
 // ────────────────────────────────────────────────────────────────────────
+// stripDateModifierSuffix (pure) — 2026-07-03 P1 prod 修復 layer 2 防線
+// ────────────────────────────────────────────────────────────────────────
+
+describe("stripDateModifierSuffix", () => {
+  it("strips 之前 suffix", () => {
+    expect(stripDateModifierSuffix("7/8之前")).toBe("7/8");
+  });
+
+  it("strips 之前 suffix with a space before it", () => {
+    expect(stripDateModifierSuffix("7/8 之前")).toBe("7/8");
+  });
+
+  it("strips a trailing parenthetical weekday annotation", () => {
+    expect(stripDateModifierSuffix("今天(星期五)")).toBe("今天");
+  });
+
+  it("strips 以前/左右/前後 suffixes", () => {
+    expect(stripDateModifierSuffix("7月10日以前")).toBe("7月10日");
+    expect(stripDateModifierSuffix("7/10左右")).toBe("7/10");
+    expect(stripDateModifierSuffix("7/10前後")).toBe("7/10");
+  });
+
+  it("leaves a plain date untouched", () => {
+    expect(stripDateModifierSuffix("7/10")).toBe("7/10");
+  });
+
+  it("only strips the trailing modifier, not text in the middle", () => {
+    expect(stripDateModifierSuffix("週五之前")).toBe("週五");
+  });
+
+  it("2026-07-03 對抗審查 P1修復:strips a STACKED parenthetical + trailing modifier ('7/8(星期三)之前')", () => {
+    // A single pass used to fail here: stripping the trailing paren requires
+    // the string to END at ")", but "之前" comes after it, so that pass no-ops;
+    // the modifier-strip pass then only removes "之前", leaving "7/8(星期三)"
+    // un-stripped and unparseable. The loop must converge to "7/8".
+    expect(stripDateModifierSuffix("7/8(星期三)之前")).toBe("7/8");
+  });
+
+  it("strips bare 前/後 suffixes (not just the compound 之前/前後 forms)", () => {
+    expect(stripDateModifierSuffix("7/8前")).toBe("7/8");
+    expect(stripDateModifierSuffix("7/10後")).toBe("7/10");
+  });
+
+  it("strips leading 大概/最晚/預計-style hedging words", () => {
+    expect(stripDateModifierSuffix("大概7/8")).toBe("7/8");
+    expect(stripDateModifierSuffix("最晚7/10")).toBe("7/10");
+    expect(stripDateModifierSuffix("預計明天")).toBe("明天");
+  });
+
+  it("strips trailing colloquial particles (吧/囉)", () => {
+    expect(stripDateModifierSuffix("明天之前吧")).toBe("明天");
+    expect(stripDateModifierSuffix("7/8囉")).toBe("7/8");
+  });
+
+  it("returns an empty string when the LLM extracted only a modifier with no date body (honest, not a crash)", () => {
+    expect(stripDateModifierSuffix("之前")).toBe("");
+    expect(stripDateModifierSuffix("(星期五)")).toBe("");
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────
 // b) buildPromiseRows (pure)
 // ────────────────────────────────────────────────────────────────────────
 
 describe("buildPromiseRows", () => {
   const opts = { customerProfileId: 42, customOrderId: 7, sourceInteractionId: 999 };
 
-  it("resolves dueDate correctly when rawDateText parses (via resolveEventDate)", () => {
-    // "7/1" with no year, evaluated against todayLA 2026-07-03 — resolveEventDate's
-    // "cannot be from the future" rule keeps this in the CURRENT year since 7/1
-    // is on-or-before today's 7/3 (a rawDateText later than today would roll back
-    // a year instead, which is exercised in chatLogImport.test.ts already).
+  it("prod fixture (customerPromises id 1): '7/8之前' resolves through the strip+resolve pipeline", () => {
+    const rows = buildPromiseRows(
+      [{ promiseText: "7/8之前可以取件", rawDateText: "7/8之前" }],
+      "2026-07-03",
+      opts,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].dueDate).toBe("2026-07-08");
+    // Original rawDateText is preserved verbatim for display — only the
+    // resolveEventDate INPUT is stripped, not the stored field.
+    expect(rows[0].rawDateText).toBe("7/8之前");
+  });
+
+  it("prod fixture (customerPromises id 2): '今天(星期五)' resolves to todayLA", () => {
+    const rows = buildPromiseRows(
+      [{ promiseText: "今天(星期五)會處理", rawDateText: "今天(星期五)" }],
+      "2026-07-03",
+      opts,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].dueDate).toBe("2026-07-03");
+    expect(rows[0].rawDateText).toBe("今天(星期五)");
+  });
+
+  it("rawDateText that strips down to empty (LLM extracted only a modifier, no date body) → dueDate:null, no crash", () => {
+    const rows = buildPromiseRows(
+      [{ promiseText: "之前可以取件", rawDateText: "之前" }],
+      TODAY_LA,
+      opts,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].dueDate).toBeNull();
+    expect(rows[0].rawDateText).toBe("之前");
+  });
+
+  it("resolves dueDate correctly when rawDateText parses — a near-future date within the same year (via resolveEventDate bias:future)", () => {
+    // "7/10" with no year, evaluated against todayLA 2026-07-03 — a promise due
+    // date is forward-looking (bias:"future"), so a date AFTER today stays in
+    // the CURRENT year (unlike chatLogImport's retrospective default, which
+    // would roll this back to last year — exercised separately in
+    // chatLogImport.test.ts).
+    const rows = buildPromiseRows(
+      [{ promiseText: "週五可以取件", rawDateText: "7/10" }],
+      TODAY_LA,
+      opts,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].dueDate).toBe("2026-07-10");
+    expect(rows[0].promiseText).toBe("週五可以取件");
+    expect(rows[0].rawDateText).toBe("7/10");
+  });
+
+  it("rolls FORWARD to next year when the naive current-year date already passed (bias:future's mirror of chatLogImport's roll-BACK rule)", () => {
+    // "7/1" is two days before todayLA 2026-07-03 — a promise can't already be
+    // due in the past at the moment it's extracted, so this must mean next
+    // year's July 1st, not this year's (which already passed).
     const rows = buildPromiseRows(
       [{ promiseText: "週五可以取件", rawDateText: "7/1" }],
       TODAY_LA,
       opts,
     );
     expect(rows).toHaveLength(1);
-    expect(rows[0].dueDate).toBe("2026-07-01");
-    expect(rows[0].promiseText).toBe("週五可以取件");
-    expect(rows[0].rawDateText).toBe("7/1");
+    expect(rows[0].dueDate).toBe("2027-07-01");
+  });
+
+  it("keeps the current year when the date is exactly today (boundary, not treated as past)", () => {
+    const rows = buildPromiseRows(
+      [{ promiseText: "今天可以取件", rawDateText: "7/3" }],
+      TODAY_LA,
+      opts,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].dueDate).toBe("2026-07-03");
   });
 
   it("keeps the promise with dueDate:null when rawDateText can't be resolved", () => {

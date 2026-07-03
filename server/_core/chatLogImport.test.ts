@@ -165,9 +165,164 @@ describe("resolveEventDate", () => {
     expect(resolveEventDate("2/30", "2026-07-02")).toBeNull();
   });
 
+  it("2026-07-03 對抗審查 P1修復:Feb 29 rolled BACK a year lands on a non-leap year → null, not an invalid date", () => {
+    // todayYear 2028 is a leap year (2/29 valid there) but the "future date,
+    // roll back" fast path used to return {year: todayYear-1, ...} WITHOUT
+    // re-validating that year — 2027 is not a leap year, so the old code
+    // returned a calendar-impossible 2027-02-29. Must be null now.
+    expect(resolveEventDate("2/29", "2028-01-15")).toBeNull();
+  });
+
   it("never throws on null/undefined-like input", () => {
     expect(() => resolveEventDate(null as unknown as string, "2026-07-02")).not.toThrow();
     expect(resolveEventDate(null as unknown as string, "2026-07-02")).toBeNull();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────
+// resolveEventDate — relative dates (2026-07-03 P1 prod 修復,customer-cockpit
+// Phase5.5)。100% 純 code 相對日推算,LLM 永不碰日期運算。錨點沿用既有測試的
+// todayLA "2026-07-02"(星期四)方便交叉核對,不改既有格式的行為(前面整個
+// describe block 全綠是硬條件)。
+// ────────────────────────────────────────────────────────────────────────
+
+describe("resolveEventDate — relative dates", () => {
+  it("今天 resolves to todayLA itself", () => {
+    expect(resolveEventDate("今天", "2026-07-02")).toEqual({ year: 2026, month: 7, day: 2 });
+  });
+
+  it("今日 (alternate wording) resolves to todayLA itself", () => {
+    expect(resolveEventDate("今日", "2026-07-02")).toEqual({ year: 2026, month: 7, day: 2 });
+  });
+
+  it("明天 resolves to todayLA + 1 day", () => {
+    expect(resolveEventDate("明天", "2026-07-02")).toEqual({ year: 2026, month: 7, day: 3 });
+  });
+
+  it("後天 (traditional) resolves to todayLA + 2 days", () => {
+    expect(resolveEventDate("後天", "2026-07-02")).toEqual({ year: 2026, month: 7, day: 4 });
+  });
+
+  it("后天 (simplified) resolves to todayLA + 2 days", () => {
+    expect(resolveEventDate("后天", "2026-07-02")).toEqual({ year: 2026, month: 7, day: 4 });
+  });
+
+  it("明天 rolls over month/year correctly at a year boundary", () => {
+    expect(resolveEventDate("明天", "2026-12-31")).toEqual({ year: 2027, month: 1, day: 1 });
+  });
+
+  it("星期X for TODAY's own weekday resolves to today (含今天,不跳到下週)", () => {
+    // todayLA 2026-07-02 is a Thursday (星期四).
+    expect(resolveEventDate("星期四", "2026-07-02")).toEqual({ year: 2026, month: 7, day: 2 });
+  });
+
+  it("星期X for a day already passed this week rolls to its NEXT occurrence", () => {
+    // Wednesday (星期三) already passed this week relative to Thursday →
+    // next occurrence is 6 days out (2026-07-08), not treated as -1 day in the past.
+    expect(resolveEventDate("星期三", "2026-07-02")).toEqual({ year: 2026, month: 7, day: 8 });
+  });
+
+  it("星期X for a day later this week resolves within the same week", () => {
+    // Monday target from Thursday anchor → next Monday is 4 days out (2026-07-06).
+    expect(resolveEventDate("星期一", "2026-07-02")).toEqual({ year: 2026, month: 7, day: 6 });
+  });
+
+  it("週X / 周X / 禮拜X are accepted synonyms for 星期X", () => {
+    expect(resolveEventDate("週一", "2026-07-02")).toEqual({ year: 2026, month: 7, day: 6 });
+    expect(resolveEventDate("周一", "2026-07-02")).toEqual({ year: 2026, month: 7, day: 6 });
+    expect(resolveEventDate("禮拜一", "2026-07-02")).toEqual({ year: 2026, month: 7, day: 6 });
+  });
+
+  it("下週X always lands in the FOLLOWING week, even for today's own weekday", () => {
+    // 下週四 from a Thursday anchor must NOT resolve to today — it's 7 days out.
+    expect(resolveEventDate("下星期四", "2026-07-02")).toEqual({ year: 2026, month: 7, day: 9 });
+  });
+
+  it("下週X for a day later this week still pushes a full week out", () => {
+    // 下週一 from Thursday: bare 星期一 would be +4 days (this coming Monday);
+    // 下週一 must be +11 days (the Monday AFTER that).
+    expect(resolveEventDate("下週一", "2026-07-02")).toEqual({ year: 2026, month: 7, day: 13 });
+  });
+
+  it("does not misfire on plain weekday text without a recognizable date pattern", () => {
+    expect(resolveEventDate("下星期", "2026-07-02")).toBeNull();
+    expect(resolveEventDate("星期", "2026-07-02")).toBeNull();
+  });
+
+  it("does not misfire on a weekday-lookalike token with an unrecognized character", () => {
+    // "星期1" uses an Arabic numeral instead of one of 一二三四五六日天 — falls
+    // through to null rather than guessing, same as any other malformed input.
+    expect(resolveEventDate("星期1", "2026-07-02")).toBeNull();
+    expect(resolveEventDate("星期天天", "2026-07-02")).toBeNull();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────
+// resolveEventDate — opts.bias:"future" (2026-07-03 P1 prod 修復). Default
+// (omitted opts, or bias:"past") behavior is asserted identical to every test
+// above — this section only covers the NEW opt-in branch used by
+// promiseExtraction.ts, never by chatLogImport itself.
+// ────────────────────────────────────────────────────────────────────────
+
+describe("resolveEventDate — opts.bias:'future'", () => {
+  it("a date after today in the same year stays in the current year (no rollback)", () => {
+    // Default/past bias would roll this back to 2025 (see the plain "handles
+    // US slash format" tests above using the SAME kind of input under default
+    // bias); future bias must not.
+    expect(resolveEventDate("7/8", "2026-07-03", { bias: "future" })).toEqual({
+      year: 2026,
+      month: 7,
+      day: 8,
+    });
+  });
+
+  it("a date before today in the same year rolls FORWARD to next year", () => {
+    expect(resolveEventDate("7/1", "2026-07-03", { bias: "future" })).toEqual({
+      year: 2027,
+      month: 7,
+      day: 1,
+    });
+  });
+
+  it("a date exactly equal to today is kept in the current year (boundary)", () => {
+    expect(resolveEventDate("7/3", "2026-07-03", { bias: "future" })).toEqual({
+      year: 2026,
+      month: 7,
+      day: 3,
+    });
+  });
+
+  it("year-boundary: today is late December, message reads early January → rolls forward to NEXT year", () => {
+    expect(resolveEventDate("1/5", "2026-12-20", { bias: "future" })).toEqual({
+      year: 2027,
+      month: 1,
+      day: 5,
+    });
+  });
+
+  it("explicit 4-digit year is trusted verbatim regardless of bias", () => {
+    expect(resolveEventDate("2025-01-01", "2026-07-03", { bias: "future" })).toEqual({
+      year: 2025,
+      month: 1,
+      day: 1,
+    });
+  });
+
+  it("2026-07-03 對抗審查 P1修復:Feb 29 rolled FORWARD a year lands on a non-leap year → null, not an invalid date", () => {
+    // todayYear 2028 is leap (2/29 valid there) and today is AFTER Feb 29, so
+    // the future-bias fast path used to roll to todayYear+1 = 2029 WITHOUT
+    // re-validating — 2029 isn't a leap year, so the old code returned a
+    // calendar-impossible 2029-02-29. Must be null now.
+    expect(resolveEventDate("2/29", "2028-03-01", { bias: "future" })).toBeNull();
+  });
+
+  it("default bias (opts omitted) is unchanged from the past-biased behavior used by chatLogImport", () => {
+    expect(resolveEventDate("7/8", "2026-07-03")).toEqual({ year: 2025, month: 7, day: 8 });
+    expect(resolveEventDate("7/8", "2026-07-03", { bias: "past" })).toEqual({
+      year: 2025,
+      month: 7,
+      day: 8,
+    });
   });
 });
 

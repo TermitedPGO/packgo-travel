@@ -57,6 +57,33 @@ const MONTH_NAMES: Record<string, number> = {
   dec: 12, december: 12,
 };
 
+// customer-cockpit Phase5.5(2026-07-03,P1 prod 修復)—「今天/明天/後天/星期X/
+// 下週X」100% 純 code 相對日推算,LLM 永不碰日期運算。星期對照表用 JS
+// Date.getDay() 的 0=日...6=六 對齊,免去另一套编号系统。
+const WEEKDAY_NUM: Record<string, number> = {
+  日: 0, 天: 0,
+  一: 1,
+  二: 2,
+  三: 3,
+  四: 4,
+  五: 5,
+  六: 6,
+};
+
+/** 純日期算術:對一組 y/m/d 加減天數,回傳新的 y/m/d(靠 Date 的 local 分量處理
+ *  月/年進位,不做任何 timezone 轉換,只用建構子與 getFullYear/getMonth/getDate
+ *  這組永遠對稱的 local API,和檔案其他地方組 Date 的寫法一致)。 */
+function addDaysToYMD(year: number, month: number, day: number, deltaDays: number): ResolvedDate {
+  const dt = new Date(year, month - 1, day);
+  dt.setDate(dt.getDate() + deltaDays);
+  return { year: dt.getFullYear(), month: dt.getMonth() + 1, day: dt.getDate() };
+}
+
+/** 純函式:算一組 y/m/d 是星期幾(0=日...6=六),同樣只用 local 分量。 */
+function dayOfWeekYMD(year: number, month: number, day: number): number {
+  return new Date(year, month - 1, day).getDay();
+}
+
 /** Days in month (non-leap; day-of-month validity check only, not leap-exact —
  *  good enough to reject junk like "2/30"; Feb 29 handled loosely by capping at 29). */
 function daysInMonth(month: number, year: number): number {
@@ -79,10 +106,19 @@ function isValidMonthDay(month: number, day: number, year: number): boolean {
  * 4-digit year, use it verbatim. Otherwise substitute todayLA's year; if the
  * resulting date is AFTER todayLA (a conversation snippet cannot be from the
  * future), roll back one year. If it lands on-or-before todayLA, keep it.
+ *
+ * `opts.bias` (2026-07-03 P1 prod 修復,customer-cockpit Phase5.5):預設
+ * "past",與原本行為完全一致(chatLogImport 唯一的呼叫方式,舊有 46 個測試
+ * 不受影響)。promiseExtraction.ts 的承諾到期日是反過來的語意 —— 承諾幾乎
+ * 一定指向「今天或未來」,不是「過去」,直接沿用 chat-log 的「未來就是去年」
+ * 規則會把「7/8」(今天 7/3 之後 5 天)誤判成去年的 7/8,讓看門狗的比較基準
+ * 整整錯一年。傳 bias:"future" 時鏡射同一套二元規則:沒有年份、換算成今年
+ * 卻落在今天「之前」,就當作是明年(而不是去年)。
  */
 export function resolveEventDate(
   rawDateText: string,
   todayLAStr: string,
+  opts?: { bias?: "past" | "future" },
 ): ResolvedDate | null {
   if (!rawDateText || typeof rawDateText !== "string") return null;
   const raw = rawDateText.trim();
@@ -165,6 +201,30 @@ export function resolveEventDate(
     }
   }
 
+  // 7) 今天/明天/後天 — 純 code 相對日,永遠以 todayLA 為基準,回傳前直接短路
+  //    (不進下面「補年份」那套邏輯,這裡算出來的已經是完整日期)。
+  if (year === null && month === null) {
+    const rel = raw.match(/^(今天|今日|明天|明日|後天|后天)$/);
+    if (rel) {
+      const delta = rel[1] === "今天" || rel[1] === "今日" ? 0 : rel[1] === "明天" || rel[1] === "明日" ? 1 : 2;
+      return addDaysToYMD(todayYear, todayMonth, todayDay, delta);
+    }
+  }
+
+  // 8) 星期X(=下一個該星期,含今天)/ 下週X(=下一週的那天,一定跨過今天所在這週)。
+  //    「下」字是唯一分歧點:沒有「下」就含今天本身(今天剛好是星期三,講「星期三」
+  //    就是今天);有「下」一律再加 7 天,就算今天剛好是那天也不會誤判成今天。
+  if (year === null && month === null) {
+    const wd = raw.match(/^(下)?\s*(?:星期|週|周|禮拜|礼拜)\s*([一二三四五六日天])$/);
+    if (wd) {
+      const targetDow = WEEKDAY_NUM[wd[2]];
+      const todayDow = dayOfWeekYMD(todayYear, todayMonth, todayDay);
+      let delta = (targetDow - todayDow + 7) % 7;
+      if (wd[1]) delta += 7;
+      return addDaysToYMD(todayYear, todayMonth, todayDay, delta);
+    }
+  }
+
   if (month === null || day === null) return null;
   if (!Number.isInteger(month) || !Number.isInteger(day)) return null;
 
@@ -172,6 +232,27 @@ export function resolveEventDate(
     // Explicit year supplied — trust it verbatim (still validate calendar shape).
     if (!isValidMonthDay(month, day, year)) return null;
     return { year, month, day };
+  }
+
+  const bias = opts?.bias ?? "past";
+
+  if (bias === "future") {
+    // Mirror image of the "past" rule below: no year in the fragment,
+    // substitute today's year, and if the result already landed BEFORE today
+    // (impossible for a forward-looking commitment), roll FORWARD one year
+    // instead of back.
+    if (!isValidMonthDay(month, day, todayYear)) {
+      if (!isValidMonthDay(month, day, todayYear + 1)) return null;
+      return { year: todayYear + 1, month, day };
+    }
+    const candidateIsPast =
+      month < todayMonth || (month === todayMonth && day < todayDay);
+    const year_ = candidateIsPast ? todayYear + 1 : todayYear;
+    // 2026-07-03 對抗審查抓到(P1):todayYear 驗過不代表 year_(todayYear+1)
+    // 也合法 —— 閏年 2/29 這種日期換到下一年可能就不是合法曆日。寧可回 null
+    // 也不要吐一個不存在的日期(例如 2029-02-29)進 customerPromises.dueDate。
+    if (!isValidMonthDay(month, day, year_)) return null;
+    return { year: year_, month, day };
   }
 
   // No year in the fragment — substitute today's year, then check for a
@@ -187,6 +268,10 @@ export function resolveEventDate(
     (month === todayMonth && day > todayDay);
 
   const year_ = candidateIsFuture ? todayYear - 1 : todayYear;
+  // 2026-07-03 對抗審查抓到(P1,跟上面 future-bias 分支同一個雷):todayYear
+  // 驗過不代表 todayYear-1 也合法(閏年 2/29 換到非閏年會不存在)。寧可回 null
+  // 也不要吐一個不存在的日期進時間軸。
+  if (!isValidMonthDay(month, day, year_)) return null;
   return { year: year_, month, day };
 }
 
