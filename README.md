@@ -19,7 +19,7 @@ PackGo Travel is a travel planning application that helps users organize their t
 ## Installation Instructions
 1. Clone the repository:
    ```bash
-   git clone https://github.com/JeffTermited/packgo-travel.git
+   git clone https://github.com/TermitedPGO/packgo-travel.git
    ```
 2. Navigate to the project directory:
    ```bash
