@@ -156,6 +156,7 @@ describe("markCustomerSeen — upsert (markNotCustomer mirror)", () => {
       insert: vi.fn(() => ({
         values: vi.fn(async (v: any) => {
           inserted = v;
+          return [{ insertId: 1 }];
         }),
       })),
     };
@@ -163,5 +164,37 @@ describe("markCustomerSeen — upsert (markNotCustomer mirror)", () => {
     await markCustomerSeen(db, { userId: 9 }, now);
     expect(db.update).not.toHaveBeenCalled();
     expect(inserted).toEqual({ userId: 9, jeffViewedAt: now });
+  });
+
+  it("2026-07-03 任務7 對抗審查 P0 — a concurrent call wins the uq_cp_user insert race: re-applies jeffViewedAt to the recovered profile instead of dropping it", async () => {
+    const capture: { set?: any } = {};
+    let selectCall = 0;
+    const dupErr = Object.assign(new Error("Duplicate entry"), {
+      code: "ER_DUP_ENTRY",
+      errno: 1062,
+    });
+    const db: any = {
+      select: vi.fn(() => ({
+        from: () => ({
+          where: () => {
+            const limit = async () => {
+              selectCall += 1;
+              // 1st call: markCustomerSeen's own "existing?" lookup → none.
+              // 2nd call: insertCustomerProfileSafely's race-recovery re-select.
+              // 3rd call: followMergePointer's own pointer lookup.
+              return selectCall === 1 ? [] : [{ id: 909 }];
+            };
+            return { limit, orderBy: () => ({ limit }) };
+          },
+        }),
+      })),
+      update: updateChain(capture),
+      insert: vi.fn(() => ({
+        values: vi.fn().mockRejectedValue(dupErr),
+      })),
+    };
+    const now = d("2026-07-01T08:00:00Z");
+    await markCustomerSeen(db, { userId: 9 }, now);
+    expect(capture.set).toEqual({ jeffViewedAt: now });
   });
 });

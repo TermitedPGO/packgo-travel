@@ -726,11 +726,16 @@ async function processOneEmail(
       // header 的顯示名("Leslie Green <l@x>" → name: Leslie Green),列表不再
       // 只剩一串 email。只在「全新 INSERT」這一枝:既有卡的 name 絕不覆寫。
       const senderName = parseSenderName(msg.from);
-      const ins = await db.insert(customerProfiles).values({
+      // insertCustomerProfileSafely (2026-07-03, 任務7 對抗審查 P0) — closes the
+      // race window between the `existing` SELECT above and this INSERT; two
+      // concurrent poll runs processing mail from the same brand-new sender
+      // would otherwise both see "no match" and both insert.
+      const { insertCustomerProfileSafely } = await import("../../db/customerProfile");
+      const insertResult = await insertCustomerProfileSafely(db, {
         email: senderEmail,
         ...(senderName ? { name: senderName.slice(0, 255) } : {}),
       });
-      profileId = Number((ins as any)[0]?.insertId ?? 0);
+      profileId = insertResult.profileId;
       emailMatchedProfileId = profileId;
 
       // customer-cockpit Step 2 — a brand-new sender: auto-collect their entire

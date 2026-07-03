@@ -530,6 +530,29 @@ describe("importCaseFile", () => {
     expect(mockDb.insert).toHaveBeenCalled();
   });
 
+  it("confirm mode: a concurrent request wins the customerProfiles insert race — reuses the winner's id instead of erroring out or double-creating (2026-07-03 任務7 對抗審查 P0)", async () => {
+    mockGoodExtraction();
+    const dupErr = Object.assign(new Error("Duplicate entry 'customer@example.com' for key 'uq_cp_email'"), {
+      code: "ER_DUP_ENTRY",
+      errno: 1062,
+    });
+    mockDb.insert.mockImplementationOnce(() => ({
+      values: vi.fn().mockRejectedValueOnce(dupErr),
+    }));
+    selectChain.limit
+      .mockResolvedValueOnce([]) // identity dedup: no match → "creatable"
+      .mockResolvedValueOnce([]) // registered-member lookup: no match
+      .mockResolvedValueOnce([]) // already-imported-by-folder check
+      .mockResolvedValueOnce([{ id: 909 }]) // insertCustomerProfileSafely's race-recovery re-select
+      .mockResolvedValueOnce([{ id: 1, role: "admin" }]); // admin user lookup
+    const result = await importCaseFile({ folderName: "測試資料夾race", markdown: "content" }, "confirm");
+    expect(result.status).toBe("imported");
+    expect(result.profileId).toBe(909);
+    // never a second customerProfiles row from this call — the loser's own
+    // insert failed and was recovered, not retried.
+    expect(mockDb.insert).toHaveBeenCalledTimes(3); // profile (failed) + order + interaction(s)
+  });
+
   it("already-imported LIKE query uses the escaped marker with an ESCAPE clause (folderName containing % or _ must not wildcard-match unrelated orders)", async () => {
     mockInvokeLLM.mockResolvedValueOnce({
       choices: [{ finish_reason: "stop", message: { content: JSON.stringify({

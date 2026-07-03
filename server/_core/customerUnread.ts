@@ -104,8 +104,21 @@ export async function markCustomerSeen(
       .set({ jeffViewedAt: now })
       .where(eq(customerProfiles.id, existing[0].id));
   } else {
-    await db
-      .insert(customerProfiles)
-      .values({ userId: selection.userId, jeffViewedAt: now });
+    // insertCustomerProfileSafely (2026-07-03, 任務7 對抗審查 P0) — a
+    // concurrent call for the same brand-new userId could otherwise both
+    // miss the `existing` SELECT above and both insert. On a recovered race,
+    // re-apply jeffViewedAt so this call's intent isn't silently dropped.
+    const { insertCustomerProfileSafely } = await import("../db/customerProfile");
+    const insertResult = await insertCustomerProfileSafely(
+      db,
+      { userId: selection.userId, jeffViewedAt: now },
+      "userId",
+    );
+    if (insertResult.recoveredFromRace) {
+      await db
+        .update(customerProfiles)
+        .set({ jeffViewedAt: now })
+        .where(eq(customerProfiles.id, insertResult.profileId));
+    }
   }
 }

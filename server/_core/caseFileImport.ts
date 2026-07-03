@@ -388,7 +388,7 @@ export async function importCaseFile(
     const db = await getDb();
     if (!db) return { status: "error" };
 
-    const { customerProfiles, customOrders, customerInteractions, users } = await import(
+    const { customOrders, customerInteractions, users } = await import(
       "../../drizzle/schema"
     );
     const { eq, sql } = await import("drizzle-orm");
@@ -416,13 +416,18 @@ export async function importCaseFile(
       if (!plan.profileId) return { status: "error" };
       profileId = plan.profileId;
     } else {
-      const [profileRes] = await db.insert(customerProfiles).values({
+      // insertCustomerProfileSafely (2026-07-03, 任務7 對抗審查 P0) — closes the
+      // race window between resolveOrIdentifyCustomer's SELECT (above, via
+      // buildCaseImportPlan) and this INSERT; two concurrent imports of the
+      // same new customer would otherwise both see "creatable" and both insert.
+      const { insertCustomerProfileSafely } = await import("../db/customerProfile");
+      const insertResult = await insertCustomerProfileSafely(db, {
         name: plan.profileFields.name,
         email: plan.profileFields.email,
         phone: plan.profileFields.phone,
         source: "manual",
-      } as any);
-      profileId = Number((profileRes as any).insertId);
+      });
+      profileId = insertResult.profileId;
     }
 
     const { generateOrderNumber } = await import("../db/customOrder");

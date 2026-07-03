@@ -96,6 +96,9 @@ export async function ensureCustomerByEmail(
     const { resolveCanonicalForFiling } = await import("../../_core/customerMerge");
     return { id: await resolveCanonicalForFiling(db, existing[0].id, email), created: false };
   }
-  const ins = await db.insert(customerProfiles).values({ email });
-  return { id: Number((ins as any)[0]?.insertId ?? 0), created: true };
+  // insertCustomerProfileSafely (2026-07-03, 任務7 對抗審查 P0) — closes the
+  // race window between the `existing` SELECT above and this INSERT.
+  const { insertCustomerProfileSafely } = await import("../../db/customerProfile");
+  const insertResult = await insertCustomerProfileSafely(db, { email });
+  return { id: insertResult.profileId, created: !insertResult.recoveredFromRace };
 }

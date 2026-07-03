@@ -11,17 +11,33 @@
 // duplicate or wrongly-merged customer cards. See docs/features/
 // customer-cockpit/design-phase1bc.md §共用基礎設施.
 //
-// NOTE: opsTools.ts's create_customer tool itself is NOT rewired to call this
-// (out of caution per task scope — that file's behavior must not change).
-// This module is the equivalent logic, single-sourced for new callers; if a
-// future pass wires create_customer to call this too, the two are already
-// verified equivalent by construction (this file's logic is a straight
-// extraction, not a redesign).
+// NOTE: opsTools.ts's create_customer tool keeps its own copy of the dedup
+// SELECT above (still intentionally not rewired to call resolveOrIdentifyCustomer
+// — out of caution, that file's query behavior must not change). It DOES call
+// this file's insertCustomerProfileSafely (2026-07-03, 任務7 對抗審查 P0) for the
+// actual INSERT, same as every other customerProfiles insert site — see that
+// function's own docstring below.
 
 import { eq, or, sql } from "drizzle-orm";
 import { customerProfiles, users } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { followMergePointer } from "../_core/mergedProfile";
+import { redis } from "../redis";
+
+type DrizzleDb = NonNullable<Awaited<ReturnType<typeof getDb>>>;
+
+/**
+ * MySQL duplicate-key error code (mysql2 surfaces this on UNIQUE collision).
+ * Second copy of the same 2-line check already living in
+ * server/_core/stripeWebhookIdempotency.ts — this repo's established
+ * convention for small cross-file checks (see normalizePhoneForMatch above)
+ * rather than a shared util for something this small.
+ */
+function isDuplicateKeyError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const anyErr = err as { code?: string; errno?: number };
+  return anyErr.code === "ER_DUP_ENTRY" || anyErr.errno === 1062;
+}
 
 /**
  * Normalize a phone number for duplicate matching. Strips pure formatting
@@ -140,4 +156,149 @@ export async function resolveOrIdentifyCustomer(params: {
   }
 
   return { status: "existing", profileId: canonicalId, matchedBy };
+}
+
+export interface SafeProfileInsertResult {
+  profileId: number;
+  /** true when a concurrent insert won a DB-level race and this call
+   * recovered the winner's id instead of creating a duplicate row.
+   *
+   * IMPORTANT (2026-07-03 監工裁決): only userId has a real DB constraint
+   * (uq_cp_user, migration 0064). email intentionally has NO unique index —
+   * a merged-away card (0109 mergedIntoProfileId) keeps its original email so
+   * every filing entrance can still find it by email and follow the pointer;
+   * multiple cards sharing an email is a legitimate architectural state here,
+   * not corruption. A UNIQUE(email) index was proposed and rejected for
+   * exactly this reason (rejects existing data AND breaks every future
+   * merge). So for conflictColumn:"email" this catch branch is currently
+   * unreachable in practice (no constraint ever throws ER_DUP_ENTRY on
+   * email) — kept as defense-in-depth / forward compatibility only. The
+   * actual email-race defense is withCustomerIntakeLock below.
+   */
+  recoveredFromRace: boolean;
+}
+
+/**
+ * Insert a new customerProfiles row, recovering gracefully if a concurrent
+ * insert already won on `conflictColumn`. Every INSERT into customerProfiles
+ * across this codebase should go through here instead of a bare
+ * `db.insert(customerProfiles)` — for conflictColumn:"userId" (uq_cp_user)
+ * this is a real, load-bearing fix; for conflictColumn:"email" see the
+ * IMPORTANT note on SafeProfileInsertResult above.
+ *
+ * On a caught duplicate-key error, re-selects by `conflictColumn` (oldest
+ * row wins, matching every other dedup site in this codebase) and follows
+ * any 0109 merge pointer so the caller never gets handed a hidden/merged-away
+ * id. NEVER silently swallows a non-duplicate-key error, and never guesses
+ * when there's no identifier to recover by — both cases rethrow the original
+ * error so the caller's own error handling (try/catch, TRPCError, etc.) sees
+ * it exactly as before this helper existed.
+ */
+export async function insertCustomerProfileSafely(
+  db: DrizzleDb,
+  values: Record<string, unknown>,
+  conflictColumn: "email" | "userId" = "email",
+): Promise<SafeProfileInsertResult> {
+  try {
+    const res = await db.insert(customerProfiles).values(values as any);
+    const insertId =
+      (res as unknown as [{ insertId?: number }])?.[0]?.insertId ?? (res as any)?.insertId;
+    if (!insertId) throw new Error("[customerProfile] insert returned no insertId");
+    return { profileId: Number(insertId), recoveredFromRace: false };
+  } catch (err) {
+    if (!isDuplicateKeyError(err)) throw err;
+    const keyValue = values[conflictColumn];
+    if (keyValue == null) throw err; // no identifier to recover by — surface the original error
+
+    const [winner] = await db
+      .select({ id: customerProfiles.id })
+      .from(customerProfiles)
+      .where(
+        conflictColumn === "email"
+          ? eq(customerProfiles.email, keyValue as string)
+          : eq(customerProfiles.userId, keyValue as number),
+      )
+      .orderBy(customerProfiles.createdAt)
+      .limit(1);
+    if (!winner) throw err; // shouldn't happen — surface the original error rather than guessing
+
+    const canonicalId = await followMergePointer(db, winner.id);
+    return { profileId: canonicalId, recoveredFromRace: true };
+  }
+}
+
+// ── Redis per-email intake lock (2026-07-03 監工裁決) ───────────────────────
+//
+// The actual defense against the customerProfiles race: customerProfiles.email
+// cannot carry a UNIQUE index (see SafeProfileInsertResult's IMPORTANT note
+// above — 0109's merge design requires a merged-away card to keep its email
+// so filing entrances can still find it and follow the pointer; multiple
+// cards sharing an email is architecturally legitimate here). So the fix has
+// to happen BEFORE the write, not be caught after it: serialize concurrent
+// find-or-create calls for the same email with a Redis lock so only one
+// caller is ever inside the resolveOrIdentifyCustomer→insert critical section
+// for a given email at a time.
+//
+// Mirrors two existing patterns rather than inventing a third:
+//   - server/_core/auditLog.ts's withAuditLogTip — SET NX + a random lockVal +
+//     Lua compare-and-delete release (never delete a lock we no longer own,
+//     e.g. after our own TTL expired and someone else acquired it).
+//   - server/agents/autonomous/gmailPipeline.ts's processWithMessageLock —
+//     fail-open on a Redis error (a blip must never block a real customer;
+//     an occasional duplicate beats a dropped submission).
+// Differs from both on CONTENTION (lock held by someone else, not a Redis
+// error): gmailPipeline just skips (fine — the label re-gates next poll) and
+// auditLog just barrels through unprotected (fine — worst case is an
+// unchained audit row). Website intake must always return a real profileId,
+// so it can't skip; instead this waits briefly for the holder (a find-or-
+// create critical section is a couple of fast SELECT/INSERTs, not an LLM
+// chain) then lets the caller's own fn() — which always starts with a fresh
+// resolveOrIdentifyCustomer — re-check current state once before proceeding.
+
+const INTAKE_LOCK_TTL_SECONDS = 30;
+const INTAKE_LOCK_CONTENTION_WAIT_MS = 400;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Run `fn` with a best-effort exclusive lock on `email` (normalized by the
+ * caller — same value used for the resolveOrIdentifyCustomer lookup inside
+ * fn). Always runs fn exactly once. Never throws on its own account — a
+ * Redis error fails open (runs fn unprotected); a contended lock waits once
+ * then runs fn anyway (fn's own fresh identity check is what actually
+ * decides existing-vs-creatable, not this wrapper).
+ */
+export async function withCustomerIntakeLock<T>(
+  email: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const lockKey = `intake-lock:${email}`;
+  const lockVal = Math.random().toString(36).slice(2);
+  let acquired = false;
+  try {
+    const ok = await redis.set(lockKey, lockVal, "EX", INTAKE_LOCK_TTL_SECONDS, "NX");
+    acquired = ok === "OK";
+  } catch {
+    // Redis unavailable — fail-open, proceed unprotected.
+    acquired = false;
+  }
+  if (!acquired) {
+    // Either contended (someone else holds it) or Redis errored — either way
+    // a short wait gives a genuine holder a chance to finish (and release)
+    // before fn()'s own fresh SELECT runs, without blocking forever.
+    await sleep(INTAKE_LOCK_CONTENTION_WAIT_MS);
+  }
+  try {
+    return await fn();
+  } finally {
+    if (acquired) {
+      // Lua release-only-if-mine: never delete a lock we no longer own
+      // (e.g. our own TTL already expired and a new caller acquired it).
+      const lua =
+        "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
+      await redis.eval(lua, 1, lockKey, lockVal).catch(() => {});
+    }
+  }
 }

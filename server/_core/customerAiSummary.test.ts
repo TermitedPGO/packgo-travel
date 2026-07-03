@@ -323,6 +323,39 @@ describe("ensureProfileId (duplicate-profile audit fix)", () => {
     // default beforeEach mock resolves null
     expect(await ensureProfileId({ userId: 7 })).toBeNull();
   });
+
+  it("2026-07-03 任務7 對抗審查 P0 — a concurrent request wins the uq_cp_user insert race: recovers the winner's id instead of throwing or creating a duplicate row", async () => {
+    let selectCall = 0;
+    const selectResults: unknown[][] = [
+      [], // 1. existing profile linked to userId → none
+      [{ email: "race@example.com" }], // 2. users.email lookup
+      [], // 3. guest-by-email claim lookup → none to claim
+      [{ id: 555 }], // 4. insertCustomerProfileSafely's race-recovery re-select by userId
+      [{ next: null }], // 5. followMergePointer's own select — no pointer, already canonical
+    ];
+    const dupErr = Object.assign(new Error("Duplicate entry"), {
+      code: "ER_DUP_ENTRY",
+      errno: 1062,
+    });
+    const db = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: () => Promise.resolve(selectResults[selectCall++] ?? []),
+            orderBy: () => ({
+              limit: () => Promise.resolve(selectResults[selectCall++] ?? []),
+            }),
+          }),
+        }),
+      }),
+      insert: () => ({
+        values: () => Promise.reject(dupErr),
+      }),
+    };
+    getDbMock.mockResolvedValueOnce(db as any);
+    const id = await ensureProfileId({ userId: 42 });
+    expect(id).toBe(555);
+  });
 });
 
 describe("buildSummaryUserPrompt — 日期 grounding(2026-07-02 年份幻覺)", () => {

@@ -197,6 +197,27 @@ migration 特別決策:0104-0109 的先例都是欄位新增用 INFORMATION_SCHE
 
 ---
 
+## 任務7 對抗審查修復:customerProfiles race condition — 已完成,待 ship
+
+**起因**:任務7(網站渠道進場)對抗審查抓到既有架構級 race:`resolveOrIdentifyCustomer` 是「先 SELECT 查重、呼叫端再視情況 INSERT」的兩步驟模式,`customerProfiles.email` 只有一般索引不是 UNIQUE,兩個近乎同時的請求對同一個新 email 會都看到「查無此人」然後都各自 INSERT,建出重複客人卡(Emerald Young 那個 bug class)。原本低並發、真人手動的呼叫點(opsTools/caseFileImport)風險小,但任務7新增的 `inquiries.ts`(create/createEmergency/addMessage)+ `stripeWebhook.ts` 訂票事件都是網路對外、真的可能並發觸發的路徑,把觸發機率拉高。
+
+**原定修法(已否決)**:`customerProfiles.email` 加 DB UNIQUE 索引 + 一次性清查合併存量重複。**監工裁決否決**:0109 合併設計刻意保留來源卡(被併走)的 email 欄位不清空,讓歸檔入口(收信/寄信/附件/詢問)之後還能靠 email 找到那張卡再跟 `mergedIntoProfileId` 指標走到最終卡——同一個 email 對到多張卡是這個架構內合法、預期的狀態(不是資料損壞),UNIQUE 索引不只會讓 migration 在既有存量上直接失敗,之後**每一次**正常的人工合併(Jeff 手動併卡)都會因為來源卡保留 email 而立刻違反這個約束。DB 層的根治(虛擬欄位 `canonicalEmail`,只在「活躍、未被併走」時有值 + 對那個虛擬欄位加 UNIQUE)技術上可行但需要先癒合存量、且是全新設計,另立獨立任務,不夾帶進這次修復。
+
+**實際修法(兩層)**:
+1. **應用層(次要,defense-in-depth)**:`server/db/customerProfile.ts` 新增 `insertCustomerProfileSafely(db, values, conflictColumn)`——insert 失敗時 catch 重複鍵錯誤(ER_DUP_ENTRY/1062),依 `conflictColumn`("email" 或 "userId")re-select 拿贏家那筆的 id(跟 0109 mergedIntoProfileId 指標走到最終卡),不 bare insert。已套用到全部 13 個目前存在的 `insert(customerProfiles)` 呼叫點(`websiteIntake.ts`、`caseFileImport.ts`、`customerAiSummary.ts` 的 `ensureProfileId`、`opsTools.ts` 的 `create_customer`、`adminCustomers.ts` 三處、`agent/_shared.ts`、`agent/demo.ts`、`agent/profiles.ts` 的 `upsertByIdentifier`(bespoke retry,查重條件橫跨 6 個 identifier 不是單一欄位)、`gmailPipeline.ts`、`customerUnread.ts`、`db/customOrder.ts`)。**注意**:對 `conflictColumn:"email"` 這個分支目前是死碼——因為沒有 UNIQUE(email) 就不會真的丟 ER_DUP_ENTRY——只有 `conflictColumn:"userId"` 是真的在防線上(uq_cp_user 是既有真實約束,migration 0064)。
+2. **真正的 race 防線**:`server/db/customerProfile.ts` 新增 `withCustomerIntakeLock(email, fn)`——Redis per-email 鎖(key `intake-lock:<email>`,`SET NX EX 30`,亂數 lockVal + Lua compare-and-delete 安全釋放),照抄既有兩個成例:`server/_core/auditLog.ts` 的 `withAuditLogTip`(acquire→fn→finally 釋放的骨架)+ `server/agents/autonomous/gmailPipeline.ts` 的 `processWithMessageLock`(Redis 掛時 fail-open,絕不讓客人流程因為 Redis 故障卡住)。跟兩者不同的地方:鎖被佔用時(不是 Redis 錯誤,是真的有人在跑)不能像 gmailPipeline 一樣直接跳過(呼叫端必須拿到一個真的 profileId),也不能像 auditLog 一樣直接不受保護硬闖——而是短暫等待(400ms,讓對方的 select+insert 跑完)後讓 `fn()` 自帶的 `resolveOrIdentifyCustomer` 重新查一次再決定。只套用在 `websiteIntake.ts` 的 `ensureCustomerProfileForWebsiteContact`(監工明確指定的範圍)——這一個函式是 `inquiries.ts` 三處 + `stripeWebhook.ts` 全部任務7新公開路徑唯一共用的進場點,修這裡就覆蓋了那次 review 真正擔心的觸發面;其餘 12 處(opsTools/caseFileImport/adminCustomers/agent 系列/gmailPipeline/customerUnread/customOrder)沿用一貫的低並發假設(真人手動 or agent 依序執行 or 已被 uq_cp_user 保護),沒有加鎖。
+
+**驗證**:`server/db/customerProfile.test.ts`(19 tests,含 `withCustomerIntakeLock` 的 acquire/release、鎖被佔用等待後仍執行、Redis 掛掉 fail-open、fn 拋錯仍正確釋放鎖、release 本身失敗不影響回傳值五種情境)、`websiteIntake.test.ts`(22 tests,含新增「guest 路徑真的被 lock 包住、logged-in 路徑不碰鎖」兩條)、`opsTools.test.ts`(139 tests)、`caseFileImport.test.ts`(38 tests)、`customerAiSummary.test.ts`(24 tests)、`customerUnread.test.ts`(12 tests)、`server/routers/agent/_shared.test.ts`(3 tests,新檔)、`server/routers/agent/profiles.test.ts`(4 tests,新檔)全綠;`tsc --noEmit` 0 錯;完整套件 289 files / 4245 tests 全綠。
+
+**已知限制 / 未做**:
+- `adminCustomers.ts` 三處(`markNotCustomer`/followUpDate 設定/`createManualCustomer`)、`agent/demo.ts`、`gmailPipeline.ts` 的新 sender 建卡邏輯目前**沒有專屬單元測試**(這幾個檔案本身就沒有既有 router/pipeline 級測試骨架,要蓋滿需要 mock 6+ 個 collaborator,跟這次修復的體積不成比例,列為獨立 follow-up,見 task list)。
+- DB 層根治(`canonicalEmail` 虛擬欄位 + UNIQUE)另立獨立任務,需先設計「怎麼癒合存量重複」再動工,這次不夾帶。
+- 監工裁決最後一段提到「7a 其餘要求不變:查卡不分 status/userId → resolveCanonicalForFiling、摘要含本文、#2730002 併回」——這幾項不在本次 race-condition 修復的範圍內(這次對話沒有這幾項的具體 spec/檔案定位),需要另外確認是否已經在其他 session/commit 處理過,或需要開新任務。
+
+**狀態**:待 commit → `pnpm ship`。
+
+---
+
 ## Phase 6、收尾 — 尚未開始(下一個 session 接續)
 
 裁示已收(2026-07-02,詳見 `roadmap-100.md`):14 案存量進場 Jeff 先手拖 1-2 案驗流程、Plaid 收款建議做(已完成)、今日清單放中欄空狀態(已完成)、報價出手前案子要在系統裡的規矩已立。Phase6 自我體檢範圍已擴充(月度 scorecard + 每週 0909 E2E canary 含新增客人鏈 + 每週正確性稽核回饋迴圈)。
