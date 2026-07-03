@@ -49,3 +49,4 @@ Jeff 一句話帶過時，主模型自己補齊另外三部分再執行；補不
 - 2026-05-29 bookkeeping 收尾：progress.md 自稱「全部完成可上線」，並行驗證仍抓到 1 個 P0（硬編碼中文）+ 3 個漂移測試。文件自稱 ready 不可信，一律獨立驗證。
 - 2026-06-08 v672：發生未授權自主部署，因此立 deploy guard（見 `docs/standards/backend.md` §8）。
 - 2026-06-30 Emerald Young 重複客人：insert 前沒查重，因此立 customerProfiles 先查再插（見 `docs/standards/backend.md` §2.2）。
+- 2026-07-02 repo 公開暴露客人 PII：packgo-travel 自 2 月起為 public，8+ 文檔含真實客人姓名、20 個 commit 提及客人（幸 0 fork 無散播）。規則：含客人可識別資訊的內容只進 private repo；任何 repo 轉 public 前先掃 PII（grep 客人名 + secret 模式）與供應商逆向代碼。
