@@ -1668,6 +1668,18 @@ async function startServer() {
     logger.warn({ err }, "[Startup] Failed to init customer backfill worker");
   }
 
+  // customer-cockpit Phase3 3b — monthly draft-eval scoring at 03:00 UTC on
+  // the 1st of the month. Read-only: re-generates sample drafts via the pure
+  // runInquiryAgent, scores with independent judge LLM calls, writes
+  // eval-history.md + an agentMessages digest card. Never sends email.
+  try {
+    const { scheduleMonthlyDraftEval } = await import('../queue');
+    await scheduleMonthlyDraftEval();
+    await import('../draftEvalWorker');
+  } catch (err) {
+    logger.warn({ err }, "[Startup] Failed to schedule monthly draft eval");
+  }
+
   // gmail-thread-filing layer 2 — nightly stale-customer follow-up scan at
   // 05:00 UTC. Surfaces customers who went quiet after we spoke last (quote /
   // itinerary sent, no reply) into Jeff's office inbox. Never emails them.

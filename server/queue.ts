@@ -1313,3 +1313,60 @@ export async function scheduleDailySupplierDetailEnrichment() {
 }
 
 console.log("✅ Supplier detail enrichment queue initialized");
+
+// ============================================================================
+// customer-cockpit Phase3 3b — Monthly Draft Eval cron. On the 1st of every
+// month at 03:00 UTC, re-generate a draft reply (via the pure runInquiryAgent)
+// for a sample of recently-active customers and score each draft with 3
+// independent judge LLM calls (accuracy/tone/completeness + the three
+// already-incidented failure modes: overbold claims, repeating a fulfilled
+// promise, wrong recipient). Read-only/唯讀:no email is ever sent, no draft
+// is ever persisted anywhere customer-visible — see server/_core/draftEval.ts.
+// Pattern照抄 scheduleWeeklyRetrospective / scheduleDailyCustomerSummaries.
+// ============================================================================
+
+export interface DraftEvalJobData {
+  triggeredBy: "schedule" | "manual";
+}
+
+export interface DraftEvalJobResult {
+  ran: boolean;
+  overallScore?: number;
+  sampleSize?: number;
+  degraded?: boolean;
+}
+
+export const draftEvalQueue = new Queue<
+  DraftEvalJobData,
+  DraftEvalJobResult
+>("draft-eval", {
+  connection: redisBullMQ,
+  defaultJobOptions: {
+    attempts: 1, // a missed month just re-runs next month; no retry storms
+    removeOnComplete: { age: 7_776_000, count: 24 }, // 90 days, ~2 years of monthly runs
+    removeOnFail: { age: 7_776_000, count: 24 },
+  },
+});
+
+/** Schedule the monthly draft-eval run at 03:00 UTC on the 1st of the month. */
+export async function scheduleMonthlyDraftEval() {
+  const repeatableJobs = await draftEvalQueue.getRepeatableJobs();
+  for (const job of repeatableJobs) {
+    if (job.name === "monthly-draft-eval-tick") {
+      await draftEvalQueue.removeRepeatableByKey(job.key);
+    }
+  }
+  await draftEvalQueue.add(
+    "monthly-draft-eval-tick",
+    { triggeredBy: "schedule" },
+    {
+      repeat: {
+        pattern: "0 3 1 * *", // 1st of month 03:00 UTC
+      },
+      jobId: "monthly-draft-eval-scheduled",
+    },
+  );
+  console.log("✅ Monthly draft eval scheduled: 1st of month 03:00 UTC");
+}
+
+console.log("✅ Draft eval queue initialized");
