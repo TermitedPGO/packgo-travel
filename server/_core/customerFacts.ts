@@ -117,6 +117,18 @@ function md(d: Date | null): string {
   return MD_LA.format(d); // "6/22"
 }
 
+/** YYYY-MM-DD "today" in the business timezone (America/Los_Angeles). Used to
+ *  ground LLM summary prompts in the current date (2026-07-02 real case: an
+ *  inbound mail about "12/19" with no year was summarized as 2024/12/19 — the
+ *  model guessed a PAST year). en-CA locale renders ISO order. Pure with an
+ *  injected `now` → unit-testable. */
+const DAY_LA_ISO = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/Los_Angeles",
+});
+export function todayLA(now: Date = new Date()): string {
+  return DAY_LA_ISO.format(now); // "2026-07-02"
+}
+
 /** Drop a trailing file extension so the 給了什麼 line reads like the 文件 tab
  *  ("…報價與行程_2026.pdf" → "…報價與行程_2026"). Only the last .ext. */
 function stripDocExt(name: string): string {

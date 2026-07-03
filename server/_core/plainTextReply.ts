@@ -50,6 +50,12 @@ export function stripMarkdownForEmail(input: string | null | undefined): string 
   if (!input) return "";
   let s = input;
 
+  // U+FFFD replacement character (2026-07-02 real case: a QUOTE_REQUEST draft
+  // contained 「麻�煩」 and reached the send-ready card). It is always encoding
+  // corruption, never intended text — drop it. Stripping restores the intended
+  // text when the LLM stuttered a corrupted copy of a char (麻�煩 → 麻煩).
+  s = s.replace(/�/g, "");
+
   // Fenced code blocks ```...``` → keep the inner text, drop the fences.
   s = s.replace(/```[a-zA-Z]*\n?([\s\S]*?)```/g, "$1");
   // Inline code `x` → x

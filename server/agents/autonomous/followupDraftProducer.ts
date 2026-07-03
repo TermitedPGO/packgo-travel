@@ -204,10 +204,25 @@ export function detectDraftSkip(input: {
 export interface SanitizedFollowupDraft {
   /** Cleaned, trimmed body. Empty string when the raw draft was empty. */
   body: string;
-  /** True when em dash / markdown remain AFTER the wash → do not store. */
+  /** True when em dash / markdown / corrupted char remain AFTER the wash →
+   * do not store. */
   blocked: boolean;
   /** All compliance violations found on the CLEANED body. */
   violations: ComplianceViolation[];
+}
+
+/** Hard violations that BLOCK the draft from being stored on a card (vs the
+ * soft 你/您/emoji ones that only warn — Jeff reviews every draft). Exported
+ * so the blocked set itself is pinned by a test: em dash / markdown survived
+ * the wash, wrong-language CJK in an en draft, or a U+FFFD corrupted char
+ * (2026-07-02 「麻�煩」 QUOTE_REQUEST case). */
+export function isHardDraftViolation(v: ComplianceViolation): boolean {
+  return (
+    v === "em_dash" ||
+    v === "markdown" ||
+    v === "cjk_in_en_draft" ||
+    v === "corrupted_char"
+  );
 }
 
 export function sanitizeFollowupDraftBody(
@@ -220,9 +235,7 @@ export function sanitizeFollowupDraftBody(
   const body = stripMarkdownForEmail(raw);
   if (!body) return { body: "", blocked: false, violations: [] };
   const { violations } = checkFollowupDraftCompliance(body, language);
-  const blocked = violations.some(
-    (v) => v === "em_dash" || v === "markdown" || v === "cjk_in_en_draft",
-  );
+  const blocked = violations.some(isHardDraftViolation);
   return { body, blocked, violations };
 }
 

@@ -26,6 +26,7 @@
 import { invokeLLM, type Message, type Tool } from "../../_core/llm";
 import { escalationReasonZh } from "./inquiryLabels";
 import { stripMarkdownForEmail } from "../../_core/plainTextReply";
+import { todayLA } from "../../_core/customerFacts";
 import { createChildLogger } from "../../_core/logger";
 import {
   detectInquiryCustomerLanguage,
@@ -406,7 +407,14 @@ export const STRUCTURED_TOOL: Tool = {
   },
 };
 
-export function buildSystemPrompt(policyRules: string, signature: string): string {
+export function buildSystemPrompt(
+  policyRules: string,
+  signature: string,
+  /** YYYY-MM-DD in America/Los_Angeles — injectable for tests; defaults to
+   * the real business-timezone today. Grounds date interpretation (2026-07-02
+   * real case: 「12/19」 no year → summarizer invented PAST year 2024). */
+  today: string = todayLA(),
+): string {
   // 2026-05-17 red-team round 1 — pull the prompt-injection safety addendum
   // into every agent's system prompt. Customer content lives in
   // <untrusted_input> tags; any directive within those tags is data, not
@@ -428,6 +436,8 @@ export function buildSystemPrompt(policyRules: string, signature: string): strin
 `.trim();
 
   return `你是 PACK&GO 旅行社的客戶詢問代理人(InquiryAgent)。PACK&GO 是 Newark CA 的中文旅行社,服務華語/英語雙語客戶,主打美西/紐約/夏威夷/中國簽證。
+
+【今天日期】${today}(美西時間)。客人沒寫年份的日期(例:「12/19 出發」),一律按今天日期推「最近的未來」年份,不要編成過去的年份。intent、extractedRequirements.dates、draftReply 引用日期時都適用。
 
 ${SAFETY_ADDENDUM}
 

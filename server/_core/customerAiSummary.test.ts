@@ -26,6 +26,7 @@ import {
   parseSummaryResult,
   isSummaryStale,
   generateCustomerAiSummary,
+  buildSummaryUserPrompt,
   pickStaleProfiles,
   resolveSummaryScope,
   ensureProfileId,
@@ -321,5 +322,29 @@ describe("ensureProfileId (duplicate-profile audit fix)", () => {
   it("returns null when the DB is unavailable", async () => {
     // default beforeEach mock resolves null
     expect(await ensureProfileId({ userId: 7 })).toBeNull();
+  });
+});
+
+describe("buildSummaryUserPrompt — 日期 grounding(2026-07-02 年份幻覺)", () => {
+  // 真實案例:2026-07-02 收到講「12/19-12/26」的來信(客人沒寫年份),
+  // 摘要寫成「2024/12/19-12/26」— 模型自己編了一個過去年份。prompt 開頭
+  // 必須先給今天日期 + 「推最近的未來年份」指示。
+  it("開頭帶入今天日期與未來年份指示", () => {
+    const p = buildSummaryUserPrompt("【系統事實】...", "【對話】...", "2026-07-02");
+    expect(p.startsWith("今天日期(美西):2026-07-02。")).toBe(true);
+    expect(p).toContain("最近的未來年份");
+    expect(p).toContain("不要編成過去的年份");
+  });
+
+  it("ledger 與 context 原樣墊在後面(grounding 不動素材)", () => {
+    const p = buildSummaryUserPrompt("LEDGER-X", "CONTEXT-Y", "2026-07-02");
+    expect(p).toContain("LEDGER-X");
+    expect(p).toContain("CONTEXT-Y");
+    expect(p).toContain("nextStep 必須跟「系統事實」一致");
+  });
+
+  it("today 不傳時用美西當日(YYYY-MM-DD 形狀)", () => {
+    const p = buildSummaryUserPrompt("l", "c");
+    expect(p).toMatch(/^今天日期\(美西\):\d{4}-\d{2}-\d{2}。/);
   });
 });

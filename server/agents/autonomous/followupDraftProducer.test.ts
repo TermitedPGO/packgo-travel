@@ -24,6 +24,7 @@ import {
   detectDraftSkip,
   pickLatestInboundClassification,
   sanitizeFollowupDraftBody,
+  isHardDraftViolation,
   buildFollowupDraftRow,
   pickFollowupVariant,
   gatherDeliveryEvidence,
@@ -397,6 +398,26 @@ describe("sanitizeFollowupDraftBody (Finding B: wash BEFORE the card, send chain
   it("Chinese draft with language=zh-TW still enforces 您", () => {
     const out = sanitizeFollowupDraftBody("林先生好,行程幫忙留著了。", "zh-TW");
     expect(out.violations).toContain("missing_formal_you");
+  });
+
+  it("U+FFFD 損毀字元(2026-07-02「麻�煩」實例)在存卡前被洗掉,卡上是乾淨字", () => {
+    const out = sanitizeFollowupDraftBody("您好,麻�煩您確認一下,謝謝您。");
+    expect(out.body).toBe("您好,麻煩您確認一下,謝謝您。");
+    expect(out.body).not.toContain("�");
+    // 洗乾淨後不再有違規 → 不 block(block 是洗失敗時的最後防線)
+    expect(out.blocked).toBe(false);
+    expect(out.violations).not.toContain("corrupted_char");
+  });
+
+  it("blocked 集合把 corrupted_char 當硬違規(萬一洗不掉就不落卡)", () => {
+    expect(isHardDraftViolation("corrupted_char")).toBe(true);
+    expect(isHardDraftViolation("em_dash")).toBe(true);
+    expect(isHardDraftViolation("markdown")).toBe(true);
+    expect(isHardDraftViolation("cjk_in_en_draft")).toBe(true);
+    // soft 違規仍只警告不擋
+    expect(isHardDraftViolation("informal_ni")).toBe(false);
+    expect(isHardDraftViolation("emoji_or_check")).toBe(false);
+    expect(isHardDraftViolation("missing_formal_you")).toBe(false);
   });
 });
 

@@ -64,6 +64,7 @@ import {
   deriveDelivered,
   formatFactsLedger,
   gatherCustomerFacts,
+  todayLA,
   EMPTY_FACTS,
   type CustomerFacts,
   type OrderFact,
@@ -334,5 +335,21 @@ describe("inbound counts exclude unrescued spam (ledger must match what Jeff see
     expect(spam.text).toContain("!= 'rescued'");
     expect(spam.vals).toContain(schema.customerInteractions.classification);
     expect(spam.vals).toContain(schema.customerInteractions.spamVerdict);
+  });
+});
+
+describe("todayLA (摘要日期 grounding,2026-07-02)", () => {
+  it("回傳美西日曆的 YYYY-MM-DD", () => {
+    // 12:00 UTC = 美西早上(同一天)
+    expect(todayLA(new Date("2026-07-02T12:00:00Z"))).toBe("2026-07-02");
+  });
+
+  it("UTC 已過午夜但美西還是前一天 → 用美西日曆(Fly=UTC 的核心用例)", () => {
+    // 2026-07-03 02:00 UTC = 2026-07-02 19:00 PDT
+    expect(todayLA(new Date("2026-07-03T02:00:00Z"))).toBe("2026-07-02");
+  });
+
+  it("無參數也回 YYYY-MM-DD 形狀", () => {
+    expect(todayLA()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 });

@@ -31,7 +31,11 @@ export type ComplianceViolation =
   // 草稿含任何 CJK 字 = 語言錯,與 customerLanguage.checkDraftLanguage 同規則。
   // 只在 caller 明確傳 language="en" 時檢查(內容 fallback 推出的 en 本身
   // 就代表零 CJK,檢查恆過,無意義)。
-  | "cjk_in_en_draft";
+  | "cjk_in_en_draft"
+  // 2026-07-02 QUOTE_REQUEST 草稿含 U+FFFD(「麻�煩」)仍上了 send-ready 卡。
+  // U+FFFD 一律是編碼損毀,絕非客人該看到的字 — 硬違規。上游
+  // stripMarkdownForEmail 已會洗掉,這裡是洗掉失敗時的最後防線。
+  | "corrupted_char";
 
 export interface ComplianceResult {
   ok: boolean;
@@ -46,6 +50,8 @@ const MARKDOWN = /\*\*|^#{1,6}\s/m;
 // high/low surrogate ranges (covers 🎁 etc. without the unicode 'u' flag). CJK
 // text + punctuation sit outside all of these.
 const CHECK_OR_EMOJI = /[☀-➿]|[\uD83C-\uD83E][\uDC00-\uDFFF]/;
+// U+FFFD replacement character — encoding corruption, never legitimate text.
+const CORRUPTED_CHAR = /�/;
 const INFORMAL_NI = /你/;
 const FORMAL_YOU = /您/;
 // Any CJK ideograph (same range detectLanguage keys on). Fallback when the
@@ -72,6 +78,7 @@ export function checkFollowupDraftCompliance(
   if (EM_DASH.test(text)) violations.push("em_dash");
   if (MARKDOWN.test(text)) violations.push("markdown");
   if (CHECK_OR_EMOJI.test(text)) violations.push("emoji_or_check");
+  if (CORRUPTED_CHAR.test(text)) violations.push("corrupted_char");
   const isEnglish = language ? language === "en" : !CJK.test(text);
   if (language === "en" && CJK.test(text)) violations.push("cjk_in_en_draft");
   if (!isEnglish) {

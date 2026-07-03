@@ -164,3 +164,21 @@ describe("stripMarkdownForEmail — 不可誤傷", () => {
     expect(stripMarkdownForEmail(s)).toBe(s);
   });
 });
+
+describe("stripMarkdownForEmail — U+FFFD 損毀字元(2026-07-02 QUOTE_REQUEST 實例)", () => {
+  it("「麻�煩」洗成「麻煩」(prod 送審卡實例,回歸鎖死)", () => {
+    const out = stripMarkdownForEmail("您好,麻�煩您確認一下出發日期,謝謝您。");
+    expect(out).toBe("您好,麻煩您確認一下出發日期,謝謝您。");
+    expect(out).not.toContain("�");
+  });
+
+  it("多個 � 全數移除,英文文本同樣適用", () => {
+    const out = stripMarkdownForEmail("Hi� Leslie, the tour� departs 12/19.");
+    expect(out).toBe("Hi Leslie, the tour departs 12/19.");
+  });
+
+  it("沒有 � 的草稿不受影響", () => {
+    const s = "您好,麻煩您確認一下,謝謝您。";
+    expect(stripMarkdownForEmail(s)).toBe(s);
+  });
+});

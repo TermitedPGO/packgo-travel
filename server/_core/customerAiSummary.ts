@@ -31,6 +31,7 @@ import {
   deriveActions,
   deriveDelivered,
   formatFactsLedger,
+  todayLA,
 } from "./customerFacts";
 
 const log = createChildLogger({ module: "customerAiSummary" });
@@ -82,6 +83,18 @@ const SUMMARY_SCHEMA = {
   strict: true,
 };
 
+/** Pure user-prompt builder — exported for tests. Leads with today's date in
+ *  the business timezone so year-less dates (「12/19」) are grounded to the
+ *  nearest FUTURE year, never a hallucinated past one (2026-07-02 real case:
+ *  a 2026 mail about 12/19 was summarized as 2024/12/19). */
+export function buildSummaryUserPrompt(
+  ledger: string,
+  context: string,
+  today: string = todayLA(),
+): string {
+  return `今天日期(美西):${today}。客人沒寫年份的日期,一律按今天日期推最近的未來年份,不要編成過去的年份。\n\n下面是這位客人的真實資料。請只判斷 wants 與 nextStep 兩欄,nextStep 必須跟「系統事實」一致。\n\n${ledger}\n\n${context}`;
+}
+
 /** Parse + sanitize the LLM's structured output into an AiSummary. */
 export function parseSummaryResult(rawContent: unknown): AiSummary {
   let obj: Record<string, unknown> = {};
@@ -131,7 +144,7 @@ export async function generateCustomerAiSummary(
       { role: "system", content: SUMMARY_SYSTEM },
       {
         role: "user",
-        content: `下面是這位客人的真實資料。請只判斷 wants 與 nextStep 兩欄,nextStep 必須跟「系統事實」一致。\n\n${ledger}\n\n${context}`,
+        content: buildSummaryUserPrompt(ledger, context),
       },
     ],
   });

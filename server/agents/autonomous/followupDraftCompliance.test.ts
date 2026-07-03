@@ -146,3 +146,23 @@ describe("checkFollowupDraftCompliance — cjk_in_en_draft(2026-07-02 Leslie 中
     expect(r.violations).not.toContain("cjk_in_en_draft")
   })
 })
+
+describe("checkFollowupDraftCompliance — corrupted_char(2026-07-02 「麻�煩」QUOTE_REQUEST 實例)", () => {
+  it("U+FFFD 損毀字元 → corrupted_char 違規", () => {
+    const r = checkFollowupDraftCompliance("您好,麻�煩您確認一下,謝謝您。");
+    expect(r.violations).toContain("corrupted_char");
+    expect(r.ok).toBe(false);
+  });
+
+  it("語言無關:en 草稿含 � 一樣抓", () => {
+    const r = checkFollowupDraftCompliance("Hi Leslie, the tour� departs Friday.", "en");
+    expect(r.violations).toContain("corrupted_char");
+  });
+
+  it("乾淨草稿不誤報", () => {
+    expect(violations(JENNY_DRAFT)).not.toContain("corrupted_char");
+    expect(
+      checkFollowupDraftCompliance(EN_DRAFT, "en").violations,
+    ).not.toContain("corrupted_char");
+  });
+});
