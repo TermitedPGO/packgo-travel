@@ -38,8 +38,11 @@ import {
 import {
   findOrderMarginIssues,
   findOrderPromiseIssues,
+  findInvoiceMismatchIssues,
+  extractInvoiceTotal,
   WATCHDOG_MARGIN_THRESHOLD,
   type WatchdogFinding,
+  type OrderInvoiceMismatchFinding,
 } from "../services/customOrderWatchdog";
 import type { CustomOrder } from "../../drizzle/schema";
 
@@ -98,6 +101,83 @@ function bumpCustomerSummary(profileId: number): void {
   void import("../queue")
     .then((m) => m.enqueueCustomerSummaryRefresh(profileId))
     .catch(() => {});
+}
+
+/**
+ * 2a:對這個客人非 draft/cancelled 的訂單,查底下 customerDocuments(type="other"
+ * —— 業務文件/報價/發票/確認書一律落在這個 DB enum 值,靠 customOrderId 歸戶,
+ * 見 drizzle/schema.ts customerDocuments 註解),對每份文件抽文字、跑
+ * extractInvoiceTotal,彙整成 orderId → 候選金額陣列(去重)餵給
+ * findInvoiceMismatchIssues。
+ *
+ * DocRef.kind 刻意填 "invoice"(而不是 d.type 的 "other")—— customerDocsText 的
+ * PDF_KINDS 只認 quote/invoice/confirmation 這幾個顯示層語意標籤,"other" 不在
+ * 集合內解析就不會真的跑,"invoice" 在集合內且不在 PII_KINDS,兩者都要對才會真
+ * 的抽到文字(見 customerDocsText.ts shouldExtract / PDF_KINDS 定義)。
+ *
+ * DB/IO 全包 try/catch:單一客人的文件讀取失敗(壞 PDF、R2 逾時等)不該讓整個
+ * watchdogForCustomer 掛掉 —— 沒有可信文件金額本來就该誠實不叫,跟「查詢失敗」
+ * 效果相同(都是回傳空陣列),不需要特殊錯誤路徑。
+ */
+async function loadInvoiceMismatchFindings(
+  orders: CustomOrder[],
+): Promise<OrderInvoiceMismatchFinding[]> {
+  const candidates = orders.filter((o) => o.status !== "draft" && o.status !== "cancelled");
+  if (candidates.length === 0) return [];
+
+  try {
+    const { getDb } = await import("../db");
+    const drizzleDb = await getDb();
+    if (!drizzleDb) return [];
+    const { customerDocuments } = await import("../../drizzle/schema");
+    const { eq, and, inArray } = await import("drizzle-orm");
+    const { extractDocTextCached } = await import("../_core/customerDocsText");
+
+    const orderIds = candidates.map((o) => o.id);
+    const docRows = await drizzleDb
+      .select({
+        customOrderId: customerDocuments.customOrderId,
+        fileName: customerDocuments.fileName,
+        r2Url: customerDocuments.r2Url,
+      })
+      .from(customerDocuments)
+      .where(
+        and(
+          inArray(customerDocuments.customOrderId, orderIds),
+          eq(customerDocuments.type, "other"),
+        ),
+      );
+
+    const docTotalsByOrderId = new Map<number, number[]>();
+    await Promise.all(
+      docRows.map(async (d) => {
+        if (d.customOrderId == null || !d.r2Url) return;
+        try {
+          const text = await extractDocTextCached({
+            kind: "invoice", // 落在 PDF_KINDS,不在 PII_KINDS → 真的解析(見上方註解)
+            name: d.fileName || "document",
+            url: d.r2Url,
+          });
+          if (!text) return;
+          const amount = extractInvoiceTotal(text);
+          if (amount == null) return;
+          const list = docTotalsByOrderId.get(d.customOrderId) ?? [];
+          if (!list.includes(amount)) list.push(amount);
+          docTotalsByOrderId.set(d.customOrderId, list);
+        } catch (err) {
+          console.warn(
+            `[customOrder] invoice text extract failed for doc ${d.fileName ?? "?"}:`,
+            err,
+          );
+        }
+      }),
+    );
+
+    return findInvoiceMismatchIssues(candidates, docTotalsByOrderId);
+  } catch (err) {
+    console.warn("[customOrder] loadInvoiceMismatchFindings failed:", err);
+    return [];
+  }
 }
 
 /** Recompute balance when total/deposit are known. null when total unknown. */
@@ -160,10 +240,14 @@ export const adminCustomerOrdersRouter = router({
     .query(async ({ input }) => loadOrder(input.orderId)),
 
   /**
-   * 看門狗(Step 5 + v2):這個客人所有訂製單的 deterministic findings。
+   * 看門狗(Step 5 + v2 + 2a):這個客人所有訂製單的 deterministic findings。
    *   - margin 類:售價對不上後台成本(賠錢 / 毛利過薄)。內部把售價/成本/毛利三個
    *     數字攤給 Jeff —— 供應商成本絕不上客人文件,這支不投影到任何客戶面查詢。
    *   - promise 類(v2):答應了還沒寄(報價 7 天 / 確認書 3 天)。
+   *   - invoiceMismatch 類(2a):訂單掛的發票/確認單文件裡的總額跟 totalPrice
+   *     對不上(scorecard 真實案例:劉偉國訂單 $6,635 vs invoice $6,621.40)。
+   *     零 LLM 純字串抓取,見 customOrderWatchdog.extractInvoiceTotal。單一客人
+   *     的文件讀取失敗不讓整支查詢掛掉(loadInvoiceMismatchFindings 自己 try/catch)。
    * admin-only(adminProcedure)。純 deterministic 規則,不改不送。
    * 規則見 server/services/customOrderWatchdog.ts。回傳 kind 判別的聯集陣列,
    * margin(錢)在前。
@@ -174,9 +258,11 @@ export const adminCustomerOrdersRouter = router({
       const profileId = await db.findCustomerProfileId(selToArgs(input));
       if (profileId == null) return [];
       const rows = await db.listCustomOrdersByProfile(profileId);
+      const invoiceMismatchFindings = await loadInvoiceMismatchFindings(rows);
       return [
         ...findOrderMarginIssues(rows, WATCHDOG_MARGIN_THRESHOLD),
         ...findOrderPromiseIssues(rows, new Date()),
+        ...invoiceMismatchFindings,
       ];
     }),
 

@@ -179,7 +179,7 @@ export type OrderPromiseFinding = {
 };
 
 /** 看門狗 findings 聯集(watchdogForCustomer 回傳的元素型別)。 */
-export type WatchdogFinding = OrderMarginFinding | OrderPromiseFinding;
+export type WatchdogFinding = OrderMarginFinding | OrderPromiseFinding | OrderInvoiceMismatchFinding;
 
 export type OrderPromiseInput = {
   id: number;
@@ -289,4 +289,188 @@ export function findOrderPromiseIssues(
     .map((o) => evaluateOrderPromise(o, now))
     .filter((f): f is OrderPromiseFinding => f !== null)
     .sort((a, b) => b.daysWaiting - a.daysWaiting);
+}
+
+// ── 2a:訂單金額對 invoice 看門狗(docs/features/customer-cockpit/design-phase2.md §2a)──
+//
+// 真實案例(scorecard 首考):劉偉國訂單系統顯示 $6,635,真實 invoice 只收了
+// $6,621.40,差 $13.60,系統原本完全看不出來。這條規則把「訂單掛的發票/確認單
+// 文件裡的總額」跟 customOrders.totalPrice 對起來,對不上跳黃卡。
+//
+// 零 LLM、零外部呼叫:純字串掃描抓錨點詞旁的金額。找不到、或找到多個不同數值的
+// 候選 → 誠實不叫(寧可漏掉真的對不上的案例,也不要在看不準的時候亂猜一個數字
+// 出來誤報)。只比對 USD——NT$/¥/€/HK$ 等非美金幣別符號的候選直接排除,不然會把
+// 供應商幣別的金額誤跟系統的美金售價比大小。
+
+/** 中英錨點詞:total 系列金額出現在這些詞之後才算候選。 */
+const INVOICE_TOTAL_ANCHORS = [
+  "grand total",
+  "amount due",
+  "total",
+  "合計",
+  "總金額",
+  "應付總額",
+  "總計",
+];
+
+// 金額 token:可選 $ 前綴,千分位逗號可選,可選小數。「有千分位逗號」的分支放
+// 前面試,但即使沒有逗號、位數超過 3 位(如 6635)也要整段吃下來,不能只吃前 3
+// 位就停 —— 用 `\d+(?:,\d{3})*` 讓逗號變成可選的重複段,首段位數不限。
+const AMOUNT_TOKEN_RE = /(\$)?(\d+(?:,\d{3})*(?:\.\d{1,2})?)/;
+
+// 非 USD 幣別符號:錨點詞後第一個非空白 token 若以這些開頭,代表候選金額是別的
+// 幣別,直接跳過整個候選(不能拿 NT$172,600 跟系統的美金售價比大小)。
+const NON_USD_PREFIX_RE = /^(NT\$|NTD|HK\$|HKD|JPY|¥|€|EUR|£|GBP|CN¥|RMB|CNY)/i;
+
+// 明確標了 USD 的 token(US$ 或後面接 USD 字樣),用來在「錨點後第一個 token 是
+// 別的幣別」時,於同一個 40 字元窗口內繼續找有沒有補記的美金金額 —— 常見雙幣別
+// 寫法「Grand Total: NT$172,600 (approx US$5,393)」,第一個 token 是 NT$,但窗口
+// 裡稍後就補了明確的 US$ 金額,不該整個候選放棄。
+const USD_MARKED_AMOUNT_RE = /US\$\s*(\d+(?:,\d{3})*(?:\.\d{1,2})?)/i;
+
+/**
+ * 純函式、零 LLM、零外部呼叫。在 docText 裡用錨點詞(中英皆有:total / grand
+ * total / amount due / 合計 / 總金額 / 應付總額 / 總計)往後找最近的金額。只認
+ * USD(`$` 前綴或無幣別符號的純數字);錨點詞後第一個 token 若明確標了非 USD
+ * 幣別符號(NT$/¥/€/HK$ 等),優先改抓同一窗口裡有沒有明確標 US$ 的補記金額
+ * (雙幣別文件常見寫法),抓不到才整個候選跳過不採計。
+ *
+ * 「total」是最寬鬆的錨點詞,裸數字風險最高(容易撞到「total number of
+ * travelers: 4」這種非金額語境)—— 這個錨點詞要求候選金額必須帶 `$` 前綴或千分位
+ * 逗號或小數,單純的裸小整數不算數;其餘語意明確的錨點詞(grand total / amount
+ * due / 合計 / 總金額 / 應付總額 / 總計)維持原本寬鬆規則,裸數字也算候選。
+ *
+ * 同一份文字找到 0 個候選、或找到 ≥2 個「數值不同」的候選 → null(找到多個但
+ * 數值相同 — 例如同一總額出現在小計行跟頁尾各一次 — 視為同一個候選,不算模糊)。
+ * 寧可漏掉真的對不上的案例,也不要在看不準的時候亂猜一個數字出來誤報。
+ */
+export function extractInvoiceTotal(docText: string): number | null {
+  if (!docText) return null;
+  const candidates = new Set<number>();
+
+  for (const anchor of INVOICE_TOTAL_ANCHORS) {
+    // 逐一找這個錨點詞在文字裡的每個出現位置(不分大小寫),往後最多看 40 字元
+    // (涵蓋「合計:」「Total: $1,234.56」這類緊接在後的金額,不吃到下一行的無關數字)。
+    // 英數錨點詞前加 \b(word boundary),避免「Subtotal」裡的「total」被誤判成
+    // 獨立的 total 錨點。中文字元不是 ASCII \w,\b 在中文錨點詞前完全不會 match
+    // (Node/ICU regex 的 \b 只認 ASCII word boundary),所以中文錨點詞不加 \b,
+    // 只對純 ASCII 字母的錨點詞加這個前綴守門。
+    const isAsciiWord = /^[a-z]+$/i.test(anchor.replace(/\s+/g, ""));
+    const escaped = anchor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const anchorRe = new RegExp(isAsciiWord ? `\\b${escaped}` : escaped, "gi");
+    let m: RegExpExecArray | null;
+    while ((m = anchorRe.exec(docText)) !== null) {
+      const after = docText.slice(m.index + m[0].length, m.index + m[0].length + 40);
+      // 幣別守門:錨點詞後(跳過冒號/空白等分隔符)第一個非空白 token 若明確標了
+      // 非 USD 幣別符號,先試著在同一窗口裡找明確標 US$ 的補記金額(雙幣別常見
+      // 寫法),找不到才整個候選跳過。
+      const trimmed = after.replace(/^[\s:：\-–—]+/, "");
+      if (NON_USD_PREFIX_RE.test(trimmed)) {
+        const usdMatch = USD_MARKED_AMOUNT_RE.exec(after);
+        if (!usdMatch) continue;
+        const n = Number(usdMatch[1].replace(/,/g, ""));
+        if (Number.isFinite(n)) candidates.add(Math.round(n * 100) / 100);
+        continue;
+      }
+
+      const amountMatch = AMOUNT_TOKEN_RE.exec(after);
+      if (!amountMatch) continue;
+      // 「total」錨點詞語意最模糊,容易撞到「total number of travelers: 4」這種
+      // 計數語境 —— 要求帶 $ 前綴或千分位逗號或小數,才算合法金額候選;裸小整數
+      // 不算。其餘錨點詞(grand total / amount due / 中文詞)語意已經明確是金額,
+      // 維持原本寬鬆規則。
+      if (anchor === "total") {
+        const looksLikeMoney = amountMatch[1] === "$" || /[,.]/.test(amountMatch[2]);
+        if (!looksLikeMoney) continue;
+      }
+      const numStr = amountMatch[2].replace(/,/g, "");
+      const n = Number(numStr);
+      if (Number.isFinite(n)) candidates.add(Math.round(n * 100) / 100);
+    }
+  }
+
+  if (candidates.size !== 1) return null; // 0 個或多個不同數值 → 誠實不猜
+  return [...candidates][0];
+}
+
+export type OrderInvoiceMismatchFinding = {
+  /** 判別欄:發票對不上類 finding。 */
+  kind: "invoiceMismatch";
+  orderId: number;
+  orderNumber: string;
+  title: string;
+  status: string;
+  /** 目前只有黃燈:提醒 Jeff 核對,不是財務紅線(算法規則本身不知道誰對誰錯)。 */
+  level: "yellow";
+  /** customOrders.totalPrice,已轉 number。 */
+  systemAmount: number;
+  /** 文件裡抽到的唯一候選金額。 */
+  documentAmount: number;
+  currency: string;
+};
+
+/** 發票金額比對的容差(四捨五入誤差),小於此差距視為同一個數字,不叫。 */
+const INVOICE_MISMATCH_TOLERANCE = 1;
+
+export type OrderInvoiceMismatchInput = {
+  id: number;
+  orderNumber: string;
+  title: string;
+  status: string;
+  totalPrice: string | number | null;
+  currency: string;
+};
+
+/**
+ * 單張單的規則。`invoiceTotals` 是呼叫端已經對這張單底下每份文件跑過
+ * `extractInvoiceTotal`、過濾掉 null、對數值去重之後的陣列 —— 這支不重複做這件事。
+ * 長度不是剛好 1(0 個沒有可信文件金額;多個不同數值代表模糊)→ null。currency
+ * 非 USD → null(不比對非美金訂單)。totalPrice 轉不出數字 → null。唯一候選與
+ * totalPrice 差距 < 1(容差)→ null。draft/cancelled 跳過(同 SKIP_STATUSES)。
+ */
+export function evaluateInvoiceMismatch(
+  order: OrderInvoiceMismatchInput,
+  invoiceTotals: number[],
+): OrderInvoiceMismatchFinding | null {
+  if (SKIP_STATUSES.has(order.status)) return null;
+  if (order.currency !== "USD") return null;
+
+  const total = toNum(order.totalPrice);
+  if (total == null) return null;
+
+  if (invoiceTotals.length !== 1) return null; // 0 個或多個不同候選 → 模糊,不叫
+  const documentAmount = invoiceTotals[0];
+
+  if (Math.abs(total - documentAmount) < INVOICE_MISMATCH_TOLERANCE) return null;
+
+  return {
+    kind: "invoiceMismatch",
+    orderId: order.id,
+    orderNumber: order.orderNumber,
+    title: order.title,
+    status: order.status,
+    level: "yellow",
+    systemAmount: total,
+    documentAmount,
+    currency: order.currency,
+  };
+}
+
+/**
+ * 一個客人所有訂製單的發票對不上 findings。`docTotalsByOrderId` 是呼叫端已經
+ * 對每張單底下所有文件跑過 extractInvoiceTotal + 過濾 null + 去重的結果
+ * (orderId → 候選金額陣列)。排序:落差最大的排最前面(跟 margin 類「最差的
+ * 最上面」同一個直覺 —— 落差越大越該優先看)。
+ */
+export function findInvoiceMismatchIssues(
+  orders: OrderInvoiceMismatchInput[],
+  docTotalsByOrderId: Map<number, number[]>,
+): OrderInvoiceMismatchFinding[] {
+  const findings = orders
+    .map((o) => evaluateInvoiceMismatch(o, docTotalsByOrderId.get(o.id) ?? []))
+    .filter((f): f is OrderInvoiceMismatchFinding => f !== null);
+
+  return findings.sort(
+    (a, b) => Math.abs(b.systemAmount - b.documentAmount) - Math.abs(a.systemAmount - a.documentAmount),
+  );
 }

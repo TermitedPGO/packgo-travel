@@ -3509,6 +3509,12 @@ export const en = {
           confirmationUnsent: 'Deposit received, confirmation still not sent',
           days: '{n} days now',
         },
+        // 2a — order amount doesn't match the invoice/confirmation document total.
+        invoiceMismatch: {
+          title: 'Amount mismatch',
+          systemAmount: 'System shows',
+          documentAmount: 'Document shows',
+        },
       },
       profile: {
         notProvided: 'Not provided',

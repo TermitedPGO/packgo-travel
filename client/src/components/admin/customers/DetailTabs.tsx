@@ -82,6 +82,7 @@ function MarginWatchdogBanner({ customer: c }: { customer: AdaptedCustomer }) {
   const all = q.data ?? []
   const findings = all.filter((f) => f.kind === "margin")
   const promises = all.filter((f) => f.kind === "promise")
+  const invoiceMismatches = all.filter((f) => f.kind === "invoiceMismatch")
   if (all.length === 0) return null
   return (
     <div className="space-y-2">
@@ -139,6 +140,33 @@ function MarginWatchdogBanner({ customer: c }: { customer: AdaptedCustomer }) {
             </div>
             <div className="text-[11.5px] text-gray-600 mt-0.5 truncate">
               {f.title} · {t("admin.customers.watchdog.promise.days", { n: f.daysWaiting })}
+            </div>
+          </div>
+        </div>
+      ))}
+      {/* invoiceMismatch 類(2a)— 訂單金額對不上文件裡的發票/確認單總額,黃燈提醒
+          Jeff 核對(規則本身不知道誰對誰錯,只負責發現落差)。 */}
+      {invoiceMismatches.map((f) => (
+        <div
+          key={`invoiceMismatch-${f.orderId}`}
+          className="rounded-xl border border-amber-300 bg-amber-50/50 p-3 flex items-start gap-2.5"
+        >
+          <TriangleAlert className="w-5 h-5 flex-shrink-0 mt-0.5 text-amber-600" />
+          <div className="flex-1 min-w-0">
+            <div className="text-[13px] font-semibold text-gray-900">
+              {k("invoiceMismatch.title")}
+              <span className="text-[10px] text-gray-400 font-normal ml-1.5">{f.orderNumber}</span>
+            </div>
+            <div className="text-[11.5px] text-gray-600 mt-0.5 truncate">{f.title}</div>
+            <div className="flex flex-wrap gap-x-5 gap-y-1 mt-1.5 text-[12px] text-gray-700">
+              <span>
+                {k("invoiceMismatch.systemAmount")}{" "}
+                <span className="font-semibold text-gray-900">{fmtMoney(f.systemAmount, f.currency)}</span>
+              </span>
+              <span>
+                {k("invoiceMismatch.documentAmount")}{" "}
+                <span className="font-semibold text-amber-600">{fmtMoney(f.documentAmount, f.currency)}</span>
+              </span>
             </div>
           </div>
         </div>

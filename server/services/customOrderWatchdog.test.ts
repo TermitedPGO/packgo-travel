@@ -20,8 +20,12 @@ import {
   WATCHDOG_QUOTE_PROMISE_DAYS,
   WATCHDOG_CONFIRMATION_PROMISE_DAYS,
   WATCHDOG_CONFIRMATION_EXEMPT_CATEGORIES,
+  extractInvoiceTotal,
+  evaluateInvoiceMismatch,
+  findInvoiceMismatchIssues,
   type OrderMarginInput,
   type OrderPromiseInput,
+  type OrderInvoiceMismatchInput,
 } from "./customOrderWatchdog";
 
 function order(over: Partial<OrderMarginInput> = {}): OrderMarginInput {
@@ -389,5 +393,189 @@ describe("findOrderPromiseIssues — 多張排序", () => {
 
   it("空輸入 → 空陣列", () => {
     expect(findOrderPromiseIssues([], NOW)).toEqual([]);
+  });
+});
+
+// ── 2a:訂單金額對 invoice 看門狗 ───────────────────────────────────────────
+
+describe("extractInvoiceTotal — 抓文字裡的總額", () => {
+  it("英文 Total: $1,234.56 → 抓到金額", () => {
+    expect(extractInvoiceTotal("Subtotal: $1,000.00\nTotal: $1,234.56")).toBe(1234.56);
+  });
+
+  it("中文 合計:NT$ 或美金皆有時只認美金 — 純中文合計 6,621.40", () => {
+    expect(extractInvoiceTotal("項目明細...\n合計: $6,621.40")).toBe(6621.40);
+  });
+
+  it("Grand Total 錨點也認得", () => {
+    expect(extractInvoiceTotal("Item A $500\nGrand Total: $500.00")).toBe(500);
+  });
+
+  it("Amount Due 錨點也認得", () => {
+    expect(extractInvoiceTotal("Amount Due: 999.99")).toBe(999.99);
+  });
+
+  it("找不到任何錨點金額 → null", () => {
+    expect(extractInvoiceTotal("這是一份沒有總額的行程表,只有景點介紹。")).toBeNull();
+  });
+
+  it("空字串 → null", () => {
+    expect(extractInvoiceTotal("")).toBeNull();
+  });
+
+  it("找到兩個不同數值的候選 → null(模糊,不猜)", () => {
+    const text = "小計 Total: $100.00\n...\n總計: $200.00";
+    expect(extractInvoiceTotal(text)).toBeNull();
+  });
+
+  it("同一數值出現兩次(小計行+頁尾)不算模糊,回傳那個值", () => {
+    const text = "Total: $6,621.40\n...\n合計: $6,621.40";
+    expect(extractInvoiceTotal(text)).toBe(6621.40);
+  });
+
+  it("NT$ 非美金幣別 → 不當候選,整份找不到就 null", () => {
+    expect(extractInvoiceTotal("總計: NT$172,600")).toBeNull();
+  });
+
+  it("NT$ 候選被排除,但同時有一個 USD 候選 → 採 USD 那個", () => {
+    const text = "供應商合計: NT$172,600\nTotal: $5,393.00";
+    expect(extractInvoiceTotal(text)).toBe(5393);
+  });
+
+  it("同一行雙幣別「Grand Total: NT$X (approx US$Y)」→ 抓到補記的 US$ 金額", () => {
+    expect(extractInvoiceTotal("Grand Total: NT$172,600 (approx US$5,393)")).toBe(5393);
+  });
+
+  it("同一行雙幣別中文「Total: NT$X(約合 US$Y)」→ 抓到補記的 US$ 金額", () => {
+    expect(extractInvoiceTotal("Total: NT$172,600(約合 US$5,393)")).toBe(5393);
+  });
+
+  it("日圓/歐元/港幣符號同樣不當候選", () => {
+    expect(extractInvoiceTotal("Total: ¥50,000")).toBeNull();
+    expect(extractInvoiceTotal("Total: €500.00")).toBeNull();
+    expect(extractInvoiceTotal("Total: HK$3,000")).toBeNull();
+  });
+
+  it("千分位逗號格式支援", () => {
+    expect(extractInvoiceTotal("Total: $12,345.67")).toBe(12345.67);
+  });
+
+  it("無幣別符號的純數字也算 USD 候選", () => {
+    expect(extractInvoiceTotal("應付總額 6635")).toBe(6635);
+  });
+
+  it("「total」錨點詞撞到計數語境(非金額)→ 不當候選,回 null", () => {
+    expect(
+      extractInvoiceTotal("Total number of travelers: 4. Please confirm before Friday."),
+    ).toBeNull();
+  });
+
+  it("「total」錨點詞裸數字但帶千分位逗號 → 仍算合法金額候選", () => {
+    expect(extractInvoiceTotal("Total: 1,234")).toBe(1234);
+  });
+});
+
+function invoiceOrder(
+  over: Partial<OrderInvoiceMismatchInput> = {},
+): OrderInvoiceMismatchInput {
+  return {
+    id: 1,
+    orderNumber: "ORD-2026-0001",
+    title: "劉偉國家庭團",
+    status: "confirmed",
+    totalPrice: "6635.00",
+    currency: "USD",
+    ...over,
+  };
+}
+
+describe("evaluateInvoiceMismatch — scorecard 真實案例重現", () => {
+  it("系統 $6,635 vs 文件 $6,621.40(差 $13.60)→ 叫,黃燈", () => {
+    const f = evaluateInvoiceMismatch(invoiceOrder(), [6621.4]);
+    expect(f).not.toBeNull();
+    expect(f!.kind).toBe("invoiceMismatch");
+    expect(f!.level).toBe("yellow");
+    expect(f!.systemAmount).toBe(6635);
+    expect(f!.documentAmount).toBe(6621.4);
+  });
+
+  it("只差 0.5(小於 1 容差)→ 不叫", () => {
+    expect(
+      evaluateInvoiceMismatch(invoiceOrder({ totalPrice: "6635.00" }), [6634.5]),
+    ).toBeNull();
+  });
+
+  it("invoiceTotals 空陣列(沒有可信文件金額)→ 不叫", () => {
+    expect(evaluateInvoiceMismatch(invoiceOrder(), [])).toBeNull();
+  });
+
+  it("invoiceTotals 有兩個不同數值(模糊)→ 不叫", () => {
+    expect(evaluateInvoiceMismatch(invoiceOrder(), [6621.4, 6600])).toBeNull();
+  });
+
+  it("draft 狀態 → 不叫", () => {
+    expect(
+      evaluateInvoiceMismatch(invoiceOrder({ status: "draft" }), [6621.4]),
+    ).toBeNull();
+  });
+
+  it("cancelled 狀態 → 不叫", () => {
+    expect(
+      evaluateInvoiceMismatch(invoiceOrder({ status: "cancelled" }), [6621.4]),
+    ).toBeNull();
+  });
+
+  it("非 USD 幣別 → 不叫(不比對非美金訂單)", () => {
+    expect(
+      evaluateInvoiceMismatch(invoiceOrder({ currency: "TWD" }), [6621.4]),
+    ).toBeNull();
+  });
+
+  it("totalPrice 缺 → 不叫", () => {
+    expect(evaluateInvoiceMismatch(invoiceOrder({ totalPrice: null }), [6621.4])).toBeNull();
+  });
+
+  it("totalPrice 空字串 → 不叫", () => {
+    expect(evaluateInvoiceMismatch(invoiceOrder({ totalPrice: "" }), [6621.4])).toBeNull();
+  });
+
+  it("totalPrice 與唯一候選完全吻合 → 不叫", () => {
+    expect(evaluateInvoiceMismatch(invoiceOrder({ totalPrice: "6621.40" }), [6621.4])).toBeNull();
+  });
+
+  it("吃 number 型 totalPrice 也行", () => {
+    const f = evaluateInvoiceMismatch(invoiceOrder({ totalPrice: 6635 }), [6621.4]);
+    expect(f!.systemAmount).toBe(6635);
+  });
+});
+
+describe("findInvoiceMismatchIssues — 多張單混合", () => {
+  it("只回該叫的那些,落差大的排前面", () => {
+    const orders: OrderInvoiceMismatchInput[] = [
+      invoiceOrder({ id: 1, totalPrice: "6635.00" }), // 差 13.60 → 叫
+      invoiceOrder({ id: 2, totalPrice: "1000.00" }), // 吻合 → 不叫
+      invoiceOrder({ id: 3, totalPrice: "5000.00" }), // 差 100 → 叫(落差更大)
+      invoiceOrder({ id: 4, status: "draft", totalPrice: "9999.00" }), // 跳過
+      invoiceOrder({ id: 5, totalPrice: "2000.00" }), // 沒有文件金額 → 不叫
+    ];
+    const docTotals = new Map<number, number[]>([
+      [1, [6621.4]],
+      [2, [1000.0]],
+      [3, [4900.0]],
+      [4, [9000.0]],
+      [5, []],
+    ]);
+    const out = findInvoiceMismatchIssues(orders, docTotals);
+    expect(out.map((f) => f.orderId)).toEqual([3, 1]);
+  });
+
+  it("空輸入 → 空陣列", () => {
+    expect(findInvoiceMismatchIssues([], new Map())).toEqual([]);
+  });
+
+  it("訂單沒有對應 docTotals key(未查過)→ 視為空陣列,不叫", () => {
+    expect(
+      findInvoiceMismatchIssues([invoiceOrder()], new Map()),
+    ).toEqual([]);
   });
 });

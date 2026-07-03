@@ -3472,6 +3472,12 @@ export const zhTW = {
           confirmationUnsent: '訂金收了確認書還沒寄',
           days: '過了 {n} 天',
         },
+        // 2a — 訂單金額對不上文件裡的發票/確認單總額。
+        invoiceMismatch: {
+          title: '金額對不上',
+          systemAmount: '系統顯示',
+          documentAmount: '文件顯示',
+        },
       },
       profile: {
         notProvided: '未提供',
