@@ -51,6 +51,7 @@ vi.mock("../../../drizzle/schema", () => ({
   customerDocuments: { customerProfileId: "cpid", type: "t", fileName: "fn", expiresAt: "ea", isCurrent: "ic", uploadedAt: "ua" },
   customOrders: { customerProfileId: "cpid" },
   customerChatMessages: { customerProfileId: "cpid" },
+  customerPromises: { id: "id", customerProfileId: "cpid", fulfilledAt: "fa", dismissedAt: "da" },
   users: { id: "id", email: "e", name: "n" },
 }));
 
@@ -1551,5 +1552,83 @@ describe("merge_into_customer — 同案聯絡人併檔 (2026-07-01: leslie@ 其
       expect(out.error).toContain("查無此人");
       expect(lastDb.update).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("mark_promise — customer-cockpit Phase3 3a 承諾兌現/撤銷 (2026-07-03)", () => {
+  const PINNED_PROFILE_ID = 42;
+
+  it("action:fulfilled 正確寫入 fulfilledAt", async () => {
+    rowQueue = [[{ id: 7, customerProfileId: PINNED_PROFILE_ID }]];
+    const out = JSON.parse(
+      await executeWriteTool("mark_promise", { promiseId: 7, action: "fulfilled" }, PINNED_PROFILE_ID),
+    );
+    expect(out.success).toBe(true);
+    expect(out.action).toBe("fulfilled");
+    expect(lastDb.update).toHaveBeenCalled();
+    expect(lastDb.set).toHaveBeenCalledWith(
+      expect.objectContaining({ fulfilledAt: expect.any(Date) }),
+    );
+    expect(lastDb.set.mock.calls[0][0]).not.toHaveProperty("dismissedAt");
+  });
+
+  it("action:dismissed 正確寫入 dismissedAt", async () => {
+    rowQueue = [[{ id: 8, customerProfileId: PINNED_PROFILE_ID }]];
+    const out = JSON.parse(
+      await executeWriteTool("mark_promise", { promiseId: 8, action: "dismissed" }, PINNED_PROFILE_ID),
+    );
+    expect(out.success).toBe(true);
+    expect(out.action).toBe("dismissed");
+    expect(lastDb.set).toHaveBeenCalledWith(
+      expect.objectContaining({ dismissedAt: expect.any(Date) }),
+    );
+    expect(lastDb.set.mock.calls[0][0]).not.toHaveProperty("fulfilledAt");
+  });
+
+  it("跨客戶守門:promise 屬於別的客人時拒絕,不寫入", async () => {
+    rowQueue = [[{ id: 9, customerProfileId: 999 }]]; // belongs to a different customer
+    const out = JSON.parse(
+      await executeWriteTool("mark_promise", { promiseId: 9, action: "fulfilled" }, PINNED_PROFILE_ID),
+    );
+    expect(out.success).toBeUndefined();
+    expect(out.error).toBeTruthy();
+    expect(lastDb.update).not.toHaveBeenCalled();
+  });
+
+  it("promiseId 不存在 → 結構化錯誤,不寫入", async () => {
+    rowQueue = [[]]; // lookup misses
+    const out = JSON.parse(
+      await executeWriteTool("mark_promise", { promiseId: 12345, action: "fulfilled" }, PINNED_PROFILE_ID),
+    );
+    expect(out.success).toBeUndefined();
+    expect(out.error).toContain("12345");
+    expect(lastDb.update).not.toHaveBeenCalled();
+  });
+
+  it("沒有釘住客人 → 拒絕,不查 DB", async () => {
+    const out = JSON.parse(
+      await executeWriteTool("mark_promise", { promiseId: 7, action: "fulfilled" }, undefined),
+    );
+    expect(out.error).toBeTruthy();
+    expect(lastDb.update).not.toHaveBeenCalled();
+  });
+
+  it("action 不是 fulfilled/dismissed → 結構化錯誤", async () => {
+    rowQueue = [[{ id: 7, customerProfileId: PINNED_PROFILE_ID }]];
+    const out = JSON.parse(
+      await executeWriteTool("mark_promise", { promiseId: 7, action: "cancelled" }, PINNED_PROFILE_ID),
+    );
+    expect(out.success).toBeUndefined();
+    expect(out.error).toBeTruthy();
+    expect(lastDb.update).not.toHaveBeenCalled();
+  });
+
+  it("工具描述提到讓 LLM 知道 Jeff 明確表達兌現/撤銷時才呼叫", () => {
+    const tool = WRITE_TOOLS.find((t) => t.name === "mark_promise")!;
+    expect(tool).toBeTruthy();
+    expect(tool.description).toContain("明確");
+    const props = (tool.input_schema as any).properties;
+    expect(props.promiseId).toBeTruthy();
+    expect(props.action).toBeTruthy();
   });
 });

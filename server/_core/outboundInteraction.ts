@@ -24,7 +24,7 @@ export async function recordOutboundEmailInteraction(args: {
   summary: string;
   /** who produced the text — human-approved drafts vs pure auto. */
   generatedBy: "human" | "ai_auto" | "ai_draft_human_approved";
-}): Promise<{ recorded: boolean }> {
+}): Promise<{ recorded: boolean; interactionId?: number; customerProfileId?: number }> {
   try {
     const db = await getDb();
     if (!db) return { recorded: false };
@@ -47,7 +47,7 @@ export async function recordOutboundEmailInteraction(args: {
       return { recorded: false };
     }
 
-    await db.insert(customerInteractions).values({
+    const result = await db.insert(customerInteractions).values({
       customerProfileId: profile.id,
       channel: "email",
       direction: "outbound",
@@ -56,7 +56,12 @@ export async function recordOutboundEmailInteraction(args: {
       generatedBy: args.generatedBy,
       agentName: "inquiry",
     });
-    return { recorded: true };
+    // ResultSetHeader.insertId — same accessor pattern as server/db.ts /
+    // auditLog.ts. Returned so callers (e.g. escalationBox promise
+    // extraction) can attach to *this* row instead of re-querying "latest
+    // interaction for this profile", which races under concurrent writes.
+    const interactionId = Number((result as unknown as [{ insertId: number }])[0]?.insertId ?? 0) || undefined;
+    return { recorded: true, interactionId, customerProfileId: profile.id };
   } catch (err) {
     log.warn(
       { err, customerEmail: args.customerEmail },

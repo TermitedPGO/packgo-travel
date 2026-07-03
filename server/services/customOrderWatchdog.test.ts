@@ -24,11 +24,14 @@ import {
   evaluateInvoiceMismatch,
   findInvoiceMismatchIssues,
   matchPaymentsToOrders,
+  evaluateCommitment,
+  findCommitmentIssues,
   type OrderMarginInput,
   type OrderPromiseInput,
   type OrderInvoiceMismatchInput,
   type OrderPaymentMatchInput,
   type BankTransactionInput,
+  type CommitmentInput,
 } from "./customOrderWatchdog";
 
 function order(over: Partial<OrderMarginInput> = {}): OrderMarginInput {
@@ -813,5 +816,141 @@ describe("matchPaymentsToOrders — 空輸入", () => {
 
   it("空交易 → 空陣列", () => {
     expect(matchPaymentsToOrders([payOrder()], [])).toEqual([]);
+  });
+});
+
+// ── 3a:承諾追蹤(commitment)────────────────────────────────────────────────
+//
+// 蓋:已兌現不叫 / 已撤銷不叫 / dueDate 為 null 永不叫 / 剛好今天到期的邊界
+// (定義:todayLA === dueDate 尚未算過期,daysOverdue 必須 >= 1)/ 明確過期
+// daysOverdue 正確 / 多筆過期排序(最久過期在前)。
+
+function promise(over: Partial<CommitmentInput> = {}): CommitmentInput {
+  return {
+    id: 1,
+    customerProfileId: 42,
+    customOrderId: null,
+    promiseText: "週五可以取件",
+    dueDate: "2026-06-25",
+    fulfilledAt: null,
+    dismissedAt: null,
+    sourceInteractionId: 500,
+    ...over,
+  };
+}
+
+describe("evaluateCommitment — 已兌現/已撤銷不叫", () => {
+  it("fulfilledAt 有值 → null(不管 dueDate 多過期)", () => {
+    const out = evaluateCommitment(
+      promise({ dueDate: "2026-01-01", fulfilledAt: new Date("2026-06-01") }),
+      "2026-07-03",
+    );
+    expect(out).toBeNull();
+  });
+
+  it("dismissedAt 有值 → null(不管 dueDate 多過期)", () => {
+    const out = evaluateCommitment(
+      promise({ dueDate: "2026-01-01", dismissedAt: new Date("2026-06-01") }),
+      "2026-07-03",
+    );
+    expect(out).toBeNull();
+  });
+
+  it("fulfilledAt 為字串也算有值 → null", () => {
+    const out = evaluateCommitment(
+      promise({ dueDate: "2026-01-01", fulfilledAt: "2026-06-01T00:00:00Z" }),
+      "2026-07-03",
+    );
+    expect(out).toBeNull();
+  });
+});
+
+describe("evaluateCommitment — dueDate 為 null 永不叫", () => {
+  it("dueDate 為 null → null(抽不出日期就沒有判斷基準)", () => {
+    const out = evaluateCommitment(promise({ dueDate: null }), "2026-07-03");
+    expect(out).toBeNull();
+  });
+});
+
+describe("evaluateCommitment — 剛好今天到期的邊界", () => {
+  it("dueDate === todayLA(今天就是到期日當天)→ 尚未算過期,回 null", () => {
+    const out = evaluateCommitment(promise({ dueDate: "2026-07-03" }), "2026-07-03");
+    expect(out).toBeNull();
+  });
+
+  it("dueDate 是明天(還沒到期)→ null", () => {
+    const out = evaluateCommitment(promise({ dueDate: "2026-07-04" }), "2026-07-03");
+    expect(out).toBeNull();
+  });
+
+  it("dueDate 是昨天(隔天才算過期)→ 過期,daysOverdue = 1", () => {
+    const out = evaluateCommitment(promise({ dueDate: "2026-07-02" }), "2026-07-03");
+    expect(out).not.toBeNull();
+    expect(out!.daysOverdue).toBe(1);
+  });
+});
+
+describe("evaluateCommitment — 明確過期", () => {
+  it("dueDate 是好幾天前 → 回 finding,daysOverdue 數字正確", () => {
+    const out = evaluateCommitment(promise({ dueDate: "2026-06-25" }), "2026-07-03");
+    expect(out).not.toBeNull();
+    expect(out!.daysOverdue).toBe(8);
+    expect(out!.kind).toBe("commitment");
+    expect(out!.level).toBe("yellow");
+    expect(out!.promiseId).toBe(1);
+    expect(out!.customerProfileId).toBe(42);
+    expect(out!.dueDate).toBe("2026-06-25");
+  });
+
+  it("回傳的 finding 不含 orderId/orderNumber/title(客人層級,不是訂單層級)", () => {
+    const out = evaluateCommitment(promise({ dueDate: "2026-06-25" }), "2026-07-03");
+    expect(out).not.toHaveProperty("orderId");
+    expect(out).not.toHaveProperty("orderNumber");
+    expect(out).not.toHaveProperty("title");
+  });
+
+  it("customOrderId 為 null 時原樣帶出", () => {
+    const out = evaluateCommitment(
+      promise({ dueDate: "2026-06-25", customOrderId: null }),
+      "2026-07-03",
+    );
+    expect(out!.customOrderId).toBeNull();
+  });
+
+  it("customOrderId 有值時原樣帶出(承諾可以掛在某張訂製單上)", () => {
+    const out = evaluateCommitment(
+      promise({ dueDate: "2026-06-25", customOrderId: 88 }),
+      "2026-07-03",
+    );
+    expect(out!.customOrderId).toBe(88);
+  });
+});
+
+describe("findCommitmentIssues — 排序(最久過期在前)", () => {
+  it("多筆過期承諾,daysOverdue 大的排最前面", () => {
+    const promises = [
+      promise({ id: 1, dueDate: "2026-07-01" }), // 2 天前
+      promise({ id: 2, dueDate: "2026-06-01" }), // 32 天前
+      promise({ id: 3, dueDate: "2026-07-02" }), // 1 天前
+    ];
+    const out = findCommitmentIssues(promises, "2026-07-03");
+    expect(out.map((f) => f.promiseId)).toEqual([2, 1, 3]);
+    expect(out.map((f) => f.daysOverdue)).toEqual([32, 2, 1]);
+  });
+
+  it("已兌現/已撤銷/dueDate 為 null/未到期 都被濾掉,不影響其餘排序", () => {
+    const promises = [
+      promise({ id: 1, dueDate: "2026-06-01" }), // 過期
+      promise({ id: 2, dueDate: "2026-01-01", fulfilledAt: new Date() }), // 已兌現
+      promise({ id: 3, dueDate: null }), // 無日期
+      promise({ id: 4, dueDate: "2026-07-04" }), // 未到期
+      promise({ id: 5, dueDate: "2026-06-20", dismissedAt: new Date() }), // 已撤銷
+    ];
+    const out = findCommitmentIssues(promises, "2026-07-03");
+    expect(out.map((f) => f.promiseId)).toEqual([1]);
+  });
+
+  it("空輸入 → 空陣列", () => {
+    expect(findCommitmentIssues([], "2026-07-03")).toEqual([]);
   });
 });

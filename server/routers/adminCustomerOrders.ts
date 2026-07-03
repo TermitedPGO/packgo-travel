@@ -41,10 +41,12 @@ import {
   findInvoiceMismatchIssues,
   extractInvoiceTotal,
   matchPaymentsToOrders,
+  findCommitmentIssues,
   WATCHDOG_MARGIN_THRESHOLD,
   type WatchdogFinding,
   type OrderInvoiceMismatchFinding,
   type OrderPaymentMatchFinding,
+  type CustomerPromiseFinding,
 } from "../services/customOrderWatchdog";
 import type { CustomOrder } from "../../drizzle/schema";
 
@@ -264,6 +266,54 @@ async function loadPaymentMatchFindings(
   }
 }
 
+/**
+ * 3a(customer-cockpit design-phase3-4.md):這位客人所有「還沒兌現/沒撤銷/有
+ * 到期日」的承諾,餵給 findCommitmentIssues。todayLA 用 customerFacts.ts 的
+ * todayLA()(America/Los_Angeles 曆日),不用 server 本地時間 —— 跟看門狗其餘規則
+ * 一致(這條規則本身用曆日字串比較,不是 server timezone 敏感的邏輯,但錨點日期
+ * 一律走同一個來源)。
+ *
+ * DB/IO 全包 try/catch,理由同 loadInvoiceMismatchFindings/loadPaymentMatchFindings
+ * ——單一客人查詢失敗不該讓整個 watchdogForCustomer 掛掉,失敗回空陣列不拖垮既有
+ * 四種 finding。
+ */
+async function loadCommitmentFindings(profileId: number): Promise<CustomerPromiseFinding[]> {
+  try {
+    const { getDb } = await import("../db");
+    const drizzleDb = await getDb();
+    if (!drizzleDb) return [];
+    const { customerPromises } = await import("../../drizzle/schema");
+    const { and, eq, isNull, isNotNull } = await import("drizzle-orm");
+    const { todayLA } = await import("../_core/customerFacts");
+
+    const rows = await drizzleDb
+      .select({
+        id: customerPromises.id,
+        customerProfileId: customerPromises.customerProfileId,
+        customOrderId: customerPromises.customOrderId,
+        promiseText: customerPromises.promiseText,
+        dueDate: customerPromises.dueDate,
+        fulfilledAt: customerPromises.fulfilledAt,
+        dismissedAt: customerPromises.dismissedAt,
+        sourceInteractionId: customerPromises.sourceInteractionId,
+      })
+      .from(customerPromises)
+      .where(
+        and(
+          eq(customerPromises.customerProfileId, profileId),
+          isNull(customerPromises.fulfilledAt),
+          isNull(customerPromises.dismissedAt),
+          isNotNull(customerPromises.dueDate),
+        ),
+      );
+
+    return findCommitmentIssues(rows, todayLA());
+  } catch (err) {
+    console.warn("[customOrder] loadCommitmentFindings failed:", err);
+    return [];
+  }
+}
+
 /** Recompute balance when total/deposit are known. null when total unknown. */
 function computeBalance(
   total: number | null | undefined,
@@ -337,6 +387,11 @@ export const adminCustomerOrdersRouter = router({
    *     見 customOrderWatchdog.matchPaymentsToOrders。AI 絕不自動標記付款狀態,
    *     只出建議,Jeff 在訂單頁自己點「標記已收款」才算數。查詢失敗不讓整支查詢
    *     掛掉(loadPaymentMatchFindings 自己 try/catch)。
+   *   - commitment 類(3a):寄信抽出的具體時間承諾過期未兌現。客人層級,不是訂單
+   *     層級(customOrderId 可為 null)。零 LLM(規則本身,抽取在寄信路徑上跑),
+   *     見 customOrderWatchdog.findCommitmentIssues。AI 絕不自動標記兌現/撤銷,
+   *     只有 Jeff 在聊天裡明確表達時 opsTools.mark_promise 才會寫入。查詢失敗不讓
+   *     整支查詢掛掉(loadCommitmentFindings 自己 try/catch)。
    * admin-only(adminProcedure)。純 deterministic 規則,不改不送。
    * 規則見 server/services/customOrderWatchdog.ts。回傳 kind 判別的聯集陣列,
    * margin(錢)在前。
@@ -349,11 +404,13 @@ export const adminCustomerOrdersRouter = router({
       const rows = await db.listCustomOrdersByProfile(profileId);
       const invoiceMismatchFindings = await loadInvoiceMismatchFindings(rows);
       const paymentMatchFindings = await loadPaymentMatchFindings(rows);
+      const commitmentFindings = await loadCommitmentFindings(profileId);
       return [
         ...findOrderMarginIssues(rows, WATCHDOG_MARGIN_THRESHOLD),
         ...findOrderPromiseIssues(rows, new Date()),
         ...invoiceMismatchFindings,
         ...paymentMatchFindings,
+        ...commitmentFindings,
       ];
     }),
 

@@ -750,6 +750,13 @@
 			"when": 1781620000000,
 			"tag": "0109_merged_into_profile",
 			"breakpoints": true
+		},
+		{
+			"idx": 110,
+			"version": "5",
+			"when": 1781630000000,
+			"tag": "0110_customer_promises",
+			"breakpoints": true
 		}
 	]
 }

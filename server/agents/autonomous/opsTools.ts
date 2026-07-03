@@ -484,6 +484,31 @@ export const WRITE_TOOLS: Anthropic.Tool[] = [
       required: [],
     },
   },
+  {
+    name: "mark_promise",
+    description:
+      "把系統從寄出的信裡自動抽出的一則『承諾』標記成已兌現(fulfilled)或撤銷/不用管了(dismissed)。" +
+      "用在 Jeff 在聊天裡說類似『這個承諾已經兌現了』『那件事處理好了』『不用管了』『撤銷這個提醒』的時候 —— " +
+      "只有 Jeff 明確這樣講才呼叫,絕不自己判斷承諾是否完成就自動呼叫。" +
+      "需要先知道 promiseId:通常從看門狗黃卡(commitment 類 finding,帶 promiseId 欄位)或 " +
+      "read_customer_conversation 讀到的承諾清單取得;如果不確定 promiseId,先跟 Jeff 確認是哪一則承諾," +
+      "不要用猜的編號呼叫。這個工具只能操作『目前釘住的這位客人』名下的承諾 —— 屬於別的客人的 promiseId 會被拒絕。",
+    input_schema: {
+      type: "object",
+      properties: {
+        promiseId: {
+          type: "number",
+          description: "這則承諾的 id(從看門狗黃卡或客人對話紀錄取得,不要編)",
+        },
+        action: {
+          type: "string",
+          enum: ["fulfilled", "dismissed"],
+          description: "fulfilled = 已兌現;dismissed = 撤銷/不用再提醒",
+        },
+      },
+      required: ["promiseId", "action"],
+    },
+  },
 ];
 
 export const CREATE_CUSTOMER_TOOL: Anthropic.Tool = {
@@ -2142,6 +2167,54 @@ async function runWriteTool(
           `專案 ${moved.orders} 筆、聊天 ${moved.chatMessages} 筆` +
           (duplicatesDropped > 0 ? `,略過 ${duplicatesDropped} 筆兩邊都有的重複互動` : "") +
           "。原檔已隱藏。",
+      };
+    }
+
+    case "mark_promise": {
+      // customer-cockpit Phase3 3a — 唯一能寫 fulfilledAt/dismissedAt 的路徑,
+      // 且只在 Jeff 聊天裡明確表達時才由 LLM 呼叫這個工具(工具描述已講清楚,
+      // 沒有任何自動化路徑——收信/夜掃/看門狗——會呼叫這個工具)。
+      //
+      // 跨客戶守門照抄 update_customer_note 的模式:input 不帶 customerProfileId,
+      // 守門邏輯在這裡用「目前釘住客人」的 profileId 比對這筆 promise 實際的
+      // customerProfileId,不符就拒絕(回結構化錯誤,不寫入)。
+      if (!profileId)
+        return { error: "沒有選定客人 — 這個工具只能在某位客人的對話框裡用" };
+      const promiseId = Number(input?.promiseId);
+      if (!Number.isFinite(promiseId) || promiseId <= 0)
+        return { error: "promiseId 缺失或不是有效數字" };
+      const action = input?.action;
+      if (action !== "fulfilled" && action !== "dismissed")
+        return { error: `action 只能是 fulfilled 或 dismissed,收到「${action}」` };
+
+      const { customerPromises } = await import("../../../drizzle/schema");
+      const [promise] = await db
+        .select({
+          id: customerPromises.id,
+          customerProfileId: customerPromises.customerProfileId,
+        })
+        .from(customerPromises)
+        .where(eq(customerPromises.id, promiseId))
+        .limit(1);
+      if (!promise) return { error: `找不到承諾 #${promiseId}` };
+      if (promise.customerProfileId !== profileId)
+        return { error: `承諾 #${promiseId} 不是這位客人的,不能標記` };
+
+      const now = new Date();
+      await db
+        .update(customerPromises)
+        .set(action === "fulfilled" ? { fulfilledAt: now } : { dismissedAt: now })
+        .where(eq(customerPromises.id, promiseId));
+
+      log.info({ profileId, promiseId, action }, "mark_promise executed");
+      return {
+        success: true,
+        promiseId,
+        action,
+        message:
+          action === "fulfilled"
+            ? `已標記承諾 #${promiseId} 為已兌現`
+            : `已撤銷承諾 #${promiseId} 的提醒`,
       };
     }
 

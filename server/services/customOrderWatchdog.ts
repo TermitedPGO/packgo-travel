@@ -178,13 +178,6 @@ export type OrderPromiseFinding = {
   daysWaiting: number;
 };
 
-/** 看門狗 findings 聯集(watchdogForCustomer 回傳的元素型別)。 */
-export type WatchdogFinding =
-  | OrderMarginFinding
-  | OrderPromiseFinding
-  | OrderInvoiceMismatchFinding
-  | OrderPaymentMatchFinding;
-
 export type OrderPromiseInput = {
   id: number;
   orderNumber: string;
@@ -668,4 +661,110 @@ export function matchPaymentsToOrders(
   }
 
   return findings;
+}
+
+// ── 3a:承諾追蹤(docs/features/customer-cockpit/design-phase3-4.md 3a)──────────
+//
+// Jeff 寄信裡常答應客人一件具體的事(「週五可取件」「明天發報價」),系統從來
+// 不記得這些承諾,過期沒兌現全靠 Jeff 自己記住。這條規則是客人層級,不是訂單
+// 層級 —— 承諾不一定掛在某張訂製單上,customOrderId 可為 null。
+//
+// 誠實邊界:dueDate 抽不出來(customerPromises.dueDate 為 null,代表
+// server/_core/promiseExtraction.ts 的 resolveEventDate 解不出日期原文)就永遠
+// 不叫 —— 抓不到日期就沒有「過期」這個判斷基準,寧可漏報不可誤報,跟本檔一貫
+// 原則一致。fulfilledAt/dismissedAt 任一有值(Jeff 在聊天裡明確表達兌現/撤銷,
+// 見 opsTools.mark_promise)也永遠不叫 —— AI 絕不自動標記這兩欄,只有這條看門狗
+// 規則讀取它們的結果。
+
+export type CustomerPromiseFinding = {
+  /** 判別欄:承諾追蹤類 finding —— 客人層級,故意不含 orderId/orderNumber/title
+   *  (承諾不一定掛在某張訂製單上),前端渲染要照 kind 分流,不要硬塞假的 orderId。 */
+  kind: "commitment";
+  promiseId: number;
+  customerProfileId: number;
+  customOrderId: number | null;
+  promiseText: string;
+  /** YYYY-MM-DD,resolveEventDate 算出來的到期日(這裡永遠非 null —— 呼叫端已經
+   *  篩過 dueDate is not null 才餵進 evaluateCommitment/findCommitmentIssues)。 */
+  dueDate: string;
+  sourceInteractionId: number;
+  /** 承諾類一律黃燈(提醒,不是財務紅線)。 */
+  level: "yellow";
+  /** 正整數:今天(LA 曆日)超過 dueDate 幾天。剛好今天到期(todayLA === dueDate)
+   *  還不算過期(daysOverdue 至少要是 1),見 evaluateCommitment 的邊界註解。 */
+  daysOverdue: number;
+};
+
+/** 看門狗 findings 聯集(watchdogForCustomer 回傳的元素型別)—— 五型聯集。 */
+export type WatchdogFinding =
+  | OrderMarginFinding
+  | OrderPromiseFinding
+  | OrderInvoiceMismatchFinding
+  | OrderPaymentMatchFinding
+  | CustomerPromiseFinding;
+
+export type CommitmentInput = {
+  id: number;
+  customerProfileId: number;
+  customOrderId: number | null;
+  promiseText: string;
+  dueDate: string | null;
+  fulfilledAt: Date | string | null;
+  dismissedAt: Date | string | null;
+  sourceInteractionId: number;
+};
+
+/** dueDate(YYYY-MM-DD)跟 todayLA(YYYY-MM-DD)的曆日差(today − due,單位:天)。
+ *  兩邊都是純日期字串,Date.parse 一律當 UTC 午夜,相減即曆日差 —— 跟 laDayDiff
+ *  同一個「兩邊都已經是 YYYY-MM-DD 就直接字串/數值比較」精神,但這支吃兩個字串
+ *  (laDayDiff 現有簽名吃兩個 Date),不共用同一支函式簽名不符。 */
+function laDayDiffFromDateStrings(dueDateStr: string, todayLAStr: string): number {
+  return Math.round((Date.parse(todayLAStr) - Date.parse(dueDateStr)) / DAY_MS);
+}
+
+/**
+ * 單一承諾的規則。回傳 finding 或 null(已兌現 / 已撤銷 / 日期缺 / 還沒到期 →
+ * 誠實不叫)。純函式。
+ *
+ * 邊界判斷(務必鎖住):dueDate 剛好等於 todayLA(今天就是到期日當天)—— 這裡
+ * 判定為「還沒過期」,回 null。理由:「週五可取件」這種承諾,到了週五當天,
+ * Jeff 可能還在處理中,還沒到「逾期」的地步;要等到週五都過完、隔天(週六)
+ * 還沒兌現,才是真正的「過期」。所以 daysOverdue 必須 >= 1 才回 finding
+ * (todayLA 嚴格晚於 dueDate),等於或早於 dueDate 一律 null。
+ */
+export function evaluateCommitment(
+  promise: CommitmentInput,
+  todayLA: string,
+): CustomerPromiseFinding | null {
+  if (promise.fulfilledAt != null || promise.dismissedAt != null) return null;
+  if (!promise.dueDate) return null;
+
+  const daysOverdue = laDayDiffFromDateStrings(promise.dueDate, todayLA);
+  if (daysOverdue <= 0) return null; // 還沒到期,或剛好今天到期(見上方邊界註解)
+
+  return {
+    kind: "commitment",
+    promiseId: promise.id,
+    customerProfileId: promise.customerProfileId,
+    customOrderId: promise.customOrderId,
+    promiseText: promise.promiseText,
+    dueDate: promise.dueDate,
+    sourceInteractionId: promise.sourceInteractionId,
+    level: "yellow",
+    daysOverdue,
+  };
+}
+
+/**
+ * 一個客人所有承諾的 findings。過期最久的排最前面(跟 findOrderPromiseIssues
+ * 「等最久在前」同一個直覺)。
+ */
+export function findCommitmentIssues(
+  promises: CommitmentInput[],
+  todayLA: string,
+): CustomerPromiseFinding[] {
+  return promises
+    .map((p) => evaluateCommitment(p, todayLA))
+    .filter((f): f is CustomerPromiseFinding => f !== null)
+    .sort((a, b) => b.daysOverdue - a.daysOverdue);
 }

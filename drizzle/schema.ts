@@ -2913,6 +2913,35 @@ export const customerInteractions = mysqlTable("customerInteractions", {
 export type CustomerInteraction = typeof customerInteractions.$inferSelect;
 export type InsertCustomerInteraction = typeof customerInteractions.$inferInsert;
 
+// customer-cockpit Phase3 3a (0110) — 承諾追蹤:寄信成功後從內文抽出的具體時間
+// 承諾(「週五可取件」「明天發報價」),看門狗(customOrderWatchdog.evaluateCommitment)
+// 在過期未兌現時跳黃卡。客人層級,不是訂單層級 — customOrderId 是軟參考可為 NULL。
+// fulfilledAt/dismissedAt 只有 opsTools mark_promise 工具、且只在 Jeff 聊天裡明確
+// 表達時才會寫入,不存在任何自動化路徑會標記這兩欄。
+export const customerPromises = mysqlTable("customerPromises", {
+  id: int("id").autoincrement().primaryKey(),
+  customerProfileId: int("customerProfileId").notNull(),
+  customOrderId: int("customOrderId"),
+  // 概念上指向 customerInteractions.id(no FK,同慣例);查重用 —
+  // recordPromisesForInteraction 靠這個防止同一封信被重複抽取燒 LLM。
+  sourceInteractionId: int("sourceInteractionId").notNull(),
+  promiseText: text("promiseText").notNull(),
+  rawDateText: varchar("rawDateText", { length: 100 }),
+  // string mode ("YYYY-MM-DD") — 跟 customOrders.departureDate 同慣例,純曆日
+  // 字串比較,不擔心 tz drift。抽不出來就 NULL,evaluateCommitment 永不叫。
+  dueDate: date("dueDate", { mode: "string" }),
+  extractedAt: timestamp("extractedAt").defaultNow().notNull(),
+  fulfilledAt: timestamp("fulfilledAt"),
+  dismissedAt: timestamp("dismissedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  profileDueIdx: index("idx_cp_profile_due").on(table.customerProfileId, table.dueDate),
+  sourceInteractionIdx: index("idx_cp_source_interaction").on(table.sourceInteractionId),
+}));
+
+export type CustomerPromise = typeof customerPromises.$inferSelect;
+export type InsertCustomerPromise = typeof customerPromises.$inferInsert;
+
 // Round 81 — Agent ↔ Jeff chatbox (Layer 1.5)
 export const agentMessages = mysqlTable("agentMessages", {
   id: int("id").autoincrement().primaryKey(),

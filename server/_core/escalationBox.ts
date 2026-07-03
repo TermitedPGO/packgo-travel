@@ -685,12 +685,40 @@ export async function sendEscalationReply(
   const { recordOutboundEmailInteraction } = await import(
     "./outboundInteraction"
   );
-  await recordOutboundEmailInteraction({
+  const outboundResult = await recordOutboundEmailInteraction({
     customerEmail: target.customerEmail,
     body: finalBody,
     summary: `回覆:${target.subject || "(無主旨)"}(你核准寄出)`,
     generatedBy: "ai_draft_human_approved",
   });
+
+  // customer-cockpit Phase3 3a — 承諾追蹤(best-effort,絕不影響已寄出的結果)。
+  // recordOutboundEmailInteraction 現在回傳它剛插入那筆的 interactionId/
+  // customerProfileId(ResultSetHeader.insertId,跟 server/db.ts 同慣例),直接
+  // 用這個當 sourceInteractionId —— 不再用「查這個 profile 最新一筆
+  // outbound interaction」猜,那個寫法在同一客人短時間內並發寫入時會抓錯行
+  // (race condition,已修)。fire-and-forget:不 await,錯誤在 promise 內部吞掉。
+  void (async () => {
+    try {
+      if (!outboundResult.recorded || !outboundResult.interactionId || !outboundResult.customerProfileId) {
+        return;
+      }
+      const { recordPromisesForInteraction } = await import("./promiseExtraction");
+      const { todayLA } = await import("./customerFacts");
+      await recordPromisesForInteraction({
+        sourceInteractionId: outboundResult.interactionId,
+        customerProfileId: outboundResult.customerProfileId,
+        customOrderId: null,
+        emailBody: finalBody,
+        todayLA: todayLA(),
+      });
+    } catch (err) {
+      log.warn(
+        { messageId, err: err instanceof Error ? err.message : String(err) },
+        "[escalationBox] promise extraction hookup failed (non-fatal)",
+      );
+    }
+  })();
 
   log.info(
     { messageId, to: target.customerEmail },
