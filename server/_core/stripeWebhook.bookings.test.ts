@@ -96,6 +96,9 @@ const store = {
     notifyOwnerCalls: 0,
     notifyAgentMessageCalls: 0,
   },
+  // customer-cockpit 任務7c — recordWebsiteInteraction call log (mocked module,
+  // see vi.mock("./websiteIntake") below).
+  websiteInteractionCalls: [] as any[],
   // Hook to force createAccountingEntry to throw (used in DB-fail-rollback cases)
   shouldThrowOnAccounting: false,
   // Hook to force updatePaymentStatus to throw
@@ -124,6 +127,7 @@ function resetStore() {
   store.shouldThrowOnAccounting = false;
   store.shouldThrowOnUpdatePaymentStatus = false;
   store.markFailedCalls = 0;
+  store.websiteInteractionCalls = [];
 }
 
 function seedBooking(overrides: Partial<BookingRow> = {}): BookingRow {
@@ -190,6 +194,15 @@ function restore(snap: ReturnType<typeof snapshot>) {
 }
 
 function buildMockDb() {
+  // Minimal .select().from().where().limit() chain — customer-cockpit 任務7c's
+  // new block does a tourDepartures lookup outside the transaction. No seeded
+  // departure rows in this test file → always resolves empty (a real,
+  // already-handled case: departureLabel just stays null).
+  const selectChain: any = {
+    from: () => selectChain,
+    where: () => selectChain,
+    limit: async () => [],
+  };
   const handle = {
     async transaction(fn: (tx: any) => Promise<unknown>) {
       const before = snapshot();
@@ -200,6 +213,7 @@ function buildMockDb() {
         throw err;
       }
     },
+    select: () => selectChain,
   };
   return handle;
 }
@@ -345,6 +359,20 @@ vi.mock("./agentNotify", () => ({
     store.sideEffects.notifyAgentMessageCalls += 1;
   }),
 }));
+// customer-cockpit 任務7c (2026-07-03) — the new post-commit block calls these.
+// ensureCustomerProfileForWebsiteContact/recordWebsiteInteraction are already
+// unit-tested in websiteIntake.test.ts; here we only assert the WIRING (called
+// with the right args on the happy path, NOT called when the tx rolls back).
+vi.mock("./websiteIntake", () => ({
+  ensureCustomerProfileForWebsiteContact: vi.fn(async () => 555),
+  recordWebsiteInteraction: vi.fn(async (args: any) => {
+    store.websiteInteractionCalls.push(args);
+    return true;
+  }),
+  formatBookingInteractionContent: vi.fn(
+    (args: any) => `訂了「${args.tourTitle}」,已付${args.paymentKindZh} $${args.amount.toFixed(2)} ${args.currency.toUpperCase()}`,
+  ),
+}));
 vi.mock("./redact", () => ({
   redactEmail: (e: string) => e,
 }));
@@ -419,6 +447,12 @@ import { handleStripeWebhook } from "./stripeWebhook";
 // Test helpers
 // ─────────────────────────────────────────────────────────────────────
 
+/** Flush the customer-cockpit 任務7c fire-and-forget `void (async () => {...})()`
+ *  chain before asserting — handleStripeWebhook responds before that IIFE settles. */
+async function flushMicrotasks() {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 function buildReqRes(event: any): { req: Request; res: Response; statusFn: ReturnType<typeof vi.fn>; jsonFn: ReturnType<typeof vi.fn>; sendFn: ReturnType<typeof vi.fn> } {
   const statusFn = vi.fn().mockImplementation(() => res);
   const jsonFn = vi.fn().mockImplementation(() => res);
@@ -477,6 +511,18 @@ describe("stripeWebhook booking handlers — transaction atomicity", () => {
     expect(store.sideEffects.notifyOwnerCalls).toBe(1);
     // Webhook response
     expect(jsonFn).toHaveBeenCalledWith({ received: true });
+
+    // customer-cockpit 任務7c: fire-and-forget booking interaction — settles
+    // AFTER the webhook already responded, so flush before asserting.
+    await flushMicrotasks();
+    expect(store.websiteInteractionCalls).toHaveLength(1);
+    expect(store.websiteInteractionCalls[0]).toMatchObject({
+      profileId: 555,
+      direction: "inbound",
+      agentName: "booking_payment",
+    });
+    expect(store.websiteInteractionCalls[0].content).toContain("Test Tour");
+    expect(store.websiteInteractionCalls[0].content).toContain("全額");
   });
 
   it("case 2 — checkout.session.completed: createAccountingEntry throws → tx rolls back + side effects NOT called", async () => {
@@ -512,6 +558,11 @@ describe("stripeWebhook booking handlers — transaction atomicity", () => {
     // markStripeEventFailed called + 500 surfaced for Stripe retry
     expect(store.markFailedCalls).toBe(1);
     expect(statusFn).toHaveBeenCalledWith(500);
+
+    // customer-cockpit 任務7c: the tx threw before the function ever reached
+    // the post-commit section, so the booking-interaction hook never fires.
+    await flushMicrotasks();
+    expect(store.websiteInteractionCalls).toHaveLength(0);
   });
 
   it("case 3 — checkout.session.completed: replayed event short-circuits at claimStripeEvent (idempotent)", async () => {

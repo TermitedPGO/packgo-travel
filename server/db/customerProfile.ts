@@ -70,7 +70,11 @@ export async function resolveOrIdentifyCustomer(params: {
   email: string | null;
   phone: string | null;
 }): Promise<ResolvedCustomerIdentity> {
-  const email = (params.email ?? "").trim() || null;
+  // 2026-07-03 對抗審查(任務7 P2):.toLowerCase() 補在這裡,讓「查重」跟
+  // websiteIntake.ts 的「建卡」用同一套大小寫正規化——原本這裡只 trim,
+  // 建卡那邊卻 trim+lowercase,兩邊比對基準不一致,只是恰好被 DB 預設的
+  // case-insensitive collation蓋住沒爆出來,不該依賴 collation 假設。
+  const email = (params.email ?? "").trim().toLowerCase() || null;
   const phone = (params.phone ?? "").trim() || null;
 
   if (!email && !phone) {

@@ -339,6 +339,28 @@ describe("resolveOrIdentifyCustomer", () => {
     expect(result.status).toBe("creatable");
     expect(mockDb.select).toHaveBeenCalledTimes(1); // no extra users lookup fired
   });
+
+  it("2026-07-03 對抗審查(任務7):normalizes a mixed-case email to lowercase before the dedup lookup, matching websiteIntake.ts's insert-time normalization", async () => {
+    selectChain.limit.mockResolvedValueOnce([]);
+    await resolveOrIdentifyCustomer({ email: "Found@Example.COM", phone: null });
+    // The eq() condition built for the dedup SELECT must carry the lowercased
+    // email — otherwise a case-insensitive collation is the only thing saving
+    // this from silently missing an existing row (or worse, creating a
+    // duplicate profile) stored under different casing.
+    const whereArg = JSON.stringify(selectChain.where.mock.calls[0][0]);
+    expect(whereArg).toContain("found@example.com");
+    expect(whereArg).not.toContain("Found@Example.COM");
+  });
+
+  it("2026-07-03 對抗審查:the registered-member users lookup also uses the lowercased email", async () => {
+    selectChain.limit
+      .mockResolvedValueOnce([]) // customerProfiles dedup: no match
+      .mockResolvedValueOnce([{ id: 77 }]); // users lookup: registered member
+    const result = await resolveOrIdentifyCustomer({ email: "Member@Example.COM", phone: null });
+    expect(result.status).toBe("blocked_registered_member");
+    const usersWhereArg = JSON.stringify(selectChain.where.mock.calls[1][0]);
+    expect(usersWhereArg).toContain("member@example.com");
+  });
 });
 
 // ────────────────────────────────────────────────────────────────────────

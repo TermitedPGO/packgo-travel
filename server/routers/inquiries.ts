@@ -41,6 +41,44 @@ import { publicProcedure, protectedProcedure, adminProcedure, router } from "../
 import * as db from "../db";
 import { checkRateLimit } from "../rateLimit";
 
+/**
+ * customer-cockpit 任務7a(2026-07-03)— 網站詢問表單送出時,確保這位聯絡人
+ * 在 customerProfiles 有卡 + 補一筆 customerInteractions,紅點該亮的亮。
+ * Fire-and-forget:絕不讓客人看得到的表單回應被這裡的失敗拖慢或搞壞。
+ */
+function ingestWebsiteInquiryContact(input: {
+  userId?: number | null;
+  customerEmail: string;
+  customerPhone?: string | null;
+  customerName: string;
+  subject: string;
+  message: string;
+}): void {
+  void (async () => {
+    try {
+      const { ensureCustomerProfileForWebsiteContact, recordWebsiteInteraction } =
+        await import("../_core/websiteIntake");
+      const profileId = await ensureCustomerProfileForWebsiteContact({
+        userId: input.userId ?? null,
+        email: input.customerEmail,
+        phone: input.customerPhone ?? null,
+        name: input.customerName,
+      });
+      if (profileId) {
+        await recordWebsiteInteraction({
+          profileId,
+          direction: "inbound",
+          content: `${input.subject}\n\n${input.message}`,
+          contentSummary: input.subject,
+          agentName: "website_inquiry",
+        });
+      }
+    } catch (err) {
+      console.error("[inquiries] website channel intake failed:", err);
+    }
+  })();
+}
+
 export const inquiriesRouter = router({
     // Get all inquiries (admin only)
     list: adminProcedure.query(async () => {
@@ -159,11 +197,20 @@ export const inquiriesRouter = router({
         }
         // inquiryType comes from input (defaults to "general"); relatedTourId +
         // wizardAnswers ride along via ...input when present (migration 0088).
-        return await db.createInquiry({
+        const inquiry = await db.createInquiry({
           ...input,
           userId: ctx.user?.id,
           status: "new",
         });
+        ingestWebsiteInquiryContact({
+          userId: ctx.user?.id ?? null,
+          customerEmail: input.customerEmail,
+          customerPhone: input.customerPhone ?? null,
+          customerName: input.customerName,
+          subject: input.subject,
+          message: input.message,
+        });
+        return inquiry;
       }),
 
     /**
@@ -261,6 +308,15 @@ export const inquiriesRouter = router({
         }).catch((err) =>
           console.error("[inquiries.createEmergency] notifyOwner failed:", err)
         );
+
+        ingestWebsiteInquiryContact({
+          userId: ctx.user?.id ?? null,
+          customerEmail: input.customerEmail,
+          customerPhone: input.customerPhone,
+          customerName: input.customerName,
+          subject: `[緊急 · ${labelZh}] ${input.currentLocation}`,
+          message: input.message,
+        });
 
         return inquiry;
       }),
@@ -368,6 +424,32 @@ export const inquiriesRouter = router({
           senderType: "customer",
           message: input.message,
         });
+        // customer-cockpit 任務7b(2026-07-03)— 站內留言也要進客戶頁時間軸,
+        // 不是只有 email 渠道才算往來。Fire-and-forget,絕不影響訊息已經
+        // 成功送出這件事本身。
+        void (async () => {
+          try {
+            const { ensureCustomerProfileForWebsiteContact, recordWebsiteInteraction } =
+              await import("../_core/websiteIntake");
+            const profileId = await ensureCustomerProfileForWebsiteContact({
+              userId: ctx.user.id,
+              email: inquiry.customerEmail,
+              phone: inquiry.customerPhone ?? null,
+              name: inquiry.customerName,
+            });
+            if (profileId) {
+              await recordWebsiteInteraction({
+                profileId,
+                direction: "inbound",
+                content: input.message,
+                contentSummary: `站內留言:${inquiry.subject || "(無主旨)"}`,
+                agentName: "website_inquiry_message",
+              });
+            }
+          } catch (err) {
+            console.error("[inquiries.addMessage] website channel intake failed:", err);
+          }
+        })();
         return { ...created, emailSent: false };
        }),
   });

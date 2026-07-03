@@ -495,6 +495,67 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
   } catch (err) {
     log.error({ err }, "[Stripe Webhook] notifyOwner (payment) failed");
   }
+
+  // customer-cockpit 任務7c(2026-07-03)— 訂票事件進場:這位客人在
+  // /ops/customers 的時間軸完全看不到任何訂票紀錄。上面的 notifyOwner +
+  // #books 卡是「Jeff 你快看」的警示通知,不會出現在這位客人自己的卡上 ——
+  // 兩者目的不同,這裡補的是客人自己時間軸的事實紀錄,不算重複轟炸。
+  // 內容只用確定性欄位組成(團名/出發日/人數/已付金額),不是 LLM 生成。
+  // 訂票是客人動作,亮紅點合理(見 T6 報告的理由)。
+  //
+  // fire-and-forget(2026-07-03 對抗審查 P2 修復):這段不是付款/booking 流程
+  // 需要的東西,純粹是駕駛艙的錦上添花。原本直接 await 會在 Stripe webhook 的
+  // 回應路徑上疊加 5-6 個序列 DB 往返,拖慢每一筆付款的 200 回應。改成
+  // fire-and-forget,絕不讓客戶頁時間軸記錄拖慢或搞壞已經成功的付款回應。
+  void (async () => {
+    try {
+      const { ensureCustomerProfileForWebsiteContact, recordWebsiteInteraction, formatBookingInteractionContent } =
+        await import("./websiteIntake");
+      const profileId = await ensureCustomerProfileForWebsiteContact({
+        userId: (booking as any).userId ?? null,
+        email: booking.customerEmail,
+        phone: booking.customerPhone ?? null,
+        name: booking.customerName,
+      });
+      if (profileId) {
+        const tour = await db.getTourById(booking.tourId);
+        const tourTitle = tour?.title ?? `Tour #${booking.tourId}`;
+        let departureLabel: string | null = null;
+        const drizzleDbForInteraction = await db.getDb();
+        if (drizzleDbForInteraction) {
+          const { tourDepartures } = await import("../../drizzle/schema");
+          const { eq } = await import("drizzle-orm");
+          const [dep] = await drizzleDbForInteraction
+            .select({ departureDate: tourDepartures.departureDate })
+            .from(tourDepartures)
+            .where(eq(tourDepartures.id, booking.departureId))
+            .limit(1);
+          if (dep?.departureDate) {
+            departureLabel = new Date(dep.departureDate).toLocaleDateString("zh-TW");
+          }
+        }
+        const content = formatBookingInteractionContent({
+          tourTitle,
+          departureLabel,
+          adults: booking.numberOfAdults || 0,
+          children: (booking.numberOfChildrenWithBed || 0) + (booking.numberOfChildrenNoBed || 0),
+          infants: booking.numberOfInfants || 0,
+          paymentKindZh: paymentType === "deposit" ? "訂金" : paymentType === "balance" ? "尾款" : "全額",
+          amount,
+          currency: session.currency ?? "usd",
+        });
+        await recordWebsiteInteraction({
+          profileId,
+          direction: "inbound",
+          content,
+          contentSummary: `訂了 ${tourTitle}`,
+          agentName: "booking_payment",
+        });
+      }
+    } catch (err) {
+      log.error({ err, bookingId }, "[Stripe Webhook] customer-cockpit interaction record failed");
+    }
+  })();
 }
 
 async function handlePaymentIntentSucceeded(paymentIntent: Stripe.PaymentIntent) {

@@ -48,10 +48,28 @@ vi.mock("../_core/logger", () => ({
   }),
 }));
 
+// customer-cockpit 任務7(2026-07-03)— 網站渠道進場 fire-and-forget hook。
+// Mocked so tests can assert it's CALLED with the right args without touching
+// a real DB (the hook itself is unit-tested separately in websiteIntake.test.ts).
+const { mockEnsureProfile, mockRecordInteraction } = vi.hoisted(() => ({
+  mockEnsureProfile: vi.fn(),
+  mockRecordInteraction: vi.fn(),
+}));
+vi.mock("../_core/websiteIntake", () => ({
+  ensureCustomerProfileForWebsiteContact: mockEnsureProfile,
+  recordWebsiteInteraction: mockRecordInteraction,
+}));
+
 import { inquiriesRouter } from "./inquiries";
 import * as db from "../db";
 import { checkRateLimit } from "../rateLimit";
 import { sendInquiryReply } from "../emailService";
+
+/** Flush the fire-and-forget `void (async () => {...})()` microtask chain
+ *  before asserting — the mutation returns before that IIFE settles. */
+async function flushMicrotasks() {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 describe("inquiriesRouter (Phase 4C extraction)", () => {
   it("exposes all 9 procedures from the pre-split source", () => {
@@ -113,6 +131,36 @@ describe("inquiriesRouter.createEmergency — migration 0077 behavior", () => {
     expect(rowArg.inquiryType).toBe("emergency");
     // Subject prefix unchanged — backfill in migration 0077 depends on it.
     expect(rowArg.subject).toMatch(/^\[緊急 · /);
+  });
+
+  it("customer-cockpit 任務7a: also ensures a customerProfile + records the inbound interaction", async () => {
+    (db.createInquiry as any).mockResolvedValue({ id: 43, inquiryType: "emergency" });
+    mockEnsureProfile.mockResolvedValue(777);
+
+    const caller = (inquiriesRouter as any).createCaller(makeContext());
+    await caller.createEmergency({
+      customerName: "Jane Doe",
+      customerEmail: "jane@example.com",
+      customerPhone: "+1-555-0100",
+      currentLocation: "Reykjavík",
+      severity: "passport",
+      message: "Lost passport at hotel, need urgent help.",
+    });
+    await flushMicrotasks();
+
+    expect(mockEnsureProfile).toHaveBeenCalledWith({
+      userId: null,
+      email: "jane@example.com",
+      phone: "+1-555-0100",
+      name: "Jane Doe",
+    });
+    expect(mockRecordInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profileId: 777,
+        direction: "inbound",
+        agentName: "website_inquiry",
+      }),
+    );
   });
 });
 
@@ -230,6 +278,55 @@ describe("inquiriesRouter.addMessage — admin reply emails the customer", () =>
     expect(db.updateInquiry).not.toHaveBeenCalled();
     expect(result.emailSent).toBe(false);
   });
+
+  it("customer-cockpit 任務7b: customer's own follow-up message ensures a profile + records an inbound interaction", async () => {
+    (db.getInquiryById as any).mockResolvedValue({ ...inquiryRow });
+    (db.createInquiryMessage as any).mockResolvedValue({
+      id: 503,
+      inquiryId: 10,
+      senderType: "customer",
+      message: "請問報價",
+    });
+    mockEnsureProfile.mockResolvedValue(888);
+
+    const caller = (inquiriesRouter as any).createCaller(makeCustomerContext());
+    await caller.addMessage({ inquiryId: 10, message: "請問報價" });
+    await flushMicrotasks();
+
+    expect(mockEnsureProfile).toHaveBeenCalledWith({
+      userId: 99,
+      email: "customer@example.com",
+      phone: null,
+      name: "王小姐",
+    });
+    expect(mockRecordInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profileId: 888,
+        direction: "inbound",
+        content: "請問報價",
+        agentName: "website_inquiry_message",
+      }),
+    );
+  });
+
+  it("customer-cockpit 任務7b: admin's reply in addMessage does NOT go through the website-intake hook (already handled by sendAdminInquiryReply's own outbound recording)", async () => {
+    (db.getInquiryById as any).mockResolvedValue({ ...inquiryRow });
+    (db.createInquiryMessage as any).mockResolvedValue({
+      id: 504,
+      inquiryId: 10,
+      senderType: "admin",
+      message: "回覆內容",
+    });
+    (db.updateInquiry as any).mockResolvedValue({});
+    (sendInquiryReply as any).mockResolvedValue(true);
+
+    const caller = (inquiriesRouter as any).createCaller(makeAdminContext());
+    await caller.addMessage({ inquiryId: 10, message: "回覆內容" });
+    await flushMicrotasks();
+
+    expect(mockEnsureProfile).not.toHaveBeenCalled();
+    expect(mockRecordInteraction).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -317,5 +414,67 @@ describe("inquiriesRouter.create — tour-page structured context", () => {
       caller.create({ customerName: "Ok", customerEmail: "not-an-email", subject: "s", message: "m" }),
     ).rejects.toBeTruthy();
     expect(db.createInquiry).not.toHaveBeenCalled();
+  });
+
+  it("customer-cockpit 任務7a: ensures a customerProfile + records the inbound interaction after a successful create", async () => {
+    mockEnsureProfile.mockResolvedValue(123);
+
+    const caller = (inquiriesRouter as any).createCaller(makeContext());
+    await caller.create({
+      customerName: "王小明",
+      customerEmail: "ming@example.com",
+      customerPhone: "+1-555-0100",
+      subject: "行程詢問",
+      message: "請問報價",
+    });
+    await flushMicrotasks();
+
+    expect(mockEnsureProfile).toHaveBeenCalledWith({
+      userId: null,
+      email: "ming@example.com",
+      phone: "+1-555-0100",
+      name: "王小明",
+    });
+    expect(mockRecordInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profileId: 123,
+        direction: "inbound",
+        content: "行程詢問\n\n請問報價",
+        contentSummary: "行程詢問",
+        agentName: "website_inquiry",
+      }),
+    );
+  });
+
+  it("customer-cockpit 任務7a: when ensureCustomerProfileForWebsiteContact returns null (blocked/no DB), never calls recordWebsiteInteraction (honest skip, not a crash)", async () => {
+    mockEnsureProfile.mockResolvedValue(null);
+
+    const caller = (inquiriesRouter as any).createCaller(makeContext());
+    await caller.create({
+      customerName: "Jane",
+      customerEmail: "jane@example.com",
+      subject: "General question",
+      message: "Hello",
+    });
+    await flushMicrotasks();
+
+    expect(mockRecordInteraction).not.toHaveBeenCalled();
+  });
+
+  it("customer-cockpit 任務7a: a website-intake failure never breaks the inquiry mutation itself", async () => {
+    mockEnsureProfile.mockRejectedValue(new Error("boom"));
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const caller = (inquiriesRouter as any).createCaller(makeContext());
+    const result = await caller.create({
+      customerName: "Jane",
+      customerEmail: "jane@example.com",
+      subject: "General question",
+      message: "Hello",
+    });
+    await flushMicrotasks();
+
+    expect(result).toEqual({ id: 7, inquiryType: "general" });
+    consoleErrorSpy.mockRestore();
   });
 });
