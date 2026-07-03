@@ -29,9 +29,14 @@
 - 【要改的檔案清單】
 - 涉及 UI 加讀 docs/standards/design.md;涉及 DB/API 加讀 docs/standards/backend.md
 邊界:只改【範圍】;不碰【明確排除,例 schema / 其他模組】。
-通用地雷(涉及者必寫進派工單):從文件/信件/案件檔抽「客人聯絡方式」時,
-一律排除業主本人的 email 與電話(jeffhsieh09/0909、support@、+1 510-634-2307)
-— 案件檔常把 Jeff 的聯絡方式跟客人寫在同一格(2026-07-03 1b P0 實案)。
+通用地雷(涉及者必寫進派工單):
+- 從文件/信件/案件檔抽「客人聯絡方式」時,一律排除業主本人的 email 與電話
+  (jeffhsieh09/0909、support@、+1 510-634-2307)— 案件檔常把 Jeff 的聯絡
+  方式跟客人寫在同一格(2026-07-03 1b P0 實案)。
+- 凡「今天」相關的邊界計算,比較的「兩端」都要換算 America/Los_Angeles
+  曆日:基準日用 todayLA() 只對了一半,被比較的 DB 時間戳(quoteSentAt/
+  departureDate 等)也要用同一套 Intl LA 換算切曆日,否則太平洋時間傍晚後
+  天數會系統性多算一天(2026-07-03 Phase4 審查實案,白天測不出來的陰險雷)。
 
 驗收條件(逐條驗,附證據):
 - tsc --noEmit 0 錯(OOM 時 NODE_OPTIONS="--max-old-space-size=6144")
