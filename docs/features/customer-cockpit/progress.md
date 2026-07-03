@@ -107,6 +107,38 @@
 
 ---
 
-## Phase 3-6、收尾
+## Phase 3:草稿誠實度收尾(commit b7a32aa / 2c350e8)— 已完成,待 ship
 
-尚未開始。裁示已收(2026-07-02):14 案存量進場 Jeff 先手拖 1-2 案驗流程(Phase1b 工具已就緒待 ship 後試跑)、Plaid 收款建議做(Phase2c 已完成)、今日清單放中欄空狀態、報價出手前案子要在系統裡的規矩已立。Phase6 自我體檢範圍已擴充(月度 scorecard 桌機腳本 + 每週 0909 E2E canary 含新增客人鏈 + 每週正確性稽核回饋迴圈),詳見 `roadmap-100.md`。
+**3a 承諾追蹤**:寄信成功後(`escalationBox.ts` 的 `sendEscalationReply`,唯一寄信路徑)fire-and-forget 抽出信文裡對客人的時間承諾,日期年份推算 100% 複用既有 `resolveEventDate`(`chatLogImport.ts`),LLM 只回原文字串。新表 `customerPromises`(migration 0110)存承諾,看門狗新增第五種 finding kind `commitment`:到期未兌現/未撤銷才跳黃卡,抽不出日期的承諾照存但永不叫。新工具 `mark_promise` 讓 Jeff 在聊天裡口頭兌現/撤銷,跨客戶守門沿用既有工具的釘住客人模式,AI 絕不自動標記。
+
+migration 特別決策:0104-0109 的先例都是欄位新增用 INFORMATION_SCHEMA+PREPARE 包裝,但這次是新表,改用原生 `CREATE TABLE IF NOT EXISTS`(TiDB 支援,不需要 PREPARE)——這個 repo 有真實 P0 事故案例(migration 0070 的 PREPARE 包裝在 TiDB 上靜默 no-op),同一個冪等精神套用在正確的 DDL 語法上,不盲目照抄舊例。
+
+四路對抗式審查:migration 安全性、日期數學/查重零缺陷;抓到並修復一個真 race condition(P1)——原本用「查最新一筆 interaction」代替 insert 回傳 id 當 sourceInteractionId,同客人短時間並發寫入可能配錯來源信,已改讓 `recordOutboundEmailInteraction` 直接回傳 insertId 從根拔除。
+
+**3b 月度草稿評分**:把 6/25 那次一次性 eval 正式入庫成每月自動跑的機制。近 30 天有真實往來的客人取最多 10 位,重生草稿走既有 `runInquiryAgent`(純函式零副作用,不落地不寄),3 個獨立評審 LLM 各自打分,聚合規則「任一評審標記三宗罪就算命中」。分數寫進 `eval-history.md` 每月追加一節,劣化(比上月掉 1 分以上)寫一張 office inbox 卡標 high priority。cron 照抄既有 weekly-retrospective/daily-summary 的 repeatable job 寫法,排每月 1 號 03:00 UTC。三路對抗式審查零 CONFIRMED 缺陷——特別驗證過整條呼叫鏈沒有任何路徑呼叫寄信函式或把重生草稿寫進客人看得到的地方。
+
+**最終驗證**:3a tsc 0 錯 + 全套 4063 測試綠;3b tsc 0 錯 + 全套 4080 測試綠。
+
+**已知限制**:3a 未處理「同一 profileId 短時間內連續寄兩封信」的並發窗口(機率極低,未加鎖);3b 首次跑無上月資料時劣化偵測正確不觸發。
+
+**狀態**:code 完成、tsc+測試綠、已 commit,等 Jeff 跑 `pnpm ship` 上線。
+
+---
+
+## Phase 4:今日清單(commit 4029fe2)— 已完成,待 ship
+
+**做了什麼**:中欄沒選客人時的空狀態改成今日清單:到期跟進、報價將過期(11/13/14 天門檻)、承諾未兌現(直接複用 Phase3a 既有邏輯不重寫)、出發倒數(精確 T-30/T-7 視窗)、尾款到期(0-30 天範圍)。全部零 LLM 純規則計算,任何欄位缺值就跳過該項不猜。點擊每項複用既有 `onSelect`/`setSelected` 選客機制,不發明新路由。清單空時維持原空狀態文案加一句提示。
+
+**驗證過程**:三路對抗式審查抓到並修復兩個真缺陷:①日期換算用 UTC 曆日切片而不是既有的 LA 時區換算,`todayLA()` 本身是對的但訂單的 `quoteSentAt`/`depositPaidAt`/`balancePaidAt` 三個時間戳沒有跟著用 LA 換算,太平洋時間傍晚到午夜這段窗口(對應 UTC 隔天凌晨)會讓天數算多一天,已改用既有 LA 時區換算寫法對齊;②報價將過期規則原本只排除 draft/cancelled,客人已經回覆進入 arranged/deposit_paid 等後續狀態的單只要 `quoteSentAt` 沒清空就會永久誤報,已改成只認 draft/quoted 這兩個報價確實還在等回覆的狀態。
+
+**最終驗證**:tsc 0 錯,`todayList.test.ts` 34 個測試(含 11/13/14 天、精確 30/7 天、0-30 天三組邊界)+ 全套 4115 測試綠,邊界案例經獨立手算驗證。
+
+**已知限制**:承諾未兌現查詢無分頁上限(一人公司資料量下無疑慮);查詢失敗與「今天真的沒待辦」在 UI 上呈現相同(靜默降級,跟既有看門狗面板同一慣例)。
+
+**狀態**:code 完成、tsc+測試綠、已 commit,等 Jeff 跑 `pnpm ship` 上線。
+
+---
+
+## Phase 5-6、收尾
+
+尚未開始。裁示已收(2026-07-02):14 案存量進場 Jeff 先手拖 1-2 案驗流程(Phase1b 工具已就緒待 ship 後試跑)、Plaid 收款建議做(Phase2c 已完成)、今日清單放中欄空狀態(Phase4 已完成)、報價出手前案子要在系統裡的規矩已立。Phase6 自我體檢範圍已擴充(月度 scorecard 桌機腳本 + 每週 0909 E2E canary 含新增客人鏈 + 每週正確性稽核回饋迴圈),詳見 `roadmap-100.md`。
