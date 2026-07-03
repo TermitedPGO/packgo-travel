@@ -2368,7 +2368,16 @@ export type InsertAiQuote = typeof aiQuotes.$inferInsert;
 // gate);系統/agent 不自動發。設計見 docs/features/custom-orders/design.md。
 //
 // 錢與法遵紅線(編碼在欄位 + 註解):
-//   - supplierCost 手動、絕不自動填、絕不上任何 customer-facing payload / email。
+//   - supplierCost 絕不上任何 customer-facing payload / email。LLM 自動化路徑的
+//     精確定義(Phase2 2b,server/_core/supplierCostVerification.ts)：只能透過
+//     create_custom_order / update_custom_order 這兩個 opsTools 寫入,且必須附上
+//     sourceDocId(customerDocuments.id)並通過 resolveAndVerifySupplierCost 驗證
+//     ——金額要真的出現在該供應商文件的文字裡才會被接受,對不上或沒附文件一律拒絕
+//     整個欄位(其餘欄位正常寫入)。任何自動化 pipeline(收信/夜掃/看門狗/其他
+//     agent)一律不可寫這個欄位。admin 後台(server/routers/adminCustomerOrders.ts
+//     的 create/update mutation)是 Jeff 本人手動輸入的既有路徑,不經過這層驗證,
+//     責任在 Jeff 本人核對 invoice;審查靠 grep 全 repo 對 customOrders.supplierCost
+//     的賦值點,不是型別系統天然擋(Drizzle insert/update 型別本來就允許這欄)。
 //   - depositPaidAt/balancePaidAt 只記「已收金額與時間」,不是營收認列。CA B&P
 //     §17550:訂金 ≠ 營收,出發後才認列。Trust #5442 對帳走銀行 + 會計,不在此表。
 //     recognizedAt 只是佔位,本批不寫 accountingEntries。
@@ -2417,7 +2426,7 @@ export const customOrders = mysqlTable("customOrders", {
   balanceAmount: decimal("balanceAmount", { precision: 12, scale: 2 }),
   currency: varchar("currency", { length: 3 }).default("USD").notNull(),
 
-  // 成本(手動、絕不自動、絕不上客人文件;只 admin 算 margin)
+  // 成本(只 admin 算 margin,絕不上客人文件;寫入規則見上方表級註解 Phase2 2b)
   supplierCost: decimal("supplierCost", { precision: 12, scale: 2 }),
 
   // 收款(只記已收金額+時間,不做 Trust 分錄)

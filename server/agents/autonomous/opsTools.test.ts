@@ -68,15 +68,35 @@ vi.mock("drizzle-orm", () => {
   };
 });
 
-const { mockCollect, mockGetBookingById, mockUpdateBooking, mockSnapshot, mockAudit, mockTouchLastInbound } =
-  vi.hoisted(() => ({
-    mockCollect: vi.fn(),
-    mockGetBookingById: vi.fn(),
-    mockUpdateBooking: vi.fn(),
-    mockSnapshot: vi.fn(),
-    mockAudit: vi.fn(),
-    mockTouchLastInbound: vi.fn(),
-  }));
+const {
+  mockCollect,
+  mockGetBookingById,
+  mockUpdateBooking,
+  mockSnapshot,
+  mockAudit,
+  mockTouchLastInbound,
+  mockResolveAndVerifySupplierCost,
+  mockGetCustomOrderById,
+  mockUpdateCustomOrder,
+  mockCreateCustomOrder,
+  mockGenerateOrderNumber,
+  mockResolveCustomerProfileIds,
+  mockOrderBelongsToProfiles,
+} = vi.hoisted(() => ({
+  mockCollect: vi.fn(),
+  mockGetBookingById: vi.fn(),
+  mockUpdateBooking: vi.fn(),
+  mockSnapshot: vi.fn(),
+  mockAudit: vi.fn(),
+  mockTouchLastInbound: vi.fn(),
+  mockResolveAndVerifySupplierCost: vi.fn(),
+  mockGetCustomOrderById: vi.fn(),
+  mockUpdateCustomOrder: vi.fn(),
+  mockCreateCustomOrder: vi.fn(),
+  mockGenerateOrderNumber: vi.fn(),
+  mockResolveCustomerProfileIds: vi.fn(),
+  mockOrderBelongsToProfiles: vi.fn(),
+}));
 // merge_into_customer recomputes the target's unread pointer via the shared
 // touchLastInbound helper (forward-only semantics live + are unit-tested in
 // server/_core/customerUnread).
@@ -90,14 +110,17 @@ vi.mock("../../db/booking", () => ({
 }));
 vi.mock("../../db/customOrder", () => ({
   getCustomerProfileSnapshot: mockSnapshot,
-  getCustomOrderById: vi.fn(),
-  updateCustomOrder: vi.fn(),
-  createCustomOrder: vi.fn(),
-  generateOrderNumber: vi.fn(),
-  resolveCustomerProfileIds: vi.fn(),
-  orderBelongsToProfiles: vi.fn(),
+  getCustomOrderById: mockGetCustomOrderById,
+  updateCustomOrder: mockUpdateCustomOrder,
+  createCustomOrder: mockCreateCustomOrder,
+  generateOrderNumber: mockGenerateOrderNumber,
+  resolveCustomerProfileIds: mockResolveCustomerProfileIds,
+  orderBelongsToProfiles: mockOrderBelongsToProfiles,
 }));
 vi.mock("../../_core/auditLog", () => ({ audit: mockAudit }));
+vi.mock("../../_core/supplierCostVerification", () => ({
+  resolveAndVerifySupplierCost: mockResolveAndVerifySupplierCost,
+}));
 // merge_into_customer's fire-and-forget summary refresh must not pull the real
 // BullMQ/Redis queue into a unit test.
 vi.mock("../../queue", () => ({ enqueueCustomerSummaryRefresh: vi.fn() }));
@@ -128,6 +151,13 @@ beforeEach(() => {
   mockSnapshot.mockReset();
   mockAudit.mockReset();
   mockTouchLastInbound.mockReset();
+  mockResolveAndVerifySupplierCost.mockReset();
+  mockGetCustomOrderById.mockReset();
+  mockUpdateCustomOrder.mockReset();
+  mockCreateCustomOrder.mockReset();
+  mockGenerateOrderNumber.mockReset();
+  mockResolveCustomerProfileIds.mockReset();
+  mockOrderBelongsToProfiles.mockReset();
 });
 
 describe("READ_TOOLS definitions", () => {
@@ -429,6 +459,141 @@ describe("update_custom_order — AI patches an existing project for this custom
     );
     expect(out.success).toBeUndefined();
     expect(out.error).toContain("沒有要改的欄位");
+  });
+});
+
+describe("supplierCost write gate (Phase2 2b) — sourceDocId required + server-verified", () => {
+  it("create_custom_order: supplierCost with NO sourceDocId is rejected, other fields still write", async () => {
+    mockSnapshot.mockResolvedValue({ userId: null, name: "劉衛國", email: "liu@example.com" });
+    mockGenerateOrderNumber.mockResolvedValue("ORD-2026-0099");
+    mockCreateCustomOrder.mockImplementation(async (fields: any) => ({ id: 501, ...fields }));
+
+    const out = JSON.parse(
+      await executeWriteTool(
+        "create_custom_order",
+        { title: "劉衛國機票", totalPrice: 500, supplierCost: 300 },
+        7001,
+        2760016,
+      ),
+    );
+
+    expect(out.success).toBe(true);
+    expect(mockResolveAndVerifySupplierCost).not.toHaveBeenCalled();
+    // supplierCost must NOT reach the DB write.
+    expect(mockCreateCustomOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ supplierCost: null, totalPrice: "500" }),
+    );
+    expect(out.message).toContain("sourceDocId");
+  });
+
+  it("create_custom_order: supplierCost + sourceDocId that FAILS verification is rejected, order still created", async () => {
+    mockSnapshot.mockResolvedValue({ userId: null, name: "劉衛國", email: "liu@example.com" });
+    mockGenerateOrderNumber.mockResolvedValue("ORD-2026-0100");
+    mockCreateCustomOrder.mockImplementation(async (fields: any) => ({ id: 502, ...fields }));
+    mockResolveAndVerifySupplierCost.mockResolvedValue({ ok: false, reason: "這個金額沒有出現在指定文件裡" });
+
+    const out = JSON.parse(
+      await executeWriteTool(
+        "create_custom_order",
+        { title: "劉衛國機票", supplierCost: 300, sourceDocId: 55 },
+        7001,
+        2760016,
+      ),
+    );
+
+    expect(out.success).toBe(true);
+    expect(mockResolveAndVerifySupplierCost).toHaveBeenCalledWith({
+      claimedAmount: 300,
+      sourceDocId: 55,
+      customerProfileId: 7001,
+    });
+    expect(mockCreateCustomOrder).toHaveBeenCalledWith(expect.objectContaining({ supplierCost: null }));
+    expect(out.message).toContain("這個金額沒有出現在指定文件裡");
+  });
+
+  it("create_custom_order: supplierCost + sourceDocId that PASSES verification is written", async () => {
+    mockSnapshot.mockResolvedValue({ userId: null, name: "劉衛國", email: "liu@example.com" });
+    mockGenerateOrderNumber.mockResolvedValue("ORD-2026-0101");
+    mockCreateCustomOrder.mockImplementation(async (fields: any) => ({ id: 503, ...fields }));
+    mockResolveAndVerifySupplierCost.mockResolvedValue({ ok: true });
+
+    const out = JSON.parse(
+      await executeWriteTool(
+        "create_custom_order",
+        { title: "劉衛國機票", supplierCost: 300, sourceDocId: 55 },
+        7001,
+        2760016,
+      ),
+    );
+
+    expect(out.success).toBe(true);
+    expect(mockCreateCustomOrder).toHaveBeenCalledWith(expect.objectContaining({ supplierCost: "300" }));
+    expect(out.message).not.toContain("sourceDocId");
+  });
+
+  it("update_custom_order: supplierCost with NO sourceDocId is rejected, other fields still patch", async () => {
+    mockGetCustomOrderById.mockResolvedValue({ id: 42, customerProfileId: 7001, orderNumber: "ORD-2026-0042" });
+    mockSnapshot.mockResolvedValue({ userId: null, name: "x", email: "x@example.com" });
+    mockOrderBelongsToProfiles.mockReturnValue(true);
+    mockUpdateCustomOrder.mockResolvedValue({ orderNumber: "ORD-2026-0042" });
+
+    const out = JSON.parse(
+      await executeWriteTool(
+        "update_custom_order",
+        { orderId: 42, notes: "補票價", supplierCost: 300 },
+        7001,
+      ),
+    );
+
+    expect(out.success).toBe(true);
+    expect(mockResolveAndVerifySupplierCost).not.toHaveBeenCalled();
+    expect(mockUpdateCustomOrder).toHaveBeenCalledWith(42, expect.objectContaining({ notes: "補票價" }));
+    const [, patchArg] = mockUpdateCustomOrder.mock.calls[0];
+    expect(patchArg.supplierCost).toBeUndefined();
+    expect(out.message).toContain("sourceDocId");
+  });
+
+  it("update_custom_order: supplierCost + sourceDocId verified against the ORDER's own customerProfileId", async () => {
+    mockGetCustomOrderById.mockResolvedValue({ id: 42, customerProfileId: 8888, orderNumber: "ORD-2026-0042" });
+    mockSnapshot.mockResolvedValue({ userId: null, name: "x", email: "x@example.com" });
+    mockOrderBelongsToProfiles.mockReturnValue(true);
+    mockUpdateCustomOrder.mockResolvedValue({ orderNumber: "ORD-2026-0042" });
+    mockResolveAndVerifySupplierCost.mockResolvedValue({ ok: true });
+
+    const out = JSON.parse(
+      await executeWriteTool(
+        "update_custom_order",
+        { orderId: 42, supplierCost: 6621.4, sourceDocId: 9 },
+        7001, // pinned profileId differs from the order's own customerProfileId
+      ),
+    );
+
+    expect(out.success).toBe(true);
+    expect(mockResolveAndVerifySupplierCost).toHaveBeenCalledWith({
+      claimedAmount: 6621.4,
+      sourceDocId: 9,
+      customerProfileId: 8888, // the ORDER's profile, not the pinned one
+    });
+    expect(mockUpdateCustomOrder).toHaveBeenCalledWith(42, expect.objectContaining({ supplierCost: "6621.4" }));
+  });
+
+  it("update_custom_order: supplierCost is the ONLY field and verification fails → nothing to patch, clear error", async () => {
+    mockGetCustomOrderById.mockResolvedValue({ id: 42, customerProfileId: 7001, orderNumber: "ORD-2026-0042" });
+    mockSnapshot.mockResolvedValue({ userId: null, name: "x", email: "x@example.com" });
+    mockOrderBelongsToProfiles.mockReturnValue(true);
+    mockResolveAndVerifySupplierCost.mockResolvedValue({ ok: false, reason: "找不到指定的文件" });
+
+    const out = JSON.parse(
+      await executeWriteTool(
+        "update_custom_order",
+        { orderId: 42, supplierCost: 300, sourceDocId: 999 },
+        7001,
+      ),
+    );
+
+    expect(out.success).toBeUndefined();
+    expect(mockUpdateCustomOrder).not.toHaveBeenCalled();
+    expect(out.error).toContain("找不到指定的文件");
   });
 });
 

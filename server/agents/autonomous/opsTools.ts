@@ -358,7 +358,10 @@ export const WRITE_TOOLS: Anthropic.Tool[] = [
       "title 用一眼看懂的短描述(例:『劉衛國 PEK-SFO 商務艙機票』『Jeff Green 中國簽證』)。" +
       "category 分四類:flight=機票 / visa=簽證 / quote=報價行程 / general=一般諮詢。" +
       "totalPrice 是直客售價(選填);supplierCost 是成本(選填,只給 Jeff 算毛利,絕不上客人文件)。" +
-      "**金額一律不要自己編,對話/附件裡有才填,沒有就留空。** 單一律建成 draft(草稿)狀態;" +
+      "**金額一律不要自己編,對話/附件裡有才填,沒有就留空。** " +
+      "supplierCost 若要填,必須同時提供 sourceDocId(指向已上傳的供應商文件);" +
+      "系統會驗證這個金額真的出現在該文件文字裡,對不上會被拒絕。沒有文件佐證就不要填這個欄位。" +
+      "單一律建成 draft(草稿)狀態;" +
       "就算 Jeff 說『已付清』也不要在這裡標成已付款 — 碰錢的狀態改由 Jeff 之後在客戶頁手動標。" +
       "建好用一句話跟 Jeff 報:建了哪張、單號。",
     input_schema: {
@@ -380,7 +383,16 @@ export const WRITE_TOOLS: Anthropic.Tool[] = [
         },
         supplierCost: {
           type: "number",
-          description: "成本(選填,只給 Jeff 算毛利,絕不上客人文件,絕不編)",
+          description:
+            "成本(選填,只給 Jeff 算毛利,絕不上客人文件,絕不編)。" +
+            "**填這個欄位就一定要同時填 sourceDocId**,否則會被系統拒絕不寫入。",
+        },
+        sourceDocId: {
+          type: "number",
+          description:
+            "supplierCost 的文件佐證——指向已上傳給這位客人的供應商文件(customerDocuments.id)。" +
+            "系統會驗證 supplierCost 的金額真的出現在這份文件的文字裡,對不上會被拒絕。" +
+            "只在填 supplierCost 時需要;沒有文件佐證就兩者都留空。",
         },
         departureDate: { type: "string", description: "出發日 YYYY-MM-DD(選填)" },
         returnDate: { type: "string", description: "回程日 YYYY-MM-DD(選填)" },
@@ -402,6 +414,8 @@ export const WRITE_TOOLS: Anthropic.Tool[] = [
       "補一個票價不會把標題洗掉)。可改:title / category(flight|visa|quote|general)/ destination / " +
       "totalPrice(直客售價)/ supplierCost(成本,只給 Jeff 算毛利,絕不上客人文件)/ departureDate / " +
       "returnDate / needsQuote / notes。**金額一律不編,PDF/對話裡有才填。** " +
+      "supplierCost 若要填,必須同時提供 sourceDocId(指向已上傳的供應商文件);" +
+      "系統會驗證這個金額真的出現在該文件文字裡,對不上會被拒絕。沒有文件佐證就不要填這個欄位。" +
       "**不能在這改付款/狀態** — 標已付款、確認、取消這種碰錢的仍由 Jeff 手動。只能改屬於這位客人的單。" +
       "改完用一句話報:改了哪張、動了哪些欄位。",
     input_schema: {
@@ -416,7 +430,19 @@ export const WRITE_TOOLS: Anthropic.Tool[] = [
         },
         destination: { type: "string", description: "目的地(選填;傳空字串=清除)" },
         totalPrice: { type: "number", description: "直客售價(選填,不確定就別傳這欄,絕不編)" },
-        supplierCost: { type: "number", description: "成本(選填,只給 Jeff 算毛利,絕不編)" },
+        supplierCost: {
+          type: "number",
+          description:
+            "成本(選填,只給 Jeff 算毛利,絕不編)。" +
+            "**填這個欄位就一定要同時填 sourceDocId**,否則會被系統拒絕不寫入。",
+        },
+        sourceDocId: {
+          type: "number",
+          description:
+            "supplierCost 的文件佐證——指向已上傳給這位客人的供應商文件(customerDocuments.id)。" +
+            "系統會驗證 supplierCost 的金額真的出現在這份文件的文字裡,對不上會被拒絕。" +
+            "只在填 supplierCost 時需要;沒有文件佐證就兩者都留空。",
+        },
         departureDate: { type: "string", description: "出發日 YYYY-MM-DD(選填)" },
         returnDate: { type: "string", description: "回程日 YYYY-MM-DD(選填)" },
         needsQuote: { type: "boolean", description: "是否還要報價(選填)" },
@@ -1338,6 +1364,59 @@ function categoryArg(v: unknown): ArgResult<string | null> {
 }
 
 /**
+ * Gate for writing customOrders.supplierCost (Phase2 2b — the only place in
+ * the codebase allowed to set this column). supplierCost is Jeff's internal
+ * cost number; it must never be an LLM-invented figure, only one carried over
+ * from a document that's actually been verified to contain it.
+ *
+ *   - supplierCost present, no sourceDocId → reject the field (not the whole
+ *     call): no DB write for supplierCost, everything else proceeds normally.
+ *   - supplierCost + sourceDocId → resolveAndVerifySupplierCost must pass, or
+ *     the field is rejected the same way.
+ *   - no supplierCost at all → nothing to do, field simply omitted.
+ *
+ * Returns `rejectedReason` (for the tool_result message back to the model)
+ * whenever supplierCost gets dropped, so the model knows to retry with a
+ * sourceDocId or just omit the field — never a silent drop.
+ */
+async function gateSupplierCost(
+  supplierCost: string | null | undefined,
+  sourceDocId: unknown,
+  customerProfileId: number,
+): Promise<{ supplierCost: string | null | undefined; rejectedReason?: string }> {
+  if (supplierCost == null) return { supplierCost };
+
+  const docId =
+    typeof sourceDocId === "number"
+      ? sourceDocId
+      : typeof sourceDocId === "string" && sourceDocId.trim()
+        ? Number(sourceDocId)
+        : NaN;
+  if (!Number.isInteger(docId) || docId <= 0) {
+    return {
+      supplierCost: undefined,
+      rejectedReason:
+        "supplierCost 需要搭配 sourceDocId 才能寫入(指向已上傳的供應商文件)," +
+        "請附上文件來源或省略 supplierCost 這個欄位。",
+    };
+  }
+
+  const { resolveAndVerifySupplierCost } = await import("../../_core/supplierCostVerification");
+  const result = await resolveAndVerifySupplierCost({
+    claimedAmount: Number(supplierCost),
+    sourceDocId: docId,
+    customerProfileId,
+  });
+  if (!result.ok) {
+    return {
+      supplierCost: undefined,
+      rejectedReason: `supplierCost 未寫入:${result.reason}`,
+    };
+  }
+  return { supplierCost };
+}
+
+/**
  * Pure validator/normalizer for the create_custom_order tool. Turns the model's
  * loose args into the exact insert-shape fields (money → decimal string, dates →
  * validated YYYY-MM-DD, category → whitelisted). Pure so it is unit-tested with
@@ -1822,6 +1901,7 @@ async function runWriteTool(
       const parsed = resolveCreateCustomOrderArgs(input);
       if (!parsed.ok) return { error: parsed.error };
       const v = parsed.value;
+      const costGate = await gateSupplierCost(v.supplierCost, input?.sourceDocId, profileId);
       const { createCustomOrder, generateOrderNumber, getCustomerProfileSnapshot } =
         await import("../../db/customOrder");
       const snap = await getCustomerProfileSnapshot(profileId);
@@ -1839,7 +1919,7 @@ async function runWriteTool(
         status: "draft",
         currency: "USD",
         totalPrice: v.totalPrice,
-        supplierCost: v.supplierCost,
+        supplierCost: costGate.supplierCost ?? null,
         departureDate: v.departureDate,
         returnDate: v.returnDate,
         notes: v.notes,
@@ -1852,7 +1932,7 @@ async function runWriteTool(
         .then((m) => m.enqueueCustomerSummaryRefresh(profileId))
         .catch(() => {});
       log.info(
-        { profileId, orderId: order.id, orderNumber, category: v.category },
+        { profileId, orderId: order.id, orderNumber, category: v.category, supplierCostRejected: !!costGate.rejectedReason },
         "create_custom_order executed",
       );
       return {
@@ -1861,7 +1941,10 @@ async function runWriteTool(
         orderNumber,
         title: v.title,
         category: v.category,
-        message: `已建立專案「${v.title}」(${orderNumber})`,
+        ...(costGate.rejectedReason ? { warning: costGate.rejectedReason } : {}),
+        message: costGate.rejectedReason
+          ? `已建立專案「${v.title}」(${orderNumber});${costGate.rejectedReason}`
+          : `已建立專案「${v.title}」(${orderNumber})`,
       };
     }
 
@@ -1890,19 +1973,33 @@ async function runWriteTool(
       if (!orderBelongsToProfiles(order.customerProfileId, scopeIds))
         return { error: `訂單 #${orderId} 不是這位客人的,不能改` };
 
+      let rejectedReason: string | undefined;
+      if ("supplierCost" in patch) {
+        const costGate = await gateSupplierCost(patch.supplierCost, input?.sourceDocId, order.customerProfileId);
+        if (costGate.rejectedReason) {
+          delete (patch as any).supplierCost;
+          rejectedReason = costGate.rejectedReason;
+        }
+      }
+      if (Object.keys(patch).length === 0)
+        return { error: rejectedReason ?? "沒有要改的欄位" };
+
       const updated = await updateCustomOrder(orderId, patch as any);
       if (!updated) return { error: "更新失敗(資料庫沒回傳)" };
       void import("../../queue")
         .then((m) => m.enqueueCustomerSummaryRefresh(profileId))
         .catch(() => {});
       const changed = Object.keys(patch);
-      log.info({ profileId, orderId, changed }, "update_custom_order executed");
+      log.info({ profileId, orderId, changed, supplierCostRejected: !!rejectedReason }, "update_custom_order executed");
       return {
         success: true,
         orderId,
         orderNumber: updated.orderNumber,
         changed,
-        message: `已更新單 ${updated.orderNumber}(改了:${changed.join("、")})`,
+        ...(rejectedReason ? { warning: rejectedReason } : {}),
+        message: rejectedReason
+          ? `已更新單 ${updated.orderNumber}(改了:${changed.join("、")});${rejectedReason}`
+          : `已更新單 ${updated.orderNumber}(改了:${changed.join("、")})`,
       };
     }
 
