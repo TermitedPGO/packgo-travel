@@ -103,6 +103,7 @@ vi.mock("../../_core/logger", () => ({
 import {
   isNoreplySender,
   isKnownNoise,
+  isOwnEmail,
   runGmailPipelineForMessageIds,
 } from "./gmailPipeline";
 import { gmailIntegration, agentPolicies } from "../../../drizzle/schema";
@@ -308,5 +309,111 @@ describe("runGmailPipelineForMessageIds — noreply firewall (poll parity)", () 
       "id-PACKGO_AI_PROCESSED",
     );
     expect(result.errors).toEqual([]);
+  });
+});
+
+// ── ④ A1 own-email firewall short-circuits BEFORE the LLM (2026-07-03) ──────
+//
+// isOwnEmail used to only stop processOneEmail from building a customer card;
+// the email still fell through to runInquiryAgent and burned a full LLM
+// classification chain (decision was thrown away, profileId stayed
+// undefined). This must now be filtered at the SAME step as isKnownNoise —
+// before processOneEmail is ever called — while the receipt pass (which runs
+// earlier, on `fresh`, regardless of sender) keeps working: Jeff forwards
+// bank receipts to his own inbox and that must not regress.
+
+describe("own-email firewall (isOwnEmail short-circuits before runInquiryAgent)", () => {
+  it("isOwnEmail still recognizes the owner addresses (sanity, mirrors gmailPipeline.sender.test.ts)", () => {
+    expect(isOwnEmail("jeffhsieh09@gmail.com")).toBe(true);
+    expect(isOwnEmail("support@packgoplay.com")).toBe(true);
+    expect(isOwnEmail("jane.doe@gmail.com")).toBe(false);
+  });
+
+  it("a non-receipt email from jeffhsieh09@gmail.com never reaches runInquiryAgent, but still gets labeled processed", async () => {
+    listHistoryMessageIdsMock.mockResolvedValue({
+      messageIds: ["m-own"],
+      latestHistoryId: "300",
+      expired: false,
+    });
+    listMessagesByIdsMock.mockResolvedValue([
+      makeMsg("m-own", "Jeff Hsieh <jeffhsieh09@gmail.com>"),
+    ]);
+    detectReceiptMock.mockReturnValue({ isReceipt: false });
+
+    const result = await runGmailPipelineForMessageIds(7, "301");
+
+    // Receipt pass DOES run (it operates on `fresh` before any sender
+    // filter) — proves the own-email gate sits AFTER the receipt check, not
+    // instead of it.
+    expect(detectReceiptMock).toHaveBeenCalledTimes(1);
+    // But the LLM classification never runs, and no per-message lock/insert
+    // path is touched — the email is filtered out before processOneEmail.
+    expect(runInquiryAgentMock).not.toHaveBeenCalled();
+    expect(redisSet).not.toHaveBeenCalled();
+    // Still labeled PACKGO_AI_PROCESSED so it doesn't reappear next poll —
+    // same treatment as known-noise senders.
+    expect(applyLabelMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "m-own",
+      "id-PACKGO_AI_PROCESSED",
+    );
+    expect(result.totalFetched).toBe(0);
+    expect(result.totalProcessed).toBe(0);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("a receipt-shaped email from jeffhsieh09@gmail.com still queues into pendingExpenses (Jeff forwards bank receipts to himself)", async () => {
+    listHistoryMessageIdsMock.mockResolvedValue({
+      messageIds: ["m-own-receipt"],
+      latestHistoryId: "302",
+      expired: false,
+    });
+    listMessagesByIdsMock.mockResolvedValue([
+      makeMsg("m-own-receipt", "Jeff Hsieh <jeffhsieh09@gmail.com>"),
+    ]);
+    detectReceiptMock.mockReturnValue({ isReceipt: true });
+    getPendingExpenseByGmailMessageIdMock.mockResolvedValue(null); // not yet queued
+
+    const result = await runGmailPipelineForMessageIds(7, "303");
+
+    // Receipt path is untouched by the own-email firewall — it must still
+    // process and label normally, never reaching the noise/own-email filter
+    // (that filter only sees `nonReceipt`).
+    expect(detectReceiptMock).toHaveBeenCalledTimes(1);
+    expect(runInquiryAgentMock).not.toHaveBeenCalled();
+    expect(result.totalReceipts).toBe(1);
+    expect(applyLabelMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "m-own-receipt",
+      "id-PACKGO_AI_PROCESSED",
+    );
+    expect(result.errors).toEqual([]);
+  });
+
+  it("a normal customer email pushed alongside an own-email still flows into the LLM pipeline (own-email gate doesn't overblock)", async () => {
+    listHistoryMessageIdsMock.mockResolvedValue({
+      messageIds: ["m-own", "m-cust"],
+      latestHistoryId: "304",
+      expired: false,
+    });
+    listMessagesByIdsMock.mockResolvedValue([
+      makeMsg("m-own", "jeffhsieh09@gmail.com"),
+      makeMsg("m-cust", "Lisa Chen <lisa@example.com>"),
+    ]);
+    detectReceiptMock.mockReturnValue({ isReceipt: false });
+    // Short-circuit the customer message via the per-message lock path so we
+    // don't need to stand up the full processOneEmail DB graph: acquiring
+    // the lock will fail closed against redisSet's mock resolution — simplest
+    // is to just assert runInquiryAgent WAS invoked for the customer message
+    // without needing it to complete successfully.
+    runInquiryAgentMock.mockRejectedValue(new Error("stop-after-invoked"));
+
+    const result = await runGmailPipelineForMessageIds(7, "305");
+
+    expect(runInquiryAgentMock).toHaveBeenCalledTimes(1);
+    // own-email message never reached the LLM, but the customer one did —
+    // and failed inside processOneEmail (our stub throws), which the ingest
+    // loop counts as totalFailed, not a silent drop.
+    expect(result.totalFailed).toBe(1);
   });
 });

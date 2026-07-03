@@ -46,11 +46,17 @@ vi.mock("drizzle-orm", () => ({ eq: (..._a: unknown[]) => ({ _op: true }) }));
 
 // ── Scripted Anthropic SDK: each messages.stream() call shifts one round ────
 type FakeRound = { deltas: string[]; final: { stop_reason: string; content: unknown[] } };
-const { roundQueue } = vi.hoisted(() => ({ roundQueue: [] as FakeRound[] }));
+const { roundQueue, streamCalls } = vi.hoisted(() => ({
+  roundQueue: [] as FakeRound[],
+  // Captures the raw params of every messages.stream() call (tool-gating tests
+  // read .tools off the last entry — the scripts never inspect this).
+  streamCalls: [] as any[],
+}));
 vi.mock("@anthropic-ai/sdk", () => ({
   default: class FakeAnthropic {
     messages = {
-      stream: () => {
+      stream: (params: any) => {
+        streamCalls.push(params);
         const round = roundQueue.shift();
         if (!round) throw new Error("test script exhausted — unexpected extra round");
         return {
@@ -80,6 +86,7 @@ async function collect(gen: AsyncGenerator<StreamEvent, void, void>): Promise<St
 
 beforeEach(() => {
   roundQueue.length = 0;
+  streamCalls.length = 0;
   mockUpdateSet.mockClear();
   mockUpdateWhere.mockClear();
   // Freeze ONLY Date at the incident day (LA noon 2026-07-01) so the "7/21"
@@ -279,5 +286,60 @@ describe("the incident, replayed through the REAL loop + REAL consumers", () => 
       opsTurnContextJson(done.suggestedActions ?? [], done.cards ?? [], done.toolResults ?? []),
     );
     expect(persisted).not.toHaveProperty("tools");
+  });
+});
+
+describe("create_customer tool gating (A5 — context-confusion fix, 2026-07-03)", () => {
+  // Creating a NEW customer while already pinned to a specific one is a
+  // context-confusion bug Jeff flagged: the tool must vanish from the list
+  // (not just be discouraged in prose) whenever draftProfileId is set, and
+  // must stay available in office-wide (unpinned) chat.
+  function toolNames(callIndex = 0): string[] {
+    return (streamCalls[callIndex]?.tools ?? []).map((t: any) => t.name);
+  }
+
+  it("pinned chat (draftProfileId set): create_customer is ABSENT, draft_followup IS present", async () => {
+    roundQueue.push({
+      deltas: ["好的"],
+      final: { stop_reason: "end_turn", content: [{ type: "text", text: "好的" }] },
+    });
+
+    await collect(
+      runOpsAgentStream("新增客人 小明", [], undefined, undefined, undefined, 2550004, 1),
+    );
+
+    const names = toolNames();
+    expect(names).not.toContain("create_customer");
+    expect(names).toContain("draft_followup");
+  });
+
+  it("office-wide chat (no draftProfileId): create_customer IS present, draft_followup is ABSENT", async () => {
+    roundQueue.push({
+      deltas: ["好的"],
+      final: { stop_reason: "end_turn", content: [{ type: "text", text: "好的" }] },
+    });
+
+    await collect(runOpsAgentStream("新增客人 小明", [], undefined, undefined, undefined));
+
+    const names = toolNames();
+    expect(names).toContain("create_customer");
+    expect(names).not.toContain("draft_followup");
+  });
+
+  it("staticSystem prompt text mirrors the tool list: 新增客人 instruction only appears when unpinned", async () => {
+    roundQueue.push(
+      { deltas: ["好的"], final: { stop_reason: "end_turn", content: [{ type: "text", text: "好的" }] } },
+      { deltas: ["好的"], final: { stop_reason: "end_turn", content: [{ type: "text", text: "好的" }] } },
+    );
+
+    await collect(runOpsAgentStream("q1", [], undefined, undefined, undefined, 2550004, 1));
+    await collect(runOpsAgentStream("q2", [], undefined, undefined, undefined));
+
+    const pinnedSystem = streamCalls[0].system.map((b: any) => b.text).join("\n");
+    const unpinnedSystem = streamCalls[1].system.map((b: any) => b.text).join("\n");
+
+    expect(pinnedSystem).not.toContain("呼叫 create_customer");
+    expect(pinnedSystem).toContain("沒有** create_customer 工具");
+    expect(unpinnedSystem).toContain("呼叫 create_customer");
   });
 });

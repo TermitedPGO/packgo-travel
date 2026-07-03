@@ -692,6 +692,22 @@ export async function sendEscalationReply(
     generatedBy: "ai_draft_human_approved",
   });
 
+  // customer-cockpit Phase6 A4 — 這封回覆改變了對話,摘要卡可能已過期;
+  // fire-and-forget 排進去重算,不等 02:00 的 nightly cron(否則摘要卡會
+  // 停在寄信前的舊狀態長達一整天)。整段包在 try 內:outboundResult 本身
+  // 可能是 undefined(記錄失敗時的舊行為),存取屬性也不准炸掉已寄出的結果。
+  try {
+    if (outboundResult?.customerProfileId) {
+      const { enqueueCustomerSummaryRefresh } = await import("../queue");
+      await enqueueCustomerSummaryRefresh(outboundResult.customerProfileId);
+    }
+  } catch (err) {
+    log.warn(
+      { messageId, err: err instanceof Error ? err.message : String(err) },
+      "[escalationBox] summary refresh enqueue failed (non-fatal)",
+    );
+  }
+
   // customer-cockpit Phase3 3a — 承諾追蹤(best-effort,絕不影響已寄出的結果)。
   // recordOutboundEmailInteraction 現在回傳它剛插入那筆的 interactionId/
   // customerProfileId(ResultSetHeader.insertId,跟 server/db.ts 同慣例),直接

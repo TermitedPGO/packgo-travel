@@ -37,6 +37,7 @@ import { invokeLLM } from "./llm";
 import { parseLlmJson } from "./parseLlmJson";
 import { todayLA } from "./customerFacts";
 import { createChildLogger } from "./logger";
+import { isTestOrOwnerAccount } from "./testAccounts";
 
 const log = createChildLogger({ module: "draftEval" });
 
@@ -93,6 +94,10 @@ export async function selectEvalSampleCustomers(): Promise<EvalSampleCustomer[]>
 
   return rows
     .filter((r) => r.customerProfileId != null)
+    // A6 (2026-07-03): 排除測試/業主帳號(0909 測試客人、Jeff 本人個人卡),
+    // 不讓它們污染月度草稿評分樣本——這裡只有 profileId 可用(query 沒抓
+    // email),isTestOrOwnerAccount 的 profileId 分支已覆蓋這兩張卡。
+    .filter((r) => !isTestOrOwnerAccount(undefined, r.customerProfileId as number))
     .map((r) => ({
       profileId: r.customerProfileId as number,
       lastInteractionAt: r.lastAt,

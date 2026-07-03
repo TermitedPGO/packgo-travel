@@ -261,6 +261,19 @@ describe("selectEvalSampleCustomers", () => {
     expect(result).toHaveLength(1);
   });
 
+  // A6 (2026-07-03): test/owner accounts (isTestOrOwnerAccount) must never
+  // pollute the monthly draft-eval sample.
+  it("excludes profileId 2760017 (0909 test customer) and 2730002 (Jeff's own card) from the sample", async () => {
+    selectChain.limit.mockResolvedValue([
+      { customerProfileId: 1, lastAt: new Date() },
+      { customerProfileId: 2760017, lastAt: new Date() },
+      { customerProfileId: 2730002, lastAt: new Date() },
+      { customerProfileId: 2, lastAt: new Date() },
+    ]);
+    const result = await selectEvalSampleCustomers();
+    expect(result.map((r) => r.profileId)).toEqual([1, 2]);
+  });
+
   it("returns an empty array when db is unavailable", async () => {
     const { getDb } = await import("../db");
     (getDb as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);

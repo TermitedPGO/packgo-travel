@@ -159,7 +159,7 @@ describe("toListItem — notifs (red dot) maps from the server unread count", ()
     phone: null,
     bookingCount: 0,
     inquiryCount: 1,
-    lastSignedIn: null,
+    lastContactAt: null,
   }
 
   it("threads a positive unread count straight into notifs (3 → 3)", () => {
@@ -172,6 +172,44 @@ describe("toListItem — notifs (red dot) maps from the server unread count", ()
 
   it("0 unread reads as a clean 0 (no red dot)", () => {
     expect(toListItem({ ...base, unread: 0 }, tagLabel, formatDate).notifs).toBe(0)
+  })
+})
+
+describe("toListItem — lastContact 口徑 (Phase6 A2: 最後往來, not last-login)", () => {
+  const tagLabel = { active: "active", inquiry: "inquiry", pending: "pending" }
+  const formatDate = (d: Date) => d.toISOString().slice(0, 10)
+  const base = {
+    id: 7,
+    name: "Wu",
+    email: "wu@example.com",
+    phone: null,
+    bookingCount: 0,
+    inquiryCount: 1,
+    lastContactAt: null,
+  }
+
+  it("formats server-computed lastContactAt (inbound/outbound-newer), not a login timestamp", () => {
+    // Regression guard for the 0909 bug: a member registered 5/13 but replied-to
+    // by Jeff today must show today, not the 2-month-old signup/login date.
+    const item = toListItem(
+      { ...base, lastContactAt: "2026-07-03T12:00:00Z" },
+      tagLabel,
+      formatDate,
+    )
+    expect(item.lastContact).toBe("2026-07-03")
+  })
+
+  it("accepts a Date instance too (server may serialize either way)", () => {
+    const item = toListItem(
+      { ...base, lastContactAt: new Date("2026-07-01T00:00:00Z") },
+      tagLabel,
+      formatDate,
+    )
+    expect(item.lastContact).toBe("2026-07-01")
+  })
+
+  it("null lastContactAt (never any contact, no fallback reached) → empty string, not a crash", () => {
+    expect(toListItem(base, tagLabel, formatDate).lastContact).toBe("")
   })
 })
 

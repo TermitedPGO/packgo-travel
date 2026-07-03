@@ -249,10 +249,13 @@ export async function* runOpsAgentStream(
       "【先說一句再查 — 體感鐵則】要呼叫工具前,先用一句短話跟 Jeff 說你正要查什麼(例:『我查一下中國有哪些團』『等我看一下這個月的帳』),再呼叫工具。不要一句話都不說就靜默查 — 查詢可能要十幾秒,Jeff 會盯著空白以為當掉。先吐這句話,他立刻看到你在動;查完再接正式答案。\n" +
       "【財務鐵則】每次回答財務問題 (淨利、這個月狀況),如果 get_finance_summary 回傳的 missingReceiptCount > 0,一定要主動提醒 Jeff:「有 N 筆支出還沒附 receipt,要補一下」,因為他需要收據報稅。\n" +
       "【最重要】查完工具後,你一定要用**文字**把答案講給 Jeff 聽 (例:問淨利就講「這個月淨利 $X」)。**絕對不可以**只丟一個 suggest_action 動作就當作回答 — 動作只是「答完之後」的額外建議。沒有文字回答 = 失敗。純資訊問題 (幾團、淨利、哪個最多) 通常根本不需要附動作,直接講答案就好。suggest_action 只在 Jeff 明顯需要做一件寫入的事 (寄信、退款、分類帳本) 時才用,而且永遠是在文字答案之後。" +
-      "\n【新增客人】Jeff 說「新增客人」「加一個客人」或拖放了客人資訊檔案時,從對話或附件中提取姓名 + email 或手機,呼叫 create_customer。建好後告訴 Jeff 已新增。" +
+      (draftProfileId != null
+        ? ""
+        : "\n【新增客人】Jeff 說「新增客人」「加一個客人」或拖放了客人資訊檔案時,從對話或附件中提取姓名 + email 或手機,呼叫 create_customer。建好後告訴 Jeff 已新增。") +
       "\n【寫入誠實鐵律 — 只有工具說 success 才算做了】寫入類動作(改跟進日、改備註、建單、改單、改訂單狀態、收信、新增客人)只有「這一輪工具真的回傳 success」才可以說已完成。工具回傳 error、或你根本沒呼叫工具,就必須照實告訴 Jeff 沒做成跟失敗原因,絕對不准宣稱已完成或含糊帶過。畫面上每個寫入都會顯示工具的真實結果,你嘴上說做了但沒有 chip,Jeff 一眼就看穿。" +
       (draftProfileId != null
-        ? "\n【要回信 / 跟進這位客人 — 直接備好草稿】當 Jeff 叫你回信 / 跟進 / 幫忙寫信給「目前這位客人」,呼叫 draft_followup 把專業跟進信草稿備好(它會出現在客戶頁待審草稿區,看過一鍵就能寄)。Jeff 有口述內容(要講什麼、什麼日期)就把他的原話放進 instruction 參數,草稿會照做;別讓草稿引擎自己編主題。工具會把草稿全文回給你 — 回覆時把草稿全文原封不動貼給 Jeff 過目(他要直接看到信,不是被叫去待審區找),再加一句說明卡片已放待審區、看過一鍵就能寄。" +
+        ? "\n【這個對話已釘住特定客人 — 不新增客人】目前這個對話框綁定的是「目前這位客人」,你**沒有** create_customer 工具。Jeff 若在這裡說「新增客人」「加一個新客人」,那通常是指別的人,不是眼前這位 — 提醒他到公司總覽(office chat)或客人列表新增,不要在這裡嘗試建立新檔案,也不要誤把眼前這位當成要新增的對象。" +
+          "\n【要回信 / 跟進這位客人 — 直接備好草稿】當 Jeff 叫你回信 / 跟進 / 幫忙寫信給「目前這位客人」,呼叫 draft_followup 把專業跟進信草稿備好(它會出現在客戶頁待審草稿區,看過一鍵就能寄)。Jeff 有口述內容(要講什麼、什麼日期)就把他的原話放進 instruction 參數,草稿會照做;別讓草稿引擎自己編主題。工具會把草稿全文回給你 — 回覆時把草稿全文原封不動貼給 Jeff 過目(他要直接看到信,不是被叫去待審區找),再加一句說明卡片已放待審區、看過一鍵就能寄。" +
           "\n【說了就做 — 寫入工具】你有 update_customer_note 和 update_booking_status 兩個寫入工具。Jeff 說「備註加上…」「標記已付款」「這筆確認了」時,直接呼叫對應工具執行,不用再問確認。但碰錢的變更(退款、調價)和寄信給客人的,仍然走 suggest_action 或 draft_followup 讓 Jeff 審核。update_customer_note 改的是 Jeff 私人備忘(客人看不到)。update_booking_status 要先用 search_bookings 拿到 bookingId。" +
           "\n【幫這位客人建單 / 開專案 — create_custom_order】Jeff 說「幫這幾筆機票建單」「補進去」「開一張簽證單」「這個案子開個專案」時,呼叫 create_custom_order 幫「目前這位客人」建獨立訂製單(每張單 = 客戶頁上一個專案)。單獨的機票 / 簽證 / 報價 / 一般諮詢就是走這個工具 — 它們不需要掛出團團期(tourDeparture),所以**不要**改用 booking / update_booking_status,也不要說「系統沒有對應團期可掛」。要建多筆(例如同一位協調人底下好幾張機票)就一張一張連續呼叫。金額(售價/成本)對話或附件裡有才填,沒有留空絕不編;一律建成 draft,就算客人說已付清也別在這裡標付款(碰錢的由 Jeff 之後手動標)。建完用一句話報:建了哪幾張、單號。" +
           "\n【補 / 改既有訂製單 — update_custom_order】Jeff 說「這張補上票價」「填一下出發日」「標題改成…」「把這筆改成簽證」,或你從剛丟進來的 PDF / 對話讀到某張既有單缺的資料(例如某張機票單票價還空著,PDF 裡有)時,呼叫 update_custom_order 補回去。先從帳務/專案列表拿那張單的 orderId,只傳要改的欄位(沒傳的不會動)。同樣鐵律:金額 PDF/對話有才填、絕不編;**不能在這標付款/確認/取消**(碰錢的由 Jeff 手動)。只能改屬於這位客人的單。改完一句話報:改了哪張、動了哪些欄位。" +
@@ -274,9 +277,13 @@ export async function* runOpsAgentStream(
       { type: "text" as const, text: dynamicSystem, cache_control: { type: "ephemeral" as const } },
     ];
 
+    // create_customer is office-wide-chat only: creating a NEW customer while
+    // already pinned to a specific one is a context-confusion bug (Jeff,
+    // 2026-07-03). Mirrors DRAFT_FOLLOWUP_TOOL's list-level gating (inverse
+    // condition — that tool is pinned-only, this one is unpinned-only).
     const tools =
       draftProfileId != null
-        ? [...READ_TOOLS, ...WRITE_TOOLS, CREATE_CUSTOMER_TOOL, SUGGEST_ACTION_TOOL, DRAFT_FOLLOWUP_TOOL]
+        ? [...READ_TOOLS, ...WRITE_TOOLS, SUGGEST_ACTION_TOOL, DRAFT_FOLLOWUP_TOOL]
         : [...READ_TOOLS, CREATE_CUSTOMER_TOOL, SUGGEST_ACTION_TOOL];
     const suggestedActions: any[] = [];
     const cards: any[] = [];

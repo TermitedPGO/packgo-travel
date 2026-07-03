@@ -324,7 +324,10 @@ type RawUser = {
   phone: string | null
   bookingCount: number
   inquiryCount: number
-  lastSignedIn: Date | null
+  /** A2 (Phase6) — 最後往來(inbound/outbound 取較新者,見 computeLastContactAt),
+   *  not lastSignedIn (last LOGIN — a member who signs in once and then only
+   *  emails would otherwise show a stale signup date forever). */
+  lastContactAt: Date | string | null
   blocked?: boolean
   needsFollowup?: boolean
   followUpDate?: string | null
@@ -355,7 +358,7 @@ export function toListItem(
     phone: raw.phone ?? "",
     initials: deriveInitials(raw.name, raw.email),
     ...avatar,
-    lastContact: raw.lastSignedIn ? formatDate(raw.lastSignedIn) : "",
+    lastContact: raw.lastContactAt ? formatDate(new Date(raw.lastContactAt)) : "",
     tag,
     tagLabel: tagLabel[tag] ?? tag,
     notifs: raw.unread ?? 0,

@@ -233,7 +233,7 @@ export function useCustomerData(
           phone: u.phone,
           bookingCount: u.bookingCount,
           inquiryCount: u.inquiryCount,
-          lastSignedIn: u.lastSignedIn,
+          lastContactAt: u.lastContactAt,
           blocked: u.blocked,
           needsFollowup: u.needsFollowup,
           unread: u.unread,
@@ -258,7 +258,11 @@ export function useCustomerData(
         phone,
         initials: deriveInitials(g.name ?? null, g.email || phone || "?"),
         ...avatar,
-        lastContact: g.updatedAt ? formatDate(new Date(g.updatedAt)) : "",
+        // A2 (Phase6) — guestList now returns lastContactAt (server GREATEST of
+        // lastInboundAt / last-outbound-interaction, falling back to
+        // updatedAt) instead of raw updatedAt, so guest and registered rows
+        // share the exact same "last contact" definition.
+        lastContact: g.lastContactAt ? formatDate(new Date(g.lastContactAt)) : "",
         tag: "inquiry" as const,
         tagLabel: tagLabels.inquiry ?? "",
         notifs: g.unread ?? 0,

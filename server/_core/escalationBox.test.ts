@@ -40,6 +40,11 @@ vi.mock("../storage", () => ({
 vi.mock("./outboundInteraction", () => ({
   recordOutboundEmailInteraction: vi.fn(async () => {}),
 }));
+const { mockEnqueueRefresh } = vi.hoisted(() => ({
+  mockEnqueueRefresh: vi.fn(),
+}));
+// A4 — fire-and-forget summary refresh must not pull the real BullMQ/Redis queue.
+vi.mock("../queue", () => ({ enqueueCustomerSummaryRefresh: mockEnqueueRefresh }));
 
 import { getDb } from "../db";
 import {
@@ -56,12 +61,14 @@ import {
 } from "./escalationBox";
 import { sendReplyInThread, threadExists } from "./gmail";
 import { storageGetBytes, getSecureDocumentUrl } from "../storage";
+import { recordOutboundEmailInteraction } from "./outboundInteraction";
 
 const getDbMock = vi.mocked(getDb);
 const sendReplyMock = vi.mocked(sendReplyInThread);
 const threadExistsMock = vi.mocked(threadExists);
 const getBytesMock = vi.mocked(storageGetBytes);
 const getSecureUrlMock = vi.mocked(getSecureDocumentUrl);
+const recordOutboundMock = vi.mocked(recordOutboundEmailInteraction);
 
 /** Thenable drizzle-chain fake: every builder method returns itself and the
  *  whole chain resolves to `result` when awaited. set() captures its arg. */
@@ -689,5 +696,76 @@ describe("sendEscalationReply multi-account routing (2026-07-02)", () => {
     expect(res.errorMessage).toContain("support@packgoplay.com");
     expect(res.errorMessage).toContain("重新連接");
     expect(sendReplyMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 2026-07-03 customer-cockpit Phase6 A4 — "summary card still shows the
+ * 21-hours-old state after replying". A successful send must fire-and-forget
+ * enqueueCustomerSummaryRefresh(profileId) so the card recomputes instead of
+ * waiting for the 02:00 nightly cron.
+ */
+describe("sendEscalationReply summary refresh (Phase6 A4)", () => {
+  const REPLYABLE_CTX = JSON.stringify({
+    gmailThreadId: "t-1",
+    gmailMessageId: "m-1",
+    customerEmail: "jenny@example.com",
+    subject: "行程詢問",
+  });
+  const msgRow = {
+    id: 5,
+    messageType: "escalation",
+    context: REPLYABLE_CTX,
+    relatedCustomerProfileId: null,
+  };
+  const integration = { emailAddress: "support@packgoplay.com", isActive: 1 };
+
+  beforeEach(() => {
+    sendReplyMock.mockResolvedValue({
+      ok: true,
+      dryRun: false,
+      messageId: "x",
+      threadId: "t-1",
+    });
+  });
+
+  it("successful send enqueues a summary refresh for the outbound interaction's profile", async () => {
+    recordOutboundMock.mockResolvedValue({
+      recorded: true,
+      interactionId: 501,
+      customerProfileId: 42,
+    });
+    getDbMock.mockResolvedValue(fakeDb([[msgRow], [integration], []]));
+
+    const res = await sendEscalationReply(5, "您好,已經處理好了");
+
+    expect(res.sent).toBe(true);
+    expect(mockEnqueueRefresh).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueRefresh).toHaveBeenCalledWith(42);
+  });
+
+  it("no customerProfileId (recording failed) → refresh is skipped, send still succeeds", async () => {
+    recordOutboundMock.mockResolvedValue({ recorded: false });
+    getDbMock.mockResolvedValue(fakeDb([[msgRow], [integration], []]));
+
+    const res = await sendEscalationReply(5, "您好");
+
+    expect(res.sent).toBe(true);
+    expect(mockEnqueueRefresh).not.toHaveBeenCalled();
+  });
+
+  it("refresh enqueue throwing never breaks the already-sent result (fire-and-forget)", async () => {
+    recordOutboundMock.mockResolvedValue({
+      recorded: true,
+      interactionId: 502,
+      customerProfileId: 43,
+    });
+    mockEnqueueRefresh.mockRejectedValueOnce(new Error("redis down"));
+    getDbMock.mockResolvedValue(fakeDb([[msgRow], [integration], []]));
+
+    const res = await sendEscalationReply(5, "您好");
+
+    expect(res.sent).toBe(true);
+    expect(mockEnqueueRefresh).toHaveBeenCalledWith(43);
   });
 });

@@ -42,6 +42,36 @@ export function isUnreadInbound(
 }
 
 /**
+ * 列表「最後往來」口徑 (customer-cockpit Phase6 A2)。
+ *
+ * 之前的 bug:客人列表(registered)拿 users.lastSignedIn(最後登入,不是最後
+ * 聯絡)當日期欄,一位客人若只登入過一次、之後全靠 email/inquiry 往來,列表
+ * 就永遠停在當初登入那天(0909 案例:顯示 5/13,實際今天還有往來)。
+ *
+ * 正解 = 這個 profile 的 inbound 與 outbound 兩根指針取較新者:
+ *   - lastInboundAt:customerUnread 既有指針(inbound customerInteraction)。
+ *   - lastOutboundAt:呼叫端從 customerInteractions 查 direction='outbound'
+ *     的 MAX(createdAt)(escalationBox 回信、inquiry 回覆等)。
+ * 兩者都空(從沒往來過,只註冊)→ fallback(通常是 createdAt/registeredAt),
+ * 讓一個剛註冊、還沒任何互動的客人至少有個日期可顯示,不是空白。
+ *
+ * 純函式、與 isUnreadInbound 同款(取兩指針中較新者,不猜、不查 DB)。
+ */
+export function computeLastContactAt(
+  lastInboundAt: Date | null | undefined,
+  lastOutboundAt: Date | null | undefined,
+  fallback: Date | null | undefined = null,
+): Date | null {
+  const candidates = [lastInboundAt, lastOutboundAt].filter(
+    (d): d is Date => d != null,
+  );
+  if (candidates.length === 0) return fallback ?? null;
+  return candidates.reduce((latest, d) =>
+    d.getTime() > latest.getTime() ? d : latest,
+  );
+}
+
+/**
  * 插入一筆 inbound customerInteraction 後呼叫:把 profile 的 lastInboundAt
  * 推進到 ts。單一條件式 UPDATE,只有 ts 比現值新(或現值 NULL)才寫 —
  * 舊時間永不倒退,重跑/亂序 idempotent。絕不 throw(未讀指針壞了不能

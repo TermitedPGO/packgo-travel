@@ -1192,6 +1192,28 @@ describe("update_customer_note — append semantics (P2 2026-07-01: 覆寫毀掉
     expect(out.message).toContain("對蝦過敏");
   });
 
+  it("two real calls in a row: the 2nd call's read picks up what the 1st call wrote — neither note is lost (A7 回歸測試, 2026-07-03)", async () => {
+    // Call 1: starts from an empty note.
+    rowQueue = [[{ note: null }]];
+    const first = JSON.parse(
+      await executeWriteTool("update_customer_note", { note: "第一條" }, 5),
+    );
+    expect(first.note).toBe("第一條");
+
+    // Call 2: DB now holds call 1's write (fed back in, exactly what the real
+    // read-before-write does against a real row) — the model calls the SAME
+    // tool again with different text, never having seen call 1's result.
+    rowQueue = [[{ note: first.note }]];
+    const second = JSON.parse(
+      await executeWriteTool("update_customer_note", { note: "第二條" }, 5),
+    );
+    expect(second.note).toContain("第一條");
+    expect(second.note).toContain("第二條");
+    expect(lastDb.set).toHaveBeenCalledWith(
+      expect.objectContaining({ jeffPersonalNote: second.note }),
+    );
+  });
+
   it("executor replace:true overwrites the field entirely", async () => {
     rowQueue = [[{ note: "舊的內容" }]];
     const out = JSON.parse(

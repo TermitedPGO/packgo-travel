@@ -56,6 +56,7 @@ import { evaluateAutoSend } from "./autoSendGate";
 import { runRefundAgent, DEFAULT_REFUND_POLICY } from "./refundAgent";
 import { redis } from "../../redis";
 import { createChildLogger } from "../../_core/logger";
+import { OWN_EMAILS } from "../../_core/testAccounts";
 const log = createChildLogger({ module: "gmailPipeline" });
 
 const PROCESSED_LABEL = "PACKGO_AI_PROCESSED";
@@ -349,14 +350,15 @@ const KNOWN_NOISE_DOMAINS = new Set([
  * support@packgoplay.com 的網域雖已在該表,防線仍以這裡的全字比對為準)。
  * 命中時信照常跑 receipt/inquiry 流程,只跳過 profile 建檔+歸戶 — 行為
  * 等同寄件人解析不到(profileId undefined)那條既有路徑。
+ *
+ * OWN_EMAILS 本體 (A6, 2026-07-03) 移到 server/_core/testAccounts.ts 定義、
+ * 這裡改成 import(見檔案頂部)——testAccounts.ts 是零重型依賴的 leaf module,
+ * draftEval / 塊 D 稽核cron 都要 import 它的 isTestOrOwnerAccount;若常數留
+ * 在這裡定義,任何人 import OWN_EMAILS 都會拖進 gmailPipeline.ts 整條
+ * db/redis/gmail/receiptExtractor/inquiryAgent 重型 import chain。方向反過來
+ * (testAccounts 當 source of truth,gmailPipeline 反向 import)兩邊都不用
+ * 重型 mock。
  */
-const OWN_EMAILS = new Set([
-  "jeffhsieh09@gmail.com",
-  // jeffhsieh0909 刻意「不在」黑名單:它是專職 E2E 測試客人(Google 顯示名
-  // Better way To survive,Jeff 2026-07-02 拍板)。從它寄進來的信要走完整
-  // 客人管線(建卡/歸檔/摘要/草稿),用來對客戶頁做真實驗收。
-  "support@packgoplay.com",
-]);
 
 /** Case-insensitive own-address check (pure; unit-tested in gmailPipeline.sender.test.ts). */
 export function isOwnEmail(email: string | null | undefined): boolean {
@@ -453,7 +455,23 @@ async function ingestFreshMessages(
   // ── Pre-LLM spam filter — isKnownNoise + KNOWN_NOISE_DOMAINS live at
   // module scope (above) so the noreply check is shared with the push-path
   // firewall and unit-testable.
+  //
+  // 自家信箱防火牆短路 (2026-07-03, A1) — isOwnEmail used to only stop
+  // processOneEmail from building a customer card (:700-ish `if (senderEmail
+  // && !isOwnEmail(...))`); the email still fell through to runInquiryAgent
+  // and burned a full LLM classification chain for nothing (profileId stayed
+  // undefined, decision was thrown away). Filtering here — same step as
+  // isKnownNoise, AFTER the receipt pass above — skips the LLM entirely
+  // while leaving receipt forwarding untouched: Jeff forwards bank receipts
+  // to himself, and detectReceipt/processReceiptEmail already ran on `fresh`
+  // before this filter even sees the message.
+  const skipOwnEmail = (m: GmailMessageSummary): boolean =>
+    isOwnEmail(parseEmailAddress(m.from));
   const customerEmails = nonReceipt.filter((m) => {
+    if (skipOwnEmail(m)) {
+      log.info({ from: m.from, subject: m.subject?.slice(0, 40) }, "[gmailPipeline] skipped own email (no LLM)");
+      return false;
+    }
     if (isKnownNoise(m.from)) {
       log.info({ from: m.from, subject: m.subject?.slice(0, 40) }, "[gmailPipeline] skipped known noise");
       return false;
@@ -467,9 +485,10 @@ async function ingestFreshMessages(
     log.info({ skippedNoise, remaining: customerEmails.length }, "[gmailPipeline] pre-filtered known noise senders");
   }
 
-  // Apply processed label to skipped noise so they don't reappear next poll
+  // Apply processed label to skipped noise (and own-email) so they don't
+  // reappear next poll
   for (const m of nonReceipt) {
-    if (isKnownNoise(m.from)) {
+    if (skipOwnEmail(m) || isKnownNoise(m.from)) {
       try { await applyLabel(gmail, m.id, labelId); } catch {}
     }
   }

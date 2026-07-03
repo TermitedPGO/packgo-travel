@@ -30,7 +30,11 @@ import {
 } from "./adminCustomersThread";
 import { isHiddenCustomer } from "./adminCustomersFilter";
 import { guestDeleteGate } from "./adminCustomersGuestDelete";
-import { isUnreadInbound, markCustomerSeen } from "../_core/customerUnread";
+import {
+  isUnreadInbound,
+  markCustomerSeen,
+  computeLastContactAt,
+} from "../_core/customerUnread";
 import { loadCustomerDocs } from "../_core/customerDocsLoader";
 import {
   readCachedSummary,
@@ -137,6 +141,7 @@ export const adminCustomersRouter = router({
         inquiries: inquiriesTable,
         aiQuotes: aiQuotesTable,
         agentMessages,
+        customerInteractions,
       } = await import("../../drizzle/schema");
 
       // Subquery: total spend per user (sum of non-cancelled bookings).
@@ -181,6 +186,15 @@ export const adminCustomersRouter = router({
           // customer-unread (0108) — 來訊未讀紅點的兩根指針(NULL 當沒 profile row)。
           lastInboundAt: customerProfiles.lastInboundAt,
           jeffViewedAt: customerProfiles.jeffViewedAt,
+          // A2 (Phase6) — 列表日期口徑:最後一筆我方 outbound 往來(email 回覆
+          // 等),跟 lastInboundAt 取較新者當「最後往來」,不再用 lastSignedIn
+          // (那是最後登入,不是最後聯絡 — 一位只登入過一次的會員會被列表誤判
+          // 成兩個月沒往來)。NULL 當這個 profile 從沒有 outbound 紀錄。
+          lastOutboundAt: sql<Date | null>`(
+            SELECT MAX(${customerInteractions.createdAt}) FROM ${customerInteractions}
+              WHERE ${customerInteractions.customerProfileId} = ${customerProfiles.id}
+                AND ${customerInteractions.direction} = 'outbound'
+          )`,
           // 需跟進 (locked 2026-06-20): open inquiry >2d unanswered OR a
           // sent/viewed quote >5d old. Correlated EXISTS by userId OR verified
           // email — read-only signal, never auto-acts. Intentionally STATUS-only
@@ -205,11 +219,16 @@ export const adminCustomersRouter = router({
         .from(usersTable)
         .leftJoin(spendSub, eq(usersTable.id, spendSub.userId))
         .leftJoin(customerProfiles, eq(customerProfiles.userId, usersTable.id))
-        .where(eq(usersTable.role, "user"))
-        .orderBy(desc(usersTable.lastSignedIn));
+        .where(eq(usersTable.role, "user"));
 
+      // A2 (Phase6) — sort moved to JS below (after withFlags is built) so it
+      // can order by the same computed lastContactAt the rows display. SQL
+      // ORDER BY can't cleanly combine the correlated lastOutboundAt subquery
+      // with lastInboundAt across NULLs; no LIMIT on this query, so a JS sort
+      // over the full result set is safe (unlike guestList's LIMIT 200 below,
+      // which needs the equivalent GREATEST(...) done in SQL before the cut).
       const withFlags = rows.map(
-        ({ profileStatus, lastInteractionAt, needsFollowup, unread, lastInboundAt, jeffViewedAt, ...r }) => {
+        ({ profileStatus, lastInteractionAt, needsFollowup, unread, lastInboundAt, jeffViewedAt, lastOutboundAt, createdAt, lastSignedIn, ...r }) => {
           const blocked = profileStatus === "blocked";
           const hidden = isHiddenCustomer(
             {
@@ -219,8 +238,19 @@ export const adminCustomersRouter = router({
             },
             blocked,
           );
+          // A2 (Phase6) — 列表「最後往來」口徑:inbound / outbound 兩指針取較新
+          // 者;都沒有(從沒任何互動,剛註冊)才 fallback 到 createdAt(註冊日),
+          // 讓列表至少有個日期,不是空白。會員卡與訪客卡(guestList)同一套口徑。
+          const lastContactAt = computeLastContactAt(
+            lastInboundAt ?? null,
+            lastOutboundAt ?? null,
+            createdAt ?? null,
+          );
           return {
             ...r,
+            createdAt,
+            lastSignedIn,
+            lastContactAt,
             blocked,
             hidden,
             needsFollowup: Number(needsFollowup) === 1,
@@ -231,6 +261,12 @@ export const adminCustomersRouter = router({
           };
         },
       );
+      // 排序跟著新口徑走:最近往來在最上面(維持列表原本「新的在前」慣例)。
+      withFlags.sort((a, b) => {
+        const at = a.lastContactAt ? a.lastContactAt.getTime() : 0;
+        const bt = b.lastContactAt ? b.lastContactAt.getTime() : 0;
+        return bt - at;
+      });
 
       return input?.includeHidden ? withFlags : withFlags.filter((r) => !r.hidden);
     }),
@@ -337,12 +373,15 @@ export const adminCustomersRouter = router({
     }),
 
   /**
-   * customerUnreadCount (customer-unread, 0108) — how many customers have an
-   * unseen inbound message, for the /ops nav rail badge. Applies the SAME
-   * noise gates as the two lists (registered: isHiddenCustomer auto-junk +
-   * blocked; guests: guestList's contactable / not-registered / real-content
-   * SQL conditions + blocked), so the badge count and the visible red dots
-   * can never disagree.
+   * customerUnreadCount (customer-unread, 0108; window aligned A3/Phase6) —
+   * how many customers have an unseen inbound message, for the /ops nav rail
+   * badge. Applies the SAME noise gates as the two lists (registered:
+   * isHiddenCustomer auto-junk + blocked; guests: guestList's contactable /
+   * not-registered / real-content SQL conditions + blocked) AND, for guests,
+   * the same ORDER BY lastContactAt DESC LIMIT 200 window guestList uses —
+   * a guest ranked past #200 can never appear in the visible list, so it must
+   * not count toward the badge either. So the badge count and the visible
+   * red dots can never disagree.
    */
   customerUnreadCount: adminProcedure.query(async () => {
     const drizzleDb = (await db.getDb())!;
@@ -351,6 +390,7 @@ export const adminCustomersRouter = router({
       users: usersTable,
       inquiries: inquiriesTable,
       agentMessages,
+      customerInteractions,
     } = await import("../../drizzle/schema");
 
     // Registered customers — profile row required (that's where the pointers
@@ -384,7 +424,34 @@ export const adminCustomersRouter = router({
         ) && isUnreadInbound(r.lastInboundAt, r.jeffViewedAt),
     ).length;
 
-    // Guests — mirror guestList's WHERE (雜訊 profile 不算數) + unread pointers.
+    // Guests — mirror guestList's WHERE EXACTLY (same population, not a
+    // superset/subset of it) + unread pointers, AND its ORDER BY + LIMIT 200
+    // window (A3, Phase6): guestList only ever shows the top-200-by-
+    // lastContactAt guests, so a guest ranked past #200 must not count toward
+    // the badge either — otherwise the badge can read nonzero with no visible
+    // red dot to match it. lastContactSql mirrors guestList's GREATEST(...)
+    // expression verbatim (same NULL-fallback reasoning: MySQL GREATEST
+    // returns NULL if any arg is NULL).
+    //
+    // IMPORTANT (A3 hotfix): do NOT add a `lastInboundAt IS NOT NULL`
+    // pre-filter here like the registered-customer branch above does.
+    // guestList has no such filter, so adding one here would shrink this
+    // query's ranking pool relative to guestList's before the identical
+    // LIMIT 200 is applied — the two top-200 windows would then be computed
+    // over different populations and could disagree on which guests are
+    // "in". isUnreadInbound(null, ...) already returns false, so a guest with
+    // no inbound message correctly never counts as unread; it must still
+    // occupy its rightful ranking slot so it can correctly push OTHER guests
+    // below #200 in the same way it does for guestList.
+    const lastContactSql = sql<Date>`GREATEST(
+        COALESCE(${customerProfiles.lastInboundAt}, ${customerProfiles.updatedAt}),
+        COALESCE(
+          (SELECT MAX(${customerInteractions.createdAt}) FROM ${customerInteractions}
+            WHERE ${customerInteractions.customerProfileId} = ${customerProfiles.id}
+              AND ${customerInteractions.direction} = 'outbound'),
+          ${customerProfiles.updatedAt}
+        )
+      )`;
     const guests = await drizzleDb
       .select({
         status: customerProfiles.status,
@@ -395,7 +462,6 @@ export const adminCustomersRouter = router({
       .where(
         and(
           sql`${customerProfiles.userId} IS NULL`,
-          sql`${customerProfiles.lastInboundAt} IS NOT NULL`,
           sql`(
             (${customerProfiles.email} IS NOT NULL AND ${customerProfiles.email} != '')
             OR (${customerProfiles.phone} IS NOT NULL AND ${customerProfiles.phone} != '')
@@ -410,7 +476,9 @@ export const adminCustomersRouter = router({
             OR EXISTS (SELECT 1 FROM ${agentMessages} WHERE ${agentMessages.relatedCustomerProfileId} = ${customerProfiles.id} AND ${agentMessages.messageType} = 'escalation')
           )`,
         ),
-      );
+      )
+      .orderBy(desc(lastContactSql))
+      .limit(200);
     const guestUnread = guests.filter(
       (g) =>
         g.status !== "blocked" &&
@@ -860,12 +928,31 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
         users: usersTable,
         inquiries: inquiriesTable,
         agentMessages,
+        customerInteractions,
       } = await import("../../drizzle/schema");
       // 訪客門檻 (v694 hotfix): 123 historical profiles were mostly noise
       // senders (bank alerts / marketing blasts) profiled before the
       // pipeline's noise filter existed. A guest only earns a sidebar chip
       // when there is actual CUSTOMER content behind it — an inquiry row or
       // an escalation — otherwise the customer list drowns in junk.
+      //
+      // A2 (Phase6) — lastContactSql is GREATEST(lastInboundAt, lastOutboundAt)
+      // with COALESCE fallback to updatedAt when a side is NULL (MySQL GREATEST
+      // returns NULL if ANY arg is NULL, so a guest with only inbound-ever would
+      // otherwise vanish from the sort entirely). Computed once here and reused
+      // for BOTH the ORDER BY (must run in SQL, before LIMIT 200 truncates the
+      // window) and the returned column (client displays it) — one expression,
+      // one truth, same shape as computeLastContactAt's inbound/outbound-newer
+      // rule used for registered customers in customerList.
+      const lastContactSql = sql<Date>`GREATEST(
+        COALESCE(${customerProfiles.lastInboundAt}, ${customerProfiles.updatedAt}),
+        COALESCE(
+          (SELECT MAX(${customerInteractions.createdAt}) FROM ${customerInteractions}
+            WHERE ${customerInteractions.customerProfileId} = ${customerProfiles.id}
+              AND ${customerInteractions.direction} = 'outbound'),
+          ${customerProfiles.updatedAt}
+        )
+      )`;
       const rows = await drizzleDb
         .select({
           profileId: customerProfiles.id,
@@ -877,6 +964,7 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
           // customer-unread (0108) — 來訊未讀紅點的兩根指針。
           lastInboundAt: customerProfiles.lastInboundAt,
           jeffViewedAt: customerProfiles.jeffViewedAt,
+          lastContactAt: lastContactSql,
           // 需跟進: an unanswered inquiry (by this profile's email) older than 2d.
           needsFollowup: sql<number>`EXISTS (SELECT 1 FROM ${inquiriesTable}
             WHERE ${inquiriesTable.customerEmail} = ${customerProfiles.email}
@@ -911,7 +999,7 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
             )`,
           ),
         )
-        .orderBy(desc(customerProfiles.updatedAt))
+        .orderBy(desc(lastContactSql))
         .limit(200);
       // Manual hide reuses the same customerProfiles.status='blocked' switch as
       // registered accounts (markNotCustomer/restoreCustomer by profileId).

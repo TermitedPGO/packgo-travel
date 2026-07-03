@@ -29,6 +29,7 @@ import {
   isUnreadInbound,
   touchLastInbound,
   markCustomerSeen,
+  computeLastContactAt,
 } from "./customerUnread";
 
 const d = (iso: string) => new Date(iso);
@@ -53,6 +54,54 @@ describe("isUnreadInbound — unread 計算", () => {
     expect(isUnreadInbound(d("2026-07-01T09:00:00Z"), d("2026-07-01T10:00:00Z"))).toBe(false);
     // exact tie is READ — viewing at the same instant counts as seen
     expect(isUnreadInbound(d("2026-07-01T10:00:00Z"), d("2026-07-01T10:00:00Z"))).toBe(false);
+  });
+});
+
+describe("computeLastContactAt — 列表日期口徑 (Phase6 A2)", () => {
+  it("both null, no fallback → null", () => {
+    expect(computeLastContactAt(null, null)).toBeNull();
+    expect(computeLastContactAt(undefined, undefined)).toBeNull();
+  });
+
+  it("both null, fallback given (e.g. registeredAt) → fallback", () => {
+    const fallback = d("2026-05-13");
+    expect(computeLastContactAt(null, null, fallback)).toBe(fallback);
+  });
+
+  it("only inbound set → inbound", () => {
+    const inbound = d("2026-07-03T10:00:00Z");
+    expect(computeLastContactAt(inbound, null)).toBe(inbound);
+  });
+
+  it("only outbound set → outbound", () => {
+    const outbound = d("2026-07-03T10:00:00Z");
+    expect(computeLastContactAt(null, outbound)).toBe(outbound);
+  });
+
+  it("inbound newer than outbound → inbound wins", () => {
+    const inbound = d("2026-07-03T10:00:00Z");
+    const outbound = d("2026-07-01T09:00:00Z");
+    expect(computeLastContactAt(inbound, outbound)).toBe(inbound);
+  });
+
+  it("outbound newer than inbound (Jeff just replied) → outbound wins", () => {
+    // This is the core bug this fixes: 0909 replied-to-by-Jeff-today case —
+    // registration/lastSignedIn is 2 months stale but the outbound reply is now.
+    const inbound = d("2026-05-13T00:00:00Z");
+    const outbound = d("2026-07-03T12:00:00Z");
+    expect(computeLastContactAt(inbound, outbound)).toBe(outbound);
+  });
+
+  it("exact tie → either (same instant), picks first candidate deterministically", () => {
+    const tie = d("2026-07-03T10:00:00Z");
+    const result = computeLastContactAt(tie, new Date(tie.getTime()));
+    expect(result?.getTime()).toBe(tie.getTime());
+  });
+
+  it("fallback ignored when either pointer is present", () => {
+    const inbound = d("2026-06-01");
+    const fallback = d("2026-05-13");
+    expect(computeLastContactAt(inbound, null, fallback)).toBe(inbound);
   });
 });
 

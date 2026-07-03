@@ -12,6 +12,10 @@
  *    以前 gate 在 `&& profileId` — undefined 直接 rethrow,label 前掛過一次
  *    的自家信變成每輪 poll 燒一次 LLM 的永久 failure loop。回復查詢 key
  *    必須跟 INSERT 寫的一致:(profileId ?? 0, externalId)。
+ *    (A1, 2026-07-03: 自家信現在在 ingestFreshMessages 就被過濾掉,根本
+ *    不會進 processOneEmail — 這條 dup-recovery 分岔對自家信已是歷史案例,
+ *    但 profileId undefined 仍會發生在「寄件人解析不到」的一般情形,函式
+ *    本身的行為驗證仍然有效,不動。)
  *
  * Heavy collaborators are mocked BEFORE importing gmailPipeline — same
  * pattern as gmailPipeline.noise.test.ts (module import must be side-effect
