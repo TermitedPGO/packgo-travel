@@ -1117,7 +1117,20 @@ async function startServer() {
   async function verifyInternalAuth(
     req: import("express").Request,
     res: import("express").Response,
-    options: { rateLimitKey?: string; rateLimitMax?: number; windowSec?: number } = {}
+    options: {
+      rateLimitKey?: string;
+      rateLimitMax?: number;
+      windowSec?: number;
+      /**
+       * Which env var carries the expected bearer token. Defaults to
+       * INTERNAL_TEST_TOKEN (existing CI/test-generation callers keep working
+       * unchanged). Phase1b/1c local-script endpoints pass
+       * "LOCAL_SCRIPT_TOKEN" — a different secret because it's a different
+       * trust boundary (Jeff's desktop scripts, not CI), while reusing the
+       * exact same timingSafeEqual/IP-allowlist/rate-limit logic below.
+       */
+      tokenEnvVar?: string;
+    } = {}
   ): Promise<string | null> {
     const cryptoMod = await import("crypto");
     const ip = (
@@ -1156,9 +1169,10 @@ async function startServer() {
       return null;
     }
 
-    const expected = process.env.INTERNAL_TEST_TOKEN || "";
+    const tokenEnvVar = options.tokenEnvVar || "INTERNAL_TEST_TOKEN";
+    const expected = process.env[tokenEnvVar] || "";
     if (!expected) {
-      res.status(503).json({ error: "INTERNAL_TEST_TOKEN not configured" });
+      res.status(503).json({ error: `${tokenEnvVar} not configured` });
       return null;
     }
     const given = (req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
@@ -1281,6 +1295,49 @@ async function startServer() {
       return res.json({ ...result, queued });
     } catch (err) {
       logger.error({ err }, "[internal/bulk-import-lion] error");
+      return res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // customer-cockpit Phase1b — batch-import Jeff's hand-written 案件資料.md
+  // case files (see docs/features/customer-cockpit/design-phase1bc.md).
+  // Caller is scripts/import-customer-cases.mjs running on Jeff's own
+  // desktop — no browser session, hence bearer-token auth like the other
+  // /api/internal/* endpoints, but a SEPARATE secret (LOCAL_SCRIPT_TOKEN,
+  // not INTERNAL_TEST_TOKEN) since this is a different trust boundary.
+  // POST /api/admin/import-case-file
+  //   Headers: Authorization: Bearer <LOCAL_SCRIPT_TOKEN>
+  //   Body: { mode: "dry_run" | "confirm", folderName: string, markdown: string }
+  const CASE_FILE_MARKDOWN_MAX_BYTES = 100_000;
+  app.post("/api/admin/import-case-file", async (req, res) => {
+    try {
+      const ip = await verifyInternalAuth(req, res, {
+        tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
+        rateLimitKey: "import-case-file",
+        rateLimitMax: 60,
+        windowSec: 3600,
+      });
+      if (!ip) return;
+      const { mode, folderName, markdown } = req.body || {};
+      if (mode !== "dry_run" && mode !== "confirm") {
+        return res.status(400).json({ error: "mode must be 'dry_run' or 'confirm'" });
+      }
+      if (typeof folderName !== "string" || !folderName.trim()) {
+        return res.status(400).json({ error: "Missing folderName" });
+      }
+      if (typeof markdown !== "string" || !markdown.trim()) {
+        return res.status(400).json({ error: "Missing markdown" });
+      }
+      if (Buffer.byteLength(markdown, "utf8") > CASE_FILE_MARKDOWN_MAX_BYTES) {
+        return res.status(400).json({
+          error: `markdown exceeds ${CASE_FILE_MARKDOWN_MAX_BYTES} byte limit — a real 案件資料.md should never be this long`,
+        });
+      }
+      const { importCaseFile } = await import("./caseFileImport");
+      const result = await importCaseFile({ folderName, markdown }, mode);
+      return res.json(result);
+    } catch (err) {
+      logger.error({ err }, "[admin/import-case-file] error");
       return res.status(500).json({ error: (err as Error).message });
     }
   });
