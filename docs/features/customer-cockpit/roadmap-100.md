@@ -79,10 +79,12 @@
 
 範圍:
 1. 收斂(照 consolidation-plan.md):待定三項逐一裁決 → /admin 與客人入口指向 /ops/customers → 刪 workspace 客人元件。整站 /workspace 退役另案(牽其他 domain)。
-2. 月度自動 scorecard:每月拿真實案卷自動對帳五維度,結果寫進 docs + office inbox 一張卡。今天這種人工考試變成系統例行公事。
-3. 雜訊清源:建檔自動帶 Gmail 顯示名、自家信箱黑名單(jeffhsieh09/0909)不建客人。
+2. 月度自動 scorecard(2026-07-02 Jeff 補):桌機常駐腳本讀 客人檔案/ 資料夾(手工核對過的真相)+ 唯讀呼叫 prod API,對帳五維度,結果寫進 docs + office inbox 一張卡。與 Phase 1c 的 iMessage 同步腳本同機部署,共用同一套 launchd 排程框架(不重複造)。今天這種人工考試變成系統例行公事。
+3. 每週 0909 E2E canary(2026-07-02 Jeff 補):0909 測試客人劇本自動化 — 寄測試信到 support@packgoplay.com → 驗歸檔/紅點/草稿品質/一鍵寄回 → 結果卡進 office inbox。壞了隔天就看得到,不用等 Jeff 自己想起來手測。順帶擴充涵蓋新增客人鏈(2026-07-02 Jeff 補):每次 ship 後的 canary 用聊天指令建測試客人(「測試」前綴名)→ 驗去重(同 email/phone 不重複建卡)、顯示名正確、列表即時出現(不用 F5,見 385d991 教訓)→ 測完用刪除三重閘刪掉,順帶驗證閘門本身有沒有失效。
+4. 客人資料與摘要正確性稽核(2026-07-02 Jeff 補,持續版 scorecard):每週逐客人比對 AI 摘要/事實卡與確定性事實(訂單金額、付款狀態、最後往來日、交付文件清單、真相條方向 vs customerFacts.ts 算出的實際值),對不上的列成差異報告卡(格式:客人、欄位、系統顯示什麼、事實是什麼)進 office inbox。桌機那份額外對照 客人檔案/ 的人工考卷(比對範圍更廣但只涵蓋已建檔客人)。這是把 scorecard 的「正確性」維度從月考變成每週自動浮現,不用等人工發現才抓到 ORD-2026-0003 這種案例。
+5. 雜訊清源:建檔自動帶 Gmail 顯示名、自家信箱黑名單(jeffhsieh09/0909)不建客人。
 
-驗收:一個月內 Jeff 沒有開過 /workspace 客人頁;月度 scorecard 自動出分。
+驗收:一個月內 Jeff 沒有開過 /workspace 客人頁;月度 scorecard 自動出分;E2E canary(含新增客人鏈)連續跑不漏測;正確性稽核連續兩週零漏抓已知案例類型。
 
 ---
 
