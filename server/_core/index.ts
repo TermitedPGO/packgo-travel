@@ -1342,6 +1342,95 @@ async function startServer() {
     }
   });
 
+  // POST /api/admin/imessage-check-known-phones (Phase1c — privacy gate)
+  //   Headers: Authorization: Bearer <LOCAL_SCRIPT_TOKEN>
+  //   Body: { phones: string[] }
+  // Returns: { knownPhones: string[] }
+  //
+  // scripts/imessage-sync.mjs calls this BEFORE deciding whether to include
+  // message text for a given phone in the ingest payload — Jeff's hard
+  // privacy requirement is that content for phones that don't match a known
+  // customerProfile must never leave his Mac. See imessageIngest.ts's header
+  // and imessage-sync.mjs's header for the full writeup.
+  const IMESSAGE_CHECK_PHONES_MAX = 500;
+  app.post("/api/admin/imessage-check-known-phones", async (req, res) => {
+    try {
+      const ip = await verifyInternalAuth(req, res, {
+        tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
+        rateLimitKey: "imessage-check-known-phones",
+        rateLimitMax: 200,
+        windowSec: 3600,
+      });
+      if (!ip) return;
+      const { phones } = req.body || {};
+      if (!Array.isArray(phones) || phones.some((p) => typeof p !== "string")) {
+        return res.status(400).json({ error: "phones must be a string[]" });
+      }
+      if (phones.length > IMESSAGE_CHECK_PHONES_MAX) {
+        return res.status(400).json({
+          error: `phones exceeds ${IMESSAGE_CHECK_PHONES_MAX} item limit per request`,
+        });
+      }
+      const { checkKnownPhones } = await import("./imessageIngest");
+      const knownPhones = await checkKnownPhones(phones);
+      return res.json({ knownPhones });
+    } catch (err) {
+      logger.error({ err }, "[admin/imessage-check-known-phones] error");
+      return res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // POST /api/admin/imessage-ingest (Phase1c)
+  //   Headers: Authorization: Bearer <LOCAL_SCRIPT_TOKEN>
+  //   Body: { messages: IngestMessage[] }
+  // Returns: { claimed: number, unclaimedPhones: string[], errors: number }
+  //
+  // Body-level validation is all-or-nothing (any malformed message 400s the
+  // whole batch) — a partial-accept response would leave the calling script
+  // unable to tell which messages actually landed, per task scope.
+  const IMESSAGE_INGEST_MAX_MESSAGES = 500;
+  app.post("/api/admin/imessage-ingest", async (req, res) => {
+    try {
+      const ip = await verifyInternalAuth(req, res, {
+        tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
+        rateLimitKey: "imessage-ingest",
+        rateLimitMax: 200,
+        windowSec: 3600,
+      });
+      if (!ip) return;
+      const { messages } = req.body || {};
+      if (!Array.isArray(messages)) {
+        return res.status(400).json({ error: "messages must be an array" });
+      }
+      if (messages.length > IMESSAGE_INGEST_MAX_MESSAGES) {
+        return res.status(400).json({
+          error: `messages exceeds ${IMESSAGE_INGEST_MAX_MESSAGES} item limit per request`,
+        });
+      }
+      for (const m of messages) {
+        if (
+          !m ||
+          typeof m.externalId !== "string" || !m.externalId.trim() ||
+          typeof m.phone !== "string" || !m.phone.trim() ||
+          (m.direction !== "inbound" && m.direction !== "outbound") ||
+          (m.text !== null && typeof m.text !== "string") ||
+          typeof m.occurredAtIso !== "string" || !m.occurredAtIso.trim()
+        ) {
+          return res.status(400).json({
+            error:
+              "each message requires externalId, phone, direction ('inbound'|'outbound'), text (string|null), occurredAtIso",
+          });
+        }
+      }
+      const { ingestImessageBatch } = await import("./imessageIngest");
+      const result = await ingestImessageBatch(messages);
+      return res.json(result);
+    } catch (err) {
+      logger.error({ err }, "[admin/imessage-ingest] error");
+      return res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   // Status endpoint paired with test-generate. Status is a polling read,
   // so no rate limit (CI polls every few seconds).
   app.get("/api/internal/test-status/:jobId", async (req, res) => {
