@@ -244,12 +244,29 @@ migration 特別決策:0104-0109 的先例都是欄位新增用 INFORMATION_SCHE
 - DB 層根治(`canonicalEmail` 虛擬欄位 + UNIQUE)另立獨立任務,需先設計「怎麼癒合存量重複」再動工,這次不夾帶。
 - 監工裁決最後一段提到「7a 其餘要求不變:查卡不分 status/userId → resolveCanonicalForFiling、摘要含本文、#2730002 併回」——分工已確認(監工回覆):
   - **查卡不分 status/userId**:監工確認 f4385aa 已做到(`resolveOrIdentifyCustomer` 的 SELECT 沒有 `status`/`userId` 過濾,靠 `followMergePointer` 走到 canonical),本 session 補一條明確的回歸測試鎖住這個不變量(`server/_core/caseFileImport.test.ts` 的「2026-07-03 監工確認 — the dedup query does NOT filter out a merged-away (status=blocked) row」)。
-  - **摘要含本文**:本 session 完成。`server/routers/inquiries.ts` 的 `create` procedure → `ingestWebsiteInquiryContact` → `recordWebsiteInteraction` 呼叫處,`contentSummary` 原本只放 `input.subject`(prod 實例:時間軸只顯示「客製旅遊」看不出客人問了什麼),改成 `${subject}:${message 前120字}`,`content` 維持表單全文不變。測試補在 `server/routers/inquiries.test.ts`(更新既有斷言 + 新增一條驗證 120 字截斷)。**範圍note**:只動了 `create` procedure(監工明確定位的那一處),`createEmergency`/`addMessage`/`stripeWebhook.ts` 的 `contentSummary` 構造沒有動,監工沒有要求擴大範圍。
+  - **摘要含本文**:`server/routers/inquiries.ts` 的 `create` procedure → `ingestWebsiteInquiryContact` → `recordWebsiteInteraction` 呼叫處,`contentSummary` 原本只放 `input.subject`(prod 實例:時間軸只顯示「客製旅遊」看不出客人問了什麼),改成 `${subject}:${message 前120字}`,`content` 維持表單全文不變(`createEmergency` 共用同一個 helper,一併修好)。
   - **#2730002 併回 + 監工重測**:歸監工,ship 後執行,這次不動。
 
 **驗證(本輪追加)**:`caseFileImport.test.ts`(39 tests,+1)、`inquiries.test.ts`(16 tests,+1,更新 1)全綠;`tsc --noEmit` 0 錯;完整套件 289 files / 4247 tests 全綠。
 
-**狀態**:待 commit → `pnpm ship`。
+**狀態**:已 commit(7f0f1d6),待 `pnpm ship`。
+
+---
+
+## 兩個平行 session 分工收尾 + merge(2026-07-03,commit 28e62c6/d715280)
+
+**背景**:任務7對抗審查抓到的 customerProfiles race condition(見上方兩節)由監工同時派給兩個平行 session 處理——另一個 session 在側分支 `claude/musing-pike-fa2a7f` 完成 Redis 鎖修復(f4385aa)+ 分工收尾(7f0f1d6),本 session 同時也在 main 上收尾任務7。監工發現另一個 session 的修復停在側分支沒併回 main,指示本 session 完成三件事:merge 回 main、補完監工交辦的殘留項、驗證後給 ship 指令。
+
+**做了什麼**:
+1. `git merge --no-ff claude/musing-pike-fa2a7f`(28e62c6)——只有 `progress.md` 有文字衝突(兩節都是有效的歷史記錄,合併時前後接續保留,不是邏輯衝突),程式碼檔案全部乾淨自動合併。
+2. 補漏:另一個 session 的「摘要含本文」只修了 `create` procedure,`addMessage` 客人站內留言分支同一個問題沒補——已補上(commit d715280),測試同步更新。
+3. 順手修一個只有在完整套件(289 檔)系統負載下才會浮現的測試 flake:`stripeWebhook.bookings.test.ts` 原本用固定 `setTimeout(0)` 等 fire-and-forget IIFE 結算,單獨跑穩、大套件跑會偶發漏等——改用 `vi.waitFor` 輪詢正向斷言,負向斷言(結構性保證,不是競態)維持固定等待。
+
+**教訓(供之後參考)**:兩個平行 session 同時在同一個 repo 工作,若沒有明確切成不同分支/worktree 或明確分工邊界,容易互相踩(本次是同一個檔案兩邊都改、同一個 progress.md 段落兩邊都寫)。監工派工時最好明確講清楚「這個修復哪個 session 負責 commit + merge」,避免兩邊都做完後才發現要花額外工夫合併。
+
+**驗證**:`tsc --noEmit` 0 錯;完整套件連跑兩次穩定 289 files / 4248 tests 全綠,無 flake。`git log main` 已含全部 10 個本批 commit(8323d65 起到 d715280)。
+
+**狀態**:已 commit,待 `pnpm ship`。
 
 ---
 
