@@ -197,6 +197,36 @@ migration 特別決策:0104-0109 的先例都是欄位新增用 INFORMATION_SCHE
 
 ---
 
+## 任務7:網站渠道進場(commit f50a0ae)— 已完成,待 ship
+
+**做了什麼**:監工稽核發現的 Phase1 遺漏——網站詢問表單、站內留言、訂票事件完全沒有跟 customerProfiles/customerInteractions 串起來,這些客人在 /ops/customers 完全不存在(沒有真相條、沒有紅點、沒有時間軸),即使已經真實聯絡過我們。
+
+新模組 `server/_core/websiteIntake.ts`:
+- `ensureCustomerProfileForWebsiteContact` — 確保聯絡人有卡。已登入用戶走既有 `ensureProfileId`;訪客走既有 `resolveOrIdentifyCustomer` 查重(existing/creatable/blocked_registered_member/blocked_no_identifier 四態全處理,email 撞到已註冊會員一律掛回會員自己的卡,絕不建平行訪客卡)。
+- `recordWebsiteInteraction` — 寫一筆 `channel=web_form` 的互動,inbound 方向順手 `touchLastInbound`。
+- `formatBookingInteractionContent` — 純函式組訂票事件時間軸文字(團名/出發日/人數/已付金額,確定性事實不是 LLM 生成)。
+
+三個掛鉤點,全部 fire-and-forget:`inquiries.ts` 的 `create`/`createEmergency`(表單送出)、`addMessage` 客人分支(站內留言;admin 回覆分支不用動,既有 `sendAdminInquiryReply` 的 `recordOutboundEmailInteraction` 在客人有卡之後會自動開始運作,免費撿到)、`stripeWebhook.ts` 的 `handleCheckoutSessionCompleted`(訂票付款成功)。
+
+**任務7a 的一個裁示已跟 Jeff 確認**:任務描述原本假設「approvalTasks lane=cs 網站詢問 AI 草稿按 email 對卡,建卡後自動串起」,實際查程式碼發現目前完全沒有自動觸發(草稿只在指揮中心手動點才生成)。跟 Jeff 確認後裁定:只做建卡+互動+紅點,不擴大範圍去接自動草稿觸發。
+
+**對抗審查(五路)抓到並修復**:
+- P2:`resolveOrIdentifyCustomer` 查重比對沒有 lowercase email,跟 `websiteIntake.ts` 建卡時的正規化不一致,只是恰好被 DB 預設 collation 蓋住沒爆出來——已修 + 補測試。
+- P2:`stripeWebhook.ts` 新區塊原本直接 await,會在 Stripe webhook 回應路徑疊加 5-6 個序列 DB 往返拖慢每筆付款的 200 回應——改成 fire-and-forget(這段純粹是駕駛艙錦上添花,不是付款流程需要的東西)。
+- P1:`stripeWebhook.ts` 新邏輯原本零測試覆蓋——補進既有 `stripeWebhook.bookings.test.ts`(mock websiteIntake,驗 happy path 有叫、tx 回滾時沒叫)。
+
+**已知限制(P1,已 spawn_task 開獨立任務,非本次範圍)**:`resolveOrIdentifyCustomer` 的「先查後插」是 TOCTOU race,`customerProfiles.email` 沒有 DB 唯一索引,這是既有架構缺口(`caseFileImport.ts`/`opsTools.ts` 的 `create_customer` 早就有這個洞,本來只有低並發真人操作路徑會踩到)。這次任務7新增三個公開網路可觸發的 fire-and-forget 呼叫點(inquiries 表單/站內留言/訂票),把觸發機率拉高了。根治需要加唯一索引 + 清理既有重複資料 + 多處 insert 改查重插入,是牽動多個既有呼叫點的中大型變更,獨立評估風險比較安全,已用 spawn_task 開一張獨立任務卡等 Jeff 決定要不要單獨排。
+
+**其他已知限制**:創立客人卡片時仍是「先 SELECT 後 INSERT」兩步驟(同上一條根因);站內留言/訂票內容目前只給 Jeff 內部看(customerInteractions 從不對客人可見),沒有額外 PII 疑慮。
+
+**驗證**:`tsc --noEmit` 0 錯;新增 34 個測試(websiteIntake 20 + inquiries 6 + stripeWebhook 2 + customerProfile casing 2 + 既有測試強化);完整套件 4220 測試綠。
+
+**尚未做**:真實 prod 驗證(需要 Jeff ship 後,用測試身分在 prod 網站送一筆測試詢問,驗卡即時出現+紅點亮+草稿掛在卡上;訂票驗證建議用測試訂單走一次 Stripe checkout)。
+
+**狀態**:已 commit,待 `pnpm ship`。
+
+---
+
 ## Phase 6、收尾 — 尚未開始(下一個 session 接續)
 
 裁示已收(2026-07-02,詳見 `roadmap-100.md`):14 案存量進場 Jeff 先手拖 1-2 案驗流程、Plaid 收款建議做(已完成)、今日清單放中欄空狀態(已完成)、報價出手前案子要在系統裡的規矩已立。Phase6 自我體檢範圍已擴充(月度 scorecard + 每週 0909 E2E canary 含新增客人鏈 + 每週正確性稽核回饋迴圈)。
@@ -211,5 +241,10 @@ migration 特別決策:0104-0109 的先例都是欄位新增用 INFORMATION_SCHE
   - ⬜ **真的要做**:專案歸屬斷層——收信 AI 判斷信件屬於哪張進行中訂單寫 `customerInteractions.customOrderId`(候選=該客人 active 單的標題/旅客名/日期,LLM 只選不編,不確定回 null);聊天加「把這串掛到某單」指令。
   - ⬜ **真的要做**:自家信箱(`gmailPipeline.ts` 的 `OWN_EMAILS`/`isOwnEmail`,已存在)信件目前仍會跑滿整條 `runInquiryAgent` LLM 分類(`processOneEmail` 函式,~line 860 `const decision = await runInquiryAgent({...})` 無條件呼叫,只有 profileId 略過建卡,LLM 分類沒省)——要在 `isOwnEmail(senderEmail)` 為 true 時跳過分類直接標處理完畢,省成本。**注意**:要保留原本「信本身照常處理/不建卡」的行為,只省 LLM 呼叫這一步,並確認 result 的計數/標記邏輯不會因為跳過分類而出錯(需讀 `processOneEmail` 後半段目前怎麼用 `decision`)。
   - ⬜ **真的要做,已定位根因**:nav badge 與列表 limit-200 口徑不對齊。`adminCustomers.ts` 的 `guestList`(line 816-877)可見列表有 `.orderBy(desc(customerProfiles.updatedAt)).limit(200)`;但 `customerUnreadCount`(line 332-406)算未讀數時,guest 那段子查詢(line 373-398)**沒有同樣的 order+limit**,理論上超過 200 位 guest 時,badge 可能數到一個「排在第 200 名之後、列表看不到」的未讀 guest——doc comment(line 326-330)聲稱「badge count 跟可見紅點不可能對不上」,但沒有真的做到(只對齊了篩選條件,沒對齊筆數上限)。`customerList`(registered,line 129 起)本身有沒有上限還沒查。修法:讓 `customerUnreadCount` 的 guest 子查詢套用同一個 `orderBy+limit(200)` 視窗再算未讀數,registered 那段若 `customerList` 也有上限要一併對齊。
+
+**6c 擴充(2026-07-03 Jeff 實測回饋,Emerald 多專案實況 + 監工稽核測試帳號抓到)**:
+- ⬜ **專案歸屬擴充**:對話列跟 chip——選了專案 chip 時,最近對話與展開全部按 `customerInteractions.customOrderId` 過濾;該專案 0 筆時顯示誠實空狀態「這個專案還沒有歸屬的對話」+ 一鍵切回看全部,不准默默退回全部混著放。AI chat 跟 chip——釘住客人且選中某 chip 時,chat context 標明當前專案並優先餵該專案 scoped 互動(獨立 cap,照 `customerChatContext` 記憶區模式);草稿/分析工具預設作用於當前 chip 的專案。存量一次性回填——對既有 interaction 跑歸屬判斷(AI 只在高信心時寫 `customOrderId`,不確定留 null 進未分類),否則 Emerald 這種老客人要等新信才慢慢分類,體感永遠是「沒做完」。驗收:Emerald 選簽證 chip → 對話只剩簽證往來;選 Morris 機票 chip → 只剩他的;未分類 chip → 其餘全部。
+- ⬜ **外寄刷新**:`escalationBox.ts` 寄出成功路徑(`sent:true`)補 `enqueueCustomerSummaryRefresh`(跟 inbound/訂製單動作同款 debounce),寄完信摘要卡不再停在舊狀態。
+- ⬜ **列表日期口徑**:客人列表每列右上的日期,註冊會員卡改用「最後往來」(`lastInteractionAt`/`lastInboundAt` 取新者),跟訪客列同口徑;排序已按活動排是對的,只修顯示。驗收:剛互動過的會員列顯示今天。
 
 **下一個 session 開工建議順序**:6c 的兩個「已完成」項目直接在 T6 報告勾掉不用碰;先做 6c 剩餘 3 項(小、快、可各自獨立 commit),再做 6a(照上面陷阱清單,grep 引用點歸零才刪),最後 6b(範圍最大,三個 cron)。
