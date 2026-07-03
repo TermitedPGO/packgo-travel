@@ -87,6 +87,26 @@
 
 ---
 
-## Phase 2-6、收尾
+## Phase 2:每個數字有出處(commit ce43265/d889fae/d8654cf)— 已完成,待 ship
 
-尚未開始。裁示已收(2026-07-02):14 案存量進場 Jeff 先手拖 1-2 案驗流程(Phase1b 工具已就緒待 ship 後試跑)、Plaid 收款建議做、今日清單放中欄空狀態、報價出手前案子要在系統裡的規矩已立。Phase6 自我體檢範圍已擴充(月度 scorecard 桌機腳本 + 每週 0909 E2E canary 含新增客人鏈 + 每週正確性稽核回饋迴圈),詳見 `roadmap-100.md`。
+三項任務全做,看門狗(`server/services/customOrderWatchdog.ts`)從兩種 finding(margin/promise)擴充成四種(margin/promise/invoiceMismatch/paymentMatch),同一套純函式風格延續:輸入已查好的資料、輸出 finding 或 null、資料不足就沉默不猜,零 LLM。
+
+**2a 訂單金額對 invoice 看門狗**(commit ce43265):訂單掛的發票/確認單文件總額跟系統 `totalPrice` 對不上時跳黃卡,兩數字並排。`extractInvoiceTotal` 用錨點詞(total/合計/amount due 等)找金額,只認 USD,0 個或多個不同候選就沉默。重現 scorecard 真實案例($6,635 vs $6,621.40 正確跳黃卡)。審查抓到 2 個 P1 已修:雙幣別文字(「Grand Total: NT$172,600 (approx US$5,393)」)裡合法 USD 金額被連坐跳過誤漏抓;「total number of travelers: 4」這種計數語境的「total」被誤判成金額(誤報方向,比漏報更危險)。全形數字留為已知限制(方向安全)。
+
+**2b supplierCost 搬運收緊**(commit d889fae):`create_custom_order`/`update_custom_order` 原本已有 `supplierCost` 參數但零驗證,LLM 可填任何數字直接寫進 DB。收緊成:填 `supplierCost` 必須帶 `sourceDocId`(指向已上傳的供應商文件),server 驗該金額真的出現在文件文字裡才收,對不上或沒帶 `sourceDocId` 一律拒絕該欄位(其餘欄位正常寫入,不整單失敗)。跨客戶守門(文件必須屬於同一客人)+ PII 文件排除(passport/visa/insurance/medical 不可當佐證)。審查四角度全部核實邏輯正確,唯一修正是 schema 註解措辭過度宣稱(「只能透過這兩個工具寫入」需明確排除 Jeff 本人在 admin 後台的既有手動輸入路徑)。
+
+**2c Plaid 收款建議**(commit d8654cf):近 30 天 Plaid 銀行流水入帳金額吻合某張未收款訂單時跳黃卡建議,Jeff 一鍵確認才算數,AI 絕不自動標記付款。核心地雷是 `bankTransactions.amount` 正負號(正=支出、負=入帳),審查獨立驗算過方向守門跟「AI 絕不碰錢」邊界都沒有破口。抓到並修復 2 個真缺陷:同額候選分組沒區分 deposit/balance/total 導致巧合同額的無關訂單被誤湊成一組候選;bankTransactions 查詢沒排序導致同日期多筆交易命中同一單時「取最新」的判斷結果不穩定(已加 orderBy)。
+
+**最終驗證**:三批合計 tsc 0 錯,`customOrderWatchdog.test.ts` 從 21 個測試累積到 97 個,完整套件從 3887 累積到 4025 測試全綠,i18n 兩語言檔全程對稱。
+
+**已知限制**(不阻擋上線):2a 對全形數字/貨幣符號不辨識(漏判方向安全);2b 的 admin 後台表單手動輸入 `supplierCost` 不受這層驗證約束(Jeff 本人核對,非本次收緊範圍);2c 未落地任何比對狀態,每次都是即時查詢(公司量級下無效能疑慮)。
+
+**尚未做**:三項都只有 unit test + mock,沒有真實文件/真實 Plaid 資料在 prod 跑過。**Jeff ship 後**,建議挑一張真實 invoice PDF 掛在某訂單上驗 2a、挑一筆真實入帳驗 2c。
+
+**狀態**:code 完成、tsc+測試綠、已 commit,等 Jeff 跑 `pnpm ship` 上線。
+
+---
+
+## Phase 3-6、收尾
+
+尚未開始。裁示已收(2026-07-02):14 案存量進場 Jeff 先手拖 1-2 案驗流程(Phase1b 工具已就緒待 ship 後試跑)、Plaid 收款建議做(Phase2c 已完成)、今日清單放中欄空狀態、報價出手前案子要在系統裡的規矩已立。Phase6 自我體檢範圍已擴充(月度 scorecard 桌機腳本 + 每週 0909 E2E canary 含新增客人鏈 + 每週正確性稽核回饋迴圈),詳見 `roadmap-100.md`。
