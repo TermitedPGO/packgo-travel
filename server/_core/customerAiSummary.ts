@@ -215,13 +215,14 @@ export async function ensureProfileId(scope: SummaryScope): Promise<number | nul
     }
   }
 
-  // No profile anywhere for this email — create a minimal one keyed to the user.
-  const res = await db
-    .insert(customerProfiles)
-    .values({ userId: scope.userId, email } as any);
-  // mysql2: insertId on the result
-  const insertId = (res as any)?.[0]?.insertId ?? (res as any)?.insertId;
-  return insertId ? Number(insertId) : null;
+  // No profile anywhere for this email — create a minimal one keyed to the
+  // user. insertCustomerProfileSafely (2026-07-03, 任務7 對抗審查 P0) catches a
+  // uq_cp_user collision (two concurrent calls for the same brand-new userId,
+  // both having just missed the `existing` select above) and hands back the
+  // winner's id instead of throwing.
+  const { insertCustomerProfileSafely } = await import("../db/customerProfile");
+  const { profileId } = await insertCustomerProfileSafely(db, { userId: scope.userId, email }, "userId");
+  return profileId;
 }
 
 /** Generate + persist the summary to the profile cache. Returns the summary. */

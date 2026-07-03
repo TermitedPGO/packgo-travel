@@ -1900,17 +1900,31 @@ async function runWriteTool(
           };
         }
       }
-      const [row] = await db
-        .insert(customerProfiles)
-        .values({
-          name: cName,
-          email: cEmail ?? null,
-          phone: cPhone ?? null,
-          source: "manual",
-        } as any)
-        .$returningId();
-      log.info({ profileId: row.id, name: cName }, "create_customer executed");
-      return { success: true, profileId: row.id, message: `已新增客人「${cName}」` };
+      // insertCustomerProfileSafely (2026-07-03, 任務7 對抗審查 P0) — closes the
+      // race window between the dedup SELECT above and this INSERT; two
+      // near-simultaneous create_customer calls for the same new email/phone
+      // would otherwise both pass the dedup check and both insert.
+      const { insertCustomerProfileSafely } = await import("../../db/customerProfile");
+      const insertResult = await insertCustomerProfileSafely(db, {
+        name: cName,
+        email: cEmail ?? null,
+        phone: cPhone ?? null,
+        source: "manual",
+      });
+      if (insertResult.recoveredFromRace) {
+        log.info(
+          { profileId: insertResult.profileId, name: cName },
+          "create_customer race-recovered → existing",
+        );
+        return {
+          success: true,
+          profileId: insertResult.profileId,
+          deduped: true,
+          message: `客人「${cName}」已經有檔案了,直接用既有的(沒有重複建立)`,
+        };
+      }
+      log.info({ profileId: insertResult.profileId, name: cName }, "create_customer executed");
+      return { success: true, profileId: insertResult.profileId, message: `已新增客人「${cName}」` };
     }
 
     case "collect_customer_threads": {

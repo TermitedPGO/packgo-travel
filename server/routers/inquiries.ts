@@ -69,7 +69,9 @@ function ingestWebsiteInquiryContact(input: {
           profileId,
           direction: "inbound",
           content: `${input.subject}\n\n${input.message}`,
-          contentSummary: input.subject,
+          // 2026-07-03 監工確認修復 — 原本只放 subject(prod 實例:時間軸只顯示
+          // 「客製旅遊」,看不出客人實際問了什麼),補上訊息本文前 120 字。
+          contentSummary: `${input.subject}:${input.message.slice(0, 120)}`,
           agentName: "website_inquiry",
         });
       }

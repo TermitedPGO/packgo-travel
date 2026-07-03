@@ -271,9 +271,24 @@ export const adminCustomersRouter = router({
           .set({ status: "blocked" })
           .where(eq(customerProfiles.id, existing[0].id));
       } else {
-        await drizzleDb
-          .insert(customerProfiles)
-          .values({ userId: input.userId, status: "blocked" });
+        // insertCustomerProfileSafely (2026-07-03, 任務7 對抗審查 P0) — a
+        // concurrent request for the same brand-new userId could otherwise
+        // both miss the `existing` select above and both insert. On a
+        // recovered race the winner's insert already carries status:"blocked"
+        // OR was created by some other flow — re-apply status:"blocked" so
+        // this call's intent is never silently dropped.
+        const { insertCustomerProfileSafely } = await import("../db/customerProfile");
+        const insertResult = await insertCustomerProfileSafely(
+          drizzleDb,
+          { userId: input.userId, status: "blocked" },
+          "userId",
+        );
+        if (insertResult.recoveredFromRace) {
+          await drizzleDb
+            .update(customerProfiles)
+            .set({ status: "blocked" })
+            .where(eq(customerProfiles.id, insertResult.profileId));
+        }
       }
       return { ok: true };
     }),
@@ -583,9 +598,20 @@ export const adminCustomersRouter = router({
           .set({ followUpDate: value })
           .where(eq(customerProfiles.id, existing[0].id));
       } else {
-        await drizzleDb
-          .insert(customerProfiles)
-          .values({ userId: input.userId, followUpDate: value });
+        // insertCustomerProfileSafely (2026-07-03, 任務7 對抗審查 P0) — see the
+        // matching comment in markNotCustomer above.
+        const { insertCustomerProfileSafely } = await import("../db/customerProfile");
+        const insertResult = await insertCustomerProfileSafely(
+          drizzleDb,
+          { userId: input.userId, followUpDate: value },
+          "userId",
+        );
+        if (insertResult.recoveredFromRace) {
+          await drizzleDb
+            .update(customerProfiles)
+            .set({ followUpDate: value })
+            .where(eq(customerProfiles.id, insertResult.profileId));
+        }
       }
       return { ok: true, followUpDate: value };
     }),
@@ -646,15 +672,27 @@ export const adminCustomersRouter = router({
         }
       }
 
-      const result = await drizzleDb.insert(customerProfiles).values({
+      // insertCustomerProfileSafely (2026-07-03, 任務7 對抗審查 P0) — closes the
+      // race window between the dupProfile SELECT above and this INSERT. This
+      // endpoint's contract is REFUSE on a duplicate email (never silently
+      // reuse), so a recovered race is translated into the same
+      // email_exists_guest CONFLICT the pre-check above already throws —
+      // not a silent success with someone else's profileId.
+      const { insertCustomerProfileSafely } = await import("../db/customerProfile");
+      const insertResult = await insertCustomerProfileSafely(drizzleDb, {
         name,
         email,
         phone,
         source: "manual",
         status: "active",
       });
-      const profileId = Number((result as any)[0]?.insertId ?? 0);
-      return { ok: true, profileId };
+      if (insertResult.recoveredFromRace) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "email_exists_guest",
+        });
+      }
+      return { ok: true, profileId: insertResult.profileId };
     }),
 
   /**

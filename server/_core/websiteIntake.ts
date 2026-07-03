@@ -76,37 +76,53 @@ export async function ensureCustomerProfileForWebsiteContact(params: {
       return await ensureProfileId({ userId: params.userId });
     }
 
-    const { resolveOrIdentifyCustomer } = await import("../db/customerProfile");
-    const resolved = await resolveOrIdentifyCustomer({
-      email: params.email,
-      phone: params.phone ?? null,
-    });
+    // resolveOrIdentifyCustomer→insert is the guest identity critical section
+    // (2026-07-03, 任務7 對抗審查 P0 — 監工裁決). customerProfiles.email carries
+    // no UNIQUE index (0109's merge design requires a merged-away card to keep
+    // its email so filing entrances can still find it and follow the pointer
+    // — same-email multi-card is legitimate here, not corruption), so the
+    // race can't be caught after the write; withCustomerIntakeLock serializes
+    // concurrent website submissions for the same email BEFORE it, mirroring
+    // server/_core/auditLog.ts's withAuditLogTip / gmailPipeline.ts's
+    // processWithMessageLock (both Redis SET NX, fail-open on Redis errors).
+    const { withCustomerIntakeLock, resolveOrIdentifyCustomer, insertCustomerProfileSafely } =
+      await import("../db/customerProfile");
+    const email = params.email.trim().toLowerCase();
 
-    if (resolved.status === "existing") {
-      return resolved.profileId ?? null;
-    }
-    if (resolved.status === "blocked_registered_member") {
-      if (!resolved.registeredUserId) return null;
-      const { ensureProfileId } = await import("./customerAiSummary");
-      return await ensureProfileId({ userId: resolved.registeredUserId });
-    }
-    if (resolved.status === "creatable") {
-      const { getDb } = await import("../db");
-      const db = await getDb();
-      if (!db) return null;
-      const { customerProfiles } = await import("../../drizzle/schema");
-      const email = params.email.trim().toLowerCase();
-      const res = await db.insert(customerProfiles).values({
-        email: email || null,
-        phone: params.phone?.trim() || null,
-        name: params.name?.trim() || null,
-        source: "web_form",
-      } as any);
-      const insertId = (res as unknown as [{ insertId: number }])?.[0]?.insertId;
-      return insertId ? Number(insertId) : null;
-    }
-    // blocked_no_identifier
-    return null;
+    const resolveAndCreate = async (): Promise<number | null> => {
+      const resolved = await resolveOrIdentifyCustomer({
+        email: params.email,
+        phone: params.phone ?? null,
+      });
+
+      if (resolved.status === "existing") {
+        return resolved.profileId ?? null;
+      }
+      if (resolved.status === "blocked_registered_member") {
+        if (!resolved.registeredUserId) return null;
+        const { ensureProfileId } = await import("./customerAiSummary");
+        return await ensureProfileId({ userId: resolved.registeredUserId });
+      }
+      if (resolved.status === "creatable") {
+        const { getDb } = await import("../db");
+        const db = await getDb();
+        if (!db) return null;
+        const { profileId } = await insertCustomerProfileSafely(db, {
+          email: email || null,
+          phone: params.phone?.trim() || null,
+          name: params.name?.trim() || null,
+          source: "web_form",
+        });
+        return profileId;
+      }
+      // blocked_no_identifier
+      return null;
+    };
+
+    // No real email → nothing to lock on (this shouldn't happen in practice,
+    // callers' zod schema requires email; see blocked_no_identifier above).
+    if (!email) return await resolveAndCreate();
+    return await withCustomerIntakeLock(email, resolveAndCreate);
   } catch (err) {
     log.warn(
       { err: err instanceof Error ? err.message : String(err), email: params.email },

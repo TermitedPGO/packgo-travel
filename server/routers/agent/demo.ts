@@ -128,11 +128,14 @@ export const demoRouter = router({
         if (existing[0]) {
           profileId = existing[0].id;
         } else {
-          const ins = await db.insert(customerProfiles).values({
+          // insertCustomerProfileSafely (2026-07-03, 任務7 對抗審查 P0) — closes
+          // the race window between the `existing` SELECT above and this INSERT.
+          const { insertCustomerProfileSafely } = await import("../../db/customerProfile");
+          const insertResult = await insertCustomerProfileSafely(db, {
             email: senderEmail,
             preferredLanguage: decision.draftLanguage === "en" ? "en" : "zh-TW",
           });
-          profileId = Number((ins as any)[0]?.insertId ?? 0);
+          profileId = insertResult.profileId;
         }
       }
 

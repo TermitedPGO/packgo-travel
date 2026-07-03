@@ -10,22 +10,47 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockEnsureProfileId, mockResolveOrIdentifyCustomer, mockTouchLastInbound, mockDb, insertMock } =
-  vi.hoisted(() => {
-    const mockEnsureProfileId = vi.fn();
-    const mockResolveOrIdentifyCustomer = vi.fn();
-    const mockTouchLastInbound = vi.fn().mockResolvedValue(undefined);
-    const insertMock = vi.fn().mockResolvedValue([{ insertId: 555 }]);
-    const mockDb = {
-      insert: vi.fn().mockReturnValue({ values: insertMock }),
-    };
-    return { mockEnsureProfileId, mockResolveOrIdentifyCustomer, mockTouchLastInbound, mockDb, insertMock };
-  });
+const {
+  mockEnsureProfileId,
+  mockResolveOrIdentifyCustomer,
+  mockInsertCustomerProfileSafely,
+  mockWithCustomerIntakeLock,
+  mockTouchLastInbound,
+  mockDb,
+  insertMock,
+} = vi.hoisted(() => {
+  const mockEnsureProfileId = vi.fn();
+  const mockResolveOrIdentifyCustomer = vi.fn();
+  const mockInsertCustomerProfileSafely = vi
+    .fn()
+    .mockResolvedValue({ profileId: 555, recoveredFromRace: false });
+  // Passthrough by default — the lock's own behavior (Redis SET NX / wait /
+  // release) is tested standalone in customerProfile.test.ts; here we only
+  // care that ensureCustomerProfileForWebsiteContact wires it around the
+  // guest identity resolution, not that it actually acquires anything.
+  const mockWithCustomerIntakeLock = vi.fn((_email: string, fn: () => Promise<unknown>) => fn());
+  const mockTouchLastInbound = vi.fn().mockResolvedValue(undefined);
+  const insertMock = vi.fn().mockResolvedValue([{ insertId: 555 }]);
+  const mockDb = {
+    insert: vi.fn().mockReturnValue({ values: insertMock }),
+  };
+  return {
+    mockEnsureProfileId,
+    mockResolveOrIdentifyCustomer,
+    mockInsertCustomerProfileSafely,
+    mockWithCustomerIntakeLock,
+    mockTouchLastInbound,
+    mockDb,
+    insertMock,
+  };
+});
 
 vi.mock("../db", () => ({ getDb: vi.fn().mockResolvedValue(mockDb) }));
 vi.mock("./customerAiSummary", () => ({ ensureProfileId: mockEnsureProfileId }));
 vi.mock("../db/customerProfile", () => ({
   resolveOrIdentifyCustomer: mockResolveOrIdentifyCustomer,
+  insertCustomerProfileSafely: mockInsertCustomerProfileSafely,
+  withCustomerIntakeLock: mockWithCustomerIntakeLock,
 }));
 vi.mock("./customerUnread", () => ({ touchLastInbound: mockTouchLastInbound }));
 vi.mock("../../drizzle/schema", () => ({
@@ -57,6 +82,8 @@ beforeEach(() => {
   vi.mocked(getDb).mockResolvedValue(mockDb as any);
   mockDb.insert.mockReturnValue({ values: insertMock });
   insertMock.mockResolvedValue([{ insertId: 555 }]);
+  mockInsertCustomerProfileSafely.mockResolvedValue({ profileId: 555, recoveredFromRace: false });
+  mockWithCustomerIntakeLock.mockImplementation((_email: string, fn: () => Promise<unknown>) => fn());
 });
 
 // ────────────────────────────────────────────────────────────────────────
@@ -75,6 +102,19 @@ describe("ensureCustomerProfileForWebsiteContact", () => {
     expect(result).toBe(42);
     expect(mockEnsureProfileId).toHaveBeenCalledWith({ userId: 7 });
     expect(mockResolveOrIdentifyCustomer).not.toHaveBeenCalled();
+    // logged-in path never touches the guest-identity intake lock — it's
+    // already race-safe via uq_cp_user (see ensureProfileId).
+    expect(mockWithCustomerIntakeLock).not.toHaveBeenCalled();
+  });
+
+  it("guest path: wraps identity resolution in withCustomerIntakeLock keyed on the normalized email (2026-07-03 監工裁決 — the actual email-race defense)", async () => {
+    mockResolveOrIdentifyCustomer.mockResolvedValue({ status: "existing", profileId: 99, matchedBy: "email" });
+    await ensureCustomerProfileForWebsiteContact({
+      email: "New@Example.com",
+      phone: null,
+      name: "A",
+    });
+    expect(mockWithCustomerIntakeLock).toHaveBeenCalledWith("new@example.com", expect.any(Function));
   });
 
   it("guest with an existing profile: returns the canonical profileId", async () => {
@@ -87,7 +127,7 @@ describe("ensureCustomerProfileForWebsiteContact", () => {
     expect(result).toBe(99);
   });
 
-  it("guest, creatable: inserts a new profile row with source:'web_form'", async () => {
+  it("guest, creatable: inserts a new profile row with source:'web_form' via insertCustomerProfileSafely", async () => {
     mockResolveOrIdentifyCustomer.mockResolvedValue({ status: "creatable" });
     const result = await ensureCustomerProfileForWebsiteContact({
       email: "New@Example.com",
@@ -95,12 +135,26 @@ describe("ensureCustomerProfileForWebsiteContact", () => {
       name: "New Guy",
     });
     expect(result).toBe(555);
-    expect(insertMock).toHaveBeenCalledWith({
+    expect(mockInsertCustomerProfileSafely).toHaveBeenCalledWith(mockDb, {
       email: "new@example.com",
       phone: "510-333-1234",
       name: "New Guy",
       source: "web_form",
     });
+  });
+
+  it("guest, creatable, but a concurrent request wins the race: still returns the recovered (existing) profileId, never a duplicate card", async () => {
+    // 2026-07-03 任務7 對抗審查 P0 — two near-simultaneous submissions for the
+    // same new email both see "creatable"; insertCustomerProfileSafely catches
+    // the loser's duplicate-key error and hands back the winner's id instead.
+    mockResolveOrIdentifyCustomer.mockResolvedValue({ status: "creatable" });
+    mockInsertCustomerProfileSafely.mockResolvedValueOnce({ profileId: 777, recoveredFromRace: true });
+    const result = await ensureCustomerProfileForWebsiteContact({
+      email: "raced@example.com",
+      phone: null,
+      name: "Raced Guy",
+    });
+    expect(result).toBe(777);
   });
 
   it("email belongs to a registered member: attaches to the member's own profile via ensureProfileId, never a parallel guest card", async () => {

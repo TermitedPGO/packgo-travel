@@ -96,42 +96,62 @@ export const profilesRouter = router({
           message: "At least one identifier required",
         });
       }
+      // Merge any of this call's identifiers that `row` is still missing.
+      // Shared by the normal "found" path and the race-recovery retry below
+      // (2026-07-03 任務7 對抗審查 P0) so both apply the exact same rule.
+      const mergeMissingIdentifiers = async (row: { id: number; [k: string]: unknown }) => {
+        const mergeFields: Record<string, unknown> = {};
+        if (input.userId && !row.userId) mergeFields.userId = input.userId;
+        if (input.email && !row.email) mergeFields.email = input.email;
+        if (input.phone && !row.phone) mergeFields.phone = input.phone;
+        if (input.wechatId && !row.wechatId) mergeFields.wechatId = input.wechatId;
+        if (input.lineId && !row.lineId) mergeFields.lineId = input.lineId;
+        if (input.whatsappPhone && !row.whatsappPhone) mergeFields.whatsappPhone = input.whatsappPhone;
+        if (Object.keys(mergeFields).length > 0) {
+          await db.update(customerProfiles).set(mergeFields).where(eq(customerProfiles.id, row.id));
+        }
+      };
+
       const existing = await db
         .select()
         .from(customerProfiles)
         .where(or(...conds))
         .limit(1);
       if (existing[0]) {
-        // Merge in any missing identifiers
-        const mergeFields: Record<string, unknown> = {};
-        if (input.userId && !existing[0].userId) mergeFields.userId = input.userId;
-        if (input.email && !existing[0].email) mergeFields.email = input.email;
-        if (input.phone && !existing[0].phone) mergeFields.phone = input.phone;
-        if (input.wechatId && !existing[0].wechatId) mergeFields.wechatId = input.wechatId;
-        if (input.lineId && !existing[0].lineId) mergeFields.lineId = input.lineId;
-        if (input.whatsappPhone && !existing[0].whatsappPhone)
-          mergeFields.whatsappPhone = input.whatsappPhone;
-        if (Object.keys(mergeFields).length > 0) {
-          await db
-            .update(customerProfiles)
-            .set(mergeFields)
-            .where(eq(customerProfiles.id, existing[0].id));
-        }
+        await mergeMissingIdentifiers(existing[0]);
         return { id: existing[0].id, created: false };
       }
-      const result = await db.insert(customerProfiles).values({
-        userId: input.userId,
-        email: input.email,
-        phone: input.phone,
-        wechatId: input.wechatId,
-        lineId: input.lineId,
-        whatsappPhone: input.whatsappPhone,
-        preferredLanguage: input.preferredLanguage ?? "zh-TW",
-      });
-      return {
-        id: Number((result as any)[0]?.insertId ?? 0),
-        created: true,
-      };
+      try {
+        const result = await db.insert(customerProfiles).values({
+          userId: input.userId,
+          email: input.email,
+          phone: input.phone,
+          wechatId: input.wechatId,
+          lineId: input.lineId,
+          whatsappPhone: input.whatsappPhone,
+          preferredLanguage: input.preferredLanguage ?? "zh-TW",
+        });
+        return {
+          id: Number((result as any)[0]?.insertId ?? 0),
+          created: true,
+        };
+      } catch (err) {
+        // Race recovery (2026-07-03 任務7 對抗審查 P0): a concurrent call for
+        // an overlapping identifier (userId's uq_cp_user or email's
+        // uq_cp_email — the only two columns with a real DB constraint) could
+        // insert between our `existing` SELECT and this INSERT. Only recover
+        // from an actual duplicate-key error; anything else propagates.
+        const anyErr = err as { code?: string; errno?: number };
+        if (anyErr?.code !== "ER_DUP_ENTRY" && anyErr?.errno !== 1062) throw err;
+        const [winner] = await db
+          .select()
+          .from(customerProfiles)
+          .where(or(...conds))
+          .limit(1);
+        if (!winner) throw err; // shouldn't happen — surface the original error
+        await mergeMissingIdentifiers(winner);
+        return { id: winner.id, created: false };
+      }
     }),
 
   /**

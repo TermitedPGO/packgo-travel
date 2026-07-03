@@ -58,10 +58,15 @@ export async function ensureCustomerProfileId(sel: {
     .where(eq(customerProfiles.userId, sel.userId))
     .limit(1);
   if (existing[0]) return existing[0].id;
-  const [res] = await db
-    .insert(customerProfiles)
-    .values({ userId: sel.userId, status: "active" });
-  return Number((res as any).insertId);
+  // insertCustomerProfileSafely (2026-07-03, 任務7 對抗審查 P0) — closes the
+  // race window between the `existing` SELECT above and this INSERT.
+  const { insertCustomerProfileSafely } = await import("./customerProfile");
+  const insertResult = await insertCustomerProfileSafely(
+    db,
+    { userId: sel.userId, status: "active" },
+    "userId",
+  );
+  return insertResult.profileId;
 }
 
 /**

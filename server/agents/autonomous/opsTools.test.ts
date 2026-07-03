@@ -17,14 +17,26 @@ vi.mock("../../_core/logger", () => ({
 let nextRows: any[] = [];
 let rowQueue: any[][] = [];
 let lastDb: any = null;
+/** Queue of one-off .values() outcomes (e.g. a duplicate-key rejection to
+ * simulate an insert race) — consumed FIFO; falls back to the default
+ * success result once empty. */
+let valuesQueue: Array<() => any> = [];
 const takeRows = () => (rowQueue.length ? rowQueue.shift()! : nextRows);
 function makeDb() {
   const chain: any = {};
-  for (const m of ["select", "from", "leftJoin", "where", "orderBy", "groupBy", "insert", "values", "update", "set", "delete"]) {
+  for (const m of ["select", "from", "leftJoin", "where", "orderBy", "groupBy", "insert", "update", "set", "delete"]) {
     chain[m] = vi.fn(() => chain);
   }
   chain.limit = vi.fn(() => Promise.resolve(takeRows()));
-  chain.$returningId = vi.fn(async () => [{ id: 991 }]);
+  // .insert(x).values(y) — awaitable to [{insertId}] (the convention every
+  // real insert site, including insertCustomerProfileSafely, expects) while
+  // staying chainable with .$returningId() for callers still using that API.
+  chain.values = vi.fn(() => {
+    const impl = valuesQueue.shift();
+    const p: any = impl ? impl() : Promise.resolve([{ insertId: 991 }]);
+    p.$returningId = async () => [{ id: 991 }];
+    return p;
+  });
   // For COUNT queries that end at .where(...) with no limit, make where awaitable too.
   chain.where = vi.fn(() => {
     const p: any = Promise.resolve(nextRows);
@@ -154,6 +166,7 @@ import {
 beforeEach(() => {
   nextRows = [];
   rowQueue = [];
+  valuesQueue = [];
   lastDb = null;
   mockCollect.mockReset();
   mockGetBookingById.mockReset();
@@ -1102,6 +1115,27 @@ describe("create_customer — §4.2 dedup red line (email OR phone + registered-
     expect(lastDb.values).toHaveBeenCalledWith(
       expect.objectContaining({ name: "新客", email: "fresh@x.com", source: "manual" }),
     );
+  });
+
+  it("2026-07-03 任務7 對抗審查 P0 — a concurrent create_customer call wins the insert race: dedups to the winner instead of erroring or duplicating", async () => {
+    rowQueue = [
+      [], // dedup select: no match → past the dedup guard
+      [], // users lookup: not a registered member
+      [{ id: 909 }], // insertCustomerProfileSafely's race-recovery re-select by email
+      [{ next: null }], // followMergePointer's own select — no pointer, already canonical
+    ];
+    valuesQueue = [
+      () => Promise.reject(Object.assign(new Error("Duplicate entry"), { code: "ER_DUP_ENTRY", errno: 1062 })),
+    ];
+    const out = JSON.parse(
+      await executeWriteTool("create_customer", {
+        name: "新客",
+        email: "raced@x.com",
+      }),
+    );
+    expect(out.success).toBe(true);
+    expect(out.deduped).toBe(true);
+    expect(out.profileId).toBe(909);
   });
 
   it("normalizePhoneForMatch strips formatting but keeps '+' (country code is a real difference)", () => {

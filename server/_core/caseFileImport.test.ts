@@ -316,6 +316,27 @@ describe("resolveOrIdentifyCustomer", () => {
     expect(result.profileId).toBe(99);
   });
 
+  it("2026-07-03 監工確認 — the dedup query does NOT filter out a merged-away (status=blocked) row: a hit on the source card still resolves to the canonical target via followMergePointer, never falls through to blocked_registered_member/creatable", async () => {
+    // The row returned here carries status:"blocked" + mergedIntoProfileId set
+    // (the exact shape of a card Jeff already merged away). The real query's
+    // WHERE only tests email/phone equality — no `eq(customerProfiles.status, ...)`
+    // or `isNull(mergedIntoProfileId)` guard exists anywhere in
+    // resolveOrIdentifyCustomer — so a merged-away card sharing this email is
+    // still a "hit", and followMergePointer (not this fn) is what walks it to
+    // the live target. Regression this guards: someone "cleaning up" the dedup
+    // WHERE to exclude blocked/merged rows would silently break every filing
+    // entrance that relies on finding a merged-away card BY EMAIL to land on
+    // its 0109 pointer.
+    selectChain.limit.mockResolvedValueOnce([
+      { id: 2730001, email: "merged-away@example.com", phone: null, status: "blocked", mergedIntoProfileId: 2760017 },
+    ]);
+    mockFollowMergePointer.mockResolvedValueOnce(2760017);
+    const result = await resolveOrIdentifyCustomer({ email: "merged-away@example.com", phone: null });
+    expect(result.status).toBe("existing");
+    expect(result.profileId).toBe(2760017);
+    expect(mockFollowMergePointer).toHaveBeenCalledWith(expect.anything(), 2730001);
+  });
+
   it("blocked_registered_member when no customerProfiles dup exists but the email belongs to a registered users row — same guard as opsTools.ts create_customer", async () => {
     selectChain.limit
       .mockResolvedValueOnce([]) // customerProfiles dedup: no match
@@ -528,6 +549,29 @@ describe("importCaseFile", () => {
     const result = await importCaseFile({ folderName: "測試資料夾", markdown: "content" }, "confirm");
     expect(result.status).toBe("imported");
     expect(mockDb.insert).toHaveBeenCalled();
+  });
+
+  it("confirm mode: a concurrent request wins the customerProfiles insert race — reuses the winner's id instead of erroring out or double-creating (2026-07-03 任務7 對抗審查 P0)", async () => {
+    mockGoodExtraction();
+    const dupErr = Object.assign(new Error("Duplicate entry 'customer@example.com' for key 'uq_cp_email'"), {
+      code: "ER_DUP_ENTRY",
+      errno: 1062,
+    });
+    mockDb.insert.mockImplementationOnce(() => ({
+      values: vi.fn().mockRejectedValueOnce(dupErr),
+    }));
+    selectChain.limit
+      .mockResolvedValueOnce([]) // identity dedup: no match → "creatable"
+      .mockResolvedValueOnce([]) // registered-member lookup: no match
+      .mockResolvedValueOnce([]) // already-imported-by-folder check
+      .mockResolvedValueOnce([{ id: 909 }]) // insertCustomerProfileSafely's race-recovery re-select
+      .mockResolvedValueOnce([{ id: 1, role: "admin" }]); // admin user lookup
+    const result = await importCaseFile({ folderName: "測試資料夾race", markdown: "content" }, "confirm");
+    expect(result.status).toBe("imported");
+    expect(result.profileId).toBe(909);
+    // never a second customerProfiles row from this call — the loser's own
+    // insert failed and was recovered, not retried.
+    expect(mockDb.insert).toHaveBeenCalledTimes(3); // profile (failed) + order + interaction(s)
   });
 
   it("already-imported LIKE query uses the escaped marker with an ESCAPE clause (folderName containing % or _ must not wildcard-match unrelated orders)", async () => {
