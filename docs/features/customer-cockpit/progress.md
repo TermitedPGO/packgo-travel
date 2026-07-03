@@ -212,7 +212,12 @@ migration 特別決策:0104-0109 的先例都是欄位新增用 INFORMATION_SCHE
 **已知限制 / 未做**:
 - `adminCustomers.ts` 三處(`markNotCustomer`/followUpDate 設定/`createManualCustomer`)、`agent/demo.ts`、`gmailPipeline.ts` 的新 sender 建卡邏輯目前**沒有專屬單元測試**(這幾個檔案本身就沒有既有 router/pipeline 級測試骨架,要蓋滿需要 mock 6+ 個 collaborator,跟這次修復的體積不成比例,列為獨立 follow-up,見 task list)。
 - DB 層根治(`canonicalEmail` 虛擬欄位 + UNIQUE)另立獨立任務,需先設計「怎麼癒合存量重複」再動工,這次不夾帶。
-- 監工裁決最後一段提到「7a 其餘要求不變:查卡不分 status/userId → resolveCanonicalForFiling、摘要含本文、#2730002 併回」——這幾項不在本次 race-condition 修復的範圍內(這次對話沒有這幾項的具體 spec/檔案定位),需要另外確認是否已經在其他 session/commit 處理過,或需要開新任務。
+- 監工裁決最後一段提到「7a 其餘要求不變:查卡不分 status/userId → resolveCanonicalForFiling、摘要含本文、#2730002 併回」——分工已確認(監工回覆):
+  - **查卡不分 status/userId**:監工確認 f4385aa 已做到(`resolveOrIdentifyCustomer` 的 SELECT 沒有 `status`/`userId` 過濾,靠 `followMergePointer` 走到 canonical),本 session 補一條明確的回歸測試鎖住這個不變量(`server/_core/caseFileImport.test.ts` 的「2026-07-03 監工確認 — the dedup query does NOT filter out a merged-away (status=blocked) row」)。
+  - **摘要含本文**:本 session 完成。`server/routers/inquiries.ts` 的 `create` procedure → `ingestWebsiteInquiryContact` → `recordWebsiteInteraction` 呼叫處,`contentSummary` 原本只放 `input.subject`(prod 實例:時間軸只顯示「客製旅遊」看不出客人問了什麼),改成 `${subject}:${message 前120字}`,`content` 維持表單全文不變。測試補在 `server/routers/inquiries.test.ts`(更新既有斷言 + 新增一條驗證 120 字截斷)。**範圍note**:只動了 `create` procedure(監工明確定位的那一處),`createEmergency`/`addMessage`/`stripeWebhook.ts` 的 `contentSummary` 構造沒有動,監工沒有要求擴大範圍。
+  - **#2730002 併回 + 監工重測**:歸監工,ship 後執行,這次不動。
+
+**驗證(本輪追加)**:`caseFileImport.test.ts`(39 tests,+1)、`inquiries.test.ts`(16 tests,+1,更新 1)全綠;`tsc --noEmit` 0 錯;完整套件 289 files / 4247 tests 全綠。
 
 **狀態**:待 commit → `pnpm ship`。
 

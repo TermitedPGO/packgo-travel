@@ -440,8 +440,36 @@ describe("inquiriesRouter.create — tour-page structured context", () => {
         profileId: 123,
         direction: "inbound",
         content: "行程詢問\n\n請問報價",
-        contentSummary: "行程詢問",
+        // 2026-07-03 監工確認修復 — contentSummary 不再只放 subject(prod 實例:
+        // 時間軸只顯示「客製旅遊」看不出客人問了什麼),補上訊息本文前120字。
+        contentSummary: "行程詢問:請問報價",
         agentName: "website_inquiry",
+      }),
+    );
+  });
+
+  it("2026-07-03 監工確認修復:contentSummary 是「主題+訊息本文前120字」,不是只有主題(避免時間軸只看到分類、看不出客人實際問了什麼)", async () => {
+    mockEnsureProfile.mockResolvedValue(456);
+    const longMessage = "x".repeat(200);
+
+    const caller = (inquiriesRouter as any).createCaller(makeContext());
+    await caller.create({
+      customerName: "陳先生",
+      customerEmail: "chen@example.com",
+      subject: "客製旅遊",
+      message: longMessage,
+    });
+    await flushMicrotasks();
+
+    expect(mockRecordInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contentSummary: `客製旅遊:${longMessage.slice(0, 120)}`,
+      }),
+    );
+    // full form text still goes into content, unabridged
+    expect(mockRecordInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: `客製旅遊\n\n${longMessage}`,
       }),
     );
   });
