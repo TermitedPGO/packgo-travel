@@ -1128,9 +1128,22 @@ export function TimelineTab({
 }) {
   const { t } = useLocale()
   const sel = toSelection(c)
+  // Phase6 B3 —「顯示未歸屬」toggle: only meaningful while a project chip is
+  // active (defaults OFF per the supervisor's ruling — the chip shows ONLY
+  // that order's interactions unless Jeff explicitly asks to also see
+  // unassigned ones). Reset on customer/project switch so a toggle left on
+  // for one project never silently carries into the next.
+  const [showUnfiled, setShowUnfiled] = useState(false)
+  useEffect(() => {
+    setShowUnfiled(false)
+  }, [c.id, activeProjectId])
   // customer-projects (0104) — own query, scoped to the active project. A
-  // project → that order's filed turns; 未分類 → unfiledOnly (IS NULL) basket.
-  const scope = activeProjectId !== null ? { orderId: activeProjectId } : { unfiledOnly: true }
+  // project → that order's filed turns (+ unfiled ones too when the toggle is
+  // on); 未分類 → unfiledOnly (IS NULL) basket.
+  const scope =
+    activeProjectId !== null
+      ? { orderId: activeProjectId, includeUnfiled: showUnfiled }
+      : { unfiledOnly: true }
   const threadInput =
     "userId" in sel
       ? { userId: sel.userId, limit: 200, ...scope }
@@ -1199,8 +1212,23 @@ export function TimelineTab({
       {/* full conversation — date jump (newest first, default newest day), then turns */}
       {hasChat && (
         <div className="space-y-3">
-          <div className="text-[11px] font-semibold text-gray-900">
-            {t("admin.customers.followUp.fullChat")}
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-[11px] font-semibold text-gray-900">
+              {t("admin.customers.followUp.fullChat")}
+            </div>
+            {/* Phase6 B3 —「顯示未歸屬」toggle, only meaningful with a project
+                chip active (未分類 basket already IS the unfiled view). */}
+            {activeProjectId !== null && (
+              <label className="flex items-center gap-1.5 text-[11px] text-gray-500 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="rounded border-gray-300"
+                  checked={showUnfiled}
+                  onChange={(e) => setShowUnfiled(e.target.checked)}
+                />
+                {t("admin.customers.projects.showUnfiled")}
+              </label>
+            )}
           </div>
           {days.length > 1 && (
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
@@ -1222,31 +1250,47 @@ export function TimelineTab({
               onDone={() => setSelectedIds(new Set())}
             />
           )}
-          {shownChat.map((m) => (
-            <div key={m.id} className="flex gap-2.5 text-[12px]">
-              {m.assign ? (
-                <input
-                  type="checkbox"
-                  className="flex-shrink-0 mt-0.5 rounded border-gray-300"
-                  checked={selectedIds.has(m.id)}
-                  onChange={() => toggleSelect(m.id)}
-                  aria-label={t("admin.customers.projects.selectForBulk")}
-                />
-              ) : (
-                <span className="flex-shrink-0 w-3.5" />
-              )}
-              <span className="flex-shrink-0 text-[10px] text-gray-400 w-10 pt-0.5">
-                {m.createdAt.toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" })}
-              </span>
-              <div className="flex-1 min-w-0">
-                <span className="font-medium text-gray-900">
-                  {m.senderRole === "jeff" ? t("admin.customers.followUp.me") : c.name}
+          {shownChat.map((m) => {
+            // Phase6 B3 — a turn surfaced by the「顯示未歸屬」toggle (project
+            // active, this row's own customOrderId is still null) renders
+            // gray so it reads as "not actually filed under this project",
+            // never mistaken for one of the order's own interactions.
+            const isUnfiledInProject =
+              activeProjectId !== null && m.assign != null && m.assign.customOrderId === null
+            return (
+              <div
+                key={m.id}
+                className={`flex gap-2.5 text-[12px] ${isUnfiledInProject ? "opacity-50" : ""}`}
+              >
+                {m.assign ? (
+                  <input
+                    type="checkbox"
+                    className="flex-shrink-0 mt-0.5 rounded border-gray-300"
+                    checked={selectedIds.has(m.id)}
+                    onChange={() => toggleSelect(m.id)}
+                    aria-label={t("admin.customers.projects.selectForBulk")}
+                  />
+                ) : (
+                  <span className="flex-shrink-0 w-3.5" />
+                )}
+                <span className="flex-shrink-0 text-[10px] text-gray-400 w-10 pt-0.5">
+                  {m.createdAt.toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" })}
                 </span>
-                <p className="text-gray-600 mt-0.5 whitespace-pre-wrap break-words">{m.body}</p>
-                {m.assign && <AssignControl customer={c} projects={projects} assign={m.assign} />}
+                <div className="flex-1 min-w-0">
+                  <span className="font-medium text-gray-900">
+                    {m.senderRole === "jeff" ? t("admin.customers.followUp.me") : c.name}
+                  </span>
+                  {isUnfiledInProject && (
+                    <span className="ml-1.5 text-[9px] text-gray-400 border border-gray-300 rounded-md px-1 py-px align-middle">
+                      {t("admin.customers.projects.unfiledBadge")}
+                    </span>
+                  )}
+                  <p className="text-gray-600 mt-0.5 whitespace-pre-wrap break-words">{m.body}</p>
+                  {m.assign && <AssignControl customer={c} projects={projects} assign={m.assign} />}
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 

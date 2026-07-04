@@ -49,7 +49,7 @@ const getDbMock = vi.mocked(getDb);
  *  drizzle eq/and/sql/desc run against the real schema without a DB. */
 function fakeChain(result: unknown) {
   const p: any = {};
-  for (const m of ["select", "from", "where", "orderBy", "limit"]) {
+  for (const m of ["select", "from", "where", "orderBy", "limit", "leftJoin"]) {
     p[m] = () => p;
   }
   p.then = (onOk: any, onErr: any) =>
@@ -272,6 +272,77 @@ describe("buildCustomerChatContext", () => {
   });
 });
 
+// Phase6 B3 — activeProjectId scopes the interactions/documents section only;
+// identity/memory sections stay unscoped (dispatch doc: 客人層級記憶/身分段保留不動).
+describe("buildCustomerChatContext — activeProjectId scopes documents (Phase6 B3)", () => {
+  it("with no activeProjectId, ALL of the customer's documents are fed (unscoped, unchanged behavior)", async () => {
+    getDbMock.mockResolvedValue(
+      fakeDb([
+        [{ id: 7, name: "陳美玲", email: "mei@example.com", tier: null, packpointBalance: 0, bookingCount: 0 }],
+        [], // bookings
+        [], // inquiries
+        [], // quotes
+        [], // profMem
+      ]),
+    );
+    vi.mocked(loadCustomerDocs).mockResolvedValueOnce([
+      { id: "co-quote:1", kind: "quote", name: "單A報價", url: "k1", meta: null, createdAt: new Date(), customOrderId: 101 },
+      { id: "co-quote:2", kind: "quote", name: "單B報價", url: "k2", meta: null, createdAt: new Date(), customOrderId: 202 },
+    ] as any);
+    vi.mocked(buildCustomerDocsText).mockImplementationOnce(async (docs) => ({
+      list: "【文件清單】\n" + docs.map((d) => `- ${d.name}`).join("\n"),
+      fullText: docs.map((d) => d.name).join(" / "),
+      readCount: docs.length,
+    }));
+    const block = await buildCustomerChatContext(7);
+    expect(block).toContain("單A報價");
+    expect(block).toContain("單B報價");
+  });
+
+  it("with activeProjectId set, only that order's documents are fed to loadCustomerDocsText", async () => {
+    getDbMock.mockResolvedValue(
+      fakeDb([
+        [{ id: 7, name: "陳美玲", email: "mei@example.com", tier: null, packpointBalance: 0, bookingCount: 0 }],
+        [],
+        [],
+        [],
+        [],
+      ]),
+    );
+    vi.mocked(loadCustomerDocs).mockResolvedValueOnce([
+      { id: "co-quote:1", kind: "quote", name: "單A報價", url: "k1", meta: null, createdAt: new Date(), customOrderId: 101 },
+      { id: "co-quote:2", kind: "quote", name: "單B報價", url: "k2", meta: null, createdAt: new Date(), customOrderId: 202 },
+    ] as any);
+    vi.mocked(buildCustomerDocsText).mockImplementationOnce(async (docs) => ({
+      list: "【文件清單】\n" + docs.map((d) => `- ${d.name}`).join("\n"),
+      fullText: docs.map((d) => d.name).join(" / "),
+      readCount: docs.length,
+    }));
+    const block = await buildCustomerChatContext(7, 101);
+    expect(block).toContain("單A報價");
+    expect(block).not.toContain("單B報價");
+  });
+
+  it("activeProjectId set but the customer has NO documents under it → docs block simply omitted", async () => {
+    getDbMock.mockResolvedValue(
+      fakeDb([
+        [{ id: 7, name: "陳美玲", email: "mei@example.com", tier: null, packpointBalance: 0, bookingCount: 0 }],
+        [],
+        [],
+        [],
+        [],
+      ]),
+    );
+    vi.mocked(loadCustomerDocs).mockResolvedValueOnce([
+      { id: "co-quote:2", kind: "quote", name: "單B報價", url: "k2", meta: null, createdAt: new Date(), customOrderId: 202 },
+    ] as any);
+    const block = await buildCustomerChatContext(7, 101);
+    expect(block).not.toBeNull();
+    expect(block).not.toContain("單B報價");
+    expect(buildCustomerDocsText).not.toHaveBeenCalled();
+  });
+});
+
 describe("formatCustomerContext — guest mode (guest-customer-chat)", () => {
   it("renders a guest header and drops the PackPoint/booking membership line", () => {
     const block = formatCustomerContext({
@@ -393,6 +464,33 @@ describe("buildGuestChatContext (guest-customer-chat)", () => {
     expect(block).not.toContain("壞資料");
   });
 
+  // Phase6 B3 — activeProjectId scopes 近期來信 + docs; the real customOrderId
+  // filter runs as a drizzle `eq()` condition inside the query (exercised
+  // against the real schema by fakeDb's thenable chain, same convention as
+  // the rest of this file — the DB-free fake can't assert the WHERE clause's
+  // effect on real rows, only that the call succeeds and the surrounding
+  // block still renders correctly with the (DB-filtered) result set).
+  it("accepts activeProjectId without throwing and still renders the scoped result set", async () => {
+    getDbMock.mockResolvedValue(
+      fakeDb([
+        [{ id: 2550004, email: "jenny@example.com" }],
+        [], // inquiries
+        [
+          {
+            direction: "inbound",
+            contentSummary: "這張單機票出了嗎",
+            content: "Hi, is the flight ticketed yet?",
+          },
+        ], // interactions — simulates the DB having already applied the customOrderId filter
+        [], // quotes
+      ]),
+    );
+    const block = await buildGuestChatContext(2550004, 142);
+    expect(block).not.toBeNull();
+    expect(block).toContain("【近期來信】");
+    expect(block).toContain("這張單機票出了嗎");
+  });
+
   it("appends the document list + PDF content to the pinned block (m4)", async () => {
     getDbMock.mockResolvedValue(
       fakeDb([[{ id: 2550004, email: "jenny@example.com" }], [], [], []]),
@@ -417,6 +515,24 @@ describe("buildGuestChatContext (guest-customer-chat)", () => {
     expect(block).toContain("Day3 阿里山日出");
     // the cost-firewall instruction rides with the doc content
     expect(block).toContain("成本/同業價是內部數字");
+  });
+
+  it("(Phase6 B3) activeProjectId filters the guest's documents to that order only", async () => {
+    getDbMock.mockResolvedValue(
+      fakeDb([[{ id: 2550004, email: "jenny@example.com" }], [], [], []]),
+    );
+    vi.mocked(loadCustomerDocs).mockResolvedValueOnce([
+      { id: "co-quote:1", kind: "quote", name: "單A報價", url: "k1", meta: null, createdAt: new Date(), customOrderId: 101 },
+      { id: "co-quote:2", kind: "quote", name: "單B報價", url: "k2", meta: null, createdAt: new Date(), customOrderId: 202 },
+    ] as any);
+    vi.mocked(buildCustomerDocsText).mockImplementationOnce(async (docs) => ({
+      list: "【文件清單】\n" + docs.map((d) => `- ${d.name}`).join("\n"),
+      fullText: docs.map((d) => d.name).join(" / "),
+      readCount: docs.length,
+    }));
+    const block = await buildGuestChatContext(2550004, 101);
+    expect(block).toContain("單A報價");
+    expect(block).not.toContain("單B報價");
   });
 });
 

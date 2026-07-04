@@ -467,6 +467,28 @@ export const WRITE_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "attach_interaction_to_order",
+    description:
+      "把『目前這位客人』尚未歸類到任何專案的往來對話(未歸戶的 email/訊息)全部掛到指定的一張訂製單" +
+      "(專案)上。用在 Jeff 說「把剛剛那幾封掛到這張單」「這些對話歸到機票那張單」「幫我把未分類的都" +
+      "歸到這個專案」時。**這個工具沒有辦法指定單一封信** — 它一次把這位客人目前『未歸戶』的往來全部" +
+      "歸到你給的 orderId,所以只在 Jeff 明確要整批歸戶、且這位客人手上大多是要歸到同一張單的對話時才用;" +
+      "如果 Jeff 想要的是『只歸某一封』而不是全部未歸戶對話,先跟他確認,不要自己猜著呼叫。" +
+      "orderId 一律用剛剛 create_custom_order / update_custom_order 回傳過的 orderId,或 Jeff 直接講的單號" +
+      "對應的 id,絕不要編。只能歸到屬於這位客人的單;沒有未歸戶對話可歸、或這張單不是這位客人的都會被拒絕。" +
+      "做完用一句話報:歸了幾筆。",
+    input_schema: {
+      type: "object",
+      properties: {
+        orderId: {
+          type: "number",
+          description: "要歸戶到的訂製單 id(從剛才建單/改單的回傳,或帳務/專案列表拿,不要編)",
+        },
+      },
+      required: ["orderId"],
+    },
+  },
+  {
     name: "merge_into_customer",
     description:
       "把「目前釘住的這位客人」整份併入另一位既有客人。用在同案聯絡人被誤建成獨立客人時" +
@@ -2099,6 +2121,87 @@ async function runWriteTool(
         message: rejectedReason
           ? `已更新單 ${updated.orderNumber}(改了:${changed.join("、")});${rejectedReason}`
           : `已更新單 ${updated.orderNumber}(改了:${changed.join("、")})`,
+      };
+    }
+
+    case "attach_interaction_to_order": {
+      // customer-cockpit Phase6 B2「聊天手動掛單」— exposes the ALREADY-BUILT
+      // assignInteractionsToOrder (customOrder.ts, built for the 歷史 tab's
+      // multi-select bulk-assign) to the LLM. Deliberately does NOT take
+      // interactionIds/gmailThreadIds as model input: no existing read tool
+      // ever surfaces a raw interaction id or gmailThreadId to the model (only
+      // orderId/orderNumber come back from create_custom_order /
+      // update_custom_order), so asking the model for one would just invite it
+      // to invent one. Instead the tool's one blunt, safe scope is "this
+      // customer's currently-unfiled (customOrderId IS NULL) interactions" —
+      // exactly what "把未歸戶的都掛上去" means, with no per-row guessing.
+      const orderId = Number(input?.orderId);
+      if (!Number.isInteger(orderId) || orderId <= 0)
+        return { error: "需要要歸戶的 orderId(正整數;從剛才建單/改單的回傳或帳務/專案列表拿,不要編)" };
+      if (!profileId) return { error: "沒有選定客人 — 這個工具只能在某位客人的對話框裡用" };
+
+      const {
+        getCustomOrderById,
+        getCustomerProfileSnapshot,
+        resolveCustomerProfileIds,
+        orderBelongsToProfiles,
+        assignInteractionsToOrder,
+      } = await import("../../db/customOrder");
+      const order = await getCustomOrderById(orderId);
+      if (!order) return { error: `找不到訂單 #${orderId}` };
+
+      // Cross-customer guard — copied verbatim from update_custom_order (the
+      // dispatch doc explicitly forbids inventing a new variant of this check).
+      const snap = await getCustomerProfileSnapshot(profileId);
+      const scopeIds =
+        snap.userId != null
+          ? await resolveCustomerProfileIds({ userId: snap.userId })
+          : [profileId];
+      if (!scopeIds.includes(profileId)) scopeIds.push(profileId);
+      if (!orderBelongsToProfiles(order.customerProfileId, scopeIds))
+        return { error: `訂單 #${orderId} 不是這位客人的,不能歸戶` };
+
+      // Terminal-status guard — a closed order (cancelled/completed) must not
+      // silently absorb new conversation history via chat. The UI-equivalent
+      // adminCustomerOrders.ts assignConversation only blocks "cancelled" (a
+      // narrower pre-existing gap left as-is there); this chat tool blocks both
+      // terminal states since a fresh chat instruction has no reason to be able
+      // to re-open bookkeeping on an already-wrapped-up case.
+      if (order.status === "cancelled" || order.status === "completed")
+        return {
+          error: `訂單 #${orderId} 已經是「${order.status === "cancelled" ? "取消" : "完成"}」狀態,不能再歸戶新對話`,
+        };
+
+      const { customerInteractions } = await import("../../../drizzle/schema");
+      const { and, inArray, isNull } = await import("drizzle-orm");
+      const unfiled = await db
+        .select({ id: customerInteractions.id })
+        .from(customerInteractions)
+        .where(
+          and(
+            inArray(customerInteractions.customerProfileId, scopeIds),
+            isNull(customerInteractions.customOrderId),
+          ),
+        )
+        .limit(200);
+      if (unfiled.length === 0)
+        return { error: "這位客人目前沒有未歸戶的往來對話可以歸" };
+
+      const updated = await assignInteractionsToOrder({
+        profileIds: scopeIds,
+        orderId,
+        interactionIds: unfiled.map((r) => r.id),
+      });
+      void import("../../queue")
+        .then((m) => m.enqueueCustomerSummaryRefresh(profileId))
+        .catch(() => {});
+      log.info({ profileId, orderId, updated }, "attach_interaction_to_order executed");
+      return {
+        success: true,
+        orderId,
+        orderNumber: order.orderNumber,
+        updated,
+        message: `已把 ${updated} 筆未歸戶對話歸到單 ${order.orderNumber}`,
       };
     }
 

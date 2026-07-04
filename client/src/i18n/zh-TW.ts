@@ -3575,6 +3575,8 @@ export const zhTW = {
         selectForBulk: '選取以批次指派',
         clearSelection: '取消選取',
         filterPlaceholder: '篩選',
+        showUnfiled: '顯示未歸屬',
+        unfiledBadge: '未歸屬',
         category: {
           flight: '機票',
           quote: '報價/行程',

@@ -59,7 +59,7 @@ vi.mock("../../../drizzle/schema", () => ({
   bookings: { id: "id", customerName: "cn", customerEmail: "ce", customerPhone: "cp", tourId: "tid", departureId: "did", totalPrice: "tp", paymentStatus: "ps", bookingStatus: "bsx", createdAt: "ca" },
   bankTransactions: { id: "id", date: "d", merchantName: "mn", description: "desc", amount: "amt", agentCategory: "ac", jeffOverrideCategory: "joc", excludeFromAccounting: "efa", isPending: "ip", receiptUrl: "ru" },
   customerProfiles: { id: "id", name: "n", email: "e", phone: "ph", userId: "uid", status: "st", jeffPersonalNote: "jpn", createdAt: "ca", budgetTier: "bt", bookingCount: "bc", totalSpend: "tsp", vipScore: "vs", aiNotes: "an" },
-  customerInteractions: { id: "id", customerProfileId: "cpid", direction: "dir", content: "c", contentSummary: "cs", createdAt: "ca", externalId: "eid" },
+  customerInteractions: { id: "id", customerProfileId: "cpid", direction: "dir", content: "c", contentSummary: "cs", createdAt: "ca", externalId: "eid", customOrderId: "coid" },
   customerDocuments: { customerProfileId: "cpid", type: "t", fileName: "fn", expiresAt: "ea", isCurrent: "ic", uploadedAt: "ua" },
   customOrders: { customerProfileId: "cpid" },
   customerChatMessages: { customerProfileId: "cpid" },
@@ -104,6 +104,7 @@ const {
   mockGenerateOrderNumber,
   mockResolveCustomerProfileIds,
   mockOrderBelongsToProfiles,
+  mockAssignInteractionsToOrder,
 } = vi.hoisted(() => ({
   mockCollect: vi.fn(),
   mockGetBookingById: vi.fn(),
@@ -118,6 +119,7 @@ const {
   mockGenerateOrderNumber: vi.fn(),
   mockResolveCustomerProfileIds: vi.fn(),
   mockOrderBelongsToProfiles: vi.fn(),
+  mockAssignInteractionsToOrder: vi.fn(),
 }));
 // merge_into_customer recomputes the target's unread pointer via the shared
 // touchLastInbound helper (forward-only semantics live + are unit-tested in
@@ -138,6 +140,7 @@ vi.mock("../../db/customOrder", () => ({
   generateOrderNumber: mockGenerateOrderNumber,
   resolveCustomerProfileIds: mockResolveCustomerProfileIds,
   orderBelongsToProfiles: mockOrderBelongsToProfiles,
+  assignInteractionsToOrder: mockAssignInteractionsToOrder,
 }));
 vi.mock("../../_core/auditLog", () => ({ audit: mockAudit }));
 vi.mock("../../_core/supplierCostVerification", () => ({
@@ -181,6 +184,7 @@ beforeEach(() => {
   mockGenerateOrderNumber.mockReset();
   mockResolveCustomerProfileIds.mockReset();
   mockOrderBelongsToProfiles.mockReset();
+  mockAssignInteractionsToOrder.mockReset();
 });
 
 describe("READ_TOOLS definitions", () => {
@@ -483,6 +487,167 @@ describe("update_custom_order — AI patches an existing project for this custom
     );
     expect(out.success).toBeUndefined();
     expect(out.error).toContain("沒有要改的欄位");
+  });
+});
+
+describe("attach_interaction_to_order — customer-cockpit Phase6 B2 聊天手動掛單", () => {
+  it("is exposed as a customer-page write tool", () => {
+    expect(WRITE_TOOLS.map((t) => t.name)).toContain("attach_interaction_to_order");
+  });
+
+  it("blocks with no customer selected", async () => {
+    const out = JSON.parse(
+      await executeWriteTool("attach_interaction_to_order", { orderId: 42 }, undefined),
+    );
+    expect(out.success).toBeUndefined();
+    expect(out.error).toContain("客人");
+  });
+
+  it("rejects a missing/non-positive orderId before touching the DB", async () => {
+    const out1 = JSON.parse(
+      await executeWriteTool("attach_interaction_to_order", {}, 2760016),
+    );
+    expect(out1.success).toBeUndefined();
+    expect(out1.error).toContain("orderId");
+
+    const out2 = JSON.parse(
+      await executeWriteTool("attach_interaction_to_order", { orderId: -1 }, 2760016),
+    );
+    expect(out2.success).toBeUndefined();
+    expect(mockGetCustomOrderById).not.toHaveBeenCalled();
+  });
+
+  it("successful assignment: unfiled interactions within scope get attached to the order", async () => {
+    mockGetCustomOrderById.mockResolvedValue({ id: 42, customerProfileId: 2760016, orderNumber: "ORD-2026-0042" });
+    mockSnapshot.mockResolvedValue({ userId: null, name: "劉衛國", email: "liu@example.com" });
+    mockOrderBelongsToProfiles.mockReturnValue(true);
+    // The unfiled-interaction lookup (db.select(...).where(...).limit(200)).
+    nextRows = [{ id: 101 }, { id: 102 }];
+    mockAssignInteractionsToOrder.mockResolvedValue(2);
+
+    const out = JSON.parse(
+      await executeWriteTool("attach_interaction_to_order", { orderId: 42 }, 2760016),
+    );
+
+    expect(out.success).toBe(true);
+    expect(out.updated).toBe(2);
+    expect(out.orderNumber).toBe("ORD-2026-0042");
+    expect(mockAssignInteractionsToOrder).toHaveBeenCalledWith({
+      profileIds: [2760016],
+      orderId: 42,
+      interactionIds: [101, 102],
+    });
+  });
+
+  it("rejects when the order belongs to a DIFFERENT customer (cross-customer guard)", async () => {
+    mockGetCustomOrderById.mockResolvedValue({ id: 42, customerProfileId: 9999, orderNumber: "ORD-2026-0042" });
+    mockSnapshot.mockResolvedValue({ userId: null, name: "x", email: "x@example.com" });
+    mockOrderBelongsToProfiles.mockReturnValue(false);
+
+    const out = JSON.parse(
+      await executeWriteTool("attach_interaction_to_order", { orderId: 42 }, 2760016),
+    );
+
+    expect(out.success).toBeUndefined();
+    expect(out.error).toContain("不是這位客人的");
+    expect(mockAssignInteractionsToOrder).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the order doesn't exist", async () => {
+    mockGetCustomOrderById.mockResolvedValue(null);
+
+    const out = JSON.parse(
+      await executeWriteTool("attach_interaction_to_order", { orderId: 999 }, 2760016),
+    );
+
+    expect(out.success).toBeUndefined();
+    expect(out.error).toContain("找不到訂單");
+    expect(mockAssignInteractionsToOrder).not.toHaveBeenCalled();
+  });
+
+  it("no unfiled interactions to attach → clear error, no assignment attempted", async () => {
+    mockGetCustomOrderById.mockResolvedValue({ id: 42, customerProfileId: 2760016, orderNumber: "ORD-2026-0042" });
+    mockSnapshot.mockResolvedValue({ userId: null, name: "x", email: "x@example.com" });
+    mockOrderBelongsToProfiles.mockReturnValue(true);
+    nextRows = []; // no unfiled interactions
+
+    const out = JSON.parse(
+      await executeWriteTool("attach_interaction_to_order", { orderId: 42 }, 2760016),
+    );
+
+    expect(out.success).toBeUndefined();
+    expect(out.error).toContain("沒有未歸戶");
+    expect(mockAssignInteractionsToOrder).not.toHaveBeenCalled();
+  });
+
+  it("scopes to ALL of the customer's resolved profileIds (registered customer with a guest row), not just the pinned one", async () => {
+    mockGetCustomOrderById.mockResolvedValue({ id: 42, customerProfileId: 555, orderNumber: "ORD-2026-0042" });
+    mockSnapshot.mockResolvedValue({ userId: 88, name: "Emerald", email: "emerald@axt.com" });
+    mockResolveCustomerProfileIds.mockResolvedValue([2760016, 555]);
+    mockOrderBelongsToProfiles.mockReturnValue(true);
+    nextRows = [{ id: 201 }];
+    mockAssignInteractionsToOrder.mockResolvedValue(1);
+
+    const out = JSON.parse(
+      await executeWriteTool("attach_interaction_to_order", { orderId: 42 }, 2760016),
+    );
+
+    expect(out.success).toBe(true);
+    expect(mockResolveCustomerProfileIds).toHaveBeenCalledWith({ userId: 88 });
+    expect(mockAssignInteractionsToOrder).toHaveBeenCalledWith({
+      profileIds: [2760016, 555],
+      orderId: 42,
+      interactionIds: [201],
+    });
+  });
+
+  it("regression: rejects attaching into a CANCELLED order (terminal-status guard, matches assignConversation's UI-path check)", async () => {
+    mockGetCustomOrderById.mockResolvedValue({
+      id: 42, customerProfileId: 2760016, orderNumber: "ORD-2026-0042", status: "cancelled",
+    });
+    mockSnapshot.mockResolvedValue({ userId: null, name: "劉衛國", email: "liu@example.com" });
+    mockOrderBelongsToProfiles.mockReturnValue(true);
+
+    const out = JSON.parse(
+      await executeWriteTool("attach_interaction_to_order", { orderId: 42 }, 2760016),
+    );
+
+    expect(out.success).toBeUndefined();
+    expect(out.error).toContain("取消");
+    expect(mockAssignInteractionsToOrder).not.toHaveBeenCalled();
+  });
+
+  it("regression: rejects attaching into a COMPLETED order (a stricter guard than assignConversation's UI path, which only blocks cancelled)", async () => {
+    mockGetCustomOrderById.mockResolvedValue({
+      id: 42, customerProfileId: 2760016, orderNumber: "ORD-2026-0042", status: "completed",
+    });
+    mockSnapshot.mockResolvedValue({ userId: null, name: "劉衛國", email: "liu@example.com" });
+    mockOrderBelongsToProfiles.mockReturnValue(true);
+
+    const out = JSON.parse(
+      await executeWriteTool("attach_interaction_to_order", { orderId: 42 }, 2760016),
+    );
+
+    expect(out.success).toBeUndefined();
+    expect(out.error).toContain("完成");
+    expect(mockAssignInteractionsToOrder).not.toHaveBeenCalled();
+  });
+
+  it("still allows attaching into a non-terminal order (e.g. status: \"quoted\") — the guard only blocks cancelled/completed", async () => {
+    mockGetCustomOrderById.mockResolvedValue({
+      id: 42, customerProfileId: 2760016, orderNumber: "ORD-2026-0042", status: "quoted",
+    });
+    mockSnapshot.mockResolvedValue({ userId: null, name: "劉衛國", email: "liu@example.com" });
+    mockOrderBelongsToProfiles.mockReturnValue(true);
+    nextRows = [{ id: 301 }];
+    mockAssignInteractionsToOrder.mockResolvedValue(1);
+
+    const out = JSON.parse(
+      await executeWriteTool("attach_interaction_to_order", { orderId: 42 }, 2760016),
+    );
+
+    expect(out.success).toBe(true);
+    expect(mockAssignInteractionsToOrder).toHaveBeenCalled();
   });
 });
 

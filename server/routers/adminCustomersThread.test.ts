@@ -157,10 +157,11 @@ describe("adminCustomersThread — stripAgentMarkup (leaked safety tags)", () =>
  * the router's query makes I/O off of.
  */
 describe("resolveConversationThreadScope (customer-projects three-state)", () => {
-  it("orderId set → project mode, carries the orderId", () => {
+  it("orderId set → project mode, carries the orderId, includeUnfiled defaults false", () => {
     expect(resolveConversationThreadScope({ orderId: 142 })).toEqual({
       mode: "project",
       orderId: 142,
+      includeUnfiled: false,
     });
   });
 
@@ -176,11 +177,29 @@ describe("resolveConversationThreadScope (customer-projects three-state)", () =>
     expect(resolveConversationThreadScope({ orderId: 7, unfiledOnly: true })).toEqual({
       mode: "project",
       orderId: 7,
+      includeUnfiled: false,
     });
   });
 
   it("unfiledOnly: false is the same as omitted → all mode", () => {
     expect(resolveConversationThreadScope({ unfiledOnly: false })).toEqual({ mode: "all" });
+  });
+
+  // Phase6 B3 — 「顯示未歸屬」toggle. Supervisor ruling: default OFF (project
+  // chip shows ONLY that order's interactions unless Jeff explicitly flips it).
+  it("includeUnfiled: true carries through on project mode", () => {
+    expect(resolveConversationThreadScope({ orderId: 142, includeUnfiled: true })).toEqual({
+      mode: "project",
+      orderId: 142,
+      includeUnfiled: true,
+    });
+  });
+
+  it("includeUnfiled is ignored outside project mode (unfiled/all have no such toggle)", () => {
+    expect(resolveConversationThreadScope({ unfiledOnly: true, includeUnfiled: true })).toEqual({
+      mode: "unfiled",
+    });
+    expect(resolveConversationThreadScope({ includeUnfiled: true })).toEqual({ mode: "all" });
   });
 });
 

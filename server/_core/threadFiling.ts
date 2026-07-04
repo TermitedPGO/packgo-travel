@@ -25,12 +25,13 @@
  * on deploy, per the repo's Gmail-pipeline norm).
  */
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, isNotNull, asc } from "drizzle-orm";
 import type { getDb } from "../db";
 import { customerInteractions } from "../../drizzle/schema";
 import { scrubPii } from "./piiScrub";
 import { createChildLogger } from "./logger";
 import { touchLastInbound } from "./customerUnread";
+import { decideInteractionOrderAssignment } from "./interactionOrderAssignment";
 import type { FilingMessage } from "./gmail";
 
 const log = createChildLogger({ module: "threadFiling" });
@@ -218,6 +219,39 @@ export async function syncThreadToInteractions(
 
   const actions = planThreadFiling(messages, existing);
 
+  // customer-cockpit Phase6 B1 — rule ① ONLY (thread-inheritance, pure code,
+  // no LLM): a thread already carrying a customOrderId on another row should
+  // have that id stamped onto any row this reconcile newly inserts. This is a
+  // lower-stakes backfill-adjacent path (historical sync), so it deliberately
+  // does NOT do rule ②/③ (in-progress-order lookup / LLM pick) — those stay
+  // exclusive to the live gmailPipeline.ts inbound path. One query, keyed by
+  // gmailThreadId, built once before the loop (not per-message).
+  const threadOrderRows = await db
+    .select({
+      gmailThreadId: customerInteractions.gmailThreadId,
+      customOrderId: customerInteractions.customOrderId,
+    })
+    .from(customerInteractions)
+    .where(
+      and(
+        eq(customerInteractions.customerProfileId, profileId),
+        isNotNull(customerInteractions.gmailThreadId),
+        isNotNull(customerInteractions.customOrderId),
+      ),
+    )
+    .orderBy(asc(customerInteractions.id));
+  // First-wins (not last-wins): if a thread's sibling rows carry conflicting
+  // customOrderId values (e.g. Jeff manually re-assigned one row later), pick
+  // the earliest-assigned order deterministically instead of letting row
+  // iteration order silently decide. Matches gmailPipeline.ts's ORDER BY id ASC
+  // + LIMIT 1 tiebreak and B4 interactionBackfill.ts's `if (!m.has(...))` guard.
+  const threadOrderMap = new Map<string, number>();
+  for (const r of threadOrderRows) {
+    if (r.gmailThreadId && r.customOrderId != null && !threadOrderMap.has(r.gmailThreadId)) {
+      threadOrderMap.set(r.gmailThreadId, r.customOrderId);
+    }
+  }
+
   // customer-unread (0108) — newest inbound message this sync actually FILED
   // (inserted). Touched once after the loop; touchLastInbound is monotonic, so
   // backfilling an old thread never regresses a fresher lastInboundAt.
@@ -266,6 +300,10 @@ export async function syncThreadToInteractions(
     // insert — onDuplicateKeyUpdate guards the poll-vs-backfill race on the same
     // thread: a colliding (profileId, externalId) collapses into a no-op update
     // instead of throwing.
+    const inheritedOrderId = decideInteractionOrderAssignment({
+      priorThreadOrderId: threadOrderMap.get(a.message.threadId) ?? null,
+      candidates: [],
+    }).customOrderId;
     await db
       .insert(customerInteractions)
       .values({
@@ -276,6 +314,7 @@ export async function syncThreadToInteractions(
         generatedBy: "human",
         externalId: a.message.messageId,
         gmailThreadId: a.message.threadId,
+        customOrderId: inheritedOrderId,
         createdAt: a.message.date,
       })
       .onDuplicateKeyUpdate({

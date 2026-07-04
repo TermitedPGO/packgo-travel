@@ -889,16 +889,23 @@ async function startServer() {
 
       // 批2 m3 — pin the customer block into the system prompt. A db hiccup
       // degrades to an unpinned chat (null → undefined), never a dead stream.
+      // Phase6 B3 — pass orderId through so the interactions/documents section
+      // itself scopes to the active project (not just the separate order-facts
+      // block appended below); `undefined` (no project chip) means unscoped,
+      // matching every existing call site that doesn't pin a project.
       let extraSystem: string | undefined;
       if (customerId !== null) {
         const { buildCustomerChatContext } = await import(
           "./customerChatContext"
         );
-        extraSystem = (await buildCustomerChatContext(customerId)) ?? undefined;
+        extraSystem =
+          (await buildCustomerChatContext(customerId, orderId ?? undefined)) ??
+          undefined;
       } else if (customerProfileId !== null) {
         const { buildGuestChatContext } = await import("./customerChatContext");
         extraSystem =
-          (await buildGuestChatContext(customerProfileId)) ?? undefined;
+          (await buildGuestChatContext(customerProfileId, orderId ?? undefined)) ??
+          undefined;
       }
 
       // customer-projects (0104) — when scoped to a project, pin THIS order's
@@ -1338,6 +1345,40 @@ async function startServer() {
       return res.json(result);
     } catch (err) {
       logger.error({ err }, "[admin/import-case-file] error");
+      return res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // customer-cockpit Phase6 B4 — one-time backfill of customOrderId onto
+  // EXISTING customerInteractions rows (customOrderId IS NULL), reusing B1's
+  // deterministic-only rules (① thread inheritance, ② exactly-one-in-progress
+  // order). NO LLM call anywhere in this path — see interactionBackfill.ts
+  // header. Same dry_run/confirm two-stage shape + bearer-token auth
+  // (Jeff's desktop, one-off run) as /api/admin/import-case-file above.
+  // POST /api/admin/backfill-interaction-orders
+  //   Headers: Authorization: Bearer <LOCAL_SCRIPT_TOKEN>
+  //   Body: { mode: "dry_run" | "confirm", excludeTestAccounts?: boolean }
+  app.post("/api/admin/backfill-interaction-orders", async (req, res) => {
+    try {
+      const ip = await verifyInternalAuth(req, res, {
+        tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
+        rateLimitKey: "backfill-interaction-orders",
+        rateLimitMax: 20,
+        windowSec: 3600,
+      });
+      if (!ip) return;
+      const { mode, excludeTestAccounts } = req.body || {};
+      if (mode !== "dry_run" && mode !== "confirm") {
+        return res.status(400).json({ error: "mode must be 'dry_run' or 'confirm'" });
+      }
+      if (excludeTestAccounts !== undefined && typeof excludeTestAccounts !== "boolean") {
+        return res.status(400).json({ error: "excludeTestAccounts must be a boolean when provided" });
+      }
+      const { runInteractionBackfill } = await import("./interactionBackfill");
+      const result = await runInteractionBackfill(mode, { excludeTestAccounts });
+      return res.json(result);
+    } catch (err) {
+      logger.error({ err }, "[admin/backfill-interaction-orders] error");
       return res.status(500).json({ error: (err as Error).message });
     }
   });

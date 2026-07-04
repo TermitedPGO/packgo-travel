@@ -1811,6 +1811,11 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
             //                     this, so it must stay whole.
             orderId: z.number().int().positive().optional(),
             unfiledOnly: z.boolean().optional(),
+            // Phase6 B3 — "顯示未歸屬" toggle. Only meaningful alongside
+            // orderId (project mode); ADDS the unfiled (customOrderId IS
+            // NULL) rows on top of the project's own, default stays OFF (the
+            // project-only view is the default per the supervisor's ruling).
+            includeUnfiled: z.boolean().optional(),
           })
           .strict(),
         z
@@ -1819,6 +1824,7 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
             limit: z.number().int().min(1).max(200).optional(),
             orderId: z.number().int().positive().optional(),
             unfiledOnly: z.boolean().optional(),
+            includeUnfiled: z.boolean().optional(),
           })
           .strict(),
       ]),
@@ -1944,12 +1950,23 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
         // customer-projects (0104) — three views (see input schema):
         //   project (orderId) → that order; 未分類 (unfiledOnly) → IS NULL;
         //   neither → no customOrderId filter (customer-wide ALL).
+        // Phase6 B3 — project mode's "顯示未歸屬" toggle ORs the unfiled rows
+        // in on top of the project's own (still scoped — never widens to
+        // another project's rows); the client renders assign.customOrderId
+        // === null turns gray to keep the two visually distinct.
         const conds = [
           inArray(customerInteractions.customerProfileId, profileIds),
           sql`NOT (COALESCE(${customerInteractions.classification}, '') = 'spam' AND COALESCE(${customerInteractions.spamVerdict}, '') != 'rescued')`,
         ];
         if (scope.mode === "project") {
-          conds.push(eq(customerInteractions.customOrderId, scope.orderId));
+          conds.push(
+            scope.includeUnfiled
+              ? (or(
+                  eq(customerInteractions.customOrderId, scope.orderId),
+                  isNull(customerInteractions.customOrderId),
+                ) as SQL)
+              : eq(customerInteractions.customOrderId, scope.orderId),
+          );
         } else if (scope.mode === "unfiled") {
           conds.push(isNull(customerInteractions.customOrderId));
         }

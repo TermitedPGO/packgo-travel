@@ -33,9 +33,19 @@ const log = createChildLogger({ module: "customerChatContext" });
  * prompt here — never persisted (customerDocsText reads, never writes). Degrades
  * to "" on any failure so a doc hiccup never breaks the chat.
  */
-async function buildDocsBlock(scope: CustomerDocsScope): Promise<string> {
+async function buildDocsBlock(
+  scope: CustomerDocsScope,
+  activeProjectId?: number,
+): Promise<string> {
   try {
-    const docs = await loadCustomerDocs(scope); // raw R2 keys (no signing)
+    let docs = await loadCustomerDocs(scope); // raw R2 keys (no signing)
+    // Phase6 B3 — project-scoped chat: only feed THIS order's documents, not
+    // the customer's whole file cabinet (loadCustomerDocs already stamps
+    // customOrderId per row — quotes/flight orders that predate any project
+    // carry null and are correctly excluded here, same as the 歷史 tab).
+    if (activeProjectId !== undefined) {
+      docs = docs.filter((d) => d.customOrderId === activeProjectId);
+    }
     if (!docs.length) return "";
     const { list, fullText } = await buildCustomerDocsText(
       docs.map((d) => ({ kind: d.kind, name: d.name, url: d.url, meta: d.meta })),
@@ -279,9 +289,19 @@ export function formatCustomerContext(data: CustomerContextData): string {
   return mem ? capped + "\n\n" + mem : capped;
 }
 
-/** IO assembly. Returns null when the DB is unavailable or the user is gone. */
+/**
+ * IO assembly. Returns null when the DB is unavailable or the user is gone.
+ *
+ * Phase6 B3 — `activeProjectId` (optional) scopes the interactions/documents
+ * section to that one order when the chat is pinned to a project chip. The
+ * customer-level identity/memory sections (profile line, keyFacts/preferences/
+ * aiNotes, case learnings) stay unscoped per the dispatch doc — they describe
+ * the PERSON, not one order, and narrowing them would just make the agent
+ * forget things it actually knows about this customer.
+ */
 export async function buildCustomerChatContext(
   customerUserId: number,
+  activeProjectId?: number,
 ): Promise<string | null> {
   const db = await getDb();
   if (!db) {
@@ -386,7 +406,11 @@ export async function buildCustomerChatContext(
   // order to check → naturally skipped.
   const { buildCaseLearningsContextBlock } = await import("./caseLearning");
   const caseLearnings = await buildCaseLearningsContextBlock(profMem ? [profMem.id] : []);
-  return base + (await buildDocsBlock({ userId: customerUserId })) + (caseLearnings ? "\n\n" + caseLearnings : "");
+  return (
+    base +
+    (await buildDocsBlock({ userId: customerUserId }, activeProjectId)) +
+    (caseLearnings ? "\n\n" + caseLearnings : "")
+  );
 }
 
 /**
@@ -396,9 +420,14 @@ export async function buildCustomerChatContext(
  * Gmail history (keyed by email / profileId, same sources as GuestCustomerPane)
  * + any AI quotes that went to that email. Degrades to null on missing
  * db/profile, same as the registered builder.
+ *
+ * Phase6 B3 — `activeProjectId` (optional) scopes 近期來信 + documents to that
+ * one order, same rule as the registered builder above (identity/memory stay
+ * unscoped).
  */
 export async function buildGuestChatContext(
   profileId: number,
+  activeProjectId?: number,
 ): Promise<string | null> {
   const db = await getDb();
   if (!db) {
@@ -445,7 +474,8 @@ export async function buildGuestChatContext(
 
   // Gmail history lives in customerInteractions (keyed by profileId). Mirror
   // GuestCustomerPane: hide spam unless Jeff rescued it (don't feed junk to
-  // the agent).
+  // the agent). Phase6 B3 — when the chat is pinned to a project, scope 近期
+  // 來信 to THAT order's rows only (mirrors the 歷史 tab's project view).
   const interactions = await db
     .select({
       direction: customerInteractions.direction,
@@ -461,6 +491,9 @@ export async function buildGuestChatContext(
         // is UNKNOWN → the WHERE drops the row, silently hiding every reply we
         // sent. Coalesce so only real, non-rescued spam is excluded.
         sql`NOT (COALESCE(${customerInteractions.classification}, '') = 'spam' AND COALESCE(${customerInteractions.spamVerdict}, '') != 'rescued')`,
+        ...(activeProjectId !== undefined
+          ? [eq(customerInteractions.customOrderId, activeProjectId)]
+          : []),
       ),
     )
     .orderBy(desc(customerInteractions.createdAt))
@@ -509,7 +542,11 @@ export async function buildGuestChatContext(
   // Phase5 學習閉環 — same as the registered-member path above.
   const { buildCaseLearningsContextBlock } = await import("./caseLearning");
   const caseLearnings = await buildCaseLearningsContextBlock([profile.id]);
-  return base + (await buildDocsBlock({ profileId })) + (caseLearnings ? "\n\n" + caseLearnings : "");
+  return (
+    base +
+    (await buildDocsBlock({ profileId }, activeProjectId)) +
+    (caseLearnings ? "\n\n" + caseLearnings : "")
+  );
 }
 
 // ── customer-projects (0104) — per-project (=customOrder) chat context ───────

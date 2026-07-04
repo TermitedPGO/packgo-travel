@@ -264,13 +264,42 @@ describe("planThreadFiling — Trash excluded", () => {
 
 // ── thin DB executor: assert counts + payloads via a lightweight fake db ──
 
-function fakeDb(existing: ExistingInteractionRow[]) {
+/**
+ * `threadOrderRows` (customer-cockpit Phase6 B1) — pairs of already-filed
+ * (gmailThreadId, customOrderId) this profile has, used to seed rule ①
+ * thread-inheritance on newly-inserted rows. Defaults to [] (no thread has an
+ * order assigned yet) so every pre-existing test above, which doesn't pass
+ * this param, is unaffected.
+ */
+function fakeDb(
+  existing: ExistingInteractionRow[],
+  threadOrderRows: Array<{ gmailThreadId: string | null; customOrderId: number | null }> = [],
+) {
   const inserts: any[] = [];
   const updates: any[] = [];
+  let selectCall = 0;
   const db = {
     inserts,
     updates,
-    select: () => ({ from: () => ({ where: async () => existing }) }),
+    // 1st select in syncThreadToInteractions = existing rows for planning
+    // (no .orderBy() chained — `where()` itself is awaited); 2nd = the
+    // thread→customOrderId map query, which chains `.orderBy(asc(id))` after
+    // `.where()` (see threadFiling.ts). Order matters here because the fake
+    // returns different shapes for each — mirrors the two real queries.
+    select: () => ({
+      from: () => ({
+        where: () => {
+          selectCall++;
+          const call = selectCall;
+          if (call === 1) {
+            return Promise.resolve(existing);
+          }
+          const p: any = Promise.resolve(threadOrderRows);
+          p.orderBy = async () => threadOrderRows;
+          return p;
+        },
+      }),
+    }),
     update: () => ({
       set: (s: any) => ({ where: async () => { updates.push(s); } }),
     }),
@@ -320,6 +349,42 @@ describe("syncThreadToInteractions — executor", () => {
     const r2 = await syncThreadToInteractions(db2, 2550004, messages);
     expect(r2).toEqual({ inserted: 0, claimed: 0, restamped: 0, skipped: 2, trashSkipped: 0 });
     expect(db2.inserts).toHaveLength(0);
+  });
+
+  it("customer-cockpit B1 rule ①: inherits customOrderId from a sibling row on the same gmailThreadId", async () => {
+    const db = fakeDb([], [{ gmailThreadId: "thread-1", customOrderId: 77 }]);
+    const r = await syncThreadToInteractions(db, 2550004, [msg({ messageId: "m-new" })]);
+    expect(r.inserted).toBe(1);
+    expect(db.inserts[0].customOrderId).toBe(77);
+  });
+
+  it("customer-cockpit B1: no prior thread assignment → customOrderId stays NULL (never guesses via order-count or LLM in this path)", async () => {
+    const db = fakeDb([], []);
+    const r = await syncThreadToInteractions(db, 2550004, [msg({ messageId: "m-new" })]);
+    expect(r.inserted).toBe(1);
+    expect(db.inserts[0].customOrderId).toBeNull();
+  });
+
+  it("customer-cockpit B1: a DIFFERENT thread's assigned order does not leak onto this thread", async () => {
+    const db = fakeDb([], [{ gmailThreadId: "some-other-thread", customOrderId: 77 }]);
+    const r = await syncThreadToInteractions(db, 2550004, [msg({ messageId: "m-new", threadId: "thread-1" })]);
+    expect(r.inserted).toBe(1);
+    expect(db.inserts[0].customOrderId).toBeNull();
+  });
+
+  it("customer-cockpit B1 regression: conflicting sibling rows on the same thread resolve deterministically (first-assigned/earliest id wins, not row-iteration order)", async () => {
+    // Same gmailThreadId carries two different customOrderId values (e.g. Jeff
+    // manually re-assigned one row later via the UI's assignConversation).
+    // The query is ORDER BY id ASC in production; the fake returns rows in
+    // that same pre-sorted order to prove the `!threadOrderMap.has(...)`
+    // first-wins guard — not "last iterated" — decides the outcome.
+    const db = fakeDb([], [
+      { gmailThreadId: "thread-1", customOrderId: 11 },
+      { gmailThreadId: "thread-1", customOrderId: 22 },
+    ]);
+    const r = await syncThreadToInteractions(db, 2550004, [msg({ messageId: "m-new" })]);
+    expect(r.inserted).toBe(1);
+    expect(db.inserts[0].customOrderId).toBe(11);
   });
 
   it("claims a legacy row by updating only key columns + createdAt (never content)", async () => {

@@ -29,7 +29,7 @@ import {
   agentMessages,
   customerDocuments,
 } from "../../../drizzle/schema";
-import { and, eq, sql, gt, isNotNull } from "drizzle-orm";
+import { and, eq, sql, gt, isNotNull, asc } from "drizzle-orm";
 import { inquiryClassificationLabelZh } from "./inquiryLabels";
 import {
   buildGmailClient,
@@ -57,6 +57,13 @@ import { runRefundAgent, DEFAULT_REFUND_POLICY } from "./refundAgent";
 import { redis } from "../../redis";
 import { createChildLogger } from "../../_core/logger";
 import { OWN_EMAILS } from "../../_core/testAccounts";
+import { decideInteractionOrderAssignment } from "../../_core/interactionOrderAssignment";
+import { listCustomOrdersByProfile } from "../../db/customOrder";
+// invokeLLM is dynamically imported inside resolveInboundInteractionOrderId
+// (not statically here) — a static import pulls in _core/llm's module-init
+// llmCache redis.ping() eagerly, which several gmailPipeline tests don't mock
+// (they mock inquiryAgent.ts wholesale instead, so llm.ts never loaded before).
+import type { Message, Tool } from "../../_core/llm";
 const log = createChildLogger({ module: "gmailPipeline" });
 
 const PROCESSED_LABEL = "PACKGO_AI_PROCESSED";
@@ -383,6 +390,130 @@ export function isKnownNoise(from: string): boolean {
     }
   }
   return false;
+}
+
+/** Structured tool for the "which in-progress order does this email belong to" LLM pick (rule ③). */
+const PICK_ORDER_TOOL: Tool = {
+  type: "function",
+  function: {
+    name: "pick_customer_order",
+    description:
+      "從候選訂製單清單中選出這封來信屬於哪一張,若無法確定就回傳 orderId=null。",
+    parameters: {
+      type: "object",
+      properties: {
+        orderId: {
+          type: ["integer", "null"],
+          description: "選中的訂單 id(必須是候選清單裡的其中一個),不確定就填 null。",
+        },
+        confident: {
+          type: "boolean",
+          description: "true = 有把握這封信屬於 orderId 指的那張單;false = 不確定(此時 orderId 應為 null)。",
+        },
+      },
+      required: ["orderId", "confident"],
+    },
+  },
+};
+
+/**
+ * customer-cockpit Phase6 B1 — resolve which customOrderId (if any) a fresh
+ * inbound interaction should be stamped with. Priority: code before LLM.
+ *   ① same gmailThreadId, a prior interaction already has customOrderId → inherit.
+ *   ② customer has exactly one in-progress (non-terminal) order → auto-assign.
+ *   ③ multiple in-progress orders → ask the LLM to pick from the candidate
+ *      list; an unconfident or unmatched pick still resolves to NULL (cardinal
+ *      rule: uncertain = NULL, never guess — decideInteractionOrderAssignment
+ *      enforces this, this function only gathers the inputs it needs).
+ * Best-effort: any failure (DB or LLM) must never block mail filing, so this
+ * returns null on error rather than throwing.
+ */
+async function resolveInboundInteractionOrderId(
+  db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
+  profileId: number,
+  gmailThreadId: string | undefined,
+  emailSummary: { subject: string; snippet: string },
+): Promise<number | null> {
+  try {
+    // ① thread inheritance — cheapest check, no candidate lookup needed at all.
+    // ORDER BY id ASC + LIMIT 1 makes the pick deterministic (earliest-assigned
+    // sibling wins) instead of relying on unspecified MySQL row order — matters
+    // when a thread has been manually re-assigned to conflicting orders (Jeff
+    // corrects a mis-file), where two sibling rows can carry different
+    // customOrderId values. Matches the "first wins" tiebreak used by B4's
+    // interactionBackfill.ts (`if (!m.has(...)) m.set(...)`).
+    let priorThreadOrderId: number | null = null;
+    if (gmailThreadId) {
+      const [sibling] = await db
+        .select({ customOrderId: customerInteractions.customOrderId })
+        .from(customerInteractions)
+        .where(
+          and(
+            eq(customerInteractions.customerProfileId, profileId),
+            eq(customerInteractions.gmailThreadId, gmailThreadId),
+            isNotNull(customerInteractions.customOrderId),
+          ),
+        )
+        .orderBy(asc(customerInteractions.id))
+        .limit(1);
+      priorThreadOrderId = sibling?.customOrderId ?? null;
+    }
+
+    if (priorThreadOrderId != null) {
+      return decideInteractionOrderAssignment({ priorThreadOrderId, candidates: [] })
+        .customOrderId;
+    }
+
+    // ② in-progress orders only (excludes completed/cancelled — a closed case
+    // must never silently absorb a new, unrelated inbound email).
+    const inProgress = await listCustomOrdersByProfile(profileId, { excludeTerminal: true });
+    const candidates = inProgress.map((o) => ({
+      id: o.id,
+      orderNumber: o.orderNumber,
+      category: o.category,
+      destination: o.destination,
+    }));
+
+    if (candidates.length <= 1) {
+      return decideInteractionOrderAssignment({ candidates }).customOrderId;
+    }
+
+    // ③ multiple candidates — ask the LLM to pick, using only order metadata
+    // (no supplier cost, no customer PII beyond what's already in the email).
+    const candidateList = candidates
+      .map((c) => `- id=${c.id} 單號=${c.orderNumber} 總類=${c.category ?? "未分類"} 目的地=${c.destination ?? "未填"}`)
+      .join("\n");
+    const messages: Message[] = [
+      {
+        role: "system",
+        content:
+          "你在判斷一封剛進來的客人 email 屬於這位客人名下哪一張訂製單。只根據信件主旨/摘要與候選單的總類/目的地做判斷。沒有足夠把握就回傳 orderId=null、confident=false,絕對不要用猜的。",
+      },
+      {
+        role: "user",
+        content: `【信件主旨】${emailSummary.subject}\n【信件摘要】${emailSummary.snippet.slice(0, 500)}\n\n【候選訂製單】\n${candidateList}`,
+      },
+    ];
+    const { invokeLLM } = await import("../../_core/llm");
+    const result = await invokeLLM({
+      model: "claude-haiku-4-5-20251001",
+      messages,
+      tools: [PICK_ORDER_TOOL],
+      toolChoice: { name: "pick_customer_order" },
+      maxTokens: 300,
+    });
+    const toolCall = result.choices[0]?.message?.tool_calls?.[0];
+    if (!toolCall) return null;
+    const parsed = JSON.parse(toolCall.function.arguments);
+    const llmPick = {
+      orderId: typeof parsed.orderId === "number" ? parsed.orderId : null,
+      confident: parsed.confident === true,
+    };
+    return decideInteractionOrderAssignment({ candidates, llmPick }).customOrderId;
+  } catch (e) {
+    log.warn({ err: e, profileId }, "[gmailPipeline] order auto-assignment failed (non-fatal) — leaving customOrderId NULL");
+    return null;
+  }
 }
 
 /**
@@ -959,6 +1090,18 @@ async function processOneEmail(
   // thread id at write time so (a) the end-of-poll thread sync recognises THIS
   // row and skips it instead of inserting a duplicate, and (b) a cross-account
   // copy of the same email collapses to one row via UNIQUE(profile, externalId).
+  //
+  // customer-cockpit Phase6 B1 — auto-assign customOrderId (code before LLM,
+  // uncertain=NULL). Only meaningful when we actually resolved a real
+  // profileId — the own-email / unparseable-from path files at profile 0 and
+  // has no orders to assign. Best-effort: resolveInboundInteractionOrderId
+  // never throws, so a DB/LLM hiccup here degrades to NULL, never blocks filing.
+  const autoOrderId = profileId
+    ? await resolveInboundInteractionOrderId(db, profileId, msg.threadId, {
+        subject: msg.subject,
+        snippet: cleanMessage,
+      })
+    : null;
   let interactionId = 0;
   try {
     const interactionIns = await db.insert(customerInteractions).values({
@@ -978,6 +1121,7 @@ async function processOneEmail(
       urgency: urgencyMap[decision.urgency] ?? 50,
       externalId: msg.messageId,
       gmailThreadId: msg.threadId,
+      customOrderId: autoOrderId,
       // Stamp with the email's actual received time, not the poll/filing time, so
       // the conversation shows the real date and stays in chronological order.
       // Without this it defaults to now() — a backlogged or late-polled email

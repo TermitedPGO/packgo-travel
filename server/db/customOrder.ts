@@ -256,17 +256,27 @@ export async function getCustomOrderById(id: number): Promise<CustomOrder | null
   return row || null;
 }
 
-/** All of a customer's orders, newest first. */
+/**
+ * All of a customer's orders, newest first. `excludeTerminal` (customer-cockpit
+ * Phase6 B1) filters out completed/cancelled — used by the auto-assignment
+ * "exactly one in-progress order" rule so a closed case never silently
+ * absorbs a new, unrelated inbound email. Defaults to false (unchanged
+ * behavior) so existing callers (customer-page 專案 list) keep seeing
+ * everything including history.
+ */
 export async function listCustomOrdersByProfile(
   customerProfileId: number,
+  opts?: { excludeTerminal?: boolean },
 ): Promise<CustomOrder[]> {
   const db = await getDb();
   if (!db) return [];
-  return db
+  const rows = await db
     .select()
     .from(customOrders)
     .where(eq(customOrders.customerProfileId, customerProfileId))
     .orderBy(desc(customOrders.createdAt));
+  if (!opts?.excludeTerminal) return rows;
+  return rows.filter((r) => r.status !== "completed" && r.status !== "cancelled");
 }
 
 export async function updateCustomOrder(

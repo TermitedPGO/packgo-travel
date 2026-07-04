@@ -3612,6 +3612,8 @@ export const en = {
         selectForBulk: 'Select for bulk assign',
         clearSelection: 'Clear selection',
         filterPlaceholder: 'Filter',
+        showUnfiled: 'Show unfiled',
+        unfiledBadge: 'Unfiled',
         category: {
           flight: 'Flight',
           quote: 'Quote / itinerary',

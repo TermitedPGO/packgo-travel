@@ -81,7 +81,21 @@ function makeDb() {
   let nextId = 1;
   const db = {
     rows,
-    select: () => ({ from: () => ({ where: async () => rows.map((r) => ({ ...r })) }) }),
+    // `where()` must support both direct-await (existing-rows query) and a
+    // chained `.orderBy()` (threadFiling.ts's already-assigned-siblings query,
+    // added for the B1 sibling-conflict fix — deterministic ORDER BY id ASC).
+    // Wrapping in a real Promise with `.orderBy` attached satisfies both call
+    // shapes with the same underlying data.
+    select: () => ({
+      from: () => ({
+        where: () => {
+          const snapshot = rows.map((r) => ({ ...r }));
+          const p = Promise.resolve(snapshot) as any;
+          p.orderBy = () => Promise.resolve(snapshot);
+          return p;
+        },
+      }),
+    }),
     update: () => ({ set: () => ({ where: async () => {} }) }),
     insert: () => ({
       values: (v: any) => ({

@@ -343,3 +343,36 @@ describe("create_customer tool gating (A5 — context-confusion fix, 2026-07-03)
     expect(unpinnedSystem).toContain("呼叫 create_customer");
   });
 });
+
+describe("attach_interaction_to_order tool gating (Phase6 B2 — 聊天手動掛單)", () => {
+  // Same list-level gating as the rest of WRITE_TOOLS: only meaningful (and
+  // only offered) once a customer is pinned — office-wide chat has no single
+  // customer's unfiled interactions to attach anywhere.
+  function toolNames(callIndex = 0): string[] {
+    return (streamCalls[callIndex]?.tools ?? []).map((t: any) => t.name);
+  }
+
+  it("pinned chat (draftProfileId set): attach_interaction_to_order IS present", async () => {
+    roundQueue.push({
+      deltas: ["好的"],
+      final: { stop_reason: "end_turn", content: [{ type: "text", text: "好的" }] },
+    });
+
+    await collect(
+      runOpsAgentStream("把剛剛那幾封掛到這張單", [], undefined, undefined, undefined, 2550004, 1),
+    );
+
+    expect(toolNames()).toContain("attach_interaction_to_order");
+  });
+
+  it("office-wide chat (no draftProfileId): attach_interaction_to_order is ABSENT", async () => {
+    roundQueue.push({
+      deltas: ["好的"],
+      final: { stop_reason: "end_turn", content: [{ type: "text", text: "好的" }] },
+    });
+
+    await collect(runOpsAgentStream("把剛剛那幾封掛到這張單", [], undefined, undefined, undefined));
+
+    expect(toolNames()).not.toContain("attach_interaction_to_order");
+  });
+});

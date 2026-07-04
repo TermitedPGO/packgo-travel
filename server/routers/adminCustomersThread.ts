@@ -110,17 +110,25 @@ export function interactionTurn(r: {
  * itself only does I/O once the scope is known). orderId set → that single
  * project; unfiledOnly → the「未分類」basket; neither → the customer-wide ALL
  * view that Overview / 真相條 / followup depend on staying whole.
+ *
+ * Phase6 B3 — `includeUnfiled` on the "project" mode is the chip-scope
+ * "顯示未歸屬" toggle: still scoped to ONE project by default (the supervisor's
+ * ruling — default shows ONLY that order's interactions), but when Jeff flips
+ * the toggle on, customOrderId-IS-NULL rows are ALSO fetched (and rendered
+ * gray client-side) instead of requiring a full mode switch to "unfiled".
  */
 export type ConversationThreadScope =
-  | { mode: "project"; orderId: number }
+  | { mode: "project"; orderId: number; includeUnfiled: boolean }
   | { mode: "unfiled" }
   | { mode: "all" };
 
 export function resolveConversationThreadScope(input: {
   orderId?: number;
   unfiledOnly?: boolean;
+  includeUnfiled?: boolean;
 }): ConversationThreadScope {
-  if (input.orderId !== undefined) return { mode: "project", orderId: input.orderId };
+  if (input.orderId !== undefined)
+    return { mode: "project", orderId: input.orderId, includeUnfiled: input.includeUnfiled === true };
   if (input.unfiledOnly) return { mode: "unfiled" };
   return { mode: "all" };
 }
