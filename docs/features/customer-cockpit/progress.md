@@ -270,24 +270,16 @@ migration 特別決策:0104-0109 的先例都是欄位新增用 INFORMATION_SCHE
 
 ---
 
-## Phase 6、收尾 — 尚未開始(下一個 session 接續)
+## Phase 6、收尾 — 已完成(2026-07-03,監工派工單 dispatch-phase6.md,commit 6662c2e/cc073d0/aef0960/1bc4296)
 
-裁示已收(2026-07-02,詳見 `roadmap-100.md`):14 案存量進場 Jeff 先手拖 1-2 案驗流程、Plaid 收款建議做(已完成)、今日清單放中欄空狀態(已完成)、報價出手前案子要在系統裡的規矩已立。Phase6 自我體檢範圍已擴充(月度 scorecard + 每週 0909 E2E canary 含新增客人鏈 + 每週正確性稽核回饋迴圈)。
+裁示已收(2026-07-02,詳見 `roadmap-100.md`)+ 監工 2026-07-03 正式簽發派工單(`docs/features/customer-cockpit/dispatch-phase6.md`),四塊(A清舊帳/B專案歸屬/C收斂/D自我體檢)依序 A→B→C→D 完成,每塊獨立 workflow 四階段(實作→對抗審查→修復→驗收),已逐批 merge 回 main。完整交付清單、逐塊對抗審查結果、偏離申報、已知限制、待 Jeff 手動清單見完工報告:`docs/features/customer-cockpit/t6-report-20260703-phase6.md`。
 
-**本 session 已完成的研究(下一個 session 直接用,不用重查)**:
-- 6a 收斂:客人入口已經指向 `/ops/customers`(`AdminShell.tsx:16`),`/admin` 已 redirect 到 `/workspace`——**入口這件事其實已經做完,不用改**。真正要做的是刪除 `client/src/components/workspace/` 下的客人專屬元件(CustomerInbox/CustomerChat/CustomerVisaSection/CustomerFlightOrders/CustomerWechatMessages/WechatApproveDialog/CustomerQuoteRecords/GuestCustomerPane/BookingDetailSheet/CustomerChatActions/FlightOrderDialogs + 對應 helper/test 檔,共約 20 個檔案)+ `admin-v2/CustomerDetailSheet.tsx`。**⚠️ 陷阱(consolidation-plan.md 沒抓到)**:`EscalationReplyDialog.tsx` 雖然在 workspace/ 目錄下,但是被 `TodayEscalationCard.tsx`/`TodayAutoReplyBox.tsx`(公司層級的 WorkspaceToday 頁面,不在刪除範圍)引用,**不可以刪**。`AutoSendPolicyCard.tsx` 也不可以刪(公司層級設定)。`workspace/CustomerChat.tsx` 跟 `admin/customers/` 下自己的 `CustomerChat.tsx`是兩個不同檔案(同名陷阱,注意別刪錯)。刪除後要改 `Workspace.tsx` 的路由邏輯(拿掉 `view.type === "customer"|"guest"` 分支+對應 lazy import),非客人的 tab(WorkspaceToday/WorkspaceCompany/AgentChatPage)不能動。`knownRoutes.ts` 不用改(/admin 與 /ops 都已在白名單)。
-- 6b 自我體檢:`gatherCustomerFacts`(`customerFacts.ts:318`)+ `customerAiSummary.ts` 的 `AiSummary`(wants/actions/delivered/nextStep,後兩個是 deterministic 不是 LLM)是稽核比對的兩端。`scorecard-20260701.md` 的五維度評分邏輯已讀懂(見該文件)。office inbox 卡片寫法範例:`server/retrospectiveWorker.ts:155-169`(`db.insert(agentMessages).values({agentName, senderRole, messageType, title, body, priority})`)。Cron 註冊三件套範例:`server/queue.ts` 的 `scheduleDailyFollowupScan`/`followupScanWorker.ts`(本 session 的 `caseLearningBacklogQueue`/`caseLearningWorker.ts` 是最新示範,直接照抄)。Canary 安全性:`runInquiryAgent` 是純函式零副作用零寄信,`caseFileImport.ts` 的 `dry_run`/`confirm` 兩態模式是「合成不碰真實」的範本。
-- 6c 清舊帳逐項現況查證(**部分已經做完,不要重做**):
-  - ✅ **已完成**:`customerChatContext.ts` 應收餘額已付清不顯示(commit b357b54,2026-07-01,`formatOrderContext` line 586 已有 `!o.balancePaidAt` guard)。
-  - ✅ **已完成**:`preferenceExtractor.ts` 的 maxTokens 截斷防護(`finish_reason==="length"` → abort、回 null、既有記憶不動,3 處呼叫點都已有這套,跟 chatLogImport 同款)。
-  - ✅ **已完成**:`update_customer_note` 已經是 append 語意(`opsTools.ts` 2026-07-01 P2 修復,見 `mergeCustomerNote` 函式),不是整欄覆蓋——**這條也不用重做**。
-  - ⬜ **真的要做**:專案歸屬斷層——收信 AI 判斷信件屬於哪張進行中訂單寫 `customerInteractions.customOrderId`(候選=該客人 active 單的標題/旅客名/日期,LLM 只選不編,不確定回 null);聊天加「把這串掛到某單」指令。
-  - ⬜ **真的要做**:自家信箱(`gmailPipeline.ts` 的 `OWN_EMAILS`/`isOwnEmail`,已存在)信件目前仍會跑滿整條 `runInquiryAgent` LLM 分類(`processOneEmail` 函式,~line 860 `const decision = await runInquiryAgent({...})` 無條件呼叫,只有 profileId 略過建卡,LLM 分類沒省)——要在 `isOwnEmail(senderEmail)` 為 true 時跳過分類直接標處理完畢,省成本。**注意**:要保留原本「信本身照常處理/不建卡」的行為,只省 LLM 呼叫這一步,並確認 result 的計數/標記邏輯不會因為跳過分類而出錯(需讀 `processOneEmail` 後半段目前怎麼用 `decision`)。
-  - ⬜ **真的要做,已定位根因**:nav badge 與列表 limit-200 口徑不對齊。`adminCustomers.ts` 的 `guestList`(line 816-877)可見列表有 `.orderBy(desc(customerProfiles.updatedAt)).limit(200)`;但 `customerUnreadCount`(line 332-406)算未讀數時,guest 那段子查詢(line 373-398)**沒有同樣的 order+limit**,理論上超過 200 位 guest 時,badge 可能數到一個「排在第 200 名之後、列表看不到」的未讀 guest——doc comment(line 326-330)聲稱「badge count 跟可見紅點不可能對不上」,但沒有真的做到(只對齊了篩選條件,沒對齊筆數上限)。`customerList`(registered,line 129 起)本身有沒有上限還沒查。修法:讓 `customerUnreadCount` 的 guest 子查詢套用同一個 `orderBy+limit(200)` 視窗再算未讀數,registered 那段若 `customerList` 也有上限要一併對齊。
+**摘要**:
+- **A(6662c2e)**:自家信跳過LLM分類、列表最後往來口徑、nav badge視窗對齊(對抗審查抓到1個真缺陷已修)、escalationBox回信後摘要刷新、釘住客人時create_customer工具歸位、測試帳號排除helper、update_customer_note append回歸測試確認。
+- **B(cc073d0)**:收信自動歸屬customOrderId(共用純函式,不確定=NULL規則)、聊天手動掛單新工具、chip scope(選專案預設只看該單)、存量回填端點。對抗審查抓到2個真缺陷已修(同thread衝突歸屬非決定性、聊天工具缺終態訂單守門)。
+- **C(aef0960)**:workspace客人UI退役(刪19個檔案),唯一入口`/ops/customers`。三個已知陷阱(EscalationReplyDialog/AutoSendPolicyCard/CustomerChat同名異檔)全部正確保留,零orphan reference,對抗審查零真缺陷。
+- **D(1bc4296)**:每週正確性稽核cron(週一12:00UTC,零LLM)+ 每週0909表單版canary(週一13:00UTC,真實HTTP路徑)。對抗審查聚焦自動化安全(零寄信/零LLM路徑逐路徑追蹤),抓到1個真缺陷已修(gatherCustomerFacts內部錯誤被靜默吞掉,原本的錯誤處理形同虛設)。**D3(月度scorecard桌機腳本)依派工單允許順延,待下一批**。
 
-**6c 擴充(2026-07-03 Jeff 實測回饋,Emerald 多專案實況 + 監工稽核測試帳號抓到)**:
-- ⬜ **專案歸屬擴充**:對話列跟 chip——選了專案 chip 時,最近對話與展開全部按 `customerInteractions.customOrderId` 過濾;該專案 0 筆時顯示誠實空狀態「這個專案還沒有歸屬的對話」+ 一鍵切回看全部,不准默默退回全部混著放。AI chat 跟 chip——釘住客人且選中某 chip 時,chat context 標明當前專案並優先餵該專案 scoped 互動(獨立 cap,照 `customerChatContext` 記憶區模式);草稿/分析工具預設作用於當前 chip 的專案。存量一次性回填——對既有 interaction 跑歸屬判斷(AI 只在高信心時寫 `customOrderId`,不確定留 null 進未分類),否則 Emerald 這種老客人要等新信才慢慢分類,體感永遠是「沒做完」。驗收:Emerald 選簽證 chip → 對話只剩簽證往來;選 Morris 機票 chip → 只剩他的;未分類 chip → 其餘全部。
-- ⬜ **外寄刷新**:`escalationBox.ts` 寄出成功路徑(`sent:true`)補 `enqueueCustomerSummaryRefresh`(跟 inbound/訂製單動作同款 debounce),寄完信摘要卡不再停在舊狀態。
-- ⬜ **列表日期口徑**:客人列表每列右上的日期,註冊會員卡改用「最後往來」(`lastInteractionAt`/`lastInboundAt` 取新者),跟訪客列同口徑;排序已按活動排是對的,只修顯示。驗收:剛互動過的會員列顯示今天。
+**驗證**:四塊合計 tsc 0 錯 + 全套 vitest 293 files / 4335 tests 綠(含過程中修好一次跟本批程式碼無關的 node_modules 環境問題)。i18n 100% parity。零硬紅線違反。
 
-**下一個 session 開工建議順序**:6c 的兩個「已完成」項目直接在 T6 報告勾掉不用碰;先做 6c 剩餘 3 項(小、快、可各自獨立 commit),再做 6a(照上面陷阱清單,grep 引用點歸零才刪),最後 6b(範圍最大,三個 cron)。
+**待 Jeff 手動**:`pnpm ship`、D1/D2 首跑觀察 office inbox、B4 存量回填先 dry_run 再 confirm、D3 待另開一批。完整清單見 T6 報告第 6 節。
