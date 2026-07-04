@@ -50,6 +50,14 @@ export const OWN_EMAILS = new Set([
 /** jeffhsieh0909@gmail.com 故意不在 OWN_EMAILS 裡(見上方 module doc)。 */
 const EXTRA_TEST_EMAILS = new Set(["jeffhsieh0909@gmail.com"]);
 
+/**
+ * 0909 測試客人的具名常數(塊 D D2 canary 直接引用,避免 canary 模組自己再刻一
+ * 份 magic number)。email 用小寫比照本檔其他比對慣例;profileId 是批5後訪客卡
+ * +會員卡癒合成的最終卡(見上方 module doc profileId 排除清單註解)。
+ */
+export const TEST_ACCOUNT_0909_EMAIL = "jeffhsieh0909@gmail.com";
+export const TEST_ACCOUNT_0909_PROFILE_ID = 2760017;
+
 /** profileId 2760017(0909 測試客人) / 2730002(Jeff 本人個人卡)。 */
 const EXCLUDED_PROFILE_IDS = new Set([2760017, 2730002]);
 

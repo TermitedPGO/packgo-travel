@@ -1746,6 +1746,37 @@ async function startServer() {
     logger.warn({ err }, "[Startup] Failed to schedule duplicate-profile scan");
   }
 
+  // customer-cockpit Phase6 D1(2026-07-03)— weekly correctness audit at
+  // Monday 12:00 UTC (Sunday evening America/Los_Angeles). Recomputes the
+  // deterministic actions/delivered fields from gatherCustomerFacts for every
+  // active, non-test customer and diffs against the cached aiSummary; posts
+  // ONE digest to Jeff's office inbox only if a MATERIAL difference is found.
+  // Zero LLM calls, read-only against customer data, never emails anyone.
+  try {
+    const { scheduleWeeklyCorrectnessAudit } = await import('../queue');
+    await scheduleWeeklyCorrectnessAudit();
+    await import('../weeklyCorrectnessAuditWorker');
+  } catch (err) {
+    logger.warn({ err }, "[Startup] Failed to schedule weekly correctness audit");
+  }
+
+  // customer-cockpit Phase6 D2(2026-07-03)— weekly 0909 canary(表單版)at
+  // Monday 13:00 UTC (1h after D1, same off-peak window). Submits a REAL HTTP
+  // POST to this server's own public /api/trpc/inquiries.create using the
+  // 0909 test identity, then 60s later verifies via DB read that the
+  // interaction landed, the owner's own email got zero new profiles, and
+  // lastInboundAt advanced. All pass → log only; any fail → ONE high-priority
+  // agentMessages card. Zero LLM calls, zero email-send paths — the only
+  // "write" is the canary's own synthetic form submission (0909 test account,
+  // already excluded from audit samples) plus the failure card.
+  try {
+    const { scheduleWeeklyCanary } = await import('../queue');
+    await scheduleWeeklyCanary();
+    await import('../weeklyCanaryWorker');
+  } catch (err) {
+    logger.warn({ err }, "[Startup] Failed to schedule weekly canary");
+  }
+
   // customer-cockpit Phase5 學習閉環(2026-07-03)— nightly backlog scan at
   // 04:00 UTC. Catches any completed/cancelled order whose fire-and-forget
   // distillation hook (adminCustomerOrders.ts) missed. Read/insert only on

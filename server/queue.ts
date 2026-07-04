@@ -986,6 +986,122 @@ export async function scheduleWeeklyDuplicateProfileScan() {
 console.log("✅ Duplicate-profile scan queue initialized");
 
 // ============================================================================
+// Weekly correctness audit (customer-cockpit Phase6 D1, 2026-07-03) — every
+// Monday 12:00 UTC (Sunday evening America/Los_Angeles), for every ACTIVE
+// customer (excluding isTestOrOwnerAccount), recompute the deterministic
+// actions/delivered fields from gatherCustomerFacts and diff them against the
+// cached aiSummary. A material difference across any customers is aggregated
+// into ONE agentMessages card; zero differences → log only, no card. Pure
+// read + string diff — zero LLM calls, zero writes to customer-facing data.
+// See server/_core/weeklyCorrectnessAudit.ts.
+// ============================================================================
+
+export interface WeeklyCorrectnessAuditJobData {
+  triggeredBy: "schedule" | "manual";
+}
+export interface WeeklyCorrectnessAuditJobResult {
+  compared: number;
+  mismatching: number;
+  degraded: number;
+  posted: boolean;
+}
+
+export const weeklyCorrectnessAuditQueue = new Queue<
+  WeeklyCorrectnessAuditJobData,
+  WeeklyCorrectnessAuditJobResult
+>("weekly-correctness-audit", {
+  connection: redisBullMQ,
+  defaultJobOptions: {
+    attempts: 1, // a missed week just re-audits next run; no retry storms
+    removeOnComplete: { age: 2592000, count: 10 },
+    removeOnFail: { age: 2592000, count: 10 },
+  },
+});
+
+/** Schedule the weekly correctness audit: Monday 12:00 UTC (Sunday evening
+ *  America/Los_Angeles — off-peak, low priority). */
+export async function scheduleWeeklyCorrectnessAudit() {
+  const repeatableJobs = await weeklyCorrectnessAuditQueue.getRepeatableJobs();
+  for (const job of repeatableJobs) {
+    if (job.name === "weekly-correctness-audit-tick") {
+      await weeklyCorrectnessAuditQueue.removeRepeatableByKey(job.key);
+    }
+  }
+  await weeklyCorrectnessAuditQueue.add(
+    "weekly-correctness-audit-tick",
+    { triggeredBy: "schedule" },
+    {
+      repeat: { pattern: "0 12 * * 1" }, // weekly, Monday 12:00 UTC
+      jobId: "weekly-correctness-audit-scheduled",
+    },
+  );
+  console.log("✅ Weekly correctness audit scheduled: Monday 12:00 UTC");
+}
+
+console.log("✅ Weekly correctness audit queue initialized");
+
+// ============================================================================
+// Weekly 0909 canary — 表單版 (customer-cockpit Phase6 D2, 2026-07-03) — every
+// Monday 13:00 UTC (1 hour after D1's correctness audit, so the two weekly
+// self-check crons don't hit the server in the same minute). Submits a REAL
+// HTTP POST to this server's own public /api/trpc/inquiries.create endpoint
+// using the 0909 test identity (TEST_ACCOUNT_0909_EMAIL, resolves to
+// profileId 2760017), marker text "[canary] 週檢 <date>". 60s later, verifies
+// via direct DB read: (1) a new customerInteractions row landed on 2760017,
+// (2) the OWNER email (jeffhsieh09@gmail.com) got zero new customerProfiles
+// rows, (3) profileId 2760017's lastInboundAt advanced. All 3 pass → log
+// only. Any fail → ONE high-priority agentMessages card. Read-only against
+// real customer data except the canary's own synthetic submission (already
+// excluded from D1/other audits by isTestOrOwnerAccount) and the failure
+// card; zero LLM calls, zero email-send paths. See
+// server/_core/weeklyCanary.ts.
+// ============================================================================
+
+export interface WeeklyCanaryJobData {
+  triggeredBy: "schedule" | "manual";
+}
+export interface WeeklyCanaryJobResult {
+  submitted: boolean;
+  allPassed: boolean;
+  failures: string[];
+  posted: boolean;
+}
+
+export const weeklyCanaryQueue = new Queue<WeeklyCanaryJobData, WeeklyCanaryJobResult>(
+  "weekly-canary",
+  {
+    connection: redisBullMQ,
+    defaultJobOptions: {
+      attempts: 1, // a missed week just re-runs next week; no retry storms
+      removeOnComplete: { age: 2592000, count: 10 },
+      removeOnFail: { age: 2592000, count: 10 },
+    },
+  },
+);
+
+/** Schedule the weekly 0909 canary: Monday 13:00 UTC (Sunday evening America/
+ *  Los_Angeles, same off-peak window as D1, offset by 1 hour). */
+export async function scheduleWeeklyCanary() {
+  const repeatableJobs = await weeklyCanaryQueue.getRepeatableJobs();
+  for (const job of repeatableJobs) {
+    if (job.name === "weekly-canary-tick") {
+      await weeklyCanaryQueue.removeRepeatableByKey(job.key);
+    }
+  }
+  await weeklyCanaryQueue.add(
+    "weekly-canary-tick",
+    { triggeredBy: "schedule" },
+    {
+      repeat: { pattern: "0 13 * * 1" }, // weekly, Monday 13:00 UTC
+      jobId: "weekly-canary-scheduled",
+    },
+  );
+  console.log("✅ Weekly 0909 canary scheduled: Monday 13:00 UTC");
+}
+
+console.log("✅ Weekly canary queue initialized");
+
+// ============================================================================
 // Case-learning backlog scan (customer-cockpit Phase5 學習閉環, 2026-07-03) —
 // nightly reconciliation for orders whose fire-and-forget distillation hook
 // (adminCustomerOrders.ts's updateStatus/cancel) might have missed — a server
