@@ -27,12 +27,6 @@ import WorkspaceSidebar, {
 import WorkspaceToday from "@/components/workspace/WorkspaceToday";
 
 const AgentChatPage = lazy(() => import("@/components/admin/AgentChatPage"));
-const CustomerInbox = lazy(
-  () => import("@/components/workspace/CustomerInbox"),
-);
-const GuestCustomerPane = lazy(
-  () => import("@/components/workspace/GuestCustomerPane"),
-);
 const WorkspaceCompany = lazy(
   () => import("@/components/workspace/WorkspaceCompany"),
 );
@@ -90,8 +84,7 @@ export default function Workspace() {
   ];
 
   const fallback = <LoadingPage text={t("workspace.loading")} />;
-  const fullHeight =
-    view.type === "ai" || view.type === "customer" || view.type === "guest";
+  const fullHeight = view.type === "ai";
 
   return (
     <div className="h-screen flex bg-white overflow-hidden">
@@ -109,15 +102,6 @@ export default function Workspace() {
           <div className="flex-1 overflow-hidden">
             <Suspense fallback={fallback}>
               {view.type === "ai" && <AgentChatPage />}
-              {view.type === "customer" && (
-                <CustomerInbox userId={view.userId} />
-              )}
-              {view.type === "guest" && (
-                <GuestCustomerPane
-                  profileId={view.profileId}
-                  onDeleted={() => setView({ type: "today" })}
-                />
-              )}
             </Suspense>
           </div>
         ) : (
@@ -125,9 +109,7 @@ export default function Workspace() {
             <Suspense fallback={fallback}>
               {view.type === "today" && (
                 <WorkspaceToday
-                  onJumpToCustomer={(userId) =>
-                    setView({ type: "customer", userId })
-                  }
+                  onJumpToCustomer={() => setLocation("/ops/customers")}
                 />
               )}
               {view.type === "company" && (

@@ -22,6 +22,7 @@ import {
   PanelLeft,
   LogOut,
 } from "lucide-react";
+import { useLocation } from "wouter";
 import { useLocale } from "@/contexts/LocaleContext";
 import SidebarRail from "./SidebarRail";
 
@@ -37,10 +38,7 @@ export type CompanySub =
 export type WsView =
   | { type: "ai" }
   | { type: "today" }
-  | { type: "company"; sub: CompanySub }
-  | { type: "customer"; userId: number }
-  // 批9 m3 — email 訪客(customerProfiles row,還沒有帳號)
-  | { type: "guest"; profileId: number };
+  | { type: "company"; sub: CompanySub };
 
 export type SidebarCustomer = {
   id: number;
@@ -91,6 +89,7 @@ export default function WorkspaceSidebar({
   onLogout?: () => void;
 }) {
   const { t } = useLocale();
+  const [, setLocation] = useLocation();
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem("workspace.sidebar.collapsed") === "1",
   );
@@ -243,37 +242,20 @@ export default function WorkspaceSidebar({
         </div>
         {filtered.map((c) => {
           const isGuest = c.kind === "guest";
-          const on = isGuest
-            ? view.type === "guest" && view.profileId === c.id
-            : view.type === "customer" && view.userId === c.id;
           return (
             <button
               key={`${c.kind ?? "user"}:${c.id}`}
-              onClick={() =>
-                onSelect(
-                  isGuest
-                    ? { type: "guest", profileId: c.id }
-                    : { type: "customer", userId: c.id },
-                )
-              }
-              className={`w-full text-left px-2.5 py-2 rounded-xl flex items-center gap-2.5 ${
-                on ? "bg-black text-white" : "hover:bg-gray-100"
-              }`}
+              onClick={() => setLocation("/ops/customers")}
+              className="w-full text-left px-2.5 py-2 rounded-xl flex items-center gap-2.5 hover:bg-gray-100"
             >
-              <div
-                className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
-                  on ? "bg-white text-black" : "bg-gray-200 text-gray-700"
-                }`}
-              >
+              <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 bg-gray-200 text-gray-700">
                 {(c.name || c.email || "?").charAt(0).toUpperCase()}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-[13px] font-medium truncate">
                   {c.name || c.email}
                 </div>
-                <div
-                  className={`text-[11px] truncate ${on ? "text-gray-300" : "text-gray-400"}`}
-                >
+                <div className="text-[11px] truncate text-gray-400">
                   {isGuest ? t("workspace.guestBadge") : c.email}
                 </div>
               </div>
