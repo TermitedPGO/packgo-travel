@@ -238,12 +238,29 @@ export function caseImportTraceMarker(folderName: string): string {
   return `匯入自案件資料.md(${folderName})`;
 }
 
-/** Escape MySQL LIKE wildcards (%, _) and the escape char itself (\) so a
- *  folderName containing one of these literal characters can't turn part of
- *  the trace marker into a wildcard and false-positive match an unrelated
- *  order's notes. Callers must pair this with `ESCAPE '\\'` in the LIKE. */
+/** The custom LIKE escape character. Deliberately NOT backslash: writing
+ *  `ESCAPE '\\'` in a Drizzle sql template emits the literal SQL text
+ *  `ESCAPE '\'` (one backslash), and MySQL/TiDB treat a backslash inside a
+ *  string literal as itself an escape char — so `'\'` escapes its own closing
+ *  quote and the statement fails to parse (ER_PARSE_ERROR on prod TiDB, seen
+ *  2026-07-04 on folder "Wu_家庭大團_2026"). A printable non-backslash char
+ *  sidesteps that quoting minefield entirely: no backslash ever reaches the
+ *  emitted SQL. '!' cannot appear as a raw LIKE metacharacter, so the only
+ *  thing we must escape in the pattern is '!' itself plus the wildcards. */
+export const LIKE_ESCAPE_CHAR = "!";
+
+/** Escape MySQL/TiDB LIKE wildcards (%, _) and the custom escape char itself
+ *  (see LIKE_ESCAPE_CHAR) so a folderName containing one of these literal
+ *  characters can't turn part of the trace marker into a wildcard and
+ *  false-positive match an unrelated order's notes. This is what keeps the
+ *  dedup check from being spoofed by a folder name — the anti-injection intent
+ *  of the original escaping is preserved. Callers must pair this with
+ *  `ESCAPE '!'` in the LIKE (see LIKE_ESCAPE_CHAR). */
 export function escapeLikePattern(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+  return value
+    .replace(/!/g, "!!")
+    .replace(/%/g, "!%")
+    .replace(/_/g, "!_");
 }
 
 /** Parse a keyDate.dateIso into a real Date, or null if it's malformed / has
@@ -399,13 +416,16 @@ export async function importCaseFile(
     // column/migration per task constraints). folderName can legitimately
     // contain '%' or '_' (SQL LIKE wildcards) — escape them and pair with an
     // explicit ESCAPE clause so the marker only ever matches its own literal
-    // text, never wildcards into unrelated orders' notes.
+    // text, never wildcards into unrelated orders' notes. The escape char is
+    // '!' not backslash: `ESCAPE '\\'` emits `ESCAPE '\'` which fails to parse
+    // on MySQL/TiDB (backslash escapes its own closing quote). See
+    // LIKE_ESCAPE_CHAR / escapeLikePattern above.
     const marker = caseImportTraceMarker(folderName);
     const likePattern = `%${escapeLikePattern(marker)}%`;
     const [already] = await db
       .select({ id: customOrders.id })
       .from(customOrders)
-      .where(sql`${customOrders.notes} LIKE ${likePattern} ESCAPE '\\'`)
+      .where(sql`${customOrders.notes} LIKE ${likePattern} ESCAPE ${LIKE_ESCAPE_CHAR}`)
       .limit(1);
     if (already) {
       return { status: "already_imported", plan, orderId: already.id, warnings };

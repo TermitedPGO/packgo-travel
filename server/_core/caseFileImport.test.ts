@@ -61,6 +61,7 @@ import {
   importCaseFile,
   caseImportTraceMarker,
   escapeLikePattern,
+  LIKE_ESCAPE_CHAR,
   type CaseExtraction,
 } from "./caseFileImport";
 import { resolveOrIdentifyCustomer } from "../db/customerProfile";
@@ -484,10 +485,19 @@ describe("buildCaseImportPlan", () => {
     expect(plan.interactions).toHaveLength(0);
   });
 
-  it("escapeLikePattern escapes %, _ and \\ so a folderName can't turn part of the marker into a wildcard", () => {
-    expect(escapeLikePattern("100%放心團")).toBe("100\\%放心團");
-    expect(escapeLikePattern("A_B")).toBe("A\\_B");
-    expect(escapeLikePattern("back\\slash")).toBe("back\\\\slash");
+  it("escapeLikePattern escapes %, _ and the '!' escape char (NOT backslash — backslash in ESCAPE fails on MySQL/TiDB) so a folderName can't turn part of the marker into a wildcard", () => {
+    // Escape char is '!', not backslash: `ESCAPE '\\'` emits SQL `ESCAPE '\'`
+    // which parse-errors on MySQL/TiDB. Wildcards get an '!' prefix.
+    expect(escapeLikePattern("100%放心團")).toBe("100!%放心團");
+    expect(escapeLikePattern("A_B")).toBe("A!_B");
+    // The real folder that broke prod — every underscore must be escaped so it
+    // matches literally, not as a single-char wildcard.
+    expect(escapeLikePattern("Wu_家庭大團_2026")).toBe("Wu!_家庭大團!_2026");
+    // '!' itself is doubled so a folder literally containing '!' stays literal.
+    expect(escapeLikePattern("急件!團")).toBe("急件!!團");
+    // A raw backslash is left untouched — it is no longer special to us and
+    // never reaches the ESCAPE clause, so no double-escaping quoting hazard.
+    expect(escapeLikePattern("back\\slash")).toBe("back\\slash");
     expect(escapeLikePattern("正常資料夾")).toBe("正常資料夾");
   });
 
@@ -598,11 +608,88 @@ describe("importCaseFile", () => {
     const whereCalls = selectChain.where.mock.calls.map((c) => c[0]);
     const likeCall = whereCalls.find((c: any) => c?.strings?.some((s: string) => s.includes("ESCAPE")));
     expect(likeCall).toBeDefined();
-    // Template is `${customOrders.notes} LIKE ${likePattern} ESCAPE '\\'` —
+    // Template is `${customOrders.notes} LIKE ${likePattern} ESCAPE ${LIKE_ESCAPE_CHAR}` —
     // values[0] is the interpolated `customOrders.notes` column ref,
-    // values[1] is the actual LIKE pattern we escaped.
+    // values[1] is the actual LIKE pattern we escaped, values[2] is the
+    // escape char (bound as a param, NOT a backslash string literal that
+    // TiDB/MySQL would reject).
     expect(likeCall.values[1]).toBe(`%${escapeLikePattern(caseImportTraceMarker("100%放心團"))}%`);
-    expect(likeCall.values[1]).toContain("100\\%放心團");
+    expect(likeCall.values[1]).toContain("100!%放心團");
+    expect(likeCall.values[2]).toBe(LIKE_ESCAPE_CHAR);
+    // Hard guard against the prod regression: no fragment of the emitted SQL
+    // may contain a lone backslash-in-quotes ESCAPE literal.
+    const joinedSql = (likeCall.strings as string[]).join("");
+    expect(joinedSql).not.toContain("\\");
+    expect(joinedSql).toContain("ESCAPE");
+  });
+
+  // Regression for the prod ER_PARSE_ERROR (2026-07-04, folder "Wu_家庭大團_2026"):
+  // an underscore in the folder name must (a) not blow up the dedup SELECT, and
+  // (b) match only its own literal marker, never wildcard-match another folder.
+  it("underscore folder name (Wu_家庭大團_2026): dedup SELECT runs and the '_' is escaped literal, not a wildcard", async () => {
+    mockInvokeLLM.mockResolvedValueOnce({
+      choices: [{ finish_reason: "stop", message: { content: JSON.stringify({
+        customerName: "Wu 家庭",
+        customerEmail: null,
+        customerPhone: "510-333-9999",
+        destinationSummary: "台灣越南日本大團",
+        sellPriceUsd: 50000,
+        paymentStatusText: null,
+        keyDates: [],
+        category: "quote",
+        warnings: [],
+      }) } }],
+    });
+    selectChain.limit
+      .mockResolvedValueOnce([]) // identity dedup (phone-only, skips users email guard)
+      .mockResolvedValueOnce([]) // already-imported-by-folder check: no prior import
+      .mockResolvedValueOnce([{ id: 1, role: "admin" }]); // admin user lookup
+    const result = await importCaseFile(
+      { folderName: "Wu_家庭大團_2026", markdown: "content" },
+      "confirm",
+    );
+    // The dedup SELECT did not throw; the import proceeded to a real insert.
+    expect(result.status).toBe("imported");
+
+    const whereCalls = selectChain.where.mock.calls.map((c) => c[0]);
+    const likeCall = whereCalls.find((c: any) => c?.strings?.some((s: string) => s.includes("ESCAPE")));
+    expect(likeCall).toBeDefined();
+    // Every underscore in the folder name is '!'-escaped so it matches
+    // literally — a decoy folder "Wu-家庭大團-2026" (or any single char in the
+    // '_' slots) must NOT satisfy this pattern.
+    expect(likeCall.values[1]).toBe(
+      `%${escapeLikePattern(caseImportTraceMarker("Wu_家庭大團_2026"))}%`,
+    );
+    expect(likeCall.values[1]).toContain("Wu!_家庭大團!_2026");
+    // The raw, unescaped underscore form must NOT appear as a bare wildcard.
+    expect(likeCall.values[1]).not.toContain("Wu_家庭大團_2026");
+    expect(likeCall.values[2]).toBe(LIKE_ESCAPE_CHAR);
+  });
+
+  it("returns already_imported for an underscore folder when its marker is already present (idempotent re-confirm survives the escaping)", async () => {
+    mockInvokeLLM.mockResolvedValueOnce({
+      choices: [{ finish_reason: "stop", message: { content: JSON.stringify({
+        customerName: "Wu 家庭",
+        customerEmail: null,
+        customerPhone: "510-333-9999",
+        destinationSummary: "台灣越南日本大團",
+        sellPriceUsd: 50000,
+        paymentStatusText: null,
+        keyDates: [],
+        category: "quote",
+        warnings: [],
+      }) } }],
+    });
+    selectChain.limit
+      .mockResolvedValueOnce([]) // identity dedup (phone-only)
+      .mockResolvedValueOnce([{ id: 77 }]); // already-imported check hits for this folder
+    const result = await importCaseFile(
+      { folderName: "Wu_家庭大團_2026", markdown: "content" },
+      "confirm",
+    );
+    expect(result.status).toBe("already_imported");
+    expect(result.orderId).toBe(77);
+    expect(mockDb.insert).not.toHaveBeenCalled();
   });
 
   it("blocked_registered_member short-circuits before any write, in both dry_run and confirm", async () => {
