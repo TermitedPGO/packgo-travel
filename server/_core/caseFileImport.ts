@@ -286,6 +286,26 @@ function parseKeyDateIso(dateIso: string): Date | null {
   return d;
 }
 
+/** 把 keyDates 收成訂單 notes 的一段參考文字(絕不變成互動)。只收有合法完整日期
+ *  的(parseKeyDateIso 過關,壞日期/缺年份丟掉,不猜);晚於今天(LA 曆日)的標
+ *  「(未來)」,一眼看出這是行程/死線事件而非已發生的往來。回空字串 = 沒有可收的
+ *  keyDate。純函式、可單測。兩邊皆 "YYYY-MM-DD",字典序即日期序。 */
+export function formatKeyDatesForNotes(
+  keyDates: CaseKeyDate[],
+  todayLAStr: string,
+): string {
+  const rows: string[] = [];
+  for (const kd of keyDates ?? []) {
+    const parsed = parseKeyDateIso(kd.dateIso);
+    if (!parsed) continue;
+    if (!kd.label || !kd.label.trim()) continue;
+    const iso = `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(parsed.getDate()).padStart(2, "0")}`;
+    const isFuture = iso > todayLAStr;
+    rows.push(`${kd.label.trim()} ${iso}${isFuture ? "(未來)" : ""}`);
+  }
+  return rows.length ? `關鍵日期:${rows.join("、")}` : "";
+}
+
 export function buildCaseImportPlan(
   extraction: CaseExtraction,
   identity: ResolvedCustomerIdentity,
@@ -298,26 +318,29 @@ export function buildCaseImportPlan(
     phone: extraction.customerPhone?.trim() || null,
   };
 
+  // 「五、關鍵日期」的日期(出發日 / 尾款截止 / 出票日…)是「事件」,不是「往來 /
+  // 對話紀錄」。舊版把每個 keyDate 捏造成一筆 inbound wechat 互動(createdAt=事件日),
+  // Wu_家庭大團_2026 因此生出 12 筆未來日期(2026-07-11 ~ 2027-01-10)的假對話、
+  // contentSummary 全 null = 違反「搬運不生成」。修正(v787 回爐,三條規則):
+  //   ① 只有明確的「往來 / 對話紀錄」才建 interaction。案件資料.md 是結構化摘要,沒有
+  //      對話段,extractCaseFields 也不抽對話 → caseFileImport 一律建 0 筆互動。
+  //   ② 事件日期(尤其晚於今天 LA 曆日的)一律不得成為 interaction,改收進訂單 notes 供參
+  //      (見 formatKeyDatesForNotes,未來日期標「(未來)」)。
+  //   ③ 沒有對話段 = 零互動,只建卡 + 單。
+  // 若日後真要匯入對話紀錄,須新增「對話段」抽取來源,並對每筆套「非未來(LA 曆日)」守門
+  // 後才可建 interaction — 而非拿 keyDates 頂替。
+  const interactions: CaseImportPlanInteraction[] = [];
+
+  const keyDateNote = formatKeyDatesForNotes(extraction.keyDates ?? [], todayLAStr);
   const order: CaseImportPlanOrder = {
     category: extraction.category,
     destination: extraction.destinationSummary,
     totalPrice: extraction.sellPriceUsd,
     status: "draft",
-    notes: `${caseImportTraceMarker(folderName)},${todayLAStr}`,
+    notes:
+      `${caseImportTraceMarker(folderName)},${todayLAStr}` +
+      (keyDateNote ? `\n${keyDateNote}` : ""),
   };
-
-  const interactions: CaseImportPlanInteraction[] = [];
-  for (const kd of extraction.keyDates ?? []) {
-    const parsedDate = parseKeyDateIso(kd.dateIso);
-    if (!parsedDate) continue; // malformed/missing-year date — skip, don't guess
-    if (!kd.label || !kd.label.trim()) continue;
-    interactions.push({
-      channel: "wechat",
-      direction: "inbound",
-      content: `${kd.label.trim()}(匯入自 ${folderName})`,
-      createdAt: parsedDate,
-    });
-  }
 
   return {
     profileAction: identity.status === "existing" ? "reuse" : "create",
@@ -508,5 +531,108 @@ export async function importCaseFile(
       "[caseFileImport] DB write failed (non-fatal)",
     );
     return { status: "error" };
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// e) repairCaseInteractions — 回爐用:刪掉某資料夾先前捏造的互動,按新規則重建。
+// ────────────────────────────────────────────────────────────────────────
+
+export interface CaseRepairResult {
+  status: "not_found" | "dry_run" | "repaired" | "error";
+  folderName: string;
+  profileId?: number;
+  orderId?: number;
+  /** 找到的 case_file_import 互動筆數(dry_run 將刪 / confirm 刪除前的數量)。 */
+  foundInteractions?: number;
+  /** confirm 實際刪除筆數(冪等:第二次跑為 0)。 */
+  deletedInteractions?: number;
+  /** 依新規則重建的互動筆數。caseFileImport 從案件摘要不建互動 → 恆為 0。 */
+  rebuiltInteractions?: number;
+  /** dry_run 附幾個 id 供人工核對(最多 20)。 */
+  sampleIds?: number[];
+}
+
+/**
+ * repairCaseInteractions — 把某個資料夾先前 caseFileImport 建的「捏造互動」按 folderName
+ * trace 找出來、刪掉、再按新規則重建。新規則下 caseFileImport 不從案件摘要建互動
+ * (見 buildCaseImportPlan),故重建集合恆為空 = 本函式即「刪除捏造列」。冪等:第二次
+ * 跑 foundInteractions=0。dry_run 先出統計(含 sample id 供核對),confirm 才刪。
+ *
+ * 精準只碰「本 import 建的、本資料夾的」列:agentName='case_file_import'(只有本 pipeline
+ * 會寫)+ content LIKE '(匯入自 <folderName>)'(本資料夾 marker,folderName 內的 LIKE
+ * 萬用字元照 escapeLikePattern 逃逸)。真實客人對話(agentName 為 gmail/wechat… 或 null)
+ * 永遠不在範圍內。先確認該案訂單(trace marker 在 notes)存在才動互動;找不到訂單 =
+ * not_found,不盲刪。卡片(profile)與訂單(含 ORD-…)一律保留,售價/成本不碰。
+ */
+export async function repairCaseInteractions(
+  folderName: string,
+  mode: "dry_run" | "confirm",
+): Promise<CaseRepairResult> {
+  try {
+    const { getDb } = await import("../db");
+    const db = await getDb();
+    if (!db) return { status: "error", folderName };
+
+    const { customOrders, customerInteractions } = await import("../../drizzle/schema");
+    const { and, eq, sql } = await import("drizzle-orm");
+
+    // 先確認該案訂單存在(notes 帶 trace marker)。保留它,只拿它證明案子是真的 + 回報
+    // orderId/profileId。找不到 = 不動任何互動。
+    const orderLike = `%${escapeLikePattern(caseImportTraceMarker(folderName))}%`;
+    const [order] = await db
+      .select({ id: customOrders.id, profileId: customOrders.customerProfileId })
+      .from(customOrders)
+      .where(sql`${customOrders.notes} LIKE ${orderLike} ESCAPE ${LIKE_ESCAPE_CHAR}`)
+      .limit(1);
+    if (!order) return { status: "not_found", folderName };
+
+    // 鎖定本資料夾的捏造互動:agentName + content marker 雙條件。
+    const contentLike = `%${escapeLikePattern(`(匯入自 ${folderName})`)}%`;
+    const targetWhere = and(
+      eq(customerInteractions.agentName, "case_file_import"),
+      sql`${customerInteractions.content} LIKE ${contentLike} ESCAPE ${LIKE_ESCAPE_CHAR}`,
+    );
+    const targets = await db
+      .select({ id: customerInteractions.id })
+      .from(customerInteractions)
+      .where(targetWhere);
+    const foundInteractions = targets.length;
+    const sampleIds = targets.slice(0, 20).map((t) => Number(t.id));
+
+    if (mode === "dry_run") {
+      return {
+        status: "dry_run",
+        folderName,
+        profileId: order.profileId ?? undefined,
+        orderId: Number(order.id),
+        foundInteractions,
+        rebuiltInteractions: 0,
+        sampleIds,
+      };
+    }
+
+    // confirm — 刪除捏造列。重建集合恆為空(新規則不從摘要建互動),故不 insert。
+    let deletedInteractions = 0;
+    if (foundInteractions > 0) {
+      await db.delete(customerInteractions).where(targetWhere);
+      deletedInteractions = foundInteractions;
+    }
+
+    return {
+      status: "repaired",
+      folderName,
+      profileId: order.profileId ?? undefined,
+      orderId: Number(order.id),
+      foundInteractions,
+      deletedInteractions,
+      rebuiltInteractions: 0,
+    };
+  } catch (err) {
+    log.warn(
+      { err: err instanceof Error ? err.message : String(err), folderName },
+      "[caseFileImport] repair failed (non-fatal)",
+    );
+    return { status: "error", folderName };
   }
 }

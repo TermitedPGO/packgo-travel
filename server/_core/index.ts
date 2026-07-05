@@ -1314,7 +1314,10 @@ async function startServer() {
   // not INTERNAL_TEST_TOKEN) since this is a different trust boundary.
   // POST /api/admin/import-case-file
   //   Headers: Authorization: Bearer <LOCAL_SCRIPT_TOKEN>
-  //   Body: { mode: "dry_run" | "confirm", folderName: string, markdown: string }
+  //   Body(匯入): { mode: "dry_run" | "confirm", folderName, markdown }
+  //   Body(回爐修復,v787): { mode: "repair_dry_run" | "repair_confirm", folderName }
+  //     repair 只按 folderName trace 刪掉先前 caseFileImport 捏造的互動(見
+  //     repairCaseInteractions),不需 markdown、不重跑 LLM 抽取。dry_run 先出統計。
   const CASE_FILE_MARKDOWN_MAX_BYTES = 100_000;
   app.post("/api/admin/import-case-file", async (req, res) => {
     try {
@@ -1326,11 +1329,21 @@ async function startServer() {
       });
       if (!ip) return;
       const { mode, folderName, markdown } = req.body || {};
-      if (mode !== "dry_run" && mode !== "confirm") {
-        return res.status(400).json({ error: "mode must be 'dry_run' or 'confirm'" });
+      const isRepair = mode === "repair_dry_run" || mode === "repair_confirm";
+      if (mode !== "dry_run" && mode !== "confirm" && !isRepair) {
+        return res.status(400).json({
+          error: "mode must be 'dry_run' | 'confirm' | 'repair_dry_run' | 'repair_confirm'",
+        });
       }
       if (typeof folderName !== "string" || !folderName.trim()) {
         return res.status(400).json({ error: "Missing folderName" });
+      }
+      // 回爐修復分支:只需 folderName,刪除捏造互動,不動卡/單/售價。
+      if (isRepair) {
+        const { repairCaseInteractions } = await import("./caseFileImport");
+        const repairMode = mode === "repair_confirm" ? "confirm" : "dry_run";
+        const result = await repairCaseInteractions(folderName, repairMode);
+        return res.json(result);
       }
       if (typeof markdown !== "string" || !markdown.trim()) {
         return res.status(400).json({ error: "Missing markdown" });

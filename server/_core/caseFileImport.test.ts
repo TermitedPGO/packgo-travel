@@ -29,9 +29,13 @@ vi.mock("../../drizzle/schema", () => ({
   customOrders: {
     id: "id",
     notes: "notes",
+    customerProfileId: "customerProfileId",
   },
   customerInteractions: {
+    id: "id",
     customerProfileId: "customerProfileId",
+    agentName: "agentName",
+    content: "content",
   },
   users: {
     id: "id",
@@ -41,6 +45,7 @@ vi.mock("../../drizzle/schema", () => ({
 }));
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn((...a: unknown[]) => ({ _op: "eq", args: a })),
+  and: vi.fn((...a: unknown[]) => ({ _op: "and", args: a })),
   or: vi.fn((...a: unknown[]) => ({ _op: "or", args: a })),
   like: vi.fn((...a: unknown[]) => ({ _op: "like", args: a })),
   sql: Object.assign(
@@ -58,7 +63,9 @@ vi.mock("../db/customOrder", () => ({
 import {
   extractCaseFields,
   buildCaseImportPlan,
+  formatKeyDatesForNotes,
   importCaseFile,
+  repairCaseInteractions,
   caseImportTraceMarker,
   escapeLikePattern,
   LIKE_ESCAPE_CHAR,
@@ -424,15 +431,18 @@ describe("buildCaseImportPlan", () => {
     expect(plan.profileId).toBeUndefined();
   });
 
-  it("order.notes includes the folder name as a trace marker plus today's date", () => {
+  it("order.notes 帶 folder trace marker + 今天日期(dedup LIKE 靠它),keyDates 收進 notes", () => {
     const plan = buildCaseImportPlan(
       baseExtraction,
       { status: "creatable" },
       "林朝安_新馬6日團",
       "2026-07-02",
     );
-    expect(plan.order.notes).toBe("匯入自案件資料.md(林朝安_新馬6日團),2026-07-02");
+    // trace marker 必須完整出現(dedup / repair 的 LIKE 靠它)。
     expect(plan.order.notes).toContain(caseImportTraceMarker("林朝安_新馬6日團"));
+    expect(plan.order.notes).toContain("2026-07-02");
+    // baseExtraction 的 keyDate(出發日 2026-07-16,晚於今天)收進 notes、標(未來)。
+    expect(plan.order.notes).toContain("關鍵日期:出發日 2026-07-16(未來)");
   });
 
   it("order.totalPrice carries the sell price straight through, never a cost figure", () => {
@@ -445,44 +455,36 @@ describe("buildCaseImportPlan", () => {
     expect(plan.order.totalPrice).toBe(1584);
   });
 
-  it("keyDates with a valid full ISO date become an interaction row", () => {
+  // ── v787 回爐:keyDates 是「事件」不是「往來/對話」,一律不得變成互動 ──
+  it("Wu 真實形狀:多個未來 keyDate + 無對話段 → interactions=0(捏造回爐鎖)", () => {
+    // Wu_家庭大團_2026 案:案件資料.md 只有「五、關鍵日期」(出發日 + 訂票死線),
+    // 沒有任何對話紀錄段。舊版把這些捏造成 12 筆未來 inbound wechat 互動。
+    const wuLike: CaseExtraction = {
+      ...baseExtraction,
+      keyDates: [
+        { label: "台灣段出發", dateIso: "2026-12-19" },
+        { label: "越南段出發", dateIso: "2026-12-31" },
+        { label: "日本段出發", dateIso: "2027-01-05" },
+        { label: "尾款截止", dateIso: "2026-07-11" },
+      ],
+    };
+    const plan = buildCaseImportPlan(wuLike, { status: "creatable" }, "Wu_家庭大團_2026", "2026-07-05");
+    // 核心斷言:沒有對話段 → 零互動,keyDates 永不成互動。
+    expect(plan.interactions).toHaveLength(0);
+    // 資料沒掉:keyDates 收進 notes 供參,未來的標(未來)。
+    expect(plan.order.notes).toContain("台灣段出發 2026-12-19(未來)");
+    expect(plan.order.notes).toContain("尾款截止 2026-07-11(未來)");
+  });
+
+  it("單一合法 keyDate 也不成互動(只進 notes,不當對話)", () => {
     const plan = buildCaseImportPlan(
       baseExtraction,
       { status: "creatable" },
       "林朝安_新馬6日團",
       "2026-07-02",
     );
-    expect(plan.interactions).toHaveLength(1);
-    expect(plan.interactions[0].createdAt.getFullYear()).toBe(2026);
-    expect(plan.interactions[0].createdAt.getMonth()).toBe(6); // July = index 6
-    expect(plan.interactions[0].createdAt.getDate()).toBe(16);
-  });
-
-  it("skips keyDates missing a year (e.g. '7/16' fragment slipped through)", () => {
-    const extraction: CaseExtraction = {
-      ...baseExtraction,
-      keyDates: [{ label: "出發日", dateIso: "7/16" }],
-    };
-    const plan = buildCaseImportPlan(extraction, { status: "creatable" }, "資料夾", "2026-07-02");
     expect(plan.interactions).toHaveLength(0);
-  });
-
-  it("skips keyDates with a malformed dateIso string", () => {
-    const extraction: CaseExtraction = {
-      ...baseExtraction,
-      keyDates: [{ label: "出發日", dateIso: "not-a-date" }],
-    };
-    const plan = buildCaseImportPlan(extraction, { status: "creatable" }, "資料夾", "2026-07-02");
-    expect(plan.interactions).toHaveLength(0);
-  });
-
-  it("skips keyDates with an invalid calendar day (e.g. 2026-02-30)", () => {
-    const extraction: CaseExtraction = {
-      ...baseExtraction,
-      keyDates: [{ label: "壞日期", dateIso: "2026-02-30" }],
-    };
-    const plan = buildCaseImportPlan(extraction, { status: "creatable" }, "資料夾", "2026-07-02");
-    expect(plan.interactions).toHaveLength(0);
+    expect(plan.order.notes).toContain("關鍵日期:出發日 2026-07-16(未來)");
   });
 
   it("escapeLikePattern escapes %, _ and the '!' escape char (NOT backslash — backslash in ESCAPE fails on MySQL/TiDB) so a folderName can't turn part of the marker into a wildcard", () => {
@@ -501,17 +503,118 @@ describe("buildCaseImportPlan", () => {
     expect(escapeLikePattern("正常資料夾")).toBe("正常資料夾");
   });
 
-  it("keeps valid dates and drops invalid ones within the same keyDates array", () => {
-    const extraction: CaseExtraction = {
-      ...baseExtraction,
-      keyDates: [
-        { label: "好日期", dateIso: "2026-07-16" },
-        { label: "壞日期", dateIso: "6/10" },
+  it("formatKeyDatesForNotes:壞日期/缺年份/非法日/空 label 一律不進 notes(不猜);過去日不標未來", () => {
+    const note = formatKeyDatesForNotes(
+      [
+        { label: "報價產出", dateIso: "2026-06-10" }, // 過去(相對 2026-07-02)
+        { label: "出發日", dateIso: "2026-07-16" }, // 未來
+        { label: "缺年份", dateIso: "6/10" }, // 丟
+        { label: "壞字串", dateIso: "not-a-date" }, // 丟
+        { label: "非法日", dateIso: "2026-02-30" }, // 丟(2 月無 30 日)
+        { label: "", dateIso: "2026-08-01" }, // 空 label,丟
       ],
+      "2026-07-02",
+    );
+    expect(note).toContain("報價產出 2026-06-10");
+    expect(note).not.toContain("報價產出 2026-06-10(未來)"); // 過去日不標未來
+    expect(note).toContain("出發日 2026-07-16(未來)");
+    expect(note).not.toContain("6/10");
+    expect(note).not.toContain("not-a-date");
+    expect(note).not.toContain("2026-02-30");
+    expect(note).not.toContain("2026-08-01"); // 空 label 那筆整筆丟
+  });
+
+  it("formatKeyDatesForNotes:沒有任何可收的 keyDate → 空字串;notes 就只有 marker 行", () => {
+    expect(formatKeyDatesForNotes([], "2026-07-02")).toBe("");
+    expect(formatKeyDatesForNotes([{ label: "x", dateIso: "壞" }], "2026-07-02")).toBe("");
+    const plan = buildCaseImportPlan(
+      { ...baseExtraction, keyDates: [] },
+      { status: "creatable" },
+      "資料夾",
+      "2026-07-02",
+    );
+    expect(plan.order.notes).toBe("匯入自案件資料.md(資料夾),2026-07-02");
+    expect(plan.interactions).toHaveLength(0);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────
+// repairCaseInteractions — 捏造互動回爐(刪除 + 按新規則重建=0)
+// ────────────────────────────────────────────────────────────────────────
+
+describe("repairCaseInteractions", () => {
+  // 兩次 select():第 1 次訂單查詢(.limit → [order]),第 2 次互動目標查詢
+  // (.where 直接 await → [rows]);外加 delete()。
+  function setupRepairDb(opts: {
+    order?: { id: number; profileId: number } | null;
+    targets?: Array<{ id: number }>;
+  }) {
+    const orderRows = opts.order ? [opts.order] : [];
+    const targetRows = opts.targets ?? [];
+    const orderChain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue(orderRows),
     };
-    const plan = buildCaseImportPlan(extraction, { status: "creatable" }, "資料夾", "2026-07-02");
-    expect(plan.interactions).toHaveLength(1);
-    expect(plan.interactions[0].content).toContain("好日期");
+    const targetsChain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockResolvedValue(targetRows), // 直接 await,無 .limit
+    };
+    let selectCall = 0;
+    mockDb.select.mockImplementation(() =>
+      selectCall++ === 0 ? (orderChain as any) : (targetsChain as any),
+    );
+    const deleteWhere = vi.fn().mockResolvedValue(undefined);
+    (mockDb as any).delete = vi.fn().mockReturnValue({ where: deleteWhere });
+    return { deleteWhere };
+  }
+
+  it("dry_run:找到訂單 + N 筆捏造互動 → 出統計、附 sampleIds、rebuilt=0、不刪", async () => {
+    const { deleteWhere } = setupRepairDb({
+      order: { id: 6, profileId: 2760045 },
+      targets: [{ id: 1380798 }, { id: 1380799 }, { id: 1380800 }],
+    });
+    const res = await repairCaseInteractions("Wu_家庭大團_2026", "dry_run");
+    expect(res.status).toBe("dry_run");
+    expect(res.orderId).toBe(6);
+    expect(res.profileId).toBe(2760045);
+    expect(res.foundInteractions).toBe(3);
+    expect(res.rebuiltInteractions).toBe(0);
+    expect(res.sampleIds).toEqual([1380798, 1380799, 1380800]);
+    expect(deleteWhere).not.toHaveBeenCalled();
+  });
+
+  it("confirm:刪除 N 筆捏造互動,rebuilt=0,只刪互動(不 delete 訂單/卡)", async () => {
+    const { deleteWhere } = setupRepairDb({
+      order: { id: 6, profileId: 2760045 },
+      targets: [{ id: 1380798 }, { id: 1380799 }],
+    });
+    const res = await repairCaseInteractions("Wu_家庭大團_2026", "confirm");
+    expect(res.status).toBe("repaired");
+    expect(res.foundInteractions).toBe(2);
+    expect(res.deletedInteractions).toBe(2);
+    expect(res.rebuiltInteractions).toBe(0);
+    expect(deleteWhere).toHaveBeenCalledTimes(1);
+  });
+
+  it("找不到該案訂單(trace marker 不在任何 notes)→ not_found,不刪任何互動", async () => {
+    const { deleteWhere } = setupRepairDb({ order: null, targets: [] });
+    const res = await repairCaseInteractions("不存在的資料夾", "dry_run");
+    expect(res.status).toBe("not_found");
+    expect(res.foundInteractions).toBeUndefined();
+    expect(deleteWhere).not.toHaveBeenCalled();
+  });
+
+  it("冪等:confirm 但已無捏造互動 → deleted=0,不呼叫 delete", async () => {
+    const { deleteWhere } = setupRepairDb({
+      order: { id: 6, profileId: 2760045 },
+      targets: [], // 已被前一次 repair 清空
+    });
+    const res = await repairCaseInteractions("Wu_家庭大團_2026", "confirm");
+    expect(res.status).toBe("repaired");
+    expect(res.foundInteractions).toBe(0);
+    expect(res.deletedInteractions).toBe(0);
+    expect(deleteWhere).not.toHaveBeenCalled();
   });
 });
 
@@ -547,7 +650,7 @@ describe("importCaseFile", () => {
     expect(mockDb.insert).not.toHaveBeenCalled();
   });
 
-  it("confirm mode writes profile + order + interactions on first call", async () => {
+  it("confirm mode writes profile + order (no interactions — 摘要檔沒有對話段) on first call", async () => {
     mockGoodExtraction();
     // 1st select: resolveOrIdentifyCustomer customerProfiles dedup → no match
     // 2nd select: resolveOrIdentifyCustomer users registered-member lookup → no match
@@ -580,8 +683,9 @@ describe("importCaseFile", () => {
     expect(result.status).toBe("imported");
     expect(result.profileId).toBe(909);
     // never a second customerProfiles row from this call — the loser's own
-    // insert failed and was recovered, not retried.
-    expect(mockDb.insert).toHaveBeenCalledTimes(3); // profile (failed) + order + interaction(s)
+    // insert failed and was recovered, not retried. v787 回爐後互動恆為 0,故
+    // insert 次數是 2(profile 失敗那次 + order),不再有 interaction insert。
+    expect(mockDb.insert).toHaveBeenCalledTimes(2); // profile (failed) + order
   });
 
   it("already-imported LIKE query uses the escaped marker with an ESCAPE clause (folderName containing % or _ must not wildcard-match unrelated orders)", async () => {
