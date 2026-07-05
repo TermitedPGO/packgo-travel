@@ -283,3 +283,21 @@ migration 特別決策:0104-0109 的先例都是欄位新增用 INFORMATION_SCHE
 **驗證**:四塊合計 tsc 0 錯 + 全套 vitest 293 files / 4335 tests 綠(含過程中修好一次跟本批程式碼無關的 node_modules 環境問題)。i18n 100% parity。零硬紅線違反。
 
 **待 Jeff 手動**:`pnpm ship`、D1/D2 首跑觀察 office inbox、B4 存量回填先 dry_run 再 confirm、D3 待另開一批。完整清單見 T6 報告第 6 節。
+
+---
+
+## Phase 6 A2 回爐 — v787 客人列表「最後往來」兩缺陷 + 錨定/時區(2026-07-04,commit `00a710f`)
+
+v787 上線後監工 live 驗收抓到 A2 兩個真缺陷,加對抗審查再抓到一個 blocker,一併修。完整報告:`docs/features/customer-cockpit/t6-rework-20260704-v787-a2.md`。
+
+- **P0 customerList 全空**:`computeLastContactAt` 吃到的 `lastOutboundAt`=raw `sql<Date>` 子查詢,drizzle 不解碼、mysql2/TiDB 回 naive 字串,舊版 `.getTime()` throw → `rows.map()` 整批爆掉。修:純函式一律 coerce 成 Date、naive 字串當 UTC、絕不 throw。
+- **P1 guestList 回 updatedAt**:`updatedAt` 是 `onUpdateNow()`,02:00 cron 蓋章;`GREATEST` fallback 用它就塌到 cron 時間(第三次「歸檔時間冒充事件時間」)。修:fallback 一律 `createdAt`。
+- **Blocker(對抗審查抓到,一輪漏修)**:guestList 把 raw `sql` 值原封送 client,client 在 formatter 前先 `new Date(naive 字串)` 用瀏覽器本機時區 parse → 非美西 viewer 的 Emerald 顯示 7/2。修:guestList 改走與 customerList 同一支 `computeLastContactAt` 在 server 端錨成 UTC 真 Date,superjson 帶 Date tag。刪 guestList `updatedAt` 死欄位;新增 client 純函式 `formatMonthDayLA`(Intl + 美西時區)。
+
+**驗證**:`tsc` 0 錯;全套 `291 passed | 11 skipped (302)` / `4261 passed | 91 skipped (4352)`;`TZ=Asia/Taipei`/`UTC` 亦全綠。四路對抗審查 11 條 confirmed 全處置 + fresh agent 複驗 blocker 6/6 PASS。i18n 100%。
+
+**驗收對照**:0909 列表出現且顯示 7/3、Emerald 顯示 7/3(美西曆日)—— 均由純函式測試釘死。
+
+**follow-up(未做,守範圍)**:detail 明細面幾處 `toLocaleDateString` 未帶 `timeZone`。
+
+**狀態**:已 commit + push `origin/main`(`00a710f`)。**未 ship**,待 Jeff `pnpm ship` 後監工 live 驗收。
