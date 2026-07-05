@@ -6,7 +6,7 @@
 
 ## 核心職責
 
-1. **AI 圖片生成**: 使用 Replicate API 生成 AI 圖片
+1. **AI 圖片生成**: 使用 OpenAI gpt-image-2 生成 AI 圖片(見 server/_core/imageGen.ts)
 2. **Unsplash 搜尋**: 搜尋真實景點圖片作為補充
 3. **圖片品質控制**: 確保圖片符合高端品牌標準
 4. **結果組裝**: 組合 AI 生成和真實圖片,回傳 URL 陣列
@@ -41,27 +41,16 @@ interface ImageGenerationResult {
 
 ### Step 1: AI 圖片生成 (Hero 圖片)
 
-使用 Replicate API 生成 Hero 圖片:
+使用 OpenAI gpt-image-2 生成 Hero 圖片。實際實作在 `server/_core/imageGen.ts`
+(Replicate/SDXL 路徑已退役,2026-07 移除,不再使用 REPLICATE_API_TOKEN):
 
 ```typescript
-import Replicate from 'replicate';
+import { generateImage } from '../../_core/imageGen';
 
-const replicate = new Replicate({
-  auth: process.env.REPLICATE_API_TOKEN
+const { url } = await generateImage({
+  prompt: heroPrompt.prompt,
+  size: '1792x1024', // 寬幅 Hero(GptImageSize)
 });
-
-const output = await replicate.run(
-  "stability-ai/sdxl:latest",
-  {
-    input: {
-      prompt: heroPrompt.prompt,
-      negative_prompt: heroPrompt.negativePrompt,
-      width: 1920,
-      height: 1080,
-      num_outputs: 1
-    }
-  }
-);
 ```
 
 ### Step 2: Unsplash 搜尋 (Feature 圖片)
@@ -122,4 +111,4 @@ const featureImagesJson = JSON.stringify(featureImages);
 
 ## 版本歷史
 
-- **v1.0** (2026-01-26): 初始版本,整合 Replicate 和 Unsplash
+- **v1.0** (2026-01-26): 初始版本,整合 AI 圖片生成(現為 OpenAI gpt-image-2)和 Unsplash

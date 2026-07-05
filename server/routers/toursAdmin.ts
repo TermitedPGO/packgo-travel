@@ -924,10 +924,9 @@ export const toursAdminRouter = router({
         const { ENV } = await import('../_core/env');
         const results: Record<string, any> = {};
         
-        // 1. Check env vars
+        // 1. Check env vars (Manus Forge 已退役,只剩 nodeEnv + 直連憑證存在性)
         results.env = {
-          forgeApiUrl: ENV.forgeApiUrl || '(empty - will use fallback)',
-          forgeApiKeySet: !!ENV.forgeApiKey,
+          anthropicApiKeySet: !!ENV.anthropicApiKey,
           nodeEnv: process.env.NODE_ENV,
         };
         

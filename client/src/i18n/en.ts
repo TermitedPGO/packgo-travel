@@ -1749,11 +1749,6 @@ export const en = {
     },
     heroTitle: 'PACK&GO',
     heroSubtitle: 'Making Travel Better',
-    loginDialog: {
-      title: 'Login Dialog',
-      description: 'Please log in with your Manus account to continue',
-      loginButton: 'Login with Manus',
-    },
   },
 
   // Profile Page

@@ -1760,11 +1760,6 @@ export const zhTW = {
     },
     heroTitle: 'PACK&GO',
     heroSubtitle: '讓旅行更美好',
-    loginDialog: {
-      title: '登入對話框',
-      description: '請使用 Manus 帳號登入以繼續',
-      loginButton: 'Login with Manus',
-    },
   },
 
   // 會員資料頁面

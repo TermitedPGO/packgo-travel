@@ -145,32 +145,21 @@ export class ClaudeAgent {
   /** 子類別可覆寫，用於識別記錄來源 */
   protected agentName: string = 'ClaudeAgent';
   protected taskType?: string;
-  /** Forge-first mode: skip Claude direct call, go straight to Forge */
-  private useForgeFirst: boolean = false;
 
   constructor(options?: { model?: ClaudeModel }) {
+    // Manus Forge proxy 已退役(2026-07,BUILT_IN_FORGE_* secrets 已從 Fly 移除),
+    // 直連 Anthropic 是唯一路徑。ANTHROPIC_API_KEY 必設,否則直接 throw。
     const apiKey = process.env.ANTHROPIC_API_KEY;
-    // 偵測是否在 Manus production 環境（Forge 可用 = 跳過 Claude 直連，省掉 403 延遲）
-    const forgeAvailable = !!(process.env.BUILT_IN_FORGE_API_KEY && process.env.BUILT_IN_FORGE_API_URL);
-    this.useForgeFirst = forgeAvailable;
-    console.log(`[ClaudeAgent] Mode: ${this.useForgeFirst ? '🔀 Forge-first (production — skipping Claude direct)' : '🔵 Claude-direct (local dev)'}`);
     // SECURITY_AUDIT_2026_05_14 P2-3: don't log the API key prefix even
     // partial — Fly logs may be exported to contractors, shared in
     // screen-share, etc. The prefix doesn't itself enable an attack but
     // confirms the key format and gives a sliver of credential surface
     // for no upside.
     console.log(`[ClaudeAgent] ANTHROPIC_API_KEY status: ${apiKey ? 'SET' : 'NOT SET'}`);
-    console.log(`[ClaudeAgent] BUILT_IN_FORGE_API_KEY status: ${process.env.BUILT_IN_FORGE_API_KEY ? 'SET' : 'NOT SET'}`);
-    if (!apiKey && !forgeAvailable) {
-      throw new Error('ANTHROPIC_API_KEY is not set and Forge is not available');
+    if (!apiKey) {
+      throw new Error('ANTHROPIC_API_KEY is not set');
     }
-    // Only create Anthropic client if we might use it (local dev)
-    if (apiKey) {
-      this.client = new Anthropic({ apiKey });
-    } else {
-      // Forge-only mode: create a dummy client (will never be called)
-      this.client = null as any;
-    }
+    this.client = new Anthropic({ apiKey });
     // Default to Haiku 4.5 for cost-effectiveness
     this.model = options?.model || CLAUDE_MODELS.HAIKU_45;
     
@@ -304,36 +293,6 @@ export class ClaudeAgent {
     }
   ): Promise<ClaudeResult> {
     const startTime = Date.now();
-
-    // 🔀 Forge-first mode: skip Claude direct call entirely (production environment)
-    if (this.useForgeFirst) {
-      console.log(`[ClaudeAgent:${this.agentName}] 🔀 Forge-first: sending directly to Forge (no Claude attempt)`);
-      try {
-        const { invokeLLM } = await import('../_core/llm');
-        const forgeResult = await invokeLLM({
-          messages: [
-            ...(options?.systemPrompt ? [{ role: 'system' as const, content: options.systemPrompt }] : []),
-            { role: 'user' as const, content: prompt },
-          ],
-          maxTokens: options?.maxTokens || 4096,
-        });
-        const forgeContent = forgeResult.choices?.[0]?.message?.content;
-        const contentStr = typeof forgeContent === 'string' ? forgeContent : JSON.stringify(forgeContent);
-        console.log(`[ClaudeAgent:${this.agentName}] ✅ Forge-first succeeded (${Date.now() - startTime}ms)`);
-        this.updateUsageStats(forgeResult.usage?.prompt_tokens || 0, forgeResult.usage?.completion_tokens || 0);
-        return {
-          success: true,
-          content: contentStr,
-          usage: {
-            inputTokens: forgeResult.usage?.prompt_tokens || 0,
-            outputTokens: forgeResult.usage?.completion_tokens || 0,
-          },
-        };
-      } catch (forgeErr: any) {
-        console.error(`[ClaudeAgent:${this.agentName}] Forge-first failed:`, forgeErr.message);
-        return { success: false, error: forgeErr.message || 'Forge error' };
-      }
-    }
 
     console.log(`[ClaudeAgent:${this.agentName}] 🔵 Calling Anthropic API (model: ${this.model})...`);
     try {
@@ -542,49 +501,6 @@ export class ClaudeAgent {
     let systemPromptText = options?.systemPrompt || '你是一個專業的資料提取專家，擅長從文本中提取結構化資訊。';
     if (options?.strictDataFidelity !== false) {
       systemPromptText = `${systemPromptText}\n\n${STRICT_DATA_FIDELITY_RULES}`;
-    }
-
-    // 🔀 Forge-first mode: skip Claude direct call entirely (production environment)
-    if (this.useForgeFirst) {
-      console.log(`[ClaudeAgent:${this.agentName}] 🔀 Forge-first: sending structured request directly to Forge (schema: ${schemaName})`);
-      try {
-        const { invokeLLM } = await import('../_core/llm');
-        const forgeResult = await invokeLLM({
-          messages: [
-            { role: 'system' as const, content: systemPromptText + '\n\n請回傳符合指定 JSON schema 的結構化資料。' },
-            { role: 'user' as const, content: prompt },
-          ],
-          maxTokens: options?.maxTokens || 4096,
-          response_format: {
-            type: 'json_schema',
-            json_schema: {
-              name: schemaName,
-              strict: false,
-              schema: schema as any,
-            },
-          },
-        });
-        const forgeContent = forgeResult.choices?.[0]?.message?.content;
-        const contentStr = typeof forgeContent === 'string' ? forgeContent : JSON.stringify(forgeContent);
-        // v80.24: parseLlmJson handles ```fences + leading prose. Old code
-        // crashed on `{ fenced }` because match(/\{[\s\S]*\}/) returns the
-        // raw fence contents that JSON.parse then rejected.
-        const parsedData = parseLlmJson<T>(contentStr);
-        console.log(`[ClaudeAgent:${this.agentName}] ✅ Forge-first structured succeeded (${Date.now() - startTime}ms)`);
-        this.updateUsageStats(forgeResult.usage?.prompt_tokens || 0, forgeResult.usage?.completion_tokens || 0);
-        return {
-          success: true,
-          data: parsedData,
-          content: contentStr,
-          usage: {
-            inputTokens: forgeResult.usage?.prompt_tokens || 0,
-            outputTokens: forgeResult.usage?.completion_tokens || 0,
-          },
-        };
-      } catch (forgeErr: any) {
-        console.error(`[ClaudeAgent:${this.agentName}] Forge-first structured failed:`, forgeErr.message);
-        return { success: false, error: forgeErr.message || 'Forge error' };
-      }
     }
 
     // P2: Apply Prompt Caching to system prompt
