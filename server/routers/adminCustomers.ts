@@ -443,13 +443,16 @@ export const adminCustomersRouter = router({
     // no inbound message correctly never counts as unread; it must still
     // occupy its rightful ranking slot so it can correctly push OTHER guests
     // below #200 in the same way it does for guestList.
+    // 口徑必須跟 guestList 的 lastContactSql *逐字* 一致(同一個 top-200 視窗),
+    // 含 createdAt fallback(絕不 updatedAt,見 guestList 註解:updatedAt 被夜間
+    // cron 蓋章)。兩處不一致 = badge 池與可見列表排序分岔,紅點對不上。
     const lastContactSql = sql<Date>`GREATEST(
-        COALESCE(${customerProfiles.lastInboundAt}, ${customerProfiles.updatedAt}),
+        COALESCE(${customerProfiles.lastInboundAt}, ${customerProfiles.createdAt}),
         COALESCE(
           (SELECT MAX(${customerInteractions.createdAt}) FROM ${customerInteractions}
             WHERE ${customerInteractions.customerProfileId} = ${customerProfiles.id}
               AND ${customerInteractions.direction} = 'outbound'),
-          ${customerProfiles.updatedAt}
+          ${customerProfiles.createdAt}
         )
       )`;
     const guests = await drizzleDb
@@ -936,21 +939,28 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
       // when there is actual CUSTOMER content behind it — an inquiry row or
       // an escalation — otherwise the customer list drowns in junk.
       //
-      // A2 (Phase6) — lastContactSql is GREATEST(lastInboundAt, lastOutboundAt)
-      // with COALESCE fallback to updatedAt when a side is NULL (MySQL GREATEST
-      // returns NULL if ANY arg is NULL, so a guest with only inbound-ever would
-      // otherwise vanish from the sort entirely). Computed once here and reused
-      // for BOTH the ORDER BY (must run in SQL, before LIMIT 200 truncates the
-      // window) and the returned column (client displays it) — one expression,
-      // one truth, same shape as computeLastContactAt's inbound/outbound-newer
-      // rule used for registered customers in customerList.
+      // A2 (Phase6; v787 P0/P1 回爐) — lastContactSql 只給下面的 ORDER BY 用:
+      // top-200 視窗必須在 SQL 內排序(LIMIT 200 之前)。它是 GREATEST(lastInboundAt,
+      // MAX(outbound)) 兩臂 COALESCE 到 *createdAt*(絕不 updatedAt:updatedAt 是
+      // onUpdateNow(),02:00 摘要 cron 的 UPDATE 會蓋成當晚時間,拿它排序 = 歸檔時間
+      // 冒充事件時間)。MySQL GREATEST 任一臂 NULL 就回 NULL,故每臂先 COALESCE。
+      //
+      // 但「回給 client 顯示的 lastContactAt」不用這個 raw sql 值 —— 改在下面 withFlags
+      // 用 computeLastContactAt 在 JS 算(與 customerList 同一支純函式)。關鍵原因
+      // (v787 P0 blocker):raw sql<Date> fragment 被 mysql2/TiDB 當「naive 無時區
+      // 字串」丟回,原封送到 client 再 new Date() 會用「瀏覽器本機時區」parse、錯一天
+      // (非美西 viewer 的 Emerald 顯示 7/2;跨 UTC 午夜的 guest 連 Jeff 自己也錯)。
+      // computeLastContactAt→toValidDate 在 server 端把 naive 字串錨成 UTC 真 Date,
+      // superjson 帶 Date tag 送出,client 收到真 instant 再由 formatMonthDayLA 以
+      // 美西曆日渲染。純函式版另有「兩指針皆空才落 createdAt」語意(createdAt 永不
+      // 蓋過真 inbound/outbound),比 SQL 每臂 floor 更準。
       const lastContactSql = sql<Date>`GREATEST(
-        COALESCE(${customerProfiles.lastInboundAt}, ${customerProfiles.updatedAt}),
+        COALESCE(${customerProfiles.lastInboundAt}, ${customerProfiles.createdAt}),
         COALESCE(
           (SELECT MAX(${customerInteractions.createdAt}) FROM ${customerInteractions}
             WHERE ${customerInteractions.customerProfileId} = ${customerProfiles.id}
               AND ${customerInteractions.direction} = 'outbound'),
-          ${customerProfiles.updatedAt}
+          ${customerProfiles.createdAt}
         )
       )`;
       const rows = await drizzleDb
@@ -959,12 +969,20 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
           name: customerProfiles.name,
           email: customerProfiles.email,
           phone: customerProfiles.phone,
-          updatedAt: customerProfiles.updatedAt,
           status: customerProfiles.status,
           // customer-unread (0108) — 來訊未讀紅點的兩根指針。
           lastInboundAt: customerProfiles.lastInboundAt,
           jeffViewedAt: customerProfiles.jeffViewedAt,
-          lastContactAt: lastContactSql,
+          // 「最後往來」在 JS 用 computeLastContactAt 算(見上方註解),這裡只回三根
+          // 原始指針:inbound(已解碼 Date)、outbound(raw MAX,可能是 naive 字串)、
+          // createdAt(fallback,兩指針皆空才用)。updatedAt 不再 select — 它是 cron
+          // 蓋章的欄位,整條 guest 資料流不留它,杜絕未來誤抓(v787 紅線防禦縱深)。
+          lastOutboundAt: sql<Date | null>`(
+            SELECT MAX(${customerInteractions.createdAt}) FROM ${customerInteractions}
+              WHERE ${customerInteractions.customerProfileId} = ${customerProfiles.id}
+                AND ${customerInteractions.direction} = 'outbound'
+          )`,
+          createdAt: customerProfiles.createdAt,
           // 需跟進: an unanswered inquiry (by this profile's email) older than 2d.
           needsFollowup: sql<number>`EXISTS (SELECT 1 FROM ${inquiriesTable}
             WHERE ${inquiriesTable.customerEmail} = ${customerProfiles.email}
@@ -1006,8 +1024,16 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
       // Default view drops blocked guests; the "show hidden" toggle brings them
       // back. Nothing is deleted — a mis-hide is one click to restore.
       const withFlags = rows.map(
-        ({ status, needsFollowup, unread, lastInboundAt, jeffViewedAt, ...r }) => ({
+        ({ status, needsFollowup, unread, lastInboundAt, lastOutboundAt, jeffViewedAt, createdAt, ...r }) => ({
           ...r,
+          // 與 customerList 同一支純函式、同一口徑:inbound / outbound 取較新者,兩者
+          // 皆空才落 createdAt(絕不 updatedAt)。computeLastContactAt→toValidDate 把
+          // raw sql 的 naive DATETIME 字串錨成 UTC 真 Date,client 收到真 instant。
+          lastContactAt: computeLastContactAt(
+            lastInboundAt ?? null,
+            lastOutboundAt ?? null,
+            createdAt ?? null,
+          ),
           blocked: status === "blocked",
           needsFollowup: Number(needsFollowup) === 1,
           unread: Number(unread),

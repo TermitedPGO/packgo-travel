@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { guestToAdaptedCustomer, toListItem, deriveFollowup, buildInquiryEditedPayload, deriveProfile, deriveBallInCourt, deriveNextMove, isFollowUpDue, laToday, pickDefaultProject, shouldCommitRename, filterProjects, countUnkeptPromises } from "./adapters"
+import { guestToAdaptedCustomer, toListItem, deriveFollowup, buildInquiryEditedPayload, deriveProfile, deriveBallInCourt, deriveNextMove, isFollowUpDue, laToday, formatMonthDayLA, pickDefaultProject, shouldCommitRename, filterProjects, countUnkeptPromises } from "./adapters"
 import type { Project } from "./types"
 
 const mkProject = (id: number, title = `t${id}`): Project => ({
@@ -330,6 +330,44 @@ describe("isFollowUpDue / laToday — America/Los_Angeles, no UTC drift", () => 
     const now = new Date("2026-06-20T07:30:00Z").getTime()
     expect(laToday(now)).toBe("2026-06-20")
     expect(isFollowUpDue("2026-06-20", now)).toBe(true)
+  })
+})
+
+// v787 P1 回爐 (d) — 列表「最後往來」M/D 渲染固定美西曆日,不吃本機時區。
+describe("formatMonthDayLA — 列表日期以 America/Los_Angeles 渲染 M/D", () => {
+  it("Emerald 案:inbound 7/3 14:30Z → 美西仍是 7/3", () => {
+    expect(formatMonthDayLA(new Date("2026-07-03T14:30:00Z"))).toBe("7/3")
+  })
+
+  it("接近 UTC 午夜的時間戳,曆日以美西算不以 UTC 算(關鍵回歸)", () => {
+    // 2026-07-05T02:00:27Z(舊 bug 拿 updatedAt=cron 蓋章那晚)= 美西 7/4 19:00,
+    // 舊版 date-fns 照本機/UTC 會顯示 7/5,整整錯一天。這裡必須是 7/4。
+    expect(formatMonthDayLA(new Date("2026-07-05T02:00:27Z"))).toBe("7/4")
+  })
+
+  it("接受 ISO 字串輸入(帶 Z)", () => {
+    expect(formatMonthDayLA("2026-07-03T14:30:00Z")).toBe("7/3")
+  })
+
+  // 對抗審查 major 抓到的盲點:舊測試只餵帶 Z 的 ISO,永遠對,攔不到 guestList 送
+  // 的「naive 無時區 mysql DATETIME 字串」被瀏覽器本機時區 parse 的錯日 bug。這幾條
+  // 餵 naive 字串,鎖死「一律當 UTC 錨定、與跑測機時區無關」的契約。
+  it("naive mysql DATETIME 字串(無時區)一律當 UTC → 美西曆日,不吃跑測機時區", () => {
+    // 2026-07-03 14:30:00 視為 UTC = 美西 07:30 → 7/3。
+    expect(formatMonthDayLA("2026-07-03 14:30:00")).toBe("7/3")
+  })
+
+  it("naive 字串落在 UTC 凌晨(美西前一天晚上)→ 曆日以美西算,不是 UTC(關鍵回歸)", () => {
+    // 2026-07-03 02:00:00 視為 UTC = 美西 7/2 19:00 → 必須是 7/2。
+    // 舊 code path(client 對 naive 字串跑 new Date 照本機時區)在非美西機器會顯示 7/3。
+    expect(formatMonthDayLA("2026-07-03 02:00:00")).toBe("7/2")
+  })
+
+  it("null / undefined / 空 / 無法 parse → 空字串,不 crash", () => {
+    expect(formatMonthDayLA(null)).toBe("")
+    expect(formatMonthDayLA(undefined)).toBe("")
+    expect(formatMonthDayLA("")).toBe("")
+    expect(formatMonthDayLA("not-a-date")).toBe("")
   })
 })
 

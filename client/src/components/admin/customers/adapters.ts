@@ -408,6 +408,41 @@ export function laToday(now: number): string {
   }).format(new Date(now))
 }
 
+/**
+ * 列表「最後往來」日期渲染成 "M/D",固定用 America/Los_Angeles(v787 P1 回爐 d)。
+ * 舊版用 date-fns `format(d, "M/d")`,那是照「瀏覽器本機時區」算日;一個接近 UTC
+ * 午夜的時間戳(例:2026-07-05T02:00:27Z = 美西 7/4 晚上)在非美西的瀏覽器/SSR
+ * 會顯示成 7/5,曆日整個錯一天。Jeff 在 Newark CA,列表口徑一律以美西曆日為準,
+ * 所以這裡跟 laToday 同款,用 Intl + 明確 timeZone,不吃本機 UTC offset。
+ */
+export function formatMonthDayLA(d: Date | string | number | null | undefined): string {
+  if (d == null) return ""
+  let dt: Date
+  if (d instanceof Date) {
+    dt = d
+  } else if (typeof d === "number") {
+    dt = new Date(d)
+  } else {
+    // naive mysql DATETIME「YYYY-MM-DD HH:MM:SS」(無時區)一律當 UTC,對齊 server
+    // 端 toValidDate 與 drizzle 的 timestamp 解碼。否則 new Date(naive) 照「瀏覽器本機
+    // 時區」parse、曆日錯一天(guestList 錯日 bug 的另一半:server 已改送真 Date,這
+    // 裡是防禦縱深 + 契約鎖)。ISO 字串(帶 T/Z/明確 offset)照原樣 parse。
+    let s = String(d).trim()
+    if (!s) return ""
+    const naive =
+      /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/.test(s) &&
+      !/[zZ]$|[+-]\d{2}:?\d{2}$/.test(s)
+    if (naive) s = s.replace(" ", "T") + "Z"
+    dt = new Date(s)
+  }
+  if (Number.isNaN(dt.getTime())) return ""
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    month: "numeric",
+    day: "numeric",
+  }).format(dt)
+}
+
 /** A follow-up date is due when set and its calendar day <= today (LA). Pure
  *  lexical compare — both sides are zero-padded "YYYY-MM-DD", so string <= works. */
 export function isFollowUpDue(followUpDate: string | null, now: number): boolean {

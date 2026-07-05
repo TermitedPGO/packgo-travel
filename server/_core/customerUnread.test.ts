@@ -103,6 +103,73 @@ describe("computeLastContactAt — 列表日期口徑 (Phase6 A2)", () => {
     const fallback = d("2026-05-13");
     expect(computeLastContactAt(inbound, null, fallback)).toBe(inbound);
   });
+
+  // ---- v787 P0 回爐:型別韌性(raw sql<Date> outbound 被 driver 當字串丟回) ----
+  // customerList 的 lastOutboundAt 是 raw correlated subquery,drizzle 不解碼,
+  // mysql2/TiDB 把 DATETIME 當「字串」回傳。舊版 `.getTime()` 直接 throw,rows.map()
+  // 整批爆掉 → 註冊會員列表全空。這幾條鎖死「壞掉/字串日期永遠不准弄空列表」。
+  describe("型別韌性 — 字串/雜型 candidate 不准 throw、不准弄空列表 (P0)", () => {
+    it("outbound 是 mysql2 naive DATETIME 字串 → 當 UTC coerce(同 drizzle 基準),不 throw", () => {
+      const inbound = d("2026-05-13T00:00:00Z");
+      // 這正是 prod 打死 customerList 的形狀:字串,沒有 .getTime()。
+      const outboundStr = "2026-07-03 12:00:00";
+      expect(() => computeLastContactAt(inbound, outboundStr as unknown as Date)).not.toThrow();
+      const result = computeLastContactAt(inbound, outboundStr as unknown as Date);
+      expect(result).toBeInstanceOf(Date);
+      // outbound(7/3)比 inbound(5/13)新 → outbound 勝出。naive 字串視為 UTC,
+      // 與 drizzle 解碼 timestamp(new Date(v+"+0000"))同基準,不吃跑測機的時區。
+      expect(result?.getTime()).toBe(new Date("2026-07-03T12:00:00Z").getTime());
+    });
+
+    it("outbound 字串比 inbound 舊 → inbound(真 Date)勝出且原樣回傳", () => {
+      const inbound = d("2026-07-03T10:00:00Z");
+      const result = computeLastContactAt(inbound, "2026-07-01 09:00:00" as unknown as Date);
+      expect(result).toBe(inbound); // 參考相等:已是 Date 的不重建
+    });
+
+    it("outbound 是無法 parse 的垃圾字串 → 丟掉,不 throw,退回 inbound", () => {
+      const inbound = d("2026-07-03T10:00:00Z");
+      expect(() =>
+        computeLastContactAt(inbound, "not-a-date" as unknown as Date),
+      ).not.toThrow();
+      expect(computeLastContactAt(inbound, "not-a-date" as unknown as Date)).toBe(inbound);
+    });
+
+    it("兩根指針都是垃圾字串 → 落 fallback,不 throw", () => {
+      const fallback = d("2026-05-13T00:00:00Z");
+      const result = computeLastContactAt(
+        "" as unknown as Date,
+        "garbage" as unknown as Date,
+        fallback,
+      );
+      expect(result).toBe(fallback);
+    });
+
+    it("fallback 也是字串 → coerce 成 Date(呼叫端從 raw sql 餵 createdAt 字串也安全)", () => {
+      const result = computeLastContactAt(null, null, "2026-05-13 08:00:00" as unknown as Date);
+      expect(result).toBeInstanceOf(Date);
+      expect(result?.getTime()).toBe(new Date("2026-05-13T08:00:00Z").getTime());
+    });
+  });
+
+  // ---- v787 P1 回爐:fallback 一律 createdAt,updatedAt 永不出現在「最後往來」----
+  // 這是純函式層的契約鎖:呼叫端該餵 createdAt 當 fallback。有 inbound 的客人
+  // (Emerald 案:inbound=7/3)絕不該掉回一個更晚的 fallback(cron 蓋章的 7/5)。
+  describe("fallback 語意 — 有 inbound 就不准被更晚的 fallback 蓋掉 (P1)", () => {
+    it("Emerald 形狀:inbound=7/3、outbound 空、fallback=createdAt → 回 7/3 inbound,不是 fallback", () => {
+      const inbound = d("2026-07-03T14:30:00Z");
+      const createdAt = d("2026-06-01T00:00:00Z");
+      const result = computeLastContactAt(inbound, null, createdAt);
+      expect(result).toBe(inbound);
+    });
+
+    it("即使 fallback 比 inbound 晚(模擬拿 updatedAt 當 fallback 的舊 bug),inbound 仍勝出 → 證明 fallback 只在兩指針全空時才用", () => {
+      const inbound = d("2026-07-03T14:30:00Z");
+      const cronStamped = d("2026-07-05T02:00:27Z"); // 若誤把 updatedAt 當 fallback
+      // fallback 只在 candidates 皆空時採用;有 inbound → 一定回 inbound,永不回 fallback。
+      expect(computeLastContactAt(inbound, null, cronStamped)).toBe(inbound);
+    });
+  });
 });
 
 /** update(table).set(x).where(y) chain stub capturing set/where args. */

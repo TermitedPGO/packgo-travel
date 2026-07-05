@@ -2,7 +2,6 @@ import { useEffect, useMemo } from "react"
 import { toast } from "sonner"
 import { trpc } from "@/lib/trpc"
 import { useLocale } from "@/contexts/LocaleContext"
-import { format } from "date-fns"
 import type { ListItem, AdaptedCustomer, ChatMessage, AiChatMessage, Doc, Draft, Project } from "./types"
 import { stripQuotedReply } from "./conversationText"
 import {
@@ -22,6 +21,7 @@ import {
   inquiryApproveFailure,
   DraftSendFailedError,
   OPEN_INQUIRY_STATUSES,
+  formatMonthDayLA,
 } from "./adapters"
 
 /** Which row is selected — id alone is ambiguous (a profileId can collide with a
@@ -38,7 +38,8 @@ export function useCustomerData(
 ) {
   const { t, language } = useLocale()
   const utils = trpc.useUtils()
-  const formatDate = (d: Date) => format(new Date(d), "M/d")
+  // 列表日期一律以美西曆日渲染(不吃瀏覽器本機時區),見 formatMonthDayLA。
+  const formatDate = (d: Date) => formatMonthDayLA(d)
 
   const tagLabels: Record<string, string> = {
     active: t("admin.customers.tagActive"),
@@ -258,10 +259,11 @@ export function useCustomerData(
         phone,
         initials: deriveInitials(g.name ?? null, g.email || phone || "?"),
         ...avatar,
-        // A2 (Phase6) — guestList now returns lastContactAt (server GREATEST of
-        // lastInboundAt / last-outbound-interaction, falling back to
-        // updatedAt) instead of raw updatedAt, so guest and registered rows
-        // share the exact same "last contact" definition.
+        // A2 (Phase6; v787 回爐) — guestList 的 lastContactAt 現在由 server 端
+        // computeLastContactAt 算(inbound / outbound 取較新者,兩者皆空才落
+        // createdAt,絕不 updatedAt — updatedAt 被 02:00 cron 的 onUpdateNow 蓋章),
+        // 且已在 server 錨成 UTC 真 Date,與 registered rows 完全同一口徑;client
+        // 只要以美西曆日渲染(formatMonthDayLA)。
         lastContact: g.lastContactAt ? formatDate(new Date(g.lastContactAt)) : "",
         tag: "inquiry" as const,
         tagLabel: tagLabels.inquiry ?? "",

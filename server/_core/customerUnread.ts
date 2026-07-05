@@ -52,20 +52,53 @@ export function isUnreadInbound(
  *   - lastInboundAt:customerUnread 既有指針(inbound customerInteraction)。
  *   - lastOutboundAt:呼叫端從 customerInteractions 查 direction='outbound'
  *     的 MAX(createdAt)(escalationBox 回信、inquiry 回覆等)。
- * 兩者都空(從沒往來過,只註冊)→ fallback(通常是 createdAt/registeredAt),
- * 讓一個剛註冊、還沒任何互動的客人至少有個日期可顯示,不是空白。
+ * 兩者都空(從沒往來過,只註冊)→ fallback(一律 createdAt/registeredAt,
+ * 絕不用 updatedAt — updatedAt 被夜間摘要 cron 的 UPDATE 蓋成當晚時間,拿它
+ * 當「最後往來」= 歸檔時間冒充事件時間),讓剛註冊、還沒任何互動的客人至少
+ * 有個日期可顯示,不是空白。
  *
  * 純函式、與 isUnreadInbound 同款(取兩指針中較新者,不猜、不查 DB)。
+ *
+ * 型別韌性 (v787 P0 回爐):lastOutboundAt 由呼叫端的 raw `sql<Date>` correlated
+ * subquery 餵進來 — drizzle 只解碼「已知欄位」,raw sql fragment 不解碼,所以
+ * mysql2/TiDB 把 DATETIME 原封不動當「字串」丟回來。舊版直接 `.getTime()`,遇到
+ * 字串就 throw,把整個 customerList 的 rows.map() 打死 → 註冊會員全消失。
+ * 因此這裡把每個 candidate 一律 coerce 成 Date、parse 不出來就丟掉:一根壞掉的
+ * 日期指針永遠不准弄空整張列表。已是 Date 的照原樣回傳(保持參考相等)。
  */
+type ContactInput = Date | string | number | null | undefined;
+
+function toValidDate(v: ContactInput): Date | null {
+  if (v == null) return null;
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v;
+  if (typeof v === "number") {
+    const dt = new Date(v);
+    return Number.isNaN(dt.getTime()) ? null : dt;
+  }
+  let s = String(v).trim();
+  if (!s) return null;
+  // mysql2/TiDB 把 DATETIME 當 naive「YYYY-MM-DD HH:MM:SS」字串丟回(無時區)。
+  // drizzle 的 timestamp decoder 對這種字串是 `new Date(value + "+0000")` = 視為
+  // UTC。這裡的 raw-sql 值(lastOutboundAt)必須用同一個基準,否則同一筆記錄裡
+  // decoded 欄位(UTC)與 raw 值(誤當本機)會差一個 server offset,GREATEST 挑錯、
+  // 顯示錯一天。有 'T'/'Z'/明確 offset 的 ISO 字串則照原樣 parse。
+  const naiveDatetime =
+    /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/.test(s) &&
+    !/[zZ]$|[+-]\d{2}:?\d{2}$/.test(s);
+  if (naiveDatetime) s = s.replace(" ", "T") + "Z";
+  const dt = new Date(s);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
 export function computeLastContactAt(
-  lastInboundAt: Date | null | undefined,
-  lastOutboundAt: Date | null | undefined,
-  fallback: Date | null | undefined = null,
+  lastInboundAt: ContactInput,
+  lastOutboundAt: ContactInput,
+  fallback: ContactInput = null,
 ): Date | null {
-  const candidates = [lastInboundAt, lastOutboundAt].filter(
+  const candidates = [toValidDate(lastInboundAt), toValidDate(lastOutboundAt)].filter(
     (d): d is Date => d != null,
   );
-  if (candidates.length === 0) return fallback ?? null;
+  if (candidates.length === 0) return toValidDate(fallback);
   return candidates.reduce((latest, d) =>
     d.getTime() > latest.getTime() ? d : latest,
   );
