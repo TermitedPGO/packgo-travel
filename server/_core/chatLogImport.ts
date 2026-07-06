@@ -529,6 +529,9 @@ export interface ImportChatLogResult {
    * a name, rather than implying the same confidence as a real name check.
    */
   unverifiedNoName?: boolean;
+  /** true when called with mode:"dry_run" — importedCount is the would-import
+   *  count and NOTHING was written (批十一 塊C 案件對話批次預覽用)。 */
+  dryRun?: boolean;
 }
 
 export async function importChatLogForCustomer(params: {
@@ -536,8 +539,12 @@ export async function importChatLogForCustomer(params: {
   text: string;
   filename: string;
   customerName: string | null;
+  /** 批十一 塊C — dry_run:走完 classify + build(含未來日期防呆),但不 insert,回 would-import
+   *  預覽。預設 confirm(既有 Phase1a 呼叫端不變)。 */
+  mode?: "dry_run" | "confirm";
 }): Promise<ImportChatLogResult> {
   const { customerProfileId, text, filename, customerName } = params;
+  const mode = params.mode ?? "confirm";
   const todayLAStr = todayLA();
 
   let extraction: ChatLogExtraction | null;
@@ -578,6 +585,19 @@ export async function importChatLogForCustomer(params: {
 
   if (built.rows.length === 0) {
     return { status: "no_messages", droppedCount: built.droppedCount };
+  }
+
+  // 批十一 塊C dry_run:classify + build 都跑完(未來日期已在 buildChatLogInteractionRows 內
+  // 依 resolveEventDate 防呆丟掉),但不寫入 —— 回 would-import 預覽給監工過目。
+  if (mode === "dry_run") {
+    return {
+      status: "imported",
+      dryRun: true,
+      importedCount: built.rows.length,
+      droppedCount: built.droppedCount,
+      dateRange: built.dateRange,
+      unverifiedNoName,
+    };
   }
 
   try {

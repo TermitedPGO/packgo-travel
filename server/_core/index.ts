@@ -1457,6 +1457,43 @@ async function startServer() {
     }
   });
 
+  // 批十一 塊C — 案件對話進場:來源/ 的對話候選檔(.txt/.md)逐檔餵既有 chatLogImport 管線
+  // (classifier 判斷是否對話、resolveEventDate 未來日期一律不建、認人守門、(content,分鐘)去重
+  // 全沿用)。dry_run 只 classify+build 預覽不寫。POST /api/admin/import-case-conversations
+  //   Body: { mode:"dry_run"|"confirm", folderName, files:[{name, text}] }
+  app.post("/api/admin/import-case-conversations", async (req, res) => {
+    try {
+      const ip = await verifyInternalAuth(req, res, {
+        tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
+        rateLimitKey: "import-case-conversations",
+        rateLimitMax: 120,
+        windowSec: 3600,
+      });
+      if (!ip) return;
+      const { mode, folderName, files } = req.body || {};
+      if (mode !== "dry_run" && mode !== "confirm") {
+        return res.status(400).json({ error: "mode must be 'dry_run' or 'confirm'" });
+      }
+      if (typeof folderName !== "string" || !folderName.trim()) {
+        return res.status(400).json({ error: "Missing folderName" });
+      }
+      if (!Array.isArray(files)) {
+        return res.status(400).json({ error: "files must be an array" });
+      }
+      for (const f of files) {
+        if (!f || typeof f !== "object" || typeof f.name !== "string" || typeof f.text !== "string") {
+          return res.status(400).json({ error: "each file needs { name, text }" });
+        }
+      }
+      const { importCaseConversations } = await import("./caseConversationImport");
+      const result = await importCaseConversations({ folderName, files }, mode);
+      return res.json(result);
+    } catch (err) {
+      logger.error({ err }, "[admin/import-case-conversations] error");
+      return res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   // customer-cockpit Phase6 B4 — one-time backfill of customOrderId onto
   // EXISTING customerInteractions rows (customOrderId IS NULL), reusing B1's
   // deterministic-only rules (① thread inheritance, ② exactly-one-in-progress
