@@ -34,16 +34,39 @@ classify 成 `type=other、isInternalCost=true`(供應商成本,走 customer-doc
 **單測(10 綠)**:分類(PII / 來源成本 / 交付產物 / .md·.txt·隱藏檔跳過)、硬紅線紅綠例
 (reply-attachments/ key → throw;customerDocR2Key 一律 customer-docs/)、計畫 + 冪等。
 
-## 塊D 兩筆資料小修 — ship 後 ops 步驟(prod 寫入,本機無 DB 跑不了)
+## 塊D 兩筆資料小修 — prod SQL(Jeff 執行;本機無 DB、rename 無對應 ops 工具)
 
-兩筆都是單列 prod 資料寫入,照「最小修法」由監工/Jeff 在 ops chat 或 prod 執行:
+三個欄位、兩列:category(有 update_custom_order 工具)、note(有 update_customer_note)、卡名
+(**無對應 ops 工具**)。三者都是單欄更新,「最小修法」= 一段有守門、冪等、先 SELECT 再 UPDATE 的
+prod SQL,由 Jeff 在 prod DB 執行(我不碰 prod 寫入)。這兩筆是純資料,與批十一程式碼無耦合,不需
+等 ship,隨時可跑。
 
-1. **ORD-2026-0010(陳案)category flight → quote**(郵輪非機票):ops chat 釘住陳案 → 呼叫
-   `update_custom_order { orderId: <ORD-2026-0010 的 id>, category: "quote" }`(工具既有,enum 含 quote)。
-2. **金宥卡 2760048 note append**(名字「Sam大寶」是對接人非客人,不改名等護照):ops chat 釘住
-   金宥 → `update_customer_note { note: "卡名暫用對接人(Sam大寶,同業轉售),客人真名待護照;客人本人電話 +1 (510) 713-7888" }`(append 模式,不覆蓋)。
+金宥卡定位修正(Jeff 2026-07-06):金宥是 **B2B 同業客戶**(金宥旅行社向 Pack&Go 訂團轉售,窗口
+Sam大寶),不是等護照的散客 —— 卡名改「金宥(同業)Sam大寶」,note 記 B2B 定位 + 成本防漏鐵律。
 
-> 註:金宥卡真名待護照的判斷來自案件資料.md §一(對接人 Sam、客人真名以護照為準)。
+```sql
+-- 先看(確認無誤再跑下面的 UPDATE)
+SELECT id, orderNumber, category, title FROM customOrders WHERE customerProfileId = 2760050;
+SELECT id, name, jeffPersonalNote FROM customerProfiles WHERE id = 2760048;
+
+-- 塊D-1 陳案(郵輪非機票)category flight → quote(以陳卡 2760050 + 現值 flight 定位,冪等)
+UPDATE customOrders SET category = 'quote'
+ WHERE customerProfileId = 2760050 AND category = 'flight';
+
+-- 塊D-2a 金宥(B2B 同業)改名(冪等)
+UPDATE customerProfiles SET name = '金宥(同業)Sam大寶'
+ WHERE id = 2760048 AND (name IS NULL OR name <> '金宥(同業)Sam大寶');
+
+-- 塊D-2b 金宥 note append(冪等:已含 marker 就不重複)
+UPDATE customerProfiles
+ SET jeffPersonalNote = CONCAT(COALESCE(jeffPersonalNote,''),
+     IF(COALESCE(jeffPersonalNote,'')='','','\n'),
+     '[2026-07-06] B2B 同業轉售;乘客為金宥的客人非本社客戶;對金宥售價 $5,393;本社對縱橫成本依防漏閘紀律,絕不出現在任何給金宥的文件')
+ WHERE id = 2760048 AND (jeffPersonalNote IS NULL OR jeffPersonalNote NOT LIKE '%B2B 同業轉售%');
+```
+
+> 冪等 + 守門:category 只改「還是 flight」的;改名只在還沒改過時;note 只在還沒有 marker 時 append。
+> 重跑安全。陳案若不只一張 flight 單,先看上面第一條 SELECT 再決定要不要加 orderNumber 條件。
 
 ## 塊B 經驗收割進教訓庫 — 設計完成、列下一 tranche(需 prod migration)
 
