@@ -744,6 +744,25 @@ describe("sendEscalationReply summary refresh (Phase6 A4)", () => {
     expect(mockEnqueueRefresh).toHaveBeenCalledWith(42);
   });
 
+  it("F5: 把 target 的 gmailThreadId 傳給外寄記錄器(讓外寄回信沿 thread 繼承 customOrderId)", async () => {
+    recordOutboundMock.mockResolvedValue({
+      recorded: true,
+      interactionId: 601,
+      customerProfileId: 44,
+      customOrderId: 77,
+    });
+    getDbMock.mockResolvedValue(fakeDb([[msgRow], [integration], []]));
+
+    const res = await sendEscalationReply(5, "您好,行程已排好");
+
+    expect(res.sent).toBe(true);
+    // F5 wiring:escalationBox 必須把回信 thread 傳下去,recordOutboundEmailInteraction
+    // 才有辦法沿同 thread 既有歸屬繼承 customOrderId(與 inbound 規則①對稱)。
+    expect(recordOutboundMock).toHaveBeenCalledWith(
+      expect.objectContaining({ gmailThreadId: "t-1" }),
+    );
+  });
+
   it("no customerProfileId (recording failed) → refresh is skipped, send still succeeds", async () => {
     recordOutboundMock.mockResolvedValue({ recorded: false });
     getDbMock.mockResolvedValue(fakeDb([[msgRow], [integration], []]));

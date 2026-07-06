@@ -517,6 +517,46 @@ describe("attach_interaction_to_order — customer-cockpit Phase6 B2 聊天手�
     expect(mockGetCustomOrderById).not.toHaveBeenCalled();
   });
 
+  it("F1: rejects when neither interactionIds nor gmailThreadId given (不再整批歸全部未歸戶)", async () => {
+    const out = JSON.parse(
+      await executeWriteTool("attach_interaction_to_order", { orderId: 42 }, 2760016),
+    );
+    expect(out.success).toBeUndefined();
+    expect(out.error).toContain("必須指定");
+    // 在 selection 檢查就擋下,連訂單都還沒查。
+    expect(mockGetCustomOrderById).not.toHaveBeenCalled();
+    expect(mockAssignInteractionsToOrder).not.toHaveBeenCalled();
+  });
+
+  it("F1: empty interactionIds array 也算未指定 → reject", async () => {
+    const out = JSON.parse(
+      await executeWriteTool("attach_interaction_to_order", { orderId: 42, interactionIds: [] }, 2760016),
+    );
+    expect(out.success).toBeUndefined();
+    expect(out.error).toContain("必須指定");
+    expect(mockAssignInteractionsToOrder).not.toHaveBeenCalled();
+  });
+
+  it("F1: gmailThreadId path — attaches only that thread's unfiled rows", async () => {
+    mockGetCustomOrderById.mockResolvedValue({ id: 42, customerProfileId: 2760016, orderNumber: "ORD-2026-0042" });
+    mockSnapshot.mockResolvedValue({ userId: null, name: "x", email: "x@example.com" });
+    mockOrderBelongsToProfiles.mockReturnValue(true);
+    nextRows = [{ id: 501 }, { id: 502 }]; // 該 thread 的未歸戶 rows
+    mockAssignInteractionsToOrder.mockResolvedValue(2);
+
+    const out = JSON.parse(
+      await executeWriteTool("attach_interaction_to_order", { orderId: 42, gmailThreadId: "thread-xyz" }, 2760016),
+    );
+
+    expect(out.success).toBe(true);
+    expect(out.updated).toBe(2);
+    expect(mockAssignInteractionsToOrder).toHaveBeenCalledWith({
+      profileIds: [2760016],
+      orderId: 42,
+      interactionIds: [501, 502],
+    });
+  });
+
   it("successful assignment: unfiled interactions within scope get attached to the order", async () => {
     mockGetCustomOrderById.mockResolvedValue({ id: 42, customerProfileId: 2760016, orderNumber: "ORD-2026-0042" });
     mockSnapshot.mockResolvedValue({ userId: null, name: "劉衛國", email: "liu@example.com" });
@@ -526,7 +566,7 @@ describe("attach_interaction_to_order — customer-cockpit Phase6 B2 聊天手�
     mockAssignInteractionsToOrder.mockResolvedValue(2);
 
     const out = JSON.parse(
-      await executeWriteTool("attach_interaction_to_order", { orderId: 42 }, 2760016),
+      await executeWriteTool("attach_interaction_to_order", { orderId: 42, interactionIds: [101, 102] }, 2760016),
     );
 
     expect(out.success).toBe(true);
@@ -545,7 +585,7 @@ describe("attach_interaction_to_order — customer-cockpit Phase6 B2 聊天手�
     mockOrderBelongsToProfiles.mockReturnValue(false);
 
     const out = JSON.parse(
-      await executeWriteTool("attach_interaction_to_order", { orderId: 42 }, 2760016),
+      await executeWriteTool("attach_interaction_to_order", { orderId: 42, interactionIds: [101, 102] }, 2760016),
     );
 
     expect(out.success).toBeUndefined();
@@ -557,7 +597,7 @@ describe("attach_interaction_to_order — customer-cockpit Phase6 B2 聊天手�
     mockGetCustomOrderById.mockResolvedValue(null);
 
     const out = JSON.parse(
-      await executeWriteTool("attach_interaction_to_order", { orderId: 999 }, 2760016),
+      await executeWriteTool("attach_interaction_to_order", { orderId: 999, interactionIds: [101] }, 2760016),
     );
 
     expect(out.success).toBeUndefined();
@@ -565,18 +605,18 @@ describe("attach_interaction_to_order — customer-cockpit Phase6 B2 聊天手�
     expect(mockAssignInteractionsToOrder).not.toHaveBeenCalled();
   });
 
-  it("no unfiled interactions to attach → clear error, no assignment attempted", async () => {
+  it("指定到的都沒有可歸(已歸戶/非本人/id 不存在)→ clear error, no assignment attempted", async () => {
     mockGetCustomOrderById.mockResolvedValue({ id: 42, customerProfileId: 2760016, orderNumber: "ORD-2026-0042" });
     mockSnapshot.mockResolvedValue({ userId: null, name: "x", email: "x@example.com" });
     mockOrderBelongsToProfiles.mockReturnValue(true);
-    nextRows = []; // no unfiled interactions
+    nextRows = []; // 指定的 id 查不到可歸的
 
     const out = JSON.parse(
-      await executeWriteTool("attach_interaction_to_order", { orderId: 42 }, 2760016),
+      await executeWriteTool("attach_interaction_to_order", { orderId: 42, interactionIds: [101, 102] }, 2760016),
     );
 
     expect(out.success).toBeUndefined();
-    expect(out.error).toContain("沒有未歸戶");
+    expect(out.error).toContain("指定的對話沒有可歸");
     expect(mockAssignInteractionsToOrder).not.toHaveBeenCalled();
   });
 
@@ -589,7 +629,7 @@ describe("attach_interaction_to_order — customer-cockpit Phase6 B2 聊天手�
     mockAssignInteractionsToOrder.mockResolvedValue(1);
 
     const out = JSON.parse(
-      await executeWriteTool("attach_interaction_to_order", { orderId: 42 }, 2760016),
+      await executeWriteTool("attach_interaction_to_order", { orderId: 42, interactionIds: [101, 102] }, 2760016),
     );
 
     expect(out.success).toBe(true);
@@ -609,7 +649,7 @@ describe("attach_interaction_to_order — customer-cockpit Phase6 B2 聊天手�
     mockOrderBelongsToProfiles.mockReturnValue(true);
 
     const out = JSON.parse(
-      await executeWriteTool("attach_interaction_to_order", { orderId: 42 }, 2760016),
+      await executeWriteTool("attach_interaction_to_order", { orderId: 42, interactionIds: [101, 102] }, 2760016),
     );
 
     expect(out.success).toBeUndefined();
@@ -625,7 +665,7 @@ describe("attach_interaction_to_order — customer-cockpit Phase6 B2 聊天手�
     mockOrderBelongsToProfiles.mockReturnValue(true);
 
     const out = JSON.parse(
-      await executeWriteTool("attach_interaction_to_order", { orderId: 42 }, 2760016),
+      await executeWriteTool("attach_interaction_to_order", { orderId: 42, interactionIds: [101, 102] }, 2760016),
     );
 
     expect(out.success).toBeUndefined();
@@ -643,7 +683,7 @@ describe("attach_interaction_to_order — customer-cockpit Phase6 B2 聊天手�
     mockAssignInteractionsToOrder.mockResolvedValue(1);
 
     const out = JSON.parse(
-      await executeWriteTool("attach_interaction_to_order", { orderId: 42 }, 2760016),
+      await executeWriteTool("attach_interaction_to_order", { orderId: 42, interactionIds: [101, 102] }, 2760016),
     );
 
     expect(out.success).toBe(true);

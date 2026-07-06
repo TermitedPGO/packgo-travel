@@ -420,11 +420,12 @@ const PICK_ORDER_TOOL: Tool = {
  * customer-cockpit Phase6 B1 — resolve which customOrderId (if any) a fresh
  * inbound interaction should be stamped with. Priority: code before LLM.
  *   ① same gmailThreadId, a prior interaction already has customOrderId → inherit.
- *   ② customer has exactly one in-progress (non-terminal) order → auto-assign.
- *   ③ multiple in-progress orders → ask the LLM to pick from the candidate
- *      list; an unconfident or unmatched pick still resolves to NULL (cardinal
- *      rule: uncertain = NULL, never guess — decideInteractionOrderAssignment
- *      enforces this, this function only gathers the inputs it needs).
+ *   ②③ new thread with ANY in-progress candidate — including exactly one (F3:
+ *      no more bare auto-assign of a lone order; a fresh unrelated topic would
+ *      otherwise get filed onto it, e.g. a Yosemite inquiry onto the customer's
+ *      only order which is a Napa quote) — ask the LLM to pick; an unconfident
+ *      or unmatched pick resolves to NULL (cardinal rule: uncertain = NULL,
+ *      never guess — decideInteractionOrderAssignment enforces this).
  * Best-effort: any failure (DB or LLM) must never block mail filing, so this
  * returns null on error rather than throwing.
  */
@@ -474,11 +475,13 @@ async function resolveInboundInteractionOrderId(
       destination: o.destination,
     }));
 
-    if (candidates.length <= 1) {
+    // Zero candidates → NULL immediately (no LLM needed, nothing to attach to).
+    if (candidates.length === 0) {
       return decideInteractionOrderAssignment({ candidates }).customOrderId;
     }
 
-    // ③ multiple candidates — ask the LLM to pick, using only order metadata
+    // ②③ one OR more candidates → ask the LLM to pick (F3: the single-candidate
+    // case is confirmed too, never bare-assigned), using only order metadata
     // (no supplier cost, no customer PII beyond what's already in the email).
     const candidateList = candidates
       .map((c) => `- id=${c.id} 單號=${c.orderNumber} 總類=${c.category ?? "未分類"} 目的地=${c.destination ?? "未填"}`)
@@ -487,7 +490,7 @@ async function resolveInboundInteractionOrderId(
       {
         role: "system",
         content:
-          "你在判斷一封剛進來的客人 email 屬於這位客人名下哪一張訂製單。只根據信件主旨/摘要與候選單的總類/目的地做判斷。沒有足夠把握就回傳 orderId=null、confident=false,絕對不要用猜的。",
+          "你在判斷一封剛進來的客人 email 屬於這位客人名下哪一張訂製單。只根據信件主旨/摘要與候選單的總類/目的地做判斷。沒有足夠把握就回傳 orderId=null、confident=false,絕對不要用猜的。**就算候選只有一張,也只有在這封信確實跟那張單同一件事時才選它;若是新的、不同主題的詢問,一律回 orderId=null、confident=false**(例:客人只有一張『Napa 報價』單,但這封是問『優勝美地』,那就是新主題,不要掛上去)。",
       },
       {
         role: "user",

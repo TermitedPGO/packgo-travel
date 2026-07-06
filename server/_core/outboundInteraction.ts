@@ -10,7 +10,7 @@
  * Failure semantics: NEVER throws — the email is already sent; a bookkeeping
  * failure must not turn a successful send into an error. Logs and returns.
  */
-import { eq } from "drizzle-orm";
+import { and, asc, eq, isNotNull } from "drizzle-orm";
 import { getDb } from "../db";
 import { customerProfiles, customerInteractions } from "../../drizzle/schema";
 import { createChildLogger } from "./logger";
@@ -24,7 +24,14 @@ export async function recordOutboundEmailInteraction(args: {
   summary: string;
   /** who produced the text — human-approved drafts vs pure auto. */
   generatedBy: "human" | "ai_auto" | "ai_draft_human_approved";
-}): Promise<{ recorded: boolean; interactionId?: number; customerProfileId?: number }> {
+  /**
+   * F5(e2e-sweep-20260705 §F5):外寄回信沿同 gmailThreadId 既有歸屬繼承
+   * customOrderId,與 inbound 規則①對稱 —— 一封回信不該和它回的那封 inbound 分屬
+   * 不同 order 狀態。給了才查/繼承;thread 無歸屬、或沒給 threadId → customOrderId
+   * 留 NULL(絕不猜)。
+   */
+  gmailThreadId?: string | null;
+}): Promise<{ recorded: boolean; interactionId?: number; customerProfileId?: number; customOrderId?: number | null }> {
   try {
     const db = await getDb();
     if (!db) return { recorded: false };
@@ -47,6 +54,26 @@ export async function recordOutboundEmailInteraction(args: {
       return { recorded: false };
     }
 
+    // F5:同 thread 既有歸屬繼承(rule ① 對稱)。ORDER BY id ASC 取最早掛的那筆,
+    // 與 gmailPipeline resolveInboundInteractionOrderId 的「first wins」tiebreak 一致。
+    const gmailThreadId = args.gmailThreadId?.trim() || null;
+    let inheritedOrderId: number | null = null;
+    if (gmailThreadId) {
+      const [sibling] = await db
+        .select({ customOrderId: customerInteractions.customOrderId })
+        .from(customerInteractions)
+        .where(
+          and(
+            eq(customerInteractions.customerProfileId, profile.id),
+            eq(customerInteractions.gmailThreadId, gmailThreadId),
+            isNotNull(customerInteractions.customOrderId),
+          ),
+        )
+        .orderBy(asc(customerInteractions.id))
+        .limit(1);
+      inheritedOrderId = sibling?.customOrderId ?? null;
+    }
+
     const result = await db.insert(customerInteractions).values({
       customerProfileId: profile.id,
       channel: "email",
@@ -55,13 +82,16 @@ export async function recordOutboundEmailInteraction(args: {
       contentSummary: args.summary.slice(0, 500),
       generatedBy: args.generatedBy,
       agentName: "inquiry",
+      // 記上 threadId 讓後續同 thread 回信也能繼承;歸屬沿用該 thread 既有 order。
+      gmailThreadId: gmailThreadId ?? undefined,
+      customOrderId: inheritedOrderId ?? undefined,
     });
     // ResultSetHeader.insertId — same accessor pattern as server/db.ts /
     // auditLog.ts. Returned so callers (e.g. escalationBox promise
     // extraction) can attach to *this* row instead of re-querying "latest
     // interaction for this profile", which races under concurrent writes.
     const interactionId = Number((result as unknown as [{ insertId: number }])[0]?.insertId ?? 0) || undefined;
-    return { recorded: true, interactionId, customerProfileId: profile.id };
+    return { recorded: true, interactionId, customerProfileId: profile.id, customOrderId: inheritedOrderId };
   } catch (err) {
     log.warn(
       { err, customerEmail: args.customerEmail },

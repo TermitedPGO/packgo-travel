@@ -469,20 +469,30 @@ export const WRITE_TOOLS: Anthropic.Tool[] = [
   {
     name: "attach_interaction_to_order",
     description:
-      "把『目前這位客人』尚未歸類到任何專案的往來對話(未歸戶的 email/訊息)全部掛到指定的一張訂製單" +
-      "(專案)上。用在 Jeff 說「把剛剛那幾封掛到這張單」「這些對話歸到機票那張單」「幫我把未分類的都" +
-      "歸到這個專案」時。**這個工具沒有辦法指定單一封信** — 它一次把這位客人目前『未歸戶』的往來全部" +
-      "歸到你給的 orderId,所以只在 Jeff 明確要整批歸戶、且這位客人手上大多是要歸到同一張單的對話時才用;" +
-      "如果 Jeff 想要的是『只歸某一封』而不是全部未歸戶對話,先跟他確認,不要自己猜著呼叫。" +
+      "把『目前這位客人』指定的往來對話掛到指定的一張訂製單(專案)上。" +
+      "**必須明確指定要掛哪些** — 二選一(其一必填):interactionIds(一串 interaction id)或 " +
+      "gmailThreadId(整個 email thread)。兩個都沒給會被拒絕:這個工具不再『整批歸全部未歸戶對話』," +
+      "因為那會把不相干主題(例如客人另外問的新行程)混進同一張單。" +
+      "只掛還沒歸戶(customOrderId 為空)且屬於這位客人的那幾筆;指定到的若都已歸戶/不是這位客人的會被拒。" +
       "orderId 一律用剛剛 create_custom_order / update_custom_order 回傳過的 orderId,或 Jeff 直接講的單號" +
-      "對應的 id,絕不要編。只能歸到屬於這位客人的單;沒有未歸戶對話可歸、或這張單不是這位客人的都會被拒絕。" +
-      "做完用一句話報:歸了幾筆。",
+      "對應的 id,絕不要編。單已取消/完成的不能再歸戶。" +
+      "如果 Jeff 只說『把未分類的都掛上去』但沒給明確的信件/thread,先請他到客戶頁『歷史』分頁多選、" +
+      "或給你明確的 gmailThreadId / interactionIds,不要自己猜著整批掛。做完用一句話報:歸了幾筆。",
     input_schema: {
       type: "object",
       properties: {
         orderId: {
           type: "number",
           description: "要歸戶到的訂製單 id(從剛才建單/改單的回傳,或帳務/專案列表拿,不要編)",
+        },
+        interactionIds: {
+          type: "array",
+          items: { type: "number" },
+          description: "要掛的 interaction id 清單(與 gmailThreadId 二選一,必填其一)",
+        },
+        gmailThreadId: {
+          type: "string",
+          description: "要掛的整個 email thread 的 gmailThreadId(與 interactionIds 二選一,必填其一)",
         },
       },
       required: ["orderId"],
@@ -2125,20 +2135,32 @@ async function runWriteTool(
     }
 
     case "attach_interaction_to_order": {
-      // customer-cockpit Phase6 B2「聊天手動掛單」— exposes the ALREADY-BUILT
-      // assignInteractionsToOrder (customOrder.ts, built for the 歷史 tab's
-      // multi-select bulk-assign) to the LLM. Deliberately does NOT take
-      // interactionIds/gmailThreadIds as model input: no existing read tool
-      // ever surfaces a raw interaction id or gmailThreadId to the model (only
-      // orderId/orderNumber come back from create_custom_order /
-      // update_custom_order), so asking the model for one would just invite it
-      // to invent one. Instead the tool's one blunt, safe scope is "this
-      // customer's currently-unfiled (customOrderId IS NULL) interactions" —
-      // exactly what "把未歸戶的都掛上去" means, with no per-row guessing.
+      // customer-cockpit Phase6 B2「聊天手動掛單」→ F1 回爐(e2e-sweep-20260705 §F1)。
+      // 舊版一次歸『全部未歸戶對話』,粒度太粗,prod 實測把 Yosemite+北海道+Napa 三個
+      // 不相干主題全灌進同一張單。現在必須明確指定 interactionIds 或 gmailThreadId(二選一),
+      // 兩者都沒給 → 拒絕;只掛指定到的、屬於這位客人、且尚未歸戶(customOrderId 為空)的那幾筆。
       const orderId = Number(input?.orderId);
       if (!Number.isInteger(orderId) || orderId <= 0)
         return { error: "需要要歸戶的 orderId(正整數;從剛才建單/改單的回傳或帳務/專案列表拿,不要編)" };
       if (!profileId) return { error: "沒有選定客人 — 這個工具只能在某位客人的對話框裡用" };
+      // F1:二選一必填 —— interactionIds 或 gmailThreadId,兩者都沒給就拒絕。
+      const rawInteractionIds = Array.isArray(input?.interactionIds) ? input.interactionIds : null;
+      const selInteractionIds: number[] = rawInteractionIds
+        ? rawInteractionIds
+            .map((n: unknown) => Number(n))
+            .filter((n: number) => Number.isInteger(n) && n > 0)
+        : [];
+      const selThreadId =
+        typeof input?.gmailThreadId === "string" && input.gmailThreadId.trim()
+          ? input.gmailThreadId.trim()
+          : null;
+      if (selInteractionIds.length === 0 && !selThreadId)
+        return {
+          error:
+            "必須指定要掛哪些:interactionIds(一串 id)或 gmailThreadId(整個 thread)二選一。" +
+            "這個工具不再整批歸全部未歸戶對話(會把不相干主題混進同一張單)。" +
+            "若 Jeff 沒給明確選擇,請他到客戶頁『歷史』分頁多選,或給你明確的 thread / interaction id。",
+        };
 
       const {
         getCustomOrderById,
@@ -2173,7 +2195,12 @@ async function runWriteTool(
         };
 
       const { customerInteractions } = await import("../../../drizzle/schema");
-      const { and, inArray, isNull } = await import("drizzle-orm");
+      const { and, inArray, isNull, eq } = await import("drizzle-orm");
+      // F1:只掛「指定到的」那幾筆 —— 本客人 scope + 尚未歸戶 + (interactionIds 或整個 thread)。
+      const selectionClause =
+        selInteractionIds.length > 0
+          ? inArray(customerInteractions.id, selInteractionIds)
+          : eq(customerInteractions.gmailThreadId, selThreadId!);
       const unfiled = await db
         .select({ id: customerInteractions.id })
         .from(customerInteractions)
@@ -2181,11 +2208,12 @@ async function runWriteTool(
           and(
             inArray(customerInteractions.customerProfileId, scopeIds),
             isNull(customerInteractions.customOrderId),
+            selectionClause,
           ),
         )
         .limit(200);
       if (unfiled.length === 0)
-        return { error: "這位客人目前沒有未歸戶的往來對話可以歸" };
+        return { error: "指定的對話沒有可歸的(可能已歸戶、不是這位客人的、或指定的 id/thread 不存在)" };
 
       const updated = await assignInteractionsToOrder({
         profileIds: scopeIds,

@@ -690,6 +690,8 @@ export async function sendEscalationReply(
     body: finalBody,
     summary: `回覆:${target.subject || "(無主旨)"}(你核准寄出)`,
     generatedBy: "ai_draft_human_approved",
+    // F5:這封回信沿同 thread 既有歸屬繼承 customOrderId(與 inbound 對稱)。
+    gmailThreadId: target.gmailThreadId,
   });
 
   // customer-cockpit Phase6 A4 — 這封回覆改變了對話,摘要卡可能已過期;
@@ -724,7 +726,8 @@ export async function sendEscalationReply(
       await recordPromisesForInteraction({
         sourceInteractionId: outboundResult.interactionId,
         customerProfileId: outboundResult.customerProfileId,
-        customOrderId: null,
+        // F5:承諾跟著這封外寄 interaction 的歸屬走(thread 繼承來的 order,或 NULL)。
+        customOrderId: outboundResult.customOrderId ?? null,
         emailBody: finalBody,
         todayLA: todayLA(),
       });

@@ -16,15 +16,14 @@
  * 高信心的一個選擇時才採用;沒給 llmPick、llmPick 不在候選清單裡、或
  * llmPick.confident === false,一律 NULL。
  *
- * 規則優先序:
+ * 規則優先序(F3 回爐後):
  *   ① 同一 gmailThreadId 的前一封信已經掛了 customOrderId → 直接繼承(no LLM,
- *      甚至不看候選清單——B4 回填也吃這條,純 code)。
- *   ② 候選清單(客人的「進行中」訂單,呼叫端已排除 completed/cancelled)恰好
- *      只有一張 → 自動掛這張。
- *   ③ 候選清單有兩張以上(或此函式被要求跳過③,見下)→ 需要呼叫端另外問過
- *      LLM,把 llmPick 傳進來;這裡只做「验证 llmPick 合法且信心足够」的裁決,
- *      不在這支函式裡打 LLM(保持這支函式對 DB/網路零依賴,單元測試不用 mock
- *      任何外部服務)。
+ *      甚至不看候選清單——B4 回填也吃這條,純 code)。不變。
+ *   ②③ 新 thread(無 ① 繼承)有任何候選 —— 含「唯一候選」—— 一律要呼叫端問過 LLM
+ *      並傳入高信心 llmPick 才掛;這裡只驗證 llmPick 合法且信心足夠。沒 llmPick
+ *      (例如 B4 純 deterministic 回填,永不帶 llmPick)、不 confident、或命中不到
+ *      候選 → NULL。**絕不裸掛**(舊「唯一在辦單→自動掛」會把新主題的信混進不相干
+ *      的單,見 e2e-sweep-20260705 §F3 Yosemite 混進 Napa 單的實測)。
  *   零張候選 → NULL(沒有可掛的單)。
  */
 
@@ -57,18 +56,21 @@ export interface AssignInteractionOrderInput {
    */
   candidates: OrderCandidate[];
   /**
-   * Only used when candidates.length > 1. Omit entirely (e.g. B4's
-   * deterministic-only backfill, which must never invoke an LLM) to skip
-   * straight to NULL for the ambiguous case.
+   * Used whenever there is at least one candidate and no ① thread inheritance
+   * — including the single-candidate case (F3: a lone in-progress order is NOT
+   * auto-assigned any more; it must be LLM-confirmed too). Omit entirely (e.g.
+   * B4's deterministic-only backfill, which must never invoke an LLM) to skip
+   * straight to NULL.
    */
   llmPick?: LlmOrderPick;
 }
 
 export type AssignInteractionOrderReason =
   | "thread_inherited"
-  | "single_in_progress_order"
   | "llm_confident_pick"
   | "no_candidates"
+  // 新 thread 有候選但無 confident LLM pick(含唯一候選、B4 無 LLM 回填、
+  // 多候選不確定)→ NULL,絕不裸掛(F3)。
   | "ambiguous_no_llm_or_unconfident";
 
 export interface AssignInteractionOrderResult {
@@ -90,18 +92,17 @@ export function decideInteractionOrderAssignment(
 
   const candidates = input.candidates ?? [];
 
-  // ② exactly one in-progress order → auto-assign.
-  if (candidates.length === 1) {
-    return { customOrderId: candidates[0].id, reason: "single_in_progress_order" };
-  }
-
   // Zero in-progress orders → nothing to attach to.
   if (candidates.length === 0) {
     return { customOrderId: null, reason: "no_candidates" };
   }
 
-  // ③ multiple candidates — only an explicit, confident LLM pick that names
-  // one of the actual candidates can resolve this. Anything less → NULL.
+  // ② + ③ 統一(F3 回爐,E2E e2e-sweep-20260705 §F3):新 thread(無 ① 繼承)有任何
+  // 候選 —— 含「唯一候選」—— 一律要 LLM 高信心確認才掛,否則 NULL。舊規則②「唯一
+  // 在辦單→裸掛」太激進:客人手上只有一張 Napa 報價單時,一封全新主題的 Yosemite
+  // 詢問會被裸掛進 Napa 單(prod 實測混單)。現在唯一候選與多候選走同一條路:只有
+  // llmPick 明確、confident===true、且命中候選清單才採用;沒 llmPick(例如 B4 純
+  // deterministic 回填,永不帶 llmPick)、不 confident、或命中不到 → NULL。絕不裸掛。
   const pick = input.llmPick;
   if (
     pick &&

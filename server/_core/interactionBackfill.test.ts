@@ -42,18 +42,20 @@ describe("buildProfileBackfillPlan — pure planning logic", () => {
     }
   });
 
-  it("single in-progress order → every NULL row gets backfilled to it (rule ②)", () => {
+  it("F3: single in-progress order no longer bare-backfills (B4 無 LLM)→ 每筆留 NULL", () => {
     const plan = buildProfileBackfillPlan({
       profileId: 1,
       nullRows: [row(1), row(2)],
       threadOrderMap: new Map(),
       candidates: [order(50)],
     });
-    expect(plan.assignedCount).toBe(2);
-    expect(plan.staysNullCount).toBe(0);
+    // 舊行為(規則②)會把兩筆都裸掛到 order 50;F3 後 B4 不裸掛,兩筆留 NULL,
+    // 只有 thread 繼承(規則①)才會被 B4 回填。
+    expect(plan.assignedCount).toBe(0);
+    expect(plan.staysNullCount).toBe(2);
     for (const d of plan.decisions) {
-      expect(d.customOrderId).toBe(50);
-      expect(d.reason).toBe("single_in_progress_order");
+      expect(d.customOrderId).toBeNull();
+      expect(d.reason).toBe("ambiguous_no_llm_or_unconfident");
     }
   });
 
@@ -79,23 +81,37 @@ describe("buildProfileBackfillPlan — pure planning logic", () => {
     expect(plan.assignedCount).toBe(1);
   });
 
-  it("propagates an in-batch assignment to a later NULL row on the same thread (chronological order matters)", () => {
+  it("F3: single candidate 不再 seed in-batch 傳播 → 同 thread 多筆全 NULL", () => {
     const plan = buildProfileBackfillPlan({
       profileId: 4,
       nullRows: [
         row(2, { gmailThreadId: "thread-B", createdAt: new Date("2026-06-02T00:00:00Z") }),
-        row(1, { gmailThreadId: "thread-B", createdAt: new Date("2026-06-01T00:00:00Z") }), // earlier, out of array order
+        row(1, { gmailThreadId: "thread-B", createdAt: new Date("2026-06-01T00:00:00Z") }),
       ],
       threadOrderMap: new Map(),
-      candidates: [order(20)], // single in-progress order -> row 1 resolves via rule ②, row 2 should inherit from row 1
+      candidates: [order(20)],
     });
-    // Both rows in this profile get the same order since there's only one
-    // candidate — but this test's real point is ordering: row 1 (earlier)
-    // is processed first and seeds the thread map for row 2.
-    const byId = new Map(plan.decisions.map((d) => [d.interactionId, d]));
-    expect(byId.get(1)?.reason).toBe("single_in_progress_order");
-    expect(byId.get(2)?.reason).toBe("thread_inherited");
-    expect(byId.get(2)?.customOrderId).toBe(20);
+    // 舊行為:row 1 靠規則②裸掛 20,再 seed 給 row 2 繼承。F3 後 row 1 不裸掛 → NULL,
+    // 沒東西可 seed → row 2 也 NULL。
+    expect(plan.assignedCount).toBe(0);
+    for (const d of plan.decisions) expect(d.customOrderId).toBeNull();
+  });
+
+  it("thread 繼承(規則①)對同 thread 多筆都生效 + in-batch 傳播:早的先處理 seed 給晚的", () => {
+    const plan = buildProfileBackfillPlan({
+      profileId: 4,
+      nullRows: [
+        row(2, { gmailThreadId: "thread-C", createdAt: new Date("2026-06-02T00:00:00Z") }),
+        row(1, { gmailThreadId: "thread-C", createdAt: new Date("2026-06-01T00:00:00Z") }),
+      ],
+      threadOrderMap: new Map([["thread-C", 30]]),
+      candidates: [order(20), order(21)], // 多候選:證明靠的是 thread 繼承不是候選數
+    });
+    expect(plan.assignedCount).toBe(2);
+    for (const d of plan.decisions) {
+      expect(d.customOrderId).toBe(30);
+      expect(d.reason).toBe("thread_inherited");
+    }
   });
 
   it("never passes an llmPick — deterministic-only, verified by asserting the ambiguous multi-candidate case always lands on ambiguous_no_llm_or_unconfident, never llm_confident_pick", () => {
@@ -115,12 +131,14 @@ describe("summarizeBackfillPlans", () => {
     const plans: ProfileBackfillPlan[] = [
       buildProfileBackfillPlan({
         profileId: 1,
-        nullRows: [row(1), row(2)],
-        threadOrderMap: new Map(),
+        // 兩筆同 thread + 已知 thread→order 5(規則① 繼承)→ 兩筆都掛 5。
+        nullRows: [row(1, { gmailThreadId: "t1" }), row(2, { gmailThreadId: "t1" })],
+        threadOrderMap: new Map([["t1", 5]]),
         candidates: [order(1)],
       }),
       buildProfileBackfillPlan({
         profileId: 2,
+        // 多候選、無繼承 → NULL。
         nullRows: [row(3)],
         threadOrderMap: new Map(),
         candidates: [order(1), order(2)],
@@ -130,7 +148,7 @@ describe("summarizeBackfillPlans", () => {
     expect(stats.totalNullRows).toBe(3);
     expect(stats.assignedCount).toBe(2);
     expect(stats.staysNullCount).toBe(1);
-    expect(stats.byReason.single_in_progress_order).toBe(2);
+    expect(stats.byReason.thread_inherited).toBe(2);
     expect(stats.byReason.ambiguous_no_llm_or_unconfident).toBe(1);
   });
 
@@ -217,12 +235,14 @@ beforeEach(() => {
 });
 
 describe("runInteractionBackfill", () => {
-  it("dry_run does not write to DB", async () => {
+  it("dry_run does not write to DB (backfill 靠 thread 繼承)", async () => {
     selectChain.where
       .mockResolvedValueOnce([
-        { id: 1, customerProfileId: 100, gmailThreadId: null, createdAt: new Date("2026-06-01") },
-      ]) // NULL rows
-      .mockResolvedValueOnce(ob([])); // already-assigned siblings
+        { id: 1, customerProfileId: 100, gmailThreadId: "thr-1", createdAt: new Date("2026-06-01") },
+      ]) // NULL rows (on thread thr-1)
+      .mockResolvedValueOnce(ob([
+        { customerProfileId: 100, gmailThreadId: "thr-1", customOrderId: 500 }, // 已歸戶 sibling → 規則① 繼承
+      ]));
     mockListCustomOrdersByProfile.mockResolvedValueOnce([
       { id: 500, orderNumber: "ORD-2026-0500", category: "quote", destination: "日本" },
     ]);
@@ -231,15 +251,17 @@ describe("runInteractionBackfill", () => {
     expect(result.status).toBe("ok");
     expect(result.mode).toBe("dry_run");
     expect(mockDb.update).not.toHaveBeenCalled();
-    expect(result.stats?.assignedCount).toBe(1);
+    expect(result.stats?.assignedCount).toBe(1); // 靠 thread 繼承(F3 後單候選不裸掛)
   });
 
-  it("confirm mode actually writes the assignments", async () => {
+  it("confirm mode actually writes the assignments (thread 繼承)", async () => {
     selectChain.where
       .mockResolvedValueOnce([
-        { id: 1, customerProfileId: 100, gmailThreadId: null, createdAt: new Date("2026-06-01") },
+        { id: 1, customerProfileId: 100, gmailThreadId: "thr-1", createdAt: new Date("2026-06-01") },
       ])
-      .mockResolvedValueOnce(ob([]));
+      .mockResolvedValueOnce(ob([
+        { customerProfileId: 100, gmailThreadId: "thr-1", customOrderId: 500 },
+      ]));
     mockListCustomOrdersByProfile.mockResolvedValueOnce([
       { id: 500, orderNumber: "ORD-2026-0500", category: "quote", destination: "日本" },
     ]);
@@ -252,7 +274,7 @@ describe("runInteractionBackfill", () => {
     expect(result.updatedCount).toBe(1);
   });
 
-  it("acceptance case: a customer with exactly one in-progress order gets backfilled", async () => {
+  it("F3: a customer with only a single in-progress order (無 thread 繼承)→ NOT backfilled,留 NULL", async () => {
     selectChain.where
       .mockResolvedValueOnce([
         { id: 1, customerProfileId: 200, gmailThreadId: null, createdAt: new Date("2026-06-01") },
@@ -265,9 +287,9 @@ describe("runInteractionBackfill", () => {
 
     const result = await runInteractionBackfill("dry_run");
     expect(result.stats?.totalNullRows).toBe(2);
-    expect(result.stats?.assignedCount).toBe(2);
-    expect(result.stats?.staysNullCount).toBe(0);
-    expect(result.stats?.byReason.single_in_progress_order).toBe(2);
+    expect(result.stats?.assignedCount).toBe(0);
+    expect(result.stats?.staysNullCount).toBe(2);
+    expect(result.stats?.byReason.ambiguous_no_llm_or_unconfident).toBe(2);
   });
 
   it("regression: conflicting sibling rows on the same thread (customOrderId differs) resolve deterministically — earliest-assigned (lowest id) wins, not query row order", async () => {
