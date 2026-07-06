@@ -1362,6 +1362,58 @@ async function startServer() {
     }
   });
 
+  // 批十一 塊A — 案件夾文件進場:掃已匯入案件的 交付/ 與 來源/,逐檔上傳 R2 並寫
+  // customerDocuments(掛該案訂單、uploadedBy='case_import')。同 import-case-file 的
+  // dry_run/confirm 兩段 + LOCAL_SCRIPT_TOKEN。⛔ 硬紅線:文件 key 一律 customer-docs/,
+  // 絕不 reply-attachments/(caseDocumentImport.assertNotOutboundKey 每次上傳硬擋)。
+  // POST /api/admin/import-case-documents
+  //   Body: { mode:"dry_run"|"confirm", folderName, files:[{subfolder:"交付"|"來源",name,sizeBytes,base64?}] }
+  //   dry_run 只送 metadata(不帶 base64);confirm 帶 base64,腳本按大小分批(body 上限 10mb)。
+  app.post("/api/admin/import-case-documents", async (req, res) => {
+    try {
+      const ip = await verifyInternalAuth(req, res, {
+        tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
+        rateLimitKey: "import-case-documents",
+        rateLimitMax: 300,
+        windowSec: 3600,
+      });
+      if (!ip) return;
+      const { mode, folderName, files } = req.body || {};
+      if (mode !== "dry_run" && mode !== "confirm") {
+        return res.status(400).json({ error: "mode must be 'dry_run' or 'confirm'" });
+      }
+      if (typeof folderName !== "string" || !folderName.trim()) {
+        return res.status(400).json({ error: "Missing folderName" });
+      }
+      if (!Array.isArray(files)) {
+        return res.status(400).json({ error: "files must be an array" });
+      }
+      const SUBS = new Set(["交付", "來源"]);
+      for (const f of files) {
+        if (
+          !f ||
+          typeof f !== "object" ||
+          !SUBS.has(f.subfolder) ||
+          typeof f.name !== "string" ||
+          typeof f.sizeBytes !== "number"
+        ) {
+          return res
+            .status(400)
+            .json({ error: "each file needs { subfolder:交付|來源, name, sizeBytes, base64? }" });
+        }
+        if (mode === "confirm" && typeof f.base64 !== "string") {
+          return res.status(400).json({ error: `confirm requires base64 for ${f.name}` });
+        }
+      }
+      const { importCaseDocuments } = await import("./caseDocumentImport");
+      const result = await importCaseDocuments({ folderName, files }, mode);
+      return res.json(result);
+    } catch (err) {
+      logger.error({ err }, "[admin/import-case-documents] error");
+      return res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   // customer-cockpit Phase6 B4 — one-time backfill of customOrderId onto
   // EXISTING customerInteractions rows (customOrderId IS NULL), reusing B1's
   // deterministic-only rules (① thread inheritance, ② exactly-one-in-progress
