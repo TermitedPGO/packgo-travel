@@ -75,6 +75,10 @@ COPY --from=builder /app/drizzle ./drizzle
 COPY --from=builder /app/scripts ./scripts
 # Round 80.22 H2: brand assets (PACK&GO logo for poster Sharp post-process)
 COPY --from=builder /app/server/assets ./server/assets
+# Batch 8: customer-document brand templates (receipt/quote/flight HTML + logo b64),
+# read from disk at render time by server/_core/customerDocumentRender.ts. esbuild
+# bundles the .ts but not these .html/.txt data files, so they must ship explicitly.
+COPY --from=builder /app/server/documentTemplates ./server/documentTemplates
 
 # Non-root user for runtime
 RUN useradd -m -u 1001 packgo && chown -R packgo:packgo /app

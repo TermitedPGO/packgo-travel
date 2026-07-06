@@ -1,0 +1,89 @@
+<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8"><style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
+* { margin:0; padding:0; box-sizing:border-box; }
+@page { size:A4; margin:0; }
+body { font-family:'Noto Sans TC','Noto Sans CJK TC','PingFang TC','Heiti TC',sans-serif; color:#1A1A1A; font-size:10pt; line-height:1.42; }
+.header { background:#1A1A1A; padding:14px 32px 10px; text-align:center; }
+.header img { width:36px; height:auto; margin-bottom:5px; }
+.header .co { color:#fff; font-size:12pt; font-weight:700; letter-spacing:3px; }
+.header h1 { color:#fff; font-size:18pt; font-weight:700; letter-spacing:5px; margin-top:5px; }
+.header .en { color:#CFCFCF; font-size:8.5pt; letter-spacing:3px; margin-top:2px; }
+.content { padding:9px 32px 0; }
+.meta { display:flex; justify-content:space-between; font-size:8.8pt; color:#555; border-bottom:1.5px solid #1A1A1A; padding-bottom:5px; margin-bottom:7px; }
+.meta b { color:#1A1A1A; }
+.sect { display:flex; align-items:center; margin:7px 0 3px; padding-bottom:3px; border-bottom:1.5px solid #D2D2D2; }
+.sect .bar { width:4px; height:16px; background:#1A1A1A; margin-right:8px; }
+.sect h2 { font-size:11pt; font-weight:700; }
+.co-grid { display:flex; flex-wrap:wrap; }
+.co-grid .row { width:50%; display:flex; margin-bottom:3px; font-size:9pt; }
+.co-grid .lbl { width:58px; color:#888; flex-shrink:0; }
+.co-grid .val { color:#1A1A1A; }
+.card { border:1.5px solid #1A1A1A; border-radius:8px; padding:8px 20px; margin-top:3px; }
+.card .line { display:flex; justify-content:space-between; align-items:baseline; padding:4px 0; border-bottom:1px solid #EAEAEA; }
+.card .line:last-child { border-bottom:none; }
+.card .k { color:#555; font-size:9.5pt; }
+.card .v { color:#1A1A1A; font-size:10.5pt; font-weight:700; }
+.card .big .k { font-size:10.5pt; color:#1A1A1A; font-weight:700; }
+.card .big .v { font-size:17pt; }
+.card .big { background:#F2F2F2; margin:2px -9px; padding:7px 9px; border-radius:6px; border-bottom:none; }
+.badge-wrap { text-align:center; margin:7px 0 3px; }
+.badge { display:inline-block; background:#1A1A1A; color:#fff; font-size:10.5pt; font-weight:700; letter-spacing:2px; padding:7px 20px; border-radius:20px; white-space:nowrap; }
+.policy { margin-left:15px; font-size:9pt; color:#555; line-height:1.4; }
+.policy li { margin-bottom:2px; padding-left:2px; }
+.policy b { color:#1A1A1A; }
+.note { font-size:8.3pt; color:#888; margin:6px 2px 0; line-height:1.4; }
+.footer { text-align:center; padding:7px 32px; border-top:1.5px solid #1A1A1A; margin:7px 32px 0; }
+.footer img { width:21px; height:auto; margin-bottom:3px; }
+.footer .co { font-weight:700; font-size:9.5pt; margin-bottom:2px; }
+.footer .info { color:#888; font-size:8pt; }
+</style></head><body>
+
+<div class="header">
+  <img src="data:image/png;base64,{{WHITE_LOGO}}" />
+  <div class="co">Pack &amp; Go, LLC</div>
+  <h1>{{TITLE}}</h1>
+  <div class="en">{{TITLE_EN}}</div>
+</div>
+
+<div class="content">
+  <div class="meta"><span>報價編號　<b>{{QUOTE_NO}}</b></span><span>報價日期　<b>{{DATE}}</b></span></div>
+
+  <div class="sect"><div class="bar"></div><h2>公司資訊</h2></div>
+  <div class="co-grid">
+    <div class="row"><span class="lbl">報價方</span><span class="val">{{PAYEE}}</span></div>
+    <div class="row"><span class="lbl">客人</span><span class="val">{{CLIENT}}</span></div>
+    <div class="row"><span class="lbl">CST</span><span class="val">#2166984-40</span></div>
+    <div class="row"><span class="lbl">聯絡人</span><span class="val">謝俊甫 Jeff Hsieh</span></div>
+    <div class="row"><span class="lbl">電話</span><span class="val">+1 (510) 634-2307</span></div>
+    <div class="row"><span class="lbl">Email</span><span class="val">jeffhsieh09@gmail.com</span></div>
+    <div class="row" style="width:100%;"><span class="lbl">地址</span><span class="val">39055 Cedar Blvd #126, Newark, CA 94560</span></div>
+  </div>
+
+  <div class="sect"><div class="bar"></div><h2>報價明細</h2></div>
+  <div class="card">
+    <div class="line"><span class="k">行程名稱</span><span class="v">{{TRIP_NAME}}</span></div>
+    <div class="line"><span class="k">出發日期</span><span class="v">{{TRIP_DATES}}</span></div>
+    {{PAX_ROW}}
+    <div class="line big"><span class="k">行程總價</span><span class="v">US$ {{TOTAL}}</span></div>
+  </div>
+
+  <div class="badge-wrap"><span class="badge">{{BADGE_TEXT}}</span></div>
+
+  {{EXTRA_SECTIONS}}
+
+  <div class="sect"><div class="bar"></div><h2>付款方式</h2></div>
+  <ul class="policy">{{PAY_TERMS}}</ul>
+
+  <div class="sect"><div class="bar"></div><h2>取消政策</h2></div>
+  <ul class="policy">{{CANCEL_TERMS}}</ul>
+
+  <div class="note">{{NOTE}}</div>
+
+  <div class="footer">
+    <img src="data:image/png;base64,{{BLACK_LOGO}}" />
+    <div class="co">Pack &amp; Go, LLC</div>
+    <div class="info">CST #2166984-40 · Newark, CA · packgoplay.com · 本報價日期：{{DATE}}</div>
+  </div>
+</div>
+
+</body></html>

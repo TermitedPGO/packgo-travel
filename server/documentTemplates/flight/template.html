@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Noto Sans TC', 'Noto Sans CJK TC', 'PingFang TC', 'Heiti TC', sans-serif; color: #1A1A1A; font-size: 14px; background: #fff; }
+
+/* === Page container === */
+.page { padding: 36px 40px; min-height: 100vh; display: flex; flex-direction: column; page-break-after: always; }
+.page:last-child { page-break-after: auto; }
+
+/* === Title area === */
+.title { font-size: 28px; font-weight: 700; margin-bottom: 6px; color: #1A1A1A; }
+.subtitle { font-size: 14px; color: #888888; margin-bottom: 30px; }
+
+/* === Flight card === */
+.card { border: 1.5px solid #D2D2D2; border-radius: 14px; padding: 26px 30px; margin-bottom: 16px; page-break-inside: avoid; }
+.card.recommend { border: 2.5px solid #1A1A1A; }
+.card.full-page { flex: 1; display: flex; flex-direction: column; }
+
+/* === Card header === */
+.card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.badge { display: inline-block; font-size: 13px; font-weight: 500; padding: 6px 16px; border-radius: 8px; }
+.badge-ua { background: #1A1A1A; color: #FFFFFF; }
+.badge-ca { background: #1A1A1A; color: #FFFFFF; }
+.badge-ci { background: #1A1A1A; color: #FFFFFF; }
+.badge-br { background: #1A1A1A; color: #FFFFFF; }
+.badge-dl { background: #1A1A1A; color: #FFFFFF; }
+.badge-aa { background: #1A1A1A; color: #FFFFFF; }
+.badge-default { background: #1A1A1A; color: #FFFFFF; }
+.badge-rec { background: #1A1A1A; color: #FFFFFF; margin-left: 8px; font-size: 11px; }
+.price { font-size: 28px; font-weight: 700; color: #1A1A1A; text-align: right; }
+.price-note { font-size: 12px; color: #888888; text-align: right; margin-top: 3px; }
+
+/* === Flight segment === */
+.segment { padding: 14px 0; }
+.segment.grow { flex: 1; }
+.segment + .segment { border-top: 1.5px solid #EAEAEA; }
+.seg-label { font-size: 14px; color: #888888; margin-bottom: 16px; }
+.flight-stop { display: flex; align-items: flex-start; margin-bottom: 8px; }
+.time-col { min-width: 100px; }
+.time-main { font-size: 22px; font-weight: 500; }
+.time-next { font-size: 12px; color: #555555; font-weight: 500; }
+.dot-col { display: flex; flex-direction: column; align-items: center; min-width: 26px; padding-top: 6px; margin-right: 14px; }
+.dot { width: 12px; height: 12px; border-radius: 50%; border: 2.5px solid #1A1A1A; background: #fff; flex-shrink: 0; }
+.line { width: 1.5px; min-height: 36px; background: #9A9A9A; }
+.info-col { flex: 1; padding-top: 3px; }
+.airport { font-size: 16px; font-weight: 400; }
+.flight-detail { font-size: 12px; color: #888888; margin-top: 4px; }
+.badge-sm { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 5px; margin-left: 5px; }
+.badge-biz { background: #ECECEC; color: #333333; }
+.badge-flat { background: #ECECEC; color: #333333; }
+.badge-prem { background: #ECECEC; color: #333333; }
+.badge-econ { background: #ECECEC; color: #333333; }
+
+/* === Transfer / Notice === */
+.notice-box { margin: 12px 0; padding: 12px 18px; background: #F2F2F2; border: 1px solid #D2D2D2; border-radius: 10px; font-size: 13px; color: #1A1A1A; font-weight: 700; }
+.transfer-box { margin: 10px 0 10px 100px; padding: 10px 16px; background: #F2F2F2; border: 1px solid #D2D2D2; border-radius: 8px; font-size: 12px; color: #1A1A1A; font-weight: 700; }
+
+/* === Policy section === */
+.policy-section { margin-top: auto; padding-top: 20px; border-top: 2px solid #EAEAEA; }
+.policy-title { font-size: 13px; font-weight: 500; color: #888888; margin-bottom: 14px; }
+.policy-grid { display: flex; gap: 16px; margin-bottom: 14px; }
+.policy-item { flex: 1; background: #F2F2F2; border-radius: 10px; padding: 12px 16px; }
+.policy-label { font-size: 11px; color: #888888; margin-bottom: 4px; }
+.policy-value { font-size: 13px; font-weight: 500; }
+
+/* === Inline policy row (for comparison cards) === */
+.policy-row { display: flex; gap: 14px; margin-top: 12px; padding-top: 12px; border-top: 1.5px solid #EAEAEA; }
+.policy-row .policy-item { background: none; padding: 0; }
+.policy-row .policy-label { font-size: 10px; }
+.policy-row .policy-value { font-size: 11px; }
+
+/* === Colors === */
+.warn { color: #1A1A1A; font-weight: 700; }
+.good { color: #1A1A1A; }
+.neutral { color: #1A1A1A; }
+
+/* === Seats left === */
+.seats { font-size: 12px; color: #1A1A1A; font-weight: 700; text-align: right; margin-top: 12px; }
+
+/* === Footer === */
+.footer { margin-top: 20px; font-size: 11px; color: #888888; text-align: center; padding-top: 16px; border-top: 1px solid #EAEAEA; }
+.footer-rec { margin-top: 14px; font-size: 14px; line-height: 1.9; }
+.footer-rec b { font-weight: 500; }
+
+/* === Logo in footer === */
+.logo-footer { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 16px; padding-top: 12px; }
+.logo-footer img { height: 30px; }
+.logo-footer span { font-size: 11px; color: #888888; }
+</style>
+</head>
+<body>
+
+<!-- 
+  ====================================================================
+  PACK & GO 航班比較 PDF 模板
+  ====================================================================
+  
+  使用方式：
+  1. 根據航班資料填入各 .card 區塊
+  2. 每張卡片包含：card-header、去程 segment、回程 segment、policy
+  3. 單一航班用 .card.full-page 撐滿整頁
+  4. 多航班比較用一般 .card，每頁放 2-3 張
+  5. 推薦的航班加 .recommend class
+  6. 最後一頁放 footer 建議
+  
+  航空公司 badge class 對照：
+  - 聯合航空: badge-ua
+  - 中國國航: badge-ca  
+  - 中華航空: badge-ci
+  - 長榮航空: badge-br
+  - 達美航空: badge-dl
+  - 美國航空: badge-aa
+  - 其他:     badge-default
+  
+  艙等 badge class 對照：
+  - 商務艙: badge-biz
+  - 可平躺: badge-flat
+  - 特選經濟艙: badge-prem
+  - 經濟艙: badge-econ
+  ====================================================================
+-->
+
+<!-- === 範例：單一航班整頁呈現 === -->
+<div class="page">
+<div class="title">{{ROUTE_TITLE}}</div>
+<div class="subtitle">{{SUBTITLE}}</div>
+
+<div class="card full-page">
+<div class="card-header">
+<div><span class="badge {{AIRLINE_BADGE_CLASS}}">{{AIRLINE_LABEL}}</span></div>
+<div><div class="price">USD {{PRICE}}</div><div class="price-note">每人（含稅）</div></div>
+</div>
+
+<!-- 去程 -->
+<div class="segment grow">
+<div class="seg-label">去程｜{{DEP_ROUTE}}｜{{DEP_DATE}}｜飛行時間 {{DEP_DURATION}}</div>
+<div class="flight-stop">
+<div class="time-col"><div class="time-main">{{DEP_TIME_1}}</div></div>
+<div class="dot-col"><div class="dot"></div><div class="line"></div></div>
+<div class="info-col"><div class="airport">{{DEP_AIRPORT_1}}</div><div class="flight-detail">{{DEP_FLIGHT_INFO_1}} <span class="badge-sm {{CABIN_BADGE}}">{{CABIN_LABEL}}</span></div></div>
+</div>
+<div class="flight-stop">
+<div class="time-col">
+<!-- 如果跨日，加 time-next -->
+<!-- <div class="time-next">{{NEXT_DAY}}</div> -->
+<div class="time-main">{{DEP_TIME_2}}</div>
+</div>
+<div class="dot-col"><div class="dot"></div></div>
+<div class="info-col"><div class="airport">{{DEP_AIRPORT_2}}</div></div>
+</div>
+<!-- 如有注意事項 -->
+<!-- <div class="notice-box">※ {{NOTICE_TEXT}}</div> -->
+</div>
+
+<!-- 回程 -->
+<div class="segment grow">
+<div class="seg-label">回程｜{{RET_ROUTE}}｜{{RET_DATE}}｜飛行時間 {{RET_DURATION}}</div>
+<div class="flight-stop">
+<div class="time-col"><div class="time-main">{{RET_TIME_1}}</div></div>
+<div class="dot-col"><div class="dot"></div><div class="line"></div></div>
+<div class="info-col"><div class="airport">{{RET_AIRPORT_1}}</div><div class="flight-detail">{{RET_FLIGHT_INFO_1}} <span class="badge-sm {{CABIN_BADGE}}">{{CABIN_LABEL}}</span></div></div>
+</div>
+<div class="flight-stop">
+<div class="time-col">
+<!-- <div class="time-next">{{NEXT_DAY}}</div> -->
+<div class="time-main">{{RET_TIME_2}}</div>
+</div>
+<div class="dot-col"><div class="dot"></div></div>
+<div class="info-col"><div class="airport">{{RET_AIRPORT_2}}</div></div>
+</div>
+</div>
+
+<!-- 退改政策 -->
+<div class="policy-section">
+<div class="policy-title">退改政策與行李</div>
+<div class="policy-grid">
+<div class="policy-item"><div class="policy-label">退票（去程）</div><div class="policy-value {{CANCEL_DEP_CLASS}}">{{CANCEL_DEP}}</div></div>
+<div class="policy-item"><div class="policy-label">退票（回程）</div><div class="policy-value {{CANCEL_RET_CLASS}}">{{CANCEL_RET}}</div></div>
+<div class="policy-item"><div class="policy-label">改期費用</div><div class="policy-value {{CHANGE_CLASS}}">{{CHANGE_FEE}}</div></div>
+</div>
+<div class="policy-grid">
+<div class="policy-item"><div class="policy-label">行李額度</div><div class="policy-value good">{{BAGGAGE}}</div></div>
+<div class="policy-item"><div class="policy-label">{{EXTRA_LABEL_1}}</div><div class="policy-value neutral">{{EXTRA_VALUE_1}}</div></div>
+<div class="policy-item"><div class="policy-label">{{EXTRA_LABEL_2}}</div><div class="policy-value neutral">{{EXTRA_VALUE_2}}</div></div>
+</div>
+</div>
+
+<div class="seats">此價格之機票只剩 {{SEATS_LEFT}} 張</div>
+</div>
+
+<div class="footer">以上資訊查詢日期：{{QUERY_DATE}}｜實際票價以訂票時為準</div>
+</div>
+
+</body>
+</html>

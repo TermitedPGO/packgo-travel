@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
+* { margin: 0; padding: 0; box-sizing: border-box; }
+@page { size: A4; margin: 0; }
+
+body { font-family: 'Noto Sans TC', 'Noto Sans CJK TC', 'PingFang TC', 'Heiti TC', 'Hiragino Sans GB', sans-serif; color: #1A1A1A; font-size: 10.5pt; line-height: 1.6; background: white; }
+
+.sheet { page-break-after: always; position: relative; }
+.sheet:last-child { page-break-after: auto; }
+
+.header { background: #1A1A1A; padding: 30px 28px 24px; text-align: center; }
+.header-logo { width: 50px; height: auto; margin-bottom: 8px; }
+.header h1 { color: white; font-size: 24pt; font-weight: 700; letter-spacing: 5px; margin-bottom: 5px; }
+.header .subtitle { color: #FFFFFF; font-size: 12pt; font-weight: 400; letter-spacing: 2px; }
+.header .accent-line { width: 80px; height: 2px; background: #FFFFFF; margin: 12px auto 0; }
+
+.content { padding: 16px 28px; }
+.intro { font-size: 10pt; color: #555555; line-height: 1.8; margin: 8px 6px 2px; }
+
+.section-title { display: flex; align-items: center; margin: 11px 0 6px; padding-bottom: 6px; border-bottom: 1.5px solid #D2D2D2; page-break-after: avoid; }
+.section-title .bar { width: 4px; height: 20px; background: #1A1A1A; margin-right: 10px; flex-shrink: 0; }
+.section-title h2 { font-size: 13pt; color: #1A1A1A; font-weight: 700; }
+
+.info-grid { margin-left: 8px; }
+.info-row { display: flex; align-items: baseline; margin-bottom: 6px; }
+.info-row .diamond { color: #1A1A1A; margin-right: 8px; font-size: 8pt; }
+.info-row .label { color: #555555; font-weight: 500; width: 95px; flex-shrink: 0; font-size: 10pt; }
+.info-row .value { color: #1A1A1A; font-size: 10pt; }
+
+.highlights { margin-left: 8px; }
+.hl-item { display: flex; align-items: baseline; margin-bottom: 6px; font-size: 9.7pt; color: #1A1A1A; }
+.hl-item .d { color: #1A1A1A; font-size: 7pt; margin-right: 9px; flex-shrink: 0; }
+
+.tbl { width: 100%; margin: 8px 0; border-collapse: collapse; font-size: 9pt; }
+.tbl th { background: #ECECEC; color: #1A1A1A; font-weight: 600; padding: 6px 9px; text-align: left; border-bottom: 2px solid #1A1A1A; }
+.tbl td { padding: 6px 9px; border-bottom: 1px solid #EAEAEA; vertical-align: top; }
+.tbl tr:last-child td { border-bottom: none; }
+.tbl td:first-child, .tbl th:first-child { white-space: nowrap; }
+.note { font-size: 8.5pt; color: #888888; margin-top: 4px; margin-left: 4px; }
+
+.day-page { min-height: 297mm; position: relative; page-break-after: always; padding-bottom: 46px; }
+.day-head { background: #1A1A1A; color: #fff; padding: 16px 30px; }
+.day-kicker { font-size: 9.5pt; letter-spacing: 5px; color: #D8D8D8; }
+.day-route { font-size: 18pt; font-weight: 700; margin-top: 6px; letter-spacing: 1px; }
+.day-dateline { font-size: 9.5pt; color: #E0E0E0; margin-top: 5px; letter-spacing: 1px; }
+.day-hero { height: 330px; background-size: cover; background-position: center; position: relative; }
+.day-hero-scrim { position: absolute; left: 0; right: 0; bottom: 0; height: 172px; padding: 0 30px 15px; display: flex; flex-direction: column; justify-content: flex-end; background: linear-gradient(to top, rgba(18,18,18,0.93) 0px, rgba(18,18,18,0.93) 80px, rgba(18,18,18,0.35) 124px, rgba(18,18,18,0) 172px); }
+.day-photo { display: block; width: 100%; height: 300px; object-fit: cover; object-position: center; border-radius: 0; margin: 0; }
+.day-content { padding: 16px 30px 0; }
+.dsub { font-weight: 700; font-size: 11pt; color: #1A1A1A; border-bottom: 1.5px solid #D2D2D2; padding-bottom: 6px; margin-bottom: 13px; }
+.seg { display: flex; margin-bottom: 8px; }
+.seg .st { width: 48px; flex-shrink: 0; font-weight: 700; color: #1A1A1A; font-size: 10.5pt; }
+.seg .sx { flex: 1; color: #444444; font-size: 10pt; line-height: 1.55; }
+.chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.chip { border: 1px solid #BFBFBF; border-radius: 5px; padding: 4px 11px; font-size: 9.3pt; color: #333333; }
+.day-foot { margin: 12px 30px 0; border: 1.2px solid #1A1A1A; border-radius: 8px; padding: 12px 18px; }
+.srow { display: flex; margin-bottom: 5px; font-size: 9.7pt; }
+.srow:last-child { margin-bottom: 0; }
+.srow .sl { width: 64px; flex-shrink: 0; font-weight: 700; color: #1A1A1A; }
+.srow .sv { flex: 1; color: #444444; }
+.pagefoot { position: absolute; bottom: 0; left: 0; right: 0; padding: 9px 30px; border-top: 1px solid #E2E2E2; display: flex; justify-content: space-between; font-size: 8.5pt; color: #999999; }
+
+.price-box { border: 1.5px solid #1A1A1A; border-radius: 8px; background: #F2F2F2; padding: 12px 22px; margin: 7px 0; }
+.price-row { display: flex; align-items: baseline; margin-bottom: 10px; }
+.price-row:last-child { margin-bottom: 0; }
+.price-label { color: #1A1A1A; font-weight: 700; font-size: 12pt; width: 100px; }
+.price-value { color: #1A1A1A; font-weight: 700; font-size: 20pt; margin-right: 15px; }
+.price-twd { color: #888888; font-size: 9pt; }
+.price-note { font-size: 8.5pt; color: #888888; margin: 3px 2px 0; }
+
+.inc-row { display: flex; align-items: baseline; margin-bottom: 4px; }
+.inc-cat { width: 50px; flex-shrink: 0; font-weight: 700; color: #1A1A1A; font-size: 10pt; }
+.inc-text { flex: 1; color: #555555; font-size: 9.7pt; line-height: 1.5; }
+
+.check-list { margin-left: 5px; }
+.check-item { display: flex; align-items: flex-start; margin-bottom: 3px; font-size: 9.7pt; color: #555555; }
+.check-item .icon { flex-shrink: 0; width: 20px; font-size: 11pt; font-weight: 700; color: #1A1A1A; }
+
+.policy-list { margin-left: 15px; font-size: 9.5pt; color: #555555; line-height: 1.4; }
+.policy-list li { margin-bottom: 2px; }
+
+.mini-header { background: #1A1A1A; padding: 7px 28px; text-align: center; color: white; font-weight: 600; font-size: 11pt; letter-spacing: 2px; }
+.footer { text-align: center; padding: 8px 28px; border-top: 1.5px solid #1A1A1A; margin: 10px 28px 0; }
+.footer-logo { width: 26px; height: auto; margin-bottom: 3px; }
+.footer .company { color: #1A1A1A; font-weight: 700; font-size: 11pt; margin-bottom: 3px; }
+.footer .info { color: #888888; font-size: 8.5pt; }
+</style>
+</head>
+<body>
+
+<div class="sheet">
+  <div class="header">
+    <img class="header-logo" src="data:image/png;base64,{{WHITE_LOGO}}" /><br/>
+    <h1>台灣環島</h1>
+    <div class="subtitle">13 天 12 夜 家庭包團行程</div>
+    <div class="accent-line"></div>
+  </div>
+  <div class="content">
+    <div class="intro">感謝您與家人選擇 Pack &amp; Go。以下為我們為您量身規劃的台灣環島 13 天 12 夜行程與報價，全程私人包團、專屬中文司機兼導遊隨行，住宿以五星及國際級飯店為主，並含每日飯店早餐及行程所列之午晚餐與主要景點門票。長輩同行的舒適與步調，已納入每日安排的考量。後續每一天皆有專頁，詳列當日行程、景點與車程。</div>
+
+    <div class="section-title"><div class="bar"></div><h2>行程基本資訊</h2></div>
+    <div class="info-grid">
+      <div class="info-row"><span class="diamond">◆</span><span class="label">行程名稱</span><span class="value">2026 台灣環島家庭包團</span></div>
+      <div class="info-row"><span class="diamond">◆</span><span class="label">出發日期</span><span class="value">2026 年 11 月 15 日（日）至 11 月 27 日（五）</span></div>
+      <div class="info-row"><span class="diamond">◆</span><span class="label">行程天數</span><span class="value">13 天 12 夜</span></div>
+      <div class="info-row"><span class="diamond">◆</span><span class="label">出行人數</span><span class="value">10 人（5 房，2 人 1 房）</span></div>
+      <div class="info-row"><span class="diamond">◆</span><span class="label">出發／結束</span><span class="value">桃園國際機場接送（家人分別自美國 CA／AZ／TX／FL 抵台）</span></div>
+      <div class="info-row"><span class="diamond">◆</span><span class="label">專屬用車</span><span class="value">全程專屬包車，含專業司機調度</span></div>
+      <div class="info-row"><span class="diamond">◆</span><span class="label">服務配置</span><span class="value">中文司機兼導遊全程隨行</span></div>
+      <div class="info-row"><span class="diamond">◆</span><span class="label">行程性質</span><span class="value">純地接私人包團（不含國際機票，建議搭乘長榮 EVA 或星宇 Starlux 直飛）</span></div>
+    </div>
+
+    <div class="section-title"><div class="bar"></div><h2>行程亮點</h2></div>
+    <div class="highlights">
+      <div class="hl-item"><span class="d">◆</span><span>日月潭兩晚溫泉酒店，含遊湖船、日月潭纜車與九族文化村。</span></div>
+      <div class="hl-item"><span class="d">◆</span><span>阿里山森林遊樂區神木群棧道，入住山上阿里山閣，清晨可賞日出。</span></div>
+      <div class="hl-item"><span class="d">◆</span><span>花蓮兩晚海景度假飯店，飽覽蘇花改清水斷崖與太魯閣。</span></div>
+      <div class="hl-item"><span class="d">◆</span><span>經典環島一次走完：台北、台中、日月潭、阿里山、花蓮、東北角。</span></div>
+      <div class="hl-item"><span class="d">◆</span><span>在地美食：欣葉台菜、奮起湖鐵路便當、南方澳海鮮、寧夏夜市。</span></div>
+      <div class="hl-item"><span class="d">◆</span><span>家庭友善：無障礙寺院、伯朗大道電瓶車免騎、台中 20 人包廂家庭聚餐。</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="sheet">
+  <div class="content">
+    <div class="section-title"><div class="bar"></div><h2>住宿安排</h2></div>
+    <table class="tbl">
+      <tr><th style="width:140px;">日期</th><th style="width:155px;">飯店（或同級）</th><th style="width:90px;">房型</th><th>等級／特色</th></tr>
+      <tr><td>11/15（日）</td><td>台北福華大飯店</td><td>雙人房 ×5</td><td>市中心國際五星</td></tr>
+      <tr><td>11/16 – 11/17</td><td>日月潭雲品溫泉酒店</td><td>雙人房 ×5</td><td>湖畔溫泉五星</td></tr>
+      <tr><td>11/18（三）</td><td>阿里山閣大飯店</td><td>雙人房 ×5</td><td>森林園區內，看日出便利</td></tr>
+      <tr><td>11/19（四）</td><td>台中金典酒店</td><td>雙人房 ×5</td><td>市中心，20 人宴會包廂</td></tr>
+      <tr><td>11/20（五）</td><td>圓山大飯店</td><td>雙人房 ×5</td><td>台北經典地標五星</td></tr>
+      <tr><td>11/21 – 11/22</td><td>花蓮遠雄悅來大飯店</td><td>雙人房 ×5</td><td>海景度假五星</td></tr>
+      <tr><td>11/23 – 11/26</td><td>台北福華大飯店</td><td>雙人房 ×5</td><td>市中心國際五星</td></tr>
+    </table>
+    <div class="note">＊ 全程 12 晚、5 房（2 人 1 房），均含每日早餐及飯店稅費；飯店如遇滿房，將以同級飯店替代並提前告知。</div>
+
+    <div class="section-title"><div class="bar"></div><h2>行程總覽</h2></div>
+    <table class="tbl">
+      <tr><th style="width:62px;">日</th><th style="width:120px;">日期</th><th>路線</th><th style="width:150px;">住宿</th></tr>
+      <tr><td>Day 1</td><td>11/15（日）</td><td>抵達台北</td><td>台北福華</td></tr>
+      <tr><td>Day 2</td><td>11/16（一）</td><td>台北 → 埔里 → 日月潭</td><td>日月潭雲品溫泉</td></tr>
+      <tr><td>Day 3</td><td>11/17（二）</td><td>日月潭 全日遊</td><td>日月潭雲品溫泉</td></tr>
+      <tr><td>Day 4</td><td>11/18（三）</td><td>日月潭 → 阿里山</td><td>阿里山閣大飯店</td></tr>
+      <tr><td>Day 5</td><td>11/19（四）</td><td>阿里山 → 台中</td><td>台中金典酒店</td></tr>
+      <tr><td>Day 6</td><td>11/20（五）</td><td>台中 → 三義 → 台北</td><td>圓山大飯店</td></tr>
+      <tr><td>Day 7</td><td>11/21（六）</td><td>台北 → 宜蘭 → 花蓮</td><td>花蓮遠雄悅來</td></tr>
+      <tr><td>Day 8</td><td>11/22（日）</td><td>花蓮（A / B 二選一）</td><td>花蓮遠雄悅來</td></tr>
+      <tr><td>Day 9</td><td>11/23（一）</td><td>花蓮 → 東北角 → 台北</td><td>台北福華</td></tr>
+      <tr><td>Day 10</td><td>11/24（二）</td><td>九份 · 金瓜石 · 平溪</td><td>台北福華</td></tr>
+      <tr><td>Day 11</td><td>11/25（三）</td><td>北海岸 + 陽明山</td><td>台北福華</td></tr>
+      <tr><td>Day 12</td><td>11/26（四）</td><td>台北 市區文化日</td><td>台北福華</td></tr>
+      <tr><td>Day 13</td><td>11/27（五）</td><td>送機 返程</td><td>—</td></tr>
+    </table>
+    <div class="note">＊ 行程景點照片來源：Wikimedia Commons（CC 授權）；實際景觀依季節與天候略有不同。</div>
+  </div>
+</div>
+
+<div class="day-page">
+  <div class="day-head"><div class="day-kicker">DAY 01</div><div class="day-route">抵達台北</div><div class="day-dateline">2026 年 11 月 15 日 · 星期日 · 行程第 1 天</div></div>
+  <img class="day-photo" src="file:///tmp/photos/day1.jpg" />
+  <div class="day-content">
+    <div class="dsub">今日行程</div>
+    <div class="seg"><div class="st">上午</div><div class="sx">航班於凌晨抵達桃園國際機場，專車接機後接往台北市區。先協助辦理行李寄放，並視房況協調提早入住；待長輩稍作梳洗，安排輕鬆的飯店周邊或市區散步，今日不排重點行程，讓全家先緩解時差與長途飛行的疲勞。</div></div>
+    <div class="seg"><div class="st">下午</div><div class="sx">正式辦理入住台北福華大飯店，回房充分休息，儲備接下來環島所需的體力。</div></div>
+    <div class="seg"><div class="st">傍晚</div><div class="sx">於老字號的欣葉台菜本店享用歡迎晚餐（中式合菜），以經典台灣料理為全家人接風，正式揭開環島旅程的序幕。</div></div>
+    <div class="dsub" style="margin-top:18px;">今日景點</div>
+    <div class="chips"><span class="chip">桃園機場接機</span><span class="chip">台北市區自由活動</span><span class="chip">欣葉台菜（歡迎晚餐）</span></div>
+  </div>
+  <div class="day-foot">
+    <div class="srow"><div class="sl">今日車程</div><div class="sv">桃園機場 → 台北市區，約 40 分鐘。</div></div>
+    <div class="srow"><div class="sl">早餐</div><div class="sv">航班抵達日，不含飯店早餐</div></div>
+    <div class="srow"><div class="sl">午餐</div><div class="sv">飯店或市區輕食</div></div>
+    <div class="srow"><div class="sl">晚餐</div><div class="sv">欣葉台菜本店（中式合菜，歡迎晚餐）</div></div>
+    <div class="srow"><div class="sl">住宿</div><div class="sv">台北福華大飯店（市中心國際五星）</div></div>
+  </div>
+  <div class="pagefoot"><span>PACK &amp; GO ｜ 2026 台灣環島 13 天 12 夜</span><span>Day 1 / 13</span></div>
+</div>
+
+<div class="day-page">
+  <div class="day-head"><div class="day-kicker">DAY 02</div><div class="day-route">台北 → 埔里 → 日月潭</div><div class="day-dateline">2026 年 11 月 16 日 · 星期一 · 行程第 2 天</div></div>
+  <img class="day-photo" src="file:///tmp/photos/day2.jpg" />
+  <div class="day-content">
+    <div class="dsub">今日行程</div>
+    <div class="seg"><div class="st">上午</div><div class="sx">享用飯店早餐後出發南下，約 3 小時抵達埔里。參觀莊嚴的中台禪寺，寺方設有電梯與無障礙坡道，長輩參觀十分方便；接著造訪 921 地震後以紙管重建、別具意義的桃米紙教堂。</div></div>
+    <div class="seg"><div class="st">下午</div><div class="sx">前往日月潭，於向山遊客中心欣賞日本建築師設計的清水模建築與環抱的湖光山色，再到水社碼頭與朝霧碼頭散步，感受潭區開闊清新的氣息。</div></div>
+    <div class="seg"><div class="st">傍晚</div><div class="sx">入住日月潭畔的雲品溫泉酒店，於館內享用晚餐（中式合菜）；晚間可在房內或館內泡湯，洗去一日舟車勞頓。（週一在地餐廳多公休，故安排館內用餐）</div></div>
+    <div class="dsub" style="margin-top:18px;">今日景點</div>
+    <div class="chips"><span class="chip">中台禪寺</span><span class="chip">桃米紙教堂</span><span class="chip">向山遊客中心</span><span class="chip">水社碼頭</span><span class="chip">朝霧碼頭</span></div>
+  </div>
+  <div class="day-foot">
+    <div class="srow"><div class="sl">今日車程</div><div class="sv">台北 → 埔里 約 3 小時；埔里 → 日月潭 約 30 分鐘。</div></div>
+    <div class="srow"><div class="sl">早餐</div><div class="sv">台北福華大飯店</div></div>
+    <div class="srow"><div class="sl">午餐</div><div class="sv">埔里在地料理（中式合菜）</div></div>
+    <div class="srow"><div class="sl">晚餐</div><div class="sv">雲品酒店（中式合菜）</div></div>
+    <div class="srow"><div class="sl">住宿</div><div class="sv">日月潭雲品溫泉酒店（湖畔溫泉五星）</div></div>
+  </div>
+  <div class="pagefoot"><span>PACK &amp; GO ｜ 2026 台灣環島 13 天 12 夜</span><span>Day 2 / 13</span></div>
+</div>
+
+<div class="day-page">
+  <div class="day-head"><div class="day-kicker">DAY 03</div><div class="day-route">日月潭 全日遊</div><div class="day-dateline">2026 年 11 月 17 日 · 星期二 · 行程第 3 天</div></div>
+  <img class="day-photo" src="file:///tmp/photos/day3.jpg" />
+  <div class="day-content">
+    <div class="dsub">今日行程</div>
+    <div class="seg"><div class="st">上午</div><div class="sx">搭乘遊湖船，串起水社、玄光寺與伊達邵三大碼頭，從水面不同角度飽覽潭區山水；玄光寺前的階台是眺望日月潭、拍攝經典湖景的最佳取景點。</div></div>
+    <div class="seg"><div class="st">下午</div><div class="sx">搭乘日月潭纜車跨越山稜前往九族文化村，認識台灣原住民族的文化、建築與歌舞表演（園區另設有遊樂設施，可自由體驗）。</div></div>
+    <div class="seg"><div class="st">傍晚</div><div class="sx">返回雲品酒店，於館內享用晚餐（中式合菜），再享溫泉放鬆，為隔日的上山行程養精蓄銳。</div></div>
+    <div class="dsub" style="margin-top:18px;">今日景點</div>
+    <div class="chips"><span class="chip">日月潭遊湖船</span><span class="chip">玄光寺</span><span class="chip">伊達邵</span><span class="chip">日月潭纜車</span><span class="chip">九族文化村</span></div>
+  </div>
+  <div class="day-foot">
+    <div class="srow"><div class="sl">今日車程</div><div class="sv">環湖區內短程接駁，無長途拉車。</div></div>
+    <div class="srow"><div class="sl">早餐</div><div class="sv">雲品酒店</div></div>
+    <div class="srow"><div class="sl">午餐</div><div class="sv">伊達邵碼頭（中式合菜）</div></div>
+    <div class="srow"><div class="sl">晚餐</div><div class="sv">雲品酒店（中式合菜）</div></div>
+    <div class="srow"><div class="sl">住宿</div><div class="sv">日月潭雲品溫泉酒店（湖畔溫泉五星）</div></div>
+  </div>
+  <div class="pagefoot"><span>PACK &amp; GO ｜ 2026 台灣環島 13 天 12 夜</span><span>Day 3 / 13</span></div>
+</div>
+
+<div class="day-page">
+  <div class="day-head"><div class="day-kicker">DAY 04</div><div class="day-route">日月潭 → 阿里山</div><div class="day-dateline">2026 年 11 月 18 日 · 星期三 · 行程第 4 天</div></div>
+  <img class="day-photo" src="file:///tmp/photos/day4.jpg" />
+  <div class="day-content">
+    <div class="dsub">今日行程</div>
+    <div class="seg"><div class="st">上午</div><div class="sx">享用早餐後沿阿里山公路上山，沿途海拔漸升，景觀由淺山田園逐漸轉為高山雲霧林相，一路風景宜人。</div></div>
+    <div class="seg"><div class="st">下午</div><div class="sx">抵達阿里山森林遊樂區，漫步神木區與巨木群棧道，造訪姊妹潭、沼平車站等經典點；園區步道平緩好走，配合長輩的步調，不趕路。</div></div>
+    <div class="seg"><div class="st">傍晚</div><div class="sx">入住園區內的阿里山閣大飯店，於館內享用晚餐（中式合菜）。住在山上，隔日清晨前往觀日出最為從容方便。</div></div>
+    <div class="dsub" style="margin-top:18px;">今日景點</div>
+    <div class="chips"><span class="chip">阿里山森林遊樂區</span><span class="chip">神木區</span><span class="chip">巨木群棧道</span><span class="chip">姊妹潭</span><span class="chip">沼平車站</span></div>
+  </div>
+  <div class="day-foot">
+    <div class="srow"><div class="sl">今日車程</div><div class="sv">日月潭 → 阿里山 約 2.5 小時（山路）。</div></div>
+    <div class="srow"><div class="sl">早餐</div><div class="sv">雲品酒店</div></div>
+    <div class="srow"><div class="sl">午餐</div><div class="sv">山區餐廳（中式合菜）</div></div>
+    <div class="srow"><div class="sl">晚餐</div><div class="sv">阿里山閣（中式合菜）</div></div>
+    <div class="srow"><div class="sl">住宿</div><div class="sv">阿里山閣大飯店（森林園區內）</div></div>
+  </div>
+  <div class="pagefoot"><span>PACK &amp; GO ｜ 2026 台灣環島 13 天 12 夜</span><span>Day 4 / 13</span></div>
+</div>
+
+<div class="day-page">
+  <div class="day-head"><div class="day-kicker">DAY 05</div><div class="day-route">阿里山 → 台中</div><div class="day-dateline">2026 年 11 月 19 日 · 星期四 · 行程第 5 天</div></div>
+  <img class="day-photo" src="file:///tmp/photos/day5.jpg" />
+  <div class="day-content">
+    <div class="dsub">今日行程</div>
+    <div class="seg"><div class="st">清晨</div><div class="sx">可自願搭乘祝山線小火車上山，迎接阿里山著名的日出與雲海（自由參加，不強制，想多休息的長輩可在飯店賴床）。</div></div>
+    <div class="seg"><div class="st">上午</div><div class="sx">於海拔最高的火車站之一奮起湖老街走逛，品嚐遠近馳名的奮起湖鐵路便當。</div></div>
+    <div class="seg"><div class="st">下午</div><div class="sx">下山前往台中，約 3 小時車程，沿途可休息補眠。</div></div>
+    <div class="seg"><div class="st">傍晚</div><div class="sx">安排台中 20 人包廂家庭聚餐（中式合菜），與在台親友團聚同桌；入住台中金典酒店。</div></div>
+    <div class="dsub" style="margin-top:18px;">今日景點</div>
+    <div class="chips"><span class="chip">祝山線日出（自選）</span><span class="chip">奮起湖老街</span></div>
+  </div>
+  <div class="day-foot">
+    <div class="srow"><div class="sl">今日車程</div><div class="sv">阿里山 → 台中 約 3 小時。</div></div>
+    <div class="srow"><div class="sl">早餐</div><div class="sv">阿里山閣大飯店</div></div>
+    <div class="srow"><div class="sl">午餐</div><div class="sv">奮起湖鐵路便當</div></div>
+    <div class="srow"><div class="sl">晚餐</div><div class="sv">台中 20 人包廂（中式合菜，家庭聚餐）</div></div>
+    <div class="srow"><div class="sl">住宿</div><div class="sv">台中金典酒店（市中心）</div></div>
+  </div>
+  <div class="pagefoot"><span>PACK &amp; GO ｜ 2026 台灣環島 13 天 12 夜</span><span>Day 5 / 13</span></div>
+</div>
+
+<div class="day-page">
+  <div class="day-head"><div class="day-kicker">DAY 06</div><div class="day-route">台中 → 三義 → 台北</div><div class="day-dateline">2026 年 11 月 20 日 · 星期五 · 行程第 6 天</div></div>
+  <img class="day-photo" src="file:///tmp/photos/day6.jpg" />
+  <div class="day-content">
+    <div class="dsub">今日行程</div>
+    <div class="seg"><div class="st">上午</div><div class="sx">前往海線的高美濕地，沿木棧道欣賞潮間帶生態與遼闊的海岸地景（最佳觀賞時段依當日退潮時間而定，由導遊提前安排）。</div></div>
+    <div class="seg"><div class="st">下午</div><div class="sx">北上轉往三義，造訪保留日式風情的勝興車站與舊山線鐵道遺跡，並逛逛以雕刻聞名的木雕老街。</div></div>
+    <div class="seg"><div class="st">傍晚</div><div class="sx">返抵台北，參加圓山大飯店的東密道導覽，一探昔日的神秘逃生通道；於圓山金龍廳享用晚餐（中式合菜），入住台北地標圓山大飯店。</div></div>
+    <div class="dsub" style="margin-top:18px;">今日景點</div>
+    <div class="chips"><span class="chip">高美濕地</span><span class="chip">勝興車站</span><span class="chip">舊山線鐵道</span><span class="chip">三義木雕老街</span><span class="chip">圓山東密道</span></div>
+  </div>
+  <div class="day-foot">
+    <div class="srow"><div class="sl">今日車程</div><div class="sv">台中 → 三義 約 40 分鐘；三義 → 台北 約 1.5 小時。</div></div>
+    <div class="srow"><div class="sl">早餐</div><div class="sv">台中金典酒店</div></div>
+    <div class="srow"><div class="sl">午餐</div><div class="sv">三義客家料理（中式合菜）</div></div>
+    <div class="srow"><div class="sl">晚餐</div><div class="sv">圓山金龍廳（中式合菜）</div></div>
+    <div class="srow"><div class="sl">住宿</div><div class="sv">圓山大飯店（台北經典地標五星）</div></div>
+  </div>
+  <div class="pagefoot"><span>PACK &amp; GO ｜ 2026 台灣環島 13 天 12 夜</span><span>Day 6 / 13</span></div>
+</div>
+
+<div class="day-page">
+  <div class="day-head"><div class="day-kicker">DAY 07</div><div class="day-route">台北 → 宜蘭 → 花蓮</div><div class="day-dateline">2026 年 11 月 21 日 · 星期六 · 行程第 7 天</div></div>
+  <img class="day-photo" src="file:///tmp/photos/day7.jpg" />
+  <div class="day-content">
+    <div class="dsub">今日行程</div>
+    <div class="seg"><div class="st">上午</div><div class="sx">出發前往東部，先抵南方澳漁港感受純樸的漁港風情，午餐品嚐當地新鮮海鮮（中式合菜）。</div></div>
+    <div class="seg"><div class="st">下午</div><div class="sx">行經蘇花改公路，飽覽本日招牌的清水斷崖海岸線，山海交界氣勢磅礡；於太魯閣輕鬆踏點（遊客中心、東西橫貫公路牌樓，部分路段因整修管制，依現場開放狀況彈性調整）。</div></div>
+    <div class="seg"><div class="st">傍晚</div><div class="sx">造訪七星潭月牙形礫石海灣，聽濤看海；入住花蓮遠雄悅來大飯店，於館內享用晚餐（中式合菜），享受海景度假氛圍。</div></div>
+    <div class="dsub" style="margin-top:18px;">今日景點</div>
+    <div class="chips"><span class="chip">南方澳漁港</span><span class="chip">清水斷崖</span><span class="chip">太魯閣牌樓</span><span class="chip">七星潭</span></div>
+  </div>
+  <div class="day-foot">
+    <div class="srow"><div class="sl">今日車程</div><div class="sv">台北 → 宜蘭 約 1 小時；蘇澳 → 花蓮 約 2 小時。</div></div>
+    <div class="srow"><div class="sl">早餐</div><div class="sv">圓山大飯店</div></div>
+    <div class="srow"><div class="sl">午餐</div><div class="sv">南方澳海鮮（中式合菜）</div></div>
+    <div class="srow"><div class="sl">晚餐</div><div class="sv">遠雄悅來（中式合菜）</div></div>
+    <div class="srow"><div class="sl">住宿</div><div class="sv">花蓮遠雄悅來大飯店（海景度假五星）</div></div>
+  </div>
+  <div class="pagefoot"><span>PACK &amp; GO ｜ 2026 台灣環島 13 天 12 夜</span><span>Day 7 / 13</span></div>
+</div>
+
+<div class="day-page">
+  <div class="day-head"><div class="day-kicker">DAY 08</div><div class="day-route">花蓮（A / B 二選一）</div><div class="day-dateline">2026 年 11 月 22 日 · 星期日 · 行程第 8 天</div></div>
+  <img class="day-photo" src="file:///tmp/photos/day8.jpg" />
+  <div class="day-content">
+    <div class="dsub">今日行程（兩案出發前擇一）</div>
+    <div class="seg"><div class="st">A 案</div><div class="sx">池上伯朗大道一日遊：南下走訪光復糖廠、瑞穗牧場，於玉里享用午餐，下午抵達伯朗大道，搭乘遮陽電瓶車悠遊金黃稻浪之間（免騎自行車，最適合長輩），來回約 5 小時車程。</div></div>
+    <div class="seg"><div class="st">B 案</div><div class="sx">花蓮在地輕鬆日：就近遊覽鯉魚潭、雲山水夢幻湖、林田山林業聚落與松園別館，步調輕鬆悠閒，最遠約 45 分鐘車程，適合想慢下來的一天。</div></div>
+    <div class="seg"><div class="st">傍晚</div><div class="sx">兩案晚餐皆於遠雄悅來館內享用（中式合菜），續住同一飯店，免去換房舟車。</div></div>
+    <div class="dsub" style="margin-top:18px;">今日景點</div>
+    <div class="chips"><span class="chip">A 光復糖廠</span><span class="chip">A 瑞穗牧場</span><span class="chip">A 伯朗大道電瓶車</span><span class="chip">B 鯉魚潭</span><span class="chip">B 雲山水</span><span class="chip">B 林田山</span><span class="chip">B 松園別館</span></div>
+  </div>
+  <div class="day-foot">
+    <div class="srow"><div class="sl">今日車程</div><div class="sv">A 案 來回約 5 小時；B 案 最遠約 45 分鐘。</div></div>
+    <div class="srow"><div class="sl">早餐</div><div class="sv">遠雄悅來</div></div>
+    <div class="srow"><div class="sl">午餐</div><div class="sv">A 玉里或池上 · B 鯉魚潭區（中式合菜）</div></div>
+    <div class="srow"><div class="sl">晚餐</div><div class="sv">遠雄悅來（中式合菜）</div></div>
+    <div class="srow"><div class="sl">住宿</div><div class="sv">花蓮遠雄悅來大飯店（海景度假五星）</div></div>
+  </div>
+  <div class="pagefoot"><span>PACK &amp; GO ｜ 2026 台灣環島 13 天 12 夜</span><span>Day 8 / 13</span></div>
+</div>
+
+<div class="day-page">
+  <div class="day-head"><div class="day-kicker">DAY 09</div><div class="day-route">花蓮 → 東北角 → 台北</div><div class="day-dateline">2026 年 11 月 23 日 · 星期一 · 行程第 9 天</div></div>
+  <img class="day-photo" src="file:///tmp/photos/day9.jpg" />
+  <div class="day-content">
+    <div class="dsub">今日行程</div>
+    <div class="seg"><div class="st">上午</div><div class="sx">沿蘇花改一路北返，於宜蘭享用午餐（中式合菜）。</div></div>
+    <div class="seg"><div class="st">下午</div><div class="sx">走訪東北角海岸，漫步鼻頭角步道，欣賞海蝕地景與遼闊的太平洋海岸風光，海風宜人。</div></div>
+    <div class="seg"><div class="st">傍晚</div><div class="sx">抵達淡水，逛淡水老街、欣賞淡水河口的夕照；返回台北入住台北福華大飯店，於飯店享用晚餐（中式合菜）。</div></div>
+    <div class="dsub" style="margin-top:18px;">今日景點</div>
+    <div class="chips"><span class="chip">鼻頭角步道</span><span class="chip">東北角海岸</span><span class="chip">淡水老街</span></div>
+  </div>
+  <div class="day-foot">
+    <div class="srow"><div class="sl">今日車程</div><div class="sv">花蓮 → 宜蘭 約 2 小時；東北角 → 台北 約 1 小時。</div></div>
+    <div class="srow"><div class="sl">早餐</div><div class="sv">遠雄悅來</div></div>
+    <div class="srow"><div class="sl">午餐</div><div class="sv">宜蘭風味（中式合菜）</div></div>
+    <div class="srow"><div class="sl">晚餐</div><div class="sv">台北福華（中式合菜）</div></div>
+    <div class="srow"><div class="sl">住宿</div><div class="sv">台北福華大飯店（市中心國際五星）</div></div>
+  </div>
+  <div class="pagefoot"><span>PACK &amp; GO ｜ 2026 台灣環島 13 天 12 夜</span><span>Day 9 / 13</span></div>
+</div>
+
+<div class="day-page">
+  <div class="day-head"><div class="day-kicker">DAY 10</div><div class="day-route">九份 · 金瓜石 · 平溪</div><div class="day-dateline">2026 年 11 月 24 日 · 星期二 · 行程第 10 天</div></div>
+  <img class="day-photo" src="file:///tmp/photos/day10.jpg" />
+  <div class="day-content">
+    <div class="dsub">今日行程</div>
+    <div class="seg"><div class="st">上午</div><div class="sx">前往昔日礦業重鎮金瓜石，參觀黃金博物館認識採金歷史，遠眺壯觀的黃金瀑布與海面色澤分明的陰陽海。</div></div>
+    <div class="seg"><div class="st">下午</div><div class="sx">走逛依山而建的九份老街（風味小吃午餐），體驗錯落的階梯巷弄與懷舊的山城茶樓風情。</div></div>
+    <div class="seg"><div class="st">傍晚</div><div class="sx">轉往平溪十分，於十分老街體驗在鐵道上施放天燈祈福，並造訪有「台灣尼加拉瓜」之稱的十分瀑布；返回台北市區享用晚餐。</div></div>
+    <div class="dsub" style="margin-top:18px;">今日景點</div>
+    <div class="chips"><span class="chip">黃金博物館</span><span class="chip">黃金瀑布</span><span class="chip">陰陽海</span><span class="chip">九份老街</span><span class="chip">十分天燈</span><span class="chip">十分瀑布</span></div>
+  </div>
+  <div class="day-foot">
+    <div class="srow"><div class="sl">今日車程</div><div class="sv">台北 → 金瓜石 約 1 小時；各景點間為短程接駁。</div></div>
+    <div class="srow"><div class="sl">早餐</div><div class="sv">台北福華大飯店</div></div>
+    <div class="srow"><div class="sl">午餐</div><div class="sv">九份老街（風味小吃）</div></div>
+    <div class="srow"><div class="sl">晚餐</div><div class="sv">台北市區（中式合菜）</div></div>
+    <div class="srow"><div class="sl">住宿</div><div class="sv">台北福華大飯店（市中心國際五星）</div></div>
+  </div>
+  <div class="pagefoot"><span>PACK &amp; GO ｜ 2026 台灣環島 13 天 12 夜</span><span>Day 10 / 13</span></div>
+</div>
+
+<div class="day-page">
+  <div class="day-head"><div class="day-kicker">DAY 11</div><div class="day-route">北海岸 + 陽明山</div><div class="day-dateline">2026 年 11 月 25 日 · 星期三 · 行程第 11 天</div></div>
+  <img class="day-photo" src="file:///tmp/photos/day11.jpg" />
+  <div class="day-content">
+    <div class="dsub">今日行程</div>
+    <div class="seg"><div class="st">上午</div><div class="sx">前往北海岸的野柳地質公園，欣賞女王頭等鬼斧神工的海蝕奇岩；午間於金山老街品嚐招牌金山鵝肉。</div></div>
+    <div class="seg"><div class="st">下午</div><div class="sx">上陽明山，走訪遼闊的擎天崗大草原與小油坑的地熱噴氣景觀；下山後逛大稻埕迪化街，感受老台北南北貨與中藥街區的風情。</div></div>
+    <div class="seg"><div class="st">傍晚</div><div class="sx">於熱鬧的寧夏夜市自由品嚐各式台灣在地小吃，體驗道地的夜市文化。</div></div>
+    <div class="dsub" style="margin-top:18px;">今日景點</div>
+    <div class="chips"><span class="chip">野柳地質公園</span><span class="chip">金山老街</span><span class="chip">擎天崗</span><span class="chip">小油坑</span><span class="chip">大稻埕迪化街</span><span class="chip">寧夏夜市</span></div>
+  </div>
+  <div class="day-foot">
+    <div class="srow"><div class="sl">今日車程</div><div class="sv">台北 → 野柳 約 50 分鐘；北海岸至陽明山順時針一圈。</div></div>
+    <div class="srow"><div class="sl">早餐</div><div class="sv">台北福華大飯店</div></div>
+    <div class="srow"><div class="sl">午餐</div><div class="sv">金山鵝肉（中式合菜）</div></div>
+    <div class="srow"><div class="sl">晚餐</div><div class="sv">寧夏夜市（在地小吃）</div></div>
+    <div class="srow"><div class="sl">住宿</div><div class="sv">台北福華大飯店（市中心國際五星）</div></div>
+  </div>
+  <div class="pagefoot"><span>PACK &amp; GO ｜ 2026 台灣環島 13 天 12 夜</span><span>Day 11 / 13</span></div>
+</div>
+
+<div class="day-page">
+  <div class="day-head"><div class="day-kicker">DAY 12</div><div class="day-route">台北 市區文化日</div><div class="day-dateline">2026 年 11 月 26 日 · 星期四 · 行程第 12 天</div></div>
+  <img class="day-photo" src="file:///tmp/photos/day12.jpg" />
+  <div class="day-content">
+    <div class="dsub">今日行程</div>
+    <div class="seg"><div class="st">上午</div><div class="sx">參觀世界級的故宮博物院，飽覽中華歷代文物珍藏，由導遊帶領認識鎮館之寶（午餐於故宮晶華）。</div></div>
+    <div class="seg"><div class="st">下午</div><div class="sx">走訪中正紀念堂與香火鼎盛的艋舺龍山寺，登台北 101 觀景台俯瞰整座城市的天際線；於西門町自由活動、購物。</div></div>
+    <div class="seg"><div class="st">傍晚</div><div class="sx">安排溫馨的歡送晚餐（中式合菜），與家人一同回味這趟旅程，為環島之旅畫下圓滿句點。</div></div>
+    <div class="dsub" style="margin-top:18px;">今日景點</div>
+    <div class="chips"><span class="chip">故宮博物院</span><span class="chip">中正紀念堂</span><span class="chip">艋舺龍山寺</span><span class="chip">台北 101 觀景台</span><span class="chip">西門町</span></div>
+  </div>
+  <div class="day-foot">
+    <div class="srow"><div class="sl">今日車程</div><div class="sv">台北市區短程接駁，無長途拉車。</div></div>
+    <div class="srow"><div class="sl">早餐</div><div class="sv">台北福華大飯店</div></div>
+    <div class="srow"><div class="sl">午餐</div><div class="sv">故宮晶華（中式合菜）</div></div>
+    <div class="srow"><div class="sl">晚餐</div><div class="sv">歡送晚餐（中式合菜）</div></div>
+    <div class="srow"><div class="sl">住宿</div><div class="sv">台北福華大飯店（市中心國際五星）</div></div>
+  </div>
+  <div class="pagefoot"><span>PACK &amp; GO ｜ 2026 台灣環島 13 天 12 夜</span><span>Day 12 / 13</span></div>
+</div>
+
+<div class="day-page">
+  <div class="day-head"><div class="day-kicker">DAY 13</div><div class="day-route">送機 返程</div><div class="day-dateline">2026 年 11 月 27 日 · 星期五 · 行程第 13 天</div></div>
+  <div class="day-content">
+    <div class="dsub">今日行程</div>
+    <div class="seg"><div class="st">上午</div><div class="sx">依回程班機時間辦理退房，專車送往桃園國際機場，並協助辦理出境手續。如班機較晚、上午尚有空檔，可與我們討論加遊烏來（目前暫不安排，視需求再議）。</div></div>
+    <div class="seg"><div class="st">航班</div><div class="sx">建議搭乘長榮 EVA 或星宇 Starlux 直飛航班返美；實際送機時間將依您的回程班機時刻調整。</div></div>
+    <div class="dsub" style="margin-top:18px;">今日景點</div>
+    <div class="chips"><span class="chip">專車送機</span><span class="chip">烏來（可加遊）</span></div>
+  </div>
+  <div class="day-foot">
+    <div class="srow"><div class="sl">今日車程</div><div class="sv">台北 → 桃園國際機場 約 40 分鐘。</div></div>
+    <div class="srow"><div class="sl">早餐</div><div class="sv">台北福華大飯店</div></div>
+    <div class="srow"><div class="sl">午／晚餐</div><div class="sv">依回程班機時間安排</div></div>
+    <div class="srow"><div class="sl">住宿</div><div class="sv">—（搭機返程）</div></div>
+  </div>
+  <div class="pagefoot"><span>PACK &amp; GO ｜ 2026 台灣環島 13 天 12 夜</span><span>Day 13 / 13</span></div>
+</div>
+
+<div class="sheet">
+  <div class="mini-header">報價資訊與費用說明</div>
+  <div class="content">
+    <div class="section-title"><div class="bar"></div><h2>報價資訊</h2></div>
+    <div class="price-box">
+      <div class="price-row"><span class="price-label">整團總價</span><span class="price-value">$28,900 USD</span><span class="price-twd">（10 人合計，純地接，不含國際機票）</span></div>
+      <div class="price-row"><span class="price-label">每人均價</span><span class="price-value">$2,890 USD</span><span class="price-twd">（2 人 1 房，全程五星 / 國際級飯店）</span></div>
+    </div>
+    <div class="price-note">＊ 本報價以 10 人成行、2 人 1 房為基準；人數、房型或飯店等級調整時將另行報價。</div>
+
+    <div class="section-title"><div class="bar"></div><h2>費用包含</h2></div>
+    <div class="inc-row"><div class="inc-cat">住宿</div><div class="inc-text">上方住宿安排所列 12 晚五星 / 國際級飯店，含每日飯店早餐及飯店稅費。</div></div>
+    <div class="inc-row"><div class="inc-cat">餐食</div><div class="inc-text">行程所列各日午餐與晚餐，以中式合菜為主，含歡迎晚餐、歡送晚餐及台中 20 人包廂家庭聚餐。</div></div>
+    <div class="inc-row"><div class="inc-cat">交通</div><div class="inc-text">全程專屬包車，含油資、停車費及過路費。</div></div>
+    <div class="inc-row"><div class="inc-cat">導覽</div><div class="inc-text">專業中文司機兼導遊全程隨行服務（含服務費）。</div></div>
+    <div class="inc-row"><div class="inc-cat">門票</div><div class="inc-text">行程所列主要景點門票（遊湖船、纜車、九族文化村、阿里山、故宮、台北 101、十分天燈等）。</div></div>
+    <div class="inc-row"><div class="inc-cat">其他</div><div class="inc-text">每日行李運送與搬運服務、台灣旅遊責任保險。</div></div>
+
+    <div class="section-title"><div class="bar"></div><h2>費用不含</h2></div>
+    <div class="check-list">
+      <div class="check-item"><span class="icon">※</span>美國往返台灣國際機票（建議搭乘長榮 EVA 或星宇 Starlux 直飛）。</div>
+      <div class="check-item"><span class="icon">※</span>個人消費、購物及自選活動（如 Day 5 祝山線日出為自願參加項目）。</div>
+      <div class="check-item"><span class="icon">※</span>行程未列之額外景點門票及延伸行程（如 Day 13 加遊烏來）。</div>
+      <div class="check-item"><span class="icon">※</span>個人旅遊平安險 / 醫療險之加保（團費已含旅遊責任險）。</div>
+    </div>
+
+    <div class="section-title"><div class="bar"></div><h2>付款方式</h2></div>
+    <ul class="policy-list">
+      <li>接受信用卡刷卡付款（美金計價），刷卡需另加 3% 手續費。</li>
+      <li>訂金：確認行程後 2 日內支付團費之 30%。</li>
+      <li>尾款：出發前 30 天付清全額。</li>
+    </ul>
+
+    <div class="section-title"><div class="bar"></div><h2>取消政策</h2></div>
+    <ul class="policy-list">
+      <li>出發前 60 天及以上取消：退還全額（需扣除銀行手續費及供應商已產生之實際費用）。</li>
+      <li>出發前 30 至 59 天取消：退還 50%。</li>
+      <li>出發前 15 至 29 天取消：退還 20%。</li>
+      <li>出發前 14 天以內取消：不可退款。</li>
+    </ul>
+
+    <div class="section-title"><div class="bar"></div><h2>預訂須知</h2></div>
+    <ul class="policy-list">
+      <li>國際機票建議盡早訂位；開票前請與我們確認班機時間，以利接送機安排。</li>
+      <li>護照效期須距回程日 6 個月以上；持非台灣護照者請自行確認入境規定。</li>
+      <li>行程順序可能因天候、交通或景點公休微調，將提前與您確認，景點內容不縮減。</li>
+      <li>Day 8 路線（A / B）與 Day 13 是否加遊烏來，請於出發前與我們確認。</li>
+    </ul>
+
+    <div class="footer">
+      <img class="footer-logo" src="data:image/png;base64,{{BLACK_LOGO}}" /><br/>
+      <div class="company">Pack &amp; Go, LLC</div>
+      <div class="info">CST #2166984-40 · Newark, CA · packgoplay.com · Jeff Hsieh +1 (510) 634-2307</div>
+      <div class="info" style="margin-top:4px;">本報價有效期為 14 天 · 報價日期：2026 年 6 月 15 日</div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
