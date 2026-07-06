@@ -655,6 +655,15 @@ export async function runFollowupDraftScan(
     }
   }
 
+  // Customers dedup-skipped as already_drafted ALSO have a live draft card in the
+  // panel, so they must go into the reminder-scan exclude set too — otherwise the
+  // inbox reminder ("go draft one") double-surfaces alongside a ready draft. The
+  // exclude intent is "has a live draft", not just "freshly drafted this run".
+  // (Especially since the dedup now counts read cards, more customers land here.)
+  for (const pid of alreadyDrafted) {
+    if (pid != null) result.draftedProfileIds.push(pid);
+  }
+
   log.info(
     { candidates: result.candidates, drafted: result.drafted, skipped: result.skipped },
     "[followupDraftProducer] scan done",

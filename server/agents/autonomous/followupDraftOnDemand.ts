@@ -56,7 +56,7 @@ export async function produceFollowupDraftForProfile(
   const { agentMessages, customerInteractions, customerProfiles } = await import(
     "../../../drizzle/schema"
   );
-  const { and, eq, desc } = await import("drizzle-orm");
+  const { and, eq, desc, ne } = await import("drizzle-orm");
 
   const prof = (
     await db
@@ -148,21 +148,11 @@ export async function produceFollowupDraftForProfile(
   if (!honesty.ok) return { status: "skipped", reason: "dishonest_draft" };
 
   const finalSubject = stripMarkdownForEmail(draft.subject) || `跟進:${honesty.counterpartyEmail}`;
-  // 重出前退場這位客人現有的未讀 followup_draft 卡:同一晚/短時間重複觸發「給我草稿」
-  // 不再疊卡(2026-07-06 duplicate cards 實案),新草稿取代舊的;面板本來就只留最新一張,
-  // 這步同時清掉辦公室 inbox 的重複。只在所有 gate 都過、確定要插入時才退場(避免退了舊卡
-  // 卻因誠實/清洗 gate 拒絕而讓客人沒卡)。
-  await db
-    .update(agentMessages)
-    .set({ readByJeff: 1 })
-    .where(
-      and(
-        eq(agentMessages.agentName, FOLLOWUP_DRAFT_AGENT),
-        eq(agentMessages.relatedCustomerProfileId, profileId),
-        eq(agentMessages.readByJeff, 0),
-      ),
-    );
-  await db.insert(agentMessages).values(
+  // 重複觸發「給我草稿」不再疊卡(2026-07-06 duplicate cards 實案):INSERT 新草稿 → 退場
+  // 這位客人「其他」未讀 followup_draft 卡(排除剛插入的這張)。插入優先確保任何 DB 失敗
+  // 都不會讓客人一張草稿都沒有(舊卡還在,呼叫端會提示重試);拿不到 insertId 就不退場
+  // (寧可留一張舊的重複,也不誤退新卡)。所有 skip/誠實/清洗 gate 都已在上方通過。
+  const inserted = (await db.insert(agentMessages).values(
     buildFollowupDraftRow({
       profileId,
       // The thread's real counterparty (newest inbound From) — display + To:
@@ -175,7 +165,21 @@ export async function produceFollowupDraftForProfile(
       promptVariant,
       hasQuoteEvidence: honesty.hasQuoteEvidence,
     }),
-  );
+  )) as unknown as Array<{ insertId?: number }>;
+  const newId = Array.isArray(inserted) ? inserted[0]?.insertId : undefined;
+  if (newId != null) {
+    await db
+      .update(agentMessages)
+      .set({ readByJeff: 1 })
+      .where(
+        and(
+          eq(agentMessages.agentName, FOLLOWUP_DRAFT_AGENT),
+          eq(agentMessages.relatedCustomerProfileId, profileId),
+          eq(agentMessages.readByJeff, 0),
+          ne(agentMessages.id, newId),
+        ),
+      );
+  }
   log.info({ profileId, daysSince }, "[followupDraftOnDemand] drafted on demand");
   return { status: "drafted", daysSince, subject: finalSubject, body: cleaned.body };
 }
