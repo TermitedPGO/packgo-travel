@@ -3472,6 +3472,8 @@ export const zhTW = {
         filterPlaceholder: '篩選',
         showUnfiled: '顯示未歸屬',
         unfiledBadge: '未歸屬',
+        emptyScopedHint: '這個專案目前沒有已歸屬的對話。勾選「顯示未歸屬」可查看尚未歸到任何專案的對話。',
+        noConversations: '這個專案沒有已歸屬或未歸屬的對話。',
         category: {
           flight: '機票',
           quote: '報價/行程',

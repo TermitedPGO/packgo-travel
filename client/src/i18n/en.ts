@@ -3509,6 +3509,8 @@ export const en = {
         filterPlaceholder: 'Filter',
         showUnfiled: 'Show unfiled',
         unfiledBadge: 'Unfiled',
+        emptyScopedHint: 'No conversations filed under this project yet. Tick "Show unfiled" to see conversations not yet filed to any project.',
+        noConversations: 'No filed or unfiled conversations for this project.',
         category: {
           flight: 'Flight',
           quote: 'Quote / itinerary',

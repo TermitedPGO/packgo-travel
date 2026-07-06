@@ -584,14 +584,39 @@ export type EscalationReplyInput = {
   attachments?: { key: string; filename: string }[]
 }
 
+/** 批八 generated 客人文件種類 → customerDocuments 存的中文檔名前綴。必須與伺服器
+ *  customerDocumentRender.ts 的 DOC_LABEL 一致(草稿附件 chip 才顯示得出跟 DB 及客人
+ *  收到的信裡相同的檔名)。 */
+const GENERATED_DOC_LABEL: Record<string, string> = {
+  deposit_receipt: "訂金收據",
+  payment_request: "預訂與支付單",
+  paid_receipt: "付款收據",
+  quote_summary: "報價摘要",
+}
+
 /**
  * Human filename for a reply-attachment R2 key
  * (reply-attachments/<scope>/<ts>-<rand>-<safeName> → safeName). Falls back to
  * the last path segment / the raw string, so it never returns empty (the server
  * zod requires filename min(1)).
+ *
+ * 批八 generated 文件的 key = generated-<ms>-<kind>.pdf。顯示成 customerDocuments 存
+ * 的中文檔名(<中文類型>_<YYYYMMDD>.pdf,UTC),不是原始 key —— key 的 <ms> 就是產生時
+ * 的 now.getTime(),與伺服器 fileStamp(now) 同源,重建出的檔名與 DB、與客人收到的信裡
+ * 的附件名完全一致(chip / 送信 filename 兩邊都走這支,故不會分岔)。
  */
 export function replyAttachmentDisplayName(keyOrName: string): string {
   const base = keyOrName.split("/").pop() ?? keyOrName
+  const gen = base.match(/^generated-(\d{10,})-([a-z_]+)\.pdf$/)
+  if (gen && GENERATED_DOC_LABEL[gen[2]]) {
+    const d = new Date(Number(gen[1]))
+    if (!Number.isNaN(d.getTime())) {
+      const stamp = `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}${String(
+        d.getUTCDate(),
+      ).padStart(2, "0")}`
+      return `${GENERATED_DOC_LABEL[gen[2]]}_${stamp}.pdf`
+    }
+  }
   const m = base.match(/^\d{10,}-[a-z0-9]{4,8}-(.+)$/)
   return ((m ? m[1] : base).trim() || "file").slice(0, 255)
 }

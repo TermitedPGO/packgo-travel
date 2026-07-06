@@ -92,6 +92,21 @@ describe("buildEscalationReplyInput", () => {
       ])
     })
 
+    it("批八 generated 文件 key 顯示成 customerDocuments 中文檔名(<類型>_<YYYYMMDD>.pdf),不是原始 key", () => {
+      // key 的 ms = 產生時 now.getTime();2026-07-06T13:00:00Z → UTC 20260706
+      const ms = new Date("2026-07-06T13:00:00Z").getTime()
+      expect(replyAttachmentDisplayName(`reply-attachments/9001/generated-${ms}-deposit_receipt.pdf`)).toBe(
+        "訂金收據_20260706.pdf",
+      )
+      expect(replyAttachmentDisplayName(`reply-attachments/9001/generated-${ms}-quote_summary.pdf`)).toBe(
+        "報價摘要_20260706.pdf",
+      )
+      // 非 generated 的一般上傳附件維持原本 <ts>-<rand>-<safeName> 解析
+      expect(replyAttachmentDisplayName("reply-attachments/9001/1700000000000-ab12cd-quote.pdf")).toBe(
+        "quote.pdf",
+      )
+    })
+
     it("an out-of-namespace key ABORTS the send loudly (honest failure, no silent drop)", async () => {
       const input = buildEscalationReplyInput(
         draft({ attachments: ["customerDocuments/42/passport.jpg"] }),

@@ -462,15 +462,35 @@ function ProjectOverviewCard({
 
 export function OverviewTab({
   customer: c,
-  chatMessages,
   activeProjectId = null,
 }: {
   customer: AdaptedCustomer
-  chatMessages: ChatMessage[]
   activeProjectId?: number | null
 }) {
   const { t } = useLocale()
   const [showAllChat, setShowAllChat] = useState(false)
+  // customer-projects — 概覽「最近對話」跟 activeProjectId 走(對齊歷史 tab 的 scope):
+  // 選中專案 → 只看該單的對話;未分類 → unfiledOnly。之前用未過濾的共用 conversationMessages,
+  // 選了專案卻仍顯示跨專案訊息。用自己的 scoped 查詢(不動共用那條,它還要餵客戶級真相條)。
+  const convSel = toSelection(c)
+  const convScope =
+    activeProjectId !== null ? { orderId: activeProjectId } : { unfiledOnly: true as const }
+  const convInput =
+    "userId" in convSel
+      ? { userId: convSel.userId, limit: 200, ...convScope }
+      : { profileId: convSel.profileId, limit: 200, ...convScope }
+  const convQ = trpc.admin.customerConversationThread.useQuery(convInput)
+  const chatMessages = useMemo<ChatMessage[]>(
+    () =>
+      (convQ.data?.messages ?? []).map((m) => ({
+        id: m.id,
+        senderRole: m.senderRole,
+        body: stripQuotedReply(m.body),
+        context: m.context,
+        createdAt: new Date(m.createdAt),
+      })),
+    [convQ.data],
+  )
   // customer-projects (§5) — when a ProjectBar chip is active, show that project's
   // OWN deterministic facts at the top (title/category/status/售價/dates/docs/notes),
   // straight from the order row — no LLM, no fabrication. The 摘要三行 below
@@ -1210,14 +1230,17 @@ export function TimelineTab({
   return (
     <div className="p-6 space-y-6">
       {/* full conversation — date jump (newest first, default newest day), then turns */}
-      {hasChat && (
+      {(hasChat || activeProjectId !== null) && (
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-2">
             <div className="text-[11px] font-semibold text-gray-900">
               {t("admin.customers.followUp.fullChat")}
             </div>
             {/* Phase6 B3 —「顯示未歸屬」toggle, only meaningful with a project
-                chip active (未分類 basket already IS the unfiled view). */}
+                chip active (未分類 basket already IS the unfiled view). Rendered
+                whenever a chip is active — NOT gated on hasChat — so a project
+                with zero filed turns still exposes the toggle (2026-07-06: it
+                used to vanish with the empty list, making it a dead end). */}
             {activeProjectId !== null && (
               <label className="flex items-center gap-1.5 text-[11px] text-gray-500 cursor-pointer select-none">
                 <input
@@ -1230,6 +1253,14 @@ export function TimelineTab({
               </label>
             )}
           </div>
+          {!hasChat ? (
+            <div className="text-[12px] text-gray-400">
+              {showUnfiled
+                ? t("admin.customers.projects.noConversations")
+                : t("admin.customers.projects.emptyScopedHint")}
+            </div>
+          ) : (
+           <>
           {days.length > 1 && (
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
               <button onClick={() => setSelDay(ALL_DATES)} className={chipCls(selDay === ALL_DATES)}>
@@ -1291,6 +1322,8 @@ export function TimelineTab({
               </div>
             )
           })}
+           </>
+          )}
         </div>
       )}
 
@@ -1318,7 +1351,10 @@ export function TimelineTab({
         </div>
       )}
 
-      {!hasChat && !hasEvents && (
+      {/* When a project chip is active the chat section above already renders an
+          empty-state hint (with the 顯示未歸屬 toggle), so only fall back to the
+          generic 無歷史 line when there's no project scope to hint about. */}
+      {!hasChat && !hasEvents && activeProjectId === null && (
         <div className="text-sm text-gray-400">{t("admin.customers.followUp.noHistory")}</div>
       )}
     </div>
