@@ -6,7 +6,7 @@
 
 ## 核心職責
 
-1. **AI 圖片生成**: 使用 OpenAI gpt-image-2 生成 AI 圖片(見 server/_core/imageGen.ts)
+1. **AI 圖片生成**: 使用 OpenAI gpt-image-2 生成 AI 圖片(見 server/_core/imageGeneration.ts)
 2. **Unsplash 搜尋**: 搜尋真實景點圖片作為補充
 3. **圖片品質控制**: 確保圖片符合高端品牌標準
 4. **結果組裝**: 組合 AI 生成和真實圖片,回傳 URL 陣列
@@ -41,16 +41,15 @@ interface ImageGenerationResult {
 
 ### Step 1: AI 圖片生成 (Hero 圖片)
 
-使用 OpenAI gpt-image-2 生成 Hero 圖片。實際實作在 `server/_core/imageGen.ts`
-(Replicate/SDXL 路徑已退役,2026-07 移除,不再使用 REPLICATE_API_TOKEN):
+使用 `server/_core/imageGeneration.ts` 的 generateImage 生成 Hero 圖片(內部走
+OpenAI gpt-image-2,產完直接上傳 R2 並回傳 { url }。Replicate/SDXL 路徑已退役,
+2026-07 移除,不再使用 REPLICATE_API_TOKEN):
 
 ```typescript
-import { generateImage } from '../../_core/imageGen';
+import { generateImage } from '../../_core/imageGeneration';
 
-const { url } = await generateImage({
-  prompt: heroPrompt.prompt,
-  size: '1792x1024', // 寬幅 Hero(GptImageSize)
-});
+// generateImage() 內部已上傳 R2,回傳 { url, sourceUrl? };只吃 prompt。
+const { url } = await generateImage({ prompt: heroPrompt.prompt });
 ```
 
 ### Step 2: Unsplash 搜尋 (Feature 圖片)
