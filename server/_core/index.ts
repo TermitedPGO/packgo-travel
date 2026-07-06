@@ -1414,6 +1414,49 @@ async function startServer() {
     }
   });
 
+  // 批十一 塊B — 案件經驗收割:parse 案件資料.md 的「經驗/踩坑/風險注意」段 → LLM 去識別化
+  // (指代化不寫客人真名)→ 寫 caseLearnings(sourceFolder 冪等,含 blocked 無訂單案)。
+  // dry_run 只 parse 候選、不燒 LLM;confirm 才 de-id + 寫。同 LOCAL_SCRIPT_TOKEN 慣例。
+  // POST /api/admin/harvest-case-lessons  Body: { mode, folderName, markdown, caseType?, destination? }
+  app.post("/api/admin/harvest-case-lessons", async (req, res) => {
+    try {
+      const ip = await verifyInternalAuth(req, res, {
+        tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
+        rateLimitKey: "harvest-case-lessons",
+        rateLimitMax: 60,
+        windowSec: 3600,
+      });
+      if (!ip) return;
+      const { mode, folderName, markdown, caseType, destination } = req.body || {};
+      if (mode !== "dry_run" && mode !== "confirm") {
+        return res.status(400).json({ error: "mode must be 'dry_run' or 'confirm'" });
+      }
+      if (typeof folderName !== "string" || !folderName.trim()) {
+        return res.status(400).json({ error: "Missing folderName" });
+      }
+      if (typeof markdown !== "string" || !markdown.trim()) {
+        return res.status(400).json({ error: "Missing markdown" });
+      }
+      if (Buffer.byteLength(markdown, "utf8") > 100_000) {
+        return res.status(400).json({ error: "markdown exceeds 100000 byte limit" });
+      }
+      const { harvestCaseLessons } = await import("./caseLessonHarvest");
+      const result = await harvestCaseLessons(
+        {
+          folderName,
+          markdown,
+          caseType: typeof caseType === "string" ? caseType : null,
+          destination: typeof destination === "string" ? destination : null,
+        },
+        mode,
+      );
+      return res.json(result);
+    } catch (err) {
+      logger.error({ err }, "[admin/harvest-case-lessons] error");
+      return res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   // customer-cockpit Phase6 B4 — one-time backfill of customOrderId onto
   // EXISTING customerInteractions rows (customOrderId IS NULL), reusing B1's
   // deterministic-only rules (① thread inheritance, ② exactly-one-in-progress

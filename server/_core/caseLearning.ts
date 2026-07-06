@@ -393,7 +393,11 @@ export async function runCaseLearningBacklogScan(days = 7): Promise<BacklogScanR
       .select({ sourceOrderId: caseLearnings.sourceOrderId })
       .from(caseLearnings)
       .where(inArray(caseLearnings.sourceOrderId, candidateIds));
-    const alreadyDistilled = new Set(existingRows.map((r) => r.sourceOrderId));
+    // sourceOrderId 自 migration 0112 起可 NULL(批十一 塊B 的 folderName-only 教訓);這裡的
+    // 對帳只看有訂單的列,NULL 濾掉。
+    const alreadyDistilled = new Set(
+      existingRows.map((r) => r.sourceOrderId).filter((id): id is number => id != null),
+    );
 
     const toDistill = filterUndistilledOrderIds(candidateIds, alreadyDistilled);
     let distilled = 0;

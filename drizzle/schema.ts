@@ -2952,11 +2952,16 @@ export const caseLearnings = mysqlTable("caseLearnings", {
   caseType: varchar("caseType", { length: 32 }),
   destination: varchar("destination", { length: 200 }),
   lesson: text("lesson").notNull(),
-  sourceOrderId: int("sourceOrderId").notNull(),
+  // migration 0112 — nullable: distillCaseLearning(案完結蒸餾)填非 NULL,以此「一單一課」
+  // 去重;批十一 塊B 收 blocked(無訂單)案時填 NULL。
+  sourceOrderId: int("sourceOrderId"),
+  // migration 0112 — 批十一 塊B 案件經驗收割的來源資料夾名;folderName 冪等去重(distill 路寫 NULL)。
+  sourceFolder: varchar("sourceFolder", { length: 255 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => ({
   typeDestCreatedIdx: index("idx_cl_type_dest_created").on(table.caseType, table.destination, table.createdAt),
   sourceOrderIdx: index("idx_cl_source_order").on(table.sourceOrderId),
+  sourceFolderIdx: index("idx_cl_source_folder").on(table.sourceFolder, table.createdAt),
 }));
 
 export type CaseLearning = typeof caseLearnings.$inferSelect;
