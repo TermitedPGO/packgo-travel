@@ -65,6 +65,25 @@ export function buildCanaryMarker(now: Date = new Date()): string {
   return `[canary] 週檢 ${todayLA(now)}`;
 }
 
+/**
+ * Pure: the "since" boundary for the post-submit verification queries, in ms.
+ *
+ * WHY floor-to-second minus 2s: MySQL DATETIME is second-precision — it TRUNCATES
+ * sub-second digits on write. If the canary submits at 13:00:00.400 and the
+ * resulting interaction lands the SAME wall-clock second, MySQL stores its
+ * createdAt as 13:00:00 (000ms). A raw `now.getTime()` boundary (13:00:00.400)
+ * then fails `createdAt >= since` (13:00:00.000 < 13:00:00.400) → a false canary
+ * failure even though the interaction really landed (prod-recorded: interaction
+ * 13:00:00 vs since 13:00:00.xxx, two checks falsely failed). Flooring to the
+ * whole second and subtracting a 2s margin makes a same-second (and near-second)
+ * truncated timestamp still satisfy the gte. The 0909 test profile has no other
+ * traffic in that tiny window, so the widened boundary can't false-pass.
+ * (General gotcha logged in docs/agent/30-templates.md — second-truncation compares.)
+ */
+export function computeCanarySinceMs(now: Date): number {
+  return Math.floor(now.getTime() / 1000) * 1000 - 2000;
+}
+
 export interface CanaryInquiryPayload {
   customerName: string;
   customerEmail: string;
@@ -270,7 +289,9 @@ export async function runWeeklyCanary(
   const sleep = opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   const delayMs = opts.delayMs ?? CANARY_VERIFY_DELAY_MS;
 
-  const submitAtMs = now.getTime();
+  // 秒級截斷防呆:MySQL DATETIME 只有秒精度,sinceMs 帶毫秒會讓同秒落庫的
+  // interaction(createdAt 被截成整秒)gte 誤判為早於 → 假失敗。向下取整到秒 + 2s 餘裕。
+  const submitAtMs = computeCanarySinceMs(now);
   let submitted = false;
   try {
     const res = await submitCanaryInquiry({ fetchImpl: opts.fetchImpl, baseUrl: opts.baseUrl, now });

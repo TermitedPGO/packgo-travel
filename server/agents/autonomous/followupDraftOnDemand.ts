@@ -23,6 +23,7 @@ import {
   pickFollowupVariant,
   sanitizeFollowupDraftBody,
   applyFollowupHonestyGate,
+  FOLLOWUP_DRAFT_AGENT,
   type InteractionDetailRow,
   type DraftSkipReason,
 } from "./followupDraftProducer";
@@ -147,6 +148,20 @@ export async function produceFollowupDraftForProfile(
   if (!honesty.ok) return { status: "skipped", reason: "dishonest_draft" };
 
   const finalSubject = stripMarkdownForEmail(draft.subject) || `跟進:${honesty.counterpartyEmail}`;
+  // 重出前退場這位客人現有的未讀 followup_draft 卡:同一晚/短時間重複觸發「給我草稿」
+  // 不再疊卡(2026-07-06 duplicate cards 實案),新草稿取代舊的;面板本來就只留最新一張,
+  // 這步同時清掉辦公室 inbox 的重複。只在所有 gate 都過、確定要插入時才退場(避免退了舊卡
+  // 卻因誠實/清洗 gate 拒絕而讓客人沒卡)。
+  await db
+    .update(agentMessages)
+    .set({ readByJeff: 1 })
+    .where(
+      and(
+        eq(agentMessages.agentName, FOLLOWUP_DRAFT_AGENT),
+        eq(agentMessages.relatedCustomerProfileId, profileId),
+        eq(agentMessages.readByJeff, 0),
+      ),
+    );
   await db.insert(agentMessages).values(
     buildFollowupDraftRow({
       profileId,

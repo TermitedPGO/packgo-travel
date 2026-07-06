@@ -32,6 +32,7 @@ import {
   submitCanaryInquiry,
   runWeeklyCanary,
   todayLA,
+  computeCanarySinceMs,
   CANARY_VERIFY_DELAY_MS,
   type CanaryCheckInputs,
   type FetchLike,
@@ -87,6 +88,27 @@ describe("verifyCanaryOutcome (pure, DB-free)", () => {
     expect(result.failures).toEqual(
       expect.arrayContaining(["interaction_landed", "owner_not_polluted", "last_inbound_advanced"]),
     );
+  });
+});
+
+describe("computeCanarySinceMs — MySQL 秒級截斷防呆(帶毫秒注入時鐘鎖住)", () => {
+  it("向下取整到秒並留 2 秒餘裕", () => {
+    const now = new Date("2026-07-06T13:00:00.400Z");
+    expect(computeCanarySinceMs(now)).toBe(new Date("2026-07-06T12:59:58.000Z").getTime());
+  });
+
+  it("同一秒落庫(被截成整秒)的 interaction 仍 >= since —— 回歸鎖:原本 raw getTime 會誤判失敗", () => {
+    const submit = new Date("2026-07-06T13:00:00.400Z"); // 帶毫秒的注入時鐘
+    const since = computeCanarySinceMs(submit);
+    // MySQL DATETIME 秒精度:同秒落庫的 interaction createdAt 被截成 13:00:00.000
+    const truncatedCreatedAt = new Date("2026-07-06T13:00:00.000Z").getTime();
+    expect(truncatedCreatedAt >= since).toBe(true); // 修好後:算數
+    expect(truncatedCreatedAt >= submit.getTime()).toBe(false); // 舊 bug:誤判為早於
+  });
+
+  it("整秒輸入也一律減 2 秒(不因沒有毫秒就不留餘裕)", () => {
+    const now = new Date("2026-07-06T13:00:00.000Z");
+    expect(computeCanarySinceMs(now)).toBe(new Date("2026-07-06T12:59:58.000Z").getTime());
   });
 });
 
@@ -219,6 +241,10 @@ describe("runWeeklyCanary — full executor with mocked DB + mocked HTTP + injec
     const result = await runWeeklyCanary(db, {
       fetchImpl: mockFetch,
       baseUrl: "http://127.0.0.1:3000",
+      // Inject now (with ms) so lastInboundAt-advanced compares deterministically
+      // against the fakeDb's fixed lastInboundAt (13:01Z) — no real-clock flake,
+      // and it exercises the second-flooring sinceMs fix.
+      now: new Date("2026-07-06T13:00:00.500Z"),
       sleep,
       delayMs: 60_000,
     });

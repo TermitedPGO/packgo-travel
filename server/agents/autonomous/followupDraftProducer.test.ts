@@ -310,6 +310,24 @@ describe("buildFollowupDraftRow — surfaces AND sends through the real consumer
     expect(neutral.body).not.toContain("報價");
   });
 
+  it("daysSince<=0(同天,常見於 on-demand)→ 不說「0 天沒回」,改中性「今天剛聯絡」", () => {
+    for (const hasQuoteEvidence of [true, false]) {
+      const sameDay = buildFollowupDraftRow({
+        profileId: 7,
+        customerEmail: "a@b.co",
+        daysSince: 0,
+        gmailThreadId: "t-123",
+        subject: "跟進:a@b.co",
+        draftBody: "嗨,補充一下…",
+        promptVariant: "A",
+        hasQuoteEvidence,
+      });
+      expect(sameDay.title).toContain("今天剛聯絡");
+      expect(sameDay.title).not.toContain("0 天沒回");
+      expect(sameDay.body).not.toContain("0 天沒回");
+    }
+  });
+
   it("收件人顯示修正:counterparty email 上卡後,card 的 to 跟信落點一致 (leslie→Emerald)", () => {
     // The producer passes applyFollowupHonestyGate.counterpartyEmail (newest
     // inbound From = leslie@axt.com) instead of the profile email — the card

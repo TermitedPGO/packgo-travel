@@ -469,9 +469,14 @@ export function buildFollowupDraftRow(input: FollowupDraftRowInput): FollowupDra
     // as awaiting send, not already-sent.
   });
   // 報價 wording only when a quote provably went out; otherwise neutral.
-  const staleLabel = input.hasQuoteEvidence
-    ? `報價 ${input.daysSince} 天沒回`
-    : `上次聯絡後 ${input.daysSince} 天沒回`;
+  // daysSince<=0(同天,常見於 on-demand「給我草稿」剛聯絡過的客人)→「N 天沒回」
+  // 語意不通(0 天沒回?),改成中性「今天剛聯絡」。
+  const staleLabel =
+    input.daysSince <= 0
+      ? "今天剛聯絡"
+      : input.hasQuoteEvidence
+        ? `報價 ${input.daysSince} 天沒回`
+        : `上次聯絡後 ${input.daysSince} 天沒回`;
   return {
     agentName: FOLLOWUP_DRAFT_AGENT,
     messageType: "observation",
@@ -515,7 +520,11 @@ export async function runFollowupDraftScan(
   const { agentMessages, customerInteractions } = await import("../../../drizzle/schema");
   const { and, eq, gte, desc, inArray } = await import("drizzle-orm");
 
-  // Dedup: skip customers with a still-unread followup_draft in the window.
+  // Dedup: skip customers who already got a followup_draft within the window,
+  // READ OR NOT — matching the sibling runFollowupScan reminder dedup. The old
+  // `readByJeff=0` filter meant a card Jeff had already opened (readByJeff=1) no
+  // longer blocked a re-draft, so the same customer could be re-drafted within 7
+  // days (2026-07-06: duplicate cards for one customer in one night).
   const dedupSince = new Date(Date.now() - FOLLOWUP_DRAFT_DEDUP_DAYS * DAY_MS);
   const existing = (await db
     .select({ pid: agentMessages.relatedCustomerProfileId })
@@ -523,7 +532,6 @@ export async function runFollowupDraftScan(
     .where(
       and(
         eq(agentMessages.agentName, FOLLOWUP_DRAFT_AGENT),
-        eq(agentMessages.readByJeff, 0),
         gte(agentMessages.createdAt, dedupSince),
         inArray(
           agentMessages.relatedCustomerProfileId,

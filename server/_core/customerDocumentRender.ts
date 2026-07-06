@@ -304,7 +304,11 @@ export function computeReceiptAmounts(
 export function DEFAULT_PAY_TERMS(ratio: DepositRatio | undefined): string[] {
   return [
     "接受信用卡刷卡付款(美金計價)",
-    `訂金:確認行程後 2 日內支付團費之 ${ratio ?? "約定比例"}`,
+    // 有比例(收據/請款)→ 明寫比例;沒比例(報價摘要,尚未定案)→ 中性句,不硬塞
+    // 「約定比例」佔位(讀起來像漏字)。
+    ratio
+      ? `訂金:確認行程後 2 日內支付團費之 ${ratio}`
+      : "訂金:確認行程後 2 日內支付團費訂金(實際比例以正式合約為準)",
     "尾款:出發前付清全額",
   ];
 }

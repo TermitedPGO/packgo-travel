@@ -32,6 +32,11 @@ vi.mock("./customerFacts", async () => {
   return { ...actual, gatherCustomerFacts: (...args: unknown[]) => gatherCustomerFactsMock(...args) };
 });
 
+// Redis is mocked so the heartbeat write in runWeeklyCorrectnessAudit never
+// touches a real client under `vitest run`.
+const redisSetMock = vi.fn().mockResolvedValue("OK");
+vi.mock("../redis", () => ({ redis: { set: (...args: unknown[]) => redisSetMock(...args) } }));
+
 import {
   diffCustomerSummary,
   aggregateAuditResults,
@@ -39,6 +44,7 @@ import {
   priorityForMismatchCount,
   isEmptyFacts,
   runWeeklyCorrectnessAudit,
+  WEEKLY_AUDIT_HEARTBEAT_KEY,
   type CustomerAuditInput,
   type CustomerAuditResult,
 } from "./weeklyCorrectnessAudit";
@@ -475,5 +481,14 @@ describe("runWeeklyCorrectnessAudit — executor loop actually continues past on
     expect(result.posted).toBe(true);
     expect(result.mismatching).toBe(1);
     expect(result.degraded).toBe(1);
+  });
+
+  it("跑完就寫 Redis 心跳 key —— 零差異也寫,監工才能區分「跑了沒事」與「根本沒跑」", async () => {
+    redisSetMock.mockClear();
+    const db = fakeDb([]); // 零候選 → 零差異、不發卡,但仍要留心跳痕跡
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const result = await runWeeklyCorrectnessAudit(db, { now });
+    expect(result.posted).toBe(false);
+    expect(redisSetMock).toHaveBeenCalledWith(WEEKLY_AUDIT_HEARTBEAT_KEY, now.toISOString());
   });
 });

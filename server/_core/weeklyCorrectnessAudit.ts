@@ -364,12 +364,35 @@ export interface WeeklyCorrectnessAuditResult {
  * LLM usage: zero — gatherCustomerFacts/deriveActions/deriveDelivered are all
  * pure DB reads + string derivation, no invokeLLM anywhere in this path.
  */
+/** Redis heartbeat key: last time the weekly correctness audit RAN to
+ *  completion (success), regardless of whether it found any diff. Lets the
+ *  supervisor tell「跑了、沒事」(key advanced this week) apart from「根本沒跑」
+ *  (key stale / missing) — a zero-diff run otherwise leaves no trace at all. */
+export const WEEKLY_AUDIT_HEARTBEAT_KEY = "lastWeeklyAuditAt";
+
+/** Fire-forget heartbeat write. A Redis blip must never fail the audit itself
+ *  (the audit's real output is the card / clean log), so a failed write only
+ *  warns. Value = ISO timestamp (human-readable when the supervisor inspects). */
+async function recordAuditHeartbeat(now: Date): Promise<void> {
+  try {
+    const { redis } = await import("../redis");
+    await redis.set(WEEKLY_AUDIT_HEARTBEAT_KEY, now.toISOString());
+    log.info({ at: now.toISOString() }, "[weeklyCorrectnessAudit] heartbeat recorded");
+  } catch (err) {
+    log.warn(
+      { err: (err as Error).message },
+      "[weeklyCorrectnessAudit] heartbeat write failed (non-fatal)",
+    );
+  }
+}
+
 export async function runWeeklyCorrectnessAudit(
   db: Db,
-  opts?: { activeDays?: number; sampleLimit?: number },
+  opts?: { activeDays?: number; sampleLimit?: number; now?: Date },
 ): Promise<WeeklyCorrectnessAuditResult> {
   const activeDays = opts?.activeDays ?? DEFAULT_ACTIVE_DAYS;
   const sampleLimit = opts?.sampleLimit ?? DEFAULT_SAMPLE_LIMIT;
+  const now = opts?.now ?? new Date();
 
   const candidates = await selectActiveAuditCandidates(db, activeDays, sampleLimit);
 
@@ -401,6 +424,8 @@ export async function runWeeklyCorrectnessAudit(
   }
 
   const aggregate = aggregateAuditResults(results);
+  // 心跳:跑完就記(不論有沒有差異),監工才能區分「跑了、沒事」與「根本沒跑」。
+  await recordAuditHeartbeat(now);
   if (!aggregate.card) {
     log.info(
       { compared: aggregate.compared, mismatching: 0, degraded: 0 },
