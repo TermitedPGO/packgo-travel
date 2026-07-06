@@ -144,6 +144,12 @@ scripts/gmail-eval/data/
 # `pnpm deploy` (see scripts/safe-deploy.mjs gate 7). Never commit; burned
 # automatically after a successful deploy.
 .deploy-approve
+# Full flyctl-deploy output captured when a deploy fails, so the monitor can
+# read the error from a file instead of scrolling Jeff's terminal (see
+# scripts/safe-deploy.mjs). Deleted automatically on a successful deploy.
+# MUST stay ignored: gate 2 (clean working tree) would otherwise block the
+# next deploy on this untracked file.
+.deploy-last-error.log
 .gstack/
 
 # Stray PDFs dropped into the repo root — this folder doubles as Jeff's

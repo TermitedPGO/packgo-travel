@@ -35,6 +35,11 @@ import { fileURLToPath } from "node:url";
 const APP = "packgo-travel";
 const HEALTH_URL = "https://packgoplay.com/health";
 const APPROVE_FILE = ".deploy-approve";
+// Full flyctl-deploy output is tee'd here when a deploy fails, so the failure
+// can be read from a file (by the monitor / next session) instead of only
+// living in Jeff's terminal scrollback. Deleted on a successful deploy.
+// Gitignored (see .gitignore) — must never trip gate 2's clean-tree check.
+const ERROR_LOG_FILE = ".deploy-last-error.log";
 
 const indent = (s) =>
   String(s)
@@ -172,10 +177,25 @@ async function guardInner(deps, opts) {
 
   log(`\n🚀 all gates green — deploying: flyctl deploy --remote-only -a ${APP}`);
   try {
-    run(`flyctl deploy --remote-only -a ${APP}`, { inherit: true });
+    // tee → the FULL build+release output streams live to Jeff's terminal AND
+    // is captured to ERROR_LOG_FILE (tee truncates, so the file always holds
+    // THIS attempt's output, never an append of past runs). pipefail makes the
+    // pipeline surface flyctl's non-zero exit — without it the pipeline status
+    // is tee's, which is always 0, and a failed deploy would look like success.
+    run(
+      `set -o pipefail; flyctl deploy --remote-only -a ${APP} 2>&1 | tee ${ERROR_LOG_FILE}`,
+      { inherit: true, shell: "/bin/bash" },
+    );
   } catch {
-    return fail("flyctl deploy failed — prod unchanged; .deploy-approve kept for retry");
+    return fail(
+      `flyctl deploy failed — prod unchanged; full output saved to ${ERROR_LOG_FILE} ` +
+        `(read that file instead of scrolling the terminal); .deploy-approve kept for retry`,
+    );
   }
+
+  // Deploy succeeded → the captured log only exists to explain FAILURES, so
+  // drop it; a leftover file would otherwise read as "last deploy failed".
+  deps.deleteErrorLog();
 
   // burn the one-time token (only after a successful deploy)
   deps.deleteApprove();
@@ -214,6 +234,8 @@ function makeRealDeps() {
   ).trim();
   const approvePath = path.join(repoRoot, APPROVE_FILE);
 
+  const errorLogPath = path.join(repoRoot, ERROR_LOG_FILE);
+
   const run = (cmd, opts = {}) =>
     execSync(cmd, {
       encoding: "utf8",
@@ -221,6 +243,9 @@ function makeRealDeps() {
       env: opts.env ?? process.env,
       cwd: repoRoot,
       maxBuffer: 64 * 1024 * 1024,
+      // `set -o pipefail` (the deploy tee pipeline) is bash syntax; default
+      // /bin/sh doesn't guarantee it. Callers that need it pass shell:"/bin/bash".
+      ...(opts.shell ? { shell: opts.shell } : {}),
     });
 
   return {
@@ -229,6 +254,9 @@ function makeRealDeps() {
     readApprove: () => (existsSync(approvePath) ? readFileSync(approvePath, "utf8") : null),
     deleteApprove: () => {
       if (existsSync(approvePath)) unlinkSync(approvePath);
+    },
+    deleteErrorLog: () => {
+      if (existsSync(errorLogPath)) unlinkSync(errorLogPath);
     },
     listMigrations: () => {
       try {

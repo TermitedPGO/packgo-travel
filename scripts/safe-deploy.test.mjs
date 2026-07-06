@@ -25,6 +25,7 @@ function makeDeps(o = {}) {
   };
   const calls = [];
   let deleted = 0;
+  let errorLogDeleted = 0;
 
   const run = (cmd) => {
     calls.push(cmd);
@@ -41,7 +42,12 @@ function makeDeps(o = {}) {
       if (state.testFail) throw new Error("tests failed");
       return "";
     }
-    if (cmd.includes("flyctl deploy")) return "deployed";
+    if (cmd.includes("flyctl deploy")) {
+      // The real deploy is a `... | tee .deploy-last-error.log` pipeline; a
+      // non-zero flyctl exit surfaces (pipefail) as a throw here.
+      if (state.deployFail) throw new Error("flyctl deploy exit 1");
+      return "deployed";
+    }
     if (cmd.includes("flyctl releases")) return " v999    │ complete │ Release";
     if (cmd.includes("curl")) return JSON.stringify({ overall: "ok", checks: {} });
     return "";
@@ -54,6 +60,9 @@ function makeDeps(o = {}) {
     deleteApprove: () => {
       deleted++;
     },
+    deleteErrorLog: () => {
+      errorLogDeleted++;
+    },
     listMigrations: () => ["0086_supplier_cost", "0087_booking_consent"],
     health: () => ({ overall: "ok", checks: { db: { status: "ok", latencyMs: 1 } } }),
     log: () => {},
@@ -61,6 +70,9 @@ function makeDeps(o = {}) {
     _calls: calls,
     get _deleted() {
       return deleted;
+    },
+    get _errorLogDeleted() {
+      return errorLogDeleted;
     },
   };
 }
@@ -131,6 +143,25 @@ test("PASS: all gates green + token matches → reaches flyctl deploy + burns to
   assert.equal(code, 0);
   assert.equal(reachedDeploy(d), true);
   assert.equal(d._deleted, 1); // one-time token consumed exactly once
+  assert.equal(d._errorLogDeleted, 1); // success cleans up the failure-capture log
+});
+
+test("PASS: the deploy command tee's full output to .deploy-last-error.log with pipefail", async () => {
+  const d = makeDeps();
+  await runGuard(d, {});
+  const deployCmd = d._calls.find((c) => c.includes("flyctl deploy"));
+  assert.ok(deployCmd, "deploy command was issued");
+  assert.match(deployCmd, /tee \.deploy-last-error\.log/);
+  assert.match(deployCmd, /pipefail/); // so a failed flyctl exit isn't masked by tee
+});
+
+test("BLOCK: flyctl deploy fails → returns 1, KEEPS error log, does NOT burn token", async () => {
+  const d = makeDeps({ deployFail: true });
+  const code = await runGuard(d, {});
+  assert.equal(code, 1);
+  assert.equal(reachedDeploy(d), true); // it did attempt the deploy
+  assert.equal(d._deleted, 0); // token NOT burned (kept for retry)
+  assert.equal(d._errorLogDeleted, 0); // log KEPT so the monitor can read the failure
 });
 
 test("DRY-RUN: all gates green but does NOT deploy and KEEPS the token", async () => {
