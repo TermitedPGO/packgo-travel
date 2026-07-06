@@ -9,7 +9,7 @@
 --
 -- Migration 風格:照 docs/MIGRATION_PATTERNS.md —— TiDB 原生 MODIFY / ADD COLUMN IF NOT
 -- EXISTS / ADD INDEX IF NOT EXISTS,不套 PREPARE/IF(0070 事故:PREPARE 內 DDL 在 TiDB 靜默
--- no-op)。每句之間放 --> statement-breakpoint(migrator 靠這個切句)。
+-- no-op)。每句 SQL 之間用 drizzle 的分句標記分隔(見下方各句),migrator 靠它切句。
 --
 -- 欄位:
 --   sourceOrderId — 改 nullable。有訂單的案子仍填(與 distillCaseLearning 相容);blocked
