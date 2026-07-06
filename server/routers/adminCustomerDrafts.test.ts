@@ -113,6 +113,49 @@ describe("adminCustomerDrafts — normalization", () => {
     expect(card!.body).toContain("update on your booking");
   });
 
+  it("批八 塊三 — escalation draft 把 context.replyAttachments 的 key 攤成 attachments 片(只留命名空間內)", () => {
+    const card = escalationDraftCard({
+      id: 9,
+      createdAt: d("2026-06-19"),
+      context: j({
+        draftReply: "附上您的收據",
+        gmailThreadId: "thread-abc",
+        replyAttachments: [
+          { key: "reply-attachments/9001/generated-1-deposit_receipt.pdf", filename: "訂金收據.pdf" },
+          { key: "customer-docs/9001/passport.pdf", filename: "護照.pdf" }, // 命名空間外 → 丟
+        ],
+      }),
+    });
+    expect(card!.attachments).toEqual([
+      "reply-attachments/9001/generated-1-deposit_receipt.pdf",
+    ]);
+  });
+
+  it("escalation draft 沒 replyAttachments → attachments 空陣列", () => {
+    const card = escalationDraftCard({
+      id: 10,
+      createdAt: d("2026-06-19"),
+      context: j({ draftReply: "hi", gmailThreadId: "t" }),
+    });
+    expect(card!.attachments).toEqual([]);
+  });
+
+  it("批八 塊三 — observation draft 也攤 replyAttachments key(與 escalation 同條件)", () => {
+    const card = observationDraftCard({
+      id: 11,
+      createdAt: d("2026-06-19"),
+      context: j({
+        draftReply: "附上收據",
+        gmailThreadId: "t",
+        replyAttachments: [
+          { key: "reply-attachments/9001/generated-1-paid_receipt.pdf", filename: "付款收據.pdf" },
+          { key: "other/x.pdf", filename: "x.pdf" },
+        ],
+      }),
+    });
+    expect(card!.attachments).toEqual(["reply-attachments/9001/generated-1-paid_receipt.pdf"]);
+  });
+
   it("escalation draft → null when no gmailThreadId (nothing to reply into) or no draftReply", () => {
     expect(
       escalationDraftCard({ id: 1, createdAt: d("2026-06-19"), context: j({ draftReply: "hi", customerEmail: "a@b.com" }) }),

@@ -557,6 +557,64 @@ export const WRITE_TOOLS: Anthropic.Tool[] = [
       required: ["promiseId", "action"],
     },
   },
+  {
+    name: "generate_customer_document",
+    description:
+      "從『目前這位客人』的一張訂製單(專案)產生品牌 PDF 客人文件(訂金收據/請款單/付款收據/報價摘要)," +
+      "存進客人文件並掛到待審草稿,等 Jeff 按確認發送才寄出 —— 你絕不自動寄。" +
+      "用在 Jeff 說「出訂金收據」「開請款單跟客人要訂金」「出付款收據」「出一張報價摘要」時。" +
+      "**金額一律不編、不傳** —— 這個工具沒有任何金額參數,總價/訂金/餘款全由系統從訂單 totalPrice + 你指定的" +
+      "訂金比例(30%/50%)自己算,你只選 kind、給 orderId、選比例。" +
+      "kind:deposit_receipt=訂金收據(客人已登記付訂金才可出)、payment_request=預訂與支付單/請款(還沒收款、" +
+      "跟客人要錢)、paid_receipt=付款收據(已登記付清全額才可出)、quote_summary=單頁報價摘要。" +
+      "沒登記收款卻要出「已收」類收據、訂單缺總價/出發日、或幣別不是 USD,系統會拒絕並告訴你缺什麼 —— " +
+      "照實回報給 Jeff,不要自己湊數字硬出。orderId 從帳務/專案列表或剛建單/改單的回傳拿,不要編。" +
+      "條款用模板預設(付款/取消);Jeff 要改條款文字可用 payTerms/cancelTerms 傳『他寫好的字』(一行一條)," +
+      "你不可自行生成條款。做完用一句話報:出了哪種文件、哪張單、檔名;若用了預設條款,提醒 Jeff 確認條款" +
+      "是否符合這位客人的合約。",
+    input_schema: {
+      type: "object",
+      properties: {
+        kind: {
+          type: "string",
+          enum: ["deposit_receipt", "payment_request", "paid_receipt", "quote_summary"],
+          description:
+            "文件種類:deposit_receipt=訂金收據(需已登記收訂金)/ payment_request=請款單(未收款)/ " +
+            "paid_receipt=付款收據(需已登記付清)/ quote_summary=報價摘要",
+        },
+        orderId: {
+          type: "number",
+          description: "要出文件的訂製單 id(從帳務/專案列表或建單回傳拿,不要編)",
+        },
+        depositRatio: {
+          type: "string",
+          enum: ["30%", "50%"],
+          description:
+            "訂金比例(deposit_receipt / payment_request 必填)。金額由系統用 totalPrice×此比例算," +
+            "你只選比例、不給金額。paid_receipt / quote_summary 不需要。",
+        },
+        paxCount: { type: "number", description: "人數(選填,只有 quote_summary 會顯示)" },
+        clientDisplayName: {
+          type: "string",
+          description: "文件上顯示的客人稱呼(選填;不給就用訂單上的客人名)。純文字,不含金額。",
+        },
+        note: {
+          type: "string",
+          description: "文件底部備註(選填,純文字,不含金額;不給用預設)",
+        },
+        payTerms: {
+          type: "string",
+          description:
+            "付款方式條款(選填;Jeff 寫好的字,一行一條;不給用模板預設)。你不可自行生成條款,只能原樣帶入 Jeff 給的文字。",
+        },
+        cancelTerms: {
+          type: "string",
+          description: "取消政策條款(選填;同 payTerms 規則,你不可自行生成條款)",
+        },
+      },
+      required: ["kind", "orderId"],
+    },
+  },
 ];
 
 export const CREATE_CUSTOMER_TOOL: Anthropic.Tool = {
@@ -1534,6 +1592,166 @@ async function gateSupplierCost(
 }
 
 /**
+ * 批八 塊二 成本防漏第二層:掛在某張單的供應商 invoice 文件抽出的 total(cents),
+ * 餵給客人文件的 cost_leak 閘。best-effort —— 讀不到/解析不出就回空陣列,不擋合法收據
+ * (supplierCost 在 render 內部一律硬納入,才是主防線)。跳過 PII 文件與我們自己 generated
+ * 的文件。
+ */
+async function gatherOrderInvoiceForbiddenCents(
+  orderId: number,
+  profileId: number,
+): Promise<number[]> {
+  try {
+    const { getDb } = await import("../../db");
+    const db = await getDb();
+    if (!db) return [];
+    const { customerDocuments } = await import("../../../drizzle/schema");
+    const { and, eq } = await import("drizzle-orm");
+    const rows = await db
+      .select({
+        id: customerDocuments.id,
+        type: customerDocuments.type,
+        fileName: customerDocuments.fileName,
+        r2Url: customerDocuments.r2Url,
+        uploadedBy: customerDocuments.uploadedBy,
+      })
+      .from(customerDocuments)
+      .where(
+        and(
+          eq(customerDocuments.customOrderId, orderId),
+          eq(customerDocuments.customerProfileId, profileId),
+        ),
+      );
+    const PII = new Set(["passport", "visa", "insurance", "medical"]);
+    const { extractDocTextCached } = await import("../../_core/customerDocsText");
+    const { extractInvoiceTotal } = await import("../../services/customOrderWatchdog");
+    const out: number[] = [];
+    for (const doc of rows) {
+      if (PII.has(doc.type)) continue;
+      if (doc.uploadedBy === "generated") continue; // 不把自己出的文件當 invoice
+      if (!doc.r2Url) continue;
+      const text = await extractDocTextCached({
+        kind: "invoice",
+        name: doc.fileName || `document-${doc.id}`,
+        url: doc.r2Url,
+      });
+      if (!text) continue;
+      const total = extractInvoiceTotal(text);
+      if (total != null && total > 0) out.push(Math.round(total * 100));
+    }
+    return out;
+  } catch (err) {
+    log.warn(
+      { orderId, profileId, err: err instanceof Error ? err.message : String(err) },
+      "gatherOrderInvoiceForbiddenCents best-effort failed — supplierCost 仍為硬防線",
+    );
+    return [];
+  }
+}
+
+/**
+ * 批八 塊三 — 把剛產生的客人文件({key, filename})掛到這位客人最近一張待審 escalation
+ * 草稿的 context.replyAttachments,寄出時(Jeff 按確認)PDF 會一起送。找不到可掛的草稿
+ * 就回 null(工具會誠實告訴 Jeff 文件已存但沒草稿可掛)。best-effort:失敗不影響文件已
+ * 產生的事實,絕不自動寄。
+ */
+async function attachDocToPendingDraft(
+  scopeIds: number[],
+  kind: string,
+  doc: { key: string; fileName: string },
+): Promise<{ attachedToMessageId: number } | null> {
+  if (scopeIds.length === 0) return null;
+  try {
+    const { getDb } = await import("../../db");
+    const db = await getDb();
+    if (!db) return null;
+    const { agentMessages, customerInteractions } = await import("../../../drizzle/schema");
+    const { and, eq, inArray, desc, sql } = await import("drizzle-orm");
+    const { escalationDraftCard, observationDraftCard, mergeDrafts, onlyNewestDraft, isDraftCurrent } =
+      await import("../../routers/adminCustomerDrafts");
+
+    // 掛到「Jeff 實際看到並會寄的那張草稿」—— 用與客戶頁 customerDrafts 相同的選法:
+    // escalation + observation 兩種可寄 email 草稿一起看,套 isDraftCurrent(過時的不掛)
+    // + onlyNewestDraft(只留最新一張),避免掛到隱藏/過時/別種來源的 row(對抗審查 HIGH)。
+    const [latestRow] = await db
+      .select({ m: sql<string | null>`max(${customerInteractions.createdAt})` })
+      .from(customerInteractions)
+      .where(
+        and(
+          inArray(customerInteractions.customerProfileId, scopeIds),
+          eq(customerInteractions.channel, "email"),
+        ),
+      );
+    const latestMsgAt = latestRow?.m ? new Date(latestRow.m) : null;
+
+    const rows = await db
+      .select({
+        id: agentMessages.id,
+        messageType: agentMessages.messageType,
+        context: agentMessages.context,
+        createdAt: agentMessages.createdAt,
+      })
+      .from(agentMessages)
+      .where(
+        and(
+          inArray(agentMessages.messageType, ["escalation", "observation"]),
+          eq(agentMessages.readByJeff, 0),
+          inArray(agentMessages.relatedCustomerProfileId, scopeIds),
+        ),
+      )
+      .orderBy(desc(agentMessages.createdAt))
+      .limit(50);
+
+    const escCards = rows
+      .filter((r) => r.messageType === "escalation")
+      .map((r) => escalationDraftCard({ id: r.id, context: r.context, createdAt: r.createdAt }))
+      .filter((c): c is NonNullable<typeof c> => c != null);
+    const obsCards = rows
+      .filter((r) => r.messageType === "observation")
+      .map((r) => observationDraftCard({ id: r.id, context: r.context, createdAt: r.createdAt }))
+      .filter((c): c is NonNullable<typeof c> => c != null);
+
+    const winner = onlyNewestDraft(
+      mergeDrafts([escCards, obsCards]).filter((c) => isDraftCurrent(c.createdAt, latestMsgAt)),
+    )[0];
+    if (!winner || winner.messageId == null) return null; // 沒有可掛的現行 email 草稿
+
+    const targetRow = rows.find((r) => r.id === winner.messageId);
+    if (!targetRow?.context) return null;
+    let ctx: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(targetRow.context);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+      ctx = parsed as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+    // 重出同一種文件要「取代」不要「疊加」:先移除這張草稿上同 kind 的舊 generated 附件,
+    // 再加新的(key 格式 reply-attachments/<profileId>/generated-<ts>-<kind>.pdf)。kind 來自
+    // 白名單 enum,無 regex 特殊字元。保留其他 kind + 非我方附件 + context 其他所有欄位。
+    const sameKindRe = new RegExp(`/generated-\\d+-${kind}\\.pdf$`);
+    const existing = Array.isArray(ctx.replyAttachments) ? ctx.replyAttachments : [];
+    const kept = existing.filter((a: unknown) => {
+      if (a == null || typeof a !== "object") return false;
+      const k = (a as Record<string, unknown>).key;
+      return typeof k === "string" && !sameKindRe.test(k);
+    });
+    const replyAttachments = [...kept, { key: doc.key, filename: doc.fileName }];
+    await db
+      .update(agentMessages)
+      .set({ context: JSON.stringify({ ...ctx, replyAttachments }) })
+      .where(eq(agentMessages.id, winner.messageId));
+    return { attachedToMessageId: winner.messageId };
+  } catch (err) {
+    log.warn(
+      { scopeIds, err: err instanceof Error ? err.message : String(err) },
+      "attachDocToPendingDraft best-effort failed — 文件已產生,只是沒掛上草稿",
+    );
+    return null;
+  }
+}
+
+/**
  * Pure validator/normalizer for the create_custom_order tool. Turns the model's
  * loose args into the exact insert-shape fields (money → decimal string, dates →
  * validated YYYY-MM-DD, category → whitelisted). Pure so it is unit-tested with
@@ -2132,6 +2350,147 @@ async function runWriteTool(
           ? `已更新單 ${updated.orderNumber}(改了:${changed.join("、")});${rejectedReason}`
           : `已更新單 ${updated.orderNumber}(改了:${changed.join("、")})`,
       };
+    }
+
+    case "generate_customer_document": {
+      // 批八 塊二。從訂單取數 → 套 Jeff 品牌模板 → 伺服器渲染 PDF → 存客人文件。
+      // 金額全由系統從 totalPrice 演算(工具無金額參數);三道閘 + 完整性/誠實/幣別閘
+      // 在 customerDocumentRender 內執行,任一失敗回誠實錯誤字串給 model 轉述 Jeff。
+      if (!profileId) return { error: "沒有選定客人 — 這個工具只能在某位客人的對話框裡用" };
+
+      const kind = input?.kind;
+      const KINDS = ["deposit_receipt", "payment_request", "paid_receipt", "quote_summary"];
+      if (typeof kind !== "string" || !KINDS.includes(kind))
+        return {
+          error:
+            "kind 需為 deposit_receipt / payment_request / paid_receipt / quote_summary 其一" +
+            "(flight_ticket 機票確認單本批尚未支援,順延下批)。",
+        };
+      const orderId = Number(input?.orderId);
+      if (!Number.isInteger(orderId) || orderId <= 0)
+        return { error: "需要要出文件的 orderId(正整數,從帳務/專案列表拿,不要編)" };
+
+      let depositRatio: "30%" | "50%" | undefined;
+      if (kind === "deposit_receipt" || kind === "payment_request") {
+        const r = input?.depositRatio;
+        if (r !== "30%" && r !== "50%")
+          return {
+            error:
+              "訂金收據/請款單需指定 depositRatio(30% 或 50%);金額由系統用 totalPrice×比例演算,你只選比例。",
+          };
+        depositRatio = r;
+      }
+
+      const {
+        getCustomOrderById,
+        getCustomerProfileSnapshot,
+        resolveCustomerProfileIds,
+        orderBelongsToProfiles,
+      } = await import("../../db/customOrder");
+      const order = await getCustomOrderById(orderId);
+      if (!order) return { error: `找不到訂單 #${orderId}` };
+      // Cross-customer guard — 與 update_custom_order 同一條(不另創變體)。
+      const snap = await getCustomerProfileSnapshot(profileId);
+      const scopeIds =
+        snap.userId != null
+          ? await resolveCustomerProfileIds({ userId: snap.userId })
+          : [profileId];
+      if (!scopeIds.includes(profileId)) scopeIds.push(profileId);
+      if (!orderBelongsToProfiles(order.customerProfileId, scopeIds))
+        return { error: `訂單 #${orderId} 不是這位客人的,不能出文件` };
+
+      // 成本防漏第二層:掛在這張單的供應商 invoice 抽出的 total 一併餵進 forbidden。
+      // best-effort(讀不到不擋合法收據);supplierCost 才是硬防線(render 內部一律納入)。
+      const extraForbiddenCents = await gatherOrderInvoiceForbiddenCents(
+        orderId,
+        order.customerProfileId,
+      );
+
+      const { CustomerDocumentError, generateCustomerDocument } = await import(
+        "../../_core/customerDocumentRender"
+      );
+      const DOC_KIND_LABEL: Record<string, string> = {
+        deposit_receipt: "訂金收據",
+        payment_request: "預訂與支付單",
+        paid_receipt: "付款收據",
+        quote_summary: "報價摘要",
+      };
+      try {
+        const doc = await generateCustomerDocument({
+          kind: kind as "deposit_receipt" | "payment_request" | "paid_receipt" | "quote_summary",
+          order: {
+            id: order.id,
+            orderNumber: order.orderNumber,
+            title: order.title,
+            customerName: order.customerName,
+            destination: order.destination ?? null,
+            departureDate: order.departureDate ?? null,
+            returnDate: order.returnDate ?? null,
+            totalPrice: order.totalPrice ?? null,
+            currency: order.currency,
+            supplierCost: order.supplierCost ?? null,
+            depositPaidAt: order.depositPaidAt ?? null,
+            balancePaidAt: order.balancePaidAt ?? null,
+          },
+          profileId: order.customerProfileId,
+          depositRatio,
+          now: new Date(),
+          // 人數:必須正整數且合理上限,否則忽略(避免 2.5 人 / 999999 人 這種垃圾上客人文件)。
+          paxCount:
+            typeof input?.paxCount === "number" &&
+            Number.isInteger(input.paxCount) &&
+            input.paxCount > 0 &&
+            input.paxCount <= 99
+              ? input.paxCount
+              : null,
+          clientDisplayName:
+            typeof input?.clientDisplayName === "string" ? input.clientDisplayName : null,
+          note: typeof input?.note === "string" ? input.note : null,
+          payTermsText: typeof input?.payTerms === "string" ? input.payTerms : null,
+          cancelTermsText: typeof input?.cancelTerms === "string" ? input.cancelTerms : null,
+          extraForbiddenCents,
+        });
+        // 塊三:把 doc({ key, fileName })掛進這位客人現行待審 email 草稿(有的話)。
+        const attached = await attachDocToPendingDraft(scopeIds, kind, {
+          key: doc.key,
+          fileName: doc.fileName,
+        });
+        log.info(
+          {
+            profileId,
+            orderId,
+            kind,
+            key: doc.key,
+            documentId: doc.documentId,
+            attachedToMessageId: attached?.attachedToMessageId ?? null,
+          },
+          "generate_customer_document executed",
+        );
+        const draftLine = attached
+          ? "已掛到這位客人的待審草稿,你確認回信時 PDF 會一起寄出。"
+          : "目前這位客人沒有待回的草稿卡,文件已在客人文件 tab,你回覆客人時可再手動掛上。";
+        return {
+          success: true,
+          kind,
+          orderId,
+          documentId: doc.documentId,
+          fileName: doc.fileName,
+          attachedToDraft: attached != null,
+          message:
+            `已產生${DOC_KIND_LABEL[kind]}「${doc.fileName}」(單 ${order.orderNumber}),已存進客人文件。${draftLine}` +
+            `條款若用預設,請確認是否符合這位客人的合約;AI 不會自動寄,務必由你按發送。`,
+        };
+      } catch (e) {
+        if (e instanceof CustomerDocumentError) {
+          log.info({ profileId, orderId, kind, gate: e.gate }, "generate_customer_document gate-rejected");
+          return { error: e.message };
+        }
+        log.error(
+          { profileId, orderId, kind, err: e instanceof Error ? e.message : String(e) },
+          "generate_customer_document failed",
+        );
+        return { error: "產生文件時發生錯誤,請重試,或改用手動流程出這份文件。" };
+      }
     }
 
     case "attach_interaction_to_order": {

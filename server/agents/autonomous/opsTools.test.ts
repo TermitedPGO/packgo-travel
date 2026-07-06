@@ -211,6 +211,65 @@ describe("READ_TOOLS definitions", () => {
   });
 });
 
+describe("generate_customer_document — 批八 塊二(從訂單出品牌 PDF)", () => {
+  const tool = WRITE_TOOLS.find((t) => t.name === "generate_customer_document");
+
+  it("已註冊進 WRITE_TOOLS", () => {
+    expect(tool).toBeDefined();
+  });
+
+  it("紅線1 結構保證:schema 沒有任何金額參數(只有 depositRatio 比例枚舉)", () => {
+    const props = Object.keys((tool!.input_schema as { properties?: Record<string, unknown> }).properties ?? {});
+    // 金額類欄位一個都不准有 —— 金額由 code 從 totalPrice 演算,LLM 不得傳金額。
+    const amountish = props.filter((k) => /price|amount|total|deposit(?!Ratio)|balance|cost|fee/i.test(k));
+    expect(amountish).toEqual([]);
+    // depositRatio 是比例枚舉,不是金額。
+    const ratio = (tool!.input_schema as { properties?: Record<string, { enum?: string[] }> }).properties
+      ?.depositRatio;
+    expect(ratio?.enum).toEqual(["30%", "50%"]);
+  });
+
+  it("沒選客人(無 profileId)→ 拒絕", async () => {
+    const r = JSON.parse(
+      await executeWriteTool(
+        "generate_customer_document",
+        { kind: "deposit_receipt", orderId: 1, depositRatio: "50%" },
+        undefined,
+      ),
+    );
+    expect(r.error).toContain("沒有選定客人");
+  });
+
+  it("kind 非法(含 flight_ticket 本批未支援)→ 拒絕", async () => {
+    for (const kind of ["bogus", "flight_ticket"]) {
+      const r = JSON.parse(
+        await executeWriteTool("generate_customer_document", { kind, orderId: 1 }, 2760016),
+      );
+      expect(r.error).toContain("kind");
+    }
+  });
+
+  it("deposit_receipt / payment_request 沒給 depositRatio → 拒絕(不編金額)", async () => {
+    for (const kind of ["deposit_receipt", "payment_request"]) {
+      const r = JSON.parse(
+        await executeWriteTool("generate_customer_document", { kind, orderId: 1 }, 2760016),
+      );
+      expect(r.error).toContain("depositRatio");
+    }
+  });
+
+  it("orderId 非正整數 → 拒絕", async () => {
+    const r = JSON.parse(
+      await executeWriteTool(
+        "generate_customer_document",
+        { kind: "quote_summary", orderId: -1 },
+        2760016,
+      ),
+    );
+    expect(r.error).toContain("orderId");
+  });
+});
+
 describe("set_follow_up_date — AI sets the cockpit follow-up date", () => {
   it("is exposed as a customer-page write tool", () => {
     expect(WRITE_TOOLS.map((t) => t.name)).toContain("set_follow_up_date");

@@ -428,6 +428,28 @@ describe("parseEscalationReplyContext (soft) + extractDraftFromBody (2026-06-13)
     expect(parseEscalationReplyContext(ctx)!.draftReply).toBe("關於 差別");
   });
 
+  it("批八 塊三 — replyAttachments 只留 reply-attachments/ 命名空間內、丟棄非法", () => {
+    const ctx = JSON.stringify({
+      gmailThreadId: "t-1",
+      replyAttachments: [
+        { key: "reply-attachments/9001/generated-1-deposit_receipt.pdf", filename: "訂金收據.pdf" },
+        { key: "customer-docs/9001/passport.pdf", filename: "護照.pdf" }, // 命名空間外 → 丟
+        { key: "reply-attachments/9001/x.pdf" }, // 缺 filename → 丟
+        { filename: "無 key.pdf" }, // 缺 key → 丟
+        "not-an-object",
+      ],
+    });
+    const c = parseEscalationReplyContext(ctx);
+    expect(c!.replyAttachments).toEqual([
+      { key: "reply-attachments/9001/generated-1-deposit_receipt.pdf", filename: "訂金收據.pdf" },
+    ]);
+  });
+
+  it("批八 塊三 — 沒有 replyAttachments 欄 → 空陣列", () => {
+    const c = parseEscalationReplyContext(JSON.stringify({ gmailThreadId: "t-1" }));
+    expect(c!.replyAttachments).toEqual([]);
+  });
+
   it("extractDraftFromBody 從卡片 body 抽出建議回覆並清 markdown", () => {
     const body =
       "這封我歸成「行程比較」,超出我能自動處理的範圍。\n\n" +

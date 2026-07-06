@@ -34,7 +34,7 @@ import {
 } from "../../drizzle/schema";
 import { createChildLogger } from "./logger";
 import { stripMarkdownForEmail } from "./plainTextReply";
-import type { ReplyAttachmentRef } from "./replyAttachments";
+import { REPLY_ATTACHMENT_KEY_PREFIX, type ReplyAttachmentRef } from "./replyAttachments";
 
 const log = createChildLogger({ module: "escalationBox" });
 
@@ -105,6 +105,11 @@ export interface EscalationReplyContext {
   customerEmail: string | null;
   subject: string;
   draftReply: string | null;
+  /** 批八 塊三 — generated customer-document PDFs attached to this draft, stored
+   *  in the escalation context so they ride along on send. Namespace-guarded:
+   *  each key must sit under reply-attachments/. Empty when none. Distinct from
+   *  the inbound-email `attachments` field (that one is metadata for display). */
+  replyAttachments: ReplyAttachmentRef[];
 }
 
 export function parseEscalationReplyContext(
@@ -132,10 +137,35 @@ export function parseEscalationReplyContext(
         typeof p.draftReply === "string" && p.draftReply.trim()
           ? stripMarkdownForEmail(p.draftReply)
           : null,
+      replyAttachments: parseReplyAttachments(p.replyAttachments),
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * 批八 塊三 — parse context.replyAttachments into namespace-guarded refs. Every
+ * key MUST sit under reply-attachments/ (the outbound-attachment safety
+ * boundary); anything else is dropped. Malformed entries are skipped, never
+ * thrown on.
+ */
+function parseReplyAttachments(raw: unknown): ReplyAttachmentRef[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ReplyAttachmentRef[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const a = item as Record<string, unknown>;
+    if (
+      typeof a.key === "string" &&
+      a.key.startsWith(REPLY_ATTACHMENT_KEY_PREFIX) &&
+      typeof a.filename === "string" &&
+      a.filename.trim().length > 0
+    ) {
+      out.push({ key: a.key, filename: a.filename });
+    }
+  }
+  return out;
 }
 
 /**
@@ -614,9 +644,20 @@ export async function sendEscalationReply(
   // inline parts vs >25MB download links (shared resolver, identical to the
   // inquiry path). Any failure here aborts the send with an honest message
   // rather than silently dropping an attachment the customer is expecting.
+  // 批八 塊三 — merge the generated-document PDFs stored in the escalation
+  // context (ctx.replyAttachments) with any caller-passed attachments, deduped
+  // by key. This guarantees the receipt/quote PDF rides along on send even if
+  // the frontend didn't re-pass it; keys are namespace-guarded at parse time.
+  // Context wins on filename collision — it carries the human-readable Chinese
+  // name (訂金收據.pdf), whereas the frontend derives an ascii name from the key.
+  const attachmentsByKey = new Map<string, ReplyAttachmentRef>();
+  for (const a of attachments ?? []) attachmentsByKey.set(a.key, a);
+  for (const a of ctx.replyAttachments) attachmentsByKey.set(a.key, a);
+  const mergedAttachments: ReplyAttachmentRef[] = [...attachmentsByKey.values()];
+
   let finalBody = body;
   let inlineAttachments: import("./gmail").GmailAttachment[] | undefined;
-  if (attachments && attachments.length > 0) {
+  if (mergedAttachments.length > 0) {
     try {
       const {
         resolveReplyAttachments,
@@ -624,7 +665,7 @@ export async function sendEscalationReply(
         DOWNLOAD_LINK_TTL_SECONDS,
       } = await import("./replyAttachments");
       const { storageGetBytes, getSecureDocumentUrl } = await import("../storage");
-      const resolved = await resolveReplyAttachments(attachments, {
+      const resolved = await resolveReplyAttachments(mergedAttachments, {
         getBytes: (key) => storageGetBytes(key),
         makeLink: (key) => getSecureDocumentUrl(key, DOWNLOAD_LINK_TTL_SECONDS),
       });

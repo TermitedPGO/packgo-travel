@@ -94,7 +94,27 @@ type EscalationCtx = {
   customerEmail?: string;
   classification?: string;
   subject?: string;
+  // 批八 塊三 — generated-document PDFs attached to this draft (R2 keys under
+  // reply-attachments/). Surfaced as the card's attachment chips.
+  replyAttachments?: Array<{ key?: unknown; filename?: unknown }>;
 };
+
+/**
+ * 批八 塊三 — pull generated-document PDF keys out of a context's replyAttachments
+ * for the draft card's attachment chips. Only reply-attachments/ keys (the
+ * outbound safety boundary); the send path re-guards the namespace. Shared by
+ * escalation + observation cards so both sendable email drafts surface the chip.
+ */
+function mapReplyAttachmentKeys(replyAttachments: unknown): string[] {
+  if (!Array.isArray(replyAttachments)) return [];
+  return replyAttachments
+    .map((a) =>
+      a != null && typeof a === "object" && typeof (a as { key?: unknown }).key === "string"
+        ? (a as { key: string }).key
+        : null,
+    )
+    .filter((k): k is string => k != null && k.startsWith("reply-attachments/"));
+}
 
 /**
  * agentMessages (messageType=escalation) row → draft card, or null when it is
@@ -131,7 +151,8 @@ export function escalationDraftCard(row: {
     subject: typeof c.subject === "string" && c.subject ? c.subject : null,
     body,
     sensitive: isSensitiveClass(c.classification),
-    attachments: [],
+    // 批八 塊三 — surface generated-document PDF keys as attachment chips.
+    attachments: mapReplyAttachmentKeys(c.replyAttachments),
     createdAt: row.createdAt,
     taskId: null,
     messageId: row.id,
@@ -185,7 +206,9 @@ export function observationDraftCard(row: {
     subject: typeof c.subject === "string" && c.subject ? c.subject : null,
     body,
     sensitive: isSensitiveClass(c.classification),
-    attachments: [],
+    // 批八 塊三 — observation drafts are first-class sendable drafts; surface the
+    // generated-document chip here too (parity with escalationDraftCard).
+    attachments: mapReplyAttachmentKeys(c.replyAttachments),
     createdAt: row.createdAt,
     taskId: null,
     messageId: row.id,
