@@ -99,6 +99,11 @@ vi.mock("../../_core/logger", () => ({
     debug: vi.fn(),
   }),
 }));
+// P0 hotfix (Ann 事故):收信失敗要浮一張 high 卡。spy notifyAgentMessage 驗 catch 有貼卡。
+const notifyAgentMessageMock = vi.fn();
+vi.mock("../../_core/agentNotify", () => ({
+  notifyAgentMessage: (...args: unknown[]) => notifyAgentMessageMock(...args),
+}));
 
 import {
   isNoreplySender,
@@ -171,6 +176,7 @@ beforeEach(() => {
   detectReceiptMock.mockReset().mockReturnValue({ isReceipt: false });
   getPendingExpenseByGmailMessageIdMock.mockReset().mockResolvedValue(null);
   runInquiryAgentMock.mockReset();
+  notifyAgentMessageMock.mockReset().mockResolvedValue(undefined);
   dbHolder.db = makeFakeDb().db;
 });
 
@@ -415,5 +421,61 @@ describe("own-email firewall (isOwnEmail short-circuits before runInquiryAgent)"
     // and failed inside processOneEmail (our stub throws), which the ingest
     // loop counts as totalFailed, not a silent drop.
     expect(result.totalFailed).toBe(1);
+  });
+});
+
+// ── ⑤ 收信失敗不再靜默(P0 hotfix, Ann Yuan 事故)— pipeline-throw 整合測 ────────
+// Ann 的信歸檔了但 LLM 分類/摘要/收件匣卡三樣靜默跳過:runInquiryAgent 那步 throw,
+// 落到 ingestFreshMessages 的 caller catch,原本只 totalFailed++/log、對 Jeff 完全靜默。
+// 這個整合測跑「真實客人的信在分類這步 throw」的完整 push 路徑,證明:除了計入失敗,
+// 一定貼一張 high 優先 intake-failure 卡(含寄件人/主旨/gmail messageId),不再靜默。
+describe("ingestFreshMessages — 分類 throw 時貼 high intake-failure 卡(不再靜默)", () => {
+  it("客人信的 LLM 分類 throw → totalFailed++ 且貼一張 high 卡,含寄件人/主旨/messageId", async () => {
+    listHistoryMessageIdsMock.mockResolvedValue({
+      messageIds: ["m-ann"],
+      latestHistoryId: "400",
+      expired: false,
+    });
+    listMessagesByIdsMock.mockResolvedValue([makeMsg("m-ann", "Ann Yuan <ayuan@axt.com>")]);
+    detectReceiptMock.mockReturnValue({ isReceipt: false });
+    // 模擬 Ann 事故:LLM 分類這步掛掉(在 interaction insert 之前)。
+    runInquiryAgentMock.mockRejectedValue(new Error("classification LLM 500"));
+
+    const result = await runGmailPipelineForMessageIds(7, "401");
+
+    // 不再靜默:計入失敗 + 真的貼了一張卡。
+    expect(result.totalFailed).toBe(1);
+    expect(notifyAgentMessageMock).toHaveBeenCalledTimes(1);
+    const card = notifyAgentMessageMock.mock.calls[0][0] as {
+      agentName: string;
+      messageType: string;
+      priority: string;
+      title: string;
+      body: string;
+    };
+    expect(card.priority).toBe("high");
+    expect(card.messageType).toBe("alert");
+    expect(card.agentName).toBe("gmail-intake");
+    expect(card.title).toContain("Ann Yuan <ayuan@axt.com>");
+    expect(card.body).toContain("subject-m-ann"); // 主旨
+    expect(card.body).toContain("m-ann"); // gmail messageId
+    expect(card.body).toContain("classification LLM 500"); // 錯誤原文
+  });
+
+  it("貼卡本身失敗也不影響其餘:notifyAgentMessage reject → 仍 totalFailed=1、不炸", async () => {
+    listHistoryMessageIdsMock.mockResolvedValue({
+      messageIds: ["m-ann2"],
+      latestHistoryId: "402",
+      expired: false,
+    });
+    listMessagesByIdsMock.mockResolvedValue([makeMsg("m-ann2", "Ann Yuan <ayuan@axt.com>")]);
+    detectReceiptMock.mockReturnValue({ isReceipt: false });
+    runInquiryAgentMock.mockRejectedValue(new Error("classification LLM 500"));
+    notifyAgentMessageMock.mockRejectedValue(new Error("agentMessages insert down"));
+
+    const result = await runGmailPipelineForMessageIds(7, "403");
+
+    expect(result.totalFailed).toBe(1);
+    expect(notifyAgentMessageMock).toHaveBeenCalledTimes(1);
   });
 });
