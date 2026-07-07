@@ -28,12 +28,55 @@ import {
   type InteractionDetailRow,
   type DraftSkipReason,
 } from "./followupDraftProducer";
-import { detectAttachmentClaim } from "./followupDraftHonesty";
-
 const log = createChildLogger({ module: "followupDraftOnDemand" });
 const DAY_MS = 24 * 60 * 60 * 1000;
 // 批十二-1:re-attach 只撈這麼久內剛產生的 generated 文件(避免掛上舊 PDF)。
 const REATTACH_WINDOW_MS = 30 * 60 * 1000;
+
+/**
+ * 批十三-1 (P2):撈這位客人最近(windowMs 內)產生、還掛在 reply-attachments/ 的
+ * generated PDF,回最新一份 {key,filename}(0 或 1 筆)。**刻意不吃草稿文案** —— 附件
+ * 要不要掛跟措辭無關,只看「最近有沒有剛產生的文件」。修好批十二的互鎖:自動掛原本
+ * 只在文案聲稱「附上」時才觸發,但工具指引又教「沒掛上前別寫附上」→ 老實草稿永遠沒
+ * 附件。誠實閘方向不變:文案聲稱附上但這裡沒撈到 → 照樣擋(呼叫端 hasAttachment=false)。
+ * best-effort:查失敗回 []。粒度只查這個 profileId(合併掉的 profile 上的文件會漏撈,
+ * 退回誠實閘擋空寄、Jeff 手動掛,安全降級)。
+ */
+export async function fetchRecentGeneratedAttachments(
+  db: Db,
+  profileId: number,
+  nowMs: number,
+  windowMs: number,
+): Promise<Array<{ key: string; filename: string }>> {
+  try {
+    const { customerDocuments } = await import("../../../drizzle/schema");
+    const { and, eq, desc } = await import("drizzle-orm");
+    const docRows = (await db
+      .select({
+        r2Url: customerDocuments.r2Url,
+        fileName: customerDocuments.fileName,
+        createdAt: customerDocuments.uploadedAt, // customerDocuments 時戳欄叫 uploadedAt
+      })
+      .from(customerDocuments)
+      .where(
+        and(
+          eq(customerDocuments.customerProfileId, profileId),
+          eq(customerDocuments.uploadedBy, "generated"),
+          eq(customerDocuments.isCurrent, true),
+        ),
+      )
+      .orderBy(desc(customerDocuments.uploadedAt))
+      .limit(10)) as Array<{
+      r2Url: string | null;
+      fileName: string | null;
+      createdAt: Date | string | null;
+    }>;
+    return selectReattachDocs(docRows, nowMs, windowMs);
+  } catch (e) {
+    log.warn({ err: e, profileId }, "[followupDraftOnDemand] re-attach lookup failed (non-fatal)");
+    return [];
+  }
+}
 
 export type OnDemandDraftResult =
   // subject/body echoed back so the ops chat can quote the draft IN its reply
@@ -57,7 +100,7 @@ export async function produceFollowupDraftForProfile(
   /** Jeff 在聊天口述的信件內容(「寫信說星期四領事館取件」);有值時草稿必須照做。 */
   jeffInstruction?: string,
 ): Promise<OnDemandDraftResult> {
-  const { agentMessages, customerInteractions, customerProfiles, customerDocuments } = await import(
+  const { agentMessages, customerInteractions, customerProfiles } = await import(
     "../../../drizzle/schema"
   );
   const { and, eq, desc, ne } = await import("drizzle-orm");
@@ -141,40 +184,16 @@ export async function produceFollowupDraftForProfile(
     );
   }
 
-  // 批十二-1 (P0 根因修):草稿若聲稱附上檔案,撈這位客人最近(REATTACH_WINDOW_MS
-  // 內)產生、還掛在 reply-attachments/ 的 generated PDF,依 kind 取最新一份掛進新草稿。
-  // 這修好「先出文件→另一輪叫草稿寄」新草稿沒繼承附件的根因(E2E F3)。撈不到就留空
-  // → 下方誠實閘會擋掉「說附上卻沒附」的草稿(寧可沒卡)。best-effort:失敗不影響其餘。
-  // 粒度註:只查這個 profileId(非合併 scopeIds),萬一文件掛在被合併掉的 profile 上會
-  // 漏撈 —— 此時退回誠實閘擋下空寄、由 Jeff 手動掛,安全降級(review D2)。
-  let replyAttachments: Array<{ key: string; filename: string }> = [];
-  if (detectAttachmentClaim(cleaned.body)) {
-    try {
-      const docRows = (await db
-        .select({
-          r2Url: customerDocuments.r2Url,
-          fileName: customerDocuments.fileName,
-          createdAt: customerDocuments.uploadedAt, // customerDocuments 的時戳欄叫 uploadedAt
-        })
-        .from(customerDocuments)
-        .where(
-          and(
-            eq(customerDocuments.customerProfileId, profileId),
-            eq(customerDocuments.uploadedBy, "generated"),
-            eq(customerDocuments.isCurrent, true),
-          ),
-        )
-        .orderBy(desc(customerDocuments.uploadedAt))
-        .limit(10)) as Array<{
-        r2Url: string | null;
-        fileName: string | null;
-        createdAt: Date | string | null;
-      }>;
-      replyAttachments = selectReattachDocs(docRows, Date.now(), REATTACH_WINDOW_MS);
-    } catch (e) {
-      log.warn({ err: e, profileId }, "[followupDraftOnDemand] re-attach lookup failed (non-fatal)");
-    }
-  }
+  // 批十三-1 (P2):附件自動掛跟措辭脫鉤。只要這位客人最近(REATTACH_WINDOW_MS 內)有
+  // 產生、還掛在 reply-attachments/ 的 generated PDF,就掛最新一份 —— **無論草稿文案有沒有
+  // 寫「附上」**。批十二原本只在文案聲稱時才掛,但工具指引又教「沒掛上前別寫附上」,互鎖
+  // 成「老實草稿永遠沒附件」。fetchRecentGeneratedAttachments 不吃 body,脫鉤是結構性的。
+  const replyAttachments = await fetchRecentGeneratedAttachments(
+    db,
+    profileId,
+    Date.now(),
+    REATTACH_WINDOW_MS,
+  );
 
   // 誠實度 gate (same shared path as the nightly scan): unverified 已寄 claims
   // or a greeting to someone not in this conversation → no card (寧可沒卡).
