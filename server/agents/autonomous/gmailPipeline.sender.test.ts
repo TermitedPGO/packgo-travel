@@ -68,7 +68,7 @@ vi.mock("../../_core/logger", () => ({
   }),
 }));
 
-import { isOwnEmail, parseSenderName, dupRecoveryLookupId } from "./gmailPipeline";
+import { isOwnEmail, parseSenderName, dupRecoveryLookupId, buildIntakeFailureCard } from "./gmailPipeline";
 
 // ── ① isOwnEmail — 自家地址絕不建客人卡 ─────────────────────────────────────
 
@@ -185,5 +185,30 @@ describe("dupRecoveryLookupId (ER_DUP_ENTRY 回復鍵跟 INSERT 的 key 一致)"
     expect(dupRecoveryLookupId(null, 123)).toBeNull();
     expect(dupRecoveryLookupId(undefined, undefined)).toBeNull();
     expect(dupRecoveryLookupId("ER_DUP_ENTRY", 123)).toBeNull();
+  });
+});
+
+// ── ④ buildIntakeFailureCard — 收信失敗不再靜默(P0 hotfix, Ann Yuan 事故)──────
+describe("buildIntakeFailureCard — high 卡讓收信失敗浮出來", () => {
+  const msg = { id: "gmailMsg-abc123", from: "Ann Yuan <ayuan@axt.com>", subject: "簽證詢問" };
+
+  it("分類/摘要 throw 時組出一張 high 優先 alert 卡,含寄件人/主旨/messageId", () => {
+    const card = buildIntakeFailureCard(msg, new Error("classification LLM 500"));
+    expect(card.priority).toBe("high");
+    expect(card.messageType).toBe("alert");
+    expect(card.agentName).toBe("gmail-intake");
+    expect(card.title).toContain("Ann Yuan <ayuan@axt.com>");
+    expect(card.body).toContain("簽證詢問");
+    expect(card.body).toContain("gmailMsg-abc123");
+    expect(card.body).toContain("classification LLM 500");
+    expect(card.body).toContain("請人工");
+  });
+
+  it("非 Error 物件與空主旨也不炸,錯誤訊息 stringify 進卡片", () => {
+    const card = buildIntakeFailureCard({ id: "m1", from: "x@y.com", subject: null }, "boom-string");
+    expect(card.priority).toBe("high");
+    expect(card.body).toContain("(無主旨)");
+    expect(card.body).toContain("boom-string");
+    expect((card.context as { gmailMessageId: string }).gmailMessageId).toBe("m1");
   });
 });

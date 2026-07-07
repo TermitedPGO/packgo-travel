@@ -43,6 +43,13 @@
   gte 誤判「沒有新列」= 假失敗。比較基準一律先 `Math.floor(ms/1000)*1000` 取整到
   秒、再視情況留 1-2 秒餘裕(2026-07-06 weeklyCanary 實案:互動 13:00:00 落庫、
   sinceMs=13:00:00.xxx,兩項檢查全誤報失敗;白天單測不帶毫秒也測不出來)。
+- TiDB 關聯子查詢必須同時在 SELECT:凡在 ORDER BY(或其他子句)放一個「內含關聯子查詢
+  引用外層 table 欄位」的表達式(如 `GREATEST(..., (SELECT MAX(x) ... WHERE t.id = outer.id))`),
+  該表達式或它引用的外層欄位必須也出現在 SELECT list,否則 TiDB 解析不到外層欄位、報
+  `ER_BAD_FIELD_ERROR Unknown column 'outer.id'`,整條查詢每次 500(2026-07-07 hotfix 實案:
+  admin.customerUnreadCount guest 臂 lastContactSql 只在 ORDER BY 沒 select,自 v794 起每次 500;
+  姊妹 guestList 因為 select 了 customerProfiles.id + 同表達式才沒炸)。修法:把該表達式
+  select 成一個欄位再 ORDER BY(本機無 DATABASE_URL 測不到 SQL 方言,必附 prod 探針或審查佐證)。
 
 驗收條件(逐條驗,附證據):
 - tsc --noEmit 0 錯(OOM 時 NODE_OPTIONS="--max-old-space-size=6144")

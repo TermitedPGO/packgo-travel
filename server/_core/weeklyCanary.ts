@@ -115,12 +115,17 @@ export interface CanaryCheckInputs {
   /** Check 3: profileId 2760017 的 lastInboundAt 有沒有在 canary 送出時刻
    *  之後（代表這筆新 interaction 真的觸發了 touchLastInbound）。 */
   lastInboundAtAdvanced: boolean;
+  /** Check 4 (hotfix 2026-07-07):server 端直接跑未讀 badge 的 guest 排名查詢
+   *  (runGuestUnreadRankingQuery)有沒有拋錯 —— 這條 TiDB 查詢自 v794 起每次靜默 500,
+   *  導覽列紅點徽章壞掉沒人知道(Ann Yuan 事故同批發現)。true = 查詢正常沒拋錯。 */
+  unreadCountQueryOk: boolean;
 }
 
 export type CanaryCheckName =
   | "interaction_landed"
   | "owner_not_polluted"
-  | "last_inbound_advanced";
+  | "last_inbound_advanced"
+  | "unread_count_query_ok";
 
 export interface CanaryVerificationResult {
   allPassed: boolean;
@@ -131,6 +136,7 @@ const CHECK_LABEL: Record<CanaryCheckName, string> = {
   interaction_landed: "profileId 2760017 沒有出現新的 customerInteractions",
   owner_not_polluted: "jeffhsieh09@gmail.com（業主本人）意外新增了 customerProfiles 卡",
   last_inbound_advanced: "profileId 2760017 的 lastInboundAt 沒有更新",
+  unread_count_query_ok: "未讀紅點徽章的 guest 排名查詢拋錯（TiDB，導覽列 badge 可能靜默 500）",
 };
 
 /**
@@ -144,6 +150,7 @@ export function verifyCanaryOutcome(inputs: CanaryCheckInputs): CanaryVerificati
   if (!inputs.newInteractionOnCanaryProfile) failures.push("interaction_landed");
   if (inputs.ownerNewProfileCount > 0) failures.push("owner_not_polluted");
   if (!inputs.lastInboundAtAdvanced) failures.push("last_inbound_advanced");
+  if (!inputs.unreadCountQueryOk) failures.push("unread_count_query_ok");
   return { allPassed: failures.length === 0, failures };
 }
 
@@ -260,6 +267,24 @@ async function checkLastInboundAdvanced(db: Db, sinceMs: number): Promise<boolea
   return new Date(lastInboundAt).getTime() >= sinceMs;
 }
 
+/** Read-only (hotfix 2026-07-07):server 端直接跑未讀 badge 的 guest 排名查詢
+ *  (customerUnreadCount 與它呼叫同一支 runGuestUnreadRankingQuery),拋錯即回 false ——
+ *  這條 TiDB 查詢自 v794 起每次靜默 500(關聯子查詢只在 ORDER BY),導覽列紅點徽章壞掉
+ *  沒人知道。內部 try/catch,永不拋進 Promise.all(讓其餘檢查照跑)。 */
+async function checkUnreadCountQueryOk(db: Db): Promise<boolean> {
+  try {
+    const { runGuestUnreadRankingQuery } = await import("../routers/adminCustomers");
+    await runGuestUnreadRankingQuery(db);
+    return true;
+  } catch (err) {
+    log.error(
+      { err: (err as Error).message },
+      "[weeklyCanary] unread badge ranking query threw — badge 可能靜默 500",
+    );
+    return false;
+  }
+}
+
 export interface WeeklyCanaryResult {
   submitted: boolean;
   allPassed: boolean;
@@ -310,16 +335,23 @@ export async function runWeeklyCanary(
 
   let result: CanaryVerificationResult;
   try {
-    const [newInteractionOnCanaryProfile, ownerNewProfileCount, lastInboundAtAdvanced] =
-      await Promise.all([
-        checkNewInteractionOnCanaryProfile(db, submitAtMs),
-        countOwnerNewProfiles(db, submitAtMs),
-        checkLastInboundAdvanced(db, submitAtMs),
-      ]);
+    const [
+      newInteractionOnCanaryProfile,
+      ownerNewProfileCount,
+      lastInboundAtAdvanced,
+      unreadCountQueryOk,
+    ] = await Promise.all([
+      checkNewInteractionOnCanaryProfile(db, submitAtMs),
+      countOwnerNewProfiles(db, submitAtMs),
+      checkLastInboundAdvanced(db, submitAtMs),
+      // 第四項與提交成功與否無關(不 && submitted):badge 查詢有沒有壞是獨立的健康檢查。
+      checkUnreadCountQueryOk(db),
+    ]);
     result = verifyCanaryOutcome({
       newInteractionOnCanaryProfile: submitted && newInteractionOnCanaryProfile,
       ownerNewProfileCount,
       lastInboundAtAdvanced: submitted && lastInboundAtAdvanced,
+      unreadCountQueryOk,
     });
   } catch (err) {
     log.warn({ err: (err as Error).message }, "[weeklyCanary] verification query failed");

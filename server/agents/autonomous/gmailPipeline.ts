@@ -64,6 +64,7 @@ import { listCustomOrdersByProfile } from "../../db/customOrder";
 // llmCache redis.ping() eagerly, which several gmailPipeline tests don't mock
 // (they mock inquiryAgent.ts wholesale instead, so llm.ts never loaded before).
 import type { Message, Tool } from "../../_core/llm";
+import type { NotifyAgentMessageArgs } from "../../_core/agentNotify";
 const log = createChildLogger({ module: "gmailPipeline" });
 
 const PROCESSED_LABEL = "PACKGO_AI_PROCESSED";
@@ -667,6 +668,18 @@ async function ingestFreshMessages(
         },
         "[gmailPipeline] Failed thread",
       );
+      // hotfix (P0, Ann Yuan 事故):真實寄件人(已過 own-email/noise 過濾)的信處理失敗
+      // 不能再對 Jeff 靜默 —— 浮一張 high 卡讓人工看。best-effort:貼卡失敗只 log,不再
+      // 拖垮這一輪(其餘信照跑)。
+      try {
+        const { notifyAgentMessage } = await import("../../_core/agentNotify");
+        await notifyAgentMessage(buildIntakeFailureCard(msg, e));
+      } catch (cardErr) {
+        log.error(
+          { err: cardErr, messageId: msg.id },
+          "[gmailPipeline] failed to post intake-failure card",
+        );
+      }
     }
   }
 
@@ -824,6 +837,32 @@ export async function runGmailPipelineForMessageIds(
   );
 
   return result;
+}
+
+/**
+ * hotfix (P0, 2026-07-07 Ann Yuan 事故):真實寄件人(已過 own-email / noise 過濾)的信
+ * 在 processOneEmail 任一步 throw 時,除了 totalFailed++ 與 log,還要浮一張 high 卡讓 Jeff
+ * 人工看 —— 收信處理失敗不能再對 Jeff 靜默(Ann 的信歸檔了,但分類/摘要/收件匣卡三樣沒
+ * 跑,Jeff 完全不知道)。純函式組卡片內容,呼叫端丟給 notifyAgentMessage(可單元測)。
+ */
+export function buildIntakeFailureCard(
+  msg: { id: string; from: string; subject?: string | null },
+  error: unknown,
+): NotifyAgentMessageArgs {
+  const errMsg = error instanceof Error ? error.message : String(error);
+  return {
+    agentName: "gmail-intake",
+    messageType: "alert",
+    priority: "high",
+    title: `一封客人來信處理失敗:${msg.from}`.slice(0, 200),
+    body:
+      `寄件人:${msg.from}\n` +
+      `主旨:${msg.subject || "(無主旨)"}\n\n` +
+      `這封信已歸檔到卡片,但 AI 分類/摘要沒有跑成功,請人工打開看一下再手動回。\n\n` +
+      `錯誤:${errMsg}\n` +
+      `gmail messageId:${msg.id}`,
+    context: { gmailMessageId: msg.id, from: msg.from, subject: msg.subject ?? null, error: errMsg },
+  };
 }
 
 async function processOneEmail(

@@ -124,6 +124,67 @@ async function hasPassportOnFile(
   return false;
 }
 
+/**
+ * hotfix (P0, 2026-07-07):訪客未讀排名查詢 —— customerUnreadCount 的 guest 臂 top-200
+ * 排名(GREATEST + 關聯子查詢 ORDER BY)。抽成共用 export 讓 customerUnreadCount 與
+ * weeklyCanary 呼叫「同一支查詢」:canary 每週跑它,一拋錯就進失敗卡 —— 這條查詢自 v794
+ * 起在 TiDB 每次 500(關聯子查詢只在 ORDER BY 沒 select → ER_BAD_FIELD 'customerprofiles.id'),
+ * 前端 badge 靜默壞掉沒人知道。lastContact 必須留在 SELECT(見下方註解)。
+ * 口徑與 guestList 的 lastContactSql *逐字* 一致。
+ */
+export async function runGuestUnreadRankingQuery(
+  drizzleDb: NonNullable<Awaited<ReturnType<typeof db.getDb>>>,
+): Promise<Array<{ status: string | null; lastInboundAt: Date | null; jeffViewedAt: Date | null }>> {
+  const {
+    customerProfiles,
+    users: usersTable,
+    inquiries: inquiriesTable,
+    agentMessages,
+    customerInteractions,
+  } = await import("../../drizzle/schema");
+  const lastContactSql = sql<Date>`GREATEST(
+        COALESCE(${customerProfiles.lastInboundAt}, ${customerProfiles.createdAt}),
+        COALESCE(
+          (SELECT MAX(${customerInteractions.createdAt}) FROM ${customerInteractions}
+            WHERE ${customerInteractions.customerProfileId} = ${customerProfiles.id}
+              AND ${customerInteractions.direction} = 'outbound'),
+          ${customerProfiles.createdAt}
+        )
+      )`;
+  return drizzleDb
+    .select({
+      status: customerProfiles.status,
+      lastInboundAt: customerProfiles.lastInboundAt,
+      jeffViewedAt: customerProfiles.jeffViewedAt,
+      // ⛔ TiDB 雷:lastContactSql 的 GREATEST 內含關聯子查詢(引用外層 ${customerProfiles.id})。
+      // 只放在 ORDER BY、沒被 SELECT 時,TiDB 解析不到外層欄位 → ER_BAD_FIELD_ERROR
+      // Unknown column 'customerprofiles.id',整條查詢每次 500(guestList 因有 select 才沒炸)。
+      // 見 docs/agent/30-templates.md 通用地雷第四條。lastContact 下方不使用,純為讓查詢合法。
+      lastContact: lastContactSql,
+    })
+    .from(customerProfiles)
+    .where(
+      and(
+        sql`${customerProfiles.userId} IS NULL`,
+        sql`(
+            (${customerProfiles.email} IS NOT NULL AND ${customerProfiles.email} != '')
+            OR (${customerProfiles.phone} IS NOT NULL AND ${customerProfiles.phone} != '')
+          )`,
+        sql`(
+            ${customerProfiles.email} IS NULL OR ${customerProfiles.email} = ''
+            OR NOT EXISTS (SELECT 1 FROM ${usersTable} WHERE ${usersTable.email} = ${customerProfiles.email})
+          )`,
+        sql`(
+            ${customerProfiles.source} = 'manual'
+            OR EXISTS (SELECT 1 FROM ${inquiriesTable} WHERE ${inquiriesTable.customerEmail} = ${customerProfiles.email})
+            OR EXISTS (SELECT 1 FROM ${agentMessages} WHERE ${agentMessages.relatedCustomerProfileId} = ${customerProfiles.id} AND ${agentMessages.messageType} = 'escalation')
+          )`,
+      ),
+    )
+    .orderBy(desc(lastContactSql))
+    .limit(200);
+}
+
 export const adminCustomersRouter = router({
   /**
    * List all registered customers with aggregated stats.
@@ -385,13 +446,7 @@ export const adminCustomersRouter = router({
    */
   customerUnreadCount: adminProcedure.query(async () => {
     const drizzleDb = (await db.getDb())!;
-    const {
-      customerProfiles,
-      users: usersTable,
-      inquiries: inquiriesTable,
-      agentMessages,
-      customerInteractions,
-    } = await import("../../drizzle/schema");
+    const { customerProfiles, users: usersTable } = await import("../../drizzle/schema");
 
     // Registered customers — profile row required (that's where the pointers
     // live); SQL prefilters lastInboundAt, TS applies the shared gates.
@@ -443,45 +498,10 @@ export const adminCustomersRouter = router({
     // no inbound message correctly never counts as unread; it must still
     // occupy its rightful ranking slot so it can correctly push OTHER guests
     // below #200 in the same way it does for guestList.
-    // 口徑必須跟 guestList 的 lastContactSql *逐字* 一致(同一個 top-200 視窗),
-    // 含 createdAt fallback(絕不 updatedAt,見 guestList 註解:updatedAt 被夜間
-    // cron 蓋章)。兩處不一致 = badge 池與可見列表排序分岔,紅點對不上。
-    const lastContactSql = sql<Date>`GREATEST(
-        COALESCE(${customerProfiles.lastInboundAt}, ${customerProfiles.createdAt}),
-        COALESCE(
-          (SELECT MAX(${customerInteractions.createdAt}) FROM ${customerInteractions}
-            WHERE ${customerInteractions.customerProfileId} = ${customerProfiles.id}
-              AND ${customerInteractions.direction} = 'outbound'),
-          ${customerProfiles.createdAt}
-        )
-      )`;
-    const guests = await drizzleDb
-      .select({
-        status: customerProfiles.status,
-        lastInboundAt: customerProfiles.lastInboundAt,
-        jeffViewedAt: customerProfiles.jeffViewedAt,
-      })
-      .from(customerProfiles)
-      .where(
-        and(
-          sql`${customerProfiles.userId} IS NULL`,
-          sql`(
-            (${customerProfiles.email} IS NOT NULL AND ${customerProfiles.email} != '')
-            OR (${customerProfiles.phone} IS NOT NULL AND ${customerProfiles.phone} != '')
-          )`,
-          sql`(
-            ${customerProfiles.email} IS NULL OR ${customerProfiles.email} = ''
-            OR NOT EXISTS (SELECT 1 FROM ${usersTable} WHERE ${usersTable.email} = ${customerProfiles.email})
-          )`,
-          sql`(
-            ${customerProfiles.source} = 'manual'
-            OR EXISTS (SELECT 1 FROM ${inquiriesTable} WHERE ${inquiriesTable.customerEmail} = ${customerProfiles.email})
-            OR EXISTS (SELECT 1 FROM ${agentMessages} WHERE ${agentMessages.relatedCustomerProfileId} = ${customerProfiles.id} AND ${agentMessages.messageType} = 'escalation')
-          )`,
-        ),
-      )
-      .orderBy(desc(lastContactSql))
-      .limit(200);
+    // guest 未讀排名(GREATEST + 關聯子查詢 ORDER BY,含 TiDB SELECT 雷的修法)抽成共用
+    // runGuestUnreadRankingQuery,與 weeklyCanary 呼叫「同一支」—— canary 每週跑它,拋錯即
+    // 進失敗卡,讓 badge 靜默 500 最晚一週被抓到。口徑與 guestList 逐字一致。
+    const guests = await runGuestUnreadRankingQuery(drizzleDb);
     const guestUnread = guests.filter(
       (g) =>
         g.status !== "blocked" &&

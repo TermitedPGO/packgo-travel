@@ -24,6 +24,13 @@ vi.mock("./logger", () => ({
   createChildLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
+// hotfix (2026-07-07):第四項檢查 checkUnreadCountQueryOk 會 import 這支跑 badge 排名查詢。
+// 整合測試用的是有序 mock db,不重跑那條真查詢 → stub 成 no-op(預設查詢正常沒拋錯);
+// 個別 test 可 mockRejectedValueOnce 模擬 TiDB 500。
+vi.mock("../routers/adminCustomers", () => ({
+  runGuestUnreadRankingQuery: vi.fn(async () => []),
+}));
+
 import {
   verifyCanaryOutcome,
   formatCanaryFailureCard,
@@ -44,6 +51,7 @@ function allPass(): CanaryCheckInputs {
     newInteractionOnCanaryProfile: true,
     ownerNewProfileCount: 0,
     lastInboundAtAdvanced: true,
+    unreadCountQueryOk: true,
   };
 }
 
@@ -77,11 +85,18 @@ describe("verifyCanaryOutcome (pure, DB-free)", () => {
     expect(result.failures).toContain("last_inbound_advanced");
   });
 
+  it("check 4 fails: 未讀 badge 排名查詢拋錯(TiDB 靜默 500)", () => {
+    const result = verifyCanaryOutcome({ ...allPass(), unreadCountQueryOk: false });
+    expect(result.allPassed).toBe(false);
+    expect(result.failures).toContain("unread_count_query_ok");
+  });
+
   it("multiple checks fail simultaneously → all are listed, not just the first", () => {
     const result = verifyCanaryOutcome({
       newInteractionOnCanaryProfile: false,
       ownerNewProfileCount: 2,
       lastInboundAtAdvanced: false,
+      unreadCountQueryOk: true,
     });
     expect(result.allPassed).toBe(false);
     expect(result.failures).toHaveLength(3);
