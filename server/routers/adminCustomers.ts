@@ -1321,6 +1321,8 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
         tours: toursTable,
         approvalTasks: approvalTasksTable,
         workspaceDispositions: dispTable,
+        customerInteractions,
+        customerProfiles,
       } = await import("../../drizzle/schema");
 
       // Resolve the account's VERIFIED email so open inquiries filed BEFORE the
@@ -1383,6 +1385,28 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
           ),
         )
         .orderBy(desc(inquiriesTable.createdAt));
+
+      // 批十二-5 (P3):此客人最近一筆我方外寄(profile 級)。deriveStatus/deriveFollowup
+      // 用它判 open 詢問是否「已回」—— 詢問成立後已外寄過就不算 48h 未回覆(修剛回信仍誤
+      // 報)。取真 Date 欄 + orderBy/limit1(避開 raw sql<Date> 在 mysql2/TiDB 回 naive 字串
+      // 的陷阱)。粒度 profile 級:一次回覆清這位客人所有 open 詢問的待回旗標(串級需
+      // inquiry↔thread 綁定,openInquiries 目前未帶 threadId,屬後續)。
+      const lastOutboundRow = await drizzleDb
+        .select({ createdAt: customerInteractions.createdAt })
+        .from(customerInteractions)
+        .innerJoin(
+          customerProfiles,
+          eq(customerInteractions.customerProfileId, customerProfiles.id),
+        )
+        .where(
+          and(
+            eq(customerProfiles.userId, input.userId),
+            eq(customerInteractions.direction, "outbound"),
+          ),
+        )
+        .orderBy(desc(customerInteractions.createdAt))
+        .limit(1);
+      const lastOutboundAt = lastOutboundRow[0]?.createdAt ?? null;
 
       // approvalTasks link to a customer only indirectly (relatedType +
       // relatedId varchar). Resolve via this customer's booking + inquiry ids.
@@ -1527,6 +1551,8 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
           handled: handled.has(`task:${t.id}`),
         })),
         openVisas,
+        // 批十二-5:profile 級最近外寄,前端判 open 詢問是否已回。
+        lastOutboundAt,
       };
     }),
 

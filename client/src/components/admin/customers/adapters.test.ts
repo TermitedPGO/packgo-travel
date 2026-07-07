@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { guestToAdaptedCustomer, toListItem, deriveFollowup, buildInquiryEditedPayload, deriveProfile, deriveBallInCourt, deriveNextMove, isFollowUpDue, laToday, formatMonthDayLA, pickDefaultProject, shouldCommitRename, filterProjects, countUnkeptPromises } from "./adapters"
+import { guestToAdaptedCustomer, toListItem, deriveFollowup, deriveStatus, isAwaitingReply, buildInquiryEditedPayload, deriveProfile, deriveBallInCourt, deriveNextMove, isFollowUpDue, laToday, formatMonthDayLA, pickDefaultProject, shouldCommitRename, filterProjects, countUnkeptPromises } from "./adapters"
 import type { Project } from "./types"
 
 const mkProject = (id: number, title = `t${id}`): Project => ({
@@ -307,6 +307,67 @@ describe("deriveFollowup", () => {
     const none = deriveFollowup({ lastContactAt: null, openInquiries: [], sentQuotes: [] }, NOW)
     expect(none.followUpDate).toBeNull()
     expect(none.isDue).toBe(false)
+  })
+})
+
+describe("isAwaitingReply — 批十二-5 P3 看門狗 48h 口徑", () => {
+  const inquiryAt = "2026-06-16T00:00:00Z"
+  it("no outbound (null/undefined) → 仍待回 (true)", () => {
+    expect(isAwaitingReply(inquiryAt, null)).toBe(true)
+    expect(isAwaitingReply(inquiryAt, undefined)).toBe(true)
+  })
+  it("outbound 晚於詢問成立 → 已回 (false)", () => {
+    expect(isAwaitingReply(inquiryAt, "2026-06-17T00:00:00Z")).toBe(false)
+  })
+  it("outbound 早於詢問成立(舊回覆、之後又有新詢問)→ 仍待回 (true)", () => {
+    expect(isAwaitingReply(inquiryAt, "2026-06-10T00:00:00Z")).toBe(true)
+  })
+})
+
+describe("deriveFollowup — 批十二-5 看門狗回歸(已回不再逾期)", () => {
+  const NOW = new Date("2026-06-20T00:00:00Z").getTime()
+  it("open 詢問 >2d 但我方已回(outbound 晚於詢問)→ 不再逾期未回", () => {
+    const r = deriveFollowup(
+      {
+        lastContactAt: null,
+        openInquiries: [{ handled: false, createdAt: "2026-06-16T00:00:00Z" }],
+        sentQuotes: [],
+        lastOutboundAt: "2026-06-18T00:00:00Z",
+      },
+      NOW,
+    )
+    expect(r.needsFollowup).toBe(false)
+    expect(r.reason).toBeNull()
+  })
+  it("open 詢問 >2d 且我方從沒回(null)→ 照樣逾期(不誤關真正待回)", () => {
+    const r = deriveFollowup(
+      {
+        lastContactAt: null,
+        openInquiries: [{ handled: false, createdAt: "2026-06-16T00:00:00Z" }],
+        sentQuotes: [],
+        lastOutboundAt: null,
+      },
+      NOW,
+    )
+    expect(r.needsFollowup).toBe(true)
+    expect(r.reason).toBe("inquiry")
+  })
+})
+
+describe("deriveStatus — 批十二-5 看門狗回歸(48h 未回覆)", () => {
+  const t = ((k: string) => k) as any
+  // 詢問建立於 2026-06-10,對任何真實 now(2026-07+)都 >48h,不需控制 Date.now。
+  const oldInquiry = { id: 1, subject: "金門三日遊詢問", status: "new", handled: false, createdAt: "2026-06-10T00:00:00Z" }
+  const mk = (lastOutboundAt: string | null) =>
+    ({ openBookings: [], pendingTasks: [], openVisas: [], counts: { total: 1 }, openInquiries: [oldInquiry], lastOutboundAt }) as any
+  it("唯一 open 詢問 >48h 但我方已回(outbound 較新)→ 非 inquiryOverdue", () => {
+    const s = deriveStatus(mk("2026-06-12T00:00:00Z"), t)
+    expect(s.title).not.toBe("admin.customers.status.inquiryOverdue")
+  })
+  it("open 詢問 >48h 且從沒回(null)→ warn inquiryOverdue(真正待回不關掉)", () => {
+    const s = deriveStatus(mk(null), t)
+    expect(s.type).toBe("warn")
+    expect(s.title).toBe("admin.customers.status.inquiryOverdue")
   })
 })
 

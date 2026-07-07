@@ -70,6 +70,24 @@ type OpenItems = {
     firstName: string | null
     lastName: string | null
   }>
+  /** 批十二-5 (P3):此客人最近一筆我方外寄(profile 級,server 帶下來)。用來判斷
+   *  open 詢問是否「已回」—— 我方在詢問成立後已外寄過就不算 48h 未回覆。 */
+  lastOutboundAt?: Date | string | null
+}
+
+/**
+ * 批十二-5 (P3):我方在這則詢問成立(inbound)之後,是否「還沒回覆」。
+ * 有 outbound 且晚於詢問成立時間 = 已回,不算待回;沒有 outbound(null/undefined)
+ * 或 outbound 更早 = 仍待回。修「剛回信卻仍顯示 48h 未回覆」的誤報(E2E watchdog)。
+ * 粒度為 profile 級(一次回覆會清掉這位客人所有 open 詢問的待回旗標),與真相條「客人
+ * 層聚合」的既有設計一致;要精準到單串需 inquiry↔thread 綁定,屬後續(見 server 註)。
+ */
+export function isAwaitingReply(
+  inquiryCreatedAt: Date | string,
+  lastOutboundAt: Date | string | null | undefined,
+): boolean {
+  if (lastOutboundAt == null) return true
+  return new Date(lastOutboundAt).getTime() < new Date(inquiryCreatedAt).getTime()
 }
 
 export function deriveStatus(
@@ -121,7 +139,12 @@ export function deriveStatus(
   )
   const oldInquiry = openItems.openInquiries.some((q) => {
     const age = Date.now() - new Date(q.createdAt).getTime()
-    return !q.handled && age > 48 * 60 * 60 * 1000
+    // 批十二-5:只有「我方還沒回」的 open 詢問才算 48h 未回覆(剛回信不再誤報)。
+    return (
+      !q.handled &&
+      age > 48 * 60 * 60 * 1000 &&
+      isAwaitingReply(q.createdAt, openItems.lastOutboundAt)
+    )
   })
 
   let bundle: BundleItem[] | null = null
@@ -457,6 +480,8 @@ export function deriveFollowup(
     sentQuotes: { status: string; createdAt: Date | string }[]
     /** customerProfiles.followUpDate as "YYYY-MM-DD" (or null). */
     followUpDate?: string | null
+    /** 批十二-5:此客人最近一筆我方外寄(profile 級)。詢問成立後已回就不算逾期未回。 */
+    lastOutboundAt?: Date | string | null
   },
   now: number,
 ): Followup {
@@ -466,7 +491,11 @@ export function deriveFollowup(
       : null
 
   const inquiryOverdue = input.openInquiries.some(
-    (q) => !q.handled && now - new Date(q.createdAt).getTime() > FOLLOWUP_INQUIRY_DAYS * DAY_MS,
+    (q) =>
+      !q.handled &&
+      now - new Date(q.createdAt).getTime() > FOLLOWUP_INQUIRY_DAYS * DAY_MS &&
+      // 批十二-5:我方在詢問成立後已外寄回覆就不算逾期未回。
+      isAwaitingReply(q.createdAt, input.lastOutboundAt),
   )
   const quoteStale = input.sentQuotes.some(
     (q) =>

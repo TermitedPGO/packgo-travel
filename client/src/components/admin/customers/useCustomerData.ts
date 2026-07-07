@@ -387,6 +387,8 @@ export function useCustomerData(
           createdAt: q.createdAt,
         })),
         followUpDate: d.followUpDate ?? null,
+        // 批十二-5:我方最近一筆外寄(profile 級)—— 已回的 open 詢問不再算逾期未回。
+        lastOutboundAt: openItemsQ.data?.lastOutboundAt ?? null,
       },
       Date.now(),
     )
