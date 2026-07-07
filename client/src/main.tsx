@@ -11,7 +11,6 @@ import "./index.css";
 import { Toaster } from "@/components/ui/sonner";
 import { HelmetProvider } from "react-helmet-async";
 import SentryBoundary from "./_core/SentryBoundary";
-import { initAnalytics } from "./_core/analytics";
 
 // v2 Wave 1 Module 1.1 — Sentry browser SDK. MUST run before createRoot
 // so the SDK can install global error/unhandledrejection handlers before
@@ -38,11 +37,6 @@ if (import.meta.env.VITE_SENTRY_DSN) {
     replaysOnErrorSampleRate: 1.0,
   });
 }
-
-// v2 Wave 1 Module 1.4 — PostHog conversion-funnel analytics. MUST run
-// AFTER Sentry.init so that any init-failure captureMessage reaches
-// Sentry. No-op when VITE_POSTHOG_KEY unset (dev / preview / test).
-initAnalytics();
 
 // Mobile Phase 0 (2026-05-22) — register PWA service worker for offline
 // shell caching + capture install prompt for later display. Both no-op

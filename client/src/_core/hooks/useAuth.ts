@@ -1,8 +1,7 @@
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
 import { TRPCClientError } from "@trpc/client";
-import { useCallback, useEffect, useMemo, useRef } from "react";
-import { identify as analyticsIdentify, reset as analyticsReset } from "@/_core/analytics";
+import { useCallback, useEffect, useMemo } from "react";
 
 type UseAuthOptions = {
   redirectOnUnauthenticated?: boolean;
@@ -76,24 +75,6 @@ export function useAuth(options?: UseAuthOptions) {
     meQuery.isLoading,
     state.user,
   ]);
-
-  // v2 Wave 1 Module 1.4 — PostHog identify/reset on auth transitions.
-  // Tracks the previous user id so we only fire `identify()` once per
-  // login (not on every render) and `reset()` once on logout.
-  const previousUserIdRef = useRef<number | null>(null);
-  useEffect(() => {
-    const currentId = state.user?.id ?? null;
-    const previousId = previousUserIdRef.current;
-    if (currentId === previousId) return;
-    if (currentId !== null && currentId !== previousId) {
-      // Login (or user switch). Pass only id + role — never email / phone.
-      analyticsIdentify(String(currentId), { role: state.user?.role });
-    } else if (currentId === null && previousId !== null) {
-      // Logout. Clear PostHog identity so the next session starts anonymous.
-      analyticsReset();
-    }
-    previousUserIdRef.current = currentId;
-  }, [state.user?.id, state.user?.role]);
 
   return {
     ...state,

@@ -69,9 +69,9 @@ export default function ShareDialog({
     if (open) setView("main");
   }, [open]);
 
-  // Mobile Phase 4 (2026-05-22) — tag shared URLs with ?ref=jeff so
-  // PostHog can attribute conversions back to admin shares vs organic.
-  // If the URL already has query params, append; else add.
+  // Mobile Phase 4 (2026-05-22) — tag shared URLs with ?ref=jeff for
+  // attribution (admin shares vs organic). If the URL already has query
+  // params, append; else add.
   const pageUrl = (() => {
     if (typeof window === "undefined") return "";
     const raw = window.location.href;

@@ -26,7 +26,6 @@ import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { useLocale } from "@/contexts/LocaleContext";
 import { trackViewTour } from "@/lib/analytics";
-import { track as trackPosthog } from "@/_core/analytics";
 import { EditModeToggle, EditModeBanner } from "@/components/inline-edit";
 
 import { useTourEditMode } from "./useTourEditMode";
@@ -120,7 +119,7 @@ export default function TourDetailPeony() {
     generatePdfMutation,
   } = editMode;
 
-  // GA4 + PostHog: 行程詳情頁瀏覽事件
+  // GA4: 行程詳情頁瀏覽事件
   useEffect(() => {
     if (tour) {
       trackViewTour({
@@ -129,24 +128,6 @@ export default function TourDetailPeony() {
         destination: (tour as any).destinationCountry ?? (tour as any).destination ?? "",
         price: (tour as any).price ?? 0,
         currency: "TWD",
-      });
-      // v2 Wave 1 Module 1.4 — PostHog tour_view event for conversion-funnel
-      // analytics. `sourceList` is read from the `?source=` query param when
-      // the user arrived from a list page (search / country / region / home);
-      // omitted for deep-links. Tour entity has no `slug` field in the schema
-      // — we omit `tourSlug` rather than synthesize one.
-      const sourceParam =
-        typeof window !== "undefined"
-          ? new URLSearchParams(window.location.search).get("source")
-          : null;
-      const allowedSources = ["search", "country", "region", "home", "direct"] as const;
-      const sourceList = (allowedSources as readonly string[]).includes(sourceParam ?? "")
-        ? (sourceParam as (typeof allowedSources)[number])
-        : undefined;
-      trackPosthog("tour_view", {
-        tourId: tour.id,
-        tourTitle: getTranslated("title", tour.title) ?? tour.title,
-        sourceList,
       });
     }
   }, [tour?.id]);

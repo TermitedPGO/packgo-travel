@@ -4,7 +4,6 @@ import { useLocation } from "wouter";
 import { useLocale } from "@/contexts/LocaleContext";
 import { translateDestination } from "@/utils/locationMapping";
 import { trackSearch } from "@/lib/analytics";
-import { track as trackPosthog } from "@/_core/analytics";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
@@ -236,41 +235,6 @@ export default function SearchResults() {
     pageSize: 100, // 獲取較多資料以便前端篩選
   });
 
-  // v2 Wave 1 Module 1.4 — PostHog `search` event. Fires once per
-  // result-set landing (both explicit submits and URL-direct landings
-  // like /search?keyword=Tokyo). Dedupe by signature so React re-renders
-  // don't re-fire the same capture.
-  const lastSearchSignatureRef = useRef<string>("");
-  useEffect(() => {
-    if (isLoading || !data) return;
-    const resultCount = (data.tours || []).length;
-    const filters = {
-      destinations: selectedDestinations,
-      tags: selectedTags,
-      durationRange,
-      priceRange,
-      sortBy,
-    };
-    const filtersJson = JSON.stringify(filters);
-    const signature = `${searchKeyword}|${filtersJson}|${resultCount}`;
-    if (signature === lastSearchSignatureRef.current) return;
-    lastSearchSignatureRef.current = signature;
-    trackPosthog("search", {
-      query: searchKeyword || "",
-      filtersJson,
-      resultCount,
-    });
-  }, [
-    data,
-    isLoading,
-    searchKeyword,
-    selectedDestinations,
-    selectedTags,
-    durationRange,
-    priceRange,
-    sortBy,
-  ]);
-  
   // 批次查詢翻譯（非中文語系時）
   const tourIds = useMemo(() => (data?.tours || []).map((t: any) => t.id), [data?.tours]);
   const shouldFetchTranslations = language !== 'zh-TW' && tourIds.length > 0;
