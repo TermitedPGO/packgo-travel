@@ -2,6 +2,7 @@ import { useState } from "react"
 import { Search, EyeOff, RotateCcw, Trash2 } from "lucide-react"
 import { useLocale } from "@/contexts/LocaleContext"
 import type { ListItem } from "./types"
+import { filterCustomers } from "./adapters"
 
 const TAG_STYLES: Record<string, string> = {
   active: "bg-gray-200 text-gray-900",
@@ -35,11 +36,7 @@ export default function CustomerList({
   // 訪客刪除確認小卡(自製,非原生 confirm)— 存待刪列,null = 關閉。
   const [confirmDelete, setConfirmDelete] = useState<ListItem | null>(null)
 
-  const filtered = customers.filter(
-    (c) =>
-      c.name.toLowerCase().includes(query.toLowerCase()) ||
-      c.email.toLowerCase().includes(query.toLowerCase()),
-  )
+  const filtered = filterCustomers(customers, query)
 
   return (
     <div className="w-[300px] flex-shrink-0 border-r border-gray-200 flex flex-col overflow-hidden">

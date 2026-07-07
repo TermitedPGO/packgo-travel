@@ -963,3 +963,16 @@ export function filterProjects(projects: Project[], query: string): Project[] {
     (p) => p.title.toLowerCase().includes(q) || p.orderNumber.toLowerCase().includes(q),
   )
 }
+
+/**
+ * 批十三-3 (P3) — 客人列表搜尋:同時比對 name / email / phone。name 空的客人(顯示成
+ * email 前綴)或只記得電話的客人都搜得到。空 query → 全部。null-safe:filter(Boolean)
+ * 去掉空欄,phone 常是空字串。
+ */
+export function filterCustomers(customers: ListItem[], query: string): ListItem[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return customers
+  return customers.filter((c) =>
+    [c.name, c.email, c.phone].filter(Boolean).some((f) => f.toLowerCase().includes(q)),
+  )
+}

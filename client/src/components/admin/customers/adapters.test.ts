@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
-import { guestToAdaptedCustomer, toListItem, deriveFollowup, deriveStatus, isAwaitingReply, buildInquiryEditedPayload, deriveProfile, deriveBallInCourt, deriveNextMove, isFollowUpDue, laToday, formatMonthDayLA, pickDefaultProject, shouldCommitRename, filterProjects, countUnkeptPromises } from "./adapters"
+import { guestToAdaptedCustomer, toListItem, deriveFollowup, deriveStatus, isAwaitingReply, buildInquiryEditedPayload, deriveProfile, deriveBallInCourt, deriveNextMove, isFollowUpDue, laToday, formatMonthDayLA, pickDefaultProject, shouldCommitRename, filterProjects, filterCustomers, countUnkeptPromises } from "./adapters"
+import type { ListItem } from "./types"
 import type { Project } from "./types"
 
 const mkProject = (id: number, title = `t${id}`): Project => ({
@@ -56,6 +57,38 @@ describe("filterProjects (ProjectBar quick filter, audit fix 2026-06-30)", () =>
 
   it("returns an empty array when nothing matches", () => {
     expect(filterProjects(projects, "完全不存在")).toEqual([])
+  })
+})
+
+describe("filterCustomers (批十三-3 P3 — name/email/phone,null-name 也搜得到)", () => {
+  const mk = (over: Partial<ListItem>): ListItem => ({
+    id: 1, kind: "user", name: "", email: "", phone: "", initials: "", color: "",
+    textColor: "", lastContact: "", tag: "inquiry", tagLabel: "", notifs: 0,
+    unread: false, blocked: false, needsFollowup: false, ...over,
+  })
+  const list = [
+    mk({ id: 1, name: "陳大文", email: "chen@example.com", phone: "+1 510-111-2222" }),
+    // name 空(profile 沒名字)→ toListItem 顯示成 email 前綴;仍要靠 email 搜得到
+    mk({ id: 2, name: "jeffhsieh0909", email: "jeffhsieh0909@gmail.com", phone: "" }),
+    mk({ id: 3, name: "Wu", email: "", phone: "925-333-4444" }),
+  ]
+
+  it("empty query returns everything", () => {
+    expect(filterCustomers(list, "")).toEqual(list)
+    expect(filterCustomers(list, "   ")).toEqual(list)
+  })
+  it("matches by email — name 空的客人靠 email 找得到(0909 實案)", () => {
+    expect(filterCustomers(list, "jeffhsieh0909")).toEqual([list[1]])
+  })
+  it("matches by phone — 只記得電話也搜得到", () => {
+    expect(filterCustomers(list, "925-333")).toEqual([list[2]])
+  })
+  it("matches by name, case-insensitive", () => {
+    expect(filterCustomers(list, "陳")).toEqual([list[0]])
+    expect(filterCustomers(list, "wu")).toEqual([list[2]])
+  })
+  it("null-safe:空 email/phone 欄不炸,無匹配回空", () => {
+    expect(filterCustomers(list, "完全不存在")).toEqual([])
   })
 })
 
