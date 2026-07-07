@@ -13,6 +13,25 @@ export function toSelection(c: AdaptedCustomer): { userId: number } | { profileI
 export const PROJECT_CATEGORY_KEYS = ["flight", "quote", "visa", "general"] as const
 export type ProjectCategory = (typeof PROJECT_CATEGORY_KEYS)[number]
 
+/**
+ * 批十二-2 (P1) — 訂製單詳情頁「往前推進」按鈕要顯示哪些下一步。只含前進生命週期
+ * 狀態(confirmed/departed/completed);cancelled 不在這裡(走既有的取消連結,避免兩條
+ * 取消路徑)。硬編狀態機 TRANSITIONS 的前進子集,因為 client 不能 import
+ * customOrderStateMachine(它 import @trpc/server,會把 server 打包進前端)。
+ * customOrderHelpers.test.ts 用 server 的 canTransition 交叉核對,防止與 server 表漂移。
+ */
+export type AdvanceStatus = "confirmed" | "departed" | "completed"
+const ADVANCE_NEXT: Record<string, AdvanceStatus[]> = {
+  arranged: ["confirmed"],
+  deposit_paid: ["confirmed"],
+  paid: ["confirmed"],
+  confirmed: ["departed"],
+  departed: ["completed"],
+}
+export function advanceableStatuses(status: string): AdvanceStatus[] {
+  return ADVANCE_NEXT[status] ?? []
+}
+
 /** Currency symbol — USD for direct customers; never bare $ for TWD. */
 export function currencySymbol(currency?: string | null): string {
   const c = (currency || "USD").toUpperCase()

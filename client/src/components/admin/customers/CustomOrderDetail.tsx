@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { FileText, DollarSign, FileCheck, Loader2 } from "lucide-react"
+import { FileText, DollarSign, FileCheck, Loader2, ArrowRight } from "lucide-react"
 import { useLocale } from "@/contexts/LocaleContext"
 import { trpc, type RouterOutputs } from "@/lib/trpc"
 import CustomOrderFields, {
@@ -15,6 +15,7 @@ import {
   todayLocal,
   localDateAtNoon,
   uploadPdfViaPresign,
+  advanceableStatuses,
   type ProjectCategory,
 } from "./customOrderHelpers"
 
@@ -77,6 +78,9 @@ export default function CustomOrderDetail({
   const attachConfirmation = trpc.customerOrders.attachConfirmation.useMutation(mutOpts)
   const sendConfirmation = trpc.customerOrders.sendConfirmation.useMutation(mutOpts)
   const cancel = trpc.customerOrders.cancel.useMutation(mutOpts)
+  // 批十二-2 (P1):訂製單生命週期手動推進(confirmed/departed/completed)。接既有
+  // updateStatus mutation(server 端 assertTransition 守法定轉移、completed 觸發蒸餾)。
+  const advance = trpc.customerOrders.updateStatus.useMutation(mutOpts)
   const createPdfUpload = trpc.customerOrders.createPdfUpload.useMutation()
 
   // ── drag-drop PDF upload (presign → browser PUT to R2 → attach) ──
@@ -365,6 +369,31 @@ export default function CustomOrderDetail({
           </button>
         </div>
       </Section>
+
+      {/* 進度推進(confirmed / departed / completed) */}
+      {advanceableStatuses(order.status).length > 0 && (
+        <Section title={k("lifecycleSection")} icon={<ArrowRight className="w-3.5 h-3.5" />}>
+          <div className="flex flex-wrap gap-2">
+            {advanceableStatuses(order.status).map((next) => (
+              <button
+                key={next}
+                className={PRIMARY_BTN}
+                disabled={advance.isPending}
+                onClick={() => {
+                  if (!window.confirm(k("confirmAdvance", { status: k(`status.${next}`) }))) return
+                  advance.mutate({ orderId: order.id, status: next })
+                }}
+              >
+                {advance.isPending ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  k("advanceTo", { status: k(`status.${next}`) })
+                )}
+              </button>
+            ))}
+          </div>
+        </Section>
+      )}
 
       {/* cancel */}
       {order.status !== "cancelled" && order.status !== "completed" && (

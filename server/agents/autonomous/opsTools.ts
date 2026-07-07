@@ -2347,10 +2347,13 @@ async function runWriteTool(
         orderId,
         orderNumber: updated.orderNumber,
         changed,
+        // 批十二-2 (P1):讓 AI 讀得到訂單目前生命週期狀態(唯讀)。這工具本來就不能改
+        // 狀態(confirmed/completed/cancelled 要人手在訂單頁按);回報狀態方便 AI 據實答。
+        status: updated.status,
         ...(rejectedReason ? { warning: rejectedReason } : {}),
         message: rejectedReason
-          ? `已更新單 ${updated.orderNumber}(改了:${changed.join("、")});${rejectedReason}`
-          : `已更新單 ${updated.orderNumber}(改了:${changed.join("、")})`,
+          ? `已更新單 ${updated.orderNumber}(改了:${changed.join("、")};目前狀態 ${updated.status});${rejectedReason}`
+          : `已更新單 ${updated.orderNumber}(改了:${changed.join("、")};目前狀態 ${updated.status})`,
       };
     }
 
