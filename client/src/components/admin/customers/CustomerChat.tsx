@@ -521,7 +521,9 @@ export default function CustomerChat({
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
+      {/* 批十三-4:min-h-0 讓 flex-1 訊息區真的內部捲動,而不是隨串流長高把下面的輸入列
+          頂出容器(overflow-hidden 會裁掉)→ 送出鈕在串流時位移點不中的根因。 */}
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
         {/* AI nudge — surface the "next step" so Jeff sees it without scrolling overview */}
         {customer?.aiSummary?.nextStep && messages.length === 0 && (
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-[12px] text-gray-700 leading-relaxed flex gap-2">
@@ -799,8 +801,8 @@ export default function CustomerChat({
         </div>
       )}
 
-      {/* Input */}
-      <div className="border-t border-gray-200 p-2 relative">
+      {/* Input — 批十三-4:flex-shrink-0 把輸入列釘在底部,串流時佈局不動,送出鈕不位移。 */}
+      <div className="border-t border-gray-200 p-2 relative flex-shrink-0">
         {/* Slash command menu — floats above the composer, covers the message
             area (z-30, same layer as the drag overlay; nothing in the message
             list has a z-index). Data-driven from SLASH_COMMANDS. */}
