@@ -152,7 +152,12 @@ export async function extractPromisesFromEmail(
  * 都收斂。
  */
 export function stripDateModifierSuffix(raw: string): string {
-  let s = raw.trim();
+  const s0 = raw.trim();
+  // 批十二-3 (P2):相對天數承諾(N 天內 / N 日內 / N 天後 …)整串就是時間表達,任何
+  // 一段都不能剝 —— 剝掉尾端的「以內 / 後 / 后」會讓 resolveEventDate 的相對天數分支
+  // 解不出來(退回 dueDate=null,看門狗就追不到時效)。命中就原樣回傳,不進下面的剝除。
+  if (/^\d{1,2}\s*(?:天|日)\s*(?:內|以內|之內|以内|之内|后|後|以后|以後)$/.test(s0)) return s0;
+  let s = s0;
   let prev: string;
   let guard = 0;
   do {

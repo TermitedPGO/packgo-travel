@@ -173,6 +173,16 @@ describe("stripDateModifierSuffix", () => {
     expect(stripDateModifierSuffix("7/10後")).toBe("7/10");
   });
 
+  // 批十二-3 (P2):相對天數承諾整串是時間表達,不能被剝(否則 resolveEventDate 解不出來)。
+  it("does NOT strip relative-duration expressions (N 天內 / N 天後 / N 天以內)", () => {
+    expect(stripDateModifierSuffix("3天內")).toBe("3天內");
+    expect(stripDateModifierSuffix("3 天內")).toBe("3 天內");
+    expect(stripDateModifierSuffix("3天後")).toBe("3天後"); // 不可誤剝成「3天」
+    expect(stripDateModifierSuffix("3天后")).toBe("3天后");
+    expect(stripDateModifierSuffix("5日內")).toBe("5日內");
+    expect(stripDateModifierSuffix("3天以內")).toBe("3天以內");
+  });
+
   it("strips leading 大概/最晚/預計-style hedging words", () => {
     expect(stripDateModifierSuffix("大概7/8")).toBe("7/8");
     expect(stripDateModifierSuffix("最晚7/10")).toBe("7/10");
@@ -219,6 +229,27 @@ describe("buildPromiseRows", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].dueDate).toBe("2026-07-03");
     expect(rows[0].rawDateText).toBe("今天(星期五)");
+  });
+
+  // 批十二-3 (P2):E2E 完單測試 F1 真實承諾「3 天內給完整報價」dueDate 曾解成 null。
+  it("E2E fixture: '3 天內' → dueDate = today + 3, rawDateText 原樣保留", () => {
+    const rows = buildPromiseRows(
+      [{ promiseText: "我們會在 3 天內把兩位大人的完整行程和報價整理好給您過目", rawDateText: "3 天內" }],
+      "2026-07-06",
+      opts,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].dueDate).toBe("2026-07-09"); // 7/6 + 3
+    expect(rows[0].rawDateText).toBe("3 天內");
+  });
+
+  it("'3天後' 不被 stripDateModifierSuffix 誤剝成 '3天' → dueDate 非 null", () => {
+    const rows = buildPromiseRows(
+      [{ promiseText: "3 天後給您回覆", rawDateText: "3天後" }],
+      "2026-07-06",
+      opts,
+    );
+    expect(rows[0].dueDate).toBe("2026-07-09");
   });
 
   it("rawDateText that strips down to empty (LLM extracted only a modifier, no date body) → dueDate:null, no crash", () => {

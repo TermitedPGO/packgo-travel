@@ -211,6 +211,17 @@ export function resolveEventDate(
     }
   }
 
+  // 7.5) 批十二-3 (P2):「N 天內 / N 日內 / N 天後 / N 天后」= 今天起算 N 天(美西曆日),
+  //      回傳前直接短路(承諾常見「3 天內給報價」→ dueDate = 今天+N)。N 上限 60 防雜訊。
+  //      「內/以內/之內」與「後/后/以後/以后」對到期日都取 today+N 當上界,合併處理。
+  if (year === null && month === null) {
+    const rel = raw.match(/^(\d{1,2})\s*(?:天|日)\s*(?:內|以內|之內|以内|之内|后|後|以后|以後)$/);
+    if (rel) {
+      const delta = Number(rel[1]);
+      if (delta >= 1 && delta <= 60) return addDaysToYMD(todayYear, todayMonth, todayDay, delta);
+    }
+  }
+
   // 8) 星期X(=下一個該星期,含今天)/ 下週X(=下一週的那天,一定跨過今天所在這週)。
   //    「下」字是唯一分歧點:沒有「下」就含今天本身(今天剛好是星期三,講「星期三」
   //    就是今天);有「下」一律再加 7 天,就算今天剛好是那天也不會誤判成今天。

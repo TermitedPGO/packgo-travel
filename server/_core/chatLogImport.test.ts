@@ -255,6 +255,39 @@ describe("resolveEventDate — relative dates", () => {
     expect(resolveEventDate("星期1", "2026-07-02")).toBeNull();
     expect(resolveEventDate("星期天天", "2026-07-02")).toBeNull();
   });
+
+  // 批十二-3 (P2):「N 天內 / N 日內 / N 天後 / N 天后」= 今天 + N(美西曆日) --------
+  it("「3 天內」= today + 3 (E2E 完單測試真實用語)", () => {
+    expect(resolveEventDate("3 天內", "2026-07-07")).toEqual({ year: 2026, month: 7, day: 10 });
+  });
+  it("「3天內」無空白同解", () => {
+    expect(resolveEventDate("3天內", "2026-07-07")).toEqual({ year: 2026, month: 7, day: 10 });
+  });
+  it("「5 日內」(日 == 天)= today + 5", () => {
+    expect(resolveEventDate("5 日內", "2026-07-07")).toEqual({ year: 2026, month: 7, day: 12 });
+  });
+  it("「3天后」(簡體)= today + 3", () => {
+    expect(resolveEventDate("3天后", "2026-07-07")).toEqual({ year: 2026, month: 7, day: 10 });
+  });
+  it("「3天後」(繁體)= today + 3", () => {
+    expect(resolveEventDate("3天後", "2026-07-07")).toEqual({ year: 2026, month: 7, day: 10 });
+  });
+  it("「3天以內」/「3天之內」變體 = today + 3", () => {
+    expect(resolveEventDate("3天以內", "2026-07-07")).toEqual({ year: 2026, month: 7, day: 10 });
+    expect(resolveEventDate("3天之內", "2026-07-07")).toEqual({ year: 2026, month: 7, day: 10 });
+  });
+  it("跨月:「30 天內」on 2026-01-15 = 2026-02-14", () => {
+    expect(resolveEventDate("30 天內", "2026-01-15")).toEqual({ year: 2026, month: 2, day: 14 });
+  });
+  it("跨年:「5 天內」on 2026-12-30 = 2027-01-04", () => {
+    expect(resolveEventDate("5 天內", "2026-12-30")).toEqual({ year: 2027, month: 1, day: 4 });
+  });
+  it("無數字的「天內」不 match → null", () => {
+    expect(resolveEventDate("天內", "2026-07-07")).toBeNull();
+  });
+  it("「0 天內」(delta < 1)拒絕 → null", () => {
+    expect(resolveEventDate("0 天內", "2026-07-07")).toBeNull();
+  });
 });
 
 // ────────────────────────────────────────────────────────────────────────
