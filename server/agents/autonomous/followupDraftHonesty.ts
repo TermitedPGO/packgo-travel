@@ -28,7 +28,11 @@
  * evidence 的 DB 查詢在 followupDraftProducer.gatherDeliveryEvidence。
  */
 
-export type HonestyViolation = "unverified_delivery_claim" | "greeting_unknown_recipient";
+export type HonestyViolation =
+  | "unverified_delivery_claim"
+  | "greeting_unknown_recipient"
+  // 批十二-1 (P0):草稿文案聲稱「附上檔案」但這封實際沒帶任何附件 → 擋(確定性,零 LLM)。
+  | "claimed_attachment_missing";
 
 /**
  * Deterministic delivery evidence for ONE customer (same sources as
@@ -76,6 +80,49 @@ const DELIVERY_CLAIM_PATTERNS: RegExp[] = [
 export function detectDeliveryClaim(body: string): boolean {
   const text = body ?? "";
   return DELIVERY_CLAIM_PATTERNS.some((p) => p.test(text));
+}
+
+// ── 附件宣稱 gate (批十二-1, P0) ──────────────────────────────────────────────
+// E2E 完單測試 F3:報價/請款/收據信本文寫「附在信裡」「隨信附上…PDF」,但外寄
+// 郵件實際沒帶附件。這個 pattern 表只收「這封信裡就有附件」的當下宣稱;刻意避開:
+//   未來式(我會附上 / 稍後附上 / I will attach)= 承諾,不是謊;
+//   否定(沒有另外附件 / 不另附)= 明說沒附;
+//   與附件無關的詞(附近 / 附加 / 附註 / attachment fee)。
+// 只用純字串比對,零 LLM,與 detectDeliveryClaim 同架構。
+const ATTACHMENT_CLAIM_PATTERNS: RegExp[] = [
+  // zh —「附在這封信 / 附在信裡 / 附在信中 / 附在郵件」
+  /附在(?:這封|此)?(?:信|郵件|信件)/,
+  //「附於信中 / 附於郵件」
+  /附於(?:此)?(?:信|郵件)/,
+  //「隨信附上 / 隨函附 / 隨郵件附」
+  /隨(?:信|函|郵件)附/,
+  //「隨附報價單 / 隨附收據 / 隨附的文件」— 需接檔案類名詞或「的/上/了」,避免誤吃「隨附近」
+  /隨附(?:上|的|了|檔|件|報價|收據|文件|發票|行程|單|表|pdf)/i,
+  //「詳見附件 / 參見附件 / 如附件 / 請見附件 / 另見附件」(不收裸「見」以免吃到「意見附件」)
+  /(?:如|詳見|參見|請見|另見)附件/,
+  //「報價單如附」— 如附收尾,後面接標點/結尾(不接「近/加/註」)
+  /如附(?=[ \t,，。;；:：!！)）】」』]|$)/,
+  //「附件是 / 附檔是 / 附件請查收 / 附件如下 / 附件中 / 附件裡 / 附件供您參考」
+  /附(?:件|檔案?)(?:是|為|裡|中|內|:|：|請查收|如下|供您|給您)/,
+  // en — present/past「it is attached / enclosed / please find attached」(未來式 will attach 不收)
+  // 「please find」需接 attached/enclosed,不吃「please find the details below」這種無附件用語。
+  /\bplease find (?:the |our )?(?:attached|enclosed)/i,
+  //「attached to this」限定 email/message/reply,排除「attached to this itinerary/reservation」。
+  /\battached (?:is|are|please|herewith|hereto|you'?ll find|you will find|for your|to this (?:e-?mail|message|reply|note))\b/i,
+  //「is/are attached」但排除慣用語「attached to X」(is attached to the reservation ≠ 帶附件)。
+  /\b(?:is|are|herewith|hereto) attached\b(?!\s+to\s)/i,
+  /\bi(?:'ve| have) (?:attached|enclosed)\b/i,
+  /\benclosed (?:is|are|herewith|please|you'?ll find|for your)\b/i,
+  /\bsee (?:the )?attach(?:ment|ed)\b/i,
+  /\bin the attach(?:ment|ed)\b/i,
+];
+
+/** True when the draft claims THIS email carries an attachment (附上/附在信裡/
+ * attached/enclosed). Deterministic — pair with the real attachment count to
+ * catch a body that says 附上 while sending nothing. */
+export function detectAttachmentClaim(body: string): boolean {
+  const text = body ?? "";
+  return ATTACHMENT_CLAIM_PATTERNS.some((p) => p.test(text));
 }
 
 // ── From-header parsing(shared by 抬頭 gate + 收件人顯示修正)──────────────
@@ -314,6 +361,11 @@ export interface HonestyCheckInput {
   evidence: DeliveryEvidence | null;
   /** From collectAllowedGreetingNames. */
   allowedGreetingNames: string[];
+  /** 批十二-1 (P0):這封草稿/信件實際帶了幾個附件 → true 代表 ≥1 個。只有明確
+   * 傳 false(呼叫端確知沒附件)時,才會在文案聲稱附件卻沒帶時擋下;undefined
+   * = 呼叫端不判附件(維持舊行為,gate 不觸發)。附件是確定性事實(不像交付/
+   * 抬頭有 UNKNOWN),所以聲稱+false 一律硬擋,沒有 fail-open。 */
+  hasAttachment?: boolean;
   /** True when a source of allowed names could not be read (e.g. the profile
    * name lookup failed). The set may be missing the very name that would have
    * vouched for the greeting, so a non-match is UNKNOWN → the greeting gate
@@ -333,6 +385,8 @@ export interface HonestyCheckResult {
   greetingWithUnknownNames: boolean;
   /** The greeting name we extracted (null = no-name greeting), for logs. */
   greetingName: string | null;
+  /** 批十二-1:文案是否聲稱這封信帶了附件(供 log / UI badge 用)。 */
+  attachmentClaim: boolean;
 }
 
 /** Both gates in one pure call; blocked = ok:false = do NOT store the card. */
@@ -358,11 +412,19 @@ export function checkFollowupDraftHonesty(input: HonestyCheckInput): HonestyChec
     }
   }
 
+  // 附件 gate:文案聲稱附上檔案,但呼叫端確知這封沒帶任何附件 → 硬擋(寧可沒卡)。
+  // 附件有無是確定性事實,沒有 UNKNOWN fail-open;undefined 代表呼叫端不判(舊行為)。
+  const attachmentClaim = detectAttachmentClaim(input.body);
+  if (attachmentClaim && input.hasAttachment === false) {
+    violations.push("claimed_attachment_missing");
+  }
+
   return {
     ok: violations.length === 0,
     violations,
     claimWithUnknownEvidence,
     greetingWithUnknownNames,
     greetingName,
+    attachmentClaim,
   };
 }

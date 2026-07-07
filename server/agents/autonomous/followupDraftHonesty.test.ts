@@ -9,6 +9,7 @@ import { describe, it, expect } from "vitest";
 
 import {
   detectDeliveryClaim,
+  detectAttachmentClaim,
   hasAnyDeliveryEvidence,
   parseAddress,
   parseFromHeader,
@@ -70,6 +71,62 @@ describe("detectDeliveryClaim — strong past-tense claims only", () => {
     ["Just checking in, no rush at all."],
   ])("future / neutral negative: %s", (text) => {
     expect(detectDeliveryClaim(text)).toBe(false);
+  });
+});
+
+describe("detectAttachmentClaim — 批十二-1 P0 附件宣稱偵測", () => {
+  it.each([
+    ["總價 USD 980,附在信裡請您看看"], // E2E step3 真實文案
+    ["已把預訂與支付單附在這封信裡"], // E2E step5 真實文案
+    ["隨信附上訂金收據 PDF"], // E2E step6 真實文案
+    ["隨信附上付清收據 PDF"], // E2E step8 真實文案
+    ["附在信中,再麻煩您過目"],
+    ["報價已附於信中"],
+    ["隨附報價單一份"],
+    ["報價單如附"],
+    ["附檔是這次的行程表"],
+    ["詳見附件"],
+    ["附件請查收"],
+    ["附件是完整行程"],
+    ["附件供您參考"],
+  ])("zh positive: %s", (text) => {
+    expect(detectAttachmentClaim(text)).toBe(true);
+  });
+
+  it.each([
+    ["Please find attached the quote."],
+    ["Please find the attached itinerary."],
+    ["The receipt is attached."],
+    ["Attached is the payment request."],
+    ["Attached are the two receipts."],
+    ["I've enclosed the itinerary."],
+    ["I have attached the quote for your review."],
+    ["Enclosed is the deposit receipt."],
+    ["See the attachment for the full breakdown."],
+    ["The details are in the attachment."],
+  ])("en positive: %s", (text) => {
+    expect(detectAttachmentClaim(text)).toBe(true);
+  });
+
+  it.each([
+    ["金額已寫在單上,沒有另外附件"], // 否定:明說沒附
+    ["這次不另附檔,直接看信裡的數字就好"],
+    ["附近有很多不錯的餐廳可以選"], // 附近
+    ["這是我們的附加服務,免費"], // 附加
+    ["附註:出發前七天請付清尾款"], // 附註
+    ["我會把報價附上給您"], // 未來式
+    ["稍後附上完整行程"], // 未來式
+    ["我等下把收據附上"], // 未來式
+    ["I will attach the quote once it's ready."], // future
+    ["I'll send the itinerary with the attachment fee waived."], // attachment fee, not a claim
+    ["The quote was sent to you last week."], // 過去交付(非本封附件宣稱)
+    ["上次已寄的報價您看了嗎"], // 過去交付,無「附」當下宣稱
+    ["Please find the details below."], // review A:「please find the …」無附件
+    ["Please find our full itinerary in the message below."],
+    ["The deposit is attached to the reservation."], // review A:「attached to X」慣用語
+    ["We are attached to this itinerary style."],
+  ])("negative (未來式/否定/無關詞): %s", (text) => {
+    expect(detectAttachmentClaim(text)).toBe(false);
   });
 });
 
@@ -415,5 +472,63 @@ describe("checkFollowupDraftHonesty — the combined gate", () => {
     });
     expect(res.ok).toBe(true);
     expect(res.greetingWithUnknownNames).toBe(false);
+  });
+
+  // 批十二-1 (P0) 附件宣稱 gate ------------------------------------------------
+  it("blocks the E2E F3 bug: body says 附在信裡 but hasAttachment:false", () => {
+    const res = checkFollowupDraftHonesty({
+      body: "Emerald 您好,總價 USD 980,附在信裡請您看看。",
+      evidence: NO_EVIDENCE,
+      allowedGreetingNames: allowed,
+      hasAttachment: false,
+    });
+    expect(res.ok).toBe(false);
+    expect(res.violations).toContain("claimed_attachment_missing");
+    expect(res.attachmentClaim).toBe(true);
+  });
+
+  it("same claim passes when the attachment IS present (hasAttachment:true)", () => {
+    const res = checkFollowupDraftHonesty({
+      body: "Emerald 您好,總價 USD 980,附在信裡請您看看。",
+      evidence: NO_EVIDENCE,
+      allowedGreetingNames: allowed,
+      hasAttachment: true,
+    });
+    expect(res.ok).toBe(true);
+    expect(res.violations).not.toContain("claimed_attachment_missing");
+    expect(res.attachmentClaim).toBe(true);
+  });
+
+  it("no attachment claim + hasAttachment:false → not flagged", () => {
+    const res = checkFollowupDraftHonesty({
+      body: "Emerald 您好,想跟您確認一下上次的行程還有沒有興趣。",
+      evidence: NO_EVIDENCE,
+      allowedGreetingNames: allowed,
+      hasAttachment: false,
+    });
+    expect(res.ok).toBe(true);
+    expect(res.attachmentClaim).toBe(false);
+  });
+
+  it("determinism: attachment claim blocks even when evidence is UNKNOWN (null)", () => {
+    const res = checkFollowupDraftHonesty({
+      body: "您好,隨信附上訂金收據 PDF。",
+      evidence: null,
+      allowedGreetingNames: [],
+      hasAttachment: false,
+    });
+    expect(res.ok).toBe(false);
+    expect(res.violations).toContain("claimed_attachment_missing");
+  });
+
+  it("hasAttachment omitted (undefined) → attachment gate never fires (backward compatible)", () => {
+    const res = checkFollowupDraftHonesty({
+      body: "您好,隨信附上訂金收據 PDF。",
+      evidence: NO_EVIDENCE,
+      allowedGreetingNames: [],
+    });
+    expect(res.violations).not.toContain("claimed_attachment_missing");
+    // 舊呼叫端不傳 hasAttachment → 不受新 gate 影響
+    expect(res.ok).toBe(true);
   });
 });

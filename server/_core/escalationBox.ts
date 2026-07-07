@@ -655,6 +655,29 @@ export async function sendEscalationReply(
   for (const a of ctx.replyAttachments) attachmentsByKey.set(a.key, a);
   const mergedAttachments: ReplyAttachmentRef[] = [...attachmentsByKey.values()];
 
+  // 批十二-1 (P0) — 送出前的附件誠實閘(純 code,零 LLM)。E2E F3:信本文寫「附在
+  // 信裡」卻沒帶任何附件,客人收到看到寫有附件卻找不到。這裡在真正寄出前擋下:文案
+  // 聲稱附上檔案但這封 mergedAttachments 為空 → 不寄,回可行動的錯誤逼 Jeff 先掛檔案
+  // 或改掉字樣。用窄偵測器(只看附件宣稱),不跑抬頭/交付 gate 以免在寄送端誤擋。
+  // 註:>25MB 檔會降級成下載連結,但那時 mergedAttachments.length>0(檔仍送達)→ 不擋。
+  {
+    const { detectAttachmentClaim } = await import(
+      "../agents/autonomous/followupDraftHonesty"
+    );
+    if (detectAttachmentClaim(body) && mergedAttachments.length === 0) {
+      log.warn(
+        { messageId },
+        "[escalationBox] body claims an attachment but none attached — blocking send",
+      );
+      return {
+        sent: false,
+        dryRun: false,
+        errorMessage:
+          "這封信寫了附上檔案,但實際沒有帶任何附件。請先產生並掛上文件(或把「附上/附在信裡」字樣拿掉)再寄一次。",
+      };
+    }
+  }
+
   let finalBody = body;
   let inlineAttachments: import("./gmail").GmailAttachment[] | undefined;
   if (mergedAttachments.length > 0) {

@@ -374,6 +374,10 @@ export async function applyFollowupHonestyGate(
     profileEmail: string;
     rowsNewestFirst: InteractionDetailRow[];
     draftBody: string;
+    /** 批十二-1 (P0):這封草稿最後會不會帶附件。跟進草稿本來不帶附件(=false),
+     * 若含 re-attach 掛上剛產生的 PDF 才傳 true。文案聲稱附上檔案卻 false → 擋
+     * (claimed_attachment_missing)。省略 = false(跟進草稿預設不帶附件)。 */
+    hasAttachment?: boolean;
   },
 ): Promise<FollowupHonestyGateOutcome> {
   const { evidence, profileName, profileNameUnknown } = await gatherDeliveryEvidence(
@@ -393,6 +397,8 @@ export async function applyFollowupHonestyGate(
     // Name lookup failed → the set may be missing the vouching name → the
     // greeting gate fails open (UNKNOWN ≠ mismatch), mirroring evidence:null.
     allowedNamesIncomplete: profileNameUnknown,
+    // 附件有無是確定性事實:傳明確 boolean 讓「聲稱附上卻沒帶」被擋(寧可沒卡)。
+    hasAttachment: input.hasAttachment ?? false,
   });
   if (res.claimWithUnknownEvidence) {
     log.warn(
@@ -442,6 +448,10 @@ export interface FollowupDraftRowInput {
    * title/body may say 報價; false → neutral 上次聯絡後 wording. 6/29:卡片
    * 無條件寫「報價 N 天沒回」,但系統根本沒有報價寄出記錄。 */
   hasQuoteEvidence: boolean;
+  /** 批十二-1 (P0):要隨這封草稿一起寄出的附件(剛產生、還沒寄的 generated PDF)。
+   * key 必須落在 reply-attachments/ 命名空間(送出端 parseReplyAttachments 會再驗一次)。
+   * 空/省略時 context 完全不含 replyAttachments 欄(與舊資料位元相同)。 */
+  replyAttachments?: Array<{ key: string; filename: string }>;
 }
 
 export interface FollowupDraftRow {
@@ -456,6 +466,11 @@ export interface FollowupDraftRow {
 }
 
 export function buildFollowupDraftRow(input: FollowupDraftRowInput): FollowupDraftRow {
+  // 批十二-1:只在真的有附件時才寫進 context(空 → undefined → JSON.stringify 略去該欄
+  // → 與舊資料位元相同,既有 snapshot/回歸不動)。key 只保留 reply-attachments/ 命名空間。
+  const cleanedAttachments = (input.replyAttachments ?? []).filter(
+    (a) => a && typeof a.key === "string" && a.key.startsWith("reply-attachments/") && !!a.filename,
+  );
   const context = JSON.stringify({
     draftReply: input.draftBody,
     gmailThreadId: input.gmailThreadId,
@@ -467,6 +482,7 @@ export function buildFollowupDraftRow(input: FollowupDraftRowInput): FollowupDra
     promptVariant: input.promptVariant,
     // sendOutcome intentionally omitted (null) → observationDraftCard treats it
     // as awaiting send, not already-sent.
+    replyAttachments: cleanedAttachments.length > 0 ? cleanedAttachments : undefined,
   });
   // 報價 wording only when a quote provably went out; otherwise neutral.
   // daysSince<=0(同天,常見於 on-demand「給我草稿」剛聯絡過的客人)→「N 天沒回」
@@ -487,6 +503,43 @@ export function buildFollowupDraftRow(input: FollowupDraftRowInput): FollowupDra
     readByJeff: 0,
     context,
   };
+}
+
+/** A generated-document row as read for re-attach (customerDocuments). */
+export interface GeneratedDocRow {
+  r2Url: string | null;
+  fileName: string | null;
+  createdAt: Date | string | null;
+}
+
+/**
+ * 批十二-1 (P0 根因修) — PURE 選片:從「剛產生的 generated 文件」挑出要掛進新草稿
+ * 的那 ONE 份。根因是「先出文件、後在另一輪叫草稿寄」時,新草稿不會繼承剛產生的
+ * PDF。規則:只收 reply-attachments/ 命名空間、在 windowMs 內產生的(避免掛上上週的
+ * 舊 PDF)、且不是未來時間(時鐘防呆);在符合的裡面只回「最新一份」。
+ * 為什麼是單一最新而非每種各一:一封信一份文件。E2E 時間軸(step3 報價 00:21、
+ * step5 請款 00:31,相隔 10 分)兩份都落在 30 分窗內,若每種各掛會讓 step5 的請款信
+ * 同時附上報價 —— 只掛「你剛產生的那份(最新)」才對。回傳 0 或 1 筆 {key, filename}。
+ * 純函式 → 單元測試(本機無 DB)。
+ */
+export function selectReattachDocs(
+  rows: GeneratedDocRow[],
+  nowMs: number,
+  windowMs: number,
+): Array<{ key: string; filename: string }> {
+  let best: { key: string; filename: string; ts: number } | null = null;
+  for (const r of rows) {
+    const key = r.r2Url;
+    const filename = r.fileName;
+    if (!key || !filename) continue;
+    if (!key.startsWith("reply-attachments/")) continue; // 命名空間硬邊界
+    const ts = r.createdAt ? new Date(r.createdAt).getTime() : NaN;
+    if (!Number.isFinite(ts)) continue;
+    if (nowMs - ts > windowMs) continue; // 太舊 → 不掛
+    if (ts - nowMs > 60_000) continue; // 未來時間(時鐘異常)防呆
+    if (!best || ts > best.ts) best = { key, filename, ts };
+  }
+  return best ? [{ key: best.key, filename: best.filename }] : [];
 }
 
 export interface FollowupDraftScanResult {

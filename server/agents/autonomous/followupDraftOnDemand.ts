@@ -23,13 +23,17 @@ import {
   pickFollowupVariant,
   sanitizeFollowupDraftBody,
   applyFollowupHonestyGate,
+  selectReattachDocs,
   FOLLOWUP_DRAFT_AGENT,
   type InteractionDetailRow,
   type DraftSkipReason,
 } from "./followupDraftProducer";
+import { detectAttachmentClaim } from "./followupDraftHonesty";
 
 const log = createChildLogger({ module: "followupDraftOnDemand" });
 const DAY_MS = 24 * 60 * 60 * 1000;
+// 批十二-1:re-attach 只撈這麼久內剛產生的 generated 文件(避免掛上舊 PDF)。
+const REATTACH_WINDOW_MS = 30 * 60 * 1000;
 
 export type OnDemandDraftResult =
   // subject/body echoed back so the ops chat can quote the draft IN its reply
@@ -53,7 +57,7 @@ export async function produceFollowupDraftForProfile(
   /** Jeff 在聊天口述的信件內容(「寫信說星期四領事館取件」);有值時草稿必須照做。 */
   jeffInstruction?: string,
 ): Promise<OnDemandDraftResult> {
-  const { agentMessages, customerInteractions, customerProfiles } = await import(
+  const { agentMessages, customerInteractions, customerProfiles, customerDocuments } = await import(
     "../../../drizzle/schema"
   );
   const { and, eq, desc, ne } = await import("drizzle-orm");
@@ -137,13 +141,50 @@ export async function produceFollowupDraftForProfile(
     );
   }
 
+  // 批十二-1 (P0 根因修):草稿若聲稱附上檔案,撈這位客人最近(REATTACH_WINDOW_MS
+  // 內)產生、還掛在 reply-attachments/ 的 generated PDF,依 kind 取最新一份掛進新草稿。
+  // 這修好「先出文件→另一輪叫草稿寄」新草稿沒繼承附件的根因(E2E F3)。撈不到就留空
+  // → 下方誠實閘會擋掉「說附上卻沒附」的草稿(寧可沒卡)。best-effort:失敗不影響其餘。
+  // 粒度註:只查這個 profileId(非合併 scopeIds),萬一文件掛在被合併掉的 profile 上會
+  // 漏撈 —— 此時退回誠實閘擋下空寄、由 Jeff 手動掛,安全降級(review D2)。
+  let replyAttachments: Array<{ key: string; filename: string }> = [];
+  if (detectAttachmentClaim(cleaned.body)) {
+    try {
+      const docRows = (await db
+        .select({
+          r2Url: customerDocuments.r2Url,
+          fileName: customerDocuments.fileName,
+          createdAt: customerDocuments.uploadedAt, // customerDocuments 的時戳欄叫 uploadedAt
+        })
+        .from(customerDocuments)
+        .where(
+          and(
+            eq(customerDocuments.customerProfileId, profileId),
+            eq(customerDocuments.uploadedBy, "generated"),
+            eq(customerDocuments.isCurrent, true),
+          ),
+        )
+        .orderBy(desc(customerDocuments.uploadedAt))
+        .limit(10)) as Array<{
+        r2Url: string | null;
+        fileName: string | null;
+        createdAt: Date | string | null;
+      }>;
+      replyAttachments = selectReattachDocs(docRows, Date.now(), REATTACH_WINDOW_MS);
+    } catch (e) {
+      log.warn({ err: e, profileId }, "[followupDraftOnDemand] re-attach lookup failed (non-fatal)");
+    }
+  }
+
   // 誠實度 gate (same shared path as the nightly scan): unverified 已寄 claims
   // or a greeting to someone not in this conversation → no card (寧可沒卡).
+  // 附件 gate:文案說附上檔案但 re-attach 沒撈到 PDF(hasAttachment=false)→ 一樣不落卡。
   const honesty = await applyFollowupHonestyGate(db, {
     profileId,
     profileEmail: email,
     rowsNewestFirst: rows,
     draftBody: cleaned.body,
+    hasAttachment: replyAttachments.length > 0,
   });
   if (!honesty.ok) return { status: "skipped", reason: "dishonest_draft" };
 
@@ -164,6 +205,8 @@ export async function produceFollowupDraftForProfile(
       draftBody: cleaned.body,
       promptVariant,
       hasQuoteEvidence: honesty.hasQuoteEvidence,
+      // 批十二-1:把剛產生的 PDF 一起寫進草稿 context,一鍵寄出時附件同行。
+      replyAttachments,
     }),
   )) as unknown as Array<{ insertId?: number }>;
   const newId = Array.isArray(inserted) ? inserted[0]?.insertId : undefined;

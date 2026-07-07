@@ -26,6 +26,7 @@ import {
   sanitizeFollowupDraftBody,
   isHardDraftViolation,
   buildFollowupDraftRow,
+  selectReattachDocs,
   pickFollowupVariant,
   gatherDeliveryEvidence,
   applyFollowupHonestyGate,
@@ -310,6 +311,76 @@ describe("buildFollowupDraftRow — surfaces AND sends through the real consumer
     expect(neutral.body).not.toContain("報價");
   });
 
+  // 批十二-1 (P0) replyAttachments 從草稿 context round-trip 到送出端 -----------
+  it("replyAttachments round-trips into the send target (ctx.replyAttachments)", () => {
+    const withDoc = buildFollowupDraftRow({
+      profileId: 7,
+      customerEmail: "a@b.co",
+      daysSince: 0,
+      gmailThreadId: "t-123",
+      subject: "金門三日遊報價整理好了",
+      draftBody: "總價 USD 980,附在信裡請您看看。",
+      promptVariant: "A",
+      hasQuoteEvidence: true,
+      replyAttachments: [
+        { key: "reply-attachments/2760017/generated-123-quote_summary.pdf", filename: "報價摘要_20260707.pdf" },
+      ],
+    });
+    const target = parseEscalationReplyContext(withDoc.context);
+    expect(target).not.toBeNull();
+    expect(target!.replyAttachments).toEqual([
+      { key: "reply-attachments/2760017/generated-123-quote_summary.pdf", filename: "報價摘要_20260707.pdf" },
+    ]);
+  });
+
+  it("drops any attachment key outside the reply-attachments/ namespace", () => {
+    const built = buildFollowupDraftRow({
+      profileId: 7,
+      customerEmail: "a@b.co",
+      daysSince: 0,
+      gmailThreadId: "t-123",
+      subject: "x",
+      draftBody: "附在信裡",
+      promptVariant: "A",
+      hasQuoteEvidence: false,
+      replyAttachments: [
+        { key: "some-other-bucket/evil.pdf", filename: "evil.pdf" },
+        { key: "reply-attachments/7/generated-9-paid_receipt.pdf", filename: "收據.pdf" },
+      ],
+    });
+    const target = parseEscalationReplyContext(built.context);
+    expect(target!.replyAttachments).toEqual([
+      { key: "reply-attachments/7/generated-9-paid_receipt.pdf", filename: "收據.pdf" },
+    ]);
+  });
+
+  it("omits the replyAttachments key entirely when there are none (byte-identical to legacy rows)", () => {
+    const none = buildFollowupDraftRow({
+      profileId: 7,
+      customerEmail: "a@b.co",
+      daysSince: 3,
+      gmailThreadId: "t-123",
+      subject: "x",
+      draftBody: "跟進一下",
+      promptVariant: "A",
+      hasQuoteEvidence: false,
+    });
+    expect(none.context).not.toContain("replyAttachments");
+    expect(JSON.parse(none.context).replyAttachments).toBeUndefined();
+    const emptyArr = buildFollowupDraftRow({
+      profileId: 7,
+      customerEmail: "a@b.co",
+      daysSince: 3,
+      gmailThreadId: "t-123",
+      subject: "x",
+      draftBody: "跟進一下",
+      promptVariant: "A",
+      hasQuoteEvidence: false,
+      replyAttachments: [],
+    });
+    expect(emptyArr.context).not.toContain("replyAttachments");
+  });
+
   it("daysSince<=0(同天,常見於 on-demand)→ 不說「0 天沒回」,改中性「今天剛聯絡」", () => {
     for (const hasQuoteEvidence of [true, false]) {
       const sameDay = buildFollowupDraftRow({
@@ -361,6 +432,97 @@ describe("buildFollowupDraftRow — surfaces AND sends through the real consumer
     expect(card!.to).toBe("leslie@axt.com");
     const target = parseEscalationReplyContext(merged.context);
     expect(target!.customerEmail).toBe("leslie@axt.com");
+  });
+});
+
+describe("selectReattachDocs — 批十二-1 P0 re-attach 選片", () => {
+  const now = new Date("2026-07-07T10:00:00Z").getTime();
+  const WIN = 30 * 60 * 1000;
+  const mk = (key: string | null, filename: string | null, minsAgo: number) => ({
+    r2Url: key,
+    fileName: filename,
+    createdAt: new Date(now - minsAgo * 60_000),
+  });
+
+  it("picks a recently generated reply-attachments PDF", () => {
+    const out = selectReattachDocs(
+      [mk("reply-attachments/7/generated-100-quote_summary.pdf", "報價.pdf", 2)],
+      now,
+      WIN,
+    );
+    expect(out).toEqual([
+      { key: "reply-attachments/7/generated-100-quote_summary.pdf", filename: "報價.pdf" },
+    ]);
+  });
+
+  it("drops docs older than the window (avoids re-attaching last week's PDF)", () => {
+    const out = selectReattachDocs(
+      [mk("reply-attachments/7/generated-100-quote_summary.pdf", "報價.pdf", 60)],
+      now,
+      WIN,
+    );
+    expect(out).toEqual([]);
+  });
+
+  it("drops keys outside the reply-attachments/ namespace", () => {
+    const out = selectReattachDocs(
+      [mk("other-bucket/generated-100-quote_summary.pdf", "x.pdf", 1)],
+      now,
+      WIN,
+    );
+    expect(out).toEqual([]);
+  });
+
+  it("returns ONLY the single newest doc, even across kinds (一封信一份;E2E step5 只掛請款不掛報價)", () => {
+    const out = selectReattachDocs(
+      [
+        mk("reply-attachments/7/generated-100-quote_summary.pdf", "報價.pdf", 20), // 20 分前的報價
+        mk("reply-attachments/7/generated-150-payment_request.pdf", "請款.pdf", 5), // 5 分前的請款(最新)
+      ],
+      now,
+      WIN,
+    );
+    expect(out).toEqual([
+      { key: "reply-attachments/7/generated-150-payment_request.pdf", filename: "請款.pdf" },
+    ]);
+  });
+
+  it("skips null key/filename and future-dated rows (clock-skew guard)", () => {
+    const out = selectReattachDocs(
+      [
+        { r2Url: null, fileName: "x.pdf", createdAt: new Date(now) },
+        {
+          r2Url: "reply-attachments/7/generated-1-quote_summary.pdf",
+          fileName: null,
+          createdAt: new Date(now),
+        },
+        {
+          r2Url: "reply-attachments/7/generated-2-paid_receipt.pdf",
+          fileName: "未來.pdf",
+          createdAt: new Date(now + 5 * 60_000),
+        },
+      ],
+      now,
+      WIN,
+    );
+    expect(out).toEqual([]);
+  });
+
+  it("tolerates ISO-string createdAt (mysql2/TiDB naive-string)", () => {
+    const out = selectReattachDocs(
+      [
+        {
+          r2Url: "reply-attachments/7/generated-9-paid_receipt.pdf",
+          fileName: "收據.pdf",
+          createdAt: new Date(now - 60_000).toISOString(),
+        },
+      ],
+      now,
+      WIN,
+    );
+    expect(out).toEqual([
+      { key: "reply-attachments/7/generated-9-paid_receipt.pdf", filename: "收據.pdf" },
+    ]);
   });
 });
 
