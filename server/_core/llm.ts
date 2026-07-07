@@ -15,6 +15,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import { ENV } from "./env";
 import { getCachedResponse, setCachedResponse } from "./llmCache";
 import { createChildLogger } from "./logger";
+// 批十二-4 (P2):額度/認證耗盡偵測 → high 優先 agentMessages 卡。掛在既有 circuit
+// 事件旁,不動 circuit breaker / 429 / fallback。
+import { creditAuthDetector } from "./llmCreditAlert";
 const log = createChildLogger({ module: "llm" });
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -794,10 +797,12 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
         ...(toolChoice ? { tool_choice: toolChoice } : {}),
       });
       circuit.recordSuccess();
+      creditAuthDetector.recordSuccess(); // 批十二-4:成功 = 額度/認證恢復 → 解除警示
       break;
     } catch (err: any) {
       lastErr = err;
       circuit.recordFailure(err);
+      void creditAuthDetector.recordFailure(err); // 批十二-4:fire-and-forget,永不加延遲/不 throw
       // Only retry on 429; everything else falls through to the throw below.
       if (err?.status !== 429 || attempt >= MAX_429_RETRIES) break;
       const retryAfterHeader = err?.headers?.["retry-after"];
