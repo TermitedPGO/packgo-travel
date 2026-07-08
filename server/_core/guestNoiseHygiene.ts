@@ -103,6 +103,18 @@ function affectedRows(res: unknown): number {
   return Number(header?.affectedRows ?? 0);
 }
 
+/** Drizzle wraps the driver error as "Failed query: …" and hides the real MySQL
+ *  reason on `.cause`. Surface the errno + sqlMessage so a failure is diagnosable
+ *  from the endpoint response (v803 回爐 lesson). */
+function describeErr(err: unknown): string {
+  const e = err as any;
+  const cause = e?.cause;
+  if (cause?.sqlMessage || cause?.code) {
+    return `${cause.code ?? "DB"}: ${cause.sqlMessage ?? cause.message ?? ""}`.trim();
+  }
+  return (e as Error)?.message ?? String(err);
+}
+
 export interface GuestBackfillResult {
   status: "ok" | "error";
   mode: "dry_run" | "confirm";
@@ -125,20 +137,36 @@ export interface GuestBackfillResult {
   error?: string;
 }
 
-/** SELECT that JOINs each eligible guest to its LATEST inbound row (unclassified). */
+/**
+ * FROM/WHERE selecting each eligible guest's LATEST inbound row (unclassified).
+ *
+ * v803 回爐: the first cut picked the latest inbound with a correlated
+ * `ORDER BY … LIMIT 1` subquery inside the JOIN … ON — prod TiDB 500'd on it
+ * ("Failed query"), while the hygiene report (which uses NOT EXISTS) ran fine.
+ * So "lci is the latest inbound" is expressed as NOT EXISTS a strictly-newer
+ * inbound — a construct already proven on prod (the qualification's NOT EXISTS
+ * clauses). The (createdAt, id) tiebreak matches the gate's latestInboundIsSpam,
+ * so both pick the same row; id is a unique PK so the ordering is total → exactly
+ * one lci per profile.
+ */
 function eligibleLatestInboundFrom() {
   return sql`
-    FROM \`customerProfiles\`
-    JOIN \`customerInteractions\` lci ON lci.id = (
-      SELECT ci.id FROM \`customerInteractions\` ci
-      WHERE ci.customerProfileId = \`customerProfiles\`.\`id\` AND ci.direction = 'inbound'
-      ORDER BY ci.createdAt DESC, ci.id DESC
-      LIMIT 1
-    )
-    WHERE ${GUEST_POPULATION_SQL}
+    FROM \`customerInteractions\` lci
+    JOIN \`customerProfiles\` ON \`customerProfiles\`.\`id\` = lci.customerProfileId
+    WHERE lci.direction = 'inbound'
+      AND lci.classification IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM \`customerInteractions\` ci
+        WHERE ci.customerProfileId = lci.customerProfileId
+          AND ci.direction = 'inbound'
+          AND (
+            ci.createdAt > lci.createdAt
+            OR (ci.createdAt = lci.createdAt AND ci.id > lci.id)
+          )
+      )
+      AND ${GUEST_POPULATION_SQL}
       AND \`customerProfiles\`.\`lastInboundAt\` IS NOT NULL
       AND ${NOT_CONTENT_QUALIFIED_SQL}
-      AND lci.classification IS NULL
   `;
 }
 
@@ -226,7 +254,7 @@ export async function runGuestClassificationBackfill(
       exceedsCap: eligibleCount > cap,
     };
   } catch (err) {
-    return { status: "error", mode, error: (err as Error).message };
+    return { status: "error", mode, error: describeErr(err) };
   }
 }
 
@@ -298,6 +326,6 @@ export async function runGuestNoiseHygieneReport(): Promise<GuestHygieneReport> 
 
     return { status: "ok", candidateCount, byAllSpam, byNoiseDomain, sample, topDomains };
   } catch (err) {
-    return { status: "error", error: (err as Error).message };
+    return { status: "error", error: describeErr(err) };
   }
 }
