@@ -140,26 +140,34 @@ export async function runGuestUnreadRankingQuery(
     users: usersTable,
     inquiries: inquiriesTable,
     agentMessages,
-    customerInteractions,
   } = await import("../../drizzle/schema");
+  // ⛔ TiDB 雷(v799 回爐修正,已在 prod TiDB 唯讀驗過形狀 —— 見 docs/agent/30-templates.md
+  // 地雷第四條):此 GREATEST 內含關聯子查詢(WHERE customerInteractions.customerProfileId =
+  // customerProfiles.id)。必須「整支只渲染一份、全程帶完整表前綴」,再靠 SELECT 別名排序。兩個坑:
+  //   1. 若 orderBy(desc(lastContactSql)),Drizzle 會在 ORDER BY 再展開一份 GREATEST —— 同一
+  //      運算式渲染兩次(select 一份、order by 一份),TiDB 對不上。
+  //   2. 更陰:Drizzle 把 ${table.column} 放進 SELECT 欄位時會「拿掉表前綴」(渲成裸 `id`),
+  //      於是子查詢 WHERE customerProfileId = `id` 的 id 被最內層 customerInteractions.id
+  //      (該表自己有 id)吃掉 → 關聯斷。orderBy 情境卻帶前綴,就成了 monitor 看到的
+  //      「一份無前綴、一份有前綴,兩者對不上 → 500」。
+  // 因此欄位寫成 raw 全限定字面(`customerProfiles`.`x` / `customerInteractions`.`x`),不用
+  // ${...} 插值(插值在 select 欄位會掉前綴);.as("lastContact") 明確給別名,ORDER BY 直接用
+  // 別名 lastContact —— 全程只一份 GREATEST。口徑仍與 guestList 的 GREATEST 語意一致。
   const lastContactSql = sql<Date>`GREATEST(
-        COALESCE(${customerProfiles.lastInboundAt}, ${customerProfiles.createdAt}),
+        COALESCE(\`customerProfiles\`.\`lastInboundAt\`, \`customerProfiles\`.\`createdAt\`),
         COALESCE(
-          (SELECT MAX(${customerInteractions.createdAt}) FROM ${customerInteractions}
-            WHERE ${customerInteractions.customerProfileId} = ${customerProfiles.id}
-              AND ${customerInteractions.direction} = 'outbound'),
-          ${customerProfiles.createdAt}
+          (SELECT MAX(\`customerInteractions\`.\`createdAt\`) FROM \`customerInteractions\`
+            WHERE \`customerInteractions\`.\`customerProfileId\` = \`customerProfiles\`.\`id\`
+              AND \`customerInteractions\`.\`direction\` = 'outbound'),
+          \`customerProfiles\`.\`createdAt\`
         )
-      )`;
+      )`.as("lastContact");
   return drizzleDb
     .select({
       status: customerProfiles.status,
       lastInboundAt: customerProfiles.lastInboundAt,
       jeffViewedAt: customerProfiles.jeffViewedAt,
-      // ⛔ TiDB 雷:lastContactSql 的 GREATEST 內含關聯子查詢(引用外層 ${customerProfiles.id})。
-      // 只放在 ORDER BY、沒被 SELECT 時,TiDB 解析不到外層欄位 → ER_BAD_FIELD_ERROR
-      // Unknown column 'customerprofiles.id',整條查詢每次 500(guestList 因有 select 才沒炸)。
-      // 見 docs/agent/30-templates.md 通用地雷第四條。lastContact 下方不使用,純為讓查詢合法。
+      // 純為讓 ORDER BY lastContact 有別名可指;JS 端不使用此值。
       lastContact: lastContactSql,
     })
     .from(customerProfiles)
@@ -181,7 +189,7 @@ export async function runGuestUnreadRankingQuery(
           )`,
       ),
     )
-    .orderBy(desc(lastContactSql))
+    .orderBy(sql`lastContact desc`)
     .limit(200);
 }
 

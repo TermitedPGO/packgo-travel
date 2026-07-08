@@ -43,13 +43,24 @@
   gte 誤判「沒有新列」= 假失敗。比較基準一律先 `Math.floor(ms/1000)*1000` 取整到
   秒、再視情況留 1-2 秒餘裕(2026-07-06 weeklyCanary 實案:互動 13:00:00 落庫、
   sinceMs=13:00:00.xxx,兩項檢查全誤報失敗;白天單測不帶毫秒也測不出來)。
-- TiDB 關聯子查詢必須同時在 SELECT:凡在 ORDER BY(或其他子句)放一個「內含關聯子查詢
-  引用外層 table 欄位」的表達式(如 `GREATEST(..., (SELECT MAX(x) ... WHERE t.id = outer.id))`),
-  該表達式或它引用的外層欄位必須也出現在 SELECT list,否則 TiDB 解析不到外層欄位、報
-  `ER_BAD_FIELD_ERROR Unknown column 'outer.id'`,整條查詢每次 500(2026-07-07 hotfix 實案:
-  admin.customerUnreadCount guest 臂 lastContactSql 只在 ORDER BY 沒 select,自 v794 起每次 500;
-  姊妹 guestList 因為 select 了 customerProfiles.id + 同表達式才沒炸)。修法:把該表達式
-  select 成一個欄位再 ORDER BY(本機無 DATABASE_URL 測不到 SQL 方言,必附 prod 探針或審查佐證)。
+- TiDB + Drizzle 關聯子查詢排序(v799 回爐後的完整版,取代舊「只要 select 就好」):凡要
+  「用一個內含關聯子查詢(`... WHERE inner.fk = outer.id`)的表達式排序」(如
+  `GREATEST(..., (SELECT MAX(x) FROM inner WHERE inner.fk = outer.id))`),正確形狀只有一種:
+  (a) 表達式**整支只渲染一份**,欄位**全程帶完整表前綴**(裸 `\`inner\`.\`fk\` = \`outer\`.\`id\``);
+  (b) `.as("alias")` 明確給別名 select 出來;(c) `ORDER BY alias`,**絕不**在 orderBy 再展開表達式。
+  兩個會 500 / 排序錯的坑(都被此形狀避開):
+  1. `orderBy(desc(exprSql))` 會在 ORDER BY **再展開一份** GREATEST → 同運算式渲染兩次,TiDB 對不上。
+  2. Drizzle 把 `${table.column}` 放進 **SELECT 欄位**時會**掉表前綴**(渲成裸 `\`id\``),子查詢
+     `WHERE fk = \`id\`` 的 id 被最內層表的 id 吃掉 → 關聯斷;同表達式在 orderBy 情境卻帶前綴 →
+     「一份無前綴、一份有前綴,兩者對不上 → 500」。故欄位要寫 **raw 全限定字面**,不用 `${...}` 插值。
+  實案:admin.customerUnreadCount guest 臂 lastContactSql。v794 起 500;第一次 hotfix(ed83709)
+  誤以為「補進 select 即可」→ v799 仍 500(正是上面兩坑)。第二次(本回爐)才用 (a)(b)(c) 修好。
+- ⛑ 元規則:**修 SQL 方言問題的 commit,修法本身必須先驗證過「渲染出來的 SQL 形狀」**,不能只
+  憑推理(本機無 DATABASE_URL 測不到方言,推理已連錯兩次)。最低成本本地驗法:把 query build 到
+  `.orderBy()` 後呼叫 `.toSQL().sql` 印出真實 SQL(用 `drizzle-orm/mysql-core` 的 `QueryBuilder` 免連線),
+  斷言 GREATEST 只一份、別名有 `as`、關聯 WHERE 用 `outer.id` 全限定。能上 prod TiDB 唯讀跑一次形狀最好。
+  這是 hardening Wave 2「EXPLAIN 彩排自動化」要接管的事;至 2026-07-07 已是第四口(前三:0112 migration
+  breakpoint、raw sql<Date> naive 字串、秒級截斷、本條 ORDER BY 關聯子查詢)。
 
 驗收條件(逐條驗,附證據):
 - tsc --noEmit 0 錯(OOM 時 NODE_OPTIONS="--max-old-space-size=6144")
