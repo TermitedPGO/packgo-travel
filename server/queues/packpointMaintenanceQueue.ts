@@ -32,6 +32,7 @@ import { users, bookings, pointsTransactions } from "../../drizzle/schema";
 import { and, eq, gte, lt, sql, isNotNull, isNull, or } from "drizzle-orm";
 import { awardPackpoint, deductPackpoint } from "../_core/packpoint";
 import { notifyOwner } from "../_core/notification";
+import { wireWorkerFunnel } from "../_core/errorFunnel";
 
 const QUEUE_NAME = "packpoint-maintenance";
 
@@ -165,6 +166,8 @@ export function initPackpointMaintenanceWorker() {
       content: `Error: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
     }).catch((e) => console.error("[notifyOwner] dispatch failed:", e));
   });
+
+  wireWorkerFunnel(_worker, QUEUE_NAME);
 
   console.log("✅ Packpoint maintenance worker initialized");
   return _worker;

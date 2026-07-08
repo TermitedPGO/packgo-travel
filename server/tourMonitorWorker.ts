@@ -10,6 +10,7 @@ import { redisBullMQ } from "./redis";
 import { TourMonitorJobData, TourMonitorJobResult } from "./queue";
 import { runMonitorCycle } from "./services/tourMonitorService";
 import { notifyOwner } from "./_core/notification";
+import { wireWorkerFunnel } from "./_core/errorFunnel";
 
 export const tourMonitorWorker = new Worker<TourMonitorJobData, TourMonitorJobResult>(
   "tour-monitor",
@@ -66,5 +67,7 @@ tourMonitorWorker.on("failed", (job, err) => {
 tourMonitorWorker.on("error", (err) => {
   console.error("[TourMonitorWorker] Worker error:", err);
 });
+
+wireWorkerFunnel(tourMonitorWorker, "tour-monitor");
 
 console.log("✅ Tour monitor worker initialized");

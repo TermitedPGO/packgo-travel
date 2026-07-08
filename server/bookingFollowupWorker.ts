@@ -25,6 +25,7 @@ import {
   BookingFollowupJobResult,
 } from "./queue";
 import { notifyOwner } from "./_core/notification";
+import { wireWorkerFunnel } from "./_core/errorFunnel";
 
 // Code-review v2 follow-up: if Puppeteer breaks for a reason that isn't
 // transient (template HTML bug, library upgrade regression, R2 outage),
@@ -206,5 +207,7 @@ bookingFollowupWorker.on("failed", (job, err) => {
     content: `Error: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
   }).catch((e) => console.error("[notifyOwner] dispatch failed:", e));
 });
+
+wireWorkerFunnel(bookingFollowupWorker, "booking-followup");
 
 console.log("✅ Booking followup worker initialized");

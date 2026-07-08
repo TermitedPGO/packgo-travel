@@ -19,6 +19,7 @@ import {
   getActiveSubscribers,
   getTourById,
 } from "./db";
+import { wireWorkerFunnel } from "./_core/errorFunnel";
 
 // ── Worker ─────────────────────────────────────────────────
 
@@ -203,5 +204,7 @@ marketingWorker.on("failed", (job, err) => {
 marketingWorker.on("error", (err) => {
   console.error("[MarketingWorker] Worker error:", err);
 });
+
+wireWorkerFunnel(marketingWorker, "marketing");
 
 console.log("✅ Marketing worker initialized");

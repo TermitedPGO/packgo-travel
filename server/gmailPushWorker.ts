@@ -37,6 +37,7 @@ import { eq } from "drizzle-orm";
 import { notifyOwner } from "./_core/notification";
 import { handleIntegrationPollError } from "./_core/gmailAuthFailure";
 import { createChildLogger } from "./_core/logger";
+import { wireWorkerFunnel } from "./_core/errorFunnel";
 
 const log = createChildLogger({ module: "gmailPushWorker" });
 
@@ -86,6 +87,8 @@ gmailPushWorker.on("failed", (job, err) => {
     "[gmailPushWorker] push job failed",
   );
 });
+
+wireWorkerFunnel(gmailPushWorker, "gmail-push");
 
 // ──────────────────────────────────────────────────────────────────────────
 // Worker 2 — gmail-watch-renew (daily re-arm of users.watch)
@@ -198,5 +201,7 @@ gmailWatchRenewWorker.on("failed", (job, err) => {
     content: `Error: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
   }).catch((e) => log.error({ err: e }, "[notifyOwner] dispatch failed"));
 });
+
+wireWorkerFunnel(gmailWatchRenewWorker, "gmail-watch-renew");
 
 log.info({}, "✅ Gmail push + watch-renew workers initialized");

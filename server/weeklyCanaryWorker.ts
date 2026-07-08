@@ -21,6 +21,7 @@ import { redisBullMQ } from "./redis";
 import type { WeeklyCanaryJobData, WeeklyCanaryJobResult } from "./queue";
 import { getDb } from "./db";
 import { runWeeklyCanary } from "./_core/weeklyCanary";
+import { wireWorkerFunnel } from "./_core/errorFunnel";
 
 /** Same loopback convention as index.ts's bot-prerender origin
  *  (http://127.0.0.1:${PORT}) — the canary is the server calling itself over
@@ -51,5 +52,7 @@ export const weeklyCanaryWorker = new Worker<WeeklyCanaryJobData, WeeklyCanaryJo
 weeklyCanaryWorker.on("failed", (job, err) => {
   console.error(`[WeeklyCanaryWorker] Job ${job?.id} failed:`, err);
 });
+
+wireWorkerFunnel(weeklyCanaryWorker, "weekly-canary");
 
 console.log("✅ Weekly canary worker initialized");

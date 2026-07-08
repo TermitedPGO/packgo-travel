@@ -584,6 +584,12 @@ async function ingestFreshMessages(
   // thread only trigger a single (idempotent) thread sync this cycle.
   const syncedThreads = new Set<string>();
 
+  // Wave1 Block B (flood gate, 2026-07-08) — 逐信失敗卡的粒度保留(Ann Yuan 事故
+  // 的教訓:絕不能吞卡),但一輪失敗信件數 > 5 時逐封即時貼卡會對 Jeff 的收件匣
+  // 洪水轟炸。改成:失敗時只先記錄,迴圈跑完後一次決定要「逐封貼卡」還是「聚合成
+  // 一張卡」。errorFunnel 的去重機制不適用於這裡 —— 刻意不接。
+  const failedThisRun: Array<{ msg: GmailMessageSummary; error: unknown }> = [];
+
   for (const msg of customerEmails) {
     try {
       const ran = await processWithMessageLock(msg.id, () =>
@@ -617,17 +623,34 @@ async function ingestFreshMessages(
         "[gmailPipeline] Failed thread",
       );
       // hotfix (P0, Ann Yuan 事故):真實寄件人(已過 own-email/noise 過濾)的信處理失敗
-      // 不能再對 Jeff 靜默 —— 浮一張 high 卡讓人工看。best-effort:貼卡失敗只 log,不再
-      // 拖垮這一輪(其餘信照跑)。
+      // 不能再對 Jeff 靜默。卡片本身留到迴圈跑完後才貼(見下方 flood gate),這裡只記錄。
+      failedThisRun.push({ msg, error: e });
+    }
+  }
+
+  // flood gate: ≤5 封失敗 → 逐封各自一張卡(行為與 hotfix 前相同,只是時機延後到
+  // 迴圈跑完)。>5 封 → 收斂成一張聚合卡,避免刷屏轟炸 Jeff 的收件匣。
+  if (failedThisRun.length > 0 && failedThisRun.length <= 5) {
+    for (const f of failedThisRun) {
       try {
         const { notifyAgentMessage } = await import("../../_core/agentNotify");
-        await notifyAgentMessage(buildIntakeFailureCard(msg, e));
+        await notifyAgentMessage(buildIntakeFailureCard(f.msg, f.error));
       } catch (cardErr) {
         log.error(
-          { err: cardErr, messageId: msg.id },
+          { err: cardErr, messageId: f.msg.id },
           "[gmailPipeline] failed to post intake-failure card",
         );
       }
+    }
+  } else if (failedThisRun.length > 5) {
+    try {
+      const { notifyAgentMessage } = await import("../../_core/agentNotify");
+      await notifyAgentMessage(buildIntakeFailureFloodCard(failedThisRun));
+    } catch (cardErr) {
+      log.error(
+        { err: cardErr, count: failedThisRun.length },
+        "[gmailPipeline] failed to post intake-failure flood card",
+      );
     }
   }
 
@@ -810,6 +833,40 @@ export function buildIntakeFailureCard(
       `錯誤:${errMsg}\n` +
       `gmail messageId:${msg.id}`,
     context: { gmailMessageId: msg.id, from: msg.from, subject: msg.subject ?? null, error: errMsg },
+  };
+}
+
+/**
+ * Wave1 Block B(洪水閘, 2026-07-08):同一輪(同一次 ingestFreshMessages 呼叫)失敗信件
+ * 數 > 5 封時,不逐封貼卡(對 Jeff 的收件匣是噪音轟炸),改貼這張聚合卡 —— 逐一列出每封
+ * 信的 msgId + 寄件人(+ 錯誤摘要),只呼叫一次 notifyAgentMessage。純函式,可單元測。
+ * 注意:這不是接 errorFunnel 的去重 —— 那個機制不適用在這條路徑(刻意)。
+ */
+export function buildIntakeFailureFloodCard(
+  failures: Array<{ msg: { id: string; from: string; subject?: string | null }; error: unknown }>,
+): NotifyAgentMessageArgs {
+  const lines = failures.map(({ msg, error }) => {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    return `- ${msg.id} | ${msg.from} | ${msg.subject || "(無主旨)"} | ${errMsg}`;
+  });
+  return {
+    agentName: "gmail-intake",
+    messageType: "alert",
+    priority: "high",
+    title: `${failures.length} 封客人來信處理失敗(已聚合)`.slice(0, 200),
+    body:
+      `這一輪有 ${failures.length} 封信處理失敗,已歸檔到卡片但 AI 分類/摘要沒有跑成功,` +
+      `請人工逐一打開看一下再手動回。為避免洪水刷屏,以下聚合成一張卡:\n\n` +
+      lines.join("\n"),
+    context: {
+      count: failures.length,
+      failures: failures.map(({ msg, error }) => ({
+        gmailMessageId: msg.id,
+        from: msg.from,
+        subject: msg.subject ?? null,
+        error: error instanceof Error ? error.message : String(error),
+      })),
+    },
   };
 }
 

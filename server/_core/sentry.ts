@@ -30,6 +30,15 @@
  */
 
 import * as Sentry from "@sentry/node";
+// 2026-07 Wave1 Block B — the trpc onError noise gate (_core/index.ts) now
+// shares this exact signature list via isKnownInfraNoise (see
+// ./infraNoise.ts docstring for the divergence incident this prevents).
+// Sourcing ignoreErrors/beforeSend from the same constant/function here
+// means the two filters can no longer silently drift apart again. Zero
+// extra import risk — infraNoise.ts is a dependency-free leaf module (no
+// logger, no db), so it doesn't reintroduce the circular-dependency problem
+// documented above (logger.ts → sentry bridge → back to sentry.ts).
+import { INFRA_NOISE_MESSAGE_SUBSTRINGS, isKnownInfraNoise } from "./infraNoise";
 
 let initialized = false;
 
@@ -84,37 +93,16 @@ export function initSentry(): void {
     // the SIGTERM graceful-shutdown handler in _core/index.ts — that
     // reduces *occurrence*, this is belt-and-suspenders for whatever
     // slips past graceful drain (genuine network blips, etc.).
-    ignoreErrors: [
-      "write EPIPE",
-      "read ECONNRESET",
-      "Client network socket disconnected",
-      // 2026-05-26: prevent inbox storms from known-handled infra signals.
-      // Each of these is already retry-loop-aware in invokeLLM / circuit
-      // breaker / BullMQ stalled-job recovery. They are noise, not bugs.
-      "LLM_RATE_LIMITED",      // 429 retries exhausted → caller defers
-      "LLM_CIRCUIT_OPEN",      // breaker open during Anthropic outage
-      "LLM_TIMEOUT",           // 120s ceiling — retried elsewhere
-      "could not renew lock",  // BullMQ lock renew when machine under load
-      "rate_limit_error",      // raw Anthropic 429 phrasing (defensive)
-    ],
+    // 2026-05-26: prevent inbox storms from known-handled infra signals.
+    // Each of these is already retry-loop-aware in invokeLLM / circuit
+    // breaker / BullMQ stalled-job recovery. They are noise, not bugs.
+    // List lives in ./infraNoise.ts — shared with the trpc onError gate.
+    ignoreErrors: [...INFRA_NOISE_MESSAGE_SUBSTRINGS],
     beforeSend(event, hint) {
-      const err = hint.originalException as
-        | { code?: string; rateLimited?: boolean; circuitOpen?: boolean; message?: string }
-        | undefined;
-      if (err?.code === "EPIPE" || err?.code === "ECONNRESET") return null;
       // Anthropic rate-limit + circuit-open are infrastructure pressure
       // signals, already retried via invokeLLM's exponential backoff.
       // Sentry-grade alerts here are noise — emails flood Jeff.
-      if (err?.rateLimited === true || err?.circuitOpen === true) return null;
-      const msg = err?.message ?? "";
-      if (
-        msg.includes("LLM_RATE_LIMITED") ||
-        msg.includes("LLM_CIRCUIT_OPEN") ||
-        msg.includes("rate_limit_error") ||
-        msg.includes("could not renew lock")
-      ) {
-        return null;
-      }
+      if (isKnownInfraNoise(hint.originalException)) return null;
       return event;
     },
   });

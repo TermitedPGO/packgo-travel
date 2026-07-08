@@ -8,6 +8,7 @@ import type {
   CaseLearningBacklogJobResult,
 } from "./queue";
 import { runCaseLearningBacklogScan } from "./_core/caseLearning";
+import { wireWorkerFunnel } from "./_core/errorFunnel";
 
 export const caseLearningBacklogWorker = new Worker<
   CaseLearningBacklogJobData,
@@ -30,5 +31,7 @@ export const caseLearningBacklogWorker = new Worker<
 caseLearningBacklogWorker.on("failed", (job, err) => {
   console.error(`[CaseLearningBacklogWorker] Job ${job?.id} failed:`, err);
 });
+
+wireWorkerFunnel(caseLearningBacklogWorker, "case-learning-backlog");
 
 console.log("✅ Case-learning backlog worker initialized");

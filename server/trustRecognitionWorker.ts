@@ -22,6 +22,7 @@ import type {
   TrustRecognitionJobResult,
 } from "./queue";
 import { notifyOwner } from "./_core/notification";
+import { wireWorkerFunnel } from "./_core/errorFunnel";
 
 export const trustRecognitionWorker = new Worker<
   TrustRecognitionJobData,
@@ -107,5 +108,7 @@ trustRecognitionWorker.on("failed", (job, err) => {
     content: `Error: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
   }).catch((e) => console.error("[notifyOwner] dispatch failed:", e));
 });
+
+wireWorkerFunnel(trustRecognitionWorker, "trust-recognition");
 
 console.log("✅ Trust recognition worker initialized");

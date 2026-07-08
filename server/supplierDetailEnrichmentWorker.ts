@@ -41,10 +41,11 @@ import { enrichLionProduct } from "./services/supplierSync/lionDetail";
 import { enrichUvProduct } from "./services/supplierSync/uvDetail";
 import { upsertProductDetail } from "./services/supplierSync/sharedDetail";
 import { createChildLogger } from "./_core/logger";
+import { wireWorkerFunnel } from "./_core/errorFunnel";
 
 const log = createChildLogger({ module: "supplierDetailEnrichmentWorker" });
 
-new Worker<SupplierEnrichmentJobData, SupplierEnrichmentJobResult>(
+const supplierDetailEnrichmentWorker = new Worker<SupplierEnrichmentJobData, SupplierEnrichmentJobResult>(
   "supplier-detail-enrichment",
   async (job) => {
     // Daily-cron sentinel → discover products needing enrichment and enqueue
@@ -94,6 +95,8 @@ new Worker<SupplierEnrichmentJobData, SupplierEnrichmentJobResult>(
   },
   { connection: redisBullMQ, concurrency: 5 },
 );
+
+wireWorkerFunnel(supplierDetailEnrichmentWorker, "supplier-detail-enrichment");
 
 async function resolveSupplierId(code: string): Promise<number | null> {
   const db = await getDb();

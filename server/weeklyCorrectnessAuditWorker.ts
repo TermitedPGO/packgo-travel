@@ -18,6 +18,7 @@ import type {
 } from "./queue";
 import { getDb } from "./db";
 import { runWeeklyCorrectnessAudit } from "./_core/weeklyCorrectnessAudit";
+import { wireWorkerFunnel } from "./_core/errorFunnel";
 
 export const weeklyCorrectnessAuditWorker = new Worker<
   WeeklyCorrectnessAuditJobData,
@@ -42,5 +43,7 @@ export const weeklyCorrectnessAuditWorker = new Worker<
 weeklyCorrectnessAuditWorker.on("failed", (job, err) => {
   console.error(`[WeeklyCorrectnessAuditWorker] Job ${job?.id} failed:`, err);
 });
+
+wireWorkerFunnel(weeklyCorrectnessAuditWorker, "weekly-correctness-audit");
 
 console.log("✅ Weekly correctness audit worker initialized");

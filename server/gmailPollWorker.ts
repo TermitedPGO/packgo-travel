@@ -18,6 +18,7 @@ import { gmailIntegration } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { notifyOwner } from "./_core/notification";
 import { handleIntegrationPollError } from "./_core/gmailAuthFailure";
+import { wireWorkerFunnel } from "./_core/errorFunnel";
 
 export const gmailPollWorker = new Worker<GmailPollJobData, GmailPollJobResult>(
   "gmail-poll",
@@ -136,5 +137,7 @@ gmailPollWorker.on("failed", (job, err) => {
     content: `Error: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
   }).catch((e) => console.error("[notifyOwner] dispatch failed:", e));
 });
+
+wireWorkerFunnel(gmailPollWorker, "gmail-poll");
 
 console.log("✅ Gmail poll worker initialized");

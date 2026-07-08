@@ -17,6 +17,7 @@ import { Worker } from "bullmq";
 import { redisBullMQ } from "./redis";
 import { runMonthlyDraftEval } from "./_core/draftEval";
 import { notifyOwner } from "./_core/notification";
+import { wireWorkerFunnel } from "./_core/errorFunnel";
 import type { DraftEvalJobData, DraftEvalJobResult } from "./queue";
 
 export const draftEvalWorker = new Worker<DraftEvalJobData, DraftEvalJobResult>(
@@ -59,5 +60,7 @@ draftEvalWorker.on("failed", (job, err) => {
     content: `Error: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
   }).catch((e) => console.error("[notifyOwner] dispatch failed:", e));
 });
+
+wireWorkerFunnel(draftEvalWorker, "draft-eval");
 
 console.log("✅ Draft eval worker started");

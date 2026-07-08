@@ -37,6 +37,7 @@ import { getDb } from "../db";
 import { tours as toursTable, llmUsageLogs } from "../../drizzle/schema";
 import { and, eq, gte, isNull, like, or, sql } from "drizzle-orm";
 import { createChildLogger } from "../_core/logger";
+import { wireWorkerFunnel } from "../_core/errorFunnel";
 
 const log = createChildLogger({ module: "priorityRewriteCron" });
 
@@ -275,6 +276,8 @@ export function startPriorityRewriteCronWorker(): Worker<
       "[priorityRewriteCron] run failed",
     );
   });
+
+  wireWorkerFunnel(worker, QUEUE_NAME);
 
   console.log("✅ Priority rewrite cron worker initialized");
   return worker;

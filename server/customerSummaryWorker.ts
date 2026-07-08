@@ -15,6 +15,7 @@ import type {
 } from "./queue";
 import { runCustomerSummaryScan, refreshSummaryForProfile } from "./_core/customerAiSummary";
 import { backfillMissingPreferences } from "./_core/customerPreferenceExtractor";
+import { wireWorkerFunnel } from "./_core/errorFunnel";
 
 export const customerSummaryWorker = new Worker<
   CustomerSummaryJobData,
@@ -64,5 +65,7 @@ export const customerSummaryWorker = new Worker<
 customerSummaryWorker.on("failed", (job, err) => {
   console.error(`[CustomerSummaryWorker] Job ${job?.id} failed:`, err);
 });
+
+wireWorkerFunnel(customerSummaryWorker, "customer-summary");
 
 console.log("✅ Customer summary worker initialized");

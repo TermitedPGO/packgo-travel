@@ -14,6 +14,7 @@ import { redisBullMQ } from "../redis";
 import { sendQuoteFollowUpEmail, QuoteFollowUpData } from "../email";
 import * as db from "../db";
 import { notifyOwner } from "../_core/notification";
+import { wireWorkerFunnel } from "../_core/errorFunnel";
 
 const QUEUE_NAME = "quote-followup";
 
@@ -141,6 +142,7 @@ export function initQuoteFollowUpWorker() {
       content: `Error: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
     }).catch((e) => console.error("[notifyOwner] dispatch failed:", e));
   });
+  wireWorkerFunnel(_worker, QUEUE_NAME);
   console.log("✅ Quote follow-up worker initialized");
   return _worker;
 }

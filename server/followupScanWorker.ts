@@ -14,6 +14,7 @@ import type { FollowupScanJobData, FollowupScanJobResult } from "./queue";
 import { getDb } from "./db";
 import { runFollowupScan } from "./_core/followupScan";
 import { runFollowupDraftScan } from "./agents/autonomous/followupDraftProducer";
+import { wireWorkerFunnel } from "./_core/errorFunnel";
 
 export const followupScanWorker = new Worker<FollowupScanJobData, FollowupScanJobResult>(
   "followup-scan",
@@ -42,5 +43,7 @@ export const followupScanWorker = new Worker<FollowupScanJobData, FollowupScanJo
 followupScanWorker.on("failed", (job, err) => {
   console.error(`[FollowupScanWorker] Job ${job?.id} failed:`, err);
 });
+
+wireWorkerFunnel(followupScanWorker, "followup-scan");
 
 console.log("✅ Followup scan worker initialized");

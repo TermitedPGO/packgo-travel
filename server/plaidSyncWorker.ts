@@ -22,6 +22,7 @@ import {
 import { syncAllActiveLinkedAccounts } from "./services/plaidSyncService";
 import { notifyOwner } from "./_core/notification";
 import { plaidIsConfigured } from "./_core/plaid";
+import { wireWorkerFunnel } from "./_core/errorFunnel";
 
 export const plaidSyncWorker = new Worker<
   PlaidDailySyncJobData,
@@ -133,5 +134,7 @@ plaidSyncWorker.on("failed", (job, err) => {
 plaidSyncWorker.on("error", (err) => {
   console.error("[plaidSyncWorker] worker error:", err);
 });
+
+wireWorkerFunnel(plaidSyncWorker, "plaid-daily-sync");
 
 console.log("✅ Plaid sync worker initialized");

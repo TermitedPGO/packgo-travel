@@ -12,6 +12,7 @@ import { rewriteSupplierTourInPlace } from "./services/supplierRewriteService";
 import { translateTour, Language } from "./translation";
 import { notifyOwner } from "./_core/notification";
 import { captureException } from "./_core/sentry";
+import { wireWorkerFunnel } from "./_core/errorFunnel";
 
 /**
  * Worker for processing tour generation jobs
@@ -189,6 +190,8 @@ tourGenerationWorker.on("error", (err) => {
   captureException(err, { tags: { worker: "tour-generation", phase: "worker-error" } });
 });
 
+wireWorkerFunnel(tourGenerationWorker, "tour-generation");
+
 console.log("✅ Tour generation worker initialized (optimized Redis polling)");
 
 // ============================================================
@@ -254,6 +257,8 @@ tourTranslationWorker.on("error", (err) => {
   console.error("❌ Translation worker error:", err);
   captureException(err, { tags: { worker: "tour-translation", phase: "worker-error" } });
 });
+
+wireWorkerFunnel(tourTranslationWorker, "tour-translation");
 
 console.log("✅ Tour translation worker initialized");
 

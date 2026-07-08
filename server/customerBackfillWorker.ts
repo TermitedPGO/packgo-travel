@@ -21,6 +21,7 @@ import { gmailIntegration } from "../drizzle/schema";
 import { buildGmailClient } from "./_core/gmail";
 import { backfillCustomerByEmail } from "./_core/customerBackfill";
 import type { CustomerBackfillJobData, CustomerBackfillJobResult } from "./queue";
+import { wireWorkerFunnel } from "./_core/errorFunnel";
 
 export const customerBackfillWorker = new Worker<
   CustomerBackfillJobData,
@@ -72,5 +73,7 @@ export const customerBackfillWorker = new Worker<
 customerBackfillWorker.on("failed", (job, err) => {
   console.error(`[CustomerBackfillWorker] job ${job?.id} failed:`, err);
 });
+
+wireWorkerFunnel(customerBackfillWorker, "customer-backfill");
 
 console.log("✅ Customer backfill worker initialized");

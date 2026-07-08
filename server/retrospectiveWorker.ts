@@ -21,6 +21,7 @@ import {
   formatRetrospectiveAsMessage,
 } from "./agents/autonomous/selfRetrospective";
 import { notifyOwner } from "./_core/notification";
+import { wireWorkerFunnel } from "./_core/errorFunnel";
 import type {
   RetrospectiveJobData,
   RetrospectiveJobResult,
@@ -189,5 +190,7 @@ retrospectiveWorker.on("failed", (job, err) => {
     content: `Error: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
   }).catch((e) => console.error("[notifyOwner] dispatch failed:", e));
 });
+
+wireWorkerFunnel(retrospectiveWorker, "retrospective");
 
 console.log("✅ Retrospective worker started");

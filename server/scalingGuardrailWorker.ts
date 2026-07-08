@@ -20,10 +20,11 @@ import {
   checkLlmBudgetAndAlert,
 } from "./services/scalingGuardrailsService";
 import { createChildLogger } from "./_core/logger";
+import { wireWorkerFunnel } from "./_core/errorFunnel";
 
 const log = createChildLogger({ module: "scalingGuardrailWorker" });
 
-new Worker<ScalingGuardrailJobData, ScalingGuardrailJobResult>(
+const scalingGuardrailWorker = new Worker<ScalingGuardrailJobData, ScalingGuardrailJobResult>(
   "scaling-guardrails",
   async (job) => {
     log.info({ jobId: job.id, trigger: job.data.triggeredBy }, "[scaling] start");
@@ -54,6 +55,8 @@ new Worker<ScalingGuardrailJobData, ScalingGuardrailJobResult>(
   },
   { connection: redisBullMQ, concurrency: 1 },
 );
+
+wireWorkerFunnel(scalingGuardrailWorker, "scaling-guardrails");
 
 void scalingGuardrailQueue;
 console.log("✅ Scaling guardrail worker initialized");

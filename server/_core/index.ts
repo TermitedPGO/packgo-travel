@@ -32,6 +32,10 @@ import { initializeGmailOAuth } from "../gmailOAuth";
 // imported below). Middleware is registered inside startServer() below.
 import { logger } from "./logger";
 import { correlationIdMiddleware } from "./correlationId";
+// Wave1 Block B — error funnel: guarantees admin tRPC 500s and cron/worker
+// failures actually surface to Jeff instead of dying silently in a catch.
+import { reportFunnelError } from "./errorFunnel";
+import { isKnownInfraNoise } from "./infraNoise";
 import { shutdownPool, warmUp } from "./puppeteerPool";
 import pinoHttp from "pino-http";
 import "../worker"; // Initialize BullMQ worker
@@ -1859,6 +1863,44 @@ async function startServer() {
     createExpressMiddleware({
       router: appRouter,
       createContext,
+      // Wave1 Block B — error funnel 掛鉤:admin tRPC 路由的未預期錯誤要保證被
+      // Jeff 看到(Ann 事故根因是「系統壞了但只有客人來信才會被發現」)。onError
+      // 是 @trpc/server express adapter 的標準參數,任何 procedure 拋錯都會呼叫。
+      onError(opts) {
+        const { error, type, path } = opts;
+
+        // 噪音閘 —— 只有 INTERNAL_SERVER_ERROR 才可能進漏斗,以下皆提前 return
+        // (等同「INTERNAL_SERVER_ERROR 以外全部不進」):
+        //   - FORBIDDEN: adminProcedure 擋非 admin,是預期的權限行為。
+        //   - UNAUTHORIZED: requireUser 擋未登入,同上,預期的權限行為。
+        //   - BAD_REQUEST: zod 輸入驗證失敗,是呼叫端資料問題,不是系統壞了。
+        //   - NOT_FOUND: 查詢不存在的資源,是預期的業務結果。
+        //   - TOO_MANY_REQUESTS: adminProcedure mutation rate limit,是設計好
+        //     的節流,不是事故(見 trpc.ts checkAdminMutationRateLimit)。
+        // 這個 if 用白名單寫法(只放行 INTERNAL_SERVER_ERROR),因此上面五種、以及
+        // 任何其他 tRPC 內建 code(PARSE_ERROR/BAD_GATEWAY/CONFLICT/...)都會被擋。
+        if (error.code !== "INTERNAL_SERVER_ERROR") return;
+
+        // 即使 code 是 INTERNAL_SERVER_ERROR,client abort / EPIPE / ECONNRESET
+        // 這類部署滾動重啟或客人中途關閉分頁造成的網路雜訊,以及 LLM_RATE_LIMITED
+        // / LLM_CIRCUIT_OPEN / LLM_TIMEOUT / BullMQ lock-renew 這類已有自己
+        // retry/backoff 的基礎設施壓力訊號,都不算「系統壞了」。isKnownInfraNoise
+        // 是跟 sentry.ts(ignoreErrors / beforeSend)共用同一份訊號清單的函式
+        // (見 ./infraNoise.ts),避免漏斗和 Sentry 兩套過濾邏輯分岔各吹各的號 ——
+        // 2026-07 審查就抓到過一次分岔:這裡原本手抄了 EPIPE/ECONNRESET 卻漏抄
+        // LLM_* 那組,Anthropic outage 時會繞過去重演 inbox storm。TRPCError 常
+        // 把底層錯誤包在 .cause 裡(getTRPCErrorFromUnknown),所以同時查 error
+        // 本身跟 error.cause 兩個候選。
+        if (isKnownInfraNoise(error, error.cause)) return;
+
+        // 通過噪音閘 —— fire-and-forget,不 await,避免拖住 tRPC middleware 的
+        // 回應路徑(reportFunnelError 內部本身也永不 throw,.catch 是雙保險)。
+        reportFunnelError({
+          source: `trpc:${path ?? "unknown"}`,
+          err: error,
+          context: { type },
+        }).catch(() => {});
+      },
     })
   );
   // Bot-UA dynamic rendering — intercept crawler/AI-bot requests BEFORE the SPA
@@ -1884,12 +1926,22 @@ async function startServer() {
   try {
     const { cleanupZombieTasks } = await import('../agentActivityService');
     // Run cleanup immediately on startup
+    // Wave1 Block B: 跟 setInterval 那次接同一支漏斗,避免同一支函式兩個呼叫點
+    // 行為不一致(一個進漏斗、一個仍是黑洞)——派工單只點名 setInterval 那次,
+    // 但啟動時這次失敗一樣是「系統壞了但沒人知道」,同樣值得被看到。
     cleanupZombieTasks(30).then(count => {
       if (count > 0) logger.info({ count }, "[Startup] Cleaned up zombie task(s)");
-    }).catch(() => {});
+    }).catch((err) => {
+      reportFunnelError({ source: "cron:zombie-cleanup", err, context: { phase: "startup" } }).catch(() => {});
+    });
     // Then run every 10 minutes
     setInterval(() => {
-      cleanupZombieTasks(30).catch(() => {});
+      // Wave1 Block B — 原本是 `.catch(() => {})`,連 log 都沒有的黑洞。改接錯誤
+      // 漏斗:失敗會被貼卡(去重後)而不是完全消失。維持 continue 語意 —— 不
+      // await、不 throw,setInterval callback 依然是 fire-and-forget。
+      cleanupZombieTasks(30).catch((err) => {
+        reportFunnelError({ source: "cron:zombie-cleanup", err }).catch(() => {});
+      });
     }, 10 * 60 * 1000);
     logger.info("[Startup] Zombie task cleanup scheduler initialized (every 10 min, timeout 30 min)");
   } catch (err) {

@@ -16,6 +16,7 @@ import { redisBullMQ } from "../redis";
 import { sendAbandonmentRecoveryEmail } from "../email";
 import * as db from "../db";
 import { notifyOwner } from "../_core/notification";
+import { wireWorkerFunnel } from "../_core/errorFunnel";
 
 const QUEUE_NAME = "abandonment-recovery";
 const RECOVERY_DELAY_MS = 30 * 60 * 1000; // 30 minutes
@@ -189,6 +190,7 @@ export function initAbandonmentRecoveryWorker() {
       content: `Error: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
     }).catch((e) => console.error("[notifyOwner] dispatch failed:", e));
   });
+  wireWorkerFunnel(_worker, QUEUE_NAME);
   console.log("✅ Abandonment recovery worker initialized");
   return _worker;
 }

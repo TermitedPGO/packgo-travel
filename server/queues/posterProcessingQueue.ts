@@ -20,6 +20,7 @@ import { posterAssets, posterPlatformCopies } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { processPosterFull } from "../_core/posterProcessor";
 import { notifyOwner } from "../_core/notification";
+import { wireWorkerFunnel } from "../_core/errorFunnel";
 
 const QUEUE_NAME = "poster-processing";
 
@@ -133,6 +134,8 @@ export function initPosterProcessingWorker() {
       content: `Poster asset ID: ${(job?.data as any)?.posterAssetId ?? "?"}\nError: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
     }).catch((e) => console.error("[notifyOwner] dispatch failed:", e));
   });
+
+  wireWorkerFunnel(_worker, QUEUE_NAME);
 
   console.log("✅ Poster processing worker initialized");
   return _worker;

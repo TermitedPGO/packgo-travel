@@ -18,6 +18,7 @@
 import { Queue, Worker, Job } from "bullmq";
 import { redisBullMQ } from "../redis";
 import { notifyOwner } from "../_core/notification";
+import { wireWorkerFunnel } from "../_core/errorFunnel";
 import {
   syncAllSuppliers,
   syncLionCatalog,
@@ -176,6 +177,8 @@ export function initSupplierSyncWorker(): Worker<SupplierSyncJob> {
       }).catch((e) => console.error("[notifyOwner] dispatch failed:", e));
     }
   });
+
+  wireWorkerFunnel(_worker, QUEUE_NAME);
 
   console.log("✅ Supplier sync worker initialized (concurrency=1)");
   return _worker;

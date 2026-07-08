@@ -31,6 +31,7 @@ import {
   insertCompetitorAlerts,
   updateCompetitorTourScrapeStatus,
 } from "./db";
+import { wireWorkerFunnel } from "./_core/errorFunnel";
 
 // ── Worker ─────────────────────────────────────────────────────
 
@@ -153,6 +154,8 @@ competitorMonitorWorker.on("failed", (job, err) => {
 competitorMonitorWorker.on("error", (err) => {
   console.error("❌ Competitor monitor worker error:", err);
 });
+
+wireWorkerFunnel(competitorMonitorWorker, "competitor-monitor");
 
 console.log("✅ Competitor monitor worker initialized");
 

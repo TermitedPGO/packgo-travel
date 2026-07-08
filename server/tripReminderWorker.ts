@@ -9,6 +9,7 @@ import { redisBullMQ } from "./redis";
 import { TripReminderJobData, TripReminderJobResult } from "./queue";
 import { runTripReminderScan, runPostTripReviewScan, runWinbackScan, runCheckinScan } from "./services/tripReminderService";
 import { notifyOwner } from "./_core/notification";
+import { wireWorkerFunnel } from "./_core/errorFunnel";
 
 export const tripReminderWorker = new Worker<TripReminderJobData, TripReminderJobResult>(
   "trip-reminder",
@@ -82,5 +83,7 @@ tripReminderWorker.on("failed", (job, err) => {
     content: `Error: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
   }).catch((e) => console.error("[notifyOwner] dispatch failed:", e));
 });
+
+wireWorkerFunnel(tripReminderWorker, "trip-reminder");
 
 console.log("✅ Trip reminder worker initialized");

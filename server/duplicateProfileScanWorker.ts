@@ -16,6 +16,7 @@ import type {
 } from "./queue";
 import { getDb } from "./db";
 import { runDuplicateProfileScan } from "./_core/duplicateProfileScan";
+import { wireWorkerFunnel } from "./_core/errorFunnel";
 
 export const duplicateProfileScanWorker = new Worker<
   DuplicateProfileScanJobData,
@@ -40,5 +41,7 @@ export const duplicateProfileScanWorker = new Worker<
 duplicateProfileScanWorker.on("failed", (job, err) => {
   console.error(`[DuplicateProfileScanWorker] Job ${job?.id} failed:`, err);
 });
+
+wireWorkerFunnel(duplicateProfileScanWorker, "duplicate-profile-scan");
 
 console.log("✅ Duplicate-profile scan worker initialized");
