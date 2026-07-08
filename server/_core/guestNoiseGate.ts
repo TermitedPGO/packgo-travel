@@ -95,7 +95,7 @@ export function guestNoiseSelectFragments(
         FROM ${customerInteractions} ci
         WHERE ci.customerProfileId = \`customerProfiles\`.\`id\`
           AND ci.direction = 'inbound'
-        ORDER BY ci.createdAt DESC
+        ORDER BY ci.createdAt DESC, ci.id DESC
         LIMIT 1
       )`,
   };

@@ -61,11 +61,18 @@ const KNOWN_NOISE_DOMAINS = new Set([
   "google.com", "youtube.com", "apple.com", "microsoft.com",
   "github.com", "notion.so", "slack.com",
   "robly.com", "constantcontact.com", "mailerlite.com",
+  // v803 (2026-07-08) — marketing / notification senders observed flooding the
+  // guest list this round (從 prod 實測 email 定域名). Root fix is the
+  // classification backfill (guestNoiseHygiene) + spam gate; these entries are
+  // the immediate TS stop-bleed for cards not yet reclassified or not labelled
+  // 'spam'. `.evite.com` domain-match also covers subdomains like mh1.evite.com.
+  "awin.com", "disneyshopping.com", "evite.com", "uptimerobot.com",
   // NOTE: these three only ever match DOMAIN forms (@noreply…/.noreply…) via
   // the loop below; noreply-class LOCALPARTS (noreply@united.com) are handled
   // by the isNoreplySender check at the top of isKnownNoise.
   "noreply", "no-reply", "donotreply",
-  "alerts@", "notifications@", "newsletter@", "digest@",
+  // localpart-prefix patterns (match "<prefix>@anything"): automated senders.
+  "alerts@", "notifications@", "newsletter@", "digest@", "onlinebanking@",
 ]);
 
 export function isKnownNoise(from: string): boolean {

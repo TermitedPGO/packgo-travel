@@ -1528,6 +1528,68 @@ async function startServer() {
     }
   });
 
+  // POST /api/admin/backfill-guest-classification (v803 — guest-list noise
+  //   eradication). Body: { mode: "dry_run"|"confirm", limit?: number }.
+  //   Re-classifies the LATEST inbound of guest cards that entered the list via
+  //   the lastInboundAt branch and are still unclassified, so the existing spam
+  //   gate can hide the marketing ones. dry_run reports the card count + LLM
+  //   calls; confirm stamps up to `limit` cards (default 80) — a large batch
+  //   stops for monitor review (re-run for the next batch). Idempotent.
+  app.post("/api/admin/backfill-guest-classification", async (req, res) => {
+    try {
+      const ip = await verifyInternalAuth(req, res, {
+        tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
+        rateLimitKey: "backfill-guest-classification",
+        rateLimitMax: 20,
+        windowSec: 3600,
+      });
+      if (!ip) return;
+      const { mode, limit } = req.body || {};
+      if (mode !== "dry_run" && mode !== "confirm") {
+        return res.status(400).json({ error: "mode must be 'dry_run' or 'confirm'" });
+      }
+      const { GUEST_BACKFILL_HARD_MAX, runGuestClassificationBackfill } = await import(
+        "./guestNoiseHygiene"
+      );
+      if (
+        limit !== undefined &&
+        (!Number.isInteger(limit) || limit < 1 || limit > GUEST_BACKFILL_HARD_MAX)
+      ) {
+        return res.status(400).json({
+          error: `limit must be an integer in [1, ${GUEST_BACKFILL_HARD_MAX}] when provided`,
+        });
+      }
+      const result = await runGuestClassificationBackfill(mode, { limit });
+      return res.json(result);
+    } catch (err) {
+      logger.error({ err }, "[admin/backfill-guest-classification] error");
+      return res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // POST /api/admin/guest-noise-hygiene-report (v803 — READ-ONLY). No mode; the
+  //   route writes nothing. Returns the bulk-block candidate stats: guest cards
+  //   whose every inbound is effective spam OR whose email hits isKnownNoise,
+  //   with a 10-row sample + a domain histogram (to curate KNOWN_NOISE_DOMAINS).
+  //   The monitor reads it and decides bulk-block separately.
+  app.post("/api/admin/guest-noise-hygiene-report", async (req, res) => {
+    try {
+      const ip = await verifyInternalAuth(req, res, {
+        tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
+        rateLimitKey: "guest-noise-hygiene-report",
+        rateLimitMax: 20,
+        windowSec: 3600,
+      });
+      if (!ip) return;
+      const { runGuestNoiseHygieneReport } = await import("./guestNoiseHygiene");
+      const result = await runGuestNoiseHygieneReport();
+      return res.json(result);
+    } catch (err) {
+      logger.error({ err }, "[admin/guest-noise-hygiene-report] error");
+      return res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   // POST /api/admin/imessage-check-known-phones (Phase1c — privacy gate)
   //   Headers: Authorization: Bearer <LOCAL_SCRIPT_TOKEN>
   //   Body: { phones: string[] }
