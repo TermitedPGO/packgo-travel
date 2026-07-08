@@ -283,3 +283,86 @@ describe("Ann-class guest visibility — inbound-only real customer (v800)", () 
     ).toBe(false);
   });
 });
+
+/**
+ * v802 noise gate (2026-07-07). v801's `OR lastInboundAt IS NOT NULL` readmitted
+ * historical NOISE cards (marketing / notification senders that emailed us and
+ * carry a lastInboundAt) — badge 99+, cockpit flooded. The fix gates the
+ * inbound-only branch through isNoiseOnlyGuest on ALL THREE surfaces. These two
+ * exercise the REAL guestList + customerUnreadCount code paths (not just the
+ * pure gate) with the three canonical fixtures, so a future refactor that drops
+ * the `.filter(...)` wiring fails here.
+ */
+function guestRow(o: Partial<Record<string, any>> = {}) {
+  return {
+    profileId: o.profileId ?? 1,
+    name: o.name ?? "Test Guest",
+    email: o.email ?? "x@example.com",
+    phone: o.phone ?? null,
+    status: o.status ?? "active",
+    // unread inbound: has an inbound, Jeff hasn't viewed → counts toward badge.
+    lastInboundAt: o.lastInboundAt ?? new Date("2026-07-05T10:00:00Z"),
+    jeffViewedAt: o.jeffViewedAt ?? null,
+    lastOutboundAt: o.lastOutboundAt ?? null,
+    createdAt: o.createdAt ?? new Date("2026-07-01T00:00:00Z"),
+    needsFollowup: o.needsFollowup ?? 0,
+    unread: o.unread ?? 1,
+    qualifiesViaContent: o.qualifiesViaContent ?? 0,
+    latestInboundIsSpam: o.latestInboundIsSpam ?? 0,
+  };
+}
+
+describe("v802 noise gate wired on list + badge (three fixtures)", () => {
+  let dbGetDbMock: ReturnType<typeof vi.fn>;
+  beforeEach(() => {
+    vi.resetModules();
+    dbGetDbMock = vi.fn();
+  });
+
+  const ann = guestRow({ profileId: 111, email: "ayuan@axt.com" }); // shown
+  const noise = guestRow({ profileId: 222, email: "alerts@chase.com" }); // hidden (known noise)
+  const spam = guestRow({
+    profileId: 333,
+    email: "customer@example.com",
+    latestInboundIsSpam: 1,
+  }); // hidden (spam)
+
+  it("guestList (list) drops inbound-only noise + spam, keeps Ann; includeHidden reveals them", async () => {
+    // guestList issues a single select → makeDbStub serves it from the FIRST arg.
+    const { db: dbStub } = makeDbStub([ann, noise, spam], []);
+    dbGetDbMock.mockResolvedValue(dbStub);
+    vi.doMock("../db", () => ({ getDb: dbGetDbMock }));
+
+    const { adminCustomersRouter } = await import("./adminCustomers");
+    const caller = (adminCustomersRouter as any).createCaller({
+      user: { id: 1, email: "jeff@packgo.com", role: "admin" },
+    });
+
+    const list = (await caller.guestList()) as any[];
+    expect(list.map((r) => r.email)).toEqual(["ayuan@axt.com"]);
+
+    // includeHidden brings noise/spam back (flagged) so Jeff can audit + bulk-block.
+    const { db: dbStub2 } = makeDbStub([ann, noise, spam], []);
+    dbGetDbMock.mockResolvedValue(dbStub2);
+    const all = (await caller.guestList({ includeHidden: true })) as any[];
+    expect(all).toHaveLength(3);
+    expect(
+      all.filter((r) => r.isNoise).map((r) => r.email).sort(),
+    ).toEqual(["alerts@chase.com", "customer@example.com"]);
+  });
+
+  it("badge (customerUnreadCount) counts only Ann among unread inbound-only guests, not noise/spam", async () => {
+    // registered select = call 1 (empty), guest select = call 2 (the fixtures).
+    const { db: dbStub } = makeDbStub([], [ann, noise, spam]);
+    dbGetDbMock.mockResolvedValue(dbStub);
+    vi.doMock("../db", () => ({ getDb: dbGetDbMock }));
+
+    const { adminCustomersRouter } = await import("./adminCustomers");
+    const caller = (adminCustomersRouter as any).createCaller({
+      user: { id: 1, email: "jeff@packgo.com", role: "admin" },
+    });
+
+    const { count } = await caller.customerUnreadCount();
+    expect(count).toBe(1);
+  });
+});

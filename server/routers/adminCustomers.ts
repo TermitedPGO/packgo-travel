@@ -29,6 +29,7 @@ import {
   includesInquiries,
 } from "./adminCustomersThread";
 import { isHiddenCustomer } from "./adminCustomersFilter";
+import { isNoiseOnlyGuest, guestNoiseSelectFragments } from "../_core/guestNoiseGate";
 import { guestDeleteGate } from "./adminCustomersGuestDelete";
 import {
   isUnreadInbound,
@@ -134,13 +135,31 @@ async function hasPassportOnFile(
  */
 export async function runGuestUnreadRankingQuery(
   drizzleDb: NonNullable<Awaited<ReturnType<typeof db.getDb>>>,
-): Promise<Array<{ status: string | null; lastInboundAt: Date | null; jeffViewedAt: Date | null }>> {
+): Promise<
+  Array<{
+    status: string | null;
+    lastInboundAt: Date | null;
+    jeffViewedAt: Date | null;
+    // v802 noise gate — same signals guestList feeds isNoiseOnlyGuest
+    // (hasInbound is derived from lastInboundAt above).
+    email: string | null;
+    qualifiesViaContent: number;
+    latestInboundIsSpam: number;
+  }>
+> {
   const {
     customerProfiles,
     users: usersTable,
     inquiries: inquiriesTable,
     agentMessages,
+    customerInteractions,
   } = await import("../../drizzle/schema");
+  const { qualifiesViaContent, latestInboundIsSpam } =
+    guestNoiseSelectFragments({
+      inquiries: inquiriesTable,
+      agentMessages,
+      customerInteractions,
+    });
   // ⛔ TiDB 雷(v799 回爐修正,已在 prod TiDB 唯讀驗過形狀 —— 見 docs/agent/30-templates.md
   // 地雷第四條):此 GREATEST 內含關聯子查詢(WHERE customerInteractions.customerProfileId =
   // customerProfiles.id)。必須「整支只渲染一份、全程帶完整表前綴」,再靠 SELECT 別名排序。兩個坑:
@@ -167,6 +186,12 @@ export async function runGuestUnreadRankingQuery(
       status: customerProfiles.status,
       lastInboundAt: customerProfiles.lastInboundAt,
       jeffViewedAt: customerProfiles.jeffViewedAt,
+      // v802 noise gate — the badge must not count a card guestList hides, so
+      // it selects the SAME three signals and applies the SAME isNoiseOnlyGuest
+      // in customerUnreadCount (口徑一致).
+      email: customerProfiles.email,
+      qualifiesViaContent,
+      latestInboundIsSpam,
       // 純為讓 ORDER BY lastContact 有別名可指;JS 端不使用此值。
       lastContact: lastContactSql,
     })
@@ -520,6 +545,15 @@ export const adminCustomersRouter = router({
     const guestUnread = guests.filter(
       (g) =>
         g.status !== "blocked" &&
+        // v802 — same noise gate guestList applies, so the badge never counts
+        // a marketing / spam card the list hides (口徑一致).
+        !isNoiseOnlyGuest({
+          userId: null,
+          email: g.email,
+          qualifiesViaContent: Number(g.qualifiesViaContent) === 1,
+          hasInbound: g.lastInboundAt != null,
+          latestInboundIsSpam: Number(g.latestInboundIsSpam) === 1,
+        }) &&
         isUnreadInbound(g.lastInboundAt, g.jeffViewedAt),
     ).length;
 
@@ -998,6 +1032,12 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
           ${customerProfiles.createdAt}
         )
       )`;
+      const { qualifiesViaContent, latestInboundIsSpam } =
+        guestNoiseSelectFragments({
+          inquiries: inquiriesTable,
+          agentMessages,
+          customerInteractions,
+        });
       const rows = await drizzleDb
         .select({
           profileId: customerProfiles.id,
@@ -1026,6 +1066,11 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
           // 紅點: unread agent messages filed against this guest's profile (the
           // profileId IS the customerProfiles row), same readByJeff=0 signal.
           unread: sql<number>`(SELECT COUNT(*) FROM ${agentMessages} WHERE ${agentMessages.relatedCustomerProfileId} = ${customerProfiles.id} AND ${agentMessages.readByJeff} = 0)`,
+          // v802 noise gate signals (byte-identical to the badge's fragments) —
+          // pulled out of the response in the map below, used only to compute
+          // isNoiseOnlyGuest. Not exposed to the client.
+          qualifiesViaContent,
+          latestInboundIsSpam,
         })
         .from(customerProfiles)
         .where(
@@ -1067,7 +1112,7 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
       // Default view drops blocked guests; the "show hidden" toggle brings them
       // back. Nothing is deleted — a mis-hide is one click to restore.
       const withFlags = rows.map(
-        ({ status, needsFollowup, unread, lastInboundAt, lastOutboundAt, jeffViewedAt, createdAt, ...r }) => ({
+        ({ status, needsFollowup, unread, lastInboundAt, lastOutboundAt, jeffViewedAt, createdAt, qualifiesViaContent: qvc, latestInboundIsSpam: lis, ...r }) => ({
           ...r,
           // 與 customerList 同一支純函式、同一口徑:inbound / outbound 取較新者,兩者
           // 皆空才落 createdAt(絕不 updatedAt)。computeLastContactAt→toValidDate 把
@@ -1082,11 +1127,22 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
           unread: Number(unread),
           // customer-unread (0108) — 客人來訊 Jeff 還沒看(名字粗體 + 頭像紅點)。
           unreadInbound: isUnreadInbound(lastInboundAt ?? null, jeffViewedAt ?? null),
+          // v802 noise gate — an inbound-only marketing/spam card. Hidden by
+          // default like `blocked`; revealed under includeHidden so Jeff can
+          // audit + bulk-block. r.email is the sender; userId is always null
+          // here (WHERE userId IS NULL).
+          isNoise: isNoiseOnlyGuest({
+            userId: null,
+            email: r.email ?? null,
+            qualifiesViaContent: Number(qvc) === 1,
+            hasInbound: lastInboundAt != null,
+            latestInboundIsSpam: Number(lis) === 1,
+          }),
         }),
       );
       return input?.includeHidden
         ? withFlags
-        : withFlags.filter((r) => !r.blocked);
+        : withFlags.filter((r) => !r.blocked && !r.isNoise);
     }),
 
   /**

@@ -57,6 +57,17 @@ import { runRefundAgent, DEFAULT_REFUND_POLICY } from "./refundAgent";
 import { redis } from "../../redis";
 import { createChildLogger } from "../../_core/logger";
 import { OWN_EMAILS } from "../../_core/testAccounts";
+import {
+  parseEmailAddress,
+  isNoreplySender,
+  isKnownNoise,
+} from "../../_core/knownNoise";
+// v802: the pre-LLM noise checks moved to the zero-heavy-dependency leaf
+// _core/knownNoise.ts so the customer-list noise gate (adminCustomers.ts /
+// globalSearch.ts) can reuse isKnownNoise WITHOUT dragging this file's
+// db/redis/gmail import chain. Re-export the two that used to be defined here
+// so gmailPipeline.noise.test.ts + any legacy importer keep resolving them.
+export { isNoreplySender, isKnownNoise };
 import { decideInteractionOrderAssignment } from "../../_core/interactionOrderAssignment";
 import { listCustomOrdersByProfile } from "../../db/customOrder";
 // invokeLLM is dynamically imported inside resolveInboundInteractionOrderId
@@ -301,54 +312,10 @@ export async function runGmailPipeline(
   return result;
 }
 
-// ── Pre-LLM noise filtering (module-scope pure functions, unit-tested in
-//    gmailPipeline.noise.test.ts) ────────────────────────────────────────────
-
-/**
- * gmail-push noreply firewall (P2, 2026-07-01) — pure sender check shared by
- * the push path (runGmailPipelineForMessageIds) and the isKnownNoise fallback
- * below. The 3-min poll's Gmail query already carries `-from:noreply`
- * (listUnreadMessages, server/_core/gmail.ts), so noreply notifications never
- * reach the pipeline via poll; the push history-diff has no Gmail query, so
- * it must apply the same gate in JS — otherwise, with GMAIL_POLL_LABEL unset,
- * every noreply notification (noreply@united.com …) enters the full
- * InquiryAgent pipeline seconds after arrival: one LLM chain burned per
- * email + a junk card in the office inbox.
- *
- * Matches the LOCALPART (before the @) containing noreply / no-reply /
- * no_reply, case-insensitive. Deliberately narrow — noreply-class only, no
- * broader blacklist (that's KNOWN_NOISE_DOMAINS' job below).
- */
-export function isNoreplySender(from: string): boolean {
-  // From header may be `Name <local@domain>` or bare `local@domain`;
-  // parseEmailAddress extracts + lowercases, falls back for malformed input.
-  const email = parseEmailAddress(from) ?? from.toLowerCase();
-  const at = email.indexOf("@");
-  const localpart = at === -1 ? email : email.slice(0, at);
-  return /no[-_]?reply/.test(localpart);
-}
-
-// ── Pre-LLM spam filter: skip known non-customer senders ──
-// These domains send automated notifications to Jeff's personal inbox.
-// Skipping them saves LLM tokens without losing training value — they
-// are never real customer emails. Unknown senders still go through the
-// full InquiryAgent pipeline.
-const KNOWN_NOISE_DOMAINS = new Set([
-  // Our own system emails (self-sent notifications, monitor alerts)
-  "packgoplay.com", "packgo-travel.fly.dev",
-  "venmo.com", "paypal.com", "cash.app",
-  "substack.com", "beehiiv.com", "mailchimp.com", "convertkit.com",
-  "mgmresorts.com", "hilton.com", "marriott.com",
-  "linkedin.com", "facebook.com", "twitter.com", "x.com",
-  "google.com", "youtube.com", "apple.com", "microsoft.com",
-  "github.com", "notion.so", "slack.com",
-  "robly.com", "constantcontact.com", "mailerlite.com",
-  // NOTE: these three only ever match DOMAIN forms (@noreply…/.noreply…) via
-  // the loop below; noreply-class LOCALPARTS (noreply@united.com) are handled
-  // by the isNoreplySender check at the top of isKnownNoise.
-  "noreply", "no-reply", "donotreply",
-  "alerts@", "notifications@", "newsletter@", "digest@",
-]);
+// ── Pre-LLM noise filtering — isNoreplySender / KNOWN_NOISE_DOMAINS /
+//    isKnownNoise moved to _core/knownNoise.ts (v802, imported + re-exported
+//    at the top of this file). Unit-tested in gmailPipeline.noise.test.ts,
+//    which still imports them from this module via the re-export.
 
 /**
  * 自家信箱防火牆 (2026-07-02) — Jeff 自己/系統的寄件地址絕不建客人檔。真實
@@ -373,25 +340,6 @@ export function isOwnEmail(email: string | null | undefined): boolean {
   return typeof email === "string" && OWN_EMAILS.has(email.trim().toLowerCase());
 }
 
-export function isKnownNoise(from: string): boolean {
-  // noreply-class localparts (noreply@united.com, no-reply@delta.com …) —
-  // shared pure check with the push-path firewall. P2 fix (2026-07-01): the
-  // domain-match branch below (`@noreply` / `.noreply`) can never match a
-  // noreply LOCALPART, which let these leak into the LLM pipeline whenever a
-  // message bypassed the poll's `-from:noreply` query (the push path).
-  if (isNoreplySender(from)) return true;
-  const lower = from.toLowerCase();
-  for (const pattern of KNOWN_NOISE_DOMAINS) {
-    if (pattern.includes("@")) {
-      // Prefix match (e.g. "alerts@" matches "alerts@anything.com")
-      if (lower.includes(pattern)) return true;
-    } else {
-      // Domain match
-      if (lower.includes(`@${pattern}`) || lower.includes(`.${pattern}`)) return true;
-    }
-  }
-  return false;
-}
 
 /** Structured tool for the "which in-progress order does this email belong to" LLM pick (rule ③). */
 const PICK_ORDER_TOOL: Tool = {
@@ -1920,16 +1868,6 @@ function formatBytesShort(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
-}
-
-function parseEmailAddress(fromHeader: string): string | undefined {
-  // "Lisa Chen <lisa@example.com>" → "lisa@example.com"
-  // "lisa@example.com" → "lisa@example.com"
-  const match = fromHeader.match(/<([^>]+)>/) || fromHeader.match(/([^\s]+@[^\s]+)/);
-  if (!match) return undefined;
-  const email = match[1].trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return undefined;
-  return email;
 }
 
 /**
