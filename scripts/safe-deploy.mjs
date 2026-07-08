@@ -34,6 +34,7 @@ import { fileURLToPath } from "node:url";
 
 const APP = "packgo-travel";
 const HEALTH_URL = "https://packgoplay.com/health";
+const SMOKE_URL = "https://packgoplay.com/api/admin/deploy-smoke";
 const APPROVE_FILE = ".deploy-approve";
 // Full flyctl-deploy output is tee'd here when a deploy fails, so the failure
 // can be read from a file (by the monitor / next session) instead of only
@@ -214,6 +215,32 @@ async function guardInner(deps, opts) {
     error(`  ⚠ post-deploy health check failed: ${short(e)}`);
   }
 
+  // Wave1 Block A — ship 後自動煙霧(deploySmoke)。跟上面的 health check 同一個
+  // 語意:紅字告知,不擋部署(guardInner 這裡已經完成部署)。LOCAL_SCRIPT_TOKEN
+  // 沒設時直接跳過(不擋),因為那代表這台機器 / CI 本來就沒配置這個 token。
+  if (!env.LOCAL_SCRIPT_TOKEN) {
+    log("\n⚠ LOCAL_SCRIPT_TOKEN 未設,跳過 ship 後煙霧(不擋部署)");
+  } else {
+    try {
+      const smoke = deps.smoke();
+      log(`\nship 後煙霧 → ok: ${smoke.ok}`);
+      if (smoke.arms)
+        for (const a of smoke.arms)
+          log(
+            `    ${a.ok ? "✓" : "✗"} ${a.name}${a.ms != null ? ` ${a.ms}ms` : ""}` +
+              `${a.rowCount != null ? ` rows=${a.rowCount}` : ""}${a.error ? `  ${a.error}` : ""}`,
+          );
+      if (!smoke.ok) {
+        const failed = (smoke.arms || []).filter((a) => !a.ok).map((a) => a.name);
+        error(
+          `  ⚠ 煙霧未全過(失敗臂:${failed.join(", ")})— 投查;rollback: flyctl releases rollback -a ${APP}`,
+        );
+      }
+    } catch (e) {
+      error(`  ⚠ 煙霧呼叫失敗: ${short(e)}`);
+    }
+  }
+
   // print deployed version
   try {
     const rel = String(run(`flyctl releases -a ${APP}`));
@@ -269,6 +296,17 @@ function makeRealDeps() {
       }
     },
     health: () => JSON.parse(String(run(`curl -s -m 20 ${HEALTH_URL}`))),
+    // Wave1 Block A — ship 後自動煙霧。token 絕不字串插值進 shell 指令(理論
+    // shell-injection 風險);改用 execSync 的 env 傳遞 + shell 內 $VAR 語法取值,
+    // 讓 shell 自己從自己的環境變數展開,JS 端組出的指令字串本身完全不含 token。
+    smoke: () =>
+      JSON.parse(
+        String(
+          run(`curl -s -m 20 -X POST -H "Authorization: Bearer $LOCAL_SCRIPT_TOKEN" ${SMOKE_URL}`, {
+            env: process.env,
+          }),
+        ),
+      ),
     log: (...a) => console.log(...a),
     error: (...a) => console.error(...a),
   };

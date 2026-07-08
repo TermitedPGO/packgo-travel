@@ -26,6 +26,8 @@ function makeDeps(o = {}) {
   const calls = [];
   let deleted = 0;
   let errorLogDeleted = 0;
+  const logs = [];
+  const errors = [];
 
   const run = (cmd) => {
     calls.push(cmd);
@@ -65,9 +67,23 @@ function makeDeps(o = {}) {
     },
     listMigrations: () => ["0086_supplier_cost", "0087_booking_consent"],
     health: () => ({ overall: "ok", checks: { db: { status: "ok", latencyMs: 1 } } }),
-    log: () => {},
-    error: () => {},
+    // Wave1 Block A — ship 後自動煙霧 fake dep. Directly returns an object
+    // (no real curl), matching the file's existing `health` fake convention.
+    // Records a "smoke()" call marker so tests can assert whether it was
+    // invoked at all (the LOCAL_SCRIPT_TOKEN-unset skip path must NOT call it).
+    smoke: () => {
+      calls.push("smoke()");
+      return state.smokeResult ?? { ok: true, arms: [] };
+    },
+    log: (...a) => {
+      logs.push(a.join(" "));
+    },
+    error: (...a) => {
+      errors.push(a.join(" "));
+    },
     _calls: calls,
+    _logs: logs,
+    _errors: errors,
     get _deleted() {
       return deleted;
     },
@@ -178,4 +194,62 @@ test("SKIP_DEPLOY_TESTS=1 skips vitest but still deploys when authorized", async
   assert.equal(code, 0);
   assert.equal(d._calls.some((c) => c.includes("vitest")), false);
   assert.equal(reachedDeploy(d), true);
+});
+
+// ---- Wave1 Block A: ship 後自動煙霧 (deploySmoke) wiring ----
+
+test("ship-smoke GREEN: LOCAL_SCRIPT_TOKEN unset → smoke() not called, output shows skip phrase, exit 0", async () => {
+  const d = makeDeps(); // env.LOCAL_SCRIPT_TOKEN left unset by default
+  const code = await runGuard(d, {});
+  assert.equal(code, 0);
+  assert.equal(d._calls.includes("smoke()"), false);
+  assert.ok(
+    d._logs.some((l) => l.includes("LOCAL_SCRIPT_TOKEN") && l.includes("跳過 ship 後煙霧")),
+    "expected a log line announcing the smoke skip",
+  );
+});
+
+test("ship-smoke GREEN: LOCAL_SCRIPT_TOKEN set + smoke returns ok:true → exit 0, no failure text", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    smokeResult: {
+      ok: true,
+      arms: [
+        { name: "customerList", ok: true, ms: 12, rowCount: 3 },
+        { name: "guestList", ok: true, ms: 8, rowCount: 1 },
+      ],
+    },
+  });
+  const code = await runGuard(d, {});
+  assert.equal(code, 0);
+  assert.equal(d._calls.includes("smoke()"), true);
+  assert.equal(
+    d._errors.some((l) => l.includes("煙霧未全過")),
+    false,
+  );
+});
+
+test("ship-smoke RED (but exit code still 0): LOCAL_SCRIPT_TOKEN set + smoke returns ok:false → prints failed arm name + rollback hint", async () => {
+  const d = makeDeps({
+    env: { DEPLOY_TOKEN: "good-token", LOCAL_SCRIPT_TOKEN: "script-token" },
+    smokeResult: {
+      ok: false,
+      arms: [
+        { name: "customerList", ok: true, ms: 10, rowCount: 2 },
+        { name: "guestList", ok: false, ms: 5, error: "TypeError: boom" },
+      ],
+    },
+  });
+  const code = await runGuard(d, {});
+  // deploy itself already succeeded before the smoke check runs — a smoke
+  // failure is reported (red) but must NOT change the guard's exit code.
+  assert.equal(code, 0);
+  assert.ok(
+    d._errors.some((l) => l.includes("guestList")),
+    "expected the failed arm name in the error output",
+  );
+  assert.ok(
+    d._errors.some((l) => l.includes("rollback")),
+    "expected a rollback hint in the error output",
+  );
 });

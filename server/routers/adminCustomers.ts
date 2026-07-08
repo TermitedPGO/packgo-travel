@@ -219,151 +219,408 @@ export async function runGuestUnreadRankingQuery(
     .limit(200);
 }
 
+/**
+ * Wave1 Block A(deploy-smoke 派工單)— customerList 查詢體抽成 exported 函式,
+ * 讓 procedure 與 deploySmoke 的煙霧臂呼叫「同一支」(不複製第二份查詢)。純搬移
+ * 重構,邏輯與回傳形狀跟原本 query 內聯的版本逐字相同。不讀 tRPC ctx。
+ */
+export async function runCustomerListQuery(
+  drizzleDb: DrizzleDb,
+  input: { includeHidden?: boolean } | undefined,
+) {
+  const {
+    users: usersTable,
+    bookings: bookingsTable,
+    customerProfiles,
+    inquiries: inquiriesTable,
+    aiQuotes: aiQuotesTable,
+    agentMessages,
+    customerInteractions,
+  } = await import("../../drizzle/schema");
+
+  // Subquery: total spend per user (sum of non-cancelled bookings).
+  // Alias must NOT be `totalSpend`: once we leftJoin customerProfiles (which
+  // has its OWN totalSpend column), a bare `COALESCE(totalSpend,0)` in the
+  // outer select becomes ambiguous and MySQL rejects the whole query.
+  const spendSub = drizzleDb
+    .select({
+      userId: bookingsTable.userId,
+      bookingSpendSum: sql<number>`COALESCE(SUM(${bookingsTable.totalPrice}), 0)`.as("bookingSpendSum"),
+    })
+    .from(bookingsTable)
+    .where(
+      and(
+        sql`${bookingsTable.userId} IS NOT NULL`,
+        sql`${bookingsTable.bookingStatus} NOT IN ('cancelled')`,
+      )
+    )
+    .groupBy(bookingsTable.userId)
+    .as("spendSub");
+
+  // leftJoin customerProfiles (1:1 via unique uq_cp_user) for the manual
+  // 'blocked' status + lastInteractionAt signal the auto-junk rule needs.
+  const rows = await drizzleDb
+    .select({
+      id: usersTable.id,
+      name: usersTable.name,
+      email: usersTable.email,
+      phone: usersTable.phone,
+      avatar: usersTable.avatar,
+      tier: usersTable.tier,
+      role: usersTable.role,
+      packpointBalance: usersTable.packpointBalance,
+      bookingCount: usersTable.bookingCount,
+      inquiryCount: usersTable.inquiryCount,
+      totalSpend: sql<number>`COALESCE(${spendSub.bookingSpendSum}, 0)`,
+      createdAt: usersTable.createdAt,
+      lastSignedIn: usersTable.lastSignedIn,
+      profileStatus: customerProfiles.status,
+      lastInteractionAt: customerProfiles.lastInteractionAt,
+      followUpDate: customerProfiles.followUpDate,
+      // customer-unread (0108) — 來訊未讀紅點的兩根指針(NULL 當沒 profile row)。
+      lastInboundAt: customerProfiles.lastInboundAt,
+      jeffViewedAt: customerProfiles.jeffViewedAt,
+      // A2 (Phase6) — 列表日期口徑:最後一筆我方 outbound 往來(email 回覆
+      // 等),跟 lastInboundAt 取較新者當「最後往來」,不再用 lastSignedIn
+      // (那是最後登入,不是最後聯絡 — 一位只登入過一次的會員會被列表誤判
+      // 成兩個月沒往來)。NULL 當這個 profile 從沒有 outbound 紀錄。
+      lastOutboundAt: sql<Date | null>`(
+        SELECT MAX(${customerInteractions.createdAt}) FROM ${customerInteractions}
+          WHERE ${customerInteractions.customerProfileId} = ${customerProfiles.id}
+            AND ${customerInteractions.direction} = 'outbound'
+      )`,
+      // 需跟進 (locked 2026-06-20): open inquiry >2d unanswered OR a
+      // sent/viewed quote >5d old. Correlated EXISTS by userId OR verified
+      // email — read-only signal, never auto-acts. Intentionally STATUS-only
+      // (a coarse sidebar nudge); the detail pane additionally subtracts
+      // Jeff's「處理好了」dispositions, so a dismissed-but-still-open item can
+      // show the list badge yet read clear on the detail — by design.
+      needsFollowup: sql<number>`(
+        EXISTS (SELECT 1 FROM ${inquiriesTable}
+          WHERE (${inquiriesTable.userId} = ${usersTable.id} OR ${inquiriesTable.customerEmail} = ${usersTable.email})
+            AND ${inquiriesTable.status} IN ('new','in_progress')
+            AND ${inquiriesTable.createdAt} < (NOW() - INTERVAL 2 DAY))
+        OR EXISTS (SELECT 1 FROM ${aiQuotesTable}
+          WHERE (${aiQuotesTable.userId} = ${usersTable.id} OR ${aiQuotesTable.customerEmail} = ${usersTable.email})
+            AND ${aiQuotesTable.status} IN ('sent','viewed')
+            AND ${aiQuotesTable.createdAt} < (NOW() - INTERVAL 5 DAY))
+      )`,
+      // 紅點: unread agent messages filed against this customer's profile —
+      // the same readByJeff=0 signal the ops ChatsTab red dot uses. NULL when
+      // a registered user has no customerProfiles row yet (COUNT → 0).
+      unread: sql<number>`(SELECT COUNT(*) FROM ${agentMessages} WHERE ${agentMessages.relatedCustomerProfileId} = ${customerProfiles.id} AND ${agentMessages.readByJeff} = 0)`,
+    })
+    .from(usersTable)
+    .leftJoin(spendSub, eq(usersTable.id, spendSub.userId))
+    .leftJoin(customerProfiles, eq(customerProfiles.userId, usersTable.id))
+    .where(eq(usersTable.role, "user"));
+
+  // A2 (Phase6) — sort moved to JS below (after withFlags is built) so it
+  // can order by the same computed lastContactAt the rows display. SQL
+  // ORDER BY can't cleanly combine the correlated lastOutboundAt subquery
+  // with lastInboundAt across NULLs; no LIMIT on this query, so a JS sort
+  // over the full result set is safe (unlike guestList's LIMIT 200 below,
+  // which needs the equivalent GREATEST(...) done in SQL before the cut).
+  const withFlags = rows.map(
+    ({ profileStatus, lastInteractionAt, needsFollowup, unread, lastInboundAt, jeffViewedAt, lastOutboundAt, createdAt, lastSignedIn, ...r }) => {
+      const blocked = profileStatus === "blocked";
+      const hidden = isHiddenCustomer(
+        {
+          bookingCount: r.bookingCount ?? 0,
+          inquiryCount: r.inquiryCount ?? 0,
+          lastInteractionAt: lastInteractionAt ?? null,
+        },
+        blocked,
+      );
+      // A2 (Phase6) — 列表「最後往來」口徑:inbound / outbound 兩指針取較新
+      // 者;都沒有(從沒任何互動,剛註冊)才 fallback 到 createdAt(註冊日),
+      // 讓列表至少有個日期,不是空白。會員卡與訪客卡(guestList)同一套口徑。
+      const lastContactAt = computeLastContactAt(
+        lastInboundAt ?? null,
+        lastOutboundAt ?? null,
+        createdAt ?? null,
+      );
+      return {
+        ...r,
+        createdAt,
+        lastSignedIn,
+        lastContactAt,
+        blocked,
+        hidden,
+        needsFollowup: Number(needsFollowup) === 1,
+        unread: Number(unread),
+        // customer-unread (0108) — 客人來訊 Jeff 還沒看(名字粗體 + 頭像紅點)。
+        // 與既有 `unread`(agentMessages count)是兩個訊號,不合併。
+        unreadInbound: isUnreadInbound(lastInboundAt ?? null, jeffViewedAt ?? null),
+      };
+    },
+  );
+  // 排序跟著新口徑走:最近往來在最上面(維持列表原本「新的在前」慣例)。
+  withFlags.sort((a, b) => {
+    const at = a.lastContactAt ? a.lastContactAt.getTime() : 0;
+    const bt = b.lastContactAt ? b.lastContactAt.getTime() : 0;
+    return bt - at;
+  });
+
+  return input?.includeHidden ? withFlags : withFlags.filter((r) => !r.hidden);
+}
+
+/**
+ * Wave1 Block A(deploy-smoke 派工單,延伸決定)— customerUnreadCount 的「註冊
+ * 客戶」臂 SQL(select+innerJoin+where,無 GREATEST/關聯子查詢排序,風險低)抽成
+ * exported 函式,只搬 SQL 查詢本身;isHiddenCustomer/isUnreadInbound 的 JS 端過濾
+ * 邏輯留在 procedure 內不搬。派工單原文只列三個抽取目標(customerList/guestList/
+ * loadTodayListItems),這是第四個 —— 派工單明白要求煙霧要跑 customerUnreadCount
+ * 的「註冊臂 + guest 臂」,而地雷規則禁止複製第二份查詢:若不抽出,煙霧要嘛不測
+ * 註冊臂,要嘛複製一份違反地雷,所以這是必要的最小範圍延伸,不是自作主張擴大
+ * 重構。guest 臂已有既有 export runGuestUnreadRankingQuery,不用動。
+ */
+export async function runRegisteredUnreadCountQuery(drizzleDb: DrizzleDb): Promise<
+  Array<{
+    bookingCount: number | null;
+    inquiryCount: number | null;
+    lastInteractionAt: Date | null;
+    status: string | null;
+    lastInboundAt: Date | null;
+    jeffViewedAt: Date | null;
+  }>
+> {
+  const { customerProfiles, users: usersTable } = await import("../../drizzle/schema");
+  return drizzleDb
+    .select({
+      bookingCount: usersTable.bookingCount,
+      inquiryCount: usersTable.inquiryCount,
+      lastInteractionAt: customerProfiles.lastInteractionAt,
+      status: customerProfiles.status,
+      lastInboundAt: customerProfiles.lastInboundAt,
+      jeffViewedAt: customerProfiles.jeffViewedAt,
+    })
+    .from(usersTable)
+    .innerJoin(customerProfiles, eq(customerProfiles.userId, usersTable.id))
+    .where(
+      and(
+        eq(usersTable.role, "user"),
+        sql`${customerProfiles.lastInboundAt} IS NOT NULL`,
+      ),
+    );
+}
+
+/**
+ * Wave1 Block A(deploy-smoke 派工單)— guestList 查詢鏈「建構」與「執行」拆開,
+ * 讓 deploySmoke 的離線 .toSQL() 形狀斷言測試能單獨對查詢鏈呼叫 .toSQL()、不必
+ * 真的連線執行:buildGuestListQuery 只組 select/from/where/orderBy/limit 鏈並
+ * return(不 await 它),runGuestListQuery 再 await 這條鏈拿真資料。procedure 與
+ * deploySmoke 的煙霧臂呼叫「同一支」runGuestListQuery——不複製第二份查詢。
+ *
+ * ⛔ 硬性要求(派工單明文):SQL 表達式(含 lastContactSql 這段 GREATEST 運算式)
+ * 一個字元都不准動,純搬移位置——包含它現有的 orderBy(desc(lastContactSql))
+ * 舊寫法(lastContactSql 未 .as() 別名,不同於 runGuestUnreadRankingQuery 的安全
+ * 形狀)一併原樣保留。若懷疑這支 TiDB 寫法有風險,那是另一個任務的範圍,這裡
+ * 只搬不修。
+ *
+ * buildGuestListQuery 因為要動態 import drizzle/schema(維持全檔既有的 lazy-import
+ * 慣例,不因這次重構改變),本身是 async 函式。回傳值刻意包成 `{ query }` 一層
+ * 純物件,不是直接 `return` 查詢鏈本身——JS 的 Promise 解析演算法對「async
+ * function return 一個 thenable」會自動呼叫它的 .then() 展開,drizzle 的查詢鏈
+ * 物件本身就是 thenable(QueryPromise),若直接 return 它,`await
+ * buildGuestListQuery(...)` 會在這裡就把查詢「執行」掉,而不是把一個尚未執行
+ * 的物件傳回去(對免連線的 QueryBuilder 餵入時會直接拋錯,實測抓到)。包一層
+ * `{ query }` 後,呼叫端 await 一次拿到的 `query` 才是真正「尚未執行」的鏈,
+ * 對它呼叫 .toSQL() 不會觸發 DB round-trip、不需要真的 db 連線——
+ * drizzle-orm/mysql-core 的 QueryBuilder(離線、免連線)可以餵給 drizzleDb 這個
+ * 參數位置做形狀斷言(見 server/routers/adminCustomers.test.ts)。真正觸發執行
+ * 的是 runGuestListQuery 內對 `query` 的第二次 await。
+ */
+export async function buildGuestListQuery(
+  drizzleDb: DrizzleDb,
+  input: { includeHidden?: boolean } | undefined,
+) {
+  const {
+    customerProfiles,
+    users: usersTable,
+    inquiries: inquiriesTable,
+    agentMessages,
+    customerInteractions,
+  } = await import("../../drizzle/schema");
+  // 訪客門檻 (v694 hotfix): 123 historical profiles were mostly noise
+  // senders (bank alerts / marketing blasts) profiled before the
+  // pipeline's noise filter existed. A guest only earns a sidebar chip
+  // when there is actual CUSTOMER content behind it — an inquiry row or
+  // an escalation — otherwise the customer list drowns in junk.
+  //
+  // A2 (Phase6; v787 P0/P1 回爐) — lastContactSql 只給下面的 ORDER BY 用:
+  // top-200 視窗必須在 SQL 內排序(LIMIT 200 之前)。它是 GREATEST(lastInboundAt,
+  // MAX(outbound)) 兩臂 COALESCE 到 *createdAt*(絕不 updatedAt:updatedAt 是
+  // onUpdateNow(),02:00 摘要 cron 的 UPDATE 會蓋成當晚時間,拿它排序 = 歸檔時間
+  // 冒充事件時間)。MySQL GREATEST 任一臂 NULL 就回 NULL,故每臂先 COALESCE。
+  //
+  // 但「回給 client 顯示的 lastContactAt」不用這個 raw sql 值 —— 改在下面 withFlags
+  // 用 computeLastContactAt 在 JS 算(與 customerList 同一支純函式)。關鍵原因
+  // (v787 P0 blocker):raw sql<Date> fragment 被 mysql2/TiDB 當「naive 無時區
+  // 字串」丟回,原封送到 client 再 new Date() 會用「瀏覽器本機時區」parse、錯一天
+  // (非美西 viewer 的 Emerald 顯示 7/2;跨 UTC 午夜的 guest 連 Jeff 自己也錯)。
+  // computeLastContactAt→toValidDate 在 server 端把 naive 字串錨成 UTC 真 Date,
+  // superjson 帶 Date tag 送出,client 收到真 instant 再由 formatMonthDayLA 以
+  // 美西曆日渲染。純函式版另有「兩指針皆空才落 createdAt」語意(createdAt 永不
+  // 蓋過真 inbound/outbound),比 SQL 每臂 floor 更準。
+  const lastContactSql = sql<Date>`GREATEST(
+        COALESCE(${customerProfiles.lastInboundAt}, ${customerProfiles.createdAt}),
+        COALESCE(
+          (SELECT MAX(${customerInteractions.createdAt}) FROM ${customerInteractions}
+            WHERE ${customerInteractions.customerProfileId} = ${customerProfiles.id}
+              AND ${customerInteractions.direction} = 'outbound'),
+          ${customerProfiles.createdAt}
+        )
+      )`;
+  const { qualifiesViaContent, latestInboundIsSpam } =
+    guestNoiseSelectFragments({
+      inquiries: inquiriesTable,
+      agentMessages,
+      customerInteractions,
+    });
+  // ⚠ 不可直接 `return drizzleDb.select()....limit(200);`(原本寫法)——
+  // buildGuestListQuery 本身是 async function(因為要 await import schema)。
+  // JS 的 Promise 解析演算法對「async function return 一個 thenable」會自動
+  // 呼叫該 thenable 的 .then() 展開它,drizzle 的查詢鏈物件本身就是 thenable
+  // (QueryPromise),所以 `await buildGuestListQuery(...)` 會在這裡就把查詢
+  // 鏈整個「執行」掉,而不是把它當一個尚未執行的物件傳回去 —— 對免連線的
+  // QueryBuilder 餵入時會直接拋 "Cannot execute a query on a query builder"
+  // (實測抓到,見 adminCustomers.test.ts 撰寫過程)。用 `{ query }` 包一層
+  // 純物件 return,讓它不再是 thenable,呼叫端 `await buildGuestListQuery(...)`
+  // 拿到的就是「尚未執行」的查詢鏈,對它呼叫 `.toSQL()` 才真的不會觸發執行。
+  const query = drizzleDb
+    .select({
+      profileId: customerProfiles.id,
+      name: customerProfiles.name,
+      email: customerProfiles.email,
+      phone: customerProfiles.phone,
+      status: customerProfiles.status,
+      // customer-unread (0108) — 來訊未讀紅點的兩根指針。
+      lastInboundAt: customerProfiles.lastInboundAt,
+      jeffViewedAt: customerProfiles.jeffViewedAt,
+      // 「最後往來」在 JS 用 computeLastContactAt 算(見上方註解),這裡只回三根
+      // 原始指針:inbound(已解碼 Date)、outbound(raw MAX,可能是 naive 字串)、
+      // createdAt(fallback,兩指針皆空才用)。updatedAt 不再 select — 它是 cron
+      // 蓋章的欄位,整條 guest 資料流不留它,杜絕未來誤抓(v787 紅線防禦縱深)。
+      lastOutboundAt: sql<Date | null>`(
+        SELECT MAX(${customerInteractions.createdAt}) FROM ${customerInteractions}
+          WHERE ${customerInteractions.customerProfileId} = ${customerProfiles.id}
+            AND ${customerInteractions.direction} = 'outbound'
+      )`,
+      createdAt: customerProfiles.createdAt,
+      // 需跟進: an unanswered inquiry (by this profile's email) older than 2d.
+      needsFollowup: sql<number>`EXISTS (SELECT 1 FROM ${inquiriesTable}
+        WHERE ${inquiriesTable.customerEmail} = ${customerProfiles.email}
+          AND ${inquiriesTable.status} IN ('new','in_progress')
+          AND ${inquiriesTable.createdAt} < (NOW() - INTERVAL 2 DAY))`,
+      // 紅點: unread agent messages filed against this guest's profile (the
+      // profileId IS the customerProfiles row), same readByJeff=0 signal.
+      unread: sql<number>`(SELECT COUNT(*) FROM ${agentMessages} WHERE ${agentMessages.relatedCustomerProfileId} = ${customerProfiles.id} AND ${agentMessages.readByJeff} = 0)`,
+      // v802 noise gate signals (byte-identical to the badge's fragments) —
+      // pulled out of the response in the map below, used only to compute
+      // isNoiseOnlyGuest. Not exposed to the client.
+      qualifiesViaContent,
+      latestInboundIsSpam,
+    })
+    .from(customerProfiles)
+    .where(
+      and(
+        sql`${customerProfiles.userId} IS NULL`,
+        // Contactable: at least an email OR a phone (a manual WeChat/phone
+        // lead may legitimately have no email).
+        sql`(
+          (${customerProfiles.email} IS NOT NULL AND ${customerProfiles.email} != '')
+          OR (${customerProfiles.phone} IS NOT NULL AND ${customerProfiles.phone} != '')
+        )`,
+        // If an email is present it must not already belong to a registered
+        // account (歸戶 targets show as registered customers, not twice).
+        sql`(
+          ${customerProfiles.email} IS NULL OR ${customerProfiles.email} = ''
+          OR NOT EXISTS (SELECT 1 FROM ${usersTable} WHERE ${usersTable.email} = ${customerProfiles.email})
+        )`,
+        // Earns a sidebar chip when there is real customer content: Jeff
+        // added them by hand (source='manual'), a filed inquiry/escalation
+        // exists, OR they actually sent us inbound mail (lastInboundAt).
+        // v800 (Ann 事故):a real customer whose inquiry classification
+        // silently failed still has lastInboundAt — gate on it too or she
+        // never appears (not even under includeHidden, which only toggles
+        // the blocked filter AFTER this qualification). This OR arm is
+        // mirrored verbatim in runGuestUnreadRankingQuery (badge) so both
+        // populations grow together — 口徑逐字一致 (v794 的教訓).
+        sql`(
+          ${customerProfiles.source} = 'manual'
+          OR EXISTS (SELECT 1 FROM ${inquiriesTable} WHERE ${inquiriesTable.customerEmail} = ${customerProfiles.email})
+          OR EXISTS (SELECT 1 FROM ${agentMessages} WHERE ${agentMessages.relatedCustomerProfileId} = ${customerProfiles.id} AND ${agentMessages.messageType} = 'escalation')
+          OR ${customerProfiles.lastInboundAt} IS NOT NULL
+        )`,
+      ),
+    )
+    .orderBy(desc(lastContactSql))
+    .limit(200);
+  return { query };
+}
+
+/**
+ * Wave1 Block A — guestList 查詢的「執行」半邊:await buildGuestListQuery 拿
+ * 尚未執行的查詢鏈,再 await 那條鏈本身觸發真的 DB round-trip,最後套原本
+ * withFlags 的 JS 端 map/filter(逐字未動)。procedure 與 deploySmoke 呼叫同一支。
+ */
+export async function runGuestListQuery(
+  drizzleDb: DrizzleDb,
+  input: { includeHidden?: boolean } | undefined,
+) {
+  const { query } = await buildGuestListQuery(drizzleDb, input);
+  const rows = await query;
+  // Manual hide reuses the same customerProfiles.status='blocked' switch as
+  // registered accounts (markNotCustomer/restoreCustomer by profileId).
+  // Default view drops blocked guests; the "show hidden" toggle brings them
+  // back. Nothing is deleted — a mis-hide is one click to restore.
+  const withFlags = rows.map(
+    ({ status, needsFollowup, unread, lastInboundAt, lastOutboundAt, jeffViewedAt, createdAt, qualifiesViaContent: qvc, latestInboundIsSpam: lis, ...r }) => ({
+      ...r,
+      // 與 customerList 同一支純函式、同一口徑:inbound / outbound 取較新者,兩者
+      // 皆空才落 createdAt(絕不 updatedAt)。computeLastContactAt→toValidDate 把
+      // raw sql 的 naive DATETIME 字串錨成 UTC 真 Date,client 收到真 instant。
+      lastContactAt: computeLastContactAt(
+        lastInboundAt ?? null,
+        lastOutboundAt ?? null,
+        createdAt ?? null,
+      ),
+      blocked: status === "blocked",
+      needsFollowup: Number(needsFollowup) === 1,
+      unread: Number(unread),
+      // customer-unread (0108) — 客人來訊 Jeff 還沒看(名字粗體 + 頭像紅點)。
+      unreadInbound: isUnreadInbound(lastInboundAt ?? null, jeffViewedAt ?? null),
+      // v802 noise gate — an inbound-only marketing/spam card. Hidden by
+      // default like `blocked`; revealed under includeHidden so Jeff can
+      // audit + bulk-block. r.email is the sender; userId is always null
+      // here (WHERE userId IS NULL).
+      isNoise: isNoiseOnlyGuest({
+        userId: null,
+        email: r.email ?? null,
+        qualifiesViaContent: Number(qvc) === 1,
+        hasInbound: lastInboundAt != null,
+        latestInboundIsSpam: Number(lis) === 1,
+      }),
+    }),
+  );
+  return input?.includeHidden
+    ? withFlags
+    : withFlags.filter((r) => !r.blocked && !r.isNoise);
+}
+
 export const adminCustomersRouter = router({
   /**
    * List all registered customers with aggregated stats.
    * Uses cached columns (bookingCount, inquiryCount, packpointBalance)
-   * plus a subquery for totalSpend.
+   * plus a subquery for totalSpend. Query body lives in runCustomerListQuery
+   * (Wave1 Block A — shared with deploySmoke's smoke arm).
    */
   customerList: adminProcedure
     .input(z.object({ includeHidden: z.boolean().optional() }).optional())
     .query(async ({ input }) => {
       const drizzleDb = (await db.getDb())!;
-      const {
-        users: usersTable,
-        bookings: bookingsTable,
-        customerProfiles,
-        inquiries: inquiriesTable,
-        aiQuotes: aiQuotesTable,
-        agentMessages,
-        customerInteractions,
-      } = await import("../../drizzle/schema");
-
-      // Subquery: total spend per user (sum of non-cancelled bookings).
-      // Alias must NOT be `totalSpend`: once we leftJoin customerProfiles (which
-      // has its OWN totalSpend column), a bare `COALESCE(totalSpend,0)` in the
-      // outer select becomes ambiguous and MySQL rejects the whole query.
-      const spendSub = drizzleDb
-        .select({
-          userId: bookingsTable.userId,
-          bookingSpendSum: sql<number>`COALESCE(SUM(${bookingsTable.totalPrice}), 0)`.as("bookingSpendSum"),
-        })
-        .from(bookingsTable)
-        .where(
-          and(
-            sql`${bookingsTable.userId} IS NOT NULL`,
-            sql`${bookingsTable.bookingStatus} NOT IN ('cancelled')`,
-          )
-        )
-        .groupBy(bookingsTable.userId)
-        .as("spendSub");
-
-      // leftJoin customerProfiles (1:1 via unique uq_cp_user) for the manual
-      // 'blocked' status + lastInteractionAt signal the auto-junk rule needs.
-      const rows = await drizzleDb
-        .select({
-          id: usersTable.id,
-          name: usersTable.name,
-          email: usersTable.email,
-          phone: usersTable.phone,
-          avatar: usersTable.avatar,
-          tier: usersTable.tier,
-          role: usersTable.role,
-          packpointBalance: usersTable.packpointBalance,
-          bookingCount: usersTable.bookingCount,
-          inquiryCount: usersTable.inquiryCount,
-          totalSpend: sql<number>`COALESCE(${spendSub.bookingSpendSum}, 0)`,
-          createdAt: usersTable.createdAt,
-          lastSignedIn: usersTable.lastSignedIn,
-          profileStatus: customerProfiles.status,
-          lastInteractionAt: customerProfiles.lastInteractionAt,
-          followUpDate: customerProfiles.followUpDate,
-          // customer-unread (0108) — 來訊未讀紅點的兩根指針(NULL 當沒 profile row)。
-          lastInboundAt: customerProfiles.lastInboundAt,
-          jeffViewedAt: customerProfiles.jeffViewedAt,
-          // A2 (Phase6) — 列表日期口徑:最後一筆我方 outbound 往來(email 回覆
-          // 等),跟 lastInboundAt 取較新者當「最後往來」,不再用 lastSignedIn
-          // (那是最後登入,不是最後聯絡 — 一位只登入過一次的會員會被列表誤判
-          // 成兩個月沒往來)。NULL 當這個 profile 從沒有 outbound 紀錄。
-          lastOutboundAt: sql<Date | null>`(
-            SELECT MAX(${customerInteractions.createdAt}) FROM ${customerInteractions}
-              WHERE ${customerInteractions.customerProfileId} = ${customerProfiles.id}
-                AND ${customerInteractions.direction} = 'outbound'
-          )`,
-          // 需跟進 (locked 2026-06-20): open inquiry >2d unanswered OR a
-          // sent/viewed quote >5d old. Correlated EXISTS by userId OR verified
-          // email — read-only signal, never auto-acts. Intentionally STATUS-only
-          // (a coarse sidebar nudge); the detail pane additionally subtracts
-          // Jeff's「處理好了」dispositions, so a dismissed-but-still-open item can
-          // show the list badge yet read clear on the detail — by design.
-          needsFollowup: sql<number>`(
-            EXISTS (SELECT 1 FROM ${inquiriesTable}
-              WHERE (${inquiriesTable.userId} = ${usersTable.id} OR ${inquiriesTable.customerEmail} = ${usersTable.email})
-                AND ${inquiriesTable.status} IN ('new','in_progress')
-                AND ${inquiriesTable.createdAt} < (NOW() - INTERVAL 2 DAY))
-            OR EXISTS (SELECT 1 FROM ${aiQuotesTable}
-              WHERE (${aiQuotesTable.userId} = ${usersTable.id} OR ${aiQuotesTable.customerEmail} = ${usersTable.email})
-                AND ${aiQuotesTable.status} IN ('sent','viewed')
-                AND ${aiQuotesTable.createdAt} < (NOW() - INTERVAL 5 DAY))
-          )`,
-          // 紅點: unread agent messages filed against this customer's profile —
-          // the same readByJeff=0 signal the ops ChatsTab red dot uses. NULL when
-          // a registered user has no customerProfiles row yet (COUNT → 0).
-          unread: sql<number>`(SELECT COUNT(*) FROM ${agentMessages} WHERE ${agentMessages.relatedCustomerProfileId} = ${customerProfiles.id} AND ${agentMessages.readByJeff} = 0)`,
-        })
-        .from(usersTable)
-        .leftJoin(spendSub, eq(usersTable.id, spendSub.userId))
-        .leftJoin(customerProfiles, eq(customerProfiles.userId, usersTable.id))
-        .where(eq(usersTable.role, "user"));
-
-      // A2 (Phase6) — sort moved to JS below (after withFlags is built) so it
-      // can order by the same computed lastContactAt the rows display. SQL
-      // ORDER BY can't cleanly combine the correlated lastOutboundAt subquery
-      // with lastInboundAt across NULLs; no LIMIT on this query, so a JS sort
-      // over the full result set is safe (unlike guestList's LIMIT 200 below,
-      // which needs the equivalent GREATEST(...) done in SQL before the cut).
-      const withFlags = rows.map(
-        ({ profileStatus, lastInteractionAt, needsFollowup, unread, lastInboundAt, jeffViewedAt, lastOutboundAt, createdAt, lastSignedIn, ...r }) => {
-          const blocked = profileStatus === "blocked";
-          const hidden = isHiddenCustomer(
-            {
-              bookingCount: r.bookingCount ?? 0,
-              inquiryCount: r.inquiryCount ?? 0,
-              lastInteractionAt: lastInteractionAt ?? null,
-            },
-            blocked,
-          );
-          // A2 (Phase6) — 列表「最後往來」口徑:inbound / outbound 兩指針取較新
-          // 者;都沒有(從沒任何互動,剛註冊)才 fallback 到 createdAt(註冊日),
-          // 讓列表至少有個日期,不是空白。會員卡與訪客卡(guestList)同一套口徑。
-          const lastContactAt = computeLastContactAt(
-            lastInboundAt ?? null,
-            lastOutboundAt ?? null,
-            createdAt ?? null,
-          );
-          return {
-            ...r,
-            createdAt,
-            lastSignedIn,
-            lastContactAt,
-            blocked,
-            hidden,
-            needsFollowup: Number(needsFollowup) === 1,
-            unread: Number(unread),
-            // customer-unread (0108) — 客人來訊 Jeff 還沒看(名字粗體 + 頭像紅點)。
-            // 與既有 `unread`(agentMessages count)是兩個訊號,不合併。
-            unreadInbound: isUnreadInbound(lastInboundAt ?? null, jeffViewedAt ?? null),
-          };
-        },
-      );
-      // 排序跟著新口徑走:最近往來在最上面(維持列表原本「新的在前」慣例)。
-      withFlags.sort((a, b) => {
-        const at = a.lastContactAt ? a.lastContactAt.getTime() : 0;
-        const bt = b.lastContactAt ? b.lastContactAt.getTime() : 0;
-        return bt - at;
-      });
-
-      return input?.includeHidden ? withFlags : withFlags.filter((r) => !r.hidden);
+      return runCustomerListQuery(drizzleDb, input);
     }),
 
   /**
@@ -480,27 +737,13 @@ export const adminCustomersRouter = router({
    */
   customerUnreadCount: adminProcedure.query(async () => {
     const drizzleDb = (await db.getDb())!;
-    const { customerProfiles, users: usersTable } = await import("../../drizzle/schema");
 
     // Registered customers — profile row required (that's where the pointers
-    // live); SQL prefilters lastInboundAt, TS applies the shared gates.
-    const registered = await drizzleDb
-      .select({
-        bookingCount: usersTable.bookingCount,
-        inquiryCount: usersTable.inquiryCount,
-        lastInteractionAt: customerProfiles.lastInteractionAt,
-        status: customerProfiles.status,
-        lastInboundAt: customerProfiles.lastInboundAt,
-        jeffViewedAt: customerProfiles.jeffViewedAt,
-      })
-      .from(usersTable)
-      .innerJoin(customerProfiles, eq(customerProfiles.userId, usersTable.id))
-      .where(
-        and(
-          eq(usersTable.role, "user"),
-          sql`${customerProfiles.lastInboundAt} IS NOT NULL`,
-        ),
-      );
+    // live); SQL prefilters lastInboundAt, TS applies the shared gates. SQL
+    // body lives in runRegisteredUnreadCountQuery (Wave1 Block A — shared
+    // with deploySmoke's smoke arm; no GREATEST/correlated-ORDER-BY risk, so
+    // no build/run split needed unlike guestList).
+    const registered = await runRegisteredUnreadCountQuery(drizzleDb);
     const registeredUnread = registered.filter(
       (r) =>
         !isHiddenCustomer(
@@ -995,154 +1238,7 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
     .input(z.object({ includeHidden: z.boolean().optional() }).optional())
     .query(async ({ input }) => {
       const drizzleDb = (await db.getDb())!;
-      const {
-        customerProfiles,
-        users: usersTable,
-        inquiries: inquiriesTable,
-        agentMessages,
-        customerInteractions,
-      } = await import("../../drizzle/schema");
-      // 訪客門檻 (v694 hotfix): 123 historical profiles were mostly noise
-      // senders (bank alerts / marketing blasts) profiled before the
-      // pipeline's noise filter existed. A guest only earns a sidebar chip
-      // when there is actual CUSTOMER content behind it — an inquiry row or
-      // an escalation — otherwise the customer list drowns in junk.
-      //
-      // A2 (Phase6; v787 P0/P1 回爐) — lastContactSql 只給下面的 ORDER BY 用:
-      // top-200 視窗必須在 SQL 內排序(LIMIT 200 之前)。它是 GREATEST(lastInboundAt,
-      // MAX(outbound)) 兩臂 COALESCE 到 *createdAt*(絕不 updatedAt:updatedAt 是
-      // onUpdateNow(),02:00 摘要 cron 的 UPDATE 會蓋成當晚時間,拿它排序 = 歸檔時間
-      // 冒充事件時間)。MySQL GREATEST 任一臂 NULL 就回 NULL,故每臂先 COALESCE。
-      //
-      // 但「回給 client 顯示的 lastContactAt」不用這個 raw sql 值 —— 改在下面 withFlags
-      // 用 computeLastContactAt 在 JS 算(與 customerList 同一支純函式)。關鍵原因
-      // (v787 P0 blocker):raw sql<Date> fragment 被 mysql2/TiDB 當「naive 無時區
-      // 字串」丟回,原封送到 client 再 new Date() 會用「瀏覽器本機時區」parse、錯一天
-      // (非美西 viewer 的 Emerald 顯示 7/2;跨 UTC 午夜的 guest 連 Jeff 自己也錯)。
-      // computeLastContactAt→toValidDate 在 server 端把 naive 字串錨成 UTC 真 Date,
-      // superjson 帶 Date tag 送出,client 收到真 instant 再由 formatMonthDayLA 以
-      // 美西曆日渲染。純函式版另有「兩指針皆空才落 createdAt」語意(createdAt 永不
-      // 蓋過真 inbound/outbound),比 SQL 每臂 floor 更準。
-      const lastContactSql = sql<Date>`GREATEST(
-        COALESCE(${customerProfiles.lastInboundAt}, ${customerProfiles.createdAt}),
-        COALESCE(
-          (SELECT MAX(${customerInteractions.createdAt}) FROM ${customerInteractions}
-            WHERE ${customerInteractions.customerProfileId} = ${customerProfiles.id}
-              AND ${customerInteractions.direction} = 'outbound'),
-          ${customerProfiles.createdAt}
-        )
-      )`;
-      const { qualifiesViaContent, latestInboundIsSpam } =
-        guestNoiseSelectFragments({
-          inquiries: inquiriesTable,
-          agentMessages,
-          customerInteractions,
-        });
-      const rows = await drizzleDb
-        .select({
-          profileId: customerProfiles.id,
-          name: customerProfiles.name,
-          email: customerProfiles.email,
-          phone: customerProfiles.phone,
-          status: customerProfiles.status,
-          // customer-unread (0108) — 來訊未讀紅點的兩根指針。
-          lastInboundAt: customerProfiles.lastInboundAt,
-          jeffViewedAt: customerProfiles.jeffViewedAt,
-          // 「最後往來」在 JS 用 computeLastContactAt 算(見上方註解),這裡只回三根
-          // 原始指針:inbound(已解碼 Date)、outbound(raw MAX,可能是 naive 字串)、
-          // createdAt(fallback,兩指針皆空才用)。updatedAt 不再 select — 它是 cron
-          // 蓋章的欄位,整條 guest 資料流不留它,杜絕未來誤抓(v787 紅線防禦縱深)。
-          lastOutboundAt: sql<Date | null>`(
-            SELECT MAX(${customerInteractions.createdAt}) FROM ${customerInteractions}
-              WHERE ${customerInteractions.customerProfileId} = ${customerProfiles.id}
-                AND ${customerInteractions.direction} = 'outbound'
-          )`,
-          createdAt: customerProfiles.createdAt,
-          // 需跟進: an unanswered inquiry (by this profile's email) older than 2d.
-          needsFollowup: sql<number>`EXISTS (SELECT 1 FROM ${inquiriesTable}
-            WHERE ${inquiriesTable.customerEmail} = ${customerProfiles.email}
-              AND ${inquiriesTable.status} IN ('new','in_progress')
-              AND ${inquiriesTable.createdAt} < (NOW() - INTERVAL 2 DAY))`,
-          // 紅點: unread agent messages filed against this guest's profile (the
-          // profileId IS the customerProfiles row), same readByJeff=0 signal.
-          unread: sql<number>`(SELECT COUNT(*) FROM ${agentMessages} WHERE ${agentMessages.relatedCustomerProfileId} = ${customerProfiles.id} AND ${agentMessages.readByJeff} = 0)`,
-          // v802 noise gate signals (byte-identical to the badge's fragments) —
-          // pulled out of the response in the map below, used only to compute
-          // isNoiseOnlyGuest. Not exposed to the client.
-          qualifiesViaContent,
-          latestInboundIsSpam,
-        })
-        .from(customerProfiles)
-        .where(
-          and(
-            sql`${customerProfiles.userId} IS NULL`,
-            // Contactable: at least an email OR a phone (a manual WeChat/phone
-            // lead may legitimately have no email).
-            sql`(
-              (${customerProfiles.email} IS NOT NULL AND ${customerProfiles.email} != '')
-              OR (${customerProfiles.phone} IS NOT NULL AND ${customerProfiles.phone} != '')
-            )`,
-            // If an email is present it must not already belong to a registered
-            // account (歸戶 targets show as registered customers, not twice).
-            sql`(
-              ${customerProfiles.email} IS NULL OR ${customerProfiles.email} = ''
-              OR NOT EXISTS (SELECT 1 FROM ${usersTable} WHERE ${usersTable.email} = ${customerProfiles.email})
-            )`,
-            // Earns a sidebar chip when there is real customer content: Jeff
-            // added them by hand (source='manual'), a filed inquiry/escalation
-            // exists, OR they actually sent us inbound mail (lastInboundAt).
-            // v800 (Ann 事故):a real customer whose inquiry classification
-            // silently failed still has lastInboundAt — gate on it too or she
-            // never appears (not even under includeHidden, which only toggles
-            // the blocked filter AFTER this qualification). This OR arm is
-            // mirrored verbatim in runGuestUnreadRankingQuery (badge) so both
-            // populations grow together — 口徑逐字一致 (v794 的教訓).
-            sql`(
-              ${customerProfiles.source} = 'manual'
-              OR EXISTS (SELECT 1 FROM ${inquiriesTable} WHERE ${inquiriesTable.customerEmail} = ${customerProfiles.email})
-              OR EXISTS (SELECT 1 FROM ${agentMessages} WHERE ${agentMessages.relatedCustomerProfileId} = ${customerProfiles.id} AND ${agentMessages.messageType} = 'escalation')
-              OR ${customerProfiles.lastInboundAt} IS NOT NULL
-            )`,
-          ),
-        )
-        .orderBy(desc(lastContactSql))
-        .limit(200);
-      // Manual hide reuses the same customerProfiles.status='blocked' switch as
-      // registered accounts (markNotCustomer/restoreCustomer by profileId).
-      // Default view drops blocked guests; the "show hidden" toggle brings them
-      // back. Nothing is deleted — a mis-hide is one click to restore.
-      const withFlags = rows.map(
-        ({ status, needsFollowup, unread, lastInboundAt, lastOutboundAt, jeffViewedAt, createdAt, qualifiesViaContent: qvc, latestInboundIsSpam: lis, ...r }) => ({
-          ...r,
-          // 與 customerList 同一支純函式、同一口徑:inbound / outbound 取較新者,兩者
-          // 皆空才落 createdAt(絕不 updatedAt)。computeLastContactAt→toValidDate 把
-          // raw sql 的 naive DATETIME 字串錨成 UTC 真 Date,client 收到真 instant。
-          lastContactAt: computeLastContactAt(
-            lastInboundAt ?? null,
-            lastOutboundAt ?? null,
-            createdAt ?? null,
-          ),
-          blocked: status === "blocked",
-          needsFollowup: Number(needsFollowup) === 1,
-          unread: Number(unread),
-          // customer-unread (0108) — 客人來訊 Jeff 還沒看(名字粗體 + 頭像紅點)。
-          unreadInbound: isUnreadInbound(lastInboundAt ?? null, jeffViewedAt ?? null),
-          // v802 noise gate — an inbound-only marketing/spam card. Hidden by
-          // default like `blocked`; revealed under includeHidden so Jeff can
-          // audit + bulk-block. r.email is the sender; userId is always null
-          // here (WHERE userId IS NULL).
-          isNoise: isNoiseOnlyGuest({
-            userId: null,
-            email: r.email ?? null,
-            qualifiesViaContent: Number(qvc) === 1,
-            hasInbound: lastInboundAt != null,
-            latestInboundIsSpam: Number(lis) === 1,
-          }),
-        }),
-      );
-      return input?.includeHidden
-        ? withFlags
-        : withFlags.filter((r) => !r.blocked && !r.isNoise);
+      return runGuestListQuery(drizzleDb, input);
     }),
 
   /**

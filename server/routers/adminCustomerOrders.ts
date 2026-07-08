@@ -339,7 +339,7 @@ async function loadCommitmentFindings(profileId: number): Promise<CustomerPromis
  * 整支掛掉,所以每個區塊各自 try/catch(呼叫端 todayList router 外層也包了
  * 一層,這裡是雙保險 —— 單一區塊掛了,其餘區塊的項目還是要看得到)。
  */
-async function loadTodayListItems(): Promise<TodayListItem[]> {
+export async function loadTodayListItems(): Promise<TodayListItem[]> {
   const { getDb } = await import("../db");
   const drizzleDb = await getDb();
   if (!drizzleDb) return [];

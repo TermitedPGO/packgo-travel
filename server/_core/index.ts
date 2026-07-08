@@ -1362,6 +1362,36 @@ async function startServer() {
     }
   });
 
+  // Wave1 Block A(ship 後自動煙霧)— safe-deploy.mjs 部署成功後打這個端點,對
+  // 一批核心讀查詢(customerList/guestList/customerUnreadCount/todayList/
+  // watchdogForCustomer/commandCenter 兩支)各自跑一輪真查詢,任一支拋錯就在
+  // arms 陣列裡帶回失敗,不讓 v794-v799 那種 TiDB 方言差異連環 500(Ann 事故)
+  // 靜默壞掉沒人知道。全程唯讀零寫入。同 import-case-file 的 LOCAL_SCRIPT_TOKEN
+  // 鑑權範式(Jeff 桌面的 safe-deploy.mjs 呼叫,不是瀏覽器 session)。
+  // POST /api/admin/deploy-smoke
+  //   Headers: Authorization: Bearer <LOCAL_SCRIPT_TOKEN>
+  //   Body(optional): { simulate?: "fail" }  — 附加一筆固定失敗臂,紅路演練用。
+  //   Returns: { ok: boolean, arms: Array<{ name, ok, ms, rowCount?, error? }> }
+  //     回應絕不夾帶客人資料 — 只有 runDeploySmoke 回傳的 {ok, arms} 結構。
+  app.post("/api/admin/deploy-smoke", async (req, res) => {
+    try {
+      const ip = await verifyInternalAuth(req, res, {
+        tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
+        rateLimitKey: "deploy-smoke",
+        rateLimitMax: 20,
+        windowSec: 3600,
+      });
+      if (!ip) return;
+      const body = req.body || {};
+      const { runDeploySmoke } = await import("./deploySmoke");
+      const result = await runDeploySmoke({ simulateFail: body?.simulate === "fail" });
+      return res.json(result);
+    } catch (err) {
+      logger.error({ err }, "[admin/deploy-smoke] error");
+      return res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   // 批十一 塊A — 案件夾文件進場:掃已匯入案件的 交付/ 與 來源/,逐檔上傳 R2 並寫
   // customerDocuments(掛該案訂單、uploadedBy='case_import')。同 import-case-file 的
   // dry_run/confirm 兩段 + LOCAL_SCRIPT_TOKEN。⛔ 硬紅線:文件 key 一律 customer-docs/,
