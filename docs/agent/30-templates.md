@@ -59,6 +59,10 @@
   憑推理(本機無 DATABASE_URL 測不到方言,推理已連錯兩次)。最低成本本地驗法:把 query build 到
   `.orderBy()` 後呼叫 `.toSQL().sql` 印出真實 SQL(用 `drizzle-orm/mysql-core` 的 `QueryBuilder` 免連線),
   斷言 GREATEST 只一份、別名有 `as`、關聯 WHERE 用 `outer.id` 全限定。能上 prod TiDB 唯讀跑一次形狀最好。
+- 資格條件放寬必帶噪音閘:凡把「誰能進列表/計數/自動處理」的條件放寬(加 OR 分支、擴大 WHERE),
+  必須同時問「這條新分支會放進哪些非目標實體?」並帶上對應過濾(isKnownNoise / spam 分類 / 測試帳號
+  排除)。2026-07-07 實案:guestList 加 OR lastInboundAt IS NOT NULL 救回被吞客人,同時把上百張
+  歷史行銷噪音卡放進列表、徽章 99+,隔天回爐兩輪。指揮側寫 spec 時就要點名這條,不是等審查抓。
   這是 hardening Wave 2「EXPLAIN 彩排自動化」要接管的事;至 2026-07-07 已是第四口(前三:0112 migration
   breakpoint、raw sql<Date> naive 字串、秒級截斷、本條 ORDER BY 關聯子查詢)。
 
