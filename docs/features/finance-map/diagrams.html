@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>PACK&GO 財務域現況地圖</title>
+<style>
+  :root {
+    --ink: #111;
+    --paper: #fff;
+    --gray: #666;
+    --lightgray: #eee;
+    --midgray: #ccc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 24px 80px;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: -apple-system, "PingFang TC", "Microsoft JhengHei", "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.5;
+  }
+  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: 0.02em; }
+  h2 { font-size: 17px; margin: 48px 0 4px; border-bottom: 2px solid var(--ink); padding-bottom: 6px; }
+  .meta { color: var(--gray); font-size: 13px; margin-bottom: 24px; }
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 18px;
+    font-size: 12px; margin: 12px 0 20px; padding: 12px 16px;
+    border: 1px solid var(--ink); border-radius: 6px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .swatch { width: 22px; height: 14px; border-radius: 3px; flex-shrink: 0; }
+  .sw-auto { border: 2px solid var(--ink); background: var(--paper); }
+  .sw-semi { border: 2px dashed var(--ink); background: var(--paper); }
+  .sw-manual { border: 2px dashed var(--gray); background: var(--lightgray); }
+  .sw-dead { border: 1.5px dotted var(--gray); background: var(--lightgray); }
+  .sw-ext { border: 3px double var(--ink); background: var(--paper); }
+  .sw-risk { border: 2px solid var(--ink); background: repeating-linear-gradient(45deg, var(--paper), var(--paper) 4px, var(--lightgray) 4px, var(--lightgray) 8px); }
+
+  .diagram { overflow-x: auto; padding: 8px 0 24px; }
+  .lanes { display: grid; grid-auto-flow: column; grid-auto-columns: 220px; gap: 16px; min-width: max-content; align-items: start; }
+  .lane { display: flex; flex-direction: column; gap: 4px; }
+  .lane-title { font-size: 13px; font-weight: 600; text-align: center; padding: 6px 4px; border-bottom: 1px solid var(--ink); margin-bottom: 8px; }
+  .box {
+    border: 2px solid var(--ink);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 12px;
+    background: var(--paper);
+    min-height: 40px;
+  }
+  .box .sub { color: var(--gray); font-size: 10.5px; margin-top: 3px; }
+  .box.manual { border-style: dashed; border-color: var(--gray); background: var(--lightgray); }
+  .box.semi { border-style: dashed; border-color: var(--ink); }
+  .box.dead { border-style: dotted; border-color: var(--gray); background: var(--lightgray); color: var(--gray); }
+  .box.dead .title { text-decoration: line-through; }
+  .box.ext { border-style: double; border-width: 3px; }
+  .box.risk { background: repeating-linear-gradient(45deg, var(--paper), var(--paper) 4px, var(--lightgray) 4px, var(--lightgray) 8px); }
+  .title { font-weight: 600; }
+  .arrow-down { text-align: center; font-size: 16px; color: var(--gray); margin: -1px 0; }
+  .note-row { font-size: 11px; color: var(--gray); text-align: center; margin: 2px 0; }
+
+  .callout {
+    border: 2px solid var(--ink);
+    background: repeating-linear-gradient(45deg, var(--paper), var(--paper) 4px, var(--lightgray) 4px, var(--lightgray) 8px);
+    border-radius: 6px;
+    padding: 14px 16px;
+    font-size: 13px;
+    margin: 20px 0;
+  }
+  .callout .title { font-size: 13px; margin-bottom: 6px; }
+
+  .grid-flow {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(200px, 1fr));
+    gap: 14px;
+    margin: 16px 0;
+  }
+  .section-label { font-size: 12px; font-weight: 600; color: var(--gray); text-transform: uppercase; letter-spacing: 0.04em; margin: 22px 0 8px; }
+
+  .footer { margin-top: 60px; font-size: 12px; color: var(--gray); border-top: 1px solid var(--midgray); padding-top: 12px; }
+  code { background: var(--lightgray); padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+
+  @media (prefers-color-scheme: dark) {
+    :root { --ink: #eee; --paper: #1a1a1a; --gray: #999; --lightgray: #2a2a2a; --midgray: #444; }
+  }
+  :root[data-theme="dark"] { --ink: #eee; --paper: #1a1a1a; --gray: #999; --lightgray: #2a2a2a; --midgray: #444; }
+  :root[data-theme="light"] { --ink: #111; --paper: #fff; --gray: #666; --lightgray: #eee; --midgray: #ccc; }
+</style>
+</head>
+<body>
+
+<h1>PACK&amp;GO 財務域現況地圖</h1>
+<div class="meta">唯讀偵察 · 2026-07-08 · 對應文字報告 <code>docs/features/finance-map/current-state.md</code> · 黑白示意圖,兩張:錢流主圖 + 系統資料流圖</div>
+
+<div class="legend">
+  <div class="legend-item"><span class="swatch sw-ext"></span>外部系統(Plaid/Stripe/Square/Gmail)</div>
+  <div class="legend-item"><span class="swatch sw-auto"></span>全自動(排程/webhook,無人工介入)</div>
+  <div class="legend-item"><span class="swatch sw-semi"></span>半自動(AI 建議,人工確認才落地)</div>
+  <div class="legend-item"><span class="swatch sw-manual"></span>純人工(系統外或需人手動點)</div>
+  <div class="legend-item"><span class="swatch sw-risk"></span>⚠ 斷點 / 風險點</div>
+  <div class="legend-item"><span class="swatch sw-dead"></span>死碼(無存活呼叫路徑)</div>
+</div>
+
+<h2>圖一 · 錢的真實流(Money Flow)</h2>
+
+<div class="diagram">
+<div class="lanes">
+
+  <div class="lane">
+    <div class="lane-title">信用卡(Stripe)</div>
+    <div class="box ext"><span class="title">客人網站刷卡</span><div class="sub">團費 / 簽證代辦 / 會員訂閱</div></div>
+    <div class="arrow-down">↓</div>
+    <div class="box"><span class="title">Stripe Checkout Session</span><div class="sub">payment_method_types: ["card"] only</div></div>
+    <div class="arrow-down">↓</div>
+    <div class="box"><span class="title">Webhook 自動處理</span><div class="sub">checkout.session.completed · 冪等表擋重放</div></div>
+    <div class="arrow-down">↓</div>
+    <div class="box"><span class="title">原子交易寫入</span><div class="sub">payments + bookings/visaApplications + accountingEntries(income)</div></div>
+    <div class="arrow-down">↓</div>
+    <div class="box risk"><span class="title">⚠ 立即認列</span><div class="sub">entryType 固定 'income',不設 trust/operating,不進 trustDeferredIncome</div></div>
+  </div>
+
+  <div class="lane">
+    <div class="lane-title">Square(訂製單)</div>
+    <div class="box manual"><span class="title">Jeff 手貼收款連結</span><div class="sub">SquarePaymentProvider 未實作,SQUARE_ACCESS_TOKEN 從未讀取</div></div>
+    <div class="arrow-down">↓</div>
+    <div class="box ext"><span class="title">客人在 Square 頁面刷卡</span><div class="sub">本站完全不知道結果</div></div>
+    <div class="arrow-down">↓</div>
+    <div class="box manual"><span class="title">Jeff 手動「記已收」</span><div class="sub">recordPayment,method 預設回退 'square'</div></div>
+    <div class="arrow-down">↓</div>
+    <div class="box"><span class="title">customOrders 收款欄位</span><div class="sub">depositPaidAt/balancePaidAt · 不建 payments、不建 accountingEntries</div></div>
+  </div>
+
+  <div class="lane">
+    <div class="lane-title">Zelle / 電匯 / 支票</div>
+    <div class="box manual"><span class="title">客人直接匯入 BofA</span><div class="sub">網站完全不觸發,站外行為</div></div>
+    <div class="arrow-down">↓</div>
+    <div class="box"><span class="title">Plaid 每日同步 05:00 UTC</span><div class="sub">plaidSyncWorker,concurrency=1</div></div>
+    <div class="arrow-down">↓</div>
+    <div class="box"><span class="title">bankTransactions</span><div class="sub">AI 自動分類 customer/vendor/other_review</div></div>
+    <div class="arrow-down">↓</div>
+    <div class="box"><span class="title">若帳戶 isTrustAccount=1</span><div class="sub">且分類 income_booking → trustDeferredIncome</div></div>
+    <div class="arrow-down">↓</div>
+    <div class="box"><span class="title">06:00 UTC 認列排程</span><div class="sub">trustRecognitionWorker 掃描到期 → recognizedAt</div></div>
+    <div class="arrow-down">↓</div>
+    <div class="box manual"><span class="title">人工轉帳提醒</span><div class="sub">notifyOwner:「該手動把 $X 轉到 operating」</div></div>
+  </div>
+
+  <div class="lane">
+    <div class="lane-title">現金 / 其他</div>
+    <div class="box manual"><span class="title">客服話術提及</span><div class="sub">「接受現金」,但零程式路徑</div></div>
+    <div class="arrow-down">↓</div>
+    <div class="box manual"><span class="title">若真發生,純人工</span><div class="sub">Jeff 事後手動走 AccountingTab 分錄</div></div>
+    <div class="arrow-down">↓</div>
+    <div class="box dead"><span class="title">PayPal / Venmo / Cash App</span><div class="sub">從未整合,enum 選項與網域雜訊過濾殘影</div></div>
+  </div>
+
+</div>
+</div>
+
+<div class="callout">
+  <div class="title">⚠ 全份地圖最關鍵的斷點</div>
+  Stripe 收的團費 / 簽證訂金<b>完全繞過</b> Trust 遞延認列機制(整套機制只對「Plaid 偵測到打進 Trust 銀行帳戶的存款」生效)。客人刷卡當下,系統立即記為已認列的收入,不等出發日,也不分 trust/operating 帳戶 —— 這是否構成 CLAUDE.md 紅線 §3(CST §17550)的合規缺口,取決於 Stripe 收單資金的法律定性,需要 Jeff / 會計顧問確認(見裁示問題)。
+</div>
+
+<div class="section-label">供應商成本流出(反方向:錢從 PACK&amp;GO 流出去)</div>
+<div class="grid-flow">
+  <div class="box manual"><span class="title">供應商 invoice</span><div class="sub">Lion / UV / eChinaTours,人工核對</div></div>
+  <div class="box"><span class="title">手寫成本欄位</span><div class="sub">customOrders.supplierCost / bookings.supplierCost,各自獨立無共用表</div></div>
+  <div class="box manual"><span class="title">Jeff 人工轉帳/刷卡</span><div class="sub">系統完全不記錄、不發起,無「應付」概念</div></div>
+  <div class="box risk"><span class="title">⚠ 事後才被看到</span><div class="sub">Plaid 抓到出帳交易後,AI 用供應商名單分類 cogs_tour(純報稅用,無法反查是哪張訂單)</div></div>
+</div>
+
+<div class="section-label">兩本帳(誰是權威、怎麼防雙計)</div>
+<div class="grid-flow">
+  <div class="box ext"><span class="title">Gmail 收據信</span></div>
+  <div class="box"><span class="title">pendingExpenses 佇列</span><div class="sub">AI 只搬運,絕不入帳</div></div>
+  <div class="box manual"><span class="title">Jeff 人工 confirm</span><div class="sub">handledMode: ledger 或 receipt_only 二選一,無自動比對</div></div>
+  <div class="box risk"><span class="title">⚠ 無交叉驗證</span><div class="sub">bankTransactions(權威,Plaid)與 accountingEntries(輔助,手動)之間沒有 FK、沒有去重機制</div></div>
+</div>
+
+<h2>圖二 · 系統資料流(誰讀誰寫、三種斷點)</h2>
+
+<div class="section-label">每日排程管線(BullMQ,單一 Fly process,05:00→06:00→07:00 UTC 依序)</div>
+<div class="grid-flow">
+  <div class="box ext"><span class="title">Plaid API</span></div>
+  <div class="box"><span class="title">plaidSyncWorker · 05:00</span><div class="sub">寫 bankTransactions + linkedBankAccounts.cursor</div></div>
+  <div class="box"><span class="title">AccountingAgent 自動分類</span><div class="sub">同步後立即觸發,cap 200 筆/次</div></div>
+  <div class="box"><span class="title">trustRecognitionWorker · 06:00</span><div class="sub">讀寫 trustDeferredIncome.recognizedAt</div></div>
+</div>
+<div class="grid-flow" style="margin-top:-4px;">
+  <div class="box manual"><span class="title">scalingGuardrailWorker · 07:00</span><div class="sub">歸檔舊交易 + LLM 預算門檻(成本控管,非會計)</div></div>
+  <div class="box dead"><span class="title">triggerManualTrustRecognition()</span><div class="sub">queue 版手動觸發,全 repo 無呼叫端</div></div>
+  <div class="box"><span class="title">/health 端點</span><div class="sub">只查 DB/Redis/Stripe/LLM,無 per-queue 檢查</div></div>
+  <div class="box"><span class="title">observabilityCounters 週報</span><div class="sub">每週一 12:00 UTC,queue failed 數(手動維護清單,新 queue 易漏)</div></div>
+</div>
+
+<div class="section-label">核心資料表</div>
+<div class="grid-flow">
+  <div class="box"><span class="title">bankTransactions</span><div class="sub">Plaid 來源 · 損益權威帳</div></div>
+  <div class="box"><span class="title">linkedBankAccounts</span><div class="sub">isTrustAccount flag,人工設定</div></div>
+  <div class="box"><span class="title">trustDeferredIncome</span><div class="sub">Trust 遞延認列佇列</div></div>
+  <div class="box"><span class="title">accountingEntries</span><div class="sub">手動分錄 · 報稅輔助帳</div></div>
+  <div class="box"><span class="title">payments</span><div class="sub">Stripe 專用,唯一寫入者是 webhook</div></div>
+  <div class="box"><span class="title">customOrders</span><div class="sub">訂製單收款欄位,無獨立 paymentStatus</div></div>
+  <div class="box"><span class="title">invoices</span><div class="sub">3 條建立路徑,狀態與 customOrders 不同步</div></div>
+  <div class="box"><span class="title">pendingExpenses</span><div class="sub">Gmail 收據佇列,AI 只到這裡</div></div>
+</div>
+
+<div class="section-label">Admin UI · 現行 live 路徑(/workspace → FinanceReports.tsx,2026-05-29 七合三)</div>
+<div class="grid-flow">
+  <div class="box"><span class="title">損益表(預設)</span><div class="sub">ProfitLossV2 · 讀 bankTransactions · 唯讀</div></div>
+  <div class="box"><span class="title">對帳</span><div class="sub">ReconciliationTab · reconciliation.runReport · 唯讀</div></div>
+  <div class="box"><span class="title">發票</span><div class="sub">InvoicesTab · 可改狀態,不能新建</div></div>
+  <div class="box"><span class="title">客人訂金</span><div class="sub">TrustComplianceV2 · 信託對帳+稽核匯出</div></div>
+</div>
+<div class="grid-flow" style="margin-top:-4px;">
+  <div class="box semi"><span class="title">報稅匯出</span><div class="sub">AccountingTab · 唯一能手動建 accountingEntries + 確認 pendingExpenses</div></div>
+  <div class="box semi"><span class="title">客戶詳情頁「記已收」</span><div class="sub">CustomOrderDetail → recordPayment,獨立於 FinanceReports</div></div>
+  <div class="box semi"><span class="title">看門狗黃卡 paymentMatch</span><div class="sub">DetailTabs,建議不落地,on-demand 非排程</div></div>
+  <div class="box"><span class="title">/ops/finance</span><div class="sub">純占位頁,新版殼子還在蓋</div></div>
+</div>
+
+<div class="section-label">⚠ 死碼(確認無任何存活 import)</div>
+<div class="grid-flow">
+  <div class="box dead"><span class="title">FinanceTab.tsx</span><div class="sub">對帳/發票/帳務/銀行帳戶 4 分頁舊父元件</div></div>
+  <div class="box dead"><span class="title">FinanceLanding.tsx</span><div class="sub">QuickBooks 風儀表板,628 行,呼叫端 id 對不上任何 registry</div></div>
+  <div class="box dead"><span class="title">BankAccountsTab.tsx</span><div class="sub">只被死碼 FinanceTab 引用</div></div>
+</div>
+
+<div class="callout">
+  <div class="title">三種斷點總結</div>
+  <b>🟢 全自動</b>:Plaid 同步、Stripe webhook 原子寫入、AI 自動分類、Trust 認列排程掃描(限 Plaid 偵測到的存款)。<br>
+  <b>🟡 半自動</b>:看門狗 paymentMatch 建議、Gmail 收據確認佇列 —— AI 只建議/搬運,人工才落地。<br>
+  <b>🔴 純人工</b>:Square 催收全流程、供應商成本核對與付款、Trust→Operating 實際轉帳、兩本帳防雙計判斷、customOrders/invoices 狀態互不同步。<br>
+  <b>⚫ 沒接起來</b>:Stripe 收款繞過 Trust 遞延機制、accountingEntries 與 bankTransactions 無交叉驗證、供應商付款方向零比對機制、3 個死碼 UI 元件、queue 版手動觸發無呼叫端。
+</div>
+
+<div class="footer">
+  本圖為唯讀偵察產物,所有結論的 file:line 出處見 <code>current-state.md</code>。分類標記([F]已查證/[I]推論/[V]待 prod 查證)僅存在於文字報告,圖中一律以最保守(已查證)結論呈現,標 ⚠ 者為需人工/prod 進一步確認之處。
+</div>
+
+</body>
+</html>
