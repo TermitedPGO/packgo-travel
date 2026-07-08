@@ -403,4 +403,18 @@ tRPC admin 路由 onError 噪音閘(server/_core/index.ts):白名單只放行 IN
 
 三路 fresh 對抗審查(正確性/向後相容、時區地雷專審、測試偵測力含突變測試)全 PASS,零 P0/P1;測試偵測力那路用突變測試(改壞邏輯重跑確認測試真的會紅)抓到一個真實邊界情況(空字串 observabilitySection 會產生懸空 --- 分隔線)並修正。獨立重跑核對:`tsc --noEmit` 0 錯;`pnpm exec vitest run` → `306 passed | 11 skipped (317)` files / `4571 passed | 90 skipped (4661)` tests;queue 枚舉 grep 核對 30 支全數涵蓋。零 LLM 呼叫、零 schema migration。已知限制:QUEUE_MODULE_IMPORTERS 是手動維護的 7 個 import 清單(非自動掃描 server/queues/ 目錄),未來新增 queue 檔案忘記加進清單會被安靜漏掉。
 
-### 塊D — fail-open 全面盤點(未開始,依賴塊B,塊B 已完成可開工)
+### 塊D — fail-open 全面盤點(2026-07-08,已 commit+push `762fa2e`)
+
+`docs/features/customer-cockpit/fail-open-ledger.md`(新檔,148KB):server/ 底下 873 個 catch/`.catch(` 全枚舉分類。16 路平行 fresh 稽核(每路負責一批,用預先計算好的 file:line 清單 + 讀碼判斷,不是憑檔名瞎猜)+ 三路對抗審查。grep 總數與 ledger 條目數對帳成立(873=873)。分類三檔:A 必須浮出 143 筆(其中 129 筆屬四類高風險路徑 — 客人資料流/錢/cron 與部署可見性/客人可見輸出 — 本批已接線;14 筆記帳留給 Wave4,不本批擴散)、B 可以安靜 724 筆(刻意 fail-open 設計,理由逐條記錄)、C 爭議 6 筆(交指揮裁決,完整列在 ledger 專節:translation.ts 翻譯 catch-all、gmail.ts 回信失敗信號、photos.ts Packpoint 獎勵、bookings.ts 三處金額/排程/出發日相關)。
+
+129 個高風險 A 類接上 `server/_core/errorFunnel.ts` 的 reportFunnelError,每處只加一行呼叫(fire-and-forget + .catch(() => {}) 雙保險),行為不變(仍 continue,原有 log/console/回傳值完全保留)。涵蓋 stripeWebhook、plaidWebhook、bookings、accounting、gmailPipeline、tourGenerator 等 60 個檔案。抽 3 個代表性場景(plaidWebhook/gmailPipeline/auth 密碼重設)補測試。
+
+三路 fresh 對抗審查:ledger 完整性那路一開始判 FAIL,但兩個「阻塞項」都是審查時序誤判 —— 審查跑在接線完成之後,把「本批接線動作自己新增的 reportFunnelError().catch(() => {}) 呼叫」誤認成「原本就漏枚舉的舊 catch」(grep 總數因此從 873 膨脹到 1002,差距剛好等於新增的 129 個接線點),已在 ledger 方法論章節明確寫清楚避免未來重蹈;接線正確性審查 PASS(128/128 全接、行為不變、import/source 字串正確);四分類一致性審查抓到 1 個真實誤判(catalogRebuild/index.ts:261 應屬 customer-output 卻標 none,同款 tourGenerator.ts:492 班期重建失敗形狀)已修復補接線。
+
+獨立重跑核對(commit 前親自跑三次,pre-commit/pre-push hook 又各跑一次,五次數字一致):`tsc --noEmit` 0 錯;`pnpm exec vitest run` → `309 passed | 11 skipped (320)` files / `4580 passed | 90 skipped (4670)` tests。已知限制:14 筆 A 類 Wave4 backlog(含 inquiries.ts:310 緊急客人通知,審查建議提升優先權,待 Jeff/後續 Wave 裁決)。
+
+---
+
+## 硬化戰役 Wave1 收官(2026-07-08)
+
+四塊(A ship 煙霧 / B 錯誤漏斗 / C D1 觀測計數器 / D fail-open 盤點)全部完成、獨立審查、獨立驗證、獨立 commit+push。詳見 T6 完工報告 `t6-report-20260708-wave1.md`。**待 Jeff `pnpm ship`**,ship 後執行者接手跑驗收走查清單(煙霧七臂/curl 端點/紅路演練/D1 手動觸發/48h soak/worker wiring grep),不留給 Jeff 手動。
