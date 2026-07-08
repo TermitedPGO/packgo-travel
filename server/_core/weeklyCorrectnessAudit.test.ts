@@ -13,6 +13,15 @@
  * pure. The executor (runWeeklyCorrectnessAudit) is DB-touching and verified
  * live per repo norm (followupScan.test.ts / duplicateProfileScan.test.ts),
  * same as its sibling weekly scans.
+ *
+ * Wave1 Block C additions: the observability-counters wiring inside
+ * runWeeklyCorrectnessAudit (gatherMessagesFailedWeeklyDelta /
+ * gatherQueueFailedCounts / gatherLlmCircuitStats / formatObservabilitySection)
+ * has its OWN dedicated test file (observabilityCounters.test.ts) with real
+ * mocks for each collector's IO. This file only needs enough of a redis/queue
+ * mock that those collectors degrade to their harmless "couldn't read" states
+ * instead of throwing — the executor-level tests here were never about
+ * exercising the collectors' internals, only the audit's own control flow.
  */
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "fs";
@@ -33,9 +42,34 @@ vi.mock("./customerFacts", async () => {
 });
 
 // Redis is mocked so the heartbeat write in runWeeklyCorrectnessAudit never
-// touches a real client under `vitest run`.
+// touches a real client under `vitest run`. get/hmget are stubbed to their
+// "nothing here" shapes (null / all-null tuple) purely so the Wave1 Block C
+// observability collectors (gatherMessagesFailedWeeklyDelta/
+// gatherLlmCircuitStats) degrade to a clean, harmless state instead of
+// throwing "x is not a function" — this file doesn't assert on their output.
 const redisSetMock = vi.fn().mockResolvedValue("OK");
-vi.mock("../redis", () => ({ redis: { set: (...args: unknown[]) => redisSetMock(...args) } }));
+vi.mock("../redis", () => ({
+  redis: {
+    set: (...args: unknown[]) => redisSetMock(...args),
+    get: vi.fn().mockResolvedValue(null),
+    hmget: vi.fn().mockResolvedValue([null, null, null]),
+  },
+}));
+
+// Wave1 Block C's gatherQueueFailedCounts dynamically imports server/queue.ts
+// + every server/queues/*.ts file to enumerate live BullMQ Queue instances.
+// None of that is relevant to THIS file's executor-control-flow tests (it's
+// covered by observabilityCounters.test.ts's own dedicated mocks), so every
+// queue-definition module is stubbed to an empty export set here — that
+// makes gatherQueueFailedCounts() resolve to `[]` deterministically, with no
+// dependency on a real Redis-backed BullMQ connection.
+vi.mock("../queue", () => ({}));
+vi.mock("../queues/abandonmentRecoveryQueue", () => ({}));
+vi.mock("../queues/packpointMaintenanceQueue", () => ({}));
+vi.mock("../queues/posterProcessingQueue", () => ({}));
+vi.mock("../queues/priorityRewriteCron", () => ({}));
+vi.mock("../queues/quoteFollowUpQueue", () => ({}));
+vi.mock("../queues/supplierSyncQueue", () => ({}));
 
 import {
   diffCustomerSummary,
@@ -361,6 +395,146 @@ describe("priorityForMismatchCount", () => {
   });
 });
 
+// ── Wave1 Block C: formatAuditDigest's optional observabilitySection param ──
+describe("formatAuditDigest — observabilitySection (Wave1 Block C, optional 2nd param)", () => {
+  it("omitted entirely → output is byte-for-byte identical to calling with one arg (backward compat)", () => {
+    const results: CustomerAuditResult[] = [
+      auditResult({ profileId: 1, email: "a@example.com", mismatches: [{ field: "actions", cached: "X", recomputed: "Y" }] }),
+    ];
+    const withoutSecondArg = formatAuditDigest(results);
+    const explicitlyUndefined = formatAuditDigest(results, undefined);
+    expect(explicitlyUndefined).toBe(withoutSecondArg);
+    expect(withoutSecondArg).not.toContain("---\n\n觀測計數器");
+  });
+
+  it("both mismatches AND degraded present + observabilitySection → three `---`-separated sections, in order", () => {
+    const results: CustomerAuditResult[] = [
+      auditResult({ profileId: 1, email: "mismatch@example.com", mismatches: [{ field: "actions", cached: "X", recomputed: "Y" }] }),
+      auditResult({ profileId: 2, email: "degraded@example.com", mismatches: [], factsGatheringDegraded: true }),
+    ];
+    const obs = "觀測計數器\nmessagesFailed 週增量:0\n各 queue failed 數:全部 queue failed=0\nLLM circuit 統計(近 7 天):circuit_opened=0, rate_limit_429=0, calls_total=0";
+    const body = formatAuditDigest(results, obs);
+    const sections = body.split("\n\n---\n\n");
+    expect(sections).toHaveLength(3);
+    expect(sections[0]).toContain("mismatch@example.com");
+    expect(sections[1]).toContain("degraded@example.com");
+    expect(sections[2]).toBe(obs);
+  });
+
+  it("only mismatches (no degraded) + observabilitySection → two sections", () => {
+    const results: CustomerAuditResult[] = [
+      auditResult({ profileId: 1, email: "mismatch@example.com", mismatches: [{ field: "delivered", cached: "X", recomputed: "Y" }] }),
+    ];
+    const obs = "觀測計數器\nline1\nline2\nline3";
+    const body = formatAuditDigest(results, obs);
+    const sections = body.split("\n\n---\n\n");
+    expect(sections).toHaveLength(2);
+    expect(sections[1]).toBe(obs);
+  });
+
+  // 審查一 P2 finding: only degraded (no ordinary mismatches) + observabilitySection
+  // was not directly covered — the "two sections" shape was only tested for
+  // the mismatch-only case, relying on code-path symmetry (parts.push in two
+  // independent places) rather than a direct test. Locks the degraded-only
+  // permutation explicitly.
+  it("only degraded (no mismatches) + observabilitySection → two sections (degraded, then observability)", () => {
+    const results: CustomerAuditResult[] = [
+      auditResult({ profileId: 9, email: "degraded@example.com", mismatches: [], factsGatheringDegraded: true }),
+    ];
+    const obs = "觀測計數器\nline1\nline2\nline3";
+    const body = formatAuditDigest(results, obs);
+    const sections = body.split("\n\n---\n\n");
+    expect(sections).toHaveLength(2);
+    expect(sections[0]).toContain("degraded@example.com");
+    expect(sections[0]).toContain("gatherCustomerFacts 疑似出錯");
+    expect(sections[1]).toBe(obs);
+  });
+
+  it("zero mismatches AND zero degraded (empty parts) + observabilitySection → the section is returned ALONE, no leading separator/blank line", () => {
+    const results: CustomerAuditResult[] = [auditResult({ profileId: 1, email: "clean@example.com", mismatches: [] })];
+    const obs = "觀測計數器\nmessagesFailed 週增量:首次基線,下週起有增量\n各 queue failed 數:全部 queue failed=0\nLLM circuit 統計(近 7 天):circuit_opened=0, rate_limit_429=0, calls_total=0";
+    const body = formatAuditDigest(results, obs);
+    expect(body).toBe(obs); // no stray "---" or leading whitespace prepended
+    expect(body.startsWith("\n")).toBe(false);
+    expect(body).not.toMatch(/^---/);
+  });
+
+  // 審查三 finding: mutating the `undefined` guard to a truthy/falsy check
+  // slipped past all 41 pre-existing tests because none of them exercised a
+  // DEFINED-but-EMPTY observabilitySection with a non-empty base — the only
+  // case where "=== undefined" and "falsy" actually diverge in output. This
+  // pins the real contract (falsy, not strict undefined, per the doc comment
+  // above formatAuditDigest) and would catch a regression to the old
+  // strict-undefined check, which used to leave a dangling "---" separator
+  // with nothing after it.
+  it("observabilitySection provided as an EMPTY STRING (not omitted) with a non-empty base → degrades exactly like omitted, no dangling separator", () => {
+    const results: CustomerAuditResult[] = [
+      auditResult({ profileId: 1, email: "mismatch@example.com", mismatches: [{ field: "actions", cached: "X", recomputed: "Y" }] }),
+    ];
+    const withEmptyString = formatAuditDigest(results, "");
+    const omitted = formatAuditDigest(results);
+    expect(withEmptyString).toBe(omitted);
+    expect(withEmptyString).not.toMatch(/---\s*$/); // no trailing dangling separator
+  });
+
+  it("observabilitySection provided as an empty string with an EMPTY base (zero mismatches, zero degraded) → returns empty string, not a stray separator", () => {
+    const results: CustomerAuditResult[] = [auditResult({ profileId: 1, email: "clean@example.com", mismatches: [] })];
+    expect(formatAuditDigest(results, "")).toBe("");
+  });
+});
+
+// ── Wave1 Block C: aggregateAuditResults's optional observabilitySection param ──
+describe("aggregateAuditResults — observabilitySection (Wave1 Block C, optional 2nd param)", () => {
+  it("backward compat lock: zero-diff WITHOUT observabilitySection → card is still undefined (pre-Wave1-Block-C promise)", () => {
+    const results: CustomerAuditResult[] = [auditResult({ profileId: 1, email: "a@example.com" })];
+    const agg = aggregateAuditResults(results);
+    expect(agg.card).toBeUndefined();
+    expect(agg.mismatching).toBe(0);
+    expect(agg.degraded).toBe(0);
+  });
+
+  it("zero-diff WITH observabilitySection → a card IS produced ('一切正常' title, normal priority), body ends with the observability section", () => {
+    const results: CustomerAuditResult[] = [auditResult({ profileId: 1, email: "a@example.com" })];
+    const obs = "觀測計數器\nmessagesFailed 週增量:0\n各 queue failed 數:全部 queue failed=0\nLLM circuit 統計(近 7 天):circuit_opened=0, rate_limit_429=0, calls_total=0";
+    const agg = aggregateAuditResults(results, obs);
+    expect(agg.card).toBeDefined();
+    expect(agg.card!.title).toContain("一切正常");
+    expect(agg.card!.priority).toBe("normal");
+    expect(agg.card!.body).toBe(obs);
+  });
+
+  it("zero-diff WITH observabilitySection provided as an EMPTY STRING (not omitted) → treated same as omitted, card stays undefined (falsy check, not strict undefined)", () => {
+    const results: CustomerAuditResult[] = [auditResult({ profileId: 1, email: "a@example.com" })];
+    const agg = aggregateAuditResults(results, "");
+    expect(agg.card).toBeUndefined();
+    expect(agg.mismatching).toBe(0);
+    expect(agg.degraded).toBe(0);
+  });
+
+  it("priority NOT influenced by ⚠ markers inside observabilitySection when mismatching=0/degraded=0 — stays 'normal' even with queue/LLM alarms", () => {
+    const results: CustomerAuditResult[] = [auditResult({ profileId: 1, email: "a@example.com" })];
+    const alarmingObs =
+      "觀測計數器\n⚠ messagesFailed 週增量:12\n⚠ 各 queue failed 數:tour-generation=9\n⚠ LLM circuit 統計(近 7 天):circuit_opened=3, rate_limit_429=5, calls_total=100";
+    const agg = aggregateAuditResults(results, alarmingObs);
+    expect(agg.card!.priority).toBe("normal");
+  });
+
+  it("mismatching>0 case: observabilitySection is appended to the existing (pre-Wave1-Block-C) mismatch digest, existing priority algorithm untouched", () => {
+    const results: CustomerAuditResult[] = Array.from({ length: 5 }, (_, i) =>
+      auditResult({ profileId: i + 1, email: `c${i}@example.com`, mismatches: [{ field: "actions" as const, cached: "X", recomputed: "Y" }] }),
+    );
+    const withoutObs = aggregateAuditResults(results);
+    const withObs = aggregateAuditResults(results, "觀測計數器\nline1\nline2\nline3");
+    // >=5 mismatching customers still escalates to "high" regardless of the
+    // observability section — untouched by Wave1 Block C.
+    expect(withoutObs.card!.priority).toBe("high");
+    expect(withObs.card!.priority).toBe("high");
+    expect(withObs.card!.title).toBe(withoutObs.card!.title);
+    expect(withObs.card!.body).toContain("觀測計數器");
+    expect(withoutObs.card!.body).not.toContain("觀測計數器");
+  });
+});
+
 describe("messageType/shape matches followupScan.ts's agentMessages card convention", () => {
   it("aggregate card always carries a card.priority of normal|high (valid agentMessages.priority enum values), never something else", () => {
     const oneMismatch: CustomerAuditResult[] = [
@@ -485,10 +659,36 @@ describe("runWeeklyCorrectnessAudit — executor loop actually continues past on
 
   it("跑完就寫 Redis 心跳 key —— 零差異也寫,監工才能區分「跑了沒事」與「根本沒跑」", async () => {
     redisSetMock.mockClear();
-    const db = fakeDb([]); // 零候選 → 零差異、不發卡,但仍要留心跳痕跡
+    const db = fakeDb([]); // 零候選 → 零差異,但仍要留心跳痕跡
     const now = new Date("2026-07-06T12:00:00.000Z");
     const result = await runWeeklyCorrectnessAudit(db, { now });
-    expect(result.posted).toBe(false);
+    // Wave1 Block C intentional behavior change: the observability section is
+    // now ALWAYS attached, so aggregate.card is always defined — a zero-diff
+    // week still posts a card (title "一切正常"), it's just no longer silent.
+    // Pre-Wave1-Block-C this asserted posted===false; see
+    // aggregateAuditResults's Wave1 Block C doc-comment for why that "zero
+    // differences → post nothing" behavior was deliberately retired.
+    expect(result.posted).toBe(true);
+    expect(result.mismatching).toBe(0);
+    expect(result.degraded).toBe(0);
     expect(redisSetMock).toHaveBeenCalledWith(WEEKLY_AUDIT_HEARTBEAT_KEY, now.toISOString());
+  });
+
+  it("零差異週的卡片內文仍帶有觀測計數器三行(Wave1 Block C 的整個重點:讓 Jeff 每週一都看得到,不只出事那週)", async () => {
+    const db = fakeDb([]);
+    const insertedValues: any[] = [];
+    db.insert = vi.fn(() => ({
+      values: (v: any) => {
+        insertedValues.push(v);
+        return Promise.resolve(undefined);
+      },
+    }));
+    const result = await runWeeklyCorrectnessAudit(db);
+    expect(result.posted).toBe(true);
+    expect(insertedValues).toHaveLength(1);
+    expect(insertedValues[0].body).toContain("觀測計數器");
+    expect(insertedValues[0].body).toContain("messagesFailed 週增量");
+    expect(insertedValues[0].body).toContain("各 queue failed 數");
+    expect(insertedValues[0].body).toContain("LLM circuit 統計");
   });
 });

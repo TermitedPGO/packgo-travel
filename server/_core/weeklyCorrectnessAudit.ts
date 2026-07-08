@@ -55,6 +55,12 @@ import {
   type FactsScope,
 } from "./customerFacts";
 import type { AiSummary } from "./customerAiSummary";
+import {
+  gatherMessagesFailedWeeklyDelta,
+  gatherQueueFailedCounts,
+  gatherLlmCircuitStats,
+  formatObservabilitySection,
+} from "./observabilityCounters";
 
 /**
  * gatherCustomerFacts NEVER throws — any internal error (bad row, transient
@@ -195,8 +201,23 @@ const FIELD_LABEL: Record<MismatchField, string> = {
  *  mismatch text, because refreshing does NOT fix a gatherCustomerFacts fault
  *  (dispatch-phase6.md adversarial review finding: folding them together
  *  would misdirect Jeff into thinking a refresh click fixes a systemic bug).
- *  Exported for tests. */
-export function formatAuditDigest(results: CustomerAuditResult[]): string {
+ *
+ *  `observabilitySection` (Wave1 Block C, optional/backward-compatible): when
+ *  provided AND non-empty, it is appended as one more `---`-separated section
+ *  AFTER the mismatches/degraded sections — even when those two are both
+ *  empty (no mismatches, no degraded rows), in which case the observability
+ *  section is returned alone with no leading separator/blank line
+ *  (parts.join(...) on an empty array is "", and naively concatenating a
+ *  leading "\n\n---\n\n" onto that would leave a stray separator with
+ *  nothing above it). Omitting the argument, OR passing an empty string,
+ *  both preserve the exact pre-Wave1-Block-C output byte for byte — every
+ *  existing caller/test that doesn't pass it is unaffected, and a
+ *  hypothetical future caller that ends up with an empty section (e.g. a
+ *  formatObservabilitySection regression) degrades to the same clean output
+ *  instead of leaving a dangling "---" separator with nothing after it
+ *  (T6 adversarial-review finding — see the falsy check below, not strict
+ *  `=== undefined`). Exported for tests. */
+export function formatAuditDigest(results: CustomerAuditResult[], observabilitySection?: string): string {
   const withMismatches = results.filter((r) => r.mismatches.length > 0);
   const degraded = results.filter((r) => r.factsGatheringDegraded);
 
@@ -227,7 +248,16 @@ export function formatAuditDigest(results: CustomerAuditResult[]): string {
         (degradedExtra > 0 ? `\n…還有 ${degradedExtra} 位未列出` : ""),
     );
   }
-  return parts.join("\n\n---\n\n");
+  const base = parts.join("\n\n---\n\n");
+  // Falsy check (not strict `=== undefined`): an explicitly-passed empty
+  // string carries no content to append, so it must degrade the same way an
+  // omitted argument does — otherwise a non-empty base would end up with a
+  // dangling "\n\n---\n\n" separator followed by nothing.
+  if (!observabilitySection) return base;
+  // base === "" happens when neither section had content (parts=[]) — attach
+  // the observability section directly with no leading separator, rather
+  // than short-circuiting past it or leaving a stray "---" above nothing.
+  return base ? `${base}\n\n---\n\n${observabilitySection}` : observabilitySection;
 }
 
 /** Pure: priority scales with how many customers have a diff (dispatch:
@@ -264,13 +294,47 @@ export interface AuditAggregateResult {
  * gatherCustomerFacts fault (many customers degraded) is exactly the kind of
  * "future schema drift" scenario the adversarial review flagged as worth a
  * high-priority look, same reasoning priorityForMismatchCount already applies
- * to ordinary mismatches. */
-export function aggregateAuditResults(results: CustomerAuditResult[]): AuditAggregateResult {
+ * to ordinary mismatches.
+ *
+ * `observabilitySection` (Wave1 Block C, optional/backward-compatible): the
+ * ONLY effect this has on the "post a card or not" decision. Omitted, OR
+ * provided as an empty string (falsy check, not strict `=== undefined` — same
+ * reasoning as formatAuditDigest's own falsy check, so an empty section can
+ * never manufacture an empty-bodied "一切正常" card), → behavior is
+ * byte-for-byte unchanged, including the zero-mismatch-zero-degraded →
+ * no-card case. Provided non-empty AND mismatching===0 && degraded===0 → a
+ * card is still produced (fixed "一切正常"
+ * title, fixed "normal" priority — deliberately NOT run through
+ * priorityForMismatchCount, and NOT influenced by any "⚠ " markers inside
+ * observabilitySection's own text: a queue backlog or LLM circuit trip is
+ * worth a look, but it is not itself a correctness-audit finding, so it must
+ * never silently escalate this card's priority) so the three observability
+ * lines actually reach Jeff instead of being computed and discarded. When
+ * mismatching/degraded ARE non-zero, the existing priority algorithm below is
+ * untouched — observabilitySection only ever adds a trailing section to
+ * card.body via formatAuditDigest. */
+export function aggregateAuditResults(
+  results: CustomerAuditResult[],
+  observabilitySection?: string,
+): AuditAggregateResult {
   const compared = results.length;
   const withMismatches = results.filter((r) => r.mismatches.length > 0);
   const mismatching = withMismatches.length;
   const degraded = results.filter((r) => r.factsGatheringDegraded).length;
-  if (mismatching === 0 && degraded === 0) return { compared, mismatching: 0, degraded: 0 };
+
+  if (mismatching === 0 && degraded === 0) {
+    if (!observabilitySection) return { compared, mismatching: 0, degraded: 0 };
+    return {
+      compared,
+      mismatching: 0,
+      degraded: 0,
+      card: {
+        title: "每週正確性稽核:一切正常",
+        body: formatAuditDigest(results, observabilitySection),
+        priority: "normal",
+      },
+    };
+  }
 
   const titleParts: string[] = [];
   if (mismatching > 0) titleParts.push(`${mismatching} 位客人的卡片跟系統事實對不上`);
@@ -282,7 +346,7 @@ export function aggregateAuditResults(results: CustomerAuditResult[]): AuditAggr
     degraded,
     card: {
       title: `每週正確性稽核:${titleParts.join("、")}`,
-      body: formatAuditDigest(results),
+      body: formatAuditDigest(results, observabilitySection),
       priority:
         priorityForMismatchCount(mismatching) === "high" || priorityForMismatchCount(degraded) === "high"
           ? "high"
@@ -423,13 +487,40 @@ export async function runWeeklyCorrectnessAudit(
     }
   }
 
-  const aggregate = aggregateAuditResults(results);
+  // Wave1 Block C — three independent, never-throwing observability
+  // collectors, folded into a fixed three-line digest section that rides
+  // along with the weekly card. Run in parallel (no ordering dependency
+  // between them); each degrades to its own "couldn't read" state on
+  // failure rather than throwing, so one bad collector never blocks the
+  // other two or the audit itself.
+  const [messagesFailedDelta, queueFailedCounts, llmCircuitStats] = await Promise.all([
+    gatherMessagesFailedWeeklyDelta(db, now),
+    gatherQueueFailedCounts(),
+    gatherLlmCircuitStats(now),
+  ]);
+  const observabilitySection = formatObservabilitySection({
+    messagesFailedDelta,
+    queueFailedCounts,
+    llmCircuitStats,
+  });
+
+  const aggregate = aggregateAuditResults(results, observabilitySection);
   // 心跳:跑完就記(不論有沒有差異),監工才能區分「跑了、沒事」與「根本沒跑」。
   await recordAuditHeartbeat(now);
   if (!aggregate.card) {
+    // Defensive fallback only — formatObservabilitySection always returns a
+    // non-empty string (its three formatXLine helpers never return ""), so
+    // aggregateAuditResults is passed a defined observabilitySection on
+    // every call here and should therefore ALWAYS produce a card now (the
+    // "zero differences → post nothing" behavior is retired: Wave1 Block C
+    // deliberately wants a card every Monday so the observability lines
+    // actually reach Jeff). This branch is kept as a safety net in case a
+    // future change to the collectors above somehow yields an unusable
+    // section — better to log+return cleanly than crash on an unexpected
+    // `undefined` card downstream.
     log.info(
       { compared: aggregate.compared, mismatching: 0, degraded: 0 },
-      "[weeklyCorrectnessAudit] zero differences — no card posted",
+      "[weeklyCorrectnessAudit] zero differences and no observability section — no card posted (should not normally happen post-Wave1-Block-C)",
     );
     return { compared: aggregate.compared, mismatching: 0, degraded: 0, posted: false };
   }
