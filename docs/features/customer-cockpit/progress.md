@@ -395,5 +395,12 @@ tRPC admin 路由 onError 噪音閘(server/_core/index.ts):白名單只放行 IN
 
 四路 fresh 對抗審查抓到兩個真 P1(errorFunnel 核心的 dedup race condition、tRPC 噪音閘漏擋 LLM 斷路器訊號)已修並補測試;27-worker 完整性與 gmail 洪水閘兩路 PASS。獨立重跑核對:`tsc --noEmit` 0 錯;`pnpm exec vitest run` → `305 passed | 11 skipped (316)` files / `4539 passed | 90 skipped (4629)` tests;`grep wireWorkerFunnel(` 29 處全數到位(逐檔核對)。pre-push hook 重跑同數字。已知限制:DB 層去重無 unique constraint,跨機器仍可能重複貼卡(需 migration,本批未做)。
 
-### 塊C — D1 週稽核觀測計數器(未開始)
-### 塊D — fail-open 全面盤點(未開始,依賴塊B)
+### 塊C — D1 週稽核觀測計數器(2026-07-08,已 commit+push `4b563a4`)
+
+`server/_core/observabilityCounters.ts`(新檔):三支獨立、絕不 throw 的蒐集函式 — messagesFailed 週增量(gmailIntegration 累積計數加總,Redis 快照存上週值算差,first-run/delta/error 三態不混淆,0 是真實數字不能跟「讀不到」混為一談)、各 queue failed 數(枚舉 server/queue.ts + server/queues/*.ts 全部 30 支 new Queue,逐支獨立 try/catch,單支失敗顯示 "?" 不拖垮其他,全零顯示「全部 queue failed=0」)、LLM circuit 統計(近 7 天 llm:stats:YYYY-MM-DD Redis hash 加總 circuit_opened/rate_limit_429/calls_total,日期 key 生成沿用 llm.ts bumpStat 同款純 UTC toISOString,不用 todayLA 或任何時區換算)。formatObservabilitySection 純函式組出三行永遠出現的文字(0 也顯示 0,異常前綴 ⚠)。
+
+`server/_core/weeklyCorrectnessAudit.ts`:formatAuditDigest/aggregateAuditResults 新增可選第二參數(observabilitySection),不傳時行為與改動前逐字相同(falsy 檢查非嚴格 undefined,連空字串都安全退化,避免懸空 --- 分隔線);有傳時即使零差異也會組出「一切正常」卡讓觀測三行確實送達 Jeff(這是刻意的行為改變:零差異週從「不貼卡」變成「每週一定貼」),priority 固定 normal 不受 ⚠ 標記或觀測數字影響,priorityForMismatchCount 演算法本體與非零情境呼叫點一個字元未動。
+
+三路 fresh 對抗審查(正確性/向後相容、時區地雷專審、測試偵測力含突變測試)全 PASS,零 P0/P1;測試偵測力那路用突變測試(改壞邏輯重跑確認測試真的會紅)抓到一個真實邊界情況(空字串 observabilitySection 會產生懸空 --- 分隔線)並修正。獨立重跑核對:`tsc --noEmit` 0 錯;`pnpm exec vitest run` → `306 passed | 11 skipped (317)` files / `4571 passed | 90 skipped (4661)` tests;queue 枚舉 grep 核對 30 支全數涵蓋。零 LLM 呼叫、零 schema migration。已知限制:QUEUE_MODULE_IMPORTERS 是手動維護的 7 個 import 清單(非自動掃描 server/queues/ 目錄),未來新增 queue 檔案忘記加進清單會被安靜漏掉。
+
+### 塊D — fail-open 全面盤點(未開始,依賴塊B,塊B 已完成可開工)
