@@ -17,6 +17,7 @@
 
 import { getHaikuAgent, JSONSchema } from "./claudeAgent";
 import { loadReference, loadReferenceSections } from "./skillLoader";
+import { reportFunnelError } from "../_core/errorFunnel";
 
 // ─── 型別定義（向後兼容，保留原有介面）─────────────────────────────────────
 
@@ -937,6 +938,7 @@ ${JSON.stringify(extractedItineraries, null, 2)}
       };
     } catch (error) {
       console.error("[ItineraryUnifiedAgent] Error:", error);
+      reportFunnelError({ source: "fail-open:itineraryUnifiedAgent:execute", err: error }).catch(() => {});
       return {
         success: false,
         error: error instanceof Error ? error.message : "Unknown error",

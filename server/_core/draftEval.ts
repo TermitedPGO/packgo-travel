@@ -38,6 +38,7 @@ import { parseLlmJson } from "./parseLlmJson";
 import { todayLA } from "./customerFacts";
 import { createChildLogger } from "./logger";
 import { isTestOrOwnerAccount } from "./testAccounts";
+import { reportFunnelError } from "./errorFunnel";
 
 const log = createChildLogger({ module: "draftEval" });
 
@@ -602,6 +603,7 @@ export async function runMonthlyDraftEval(): Promise<MonthlyEvalReport | null> {
         { err: err instanceof Error ? err.message : String(err) },
         "[draftEval] failed to write agentMessages card (non-fatal)",
       );
+      reportFunnelError({ source: "fail-open:draftEval:agentMessagesCardWrite", err, context: { monthLabel } }).catch(() => {});
     }
 
     return report;
@@ -610,6 +612,7 @@ export async function runMonthlyDraftEval(): Promise<MonthlyEvalReport | null> {
       { err: err instanceof Error ? err.message : String(err) },
       "[draftEval] monthly eval failed entirely",
     );
+    reportFunnelError({ source: "fail-open:draftEval:monthlyEvalFailedEntirely", err }).catch(() => {});
     return null;
   }
 }

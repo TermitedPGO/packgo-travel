@@ -23,6 +23,7 @@ import { and, eq, gte, sql, desc } from "drizzle-orm";
 import nodemailer, { type Transporter } from "nodemailer";
 import { wrapInBrandTemplate, emailButton } from "./emailTemplateService";
 import { runReconciliation } from "./reconciliationService";
+import { reportFunnelError } from "../_core/errorFunnel";
 
 // SMTP — same env vars as server/email.ts
 const EMAIL_HOST = process.env.EMAIL_HOST || "smtp.gmail.com";
@@ -433,6 +434,7 @@ export async function sendDailyDigestEmail(
     return true;
   } catch (err) {
     console.error("[DailyDigest] Send failed:", err);
+    reportFunnelError({ source: "fail-open:dailyDigestService:digestSendFailed", err }).catch(() => {});
     return false;
   }
 }

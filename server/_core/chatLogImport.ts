@@ -27,6 +27,7 @@ import { invokeLLM } from "./llm";
 import { parseLlmJson } from "./parseLlmJson";
 import { todayLA } from "./customerFacts";
 import { createChildLogger } from "./logger";
+import { reportFunnelError } from "./errorFunnel";
 
 const log = createChildLogger({ module: "chatLogImport" });
 
@@ -412,6 +413,7 @@ export async function classifyAndExtractChatLog(params: {
       { err: err instanceof Error ? err.message : String(err), filename },
       "[chatLogImport] classify/extract failed (non-fatal)",
     );
+    reportFunnelError({ source: "fail-open:chatLogImport:classifyExtractFailed", err, context: { filename } }).catch(() => {});
     return null;
   }
 }
@@ -571,6 +573,7 @@ export async function importChatLogForCustomer(params: {
       { err: err instanceof Error ? err.message : String(err), customerProfileId, filename },
       "[chatLogImport] classify call threw (non-fatal)",
     );
+    reportFunnelError({ source: "fail-open:chatLogImport:classifyCallThrew", err, context: { customerProfileId, filename } }).catch(() => {});
     return { status: "error" };
   }
 
@@ -694,6 +697,7 @@ export async function importChatLogForCustomer(params: {
       { err: err instanceof Error ? err.message : String(err), customerProfileId, filename },
       "[chatLogImport] DB write failed (non-fatal)",
     );
+    reportFunnelError({ source: "fail-open:chatLogImport:dbWriteFailed", err, context: { customerProfileId, filename } }).catch(() => {});
     return { status: "error" };
   }
 }

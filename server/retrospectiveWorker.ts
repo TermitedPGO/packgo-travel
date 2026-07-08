@@ -21,7 +21,7 @@ import {
   formatRetrospectiveAsMessage,
 } from "./agents/autonomous/selfRetrospective";
 import { notifyOwner } from "./_core/notification";
-import { wireWorkerFunnel } from "./_core/errorFunnel";
+import { wireWorkerFunnel, reportFunnelError } from "./_core/errorFunnel";
 import type {
   RetrospectiveJobData,
   RetrospectiveJobResult,
@@ -188,7 +188,10 @@ retrospectiveWorker.on("failed", (job, err) => {
   notifyOwner({
     title: `[RetrospectiveWorker] Job ${job?.id ?? "?"} failed`,
     content: `Error: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
-  }).catch((e) => console.error("[notifyOwner] dispatch failed:", e));
+  }).catch((e) => {
+    console.error("[notifyOwner] dispatch failed:", e);
+    reportFunnelError({ source: "fail-open:retrospectiveWorker:notifyOwnerDispatchFailed", err: e, context: { jobId: job?.id } }).catch(() => {});
+  });
 });
 
 wireWorkerFunnel(retrospectiveWorker, "retrospective");

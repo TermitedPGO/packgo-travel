@@ -15,6 +15,7 @@
  */
 
 import { createChildLogger } from "../_core/logger";
+import { reportFunnelError } from "../_core/errorFunnel";
 
 const log = createChildLogger({ module: "taxCsvService" });
 
@@ -174,6 +175,7 @@ export async function generateTaxCsv(year: number): Promise<string> {
     scheduleCLabels = { ...SCHEDULE_C_MAP };
   } catch (err) {
     log.error({ err }, "[taxCsvService] failed to load bank monthly trend");
+    reportFunnelError({ source: "fail-open:taxCsvService:bankMonthlyTrend", err, context: { year } }).catch(() => {});
   }
 
   // 2. Trust account summary
@@ -202,6 +204,7 @@ export async function generateTaxCsv(year: number): Promise<string> {
     }
   } catch (err) {
     log.warn({ err }, "[taxCsvService] trust data unavailable, using zeros");
+    reportFunnelError({ source: "fail-open:taxCsvService:trustDeferral", err, context: { year } }).catch(() => {});
   }
 
   const data: TaxCsvData = { year, monthlyRows, scheduleCLabels, trust };

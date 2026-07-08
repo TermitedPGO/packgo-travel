@@ -18,7 +18,7 @@
 import { Queue, Worker, Job } from "bullmq";
 import { redisBullMQ } from "../redis";
 import { notifyOwner } from "../_core/notification";
-import { wireWorkerFunnel } from "../_core/errorFunnel";
+import { wireWorkerFunnel, reportFunnelError } from "../_core/errorFunnel";
 import {
   syncAllSuppliers,
   syncLionCatalog,
@@ -174,7 +174,10 @@ export function initSupplierSyncWorker(): Worker<SupplierSyncJob> {
       notifyOwner({
         title: `[供應商同步] ${job?.id ?? "?"} 失敗 (重試 ${attemptsMade} 次)`,
         content: `Error: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
-      }).catch((e) => console.error("[notifyOwner] dispatch failed:", e));
+      }).catch((e) => {
+        console.error("[notifyOwner] dispatch failed:", e);
+        reportFunnelError({ source: "fail-open:supplierSyncQueue:notifyOwnerFinalFailure", err: e, context: { jobId: job?.id, attemptsMade } }).catch(() => {});
+      });
     }
   });
 

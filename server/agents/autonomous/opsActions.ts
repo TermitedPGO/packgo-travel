@@ -15,6 +15,7 @@
  */
 import { z } from "zod";
 import { createChildLogger } from "../../_core/logger";
+import { reportFunnelError } from "../../_core/errorFunnel";
 const log = createChildLogger({ module: "opsActions" });
 
 // ────────────────────────────────────────────────────────────────────────
@@ -742,6 +743,7 @@ export async function doCollectCustomerThreads(
         { err: e, mailbox: integ.emailAddress, email },
         "[opsActions] collectCustomerThreads one mailbox failed (non-fatal)",
       );
+      reportFunnelError({ source: "fail-open:opsActions:collectCustomerThreadsMailbox", err: e, context: { mailbox: integ.emailAddress, email } }).catch(() => {});
     }
   }
 

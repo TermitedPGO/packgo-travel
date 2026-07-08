@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import * as db from './db';
 import { sendPasswordResetEmail } from './emailService';
 import { redactEmail } from './_core/redact';
+import { reportFunnelError } from './_core/errorFunnel';
 
 const SALT_ROUNDS = 10;
 
@@ -130,6 +131,7 @@ export async function requestPasswordReset(email: string) {
     }
   } catch (error) {
     console.error('[Auth] Error sending password reset email:', error);
+    reportFunnelError({ source: "fail-open:auth:requestPasswordResetSendFailed", err: error }).catch(() => {});
   }
 
   // In test environment, return the token for testing purposes

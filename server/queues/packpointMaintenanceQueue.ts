@@ -32,7 +32,7 @@ import { users, bookings, pointsTransactions } from "../../drizzle/schema";
 import { and, eq, gte, lt, sql, isNotNull, isNull, or } from "drizzle-orm";
 import { awardPackpoint, deductPackpoint } from "../_core/packpoint";
 import { notifyOwner } from "../_core/notification";
-import { wireWorkerFunnel } from "../_core/errorFunnel";
+import { wireWorkerFunnel, reportFunnelError } from "../_core/errorFunnel";
 
 const QUEUE_NAME = "packpoint-maintenance";
 
@@ -123,18 +123,21 @@ export function initPackpointMaintenanceWorker() {
       } catch (err) {
         console.error("[PackpointMaintenance] auto-upgrade failed:", err);
         result.errors++;
+        reportFunnelError({ source: "fail-open:packpointMaintenanceQueue:autoUpgrade", err }).catch(() => {});
       }
       try {
         await runExpirySweep(result);
       } catch (err) {
         console.error("[PackpointMaintenance] expiry sweep failed:", err);
         result.errors++;
+        reportFunnelError({ source: "fail-open:packpointMaintenanceQueue:expirySweep", err }).catch(() => {});
       }
       try {
         await runBirthdayBonus(result);
       } catch (err) {
         console.error("[PackpointMaintenance] birthday bonus failed:", err);
         result.errors++;
+        reportFunnelError({ source: "fail-open:packpointMaintenanceQueue:birthdayBonus", err }).catch(() => {});
       }
       // Round 80.22 Phase F: also sweep expired vouchers in same daily run.
       try {
@@ -146,6 +149,7 @@ export function initPackpointMaintenanceWorker() {
       } catch (err) {
         console.error("[PackpointMaintenance] voucher sweep failed:", err);
         result.errors++;
+        reportFunnelError({ source: "fail-open:packpointMaintenanceQueue:voucherSweep", err }).catch(() => {});
       }
 
       console.log(

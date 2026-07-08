@@ -6,6 +6,7 @@
 
 import { getAccountingEntries, getAccountingStats, type AccountingStats } from "../db";
 import { AccountingEntry } from "../../drizzle/schema";
+import { reportFunnelError } from "../_core/errorFunnel";
 
 export interface ProfitAndLossReport {
   period: { start: Date; end: Date };
@@ -195,6 +196,7 @@ export async function generateMonthlyTrend(months: number = 12): Promise<Monthly
     }
   } catch (err) {
     console.warn("[financialReport] monthly trust deferral lookup failed (gross):", (err as Error)?.message);
+    reportFunnelError({ source: "fail-open:financialReportService:monthlyTrustDeferralLookup", err }).catch(() => {});
   }
 
   return foldMonthlyTrend(monthMap, deferredByMonth);

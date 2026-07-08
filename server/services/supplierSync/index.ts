@@ -27,6 +27,7 @@
 import { syncLionCatalog } from "./lion";
 import { syncUvCatalog } from "./uv";
 import type { SyncResult } from "./shared";
+import { reportFunnelError } from "../../_core/errorFunnel";
 
 export { syncLionCatalog } from "./lion";
 export { syncUvCatalog } from "./uv";
@@ -60,11 +61,13 @@ export async function syncAllSuppliers(): Promise<SyncResult[]> {
     results.push(await syncLionCatalog());
   } catch (err) {
     console.error("[supplierSync] Lion sync threw:", err);
+    reportFunnelError({ source: "fail-open:supplierSync:lionSyncThrew", err }).catch(() => {});
   }
   try {
     results.push(await syncUvCatalog());
   } catch (err) {
     console.error("[supplierSync] UV sync threw:", err);
+    reportFunnelError({ source: "fail-open:supplierSync:uvSyncThrew", err }).catch(() => {});
   }
   return results;
 }

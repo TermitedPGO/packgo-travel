@@ -13,6 +13,7 @@
 import { z } from "zod";
 import { publicProcedure, adminProcedure, router } from "../_core/trpc";
 import * as db from "../db";
+import { reportFunnelError } from "../_core/errorFunnel";
 
 // v74 bounded string helpers — preserved from routers.ts
 const CONTROL_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
@@ -96,6 +97,7 @@ export const aiQuotesRouter = router({
             await scheduleQuoteFollowUps(inserted.id, input.customerEmail);
           } catch (err) {
             console.warn("[aiQuotes.generate] Failed to schedule follow-ups:", (err as Error).message);
+            reportFunnelError({ source: "fail-open:aiQuotes:scheduleQuoteFollowUps", err, context: { quoteId: inserted?.id } }).catch(() => {});
           }
         }
 

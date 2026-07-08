@@ -31,6 +31,7 @@ import {
   sendVisaRejectedEmail,
 } from "../services/visaEmailService";
 import { ENV } from "../_core/env";
+import { reportFunnelError } from "../_core/errorFunnel";
 
 // P0-1: Lazy-load Stripe to prevent server crash when STRIPE_SECRET_KEY is not set
 let _stripeClient: Stripe | null = null;
@@ -247,6 +248,7 @@ export const visaRouter = router({
             }
           } catch (emailErr) {
             console.error("[Visa] Failed to send status update email:", emailErr);
+            reportFunnelError({ source: "fail-open:visa:statusUpdateEmailFailed", err: emailErr, context: { applicationId: input.applicationId, newStatus: input.newStatus } }).catch(() => {});
           }
         }
 

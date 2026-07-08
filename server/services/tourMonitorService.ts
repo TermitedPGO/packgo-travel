@@ -15,6 +15,7 @@ import { getDb } from '../db';
 import { tours, tourDepartures, tourMonitorLogs } from '../../drizzle/schema';
 import { eq, and, gte, isNotNull, ne, desc } from 'drizzle-orm';
 import { fetchLionTravelData } from './lionTravelApiService';
+import { reportFunnelError } from '../_core/errorFunnel';
 
 export interface MonitorRunResult {
   runId: string;
@@ -113,11 +114,12 @@ export async function runMonitorCycle(): Promise<MonitorRunResult> {
           errorMessage: err instanceof Error ? err.message : String(err),
           durationMs: Date.now() - checkStart,
           hasChanges: 0,
-        } as any).catch((dbErr) =>
+        } as any).catch((dbErr) => {
           // v71: don't silently swallow log-write failures — if the monitor log
           // table itself is broken we want to know.
-          console.warn(`[TourMonitor] Failed to write tourMonitorLogs row for tour ${tour.id}:`, (dbErr as Error)?.message)
-        );
+          console.warn(`[TourMonitor] Failed to write tourMonitorLogs row for tour ${tour.id}:`, (dbErr as Error)?.message);
+          reportFunnelError({ source: "fail-open:tourMonitorService:writeMonitorLog", err: dbErr, context: { tourId: tour.id } }).catch(() => {});
+        });
 
         // Update tour monitor status
         if (db) await db.update(tours)
@@ -126,9 +128,10 @@ export async function runMonitorCycle(): Promise<MonitorRunResult> {
             monitorStatus: 'error',
           } as any)
           .where(eq(tours.id, tour.id))
-          .catch((dbErr) =>
-            console.warn(`[TourMonitor] Failed to update monitor status for tour ${tour.id}:`, (dbErr as Error)?.message)
-          );
+          .catch((dbErr) => {
+            console.warn(`[TourMonitor] Failed to update monitor status for tour ${tour.id}:`, (dbErr as Error)?.message);
+            reportFunnelError({ source: "fail-open:tourMonitorService:updateMonitorStatusError", err: dbErr, context: { tourId: tour.id } }).catch(() => {});
+          });
       }
     }));
     
@@ -278,7 +281,10 @@ async function checkTour(tourId: number, sourceUrl: string, runId: string): Prom
               await db.update(tourDepartures)
                 .set({ status: normalized })
                 .where(eq(tourDepartures.id, dbDep.id))
-                .catch((err) => console.warn(`[TourMonitor] Failed to update status for departure ${dbDep.id}:`, err?.message));
+                .catch((err) => {
+                  console.warn(`[TourMonitor] Failed to update status for departure ${dbDep.id}:`, err?.message);
+                  reportFunnelError({ source: "fail-open:tourMonitorService:updateDepartureStatus", err, context: { departureId: dbDep.id } }).catch(() => {});
+                });
             } else {
               console.warn(`[TourMonitor] Unknown status "${scrapedDep.status}" for departure ${dbDep.id} — skipping status update`);
             }
@@ -295,9 +301,10 @@ async function checkTour(tourId: number, sourceUrl: string, runId: string): Prom
             await db.update(tourDepartures)
               .set({ bookedSlots: newBookedSlots } as any)
               .where(eq(tourDepartures.id, dbDep.id))
-              .catch((dbErr) =>
-                console.warn(`[TourMonitor] Failed to update seats for departure ${dbDep.id}:`, (dbErr as Error)?.message)
-              );
+              .catch((dbErr) => {
+                console.warn(`[TourMonitor] Failed to update seats for departure ${dbDep.id}:`, (dbErr as Error)?.message);
+                reportFunnelError({ source: "fail-open:tourMonitorService:updateDepartureSeats", err: dbErr, context: { departureId: dbDep.id } }).catch(() => {});
+              });
           }
         } else {
           // No changes - log success

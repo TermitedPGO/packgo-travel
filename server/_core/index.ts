@@ -586,6 +586,7 @@ async function startServer() {
                   filed++;
                 } catch (e) {
                   logger.warn({ err: e }, "[ask-ops-stream] one dropped file failed to file (non-fatal)");
+                  reportFunnelError({ source: "fail-open:index:droppedFileFiling", err: e, context: { profileId: persistProfileId, orderId } }).catch(() => {});
                 }
               }
               if (filed > 0) {
@@ -598,6 +599,7 @@ async function startServer() {
           }
         } catch (e) {
           logger.warn({ err: e }, "[ask-ops-stream] file persistence block failed (non-fatal)");
+          reportFunnelError({ source: "fail-open:index:filePersistenceBlock", err: e }).catch(() => {});
         }
       }
 
@@ -688,6 +690,7 @@ async function startServer() {
                   { err: e, filename: r.filename },
                   "[ask-ops-stream] chat log import failed for one file (non-fatal)",
                 );
+                reportFunnelError({ source: "fail-open:index:chatLogImportOneFile", err: e, context: { filename: r.filename, profileId: persistProfileId } }).catch(() => {});
               }
             }
             if (resultLines.length > 0) {
@@ -702,6 +705,7 @@ async function startServer() {
           }
         } catch (e) {
           logger.warn({ err: e }, "[ask-ops-stream] chat log import block failed (non-fatal)");
+          reportFunnelError({ source: "fail-open:index:chatLogImportBlock", err: e, context: { profileId: persistProfileId } }).catch(() => {});
         }
       }
       if (chatImportResultBlock && fileContext) {
@@ -1946,6 +1950,7 @@ async function startServer() {
     logger.info("[Startup] Zombie task cleanup scheduler initialized (every 10 min, timeout 30 min)");
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to initialize zombie cleanup");
+    reportFunnelError({ source: "fail-open:index:zombieCleanupRegister", err, context: { phase: "startup-register" } }).catch(() => {});
   }
 
   // Schedule daily tour monitor at 03:00 Taiwan time (19:00 UTC)
@@ -1954,6 +1959,7 @@ async function startServer() {
     await scheduleDailyTourMonitor();
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to schedule daily tour monitor");
+    reportFunnelError({ source: "fail-open:index:dailyTourMonitorCronInit", err }).catch(() => {});
   }
 
   // v77: Schedule daily trip-reminder scan at 09:00 Taipei (01:00 UTC). Sends
@@ -1965,6 +1971,7 @@ async function startServer() {
     await import('../tripReminderWorker');
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to schedule trip reminders");
+    reportFunnelError({ source: "fail-open:index:tripReminderCronInit", err }).catch(() => {});
   }
 
   // Round 81 Phase 3.5: Schedule weekly Self-Retrospective at Mon 01:00 UTC
@@ -1976,6 +1983,7 @@ async function startServer() {
     await import('../retrospectiveWorker');
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to schedule weekly retrospective");
+    reportFunnelError({ source: "fail-open:index:weeklyRetrospectiveCronInit", err }).catch(() => {});
   }
 
   // customer-ai-sessions 批3 m3 — nightly customer-card AI summary warm-up at
@@ -1987,6 +1995,7 @@ async function startServer() {
     await import('../customerSummaryWorker');
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to schedule customer summary warm-up");
+    reportFunnelError({ source: "fail-open:index:customerSummaryCronInit", err }).catch(() => {});
   }
 
   // customer-cockpit Step 2 — boot the worker that auto-collects a brand-new
@@ -1996,6 +2005,7 @@ async function startServer() {
     await import('../customerBackfillWorker');
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to init customer backfill worker");
+    reportFunnelError({ source: "fail-open:index:customerBackfillWorkerInit", err }).catch(() => {});
   }
 
   // customer-cockpit Phase3 3b — monthly draft-eval scoring at 03:00 UTC on
@@ -2008,6 +2018,7 @@ async function startServer() {
     await import('../draftEvalWorker');
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to schedule monthly draft eval");
+    reportFunnelError({ source: "fail-open:index:monthlyDraftEvalCronInit", err }).catch(() => {});
   }
 
   // gmail-thread-filing layer 2 — nightly stale-customer follow-up scan at
@@ -2019,6 +2030,7 @@ async function startServer() {
     await import('../followupScanWorker');
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to schedule followup scan");
+    reportFunnelError({ source: "fail-open:index:followupScanCronInit", err }).catch(() => {});
   }
 
   // customer-projects audit fix (2026-06-30) — weekly duplicate-customer-
@@ -2033,6 +2045,7 @@ async function startServer() {
     await import('../duplicateProfileScanWorker');
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to schedule duplicate-profile scan");
+    reportFunnelError({ source: "fail-open:index:duplicateProfileScanCronInit", err }).catch(() => {});
   }
 
   // customer-cockpit Phase6 D1(2026-07-03)— weekly correctness audit at
@@ -2047,6 +2060,7 @@ async function startServer() {
     await import('../weeklyCorrectnessAuditWorker');
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to schedule weekly correctness audit");
+    reportFunnelError({ source: "fail-open:index:weeklyCorrectnessAuditCronInit", err }).catch(() => {});
   }
 
   // customer-cockpit Phase6 D2(2026-07-03)— weekly 0909 canary(表單版)at
@@ -2064,6 +2078,7 @@ async function startServer() {
     await import('../weeklyCanaryWorker');
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to schedule weekly canary");
+    reportFunnelError({ source: "fail-open:index:weeklyCanaryCronInit", err }).catch(() => {});
   }
 
   // customer-cockpit Phase5 學習閉環(2026-07-03)— nightly backlog scan at
@@ -2076,6 +2091,7 @@ async function startServer() {
     await import('../caseLearningWorker');
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to schedule case-learning backlog scan");
+    reportFunnelError({ source: "fail-open:index:caseLearningBacklogCronInit", err }).catch(() => {});
   }
 
   // QA audit 2026-05-11 Phase 9 P0: Gmail poll cron. Closes the
@@ -2088,6 +2104,7 @@ async function startServer() {
     await import('../gmailPollWorker');
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to schedule Gmail poll");
+    reportFunnelError({ source: "fail-open:index:gmailPollCronInit", err }).catch(() => {});
   }
 
   // gmail-push (2026-06-29) — Gmail push (Pub/Sub) workers + daily watch-renew
@@ -2101,6 +2118,7 @@ async function startServer() {
     await import('../gmailPushWorker');
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to init Gmail push workers");
+    reportFunnelError({ source: "fail-open:index:gmailPushWorkersInit", err }).catch(() => {});
   }
 
   // Booking followup worker — drains the queue that bookings.create
@@ -2110,6 +2128,7 @@ async function startServer() {
     await import('../bookingFollowupWorker');
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to init booking followup worker");
+    reportFunnelError({ source: "fail-open:index:bookingFollowupWorkerInit", err }).catch(() => {});
   }
 
   // Phase 1.5: Plaid daily sync — catch-up cron at 05:00 UTC. Webhooks
@@ -2123,6 +2142,7 @@ async function startServer() {
     await import('../plaidSyncWorker');
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to schedule Plaid daily sync");
+    reportFunnelError({ source: "fail-open:index:plaidDailySyncCronInit", err }).catch(() => {});
   }
 
   // Phase 4: Trust account recognition cron at 06:00 UTC (1 hr after Plaid
@@ -2135,6 +2155,7 @@ async function startServer() {
     await import('../trustRecognitionWorker');
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to schedule trust recognition cron");
+    reportFunnelError({ source: "fail-open:index:trustRecognitionCronInit", err }).catch(() => {});
   }
 
   // Scaling guardrails (2026-05-23) — daily archive + LLM budget check at
@@ -2145,6 +2166,7 @@ async function startServer() {
     await import('../scalingGuardrailWorker');
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to schedule scaling guardrails cron");
+    reportFunnelError({ source: "fail-open:index:scalingGuardrailsCronInit", err }).catch(() => {});
   }
 
   // Supplier detail enrichment (2026-05-24) — Stage 1 of supplier deep
@@ -2157,6 +2179,7 @@ async function startServer() {
     await import('../supplierDetailEnrichmentWorker');
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to schedule supplier detail enrichment cron");
+    reportFunnelError({ source: "fail-open:index:supplierDetailEnrichmentCronInit", err }).catch(() => {});
   }
 
   // Monthly priority rewrite (2026-05-25) — fires 1st of month 09:00 UTC.
@@ -2173,6 +2196,7 @@ async function startServer() {
     startPriorityRewriteCronWorker();
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to schedule monthly priority rewrite cron");
+    reportFunnelError({ source: "fail-open:index:monthlyPriorityRewriteCronInit", err }).catch(() => {});
   }
 
   // Round 80.22 Phase C: Packpoint daily maintenance — auto-upgrade tier,
@@ -2187,6 +2211,7 @@ async function startServer() {
     initPackpointMaintenanceWorker();
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to schedule Packpoint maintenance");
+    reportFunnelError({ source: "fail-open:index:packpointMaintenanceCronInit", err }).catch(() => {});
   }
 
   // Round 80.22 Phase H2: Supplier poster processing worker — async
@@ -2199,6 +2224,7 @@ async function startServer() {
     initPosterProcessingWorker();
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to init poster processing worker");
+    reportFunnelError({ source: "fail-open:index:posterProcessingWorkerInit", err }).catch(() => {});
   }
 
   // Phase 1D supplier-sync — daily catalog mirror for Lion + UV at
@@ -2214,6 +2240,7 @@ async function startServer() {
     await ensureDailySupplierSyncScheduled();
   } catch (err) {
     logger.warn({ err }, "[Startup] Failed to init supplier sync worker");
+    reportFunnelError({ source: "fail-open:index:supplierSyncWorkerInit", err }).catch(() => {});
   }
 
   // 2026-05-22 — SIGTERM graceful shutdown.
@@ -2289,4 +2316,5 @@ async function startServer() {
 
 startServer().catch((err) => {
   logger.error({ err }, "startServer failed");
+  reportFunnelError({ source: "fail-open:index:startServerFatal", err, context: { phase: "startup-fatal" } }).catch(() => {});
 });

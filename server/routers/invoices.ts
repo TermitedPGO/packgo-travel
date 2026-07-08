@@ -18,6 +18,7 @@ import { TRPCError } from "@trpc/server";
 import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
 import * as db from "../db";
 import { generateInvoiceNumber, generateInvoicePdf } from "../services/invoiceService";
+import { reportFunnelError } from "../_core/errorFunnel";
 
 export const invoicesRouter = router({
     // v77: customer-facing — get OR generate invoice for a booking the user owns.
@@ -102,6 +103,7 @@ export const invoicesRouter = router({
           createdBy: booking.userId || ctx.user.id,
         } as any).catch((e) => {
           console.warn("[invoices.forBooking] persist failed:", e?.message);
+          reportFunnelError({ source: "fail-open:invoices:forBookingCreateInvoice", err: e, context: { bookingId: input.bookingId } }).catch(() => {});
           return null;
         });
 

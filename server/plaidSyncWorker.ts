@@ -22,7 +22,7 @@ import {
 import { syncAllActiveLinkedAccounts } from "./services/plaidSyncService";
 import { notifyOwner } from "./_core/notification";
 import { plaidIsConfigured } from "./_core/plaid";
-import { wireWorkerFunnel } from "./_core/errorFunnel";
+import { wireWorkerFunnel, reportFunnelError } from "./_core/errorFunnel";
 
 export const plaidSyncWorker = new Worker<
   PlaidDailySyncJobData,
@@ -76,6 +76,10 @@ export const plaidSyncWorker = new Worker<
             "[plaidSyncWorker] auto-classify failed (sync still succeeded):",
             (classifyErr as Error)?.message
           );
+          reportFunnelError({
+            source: "fail-open:plaidSyncWorker:autoClassify",
+            err: classifyErr,
+          }).catch(() => {});
         }
       }
 

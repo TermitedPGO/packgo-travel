@@ -35,6 +35,7 @@ import { eq } from "drizzle-orm";
 import { notifyOwner } from "./notification";
 import { verifyPlaidWebhook } from "./plaidWebhookVerify";
 import { createChildLogger } from "./logger";
+import { reportFunnelError } from "./errorFunnel";
 const log = createChildLogger({ module: "plaidWebhook" });
 
 export async function handlePlaidWebhook(req: Request, res: Response): Promise<void> {
@@ -162,6 +163,7 @@ export async function handlePlaidWebhook(req: Request, res: Response): Promise<v
       { err, webhookType, webhookCode },
       "[plaid-webhook] handler failed",
     );
+    reportFunnelError({ source: "fail-open:plaidWebhook:handlerDispatch", err, context: { webhookType, webhookCode } }).catch(() => {});
     if (eventId !== null) {
       const db = await getDb();
       if (db) {
@@ -300,6 +302,7 @@ async function handleHostedLinkSessionFinished(payload: any): Promise<void> {
       );
     } catch (err) {
       log.error({ err }, "[plaid-webhook] linkTokenGet failed");
+      reportFunnelError({ source: "fail-open:plaidWebhook:linkTokenGet", err }).catch(() => {});
     }
   }
 
@@ -406,6 +409,7 @@ async function handleHostedLinkSessionFinished(payload: any): Promise<void> {
               { err: e, accountId: a.account_id, fullMsg },
               "[plaid-webhook] Hosted Link insert account failed",
             );
+            reportFunnelError({ source: "fail-open:plaidWebhook:linkedBankAccountInsert", err, context: { accountId: a.account_id, fullMsg } }).catch(() => {});
           }
         }
       }
@@ -447,6 +451,7 @@ async function handleHostedLinkSessionFinished(payload: any): Promise<void> {
       });
     } catch (err) {
       log.error({ err }, "[plaid-webhook] Hosted Link exchange failed");
+      reportFunnelError({ source: "fail-open:plaidWebhook:hostedLinkExchange", err }).catch(() => {});
     }
   }
 }

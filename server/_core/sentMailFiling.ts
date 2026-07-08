@@ -38,6 +38,7 @@ import {
 import { storagePut } from "../storage";
 import { isCustomerDocAttachment, customerDocR2Key } from "./customerDocFiling";
 import { detectAttachmentKind } from "./attachmentParser";
+import { reportFunnelError } from "./errorFunnel";
 
 const log = createChildLogger({ module: "sentMailFiling" });
 
@@ -159,6 +160,7 @@ export async function runSentMailCapture(
                 { err: e, profileId: p.id },
                 "[sentMailFiling] one attachment failed (non-fatal)",
               );
+              reportFunnelError({ source: "fail-open:sentMailFiling:attachmentUpload", err: e, context: { profileId: p.id, messageId: msg.id } }).catch(() => {});
             }
           }
 

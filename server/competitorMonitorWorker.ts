@@ -31,7 +31,7 @@ import {
   insertCompetitorAlerts,
   updateCompetitorTourScrapeStatus,
 } from "./db";
-import { wireWorkerFunnel } from "./_core/errorFunnel";
+import { wireWorkerFunnel, reportFunnelError } from "./_core/errorFunnel";
 
 // ── Worker ─────────────────────────────────────────────────────
 
@@ -187,6 +187,10 @@ export async function scheduleCompetitorMonitorJobs() {
     console.log(`✅ [CompetitorMonitor] ${activeTours.length} jobs scheduled`);
   } catch (error) {
     console.error("[CompetitorMonitor] Scheduling error:", error);
+    reportFunnelError({
+      source: "fail-open:competitorMonitorWorker:scheduleCompetitorMonitorJobs",
+      err: error,
+    }).catch(() => {});
   }
 }
 

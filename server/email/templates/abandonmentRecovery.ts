@@ -7,6 +7,7 @@
 // Extracted verbatim from server/email.ts in v2 Wave 2 Module 2.11.
 
 import { redactEmail } from "../../_core/redact";
+import { reportFunnelError } from "../../_core/errorFunnel";
 import {
   wrapInBrandTemplate,
   emailButton,
@@ -62,6 +63,7 @@ export async function sendAbandonmentRecoveryEmail(data: AbandonmentRecoveryData
     return true;
   } catch (err) {
     console.error("[Email] Abandonment recovery failed:", err);
+    reportFunnelError({ source: "fail-open:abandonmentRecovery:sendMail", err, context: { bookingId: data.bookingId } }).catch(() => {});
     return false;
   }
 }

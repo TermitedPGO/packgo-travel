@@ -8,6 +8,7 @@ import { createAccountingEntry } from "../db";
 import { notifyOwner } from "./notification";
 import { redactEmail } from "./redact";
 import { claimStripeEvent, markStripeEventSucceeded, markStripeEventFailed } from "./stripeWebhookIdempotency";
+import { reportFunnelError } from "./errorFunnel";
 // v2 Wave 1 Module 1.2 — pino structured logger. We use a child logger so
 // every line carries module="stripeWebhook" without manual tagging.
 // Searchability: Fly's log grep matches inside JSON strings, so
@@ -448,6 +449,7 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
     }
   } catch (error) {
     log.error({ err: error }, "[Stripe Webhook] Failed to send payment success email");
+    reportFunnelError({ source: "fail-open:stripeWebhook:paymentSuccessEmail", err: error, context: { bookingId: booking.id } }).catch(() => {});
     // Don't fail the webhook if email fails
   }
 
@@ -494,6 +496,7 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
     });
   } catch (err) {
     log.error({ err }, "[Stripe Webhook] notifyOwner (payment) failed");
+    reportFunnelError({ source: "fail-open:stripeWebhook:notifyOwnerPaymentReceived", err, context: { bookingId: booking.id } }).catch(() => {});
   }
 
   // customer-cockpit 任務7c(2026-07-03)— 訂票事件進場:這位客人在
@@ -554,6 +557,7 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
       }
     } catch (err) {
       log.error({ err, bookingId }, "[Stripe Webhook] customer-cockpit interaction record failed");
+      reportFunnelError({ source: "fail-open:stripeWebhook:customerCockpitInteractionRecord", err, context: { bookingId } }).catch(() => {});
     }
   })();
 }
@@ -593,7 +597,10 @@ async function handlePaymentIntentFailed(paymentIntent: Stripe.PaymentIntent) {
       `Stripe payment_intent ${paymentIntent.id} failed.\n` +
       `Reason: ${paymentIntent.last_payment_error?.message ?? "(none)"}\n` +
       `客人的卡可能被拒,需要寄重試連結或聯絡客人。`,
-  }).catch((e) => log.error({ err: e }, "[Stripe Webhook] notifyOwner (payment failed) failed"));
+  }).catch((e) => {
+    log.error({ err: e }, "[Stripe Webhook] notifyOwner (payment failed) failed");
+    reportFunnelError({ source: "fail-open:stripeWebhook:notifyOwnerPaymentFailed", err: e, context: { paymentIntentId: paymentIntent.id } }).catch(() => {});
+  });
 }
 
 /**
@@ -624,7 +631,10 @@ async function handleChargeDispute(eventType: string, dispute: Stripe.Dispute) {
       (eventType === "charge.dispute.created"
         ? `證據提交截止 Evidence due: ${due}\n請到 Stripe Dashboard 上傳證據(訂單確認、取消政策同意紀錄)反駁,逾期就直接輸。`
         : `outcome: ${dispute.status}`),
-  }).catch((e) => log.error({ err: e }, "[Stripe Webhook] notifyOwner (dispute) failed"));
+  }).catch((e) => {
+    log.error({ err: e }, "[Stripe Webhook] notifyOwner (dispute) failed");
+    reportFunnelError({ source: "fail-open:stripeWebhook:notifyOwnerDispute", err: e, context: { disputeId: dispute.id } }).catch(() => {});
+  });
 }
 
 /**
@@ -809,6 +819,11 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
         { err, bookingId: payment.bookingId },
         "[Stripe Webhook] Packpoint clawback failed for booking",
       );
+      reportFunnelError({
+        source: "fail-open:stripeWebhook:packpointClawback",
+        err,
+        context: { bookingId: payment.bookingId },
+      }).catch(() => {});
     }
   }
 
@@ -845,6 +860,11 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
     });
   } catch (err) {
     log.error({ err }, "[Stripe Webhook] notifyOwner (refund) failed");
+    reportFunnelError({
+      source: "fail-open:stripeWebhook:refundNotifyOwner",
+      err,
+      context: { bookingId: payment.bookingId, chargeId: charge.id },
+    }).catch(() => {});
   }
 
   // v2 Wave 3 Module 3.5 — autonomous RefundAgent triage on every refund.
@@ -1092,6 +1112,11 @@ async function handleVisaPaymentCompleted(
     );
   } catch (error) {
     log.error({ err: error }, "[Stripe Webhook] Failed to send visa confirmation email");
+    reportFunnelError({
+      source: "fail-open:stripeWebhook:visaConfirmationEmail",
+      err: error,
+      context: { applicationId },
+    }).catch(() => {});
   }
 
   // QA Audit Phase 5 fix: visa payment notification to Jeff.
@@ -1108,6 +1133,11 @@ async function handleVisaPaymentCompleted(
     });
   } catch (err) {
     log.error({ err }, "[Stripe Webhook] notifyOwner (visa) failed");
+    reportFunnelError({
+      source: "fail-open:stripeWebhook:visaNotifyOwner",
+      err,
+      context: { applicationId },
+    }).catch(() => {});
   }
 }
 
@@ -1434,7 +1464,13 @@ async function handleTrialWillEnd(sub: Stripe.Subscription) {
       title: `Trial 即將結束: ${userData.name || userData.email}`,
       content:
         `會員: ${userData.email}\nTier: ${tierLabel}\n試用結束: ${trialData.endsAt.toISOString()}\n即將收費: ${formattedAmount}\nAB 390 reminder email 已發送。`,
-    }).catch(() => {});
+    }).catch((notifyOwnerErr) => {
+      reportFunnelError({
+        source: "fail-open:stripeWebhook:trialWillEndNotifyOwner",
+        err: notifyOwnerErr,
+        context: { userId: userData.id, trialId: trialData.id },
+      }).catch(() => {});
+    });
 
     // Round 81 (2026-05-17): #books channel — membership trial about to convert.
     const { notifyAgentMessage } = await import("./agentNotify");
@@ -1479,6 +1515,11 @@ async function handleTrialWillEnd(sub: Stripe.Subscription) {
         { err: notifyErr },
         "[Stripe Webhook] trial_will_end: failure-alert notifyOwner ALSO failed",
       );
+      reportFunnelError({
+        source: "fail-open:stripeWebhook:trialWillEndUrgentNotifyOwnerAlsoFailed",
+        err: notifyErr,
+        context: { userId: userData.id, trialId: trialData.id },
+      }).catch(() => {});
     });
   }
 }

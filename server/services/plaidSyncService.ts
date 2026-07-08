@@ -28,6 +28,7 @@ import { getDb } from "../db";
 import { linkedBankAccounts, bankTransactions } from "../../drizzle/schema";
 import { eq, and } from "drizzle-orm";
 import { syncTransactions, decryptAccessToken } from "../_core/plaid";
+import { reportFunnelError } from "../_core/errorFunnel";
 
 const MAX_PAGES_PER_SYNC = 20;
 
@@ -135,6 +136,11 @@ export async function syncOneLinkedAccount(
               `[plaidSync] failed to upsert ${t.transaction_id}:`,
               msg
             );
+            reportFunnelError({
+              source: "fail-open:plaidSyncService:addedInsert",
+              err: insertErr,
+              context: { transactionId: t.transaction_id, accountId: acc.id },
+            }).catch(() => {});
           }
         }
       }
@@ -213,6 +219,11 @@ export async function syncOneLinkedAccount(
             `[plaidSync] failed to flag removed ${r.transaction_id}:`,
             (rmErr as Error)?.message
           );
+          reportFunnelError({
+            source: "fail-open:plaidSyncService:removedFlag",
+            err: rmErr,
+            context: { transactionId: r.transaction_id, accountId: acc.id },
+          }).catch(() => {});
         }
       }
 

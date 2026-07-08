@@ -14,6 +14,7 @@ import { tours, skillLearningHistory, skillLearningSchedule, tourStatistics } fr
 import { eq, and, gt, desc, sql, isNull, or } from "drizzle-orm";
 import { notifyOwner } from "../_core/notification";
 import { skillLearningQueue } from "../queue";
+import { reportFunnelError } from "../_core/errorFunnel";
 
 // 排程任務名稱
 const SCHEDULED_LEARNING_JOB = "scheduled-skill-learning";
@@ -80,6 +81,10 @@ class ScheduledLearningService {
       console.log(`[ScheduledLearning] Initialized ${schedules.length} schedule(s)`);
     } catch (error) {
       console.error("[ScheduledLearning] Failed to initialize scheduler:", error);
+      reportFunnelError({
+        source: "fail-open:scheduledLearningService:initializeScheduler",
+        err: error,
+      }).catch(() => {});
     }
   }
 
@@ -133,6 +138,11 @@ class ScheduledLearningService {
       console.log(`[ScheduledLearning] Set up job for schedule ${schedule.id}: ${cronExpression}`);
     } catch (error) {
       console.error(`[ScheduledLearning] Failed to setup job for schedule ${schedule.id}:`, error);
+      reportFunnelError({
+        source: "fail-open:scheduledLearningService:setupScheduleJob",
+        err: error,
+        context: { scheduleId: schedule.id },
+      }).catch(() => {});
     }
   }
 

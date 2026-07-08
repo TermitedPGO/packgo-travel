@@ -9,6 +9,7 @@
 
 import { notifyOwner } from "../../_core/notification";
 import { redactEmail } from "../../_core/redact";
+import { reportFunnelError } from "../../_core/errorFunnel";
 import { EMAIL_FROM, getTransporter } from "../_shared";
 import type { BookingEmailData } from "./types";
 
@@ -69,6 +70,7 @@ export async function sendBookingConfirmationEmail(data: BookingEmailData) {
       console.log('[Email] Booking confirmation email sent to:', redactEmail(data.to), `(${data.language || 'zh-TW'})`);
     } catch (error) {
       console.error('[Email] Failed to send booking confirmation email:', error);
+      reportFunnelError({ source: "fail-open:bookingConfirmation:sendMail", err: error, context: { bookingId: data.bookingId } }).catch(() => {});
     }
   }
 

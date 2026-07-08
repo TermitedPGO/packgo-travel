@@ -14,6 +14,7 @@ import { and, asc, eq, isNotNull } from "drizzle-orm";
 import { getDb } from "../db";
 import { customerProfiles, customerInteractions } from "../../drizzle/schema";
 import { createChildLogger } from "./logger";
+import { reportFunnelError } from "./errorFunnel";
 
 const log = createChildLogger({ module: "outboundInteraction" });
 
@@ -97,6 +98,7 @@ export async function recordOutboundEmailInteraction(args: {
       { err, customerEmail: args.customerEmail },
       "[outboundInteraction] record failed (non-fatal — email already sent)",
     );
+    reportFunnelError({ source: "fail-open:outboundInteraction:recordFailed", err, context: { customerEmail: args.customerEmail } }).catch(() => {});
     return { recorded: false };
   }
 }

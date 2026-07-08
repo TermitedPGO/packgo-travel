@@ -30,6 +30,7 @@ import {
   type InsertTour,
 } from "../../../drizzle/schema";
 import { createChildLogger } from "../../_core/logger";
+import { reportFunnelError } from "../../_core/errorFunnel";
 import { syncUvCatalog } from "../supplierSync/uv";
 import { enrichUvProduct } from "../supplierSync/uvDetail";
 import { upsertProductDetail } from "../supplierSync/sharedDetail";
@@ -263,6 +264,7 @@ async function refreshTourDepartures(
       { tourId, err: (err as Error).message },
       "refreshTourDepartures failed (non-fatal)",
     );
+    reportFunnelError({ source: "fail-open:catalogRebuild:refreshTourDepartures", err, context: { tourId } }).catch(() => {});
   }
 }
 

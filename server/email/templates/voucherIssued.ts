@@ -7,6 +7,7 @@
 // Extracted verbatim from server/email.ts in v2 Wave 2 Module 2.11.
 
 import { redactEmail } from "../../_core/redact";
+import { reportFunnelError } from "../../_core/errorFunnel";
 import {
   wrapInBrandTemplate,
   emailButton,
@@ -64,6 +65,7 @@ export async function sendVoucherIssuedEmail(data: VoucherIssuedEmailData) {
     return true;
   } catch (err) {
     console.error("[Email] Voucher issued email failed:", err);
+    reportFunnelError({ source: "fail-open:voucherIssued:sendMailFailed", err, context: { voucherCode: data.voucherCode } }).catch(() => {});
     return false;
   }
 }

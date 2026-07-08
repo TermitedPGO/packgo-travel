@@ -7,6 +7,7 @@
 
 import { getHaikuAgent, JSONSchema, STRICT_DATA_FIDELITY_RULES } from "./claudeAgent";
 import { getKeyInstructions, loadReference } from "./skillLoader";
+import { reportFunnelError } from "../_core/errorFunnel";
 
 export interface TrainAgentResult {
   success: boolean;
@@ -181,6 +182,7 @@ ${this.taiwanTourTypes}
       };
     } catch (error) {
       console.error("[TrainAgent] Error:", error);
+      reportFunnelError({ source: "fail-open:trainAgent:structuredGenFallback", err: error }).catch(() => {});
       return {
         success: true,
         data: this.generateDefaultTrain(rawData, 'TRAIN'),

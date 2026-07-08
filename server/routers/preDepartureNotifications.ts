@@ -8,6 +8,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { adminProcedure, router } from "../_core/trpc";
 import { createChildLogger } from "../_core/logger";
+import { reportFunnelError } from "../_core/errorFunnel";
 import * as db from "../db";
 import { eq, and, desc } from "drizzle-orm";
 
@@ -89,6 +90,7 @@ export const preDepartureNotificationsRouter = router({
         return { ok: true, sent: true };
       } catch (err) {
         log.error({ err, id: input.id }, "email send failed, marking approved");
+        reportFunnelError({ source: "fail-open:preDepartureNotifications:send", err, context: { id: input.id } }).catch(() => {});
         await drizzleDb
           .update(preDepartureNotifications)
           .set({ status: "approved", approvedBy: ctx.user.id })

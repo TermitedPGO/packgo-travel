@@ -21,7 +21,7 @@ import { gmailIntegration } from "../drizzle/schema";
 import { buildGmailClient } from "./_core/gmail";
 import { backfillCustomerByEmail } from "./_core/customerBackfill";
 import type { CustomerBackfillJobData, CustomerBackfillJobResult } from "./queue";
-import { wireWorkerFunnel } from "./_core/errorFunnel";
+import { wireWorkerFunnel, reportFunnelError } from "./_core/errorFunnel";
 
 export const customerBackfillWorker = new Worker<
   CustomerBackfillJobData,
@@ -58,6 +58,7 @@ export const customerBackfillWorker = new Worker<
           `[CustomerBackfillWorker] mailbox ${integ.emailAddress} failed for ${email}:`,
           e,
         );
+        reportFunnelError({ source: "fail-open:customerBackfillWorker:mailboxBackfill", err: e, context: { mailbox: integ.emailAddress, profileId, email } }).catch(() => {});
       }
     }
     console.log(

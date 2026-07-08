@@ -40,6 +40,7 @@ import { TRPCError } from "@trpc/server";
 import { publicProcedure, protectedProcedure, adminProcedure, router } from "../_core/trpc";
 import * as db from "../db";
 import { checkRateLimit } from "../rateLimit";
+import { reportFunnelError } from "../_core/errorFunnel";
 
 /**
  * customer-cockpit 任務7a(2026-07-03)— 網站詢問表單送出時,確保這位聯絡人
@@ -77,6 +78,7 @@ function ingestWebsiteInquiryContact(input: {
       }
     } catch (err) {
       console.error("[inquiries] website channel intake failed:", err);
+      reportFunnelError({ source: "fail-open:inquiries:websiteChannelIntakeFailed:create" , err }).catch(() => {});
     }
   })();
 }
@@ -452,6 +454,7 @@ export const inquiriesRouter = router({
             }
           } catch (err) {
             console.error("[inquiries.addMessage] website channel intake failed:", err);
+            reportFunnelError({ source: "fail-open:inquiries:websiteChannelIntakeFailed:addMessage", err }).catch(() => {});
           }
         })();
         return { ...created, emailSent: false };

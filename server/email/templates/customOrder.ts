@@ -12,6 +12,7 @@
 
 import { redactEmail } from "../../_core/redact";
 import { notifyOwner } from "../../_core/notification";
+import { reportFunnelError } from "../../_core/errorFunnel";
 import {
   wrapInBrandTemplate,
   emailButton,
@@ -83,6 +84,11 @@ async function deliver(args: {
     return true;
   } catch (err) {
     console.error(`[Email] ${args.logLabel} failed:`, err);
+    reportFunnelError({
+      source: "fail-open:customOrder:deliverSmtpSend",
+      err,
+      context: { logLabel: args.logLabel },
+    }).catch(() => {});
     return false;
   }
 }

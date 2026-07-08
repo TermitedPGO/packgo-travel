@@ -18,6 +18,7 @@ import { OAuth2Client } from "google-auth-library";
 import { ENV } from "./env";
 import { decryptToken } from "./tokenCrypto";
 import { createChildLogger } from "./logger";
+import { reportFunnelError } from "./errorFunnel";
 const log = createChildLogger({ module: "gmail" });
 
 // gmail-push (2026-06-29) — NOTE on scopes + users.watch:
@@ -258,6 +259,7 @@ async function hydrateMessageById(
     return summary;
   } catch (e) {
     log.warn({ err: e, messageId: id }, "[gmail] failed to fetch message");
+    reportFunnelError({ source: "fail-open:gmail:hydrateMessageByIdFailed", err: e, context: { messageId: id } }).catch(() => {});
     return null;
   }
 }
@@ -671,6 +673,7 @@ export async function fetchRawAttachments(
         { err, messageId, filename: p.filename },
         "[gmail] raw attachment fetch failed",
       );
+      reportFunnelError({ source: "fail-open:gmail:rawAttachmentFetchFailed", err, context: { messageId, filename: p.filename } }).catch(() => {});
     }
   }
   return out;

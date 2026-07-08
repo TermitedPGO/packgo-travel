@@ -38,6 +38,7 @@ import * as db from "../db";
 import { sendBookingConfirmationEmail } from "../email";
 import { convertCurrency, type SupportedCurrency } from "../agents/exchangeRateAgent";
 import { checkBookingCreateRateLimit } from "../rateLimit";
+import { reportFunnelError } from "../_core/errorFunnel";
 
 // v74 bounded string helpers — kept in sync with the originals in routers.ts.
 // Without max bounds, attackers can send 10MB payloads per field and DoS the
@@ -312,6 +313,7 @@ export const bookingsRouter = router({
               `[bookings.create] CRITICAL: Packpoint deduction failed for booking ${booking.id}:`,
               (err as Error).message
             );
+            reportFunnelError({ source: "fail-open:bookings:packpointDeductionFailed", err, context: { bookingId: booking.id, pointsRedeemed } }).catch(() => {});
           }
         }
 
@@ -396,12 +398,13 @@ export const bookingsRouter = router({
             remainingAmount,
             currency: isUsd ? "USD" : "TWD",
             language: input.language,
-          }).catch((e) =>
+          }).catch((e) => {
             console.error(
               `[bookings.create] Even fallback email failed for booking ${booking.id}:`,
               e?.message
-            )
-          );
+            );
+            reportFunnelError({ source: "fail-open:bookings:fallbackConfirmationEmailFailed", err: e, context: { bookingId: booking.id } }).catch(() => {});
+          });
         }
 
         // v78n Sprint 6A: schedule 30-min abandonment recovery email +
@@ -777,7 +780,14 @@ export const bookingsRouter = router({
           booking.departureId
             ? db.getDepartureById(booking.departureId).catch(() => null)
             : Promise.resolve(null),
-          db.getBookingParticipants(booking.id).catch(() => []),
+          db.getBookingParticipants(booking.id).catch((err) => {
+            reportFunnelError({
+              source: "fail-open:bookings:getOrderPacket:participants",
+              err,
+              context: { bookingId: booking.id },
+            }).catch(() => {});
+            return [];
+          }),
         ]);
 
         const { audit } = await import("../_core/auditLog");

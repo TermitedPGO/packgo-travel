@@ -58,6 +58,7 @@ import {
   sql,
 } from "drizzle-orm";
 import { syncOneLinkedAccount } from "../services/plaidSyncService";
+import { reportFunnelError } from "../_core/errorFunnel";
 import { ACCOUNTING_CATEGORIES } from "../agents/autonomous/accountingAgent";
 
 // ── Canonical category validation (M1, 2026-05-28) ────────────────────────
@@ -217,6 +218,11 @@ export const plaidRouter = router({
             `[plaid] insert linkedBankAccount for ${a.account_id} failed:`,
             `${e?.message} | code=${e?.code ?? e?.cause?.code} | type=${rawType}`
           );
+          reportFunnelError({
+            source: "fail-open:plaidRouter:insertLinkedBankAccount",
+            err,
+            context: { plaidAccountId: a.account_id },
+          }).catch(() => {});
         }
       }
 
@@ -822,6 +828,11 @@ export const plaidRouter = router({
         } catch (err) {
           // Genuine error — log + skip
           console.warn(`[csv import] row failed: ${(err as Error)?.message}`);
+          reportFunnelError({
+            source: "fail-open:plaidRouter:csvImportRow",
+            err,
+            context: { linkedAccountId: input.linkedAccountId },
+          }).catch(() => {});
         }
       }
 
@@ -1140,6 +1151,7 @@ export const plaidRouter = router({
           console.warn(
             `[trust-deferral] manual-override sync failed for txn ${input.transactionId}: ${(err as Error)?.message}`
           );
+          reportFunnelError({ source: "fail-open:plaidRouter:trustDeferralManualOverrideSync", err, context: { transactionId: input.transactionId } }).catch(() => {});
         }
       }
 

@@ -22,6 +22,7 @@ import {
 import { createChildLogger } from "../../_core/logger";
 import { classifyFinanceAlertRisk } from "./financeAlertClassifier";
 import { FINANCE_ALERT_TASK_TYPE } from "./financeExecutor";
+import { reportFunnelError } from "../../_core/errorFunnel";
 
 const log = createChildLogger({ module: "financeAlertProducer" });
 
@@ -349,6 +350,7 @@ export async function produceFinanceAlerts(
         { err, alertType: payload.alertType },
         "[financeAlertProducer] failed to create alert task",
       );
+      reportFunnelError({ source: "fail-open:financeAlertProducer:createApprovalTask", err, context: { alertType: payload.alertType, severity: payload.severity } }).catch(() => {});
     }
   }
 

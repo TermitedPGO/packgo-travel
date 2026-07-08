@@ -40,6 +40,7 @@ import {
   emailSendLogs, EmailSendLog, InsertEmailSendLog,
 } from "../../drizzle/schema";
 import { getDb, type DrizzleTx } from "../db";
+import { reportFunnelError } from "../_core/errorFunnel";
 
 // ─── Accounting Entries ────────────────────────────────────────────────────────
 
@@ -317,6 +318,7 @@ export async function getAccountingStats(params: { startDate: Date; endDate: Dat
     }
   } catch (err) {
     console.warn("[accounting] trust deferral lookup failed (returning gross):", (err as Error)?.message);
+    reportFunnelError({ source: "fail-open:accounting:trustDeferralLookup", err }).catch(() => {});
   }
 
   return assembleAccountingStats({ ti, te, pti, pte, yi, ye, trustDeferred, prevTrustDeferred, yearTrustDeferred });

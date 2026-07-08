@@ -10,7 +10,7 @@ import { redisBullMQ } from "./redis";
 import { TourMonitorJobData, TourMonitorJobResult } from "./queue";
 import { runMonitorCycle } from "./services/tourMonitorService";
 import { notifyOwner } from "./_core/notification";
-import { wireWorkerFunnel } from "./_core/errorFunnel";
+import { wireWorkerFunnel, reportFunnelError } from "./_core/errorFunnel";
 
 export const tourMonitorWorker = new Worker<TourMonitorJobData, TourMonitorJobResult>(
   "tour-monitor",
@@ -61,7 +61,10 @@ tourMonitorWorker.on("failed", (job, err) => {
   notifyOwner({
     title: `[TourMonitorWorker] Job ${job?.id ?? "?"} failed`,
     content: `Error: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
-  }).catch((e) => console.error("[notifyOwner] dispatch failed:", e));
+  }).catch((e) => {
+    console.error("[notifyOwner] dispatch failed:", e);
+    reportFunnelError({ source: "fail-open:tourMonitorWorker:notifyOwnerDispatchFailed", err: e, context: { jobId: job?.id } }).catch(() => {});
+  });
 });
 
 tourMonitorWorker.on("error", (err) => {

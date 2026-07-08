@@ -29,6 +29,7 @@ import { invokeLLM } from "./llm";
 import { parseLlmJson } from "./parseLlmJson";
 import { todayLA } from "./customerFacts";
 import { createChildLogger } from "./logger";
+import { reportFunnelError } from "./errorFunnel";
 import {
   resolveOrIdentifyCustomer,
   type ResolvedCustomerIdentity,
@@ -521,6 +522,11 @@ export async function importCaseFile(
           { err: err instanceof Error ? err.message : String(err), folderName, profileId },
           "[caseFileImport] one interaction row failed to insert (continuing)",
         );
+        reportFunnelError({
+          source: "fail-open:caseFileImport:interactionInsert",
+          err,
+          context: { folderName, profileId },
+        }).catch(() => {});
       }
     }
 

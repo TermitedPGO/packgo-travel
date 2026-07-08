@@ -9,7 +9,7 @@ import { redisBullMQ } from "./redis";
 import { TripReminderJobData, TripReminderJobResult } from "./queue";
 import { runTripReminderScan, runPostTripReviewScan, runWinbackScan, runCheckinScan } from "./services/tripReminderService";
 import { notifyOwner } from "./_core/notification";
-import { wireWorkerFunnel } from "./_core/errorFunnel";
+import { wireWorkerFunnel, reportFunnelError } from "./_core/errorFunnel";
 
 export const tripReminderWorker = new Worker<TripReminderJobData, TripReminderJobResult>(
   "trip-reminder",
@@ -29,6 +29,10 @@ export const tripReminderWorker = new Worker<TripReminderJobData, TripReminderJo
         );
       } catch (reviewErr) {
         console.error(`[TripReminderWorker] Post-trip review scan failed:`, reviewErr);
+        reportFunnelError({
+          source: "fail-open:tripReminderWorker:postTripReviewScan",
+          err: reviewErr,
+        }).catch(() => {});
       }
 
       // QA audit 2026-05-11 Phase 9 fix: 30-day winback. Same daily cadence
@@ -41,6 +45,10 @@ export const tripReminderWorker = new Worker<TripReminderJobData, TripReminderJo
         );
       } catch (winbackErr) {
         console.error(`[TripReminderWorker] Winback scan failed:`, winbackErr);
+        reportFunnelError({
+          source: "fail-open:tripReminderWorker:winbackScan",
+          err: winbackErr,
+        }).catch(() => {});
       }
 
       // QA audit Phase 9 step ⑦: 90-day check-in. Final scheduled
@@ -52,6 +60,10 @@ export const tripReminderWorker = new Worker<TripReminderJobData, TripReminderJo
         );
       } catch (checkinErr) {
         console.error(`[TripReminderWorker] Check-in scan failed:`, checkinErr);
+        reportFunnelError({
+          source: "fail-open:tripReminderWorker:checkinScan",
+          err: checkinErr,
+        }).catch(() => {});
       }
 
       // 早報 daily ops digest email to owner — removed 2026-06-27 per Jeff

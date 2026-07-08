@@ -31,6 +31,7 @@
 import * as db from "../db";
 import { createChildLogger } from "./logger";
 import type { ReplyAttachmentRef } from "./replyAttachments";
+import { reportFunnelError } from "./errorFunnel";
 
 const log = createChildLogger({ module: "inquiryReply" });
 
@@ -137,6 +138,7 @@ export async function sendAdminInquiryReply(
         { err, inquiryId: input.inquiryId },
         "[inquiryReply] sendInquiryReply threw",
       );
+      reportFunnelError({ source: "fail-open:inquiryReply:sendInquiryReply", err, context: { inquiryId: input.inquiryId } }).catch(() => {});
     }
   }
 

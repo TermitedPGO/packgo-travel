@@ -30,6 +30,7 @@
 import { eq, or, and, inArray, sql, type SQL } from "drizzle-orm";
 import { getDb } from "../db";
 import { createChildLogger } from "./logger";
+import { reportFunnelError } from "./errorFunnel";
 
 const log = createChildLogger({ module: "customerFacts" });
 
@@ -508,6 +509,11 @@ export async function gatherCustomerFacts(scope: FactsScope): Promise<CustomerFa
       { scope, err: (err as Error).message },
       "[customerFacts] gather failed — summary continues with empty facts",
     );
+    reportFunnelError({
+      source: "fail-open:customerFacts:gather",
+      err,
+      context: { scope },
+    }).catch(() => {});
     return EMPTY_FACTS;
   }
 }

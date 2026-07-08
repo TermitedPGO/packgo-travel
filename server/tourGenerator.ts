@@ -7,6 +7,7 @@ import {
 import { MasterAgent } from "./agents/masterAgent";
 import { createTour, saveCalibrationResult, updateTour, createDeparture, getTourDepartures } from "./db";
 import { searchUnsplashPhotos } from "./services/unsplashService";
+import { reportFunnelError } from "./_core/errorFunnel";
 
 /**
  * Internal tour generation function called by worker
@@ -491,6 +492,7 @@ export async function generateTourFromUrlInternal(
           console.log(`[TourGenerator] ✓ B5: Inserted ${inserted}/${_lionAllDepartures.length} liontravel departures for tour ${tour.id}`);
         } catch (b5Err) {
           console.warn('[TourGenerator] B5 lionDepartures save failed (non-fatal):', b5Err);
+          reportFunnelError({ source: "fail-open:tourGenerator:b5DepartureDateRebuild", err: b5Err, context: { tourId: tour.id } }).catch(() => {});
         }
       })();
     }
@@ -634,6 +636,7 @@ export async function generateTourFromUrlInternal(
       console.log(`[TourGenerator] ✓ Queued auto-translation for tour ${tour.id} → en`);
     } catch (err) {
       console.warn(`[TourGenerator] Failed to queue translation for tour ${tour.id}:`, err);
+      reportFunnelError({ source: "fail-open:tourGenerator:addTourTranslationJob", err, context: { tourId: tour.id } }).catch(() => {});
     }
     
     return {

@@ -28,6 +28,7 @@ import {
   linkedBankAccounts,
 } from "../../drizzle/schema";
 import { and, eq, gte, lte, sql, isNull } from "drizzle-orm";
+import { reportFunnelError } from "../_core/errorFunnel";
 import {
   ACCOUNTING_CATEGORIES,
   type AccountingCategory,
@@ -185,6 +186,7 @@ export async function generateBankPL(opts: {
       "[bankPL] trust deferral lookup failed (returning gross):",
       (err as Error)?.message
     );
+    reportFunnelError({ source: "fail-open:bankPLService:trustDeferralLookupFailed", err }).catch(() => {});
   }
 
   return foldBankPLRows(rows, {

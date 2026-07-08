@@ -29,6 +29,7 @@ import { listThreadMessagesForFiling, type buildGmailClient } from "./gmail";
 import { syncThreadToInteractions } from "./threadFiling";
 import { scrubPii } from "./piiScrub";
 import { createChildLogger } from "./logger";
+import { reportFunnelError } from "./errorFunnel";
 
 const log = createChildLogger({ module: "customerBackfill" });
 
@@ -147,6 +148,11 @@ export async function backfillCustomerByEmail(
     } catch (e) {
       // One bad thread must not abort the rest of the backfill.
       log.warn({ err: e, threadId, profileId }, "[customerBackfill] one thread failed (non-fatal)");
+      reportFunnelError({
+        source: "fail-open:customerBackfill:threadSync",
+        err: e,
+        context: { threadId, profileId },
+      }).catch(() => {});
     }
   }
   log.info({ profileId, targetEmail, ...result, threadIds: undefined }, "[customerBackfill] done");

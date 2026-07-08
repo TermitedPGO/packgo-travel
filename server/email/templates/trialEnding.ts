@@ -23,6 +23,7 @@
 // even if SMTP fails — keep callers' ordering intact.
 
 import { redactEmail } from "../../_core/redact";
+import { reportFunnelError } from "../../_core/errorFunnel";
 import {
   wrapInBrandTemplate,
   emailButton,
@@ -132,6 +133,11 @@ CST #2166984 · +1 (510) 634-2307
     return true;
   } catch (err) {
     console.error("[Email] Trial-ending reminder failed:", err);
+    reportFunnelError({
+      source: "fail-open:trialEnding:smtpSend",
+      err,
+      context: { tierLabel: data.tierLabel },
+    }).catch(() => {});
     return false;
   }
 }

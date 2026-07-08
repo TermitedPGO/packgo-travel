@@ -26,6 +26,7 @@
  * per-interaction try/catch around the insert loop).
  */
 import { createChildLogger } from "./logger";
+import { reportFunnelError } from "./errorFunnel";
 import { normalizePhoneForMatch } from "../db/customerProfile";
 import { followMergePointer } from "./mergedProfile";
 import { touchLastInbound } from "./customerUnread";
@@ -218,6 +219,11 @@ export async function ingestImessageBatch(
           result.claimed++;
         } else {
           log.warn({ err: msg, externalId: message.externalId }, "[imessageIngest] insert failed");
+          reportFunnelError({
+            source: "fail-open:imessageIngest:insertCustomerInteraction",
+            err,
+            context: { externalId: message.externalId },
+          }).catch(() => {});
           result.errors++;
           continue;
         }
@@ -231,6 +237,10 @@ export async function ingestImessageBatch(
         { err: err instanceof Error ? err.message : String(err) },
         "[imessageIngest] one message failed to process (continuing)",
       );
+      reportFunnelError({
+        source: "fail-open:imessageIngest:processMessage",
+        err,
+      }).catch(() => {});
       result.errors++;
     }
   }

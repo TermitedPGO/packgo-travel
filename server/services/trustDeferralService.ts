@@ -60,6 +60,7 @@ import { nanoid } from "nanoid";
 // SECURITY_AUDIT_2026_05_14 P3-3: feature flag reads come from the typed
 // featureFlags module so a typo in env-var names becomes a compile error.
 import * as featureFlags from "../_core/featureFlags";
+import { reportFunnelError } from "../_core/errorFunnel";
 
 // ─── Feature flag + config ─────────────────────────────────────────────────
 
@@ -408,6 +409,7 @@ export async function processTrustInflow(
         reason: "already deferred (idempotent skip)",
       };
     }
+    reportFunnelError({ source: "fail-open:trustDeferralService:insert", err, context: { bankTransactionId: row.txn.id } }).catch(() => {});
     return {
       deferredId: null,
       matched: false,

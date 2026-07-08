@@ -18,7 +18,7 @@ import { gmailIntegration } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { notifyOwner } from "./_core/notification";
 import { handleIntegrationPollError } from "./_core/gmailAuthFailure";
-import { wireWorkerFunnel } from "./_core/errorFunnel";
+import { wireWorkerFunnel, reportFunnelError } from "./_core/errorFunnel";
 
 export const gmailPollWorker = new Worker<GmailPollJobData, GmailPollJobResult>(
   "gmail-poll",
@@ -67,6 +67,11 @@ export const gmailPollWorker = new Worker<GmailPollJobData, GmailPollJobResult>(
             `[GmailPollWorker] sent-capture ${integration.id} failed (non-fatal):`,
             e
           );
+          reportFunnelError({
+            source: "fail-open:gmailPollWorker:sentMailCapture",
+            err: e,
+            context: { integrationId: integration.id },
+          }).catch(() => {});
         }
       } catch (err) {
         errors++;
@@ -135,7 +140,14 @@ gmailPollWorker.on("failed", (job, err) => {
   notifyOwner({
     title: `[GmailPollWorker] Job ${job?.id ?? "?"} failed`,
     content: `Error: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
-  }).catch((e) => console.error("[notifyOwner] dispatch failed:", e));
+  }).catch((e) => {
+    console.error("[notifyOwner] dispatch failed:", e);
+    reportFunnelError({
+      source: "fail-open:gmailPollWorker:notifyOwnerOnFailed",
+      err: e,
+      context: { jobId: job?.id },
+    }).catch(() => {});
+  });
 });
 
 wireWorkerFunnel(gmailPollWorker, "gmail-poll");

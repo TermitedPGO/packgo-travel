@@ -22,6 +22,7 @@ import { bookings, tourDepartures, tours } from "../../drizzle/schema";
 import { and, eq, gte, lte, inArray } from "drizzle-orm";
 import { sendTripReminderEmail, sendReviewRequestEmail, sendWinbackEmail, sendCheckinEmail } from "../email";
 import { redis } from "../redis";
+import { reportFunnelError } from "../_core/errorFunnel";
 
 export type ReminderWindow = 30 | 14 | 7 | 3 | 1;
 const REMINDER_WINDOWS: ReminderWindow[] = [30, 14, 7, 3, 1];
@@ -48,6 +49,7 @@ async function alreadySent(bookingId: number, daysOut: ReminderWindow): Promise<
   } catch (err) {
     // Redis unavailable — fail-safe: don't send (avoid duplicates over no-sends)
     console.warn("[tripReminderService] Redis check failed, skipping send to be safe:", (err as Error)?.message);
+    reportFunnelError({ source: "fail-open:tripReminderService:alreadySentRedisCheck", err, context: { bookingId, daysOut } }).catch(() => {});
     return true;
   }
 }
@@ -138,6 +140,7 @@ export async function runTripReminderScan(): Promise<ReminderScanResult> {
         `[tripReminderService] Failed to email booking ${row.bookingId} (${window}d out):`,
         (err as Error)?.message
       );
+      reportFunnelError({ source: "fail-open:tripReminderService:sendTripReminderEmail", err, context: { bookingId: row.bookingId, window } }).catch(() => {});
       result.errors++;
     }
   }

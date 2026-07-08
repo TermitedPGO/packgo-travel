@@ -44,6 +44,7 @@ import {
   type GmailMessageSummary,
 } from "../../_core/gmail";
 import { detectReceipt, extractReceipt, pickReceiptAttachment } from "../../_core/receiptExtractor";
+import { reportFunnelError } from "../../_core/errorFunnel";
 import { scrubPii } from "../../_core/piiScrub";
 import { touchLastInbound } from "../../_core/customerUnread";
 import {
@@ -194,6 +195,11 @@ export async function runGmailPipeline(
   try {
     messages = await listUnreadMessages(gmail, sinceSeconds, 25, POLL_FILTER_LABEL || undefined);
   } catch (e) {
+    reportFunnelError({
+      source: "fail-open:gmailPipeline:listUnreadMessages",
+      err: e,
+      context: { emailAddress: integration.emailAddress },
+    }).catch(() => {});
     return {
       ok: false,
       emailAddress: integration.emailAddress,
@@ -532,6 +538,11 @@ async function ingestFreshMessages(
         { err: e, messageId: m.id, subject: m.subject?.slice(0, 60), from: m.from },
         "[gmailPipeline] Failed receipt",
       );
+      reportFunnelError({
+        source: "fail-open:gmailPipeline:receiptProcessing",
+        err: e,
+        context: { messageId: m.id },
+      }).catch(() => {});
     }
   }
 
@@ -640,6 +651,11 @@ async function ingestFreshMessages(
           { err: cardErr, messageId: f.msg.id },
           "[gmailPipeline] failed to post intake-failure card",
         );
+        reportFunnelError({
+          source: "fail-open:gmailPipeline:intakeFailureCard",
+          err: cardErr,
+          context: { messageId: f.msg.id },
+        }).catch(() => {});
       }
     }
   } else if (failedThisRun.length > 5) {
@@ -651,6 +667,11 @@ async function ingestFreshMessages(
         { err: cardErr, count: failedThisRun.length },
         "[gmailPipeline] failed to post intake-failure flood card",
       );
+      reportFunnelError({
+        source: "fail-open:gmailPipeline:intakeFailureFloodCard",
+        err: cardErr,
+        context: { count: failedThisRun.length },
+      }).catch(() => {});
     }
   }
 
@@ -729,6 +750,11 @@ export async function runGmailPipelineForMessageIds(
     result.errors.push(
       `history.list failed: ${e instanceof Error ? e.message : String(e)}`,
     );
+    reportFunnelError({
+      source: "fail-open:gmailPipeline:historyListPush",
+      err: e,
+      context: { emailAddress: result.emailAddress },
+    }).catch(() => {});
     return result;
   }
 
@@ -1504,6 +1530,7 @@ async function processOneEmail(
       result.errors.push(
         `send threw for ${msg.id}: ${e instanceof Error ? e.message : String(e)}`
       );
+      reportFunnelError({ source: "fail-open:gmailPipeline:autoReplySendThrew", err: e, context: { msgId: msg.id, threadId: msg.threadId } }).catch(() => {});
     }
   }
 

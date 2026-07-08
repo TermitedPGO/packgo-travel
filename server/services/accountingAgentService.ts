@@ -29,6 +29,7 @@ import {
   linkedBankAccounts,
 } from "../../drizzle/schema";
 import { and, eq, isNull, desc } from "drizzle-orm";
+import { reportFunnelError } from "../_core/errorFunnel";
 import {
   runAccountingAgent,
   type AccountingAgentInput,
@@ -326,6 +327,7 @@ export async function classifyOne(
         `[accountingAgent] trust-deferral hook failed for txn ${transactionId}:`,
         (err as Error)?.message
       );
+      reportFunnelError({ source: "fail-open:accountingAgentService:trustDeferralHook", err, context: { transactionId } }).catch(() => {});
     }
   }
 

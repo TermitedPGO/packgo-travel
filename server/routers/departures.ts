@@ -25,6 +25,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { publicProcedure, adminProcedure, router } from "../_core/trpc";
+import { reportFunnelError } from "../_core/errorFunnel";
 import * as db from "../db";
 
 // v74 bounded string helpers — kept in sync with originals in routers.ts.
@@ -188,7 +189,10 @@ export const departuresRouter = router({
         if (!before) {
           throw new TRPCError({ code: "NOT_FOUND", message: "Departure not found" });
         }
-        const activeBookings = await db.getActiveBookingsByDepartureId(input.id).catch(() => [] as any[]);
+        const activeBookings = await db.getActiveBookingsByDepartureId(input.id).catch((err) => {
+          reportFunnelError({ source: "fail-open:departures:activeBookingsCheck", err, context: { departureId: input.id } }).catch(() => {});
+          return [] as any[];
+        });
         if (activeBookings.length > 0) {
           throw new TRPCError({
             code: "CONFLICT",

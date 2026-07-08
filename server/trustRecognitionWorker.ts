@@ -22,7 +22,7 @@ import type {
   TrustRecognitionJobResult,
 } from "./queue";
 import { notifyOwner } from "./_core/notification";
-import { wireWorkerFunnel } from "./_core/errorFunnel";
+import { wireWorkerFunnel, reportFunnelError } from "./_core/errorFunnel";
 
 export const trustRecognitionWorker = new Worker<
   TrustRecognitionJobData,
@@ -106,7 +106,10 @@ trustRecognitionWorker.on("failed", (job, err) => {
   notifyOwner({
     title: `[trustRecognitionWorker] Job ${job?.id ?? "?"} failed`,
     content: `Error: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
-  }).catch((e) => console.error("[notifyOwner] dispatch failed:", e));
+  }).catch((e) => {
+    console.error("[notifyOwner] dispatch failed:", e);
+    reportFunnelError({ source: "fail-open:trustRecognitionWorker:notifyOwnerFailed", err: e, context: { jobId: job?.id ?? "?" } }).catch(() => {});
+  });
 });
 
 wireWorkerFunnel(trustRecognitionWorker, "trust-recognition");

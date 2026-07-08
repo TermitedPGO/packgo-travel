@@ -8,6 +8,7 @@
 
 import { notifyOwner } from "../../_core/notification";
 import { redactEmail } from "../../_core/redact";
+import { reportFunnelError } from "../../_core/errorFunnel";
 import {
   wrapInBrandTemplate,
   emailInfoTable,
@@ -135,6 +136,7 @@ PACK & GO 旅行社（CST #2166984）
     return true;
   } catch (error) {
     console.error('[Email] Failed to send trip reminder:', error);
+    reportFunnelError({ source: "fail-open:tripReminder:sendMail", err: error, context: { bookingId: data.bookingId, daysOut: data.daysOut } }).catch(() => {});
     return false;
   }
 }

@@ -7,6 +7,7 @@
  */
 import { invokeLLM } from "./llm";
 import { createChildLogger } from "./logger";
+import { reportFunnelError } from "./errorFunnel";
 import * as db from "../db";
 import { eq, and } from "drizzle-orm";
 
@@ -98,6 +99,7 @@ export async function generatePreDepartureMessages(departureId: number) {
       created++;
     } catch (err) {
       log.error({ err, bookingId: booking.id }, "failed to draft message");
+      reportFunnelError({ source: "fail-open:preDepartureDraftService:draftMessage", err, context: { departureId, bookingId: booking.id } }).catch(() => {});
     }
   }
 

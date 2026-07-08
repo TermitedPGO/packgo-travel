@@ -19,6 +19,7 @@ import { invokeLLM } from "../_core/llm";
 import { getDb } from "../db";
 import { wechatMessages } from "../../drizzle/schema";
 import { enrichChatContext } from "./aiChatContextService";
+import { reportFunnelError } from "../_core/errorFunnel";
 
 const SYSTEM_PROMPT = `你是 PACK&GO 旅行社的 AI 助理 Jeff（謝俊富，老闆本人）的「分身」。
 客戶在 WeChat / 朋友圈 / LINE 對 Jeff 提問，Jeff 沒空即時回，你先草擬回覆讓他審。
@@ -123,6 +124,7 @@ export async function draftReply(input: DraftReplyInput): Promise<DraftReplyResu
     }
   } catch (err) {
     console.warn("[wechatAssistService] persist failed:", (err as Error)?.message);
+    reportFunnelError({ source: "fail-open:wechatAssistService:persistFailed", err, context: { channel: input.source } }).catch(() => {});
   }
 
   return {
