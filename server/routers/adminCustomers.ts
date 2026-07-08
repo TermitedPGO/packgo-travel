@@ -186,6 +186,7 @@ export async function runGuestUnreadRankingQuery(
             ${customerProfiles.source} = 'manual'
             OR EXISTS (SELECT 1 FROM ${inquiriesTable} WHERE ${inquiriesTable.customerEmail} = ${customerProfiles.email})
             OR EXISTS (SELECT 1 FROM ${agentMessages} WHERE ${agentMessages.relatedCustomerProfileId} = ${customerProfiles.id} AND ${agentMessages.messageType} = 'escalation')
+            OR ${customerProfiles.lastInboundAt} IS NOT NULL
           )`,
       ),
     )
@@ -497,15 +498,21 @@ export const adminCustomersRouter = router({
     // returns NULL if any arg is NULL).
     //
     // IMPORTANT (A3 hotfix): do NOT add a `lastInboundAt IS NOT NULL`
-    // pre-filter here like the registered-customer branch above does.
-    // guestList has no such filter, so adding one here would shrink this
-    // query's ranking pool relative to guestList's before the identical
-    // LIMIT 200 is applied — the two top-200 windows would then be computed
-    // over different populations and could disagree on which guests are
-    // "in". isUnreadInbound(null, ...) already returns false, so a guest with
-    // no inbound message correctly never counts as unread; it must still
-    // occupy its rightful ranking slot so it can correctly push OTHER guests
-    // below #200 in the same way it does for guestList.
+    // *pre-filter* (a top-level AND gate) here like the registered-customer
+    // branch above does. guestList has no such AND filter, so adding one here
+    // would shrink this query's ranking pool relative to guestList's before
+    // the identical LIMIT 200 is applied — the two top-200 windows would then
+    // be computed over different populations and could disagree on which
+    // guests are "in". isUnreadInbound(null, ...) already returns false, so a
+    // guest with no inbound message correctly never counts as unread; it must
+    // still occupy its rightful ranking slot so it can correctly push OTHER
+    // guests below #200 in the same way it does for guestList.
+    // (v800, Ann 事故) — distinct from the above: the shared qualification
+    // inside runGuestUnreadRankingQuery now carries `OR lastInboundAt IS NOT
+    // NULL` as a *disjunct* (real inbound mail = a real customer). That is safe
+    // and required precisely because guestList carries the identical OR arm —
+    // both populations grow together, symmetry preserved. The prohibition is
+    // only against an ASYMMETRIC top-level AND pre-filter, never a mirrored OR.
     // guest 未讀排名(GREATEST + 關聯子查詢 ORDER BY,含 TiDB SELECT 雷的修法)抽成共用
     // runGuestUnreadRankingQuery,與 weeklyCanary 呼叫「同一支」—— canary 每週跑它,拋錯即
     // 進失敗卡,讓 badge 靜默 500 最晚一週被抓到。口徑與 guestList 逐字一致。
@@ -1036,12 +1043,20 @@ ${text.slice(0, MAX_EXTRACT_TEXT_CHARS)}`;
               ${customerProfiles.email} IS NULL OR ${customerProfiles.email} = ''
               OR NOT EXISTS (SELECT 1 FROM ${usersTable} WHERE ${usersTable.email} = ${customerProfiles.email})
             )`,
-            // Earns a sidebar chip when there is real customer content (an
-            // inquiry / escalation) OR Jeff added the customer by hand.
+            // Earns a sidebar chip when there is real customer content: Jeff
+            // added them by hand (source='manual'), a filed inquiry/escalation
+            // exists, OR they actually sent us inbound mail (lastInboundAt).
+            // v800 (Ann 事故):a real customer whose inquiry classification
+            // silently failed still has lastInboundAt — gate on it too or she
+            // never appears (not even under includeHidden, which only toggles
+            // the blocked filter AFTER this qualification). This OR arm is
+            // mirrored verbatim in runGuestUnreadRankingQuery (badge) so both
+            // populations grow together — 口徑逐字一致 (v794 的教訓).
             sql`(
               ${customerProfiles.source} = 'manual'
               OR EXISTS (SELECT 1 FROM ${inquiriesTable} WHERE ${inquiriesTable.customerEmail} = ${customerProfiles.email})
               OR EXISTS (SELECT 1 FROM ${agentMessages} WHERE ${agentMessages.relatedCustomerProfileId} = ${customerProfiles.id} AND ${agentMessages.messageType} = 'escalation')
+              OR ${customerProfiles.lastInboundAt} IS NOT NULL
             )`,
           ),
         )

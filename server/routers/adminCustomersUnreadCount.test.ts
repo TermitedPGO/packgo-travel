@@ -206,3 +206,80 @@ describe("customerUnreadCount — guest sub-query window (A3, Phase6)", () => {
     expect({ onlyInCount, onlyInList }).toEqual({ onlyInCount: [], onlyInList: [] });
   });
 });
+
+/**
+ * Ann-class guest visibility (v800, 2026-07-07). Profile 2760051 had
+ * source=null, NO inquiry row, and NO escalation agentMessages card (her
+ * inquiry classification silently failed — the original Ann 事故), yet a real
+ * lastInboundAt (she emailed us). The old qualification (source='manual' OR
+ * EXISTS inquiry OR EXISTS escalation) matched none of those, so guestList AND
+ * the badge both excluded her — invisible even under includeHidden (which only
+ * toggles the blocked filter, applied AFTER this qualification). v800 adds
+ * `OR lastInboundAt IS NOT NULL` to the shared qualification, VERBATIM in both.
+ */
+describe("Ann-class guest visibility — inbound-only real customer (v800)", () => {
+  let dbGetDbMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.resetModules();
+    dbGetDbMock = vi.fn();
+  });
+
+  it("BOTH guestList (list) and customerUnreadCount (badge) admit an inbound-only guest via the mirrored `lastInboundAt IS NOT NULL` OR arm", async () => {
+    const { db: dbStub, calls } = makeDbStub([], []);
+    dbGetDbMock.mockResolvedValue(dbStub);
+    vi.doMock("../db", () => ({ getDb: dbGetDbMock }));
+
+    const { adminCustomersRouter } = await import("./adminCustomers");
+    const caller = (adminCustomersRouter as any).createCaller({
+      user: { id: 1, email: "jeff@packgo.com", role: "admin" },
+    });
+
+    await caller.customerUnreadCount();
+    const badgeWhere = sqlToText(calls[1].whereArg).replace(/\s+/g, " ");
+
+    const { db: dbStub2, calls: calls2 } = makeDbStub([], []);
+    dbGetDbMock.mockResolvedValue(dbStub2);
+    await caller.guestList();
+    const listWhere = sqlToText(calls2[0].whereArg).replace(/\s+/g, " ");
+
+    // The NEW disjunct that admits Ann. lastInboundAt appears in the WHERE only
+    // via this arm (the GREATEST lastContact expression lives in SELECT/orderBy,
+    // never the WHERE), so this substring is unambiguous — distinct from the
+    // email/phone `... IS NOT NULL` contactable checks.
+    expect(badgeWhere).toMatch(/lastInboundAt\s+IS NOT NULL/i);
+    expect(listWhere).toMatch(/lastInboundAt\s+IS NOT NULL/i);
+
+    // Ann only qualifies via that arm — she fails the other three disjuncts
+    // (source≠manual, no inquiry EXISTS, no escalation EXISTS). Model the SQL
+    // qualification as a pure predicate; assert her exact shape passes while a
+    // truly empty guest (never wrote in) is still correctly excluded.
+    const qualifies = (g: {
+      source: string | null;
+      hasInquiry: boolean;
+      hasEscalation: boolean;
+      lastInboundAt: Date | null;
+    }) =>
+      g.source === "manual" ||
+      g.hasInquiry ||
+      g.hasEscalation ||
+      g.lastInboundAt != null;
+
+    expect(
+      qualifies({
+        source: null,
+        hasInquiry: false,
+        hasEscalation: false,
+        lastInboundAt: new Date("2026-07-07T17:20:00Z"),
+      }),
+    ).toBe(true);
+    expect(
+      qualifies({
+        source: null,
+        hasInquiry: false,
+        hasEscalation: false,
+        lastInboundAt: null,
+      }),
+    ).toBe(false);
+  });
+});
