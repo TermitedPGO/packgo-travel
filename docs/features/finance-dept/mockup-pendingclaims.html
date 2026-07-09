@@ -1,670 +1,394 @@
 <!doctype html>
-<html lang="zh-TW">
+<html lang="zh-Hant">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>待認領入帳・財報頁預覽（示意，v2 以真實頁面為基準重做）</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1280">
+<title>待認領頁面預覽（示意）</title>
 <style>
-  :root {
-    --primary: oklch(0.15 0 0);
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.15 0 0);
-    --gray-50: #F9FAFB;
-    --gray-100: #F3F4F6;
-    --gray-200: #E5E7EB;
-    --gray-300: #D1D5DB;
-    --gray-400: #9CA3AF;
-    --gray-500: #6B7280;
-    --gray-600: #4B5563;
-    --gray-700: #374151;
-    --gray-900: #111827;
-    --teal-50: #F0FDFA;
-    --teal-600: #0D9488;
+  :root{
+    /* 取自 client/src/index.css @theme（oklch 轉近似 hex）與既有硬編碼 class */
+    --rail:#030712;            /* bg-gray-950 深色左欄 */
+    --bg:#ffffff;             /* --background 純白 */
+    --fg:#111827;             /* 內容主色（PendingClaimsTab 用 text-gray-900）*/
+    --fg-near-black:#1a1a1a;  /* --foreground / --primary 近黑（認領鈕）*/
+    --muted-500:#6b7280;      /* text-gray-500 副標/表頭 */
+    --muted-400:#9ca3af;      /* text-gray-400 交易 id */
+    --muted-600:#4b5563;      /* text-gray-600 候選未選字 */
+    --line-200:#e5e7eb;       /* border-gray-200 卡片邊 */
+    --line-100:#f3f4f6;       /* divide-gray-100 列分隔 */
+    --line-300:#d1d5db;       /* 表單控件邊 */
+    --gray-50:#f9fafb;        /* thead / hover 底 */
+    --teal-600:#0d9488;       /* 既有 tab 選中態 + 候選選中框 */
+    --teal-50:#f0fdfa;
+    --teal-700:#0f766e;
+    --radius-md:6px;          /* rounded-md */
+    --radius-lg:8px;          /* rounded-lg (--radius 0.5rem) */
+    --radius-xl:12px;         /* rounded-xl */
+    font-synthesis-weight:none;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:#eef0f2}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Microsoft JhengHei","Noto Sans TC","Segoe UI",Roboto,sans-serif;
+    color:var(--fg);
+    -webkit-font-smoothing:antialiased;
+  }
+  .tabnum{font-variant-numeric:tabular-nums}
+
+  /* ── /ops AdminShell 外殼 ─────────────────────────────── */
+  .app{display:flex;min-height:100vh;background:var(--bg)}
+  .rail{
+    width:56px;flex-shrink:0;background:var(--rail);
+    display:flex;flex-direction:column;align-items:center;
+    padding:12px 0;gap:4px;position:sticky;top:0;height:100vh;align-self:flex-start;
+  }
+  .rail-logo{
+    width:32px;height:32px;border-radius:var(--radius-lg);
+    background:rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;
+    margin-bottom:16px;
+  }
+  .rail-logo span{color:#fff;font-size:10px;font-weight:700;letter-spacing:-.02em}
+  .rail-btn{
+    position:relative;width:40px;height:40px;border-radius:var(--radius-lg);
+    display:flex;align-items:center;justify-content:center;
+    color:#9ca3af;border:none;background:transparent;cursor:pointer;
+  }
+  .rail-btn.active{background:#fff;color:var(--rail)}
+  .rail-btn svg{width:18px;height:18px}
+  .rail-spacer{flex:1}
+
+  /* ── main 內容區 ─────────────────────────────── */
+  .main{flex:1;overflow-y:auto}
+  .content{max-width:1024px;margin:0 auto;padding:32px 40px 64px}
+  .section-tag{
+    font-size:11px;color:var(--muted-500);letter-spacing:.04em;
+    border:1px dashed var(--line-300);border-radius:999px;
+    padding:3px 12px;display:inline-block;margin-bottom:14px;background:#fff;
   }
 
-  * { box-sizing: border-box; }
-  button {
-    border: none;
-    background: none;
-    font: inherit;
-    color: inherit;
-    padding: 0;
-    margin: 0;
-    cursor: default;
+  /* 六分頁切換器（FinanceReports）*/
+  .switcher{
+    display:inline-flex;flex-wrap:wrap;gap:4px;
+    border-radius:var(--radius-xl);border:1px solid rgba(23,23,23,.1);
+    background:#fff;padding:4px;margin-bottom:16px;
+  }
+  .tab{
+    display:inline-flex;align-items:center;gap:6px;
+    border-radius:var(--radius-lg);padding:6px 12px;
+    font-size:12px;font-weight:500;color:rgba(23,23,23,.6);
+    border:none;background:transparent;cursor:pointer;white-space:nowrap;
+  }
+  .tab svg{width:14px;height:14px}
+  .tab.active{background:var(--teal-600);color:#fff}
+
+  /* PendingClaimsTab */
+  .pc-head h2{font-size:24px;font-weight:700;color:var(--fg);line-height:1.2}
+  .pc-head p{font-size:14px;color:var(--muted-500);margin-top:4px;max-width:640px;line-height:1.5}
+  .pc-space{margin-top:24px}
+
+  .card{
+    background:#fff;border:1px solid var(--line-200);
+    border-radius:var(--radius-xl);overflow:hidden;
+  }
+  table{width:100%;border-collapse:collapse}
+  thead{background:var(--gray-50);border-bottom:1px solid var(--line-200)}
+  th{
+    padding:12px 16px;font-size:12px;font-weight:500;color:var(--muted-500);
+    text-transform:uppercase;letter-spacing:.05em;
+  }
+  th.l{text-align:left}
+  th.r{text-align:right}
+  tbody tr{border-top:1px solid var(--line-100);vertical-align:top}
+  tbody tr:first-child{border-top:none}
+  tbody tr:hover{background:var(--gray-50)}
+  td{padding:12px 16px}
+  td.r{text-align:right}
+
+  .date-line{display:flex;align-items:center;gap:4px;font-size:14px;color:#374151}
+  .date-line svg{width:12px;height:12px;color:var(--muted-400)}
+  .txn-id{font-size:12px;color:var(--muted-400);margin-top:2px}
+  .amount{font-size:14px;font-weight:600;color:var(--fg)}
+
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+  .chip{
+    border-radius:var(--radius-md);border:1px solid var(--line-200);
+    padding:4px 8px;font-size:12px;color:var(--muted-600);background:#fff;cursor:pointer;
+  }
+  .chip.sel{border-color:var(--teal-600);background:var(--teal-50);color:var(--teal-700)}
+
+  .select{
+    width:176px;height:32px;border:1px solid var(--line-300);border-radius:var(--radius-lg);
+    font-size:12px;color:var(--muted-500);background:#fff;
+    display:flex;align-items:center;justify-content:space-between;padding:0 10px 0 12px;
+  }
+  .select svg{width:14px;height:14px;color:var(--muted-400);flex-shrink:0}
+
+  .num-input{
+    width:112px;height:32px;border:1px solid var(--line-300);border-radius:var(--radius-lg);
+    font-size:12px;text-align:right;color:var(--muted-400);background:#fff;
+    display:flex;align-items:center;justify-content:flex-end;padding:0 8px;margin-left:auto;
   }
 
-  html, body {
-    margin: 0;
-    padding: 0;
-    background: var(--background);
-    color: var(--foreground);
-    font-family: "PingFang TC", "Microsoft JhengHei", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-    -webkit-font-smoothing: antialiased;
-    font-size: 14px;
+  .btn-claim{
+    display:inline-flex;align-items:center;gap:4px;
+    height:32px;padding:0 12px;border-radius:var(--radius-lg);
+    background:var(--fg-near-black);color:#fff;font-size:13px;font-weight:500;
+    border:none;cursor:pointer;
   }
-  /* repo 的 --font-sans 是 "Noto Sans TC"（client/src/index.css），本檔自含
-     不外連字型，用系統內建的 PingFang TC / 微軟正黑體 頂替，字重視覺上接近。 */
+  .btn-claim svg{width:14px;height:14px}
+  .btn-claim.disabled{opacity:.45;background:#9ca3af;cursor:not-allowed}
 
-  .app {
-    display: flex;
-    height: 100vh;
-    overflow: hidden;
-  }
+  .empty-row td{padding:48px 16px;text-align:center;color:var(--muted-500);font-size:14px}
 
-  /* ══════════════════════════════════════════════════════════════════
-     側欄（逐字比照 client/src/components/workspace/WorkspaceSidebar.tsx）
-     ══════════════════════════════════════════════════════════════════ */
-  .sidebar {
-    width: 248px;
-    flex-shrink: 0;
-    border-right: 1px solid var(--gray-200);
-    background: var(--gray-50);
-    display: flex;
-    flex-direction: column;
+  /* 對比：已自動對帳 callout */
+  .contrast{
+    margin-top:16px;border:1px solid var(--line-200);border-radius:var(--radius-xl);
+    background:var(--gray-50);padding:14px 16px;
   }
+  .contrast-title{font-size:12px;color:var(--muted-500);margin-bottom:10px;display:flex;align-items:center;gap:6px}
+  .contrast-title .dot{width:6px;height:6px;border-radius:999px;background:var(--teal-600);display:inline-block}
+  .contrast-row{
+    display:flex;align-items:center;gap:16px;font-size:13px;color:#6b7280;
+    background:#fff;border:1px solid var(--line-200);border-radius:var(--radius-lg);
+    padding:10px 14px;
+  }
+  .contrast-row .k{color:var(--muted-400);font-size:11px}
+  .badge-auto{
+    display:inline-flex;align-items:center;gap:4px;font-size:11px;
+    background:var(--teal-50);color:var(--teal-700);border:1px solid #99f6e4;
+    border-radius:999px;padding:3px 10px;
+  }
+  .badge-auto svg{width:12px;height:12px}
 
-  .sb-header {
-    height: 48px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 14px;
-    border-bottom: 1px solid var(--gray-100);
-    flex-shrink: 0;
-  }
-  .sb-header .wordmark { font-size: 14px; font-weight: 600; }
-  .sb-header .collapse-btn {
-    width: 28px; height: 28px; border-radius: 6px;
-    display: flex; align-items: center; justify-content: center;
-    color: var(--gray-500);
-  }
-  .sb-header .collapse-btn svg { width: 16px; height: 16px; }
+  .caption{margin-top:12px;font-size:12px;color:var(--muted-400);line-height:1.6}
 
-  .sb-search-wrap { padding: 10px 12px; flex-shrink: 0; }
-  .sb-search {
-    height: 32px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 0 10px;
-    border-radius: 8px;
-    background: var(--gray-100);
-  }
-  .sb-search svg { width: 14px; height: 14px; color: var(--gray-400); flex-shrink: 0; }
-  .sb-search span { font-size: 12px; color: var(--gray-400); }
+  .divider{margin:40px 0 8px;border-top:1px dashed var(--line-300)}
 
-  .sb-nav { flex: 1; overflow-y: auto; padding: 0 10px 8px; }
-  .sb-row {
-    width: 100%;
-    text-align: left;
-    padding: 8px 10px;
-    border-radius: 12px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 4px;
+  /* 出入清單 */
+  .findings{
+    margin-top:40px;border:1px solid var(--line-200);border-radius:var(--radius-xl);
+    background:#fff;padding:20px 22px;
   }
-  .sb-row.active { background: #000; color: #fff; }
-  .sb-row-icon {
-    width: 28px; height: 28px; border-radius: 8px;
-    display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
-    background: #000; color: #fff;
+  .findings h3{font-size:15px;font-weight:700;color:var(--fg);margin-bottom:4px}
+  .findings .sub{font-size:12px;color:var(--muted-500);margin-bottom:14px}
+  .findings ol{list-style:none;counter-reset:f;display:flex;flex-direction:column;gap:12px}
+  .findings li{counter-increment:f;position:relative;padding-left:28px;font-size:13px;color:#374151;line-height:1.55}
+  .findings li::before{
+    content:counter(f);position:absolute;left:0;top:0;
+    width:20px;height:20px;border-radius:999px;background:#f3f4f6;color:#6b7280;
+    font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center;
   }
-  .sb-row.active .sb-row-icon { background: #fff; color: #000; }
-  .sb-row-icon svg { width: 16px; height: 16px; }
-  .sb-row-text { flex: 1; min-width: 0; }
-  .sb-row-label { font-size: 13px; font-weight: 600; }
-  .sb-row-sub { font-size: 11px; color: var(--gray-400); }
-  .sb-row.active .sb-row-sub { color: #D1D5DB; }
-  .sb-badge {
-    min-width: 18px; height: 18px; padding: 0 4px;
-    border-radius: 999px; font-size: 10px; font-weight: 700;
-    display: flex; align-items: center; justify-content: center;
-    background: #000; color: #fff;
+  .tag{
+    display:inline-block;font-size:10px;font-weight:600;border-radius:999px;
+    padding:1px 8px;margin-right:6px;vertical-align:1px;
   }
-  .sb-row.active .sb-badge { background: #fff; color: #000; }
-
-  .sb-subs { padding: 2px 0 2px 12px; margin-bottom: 4px; }
-  .sb-sub {
-    width: 100%;
-    text-align: left;
-    padding: 6px 10px;
-    border-radius: 8px;
-    font-size: 12px;
-    color: var(--foreground);
-    margin-bottom: 2px;
-  }
-  .sb-sub.on { background: var(--gray-200); }
-
-  .sb-cust-header {
-    font-size: 10px; font-weight: 600; color: var(--gray-400);
-    padding: 8px 4px 4px;
-  }
-  .sb-cust {
-    width: 100%;
-    text-align: left;
-    padding: 8px 10px;
-    border-radius: 12px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 2px;
-  }
-  .sb-cust-avatar {
-    width: 28px; height: 28px; border-radius: 999px;
-    background: var(--gray-200); color: var(--gray-700);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 12px; font-weight: 700; flex-shrink: 0;
-  }
-  .sb-cust-name { font-size: 13px; font-weight: 500; }
-  .sb-cust-sub { font-size: 11px; color: var(--gray-400); }
-
-  .sb-footer {
-    height: 44px;
-    border-top: 1px solid var(--gray-100);
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0 14px;
-    flex-shrink: 0;
-  }
-  .sb-footer-avatar {
-    width: 24px; height: 24px; border-radius: 999px;
-    background: #000; color: #fff;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 10px; font-weight: 700; flex-shrink: 0;
-  }
-  .sb-footer-name { font-size: 12px; flex: 1; }
-  .sb-footer svg { width: 14px; height: 14px; color: var(--gray-400); }
-
-  /* ══════════════════════════════════════════════════════════════════
-     主內容（client/src/pages/Workspace.tsx 的 <main class="p-4 md:p-6">）
-     ══════════════════════════════════════════════════════════════════ */
-  main {
-    flex: 1;
-    overflow-y: auto;
-    padding: 24px;
-    background: #fff;
-  }
-
-  .stack { display: flex; flex-direction: column; gap: 16px; } /* space-y-4 */
-
-  /* WorkspaceCompany 外層 tab bar（記帳/月報/…七個） */
-  .outer-tabbar {
-    display: inline-flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    border-radius: 12px;
-    border: 1px solid var(--gray-200);
-    background: #fff;
-    padding: 4px;
-  }
-  .outer-tab {
-    height: 32px;
-    padding: 0 12px;
-    border-radius: 8px;
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--gray-600);
-    display: inline-flex;
-    align-items: center;
-  }
-  .outer-tab.active { background: var(--gray-900); color: #fff; }
-
-  /* FinanceReports 內層 tab bar（損益表/對帳/發票/待認領/客人訂金/報稅匯出） */
-  .fr-tabbar-wrap { max-width: 960px; margin: 0 auto; } /* max-w-5xl mx-auto */
-  .fr-tabbar {
-    display: inline-flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    border-radius: 12px;
-    border: 1px solid rgba(17,24,39,0.10);
-    background: #fff;
-    padding: 4px;
-  }
-  .fr-tab {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    border-radius: 8px;
-    padding: 6px 12px;
-    font-size: 12px;
-    font-weight: 500;
-    color: rgba(17,24,39,0.6);
-  }
-  .fr-tab svg { width: 14px; height: 14px; }
-  .fr-tab.active { background: var(--teal-600); color: #fff; }
-
-  /* PendingClaimsTab 本體：注意這支元件源碼沒有 max-w-5xl 包裝（跟
-     ProfitLossV2.tsx 不同），所以會撐滿到跟上面 tab bar 不同寬。這是
-     忠實還原，不是我加的，細節見檔尾出入清單。 */
-  .pct { display: flex; flex-direction: column; gap: 24px; } /* space-y-6 */
-
-  .pct-title h2 { font-size: 24px; font-weight: 700; color: var(--gray-900); margin: 0; }
-  .pct-title p { margin: 4px 0 0; font-size: 14px; color: var(--gray-500); }
-
-  .pct-card {
-    background: #fff;
-    border-radius: 12px;
-    border: 1px solid var(--gray-200);
-    overflow: hidden;
-  }
-  table { width: 100%; border-collapse: collapse; }
-  thead { background: var(--gray-50); border-bottom: 1px solid var(--gray-200); }
-  th {
-    text-align: left; padding: 12px 16px; font-size: 11px; font-weight: 500;
-    color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;
-  }
-  th.num { text-align: right; }
-  tbody tr { border-top: 1px solid var(--gray-100); }
-  tbody tr:first-child { border-top: none; }
-  td { padding: 12px 16px; vertical-align: top; }
-
-  .cell-date { display: flex; align-items: center; gap: 4px; font-size: 14px; color: var(--gray-700); white-space: nowrap; }
-  .cell-date svg { width: 12px; height: 12px; color: var(--gray-400); }
-  .cell-id { font-size: 11px; color: var(--gray-400); margin-top: 2px; }
-  .cell-amount { text-align: right; font-size: 14px; font-weight: 600; color: var(--gray-900); white-space: nowrap; }
-
-  .candidates { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
-  .chip {
-    border-radius: 6px; border: 1px solid var(--gray-200); padding: 4px 8px;
-    font-size: 12px; color: var(--gray-600); background: #fff; white-space: nowrap;
-  }
-  .chip.selected { border-color: var(--teal-600); background: var(--teal-50); color: #0F766E; }
-
-  .select-fake {
-    width: 176px; height: 32px; border-radius: 8px; border: 1px solid var(--gray-200);
-    background: #fff; display: flex; align-items: center; padding: 0 10px;
-    font-size: 12px; color: var(--gray-400);
-  }
-  .input-fake {
-    width: 112px; height: 32px; border-radius: 8px; border: 1px solid var(--gray-200);
-    background: #fff; margin-left: auto; display: flex; align-items: center;
-    justify-content: flex-end; padding: 0 10px; font-size: 12px; color: var(--gray-400);
-  }
-  .actions-cell { text-align: right; }
-  .btn-claim {
-    display: inline-flex; align-items: center; gap: 6px; border-radius: 8px;
-    padding: 6px 12px; font-size: 12px; font-weight: 500; border: none;
-  }
-  .btn-claim svg { width: 13px; height: 13px; }
-  .btn-claim.enabled { background: #000; color: #fff; }
-  .btn-claim.disabled { background: var(--gray-200); color: var(--gray-400); }
-
-  .contrast-note { display: flex; align-items: flex-start; gap: 4px; font-size: 12px; color: var(--gray-400); margin-top: -8px; }
-  .auto-card {
-    border: 1px dashed var(--gray-300); border-radius: 12px; padding: 12px 16px;
-    display: flex; align-items: center; justify-content: space-between; gap: 16px;
-    background: #FCFCFD;
-  }
-  .auto-card-left { display: flex; align-items: center; gap: 12px; }
-  .auto-icon {
-    width: 32px; height: 32px; border-radius: 8px; background: var(--gray-100);
-    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-  }
-  .auto-icon svg { width: 16px; height: 16px; color: var(--gray-600); }
-  .auto-card-title { font-size: 13px; font-weight: 600; color: var(--gray-700); }
-  .auto-card-sub { font-size: 11px; color: var(--gray-400); margin-top: 2px; }
-  .auto-card-amount { font-size: 14px; font-weight: 600; color: var(--gray-900); white-space: nowrap; }
-  .auto-card-method { font-size: 10px; color: var(--gray-500); background: var(--gray-100); border-radius: 6px; padding: 3px 7px; white-space: nowrap; }
-
-  .empty-row { padding: 48px 16px; text-align: center; color: var(--gray-500); font-size: 14px; }
-
-  .meta-banner {
-    background: var(--gray-900); color: var(--gray-50); font-size: 12px; text-align: center;
-    padding: 8px 16px; letter-spacing: 0.02em;
-  }
-
-  .divider { display: flex; align-items: center; gap: 12px; margin: 40px 0 0; }
-  .divider-line { flex: 1; height: 1px; background: var(--gray-200); }
-  .divider-label { font-size: 12px; color: var(--gray-400); white-space: nowrap; }
-
-  .demo-footer { text-align: center; font-size: 11px; color: var(--gray-400); margin-top: 8px; }
-
-  .appendix { border-top: 1px solid var(--gray-200); padding-top: 24px; margin-top: 8px; }
-  .appendix h3 { font-size: 14px; font-weight: 700; color: var(--gray-700); margin: 0 0 12px; }
-  .appendix ol { margin: 0; padding-left: 20px; font-size: 12px; color: var(--gray-600); line-height: 1.9; }
-  .appendix li { margin-bottom: 4px; }
-  .appendix code { background: var(--gray-100); border-radius: 4px; padding: 1px 5px; font-size: 11px; }
-  .fix-tag {
-    display: inline-block; font-size: 10px; font-weight: 700; color: #fff;
-    background: var(--gray-900); border-radius: 6px; padding: 1px 6px; margin-right: 4px;
-    vertical-align: middle;
+  .tag-fix{background:#fef3c7;color:#92400e}
+  .tag-faith{background:#e0e7ff;color:#3730a3}
+  .findings code{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;
+    background:#f3f4f6;border-radius:4px;padding:1px 5px;color:#374151;
   }
 </style>
 </head>
 <body>
+<div class="app">
 
-  <div class="meta-banner">示意資料，給 Jeff 預覽 ship 後「待認領」頁面版面，外殼已對照 packgoplay.com/workspace 真實頁面重做，非真實資料庫內容</div>
+  <!-- ═══ /ops AdminShell 深色左欄（w-14 bg-gray-950） ═══ -->
+  <nav class="rail">
+    <div class="rail-logo"><span>P&amp;G</span></div>
 
-  <div class="app">
+    <button class="rail-btn" title="首頁">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg>
+    </button>
+    <button class="rail-btn" title="客人">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+    </button>
+    <button class="rail-btn" title="行程">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"/><path d="M15 5.764v15"/><path d="M9 3.236v15"/></svg>
+    </button>
+    <!-- 財務（選中態） -->
+    <button class="rail-btn active" title="財務">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+    </button>
+    <button class="rail-btn" title="行銷">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>
+    </button>
 
-    <!-- ══════════════ 側欄（真實還原） ══════════════ -->
-    <div class="sidebar">
-      <div class="sb-header">
-        <span class="wordmark">PACK&amp;GO</span>
-        <button class="collapse-btn">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg>
-        </button>
+    <div class="rail-spacer"></div>
+    <button class="rail-btn" title="設定">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+    </button>
+  </nav>
+
+  <!-- ═══ 主內容 ═══ -->
+  <main class="main">
+    <div class="content">
+
+      <div class="section-tag">第一段　財務頁 待認領（有資料）</div>
+
+      <!-- 六分頁切換器：待認領選中 -->
+      <div class="switcher">
+        <button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>損益表</button>
+        <button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></svg>對帳</button>
+        <button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 17.5v-11"/></svg>發票</button>
+        <button class="tab active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>待認領</button>
+        <button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>客人訂金</button>
+        <button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17V3"/><path d="m6 11 6 6 6-6"/><path d="M19 21H5"/></svg>報稅匯出</button>
       </div>
 
-      <div class="sb-search-wrap">
-        <div class="sb-search">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-          <span>搜尋客人 / 事務</span>
+      <div class="pc-head">
+        <h2>待認領入帳</h2>
+        <p>系統對不上單據的入帳，猜的候選訂單僅供參考，最終一律由你決定認領到哪裡。</p>
+      </div>
+
+      <div class="pc-space card">
+        <table>
+          <thead>
+            <tr>
+              <th class="l">日期</th>
+              <th class="r">金額</th>
+              <th class="l">對應到</th>
+              <th class="r">認領金額</th>
+              <th class="r">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+
+            <!-- 列 1：兩個候選，選了一個（teal） -->
+            <tr>
+              <td>
+                <div class="date-line"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>2026/04/13</div>
+                <div class="txn-id">#1041</div>
+              </td>
+              <td class="r"><span class="amount tabnum">$8,908.00</span></td>
+              <td>
+                <div class="chips">
+                  <button class="chip sel">ORD-2026-0087（訂金）</button>
+                  <button class="chip">ORD-2026-0091（全額）</button>
+                </div>
+                <div class="select">或選一個內部分類
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                </div>
+              </td>
+              <td class="r"><div class="num-input tabnum">8908.00</div></td>
+              <td class="r">
+                <button class="btn-claim"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>認領</button>
+              </td>
+            </tr>
+
+            <!-- 列 2：對不到候選，只能選內部分類 -->
+            <tr>
+              <td>
+                <div class="date-line"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>2026/06/02</div>
+                <div class="txn-id">#1198</div>
+              </td>
+              <td class="r"><span class="amount tabnum">$2,916.00</span></td>
+              <td>
+                <div class="select">或選一個內部分類
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                </div>
+              </td>
+              <td class="r"><div class="num-input tabnum">2916.00</div></td>
+              <td class="r">
+                <button class="btn-claim disabled"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>認領</button>
+              </td>
+            </tr>
+
+            <!-- 列 3：一個候選，尚未點選 -->
+            <tr>
+              <td>
+                <div class="date-line"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>2026/06/12</div>
+                <div class="txn-id">#1203</div>
+              </td>
+              <td class="r"><span class="amount tabnum">$3,598.00</span></td>
+              <td>
+                <div class="chips">
+                  <button class="chip">ORD-2026-0102（尾款）</button>
+                </div>
+                <div class="select">或選一個內部分類
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                </div>
+              </td>
+              <td class="r"><div class="num-input tabnum">3598.00</div></td>
+              <td class="r">
+                <button class="btn-claim disabled"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>認領</button>
+              </td>
+            </tr>
+
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 對比：已自動對帳 -->
+      <div class="contrast">
+        <div class="contrast-title"><span class="dot"></span>對比：已自動對帳的入帳長這樣（不會出現在待認領，這裡只為看差別）</div>
+        <div class="contrast-row">
+          <div><span class="k">日期</span><br>2026/05/20</div>
+          <div><span class="k">金額</span><br><span class="tabnum">$4,200.00</span></div>
+          <div><span class="k">對應到</span><br>ORD-2026-0071（全額）</div>
+          <div style="margin-left:auto"><span class="badge-auto"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>auto:exact_amount 已自動 link</span></div>
         </div>
       </div>
 
-      <div class="sb-nav">
-        <div class="sb-row">
-          <div class="sb-row-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
-          </div>
-          <div class="sb-row-text">
-            <div class="sb-row-label">與 AI 對話</div>
-            <div class="sb-row-sub">隨手問，不綁客人</div>
-          </div>
-        </div>
-
-        <div class="sb-row">
-          <div class="sb-row-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
-          </div>
-          <div class="sb-row-text">
-            <div class="sb-row-label">今日待辦</div>
-            <div class="sb-row-sub">所有客人 roll-up</div>
-          </div>
-          <span class="sb-badge">8</span>
-        </div>
-
-        <div class="sb-row active">
-          <div class="sb-row-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22V4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v18Z"/><path d="M6 12H4a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h2"/><path d="M18 9h2a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></svg>
-          </div>
-          <div class="sb-row-text">
-            <div class="sb-row-label">全公司事務</div>
-            <div class="sb-row-sub">記帳・月報・行銷・供應商</div>
-          </div>
-          <span class="sb-badge">1</span>
-        </div>
-
-        <div class="sb-subs">
-          <div class="sb-sub">行程庫</div>
-          <div class="sb-sub">記帳</div>
-          <div class="sb-sub on">月報</div>
-          <div class="sb-sub">出團</div>
-          <div class="sb-sub">行銷</div>
-          <div class="sb-sub">供應商</div>
-          <div class="sb-sub">系統</div>
-        </div>
-
-        <div class="sb-cust-header">客戶</div>
-        <div class="sb-cust">
-          <div class="sb-cust-avatar">B</div>
-          <div>
-            <div class="sb-cust-name">Better way To survive</div>
-            <div class="sb-cust-sub">jeffhsieh0909@gmail.com</div>
-          </div>
-        </div>
-        <div class="sb-cust">
-          <div class="sb-cust-avatar">A</div>
-          <div>
-            <div class="sb-cust-name">ayuan@axt.com</div>
-            <div class="sb-cust-sub">訪客</div>
-          </div>
-        </div>
-        <div class="sb-cust">
-          <div class="sb-cust-avatar">?</div>
-          <div>
-            <div class="sb-cust-name">訪客</div>
-          </div>
-        </div>
-        <div class="sb-cust">
-          <div class="sb-cust-avatar">E</div>
-          <div>
-            <div class="sb-cust-name">eyoung@axt.com</div>
-            <div class="sb-cust-sub">訪客</div>
-          </div>
-        </div>
+      <div class="caption">
+        以上為示意資料。三筆金額為真實待認領金額（$8,908 · $2,916 · $3,598），來源皆為 Trust 帳戶 Zelle 入帳；訂單號與客人皆為替身<br>
+        （ORD-2026-0087 = 王先生 台灣12天團 訂金，ORD-2026-0091 = 陳小姐 日本團 全額，ORD-2026-0102 = 王先生 尾款）。認領動作一律由你親自按，AI 只把候選搬到你面前。
       </div>
 
-      <div class="sb-footer">
-        <div class="sb-footer-avatar">J</div>
-        <span class="sb-footer-name">Jeff Hsieh</span>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+      <!-- ═══ 第二段：空狀態 ═══ -->
+      <div class="divider"></div>
+      <div class="section-tag">第二段　待認領 空狀態（全部認領完）</div>
+
+      <div class="switcher">
+        <button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>損益表</button>
+        <button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></svg>對帳</button>
+        <button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 17.5v-11"/></svg>發票</button>
+        <button class="tab active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>待認領</button>
+        <button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>客人訂金</button>
+        <button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17V3"/><path d="m6 11 6 6 6-6"/><path d="M19 21H5"/></svg>報稅匯出</button>
       </div>
+
+      <div class="pc-head">
+        <h2>待認領入帳</h2>
+        <p>系統對不上單據的入帳，猜的候選訂單僅供參考，最終一律由你決定認領到哪裡。</p>
+      </div>
+
+      <div class="pc-space card">
+        <table>
+          <thead>
+            <tr>
+              <th class="l">日期</th>
+              <th class="r">金額</th>
+              <th class="l">對應到</th>
+              <th class="r">認領金額</th>
+              <th class="r">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="empty-row"><td colspan="5">目前沒有待認領的入帳</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ═══ 出入清單 ═══ -->
+      <div class="findings">
+        <h3>實作 vs 設計系統：出入清單</h3>
+        <div class="sub">忠實還原現網程式，以下是我照實呈現、沒有自作主張改掉的地方。</div>
+        <ol>
+          <li><span class="tag tag-faith">原樣呈現</span>財報六分頁的選中態用 <code>bg-teal-600</code>（青綠 #0d9488），不是設計系統的近黑 <code>--primary</code>（已從 teal 改成近黑）。這六個 tab 的配色是既存硬編碼，塊A 只新增「待認領」一個走 i18n 的 tab，沒動既有配色。青綠跟全站黑白極簡有出入，照實呈現。</li>
+          <li><span class="tag tag-fix">建議修</span>候選只顯示訂單號 + 訂金/尾款/全額，沒有客人名字（例：ORD-2026-0087 其實是王先生台灣團）。認領時較難一眼確認是誰的錢，建議候選加上客人名。</li>
+          <li><span class="tag tag-fix">建議修</span>表格沒有「來源帳戶」欄。這三筆都是 Trust 帳戶 Zelle 入帳，但畫面看不出來源；建議加來源欄或列上標 Trust badge，方便對信託合規。</li>
+          <li><span class="tag tag-faith">原樣呈現</span>已自動對帳（<code>auto:exact_amount</code> 等）的入帳不會進這張清單，這張只列 pending。我把自動對帳的例子放表格下方當對比，不是真的在表內。</li>
+          <li><span class="tag tag-faith">原樣呈現</span>沒選候選或分類前，認領鈕是 disabled（灰），對應程式 <code>disabled={!choice}</code>。列 2、列 3 就是這個狀態。</li>
+          <li><span class="tag tag-fix">建議修</span>無分頁：<code>listPending</code> 一次撈 limit 100，存量大時整頁很長，沒有分頁或載入更多。</li>
+          <li><span class="tag tag-fix">建議修</span>無排序 / 無篩選：不能依金額、日期、有無候選排序或篩，筆數一多不好找。</li>
+          <li><span class="tag tag-fix">建議修</span>空狀態很陽春：只有一行「目前沒有待認領的入帳」置中，沒有插圖或引導下一步。</li>
+          <li><span class="tag tag-faith">原樣呈現（我對齊了）</span><code>PendingClaimsTab</code> 本身沒包 <code>max-w-5xl</code>，現網表格會比上方 switcher 略寬（其他報表有包）。示意圖裡我把它對齊 switcher 寬度方便看；建議程式補上 <code>max-w-5xl</code> 對齊。</li>
+        </ol>
+      </div>
+
     </div>
-
-    <!-- ══════════════ 主內容 ══════════════ -->
-    <main>
-      <div class="stack">
-
-        <!-- WorkspaceCompany 外層 tab bar -->
-        <div class="outer-tabbar">
-          <span class="outer-tab">行程庫</span>
-          <span class="outer-tab">記帳</span>
-          <span class="outer-tab active">月報</span>
-          <span class="outer-tab">出團</span>
-          <span class="outer-tab">行銷</span>
-          <span class="outer-tab">供應商</span>
-          <span class="outer-tab">系統</span>
-        </div>
-
-        <!-- FinanceReports 的 space-y-4：內層 tab bar + 內容 -->
-        <div class="stack">
-
-          <div class="fr-tabbar-wrap">
-            <div class="fr-tabbar">
-              <span class="fr-tab">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
-                損益表
-              </span>
-              <span class="fr-tab">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></svg>
-                對帳
-              </span>
-              <span class="fr-tab">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M8 7h8"/><path d="M8 11h8"/><path d="M8 15h5"/></svg>
-                發票
-              </span>
-              <span class="fr-tab active">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11Z"/></svg>
-                待認領
-              </span>
-              <span class="fr-tab">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                客人訂金
-              </span>
-              <span class="fr-tab">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17V3"/><path d="m6 11 6 6 6-6"/><path d="M19 21H5"/></svg>
-                報稅匯出
-              </span>
-            </div>
-          </div>
-
-          <!-- PendingClaimsTab 本體（撐滿寬度，見檔尾出入清單） -->
-          <div class="pct">
-
-            <div class="pct-title">
-              <h2>待認領入帳</h2>
-              <p>系統對不上單據的入帳，猜的候選訂單僅供參考，最終一律由你決定認領到哪裡。</p>
-            </div>
-
-            <div class="pct-card">
-              <table>
-                <thead>
-                  <tr>
-                    <th>日期</th>
-                    <th class="num">金額</th>
-                    <th>對應到</th>
-                    <th class="num">認領金額</th>
-                    <th class="num">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-
-                  <tr>
-                    <td>
-                      <div class="cell-date">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></svg>
-                        2026/04/13
-                      </div>
-                      <div class="cell-id">#20431</div>
-                    </td>
-                    <td class="cell-amount">$8,908.00</td>
-                    <td>
-                      <div class="candidates">
-                        <span class="chip selected">ORD-2026-0031（訂金）</span>
-                      </div>
-                      <div class="select-fake">或選一個內部分類</div>
-                    </td>
-                    <td><div class="input-fake">8908.00</div></td>
-                    <td class="actions-cell">
-                      <button class="btn-claim enabled">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-                        認領
-                      </button>
-                    </td>
-                  </tr>
-
-                  <tr>
-                    <td>
-                      <div class="cell-date">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></svg>
-                        2026/06/02
-                      </div>
-                      <div class="cell-id">#20892</div>
-                    </td>
-                    <td class="cell-amount">$2,916.00</td>
-                    <td>
-                      <div class="select-fake">或選一個內部分類</div>
-                    </td>
-                    <td><div class="input-fake">2916.00</div></td>
-                    <td class="actions-cell">
-                      <button class="btn-claim disabled">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-                        認領
-                      </button>
-                    </td>
-                  </tr>
-
-                  <tr>
-                    <td>
-                      <div class="cell-date">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></svg>
-                        2026/06/12
-                      </div>
-                      <div class="cell-id">#21205</div>
-                    </td>
-                    <td class="cell-amount">$3,598.00</td>
-                    <td>
-                      <div class="candidates">
-                        <span class="chip">ORD-2026-0058（尾款）</span>
-                      </div>
-                      <div class="select-fake">或選一個內部分類</div>
-                    </td>
-                    <td><div class="input-fake">3598.00</div></td>
-                    <td class="actions-cell">
-                      <button class="btn-claim disabled">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-                        認領
-                      </button>
-                    </td>
-                  </tr>
-
-                </tbody>
-              </table>
-            </div>
-
-            <div class="contrast-note">
-              僅供對比說明：下面這筆走 auto:exact_amount 規則已自動 link，不會出現在「待認領」清單裡。
-            </div>
-            <div class="auto-card">
-              <div class="auto-card-left">
-                <div class="auto-icon">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-                </div>
-                <div>
-                  <div class="auto-card-title">2026/05/28 · #19887 · ORD-2026-0022（全額）</div>
-                  <div class="auto-card-sub">王先生 · 日本 8 天團 · 金額吻合公司層級唯一候選，時間窗內自動認領</div>
-                </div>
-              </div>
-              <div style="display:flex; align-items:center; gap:12px;">
-                <span class="auto-card-amount">$5,240.00</span>
-                <span class="auto-card-method">auto:exact_amount</span>
-              </div>
-            </div>
-
-          </div>
-
-        </div>
-
-        <!-- 分隔：第二段示意（空狀態） -->
-        <div class="divider">
-          <div class="divider-line"></div>
-          <div class="divider-label">示意二：空狀態（全部認領完）</div>
-          <div class="divider-line"></div>
-        </div>
-
-        <div class="stack">
-          <div class="fr-tabbar-wrap">
-            <div class="fr-tabbar">
-              <span class="fr-tab active">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11Z"/></svg>
-                待認領
-              </span>
-            </div>
-          </div>
-          <div class="pct">
-            <div class="pct-title">
-              <h2>待認領入帳</h2>
-              <p>系統對不上單據的入帳，猜的候選訂單僅供參考，最終一律由你決定認領到哪裡。</p>
-            </div>
-            <div class="pct-card">
-              <table>
-                <thead>
-                  <tr>
-                    <th>日期</th>
-                    <th class="num">金額</th>
-                    <th>對應到</th>
-                    <th class="num">認領金額</th>
-                    <th class="num">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td colspan="5" class="empty-row">目前沒有待認領的入帳</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <div class="demo-footer">
-          示意資料，非真實客戶資訊 · 產生於 F1 對帳引擎塊A ship 後預覽（v2，外殼對照 packgoplay.com/workspace 真實頁面重做）· docs/features/finance-dept/mockup-pendingclaims.html
-        </div>
-
-        <!-- 出入清單 -->
-        <div class="appendix">
-          <h3>與現有實作 / 設計系統的出入清單（唯讀記錄，未擅自修改版面）</h3>
-          <ol>
-            <li>本頁沒有「已自動比對」清單：<code>PendingClaimsTab.tsx</code> 只呼叫 <code>listPending</code>（只回未認領的入帳），畫面上的「auto:exact_amount」對比卡是本次為了展示對比額外加的說明性元素，ship 後的真實頁面不會出現這張卡片。</li>
-            <li><span class="fix-tag">建議修</span>寬度跟上面 tab bar 不一致：<code>ProfitLossV2.tsx</code> 自己有 <code>max-w-5xl mx-auto</code> 包裝，跟上面 tab 切換列同寬對齊；<code>PendingClaimsTab.tsx</code> 沒有這層包裝，表格會撐滿到 <code>main</code> 的全部可用寬度，在寬螢幕上會比上面的 tab bar 明顯更寬，兩者左右邊界對不齊。本 mockup 忠實重現這個落差（沒有偷偷幫它加 max-w），Jeff 可以自己比對上下對不對齊。</li>
-            <li><span class="fix-tag">建議修</span>無分頁機制：<code>listPending</code> 查詢寫死 <code>limit: 100</code>，待認領超過 100 筆時沒有翻頁或「載入更多」，UI 上也沒有筆數提示。</li>
-            <li>候選/內部分類清單沒有排序或搜尋：表格是純線性清單，無法依日期/金額排序，金額大的舊件跟金額小的新件混在一起。</li>
-            <li><span class="fix-tag">建議修</span>空狀態很陽春：只有一行文字置中，沒有圖示或「全部清空，做得好」這類正向回饋，跟本頁其他地方（如損益表的 KPI 卡）比起來略顯單薄。</li>
-            <li>顏色 class 不一致：<code>PendingClaimsTab.tsx</code> 直接寫死 Tailwind 灰階（<code>text-gray-900</code> / <code>bg-gray-50</code> / <code>border-gray-200</code>），沒有沿用 <code>ProfitLossV2.tsx</code> 已經在用的 <code>text-foreground</code> / <code>border-foreground/10</code> token 寫法，兩邊視覺上接近但不是同一套 class 來源。</li>
-            <li>內部分類只有 4 種固定選項（業主轉帳／利息／Stripe 轉撥／其他），沒有自由文字備註欄位可見於這層 UI（實際 <code>claim</code> mutation 是否接受 note 需另外確認，此頁沒有暴露輸入框）。</li>
-            <li>六個分頁只有「待認領」是活的，其餘五個分頁按鈕在本 mockup 中不可點擊。範圍是「待認領」這一頁的預覽，沒有重建其餘五頁內容（但外殼／側欄／兩層 tab bar 全部照真實頁面重建）。</li>
-          </ol>
-        </div>
-
-      </div>
-    </main>
-
-  </div>
-
+  </main>
+</div>
 </body>
 </html>
