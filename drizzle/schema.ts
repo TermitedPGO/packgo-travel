@@ -3252,6 +3252,52 @@ export type InsertTrustDeferredIncome =
   typeof trustDeferredIncome.$inferInsert;
 
 /**
+ * F1 對帳引擎 塊A (2026-07-08, migration 0113) — bankTransactionLinks.
+ *
+ * Multi-to-multi link between a bankTransactions row and its "claimed"
+ * destination: a real source document (custom_order / invoice / booking)
+ * or an internal category bucket (targetType='category', categoryCode
+ * like 'stripe_payout' / 'owner_transfer' / 'interest' / 'small_inflow').
+ * One inflow can be split across multiple links (deposit + balance landing
+ * in the same wire) — bankTransactionId is deliberately NOT unique.
+ *
+ * Invariant enforced in code (server/services/bankTransactionLinkEngine.ts),
+ * not at the DB layer: SUM(amountAllocated) for a given bankTransactionId
+ * must never exceed |bankTransactions.amount|.
+ */
+export const bankTransactionLinks = mysqlTable(
+  "bankTransactionLinks",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    bankTransactionId: int("bankTransactionId").notNull(),
+    targetType: mysqlEnum("targetType", [
+      "custom_order",
+      "invoice",
+      "booking",
+      "category",
+    ]).notNull(),
+    targetId: int("targetId"),
+    categoryCode: varchar("categoryCode", { length: 64 }),
+    amountAllocated: decimal("amountAllocated", { precision: 14, scale: 2 }).notNull(),
+    // 'auto:<rule-name>' (e.g. 'auto:exact_amount') or 'manual'.
+    matchMethod: varchar("matchMethod", { length: 64 }).notNull(),
+    matchConfidence: int("matchConfidence"),
+    // 'jeff' (manual claim) or 'system' (auto-linked by a rule).
+    claimedBy: varchar("claimedBy", { length: 32 }).notNull(),
+    note: text("note"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => ({
+    bankTxnIdx: index("idx_btl_bank_txn").on(table.bankTransactionId),
+    targetIdx: index("idx_btl_target").on(table.targetType, table.targetId),
+  })
+);
+
+export type BankTransactionLink = typeof bankTransactionLinks.$inferSelect;
+export type InsertBankTransactionLink = typeof bankTransactionLinks.$inferInsert;
+
+/**
  * ─────────────────────────────────────────────────────────────────────
  *  Supplier Product Sync (PACK&GO 供應商產品自動同步)
  * ─────────────────────────────────────────────────────────────────────

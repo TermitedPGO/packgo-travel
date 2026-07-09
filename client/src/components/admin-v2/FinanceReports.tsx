@@ -8,6 +8,7 @@
  *   損益表 (ProfitLossV2)          ← 預設
  *   對帳   (ReconciliationTab)
  *   發票   (InvoicesTab)
+ *   待認領 (PendingClaimsTab)       ← F1 對帳引擎 塊A 新增 (2026-07-08)
  *   客人訂金 (TrustComplianceV2)    ← 原「信託合規」白話化
  *   報稅匯出 (AccountingTab)        ← 原「帳務 (Schedule C)」白話化
  *
@@ -17,29 +18,34 @@
  */
 import { Suspense, lazy, useEffect, useState } from "react";
 import { LoadingPage } from "@/components/ui/spinner";
-import { BarChart3, Scale, Receipt, Lock, ArrowDownToLine } from "lucide-react";
+import { BarChart3, Scale, Receipt, Lock, ArrowDownToLine, Inbox } from "lucide-react";
+import { useLocale } from "@/contexts/LocaleContext";
 
 const ProfitLossV2 = lazy(() => import("./ProfitLossV2"));
 const TrustComplianceV2 = lazy(() => import("./TrustComplianceV2"));
 const ReconciliationTab = lazy(() => import("@/components/admin/ReconciliationTab"));
 const InvoicesTab = lazy(() => import("@/components/admin/InvoicesTab"));
 const AccountingTab = lazy(() => import("@/components/admin/AccountingTab"));
+const PendingClaimsTab = lazy(() => import("@/components/admin/PendingClaimsTab"));
 
-export type FinanceReportView = "pl" | "recon" | "invoices" | "trust" | "tax";
-
-const TABS: { id: FinanceReportView; label: string; icon: typeof BarChart3 }[] = [
-  { id: "pl", label: "損益表", icon: BarChart3 },
-  { id: "recon", label: "對帳", icon: Scale },
-  { id: "invoices", label: "發票", icon: Receipt },
-  { id: "trust", label: "客人訂金", icon: Lock },
-  { id: "tax", label: "報稅匯出", icon: ArrowDownToLine },
-];
+export type FinanceReportView = "pl" | "recon" | "invoices" | "pendingClaims" | "trust" | "tax";
 
 export default function FinanceReports({
   initialView = "pl",
 }: {
   initialView?: FinanceReportView;
 }) {
+  const { t } = useLocale();
+  const TABS: { id: FinanceReportView; label: string; icon: typeof BarChart3 }[] = [
+    { id: "pl", label: "損益表", icon: BarChart3 },
+    { id: "recon", label: "對帳", icon: Scale },
+    { id: "invoices", label: "發票", icon: Receipt },
+    // F1 對帳引擎 塊A (2026-07-08) — 既有 5 個分頁的 label 是既存的硬編碼中文
+    // (超出本批範圍,不動),新增的這一頁走 i18n key,不重蹈覆轍。
+    { id: "pendingClaims", label: t("pendingClaimsTab.tabLabel"), icon: Inbox },
+    { id: "trust", label: "客人訂金", icon: Lock },
+    { id: "tax", label: "報稅匯出", icon: ArrowDownToLine },
+  ];
   const [view, setView] = useState<FinanceReportView>(initialView);
   // Re-sync when a deep-link lands on a specific report while the hub is
   // already mounted. Re-renders that don't change initialView (badge polls)
@@ -78,6 +84,7 @@ export default function FinanceReports({
         {view === "pl" && <ProfitLossV2 />}
         {view === "recon" && <ReconciliationTab />}
         {view === "invoices" && <InvoicesTab />}
+        {view === "pendingClaims" && <PendingClaimsTab />}
         {view === "trust" && <TrustComplianceV2 />}
         {view === "tax" && <AccountingTab />}
       </Suspense>

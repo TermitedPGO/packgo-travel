@@ -55,6 +55,7 @@ import { marketingContentRouter } from "./routers/marketingContent";
 import { opsRouter } from "./routers/ops";
 import { storageRouter } from "./routers/storage";
 import { reconciliationRouter } from "./routers/reconciliation";
+import { bankTransactionLinksRouter } from "./routers/bankTransactionLinks";
 import { adminCleanupRouter } from "./routers/adminCleanup";
 import { posterGenRouter } from "./routers/posterGen";
 import { aiQuotesRouter } from "./routers/aiQuotes";
@@ -237,6 +238,8 @@ export const appRouter = router({
   // ──────────────────────────────────────────────────────────────────────────
   // Reconciliation router — Phase 4E extracted to ./routers/reconciliation.ts
   reconciliation: reconciliationRouter,
+  // F1 對帳引擎 塊A (2026-07-08) — 待認領入帳清單 + 人工認領
+  bankTransactionLinks: bankTransactionLinksRouter,
 
   // 2026-05-22 — Cleanup tools for dev/test data surfacing in production:
   // findStale tours / test-looking inquiries / agent message noise +

@@ -548,7 +548,14 @@ export type BankTransactionInput = {
  *   4. 都不適用(depositPaidAt/balancePaidAt 任一有值,但沒有可用的 totalPrice/
  *      depositAmount/balanceAmount 组合)→ null,這張單不參與比對。
  */
-function resolveUnpaidLeg(
+/**
+ * Exported (2026-07-08, F1 對帳引擎 塊A) so bankTransactionLinkEngine's
+ * `exact_amount` rule can reuse this exact "還欠哪一段錢" algorithm company-wide
+ * instead of re-deriving it — see dispatch-f1.md 塊A「沿用批8演算」。Behavior
+ * and signature unchanged; this file's own matchPaymentsToOrders still calls it
+ * the same way it always did.
+ */
+export function resolveUnpaidLeg(
   order: OrderPaymentMatchInput,
 ): { legKind: OrderPaymentMatchLegKind; targetAmount: number } | null {
   const deposit = toNum(order.depositAmount);

@@ -83,6 +83,29 @@ export const plaidSyncWorker = new Worker<
         }
       }
 
+      // F1 對帳引擎 塊A (2026-07-08): scan unlinked inflows and try the auto
+      // rules, then card whatever's left (subject to the daily cap + noise
+      // gate). Runs every sync regardless of totalAdded — leftover unlinked
+      // rows from a prior failed/partial run should still get picked up.
+      try {
+        const { scanAndAlertPendingClaims } = await import(
+          "./agents/autonomous/bankTransactionLinkAlerts"
+        );
+        const claimResult = await scanAndAlertPendingClaims();
+        console.log(
+          `[plaidSyncWorker] pending-claim scan: scanned=${claimResult.scanned} linked=${claimResult.linked} cardsCreated=${claimResult.cardsCreated} aggregated=${claimResult.aggregatedCount}`
+        );
+      } catch (claimErr) {
+        console.error(
+          "[plaidSyncWorker] pending-claim scan failed (sync still succeeded):",
+          (claimErr as Error)?.message
+        );
+        reportFunnelError({
+          source: "fail-open:plaidSyncWorker:pendingClaimScan",
+          err: claimErr,
+        }).catch(() => {});
+      }
+
       // Alert on any account-level failures so Jeff sees them in his
       // morning digest. We don't fail the whole job because retrying
       // wouldn't help (broken bank login won't fix itself).

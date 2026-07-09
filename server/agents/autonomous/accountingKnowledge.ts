@@ -270,12 +270,42 @@ const MISS: PreClassifyResult = {
 };
 
 /** lowercase + 收斂空白 + trim。null/undefined → ""。 */
-function norm(s: string | null | undefined): string {
+export function norm(s: string | null | undefined): string {
   return (s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+// ── 2c. Stripe 撥款進帳 = 轉帳,非收入(F1 對帳引擎 塊A, 2026-07-08)──────────
+// Stripe 把 Checkout 收到的錢撥款進 PACK&GO 銀行帳戶,這筆撥款落地時是一筆普通
+// Plaid 進帳(amount<0)。但這筆錢的「收入」已經在 stripeWebhook 當下(客人結帳
+// 那一刻,server/_core/stripeWebhook.ts:258-297/1077-1091)寫過一次
+// accountingEntries(income)了 —— 撥款落地絕不能再算一次收入,否則雙計(見
+// docs/features/finance-dept/dispatch-f1.md 塊C「雙計防護」)。
+//
+// 這份清單與判斷函式是 F1 塊A(bankTransactionLinkEngine 的 stripe_payout 自動
+// link 規則)與塊C(preClassify 雙計防護)共用的唯一來源 —— 塊C 接進 preClassify
+// 判斷 bankTransactions.agentCategory 時,直接呼叫這支函式,不重造規則。
+//
+// Plaid 對 Stripe 撥款的常見 merchantName/description 樣式:"STRIPE"、
+// "STRIPE TRANSFER"、"STRIPE PAYOUT"。token "stripe" 在正常銀行摘要語境幾乎
+// 不會誤中其他詞(不像 "total" 那種泛用字);只在「進帳」時判斷有意義 —— 出帳側
+// 含 "stripe" 字樣的是 Stripe 手續費扣款(cogs_other),跟這條規則管的範圍無關,
+// 呼叫端負責只在 amount<0 時呼叫本函式。
+export const STRIPE_PAYOUT_DESCRIPTORS: readonly string[] = ["stripe"] as const;
+
+/** haystack 已是呼叫端組好的 merchantName+description+originalDescription+對方
+ *  字串(見 preClassify 的 haystack 組法)。呼叫端負責只在進帳時呼叫。
+ *
+ * 2026-07-08 對抗審查修復(P2):原本用裸子字串 includes 比對,姓名/商號含
+ * "stripe" 子字串(如 "Stripeman"、"J Stripe Co")會被誤判成 Stripe 撥款。
+ * 改用 hasWord 單字邊界比對,跟本檔其餘 vendor 規則(如 unitedstars vs
+ * United Airlines 的邊界踩雷案例)一致精神。 */
+export function isStripePayoutInflow(haystack: string): boolean {
+  const h = norm(haystack);
+  return STRIPE_PAYOUT_DESCRIPTORS.some((token) => hasWord(h, norm(token)));
+}
+
 /** \bword\b 完整單字比對(token 已是 lowercase)。 */
-function hasWord(haystack: string, token: string): boolean {
+export function hasWord(haystack: string, token: string): boolean {
   if (!token) return false;
   // 轉義 regex 特殊字元;CJK 無 \b 概念,改用「前後非字母數字或邊界」判斷。
   const esc = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
