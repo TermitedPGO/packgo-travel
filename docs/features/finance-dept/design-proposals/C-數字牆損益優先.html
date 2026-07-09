@@ -1,0 +1,309 @@
+<!-- 版C｜數字牆 · 損益優先：把「這個月到底賺不賠」做成主角。頂部數字牆最大、損益表當主體(含成分條),行動壓縮成一條 strip。取捨 = 密度最高、最像 Linear/Cron 儀表板,適合想盯著損益看的日子;行動仍在但被收斂,不是每天掃收件匣的節奏。 -->
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1280">
+<title>財務駕駛艙 · 版C 數字牆損益優先</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;600;700&family=Noto+Serif+TC:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --gray-950:#030712; --gray-900:#101828; --gray-800:#1e2939; --gray-700:#364153;
+    --gray-600:#4a5565; --gray-500:#6a7282; --gray-400:#99a1af; --gray-300:#d1d5dc;
+    --gray-200:#e5e7eb; --gray-100:#f3f4f6; --gray-50:#f9fafb; --white:#fff;
+    --amber-600:#e17100; --amber-400:#ffb900; --amber-50:#fffbeb; --amber-200:#fee685;
+    --red-500:#fb2c36; --red-50:#fef2f2;
+    --emerald-700:#008236; --rose-600:#e7000b;
+    --r-xl:12px; --r-lg:8px; --r-md:6px;
+    font-synthesis-weight:none;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--white)}
+  body{font-family:"Noto Sans TC",sans-serif;color:var(--gray-900);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  h1,h2,h3{font-family:"Noto Serif TC",serif;font-weight:700;letter-spacing:-.01em}
+  .num{font-variant-numeric:tabular-nums}
+  b{font-variant-numeric:tabular-nums}
+  svg{display:block}
+
+  .app{display:flex;min-height:100vh}
+  .rail{width:56px;flex-shrink:0;background:var(--gray-950);display:flex;flex-direction:column;
+    align-items:center;padding:12px 0;gap:4px;position:sticky;top:0;height:100vh;align-self:flex-start}
+  .rail-logo{width:32px;height:32px;border-radius:var(--r-lg);background:rgba(255,255,255,.1);
+    display:flex;align-items:center;justify-content:center;margin-bottom:16px}
+  .rail-logo span{color:#fff;font-size:10px;font-weight:700;letter-spacing:-.02em}
+  .rail-btn{position:relative;width:40px;height:40px;border-radius:var(--r-lg);display:flex;
+    align-items:center;justify-content:center;color:var(--gray-400);border:none;background:transparent;cursor:pointer}
+  .rail-btn:hover{color:#fff;background:rgba(255,255,255,.1)}
+  .rail-btn.active{background:#fff;color:var(--gray-950)}
+  .rail-btn svg{width:18px;height:18px}
+  .rail-spacer{flex:1}
+
+  .main{flex:1;overflow-y:auto;background:var(--white)}
+  .content{max-width:1160px;margin:0 auto;padding:24px 36px 64px}
+
+  .phead{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;
+    padding-bottom:13px;margin-bottom:16px;border-bottom:1px solid var(--gray-100)}
+  .phead h1{font-size:22px;color:var(--gray-900);line-height:1.15}
+  .phead .sub{font-size:12px;color:var(--gray-500);margin-top:4px}
+  .phead .asof{font-size:11px;color:var(--gray-400);text-align:right;line-height:1.6}
+  .phead .asof b{color:var(--gray-600);font-weight:500}
+
+  /* 數字牆 */
+  .wall{display:grid;grid-template-columns:1.1fr 2fr;border:1px solid var(--gray-200);
+    border-radius:var(--r-xl);overflow:hidden;margin-bottom:16px}
+  .wall-hero{padding:18px 22px;border-right:1px solid var(--gray-100);display:flex;flex-direction:column;justify-content:center}
+  .wall-hero .k{font-size:10px;color:var(--gray-500);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:9px;display:flex;align-items:center;gap:6px}
+  .wall-hero .k svg{width:13px;height:13px;color:var(--gray-400)}
+  .wall-hero .big{font-size:40px;font-weight:700;color:var(--gray-900);line-height:.95;letter-spacing:-.03em}
+  .wall-hero .sub{font-size:12px;color:var(--gray-400);margin-top:9px}
+  .wall-hero .pl{font-size:13px;margin-top:13px;color:var(--gray-500);display:flex;align-items:baseline;gap:7px}
+  .wall-hero .pl b{color:var(--emerald-700);font-weight:700;font-size:16px}
+  .wall-cells{display:grid;grid-template-columns:repeat(4,1fr)}
+  .wall-cell{padding:16px 18px;border-left:1px solid var(--gray-100);display:flex;flex-direction:column;justify-content:center}
+  .wall-cell .k{font-size:10px;color:var(--gray-500);font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:9px;white-space:nowrap}
+  .wall-cell .v{font-size:22px;font-weight:700;color:var(--gray-900);line-height:1;letter-spacing:-.02em}
+  .wall-cell .v.amber{color:var(--amber-600)}
+  .wall-cell .h{font-size:10px;color:var(--gray-400);margin-top:7px;white-space:nowrap}
+
+  /* 卡片通用 */
+  .card{background:var(--white);border:1px solid var(--gray-200);border-radius:var(--r-xl);overflow:hidden}
+  .card-h{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 15px;border-bottom:1px solid var(--gray-100)}
+  .card-h .t{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--gray-900);font-family:"Noto Serif TC",serif}
+  .card-h .t svg{width:15px;height:15px;color:var(--gray-500)}
+  .card-h .meta{font-size:11px;color:var(--gray-500)}
+  .card-h .meta b{color:var(--amber-600);font-weight:600}
+
+  /* 行動 strip：待認領 dense table + 待認列 收斂列 */
+  .astrip{margin-bottom:16px}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  thead{background:var(--gray-50);border-bottom:1px solid var(--gray-200)}
+  th{padding:6px 15px;font-size:10px;font-weight:700;color:var(--gray-500);text-transform:uppercase;letter-spacing:.05em;text-align:left}
+  th.r{text-align:right}
+  tbody tr{border-top:1px solid var(--gray-100)}
+  tbody tr:hover{background:var(--gray-50)}
+  td{padding:8px 15px;vertical-align:middle;color:var(--gray-700)}
+  td.r{text-align:right}
+  .cdate{color:var(--gray-800);font-weight:500} .cid{color:var(--gray-400);font-size:11px;margin-left:5px}
+  .camt{font-weight:700;color:var(--amber-600);font-size:13px}
+  .chip{border-radius:var(--r-md);border:1px solid var(--gray-200);background:var(--white);padding:3px 7px;
+    font-size:11px;color:var(--gray-600);cursor:pointer;display:inline-flex;gap:4px;align-items:center;white-space:nowrap}
+  .chip .who{color:var(--gray-900);font-weight:500}
+  .chip.sel{border-color:var(--gray-900);background:var(--gray-900);color:#fff}
+  .chip.sel .who{color:#fff}
+  .chip.ghost{border-style:dashed;color:var(--gray-400)}
+  .chiprow{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+  .badge{display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:600;border-radius:var(--r-md);
+    padding:2px 6px;border:1px solid var(--amber-200);background:var(--amber-50);color:var(--amber-600);white-space:nowrap}
+  .badge svg{width:9px;height:9px}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;height:28px;padding:0 11px;
+    border-radius:var(--r-lg);border:none;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;font-family:"Noto Sans TC"}
+  .btn svg{width:13px;height:13px}
+  .btn-dark{background:var(--gray-900);color:#fff} .btn-dark:hover{background:var(--gray-800)}
+  .btn-dark.off{background:var(--gray-200);color:var(--gray-400);cursor:not-allowed}
+  .recstrip{display:flex;align-items:center;gap:11px;padding:11px 15px;background:var(--gray-50);border-top:1px solid var(--gray-100)}
+  .recstrip .dot{width:7px;height:7px;border-radius:999px;background:var(--red-500);flex-shrink:0}
+  .recstrip .b{flex:1;min-width:0;font-size:12px;color:var(--gray-700)}
+  .recstrip .b b{color:var(--gray-900);font-weight:600} .recstrip .b .amt{color:var(--amber-600);font-weight:700}
+  .recstrip .b .l2{color:var(--gray-400);font-size:11px;margin-top:2px}
+
+  /* 損益優先：主體兩欄 */
+  .body{display:grid;grid-template-columns:1.62fr 1fr;gap:16px;align-items:start}
+
+  /* 損益成分條 */
+  .pl-body{padding:16px 18px}
+  .pl-topline{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:13px}
+  .pl-topline .rev{font-size:12px;color:var(--gray-500)} .pl-topline .rev b{color:var(--gray-900);font-weight:700;font-size:16px;margin-left:6px}
+  .pl-topline .net{font-size:12px;color:var(--gray-500)} .pl-topline .net b{color:var(--emerald-700);font-weight:700;font-size:16px;margin-left:6px}
+  .compbar{display:flex;height:34px;border-radius:var(--r-md);overflow:hidden;border:1px solid var(--gray-200)}
+  .compbar .seg{display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:600;min-width:0;overflow:hidden;white-space:nowrap;letter-spacing:.02em}
+  .complegend{display:flex;flex-wrap:wrap;gap:7px 18px;margin-top:12px;margin-bottom:4px}
+  .legitem{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--gray-600)}
+  .legdot{width:9px;height:9px;border-radius:3px;flex-shrink:0}
+  .legitem .lv{color:var(--gray-900);font-weight:600;margin-left:auto}
+  .pl-rows{margin-top:6px;border-top:1px solid var(--gray-100);padding-top:4px}
+  .pl-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;font-size:12px}
+  .pl-row + .pl-row{border-top:1px solid var(--gray-50)}
+  .pl-row .n{color:var(--gray-600);display:flex;align-items:center;gap:8px} .pl-row .n.s{color:var(--gray-900);font-weight:500}
+  .pl-row .n .sw{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+  .pl-row .v{color:var(--gray-800);font-weight:500} .pl-row .v.exp{color:var(--gray-600)}
+  .pl-row.total{border-top:1.5px solid var(--gray-300);margin-top:1px;padding-top:10px}
+  .pl-row.total .n{font-size:13px;font-weight:700;color:var(--gray-900);font-family:"Noto Serif TC",serif}
+  .pl-row.total .v{font-size:17px;font-weight:700;color:var(--emerald-700)}
+  .note{font-size:10px;color:var(--gray-400);line-height:1.55;padding:10px 18px 0;display:flex;gap:6px;border-top:1px solid var(--gray-50);margin-top:8px}
+  .note svg{width:12px;height:12px;flex-shrink:0;margin-top:1px;color:var(--gray-300)}
+
+  /* Trust companion */
+  .tsplit{display:flex;border-bottom:1px solid var(--gray-100)}
+  .tsplit .c{flex:1;padding:11px 15px} .tsplit .c + .c{border-left:1px solid var(--gray-100)}
+  .tsplit .k{font-size:10px;color:var(--gray-400);margin-bottom:5px}
+  .tsplit .v{font-size:16px;font-weight:700;color:var(--gray-900)} .tsplit .v.amber{color:var(--amber-600)}
+  .tlist{padding:4px 15px 8px}
+  .trow{display:flex;align-items:center;gap:9px;padding:8px 0;font-size:12px} .trow + .trow{border-top:1px solid var(--gray-50)}
+  .trow .dot{width:6px;height:6px;border-radius:999px;flex-shrink:0}
+  .dot.amber{background:var(--amber-400)} .dot.gray{background:var(--gray-300)} .dot.red{background:var(--red-500)}
+  .trow .w{flex:1;min-width:0} .trow .w .n{color:var(--gray-900);font-weight:500} .trow .w .d{color:var(--gray-400);font-size:10px;margin-top:1px}
+  .trow .a{font-weight:600;color:var(--gray-800);flex-shrink:0}
+  .tnote{font-size:10px;color:var(--gray-400);line-height:1.55;padding:0 15px 12px;display:flex;gap:6px}
+  .tnote svg{width:12px;height:12px;flex-shrink:0;margin-top:1px;color:var(--gray-300)}
+
+  /* 第二層 tabs */
+  .second{display:flex;align-items:center;gap:8px;margin-top:18px;padding-top:14px;border-top:1px solid var(--gray-100)}
+  .second .lbl{font-size:12px;color:var(--gray-400);margin-right:2px}
+  .lnk{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;border-radius:var(--r-lg);
+    border:1px solid var(--gray-200);background:var(--white);font-size:12px;color:var(--gray-600);cursor:pointer;font-family:"Noto Sans TC"}
+  .lnk:hover{background:var(--gray-50);color:var(--gray-900)}
+  .lnk svg{width:13px;height:13px;color:var(--gray-400)}
+  .second .grow{flex:1}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="rail">
+    <div class="rail-logo"><span>P&amp;G</span></div>
+    <button class="rail-btn" title="首頁"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg></button>
+    <button class="rail-btn" title="客人"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></button>
+    <button class="rail-btn" title="行程"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"/><path d="M15 5.764v15"/><path d="M9 3.236v15"/></svg></button>
+    <button class="rail-btn active" title="財務"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></button>
+    <button class="rail-btn" title="行銷"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg></button>
+    <div class="rail-spacer"></div>
+    <button class="rail-btn" title="設定"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
+  </nav>
+
+  <main class="main">
+    <div class="content">
+
+      <div class="phead">
+        <div><h1>財務</h1><div class="sub">這個月到底賺不賠 · 一眼看到損益</div></div>
+        <div class="asof">資料截至 <b>2026/07/09 08:12</b><br>損益來源 Plaid · Trust #5442</div>
+      </div>
+
+      <!-- 數字牆 -->
+      <div class="wall">
+        <div class="wall-hero">
+          <div class="k"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/></svg>現金部位（可動用）</div>
+          <div class="big num">$12,300</div>
+          <div class="sub">Operating #2174 · 不含 Trust 信託款</div>
+          <div class="pl">本月損益 <b class="num">+$3,550</b> · 利潤率 28.5%</div>
+        </div>
+        <div class="wall-cells">
+          <div class="wall-cell"><div class="k">本月營收</div><div class="v num">$12,450</div><div class="h">Plaid 實收</div></div>
+          <div class="wall-cell"><div class="k">待認領</div><div class="v amber num">3 筆</div><div class="h">$15,422 待分類</div></div>
+          <div class="wall-cell"><div class="k">Trust 未認列</div><div class="v num">$38,600</div><div class="h">未出發訂金</div></div>
+          <div class="wall-cell"><div class="k">Trust 餘額</div><div class="v num">$45,000</div><div class="h">#5442 信託</div></div>
+        </div>
+      </div>
+
+      <!-- 行動 strip -->
+      <div class="card astrip">
+        <div class="card-h">
+          <div class="t"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>需要你決定</div>
+          <div class="meta">待認領 3 筆 <b>$15,422</b> · 待認列 1 筆 <b>$6,400</b></div>
+        </div>
+        <table>
+          <thead><tr><th>待認領入帳</th><th class="r">金額</th><th>對應到（你決定）· 全部 Trust Zelle</th><th class="r">操作</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="cdate">04/13</span><span class="cid">#1041</span></td>
+              <td class="r"><span class="camt num">$8,908</span></td>
+              <td><div class="chiprow"><button class="chip sel"><span class="who">王先生</span>台灣12天訂金</button><button class="chip">陳小姐 日本全額</button></div></td>
+              <td class="r"><button class="btn btn-dark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>認領</button></td>
+            </tr>
+            <tr>
+              <td><span class="cdate">06/02</span><span class="cid">#1198</span></td>
+              <td class="r"><span class="camt num">$2,916</span></td>
+              <td><div class="chiprow"><span class="badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>對不到訂單</span><button class="chip ghost">選內部分類…</button></div></td>
+              <td class="r"><button class="btn btn-dark off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>認領</button></td>
+            </tr>
+            <tr>
+              <td><span class="cdate">06/12</span><span class="cid">#1203</span></td>
+              <td class="r"><span class="camt num">$3,598</span></td>
+              <td><div class="chiprow"><button class="chip"><span class="who">王先生</span>台灣12天尾款</button><button class="chip ghost">或內部分類…</button></div></td>
+              <td class="r"><button class="btn btn-dark off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>認領</button></td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="recstrip">
+          <span class="dot"></span>
+          <div class="b"><span><b>待認列</b> 陳先生 韓國團已於 07/05 出發,<span class="amt num">$6,400</span> 可認列</span><div class="l2">確認後 Trust 遞延轉營收,並提醒你把 $6,400 從 Trust 轉入 Operating #2174（CST §17550,轉帳由你親自執行）</div></div>
+          <button class="btn btn-dark">認列入帳</button>
+        </div>
+      </div>
+
+      <!-- 損益優先主體 -->
+      <div class="body">
+
+        <!-- 損益表（主角） -->
+        <div class="card">
+          <div class="card-h">
+            <div class="t"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>損益表 · 本月 2026/07</div>
+            <div class="meta">來源 Plaid bankTransactions · Stripe 遞延 OFF</div>
+          </div>
+          <div class="pl-body">
+            <div class="pl-topline">
+              <div class="rev">營收<b class="num">$12,450</b></div>
+              <div class="net">淨利<b class="num">+$3,550</b></div>
+            </div>
+            <div class="compbar">
+              <div class="seg" style="width:51.4%;background:var(--gray-800)">供應商 51%</div>
+              <div class="seg" style="width:4.2%;background:var(--gray-600)"></div>
+              <div class="seg" style="width:9.6%;background:var(--gray-500)">廣告</div>
+              <div class="seg" style="width:6.3%;background:var(--gray-400)"></div>
+              <div class="seg" style="width:28.5%;background:var(--emerald-700)">淨利 28.5%</div>
+            </div>
+            <div class="complegend">
+              <div class="legitem"><span class="legdot" style="background:var(--gray-800)"></span>供應商成本<span class="lv num">$6,400</span></div>
+              <div class="legitem"><span class="legdot" style="background:var(--gray-600)"></span>平台手續費<span class="lv num">$520</span></div>
+              <div class="legitem"><span class="legdot" style="background:var(--gray-500)"></span>廣告投放<span class="lv num">$1,200</span></div>
+              <div class="legitem"><span class="legdot" style="background:var(--gray-400)"></span>營運雜支<span class="lv num">$780</span></div>
+              <div class="legitem"><span class="legdot" style="background:var(--emerald-700)"></span>本月淨利<span class="lv num">$3,550</span></div>
+            </div>
+            <div class="pl-rows">
+              <div class="pl-row"><span class="n s">營業收入</span><span class="v num">$12,450</span></div>
+              <div class="pl-row"><span class="n"><span class="sw" style="background:var(--gray-800)"></span>供應商成本</span><span class="v exp num">−$6,400</span></div>
+              <div class="pl-row"><span class="n"><span class="sw" style="background:var(--gray-600)"></span>平台手續費（Stripe / Square）</span><span class="v exp num">−$520</span></div>
+              <div class="pl-row"><span class="n"><span class="sw" style="background:var(--gray-500)"></span>廣告投放</span><span class="v exp num">−$1,200</span></div>
+              <div class="pl-row"><span class="n"><span class="sw" style="background:var(--gray-400)"></span>營運雜支</span><span class="v exp num">−$780</span></div>
+              <div class="pl-row total"><span class="n">本月淨利</span><span class="v num">+$3,550</span></div>
+            </div>
+          </div>
+          <div class="note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>損益以 Plaid 銀行實際流水為準;Stripe 遞延旗標 OFF,Stripe 收款於結帳當下即計入。</div>
+        </div>
+
+        <!-- Trust companion -->
+        <div class="card">
+          <div class="card-h">
+            <div class="t"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>客人訂金 · Trust #5442</div>
+            <div class="meta">$45,000</div>
+          </div>
+          <div class="tsplit">
+            <div class="c"><div class="k">未認列（未出發）</div><div class="v amber num">$38,600</div></div>
+            <div class="c"><div class="k">已出發 · 待轉出</div><div class="v num">$6,400</div></div>
+          </div>
+          <div class="tlist">
+            <div class="trow"><span class="dot gray"></span><div class="w"><div class="n">王家 台越日三國團</div><div class="d">出發 2026/12/20</div></div><span class="a num">$18,500</span></div>
+            <div class="trow"><span class="dot amber"></span><div class="w"><div class="n">陳小姐 日本團</div><div class="d">出發 2026/07/28 · 19 天後</div></div><span class="a num">$9,200</span></div>
+            <div class="trow"><span class="dot gray"></span><div class="w"><div class="n">Lisa Wu 越南團</div><div class="d">出發 2026/09/15</div></div><span class="a num">$7,300</span></div>
+            <div class="trow"><span class="dot gray"></span><div class="w"><div class="n" style="color:var(--gray-500)">其他 2 筆訂金</div><div class="d">出發日期較遠 · 未逐筆列出</div></div><span class="a num" style="color:var(--gray-500)">$3,600</span></div>
+            <div class="trow"><span class="dot red"></span><div class="w"><div class="n">陳先生 韓國團</div><div class="d">已出發 07/05 · 待認列</div></div><span class="a num">$6,400</span></div>
+          </div>
+          <div class="tnote"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>訂金非營收,出發後才認列轉 Operating #2174（CST §17550）。</div>
+        </div>
+      </div>
+
+      <!-- 第二層 -->
+      <div class="second">
+        <span class="lbl">次要報表</span>
+        <button class="lnk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>完整損益表</button>
+        <button class="lnk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 17.5v-11"/></svg>發票</button>
+        <button class="lnk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></svg>對帳明細</button>
+        <div class="grow"></div>
+        <button class="lnk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17V3"/><path d="m6 11 6 6 6-6"/><path d="M19 21H5"/></svg>報稅匯出 CSV</button>
+      </div>
+
+    </div>
+  </main>
+</div>
+</body>
+</html>
