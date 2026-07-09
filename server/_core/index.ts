@@ -35,7 +35,7 @@ import { correlationIdMiddleware } from "./correlationId";
 // Wave1 Block B — error funnel: guarantees admin tRPC 500s and cron/worker
 // failures actually surface to Jeff instead of dying silently in a catch.
 import { reportFunnelError } from "./errorFunnel";
-import { isKnownInfraNoise } from "./infraNoise";
+import { shouldFunnelTrpcError } from "./trpcNoiseGate";
 import { shutdownPool, warmUp } from "./puppeteerPool";
 import pinoHttp from "pino-http";
 import "../worker"; // Initialize BullMQ worker
@@ -1495,6 +1495,41 @@ async function startServer() {
     }
   });
 
+  // F1 對帳引擎 塊A(2026-07-08)— 存量入帳回填:掃描全部還沒有 bankTransactionLinks
+  // 的入帳,dry_run 只算(自動 link 統計 + 待認領清單,不寫),confirm 真的跑規則
+  // 寫 link,若還有待認領則額外建「最多一張」聚合卡(存量絕不逐筆出卡)。同
+  // dry_run/confirm + LOCAL_SCRIPT_TOKEN 慣例。回應本身就是報表(同
+  // harvest-case-lessons 慣例,伺服器端不另外寫檔)。
+  // POST /api/admin/backfill-bank-transaction-links
+  //   Body: { mode:"dry_run"|"confirm", limit?: number }
+  app.post("/api/admin/backfill-bank-transaction-links", async (req, res) => {
+    try {
+      const ip = await verifyInternalAuth(req, res, {
+        tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
+        rateLimitKey: "backfill-bank-transaction-links",
+        rateLimitMax: 30,
+        windowSec: 3600,
+      });
+      if (!ip) return;
+      const { mode, limit } = req.body || {};
+      if (mode !== "dry_run" && mode !== "confirm") {
+        return res.status(400).json({ error: "mode must be 'dry_run' or 'confirm'" });
+      }
+      const parsedLimit = typeof limit === "number" && Number.isFinite(limit) && limit > 0 ? limit : undefined;
+      const { runBackfillDryRun, runBackfillConfirm } = await import(
+        "../services/bankTransactionLinkBackfill"
+      );
+      const result =
+        mode === "dry_run"
+          ? await runBackfillDryRun({ limit: parsedLimit })
+          : await runBackfillConfirm({ limit: parsedLimit });
+      return res.json(result);
+    } catch (err) {
+      logger.error({ err }, "[admin/backfill-bank-transaction-links] error");
+      return res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   // 批十一 塊C — 案件對話進場:來源/ 的對話候選檔(.txt/.md)逐檔餵既有 chatLogImport 管線
   // (classifier 判斷是否對話、resolveEventDate 未來日期一律不建、認人守門、(content,分鐘)去重
   // 全沿用)。dry_run 只 classify+build 預覽不寫。POST /api/admin/import-case-conversations
@@ -1873,29 +1908,10 @@ async function startServer() {
       onError(opts) {
         const { error, type, path } = opts;
 
-        // 噪音閘 —— 只有 INTERNAL_SERVER_ERROR 才可能進漏斗,以下皆提前 return
-        // (等同「INTERNAL_SERVER_ERROR 以外全部不進」):
-        //   - FORBIDDEN: adminProcedure 擋非 admin,是預期的權限行為。
-        //   - UNAUTHORIZED: requireUser 擋未登入,同上,預期的權限行為。
-        //   - BAD_REQUEST: zod 輸入驗證失敗,是呼叫端資料問題,不是系統壞了。
-        //   - NOT_FOUND: 查詢不存在的資源,是預期的業務結果。
-        //   - TOO_MANY_REQUESTS: adminProcedure mutation rate limit,是設計好
-        //     的節流,不是事故(見 trpc.ts checkAdminMutationRateLimit)。
-        // 這個 if 用白名單寫法(只放行 INTERNAL_SERVER_ERROR),因此上面五種、以及
-        // 任何其他 tRPC 內建 code(PARSE_ERROR/BAD_GATEWAY/CONFLICT/...)都會被擋。
-        if (error.code !== "INTERNAL_SERVER_ERROR") return;
-
-        // 即使 code 是 INTERNAL_SERVER_ERROR,client abort / EPIPE / ECONNRESET
-        // 這類部署滾動重啟或客人中途關閉分頁造成的網路雜訊,以及 LLM_RATE_LIMITED
-        // / LLM_CIRCUIT_OPEN / LLM_TIMEOUT / BullMQ lock-renew 這類已有自己
-        // retry/backoff 的基礎設施壓力訊號,都不算「系統壞了」。isKnownInfraNoise
-        // 是跟 sentry.ts(ignoreErrors / beforeSend)共用同一份訊號清單的函式
-        // (見 ./infraNoise.ts),避免漏斗和 Sentry 兩套過濾邏輯分岔各吹各的號 ——
-        // 2026-07 審查就抓到過一次分岔:這裡原本手抄了 EPIPE/ECONNRESET 卻漏抄
-        // LLM_* 那組,Anthropic outage 時會繞過去重演 inbox storm。TRPCError 常
-        // 把底層錯誤包在 .cause 裡(getTRPCErrorFromUnknown),所以同時查 error
-        // 本身跟 error.cause 兩個候選。
-        if (isKnownInfraNoise(error, error.cause)) return;
+        // 噪音閘邏輯(白名單:只有 INTERNAL_SERVER_ERROR 且非已知基礎設施雜訊
+        // 才進漏斗)已抽成獨立、有紅綠測試覆蓋的純函式,見 ./trpcNoiseGate.ts
+        // 的檔頭註解與 trpcNoiseGate.test.ts。
+        if (!shouldFunnelTrpcError(error)) return;
 
         // 通過噪音閘 —— fire-and-forget,不 await,避免拖住 tRPC middleware 的
         // 回應路徑(reportFunnelError 內部本身也永不 throw,.catch 是雙保險)。

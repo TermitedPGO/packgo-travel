@@ -26,7 +26,19 @@ vi.mock("../rateLimit", () => ({
   checkRateLimit: vi.fn(),
 }));
 vi.mock("../_core/notification", () => ({
-  notifyOwner: vi.fn(() => Promise.resolve()),
+  // Real notifyOwner() resolves `true` on delivery success — default the
+  // mock to match so tests that don't care about the notify outcome don't
+  // accidentally exercise the failure branch. See _core/notification.ts:
+  // it NEVER rejects (SMTP errors / missing config are swallowed internally
+  // and turned into a `false` resolve), so `false`, not a rejection, is the
+  // realistic failure shape.
+  notifyOwner: vi.fn(() => Promise.resolve(true)),
+}));
+// Wave1 收尾補丁 — createEmergency's notifyOwner failure catch reports to the
+// error funnel (see server/_core/errorFunnel.ts). Mocked so the failure path
+// is assertable without touching the real dedup/DB logic.
+vi.mock("../_core/errorFunnel", () => ({
+  reportFunnelError: vi.fn(() => Promise.resolve()),
 }));
 // addMessage (admin) now delegates to the shared server/_core/inquiryReply
 // helper, which dynamically `await import("../emailService")`. vi.mock
@@ -64,6 +76,8 @@ import { inquiriesRouter } from "./inquiries";
 import * as db from "../db";
 import { checkRateLimit } from "../rateLimit";
 import { sendInquiryReply } from "../emailService";
+import { notifyOwner } from "../_core/notification";
+import { reportFunnelError } from "../_core/errorFunnel";
 
 /** Flush the fire-and-forget `void (async () => {...})()` microtask chain
  *  before asserting — the mutation returns before that IIFE settles. */
@@ -161,6 +175,99 @@ describe("inquiriesRouter.createEmergency — migration 0077 behavior", () => {
         agentName: "website_inquiry",
       }),
     );
+  });
+
+  // Wave1 收尾補丁 — 接線點 1/5: notifyOwner 失敗時報進錯誤漏斗
+  // (server/routers/inquiries.ts createEmergency 的 notifyOwner().then/.catch)。
+  //
+  // 2026-07 審查三 P0 修復:notifyOwner() 真實行為是「永不 reject」——
+  // SMTP 失敗 / EMAIL_USER 或 EMAIL_PASSWORD 未設定都在內部被吞掉、
+  // resolve(false)(見 _core/notification.ts)。原本這裡只測 mockRejectedValue,
+  // 對「Gmail 帳密過期 / SMTP 掛掉 / OWNER_EMAIL 打錯」這個最可能發生的場景
+  // 是死代碼,因為那個場景走的是 resolve(false) 不是 reject。
+  // 兩條路徑都要測:resolve(false) 是真實會發生的路徑,reject 是防禦性路徑
+  // (萬一未來 notifyOwner 改成會 throw)。
+  it("notifyOwner resolves false (真實 SMTP 失敗 / 未設定的形狀): reports to the error funnel with source 'fail-open:inquiries:emergencyOwnerNotifyFailed', still returns the inquiry (never blocks the customer response)", async () => {
+    (db.createInquiry as any).mockResolvedValue({ id: 99, inquiryType: "emergency" });
+    (notifyOwner as any).mockResolvedValue(false);
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const caller = (inquiriesRouter as any).createCaller(makeContext());
+    const result = await caller.createEmergency({
+      customerName: "Jane Doe",
+      customerEmail: "jane@example.com",
+      customerPhone: "+1-555-0100",
+      currentLocation: "Reykjavík",
+      severity: "medical",
+      message: "Need urgent help.",
+    });
+    await flushMicrotasks();
+
+    // Original behavior unchanged: the mutation still resolves with the
+    // created inquiry — a notifyOwner failure must never surface to the caller.
+    expect(result).toEqual({ id: 99, inquiryType: "emergency" });
+    // console.error logging fires for the resolve(false) path too.
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "[inquiries.createEmergency] notifyOwner failed:",
+      expect.any(Error),
+    );
+    expect(reportFunnelError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "fail-open:inquiries:emergencyOwnerNotifyFailed",
+        context: { inquiryId: 99 },
+      }),
+    );
+
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("notifyOwner rejects (defensive path, not notifyOwner's real behavior today): still reports to the error funnel, still returns the inquiry", async () => {
+    (db.createInquiry as any).mockResolvedValue({ id: 100, inquiryType: "emergency" });
+    (notifyOwner as any).mockRejectedValue(new Error("sendgrid down"));
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const caller = (inquiriesRouter as any).createCaller(makeContext());
+    const result = await caller.createEmergency({
+      customerName: "Jane Doe",
+      customerEmail: "jane@example.com",
+      customerPhone: "+1-555-0100",
+      currentLocation: "Reykjavík",
+      severity: "medical",
+      message: "Need urgent help.",
+    });
+    await flushMicrotasks();
+
+    expect(result).toEqual({ id: 100, inquiryType: "emergency" });
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "[inquiries.createEmergency] notifyOwner failed:",
+      expect.any(Error),
+    );
+    expect(reportFunnelError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "fail-open:inquiries:emergencyOwnerNotifyFailed",
+        context: { inquiryId: 100 },
+      }),
+    );
+
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("notifyOwner resolves true (delivery succeeded): does NOT report to the error funnel", async () => {
+    (db.createInquiry as any).mockResolvedValue({ id: 101, inquiryType: "emergency" });
+    (notifyOwner as any).mockResolvedValue(true);
+
+    const caller = (inquiriesRouter as any).createCaller(makeContext());
+    await caller.createEmergency({
+      customerName: "Jane Doe",
+      customerEmail: "jane@example.com",
+      customerPhone: "+1-555-0100",
+      currentLocation: "Reykjavík",
+      severity: "medical",
+      message: "Need urgent help.",
+    });
+    await flushMicrotasks();
+
+    expect(reportFunnelError).not.toHaveBeenCalled();
   });
 });
 

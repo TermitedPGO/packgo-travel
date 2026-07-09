@@ -297,6 +297,14 @@ export const inquiriesRouter = router({
 
         // Fire-and-forget owner notification — never block the
         // customer-facing response on the email send.
+        //
+        // notifyOwner() 內部把 transport.sendMail 包在自己的 try/catch,
+        // SMTP 失敗或 EMAIL_USER/EMAIL_PASSWORD 未設定時一律 resolve(false),
+        // 「不」 reject(見 _core/notification.ts)。所以只掛 .catch() 對
+        // 「Gmail 帳密過期 / SMTP 掛掉 / OWNER_EMAIL 打錯」這個最可能發生的
+        // 場景是死代碼 —— 必須同時檢查 resolve 出來的布林值。
+        // (2026-07 審查三 P0:客人送出人身安全緊急通報,Jeff 收不到信,
+        // 原本的 fail-open 警報也不會貼出。)
         const { notifyOwner } = await import("../_core/notification");
         notifyOwner({
           title: `🆘 [緊急 · ${labelZh}] ${input.customerName} @ ${input.currentLocation}`,
@@ -309,9 +317,27 @@ export const inquiriesRouter = router({
             `訊息:\n${input.message}\n\n` +
             `Inquiry ID: ${inquiry?.id ?? "?"}\n` +
             `請盡快撥打客戶電話。`,
-        }).catch((err) =>
-          console.error("[inquiries.createEmergency] notifyOwner failed:", err)
-        );
+        })
+          .then((delivered) => {
+            if (delivered) return;
+            const err = new Error(
+              "notifyOwner resolved false (SMTP not configured or send failed; see notifyOwner internal logger.error/warn for detail)",
+            );
+            console.error("[inquiries.createEmergency] notifyOwner failed:", err);
+            return reportFunnelError({
+              source: "fail-open:inquiries:emergencyOwnerNotifyFailed",
+              err,
+              context: { inquiryId: inquiry?.id ?? null },
+            }).catch(() => {});
+          })
+          .catch((err) => {
+            console.error("[inquiries.createEmergency] notifyOwner failed:", err);
+            reportFunnelError({
+              source: "fail-open:inquiries:emergencyOwnerNotifyFailed",
+              err,
+              context: { inquiryId: inquiry?.id ?? null },
+            }).catch(() => {});
+          });
 
         ingestWebsiteInquiryContact({
           userId: ctx.user?.id ?? null,

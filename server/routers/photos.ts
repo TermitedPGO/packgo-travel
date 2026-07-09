@@ -14,6 +14,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
 import * as db from "../db";
+import { reportFunnelError } from "../_core/errorFunnel";
 
 export const photosRouter = router({
     /** Upload a photo URL (from S3 / pre-signed upload). */
@@ -86,6 +87,11 @@ export const photosRouter = router({
             pointsEarned = 10;
           } catch (err) {
             console.error("[Photos] Bonus award failed:", err);
+            reportFunnelError({
+              source: "fail-open:photos:packpointBonusAwardFailed",
+              err,
+              context: { photoId, userId: ctx.user.id },
+            }).catch(() => {});
           }
         }
 

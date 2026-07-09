@@ -250,7 +250,14 @@ export const bookingsRouter = router({
                   finalDiscount,
                   departureCurrency as SupportedCurrency,
                   "USD" as SupportedCurrency
-                ).catch(() => requestedDiscountUsd);
+                ).catch((err) => {
+                  reportFunnelError({
+                    source: "fail-open:bookings:discountReconversionFallback",
+                    err,
+                    context: { departureCurrency },
+                  }).catch(() => {});
+                  return requestedDiscountUsd;
+                });
           pointsRedeemed = Math.floor(finalDiscountUsd * 100);
           console.log(
             `[bookings.create] Packpoint redemption: user ${ctx.user.id} → -${pointsRedeemed} pts, discount ${departureCurrency} ${finalDiscount}`
@@ -420,6 +427,11 @@ export const bookingsRouter = router({
             "[bookings.create] Failed to schedule abandonment recovery:",
             (err as Error).message
           );
+          reportFunnelError({
+            source: "fail-open:bookings:abandonmentRecoveryScheduleFailed",
+            err,
+            context: { bookingId: booking.id },
+          }).catch(() => {});
         }
 
         return booking;
@@ -778,7 +790,14 @@ export const bookingsRouter = router({
         const [tour, departure, participants] = await Promise.all([
           db.getTourById(booking.tourId).catch(() => null),
           booking.departureId
-            ? db.getDepartureById(booking.departureId).catch(() => null)
+            ? db.getDepartureById(booking.departureId).catch((err) => {
+                reportFunnelError({
+                  source: "fail-open:bookings:getOrderPacket:departure",
+                  err,
+                  context: { bookingId: booking.id, departureId: booking.departureId },
+                }).catch(() => {});
+                return null;
+              })
             : Promise.resolve(null),
           db.getBookingParticipants(booking.id).catch((err) => {
             reportFunnelError({
