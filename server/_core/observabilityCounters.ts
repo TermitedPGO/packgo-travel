@@ -102,14 +102,16 @@ export async function gatherMessagesFailedWeeklyDelta(db: Db, now: Date): Promis
 
 export interface QueueFailedCount {
   queueName: string;
-  /** null = this specific queue's getFailedCount() call itself failed
+  /** null = this specific queue's getFailed() call itself failed
    *  ("?" in the digest), NOT the same as a genuine 0. */
   failed: number | null;
 }
 
+/** BullMQ 的 failed 集合是永久累積的(不會自動清)。近 7 天口徑要抓 job 本體看
+ *  finishedOn,所以這裡要的是 getFailed(start,end) 而非 getFailedCount()。 */
 interface QueueLike {
   name: string;
-  getFailedCount: () => Promise<number>;
+  getFailed: (start: number, end: number) => Promise<Array<{ finishedOn?: number | null }>>;
 }
 
 function isQueueLike(value: unknown): value is QueueLike {
@@ -117,9 +119,14 @@ function isQueueLike(value: unknown): value is QueueLike {
     !!value &&
     typeof value === "object" &&
     typeof (value as { name?: unknown }).name === "string" &&
-    typeof (value as { getFailedCount?: unknown }).getFailedCount === "function"
+    typeof (value as { getFailed?: unknown }).getFailed === "function"
   );
 }
+
+/** 近 7 天口徑窗口。 */
+const QUEUE_FAILED_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+/** 單 queue 掃描的 failed job 上限(防爆:BullMQ failed 集合可能很大)。 */
+const QUEUE_FAILED_SCAN_CAP = 500;
 
 /** Every module that exports a `new Queue(...)` instance — server/queue.ts
  *  (the ~24-queue monolith) plus the standalone files under server/queues/.
@@ -142,15 +149,22 @@ const QUEUE_MODULE_IMPORTERS: Array<() => Promise<Record<string, unknown>>> = [
 ];
 
 /**
- * Calls .getFailedCount() on every exported BullMQ Queue instance across the
- * repo's queue-definition modules. queueName is the actual BullMQ queue name
- * (Queue#name — the string passed to `new Queue(...)`), never the source
- * variable name, so it's meaningful outside the codebase too. Each queue's
- * call is independently try/catch'd (one queue's Redis hiccup never blanks
- * out the rest), and loading a queue-definition module itself is likewise
- * independently try/catch'd. Never throws.
+ * 近 7 天口徑的 per-queue failed 計數。掃每個 BullMQ Queue 的 failed 集合,只數
+ * finishedOn 落在近 7 天內的 job。
+ *
+ * 為什麼不用 getFailedCount():BullMQ 的 failed 集合是永久累積的(job 失敗後留在裡面,
+ * 不會自動清)。getFailedCount() 數的是「歷來全部」,所以幾週前的一批殘留(實例:
+ * gmail-poll 2026-06-17 的 36 筆歷史 failed)會變成永遠掛在週報上的假警告。改成抓 job
+ * 本體、按 finishedOn >= now-7d 過濾,舊殘留自然退場;真的近期在壞才亮 ⚠。
+ *
+ * 單 queue 最多掃 QUEUE_FAILED_SCAN_CAP(500)筆防爆(failed 集合可能很大)。讀不到
+ * (getFailed 丟例外)照舊回 null → 週報顯示 "?"(明確「沒讀到」,不是 0)。
+ *
+ * queueName 是實際的 BullMQ queue 名(Queue#name),非原始碼變數名。每個 queue 與每個
+ * 模組載入都各自 try/catch(一個壞不影響其他)。永不 throw。now 可注入(測試用)。
  */
-export async function gatherQueueFailedCounts(): Promise<QueueFailedCount[]> {
+export async function gatherQueueFailedCounts(now: Date = new Date()): Promise<QueueFailedCount[]> {
+  const cutoff = now.getTime() - QUEUE_FAILED_WINDOW_MS;
   const queues: QueueLike[] = [];
   for (const importer of QUEUE_MODULE_IMPORTERS) {
     try {
@@ -169,12 +183,15 @@ export async function gatherQueueFailedCounts(): Promise<QueueFailedCount[]> {
   const results: QueueFailedCount[] = [];
   for (const q of queues) {
     try {
-      const failed = await q.getFailedCount();
+      const jobs = await q.getFailed(0, QUEUE_FAILED_SCAN_CAP - 1);
+      const failed = jobs.filter(
+        (j) => typeof j.finishedOn === "number" && j.finishedOn >= cutoff,
+      ).length;
       results.push({ queueName: q.name, failed });
     } catch (err) {
       log.warn(
         { queueName: q.name, err: (err as Error).message },
-        "[observabilityCounters] getFailedCount() failed for one queue",
+        "[observabilityCounters] getFailed() failed for one queue",
       );
       results.push({ queueName: q.name, failed: null });
     }
