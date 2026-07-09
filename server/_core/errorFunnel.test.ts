@@ -207,10 +207,13 @@ describe("reportFunnelError — P1-2 count 週期性回寫 DB", () => {
     for (let i = 0; i < 4; i++) {
       await reportFunnelError({ source: "worker:flush", err: new Error("boom") }); // count 累加到 2,3,4,5
     }
-    // flush 是 fire-and-forget,讓待處理的 microtask(動態 import + select + update)跑完。
-    await new Promise((r) => setTimeout(r, 0));
-
-    expect(capturedUpdates.length).toBe(1); // 第 5 次命中(5 % 5 === 0)觸發剛好一次回寫
+    // flush 是 fire-and-forget(動態 import + select + update),settles 在這幾次
+    // reportFunnelError 呼叫都 resolve 之後。固定 setTimeout(0) 在全套跑（多測試檔
+    // 並發）下負載重時 flake(2026-07-03 stripeWebhook.bookings.test.ts 同款教訓)—
+    // 改用 vi.waitFor 輪詢正向斷言,對負載不敏感。
+    await vi.waitFor(() => {
+      expect(capturedUpdates.length).toBe(1); // 第 5 次命中(5 % 5 === 0)觸發剛好一次回寫
+    });
     const nextContext = JSON.parse(capturedUpdates[0].context);
     expect(nextContext.count).toBe(5);
   });
