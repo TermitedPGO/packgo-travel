@@ -4,8 +4,9 @@
 
 ## 塊A:對帳資料模型 + 引擎 + 待認領流程
 
-**狀態:實作完成 → 3 路 fresh 對抗審查(全數 FAIL,共 3 P0/8 P1/5 P2/2 note)
-→ 逐條修復 → 重驗 tsc/vitest/i18n 綠 → 已 commit+push。**
+**狀態:✅ 完成。實作 → 3 路 fresh 對抗審查(全數 FAIL,共 3 P0/8 P1/5 P2/2 note)
+→ 逐條修復 → 重驗 tsc/vitest/i18n 綠 → commit `4d0a1b4` → push 成功
+(`294e9e4..4d0a1b4 main -> main`,pre-push 全套 315 files/4653 tests 綠)。**
 
 **⚠ 營運事故(修復後才發現,已解決)**:對抗審查 iron_rules_and_ux 路抓到
 main 曾經處於壞掉狀態 —— 另一並行 session(Wave1 收尾補丁,commit 0cbd000/
