@@ -13,16 +13,18 @@
     --gray-950:#030712; --gray-900:#101828; --gray-800:#1e2939; --gray-700:#364153;
     --gray-600:#4a5565; --gray-500:#6a7282; --gray-400:#99a1af; --gray-300:#d1d5dc;
     --gray-200:#e5e7eb; --gray-100:#f3f4f6; --gray-50:#f9fafb; --white:#fff;
-    --amber-600:#e17100; --amber-400:#ffb900; --amber-50:#fffbeb; --amber-200:#fee685;
-    --red-500:#fb2c36; --red-50:#fef2f2;
-    --emerald-700:#008236; --rose-600:#e7000b;
+    /* 狀態色:大號金額(>=18px)可用 -600;9-16px 小字一律 -700 過 4.5:1 對比 */
+    --amber-600:#e17100; --amber-700:#bb4d00; --amber-400:#ffb900;
+    --red-500:#fb2c36;
+    --emerald-700:#007a55;
     --r-xl:12px; --r-lg:8px; --r-md:6px;
     font-synthesis-weight:none;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{background:var(--white)}
   body{font-family:"Noto Sans TC",sans-serif;color:var(--gray-900);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
-  h1,h2,h3{font-family:"Noto Serif TC",serif;font-weight:700;letter-spacing:-.01em}
+  /* serif 只准頁面 H1(對齊 primitives/PageHeader.tsx:7 品牌規則) */
+  h1{font-family:"Noto Serif TC",serif;font-weight:700;letter-spacing:-.01em}
   .num{font-variant-numeric:tabular-nums}
   b{font-variant-numeric:tabular-nums}
   svg{display:block}
@@ -44,24 +46,24 @@
   .content{max-width:1160px;margin:0 auto;padding:24px 36px 64px}
 
   .phead{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;
-    padding-bottom:13px;margin-bottom:16px;border-bottom:1px solid var(--gray-100)}
-  .phead h1{font-size:22px;color:var(--gray-900);line-height:1.15;display:flex;align-items:center;gap:9px}
+    padding-bottom:12px;margin-bottom:16px;border-bottom:1px solid var(--gray-100)}
+  .phead h1{font-size:22px;color:var(--gray-900);line-height:1.15;display:flex;align-items:center;gap:8px}
   .phead h1 .back{font-size:12px;color:var(--gray-400);font-family:"Noto Sans TC";font-weight:400;
     border:1px solid var(--gray-200);border-radius:var(--r-md);padding:3px 8px;cursor:pointer}
   .phead h1 .back:hover{background:var(--gray-50);color:var(--gray-700)}
-  .phead .sub{font-size:12px;color:var(--gray-500);margin-top:5px}
+  .phead .sub{font-size:12px;color:var(--gray-500);margin-top:4px}
   .phead .asof{font-size:11px;color:var(--gray-400);text-align:right;line-height:1.6}
   .phead .asof b{color:var(--gray-600);font-weight:500}
 
   /* 期間切換 */
-  .periodbar{display:flex;align-items:center;gap:10px;margin-bottom:20px}
+  .periodbar{display:flex;align-items:center;gap:8px;margin-bottom:20px}
   .seg{display:inline-flex;border:1px solid var(--gray-200);border-radius:var(--r-lg);overflow:hidden;background:var(--white)}
-  .seg button{border:none;background:transparent;padding:7px 14px;font-size:12px;color:var(--gray-600);
+  .seg button{border:none;background:transparent;padding:8px 12px;font-size:12px;color:var(--gray-600);
     cursor:pointer;font-family:"Noto Sans TC";border-left:1px solid var(--gray-100)}
   .seg button:first-child{border-left:none}
   .seg button:hover{background:var(--gray-50)}
   .seg button.active{background:var(--gray-900);color:#fff}
-  .yr{display:inline-flex;align-items:center;gap:7px;height:33px;padding:0 12px;border:1px solid var(--gray-200);
+  .yr{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 12px;border:1px solid var(--gray-200);
     border-radius:var(--r-lg);font-size:12px;color:var(--gray-700);background:var(--white);cursor:pointer}
   .yr svg{width:13px;height:13px;color:var(--gray-400)}
   .periodbar .spacer{flex:1}
@@ -70,9 +72,9 @@
   /* KPIStrip context */
   .kpis{display:grid;grid-template-columns:repeat(5,1fr);border:1px solid var(--gray-200);
     border-radius:var(--r-xl);background:var(--white);overflow:hidden;margin-bottom:22px}
-  .kpi{padding:13px 16px;border-left:1px solid var(--gray-100)}
+  .kpi{padding:12px 16px;border-left:1px solid var(--gray-100)}
   .kpi:first-child{border-left:none}
-  .kpi .k{font-size:10px;font-weight:700;letter-spacing:.05em;color:var(--gray-500);text-transform:uppercase;margin-bottom:7px;white-space:nowrap}
+  .kpi .k{font-size:10px;font-weight:700;letter-spacing:.05em;color:var(--gray-500);text-transform:uppercase;margin-bottom:8px;white-space:nowrap}
   .kpi .v{font-size:21px;font-weight:700;color:var(--gray-900);line-height:1;letter-spacing:-.02em}
   .kpi .v.pos{color:var(--emerald-700)} .kpi .v.amber{color:var(--amber-600)}
   .kpi .h{font-size:10px;color:var(--gray-400);margin-top:6px;white-space:nowrap}
@@ -86,45 +88,46 @@
   .block{margin-bottom:28px}
 
   .card{background:var(--white);border:1px solid var(--gray-200);border-radius:var(--r-xl);overflow:hidden}
-  .card-h{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 16px;border-bottom:1px solid var(--gray-100)}
-  .card-h .t{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--gray-900);font-family:"Noto Serif TC",serif}
-  .card-h .t svg{width:15px;height:15px;color:var(--gray-500)}
+  .card-h{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:1px solid var(--gray-100)}
+  /* 卡片標題:對齊 FinanceDashboard.tsx:116 的 text-xs 粗體 uppercase gray-500 sans(非 serif) */
+  .card-h .t{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:var(--gray-500);text-transform:uppercase;letter-spacing:.05em}
+  .card-h .t svg{width:14px;height:14px;color:var(--gray-400)}
   .card-h .meta{font-size:11px;color:var(--gray-500)}
   .card-h .meta b{color:var(--gray-800);font-weight:600}
 
   /* 月度趨勢 bar */
-  .trendwrap{padding:18px 18px 8px}
-  .trend{display:flex;align-items:flex-end;gap:12px;height:132px;border-bottom:1px solid var(--gray-100);padding-bottom:0}
+  .trendwrap{padding:16px 16px 8px}
+  .trend{display:flex;align-items:flex-end;gap:12px;height:128px;border-bottom:1px solid var(--gray-100);padding-bottom:0}
   .tcol{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%}
   .tcol .tval{font-size:11px;color:var(--gray-600);font-weight:600;margin-bottom:6px}
   .tcol.cur .tval{color:var(--emerald-700)}
   .tbar{width:100%;max-width:38px;background:var(--gray-700);border-radius:var(--r-md) var(--r-md) 0 0;min-height:3px}
   .tcol.cur .tbar{background:var(--gray-900)}
-  .tlabels{display:flex;gap:12px;padding:9px 0 0}
+  .tlabels{display:flex;gap:12px;padding:8px 0 0}
   .tlab{flex:1;text-align:center;font-size:11px;color:var(--gray-400)}
   .tlab.cur{color:var(--gray-900);font-weight:600}
 
   /* 表格 */
   table{width:100%;border-collapse:collapse;font-size:12px}
   thead{background:var(--gray-50);border-bottom:1px solid var(--gray-200)}
-  th{padding:7px 16px;font-size:10px;font-weight:700;color:var(--gray-500);text-transform:uppercase;letter-spacing:.04em;text-align:right;white-space:nowrap}
+  th{padding:8px 16px;font-size:10px;font-weight:700;color:var(--gray-500);text-transform:uppercase;letter-spacing:.04em;text-align:right;white-space:nowrap}
   th.l{text-align:left}
   tbody tr{border-top:1px solid var(--gray-100)}
   tbody tr:hover{background:var(--gray-50)}
-  tbody tr.cur{background:var(--amber-50)}
-  tbody tr.cur:hover{background:var(--amber-50)}
+  /* 本月列:用 gray-50 底 + 月份 amber-700 標,不做 amber 背景填色(狀態色不做 fill) */
+  tbody tr.cur{background:var(--gray-50)}
+  tbody tr.cur td.mo{color:var(--amber-700);font-weight:600}
   tbody tr.total{border-top:1.5px solid var(--gray-300);background:var(--gray-50)}
   td{padding:8px 16px;text-align:right;color:var(--gray-700)}
   td.l{text-align:left}
   td.mo{color:var(--gray-800);font-weight:500}
   td.net{color:var(--gray-900);font-weight:600}
   tr.total td{font-weight:700;color:var(--gray-900);font-size:12px}
-  tr.total td.l{font-family:"Noto Serif TC",serif}
   .pct{color:var(--gray-500);font-size:11px}
 
   /* 年度 + Schedule C */
   .cols{display:grid;grid-template-columns:1.35fr 1fr;gap:16px;align-items:start}
-  .stack > * + *{margin-top:14px}
+  .stack > * + *{margin-top:16px}
 
   /* Schedule C table */
   .sc-body{padding:4px 0 8px}
@@ -140,7 +143,7 @@
   .sc-row.sub .nm{color:var(--gray-600);font-weight:500}
   .sc-row.sub .amt{color:var(--gray-800);font-weight:600}
   .sc-row.grand{border-top:1.5px solid var(--gray-300);background:var(--gray-50)}
-  .sc-row.grand .nm{font-family:"Noto Serif TC",serif;font-weight:700;color:var(--gray-900);font-size:13px}
+  .sc-row.grand .nm{font-weight:700;color:var(--gray-900);font-size:13px}
   .sc-row.grand .amt{font-size:16px;font-weight:700;color:var(--emerald-700)}
   .sc-row .amt.neg{color:var(--gray-500)}
   .colhdr{display:grid;grid-template-columns:1fr auto auto;gap:14px;padding:8px 16px;border-bottom:1px solid var(--gray-100)}
@@ -154,24 +157,25 @@
   .mini .mr + .mr{border-top:1px solid var(--gray-50)}
   .mini .mr .k{color:var(--gray-600)} .mini .mr .k .s{color:var(--gray-400);font-size:10px;display:block;margin-top:1px}
   .mini .mr .v{color:var(--gray-900);font-weight:600;font-variant-numeric:tabular-nums}
-  .mini .mr .v.amber{color:var(--amber-600)} .mini .mr .v.mut{color:var(--gray-400);font-weight:500}
-  .exq{display:flex;align-items:center;gap:9px;padding:9px 16px;font-size:12px;color:var(--gray-600)}
+  .mini .mr .v.amber{color:var(--amber-700)} .mini .mr .v.mut{color:var(--gray-400);font-weight:500}
+  .exq{display:flex;align-items:center;gap:8px;padding:8px 16px;font-size:12px;color:var(--gray-600)}
   .exq + .exq{border-top:1px solid var(--gray-50)}
   .exq .dot{width:6px;height:6px;border-radius:999px;background:var(--gray-300);flex-shrink:0}
   .exq .lbl{flex:1} .exq .lbl b{color:var(--gray-800)}
   .exq .amt{color:var(--gray-400);font-variant-numeric:tabular-nums}
-  .pill{display:inline-flex;align-items:center;gap:4px;font-size:9px;font-weight:600;border-radius:var(--r-md);
-    padding:2px 6px;border:1px solid var(--gray-200);background:var(--white);color:var(--gray-500)}
-  .soon{border-color:var(--amber-200);background:var(--amber-50);color:var(--amber-600)}
-  .note{font-size:10px;color:var(--gray-400);line-height:1.55;padding:10px 16px;display:flex;gap:6px;border-top:1px solid var(--gray-100)}
+  /* status = dot 加文字色,不做背景填色(admin 設計系統 anti-pattern) */
+  .pill{display:inline-flex;align-items:center;gap:5px;font-size:9px;font-weight:600;color:var(--gray-500);white-space:nowrap}
+  .pill::before{content:"";width:5px;height:5px;border-radius:999px;background:currentColor;flex-shrink:0}
+  .soon{color:var(--amber-700)}
+  .note{font-size:10px;color:var(--gray-400);line-height:1.55;padding:12px 16px;display:flex;gap:6px;border-top:1px solid var(--gray-100)}
   .note svg{width:12px;height:12px;flex-shrink:0;margin-top:1px;color:var(--gray-300)}
   .q4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:12px 16px}
-  .q{border:1px solid var(--gray-200);border-radius:var(--r-lg);padding:9px 10px;text-align:center}
+  .q{border:1px solid var(--gray-200);border-radius:var(--r-lg);padding:8px 12px;text-align:center}
   .q .ql{font-size:10px;color:var(--gray-400);margin-bottom:4px} .q .qv{font-size:12px;color:var(--gray-400);font-weight:600}
 
   /* 匯出 */
-  .exports{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-  .exbtn{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border:1px solid var(--gray-200);
+  .exports{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .exbtn{display:inline-flex;align-items:center;gap:8px;padding:12px 16px;border:1px solid var(--gray-200);
     border-radius:var(--r-lg);background:var(--white);cursor:pointer;text-align:left}
   .exbtn:hover{background:var(--gray-50)}
   .exbtn svg{width:16px;height:16px;color:var(--gray-500);flex-shrink:0}
@@ -329,10 +333,10 @@
             <div class="card">
               <div class="card-h"><div class="t"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M8 2v4"/><path d="M16 2v4"/><path d="M3 10h18"/></svg>季度預估稅 1040-ES</div><div class="meta"><span class="pill soon">待建</span></div></div>
               <div class="q4">
-                <div class="q"><div class="ql">Q1</div><div class="qv">—</div></div>
-                <div class="q"><div class="ql">Q2</div><div class="qv">—</div></div>
-                <div class="q"><div class="ql">Q3</div><div class="qv">—</div></div>
-                <div class="q"><div class="ql">Q4</div><div class="qv">—</div></div>
+                <div class="q"><div class="ql">Q1</div><div class="qv">待建</div></div>
+                <div class="q"><div class="ql">Q2</div><div class="qv">待建</div></div>
+                <div class="q"><div class="ql">Q3</div><div class="qv">待建</div></div>
+                <div class="q"><div class="ql">Q4</div><div class="qv">待建</div></div>
               </div>
               <div class="note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>後端還沒有預估稅算法。應稅淨利 $22,640 已備妥,接入需設定聯邦+加州有效稅率或由會計師提供,系統不自己猜稅率。</div>
             </div>
