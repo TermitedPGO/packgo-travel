@@ -77,3 +77,22 @@ server/supplierDetailEnrichmentWorker.ts:99 wireWorkerFunnel(supplierDetailEnric
 - Redis:`ioredis` 連 `UPSTASH_REDIS_URL`(tls `rejectUnauthorized:false`),`hmget llm:stats:*` / `get weeklyAuditMessagesFailedSnapshot`。
 - Queue:`bullmq` `new Queue(name,{connection})` + `getFailedCount()`(prod 無自訂 prefix,預設 `bull`)。
 - 全部 base64 編碼經 `flyctl ssh console -C "sh -lc 'echo <b64> | base64 -d | node'"` 執行,避開引號轉義。
+
+---
+
+## 指揮驗收判定(Fable,2026-07-09)
+
+fresh 驗收員交叉比對派工單七項與本紀錄(程式碼結構引用全部與 repo 實測一致,紀錄非憑空),判定:
+
+- 第 2、6、7 項:簽收。證據完整,grep 行號、deploy-smoke JSON、ledger 核對表都對得上。
+- 第 1 項:簽收,證據由指揮補。ship 原始煙霧輸出在 Jeff 終端,執行者結構上拿不到;指揮持有 Jeff 貼回的 v805 部署輸出原文(七臂全綠 + /health db/redis/stripe/llm 四項 ok),以此簽。
+- 第 3 項:簽收(等效證據)。紅路以 simulate:fail 端點實測(ok:false,前七臂不受影響)+ deploySmoke.test.ts 15 條單測覆蓋 safe-deploy 紅字與 exit code 行為,接受替代,不重跑。
+- 第 4 項:核准降級替代。手動觸發 D1 會寫卡+寫 snapshot 污染首次基線,與「只讀不改」指令直接衝突,執行者選擇正確。補償檢查:下次自然週一 D1 跑完後,抽查 inbox 卡第三段三行計數器有渲染出來(掛入後續走查)。queue 抽 5 支代表接受(同一 code path,逐 queue try/catch 均勻)。
+- 第 5 項:改判 PENDING(原標 PASS 不成立)。48h soak 到期 = 2026-07-11 約 19:00,到期重查 agentMessages 漏斗卡才定案;期間 prod 若自然出現 500 或 worker 失敗,查到卡有落地即可提前結案。
+
+三個非阻塞觀察的裁決:
+1. soak 未滿 = 第 5 項 PENDING,併入 F1 走查或 07-11 單獨探針。
+2. gmail-poll 36 筆 06-17 歷史 failed 佔住累計計數:待 Jeff 授權一次性清理(先 dry-run 列清單再 clean);D1 計數器改「近 N 天」視窗留給後續波次,先以一次性清理止噪。
+3. ledger 行號漂移:接受,枚舉快照特性,靠描述+就近搜尋可定位,不處理。
+
+制度回流:「走查降級自標 PASS」屬 prompt 可防,已回寫 30-templates.md T6 補充條款(替代標記制 + 時間窗 pending 制)。
