@@ -35,7 +35,8 @@ export const ACCOUNTING_CATEGORIES = [
   "expense_software", // 軟體訂閱 — Anthropic API, AWS, Cloudflare, Vercel, GitHub
   "expense_office", // 辦公支出 — legal, accounting, banking fees, supplies, rent
   "expense_travel", // 商務差旅 — Jeff's flights/hotels for site visits / supplier meets
-  "income_booking", // 預訂收入 — Stripe payouts, customer direct payments
+  "income_booking", // 預訂收入 — customer direct payments (Zelle/ACH/Wire/信用卡團費)
+  "stripe_payout", // F1 塊C (2026-07-08) — Stripe 撥款落地(轉撥,非二次收入,見下方說明)
   "transfer", // 內部轉帳 — between own accounts, owner↔company, balance moves
   "refund", // 退款 — customer refund out / chargeback / supplier refund in
   "other_review", // 需 Jeff 確認 — agent couldn't classify with high confidence
@@ -57,7 +58,16 @@ export const CATEGORY_DESCRIPTIONS: Record<AccountingCategory, string> = {
   expense_travel:
     "Jeff 的商務差旅。視察供應商、洽談合作、踏查路線時的機票、住宿、地面交通、餐費。注意:不是客戶旅行!",
   income_booking:
-    "客戶收入。Stripe 撥款進帳、客戶 ACH/Wire 直匯款、Zelle 收款、信用卡刷團費。",
+    "客戶收入。客戶 ACH/Wire 直匯款、Zelle 收款、信用卡刷團費。**不含 Stripe 撥款**(見 stripe_payout)。",
+  // F1 塊C (2026-07-08) 雙計防護:Stripe 把 Checkout 收到的錢撥款進銀行帳戶,
+  // 這筆撥款落地是一筆普通 Plaid 進帳,但這筆錢的「收入」已經在 Stripe
+  // webhook 結帳當下(server/_core/stripeWebhook.ts)寫過一次
+  // accountingEntries(income)/trustDeferredIncome 了——撥款落地絕不能再算
+  //一次收入,否則雙計。舊版 income_booking 描述誤把「Stripe 撥款進帳」列為
+  // 收入範例,這是雙計 bug 的根因(preClassify 之前完全沒有這條規則,LLM
+  // 分類時只能照這段誤導性描述去猜,大機率誤判成 income_booking)。
+  stripe_payout:
+    "Stripe 撥款落地(轉撥,不是收入)。這筆錢的收入已經在 Stripe 結帳當下入帳,撥款進銀行戶只是資金搬運,絕不能再記一次收入。",
   transfer:
     "內部轉帳,不影響損益。Jeff 個人 ↔ 公司、Operating ↔ Trust、信用卡還款、Trust account 內部轉帳。",
   refund:
@@ -124,7 +134,7 @@ export type AccountingAgentInput = {
 // Lets the year-end Schedule C / 1099-NEC export aggregate by type.
 export const COUNTERPARTY_TYPES = [
   "vendor", // 供應商付款 (Lion Travel, AWS, FB Ads, 律師費 etc.)
-  "customer", // 客戶收入 (Stripe payout, ACH inflow, Zelle from customer)
+  "customer", // 客戶收入 (ACH inflow, Zelle from customer — 不含 Stripe payout,那是 transfer)
   "owner", // 業主出入 (Jeff personal ↔ company, owner draw)
   "employee", // 員工 (salary, 1099 contractor payment)
   "refund", // 退款進出 (customer refund out, supplier refund in, chargeback)
@@ -160,8 +170,7 @@ export const TOOL = {
   type: "function" as const,
   function: {
     name: "submit_classification",
-    description:
-      "Submit a classification for one PACK&GO bank transaction. Use the 9 PACK&GO categories.",
+    description: `Submit a classification for one PACK&GO bank transaction. Use the ${ACCOUNTING_CATEGORIES.length} PACK&GO categories.`,
     parameters: {
       type: "object",
       properties: {
@@ -224,7 +233,7 @@ export function buildSystem(): string {
 
 【IRS Schedule C-grade 文件要求】
 每筆都要回:
-1. category (10 個 PACK&GO 類別)
+1. category (${ACCOUNTING_CATEGORIES.length} 個 PACK&GO 類別)
 2. counterparty — 對方乾淨名字。把 Plaid 原始字串清理成可讀名字。
    範例: "AUTHORIZED ON 05/21 VIA WEB ANTHROPIC API" → "Anthropic"
    範例: "TRANSFER TO ACCT #2174 ON 05/21" → "BofA Operating (#2174)"
@@ -234,12 +243,15 @@ ${ctList}
    只用交易上真的看得到的名字/編號/日期,沒看到就別編。範例(佔位符):
    "<客人>團 <目的地> 訂金"、"FB 廣告 美西自由行"、"還信用卡 <卡號末四碼>"
 
-【你 ONLY 從這 10 個 PACK&GO 類別選一個】
+【你 ONLY 從這 ${ACCOUNTING_CATEGORIES.length} 個 PACK&GO 類別選一個】
 ${catList}
 
 【PACK&GO 特定情境】
 - 我們是美西旅行社 (Newark CA),主要客戶來自中國 / 台灣 / 北美華人。
-- 收入幾乎全是 Stripe 撥款 (描述常含 "STRIPE" 或 "TRANSFER STRIPE") 或客戶 Zelle / ACH 直匯。
+- 客戶收入是 Zelle / ACH 直匯團費/訂金。**Stripe 撥款進帳不是收入** —— 那筆錢的
+  收入已經在 Stripe 結帳當下記過一次了,撥款落地只是轉撥,分類是
+  stripe_payout,絕不能再記一次 income_booking(見下面 Stripe 那條,雙計會
+  導致 Jeff 報稅短報)。
 - 主要供應商:LionTravel, Kuoni, 飯店直訂, 包車公司, 當地導遊。
 - 主要 SaaS:Anthropic, OpenAI, AWS, Cloudflare, Vercel, GitHub, Stripe Fees。
 - 行銷:Meta (FB/IG Ads), Google Ads, 小紅書, 微信公眾號代運營。
@@ -248,7 +260,12 @@ ${catList}
   - Credit card outflow: 大多是費用 (expense_*) 或 cogs (cogs_tour)
   - Checking outflow: 可能是 transfer (還信用卡 / 轉 trust)
 - "PAYMENT TO CHASE CARD" / "AUTOPAY" = transfer (還信用卡)。
-- Plaid PFC 只是參考,不要照抄。Plaid 把 Stripe payout 分到 "TRANSFER_IN" 但我們的正確分類是 income_booking。
+- Plaid PFC 只是參考,不要照抄。Plaid 把 Stripe payout 分到 "TRANSFER_IN",我們
+  的正確分類是新的 stripe_payout(轉撥落地,非二次收入),**不是**
+  income_booking —— 規則庫已經攔截大部分含 "stripe" 字樣的撥款描述,不會
+  送到你這裡;如果你看到一筆進帳含 stripe/transfer 字樣但沒被規則庫攔下,
+  不要猜 income_booking,回 other_review 讓 Jeff 確認是不是規則庫漏網的
+  Stripe 撥款。
 - **Jeff 在 BofA 打的備註 (Bank raw line, Payment meta reason) 是最強信號**。如果他寫 "PACKAGE TRIP DEPOSIT" 那就一定是 income_booking;寫 "REFUND TO LIN FAMILY" 就是 refund;寫 "FB AD APR" 就是 expense_marketing。Plaid 自動分類常常錯,但 Jeff 的人工備註幾乎不會錯。memo 出現時直接寫進 purposeNote 給 IRS audit 看。
 - **Zelle / wire / ACH 對方學習**:
   - 如果【歷史分類】有紀錄, 直接套用同個 category(這位是已知對方, 跟過去模式一致)

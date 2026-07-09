@@ -537,7 +537,13 @@ async function findByOrderRef(orderNumber: string): Promise<ExactAmountOrderCand
 }
 
 function buildHaystack(txn: LinkableBankTxn): string {
-  return [txn.merchantName, txn.description, txn.originalDescription]
+  // 2026-07-08 對抗審查(F1 塊C)發現:塊C 的 preClassify haystack 有併入
+  // counterparty 訊號,這裡原本沒有併入 paymentMetaReason(型別已有這欄,
+  // extractOrderRef 也已經在用),導致 stripe_payout 這條 auto-link 規則
+  // 在少數「stripe 字樣只出現在 Zelle memo」的情況會漏抓——不是雙計風險
+  // (漏抓只會多出一張待認領卡讓 Jeff 白忙),但破壞「與塊C 同源」的宣稱,
+  // 順手補齊。
+  return [txn.merchantName, txn.description, txn.originalDescription, txn.paymentMetaReason]
     .map(norm)
     .filter(Boolean)
     .join(" | ");

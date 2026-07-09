@@ -30,6 +30,7 @@ import {
   DollarSign,
   Landmark,
   ArrowDownToLine,
+  ArrowLeftRight,
   Lock,
   AlertTriangle,
   EyeOff,
@@ -371,7 +372,7 @@ export default function ProfitLossV2() {
           <p className="text-xs text-foreground/50 -mt-1 mb-3">
             {t("admin.profitLoss.auditDesc")}
           </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="rounded-lg border border-foreground/10 p-3">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground/70">
                 <Landmark className="w-3.5 h-3.5 text-slate-500" />
@@ -382,6 +383,19 @@ export default function ProfitLossV2() {
               </div>
               <div className="text-[11px] text-foreground/45">
                 {t("admin.profitLoss.ownerCapitalDesc", { count: String(r.transfer.count) })}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-foreground/10 p-3">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground/70">
+                <ArrowLeftRight className="w-3.5 h-3.5 text-violet-500" />
+                {t("admin.profitLoss.stripePayoutTile")}
+              </div>
+              <div className="mt-1 text-base font-bold tabular-nums text-foreground">
+                {fmtSigned(r.stripePayout.total)}
+              </div>
+              <div className="text-[11px] text-foreground/45">
+                {t("admin.profitLoss.stripePayoutDesc", { count: String(r.stripePayout.count) })}
               </div>
             </div>
 

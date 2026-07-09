@@ -1,5 +1,5 @@
 /**
- * Single source of truth for the 10 accounting categories — CLIENT side.
+ * Single source of truth for the 11 accounting categories — CLIENT side.
  *
  * These keys MUST stay identical to the server's canonical list in
  * `server/agents/autonomous/accountingAgent.ts` (ACCOUNTING_CATEGORIES) and the
@@ -11,7 +11,7 @@
  * used to offer an OLD manual-entry taxonomy (tour_booking / supplier_payment /
  * …) plus a free-text "custom" field. bankPLService doesn't recognise those, so
  * every manual override silently dropped out of P&L and the Schedule C tax
- * export. Forcing the dropdown + server validation onto these 10 keys closes
+ * export. Forcing the dropdown + server validation onto these 11 keys closes
  * that hole.
  *
  * Pure constants — NO imports. Server-side tests can import this file directly
@@ -28,7 +28,8 @@ export type AccountingCategoryKey =
   | "expense_travel"
   | "transfer"
   | "refund"
-  | "other_review";
+  | "other_review"
+  | "stripe_payout";
 
 export type CategoryGroup = "income" | "cogs" | "opex" | "other";
 
@@ -54,6 +55,7 @@ export const ACCOUNTING_CATEGORY_CONFIG: readonly CategoryConfig[] = [
   { key: "transfer", group: "other", i18nKey: "catTransfer" },
   { key: "refund", group: "other", i18nKey: "catRefund" },
   { key: "other_review", group: "other", i18nKey: "catOtherReview" },
+  { key: "stripe_payout", group: "other", i18nKey: "catStripePayout" },
 ] as const;
 
 export const ACCOUNTING_CATEGORY_KEYS: readonly AccountingCategoryKey[] =
@@ -72,7 +74,7 @@ export const CATEGORY_GROUP_ORDER: readonly {
 
 const KEY_SET: ReadonlySet<string> = new Set<string>(ACCOUNTING_CATEGORY_KEYS);
 
-/** True when `value` is one of the canonical 10 category keys. */
+/** True when `value` is one of the canonical 11 category keys. */
 export function isAccountingCategory(
   value: string | null | undefined,
 ): value is AccountingCategoryKey {

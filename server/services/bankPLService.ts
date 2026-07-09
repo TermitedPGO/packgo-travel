@@ -14,8 +14,13 @@
  *   expense_travel             → Schedule C Line 24a (Travel)
  *   income_booking             → Schedule C Line 1 (Gross receipts)
  *   refund                     → Schedule C Line 2 (Returns and allowances) — netted
- *   transfer, other_review     → EXCLUDED (transfers are not income/expense;
- *                                other_review surfaces in needsReview list)
+ *   transfer, other_review,
+ *   stripe_payout               → EXCLUDED (transfers are not income/expense;
+ *                                other_review surfaces in needsReview list;
+ *                                stripe_payout is a Stripe payout landing —
+ *                                the income was already recognized at Stripe
+ *                                checkout time, counting it again here would
+ *                                double-count, F1 塊C 2026-07-08)
  *
  * Jeff override priority:
  *   jeffOverrideCategory > agentCategory
@@ -45,6 +50,7 @@ export const SCHEDULE_C_MAP: Record<AccountingCategory, string> = {
   refund: "Line 2 — Returns and allowances",
   transfer: "(excluded — internal transfer)",
   other_review: "(excluded — needs review)",
+  stripe_payout: "(excluded — Stripe payout landing, already counted at checkout)",
 };
 
 const INCOME_CATEGORIES: AccountingCategory[] = ["income_booking"];
@@ -56,7 +62,7 @@ const EXPENSE_CATEGORIES: AccountingCategory[] = [
   "expense_office",
   "expense_travel",
 ];
-const NEUTRAL_CATEGORIES: AccountingCategory[] = ["transfer", "other_review"];
+const NEUTRAL_CATEGORIES: AccountingCategory[] = ["transfer", "other_review", "stripe_payout"];
 const _ALL_KNOWN: AccountingCategory[] = [
   ...INCOME_CATEGORIES,
   ...EXPENSE_CATEGORIES,
@@ -92,6 +98,12 @@ export interface BankPLReport {
    *  (Jeff 2026-05-28:「我自己拿出 不代表公司賺」). Inflow-positive convention:
    *  money IN from owner / other accounts is positive, owner draw is negative. */
   transfer: { total: number; count: number };
+  /** Stripe 撥款落地(轉撥,非收入)——同 transfer 排除出損益,但獨立成自己的
+   *  tile 讓 Jeff 看得到這筆錢去哪了(F1 塊C 2026-07-08 對抗審查 P1 修復:
+   *  原本 stripe_payout 落進 fold 的 if-chain 沒有分支接住,金額靜默消失,
+   *  Jeff 在 P&L UI 上完全看不到,對帳時對不上銀行對帳單)。Inflow-positive
+   *  同 transfer 的符號慣例。 */
+  stripePayout: { total: number; count: number };
   grossProfit: number;
   netProfit: number;
   profitMargin: number;
@@ -230,6 +242,8 @@ export function foldBankPLRows(
   let refunds = 0;
   let transferTotal = 0;
   let transferCount = 0;
+  let stripePayoutTotal = 0;
+  let stripePayoutCount = 0;
   let excludedFromAccounting = 0;
   let uncategorizedCount = 0;
   let needsReviewCount = 0;
@@ -268,6 +282,16 @@ export function foldBankPLRows(
       // transparently in its own tile.
       transferTotal += -amt;
       transferCount++;
+      continue;
+    }
+
+    if (cat === "stripe_payout") {
+      // Stripe 撥款落地 —— 收入已在 Stripe 結帳當下記過一次,這裡只是轉撥
+      // 落地,絕不能再進 income(F1 塊C 雙計防護)。跟 transfer 同待遇排除
+      // 出損益,但獨立計數/加總,讓 Jeff 在 UI 上有專屬 tile 核對撥款金額
+      // (不是靜默丟棄)。
+      stripePayoutTotal += -amt;
+      stripePayoutCount++;
       continue;
     }
 
@@ -321,6 +345,7 @@ export function foldBankPLRows(
     },
     refunds,
     transfer: { total: transferTotal, count: transferCount },
+    stripePayout: { total: stripePayoutTotal, count: stripePayoutCount },
     grossProfit,
     netProfit,
     profitMargin,
@@ -341,6 +366,7 @@ function emptyReport(startDate: string, endDate: string): BankPLReport {
     expenses: { total: 0, cogs: 0, operating: 0, byCategory: {} },
     refunds: 0,
     transfer: { total: 0, count: 0 },
+    stripePayout: { total: 0, count: 0 },
     trustDeferredIncome: 0,
     grossProfit: 0,
     netProfit: 0,
@@ -426,7 +452,10 @@ export async function generateBankMonthlyTrend(opts: {
     const cat = (r.jeffOverrideCategory ?? r.agentCategory) as
       | AccountingCategory
       | null;
-    if (!cat || cat === "transfer" || cat === "other_review") continue;
+    // stripe_payout 明確排除(同 transfer/other_review)——它跟其他類別一樣
+    // 不落入任何 income/cogs/expense 分支,顯式排除比「靠 if-chain 空跑」更
+    // 清楚意圖(F1 塊C 2026-07-08 對抗審查修復)。
+    if (!cat || cat === "transfer" || cat === "other_review" || cat === "stripe_payout") continue;
 
     const d = new Date(String(r.date));
     const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;

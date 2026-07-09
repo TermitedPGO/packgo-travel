@@ -94,6 +94,39 @@ describe("foldBankPLRows — trust deferral (CST §17550)", () => {
   });
 });
 
+describe("foldBankPLRows — stripe_payout (F1 塊C 雙計防護, 2026-07-08)", () => {
+  // 2026-07-08 對抗審查 P1:stripe_payout 原本沒有分支接住,金額靜默消失,
+  // Jeff 在 P&L UI 上完全看不到。這組測試鎖死它有自己的 tile,同時絕不
+  // 進 income/expense/netProfit(跟 transfer 同級的紅線)。
+  const rows: BankPLRowLike[] = [
+    { amount: "-1000", agentCategory: "income_booking" }, // 真收入
+    { amount: "-4200", agentCategory: "stripe_payout" }, // Stripe 撥款落地(進帳)
+    { amount: "-808", jeffOverrideCategory: "stripe_payout" }, // Jeff 手動改標的也算
+    { amount: "300", agentCategory: "cogs_tour" },
+  ];
+
+  it("RED-LINE: stripe_payout 有自己的 tile,金額不會靜默消失", () => {
+    const r = fold(rows);
+    expect(r.stripePayout.total).toBe(5008); // 4200 + 808,inflow-positive
+    expect(r.stripePayout.count).toBe(2);
+  });
+
+  it("RED-LINE: stripe_payout 絕不進 income/expense/netProfit(雙計防護核心)", () => {
+    const r = fold(rows);
+    expect(r.income.total).toBe(1000); // 只有真收入,stripe_payout 沒混進來
+    expect(r.income.byCategory.stripe_payout).toBeUndefined();
+    expect(r.expenses.total).toBe(300);
+    expect(r.grossProfit).toBe(700); // 1000 - 300,不受 5008 撥款影響
+    expect(r.netProfit).toBe(700);
+  });
+
+  it("stripe_payout 不落入 needsReview(不是待審核,是已知的轉撥類別)", () => {
+    const r = fold(rows);
+    expect(r.needsReviewCount).toBe(0);
+    expect(r.uncategorizedCount).toBe(0);
+  });
+});
+
 describe("foldBankPLRows — transfer-only ledger", () => {
   it("a ledger of pure owner transfers yields zero profit, only a transfer tile", () => {
     const r = fold([

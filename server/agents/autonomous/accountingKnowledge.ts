@@ -246,6 +246,7 @@ export interface PreClassifyInput {
 export type PreClassifySource =
   | "owner"
   | "vendor"
+  | "stripe_payout"
   | "wf_card"
   | "card_payoff"
   | "memo"
@@ -406,6 +407,24 @@ export function preClassify(input: PreClassifyInput): PreClassifyResult {
         };
       }
     }
+  }
+
+  // 2c) Stripe 撥款進帳 = 轉帳,絕不 income_booking(F1 塊C 雙計防護,
+  //     2026-07-08)。只在進帳時判斷 —— 出帳側含 "stripe" 是手續費扣款,
+  //     不屬本規則管轄(isStripePayoutInflow 呼叫端契約,見上方 2c 節說明)。
+  //     與塊A(bankTransactionLinkEngine 的 stripe_payout 自動 link 規則)
+  //     共用同一 STRIPE_PAYOUT_DESCRIPTORS/isStripePayoutInflow 來源,防止
+  //     兩塊規則各自維護一份判斷邏輯而漂移。
+  if (isInflow && isStripePayoutInflow(haystack)) {
+    return {
+      category: "stripe_payout",
+      confidence: 95,
+      reason: "Stripe 撥款進帳 — 轉撥落地,收入已在 Stripe 結帳當下記過一次,不可再記",
+      source: "stripe_payout",
+      counterparty: "Stripe",
+      counterpartyType: "transfer",
+      purposeNote: "Stripe 撥款落地 — 資金搬運,非二次收入",
+    };
   }
 
   // 3) Wells Fargo 卡出帳 = 代客訂機票 → cogs_tour。

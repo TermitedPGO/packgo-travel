@@ -1530,6 +1530,41 @@ async function startServer() {
     }
   });
 
+  // F1 對帳引擎 塊C(2026-07-08)— 雙計防護存量回填:掃描歷史積壓入帳中「已被
+  // 分類成 income_booking 但 descriptor 像 Stripe 撥款」的疑似雙計筆數。dry_run
+  // 只回報數字(進 T6),confirm 才真的把 jeffOverrideCategory 改標成
+  // stripe_payout。同 LOCAL_SCRIPT_TOKEN + dry_run/confirm 慣例,回應本身就是
+  // 報表。
+  // POST /api/admin/backfill-stripe-payout-declassify
+  //   Body: { mode:"dry_run"|"confirm", limit?: number }
+  app.post("/api/admin/backfill-stripe-payout-declassify", async (req, res) => {
+    try {
+      const ip = await verifyInternalAuth(req, res, {
+        tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
+        rateLimitKey: "backfill-stripe-payout-declassify",
+        rateLimitMax: 30,
+        windowSec: 3600,
+      });
+      if (!ip) return;
+      const { mode, limit } = req.body || {};
+      if (mode !== "dry_run" && mode !== "confirm") {
+        return res.status(400).json({ error: "mode must be 'dry_run' or 'confirm'" });
+      }
+      const parsedLimit = typeof limit === "number" && Number.isFinite(limit) && limit > 0 ? limit : undefined;
+      const { runStripePayoutProbeDryRun, runStripePayoutProbeConfirm } = await import(
+        "../services/stripePayoutDeclassifyBackfill"
+      );
+      const result =
+        mode === "dry_run"
+          ? await runStripePayoutProbeDryRun({ limit: parsedLimit })
+          : await runStripePayoutProbeConfirm({ limit: parsedLimit });
+      return res.json(result);
+    } catch (err) {
+      logger.error({ err }, "[admin/backfill-stripe-payout-declassify] error");
+      return res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   // 批十一 塊C — 案件對話進場:來源/ 的對話候選檔(.txt/.md)逐檔餵既有 chatLogImport 管線
   // (classifier 判斷是否對話、resolveEventDate 未來日期一律不建、認人守門、(content,分鐘)去重
   // 全沿用)。dry_run 只 classify+build 預覽不寫。POST /api/admin/import-case-conversations

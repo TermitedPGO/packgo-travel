@@ -53,6 +53,7 @@ function makeBankPL(overrides: Partial<BankPLReport> = {}): BankPLReport {
     expenses: { total: 5000, cogs: 3000, operating: 2000, byCategory: {} },
     refunds: 0,
     transfer: { total: 0, count: 0 },
+    stripePayout: { total: 0, count: 0 },
     grossProfit: 5000,
     netProfit: 5000,
     profitMargin: 50,

@@ -341,3 +341,247 @@ UNION/OR 條件涵蓋 linkedAccountId=0)。
   來源),不是靠新的 DB 整合測試證明——這兩支本來就是 DB-touching、本地無
   DATABASE_URL、既有慣例本來就不測(見塊A 已知限制
   的同一套理由)。
+
+## 塊C:雙計防護(Stripe payout 識別)
+
+**狀態:實作完成,tsc/vitest/i18n 已綠,尚未送對抗審查/commit。**
+
+零 migration(dispatch 硬性規定全批 migration 只有塊A 一張)——本塊只動
+TS 列舉/陣列/i18n key,不動 schema。`agentCategory`/`jeffOverrideCategory`
+在資料庫是 varchar,不是真 SQL enum,所以新增分類值不需要 migration。
+
+### 交付清單
+
+1. `server/agents/autonomous/accountingKnowledge.ts` —preClassify() 新增
+   規則「2c」:進帳(amount<0)且 `isStripePayoutInflow(haystack)` 命中 →
+   `category:"stripe_payout"`,`confidence:95`,`source:"stripe_payout"`
+   (`PreClassifySource` 型別新增這個值)。`isStripePayoutInflow`/
+   `STRIPE_PAYOUT_DESCRIPTORS` 本身是塊A 已建好的共用來源,本塊只是把它
+   接進 preClassify 的規則鏈——之前只有函式存在,沒有規則分支呼叫它。
+2. `server/agents/autonomous/accountingAgent.ts` — `ACCOUNTING_CATEGORIES`
+   新增第 11 個值 `"stripe_payout"`;`CATEGORY_DESCRIPTIONS` 新增對應說明,
+   並修正 `income_booking` 舊描述裡誤把「Stripe 撥款進帳」列為收入範例的
+   錯誤措辭(這正是雙計 bug 的根因之一——preClassify 之前完全沒有攔截
+   規則,LLM 分類全靠這段誤導性描述去猜)。
+3. `server/services/bankPLService.ts` — `SCHEDULE_C_MAP` 新增
+   `stripe_payout: "(excluded — Stripe payout landing, already counted at
+   checkout)"`;`NEUTRAL_CATEGORIES` 加入 `stripe_payout`(排除稅表計算,
+   跟 `transfer`/`other_review` 同待遇)。
+4. `client/src/lib/accountingCategories.ts` — `AccountingCategoryKey` 型別
+   +`ACCOUNTING_CATEGORY_CONFIG` 新增 `{key:"stripe_payout", group:"other",
+   i18nKey:"catStripePayout"}`。
+5. `client/src/i18n/zh-TW.ts` / `en.ts` — `admin.bankLedgerTab` 新增
+   `catStripePayout` key(zh:「Stripe 撥款(轉撥)」/ en:「Stripe payout
+   (transfer)」)。
+6. `server/accountingCategories.test.ts`(**既有測試,本批修改**)—
+   「M1 keystone guard」的 `exactly 10 categories` 斷言改成 11(taxonomy
+   從 10 類擴充到 11 類是本塊的明確目的,不是誤破既有測試)。
+7. `server/services/stripePayoutDeclassifyBackfill.ts`(新檔)— 存量回填
+   探針:`runStripePayoutProbeDryRun`/`runStripePayoutProbeConfirm` +
+   純函式 `buildStripePayoutDeclassifyReport`。掃描條件:入帳
+   (`amount<0`)、未被排除(`excludeFromAccounting=0`)、effective category
+   (`jeffOverrideCategory` 優先,否則 `agentCategory`)= `income_booking`、
+   且 `isStripePayoutInflow` 命中。dry_run 只回報 `totalMisclassified`/
+   `totalAmount`/樣本清單(截斷至 200 筆,`totalMisclassified` 數字不受
+   截斷影響);confirm 把符合列的 `jeffOverrideCategory` 改成
+   `"stripe_payout"`,`jeffOverrideReason` 寫入固定留痕字串,`agentCategory`
+   維持原值不覆寫(比照既有 `bulkCategorize` 慣例,見下方偏離申報)。
+8. `server/_core/index.ts` — 新路由
+   `POST /api/admin/backfill-stripe-payout-declassify`,
+   `{mode:"dry_run"|"confirm", limit?}`,LOCAL_SCRIPT_TOKEN 驗證,同塊A
+   backfill 端點慣例(回應本身就是報表)。
+9. 測試:
+   - `server/agents/autonomous/accountingKnowledge.test.ts` 新增
+     `describe("preClassify — stripe_payout 分支")`4 個案例:Stripe 撥款
+     進帳→`stripe_payout`(綠)、真客人 Zelle 進帳不受影響(紅)、出帳側含
+     stripe(手續費)不套用本規則、與 memo 提示分支不衝突。
+   - `server/services/stripePayoutDeclassifyBackfill.test.ts`(新檔)3 個
+     案例測 `buildStripePayoutDeclassifyReport`(空輸入歸零、金額加總、
+     200 筆截斷）。`scanMisclassified`/dry_run/confirm 本體是 DB-touching,
+     本地無 DATABASE_URL 測不到,誠實列為已知限制(同塊A/塊B 慣例）。
+
+### 自測證據(commit 前重跑)
+
+```
+tsc --noEmit: 0 錯
+pnpm vitest run: Test Files  318 passed | 11 skipped (329)
+                 Tests  4688 passed | 90 skipped (4778)
+pnpm i18n:parity: en 7683 keys │ missing 0 │ extra 0
+                  ✓ 100% parity, 0 hardcoded patterns. Ship it.
+```
+
+### 偏離申報(dispatch 未點名細節,執行者決定)
+
+1. **file:line 錨點漂移**:dispatch 寫「preClassify(accountingKnowledge.ts:308)」,
+   但本 session 開工時該行實際落在 `isStripePayoutInflow`/`hasWord`
+   輔助函式區(302-317),`preClassify` 函式本體開頭在 338 行——塊A 已先
+   在檔案中插入大段共用規則(含這兩支輔助函式跟一大段解釋註解),把行號
+   往後推了。以實際程式碼為準,插入點選在 preClassify 內部「規則 2b」
+   (已知旅遊 vendor 退款進帳)之後、「規則 3」(Wells Fargo 卡出帳)之前,
+   延續塊A 已經寫好、標號「2c」的註解區塊(該註解本身已預告塊C 會在這裡接
+   規則)。
+2. **信心值 95,非既有 vendor 規則的 90**:Stripe payout 判斷只靠單一
+   token(`hasWord` 對 "stripe" 的完整單字比對,已通過對抗審查驗證不誤傷
+   "stripeman"/"mystripe" 等子字串),比對明確度不輸「業主本人」規則
+   (也是 95),高於「已知供應商」類規則(90,可能有多 vendor 別名歧義)。
+   選 95 是執行者判斷,dispatch 未指定數字。
+3. **confirm 模式覆寫對象是 `jeffOverrideCategory`,不動 `agentCategory`**:
+   比照 `plaidRouter.ts` 既有 `bulkCategorize` mutation 的寫法(只寫
+   override 欄位 + reason,不動 AI 原始判斷欄位,讓 `agentCategory` 保留
+   歷史紀錄)。**風險揭露**:如果某筆歷史 Stripe payout 是 Jeff 手動
+   override 成 `income_booking`(不是 AI 誤判,是 Jeff 自己標的),confirm
+   仍會覆寫它——因為 dispatch 定義的「疑似雙計」範圍是 effective category
+   (override 優先),沒有排除「人工已確認」的情況。這條 confirm 端點只能
+   靠 Jeff 自己手動呼叫(LOCAL_SCRIPT_TOKEN,等同 Jeff 本人執行),且
+   dry_run 報表會先給 Jeff 看過數字才決定要不要 confirm,不是 AI 自動跑;
+   但如果 Jeff 之前是「明知是 Stripe 撥款、但故意標成 income_booking」的
+   特殊案例(目前找不到會這樣做的理由,但不能完全排除),這支會誤改。
+   T6 會把這條列為驗收前 Jeff 需要知道的風險點。
+4. **未呼叫 `_core/auditLog.ts` 的 `audit()`**:讀過該函式後確認它硬性
+   要求 `ctx.user`(admin 已登入 context),沒有就只 `log.warn` 然後靜默
+   return——LOCAL_SCRIPT_TOKEN 端點沒有這個 context,呼叫了等於沒留痕
+   但看起來像有。改用 `jeffOverrideReason` 欄位本身當留痕(比照
+   `bulkCategorize` 既有慣例)+ 結構化 `logger.info`(比照塊A backfill 的
+   既有慣例),鐵律五(留痕)用這個方式滿足,不是進 `adminAuditLog` 表。
+5. **未建 approval card**:block A 存量回填 confirm 完會建一張聚合卡通知
+   Jeff;塊C 的 dispatch 原文只要求「dry_run 先回報...confirm 才改標」,
+   沒有提到要出卡通知——本批解讀為塊C 是資料修正動作(改分類標籤),不是
+   需要 Jeff 逐筆認領的新事項,所以沒建卡。如果 Fable 認為 confirm 動作
+   也該留一張通知卡,是可以補的小改動,執行者先不假設。
+
+### 對抗審查結果與修復(3 路 fresh:correctness / double_count_guard / test_and_scope)
+
+三路平行審查 + 一路 synthesis 去重排序(dispatch 塊C 未要求 opus,只有塊B
+點名)。結論:核心規則(preClassify 的 stripe_payout 分支、NEUTRAL_CATEGORIES
+排除)本身寫得對,但「雙計防護的退路」沒補完——以下逐條列出發現與修復。
+
+**P0(commit 前必修,已修復)**
+
+1. **`buildSystem()` 的 LLM system prompt 仍教「Stripe 撥款 = income_booking」**
+   —— 2/3 路獨立發現(correctness 標 P1、double_count_guard 標 P0)。
+   `accountingAgent.ts:252`/`:261` 是自由文字,`preClassify` 的確定性規則沒
+   命中時會退回 LLM,LLM 讀的正是這段矛盾指令——遇到不含 "stripe" 字樣的
+   簡化 descriptor(規則庫的已知限制,見下方 P1 #2)會原地重現雙計。**修復**:
+   改寫兩處文字(不再暗示「收入幾乎全是 Stripe 撥款」,明確教「Plaid 把
+   Stripe payout 分到 TRANSFER_IN,正確分類是 stripe_payout,沒被規則庫攔下
+   就回 other_review 不要猜 income_booking」);「10 個類別」/「9 個類別」的
+   寫死數字全部改成 `${ACCOUNTING_CATEGORIES.length}` 動態插值(TOOL 描述+
+   兩處 buildSystem 文字);新增 `accountingAgent.test.ts` 的
+   `describe("buildSystem — prompt hygiene guard")` 3 個測試,鎖死
+   「Stripe payout」與「income_booking」不會同時出現在教 LLM 的語境裡,
+   仿 repo 既有 `aafb7ef` commit 的 prompt-hygiene 守門測試先例。
+
+**P1(commit 前必修,已修復)**
+
+2. **`scanMisclassified` 的 haystack 缺 `paymentMeta`,跟 live preClassify 不
+   同源**—— 3/3 路一致發現(correctness 標 P2、double_count_guard Q5 答覆
+   時發現、test_and_scope 標 P1 並用具體情境驗證)。live path
+   (`accountingAgentService.ts:108-114`)的 `counterparty` 來自
+   `paymentMeta.payee/payer`,回填掃描原本完全沒撈這欄,dry_run 數字系統性
+   低估。**修復**:`scanMisclassified` 的 SELECT 加入 `paymentMeta`,依同樣
+   `payee || payer` 邏輯併入 haystack;補 4 個 mock-DB 測試鎖住這條路徑
+   (`describe("runStripePayoutProbeDryRun — paymentMeta payee/payer 併入
+   haystack")`)。
+3. **`bankPLService.ts` 的 `foldBankPLRows`/`generateBankMonthlyTrend` 沒有
+   `stripe_payout` 分支,金額靜默消失**—— 1/3 路發現(correctness),論證
+   扎實(逐行追 if-chain 證明無分支命中)且後果嚴重:雖然正確排除出損益
+   (雙計防護達標),但 Jeff 在 P&L UI 上完全看不到這筆錢,對帳時對不上銀行
+   對帳單。**修復**:`foldBankPLRows` 新增 `stripe_payout` 分支(仿 `transfer`
+   給獨立 `stripePayout: {total, count}` tile);`generateBankMonthlyTrend`
+   的 skip guard 顯式排除;`BankPLReport` 介面+`emptyReport()`+
+   `financeAlertProducer.test.ts` 的 `makeBankPL` 全部同步補欄位;
+   `ProfitLossV2.tsx` 的「不計入損益」callout 區塊新增第 3 個 tile(grid 從
+   2 欄改 3 欄,6 個 tile 剛好排滿兩列,i18n `stripePayoutTile`/
+   `stripePayoutDesc` 兩地新增);`bankPLService.test.ts` 新增 3 個
+   RED-LINE 測試鎖死「有自己的 tile」+「絕不進 income/expense/netProfit」。
+4. **confirm 回填會靜默覆寫 Jeff 手動的 `jeffOverrideCategory`**—— 1/3 路
+   發現(double_count_guard),執行者自己在初版也已在偏離申報承認是已知
+   缺口。**修復(採「折衷版」,審查建議的兩個選項之一)**:`scanMisclassified`
+   回傳的每筆候選新增 `isHumanOverridden` 欄位(`jeffOverrideCategory`
+   非空字串即為 true);報表分兩桶——`autoEligibleCount/Amount`(AI 判斷、
+   Jeff 從未動過的,confirm 會改標)與 `humanOverriddenCount/Amount`
+   (Jeff 已手動設過 income_booking 的,只回報數字,confirm **絕不觸碰**)。
+   `runStripePayoutProbeConfirm` 只對 autoEligible 桶的 id 執行 UPDATE。
+   3 個 mock-DB 測試鎖死:全 autoEligible → update 呼叫一次;全
+   humanOverridden → update 完全不呼叫、updatedCount=0;混合桶 → 只有
+   autoEligible 那筆被改。
+5. **`accountingKnowledge.test.ts`「紅」案例斷言太弱,mutation test 證明
+   會放行真實回歸**—— 1/3 路發現(test_and_scope),附可重現證據:把
+   `MEMO_HINTS` 的 `"tour deposit"` token 拿掉(模擬讓真實客人收入掉出
+   正確分類的回歸),14 個測試全部照樣 PASS。原斷言只寫
+   `expect(r.category).not.toBe("stripe_payout")`,沒證明「真的還是
+   income_booking」。**修復**:改成
+   `expect(r.category).toBe("income_booking")` +
+   `expect(r.source).toBe("memo")`;順手把 descriptor 從借用
+   `KNOWN_OUTFLOW_VENDORS`「Ann(中國簽證 vendor)」出帳字串換成乾淨的
+   客人 Zelle 格式(P2 #10 一併處理,審查者也點出語意混淆問題)。
+6. **`scanMisclassified` 零測試覆蓋 DB 邏輯,「本地無 DATABASE_URL」理由
+   站不住腳**—— 1/3 路發現(test_and_scope),附具體反證:repo 已有
+   `stripeWebhook.refunds.test.ts:243-244` 這類用 `vi.mock("../db", () =>
+   ({getDb: vi.fn(...)}))` 在沒有真實 DB 時測 DB-touching orchestration 的
+   既有慣例,塊A/塊C 都沒嘗試。**修復**:補 7 個 mock-DB 測試(dry_run 4 個
+   + confirm 3 個,見上方 #2/#4),誠實揭露範圍——mock 的
+   `.where()`/`.orderBy()`/`.limit()` 不會真的解析 drizzle SQL 條件樹,
+   fixture 直接提供「假設 SQL WHERE 已篩過」的列,測的是 scanMisclassified
+   收到 DB 列之後的 JS 後處理邏輯,不是 SQL WHERE 文字本身(CASE WHEN
+   優先權/exclude 篩選邏輯簡單,仍是人工 review 保證,測試檔頂端註解已
+   如實寫明)。
+
+**P2(commit 前一併處理,低風險/低成本)**
+
+7. **`bankTransactionLinkEngine.ts`(塊A 已 commit 檔案)的 `buildHaystack`
+   缺 `paymentMetaReason`,跟塊C 的 preClassify haystack 不對稱**—— 1/3 路
+   發現(double_count_guard)。這是**跨塊觸碰**:`LinkableBankTxn` 型別
+   其實已有 `paymentMetaReason` 欄位(`extractOrderRef` 已在用),只是
+   `buildHaystack`(供 stripe_payout auto-link 規則用)沒有併入。不是雙計
+   風險(漏抓只會多出一張待認領卡讓 Jeff 白忙),但破壞「與塊C 同源」的
+   宣稱。**修復**:一行加入 `txn.paymentMetaReason`,重跑塊A 既有 27 個
+   測試全綠(沒有動到型別或呼叫端,單純多一個 haystack 輸入源)。完整
+   payee/payer 級別的深度整合(型別加欄位+呼叫端 plumbing)留作已知
+   殘餘差距,不在本次順手修復範圍。
+8. `accountingAgent.ts:237`/`:247` 的「10 個類別」字樣同步(併入 P0 #1 一起
+   改)。
+9. `accountingCategories.ts` 註解殘留「10 keys」字樣(頂端已改 11,下方
+   M1 說明+`isAccountingCategory` 函式註解沒同步)——已同步成 11。
+10. `accountingKnowledge.test.ts` 紅例 descriptor 借用 vendor 出帳字串
+    (併入 P1 #5 一起改)。
+11. `stripePayoutDeclassifyBackfill.test.ts` 缺「剛好 200 筆」邊界測試
+    (兩路審查對此結論矛盾,人工核對後確認 test_and_scope 是對的,原本
+    只測 250 筆超過上限這一側)——已補上。
+
+**未修復(操作面限制,無法用程式碼解決,已寫進 T6)**
+
+12. **塊A、塊C 兩支存量回填是獨立端點,沒有機制保證兩個都會被跑**——
+    `bankPLService`(真正決定 P&L/報稅數字的地方)只讀
+    `bankTransactions.agentCategory`/`jeffOverrideCategory`,不讀
+    `bankTransactionLinks`。若 Jeff 只跑了塊A 的 confirm,`bankTransactionLinks`
+    顯示正確但 `bankTransactions` 的分類沒被塊C 改到,`bankPLService` 的
+    數字依然雙計。這不是程式碼 bug,是兩支獨立端點的操作順序依賴——T6
+    會明確提醒兩支都要各自 confirm 過,順序不重要但缺一不可。
+
+### 自測證據(對抗審查修復後、commit 前重跑)
+
+```
+tsc --noEmit: 0 錯
+pnpm vitest run: Test Files  318 passed | 11 skipped (329)
+                 Tests  4703 passed | 90 skipped (4793)
+pnpm i18n:parity: en 7685 keys │ missing 0 │ extra 0
+                  ✓ 100% parity, 0 hardcoded patterns. Ship it.
+```
+
+### 已知限制
+
+- 探針數字(存量中疑似雙計筆數,dry_run 的 `totalMisclassified`/
+  `autoEligibleCount`/`humanOverriddenCount`)需要 prod 跑 dry_run 才有真
+  數字——本地無 DATABASE_URL,無法在本 session 內產生真實探針結果,T6 會
+  誠實列出這個限制,建議 ship 後由 Jeff/下一個 session 實際跑一次 dry_run
+  並把數字回填進 T6。
+- `ProfitLossV2.tsx` 新增的 `stripePayout` tile 因本地無 DATABASE_URL +
+  無法通過 admin 登入(同一限制),無法在本 session 內實際截圖驗證渲染
+  結果;已用 tsc(型別/JSX 結構正確)+ 比照同一 grid 內其餘 4 個 tile 的
+  完全相同 pattern(rounded-lg border/icon/文字大小)手動核對一致性,視覺
+  驗證留給 ship 後走查清單第 3 項(dispatch 原文已要求「FinanceReports
+  待認領區塊截圖」,可以順便一併截這個新 tile)。
+- `bankTransactionLinkEngine.ts` 的 haystack 對稱性只補了
+  `paymentMetaReason`,payee/payer 級別的深度整合(型別加欄位+呼叫端
+  plumbing)留作已知殘餘差距,見上方 P2 #7。
