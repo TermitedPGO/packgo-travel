@@ -59,3 +59,16 @@
 3. 紅路演練 x2:壞 SQL 條目擋閘(截輸出)、未登記 sql`` 測試紅(截輸出)。
 4. 通道腳本一路 fresh 對抗審查(安全視角:注入、寫繞過、多語句),PASS 才收。
 5. 回寫 progress.md + 本檔補實際數字。commit 訊息 `feat(hardening): wave2 <塊>`。
+
+## 偵察補遺(2026-07-09,指揮)
+
+執行模型改派 opus 4.8(Jeff 裁定)。補以下錨點與細則:
+
+1. 閘位錨點:safe-deploy.mjs 現閘位於 L87/93/99/120/130/146/159。彩排閘插在 L146 vitest 閘完成之後、L159 token 閘之前。
+2. toSQL 形狀斷言先例:`server/routers/adminCustomers.test.ts`(ORDER BY 關聯子查詢事故後補的守門),塊A 產條目與塊C 寫測試前先讀它。
+3. ESCAPE 事故的完整考古就在 repo:`server/_core/caseFileImport.ts:243-254`(LIKE_ESCAPE_CHAR="!" 與反斜線行為差異的註解)。現存 ESCAPE 活體:`caseDocumentImport.ts:225`、`caseLessonHarvest.ts:180`。這兩處是登記表必收的高危條目。
+4. `db.execute(` 直呼共 10 處(指揮已量),全數盤進 A/B/C 分類。
+5. 登記表存「裸語句」(以 SELECT/UPDATE/... 開頭),EXPLAIN 前綴由彩排腳本統一加。腳本必須拒絕以 EXPLAIN 開頭的條目(防有人登 EXPLAIN ANALYZE 進來;ANALYZE 會真執行,絕對禁止)。
+6. toSQL 採收技巧:mysql2 createPool 是懶連線,測試/腳本裡建 pool 給 drizzle 而只呼 .toSQL() 不會真連 DB。查詢嵌太深的允許手抄,條目標 handWritten: true。
+7. 佔位符代入用 sqlstring(mysql2 內建依賴)的 format/escape,客戶端代入後成完整字面語句再送。
+8. 順手活細則:gmail-poll 36 筆歷史 failed 清理是本批唯一允許的 prod 寫操作,且分兩段 — 先 dry-run 列清單(job id、時間、錯誤摘要)貼給 Jeff,他點頭才 job.remove(),不點頭不動。D1 queue failed 行改近 7 天口徑:observabilityCounters.ts 改用 getFailed() 取回後按 finishedOn >= now-7d 過濾計數,單 queue 上限取 500 筆防爆,讀不到照舊顯示 "?"。
