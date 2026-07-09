@@ -65,6 +65,11 @@
   歷史行銷噪音卡放進列表、徽章 99+,隔天回爐兩輪。指揮側寫 spec 時就要點名這條,不是等審查抓。
   這是 hardening Wave 2「EXPLAIN 彩排自動化」要接管的事;至 2026-07-07 已是第四口(前三:0112 migration
   breakpoint、raw sql<Date> naive 字串、秒級截斷、本條 ORDER BY 關聯子查詢)。
+- 非同步斷言禁固定等待:測試裡凡斷言 fire-and-forget 副作用(事件後補寫 DB、queue 回寫、微任務鏈),
+  一律 vi.waitFor 輪詢正向斷言,禁 setTimeout(0)/固定 sleep(負向斷言「不該發生」維持固定等待);
+  新增此類測試要單檔連跑 5 次證穩才算交付。2026-07-09 實案:errorFunnel count 回寫測試用
+  setTimeout(0),高負載間歇紅,擋 ship 一次、擋 push 兩次;2026-07-03 stripeWebhook.bookings
+  同類已修過一次,第二口立為通則。單獨跑會綠、全套並行才紅,是這類雷的招牌症狀。
 
 驗收條件(逐條驗,附證據):
 - tsc --noEmit 0 錯(OOM 時 NODE_OPTIONS="--max-old-space-size=6144")
