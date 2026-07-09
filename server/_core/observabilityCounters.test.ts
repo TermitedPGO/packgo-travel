@@ -33,13 +33,29 @@ vi.mock("../redis", () => ({
 // queue-definition module is stubbed empty EXCEPT supplierSyncQueue, whose
 // factory deliberately throws — proving one module's import failure never
 // blocks the other modules' queues from being collected.
-const fakeGoodQueueGetFailedCount = vi.fn().mockResolvedValue(3);
-const fakeZeroQueueGetFailedCount = vi.fn().mockResolvedValue(0);
-const fakeBadQueueGetFailedCount = vi.fn().mockRejectedValue(new Error("redis down for this one queue"));
+//
+// 近 7 天口徑:mock 的是 getFailed(start,end)(回 job 本體帶 finishedOn),不是
+// getFailedCount()。固定 now = 2026-07-09;recent = 近 7 天內、old = 30 天前。
+const TEST_NOW = new Date("2026-07-09T00:00:00Z");
+const RECENT = TEST_NOW.getTime() - 1 * 24 * 60 * 60 * 1000; // 1 天前(窗內)
+const OLD = TEST_NOW.getTime() - 30 * 24 * 60 * 60 * 1000; // 30 天前(窗外,如 gmail-poll 6/17 殘留)
+// fake-good-queue:3 筆近期 + 2 筆舊殘留 → 近 7 天口徑只該數到 3(舊的被濾掉)。
+const fakeGoodQueueGetFailed = vi
+  .fn()
+  .mockResolvedValue([
+    { finishedOn: RECENT },
+    { finishedOn: RECENT },
+    { finishedOn: RECENT },
+    { finishedOn: OLD },
+    { finishedOn: OLD },
+  ]);
+// fake-zero-queue:只有舊殘留(模擬 gmail-poll:36 筆全是 6/17 的舊 failed)→ 近 7 天口徑=0,假警告消。
+const fakeZeroQueueGetFailed = vi.fn().mockResolvedValue([{ finishedOn: OLD }, { finishedOn: OLD }]);
+const fakeBadQueueGetFailed = vi.fn().mockRejectedValue(new Error("redis down for this one queue"));
 vi.mock("../queue", () => ({
-  fakeGoodQueue: { name: "fake-good-queue", getFailedCount: (...a: unknown[]) => fakeGoodQueueGetFailedCount(...a) },
-  fakeZeroQueue: { name: "fake-zero-queue", getFailedCount: (...a: unknown[]) => fakeZeroQueueGetFailedCount(...a) },
-  fakeBadQueue: { name: "fake-bad-queue", getFailedCount: (...a: unknown[]) => fakeBadQueueGetFailedCount(...a) },
+  fakeGoodQueue: { name: "fake-good-queue", getFailed: (...a: unknown[]) => fakeGoodQueueGetFailed(...a) },
+  fakeZeroQueue: { name: "fake-zero-queue", getFailed: (...a: unknown[]) => fakeZeroQueueGetFailed(...a) },
+  fakeBadQueue: { name: "fake-bad-queue", getFailed: (...a: unknown[]) => fakeBadQueueGetFailed(...a) },
   someUnrelatedExport: "not a queue — isQueueLike() must ignore this",
 }));
 vi.mock("../queues/abandonmentRecoveryQueue", () => ({}));
@@ -119,28 +135,42 @@ describe("gatherMessagesFailedWeeklyDelta", () => {
   });
 });
 
-describe("gatherQueueFailedCounts", () => {
-  it("collects .getFailedCount() from every Queue-like export across modules, independently per queue AND per module — never throws", async () => {
-    const results = await gatherQueueFailedCounts();
+describe("gatherQueueFailedCounts (近 7 天口徑)", () => {
+  it("只數 finishedOn 落在近 7 天內的 failed job — 舊殘留被濾掉;per-queue / per-module 獨立 try/catch,never throws", async () => {
+    const results = await gatherQueueFailedCounts(TEST_NOW);
     const byName = Object.fromEntries(results.map((r) => [r.queueName, r.failed]));
 
+    // fake-good:3 近期 + 2 舊 → 只數到 3(舊的在窗外)。
     expect(byName["fake-good-queue"]).toBe(3);
+    // fake-zero:全是舊殘留(gmail-poll 6/17 那類)→ 近 7 天=0,不再是永久假警告。
     expect(byName["fake-zero-queue"]).toBe(0);
-    // This one queue's own getFailedCount() rejected — it's null (an
-    // explicit "couldn't check"), not silently dropped and not a thrown
-    // error propagating out of gatherQueueFailedCounts.
+    // 這個 queue 自己的 getFailed() rejected → null(明確「沒讀到」),不是被吞、也不是 throw 出去。
     expect(byName["fake-bad-queue"]).toBeNull();
-    // The non-Queue export from "../queue" must never be treated as a queue.
+    // "../queue" 的非 Queue export 不該被當 queue。
     expect(Object.keys(byName)).not.toContain("someUnrelatedExport");
-    // supplierSyncQueue's module import itself rejected; its (mocked-empty)
-    // module contributes zero queues, and — crucially — that failure does
-    // NOT prevent the three queues above (from a DIFFERENT, successfully
-    // loaded module) from being collected.
+    // supplierSyncQueue 模組載入自己 reject;它(mock 空)貢獻 0 個 queue,且不擋上面三個
+    // (來自另一個成功載入的模組)被收集。
     expect(results).toHaveLength(3);
   });
 
+  it("單 queue 掃描上限 500(getFailed 以 (0, 499) 呼叫,防 failed 集合爆量)", async () => {
+    await gatherQueueFailedCounts(TEST_NOW);
+    expect(fakeGoodQueueGetFailed).toHaveBeenCalledWith(0, 499);
+  });
+
+  it("finishedOn 缺失 / 非數字的 job 不計入(只認明確落在窗內的 finishedOn)", async () => {
+    fakeGoodQueueGetFailed.mockResolvedValueOnce([
+      { finishedOn: RECENT }, // 計
+      { finishedOn: OLD }, // 不計(窗外)
+      { finishedOn: null }, // 不計(缺)
+      {}, // 不計(缺)
+    ]);
+    const results = await gatherQueueFailedCounts(TEST_NOW);
+    expect(results.find((r) => r.queueName === "fake-good-queue")?.failed).toBe(1);
+  });
+
   it("queueName is the actual BullMQ queue name (the .name property), never a source-level variable name", async () => {
-    const results = await gatherQueueFailedCounts();
+    const results = await gatherQueueFailedCounts(TEST_NOW);
     expect(results.some((r) => r.queueName === "fake-good-queue")).toBe(true);
     expect(results.some((r) => r.queueName === "fakeGoodQueue")).toBe(false);
   });

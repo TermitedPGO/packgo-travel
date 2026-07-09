@@ -155,6 +155,39 @@ async function guardInner(deps, opts) {
     ok("tests passed");
   }
 
+  // 6.5 — ship 前 SQL 彩排(對 prod TiDB 逐條 EXPLAIN,擋 raw-SQL parse/resolution 錯)。
+  //   唯讀:flyctl ssh + base64 node、READ ONLY session、不新增 HTTP 端點。詳見
+  //   scripts/sqlRehearsalGate.ts 與 server/_core/sqlRehearsal/。fail-closed:EXPLAIN 有錯
+  //   或通道失敗都擋,通道失敗附逃生口。編號 6.5 是為了不動既有七閘語義(派工單硬性)。
+  log("[6.5/7] SQL 彩排(prod TiDB EXPLAIN — 登記表逐條 parse/resolution)");
+  if (env.SKIP_SQL_REHEARSAL === "1") {
+    log("  ⚠ skipped (SKIP_SQL_REHEARSAL=1) — 這次部署沒做 raw-SQL parse 檢查(operator 自行判斷)");
+  } else {
+    let reh;
+    try {
+      reh = await deps.rehearse();
+    } catch (e) {
+      return fail(
+        `SQL 彩排啟動失敗 — ${short(e)}\n` +
+          `   逃生口:SKIP_SQL_REHEARSAL=1 pnpm ship(略過 SQL 彩排;此次不做 parse 檢查,風險自負)`,
+      );
+    }
+    if (reh && reh.channelError) {
+      return fail(
+        `SQL 彩排通道失敗:${reh.channelError}\n` +
+          `   逃生口:SKIP_SQL_REHEARSAL=1 pnpm ship(略過 SQL 彩排;風險自負)`,
+      );
+    }
+    if (!reh || !reh.ok) {
+      const fails = (reh && reh.failures) || [];
+      const lines = fails.map((f) => `      ✗ ${f.key}  (${f.source})  ${f.error}`).join("\n");
+      return fail(
+        `SQL 彩排發現 ${fails.length} 條 EXPLAIN 失敗(parse/resolution)— 修正後再部署:\n${lines}`,
+      );
+    }
+    ok(`SQL 彩排通過(${reh.passed}/${reh.total} 條 EXPLAIN-clean on prod TiDB)`);
+  }
+
   // 7. human authorization lock — the part a session cannot fabricate
   log("[7/7] human authorization lock (.deploy-approve must equal env DEPLOY_TOKEN)");
   const raw = deps.readApprove();
@@ -296,6 +329,28 @@ function makeRealDeps() {
       }
     },
     health: () => JSON.parse(String(run(`curl -s -m 20 ${HEALTH_URL}`))),
+    // 閘 6.5 — ship 前 SQL 彩排。跑 orchestrator(tsx):它做 flyctl ssh + prod TiDB
+    // 逐條 EXPLAIN,把「唯一一行 JSON」印到 stdout,進度/遠端訊息走 stderr(直接顯示給
+    // operator)。orchestrator 一律 exit 0(狀態編碼在 JSON),所以這裡 execSync 不會因
+    // SQL 失敗而 throw;只有 tsx 本身起不來才 throw(閘那邊 catch 成「彩排啟動失敗」)。
+    rehearse: () => {
+      const out = String(
+        execSync("pnpm exec tsx scripts/sqlRehearsalGate.ts", {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "inherit"],
+          env: process.env,
+          cwd: repoRoot,
+          maxBuffer: 32 * 1024 * 1024,
+        }),
+      );
+      // 對 stdout 外圍雜訊(理論上不該有)穩健:取第一個 { 到最後一個 } 之間解析。
+      const a = out.indexOf("{");
+      const b = out.lastIndexOf("}");
+      if (a === -1 || b === -1 || b < a) {
+        return { ok: false, channelError: `orchestrator 沒回 JSON(stdout: ${out.slice(0, 200)})`, total: 0, passed: 0, failures: [] };
+      }
+      return JSON.parse(out.slice(a, b + 1));
+    },
     // Wave1 Block A — ship 後自動煙霧。token 絕不字串插值進 shell 指令(理論
     // shell-injection 風險);改用 execSync 的 env 傳遞 + shell 內 $VAR 語法取值,
     // 讓 shell 自己從自己的環境變數展開,JS 端組出的指令字串本身完全不含 token。

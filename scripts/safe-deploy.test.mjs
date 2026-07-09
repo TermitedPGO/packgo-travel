@@ -75,6 +75,14 @@ function makeDeps(o = {}) {
       calls.push("smoke()");
       return state.smokeResult ?? { ok: true, arms: [] };
     },
+    // 閘 6.5 — SQL 彩排 fake。預設回全過;測試可用 rehearseResult 注入失敗/通道錯,
+    // 或 rehearseThrow 模擬 orchestrator 起不來(tsx crash)。記一個 "rehearse()" 標記
+    // 讓測試能斷言「SKIP_SQL_REHEARSAL=1 時完全沒被呼叫」。
+    rehearse: () => {
+      calls.push("rehearse()");
+      if (state.rehearseThrow) throw new Error("tsx failed to start");
+      return state.rehearseResult ?? { ok: true, total: 42, passed: 42, failures: [] };
+    },
     log: (...a) => {
       logs.push(a.join(" "));
     },
@@ -251,5 +259,73 @@ test("ship-smoke RED (but exit code still 0): LOCAL_SCRIPT_TOKEN set + smoke ret
   assert.ok(
     d._errors.some((l) => l.includes("rollback")),
     "expected a rollback hint in the error output",
+  );
+});
+
+// ---- Wave2 塊 B: 閘 6.5 SQL 彩排 wiring ----
+
+test("rehearsal PASS: rehearse ok → 通過 6.5,續往 token/deploy", async () => {
+  const d = makeDeps(); // 預設 rehearse 回 ok
+  const code = await runGuard(d, {});
+  assert.equal(code, 0);
+  assert.equal(d._calls.includes("rehearse()"), true);
+  assert.equal(reachedDeploy(d), true);
+  assert.ok(
+    d._logs.some((l) => l.includes("SQL 彩排通過")),
+    "expected a pass line for the rehearsal gate",
+  );
+});
+
+test("rehearsal BLOCK: EXPLAIN 失敗 → exit 1、不部署、列出失敗 key", async () => {
+  const d = makeDeps({
+    rehearseResult: {
+      ok: false,
+      total: 42,
+      passed: 41,
+      failures: [{ key: "adminCustomers.badQuery", source: "server/routers/adminCustomers.ts:512", error: "Unknown column 'x'" }],
+    },
+  });
+  const code = await runGuard(d, {});
+  assert.equal(code, 1);
+  assert.equal(reachedDeploy(d), false); // 擋在部署前
+  assert.ok(
+    d._errors.some((l) => l.includes("adminCustomers.badQuery")),
+    "expected the failing entry key in the block message",
+  );
+});
+
+test("rehearsal BLOCK: 通道失敗(flyctl 連不上)→ exit 1、附逃生口 SKIP_SQL_REHEARSAL", async () => {
+  const d = makeDeps({
+    rehearseResult: { ok: false, channelError: "flyctl ssh 通道失敗:connection refused", total: 42, passed: 0, failures: [] },
+  });
+  const code = await runGuard(d, {});
+  assert.equal(code, 1);
+  assert.equal(reachedDeploy(d), false);
+  assert.ok(
+    d._errors.some((l) => l.includes("SKIP_SQL_REHEARSAL=1")),
+    "channel failure must print the escape-hatch instruction",
+  );
+});
+
+test("rehearsal BLOCK: orchestrator 起不來(tsx crash)→ exit 1、附逃生口", async () => {
+  const d = makeDeps({ rehearseThrow: true });
+  const code = await runGuard(d, {});
+  assert.equal(code, 1);
+  assert.equal(reachedDeploy(d), false);
+  assert.ok(
+    d._errors.some((l) => l.includes("SKIP_SQL_REHEARSAL=1")),
+    "startup failure must print the escape-hatch instruction",
+  );
+});
+
+test("SKIP_SQL_REHEARSAL=1 跳過彩排(完全不呼叫 rehearse)但仍部署", async () => {
+  const d = makeDeps({ env: { DEPLOY_TOKEN: "good-token", SKIP_SQL_REHEARSAL: "1" } });
+  const code = await runGuard(d, {});
+  assert.equal(code, 0);
+  assert.equal(d._calls.includes("rehearse()"), false); // 完全沒被呼叫
+  assert.equal(reachedDeploy(d), true);
+  assert.ok(
+    d._logs.some((l) => l.includes("SKIP_SQL_REHEARSAL=1")),
+    "expected a skip announcement line",
   );
 });
