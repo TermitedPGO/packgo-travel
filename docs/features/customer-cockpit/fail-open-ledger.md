@@ -1,6 +1,8 @@
 # fail-open 全面盤點 — Wave1 塊D
 
 > 硬化戰役 Wave1 塊D(2026-07-08)。派工單 `dispatch-wave1.md`,母計畫 `hardening-plan.md`。目標:枚舉 server/ 底下所有 catch/`.catch(` 吞錯誤的地方,逐一分類「這個失敗被吞掉之後,Jeff 該不該知道」,把真正該浮出卻沒浮出的接上 `server/_core/errorFunnel.ts`(Wave1 塊B)的漏斗。
+>
+> **2026-07-08 監工複核後收尾補丁**:6 筆原 C 類(爭議)+ 1 筆原 A 類 Wave4 backlog(`inquiries.ts` 緊急客人通知)已由監工裁決落地 —— 4 筆升級為 A(已接線)、2 筆降為 B、1 筆 Wave4 backlog 提前接線。C 類清單現已清空。詳見下方「監工裁決」專節與各條目的更新理由。同批也校正了 3 個檔案的行號漂移(見下方對照表)。
 
 ## 數字紀律(對帳)
 
@@ -12,52 +14,34 @@ grep -rnE "\\bcatch\\s*\\(|\\.catch\\(" server --include="*.ts" | grep -v "\\.te
 
 grep 總數:**873**。ledger 條目數:**873**。**對帳成立(873 = 873)**。
 
-**重要方法論說明(避免未來重跑此 grep 對帳時誤判)**:本批塊D 自己的接線動作(每一處高風險 A 類新增 `reportFunnelError({...}).catch(() => {})`)本身會被同一條 grep 指令算成一個新的 `.catch(` 命中。因此塊D 收工後(接線完成)若重跑同一條 grep,總數會膨脹到約 1002(873 + 129 個新接線點),**這不是本次枚舉漏掉了 129 筆** —— 是這次枚舉自己的修復動作新增的 catch 站點。任何下一輪盤點要重新對帳,基線應該是「這次 ledger 收錄的 873 筆」加上「後續新增的程式碼變更」,而不是拿當下 grep 總數直接跟 873 比較。
+**重要方法論說明(避免未來重跑此 grep 對帳時誤判)**:本批塊D 自己的接線動作(每一處高風險 A 類新增 `reportFunnelError({...}).catch(() => {})`)本身會被同一條 grep 指令算成一個新的 `.catch(` 命中。因此塊D 收工後(接線完成)若重跑同一條 grep,總數會持續膨脹(截至本次收尾補丁,累計已接線 134 處,加上原始 873 再加後續每處接線自帶的 `.catch(() => {})`,重跑 grep 會遠高於 873),**這不是本次枚舉漏掉了這些筆數** —— 是接線動作自己新增的 catch 站點。任何下一輪盤點要重新對帳,基線應該是「這次 ledger 收錄的 873 筆」加上「後續新增的程式碼變更」,而不是拿當下 grep 總數直接跟 873 比較。
+
+## 監工裁決:行號校正 + C 類清空(2026-07-08 收尾補丁)
+
+| file | 原行號 | 校正後行號 | 裁決結果 |
+|---|---|---|---|
+| `server/routers/inquiries.ts` | 310(A 類/Wave4 backlog) | 312 | 升級 A/已接線(customer-data)—— 全批唯一涉及人身安全的 fail-open catch,監工裁決不等 Wave4 |
+| `server/routers/photos.ts` | 87(C 類) | 87(無漂移) | 升級 A/已接線(money) |
+| `server/routers/bookings.ts`(折扣換算) | 252(C 類) | 253 | 升級 A/已接線(money) |
+| `server/routers/bookings.ts`(棄單挽回) | 415(C 類) | 418 | 升級 A/已接線(money) |
+| `server/routers/bookings.ts`(供應商訂單包) | 778(C 類) | 781 | 升級 A/已接線(money) |
+| `server/translation.ts` | 339(C 類) | 339(無漂移) | 降為 B —— LLM 故障已由 llmCreditAlert + D1 週稽核 LLM circuit 統計覆蓋 |
+| `server/_core/gmail.ts` | 986(C 類) | 989 | 降為 B —— 批5 draftSendOutcome 前端已顯示送信結果 |
+
+**inquiries.ts:312 額外修正**:對抗審查發現 `notifyOwner()` 內部把 SMTP 失敗包在自己的 try/catch 一律 `resolve(false)` 不 `reject`,原本只掛 `.catch()` 對「Gmail 帳密過期/SMTP 掛掉」這個最可能場景是死代碼。已改成同時檢查 resolve 出來的布林值,兩條路徑都接 reportFunnelError。詳見 `t6-report-20260708-wave1.md` 收尾補丁章節。
 
 ## 分類總覽
 
 | 分類 | 筆數 | 說明 |
 |---|---|---|
-| A 必須浮出 | 143 | 其中 **129** 筆屬四類高風險路徑,本批已接線;**14** 筆記帳留給 Wave4 |
-| B 可以安靜 | 724 | 刻意 fail-open 設計,理由逐條記錄於下方 |
-| C 爭議 | 6 | 拿不準,交指揮裁決,完整清單見下方專節 |
+| A 必須浮出 | 147 | 其中 **134** 筆屬四類高風險路徑,已接線;**13** 筆記帳留給 Wave4 |
+| B 可以安靜 | 726 | 刻意 fail-open 設計,理由逐條記錄於下方 |
+| C 爭議 | 0 | 監工複核後已全數裁決(見上方專節),目前清空 |
 | **總計** | **873** | = grep 總數 873 |
 
-## C 類清單(交指揮裁決,完整列出)
+## A 類清單(必須浮出,134 筆已接線 + 13 筆 Wave4 記帳)
 
-### `server/translation.ts:339`
-
-- 吞了什麼:translateText 整體翻譯流程(含 LLM 呼叫)發生任何例外
-- 拿不準的原因:catch-all 吞下所有翻譯錯誤並靜默回退原文,LLM 若長期故障會大量靜默降級且無人知曉,但也可視為合理 graceful degrade,難判斷業務重要性
-
-### `server/_core/gmail.ts:986`
-
-- 吞了什麼:sendReplyInThread 呼叫 Gmail send API 失敗,回傳結構化 {ok:false, error}
-- 拿不準的原因:有回傳失敗信號但這批看不到上游呼叫端是否真的把 ok:false 轉告 Jeff;客人回信寄送失敗風險高,拿不準故誠實標 C
-
-### `server/routers/photos.ts:87`
-
-- 吞了什麼:上傳行程照片後發 Packpoint 獎勵(含更新 pointsAwarded 欄位)失敗,只 console.error
-- 拿不準的原因:Packpoint 是可兌換 voucher 的準貨幣,若 awardPackpoint 已入帳但 pointsAwarded 欄位更新失敗,回傳給客人的 pointsEarned 會與實際餘額不一致,但材質金額小且不確定是否會導致重複發放,拿不準算不算 money 級風險
-
-### `server/routers/bookings.ts:252`
-
-- 吞了什麼:折扣金額換算回 USD 失敗時,用原始請求折抵值當備援,實際扣點數可能與真實折扣不完全對應
-- 拿不準的原因:影響 Packpoint 帳務準確度但有保守備援值,金額本身不受影響,嚴重度拿不準
-
-### `server/routers/bookings.ts:415`
-
-- 吞了什麼:排程棄單挽回信/座位到期釋放失敗,只有 console.warn
-- 拿不準的原因:若座位到期釋放排程失效,未付款訂單可能永久佔位造成庫存流失,但屬背景排程且無法判斷是否有其他兜底機制
-
-### `server/routers/bookings.ts:778`
-
-- 吞了什麼:組裝供應商訂單包時查詢 departure 失敗,被吞成 null,出發日期靜默變 null
-- 拿不準的原因:供應商下單包缺出發日期可能影響真實下單準確度,但 admin 通常會注意到空值,嚴重度拿不準
-
-## A 類清單(必須浮出,129 筆已接線 + 14 筆 Wave4 記帳)
-
-### 已接線(本批,呼叫 reportFunnelError)
+### 已接線(呼叫 reportFunnelError)
 
 | file:line | 吞了什麼 | 高風險類型 | 理由 |
 |---|---|---|---|
@@ -150,13 +134,18 @@ grep 總數:**873**。ledger 條目數:**873**。**對帳成立(873 = 873)**。
 | `server/queues/supplierSyncQueue.ts:177` | 重試耗盡後呼叫 notifyOwner 通知 Jeff 供應商同步最終失敗,若 notifyOwner 本身失敗只 console.error 靜默吞掉 | ③cron/部署可見性 | 這是唯一會通知 Jeff 的最後防線,若通知本身失敗,Jeff 對供應商同步最終失敗完全不知情 |
 | `server/retrospectiveWorker.ts:191` | worker failed 事件內呼叫 notifyOwner 通知 Jeff 任務失敗,若 notifyOwner 本身失敗只 console.error 靜默吞掉 | ③cron/部署可見性 | 與 supplierSyncQueue 相同模式:通知機制本身失敗會讓 Jeff 完全不知道背景任務失敗 |
 | `server/routers/aiQuotes.ts:97` | AI 報價產生後,排程 24h/3d/7d 客人跟進信(scheduleQuoteFollowUps)失敗 | ④客人可見輸出 | 只有 console.warn,無任何下游檢查或重試,報價流程本身照常回傳成功,客人本該收到的後續跟進信可能整組默默消失,公司高度重視跟進完整性 |
+| `server/routers/bookings.ts:253` | 折扣金額換算回 USD 失敗時,用原始請求折抵值當備援,實際扣點數可能與真實折扣不完全對應 | ②錢 | 折扣金額換算回 USD 失敗的備援值直接餵進 Packpoint 扣點計算,算錯會扣錯客人點數,監工裁決接線 _(行號校正:252→253(監工收尾補丁校正))_ |
 | `server/routers/bookings.ts:310` | Packpoint 扣點失敗(訂單已用折扣價建立,若扣點失敗等於白送折扣),只有 console.error 沒有任何浮出動作 | ②錢 | 註解自稱 CRITICAL 且要求 ops 人工對帳,但實際只寫 console.error 沒有 notifyOwner,Jeff 不會知道 |
 | `server/routers/bookings.ts:399` | 降級備援的同步確認信本身也寄送失敗,只有 console.error | ④客人可見輸出 | 佇列與備援皆失敗,客人完全收不到訂單確認信,只留 console.error 沒有任何浮出給 Jeff |
+| `server/routers/bookings.ts:418` | 排程棄單挽回信/座位到期釋放失敗,只有 console.warn | ②錢 | 棄單挽回信與座位到期釋放排程失敗,座位可能永久佔位造成庫存/營收流失,監工裁決接線 _(行號校正:415→418(監工收尾補丁校正))_ |
 | `server/routers/bookings.ts:780` | 組裝供應商訂單包時查詢乘客(含護照PII)失敗,被吞成空陣列 | ①客人資料流 | 此端點專門提供護照等乘客資料供 admin 送出真實供應商訂單;空陣列無法與「客人尚未填寫」區分,可能導致漏帶乘客資料下單而不自知 |
+| `server/routers/bookings.ts:781` | 組裝供應商訂單包時查詢 departure 失敗,被吞成 null,出發日期靜默變 null | ②錢 | 供應商訂單包組裝時 departure 查詢失敗,出發日期靜默變 null,可能影響對供應商下單的準確度,監工裁決接線 _(行號校正:778→781(監工收尾補丁校正))_ |
 | `server/routers/departures.ts:191` | 刪除出發日前查詢是否有有效訂單(activeBookings)關聯失敗 | ①客人資料流 | 這是刪除前唯一的安全閘;查詢一旦失敗被吞成空陣列,會讓有真實客人訂單的出發日被直接刪除,孤兒化客人訂單(註解本身寫明「否則會 orphan customer bookings」) |
 | `server/routers/inquiries.ts:78` | ingestWebsiteInquiryContact 把網站表單/緊急聯絡資訊寫入 customerProfiles+customerInteractions 失敗,只 console.error | ①客人資料流 | 原始 inquiry 雖仍在 inquiries 表,但客人這則訊息不會出現在客人互動時間軸/客戶座艙,AI ops chat 讀不到這則對話 |
+| `server/routers/inquiries.ts:312` | notifyOwner(緊急客人求助通知)本身寄送失敗,只 console.error,無備援管道 | ①客人資料流 | 緊急客人事件(醫療/安全/證件遺失)通知業主失敗,全批唯一涉及人身安全的 fail-open catch,監工裁決優先接線,不等 Wave4 _(行號校正:310→312(監工收尾補丁校正))_ |
 | `server/routers/inquiries.ts:453` | addMessage procedure 內,同一支 ingestWebsiteInquiryContact 失敗,只 console.error | ①客人資料流 | 與第 78 行同一風險,客人這則跟進留言不會進客人互動時間軸 |
 | `server/routers/invoices.ts:103` | 客人自助發票 forBooking 流程中 db.createInvoice 寫入失敗,inserted 設為 null | ②錢 | 若此時 R2 上傳恰好成功(r2Url 有值),下方 !finalUrl 判斷為 false 不會拋錯,客人仍拿到可用網址,但這張發票在資料庫裡完全沒有記錄,系統帳務對不上且無任何信號通知 Jeff |
+| `server/routers/photos.ts:87` | 上傳行程照片後發 Packpoint 獎勵(含更新 pointsAwarded 欄位)失敗,只 console.error | ②錢 | Packpoint 獎勵可能已入帳但 pointsAwarded 欄位更新失敗,帳務不一致且無人知曉,監工裁決接線 |
 | `server/routers/plaidRouter.ts:214` | 單一 Plaid 帳戶寫入 linkedBankAccounts 失敗,只 console.warn,迴圈繼續下一個帳戶,該帳戶不會出現在 insertedIds | ②錢 | 銀行帳戶連結失敗會導致該帳戶永遠不會被同步交易,屬於金流基礎設施相關且無主動通知 |
 | `server/routers/plaidRouter.ts:822` | CSV 匯入單筆交易列寫入 bankTransactions 失敗,只 console.warn,跳過該筆繼續下一筆 | ②錢 | bankTransactions 是權威 P&L 帳本,單筆交易寫入失敗且無任何浮出等同帳目憑空漏一筆,Jeff 不會知道 |
 | `server/routers/plaidRouter.ts:1139` | 手動覆蓋交易分類後,同步 trust deferral 狀態失敗,只 console.warn | ②錢 | Trust 帳戶遞延認列狀態若與分類覆蓋不同步,可能造成 Trust vs Operating 認列金額算錯且無人知曉,涉及 CLAUDE.md Trust 會計硬紅線 |
@@ -164,7 +153,7 @@ grep 總數:**873**。ledger 條目數:**873**。**對帳成立(873 = 873)**。
 | `server/routers/visa.ts:248` | 簽證狀態更新信(approved/rejected/status update)寄送失敗 | ④客人可見輸出 | 只 console.error,mutation 仍無條件回傳 success:true,admin(Jeff)會誤以為客人已收到通知 |
 | `server/services/accountingAgentService.ts:323` | processTrustInflow(Trust 帳戶遞延收入紀錄)呼叫失敗 | ②錢 | Trust 會計是 CLAUDE.md 明訂硬紅線,這裡吞掉例外後完全沒有任何標記或回傳反映此筆遞延收入未寫入,交易分類本身仍顯示成功,錢的紀錄可能因此對不上 |
 | `server/services/bankPLService.ts:183` | Trust 遞延收入查詢(totalDeferredForUser)失敗,導致 deferredIncomeSubtracted 維持 0 | ②錢 | P&L 計算會退化成「未扣除 Trust 遞延收入的毛額」,等同把尚未 recognize 的訂金當本期營收,直接牴觸 CLAUDE.md 硬紅線 §3(CST §17550);只有 console.warn,Jeff 看到的月報數字可能是錯的卻毫無察覺 |
-| `server/services/catalogRebuild/index.ts:261` | 刷新一團客人班期 refreshTourDepartures(先刪舊未來班期再寫入重建班期)失敗 | ④客人可見輸出 | 刪除/寫入若中途失敗可能讓客人正在看的行程班期消失或不完整,導致無法訂位卻無人知曉,要等下次重建才修復 _(審查三抓到誤標,修復階段已補接線(見 fix-phase 回報))_ |
+| `server/services/catalogRebuild/index.ts:261` | 刷新一團客人班期 refreshTourDepartures(先刪舊未來班期再寫入重建班期)失敗 | ④客人可見輸出 | 刪除/寫入若中途失敗可能讓客人正在看的行程班期消失或不完整,導致無法訂位卻無人知曉,要等下次重建才修復 |
 | `server/services/dailyDigestService.ts:434` | 早報信本身寄送失敗(sendMail 拋錯),console.error 後回 false,無其他備援通知 | ③cron/部署可見性 | 這是 Jeff 每日了解營運狀況的主要管道,寄送失敗自己也沒有第二層告警,Jeff 完全不知道今天沒收到早報 |
 | `server/services/financialReportService.ts:196` | 財務月趨勢報表計算信託遞延(trust deferral, CST §17550)金額失敗,console.warn 後 deferredByMonth 維持空物件,每個月退回 gross 計算 | ②錢 | 報表可能因此高估月營收/淨利(把還沒認列的信託訂金算進去),觸及 Trust 會計硬紅線,只有 console.warn 沒有任何後台可見警示 |
 | `server/services/plaidSyncService.ts:129` | bankTransactions 新增交易 insert 失敗(非重複鍵的未知錯誤)只 console.warn,不計入任何失敗統計 | ②錢 | authoritative 銀行交易可能永久漏記且無任何統計或通知會反映這筆遺失 |
@@ -191,7 +180,7 @@ grep 總數:**873**。ledger 條目數:**873**。**對帳成立(873 = 873)**。
 | `server/tripReminderWorker.ts:53` | 90 天 check-in 信排程失敗 | ③cron/部署可見性 | 同上,子掃描失敗被吞,job 仍回報成功,監控機制看不到 |
 | `server/trustRecognitionWorker.ts:109` | worker job 失敗後呼叫 notifyOwner 通知 Jeff,這個通知呼叫本身又失敗,只 console.error,無備援 | ②錢 | Trust 認列 worker 是錢的敏感流程(CST §17550),若 job 失敗+失敗通知又失敗,Jeff 對這筆信託認列問題完全零可見度 |
 
-### Wave4 記帳(A 類但不屬於四類高風險路徑,本批不接線)
+### Wave4 記帳(A 類但不屬於四類高風險路徑,記帳留待後續)
 
 | file:line | 吞了什麼 | 理由 |
 |---|---|---|
@@ -206,13 +195,12 @@ grep 總數:**873**。ledger 條目數:**873**。**對帳成立(873 = 873)**。
 | `server/email/templates/supplierNotification.ts:114` | 寄送供應商訂單通知信 smtp.sendMail 失敗,console.error 後回傳 false | 呼叫端 stripeWebhook 不檢查回傳值,仍會記 log 誤稱已寄出,供應商可能完全不知道有新訂單 |
 | `server/queues/abandonmentRecoveryQueue.ts:140` | 取消未付款訂單後釋放出發場次座位(releaseDepartureSlots)失敗,只 console.warn | booking 已標記 cancelled 但座位庫存未實際釋回,長期會造成場次餘位持續被低估、影響銷售但無人察覺 |
 | `server/routers/bookingsPayment.ts:344` | 全額退款後釋放出團名額(座位)失敗 | 座位未釋放可能造成出團名額顯示已滿、錯失後續訂位,無任何通知讓 Jeff 知道要人工修正 |
-| `server/routers/inquiries.ts:310` | notifyOwner(緊急客人求助通知)本身寄送失敗,只 console.error,無備援管道 | 這是 🆘 緊急客人事件通知 Jeff 的唯一管道,失敗即代表 Jeff 完全不知道有緊急案例待處理 |
 | `server/tourGenerator.ts:565` | notifyAgentMessage 發送 #catalog 頻道校準結果通知本身拋錯,只 console.warn | 這正是要讓 Jeff 看到新行程審核結果的通知機制失敗且無其他管道補位,Jeff 該知道而不知道 |
 | `server/tourGenerator.ts:643` | 整個 generateTour 流程任何未捕捉例外,console.error 後回傳 {success:false} 而非 throw | worker.ts 呼叫端未檢查 result.success 直接視為 job 完成,導致 Sentry/notifyOwner 的 failed 事件警報鏈完全繞過 |
 
 ## 全枚舉(逐檔案,含 B 類)
 
-> 以下依檔案分組列出全部 873 筆(含上方已列出的 A/C 類,方便照檔案查閱)。
+> 以下依檔案分組列出全部 873 筆(含上方已列出的 A 類,方便照檔案查閱)。
 
 ### `server/_core/agentNotify.ts`
 
@@ -401,7 +389,7 @@ grep 總數:**873**。ledger 條目數:**873**。**對帳成立(873 = 873)**。
 | 396 | threadExists 查詢遇到非 404 錯誤 | B(可以安靜) | — | mechanical:非 404 一律 throw err(rethrow),只有 404 轉成業務語意 false |
 | 592 | 單一附件解析(parseAttachment)失敗,記 warn 後在附件陣列塞入 parseStatus:'parse_error' 佔位項 | B(可以安靜) | — | 失敗狀態被保留在資料結構裡並標記,非完全消失,下游可辨識這筆附件解析失敗 |
 | 669 | email-receipt-intake 路徑抓取單一附件原始位元組失敗,記 warn 後直接跳過,該附件完全不進 out 陣列無任何痕跡 | A(必須浮出) | ②錢 | 若剛好是那張收據圖片/PDF,會整筆漏收不進後續 OCR/記帳流程且無任何信號留下 |
-| 986 | sendReplyInThread 呼叫 Gmail send API 失敗,回傳結構化 {ok:false, error} | C(爭議,交指揮裁決) | — | 有回傳失敗信號但這批看不到上游呼叫端是否真的把 ok:false 轉告 Jeff;客人回信寄送失敗風險高,拿不準故誠實標 C |
+| 989 _(校正:986→989(監工收尾補丁校正))_ | sendReplyInThread 呼叫 Gmail send API 失敗,回傳結構化 {ok:false, error} | B(可以安靜) | — | 批5 draftSendOutcome 前端已顯示送信結果,{ok:false} 結構化回傳已被上游轉告,監工裁決標 B |
 | 1006 | verifyConnection 測試 Gmail 整合連線失敗,回傳 {ok:false, error} | B(可以安靜) | — | 這是連線健康檢查用途的函式,失敗本就該原樣回傳給呼叫端顯示連線狀態 |
 | 1073 | stopGmailWatch 呼叫 users.stop 失敗,只記 warn | B(可以安靜) | — | 函式註解明說 never throws,已過期/不存在的 watch 本就是 no-op,刻意設計為 non-fatal 清理 |
 | 1120 | history.list 呼叫失敗且非 404 | B(可以安靜) | — | mechanical:非 404 一律 throw e(rethrow),只有 404 轉成 expired:true 業務語意讓呼叫端回退時間窗輪詢 |
@@ -1668,21 +1656,21 @@ grep 總數:**873**。ledger 條目數:**873**。**對帳成立(873 = 873)**。
 | 213 | 折抵點數低於下限中止訂單時,釋放座位的清理動作失敗被吞掉 | B(可以安靜) | — | 同一組 best-effort 座位釋放清理模式,主錯誤仍浮出給客人 |
 | 231 | 匯率轉換失敗(catch 本體) | B(可以安靜) | — | 已用 throw 方式浮出(rethrow 為 TRPCError INTERNAL_SERVER_ERROR) |
 | 232 | 匯率轉換失敗中止訂單時,釋放座位的清理動作失敗被吞掉 | B(可以安靜) | — | 同一組 best-effort 座位釋放清理模式,外層已 rethrow 浮出 |
-| 252 | 折扣金額換算回 USD 失敗時,用原始請求折抵值當備援,實際扣點數可能與真實折扣不完全對應 | C(爭議,交指揮裁決) | — | 影響 Packpoint 帳務準確度但有保守備援值,金額本身不受影響,嚴重度拿不準 |
+| 253 _(校正:252→253(監工收尾補丁校正))_ | 折扣金額換算回 USD 失敗時,用原始請求折抵值當備援,實際扣點數可能與真實折扣不完全對應 | A(必須浮出) | ②錢 | 折扣金額換算回 USD 失敗的備援值直接餵進 Packpoint 扣點計算,算錯會扣錯客人點數,監工裁決接線 |
 | 289 | 訂單列寫入失敗(catch 本體) | B(可以安靜) | — | 已用 throw 方式浮出(rethrow err) |
 | 291 | 訂單建立失敗回滾時,釋放座位的清理動作失敗被吞掉 | B(可以安靜) | — | 同一組 best-effort 座位釋放清理模式,外層已 rethrow 浮出 |
 | 310 | Packpoint 扣點失敗(訂單已用折扣價建立,若扣點失敗等於白送折扣),只有 console.error 沒有任何浮出動作 | A(必須浮出) | ②錢 | 註解自稱 CRITICAL 且要求 ops 人工對帳,但實際只寫 console.error 沒有 notifyOwner,Jeff 不會知道 |
 | 375 | 訂單後續信件佇列(deposit PDF+確認信)排入失敗,退回同步寄送基本確認信 | B(可以安靜) | — | 已有降級備援同步寄出含金額資訊的確認信,並用 console.error 記錄,非完全靜默 |
 | 399 | 降級備援的同步確認信本身也寄送失敗,只有 console.error | A(必須浮出) | ④客人可見輸出 | 佇列與備援皆失敗,客人完全收不到訂單確認信,只留 console.error 沒有任何浮出給 Jeff |
-| 415 | 排程棄單挽回信/座位到期釋放失敗,只有 console.warn | C(爭議,交指揮裁決) | — | 若座位到期釋放排程失效,未付款訂單可能永久佔位造成庫存流失,但屬背景排程且無法判斷是否有其他兜底機制 |
+| 418 _(校正:415→418(監工收尾補丁校正))_ | 排程棄單挽回信/座位到期釋放失敗,只有 console.warn | A(必須浮出) | ②錢 | 棄單挽回信與座位到期釋放排程失敗,座位可能永久佔位造成庫存/營收流失,監工裁決接線 |
 | 546 | getById 的 Redis 限流檢查失敗,只有 console.warn | B(可以安靜) | — | 程式註解明確聲明刻意 fail-open(Redis 掛掉不擋合法用戶),屬設計選擇 |
 | 610 | 客人取消訂單後釋放座位失敗,只有 console.warn | B(可以安靜) | — | best-effort 座位釋放清理,已記錄 warn,非本次操作的關鍵路徑 |
 | 651 | admin 更新訂單狀態前查詢訂單失敗,被吞成 null 進而回報 NOT_FOUND | B(可以安靜) | — | 雖誤標為找不到,但仍會擋下整個操作並回傳可見錯誤給 admin,不是靜默成功 |
 | 686 | admin 更新訂單狀態為取消時釋放座位失敗,只有 console.warn | B(可以安靜) | — | 同一組 best-effort 座位釋放清理模式 |
 | 732 | admin 設定供應商狀態前查詢訂單失敗,被吞成 null 進而回報 NOT_FOUND | B(可以安靜) | — | 同 651 模式,雖誤標但仍擋下操作並回傳可見錯誤 |
 | 776 | 組裝供應商訂單包時查詢 tour 失敗,被吞成 null | B(可以安靜) | — | 有安全預設 fallback 標題(Tour #id)顯示給 admin,屬可辨識的降級呈現 |
-| 778 | 組裝供應商訂單包時查詢 departure 失敗,被吞成 null,出發日期靜默變 null | C(爭議,交指揮裁決) | — | 供應商下單包缺出發日期可能影響真實下單準確度,但 admin 通常會注意到空值,嚴重度拿不準 |
 | 780 | 組裝供應商訂單包時查詢乘客(含護照PII)失敗,被吞成空陣列 | A(必須浮出) | ①客人資料流 | 此端點專門提供護照等乘客資料供 admin 送出真實供應商訂單;空陣列無法與「客人尚未填寫」區分,可能導致漏帶乘客資料下單而不自知 |
+| 781 _(校正:778→781(監工收尾補丁校正))_ | 組裝供應商訂單包時查詢 departure 失敗,被吞成 null,出發日期靜默變 null | A(必須浮出) | ②錢 | 供應商訂單包組裝時 departure 查詢失敗,出發日期靜默變 null,可能影響對供應商下單的準確度,監工裁決接線 |
 | 839 | admin 設定供應商成本前查詢訂單失敗,被吞成 null 進而回報 NOT_FOUND | B(可以安靜) | — | 同 651/732 模式,雖誤標但仍擋下操作並回傳可見錯誤 |
 
 ### `server/routers/bookingsPayment.ts`
@@ -1719,7 +1707,7 @@ grep 總數:**873**。ledger 條目數:**873**。**對帳成立(873 = 873)**。
 | line | 吞了什麼 | 分類 | 高風險類型 | 理由 |
 |---|---|---|---|---|
 | 78 | ingestWebsiteInquiryContact 把網站表單/緊急聯絡資訊寫入 customerProfiles+customerInteractions 失敗,只 console.error | A(必須浮出) | ①客人資料流 | 原始 inquiry 雖仍在 inquiries 表,但客人這則訊息不會出現在客人互動時間軸/客戶座艙,AI ops chat 讀不到這則對話 |
-| 310 | notifyOwner(緊急客人求助通知)本身寄送失敗,只 console.error,無備援管道 | A(必須浮出) | — | 這是 🆘 緊急客人事件通知 Jeff 的唯一管道,失敗即代表 Jeff 完全不知道有緊急案例待處理 |
+| 312 _(校正:310→312(監工收尾補丁校正))_ | notifyOwner(緊急客人求助通知)本身寄送失敗,只 console.error,無備援管道 | A(必須浮出) | ①客人資料流 | 緊急客人事件(醫療/安全/證件遺失)通知業主失敗,全批唯一涉及人身安全的 fail-open catch,監工裁決優先接線,不等 Wave4 |
 | 453 | addMessage procedure 內,同一支 ingestWebsiteInquiryContact 失敗,只 console.error | A(必須浮出) | ①客人資料流 | 與第 78 行同一風險,客人這則跟進留言不會進客人互動時間軸 |
 
 ### `server/routers/invoices.ts`
@@ -1756,7 +1744,7 @@ grep 總數:**873**。ledger 條目數:**873**。**對帳成立(873 = 873)**。
 
 | line | 吞了什麼 | 分類 | 高風險類型 | 理由 |
 |---|---|---|---|---|
-| 87 | 上傳行程照片後發 Packpoint 獎勵(含更新 pointsAwarded 欄位)失敗,只 console.error | C(爭議,交指揮裁決) | — | Packpoint 是可兌換 voucher 的準貨幣,若 awardPackpoint 已入帳但 pointsAwarded 欄位更新失敗,回傳給客人的 pointsEarned 會與實際餘額不一致,但材質金額小且不確定是否會導致重複發放,拿不準算不算 money 級風險 |
+| 87 | 上傳行程照片後發 Packpoint 獎勵(含更新 pointsAwarded 欄位)失敗,只 console.error | A(必須浮出) | ②錢 | Packpoint 獎勵可能已入帳但 pointsAwarded 欄位更新失敗,帳務不一致且無人知曉,監工裁決接線 |
 
 ### `server/routers/plaidRouter.ts`
 
@@ -2318,7 +2306,7 @@ grep 總數:**873**。ledger 條目數:**873**。**對帳成立(873 = 873)**。
 | 227 | logLlmUsage 記錄翻譯 LLM 用量寫入失敗 | B(可以安靜) | — | LLM 用量記錄屬分析用途,失敗不影響翻譯結果本身 |
 | 327 | CJK 洩漏重試呼叫的 logLlmUsage 用量記錄失敗 | B(可以安靜) | — | 同上,用量記錄非關鍵 best-effort |
 | 329 | CJK 洩漏偵測後的重試翻譯 LLM 呼叫失敗 | B(可以安靜) | — | 刻意設計的加強重試,失敗則沿用先前已產出的翻譯文字,fail-open 不影響主流程完成 |
-| 339 | translateText 整體翻譯流程(含 LLM 呼叫)發生任何例外 | C(爭議,交指揮裁決) | — | catch-all 吞下所有翻譯錯誤並靜默回退原文,LLM 若長期故障會大量靜默降級且無人知曉,但也可視為合理 graceful degrade,難判斷業務重要性 |
+| 339 | translateText 整體翻譯流程(含 LLM 呼叫)發生任何例外 | B(可以安靜) | — | LLM 故障已由 llmCreditAlert(額度/認證異常偵測)+ D1 週稽核 LLM circuit 統計覆蓋,不需要 translateText 這層再重複浮出,監工裁決標 B |
 | 422 | safeComplete 呼叫 logAgentComplete 寫入翻譯任務完成狀態失敗 | B(可以安靜) | — | 活動紀錄寫入的 best-effort 保護層,不影響翻譯本身結果 |
 | 599 | 行程 hotels JSON 翻譯過程失敗(parse 或呼叫 translateText) | B(可以安靜) | — | 單一欄位翻譯降級,continue 迴圈繼續處理其他欄位,不影響整體行程資料 |
 | 635 | 行程 meals JSON 翻譯過程失敗 | B(可以安靜) | — | 同 599,單一欄位翻譯降級不影響主流程 |

@@ -417,4 +417,10 @@ tRPC admin 路由 onError 噪音閘(server/_core/index.ts):白名單只放行 IN
 
 ## 硬化戰役 Wave1 收官(2026-07-08)
 
-四塊(A ship 煙霧 / B 錯誤漏斗 / C D1 觀測計數器 / D fail-open 盤點)全部完成、獨立審查、獨立驗證、獨立 commit+push。詳見 T6 完工報告 `t6-report-20260708-wave1.md`。**待 Jeff `pnpm ship`**,ship 後執行者接手跑驗收走查清單(煙霧七臂/curl 端點/紅路演練/D1 手動觸發/48h soak/worker wiring grep),不留給 Jeff 手動。
+四塊(A ship 煙霧 / B 錯誤漏斗 / C D1 觀測計數器 / D fail-open 盤點)全部完成、獨立審查、獨立驗證、獨立 commit+push。詳見 T6 完工報告 `t6-report-20260708-wave1.md`。
+
+### 收尾補丁(2026-07-08,commit `0cbd000`)
+
+監工複核 T6 首版後裁定的收尾補丁,獨立三路對抗審查+修復+驗證:①`server/_core/trpcNoiseGate.ts` 抽出 `shouldFunnelTrpcError` 純函式,補六個 tRPC code 紅綠測試(原本零測試)。②監工複核 fail-open ledger 後裁決 5 處接線:`inquiries.ts:312` 緊急客人通知(額外修正 notifyOwner resolve(false) 死代碼 P0)、`photos.ts:87` Packpoint 獎勵、`bookings.ts` 三處(折扣換算/棄單挽回/供應商訂單包),5 處全補測試。③ledger 訂正行號漂移 + C 類清單全數裁決清空(4 升 A 已接線、2 降 B)。④T6 報告訂正 errorFunnel 測試數(16→實際 20)+ 補上 skillLearningQueue 無對應 worker 的確認結果。發現一個既存折扣計算 bug(50% 封頂後 fallback 算錯,只會多扣不會少扣)另立任務卡 `task_881cf08b`,未在本批修正。獨立驗證:tsc 0 錯;working tree 當時與另一並行 F1 記帳工作階段共存,已用檔案清單精確 staging 避免誤 commit;本批相關 6 個測試檔隔離跑 62/62 全綠。
+
+**待 Jeff `pnpm ship`**,ship 後執行者接手跑驗收走查清單(煙霧七臂/curl 端點/紅路演練/D1 手動觸發/48h soak/worker wiring grep),不留給 Jeff 手動。
