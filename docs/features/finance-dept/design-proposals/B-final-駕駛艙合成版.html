@@ -91,12 +91,12 @@
   .cdate{color:var(--gray-800);font-weight:500}
   .cid{color:var(--gray-400);font-size:11px}
   /* 老化訊號:入帳 >30 天顯示天數(dot 加紅字,無填色) */
-  .age{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:var(--red-700);margin-top:3px}
+  .age{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:var(--red-700);margin-top:4px}
   .age::before{content:"";width:5px;height:5px;border-radius:999px;background:var(--red-500);flex-shrink:0}
   .camt{font-weight:700;color:var(--amber-700);font-size:13px}
 
   /* status = dot 加文字色,不做背景填色(admin 設計系統 anti-pattern) */
-  .badge{display:inline-flex;align-items:center;gap:5px;font-size:9px;font-weight:600;white-space:nowrap;color:var(--amber-700)}
+  .badge{display:inline-flex;align-items:center;gap:4px;font-size:9px;font-weight:600;white-space:nowrap;color:var(--amber-700)}
   .badge::before{content:"";width:5px;height:5px;border-radius:999px;background:currentColor;flex-shrink:0}
   .badge.done{color:var(--gray-500)}
   .chip{border-radius:var(--r-md);border:1px solid var(--gray-200);background:var(--white);padding:4px 8px;
@@ -203,7 +203,7 @@
 
   .secdiv{margin:44px 0 16px;display:flex;align-items:center;gap:10px}
   .secdiv .l{flex:1;height:1px;background:var(--gray-100)}
-  .secdiv .tag{font-size:11px;color:var(--gray-500);border:1px dashed var(--gray-300);border-radius:999px;padding:3px 12px;background:var(--white)}
+  .secdiv .tag{font-size:11px;color:var(--gray-500);border:1px dashed var(--gray-300);border-radius:999px;padding:4px 12px;background:var(--white)}
 </style>
 </head>
 <body>
@@ -293,7 +293,7 @@
               </div>
               <div class="autosum"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>對帳引擎本月自動對上 <b>12 筆</b>入帳,共 <b>$48,200</b>;金額與訂單吻合才自動 link,對不上的才丟到上面待你認領。</span></div>
               <div class="autorow"><div class="d">07/02<span>#1201</span></div><div class="m"><b>ORD-0088</b> 台灣團 訂金</div><span class="badge done">auto:order_ref</span><span class="amt num">$3,100</span></div>
-              <div class="autorow"><div class="d">07/05<span>#1208</span></div><div class="m"><b>Stripe 撥款</b> 已排除損益（結帳已計）</div><span class="badge done">stripe_payout</span><span class="amt num">$6,150</span></div>
+              <div class="autorow"><div class="d">07/05<span>#1208</span></div><div class="m"><b>Stripe 撥款</b> 已排除損益（防雙計）</div><span class="badge done">stripe_payout</span><span class="amt num">$6,150</span></div>
               <div class="autorow"><div class="d">07/08<span>#1215</span></div><div class="m"><b>ORD-0071</b> 日本團 全額</div><span class="badge done">auto:exact_amount</span><span class="amt num">$4,200</span></div>
               <div class="note top"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>列在這裡只是讓你知道引擎做了什麼,不需要你決定;要複查點右下「對帳明細」。</div>
             </div>
