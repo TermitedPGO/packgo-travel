@@ -2002,10 +2002,14 @@ export const plaidRouter = router({
    * "rerun now" button after fixing matches.
    */
   trustRecognizeNow: adminProcedure.mutation(async () => {
-    const { recognizeReadyDepartures, isTrustDeferralEnabled } = await import(
+    const { recognizeReadyDepartures, isAnyTrustDeferralEnabled } = await import(
       "../services/trustDeferralService"
     );
-    if (!isTrustDeferralEnabled()) {
+    // F1 塊B (2026-07-08) 對抗審查 P1 修復:改用 isAnyTrustDeferralEnabled——
+    // 只看 PLAID flag 會讓 Jeff 在只開 STRIPE flag 時按這顆「立即重跑」按鈕
+    // 得到誤導性的「disabled」訊息,即使 Stripe-direct 遞延列其實已經在等
+    // 認列。
+    if (!isAnyTrustDeferralEnabled()) {
       return {
         runId: "disabled",
         scanned: 0,
@@ -2013,7 +2017,8 @@ export const plaidRouter = router({
         totalRecognizedAmount: 0,
         skippedNoDepartureDate: 0,
         skippedNotMatched: 0,
-        error: "PLAID_TRUST_DEFERRAL_ENABLED is not set",
+        skippedCancelledBooking: 0,
+        error: "trust deferral is disabled (both PLAID_TRUST_DEFERRAL_ENABLED and STRIPE_TRUST_DEFERRAL_ENABLED are off)",
       } as const;
     }
     return await recognizeReadyDepartures();

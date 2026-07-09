@@ -34,13 +34,17 @@ export const trustRecognitionWorker = new Worker<
       `[trustRecognitionWorker] starting run ${job.id} (triggered by: ${job.data.triggeredBy})`
     );
 
-    const { recognizeReadyDepartures, isTrustDeferralEnabled } = await import(
+    const { recognizeReadyDepartures, isAnyTrustDeferralEnabled } = await import(
       "./services/trustDeferralService"
     );
 
-    if (!isTrustDeferralEnabled()) {
+    // F1 塊B (2026-07-08) 對抗審查 P1 修復:改用 isAnyTrustDeferralEnabled
+    // (PLAID flag OR STRIPE flag)——這支 worker 是 recognizeReadyDepartures
+    // 的唯一日常呼叫端,外層的 gate 若還只看 PLAID flag,即使函式本體已經
+    // 修好,worker 還是會在 STRIPE-only 開啟時提早 return 不呼叫它。
+    if (!isAnyTrustDeferralEnabled()) {
       console.log(
-        "[trustRecognitionWorker] PLAID_TRUST_DEFERRAL_ENABLED is off — skipping"
+        "[trustRecognitionWorker] trust deferral disabled (both PLAID_TRUST_DEFERRAL_ENABLED and STRIPE_TRUST_DEFERRAL_ENABLED are off) — skipping"
       );
       return {
         runId: `disabled-${job.id}`,

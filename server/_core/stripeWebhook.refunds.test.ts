@@ -339,6 +339,17 @@ vi.mock("./stripeWebhookIdempotency", () => ({
   markStripeEventFailed: vi.fn(),
 }));
 
+// F1 塊B (2026-07-08) — 退款邊界:handleChargeRefunded 現在會查有沒有
+// Stripe-direct 遞延列(findStripeDeferredByPaymentId)並在找到時標記
+// reversed。本檔的付款情境都不是 STRIPE_TRUST_DEFERRAL_ENABLED 開啟時建立的
+// (那條路徑有自己的 stripeWebhook.test.ts 覆蓋),回 null 讓這裡的既有斷言
+// (notifyAgentMessage/notifyOwner 呼叫次數)不受影響。
+vi.mock("../services/trustDeferralService", () => ({
+  findStripeDeferredByPaymentId: vi.fn(async () => null),
+  reverseDeferral: vi.fn(async () => ({ success: true })),
+  deferStripeBookingIncome: vi.fn(async () => ({ deferredId: null, expectedRecognitionDate: null, reason: "not used in this test" })),
+}));
+
 // v2 Wave 3 Module 3.5 — RefundAgent is invoked POST-COMMIT inside
 // handleChargeRefunded. Mock it to a deterministic triage so the test's
 // LLM-free environment doesn't crash + so the proposal agentMessage
@@ -364,6 +375,7 @@ vi.mock("../agents/autonomous/refundAgent", async () => {
 
 // Import AFTER mocks.
 import { __test__ } from "./stripeWebhook";
+import { findStripeDeferredByPaymentId, reverseDeferral } from "../services/trustDeferralService";
 const { handleChargeRefunded } = __test__;
 
 // ─────────────────────────────────────────────────────────────────────
@@ -415,6 +427,8 @@ describe("handleChargeRefunded — Phase 2 module 2.3 transaction wrap", () => {
     spies.notifyOwner.mockClear();
     spies.notifyAgentMessage.mockClear();
     spies.deductPackpoint.mockClear();
+    (findStripeDeferredByPaymentId as any).mockClear();
+    (reverseDeferral as any).mockClear();
     currentDrizzle = makeDrizzle();
   });
 
@@ -464,6 +478,60 @@ describe("handleChargeRefunded — Phase 2 module 2.3 transaction wrap", () => {
     expect(spies.notifyAgentMessage.mock.calls[1][0].messageType).toBe(
       "proposal",
     );
+  });
+
+  it("F1 塊B (2026-07-08) 退款邊界:找到未認列的 Stripe-direct 遞延列 → reverseDeferral 被呼叫", async () => {
+    seedHappyPath();
+    (findStripeDeferredByPaymentId as any).mockResolvedValueOnce({
+      id: 999,
+      recognizedAt: null,
+      reversedAt: null,
+    });
+    const charge = makeCharge({
+      paymentIntent: "pi_refund_1",
+      amount: 30000,
+      amount_refunded: 30000,
+    });
+
+    await handleChargeRefunded(charge);
+
+    expect(findStripeDeferredByPaymentId).toHaveBeenCalledWith(1); // seedHappyPath payment.id = 1
+    expect(reverseDeferral).toHaveBeenCalledWith(
+      expect.objectContaining({ deferredId: 999, reason: expect.stringContaining("refund") }),
+    );
+  });
+
+  it("F1 塊B 退款邊界:已認列的遞延列不動(不呼叫 reverseDeferral)——已經記進 P&L 的收入,退款會計留 F2", async () => {
+    seedHappyPath();
+    (findStripeDeferredByPaymentId as any).mockResolvedValueOnce({
+      id: 999,
+      recognizedAt: new Date("2026-06-01"),
+      reversedAt: null,
+    });
+    const charge = makeCharge({
+      paymentIntent: "pi_refund_1",
+      amount: 30000,
+      amount_refunded: 30000,
+    });
+
+    await handleChargeRefunded(charge);
+
+    expect(reverseDeferral).not.toHaveBeenCalled();
+  });
+
+  it("F1 塊B 退款邊界:查無遞延列(flag 從未開過,或非 tour booking)→ 靜默不動,既有退款流程不受影響", async () => {
+    seedHappyPath();
+    (findStripeDeferredByPaymentId as any).mockResolvedValueOnce(null);
+    const charge = makeCharge({
+      paymentIntent: "pi_refund_1",
+      amount: 30000,
+      amount_refunded: 30000,
+    });
+
+    await handleChargeRefunded(charge);
+
+    expect(reverseDeferral).not.toHaveBeenCalled();
+    expect(store.payments[0].paymentStatus).toBe("refunded");
   });
 
   it("case 2: voucher restoration is NOT triggered on refund (current policy)", async () => {

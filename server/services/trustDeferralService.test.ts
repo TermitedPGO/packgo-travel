@@ -13,8 +13,70 @@ import {
   effectiveCategory,
   shouldHaveDeferral,
   decideDeferralSync,
+  computeExpectedRecognitionDate,
+  isAnyTrustDeferralEnabled,
   type TrustDeferredRowLike,
 } from "./trustDeferralService";
+
+describe("isAnyTrustDeferralEnabled — F1 塊B (2026-07-08) 對抗審查 P1 修復:認列/查詢路徑要看任一 flag", () => {
+  const ORIGINAL_PLAID = process.env.PLAID_TRUST_DEFERRAL_ENABLED;
+  const ORIGINAL_STRIPE = process.env.STRIPE_TRUST_DEFERRAL_ENABLED;
+  const restore = () => {
+    if (ORIGINAL_PLAID === undefined) delete process.env.PLAID_TRUST_DEFERRAL_ENABLED;
+    else process.env.PLAID_TRUST_DEFERRAL_ENABLED = ORIGINAL_PLAID;
+    if (ORIGINAL_STRIPE === undefined) delete process.env.STRIPE_TRUST_DEFERRAL_ENABLED;
+    else process.env.STRIPE_TRUST_DEFERRAL_ENABLED = ORIGINAL_STRIPE;
+  };
+
+  it("兩個 flag 都 off → false", () => {
+    delete process.env.PLAID_TRUST_DEFERRAL_ENABLED;
+    delete process.env.STRIPE_TRUST_DEFERRAL_ENABLED;
+    expect(isAnyTrustDeferralEnabled()).toBe(false);
+    restore();
+  });
+
+  it("只有 PLAID on → true(既有行為不變)", () => {
+    process.env.PLAID_TRUST_DEFERRAL_ENABLED = "true";
+    delete process.env.STRIPE_TRUST_DEFERRAL_ENABLED;
+    expect(isAnyTrustDeferralEnabled()).toBe(true);
+    restore();
+  });
+
+  it("只有 STRIPE on(PLAID 維持預設 off,最可能發生的裁示組合)→ true", () => {
+    delete process.env.PLAID_TRUST_DEFERRAL_ENABLED;
+    process.env.STRIPE_TRUST_DEFERRAL_ENABLED = "true";
+    expect(isAnyTrustDeferralEnabled()).toBe(true);
+    restore();
+  });
+
+  it("兩個都 on → true", () => {
+    process.env.PLAID_TRUST_DEFERRAL_ENABLED = "true";
+    process.env.STRIPE_TRUST_DEFERRAL_ENABLED = "true";
+    expect(isAnyTrustDeferralEnabled()).toBe(true);
+    restore();
+  });
+});
+
+describe("computeExpectedRecognitionDate — F1 塊B (2026-07-08) 抽出的純函式,供 Plaid 與 Stripe-direct 兩條路徑共用", () => {
+  it("出發日在早鳥窗口外(預設 30 天)→ 認列日 = 出發日(+ offset,預設 0)", () => {
+    // 訂金 2026-01-01,出發 2026-06-01,遠超過 30 天早鳥窗口。
+    expect(computeExpectedRecognitionDate("2026-06-01", "2026-01-01")).toBe("2026-06-01");
+  });
+
+  it("出發日在早鳥窗口內(<=30 天)→ 認列日改成訂金收款日,避免跨年度歸屬問題", () => {
+    // 訂金 2026-12-20,出發 2027-01-05(16 天,短前置期)。
+    expect(computeExpectedRecognitionDate("2027-01-05", "2026-12-20")).toBe("2026-12-20");
+  });
+
+  it("剛好等於 30 天早鳥窗口邊界 → 走短前置期(收款日)分支(<=,不是 <)", () => {
+    // 30 天整:2026-01-01 收款,2026-01-31 出發。
+    expect(computeExpectedRecognitionDate("2026-01-31", "2026-01-01")).toBe("2026-01-01");
+  });
+
+  it("31 天(剛好超過窗口)→ 走出發日分支", () => {
+    expect(computeExpectedRecognitionDate("2026-02-01", "2026-01-01")).toBe("2026-02-01");
+  });
+});
 
 describe("foldOutstandingTrust — outstanding + unmatched", () => {
   it("sums all rows into totalOutstanding and counts rows", () => {

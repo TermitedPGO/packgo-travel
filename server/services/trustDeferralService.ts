@@ -46,7 +46,7 @@
  *       reconciliation: should equal current trust account balance.
  */
 
-import { getDb } from "../db";
+import { getDb, type DrizzleTx } from "../db";
 import {
   trustDeferredIncome,
   linkedBankAccounts,
@@ -55,7 +55,7 @@ import {
   tourDepartures,
   payments,
 } from "../../drizzle/schema";
-import { and, eq, isNull, lte, gte } from "drizzle-orm";
+import { and, eq, isNull, lte, gte, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 // SECURITY_AUDIT_2026_05_14 P3-3: feature flag reads come from the typed
 // featureFlags module so a typo in env-var names becomes a compile error.
@@ -68,30 +68,38 @@ export function isTrustDeferralEnabled(): boolean {
   return featureFlags.trustDeferralEnabled();
 }
 
+/**
+ * F1 塊B (2026-07-08) 對抗審查 P1 修復:PLAID_TRUST_DEFERRAL_ENABLED(Plaid
+ * 銀行同步遞延)與 STRIPE_TRUST_DEFERRAL_ENABLED(Stripe checkout 直接遞延)
+ * 是兩個獨立、可分別切換的 flag。**建立**遞延列的路徑(processTrustInflow
+ * 只認 PLAID flag、deferStripeBookingIncome 的呼叫端只認 STRIPE flag)本來
+ * 就該分開——這是設計上刻意的,兩條路徑的資料來源不同。但**認列/查詢**
+ * 遞延列的路徑(recognizeReadyDepartures/totalDeferredForUser/
+ * trustRecognizeNow)如果只認 PLAID flag,會出現「Jeff 只開 STRIPE flag、
+ * PLAID flag 維持預設 off」這個最可能發生的裁示組合下,Stripe-direct 遞延
+ * 列永遠不會被認列、永遠不會被算進報表——3 路獨立對抗審查(含 1 路 opus)
+ * 全數命中同一個 P1。這支函式只給「認列/查詢」路徑用,不給「建立」路徑用
+ * ——建立路徑的兩個 flag 保持各自獨立判斷,不要在這裡混用。
+ */
+export function isAnyTrustDeferralEnabled(): boolean {
+  return featureFlags.trustDeferralEnabled() || featureFlags.stripeTrustDeferralEnabled();
+}
+
 const RECOGNITION_OFFSET_DAYS = featureFlags.trustRecognitionOffsetDays();
 const AUTOMATCH_MIN_CONFIDENCE = featureFlags.trustAutomatchMinConfidence();
-const AUTOMATCH_AMOUNT_WINDOW = Math.max(
-  0,
-  parseFloat(process.env.PLAID_TRUST_AUTOMATCH_AMOUNT_WINDOW_USD ?? "1.00") ||
-    1.0
-);
-const AUTOMATCH_DATE_WINDOW_DAYS = Math.max(
-  0,
-  parseInt(process.env.PLAID_TRUST_AUTOMATCH_DATE_WINDOW_DAYS ?? "2", 10) || 2
-);
+// F1 塊B (2026-07-08): these three used to be bare process.env reads here
+// (SECURITY_AUDIT_2026_05_14 P3-3 flagged this as a typo-risk gap — a
+// misspelled env var name would silently evaluate to the fallback with no
+// compile error). Centralized into featureFlags.ts alongside the two above.
+const AUTOMATCH_AMOUNT_WINDOW = featureFlags.trustAutomatchAmountWindowUsd();
+const AUTOMATCH_DATE_WINDOW_DAYS = featureFlags.trustAutomatchDateWindowDays();
 // Q7: when departure is within this many days of the deposit, recognize
 // income on the deposit date instead of deferring to departure. Per Jeff's
 // 2026-05-13 answer (option B), this is 30 days — short-lead bookings
 // crossing year boundaries get attributed to the deposit year, not the
 // departure year. Set to 0 to disable early recognition entirely (strict
 // departure-date attribution).
-const EARLY_RECOGNITION_WINDOW_DAYS = Math.max(
-  0,
-  parseInt(
-    process.env.PLAID_TRUST_EARLY_RECOGNITION_WINDOW_DAYS ?? "30",
-    10
-  ) || 30
-);
+const EARLY_RECOGNITION_WINDOW_DAYS = featureFlags.trustEarlyRecognitionWindowDays();
 
 // ─── Heuristic matching ────────────────────────────────────────────────────
 //
@@ -240,6 +248,34 @@ async function findBookingMatch(txn: {
   return null;
 }
 
+/**
+ * Pure — the "expected recognition date" calculation, extracted (F1 塊B,
+ * 2026-07-08) out of processTrustInflow/linkInflowToBooking so
+ * deferStripeBookingIncome (Stripe-direct path, bookingId already known,
+ * no heuristic matching needed) can reuse the exact same rule instead of
+ * re-deriving it. Behavior unchanged from the two inline call sites this
+ * replaces.
+ *
+ * Q7 early-recognition: short-lead bookings recognize on the deposit date
+ * instead of departure date (keeps year-end attribution simple — a 12/30
+ * deposit for a 1/5 departure is this year's income, not next year's).
+ * Disabled by setting the window to 0 (strict departure-date attribution).
+ */
+export function computeExpectedRecognitionDate(
+  departureDateStr: string,
+  depositDateStr: string,
+): string {
+  const dep = new Date(departureDateStr);
+  const deposit = new Date(depositDateStr);
+  const daysToDeparture = Math.ceil((dep.getTime() - deposit.getTime()) / 86_400_000);
+
+  if (EARLY_RECOGNITION_WINDOW_DAYS > 0 && daysToDeparture <= EARLY_RECOGNITION_WINDOW_DAYS) {
+    return deposit.toISOString().slice(0, 10);
+  }
+  dep.setDate(dep.getDate() + RECOGNITION_OFFSET_DAYS);
+  return dep.toISOString().slice(0, 10);
+}
+
 // ─── Public API ────────────────────────────────────────────────────────────
 
 export interface ProcessTrustInflowResult {
@@ -343,27 +379,10 @@ export async function processTrustInflow(
 
   let expectedRecognitionDate: string | null = null;
   if (match?.departureDate) {
-    const dep = new Date(match.departureDate);
-    const deposit = new Date(String(row.txn.date));
-    const daysToDeparture = Math.ceil(
-      (dep.getTime() - deposit.getTime()) / 86_400_000
+    expectedRecognitionDate = computeExpectedRecognitionDate(
+      match.departureDate,
+      String(row.txn.date),
     );
-
-    // Q7 early-recognition: short-lead bookings recognize on deposit date.
-    // Keeps year-end attribution simple — a 12/30 deposit for 1/5 departure
-    // is 2026 income, not 2027. Disabled by setting window to 0.
-    if (
-      EARLY_RECOGNITION_WINDOW_DAYS > 0 &&
-      daysToDeparture <= EARLY_RECOGNITION_WINDOW_DAYS
-    ) {
-      expectedRecognitionDate = deposit.toISOString().slice(0, 10);
-      console.log(
-        `[trust-deferral] txn ${row.txn.id} short-lead (${daysToDeparture}d to departure) — recognize on deposit ${expectedRecognitionDate}`
-      );
-    } else {
-      dep.setDate(dep.getDate() + RECOGNITION_OFFSET_DAYS);
-      expectedRecognitionDate = dep.toISOString().slice(0, 10);
-    }
   }
 
   // Insert (idempotent on bankTransactionId)
@@ -421,6 +440,143 @@ export async function processTrustInflow(
   }
 }
 
+// ─── F1 塊B (2026-07-08): Stripe tour-checkout 直接遞延 ─────────────────────
+//
+// Feature-flagged via featureFlags.stripeTrustDeferralEnabled()
+// (STRIPE_TRUST_DEFERRAL_ENABLED,預設 off)。呼叫端(stripeWebhook.ts)只在
+// flag 開啟時才呼叫這支——flag 關閉時的行為由呼叫端自己保持 byte-identical,
+// 這支函式本身不重複檢查 flag。
+//
+// 與 processTrustInflow(Plaid 銀行同步偵測到 Trust 帳戶存款)的差異:
+// Stripe checkout 當下 bookingId 是 webhook metadata 直接給的,100% 確定,
+// 不需要 findBookingMatch 的金額+日期heuristic 去猜——本函式跳過整個配對
+// 演算法,直接建立已配對(matchConfidence=100)的遞延列。
+//
+// Schema 限制(本批零 migration,bankTransactionLinks 是 F1 唯一授權的一張):
+//   - trustDeferredIncome.bankTransactionId 是 NOT NULL + UNIQUE,設計上綁定
+//     一筆 Plaid bankTransactions.id。Stripe checkout 付款當下還沒有對應的
+//     Plaid 銀行交易(Stripe 撥款落地是之後的事;落地時會被 F1 塊A 的
+//     stripe_payout 規則正確識別成「轉撥非收入」,不會再走這條、也不會跟
+//     這裡的遞延列衝突)。用 `-payments.id` 當 sentinel 值頂住 NOT
+//     NULL/UNIQUE 約束——Plaid 的 bankTransactions.id 是 autoincrement 正
+//     整數,負值保證零碰撞,且天然可追溯回是哪筆 Stripe payment,UNIQUE
+//     約束天然提供「同一筆 payment 重複呼叫(webhook 重放)不會建立第二筆」
+//     的冪等保護。
+//   - matchMethod 只能是既有 enum('auto'|'manual'|'unmatched')三選一(同一
+//     原因,不能新增 dispatch 原文提到的 'stripe_direct' 這個 enum 值)。
+//     bookingId 是系統自動決定(非 Jeff 手動 link),語意上最貼近 'auto';
+//     來源記在 notes 欄位供追溯。
+//   - linkedAccountId 填 0(佔位,不對應真正的 linkedBankAccounts 列)——按
+//     帳戶分帳的既有查詢(如 computeOutstandingTrust)本來就不會撈到假 ID,
+//     不影響既有 Plaid 側報表;若未來要讓 year-end export 等其他消費者也
+//     涵蓋 Stripe-direct 列需另外處理,本批不做(T6 已知限制)。
+//
+// 這些是 dispatch 沒有點名怎麼處理 schema 衝突時,執行者的實作決策,標記
+// 供 Fable 驗收時特別留意(T6 偏離申報)。
+
+export interface DeferStripeBookingIncomeResult {
+  deferredId: number | null;
+  expectedRecognitionDate: string | null;
+  reason: string;
+}
+
+/**
+ * 建立(或冪等取得既有)一筆 Stripe tour-checkout 的遞延收入列。呼叫端
+ * (stripeWebhook.ts)必須傳入自己開的 tx,讓這筆寫入跟 payments/bookings
+ * 的原子交易綁在一起——任一步失敗全部 rollback,跟現行 createAccountingEntry
+ * 的原子性保證一致。
+ */
+export async function deferStripeBookingIncome(
+  opts: {
+    paymentId: number;
+    bookingId: number;
+    /** USD,正數。 */
+    amount: number;
+    isoCurrencyCode: string;
+    depositDate: Date;
+    /** tourDepartures.departureDate;理論上 booking 流程保證有,缺值則不算
+     *  expectedRecognitionDate(交給每日認列掃描的 skippedNoDepartureDate
+     *  分支處理,同 Plaid 路徑的既有行為)。 */
+    departureDate: string | null;
+  },
+  tx: DrizzleTx,
+): Promise<DeferStripeBookingIncomeResult> {
+  const sentinelBankTransactionId = -opts.paymentId;
+  // F1 塊B 對抗審查 P2 修復:用 America/Los_Angeles 曆日,不是 UTC 曆日。
+  // PACK&GO 是加州公司,客人多半太平洋時區結帳;Plaid 路徑的 depositDate
+  // 直接來自 bankTransactions.date(Plaid 本來就是純日期型別,無時區轉換
+  // 問題),但 Stripe-direct 這裡是拿 webhook 收到當下的 wall-clock Date
+  // 物件轉曆日——若不校正時區,美西深夜結帳(UTC 已跨到隔天)會被錯記成
+  // UTC 曆日的隔天,可能讓早鳥認列窗口(30 天)在年度交界附近誤判年度歸屬。
+  const depositDateStr = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(opts.depositDate);
+  const expectedRecognitionDate = opts.departureDate
+    ? computeExpectedRecognitionDate(opts.departureDate, depositDateStr)
+    : null;
+
+  try {
+    const ins: any = await tx.insert(trustDeferredIncome).values({
+      bankTransactionId: sentinelBankTransactionId,
+      linkedAccountId: 0,
+      bookingId: opts.bookingId,
+      matchConfidence: 100,
+      matchMethod: "auto",
+      amount: String(opts.amount.toFixed(2)),
+      isoCurrencyCode: opts.isoCurrencyCode,
+      depositDate: depositDateStr as any,
+      expectedRecognitionDate: expectedRecognitionDate as any,
+      notes: "stripe_direct — Stripe tour checkout,bookingId 直接來自 webhook metadata,非 Plaid 銀行同步猜測配對",
+    });
+    const deferredId = Number(ins?.[0]?.insertId ?? 0) || null;
+    return { deferredId, expectedRecognitionDate, reason: "deferred" };
+  } catch (err) {
+    const e = err as any;
+    if (String(e?.code ?? "").includes("DUP")) {
+      const [existing] = await tx
+        .select()
+        .from(trustDeferredIncome)
+        .where(eq(trustDeferredIncome.bankTransactionId, sentinelBankTransactionId))
+        .limit(1);
+      return {
+        deferredId: existing?.id ?? null,
+        expectedRecognitionDate: existing?.expectedRecognitionDate
+          ? String(existing.expectedRecognitionDate)
+          : null,
+        reason: "already deferred (idempotent skip)",
+      };
+    }
+    // 讓呼叫端的 tx 照既有 createAccountingEntry 慣例 rollback整筆(webhook
+    // idempotency 表會讓 Stripe 重試),不在這裡吞錯誤。
+    throw err;
+  }
+}
+
+/**
+ * 用 sentinel bankTransactionId(-paymentId)找到某筆 Stripe payment 對應的
+ * 遞延列(若有)。塊B 退款邊界用:charge.refunded 時若找得到未認列的遞延列,
+ * 標記 reversed,不認列。
+ */
+export async function findStripeDeferredByPaymentId(
+  paymentId: number,
+): Promise<{ id: number; recognizedAt: Date | null; reversedAt: Date | null } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db
+    .select({
+      id: trustDeferredIncome.id,
+      recognizedAt: trustDeferredIncome.recognizedAt,
+      reversedAt: trustDeferredIncome.reversedAt,
+    })
+    .from(trustDeferredIncome)
+    .where(eq(trustDeferredIncome.bankTransactionId, -paymentId))
+    .limit(1);
+  return row ?? null;
+}
+
 export interface RecognizeReadyResult {
   runId: string;
   scanned: number;
@@ -428,6 +584,10 @@ export interface RecognizeReadyResult {
   totalRecognizedAmount: number;
   skippedNoDepartureDate: number;
   skippedNotMatched: number;
+  /** F1 塊B (2026-07-08) 對抗審查 P1 修復:booking 已 cancelled(退款流程
+   *  轉態)但遞延列還沒被 reverseDeferral 標記(例如 post-commit 沖銷失敗
+   *  留下的殘留態)——這裡當最後一道防線擋下,不認列已取消訂單的收入。 */
+  skippedCancelledBooking: number;
 }
 
 /**
@@ -451,9 +611,14 @@ export async function recognizeReadyDepartures(
     totalRecognizedAmount: 0,
     skippedNoDepartureDate: 0,
     skippedNotMatched: 0,
+    skippedCancelledBooking: 0,
   };
 
-  if (!isTrustDeferralEnabled()) return empty;
+  // F1 塊B (2026-07-08) 對抗審查 P1 修復:改用 isAnyTrustDeferralEnabled
+  // (PLAID flag OR STRIPE flag)——只認 PLAID flag 會讓「只開 STRIPE flag」
+  // (CPA 對 Stripe 適用範圍的裁示,跟 Jeff 有沒有啟用既有 Plaid 遞延系統是
+  // 兩件獨立的事)這個最可能發生的組合下,Stripe-direct 遞延列永遠不被認列。
+  if (!isAnyTrustDeferralEnabled()) return empty;
 
   const db = await getDb();
   if (!db) return empty;
@@ -473,6 +638,25 @@ export async function recognizeReadyDepartures(
   let totalAmt = 0;
   let skipNoDate = 0;
   let skipNoMatch = 0;
+  let skipCancelled = 0;
+
+  // F1 塊B 對抗審查 P1 修復:最後一道防線——booking 已 cancelled(退款流程
+  // 轉態)但遞延列還沒被 reverseDeferral 標記 reversed(例如 post-commit 沖銷
+  // 失敗、或還沒收到 webhook)的殘留態,認列前先擋下,不把已退款的錢當收入。
+  // 批次撈,不逐列查(N+1)。
+  const readyBookingIds = candidates
+    .filter((r) => r.expectedRecognitionDate && r.bookingId && String(r.expectedRecognitionDate) <= today)
+    .map((r) => r.bookingId as number);
+  const cancelledBookingIds = new Set<number>();
+  if (readyBookingIds.length > 0) {
+    const bookingRows = await db
+      .select({ id: bookings.id, bookingStatus: bookings.bookingStatus })
+      .from(bookings)
+      .where(inArray(bookings.id, readyBookingIds));
+    for (const b of bookingRows) {
+      if (b.bookingStatus === "cancelled") cancelledBookingIds.add(b.id);
+    }
+  }
 
   for (const r of candidates) {
     if (!r.expectedRecognitionDate) {
@@ -487,6 +671,10 @@ export async function recognizeReadyDepartures(
     }
     const expected = String(r.expectedRecognitionDate);
     if (expected > today) continue; // not yet
+    if (cancelledBookingIds.has(r.bookingId)) {
+      skipCancelled++;
+      continue;
+    }
     await db
       .update(trustDeferredIncome)
       .set({
@@ -499,7 +687,7 @@ export async function recognizeReadyDepartures(
   }
 
   console.log(
-    `[trust-deferral] run=${runId} scanned=${candidates.length} recognized=${recognized} skippedNoDate=${skipNoDate} skippedNoMatch=${skipNoMatch} totalAmt=${totalAmt.toFixed(2)}`
+    `[trust-deferral] run=${runId} scanned=${candidates.length} recognized=${recognized} skippedNoDate=${skipNoDate} skippedNoMatch=${skipNoMatch} skippedCancelled=${skipCancelled} totalAmt=${totalAmt.toFixed(2)}`
   );
 
   return {
@@ -509,6 +697,7 @@ export async function recognizeReadyDepartures(
     totalRecognizedAmount: totalAmt,
     skippedNoDepartureDate: skipNoDate,
     skippedNotMatched: skipNoMatch,
+    skippedCancelledBooking: skipCancelled,
   };
 }
 
@@ -540,21 +729,10 @@ export async function linkInflowToBooking(opts: {
 
   let expectedRecognitionDate: string | null = null;
   if (booking?.departureDate && deferred?.depositDate) {
-    const dep = new Date(booking.departureDate as any);
-    const deposit = new Date(String(deferred.depositDate));
-    const daysToDeparture = Math.ceil(
-      (dep.getTime() - deposit.getTime()) / 86_400_000
+    expectedRecognitionDate = computeExpectedRecognitionDate(
+      String(booking.departureDate),
+      String(deferred.depositDate),
     );
-    // Q7 short-lead → recognize on deposit
-    if (
-      EARLY_RECOGNITION_WINDOW_DAYS > 0 &&
-      daysToDeparture <= EARLY_RECOGNITION_WINDOW_DAYS
-    ) {
-      expectedRecognitionDate = deposit.toISOString().slice(0, 10);
-    } else {
-      dep.setDate(dep.getDate() + RECOGNITION_OFFSET_DAYS);
-      expectedRecognitionDate = dep.toISOString().slice(0, 10);
-    }
   }
 
   await db
@@ -822,7 +1000,16 @@ export async function totalDeferredForUser(opts: {
   asOfDate: string;     // YYYY-MM-DD — include deposits up to (and including) this date
   depositSince?: string; // optional YYYY-MM-DD — only deposits ON/AFTER this date
 }): Promise<number> {
-  if (!isTrustDeferralEnabled()) return 0;
+  // F1 塊B 對抗審查 P1 修復:同 recognizeReadyDepartures,認列/查詢路徑要看
+  // 「任一」遞延機制的 flag,不能只看 PLAID flag(否則 STRIPE-only 開啟時,
+  // 這支函式對 Stripe-direct 列永遠回 0,即使 flag 已經開了)。
+  //
+  // ⚠ 已知限制(docs/features/finance-dept/progress.md「重大已知限制」段):
+  // 下面的 eq(linkedBankAccounts.isActive,1) 是 INNER JOIN 語意的過濾條件,
+  // Stripe-direct 列的 linkedAccountId=0(sentinel,無對應真實帳戶)join 不到
+  // 任何 linkedBankAccounts 列,仍然會被這個條件排除——這是另一個獨立問題
+  // (sentinel ID 對不上真實帳戶,不是 flag 判斷錯誤),F1 不修,留 F2。
+  if (!isAnyTrustDeferralEnabled()) return 0;
   const db = await getDb();
   if (!db) return 0;
   // Deferred = deposited within [depositSince, asOfDate], not yet recognized, not reversed

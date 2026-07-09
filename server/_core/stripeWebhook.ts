@@ -9,6 +9,9 @@ import { notifyOwner } from "./notification";
 import { redactEmail } from "./redact";
 import { claimStripeEvent, markStripeEventSucceeded, markStripeEventFailed } from "./stripeWebhookIdempotency";
 import { reportFunnelError } from "./errorFunnel";
+import { stripeTrustDeferralEnabled } from "./featureFlags";
+import { deferStripeBookingIncome } from "../services/trustDeferralService";
+import { getDepartureById } from "../db/tour";
 // v2 Wave 1 Module 1.2 — pino structured logger. We use a child logger so
 // every line carries module="stripeWebhook" without manual tagging.
 // Searchability: Fly's log grep matches inside JSON strings, so
@@ -255,8 +258,24 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
     );
   }
 
+  // F1 塊B (2026-07-08): STRIPE_TRUST_DEFERRAL_ENABLED(預設 off)。OFF 時
+  // 這個區塊的行為必須與現版 byte-identical(dispatch-f1.md 塊B 明文要求,
+  // 測試釘死)——flag 判斷放在 tx 外層,tx 內只有「走哪一支」的分支,不改
+  // createPayment/updateBooking 呼叫本身。
+  const deferToTrust = stripeTrustDeferralEnabled();
+  // 只在 flag on 時才需要查 departureDate(避免 flag off 時多一次查詢,
+  // 維持 byte-identical 的查詢足跡)。
+  const departureDateRaw =
+    deferToTrust && booking.departureId
+      ? (await getDepartureById(booking.departureId))?.departureDate ?? null
+      : null;
+  // toISOString(), 不是 String() — Date 的預設 String() 轉出的是本地時區
+  // 格式("Mon Nov 30 2026 16:00:00 GMT-0800..."),不是 ISO,會讓
+  // computeExpectedRecognitionDate 拿到不乾淨的日期字串。
+  const departureDate = departureDateRaw ? new Date(departureDateRaw).toISOString() : null;
+
   await drizzleDbForTx.transaction(async (tx) => {
-    await db.createPayment(
+    const paymentRow = await db.createPayment(
       {
         bookingId: parseInt(bookingId),
         stripePaymentIntentId: paymentIntentId,
@@ -280,27 +299,45 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
       tx,
     );
 
-    await createAccountingEntry(
-      {
-        entryType: "income",
-        category: "tour_booking",
-        amount: String(amount),
-        currency: (session.currency ?? "usd").toUpperCase(),
-        description: `行程訂單付款 #${bookingId}${paymentType === "deposit" ? "（訂金）" : paymentType === "balance" ? "（尾款）" : "（全額）"}`,
-        bookingId: parseInt(bookingId),
-        entryDate: new Date(),
-        isTaxDeductible: 0,
-        createdBy: 1,
-      },
-      tx,
-    );
+    if (deferToTrust) {
+      // 塊B:寫 trustDeferredIncome,不立即 createAccountingEntry —
+      // bookingId 直接來自 webhook metadata(100% 確定,不用 findBookingMatch
+      // 猜),認列規則(expectedRecognitionDate)沿用既有出發日計算,departure
+      // 到才由既有的 recognizeReadyDepartures 每日排程認列。
+      await deferStripeBookingIncome(
+        {
+          paymentId: paymentRow.id,
+          bookingId: parseInt(bookingId),
+          amount,
+          isoCurrencyCode: (session.currency ?? "usd").toUpperCase(),
+          depositDate: new Date(),
+          departureDate,
+        },
+        tx,
+      );
+    } else {
+      await createAccountingEntry(
+        {
+          entryType: "income",
+          category: "tour_booking",
+          amount: String(amount),
+          currency: (session.currency ?? "usd").toUpperCase(),
+          description: `行程訂單付款 #${bookingId}${paymentType === "deposit" ? "（訂金）" : paymentType === "balance" ? "（尾款）" : "（全額）"}`,
+          bookingId: parseInt(bookingId),
+          entryDate: new Date(),
+          isTaxDeductible: 0,
+          createdBy: 1,
+        },
+        tx,
+      );
+    }
   });
 
   log.info(
     { bookingId, newPaymentStatus },
     "[Stripe Webhook] Booking payment status updated",
   );
-  log.info({ bookingId }, "[Stripe Webhook] Accounting entry created");
+  log.info({ bookingId, deferToTrust }, deferToTrust ? "[Stripe Webhook] Trust deferral recorded" : "[Stripe Webhook] Accounting entry created");
 
   // ─── POST-COMMIT side effects ────────────────────────────────────────
   // Anything below runs ONLY if the transaction above committed. Each side
@@ -670,9 +707,15 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
 
   const isFullRefund = charge.amount_refunded >= charge.amount;
   if (!isFullRefund) {
+    // F1 塊B (2026-07-08) 對抗審查 P2:部分退款不會 touch 任何 Stripe-direct
+    // 遞延列(dispatch 塊B 退款邊界明文只要求處理全額退款)——若這筆付款有
+    // 一筆遞延列在等認列,出發日到了會照全額認列,實際只該認列扣掉退款後
+    // 的淨額。這是已知、刻意留給 F2 的更細退款會計缺口(見
+    // docs/features/finance-dept/progress.md「已知限制」),這裡只補強 log
+    // 訊息讓 fly logs 排查時看得到這個關聯,不是完整修復。
     log.info(
       { refunded: charge.amount_refunded, total: charge.amount },
-      "[Stripe Webhook] Partial refund detected — leaving paymentStatus alone, manual reconciliation needed",
+      "[Stripe Webhook] Partial refund detected — leaving paymentStatus alone, manual reconciliation needed (NOTE: if STRIPE_TRUST_DEFERRAL_ENABLED is on and this payment has an active trust-deferred row, it will still be recognized at full amount on departure — partial-refund deferral accounting is deferred to F2)",
     );
     return;
   }
@@ -825,6 +868,35 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
         context: { bookingId: payment.bookingId },
       }).catch(() => {});
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // POST-COMMIT: F1 塊B (2026-07-08) 退款邊界 — 若這筆付款有 Stripe-direct
+  // 遞延列(STRIPE_TRUST_DEFERRAL_ENABLED 開啟時 checkout 當下建立的),標記
+  // reversed,不認列。查無(flag 從未開過,或非 tour booking)則靜默 no-op。
+  // 只處理「標 reversed」這個邊界;已認列(recognizedAt 已設)的列不動——
+  // 更細的退款會計(例如已認列後才退款的沖銷分錄)留 F2,同 trustDeferralService.
+  // reverseDeferralForTransaction 對「已認列不動」的既有慣例一致。
+  // ─────────────────────────────────────────────────────────────────────
+  try {
+    const { findStripeDeferredByPaymentId, reverseDeferral } = await import(
+      "../services/trustDeferralService"
+    );
+    const deferred = await findStripeDeferredByPaymentId(payment.id);
+    if (deferred && !deferred.recognizedAt && !deferred.reversedAt) {
+      await reverseDeferral({ deferredId: deferred.id, reason: "Stripe charge.refunded (full refund)" });
+      log.info(
+        { paymentId: payment.id, deferredId: deferred.id },
+        "[Stripe Webhook] Trust-deferred income reversed on refund",
+      );
+    }
+  } catch (err) {
+    log.error({ err, paymentId: payment.id }, "[Stripe Webhook] Trust deferral reversal check failed");
+    reportFunnelError({
+      source: "fail-open:stripeWebhook:trustDeferralReversal",
+      err,
+      context: { paymentId: payment.id },
+    }).catch(() => {});
   }
 
   // QA Audit 2026-05-11 Phase 5 fix: notify Jeff on every refund — full or

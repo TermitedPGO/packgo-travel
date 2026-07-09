@@ -1316,6 +1316,8 @@ export interface TrustRecognitionJobResult {
   totalRecognizedAmount: number;
   skippedNoDepartureDate: number;
   skippedNotMatched: number;
+  /** F1 塊B (2026-07-08) 對抗審查 P1 修復:見 trustDeferralService.RecognizeReadyResult。 */
+  skippedCancelledBooking?: number;
 }
 
 export const trustRecognitionQueue = new Queue<
