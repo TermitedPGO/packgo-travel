@@ -585,3 +585,38 @@ pnpm i18n:parity: en 7685 keys │ missing 0 │ extra 0
 - `bankTransactionLinkEngine.ts` 的 haystack 對稱性只補了
   `paymentMetaReason`,payee/payer 級別的深度整合(型別加欄位+呼叫端
   plumbing)留作已知殘餘差距,見上方 P2 #7。
+
+## 塊D:衛生清理 + 六項回爐(零 migration)
+
+**狀態:✅ 完成。commit `3de1e67`,tsc 0 錯 + 全套 323 檔 4753 tests 綠 +
+i18n 100% parity。完整 T6 見 `t6-report-20260709-f1.md`。**
+
+塊D 三件:
+1. recordPayment(adminCustomerOrders.ts)移除寫死 `'square'` 回退,method 與
+   訂單既有值皆缺時存 `null` 不猜(Jeff 有五條收款通道,預設 square 會汙染對帳)。
+2. 刪三個死 UI 元件(FinanceTab.tsx / landings/FinanceLanding.tsx /
+   BankAccountsTab.tsx),fresh 驗證零 live import;ProfitLossV2.tsx:50 +
+   plaidRouter.ts:1428/1531 三處孤兒註解改寫(financeKpi 端點仍 live,只改註解)。
+3. Plaid sandbox 殘留清理端點 `POST /api/admin/cleanup-sandbox-residue`
+   (dry_run/confirm,LOCAL_SCRIPT_TOKEN)+ 新檔 `sandboxResidueCleanup.ts`。
+   三重防護(SQL WHERE + JS 逐列複驗 assertOnlySandboxRows + BofA 黑名單),
+   只刪 First Platypus Bank + isActive=0。dry-run 實數待 prod 跑(本地無 DB)。
+
+六項回爐(監工代 push 塊C 後回流):
+1. 抽 `wouldExceedAllocation` 純函式,8 個真實數字紅綠例(engine.test.ts)。
+2. `processInboundTransaction` 可注入假 db 四態整合測試(新檔
+   `bankTransactionLinkEngine.process.test.ts`,8 例)。
+3. `isStripePayoutInflow` 補獨立單字 'stripe' 誤標紅測試(釘現狀,記已知風險)。
+4. `deferStripeBookingIncome`/`reverseDeferral` auditLog:T6 申報 webhook 豁免
+   (無 ctx.user,靠 trustDeferredIncome 列 + reversedAt + idempotency 表追溯)。
+5. 0113 migration 註解移除字面 `statement-breakpoint` marker。
+6. T6 兩行紅字(STRIPE_TRUST_DEFERRAL_ENABLED 需先建 F2 P&L 接線;部分退款不觸
+   遞延 → F2)。
+
+順帶:Wave2 SQL 登記表行號漂移修正(registryEntries.ts 6 條 source)。
+
+### 待 Jeff(見 T6 第 6 節)
+
+- sandbox 清理 dry-run 待 prod 跑(預期 24 帳戶),Jeff 點頭才 confirm。
+- 塊C 存量回填 dry-run 待 prod 跑,數字回填塊C T6 欄。
+- STRIPE_TRUST_DEFERRAL_ENABLED flag 在 F2 P&L 接線建好前不准翻開。
