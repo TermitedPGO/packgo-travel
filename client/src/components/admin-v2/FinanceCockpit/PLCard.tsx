@@ -224,6 +224,16 @@ export function PLCard() {
               <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-gray-300" />
               {t("financeCockpit.ledger.plExclTransfer")}
               <b className="font-semibold text-gray-600 tabular-nums">{fmtSignedMoney(r?.transfer.total ?? 0)}</b>
+              {/* F3 塊D 回爐 #5:主值是淨額(一出一進相抵可為 $0),副字給搬運總量,
+                  Jeff 才看得到 4 筆 $13,540 的資金移動不是「沒動」 */}
+              {(r?.transfer.count ?? 0) > 0 && (
+                <span className="text-[10px] text-gray-400 tabular-nums">
+                  {t("financeCockpit.ledger.plExclTransferSub", {
+                    count: String(r?.transfer.count ?? 0),
+                    gross: fmtMoney(r?.transfer.gross ?? 0),
+                  })}
+                </span>
+              )}
             </span>
             <span className="flex items-center gap-1.5 text-[11px] text-gray-500">
               <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-gray-300" />

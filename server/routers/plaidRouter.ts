@@ -2190,11 +2190,9 @@ export const plaidRouter = router({
     .query(async ({ input }) => {
       const { generateBankPL } = await import("../services/bankPLService");
       const { laToday } = await import("../services/trustOutstandingSplit");
-      const today = laToday();
-      const curY = Number(today.slice(0, 4));
-      const curM = Number(today.slice(5, 7));
-      const pad = (n: number) => String(n).padStart(2, "0");
-      const lastMonth = input.year < curY ? 12 : input.year > curY ? 0 : curM;
+      // 期間窗數學抽純函式(taxAggregates,F3 回爐 #1,有專屬單測)
+      const { monthlyTrendWindows } = await import("../services/taxAggregates");
+      const windows = monthlyTrendWindows(input.year, laToday());
 
       const months: {
         month: number;
@@ -2204,15 +2202,10 @@ export const plaidRouter = router({
         netProfit: number;
         profitMargin: number;
       }[] = [];
-      for (let m = 1; m <= lastMonth; m++) {
-        const startDate = `${input.year}-${pad(m)}-01`;
-        const endDate =
-          input.year === curY && m === curM
-            ? today
-            : `${input.year}-${pad(m)}-${pad(new Date(input.year, m, 0).getDate())}`;
-        const r = await generateBankPL({ startDate, endDate });
+      for (const w of windows) {
+        const r = await generateBankPL({ startDate: w.startDate, endDate: w.endDate });
         months.push({
-          month: m,
+          month: w.month,
           income: r.income.total,
           cogs: r.expenses.cogs,
           opex: r.expenses.operating,
@@ -2254,21 +2247,9 @@ export const plaidRouter = router({
           )
         );
 
-      const byVendor = new Map<string, number>();
-      for (const r of rows) {
-        // Jeff override 優先(bankPLService 同一優先序);只算供應商成本
-        const cat = r.jeffOverrideCategory ?? r.agentCategory;
-        if (cat !== "cogs_tour") continue;
-        const amt = parseFloat(String(r.amount)) || 0;
-        if (amt <= 0) continue; // 正 = 流出(付款);入帳不算
-        const name = (r.counterparty || r.merchantName || "").trim();
-        if (!name) continue;
-        byVendor.set(name, (byVendor.get(name) ?? 0) + amt);
-      }
-      const vendors = [...byVendor.entries()]
-        .map(([counterparty, total]) => ({ counterparty, total: Math.round(total * 100) / 100 }))
-        .filter((v) => v.total >= 600)
-        .sort((a, b) => b.total - a.total);
-      return { vendors };
+      // 彙總數學抽純函式(taxAggregates,F3 回爐 #1,有專屬單測:override
+      // 優先序 / amt<=0 毛額語義 / $600 邊界 / 名稱 fallback 鏈)
+      const { foldVendor1099 } = await import("../services/taxAggregates");
+      return { vendors: foldVendor1099(rows) };
     }),
 });

@@ -54,6 +54,9 @@ describe("foldBankPLRows — section math", () => {
     // net owner movement: +5000 in − 2000 out = 3000 (inflow-positive)
     expect(r.transfer.total).toBe(3000);
     expect(r.transfer.count).toBe(2);
+    // F3 塊D 回爐 #5:gross = 搬運總量(|5000| + |2000|),netted 成 0 時 UI
+    // 仍能顯示「N 筆 · 搬運 $gross」
+    expect(r.transfer.gross).toBe(7000);
     // none of that 5000 leaked into income or profit
     expect(r.income.byCategory.transfer).toBeUndefined();
     expect(r.netProfit).toBe(900); // unchanged by the 5000 inflow

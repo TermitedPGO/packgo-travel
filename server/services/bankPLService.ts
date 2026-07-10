@@ -96,8 +96,10 @@ export interface BankPLReport {
   /** Owner capital / internal transfers — summed but EXCLUDED from income,
    *  expenses, and netProfit. Surfaced so the UI can show it as its own tile
    *  (Jeff 2026-05-28:「我自己拿出 不代表公司賺」). Inflow-positive convention:
-   *  money IN from owner / other accounts is positive, owner draw is negative. */
-  transfer: { total: number; count: number };
+   *  money IN from owner / other accounts is positive, owner draw is negative.
+   *  gross = 絕對值加總(搬運總量;一出一進 netted 成 $0 時 UI 仍能顯示
+   *  「N 筆 · 搬運 $gross」,F3 塊D 回爐 #5,2026-07-10)。 */
+  transfer: { total: number; count: number; gross: number };
   /** Stripe 撥款落地(轉撥,非收入)——同 transfer 排除出損益,但獨立成自己的
    *  tile 讓 Jeff 看得到這筆錢去哪了(F1 塊C 2026-07-08 對抗審查 P1 修復:
    *  原本 stripe_payout 落進 fold 的 if-chain 沒有分支接住,金額靜默消失,
@@ -241,6 +243,7 @@ export function foldBankPLRows(
   let operating = 0;
   let refunds = 0;
   let transferTotal = 0;
+  let transferGross = 0;
   let transferCount = 0;
   let stripePayoutTotal = 0;
   let stripePayoutCount = 0;
@@ -281,6 +284,7 @@ export function foldBankPLRows(
       // positive, same flip as income) so the UI can show owner-money movement
       // transparently in its own tile.
       transferTotal += -amt;
+      transferGross += Math.abs(amt);
       transferCount++;
       continue;
     }
@@ -344,7 +348,7 @@ export function foldBankPLRows(
       byCategory: expensesByCategory,
     },
     refunds,
-    transfer: { total: transferTotal, count: transferCount },
+    transfer: { total: transferTotal, count: transferCount, gross: transferGross },
     stripePayout: { total: stripePayoutTotal, count: stripePayoutCount },
     grossProfit,
     netProfit,
@@ -365,7 +369,7 @@ function emptyReport(startDate: string, endDate: string): BankPLReport {
     income: { total: 0, byCategory: {} },
     expenses: { total: 0, cogs: 0, operating: 0, byCategory: {} },
     refunds: 0,
-    transfer: { total: 0, count: 0 },
+    transfer: { total: 0, count: 0, gross: 0 },
     stripePayout: { total: 0, count: 0 },
     trustDeferredIncome: 0,
     grossProfit: 0,

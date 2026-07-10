@@ -231,6 +231,15 @@ export function TrustCard({ trust }: { trust: TrustTile }) {
               })}
               {driftClean ? (
                 <> {t("financeCockpit.ledger.trustNoteBalanceClean", { balance: fmtMoney(trust.balance) })}</>
+              ) : drift < 0 ? (
+                /* F3 塊D 回爐 #3:負 drift 方向感知 —— 信託現金低於追蹤中的
+                   未認列訂金,是查核級訊號(訂金可能未入信託或提前轉出) */
+                <>{" "}
+                  {t("financeCockpit.ledger.trustNoteBalanceDriftNegative", {
+                    balance: fmtMoney(trust.balance),
+                    gap: fmtMoney(Math.abs(drift)),
+                  })}
+                </>
               ) : (
                 <>{" "}
                   {t("financeCockpit.ledger.trustNoteBalanceDrift", {

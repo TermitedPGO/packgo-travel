@@ -128,8 +128,14 @@ export function TaxDetail() {
 
   const income = r?.income.total ?? 0;
   const net = r?.netProfit ?? 0;
+  // F3 塊D 回爐 #4(指揮裁決):營收 KPI 主值 = 毛收入(Line 1 gross receipts,
+  // 對齊 D 藍本與稅表語意);退款 ≠0 時副行「退款 −$X · 淨 $Y」。growth 同以
+  // gross 對 gross。
+  const grossReceipts = r?.income.byCategory?.income_booking ?? 0;
+  const prevGross = p?.income.byCategory?.income_booking ?? 0;
+  const refunds = r?.refunds ?? 0;
   const growth =
-    p && p.income.total > 0 ? Math.round(((income - p.income.total) / p.income.total) * 100) : null;
+    prevGross > 0 ? Math.round(((grossReceipts - prevGross) / prevGross) * 100) : null;
 
   // 費用行(Schedule C Part II):cogs 兩桶 + opex,照 SCHEDULE_C_MAP 順序
   const expenseRows = useMemo(() => {
@@ -221,10 +227,15 @@ export function TaxDetail() {
             {t("financeCockpit.tax.kpiRevenue", { scope: scopeLabel })}
           </div>
           <div className="mt-2 text-[21px] font-bold leading-none tracking-tight text-gray-900 tabular-nums">
-            {fmtMoney(income)}
+            {fmtMoney(grossReceipts)}
           </div>
           <div className="mt-1.5 truncate text-[10px] text-gray-400">
-            {growth !== null ? (
+            {refunds !== 0 ? (
+              t("financeCockpit.tax.kpiRevenueRefundHint", {
+                refund: fmtSignedMoney(-refunds),
+                net: fmtMoney(income),
+              })
+            ) : growth !== null ? (
               <>
                 <span className="font-semibold text-emerald-700">
                   {growth >= 0 ? "↑" : "↓"} {Math.abs(growth)}%

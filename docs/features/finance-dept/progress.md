@@ -911,3 +911,137 @@ bankTransactionLinks 現有 14 筆 link(引擎部署後已開始工作)。
 designLint.test.ts 源碼級斷言 5 條全綠(狀態色不做背景填色 / serif 只准
 PageHeader / 禁 rounded-none / 負值用 red-700 非 rose / 元件檔數防呆)。
 像素級抽查(間距 4px 網格、字級)待 prod 部署後 Jeff 親驗或指揮截圖複核。
+
+### 塊D 收官回爐(指揮總驗收六項,commit 見鏈尾)
+
+1. vendor1099List / plMonthlyTrend 核心數學抽純函式 server/services/
+   taxAggregates.ts + 專屬單測 11 個(照 foldBankPLRows 抽取慣例,比 mock db
+   更強):trend 蓋當年止於本月 / 過去年 12 月 / 未來年空 / 2 月閏平年天數 /
+   年初下界;1099 蓋 jeffOverride 優先序雙向 / amt<=0 毛額語義 / $600 邊界
+   (600.00 含、599.99 不含、跨筆累計過線)/ 名稱 fallback 鏈 / 排序捨入。
+2. 探針稽核留檔:附錄(下方)含探針原文與 node --check 證據。
+3. drift 文案方向感知:負 drift(信託現金 < 追蹤中未認列)顯示查核級文案
+   「信託帳戶現金低於追蹤中的未認列訂金 $gap,需查核(訂金可能未入信託或
+   提前轉出)」;正 drift 維持原文案。i18n 雙語
+   (trustNoteBalanceDriftNegative)。prod 現況 drift −$10,442 會走新文案。
+4. TaxDetail 營收 KPI 改毛收入(Line 1 gross receipts,標籤同步標明);
+   refunds ≠ 0 副行「退款 −$X · 淨 $Y」,= 0 保留同期成長副行;growth 改
+   gross 對 gross。
+5. transfer tile 主值保留淨額,副字「(N 筆 · 搬運 $gross)」——
+   foldBankPLRows 新增 transfer.gross(絕對值和;新欄位不破壞消費者,
+   bankPLService.test 紅線測試補 gross=7000 斷言)。
+6. 1099 note 補句:金額為毛額(供應商退款未淨扣),以 Jeff 覆核為準(雙語)。
+
+順手留檔:
+- 寫路徑清點更新:F3 全案觸及的 mutation 共四支 —— claim / unlink /
+  trustRecognizeNow(皆 Jeff 按 + audit)+ yearEndExport(第四支,唯讀
+  mutation:只讀 DB 組 ZIP 上傳 R2 回 URL,無 DB 寫入,mutation 形式僅因
+  含外部副作用)。
+- UX 觀察(留待 Jeff 反饋):TaxDetail「Trust 對稅時點」卡的「本年已認列」
+  固定算 curYear,而 Schedule C 卡跟著期間切換(本月/YTD/去年)—— 選「去年」
+  時兩卡期間不同步。對稅時點語義上「本年」合理,但雙期間並存可能困惑,
+  等 Jeff 用過裁示。
+
+### 附錄:塊D 探針原文與實跑證據(治理先例 e38ddcd;T2 地雷 #7 留檔)
+
+驗證證據:`node --check f3-probe.cjs` exit 0;
+`grep -c '（反引號或 dollar-brace)' f3-probe.cjs` = 0 處。
+prod 執行:flyctl ssh console 內 base64 解碼至 /tmp 執行後即刪,
+NODE_PATH=/app/node_modules,輸出 PROBE_JSON(8,211 bytes)無 PROBE_FAIL。
+dry_run 探針(f3-dryrun.cjs,node 內建 fetch 打 localhost:8080 端點,
+Bearer LOCAL_SCRIPT_TOKEN 容器內取用不外流):HTTP 200。
+
+f3-probe.cjs 原文(唯讀 SELECT 六句):
+
+```js
+// F3 塊D prod 唯讀探真(2026-07-10)。只 SELECT,零寫入。
+// 注意:本檔會經 base64 進 flyctl ssh 執行 —— 全檔禁止反引號與 dollar-brace
+// (T2 地雷 #7),字串一律單引號串接。
+var mysql = require("mysql2/promise");
+
+var MONTH_START = "2026-07-01";
+var TODAY_LA = "2026-07-10";
+
+function run() {
+  return mysql.createConnection(process.env.DATABASE_URL).then(function (conn) {
+    var out = {};
+    return conn
+      .execute(
+        "SELECT bt.amount, bt.agentCategory, bt.jeffOverrideCategory, bt.excludeFromAccounting, bt.isPending " +
+          "FROM bankTransactions bt LEFT JOIN linkedBankAccounts a ON bt.linkedAccountId = a.id " +
+          "WHERE a.isActive = 1 AND bt.date >= ? AND bt.date <= ?",
+        [MONTH_START, TODAY_LA]
+      )
+      .then(function (r) {
+        out.plRows = r[0];
+        return conn.execute(
+          "SELECT t.id, t.amount, t.bookingId, DATE_FORMAT(t.expectedRecognitionDate, '%Y-%m-%d') AS expectedRecognitionDate " +
+            "FROM trustDeferredIncome t JOIN linkedBankAccounts a ON t.linkedAccountId = a.id " +
+            "WHERE a.isTrustAccount = 1 AND a.isActive = 1 AND t.recognizedAt IS NULL AND t.reversedAt IS NULL"
+        );
+      })
+      .then(function (r) {
+        out.trustRows = r[0];
+        return conn.execute(
+          "SELECT id, accountMask, currentBalance, availableBalance, isTrustAccount FROM linkedBankAccounts WHERE isActive = 1"
+        );
+      })
+      .then(function (r) {
+        out.accounts = r[0];
+        return conn.execute(
+          "SELECT t.amount FROM trustDeferredIncome t LEFT JOIN linkedBankAccounts a ON t.linkedAccountId = a.id " +
+            "WHERE a.isActive = 1 AND t.depositDate >= ? AND t.depositDate <= ? AND t.recognizedAt IS NULL AND t.reversedAt IS NULL",
+          [MONTH_START, TODAY_LA]
+        );
+      })
+      .then(function (r) {
+        out.deferredThisMonth = r[0];
+        return conn.execute(
+          "SELECT t.amount, DATE_FORMAT(t.recognizedAt, '%Y-%m-%d') AS recognizedDay FROM trustDeferredIncome t " +
+            "WHERE t.recognizedAt IS NOT NULL AND t.recognizedAt >= '2026-01-01' AND t.recognizedAt < '2027-01-01'"
+        );
+      })
+      .then(function (r) {
+        out.recognized2026 = r[0];
+        return conn.execute(
+          "SELECT COUNT(*) AS c FROM bankTransactionLinks"
+        );
+      })
+      .then(function (r) {
+        out.linkCount = r[0];
+        console.log("PROBE_JSON_START" + JSON.stringify(out) + "PROBE_JSON_END");
+        return conn.end();
+      });
+  });
+}
+
+run().catch(function (e) {
+  console.error("PROBE_FAIL " + (e && e.message));
+  process.exit(1);
+});
+```
+
+f3-dryrun.cjs 原文(唯讀 dry_run 端點):
+
+```js
+// F3 塊D:prod 內打 backfill dry_run 端點(唯讀:dry_run 只算不寫)。
+// 禁反引號 / dollar-brace(T2 地雷 #7)。
+fetch("http://localhost:8080/api/admin/backfill-bank-transaction-links", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer " + process.env.LOCAL_SCRIPT_TOKEN,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({ mode: "dry_run" }),
+})
+  .then(function (res) {
+    return res.text().then(function (txt) {
+      console.log("DRYRUN_STATUS " + res.status);
+      console.log("DRYRUN_JSON_START" + txt + "DRYRUN_JSON_END");
+    });
+  })
+  .catch(function (e) {
+    console.error("DRYRUN_FAIL " + (e && e.message));
+    process.exit(1);
+  });
+```
