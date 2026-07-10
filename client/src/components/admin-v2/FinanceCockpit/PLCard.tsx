@@ -240,16 +240,15 @@ export function PLCard() {
               {t("financeCockpit.ledger.plExclStripe")}
               <b className="font-semibold text-gray-600 tabular-nums">{fmtSignedMoney(r?.stripePayout.total ?? 0)}</b>
             </span>
-            {/* F2 塊C(2026-07-10):square_payout 中性列。平常 $0 是正常態
-                (撥款入帳現況就是收入紀錄,只有 Jeff 明確歸類的列才進這桶),
-                有筆數才顯示,避免常態多一行雜訊。 */}
-            {(r?.squarePayout?.count ?? 0) > 0 && (
-              <span className="flex items-center gap-1.5 text-[11px] text-gray-500">
-                <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-gray-300" />
-                {t("financeCockpit.ledger.plExclSquare")}
-                <b className="font-semibold text-gray-600 tabular-nums">{fmtSignedMoney(r?.squarePayout?.total ?? 0)}</b>
-              </span>
-            )}
+            {/* F2 塊D 回令(2026-07-10):square_payout 中性列改「$0 恆顯」——
+                三客面(PLCard/ProfitLossV2/TaxDetail)統一照 stripe 模式,
+                消掉 1/3 鏡像對帳盲點。$0 是正常態(撥款入帳現況就是收入紀錄,
+                只有 Jeff 明確歸類的列才進這桶)。 */}
+            <span className="flex items-center gap-1.5 text-[11px] text-gray-500">
+              <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-gray-300" />
+              {t("financeCockpit.ledger.plExclSquare")}
+              <b className="font-semibold text-gray-600 tabular-nums">{fmtSignedMoney(r?.squarePayout?.total ?? 0)}</b>
+            </span>
           </div>
         </div>
       )}

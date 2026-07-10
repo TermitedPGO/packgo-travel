@@ -1089,3 +1089,100 @@ square txn 計數(入出分列)/ customOrders square 取樣(LIMIT 40)/
 paymentMethod 分布 / accountingEntries square 計數 / linkedBankAccounts 全列。
 完整原文在 git 歷史與本 session 記錄;關鍵防護:全檔 var+function 語法、
 零反引號、零 dollar-brace、只 SELECT。
+
+### 附錄:F2 塊C 探針原文與實跑證據(塊D 回令 #2 補課;地雷 #7 留檔)
+
+驗證證據:`node --check f2c-square-probe.cjs` exit 0;全檔反引號 0 處、
+dollar-brace 0 處(grep 核對)。prod 執行:flyctl ssh console 內 base64 解碼至
+/tmp 執行後即刪,NODE_PATH=/app/node_modules,輸出 PROBE_JSON 無 PROBE_FAIL。
+
+f2c-square-probe.cjs 原文(唯讀 SELECT 六句):
+
+```js
+// F2 塊C prod 唯讀探真(2026-07-10)。只 SELECT,零寫入。
+// 本檔經 base64 進 flyctl ssh 執行 —— 全檔禁止反引號與 dollar-brace
+// (T2 地雷 #7),字串一律單引號/雙引號串接。
+var mysql = require("mysql2/promise");
+
+function run() {
+  return mysql.createConnection(process.env.DATABASE_URL).then(function (conn) {
+    var out = {};
+    var squareWhere =
+      "LOWER(CONCAT_WS(' ', COALESCE(bt.merchantName,''), COALESCE(bt.description,''), " +
+      "COALESCE(bt.originalDescription,''), COALESCE(bt.counterparty,''))) LIKE '%square%'";
+    return conn
+      .execute(
+        "SELECT bt.id, DATE_FORMAT(bt.date, '%Y-%m-%d') AS d, bt.amount, bt.merchantName, " +
+          "bt.description, bt.originalDescription, bt.paymentMeta, bt.agentCategory, " +
+          "bt.jeffOverrideCategory, bt.linkedAccountId " +
+          "FROM bankTransactions bt WHERE " + squareWhere + " ORDER BY bt.date DESC LIMIT 60"
+      )
+      .then(function (r) {
+        out.squareTxns = r[0];
+        return conn.execute(
+          "SELECT COUNT(*) AS c, SUM(CASE WHEN bt.amount < 0 THEN 1 ELSE 0 END) AS inflows, " +
+            "SUM(CASE WHEN bt.amount > 0 THEN 1 ELSE 0 END) AS outflows " +
+            "FROM bankTransactions bt WHERE " + squareWhere
+        );
+      })
+      .then(function (r) {
+        out.squareCounts = r[0];
+        return conn.execute(
+          "SELECT id, orderNumber, status, paymentMethod, depositAmount, depositPaidAmount, " +
+            "DATE_FORMAT(depositPaidAt, '%Y-%m-%d') AS depPaid, balanceAmount, balancePaidAmount, " +
+            "DATE_FORMAT(balancePaidAt, '%Y-%m-%d') AS balPaid " +
+            "FROM customOrders WHERE LOWER(COALESCE(paymentMethod,'')) LIKE '%square%' " +
+            "ORDER BY id DESC LIMIT 40"
+        );
+      })
+      .then(function (r) {
+        out.squareOrders = r[0];
+        return conn.execute(
+          "SELECT LOWER(COALESCE(paymentMethod,'(null)')) AS m, COUNT(*) AS c FROM customOrders " +
+            "GROUP BY LOWER(COALESCE(paymentMethod,'(null)')) ORDER BY c DESC"
+        );
+      })
+      .then(function (r) {
+        out.paymentMethodDist = r[0];
+        return conn.execute(
+          "SELECT COUNT(*) AS c FROM accountingEntries WHERE LOWER(CONCAT_WS(' ', " +
+            "COALESCE(description,''), COALESCE(category,''))) LIKE '%square%'"
+        );
+      })
+      .then(function (r) {
+        out.squareAcctEntries = r[0];
+        return conn.execute(
+          "SELECT id, accountMask, accountName, institutionName, isTrustAccount, isActive " +
+            "FROM linkedBankAccounts ORDER BY id"
+        );
+      })
+      .then(function (r) {
+        out.accounts = r[0];
+        console.log("PROBE_JSON_START" + JSON.stringify(out) + "PROBE_JSON_END");
+        return conn.end();
+      });
+  });
+}
+
+run().catch(function (e) {
+  console.error("PROBE_FAIL " + (e && e.message));
+  process.exit(1);
+});
+```
+
+## F2 塊D:square_payout 自動分類後衛 —— 解除條款(2026-07-10 指揮裁決)
+
+現狀:自動分類產生 square_payout 的路徑為零 —— preClassify / linkEngine 不產
+(塊C 設計),LLM 輸出被確定性後衛降級 other_review + 強制人工複核
+(accountingAgent.ts P1 後衛,紅綠測試釘死)。Jeff 的 jeffOverrideCategory
+手動歸類不受影響。
+
+解除條件(可檢查;滿足其一並經指揮覆核後才可移除後衛/開自動):
+1. Square 銷售在收款當下有第二處收入紀錄(如 Square webhook →
+   accountingEntries / 次帳上線)—— 撥款落地自此構成雙計風險,自動中性化
+   才由「病」變「藥」;或
+2. customOrders recordPayment 對 Square 收款覆蓋率達標:近 90 天每筆 Square
+   撥款都能經 processorPayoutMapping 對到已記錄銷售(候選命中率報表佐證)。
+
+檢查方式:重跑塊C 探針(progress 附錄)比對 accountingEntries square 計數與
+customOrders square 覆蓋;或走查 dry-run 候選命中率。

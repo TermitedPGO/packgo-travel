@@ -116,6 +116,43 @@ export async function hasOpenCardFor(relatedType: string, relatedId: string): Pr
   return Boolean(row);
 }
 
+/**
+ * 待認領卡 candidateNote(純函式,F2 塊D 回令 #3 抽出可測)。
+ * 一般候選(金額吻合訂單)與撥款候選(銷售−手續費,processorPayoutMapping)
+ * 兩段拼接;都沒有 → 誠實寫「沒有金額吻合的候選訂單」。
+ */
+export function buildPendingCandidateNote(
+  candidates: Array<{ orderNumber: string }>,
+  payoutSaleCandidates?: Array<{
+    orderNumbers: string[];
+    saleTotalCents: number;
+    impliedFeeCents: number;
+    impliedFeePct: number;
+  }>,
+): string {
+  const payoutCands = payoutSaleCandidates ?? [];
+  const payoutNote =
+    payoutCands.length > 0
+      ? `疑似 Square 撥款,費率帶候選銷售:${payoutCands
+          .slice(0, 3)
+          .map(
+            (p) =>
+              `${p.orderNumbers.join("+")}($${(p.saleTotalCents / 100).toFixed(2)} − 手續費 $${(p.impliedFeeCents / 100).toFixed(2)},費率 ${(p.impliedFeePct * 100).toFixed(2)}%)`,
+          )
+          .join("、")}(系統不寫,Jeff 認領時確認)`
+      : "";
+  return (
+    [
+      candidates.length > 0
+        ? `疑似候選訂單:${candidates.map((c) => c.orderNumber).join("、")}(系統不確定,Jeff 判斷)`
+        : "",
+      payoutNote,
+    ]
+      .filter(Boolean)
+      .join(";") || "沒有金額吻合的候選訂單"
+  );
+}
+
 export interface PendingClaimScanResult {
   scanned: number;
   linked: number;
@@ -183,31 +220,13 @@ export async function scanAndAlertPendingClaims(
 
     // F2 塊C(2026-07-10):撥款形狀(Square)入帳 → note 帶「銷售−手續費」
     // 費率帶候選(撥款卡列候選銷售,Jeff 確認 —— 人工確認式對映)。
+    // note 組字抽 buildPendingCandidateNote(純函式,塊D 回令 #3 可測)。
     const payoutCands = outcome.payoutSaleCandidates ?? [];
-    const payoutNote =
-      payoutCands.length > 0
-        ? `疑似 Square 撥款,費率帶候選銷售:${payoutCands
-            .slice(0, 3)
-            .map(
-              (p) =>
-                `${p.orderNumbers.join("+")}($${(p.saleTotalCents / 100).toFixed(2)} − 手續費 $${(p.impliedFeeCents / 100).toFixed(2)},費率 ${(p.impliedFeePct * 100).toFixed(2)}%)`,
-            )
-            .join("、")}(系統不寫,Jeff 認領時確認)`
-        : "";
-
     needsCard.push({
       id: u.id,
       amount: amountAbs,
       date: u.date,
-      candidateNote:
-        [
-          outcome.candidates.length > 0
-            ? `疑似候選訂單:${outcome.candidates.map((c) => c.orderNumber).join("、")}(系統不確定,Jeff 判斷)`
-            : "",
-          payoutNote,
-        ]
-          .filter(Boolean)
-          .join(";") || "沒有金額吻合的候選訂單",
+      candidateNote: buildPendingCandidateNote(outcome.candidates, outcome.payoutSaleCandidates),
       candidates: outcome.candidates,
       payoutSaleCandidates: payoutCands.length > 0 ? payoutCands : undefined,
     });

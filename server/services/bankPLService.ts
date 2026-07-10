@@ -131,6 +131,9 @@ export interface BankPLReport {
   // already subtracted from income.total + netProfit; this is the separate
   // total so the UI can show "客人訂金待 recognize" as its own KPI.
   trustDeferredIncome: number;
+  /** F2 塊D:本期認列(recognizedAt 落本期 LA 曆日)的遞延收入,已加進
+   *  income.total/netProfit;獨立揭示供 UI/對帳核對。flag OFF 恆 0。 */
+  trustRecognizedIncome: number;
 }
 
 /**
@@ -194,17 +197,29 @@ export async function generateBankPL(opts: {
   // deferred income kept eating into each new month. We only want to subtract
   // the NEW deposits whose income_booking we ALSO just summed.
   let deferredIncomeSubtracted = 0;
+  let recognizedTrustIncome = 0;
   try {
-    const { totalDeferredForUser, isTrustDeferralEnabled } = await import(
-      "./trustDeferralService"
-    );
+    const { totalDeferredForUser, recognizedTrustIncomeInPeriod, isTrustDeferralEnabled } =
+      await import("./trustDeferralService");
     if (isTrustDeferralEnabled()) {
+      // F2 塊D:includeRecognized —— 存入期的減項要「含後來已認列的列」,
+      // 否則認列一發生,存入月的歷史 P&L 重算時收入會漂回存入日(認列月
+      // 又靠 recognizedTrustIncome 加了一次 → 跨月雙計)。flag OFF 此值恆 0。
       deferredIncomeSubtracted = await totalDeferredForUser({
         userId: opts.userId,
         asOfDate: opts.endDate,
         depositSince: opts.startDate,
+        includeRecognized: true,
       });
     }
+    // 認列期加回:gate 在函式內(isAnyTrustDeferralEnabled)—— STRIPE-only
+    // 開啟時 Stripe-direct 認列列也要進 P&L(「不再依賴 checkout 當下的次帳」
+    // 的入口),不能只看 PLAID flag。flag 全 OFF 恆 0,fold byte-identical。
+    recognizedTrustIncome = await recognizedTrustIncomeInPeriod({
+      userId: opts.userId,
+      startDate: opts.startDate,
+      endDate: opts.endDate,
+    });
   } catch (err) {
     console.warn(
       "[bankPL] trust deferral lookup failed (returning gross):",
@@ -217,6 +232,7 @@ export async function generateBankPL(opts: {
     startDate: opts.startDate,
     endDate: opts.endDate,
     deferredIncomeSubtracted,
+    recognizedTrustIncome,
   });
 }
 
@@ -244,6 +260,10 @@ export function foldBankPLRows(
     startDate: string;
     endDate: string;
     deferredIncomeSubtracted?: number;
+    /** F2 塊D(2026-07-10)flag-ON P&L 接線:本期「認列」的遞延收入(CST
+     *  §17550 認列時進 P&L,不再依賴 checkout 當下的次帳)。flag OFF 恆 0,
+     *  fold 輸出 byte-identical。 */
+    recognizedTrustIncome?: number;
   },
 ): BankPLReport {
   const incomeByCategory: Record<string, number> = {};
@@ -350,7 +370,13 @@ export function foldBankPLRows(
   // grossProfit = income - cogs - refunds
   const grossIncome = totalIncome - refunds;
   const deferredIncomeSubtracted = opts.deferredIncomeSubtracted ?? 0;
-  const netIncome = grossIncome - deferredIncomeSubtracted;
+  // F2 塊D flag-ON 接線:遞延的訂金在「存入期」被減掉(deferredIncomeSubtracted,
+  // 含後來已認列的 —— 存入當下就不是收入),在「認列期」加回來(recognizedTrust-
+  // Income)。同期存入+認列 → 一減一加,淨計一次;跨期 → 收入落在認列期,
+  // §17550 的口徑。Stripe-direct(哨兵列,無銀行入帳列可減)只有加回這一半,
+  // 正是「認列時進 P&L、不依賴 checkout 次帳」的入口。flag OFF 兩項皆 0。
+  const recognizedTrustIncome = opts.recognizedTrustIncome ?? 0;
+  const netIncome = grossIncome - deferredIncomeSubtracted + recognizedTrustIncome;
   const grossProfit = netIncome - cogs;
   const netProfit = grossProfit - operating;
   const profitMargin = netIncome > 0 ? (netProfit / netIncome) * 100 : 0;
@@ -381,6 +407,7 @@ export function foldBankPLRows(
     excludedFromAccounting,
     uncategorizedCount,
     trustDeferredIncome: deferredIncomeSubtracted,
+    trustRecognizedIncome: recognizedTrustIncome,
   };
 }
 
@@ -394,6 +421,7 @@ function emptyReport(startDate: string, endDate: string): BankPLReport {
     stripePayout: { total: 0, count: 0 },
     squarePayout: { total: 0, count: 0 },
     trustDeferredIncome: 0,
+    trustRecognizedIncome: 0,
     grossProfit: 0,
     netProfit: 0,
     profitMargin: 0,

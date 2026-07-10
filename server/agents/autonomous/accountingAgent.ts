@@ -428,9 +428,40 @@ async function _runAccountingAgentInner(
     0,
     Math.min(100, Number.parseInt(String(parsed.confidence ?? 0), 10) || 0)
   );
-  const finalCat: AccountingCategory = conf < 60 ? "other_review" : cat;
+  let finalCat: AccountingCategory = conf < 60 ? "other_review" : cat;
+  let reasoning = String(parsed.reasoning ?? "").slice(0, 1000);
+
+  // ── F2 塊D P1 確定性後衛(2026-07-10 指揮裁決)────────────────────────────
+  // LLM 輸出 square_payout 一律不靜默接受:agentCategory 一旦寫成 square_payout,
+  // bankPL 就把它排除出收入(needsHumanReview 只是 UI/計數旗標,不擋 P&L 口徑,
+  // accountingAgentService.ts:285 無條件持久化 agentCategory)—— 而 prod 探真
+  // (progress.md「F2 塊C 探真結論」)證實 Square 撥款入帳目前「就是」P&L 唯一
+  // 收入紀錄,靜默接受 = 真收入從損益消失(正是 accountingKnowledge.ts 2d 節
+  // 裁定要防的病)。後衛:降級為 other_review(needsReview 待審池,金額進
+  // needsReviewAmount,Jeff 看得到、絕不靜默)+ 強制 needsHumanReview=true,
+  // 模型原判與理由保留在 reasoning 供 Jeff 參考。preClassify / linkEngine 兩條
+  // 確定性路徑本就不產 square_payout,封掉 LLM 這第三條後,自動分類產生
+  // square_payout 的路徑為零;Jeff 的 jeffOverrideCategory 手動歸類不受影響
+  // (該桶的預期用途)。
+  //
+  // 解除條件(可檢查,滿足其一並經指揮覆核後才可移除本後衛;progress.md 同步):
+  //   (a) Square 銷售在收款當下有第二處收入紀錄(如 Square webhook →
+  //       accountingEntries / 次帳),撥款落地自此構成雙計風險;或
+  //   (b) customOrders recordPayment 對 Square 收款覆蓋率達標 —— 近 90 天每筆
+  //       Square 撥款都能對到已記錄銷售(processorPayoutMapping 候選命中率佐證)。
+  let forceReview = false;
+  if (cat === "square_payout") {
+    finalCat = "other_review";
+    forceReview = true;
+    reasoning =
+      `[square_payout 後衛] 模型判 square_payout(信心 ${conf}),依 F2 塊D 裁決強制人工複核 —— Square 撥款入帳目前是 P&L 唯一收入紀錄,不可自動中性化。模型理由:${reasoning}`.slice(
+        0,
+        1000,
+      );
+  }
+
   const finalReview =
-    finalCat === "other_review" || conf < 80 || Boolean(parsed.needsHumanReview);
+    forceReview || finalCat === "other_review" || conf < 80 || Boolean(parsed.needsHumanReview);
 
   // IRS Schedule C fields — defensively coerce to safe defaults.
   const cptyRaw = String(parsed.counterparty ?? "").trim();
@@ -445,7 +476,7 @@ async function _runAccountingAgentInner(
   return {
     category: finalCat,
     confidence: conf,
-    reasoning: String(parsed.reasoning ?? "").slice(0, 1000),
+    reasoning,
     needsHumanReview: finalReview,
     suggestedJeffNote: parsed.suggestedJeffNote
       ? String(parsed.suggestedJeffNote).slice(0, 500)

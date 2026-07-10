@@ -280,3 +280,51 @@ describe("decideDeferralSync — create / reverse / noop", () => {
     expect(decideDeferralSync({ enabled, before, after }).action).toBe("reverse");
   });
 });
+
+// ─── F2 塊D:認列期收入(LA 曆日歸屬)─────────────────────────────────────────
+import { sumRecognizedInPeriodLA, type RecognizedRowLike } from "./trustDeferralService";
+
+describe("sumRecognizedInPeriodLA — 認列期收入純函式(F2 塊D)", () => {
+  const row = (o: Partial<RecognizedRowLike> = {}): RecognizedRowLike => ({
+    amount: "1000.00",
+    recognizedAt: new Date("2026-07-15T18:00:00Z"),
+    linkedAccountId: 30003,
+    ownerUserId: 1,
+    accountIsActive: 1,
+    ...o,
+  });
+
+  it("期內認列列加總;期外排除", () => {
+    expect(
+      sumRecognizedInPeriodLA(
+        [row(), row({ amount: "500.00" }), row({ recognizedAt: new Date("2026-08-02T18:00:00Z") })],
+        "2026-07-01",
+        "2026-07-31",
+      ),
+    ).toBe(1500);
+  });
+
+  it("月界地雷(T2 #2):UTC 已跨到 8/1 凌晨、LA 還是 7/31 → 歸七月", () => {
+    // 2026-08-01T02:00Z = LA 2026-07-31 19:00(PDT)
+    const r = row({ recognizedAt: new Date("2026-08-01T02:00:00Z") });
+    expect(sumRecognizedInPeriodLA([r], "2026-07-01", "2026-07-31")).toBe(1000);
+    expect(sumRecognizedInPeriodLA([r], "2026-08-01", "2026-08-31")).toBe(0);
+  });
+
+  it("哨兵列(linkedAccountId=0,Stripe-direct)一律計入 —— 認列加回是它進 P&L 的唯一入口", () => {
+    const sentinel = row({ linkedAccountId: 0, ownerUserId: null, accountIsActive: null });
+    expect(sumRecognizedInPeriodLA([sentinel], "2026-07-01", "2026-07-31", 999)).toBe(1000);
+  });
+
+  it("真實帳戶列:inactive 帳戶排除;userId scope 不符排除", () => {
+    expect(
+      sumRecognizedInPeriodLA([row({ accountIsActive: 0 })], "2026-07-01", "2026-07-31"),
+    ).toBe(0);
+    expect(
+      sumRecognizedInPeriodLA([row({ ownerUserId: 2 })], "2026-07-01", "2026-07-31", 1),
+    ).toBe(0);
+    expect(
+      sumRecognizedInPeriodLA([row()], "2026-07-01", "2026-07-31", 1),
+    ).toBe(1000);
+  });
+});

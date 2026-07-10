@@ -372,7 +372,9 @@ export default function ProfitLossV2() {
           <p className="text-xs text-foreground/50 -mt-1 mb-3">
             {t("admin.profitLoss.auditDesc")}
           </p>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* F2 塊D 回令(2026-07-10):加 Square 撥款 tile 後共 4 格,格線改
+              2/4 欄維持密度節奏(3 欄放 4 格會 ragged)。 */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
             <div className="rounded-lg border border-foreground/10 p-3">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground/70">
                 <Landmark className="w-3.5 h-3.5 text-slate-500" />
@@ -396,6 +398,19 @@ export default function ProfitLossV2() {
               </div>
               <div className="text-[11px] text-foreground/45">
                 {t("admin.profitLoss.stripePayoutDesc", { count: String(r.stripePayout.count) })}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-foreground/10 p-3">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground/70">
+                <ArrowLeftRight className="w-3.5 h-3.5 text-emerald-600" />
+                {t("admin.profitLoss.squarePayoutTile")}
+              </div>
+              <div className="mt-1 text-base font-bold tabular-nums text-foreground">
+                {fmtSigned(r.squarePayout?.total ?? 0)}
+              </div>
+              <div className="text-[11px] text-foreground/45">
+                {t("admin.profitLoss.squarePayoutDesc", { count: String(r.squarePayout?.count ?? 0) })}
               </div>
             </div>
 

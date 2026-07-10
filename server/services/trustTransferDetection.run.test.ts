@@ -339,6 +339,33 @@ describe("runManualTransferBackfill — Jeff 確認後的落地路(fail-closed)"
     expect(res2.error).toContain("not a trust outflow");
   });
 
+  it("列帳戶與流水帳戶不一致 → 整批拒絕(塊D 回令 #3 補測)", async () => {
+    const { db, updates } = makeDb([
+      [TXN],
+      [TRUST_ACCT],
+      [ROWS[0], eligibleRow({ id: 602, amount: "1000.00", linkedAccountId: 99 })], // 掛別的 trust 帳
+    ]);
+    getDb.mockResolvedValue(db);
+    const res = await runManualTransferBackfill({ deferredIds: [601, 602], bankTransactionId: 900 });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("different trust account");
+    expect(updates).toHaveLength(0);
+    expect(systemAudit).not.toHaveBeenCalled();
+  });
+
+  it("認列晚於轉帳曆日 → 整批拒絕(§17550:認列後才可轉出;塊D 回令 #3 補測)", async () => {
+    const { db, updates } = makeDb([
+      [TXN], // 轉帳 2026-07-05
+      [TRUST_ACCT],
+      [ROWS[0], eligibleRow({ id: 602, amount: "1000.00", recognizedAt: new Date("2026-07-06T10:00:00Z") })],
+    ]);
+    getDb.mockResolvedValue(db);
+    const res = await runManualTransferBackfill({ deferredIds: [601, 602], bankTransactionId: 900 });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("認列後才可轉出");
+    expect(updates).toHaveLength(0);
+  });
+
   it("流水不存在 / 列缺漏 → 拒絕", async () => {
     const { db } = makeDb([[], [], []]);
     getDb.mockResolvedValue(db);
