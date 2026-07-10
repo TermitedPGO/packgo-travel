@@ -19,6 +19,7 @@ import {
   type AutoLinkRule,
 } from "./bankTransactionLinkEngine";
 import { createApprovalTask } from "../_core/approvalTasks";
+import { systemAudit } from "../_core/auditLog";
 import { classifyFinanceAlertRisk } from "../agents/autonomous/financeAlertClassifier";
 import { FINANCE_ALERT_TASK_TYPE } from "../agents/autonomous/financeExecutor";
 import { hasOpenCardFor, laDay } from "../agents/autonomous/bankTransactionLinkAlerts";
@@ -151,6 +152,20 @@ export async function runBackfillConfirm(
       }
     }
   }
+
+  // F2 塊A:LOCAL_SCRIPT_TOKEN confirm 端點的存量寫入(自動 link + 聚合卡)必留
+  // 系統稽核軌(無 ctx.user)。fire-and-forget + .catch 雙保險,絕不影響回填主流程。
+  void systemAudit(
+    "system:bankLinkBackfill",
+    "bank.backfill_links_confirm",
+    aggregateCardId,
+    {
+      autoLinkedTotal: report.autoLinkedTotal,
+      pendingCount: report.pendingCount,
+      pendingTotalAmount: report.pendingTotalAmount,
+      totalScanned: report.totalScanned,
+    },
+  ).catch(() => {});
 
   return { ...report, aggregateCardId };
 }

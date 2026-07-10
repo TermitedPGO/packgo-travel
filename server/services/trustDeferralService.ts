@@ -61,6 +61,7 @@ import { nanoid } from "nanoid";
 // featureFlags module so a typo in env-var names becomes a compile error.
 import * as featureFlags from "../_core/featureFlags";
 import { reportFunnelError } from "../_core/errorFunnel";
+import { systemAudit } from "../_core/auditLog";
 
 // ─── Feature flag + config ─────────────────────────────────────────────────
 
@@ -532,6 +533,17 @@ export async function deferStripeBookingIncome(
       notes: "stripe_direct — Stripe tour checkout,bookingId 直接來自 webhook metadata,非 Plaid 銀行同步猜測配對",
     });
     const deferredId = Number(ins?.[0]?.insertId ?? 0) || null;
+    // F2 塊A:webhook 驅動的財務寫入必留系統稽核軌(無 ctx.user)。fire-and-forget
+    // + .catch 雙保險,絕不影響 Stripe webhook 主交易流程(systemAudit 走獨立連線,
+    //  不參與傳入的 tx;tx 若 rollback 也不回滾此列——記錄「曾建立遞延」對合規有利)。
+    void systemAudit("system:trustDeferral", "trust.defer", opts.bookingId, {
+      deferredId,
+      paymentId: opts.paymentId,
+      amount: opts.amount,
+      isoCurrencyCode: opts.isoCurrencyCode,
+      expectedRecognitionDate,
+      source: "stripe_direct",
+    }).catch(() => {});
     return { deferredId, expectedRecognitionDate, reason: "deferred" };
   } catch (err) {
     const e = err as any;
@@ -765,6 +777,23 @@ export async function reverseDeferral(opts: {
       reversedReason: opts.reason.slice(0, 256),
     })
     .where(eq(trustDeferredIncome.id, opts.deferredId));
+
+  // F2 塊A:撤銷遞延(取消/退款)是財務動作,留系統稽核軌。fire-and-forget:
+  // 讀回金額純為稽核明細,不阻塞主流程回傳;金額欄 update 未動,撤銷後讀值正確。
+  // .catch 雙保險,絕不影響 reverseDeferral 呼叫端。
+  void (async () => {
+    const [row] = await db
+      .select({ amount: trustDeferredIncome.amount, bookingId: trustDeferredIncome.bookingId })
+      .from(trustDeferredIncome)
+      .where(eq(trustDeferredIncome.id, opts.deferredId))
+      .limit(1);
+    await systemAudit("system:trustDeferral", "trust.reverse", opts.deferredId, {
+      amount: row?.amount ?? null,
+      bookingId: row?.bookingId ?? null,
+      reason: opts.reason,
+    });
+  })().catch(() => {});
+
   return { success: true };
 }
 
