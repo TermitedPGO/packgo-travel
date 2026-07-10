@@ -387,6 +387,9 @@ describe("recordPayment — money truth + forward status nudge", () => {
     expect(patch.depositPaidAmount).toBe("1500"); // received defaults to owed
     expect(patch.depositAmount).toBeUndefined(); // contract figure untouched
     expect(patch.status).toBe("deposit_paid");
+    // F1 塊D 回爐(2026-07-09):method 與訂單既有值皆缺 → 存 null,不猜 'square'。
+    // baseOrder.paymentMethod=null 且未傳 method,釘死不再寫死 square 回退。
+    expect(patch.paymentMethod).toBeNull();
     expect(audit).toHaveBeenCalled();
   });
   it("balance after confirmation keeps confirmed but records balancePaidAt", async () => {

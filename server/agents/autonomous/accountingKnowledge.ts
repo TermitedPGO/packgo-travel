@@ -286,23 +286,40 @@ export function norm(s: string | null | undefined): string {
 // link 規則)與塊C(preClassify 雙計防護)共用的唯一來源 —— 塊C 接進 preClassify
 // 判斷 bankTransactions.agentCategory 時,直接呼叫這支函式,不重造規則。
 //
-// Plaid 對 Stripe 撥款的常見 merchantName/description 樣式:"STRIPE"、
-// "STRIPE TRANSFER"、"STRIPE PAYOUT"。token "stripe" 在正常銀行摘要語境幾乎
-// 不會誤中其他詞(不像 "total" 那種泛用字);只在「進帳」時判斷有意義 —— 出帳側
-// 含 "stripe" 字樣的是 Stripe 手續費扣款(cogs_other),跟這條規則管的範圍無關,
-// 呼叫端負責只在 amount<0 時呼叫本函式。
+// ⚠ 2026-07-09 塊D 回爐(指揮打回釘現狀,改真修)+ prod 唯讀探真結論:
+//   flyctl ssh 探 prod bankTransactions(1612 筆,408 入帳)發現「stripe」字樣
+//   在任何欄位(merchantName/description/originalDescription/paymentMeta)出現
+//   次數 = 0。PACK&GO 真實的金流處理商入帳是 Square(descriptor 形如
+//   "ACH CREDIT Square Inc SQ ON 06/01"),不是 Stripe;Stripe 目前只做線上
+//   Checkout,其撥款尚未落進 Plaid 同步的銀行資料。
+//   → 後果:舊版「裸 stripe 單字即命中」在 prod 抓到 0 筆真撥款,卻會把任何
+//     姓名/memo 含獨立單字 "stripe" 的真客人入帳誤判成撥款(轉撥不計收入)
+//     → 該筆真收入靜默從損益表消失、且永不進待認領(Ann 同類漏斗病)。
+//   → 修法(不對稱風險取捨):要求「stripe 錨點 + 撥款語境 token」才命中。
+//     真實 Stripe ACH 撥款的銀行摘要慣例帶 "TRANSFER"/"PAYOUT"(Stripe 預設
+//     statement descriptor 為 "STRIPE TRANSFER" / "STRIPE PAYOUT")。裸 stripe
+//     不再命中 → 落 pending_claim 交 Jeff 覆核(安全:漏抓變人工看,不是靜默
+//     消失)。日後真 Stripe 撥款開始落地,Jeff 看到真實 descriptor 再校準本
+//     清單(按真資料定,不憑空猜形狀)。
+//   只在「進帳」判斷有意義 —— 出帳側含 stripe 是手續費扣款(cogs_other),
+//   不屬本規則,呼叫端負責只在 amount<0 時呼叫。
 export const STRIPE_PAYOUT_DESCRIPTORS: readonly string[] = ["stripe"] as const;
+/** 撥款語境 token:錨點單字 "stripe" 必須與其一同現才算撥款,擋掉裸 stripe 誤中。 */
+export const STRIPE_PAYOUT_CONTEXT_TOKENS: readonly string[] = ["payout", "transfer"] as const;
 
 /** haystack 已是呼叫端組好的 merchantName+description+originalDescription+對方
  *  字串(見 preClassify 的 haystack 組法)。呼叫端負責只在進帳時呼叫。
  *
- * 2026-07-08 對抗審查修復(P2):原本用裸子字串 includes 比對,姓名/商號含
- * "stripe" 子字串(如 "Stripeman"、"J Stripe Co")會被誤判成 Stripe 撥款。
- * 改用 hasWord 單字邊界比對,跟本檔其餘 vendor 規則(如 unitedstars vs
- * United Airlines 的邊界踩雷案例)一致精神。 */
+ * 命中條件(2026-07-09 塊D 回爐後):hasWord("stripe") 且 至少一個撥款語境
+ * token(payout / transfer)也 hasWord 命中。單字邊界比對(hasWord)沿用,
+ * 續擋 "stripeman"/"mystripe" 之類子字串誤中;新增的語境要求再擋掉「客人姓
+ * Stripe」「memo 提到 stripe trip」這類裸 stripe 誤中(prod 探真:真撥款 0 筆,
+ * 誤中風險 > 真陽性效益,故收緊)。 */
 export function isStripePayoutInflow(haystack: string): boolean {
   const h = norm(haystack);
-  return STRIPE_PAYOUT_DESCRIPTORS.some((token) => hasWord(h, norm(token)));
+  const hasAnchor = STRIPE_PAYOUT_DESCRIPTORS.some((token) => hasWord(h, norm(token)));
+  if (!hasAnchor) return false;
+  return STRIPE_PAYOUT_CONTEXT_TOKENS.some((token) => hasWord(h, norm(token)));
 }
 
 /** \bword\b 完整單字比對(token 已是 lowercase)。 */

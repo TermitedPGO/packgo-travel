@@ -166,7 +166,7 @@ describe("runStripePayoutProbeDryRun — paymentMeta payee/payer 併入 haystack
 
   it("paymentMeta.payer(payee 缺)含 stripe → 一樣命中(payee||payer 的 fallback 順序)", async () => {
     dbRows = [
-      fakeDbRow({ id: 43, merchantName: "ACH", paymentMeta: { payee: null, payer: "Stripe Inc" } }),
+      fakeDbRow({ id: 43, merchantName: "ACH CREDIT", paymentMeta: { payee: null, payer: "STRIPE TRANSFER" } }),
     ];
     const report = await runStripePayoutProbeDryRun();
     expect(report.totalMisclassified).toBe(1);
@@ -200,7 +200,7 @@ describe("runStripePayoutProbeConfirm — 只改標 autoEligible 桶,humanOverri
 
   it("全部 autoEligible → db.update 呼叫一次,jeffOverrideCategory 改成 stripe_payout,updatedCount 正確", async () => {
     dbRows = [
-      fakeDbRow({ id: 1, merchantName: "STRIPE" }),
+      fakeDbRow({ id: 1, merchantName: "STRIPE TRANSFER" }),
       fakeDbRow({ id: 2, merchantName: "STRIPE TRANSFER" }),
     ];
     const result = await runStripePayoutProbeConfirm();
@@ -213,7 +213,7 @@ describe("runStripePayoutProbeConfirm — 只改標 autoEligible 桶,humanOverri
 
   it("全部 humanOverridden → db.update 完全不呼叫,updatedCount=0(絕不覆寫人工決定)", async () => {
     dbRows = [
-      fakeDbRow({ id: 1, merchantName: "STRIPE", jeffOverrideCategory: "income_booking" }),
+      fakeDbRow({ id: 1, merchantName: "STRIPE PAYOUT", jeffOverrideCategory: "income_booking" }),
     ];
     const result = await runStripePayoutProbeConfirm();
     expect(result.updatedCount).toBe(0);
@@ -223,7 +223,7 @@ describe("runStripePayoutProbeConfirm — 只改標 autoEligible 桶,humanOverri
 
   it("混合桶 → 只有 autoEligible 那筆進 updatedCount,humanOverridden 那筆保留在報表但不被改", async () => {
     dbRows = [
-      fakeDbRow({ id: 1, merchantName: "STRIPE" }),
+      fakeDbRow({ id: 1, merchantName: "STRIPE TRANSFER" }),
       fakeDbRow({ id: 2, merchantName: "STRIPE PAYOUT", jeffOverrideCategory: "income_booking" }),
     ];
     const result = await runStripePayoutProbeConfirm();

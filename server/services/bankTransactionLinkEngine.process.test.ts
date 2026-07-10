@@ -132,6 +132,19 @@ describe("processInboundTransaction — 四態分派(F1 塊D 回爐,可注入假
     }
   });
 
+  // ── 回爐真修:裸 stripe 客人入帳 → pending_claim,不被誤 link ──
+  it("pending_claim:客人姓 Stripe(裸 stripe 無撥款語境)不再被誤 link stripe_payout,落待認領交 Jeff", async () => {
+    // 指揮打回的認領漏斗漏洞:2026-07-09 收緊 isStripePayoutInflow 後,描述含
+    // stripe 但無 payout/transfer 語境的真客人入帳,不再走 stripe_payout 自動
+    // 排除(靜默消失),改落 pending_claim 讓 Jeff 覆核。amount 高於門檻、無
+    // 其他規則命中(trust/order_ref/exact_amount 皆空)。
+    H.rows.set(bankTransactions, [
+      txnRow({ amount: "-4200.00", merchantName: "ZELLE PAYMENT FROM STRIPE WONG", description: "tour deposit" }),
+    ]);
+    const r = await processInboundTransaction(1, { dryRun: true });
+    expect(r.status).toBe("pending_claim");
+  });
+
   it("不變式:任何入帳處理後狀態 ∈ {linked, pending_claim, already_handled, skipped},不存在第五態", async () => {
     H.rows.set(bankTransactions, [txnRow({ amount: "-6150.00", merchantName: "STRIPE PAYOUT" })]);
     const r = await processInboundTransaction(1, { dryRun: true });
