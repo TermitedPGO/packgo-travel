@@ -495,7 +495,7 @@ export async function runWeeklyCorrectnessAudit(
   // other two or the audit itself.
   const [messagesFailedDelta, queueFailedCounts, llmCircuitStats] = await Promise.all([
     gatherMessagesFailedWeeklyDelta(db, now),
-    gatherQueueFailedCounts(),
+    gatherQueueFailedCounts(now),
     gatherLlmCircuitStats(now),
   ]);
   const observabilitySection = formatObservabilitySection({

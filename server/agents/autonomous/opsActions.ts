@@ -14,6 +14,7 @@
  * confirmation on the frontend.
  */
 import { z } from "zod";
+import { sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { createChildLogger } from "../../_core/logger";
 import { reportFunnelError } from "../../_core/errorFunnel";
 const log = createChildLogger({ module: "opsActions" });
@@ -359,10 +360,32 @@ async function doScheduleReminder(args: z.infer<typeof ScheduleReminderArgs>): P
  *
  * Idempotent: if booking is already cancelled, returns success without changes.
  */
+/**
+ * 取消訂單時附加到 bookings.message 的稽核字串。整條(日期戳 + reason)在 JS 組好,
+ * 由呼叫端當「單一」綁定參數傳給 CONCAT —— 日期戳與 reason 都不進 SQL 字串字面。
+ *
+ * 2026-07-09 Wave2 latent bug P1:原本寫 `sql\`... '\n[cancelled by OpsAgent ${date}] ' ...\``,
+ * date 內插落在未關閉的字串常量中間 → drizzle 把它當獨立 bind param 渲成 `'...OpsAgent ?] '`
+ * (`?` 卡在引號裡)。執行期不論 prepared(佔位符數對不上綁定數)或 text(引號被跳脫值撐破)
+ * 都炸,cancel 靜默失敗。正確寫法同 doUpdateInternalNote:CONCAT(COALESCE(col,''), ${wholeNote})。
+ */
+export function buildCancelAuditNote(reason: string, dateIso: string): string {
+  return `\n[cancelled by OpsAgent ${dateIso}] ${reason}`;
+}
+
+/**
+ * bookings.message 的 append 運算式:CONCAT(COALESCE(<messageCol>, ''), <整條稽核字串>)。
+ * 稽核字串走單一綁定參數,渲染後 SQL 只有一個 `?` 且不在任何字串字面內。exported 供
+ * opsActions.test.ts 直接渲染真形狀斷言(不憑推理 —— Wave2 meta 規則)。
+ */
+export function cancelMessageSql(messageCol: AnyColumn, reason: string, dateIso: string): SQL {
+  return sql`CONCAT(COALESCE(${messageCol}, ''), ${buildCancelAuditNote(reason, dateIso)})`;
+}
+
 async function doCancelBooking(args: z.infer<typeof CancelBookingArgs>): Promise<ExecutionResult> {
   const { getDb } = await import("../../db");
   const { bookings, tourDepartures } = await import("../../../drizzle/schema");
-  const { eq, and, ne, sql } = await import("drizzle-orm");
+  const { eq, and, ne } = await import("drizzle-orm"); // sql 用頂層 import(cancelMessageSql / GREATEST 共用,不再本地 shadow)
   const db = await getDb();
   if (!db) return { ok: false, summary: "DB unavailable", error: "no_db" };
 
@@ -380,21 +403,32 @@ async function doCancelBooking(args: z.infer<typeof CancelBookingArgs>): Promise
     };
   }
 
+  // bookings has no `notes` column — append audit string to `message` field.
+  // (Schema canonical: `message: text("message")` — see drizzle/schema.ts:690)
+  // 稽核字串整條當單一綁定參數(見 cancelMessageSql):日期戳/reason 都不進 SQL 字串字面。
+  const messageExpr = cancelMessageSql(bookings.message, args.reason, new Date().toISOString().slice(0, 10));
+
   // Conditional update (atomic) — only flip if not already cancelled
   const updateResult: any = await db
     .update(bookings)
-    .set({
-      bookingStatus: "cancelled" as any,
-      // bookings has no `notes` column — append audit string to `message` field.
-      // (Schema canonical: `message: text("message")` — see drizzle/schema.ts:690)
-      message: sql`CONCAT(COALESCE(${bookings.message}, ''), '\n[cancelled by OpsAgent ${new Date().toISOString().slice(0, 10)}] ', ${args.reason})`,
-    })
+    .set({ bookingStatus: "cancelled" as any, message: messageExpr })
     .where(and(eq(bookings.id, args.bookingId), ne(bookings.bookingStatus, "cancelled")));
 
   const transitioned = (updateResult?.[0]?.affectedRows ?? updateResult?.affectedRows ?? 0) > 0;
 
-  // Release seats only if we won the cancel race
-  if (transitioned && booking.departureId) {
+  // 條件式更新沒命中(load 之後、update 之前被別人搶先取消,或該列已非 active)→ 這次沒真的
+  // 取消、沒釋座。不能回「✓ 已取消 · 釋出座位」的假成功 —— 那是 P1 bug 的另一半:原本無條件
+  // ok:true + 固定成功摘要,把「訂單沒取消座位沒釋放」也講成成功。回誠實摘要,details 標 false。
+  if (!transitioned) {
+    return {
+      ok: true,
+      summary: `Booking #${args.bookingId} 已是 cancelled(本次未變更,未釋座)`,
+      details: { transitioned: false, customerName: booking.customerName, originalStatus: booking.bookingStatus },
+    };
+  }
+
+  // Release seats — we won the cancel race (transitioned === true)
+  if (booking.departureId) {
     const seatCount =
       (booking.numberOfAdults || 0) +
       (booking.numberOfChildrenWithBed || 0) +
@@ -410,7 +444,7 @@ async function doCancelBooking(args: z.infer<typeof CancelBookingArgs>): Promise
   return {
     ok: true,
     summary: `✓ Booking #${args.bookingId} 已取消 · 釋出座位 · 原因「${args.reason.slice(0, 60)}」`,
-    details: { transitioned, customerName: booking.customerName, originalStatus: booking.bookingStatus },
+    details: { transitioned: true, customerName: booking.customerName, originalStatus: booking.bookingStatus },
   };
 }
 
