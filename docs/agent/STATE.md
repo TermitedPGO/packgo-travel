@@ -1,11 +1,11 @@
 # 指揮交接檔(每批收尾由指揮更新,30 行封頂)
-> 2026-07-09 by Fable
-- prod:v806(2026-07-09 部署;閘6.5 SQL彩排首航 238/238;ship 後煙霧七臂指揮獨立重打全綠)。內含:Wave2 全案+cancel_booking P1 修復+F1 塊D/回爐三輪+observability 近7天口徑。判定檔:customer-cockpit/wave2-acceptance、finance-dept/f1-acceptance。
-- F1 全案結案(2026-07-09 最終簽收):sandbox 清理 confirm 24帳戶+104交易、BofA 完好、指揮獨立複掃零殘渣;塊C 回填 no-op;走查六項過。追溯在 finance-dept/progress.md。
-- F3 財務駕駛艙全案完成(2026-07-10 凌晨,閉環夜間衝刺):/ops/finance 一層直達+月報 tab 同步,五 commit 已併 main 待 ship;15 格 prod 真數對比全勾;判定檔 finance-dept/f3-acceptance-20260710.md。F2 塊A agent 夜間夭折零產出,今日重派。
-- 在飛:無(等 Jeff 晨間親驗+ship v807)。
-- 等 Jeff:①親驗 /ops/finance(ship 後)+ ship v807 ②真發現:Trust drift -$10,442 需查核(信託現金低於未認列訂金,詳 f3-acceptance)③321 筆/$448,022 存量待認領分批 ④存量回填 confirm 時機 ⑤CPA §17550。
-- soak 中:errorFunnel 48h、SQL 彩排閘與 D1 新口徑下週一首驗。
-- 鐵閘:STRIPE_TRUST_DEFERRAL_ENABLED 保持 OFF 直到 F2 P&L 接線;pnpm ship 只有 Jeff。
-- 佇列:F2(Trust 合規結構化)→ F3(駕駛艙,藍本 design-proposals/B-final)→ F4(建議卡+省稅);硬化 Wave3(時間紀律);行程頁翻修(含地圖重做,保留狀態)。
+> 2026-07-10 by Fable
+- prod:v807(2026-07-10 部署;F3 財務駕駛艙 /ops/finance + 月報 tab;15 格 prod 真數對比全勾)。判定檔:finance-dept/f3-acceptance-20260710.md。
+- F2 財務合規全案結案(2026-07-10,閉環八 commit d6c5394→6fa8d88,已併 main 待 ship v808):塊A systemAudit 四接線、塊B 認列閉環(migration 0114+轉帳偵測+看門狗+§17550)、塊C Square 對映(不接自動分類裁定+LLM 後衛 RATIFIED)、塊D flag 收口(P&L+稅表/財報/趨勢四口徑對稱接線、部分退款擋下轉人工、feature-flags.md 清點)。指揮四輪驗收(塊際三路×2+收官兩路+補丁單路)全 PASS;全套 338 檔 4954 測綠。
+- v808 內含 migration 0114(trustDeferredIncome 加 transferredAt/transferBankTransactionId,release_command 自動跑,有 down)。
+- ship 後走查(指揮辦):D1 看門狗首跑(watchdog 首叫 drift 一次)、trust-transfer-detect dry_run、square 謂詞對 prod 19 筆命中率、flag OFF 探針、feature-flags.md 走查單 2b 四口徑同數。
+- 在飛:無(等 Jeff ship v808)。
+- 等 Jeff:①ship v808 ②裁決五題:TiDB 備份保留期查一眼/商品圖三選一(供應商圖-無圖-AI 生圖)/目錄重建 go/通道波次(0 內部合併→1 LINE→2 Meta→3 WeChat OA→4 iMessage 只收)/iMessage 桌面腳本裝否 ③Trust drift -$10,442 查核 ④321 筆/$448,022 分批認領節奏 ⑤CPA §17550;Square ACH HOLD ±$3,106 歸類看一眼。
+- 鐵閘:兩遞延 flag 保持 OFF,翻 flag = Jeff 單獨裁決(前置與走查單在 finance-dept/feature-flags.md);pnpm ship 只有 Jeff;prod schema 只准 tracked migration 經 release_command。
+- 佇列:F3-polish(Jeff 嫌棄清單)→ F4(建議卡+省稅);線二通道 Wave0 內部合併(candidate,等波次拍板);線三目錄重建(等圖片+go 裁決);硬化 Wave3。
 - 慣例:執行者只讀自己的派工單;歷史在各 feature 的 archive/;本檔是唯一狀態源。
