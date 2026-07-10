@@ -271,6 +271,21 @@ export class AllocationExceededError extends Error {
   }
 }
 
+/**
+ * 分配上限守門(純函式,可單測 —— F1 塊D 回爐 2026-07-09):一筆流水可拆多單,
+ * 但「既有已分配 + 這次新增」不得超過 |交易金額|(含 ALLOCATION_EPSILON 容差,
+ * 吸收小數點浮動)。true = 會超額,呼叫端該拒收。抽成純函式讓紅綠例釘死的是
+ * 「數字邊界判斷」本身,不是錯誤訊息字串。
+ */
+export function wouldExceedAllocation(
+  existing: number,
+  incoming: number,
+  cap: number,
+  epsilon: number = ALLOCATION_EPSILON,
+): boolean {
+  return existing + incoming > cap + epsilon;
+}
+
 export interface CreateLinkInput {
   bankTransactionId: number;
   targetType: LinkTargetType;
@@ -437,7 +452,7 @@ export async function createBankTransactionLink(
       let existing = 0;
       for (const r of existingRows) existing += parseFloat(r.amountAllocated as any) || 0;
 
-      if (existing + input.amountAllocated > cap + ALLOCATION_EPSILON) {
+      if (wouldExceedAllocation(existing, input.amountAllocated, cap)) {
         throw new AllocationExceededError(input.bankTransactionId, existing, input.amountAllocated, cap);
       }
 

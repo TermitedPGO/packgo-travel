@@ -28,9 +28,9 @@
 -- 索引:(bankTransactionId) 給「這筆流水已經被連結多少錢」查詢用;
 --   (targetType, targetId) 給「這張單/這個分類底下掛了哪些流水」查詢用。
 --
--- Migration 風格:照 docs/MIGRATION_PATTERNS.md Rule 1 —— CREATE TABLE IF NOT
+-- Migration 風格:照 docs/MIGRATION_PATTERNS.md Rule 1,CREATE TABLE IF NOT
 -- EXISTS,不用 PREPARE/EXECUTE 包裝(0070 事故)。單一 CREATE TABLE 陳述式,
--- 不需要 statement-breakpoint 分句。
+-- 無需分句標記(避免在註解裡寫出 drizzle 切句用的字面 marker,0112 事故)。
 
 CREATE TABLE IF NOT EXISTS `bankTransactionLinks` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,

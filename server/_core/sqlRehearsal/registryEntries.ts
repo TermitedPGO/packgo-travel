@@ -748,7 +748,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "plaidRouter.uncategorizedGroups.totalCount",
-    sources: ["server/routers/plaidRouter.ts:1624"],
+    sources: ["server/routers/plaidRouter.ts:1626"],
     cls: "B",
     sql: "SELECT COUNT(*) AS `cnt` FROM `bankTransactions` WHERE `bankTransactions`.`jeffOverrideCategory` IS NULL AND (`bankTransactions`.`agentCategory` IS NULL OR `bankTransactions`.`agentCategory` = ?) AND `bankTransactions`.`excludeFromAccounting` = ? AND `bankTransactions`.`archived` = ?",
     sampleParams: ["x",1,1],
@@ -756,7 +756,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "plaidRouter.uncategorizedGroups.rawGroupBy",
-    sources: ["server/routers/plaidRouter.ts:1637"],
+    sources: ["server/routers/plaidRouter.ts:1639"],
     cls: "A",
     sql: "SELECT COALESCE(merchantName, counterparty, 'Unknown') AS groupKey, COUNT(*) AS cnt, SUM(CAST(amount AS DECIMAL(14,2))) AS totalAmount, MAX(date) AS sampleDate, GROUP_CONCAT(id ORDER BY date DESC) AS ids FROM bankTransactions WHERE jeffOverrideCategory IS NULL AND (agentCategory IS NULL OR agentCategory = 'other_review') AND excludeFromAccounting = 0 AND archived = 0 GROUP BY groupKey HAVING cnt >= 2 ORDER BY cnt DESC, totalAmount DESC LIMIT ?",
     sampleParams: [1],
@@ -774,7 +774,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "plaidRouter.accountingLegacyOverrideAudit.countQuery",
-    sources: ["server/routers/plaidRouter.ts:1696"],
+    sources: ["server/routers/plaidRouter.ts:1698"],
     cls: "B",
     sql: "SELECT COUNT(*) AS `cnt` FROM `bankTransactions` WHERE `bankTransactions`.`jeffOverrideCategory` IS NOT NULL AND `bankTransactions`.`jeffOverrideCategory` != ? AND `bankTransactions`.`jeffOverrideCategory` NOT IN (?, ?)",
     sampleParams: ["x","x","x"],
@@ -783,7 +783,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "plaidRouter.trustDeferredList.statusRecognized",
-    sources: ["server/routers/plaidRouter.ts:1949", "server/routers/plaidRouter.ts:1952"],
+    sources: ["server/routers/plaidRouter.ts:1951", "server/routers/plaidRouter.ts:1954"],
     cls: "B",
     sql: "SELECT * FROM `trustDeferredIncome` WHERE `trustDeferredIncome`.`linkedAccountId` IN (?, ?) AND `trustDeferredIncome`.`linkedAccountId` = ? AND `trustDeferredIncome`.`recognizedAt` IS NOT NULL ORDER BY `trustDeferredIncome`.`depositDate` DESC LIMIT ?",
     sampleParams: [1,2,1,1],
@@ -792,7 +792,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "plaidRouter.trustDeferredList.statusReversed",
-    sources: ["server/routers/plaidRouter.ts:1949", "server/routers/plaidRouter.ts:1952"],
+    sources: ["server/routers/plaidRouter.ts:1951", "server/routers/plaidRouter.ts:1954"],
     cls: "B",
     sql: "SELECT * FROM `trustDeferredIncome` WHERE `trustDeferredIncome`.`linkedAccountId` IN (?, ?) AND `trustDeferredIncome`.`linkedAccountId` = ? AND `trustDeferredIncome`.`reversedAt` IS NOT NULL ORDER BY `trustDeferredIncome`.`depositDate` DESC LIMIT ?",
     sampleParams: [1,2,1,1],
@@ -1274,7 +1274,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "bankTransactionLinkEngine.ts.scanUnlinkedInflows",
-    sources: ["server/services/bankTransactionLinkEngine.ts:830"],
+    sources: ["server/services/bankTransactionLinkEngine.ts:845"],
     cls: "B",
     sql: "SELECT `bankTransactions`.`id`, `bankTransactions`.`amount`, `bankTransactions`.`date` FROM `bankTransactions` WHERE (`bankTransactions`.`amount` < 0 AND `bankTransactions`.`isPending` = ? AND `bankTransactions`.`excludeFromAccounting` = ? AND `bankTransactions`.`archived` = ?)",
     sampleParams: [1,1,1],

@@ -1565,6 +1565,37 @@ async function startServer() {
     }
   });
 
+  // F1 對帳引擎 塊D 衛生(2026-07-09)— Plaid sandbox 殘留清理:刪除
+  // institutionName='First Platypus Bank' 且 isActive=0 的假帳戶 + 其掛的
+  // bankTransactions。三重防護(SQL WHERE + JS 逐列複驗 + BofA 黑名單),
+  // dry_run 只報數,Jeff 授權才 confirm。⛔ BofA 四帳戶絕不碰。
+  // POST /api/admin/cleanup-sandbox-residue
+  //   Body: { mode:"dry_run"|"confirm" }
+  app.post("/api/admin/cleanup-sandbox-residue", async (req, res) => {
+    try {
+      const ip = await verifyInternalAuth(req, res, {
+        tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
+        rateLimitKey: "cleanup-sandbox-residue",
+        rateLimitMax: 10,
+        windowSec: 3600,
+      });
+      if (!ip) return;
+      const { mode } = req.body || {};
+      if (mode !== "dry_run" && mode !== "confirm") {
+        return res.status(400).json({ error: "mode must be 'dry_run' or 'confirm'" });
+      }
+      const { runSandboxCleanupDryRun, runSandboxCleanupConfirm } = await import(
+        "../services/sandboxResidueCleanup"
+      );
+      const result =
+        mode === "dry_run" ? await runSandboxCleanupDryRun() : await runSandboxCleanupConfirm();
+      return res.json(result);
+    } catch (err) {
+      logger.error({ err }, "[admin/cleanup-sandbox-residue] error");
+      return res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   // 批十一 塊C — 案件對話進場:來源/ 的對話候選檔(.txt/.md)逐檔餵既有 chatLogImport 管線
   // (classifier 判斷是否對話、resolveEventDate 未來日期一律不建、認人守門、(content,分鐘)去重
   // 全沿用)。dry_run 只 classify+build 預覽不寫。POST /api/admin/import-case-conversations

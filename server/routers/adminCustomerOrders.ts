@@ -1167,7 +1167,10 @@ export const adminCustomerOrdersRouter = router({
         (input.kind === "deposit" ? num(o.depositAmount) : num(o.balanceAmount));
       const patch: Record<string, unknown> = {
         status: newStatus,
-        paymentMethod: input.method ?? o.paymentMethod ?? "square",
+        // F1 塊D 衛生(2026-07-09):移除寫死 'square' 回退。method 與訂單既有值
+        // 皆缺時存 null,不猜付款管道 —— Jeff 有 Stripe/Square/Zelle/Venmo/PayPal
+        // 五條通道,預設 square 會把 Zelle/Venmo 收款誤記成 Square,汙染對帳。
+        paymentMethod: input.method ?? o.paymentMethod ?? null,
         ...(input.kind === "deposit"
           ? { depositPaidAt: when, depositPaidAmount: dec(received) }
           : { balancePaidAt: when, balancePaidAmount: dec(received) }),

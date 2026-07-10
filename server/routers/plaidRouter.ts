@@ -1426,9 +1426,11 @@ export const plaidRouter = router({
     }),
 
   /**
-   * Lightweight KPI tile data for FinanceLanding — "賺多少 / 付多少 / 淨利"
-   * for current month + YTD. Cheaper than profitLossReport since callers
-   * only need 6 numbers, not the per-category breakdown.
+   * Lightweight KPI tile data for the 財務 KPI strip (BankLedgerV2 desktop +
+   * mobile KpiStrip): "賺多少 / 付多少 / 淨利" for current month + YTD. Cheaper
+   * than profitLossReport since callers only need 6 numbers, not the
+   * per-category breakdown. (F1 塊D 2026-07-09:原註解引用的 FinanceLanding
+   * 已刪除死碼,改列現行 live 消費者。)
    *
    * 2026-05-22 — built in response to Jeff seeing $0 on the 財務 page even
    * after AI classified Zelle income, FedEx expenses, etc. The old card
@@ -1527,9 +1529,9 @@ export const plaidRouter = router({
 
   // ── Phase 3: AccountingAgent ────────────────────────────────────────────
   //
-  // Classify uncategorized bank transactions into PACK&GO's 10-category
-  // taxonomy. Used by:
-  //   - Admin "AI 分類" button on the BankAccountsTab (batch)
+  // Classify uncategorized bank transactions into PACK&GO's 11-category
+  // taxonomy (F1 塊C 2026-07-08 加了 stripe_payout,原註解寫 10 未同步)。Used by:
+  //   - Admin "AI 分類" batch button on the bank ledger (BankLedgerV2)
   //   - Per-transaction "重新分類" link (single)
   //   - Phase 1.5 plaidSyncWorker after each sync (auto-classify new txns)
 

@@ -47,9 +47,9 @@ const fmtSigned = (n: number) =>
   `${n >= 0 ? "+" : "−"}$${Math.abs(Math.round(n)).toLocaleString("en-US")}`;
 
 /**
- * Schedule-C category code → display label. Same data-driven pattern as
- * FinanceLanding's PL_CATEGORY_LABELS (keyed by stable codes, localized at
- * render). cogs_* land in the COGS line; the rest are OpEx sub-rows.
+ * Schedule-C category code → display label. Keyed by stable category codes,
+ * localized at render. cogs_* land in the COGS line; the rest are OpEx sub-rows.
+ * (F1 塊D 2026-07-09:原註解引用的 FinanceLanding 已刪除死碼,拿掉這條參照。)
  */
 const CAT_LABEL: Record<string, { zh: string; en: string }> = {
   cogs_tour: { zh: "供應商成本", en: "Supplier Cost" },

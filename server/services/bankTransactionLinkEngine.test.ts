@@ -22,6 +22,7 @@ import {
   isKnownRefundVendorInflow,
   pendingClaimMinUsd,
   AllocationExceededError,
+  wouldExceedAllocation,
   EXACT_AMOUNT_DATE_WINDOW_DAYS,
   type ExactAmountOrderCandidate,
 } from "./bankTransactionLinkEngine";
@@ -261,5 +262,38 @@ describe("AllocationExceededError — 超額分配拒收訊息", () => {
     expect(err.message).toContain("30.00");
     expect(err.message).toContain("100.00");
     expect(err.name).toBe("AllocationExceededError");
+  });
+});
+
+describe("wouldExceedAllocation — 分配上限守門(F1 塊D 回爐 2026-07-09,真實數字邊界紅綠例)", () => {
+  // 綠例:允許(不超額)
+  it("空帳,首次認領剛好等於全額 → 不超額(邊界 =,不是 <)", () => {
+    expect(wouldExceedAllocation(0, 100, 100)).toBe(false);
+  });
+  it("拆兩單剛好加滿全額 → 不超額", () => {
+    expect(wouldExceedAllocation(60, 40, 100)).toBe(false);
+  });
+  it("落在容差內的浮點超出(100.005 <= 100 + 0.01)→ 視為不超額", () => {
+    expect(wouldExceedAllocation(0, 100.005, 100)).toBe(false);
+  });
+  it("零金額交易、零分配 → 不超額", () => {
+    expect(wouldExceedAllocation(0, 0, 0)).toBe(false);
+  });
+
+  // 紅例:拒收(超額)
+  it("已滿額後再加一分錢 → 超額拒收", () => {
+    expect(wouldExceedAllocation(100, 1, 100)).toBe(true);
+  });
+  it("首次認領就超過全額(超出容差)→ 超額拒收", () => {
+    expect(wouldExceedAllocation(0, 100.02, 100)).toBe(true);
+  });
+  it("既有部分分配 + 新增合計爆表 → 超額拒收", () => {
+    expect(wouldExceedAllocation(70, 40, 100)).toBe(true);
+  });
+
+  it("容差邊界:剛好超過 cap+epsilon 一點點 → 拒收(釘死用的是 > 不是 >=)", () => {
+    // 100 + 0.01 = 100.01 是允許上限;100.0100001 應該拒收
+    expect(wouldExceedAllocation(0, 100.02, 100, 0.01)).toBe(true);
+    expect(wouldExceedAllocation(0, 100.01, 100, 0.01)).toBe(false);
   });
 });
