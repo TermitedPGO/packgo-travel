@@ -617,6 +617,80 @@ i18n 100% parity。完整 T6 見 `t6-report-20260709-f1.md`。**
 
 ### 待 Jeff(見 T6 第 6 節)
 
-- sandbox 清理 dry-run 待 prod 跑(預期 24 帳戶),Jeff 點頭才 confirm。
-- 塊C 存量回填 dry-run 待 prod 跑,數字回填塊C T6 欄。
+- ~~sandbox 清理 dry-run 待 prod 跑(預期 24 帳戶),Jeff 點頭才 confirm。~~ 已完成,見下方追溯紀錄。
+- ~~塊C 存量回填 dry-run 待 prod 跑,數字回填塊C T6 欄。~~ 已完成(totalMisclassified=0),見下方。
 - STRIPE_TRUST_DEFERRAL_ENABLED flag 在 F2 P&L 接線建好前不准翻開。
+
+## post-ship 追溯紀錄(v806,2026-07-09,Jeff 對話授權後執行)
+
+> 指揮裁決:sandbox confirm 這個一次性硬刪動作,在 systemAudit() 建好前,
+> 端點回應全文貼進本檔當追溯(補足這次沒有 DB 審計列的缺口)。
+
+### sandbox 清理(cleanup-sandbox-residue)
+
+dry_run(唯讀,狀態 200):`accountCount=24, transactionCount=104,
+deletedAccounts=null, deletedTransactions=null`。24 個帳戶全部
+institutionName="First Platypus Bank"、isActive=0、id 1-24(Plaid sandbox
+兩輪各 12 種帳戶型)。
+
+linkedBankAccounts 執行前總覽:First Platypus(isActive=0)24 + Bank of America
+(isActive=1)4。
+
+**confirm(Jeff 2026-07-09 對話授權,狀態 200)全文**:
+```json
+{"accountCount":24,"transactionCount":104,"accounts":[
+{"id":1,"institutionName":"First Platypus Bank","accountName":"Plaid Checking","isActive":0},
+{"id":2,"institutionName":"First Platypus Bank","accountName":"Plaid Saving","isActive":0},
+{"id":3,"institutionName":"First Platypus Bank","accountName":"Plaid CD","isActive":0},
+{"id":4,"institutionName":"First Platypus Bank","accountName":"Plaid Credit Card","isActive":0},
+{"id":5,"institutionName":"First Platypus Bank","accountName":"Plaid Money Market","isActive":0},
+{"id":6,"institutionName":"First Platypus Bank","accountName":"Plaid IRA","isActive":0},
+{"id":7,"institutionName":"First Platypus Bank","accountName":"Plaid 401k","isActive":0},
+{"id":8,"institutionName":"First Platypus Bank","accountName":"Plaid Student Loan","isActive":0},
+{"id":9,"institutionName":"First Platypus Bank","accountName":"Plaid Mortgage","isActive":0},
+{"id":10,"institutionName":"First Platypus Bank","accountName":"Plaid HSA","isActive":0},
+{"id":11,"institutionName":"First Platypus Bank","accountName":"Plaid Cash Management","isActive":0},
+{"id":12,"institutionName":"First Platypus Bank","accountName":"Plaid Business Credit Card","isActive":0},
+{"id":13,"institutionName":"First Platypus Bank","accountName":"Plaid Checking","isActive":0},
+{"id":14,"institutionName":"First Platypus Bank","accountName":"Plaid Saving","isActive":0},
+{"id":15,"institutionName":"First Platypus Bank","accountName":"Plaid CD","isActive":0},
+{"id":16,"institutionName":"First Platypus Bank","accountName":"Plaid Credit Card","isActive":0},
+{"id":17,"institutionName":"First Platypus Bank","accountName":"Plaid Money Market","isActive":0},
+{"id":18,"institutionName":"First Platypus Bank","accountName":"Plaid IRA","isActive":0},
+{"id":19,"institutionName":"First Platypus Bank","accountName":"Plaid 401k","isActive":0},
+{"id":20,"institutionName":"First Platypus Bank","accountName":"Plaid Student Loan","isActive":0},
+{"id":21,"institutionName":"First Platypus Bank","accountName":"Plaid Mortgage","isActive":0},
+{"id":22,"institutionName":"First Platypus Bank","accountName":"Plaid HSA","isActive":0},
+{"id":23,"institutionName":"First Platypus Bank","accountName":"Plaid Cash Management","isActive":0},
+{"id":24,"institutionName":"First Platypus Bank","accountName":"Plaid Business Credit Card","isActive":0}
+],"deletedAccounts":24,"deletedTransactions":104}
+```
+
+**confirm 後唯讀複驗**:
+- linkedBankAccounts 總覽:只剩 Bank of America(isActive=1)× 4。First Platypus 0 筆。
+- BofA 四帳戶完好(id/名字/isActive 全在):
+  - 30001 "packgo llc"(isActive=1)
+  - 30002 "CORP Account - Business Advantage Travel Rewards - 4899"(isActive=1)
+  - 30003 "Living Trust Account"(isActive=1)
+  - 30004 "CORP Account - Business Adv Unlimited Cash Rewards - 9888"(isActive=1)
+- 計數:`lba_total=4, fp_remaining=0`。刪除精準,BofA 一根毛沒動。
+
+### 塊C 存量回填(backfill-stripe-payout-declassify)
+
+before(dry_run,狀態 200)與 after(confirm,狀態 200)皆:
+`totalMisclassified=0, autoEligibleCount=0, humanOverriddenCount=0, updatedCount=0`。
+no-op —— prod 存量中沒有被誤分類成 income 類的疑似 Stripe 撥款(與 #3 探真一致:
+prod 根本沒有 Stripe 撥款,真實處理商是 Square)。before/after 相同,無資料變動。
+
+### post-ship 走查六項(唯讀,詳見 t6-report-20260709-f1.md 走查段)
+
+- 待認領:$8,908/$2,916/$3,598(合 $15,422)三筆確認仍在 v806 未 link 入帳集
+  (320 筆待認領 / 共 $447,732)。Chrome 截圖待 Jeff 登入補(Browser 3 未登入,
+  不代輸密碼)。
+- flag OFF:`STRIPE_TRUST_DEFERRAL_ENABLED=(unset)`;`PLAID_TRUST_DEFERRAL_ENABLED=true`
+  (塊B 既有,非本批)。
+- backfill dry_run:373 掃描、53 small_inflow、320 待認領、$447,732。
+- 對帳引擎 link 現況:bankTransactionLinks total=0(存量回填 confirm 未跑、部署後
+  尚無新 sync 觸發掛鉤;預期狀態非缺陷)。
+- 煙霧七臂:指揮已驗全綠,引用。
+- sandbox confirm + BofA 複驗:見上方追溯段。
