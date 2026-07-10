@@ -27,9 +27,22 @@ vi.mock("../services/bankTransactionLinkEngine", () => {
   };
 });
 vi.mock("../_core/auditLog", () => ({ audit: vi.fn(async () => {}) }));
+// pendingSummary 借用 runBackfillDryRun(唯讀彙總)—— mock 掉,只驗真相列要的
+// count/totalAmount 直通,且是 dry-run(不寫路徑)。
+vi.mock("../services/bankTransactionLinkBackfill", () => ({
+  runBackfillDryRun: vi.fn(async () => ({
+    totalScanned: 0,
+    autoLinkedByRule: {},
+    autoLinkedTotal: 0,
+    pendingCount: 0,
+    pendingTotalAmount: 0,
+    pendingItems: [],
+  })),
+}));
 
 import { bankTransactionLinksRouter } from "./bankTransactionLinks";
 import { audit } from "../_core/auditLog";
+import { runBackfillDryRun } from "../services/bankTransactionLinkBackfill";
 import {
   scanUnlinkedInflows,
   processInboundTransaction,
@@ -50,9 +63,38 @@ const caller = () => (bankTransactionLinksRouter as any).createCaller(adminCtx()
 beforeEach(() => vi.clearAllMocks());
 
 describe("surface", () => {
-  it("exposes exactly listPending + claim", () => {
+  it("exposes exactly listPending + pendingSummary + claim", () => {
     const procs = Object.keys((bankTransactionLinksRouter as any)._def.procedures).sort();
-    expect(procs).toEqual(["claim", "listPending"]);
+    expect(procs).toEqual(["claim", "listPending", "pendingSummary"]);
+  });
+});
+
+describe("pendingSummary — 真相列「待認領」彙總(唯讀)", () => {
+  it("直通 runBackfillDryRun 的 pendingCount / pendingTotalAmount(真相列一格數字)", async () => {
+    (runBackfillDryRun as any).mockResolvedValueOnce({
+      totalScanned: 373,
+      autoLinkedByRule: { small_inflow: 53 },
+      autoLinkedTotal: 53,
+      pendingCount: 320,
+      pendingTotalAmount: 447732,
+      pendingItems: [],
+    });
+    const out = await caller().pendingSummary();
+    expect(out).toEqual({ count: 320, totalAmount: 447732 });
+  });
+
+  it("唯讀:走 dry-run 彙總,不觸發 confirm 寫路徑(不建卡、不留審計)", async () => {
+    (runBackfillDryRun as any).mockResolvedValueOnce({
+      totalScanned: 0,
+      autoLinkedByRule: {},
+      autoLinkedTotal: 0,
+      pendingCount: 0,
+      pendingTotalAmount: 0,
+      pendingItems: [],
+    });
+    await caller().pendingSummary();
+    expect(runBackfillDryRun).toHaveBeenCalledTimes(1);
+    expect(audit).not.toHaveBeenCalled();
   });
 });
 

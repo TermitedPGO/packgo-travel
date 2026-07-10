@@ -1,10 +1,13 @@
 /**
  * bankTransactionLinks router — F1 對帳引擎 塊A「待認領」認領 UI 後端 (2026-07-08).
  *
- * Procedures (2):
+ * Procedures (3):
  *   - listPending — 唯讀。撈還沒有 link 的入帳,each 附 dry-run 算出的候選訂單
  *     (供 UI 顯示「疑似這幾張單」)。不寫入——真正的自動 link 由
  *     bankTransactionLinkAlerts(daily 掃描)或本檔的 claim(人工)負責。
+ *   - pendingSummary — 唯讀。F3 財務駕駛艙真相列「待認領」一格要的「總筆數 +
+ *     總金額」。listPending 只回 items 且有 limit,真相列要的是全部待認領的彙總,
+ *     故借用存量回填的 dry-run(只算不寫)取 pendingCount / pendingTotalAmount。
  *   - claim — 人工認領,唯一「錢的真相」寫入路徑。AI 絕不呼叫這支;它只服務
  *     Jeff 在 FinanceReports「待認領」頁按下的認領鈕。留 auditLog(dispatch-f1.md
  *     鐵律 #5)。
@@ -54,6 +57,16 @@ export const bankTransactionLinksRouter = router({
       }
       return { items };
     }),
+
+  pendingSummary: adminProcedure.query(async () => {
+    // 唯讀:runBackfillDryRun 內部 processInboundTransaction({ dryRun: true }),
+    // 只算不寫、不建卡(建卡是 confirm 的事)。回傳全部待認領的彙總數字給真相列。
+    const { runBackfillDryRun } = await import(
+      "../services/bankTransactionLinkBackfill"
+    );
+    const report = await runBackfillDryRun();
+    return { count: report.pendingCount, totalAmount: report.pendingTotalAmount };
+  }),
 
   claim: adminProcedure
     .input(

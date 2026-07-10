@@ -25,7 +25,8 @@ const AdminHome = lazy(() => import("./pages/AdminHome"));
 const AdminShell = lazy(() => import("./layouts/AdminShell"));
 const AdminCustomers = lazy(() => import("./pages/AdminCustomers"));
 const AdminTours = lazy(() => import("./pages/AdminTours"));
-const AdminFinance = lazy(() => import("./pages/AdminFinance"));
+// F3 財務駕駛艙(2026-07-09)取代舊 AdminFinance placeholder。舊檔保留不刪。
+const FinanceCockpit = lazy(() => import("./components/admin-v2/FinanceCockpit"));
 const AdminMarketing = lazy(() => import("./pages/AdminMarketing"));
 const AdminSettings = lazy(() => import("./pages/AdminSettings"));
 const DiagnosticsPage = lazy(() => import("./pages/admin/DiagnosticsPage"));
@@ -205,7 +206,7 @@ function Router() {
       {/* v4 後台重建 — preview at /ops while iterating */}
       <Route path={"/ops/customers"}>{() => <AdminShell><AdminCustomers /></AdminShell>}</Route>
       <Route path={"/ops/tours"}>{() => <AdminShell><AdminTours /></AdminShell>}</Route>
-      <Route path={"/ops/finance"}>{() => <AdminShell><AdminFinance /></AdminShell>}</Route>
+      <Route path={"/ops/finance"}>{() => <AdminShell><FinanceCockpit /></AdminShell>}</Route>
       <Route path={"/ops/marketing"}>{() => <AdminShell><AdminMarketing /></AdminShell>}</Route>
       <Route path={"/ops/settings"}>{() => <AdminShell><AdminSettings /></AdminShell>}</Route>
       <Route path={"/ops"}>{() => <AdminShell><AdminHome /></AdminShell>}</Route>

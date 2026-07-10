@@ -10,8 +10,10 @@ import { useLocale } from "@/contexts/LocaleContext";
 import { LoadingPage } from "@/components/ui/spinner";
 
 const WorkspaceLedger = lazy(() => import("./WorkspaceLedger"));
-const FinanceReports = lazy(
-  () => import("@/components/admin-v2/FinanceReports"),
+// F3 財務駕駛艙(2026-07-09)過渡:月報 tab 改 render 駕駛艙。舊 FinanceReports
+// 檔案保留不刪 —— 發票等未遷功能經駕駛艙第二層入口仍可達。
+const FinanceCockpit = lazy(
+  () => import("@/components/admin-v2/FinanceCockpit"),
 );
 const MarketingHub = lazy(() => import("./MarketingHub"));
 const WorkspaceSuppliers = lazy(() => import("./WorkspaceSuppliers"));
@@ -75,7 +77,7 @@ export default function WorkspaceCompany({
 
       <Suspense fallback={<LoadingPage text={t("workspace.loading")} />}>
         {tab === "ledger" && <WorkspaceLedger />}
-        {tab === "reports" && <FinanceReports />}
+        {tab === "reports" && <FinanceCockpit />}
         {tab === "marketing" && <MarketingHub />}
         {tab === "suppliers" && <WorkspaceSuppliers />}
         {tab === "departures" && <DepartureList />}
