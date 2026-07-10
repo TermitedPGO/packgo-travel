@@ -1077,11 +1077,14 @@ export async function totalDeferredForUser(opts: {
   // 「任一」遞延機制的 flag,不能只看 PLAID flag(否則 STRIPE-only 開啟時,
   // 這支函式對 Stripe-direct 列永遠回 0,即使 flag 已經開了)。
   //
-  // ⚠ 已知限制(docs/features/finance-dept/progress.md「重大已知限制」段):
-  // 下面的 eq(linkedBankAccounts.isActive,1) 是 INNER JOIN 語意的過濾條件,
-  // Stripe-direct 列的 linkedAccountId=0(sentinel,無對應真實帳戶)join 不到
-  // 任何 linkedBankAccounts 列,仍然會被這個條件排除——這是另一個獨立問題
-  // (sentinel ID 對不上真實帳戶,不是 flag 判斷錯誤),F1 不修,留 F2。
+  // 哨兵列(linkedAccountId=0,Stripe-direct)的處理 —— F2 收案補丁 #1 已解
+  // (F1 時代靠 SQL 端 eq(isActive,1) 過濾,哨兵 join 不到帳戶被一併排除,
+  // 當時記為「留 F2」的已知限制):現行 isActive/userId/哨兵過濾全部移到
+  // JS 層共用謂詞(depositRowInScope / recognizedRowInScope,與月度口徑
+  // foldMonthlyDeferralAdjustments 同一來源)。includeSentinel:true 時哨兵
+  // 納入(稅表 Trust Summary 的 Received/Remaining,與 Recognized 同 scope
+  // 保恆等式);預設 false 排除哨兵 = 舊行為(P&L 存入減項,哨兵無銀行
+  // 入帳列可抵)。
   if (!isAnyTrustDeferralEnabled()) return 0;
   const db = await getDb();
   if (!db) return 0;
