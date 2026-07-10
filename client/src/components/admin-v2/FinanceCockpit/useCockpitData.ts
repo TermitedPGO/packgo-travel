@@ -73,6 +73,7 @@ export function useCockpitData(): CockpitData {
         unmatchedCount: trustAgg.unmatchedCount,
         balance: trustAgg.balance,
         enabled: trustAgg.enabled,
+        accountMask: trustAgg.accountMask,
       },
     },
     counts: {

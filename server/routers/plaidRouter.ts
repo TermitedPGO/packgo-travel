@@ -1987,9 +1987,21 @@ export const plaidRouter = router({
       }
       // "all" → no filter
 
+      // F3 塊C(2026-07-10):唯讀 join 補「客人名 / 團名」給駕駛艙客人訂金卡
+      // (B-final「王家 台越日三國團」)。getTableColumns spread 保留原有全欄位,
+      // 既有消費者(TrustComplianceV2)形狀不變,只多兩個欄位。dynamic import
+      // 避免頂部 import 區行號漂移(sqlRehearsal 登記表錨在上方 raw SQL 行號)。
+      const { getTableColumns } = await import("drizzle-orm");
+      const { bookings, tours } = await import("../../drizzle/schema");
       return await db
-        .select()
+        .select({
+          ...getTableColumns(trustDeferredIncome),
+          bookingCustomerName: bookings.customerName,
+          bookingTourTitle: tours.title,
+        })
         .from(trustDeferredIncome)
+        .leftJoin(bookings, eq(trustDeferredIncome.bookingId, bookings.id))
+        .leftJoin(tours, eq(bookings.tourId, tours.id))
         .where(and(...filters))
         .orderBy(desc(trustDeferredIncome.depositDate))
         .limit(input?.limit ?? 50);

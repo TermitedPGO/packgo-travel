@@ -41,11 +41,15 @@ vi.mock("../services/bankTransactionLinkBackfill", () => ({
   })),
 }));
 // Redis:預設全 miss(get→null)。個別測試覆寫模擬命中 / 故障。
+// ping/on 是 import 鏈副作用要的(claim zod 枚舉 import accountingAgent →
+// llm → llmCache 會在模組載入時 redis.ping())。
 vi.mock("../redis", () => ({
   redis: {
     get: vi.fn(async () => null),
     set: vi.fn(async () => "OK"),
     del: vi.fn(async () => 1),
+    ping: vi.fn(async () => "PONG"),
+    on: vi.fn(),
   },
 }));
 // DB:預設不可用(唯讀 query fail-open 回空)。unlink 測試覆寫成 fake chain。
@@ -274,8 +278,18 @@ describe("claim — 人工認領,錢的真相寫入路徑", () => {
       new (AllocationExceededError as any)(42, 80, 30, 100),
     );
     await expect(
-      caller().claim({ bankTransactionId: 42, targetType: "category", categoryCode: "interest", amountAllocated: 30 }),
+      caller().claim({ bankTransactionId: 42, targetType: "category", categoryCode: "transfer", amountAllocated: 30 }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(audit).not.toHaveBeenCalled();
+  });
+
+  it("F3 塊C 小修:categoryCode server 端鎖 SCHEDULE_C_MAP 枚舉,枚舉外值(舊 owner_transfer / 自由文字)被 zod 擋", async () => {
+    for (const bad of ["owner_transfer", "interest", "other", "free text"]) {
+      await expect(
+        caller().claim({ bankTransactionId: 42, targetType: "category", categoryCode: bad as any, amountAllocated: 30 }),
+      ).rejects.toThrow(); // zod 輸入驗證,連 handler 都進不去
+    }
+    expect(createBankTransactionLink).not.toHaveBeenCalled();
     expect(audit).not.toHaveBeenCalled();
   });
 });

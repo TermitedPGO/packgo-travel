@@ -20,6 +20,7 @@ export interface AccountRowLike {
 /** trustReconciliation 一列(只取真相列用到的欄位;F3 回爐 P1 加三段拆分)。 */
 export interface TrustReconRowLike {
   enabled?: boolean;
+  accountMask?: string | null;
   outstandingTotal?: number | null;
   unmatchedCount?: number | null;
   unmatchedTotal?: number | null;
@@ -75,6 +76,8 @@ export interface TrustAgg {
   /** 任一 trust 帳戶啟用遞延即視為啟用(關閉時真相列顯示「未啟用」而非謊報 $0)。 */
   enabled: boolean;
   accountCount: number;
+  /** 第一個 trust 帳戶的 mask(客人訂金卡標題「Trust #5442」);無帳戶 null。 */
+  accountMask: string | null;
 }
 
 /** 跨所有 trust 帳戶加總三段勾稽數字(對齊 TrustComplianceV2 的 agg 邏輯)。 */
@@ -91,6 +94,7 @@ export function aggregateTrust(
     balance: 0,
     enabled: false,
     accountCount: 0,
+    accountMask: null,
   };
   if (!rows) return acc;
   for (const r of rows) {
@@ -102,6 +106,7 @@ export function aggregateTrust(
     acc.unmatchedCount += r.unmatchedCount ?? 0;
     acc.balance += r.balance ?? 0;
     if (r.enabled) acc.enabled = true;
+    if (acc.accountMask === null && r.accountMask) acc.accountMask = r.accountMask;
     acc.accountCount++;
   }
   return acc;
@@ -137,7 +142,7 @@ export function dateOnlyClient(d: string | Date | null | undefined): string | nu
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-/** trustDeferredList 一列(待認列卡用到的欄位)。 */
+/** trustDeferredList 一列(待認列卡 / 客人訂金卡用到的欄位;塊C join 名稱)。 */
 export interface DeferredRowLike {
   id: number;
   bookingId: number | null;
@@ -146,6 +151,9 @@ export interface DeferredRowLike {
   expectedRecognitionDate: string | Date | null;
   recognizedAt?: string | Date | null;
   reversedAt?: string | Date | null;
+  /** 塊C:trustDeferredList 唯讀 join bookings/tours 補的名稱(可 null)。 */
+  bookingCustomerName?: string | null;
+  bookingTourTitle?: string | null;
 }
 
 export interface DepartedPendingItem {
@@ -154,6 +162,8 @@ export interface DepartedPendingItem {
   amount: number;
   depositDate: string | null;
   recognitionDate: string | null;
+  customerName: string | null;
+  tourTitle: string | null;
 }
 
 /**
@@ -181,9 +191,118 @@ export function foldDepartedPending(
       amount: a,
       depositDate: dateOnlyClient(r.depositDate),
       recognitionDate: rec,
+      customerName: r.bookingCustomerName ?? null,
+      tourTitle: r.bookingTourTitle ?? null,
     });
   }
   return { items, total, count: items.length };
+}
+
+/** 客人訂金卡「已對應未出發」逐團列(塊C)。 */
+export interface MatchedTrustItem {
+  id: number;
+  bookingId: number;
+  amount: number;
+  /** 預計認列日(≈出發日);null = 尚未排。 */
+  recognitionDate: string | null;
+  /** 距認列日天數(今天起算);null = 未排。 */
+  daysUntil: number | null;
+  /** 近出發(<= 30 天)→ amber dot。 */
+  soon: boolean;
+  customerName: string | null;
+  tourTitle: string | null;
+}
+
+const TRUST_SOON_DAYS = 30;
+
+/**
+ * 客人訂金卡逐團列表的摺疊:已對應且未出發(與 server matchedNotDeparted 同
+ * 口徑),按認列日近→遠排序(null 排最後),列前 maxRows 筆,其餘聚合成
+ * 「其他 N 筆訂金 $X」(B-final .trow 聚合列)。
+ */
+export function foldMatchedNotDeparted(
+  rows: DeferredRowLike[] | undefined | null,
+  todayStr: string,
+  maxRows = 4,
+): {
+  listed: MatchedTrustItem[];
+  othersCount: number;
+  othersTotal: number;
+  total: number;
+  count: number;
+} {
+  const all: MatchedTrustItem[] = [];
+  let total = 0;
+  if (rows) {
+    for (const r of rows) {
+      if (r.recognizedAt || r.reversedAt) continue;
+      if (!r.bookingId) continue;
+      const rec = dateOnlyClient(r.expectedRecognitionDate);
+      if (rec !== null && rec <= todayStr) continue; // 已出發 → 待認列卡的事
+      const a = parseFloat(String(r.amount)) || 0;
+      total += a;
+      const daysUntil = rec !== null ? agingDays(todayStr, rec) : null;
+      all.push({
+        id: r.id,
+        bookingId: r.bookingId,
+        amount: a,
+        recognitionDate: rec,
+        daysUntil,
+        soon: daysUntil !== null && daysUntil <= TRUST_SOON_DAYS,
+        customerName: r.bookingCustomerName ?? null,
+        tourTitle: r.bookingTourTitle ?? null,
+      });
+    }
+  }
+  all.sort((a, b) => {
+    if (a.recognitionDate === null) return b.recognitionDate === null ? 0 : 1;
+    if (b.recognitionDate === null) return -1;
+    return a.recognitionDate < b.recognitionDate ? -1 : a.recognitionDate > b.recognitionDate ? 1 : 0;
+  });
+  const listed = all.slice(0, maxRows);
+  const others = all.slice(maxRows);
+  return {
+    listed,
+    othersCount: others.length,
+    othersTotal: others.reduce((s, x) => s + x.amount, 0),
+    total,
+    count: all.length,
+  };
+}
+
+/** 損益成分條一段(B-final .compbar)。pct 為佔營收百分比(0-100,一位小數)。 */
+export interface CompBarSegment {
+  key: string;
+  pct: number;
+}
+
+/**
+ * 成分條寬度計算:各成本段 + 淨利段,寬度 = 佔營收比例,最後一段吃殘差使
+ * 加總恰為 100(浮點不漂移)。income <= 0(不除零)或淨利為負(段寬無法
+ * 表達虧損)→ 回空陣列,UI 藏條只列行。
+ */
+export function compBarSegments(
+  costs: { key: string; value: number }[],
+  income: number,
+  netProfit: number,
+): CompBarSegment[] {
+  if (!Number.isFinite(income) || income <= 0 || netProfit < 0) return [];
+  const items = [
+    ...costs.filter((c) => c.value > 0),
+    { key: "net", value: netProfit },
+  ];
+  const segs: CompBarSegment[] = [];
+  let acc = 0;
+  for (let i = 0; i < items.length; i++) {
+    if (i === items.length - 1) {
+      segs.push({ key: items[i].key, pct: Math.max(0, Math.round((100 - acc) * 10) / 10) });
+    } else {
+      const pct = Math.round((items[i].value / income) * 1000) / 10;
+      acc += pct;
+      segs.push({ key: items[i].key, pct });
+    }
+  }
+  return segs;
 }
 
 /**

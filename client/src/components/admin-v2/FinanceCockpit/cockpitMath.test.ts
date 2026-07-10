@@ -18,6 +18,8 @@ import {
   laTodayClient,
   dateOnlyClient,
   foldDepartedPending,
+  foldMatchedNotDeparted,
+  compBarSegments,
   fmtMoney,
   fmtSignedMoney,
   type AccountRowLike,
@@ -115,11 +117,20 @@ describe("aggregateTrust — 三段口徑(F3 回爐 P1,B-final 定稿)", () => {
     expect(aggregateTrust(null)).toEqual({
       outstanding: 0, matchedNotDeparted: 0, departedPending: 0, departedPendingCount: 0,
       unmatchedTotal: 0, unmatchedCount: 0, balance: 0, enabled: false, accountCount: 0,
+      accountMask: null,
     });
     const agg = aggregateTrust([{ enabled: true }]);
     expect(agg.matchedNotDeparted).toBe(0);
     expect(Number.isNaN(agg.outstanding)).toBe(false);
     expect(agg.enabled).toBe(true);
+  });
+
+  it("accountMask:取第一個有 mask 的帳戶(客人訂金卡標題 Trust #5442)", () => {
+    const agg = aggregateTrust([
+      { enabled: true, accountMask: null },
+      { enabled: true, accountMask: "5442" },
+    ]);
+    expect(agg.accountMask).toBe("5442");
   });
 });
 
@@ -200,7 +211,22 @@ describe("foldDepartedPending — 待認列確認卡(與 server departedPending 
       amount: 6400,
       depositDate: "2026-06-01",
       recognitionDate: "2026-07-05",
+      customerName: null,
+      tourTitle: null,
     });
+  });
+
+  it("塊C join 名稱透傳(客人名/團名)", () => {
+    const out = foldDepartedPending(
+      [{
+        id: 7, bookingId: 105, amount: "6400.00", depositDate: "2026-06-01",
+        expectedRecognitionDate: "2026-07-05",
+        bookingCustomerName: "陳先生", bookingTourTitle: "韓國團",
+      }],
+      TODAY,
+    );
+    expect(out.items[0].customerName).toBe("陳先生");
+    expect(out.items[0].tourTitle).toBe("韓國團");
   });
 
   it("認列日 = 今天含當日(邊界與 server splitOutstandingTrust 一致)", () => {
@@ -214,6 +240,91 @@ describe("foldDepartedPending — 待認列確認卡(與 server departedPending 
   it("空 / null 回全 0", () => {
     expect(foldDepartedPending(null, TODAY)).toEqual({ items: [], total: 0, count: 0 });
     expect(foldDepartedPending([], TODAY)).toEqual({ items: [], total: 0, count: 0 });
+  });
+});
+
+describe("foldMatchedNotDeparted — 客人訂金卡逐團列表(塊C)", () => {
+  const TODAY = "2026-07-09";
+  const rows: DeferredRowLike[] = [
+    // 已對應未出發 ×5(B-final:前 4 列出,第 5 進「其他」聚合)
+    { id: 1, bookingId: 101, amount: "18500.00", depositDate: null, expectedRecognitionDate: "2026-12-20", bookingCustomerName: "王家", bookingTourTitle: "台越日三國團" },
+    { id: 2, bookingId: 102, amount: "9200.00", depositDate: null, expectedRecognitionDate: "2026-07-28", bookingCustomerName: "陳小姐", bookingTourTitle: "日本團" },
+    { id: 3, bookingId: 103, amount: "7300.00", depositDate: null, expectedRecognitionDate: "2026-09-15", bookingCustomerName: "Lisa Wu", bookingTourTitle: "越南團" },
+    { id: 4, bookingId: 104, amount: "2000.00", depositDate: null, expectedRecognitionDate: "2027-01-10" },
+    { id: 5, bookingId: 106, amount: "1600.00", depositDate: null, expectedRecognitionDate: null }, // 未排認列日 → 排最後
+    // 已出發(不進本列表 —— departedPending 的事)
+    { id: 6, bookingId: 105, amount: "6400.00", depositDate: null, expectedRecognitionDate: "2026-07-05" },
+    // 未對應(不進)
+    { id: 7, bookingId: null, amount: "8908.00", depositDate: null, expectedRecognitionDate: null },
+    // 已認列(不進)
+    { id: 8, bookingId: 99, amount: "500.00", depositDate: null, expectedRecognitionDate: "2026-08-01", recognizedAt: "2026-07-01T00:00:00Z" },
+  ];
+
+  it("只留已對應未出發;按認列日近→遠排序,null 最後;前 4 列出、其餘聚合", () => {
+    const out = foldMatchedNotDeparted(rows, TODAY, 4);
+    expect(out.count).toBe(5);
+    expect(out.total).toBe(38600); // B-final matchedNotDeparted 口徑
+    expect(out.listed.map((x) => x.id)).toEqual([2, 3, 1, 4]); // 07/28 → 09/15 → 12/20 → 2027
+    expect(out.othersCount).toBe(1);
+    expect(out.othersTotal).toBe(1600);
+  });
+
+  it("近出發(<=30 天)標 soon(amber dot);遠的不標;未排認列日 daysUntil=null", () => {
+    const out = foldMatchedNotDeparted(rows, TODAY, 10);
+    const byId = Object.fromEntries(out.listed.map((x) => [x.id, x]));
+    expect(byId[2].soon).toBe(true); // 07/28,19 天後
+    expect(byId[2].daysUntil).toBe(19);
+    expect(byId[3].soon).toBe(false); // 09/15
+    expect(byId[5].daysUntil).toBeNull();
+    expect(byId[5].soon).toBe(false);
+  });
+
+  it("名稱透傳;空 / null 回全 0", () => {
+    const out = foldMatchedNotDeparted(rows, TODAY, 4);
+    expect(out.listed[0].customerName).toBe("陳小姐");
+    expect(out.listed[0].tourTitle).toBe("日本團");
+    expect(foldMatchedNotDeparted(null, TODAY)).toEqual({
+      listed: [], othersCount: 0, othersTotal: 0, total: 0, count: 0,
+    });
+  });
+});
+
+describe("compBarSegments — 損益成分條寬度(塊C)", () => {
+  const bFinalCosts = [
+    { key: "cogs_tour", value: 6400 },
+    { key: "cogs_other", value: 520 },
+    { key: "expense_marketing", value: 1200 },
+    { key: "expense_office", value: 780 },
+  ];
+
+  it("B-final 數字:各段佔營收比例,加總恰 100(最後一段吃殘差)", () => {
+    const segs = compBarSegments(bFinalCosts, 12450, 3550);
+    expect(segs.map((s) => s.key)).toEqual([
+      "cogs_tour", "cogs_other", "expense_marketing", "expense_office", "net",
+    ]);
+    const sum = segs.reduce((s, x) => s + x.pct, 0);
+    expect(sum).toBeCloseTo(100, 6);
+    expect(segs[0].pct).toBeCloseTo(51.4, 1); // 供應商 51%
+    expect(segs[segs.length - 1].pct).toBeCloseTo(28.5, 1); // 淨利 28.5%
+  });
+
+  it("0 收入不除零 → 空陣列(UI 藏條)", () => {
+    expect(compBarSegments(bFinalCosts, 0, 0)).toEqual([]);
+    expect(compBarSegments(bFinalCosts, -5, -5)).toEqual([]);
+  });
+
+  it("淨利為負 → 空陣列(段寬無法表達虧損,只列行不畫條)", () => {
+    expect(compBarSegments(bFinalCosts, 1000, -200)).toEqual([]);
+  });
+
+  it("value 0 的成本段被濾掉,不佔 0 寬段", () => {
+    const segs = compBarSegments(
+      [{ key: "cogs_tour", value: 500 }, { key: "cogs_other", value: 0 }],
+      1000,
+      500,
+    );
+    expect(segs.map((s) => s.key)).toEqual(["cogs_tour", "net"]);
+    expect(segs.reduce((s, x) => s + x.pct, 0)).toBeCloseTo(100, 6);
   });
 });
 

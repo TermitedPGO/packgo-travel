@@ -31,13 +31,13 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { Check, Loader2, Search } from "lucide-react";
 import { useLocale } from "@/contexts/LocaleContext";
-import { CLAIM_CATEGORIES, CLAIM_CATEGORY_LABEL_KEY } from "./claimCategories";
+import { CLAIM_CATEGORIES, CLAIM_CATEGORY_LABEL_KEY, type ClaimCategory } from "./claimCategories";
 import { fmtMoney } from "./cockpitMath";
 import type { PendingItem } from "./PendingClaimsCard";
 
 type Choice =
   | { kind: "order"; orderId: number; orderNumber: string; label: string }
-  | { kind: "category"; categoryCode: string }
+  | { kind: "category"; categoryCode: ClaimCategory }
   | null;
 
 export function ClaimDialog({
@@ -200,7 +200,8 @@ export function ClaimDialog({
             </div>
             <Select
               value={choice?.kind === "category" ? choice.categoryCode : ""}
-              onValueChange={(v) => setChoice({ kind: "category", categoryCode: v })}
+              // 值只可能來自下方 CLAIM_CATEGORIES 選項,cast 安全
+              onValueChange={(v) => setChoice({ kind: "category", categoryCode: v as ClaimCategory })}
             >
               <SelectTrigger className="h-8 w-full rounded-lg text-xs">
                 <SelectValue placeholder={t("financeCockpit.claim.categoryPlaceholder")} />

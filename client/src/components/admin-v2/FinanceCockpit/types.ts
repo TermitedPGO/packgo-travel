@@ -43,6 +43,8 @@ export interface TrustTile {
   unmatchedCount: number;
   balance: number;
   enabled: boolean;
+  /** 第一個 trust 帳戶 mask(客人訂金卡標題);null = 無 trust 帳戶。 */
+  accountMask: string | null;
 }
 
 export interface TruthRowData {

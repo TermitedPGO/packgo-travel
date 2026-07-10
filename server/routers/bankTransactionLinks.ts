@@ -35,6 +35,7 @@ import {
   createBankTransactionLink,
   AllocationExceededError,
 } from "../services/bankTransactionLinkEngine";
+import { ACCOUNTING_CATEGORIES } from "../agents/autonomous/accountingAgent";
 import { laToday } from "../services/trustOutstandingSplit";
 import { redis } from "../redis";
 import { reportFunnelError } from "../_core/errorFunnel";
@@ -236,7 +237,9 @@ export const bankTransactionLinksRouter = router({
         bankTransactionId: z.number().int().positive(),
         targetType: z.enum(["custom_order", "invoice", "booking", "category"]),
         targetId: z.number().int().positive().optional(),
-        categoryCode: z.string().trim().max(64).optional(),
+        // F3 塊C 小修(2026-07-10):server 端也鎖 SCHEDULE_C_MAP 枚舉(defense in
+        // depth,原本只有 client 下拉鎖)。自動 link 不走本 procedure,不受影響。
+        categoryCode: z.enum(ACCOUNTING_CATEGORIES).optional(),
         amountAllocated: z.number().positive(),
         note: z.string().trim().max(1000).optional(),
       }),

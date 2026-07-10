@@ -22,16 +22,21 @@ import { zhTW, enUS } from "date-fns/locale";
 import { useLocale } from "@/contexts/LocaleContext";
 import { toast } from "sonner";
 
+// F3 塊C 小修(2026-07-10):claim 的 categoryCode 在 server 端 zod 鎖
+// SCHEDULE_C_MAP 枚舉後,舊值 owner_transfer/interest/other 不再合法 —— value
+// 對映到枚舉(transfer / other_review),interest 無對應枚舉直接移除。
+// label key 沿用既有 i18n;駕駛艙的新認領對話框(ClaimDialog)用全 11 枚舉。
 const CATEGORY_OPTIONS = [
-  { value: "owner_transfer", labelKey: "pendingClaimsTab.categoryOwnerTransfer" },
-  { value: "interest", labelKey: "pendingClaimsTab.categoryInterest" },
+  { value: "transfer", labelKey: "pendingClaimsTab.categoryOwnerTransfer" },
   { value: "stripe_payout", labelKey: "pendingClaimsTab.categoryStripePayout" },
-  { value: "other", labelKey: "pendingClaimsTab.categoryOther" },
+  { value: "other_review", labelKey: "pendingClaimsTab.categoryOther" },
 ] as const;
+
+type CategoryValue = (typeof CATEGORY_OPTIONS)[number]["value"];
 
 type ClaimChoice =
   | { kind: "order"; orderId: number; orderNumber: string }
-  | { kind: "category"; categoryCode: string }
+  | { kind: "category"; categoryCode: CategoryValue }
   | null;
 
 export default function PendingClaimsTab() {
@@ -163,7 +168,8 @@ export default function PendingClaimsTab() {
                       <Select
                         value={choice?.kind === "category" ? choice.categoryCode : ""}
                         onValueChange={(v) =>
-                          setChoices((prev) => ({ ...prev, [item.bankTransactionId]: { kind: "category", categoryCode: v } }))
+                          // 值只可能來自 CATEGORY_OPTIONS,cast 安全
+                          setChoices((prev) => ({ ...prev, [item.bankTransactionId]: { kind: "category", categoryCode: v as CategoryValue } }))
                         }
                       >
                         <SelectTrigger className="w-44 h-8 text-xs rounded-lg">

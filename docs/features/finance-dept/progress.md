@@ -755,8 +755,56 @@ prod 根本沒有 Stripe 撥款,真實處理商是 Square)。before/after 相同
 1. 認領按鈕未選候選時不做 disabled(B-final off 樣式),改為 outline 樣式仍可按
    (開對話框走搜尋/分類)—— 對不到訂單的列需要認領入口,純 off 會走不下去。
 2. 待認列卡顯示「Booking #id」,未 join 客人名/團名(B-final「陳先生 韓國團」);
-   trustDeferredList 無 join,名稱補齊留塊C/D。
+   trustDeferredList 無 join,名稱補齊留塊C/D。→ 塊C 已補(join + fallback)。
 3. 認列按鈕 = 批次認列所有已到期(server recognizeReadyDepartures 語義),非逐筆
-   認列;卡上逐筆列出、footer 顯示合計後一鍵確認。
+   認列;卡上逐筆列出、footer 顯示合計後一鍵確認。→ 指揮批准保留,塊C 文案
+   誠實化(「執行認列掃描」+ footer 註明認列所有已到期)。
 4. 分類下拉鎖全 11 個 SCHEDULE_C_MAP 枚舉;舊 PendingClaimsTab 的
-   owner_transfer/other 選項不在枚舉內,屬既有債,本批不動舊元件。
+   owner_transfer/other 選項不在枚舉內,屬既有債,本批不動舊元件。→ 塊C 小修
+   server 端鎖 zod 枚舉後,舊元件選項 value 已對映到枚舉(見塊C)。
+
+### 塊C:兩本帳(右欄)+ 小修
+
+小修(指揮塊B 驗收回令):
+- claim.categoryCode server 端 zod 鎖 SCHEDULE_C_MAP 枚舉(z.enum(ACCOUNTING_
+  CATEGORIES),defense in depth);測試蓋枚舉外值(owner_transfer/interest/
+  other/自由文字)被 zod 擋。連帶:舊 PendingClaimsTab 的 CATEGORY_OPTIONS
+  value 對映到枚舉(owner_transfer→transfer、other→other_review、interest 無
+  對應枚舉移除選項),否則鎖 zod 後舊 tab 認領會 400 —— label i18n key 沿用。
+- 認列語義誠實化:recogAction 改「執行認列掃描」,footer 註明掃描會認列所有
+  已到期訂金(全域掃描語義經指揮批准保留,冪等)。
+
+塊C 本體:
+- 損益卡 PLCard:topline / 成分條(灰階,淨利段字綠;寬度 compBarSegments 純
+  函式,比例加總 100、0 收入不除零、負淨利藏條)/ legend / 損益行(refunds 或
+  遞延 ≠0 時展開 總收款→減項→營業收入,否則單行)/ 中性列兩行(transfer /
+  stripePayout tiles)/ 口徑 note(B-final 修訂版;退款 0 摺疊成一句)/ $0 月
+  中性灰簡版。資料源申報:選 plaid.profitLossReport(LA 本月),不選 financeKpi
+  —— 真相列只要 income/netProfit,本卡要成本 byCategory + 中性 tiles + refunds,
+  只有 profitLossReport 回全量;兩者同一支 generateBankPL,總額口徑一致(唯
+  financeKpi 期間用 server 時鐘 UTC 切月、本卡用 LA 曆月,月界深夜短暫可能差,
+  月中恆一致)。成本行 label 復用 claim.cat* 譯文(同一組分類名)。
+- 客人訂金卡 TrustCard:三段拆分直接吃 truth.trust(與真相列同源);逐團列表
+  foldMatchedNotDeparted(前 4 筆 + 「其他 N 筆」聚合;近出發 <=30 天 amber
+  dot);未對應列(認領後歸戶·見左側);已出發待認列列(red dot);footer
+  等式錨在「未認列合計 = 三段之和」(結構恆真),銀行餘額相符顯示「相符」、
+  drift >= $1 顯示差額待查(誠實,不假裝餘額恆等)。
+- 名稱 join:trustDeferredList 唯讀擴充(getTableColumns spread + leftJoin
+  bookings/tours,新增 bookingCustomerName/bookingTourTitle 兩欄,既有消費者
+  形狀不變;dynamic import 避免頂部行號漂移破壞 sqlRehearsal 登記錨點)。
+  RecognitionCard 同步升級顯示客人名+團名(fallback Booking #id)。
+- 三態:各卡 loading(pulse)/error(讀取失敗)/stale(淡標記+上次值),
+  沿用 resolveTileState。
+- ColumnPlaceholder.tsx 刪除(塊C 落地後無消費者);ledger.placeholder* i18n
+  同步刪(zh/en parity 維持)。
+
+### 塊C 偏離申報
+
+1. 成分條在淨利為負或 $0 月時整條隱藏(B-final 未定義虧損態;段寬無法表達
+   負值,只列損益行)。
+2. 損益卡 meta 用「Plaid 實收」,不照 B-final「Plaid 實收 · Stripe 遞延 OFF」
+   寫死 flag 狀態(flag 是活的,寫死會說謊)。
+3. footer 等式錨在未認列合計(恆真式),非 B-final 的「餘額 = 三段和」(那是
+   drift=0 特例);drift ≠ 0 時顯示差額,經指揮「誠實顯示」指示。
+4. 逐團列表每列 dot 的 amber 判定 = 距認列日 <=30 天(B-final 只畫了一個 19 天
+   的 amber 例,未定義閾值;取 30 天與 aging 紅字同刻度)。

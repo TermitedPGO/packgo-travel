@@ -70,7 +70,10 @@ export function RecognitionCard() {
           <div className="min-w-0 flex-1">
             <div className="text-[13px] text-gray-900">
               {t("financeCockpit.work.recogLine1", {
-                bookingId: String(row.bookingId),
+                // 塊C:join 名稱補齊(客人名+團名);沒有才 fallback Booking #id
+                name:
+                  [row.customerName, row.tourTitle].filter(Boolean).join(" ") ||
+                  t("financeCockpit.ledger.trustBooking", { id: String(row.bookingId) }),
                 date: fmtShortDate(row.recognitionDate),
               })}{" "}
               <b className="font-bold text-amber-700 tabular-nums">{fmtMoney(row.amount)}</b>{" "}
