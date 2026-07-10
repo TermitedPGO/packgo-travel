@@ -171,7 +171,11 @@ export async function generateTaxCsv(year: number): Promise<string> {
     const { generateBankMonthlyTrend, SCHEDULE_C_MAP } = await import(
       "./bankPLService"
     );
-    monthlyRows = await generateBankMonthlyTrend({ months: 12 });
+    // F2 收案補丁 #3(2026-07-10):滾動窗定錨 now 會讓「年度結束後補產該年
+    // 稅表」(正常報稅時序:明年 3 月報今年)漏掉該年頭幾個月,Line-1 年度
+    // 合計短報。窗口固定為指定 year 的 12 個月:now 錨到該年 12/31(local
+    // 構造,getFullYear/getMonth 恆為 year/11)。
+    monthlyRows = await generateBankMonthlyTrend({ months: 12, now: new Date(year, 11, 31, 12) });
     scheduleCLabels = { ...SCHEDULE_C_MAP };
   } catch (err) {
     log.error({ err }, "[taxCsvService] failed to load bank monthly trend");
@@ -179,26 +183,46 @@ export async function generateTaxCsv(year: number): Promise<string> {
   }
 
   // 2. Trust account summary
+  // F2 塊D 回爐 P2(2026-07-10)—— 稅表接線:
+  //   totalReceived  = 本年「存入」的遞延訂金全額(includeRecognized:true ——
+  //                    收到就是收到,不因日後認列而縮水;舊版排除已認列,
+  //                    語義跟欄位名對不上)。
+  //   totalRecognized = 本年「認列」(LA 曆日)的遞延收入 —— 直接用共用
+  //                    口徑 recognizedTrustIncomeInPeriod,不再用
+  //                    「本年存入未認列 − 全期未認列」的差值 hack(那個
+  //                    導數在跨年情境會算錯且被 Math.max 掩蓋)。
+  //   remainingDeferred = 全期仍未認列(語義不變)。
+  //   gate 改 isAnyTrustDeferralEnabled(共用函式內部同款)—— STRIPE-only
+  //   開啟時 Stripe-direct 認列也要進年終稅摘要。flag 全 OFF → 三值全零,
+  //   輸出 byte-identical。
   try {
-    const { totalDeferredForUser, isTrustDeferralEnabled } = await import(
-      "./trustDeferralService"
-    );
-    if (isTrustDeferralEnabled()) {
+    const { totalDeferredForUser, recognizedTrustIncomeInPeriod, isAnyTrustDeferralEnabled } =
+      await import("./trustDeferralService");
+    if (isAnyTrustDeferralEnabled()) {
       const endDate = `${year}-12-31`;
       const startDate = `${year}-01-01`;
-      // Currently deferred for this year's deposits
-      const yearDeferred = await totalDeferredForUser({
+      // F2 收案補丁 #1:includeSentinel —— Received/Remaining 與 Recognized
+      // (向來含哨兵)同 scope,恆等式 Received = Recognized + Remaining
+      // 在 STRIPE-only 穩態(哨兵列當年存入當年認列)才成立。
+      const yearReceived = await totalDeferredForUser({
         asOfDate: endDate,
         depositSince: startDate,
+        includeRecognized: true,
+        includeSentinel: true,
       });
-      // Total still deferred (all time, not yet recognized)
+      const yearRecognized = await recognizedTrustIncomeInPeriod({
+        startDate,
+        endDate,
+      });
+      // Total still deferred (all time, not yet recognized; 含哨兵,同上)
       const totalDeferred = await totalDeferredForUser({
         asOfDate: endDate,
+        includeSentinel: true,
       });
 
       trust = {
-        totalReceived: yearDeferred,
-        totalRecognized: Math.max(0, yearDeferred - totalDeferred),
+        totalReceived: yearReceived,
+        totalRecognized: yearRecognized,
         remainingDeferred: totalDeferred,
       };
     }

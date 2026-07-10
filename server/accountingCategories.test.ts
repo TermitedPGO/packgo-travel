@@ -2,8 +2,9 @@
  * M1 keystone guard — accounting category taxonomy parity.
  *
  * The bug this prevents: the client override dropdown, the AI agent, the P&L
- * engine, and the tax export must all speak the SAME 11 category keys (was 10
- * until F1 塊C 2026-07-08 added stripe_payout for double-count protection).
+ * engine, and the tax export must all speak the SAME 12 category keys (was 10
+ * until F1 塊C 2026-07-08 added stripe_payout; F2 塊C 2026-07-10 added
+ * square_payout).
  * When they drift, manual overrides silently fall out of P&L + Schedule C.
  * These tests fail loudly the moment any of the four lists diverges.
  */
@@ -17,6 +18,7 @@ import {
 } from "@/lib/accountingCategories";
 import { ACCOUNTING_CATEGORIES } from "./agents/autonomous/accountingAgent";
 import { SCHEDULE_C_MAP } from "./services/bankPLService";
+import { PENDING_CLAIM_CATEGORY_OPTIONS } from "@/components/admin/pendingClaimCategoryOptions";
 import { zhTW } from "@/i18n/zh-TW";
 import { en } from "@/i18n/en";
 
@@ -35,9 +37,21 @@ describe("accounting category parity", () => {
     );
   });
 
-  it("exactly 11 categories, no duplicates (F1 塊C 2026-07-08 added stripe_payout)", () => {
-    expect(ACCOUNTING_CATEGORY_KEYS.length).toBe(11);
-    expect(new Set(ACCOUNTING_CATEGORY_KEYS).size).toBe(11);
+  it("exactly 12 categories, no duplicates (F1 塊C added stripe_payout; F2 塊C 2026-07-10 added square_payout)", () => {
+    expect(ACCOUNTING_CATEGORY_KEYS.length).toBe(12);
+    expect(new Set(ACCOUNTING_CATEGORY_KEYS).size).toBe(12);
+  });
+
+  it("F2 塊D 回令 #3:PendingClaimsTab 第三面鏡像 —— 選項值全部 ⊆ SCHEDULE_C_MAP 枚舉,且 i18n label 兩語都有", () => {
+    const serverKeys = new Set(Object.keys(SCHEDULE_C_MAP));
+    const zhTab = (zhTW as any).pendingClaimsTab as Record<string, unknown>;
+    const enTab = (en as any).pendingClaimsTab as Record<string, unknown>;
+    for (const opt of PENDING_CLAIM_CATEGORY_OPTIONS) {
+      expect(serverKeys.has(opt.value)).toBe(true); // 子集永遠合法(zod 會擋非法值)
+      const leaf = opt.labelKey.replace("pendingClaimsTab.", "");
+      expect(typeof zhTab[leaf]).toBe("string");
+      expect(typeof enTab[leaf]).toBe("string");
+    }
   });
 
   it("every config row belongs to a declared group", () => {

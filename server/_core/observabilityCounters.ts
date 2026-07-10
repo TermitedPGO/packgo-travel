@@ -289,14 +289,21 @@ function formatLlmCircuitLine(stats: LlmCircuitStats): string {
  * fine would defeat the "trend visible every Monday" goal. Non-zero /
  * unreadable states get a "⚠ " prefix so an unusual week is visually loud
  * against five weeks of plain, unprefixed "all clear" lines.
+ *
+ * `trustInvariantLine`(F2 塊B,2026-07-10,選填、向後相容):Trust 勾稽
+ * 不變式看門狗的一行(services/trustInvariantWatchdog.ts 產生,同「絕不
+ * throw、健康也顯示」合約)。省略 → 輸出 byte-identical 於三行版,既有
+ * 呼叫端/測試不受影響。
  */
 export function formatObservabilitySection(input: {
   messagesFailedDelta: MessagesFailedWeeklyDelta;
   queueFailedCounts: QueueFailedCount[];
   llmCircuitStats: LlmCircuitStats;
+  trustInvariantLine?: string;
 }): string {
   const line1 = formatMessagesFailedLine(input.messagesFailedDelta);
   const line2 = formatQueueFailedLine(input.queueFailedCounts);
   const line3 = formatLlmCircuitLine(input.llmCircuitStats);
-  return `觀測計數器\n${line1}\n${line2}\n${line3}`;
+  const base = `觀測計數器\n${line1}\n${line2}\n${line3}`;
+  return input.trustInvariantLine ? `${base}\n${input.trustInvariantLine}` : base;
 }

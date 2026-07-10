@@ -5,7 +5,7 @@
  * scanAndAlertPendingClaims 本地無 DATABASE_URL 測不到,誠實列 T6 已知限制。
  */
 import { describe, it, expect } from "vitest";
-import { allocateCardSlots, laDay, DAILY_PENDING_CLAIM_CARD_CAP } from "./bankTransactionLinkAlerts";
+import { allocateCardSlots, laDay, DAILY_PENDING_CLAIM_CARD_CAP, buildPendingCandidateNote } from "./bankTransactionLinkAlerts";
 
 describe("allocateCardSlots — 每日出卡上限(噪音閘)", () => {
   it("今天還沒出過卡,items 數 <= cap → 全部進 individual,overflow 空", () => {
@@ -60,5 +60,35 @@ describe("laDay — America/Los_Angeles 曆日", () => {
     // UTC 2026-07-08 03:00 = LA 2026-07-07 20:00(PDT, UTC-7)—— 確認換算方向沒搞反。
     const d = laDay(new Date("2026-07-08T03:00:00Z"));
     expect(d).toBe("2026-07-07");
+  });
+});
+
+
+describe("buildPendingCandidateNote — 撥款候選分支(F2 塊D 回令 #3)", () => {
+  it("payout 候選存在 → note 帶「銷售 − 手續費 = 費率」明細與人工確認提示", () => {
+    const note = buildPendingCandidateNote([], [
+      {
+        orderNumbers: ["ORD-2026-0011"],
+        saleTotalCents: 49000,
+        impliedFeeCents: 1451,
+        impliedFeePct: 0.0296,
+      },
+    ]);
+    expect(note).toContain("疑似 Square 撥款");
+    expect(note).toContain("ORD-2026-0011");
+    expect(note).toContain("$490.00");
+    expect(note).toContain("$14.51");
+    expect(note).toContain("2.96%");
+    expect(note).toContain("Jeff 認領時確認");
+  });
+
+  it("一般候選 + payout 候選並存 → 兩段以分號拼接;全空 → 誠實寫無候選", () => {
+    const both = buildPendingCandidateNote(
+      [{ orderNumber: "ORD-2026-0042" }],
+      [{ orderNumbers: ["ORD-2026-0011"], saleTotalCents: 49000, impliedFeeCents: 1451, impliedFeePct: 0.0296 }],
+    );
+    expect(both).toContain("疑似候選訂單:ORD-2026-0042");
+    expect(both).toContain(";疑似 Square 撥款");
+    expect(buildPendingCandidateNote([], [])).toBe("沒有金額吻合的候選訂單");
   });
 });

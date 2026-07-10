@@ -570,6 +570,15 @@ export function TaxDetail() {
               </span>
               <span className="text-gray-400 tabular-nums">{fmtSignedMoney(r?.stripePayout.total ?? 0)}</span>
             </div>
+            {/* F2 塊D 回令(2026-07-10):square_payout 排除列,照 stripe 模式 $0 恆顯 */}
+            <div className="flex items-center gap-2 border-t border-gray-50 px-4 py-2 text-xs text-gray-600">
+              <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-gray-300" />
+              <span className="flex-1">
+                <b className="font-semibold text-gray-800">{t("financeCockpit.tax.exclSquare")}</b>{" "}
+                {t("financeCockpit.tax.exclSquareDesc")}
+              </span>
+              <span className="text-gray-400 tabular-nums">{fmtSignedMoney(r?.squarePayout?.total ?? 0)}</span>
+            </div>
             <div className="flex items-center gap-2 border-t border-gray-50 px-4 py-2 pb-3 text-xs text-gray-600">
               <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-gray-300" />
               <span className="flex-1">

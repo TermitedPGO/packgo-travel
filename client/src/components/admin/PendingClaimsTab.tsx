@@ -23,16 +23,13 @@ import { useLocale } from "@/contexts/LocaleContext";
 import { toast } from "sonner";
 
 // F3 塊C 小修(2026-07-10):claim 的 categoryCode 在 server 端 zod 鎖
-// SCHEDULE_C_MAP 枚舉後,舊值 owner_transfer/interest/other 不再合法 —— value
-// 對映到枚舉(transfer / other_review),interest 無對應枚舉直接移除。
-// label key 沿用既有 i18n;駕駛艙的新認領對話框(ClaimDialog)用全 11 枚舉。
-const CATEGORY_OPTIONS = [
-  { value: "transfer", labelKey: "pendingClaimsTab.categoryOwnerTransfer" },
-  { value: "stripe_payout", labelKey: "pendingClaimsTab.categoryStripePayout" },
-  { value: "other_review", labelKey: "pendingClaimsTab.categoryOther" },
-] as const;
-
-type CategoryValue = (typeof CATEGORY_OPTIONS)[number]["value"];
+// SCHEDULE_C_MAP 枚舉後,舊值 owner_transfer/interest/other 不再合法。
+// F2 塊D 回令 #3:選項抽到 pendingClaimCategoryOptions.ts(純模組),
+// 納入 accountingCategories.test.ts parity 守門;駕駛艙 ClaimDialog 用全 12 枚舉。
+import {
+  PENDING_CLAIM_CATEGORY_OPTIONS as CATEGORY_OPTIONS,
+  type PendingClaimCategoryValue as CategoryValue,
+} from "./pendingClaimCategoryOptions";
 
 type ClaimChoice =
   | { kind: "order"; orderId: number; orderNumber: string }

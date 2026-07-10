@@ -15,6 +15,7 @@ import {
   decideDeferralSync,
   computeExpectedRecognitionDate,
   isAnyTrustDeferralEnabled,
+  isRecognitionDue,
   type TrustDeferredRowLike,
 } from "./trustDeferralService";
 
@@ -124,6 +125,33 @@ describe("foldOutstandingTrust — outstanding + unmatched", () => {
       unmatchedCount: 0,
       unmatchedTotal: 0,
     });
+  });
+});
+
+// ─── §17550 認列時點 —— 單一函式紅綠(F2 塊B,2026-07-10)────────────────────
+//
+// 三條 §17550 紅綠中的前兩條(出發前不可認列/出發後可認列)釘在這裡;
+// 第三條(認列後才可轉出)釘在 trustTransferDetection.test.ts 的
+// isTransferBackfillEligible / matchPairsToDeferrals。CPA 答覆回來只調
+// computeExpectedRecognitionDate 的參數或 isRecognitionDue 的比較式,不動結構。
+
+describe("isRecognitionDue — §17550 認列時點(單一判定函式)", () => {
+  it("紅:出發前(認列日在未來)不可認列", () => {
+    expect(isRecognitionDue("2026-08-01", "2026-07-10")).toBe(false);
+  });
+
+  it("綠:出發後(認列日已過)可認列", () => {
+    expect(isRecognitionDue("2026-07-01", "2026-07-10")).toBe(true);
+  });
+
+  it("綠:認列日當天(邊界,<= 不是 <)可認列", () => {
+    expect(isRecognitionDue("2026-07-10", "2026-07-10")).toBe(true);
+  });
+
+  it("紅:認列日缺值(算不出出發日)一律不可認列", () => {
+    expect(isRecognitionDue(null, "2026-07-10")).toBe(false);
+    expect(isRecognitionDue(undefined, "2026-07-10")).toBe(false);
+    expect(isRecognitionDue("", "2026-07-10")).toBe(false);
   });
 });
 
@@ -250,5 +278,133 @@ describe("decideDeferralSync — create / reverse / noop", () => {
       excluded: false,
     };
     expect(decideDeferralSync({ enabled, before, after }).action).toBe("reverse");
+  });
+});
+
+// ─── F2 塊D:認列期收入(LA 曆日歸屬)─────────────────────────────────────────
+import { sumRecognizedInPeriodLA, type RecognizedRowLike } from "./trustDeferralService";
+
+describe("sumRecognizedInPeriodLA — 認列期收入純函式(F2 塊D)", () => {
+  const row = (o: Partial<RecognizedRowLike> = {}): RecognizedRowLike => ({
+    amount: "1000.00",
+    recognizedAt: new Date("2026-07-15T18:00:00Z"),
+    linkedAccountId: 30003,
+    ownerUserId: 1,
+    accountIsActive: 1,
+    ...o,
+  });
+
+  it("期內認列列加總;期外排除", () => {
+    expect(
+      sumRecognizedInPeriodLA(
+        [row(), row({ amount: "500.00" }), row({ recognizedAt: new Date("2026-08-02T18:00:00Z") })],
+        "2026-07-01",
+        "2026-07-31",
+      ),
+    ).toBe(1500);
+  });
+
+  it("月界地雷(T2 #2):UTC 已跨到 8/1 凌晨、LA 還是 7/31 → 歸七月", () => {
+    // 2026-08-01T02:00Z = LA 2026-07-31 19:00(PDT)
+    const r = row({ recognizedAt: new Date("2026-08-01T02:00:00Z") });
+    expect(sumRecognizedInPeriodLA([r], "2026-07-01", "2026-07-31")).toBe(1000);
+    expect(sumRecognizedInPeriodLA([r], "2026-08-01", "2026-08-31")).toBe(0);
+  });
+
+  it("哨兵列(linkedAccountId=0,Stripe-direct)一律計入 —— 認列加回是它進 P&L 的唯一入口", () => {
+    const sentinel = row({ linkedAccountId: 0, ownerUserId: null, accountIsActive: null });
+    expect(sumRecognizedInPeriodLA([sentinel], "2026-07-01", "2026-07-31", 999)).toBe(1000);
+  });
+
+  it("真實帳戶列:inactive 帳戶排除;userId scope 不符排除", () => {
+    expect(
+      sumRecognizedInPeriodLA([row({ accountIsActive: 0 })], "2026-07-01", "2026-07-31"),
+    ).toBe(0);
+    expect(
+      sumRecognizedInPeriodLA([row({ ownerUserId: 2 })], "2026-07-01", "2026-07-31", 1),
+    ).toBe(0);
+    expect(
+      sumRecognizedInPeriodLA([row()], "2026-07-01", "2026-07-31", 1),
+    ).toBe(1000);
+  });
+});
+
+// ─── F2 塊D 回爐 P2:月度遞延口徑(損益/稅表/財報共用)─────────────────────────
+import {
+  foldMonthlyDeferralAdjustments,
+  type DeferralLedgerRowLike,
+} from "./trustDeferralService";
+
+describe("foldMonthlyDeferralAdjustments — 月度口徑純函式(F2 塊D 回爐)", () => {
+  const MONTHS = ["2026-06", "2026-07", "2026-08"] as const;
+  const ledger = (o: Partial<DeferralLedgerRowLike> = {}): DeferralLedgerRowLike => ({
+    amount: "1000.00",
+    depositDate: "2026-06-05",
+    recognizedAt: null,
+    reversedAt: null,
+    linkedAccountId: 30003,
+    ownerUserId: 1,
+    accountIsActive: 1,
+    ...o,
+  });
+
+  it("跨月情境(P2 核心):6 月存入、8 月認列 → 6 月減 1000、8 月加回 1000", () => {
+    const adj = foldMonthlyDeferralAdjustments(
+      [ledger({ recognizedAt: new Date("2026-08-03T18:00:00Z") })],
+      MONTHS,
+    );
+    expect(adj["2026-06"]).toEqual({ deferredDeposits: 1000, recognizedIncome: 0 });
+    expect(adj["2026-07"]).toEqual({ deferredDeposits: 0, recognizedIncome: 0 });
+    expect(adj["2026-08"]).toEqual({ deferredDeposits: 0, recognizedIncome: 1000 });
+  });
+
+  it("未認列列只有存入側;reversed 列兩側都不算", () => {
+    const adj = foldMonthlyDeferralAdjustments(
+      [ledger(), ledger({ amount: "500.00", reversedAt: new Date("2026-06-10") })],
+      MONTHS,
+    );
+    expect(adj["2026-06"].deferredDeposits).toBe(1000); // reversed 的 500 不進
+    expect(adj["2026-06"].recognizedIncome).toBe(0);
+  });
+
+  it("哨兵列(Stripe-direct):存入側不減(無銀行入帳可抵)、認列側照加", () => {
+    const adj = foldMonthlyDeferralAdjustments(
+      [
+        ledger({
+          linkedAccountId: 0,
+          ownerUserId: null,
+          accountIsActive: null,
+          recognizedAt: new Date("2026-07-05T18:00:00Z"),
+        }),
+      ],
+      MONTHS,
+    );
+    expect(adj["2026-06"].deferredDeposits).toBe(0);
+    expect(adj["2026-07"].recognizedIncome).toBe(1000);
+  });
+
+  it("月界地雷(T2 #2):UTC 已到 8/1 凌晨、LA 還是 7/31 → 認列歸七月", () => {
+    const adj = foldMonthlyDeferralAdjustments(
+      [ledger({ recognizedAt: new Date("2026-08-01T02:00:00Z") })],
+      MONTHS,
+    );
+    expect(adj["2026-07"].recognizedIncome).toBe(1000);
+    expect(adj["2026-08"].recognizedIncome).toBe(0);
+  });
+
+  it("視窗外月份忽略;userId scope 不符的真實帳戶列兩側都不算", () => {
+    const adj = foldMonthlyDeferralAdjustments(
+      [ledger({ depositDate: "2025-12-01" })],
+      MONTHS,
+    );
+    expect(adj["2026-06"].deferredDeposits).toBe(0);
+
+    const scoped = foldMonthlyDeferralAdjustments(
+      [ledger({ ownerUserId: 2, recognizedAt: new Date("2026-07-05T18:00:00Z") })],
+      MONTHS,
+      1,
+    );
+    expect(scoped["2026-06"].deferredDeposits).toBe(0);
+    expect(scoped["2026-07"].recognizedIncome).toBe(0);
   });
 });

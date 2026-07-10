@@ -7,6 +7,17 @@
  * Usage:
  *   await audit({ ctx, action: "tour.update", targetType: "tour", targetId: id, changes: { before, after } });
  *
+ * System-actor writes (no ctx.user):
+ *   audit() intentionally no-ops when there is no ctx.user, so background code
+ *   paths that mutate money/data outside an admin request would otherwise leave
+ *   NO audit trail. Use systemAudit() for those. CONVENTION (F2 塊A, 2026-07-09):
+ *   every LOCAL_SCRIPT_TOKEN internal write endpoint (server/_core/index.ts
+ *   /api/admin/* confirm paths) and every webhook-driven financial write
+ *   (Stripe/Plaid trust deferral, reversal, etc.) MUST call systemAudit() so
+ *   the tamper-evident chain covers system actors, not just admins.
+ *   Example (fire-and-forget, belt-and-suspenders catch):
+ *     void systemAudit("system:trustDeferral", "trust.defer", bookingId, { amount }).catch(() => {});
+ *
  * Design:
  *   - Never throws — audit-write failures must never break the underlying request.
  *   - Captures actor, action, target, before/after diff, IP, user-agent.
@@ -162,6 +173,76 @@ function extractUA(req?: AuditCtx["req"]): string | null {
 }
 
 /**
+ * Sentinel userId for system-actor audit rows written by systemAudit(). No
+ * real admin user has id 0 (autoincrement starts at 1), so this cleanly marks
+ * a row as system-originated; the human-readable actor ("system:<module>")
+ * lives in userEmail and userRole is fixed to "system".
+ */
+export const SYSTEM_ACTOR_USER_ID = 0;
+
+/** The exact column shape (minus autoincrement id) written to adminAuditLog. */
+interface AuditRowSansId {
+  userId: number;
+  userEmail: string;
+  userRole: string;
+  action: string;
+  targetType: string | null;
+  targetId: string | null;
+  changes: string | null;
+  reason: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  success: number;
+  errorMessage: string | null;
+  createdAt: Date;
+}
+
+/**
+ * Shared low-level writer for both audit() (admin actor) and systemAudit()
+ * (system actor). Performs the tamper-evident hash-chain insert. Does NOT
+ * swallow errors itself — each public caller wraps this in its own try/catch
+ * so audit-write failures never break the underlying request.
+ *
+ * SECURITY_AUDIT_2026_05_14 P2-1: hash-chain.
+ *
+ * We need the new row's `id` to canonicalize before hashing. Two options:
+ *   (a) Insert first, then UPDATE with the hashes — works but leaves a brief
+ *       window where the row exists unhashed.
+ *   (b) Generate the id explicitly before insert — requires the table to
+ *       expose AUTO_INCREMENT next value, racy on TiDB.
+ * We use (a) inside the mutex so concurrent writes still serialize and the
+ * verifier sees a clean chain.
+ */
+async function writeAuditRow(rowSansId: AuditRowSansId): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  await withAuditLogTip(async () => {
+    // Read the tip BEFORE insert so concurrent writers can't both
+    // chain to the same predecessor.
+    const tip = await db
+      .select({ rowHash: adminAuditLog.rowHash })
+      .from(adminAuditLog)
+      .orderBy(desc(adminAuditLog.id))
+      .limit(1);
+    const previousHash = tip[0]?.rowHash ?? GENESIS_HASH;
+
+    const ins = await db.insert(adminAuditLog).values(rowSansId);
+    const insertId = Number((ins as any)[0]?.insertId ?? 0);
+    if (!insertId) {
+      log.warn("[audit] insert returned no id; skipping hash");
+      return;
+    }
+    const canonical = canonicalAuditRow({ id: insertId, ...rowSansId });
+    const rowHash = computeRowHash(previousHash, canonical);
+    await db
+      .update(adminAuditLog)
+      .set({ previousHash, rowHash })
+      .where(eq(adminAuditLog.id, insertId));
+  });
+}
+
+/**
  * Log an admin mutation. Fire-and-forget — caller does not await unless they
  * want to ensure the row is written before returning.
  */
@@ -170,12 +251,11 @@ export async function audit(input: AuditInput): Promise<void> {
     const { ctx, action, targetType, targetId, changes, reason, success = true, errorMessage } = input;
     if (!ctx.user) {
       // Non-admin or anonymous calls reaching audit() shouldn't happen, but
-      // log a warning if they do. Don't throw — just skip.
+      // log a warning if they do. Don't throw — just skip. (Background/system
+      // code paths with no ctx.user must call systemAudit() instead.)
       log.warn({ action }, "[audit] attempted to log without ctx.user");
       return;
     }
-    const db = await getDb();
-    if (!db) return;
 
     let changesStr: string | null = null;
     if (changes !== undefined && changes !== null) {
@@ -186,12 +266,11 @@ export async function audit(input: AuditInput): Promise<void> {
       }
     }
 
-    // Common values used both for the insert and for hash computation.
     // createdAt is fixed at write time so the hash is deterministic
     // (defaultNow() would create a tiny gap between our hash-time and
     // the DB-recorded value).
     const createdAt = new Date();
-    const rowSansId = {
+    await writeAuditRow({
       userId: ctx.user.id,
       userEmail: ctx.user.email,
       userRole: ctx.user.role,
@@ -205,45 +284,70 @@ export async function audit(input: AuditInput): Promise<void> {
       success: success ? 1 : 0,
       errorMessage: errorMessage || null,
       createdAt,
-    };
-
-    // SECURITY_AUDIT_2026_05_14 P2-1: hash-chain.
-    //
-    // We need the new row's `id` to canonicalize before hashing. Two
-    // options:
-    //   (a) Insert first, then UPDATE with the hashes — works but
-    //       leaves a brief window where the row exists unhashed.
-    //   (b) Generate the id explicitly before insert — requires the
-    //       table to expose AUTO_INCREMENT next value, racy on TiDB.
-    // We use (a) inside the mutex so concurrent writes still serialize
-    // and the verifier sees a clean chain.
-    await withAuditLogTip(async () => {
-      // Read the tip BEFORE insert so concurrent admins can't both
-      // chain to the same predecessor.
-      const tip = await db
-        .select({ rowHash: adminAuditLog.rowHash })
-        .from(adminAuditLog)
-        .orderBy(desc(adminAuditLog.id))
-        .limit(1);
-      const previousHash = tip[0]?.rowHash ?? GENESIS_HASH;
-
-      const ins = await db.insert(adminAuditLog).values(rowSansId);
-      const insertId = Number((ins as any)[0]?.insertId ?? 0);
-      if (!insertId) {
-        log.warn("[audit] insert returned no id; skipping hash");
-        return;
-      }
-      const canonical = canonicalAuditRow({ id: insertId, ...rowSansId });
-      const rowHash = computeRowHash(previousHash, canonical);
-      await db
-        .update(adminAuditLog)
-        .set({ previousHash, rowHash })
-        .where(eq(adminAuditLog.id, insertId));
     });
   } catch (err) {
     // Audit write failures must never break the request. Log loudly so they're
     // visible in Fly logs, but always swallow.
     log.error({ err }, "[audit] write failed (request continued)");
+  }
+}
+
+/**
+ * Log a mutation performed by a system/background code path that has no
+ * ctx.user — webhooks (Stripe/Plaid), LOCAL_SCRIPT_TOKEN internal endpoints,
+ * scheduled jobs. Unlike audit(), this NEVER no-ops on a missing user: the
+ * whole point is to attribute writes that happen outside an admin request.
+ *
+ * The actor string ("system:<module>") lands in userEmail and userRole is
+ * fixed to "system", so the tamper-evident chain and the admin audit UI treat
+ * these exactly like admin rows, just with a system actor (userId = 0).
+ *
+ * Fire-and-forget at call sites: `void systemAudit(...).catch(() => {})`.
+ * This body already swallows all errors (never throws); the call-site `.catch`
+ * is belt-and-suspenders so an unhandled rejection can never surface into the
+ * financial main flow it's attached to.
+ *
+ * @param actor  "system:<module>", e.g. "system:trustDeferral"
+ * @param action short verb.noun, e.g. "trust.defer"
+ * @param target affected entity id/key, or null for batch operations
+ * @param detail arbitrary JSON (amount, counts, ids) — stringified into changes
+ */
+export async function systemAudit(
+  actor: string,
+  action: string,
+  target: string | number | null,
+  detail?: unknown,
+): Promise<void> {
+  try {
+    let detailStr: string | null = null;
+    if (detail !== undefined && detail !== null) {
+      try {
+        detailStr = JSON.stringify(detail).slice(0, 50_000);
+      } catch {
+        detailStr = String(detail).slice(0, 50_000);
+      }
+    }
+
+    const createdAt = new Date();
+    await writeAuditRow({
+      userId: SYSTEM_ACTOR_USER_ID,
+      userEmail: actor.slice(0, 320),
+      userRole: "system",
+      action,
+      targetType: null,
+      targetId: target !== null && target !== undefined ? String(target) : null,
+      changes: detailStr,
+      reason: null,
+      ipAddress: null,
+      userAgent: null,
+      success: 1,
+      errorMessage: null,
+      createdAt,
+    });
+  } catch (err) {
+    // System-audit failures must never break the financial main flow they're
+    // attached to. Log loudly, always swallow.
+    log.error({ err, actor, action }, "[systemAudit] write failed (main flow continued)");
   }
 }
 

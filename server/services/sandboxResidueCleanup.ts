@@ -18,6 +18,7 @@ import { getDb } from "../db";
 import { linkedBankAccounts, bankTransactions } from "../../drizzle/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import { createChildLogger } from "../_core/logger";
+import { systemAudit } from "../_core/auditLog";
 
 const log = createChildLogger({ module: "sandboxResidueCleanup" });
 
@@ -138,6 +139,14 @@ export async function runSandboxCleanupConfirm(): Promise<SandboxCleanupReport> 
     { deletedAccounts: ids.length, deletedTransactions: txnCount, accountIds: ids },
     "[sandboxResidueCleanup] confirm — First Platypus sandbox residue deleted (BofA untouched)",
   );
+
+  // F2 塊A:LOCAL_SCRIPT_TOKEN confirm 端點的破壞性寫入(刪帳戶+交易)必留系統
+  // 稽核軌(無 ctx.user)。fire-and-forget + .catch 雙保險,絕不影響刪除主流程回傳。
+  void systemAudit("system:sandboxCleanup", "sandbox.cleanup_confirm", "First Platypus Bank", {
+    deletedAccounts: ids.length,
+    deletedTransactions: txnCount,
+    accountIds: ids,
+  }).catch(() => {});
 
   return {
     accountCount: accounts.length,

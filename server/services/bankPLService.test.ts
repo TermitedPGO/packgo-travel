@@ -151,3 +151,71 @@ describe("foldBankPLRows — transfer-only ledger", () => {
     expect(r.transactionCount).toBe(0);
   });
 });
+
+describe("foldBankPLRows — square_payout (F2 塊C, 2026-07-10)", () => {
+  // Square 撥款中性桶:只有 Jeff 明確歸類的列才進來(自動分類不套用,見
+  // accountingKnowledge.ts 2d 節探真結論),同 stripe_payout 待遇 —— 自己的
+  // tile、絕不進 income/expense/netProfit。
+  const rows: BankPLRowLike[] = [
+    { amount: "-1000", agentCategory: "income_booking" }, // 真收入(含未歸類的 Square 撥款現況)
+    { amount: "-2950.55", jeffOverrideCategory: "square_payout" }, // Jeff 確認銷售已另記後歸類
+    { amount: "300", agentCategory: "cogs_tour" },
+  ];
+
+  it("square_payout 有自己的 tile,金額不靜默消失", () => {
+    const r = fold(rows);
+    expect(r.squarePayout.total).toBeCloseTo(2950.55, 2); // inflow-positive
+    expect(r.squarePayout.count).toBe(1);
+  });
+
+  it("RED-LINE: square_payout 絕不進 income/expense/netProfit", () => {
+    const r = fold(rows);
+    expect(r.income.total).toBe(1000);
+    expect(r.income.byCategory.square_payout).toBeUndefined();
+    expect(r.expenses.total).toBe(300);
+    expect(r.netProfit).toBe(700);
+    expect(r.needsReviewCount).toBe(0);
+  });
+
+  it("零 square_payout 列 → tile 為 0(平常態,UI 據此隱藏該行)", () => {
+    const r = fold([{ amount: "-1000", agentCategory: "income_booking" }]);
+    expect(r.squarePayout).toEqual({ total: 0, count: 0 });
+  });
+});
+
+describe("foldBankPLRows — trustRecognizedIncome(F2 塊D flag-ON P&L 接線)", () => {
+  const rows: BankPLRowLike[] = [
+    { amount: "-1000", agentCategory: "income_booking" },
+    { amount: "300", agentCategory: "cogs_tour" },
+  ];
+
+  it("綠:認列期加回 —— recognizedTrustIncome 進 income.total 與 netProfit,並獨立揭示", () => {
+    const r = foldBankPLRows(rows, {
+      startDate: "2026-08-01",
+      endDate: "2026-08-31",
+      recognizedTrustIncome: 2500,
+    });
+    expect(r.income.total).toBe(3500); // 1000 銀行收入 + 2500 認列加回
+    expect(r.netProfit).toBe(3200); // 3500 - 300
+    expect(r.trustRecognizedIncome).toBe(2500);
+  });
+
+  it("同期存入+認列 → 一減一加淨計一次(不雙計)", () => {
+    const r = foldBankPLRows(rows, {
+      startDate: "2026-06-01",
+      endDate: "2026-06-30",
+      deferredIncomeSubtracted: 1000, // 存入期減(含已認列)
+      recognizedTrustIncome: 1000, // 同期認列加回
+    });
+    expect(r.income.total).toBe(1000); // 淨計一次
+    expect(r.netProfit).toBe(700);
+  });
+
+  it("紅(flag OFF byte-identical):不給 recognizedTrustIncome → 輸出與舊版完全一致", () => {
+    const withField = foldBankPLRows(rows, { ...PERIOD, recognizedTrustIncome: 0 });
+    const without = foldBankPLRows(rows, PERIOD);
+    expect(without).toEqual(withField);
+    expect(without.trustRecognizedIncome).toBe(0);
+    expect(without.income.total).toBe(1000);
+  });
+});

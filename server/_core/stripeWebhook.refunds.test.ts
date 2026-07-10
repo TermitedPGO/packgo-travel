@@ -350,6 +350,20 @@ vi.mock("../services/trustDeferralService", () => ({
   deferStripeBookingIncome: vi.fn(async () => ({ deferredId: null, expectedRecognitionDate: null, reason: "not used in this test" })),
 }));
 
+// F2 塊D(2026-07-10)部分退款卡的協作者 —— 全部 mock 成確定性 stub。
+vi.mock("./approvalTasks", () => ({
+  createApprovalTask: vi.fn(async () => ({ id: 777 })),
+}));
+vi.mock("../agents/autonomous/bankTransactionLinkAlerts", () => ({
+  hasOpenCardFor: vi.fn(async () => false),
+}));
+vi.mock("../agents/autonomous/financeAlertClassifier", () => ({
+  classifyFinanceAlertRisk: () => ({ riskLevel: "review", reason: "stub" }),
+}));
+vi.mock("../agents/autonomous/financeExecutor", () => ({
+  FINANCE_ALERT_TASK_TYPE: "finance_alert",
+}));
+
 // v2 Wave 3 Module 3.5 — RefundAgent is invoked POST-COMMIT inside
 // handleChargeRefunded. Mock it to a deterministic triage so the test's
 // LLM-free environment doesn't crash + so the proposal agentMessage
@@ -376,6 +390,8 @@ vi.mock("../agents/autonomous/refundAgent", async () => {
 // Import AFTER mocks.
 import { __test__ } from "./stripeWebhook";
 import { findStripeDeferredByPaymentId, reverseDeferral } from "../services/trustDeferralService";
+import { createApprovalTask } from "./approvalTasks";
+import { hasOpenCardFor } from "../agents/autonomous/bankTransactionLinkAlerts";
 const { handleChargeRefunded } = __test__;
 
 // ─────────────────────────────────────────────────────────────────────
@@ -428,7 +444,11 @@ describe("handleChargeRefunded — Phase 2 module 2.3 transaction wrap", () => {
     spies.notifyAgentMessage.mockClear();
     spies.deductPackpoint.mockClear();
     (findStripeDeferredByPaymentId as any).mockClear();
+    (findStripeDeferredByPaymentId as any).mockResolvedValue(null);
     (reverseDeferral as any).mockClear();
+    (createApprovalTask as any).mockClear();
+    (hasOpenCardFor as any).mockClear();
+    (hasOpenCardFor as any).mockResolvedValue(false);
     currentDrizzle = makeDrizzle();
   });
 
@@ -516,6 +536,74 @@ describe("handleChargeRefunded — Phase 2 module 2.3 transaction wrap", () => {
 
     await handleChargeRefunded(charge);
 
+    expect(reverseDeferral).not.toHaveBeenCalled();
+  });
+
+  // ── F2 塊D(2026-07-10):部分退款遞延 —— 擋下轉人工(紅綠)──────────────
+  it("塊D 紅綠:部分退款 + 未認列遞延列 → 遞延列一毛不動(不 reverse),出一張 finance 卡", async () => {
+    seedHappyPath();
+    (findStripeDeferredByPaymentId as any).mockResolvedValue({
+      id: 42,
+      amount: "300.00",
+      recognizedAt: null,
+      reversedAt: null,
+    });
+    const charge = makeCharge({ paymentIntent: "pi_refund_1", amount: 30000, amount_refunded: 10000 });
+
+    await handleChargeRefunded(charge);
+
+    expect(reverseDeferral).not.toHaveBeenCalled(); // 錢的裁決是 Jeff 的
+    expect(createApprovalTask).toHaveBeenCalledTimes(1);
+    const arg = (createApprovalTask as any).mock.calls[0][0];
+    expect(arg.relatedType).toBe("stripe_partial_refund_deferral");
+    expect(arg.relatedId).toBe("1"); // payment.id
+    expect(arg.summary).toContain("尚未認列");
+    expect(arg.summary).toContain("$100.00"); // 退款額
+    expect(arg.summary).toContain("$300.00"); // 遞延額
+  });
+
+  it("塊D 邊界:多次部分退款 → pending 卡去重,第二次不再出卡", async () => {
+    seedHappyPath();
+    (findStripeDeferredByPaymentId as any).mockResolvedValue({
+      id: 42,
+      amount: "300.00",
+      recognizedAt: null,
+      reversedAt: null,
+    });
+    (hasOpenCardFor as any).mockResolvedValue(true); // 第一張卡還開著
+    const charge = makeCharge({ paymentIntent: "pi_refund_1", amount: 30000, amount_refunded: 15000 });
+
+    await handleChargeRefunded(charge);
+
+    expect(createApprovalTask).not.toHaveBeenCalled();
+    expect(reverseDeferral).not.toHaveBeenCalled();
+  });
+
+  it("塊D 邊界:已認列後的部分退款 → 卡文案標明需沖銷決策;退款額>遞延額 → ⚠ 並列提醒", async () => {
+    seedHappyPath();
+    (findStripeDeferredByPaymentId as any).mockResolvedValue({
+      id: 42,
+      amount: "50.00", // 遞延額 < 退款額
+      recognizedAt: new Date("2026-06-20"),
+      reversedAt: null,
+    });
+    const charge = makeCharge({ paymentIntent: "pi_refund_1", amount: 30000, amount_refunded: 10000 });
+
+    await handleChargeRefunded(charge);
+
+    expect(createApprovalTask).toHaveBeenCalledTimes(1);
+    const arg = (createApprovalTask as any).mock.calls[0][0];
+    expect(arg.summary).toContain("已認列");
+    expect(arg.summary).toContain("沖銷");
+    expect(arg.summary).toContain("退款額大於遞延額");
+    expect(reverseDeferral).not.toHaveBeenCalled();
+  });
+
+  it("塊D 邊界:部分退款但查無遞延列(flag 從未開)→ 不出卡,既有部分退款行為不變", async () => {
+    seedHappyPath();
+    const charge = makeCharge({ paymentIntent: "pi_refund_1", amount: 30000, amount_refunded: 10000 });
+    await handleChargeRefunded(charge);
+    expect(createApprovalTask).not.toHaveBeenCalled();
     expect(reverseDeferral).not.toHaveBeenCalled();
   });
 

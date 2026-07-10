@@ -82,6 +82,30 @@ describe("runAccountingAgent — happy + failure", () => {
     expect(notifyOwnerSpy).not.toHaveBeenCalled();
   });
 
+  it("F2 塊D P1 後衛(紅綠):模型回 square_payout 高信心(95)→ 仍降級 other_review + 強制人工複核,絕不靜默接受", async () => {
+    // prod 探真:Square 撥款入帳是 P&L 唯一收入紀錄;agentCategory 寫成
+    // square_payout 會讓真收入從損益靜默消失(needsHumanReview 旗標不擋 P&L
+    // 口徑)。後衛把 LLM 這條路封死 —— 高信心也一樣進待審池。
+    invokeLLMSpy.mockResolvedValueOnce(stubResponse("square_payout", 95));
+    const result = await runAccountingAgent({
+      amount: -2950.55, // 入帳
+      date: "2026-06-18",
+      merchantName: "Square Inc",
+      description: "ACH CREDIT Square Inc SQ ON 06/18",
+      paymentChannel: "ach",
+      plaidCategoryPrimary: "TRANSFER_IN",
+      plaidCategoryDetailed: "TRANSFER_IN_ACH",
+      isoCurrencyCode: "USD",
+      accountType: "depository",
+      accountName: "PACKGO LLC",
+      isTrustAccount: false,
+    });
+    expect(result.category).toBe("other_review"); // 不是 square_payout:收入不消失
+    expect(result.needsHumanReview).toBe(true); // 高信心也強制複核
+    expect(result.reasoning).toContain("square_payout 後衛"); // 模型原判留痕供 Jeff 參考
+    expect(result.reasoning).toContain("95");
+  });
+
   it("failure path — no tool_call → throws + notifyOwner fires", async () => {
     invokeLLMSpy.mockResolvedValueOnce({
       choices: [{ message: { content: "", tool_calls: [] } }],

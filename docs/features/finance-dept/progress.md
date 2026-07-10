@@ -1045,3 +1045,181 @@ fetch("http://localhost:8080/api/admin/backfill-bank-transaction-links", {
     process.exit(1);
   });
 ```
+
+## F2 塊C 探真結論(2026-07-10,prod 唯讀;T6 依據)
+
+方法:flyctl ssh 容器內 node 探針(唯讀 SELECT 六句,base64 → /tmp 執行後即刪,
+NODE_PATH=/app/node_modules)。探針 `node --check` exit 0、全檔零反引號零
+dollar-brace(T2 地雷 #7);輸出 PROBE_JSON 無 PROBE_FAIL。
+
+### Square 撥款 descriptor 全形狀(bankTransactions,19 筆:16 入 3 出,全在 30001/#2174)
+
+1. `ACH CREDIT Square Inc SQ ON ##/##`(description+merchantName;5 筆入帳)
+2. `Square Inc DES:SQ###### ID:T############### INDN:PACK & GO, LLC CO ID:XXXXX##### PPD|WEB`
+   (BofA originalDescription;9 筆入帳)
+3. `Square Inc DES:ACCTVERIFY ... INDN:Chunfu hsieh ... CCD`(±$0.01 帳戶驗證一對,agent=transfer)
+4. 出帳側:`ACH HOLD Square Inc SQ ON ##/##`(+$3,106 hold)與同額 DES:SQ WEB 出帳
+   (2026-06-22/23 一組 hold/回沖形狀,值得 Jeff 留意但非本批範圍)
+
+### 現行記帳路徑(決定對映設計的關鍵事實)
+
+- Square 撥款入帳 agentCategory 幾乎全是 income_booking(兩筆有 jeffOverride)——
+  撥款入帳「就是」bankTransactions 主帳(P&L 權威帳)唯一收入紀錄。
+- customOrders paymentMethod='square' 僅 2 筆(ORD-2026-0011 收 $490+$490、
+  ORD-2026-0004 金額 NULL);paymentMethod 分布:null 9、square 2。
+- accountingEntries 含 square 字樣:0 筆。無次帳紀錄。
+- → 與 Stripe(結帳當下已寫收入,撥款=雙計風險)相反:Square 今天不存在雙計,
+  自動把撥款歸中性桶 = 真收入從損益靜默消失(Ann 漏斗病同款)。
+- → 設計裁定:isSquarePayoutInflow 謂詞 + square_payout 桶「就緒」但不接
+  preClassify / linkEngine 自動分類;撥款照走待認領,卡上帶費率帶候選銷售
+  (processorPayoutMapping),Jeff 用既有 ClaimDialog 對映
+  (bankTransactionLinks 即對映結構,零新表)。自動對映留待 recordPayment
+  紀律成熟(dispatch 塊C #3 原文)。
+
+### 帳戶對照(watchdog/白名單依據)
+
+- 30001 mask 2174 = PACK&GO LLC operating(Operating 白名單預設值)
+- 30002 mask 4899、30004 mask 9888 = 信用卡(非白名單)
+- 30003 mask 5442 = Living Trust Account(isTrustAccount=1)—— dispatch 錨點
+  「Trust 帳(30003)」即此 linkedAccountId。
+
+探針原文(f2c-square-probe.cjs,唯讀 SELECT 六句):與 F3 探針同款結構
+(mysql2/promise + 單引號串接),六句依序:square 字樣 txn 取樣(LIMIT 60)/
+square txn 計數(入出分列)/ customOrders square 取樣(LIMIT 40)/
+paymentMethod 分布 / accountingEntries square 計數 / linkedBankAccounts 全列。
+完整原文在 git 歷史與本 session 記錄;關鍵防護:全檔 var+function 語法、
+零反引號、零 dollar-brace、只 SELECT。
+
+### 附錄:F2 塊C 探針原文與實跑證據(塊D 回令 #2 補課;地雷 #7 留檔)
+
+驗證證據:`node --check f2c-square-probe.cjs` exit 0;全檔反引號 0 處、
+dollar-brace 0 處(grep 核對)。prod 執行:flyctl ssh console 內 base64 解碼至
+/tmp 執行後即刪,NODE_PATH=/app/node_modules,輸出 PROBE_JSON 無 PROBE_FAIL。
+
+f2c-square-probe.cjs 原文(唯讀 SELECT 六句):
+
+```js
+// F2 塊C prod 唯讀探真(2026-07-10)。只 SELECT,零寫入。
+// 本檔經 base64 進 flyctl ssh 執行 —— 全檔禁止反引號與 dollar-brace
+// (T2 地雷 #7),字串一律單引號/雙引號串接。
+var mysql = require("mysql2/promise");
+
+function run() {
+  return mysql.createConnection(process.env.DATABASE_URL).then(function (conn) {
+    var out = {};
+    var squareWhere =
+      "LOWER(CONCAT_WS(' ', COALESCE(bt.merchantName,''), COALESCE(bt.description,''), " +
+      "COALESCE(bt.originalDescription,''), COALESCE(bt.counterparty,''))) LIKE '%square%'";
+    return conn
+      .execute(
+        "SELECT bt.id, DATE_FORMAT(bt.date, '%Y-%m-%d') AS d, bt.amount, bt.merchantName, " +
+          "bt.description, bt.originalDescription, bt.paymentMeta, bt.agentCategory, " +
+          "bt.jeffOverrideCategory, bt.linkedAccountId " +
+          "FROM bankTransactions bt WHERE " + squareWhere + " ORDER BY bt.date DESC LIMIT 60"
+      )
+      .then(function (r) {
+        out.squareTxns = r[0];
+        return conn.execute(
+          "SELECT COUNT(*) AS c, SUM(CASE WHEN bt.amount < 0 THEN 1 ELSE 0 END) AS inflows, " +
+            "SUM(CASE WHEN bt.amount > 0 THEN 1 ELSE 0 END) AS outflows " +
+            "FROM bankTransactions bt WHERE " + squareWhere
+        );
+      })
+      .then(function (r) {
+        out.squareCounts = r[0];
+        return conn.execute(
+          "SELECT id, orderNumber, status, paymentMethod, depositAmount, depositPaidAmount, " +
+            "DATE_FORMAT(depositPaidAt, '%Y-%m-%d') AS depPaid, balanceAmount, balancePaidAmount, " +
+            "DATE_FORMAT(balancePaidAt, '%Y-%m-%d') AS balPaid " +
+            "FROM customOrders WHERE LOWER(COALESCE(paymentMethod,'')) LIKE '%square%' " +
+            "ORDER BY id DESC LIMIT 40"
+        );
+      })
+      .then(function (r) {
+        out.squareOrders = r[0];
+        return conn.execute(
+          "SELECT LOWER(COALESCE(paymentMethod,'(null)')) AS m, COUNT(*) AS c FROM customOrders " +
+            "GROUP BY LOWER(COALESCE(paymentMethod,'(null)')) ORDER BY c DESC"
+        );
+      })
+      .then(function (r) {
+        out.paymentMethodDist = r[0];
+        return conn.execute(
+          "SELECT COUNT(*) AS c FROM accountingEntries WHERE LOWER(CONCAT_WS(' ', " +
+            "COALESCE(description,''), COALESCE(category,''))) LIKE '%square%'"
+        );
+      })
+      .then(function (r) {
+        out.squareAcctEntries = r[0];
+        return conn.execute(
+          "SELECT id, accountMask, accountName, institutionName, isTrustAccount, isActive " +
+            "FROM linkedBankAccounts ORDER BY id"
+        );
+      })
+      .then(function (r) {
+        out.accounts = r[0];
+        console.log("PROBE_JSON_START" + JSON.stringify(out) + "PROBE_JSON_END");
+        return conn.end();
+      });
+  });
+}
+
+run().catch(function (e) {
+  console.error("PROBE_FAIL " + (e && e.message));
+  process.exit(1);
+});
+```
+
+## F2 塊D:square_payout 自動分類後衛 —— 解除條款(2026-07-10 指揮裁決)
+
+現狀:自動分類產生 square_payout 的路徑為零 —— preClassify / linkEngine 不產
+(塊C 設計),LLM 輸出被確定性後衛降級 other_review + 強制人工複核
+(accountingAgent.ts P1 後衛,紅綠測試釘死)。Jeff 的 jeffOverrideCategory
+手動歸類不受影響。
+
+解除條件(可檢查;滿足其一並經指揮覆核後才可移除後衛/開自動):
+1. Square 銷售在收款當下有第二處收入紀錄(如 Square webhook →
+   accountingEntries / 次帳上線)—— 撥款落地自此構成雙計風險,自動中性化
+   才由「病」變「藥」;或
+2. customOrders recordPayment 對 Square 收款覆蓋率達標:近 90 天每筆 Square
+   撥款都能經 processorPayoutMapping 對到已記錄銷售(候選命中率報表佐證)。
+
+檢查方式:重跑塊C 探針(progress 附錄)比對 accountingEntries square 計數與
+customOrders square 覆蓋;或走查 dry-run 候選命中率。
+
+### 塊D 偏離申報(F2 收官;照塊B/C 前例彙整)
+
+1. LLM square_payout 後衛「降級 other_review」強於回令原文「強制
+   needsHumanReview」—— 指揮親核追認【RATIFIED,2026-07-10 總驗收回令】
+   (accountingAgentService:285 無條件持久化 agentCategory、bankPLService
+   零引用 needsHumanReview、other_review 落 needsReview 池金額可見,降級
+   才真的不靜默)。
+2. 部分退款遞延:擋下轉人工,不按比例 —— schema 無部分沖銷結構、改 amount
+   毀稽核軌、多次部分退款複利走樣、已認列沖銷屬 CPA 範疇;遞延列一毛不動,
+   finance 卡(同 payment 去重)交 Jeff 裁決。CPA 答覆若要求按比例,卡
+   payload 帶全數字可追溯重放。
+3. totalDeferredForUser 增 includeRecognized 語義(預設 false byte-identical):
+   存入期減項改「含已認列全額」—— 修隱性洞:認列發生後歷史月 P&L 重算時
+   收入會漂回存入日,與認列月加回構成跨月雙計。
+4. 稅表接線(本回爐 P2):「損益/稅表 join」補齊 —— generateBankMonthlyTrend
+   (稅 CSV 資料源)/taxCsvService trust 摘要/financialReportService 三路
+   對稱接上同一月度口徑(trustDeferralService.monthlyDeferralAdjustments +
+   foldMonthlyDeferralAdjustments 純函式單一來源,無複製貼上);taxCsv
+   totalRecognized 廢除「差值 hack」改走共用口徑;gate 統一
+   isAnyTrustDeferralEnabled。
+5. generateBankMonthlyTrend 增測試注入用 now 參數(選填,省略=現在;
+   月窗定錨讓跨月紅綠不隨真實日期漂移)。
+
+### 已知限制補錄(塊D 回爐 P3)
+
+- flag 轉態/已認列退款的暫態歸屬粗糙:flag OFF 期間認列的歷史列在 flag
+  翻 ON 後會被認列月加回計入(該月銀行側從未減過 → 理論高估)。另,
+  「已認列後的全額退款」Stripe 路徑刻意【不】reverse(stripeWebhook.ts
+  已認列不動的既有慣例)—— 該列保持 recognized 未 reversed,認列月加回
+  殘留成幽靈收入,直到 Jeff 人工沖銷(每筆退款有 notifyOwner 通知兜底,
+  部分退款另有塊D 的 finance 卡)。兩者在現況(prod 零認列列)無影響,
+  翻 flag 走查 2b 會逐口徑對數抓出;結構性處理(轉態基線日/沖銷分錄)
+  等 CPA 答覆。
+- fold byte-identical 測試為「自比對」(同版本兩參數 vs 三參數輸出相等),
+  非跨版本 golden file —— 防「新參數預設值改行為」,不防「共同路徑被改」;
+  後者由全套既有 fold 數字測試覆蓋。

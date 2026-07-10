@@ -3224,6 +3224,14 @@ export const trustDeferredIncome = mysqlTable(
     recognitionRunId: varchar("recognitionRunId", { length: 64 }),
     reversedAt: timestamp("reversedAt"),
     reversedReason: varchar("reversedReason", { length: 256 }),
+    // F2 塊B (2026-07-10, migration 0114) — 認列生命週期閉環:認列後 Jeff 把錢
+    // 從 Trust 轉到 Operating,轉帳偵測(trustTransferDetection.ts)在
+    // bankTransactions 找到「Trust 流出 + Operating 流入」同額配對後回填。
+    // transferredAt 非空 = §17550 閉環完成(收訂 → 出發認列 → 轉出)。
+    // transferBankTransactionId = Trust 側流出那筆 bankTransactions.id
+    // (概念 FK,無實體約束,同 bankTransactionLinks 慣例)。
+    transferredAt: timestamp("transferredAt"),
+    transferBankTransactionId: int("transferBankTransactionId"),
     notes: text("notes"),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),

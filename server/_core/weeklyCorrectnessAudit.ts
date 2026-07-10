@@ -493,16 +493,34 @@ export async function runWeeklyCorrectnessAudit(
   // between them); each degrades to its own "couldn't read" state on
   // failure rather than throwing, so one bad collector never blocks the
   // other two or the audit itself.
-  const [messagesFailedDelta, queueFailedCounts, llmCircuitStats] = await Promise.all([
-    gatherMessagesFailedWeeklyDelta(db, now),
-    gatherQueueFailedCounts(now),
-    gatherLlmCircuitStats(now),
-  ]);
+  // F2 塊B(2026-07-10):第四個 collector — Trust 勾稽不變式看門狗
+  // (餘額 vs 未認列+已認列未轉出),同「絕不 throw」合約;dynamic import
+  // 維持 _core → services 的既有邊界慣例(worker/router 同款)。
+  const { gatherTrustInvariant, formatTrustInvariantLine, maybePostTrustDriftCard } =
+    await import("../services/trustInvariantWatchdog");
+  const [messagesFailedDelta, queueFailedCounts, llmCircuitStats, trustInvariant] =
+    await Promise.all([
+      gatherMessagesFailedWeeklyDelta(db, now),
+      gatherQueueFailedCounts(now),
+      gatherLlmCircuitStats(now),
+      gatherTrustInvariant(db),
+    ]);
   const observabilitySection = formatObservabilitySection({
     messagesFailedDelta,
     queueFailedCounts,
     llmCircuitStats,
+    trustInvariantLine: formatTrustInvariantLine(trustInvariant),
   });
+  // 漂移 > $1 → 獨立 high 卡(同 drift 值持續期間去重,函式內部處理;絕不
+  // throw)。刻意不影響 D1 主卡的 priority —— 觀測段不升級主卡是 Wave1 的
+  // 既定設計,漂移的「high」由這張獨立卡承載。
+  const driftCardPosted = await maybePostTrustDriftCard(db, trustInvariant);
+  if (driftCardPosted) {
+    log.info(
+      { drift: trustInvariant.drift },
+      "[weeklyCorrectnessAudit] trust invariant drift card posted",
+    );
+  }
 
   const aggregate = aggregateAuditResults(results, observabilitySection);
   // 心跳:跑完就記(不論有沒有差異),監工才能區分「跑了、沒事」與「根本沒跑」。

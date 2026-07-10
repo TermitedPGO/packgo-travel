@@ -50,3 +50,28 @@ describe("foldMonthlyTrend — trust-aware per-month netProfit", () => {
     expect(foldMonthlyTrend({})).toEqual([]);
   });
 });
+
+describe("foldMonthlyTrend — 認列月加回(F2 塊D 回爐 P2)", () => {
+  it("跨月情境:1 月存入遞延減、3 月認列加回,netProfit 對稱", () => {
+    const rows = foldMonthlyTrend(
+      {
+        "2026-01": { income: 5000, expenses: 2000 },
+        "2026-03": { income: 0, expenses: 0 },
+      },
+      { "2026-01": 1000 },
+      { "2026-03": 1000 },
+    );
+    const jan = rows.find((r) => r.month === "2026-01")!;
+    const mar = rows.find((r) => r.month === "2026-03")!;
+    expect(jan.netProfit).toBe(2000); // 5000 − 1000 − 2000
+    expect(jan.trustRecognizedIncome).toBe(0);
+    expect(mar.netProfit).toBe(1000); // 0 − 0 + 1000 − 0:認列月收入出現
+    expect(mar.trustRecognizedIncome).toBe(1000);
+  });
+
+  it("兩參數呼叫(舊形狀)byte-identical:trustRecognizedIncome 恆 0、netProfit 不變", () => {
+    const rows = foldMonthlyTrend({ "2026-02": { income: 800, expenses: 300 } }, { "2026-02": 100 });
+    expect(rows[0].netProfit).toBe(400);
+    expect(rows[0].trustRecognizedIncome).toBe(0);
+  });
+});

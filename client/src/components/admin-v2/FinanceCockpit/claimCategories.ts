@@ -19,6 +19,7 @@ export const CLAIM_CATEGORIES = [
   "transfer",
   "other_review",
   "stripe_payout",
+  "square_payout",
 ] as const;
 
 export type ClaimCategory = (typeof CLAIM_CATEGORIES)[number];
@@ -36,4 +37,5 @@ export const CLAIM_CATEGORY_LABEL_KEY: Record<ClaimCategory, string> = {
   transfer: "financeCockpit.claim.catTransfer",
   other_review: "financeCockpit.claim.catOtherReview",
   stripe_payout: "financeCockpit.claim.catStripePayout",
+  square_payout: "financeCockpit.claim.catSquarePayout",
 };

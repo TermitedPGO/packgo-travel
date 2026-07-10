@@ -55,12 +55,13 @@ import {
   tourDepartures,
   payments,
 } from "../../drizzle/schema";
-import { and, eq, isNull, lte, gte, inArray } from "drizzle-orm";
+import { and, eq, isNull, isNotNull, lte, gte, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 // SECURITY_AUDIT_2026_05_14 P3-3: feature flag reads come from the typed
 // featureFlags module so a typo in env-var names becomes a compile error.
 import * as featureFlags from "../_core/featureFlags";
 import { reportFunnelError } from "../_core/errorFunnel";
+import { systemAudit } from "../_core/auditLog";
 
 // ─── Feature flag + config ─────────────────────────────────────────────────
 
@@ -274,6 +275,28 @@ export function computeExpectedRecognitionDate(
   }
   dep.setDate(dep.getDate() + RECOGNITION_OFFSET_DAYS);
   return dep.toISOString().slice(0, 10);
+}
+
+/**
+ * §17550 認列時點 —— 單一判定函式(F2 塊B,2026-07-10)。
+ *
+ * 「什麼時候可以認列」整個 codebase 只有這一條規則:認列日(expectedRecognition-
+ * Date,由 computeExpectedRecognitionDate 從出發日+訂金日算出)已到(<= 今天)。
+ * 出發前(認列日在未來)絕不可認列 —— 這是 CST §17550 的紅線,紅綠測試釘死。
+ *
+ * CPA 答覆(Jeff 佇列中)回來若調整認列時點,只動 computeExpectedRecognitionDate
+ * 的參數(RECOGNITION_OFFSET_DAYS / EARLY_RECOGNITION_WINDOW_DAYS)或本函式的
+ * 比較式,不動呼叫端結構 —— recognizeReadyDepartures 的兩處比較都走這裡。
+ *
+ * 兩端皆為 'YYYY-MM-DD' 曆日字串,字典序即日期序。expectedRecognitionDate 為
+ * null(還算不出認列日,如缺出發日)一律不可認列。
+ */
+export function isRecognitionDue(
+  expectedRecognitionDate: string | null | undefined,
+  todayStr: string,
+): boolean {
+  if (!expectedRecognitionDate) return false;
+  return String(expectedRecognitionDate) <= todayStr;
 }
 
 // ─── Public API ────────────────────────────────────────────────────────────
@@ -532,6 +555,17 @@ export async function deferStripeBookingIncome(
       notes: "stripe_direct — Stripe tour checkout,bookingId 直接來自 webhook metadata,非 Plaid 銀行同步猜測配對",
     });
     const deferredId = Number(ins?.[0]?.insertId ?? 0) || null;
+    // F2 塊A:webhook 驅動的財務寫入必留系統稽核軌(無 ctx.user)。fire-and-forget
+    // + .catch 雙保險,絕不影響 Stripe webhook 主交易流程(systemAudit 走獨立連線,
+    //  不參與傳入的 tx;tx 若 rollback 也不回滾此列——記錄「曾建立遞延」對合規有利)。
+    void systemAudit("system:trustDeferral", "trust.defer", opts.bookingId, {
+      deferredId,
+      paymentId: opts.paymentId,
+      amount: opts.amount,
+      isoCurrencyCode: opts.isoCurrencyCode,
+      expectedRecognitionDate,
+      source: "stripe_direct",
+    }).catch(() => {});
     return { deferredId, expectedRecognitionDate, reason: "deferred" };
   } catch (err) {
     const e = err as any;
@@ -562,12 +596,13 @@ export async function deferStripeBookingIncome(
  */
 export async function findStripeDeferredByPaymentId(
   paymentId: number,
-): Promise<{ id: number; recognizedAt: Date | null; reversedAt: Date | null } | null> {
+): Promise<{ id: number; amount: string; recognizedAt: Date | null; reversedAt: Date | null } | null> {
   const db = await getDb();
   if (!db) return null;
   const [row] = await db
     .select({
       id: trustDeferredIncome.id,
+      amount: trustDeferredIncome.amount,
       recognizedAt: trustDeferredIncome.recognizedAt,
       reversedAt: trustDeferredIncome.reversedAt,
     })
@@ -645,7 +680,7 @@ export async function recognizeReadyDepartures(
   // 失敗、或還沒收到 webhook)的殘留態,認列前先擋下,不把已退款的錢當收入。
   // 批次撈,不逐列查(N+1)。
   const readyBookingIds = candidates
-    .filter((r) => r.expectedRecognitionDate && r.bookingId && String(r.expectedRecognitionDate) <= today)
+    .filter((r) => r.bookingId && isRecognitionDue(r.expectedRecognitionDate ? String(r.expectedRecognitionDate) : null, today))
     .map((r) => r.bookingId as number);
   const cancelledBookingIds = new Set<number>();
   if (readyBookingIds.length > 0) {
@@ -669,8 +704,8 @@ export async function recognizeReadyDepartures(
       skipNoMatch++;
       continue;
     }
-    const expected = String(r.expectedRecognitionDate);
-    if (expected > today) continue; // not yet
+    // §17550 認列時點單一函式(isRecognitionDue):出發前不可認列。
+    if (!isRecognitionDue(String(r.expectedRecognitionDate), today)) continue; // not yet
     if (cancelledBookingIds.has(r.bookingId)) {
       skipCancelled++;
       continue;
@@ -758,6 +793,24 @@ export async function reverseDeferral(opts: {
 }): Promise<{ success: boolean }> {
   const db = await getDb();
   if (!db) return { success: false };
+  // F2 塊A(P3 修正:塊B 回令 #1):UPDATE 前先 SELECT 快照供稽核 —— 順序調換
+  // 零成本,且防未來有人在 reverse 時順手動 amount 欄造成稽核值失真。快照失敗
+  // 不擋主流程(稽核明細降級為 null)。
+  let snapshot: { amount: string | null; bookingId: number | null } = {
+    amount: null,
+    bookingId: null,
+  };
+  try {
+    const [row] = await db
+      .select({ amount: trustDeferredIncome.amount, bookingId: trustDeferredIncome.bookingId })
+      .from(trustDeferredIncome)
+      .where(eq(trustDeferredIncome.id, opts.deferredId))
+      .limit(1);
+    if (row) snapshot = { amount: row.amount, bookingId: row.bookingId };
+  } catch {
+    // 快照僅供稽核明細;讀失敗照樣 reverse,不因稽核前置查詢擋財務主流程。
+  }
+
   await db
     .update(trustDeferredIncome)
     .set({
@@ -765,6 +818,15 @@ export async function reverseDeferral(opts: {
       reversedReason: opts.reason.slice(0, 256),
     })
     .where(eq(trustDeferredIncome.id, opts.deferredId));
+
+  // F2 塊A:撤銷遞延(取消/退款)是財務動作,留系統稽核軌。fire-and-forget
+  // + .catch 雙保險,絕不影響 reverseDeferral 呼叫端。
+  void systemAudit("system:trustDeferral", "trust.reverse", opts.deferredId, {
+    amount: snapshot.amount,
+    bookingId: snapshot.bookingId,
+    reason: opts.reason,
+  }).catch(() => {});
+
   return { success: true };
 }
 
@@ -999,36 +1061,54 @@ export async function totalDeferredForUser(opts: {
   userId?: number;
   asOfDate: string;     // YYYY-MM-DD — include deposits up to (and including) this date
   depositSince?: string; // optional YYYY-MM-DD — only deposits ON/AFTER this date
+  /** F2 塊D(2026-07-10)P&L 接線:true = 連「後來已認列」的列也算(存入當下
+   *  就不是收入 —— 存入期減項要穩定,不因日後認列而讓歷史月收入漂回)。
+   *  預設 false 保持既有呼叫端(financeAlertProducer 等「目前未認列餘額」
+   *  口徑)byte-identical。 */
+  includeRecognized?: boolean;
+  /** F2 收案補丁(2026-07-10 回令 #1):true = 含哨兵列(linkedAccountId=0,
+   *  Stripe-direct)——「收到就是收到」對 Stripe 收款同樣成立;稅表 Trust
+   *  Summary 的 Received/Remaining 要與 Recognized(向來含哨兵)同 scope,
+   *  否則 STRIPE-only 穩態下恆等式 Received = Recognized + Remaining 破裂。
+   *  預設 false(P&L 存入減項不可含哨兵 —— 哨兵無銀行入帳列可抵)。 */
+  includeSentinel?: boolean;
 }): Promise<number> {
   // F1 塊B 對抗審查 P1 修復:同 recognizeReadyDepartures,認列/查詢路徑要看
   // 「任一」遞延機制的 flag,不能只看 PLAID flag(否則 STRIPE-only 開啟時,
   // 這支函式對 Stripe-direct 列永遠回 0,即使 flag 已經開了)。
   //
-  // ⚠ 已知限制(docs/features/finance-dept/progress.md「重大已知限制」段):
-  // 下面的 eq(linkedBankAccounts.isActive,1) 是 INNER JOIN 語意的過濾條件,
-  // Stripe-direct 列的 linkedAccountId=0(sentinel,無對應真實帳戶)join 不到
-  // 任何 linkedBankAccounts 列,仍然會被這個條件排除——這是另一個獨立問題
-  // (sentinel ID 對不上真實帳戶,不是 flag 判斷錯誤),F1 不修,留 F2。
+  // 哨兵列(linkedAccountId=0,Stripe-direct)的處理 —— F2 收案補丁 #1 已解
+  // (F1 時代靠 SQL 端 eq(isActive,1) 過濾,哨兵 join 不到帳戶被一併排除,
+  // 當時記為「留 F2」的已知限制):現行 isActive/userId/哨兵過濾全部移到
+  // JS 層共用謂詞(depositRowInScope / recognizedRowInScope,與月度口徑
+  // foldMonthlyDeferralAdjustments 同一來源)。includeSentinel:true 時哨兵
+  // 納入(稅表 Trust Summary 的 Received/Remaining,與 Recognized 同 scope
+  // 保恆等式);預設 false 排除哨兵 = 舊行為(P&L 存入減項,哨兵無銀行
+  // 入帳列可抵)。
   if (!isAnyTrustDeferralEnabled()) return 0;
   const db = await getDb();
   if (!db) return 0;
-  // Deferred = deposited within [depositSince, asOfDate], not yet recognized, not reversed
+  // Deferred = deposited within [depositSince, asOfDate], not reversed
+  // (recognized 依 includeRecognized)。帳戶 scope(isActive/userId/哨兵)
+  // 改在 JS 層用共用謂詞判(F2 收案補丁 #1)—— 與月度口徑
+  // foldMonthlyDeferralAdjustments 同一來源;includeSentinel:false 時與舊
+  // SQL 過濾(isActive=1 AND userId)行為 byte-identical。
   const filters: any[] = [
-    eq(linkedBankAccounts.isActive, 1),
     lte(trustDeferredIncome.depositDate, opts.asOfDate as any),
-    isNull(trustDeferredIncome.recognizedAt),
     isNull(trustDeferredIncome.reversedAt),
   ];
+  if (!opts.includeRecognized) {
+    filters.push(isNull(trustDeferredIncome.recognizedAt));
+  }
   if (opts.depositSince) {
     filters.push(gte(trustDeferredIncome.depositDate, opts.depositSince as any));
-  }
-  if (opts.userId !== undefined) {
-    filters.push(eq(linkedBankAccounts.userId, opts.userId));
   }
   const rows = await db
     .select({
       amount: trustDeferredIncome.amount,
+      linkedAccountId: trustDeferredIncome.linkedAccountId,
       ownerUserId: linkedBankAccounts.userId,
+      accountIsActive: linkedBankAccounts.isActive,
     })
     .from(trustDeferredIncome)
     .leftJoin(
@@ -1038,7 +1118,230 @@ export async function totalDeferredForUser(opts: {
     .where(and(...filters));
   let total = 0;
   for (const r of rows) {
+    const inScope = opts.includeSentinel
+      ? recognizedRowInScope(r, opts.userId) // 含哨兵(認列側同款 scope)
+      : depositRowInScope(r, opts.userId); // 排哨兵(P&L 存入減項口徑)
+    if (!inScope) continue;
     total += parseFloat(r.amount as any) || 0;
   }
   return total;
+}
+
+// ─── F2 塊D(2026-07-10):認列期收入(flag-ON P&L 接線)─────────────────────
+
+/** 任意時點 → America/Los_Angeles 曆日字串(T2 地雷 #2:月界歸屬的比較兩端
+ *  都用 LA 曆日;recognizedAt 是 UTC TIMESTAMP,美西傍晚認列若用 UTC 切日
+ *  會系統性歸到隔月)。 */
+export function laDayOf(d: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+export interface RecognizedRowLike {
+  amount: string | number;
+  recognizedAt: Date | string | null;
+  linkedAccountId: number;
+  /** left join linkedBankAccounts 的結果;哨兵列(linkedAccountId=0)join 不到
+   *  → 兩者皆 null。 */
+  ownerUserId: number | null;
+  accountIsActive: number | null;
+}
+
+/** 認列側收列範圍(單一來源,月度/期間兩個 fold 共用,禁複製貼上):
+ *  哨兵列(linkedAccountId=0,Stripe-direct)一律計入 —— 這批收入沒有銀行
+ *  入帳列,認列加回是它進 P&L/稅表的唯一入口;userId scope 對哨兵列不適用。
+ *  真實帳戶列要求 isActive=1 且 userId 有給時相符(totalDeferredForUser
+ *  join 語意)。 */
+function recognizedRowInScope(
+  r: { linkedAccountId: number; ownerUserId: number | null; accountIsActive: number | null },
+  userId?: number,
+): boolean {
+  if (r.linkedAccountId !== 0) {
+    if (r.accountIsActive !== 1) return false;
+    if (userId !== undefined && r.ownerUserId !== userId) return false;
+  }
+  return true;
+}
+
+/** 存入側收列範圍(單一來源):只算真實帳戶列(哨兵列沒有銀行入帳可減,
+ *  減了會憑空扣掉不存在的收入),isActive=1 + userId 語意同上。 */
+function depositRowInScope(
+  r: { linkedAccountId: number; ownerUserId: number | null; accountIsActive: number | null },
+  userId?: number,
+): boolean {
+  if (r.linkedAccountId === 0) return false;
+  if (r.accountIsActive !== 1) return false;
+  if (userId !== undefined && r.ownerUserId !== userId) return false;
+  return true;
+}
+
+/**
+ * 純函式:本期(LA 曆日 [startDate, endDate])認列的遞延收入加總。
+ * 收列規則見 recognizedRowInScope(與月度 fold 同一來源)。
+ * caller 合約:傳入的列已過濾 recognizedAt IS NOT NULL AND reversedAt IS NULL。
+ */
+export function sumRecognizedInPeriodLA(
+  rows: RecognizedRowLike[],
+  startDate: string,
+  endDate: string,
+  userId?: number,
+): number {
+  let total = 0;
+  for (const r of rows) {
+    if (!r.recognizedAt) continue;
+    const day = laDayOf(new Date(r.recognizedAt as any));
+    if (day < startDate || day > endDate) continue;
+    if (!recognizedRowInScope(r, userId)) continue;
+    total += parseFloat(r.amount as any) || 0;
+  }
+  return total;
+}
+
+/**
+ * 本期認列的遞延收入(IO 殼)。generateBankPL 在認列期把它加回 income
+ * (存入期已由 totalDeferredForUser(includeRecognized:true) 減去)。
+ * gate:isAnyTrustDeferralEnabled —— STRIPE-only 開啟時 Stripe-direct 認列
+ * 列也要進 P&L,不能只看 PLAID flag(F1 塊B P1 同款教訓)。flag 全 OFF 回 0,
+ * P&L 輸出 byte-identical。
+ * 取數:撈全部已認列未撤銷列(一人公司量級,認列列數小),LA 曆日過濾在
+ * 純函式做(避免 raw SQL DATE() 進 sqlRehearsal 登記面;也避開 UTC 切日的
+ * 月界歸屬錯)。
+ */
+export async function recognizedTrustIncomeInPeriod(opts: {
+  userId?: number;
+  startDate: string;
+  endDate: string;
+}): Promise<number> {
+  if (!isAnyTrustDeferralEnabled()) return 0;
+  const db = await getDb();
+  if (!db) return 0;
+  const rows = await db
+    .select({
+      amount: trustDeferredIncome.amount,
+      recognizedAt: trustDeferredIncome.recognizedAt,
+      linkedAccountId: trustDeferredIncome.linkedAccountId,
+      ownerUserId: linkedBankAccounts.userId,
+      accountIsActive: linkedBankAccounts.isActive,
+    })
+    .from(trustDeferredIncome)
+    .leftJoin(
+      linkedBankAccounts,
+      eq(trustDeferredIncome.linkedAccountId, linkedBankAccounts.id)
+    )
+    .where(
+      and(
+        isNotNull(trustDeferredIncome.recognizedAt),
+        isNull(trustDeferredIncome.reversedAt)
+      )
+    );
+  return sumRecognizedInPeriodLA(
+    rows as RecognizedRowLike[],
+    opts.startDate,
+    opts.endDate,
+    opts.userId,
+  );
+}
+
+// ─── F2 塊D 回爐(2026-07-10):月度遞延口徑(損益/稅表/財報共用)──────────────
+
+export interface DeferralLedgerRowLike {
+  amount: string | number;
+  /** MySQL DATE:'YYYY-MM-DD' 字串或 local-midnight Date。 */
+  depositDate: string | Date;
+  recognizedAt: Date | string | null;
+  reversedAt: Date | string | null;
+  linkedAccountId: number;
+  ownerUserId: number | null;
+  accountIsActive: number | null;
+}
+
+export interface MonthlyDeferralAdjustment {
+  /** 存入月減項:該月存入的遞延訂金(含後來已認列 —— 存入當下就不是收入,
+   *  歷史月不因日後認列漂移;reversed 除外)。 */
+  deferredDeposits: number;
+  /** 認列月加回:recognizedAt 的 LA 曆日落在該月的認列收入。 */
+  recognizedIncome: number;
+}
+
+/** DATE 欄 → 'YYYY-MM'(mysql2 DATE 可能回字串或 local-midnight Date,
+ *  用 local getters 還原曆日 —— 同 trustOutstandingSplit.dateOnly 的理由)。 */
+function monthKeyOfDate(d: string | Date): string {
+  if (typeof d === "string") return d.slice(0, 7);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}`;
+}
+
+/**
+ * 純函式:遞延列 → 每月 {存入減項, 認列加回}。
+ * 這是「損益/稅表 join」的單一月度口徑來源(F2 塊D 回爐 P2):
+ * generateBankMonthlyTrend(稅 CSV 的資料源)與 financialReportService
+ * 都走這裡,不各自複製貼上口徑。與期間版(totalDeferredForUser
+ * includeRecognized + sumRecognizedInPeriodLA)同一套收列謂詞
+ * (depositRowInScope / recognizedRowInScope)。
+ * monthKeys 之外的月份忽略(視窗外);reversed 列兩側都不算。
+ */
+export function foldMonthlyDeferralAdjustments(
+  rows: DeferralLedgerRowLike[],
+  monthKeys: readonly string[],
+  userId?: number,
+): Record<string, MonthlyDeferralAdjustment> {
+  const out: Record<string, MonthlyDeferralAdjustment> = {};
+  for (const k of monthKeys) out[k] = { deferredDeposits: 0, recognizedIncome: 0 };
+  for (const r of rows) {
+    if (r.reversedAt) continue;
+    const amt = parseFloat(r.amount as any) || 0;
+    if (!amt) continue;
+    // 存入側(真實帳戶列)
+    if (depositRowInScope(r, userId)) {
+      const dk = monthKeyOfDate(r.depositDate);
+      if (out[dk]) out[dk].deferredDeposits += amt;
+    }
+    // 認列側(LA 曆日;含哨兵列)
+    if (r.recognizedAt && recognizedRowInScope(r, userId)) {
+      const rk = laDayOf(new Date(r.recognizedAt as any)).slice(0, 7);
+      if (out[rk]) out[rk].recognizedIncome += amt;
+    }
+  }
+  return out;
+}
+
+/**
+ * IO 殼:撈全部未撤銷遞延列(一人公司量級),月度 fold 在純函式做。
+ * gate:isAnyTrustDeferralEnabled(與 totalDeferredForUser/
+ * recognizedTrustIncomeInPeriod 同一 gate 語意)。flag 全 OFF → 全零,
+ * 三個消費端(trend/稅 CSV/財報)輸出 byte-identical。
+ */
+export async function monthlyDeferralAdjustments(
+  monthKeys: readonly string[],
+  userId?: number,
+): Promise<Record<string, MonthlyDeferralAdjustment>> {
+  const zeros = foldMonthlyDeferralAdjustments([], monthKeys, userId);
+  if (!isAnyTrustDeferralEnabled()) return zeros;
+  const db = await getDb();
+  if (!db) return zeros;
+  const rows = await db
+    .select({
+      amount: trustDeferredIncome.amount,
+      depositDate: trustDeferredIncome.depositDate,
+      recognizedAt: trustDeferredIncome.recognizedAt,
+      reversedAt: trustDeferredIncome.reversedAt,
+      linkedAccountId: trustDeferredIncome.linkedAccountId,
+      ownerUserId: linkedBankAccounts.userId,
+      accountIsActive: linkedBankAccounts.isActive,
+    })
+    .from(trustDeferredIncome)
+    .leftJoin(
+      linkedBankAccounts,
+      eq(trustDeferredIncome.linkedAccountId, linkedBankAccounts.id)
+    )
+    .where(isNull(trustDeferredIncome.reversedAt));
+  return foldMonthlyDeferralAdjustments(
+    rows as DeferralLedgerRowLike[],
+    monthKeys,
+    userId,
+  );
 }

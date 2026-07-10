@@ -8,6 +8,7 @@
 import { describe, it, expect } from "vitest";
 import {
   isStripePayoutInflow,
+  isSquarePayoutInflow,
   norm,
   STRIPE_PAYOUT_DESCRIPTORS,
   STRIPE_PAYOUT_CONTEXT_TOKENS,
@@ -130,5 +131,34 @@ describe("preClassify — stripe_payout 分支(F1 塊C 雙計防護,2026-07-08)"
       description: "tour deposit settlement",
     });
     expect(r.category).toBe("stripe_payout");
+  });
+});
+
+describe("isSquarePayoutInflow — Square 撥款錨點+語境(F2 塊C 2026-07-10,prod 探真錨定)", () => {
+  it("真形狀 a(Plaid description):ACH CREDIT Square Inc SQ ON 06/01 → 命中", () => {
+    expect(isSquarePayoutInflow("ACH CREDIT Square Inc SQ ON 06/01")).toBe(true);
+  });
+
+  it("真形狀 b(BofA originalDescription):Square Inc DES:SQ190723 ID:Txxx INDN:PACK & GO, LLC CO ID:xxx PPD → 命中", () => {
+    expect(
+      isSquarePayoutInflow(
+        "Square Inc DES:SQ190723 ID:T2DJEJC0VJZ8W3K INDN:PACK & GO, LLC CO ID:9424300002 PPD",
+      ),
+    ).toBe(true);
+  });
+
+  it("裸 square 字樣(客人姓氏/memo)→ 永不命中(防姓氏誤傷)", () => {
+    expect(isSquarePayoutInflow("zelle payment from ann square")).toBe(false);
+    expect(isSquarePayoutInflow("wire from SQUARE WONG for tour deposit")).toBe(false);
+    expect(isSquarePayoutInflow("square")).toBe(false);
+  });
+
+  it("有 square inc 詞組但無語境 token → 不命中(錨點+語境雙要求)", () => {
+    expect(isSquarePayoutInflow("payment to square inc for hardware")).toBe(false);
+  });
+
+  it("子字串不算單字命中:squareinc / mysquare 不中", () => {
+    expect(isSquarePayoutInflow("squareinc sq transfer")).toBe(false);
+    expect(isSquarePayoutInflow("mysquare inc ach")).toBe(false);
   });
 });

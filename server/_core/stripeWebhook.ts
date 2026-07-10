@@ -690,6 +690,88 @@ async function handleChargeDispute(eventType: string, dispute: Stripe.Dispute) {
  *     the booking via adminUpdateStatus, which has its own confirmation +
  *     audit trail.
  */
+/**
+ * F2 塊D(2026-07-10):部分退款 × Stripe-direct 遞延列 —— 擋下轉人工。
+ * 遞延列存在且未撤銷 → 出一張 finance 卡叫 Jeff 裁決;同 payment 去重
+ * (hasOpenCardFor)。絕不 throw、絕不動遞延列 —— 錢的裁決是 Jeff 的。
+ * 覆蓋三個邊界(紅綠釘死):
+ *   - 退款額 > 遞延額(部分退款可跨多筆付款/含非遞延部分)→ 卡上並列兩數;
+ *   - 多次部分退款 → 第二次起被 pending 卡去重;
+ *   - 已認列後的部分退款 → 卡文案標明需沖銷決策(收入已進 P&L)。
+ */
+async function raisePartialRefundDeferralCard(
+  paymentIntentId: string,
+  charge: Stripe.Charge,
+): Promise<void> {
+  try {
+    const payment = await db.getPaymentByIntentId(paymentIntentId);
+    if (!payment) return;
+    const { findStripeDeferredByPaymentId } = await import(
+      "../services/trustDeferralService"
+    );
+    const deferred = await findStripeDeferredByPaymentId(payment.id);
+    if (!deferred || deferred.reversedAt) return; // 無遞延列/已撤銷 → 既有人工流程
+
+    const { hasOpenCardFor } = await import(
+      "../agents/autonomous/bankTransactionLinkAlerts"
+    );
+    const relatedType = "stripe_partial_refund_deferral";
+    const relatedId = String(payment.id);
+    if (await hasOpenCardFor(relatedType, relatedId)) return; // 多次部分退款不轟炸
+
+    const refundedUsd = (charge.amount_refunded / 100).toFixed(2);
+    const totalUsd = (charge.amount / 100).toFixed(2);
+    const deferredUsd = parseFloat(String(deferred.amount)).toFixed(2);
+    const recognizedNote = deferred.recognizedAt
+      ? "此列【已認列】—— 收入已進 P&L,需要沖銷決策(退款分錄/調整認列),請帶 CPA 口徑處理。"
+      : "此列尚未認列 —— 出發日到了會照【全額】認列;若退款屬實,請裁決:全額 reverse 後以淨額重建遞延,或人工調整。";
+    const overNote =
+      charge.amount_refunded > Math.round(parseFloat(String(deferred.amount)) * 100)
+        ? "\n⚠ 退款額大於遞延額(退款可能涵蓋非遞延部分),請逐筆核對。"
+        : "";
+
+    const { createApprovalTask } = await import("./approvalTasks");
+    const { classifyFinanceAlertRisk } = await import(
+      "../agents/autonomous/financeAlertClassifier"
+    );
+    const { FINANCE_ALERT_TASK_TYPE } = await import(
+      "../agents/autonomous/financeExecutor"
+    );
+    const { riskLevel } = classifyFinanceAlertRisk();
+    await createApprovalTask({
+      lane: "finance",
+      taskType: FINANCE_ALERT_TASK_TYPE,
+      riskLevel,
+      title: `💰 部分退款 × 信託遞延:payment #${payment.id} 退 $${refundedUsd} / $${totalUsd}`,
+      summary:
+        `Stripe 部分退款(退 $${refundedUsd},原額 $${totalUsd}),對應遞延列 #${deferred.id}` +
+        `(遞延 $${deferredUsd})。系統依 F2 塊D 裁決【不自動動遞延列】。${recognizedNote}${overNote}`,
+      payload: JSON.stringify({
+        paymentId: payment.id,
+        deferredId: deferred.id,
+        deferredAmount: deferredUsd,
+        amountRefundedCents: charge.amount_refunded,
+        chargeAmountCents: charge.amount,
+        recognized: Boolean(deferred.recognizedAt),
+      }),
+      relatedType,
+      relatedId,
+      createdBy: "stripeWebhook.partialRefund",
+    });
+    log.info(
+      { paymentId: payment.id, deferredId: deferred.id },
+      "[Stripe Webhook] Partial-refund deferral card raised (deferral untouched)",
+    );
+  } catch (err) {
+    log.error({ err }, "[Stripe Webhook] partial-refund deferral card failed (refund flow unaffected)");
+    reportFunnelError({
+      source: "fail-open:stripeWebhook:partialRefundDeferralCard",
+      err,
+      context: { paymentIntentId },
+    }).catch(() => {});
+  }
+}
+
 async function handleChargeRefunded(charge: Stripe.Charge) {
   log.info(
     { chargeId: charge.id, amount: charge.amount, refunded: charge.amount_refunded },
@@ -707,16 +789,17 @@ async function handleChargeRefunded(charge: Stripe.Charge) {
 
   const isFullRefund = charge.amount_refunded >= charge.amount;
   if (!isFullRefund) {
-    // F1 塊B (2026-07-08) 對抗審查 P2:部分退款不會 touch 任何 Stripe-direct
-    // 遞延列(dispatch 塊B 退款邊界明文只要求處理全額退款)——若這筆付款有
-    // 一筆遞延列在等認列,出發日到了會照全額認列,實際只該認列扣掉退款後
-    // 的淨額。這是已知、刻意留給 F2 的更細退款會計缺口(見
-    // docs/features/finance-dept/progress.md「已知限制」),這裡只補強 log
-    // 訊息讓 fly logs 排查時看得到這個關聯,不是完整修復。
+    // F2 塊D(2026-07-10)部分退款遞延 —— 設計取捨(擋下轉人工,不按比例):
+    // 按比例 reverse 需要改遞延列的 amount 或引入部分沖銷簿記,schema 沒有
+    // 這個結構(amount = 原始訂金,改它毀稽核軌;多次部分退款會複利式走樣;
+    // 已認列後的部分退款要沖銷分錄,是 CPA 答覆範疇)。AI 絕不動錢 + 部分
+    // 退款低頻 → 明確擋下:遞延列一毛不動,出一張 finance 卡叫 Jeff 裁決
+    // (全額 reverse 重建淨額遞延、或人工調整),同 payment 去重不轟炸。
     log.info(
       { refunded: charge.amount_refunded, total: charge.amount },
-      "[Stripe Webhook] Partial refund detected — leaving paymentStatus alone, manual reconciliation needed (NOTE: if STRIPE_TRUST_DEFERRAL_ENABLED is on and this payment has an active trust-deferred row, it will still be recognized at full amount on departure — partial-refund deferral accounting is deferred to F2)",
+      "[Stripe Webhook] Partial refund detected — deferral row (if any) left untouched, Jeff card raised for manual ruling (F2 塊D)",
     );
+    await raisePartialRefundDeferralCard(paymentIntentId, charge);
     return;
   }
 

@@ -51,6 +51,11 @@ export const SCHEDULE_C_MAP: Record<AccountingCategory, string> = {
   transfer: "(excluded — internal transfer)",
   other_review: "(excluded — needs review)",
   stripe_payout: "(excluded — Stripe payout landing, already counted at checkout)",
+  // F2 塊C (2026-07-10):Square 撥款中性桶。與 stripe_payout 不同,目前只供
+  // Jeff 人工歸類(銷售已另行入帳時)與未來自動對映就緒 —— 探真:Square 撥款
+  // 入帳現在就是 P&L 唯一收入紀錄,自動歸中性桶會讓真收入消失,故不接
+  // preClassify / linkEngine(accountingKnowledge.ts 2d 節)。
+  square_payout: "(excluded — Square payout landing, only when the sale is booked elsewhere)",
 };
 
 const INCOME_CATEGORIES: AccountingCategory[] = ["income_booking"];
@@ -62,7 +67,7 @@ const EXPENSE_CATEGORIES: AccountingCategory[] = [
   "expense_office",
   "expense_travel",
 ];
-const NEUTRAL_CATEGORIES: AccountingCategory[] = ["transfer", "other_review", "stripe_payout"];
+const NEUTRAL_CATEGORIES: AccountingCategory[] = ["transfer", "other_review", "stripe_payout", "square_payout"];
 const _ALL_KNOWN: AccountingCategory[] = [
   ...INCOME_CATEGORIES,
   ...EXPENSE_CATEGORIES,
@@ -106,6 +111,11 @@ export interface BankPLReport {
    *  Jeff 在 P&L UI 上完全看不到,對帳時對不上銀行對帳單)。Inflow-positive
    *  同 transfer 的符號慣例。 */
   stripePayout: { total: number; count: number };
+  /** Square 撥款歸中性桶的部分(F2 塊C,2026-07-10)。同 stripePayout 的
+   *  inflow-positive 符號慣例。注意:大多數 Square 撥款目前仍是 income_booking
+   *  (撥款入帳=唯一收入紀錄),本 tile 只匯總被 Jeff 明確歸類 square_payout
+   *  的列 —— 平常為 $0 是正常狀態。 */
+  squarePayout: { total: number; count: number };
   grossProfit: number;
   netProfit: number;
   profitMargin: number;
@@ -121,6 +131,9 @@ export interface BankPLReport {
   // already subtracted from income.total + netProfit; this is the separate
   // total so the UI can show "客人訂金待 recognize" as its own KPI.
   trustDeferredIncome: number;
+  /** F2 塊D:本期認列(recognizedAt 落本期 LA 曆日)的遞延收入,已加進
+   *  income.total/netProfit;獨立揭示供 UI/對帳核對。flag OFF 恆 0。 */
+  trustRecognizedIncome: number;
 }
 
 /**
@@ -184,17 +197,32 @@ export async function generateBankPL(opts: {
   // deferred income kept eating into each new month. We only want to subtract
   // the NEW deposits whose income_booking we ALSO just summed.
   let deferredIncomeSubtracted = 0;
+  let recognizedTrustIncome = 0;
   try {
-    const { totalDeferredForUser, isTrustDeferralEnabled } = await import(
-      "./trustDeferralService"
-    );
-    if (isTrustDeferralEnabled()) {
-      deferredIncomeSubtracted = await totalDeferredForUser({
-        userId: opts.userId,
-        asOfDate: opts.endDate,
-        depositSince: opts.startDate,
-      });
-    }
+    const { totalDeferredForUser, recognizedTrustIncomeInPeriod } =
+      await import("./trustDeferralService");
+    // F2 塊D:includeRecognized —— 存入期的減項要「含後來已認列的列」,
+    // 否則認列一發生,存入月的歷史 P&L 重算時收入會漂回存入日(認列月
+    // 又靠 recognizedTrustIncome 加了一次 → 跨月雙計)。
+    // F2 收案補丁 #2:外層 isTrustDeferralEnabled(PLAID-only)gate 移除,
+    // 統一靠函式內部的 isAnyTrustDeferralEnabled —— 語義:只要任一遞延機制
+    // 啟用,台帳上活躍遞延列一律減。否則 flag 轉態(PLAID 曾開建了真帳戶列、
+    // 後轉 STRIPE-only)下,headline P&L 對該列「加回不減項」跨月雙計,且與
+    // trend/稅 CSV/財報三路(同一內部 gate)發散。flag 全 OFF 此值恆 0。
+    deferredIncomeSubtracted = await totalDeferredForUser({
+      userId: opts.userId,
+      asOfDate: opts.endDate,
+      depositSince: opts.startDate,
+      includeRecognized: true,
+    });
+    // 認列期加回:gate 在函式內(isAnyTrustDeferralEnabled)—— STRIPE-only
+    // 開啟時 Stripe-direct 認列列也要進 P&L(「不再依賴 checkout 當下的次帳」
+    // 的入口),不能只看 PLAID flag。flag 全 OFF 恆 0,fold byte-identical。
+    recognizedTrustIncome = await recognizedTrustIncomeInPeriod({
+      userId: opts.userId,
+      startDate: opts.startDate,
+      endDate: opts.endDate,
+    });
   } catch (err) {
     console.warn(
       "[bankPL] trust deferral lookup failed (returning gross):",
@@ -207,6 +235,7 @@ export async function generateBankPL(opts: {
     startDate: opts.startDate,
     endDate: opts.endDate,
     deferredIncomeSubtracted,
+    recognizedTrustIncome,
   });
 }
 
@@ -234,6 +263,10 @@ export function foldBankPLRows(
     startDate: string;
     endDate: string;
     deferredIncomeSubtracted?: number;
+    /** F2 塊D(2026-07-10)flag-ON P&L 接線:本期「認列」的遞延收入(CST
+     *  §17550 認列時進 P&L,不再依賴 checkout 當下的次帳)。flag OFF 恆 0,
+     *  fold 輸出 byte-identical。 */
+    recognizedTrustIncome?: number;
   },
 ): BankPLReport {
   const incomeByCategory: Record<string, number> = {};
@@ -247,6 +280,8 @@ export function foldBankPLRows(
   let transferCount = 0;
   let stripePayoutTotal = 0;
   let stripePayoutCount = 0;
+  let squarePayoutTotal = 0;
+  let squarePayoutCount = 0;
   let excludedFromAccounting = 0;
   let uncategorizedCount = 0;
   let needsReviewCount = 0;
@@ -299,6 +334,14 @@ export function foldBankPLRows(
       continue;
     }
 
+    if (cat === "square_payout") {
+      // Square 撥款且銷售已另行入帳(Jeff 人工歸類)—— 同 stripe_payout 待遇:
+      // 排除出損益、獨立 tile 匯總(F2 塊C,2026-07-10)。
+      squarePayoutTotal += -amt;
+      squarePayoutCount++;
+      continue;
+    }
+
     if (cat === "refund") {
       // Plaid sign convention: positive = outflow.
       // Customer refund OUT to customer = positive (outflow). Reduces income.
@@ -330,7 +373,13 @@ export function foldBankPLRows(
   // grossProfit = income - cogs - refunds
   const grossIncome = totalIncome - refunds;
   const deferredIncomeSubtracted = opts.deferredIncomeSubtracted ?? 0;
-  const netIncome = grossIncome - deferredIncomeSubtracted;
+  // F2 塊D flag-ON 接線:遞延的訂金在「存入期」被減掉(deferredIncomeSubtracted,
+  // 含後來已認列的 —— 存入當下就不是收入),在「認列期」加回來(recognizedTrust-
+  // Income)。同期存入+認列 → 一減一加,淨計一次;跨期 → 收入落在認列期,
+  // §17550 的口徑。Stripe-direct(哨兵列,無銀行入帳列可減)只有加回這一半,
+  // 正是「認列時進 P&L、不依賴 checkout 次帳」的入口。flag OFF 兩項皆 0。
+  const recognizedTrustIncome = opts.recognizedTrustIncome ?? 0;
+  const netIncome = grossIncome - deferredIncomeSubtracted + recognizedTrustIncome;
   const grossProfit = netIncome - cogs;
   const netProfit = grossProfit - operating;
   const profitMargin = netIncome > 0 ? (netProfit / netIncome) * 100 : 0;
@@ -350,6 +399,7 @@ export function foldBankPLRows(
     refunds,
     transfer: { total: transferTotal, count: transferCount, gross: transferGross },
     stripePayout: { total: stripePayoutTotal, count: stripePayoutCount },
+    squarePayout: { total: squarePayoutTotal, count: squarePayoutCount },
     grossProfit,
     netProfit,
     profitMargin,
@@ -360,6 +410,7 @@ export function foldBankPLRows(
     excludedFromAccounting,
     uncategorizedCount,
     trustDeferredIncome: deferredIncomeSubtracted,
+    trustRecognizedIncome: recognizedTrustIncome,
   };
 }
 
@@ -371,7 +422,9 @@ function emptyReport(startDate: string, endDate: string): BankPLReport {
     refunds: 0,
     transfer: { total: 0, count: 0, gross: 0 },
     stripePayout: { total: 0, count: 0 },
+    squarePayout: { total: 0, count: 0 },
     trustDeferredIncome: 0,
+    trustRecognizedIncome: 0,
     grossProfit: 0,
     netProfit: 0,
     profitMargin: 0,
@@ -391,6 +444,8 @@ function emptyReport(startDate: string, endDate: string): BankPLReport {
 export async function generateBankMonthlyTrend(opts: {
   userId?: number;
   months: number;
+  /** 測試注入用(月窗定錨);省略 = 現在。 */
+  now?: Date;
 }): Promise<
   Array<{
     month: string; // YYYY-MM
@@ -401,7 +456,7 @@ export async function generateBankMonthlyTrend(opts: {
   }>
 > {
   const months = Math.max(1, Math.min(36, opts.months));
-  const now = new Date();
+  const now = opts.now ?? new Date();
   const start = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
 
   const startStr = start.toISOString().slice(0, 10);
@@ -459,7 +514,7 @@ export async function generateBankMonthlyTrend(opts: {
     // stripe_payout 明確排除(同 transfer/other_review)——它跟其他類別一樣
     // 不落入任何 income/cogs/expense 分支,顯式排除比「靠 if-chain 空跑」更
     // 清楚意圖(F1 塊C 2026-07-08 對抗審查修復)。
-    if (!cat || cat === "transfer" || cat === "other_review" || cat === "stripe_payout") continue;
+    if (!cat || cat === "transfer" || cat === "other_review" || cat === "stripe_payout" || cat === "square_payout") continue;
 
     const d = new Date(String(r.date));
     const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -476,6 +531,26 @@ export async function generateBankMonthlyTrend(opts: {
     } else if (EXPENSE_CATEGORIES.includes(cat)) {
       slot.operating += amt;
     }
+  }
+
+  // F2 塊D 回爐 P2(2026-07-10)—— 稅表接線:趨勢(= 稅 CSV 的資料源)套
+  // 與 generateBankPL 同一遞延口徑:存入月減(含已認列全額)、認列月(LA
+  // 曆日)加回。共用 trustDeferralService.monthlyDeferralAdjustments,不
+  // 複製貼上口徑;flag 全 OFF 回全零 → 輸出 byte-identical。
+  try {
+    const { monthlyDeferralAdjustments } = await import("./trustDeferralService");
+    const adjustments = await monthlyDeferralAdjustments(Array.from(map.keys()), opts.userId);
+    for (const [k, slot] of map.entries()) {
+      const adj = adjustments[k];
+      if (!adj) continue;
+      slot.income += adj.recognizedIncome - adj.deferredDeposits;
+    }
+  } catch (err) {
+    console.warn(
+      "[bankPL] monthly trust deferral adjustment failed (trend stays gross):",
+      (err as Error)?.message
+    );
+    reportFunnelError({ source: "fail-open:bankPLService:monthlyTrendDeferral", err }).catch(() => {});
   }
 
   return Array.from(map.entries())

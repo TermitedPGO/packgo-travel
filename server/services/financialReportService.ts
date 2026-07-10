@@ -43,6 +43,8 @@ export interface MonthlyTrendData {
   /** Trust-deferred income for the month (CST §17550), already subtracted
    *  from `netProfit`. Same convention as the headline stats. */
   trustDeferredIncome: number;
+  /** 本月認列(LA 曆日)的遞延收入,已加進 netProfit(F2 塊D 回爐 P2)。 */
+  trustRecognizedIncome: number;
   netProfit: number;
 }
 
@@ -177,51 +179,55 @@ export async function generateMonthlyTrend(months: number = 12): Promise<Monthly
   // month's own deposits (depositSince=month-01). Reuses the canonical helper
   // via a dynamic import (db ↔ trustDeferral cycle). Flag-gated: when off, no
   // extra queries run and every month stays gross.
+  // F2 塊D 回爐 P2(2026-07-10)—— 財報接線:改走 trustDeferralService.
+  // monthlyDeferralAdjustments 共用月度口徑(存入月減【含已認列全額】+
+  // 認列月 LA 曆日加回),與 generateBankPL / generateBankMonthlyTrend 對稱,
+  // 不再各自複製貼上口徑。舊寫法只減不加(且排除已認列)—— flag 一開,
+  // 認列收入會從財報系統性消失。gate 在共用函式內(isAnyTrustDeferralEnabled),
+  // flag 全 OFF 回全零 → foldMonthlyTrend 輸出 byte-identical。
   const deferredByMonth: Record<string, number> = {};
+  const recognizedByMonth: Record<string, number> = {};
   try {
-    const { totalDeferredForUser, isTrustDeferralEnabled } = await import("./trustDeferralService");
-    if (isTrustDeferralEnabled()) {
-      const keys = Object.keys(monthMap);
-      const totals = await Promise.all(
-        keys.map((k) => {
-          const [y, m] = k.split("-").map(Number);
-          const lastDay = new Date(y, m, 0).getDate(); // m is 1-based → day 0 of next = last of this
-          return totalDeferredForUser({
-            depositSince: `${k}-01`,
-            asOfDate: `${k}-${String(lastDay).padStart(2, "0")}`,
-          });
-        })
-      );
-      keys.forEach((k, i) => { deferredByMonth[k] = totals[i]; });
+    const { monthlyDeferralAdjustments } = await import("./trustDeferralService");
+    const adjustments = await monthlyDeferralAdjustments(Object.keys(monthMap));
+    for (const [k, adj] of Object.entries(adjustments)) {
+      deferredByMonth[k] = adj.deferredDeposits;
+      recognizedByMonth[k] = adj.recognizedIncome;
     }
   } catch (err) {
     console.warn("[financialReport] monthly trust deferral lookup failed (gross):", (err as Error)?.message);
     reportFunnelError({ source: "fail-open:financialReportService:monthlyTrustDeferralLookup", err }).catch(() => {});
   }
 
-  return foldMonthlyTrend(monthMap, deferredByMonth);
+  return foldMonthlyTrend(monthMap, deferredByMonth, recognizedByMonth);
 }
 
 /**
  * Pure fold of month buckets → sorted trend rows with trust-aware netProfit.
  * Split out (PKG-C, 2026-05-30) so the per-month formula
- *   netProfit = income − trustDeferred − expenses
- * is unit-testable without a DB. `deferredByMonth` defaults to empty → gross.
+ *   netProfit = income − trustDeferred + trustRecognized − expenses
+ * is unit-testable without a DB. `deferredByMonth`/`recognizedByMonth`
+ * default to empty → gross(byte-identical 於舊兩參數版)。
+ * F2 塊D 回爐 P2(2026-07-10):加 recognizedByMonth —— 認列月把遞延收入
+ * 加回(§17550 認列時進財報),與存入月減項對稱。
  */
 export function foldMonthlyTrend(
   buckets: Record<string, { income: number; expenses: number }>,
-  deferredByMonth: Record<string, number> = {}
+  deferredByMonth: Record<string, number> = {},
+  recognizedByMonth: Record<string, number> = {}
 ): MonthlyTrendData[] {
   return Object.entries(buckets)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([month, { income, expenses }]) => {
       const trustDeferredIncome = deferredByMonth[month] ?? 0;
+      const trustRecognizedIncome = recognizedByMonth[month] ?? 0;
       return {
         month,
         income,
         expenses,
         trustDeferredIncome,
-        netProfit: income - trustDeferredIncome - expenses,
+        trustRecognizedIncome,
+        netProfit: income - trustDeferredIncome + trustRecognizedIncome - expenses,
       };
     });
 }

@@ -778,6 +778,13 @@
 			"when": 1781660000000,
 			"tag": "0113_bank_transaction_links",
 			"breakpoints": true
+		},
+		{
+			"idx": 114,
+			"version": "5",
+			"when": 1783641600000,
+			"tag": "0114_trust_transfer_lifecycle",
+			"breakpoints": true
 		}
 	]
 }
