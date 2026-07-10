@@ -199,19 +199,22 @@ export async function generateBankPL(opts: {
   let deferredIncomeSubtracted = 0;
   let recognizedTrustIncome = 0;
   try {
-    const { totalDeferredForUser, recognizedTrustIncomeInPeriod, isTrustDeferralEnabled } =
+    const { totalDeferredForUser, recognizedTrustIncomeInPeriod } =
       await import("./trustDeferralService");
-    if (isTrustDeferralEnabled()) {
-      // F2 塊D:includeRecognized —— 存入期的減項要「含後來已認列的列」,
-      // 否則認列一發生,存入月的歷史 P&L 重算時收入會漂回存入日(認列月
-      // 又靠 recognizedTrustIncome 加了一次 → 跨月雙計)。flag OFF 此值恆 0。
-      deferredIncomeSubtracted = await totalDeferredForUser({
-        userId: opts.userId,
-        asOfDate: opts.endDate,
-        depositSince: opts.startDate,
-        includeRecognized: true,
-      });
-    }
+    // F2 塊D:includeRecognized —— 存入期的減項要「含後來已認列的列」,
+    // 否則認列一發生,存入月的歷史 P&L 重算時收入會漂回存入日(認列月
+    // 又靠 recognizedTrustIncome 加了一次 → 跨月雙計)。
+    // F2 收案補丁 #2:外層 isTrustDeferralEnabled(PLAID-only)gate 移除,
+    // 統一靠函式內部的 isAnyTrustDeferralEnabled —— 語義:只要任一遞延機制
+    // 啟用,台帳上活躍遞延列一律減。否則 flag 轉態(PLAID 曾開建了真帳戶列、
+    // 後轉 STRIPE-only)下,headline P&L 對該列「加回不減項」跨月雙計,且與
+    // trend/稅 CSV/財報三路(同一內部 gate)發散。flag 全 OFF 此值恆 0。
+    deferredIncomeSubtracted = await totalDeferredForUser({
+      userId: opts.userId,
+      asOfDate: opts.endDate,
+      depositSince: opts.startDate,
+      includeRecognized: true,
+    });
     // 認列期加回:gate 在函式內(isAnyTrustDeferralEnabled)—— STRIPE-only
     // 開啟時 Stripe-direct 認列列也要進 P&L(「不再依賴 checkout 當下的次帳」
     // 的入口),不能只看 PLAID flag。flag 全 OFF 恆 0,fold byte-identical。

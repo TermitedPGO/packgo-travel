@@ -11,8 +11,9 @@ vi.mock("./trustDeferralService", () => ({
   recognizedTrustIncomeInPeriod: (...a: unknown[]) => recognizedTrustIncomeInPeriod(...a),
   isAnyTrustDeferralEnabled: (...a: unknown[]) => isAnyTrustDeferralEnabled(...a),
 }));
+const generateBankMonthlyTrend = vi.fn(async () => []);
 vi.mock("./bankPLService", () => ({
-  generateBankMonthlyTrend: vi.fn(async () => []),
+  generateBankMonthlyTrend: (...a: unknown[]) => generateBankMonthlyTrend(...a),
   SCHEDULE_C_MAP: { income_booking: "Line 1" },
 }));
 
@@ -132,6 +133,7 @@ describe("generateTaxCsv — 稅表遞延接線(F2 塊D 回爐 P2)", () => {
     totalDeferredForUser.mockReset();
     recognizedTrustIncomeInPeriod.mockReset();
     isAnyTrustDeferralEnabled.mockReturnValue(true);
+    generateBankMonthlyTrend.mockClear();
   });
 
   it("totalReceived 用 includeRecognized 全額;totalRecognized 走共用口徑函式(不再用差值 hack)", async () => {
@@ -154,6 +156,32 @@ describe("generateTaxCsv — 稅表遞延接線(F2 塊D 回爐 P2)", () => {
     expect(csv).toContain("Total Received in Trust,5000.00");
     expect(csv).toContain("Total Recognized as Income,3000.00");
     expect(csv).toContain("2000.00"); // remainingDeferred(全期未認列)
+  });
+
+  it("F2 收案補丁 #3:年度結束後補產(now=2027-03 報 2026)→ 視窗仍錨定 2026 全年,不漏頭幾個月", async () => {
+    // 舊寫法 generateBankMonthlyTrend({months:12}) 滾動窗錨到「現在」——
+    // 2027-03 產 2026 稅表時窗 = 2026-04..2027-03,2026 年 1-3 月收入從
+    // Line-1 年度合計消失。修後 now 錨到該年 12/31,與「現在」無關。
+    totalDeferredForUser.mockResolvedValue(0);
+    recognizedTrustIncomeInPeriod.mockResolvedValue(0);
+    await generateTaxCsv(2026);
+    expect(generateBankMonthlyTrend).toHaveBeenCalledTimes(1);
+    const arg: any = generateBankMonthlyTrend.mock.calls[0][0];
+    expect(arg.months).toBe(12);
+    expect(arg.now.getFullYear()).toBe(2026); // 錨到 year 年底,而非執行當下
+    expect(arg.now.getMonth()).toBe(11);
+  });
+
+  it("F2 收案補丁 #1:Received/Remaining 呼叫帶 includeSentinel:true(與 Recognized 同 scope,恆等式前提)", async () => {
+    totalDeferredForUser.mockResolvedValue(0);
+    recognizedTrustIncomeInPeriod.mockResolvedValue(0);
+    await generateTaxCsv(2026);
+    expect(totalDeferredForUser).toHaveBeenCalledWith(
+      expect.objectContaining({ depositSince: "2026-01-01", includeRecognized: true, includeSentinel: true }),
+    );
+    expect(totalDeferredForUser).toHaveBeenCalledWith(
+      expect.objectContaining({ asOfDate: "2026-12-31", includeSentinel: true }),
+    );
   });
 
   it("flag 全 OFF → 三值全零(byte-identical),不打任何遞延查詢", async () => {

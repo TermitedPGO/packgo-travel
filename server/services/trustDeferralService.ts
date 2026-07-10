@@ -1066,6 +1066,12 @@ export async function totalDeferredForUser(opts: {
    *  預設 false 保持既有呼叫端(financeAlertProducer 等「目前未認列餘額」
    *  口徑)byte-identical。 */
   includeRecognized?: boolean;
+  /** F2 收案補丁(2026-07-10 回令 #1):true = 含哨兵列(linkedAccountId=0,
+   *  Stripe-direct)——「收到就是收到」對 Stripe 收款同樣成立;稅表 Trust
+   *  Summary 的 Received/Remaining 要與 Recognized(向來含哨兵)同 scope,
+   *  否則 STRIPE-only 穩態下恆等式 Received = Recognized + Remaining 破裂。
+   *  預設 false(P&L 存入減項不可含哨兵 —— 哨兵無銀行入帳列可抵)。 */
+  includeSentinel?: boolean;
 }): Promise<number> {
   // F1 塊B 對抗審查 P1 修復:同 recognizeReadyDepartures,認列/查詢路徑要看
   // 「任一」遞延機制的 flag,不能只看 PLAID flag(否則 STRIPE-only 開啟時,
@@ -1079,9 +1085,12 @@ export async function totalDeferredForUser(opts: {
   if (!isAnyTrustDeferralEnabled()) return 0;
   const db = await getDb();
   if (!db) return 0;
-  // Deferred = deposited within [depositSince, asOfDate], not yet recognized, not reversed
+  // Deferred = deposited within [depositSince, asOfDate], not reversed
+  // (recognized 依 includeRecognized)。帳戶 scope(isActive/userId/哨兵)
+  // 改在 JS 層用共用謂詞判(F2 收案補丁 #1)—— 與月度口徑
+  // foldMonthlyDeferralAdjustments 同一來源;includeSentinel:false 時與舊
+  // SQL 過濾(isActive=1 AND userId)行為 byte-identical。
   const filters: any[] = [
-    eq(linkedBankAccounts.isActive, 1),
     lte(trustDeferredIncome.depositDate, opts.asOfDate as any),
     isNull(trustDeferredIncome.reversedAt),
   ];
@@ -1091,13 +1100,12 @@ export async function totalDeferredForUser(opts: {
   if (opts.depositSince) {
     filters.push(gte(trustDeferredIncome.depositDate, opts.depositSince as any));
   }
-  if (opts.userId !== undefined) {
-    filters.push(eq(linkedBankAccounts.userId, opts.userId));
-  }
   const rows = await db
     .select({
       amount: trustDeferredIncome.amount,
+      linkedAccountId: trustDeferredIncome.linkedAccountId,
       ownerUserId: linkedBankAccounts.userId,
+      accountIsActive: linkedBankAccounts.isActive,
     })
     .from(trustDeferredIncome)
     .leftJoin(
@@ -1107,6 +1115,10 @@ export async function totalDeferredForUser(opts: {
     .where(and(...filters));
   let total = 0;
   for (const r of rows) {
+    const inScope = opts.includeSentinel
+      ? recognizedRowInScope(r, opts.userId) // 含哨兵(認列側同款 scope)
+      : depositRowInScope(r, opts.userId); // 排哨兵(P&L 存入減項口徑)
+    if (!inScope) continue;
     total += parseFloat(r.amount as any) || 0;
   }
   return total;

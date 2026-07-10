@@ -171,7 +171,11 @@ export async function generateTaxCsv(year: number): Promise<string> {
     const { generateBankMonthlyTrend, SCHEDULE_C_MAP } = await import(
       "./bankPLService"
     );
-    monthlyRows = await generateBankMonthlyTrend({ months: 12 });
+    // F2 收案補丁 #3(2026-07-10):滾動窗定錨 now 會讓「年度結束後補產該年
+    // 稅表」(正常報稅時序:明年 3 月報今年)漏掉該年頭幾個月,Line-1 年度
+    // 合計短報。窗口固定為指定 year 的 12 個月:now 錨到該年 12/31(local
+    // 構造,getFullYear/getMonth 恆為 year/11)。
+    monthlyRows = await generateBankMonthlyTrend({ months: 12, now: new Date(year, 11, 31, 12) });
     scheduleCLabels = { ...SCHEDULE_C_MAP };
   } catch (err) {
     log.error({ err }, "[taxCsvService] failed to load bank monthly trend");
@@ -197,18 +201,23 @@ export async function generateTaxCsv(year: number): Promise<string> {
     if (isAnyTrustDeferralEnabled()) {
       const endDate = `${year}-12-31`;
       const startDate = `${year}-01-01`;
+      // F2 收案補丁 #1:includeSentinel —— Received/Remaining 與 Recognized
+      // (向來含哨兵)同 scope,恆等式 Received = Recognized + Remaining
+      // 在 STRIPE-only 穩態(哨兵列當年存入當年認列)才成立。
       const yearReceived = await totalDeferredForUser({
         asOfDate: endDate,
         depositSince: startDate,
         includeRecognized: true,
+        includeSentinel: true,
       });
       const yearRecognized = await recognizedTrustIncomeInPeriod({
         startDate,
         endDate,
       });
-      // Total still deferred (all time, not yet recognized)
+      // Total still deferred (all time, not yet recognized; 含哨兵,同上)
       const totalDeferred = await totalDeferredForUser({
         asOfDate: endDate,
+        includeSentinel: true,
       });
 
       trust = {

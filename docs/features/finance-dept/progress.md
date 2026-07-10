@@ -1212,11 +1212,14 @@ customOrders square 覆蓋;或走查 dry-run 候選命中率。
 
 ### 已知限制補錄(塊D 回爐 P3)
 
-- flag 轉態/認列後撤銷的暫態歸屬粗糙:flag OFF 期間認列的歷史列在 flag
-  翻 ON 後會被認列月加回計入(該月銀行側從未減過 → 理論高估),以及
-  「已認列後才 reverse」的列從加回消失但存入月減項也同步消失 —— 兩者在
-  現況(prod 零認列列)無影響,翻 flag 走查 2b 會逐口徑對數抓出;結構性
-  處理(轉態基線日/沖銷分錄)等 CPA 答覆。
+- flag 轉態/已認列退款的暫態歸屬粗糙:flag OFF 期間認列的歷史列在 flag
+  翻 ON 後會被認列月加回計入(該月銀行側從未減過 → 理論高估)。另,
+  「已認列後的全額退款」Stripe 路徑刻意【不】reverse(stripeWebhook.ts
+  已認列不動的既有慣例)—— 該列保持 recognized 未 reversed,認列月加回
+  殘留成幽靈收入,直到 Jeff 人工沖銷(每筆退款有 notifyOwner 通知兜底,
+  部分退款另有塊D 的 finance 卡)。兩者在現況(prod 零認列列)無影響,
+  翻 flag 走查 2b 會逐口徑對數抓出;結構性處理(轉態基線日/沖銷分錄)
+  等 CPA 答覆。
 - fold byte-identical 測試為「自比對」(同版本兩參數 vs 三參數輸出相等),
   非跨版本 golden file —— 防「新參數預設值改行為」,不防「共同路徑被改」;
   後者由全套既有 fold 數字測試覆蓋。
