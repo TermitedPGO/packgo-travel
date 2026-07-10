@@ -6,7 +6,7 @@
  * ship 後對「後台開機就會打」的一批核心讀查詢跑一輪真查詢,任一支拋錯就報
  * 出來,而不是等 Jeff 自己點開後台才發現壞了。
  *
- * 七臂全部唯讀,零寫入、零 mutation:
+ * 八臂全部唯讀,零寫入、零 mutation:
  *   1. customerList         — runCustomerListQuery(drizzleDb, {})
  *   2. guestList             — runGuestListQuery(drizzleDb, {})
  *   3. customerUnreadCount   — runRegisteredUnreadCountQuery + runGuestUnreadRankingQuery
@@ -16,9 +16,17 @@
  *                               listCustomOrdersByProfile
  *   6. commandCenter.approvalTasks — listApprovalTasks({})
  *   7. commandCenter.escalations   — listEscalations()
+ *   8. activeToursCount      — db.searchTours({}).total(公開賣場真查詢,status='active';
+ *                               計數為 0 時刻意標紅,提醒賣場對客零商品直到目錄重建完成)
+ *
+ * 第八臂 WHY:2026-06-17 prod tours 等七表被非正規 DDL 清空,賣場對客零商品三週
+ * 無告警(當時觀測神經未覆蓋「對客商品數」信號)。此臂跑與公開 searchTours 等價
+ * 的計數(呼叫同一支公開查詢,不另寫平行 SQL),賣場歸零永不再無聲。事故當下 prod
+ * 本來就是 0(未復原),故此臂上線第一天起就會紅 —— 這是刻意的,紅著提醒直到目錄
+ * 重建完成。事故報告:docs/features/public-site/incident-20260617-tours-wipe.md。
  *
  * 每一臂各自 try/catch + 計時(timeArm),一臂拋錯絕不中斷其餘臂 —— arms 陣列
- * 永遠回滿七筆(opts.simulateFail 時是八筆),失敗的臂帶 error,其餘欄位仍然
+ * 永遠回滿八筆(opts.simulateFail 時是九筆),失敗的臂帶 error,其餘欄位仍然
  * 完整。error 欄位格式 `${err.name}: ${err.message}`,截到前 200 字,絕不含
  * stack、絕不含任何客人資料(email/姓名/id 等一律不放進 error 字串或其他欄位)。
  *
@@ -151,6 +159,23 @@ export async function runDeploySmoke(
     await timeArm("commandCenter.escalations", async () => {
       const rows = await listEscalations();
       return { rowCount: rows.length };
+    }),
+  );
+
+  arms.push(
+    await timeArm("activeToursCount", async () => {
+      // 跑與公開賣場等價的計數:db.searchTours({}) 內建 status='active' 過濾,
+      // 回傳的 total 就是對客可見的團數(與 toursRead 公開路由同一支查詢)。
+      // total 為 0 = 賣場對客零商品,刻意 throw 讓這一臂標紅(ok:false);
+      // 事故當下 prod 本來就是 0(2026-06-17 tours 清空未復原),此臂會持續紅著
+      // 提醒到目錄重建完成,不是 bug。error 文案帶事故報告路徑(不含任何客人資料)。
+      const { total } = await db.searchTours({});
+      if (total === 0) {
+        throw new Error(
+          "賣場對客零商品(active tours = 0);2026-06-17 tours 清空事故未復原 — 見 docs/features/public-site/incident-20260617-tours-wipe.md",
+        );
+      }
+      return { rowCount: total };
     }),
   );
 
