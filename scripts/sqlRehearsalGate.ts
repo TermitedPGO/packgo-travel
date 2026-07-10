@@ -69,8 +69,12 @@ function buildRemoteBlob(entriesJson: string): string {
       multipleStatements: false,
     });
   } catch (e) {
-    // 對抗審查 finding #2:DB connect / new URL(raw) 的錯訊可能夾帶 DATABASE_URL(含密碼)。
-    // 明細只寫遠端 stderr(flyctl 看得到),回給本地的 channelError 用固定字串,不接 e.message。
+    // 對抗審查 finding #2:DB connect / new URL(raw) 的錯訊「可能」夾帶 DATABASE_URL(含密碼)。
+    // 回給本地 safe-deploy 的 channelError 一律用固定字串(不接 e.message)。明細寫遠端 stderr —— 注意
+    // 遠端 stderr 經本地 execFileSync 的 stdio:["pipe","pipe","inherit"] 會「轉發到本地 operator 終端」
+    // (不是留在機上),所以這行仍可能把錯訊顯示在本地。已驗:Node 22 的 mysql2 connect error 與
+    // URL 解析 error 訊息都不含完整連線字串/密碼(只到 host)。⚠ Node 升版時複驗這個假設。
+    // (註:本註解身處遠端 blob 的 template literal 內,不可含反引號或 dollar-brace —— 會提早關閉/內插字串。)
     try { process.stderr.write("remote DB connect/URL parse error: " + (e && e.message || e) + "\\n"); } catch (e2) {}
     return out({ ok: false, channelError: "remote: DB connect / DATABASE_URL parse failed (明細在機上 stderr;已隱去以免洩漏連線字串)", total: 0, passed: 0, failures: [] });
   }
@@ -136,7 +140,9 @@ function main() {
   }
 
   const s = stdout.indexOf(START);
-  const t = stdout.indexOf(END);
+  // lastIndexOf:若遠端輸出(如某條錯訊)剛好回顯 END 字面,indexOf 會抓到 JSON 內那個而
+  // 提早截斷;取最後一個 END 才是包住 payload 的那個。仍 fail-closed(解不出就當通道失敗)。
+  const t = stdout.lastIndexOf(END);
   if (s === -1 || t === -1 || t < s) {
     return emit({
       ok: false,

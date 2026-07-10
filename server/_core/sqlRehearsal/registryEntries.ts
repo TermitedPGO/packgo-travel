@@ -384,7 +384,7 @@ export const ENTRIES: RehearsalEntry[] = [
     sql: "SELECT `dt`.`tourId` AS `tourId`, MAX(`dt`.`title`) AS `title`, MAX(`dt`.`price`) AS `price`, MAX(`dt`.`priceCurrency`) AS `priceCurrency`, `supplierProducts`.`externalProductCode` AS `externalProductCode`, `suppliers`.`code` AS `supplierCode`, MIN(`supplierDepartures`.`agentPrice`) AS `minCost`, MAX(`supplierDepartures`.`currency`) AS `costCurrency` FROM (SELECT `tours`.`id` AS `tourId`, `tours`.`title` AS `title`, `tours`.`price` AS `price`, `tours`.`priceCurrency` AS `priceCurrency`, CASE WHEN `tours`.`sourceUrl` LIKE '%NormGroupID=%' THEN SUBSTRING_INDEX(SUBSTRING_INDEX(`tours`.`sourceUrl`, 'NormGroupID=', -1), '&', 1) WHEN `tours`.`sourceUrl` LIKE '%/product/detail/%' THEN SUBSTRING_INDEX(SUBSTRING_INDEX(SUBSTRING_INDEX(`tours`.`sourceUrl`, '/product/detail/', -1), '/', 1), 'Q', 1) ELSE NULL END AS `extractedCode` FROM `tours` WHERE `tours`.`id` = ? AND (`tours`.`sourceUrl` LIKE ? OR `tours`.`sourceUrl` LIKE ?)) AS `dt` INNER JOIN `supplierProducts` ON `supplierProducts`.`externalProductCode` = `dt`.`extractedCode` INNER JOIN `suppliers` ON `suppliers`.`id` = `supplierProducts`.`supplierId` INNER JOIN `supplierDepartures` ON (`supplierDepartures`.`supplierProductId` = `supplierProducts`.`id` AND `supplierDepartures`.`departureDate` >= CURDATE() AND `supplierDepartures`.`agentPrice` IS NOT NULL AND `supplierDepartures`.`agentPrice` > 0) GROUP BY `dt`.`tourId`, `supplierProducts`.`id`, `suppliers`.`code`",
     sampleParams: [1,"%x%","%x%"],
     handWritten: true,
-    note: "單一 query 內含 7 個 sql`` 片段(derived table CASE 運算式 + 4 個聚合欄位 + 2 個 join 條件),input.tourId 有值時分支為 eq(id); 否則 eq(status,'active')。",
+    note: "單一 query 內含 7 個 sql`` 片段(derived table CASE 運算式 + 4 個聚合欄位 + 2 個 join 條件),input.tourId 有值時分支為 eq(id); 否則 eq(status,'active')。真碼 SUBSTRING_INDEX 分隔字元是字面 '?'(URL query 分隔),登記表把它替換成 'Q' —— 否則 mysql2.format 會把字串內的 ? 也代入 → 佔位錯位;EXPLAIN 不在乎分隔字元。",
   },
   {
     key: "suppliersRouter.marginAudit.rows.activeOnly",
@@ -393,6 +393,7 @@ export const ENTRIES: RehearsalEntry[] = [
     sql: "SELECT `dt`.`tourId` AS `tourId`, MAX(`dt`.`title`) AS `title`, MAX(`dt`.`price`) AS `price`, MAX(`dt`.`priceCurrency`) AS `priceCurrency`, `supplierProducts`.`externalProductCode` AS `externalProductCode`, `suppliers`.`code` AS `supplierCode`, MIN(`supplierDepartures`.`agentPrice`) AS `minCost`, MAX(`supplierDepartures`.`currency`) AS `costCurrency` FROM (SELECT `tours`.`id` AS `tourId`, `tours`.`title` AS `title`, `tours`.`price` AS `price`, `tours`.`priceCurrency` AS `priceCurrency`, CASE WHEN `tours`.`sourceUrl` LIKE '%NormGroupID=%' THEN SUBSTRING_INDEX(SUBSTRING_INDEX(`tours`.`sourceUrl`, 'NormGroupID=', -1), '&', 1) WHEN `tours`.`sourceUrl` LIKE '%/product/detail/%' THEN SUBSTRING_INDEX(SUBSTRING_INDEX(SUBSTRING_INDEX(`tours`.`sourceUrl`, '/product/detail/', -1), '/', 1), 'Q', 1) ELSE NULL END AS `extractedCode` FROM `tours` WHERE `tours`.`status` = ? AND (`tours`.`sourceUrl` LIKE ? OR `tours`.`sourceUrl` LIKE ?)) AS `dt` INNER JOIN `supplierProducts` ON `supplierProducts`.`externalProductCode` = `dt`.`extractedCode` INNER JOIN `suppliers` ON `suppliers`.`id` = `supplierProducts`.`supplierId` INNER JOIN `supplierDepartures` ON (`supplierDepartures`.`supplierProductId` = `supplierProducts`.`id` AND `supplierDepartures`.`departureDate` >= CURDATE() AND `supplierDepartures`.`agentPrice` IS NOT NULL AND `supplierDepartures`.`agentPrice` > 0) GROUP BY `dt`.`tourId`, `supplierProducts`.`id`, `suppliers`.`code`",
     sampleParams: ["active","%x%","%x%"],
     handWritten: true,
+    note: "同 byTourId(input.tourId 未帶時的 eq(status,'active') 分支)。真碼 SUBSTRING_INDEX 分隔字元字面 '?' 已替換成 'Q':否則 mysql2.format 會把字串內的 ? 也代入 → 佔位錯位;EXPLAIN 不在乎分隔字元。",
   },
   {
     key: "suppliersRouter.enrichmentOverview.totalCount",
@@ -469,7 +470,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "suppliersRouter.massImportFromMirror.minPrice",
-    sources: ["server/routers/suppliersRouter.ts:929", "server/routers/suppliersRouter.ts:1164", "server/routers/suppliersRouter.ts:1165", "server/routers/suppliersRouter.ts:1891"],
+    sources: ["server/routers/suppliersRouter.ts:929", "server/routers/suppliersRouter.ts:1891"],
     cls: "B",
     sql: "SELECT MIN(`supplierDepartures`.`retailPrice`) AS `minPrice` FROM `supplierDepartures` WHERE `supplierDepartures`.`supplierProductId` = ?",
     sampleParams: [1],
@@ -906,7 +907,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "opsActions.doUpdateInternalNote.appendNote",
-    sources: ["server/agents/autonomous/opsActions.ts:292"],
+    sources: ["server/agents/autonomous/opsActions.ts:293"],
     cls: "B",
     sql: "UPDATE `tourDepartures` SET `internalNotes` = CONCAT(COALESCE(`tourDepartures`.`internalNotes`, ''), ?) WHERE `tourDepartures`.`id` = ?",
     sampleParams: ["x",1],
@@ -914,16 +915,16 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "opsActions.doCancelBooking.updateBookingMessage",
-    sources: ["server/agents/autonomous/opsActions.ts:390"],
+    sources: ["server/agents/autonomous/opsActions.ts:382"],
     cls: "B",
-    sql: "UPDATE `bookings` SET `bookingStatus` = ?, `message` = CONCAT(COALESCE(`bookings`.`message`, ''), '\\n[cancelled by OpsAgent 2026-01-01] ', ?) WHERE `bookings`.`id` = ? AND `bookings`.`bookingStatus` != ?",
+    sql: "UPDATE `bookings` SET `bookingStatus` = ?, `message` = CONCAT(COALESCE(`bookings`.`message`, ''), ?) WHERE `bookings`.`id` = ? AND `bookings`.`bookingStatus` != ?",
     sampleParams: ["cancelled","x",1,"cancelled"],
     handWritten: true,
-    note: "⚠ 真碼 opsActions.ts:390 把日期戳插在字串字面內 → drizzle 渲成 '...OpsAgent ?] '(? 卡引號裡),疑似 latent bug(見 T6,flag 給 Jeff)。登記表把日期 inline 成字面以便 EXPLAIN 驗結構;不驗那個 ?-in-literal 執行期行為。",
+    note: "2026-07-09 Wave2 已修 latent bug:稽核字串(日期戳+reason)整條當單一綁定參數(cancelMessageSql),不再卡字串字面內。此為修後真實形狀,對位乾淨(? 只在 message CONCAT 一個 + set/where 三個)。",
   },
   {
     key: "opsActions.doCancelBooking.releaseSeats",
-    sources: ["server/agents/autonomous/opsActions.ts:405"],
+    sources: ["server/agents/autonomous/opsActions.ts:439"],
     cls: "B",
     sql: "UPDATE `tourDepartures` SET `bookedSlots` = GREATEST(`tourDepartures`.`bookedSlots` - ?, 0) WHERE `tourDepartures`.`id` = ?",
     sampleParams: [1,1],

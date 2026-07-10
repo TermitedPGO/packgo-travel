@@ -15,6 +15,9 @@
  *   4. 列出這次 build 內的 migration（可見性）
  *   5. tsc --noEmit 必須 0 錯（SKIP_TSC=1 可略過；TSC_HEAP_MB 可調 heap 上限，預設 6144）
  *   6. vitest（SKIP_DEPLOY_TESTS=1 可略過，預設要跑）
+ *   6.5 SQL 彩排（Wave2）：對 prod TiDB 逐條 EXPLAIN 登記表 SQL，擋 raw-SQL parse/resolution
+ *       錯（唯讀:flyctl ssh + blob 走 stdin,不新增端點）。fail-closed;通道失敗附逃生口
+ *       `SKIP_SQL_REHEARSAL=1 pnpm ship`。詳見 scripts/sqlRehearsalGate.ts。
  *   7. 人工授權鎖：讀 gitignored .deploy-approve，內容須等於 env DEPLOY_TOKEN，
  *      否則 BLOCK。session 無法自行湊出此 token，只有 Jeff 手動放檔才能解鎖一次部署。
  *      部署成功後刪除 .deploy-approve（一次性，用完即焚）。
@@ -200,9 +203,9 @@ async function guardInner(deps, opts) {
   if (!tokensMatch(fileTok, envTok)) return fail(`${APPROVE_FILE} does not match DEPLOY_TOKEN`);
   ok("authorized by Jeff (one-time token matched)");
 
-  // ---- all 7 gates green ----
+  // ---- all gates green (1–7 + 6.5 SQL 彩排) ----
   if (dryRun) {
-    log("\n✅ [DRY-RUN] all 7 gates passed. Would now run:");
+    log("\n✅ [DRY-RUN] all gates passed (含 6.5 SQL 彩排). Would now run:");
     log(`     flyctl deploy --remote-only -a ${APP}`);
     log("   then: consume .deploy-approve, curl /health, print version.");
     log("   (dry-run: nothing deployed, .deploy-approve left intact)");

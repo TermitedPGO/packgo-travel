@@ -21,6 +21,8 @@ const mockGenerateTaxCsv = vi.fn();
 const mockRunInquiryAgent = vi.fn();
 const mockProduceInquiryReplyTask = vi.fn();
 const mockGetInquiryById = vi.fn();
+// getDb 走一個可控 mock(預設 resolve null,保既有 no_db 測試;cancelBooking 測試逐條覆寫)。
+const mockGetDb = vi.fn();
 
 vi.mock("./financeAlertProducer", () => ({
   produceFinanceAlerts: (...args: any[]) => mockProduceFinanceAlerts(...args),
@@ -44,13 +46,22 @@ vi.mock("./inquiryReplyProducer", () => ({
 
 vi.mock("../../db", () => ({
   getInquiryById: (...args: any[]) => mockGetInquiryById(...args),
-  getDb: vi.fn().mockResolvedValue(null),
+  getDb: (...args: any[]) => mockGetDb(...args),
 }));
 
-import { executeOpsAction, ActionTypeEnum } from "./opsActions";
+import { MySqlDialect } from "drizzle-orm/mysql-core";
+import { bookings, tourDepartures } from "../../../drizzle/schema";
+import {
+  executeOpsAction,
+  ActionTypeEnum,
+  buildCancelAuditNote,
+  cancelMessageSql,
+} from "./opsActions";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // clearAllMocks 不重置 implementation → 顯式回預設 null(既有 no_db 測試靠這個)。
+  mockGetDb.mockResolvedValue(null);
 });
 
 describe("ActionTypeEnum includes commandCenter types", () => {
@@ -268,5 +279,105 @@ describe("executeOpsAction — collectCustomerThreads", () => {
     const result = await executeOpsAction("collectCustomerThreads", { email: "eyoung@axt.com" });
     expect(result.ok).toBe(false);
     expect(result.error).toBe("no_db");
+  });
+});
+
+// ── cancelBooking latent bug P1(Wave2,2026-07-09)─────────────────────────
+//
+// bug:`sql\`... '\n[cancelled by OpsAgent ${date}] ' ...\`` 把日期戳內插在未關閉的字串
+// 常量中間 → drizzle 渲成 `'...OpsAgent ?] '`(? 卡引號裡)佔位對位破壞 → cancel 失敗;
+// 且回傳無條件 ok:true + 固定「已取消·釋出座位」摘要,把失敗講成成功。
+//
+// 說明:doCancelBooking 全程 await(select→update→釋座 update),無 fire-and-forget 副作用,
+// 不需要 vi.waitFor。仍照派工單要求單檔連跑 5 次證穩。
+
+/** 可鏈式 fake db:select 回指定 booking 列;update 依 table 回 affectedRows,記錄更新過哪些 table。 */
+function makeFakeDb(opts: { bookingRow: unknown | null; bookingUpdateAffected: number }) {
+  const updatedTables: unknown[] = [];
+  return {
+    select: () => ({
+      from: () => ({ where: () => ({ limit: async () => (opts.bookingRow ? [opts.bookingRow] : []) }) }),
+    }),
+    update: (table: unknown) => ({
+      set: () => ({
+        where: async () => {
+          updatedTables.push(table);
+          if (table === bookings) return [{ affectedRows: opts.bookingUpdateAffected }];
+          return [{ affectedRows: 1 }]; // tourDepartures 釋座,結果不被用
+        },
+      }),
+    }),
+    _updatedTables: updatedTables,
+  };
+}
+
+const baseBooking = {
+  id: 42,
+  bookingStatus: "confirmed",
+  departureId: 7,
+  numberOfAdults: 2,
+  numberOfChildrenWithBed: 0,
+  numberOfChildrenNoBed: 1,
+  customerName: "測試客",
+  message: null,
+};
+
+describe("cancelMessageSql — 佔位符 regression(P1 bug 守門,舊寫法會紅)", () => {
+  const dialect = new MySqlDialect();
+
+  it("渲染後只有一個 `?`、佔位符數==綁定數、且沒有任何 `?` 落在字串字面內", () => {
+    const { sql, params } = dialect.sqlToQuery(cancelMessageSql(bookings.message, "客人要求", "2026-07-09"));
+    expect((sql.match(/\?/g) || []).length).toBe(1);
+    expect((sql.match(/\?/g) || []).length).toBe(params.length);
+    // 舊寫法 `'...OpsAgent ?] '` 會命中這個 regex(? 夾在單引號字串常量內);修法不會。
+    expect(sql).not.toMatch(/'[^']*\?[^']*'/);
+    // 綁定值是整條稽核字串(日期戳 + reason 都在裡面,不進 SQL 字面)
+    expect(params).toEqual(["\n[cancelled by OpsAgent 2026-07-09] 客人要求"]);
+  });
+
+  it("buildCancelAuditNote 把日期戳與 reason 併成單一字串", () => {
+    expect(buildCancelAuditNote("退團", "2026-01-01")).toBe("\n[cancelled by OpsAgent 2026-01-01] 退團");
+  });
+});
+
+describe("executeOpsAction('cancelBooking') — transitioned 決定成敗,不再無條件假成功", () => {
+  it("正常路徑:未取消 + 條件式更新命中(affectedRows>0)→ ok:true『已取消·釋出座位』且真的釋座", async () => {
+    const db = makeFakeDb({ bookingRow: { ...baseBooking }, bookingUpdateAffected: 1 });
+    mockGetDb.mockResolvedValue(db);
+    const res = await executeOpsAction("cancelBooking", { bookingId: 42, reason: "客人要求取消" });
+    expect(res.ok).toBe(true);
+    expect(res.summary).toContain("已取消");
+    expect(res.summary).toContain("釋出座位");
+    expect(res.details?.transitioned).toBe(true);
+    expect(db._updatedTables).toContain(bookings);
+    expect(db._updatedTables).toContain(tourDepartures); // 有座位 → 有釋座
+  });
+
+  it("條件式更新沒命中(affectedRows=0,被搶先取消)→ 不假成功:摘要標『本次未變更』且不釋座", async () => {
+    const db = makeFakeDb({ bookingRow: { ...baseBooking }, bookingUpdateAffected: 0 });
+    mockGetDb.mockResolvedValue(db);
+    const res = await executeOpsAction("cancelBooking", { bookingId: 42, reason: "客人要求取消" });
+    expect(res.ok).toBe(true);
+    expect(res.details?.transitioned).toBe(false);
+    expect(res.summary).toContain("本次未變更");
+    expect(res.summary).not.toContain("釋出座位");
+    expect(db._updatedTables).not.toContain(tourDepartures); // 沒命中 → 絕不釋座
+  });
+
+  it("已是 cancelled → 早退,不做任何 update", async () => {
+    const db = makeFakeDb({ bookingRow: { ...baseBooking, bookingStatus: "cancelled" }, bookingUpdateAffected: 0 });
+    mockGetDb.mockResolvedValue(db);
+    const res = await executeOpsAction("cancelBooking", { bookingId: 42, reason: "x" });
+    expect(res.ok).toBe(true);
+    expect(res.details?.alreadyCancelled).toBe(true);
+    expect(db._updatedTables).toHaveLength(0);
+  });
+
+  it("booking 不存在 → ok:false booking_not_found", async () => {
+    const db = makeFakeDb({ bookingRow: null, bookingUpdateAffected: 0 });
+    mockGetDb.mockResolvedValue(db);
+    const res = await executeOpsAction("cancelBooking", { bookingId: 999, reason: "x" });
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe("booking_not_found");
   });
 });
