@@ -22,11 +22,12 @@
 2. [裁決門] 設計方向提案(照 B-final 成功模式:真實渲染多版型)→ Jeff 挑 → 才實作。行程頁翻修含地圖重做(保留狀態在此解凍)。
 3. 開放問題(等 Jeff 一句話):「旅遊頁面」= 現站公開頁翻修(指揮暫按此盤點),還是另立獨立新站?
 
-## 基建
+## 基建(2026-07-10 改案:mini 延後,零成本方案先行)
 
-1. [Jeff] 採購 Mac mini 當 24/7 AI 主機(建議 M4 16GB $599 或二手 M2;解四件事:指揮常駐/iMessage 橋接先決/專職測試機/筆電解放)。
-2. [預授權] 指揮先備妥 mini 開機設定腳本與檢查清單進 docs/infra/(Claude Code/flyctl/repo/常駐 session/遠端進入),到貨十分鐘上線。
-3. 過渡期:筆電在家開著就夜間衝刺,不在就攢佇列;例行掃描逐步搬雲端排程。
+1. [Jeff] Windows 常駐工位上線:照 docs/infra/windows-resident-setup.md 設定(WSL+Claude Code+repo+不休眠),並回報 RAM/WSL 有無/開機時段。定位:指揮值班、夜間衝刺、瀏覽器偵察;不產 PDF、不 ship。
+2. [預授權] MacBook 回家補課腳本(iMessage chat.db 增量抓取,只收不發):等通道 Wave 4 動工時由 opus 實作,進 docs/infra/macbook-imessage-catchup.md。
+3. Mac mini 延後:iMessage 只收不發不需即時,現階段不買。復議條件:iMessage 量大需即時、或 Windows 常駐證明太麻煩;屆時二手 M2 即可。
+4. 過渡期:例行掃描逐步搬雲端排程(Fly cron)。
 
 ## 節奏
 
