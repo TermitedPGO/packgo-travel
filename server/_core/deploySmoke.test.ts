@@ -27,6 +27,7 @@ vi.mock("../db", () => ({
   getUserByEmail: vi.fn(async () => ({ id: 42, email: "jeffhsieh0909@gmail.com" })),
   findCustomerProfileId: vi.fn(async () => 2760017),
   listCustomOrdersByProfile: vi.fn(async () => [{ id: 1 }, { id: 2 }]),
+  searchTours: vi.fn(async () => ({ tours: [{ id: 1 }], total: 5 })),
 }));
 
 vi.mock("../routers/adminCustomers", () => ({
@@ -68,6 +69,7 @@ const ARM_NAMES = [
   "watchdogForCustomer",
   "commandCenter.approvalTasks",
   "commandCenter.escalations",
+  "activeToursCount",
 ];
 
 beforeEach(() => {
@@ -89,13 +91,15 @@ beforeEach(() => {
   vi.mocked(loadTodayListItems).mockResolvedValue([{ kind: "followUpDue" }] as any);
   vi.mocked(listApprovalTasks).mockResolvedValue([{ id: 1 }, { id: 2 }, { id: 3 }] as any);
   vi.mocked(listEscalations).mockResolvedValue([{ id: 1 }] as any);
+  // storefront healthy by default: 5 active tours (arm goes green)
+  vi.mocked(db.searchTours).mockResolvedValue({ tours: [{ id: 1 }], total: 5 } as any);
 });
 
 describe("runDeploySmoke — happy path (all seven arms succeed)", () => {
-  it("returns ok:true with all seven arms ok, correct rowCounts, ms timing present", async () => {
+  it("returns ok:true with all eight arms ok, correct rowCounts, ms timing present", async () => {
     const result = await runDeploySmoke();
     expect(result.ok).toBe(true);
-    expect(result.arms).toHaveLength(7);
+    expect(result.arms).toHaveLength(8);
     expect(result.arms.map((a) => a.name)).toEqual(ARM_NAMES);
     for (const arm of result.arms) {
       expect(arm.ok).toBe(true);
@@ -112,6 +116,8 @@ describe("runDeploySmoke — happy path (all seven arms succeed)", () => {
     expect(byName.watchdogForCustomer.rowCount).toBe(2);
     expect(byName["commandCenter.approvalTasks"].rowCount).toBe(3);
     expect(byName["commandCenter.escalations"].rowCount).toBe(1);
+    // activeToursCount reports the storefront's active-tour total (5 by default)
+    expect(byName.activeToursCount.rowCount).toBe(5);
   });
 
   it("calls runCustomerListQuery / runGuestListQuery with the admin-UI default input ({})", async () => {
@@ -132,7 +138,7 @@ describe("runDeploySmoke — never-throw-whole-suite: one arm fails, others unaf
     vi.mocked(runCustomerListQuery).mockRejectedValue(new TypeError("boom"));
     const result = await runDeploySmoke();
     expect(result.ok).toBe(false);
-    expect(result.arms).toHaveLength(7);
+    expect(result.arms).toHaveLength(8);
     const byName = Object.fromEntries(result.arms.map((a) => [a.name, a]));
     expect(byName.customerList.ok).toBe(false);
     expect(byName.customerList.error).toBe("TypeError: boom");
@@ -219,16 +225,16 @@ describe("runDeploySmoke — watchdogForCustomer profileId resolution", () => {
 });
 
 describe("runDeploySmoke — simulateFail injection", () => {
-  it("opts.simulateFail:true appends an eighth 'simulated' failed arm; real seven still run + succeed", async () => {
+  it("opts.simulateFail:true appends a 'simulated' failed arm; real eight still run + succeed", async () => {
     const result = await runDeploySmoke({ simulateFail: true });
     expect(result.ok).toBe(false);
-    expect(result.arms).toHaveLength(8);
+    expect(result.arms).toHaveLength(9);
     expect(result.arms.map((a) => a.name)).toEqual([...ARM_NAMES, "simulated"]);
     const simulated = result.arms.find((a) => a.name === "simulated")!;
     expect(simulated.ok).toBe(false);
     expect(simulated.ms).toBe(0);
     expect(simulated.error).toBeDefined();
-    // the real seven arms are untouched by the simulated injection
+    // the real eight arms are untouched by the simulated injection
     for (const name of ARM_NAMES) {
       const arm = result.arms.find((a) => a.name === name)!;
       expect(arm.ok).toBe(true);
@@ -237,8 +243,62 @@ describe("runDeploySmoke — simulateFail injection", () => {
 
   it("opts.simulateFail:false (default) never appends the simulated arm", async () => {
     const result = await runDeploySmoke({ simulateFail: false });
-    expect(result.arms).toHaveLength(7);
+    expect(result.arms).toHaveLength(8);
     expect(result.arms.some((a) => a.name === "simulated")).toBe(false);
+  });
+});
+
+describe("runDeploySmoke — activeToursCount (storefront zero alarm)", () => {
+  it("count > 0 → arm green, rowCount is the storefront active-tour total", async () => {
+    vi.mocked(db.searchTours).mockResolvedValue({ tours: [{ id: 1 }], total: 1205 } as any);
+    const result = await runDeploySmoke();
+    const arm = result.arms.find((a) => a.name === "activeToursCount")!;
+    expect(arm.ok).toBe(true);
+    expect(arm.rowCount).toBe(1205);
+    expect(arm.error).toBeUndefined();
+    // calls the real public search query with the storefront default input ({})
+    expect(db.searchTours).toHaveBeenCalledWith({});
+  });
+
+  it("count === 0 → arm red (ok:false) with a storefront-zero error naming the incident report", async () => {
+    vi.mocked(db.searchTours).mockResolvedValue({ tours: [], total: 0 } as any);
+    const result = await runDeploySmoke();
+    expect(result.ok).toBe(false);
+    const arm = result.arms.find((a) => a.name === "activeToursCount")!;
+    expect(arm.ok).toBe(false);
+    expect(arm.rowCount).toBeUndefined();
+    expect(arm.error).toContain("賣場對客零商品");
+    expect(arm.error).toContain("active tours = 0");
+    expect(arm.error).toContain(
+      "docs/features/public-site/incident-20260617-tours-wipe.md",
+    );
+  });
+
+  it("query throws → fail-open: arm red, but the other seven arms are unaffected", async () => {
+    vi.mocked(db.searchTours).mockRejectedValue(new Error("TiDB 500 on tours count"));
+    const result = await runDeploySmoke();
+    expect(result.ok).toBe(false);
+    expect(result.arms).toHaveLength(8);
+    const byName = Object.fromEntries(result.arms.map((a) => [a.name, a]));
+    expect(byName.activeToursCount.ok).toBe(false);
+    expect(byName.activeToursCount.error).toBe("Error: TiDB 500 on tours count");
+    // the storefront query blowing up must not drag down any other arm
+    for (const name of ARM_NAMES.filter((n) => n !== "activeToursCount")) {
+      expect(byName[name].ok).toBe(true);
+    }
+  });
+
+  it("the storefront-zero red is distinct from a query-error red (different error text)", async () => {
+    vi.mocked(db.searchTours).mockResolvedValue({ tours: [], total: 0 } as any);
+    const zeroResult = await runDeploySmoke();
+    const zeroArm = zeroResult.arms.find((a) => a.name === "activeToursCount")!;
+    vi.mocked(db.searchTours).mockRejectedValue(new Error("connection reset"));
+    const errResult = await runDeploySmoke();
+    const errArm = errResult.arms.find((a) => a.name === "activeToursCount")!;
+    expect(zeroArm.ok).toBe(false);
+    expect(errArm.ok).toBe(false);
+    expect(zeroArm.error).not.toBe(errArm.error);
+    expect(errArm.error).toBe("Error: connection reset");
   });
 });
 
@@ -247,14 +307,16 @@ describe("runDeploySmoke — DB unavailable (getDb() → null)", () => {
     vi.mocked(db.getDb).mockResolvedValue(null as any);
     const result = await runDeploySmoke();
     expect(result.ok).toBe(false);
-    expect(result.arms).toHaveLength(7);
+    expect(result.arms).toHaveLength(8);
     const byName = Object.fromEntries(result.arms.map((a) => [a.name, a]));
     expect(byName.customerList.ok).toBe(false);
     expect(byName.guestList.ok).toBe(false);
     expect(byName.customerUnreadCount.ok).toBe(false);
-    // todayList / commandCenter arms don't depend on this module's getDb() call
-    // directly (loadTodayListItems/listApprovalTasks/listEscalations resolve
-    // their own db internally) — mocked here to always succeed, so they stay ok.
+    // todayList / commandCenter / activeToursCount arms don't depend on this
+    // module's getDb() call directly (loadTodayListItems/listApprovalTasks/
+    // listEscalations/searchTours resolve their own db internally) — mocked
+    // here to always succeed, so they stay ok.
     expect(byName.todayList.ok).toBe(true);
+    expect(byName.activeToursCount.ok).toBe(true);
   });
 });
