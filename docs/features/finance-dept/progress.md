@@ -1186,3 +1186,37 @@ run().catch(function (e) {
 
 檢查方式:重跑塊C 探針(progress 附錄)比對 accountingEntries square 計數與
 customOrders square 覆蓋;或走查 dry-run 候選命中率。
+
+### 塊D 偏離申報(F2 收官;照塊B/C 前例彙整)
+
+1. LLM square_payout 後衛「降級 other_review」強於回令原文「強制
+   needsHumanReview」—— 指揮親核追認【RATIFIED,2026-07-10 總驗收回令】
+   (accountingAgentService:285 無條件持久化 agentCategory、bankPLService
+   零引用 needsHumanReview、other_review 落 needsReview 池金額可見,降級
+   才真的不靜默)。
+2. 部分退款遞延:擋下轉人工,不按比例 —— schema 無部分沖銷結構、改 amount
+   毀稽核軌、多次部分退款複利走樣、已認列沖銷屬 CPA 範疇;遞延列一毛不動,
+   finance 卡(同 payment 去重)交 Jeff 裁決。CPA 答覆若要求按比例,卡
+   payload 帶全數字可追溯重放。
+3. totalDeferredForUser 增 includeRecognized 語義(預設 false byte-identical):
+   存入期減項改「含已認列全額」—— 修隱性洞:認列發生後歷史月 P&L 重算時
+   收入會漂回存入日,與認列月加回構成跨月雙計。
+4. 稅表接線(本回爐 P2):「損益/稅表 join」補齊 —— generateBankMonthlyTrend
+   (稅 CSV 資料源)/taxCsvService trust 摘要/financialReportService 三路
+   對稱接上同一月度口徑(trustDeferralService.monthlyDeferralAdjustments +
+   foldMonthlyDeferralAdjustments 純函式單一來源,無複製貼上);taxCsv
+   totalRecognized 廢除「差值 hack」改走共用口徑;gate 統一
+   isAnyTrustDeferralEnabled。
+5. generateBankMonthlyTrend 增測試注入用 now 參數(選填,省略=現在;
+   月窗定錨讓跨月紅綠不隨真實日期漂移)。
+
+### 已知限制補錄(塊D 回爐 P3)
+
+- flag 轉態/認列後撤銷的暫態歸屬粗糙:flag OFF 期間認列的歷史列在 flag
+  翻 ON 後會被認列月加回計入(該月銀行側從未減過 → 理論高估),以及
+  「已認列後才 reverse」的列從加回消失但存入月減項也同步消失 —— 兩者在
+  現況(prod 零認列列)無影響,翻 flag 走查 2b 會逐口徑對數抓出;結構性
+  處理(轉態基線日/沖銷分錄)等 CPA 答覆。
+- fold byte-identical 測試為「自比對」(同版本兩參數 vs 三參數輸出相等),
+  非跨版本 golden file —— 防「新參數預設值改行為」,不防「共同路徑被改」;
+  後者由全套既有 fold 數字測試覆蓋。

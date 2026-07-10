@@ -179,17 +179,32 @@ export async function generateTaxCsv(year: number): Promise<string> {
   }
 
   // 2. Trust account summary
+  // F2 塊D 回爐 P2(2026-07-10)—— 稅表接線:
+  //   totalReceived  = 本年「存入」的遞延訂金全額(includeRecognized:true ——
+  //                    收到就是收到,不因日後認列而縮水;舊版排除已認列,
+  //                    語義跟欄位名對不上)。
+  //   totalRecognized = 本年「認列」(LA 曆日)的遞延收入 —— 直接用共用
+  //                    口徑 recognizedTrustIncomeInPeriod,不再用
+  //                    「本年存入未認列 − 全期未認列」的差值 hack(那個
+  //                    導數在跨年情境會算錯且被 Math.max 掩蓋)。
+  //   remainingDeferred = 全期仍未認列(語義不變)。
+  //   gate 改 isAnyTrustDeferralEnabled(共用函式內部同款)—— STRIPE-only
+  //   開啟時 Stripe-direct 認列也要進年終稅摘要。flag 全 OFF → 三值全零,
+  //   輸出 byte-identical。
   try {
-    const { totalDeferredForUser, isTrustDeferralEnabled } = await import(
-      "./trustDeferralService"
-    );
-    if (isTrustDeferralEnabled()) {
+    const { totalDeferredForUser, recognizedTrustIncomeInPeriod, isAnyTrustDeferralEnabled } =
+      await import("./trustDeferralService");
+    if (isAnyTrustDeferralEnabled()) {
       const endDate = `${year}-12-31`;
       const startDate = `${year}-01-01`;
-      // Currently deferred for this year's deposits
-      const yearDeferred = await totalDeferredForUser({
+      const yearReceived = await totalDeferredForUser({
         asOfDate: endDate,
         depositSince: startDate,
+        includeRecognized: true,
+      });
+      const yearRecognized = await recognizedTrustIncomeInPeriod({
+        startDate,
+        endDate,
       });
       // Total still deferred (all time, not yet recognized)
       const totalDeferred = await totalDeferredForUser({
@@ -197,8 +212,8 @@ export async function generateTaxCsv(year: number): Promise<string> {
       });
 
       trust = {
-        totalReceived: yearDeferred,
-        totalRecognized: Math.max(0, yearDeferred - totalDeferred),
+        totalReceived: yearReceived,
+        totalRecognized: yearRecognized,
         remainingDeferred: totalDeferred,
       };
     }

@@ -1136,15 +1136,37 @@ export interface RecognizedRowLike {
   accountIsActive: number | null;
 }
 
+/** 認列側收列範圍(單一來源,月度/期間兩個 fold 共用,禁複製貼上):
+ *  哨兵列(linkedAccountId=0,Stripe-direct)一律計入 —— 這批收入沒有銀行
+ *  入帳列,認列加回是它進 P&L/稅表的唯一入口;userId scope 對哨兵列不適用。
+ *  真實帳戶列要求 isActive=1 且 userId 有給時相符(totalDeferredForUser
+ *  join 語意)。 */
+function recognizedRowInScope(
+  r: { linkedAccountId: number; ownerUserId: number | null; accountIsActive: number | null },
+  userId?: number,
+): boolean {
+  if (r.linkedAccountId !== 0) {
+    if (r.accountIsActive !== 1) return false;
+    if (userId !== undefined && r.ownerUserId !== userId) return false;
+  }
+  return true;
+}
+
+/** 存入側收列範圍(單一來源):只算真實帳戶列(哨兵列沒有銀行入帳可減,
+ *  減了會憑空扣掉不存在的收入),isActive=1 + userId 語意同上。 */
+function depositRowInScope(
+  r: { linkedAccountId: number; ownerUserId: number | null; accountIsActive: number | null },
+  userId?: number,
+): boolean {
+  if (r.linkedAccountId === 0) return false;
+  if (r.accountIsActive !== 1) return false;
+  if (userId !== undefined && r.ownerUserId !== userId) return false;
+  return true;
+}
+
 /**
  * 純函式:本期(LA 曆日 [startDate, endDate])認列的遞延收入加總。
- * 收列規則:
- *   - recognizedAt 的 LA 曆日落在期間內;
- *   - 哨兵列(linkedAccountId=0,Stripe-direct)一律計入 —— 這批收入沒有
- *     銀行入帳列,認列加回是它進 P&L 的唯一入口(「不再依賴 checkout 當下
- *     的次帳」);userId scope 對哨兵列不適用(單一公司,無 per-user 歸屬);
- *   - 真實帳戶列要求帳戶 isActive=1,且 userId 有給時要相符(與
- *     totalDeferredForUser 的 join 語意一致)。
+ * 收列規則見 recognizedRowInScope(與月度 fold 同一來源)。
  * caller 合約:傳入的列已過濾 recognizedAt IS NOT NULL AND reversedAt IS NULL。
  */
 export function sumRecognizedInPeriodLA(
@@ -1158,10 +1180,7 @@ export function sumRecognizedInPeriodLA(
     if (!r.recognizedAt) continue;
     const day = laDayOf(new Date(r.recognizedAt as any));
     if (day < startDate || day > endDate) continue;
-    if (r.linkedAccountId !== 0) {
-      if (r.accountIsActive !== 1) continue;
-      if (userId !== undefined && r.ownerUserId !== userId) continue;
-    }
+    if (!recognizedRowInScope(r, userId)) continue;
     total += parseFloat(r.amount as any) || 0;
   }
   return total;
@@ -1209,5 +1228,105 @@ export async function recognizedTrustIncomeInPeriod(opts: {
     opts.startDate,
     opts.endDate,
     opts.userId,
+  );
+}
+
+// ─── F2 塊D 回爐(2026-07-10):月度遞延口徑(損益/稅表/財報共用)──────────────
+
+export interface DeferralLedgerRowLike {
+  amount: string | number;
+  /** MySQL DATE:'YYYY-MM-DD' 字串或 local-midnight Date。 */
+  depositDate: string | Date;
+  recognizedAt: Date | string | null;
+  reversedAt: Date | string | null;
+  linkedAccountId: number;
+  ownerUserId: number | null;
+  accountIsActive: number | null;
+}
+
+export interface MonthlyDeferralAdjustment {
+  /** 存入月減項:該月存入的遞延訂金(含後來已認列 —— 存入當下就不是收入,
+   *  歷史月不因日後認列漂移;reversed 除外)。 */
+  deferredDeposits: number;
+  /** 認列月加回:recognizedAt 的 LA 曆日落在該月的認列收入。 */
+  recognizedIncome: number;
+}
+
+/** DATE 欄 → 'YYYY-MM'(mysql2 DATE 可能回字串或 local-midnight Date,
+ *  用 local getters 還原曆日 —— 同 trustOutstandingSplit.dateOnly 的理由)。 */
+function monthKeyOfDate(d: string | Date): string {
+  if (typeof d === "string") return d.slice(0, 7);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}`;
+}
+
+/**
+ * 純函式:遞延列 → 每月 {存入減項, 認列加回}。
+ * 這是「損益/稅表 join」的單一月度口徑來源(F2 塊D 回爐 P2):
+ * generateBankMonthlyTrend(稅 CSV 的資料源)與 financialReportService
+ * 都走這裡,不各自複製貼上口徑。與期間版(totalDeferredForUser
+ * includeRecognized + sumRecognizedInPeriodLA)同一套收列謂詞
+ * (depositRowInScope / recognizedRowInScope)。
+ * monthKeys 之外的月份忽略(視窗外);reversed 列兩側都不算。
+ */
+export function foldMonthlyDeferralAdjustments(
+  rows: DeferralLedgerRowLike[],
+  monthKeys: readonly string[],
+  userId?: number,
+): Record<string, MonthlyDeferralAdjustment> {
+  const out: Record<string, MonthlyDeferralAdjustment> = {};
+  for (const k of monthKeys) out[k] = { deferredDeposits: 0, recognizedIncome: 0 };
+  for (const r of rows) {
+    if (r.reversedAt) continue;
+    const amt = parseFloat(r.amount as any) || 0;
+    if (!amt) continue;
+    // 存入側(真實帳戶列)
+    if (depositRowInScope(r, userId)) {
+      const dk = monthKeyOfDate(r.depositDate);
+      if (out[dk]) out[dk].deferredDeposits += amt;
+    }
+    // 認列側(LA 曆日;含哨兵列)
+    if (r.recognizedAt && recognizedRowInScope(r, userId)) {
+      const rk = laDayOf(new Date(r.recognizedAt as any)).slice(0, 7);
+      if (out[rk]) out[rk].recognizedIncome += amt;
+    }
+  }
+  return out;
+}
+
+/**
+ * IO 殼:撈全部未撤銷遞延列(一人公司量級),月度 fold 在純函式做。
+ * gate:isAnyTrustDeferralEnabled(與 totalDeferredForUser/
+ * recognizedTrustIncomeInPeriod 同一 gate 語意)。flag 全 OFF → 全零,
+ * 三個消費端(trend/稅 CSV/財報)輸出 byte-identical。
+ */
+export async function monthlyDeferralAdjustments(
+  monthKeys: readonly string[],
+  userId?: number,
+): Promise<Record<string, MonthlyDeferralAdjustment>> {
+  const zeros = foldMonthlyDeferralAdjustments([], monthKeys, userId);
+  if (!isAnyTrustDeferralEnabled()) return zeros;
+  const db = await getDb();
+  if (!db) return zeros;
+  const rows = await db
+    .select({
+      amount: trustDeferredIncome.amount,
+      depositDate: trustDeferredIncome.depositDate,
+      recognizedAt: trustDeferredIncome.recognizedAt,
+      reversedAt: trustDeferredIncome.reversedAt,
+      linkedAccountId: trustDeferredIncome.linkedAccountId,
+      ownerUserId: linkedBankAccounts.userId,
+      accountIsActive: linkedBankAccounts.isActive,
+    })
+    .from(trustDeferredIncome)
+    .leftJoin(
+      linkedBankAccounts,
+      eq(trustDeferredIncome.linkedAccountId, linkedBankAccounts.id)
+    )
+    .where(isNull(trustDeferredIncome.reversedAt));
+  return foldMonthlyDeferralAdjustments(
+    rows as DeferralLedgerRowLike[],
+    monthKeys,
+    userId,
   );
 }

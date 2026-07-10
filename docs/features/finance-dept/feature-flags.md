@@ -33,5 +33,9 @@
 2. 翻 ON 後首月:P&L 的 `trustDeferredIncome`(存入期減項)與
    `trustRecognizedIncome`(認列期加回)兩 KPI 對得上遞延表;跨月案例走查
    (存入月收入不含訂金、認列月出現)。
+2b. 稅表/財報口徑驗證(塊D 回爐 P2):generateBankMonthlyTrend(稅 CSV 資料
+   源)、taxCsvService trust 摘要(totalReceived 含已認列全額/totalRecognized
+   走共用口徑)、financialReportService 月度趨勢(trustRecognizedIncome 欄)
+   三路與 generateBankPL 對同一筆跨月遞延各驗一次 —— 四個口徑必須同數。
 3. 每日 trustRecognitionWorker 認列 → 轉帳偵測 → 提醒卡鏈路首跑觀察。
 4. 翻與否是 Jeff 單獨裁決(dispatch-f2 塊D 原文),本批不翻。

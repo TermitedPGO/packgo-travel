@@ -1,5 +1,20 @@
-import { describe, it, expect } from "vitest";
-import { buildCsvFromData, type TaxCsvData } from "./taxCsvService";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { buildCsvFromData, generateTaxCsv, type TaxCsvData } from "./taxCsvService";
+
+// F2 塊D 回爐 P2:generateTaxCsv 的兩個資料源 mock 成確定性 stub,
+// 釘死稅表接線(includeRecognized 存入全額 + 認列期共用口徑)。
+const totalDeferredForUser = vi.fn();
+const recognizedTrustIncomeInPeriod = vi.fn();
+const isAnyTrustDeferralEnabled = vi.fn(() => true);
+vi.mock("./trustDeferralService", () => ({
+  totalDeferredForUser: (...a: unknown[]) => totalDeferredForUser(...a),
+  recognizedTrustIncomeInPeriod: (...a: unknown[]) => recognizedTrustIncomeInPeriod(...a),
+  isAnyTrustDeferralEnabled: (...a: unknown[]) => isAnyTrustDeferralEnabled(...a),
+}));
+vi.mock("./bankPLService", () => ({
+  generateBankMonthlyTrend: vi.fn(async () => []),
+  SCHEDULE_C_MAP: { income_booking: "Line 1" },
+}));
 
 function makeTaxData(overrides: Partial<TaxCsvData> = {}): TaxCsvData {
   return {
@@ -108,5 +123,44 @@ describe("buildCsvFromData", () => {
     const csv = buildCsvFromData(data);
     // Field with comma should be quoted
     expect(csv).toContain('"Line 4');
+  });
+});
+
+
+describe("generateTaxCsv — 稅表遞延接線(F2 塊D 回爐 P2)", () => {
+  beforeEach(() => {
+    totalDeferredForUser.mockReset();
+    recognizedTrustIncomeInPeriod.mockReset();
+    isAnyTrustDeferralEnabled.mockReturnValue(true);
+  });
+
+  it("totalReceived 用 includeRecognized 全額;totalRecognized 走共用口徑函式(不再用差值 hack)", async () => {
+    totalDeferredForUser.mockImplementation(async (opts: any) =>
+      opts.depositSince ? 5000 : 2000, // 本年存入全額 5000;全期未認列 2000
+    );
+    recognizedTrustIncomeInPeriod.mockResolvedValue(3000);
+
+    const csv = await generateTaxCsv(2026);
+
+    // 存入側:第一個呼叫必須帶 includeRecognized:true(收到就是收到)
+    expect(totalDeferredForUser).toHaveBeenCalledWith(
+      expect.objectContaining({ depositSince: "2026-01-01", asOfDate: "2026-12-31", includeRecognized: true }),
+    );
+    // 認列側:共用口徑函式,本年 LA 曆日
+    expect(recognizedTrustIncomeInPeriod).toHaveBeenCalledWith({
+      startDate: "2026-01-01",
+      endDate: "2026-12-31",
+    });
+    expect(csv).toContain("Total Received in Trust,5000.00");
+    expect(csv).toContain("Total Recognized as Income,3000.00");
+    expect(csv).toContain("2000.00"); // remainingDeferred(全期未認列)
+  });
+
+  it("flag 全 OFF → 三值全零(byte-identical),不打任何遞延查詢", async () => {
+    isAnyTrustDeferralEnabled.mockReturnValue(false);
+    const csv = await generateTaxCsv(2026);
+    expect(totalDeferredForUser).not.toHaveBeenCalled();
+    expect(recognizedTrustIncomeInPeriod).not.toHaveBeenCalled();
+    expect(csv).toContain("Total Received in Trust,0.00");
   });
 });

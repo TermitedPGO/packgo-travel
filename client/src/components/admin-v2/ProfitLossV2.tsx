@@ -372,9 +372,10 @@ export default function ProfitLossV2() {
           <p className="text-xs text-foreground/50 -mt-1 mb-3">
             {t("admin.profitLoss.auditDesc")}
           </p>
-          {/* F2 塊D 回令(2026-07-10):加 Square 撥款 tile 後共 4 格,格線改
-              2/4 欄維持密度節奏(3 欄放 4 格會 ragged)。 */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+          {/* F2 塊D 回爐 P2(2026-07-10):本 grid 實有 6 個 tile(owner/stripe/
+              square/trustDeferred/needsReview/excluded)。xl 用 3 欄(6=3+3
+              乾淨兩排);sm 用 2 欄(6=2×3)—— 無殘行,密度節奏紅線。 */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
             <div className="rounded-lg border border-foreground/10 p-3">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground/70">
                 <Landmark className="w-3.5 h-3.5 text-slate-500" />

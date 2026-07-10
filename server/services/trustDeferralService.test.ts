@@ -328,3 +328,83 @@ describe("sumRecognizedInPeriodLA — 認列期收入純函式(F2 塊D)", () => 
     ).toBe(1000);
   });
 });
+
+// ─── F2 塊D 回爐 P2:月度遞延口徑(損益/稅表/財報共用)─────────────────────────
+import {
+  foldMonthlyDeferralAdjustments,
+  type DeferralLedgerRowLike,
+} from "./trustDeferralService";
+
+describe("foldMonthlyDeferralAdjustments — 月度口徑純函式(F2 塊D 回爐)", () => {
+  const MONTHS = ["2026-06", "2026-07", "2026-08"] as const;
+  const ledger = (o: Partial<DeferralLedgerRowLike> = {}): DeferralLedgerRowLike => ({
+    amount: "1000.00",
+    depositDate: "2026-06-05",
+    recognizedAt: null,
+    reversedAt: null,
+    linkedAccountId: 30003,
+    ownerUserId: 1,
+    accountIsActive: 1,
+    ...o,
+  });
+
+  it("跨月情境(P2 核心):6 月存入、8 月認列 → 6 月減 1000、8 月加回 1000", () => {
+    const adj = foldMonthlyDeferralAdjustments(
+      [ledger({ recognizedAt: new Date("2026-08-03T18:00:00Z") })],
+      MONTHS,
+    );
+    expect(adj["2026-06"]).toEqual({ deferredDeposits: 1000, recognizedIncome: 0 });
+    expect(adj["2026-07"]).toEqual({ deferredDeposits: 0, recognizedIncome: 0 });
+    expect(adj["2026-08"]).toEqual({ deferredDeposits: 0, recognizedIncome: 1000 });
+  });
+
+  it("未認列列只有存入側;reversed 列兩側都不算", () => {
+    const adj = foldMonthlyDeferralAdjustments(
+      [ledger(), ledger({ amount: "500.00", reversedAt: new Date("2026-06-10") })],
+      MONTHS,
+    );
+    expect(adj["2026-06"].deferredDeposits).toBe(1000); // reversed 的 500 不進
+    expect(adj["2026-06"].recognizedIncome).toBe(0);
+  });
+
+  it("哨兵列(Stripe-direct):存入側不減(無銀行入帳可抵)、認列側照加", () => {
+    const adj = foldMonthlyDeferralAdjustments(
+      [
+        ledger({
+          linkedAccountId: 0,
+          ownerUserId: null,
+          accountIsActive: null,
+          recognizedAt: new Date("2026-07-05T18:00:00Z"),
+        }),
+      ],
+      MONTHS,
+    );
+    expect(adj["2026-06"].deferredDeposits).toBe(0);
+    expect(adj["2026-07"].recognizedIncome).toBe(1000);
+  });
+
+  it("月界地雷(T2 #2):UTC 已到 8/1 凌晨、LA 還是 7/31 → 認列歸七月", () => {
+    const adj = foldMonthlyDeferralAdjustments(
+      [ledger({ recognizedAt: new Date("2026-08-01T02:00:00Z") })],
+      MONTHS,
+    );
+    expect(adj["2026-07"].recognizedIncome).toBe(1000);
+    expect(adj["2026-08"].recognizedIncome).toBe(0);
+  });
+
+  it("視窗外月份忽略;userId scope 不符的真實帳戶列兩側都不算", () => {
+    const adj = foldMonthlyDeferralAdjustments(
+      [ledger({ depositDate: "2025-12-01" })],
+      MONTHS,
+    );
+    expect(adj["2026-06"].deferredDeposits).toBe(0);
+
+    const scoped = foldMonthlyDeferralAdjustments(
+      [ledger({ ownerUserId: 2, recognizedAt: new Date("2026-07-05T18:00:00Z") })],
+      MONTHS,
+      1,
+    );
+    expect(scoped["2026-06"].deferredDeposits).toBe(0);
+    expect(scoped["2026-07"].recognizedIncome).toBe(0);
+  });
+});

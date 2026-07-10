@@ -441,6 +441,8 @@ function emptyReport(startDate: string, endDate: string): BankPLReport {
 export async function generateBankMonthlyTrend(opts: {
   userId?: number;
   months: number;
+  /** 測試注入用(月窗定錨);省略 = 現在。 */
+  now?: Date;
 }): Promise<
   Array<{
     month: string; // YYYY-MM
@@ -451,7 +453,7 @@ export async function generateBankMonthlyTrend(opts: {
   }>
 > {
   const months = Math.max(1, Math.min(36, opts.months));
-  const now = new Date();
+  const now = opts.now ?? new Date();
   const start = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
 
   const startStr = start.toISOString().slice(0, 10);
@@ -526,6 +528,26 @@ export async function generateBankMonthlyTrend(opts: {
     } else if (EXPENSE_CATEGORIES.includes(cat)) {
       slot.operating += amt;
     }
+  }
+
+  // F2 塊D 回爐 P2(2026-07-10)—— 稅表接線:趨勢(= 稅 CSV 的資料源)套
+  // 與 generateBankPL 同一遞延口徑:存入月減(含已認列全額)、認列月(LA
+  // 曆日)加回。共用 trustDeferralService.monthlyDeferralAdjustments,不
+  // 複製貼上口徑;flag 全 OFF 回全零 → 輸出 byte-identical。
+  try {
+    const { monthlyDeferralAdjustments } = await import("./trustDeferralService");
+    const adjustments = await monthlyDeferralAdjustments(Array.from(map.keys()), opts.userId);
+    for (const [k, slot] of map.entries()) {
+      const adj = adjustments[k];
+      if (!adj) continue;
+      slot.income += adj.recognizedIncome - adj.deferredDeposits;
+    }
+  } catch (err) {
+    console.warn(
+      "[bankPL] monthly trust deferral adjustment failed (trend stays gross):",
+      (err as Error)?.message
+    );
+    reportFunnelError({ source: "fail-open:bankPLService:monthlyTrendDeferral", err }).catch(() => {});
   }
 
   return Array.from(map.entries())
