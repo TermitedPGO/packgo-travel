@@ -1852,9 +1852,17 @@ export const plaidRouter = router({
   trustReconciliation: adminProcedure.query(async () => {
     const db = await getDb();
     if (!db) return [];
-    const { computeOutstandingTrust, isTrustDeferralEnabled } = await import(
+    const { foldOutstandingTrust, isTrustDeferralEnabled } = await import(
       "../services/trustDeferralService"
     );
+    // F3 塊A 回爐 P1(2026-07-10):每帳戶加「三段拆分」欄位(唯讀新增,不改既有
+    // 欄位)。真相列 Trust 格主數字 = matchedNotDeparted(B-final 38,600 口徑),
+    // 不是全部 outstanding(那含未對應,口徑走樣)。拆分純函式刻意放
+    // trustOutstandingSplit.ts(F2 並行 branch 在動 trustDeferralService,禁碰)。
+    const { splitOutstandingTrust, laToday } = await import(
+      "../services/trustOutstandingSplit"
+    );
+    const { trustDeferredIncome } = await import("../../drizzle/schema");
 
     // 2026-05-22 — drop userId scope (single-tenant). Was returning [] for
     // support@ admin because the Living Trust Account (#5442) is linked
@@ -1877,9 +1885,28 @@ export const plaidRouter = router({
       );
 
     const enabled = isTrustDeferralEnabled();
+    const todayStr = laToday();
     const results = await Promise.all(
       trustAccounts.map(async (a) => {
-        const outstanding = await computeOutstandingTrust(a.id);
+        // 一次撈未認列 rows,同時餵 fold(既有欄位)與 split(新欄位)——
+        // 與 computeOutstandingTrust 同一 WHERE(recognizedAt/reversedAt 皆 NULL),
+        // 行為等價但省一次重複查詢。
+        const rows = await db
+          .select({
+            amount: trustDeferredIncome.amount,
+            bookingId: trustDeferredIncome.bookingId,
+            expectedRecognitionDate: trustDeferredIncome.expectedRecognitionDate,
+          })
+          .from(trustDeferredIncome)
+          .where(
+            and(
+              eq(trustDeferredIncome.linkedAccountId, a.id),
+              isNull(trustDeferredIncome.recognizedAt),
+              isNull(trustDeferredIncome.reversedAt)
+            )
+          );
+        const outstanding = foldOutstandingTrust(rows as any);
+        const split = splitOutstandingTrust(rows as any, todayStr);
         const balance = parseFloat(String(a.currentBalance ?? 0));
         const drift = balance - outstanding.totalOutstanding;
         return {
@@ -1891,6 +1918,11 @@ export const plaidRouter = router({
           unmatchedTotal: outstanding.unmatchedTotal,
           balance,
           drift, // positive = trust balance > what we're tracking (orphan deposits)
+          // F3 三段拆分(新欄位;split.total === outstandingTotal,等式在
+          // trustOutstandingSplit.test.ts 釘死)
+          matchedNotDeparted: split.matchedNotDeparted,
+          departedPending: split.departedPending,
+          departedPendingCount: split.departedPendingCount,
         };
       })
     );
@@ -2003,7 +2035,7 @@ export const plaidRouter = router({
    * Manually trigger the daily trust-recognition scan. Useful for admin
    * "rerun now" button after fixing matches.
    */
-  trustRecognizeNow: adminProcedure.mutation(async () => {
+  trustRecognizeNow: adminProcedure.mutation(async ({ ctx }) => {
     const { recognizeReadyDepartures, isAnyTrustDeferralEnabled } = await import(
       "../services/trustDeferralService"
     );
@@ -2023,7 +2055,31 @@ export const plaidRouter = router({
         error: "trust deferral is disabled (both PLAID_TRUST_DEFERRAL_ENABLED and STRIPE_TRUST_DEFERRAL_ENABLED are off)",
       } as const;
     }
-    return await recognizeReadyDepartures();
+    const result = await recognizeReadyDepartures();
+    // F3 塊B(2026-07-10):認列是 Jeff 在駕駛艙按的錢的動作,寫路徑接 audit
+    // (dispatch-f3 塊B#3)。fail-open:audit 失敗不吞掉已完成的認列結果。
+    try {
+      const { audit } = await import("../_core/auditLog");
+      await audit({
+        ctx,
+        action: "trust.recognizeNow",
+        targetType: "trustDeferredIncome",
+        targetId: 0, // 批次動作,無單一目標列;明細在 changes
+        changes: {
+          runId: result.runId,
+          recognized: result.recognized,
+          totalRecognizedAmount: result.totalRecognizedAmount,
+          scanned: result.scanned,
+        },
+      });
+    } catch (err) {
+      reportFunnelError({
+        source: "fail-open:plaidRouter:trustRecognizeNowAudit",
+        err,
+        context: { runId: result.runId },
+      }).catch(() => {});
+    }
+    return result;
   }),
 
   // ── M5: exclusion audit export ──────────────────────────────────────────

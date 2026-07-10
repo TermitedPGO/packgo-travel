@@ -19,9 +19,9 @@ function toneClass(tone: Tone): string {
     case "pos":
       return "text-emerald-700";
     case "neg":
-      return "text-rose-700";
+      return "text-red-700"; // B-final 基準 red-700 #c10007(F3 回爐 #4:誤用 rose)
     case "amber":
-      return "text-amber-600"; // 大號金額用 amber-600;小字 hint 才用 amber-700(對比)
+      return "text-amber-600"; // 大號金額(24px)可用 amber-600 過對比;9-16px 小字須 amber-700
     default:
       return "text-gray-900";
   }
@@ -34,6 +34,7 @@ function Tile({
   hint,
   tone = "default",
   errorText,
+  staleText,
 }: {
   label: string;
   state: TileState;
@@ -41,7 +42,12 @@ function Tile({
   hint: string;
   tone?: Tone;
   errorText: string;
+  staleText: string;
 }) {
+  // stale(F3 回爐 #7):refetch 失敗但 react-query 保留上次好值 → 照常顯示
+  // 上次數字(降透明度),hint 換淡標記;只有「首載就失敗、沒任何值」才翻
+  // 成「讀取失敗」。
+  const isStale = state === "stale";
   return (
     <div className="p-3 sm:px-4 border-l border-gray-100 first:border-l-0">
       <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500 truncate">
@@ -64,11 +70,13 @@ function Tile({
           <div
             className={`mt-2 text-2xl font-bold leading-none tracking-tight tabular-nums ${toneClass(
               tone,
-            )}`}
+            )} ${isStale ? "opacity-50" : ""}`}
           >
             {value}
           </div>
-          <div className="mt-1.5 text-[10px] text-gray-400 truncate">{hint}</div>
+          <div className="mt-1.5 text-[10px] text-gray-400 truncate">
+            {isStale ? staleText : hint}
+          </div>
         </>
       )}
     </div>
@@ -78,6 +86,7 @@ function Tile({
 export function TruthRow({ truth }: { truth: TruthRowData }) {
   const { t } = useLocale();
   const errText = t("financeCockpit.truth.loadError");
+  const staleText = t("financeCockpit.truth.staleHint");
 
   const { cash, pl, pending, trust } = truth;
 
@@ -105,7 +114,8 @@ export function TruthRow({ truth }: { truth: TruthRowData }) {
       ? t("financeCockpit.truth.pendingHint", { amount: fmtMoney(pending.total) })
       : t("financeCockpit.truth.pendingHintEmpty");
 
-  // Trust 未認列
+  // Trust 未認列 —— 主數字 = 已對應未出發(F3 回爐 P1,B-final 定稿口徑);
+  // hint 標明「Trust 未對應」與左格「待認領」(全通道)是兩個不同語意的數。
   const trustHint = trust.enabled
     ? t("financeCockpit.truth.trustHint", {
         unmatched: fmtMoney(trust.unmatchedTotal),
@@ -121,6 +131,7 @@ export function TruthRow({ truth }: { truth: TruthRowData }) {
         value={cashValue}
         hint={cashHint}
         errorText={errText}
+        staleText={staleText}
       />
       <Tile
         label={t("financeCockpit.truth.plLabel")}
@@ -129,6 +140,7 @@ export function TruthRow({ truth }: { truth: TruthRowData }) {
         hint={plHint}
         tone={plTone}
         errorText={errText}
+        staleText={staleText}
       />
       <Tile
         label={t("financeCockpit.truth.pendingLabel")}
@@ -137,13 +149,15 @@ export function TruthRow({ truth }: { truth: TruthRowData }) {
         hint={pendingHint}
         tone={pendingTone}
         errorText={errText}
+        staleText={staleText}
       />
       <Tile
         label={t("financeCockpit.truth.trustLabel")}
         state={trust.state}
-        value={fmtMoney(trust.outstanding)}
+        value={fmtMoney(trust.matchedNotDeparted)}
         hint={trustHint}
         errorText={errText}
+        staleText={staleText}
       />
     </div>
   );

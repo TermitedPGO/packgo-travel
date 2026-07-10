@@ -33,7 +33,12 @@ export interface PendingTile {
 
 export interface TrustTile {
   state: TileState;
+  /** 主數字:已對應且未出發(B-final 38,600 口徑;F3 回爐 P1)。 */
+  matchedNotDeparted: number;
+  /** 全部未認列(三段之和)—— 勾稽 / 塊C 等式用。 */
   outstanding: number;
+  departedPending: number;
+  departedPendingCount: number;
   unmatchedTotal: number;
   unmatchedCount: number;
   balance: number;
@@ -58,6 +63,8 @@ export interface CockpitData {
   truth: TruthRowData;
   counts: {
     pendingCount: number;
+    /** 已出發待認列筆數(工作區欄頭 + 待認列卡共用)。 */
+    departedPendingCount: number;
   };
   asOf: number | null;
   isLoading: boolean;

@@ -7,7 +7,7 @@ export function ColumnHeader({
   count,
 }: {
   title: string;
-  count?: string;
+  count?: React.ReactNode;
 }) {
   return (
     <div className="flex items-baseline gap-2 mx-0.5 mb-2">

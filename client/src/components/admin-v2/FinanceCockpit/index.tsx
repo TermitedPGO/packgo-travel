@@ -89,7 +89,7 @@ export default function FinanceCockpit() {
         <TruthRow truth={data.truth} />
 
         <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[1.12fr_0.88fr]">
-          <WorkColumn data={data} />
+          <WorkColumn data={data} onOpenRecon={() => setDetail("recon")} />
           <LedgerColumn data={data} />
         </div>
 

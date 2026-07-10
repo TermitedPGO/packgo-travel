@@ -1,9 +1,9 @@
 /**
- * bankTransactionLinks router 測試(F1 對帳引擎 塊A,2026-07-08)。
- * 蓋:procedure surface、listPending 過濾(只留 pending_claim)、claim 寫入 +
- * auditLog 斷言(dispatch-f1.md 驗收條件 3「認領寫入含 auditLog 斷言」)、
- * claim 輸入驗證(category 缺 categoryCode / 非 category 缺 targetId)、
- * 超額分配轉成 BAD_REQUEST(不是 500)。
+ * bankTransactionLinks router 測試(F1 對帳引擎 塊A,2026-07-08;F3 塊B 擴充 2026-07-10)。
+ * 蓋:procedure surface、listPending 過濾(只留 pending_claim)、pendingSummary
+ * Redis 快取(命中不掃 / miss 回填 / single-flight / redis 掛 fail-open)、
+ * claim 寫入 + auditLog 斷言 + 快取失效、unlink 寫入 + auditLog + NOT_FOUND、
+ * summarizeAutoLinked 純函式、claim 輸入驗證、超額分配轉 BAD_REQUEST。
  *
  * Mock collaborators BEFORE importing the router(vi.mock hoisted)。
  */
@@ -27,6 +27,7 @@ vi.mock("../services/bankTransactionLinkEngine", () => {
   };
 });
 vi.mock("../_core/auditLog", () => ({ audit: vi.fn(async () => {}) }));
+vi.mock("../_core/errorFunnel", () => ({ reportFunnelError: vi.fn(async () => {}) }));
 // pendingSummary 借用 runBackfillDryRun(唯讀彙總)—— mock 掉,只驗真相列要的
 // count/totalAmount 直通,且是 dry-run(不寫路徑)。
 vi.mock("../services/bankTransactionLinkBackfill", () => ({
@@ -39,10 +40,22 @@ vi.mock("../services/bankTransactionLinkBackfill", () => ({
     pendingItems: [],
   })),
 }));
+// Redis:預設全 miss(get→null)。個別測試覆寫模擬命中 / 故障。
+vi.mock("../redis", () => ({
+  redis: {
+    get: vi.fn(async () => null),
+    set: vi.fn(async () => "OK"),
+    del: vi.fn(async () => 1),
+  },
+}));
+// DB:預設不可用(唯讀 query fail-open 回空)。unlink 測試覆寫成 fake chain。
+vi.mock("../db", () => ({ getDb: vi.fn(async () => null) }));
 
-import { bankTransactionLinksRouter } from "./bankTransactionLinks";
+import { bankTransactionLinksRouter, summarizeAutoLinked } from "./bankTransactionLinks";
 import { audit } from "../_core/auditLog";
 import { runBackfillDryRun } from "../services/bankTransactionLinkBackfill";
+import { redis } from "../redis";
+import { getDb } from "../db";
 import {
   scanUnlinkedInflows,
   processInboundTransaction,
@@ -60,41 +73,28 @@ function adminCtx() {
 }
 const caller = () => (bankTransactionLinksRouter as any).createCaller(adminCtx());
 
+const emptyDryRun = {
+  totalScanned: 0,
+  autoLinkedByRule: {},
+  autoLinkedTotal: 0,
+  pendingCount: 0,
+  pendingTotalAmount: 0,
+  pendingItems: [],
+};
+
 beforeEach(() => vi.clearAllMocks());
 
 describe("surface", () => {
-  it("exposes exactly listPending + pendingSummary + claim", () => {
+  it("exposes exactly the 6 procedures (4 read + claim/unlink write)", () => {
     const procs = Object.keys((bankTransactionLinksRouter as any)._def.procedures).sort();
-    expect(procs).toEqual(["claim", "listPending", "pendingSummary"]);
-  });
-});
-
-describe("pendingSummary — 真相列「待認領」彙總(唯讀)", () => {
-  it("直通 runBackfillDryRun 的 pendingCount / pendingTotalAmount(真相列一格數字)", async () => {
-    (runBackfillDryRun as any).mockResolvedValueOnce({
-      totalScanned: 373,
-      autoLinkedByRule: { small_inflow: 53 },
-      autoLinkedTotal: 53,
-      pendingCount: 320,
-      pendingTotalAmount: 447732,
-      pendingItems: [],
-    });
-    const out = await caller().pendingSummary();
-    expect(out).toEqual({ count: 320, totalAmount: 447732 });
-  });
-
-  it("唯讀:走 dry-run 彙總,不觸發 confirm 寫路徑(不建卡、不留審計)", async () => {
-    (runBackfillDryRun as any).mockResolvedValueOnce({
-      totalScanned: 0,
-      autoLinkedByRule: {},
-      autoLinkedTotal: 0,
-      pendingCount: 0,
-      pendingTotalAmount: 0,
-      pendingItems: [],
-    });
-    await caller().pendingSummary();
-    expect(runBackfillDryRun).toHaveBeenCalledTimes(1);
-    expect(audit).not.toHaveBeenCalled();
+    expect(procs).toEqual([
+      "claim",
+      "listAutoLinked",
+      "listPending",
+      "pendingSummary",
+      "searchClaimTargets",
+      "unlink",
+    ]);
   });
 });
 
@@ -137,8 +137,94 @@ describe("listPending — 只留 dry-run 判定為 pending_claim 的入帳", () 
   });
 });
 
-describe("claim — 人工認領,唯一錢的真相寫入路徑", () => {
-  it("認領到 custom_order → 呼叫 createBankTransactionLink(claimedBy='jeff') 並留 auditLog", async () => {
+describe("pendingSummary — 真相列「待認領」彙總(唯讀 + Redis 快取)", () => {
+  it("快取 miss:直通 runBackfillDryRun 的 pendingCount / pendingTotalAmount,並回填快取 TTL 300s", async () => {
+    (runBackfillDryRun as any).mockResolvedValueOnce({
+      ...emptyDryRun,
+      totalScanned: 373,
+      autoLinkedByRule: { small_inflow: 53 },
+      autoLinkedTotal: 53,
+      pendingCount: 320,
+      pendingTotalAmount: 447732,
+    });
+    const out = await caller().pendingSummary();
+    expect(out).toEqual({ count: 320, totalAmount: 447732 });
+    expect(redis.set).toHaveBeenCalledWith(
+      "financeCockpit:pendingSummary:v1",
+      JSON.stringify({ count: 320, totalAmount: 447732 }),
+      "EX",
+      300,
+    );
+  });
+
+  it("快取命中:回快取值,完全不跑全量掃描", async () => {
+    (redis.get as any).mockResolvedValueOnce(JSON.stringify({ count: 320, totalAmount: 447732 }));
+    const out = await caller().pendingSummary();
+    expect(out).toEqual({ count: 320, totalAmount: 447732 });
+    expect(runBackfillDryRun).not.toHaveBeenCalled();
+  });
+
+  it("single-flight:並發兩個 poll 同時 miss,只跑一次全量掃描,兩邊拿同一份", async () => {
+    (runBackfillDryRun as any).mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 10)); // 人工延遲讓兩個 call 重疊
+      return { ...emptyDryRun, pendingCount: 7, pendingTotalAmount: 700 };
+    });
+    const [a, b] = await Promise.all([caller().pendingSummary(), caller().pendingSummary()]);
+    expect(a).toEqual({ count: 7, totalAmount: 700 });
+    expect(b).toEqual({ count: 7, totalAmount: 700 });
+    expect(runBackfillDryRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("redis 掛掉:fail-open 直接算,不擋真相列", async () => {
+    (redis.get as any).mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    (redis.set as any).mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    (runBackfillDryRun as any).mockResolvedValueOnce({
+      ...emptyDryRun,
+      pendingCount: 3,
+      pendingTotalAmount: 15422,
+    });
+    const out = await caller().pendingSummary();
+    expect(out).toEqual({ count: 3, totalAmount: 15422 });
+  });
+
+  it("唯讀:走 dry-run 彙總,不觸發 confirm 寫路徑(不建卡、不留審計)", async () => {
+    (runBackfillDryRun as any).mockResolvedValueOnce({ ...emptyDryRun });
+    await caller().pendingSummary();
+    expect(runBackfillDryRun).toHaveBeenCalledTimes(1);
+    expect(audit).not.toHaveBeenCalled();
+  });
+});
+
+describe("listAutoLinked / searchClaimTargets — 唯讀 fail-open", () => {
+  it("db 不可用:listAutoLinked 回空形狀(不炸)", async () => {
+    const out = await caller().listAutoLinked({});
+    expect(out).toEqual({ items: [], summary: { count: 0, totalAmount: 0 } });
+  });
+
+  it("db 不可用:searchClaimTargets 回空 orders(不炸)", async () => {
+    const out = await caller().searchClaimTargets({ q: "王" });
+    expect(out).toEqual({ orders: [] });
+  });
+});
+
+describe("summarizeAutoLinked — 已自動處理彙總純函式", () => {
+  it("加總 amountAllocated(decimal 字串),count = 列數", () => {
+    expect(
+      summarizeAutoLinked([
+        { amountAllocated: "3100.00" },
+        { amountAllocated: "6150.00" },
+        { amountAllocated: "4200.50" },
+      ]),
+    ).toEqual({ count: 3, totalAmount: 13450.5 });
+  });
+  it("空列表回 0;爛值當 0 不 NaN", () => {
+    expect(summarizeAutoLinked([])).toEqual({ count: 0, totalAmount: 0 });
+    expect(summarizeAutoLinked([{ amountAllocated: "bad" }])).toEqual({ count: 1, totalAmount: 0 });
+  });
+});
+
+describe("claim — 人工認領,錢的真相寫入路徑", () => {
+  it("認領到 custom_order → 呼叫 createBankTransactionLink(claimedBy='jeff') 並留 auditLog + 失效彙總快取", async () => {
     const result = await caller().claim({
       bankTransactionId: 42,
       targetType: "custom_order",
@@ -165,6 +251,8 @@ describe("claim — 人工認領,唯一錢的真相寫入路徑", () => {
     expect(auditArg.changes).toEqual(
       expect.objectContaining({ linkId: 999, targetType: "custom_order", targetId: 7, amountAllocated: 300 }),
     );
+    // F3 塊B:認領後主動失效 pendingSummary 快取,真相列不滯後
+    expect(redis.del).toHaveBeenCalledWith("financeCockpit:pendingSummary:v1");
   });
 
   it("認領到 category → categoryCode 必填,缺就 BAD_REQUEST 且不寫入不留審計", async () => {
@@ -188,6 +276,77 @@ describe("claim — 人工認領,唯一錢的真相寫入路徑", () => {
     await expect(
       caller().claim({ bankTransactionId: 42, targetType: "category", categoryCode: "interest", amountAllocated: 30 }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(audit).not.toHaveBeenCalled();
+  });
+});
+
+describe("unlink — 人工撤銷 link(對帳明細層複查動作)", () => {
+  const linkRow = {
+    id: 55,
+    bankTransactionId: 42,
+    targetType: "custom_order",
+    targetId: 7,
+    categoryCode: null,
+    amountAllocated: "300.00",
+    matchMethod: "auto:exact_amount",
+    claimedBy: "system",
+    note: null,
+  };
+
+  /** thenable 假 db chain:任何 builder 方法回自身,await 得 rows。 */
+  function fakeDb(selectRows: any[]) {
+    const deleted: any[] = [];
+    const chain = (rows: any[]) => {
+      const c: any = {};
+      for (const m of ["from", "innerJoin", "leftJoin", "where", "orderBy", "limit"]) {
+        c[m] = vi.fn(() => c);
+      }
+      c.then = (resolve: any, reject: any) => Promise.resolve(rows).then(resolve, reject);
+      return c;
+    };
+    return {
+      db: {
+        select: vi.fn(() => chain(selectRows)),
+        delete: vi.fn(() => {
+          deleted.push(true);
+          return chain([]);
+        }),
+      },
+      deleted,
+    };
+  }
+
+  it("存在的 link → 刪除 + auditLog(unlink,含原 link 明細)+ 失效彙總快取", async () => {
+    const { db, deleted } = fakeDb([linkRow]);
+    (getDb as any).mockResolvedValueOnce(db);
+
+    const out = await caller().unlink({ linkId: 55, note: "對錯單,撤銷重認" });
+    expect(out).toEqual({ ok: true, bankTransactionId: 42 });
+    expect(deleted).toHaveLength(1);
+
+    expect(audit).toHaveBeenCalledTimes(1);
+    const auditArg = (audit as any).mock.calls[0][0];
+    expect(auditArg.action).toBe("bankTransactionLink.unlink");
+    expect(auditArg.targetType).toBe("bankTransaction");
+    expect(auditArg.targetId).toBe(42);
+    expect(auditArg.changes).toEqual(
+      expect.objectContaining({
+        linkId: 55,
+        targetType: "custom_order",
+        targetId: 7,
+        amountAllocated: "300.00",
+        matchMethod: "auto:exact_amount",
+        note: "對錯單,撤銷重認",
+      }),
+    );
+    expect(redis.del).toHaveBeenCalledWith("financeCockpit:pendingSummary:v1");
+  });
+
+  it("不存在的 link → NOT_FOUND,不刪不留審計", async () => {
+    const { db, deleted } = fakeDb([]);
+    (getDb as any).mockResolvedValueOnce(db);
+    await expect(caller().unlink({ linkId: 999 })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(deleted).toHaveLength(0);
     expect(audit).not.toHaveBeenCalled();
   });
 });

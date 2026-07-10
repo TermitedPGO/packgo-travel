@@ -784,7 +784,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "plaidRouter.trustDeferredList.statusRecognized",
-    sources: ["server/routers/plaidRouter.ts:1951", "server/routers/plaidRouter.ts:1954"],
+    sources: ["server/routers/plaidRouter.ts:1983", "server/routers/plaidRouter.ts:1986"],
     cls: "B",
     sql: "SELECT * FROM `trustDeferredIncome` WHERE `trustDeferredIncome`.`linkedAccountId` IN (?, ?) AND `trustDeferredIncome`.`linkedAccountId` = ? AND `trustDeferredIncome`.`recognizedAt` IS NOT NULL ORDER BY `trustDeferredIncome`.`depositDate` DESC LIMIT ?",
     sampleParams: [1,2,1,1],
@@ -793,7 +793,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "plaidRouter.trustDeferredList.statusReversed",
-    sources: ["server/routers/plaidRouter.ts:1951", "server/routers/plaidRouter.ts:1954"],
+    sources: ["server/routers/plaidRouter.ts:1983", "server/routers/plaidRouter.ts:1986"],
     cls: "B",
     sql: "SELECT * FROM `trustDeferredIncome` WHERE `trustDeferredIncome`.`linkedAccountId` IN (?, ?) AND `trustDeferredIncome`.`linkedAccountId` = ? AND `trustDeferredIncome`.`reversedAt` IS NOT NULL ORDER BY `trustDeferredIncome`.`depositDate` DESC LIMIT ?",
     sampleParams: [1,2,1,1],

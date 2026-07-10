@@ -694,3 +694,69 @@ prod 根本沒有 Stripe 撥款,真實處理商是 Square)。before/after 相同
   尚無新 sync 觸發掛鉤;預期狀態非缺陷)。
 - 煙霧七臂:指揮已驗全綠,引用。
 - sandbox confirm + BofA 複驗:見上方追溯段。
+
+## F3 財務駕駛艙(branch finance-f3,2026-07-09 夜間衝刺)
+
+### 塊A:駕駛艙殼與真相列(commit 86c241b,指揮驗收有條件收)
+
+新建 client/src/components/admin-v2/FinanceCockpit/(殼 + 真相列四格 + 雙欄骨架 +
+第二層入口);掛載兩點(/ops/finance 取代 placeholder;/workspace 月報 tab);
+新增唯讀 bankTransactionLinks.pendingSummary。
+
+### 塊A 與 B-final 的偏離申報(指揮令 #8 留痕;初版六條 + 驗收裁定)
+
+1. 待認領格接真源顯示 prod 真數(320 筆/$447,732),非 mockup「3 筆/$15,422」
+   (mockup 那三筆實為 Trust 未歸戶)。裁定:合規,dispatch 明令接真源。
+2. Trust 格接 trustReconciliation;flag off 顯示「Trust 遞延未啟用」不謊報數字。
+   裁定:初版口徑走樣(誤用全 outstanding 當主數字)= P1,回爐修正:server 加
+   三段拆分(trustOutstandingSplit),主數字 = 已對應未出發(38,600 口徑),
+   等式 outstanding = matchedNotDeparted + departedPending + unmatched 測試釘死。
+3. 真相列自建 4 欄 1:1(KPIStrip primitive 寫死 6 欄 grid,像素對不上 B-final);
+   PageHeader primitive 有復用。裁定:接受。
+4. 色值用 Tailwind 語意 class(emerald-700/amber-600/amber-700),非 B-final 字面
+   hex var;負值初版誤用 rose-700,回爐改 red-700(B-final #c10007)。
+5. 新增唯讀 server procedure pendingSummary(dispatch「缺唯讀才新增」授權);
+   回爐加 Redis 快取 TTL 300s + single-flight + claim/unlink 主動失效。
+6. 左右欄塊A 為建置中占位;第二層「報表與稅務」「報稅匯出 CSV」暫指
+   FinanceReports "tax" 分頁(塊D 換 D 藍本正式頁)。
+
+### 塊A 回爐(P1 + 批修,與塊B 同 commit)
+
+- P1 Trust 口徑:見偏離 #2。trustReconciliation 每帳戶新增欄位
+  matchedNotDeparted / departedPending / departedPendingCount(唯讀新增,不改
+  既有欄位);TruthRow 主數字換 matchedNotDeparted,hint 標明「Trust 未對應」
+  與左格「待認領」(全通道)是兩個語意的數。
+- 批修:rose→red-700;誤導註解修正;pendingSummary Redis 快取(見偏離 #5);
+  resolveTileState 加 stale 態(refetch 失敗但有上次好值 → 顯示上次值 + 淡標記,
+  不翻「讀取失敗」);本章節即偏離申報留痕。
+
+### 塊B:工作區(左欄)
+
+- 待認領表 PendingClaimsCard:日期/#流水號/aging(>30 天紅字天數,LA 曆日兩端
+  同套)/金額 amber-700/候選 chip/認領按鈕;卡頭彙總接 pendingSummary(與真相列
+  同源);表列接 listPending(limit 200),列數 < 總數時表尾標「僅顯示前 N 筆」。
+- 認領對話框 ClaimDialog:候選確認 + 訂單搜尋逃生口(新唯讀 searchClaimTargets,
+  搜 customOrders 單號/客人/團名)+ 內部分類下拉(鎖 SCHEDULE_C_MAP 枚舉,
+  claimCategories.ts 鏡像 + 測試斷言與 server 枚舉一致,禁自由文字)+ 備註欄
+  (claim.note 既有欄位)。
+- 待認列確認卡 RecognitionCard:trustDeferredList(pending) 前端摺
+  foldDepartedPending(與 server departedPending 同口徑);認列按鈕接既有
+  plaid.trustRecognizeNow(本批在該 mutation 加 audit,action trust.recognizeNow,
+  fail-open 不吞認列結果);AI 不自動認列,全部 Jeff 按。
+- 已自動處理卡 AutoHandledCard:新唯讀 listAutoLinked(claimedBy='system',
+  LA 本月,join bankTransactions + customOrders)+ 摘要行;撤銷 unlink tRPC 已建
+  (delete + audit action bankTransactionLink.unlink + 快取失效),UI 入口按
+  dispatch 塊B#4 掛「對帳明細」層(本批只留入口按鈕)。
+- 空態:待認領 0 且待認列 0 → 「今天沒有等你的事」(B-final 第二態);已自動卡
+  仍顯示。
+
+### 塊B 偏離申報
+
+1. 認領按鈕未選候選時不做 disabled(B-final off 樣式),改為 outline 樣式仍可按
+   (開對話框走搜尋/分類)—— 對不到訂單的列需要認領入口,純 off 會走不下去。
+2. 待認列卡顯示「Booking #id」,未 join 客人名/團名(B-final「陳先生 韓國團」);
+   trustDeferredList 無 join,名稱補齊留塊C/D。
+3. 認列按鈕 = 批次認列所有已到期(server recognizeReadyDepartures 語義),非逐筆
+   認列;卡上逐筆列出、footer 顯示合計後一鍵確認。
+4. 分類下拉鎖全 11 個 SCHEDULE_C_MAP 枚舉;舊 PendingClaimsTab 的
+   owner_transfer/other 選項不在枚舉內,屬既有債,本批不動舊元件。

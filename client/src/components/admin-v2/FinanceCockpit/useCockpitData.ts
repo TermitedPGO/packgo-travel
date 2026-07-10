@@ -64,14 +64,21 @@ export function useCockpitData(): CockpitData {
       },
       trust: {
         state: st(trust),
+        // 主數字 = 已對應未出發(F3 回爐 P1:B-final 定稿口徑,非全部 outstanding)
+        matchedNotDeparted: trustAgg.matchedNotDeparted,
         outstanding: trustAgg.outstanding,
+        departedPending: trustAgg.departedPending,
+        departedPendingCount: trustAgg.departedPendingCount,
         unmatchedTotal: trustAgg.unmatchedTotal,
         unmatchedCount: trustAgg.unmatchedCount,
         balance: trustAgg.balance,
         enabled: trustAgg.enabled,
       },
     },
-    counts: { pendingCount: pending.data?.count ?? 0 },
+    counts: {
+      pendingCount: pending.data?.count ?? 0,
+      departedPendingCount: trustAgg.departedPendingCount,
+    },
     asOf: asOfCandidates.length ? Math.max(...asOfCandidates) : null,
     // 頁級 loading:任一還在首載;頁級 error:全部都錯(單格錯走各格 fail-open)。
     isLoading: kpi.isLoading || accounts.isLoading || trust.isLoading || pending.isLoading,
