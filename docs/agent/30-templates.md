@@ -70,6 +70,12 @@
   新增此類測試要單檔連跑 5 次證穩才算交付。2026-07-09 實案:errorFunnel count 回寫測試用
   setTimeout(0),高負載間歇紅,擋 ship 一次、擋 push 兩次;2026-07-03 stripeWebhook.bookings
   同類已修過一次,第二口立為通則。單獨跑會綠、全套並行才紅,是這類雷的招牌症狀。
+- code-in-string 遠端 blob:凡把 JS 程式當字串嵌在 template literal 內(flyctl ssh stdin/base64
+  node 探針、彩排 orchestrator 這類本 repo 反覆使用的通道),字串內連註解都不可含反引號或
+  dollar-brace,會提早關閉字串或觸發內插。且 scripts/ 不在 tsconfig include(只含 client/shared/server),
+  這類腳本的「tsc 0 錯」是無效證據 — 交付涉及 scripts/*.ts 或字串內嵌 code 時,驗收必須另附實跑
+  或 node --check/esbuild parse 證據。2026-07-09 Wave2 round2 實案:註解先後帶反引號與 dollar-brace
+  溜過 tsc,靠 prod 彩排 fail-closed 擋下。
 
 驗收條件(逐條驗,附證據):
 - tsc --noEmit 0 錯(OOM 時 NODE_OPTIONS="--max-old-space-size=6144")
