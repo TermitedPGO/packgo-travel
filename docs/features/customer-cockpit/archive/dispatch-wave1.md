@@ -19,7 +19,7 @@
 - 全套 vitest + tsc 綠才 commit;push;**不 ship**(`pnpm ship` 只有 Jeff 能跑;需要 ship 就停下回報)。
 - 全批零 schema migration 授權。做到一半發現非要 migration 不可,停下回報,不夾帶。
 - 全批零 LLM 呼叫(觀測系統本身純 code;`llm.ts` 只讀統計不碰呼叫路徑)。
-- T6 報告 `docs/features/customer-cockpit/t6-report-20260708-wave1.md`,vitest/tsc 總結行從終端原樣貼。progress.md 隨塊回寫。
+- T6 報告 `docs/features/customer-cockpit/archive/t6-report-20260708-wave1.md`,vitest/tsc 總結行從終端原樣貼。progress.md 隨塊回寫。
 - 不確定就停下來回報,不要猜。你看不到 Jeff 的 memory 和主對話歷史,本派工單已含全部 context,缺什麼在回報中說明。
 
 ## 本批點名的通用地雷(五條全文見 30-templates.md T2,對抗審查每路必驗)

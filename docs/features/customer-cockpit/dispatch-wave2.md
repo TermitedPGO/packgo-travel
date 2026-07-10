@@ -7,7 +7,7 @@
 ## 規模事實(指揮已量)
 
 - `sql\`` 在 server/ 非測試檔共約 168 處、57 個檔案。另有 `db.execute(` 直呼待你盤點。
-- 既有守門先例:`server/_core/migrationBreakpoint.test.ts`(grep 守門測試寫法)、`scripts/safe-deploy.mjs`(七道閘)、`server/_core/deploySmoke.ts`(LOCAL_SCRIPT_TOKEN 端點模式)、flyctl ssh + base64 node 腳本探針(Wave 1 走查全程用過,`wave1-post-ship-walkthrough-20260709.md` 有實例)。
+- 既有守門先例:`server/_core/migrationBreakpoint.test.ts`(grep 守門測試寫法)、`scripts/safe-deploy.mjs`(七道閘)、`server/_core/deploySmoke.ts`(LOCAL_SCRIPT_TOKEN 端點模式)、flyctl ssh + base64 node 腳本探針(Wave 1 走查全程用過,`archive/wave1-post-ship-walkthrough-20260709.md` 有實例)。
 
 ## 塊 A — SQL 登記表(sonnet)
 

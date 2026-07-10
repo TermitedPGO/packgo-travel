@@ -1,6 +1,6 @@
 # fail-open 全面盤點 — Wave1 塊D
 
-> 硬化戰役 Wave1 塊D(2026-07-08)。派工單 `dispatch-wave1.md`,母計畫 `hardening-plan.md`。目標:枚舉 server/ 底下所有 catch/`.catch(` 吞錯誤的地方,逐一分類「這個失敗被吞掉之後,Jeff 該不該知道」,把真正該浮出卻沒浮出的接上 `server/_core/errorFunnel.ts`(Wave1 塊B)的漏斗。
+> 硬化戰役 Wave1 塊D(2026-07-08)。派工單 `archive/dispatch-wave1.md`,母計畫 `hardening-plan.md`。目標:枚舉 server/ 底下所有 catch/`.catch(` 吞錯誤的地方,逐一分類「這個失敗被吞掉之後,Jeff 該不該知道」,把真正該浮出卻沒浮出的接上 `server/_core/errorFunnel.ts`(Wave1 塊B)的漏斗。
 >
 > **2026-07-08 監工複核後收尾補丁**:6 筆原 C 類(爭議)+ 1 筆原 A 類 Wave4 backlog(`inquiries.ts` 緊急客人通知)已由監工裁決落地 —— 4 筆升級為 A(已接線)、2 筆降為 B、1 筆 Wave4 backlog 提前接線。C 類清單現已清空。詳見下方「監工裁決」專節與各條目的更新理由。同批也校正了 3 個檔案的行號漂移(見下方對照表)。
 
@@ -28,7 +28,7 @@ grep 總數:**873**。ledger 條目數:**873**。**對帳成立(873 = 873)**。
 | `server/translation.ts` | 339(C 類) | 339(無漂移) | 降為 B —— LLM 故障已由 llmCreditAlert + D1 週稽核 LLM circuit 統計覆蓋 |
 | `server/_core/gmail.ts` | 986(C 類) | 989 | 降為 B —— 批5 draftSendOutcome 前端已顯示送信結果 |
 
-**inquiries.ts:312 額外修正**:對抗審查發現 `notifyOwner()` 內部把 SMTP 失敗包在自己的 try/catch 一律 `resolve(false)` 不 `reject`,原本只掛 `.catch()` 對「Gmail 帳密過期/SMTP 掛掉」這個最可能場景是死代碼。已改成同時檢查 resolve 出來的布林值,兩條路徑都接 reportFunnelError。詳見 `t6-report-20260708-wave1.md` 收尾補丁章節。
+**inquiries.ts:312 額外修正**:對抗審查發現 `notifyOwner()` 內部把 SMTP 失敗包在自己的 try/catch 一律 `resolve(false)` 不 `reject`,原本只掛 `.catch()` 對「Gmail 帳密過期/SMTP 掛掉」這個最可能場景是死代碼。已改成同時檢查 resolve 出來的布林值,兩條路徑都接 reportFunnelError。詳見 `archive/t6-report-20260708-wave1.md` 收尾補丁章節。
 
 ## 分類總覽
 

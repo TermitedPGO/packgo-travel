@@ -1,6 +1,6 @@
 # 完工報告:硬化戰役 Wave1 — 觀測神經(2026-07-08)
 
-> 對應派工單 `docs/features/customer-cockpit/dispatch-wave1.md`,母計畫 `docs/features/customer-cockpit/hardening-plan.md`。四塊(A→B→C→D)依序執行,每塊獨立四階段(實作 → ≥3 路 fresh 對抗審查 → 修復 → 驗收),獨立 commit + push。全程未跑 `pnpm ship`,未跑 `flyctl deploy`。
+> 對應派工單 `docs/features/customer-cockpit/archive/dispatch-wave1.md`,母計畫 `docs/features/customer-cockpit/hardening-plan.md`。四塊(A→B→C→D)依序執行,每塊獨立四階段(實作 → ≥3 路 fresh 對抗審查 → 修復 → 驗收),獨立 commit + push。全程未跑 `pnpm ship`,未跑 `flyctl deploy`。
 
 ## 1. 交付清單
 
