@@ -17,7 +17,8 @@
 
 ## 線三 旅遊公開網站
 
-1. [預授權] 公開站現況盤點(唯讀):首頁/行程頁/預訂流程/SEO/慢與醜的地方,缺口清單。產出 docs/features/public-site/audit.md。
+0. 事故復原(2026-06-17 tours 七表清空,報告 public-site/incident-20260617-tours-wipe.md):[Jeff 立即] TiDB Cloud 查備份保留期;[預授權] 指揮出目錄重建計畫(supplierProducts 鏡像→catalogRebuild→分批 promote,日本先行,LLM 成本估算);[預授權] deploySmoke 加第八臂 active tours>0;[裁決門] 重建計畫與成本 Jeff 拍板才執行。
+1. [已完成] 公開站現況盤點:docs/features/public-site/audit.md(結論:先上架再翻修)。
 2. [裁決門] 設計方向提案(照 B-final 成功模式:真實渲染多版型)→ Jeff 挑 → 才實作。行程頁翻修含地圖重做(保留狀態在此解凍)。
 3. 開放問題(等 Jeff 一句話):「旅遊頁面」= 現站公開頁翻修(指揮暫按此盤點),還是另立獨立新站?
 
