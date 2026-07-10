@@ -5483,6 +5483,7 @@ export const en = {
       catRefund: 'Refund',
       catOtherReview: 'Needs review',
       catStripePayout: 'Stripe payout (transfer)',
+      catSquarePayout: 'Square payout (transfer, sale booked elsewhere)',
       groupExpense: 'Expense',
       groupCustom: 'Other',
       customCategoryOption: 'Custom category…',
@@ -8598,6 +8599,7 @@ export const en = {
     categoryOwnerTransfer: 'Owner transfer',
     categoryInterest: 'Interest',
     categoryStripePayout: 'Stripe payout',
+    categorySquarePayout: 'Square payout (sale booked elsewhere)',
     categoryOther: 'Other',
     leg: {
       deposit: 'deposit',
@@ -8827,6 +8829,7 @@ export const en = {
       catTransfer: 'Internal transfer (owner)',
       catOtherReview: 'Needs review',
       catStripePayout: 'Stripe payout landing',
+      catSquarePayout: 'Square payout landing (sale booked elsewhere)',
     },
     ledger: {
       colTitle: 'Two Books',
@@ -8846,6 +8849,7 @@ export const en = {
       plExclTransfer: 'Internal transfers',
       plExclTransferSub: '({count} txns · {gross} moved)',
       plExclStripe: 'Stripe payout landing',
+      plExclSquare: 'Square payout landing',
       plNote: 'This statement reflects Plaid actuals and excludes Stripe checkout income; payouts are excluded to prevent double-counting until the payout mapping lands. Fees shown are externally charged — netted fees never hit the Plaid feed.',
       plNoteRefundZero: 'Returns / allowances are $0 this month; when non-zero they appear below revenue.',
       plEmptyNote: 'No transactions this month yet; updates at close. A $0 month shows net in neutral gray, never green.',

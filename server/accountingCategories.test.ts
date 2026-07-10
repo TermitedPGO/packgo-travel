@@ -2,8 +2,9 @@
  * M1 keystone guard — accounting category taxonomy parity.
  *
  * The bug this prevents: the client override dropdown, the AI agent, the P&L
- * engine, and the tax export must all speak the SAME 11 category keys (was 10
- * until F1 塊C 2026-07-08 added stripe_payout for double-count protection).
+ * engine, and the tax export must all speak the SAME 12 category keys (was 10
+ * until F1 塊C 2026-07-08 added stripe_payout; F2 塊C 2026-07-10 added
+ * square_payout).
  * When they drift, manual overrides silently fall out of P&L + Schedule C.
  * These tests fail loudly the moment any of the four lists diverges.
  */
@@ -35,9 +36,9 @@ describe("accounting category parity", () => {
     );
   });
 
-  it("exactly 11 categories, no duplicates (F1 塊C 2026-07-08 added stripe_payout)", () => {
-    expect(ACCOUNTING_CATEGORY_KEYS.length).toBe(11);
-    expect(new Set(ACCOUNTING_CATEGORY_KEYS).size).toBe(11);
+  it("exactly 12 categories, no duplicates (F1 塊C added stripe_payout; F2 塊C 2026-07-10 added square_payout)", () => {
+    expect(ACCOUNTING_CATEGORY_KEYS.length).toBe(12);
+    expect(new Set(ACCOUNTING_CATEGORY_KEYS).size).toBe(12);
   });
 
   it("every config row belongs to a declared group", () => {

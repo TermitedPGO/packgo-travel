@@ -151,3 +151,34 @@ describe("foldBankPLRows — transfer-only ledger", () => {
     expect(r.transactionCount).toBe(0);
   });
 });
+
+describe("foldBankPLRows — square_payout (F2 塊C, 2026-07-10)", () => {
+  // Square 撥款中性桶:只有 Jeff 明確歸類的列才進來(自動分類不套用,見
+  // accountingKnowledge.ts 2d 節探真結論),同 stripe_payout 待遇 —— 自己的
+  // tile、絕不進 income/expense/netProfit。
+  const rows: BankPLRowLike[] = [
+    { amount: "-1000", agentCategory: "income_booking" }, // 真收入(含未歸類的 Square 撥款現況)
+    { amount: "-2950.55", jeffOverrideCategory: "square_payout" }, // Jeff 確認銷售已另記後歸類
+    { amount: "300", agentCategory: "cogs_tour" },
+  ];
+
+  it("square_payout 有自己的 tile,金額不靜默消失", () => {
+    const r = fold(rows);
+    expect(r.squarePayout.total).toBeCloseTo(2950.55, 2); // inflow-positive
+    expect(r.squarePayout.count).toBe(1);
+  });
+
+  it("RED-LINE: square_payout 絕不進 income/expense/netProfit", () => {
+    const r = fold(rows);
+    expect(r.income.total).toBe(1000);
+    expect(r.income.byCategory.square_payout).toBeUndefined();
+    expect(r.expenses.total).toBe(300);
+    expect(r.netProfit).toBe(700);
+    expect(r.needsReviewCount).toBe(0);
+  });
+
+  it("零 square_payout 列 → tile 為 0(平常態,UI 據此隱藏該行)", () => {
+    const r = fold([{ amount: "-1000", agentCategory: "income_booking" }]);
+    expect(r.squarePayout).toEqual({ total: 0, count: 0 });
+  });
+});

@@ -303,9 +303,57 @@ export function norm(s: string | null | undefined): string {
 //     清單(按真資料定,不憑空猜形狀)。
 //   只在「進帳」判斷有意義 —— 出帳側含 stripe 是手續費扣款(cogs_other),
 //   不屬本規則,呼叫端負責只在 amount<0 時呼叫。
+// ── 處理商撥款 descriptor 校準登記(F2 塊C 回令 #4,2026-07-10)────────────────
+// 這一段是兩家處理商撥款判斷的「descriptor registry」:每家一組 錨點+語境 token,
+// 全部以 prod 真 descriptor 錨定,不憑空猜形狀。校準步驟(任一家撥款形狀改變
+// /首次落地時照做):
+//   1. flyctl ssh 唯讀探 prod bankTransactions,LIKE 取樣該處理商字樣全形狀
+//      (四欄位:merchantName/description/originalDescription/paymentMeta),
+//      形狀樣本進 T6/progress 附錄留檔(F1 round3 / F2 塊C 先例)。
+//   2. 錨點取「不可能出現在客人姓名/memo 的完整詞組」(如 "square inc"),
+//      語境取真 descriptor 內穩定共現的 token;裸品牌單字絕不做錨點
+//      (裸 stripe 誤傷案:2026-07-09 塊D 回爐)。
+//   3. 改動後跑 accountingKnowledge.test.ts 紅綠(真樣本必中、姓氏/memo 誤傷
+//      必不中),並對 prod 全量入帳 dry-run 謂詞命中率覆核。
+// Stripe 殘留窗:prod 至今零真 Stripe 撥款(408 筆入帳零 'stripe' 字樣,
+// f1-acceptance-20260709.md);首筆真撥款落地時按上述步驟校準下方 token。
 export const STRIPE_PAYOUT_DESCRIPTORS: readonly string[] = ["stripe"] as const;
 /** 撥款語境 token:錨點單字 "stripe" 必須與其一同現才算撥款,擋掉裸 stripe 誤中。 */
 export const STRIPE_PAYOUT_CONTEXT_TOKENS: readonly string[] = ["payout", "transfer"] as const;
+
+// ── 2d. Square 撥款進帳判斷(F2 塊C,2026-07-10)──────────────────────────────
+// 探真(2026-07-10,prod 唯讀,樣本進 T6):Square 撥款 19 筆(16 入 3 出),
+// 全落 Operating 30001(#2174),descriptor 兩形狀:
+//   a. "ACH CREDIT Square Inc SQ ON 06/01"(Plaid description/merchantName)
+//   b. "Square Inc DES:SQ190723 ID:Txxxx INDN:PACK & GO, LLC CO ID:xxxx PPD/WEB"
+//      (BofA originalDescription)
+// 錨點 = 詞組 "square inc"(完整詞組,客人姓 Square 的 memo 不可能帶 "inc"
+// 共現 → 裸 square 字樣永不命中,防姓氏誤傷);語境 token = sq / des / ach
+// (兩形狀各自穩定含其一)。
+//
+// ⚠ 與 Stripe 的關鍵差異(探真結論,決定對映設計):Square 撥款入帳目前
+// agentCategory 幾乎全是 income_booking,而 Square 銷售幾乎沒有第二處紀錄
+// (customOrders paymentMethod='square' 僅 2 筆、accountingEntries 0 筆)——
+// 撥款入帳「就是」P&L 唯一收入紀錄,今天不存在雙計。因此本謂詞【不接】
+// preClassify、也【不接】linkEngine 自動 link(接了 = 新 Square 入帳被中性
+// 桶吃掉 → 真收入從損益靜默消失,Ann 漏斗病同款)。謂詞用途:
+//   1. 待認領卡的「撥款形狀」偵測 → 附上費率帶候選銷售(processorPayoutMapping);
+//   2. 未來銷售紀錄成熟(recordPayment 紀律 + 次帳)後的自動對映(塊C #3
+//      「自動對映留待真資料量夠」)。
+// square_payout 中性桶已進 SCHEDULE_C_MAP/枚舉(Jeff 人工歸類用 + 就緒),
+// 何時開始自動歸類由指揮/Jeff 依銷售紀錄成熟度裁決。
+export const SQUARE_PAYOUT_ANCHOR_PHRASES: readonly string[] = ["square inc"] as const;
+export const SQUARE_PAYOUT_CONTEXT_TOKENS: readonly string[] = ["sq", "des", "ach"] as const;
+
+/** haystack 組法同 isStripePayoutInflow(呼叫端負責只在進帳時呼叫)。
+ *  命中條件:詞組 "square inc" 完整出現 + 至少一個語境 token(sq/des/ach)
+ *  單字邊界命中。裸 "square"(姓氏/memo)永不命中。 */
+export function isSquarePayoutInflow(haystack: string): boolean {
+  const h = norm(haystack);
+  const hasAnchor = SQUARE_PAYOUT_ANCHOR_PHRASES.some((p) => hasWord(h, norm(p)));
+  if (!hasAnchor) return false;
+  return SQUARE_PAYOUT_CONTEXT_TOKENS.some((token) => hasWord(h, norm(token)));
+}
 
 /** haystack 已是呼叫端組好的 merchantName+description+originalDescription+對方
  *  字串(見 preClassify 的 haystack 組法)。呼叫端負責只在進帳時呼叫。

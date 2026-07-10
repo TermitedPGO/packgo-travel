@@ -11,16 +11,29 @@
  * 鐵律(紅綠測試釘死):
  *   - 認列後才可轉出 —— 只有 recognizedAt 非空、未 reversed、未 transferred 的
  *     列有資格被回填(isTransferBackfillEligible),且轉帳日不得早於認列曆日。
- *   - 偵測是搬運不是決定:只做「金額到分毫全等 + 單一無歧義候選」的保守配對,
- *     任何歧義(同額多候選)一律跳過留給人;回填動作走 systemAudit 留系統稽核軌。
+ *   - 偵測是搬運不是決定:自動回填只有規則 1(單列金額到分毫全等 + 單一無歧義
+ *     候選)。規則 2(run_group 加總配對)是純金額訊號、無第二佐證,巧合等額的
+ *     無關轉帳會被錯誤閉環且從此靜音 —— 2026-07-10 指揮裁決(塊C 回令 #1)降級
+ *     為「建議」:不寫 transferredAt,改在提醒卡帶出配對建議(群組明細+候選
+ *     流水),Jeff 看卡確認後由走查用 manual_backfill 模式回填
+ *     (runManualTransferBackfill,systemAudit 記 trust.transfer_backfill.manual)。
+ *     錢寧漏不錯。
  *   - 金額符號地雷(T2):Plaid 慣例 正=流出、負=流入(schema.ts bankTransactions
- *     欄位註解),Trust 流出 = trust 帳戶上 amount > 0,Operating 流入 = 非 trust
- *     帳戶上 amount < 0。
+ *     欄位註解),Trust 流出 = trust 帳戶上 amount > 0,Operating 流入 =
+ *     Operating 白名單帳戶上 amount < 0。
+ *   - Operating 白名單(塊C 回令 #2):流入候選限定 Operating 帳戶(accountMask
+ *     白名單,env TRUST_OPERATING_ACCOUNT_MASKS,預設 "2174" = prod 帳戶 30001),
+ *     不再是「任何非 trust 帳戶」—— 縮小巧合等額的誤配面。
+ *   - 語境訊號(塊C 回令 #2 後半,本批只收白名單、訊號留待真資料校準):
+ *     description/paymentMeta 含轉帳語境字樣(BofA 內轉常見 "Online Banking
+ *     transfer" 等)未來可作規則 1 的加分訊號;prod 真轉帳 descriptor 落地後
+ *     按真形狀校準,不憑空猜(與 Stripe descriptor 校準同款原則)。
  *
  * 提醒卡(認了沒轉錢):認列超過 N 天(TRUST_TRANSFER_REMINDER_DAYS,預設 7)
- * 仍未轉出 → 聚合一張 agentMessages 卡。噪音閘(T2 地雷 #5):絕不逐筆出卡;
- * 同一批未轉列(簽名相同)持續期間去重,只有集合變化才再出卡。歷史上實際已轉
- * 但無資料可配的舊列會進第一張卡(文案已註明人工核對路徑),之後被簽名去重壓住。
+ * 仍未轉出 → 聚合一張 agentMessages 卡,run_group 配對建議一併帶在卡上。
+ * 噪音閘(T2 地雷 #5):絕不逐筆出卡;同一批未轉列+建議(簽名相同)持續期間
+ * 去重,集合或建議變化才再出卡。歷史上實際已轉但無資料可配的舊列會進第一張卡
+ * (文案已註明人工核對路徑),之後被簽名去重壓住。
  *
  * Stripe-direct 哨兵列(linkedAccountId=0,deferStripeBookingIncome)天然不參與
  * 配對(帳戶集合對不上真 trust 帳戶 id),flag 開啟後那批錢的轉出對映屬塊C/D
@@ -36,7 +49,7 @@ import {
   bankTransactions,
   agentMessages,
 } from "../../drizzle/schema";
-import { and, eq, gte, isNull, isNotNull } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, isNotNull } from "drizzle-orm";
 import { createChildLogger } from "../_core/logger";
 import { systemAudit } from "../_core/auditLog";
 import { dateOnly } from "./trustOutstandingSplit";
@@ -61,6 +74,18 @@ export function transferScanDays(): number {
 export function transferReminderDays(): number {
   const n = Number(process.env.TRUST_TRANSFER_REMINDER_DAYS);
   return Number.isFinite(n) && n > 0 ? n : 7;
+}
+
+/**
+ * Operating 帳戶 accountMask 白名單(塊C 回令 #2)。預設 "2174"(prod 帳戶
+ * 30001,PACK&GO LLC operating checking)。逗號分隔可列多帳戶。
+ */
+export function operatingAccountMasks(): string[] {
+  const raw = process.env.TRUST_OPERATING_ACCOUNT_MASKS ?? "2174";
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 // ─── 純函式:配對 ────────────────────────────────────────────────────────────
@@ -98,6 +123,7 @@ function dayDiff(a: string, b: string): number {
 
 /**
  * 「Trust 流出 + Operating 流入」同額近日配對。保守規則:
+ *   - 流入候選只認 Operating 白名單帳戶(塊C 回令 #2,不再是任何非 trust 帳戶);
  *   - 每筆 Trust 流出,在日窗內找金額(分)全等的 Operating 流入;
  *   - 恰好一個候選 → 配對;零個或多個(歧義)→ 跳過;
  *   - 每筆流入最多被用一次(先到先得,輸入先按 日期,id 排序保證確定性)。
@@ -105,6 +131,7 @@ function dayDiff(a: string, b: string): number {
 export function pairTransfers(
   txns: TransferTxnLike[],
   trustAccountIds: ReadonlySet<number>,
+  operatingAccountIds: ReadonlySet<number>,
   opts?: { dateWindowDays?: number },
 ): TransferPair[] {
   const windowDays = opts?.dateWindowDays ?? transferDateWindowDays();
@@ -115,7 +142,7 @@ export function pairTransfers(
     .filter((t) => trustAccountIds.has(t.linkedAccountId) && t.amount > 0)
     .sort(byDateId);
   const operatingInflows = txns
-    .filter((t) => !trustAccountIds.has(t.linkedAccountId) && t.amount < 0)
+    .filter((t) => operatingAccountIds.has(t.linkedAccountId) && t.amount < 0)
     .sort(byDateId);
 
   const usedInflows = new Set<number>();
@@ -173,24 +200,46 @@ export interface TransferBackfill {
   /** 'YYYY-MM-DD',Trust 流出曆日。 */
   transferDate: string;
   amountCents: number;
-  rule: "single" | "run_group";
+  rule: "single";
+}
+
+/**
+ * run_group 配對「建議」(塊C 回令 #1:純金額加總無第二訊號,不自動回填,
+ * 提醒卡帶出、Jeff 確認後走 runManualTransferBackfill)。
+ */
+export interface TransferGroupSuggestion {
+  recognitionRunId: string;
+  deferredIds: number[];
+  rowAmountsCents: number[];
+  totalCents: number;
+  trustOutflowId: number;
+  operatingInflowId: number;
+  transferDate: string;
+}
+
+export interface MatchResult {
+  /** 規則 1(單列全等單一候選)—— 唯一自動回填的路。 */
+  backfills: TransferBackfill[];
+  /** 規則 2(run_group 加總全等)—— 建議,不自動寫。 */
+  suggestions: TransferGroupSuggestion[];
 }
 
 /**
  * 把配對到的轉帳對回遞延列。兩條規則,都要求「轉帳曆日 >= 認列曆日」
  * (認列後才可轉出)且帳戶一致:
- *   1. single:恰好一列 eligible 且金額(分)全等 → 回填該列。
+ *   1. single:恰好一列 eligible 且金額(分)全等 → 自動回填該列。
  *   2. run_group:single 零命中時,恰好一組同 recognitionRunId 的 eligible 列
- *      加總全等 → 整組回填(對應每日認列 cron 後 notifyOwner 叫 Jeff 一次轉
- *      當日總額的實際操作流)。
- * 任何歧義(多列/多組命中)→ 跳過留給人。每列最多被回填一次。
+ *      加總全等 → 產出「建議」(不寫,塊C 回令 #1 裁決:巧合等額會錯誤閉環
+ *      且靜音;對應每日認列後一次轉總額的操作流,由 Jeff 看卡確認)。
+ * 任何歧義(多列/多組命中)→ 跳過留給人。每列最多出現一次(回填與建議互斥)。
  */
 export function matchPairsToDeferrals(
   pairs: TransferPair[],
   rows: DeferralRowLike[],
-): TransferBackfill[] {
+): MatchResult {
   const usedRows = new Set<number>();
   const backfills: TransferBackfill[] = [];
+  const suggestions: TransferGroupSuggestion[] = [];
 
   const recognizedDay = (r: DeferralRowLike): string | null =>
     r.recognizedAt ? dateOnly(r.recognizedAt as any) : null;
@@ -204,7 +253,7 @@ export function matchPairsToDeferrals(
       return recDay !== null && recDay <= pair.date; // 認列後才可轉出
     });
 
-    // 規則 1:單列全等
+    // 規則 1:單列全等(唯一自動回填)
     const singles = eligible.filter((r) => toCents(r.amount) === pair.amountCents);
     if (singles.length === 1) {
       usedRows.add(singles[0].id);
@@ -219,7 +268,7 @@ export function matchPairsToDeferrals(
     }
     if (singles.length > 1) continue; // 歧義 → 人工
 
-    // 規則 2:同 recognitionRunId 群組加總全等
+    // 規則 2:同 recognitionRunId 群組加總全等 → 建議(不寫)
     const groups = new Map<string, DeferralRowLike[]>();
     for (const r of eligible) {
       if (!r.recognitionRunId) continue;
@@ -227,24 +276,25 @@ export function matchPairsToDeferrals(
       g.push(r);
       groups.set(r.recognitionRunId, g);
     }
-    const matchingGroups: DeferralRowLike[][] = [];
-    for (const g of groups.values()) {
+    const matchingGroups: Array<{ runId: string; rows: DeferralRowLike[] }> = [];
+    for (const [runId, g] of groups.entries()) {
       const sum = g.reduce((s, r) => s + toCents(r.amount), 0);
-      if (sum === pair.amountCents && g.length > 1) matchingGroups.push(g);
+      if (sum === pair.amountCents && g.length > 1) matchingGroups.push({ runId, rows: g });
     }
     if (matchingGroups.length !== 1) continue; // 零組或多組歧義 → 人工
-    for (const r of matchingGroups[0]) {
-      usedRows.add(r.id);
-      backfills.push({
-        deferredId: r.id,
-        transferBankTransactionId: pair.trustOutflowId,
-        transferDate: pair.date,
-        amountCents: toCents(r.amount),
-        rule: "run_group",
-      });
-    }
+    const grp = matchingGroups[0];
+    for (const r of grp.rows) usedRows.add(r.id); // 已入建議的列不再被後續 pair 配
+    suggestions.push({
+      recognitionRunId: grp.runId,
+      deferredIds: grp.rows.map((r) => r.id),
+      rowAmountsCents: grp.rows.map((r) => toCents(r.amount)),
+      totalCents: pair.amountCents,
+      trustOutflowId: pair.trustOutflowId,
+      operatingInflowId: pair.operatingInflowId,
+      transferDate: pair.date,
+    });
   }
-  return backfills;
+  return { backfills, suggestions };
 }
 
 // ─── IO:偵測 + 回填 + 提醒卡 ───────────────────────────────────────────────
@@ -254,6 +304,8 @@ export interface TransferDetectionReport {
   scannedTxns: number;
   pairsFound: number;
   backfills: TransferBackfill[];
+  /** run_group 配對建議(不自動寫;提醒卡帶出,Jeff 確認後 manual_backfill)。 */
+  suggestions: TransferGroupSuggestion[];
   /** confirm 模式實際寫入的列數(dry_run 恆 0)。 */
   backfilled: number;
   overdueCount: number;
@@ -266,13 +318,14 @@ const EMPTY_REPORT: TransferDetectionReport = {
   scannedTxns: 0,
   pairsFound: 0,
   backfills: [],
+  suggestions: [],
   backfilled: 0,
   overdueCount: 0,
   overdueTotal: 0,
   reminderPosted: false,
 };
 
-/** 提醒卡去重簽名的 Redis key(同一批未轉列持續期間只出一張卡)。 */
+/** 提醒卡去重簽名的 Redis key(同一批未轉列+建議持續期間只出一張卡)。 */
 export const TRANSFER_REMINDER_SIGNATURE_KEY = "trustTransferOverdueSignature";
 
 /**
@@ -312,15 +365,27 @@ export async function runTrustTransferDetection(opts?: {
       )) as DeferralRowLike[];
     if (eligibleRows.length === 0) return EMPTY_REPORT;
 
-    // 2. trust 帳戶集合(分類流出/流入用;含 inactive 以涵蓋歷史交易的歸屬)。
-    const trustAccounts = await db
-      .select({ id: linkedBankAccounts.id })
-      .from(linkedBankAccounts)
-      .where(eq(linkedBankAccounts.isTrustAccount, 1));
-    const trustIds = new Set(trustAccounts.map((r) => r.id));
-    if (trustIds.size === 0) return { ...EMPTY_REPORT, eligibleRows: eligibleRows.length };
+    // 2. 帳戶集合:trust(含 inactive,涵蓋歷史交易歸屬)+ Operating 白名單
+    //    (塊C 回令 #2:mask 白名單,預設 2174;排除 trust 帳戶防設定錯誤)。
+    const accounts = await db
+      .select({
+        id: linkedBankAccounts.id,
+        accountMask: linkedBankAccounts.accountMask,
+        isTrustAccount: linkedBankAccounts.isTrustAccount,
+      })
+      .from(linkedBankAccounts);
+    const trustIds = new Set(accounts.filter((a) => a.isTrustAccount === 1).map((a) => a.id));
+    const masks = new Set(operatingAccountMasks());
+    const operatingIds = new Set(
+      accounts
+        .filter((a) => a.isTrustAccount !== 1 && a.accountMask && masks.has(String(a.accountMask)))
+        .map((a) => a.id),
+    );
+    if (trustIds.size === 0 || operatingIds.size === 0) {
+      return { ...EMPTY_REPORT, eligibleRows: eligibleRows.length };
+    }
 
-    // 3. 掃描窗內的 bankTransactions(全帳戶;配對函式自己按 trust/非 trust 分邊)。
+    // 3. 掃描窗內的 bankTransactions(全帳戶;配對函式按 trust/Operating 白名單分邊)。
     const sinceStr = new Date(now.getTime() - transferScanDays() * 86_400_000)
       .toISOString()
       .slice(0, 10);
@@ -340,11 +405,11 @@ export async function runTrustTransferDetection(opts?: {
       date: dateOnly(t.date as any) ?? "",
     }));
 
-    // 4. 配對 + 對回遞延列(純函式)。
-    const pairs = pairTransfers(txns, trustIds);
-    const backfills = matchPairsToDeferrals(pairs, eligibleRows);
+    // 4. 配對 + 對回遞延列(純函式)。規則 1 自動;規則 2 只出建議。
+    const pairs = pairTransfers(txns, trustIds, operatingIds);
+    const { backfills, suggestions } = matchPairsToDeferrals(pairs, eligibleRows);
 
-    // 5. confirm:回填 + systemAudit(每筆;fire-and-forget + .catch 雙保險)。
+    // 5. confirm:回填(僅規則 1)+ systemAudit(每筆;fire-and-forget + .catch 雙保險)。
     let backfilled = 0;
     if (!dryRun) {
       for (const b of backfills) {
@@ -377,7 +442,8 @@ export async function runTrustTransferDetection(opts?: {
     }
 
     // 6. 認了沒轉錢提醒(認列超過 N 天仍未轉出)。剛(或將,dry_run 口徑一致)
-    // 回填的列不算 —— dry_run 報表回答「confirm 之後還剩哪些沒著落」。
+    //    自動回填的列不算;建議中的列「仍算」overdue —— 它們還沒被寫,卡上
+    //    同時帶出建議讓 Jeff 一眼看到出路。
     const backfilledIds = new Set(backfills.map((b) => b.deferredId));
     const cutoffMs = now.getTime() - transferReminderDays() * 86_400_000;
     const overdue = eligibleRows.filter((r) => {
@@ -388,7 +454,7 @@ export async function runTrustTransferDetection(opts?: {
     const overdueTotal = overdue.reduce((s, r) => s + toCents(r.amount), 0) / 100;
     let reminderPosted = false;
     if (!dryRun && overdue.length > 0) {
-      reminderPosted = await postOverdueReminder(db, overdue, overdueTotal);
+      reminderPosted = await postOverdueReminder(db, overdue, overdueTotal, suggestions);
     }
 
     const report: TransferDetectionReport = {
@@ -396,6 +462,7 @@ export async function runTrustTransferDetection(opts?: {
       scannedTxns: txns.length,
       pairsFound: pairs.length,
       backfills,
+      suggestions,
       backfilled,
       overdueCount: overdue.length,
       overdueTotal,
@@ -410,23 +477,44 @@ export async function runTrustTransferDetection(opts?: {
 }
 
 /**
- * 聚合一張「認了沒轉錢」提醒卡。噪音閘:同一批未轉列(id 集合 + 總額簽名)
- * 持續期間只出一張;集合變化(新列加入/舊列被回填)才再出。
+ * 聚合一張「認了沒轉錢」提醒卡,run_group 建議一併帶出。噪音閘:同一批未轉列
+ * +同一批建議(簽名相同)持續期間只出一張;集合或建議變化才再出。
  * Redis 讀失敗 → 照出卡(合規提醒寧可偏吵;週期是每日,最壞情況一天一張)。
  */
 async function postOverdueReminder(
   db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
   overdue: DeferralRowLike[],
   overdueTotal: number,
+  suggestions: TransferGroupSuggestion[],
 ): Promise<boolean> {
+  const suggestionSig = suggestions
+    .map((s) => `${s.recognitionRunId}:${s.trustOutflowId}:${s.deferredIds.join("+")}`)
+    .sort()
+    .join(";");
   const signature = `${overdue
     .map((r) => r.id)
     .sort((a, b) => a - b)
-    .join(",")}|${Math.round(overdueTotal * 100)}`;
+    .join(",")}|${Math.round(overdueTotal * 100)}|${suggestionSig}`;
   try {
     const { redis } = await import("../redis");
     const last = await redis.get(TRANSFER_REMINDER_SIGNATURE_KEY).catch(() => null);
     if (last === signature) return false; // 同一批,已提醒過 → 靜默
+
+    const suggestionSection =
+      suggestions.length > 0
+        ? `\n\n配對建議(同批認列加總 = 單筆轉帳,需你確認,系統不自動寫):\n` +
+          suggestions
+            .map(
+              (s) =>
+                `- 轉帳流水 #${s.trustOutflowId}(${s.transferDate},$${(s.totalCents / 100).toFixed(2)})` +
+                ` ↔ 遞延列 ${s.deferredIds.map((id) => `#${id}`).join(" + ")}` +
+                `(${s.rowAmountsCents.map((c) => `$${(c / 100).toFixed(2)}`).join(" + ")},認列批 ${s.recognitionRunId})`,
+            )
+            .join("\n") +
+          `\n確認無誤後由走查執行 manual_backfill(POST /api/admin/trust-transfer-detect,` +
+          `mode:"manual_backfill" + deferredIds + bankTransactionId)。`
+        : "";
+
     await db.insert(agentMessages).values({
       agentName: "trust-transfer",
       senderRole: "agent" as const,
@@ -442,9 +530,10 @@ async function postOverdueReminder(
           )
           .join("\n") +
         (overdue.length > 20 ? `\n…及其餘 ${overdue.length - 20} 筆` : "") +
+        suggestionSection +
         `\n\n§17550:認列後的錢應從 Trust #5442 轉到 Operating #2174。若實際已轉但日期久遠/金額被合併,` +
         `偵測配對不到,請到財務頁核對後人工處理;若真的沒轉,請盡快轉出。` +
-        `\n(同一批未轉列只提醒一次,集合變化才會再出卡。)`,
+        `\n(同一批未轉列+建議只提醒一次,集合變化才會再出卡。)`,
       priority: "high" as const,
     });
     await redis.set(TRANSFER_REMINDER_SIGNATURE_KEY, signature).catch(() => null);
@@ -452,5 +541,121 @@ async function postOverdueReminder(
   } catch (err) {
     log.error({ err }, "[trustTransferDetection] reminder card post failed");
     return false;
+  }
+}
+
+// ─── 人工回填(塊C 回令 #1:Jeff 確認後的 run_group 建議落地路)──────────────
+
+export interface ManualBackfillResult {
+  ok: boolean;
+  backfilled: number;
+  error?: string;
+}
+
+/**
+ * Jeff 看卡確認後的人工回填:把明確指定的遞延列組標記為「由指定轉帳流水轉出」。
+ * 全部驗證通過才寫(fail-closed,錢的操作不做部分成功):
+ *   - 流水存在、屬 trust 帳戶、是流出(amount > 0);
+ *   - 每列 eligible(已認列/未撤銷/未轉出)、帳戶與流水一致、認列曆日 <= 轉帳曆日;
+ *   - 列金額加總(分)=== 流水金額(分)—— 建議卡上就是這個等式,Jeff 確認的
+ *     就是這個等式,不吻合即拒絕。
+ * 每列寫入後 systemAudit 記 trust.transfer_backfill.manual(actor 是系統執行,
+ * 但 detail 註明 Jeff-confirmed;router/walkthrough 層的人為觸發另有其軌)。
+ */
+export async function runManualTransferBackfill(input: {
+  deferredIds: number[];
+  bankTransactionId: number;
+}): Promise<ManualBackfillResult> {
+  try {
+    const db = await getDb();
+    if (!db) return { ok: false, backfilled: 0, error: "DB unavailable" };
+    if (!input.deferredIds.length) return { ok: false, backfilled: 0, error: "deferredIds empty" };
+
+    const [txn] = await db
+      .select({
+        id: bankTransactions.id,
+        linkedAccountId: bankTransactions.linkedAccountId,
+        amount: bankTransactions.amount,
+        date: bankTransactions.date,
+      })
+      .from(bankTransactions)
+      .where(eq(bankTransactions.id, input.bankTransactionId))
+      .limit(1);
+    if (!txn) return { ok: false, backfilled: 0, error: "bankTransaction not found" };
+    const txnAmount = parseFloat(String(txn.amount)) || 0;
+    if (txnAmount <= 0) {
+      return { ok: false, backfilled: 0, error: "bankTransaction is not a trust outflow (amount <= 0)" };
+    }
+    const [acct] = await db
+      .select({ isTrustAccount: linkedBankAccounts.isTrustAccount })
+      .from(linkedBankAccounts)
+      .where(eq(linkedBankAccounts.id, txn.linkedAccountId))
+      .limit(1);
+    if (!acct || acct.isTrustAccount !== 1) {
+      return { ok: false, backfilled: 0, error: "bankTransaction is not on a trust account" };
+    }
+    const transferDate = dateOnly(txn.date as any) ?? "";
+
+    const rows = (await db
+      .select({
+        id: trustDeferredIncome.id,
+        linkedAccountId: trustDeferredIncome.linkedAccountId,
+        amount: trustDeferredIncome.amount,
+        recognizedAt: trustDeferredIncome.recognizedAt,
+        reversedAt: trustDeferredIncome.reversedAt,
+        transferredAt: trustDeferredIncome.transferredAt,
+        recognitionRunId: trustDeferredIncome.recognitionRunId,
+      })
+      .from(trustDeferredIncome)
+      .where(inArray(trustDeferredIncome.id, input.deferredIds))) as DeferralRowLike[];
+    if (rows.length !== input.deferredIds.length) {
+      return { ok: false, backfilled: 0, error: "some deferredIds not found" };
+    }
+    for (const r of rows) {
+      if (!isTransferBackfillEligible(r)) {
+        return { ok: false, backfilled: 0, error: `deferred #${r.id} not eligible (unrecognized/reversed/already transferred)` };
+      }
+      if (r.linkedAccountId !== txn.linkedAccountId) {
+        return { ok: false, backfilled: 0, error: `deferred #${r.id} is on a different trust account than the transaction` };
+      }
+      const recDay = r.recognizedAt ? dateOnly(r.recognizedAt as any) : null;
+      if (recDay === null || recDay > transferDate) {
+        return { ok: false, backfilled: 0, error: `deferred #${r.id} recognized after the transfer date (認列後才可轉出)` };
+      }
+    }
+    const sumCents = rows.reduce((s, r) => s + toCents(r.amount), 0);
+    if (sumCents !== toCents(txnAmount)) {
+      return {
+        ok: false,
+        backfilled: 0,
+        error: `sum of deferred amounts (${(sumCents / 100).toFixed(2)}) != transaction amount (${txnAmount.toFixed(2)})`,
+      };
+    }
+
+    // 全數驗證通過 → 寫(冪等守門同自動路)+ 每列 systemAudit。
+    const transferredAt = new Date(`${transferDate}T00:00:00Z`);
+    let backfilled = 0;
+    for (const r of rows) {
+      const res: any = await db
+        .update(trustDeferredIncome)
+        .set({ transferredAt, transferBankTransactionId: txn.id })
+        .where(and(eq(trustDeferredIncome.id, r.id), isNull(trustDeferredIncome.transferredAt)));
+      const affected = Number(res?.[0]?.affectedRows ?? 0);
+      if (affected > 0) {
+        backfilled++;
+        void systemAudit("system:trustTransfer", "trust.transfer_backfill.manual", r.id, {
+          amount: (toCents(r.amount) / 100).toFixed(2),
+          transferBankTransactionId: txn.id,
+          transferDate,
+          rule: "manual",
+          groupDeferredIds: input.deferredIds,
+          confirmedBy: "jeff-via-walkthrough",
+        }).catch(() => {});
+      }
+    }
+    return { ok: true, backfilled };
+  } catch (err) {
+    log.error({ err }, "[trustTransferDetection] manual backfill failed");
+    return { ok: false, backfilled: 0, error: (err as Error).message };
   }
 }

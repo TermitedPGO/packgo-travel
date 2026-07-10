@@ -29,6 +29,7 @@ import { toast } from "sonner";
 const CATEGORY_OPTIONS = [
   { value: "transfer", labelKey: "pendingClaimsTab.categoryOwnerTransfer" },
   { value: "stripe_payout", labelKey: "pendingClaimsTab.categoryStripePayout" },
+  { value: "square_payout", labelKey: "pendingClaimsTab.categorySquarePayout" },
   { value: "other_review", labelKey: "pendingClaimsTab.categoryOther" },
 ] as const;
 

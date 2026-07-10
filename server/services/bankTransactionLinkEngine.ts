@@ -72,6 +72,7 @@ import {
 import { and, eq, ne, isNull, sql } from "drizzle-orm";
 import {
   isStripePayoutInflow,
+  isSquarePayoutInflow,
   norm,
   hasWord,
   KNOWN_INFLOW_REFUND_VENDORS,
@@ -134,7 +135,15 @@ export interface AutoLinkResult {
 
 export type ProcessOutcome =
   | { status: "linked"; rule: AutoLinkRule; link: AutoLinkResult; linkId: number }
-  | { status: "pending_claim"; candidates: OrderPaymentMatchFinding[] }
+  | {
+      status: "pending_claim";
+      candidates: OrderPaymentMatchFinding[];
+      /** F2 塊C(2026-07-10):撥款形狀入帳(Square)的費率帶候選銷售 ——
+       *  撥款 = 銷售 − 手續費,exact_amount 永遠對不上,這裡補「扣費對映」
+       *  候選給待認領卡(人工確認式,processorPayoutMapping.ts)。
+       *  非撥款形狀 / 查詢降級時省略。 */
+      payoutSaleCandidates?: import("./processorPayoutMapping").PayoutSaleCandidate[];
+    }
   | { status: "already_handled"; existingAllocated: number }
   | { status: "skipped"; reason: string };
 
@@ -796,6 +805,26 @@ export async function processInboundTransaction(
   }
 
   const candidates = orderRefCandidate ? [orderRefCandidate, ...findings] : findings;
+
+  // 7) F2 塊C(2026-07-10):Square 撥款形狀 → 附費率帶候選銷售(人工確認式)。
+  //    刻意【不】auto-link 成 square_payout 中性桶 —— 探真:Square 撥款入帳
+  //    目前就是 P&L 唯一收入紀錄,自動中性化 = 真收入靜默消失(Ann 漏斗病同款,
+  //    見 accountingKnowledge.ts 2d 節)。撥款照走待認領,卡上多帶「銷售−手續費」
+  //    候選,Jeff 用既有 ClaimDialog 對映(bankTransactionLinks 即對映結構)。
+  if (isSquarePayoutInflow(haystack)) {
+    try {
+      const { findSquarePayoutSaleCandidates } = await import("./processorPayoutMapping");
+      const payoutSaleCandidates = await findSquarePayoutSaleCandidates({
+        amountCents: Math.round(amountAbs * 100),
+        date: txn.date,
+      });
+      return { status: "pending_claim", candidates, payoutSaleCandidates };
+    } catch (err) {
+      reportFunnelError({ source: "fail-open:bankTransactionLinkEngine:squarePayoutCandidates", err, context: { bankTransactionId } }).catch(() => {});
+      // 候選失敗不擋卡:退回無候選的一般待認領
+    }
+  }
+
   return { status: "pending_claim", candidates };
 }
 

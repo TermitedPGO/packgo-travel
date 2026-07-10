@@ -1599,11 +1599,16 @@ async function startServer() {
   // F2 塊B(2026-07-10)— Trust→Operating 轉帳偵測:掃 bankTransactions 找
   // 「Trust 流出 + Operating 流入」同額近日配對,對回已認列的遞延列。dry_run
   // 只算不寫(T6 走查「轉帳配對對歷史資料 dry-run」走這裡),confirm 回填
-  // transferredAt/transferBankTransactionId(回填走 systemAudit,檔頭慣例)。
-  // 每日 trustRecognitionWorker 也會自動跑 confirm 口徑;本端點供人工觸發/走查。
-  // 同 dry_run/confirm + LOCAL_SCRIPT_TOKEN 慣例,回應本身就是報表。
+  // transferredAt/transferBankTransactionId(僅規則 1 單列全等;回填走 systemAudit,
+  // 檔頭慣例)。每日 trustRecognitionWorker 也會自動跑 confirm 口徑;本端點供
+  // 人工觸發/走查。同 dry_run/confirm + LOCAL_SCRIPT_TOKEN 慣例,回應即報表。
+  // 塊C 回令 #1(2026-07-10):manual_backfill 模式 —— run_group 建議(提醒卡
+  // 帶出)經 Jeff 確認後,由走查明確指定 deferredIds + bankTransactionId 落地;
+  // 全部驗證(資格/帳戶一致/認列先於轉帳/金額加總全等)通過才寫,
+  // systemAudit 記 trust.transfer_backfill.manual。
   // POST /api/admin/trust-transfer-detect
   //   Body: { mode:"dry_run"|"confirm" }
+  //       | { mode:"manual_backfill", deferredIds:number[], bankTransactionId:number }
   app.post("/api/admin/trust-transfer-detect", async (req, res) => {
     try {
       const ip = await verifyInternalAuth(req, res, {
@@ -1613,9 +1618,25 @@ async function startServer() {
         windowSec: 3600,
       });
       if (!ip) return;
-      const { mode } = req.body || {};
-      if (mode !== "dry_run" && mode !== "confirm") {
-        return res.status(400).json({ error: "mode must be 'dry_run' or 'confirm'" });
+      const { mode, deferredIds, bankTransactionId } = req.body || {};
+      if (mode !== "dry_run" && mode !== "confirm" && mode !== "manual_backfill") {
+        return res.status(400).json({ error: "mode must be 'dry_run' | 'confirm' | 'manual_backfill'" });
+      }
+      if (mode === "manual_backfill") {
+        const idsOk =
+          Array.isArray(deferredIds) &&
+          deferredIds.length > 0 &&
+          deferredIds.every((n: unknown) => Number.isInteger(n) && (n as number) > 0);
+        if (!idsOk || !Number.isInteger(bankTransactionId) || bankTransactionId <= 0) {
+          return res.status(400).json({
+            error: "manual_backfill requires deferredIds (positive int array) and bankTransactionId (positive int)",
+          });
+        }
+        const { runManualTransferBackfill } = await import(
+          "../services/trustTransferDetection"
+        );
+        const result = await runManualTransferBackfill({ deferredIds, bankTransactionId });
+        return res.status(result.ok ? 200 : 400).json(result);
       }
       const { runTrustTransferDetection } = await import(
         "../services/trustTransferDetection"

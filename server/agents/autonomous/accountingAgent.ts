@@ -37,6 +37,7 @@ export const ACCOUNTING_CATEGORIES = [
   "expense_travel", // 商務差旅 — Jeff's flights/hotels for site visits / supplier meets
   "income_booking", // 預訂收入 — customer direct payments (Zelle/ACH/Wire/信用卡團費)
   "stripe_payout", // F1 塊C (2026-07-08) — Stripe 撥款落地(轉撥,非二次收入,見下方說明)
+  "square_payout", // F2 塊C (2026-07-10) — Square 撥款中性桶(就緒;自動分類暫不套用,見下方說明)
   "transfer", // 內部轉帳 — between own accounts, owner↔company, balance moves
   "refund", // 退款 — customer refund out / chargeback / supplier refund in
   "other_review", // 需 Jeff 確認 — agent couldn't classify with high confidence
@@ -68,6 +69,15 @@ export const CATEGORY_DESCRIPTIONS: Record<AccountingCategory, string> = {
   // 分類時只能照這段誤導性描述去猜,大機率誤判成 income_booking)。
   stripe_payout:
     "Stripe 撥款落地(轉撥,不是收入)。這筆錢的收入已經在 Stripe 結帳當下入帳,撥款進銀行戶只是資金搬運,絕不能再記一次收入。",
+  // F2 塊C (2026-07-10) — 與 stripe_payout 的關鍵差異(prod 探真):Square
+  // 銷售目前幾乎沒有第二處收入紀錄(customOrders square 僅 2 筆、
+  // accountingEntries 0 筆),Square 撥款入帳「就是」P&L 唯一收入紀錄——
+  // 把它自動歸中性桶 = 真收入從損益消失。故本分類只供 Jeff 人工歸類
+  // (該撥款對應的銷售已在別處記帳時)與未來自動對映就緒用;LLM 分類時
+  // 除非 descriptor 明示且已確認銷售另有紀錄,否則 Square 撥款維持
+  // income_booking(見 accountingKnowledge.ts 2d 節)。
+  square_payout:
+    "Square 撥款落地且該筆銷售已在別處記帳(轉撥,不再是收入)。注意:目前 Square 銷售通常沒有第二處紀錄,撥款入帳本身就是收入 —— 只有確認銷售已另行入帳時才用本分類,否則維持 income_booking。",
   transfer:
     "內部轉帳,不影響損益。Jeff 個人 ↔ 公司、Operating ↔ Trust、信用卡還款、Trust account 內部轉帳。",
   refund:

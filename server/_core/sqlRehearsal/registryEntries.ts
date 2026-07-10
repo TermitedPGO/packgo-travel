@@ -1275,7 +1275,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "bankTransactionLinkEngine.ts.scanUnlinkedInflows",
-    sources: ["server/services/bankTransactionLinkEngine.ts:845"],
+    sources: ["server/services/bankTransactionLinkEngine.ts:874"],
     cls: "B",
     sql: "SELECT `bankTransactions`.`id`, `bankTransactions`.`amount`, `bankTransactions`.`date` FROM `bankTransactions` WHERE (`bankTransactions`.`amount` < 0 AND `bankTransactions`.`isPending` = ? AND `bankTransactions`.`excludeFromAccounting` = ? AND `bankTransactions`.`archived` = ?)",
     sampleParams: [1,1,1],

@@ -51,6 +51,11 @@ export const SCHEDULE_C_MAP: Record<AccountingCategory, string> = {
   transfer: "(excluded — internal transfer)",
   other_review: "(excluded — needs review)",
   stripe_payout: "(excluded — Stripe payout landing, already counted at checkout)",
+  // F2 塊C (2026-07-10):Square 撥款中性桶。與 stripe_payout 不同,目前只供
+  // Jeff 人工歸類(銷售已另行入帳時)與未來自動對映就緒 —— 探真:Square 撥款
+  // 入帳現在就是 P&L 唯一收入紀錄,自動歸中性桶會讓真收入消失,故不接
+  // preClassify / linkEngine(accountingKnowledge.ts 2d 節)。
+  square_payout: "(excluded — Square payout landing, only when the sale is booked elsewhere)",
 };
 
 const INCOME_CATEGORIES: AccountingCategory[] = ["income_booking"];
@@ -62,7 +67,7 @@ const EXPENSE_CATEGORIES: AccountingCategory[] = [
   "expense_office",
   "expense_travel",
 ];
-const NEUTRAL_CATEGORIES: AccountingCategory[] = ["transfer", "other_review", "stripe_payout"];
+const NEUTRAL_CATEGORIES: AccountingCategory[] = ["transfer", "other_review", "stripe_payout", "square_payout"];
 const _ALL_KNOWN: AccountingCategory[] = [
   ...INCOME_CATEGORIES,
   ...EXPENSE_CATEGORIES,
@@ -106,6 +111,11 @@ export interface BankPLReport {
    *  Jeff 在 P&L UI 上完全看不到,對帳時對不上銀行對帳單)。Inflow-positive
    *  同 transfer 的符號慣例。 */
   stripePayout: { total: number; count: number };
+  /** Square 撥款歸中性桶的部分(F2 塊C,2026-07-10)。同 stripePayout 的
+   *  inflow-positive 符號慣例。注意:大多數 Square 撥款目前仍是 income_booking
+   *  (撥款入帳=唯一收入紀錄),本 tile 只匯總被 Jeff 明確歸類 square_payout
+   *  的列 —— 平常為 $0 是正常狀態。 */
+  squarePayout: { total: number; count: number };
   grossProfit: number;
   netProfit: number;
   profitMargin: number;
@@ -247,6 +257,8 @@ export function foldBankPLRows(
   let transferCount = 0;
   let stripePayoutTotal = 0;
   let stripePayoutCount = 0;
+  let squarePayoutTotal = 0;
+  let squarePayoutCount = 0;
   let excludedFromAccounting = 0;
   let uncategorizedCount = 0;
   let needsReviewCount = 0;
@@ -296,6 +308,14 @@ export function foldBankPLRows(
       // (不是靜默丟棄)。
       stripePayoutTotal += -amt;
       stripePayoutCount++;
+      continue;
+    }
+
+    if (cat === "square_payout") {
+      // Square 撥款且銷售已另行入帳(Jeff 人工歸類)—— 同 stripe_payout 待遇:
+      // 排除出損益、獨立 tile 匯總(F2 塊C,2026-07-10)。
+      squarePayoutTotal += -amt;
+      squarePayoutCount++;
       continue;
     }
 
@@ -350,6 +370,7 @@ export function foldBankPLRows(
     refunds,
     transfer: { total: transferTotal, count: transferCount, gross: transferGross },
     stripePayout: { total: stripePayoutTotal, count: stripePayoutCount },
+    squarePayout: { total: squarePayoutTotal, count: squarePayoutCount },
     grossProfit,
     netProfit,
     profitMargin,
@@ -371,6 +392,7 @@ function emptyReport(startDate: string, endDate: string): BankPLReport {
     refunds: 0,
     transfer: { total: 0, count: 0, gross: 0 },
     stripePayout: { total: 0, count: 0 },
+    squarePayout: { total: 0, count: 0 },
     trustDeferredIncome: 0,
     grossProfit: 0,
     netProfit: 0,
@@ -459,7 +481,7 @@ export async function generateBankMonthlyTrend(opts: {
     // stripe_payout 明確排除(同 transfer/other_review)——它跟其他類別一樣
     // 不落入任何 income/cogs/expense 分支,顯式排除比「靠 if-chain 空跑」更
     // 清楚意圖(F1 塊C 2026-07-08 對抗審查修復)。
-    if (!cat || cat === "transfer" || cat === "other_review" || cat === "stripe_payout") continue;
+    if (!cat || cat === "transfer" || cat === "other_review" || cat === "stripe_payout" || cat === "square_payout") continue;
 
     const d = new Date(String(r.date));
     const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;

@@ -5432,6 +5432,7 @@ export const zhTW = {
       catRefund: '退款',
       catOtherReview: '待審核',
       catStripePayout: 'Stripe 撥款(轉撥)',
+      catSquarePayout: 'Square 撥款(轉撥,銷售已另記)',
       groupExpense: '支出',
       groupCustom: '其他',
       customCategoryOption: '自訂類別…',
@@ -8596,6 +8597,7 @@ export const zhTW = {
     categoryOwnerTransfer: '業主轉帳',
     categoryInterest: '利息',
     categoryStripePayout: 'Stripe 轉撥',
+    categorySquarePayout: 'Square 轉撥(銷售已另記)',
     categoryOther: '其他',
     leg: {
       deposit: '訂金',
@@ -8825,6 +8827,7 @@ export const zhTW = {
       catTransfer: '內部轉帳（業主資金）',
       catOtherReview: '待審查',
       catStripePayout: 'Stripe 撥款落地',
+      catSquarePayout: 'Square 撥款落地(銷售已另記)',
     },
     ledger: {
       colTitle: '兩本帳',
@@ -8844,6 +8847,7 @@ export const zhTW = {
       plExclTransfer: '內部轉帳',
       plExclTransferSub: '（{count} 筆 · 搬運 {gross}）',
       plExclStripe: 'Stripe 撥款落地',
+      plExclSquare: 'Square 撥款落地',
       plNote: '本表口徑為 Plaid 實收，不含 Stripe 結帳收入；撥款已排除防雙計，Stripe 收入併表待後續 payout 對映建成。手續費為外扣費，內扣費不走 Plaid 流水。',
       plNoteRefundZero: '退款／折讓本月 $0，有值時列於營收下方。',
       plEmptyNote: '本月尚無交易，月結後更新。$0 月的淨利以中性灰顯示，不套綠色。',

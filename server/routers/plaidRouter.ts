@@ -2050,14 +2050,18 @@ export const plaidRouter = router({
       // F2 塊A P3 #4(2026-07-10 指揮回令):這條路徑是 Jeff 按的,router 層補
       // ctx 版 audit 記「誰按的」;service 層的 systemAudit(trust.reverse)保留
       // 給 webhook 路徑同款留痕 —— 兩層各記各的行為者,不衝突。
-      const { audit } = await import("../_core/auditLog");
-      void audit({
-        ctx,
-        action: "trust.reverse.admin",
-        targetType: "trustDeferredIncome",
-        targetId: input.deferredId,
-        changes: { reason: input.reason },
-      });
+      // 塊C 回令 #3:看 result.success —— 失敗(DB 不可用)不留「沒發生的
+      // 撤銷」稽核列,稽核軌只記真的發生過的事。
+      if (result.success) {
+        const { audit } = await import("../_core/auditLog");
+        void audit({
+          ctx,
+          action: "trust.reverse.admin",
+          targetType: "trustDeferredIncome",
+          targetId: input.deferredId,
+          changes: { reason: input.reason },
+        });
+      }
       return result;
     }),
 

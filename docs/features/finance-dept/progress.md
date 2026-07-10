@@ -1045,3 +1045,47 @@ fetch("http://localhost:8080/api/admin/backfill-bank-transaction-links", {
     process.exit(1);
   });
 ```
+
+## F2 塊C 探真結論(2026-07-10,prod 唯讀;T6 依據)
+
+方法:flyctl ssh 容器內 node 探針(唯讀 SELECT 六句,base64 → /tmp 執行後即刪,
+NODE_PATH=/app/node_modules)。探針 `node --check` exit 0、全檔零反引號零
+dollar-brace(T2 地雷 #7);輸出 PROBE_JSON 無 PROBE_FAIL。
+
+### Square 撥款 descriptor 全形狀(bankTransactions,19 筆:16 入 3 出,全在 30001/#2174)
+
+1. `ACH CREDIT Square Inc SQ ON ##/##`(description+merchantName;5 筆入帳)
+2. `Square Inc DES:SQ###### ID:T############### INDN:PACK & GO, LLC CO ID:XXXXX##### PPD|WEB`
+   (BofA originalDescription;9 筆入帳)
+3. `Square Inc DES:ACCTVERIFY ... INDN:Chunfu hsieh ... CCD`(±$0.01 帳戶驗證一對,agent=transfer)
+4. 出帳側:`ACH HOLD Square Inc SQ ON ##/##`(+$3,106 hold)與同額 DES:SQ WEB 出帳
+   (2026-06-22/23 一組 hold/回沖形狀,值得 Jeff 留意但非本批範圍)
+
+### 現行記帳路徑(決定對映設計的關鍵事實)
+
+- Square 撥款入帳 agentCategory 幾乎全是 income_booking(兩筆有 jeffOverride)——
+  撥款入帳「就是」bankTransactions 主帳(P&L 權威帳)唯一收入紀錄。
+- customOrders paymentMethod='square' 僅 2 筆(ORD-2026-0011 收 $490+$490、
+  ORD-2026-0004 金額 NULL);paymentMethod 分布:null 9、square 2。
+- accountingEntries 含 square 字樣:0 筆。無次帳紀錄。
+- → 與 Stripe(結帳當下已寫收入,撥款=雙計風險)相反:Square 今天不存在雙計,
+  自動把撥款歸中性桶 = 真收入從損益靜默消失(Ann 漏斗病同款)。
+- → 設計裁定:isSquarePayoutInflow 謂詞 + square_payout 桶「就緒」但不接
+  preClassify / linkEngine 自動分類;撥款照走待認領,卡上帶費率帶候選銷售
+  (processorPayoutMapping),Jeff 用既有 ClaimDialog 對映
+  (bankTransactionLinks 即對映結構,零新表)。自動對映留待 recordPayment
+  紀律成熟(dispatch 塊C #3 原文)。
+
+### 帳戶對照(watchdog/白名單依據)
+
+- 30001 mask 2174 = PACK&GO LLC operating(Operating 白名單預設值)
+- 30002 mask 4899、30004 mask 9888 = 信用卡(非白名單)
+- 30003 mask 5442 = Living Trust Account(isTrustAccount=1)—— dispatch 錨點
+  「Trust 帳(30003)」即此 linkedAccountId。
+
+探針原文(f2c-square-probe.cjs,唯讀 SELECT 六句):與 F3 探針同款結構
+(mysql2/promise + 單引號串接),六句依序:square 字樣 txn 取樣(LIMIT 60)/
+square txn 計數(入出分列)/ customOrders square 取樣(LIMIT 40)/
+paymentMethod 分布 / accountingEntries square 計數 / linkedBankAccounts 全列。
+完整原文在 git 歷史與本 session 記錄;關鍵防護:全檔 var+function 語法、
+零反引號、零 dollar-brace、只 SELECT。

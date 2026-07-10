@@ -145,6 +145,48 @@ describe("processInboundTransaction — 四態分派(F1 塊D 回爐,可注入假
     expect(r.status).toBe("pending_claim");
   });
 
+  // ── F2 塊C(2026-07-10):Square 撥款形狀 ──
+  it("pending_claim + payoutSaleCandidates:Square 撥款附費率帶候選銷售,且絕不被 auto-link 成中性桶(收入不消失)", async () => {
+    // 探真:Square 撥款入帳目前就是 P&L 唯一收入紀錄 → 引擎刻意不 auto-link
+    // square_payout(對比 stripe_payout 分支),照走待認領;卡上多帶
+    // 「銷售 − 手續費」候選(processorPayoutMapping,人工確認式)。
+    // 真例:ORD-2026-0011 收 $490(square),撥款 $475.49(費率 2.96%)。
+    H.rows.set(bankTransactions, [
+      txnRow({
+        amount: "-475.49",
+        merchantName: "Square Inc",
+        description: "ACH CREDIT Square Inc SQ ON 07/05",
+        date: "2026-07-06",
+      }),
+    ]);
+    H.rows.set(customOrders, [
+      {
+        id: 11,
+        orderNumber: "ORD-2026-0011",
+        status: "completed",
+        paymentMethod: "square",
+        depositAmount: null,
+        depositPaidAt: new Date("2026-07-04T10:00:00Z"),
+        depositPaidAmount: "490.00",
+        balanceAmount: null,
+        balancePaidAt: null,
+        balancePaidAmount: null,
+      },
+    ]);
+    const r = await processInboundTransaction(1, { dryRun: true });
+    expect(r.status).toBe("pending_claim"); // 不是 linked:中性桶不自動吃收入
+    if (r.status === "pending_claim") {
+      expect(r.payoutSaleCandidates).toBeDefined();
+      expect(r.payoutSaleCandidates![0]).toMatchObject({
+        processor: "square",
+        rule: "single",
+        orderIds: [11],
+        saleTotalCents: 49000,
+        impliedFeeCents: 1451,
+      });
+    }
+  });
+
   it("不變式:任何入帳處理後狀態 ∈ {linked, pending_claim, already_handled, skipped},不存在第五態", async () => {
     H.rows.set(bankTransactions, [txnRow({ amount: "-6150.00", merchantName: "STRIPE PAYOUT" })]);
     const r = await processInboundTransaction(1, { dryRun: true });
