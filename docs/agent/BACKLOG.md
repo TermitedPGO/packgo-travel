@@ -17,9 +17,16 @@
 
 ## 線三 旅遊公開網站
 
-1. [預授權] 公開站現況盤點(唯讀):首頁/行程頁/預訂流程/SEO/慢與醜的地方,缺口清單。產出 docs/features/public-site/audit.md。
+0. 事故復原(2026-06-17 tours 七表清空,報告 public-site/incident-20260617-tours-wipe.md):[Jeff 立即] TiDB Cloud 查備份保留期;[預授權] 指揮出目錄重建計畫(supplierProducts 鏡像→catalogRebuild→分批 promote,日本先行,LLM 成本估算);[預授權] deploySmoke 加第八臂 active tours>0;[裁決門] 重建計畫與成本 Jeff 拍板才執行。
+1. [已完成] 公開站現況盤點:docs/features/public-site/audit.md(結論:先上架再翻修)。
 2. [裁決門] 設計方向提案(照 B-final 成功模式:真實渲染多版型)→ Jeff 挑 → 才實作。行程頁翻修含地圖重做(保留狀態在此解凍)。
 3. 開放問題(等 Jeff 一句話):「旅遊頁面」= 現站公開頁翻修(指揮暫按此盤點),還是另立獨立新站?
+
+## 基建
+
+1. [Jeff] 採購 Mac mini 當 24/7 AI 主機(建議 M4 16GB $599 或二手 M2;解四件事:指揮常駐/iMessage 橋接先決/專職測試機/筆電解放)。
+2. [預授權] 指揮先備妥 mini 開機設定腳本與檢查清單進 docs/infra/(Claude Code/flyctl/repo/常駐 session/遠端進入),到貨十分鐘上線。
+3. 過渡期:筆電在家開著就夜間衝刺,不在就攢佇列;例行掃描逐步搬雲端排程。
 
 ## 節奏
 
