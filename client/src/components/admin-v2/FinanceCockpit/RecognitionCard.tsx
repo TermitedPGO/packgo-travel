@@ -93,6 +93,10 @@ export function RecognitionCard() {
             count: String(count),
             amount: fmtMoney(total),
           })}
+          {/* limit 200 天花板:來源截斷時誠實標注(P3 回爐 #3) */}
+          {(deferred.data?.length ?? 0) >= 200 && (
+            <> {t("financeCockpit.ledger.listTruncated", { limit: "200" })}</>
+          )}
         </div>
         <button
           type="button"

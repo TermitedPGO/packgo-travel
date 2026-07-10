@@ -808,3 +808,106 @@ prod 根本沒有 Stripe 撥款,真實處理商是 Square)。before/after 相同
    drift=0 特例);drift ≠ 0 時顯示差額,經指揮「誠實顯示」指示。
 4. 逐團列表每列 dot 的 amber 判定 = 距認列日 <=30 天(B-final 只畫了一個 19 天
    的 amber 例,未定義閾值;取 30 天與 aging 紅字同刻度)。
+5. 損益卡口徑選擇(指揮令補入編號):資料源選 profitLossReport 不選 financeKpi
+   (本卡要成本 byCategory + 中性 tiles + refunds,只有前者回全量;同一支
+   generateBankPL,總額口徑一致)。原月界差異已由塊C 回爐 P2 統一 LA 曆月消除。
+
+### 塊C 交付數字勘誤(指揮令)
+
+- cockpitMath 測試數前報「26→36」有誤,實為 26→35(accountMask 1 + join 名稱
+  透傳 1 + foldMatchedNotDeparted 3 + compBarSegments 4);全套總數 4823 正確。
+- 中途修(執行過程抓到即修,非驗收發現):
+  1. claim zod 枚舉收緊使兩處 client 端 string 型別紅(ClaimDialog /
+     PendingClaimsTab)→ 改 ClaimCategory / CategoryValue union + 下拉來源 cast。
+  2. claim 枚舉 import 鏈(accountingAgent→llm→llmCache)在測試模組載入時
+     redis.ping() → 測試 redis mock 補 ping/on。
+
+### 塊C 回爐(P1/P2/P3,與塊D 同 commit)
+
+- P1 scope 一致:trustDeferredList 移除 eq(userId, ctx.user.id),比照
+  trustReconciliation unscope(isTrustAccount=1 + isActive=1),support@ 開
+  /ops/finance 標頭與明細不再打架。改動處註解已寫明理由與日期(plaidRouter
+  trustDeferredList 段)。單一公司後台,adminProcedure 已是守門。
+- P2 月界口徑:financeKpi 切月改 America/Los_Angeles 曆月(原 server UTC
+  toISOString 切月,月初 UTC 領先 0-8 小時內真相列與損益卡顯示不同月)。回傳
+  形狀不變,只有期間定義修正 —— 行為變更:UTC 月初深夜時段 thisMonth 從
+  「新月」修正為「LA 仍在的舊月」,其他消費者同步受益。
+- P3#1 registry 同步:trustDeferredList 兩條 handWritten 條目的 sql 文字補上
+  leftJoin bookings/tours 真形狀(先前只 bump 行號,ship 前 EXPLAIN 會跑舊
+  SQL);行號同步 1989/1992(P1/P2 位移),另三條 financeKpi 下游錨點
+  1626/1639/1698 → 1628/1641/1700。
+- P3#2 退款列帶號:PLCard 退款列改 fmtSignedMoney(-refunds),供應商退款入帳
+  (refunds<0)顯示 +,不再 Math.abs 假裝減項,三列可 foot。
+- P3#3 截斷尾註:TrustCard 逐團列表與 RecognitionCard footer 在來源打滿
+  limit 200 時顯示「來源僅取前 200 筆」(ledger.listTruncated)。
+
+### 塊D:報表與稅務正式頁 + 真數對比驗收
+
+- TaxDetail.tsx(D 藍本):期間切換(本月 / YTD / 去年 + 年份選)→ KPI 4 格
+  (營收+同期成長 / 應稅淨利 Line 31 / Trust 未認列不計本年稅 / 待複查)→
+  月度趨勢(bar + 表 + 累計列;新唯讀 plaid.plMonthlyTrend 逐月 generateBankPL)
+  → Schedule C 對照(profitLossReport.scheduleCMap 真對映抽 Line 行號,Part
+  I/II + Line 31,vs 去年同期)→ Trust 對稅時點(本年已認列 / 未認列遞延)→
+  已排除防雙計(stripePayout / transfer tiles)→ 1099-NEC(新唯讀
+  plaid.vendor1099List:年付 ≥$600 的 cogs_tour 供應商,Jeff override 優先,
+  JS 端彙總不新增 raw SQL 面)→ 1040-ES 四格「待建」(後端無算法,不猜稅率)
+  → 匯出(年度報稅包 ZIP 接現成 yearEndExport;Schedule C 摘要 CSV 端點沒有,
+  disabled + 待建標,不本批造)。
+- CockpitDetail "tax" 分支換 TaxDetail(其餘 view 仍指 FinanceReports 過渡)。
+- i18n:financeCockpit.tax 全區塊雙語,parity 100%。
+
+### 塊D 偏離申報
+
+1. 期間切換做「本月 / 今年 YTD / 去年」三段(D 藍本另有「本季 / 自訂」,資料
+   源天然支援,UI 留待後續需求)。
+2. KPI 合併 D 藍本的「YTD 淨利」與「應稅淨利」為一格 —— 真源 generateBankPL
+   每期已扣退款,兩數恆等,分開顯示反而暗示有兩套口徑。
+3. 1099 卡接真源(vendor1099List),但單一 vendor 金額未做獨立 SQL 對照
+   (彙總邏輯 tsc + code 審查;探真對比表以 P&L / trust / pending 為準)。
+4. Trust 對稅時點卡的「本年收到訂金」行(D 藍本三行之一)省略 —— 無精確現成
+   資料源(recognized + outstanding 的 depositDate 混合口徑),不擺近似數。
+5. plMonthlyTrend / vendor1099List 兩個新唯讀 procedure 無專屬單測(內部是
+   generateBankPL 迴圈 / 純 JS 彙總;generateBankPL 本身已有單測)。
+
+### 塊D 真數對比表(2026-07-10 prod 唯讀探真;壓軸驗收)
+
+探真方法:flyctl ssh 容器內 node 探針(唯讀 SELECT,rows 原樣拉回)→ 本機以
+worktree 真源碼 fold(頁面路徑)vs 獨立 SUM(不經 fold)逐格對比;待認領走
+prod dry_run 端點(HTTP 200,唯讀)。探針經 node --check + 無反引號 /
+dollar-brace 檢查(T2 地雷 #7)。LA 本月 = 2026-07-01 – 2026-07-10。
+
+| 格 | 頁面路徑計算值 | 獨立探真值 | 判 |
+|---|---|---|---|
+| 現金部位(#2174 available) | $2,034.03 | $2,034.03(accounts row 直讀) | ✓ |
+| 本月營收 income.total | $290.00 | income_booking SUM $290.00(退款 0、本月新遞延 0) | ✓ |
+| 本月淨利 | −$238.97 | 290 − 210.90(COGS)− 318.07(OpEx)= −238.97 | ✓ |
+| COGS(tour+other) | $210.90 | $210.00 + $0.90 | ✓ |
+| OpEx 逐項 | office 96.40 / travel 120.17 / software 101.50 | 同值(獨立 SUM) | ✓ |
+| 退款列 | $0(摺疊成 note 一句) | refund SUM $0 | ✓ |
+| Stripe 撥款 tile | $0 | stripe_payout SUM $0 | ✓ |
+| 內部轉帳 tile | +$0(count 4,netted) | gross SUM $13,540 | ✓* |
+| 待認領(真相列) | pendingSummary = dry_run 同源 | dry_run:321 筆 / $448,022(掃 360、自動 39 small_inflow) | ✓ |
+| Trust 主數字 matchedNotDeparted | $0 | bookingId 有 + 未到期 SUM = $0 | ✓ |
+| Trust 未對應 | $15,422(3 筆) | bookingId NULL SUM = $15,422 / 3 筆 | ✓ |
+| Trust 待認列 departedPending | $0(0 筆,認列卡隱藏) | 到期 SUM = $0 | ✓ |
+| Trust 等式 | 0 + 0 + 15,422 = 15,422 = outstanding | trustTotal SUM $15,422 | ✓ |
+| Trust 餘額 / drift | 餘額 $4,980,drift −$10,442 → footer 顯示差額待查 | balance 直讀 $4,980 | ✓ |
+| 本年已認列(TaxDetail) | $0 | recognized2026 SUM $0 | ✓ |
+
+✓* 內部轉帳 tile 口徑說明(非 mismatch):bankPLService transfer tile 是
+netted(流入−流出,一出一進相抵 = $0,count 4),與 ProfitLossV2 owner-capital
+tile 同語義;獨立 gross 加總 $13,540 是搬運總量。頁面照 tile 語義顯示
++$0(4 筆)。若要顯示 gross 搬運量屬後續口徑裁決,不影響數字真實性。
+
+註:2026-07-09 探真基準(320 筆/$447,732)與本日(321/$448,022)差一筆新
+入帳,屬資料自然增長;三筆 Trust 未歸戶 $8,908/$2,916/$3,598 = $15,422 兩日
+一致。prod 真實狀態:Trust 未認列全部是未對應(matchedNotDeparted = $0),
+真相列 Trust 格顯示 $0 + hint 未對應 $15,422 是誠實顯示,非缺陷。另
+bankTransactionLinks 現有 14 筆 link(引擎部署後已開始工作)。
+
+### 塊D 視覺驗收(fallback,誠實申報)
+
+本機 dev server 起不來(無 DATABASE_URL),無法截圖與 B-final 並排。fallback:
+designLint.test.ts 源碼級斷言 5 條全綠(狀態色不做背景填色 / serif 只准
+PageHeader / 禁 rounded-none / 負值用 red-700 非 rose / 元件檔數防呆)。
+像素級抽查(間距 4px 網格、字級)待 prod 部署後 Jeff 親驗或指揮截圖複核。

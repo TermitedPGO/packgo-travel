@@ -1438,20 +1438,22 @@ export const plaidRouter = router({
    * AccountingAgent classifications.
    */
   financeKpi: adminProcedure.query(async () => {
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
-      .toISOString()
-      .slice(0, 10);
-    const startOfYear = new Date(now.getFullYear(), 0, 1)
-      .toISOString()
-      .slice(0, 10);
-    const today = now.toISOString().slice(0, 10);
-    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-      .toISOString()
-      .slice(0, 10);
-    const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0)
-      .toISOString()
-      .slice(0, 10);
+    // F3 塊C 回爐 P2(2026-07-10,指揮裁決):切月統一 America/Los_Angeles 曆月。
+    // 舊寫法 new Date(...).toISOString() 是 server 時鐘(Fly=UTC)切月 —— 月初
+    // UTC 領先 LA 的 0-8 小時內,真相列(本 procedure)與損益卡(profitLossReport
+    // 走 LA 曆月)會顯示不同月份的整月數字。回傳形狀不變,只有期間定義修正。
+    const { laToday } = await import("../services/trustOutstandingSplit");
+    const today = laToday();
+    const y = Number(today.slice(0, 4));
+    const m = Number(today.slice(5, 7));
+    const p = (n: number) => String(n).padStart(2, "0");
+    const startOfMonth = `${today.slice(0, 7)}-01`;
+    const startOfYear = `${y}-01-01`;
+    const lmY = m === 1 ? y - 1 : y;
+    const lmM = m === 1 ? 12 : m - 1;
+    const lastMonthStart = `${lmY}-${p(lmM)}-01`;
+    // new Date(y, m, 0).getDate() = 該月天數(與時區無關的曆法計算)
+    const lastMonthEnd = `${lmY}-${p(lmM)}-${p(new Date(lmY, lmM, 0).getDate())}`;
 
     const { generateBankPL } = await import("../services/bankPLService");
     const [thisMonth, lastMonth, ytd] = await Promise.all([
@@ -1945,24 +1947,28 @@ export const plaidRouter = router({
         })
         .optional()
     )
-    .query(async ({ ctx, input }) => {
+    .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return [];
       const status = input?.status ?? "unmatched";
 
       const { trustDeferredIncome } = await import("../../drizzle/schema");
 
-      // Get the user's trust account ids first
-      const userTrustIds = await db
+      // F3 塊C 回爐 P1(2026-07-10,指揮裁決):drop userId scope,比照
+      // trustReconciliation(2026-05-22 同款修法)。舊的 eq(userId, ctx.user.id)
+      // 讓 support@ admin 看到「標頭三段有數、逐團明細空」—— #5442 掛在
+      // jeffhsieh09@ 名下,錢的頁面標頭跟明細打架。單一公司後台,
+      // adminProcedure 已是守門,userId 隔離是舊雷。
+      const trustIds = await db
         .select({ id: linkedBankAccounts.id })
         .from(linkedBankAccounts)
         .where(
           and(
-            eq(linkedBankAccounts.userId, ctx.user.id),
-            eq(linkedBankAccounts.isTrustAccount, 1)
+            eq(linkedBankAccounts.isTrustAccount, 1),
+            eq(linkedBankAccounts.isActive, 1)
           )
         );
-      const ids = userTrustIds.map((r) => r.id);
+      const ids = trustIds.map((r) => r.id);
       if (ids.length === 0) return [];
 
       const filters: any[] = [inArray(trustDeferredIncome.linkedAccountId, ids)];
@@ -2168,5 +2174,101 @@ export const plaidRouter = router({
 
       const { records, summary } = foldExclusionRows(rows);
       return { records, summary, csv: toExclusionCsv(records) };
+    }),
+
+  // ── F3 塊D:報表與稅務頁的兩個唯讀聚合(2026-07-10)─────────────────────
+  // 刻意放檔尾:trustDeferredList 的 raw SQL 行號是 sqlRehearsal 登記錨點,
+  // 檔尾新增不會挪動它。
+
+  /**
+   * 月度趨勢:指定年份逐月 P&L(D 藍本月度趨勢卡)。金額權威在
+   * generateBankPL(與 financeKpi / profitLossReport 同一支摺疊);當年只算到
+   * 本月(LA 曆月),未來月不回傳。唯讀。
+   */
+  plMonthlyTrend: adminProcedure
+    .input(z.object({ year: z.number().int().min(2020).max(2100) }))
+    .query(async ({ input }) => {
+      const { generateBankPL } = await import("../services/bankPLService");
+      const { laToday } = await import("../services/trustOutstandingSplit");
+      const today = laToday();
+      const curY = Number(today.slice(0, 4));
+      const curM = Number(today.slice(5, 7));
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const lastMonth = input.year < curY ? 12 : input.year > curY ? 0 : curM;
+
+      const months: {
+        month: number;
+        income: number;
+        cogs: number;
+        opex: number;
+        netProfit: number;
+        profitMargin: number;
+      }[] = [];
+      for (let m = 1; m <= lastMonth; m++) {
+        const startDate = `${input.year}-${pad(m)}-01`;
+        const endDate =
+          input.year === curY && m === curM
+            ? today
+            : `${input.year}-${pad(m)}-${pad(new Date(input.year, m, 0).getDate())}`;
+        const r = await generateBankPL({ startDate, endDate });
+        months.push({
+          month: m,
+          income: r.income.total,
+          cogs: r.expenses.cogs,
+          opex: r.expenses.operating,
+          netProfit: r.netProfit,
+          profitMargin: r.profitMargin,
+        });
+      }
+      return { year: input.year, months };
+    }),
+
+  /**
+   * 1099-NEC 候選:指定年份付款(流出)累計 ≥ $600 的供應商(cogs_tour 分類,
+   * Jeff override 優先)。彙總在 JS 端做(counterparty 數量有限),不寫 raw
+   * SQL 聚合 —— 不新增 sqlRehearsal 登記面。唯讀。
+   */
+  vendor1099List: adminProcedure
+    .input(z.object({ year: z.number().int().min(2020).max(2100) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { vendors: [] as { counterparty: string; total: number }[] };
+      const rows = await db
+        .select({
+          counterparty: bankTransactions.counterparty,
+          merchantName: bankTransactions.merchantName,
+          amount: bankTransactions.amount,
+          agentCategory: bankTransactions.agentCategory,
+          jeffOverrideCategory: bankTransactions.jeffOverrideCategory,
+        })
+        .from(bankTransactions)
+        .leftJoin(
+          linkedBankAccounts,
+          eq(bankTransactions.linkedAccountId, linkedBankAccounts.id)
+        )
+        .where(
+          and(
+            eq(linkedBankAccounts.isActive, 1),
+            gte(bankTransactions.date, `${input.year}-01-01` as any),
+            lte(bankTransactions.date, `${input.year}-12-31` as any)
+          )
+        );
+
+      const byVendor = new Map<string, number>();
+      for (const r of rows) {
+        // Jeff override 優先(bankPLService 同一優先序);只算供應商成本
+        const cat = r.jeffOverrideCategory ?? r.agentCategory;
+        if (cat !== "cogs_tour") continue;
+        const amt = parseFloat(String(r.amount)) || 0;
+        if (amt <= 0) continue; // 正 = 流出(付款);入帳不算
+        const name = (r.counterparty || r.merchantName || "").trim();
+        if (!name) continue;
+        byVendor.set(name, (byVendor.get(name) ?? 0) + amt);
+      }
+      const vendors = [...byVendor.entries()]
+        .map(([counterparty, total]) => ({ counterparty, total: Math.round(total * 100) / 100 }))
+        .filter((v) => v.total >= 600)
+        .sort((a, b) => b.total - a.total);
+      return { vendors };
     }),
 });

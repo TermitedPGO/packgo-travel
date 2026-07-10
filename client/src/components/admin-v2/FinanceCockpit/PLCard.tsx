@@ -180,7 +180,9 @@ export function PLCard() {
                 {r.refunds !== 0 && (
                   <div className="flex items-center justify-between border-t border-gray-50 py-2 text-xs">
                     <span className="text-gray-600">{t("financeCockpit.ledger.plRowRefunds")}</span>
-                    <span className="text-gray-600 tabular-nums">−{fmtMoney(Math.abs(r.refunds))}</span>
+                    {/* 帶號(P3 回爐):refunds>0=退給客人(−),refunds<0=供應商
+                        退款入帳(+);不用 Math.abs 假裝都是減項,三列才 foot */}
+                    <span className="text-gray-600 tabular-nums">{fmtSignedMoney(-r.refunds)}</span>
                   </div>
                 )}
                 {r.trustDeferredIncome !== 0 && (

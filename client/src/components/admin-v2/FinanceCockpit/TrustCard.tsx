@@ -209,6 +209,13 @@ export function TrustCard({ trust }: { trust: TrustTile }) {
                   </span>
                 </div>
               ))}
+
+              {/* limit 200 天花板:來源截斷時誠實標注(P3 回爐 #3) */}
+              {(deferred.data?.length ?? 0) >= 200 && (
+                <div className="pt-2 text-[10px] text-gray-400">
+                  {t("financeCockpit.ledger.listTruncated", { limit: "200" })}
+                </div>
+              )}
             </div>
           )}
 

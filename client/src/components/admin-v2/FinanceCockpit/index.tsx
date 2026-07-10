@@ -22,6 +22,7 @@ import { TruthRow } from "./TruthRow";
 import { WorkColumn } from "./WorkColumn";
 import { LedgerColumn } from "./LedgerColumn";
 import { SecondaryNav } from "./SecondaryNav";
+import { TaxDetail } from "./TaxDetail";
 import type { FinanceReportView } from "../FinanceReports";
 
 const FinanceReports = lazy(() => import("../FinanceReports"));
@@ -32,7 +33,11 @@ function formatAsOf(ms: number): string {
   return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-/** 明細層:駕駛艙內開既有報表分頁,附返回鍵。塊D 會替換「報表與稅務」為正式頁。 */
+/**
+ * 明細層:駕駛艙內開細節頁,附返回鍵。
+ * "tax" = F3 塊D 正式「報表與稅務」頁(D 藍本);其餘 view 過渡期仍指既有
+ * FinanceReports 分頁(完整損益表 / 發票 / 對帳明細,未遷功能經此仍可達)。
+ */
 function CockpitDetail({
   view,
   onBack,
@@ -53,7 +58,7 @@ function CockpitDetail({
           {t("financeCockpit.secondary.back")}
         </button>
         <Suspense fallback={<LoadingPage text={t("financeCockpit.loading")} />}>
-          <FinanceReports initialView={view} />
+          {view === "tax" ? <TaxDetail /> : <FinanceReports initialView={view} />}
         </Suspense>
       </div>
     </div>
