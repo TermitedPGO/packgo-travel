@@ -277,6 +277,28 @@ export function computeExpectedRecognitionDate(
   return dep.toISOString().slice(0, 10);
 }
 
+/**
+ * §17550 認列時點 —— 單一判定函式(F2 塊B,2026-07-10)。
+ *
+ * 「什麼時候可以認列」整個 codebase 只有這一條規則:認列日(expectedRecognition-
+ * Date,由 computeExpectedRecognitionDate 從出發日+訂金日算出)已到(<= 今天)。
+ * 出發前(認列日在未來)絕不可認列 —— 這是 CST §17550 的紅線,紅綠測試釘死。
+ *
+ * CPA 答覆(Jeff 佇列中)回來若調整認列時點,只動 computeExpectedRecognitionDate
+ * 的參數(RECOGNITION_OFFSET_DAYS / EARLY_RECOGNITION_WINDOW_DAYS)或本函式的
+ * 比較式,不動呼叫端結構 —— recognizeReadyDepartures 的兩處比較都走這裡。
+ *
+ * 兩端皆為 'YYYY-MM-DD' 曆日字串,字典序即日期序。expectedRecognitionDate 為
+ * null(還算不出認列日,如缺出發日)一律不可認列。
+ */
+export function isRecognitionDue(
+  expectedRecognitionDate: string | null | undefined,
+  todayStr: string,
+): boolean {
+  if (!expectedRecognitionDate) return false;
+  return String(expectedRecognitionDate) <= todayStr;
+}
+
 // ─── Public API ────────────────────────────────────────────────────────────
 
 export interface ProcessTrustInflowResult {
@@ -657,7 +679,7 @@ export async function recognizeReadyDepartures(
   // 失敗、或還沒收到 webhook)的殘留態,認列前先擋下,不把已退款的錢當收入。
   // 批次撈,不逐列查(N+1)。
   const readyBookingIds = candidates
-    .filter((r) => r.expectedRecognitionDate && r.bookingId && String(r.expectedRecognitionDate) <= today)
+    .filter((r) => r.bookingId && isRecognitionDue(r.expectedRecognitionDate ? String(r.expectedRecognitionDate) : null, today))
     .map((r) => r.bookingId as number);
   const cancelledBookingIds = new Set<number>();
   if (readyBookingIds.length > 0) {
@@ -681,8 +703,8 @@ export async function recognizeReadyDepartures(
       skipNoMatch++;
       continue;
     }
-    const expected = String(r.expectedRecognitionDate);
-    if (expected > today) continue; // not yet
+    // §17550 認列時點單一函式(isRecognitionDue):出發前不可認列。
+    if (!isRecognitionDue(String(r.expectedRecognitionDate), today)) continue; // not yet
     if (cancelledBookingIds.has(r.bookingId)) {
       skipCancelled++;
       continue;
@@ -770,6 +792,24 @@ export async function reverseDeferral(opts: {
 }): Promise<{ success: boolean }> {
   const db = await getDb();
   if (!db) return { success: false };
+  // F2 塊A(P3 修正:塊B 回令 #1):UPDATE 前先 SELECT 快照供稽核 —— 順序調換
+  // 零成本,且防未來有人在 reverse 時順手動 amount 欄造成稽核值失真。快照失敗
+  // 不擋主流程(稽核明細降級為 null)。
+  let snapshot: { amount: string | null; bookingId: number | null } = {
+    amount: null,
+    bookingId: null,
+  };
+  try {
+    const [row] = await db
+      .select({ amount: trustDeferredIncome.amount, bookingId: trustDeferredIncome.bookingId })
+      .from(trustDeferredIncome)
+      .where(eq(trustDeferredIncome.id, opts.deferredId))
+      .limit(1);
+    if (row) snapshot = { amount: row.amount, bookingId: row.bookingId };
+  } catch {
+    // 快照僅供稽核明細;讀失敗照樣 reverse,不因稽核前置查詢擋財務主流程。
+  }
+
   await db
     .update(trustDeferredIncome)
     .set({
@@ -778,21 +818,13 @@ export async function reverseDeferral(opts: {
     })
     .where(eq(trustDeferredIncome.id, opts.deferredId));
 
-  // F2 塊A:撤銷遞延(取消/退款)是財務動作,留系統稽核軌。fire-and-forget:
-  // 讀回金額純為稽核明細,不阻塞主流程回傳;金額欄 update 未動,撤銷後讀值正確。
-  // .catch 雙保險,絕不影響 reverseDeferral 呼叫端。
-  void (async () => {
-    const [row] = await db
-      .select({ amount: trustDeferredIncome.amount, bookingId: trustDeferredIncome.bookingId })
-      .from(trustDeferredIncome)
-      .where(eq(trustDeferredIncome.id, opts.deferredId))
-      .limit(1);
-    await systemAudit("system:trustDeferral", "trust.reverse", opts.deferredId, {
-      amount: row?.amount ?? null,
-      bookingId: row?.bookingId ?? null,
-      reason: opts.reason,
-    });
-  })().catch(() => {});
+  // F2 塊A:撤銷遞延(取消/退款)是財務動作,留系統稽核軌。fire-and-forget
+  // + .catch 雙保險,絕不影響 reverseDeferral 呼叫端。
+  void systemAudit("system:trustDeferral", "trust.reverse", opts.deferredId, {
+    amount: snapshot.amount,
+    bookingId: snapshot.bookingId,
+    reason: opts.reason,
+  }).catch(() => {});
 
   return { success: true };
 }

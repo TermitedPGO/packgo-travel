@@ -1596,6 +1596,38 @@ async function startServer() {
     }
   });
 
+  // F2 塊B(2026-07-10)— Trust→Operating 轉帳偵測:掃 bankTransactions 找
+  // 「Trust 流出 + Operating 流入」同額近日配對,對回已認列的遞延列。dry_run
+  // 只算不寫(T6 走查「轉帳配對對歷史資料 dry-run」走這裡),confirm 回填
+  // transferredAt/transferBankTransactionId(回填走 systemAudit,檔頭慣例)。
+  // 每日 trustRecognitionWorker 也會自動跑 confirm 口徑;本端點供人工觸發/走查。
+  // 同 dry_run/confirm + LOCAL_SCRIPT_TOKEN 慣例,回應本身就是報表。
+  // POST /api/admin/trust-transfer-detect
+  //   Body: { mode:"dry_run"|"confirm" }
+  app.post("/api/admin/trust-transfer-detect", async (req, res) => {
+    try {
+      const ip = await verifyInternalAuth(req, res, {
+        tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
+        rateLimitKey: "trust-transfer-detect",
+        rateLimitMax: 30,
+        windowSec: 3600,
+      });
+      if (!ip) return;
+      const { mode } = req.body || {};
+      if (mode !== "dry_run" && mode !== "confirm") {
+        return res.status(400).json({ error: "mode must be 'dry_run' or 'confirm'" });
+      }
+      const { runTrustTransferDetection } = await import(
+        "../services/trustTransferDetection"
+      );
+      const result = await runTrustTransferDetection({ dryRun: mode === "dry_run" });
+      return res.json(result);
+    } catch (err) {
+      logger.error({ err }, "[admin/trust-transfer-detect] error");
+      return res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   // 批十一 塊C — 案件對話進場:來源/ 的對話候選檔(.txt/.md)逐檔餵既有 chatLogImport 管線
   // (classifier 判斷是否對話、resolveEventDate 未來日期一律不建、認人守門、(content,分鐘)去重
   // 全沿用)。dry_run 只 classify+build 預覽不寫。POST /api/admin/import-case-conversations

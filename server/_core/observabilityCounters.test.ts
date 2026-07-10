@@ -303,6 +303,23 @@ describe("formatObservabilitySection", () => {
     expect(text).not.toContain("marketing");
   });
 
+  it("F2 塊B:trustInvariantLine 提供時附加為第 5 行;省略時輸出 byte-identical 於三行版(向後相容)", () => {
+    const base = {
+      messagesFailedDelta: { kind: "delta", value: 0 } as const,
+      queueFailedCounts: [],
+      llmCircuitStats: { kind: "ok", circuitOpened: 0, rateLimit429: 0, callsTotal: 0 } as const,
+    };
+    const without = formatObservabilitySection(base);
+    const withLine = formatObservabilitySection({
+      ...base,
+      trustInvariantLine: "Trust 勾稽:餘額 $100.00 vs 遞延帳 $100.00(未認列 $100.00 + 已認列未轉出 $0.00)→ 漂移 $0.00",
+    });
+    expect(withLine.split("\n")).toHaveLength(5);
+    expect(withLine).toContain("Trust 勾稽");
+    expect(withLine.startsWith(without)).toBe(true); // 前四行 byte-identical
+    expect(formatObservabilitySection({ ...base, trustInvariantLine: undefined })).toBe(without);
+  });
+
   it("messagesFailed read failure → distinguishable 'couldn't read' text, never silently shown as 0", () => {
     const text = formatObservabilitySection({
       messagesFailedDelta: { kind: "error" },

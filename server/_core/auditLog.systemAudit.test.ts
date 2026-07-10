@@ -24,7 +24,13 @@ vi.mock("../redis", () => ({
   },
 }));
 
-import { systemAudit, SYSTEM_ACTOR_USER_ID } from "./auditLog";
+import {
+  systemAudit,
+  SYSTEM_ACTOR_USER_ID,
+  verifyAuditChain,
+  canonicalAuditRow,
+  computeRowHash,
+} from "./auditLog";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -115,5 +121,61 @@ describe("systemAudit — 底層炸不外拋", () => {
         deletedAccounts: 2,
       }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("verifyAuditChain — 系統列(P3 #2,2026-07-10 指揮回令)", () => {
+  it("userId=0 / userRole=system / targetType=null 的系統列 + 後接 admin 列,鏈驗證 ok:true", async () => {
+    // 用真 canonicalAuditRow/computeRowHash 造一條「系統列 → admin 列」的合法鏈,
+    // 釘死 systemAudit 寫出的欄位形狀(哨兵 userId=0、targetType null)不會被
+    // 驗證器誤判為 row-modified / chain-broken。
+    const sysData = {
+      id: 1,
+      userId: SYSTEM_ACTOR_USER_ID,
+      userEmail: "system:trustDeferral",
+      userRole: "system",
+      action: "trust.defer",
+      targetType: null,
+      targetId: "77",
+      changes: '{"amount":1234.56}',
+      reason: null,
+      ipAddress: null,
+      userAgent: null,
+      success: 1,
+      errorMessage: null,
+      createdAt: new Date("2026-07-10T00:00:00Z"),
+    };
+    const sysHash = computeRowHash("GENESIS", canonicalAuditRow(sysData));
+    const sysRow = { ...sysData, previousHash: "GENESIS", rowHash: sysHash };
+
+    const adminData = {
+      id: 2,
+      userId: 1,
+      userEmail: "jeff@packgoplay.com",
+      userRole: "admin",
+      action: "tour.update",
+      targetType: "tour",
+      targetId: "5",
+      changes: null,
+      reason: null,
+      ipAddress: "1.2.3.4",
+      userAgent: "test",
+      success: 1,
+      errorMessage: null,
+      createdAt: new Date("2026-07-10T00:01:00Z"),
+    };
+    const adminHash = computeRowHash(sysHash, canonicalAuditRow(adminData));
+    const adminRow = { ...adminData, previousHash: sysHash, rowHash: adminHash };
+
+    getDb.mockResolvedValue({
+      select: () => ({
+        from: () => ({ orderBy: () => Promise.resolve([sysRow, adminRow]) }),
+      }),
+    });
+
+    const result = await verifyAuditChain();
+    expect(result.ok).toBe(true);
+    expect(result.hashedRows).toBe(2);
+    expect(result.anomalies).toEqual([]);
   });
 });

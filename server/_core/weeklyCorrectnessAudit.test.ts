@@ -691,4 +691,21 @@ describe("runWeeklyCorrectnessAudit — executor loop actually continues past on
     expect(insertedValues[0].body).toContain("各 queue failed 數");
     expect(insertedValues[0].body).toContain("LLM circuit 統計");
   });
+
+  it("F2 塊B:卡片內文帶第四行 Trust 勾稽(本測試的 fakeDb 撐不起勾稽查詢 → 降級為「讀取失敗」一行,正好證明看門狗絕不 throw、也絕不拖垮 D1)", async () => {
+    const db = fakeDb([]);
+    const insertedValues: any[] = [];
+    db.insert = vi.fn(() => ({
+      values: (v: any) => {
+        insertedValues.push(v);
+        return Promise.resolve(undefined);
+      },
+    }));
+    const result = await runWeeklyCorrectnessAudit(db);
+    expect(result.posted).toBe(true);
+    // 看門狗降級不阻卡:仍然只有 D1 一張卡(kind:"error" 不出 drift high 卡)
+    expect(insertedValues).toHaveLength(1);
+    expect(insertedValues[0].body).toContain("Trust 勾稽");
+    expect(insertedValues[0].body).toContain("讀取失敗");
+  });
 });

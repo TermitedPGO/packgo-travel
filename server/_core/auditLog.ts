@@ -15,6 +15,8 @@
  *   /api/admin/* confirm paths) and every webhook-driven financial write
  *   (Stripe/Plaid trust deferral, reversal, etc.) MUST call systemAudit() so
  *   the tamper-evident chain covers system actors, not just admins.
+ *   Example (fire-and-forget, belt-and-suspenders catch):
+ *     void systemAudit("system:trustDeferral", "trust.defer", bookingId, { amount }).catch(() => {});
  *
  * Design:
  *   - Never throws — audit-write failures must never break the underlying request.

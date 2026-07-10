@@ -42,6 +42,21 @@ export const trustRecognitionWorker = new Worker<
     // (PLAID flag OR STRIPE flag)——這支 worker 是 recognizeReadyDepartures
     // 的唯一日常呼叫端,外層的 gate 若還只看 PLAID flag,即使函式本體已經
     // 修好,worker 還是會在 STRIPE-only 開啟時提早 return 不呼叫它。
+    // F2 塊B(2026-07-10):Trust→Operating 轉帳偵測 + 「認了沒轉錢」提醒,
+    // 搭每日認列 cron 的便車。刻意放在 flag gate 之前 —— 偵測對象是「已存在
+    // 的已認列列」(歷史事實,與當下 flag 開關無關),flag 全關時也要跑,
+    // 否則歷史認列列的轉出閉環永遠不會回填。runTrustTransferDetection 本體
+    // 絕不 throw(內部降級),不影響認列主流程。
+    const { runTrustTransferDetection } = await import(
+      "./services/trustTransferDetection"
+    );
+    const transferReport = await runTrustTransferDetection();
+    if (transferReport.backfilled > 0 || transferReport.overdueCount > 0) {
+      console.log(
+        `[trustRecognitionWorker] transfer detection: backfilled=${transferReport.backfilled} pairs=${transferReport.pairsFound} overdue=${transferReport.overdueCount} ($${transferReport.overdueTotal.toFixed(2)})`
+      );
+    }
+
     if (!isAnyTrustDeferralEnabled()) {
       console.log(
         "[trustRecognitionWorker] trust deferral disabled (both PLAID_TRUST_DEFERRAL_ENABLED and STRIPE_TRUST_DEFERRAL_ENABLED are off) — skipping"
