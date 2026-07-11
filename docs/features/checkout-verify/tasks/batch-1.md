@@ -12,5 +12,6 @@
 - [x] 紅綠測試:服務 26 案 / router 8 案 / 停止線 2 案 / webhook 蓋章斷言進既有 9 案;新測試連跑 5 次穩
 - [x] 既有測試不弱化:stripeWebhook.bookings+refunds、membership、bookings、inquiries、i18n 全綠
 - [x] coverage.test.ts(SQL 彩排登記行號漂移已更新)、migrationJournal、migrationBreakpoint 綠
+- [x] 驗收收案三小條(2026-07-11 指揮回令):flag docstring v2 語意、currency_missing 防呆+測試、必付格式漂移運維閘 runbook(runbook-flag-enable.md,探針三團實跑 aligned)
 - [ ] prod 部署後:migration 0116 落表驗證(SHOW TABLES,MIGRATION_PATTERNS Rule 3)— 待 Jeff ship
-- [ ] 旗標 `TOUR_INSTANT_CHECKOUT_ENABLED=true` 開啟時機 — Jeff 裁決
+- [ ] 旗標 `TOUR_INSTANT_CHECKOUT_ENABLED=true` 開啟時機 — Jeff 裁決,前置照 runbook-flag-enable.md 兩條運維閘

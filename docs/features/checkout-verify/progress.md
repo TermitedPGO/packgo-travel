@@ -21,3 +21,10 @@
   3. business-logic.test.ts 的 DB-gated checkout 測試在有 DATABASE_URL 環境會寫一列 disclosure(綁測試 booking,同檔既有 bookings.create 寫入 pattern);
   4. 模式二/三、三態商品狀態不在本批。
 - 待 Jeff:merge 裁決、部署後 0116 落表驗證(Rule 3)、旗標開啟時機。
+
+## 2026-07-11 · 驗收收案(指揮回令:兩路過、無 P1,旗標語意升級 RATIFIED)
+
+三小條補完:
+1. featureFlags.tourInstantCheckoutEnabled docstring 更新為 v2 現況語意(OFF=全擋不跑驗證;ON=驗證+存證才建 Session),並指向 runbook。
+2. verifyTourCheckout 幣別缺失防呆:booking.currency 非字串/空 → 直接回 failed reason=currency_missing(維持「絕不 throw」不變式);新增測試 1 案(服務測試 27 案)。
+3. 必付格式漂移 P2 運維閘 → `runbook-flag-enable.md`:全量 475 開旗標前置兩條(promote 必帶 skipSync:false;prod 抽團跑必付兩端比對探針)。探針已於本機對 prod 實跑三團(tour 2/8/11,含一團帶真必付 TF1 Niagara)全 aligned,紀錄在 runbook。

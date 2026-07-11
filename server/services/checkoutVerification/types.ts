@@ -15,6 +15,7 @@ export type CheckoutBlockReason =
   | "price_changed" // 現價與頁面展示價不一致(含超收防護)
   | "mandatory_fees_changed" // 必付費用清單與頁面展示不一致
   | "currency_mismatch" // 幣別基準對不上(UV 基準 USD)
+  | "currency_missing" // booking 幣別缺失(資料異常)— 驗不了 = 擋
   | "supplier_unreachable" // UV API 逾時/炸 — fail-closed
   | "balance_without_vendor_confirmation"; // 尾款但供應商尚未確認座位
 
@@ -90,7 +91,7 @@ export interface VerificationRecord {
     price?: { displayedAdultPrice: number; liveAdultPrice: number | null };
     grossGuard?: { bookingTotal: number; recomputedGross: number };
     mandatoryFees?: { displayed: string[]; live: string[] | null };
-    currency?: { booking: string; departure: string | null; live: string | null };
+    currency?: { booking: string | null; departure: string | null; live: string | null };
   };
   supplierFreshness: {
     supplierLastSyncedAt: string | null;

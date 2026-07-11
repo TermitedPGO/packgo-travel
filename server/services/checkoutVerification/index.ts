@@ -183,8 +183,25 @@ export async function verifyTourCheckout(args: {
   }
 
   // 幣別基準:UV 一律 USD(pickDepartureAdultPrice 的尺就是 USD)。
+  // booking.currency 型別上 non-null,但 runtime 資料異常(舊列/髒資料)可能缺 —
+  // 依模組「絕不 throw」不變式,缺失直接收斂成 currency_missing 擋單
+  // (指揮驗收回令 2026-07-11:冒泡 TypeError 雖也 fail-closed,但要跟宣稱的合約一致)。
+  const bookingCurrency =
+    typeof booking.currency === "string" && booking.currency
+      ? booking.currency.toUpperCase()
+      : null;
   const departureCurrency = (departure.currency ?? "").toUpperCase() || null;
-  if (booking.currency.toUpperCase() !== "USD" || departureCurrency !== "USD") {
+  if (!bookingCurrency) {
+    return finish(
+      "failed",
+      "blocked",
+      "currency_missing",
+      { currency: { booking: null, departure: departureCurrency, live: null } },
+      EMPTY_STORED_DETAIL,
+      [],
+    );
+  }
+  if (bookingCurrency !== "USD" || departureCurrency !== "USD") {
     return finish(
       "failed",
       "blocked",

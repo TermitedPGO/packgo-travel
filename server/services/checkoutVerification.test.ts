@@ -243,6 +243,20 @@ describe("verifyTourCheckout — fail-closed blocks (紅)", () => {
     expect(a.getProductMain).not.toHaveBeenCalled();
   });
 
+  it("booking 幣別缺失(runtime 髒資料)→ currency_missing,不 throw、不打 live(絕不 throw 不變式)", async () => {
+    const { api: a, result } = run({ b: { currency: null as any } });
+    const r = await result; // 不 reject = 不變式成立
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe("currency_missing");
+    expect(r.verification.checks.currency).toEqual({
+      booking: null,
+      departure: "USD",
+      live: null,
+    });
+    expect(a.getProductMain).not.toHaveBeenCalled();
+    expect(a.getProductGroup).not.toHaveBeenCalled();
+  });
+
   it("(a) 供應商端商品已下架(responseResult 軟失敗)→ product_not_on_sale", async () => {
     const { result } = run({
       api: {
