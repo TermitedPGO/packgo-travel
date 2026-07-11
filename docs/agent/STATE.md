@@ -1,13 +1,11 @@
 # 指揮交接檔(每批收尾由指揮更新,30 行封頂)
-> 2026-07-10 by Fable
-- prod:v808(2026-07-10 部署;F2 財務合規全案八 commit + migration 0114 經 release 套用;閘 6.5 SQL 彩排 238/238)。F2 內容:塊A systemAudit、塊B 認列閉環+轉帳偵測+看門狗、塊C Square 對映(不接自動分類+LLM 後衛 RATIFIED)、塊D flag 收口(P&L+稅表/財報/趨勢四口徑對稱、部分退款擋下轉人工、feature-flags.md)。指揮四輪驗收全 PASS;全套 338 檔 4958 測綠(ship 時)。
-- v808 走查完:四項 PASS;真發現 PLAID 遞延 flag prod 實為 ON(既有,Jeff 裁決維持開,v808 認列加回即刻生效);看門狗首跑 7/13 週一 12:00 UTC(預期叫一次 drift 卡)。報告 finance-dept/v808-walkthrough-20260710.md。
-- prod v810(2026-07-11:R4 必付真修 + 分艙 Phase 0 + 臨時停止線 tour 即時結帳 fail-closed 轉詢位)。試批 16 團 live 且已用 v810 重跑刷新(updatedAt 核實),等 Jeff 驗貨 → UV 全量。checkout-verify 大批(UV 即時驗位驗價 + 揭露存證)施工中,完成後 v811 恢復即時可訂。
-- 分艙:藍圖 storefront-split/plan.md(四階段);Phase 0 完;Phase 1+ 等 Jeff 點頭域名(packgoplay.com=客人站/ops.packgoplay.com=後台)與開第二 Fly app;指揮已裁:同源反代寫入、分階段收緊唯讀、Redis 共用。P3 備忘:掃描守門前綴白名單擴充、upload-chat-image 收編。
-- 外部 AI 交流:第一輪雙向存檔(external-exchange-round1*);八條採納進 BACKLOG;Jeff 裁分歧一=控團成本成立一半,下訂模式定型(驗位/請款時點)升線三硬前置。
-- 供給裁決現況:Jeff 驗 16 團 → UV 全量與精選層並行案等最終點頭;貨架放量綁每單 Jeff 分鐘數量測。
-- 基建改案(2026-07-10):Mac mini 延後;Windows 常駐工位(docs/infra/windows-resident-setup.md,等 Jeff 規格回報)+ MacBook 回家補課(iMessage 增量,Wave4 時實作)。
-- 等 Jeff:①ship v808 ②裁決五題:TiDB 備份保留期查一眼/商品圖三選一(供應商圖-無圖-AI 生圖)/目錄重建 go/通道波次(0 內部合併→1 LINE→2 Meta→3 WeChat OA→4 iMessage 只收)/iMessage 桌面腳本裝否 ③Trust drift -$10,442 查核 ④321 筆/$448,022 分批認領節奏 ⑤CPA §17550;Square ACH HOLD ±$3,106 歸類看一眼。
-- 鐵閘:兩遞延 flag 保持 OFF,翻 flag = Jeff 單獨裁決(前置與走查單在 finance-dept/feature-flags.md);pnpm ship 只有 Jeff;prod schema 只准 tracked migration 經 release_command。
-- 佇列:F3-polish(Jeff 嫌棄清單)→ F4(建議卡+省稅);線二通道 Wave0 內部合併(candidate,等波次拍板);線三目錄重建(等圖片+go 裁決);硬化 Wave3。
-- 慣例:執行者只讀自己的派工單;歷史在各 feature 的 archive/;本檔是唯一狀態源。
+> 2026-07-11 by Fable
+- prod:v810(R4 必付真修 + 分艙 Phase 0 + 臨時停止線)。v808=F2 財務合規全案(四輪驗收 PASS);v809=線三重建前置 R1-R3。
+- 線三現況:試批 16 團 live 且已用 v810 刷新(updatedAt 核實;25 進 9 被門檻正確擋),等 Jeff 驗貨 → UV 全量約 475 + 首頁精選層;雄獅橋接已修好待試批。checkout-verify 大批(UV 結帳前即時驗位驗價 + 付款前揭露存證,migration 0116 預授權)施工中,完成後 v811 恢復「驗證通過才可訂」;現按鈕=提交訂位需求,伺服器 fail-closed 擋 tour 即時收款(flag TOUR_INSTANT_CHECKOUT_ENABLED 預設 OFF)。
+- 分艙:plan.md 四階段;Phase 0 完(OFF byte-identical);Phase 1+ 等 Jeff 點頭域名(packgoplay.com=客人站/ops.packgoplay.com=後台)+ 開第二 Fly app。指揮已裁:同源反代寫入/分階段收緊唯讀/Redis 共用。P3 備忘:掃描守門前綴擴充、upload-chat-image 收編。
+- 外部 AI 交流:兩輪存檔(external-exchange-round1/2*),分歧歸零。重要採納:交易三模式(即時可訂/授權後確認/詢位制,按供應商能力)、可展示/可索引/可收款三態(稀疏頁 noindex)、DB 硬化驗收規格(實測 DDL 被拒/真實還原演練/RPO-RTO)、郵件放權分層樣本、容量指標組(北極星=每小時 Jeff 稀缺時間貢獻毛利)、「證據就緒等 Jeff」佇列限流。
+- 財務:v808 走查四項 PASS;PLAID 遞延 flag prod 實為 ON(Jeff 裁決維持,認列加回已生效);STRIPE flag 保持 OFF;看門狗首跑 7/13 週一 12:00 UTC(預期叫一次 drift 卡)。F4 省稅顧問凍結至 CPA 矩陣+差異查核完成。
+- 等 Jeff:①驗貨 16 團(主閘,點頭放 UV 全量)②分艙域名點頭 ③TiDB 備份保留期看一眼 ④通道波次點頭 ⑤Windows 規格三個數 ⑥Trust drift 六桶查核結果(指揮跑)後的處置 ⑦321 筆分批認領節奏 ⑧CPA 判斷矩陣送出。
+- 待指揮(預授權,依序):checkout-verify 驗收 → DB 權限隔離+還原演練批(驗收規格照 round2 第六節)→ 信託差異六桶查核 → 雄獅試批 → 行程頁翻修+路線圖設計提案(多引擎競比,Codex 參賽)。
+- 鐵閘:pnpm ship 只有 Jeff;AI 不動錢;prod schema 只准 tracked migration;供應商成本/圖不上客面。
+- 慣例:執行者只讀自己的派工單;歷史在各 feature archive/;本檔是唯一狀態源。
