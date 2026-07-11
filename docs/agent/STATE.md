@@ -2,7 +2,7 @@
 > 2026-07-10 by Fable
 - prod:v808(2026-07-10 部署;F2 財務合規全案八 commit + migration 0114 經 release 套用;閘 6.5 SQL 彩排 238/238)。F2 內容:塊A systemAudit、塊B 認列閉環+轉帳偵測+看門狗、塊C Square 對映(不接自動分類+LLM 後衛 RATIFIED)、塊D flag 收口(P&L+稅表/財報/趨勢四口徑對稱、部分退款擋下轉人工、feature-flags.md)。指揮四輪驗收全 PASS;全套 338 檔 4958 測綠(ship 時)。
 - v808 走查完:四項 PASS;真發現 PLAID 遞延 flag prod 實為 ON(既有,Jeff 裁決維持開,v808 認列加回即刻生效);看門狗首跑 7/13 週一 12:00 UTC(預期叫一次 drift 卡)。報告 finance-dept/v808-walkthrough-20260710.md。
-- prod v809(R1-R3);試批已跑:16 團 live(25 進 9 被門檻擋),價格核對過、圖+署名齊,煙霧八臂全綠。待 ship v810:R4 必付真修(現 16 團費用區是舊解析,v810 後指揮重跑試批刷新)+ 分艙 Phase 0(STOREFRONT_MODE 旗標,OFF byte-identical,驗收 PASS 已併 main)。
+- prod v810(2026-07-11:R4 必付真修 + 分艙 Phase 0 + 臨時停止線 tour 即時結帳 fail-closed 轉詢位)。試批 16 團 live 且已用 v810 重跑刷新(updatedAt 核實),等 Jeff 驗貨 → UV 全量。checkout-verify 大批(UV 即時驗位驗價 + 揭露存證)施工中,完成後 v811 恢復即時可訂。
 - 分艙:藍圖 storefront-split/plan.md(四階段);Phase 0 完;Phase 1+ 等 Jeff 點頭域名(packgoplay.com=客人站/ops.packgoplay.com=後台)與開第二 Fly app;指揮已裁:同源反代寫入、分階段收緊唯讀、Redis 共用。P3 備忘:掃描守門前綴白名單擴充、upload-chat-image 收編。
 - 外部 AI 交流:第一輪雙向存檔(external-exchange-round1*);八條採納進 BACKLOG;Jeff 裁分歧一=控團成本成立一半,下訂模式定型(驗位/請款時點)升線三硬前置。
 - 供給裁決現況:Jeff 驗 16 團 → UV 全量與精選層並行案等最終點頭;貨架放量綁每單 Jeff 分鐘數量測。
