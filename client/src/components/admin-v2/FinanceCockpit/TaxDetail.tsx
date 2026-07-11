@@ -4,17 +4,18 @@
  * 駕駛艙是「現在 + 要你做的事」,這頁是往下鑽的細節:期間切換 → KPI → 月度
  * 趨勢(plMonthlyTrend)→ Schedule C 對照(profitLossReport.scheduleCMap 真
  * 對映)→ Trust 對稅時點 → 已排除防雙計 → 1099-NEC(vendor1099List)→
- * 1040-ES(後端無算法,誠實「待建」)→ 匯出(ZIP 接現成 yearEndExport;
- * Schedule C CSV 端點沒有,掛 disabled 待建標,不本批造)。
+ * 匯出(ZIP 接現成 yearEndExport)。
  * 數據全接真源;金額權威在 server(generateBankPL),此處不重算。
+ *
+ * F-workbench(2026-07-11):KPI strip / Trust 對稅時點 / 1099-NEC 補錯誤態
+ * (query 失敗顯「讀取失敗」,不再靜默顯 $0 / 空);1040-ES 卡與 Schedule C
+ * CSV 鈕整個移除(端點/算法不存在的佔位假功能違反誠實原則,見原位註解)。
  */
 import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import {
   Archive,
-  ArrowDownToLine,
-  Calendar,
   CheckCircle2,
   FileText,
   Info,
@@ -220,69 +221,95 @@ export function TaxDetail() {
         </span>
       </div>
 
-      {/* KPI strip(4 格) */}
+      {/* KPI strip(4 格)—— F-workbench:query 失敗顯示錯誤態,不再靜默顯 $0
+          (錯當空會讓 Jeff 誤信「沒有」;checkup 第三節)。前三格與待複查格
+          吃 profitLossReport(cur),Trust 格吃 trustReconciliation。 */}
       <div className="mb-6 grid grid-cols-2 overflow-hidden rounded-xl border border-gray-200 bg-white lg:grid-cols-4">
         <div className="border-l border-gray-100 p-3 first:border-l-0 sm:px-4">
           <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
             {t("financeCockpit.tax.kpiRevenue", { scope: scopeLabel })}
           </div>
-          <div className="mt-2 text-[21px] font-bold leading-none tracking-tight text-gray-900 tabular-nums">
-            {fmtMoney(grossReceipts)}
-          </div>
-          <div className="mt-1.5 truncate text-[10px] text-gray-400">
-            {refunds !== 0 ? (
-              t("financeCockpit.tax.kpiRevenueRefundHint", {
-                refund: fmtSignedMoney(-refunds),
-                net: fmtMoney(income),
-              })
-            ) : growth !== null ? (
-              <>
-                <span className="font-semibold text-emerald-700">
-                  {growth >= 0 ? "↑" : "↓"} {Math.abs(growth)}%
-                </span>{" "}
-                {t("financeCockpit.tax.kpiVsPrev")}
-              </>
-            ) : (
-              t("financeCockpit.tax.kpiNoPrev")
-            )}
-          </div>
+          {cur.isError ? (
+            <KpiError label={t("financeCockpit.truth.loadError")} />
+          ) : (
+            <>
+              <div className="mt-2 text-[21px] font-bold leading-none tracking-tight text-gray-900 tabular-nums">
+                {fmtMoney(grossReceipts)}
+              </div>
+              <div className="mt-1.5 truncate text-[10px] text-gray-400">
+                {refunds !== 0 ? (
+                  t("financeCockpit.tax.kpiRevenueRefundHint", {
+                    refund: fmtSignedMoney(-refunds),
+                    net: fmtMoney(income),
+                  })
+                ) : growth !== null ? (
+                  <>
+                    <span className="font-semibold text-emerald-700">
+                      {growth >= 0 ? "↑" : "↓"} {Math.abs(growth)}%
+                    </span>{" "}
+                    {t("financeCockpit.tax.kpiVsPrev")}
+                  </>
+                ) : (
+                  t("financeCockpit.tax.kpiNoPrev")
+                )}
+              </div>
+            </>
+          )}
         </div>
         <div className="border-l border-gray-100 p-3 sm:px-4">
           <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
             {t("financeCockpit.tax.kpiNet")}
           </div>
-          <div
-            className={`mt-2 text-[21px] font-bold leading-none tracking-tight tabular-nums ${
-              net > 0 ? "text-emerald-700" : net < 0 ? "text-red-700" : "text-gray-400"
-            }`}
-          >
-            {fmtMoney(net)}
-          </div>
-          <div className="mt-1.5 truncate text-[10px] text-gray-400">
-            {t("financeCockpit.tax.kpiNetHint", { pct: String(profitMargin(income, net)) })}
-          </div>
+          {cur.isError ? (
+            <KpiError label={t("financeCockpit.truth.loadError")} />
+          ) : (
+            <>
+              <div
+                className={`mt-2 text-[21px] font-bold leading-none tracking-tight tabular-nums ${
+                  net > 0 ? "text-emerald-700" : net < 0 ? "text-red-700" : "text-gray-400"
+                }`}
+              >
+                {fmtMoney(net)}
+              </div>
+              <div className="mt-1.5 truncate text-[10px] text-gray-400">
+                {t("financeCockpit.tax.kpiNetHint", { pct: String(profitMargin(income, net)) })}
+              </div>
+            </>
+          )}
         </div>
         <div className="border-l border-gray-100 p-3 sm:px-4">
           <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
             {t("financeCockpit.tax.kpiTrust")}
           </div>
-          <div className="mt-2 text-[21px] font-bold leading-none tracking-tight text-amber-600 tabular-nums">
-            {fmtMoney(trustAgg.outstanding)}
-          </div>
-          <div className="mt-1.5 truncate text-[10px] text-gray-400">
-            {t("financeCockpit.tax.kpiTrustHint")}
-          </div>
+          {trustRecon.isError ? (
+            <KpiError label={t("financeCockpit.truth.loadError")} />
+          ) : (
+            <>
+              <div className="mt-2 text-[21px] font-bold leading-none tracking-tight text-amber-600 tabular-nums">
+                {fmtMoney(trustAgg.outstanding)}
+              </div>
+              <div className="mt-1.5 truncate text-[10px] text-gray-400">
+                {t("financeCockpit.tax.kpiTrustHint")}
+              </div>
+            </>
+          )}
         </div>
         <div className="border-l border-gray-100 p-3 sm:px-4">
           <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
             {t("financeCockpit.tax.kpiReview")}
           </div>
-          <div className="mt-2 text-[21px] font-bold leading-none tracking-tight text-gray-900 tabular-nums">
-            {t("financeCockpit.tax.kpiReviewValue", { count: String(r?.needsReviewCount ?? 0) })}
-          </div>
-          <div className="mt-1.5 truncate text-[10px] text-gray-400">
-            {t("financeCockpit.tax.kpiReviewHint")}
-          </div>
+          {cur.isError ? (
+            <KpiError label={t("financeCockpit.truth.loadError")} />
+          ) : (
+            <>
+              <div className="mt-2 text-[21px] font-bold leading-none tracking-tight text-gray-900 tabular-nums">
+                {t("financeCockpit.tax.kpiReviewValue", { count: String(r?.needsReviewCount ?? 0) })}
+              </div>
+              <div className="mt-1.5 truncate text-[10px] text-gray-400">
+                {t("financeCockpit.tax.kpiReviewHint")}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -525,6 +552,9 @@ export function TaxDetail() {
               </div>
               <div className="text-[11px] text-gray-500">CST §17550</div>
             </div>
+            {/* F-workbench:兩行各自的資料源(recognized / trustRecon)失敗時
+                顯示錯誤態,不再把錯誤靜默蓋成 $0(現況本就全 $0,錯誤會被
+                永久性 $0 蓋掉;checkup 第三節)。 */}
             <div className="px-4 py-1">
               <div className="flex items-baseline justify-between py-2 text-xs">
                 <span className="text-gray-600">
@@ -533,7 +563,11 @@ export function TaxDetail() {
                     {t("financeCockpit.tax.trustRecognizedSub")}
                   </span>
                 </span>
-                <span className="font-semibold text-gray-900 tabular-nums">{fmtMoney(recognizedThisYear)}</span>
+                {recognized.isError ? (
+                  <InlineError label={t("financeCockpit.truth.loadError")} />
+                ) : (
+                  <span className="font-semibold text-gray-900 tabular-nums">{fmtMoney(recognizedThisYear)}</span>
+                )}
               </div>
               <div className="flex items-baseline justify-between border-t border-gray-50 py-2 text-xs">
                 <span className="text-gray-600">
@@ -542,7 +576,11 @@ export function TaxDetail() {
                     {t("financeCockpit.tax.trustDeferredSub")}
                   </span>
                 </span>
-                <span className="font-semibold text-amber-700 tabular-nums">{fmtMoney(trustAgg.outstanding)}</span>
+                {trustRecon.isError ? (
+                  <InlineError label={t("financeCockpit.truth.loadError")} />
+                ) : (
+                  <span className="font-semibold text-amber-700 tabular-nums">{fmtMoney(trustAgg.outstanding)}</span>
+                )}
               </div>
             </div>
             <div className={noteCls}>
@@ -601,6 +639,12 @@ export function TaxDetail() {
               <div className="animate-pulse p-4">
                 <div className="h-16 rounded bg-gray-50" />
               </div>
+            ) : vendors.isError ? (
+              /* F-workbench:錯誤態不再被 `?? []` 吃成「無 1099 廠商」空態
+                 (把錯當空會讓 Jeff 誤信不用開 1099;checkup 第三節)。 */
+              <div className="px-4 py-5 text-center text-xs text-gray-400">
+                {t("financeCockpit.truth.loadError")}
+              </div>
             ) : (vendors.data?.vendors ?? []).length === 0 ? (
               <div className="px-4 py-5 text-center text-xs text-gray-400">
                 {t("financeCockpit.tax.ten99Empty")}
@@ -627,32 +671,9 @@ export function TaxDetail() {
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-            <div className={cardH}>
-              <div className={cardT}>
-                <Calendar className="h-3.5 w-3.5 text-gray-400" />
-                {t("financeCockpit.tax.esTitle")}
-              </div>
-              <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-amber-700">
-                <span className="h-[5px] w-[5px] rounded-full bg-current" />
-                {t("financeCockpit.tax.esPending")}
-              </span>
-            </div>
-            <div className="grid grid-cols-4 gap-2 px-4 py-3">
-              {["Q1", "Q2", "Q3", "Q4"].map((q) => (
-                <div key={q} className="rounded-lg border border-gray-200 px-3 py-2 text-center">
-                  <div className="text-[10px] text-gray-400">{q}</div>
-                  <div className="mt-1 text-xs font-semibold text-gray-400">
-                    {t("financeCockpit.tax.esPending")}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className={noteCls}>
-              <Info className="mt-0.5 h-3 w-3 flex-shrink-0 text-gray-300" />
-              {t("financeCockpit.tax.esNote")}
-            </div>
-          </div>
+          {/* F-workbench 移除「1040-ES 季繳」卡:後端無預估稅算法,Q1–Q4 永遠
+              hardcode「待建」——佔位假功能違反誠實原則(每天佔一塊版面顯示空殼)。
+              等後端真有 1040-ES 計算(需聯邦+加州有效稅率設定)再帶著真資料回來。 */}
         </div>
       </div>
 
@@ -663,24 +684,9 @@ export function TaxDetail() {
         <div className="h-px flex-1 bg-gray-100" />
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        {/* Schedule C CSV:端點沒有 → disabled + 待建標(不本批造) */}
-        <button
-          type="button"
-          disabled
-          className="inline-flex cursor-not-allowed items-center gap-2.5 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-left opacity-70"
-        >
-          <ArrowDownToLine className="h-4 w-4 flex-shrink-0 text-gray-400" />
-          <span>
-            <span className="flex items-center gap-2 text-[13px] font-medium text-gray-500">
-              {t("financeCockpit.tax.exportCsvTitle")}
-              <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-amber-700">
-                <span className="h-[5px] w-[5px] rounded-full bg-current" />
-                {t("financeCockpit.tax.esPending")}
-              </span>
-            </span>
-            <span className="mt-px block text-[10px] text-gray-400">{t("financeCockpit.tax.exportCsvDesc")}</span>
-          </span>
-        </button>
+        {/* F-workbench 移除「Schedule C CSV」匯出鈕:端點不存在,永久 disabled
+            的死控制項 = 佔位假功能,違反誠實原則。年度報稅包 ZIP(下方)已含
+            Schedule C 摘要;等 CSV 端點真的存在再帶著可按的鈕回來。 */}
         {/* 年度報稅包 ZIP:接現成 yearEndExport */}
         <button
           type="button"
@@ -703,6 +709,26 @@ export function TaxDetail() {
         <span className="text-[11px] text-gray-400">{t("financeCockpit.tax.exportHint")}</span>
       </div>
     </div>
+  );
+}
+
+/** KPI 格錯誤態(dot + 文字,不填底 —— 設計裁決同狀態色規範)。 */
+function KpiError({ label }: { label: string }) {
+  return (
+    <div className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-red-700">
+      <span className="h-[5px] w-[5px] flex-shrink-0 rounded-full bg-red-500" />
+      {label}
+    </div>
+  );
+}
+
+/** 行內金額位置的錯誤態(取代金額,dot + 文字)。 */
+function InlineError({ label }: { label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-700">
+      <span className="h-[5px] w-[5px] flex-shrink-0 rounded-full bg-red-500" />
+      {label}
+    </span>
   );
 }
 

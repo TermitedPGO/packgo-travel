@@ -6,8 +6,13 @@
  *   2) 訂單搜尋逃生口(候選不對時,用單號 / 客人名 / 團名搜 customOrders)
  *   3) 內部分類(鎖 SCHEDULE_C_MAP 枚舉,禁自由文字 —— claimCategories.ts)
  *
- * 認領永遠是 Jeff 按的;AI 只把候選擺上來。成功後 invalidate listPending /
- * pendingSummary(server 端也主動失效 Redis 快取,真相列不滯後)。
+ * 認領永遠是 Jeff 按的;AI 只把候選擺上來。成功後不再 invalidate 全量重抓
+ * (listPending 逐筆 dry-run + pendingSummary 全掃,每筆認領都卡一下)——
+ * 改回呼 onClaimed 讓 parent 做本地 cache 手術(移除該列 + 彙總遞減);
+ * server 端已主動失效 Redis 快取,下一輪 poll 自然對真(F-workbench #3)。
+ *
+ * 類別記憶(F-workbench):parent 傳 defaultCategory(上次認領選的類別),
+ * 沒有候選預選時以它起始 —— 連續把 50 筆歸同一類不用每筆重選下拉。
  */
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
@@ -43,23 +48,36 @@ type Choice =
 export function ClaimDialog({
   item,
   initialOrderId,
+  defaultCategory = null,
+  onClaimed,
   onClose,
 }: {
   /** 待認領列(null = 關閉)。 */
   item: PendingItem | null;
   /** 從表上點了候選 chip 進來時的預選訂單。 */
   initialOrderId: number | null;
+  /** 上次認領選的內部分類(類別記憶);無候選預選時以它起始。 */
+  defaultCategory?: ClaimCategory | null;
+  /**
+   * 認領成功回呼:parent 做本地 cache 手術(取代全量 invalidate)+ 記住
+   * 這次選的類別(order 認領時 category 為 null)。
+   */
+  onClaimed?: (
+    claim: { bankTransactionId: number; amount: number },
+    category: ClaimCategory | null,
+  ) => void;
   onClose: () => void;
 }) {
   const { t } = useLocale();
-  const utils = trpc.useUtils();
 
   // key 隨 item 變化重掛(dialog 每次打開都是乾淨狀態)—— 由 parent 控制。
   const preset = item?.candidates.find((c) => c.orderId === initialOrderId) ?? null;
   const [choice, setChoice] = useState<Choice>(
     preset
       ? { kind: "order", orderId: preset.orderId, orderNumber: preset.orderNumber, label: preset.title }
-      : null,
+      : defaultCategory
+        ? { kind: "category", categoryCode: defaultCategory }
+        : null,
   );
   const [amountStr, setAmountStr] = useState("");
   const [note, setNote] = useState("");
@@ -71,9 +89,11 @@ export function ClaimDialog({
   );
 
   const claim = trpc.bankTransactionLinks.claim.useMutation({
-    onSuccess: () => {
-      utils.bankTransactionLinks.listPending.invalidate();
-      utils.bankTransactionLinks.pendingSummary.invalidate();
+    onSuccess: (_out, vars) => {
+      onClaimed?.(
+        { bankTransactionId: vars.bankTransactionId, amount: vars.amountAllocated },
+        vars.targetType === "category" ? ((vars.categoryCode ?? null) as ClaimCategory | null) : null,
+      );
       toast.success(t("financeCockpit.claim.toastClaimed"));
       onClose();
     },

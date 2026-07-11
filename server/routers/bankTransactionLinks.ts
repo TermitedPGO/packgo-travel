@@ -34,6 +34,7 @@ import {
   processInboundTransaction,
   createBankTransactionLink,
   AllocationExceededError,
+  type UnlinkedInflowCursor,
 } from "../services/bankTransactionLinkEngine";
 import { ACCOUNTING_CATEGORIES } from "../agents/autonomous/accountingAgent";
 import { laToday } from "../services/trustOutstandingSplit";
@@ -85,11 +86,82 @@ export function summarizeAutoLinked(
   return { count: rows.length, totalAmount: Math.round(total * 100) / 100 };
 }
 
+/* ── 認領輸入 schema(claim 單筆與 batchClaim 逐筆共用同一份驗證)──────────── */
+
+const claimItemSchema = z.object({
+  bankTransactionId: z.number().int().positive(),
+  targetType: z.enum(["custom_order", "invoice", "booking", "category"]),
+  targetId: z.number().int().positive().optional(),
+  // server 端也鎖 SCHEDULE_C_MAP 枚舉(defense in depth,原本只有 client 下拉鎖)。
+  categoryCode: z.enum(ACCOUNTING_CATEGORIES).optional(),
+  amountAllocated: z.number().positive(),
+  note: z.string().trim().max(1000).optional(),
+});
+type ClaimItemInput = z.infer<typeof claimItemSchema>;
+
+/** 一次批次認領最多幾筆(擋無界請求;一人公司單批清帳綽綽有餘)。 */
+const BATCH_CLAIM_MAX = 200;
+
+/**
+ * 單筆認領的真相寫入路徑(claim 與 batchClaim 逐筆都經這支)—— 同一套跨欄位
+ * 驗證 + createBankTransactionLink + 逐筆 auditLog。批次沿用它,稽核逐筆落、
+ * 絕不合併成一條(dispatch 鐵律 #5)。快取失效由呼叫端統一在最後做一次。
+ */
+async function performClaim(ctx: any, input: ClaimItemInput): Promise<{ id: number }> {
+  if (input.targetType === "category" && !input.categoryCode) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "categoryCode required when targetType='category'" });
+  }
+  if (input.targetType !== "category" && !input.targetId) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "targetId required for custom_order/invoice/booking" });
+  }
+
+  const { id } = await createBankTransactionLink({
+    bankTransactionId: input.bankTransactionId,
+    targetType: input.targetType,
+    targetId: input.targetId ?? null,
+    categoryCode: input.categoryCode ?? null,
+    amountAllocated: input.amountAllocated,
+    matchMethod: "manual",
+    matchConfidence: 100,
+    claimedBy: "jeff",
+    note: input.note ?? null,
+  });
+
+  await audit({
+    ctx,
+    action: "bankTransactionLink.claim",
+    targetType: "bankTransaction",
+    targetId: input.bankTransactionId,
+    changes: {
+      linkId: id,
+      targetType: input.targetType,
+      targetId: input.targetId ?? null,
+      categoryCode: input.categoryCode ?? null,
+      amountAllocated: input.amountAllocated,
+    },
+  });
+
+  return { id };
+}
+
 export const bankTransactionLinksRouter = router({
   listPending: adminProcedure
-    .input(z.object({ limit: z.number().int().positive().max(200).optional() }).optional())
+    .input(
+      z
+        .object({
+          limit: z.number().int().positive().max(200).optional(),
+          // keyset 游標(上一頁最後一列)—— 讓 UI 用「載入更多」推進掃描窗,
+          // 整條背帳(>200 筆)都搆得到,不再被 200 硬天花板擋住。
+          cursor: z
+            .object({ date: z.string(), id: z.number().int().positive() })
+            .nullish(),
+        })
+        .optional(),
+    )
     .query(async ({ input }) => {
-      const unlinked = await scanUnlinkedInflows({ limit: input?.limit ?? 100 });
+      const limit = input?.limit ?? 100;
+      const cursor: UnlinkedInflowCursor | null = input?.cursor ?? null;
+      const unlinked = await scanUnlinkedInflows({ limit, cursor });
       const items: Array<{
         bankTransactionId: number;
         amount: number;
@@ -116,7 +188,16 @@ export const bankTransactionLinksRouter = router({
           })),
         });
       }
-      return { items };
+
+      // 游標推進掃描窗:以「這一頁最後一筆掃到的列」(非最後一筆 pending,
+      // 因為有些會被 dry-run 判為 auto-link 濾掉)為下一頁起點。掃到滿一頁
+      // (=limit)才可能還有更多;不足一頁代表背帳掃完。
+      const lastScanned = unlinked.length > 0 ? unlinked[unlinked.length - 1] : null;
+      const hasMore = unlinked.length === limit;
+      const nextCursor =
+        hasMore && lastScanned ? { date: lastScanned.date, id: lastScanned.id } : null;
+
+      return { items, nextCursor, hasMore };
     }),
 
   pendingSummary: adminProcedure.query(async (): Promise<PendingSummary> => {
@@ -232,56 +313,12 @@ export const bankTransactionLinksRouter = router({
     }),
 
   claim: adminProcedure
-    .input(
-      z.object({
-        bankTransactionId: z.number().int().positive(),
-        targetType: z.enum(["custom_order", "invoice", "booking", "category"]),
-        targetId: z.number().int().positive().optional(),
-        // F3 塊C 小修(2026-07-10):server 端也鎖 SCHEDULE_C_MAP 枚舉(defense in
-        // depth,原本只有 client 下拉鎖)。自動 link 不走本 procedure,不受影響。
-        categoryCode: z.enum(ACCOUNTING_CATEGORIES).optional(),
-        amountAllocated: z.number().positive(),
-        note: z.string().trim().max(1000).optional(),
-      }),
-    )
+    .input(claimItemSchema)
     .mutation(async ({ ctx, input }) => {
-      if (input.targetType === "category" && !input.categoryCode) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "categoryCode required when targetType='category'" });
-      }
-      if (input.targetType !== "category" && !input.targetId) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "targetId required for custom_order/invoice/booking" });
-      }
-
       try {
-        const { id } = await createBankTransactionLink({
-          bankTransactionId: input.bankTransactionId,
-          targetType: input.targetType,
-          targetId: input.targetId ?? null,
-          categoryCode: input.categoryCode ?? null,
-          amountAllocated: input.amountAllocated,
-          matchMethod: "manual",
-          matchConfidence: 100,
-          claimedBy: "jeff",
-          note: input.note ?? null,
-        });
-
-        await audit({
-          ctx,
-          action: "bankTransactionLink.claim",
-          targetType: "bankTransaction",
-          targetId: input.bankTransactionId,
-          changes: {
-            linkId: id,
-            targetType: input.targetType,
-            targetId: input.targetId ?? null,
-            categoryCode: input.categoryCode ?? null,
-            amountAllocated: input.amountAllocated,
-          },
-        });
-
+        const { id } = await performClaim(ctx, input);
         // 認領成功 → 待認領彙總變了,主動失效快取(F3 塊B)。
         await bustPendingSummaryCache();
-
         return { id };
       } catch (err) {
         if (err instanceof AllocationExceededError) {
@@ -289,6 +326,48 @@ export const bankTransactionLinksRouter = router({
         }
         throw err;
       }
+    }),
+
+  /**
+   * batchClaim —— 多筆一次認領(F-workbench)。仍是 Jeff 手動勾選後親自按下的
+   * 批次化,不是自動認領:AI 不動錢紅線未破,只是把「一筆一 dialog」的體力活
+   * 收成一次提交。逐筆走 performClaim(同單筆的驗證 + 稽核,逐筆落 audit 不
+   * 合併);一筆失敗其餘照常,結果逐筆回報。至少一筆成功才失效快取一次
+   * (避免每筆各失效一次)。
+   */
+  batchClaim: adminProcedure
+    .input(z.object({ items: z.array(claimItemSchema).min(1).max(BATCH_CLAIM_MAX) }))
+    .mutation(async ({ ctx, input }) => {
+      const results: Array<{
+        bankTransactionId: number;
+        ok: boolean;
+        linkId?: number;
+        error?: string;
+      }> = [];
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const item of input.items) {
+        try {
+          const { id } = await performClaim(ctx, item);
+          results.push({ bankTransactionId: item.bankTransactionId, ok: true, linkId: id });
+          successCount++;
+        } catch (err) {
+          // 部分失敗:這一筆記錯、其餘照跑(超額 / 缺欄位 / DB 競態都在此收斂)。
+          const error =
+            err instanceof AllocationExceededError || err instanceof TRPCError
+              ? err.message
+              : err instanceof Error
+                ? err.message
+                : "claim failed";
+          results.push({ bankTransactionId: item.bankTransactionId, ok: false, error });
+          failCount++;
+        }
+      }
+
+      if (successCount > 0) await bustPendingSummaryCache();
+
+      return { results, successCount, failCount };
     }),
 
   unlink: adminProcedure
