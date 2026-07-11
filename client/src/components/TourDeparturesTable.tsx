@@ -25,6 +25,9 @@ interface Props {
   basePrice: number;
   baseCurrency?: string;
   themeColor?: { primary: string; secondary?: string };
+  /** 停止線(2026-07-10):提供時,每列 CTA 走「提交訂位需求」詢位流,不直連即時
+   *  結帳。未提供時維持舊 Link 行為(向後相容)。 */
+  onReserve?: () => void;
 }
 
 export default function TourDeparturesTable({
@@ -32,6 +35,7 @@ export default function TourDeparturesTable({
   basePrice,
   baseCurrency = "TWD",
   themeColor,
+  onReserve,
 }: Props) {
   const { language, formatPrice, t } = useLocale();
   const isEN = language === "en";
@@ -208,6 +212,16 @@ export default function TourDeparturesTable({
                         {isFull ? (
                           <Button variant="outline" size="sm" disabled className="rounded-lg">
                             {t("tourDeparturesTable.soldOutCta")}
+                          </Button>
+                        ) : onReserve ? (
+                          // 停止線:提交訂位需求(詢位流),不直連即時結帳。
+                          <Button
+                            size="sm"
+                            onClick={onReserve}
+                            className="rounded-lg text-white whitespace-nowrap"
+                            style={{ backgroundColor: themeColor?.primary || "#0d9488" }}
+                          >
+                            {t("tourDetail.action.cta.reserveRequest")}
                           </Button>
                         ) : (
                           <Link href={`/book/${tourId}?departureId=${dep.id}`}>

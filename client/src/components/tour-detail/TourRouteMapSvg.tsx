@@ -38,6 +38,7 @@ import { useMemo, useState, lazy, Suspense } from "react";
 import { trpc } from "@/lib/trpc";
 import { useLocale } from "@/contexts/LocaleContext";
 import { Map as MapIcon, ExternalLink, Loader2 } from "lucide-react";
+import { deriveItineraryCities } from "@/pages/TourDetailPeony/actionArea.helpers";
 
 // v359c — removed dead helpers:
 //   • themePhraseMap (35-entry dict of marketing phrase translations)
@@ -121,7 +122,6 @@ export default function TourRouteMapSvg({
     () => stops.filter((s) => s.lat !== 0 || s.lng !== 0),
     [stops]
   );
-  const mappedCount = mappedStops.length;
 
   // Round 80.21 v5 — server now returns primary cluster + outliers
   // separately. For the LEGEND chips below the map, we want ALL stops
@@ -148,8 +148,12 @@ export default function TourRouteMapSvg({
           lng: 0,
         }));
 
-  const subtitleText = mappedCount > 0
-    ? t("reviews.mapSubtitleWithStops", { days: String(itinerary.length), stops: String(mappedCount) })
+  // Wave 1 A.1: the「N 個地點」count comes from the SAME deduped-itinerary source
+  // as the hero city chip + overview card (not the geocoded-marker count, which
+  // disagreed). All three place counts now derive from deriveItineraryCities.
+  const placeCount = deriveItineraryCities(itinerary).length;
+  const subtitleText = placeCount > 0
+    ? t("reviews.mapSubtitleWithStops", { days: String(itinerary.length), stops: String(placeCount) })
     : t("reviews.mapSubtitle", { days: String(itinerary.length) });
 
   return (
@@ -279,7 +283,7 @@ function RouteFlowFallback({
         aria-hidden
       />
       <div className="absolute top-4 left-4 right-4 flex items-center justify-between">
-        <span className="text-[10px] md:text-xs tracking-[0.3em] uppercase text-[#c9a563] font-semibold">
+        <span className="text-[10px] md:text-xs tracking-[0.3em] uppercase text-[#80652D] font-semibold">
           {t("reviews.journeyFlow")}
         </span>
         <span className="text-[10px] md:text-xs text-gray-400 font-medium">

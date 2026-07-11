@@ -10,6 +10,7 @@ import {
   deriveGroupSize,
   deriveAvailabilityBucket,
   deriveAvailability,
+  deriveItineraryCities,
   buildInquiryInput,
   type DepartureLike,
   type InquirySummaryLabels,
@@ -192,16 +193,59 @@ describe("deriveAvailability", () => {
 
 describe("deriveGroupSize", () => {
   it("uses maxParticipants when present", () => {
-    expect(deriveGroupSize({ maxParticipants: 16 }, dep({ totalSlots: 30 }))).toBe(16);
+    expect(deriveGroupSize({ maxParticipants: 16 })).toBe(16);
   });
 
-  it("falls back to next departure totalSlots", () => {
-    expect(deriveGroupSize({ maxParticipants: null }, dep({ totalSlots: 20 }))).toBe(20);
+  // Wave 1 data-truth fix: totalSlots is per-departure seat INVENTORY (e.g. 50),
+  // not the small-group cap — the old fallback rendered「小團 50 人」. No
+  // structured maxParticipants → null (caller omits the chip, no guessing).
+  it("does NOT fall back to departure totalSlots (inventory ≠ group cap)", () => {
+    expect(deriveGroupSize({ maxParticipants: null })).toBeNull();
   });
 
-  it("returns null when neither is usable", () => {
-    expect(deriveGroupSize({ maxParticipants: 0 }, dep({ totalSlots: 0 }))).toBeNull();
-    expect(deriveGroupSize({ maxParticipants: null }, null)).toBeNull();
+  it("returns null when maxParticipants is missing or non-positive", () => {
+    expect(deriveGroupSize({ maxParticipants: 0 })).toBeNull();
+    expect(deriveGroupSize({ maxParticipants: null })).toBeNull();
+  });
+});
+
+describe("deriveItineraryCities", () => {
+  // Anchored on prod tour id 2 (2026-07-11 real-data hand-check): route-chain
+  // day titles split on "-" and dedupe across days, first-seen order.
+  it("splits route-chain titles and dedupes across days (prod tour 2)", () => {
+    const itin = [
+      { day: 1, title: "馬德里 - 阿維拉 - 薩拉曼卡" },
+      { day: 2, title: "薩拉曼卡 - 巴利亞多利德 - 佈爾戈斯" },
+      { day: 3, title: "佈爾戈斯 - 畢爾巴鄂 - 佈爾戈斯" },
+      { day: 4, title: "佈爾戈斯 - 塞戈維亞 - 昆卡" },
+      { day: 5, title: "昆卡 - 孔蘇埃格拉 - 托萊多 - 馬德里" },
+    ];
+    expect(deriveItineraryCities(itin)).toEqual([
+      "馬德里", "阿維拉", "薩拉曼卡", "巴利亞多利德", "佈爾戈斯",
+      "畢爾巴鄂", "塞戈維亞", "昆卡", "孔蘇埃格拉", "托萊多",
+    ]);
+  });
+
+  // Prod tours 7 / 9: descriptive one-day titles. The tour-type suffix is
+  // stripped so the overview destination card shows the PLACE, never a tour
+  // name like「西峽谷一日遊」.
+  it("strips tour-type suffixes from descriptive day titles (prod tours 7/9)", () => {
+    expect(deriveItineraryCities([{ day: 1, title: "西峽谷一日遊" }])).toEqual(["西峽谷"]);
+    expect(deriveItineraryCities([{ day: 1, title: "尼亞加拉瀑布 1日遊" }])).toEqual(["尼亞加拉瀑布"]);
+    expect(deriveItineraryCities([{ day: 1, title: "Niagara Falls 1-Day Tour" }])).toEqual(["Niagara Falls"]);
+  });
+
+  it("prefers location/city fields over the title", () => {
+    expect(
+      deriveItineraryCities([{ day: 1, title: "西峽谷一日遊", location: "拉斯維加斯" }]),
+    ).toEqual(["拉斯維加斯"]);
+  });
+
+  it("drops placeholders and suffix-only labels; empty itinerary → []", () => {
+    expect(deriveItineraryCities([{ day: 1, title: "Day 1" }, { day: 2, title: "景點 2" }])).toEqual([]);
+    expect(deriveItineraryCities([{ day: 1, title: "一日遊" }])).toEqual([]);
+    expect(deriveItineraryCities([])).toEqual([]);
+    expect(deriveItineraryCities(null)).toEqual([]);
   });
 });
 

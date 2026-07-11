@@ -55,6 +55,7 @@ import {
 } from "../../db";
 import { buildStagedTour, type MirrorProduct, type MirrorDetail } from "./staging";
 import { promoteBatch, type PromotableTour } from "./promote";
+import { dedupeHeroImagesAcrossCountries } from "./heroDedupe";
 
 const log = createChildLogger({ module: "catalogRebuild" });
 
@@ -278,30 +279,38 @@ function firstAttractionName(attractionsJson: unknown): string | null {
  * 為每個待上架團配一張對客 hero 圖(商用授權,非供應商圖)。就地改 fields.heroImage /
  * imageUrl,並把攝影師署名(Unsplash 條款)寫進 fields.heroImageCredit(JSON;無署名
  * 資料 → null,UI 不渲染署名行,絕不留舊圖的過期署名)。fail-open:resolveStockPhoto
- * 拿不到就不加(無圖上架)。並發小批降低速率壓力。
- * exported + 注入式 resolver → 「credit 落庫」可純測,不碰真 API。
+ * 拿不到就不加(無圖上架)。
+ *
+ * 批次內同圖去重(2026-07-11 指揮回令 Block B):維護一個跨整批共用的 usedUrls Set,
+ * 每團解析時都傳給 resolve;resolveStockPhoto 選中一張候選就把它的 url 記進這個
+ * Set,下一團若命中同一張就會自動換下一候選(見 stockPhotoResolver.ts)。刻意改成
+ * 「循序處理」而非併發:這裡是離線批次重建、本就受 Unsplash 免費層速率限制,循序
+ * 可接受;若仍用 Promise.all 併發共用同一個 Set 會 race(多團同時讀到還沒寫入的
+ * usedUrls,互相看不到彼此剛選走的候選),去重就不確定了。
+ *
+ * exported + 注入式 resolver → 「credit 落庫」「批次去重」都可純測,不碰真 API。
  */
 export async function attachStockHeroImages(
   promotable: PromotableTour[],
   resolve: typeof resolveStockPhoto = resolveStockPhoto,
 ): Promise<void> {
-  const CONCURRENCY = 5;
-  for (let i = 0; i < promotable.length; i += CONCURRENCY) {
-    const batch = promotable.slice(i, i + CONCURRENCY);
-    await Promise.all(
-      batch.map(async (p) => {
-        const hero = await resolve({
-          destinationCountry: (p.fields.destinationCountry as string | undefined) ?? null,
-          destinationCity: (p.fields.destinationCity as string | undefined) ?? null,
-          attractionName: firstAttractionName(p.fields.attractions),
-        });
-        if (hero) {
-          p.fields.heroImage = hero.url;
-          p.fields.imageUrl = hero.url;
-          p.fields.heroImageCredit = hero.credit ? JSON.stringify(hero.credit) : null;
-        }
-      }),
+  const usedUrls = new Set<string>();
+  for (const p of promotable) {
+    const hero = await resolve(
+      {
+        destinationCountry: (p.fields.destinationCountry as string | undefined) ?? null,
+        destinationCity: (p.fields.destinationCity as string | undefined) ?? null,
+        attractionName: firstAttractionName(p.fields.attractions),
+      },
+      undefined,
+      undefined,
+      usedUrls,
     );
+    if (hero) {
+      p.fields.heroImage = hero.url;
+      p.fields.imageUrl = hero.url;
+      p.fields.heroImageCredit = hero.credit ? JSON.stringify(hero.credit) : null;
+    }
   }
 }
 
@@ -607,6 +616,11 @@ export async function rebuildCatalog(
   //     註:大批(數百~數千團)會受 Unsplash 免費層速率限制,超額後多回 null → 無圖,
   //     由後續潤稿/AI 生圖另案補;此處不解速率限制。
   await attachStockHeroImages(promotable);
+
+  // 3.6 跨國同圖上架守門(Block B):resolver 批次去重之外的最後一道防線 — 不同
+  //     destinationCountry 的團若共用同一張 hero url,後出現者一律讓圖(置 null),
+  //     寧無圖不跨國錯配可信度。純函式,promote transaction 之前呼叫。
+  dedupeHeroImagesAcrossCountries(promotable);
 
   // 4. 開 batch、原子 promote(快照可回滾)。
   const replacedBatchId = await findCurrentLiveBatchId(scope);

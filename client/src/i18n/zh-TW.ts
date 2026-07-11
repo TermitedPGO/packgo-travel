@@ -2553,6 +2553,8 @@ export const zhTW = {
     supplierDisclosureUv: '此行程由優旅行 (UV Bookings) 營運，PACK&GO 為您提供雙語接待與在地服務。\nThis tour is operated by UV Bookings. PACK&GO provides bilingual assistance and local support services.',
     citiesCount: '{n} 座城市',
     citiesCountSingle: '1 座城市',
+    backToAllTours: '返回所有行程',
+    supplierCostRaw: '供應商費用說明原文',
     cancelRefundTitle: '取消與退費政策',
     cstFootnote: '受加州旅行業法（CST# 2166984）與 TCRF 消費者保障基金保護。',
     tabs: {

@@ -2293,6 +2293,8 @@ export const en = {
     supplierDisclosureUv: 'This tour is operated by UV Bookings. PACK&GO provides bilingual assistance and local support services.\n此行程由優旅行 (UV Bookings) 營運，PACK&GO 為您提供雙語接待與在地服務。',
     citiesCount: '{n} cities',
     citiesCountSingle: '1 city',
+    backToAllTours: 'Back to all tours',
+    supplierCostRaw: "Supplier's cost notes (original text)",
     cancelRefundTitle: 'Cancellation & Refund Policy',
     cstFootnote: 'Protected by the California Sellers of Travel Law (CST# 2166984) and the TCRF Consumer Restitution Fund.',
     itinerary: 'Daily Itinerary',

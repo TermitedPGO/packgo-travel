@@ -12,7 +12,17 @@ import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useLocale } from "@/contexts/LocaleContext";
+import { deriveAvailabilityBucket, type AvailabilityBucket } from "./actionArea.helpers";
 import type { getThemeColorByDestination } from "./helpers";
+
+// Availability bucket → i18n label (customer only ever sees 有位/名額有限/已滿,
+// never a seat count — red line #2). Shared vocabulary with BookingRail.
+const BUCKET_LABEL: Record<AvailabilityBucket, string> = {
+  available: "tours.availAvailable",
+  limited: "tours.availLimited",
+  soldout: "tours.availSoldout",
+  unknown: "tours.availConfirm",
+};
 
 export const DeparturePriceCalendar = ({
   tourId,
@@ -61,6 +71,17 @@ export const DeparturePriceCalendar = ({
     return days;
   }, [selectedMonth]);
 
+  // Wave 1 C.1: upcoming departures, sorted — powers the mobile compact list
+  // (the 7-col calendar squeezed prices down to "$1" on phones).
+  const upcomingDepartures = useMemo(() => {
+    if (!departures) return [] as any[];
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    return (departures as any[])
+      .filter((d) => new Date(d.departureDate) >= now && d.status !== "cancelled")
+      .sort((a, b) => new Date(a.departureDate).getTime() - new Date(b.departureDate).getTime());
+  }, [departures]);
+
   const getDepartureForDay = (date: Date | null) => {
     if (!date || !departures) return null;
     return departures.find((d: any) => {
@@ -102,6 +123,53 @@ export const DeparturePriceCalendar = ({
 
   return (
     <div className="bg-white rounded-xl shadow-lg overflow-hidden mb-8 border border-gray-100">
+      {/* Mobile compact list (Wave 1 C.1) — the desktop 7-col calendar squeezed
+          per-cell prices down to a truncated "$1" at 320-430px. Phones get a
+          one-line-per-departure list: 日期 + 天數 + 餘位 + 完整價(nowrap +
+          tabular-nums so the price never wraps or clips). */}
+      <div className="md:hidden">
+        <div className="p-4 text-center" style={{ background: `linear-gradient(135deg, ${themeColor.primary} 0%, ${themeColor.secondary} 100%)` }}>
+          <h3 className="text-lg font-bold text-white tracking-wide">{t('tourDetail.selectDepartureDate')}</h3>
+        </div>
+        <div className="divide-y divide-gray-100">
+          {upcomingDepartures.map((dep: any) => {
+            const depDate = new Date(dep.departureDate);
+            const retDate = dep.returnDate ? new Date(dep.returnDate) : null;
+            const days = retDate
+              ? Math.max(1, Math.round((retDate.getTime() - depDate.getTime()) / 86400000) + 1)
+              : null;
+            const bucket = deriveAvailabilityBucket(dep);
+            const isFull = bucket === 'soldout';
+            const isConfirmed = dep.status === 'confirmed';
+            return (
+              <button
+                key={dep.id}
+                disabled={isFull}
+                onClick={() => { if (!isFull) onSelectDeparture(dep.id); }}
+                className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 whitespace-nowrap">
+                    {depDate.getFullYear()}/{depDate.getMonth() + 1}/{depDate.getDate()}
+                    {isConfirmed && (
+                      <span className="ml-2 text-[10px] font-semibold text-[#8a6f3a]">✓ {t('tourDetail.confirmed')}</span>
+                    )}
+                  </p>
+                  <p className="text-xs text-gray-500 whitespace-nowrap">
+                    {days ? `${t('tourDetail.daysUnit', { days })} · ` : ''}{t(BUCKET_LABEL[bucket])}
+                  </p>
+                </div>
+                <span className="text-sm font-bold tabular-nums whitespace-nowrap" style={{ color: themeColor.secondary }}>
+                  {formatPrice(Number(dep.adultPrice || basePrice), (dep.currency as any) || 'TWD')}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Desktop calendar */}
+      <div className="hidden md:block">
       <div
         className="flex items-center justify-between p-6"
         style={{ background: `linear-gradient(135deg, ${themeColor.primary} 0%, ${themeColor.secondary} 100%)` }}
@@ -173,7 +241,7 @@ export const DeparturePriceCalendar = ({
                               ✓ {t('tourDetail.confirmed')}
                             </span>
                           )}
-                          <div className="text-xs font-bold px-2 py-1 rounded-lg text-white shadow-sm" style={{ backgroundColor: themeColor.secondary }}>
+                          <div className="text-xs font-bold px-2 py-1 rounded-lg text-white shadow-sm tabular-nums whitespace-nowrap" style={{ backgroundColor: themeColor.secondary }}>
                             ${(departure.adultPrice || basePrice).toLocaleString()}
                           </div>
                           {departure.status === 'open' && (
@@ -257,6 +325,7 @@ export const DeparturePriceCalendar = ({
           })()}
         </div>
       )}
+      </div>
     </div>
   );
 };
