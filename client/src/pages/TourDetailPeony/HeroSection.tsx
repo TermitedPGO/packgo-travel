@@ -35,6 +35,11 @@ import {
   formatDualPrice,
   type getThemeColorByDestination,
 } from "./helpers";
+import {
+  parseHeroImageCredit,
+  withUnsplashUtm,
+  UNSPLASH_HOME_URL,
+} from "./heroCredit";
 
 export type HeroSectionProps = {
   tour: any;
@@ -90,6 +95,13 @@ export default function HeroSection({
 }: HeroSectionProps) {
   // Use prop t for parity with original to maximise i18n parity; useLocale just to anchor unused imports for now.
   useLocale();
+  // Stock-photo attribution (Unsplash API terms). Written by the catalog
+  // rebuild alongside tours.heroImage; only rendered when (a) it parses and
+  // (b) the tour's own heroImage is what's displayed (credit was stored with
+  // it). No credit → no line. English literal is the Unsplash-standard format.
+  const heroCredit = (tour as any)?.heroImage
+    ? parseHeroImageCredit((tour as any)?.heroImageCredit)
+    : null;
   return (
     <>
       <Header />
@@ -269,6 +281,33 @@ export default function HeroSection({
             )}
           </div>
         </div>
+
+        {/* Stock-photo attribution — Unsplash API terms: visible credit with
+            links back (utm params per official guideline). Renders ONLY when
+            heroImageCredit parsed (no credit → no line). English literal is
+            the Unsplash-standard format, not hardcoded UI copy. */}
+        {!isEditMode && heroCredit && (
+          <div className="absolute bottom-2 right-3 z-10 px-2 py-0.5 rounded-md bg-black/40 backdrop-blur-sm text-[10px] text-white/75">
+            Photo by{" "}
+            <a
+              href={withUnsplashUtm(heroCredit.profileUrl)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline underline-offset-2 hover:text-white transition-colors"
+            >
+              {heroCredit.name}
+            </a>{" "}
+            on{" "}
+            <a
+              href={UNSPLASH_HOME_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline underline-offset-2 hover:text-white transition-colors"
+            >
+              Unsplash
+            </a>
+          </div>
+        )}
       </section>
 
       {/* v78t: Trust badges strip — under hero, above Quick Facts.

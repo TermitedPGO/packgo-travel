@@ -276,26 +276,43 @@ function firstAttractionName(attractionsJson: unknown): string | null {
 
 /**
  * 為每個待上架團配一張對客 hero 圖(商用授權,非供應商圖)。就地改 fields.heroImage /
- * imageUrl。fail-open:resolveStockPhoto 拿不到就不加(無圖上架)。並發小批降低速率壓力。
+ * imageUrl,並把攝影師署名(Unsplash 條款)寫進 fields.heroImageCredit(JSON;無署名
+ * 資料 → null,UI 不渲染署名行,絕不留舊圖的過期署名)。fail-open:resolveStockPhoto
+ * 拿不到就不加(無圖上架)。並發小批降低速率壓力。
+ * exported + 注入式 resolver → 「credit 落庫」可純測,不碰真 API。
  */
-async function attachStockHeroImages(promotable: PromotableTour[]): Promise<void> {
+export async function attachStockHeroImages(
+  promotable: PromotableTour[],
+  resolve: typeof resolveStockPhoto = resolveStockPhoto,
+): Promise<void> {
   const CONCURRENCY = 5;
   for (let i = 0; i < promotable.length; i += CONCURRENCY) {
     const batch = promotable.slice(i, i + CONCURRENCY);
     await Promise.all(
       batch.map(async (p) => {
-        const hero = await resolveStockPhoto({
+        const hero = await resolve({
           destinationCountry: (p.fields.destinationCountry as string | undefined) ?? null,
           destinationCity: (p.fields.destinationCity as string | undefined) ?? null,
           attractionName: firstAttractionName(p.fields.attractions),
         });
         if (hero) {
-          p.fields.heroImage = hero;
-          p.fields.imageUrl = hero;
+          p.fields.heroImage = hero.url;
+          p.fields.imageUrl = hero.url;
+          p.fields.heroImageCredit = hero.credit ? JSON.stringify(hero.credit) : null;
         }
       }),
     );
   }
+}
+
+/**
+ * 匯率本地後衛(fail-closed,2026-07-10 指揮回令 P3):Lion 全 TWD,換匯 rate 壞掉
+ * (0 / NaN / Infinity / 負數)會把整批價格算成 0 或垃圾。不依賴下游 completeness
+ * 門檻的間接保護 — rate 不可用就整批 Lion 跳過。UV 原生 USD(rate 恆 1)不受影響。
+ * 純函式 → 直接測。
+ */
+export function shouldSkipLionForFxRate(scope: RebuildScope, rate: number): boolean {
+  return scope === "lion" && !(Number.isFinite(rate) && rate > 0);
 }
 
 /** 刷新一團的客人班期:清掉舊的未來班期 → 寫入重建的。best-effort。 */
@@ -392,6 +409,30 @@ export async function rebuildCatalog(
   // (放這裡、不塞進 staging 純函式),之後每筆班期用純函式套用(見 lionDepartures)。
   // UV 原生 USD,rate=1、不換。
   const twdToUsdRate = scope === "lion" ? await getExchangeRate("TWD", "USD") : 1;
+
+  // 匯率本地後衛(fail-closed):rate 不可用 → 整批 Lion 跳過,不寫任何 tours,
+  // 記 log 回報零批。不靠下游門檻的間接保護(P3 回令)。
+  if (shouldSkipLionForFxRate(scope, twdToUsdRate)) {
+    log.error(
+      { scope, twdToUsdRate },
+      "unusable TWD→USD rate — skipping the ENTIRE Lion batch (fail-closed, no writes)",
+    );
+    return {
+      scope,
+      batchId: null,
+      dryRun,
+      productsScanned: productRows.length,
+      complete: 0,
+      incomplete: 0,
+      promoted: 0,
+      retired: 0,
+      newDrafts: 0,
+      matchedExisting: 0,
+      wouldCreateNew: 0,
+      missingBreakdown: { fxRateUnavailable: productRows.length },
+      incompleteSamples: [],
+    };
+  }
 
   // 批次預載班期 + 明細(避免 N+1:~1000 次來回 → 分批 IN 查)。
   const productIds = productRows.map((p) => p.id);

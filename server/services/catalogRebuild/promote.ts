@@ -96,6 +96,7 @@ export const RESTORABLE_TOUR_COLUMNS = [
   "destinationCity",
   "departureCity",
   "heroImage",
+  "heroImageCredit",
   "imageUrl",
   "dailyItinerary",
   "itineraryDetailed",

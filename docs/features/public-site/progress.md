@@ -41,3 +41,51 @@
 - Unsplash 免費層速率限制(~50/hr):數百~數千團批次超額後 resolveStockPhoto 多回 null → 無圖上架;後續潤稿/AI 生圖另案補。
 - Lion 良率預期 ~6 成(自由行/郵輪/機加酒卡 attractions 硬門檻,lion-audit §4.3),非 bug。
 - destinationCountry provenance 修的是 enrich 回填 + 直匯路徑;已在 tours 表的舊 Lion 團(事故後為空)不受影響。
+
+## 2026-07-10 · 批次 R2:指揮驗收回爐兩條(Unsplash 署名合規 + 匯率本地後衛)
+
+指揮驗收:兩路過、無 P1。回爐 P2(署名)+ P3(匯率 guard),修完收案。
+
+### 1. P2 Unsplash 署名合規(試批公開前必修)
+- `unsplashService.ts`:新 `searchUnsplashPhotosDetailed`(回 `{url, credit:{name,username,profileUrl}, downloadLocation}`;舊 `searchUnsplashPhotos` 改為其 URL-only 包裝,既有呼叫者不變);新 `triggerUnsplashDownload`(打 download_location,fail-open 不擋圖)。
+- `stockPhotoResolver.ts`:回傳改 `ResolvedStockPhoto` 物件;命中即打一次 download_location(注入式 trigger,fail-open);credit 缺就 null。
+- 署名持久化:tours 無既有可用欄(heroImageAlt=SEO alt、galleryImages=圖庫陣列,語意不合)→ 開 **migration 0115**(`0115_tours_hero_image_credit.sql` + `.down.sql`,TiDB 原生 IF NOT EXISTS 單語句、註解不含分句標記字面,journal 已加 idx 115);`drizzle/schema.ts` 加 `tours.heroImageCredit`(TEXT NULL,JSON);`promote.ts` RESTORABLE_TOUR_COLUMNS 加同名欄(回滾可還原,測試釘住)。
+- `index.ts` `attachStockHeroImages`(改 exported + 注入式 resolver):寫 `fields.heroImage/imageUrl/heroImageCredit`;無 credit 明確寫 null(絕不留舊圖過期署名)。
+- 對客 UI:`TourDetailPeony/heroCredit.ts` 純 helper(parse + utm)+ `HeroSection.tsx` hero 右下角 "Photo by {name} on Unsplash" 帶官方 utm 參數連結(英文原文 = Unsplash 標準格式;圓角 badge)。credit 解析失敗/缺/tour.heroImage 空 → 不渲染。
+- 紅綠:resolver 帶 credit 三態 + download 觸發一次 + fail-open(stockPhotoResolver.test 12 條);credit 落庫(index.test attachStockHeroImages 3 條);無 credit UI 不渲染(heroCredit.test 7 條);RESTORABLE 覆蓋(promote.test)。
+
+### 2. P3 匯率本地後衛(fail-closed)
+- `index.ts` 新純函式 `shouldSkipLionForFxRate(scope, rate)`:`!(rate>0 && isFinite)` 且 scope=lion → 整批跳過。rebuildCatalog 在 fetch rate 後就地 guard:log.error + 回零批 report(`missingBreakdown.fxRateUnavailable`),不寫任何 tours。
+- 紅綠:rate=0/NaN/Infinity/負 → Lion 全跳過;UV rate=0 不受影響;正常 rate 放行(index.test 4 條)。
+
+### 驗證(本批 R2)
+- tsc 0 錯(NODE_OPTIONS=6144)。
+- vitest(catalogRebuild + supplierSync + uvBulkImport + lionLocation + migrationBreakpoint + heroCredit):`Test Files  19 passed | 1 skipped (20)` / `Tests  252 passed | 1 skipped (253)`(skipped = env-gated 真 Unsplash 憑證測試),連跑兩輪一致。
+- UI 變更未跑本地瀏覽器驗證:行程頁需 DB 資料、本地無 DATABASE_URL;渲染閘門邏輯由 heroCredit 純測覆蓋,prod 試批時眼看。
+
+### 附錄:探針腳本原文(地雷 #7,R2)
+本批未跑任何探針腳本 / flyctl ssh / code-in-string blob;journal 0115 條目以本地 python3 heredoc 寫入(唯讀 repo 外零副作用),原文:
+
+```python
+import json
+p = "drizzle/meta/_journal.json"
+j = json.load(open(p))
+entries = j["entries"]
+assert entries[-1]["tag"] == "0114_trust_transfer_lifecycle", entries[-1]
+entries.append({
+    "idx": 115,
+    "version": "5",
+    "when": 1783728000000,
+    "tag": "0115_tours_hero_image_credit",
+    "breakpoints": True,
+})
+with open(p, "w") as f:
+    json.dump(j, f, indent="\t", ensure_ascii=False)
+    f.write("\n")
+print("appended 0115")
+```
+
+### R2 已知限制
+- download_location 觸發在 rebuild 取圖當下打一次(= 該圖被選用),不在每次頁面瀏覽打(Unsplash 指引的 download 語意是「使用」非「瀏覽」,合規)。
+- 既有其他 `searchUnsplashPhotos` 呼叫者(tourGenerator / itineraryImageService 等)仍拿 URL-only,其產出不經本管線落對客 hero;若日後那些路徑也上公開頁,需同樣接 detailed + credit(另案)。
+- migration 0115 未在 prod 跑(本地無 DB);隨 ship 的 release_command 生效。

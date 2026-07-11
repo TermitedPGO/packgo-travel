@@ -22,7 +22,28 @@ interface UnsplashPhoto {
   user: {
     name: string;
     username: string;
+    links?: {
+      html?: string;
+    };
   };
+  links?: {
+    download_location?: string;
+  };
+}
+
+/**
+ * One search hit with the attribution data the Unsplash API Terms require us
+ * to keep alongside the image (photographer name + profile link) and the
+ * download_location endpoint we must hit when the photo is actually used.
+ */
+export interface UnsplashPhotoResult {
+  url: string;
+  credit: {
+    name: string;
+    username: string;
+    profileUrl: string;
+  } | null;
+  downloadLocation: string | null;
 }
 
 interface UnsplashSearchResponse {
@@ -195,15 +216,17 @@ function sanitizeQueryForUnsplash(query: string): string {
 }
 
 /**
- * Search photos from Unsplash
+ * Search photos from Unsplash — detailed variant. Returns url + photographer
+ * credit + download_location per hit so callers can satisfy the Unsplash API
+ * attribution + download-tracking requirements. Fail-open: any error → [].
  */
-export async function searchUnsplashPhotos(
+export async function searchUnsplashPhotosDetailed(
   query: string,
   count: number = 6
-): Promise<string[]> {
+): Promise<UnsplashPhotoResult[]> {
   try {
     const accessKey = ENV.unsplashAccessKey;
-    
+
     if (!accessKey) {
       console.error("[UnsplashService] Access key not configured");
       return [];
@@ -211,43 +234,94 @@ export async function searchUnsplashPhotos(
 
     // Sanitize query: Unsplash returns 410 Gone for CJK characters
     const safeQuery = sanitizeQueryForUnsplash(query);
-    
+
     // Build search query
     const searchQuery = `${safeQuery} travel landscape`;
     const url = `https://api.unsplash.com/search/photos?query=${encodeURIComponent(searchQuery)}&per_page=${count}&orientation=landscape`;
-    
+
     if (hasCJK(query)) {
       console.log(`[UnsplashService] CJK query sanitized: "${query.substring(0, 30)}" → "${safeQuery}"`);
     }
     console.log(`[UnsplashService] Searching photos: "${searchQuery.substring(0, 80)}"`);
-    
+
     const response = await fetch(url, {
       headers: {
         Authorization: `Client-ID ${accessKey}`,
       },
     });
-    
+
     if (!response.ok) {
       console.error(`[UnsplashService] API error: ${response.status} ${response.statusText} (query: "${safeQuery.substring(0, 40)}")`);
       return [];
     }
-    
+
     const data: UnsplashSearchResponse = await response.json();
-    
+
     if (!data.results || data.results.length === 0) {
       console.warn(`[UnsplashService] No photos found for query: "${searchQuery.substring(0, 60)}"`);
       return [];
     }
-    
-    // Extract regular-sized image URLs
-    const imageUrls = data.results.map(photo => photo.urls.regular);
-    
-    console.log(`[UnsplashService] Found ${imageUrls.length} photos`);
-    
-    return imageUrls;
+
+    const results: UnsplashPhotoResult[] = data.results.map((photo) => ({
+      url: photo.urls.regular,
+      credit:
+        photo.user?.name && photo.user?.username
+          ? {
+              name: photo.user.name,
+              username: photo.user.username,
+              profileUrl:
+                photo.user.links?.html ||
+                `https://unsplash.com/@${photo.user.username}`,
+            }
+          : null,
+      downloadLocation: photo.links?.download_location ?? null,
+    }));
+
+    console.log(`[UnsplashService] Found ${results.length} photos`);
+
+    return results;
   } catch (error) {
     console.error("[UnsplashService] Error searching photos:", error);
     return [];
+  }
+}
+
+/**
+ * Search photos from Unsplash (URL-only, legacy shape). Existing callers that
+ * only place images in internal/LLM contexts keep this; anything that shows a
+ * photo on a public page should use `searchUnsplashPhotosDetailed` + credit.
+ */
+export async function searchUnsplashPhotos(
+  query: string,
+  count: number = 6
+): Promise<string[]> {
+  return (await searchUnsplashPhotosDetailed(query, count)).map((p) => p.url);
+}
+
+/**
+ * Hit a photo's `download_location` endpoint once when the photo is actually
+ * used (Unsplash API guideline — this is how photographers get view credit).
+ * Fail-open by design: any failure is logged and swallowed, never blocks the
+ * image from shipping.
+ */
+export async function triggerUnsplashDownload(
+  downloadLocation: string | null | undefined
+): Promise<void> {
+  try {
+    const accessKey = ENV.unsplashAccessKey;
+    if (!accessKey || !downloadLocation) return;
+    const response = await fetch(downloadLocation, {
+      headers: {
+        Authorization: `Client-ID ${accessKey}`,
+      },
+    });
+    if (!response.ok) {
+      console.warn(
+        `[UnsplashService] download_location ping failed: ${response.status} (non-blocking)`
+      );
+    }
+  } catch (error) {
+    console.warn("[UnsplashService] download_location ping error (non-blocking):", error);
   }
 }
 

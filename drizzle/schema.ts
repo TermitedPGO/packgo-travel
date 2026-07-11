@@ -491,6 +491,10 @@ export const tours = mysqlTable("tours", {
   // Hero Section
   heroImage: varchar("heroImage", { length: 2048 }), // Full-screen hero background image
   heroImageAlt: text("heroImageAlt"), // Hero image alt text for SEO
+  // 0115: stock-photo attribution (Unsplash API terms). JSON {name, username,
+  // profileUrl} | NULL. Written by catalogRebuild's stockPhotoResolver when the
+  // hero is a stock photo; customer page renders "Photo by {name} on Unsplash".
+  heroImageCredit: text("heroImageCredit"),
   heroSubtitle: text("heroSubtitle"), // Hero subtitle - tour highlights summary
   
   // Color Theme

@@ -785,6 +785,13 @@
 			"when": 1783641600000,
 			"tag": "0114_trust_transfer_lifecycle",
 			"breakpoints": true
+		},
+		{
+			"idx": 115,
+			"version": "5",
+			"when": 1783728000000,
+			"tag": "0115_tours_hero_image_credit",
+			"breakpoints": true
 		}
 	]
 }

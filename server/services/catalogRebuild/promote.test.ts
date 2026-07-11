@@ -375,6 +375,7 @@ describe("buildRestorePayload", () => {
       "itineraryDetailed",
       "attractions",
       "dailyItinerary",
+      "heroImageCredit", // 0115 — stock-photo attribution written by attachStockHeroImages
     ]) {
       expect(RESTORABLE_TOUR_COLUMNS).toContain(col);
     }
