@@ -8310,7 +8310,6 @@ export const zhTW = {
     returnLabel: '回程',
     statusLabel: '狀態',
     priceLabel: '團費（成人）',
-    bookCta: '預訂',
     soldOutCta: '額滿',
     seatsLeft: '剩 {n} 位',
     seatsAvailable: '尚有 {n} 位',

@@ -78,7 +78,9 @@ export default function PricingSection({
             prose walls render verbatim under「供應商費用說明原文」without marks.
             C.4: a lone card spans the row. */}
         {costExplanation && (() => {
-          const inc = splitCostEntries(costExplanation.included);
+          // demoteNegations:included 裡的短排除句(「機票自理」)降去無勾號
+          // 原文區,絕不打 ✓(2026-07-11 驗收回令 P2)。
+          const inc = splitCostEntries(costExplanation.included, { demoteNegations: true });
           const exc = splitCostEntries(costExplanation.excluded);
           const walls = [...inc.walls, ...exc.walls];
           const bothCards = inc.items.length > 0 && exc.items.length > 0;

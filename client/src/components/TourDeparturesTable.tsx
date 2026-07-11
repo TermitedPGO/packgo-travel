@@ -11,7 +11,6 @@ import { useMemo } from "react";
 import { trpc } from "@/lib/trpc";
 import { Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Link } from "wouter";
 import { useLocale } from "@/contexts/LocaleContext";
 import { format } from "date-fns";
 import { zhTW, enUS } from "date-fns/locale";
@@ -25,9 +24,9 @@ interface Props {
   basePrice: number;
   baseCurrency?: string;
   themeColor?: { primary: string; secondary?: string };
-  /** 停止線(2026-07-10):提供時,每列 CTA 走「提交訂位需求」詢位流,不直連即時
-   *  結帳。未提供時維持舊 Link 行為(向後相容)。 */
-  onReserve?: () => void;
+  /** 停止線(2026-07-10):每列 CTA 一律走「提交訂位需求」詢位流。必填 — 停止線
+   *  期間不留任何直連 /book 即時結帳的 fallback(2026-07-11 驗收回令釘死)。 */
+  onReserve: () => void;
 }
 
 export default function TourDeparturesTable({
@@ -213,7 +212,7 @@ export default function TourDeparturesTable({
                           <Button variant="outline" size="sm" disabled className="rounded-lg">
                             {t("tourDeparturesTable.soldOutCta")}
                           </Button>
-                        ) : onReserve ? (
+                        ) : (
                           // 停止線:提交訂位需求(詢位流),不直連即時結帳。
                           <Button
                             size="sm"
@@ -223,16 +222,6 @@ export default function TourDeparturesTable({
                           >
                             {t("tourDetail.action.cta.reserveRequest")}
                           </Button>
-                        ) : (
-                          <Link href={`/book/${tourId}?departureId=${dep.id}`}>
-                            <Button
-                              size="sm"
-                              className="rounded-lg text-white"
-                              style={{ backgroundColor: themeColor?.primary || "#0d9488" }}
-                            >
-                              {t("tourDeparturesTable.bookCta")}
-                            </Button>
-                          </Link>
                         )}
                       </td>
                     </tr>

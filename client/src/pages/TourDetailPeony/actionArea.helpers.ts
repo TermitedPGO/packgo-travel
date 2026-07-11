@@ -137,7 +137,12 @@ export function deriveFlightInclusion(
   // the supplier only gives walls, flight inference stays unknown → no chip.
   const itemized = (v: unknown) => asStringArray(v).filter((s) => !isCostWall(s));
   if (itemized(ce.excluded).some((s) => FLIGHT_RE.test(s))) return "excluded";
-  if (itemized(ce.included).some((s) => FLIGHT_RE.test(s))) return "included";
+  // 否定詞守門(2026-07-11 驗收回令 P2):供應商把「機票自理」塞進 included
+  // 陣列時,舊碼讀成含機票 — 正好把排除句翻成最貴的過度承諾。帶否定詞的機票
+  // 條目不論躺在哪個陣列,一律是排除訊號。
+  const includedFlight = itemized(ce.included).filter((s) => FLIGHT_RE.test(s));
+  if (includedFlight.some((s) => hasCostNegation(s))) return "excluded";
+  if (includedFlight.length > 0) return "included";
   return "unknown";
 }
 
@@ -161,17 +166,63 @@ export function isCostWall(text: unknown): boolean {
 }
 
 /**
+ * 費用否定詞表(2026-07-11 驗收回令 P2)。isCostWall 只擋長牆;供應商常把短的
+ * 排除句直接塞進 included 陣列(「機票自理」「午餐自費」),長度守門攔不住,
+ * 打了 ✓ 就是反著騙客人。條目含任一否定詞 → 絕不渲染 ✓。
+ * 純字串表,補新詞直接加一行;比對時 lowercase substring。
+ */
+const COST_NEGATION_TERMS: readonly string[] = [
+  "不含",
+  "不包括",
+  "不包含",
+  "未含",
+  "未包含",
+  "除外",
+  "自理",
+  "自費",
+  "另付",
+  "另計",
+  "另行",
+  "恕不",
+  "not included",
+  "not covered",
+  "excluded",
+  "excludes",
+  "exclusion",
+  "at your own",
+  "own expense",
+  "optional",
+];
+
+/** True when a cost entry carries an exclusion/negation phrase. */
+export function hasCostNegation(text: unknown): boolean {
+  if (typeof text !== "string") return false;
+  const t = text.toLowerCase();
+  return COST_NEGATION_TERMS.some((term) => t.includes(term));
+}
+
+/**
  * Split a cost list into clean line items (get a ✓/✗) and prose walls (shown as
  * raw supplier text, no mark). Preserves order within each bucket.
+ *
+ * `demoteNegations`(included 列表用):含否定詞的條目降去 walls(無勾號原文
+ * 區),即使它又短又乾淨。選「無勾號」而不是改渲染 ✗:這類條目常是混合句
+ * (「含早餐,午晚餐自理」),整行打 ✗ 會反過來否認真的有含的部分;原文區照抄
+ * 供應商的話、我們不下判斷,才是誠實的那個。excluded 列表不用降 — 否定詞條目
+ * 掛 ✗ 語義一致。
  */
-export function splitCostEntries(list: unknown): { items: string[]; walls: string[] } {
+export function splitCostEntries(
+  list: unknown,
+  opts?: { demoteNegations?: boolean },
+): { items: string[]; walls: string[] } {
   const items: string[] = [];
   const walls: string[] = [];
   for (const raw of Array.isArray(list) ? list : []) {
     if (typeof raw !== "string") continue;
     const s = raw.trim();
     if (!s) continue;
-    (isCostWall(s) ? walls : items).push(s);
+    const wall = isCostWall(s) || (opts?.demoteNegations === true && hasCostNegation(s));
+    (wall ? walls : items).push(s);
   }
   return { items, walls };
 }
@@ -277,7 +328,12 @@ function stripDayPrefix(s: string): string {
 function stripTourTypeSuffix(s: string): string {
   return s
     .replace(/\s*(?:[0-9]+|[一二兩三四五六七八九十]+|半)\s*[日天]遊$/, "")
+    // 「N天M夜(遊)」收尾:東京5天4夜 → 東京(2026-07-11 驗收回令 P3 補)
+    .replace(/\s*(?:[0-9]+|[一二兩三四五六七八九十]+)\s*[天日]\s*(?:[0-9]+|[一二兩三四五六七八九十]+)\s*[夜晚]遊?$/, "")
     .replace(/\s*(?:[0-9]+[\s-]*day|half[\s-]*day|full[\s-]*day)\s*(?:tour|trip)$/i, "")
+    // 無 tour/trip 收尾的 Half Day 變體:Grand Canyon Half Day → Grand Canyon
+    // (同回令補)。只認 half day — 裸的 "5 Day" 結尾可能是團名一部分,寧留整串。
+    .replace(/\s*half[\s-]*day$/i, "")
     .trim();
 }
 

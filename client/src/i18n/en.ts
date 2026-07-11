@@ -8311,7 +8311,6 @@ export const en = {
     returnLabel: 'Return',
     statusLabel: 'Status',
     priceLabel: 'Price (Adult)',
-    bookCta: 'Book',
     soldOutCta: 'Sold out',
     seatsLeft: '{n} seat{s} left',
     seatsAvailable: '{n} seats available',
