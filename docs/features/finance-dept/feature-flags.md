@@ -5,9 +5,16 @@
 > compile error)。Fly secrets 開機注入,改 flag 需 redeploy(金融行為刻意
 > 不做熱切換)。本表是 dispatch-f2 塊D #3 的交付;flag 增減時同步本表。
 
+> **prod 實測(2026-07-10 v808 走查)**:`PLAID_TRUST_DEFERRAL_ENABLED` 在 prod 是
+> **ON**(Fly secret = true,F2 之前既有,非本批所翻;prod 的遞延列即由此而來)。
+> `STRIPE_TRUST_DEFERRAL_ENABLED` 未設 = OFF。下表「預設」欄是 code 預設(env 未設
+> 時的行為),不是 prod 現值。含義:v808 的認列加回與四口徑接線對 Plaid 路徑
+> **上線即生效**,損益月度歸屬自 v808 起修正(存入月減、認列月加);走查單第 2/2b
+> 項對 Plaid 路徑應以 live 數據執行,不再是翻轉前的假想練習。
+
 | Flag(env) | 讀取函式 | 用途 | 預設 | 翻轉條件 | 測試覆蓋 |
 |---|---|---|---|---|---|
-| `PLAID_TRUST_DEFERRAL_ENABLED` | `trustDeferralEnabled()` | CST §17550 主開關(Plaid 路徑):trust 帳戶 income_booking 入帳建遞延列,出發才認列 | **OFF** | CPA 對信託遞延整體口徑點頭 + Jeff 裁決;塊D P&L 接線已交付「可翻」狀態 | featureFlags.test.ts;trustDeferralService.test.ts(isAnyTrustDeferralEnabled 四象限) |
+| `PLAID_TRUST_DEFERRAL_ENABLED` | `trustDeferralEnabled()` | CST §17550 主開關(Plaid 路徑):trust 帳戶 income_booking 入帳建遞延列,出發才認列 | **OFF**(prod 現值 ON,見上) | 已 ON(關閉才需裁決);CPA 口徑答覆回來調參不動結構 | featureFlags.test.ts;trustDeferralService.test.ts(isAnyTrustDeferralEnabled 四象限) |
 | `STRIPE_TRUST_DEFERRAL_ENABLED` | `stripeTrustDeferralEnabled()` | Stripe tour checkout 收款走同一遞延帳(不在結帳當下認列);visa 服務費永不遞延 | **OFF** | CPA 對「Stripe 收的訂金是否屬信託監管」的裁示(dispatch-f1 塊B;Jeff 佇列中) | featureFlags.test.ts;stripeWebhook.test.ts:141-165(flag-OFF byte-identical,不准弱化)+ flag-ON 遞延分支 |
 | `PLAID_TRUST_RECOGNITION_OFFSET_DAYS` | `trustRecognitionOffsetDays()` | 認列日 = 出發日 + N 天(CST 稽核緩衝) | `0` | CPA 答覆回來只調此參數,結構不動(isRecognitionDue 單一函式) | featureFlags.test.ts |
 | `PLAID_TRUST_AUTOMATCH_MIN_CONFIDENCE` | `trustAutomatchMinConfidence()` | 入帳→booking 自動配對的最低信心,低於則轉人工 | `80` | 配對品質數據(誤配率)支持調整時 | featureFlags.test.ts |
