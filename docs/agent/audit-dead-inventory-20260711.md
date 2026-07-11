@@ -14,7 +14,7 @@
 - 後台三代並存是最大宗殭屍：舊 `components/admin/`（28-tab 時代，107 檔 36,110 行）已全數不掛載，只剩 `customers/` 子樹（8,249 行）被 `/ops` 沿用；44 個頂層孤兒檔共 17,756 行，連帶其子元件子樹更多。
 - `/ops` 六域頁面有四個是 15 行 placeholder（Tours / Marketing / Settings，加上被 FinanceCockpit 取代而閒置的 AdminFinance 頁），所以舊 tab 是那些功能目前唯一的實作，刪之前要 Jeff 裁。
 - 一張孤兒資料表 `posterGenLogs`（v0，已被 `posterIterations` v1 取代，程式碼只剩一句註解提到它）。
-- 兩個 flag 讓一整個子系統目前永不觸發但屬刻意停放：trust-deferral（`PLAID_/STRIPE_TRUST_DEFERRAL_ENABLED` 都預設 off）與 storefront-split（`STOREFRONT_MODE` 未啟）。這是「留著有理由」但要付維護稅。
+- 兩個 flag 讓一整個子系統目前永不觸發但屬刻意停放：trust-deferral與 storefront-split（`STOREFRONT_MODE` 未啟）。這是「留著有理由」但要付維護稅。【指揮校正:PLAID_TRUST_DEFERRAL_ENABLED 在 prod 是 Fly secret=true(ON),信託子系統在 prod 活躍且 v808 起認列加回生效(見 finance-dept/v808-walkthrough-20260710.md);掃描以 code 預設值誤判,此組非殭屍,僅 STRIPE 側停放等 CPA。】
 
 ---
 
