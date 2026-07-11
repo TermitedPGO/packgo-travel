@@ -106,3 +106,183 @@ print("appended 0115")
 ### 驗證(本批 R3)
 - tsc 0 錯(NODE_OPTIONS=6144)。
 - vitest(R1+R2 全套 + coverage + 端點):`Test Files  21 passed | 1 skipped (22)` / `Tests  267 passed | 1 skipped (268)`,連跑兩輪一致。
+
+## 2026-07-10 · 批次 R4:UV 必付/自費費用(Jeff 點出,放全量硬前置;25 團試批不擋)
+
+### 探真結論(10 團 live 實測,兩輪探針)
+
+| 問題 | 答案 | 數字 |
+|---|---|---|
+| getProductTravelDetail 必付資料齊不齊 | productCost.list 是必付+自費混裝清單,**無結構性 flag**(必付/自費欄位完全同構:editType=1/resourceType=0/expenseCode=EM*),唯一可辨識訊號是**名稱**("JP-NTF3 Mandatory fee"/"YG Mandatory Fee") | costItems 非空 5/10;名稱命中必付 1/10(有 add-on 的團中 1/5) |
+| 跟 export 頁 priceTerms 是否同源 | 同源同路 — enrich 本來就打這條 API;鏡像 34/1,094 稀疏是**鏡像過期**(5/25-30 enrich 的舊資料),不是 parser 缺陷:今日 live 對同 parser 實測 **parseUvPriceTerms 10/10 OK**(included 387-1172 chars)、noticeType-0 費用說明 10/10 存在 | live parse 10/10 vs 鏡像 34/1,094 |
+| 自費從這條 API 拿是否更全 | 就是現行來源(parseUvOptional 已讀 productCost),無更全來源;問題是舊行為把必付**混進自費** = 客人把必繳費用當可跳過 = 低報總價 | 鏡像 optionalParsed 1,076/1,094 本來就高 |
+
+含意:**費用含蓋空白會被 skipSync:false 首跑 enrich 自癒**(uv-audit 前置 #1 已列);真正要修 code 的是必付/自費分流。
+
+### 接線(全在既有欄,零 migration)
+- `supplierSync/uvDetail.ts`:新純函式 `isUvMandatoryCostItem(name)`(名稱式判別,只比對名稱不比對描述 — 描述常含 "Include service fee" 會誤傷自費項;pattern 保守:寧漏勿錯殺);`parseUvPriceTerms` 擴充 — 必付項進 `excluded`(格式 `必付:名稱 — 價階1 / 價階2`),included 空但有必付也不回 null;`parseUvOptional` 排除必付項(不再列自費);enrich 的 priceTerms raw 同步帶 productCost。
+- 承載欄:priceTermsParsed(既有)→ hydration 既有邏輯自動進 `costExplanation`;前端 FeaturesSection 本來就渲染 included/excluded 清單,必付帶標籤+金額直接顯示,零 UI 改動。未開任何新欄。
+- 售價紅線:必付金額只進文字清單,**絕不加進 tours.price**(price 一律來自班期 pricing facts)。
+
+### 紅綠
+- uvDetail.test.ts(24 條,+5 新):probe 真實形狀(P00008352)必付 $80 進 excluded 帶價階/自費遊船不混入;純自費團 excluded 空;isUvMandatoryCostItem 邊界(Antelope desc 有 service fee 名稱沒有 → 自費);fixture 12→11 optional + YG Mandatory Fee $215 移進 excluded(行為修正,非弱化);fail-open null 條件擴充。
+- staging.test.ts +1:必付 $80 在 costExplanation 文字可見、fields.price 恆 = 998(絕不 998+80)。
+- API 失敗 fail-open 沿用既有結構(travel null → parse_failed,completeness 不因 priceTerms 缺擋團)。
+
+### 驗證(本批 R4)
+- tsc 0 錯(NODE_OPTIONS=6144)。
+- vitest(全套 + coverage + 端點):`Test Files  21 passed (21)` / `Tests  273 passed (273)`,連跑兩輪一致。coverage.test.ts 綠(本批未動任何有登記 SQL 的檔,照紀律仍跑)。
+- 節制:API 打點 = 10 團 × 2 輪探真(節流 800ms),測試全 mock;全量補抓發生在 prod 首跑 enrich(skipSync:false),不在本地。
+
+### R4 已知限制(交指揮)
+- 必付分類靠名稱 pattern,無結構性 flag 可依。抽樣中必付項均含 "Mandatory";若供應商日後用未收錄的名稱(如純中文「雜支」),會落自費清單(金額仍可見,非消失)。試批眼看時留意費用區塊。
+- 鏡像 priceTerms 覆蓋率要等 prod 首跑 enrich 才跳升;本批只保證 parser 對今日 live 形狀 10/10 可解。
+- productCost.list 為空的團(探真 5/10,歐洲拼小團/馬爾地夫/純酒店)是來源真沒有 add-on,非漏抓。
+
+### 附錄:探針腳本原文(地雷 #7,R4 兩輪)
+
+第一輪 `uv_mandatory_fee_probe.mts`(結構+覆蓋率):
+
+```ts
+/**
+ * uv_mandatory_fee_probe.mts — R4 探真(唯讀):UV getProductTravelDetail 的
+ * 必付(mandatory fees)/自費(optional)資料齊不齊、結構長怎樣。
+ * 打 repo 真 uvClient(header-guest 公開門市認證,無密鑰),對 UV 審計抽樣中
+ * 10 個過門檻團實測。零 DB、零寫入。跑法:
+ *   cd /Users/jeff/Desktop/網站-rebuild && node_modules/.bin/tsx <this file>
+ */
+import { getProductTravelDetail } from "/Users/jeff/Desktop/網站-rebuild/server/suppliers/uvClient";
+
+const CODES = [
+  "P00008352", "P00004442", "P00008680", "P00003708", "P00004995",
+  "P00003693", "P00003362", "P00008667", "P00006905", "P00002762",
+];
+
+const MANDATORY_NAME = /必付|必須|必须|必要|服務費|服务费|小費|小费|門票|门票|燃油|資源費|资源费|雜費|杂费|Mandatory|Required|Service Fee|Tips?/i;
+
+function moneyStrings(priceInfo: any[]): string {
+  return (priceInfo ?? [])
+    .map((p: any) => `${p?.expPriceName}=${p?.expPriceMoney}`)
+    .join(", ");
+}
+
+async function main() {
+  let withCost = 0;
+  let withMandatoryByName = 0;
+  let withNotice0 = 0;
+  const flagKeys = new Map<string, number>();
+  let dumpedSample = false;
+
+  for (const code of CODES) {
+    try {
+      const t: any = await getProductTravelDetail(code);
+      const list: any[] = Array.isArray(t?.productCost?.list) ? t.productCost.list : [];
+      const noticeInfo: any[] = Array.isArray(t?.productNotice?.noticeInfo)
+        ? t.productNotice.noticeInfo
+        : [];
+      const byType: Record<string, number> = {};
+      for (const n of noticeInfo) byType[String(n?.noticeType)] = (byType[String(n?.noticeType)] ?? 0) + 1;
+      if (byType["0"]) withNotice0++;
+      if (list.length > 0) withCost++;
+
+      const mandatory = list.filter((it) => MANDATORY_NAME.test(String(it?.expIExpandName ?? "")));
+      if (mandatory.length > 0) withMandatoryByName++;
+
+      for (const it of list) {
+        for (const k of Object.keys(it ?? {})) flagKeys.set(k, (flagKeys.get(k) ?? 0) + 1);
+      }
+
+      console.log(`\n#${code} costItems=${list.length} mandatoryByName=${mandatory.length} noticeTypes=${JSON.stringify(byType)}`);
+      for (const it of list) {
+        const name = String(it?.expIExpandName ?? "").slice(0, 60);
+        const tag = MANDATORY_NAME.test(name) ? "[必付?]" : "[自費?]";
+        console.log(`   ${tag} ${name} | prices: ${moneyStrings(it?.priceInfo)}`);
+      }
+      if (!dumpedSample && mandatory.length > 0) {
+        dumpedSample = true;
+        console.log("   FULL ITEM DUMP (structure check):");
+        console.log(JSON.stringify(mandatory[0], null, 2).slice(0, 2500));
+      }
+      console.log(
+        `   notices: ${noticeInfo.map((n: any) => `[t${n?.noticeType}]${String(n?.matterName ?? "").slice(0, 24)}`).join(" | ").slice(0, 300)}`,
+      );
+    } catch (err) {
+      console.log(`\n#${code} FETCH FAILED: ${(err as Error).message}`);
+    }
+    await new Promise((r) => setTimeout(r, 800));
+  }
+
+  console.log(`\n==== SUMMARY (n=${CODES.length}) ====`);
+  console.log(`productCost.list non-empty: ${withCost}/${CODES.length}`);
+  console.log(`mandatory-by-name hit:      ${withMandatoryByName}/${CODES.length}`);
+  console.log(`noticeType-0 (含蓋) present: ${withNotice0}/${CODES.length}`);
+  console.log(`cost item keys seen: ${[...flagKeys.entries()].map(([k, c]) => `${k}(${c})`).join(", ")}`);
+}
+
+main();
+```
+
+第二輪 `uv_mandatory_fee_probe2.mts`(parser yield + 結構 flag 對照):
+
+```ts
+/**
+ * uv_mandatory_fee_probe2.mts — R4 探真第二輪(唯讀):
+ *   (a) 真 parseUvPriceTerms / parseUvNotices 對「今日 live 回傳」的 yield
+ *       (解「鏡像 34/1094 vs live 10/10 有 noticeType-0」的矛盾);
+ *   (b) cost item 的 editType / resourceType / expenseCode 是否能結構性分辨
+ *       必付 vs 自費(第一輪只見名稱差異)。
+ * 跑法同第一輪:node_modules/.bin/tsx <this file>
+ */
+import { getProductTravelDetail } from "/Users/jeff/Desktop/網站-rebuild/server/suppliers/uvClient";
+import {
+  parseUvPriceTerms,
+  parseUvNotices,
+} from "/Users/jeff/Desktop/網站-rebuild/server/services/supplierSync/uvDetail";
+
+const CODES = [
+  "P00008352", "P00004442", "P00008680", "P00003708", "P00004995",
+  "P00003693", "P00003362", "P00008667", "P00006905", "P00002762",
+];
+const MANDATORY_NAME = /必付|必須|必须|必要|服務費|服务费|小費|小费|門票|门票|燃油|資源費|资源费|雜費|杂费|Mandatory|Required|Service Fee|Tips?/i;
+
+function stripHtml(s: unknown): string {
+  if (typeof s !== "string") return "";
+  return s.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+}
+
+async function main() {
+  let priceTermsOk = 0;
+  let noticesOk = 0;
+  for (const code of CODES) {
+    try {
+      const t: any = await getProductTravelDetail(code);
+      const pt = parseUvPriceTerms(t);
+      const nt = parseUvNotices(t);
+      if (pt) priceTermsOk++;
+      if (nt) noticesOk++;
+      const inc = pt?.included?.length ?? 0;
+      const incLen = (pt?.included ?? []).join("").length;
+      console.log(`\n#${code} priceTerms=${pt ? `OK included[${inc}] chars=${incLen}` : "NULL"} notices=${nt ? "OK" : "NULL"}`);
+      if (pt) console.log(`   included[0] head: ${String(pt.included[0] ?? "").slice(0, 160)}`);
+      const n0 = (t?.productNotice?.noticeInfo ?? []).filter((n: any) => String(n?.noticeType) === "0");
+      for (const n of n0) {
+        console.log(`   t0 "${String(n?.matterName ?? "").slice(0, 30)}" tip1=${stripHtml(n?.vluesTip1).length}ch tip2=${stripHtml(n?.vluesTip2).length}ch`);
+      }
+      const list: any[] = Array.isArray(t?.productCost?.list) ? t.productCost.list : [];
+      for (const it of list) {
+        const name = String(it?.expIExpandName ?? "");
+        const tag = MANDATORY_NAME.test(name) ? "MAND" : "OPT ";
+        console.log(`   ${tag} editType=${it?.editType} resourceType=${it?.resourceType} expenseCode=${String(it?.expenseCode ?? "").slice(0, 2)} costDay="${it?.costDay}" | ${name.slice(0, 50)}`);
+      }
+    } catch (err) {
+      console.log(`\n#${code} FETCH FAILED: ${(err as Error).message}`);
+    }
+    await new Promise((r) => setTimeout(r, 800));
+  }
+  console.log(`\n==== SUMMARY ==== live parseUvPriceTerms OK: ${priceTermsOk}/${CODES.length}; parseUvNotices OK: ${noticesOk}/${CODES.length}`);
+}
+
+main();
+```
+
+關鍵原始輸出(節錄):第一輪 SUMMARY `productCost.list non-empty: 5/10 / mandatory-by-name hit: 1/10 / noticeType-0 present: 10/10 / cost item keys: id, editType, expenseCode, costDay, expIExpandName, expIExpandDesc, resourceType, sortNo, priceInfo(全 37 項同構)`;必付實例 dump:P00008352 `{"expIExpandName":"JP-NTF3 Mandatory fee","editType":1,"resourceType":0,"expenseCode":"EM00002379","priceInfo":[{"expPriceName":"Everyone","expPriceMoney":"$80.00"}]}`(desc 含 Niagara Resort Fee 等)。第二輪 SUMMARY `live parseUvPriceTerms OK: 10/10; parseUvNotices OK: 10/10`(included 387-1172 chars;必付/自費 editType/resourceType/expenseCode 完全同值,無結構 flag)。
