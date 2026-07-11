@@ -9,6 +9,7 @@ import {
   toggleSelected,
   pruneSelected,
   moveFocus,
+  chunkArray,
 } from "./pendingClaimsHelpers";
 
 describe("flattenPages — useInfiniteQuery 多頁攤平", () => {
@@ -58,6 +59,30 @@ describe("pruneSelected — 清掉已不在列表的殘留勾選", () => {
       { bankTransactionId: 3, amount: 30 },
     ];
     expect([...pruneSelected(new Set([1, 2, 3]), items)].sort()).toEqual([1, 3]);
+  });
+});
+
+describe("chunkArray — 批次分塊(選取超過 server 單請求上限時自動切塊)", () => {
+  it("空陣列 → 無塊", () => {
+    expect(chunkArray([], 200)).toEqual([]);
+  });
+  it("不足一塊 → 單塊原樣", () => {
+    expect(chunkArray([1, 2, 3], 200)).toEqual([[1, 2, 3]]);
+  });
+  it("恰整數倍 → 均分無殘塊", () => {
+    expect(chunkArray([1, 2, 3, 4], 2)).toEqual([[1, 2], [3, 4]]);
+  });
+  it("有餘數 → 最後一塊吃殘餘,保序", () => {
+    expect(chunkArray([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]]);
+  });
+  it("450 筆切 200 → 3 塊(200/200/50)—— 全選超量招牌流程", () => {
+    const arr = Array.from({ length: 450 }, (_, i) => i);
+    const chunks = chunkArray(arr, 200);
+    expect(chunks.map((c) => c.length)).toEqual([200, 200, 50]);
+    expect(chunks.flat()).toEqual(arr);
+  });
+  it("size <= 0 防呆 → 單塊", () => {
+    expect(chunkArray([1, 2], 0)).toEqual([[1, 2]]);
   });
 });
 

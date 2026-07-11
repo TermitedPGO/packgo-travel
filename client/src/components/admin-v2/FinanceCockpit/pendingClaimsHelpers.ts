@@ -59,3 +59,16 @@ export function moveFocus(current: number, delta: number, len: number): number {
   if (current < 0) return delta > 0 ? 0 : len - 1;
   return Math.min(len - 1, Math.max(0, current + delta));
 }
+
+/**
+ * 均分成 ≤size 的塊(保序)。批次認領選取集可能超過 server 單請求上限
+ * (BATCH_CLAIM_MAX=200),client 自動分塊循序送,使用者不用自己算 200
+ * (指揮驗收回令 P2 #1)。size <= 0 視為防呆回單塊。
+ */
+export function chunkArray<T>(arr: T[], size: number): T[][] {
+  if (arr.length === 0) return [];
+  if (size <= 0) return [arr.slice()];
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}

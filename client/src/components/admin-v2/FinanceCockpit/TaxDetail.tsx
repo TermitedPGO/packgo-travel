@@ -542,7 +542,7 @@ export function TaxDetail() {
           )}
         </div>
 
-        {/* 右欄:Trust 時點 / 已排除 / 1099 / 1040-ES */}
+        {/* 右欄:Trust 時點 / 已排除 / 1099 */}
         <div className="space-y-4">
           <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
             <div className={cardH}>
