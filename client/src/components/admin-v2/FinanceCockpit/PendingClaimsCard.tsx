@@ -1,17 +1,62 @@
 /**
- * PendingClaimsCard —— 待認領入帳表(F3 塊B#1,B-final 左欄第一卡)。
+ * PendingClaimsCard —— 待認領入帳表(F3 塊B#1,B-final 左欄第一卡;
+ * F-workbench 2026-07-11 升級成「敢清 322 筆」的工作台)。
  *
- * 每列:日期 + #流水號 + 老化天數(>30 天紅字,dot+文字不填底)、金額(amber-700
- * 粗體)、候選 chip(引擎猜的,點選預選)、認領按鈕(開 ClaimDialog,永遠 Jeff 按)。
- * 卡頭彙總(N 筆 · 共 $X)接 pendingSummary —— 與真相列同源;表列接 listPending
- * (limit 200),列數少於總數時表尾標「僅顯示前 N 筆」。
+ * 每列:勾選框 + 日期 + #流水號 + 老化天數(>30 天紅字,dot+文字不填底)、金額
+ * (amber-700 粗體)、候選 chip(引擎猜的,點選預選)、認領按鈕(開 ClaimDialog,
+ * 永遠 Jeff 按)。卡頭彙總(N 筆 · 共 $X)接 pendingSummary —— 與真相列同源。
+ *
+ * F-workbench 三件事:
+ *   1. 破 200 天花板:listPending 改 useInfiniteQuery(keyset 游標),表尾
+ *      「載入更多」推進掃描窗;已載入 / 總數誠實顯示。
+ *   2. 批次認領:勾選多筆 → 批次歸同一內部分類(batchClaim,server 逐筆稽核);
+ *      仍是 Jeff 手動勾選親自按,AI 不動錢。鍵盤流:↑↓ 移動、空白鍵勾選、
+ *      Enter 開認領 dialog;ClaimDialog 記上次選的類別。
+ *   3. 認領後不全量重抓:本地 cache 手術(setInfiniteData 移除該列 +
+ *      pendingSummary setData 遞減),不 invalidate 觸發 ≤200 次 dry-run +
+ *      全量掃描;server 端 Redis 快取已主動失效,下一輪 5 分鐘 poll 自然對真。
+ *
+ * 驗收回爐(2026-07-11 指揮回令):
+ *   - 全選超量:選取集自動分塊(每塊 ≤200 對齊 server BATCH_CLAIM_MAX)循序送
+ *     batchClaim,塊間合併逐筆回報;UI 顯示「第 x/y 塊」進度 ——「載滿全部→
+ *     全選→一鍵清」直接成立,使用者不用自己算 200。
+ *   - 清頁死路:cache 手術後本頁清空但還有下一頁時自動 fetchNextPage;
+ *     「待認領空了」只有真的無下一頁才顯示,不再與真相列筆數自相矛盾。
+ *   - 批次確認框:送出前顯示筆數/類別/金額合計,兩鍵確認/取消(錢的一鍵
+ *     寫入值得多一步);單筆 ClaimDialog 流程不動。
  */
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "@/lib/trpc";
-import { Check, Inbox, Info } from "lucide-react";
+import { toast } from "sonner";
+import { Check, Inbox, Info, Loader2 } from "lucide-react";
 import { useLocale } from "@/contexts/LocaleContext";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 import { agingDays, laTodayClient, fmtMoney } from "./cockpitMath";
 import { ClaimDialog } from "./ClaimDialog";
+import { CLAIM_CATEGORIES, CLAIM_CATEGORY_LABEL_KEY, type ClaimCategory } from "./claimCategories";
+import {
+  flattenPages,
+  sumSelectedAmount,
+  toggleSelected,
+  pruneSelected,
+  moveFocus,
+  chunkArray,
+} from "./pendingClaimsHelpers";
 import type { PendingTile } from "./types";
 
 export interface PendingItem {
@@ -28,6 +73,11 @@ export interface PendingItem {
 }
 
 const AGING_RED_DAYS = 30;
+const PAGE_SIZE = 200;
+/** listPending infinite query 的穩定 input(cursor 由 react-query 管)。 */
+const LIST_INPUT = { limit: PAGE_SIZE } as const;
+/** 批次認領單請求上限(對齊 server BATCH_CLAIM_MAX);超過自動分塊循序送。 */
+const BATCH_CHUNK_SIZE = 200;
 
 function fmtShortDate(d: string): string {
   // 'YYYY-MM-DD' → 'MM/DD'(B-final .cdate)
@@ -36,14 +86,190 @@ function fmtShortDate(d: string): string {
 
 export function PendingClaimsCard({ pending }: { pending: PendingTile }) {
   const { t } = useLocale();
+  const utils = trpc.useUtils();
   const today = laTodayClient();
-  const list = trpc.bankTransactionLinks.listPending.useQuery({ limit: 200 });
+
+  const list = trpc.bankTransactionLinks.listPending.useInfiniteQuery(LIST_INPUT, {
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+  });
 
   // 每列的預選候選(點 chip = 預選;按認領帶進 dialog)
   const [picked, setPicked] = useState<Record<number, number>>({});
   const [dialogItem, setDialogItem] = useState<PendingItem | null>(null);
+  // 批次勾選 + 批次歸類類別 + ClaimDialog 類別記憶(記上次選擇)
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [batchCategory, setBatchCategory] = useState<ClaimCategory | "">("");
+  const [lastCategory, setLastCategory] = useState<ClaimCategory | null>(null);
+  // 批次確認框 + 分塊進度(第 x/y 塊;跨塊期間鎖按鈕)
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
+  // 鍵盤焦點列(-1 = 無)
+  const [focusIdx, setFocusIdx] = useState(-1);
+  const tableRef = useRef<HTMLDivElement>(null);
 
-  const items: PendingItem[] = list.data?.items ?? [];
+  const items: PendingItem[] = useMemo(
+    () => flattenPages<PendingItem>(list.data?.pages),
+    [list.data?.pages],
+  );
+
+  // 列表變動(翻頁 / 認領移除)後清掉已消失列的殘留勾選與焦點
+  useEffect(() => {
+    setSelected((prev) => pruneSelected(prev, items));
+    setFocusIdx((prev) => (prev >= items.length ? items.length - 1 : prev));
+  }, [items]);
+
+  // 清頁死路修復(驗收回爐 P2 #2):cache 手術 / 翻頁後本頁清空但游標還有
+  // 下一頁 → 自動推進掃描窗,不讓 Jeff 卡在「表空了但真相列還有 N 筆」。
+  useEffect(() => {
+    if (
+      !list.isLoading &&
+      !list.isError &&
+      items.length === 0 &&
+      list.hasNextPage &&
+      !list.isFetchingNextPage
+    ) {
+      void list.fetchNextPage();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.length, list.hasNextPage, list.isFetchingNextPage, list.isLoading, list.isError]);
+
+  /* ── 認領後本地 cache 手術(取代全量 invalidate-refetch)────────────── */
+
+  /** 從 listPending 快取移除(或減額)一列 + pendingSummary 遞減。 */
+  const applyClaimedLocally = (claims: { bankTransactionId: number; amount: number }[]) => {
+    if (claims.length === 0) return;
+    const byId = new Map(claims.map((c) => [c.bankTransactionId, c.amount]));
+    let fullyRemoved = 0;
+    let totalClaimed = 0;
+    utils.bankTransactionLinks.listPending.setInfiniteData(LIST_INPUT, (old) => {
+      if (!old) return old;
+      return {
+        ...old,
+        pages: old.pages.map((p) => ({
+          ...p,
+          items: p.items
+            .map((it) => {
+              const claimed = byId.get(it.bankTransactionId);
+              if (claimed === undefined) return it;
+              totalClaimed += claimed;
+              const remaining = Math.round((it.amount - claimed) * 100) / 100;
+              if (remaining <= 0.01) {
+                fullyRemoved++;
+                return null; // 認滿 → 整列移除
+              }
+              return { ...it, amount: remaining }; // 部分認領 → 顯示剩餘
+            })
+            .filter((it): it is NonNullable<typeof it> => it !== null),
+        })),
+      };
+    });
+    // 真相列彙總同步遞減(server Redis 快取已失效,下一輪 poll 對真)
+    utils.bankTransactionLinks.pendingSummary.setData(undefined, (old) =>
+      old
+        ? {
+            count: Math.max(0, old.count - fullyRemoved),
+            totalAmount: Math.max(0, Math.round((old.totalAmount - totalClaimed) * 100) / 100),
+          }
+        : old,
+    );
+  };
+
+  /* ── 批次認領(Jeff 勾選 + 確認框親自按;server 逐筆稽核)────────────── */
+
+  // toast / cache 手術都在 runBatch 統一做(跨塊合併),mutation 本身不掛回呼。
+  const batchClaim = trpc.bankTransactionLinks.batchClaim.useMutation();
+
+  const selectedAmount = sumSelectedAmount(items, selected);
+
+  /**
+   * 確認框按下後執行:選取集分塊(每塊 ≤200)循序送,塊間沿用逐筆回報、
+   * 每塊成功筆立即 cache 手術(邊清邊看到列消失);全部塊跑完合併 toast。
+   * 塊級失敗(網路 / 整包被拒)停止後續塊,已寫入的塊誠實保留。
+   */
+  const runBatch = async () => {
+    if (!batchCategory || selected.size === 0 || batchRunning) return;
+    setConfirmOpen(false);
+    setBatchRunning(true);
+    setLastCategory(batchCategory);
+
+    const claimItems = items
+      .filter((it) => selected.has(it.bankTransactionId))
+      .map((it) => ({
+        bankTransactionId: it.bankTransactionId,
+        targetType: "category" as const,
+        categoryCode: batchCategory,
+        amountAllocated: it.amount,
+      }));
+    const chunks = chunkArray(claimItems, BATCH_CHUNK_SIZE);
+
+    let ok = 0;
+    let fail = 0;
+    let firstError: string | null = null;
+    let chunkError: string | null = null;
+
+    try {
+      for (let i = 0; i < chunks.length; i++) {
+        setBatchProgress({ current: i + 1, total: chunks.length });
+        const out = await batchClaim.mutateAsync({ items: chunks[i] });
+        const okIds = new Set(out.results.filter((r) => r.ok).map((r) => r.bankTransactionId));
+        applyClaimedLocally(
+          chunks[i]
+            .filter((c) => okIds.has(c.bankTransactionId))
+            .map((c) => ({ bankTransactionId: c.bankTransactionId, amount: c.amountAllocated })),
+        );
+        ok += out.successCount;
+        fail += out.failCount;
+        if (!firstError) firstError = out.results.find((r) => !r.ok)?.error ?? null;
+      }
+    } catch (err) {
+      // 塊級失敗:已跑完的塊已寫入生效,停止後續塊,合併回報時帶原因。
+      chunkError = err instanceof Error ? err.message : "batch claim failed";
+    } finally {
+      setBatchRunning(false);
+      setBatchProgress(null);
+    }
+
+    // 合併回報:失敗筆保留勾選讓 Jeff 重試(成功筆由 pruneSelected 自動清)。
+    const detail = firstError ?? chunkError;
+    if (ok > 0 && fail === 0 && !chunkError) {
+      toast.success(t("financeCockpit.work.batchToastDone", { count: String(ok) }));
+      setSelected(new Set());
+    } else if (ok > 0) {
+      toast.warning(
+        t("financeCockpit.work.batchToastPartial", { ok: String(ok), fail: String(fail) }) +
+          (detail ? ` — ${detail}` : ""),
+      );
+    } else {
+      toast.error(
+        t("financeCockpit.work.batchToastAllFailed") + (detail ? ` — ${detail}` : ""),
+      );
+    }
+  };
+
+  /* ── 鍵盤流:↑↓ 移動、空白鍵勾選、Enter 開認領 dialog ────────────────── */
+
+  const onTableKeyDown = (e: React.KeyboardEvent) => {
+    if (dialogItem || confirmOpen) return; // dialog / 確認框開著時不搶鍵盤
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      setFocusIdx((prev) => moveFocus(prev, e.key === "ArrowDown" ? 1 : -1, items.length));
+    } else if (e.key === " " && focusIdx >= 0 && focusIdx < items.length) {
+      e.preventDefault();
+      setSelected((prev) => toggleSelected(prev, items[focusIdx].bankTransactionId));
+    } else if (e.key === "Enter" && focusIdx >= 0 && focusIdx < items.length) {
+      e.preventDefault();
+      setDialogItem(items[focusIdx]);
+    }
+  };
+
+  const allOnPageSelected = items.length > 0 && items.every((it) => selected.has(it.bankTransactionId));
+  const toggleAll = () => {
+    setSelected(allOnPageSelected ? new Set() : new Set(items.map((it) => it.bankTransactionId)));
+  };
+
+  const checkboxCls =
+    "h-3.5 w-3.5 cursor-pointer rounded-sm border-gray-300 accent-gray-900 align-middle";
 
   return (
     <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
@@ -65,7 +291,65 @@ export function PendingClaimsCard({ pending }: { pending: PendingTile }) {
         </div>
       </div>
 
-      {/* 表(B-final DataTable 高密度樣式) */}
+      {/* 批次列(有勾選才顯示):同類多筆一次認領,Jeff 親自按 */}
+      {selected.size > 0 && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-gray-100 bg-gray-50 px-4 py-2">
+          <span className="text-[11px] font-semibold text-gray-700 tabular-nums">
+            {t("financeCockpit.work.batchSelected", {
+              count: String(selected.size),
+              amount: fmtMoney(selectedAmount),
+            })}
+          </span>
+          <span className="text-[11px] text-gray-400">{t("financeCockpit.work.batchCategoryLabel")}</span>
+          <Select
+            value={batchCategory}
+            onValueChange={(v) => setBatchCategory(v as ClaimCategory)}
+          >
+            <SelectTrigger className="h-7 w-[180px] rounded-lg bg-white text-xs">
+              <SelectValue placeholder={t("financeCockpit.claim.categoryPlaceholder")} />
+            </SelectTrigger>
+            <SelectContent className="rounded-xl">
+              {CLAIM_CATEGORIES.map((c) => (
+                <SelectItem key={c} value={c} className="rounded-lg text-xs">
+                  {t(CLAIM_CATEGORY_LABEL_KEY[c])}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <button
+            type="button"
+            disabled={!batchCategory || batchRunning}
+            onClick={() => setConfirmOpen(true)}
+            className="inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-lg bg-gray-900 px-3 text-xs font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {batchRunning ? (
+              <Loader2 className="h-[13px] w-[13px] animate-spin" />
+            ) : (
+              <Check className="h-[13px] w-[13px]" />
+            )}
+            {t("financeCockpit.work.batchClaimAction")}
+          </button>
+          {/* 分塊進度:選取 >200 筆時循序送多塊,顯示第 x/y 塊 */}
+          {batchRunning && batchProgress && batchProgress.total > 1 && (
+            <span className="text-[11px] text-gray-500 tabular-nums">
+              {t("financeCockpit.work.batchProgress", {
+                current: String(batchProgress.current),
+                total: String(batchProgress.total),
+              })}
+            </span>
+          )}
+          <button
+            type="button"
+            disabled={batchRunning}
+            onClick={() => setSelected(new Set())}
+            className="h-7 rounded-lg border border-gray-200 bg-white px-2.5 text-xs text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-700 disabled:opacity-50"
+          >
+            {t("financeCockpit.work.batchClear")}
+          </button>
+        </div>
+      )}
+
+      {/* 表(B-final DataTable 高密度樣式;容器收鍵盤事件) */}
       {list.isLoading ? (
         <div className="animate-pulse">
           {[...Array(4)].map((_, i) => (
@@ -77,14 +361,39 @@ export function PendingClaimsCard({ pending }: { pending: PendingTile }) {
           {t("financeCockpit.truth.loadError")}
         </div>
       ) : items.length === 0 ? (
-        <div className="px-4 py-8 text-center text-xs text-gray-400">
-          {t("financeCockpit.work.pendingEmpty")}
-        </div>
+        list.hasNextPage || list.isFetchingNextPage ? (
+          /* 本頁清空但還有下一頁:自動翻頁進行中(上方 effect),顯示載入骨架
+             而非空態 ——「待認領空了」只有真的無下一頁才說(回爐 P2 #2)。 */
+          <div className="animate-pulse">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="h-11 border-b border-gray-50 bg-gray-50/40 last:border-0" />
+            ))}
+          </div>
+        ) : (
+          <div className="px-4 py-8 text-center text-xs text-gray-400">
+            {t("financeCockpit.work.pendingEmpty")}
+          </div>
+        )
       ) : (
-        <div className="overflow-x-auto">
+        <div
+          ref={tableRef}
+          tabIndex={0}
+          onKeyDown={onTableKeyDown}
+          className="overflow-x-auto outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-gray-300"
+        >
           <table className="w-full border-collapse text-xs">
             <thead className="border-b border-gray-200 bg-gray-50">
               <tr>
+                <th className="w-8 px-3 py-2 text-left">
+                  <input
+                    type="checkbox"
+                    checked={allOnPageSelected}
+                    onChange={toggleAll}
+                    title={t("financeCockpit.work.selectAllTitle")}
+                    aria-label={t("financeCockpit.work.selectAllTitle")}
+                    className={checkboxCls}
+                  />
+                </th>
                 <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-gray-500">
                   {t("financeCockpit.work.colDate")}
                 </th>
@@ -100,11 +409,30 @@ export function PendingClaimsCard({ pending }: { pending: PendingTile }) {
               </tr>
             </thead>
             <tbody>
-              {items.map((item) => {
+              {items.map((item, idx) => {
                 const days = agingDays(item.date, today);
                 const pickedId = picked[item.bankTransactionId] ?? null;
+                const isSelected = selected.has(item.bankTransactionId);
+                const isFocused = idx === focusIdx;
                 return (
-                  <tr key={item.bankTransactionId} className="border-t border-gray-100 align-middle hover:bg-gray-50">
+                  <tr
+                    key={item.bankTransactionId}
+                    onClick={() => setFocusIdx(idx)}
+                    className={`border-t border-gray-100 align-middle ${
+                      isFocused ? "bg-gray-50" : "hover:bg-gray-50"
+                    }`}
+                  >
+                    <td className="w-8 px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() =>
+                          setSelected((prev) => toggleSelected(prev, item.bankTransactionId))
+                        }
+                        aria-label={`#${item.bankTransactionId}`}
+                        className={checkboxCls}
+                      />
+                    </td>
                     <td className="px-3 py-2">
                       <div className="font-medium text-gray-800">{fmtShortDate(item.date)}</div>
                       <div className="text-[11px] text-gray-400">#{item.bankTransactionId}</div>
@@ -182,21 +510,88 @@ export function PendingClaimsCard({ pending }: { pending: PendingTile }) {
         </div>
       )}
 
-      {/* 表尾 note(B-final .note.top) */}
+      {/* 表尾:載入進度(誠實顯示已載入 / 總數)+ 載入更多 + 鍵盤提示。
+          不依賴 items.length>0 —— 本頁清空但還有下一頁時仍顯示(回爐 P2 #2)。 */}
+      {!list.isLoading && !list.isError && (items.length > 0 || list.hasNextPage) && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 px-4 py-2.5">
+          <span className="text-[10px] text-gray-400 tabular-nums">
+            {list.hasNextPage
+              ? t("financeCockpit.work.loadedOf", {
+                  loaded: String(items.length),
+                  total: String(Math.max(pending.count, items.length)),
+                })
+              : t("financeCockpit.work.allLoaded", { total: String(items.length) })}
+          </span>
+          {list.hasNextPage && (
+            <button
+              type="button"
+              disabled={list.isFetchingNextPage}
+              onClick={() => list.fetchNextPage()}
+              className="inline-flex h-6 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 text-[11px] text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-50"
+            >
+              {list.isFetchingNextPage && <Loader2 className="h-3 w-3 animate-spin" />}
+              {list.isFetchingNextPage
+                ? t("financeCockpit.work.loadingMore")
+                : t("financeCockpit.work.loadMore")}
+            </button>
+          )}
+          <span className="ml-auto text-[10px] text-gray-300">
+            {t("financeCockpit.work.keyboardHint")}
+          </span>
+        </div>
+      )}
+
       <div className="flex gap-1.5 border-t border-gray-50 px-4 pb-3 pt-2.5 text-[10px] leading-relaxed text-gray-400">
         <Info className="mt-0.5 h-3 w-3 flex-shrink-0 text-gray-300" />
-        <span>
-          {t("financeCockpit.work.pendingNote")}
-          {items.length > 0 && pending.count > items.length && (
-            <> {t("financeCockpit.work.pendingTruncated", { shown: String(items.length) })}</>
-          )}
-        </span>
+        <span>{t("financeCockpit.work.pendingNote")}</span>
       </div>
+
+      {/* 批次確認框(回爐 P3 #3):錢的一鍵寫入前多一步 —— 顯示筆數 / 類別 /
+          金額合計,兩鍵確認 / 取消;單筆 ClaimDialog 既有確認流程不動。 */}
+      <Dialog open={confirmOpen} onOpenChange={(open) => !open && setConfirmOpen(false)}>
+        <DialogContent className="max-w-sm rounded-xl">
+          <DialogHeader>
+            <DialogTitle className="text-base">
+              {t("financeCockpit.work.batchConfirmTitle")}
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              {t("financeCockpit.work.batchConfirmBody", {
+                count: String(selected.size),
+                category: batchCategory ? t(CLAIM_CATEGORY_LABEL_KEY[batchCategory]) : "",
+                amount: fmtMoney(selectedAmount),
+              })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-lg text-xs"
+              onClick={() => setConfirmOpen(false)}
+            >
+              {t("financeCockpit.claim.cancel")}
+            </Button>
+            <Button
+              size="sm"
+              className="rounded-lg bg-gray-900 text-xs text-white hover:bg-gray-800"
+              onClick={runBatch}
+            >
+              <Check className="mr-1 h-3.5 w-3.5" />
+              {t("financeCockpit.claim.confirm")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ClaimDialog
         key={dialogItem?.bankTransactionId ?? "closed"}
         item={dialogItem}
         initialOrderId={dialogItem ? (picked[dialogItem.bankTransactionId] ?? null) : null}
+        defaultCategory={lastCategory}
+        onClaimed={(claim, category) => {
+          applyClaimedLocally([claim]);
+          if (category) setLastCategory(category);
+        }}
         onClose={() => setDialogItem(null)}
       />
     </div>

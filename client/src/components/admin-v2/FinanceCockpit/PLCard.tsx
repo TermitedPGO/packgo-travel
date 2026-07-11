@@ -4,9 +4,11 @@
  * 資料源:plaid.profitLossReport(LA 本月 1 日 → 今天)。選它不選 financeKpi
  * 的原因:真相列只要 income/netProfit(financeKpi 有),本卡要成本 byCategory
  * 細項 + transfer/stripePayout 中性 tiles + refunds,只有 profitLossReport 回
- * 全量 BankPLReport;兩者底層同一支 generateBankPL 摺疊,總額口徑一致(申報:
- * financeKpi 期間用 server 時鐘 UTC 切月,本卡用 LA 曆月,月界深夜短暫可能
- * 差一天資料,月中恆一致)。金額權威在 server,此處不重算。
+ * 全量 BankPLReport;兩者底層同一支 generateBankPL 摺疊,總額口徑一致。期間
+ * 定義也一致:financeKpi 已於 F3 塊C 回爐 P2(2026-07-10)改用 laToday 切月
+ * (America/Los_Angeles 曆月),與本卡同一套,無月界時差(F-workbench 2026-07-11
+ * 更正過期申報:舊註解說 financeKpi 用 server 時鐘 UTC 切月,行為早已修正)。
+ * 金額權威在 server,此處不重算。
  *
  * 版面照 B-final:topline(營收/淨利)→ 成分條(灰階,淨利段字可綠)→ legend
  * → 損益行 → 中性列(不計入損益)→ 口徑 note。$0 月顯示中性灰簡版;

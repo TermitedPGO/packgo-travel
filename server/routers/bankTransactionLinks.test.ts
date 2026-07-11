@@ -89,9 +89,10 @@ const emptyDryRun = {
 beforeEach(() => vi.clearAllMocks());
 
 describe("surface", () => {
-  it("exposes exactly the 6 procedures (4 read + claim/unlink write)", () => {
+  it("exposes exactly the 7 procedures (4 read + claim/batchClaim/unlink write)", () => {
     const procs = Object.keys((bankTransactionLinksRouter as any)._def.procedures).sort();
     expect(procs).toEqual([
+      "batchClaim",
       "claim",
       "listAutoLinked",
       "listPending",
@@ -138,6 +139,43 @@ describe("listPending — 只留 dry-run 判定為 pending_claim 的入帳", () 
     (processInboundTransaction as any).mockResolvedValue({ status: "pending_claim", candidates: [] });
     await caller().listPending({});
     expect(processInboundTransaction).toHaveBeenCalledWith(1, { dryRun: true });
+  });
+
+  it("分頁:掃滿一頁(=limit)→ nextCursor 指向最後一筆掃到的列,hasMore=true", async () => {
+    (scanUnlinkedInflows as any).mockResolvedValue([
+      { id: 30, amount: "-500.00", date: "2026-06-03", remainingAmount: 500 },
+      { id: 20, amount: "-300.00", date: "2026-06-02", remainingAmount: 300 },
+    ]);
+    (processInboundTransaction as any).mockResolvedValue({ status: "pending_claim", candidates: [] });
+    const out = await caller().listPending({ limit: 2 });
+    expect(scanUnlinkedInflows).toHaveBeenCalledWith({ limit: 2, cursor: null });
+    expect(out.hasMore).toBe(true);
+    // nextCursor = 最後掃到的列(#20),即使它是/不是 pending 都以掃描列為準
+    expect(out.nextCursor).toEqual({ date: "2026-06-02", id: 20 });
+  });
+
+  it("分頁:不足一頁 → hasMore=false、nextCursor=null(背帳掃完)", async () => {
+    (scanUnlinkedInflows as any).mockResolvedValue([
+      { id: 30, amount: "-500.00", date: "2026-06-03", remainingAmount: 500 },
+    ]);
+    (processInboundTransaction as any).mockResolvedValue({ status: "pending_claim", candidates: [] });
+    const out = await caller().listPending({ limit: 10 });
+    expect(out.hasMore).toBe(false);
+    expect(out.nextCursor).toBeNull();
+  });
+
+  it("分頁:空頁(掃不到任何列)→ items 空、hasMore=false、nextCursor=null", async () => {
+    (scanUnlinkedInflows as any).mockResolvedValue([]);
+    const out = await caller().listPending({ limit: 10 });
+    expect(out.items).toEqual([]);
+    expect(out.hasMore).toBe(false);
+    expect(out.nextCursor).toBeNull();
+  });
+
+  it("分頁:帶 cursor 進來會原樣傳給 scanUnlinkedInflows(續掃更舊)", async () => {
+    (scanUnlinkedInflows as any).mockResolvedValue([]);
+    await caller().listPending({ limit: 200, cursor: { date: "2026-05-01", id: 88 } });
+    expect(scanUnlinkedInflows).toHaveBeenCalledWith({ limit: 200, cursor: { date: "2026-05-01", id: 88 } });
   });
 });
 
@@ -289,6 +327,94 @@ describe("claim — 人工認領,錢的真相寫入路徑", () => {
         caller().claim({ bankTransactionId: 42, targetType: "category", categoryCode: bad as any, amountAllocated: 30 }),
       ).rejects.toThrow(); // zod 輸入驗證,連 handler 都進不去
     }
+    expect(createBankTransactionLink).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
+  });
+});
+
+describe("batchClaim — 多筆一次認領(Jeff 手動勾選的批次化,非自動)", () => {
+  it("三筆同類批次 → 逐筆 createBankTransactionLink(claimedBy='jeff')+ 逐筆 audit 不合併,失效快取一次", async () => {
+    const out = await caller().batchClaim({
+      items: [
+        { bankTransactionId: 11, targetType: "category", categoryCode: "income_booking", amountAllocated: 100 },
+        { bankTransactionId: 12, targetType: "category", categoryCode: "income_booking", amountAllocated: 200 },
+        { bankTransactionId: 13, targetType: "category", categoryCode: "income_booking", amountAllocated: 300 },
+      ],
+    });
+    expect(out.successCount).toBe(3);
+    expect(out.failCount).toBe(0);
+    expect(out.results).toEqual([
+      { bankTransactionId: 11, ok: true, linkId: 999 },
+      { bankTransactionId: 12, ok: true, linkId: 999 },
+      { bankTransactionId: 13, ok: true, linkId: 999 },
+    ]);
+    // 逐筆落稽核:三筆 = 三條 audit,不合併成一條
+    expect(createBankTransactionLink).toHaveBeenCalledTimes(3);
+    expect(audit).toHaveBeenCalledTimes(3);
+    expect((audit as any).mock.calls.every((c: any[]) => c[0].action === "bankTransactionLink.claim")).toBe(true);
+    // 稽核逐筆記各自的 bankTransactionId
+    expect((audit as any).mock.calls.map((c: any[]) => c[0].targetId)).toEqual([11, 12, 13]);
+    // 快取只失效一次(批次收尾),不是每筆一次
+    expect(redis.del).toHaveBeenCalledTimes(1);
+    expect(redis.del).toHaveBeenCalledWith("financeCockpit:pendingSummary:v1");
+  });
+
+  it("部分失敗:中間一筆超額 → 其餘照常成功,失敗那筆回報 error,不中止批次", async () => {
+    (createBankTransactionLink as any)
+      .mockResolvedValueOnce({ id: 501 })
+      .mockRejectedValueOnce(new (AllocationExceededError as any)(12, 80, 300, 100))
+      .mockResolvedValueOnce({ id: 503 });
+    const out = await caller().batchClaim({
+      items: [
+        { bankTransactionId: 11, targetType: "category", categoryCode: "income_booking", amountAllocated: 100 },
+        { bankTransactionId: 12, targetType: "category", categoryCode: "income_booking", amountAllocated: 300 },
+        { bankTransactionId: 13, targetType: "category", categoryCode: "income_booking", amountAllocated: 300 },
+      ],
+    });
+    expect(out.successCount).toBe(2);
+    expect(out.failCount).toBe(1);
+    expect(out.results[0]).toEqual({ bankTransactionId: 11, ok: true, linkId: 501 });
+    expect(out.results[1].ok).toBe(false);
+    expect(out.results[1].bankTransactionId).toBe(12);
+    expect(out.results[1].error).toMatch(/exceeds/);
+    expect(out.results[2]).toEqual({ bankTransactionId: 13, ok: true, linkId: 503 });
+    // 成功筆的稽核仍逐筆落(2 條);失敗筆不落稽核
+    expect(audit).toHaveBeenCalledTimes(2);
+    // 有成功筆 → 失效快取一次
+    expect(redis.del).toHaveBeenCalledTimes(1);
+  });
+
+  it("跨欄位驗證逐筆生效:category 缺 categoryCode 這筆失敗、其餘成功", async () => {
+    const out = await caller().batchClaim({
+      items: [
+        { bankTransactionId: 11, targetType: "custom_order", targetId: 7, amountAllocated: 100 },
+        { bankTransactionId: 12, targetType: "category", amountAllocated: 200 }, // 缺 categoryCode
+      ],
+    });
+    expect(out.successCount).toBe(1);
+    expect(out.failCount).toBe(1);
+    expect(out.results[1].ok).toBe(false);
+    expect(out.results[1].error).toMatch(/categoryCode/);
+  });
+
+  it("全數失敗 → 不失效快取(沒有任何真相變動)", async () => {
+    (createBankTransactionLink as any).mockRejectedValue(new (AllocationExceededError as any)(11, 80, 300, 100));
+    const out = await caller().batchClaim({
+      items: [
+        { bankTransactionId: 11, targetType: "category", categoryCode: "income_booking", amountAllocated: 300 },
+      ],
+    });
+    expect(out.successCount).toBe(0);
+    expect(out.failCount).toBe(1);
+    expect(redis.del).not.toHaveBeenCalled();
+  });
+
+  it("枚舉外 categoryCode 被 zod 擋在 handler 外(整批拒絕,連 performClaim 都進不去)", async () => {
+    await expect(
+      caller().batchClaim({
+        items: [{ bankTransactionId: 11, targetType: "category", categoryCode: "free text" as any, amountAllocated: 30 }],
+      }),
+    ).rejects.toThrow();
     expect(createBankTransactionLink).not.toHaveBeenCalled();
     expect(audit).not.toHaveBeenCalled();
   });

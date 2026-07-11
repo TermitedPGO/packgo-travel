@@ -23,10 +23,101 @@ import {
   pendingClaimMinUsd,
   AllocationExceededError,
   wouldExceedAllocation,
+  paginateUnlinkedInflows,
   EXACT_AMOUNT_DATE_WINDOW_DAYS,
   type ExactAmountOrderCandidate,
 } from "./bankTransactionLinkEngine";
 import type { BankTransactionInput } from "./customOrderWatchdog";
+
+describe("paginateUnlinkedInflows — keyset 分頁純函式(排序 / 差集 / 游標 / 取頁)", () => {
+  // 造 N 筆入帳:date 遞減(新到舊),id 遞減,各 $500 全額未分配。
+  function makeCandidates(n: number) {
+    return Array.from({ length: n }, (_, i) => ({
+      id: 1000 - i,
+      amount: "-500.00",
+      date: `2026-06-${String(((n - i - 1) % 28) + 1).padStart(2, "0")}`,
+    }));
+  }
+
+  it("差集:已分配滿額的列被濾掉,只留還有餘額的", () => {
+    const cands = [
+      { id: 1, amount: "-500.00", date: "2026-06-03" }, // 全未分配
+      { id: 2, amount: "-300.00", date: "2026-06-02" }, // 已分配滿額 → 濾掉
+      { id: 3, amount: "-100.00", date: "2026-06-01" }, // 部分分配 $60,剩 $40
+    ];
+    const allocated = new Map<number, number>([
+      [2, 300],
+      [3, 60],
+    ]);
+    const out = paginateUnlinkedInflows(cands, allocated, { limit: 100 });
+    expect(out.map((r) => r.id)).toEqual([1, 3]);
+    expect(out.find((r) => r.id === 3)!.remainingAmount).toBeCloseTo(40, 5);
+  });
+
+  it("排序:新到舊,同日以 id 大到小(穩定總序)", () => {
+    const cands = [
+      { id: 10, amount: "-500.00", date: "2026-06-01" },
+      { id: 30, amount: "-500.00", date: "2026-06-02" },
+      { id: 20, amount: "-500.00", date: "2026-06-02" }, // 與 30 同日
+    ];
+    const out = paginateUnlinkedInflows(cands, new Map(), { limit: 100 });
+    expect(out.map((r) => r.id)).toEqual([30, 20, 10]);
+  });
+
+  it("邊界:恰 200 筆、limit 200 → 回滿 200 筆", () => {
+    const out = paginateUnlinkedInflows(makeCandidates(200), new Map(), { limit: 200 });
+    expect(out).toHaveLength(200);
+  });
+
+  it("邊界:201 筆、limit 200 → 只回前 200 筆,第 201 筆需靠游標下一頁", () => {
+    const cands = makeCandidates(201);
+    const page1 = paginateUnlinkedInflows(cands, new Map(), { limit: 200 });
+    expect(page1).toHaveLength(200);
+    // 用第一頁最後一列當游標取下一頁
+    const last = page1[page1.length - 1];
+    const page2 = paginateUnlinkedInflows(cands, new Map(), {
+      limit: 200,
+      cursor: { date: last.date, id: last.id },
+    });
+    expect(page2).toHaveLength(1);
+    // 第二頁的列不與第一頁重疊
+    const page1Ids = new Set(page1.map((r) => r.id));
+    expect(page1Ids.has(page2[0].id)).toBe(false);
+  });
+
+  it("邊界:空輸入 → 空頁", () => {
+    expect(paginateUnlinkedInflows([], new Map(), { limit: 200 })).toEqual([]);
+  });
+
+  it("游標:嚴格取「更舊」的列(同日看 id),不含游標列本身", () => {
+    const cands = [
+      { id: 30, amount: "-500.00", date: "2026-06-02" },
+      { id: 20, amount: "-500.00", date: "2026-06-02" },
+      { id: 10, amount: "-500.00", date: "2026-06-01" },
+    ];
+    // 游標 = {2026-06-02, id 20} → 只剩同日 id<20(無)與更舊日期(#10)
+    const out = paginateUnlinkedInflows(cands, new Map(), {
+      limit: 100,
+      cursor: { date: "2026-06-02", id: 20 },
+    });
+    expect(out.map((r) => r.id)).toEqual([10]);
+  });
+
+  it("keyset 對刪除穩定:第一頁某列被認領消失後,游標取下一頁仍不漏不重", () => {
+    const cands = makeCandidates(5); // ids 1000..996, 日期遞減
+    const page1 = paginateUnlinkedInflows(cands, new Map(), { limit: 2 });
+    const last = page1[page1.length - 1];
+    // 模擬 page1 的第一列被認領(從候選集移除)——不影響游標之後的頁
+    const remaining = cands.filter((c) => c.id !== page1[0].id);
+    const page2 = paginateUnlinkedInflows(remaining, new Map(), {
+      limit: 2,
+      cursor: { date: last.date, id: last.id },
+    });
+    // page2 起點嚴格在游標之後,與 page1 無重疊
+    const page1Ids = new Set(page1.map((r) => r.id));
+    expect(page2.every((r) => !page1Ids.has(r.id))).toBe(true);
+  });
+});
 
 describe("extractOrderRef — order_ref 規則(memo 含訂單編號)", () => {
   it("原始描述含 ORD-YYYY-NNNN → 抽出並補零到 4 碼", () => {

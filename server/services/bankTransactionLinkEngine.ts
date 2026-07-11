@@ -840,6 +840,54 @@ export interface UnlinkedInflow {
   remainingAmount: number;
 }
 
+/** keyset 分頁游標:上一頁最後一列的 {date, id}(見 paginateUnlinkedInflows)。 */
+export interface UnlinkedInflowCursor {
+  date: string;
+  id: number;
+}
+
+/**
+ * 純函式(可單測,無 DB):把「候選入帳 + 各筆已分配額」摺成「還沒分配完」的清單,
+ * 依交易日新到舊排序(同日以 id 大到小當 tiebreaker,構成穩定總序),套 keyset
+ * 游標 + limit 取一頁。
+ *
+ * 分頁採 keyset(游標)而非 offset:游標是排序位置(date,id),不是計數位移,
+ * 所以 Jeff 一邊清一邊翻頁時,已認領(從候選集永久消失)的列不會讓後續頁位移
+ * 錯位——offset 分頁在刪除下會漏列/重列,keyset 對刪除天生穩定。
+ *
+ * cursor = 上一頁最後一列的 {date, id};回傳嚴格在其之後(排序更後 = 更舊)的列。
+ * 「之後」= date < cursor.date,或同日但 id < cursor.id(對齊上面的總序方向)。
+ */
+export function paginateUnlinkedInflows(
+  candidates: { id: number; amount: string | number; date: string | Date }[],
+  allocatedById: Map<number, number>,
+  opts?: { limit?: number; cursor?: UnlinkedInflowCursor | null },
+): UnlinkedInflow[] {
+  const limit = opts?.limit ?? 500;
+  const cursor = opts?.cursor ?? null;
+  const rows = candidates
+    .map((c) => {
+      const cap = Math.abs(parseFloat(c.amount as any) || 0);
+      const allocated = allocatedById.get(c.id) ?? 0;
+      return {
+        id: c.id,
+        amount: String(c.amount),
+        date: String(c.date),
+        remainingAmount: cap - allocated,
+      };
+    })
+    .filter((c) => c.remainingAmount > ALLOCATION_EPSILON)
+    // 新到舊;同日 id 大到小(總序,分頁游標才不會在同日多筆時卡住/跳筆)。
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.id - a.id));
+
+  const afterCursor = cursor
+    ? rows.filter(
+        (r) => r.date < cursor.date || (r.date === cursor.date && r.id < cursor.id),
+      )
+    : rows;
+  return afterCursor.slice(0, limit);
+}
+
 /**
  * 撈「還沒分配完」的入帳(amount<0,排除 isPending/excludeFromAccounting/
  * archived,同既有 watchdog 慣例)。
@@ -861,10 +909,12 @@ export interface UnlinkedInflow {
  * 「全部」符合 WHERE 條件的候選,PACK&GO 一人公司的 Plaid 交易總量遠低於
  * 需要分頁的規模(見 T6 已知限制:若交易量成長到需要分頁,這裡要重新設計)。
  */
-export async function scanUnlinkedInflows(opts?: { limit?: number }): Promise<UnlinkedInflow[]> {
+export async function scanUnlinkedInflows(opts?: {
+  limit?: number;
+  cursor?: UnlinkedInflowCursor | null;
+}): Promise<UnlinkedInflow[]> {
   const db = await getDb();
   if (!db) return [];
-  const limit = opts?.limit ?? 500;
 
   const candidates = await db
     .select({ id: bankTransactions.id, amount: bankTransactions.amount, date: bankTransactions.date })
@@ -894,13 +944,9 @@ export async function scanUnlinkedInflows(opts?: { limit?: number }): Promise<Un
     );
   }
 
-  return candidates
-    .map((c) => {
-      const cap = Math.abs(parseFloat(c.amount as any) || 0);
-      const allocated = allocatedById.get(c.id) ?? 0;
-      return { id: c.id, amount: String(c.amount), date: String(c.date), remainingAmount: cap - allocated };
-    })
-    .filter((c) => c.remainingAmount > ALLOCATION_EPSILON)
-    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)) // 新到舊
-    .slice(0, limit);
+  // 排序 / 差集 / 游標 / 取頁全在純函式,可單測分頁邊界(200/201/空頁)。
+  return paginateUnlinkedInflows(candidates, allocatedById, {
+    limit: opts?.limit,
+    cursor: opts?.cursor ?? null,
+  });
 }
