@@ -89,3 +89,20 @@ print("appended 0115")
 - download_location 觸發在 rebuild 取圖當下打一次(= 該圖被選用),不在每次頁面瀏覽打(Unsplash 指引的 download 語意是「使用」非「瀏覽」,合規)。
 - 既有其他 `searchUnsplashPhotos` 呼叫者(tourGenerator / itineraryImageService 等)仍拿 URL-only,其產出不經本管線落對客 hero;若日後那些路徑也上公開頁,需同樣接 detailed + credit(另案)。
 - migration 0115 未在 prod 跑(本地無 DB);隨 ship 的 release_command 生效。
+
+## 2026-07-10 · 批次 R3:指揮追加兩件(sqlRehearsal 行號同步 + script-token 端點),收案批
+
+### 1. sqlRehearsal 登記表行號同步
+- main 合併後 coverage.test.ts 紅兩條:R1 改 `catalogRebuild/index.ts` 造成行號漂移。
+- `registryEntries.ts` 兩條目行號同步:`catalogRebuild.loadExistingSupplierTours.rows` 180→193、`catalogRebuild.findCurrentLiveBatchId.row` 518→655。**SQL 文本 byte-identical 未動**(loadExistingSupplierTours 的 LIKE ? 形狀不變,只是 runtime 參數多了 Lion host 分支;findCurrentLiveBatchId 完全沒改)。coverage.test.ts 3/3 綠。
+- 紀律更新:此檔列入必跑清單 — 只要動過任何有登記 SQL 的檔。
+
+### 2. script-token 端點 /api/admin/catalog-rebuild
+- 新 `server/_core/catalogRebuildEndpoint.ts`:可測 factory(zod strict 硬驗 + confirm 閘 + 注入式 auth/rebuild deps);`server/_core/index.ts` 照 trust-transfer-detect 現成模式註冊(同 verifyInternalAuth + LOCAL_SCRIPT_TOKEN,rate limit 20/hr)。
+- 合約:body `{scope:'uv'|'lion'(enum 硬驗), dryRun(預設 true), limit(正整數 1-100,不給=全量), skipSync(預設 false)}`;安全閘:dryRun:false 必帶 `confirm:'promote'` 字面,缺/打錯 → 400(雙保險,tRPC 版另有全量 confirm 閘);回傳 RebuildReport 原樣。走 promote pipeline(快照可回滾),非裸寫。
+- 端點無 raw SQL(只調 service),免 sqlRehearsal 登記。
+- 紅綠(catalogRebuildEndpoint.test.ts,12 條):壞 token 401 短路不碰 rebuild、最小 body 預設 dryRun/skipSync、dryRun:false 無 confirm 400、confirm 打錯字 400、confirm:'promote' 真跑、scope/limit/型別/未知鍵硬驗、limit 1 與 100 邊界放行、report 原樣、service 炸 500。
+
+### 驗證(本批 R3)
+- tsc 0 錯(NODE_OPTIONS=6144)。
+- vitest(R1+R2 全套 + coverage + 端點):`Test Files  21 passed | 1 skipped (22)` / `Tests  267 passed | 1 skipped (268)`,連跑兩輪一致。

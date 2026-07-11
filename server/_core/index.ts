@@ -32,6 +32,7 @@ import { initializeGmailOAuth } from "../gmailOAuth";
 // imported below). Middleware is registered inside startServer() below.
 import { logger } from "./logger";
 import { correlationIdMiddleware } from "./correlationId";
+import { makeCatalogRebuildHandler } from "./catalogRebuildEndpoint";
 // Wave1 Block B — error funnel: guarantees admin tRPC 500s and cron/worker
 // failures actually surface to Jeff instead of dying silently in a catch.
 import { reportFunnelError } from "./errorFunnel";
@@ -1648,6 +1649,30 @@ async function startServer() {
       return res.status(500).json({ error: (err as Error).message });
     }
   });
+
+  // 線三 R3(2026-07-10)— 目錄重建 script-token 端點:包 rebuildCatalog(走
+  // promote pipeline,單一 txn + 快照可回滾,不是裸寫)。dryRun 預設 true;
+  // 真寫入(dryRun:false)必須額外帶 confirm:"promote" 字面,缺了 400(雙保險:
+  // tRPC suppliers.rebuildCatalog 另有全量 confirm 閘)。驗證/閘/參數硬驗在
+  // ./catalogRebuildEndpoint(可測 factory,zod strict)。
+  // POST /api/admin/catalog-rebuild
+  //   Headers: Authorization: Bearer <LOCAL_SCRIPT_TOKEN>
+  //   Body: { scope:"uv"|"lion", dryRun?=true, limit?(1-100), skipSync?=false,
+  //           confirm?:"promote" }
+  app.post(
+    "/api/admin/catalog-rebuild",
+    makeCatalogRebuildHandler({
+      verifyAuth: (req, res) =>
+        verifyInternalAuth(req, res, {
+          tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
+          rateLimitKey: "catalog-rebuild",
+          rateLimitMax: 20,
+          windowSec: 3600,
+        }),
+      runRebuild: async (scope, opts) =>
+        (await import("../services/catalogRebuild")).rebuildCatalog(scope, opts),
+    }),
+  );
 
   // 批十一 塊C — 案件對話進場:來源/ 的對話候選檔(.txt/.md)逐檔餵既有 chatLogImport 管線
   // (classifier 判斷是否對話、resolveEventDate 未來日期一律不建、認人守門、(content,分鐘)去重

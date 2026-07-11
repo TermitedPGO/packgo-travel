@@ -572,7 +572,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "catalogRebuild.loadExistingSupplierTours.rows",
-    sources: ["server/services/catalogRebuild/index.ts:180"],
+    sources: ["server/services/catalogRebuild/index.ts:193"],
     cls: "B",
     sql: "SELECT `tours`.`id`, `tours`.`productCode`, `tours`.`sourceUrl`, `tours`.`status` FROM `tours` WHERE `tours`.`sourceUrl` LIKE ?",
     sampleParams: ["%x%"],
@@ -580,7 +580,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "catalogRebuild.findCurrentLiveBatchId.row",
-    sources: ["server/services/catalogRebuild/index.ts:518"],
+    sources: ["server/services/catalogRebuild/index.ts:655"],
     cls: "B",
     sql: "SELECT `catalogBatches`.`id` FROM `catalogBatches` WHERE `catalogBatches`.`scope` = ? AND `catalogBatches`.`status` = ? ORDER BY `catalogBatches`.`createdAt` DESC LIMIT ?",
     sampleParams: ["uv","live",1],
