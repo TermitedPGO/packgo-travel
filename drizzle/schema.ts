@@ -861,6 +861,53 @@ export type StripeWebhookEvent = typeof stripeWebhookEvents.$inferSelect;
 export type InsertStripeWebhookEvent = typeof stripeWebhookEvents.$inferInsert;
 
 /**
+ * checkoutDisclosures — 付款前揭露存證 + 結帳前即時驗位驗價紀錄
+ * (migration 0116, checkout-verify 批, 2026-07-11)。
+ *
+ * 外部顧問第二輪審計 §二指出的曝險 #4:「缺少付款前揭露版本,日後難以證明
+ * 客戶同意的是哪個價格、費用與取消條款」。本表在建立 Stripe Checkout Session
+ * 之前落一列:snapshot = 客戶即將同意的版本(團名/班期/單價與人數/必付費用
+ * 明細/取消退款條款文字/幣別),verification = 即時驗證結果與時間戳
+ * (商品在售/餘位/價格/供應商資料新鮮度)。驗證失敗也落列(status=
+ * verification_failed,無 sessionId)供漏斗量測。webhook 完成付款時以
+ * stripeSessionId 回填 completedAt + paymentIntentId 釘死關聯。
+ *
+ * 一列 = 一次結帳嘗試(同 booking 可多列:deposit/remaining/重試),
+ * 絕不覆寫 —— 只新增,稽核軌不可變。
+ */
+export const checkoutDisclosures = mysqlTable("checkoutDisclosures", {
+  id: int("id").autoincrement().primaryKey(),
+  bookingId: int("bookingId").notNull(),
+  /** createCheckoutSession input.paymentType: "deposit" | "remaining"。 */
+  paymentType: varchar("paymentType", { length: 16 }).notNull(),
+  status: mysqlEnum("status", [
+    "verification_failed", // 驗證未過,未建 Session
+    "session_created",     // 驗證通過,Session 已建(或建立中)
+    "completed",           // webhook 收到付款完成,關聯釘死
+  ]).notNull(),
+  /** Stripe Checkout Session id(cs_…);verification_failed 時為 NULL。 */
+  stripeSessionId: varchar("stripeSessionId", { length: 255 }),
+  /** webhook 完成時回填的 payment intent(pi_…)。 */
+  stripePaymentIntentId: varchar("stripePaymentIntentId", { length: 255 }),
+  /** 客戶即將同意的版本快照(JSON,見 checkoutVerification.ts DisclosureSnapshot)。 */
+  snapshot: json("snapshot"),
+  /** 即時驗證結果(JSON,見 checkoutVerification.ts VerificationRecord)。 */
+  verification: json("verification"),
+  /** 驗證完成時間(不論過/不過)。 */
+  verifiedAt: timestamp("verifiedAt").notNull(),
+  /** webhook checkout.session.completed 蓋章時間。 */
+  completedAt: timestamp("completedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (t) => ({
+  bookingIdx: index("idx_checkoutDisclosures_booking").on(t.bookingId, t.createdAt),
+  sessionIdx: index("idx_checkoutDisclosures_session").on(t.stripeSessionId),
+}));
+
+export type CheckoutDisclosure = typeof checkoutDisclosures.$inferSelect;
+export type InsertCheckoutDisclosure = typeof checkoutDisclosures.$inferInsert;
+
+/**
  * Inquiries table for customer service requests.
  * Stores all customer inquiries including quick inquiries and custom tour requests.
  */

@@ -339,6 +339,33 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
   );
   log.info({ bookingId, deferToTrust }, deferToTrust ? "[Stripe Webhook] Trust deferral recorded" : "[Stripe Webhook] Accounting entry created");
 
+  // checkout-verify (2026-07-11): 揭露存證蓋章 — 以 sessionId 找到付款前落的
+  // checkoutDisclosures 列,標 completed + 回填 paymentIntentId,把「客戶同意
+  // 的版本」跟這筆完成的付款釘死。post-commit + fail-open:付款本身已成立,
+  // 蓋章失敗只記 log + errorFunnel(sessionId 已在列上,關聯不會丟,可事後補章)。
+  // 找不到列(停止線前的舊 Session)記 warn 供對帳,不 throw。
+  try {
+    const stamped = await db.markCheckoutDisclosureCompleted(
+      session.id,
+      typeof session.payment_intent === "string" ? session.payment_intent : null,
+    );
+    if (stamped) {
+      log.info({ bookingId, sessionId: session.id }, "[Stripe Webhook] Checkout disclosure stamped completed");
+    } else {
+      log.warn(
+        { bookingId, sessionId: session.id },
+        "[Stripe Webhook] No checkout disclosure row for completed session (pre-stopline session?)",
+      );
+    }
+  } catch (err) {
+    log.error({ err, bookingId, sessionId: session.id }, "[Stripe Webhook] Checkout disclosure stamp failed");
+    reportFunnelError({
+      source: "fail-open:stripeWebhook:checkoutDisclosureStamp",
+      err,
+      context: { bookingId, sessionId: session.id },
+    }).catch(() => {});
+  }
+
   // ─── POST-COMMIT side effects ────────────────────────────────────────
   // Anything below runs ONLY if the transaction above committed. Each side
   // effect MUST swallow its own errors — a failed email must NOT roll back

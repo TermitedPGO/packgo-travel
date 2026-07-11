@@ -44,6 +44,18 @@ export default function BookingDetail() {
     { enabled: !!bookingId && !!user }
   );
 
+  // checkout-verify (2026-07-11): 結帳前即時驗證的結構化錯誤契約 —
+  // PRECONDITION_FAILED = 驗位/驗價未過(或即時結帳停止線),前端轉詢位流:
+  // 付款按鈕區換成「提交訂位需求」卡(走既有 inquiries.create)。
+  const [verificationBlocked, setVerificationBlocked] = useState(false);
+  const [reserveRequestSent, setReserveRequestSent] = useState(false);
+  const reserveInquiryMutation = trpc.inquiries.create.useMutation({
+    onSuccess: () => setReserveRequestSent(true),
+    onError: () => {
+      toast.error(t('bookingDetail.reserveRequestFailed'));
+    },
+  });
+
   const createCheckoutMutation = trpc.bookings.createCheckoutSession.useMutation({
     onSuccess: (data) => {
       toast.success(t('bookingDetail.redirectingToPayment'));
@@ -56,11 +68,30 @@ export default function BookingDetail() {
       }, 3000);
     },
     onError: (error) => {
+      if (error.data?.code === "PRECONDITION_FAILED") {
+        setVerificationBlocked(true);
+        return;
+      }
       toast.error(t('bookingDetail.createCheckoutFailed'), {
         description: error.message,
       });
     },
   });
+
+  const handleReserveRequest = () => {
+    if (!booking || reserveInquiryMutation.isPending) return;
+    reserveInquiryMutation.mutate({
+      customerName: booking.customerName,
+      customerEmail: booking.customerEmail,
+      customerPhone: booking.customerPhone || undefined,
+      subject: `[訂位] Booking #${booking.id} (Tour #${booking.tourId})`,
+      message:
+        `訂單 #${booking.id} 線上付款前驗證未通過(團位/價格需人工確認),` +
+        `客人請求確認團位後付款。請核對供應商即時位價後寄付款連結。`,
+      inquiryType: "general",
+      relatedTourId: booking.tourId,
+    });
+  };
 
   // v78w: Wire up cancel-booking endpoint that already exists server-side.
   // Triggers an unrefundable warning prompt before calling the mutation.
@@ -376,7 +407,38 @@ export default function BookingDetail() {
                   </div>
                 </div>
 
-                {!isFullyPaid && (
+                {!isFullyPaid && verificationBlocked && (
+                  <>
+                    <Separator />
+                    {/* checkout-verify: 驗位驗價未過 → 線上付款轉詢位流 */}
+                    <div className="rounded-lg border-2 border-gray-200 bg-gray-50 p-4 text-center space-y-2">
+                      {reserveRequestSent ? (
+                        <>
+                          <CheckCircle2 className="h-8 w-8 text-[#c9a563] mx-auto" />
+                          <p className="font-bold text-foreground">{t('bookingDetail.reserveRequestSent')}</p>
+                          <p className="text-sm text-gray-600">{t('bookingDetail.reserveRequestSentBody')}</p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="font-bold text-foreground">{t('bookingDetail.verifyBlockedTitle')}</p>
+                          <p className="text-sm text-gray-600">{t('bookingDetail.verifyBlockedBody')}</p>
+                          <Button
+                            className="w-full rounded-lg bg-foreground hover:bg-foreground/90 text-white"
+                            onClick={handleReserveRequest}
+                            disabled={reserveInquiryMutation.isPending}
+                          >
+                            {reserveInquiryMutation.isPending && (
+                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                            )}
+                            {t('bookingDetail.submitReserveRequest')}
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
+
+                {!isFullyPaid && !verificationBlocked && (
                   <>
                     <Separator />
                     <div className="space-y-3">

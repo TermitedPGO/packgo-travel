@@ -131,17 +131,23 @@ export const stripeTrustDeferralEnabled = (): boolean =>
   isTrue(process.env.STRIPE_TRUST_DEFERRAL_ENABLED);
 
 /**
- * 臨時停止線 (2026-07-10, Jeff 裁決 · 外部顧問第二輪審計 §二/§三). Tour 類
- * 「結帳即請款」在付款前尚無即時驗價、驗位與揭露存證,先擋下來:OFF (預設)
- * = 擋,createCheckoutSession 對 tour booking 回結構化錯誤,前端轉「提交訂位
- * 需求」詢位流。ON = 放行舊即時請款行為。
+ * Tour 即時結帳總閘 (2026-07-10 立為臨時停止線;2026-07-11 checkout-verify
+ * batch-1 升級為 v2 語意,指揮驗收 RATIFIED)。
+ *
+ * OFF (預設) = 停止線全擋:createCheckoutSession 對 tour booking 直接回
+ * PRECONDITION_FAILED,不跑驗證、不落存證、不打 Stripe;前端轉「提交訂位
+ * 需求」詢位流。
+ *
+ * ON = 模式一「即時驗證後請款」:必須通過 verifyTourCheckout(UV live 驗
+ * 在售/驗位/驗價/必付,非 UV 一律擋)且揭露存證列(checkoutDisclosures)
+ * 落庫成功,才建立 Stripe Session。不存在「不驗證就收錢」的 legacy 路徑。
  *
  * 作用域:僅 tour booking 的 createCheckoutSession (server/routers/
  * bookingsPayment.ts)。visa / membership 結帳走各自 router,完全不受此旗標
  * 影響。
  *
- * 退場:checkout-verify 批的即時驗證(驗商品在售/驗位/驗價/揭露存證)上線後,
- * 這個「無條件擋」由「驗證通過才建 session」的條件擋取代,本旗標即可退役。
+ * 開啟前置(運維閘,詳 docs/features/checkout-verify/runbook-flag-enable.md):
+ * promote 必帶 skipSync:false + prod 抽團跑 verifyTourCheckout 核必付兩端對齊。
  *
  * Env: `TOUR_INSTANT_CHECKOUT_ENABLED=true`
  */

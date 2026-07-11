@@ -1,16 +1,18 @@
 /**
- * 臨時停止線 red-green — tour 類即時結帳 fail-closed 擋 (2026-07-10, Jeff 裁決).
+ * 停止線 red-green — tour 類即時結帳 fail-closed 擋 (2026-07-10 立;
+ * 2026-07-11 checkout-verify 批升級 v2 語意).
  *
  * 錢的碼從嚴:證明
  *   (紅) 旗標 OFF (預設) → createCheckoutSession 對 tour booking 拋
  *        PRECONDITION_FAILED,且「絕不打 Stripe」(sessions.create 零呼叫,
  *        連 booking 查詢都不發生 —— 擋在最前面)。
- *   (綠) 旗標 ON → 擋被繞過,流程正常走到 Stripe 並回傳 url(證明擋是
- *        旗標閘控、可逆,退場時即時驗證邏輯直接接手這個位置)。
+ *   (綠) 旗標 ON → 進入「即時驗證後請款」路徑:驗證通過(本檔 mock 通過)
+ *        才走到 Stripe 並回傳 url。旗標 ON 不再有「不驗證的 legacy 結帳」
+ *        —— 驗證失敗/存證失敗的擋單合約見 bookingsPayment.checkoutVerify.test.ts。
  *
- * 全 hermetic:Stripe / db / rateLimit / env / salesTax 皆 mock,不碰真實
- * 網路、DB 或 Stripe。visa / membership 走各自 router,不經此 procedure,
- * 故不受此旗標影響(見 business-logic.test.ts 的既有覆蓋)。
+ * 全 hermetic:Stripe / db / rateLimit / env / salesTax / checkoutVerification
+ * 皆 mock,不碰真實網路、DB 或 Stripe。visa / membership 走各自 router,
+ * 不經此 procedure,故不受此旗標影響(見 business-logic.test.ts 的既有覆蓋)。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -29,6 +31,9 @@ vi.mock("stripe", () => ({
 vi.mock("../db", () => ({
   getBookingById: vi.fn(),
   getTourById: vi.fn(),
+  getDepartureById: vi.fn(),
+  createCheckoutDisclosure: vi.fn(),
+  setCheckoutDisclosureSession: vi.fn(),
 }));
 
 vi.mock("../rateLimit", () => ({
@@ -43,8 +48,18 @@ vi.mock("../services/salesTaxService", () => ({
   calculateSalesTax: vi.fn().mockReturnValue({ amount: 0, rate: 0, jurisdiction: "" }),
 }));
 
+// GREEN 案走「驗證通過」;驗證本身的紅綠在 checkoutVerification.test.ts。
+vi.mock("../services/checkoutVerification", () => ({
+  verifyTourCheckout: vi.fn().mockResolvedValue({
+    ok: true,
+    verification: { mode: "uv_live", outcome: "passed" },
+    snapshot: {},
+  }),
+}));
+
 import { bookingsPaymentRouter } from "./bookingsPayment";
 import * as db from "../db";
+import { verifyTourCheckout } from "../services/checkoutVerification";
 
 const BOOKING = {
   id: 55,
@@ -74,17 +89,30 @@ function ctx() {
   } as any;
 }
 
-describe("createCheckoutSession · 臨時停止線 (tour instant checkout)", () => {
+describe("createCheckoutSession · 停止線 (tour instant checkout)", () => {
   beforeEach(() => {
     createSessionMock.mockReset();
     createSessionMock.mockResolvedValue({
       id: "cs_test_stopline",
       url: "https://checkout.stripe.com/pay/cs_test_stopline",
     });
-    (db.getBookingById as any).mockReset();
-    (db.getBookingById as any).mockResolvedValue(BOOKING);
-    (db.getTourById as any).mockReset();
-    (db.getTourById as any).mockResolvedValue({ id: 10, title: "Test Tour" });
+    (db.getBookingById as any).mockReset().mockResolvedValue(BOOKING);
+    (db.getTourById as any).mockReset().mockResolvedValue({
+      id: 10,
+      title: "Test Tour",
+      status: "active",
+      sourceUrl: "https://uvbookings.toursbms.com/product/detail/P00002255",
+    });
+    (db.getDepartureById as any).mockReset().mockResolvedValue({
+      id: 3,
+      departureDate: new Date(2026, 8, 15, 8, 0, 0),
+      adultPrice: 1000,
+      currency: "USD",
+    });
+    (db.createCheckoutDisclosure as any)
+      .mockReset()
+      .mockImplementation(async (row: any) => ({ id: 9, ...row }));
+    (db.setCheckoutDisclosureSession as any).mockReset().mockResolvedValue(undefined);
     delete process.env.TOUR_INSTANT_CHECKOUT_ENABLED;
   });
 
@@ -98,12 +126,13 @@ describe("createCheckoutSession · 臨時停止線 (tour instant checkout)", () 
       caller.createCheckoutSession({ bookingId: 55, paymentType: "deposit" }),
     ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
 
-    // 絕不打 Stripe —— 一分錢也擋。擋在最前面,連 booking 查詢都沒發生。
+    // 絕不打 Stripe —— 一分錢也擋。擋在最前面,連 booking 查詢、驗證都沒發生。
     expect(createSessionMock).not.toHaveBeenCalled();
     expect(db.getBookingById as any).not.toHaveBeenCalled();
+    expect(verifyTourCheckout as any).not.toHaveBeenCalled();
   });
 
-  it("GREEN · flag ON: block is bypassed, flow reaches Stripe and returns a url", async () => {
+  it("GREEN · flag ON: verified path reaches Stripe and returns a url (with disclosure persisted)", async () => {
     process.env.TOUR_INSTANT_CHECKOUT_ENABLED = "true";
     const caller = (bookingsPaymentRouter as any).createCaller(ctx());
     const result = await caller.createCheckoutSession({
@@ -114,5 +143,12 @@ describe("createCheckoutSession · 臨時停止線 (tour instant checkout)", () 
     expect(result).toHaveProperty("url");
     expect(typeof result.url).toBe("string");
     expect(createSessionMock).toHaveBeenCalledTimes(1);
+    // v2:旗標 ON 一定經過驗證 + 揭露存證,沒有 legacy 未驗證路徑
+    expect(verifyTourCheckout as any).toHaveBeenCalledTimes(1);
+    expect(db.createCheckoutDisclosure as any).toHaveBeenCalledTimes(1);
+    expect(db.setCheckoutDisclosureSession as any).toHaveBeenCalledWith(
+      9,
+      "cs_test_stopline",
+    );
   });
 });
