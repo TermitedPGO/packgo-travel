@@ -16,7 +16,7 @@
 --     PACK&GO's existing audit tables (adminAuditLog etc.) use loose
 --     references for the same reason — soft FK via index, not constraint.
 
-CREATE TABLE skillRuns (
+CREATE TABLE IF NOT EXISTS skillRuns (
   id INT AUTO_INCREMENT PRIMARY KEY,
 
   -- Identifies which skill ran. Matches the SkillId union in registry.ts
