@@ -144,16 +144,19 @@ export interface UvDepartureForPricing {
  *     5=三人 / 6=四人. Adult basis = priceType=4 (double-occupancy).
  *   - NON-ROOM (1-day tours / tickets / cruises): priceType 1=成人 / 2=兒童.
  *     Adult = priceType=1. There is NO pt4 (no room), so pt1 is correct.
- * So: pt4 → pt1 → (any non-single tier) → 0. priceType=3 (單人/single)
- * over-quotes ~30-37% and is NEVER used as the adult price. Rounded.
+ * So: pt4 → pt1 → 0 (skip). NOTHING else. priceType=3 (單人/single)
+ * over-quotes ~30-37%; priceType=5/6 (三人/四人 per-person) UNDER-quote — so
+ * neither is ever an adult basis. Hardened 2026-07-10 (uv-audit §4): the old
+ * "first non-single tier" fallback could silently pick pt5/pt6 (low-report =
+ * a real quoting risk). Now: no pt4 AND no pt1 → return 0 and SKIP the date,
+ * never fall through to a cheaper occupancy tier. Rounded.
  * Pure + exported for unit tests (Jeff rule: real getProductGroup price only).
  */
 export function pickDepartureAdultPrice(dep: UvDepartureForPricing): number {
   const byType = (t: number) => dep.groupPrice?.find((g) => g.priceType === t)?.groupPrice;
+  // pt4 (兩人一房) → pt1 (成人). Never pt3 (over-quote) / pt5 / pt6 (under-quote).
   const adult = byType(4) ?? byType(1);
-  // last resort: first tier that is not single-occupancy (pt3)
-  const fallback = dep.groupPrice?.find((g) => g.priceType !== 3)?.groupPrice;
-  return Math.round(Number(adult ?? fallback ?? 0) || 0);
+  return Math.round(Number(adult ?? 0) || 0);
 }
 
 /**

@@ -49,6 +49,30 @@ describe("pickDepartureAdultPrice", () => {
     expect(pickDepartureAdultPrice(dep)).toBe(0);
   });
 
+  it("returns 0 when only higher-occupancy tiers (pt5/pt6) exist — never UNDER-quotes (fallback hardened)", () => {
+    // uv-audit §4 landmine: with no pt4 and no pt1, the old fallback picked the
+    // first non-pt3 tier → pt5/pt6 (per-person cheaper) = low-report. Now skip.
+    const pt5pt6Only = {
+      groupPrice: [
+        { priceType: 5, groupPrice: 558 }, // 三人 — must NOT be picked
+        { priceType: 6, groupPrice: 528 }, // 四人 — must NOT be picked
+      ],
+    };
+    expect(pickDepartureAdultPrice(pt5pt6Only)).toBe(0);
+  });
+
+  it("still prefers pt4 even when cheaper pt5/pt6 tiers are also present", () => {
+    // Guard against a naive 'skip if higher tiers' overcorrection: pt4 present → pt4.
+    const dep = {
+      groupPrice: [
+        { priceType: 4, groupPrice: 598 },
+        { priceType: 5, groupPrice: 558 },
+        { priceType: 6, groupPrice: 528 },
+      ],
+    };
+    expect(pickDepartureAdultPrice(dep)).toBe(598);
+  });
+
   it("returns 0 when there is no price at all", () => {
     expect(pickDepartureAdultPrice({})).toBe(0);
     expect(pickDepartureAdultPrice({ groupPrice: [] })).toBe(0);
@@ -148,6 +172,20 @@ describe("buildDepartureFromMirrorRow", () => {
       groupPrice: [{ priceType: 3, groupPrice: 4350 }],
     });
     expect(buildDepartureFromMirrorRow(pt3Only, 6, TODAY_MS)).toBeNull();
+  });
+
+  it("skips a higher-occupancy-only (pt5/pt6) date rather than under-quoting it", () => {
+    // No pt4/pt1 → not a valid adult basis → skip, never build with a low pt5.
+    const pt5pt6Only = JSON.stringify({
+      groupDate: "2026-09-05 00:00:00",
+      groupStock: 20,
+      groupSaleStock: 0,
+      groupPrice: [
+        { priceType: 5, groupPrice: 1870 },
+        { priceType: 6, groupPrice: 1720 },
+      ],
+    });
+    expect(buildDepartureFromMirrorRow(pt5pt6Only, 6, TODAY_MS)).toBeNull();
   });
 
   it("marks a fully-booked departure as full", () => {

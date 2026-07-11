@@ -65,6 +65,13 @@ export interface StagedTour {
   /** 要寫進 tours 的對客欄位(已過 retail-only guard)。 */
   fields: Record<string, unknown>;
   assessment: CompletenessResult;
+  /**
+   * 供應商行銷照 URL(staging 內部欄,**刻意不進 `fields`**)。指揮裁決:供應商圖
+   * 不上客人頁(版權/品牌,design.md 紅線 #3)。留在這裡供日後參考(且鏡像
+   * supplierProducts.imageUrl 本就永久保有)。對客 hero 由 index.ts 的 adapter 走
+   * stockPhotoResolver 另配一張商用授權照,拿不到就無圖上架(noImage 軟旗標不擋)。
+   */
+  supplierImageUrl: string | null;
 }
 
 /**
@@ -107,6 +114,10 @@ export function buildStagedTour(
   });
 
   // 對客 fields = hydrate 內容 + 基本事實。只放 retail。
+  //
+  // 刻意 **不** 放 heroImage/imageUrl:供應商行銷照不上客人頁(指揮裁決 / design.md
+  // 紅線 #3)。對客 hero 由 index.ts adapter 走 stockPhotoResolver 另配商用授權照;
+  // 供應商 URL 留在 staged.supplierImageUrl(staging 內部)供參考,不寫進 tours。
   const fields: Record<string, unknown> = {
     ...hydrated,
     title: product.title.slice(0, 200),
@@ -114,8 +125,6 @@ export function buildStagedTour(
     destinationCountry: product.destinationCountry ?? undefined,
     destinationCity: product.destinationCity ?? undefined,
     departureCity: product.departureCity ?? undefined,
-    heroImage: product.imageUrl ?? undefined,
-    imageUrl: product.imageUrl ?? undefined,
     price: pricing.priceRetail,
     priceCurrency: pricing.currency,
   };
@@ -127,6 +136,8 @@ export function buildStagedTour(
   // 紅線:出口最後一道。任何成本欄混入 → throw,絕不上架。
   assertRetailOnly(fields);
 
+  // 圖片:completeness 只看「對客欄位有沒有圖」。供應商圖已攔在 fields 之外,故此處
+  // 圖一律視為缺(noImage 軟旗標,不擋);真正的 hero 由 adapter 之後配。
   const assessment = assessTourCompleteness({
     title: product.title,
     destinationCountry: product.destinationCountry,
@@ -135,10 +146,15 @@ export function buildStagedTour(
     itineraryDetailedJson: hydrated.itineraryDetailed ?? null,
     attractionsJson: hydrated.attractions ?? null,
     futureDepartureCount: pricing.futureDepartureCount,
-    heroImage: product.imageUrl,
-    imageUrl: product.imageUrl,
+    heroImage: null,
+    imageUrl: null,
     galleryImagesJson: null,
   });
 
-  return { productCode: product.externalProductCode, fields, assessment };
+  return {
+    productCode: product.externalProductCode,
+    fields,
+    assessment,
+    supplierImageUrl: product.imageUrl ?? null,
+  };
 }

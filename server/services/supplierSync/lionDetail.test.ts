@@ -8,12 +8,54 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  deriveLionDestination,
   parseLionItinerary,
   parseLionNotices,
   parseLionOptional,
   parseLionPriceTerms,
   parseLionTourInfo,
 } from "./lionDetail";
+
+describe("deriveLionDestination — destination from own data, never GroupInfo.Country", () => {
+  it("杜拜 tour is NOT labelled TW/台灣 even though GroupInfo.Country='TW' (lion-audit §5.1)", () => {
+    // Real shape: Country is the DEPARTURE country (TW) for an outbound Dubai tour.
+    const travel = {
+      GroupInfo: { TourDays: 7, Country: "TW", TourName: "璽品杜拜親子奇幻7日" },
+    } as any;
+    const dayTrip = {
+      DailyList: [
+        { Day: 1, TravelPoint: "台北 → 杜拜", AttractionsList: [{ Name: "杜拜塔" }] },
+        { Day: 2, TravelPoint: "杜拜市區", AttractionsList: [{ Name: "阿布達比大清真寺" }] },
+      ],
+    } as any;
+    const r = deriveLionDestination(travel, dayTrip);
+    expect(r.country).toBe("阿聯");
+    expect(r.country).not.toBe("台灣");
+    expect(r.country).not.toBe("TW");
+  });
+
+  it("genuine Taiwan domestic tour (小琉球) still resolves to 台灣", () => {
+    const travel = {
+      GroupInfo: { TourDays: 2, Country: "TW", TourName: "旅展一口價｜小琉球高鐵2日" },
+    } as any;
+    const dayTrip = {
+      DailyList: [
+        { Day: 1, TravelPoint: "高鐵 → 小琉球", AttractionsList: [{ Name: "小琉球" }] },
+      ],
+    } as any;
+    expect(deriveLionDestination(travel, dayTrip).country).toBe("台灣");
+  });
+
+  it("abstains (null) rather than guess when signals conflict/absent — gate then blocks", () => {
+    const travel = {
+      GroupInfo: { TourDays: 5, Country: "TW", TourName: "夢幻假期五日遊" },
+    } as any;
+    const r = deriveLionDestination(travel, { DailyList: [] } as any);
+    expect(r.country).toBeNull();
+    // The key invariant: abstain, but NEVER the wrong "台灣" default.
+    expect(r.country).not.toBe("台灣");
+  });
+});
 
 describe("parseLionItinerary", () => {
   it("returns null when GroupInfo missing", () => {

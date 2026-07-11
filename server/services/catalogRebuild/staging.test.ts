@@ -101,6 +101,21 @@ describe("buildStagedTour", () => {
     expect(staged.fields).toHaveProperty("costExplanation");
   });
 
+  it("RED LINE: supplier marketing image URL NEVER reaches customer fields (指揮裁決)", () => {
+    const staged = buildStagedTour(COMPLETE_PRODUCT, COMPLETE_DETAIL, {
+      priceRetail: 998,
+      currency: "USD",
+      futureDepartureCount: 6,
+    });
+    // COMPLETE_PRODUCT.imageUrl = "https://example.com/img.jpg" (a supplier URL).
+    // It must NOT appear anywhere in the customer-facing fields object.
+    expect(staged.fields).not.toHaveProperty("heroImage");
+    expect(staged.fields).not.toHaveProperty("imageUrl");
+    expect(JSON.stringify(staged.fields)).not.toContain("example.com");
+    // …but it IS retained on the staging-internal field for later reference.
+    expect(staged.supplierImageUrl).toBe("https://example.com/img.jpg");
+  });
+
   it("missing itinerary + attractions → blocked, reports both", () => {
     const staged = buildStagedTour(
       COMPLETE_PRODUCT,

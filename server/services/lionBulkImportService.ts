@@ -20,6 +20,7 @@
 import { fetchLionTravelData, type LionTravelApiData } from "./lionTravelApiService";
 import { createTour, createDeparture, getTourDepartures } from "../db";
 import { tourGenerationQueue } from "../queue";
+import { deriveLocation } from "./lionLocation";
 
 /** Result for one imported tour */
 export interface BulkImportResult {
@@ -87,25 +88,26 @@ function lionDataToTourRecord(
   normGroupId: string,
   createdBy: number
 ) {
-  // Best-effort country derivation from country code (Lion uses ISO-2)
-  const countryCodeMap: Record<string, string> = {
-    JP: "日本", KR: "韓國", TW: "台灣", US: "美國", CA: "加拿大",
-    GB: "英國", FR: "法國", DE: "德國", IT: "義大利", ES: "西班牙",
-    CH: "瑞士", AT: "奧地利", NL: "荷蘭", BE: "比利時", LU: "盧森堡",
-    GR: "希臘", PT: "葡萄牙", IE: "愛爾蘭",
-    CZ: "捷克", HU: "匈牙利", PL: "波蘭", SK: "斯洛伐克", SI: "斯洛維尼亞",
-    HR: "克羅埃西亞", RS: "塞爾維亞", BG: "保加利亞", RO: "羅馬尼亞",
-    NO: "挪威", SE: "瑞典", DK: "丹麥", FI: "芬蘭", IS: "冰島",
-    RU: "俄羅斯", TR: "土耳其",
-    TH: "泰國", VN: "越南", MY: "馬來西亞", SG: "新加坡", ID: "印尼",
-    PH: "菲律賓", IN: "印度", LK: "斯里蘭卡", NP: "尼泊爾",
-    EG: "埃及", MA: "摩洛哥", ZA: "南非",
-    AU: "澳洲", NZ: "紐西蘭",
-  };
-  const destCountry =
-    countryCodeMap[data.country?.toUpperCase() || ""] || data.country || "";
-  // First city in itinerary (best-effort)
-  const firstCity = data.dailyItinerary?.[0]?.attractions?.[0]?.name || "";
+  // Destination country/city — derive from the tour's OWN name + itinerary,
+  // NEVER from `data.country`. Lion's `GroupInfo.Country` is the DEPARTURE
+  // country (always "TW"), so trusting it mislabelled every outbound tour as
+  // 台灣 (lion-audit §5.1 — 杜拜/挪威/北京 all reported TW). deriveLocation is the
+  // codebase's "recover the real destination from own data, NO guessing" tool;
+  // it abstains (null) rather than guess, in which case we ship an empty country
+  // (honest) instead of a wrong one.
+  const derived = deriveLocation({
+    title: data.tourName || "",
+    dayTitles: (data.dailyItinerary ?? [])
+      .map((d) => d.travelPoint)
+      .filter((s): s is string => !!s),
+    locations: (data.dailyItinerary ?? [])
+      .flatMap((d) => (d.attractions ?? []).map((a) => a.name))
+      .filter((s): s is string => !!s),
+  });
+  const destCountry = derived.country || "";
+  // Prefer the itinerary-derived city; fall back to the first attraction name.
+  const firstCity =
+    derived.city || data.dailyItinerary?.[0]?.attractions?.[0]?.name || "";
 
   return {
     title: data.tourName.slice(0, 200), // safety cap

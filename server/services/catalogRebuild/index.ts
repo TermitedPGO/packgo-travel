@@ -32,13 +32,21 @@ import {
 import { createChildLogger } from "../../_core/logger";
 import { reportFunnelError } from "../../_core/errorFunnel";
 import { syncUvCatalog } from "../supplierSync/uv";
+import { syncLionCatalog } from "../supplierSync/lion";
 import { enrichUvProduct } from "../supplierSync/uvDetail";
+import { enrichLionProduct } from "../supplierSync/lionDetail";
 import { upsertProductDetail } from "../supplierSync/sharedDetail";
 import {
   buildDepartureFromMirrorRow,
   headlineFromBuiltDepartures,
   type BuiltMirrorDeparture,
 } from "../uvBulkImportService";
+import {
+  buildLionDepartures,
+  convertLionDeparturesToUsd,
+} from "./lionDepartures";
+import { getExchangeRate } from "../../agents/exchangeRateAgent";
+import { resolveStockPhoto } from "./stockPhotoResolver";
 import {
   createTour,
   createDeparture,
@@ -85,6 +93,8 @@ export interface RebuildReport {
 
 /** UV tours 的 sourceUrl host(辨識「這團屬於 UV」)。 */
 const UV_SOURCE_HOST = "uvbookings.toursbms.com";
+/** Lion tours 的 sourceUrl host(sourceUrl = .../detail?NormGroupID=<uuid>)。 */
+const LION_SOURCE_HOST = "travel.liontravel.com";
 
 interface ExistingTour {
   id: number;
@@ -149,6 +159,13 @@ export function extractUvProductCode(sourceUrl: string | null | undefined): stri
   return m ? m[1] : null;
 }
 
+/** 從 Lion tours.sourceUrl 取出 NormGroupID(.../detail?NormGroupID=<uuid> → <uuid>)。 */
+export function extractLionNormGroupId(sourceUrl: string | null | undefined): string | null {
+  if (!sourceUrl) return null;
+  const m = sourceUrl.match(/[?&]NormGroupID=([^&#]+)/i);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
 /**
  * 載入這家供應商在 tours 表的既有團(by sourceUrl host)→ Map<productCode, {id,status}>。
  *
@@ -162,13 +179,9 @@ export function extractUvProductCode(sourceUrl: string | null | undefined): stri
 async function loadExistingSupplierTours(
   scope: RebuildScope,
 ): Promise<Map<string, ExistingTour>> {
-  if (scope !== "uv") {
-    throw new Error(
-      `[catalogRebuild] scope='${scope}' 尚未接上 tours 對映(Lion 需先解 NormGroupID 橋接)。目前只支援 'uv'。`,
-    );
-  }
   const db = await getDb();
   if (!db) throw new Error("Database not available");
+  const host = scope === "lion" ? LION_SOURCE_HOST : UV_SOURCE_HOST;
   const rows = await db
     .select({
       id: toursTable.id,
@@ -177,12 +190,21 @@ async function loadExistingSupplierTours(
       status: toursTable.status,
     })
     .from(toursTable)
-    .where(sql`${toursTable.sourceUrl} LIKE ${"%" + UV_SOURCE_HOST + "%"}`);
+    .where(sql`${toursTable.sourceUrl} LIKE ${"%" + host + "%"}`);
   const map = new Map<string, ExistingTour>();
   for (const r of rows) {
     const entry: ExistingTour = { id: r.id, status: r.status };
-    const fromUrl = extractUvProductCode(r.sourceUrl);
-    for (const key of [r.productCode, fromUrl]) {
+    // key = 供應商產品碼(= supplierProducts.externalProductCode)。
+    //   UV:tours.productCode 乾淨,也收 sourceUrl 解出的 code(早期匯入只有其一)。
+    //   Lion:externalProductCode = NormGroupID,而 tours.productCode 存的是 tourId
+    //     (不同 ID),所以只能靠 sourceUrl 的 NormGroupID param 對映。
+    //   事故後 tours 全空 → 回空 Map、全部 wouldCreateNew 建 draft(正確首批語意);
+    //   此對映是為日後 re-run 就地更新(id/URL/SEO 穩)不砸 SEO。
+    const keys =
+      scope === "lion"
+        ? [extractLionNormGroupId(r.sourceUrl)]
+        : [r.productCode, extractUvProductCode(r.sourceUrl)];
+    for (const key of keys) {
       if (key && !map.has(key)) map.set(key, entry);
     }
   }
@@ -222,13 +244,54 @@ async function enrichAll(
           const enrichment =
             scope === "uv"
               ? await enrichUvProduct(p.id, p.externalProductCode)
-              : null;
+              : scope === "lion"
+                ? await enrichLionProduct(p.id, p.externalProductCode)
+                : null;
           if (enrichment) await upsertProductDetail(p.id, supplierId, enrichment);
         } catch (err) {
           log.warn(
             { productCode: p.externalProductCode, err: (err as Error).message },
             "enrich failed (non-fatal, will gate on completeness)",
           );
+        }
+      }),
+    );
+  }
+}
+
+/** 從 hydrate 的 attractions JSON(array of {name}) 取第一個景點名,給搜圖 query 用。 */
+function firstAttractionName(attractionsJson: unknown): string | null {
+  if (typeof attractionsJson !== "string" || !attractionsJson) return null;
+  try {
+    const arr = JSON.parse(attractionsJson);
+    if (Array.isArray(arr) && arr.length > 0) {
+      const name = (arr[0] as { name?: unknown })?.name;
+      return typeof name === "string" && name.trim() ? name : null;
+    }
+  } catch {
+    /* garbage → no attraction hint */
+  }
+  return null;
+}
+
+/**
+ * 為每個待上架團配一張對客 hero 圖(商用授權,非供應商圖)。就地改 fields.heroImage /
+ * imageUrl。fail-open:resolveStockPhoto 拿不到就不加(無圖上架)。並發小批降低速率壓力。
+ */
+async function attachStockHeroImages(promotable: PromotableTour[]): Promise<void> {
+  const CONCURRENCY = 5;
+  for (let i = 0; i < promotable.length; i += CONCURRENCY) {
+    const batch = promotable.slice(i, i + CONCURRENCY);
+    await Promise.all(
+      batch.map(async (p) => {
+        const hero = await resolveStockPhoto({
+          destinationCountry: (p.fields.destinationCountry as string | undefined) ?? null,
+          destinationCity: (p.fields.destinationCity as string | undefined) ?? null,
+          attractionName: firstAttractionName(p.fields.attractions),
+        });
+        if (hero) {
+          p.fields.heroImage = hero;
+          p.fields.imageUrl = hero;
         }
       }),
     );
@@ -289,6 +352,7 @@ export async function rebuildCatalog(
   // 1. 刷新鏡像(sync 產品+班期 → enrich 明細)。skipSync 時略過。
   if (!skipSync) {
     if (scope === "uv") await syncUvCatalog();
+    else if (scope === "lion") await syncLionCatalog();
     else throw new Error(`[catalogRebuild] scope='${scope}' sync 尚未接上`);
   }
 
@@ -323,6 +387,11 @@ export async function rebuildCatalog(
   }
 
   const existingByCode = await loadExistingSupplierTours(scope);
+
+  // Lion 全 TWD → 換成 USD(對美國客面站,與 UV 團一致)。匯率 async fetch 一次
+  // (放這裡、不塞進 staging 純函式),之後每筆班期用純函式套用(見 lionDepartures)。
+  // UV 原生 USD,rate=1、不換。
+  const twdToUsdRate = scope === "lion" ? await getExchangeRate("TWD", "USD") : 1;
 
   // 批次預載班期 + 明細(避免 N+1:~1000 次來回 → 分批 IN 查)。
   const productIds = productRows.map((p) => p.id);
@@ -380,12 +449,25 @@ export async function rebuildCatalog(
   for (const p of productRows) {
     seenCodes.add(p.externalProductCode);
 
-    // 班期 + 起價(UV 從鏡像 rawDepartureJson 乾淨重建)。批次預載,非 per-product 查。
-    const { built, priceRetail, futureCount } = buildUvDepartures(
-      depsByProduct.get(p.id) ?? [],
-      p.days,
-      todayMs,
-    );
+    // 班期 + 起價。UV / Lion 的鏡像 rawDepartureJson 形狀不同 → per-supplier adapter。
+    // Lion 另需 TWD→USD 換匯(rate 已 fetch 好一次,這裡純函式套用)。批次預載,非 per-product 查。
+    let built: BuiltMirrorDeparture[];
+    let priceRetail: number;
+    let futureCount: number;
+    if (scope === "lion") {
+      const lion = buildLionDepartures(depsByProduct.get(p.id) ?? [], p.days, todayMs);
+      built = convertLionDeparturesToUsd(lion.built, twdToUsdRate);
+      priceRetail = headlineFromBuiltDepartures(built);
+      futureCount = lion.futureCount;
+    } else {
+      ({ built, priceRetail, futureCount } = buildUvDepartures(
+        depsByProduct.get(p.id) ?? [],
+        p.days,
+        todayMs,
+      ));
+    }
+    // 換匯後 Lion 團的價已是 USD;UV 原生 USD。對客一律標 USD。
+    const outputCurrency = scope === "lion" ? "USD" : p.currency || "USD";
 
     // 明細(parsed JSON)— 批次預載。
     const detailRow = detailByProduct.get(p.id) ?? null;
@@ -404,7 +486,7 @@ export async function rebuildCatalog(
 
     const staged = buildStagedTour(product, detail, {
       priceRetail,
-      currency: p.currency || "USD",
+      currency: outputCurrency,
       futureDepartureCount: futureCount,
     });
 
@@ -422,6 +504,10 @@ export async function rebuildCatalog(
     } else {
       wouldCreateNew++;
       if (dryRun) continue; // 預覽不建新列、不算進 promotable
+      const sourceUrl =
+        scope === "lion"
+          ? `https://${LION_SOURCE_HOST}/detail?NormGroupID=${p.externalProductCode}`
+          : `https://${UV_SOURCE_HOST}/en/product/detail/${p.externalProductCode}`;
       const draft = await createTour({
         title: product.title.slice(0, 200),
         description: "",
@@ -433,11 +519,13 @@ export async function rebuildCatalog(
         duration: product.days,
         nights: Math.max(0, product.days - 1),
         price: priceRetail,
-        priceCurrency: product.currency || "USD",
-        heroImage: product.imageUrl,
-        imageUrl: product.imageUrl,
+        priceCurrency: outputCurrency,
+        // 供應商圖不上客人頁(指揮裁決)。draft 先建成無圖,對客 hero 由下方
+        // stockPhotoResolver 配好後由 promote 就地寫入(拿不到就無圖上架)。
+        heroImage: null,
+        imageUrl: null,
         status: "draft",
-        sourceUrl: `https://${UV_SOURCE_HOST}/en/product/detail/${p.externalProductCode}`,
+        sourceUrl,
         createdBy,
       } satisfies InsertTour);
       tourId = draft.id;
@@ -470,6 +558,14 @@ export async function rebuildCatalog(
     log.info({ ...report }, "rebuildCatalog dry-run done (no writes)");
     return report;
   }
+
+  // 3.5 對客 hero 圖:供應商行銷照已在 staging 攔掉(不上客人頁,指揮裁決)。這裡按
+  //     目的地(城市/景點/國家)另配一張商用授權照當 hero,寫進 promotable.fields
+  //     (promote 就地寫入 tours)。fail-open:拿不到(無 key / 查無 / 出錯)→ 不加圖,
+  //     無圖上架(noImage 只是軟旗標,不擋)。dryRun 不做(不打外部 API)。
+  //     註:大批(數百~數千團)會受 Unsplash 免費層速率限制,超額後多回 null → 無圖,
+  //     由後續潤稿/AI 生圖另案補;此處不解速率限制。
+  await attachStockHeroImages(promotable);
 
   // 4. 開 batch、原子 promote(快照可回滾)。
   const replacedBatchId = await findCurrentLiveBatchId(scope);

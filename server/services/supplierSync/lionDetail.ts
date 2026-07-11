@@ -49,20 +49,7 @@ async function updateSupplierProductMeta(
   }
 }
 
-// Lion's ISO-2 country code map (reused from lionTravelApiService)
-const LION_COUNTRY_MAP: Record<string, string> = {
-  JP: "日本", KR: "韓國", TW: "台灣", US: "美國", CA: "加拿大",
-  GB: "英國", FR: "法國", DE: "德國", IT: "義大利", ES: "西班牙",
-  CH: "瑞士", AT: "奧地利", NL: "荷蘭", BE: "比利時", LU: "盧森堡",
-  GR: "希臘", PT: "葡萄牙", IE: "愛爾蘭", CZ: "捷克", HU: "匈牙利",
-  PL: "波蘭", SK: "斯洛伐克", SI: "斯洛維尼亞", HR: "克羅埃西亞",
-  RS: "塞爾維亞", BG: "保加利亞", RO: "羅馬尼亞", NO: "挪威",
-  SE: "瑞典", DK: "丹麥", FI: "芬蘭", IS: "冰島", RU: "俄羅斯",
-  TR: "土耳其", TH: "泰國", VN: "越南", MY: "馬來西亞", SG: "新加坡",
-  ID: "印尼", PH: "菲律賓", IN: "印度", LK: "斯里蘭卡", NP: "尼泊爾",
-  EG: "埃及", MA: "摩洛哥", ZA: "南非", AU: "澳洲", NZ: "紐西蘭",
-  MO: "澳門", HK: "香港", CN: "中國",
-};
+import { deriveLocation } from "../lionLocation";
 import {
   getTravelInfo,
   getPriceInfo,
@@ -142,14 +129,23 @@ export async function enrichLionProduct(
           "daytripinfojson fetch failed, using flight-info fallback",
         );
       }
-      // 2026-05-25: backfill destination country to supplierProducts so
-      // downstream tour imports get the country field populated. Lion's
-      // search API doesn't return country — only the detail call does.
-      const country = (travelRaw as any)?.GroupInfo?.Country;
-      if (typeof country === "string") {
-        const mapped = LION_COUNTRY_MAP[country.toUpperCase()] || country;
+      // Backfill destination country/city to supplierProducts so downstream
+      // tour imports get them populated. Lion's search API returns neither.
+      //
+      // 2026-07-10 (lion-audit §5.1, real bug): travelinfojson `GroupInfo.Country`
+      // is the DEPARTURE country (always "TW" — a Dubai/Norway/Beijing tour all
+      // report TW), NOT the destination. Trusting it mislabelled every outbound
+      // tour as 台灣 (hard gate passes with a semantically wrong value; downstream
+      // calibration + destination routing then break). Derive the REAL destination
+      // from the tour name + day-by-day itinerary instead (deriveLocation — the
+      // codebase's "recover from own data, NO guessing" tool built for exactly
+      // this). Abstain (null) → leave it null so the completeness gate blocks the
+      // tour rather than shipping a wrong country.
+      const dest = deriveLionDestination(travelRaw, dayTripRaw);
+      if (dest.country) {
         await updateSupplierProductMeta(supplierProductId, {
-          destinationCountry: mapped,
+          destinationCountry: dest.country,
+          destinationCity: dest.city ?? undefined,
         });
       }
       return ok(
@@ -233,6 +229,34 @@ async function resolveLionGroupId(
     .limit(1);
 
   return anyRow?.code ?? null;
+}
+
+/**
+ * Derive the REAL destination country + city for a Lion product from its OWN
+ * data (tour name + day-by-day itinerary), NOT from `GroupInfo.Country` (which
+ * is the departure country = always "TW"; see lion-audit §5.1).
+ *
+ * Pure — no DB, no fetch. Feeds the country backfill in `enrichLionProduct`
+ * and is directly unit-testable (the 杜拜-not-TW red/green). Returns
+ * `{ country: null, city: null }` when the signals don't support a confident
+ * answer (deriveLocation abstains) — the caller then leaves the mirror's
+ * destinationCountry null and the completeness gate blocks the tour, which is
+ * the safe outcome (never ship a guessed/wrong country).
+ */
+export function deriveLionDestination(
+  travel: LionTravelInfo | null | undefined,
+  dayTrip: LionDayTripInfo | null | undefined,
+): { country: string | null; city: string | null } {
+  const title = travel?.GroupInfo?.TourName ?? "";
+  const dailyList = dayTrip?.DailyList ?? [];
+  const dayTitles = dailyList
+    .map((d) => stripHtml(d.TravelPoint))
+    .filter((s): s is string => s.length > 0);
+  const locations = dailyList
+    .flatMap((d) => (d.AttractionsList ?? []).map((a) => stripHtml(a.Name)))
+    .filter((s): s is string => s.length > 0);
+  const derived = deriveLocation({ title, dayTitles, locations });
+  return { country: derived.country, city: derived.city };
 }
 
 /* ─────────────────── Parsers ─────────────────── */
