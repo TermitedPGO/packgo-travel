@@ -101,6 +101,29 @@ describe("buildStagedTour", () => {
     expect(staged.fields).toHaveProperty("costExplanation");
   });
 
+  it("RED LINE (R4): mandatory-fee amounts stay in costExplanation text — NEVER added to the price field", () => {
+    // priceTerms carrying a 必付 $80 (R4 shape) must not move tours.price:
+    // price comes from departure pricing facts ONLY.
+    const detailWithMandatory: MirrorDetail = {
+      ...COMPLETE_DETAIL,
+      priceTermsParsed: JSON.stringify({
+        included: ["住宿", "門票"],
+        excluded: ["必付:JP-NTF3 Mandatory fee — Everyone $80.00"],
+        paymentTerms: "報名時付訂金、出發前依縱橫標準條款付尾款",
+        cancellationPolicy: [],
+      }),
+    };
+    const staged = buildStagedTour(COMPLETE_PRODUCT, detailWithMandatory, {
+      priceRetail: 998,
+      currency: "USD",
+      futureDepartureCount: 6,
+    });
+    expect(staged.fields.price).toBe(998); // NOT 998+80
+    // the fee is visible to the customer as text in costExplanation
+    expect(String(staged.fields.costExplanation)).toContain("必付");
+    expect(String(staged.fields.costExplanation)).toContain("$80.00");
+  });
+
   it("RED LINE: supplier marketing image URL NEVER reaches customer fields (指揮裁決)", () => {
     const staged = buildStagedTour(COMPLETE_PRODUCT, COMPLETE_DETAIL, {
       priceRetail: 998,

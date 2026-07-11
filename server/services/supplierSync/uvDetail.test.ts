@@ -7,6 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  isUvMandatoryCostItem,
   parseUvItinerary,
   parseUvNotices,
   parseUvOptional,
@@ -123,12 +124,14 @@ describe("parseUvOptional (real fixture)", () => {
     expect(parseUvOptional({} as any)).toBeNull();
   });
 
-  it("extracts all 12 cost items with USD prices", () => {
+  it("extracts the 11 OPTIONAL cost items — the mandatory fee is NOT 自費 (R4)", () => {
     const result = parseUvOptional(real)!;
-    expect(result.items).toHaveLength(12);
-    const fee = result.items.find((i) => i.name === "YG Mandatory Fee")!;
-    expect(fee.price).toBe(215);
-    expect(fee.currency).toBe("USD");
+    // fixture has 12 cost items; "YG Mandatory Fee" is 必付 → excluded from optional
+    expect(result.items).toHaveLength(11);
+    expect(result.items.find((i) => i.name === "YG Mandatory Fee")).toBeUndefined();
+    const canyon = result.items.find((i) => i.name === "Lower Antelope Canyon")!;
+    expect(canyon.price).toBe(105);
+    expect(canyon.currency).toBe("USD");
   });
 
   it("picks the adult/everyone tier when multiple price tiers exist", () => {
@@ -142,9 +145,9 @@ describe("parseUvOptional (real fixture)", () => {
 
   it("strips HTML from the description", () => {
     const result = parseUvOptional(real)!;
-    const fee = result.items.find((i) => i.name === "YG Mandatory Fee")!;
-    expect(fee.description).not.toContain("<");
-    expect(fee.description).toContain("Including");
+    const kayak = result.items.find((i) => i.name === "Lake Powell Kayaking")!;
+    expect(kayak.description).not.toContain("<");
+    expect(kayak.description).toContain("Fee included");
   });
 });
 
@@ -172,16 +175,112 @@ describe("parseUvPriceTerms (real fixture)", () => {
     expect(result.included).toHaveLength(2);
     expect(result.included.join("\n")).toContain("Transportation");
     expect(result.included.join("\n")).toContain("Lunch");
-    expect(result.excluded).toEqual([]);
     expect(result.cancellationPolicy).toEqual([]);
   });
 
-  it("returns null when no inclusion notice exists", () => {
+  it("carries the mandatory fee into excluded with 必付 label + amount (R4)", () => {
+    const result = parseUvPriceTerms(real)!;
+    expect(result.excluded).toHaveLength(1);
+    expect(result.excluded[0]).toContain("必付");
+    expect(result.excluded[0]).toContain("YG Mandatory Fee");
+    expect(result.excluded[0]).toContain("$215.00");
+  });
+
+  it("returns null when no inclusion notice AND no mandatory fee exist", () => {
     expect(
       parseUvPriceTerms({
         productNotice: { noticeInfo: [{ noticeType: 3, matterName: "退改" }] },
       } as any)
     ).toBeNull();
+    // fail-open on empty/absent productCost too
+    expect(
+      parseUvPriceTerms({
+        productNotice: { noticeInfo: [] },
+        productCost: { list: [] },
+      } as any)
+    ).toBeNull();
+  });
+});
+
+// ── R4 必付/自費分流 — 對「2026-07-10 live 探真」的真實回傳形狀(P00008352,
+//    progress.md R4 附錄)紅綠。UV cost item 無結構性 flag(必付/自費同構),
+//    唯一訊號是名稱;分類錯 = 低報總價(必付被當自費)。
+describe("R4 必付/自費分流(probe 真實形狀)", () => {
+  // P00008352 的真實 productCost item(探針原文照抄,僅節錄 desc)
+  const P00008352_COST = {
+    list: [
+      {
+        id: 90847,
+        editType: 1,
+        expenseCode: "EM00002379",
+        costDay: "",
+        expIExpandName: "JP-NTF3 Mandatory fee",
+        expIExpandDesc:
+          "<p>Include Niagara Falls Hotel Resort Fee, Niagara Power Plant.</p>",
+        resourceType: 0,
+        sortNo: 1,
+        priceInfo: [{ expPriceName: "Everyone", expPriceMoney: "$80.00", sortNo: 1 }],
+      },
+      {
+        id: 90848,
+        editType: 1,
+        expenseCode: "EM00002380",
+        costDay: "",
+        expIExpandName: "Thousand Islands Cruise (US Side)",
+        expIExpandDesc: "",
+        resourceType: 0,
+        sortNo: 2,
+        priceInfo: [
+          { expPriceName: "Adult", expPriceMoney: "$31.54", sortNo: 1 },
+          { expPriceName: "Child (5-12)", expPriceMoney: "$20.94", sortNo: 2 },
+        ],
+      },
+    ],
+  };
+
+  it("isUvMandatoryCostItem:名稱式判別(必付命中、自費不命中)", () => {
+    expect(isUvMandatoryCostItem("JP-NTF3 Mandatory fee")).toBe(true);
+    expect(isUvMandatoryCostItem("YG Mandatory Fee")).toBe(true);
+    expect(isUvMandatoryCostItem("司導服務費")).toBe(true);
+    expect(isUvMandatoryCostItem("Thousand Islands Cruise (US Side)")).toBe(false);
+    expect(isUvMandatoryCostItem("Lower Antelope Canyon")).toBe(false); // desc 有 service fee,名稱沒有 → 自費
+    expect(isUvMandatoryCostItem("")).toBe(false);
+    expect(isUvMandatoryCostItem(null)).toBe(false);
+  });
+
+  it("必付 $80 進 priceTerms.excluded(帶價階),自費遊船不進", () => {
+    const pt = parseUvPriceTerms({
+      productNotice: { noticeInfo: [] },
+      productCost: P00008352_COST,
+    } as any)!;
+    expect(pt.excluded).toHaveLength(1);
+    expect(pt.excluded[0]).toBe("必付:JP-NTF3 Mandatory fee — Everyone $80.00");
+    // included 可以空(該團 noticeType-0 另存)— 有必付就不回 null
+    expect(pt.included).toEqual([]);
+  });
+
+  it("自費清單只剩遊船,必付項絕不混入自費", () => {
+    const opt = parseUvOptional({ productCost: P00008352_COST } as any)!;
+    expect(opt.items).toHaveLength(1);
+    expect(opt.items[0].name).toBe("Thousand Islands Cruise (US Side)");
+    expect(opt.items[0].price).toBe(31.54);
+  });
+
+  it("純自費團(P00004442 形狀):excluded 空、自費完整保留", () => {
+    const onlyOptional = {
+      list: [
+        {
+          expIExpandName: "Maras+Moray+Chinchero One Day Tour",
+          expIExpandDesc: "",
+          priceInfo: [{ expPriceName: "Everyone", expPriceMoney: "$200.00" }],
+        },
+      ],
+    };
+    expect(
+      parseUvPriceTerms({ productNotice: { noticeInfo: [] }, productCost: onlyOptional } as any),
+    ).toBeNull(); // 無含蓋、無必付 → null(不造假)
+    const opt = parseUvOptional({ productCost: onlyOptional } as any)!;
+    expect(opt.items).toHaveLength(1);
   });
 });
 

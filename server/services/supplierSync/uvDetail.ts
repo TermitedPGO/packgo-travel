@@ -99,8 +99,14 @@ export async function enrichUvProduct(
     ? ok("itinerary", { productTravel: travel.productTravel }, parseUvItinerary(travel, main))
     : fail("itinerary", new Error("getProductTravelDetail returned null"));
 
+  // R4:priceTerms 的來源現在含 productCost(必付費用)— raw 同步帶上,存的 JSON
+  // 才對得上 parser 讀的東西。
   const priceTerms: EnrichmentResult = travel
-    ? ok("priceTerms", { productNotice: travel.productNotice }, parseUvPriceTerms(travel))
+    ? ok(
+        "priceTerms",
+        { productNotice: travel.productNotice, productCost: travel.productCost },
+        parseUvPriceTerms(travel),
+      )
     : fail("priceTerms", new Error("getProductTravelDetail returned null"));
 
   const notices: EnrichmentResult = travel
@@ -201,6 +207,24 @@ function sectionToTitle(section: unknown): string {
 /* ─────────────────── Parsers ─────────────────── */
 
 /**
+ * 名稱式必付判別(R4 2026-07-10,Jeff 點出:必付留白/誤標自費 = 低報總價)。
+ *
+ * 探真(10 團 live 實測,progress.md R4 附錄)證實 UV cost item **沒有結構性
+ * flag**:必付與自費的欄位完全同構(editType=1 / resourceType=0 / expenseCode=EM*),
+ * 唯一可辨識訊號是名稱(實例 "JP-NTF3 Mandatory fee"、fixture "YG Mandatory Fee")。
+ * 故用名稱 pattern 分類;只比對**名稱**不比對描述(描述常含 "Include service fee"
+ * 這類字樣會誤傷純自費項)。pattern 保守收斂:寧漏(漏的仍列自費、金額可見)
+ * 勿錯殺(把自費硬標必付=高報)。
+ */
+const MANDATORY_FEE_NAME =
+  /mandatory|required\s*fee|必付|必須費|必须费|必要費|必要费|服務費|服务费|小費|小费|resort\s*fee|燃油|資源費|资源费|雜費|杂费|city\s*tax|城市稅|城市税/i;
+
+/** 一個 productCost.list 項目名稱是否為「必付費用」(非自費)。純函式。 */
+export function isUvMandatoryCostItem(name: unknown): boolean {
+  return typeof name === "string" && MANDATORY_FEE_NAME.test(name);
+}
+
+/**
  * Parse UV's `productTravel` block into NormalizedItinerary.
  *
  * Real path: productTravel.productTravelInfoList[<source>].dayList[]. Days
@@ -289,9 +313,13 @@ export function parseUvItinerary(
 /**
  * Parse UV's price terms. UV states what the tour price INCLUDES via
  * productNotice items with noticeType 0 (the 含 notices); their vluesTip1/2
- * carry the inclusion prose (transport, meals, …). UV gives no clean
- * structured excluded list or refund schedule (the refund policy is an HTML
- * table → surfaced as a notice instead), so those stay empty.
+ * carry the inclusion prose (transport, meals, …).
+ *
+ * R4 (2026-07-10):`excluded` 現在承載「必付費用」— productCost.list 中名稱命中
+ * isUvMandatoryCostItem 的項目(帶名稱 + 各價階金額)。必付 = 不含在團費但一定
+ * 要繳,漏列 = 低報總價(與價格紅線同性質,Jeff 點出)。金額**只進文字清單、
+ * 絕不加進售價欄**(tours.price 一律來自班期 pricing facts,staging 測試釘住)。
+ * UV 無結構化退款表(HTML table → notices),cancellationPolicy 維持空。
  */
 export function parseUvPriceTerms(
   travel: UvProductTravelDetail
@@ -310,11 +338,32 @@ export function parseUvPriceTerms(
     }
   }
 
-  if (included.length === 0) return null;
+  // 必付費用 → excluded(團費不含、必繳)。每項:必付:名稱 — 價階1 / 價階2。
+  const cost = (travel as any)?.productCost;
+  const costList: any[] = Array.isArray(cost?.list) ? cost.list : [];
+  const excluded: string[] = [];
+  for (const it of costList) {
+    const name =
+      typeof it?.expIExpandName === "string" ? it.expIExpandName.trim() : "";
+    if (!name || !isUvMandatoryCostItem(name)) continue;
+    const priceInfo: any[] = Array.isArray(it?.priceInfo) ? it.priceInfo : [];
+    const tiers = priceInfo
+      .map((p) => {
+        const tierName = stripHtml(p?.expPriceName).replace(/[:：]\s*$/, "");
+        const money = typeof p?.expPriceMoney === "string" ? p.expPriceMoney.trim() : "";
+        if (!money) return "";
+        return tierName ? `${tierName} ${money}` : money;
+      })
+      .filter(Boolean)
+      .join(" / ");
+    excluded.push(`必付:${name}${tiers ? ` — ${tiers}` : ""}`);
+  }
+
+  if (included.length === 0 && excluded.length === 0) return null;
 
   return {
     included,
-    excluded: [],
+    excluded,
     paymentTerms: "報名時付訂金、出發前依縱橫標準條款付尾款",
     cancellationPolicy: [],
   };
@@ -367,6 +416,10 @@ export function parseUvNotices(
  * fee + optional activities/shows), each with an HTML description and a
  * priceInfo[] tier list in USD. Day-level optionalProductList is merged when
  * present (rare).
+ *
+ * R4 (2026-07-10):名稱命中 isUvMandatoryCostItem 的項目**不再列自費** — 它們是
+ * 必付費用,歸 parseUvPriceTerms 的 excluded(舊行為把 "Mandatory fee" 混進自費
+ * = 客人把必繳費用當可跳過,低報總價)。
  */
 export function parseUvOptional(
   travel: UvProductTravelDetail
@@ -379,7 +432,7 @@ export function parseUvOptional(
   for (const it of list) {
     const name =
       typeof it?.expIExpandName === "string" ? it.expIExpandName.trim() : "";
-    if (!name) continue;
+    if (!name || isUvMandatoryCostItem(name)) continue; // 必付 → priceTerms.excluded
     const priceInfo: any[] = Array.isArray(it?.priceInfo) ? it.priceInfo : [];
     // Prefer an adult / everyone tier; else the first listed.
     const tier =
