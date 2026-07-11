@@ -14,6 +14,19 @@ import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
 import type { User } from "../drizzle/schema";
 
+// checkout-verify (2026-07-11): createCheckoutSession 現在在建 Session 前跑
+// 即時驗位驗價(live UV API)。本檔那條測試的原意是「Stripe 整合回 URL」,
+// 不是驗證合約(那在 checkoutVerification.test.ts + bookingsPayment.
+// checkoutVerify.test.ts 紅綠釘死),故 mock 驗證為通過,避免整合測試打真
+// 供應商 API 造成不確定紅。
+vi.mock("./services/checkoutVerification", () => ({
+  verifyTourCheckout: vi.fn().mockResolvedValue({
+    ok: true,
+    verification: { mode: "uv_live", outcome: "passed" },
+    snapshot: {},
+  }),
+}));
+
 // Mock Stripe to avoid real API calls in tests
 vi.mock("stripe", () => {
   const mockSession = {

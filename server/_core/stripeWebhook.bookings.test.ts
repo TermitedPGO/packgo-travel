@@ -99,6 +99,8 @@ const store = {
   // customer-cockpit 任務7c — recordWebsiteInteraction call log (mocked module,
   // see vi.mock("./websiteIntake") below).
   websiteInteractionCalls: [] as any[],
+  // checkout-verify (2026-07-11) — 揭露存證蓋章 spy(post-commit 步驟)。
+  disclosureStamps: [] as Array<{ sessionId: string; intentId: string | null }>,
   // Hook to force createAccountingEntry to throw (used in DB-fail-rollback cases)
   shouldThrowOnAccounting: false,
   // Hook to force updatePaymentStatus to throw
@@ -128,6 +130,7 @@ function resetStore() {
   store.shouldThrowOnUpdatePaymentStatus = false;
   store.markFailedCalls = 0;
   store.websiteInteractionCalls = [];
+  store.disclosureStamps = [];
 }
 
 function seedBooking(overrides: Partial<BookingRow> = {}): BookingRow {
@@ -289,6 +292,14 @@ vi.mock("../db", () => {
       store.accounting.push(row);
       return row;
     }),
+    // checkout-verify (2026-07-11): 揭露存證蓋章 — post-commit 步驟,
+    // 蓋章紀錄進 spy 供 case 1(有蓋)/ case 2(rollback 不蓋)斷言。
+    markCheckoutDisclosureCompleted: vi.fn(
+      async (sessionId: string, intentId: string | null) => {
+        store.disclosureStamps.push({ sessionId, intentId });
+        return true;
+      },
+    ),
   };
 });
 
@@ -503,6 +514,12 @@ describe("stripeWebhook booking handlers — transaction atomicity", () => {
     expect(store.sideEffects.abandonmentCancelCalls).toBe(1);
     expect(store.sideEffects.paymentSuccessEmailCalls).toBe(1);
     expect(store.sideEffects.notifyOwnerCalls).toBe(1);
+    // checkout-verify: 揭露存證蓋章(post-commit)— session↔快照關聯釘死
+    expect(store.disclosureStamps).toHaveLength(1);
+    expect(store.disclosureStamps[0]).toEqual({
+      sessionId: session.id,
+      intentId: "pi_happy_1",
+    });
     // Webhook response
     expect(jsonFn).toHaveBeenCalledWith({ received: true });
 
@@ -555,6 +572,8 @@ describe("stripeWebhook booking handlers — transaction atomicity", () => {
     // markStripeEventFailed called + 500 surfaced for Stripe retry
     expect(store.markFailedCalls).toBe(1);
     expect(statusFn).toHaveBeenCalledWith(500);
+    // checkout-verify: tx rollback → 揭露存證蓋章(post-commit)也不發生
+    expect(store.disclosureStamps).toHaveLength(0);
 
     // customer-cockpit 任務7c: the tx threw before the function ever reached
     // the post-commit section, so the booking-interaction hook never fires.

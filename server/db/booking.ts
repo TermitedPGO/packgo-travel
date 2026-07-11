@@ -11,6 +11,7 @@ import {
   bookings, InsertBooking, Booking,
   bookingParticipants, InsertBookingParticipant, BookingParticipant,
   payments, InsertPayment, Payment,
+  checkoutDisclosures, InsertCheckoutDisclosure, CheckoutDisclosure,
 } from "../../drizzle/schema";
 import { getDb, type DrizzleTx } from "../db";
 import {
@@ -364,4 +365,75 @@ export async function updatePaymentStatus(
   }
 
   return paymentRecords[0];
+}
+
+// ============================================
+// Checkout Disclosure Evidence (migration 0116, checkout-verify 批 2026-07-11)
+// ============================================
+
+/**
+ * 落一列付款前揭露存證(驗證通過或失敗都落)。只新增不覆寫 —— 稽核軌不可變。
+ * 呼叫時機:createCheckoutSession 在「建 Stripe Session 之前」。
+ * Throws(而非回 null)當 DB 不可用:錢的路 fail-closed,沒存證就不准建 Session。
+ */
+export async function createCheckoutDisclosure(
+  row: InsertCheckoutDisclosure,
+): Promise<CheckoutDisclosure> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available for checkout disclosure");
+  }
+  const result = await db.insert(checkoutDisclosures).values(row);
+  const insertId = Number(result[0].insertId);
+  const rows = await db
+    .select()
+    .from(checkoutDisclosures)
+    .where(eq(checkoutDisclosures.id, insertId))
+    .limit(1);
+  if (rows.length === 0) {
+    throw new Error("Failed to retrieve created checkout disclosure");
+  }
+  return rows[0];
+}
+
+/**
+ * Session 建立成功後回填 stripeSessionId(同一列,status 維持 session_created)。
+ * Throws 當 DB 不可用或列不存在 —— caller 據此不回傳付款 URL(fail-closed)。
+ */
+export async function setCheckoutDisclosureSession(
+  disclosureId: number,
+  stripeSessionId: string,
+): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available for checkout disclosure session update");
+  }
+  await db
+    .update(checkoutDisclosures)
+    .set({ stripeSessionId })
+    .where(eq(checkoutDisclosures.id, disclosureId));
+}
+
+/**
+ * webhook checkout.session.completed 蓋章:以 sessionId 找到揭露列,標 completed
+ * + 回填 paymentIntentId,釘死 Session 與快照的關聯。回傳是否有列被更新
+ * (false = 找不到對應揭露列,caller 記 log 供對帳,不 throw —— 付款本身已成立,
+ * 蓋章失敗不能搞壞 webhook)。
+ */
+export async function markCheckoutDisclosureCompleted(
+  stripeSessionId: string,
+  stripePaymentIntentId: string | null,
+): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const result: any = await db
+    .update(checkoutDisclosures)
+    .set({
+      status: "completed",
+      completedAt: new Date(),
+      ...(stripePaymentIntentId ? { stripePaymentIntentId } : {}),
+    })
+    .where(eq(checkoutDisclosures.stripeSessionId, stripeSessionId));
+  const affected = (result?.[0]?.affectedRows ?? result?.affectedRows ?? 0) | 0;
+  return affected > 0;
 }

@@ -80,12 +80,13 @@ export const bookingsPaymentRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
-        // 臨時停止線 (2026-07-10, Jeff 裁決 · 外部顧問第二輪審計).
-        // Tour 類「結帳即請款」在付款前尚無即時驗價/驗位/揭露存證,先 fail-closed
-        // 擋下 —— 絕不建立 Stripe session、絕不打 Stripe。前端已改用「提交訂位需求」
-        // 走 inquiry 詢位流;此擋是對「有人直接打 /book/:id」的 defense-in-depth。
-        // checkout-verify 批的即時驗證上線後,這段無條件擋由「驗證通過才建 session」
-        // 的條件擋取代。旗標見 featureFlags.tourInstantCheckoutEnabled (預設 OFF)。
+        // 停止線 v2 (checkout-verify 批, 2026-07-11 · 外部顧問第二輪審計 §二/§三)。
+        // 旗標 OFF (預設) = 全擋(臨時停止線原語意,prod 現況)。旗標 ON =
+        // 模式一「即時驗證後請款」:建 Session 前必過 verifyTourCheckout
+        // (UV live 驗在售/驗位/驗價/必付;非 UV 一律擋),並先落
+        // checkoutDisclosures 揭露存證 —— 沒有任何「不驗證就收錢」的路徑,
+        // 舊的 legacy 未驗證結帳已不存在。前端契約:error.data.code ===
+        // "PRECONDITION_FAILED" → 轉「提交訂位需求」詢位流。
         if (!tourInstantCheckoutEnabled()) {
           throw new TRPCError({
             code: "PRECONDITION_FAILED",
@@ -132,6 +133,63 @@ export const bookingsPaymentRouter = router({
         // Get tour info for product name
         const tour = await db.getTourById(booking.tourId);
         const tourTitle = tour?.title ?? `行程 #${booking.tourId}`;
+
+        // ── 結帳前即時驗證 + 揭露存證 (checkout-verify 批, 2026-07-11) ──────
+        // 順序是刻意的:驗證 → 落存證 → 才建 Stripe Session。任何一步失敗都
+        // 擋在 Stripe 之前(fail-closed);存證失敗也不建 Session(沒有存證的
+        // 收款不存在)。
+        const BLOCK_MESSAGE =
+          "此團需要先跟供應商確認團位與最新價格,請改用「提交訂位需求」,確認後我們會寄付款連結給您。";
+        const departure = booking.departureId
+          ? await db.getDepartureById(booking.departureId)
+          : undefined;
+        if (!tour || !departure) {
+          // 缺本地資料 = 驗不了 = 擋(fail-closed),並照樣落存證不了的紀錄進 log。
+          console.warn(
+            `[bookings.createCheckoutSession] blocked: missing ${!tour ? "tour" : "departure"} for booking ${booking.id}`,
+          );
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: BLOCK_MESSAGE });
+        }
+
+        const { verifyTourCheckout } = await import("../services/checkoutVerification");
+        const verifyResult = await verifyTourCheckout({
+          booking: booking as any,
+          tour: tour as any,
+          departure: departure as any,
+          paymentType: input.paymentType,
+        });
+
+        if (!verifyResult.ok) {
+          // 驗證失敗也落存證(status=verification_failed,無 sessionId)供漏斗量測;
+          // 存證寫入失敗不能掩蓋擋單(照擋,記 log)。
+          try {
+            await db.createCheckoutDisclosure({
+              bookingId: booking.id,
+              paymentType: input.paymentType,
+              status: "verification_failed",
+              snapshot: verifyResult.snapshot,
+              verification: verifyResult.verification,
+              verifiedAt: new Date(),
+            });
+          } catch (persistErr: any) {
+            console.error(
+              `[bookings.createCheckoutSession] failed-verification disclosure persist failed for booking ${booking.id}:`,
+              persistErr?.message,
+            );
+          }
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: BLOCK_MESSAGE });
+        }
+
+        // 驗證通過 → 先落揭露存證(客戶即將同意的版本),才建 Session。
+        // 這裡 throw(DB 不可用/寫入失敗)= 不建 Session,fail-closed。
+        const disclosure = await db.createCheckoutDisclosure({
+          bookingId: booking.id,
+          paymentType: input.paymentType,
+          status: "session_created",
+          snapshot: verifyResult.snapshot,
+          verification: verifyResult.verification,
+          verifiedAt: new Date(),
+        });
 
         // P0-1: Real Stripe Checkout Session
         const stripe = getStripeClient();
@@ -210,6 +268,9 @@ export const bookingsPaymentRouter = router({
               tax_rate: String(taxResult.rate),
               tax_amount: String(taxResult.amount),
               tax_jurisdiction: taxResult.jurisdiction,
+              // checkout-verify: 揭露存證列 id — Session↔快照雙向釘死
+              // (webhook 主鍵是 sessionId 反查,metadata 是 belt-and-suspenders)。
+              disclosure_id: String(disclosure.id),
             },
             customer_email: booking.customerEmail,
             success_url: `${baseUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}&booking_id=${booking.id}`,
@@ -226,7 +287,11 @@ export const bookingsPaymentRouter = router({
           });
         }
 
-        console.log(`[Stripe] Created checkout session ${session.id} for booking ${booking.id}, amount ${stripeAmount} ${currency}`);
+        // 揭露存證回填 sessionId。失敗 → throw = 不回傳付款 URL(客人拿不到連結
+        // 就不會付款;Session 60 分鐘後自然過期)。存證列已在,稽核軌完整。
+        await db.setCheckoutDisclosureSession(disclosure.id, session.id);
+
+        console.log(`[Stripe] Created checkout session ${session.id} for booking ${booking.id}, amount ${stripeAmount} ${currency}, disclosure ${disclosure.id}`);
 
         return {
           url: session.url,

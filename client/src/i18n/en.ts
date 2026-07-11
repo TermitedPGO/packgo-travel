@@ -6705,6 +6705,12 @@ export const en = {
     // Toast messages
     redirectingToPayment: 'Redirecting to payment page...',
     createCheckoutFailed: 'Failed to create payment link',
+    verifyBlockedTitle: 'Availability check needed',
+    verifyBlockedBody: 'We need to reconfirm live availability and pricing for this tour, so online payment is paused. Submit a booking request and we will send you a payment link once confirmed.',
+    submitReserveRequest: 'Request to book',
+    reserveRequestSent: 'We have your booking request',
+    reserveRequestSentBody: 'We will confirm availability and the latest price, then get in touch shortly.',
+    reserveRequestFailed: 'Could not send. Please try again or contact us directly.',
     loginRequiredToast: 'Please log in first',
     // Round 80.25 — review section i18n
     reviewYourReview: 'Your Review',

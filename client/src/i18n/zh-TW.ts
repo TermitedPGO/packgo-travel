@@ -6702,6 +6702,12 @@ export const zhTW = {
     // Toast messages
     redirectingToPayment: '正在前往付款頁面...',
     createCheckoutFailed: '建立付款連結失敗',
+    verifyBlockedTitle: '需要先確認團位',
+    verifyBlockedBody: '此團的即時團位與價格需要再確認，線上付款已暫停。請提交訂位需求，我們確認後會寄付款連結給您。',
+    submitReserveRequest: '提交訂位需求',
+    reserveRequestSent: '已收到您的訂位需求',
+    reserveRequestSentBody: '我們會盡快確認團位與最新價格，並與您聯絡。',
+    reserveRequestFailed: '送出失敗，請稍後再試，或直接與我們聯絡。',
     loginRequiredToast: '請先登入',
     // Round 80.25 — review section i18n (was hardcoded zh)
     reviewYourReview: '您的評論',

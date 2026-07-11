@@ -640,7 +640,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "booking.getAllBookings.base",
-    sources: ["server/db/booking.ts:75", "server/db/booking.ts:83"],
+    sources: ["server/db/booking.ts:76", "server/db/booking.ts:84"],
     cls: "A",
     sql: "SELECT b.*, t.title AS tourTitle, d.departureDate AS departureDate FROM bookings b LEFT JOIN tours t ON b.tourId = t.id LEFT JOIN tourDepartures d ON b.departureId = d.id ORDER BY b.createdAt DESC",
     sampleParams: [],
@@ -649,7 +649,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "booking.getAllBookings.withUserId",
-    sources: ["server/db/booking.ts:75", "server/db/booking.ts:83"],
+    sources: ["server/db/booking.ts:76", "server/db/booking.ts:84"],
     cls: "A",
     sql: "SELECT b.*, t.title AS tourTitle, d.departureDate AS departureDate FROM bookings b LEFT JOIN tours t ON b.tourId = t.id LEFT JOIN tourDepartures d ON b.departureId = d.id WHERE b.userId = ? ORDER BY b.createdAt DESC",
     sampleParams: [1],
@@ -1624,7 +1624,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "stripeWebhook.handleChargeRefunded.packpointEarnLookup",
-    sources: ["server/_core/stripeWebhook.ts:923"],
+    sources: ["server/_core/stripeWebhook.ts:950"],
     cls: "B",
     sql: "select `pointsTransactions`.`delta` from `pointsTransactions` where (`pointsTransactions`.`referenceType` = 'booking' AND `pointsTransactions`.`referenceId` = ? AND `pointsTransactions`.`reason` = 'booking_earn') limit 1",
     sampleParams: [1],
