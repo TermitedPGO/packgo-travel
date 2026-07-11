@@ -66,6 +66,13 @@ function clean(s: string | null | undefined): string {
 }
 
 /**
+ * 一次抓的候選張數(2026-07-11 指揮回令 Block B — 批次內同圖去重)。
+ * 從 1 張改為多張候選,讓 resolveStockPhoto 在「第一候選已被同批用過」時能換下一張,
+ * 而不是每團都拿回同一張(跨團同圖傷可信度)。
+ */
+const CANDIDATE_COUNT = 10;
+
+/**
  * 從目的地訊號組一段搜圖 query。優先序:景點名 > 城市 > 國家(越具體越好);
  * 有更具體的 token 時再附上國家消歧(例「杜拜 阿聯」)。全空 → null(不打 API)。
  * 純函式。
@@ -88,31 +95,42 @@ export function buildStockPhotoQuery(q: StockPhotoQuery): string | null {
  * 解析一張對客 hero 圖(URL + 署名 + download 端點)。拿不到 → null(fail-open,
  * 無圖上架)。命中時打一次 download_location(fail-open,失敗不擋圖)。
  *
- * @param q       目的地訊號
- * @param search  取圖函式(預設 Unsplash detailed;測試注入假的)
- * @param trigger download 觸發函式(預設 unsplashService;測試注入假的)
+ * 批次去重(Block B):傳入 `usedUrls` 時,一次抓 {@link CANDIDATE_COUNT} 張候選,
+ * 挑第一張 url 不在 usedUrls 內的;選中後把它的 url 加進該 Set(呼叫端跨整批共用
+ * 同一個 Set,見 index.ts attachStockHeroImages)。全部候選都用過或查無結果 → null
+ * (該團無圖上架,寧無圖不跨團撞圖)。不傳 usedUrls → 行為等同舊版(取第一張有效候選)。
+ *
+ * @param q         目的地訊號
+ * @param search    取圖函式(預設 Unsplash detailed;測試注入假的)
+ * @param trigger   download 觸發函式(預設 unsplashService;測試注入假的)
+ * @param usedUrls  本批已用過的 hero url 集合(可選;呼叫端跨團共用同一個 Set)
  */
 export async function resolveStockPhoto(
   q: StockPhotoQuery,
   search: PhotoSearchFn = searchUnsplashPhotosDetailed,
   trigger: DownloadTriggerFn = triggerUnsplashDownload,
+  usedUrls?: Set<string>,
 ): Promise<ResolvedStockPhoto | null> {
   const query = buildStockPhotoQuery(q);
   if (!query) return null; // 無可用目的地訊號 → 不打 API
   try {
-    const results = await search(query, 1);
-    const first = results.find(
-      (r) => typeof r?.url === "string" && r.url.trim().length > 0,
+    const results = await search(query, CANDIDATE_COUNT);
+    const candidate = results.find(
+      (r) =>
+        typeof r?.url === "string" &&
+        r.url.trim().length > 0 &&
+        !usedUrls?.has(r.url),
     );
-    if (!first) return null;
+    if (!candidate) return null; // 無候選,或全部已被本批用過 → 無圖(fail-open)
+    usedUrls?.add(candidate.url);
     // 取用即觸發 download_location(Unsplash 條款)。fail-open:失敗不擋圖。
-    if (first.downloadLocation) {
-      await trigger(first.downloadLocation).catch(() => {});
+    if (candidate.downloadLocation) {
+      await trigger(candidate.downloadLocation).catch(() => {});
     }
     return {
-      url: first.url,
-      credit: first.credit ?? null,
-      downloadLocation: first.downloadLocation ?? null,
+      url: candidate.url,
+      credit: candidate.credit ?? null,
+      downloadLocation: candidate.downloadLocation ?? null,
     };
   } catch (err) {
     // fail-open:任何錯誤都不擋上架,回 null = 無圖。

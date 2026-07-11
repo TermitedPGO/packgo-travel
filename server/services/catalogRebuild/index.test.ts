@@ -14,6 +14,11 @@ import {
   attachStockHeroImages,
 } from "./index";
 import type { PromotableTour } from "./promote";
+import {
+  resolveStockPhoto,
+  type PhotoSearchFn,
+  type DownloadTriggerFn,
+} from "./stockPhotoResolver";
 
 describe("computeRetiredTourIds", () => {
   it("retires active tours whose product code wasn't seen this run", () => {
@@ -124,12 +129,19 @@ describe("attachStockHeroImages — 署名(credit)落庫", () => {
     expect(p.fields.imageUrl).toBe("https://images.unsplash.com/photo-1.jpg");
     // credit persisted as JSON in the tours-bound field (promote writes it to DB)
     expect(JSON.parse(p.fields.heroImageCredit as string)).toEqual(CREDIT);
-    // resolver got the attraction-first query signals
-    expect(resolve).toHaveBeenCalledWith({
-      destinationCountry: "阿聯",
-      destinationCity: "杜拜",
-      attractionName: "杜拜塔",
-    });
+    // resolver got the attraction-first query signals; since the Block B batch
+    // dedup, attachStockHeroImages also threads the batch-shared usedUrls Set
+    // through as the 4th arg (search/trigger stay default → undefined).
+    expect(resolve).toHaveBeenCalledWith(
+      {
+        destinationCountry: "阿聯",
+        destinationCity: "杜拜",
+        attractionName: "杜拜塔",
+      },
+      undefined,
+      undefined,
+      expect.any(Set),
+    );
   });
 
   it("photo without credit → heroImageCredit explicitly null (UI skips the attribution line)", async () => {
@@ -151,5 +163,54 @@ describe("attachStockHeroImages — 署名(credit)落庫", () => {
     expect(p.fields).not.toHaveProperty("heroImage");
     expect(p.fields).not.toHaveProperty("imageUrl");
     expect(p.fields).not.toHaveProperty("heroImageCredit");
+  });
+});
+
+describe("attachStockHeroImages — 批次內同圖去重(2026-07-11 指揮回令 Block B)", () => {
+  const makePromotable = (tourId: number, productCode: string): PromotableTour => ({
+    tourId,
+    productCode,
+    fields: {
+      destinationCountry: "阿聯",
+      destinationCity: "杜拜",
+      attractions: JSON.stringify([{ name: "杜拜塔", description: "", dayNumber: 1 }]),
+    },
+  });
+
+  /** 用真的 resolveStockPhoto 包一層假 search,證明 attachStockHeroImages 真的把
+   *  usedUrls 傳給 resolve、跨團共用同一個 Set(不是每團各配各的)。 */
+  const wrapRealResolver = (search: PhotoSearchFn): typeof resolveStockPhoto => {
+    const noopTrigger: DownloadTriggerFn = async () => {};
+    return (q, _search, _trigger, usedUrls) =>
+      resolveStockPhoto(q, search, noopTrigger, usedUrls);
+  };
+
+  it("two tours, search only ever returns the SAME photo + one alternate → they get different urls", async () => {
+    const search: PhotoSearchFn = vi.fn(async () => [
+      { url: "https://images.unsplash.com/photo-same.jpg", credit: null, downloadLocation: null },
+      { url: "https://images.unsplash.com/photo-alt.jpg", credit: null, downloadLocation: null },
+    ]);
+    const p1 = makePromotable(1, "P1");
+    const p2 = makePromotable(2, "P2");
+    await attachStockHeroImages([p1, p2], wrapRealResolver(search));
+
+    expect(p1.fields.heroImage).toBe("https://images.unsplash.com/photo-same.jpg");
+    expect(p2.fields.heroImage).toBe("https://images.unsplash.com/photo-alt.jpg");
+    expect(p1.fields.heroImage).not.toBe(p2.fields.heroImage);
+  });
+
+  it("candidates exhausted for the 2nd tour → it ships with no hero (fields untouched)", async () => {
+    // 只有一張候選,兩團都想要;第一團拿走,第二團無可換 → resolveStockPhoto 回 null。
+    const search: PhotoSearchFn = vi.fn(async () => [
+      { url: "https://images.unsplash.com/photo-only.jpg", credit: null, downloadLocation: null },
+    ]);
+    const p1 = makePromotable(1, "P1");
+    const p2 = makePromotable(2, "P2");
+    await attachStockHeroImages([p1, p2], wrapRealResolver(search));
+
+    expect(p1.fields.heroImage).toBe("https://images.unsplash.com/photo-only.jpg");
+    expect(p2.fields).not.toHaveProperty("heroImage");
+    expect(p2.fields).not.toHaveProperty("imageUrl");
+    expect(p2.fields).not.toHaveProperty("heroImageCredit");
   });
 });

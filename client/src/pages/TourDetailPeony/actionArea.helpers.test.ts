@@ -10,7 +10,11 @@ import {
   deriveGroupSize,
   deriveAvailabilityBucket,
   deriveAvailability,
+  deriveItineraryCities,
   buildInquiryInput,
+  isCostWall,
+  hasCostNegation,
+  splitCostEntries,
   type DepartureLike,
   type InquirySummaryLabels,
 } from "./actionArea.helpers";
@@ -192,16 +196,59 @@ describe("deriveAvailability", () => {
 
 describe("deriveGroupSize", () => {
   it("uses maxParticipants when present", () => {
-    expect(deriveGroupSize({ maxParticipants: 16 }, dep({ totalSlots: 30 }))).toBe(16);
+    expect(deriveGroupSize({ maxParticipants: 16 })).toBe(16);
   });
 
-  it("falls back to next departure totalSlots", () => {
-    expect(deriveGroupSize({ maxParticipants: null }, dep({ totalSlots: 20 }))).toBe(20);
+  // Wave 1 data-truth fix: totalSlots is per-departure seat INVENTORY (e.g. 50),
+  // not the small-group cap — the old fallback rendered「小團 50 人」. No
+  // structured maxParticipants → null (caller omits the chip, no guessing).
+  it("does NOT fall back to departure totalSlots (inventory ≠ group cap)", () => {
+    expect(deriveGroupSize({ maxParticipants: null })).toBeNull();
   });
 
-  it("returns null when neither is usable", () => {
-    expect(deriveGroupSize({ maxParticipants: 0 }, dep({ totalSlots: 0 }))).toBeNull();
-    expect(deriveGroupSize({ maxParticipants: null }, null)).toBeNull();
+  it("returns null when maxParticipants is missing or non-positive", () => {
+    expect(deriveGroupSize({ maxParticipants: 0 })).toBeNull();
+    expect(deriveGroupSize({ maxParticipants: null })).toBeNull();
+  });
+});
+
+describe("deriveItineraryCities", () => {
+  // Anchored on prod tour id 2 (2026-07-11 real-data hand-check): route-chain
+  // day titles split on "-" and dedupe across days, first-seen order.
+  it("splits route-chain titles and dedupes across days (prod tour 2)", () => {
+    const itin = [
+      { day: 1, title: "馬德里 - 阿維拉 - 薩拉曼卡" },
+      { day: 2, title: "薩拉曼卡 - 巴利亞多利德 - 佈爾戈斯" },
+      { day: 3, title: "佈爾戈斯 - 畢爾巴鄂 - 佈爾戈斯" },
+      { day: 4, title: "佈爾戈斯 - 塞戈維亞 - 昆卡" },
+      { day: 5, title: "昆卡 - 孔蘇埃格拉 - 托萊多 - 馬德里" },
+    ];
+    expect(deriveItineraryCities(itin)).toEqual([
+      "馬德里", "阿維拉", "薩拉曼卡", "巴利亞多利德", "佈爾戈斯",
+      "畢爾巴鄂", "塞戈維亞", "昆卡", "孔蘇埃格拉", "托萊多",
+    ]);
+  });
+
+  // Prod tours 7 / 9: descriptive one-day titles. The tour-type suffix is
+  // stripped so the overview destination card shows the PLACE, never a tour
+  // name like「西峽谷一日遊」.
+  it("strips tour-type suffixes from descriptive day titles (prod tours 7/9)", () => {
+    expect(deriveItineraryCities([{ day: 1, title: "西峽谷一日遊" }])).toEqual(["西峽谷"]);
+    expect(deriveItineraryCities([{ day: 1, title: "尼亞加拉瀑布 1日遊" }])).toEqual(["尼亞加拉瀑布"]);
+    expect(deriveItineraryCities([{ day: 1, title: "Niagara Falls 1-Day Tour" }])).toEqual(["Niagara Falls"]);
+  });
+
+  it("prefers location/city fields over the title", () => {
+    expect(
+      deriveItineraryCities([{ day: 1, title: "西峽谷一日遊", location: "拉斯維加斯" }]),
+    ).toEqual(["拉斯維加斯"]);
+  });
+
+  it("drops placeholders and suffix-only labels; empty itinerary → []", () => {
+    expect(deriveItineraryCities([{ day: 1, title: "Day 1" }, { day: 2, title: "景點 2" }])).toEqual([]);
+    expect(deriveItineraryCities([{ day: 1, title: "一日遊" }])).toEqual([]);
+    expect(deriveItineraryCities([])).toEqual([]);
+    expect(deriveItineraryCities(null)).toEqual([]);
   });
 });
 
@@ -287,5 +334,130 @@ describe("buildInquiryInput", () => {
     const out = buildInquiryInput({ id: 9, title: longTitle }, {}, "quote", form, labels);
     expect(out.subject.length).toBeLessThanOrEqual(200);
     expect(out.message.length).toBeLessThanOrEqual(5000);
+  });
+});
+
+// ─── 費用牆與否定詞守門(2026-07-11 驗收回令 P2:核心防線直接測) ────────────
+
+describe("isCostWall", () => {
+  it("multi-line prose is a wall", () => {
+    expect(isCostWall("含酒店住宿\n不含機票、簽證")).toBe(true);
+  });
+
+  it("overlong single line is a wall", () => {
+    const long =
+      "行程包含酒店住宿與每日早餐以及全程豪華巴士接送與專業中文導遊服務與所有景點第一道門票與旅遊責任保險但不包含國際機票與個人消費與雜項開支";
+    expect(long.length).toBeGreaterThan(60); // 守住測試前提(CJK 每字 length 1)
+    expect(isCostWall(long)).toBe(true);
+  });
+
+  it("multi-clause packed prose is a wall", () => {
+    expect(isCostWall("含酒店。含早餐;不含機票。")).toBe(true);
+  });
+
+  it("clean short line items are NOT walls", () => {
+    expect(isCostWall("四星酒店住宿")).toBe(false);
+    expect(isCostWall("每日早餐")).toBe(false);
+    expect(isCostWall("Hotel accommodation")).toBe(false);
+  });
+
+  it("non-string / blank → false", () => {
+    expect(isCostWall(null)).toBe(false);
+    expect(isCostWall(42)).toBe(false);
+    expect(isCostWall("   ")).toBe(false);
+  });
+});
+
+describe("hasCostNegation", () => {
+  it("flags Chinese exclusion phrases", () => {
+    expect(hasCostNegation("機票自理")).toBe(true);
+    expect(hasCostNegation("午餐自費")).toBe(true);
+    expect(hasCostNegation("簽證費另付")).toBe(true);
+    expect(hasCostNegation("小費除外")).toBe(true);
+    expect(hasCostNegation("不含國際機票")).toBe(true);
+  });
+
+  it("flags English exclusion phrases (case-insensitive)", () => {
+    expect(hasCostNegation("Airfare NOT included")).toBe(true);
+    expect(hasCostNegation("Visa fee excluded")).toBe(true);
+    expect(hasCostNegation("Lunch at your own expense")).toBe(true);
+    expect(hasCostNegation("Optional gratuities")).toBe(true);
+  });
+
+  it("clean inclusion items pass", () => {
+    expect(hasCostNegation("四星酒店住宿")).toBe(false);
+    expect(hasCostNegation("Daily breakfast")).toBe(false);
+  });
+});
+
+describe("splitCostEntries", () => {
+  it("splits clean items from walls, preserving order", () => {
+    const wall = "含酒店。含早餐;不含機票。";
+    const out = splitCostEntries(["四星酒店", wall, "每日早餐"]);
+    expect(out.items).toEqual(["四星酒店", "每日早餐"]);
+    expect(out.walls).toEqual([wall]);
+  });
+
+  // 釘死斷言:排除字樣絕不打勾。included 列表開 demoteNegations 後,含否定詞
+  // 的條目(短且乾淨也一樣)絕不出現在 items(✓ 集合),一律降去 walls。
+  it("NEGATION PIN: entries with exclusion wording never reach the checkmark bucket", () => {
+    const negations = [
+      "機票自理",
+      "午餐自費",
+      "簽證費另付",
+      "小費除外",
+      "不含國際機票",
+      "Airfare not included",
+      "Visa excluded",
+    ];
+    const out = splitCostEntries(["四星酒店", ...negations, "每日早餐"], { demoteNegations: true });
+    expect(out.items).toEqual(["四星酒店", "每日早餐"]);
+    for (const n of negations) {
+      expect(out.items).not.toContain(n);
+      expect(out.walls).toContain(n);
+    }
+  });
+
+  it("without demoteNegations (excluded list), short negation entries keep their ✗", () => {
+    const out = splitCostEntries(["機票自理", "小費"]);
+    expect(out.items).toEqual(["機票自理", "小費"]);
+    expect(out.walls).toEqual([]);
+  });
+
+  it("drops non-strings and blanks; non-array → empty", () => {
+    expect(splitCostEntries(["  ", null, 3, "酒店"])).toEqual({ items: ["酒店"], walls: [] });
+    expect(splitCostEntries(undefined)).toEqual({ items: [], walls: [] });
+  });
+});
+
+describe("deriveFlightInclusion — 牆與否定詞不得翻含機票", () => {
+  it("a prose wall mentioning 機票 in included must NOT flip to included (stays unknown)", () => {
+    const wall = "行程含酒店住宿。含每日早餐;機票、簽證與小費請自理。";
+    expect(deriveFlightInclusion({ costExplanation: { included: [wall] } })).toBe("unknown");
+  });
+
+  it("short negation entry 機票自理 sitting in the included array reads as EXCLUDED", () => {
+    expect(deriveFlightInclusion({ costExplanation: { included: ["機票自理", "酒店"] } })).toBe("excluded");
+    expect(
+      deriveFlightInclusion({ costExplanation: { included: ["Airfare not included"] } }),
+    ).toBe("excluded");
+  });
+});
+
+describe("deriveItineraryCities — 尾綴變體(2026-07-11 驗收回令 P3 補)", () => {
+  it("strips N天M夜 endings", () => {
+    expect(deriveItineraryCities([{ day: 1, title: "東京5天4夜" }])).toEqual(["東京"]);
+    expect(deriveItineraryCities([{ day: 1, title: "北海道五天四夜遊" }])).toEqual(["北海道"]);
+  });
+
+  it("strips a bare Half Day ending (no tour/trip tail)", () => {
+    expect(deriveItineraryCities([{ day: 1, title: "Grand Canyon Half Day" }])).toEqual(["Grand Canyon"]);
+  });
+
+  it("fail direction: unrecognized endings keep the whole label (寧留整串)", () => {
+    // 裸 "5 Day" 結尾不在詞表 — 可能是團名一部分,整串保留不亂剝。
+    expect(deriveItineraryCities([{ day: 1, title: "Canyon Explorer 5 Day" }])).toEqual([
+      "Canyon Explorer 5 Day",
+    ]);
   });
 });

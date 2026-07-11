@@ -97,8 +97,9 @@ export default function TourSpecBar({ tour, departures, themeColor }: TourSpecBa
   // Next departure (+ confirmed badge) — fallback "ask us" only once loaded
   const next = deriveNextDeparture(departures);
 
-  // Small-group size
-  const groupSize = deriveGroupSize(tour, next?.departure);
+  // Small-group size — only from the structured maxParticipants field. No
+  // departure-totalSlots fallback (that inventory number rendered「小團 50 人」).
+  const groupSize = deriveGroupSize(tour);
   if (groupSize) {
     chips.push({
       key: "group",

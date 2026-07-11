@@ -270,7 +270,7 @@ export const DayCard = ({
                     <Building className="h-5 w-5" style={{ color: themeColor.primary }} />
                     {t('tourDetail.tonightHotel')}
                   </h4>
-                  {isMulti && (<span className="text-[10px] md:text-xs tracking-[0.2em] uppercase text-[#c9a563] font-semibold">{t('tourDetail.accommodationOptions')}</span>)}
+                  {isMulti && (<span className="text-[10px] md:text-xs tracking-[0.2em] uppercase text-[#80652D] font-semibold">{t('tourDetail.accommodationOptions')}</span>)}
                 </div>
                 <div className="rounded-xl bg-gray-50 border border-gray-100 p-4">
                   {isMulti ? (

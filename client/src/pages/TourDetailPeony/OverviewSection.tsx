@@ -30,7 +30,7 @@ import {
 import { useLocale } from "@/contexts/LocaleContext";
 import { translateDestination } from "@/utils/locationMapping";
 import { EditableText, EditableImage } from "@/components/inline-edit";
-import type { getThemeColorByDestination } from "./helpers";
+import { formatDuration, type getThemeColorByDestination } from "./helpers";
 
 export type OverviewSectionProps = {
   tour: any;
@@ -44,6 +44,7 @@ export type OverviewSectionProps = {
   tourHighlights: any[];
   poeticContent: any;
   hasConfirmedDeparture: boolean;
+  itineraryCities: string[];
   updateField: (field: string, value: any) => void;
   setEditedTour: React.Dispatch<React.SetStateAction<any>>;
   setHasChanges: (b: boolean) => void;
@@ -62,6 +63,7 @@ export default function OverviewSection({
   tourHighlights,
   poeticContent,
   hasConfirmedDeparture,
+  itineraryCities,
   updateField,
   setEditedTour,
   setHasChanges,
@@ -69,18 +71,26 @@ export default function OverviewSection({
 }: OverviewSectionProps) {
   const { t } = useLocale();
 
+  // Wave 1 A.3: an empty description used to render the heading + a blank
+  // paragraph — a bald spot on the page. Hide the whole description block when
+  // there's nothing to show (edit mode always renders it so admins can fill it).
+  const hasDescription = !!(displayDescription && displayDescription.trim());
+
   return (
     <section ref={sectionRef} id="overview" className="py-16 lg:py-24">
       <div className="max-w-5xl mx-auto px-6">
+        {(isEditMode || hasDescription) && (
         <h2 className="text-3xl md:text-4xl font-serif font-bold tracking-tight text-center mb-12" style={{ color: themeColor.primary }}>
           {t('tourDetail.description')}
         </h2>
+        )}
 
         {/* Description — v80.23: parse bullet-formatted descriptions into a
             styled list. LLM often returns "• 第一點\n• 第二點\n• 第三點" as a
             single string; rendering as <p> showed everything on one line which
             looked plain. We now detect bullets/line-breaks and render them as
             an elegant card-style list. */}
+        {(isEditMode || hasDescription) && (
         <div className="max-w-none text-gray-700 leading-relaxed mb-12">
           {isEditMode ? (
             <div className="prose prose-xl max-w-none text-gray-600 leading-relaxed text-center text-lg md:text-xl">
@@ -144,6 +154,7 @@ export default function OverviewSection({
             );
           })()}
         </div>
+        )}
 
         {/* Key Features Grid — v78r: 2-col grid; v78t: dynamic for sparse cases.
             1 feature → single centered card (avoids half-empty row).
@@ -340,7 +351,7 @@ export default function OverviewSection({
                     <div key={key} className="text-center">
                       <h4
                         className="text-xs tracking-[0.3em] uppercase mb-3 font-medium"
-                        style={{ color: "#c9a563" }}
+                        style={{ color: "#80652D" }}
                       >
                         {label}
                       </h4>
@@ -369,16 +380,22 @@ export default function OverviewSection({
           <div className="text-center p-6 bg-[#FAF8F2] border border-foreground/8 rounded-xl">
             <Clock className="h-10 w-10 mx-auto mb-3" style={{ color: themeColor.secondary }} />
             <p className="text-base text-gray-700 mb-1">{t('tourDetail.duration')}</p>
-            <p className="font-bold text-xl">{tour.duration || t('tourDetail.multiDayTour')}</p>
+            <p className="font-bold text-xl whitespace-nowrap">{formatDuration(tour.duration, t)}</p>
           </div>
           <div className="text-center p-6 bg-[#FAF8F2] border border-foreground/8 rounded-xl">
             <MapPin className="h-10 w-10 mx-auto mb-3" style={{ color: themeColor.secondary }} />
             <p className="text-base text-gray-700 mb-1">{t('tourDetail.destination')}</p>
             <p className="font-bold text-xl">{(() => {
-              const cities = (tour.destinationCity || tour.destinationCountry || '').split(/[,、]/).map((c: string) => c.trim()).filter(Boolean);
+              // Wave 1 A.1: same deduped itinerary cities the hero chip + route
+              // subtitle use, so the destination card can't disagree. Falls back
+              // to the country label when the itinerary yields no places.
+              const cities = itineraryCities.length > 0
+                ? itineraryCities
+                : (tour.destinationCity || tour.destinationCountry || '').split(/[,、]/).map((c: string) => c.trim()).filter(Boolean);
               // v78p: translate each city + use locale-appropriate separator
               const translated = cities.map((c: string) => translateDestination(c, language));
               const sep = language === 'zh-TW' ? '、' : ', ';
+              if (translated.length === 0) return tour.destinationCountry ? translateDestination(tour.destinationCountry, language) : '—';
               if (translated.length <= 4) return translated.join(sep);
               return translated.slice(0, 4).join(sep) + '…';
             })()}</p>

@@ -131,9 +131,100 @@ export function deriveFlightInclusion(
     }
   }
   if (!ce || typeof ce !== "object") return "unknown";
-  if (asStringArray(ce.excluded).some((s) => FLIGHT_RE.test(s))) return "excluded";
-  if (asStringArray(ce.included).some((s) => FLIGHT_RE.test(s))) return "included";
+  // Only trust CLEAN itemized entries. A flight keyword buried in a prose
+  // "wall" is ambiguous (walls usually read "airfare NOT included"), so a wall
+  // must never flip the chip to 含機票. Walls are dropped from the signal — when
+  // the supplier only gives walls, flight inference stays unknown → no chip.
+  const itemized = (v: unknown) => asStringArray(v).filter((s) => !isCostWall(s));
+  if (itemized(ce.excluded).some((s) => FLIGHT_RE.test(s))) return "excluded";
+  // 否定詞守門(2026-07-11 驗收回令 P2):供應商把「機票自理」塞進 included
+  // 陣列時,舊碼讀成含機票 — 正好把排除句翻成最貴的過度承諾。帶否定詞的機票
+  // 條目不論躺在哪個陣列,一律是排除訊號。
+  const includedFlight = itemized(ce.included).filter((s) => FLIGHT_RE.test(s));
+  if (includedFlight.some((s) => hasCostNegation(s))) return "excluded";
+  if (includedFlight.length > 0) return "included";
   return "unknown";
+}
+
+// ─── Cost-item "wall" detection (fail-honest checkmarks) ─────────────────────
+// The supplier's cost inclusions sometimes arrive as one giant prose block that
+// itself lists BOTH inclusions and exclusions (airfare/visa/lunch not included).
+// Rendering a ✓ next to such a "wall" falsely tells the customer everything in
+// it is included. isCostWall flags these so the UI shows them as plain
+// "供應商費用說明原文" text (no checkmark); only clean short line items get ✓.
+
+/** True when a cost string is a prose wall rather than a clean line item. */
+export function isCostWall(text: unknown): boolean {
+  if (typeof text !== "string") return false;
+  const t = text.trim();
+  if (!t) return false;
+  if (/[\r\n]/.test(t)) return true; // multi-line prose
+  if (t.length > 60) return true; // long single line reads as a paragraph
+  // Several clause breaks in one entry = packed prose, not a single item.
+  const clauseBreaks = (t.match(/[。;；]|\.\s|,\s.*,\s/g) || []).length;
+  return clauseBreaks >= 2;
+}
+
+/**
+ * 費用否定詞表(2026-07-11 驗收回令 P2)。isCostWall 只擋長牆;供應商常把短的
+ * 排除句直接塞進 included 陣列(「機票自理」「午餐自費」),長度守門攔不住,
+ * 打了 ✓ 就是反著騙客人。條目含任一否定詞 → 絕不渲染 ✓。
+ * 純字串表,補新詞直接加一行;比對時 lowercase substring。
+ */
+const COST_NEGATION_TERMS: readonly string[] = [
+  "不含",
+  "不包括",
+  "不包含",
+  "未含",
+  "未包含",
+  "除外",
+  "自理",
+  "自費",
+  "另付",
+  "另計",
+  "另行",
+  "恕不",
+  "not included",
+  "not covered",
+  "excluded",
+  "excludes",
+  "exclusion",
+  "at your own",
+  "own expense",
+  "optional",
+];
+
+/** True when a cost entry carries an exclusion/negation phrase. */
+export function hasCostNegation(text: unknown): boolean {
+  if (typeof text !== "string") return false;
+  const t = text.toLowerCase();
+  return COST_NEGATION_TERMS.some((term) => t.includes(term));
+}
+
+/**
+ * Split a cost list into clean line items (get a ✓/✗) and prose walls (shown as
+ * raw supplier text, no mark). Preserves order within each bucket.
+ *
+ * `demoteNegations`(included 列表用):含否定詞的條目降去 walls(無勾號原文
+ * 區),即使它又短又乾淨。選「無勾號」而不是改渲染 ✗:這類條目常是混合句
+ * (「含早餐,午晚餐自理」),整行打 ✗ 會反過來否認真的有含的部分;原文區照抄
+ * 供應商的話、我們不下判斷,才是誠實的那個。excluded 列表不用降 — 否定詞條目
+ * 掛 ✗ 語義一致。
+ */
+export function splitCostEntries(
+  list: unknown,
+  opts?: { demoteNegations?: boolean },
+): { items: string[]; walls: string[] } {
+  const items: string[] = [];
+  const walls: string[] = [];
+  for (const raw of Array.isArray(list) ? list : []) {
+    if (typeof raw !== "string") continue;
+    const s = raw.trim();
+    if (!s) continue;
+    const wall = isCostWall(s) || (opts?.demoteNegations === true && hasCostNegation(s));
+    (wall ? walls : items).push(s);
+  }
+  return { items, walls };
 }
 
 // ─── Starting price in USD ─────────────────────────────────────────────────
@@ -181,18 +272,114 @@ export function deriveStartingUsd(
 // ─── Group size ────────────────────────────────────────────────────────────
 
 /**
- * Small-group cap: tour.maxParticipants wins, else the next departure's
- * totalSlots, else null (omit chip).
+ * Small-group cap — read from the ONE structured field (tour.maxParticipants).
+ *
+ * Data-truth red line (Wave 1): the old code fell back to the next departure's
+ * `totalSlots` when maxParticipants was absent. But totalSlots is the supplier's
+ * per-departure seat inventory (e.g. 50), NOT the small-group cap — a
+ * catalog-rebuild tour whose title reads「6 人小團」would render「小團 50 人」off
+ * that fallback. We now return null (caller omits the chip) rather than show a
+ * guessed number. No structured group size → no chip.
  */
 export function deriveGroupSize(
   tour: Pick<TourLike, "maxParticipants">,
-  nextDeparture?: DepartureLike | null,
 ): number | null {
   const mp = tour?.maxParticipants;
   if (typeof mp === "number" && mp > 0) return mp;
-  const ts = nextDeparture?.totalSlots;
-  if (typeof ts === "number" && ts > 0) return ts;
   return null;
+}
+
+// ─── Itinerary cities (single source of truth for the "places" count) ────────
+// The detail page showed three disagreeing numbers: a hero「途經城市 1 座」(off
+// the free-form destinationCity string — a lone country name reads as 1), a
+// route-map「N 個地點」(geocoded markers), and titles implying ~10 cities. This
+// helper is the ONE source all place-count displays derive from, computed from
+// the itinerary itself and deduped, so the hero chip, overview card, and route
+// subtitle always agree. No itinerary → empty (caller hides the chip).
+
+export interface ItineraryDayLike {
+  day?: number | string | null;
+  title?: string | null;
+  location?: string | null;
+  city?: string | null;
+}
+
+// Placeholder day/place names the AI/templates leave when a real place can't be
+// extracted. Excluded from the count so "Day 3" / "景點 2" never inflate it.
+const STOP_PLACEHOLDER_RE =
+  /^(?:day\s*\d+|第\s*\d+\s*[日天]|景點\s*\d+|景点\s*\d+|attraction\s*\d+|place\s*\d+)$/i;
+
+/** Strip a leading "Day N:" / "第N日" prefix from a day label. */
+function stripDayPrefix(s: string): string {
+  return s
+    .replace(/^\s*(?:day\s*\d+|第\s*\d+\s*[日天])\s*[:：.\-–—]?\s*/i, "")
+    .trim();
+}
+
+/**
+ * Strip a trailing tour-type suffix (「一日遊」「1日遊」「半日遊」「五天遊」/
+ * "1-Day Tour" / "Half-day Trip") from a stop label. Real-data check
+ * (2026-07-11, prod tours 7/9): descriptive single-day titles like
+ * 「西峽谷一日遊」otherwise flow verbatim into the overview destination card —
+ * a tour NAME shown as a place. The suffix is descriptive noise; what remains
+ * (西峽谷 / 尼亞加拉瀑布) is the actual place. A label that is ONLY the suffix
+ * strips to "" and is dropped by the caller's filter (no guessed place).
+ */
+function stripTourTypeSuffix(s: string): string {
+  return s
+    .replace(/\s*(?:[0-9]+|[一二兩三四五六七八九十]+|半)\s*[日天]遊$/, "")
+    // 「N天M夜(遊)」收尾:東京5天4夜 → 東京(2026-07-11 驗收回令 P3 補)
+    .replace(/\s*(?:[0-9]+|[一二兩三四五六七八九十]+)\s*[天日]\s*(?:[0-9]+|[一二兩三四五六七八九十]+)\s*[夜晚]遊?$/, "")
+    .replace(/\s*(?:[0-9]+[\s-]*day|half[\s-]*day|full[\s-]*day)\s*(?:tour|trip)$/i, "")
+    // 無 tour/trip 收尾的 Half Day 變體:Grand Canyon Half Day → Grand Canyon
+    // (同回令補)。只認 half day — 裸的 "5 Day" 結尾可能是團名一部分,寧留整串。
+    .replace(/\s*half[\s-]*day$/i, "")
+    .trim();
+}
+
+/**
+ * Distinct places visited across the itinerary, in first-seen order.
+ * Mirrors the server route-map field priority (location → city → title) and
+ * splits route chains ("A - B - C", "A → B", "A、B") into individual stops,
+ * then dedupes case-insensitively. Placeholders and blanks are dropped.
+ */
+export function deriveItineraryCities(
+  itinerary: ItineraryDayLike[] | null | undefined,
+): string[] {
+  if (!Array.isArray(itinerary) || itinerary.length === 0) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const d of itinerary) {
+    const raw =
+      (typeof d?.location === "string" && d.location.trim()) ||
+      (typeof d?.city === "string" && d.city.trim()) ||
+      (typeof d?.title === "string" && d.title.trim()) ||
+      "";
+    if (!raw) continue;
+    // Suffix-strip BEFORE splitting too: the chain split treats "-" as a route
+    // separator, so an un-stripped "Niagara Falls 1-Day Tour" would be cut into
+    // ["Niagara Falls 1", "Day Tour"]. Then strip per part for chains whose
+    // last stop carries its own suffix.
+    const parts = stripTourTypeSuffix(stripDayPrefix(raw))
+      .split(/\s*[-－—–→›»、,／/]\s*/)
+      .map((x) => stripTourTypeSuffix(x.trim()))
+      .filter(Boolean);
+    for (const p of parts) {
+      if (STOP_PLACEHOLDER_RE.test(p)) continue;
+      const key = p.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(p);
+    }
+  }
+  return out;
+}
+
+/** Count of distinct itinerary places. 0 → caller hides the chip (no guess). */
+export function deriveItineraryCityCount(
+  itinerary: ItineraryDayLike[] | null | undefined,
+): number {
+  return deriveItineraryCities(itinerary).length;
 }
 
 // ─── Availability bucket ─────────────────────────────────────────────────────

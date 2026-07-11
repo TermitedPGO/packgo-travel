@@ -32,12 +32,14 @@ import { useTourEditMode } from "./useTourEditMode";
 
 import {
   parseJSON,
+  cleanTourTitle,
   getThemeColorByDestination,
   MealDetailDialog,
   AttractionDetailDialog,
   type MealDetail,
   type AttractionDetail,
 } from "./helpers";
+import { deriveItineraryCities } from "./actionArea.helpers";
 import HeroSection from "./HeroSection";
 import OverviewSection from "./OverviewSection";
 import RouteMapSection from "./RouteMapSection";
@@ -236,8 +238,13 @@ export default function TourDetailPeony() {
   const scrollToSection = (sectionId: string) => {
     const ref = sectionRefs[sectionId as keyof typeof sectionRefs];
     if (ref?.current) {
-      const yOffset = -150;
-      const y = ref.current.getBoundingClientRect().top + window.pageYOffset + yOffset;
+      // Wave 1 C.7: derive the offset from the actual sticky-nav bottom edge
+      // instead of a hardcoded -150 that overshot on mobile (clicking a section
+      // landed on the previous one). getBoundingClientRect().bottom already
+      // accounts for the header height above the sticky nav at both breakpoints.
+      const stickyNav = document.getElementById("tour-sticky-nav");
+      const navBottom = stickyNav ? stickyNav.getBoundingClientRect().bottom : 150;
+      const y = ref.current.getBoundingClientRect().top + window.pageYOffset - navBottom - 8;
       window.scrollTo({ top: y, behavior: "smooth" });
     }
   };
@@ -335,6 +342,15 @@ export default function TourDetailPeony() {
     }
     return itineraryDetailed;
   }, [isEditMode, editedTour?.itineraryDetailed, itineraryDetailed]);
+
+  // Single source of truth for the "places visited" count (Wave 1 data-truth
+  // fix). Derived from the itinerary + deduped; the hero city chip, the overview
+  // destination card, and the route-map subtitle all read from this so they can
+  // never disagree the way「途經城市 1 座」vs「5 個地點」did.
+  const itineraryCities = useMemo(
+    () => deriveItineraryCities(displayItinerary),
+    [displayItinerary],
+  );
   // ====== 結束 JSON 欄位 useMemo 快取 ======
 
   // v80.24: auto-expand all days on first load (Jeff: 預設要全展開).
@@ -354,8 +370,9 @@ export default function TourDetailPeony() {
   const heroImage = (isEditMode && editedTour?.heroImage)
     ? editedTour.heroImage
     : (tour.heroImage || tour.imageUrl || "https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=1200");
-  // 翻譯覆蓋：文字欄位
-  const displayTitle = getTranslated('title', tour.title) ?? tour.title;
+  // 翻譯覆蓋：文字欄位。cleanTourTitle 剝掉 [Gold]/[Silver]/【促銷】等框與多餘空白
+  // (顯示層清洗:存量 16 團 + 未來全量一次到位)。
+  const displayTitle = cleanTourTitle(getTranslated('title', tour.title) ?? tour.title);
   // v78j: split long titles into clean primary headline + subtitle chips.
   // Heuristic: if first segment is < 6 chars (likely a marketing prefix like
   // "好運發發發"), skip it and use the second segment as primary.
@@ -426,10 +443,12 @@ export default function TourDetailPeony() {
         displayHeroSubtitle={displayHeroSubtitle}
         hasConfirmedDeparture={hasConfirmedDeparture}
         transportationInfo={transportationInfo}
+        itineraryCities={itineraryCities}
         navItems={navItems}
         activeTab={activeTab}
         scrollToSection={scrollToSection}
         navigate={navigate}
+        onInquire={openInquiry}
         setShowShareDialog={setShowShareDialog}
         generatePdfMutation={generatePdfMutation}
         isEditMode={isEditMode}
@@ -464,6 +483,7 @@ export default function TourDetailPeony() {
         tourHighlights={tourHighlights}
         poeticContent={poeticContent}
         hasConfirmedDeparture={hasConfirmedDeparture}
+        itineraryCities={itineraryCities}
         updateField={updateField}
         setEditedTour={setEditedTour}
         setHasChanges={setHasChanges}
@@ -499,7 +519,6 @@ export default function TourDetailPeony() {
         costExplanation={costExplanation}
         themeColor={themeColor}
         sectionRef={sectionRefs.features}
-        ensureArray={ensureArray}
       />
 
       <HotelsSection
@@ -518,8 +537,6 @@ export default function TourDetailPeony() {
         sectionRef={sectionRefs.pricing}
         costExplanation={costExplanation}
         language={language}
-        navigate={navigate}
-        ensureArray={ensureArray}
         onInquire={openInquiry}
       />
 
@@ -543,6 +560,7 @@ export default function TourDetailPeony() {
           basePrice={tour.price || 0}
           baseCurrency={tour.priceCurrency || "TWD"}
           themeColor={themeColor}
+          onReserve={() => openInquiry('reserve')}
         />
       )}
 

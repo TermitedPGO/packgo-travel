@@ -30,6 +30,50 @@ export const TRANSPORT_TYPE_EN: Record<string, string> = {
   '船': 'Ferry',
 };
 
+// ─── Title cleaning (display layer — fixes existing stock + all future) ──────
+// Supplier / promo titles arrive wrapped in tier or promo frames:
+// "[Gold] 東京五日", "【早鳥優惠】京都賞櫻", "  雙人成行  ". These read as noise on
+// the customer page. We strip them at DISPLAY time (not at hydrate) so every
+// already-imported tour is cleaned on the next render, not only re-scraped ones.
+// Zero LLM — deterministic regex, promo-keyword-gated so real 【】 content stays.
+const PROMO_INNER =
+  /gold|silver|bronze|platinum|diamond|vip|hot\b|new\b|sale|promo|限時|限量|早鳥|促銷|特惠|優惠|折扣|下殺|加碼|熱賣|熱銷|獨家|超值|團購|首選|推薦|季節限定/i;
+
+/**
+ * Strip [..]/【..】 promo/tier frames and squeeze whitespace from a tour title.
+ * Only removes bracket frames whose inner text is a promo label — real bracketed
+ * content (e.g. a genuine subtitle) is preserved. Pure + deterministic.
+ */
+export function cleanTourTitle(title: string | null | undefined): string {
+  if (!title) return "";
+  let t = String(title);
+  // Remove [..] / 【..】 frames whose inner text matches a promo keyword.
+  t = t.replace(/[【\[]([^】\]]*)[】\]]/g, (m, inner) =>
+    PROMO_INNER.test(inner) ? " " : m,
+  );
+  // Collapse runs of whitespace + trim leftover leading/trailing separators.
+  t = t
+    .replace(/\s{2,}/g, " ")
+    .replace(/^[\s|｜·・、,\-–—]+|[\s|｜·・、,\-–—]+$/g, "")
+    .trim();
+  return t;
+}
+
+/**
+ * Format a tour duration for display. A bare numeric duration (the schema stores
+ * an int like 5) rendered「5」as an orphan digit with no unit; this appends the
+ * localised unit ("5 天" / "5 Days"). Already-unit'd strings pass through
+ * unchanged, and an empty duration falls back to the multi-day label. (Wave 1 C.6)
+ */
+export function formatDuration(
+  duration: unknown,
+  t: (key: string, params?: Record<string, string | number>) => string,
+): string {
+  if (duration == null || duration === "") return t("tourDetail.multiDayTour");
+  const s = String(duration).trim();
+  return /^\d+$/.test(s) ? t("tourDetail.daysUnit", { days: s }) : s;
+}
+
 // 解析 JSON 字串
 export const parseJSON = (str: string | null | undefined, defaultValue: any = null) => {
   if (!str) return defaultValue;

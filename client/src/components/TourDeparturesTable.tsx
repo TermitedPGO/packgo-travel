@@ -11,7 +11,6 @@ import { useMemo } from "react";
 import { trpc } from "@/lib/trpc";
 import { Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Link } from "wouter";
 import { useLocale } from "@/contexts/LocaleContext";
 import { format } from "date-fns";
 import { zhTW, enUS } from "date-fns/locale";
@@ -25,6 +24,9 @@ interface Props {
   basePrice: number;
   baseCurrency?: string;
   themeColor?: { primary: string; secondary?: string };
+  /** 停止線(2026-07-10):每列 CTA 一律走「提交訂位需求」詢位流。必填 — 停止線
+   *  期間不留任何直連 /book 即時結帳的 fallback(2026-07-11 驗收回令釘死)。 */
+  onReserve: () => void;
 }
 
 export default function TourDeparturesTable({
@@ -32,6 +34,7 @@ export default function TourDeparturesTable({
   basePrice,
   baseCurrency = "TWD",
   themeColor,
+  onReserve,
 }: Props) {
   const { language, formatPrice, t } = useLocale();
   const isEN = language === "en";
@@ -210,15 +213,15 @@ export default function TourDeparturesTable({
                             {t("tourDeparturesTable.soldOutCta")}
                           </Button>
                         ) : (
-                          <Link href={`/book/${tourId}?departureId=${dep.id}`}>
-                            <Button
-                              size="sm"
-                              className="rounded-lg text-white"
-                              style={{ backgroundColor: themeColor?.primary || "#0d9488" }}
-                            >
-                              {t("tourDeparturesTable.bookCta")}
-                            </Button>
-                          </Link>
+                          // 停止線:提交訂位需求(詢位流),不直連即時結帳。
+                          <Button
+                            size="sm"
+                            onClick={onReserve}
+                            className="rounded-lg text-white whitespace-nowrap"
+                            style={{ backgroundColor: themeColor?.primary || "#0d9488" }}
+                          >
+                            {t("tourDetail.action.cta.reserveRequest")}
+                          </Button>
                         )}
                       </td>
                     </tr>

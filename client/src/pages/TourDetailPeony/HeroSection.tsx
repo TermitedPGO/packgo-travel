@@ -33,8 +33,10 @@ import {
   TransportIcon,
   NavTabs,
   formatDualPrice,
+  formatDuration,
   type getThemeColorByDestination,
 } from "./helpers";
+import { type InquiryMode } from "./actionArea.helpers";
 import {
   parseHeroImageCredit,
   withUnsplashUtm,
@@ -55,10 +57,12 @@ export type HeroSectionProps = {
   displayHeroSubtitle: string | null | undefined;
   hasConfirmedDeparture: boolean;
   transportationInfo: any;
+  itineraryCities: string[];
   navItems: { id: string; label: string }[];
   activeTab: string;
   scrollToSection: (sectionId: string) => void;
   navigate: (path: string) => void;
+  onInquire: (mode: InquiryMode) => void;
   setShowShareDialog: (open: boolean) => void;
   generatePdfMutation: any;
   isEditMode: boolean;
@@ -81,10 +85,12 @@ export default function HeroSection({
   displayHeroSubtitle,
   hasConfirmedDeparture,
   transportationInfo,
+  itineraryCities,
   navItems,
   activeTab,
   scrollToSection,
   navigate,
+  onInquire,
   setShowShareDialog,
   generatePdfMutation,
   isEditMode,
@@ -106,15 +112,27 @@ export default function HeroSection({
     <>
       <Header />
 
-      {/* Breadcrumb */}
+      {/* Breadcrumb — Wave 1 C.3: on mobile the full crumb wrapped the long
+          title into a broken vertical stack, so phones show ONE clean back
+          link instead. Desktop keeps the full trail with the current title
+          truncated to a single line. */}
       <div className="bg-gray-50 py-3 border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-6">
-          <div className="flex items-center gap-2 text-sm text-gray-700">
-            <button onClick={() => navigate("/")} className="hover:text-black transition-colors">{t('nav.home')}</button>
-            <span>&gt;</span>
-            <button onClick={() => navigate("/tours")} className="hover:text-black transition-colors">{t('nav.allTours')}</button>
-            <span>&gt;</span>
-            <span className="text-black">{displayTitle}</span>
+          {/* Mobile: single back link */}
+          <button
+            onClick={() => navigate("/tours")}
+            className="md:hidden inline-flex items-center gap-1 text-sm text-gray-700 hover:text-black transition-colors"
+          >
+            <span aria-hidden>‹</span>
+            {t('tourDetail.backToAllTours')}
+          </button>
+          {/* Desktop: full trail, current title truncated to one line */}
+          <div className="hidden md:flex items-center gap-2 text-sm text-gray-700 min-w-0">
+            <button onClick={() => navigate("/")} className="hover:text-black transition-colors flex-shrink-0">{t('nav.home')}</button>
+            <span className="flex-shrink-0">&gt;</span>
+            <button onClick={() => navigate("/tours")} className="hover:text-black transition-colors flex-shrink-0">{t('nav.allTours')}</button>
+            <span className="flex-shrink-0">&gt;</span>
+            <span className="text-black truncate min-w-0" title={displayTitle}>{displayTitle}</span>
           </div>
         </div>
       </div>
@@ -259,7 +277,7 @@ export default function HeroSection({
             )}
             <div className="flex items-center gap-2">
               <Clock className="h-5 w-5" />
-              <span>{tour.duration || t('tourDetail.multiDayTour')}</span>
+              <span className="whitespace-nowrap">{formatDuration(tour.duration, t)}</span>
             </div>
             <div className="flex items-center gap-2">
               <MapPin className="h-5 w-5" />
@@ -348,25 +366,27 @@ export default function HeroSection({
               <Clock className="h-4 w-4 flex-shrink-0" style={{ color: themeColor.primary }} />
               <div className="min-w-0">
                 <p className="text-[10px] uppercase tracking-wide text-gray-500 leading-none">{t('tourDetail.duration')}</p>
-                <p className="text-sm font-bold text-gray-900 mt-0.5 truncate">{tour.duration || t('tourDetail.multiDayTour')}</p>
+                <p className="text-sm font-bold text-gray-900 mt-0.5 truncate whitespace-nowrap">{formatDuration(tour.duration, t)}</p>
               </div>
             </div>
 
-            {/* 城市數 */}
-            <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-100">
-              <MapPin className="h-4 w-4 flex-shrink-0" style={{ color: themeColor.primary }} />
-              <div className="min-w-0">
-                <p className="text-[10px] uppercase tracking-wide text-gray-500 leading-none">{t('tourDetail.citiesLabel')}</p>
-                <p className="text-sm font-bold text-gray-900 mt-0.5 truncate">
-                  {(() => {
-                    const rawCities = (tour.destinationCity || tour.destinationCountry || '').split(/[,、]/).map((c: string) => c.trim()).filter(Boolean);
-                    const n = rawCities.length;
-                    if (n === 0) return tour.destinationCountry ? translateDestination(tour.destinationCountry, language) : '—';
-                    return n === 1 ? t('tourDetail.citiesCountSingle') : t('tourDetail.citiesCount', { n });
-                  })()}
-                </p>
+            {/* 城市數 — Wave 1 A.1: derived from the deduped itinerary (single
+                source shared with the overview card + route-map subtitle). No
+                itinerary places → chip omitted rather than guessing「1 座」off a
+                lone country name. */}
+            {itineraryCities.length > 0 && (
+              <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-100">
+                <MapPin className="h-4 w-4 flex-shrink-0" style={{ color: themeColor.primary }} />
+                <div className="min-w-0">
+                  <p className="text-[10px] uppercase tracking-wide text-gray-500 leading-none">{t('tourDetail.citiesLabel')}</p>
+                  <p className="text-sm font-bold text-gray-900 mt-0.5 truncate whitespace-nowrap">
+                    {itineraryCities.length === 1
+                      ? t('tourDetail.citiesCountSingle')
+                      : t('tourDetail.citiesCount', { n: itineraryCities.length })}
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* 交通 */}
             {transportationInfo?.type && (
@@ -408,14 +428,15 @@ export default function HeroSection({
               </div>
             </div>
 
-            {/* 立即預訂 CTA — 隱藏在手機，桌面顯示 */}
+            {/* 提交訂位需求 CTA — 隱藏在手機，桌面顯示。停止線(2026-07-10):即時
+                結帳暫停,一律走詢位流(reserve),不直連 /book/:id。 */}
             <button
-              onClick={() => navigate(`/book/${tour.id}`)}
+              onClick={() => onInquire('reserve')}
               className="hidden lg:flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-white font-semibold text-sm transition-opacity hover:opacity-90"
               style={{ backgroundColor: themeColor.primary }}
             >
               <Calendar className="h-4 w-4" />
-              {t('tourDetail.bookNowBtn')}
+              {t('tourDetail.action.cta.reserveRequest')}
             </button>
           </div>
         </div>
@@ -427,7 +448,7 @@ export default function HeroSection({
           Header is utility-bar (36px) + main (80px) = 116px; on mobile only
           the main bar shows so 80px is correct. Old `top-[80px]` overlapped
           the bottom of the utility bar on desktop. */}
-      <nav className="sticky top-[80px] lg:top-[116px] z-40 bg-white shadow-sm border-b border-gray-100">
+      <nav id="tour-sticky-nav" className="sticky top-[80px] lg:top-[116px] z-40 bg-white shadow-sm border-b border-gray-100">
         <div className="max-w-7xl mx-auto px-2 md:px-6">
           <div className="flex items-center justify-between gap-2 md:gap-4">
             {/* Left: section nav */}
@@ -473,13 +494,14 @@ export default function HeroSection({
                 )}
               </div>
 
-              {/* Book Now CTA — always visible (desktop + mobile) */}
+              {/* 提交訂位需求 CTA — always visible (desktop + mobile). 停止線:
+                  走詢位流(reserve),不直連即時結帳。 */}
               <Button
-                onClick={() => navigate(`/book/${tour.id}`)}
-                className="px-3 md:px-5 py-2 text-white text-sm md:text-base font-semibold shadow-sm rounded-lg"
+                onClick={() => onInquire('reserve')}
+                className="px-3 md:px-5 py-2 text-white text-sm md:text-base font-semibold shadow-sm rounded-lg whitespace-nowrap"
                 style={{ backgroundColor: themeColor.primary }}
               >
-                {t('tourDetail.bookNowBtn')}
+                {t('tourDetail.action.cta.reserveRequest')}
               </Button>
 
               {/* Print / PDF / Share — icon-only on hover, hidden on mobile */}

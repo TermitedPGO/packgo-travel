@@ -67,7 +67,7 @@ describe("resolveStockPhoto — 三態(含 credit)", () => {
     expect(r!.url).toBe("https://images.unsplash.com/photo-1.jpg");
     expect(r!.credit).toEqual(CREDIT);
     expect(r!.downloadLocation).toBe("https://api.unsplash.com/photos/abc/download");
-    expect(search).toHaveBeenCalledWith("杜拜 阿聯", 1);
+    expect(search).toHaveBeenCalledWith("杜拜 阿聯", 10);
     expect(trigger).toHaveBeenCalledTimes(1);
     expect(trigger).toHaveBeenCalledWith("https://api.unsplash.com/photos/abc/download");
   });
@@ -124,5 +124,40 @@ describe("resolveStockPhoto — 三態(含 credit)", () => {
     ]);
     const r = await resolveStockPhoto({ destinationCountry: "泰國" }, search, noopTrigger);
     expect(r!.url).toBe("https://ok.jpg");
+  });
+});
+
+describe("resolveStockPhoto — 批次去重(usedUrls,Block B)", () => {
+  it("skips a candidate already in usedUrls, picks the next unused one", async () => {
+    const search: PhotoSearchFn = vi.fn(async () => [
+      hit({ url: "https://images.unsplash.com/photo-1.jpg" }),
+      hit({ url: "https://images.unsplash.com/photo-2.jpg" }),
+    ]);
+    const trigger: DownloadTriggerFn = vi.fn(async () => {});
+    const used = new Set<string>(["https://images.unsplash.com/photo-1.jpg"]);
+    const r = await resolveStockPhoto({ destinationCountry: "泰國" }, search, trigger, used);
+    expect(r).not.toBeNull();
+    expect(r!.url).toBe("https://images.unsplash.com/photo-2.jpg");
+    // 選中的候選被加進共用集合,供下一個呼叫端(下一團)避開。
+    expect(used.has("https://images.unsplash.com/photo-2.jpg")).toBe(true);
+  });
+
+  it("all candidates already used → returns null (fail-open, tour ships imageless)", async () => {
+    const search: PhotoSearchFn = vi.fn(async () => [
+      hit({ url: "https://images.unsplash.com/photo-1.jpg" }),
+      hit({ url: "https://images.unsplash.com/photo-2.jpg" }),
+    ]);
+    const used = new Set<string>([
+      "https://images.unsplash.com/photo-1.jpg",
+      "https://images.unsplash.com/photo-2.jpg",
+    ]);
+    const r = await resolveStockPhoto({ destinationCountry: "泰國" }, search, noopTrigger, used);
+    expect(r).toBeNull();
+  });
+
+  it("without usedUrls (undefined) behaves as before — first valid candidate wins", async () => {
+    const search: PhotoSearchFn = vi.fn(async () => [hit()]);
+    const r = await resolveStockPhoto({ destinationCountry: "泰國" }, search, noopTrigger);
+    expect(r!.url).toBe("https://images.unsplash.com/photo-1.jpg");
   });
 });
