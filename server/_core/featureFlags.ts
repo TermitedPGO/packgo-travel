@@ -131,6 +131,24 @@ export const stripeTrustDeferralEnabled = (): boolean =>
   isTrue(process.env.STRIPE_TRUST_DEFERRAL_ENABLED);
 
 /**
+ * 臨時停止線 (2026-07-10, Jeff 裁決 · 外部顧問第二輪審計 §二/§三). Tour 類
+ * 「結帳即請款」在付款前尚無即時驗價、驗位與揭露存證,先擋下來:OFF (預設)
+ * = 擋,createCheckoutSession 對 tour booking 回結構化錯誤,前端轉「提交訂位
+ * 需求」詢位流。ON = 放行舊即時請款行為。
+ *
+ * 作用域:僅 tour booking 的 createCheckoutSession (server/routers/
+ * bookingsPayment.ts)。visa / membership 結帳走各自 router,完全不受此旗標
+ * 影響。
+ *
+ * 退場:checkout-verify 批的即時驗證(驗商品在售/驗位/驗價/揭露存證)上線後,
+ * 這個「無條件擋」由「驗證通過才建 session」的條件擋取代,本旗標即可退役。
+ *
+ * Env: `TOUR_INSTANT_CHECKOUT_ENABLED=true`
+ */
+export const tourInstantCheckoutEnabled = (): boolean =>
+  isTrue(process.env.TOUR_INSTANT_CHECKOUT_ENABLED);
+
+/**
  * STOREFRONT_MODE — same-image split-role flag (feature: storefront-split,
  * Phase 0). When SET, this process runs as the customer-facing storefront:
  * it serves the SPA + bot-prerender + the public tRPC surface, but starts

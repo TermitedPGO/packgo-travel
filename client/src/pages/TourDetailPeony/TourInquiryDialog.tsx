@@ -87,6 +87,7 @@ export default function TourInquiryDialog({
     () => ({
       subjectQuote: t("tourDetail.action.summary.subjectQuote"),
       subjectCustom: t("tourDetail.action.summary.subjectCustom"),
+      subjectReserve: t("tourDetail.action.summary.subjectReserve"),
       intro: t("tourDetail.action.summary.intro"),
       peopleLabel: t(wz("peopleLabel")),
       timeLabel: t(wz("timeLabel")),
@@ -111,7 +112,16 @@ export default function TourInquiryDialog({
     [t],
   );
 
-  const title = mode === "custom" ? t(d("titleCustom")) : t(d("titleQuote"));
+  const title =
+    mode === "custom"
+      ? t(d("titleCustom"))
+      : mode === "reserve"
+        ? t(d("titleReserve"))
+        : t(d("titleQuote"));
+  // Reserve (提交訂位需求) sets a payment-later expectation: we confirm seat +
+  // price with the supplier, then send a payment link. Quote/custom keep the
+  // generic intro.
+  const introText = mode === "reserve" ? t(d("introReserve")) : t(d("intro"));
   const emailOk = /\S+@\S+\.\S+/.test(email.trim());
   const canSubmit = name.trim().length > 0 && emailOk && !createInquiry.isPending;
 
@@ -175,7 +185,7 @@ export default function TourInquiryDialog({
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
-            <p className="text-sm text-gray-600">{t(d("intro"))}</p>
+            <p className="text-sm text-gray-600">{introText}</p>
 
             {choiceChips.length > 0 && (
               <div className="rounded-lg bg-gray-50 p-3">

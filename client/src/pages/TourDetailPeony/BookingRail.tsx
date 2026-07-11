@@ -27,6 +27,7 @@ import {
   deriveFlightInclusion,
   type AvailabilityBucket,
   type DepartureLike,
+  type InquiryMode,
   type TourLike,
 } from "./actionArea.helpers";
 import { type getThemeColorByDestination } from "./helpers";
@@ -35,7 +36,7 @@ export type BookingRailProps = {
   tour: TourLike & Record<string, any>;
   departures?: DepartureLike[] | null;
   themeColor: ReturnType<typeof getThemeColorByDestination>;
-  onInquire: (mode: "quote" | "custom") => void;
+  onInquire: (mode: InquiryMode) => void;
   onWeChat: () => void;
   navigate: (path: string) => void;
 };
@@ -125,14 +126,16 @@ export default function BookingRail({
           )}
         </dl>
 
-        {/* ONE primary action */}
+        {/* ONE primary action — 臨時停止線 (2026-07-10): 即時結帳暫停,購買動作
+            改為「提交訂位需求」走 inquiry 詢位流(我們確認團位與價格後寄付款連結),
+            不再直連 /book/:id 結帳。checkout-verify 批的即時驗證上線後恢復可訂。 */}
         <Button
-          onClick={() => navigate(`/book/${tour.id}`)}
+          onClick={() => onInquire("reserve")}
           disabled={bucket === "soldout"}
           className="mt-4 h-12 w-full rounded-lg text-base font-bold text-white disabled:opacity-50"
           style={{ backgroundColor: themeColor.primary }}
         >
-          {t("tourDetail.bookNowBtn")}
+          {t("tourDetail.action.cta.reserveRequest")}
           <ChevronRight className="h-4 w-4" />
         </Button>
 

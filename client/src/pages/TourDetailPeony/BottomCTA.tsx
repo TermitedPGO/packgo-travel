@@ -63,21 +63,22 @@ export default function BottomCTA({ tour, themeColor, navigate, onInquire }: Bot
                 <span className="hidden lg:inline">{CONTACT.phoneDisplay}</span>
                 <span className="lg:hidden">{t('tourDetail.contactUs')}</span>
               </a>
-              {/* Online checkout kept but demoted to a low-weight text link. */}
+              {/* 臨時停止線 (2026-07-10): 即時結帳暫停。原「線上預訂」→ /book/:id
+                  結帳連結移除;改為「要報價」詢位 fallback,主 CTA 升為「提交訂位
+                  需求」(走 inquiry 詢位流)。checkout-verify 批的即時驗證上線後恢復。 */}
               <button
                 type="button"
-                onClick={() => navigate(`/book/${tour.id}`)}
+                onClick={() => onInquire('quote')}
                 className="hidden sm:inline text-sm text-gray-500 underline-offset-4 transition-colors hover:text-gray-700 hover:underline"
               >
-                {t('tourDetail.action.cta.bookOnline')}
+                {t('tourDetail.action.cta.requestQuote')}
               </button>
-              {/* Primary CTA is now "request quote" (inquiry), not online checkout. */}
               <Button
-                onClick={() => onInquire('quote')}
+                onClick={() => onInquire('reserve')}
                 className="px-6 md:px-10 py-3 text-white font-bold text-base md:text-lg rounded-lg"
                 style={{ backgroundColor: themeColor.primary }}
               >
-                {t('tourDetail.action.cta.requestQuote')}
+                {t('tourDetail.action.cta.reserveRequest')}
               </Button>
             </div>
           </div>

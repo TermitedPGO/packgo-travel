@@ -37,6 +37,7 @@ import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
 import * as db from "../db";
 import { checkCheckoutSessionRateLimit } from "../rateLimit";
 import { ENV } from "../_core/env";
+import { tourInstantCheckoutEnabled } from "../_core/featureFlags";
 
 // v74 bounded string helpers — kept in sync with the originals in routers.ts.
 // Without max bounds, attackers can send 10MB payloads per field and DoS the
@@ -79,6 +80,20 @@ export const bookingsPaymentRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
+        // 臨時停止線 (2026-07-10, Jeff 裁決 · 外部顧問第二輪審計).
+        // Tour 類「結帳即請款」在付款前尚無即時驗價/驗位/揭露存證,先 fail-closed
+        // 擋下 —— 絕不建立 Stripe session、絕不打 Stripe。前端已改用「提交訂位需求」
+        // 走 inquiry 詢位流;此擋是對「有人直接打 /book/:id」的 defense-in-depth。
+        // checkout-verify 批的即時驗證上線後,這段無條件擋由「驗證通過才建 session」
+        // 的條件擋取代。旗標見 featureFlags.tourInstantCheckoutEnabled (預設 OFF)。
+        if (!tourInstantCheckoutEnabled()) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message:
+              "線上即時結帳暫時關閉,請改用「提交訂位需求」,我們確認團位與價格後會寄付款連結給您。",
+          });
+        }
+
         // Rate limiting: 20 checkout sessions per hour per user
         const checkoutRateLimit = await checkCheckoutSessionRateLimit(ctx.user.id);
         if (!checkoutRateLimit.allowed) {

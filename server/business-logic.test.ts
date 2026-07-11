@@ -252,24 +252,35 @@ describe.skipIf(!process.env.DATABASE_URL)("支付流程業務邏輯 (bookings)"
   }, 15000); // 增加 timeout 因為需要發送確認 email
 
   it("Stripe checkout session 建立應回傳 URL（需登入）", async () => {
-    const caller = appRouter.createCaller(createCtx(mockRegularUser));
+    // 臨時停止線 (2026-07-10): tour 即時結帳預設擋 (TOUR_INSTANT_CHECKOUT_ENABLED
+    // OFF)。此測試驗的是「放行時 Stripe 整合會回 URL」這條既有覆蓋,故顯式開旗標
+    // 走 enabled 路徑。停止線本身的「擋 + 不打 Stripe」由
+    // server/routers/bookingsPayment.stopline.test.ts 專測。
+    const prev = process.env.TOUR_INSTANT_CHECKOUT_ENABLED;
+    process.env.TOUR_INSTANT_CHECKOUT_ENABLED = "true";
+    try {
+      const caller = appRouter.createCaller(createCtx(mockRegularUser));
 
-    // 取得現有訂單
-    const bookings = await caller.bookings.list();
-    if (bookings.length === 0) {
-      console.log("⚠️ 跳過：資料庫中無訂單資料");
-      return;
+      // 取得現有訂單
+      const bookings = await caller.bookings.list();
+      if (bookings.length === 0) {
+        console.log("⚠️ 跳過：資料庫中無訂單資料");
+        return;
+      }
+
+      const booking = bookings[0];
+      const result = await caller.bookings.createCheckoutSession({
+        bookingId: booking.id,
+        paymentType: "deposit",
+      });
+
+      expect(result).toHaveProperty("url");
+      expect(typeof result.url).toBe("string");
+      expect(result.url.length).toBeGreaterThan(0);
+    } finally {
+      if (prev === undefined) delete process.env.TOUR_INSTANT_CHECKOUT_ENABLED;
+      else process.env.TOUR_INSTANT_CHECKOUT_ENABLED = prev;
     }
-
-    const booking = bookings[0];
-    const result = await caller.bookings.createCheckoutSession({
-      bookingId: booking.id,
-      paymentType: "deposit",
-    });
-
-    expect(result).toHaveProperty("url");
-    expect(typeof result.url).toBe("string");
-    expect(result.url.length).toBeGreaterThan(0);
   });
 
   it("未登入用戶嘗試建立 checkout session 應拋出 UNAUTHORIZED", async () => {

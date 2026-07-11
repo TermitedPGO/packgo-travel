@@ -23,7 +23,11 @@ export interface WizardAnswers {
   budget?: WizardBudget;
 }
 
-export type InquiryMode = "quote" | "custom";
+// "reserve" = 提交訂位需求 (booking request). Added 2026-07-10 with the tour
+// instant-checkout 臨時停止線: the detail page's buy button now submits a
+// booking request through the inquiry flow instead of hitting instant checkout.
+// Routed as a "general" inquiry (a booking intent, not a custom-tour brief).
+export type InquiryMode = "quote" | "custom" | "reserve";
 
 // ─── Minimal structural input shapes ───────────────────────────────────────
 // The page passes `any` tour/departure objects; we narrow to just the fields
@@ -268,6 +272,7 @@ export interface InquiryFormFields {
 export interface InquirySummaryLabels {
   subjectQuote: string; // e.g. "[報價]"
   subjectCustom: string; // e.g. "[客製]"
+  subjectReserve: string; // e.g. "[訂位]"
   intro: string; // e.g. "行程詢問"
   peopleLabel: string;
   timeLabel: string;
@@ -306,7 +311,12 @@ export function buildInquiryInput(
 ): InquiryCreateInput {
   const w = wizard ?? {};
   const title = (tour.title ?? "").trim();
-  const prefix = mode === "custom" ? labels.subjectCustom : labels.subjectQuote;
+  const prefix =
+    mode === "custom"
+      ? labels.subjectCustom
+      : mode === "reserve"
+        ? labels.subjectReserve
+        : labels.subjectQuote;
   const subject = `${prefix} ${title}`.trim().slice(0, 200);
 
   const lines: string[] = [`${labels.intro}: ${title} (Tour #${tour.id})`, ""];

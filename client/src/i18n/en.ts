@@ -2181,11 +2181,14 @@ export const en = {
         addWeChat: 'Add WeChat',
         callNow: 'Call us',
         bookOnline: 'Book online',
+        reserveRequest: 'Request to book',
       },
       dialog: {
         titleQuote: 'Request a quote',
         titleCustom: 'Customize this tour',
+        titleReserve: 'Request to book',
         intro: 'Leave your contact details and we will get back to you shortly.',
+        introReserve: 'Leave your contact details. Once we confirm availability and the latest price, we will send you a payment link to complete your booking.',
         yourChoices: 'Your choices',
         name: 'Name',
         namePlaceholder: 'Your name',
@@ -2211,6 +2214,7 @@ export const en = {
       summary: {
         subjectQuote: '[Quote]',
         subjectCustom: '[Custom]',
+        subjectReserve: '[Booking]',
         intro: 'Tour inquiry',
         fromTourPage: '(via the tour page wizard)',
       },

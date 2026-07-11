@@ -2194,11 +2194,14 @@ export const zhTW = {
         addWeChat: '加微信',
         callNow: '打電話',
         bookOnline: '線上預訂',
+        reserveRequest: '提交訂位需求',
       },
       dialog: {
         titleQuote: '索取報價',
         titleCustom: '客製這團',
+        titleReserve: '提交訂位需求',
         intro: '留下聯絡方式，我們會盡快依你的需求回覆。',
+        introReserve: '留下聯絡方式，我們確認團位與最新價格後，會寄付款連結給你完成訂位。',
         yourChoices: '你的選擇',
         name: '姓名',
         namePlaceholder: '你的稱呼',
@@ -2224,6 +2227,7 @@ export const zhTW = {
       summary: {
         subjectQuote: '[報價]',
         subjectCustom: '[客製]',
+        subjectReserve: '[訂位]',
         intro: '行程詢問',
         fromTourPage: '（由行程頁小精靈帶入）',
       },

@@ -209,6 +209,7 @@ describe("buildInquiryInput", () => {
   const labels: InquirySummaryLabels = {
     subjectQuote: "[報價]",
     subjectCustom: "[客製]",
+    subjectReserve: "[訂位]",
     intro: "行程詢問",
     peopleLabel: "人數",
     timeLabel: "出發時間",
@@ -231,6 +232,16 @@ describe("buildInquiryInput", () => {
     const out = buildInquiryInput(tour, {}, "custom", form, labels);
     expect(out.inquiryType).toBe("custom_tour");
     expect(out.subject).toBe("[客製] 北海道親子賞雪 5 日");
+  });
+
+  // 臨時停止線 (2026-07-10): 「提交訂位需求」按鈕走 reserve mode。訂位意圖歸
+  // general inquiry(不是 custom_tour),subject 帶 [訂位] 前綴讓 Jeff 分辨
+  // 「想訂」與「想問價」。
+  it("maps reserve mode to general inquiryType + [訂位] subject prefix", () => {
+    const out = buildInquiryInput(tour, { people: "1-2" }, "reserve", form, labels);
+    expect(out.inquiryType).toBe("general");
+    expect(out.subject).toBe("[訂位] 北海道親子賞雪 5 日");
+    expect(out.relatedTourId).toBe(1234);
   });
 
   it("carries relatedTourId and trims contact fields", () => {
