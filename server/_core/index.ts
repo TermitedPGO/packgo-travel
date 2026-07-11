@@ -39,7 +39,10 @@ import { reportFunnelError } from "./errorFunnel";
 import { shouldFunnelTrpcError } from "./trpcNoiseGate";
 import { shutdownPool, warmUp } from "./puppeteerPool";
 import pinoHttp from "pino-http";
-import "../worker"; // Initialize BullMQ worker
+// storefront-split Phase 0 — the same-image role decision (ops vs storefront).
+// worker.ts is NO LONGER a static top-level import: it's a gated dynamic
+// import inside startServer() so a STOREFRONT_MODE process starts zero workers.
+import { buildStorefrontBootPlan } from "./storefrontBootPlan";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -61,7 +64,36 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
+  // storefront-split Phase 0 — decide this process's role ONCE at boot.
+  // Flag unset (default) → ops role → every field below is true → byte-
+  // identical to pre-flag behavior. STOREFRONT_MODE=1 → storefront role →
+  // no workers, no cron, no backend-only endpoints.
+  const bootPlan = buildStorefrontBootPlan();
+
+  // BullMQ workers (tour-generation/translation consumers + the re-exported
+  // monitor/quote-followup/abandonment-recovery workers). Was a static
+  // top-level `import "../worker"`; now a gated dynamic import so storefront
+  // starts none of them. Ops role → imported on boot exactly as before.
+  if (bootPlan.startWorkers) {
+    await import("../worker");
+  }
+
   const app = express();
+
+  // Backend-only route registrars. In ops role these delegate straight to
+  // express (byte-identical mounting); in storefront role they no-op so the
+  // customer process never exposes webhooks, script-token endpoints, or the
+  // OpsAgent SSE. See BACKEND_ONLY_ENDPOINTS in ./storefrontBootPlan.ts.
+  const backendPost = (path: string, ...handlers: express.RequestHandler[]) => {
+    if (bootPlan.mountBackendEndpoints) app.post(path, ...handlers);
+  };
+  const backendGet = (path: string, ...handlers: express.RequestHandler[]) => {
+    if (bootPlan.mountBackendEndpoints) app.get(path, ...handlers);
+  };
+  const backendAll = (path: string, ...handlers: express.RequestHandler[]) => {
+    if (bootPlan.mountBackendEndpoints) app.all(path, ...handlers);
+  };
+
   // SEO audit 2026-05-09: enable response compression. The 702KB JS bundle
   // was being served uncompressed; gzip cuts it ~70% and fixes LCP on slow
   // connections. Added before any route handlers so all responses benefit.
@@ -240,11 +272,11 @@ async function startServer() {
   });
 
   // Stripe webhook must be registered BEFORE express.json() to preserve raw body
-  app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), handleStripeWebhook);
+  backendPost("/api/stripe/webhook", express.raw({ type: "application/json" }), handleStripeWebhook);
 
   // Plaid webhook — same raw-body pattern in case we later add JWT
   // signature verification on the headers + raw body.
-  app.post(
+  backendPost(
     "/api/plaid/webhook",
     express.raw({ type: "application/json" }),
     async (req, res) => {
@@ -258,7 +290,7 @@ async function startServer() {
   // OIDC bearer token (signature + aud + service account), enqueues the heavy
   // ingest to BullMQ, and 204-acks fast (Pub/Sub demands a quick response).
   // See server/_core/gmailPushWebhook.ts + the push runbook.
-  app.post(
+  backendPost(
     "/api/gmail/push",
     express.raw({ type: "application/json" }),
     async (req, res) => {
@@ -276,11 +308,14 @@ async function startServer() {
   // Cookie parser - MUST be before routes that need to read cookies
   app.use(cookieParser());
   
-  // Google OAuth (user login)
+  // Google OAuth (user login) — PUBLIC surface, customers log in here. Always
+  // mounted in both roles.
   initializeGoogleAuth(app);
 
-  // Gmail OAuth (Round 81 — email pipeline)
-  initializeGmailOAuth(app);
+  // Gmail OAuth (Round 81 — email pipeline) — backend-only (support@ mailbox
+  // connect + /api/gmail/oauth/callback). Storefront never runs the pipeline,
+  // so gate it behind the boot plan.
+  if (bootPlan.mountBackendEndpoints) initializeGmailOAuth(app);
   
   // ── Chat image upload (2026-06-01) ───────────────────────────────────
   // Express route (not tRPC) because tRPC doesn't natively handle multipart.
@@ -336,7 +371,7 @@ async function startServer() {
   //
   // Why GET (not POST): EventSource API only supports GET. The question
   // text is passed via ?q= query param (max ~2K chars, plenty for ops Q&A).
-  app.all("/api/agent/ask-ops-stream", async (req, res) => {
+  backendAll("/api/agent/ask-ops-stream", async (req, res) => {
     if (req.method !== "GET" && req.method !== "POST") {
       return res.status(405).json({ error: "Method not allowed" });
     }
@@ -1245,7 +1280,7 @@ async function startServer() {
     return cachedAdminUserId;
   }
 
-  app.post("/api/internal/test-generate", async (req, res) => {
+  backendPost("/api/internal/test-generate", async (req, res) => {
     try {
       const ip = await verifyInternalAuth(req, res, {
         rateLimitKey: "test-generate",
@@ -1284,7 +1319,7 @@ async function startServer() {
   // POST /api/internal/bulk-import-lion
   //   Body: { ids?: string[], categoryPath?: string, limit?: number, queueRewrite?: boolean }
   //   Returns: BulkImportBatchResult + (if queueRewrite) queued: N
-  app.post("/api/internal/bulk-import-lion", async (req, res) => {
+  backendPost("/api/internal/bulk-import-lion", async (req, res) => {
     try {
       // bulk-import = expensive per call (queues N LLM rewrites). Hard cap
       // at 2 per hour per IP — strictly slower than test-generate which
@@ -1328,7 +1363,7 @@ async function startServer() {
   //     repair 只按 folderName trace 刪掉先前 caseFileImport 捏造的互動(見
   //     repairCaseInteractions),不需 markdown、不重跑 LLM 抽取。dry_run 先出統計。
   const CASE_FILE_MARKDOWN_MAX_BYTES = 100_000;
-  app.post("/api/admin/import-case-file", async (req, res) => {
+  backendPost("/api/admin/import-case-file", async (req, res) => {
     try {
       const ip = await verifyInternalAuth(req, res, {
         tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
@@ -1382,7 +1417,7 @@ async function startServer() {
   //   Body(optional): { simulate?: "fail" }  — 附加一筆固定失敗臂,紅路演練用。
   //   Returns: { ok: boolean, arms: Array<{ name, ok, ms, rowCount?, error? }> }
   //     回應絕不夾帶客人資料 — 只有 runDeploySmoke 回傳的 {ok, arms} 結構。
-  app.post("/api/admin/deploy-smoke", async (req, res) => {
+  backendPost("/api/admin/deploy-smoke", async (req, res) => {
     try {
       const ip = await verifyInternalAuth(req, res, {
         tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
@@ -1408,7 +1443,7 @@ async function startServer() {
   // POST /api/admin/import-case-documents
   //   Body: { mode:"dry_run"|"confirm", folderName, files:[{subfolder:"交付"|"來源",name,sizeBytes,base64?}] }
   //   dry_run 只送 metadata(不帶 base64);confirm 帶 base64,腳本按大小分批(body 上限 10mb)。
-  app.post("/api/admin/import-case-documents", async (req, res) => {
+  backendPost("/api/admin/import-case-documents", async (req, res) => {
     try {
       const ip = await verifyInternalAuth(req, res, {
         tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
@@ -1457,7 +1492,7 @@ async function startServer() {
   // (指代化不寫客人真名)→ 寫 caseLearnings(sourceFolder 冪等,含 blocked 無訂單案)。
   // dry_run 只 parse 候選、不燒 LLM;confirm 才 de-id + 寫。同 LOCAL_SCRIPT_TOKEN 慣例。
   // POST /api/admin/harvest-case-lessons  Body: { mode, folderName, markdown, caseType?, destination? }
-  app.post("/api/admin/harvest-case-lessons", async (req, res) => {
+  backendPost("/api/admin/harvest-case-lessons", async (req, res) => {
     try {
       const ip = await verifyInternalAuth(req, res, {
         tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
@@ -1503,7 +1538,7 @@ async function startServer() {
   // harvest-case-lessons 慣例,伺服器端不另外寫檔)。
   // POST /api/admin/backfill-bank-transaction-links
   //   Body: { mode:"dry_run"|"confirm", limit?: number }
-  app.post("/api/admin/backfill-bank-transaction-links", async (req, res) => {
+  backendPost("/api/admin/backfill-bank-transaction-links", async (req, res) => {
     try {
       const ip = await verifyInternalAuth(req, res, {
         tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
@@ -1538,7 +1573,7 @@ async function startServer() {
   // 報表。
   // POST /api/admin/backfill-stripe-payout-declassify
   //   Body: { mode:"dry_run"|"confirm", limit?: number }
-  app.post("/api/admin/backfill-stripe-payout-declassify", async (req, res) => {
+  backendPost("/api/admin/backfill-stripe-payout-declassify", async (req, res) => {
     try {
       const ip = await verifyInternalAuth(req, res, {
         tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
@@ -1572,7 +1607,7 @@ async function startServer() {
   // dry_run 只報數,Jeff 授權才 confirm。⛔ BofA 四帳戶絕不碰。
   // POST /api/admin/cleanup-sandbox-residue
   //   Body: { mode:"dry_run"|"confirm" }
-  app.post("/api/admin/cleanup-sandbox-residue", async (req, res) => {
+  backendPost("/api/admin/cleanup-sandbox-residue", async (req, res) => {
     try {
       const ip = await verifyInternalAuth(req, res, {
         tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
@@ -1610,7 +1645,7 @@ async function startServer() {
   // POST /api/admin/trust-transfer-detect
   //   Body: { mode:"dry_run"|"confirm" }
   //       | { mode:"manual_backfill", deferredIds:number[], bankTransactionId:number }
-  app.post("/api/admin/trust-transfer-detect", async (req, res) => {
+  backendPost("/api/admin/trust-transfer-detect", async (req, res) => {
     try {
       const ip = await verifyInternalAuth(req, res, {
         tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
@@ -1659,7 +1694,7 @@ async function startServer() {
   //   Headers: Authorization: Bearer <LOCAL_SCRIPT_TOKEN>
   //   Body: { scope:"uv"|"lion", dryRun?=true, limit?(1-100), skipSync?=false,
   //           confirm?:"promote" }
-  app.post(
+  backendPost(
     "/api/admin/catalog-rebuild",
     makeCatalogRebuildHandler({
       verifyAuth: (req, res) =>
@@ -1678,7 +1713,7 @@ async function startServer() {
   // (classifier 判斷是否對話、resolveEventDate 未來日期一律不建、認人守門、(content,分鐘)去重
   // 全沿用)。dry_run 只 classify+build 預覽不寫。POST /api/admin/import-case-conversations
   //   Body: { mode:"dry_run"|"confirm", folderName, files:[{name, text}] }
-  app.post("/api/admin/import-case-conversations", async (req, res) => {
+  backendPost("/api/admin/import-case-conversations", async (req, res) => {
     try {
       const ip = await verifyInternalAuth(req, res, {
         tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
@@ -1720,7 +1755,7 @@ async function startServer() {
   // POST /api/admin/backfill-interaction-orders
   //   Headers: Authorization: Bearer <LOCAL_SCRIPT_TOKEN>
   //   Body: { mode: "dry_run" | "confirm", excludeTestAccounts?: boolean }
-  app.post("/api/admin/backfill-interaction-orders", async (req, res) => {
+  backendPost("/api/admin/backfill-interaction-orders", async (req, res) => {
     try {
       const ip = await verifyInternalAuth(req, res, {
         tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
@@ -1752,7 +1787,7 @@ async function startServer() {
   //   gate can hide the marketing ones. dry_run reports the card count + LLM
   //   calls; confirm stamps up to `limit` cards (default 80) — a large batch
   //   stops for monitor review (re-run for the next batch). Idempotent.
-  app.post("/api/admin/backfill-guest-classification", async (req, res) => {
+  backendPost("/api/admin/backfill-guest-classification", async (req, res) => {
     try {
       const ip = await verifyInternalAuth(req, res, {
         tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
@@ -1789,7 +1824,7 @@ async function startServer() {
   //   whose every inbound is effective spam OR whose email hits isKnownNoise,
   //   with a 10-row sample + a domain histogram (to curate KNOWN_NOISE_DOMAINS).
   //   The monitor reads it and decides bulk-block separately.
-  app.post("/api/admin/guest-noise-hygiene-report", async (req, res) => {
+  backendPost("/api/admin/guest-noise-hygiene-report", async (req, res) => {
     try {
       const ip = await verifyInternalAuth(req, res, {
         tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
@@ -1818,7 +1853,7 @@ async function startServer() {
   // customerProfile must never leave his Mac. See imessageIngest.ts's header
   // and imessage-sync.mjs's header for the full writeup.
   const IMESSAGE_CHECK_PHONES_MAX = 500;
-  app.post("/api/admin/imessage-check-known-phones", async (req, res) => {
+  backendPost("/api/admin/imessage-check-known-phones", async (req, res) => {
     try {
       const ip = await verifyInternalAuth(req, res, {
         tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
@@ -1854,7 +1889,7 @@ async function startServer() {
   // whole batch) — a partial-accept response would leave the calling script
   // unable to tell which messages actually landed, per task scope.
   const IMESSAGE_INGEST_MAX_MESSAGES = 500;
-  app.post("/api/admin/imessage-ingest", async (req, res) => {
+  backendPost("/api/admin/imessage-ingest", async (req, res) => {
     try {
       const ip = await verifyInternalAuth(req, res, {
         tokenEnvVar: "LOCAL_SCRIPT_TOKEN",
@@ -1898,7 +1933,7 @@ async function startServer() {
 
   // Status endpoint paired with test-generate. Status is a polling read,
   // so no rate limit (CI polls every few seconds).
-  app.get("/api/internal/test-status/:jobId", async (req, res) => {
+  backendGet("/api/internal/test-status/:jobId", async (req, res) => {
     try {
       const ip = await verifyInternalAuth(req, res);
       if (!ip) return;
@@ -2084,323 +2119,327 @@ async function startServer() {
   // tRPC / static serving. No-op when SENTRY_DSN unset (initSentry guarded).
   setupExpressErrorHandler(app);
 
-  // Schedule zombie task cleanup every 10 minutes (timeout: 25 min)
-  // Round 36-Fix-2: 從 5 分鐘延長到 25 分鐘，避免誤殺正在執行的任務
-  // 排程間隔從 5 分鐘改為 10 分鐘，減少不必要的 DB 查詢
-  try {
-    const { cleanupZombieTasks } = await import('../agentActivityService');
-    // Run cleanup immediately on startup
-    // Wave1 Block B: 跟 setInterval 那次接同一支漏斗,避免同一支函式兩個呼叫點
-    // 行為不一致(一個進漏斗、一個仍是黑洞)——派工單只點名 setInterval 那次,
-    // 但啟動時這次失敗一樣是「系統壞了但沒人知道」,同樣值得被看到。
-    cleanupZombieTasks(30).then(count => {
-      if (count > 0) logger.info({ count }, "[Startup] Cleaned up zombie task(s)");
-    }).catch((err) => {
-      reportFunnelError({ source: "cron:zombie-cleanup", err, context: { phase: "startup" } }).catch(() => {});
-    });
-    // Then run every 10 minutes
-    setInterval(() => {
-      // Wave1 Block B — 原本是 `.catch(() => {})`,連 log 都沒有的黑洞。改接錯誤
-      // 漏斗:失敗會被貼卡(去重後)而不是完全消失。維持 continue 語意 —— 不
-      // await、不 throw,setInterval callback 依然是 fire-and-forget。
-      cleanupZombieTasks(30).catch((err) => {
-        reportFunnelError({ source: "cron:zombie-cleanup", err }).catch(() => {});
+  // storefront-split Phase 0 — cron schedulers + their BullMQ workers. Ops
+  // role only; a STOREFRONT_MODE process schedules nothing (bootPlan.startCron).
+  if (bootPlan.startCron) {
+    // Schedule zombie task cleanup every 10 minutes (timeout: 25 min)
+    // Round 36-Fix-2: 從 5 分鐘延長到 25 分鐘，避免誤殺正在執行的任務
+    // 排程間隔從 5 分鐘改為 10 分鐘，減少不必要的 DB 查詢
+    try {
+      const { cleanupZombieTasks } = await import('../agentActivityService');
+      // Run cleanup immediately on startup
+      // Wave1 Block B: 跟 setInterval 那次接同一支漏斗,避免同一支函式兩個呼叫點
+      // 行為不一致(一個進漏斗、一個仍是黑洞)——派工單只點名 setInterval 那次,
+      // 但啟動時這次失敗一樣是「系統壞了但沒人知道」,同樣值得被看到。
+      cleanupZombieTasks(30).then(count => {
+        if (count > 0) logger.info({ count }, "[Startup] Cleaned up zombie task(s)");
+      }).catch((err) => {
+        reportFunnelError({ source: "cron:zombie-cleanup", err, context: { phase: "startup" } }).catch(() => {});
       });
-    }, 10 * 60 * 1000);
-    logger.info("[Startup] Zombie task cleanup scheduler initialized (every 10 min, timeout 30 min)");
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Failed to initialize zombie cleanup");
-    reportFunnelError({ source: "fail-open:index:zombieCleanupRegister", err, context: { phase: "startup-register" } }).catch(() => {});
-  }
+      // Then run every 10 minutes
+      setInterval(() => {
+        // Wave1 Block B — 原本是 `.catch(() => {})`,連 log 都沒有的黑洞。改接錯誤
+        // 漏斗:失敗會被貼卡(去重後)而不是完全消失。維持 continue 語意 —— 不
+        // await、不 throw,setInterval callback 依然是 fire-and-forget。
+        cleanupZombieTasks(30).catch((err) => {
+          reportFunnelError({ source: "cron:zombie-cleanup", err }).catch(() => {});
+        });
+      }, 10 * 60 * 1000);
+      logger.info("[Startup] Zombie task cleanup scheduler initialized (every 10 min, timeout 30 min)");
+    } catch (err) {
+      logger.warn({ err }, "[Startup] Failed to initialize zombie cleanup");
+      reportFunnelError({ source: "fail-open:index:zombieCleanupRegister", err, context: { phase: "startup-register" } }).catch(() => {});
+    }
 
-  // Schedule daily tour monitor at 03:00 Taiwan time (19:00 UTC)
-  try {
-    const { scheduleDailyTourMonitor } = await import('../queue');
-    await scheduleDailyTourMonitor();
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Failed to schedule daily tour monitor");
-    reportFunnelError({ source: "fail-open:index:dailyTourMonitorCronInit", err }).catch(() => {});
-  }
+    // Schedule daily tour monitor at 03:00 Taiwan time (19:00 UTC)
+    try {
+      const { scheduleDailyTourMonitor } = await import('../queue');
+      await scheduleDailyTourMonitor();
+    } catch (err) {
+      logger.warn({ err }, "[Startup] Failed to schedule daily tour monitor");
+      reportFunnelError({ source: "fail-open:index:dailyTourMonitorCronInit", err }).catch(() => {});
+    }
 
-  // v77: Schedule daily trip-reminder scan at 09:00 Taipei (01:00 UTC). Sends
-  // 30/14/7/3/1-day departure reminders; idempotent via Redis SET dedup.
-  try {
-    const { scheduleDailyTripReminders } = await import('../queue');
-    await scheduleDailyTripReminders();
-    // Also import the worker so it starts processing the queue
-    await import('../tripReminderWorker');
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Failed to schedule trip reminders");
-    reportFunnelError({ source: "fail-open:index:tripReminderCronInit", err }).catch(() => {});
-  }
+    // v77: Schedule daily trip-reminder scan at 09:00 Taipei (01:00 UTC). Sends
+    // 30/14/7/3/1-day departure reminders; idempotent via Redis SET dedup.
+    try {
+      const { scheduleDailyTripReminders } = await import('../queue');
+      await scheduleDailyTripReminders();
+      // Also import the worker so it starts processing the queue
+      await import('../tripReminderWorker');
+    } catch (err) {
+      logger.warn({ err }, "[Startup] Failed to schedule trip reminders");
+      reportFunnelError({ source: "fail-open:index:tripReminderCronInit", err }).catch(() => {});
+    }
 
-  // Round 81 Phase 3.5: Schedule weekly Self-Retrospective at Mon 01:00 UTC
-  // (Sun 18:00 PT). Reads past 7 days of agent outcomes + policies, posts
-  // a digest + policy proposals to the Inbox.
-  try {
-    const { scheduleWeeklyRetrospective } = await import('../queue');
-    await scheduleWeeklyRetrospective();
-    await import('../retrospectiveWorker');
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Failed to schedule weekly retrospective");
-    reportFunnelError({ source: "fail-open:index:weeklyRetrospectiveCronInit", err }).catch(() => {});
-  }
+    // Round 81 Phase 3.5: Schedule weekly Self-Retrospective at Mon 01:00 UTC
+    // (Sun 18:00 PT). Reads past 7 days of agent outcomes + policies, posts
+    // a digest + policy proposals to the Inbox.
+    try {
+      const { scheduleWeeklyRetrospective } = await import('../queue');
+      await scheduleWeeklyRetrospective();
+      await import('../retrospectiveWorker');
+    } catch (err) {
+      logger.warn({ err }, "[Startup] Failed to schedule weekly retrospective");
+      reportFunnelError({ source: "fail-open:index:weeklyRetrospectiveCronInit", err }).catch(() => {});
+    }
 
-  // customer-ai-sessions 批3 m3 — nightly customer-card AI summary warm-up at
-  // 02:00 UTC. Recomputes summaries for active + stale customers so opening
-  // their card is instant; lazy-on-open (DetailTabs) covers everyone else.
-  try {
-    const { scheduleDailyCustomerSummaries } = await import('../queue');
-    await scheduleDailyCustomerSummaries();
-    await import('../customerSummaryWorker');
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Failed to schedule customer summary warm-up");
-    reportFunnelError({ source: "fail-open:index:customerSummaryCronInit", err }).catch(() => {});
-  }
+    // customer-ai-sessions 批3 m3 — nightly customer-card AI summary warm-up at
+    // 02:00 UTC. Recomputes summaries for active + stale customers so opening
+    // their card is instant; lazy-on-open (DetailTabs) covers everyone else.
+    try {
+      const { scheduleDailyCustomerSummaries } = await import('../queue');
+      await scheduleDailyCustomerSummaries();
+      await import('../customerSummaryWorker');
+    } catch (err) {
+      logger.warn({ err }, "[Startup] Failed to schedule customer summary warm-up");
+      reportFunnelError({ source: "fail-open:index:customerSummaryCronInit", err }).catch(() => {});
+    }
 
-  // customer-cockpit Step 2 — boot the worker that auto-collects a brand-new
-  // customer's full Gmail history when the pipeline first creates their profile
-  // (enqueued from gmailPipeline). Pure 搬運; never emails the customer.
-  try {
-    await import('../customerBackfillWorker');
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Failed to init customer backfill worker");
-    reportFunnelError({ source: "fail-open:index:customerBackfillWorkerInit", err }).catch(() => {});
-  }
+    // customer-cockpit Step 2 — boot the worker that auto-collects a brand-new
+    // customer's full Gmail history when the pipeline first creates their profile
+    // (enqueued from gmailPipeline). Pure 搬運; never emails the customer.
+    try {
+      await import('../customerBackfillWorker');
+    } catch (err) {
+      logger.warn({ err }, "[Startup] Failed to init customer backfill worker");
+      reportFunnelError({ source: "fail-open:index:customerBackfillWorkerInit", err }).catch(() => {});
+    }
 
-  // customer-cockpit Phase3 3b — monthly draft-eval scoring at 03:00 UTC on
-  // the 1st of the month. Read-only: re-generates sample drafts via the pure
-  // runInquiryAgent, scores with independent judge LLM calls, writes
-  // eval-history.md + an agentMessages digest card. Never sends email.
-  try {
-    const { scheduleMonthlyDraftEval } = await import('../queue');
-    await scheduleMonthlyDraftEval();
-    await import('../draftEvalWorker');
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Failed to schedule monthly draft eval");
-    reportFunnelError({ source: "fail-open:index:monthlyDraftEvalCronInit", err }).catch(() => {});
-  }
+    // customer-cockpit Phase3 3b — monthly draft-eval scoring at 03:00 UTC on
+    // the 1st of the month. Read-only: re-generates sample drafts via the pure
+    // runInquiryAgent, scores with independent judge LLM calls, writes
+    // eval-history.md + an agentMessages digest card. Never sends email.
+    try {
+      const { scheduleMonthlyDraftEval } = await import('../queue');
+      await scheduleMonthlyDraftEval();
+      await import('../draftEvalWorker');
+    } catch (err) {
+      logger.warn({ err }, "[Startup] Failed to schedule monthly draft eval");
+      reportFunnelError({ source: "fail-open:index:monthlyDraftEvalCronInit", err }).catch(() => {});
+    }
 
-  // gmail-thread-filing layer 2 — nightly stale-customer follow-up scan at
-  // 05:00 UTC. Surfaces customers who went quiet after we spoke last (quote /
-  // itinerary sent, no reply) into Jeff's office inbox. Never emails them.
-  try {
-    const { scheduleDailyFollowupScan } = await import('../queue');
-    await scheduleDailyFollowupScan();
-    await import('../followupScanWorker');
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Failed to schedule followup scan");
-    reportFunnelError({ source: "fail-open:index:followupScanCronInit", err }).catch(() => {});
-  }
+    // gmail-thread-filing layer 2 — nightly stale-customer follow-up scan at
+    // 05:00 UTC. Surfaces customers who went quiet after we spoke last (quote /
+    // itinerary sent, no reply) into Jeff's office inbox. Never emails them.
+    try {
+      const { scheduleDailyFollowupScan } = await import('../queue');
+      await scheduleDailyFollowupScan();
+      await import('../followupScanWorker');
+    } catch (err) {
+      logger.warn({ err }, "[Startup] Failed to schedule followup scan");
+      reportFunnelError({ source: "fail-open:index:followupScanCronInit", err }).catch(() => {});
+    }
 
-  // customer-projects audit fix (2026-06-30) — weekly duplicate-customer-
-  // profile reconciliation scan (Sunday 08:00 UTC). customerProfiles has no
-  // DB-level unique constraint on email/phone; this is the backstop that
-  // catches a duplicate (like the Emerald Young incident) if a future insert
-  // site forgets to select-by-identity first. Posts a digest to Jeff's office
-  // inbox, never auto-merges.
-  try {
-    const { scheduleWeeklyDuplicateProfileScan } = await import('../queue');
-    await scheduleWeeklyDuplicateProfileScan();
-    await import('../duplicateProfileScanWorker');
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Failed to schedule duplicate-profile scan");
-    reportFunnelError({ source: "fail-open:index:duplicateProfileScanCronInit", err }).catch(() => {});
-  }
+    // customer-projects audit fix (2026-06-30) — weekly duplicate-customer-
+    // profile reconciliation scan (Sunday 08:00 UTC). customerProfiles has no
+    // DB-level unique constraint on email/phone; this is the backstop that
+    // catches a duplicate (like the Emerald Young incident) if a future insert
+    // site forgets to select-by-identity first. Posts a digest to Jeff's office
+    // inbox, never auto-merges.
+    try {
+      const { scheduleWeeklyDuplicateProfileScan } = await import('../queue');
+      await scheduleWeeklyDuplicateProfileScan();
+      await import('../duplicateProfileScanWorker');
+    } catch (err) {
+      logger.warn({ err }, "[Startup] Failed to schedule duplicate-profile scan");
+      reportFunnelError({ source: "fail-open:index:duplicateProfileScanCronInit", err }).catch(() => {});
+    }
 
-  // customer-cockpit Phase6 D1(2026-07-03)— weekly correctness audit at
-  // Monday 12:00 UTC (Sunday evening America/Los_Angeles). Recomputes the
-  // deterministic actions/delivered fields from gatherCustomerFacts for every
-  // active, non-test customer and diffs against the cached aiSummary; posts
-  // ONE digest to Jeff's office inbox only if a MATERIAL difference is found.
-  // Zero LLM calls, read-only against customer data, never emails anyone.
-  try {
-    const { scheduleWeeklyCorrectnessAudit } = await import('../queue');
-    await scheduleWeeklyCorrectnessAudit();
-    await import('../weeklyCorrectnessAuditWorker');
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Failed to schedule weekly correctness audit");
-    reportFunnelError({ source: "fail-open:index:weeklyCorrectnessAuditCronInit", err }).catch(() => {});
-  }
+    // customer-cockpit Phase6 D1(2026-07-03)— weekly correctness audit at
+    // Monday 12:00 UTC (Sunday evening America/Los_Angeles). Recomputes the
+    // deterministic actions/delivered fields from gatherCustomerFacts for every
+    // active, non-test customer and diffs against the cached aiSummary; posts
+    // ONE digest to Jeff's office inbox only if a MATERIAL difference is found.
+    // Zero LLM calls, read-only against customer data, never emails anyone.
+    try {
+      const { scheduleWeeklyCorrectnessAudit } = await import('../queue');
+      await scheduleWeeklyCorrectnessAudit();
+      await import('../weeklyCorrectnessAuditWorker');
+    } catch (err) {
+      logger.warn({ err }, "[Startup] Failed to schedule weekly correctness audit");
+      reportFunnelError({ source: "fail-open:index:weeklyCorrectnessAuditCronInit", err }).catch(() => {});
+    }
 
-  // customer-cockpit Phase6 D2(2026-07-03)— weekly 0909 canary(表單版)at
-  // Monday 13:00 UTC (1h after D1, same off-peak window). Submits a REAL HTTP
-  // POST to this server's own public /api/trpc/inquiries.create using the
-  // 0909 test identity, then 60s later verifies via DB read that the
-  // interaction landed, the owner's own email got zero new profiles, and
-  // lastInboundAt advanced. All pass → log only; any fail → ONE high-priority
-  // agentMessages card. Zero LLM calls, zero email-send paths — the only
-  // "write" is the canary's own synthetic form submission (0909 test account,
-  // already excluded from audit samples) plus the failure card.
-  try {
-    const { scheduleWeeklyCanary } = await import('../queue');
-    await scheduleWeeklyCanary();
-    await import('../weeklyCanaryWorker');
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Failed to schedule weekly canary");
-    reportFunnelError({ source: "fail-open:index:weeklyCanaryCronInit", err }).catch(() => {});
-  }
+    // customer-cockpit Phase6 D2(2026-07-03)— weekly 0909 canary(表單版)at
+    // Monday 13:00 UTC (1h after D1, same off-peak window). Submits a REAL HTTP
+    // POST to this server's own public /api/trpc/inquiries.create using the
+    // 0909 test identity, then 60s later verifies via DB read that the
+    // interaction landed, the owner's own email got zero new profiles, and
+    // lastInboundAt advanced. All pass → log only; any fail → ONE high-priority
+    // agentMessages card. Zero LLM calls, zero email-send paths — the only
+    // "write" is the canary's own synthetic form submission (0909 test account,
+    // already excluded from audit samples) plus the failure card.
+    try {
+      const { scheduleWeeklyCanary } = await import('../queue');
+      await scheduleWeeklyCanary();
+      await import('../weeklyCanaryWorker');
+    } catch (err) {
+      logger.warn({ err }, "[Startup] Failed to schedule weekly canary");
+      reportFunnelError({ source: "fail-open:index:weeklyCanaryCronInit", err }).catch(() => {});
+    }
 
-  // customer-cockpit Phase5 學習閉環(2026-07-03)— nightly backlog scan at
-  // 04:00 UTC. Catches any completed/cancelled order whose fire-and-forget
-  // distillation hook (adminCustomerOrders.ts) missed. Read/insert only on
-  // caseLearnings; never touches customer-visible data, never emails.
-  try {
-    const { scheduleNightlyCaseLearningBacklog } = await import('../queue');
-    await scheduleNightlyCaseLearningBacklog();
-    await import('../caseLearningWorker');
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Failed to schedule case-learning backlog scan");
-    reportFunnelError({ source: "fail-open:index:caseLearningBacklogCronInit", err }).catch(() => {});
-  }
+    // customer-cockpit Phase5 學習閉環(2026-07-03)— nightly backlog scan at
+    // 04:00 UTC. Catches any completed/cancelled order whose fire-and-forget
+    // distillation hook (adminCustomerOrders.ts) missed. Read/insert only on
+    // caseLearnings; never touches customer-visible data, never emails.
+    try {
+      const { scheduleNightlyCaseLearningBacklog } = await import('../queue');
+      await scheduleNightlyCaseLearningBacklog();
+      await import('../caseLearningWorker');
+    } catch (err) {
+      logger.warn({ err }, "[Startup] Failed to schedule case-learning backlog scan");
+      reportFunnelError({ source: "fail-open:index:caseLearningBacklogCronInit", err }).catch(() => {});
+    }
 
-  // QA audit 2026-05-11 Phase 9 P0: Gmail poll cron. Closes the
-  // "customer asks at 10am, Jeff sees at 2pm" gap by polling every 10
-  // minutes and running InquiryAgent pipeline on new threads. autoSend
-  // gate inside the pipeline still respects per-policy autoSendEnabled.
-  try {
-    const { scheduleGmailPoll } = await import('../queue');
-    await scheduleGmailPoll();
-    await import('../gmailPollWorker');
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Failed to schedule Gmail poll");
-    reportFunnelError({ source: "fail-open:index:gmailPollCronInit", err }).catch(() => {});
-  }
+    // QA audit 2026-05-11 Phase 9 P0: Gmail poll cron. Closes the
+    // "customer asks at 10am, Jeff sees at 2pm" gap by polling every 10
+    // minutes and running InquiryAgent pipeline on new threads. autoSend
+    // gate inside the pipeline still respects per-policy autoSendEnabled.
+    try {
+      const { scheduleGmailPoll } = await import('../queue');
+      await scheduleGmailPoll();
+      await import('../gmailPollWorker');
+    } catch (err) {
+      logger.warn({ err }, "[Startup] Failed to schedule Gmail poll");
+      reportFunnelError({ source: "fail-open:index:gmailPollCronInit", err }).catch(() => {});
+    }
 
-  // gmail-push (2026-06-29) — Gmail push (Pub/Sub) workers + daily watch-renew
-  // cron. Sits ALONGSIDE the 3-min poll above (fallback). The push webhook
-  // enqueues; gmailPushWorker drains the ingest; gmailWatchRenewWorker re-arms
-  // each watch daily (watch expires ~7 days). No-ops gracefully when
-  // GMAIL_PUBSUB_TOPIC is unset (push not configured yet).
-  try {
-    const { scheduleGmailWatchRenew } = await import('../queue');
-    await scheduleGmailWatchRenew();
-    await import('../gmailPushWorker');
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Failed to init Gmail push workers");
-    reportFunnelError({ source: "fail-open:index:gmailPushWorkersInit", err }).catch(() => {});
-  }
+    // gmail-push (2026-06-29) — Gmail push (Pub/Sub) workers + daily watch-renew
+    // cron. Sits ALONGSIDE the 3-min poll above (fallback). The push webhook
+    // enqueues; gmailPushWorker drains the ingest; gmailWatchRenewWorker re-arms
+    // each watch daily (watch expires ~7 days). No-ops gracefully when
+    // GMAIL_PUBSUB_TOPIC is unset (push not configured yet).
+    try {
+      const { scheduleGmailWatchRenew } = await import('../queue');
+      await scheduleGmailWatchRenew();
+      await import('../gmailPushWorker');
+    } catch (err) {
+      logger.warn({ err }, "[Startup] Failed to init Gmail push workers");
+      reportFunnelError({ source: "fail-open:index:gmailPushWorkersInit", err }).catch(() => {});
+    }
 
-  // Booking followup worker — drains the queue that bookings.create
-  // enqueues into. Generates deposit PDF + sends confirmation email
-  // off the HTTP critical path.
-  try {
-    await import('../bookingFollowupWorker');
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Failed to init booking followup worker");
-    reportFunnelError({ source: "fail-open:index:bookingFollowupWorkerInit", err }).catch(() => {});
-  }
+    // Booking followup worker — drains the queue that bookings.create
+    // enqueues into. Generates deposit PDF + sends confirmation email
+    // off the HTTP critical path.
+    try {
+      await import('../bookingFollowupWorker');
+    } catch (err) {
+      logger.warn({ err }, "[Startup] Failed to init booking followup worker");
+      reportFunnelError({ source: "fail-open:index:bookingFollowupWorkerInit", err }).catch(() => {});
+    }
 
-  // Phase 1.5: Plaid daily sync — catch-up cron at 05:00 UTC. Webhooks
-  // give sub-minute latency during normal ops, but Plaid recommends a
-  // daily safety-net /transactions/sync against every item in case any
-  // webhook was missed. The worker is registered even if PLAID_CLIENT_ID
-  // is unset — it no-ops at runtime so dev doesn't choke on missing keys.
-  try {
-    const { schedulePlaidDailySync } = await import('../queue');
-    await schedulePlaidDailySync();
-    await import('../plaidSyncWorker');
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Failed to schedule Plaid daily sync");
-    reportFunnelError({ source: "fail-open:index:plaidDailySyncCronInit", err }).catch(() => {});
-  }
+    // Phase 1.5: Plaid daily sync — catch-up cron at 05:00 UTC. Webhooks
+    // give sub-minute latency during normal ops, but Plaid recommends a
+    // daily safety-net /transactions/sync against every item in case any
+    // webhook was missed. The worker is registered even if PLAID_CLIENT_ID
+    // is unset — it no-ops at runtime so dev doesn't choke on missing keys.
+    try {
+      const { schedulePlaidDailySync } = await import('../queue');
+      await schedulePlaidDailySync();
+      await import('../plaidSyncWorker');
+    } catch (err) {
+      logger.warn({ err }, "[Startup] Failed to schedule Plaid daily sync");
+      reportFunnelError({ source: "fail-open:index:plaidDailySyncCronInit", err }).catch(() => {});
+    }
 
-  // Phase 4: Trust account recognition cron at 06:00 UTC (1 hr after Plaid
-  // sync so today's deposits are in the DB before we scan for ready-to-
-  // recognize rows). Feature-flagged via PLAID_TRUST_DEFERRAL_ENABLED in
-  // the service layer — worker fires but no-ops when off.
-  try {
-    const { scheduleDailyTrustRecognition } = await import('../queue');
-    await scheduleDailyTrustRecognition();
-    await import('../trustRecognitionWorker');
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Failed to schedule trust recognition cron");
-    reportFunnelError({ source: "fail-open:index:trustRecognitionCronInit", err }).catch(() => {});
-  }
+    // Phase 4: Trust account recognition cron at 06:00 UTC (1 hr after Plaid
+    // sync so today's deposits are in the DB before we scan for ready-to-
+    // recognize rows). Feature-flagged via PLAID_TRUST_DEFERRAL_ENABLED in
+    // the service layer — worker fires but no-ops when off.
+    try {
+      const { scheduleDailyTrustRecognition } = await import('../queue');
+      await scheduleDailyTrustRecognition();
+      await import('../trustRecognitionWorker');
+    } catch (err) {
+      logger.warn({ err }, "[Startup] Failed to schedule trust recognition cron");
+      reportFunnelError({ source: "fail-open:index:trustRecognitionCronInit", err }).catch(() => {});
+    }
 
-  // Scaling guardrails (2026-05-23) — daily archive + LLM budget check at
-  // 07:00 UTC. Worker just calls the service functions; failures retry.
-  try {
-    const { scheduleDailyScalingGuardrails } = await import('../queue');
-    await scheduleDailyScalingGuardrails();
-    await import('../scalingGuardrailWorker');
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Failed to schedule scaling guardrails cron");
-    reportFunnelError({ source: "fail-open:index:scalingGuardrailsCronInit", err }).catch(() => {});
-  }
+    // Scaling guardrails (2026-05-23) — daily archive + LLM budget check at
+    // 07:00 UTC. Worker just calls the service functions; failures retry.
+    try {
+      const { scheduleDailyScalingGuardrails } = await import('../queue');
+      await scheduleDailyScalingGuardrails();
+      await import('../scalingGuardrailWorker');
+    } catch (err) {
+      logger.warn({ err }, "[Startup] Failed to schedule scaling guardrails cron");
+      reportFunnelError({ source: "fail-open:index:scalingGuardrailsCronInit", err }).catch(() => {});
+    }
 
-  // Supplier detail enrichment (2026-05-24) — Stage 1 of supplier deep
-  // sync. Daily cron at 03:00 UTC discovers products needing enrichment
-  // (new / changed / 30day-stale) and enqueues per-product jobs.
-  // Worker concurrency 5, rate-limit 1.5-2.5 sec/call.
-  try {
-    const { scheduleDailySupplierDetailEnrichment } = await import('../queue');
-    await scheduleDailySupplierDetailEnrichment();
-    await import('../supplierDetailEnrichmentWorker');
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Failed to schedule supplier detail enrichment cron");
-    reportFunnelError({ source: "fail-open:index:supplierDetailEnrichmentCronInit", err }).catch(() => {});
-  }
+    // Supplier detail enrichment (2026-05-24) — Stage 1 of supplier deep
+    // sync. Daily cron at 03:00 UTC discovers products needing enrichment
+    // (new / changed / 30day-stale) and enqueues per-product jobs.
+    // Worker concurrency 5, rate-limit 1.5-2.5 sec/call.
+    try {
+      const { scheduleDailySupplierDetailEnrichment } = await import('../queue');
+      await scheduleDailySupplierDetailEnrichment();
+      await import('../supplierDetailEnrichmentWorker');
+    } catch (err) {
+      logger.warn({ err }, "[Startup] Failed to schedule supplier detail enrichment cron");
+      reportFunnelError({ source: "fail-open:index:supplierDetailEnrichmentCronInit", err }).catch(() => {});
+    }
 
-  // Monthly priority rewrite (2026-05-25) — fires 1st of month 09:00 UTC.
-  // Picks top ~225 shallow tours by destination score, pushes to
-  // tour-generation queue for full LLM/imagegen rewrite. Budget-gated at
-  // $45/run (under Jeff's $50/mo top-up). With 4057 shallow tours, this
-  // covers everything in ~18 months automated.
-  try {
-    const {
-      setupMonthlyPriorityRewriteCron,
-      startPriorityRewriteCronWorker,
-    } = await import('../queues/priorityRewriteCron');
-    await setupMonthlyPriorityRewriteCron();
-    startPriorityRewriteCronWorker();
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Failed to schedule monthly priority rewrite cron");
-    reportFunnelError({ source: "fail-open:index:monthlyPriorityRewriteCronInit", err }).catch(() => {});
-  }
+    // Monthly priority rewrite (2026-05-25) — fires 1st of month 09:00 UTC.
+    // Picks top ~225 shallow tours by destination score, pushes to
+    // tour-generation queue for full LLM/imagegen rewrite. Budget-gated at
+    // $45/run (under Jeff's $50/mo top-up). With 4057 shallow tours, this
+    // covers everything in ~18 months automated.
+    try {
+      const {
+        setupMonthlyPriorityRewriteCron,
+        startPriorityRewriteCronWorker,
+      } = await import('../queues/priorityRewriteCron');
+      await setupMonthlyPriorityRewriteCron();
+      startPriorityRewriteCronWorker();
+    } catch (err) {
+      logger.warn({ err }, "[Startup] Failed to schedule monthly priority rewrite cron");
+      reportFunnelError({ source: "fail-open:index:monthlyPriorityRewriteCronInit", err }).catch(() => {});
+    }
 
-  // Round 80.22 Phase C: Packpoint daily maintenance — auto-upgrade tier,
-  // 18-month inactivity expiry, birthday bonus. Runs at 02:00 UTC (10:00
-  // Taipei). Idempotent on each user-level mutation.
-  try {
-    const {
-      scheduleDailyPackpointMaintenance,
-      initPackpointMaintenanceWorker,
-    } = await import('../queues/packpointMaintenanceQueue');
-    await scheduleDailyPackpointMaintenance();
-    initPackpointMaintenanceWorker();
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Failed to schedule Packpoint maintenance");
-    reportFunnelError({ source: "fail-open:index:packpointMaintenanceCronInit", err }).catch(() => {});
-  }
+    // Round 80.22 Phase C: Packpoint daily maintenance — auto-upgrade tier,
+    // 18-month inactivity expiry, birthday bonus. Runs at 02:00 UTC (10:00
+    // Taipei). Idempotent on each user-level mutation.
+    try {
+      const {
+        scheduleDailyPackpointMaintenance,
+        initPackpointMaintenanceWorker,
+      } = await import('../queues/packpointMaintenanceQueue');
+      await scheduleDailyPackpointMaintenance();
+      initPackpointMaintenanceWorker();
+    } catch (err) {
+      logger.warn({ err }, "[Startup] Failed to schedule Packpoint maintenance");
+      reportFunnelError({ source: "fail-open:index:packpointMaintenanceCronInit", err }).catch(() => {});
+    }
 
-  // Round 80.22 Phase H2: Supplier poster processing worker — async
-  // pipeline (AI Vision → gpt-image-2 → 7 platform copies). Triggered
-  // by admin uploads via posters.create tRPC mutation.
-  try {
-    const { initPosterProcessingWorker } = await import(
-      '../queues/posterProcessingQueue'
-    );
-    initPosterProcessingWorker();
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Failed to init poster processing worker");
-    reportFunnelError({ source: "fail-open:index:posterProcessingWorkerInit", err }).catch(() => {});
-  }
+    // Round 80.22 Phase H2: Supplier poster processing worker — async
+    // pipeline (AI Vision → gpt-image-2 → 7 platform copies). Triggered
+    // by admin uploads via posters.create tRPC mutation.
+    try {
+      const { initPosterProcessingWorker } = await import(
+        '../queues/posterProcessingQueue'
+      );
+      initPosterProcessingWorker();
+    } catch (err) {
+      logger.warn({ err }, "[Startup] Failed to init poster processing worker");
+      reportFunnelError({ source: "fail-open:index:posterProcessingWorkerInit", err }).catch(() => {});
+    }
 
-  // Phase 1D supplier-sync — daily catalog mirror for Lion + UV at
-  // 03:00 UTC. See server/services/supplierSyncService.ts for the
-  // orchestrator and server/queues/supplierSyncQueue.ts for the
-  // BullMQ worker.
-  try {
-    const {
-      initSupplierSyncWorker,
-      ensureDailySupplierSyncScheduled,
-    } = await import('../queues/supplierSyncQueue');
-    initSupplierSyncWorker();
-    await ensureDailySupplierSyncScheduled();
-  } catch (err) {
-    logger.warn({ err }, "[Startup] Failed to init supplier sync worker");
-    reportFunnelError({ source: "fail-open:index:supplierSyncWorkerInit", err }).catch(() => {});
+    // Phase 1D supplier-sync — daily catalog mirror for Lion + UV at
+    // 03:00 UTC. See server/services/supplierSyncService.ts for the
+    // orchestrator and server/queues/supplierSyncQueue.ts for the
+    // BullMQ worker.
+    try {
+      const {
+        initSupplierSyncWorker,
+        ensureDailySupplierSyncScheduled,
+      } = await import('../queues/supplierSyncQueue');
+      initSupplierSyncWorker();
+      await ensureDailySupplierSyncScheduled();
+    } catch (err) {
+      logger.warn({ err }, "[Startup] Failed to init supplier sync worker");
+      reportFunnelError({ source: "fail-open:index:supplierSyncWorkerInit", err }).catch(() => {});
+    }
   }
 
   // 2026-05-22 — SIGTERM graceful shutdown.

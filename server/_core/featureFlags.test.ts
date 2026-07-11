@@ -10,6 +10,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import {
   stripeTrustDeferralEnabled,
+  storefrontMode,
   trustAutomatchAmountWindowUsd,
   trustAutomatchDateWindowDays,
   trustEarlyRecognitionWindowDays,
@@ -102,5 +103,35 @@ describe("trustEarlyRecognitionWindowDays — 收口自 trustDeferralService.ts 
   it("非數字字串 → 退回預設(2026-07-08 對抗審查 P2 補齊,原本只測負值)", () => {
     process.env.PLAID_TRUST_EARLY_RECOGNITION_WINDOW_DAYS = "nope";
     expect(trustEarlyRecognitionWindowDays()).toBe(30);
+  });
+});
+
+describe("storefrontMode — storefront-split Phase 0 role flag", () => {
+  const orig = process.env.STOREFRONT_MODE;
+  afterEach(() => {
+    if (orig === undefined) delete process.env.STOREFRONT_MODE;
+    else process.env.STOREFRONT_MODE = orig;
+  });
+
+  it("未設定 → false(預設 = ops 角色,行為 byte-identical)", () => {
+    delete process.env.STOREFRONT_MODE;
+    expect(storefrontMode()).toBe(false);
+  });
+
+  it("設 '1'(藍圖 fly secrets 的值)→ true", () => {
+    process.env.STOREFRONT_MODE = "1";
+    expect(storefrontMode()).toBe(true);
+  });
+
+  it("設 'true'(與本檔其他 flag 慣例一致)→ true", () => {
+    process.env.STOREFRONT_MODE = "true";
+    expect(storefrontMode()).toBe(true);
+  });
+
+  it("其他值(''/'0'/'yes'/'TRUE')→ false(嚴格 opt-in,只認 '1' 或 'true')", () => {
+    for (const v of ["", "0", "yes", "TRUE", "on", "false"]) {
+      process.env.STOREFRONT_MODE = v;
+      expect(storefrontMode()).toBe(false);
+    }
   });
 });

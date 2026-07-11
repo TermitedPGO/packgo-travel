@@ -129,3 +129,29 @@ export const trustEarlyRecognitionWindowDays = (): number => {
  */
 export const stripeTrustDeferralEnabled = (): boolean =>
   isTrue(process.env.STRIPE_TRUST_DEFERRAL_ENABLED);
+
+/**
+ * STOREFRONT_MODE — same-image split-role flag (feature: storefront-split,
+ * Phase 0). When SET, this process runs as the customer-facing storefront:
+ * it serves the SPA + bot-prerender + the public tRPC surface, but starts
+ * NO BullMQ workers, NO cron schedulers, and does NOT mount backend-only
+ * Express endpoints (Stripe/Plaid/Gmail-push webhooks, /api/internal/*,
+ * /api/admin/*, the OpsAgent SSE, and the Gmail-pipeline OAuth routes).
+ *
+ * When UNSET (default = ops/backend role), behavior is byte-identical to
+ * before this flag existed — every worker/cron starts and every endpoint
+ * mounts. Phase 0 only adds this gate; it does not deploy anything.
+ *
+ * Convention note: the other flags in this module use the strict `=== "true"`
+ * form (see `isTrue`). This flag intentionally also accepts `"1"` because the
+ * split blueprint provisions it in fly secrets as `STOREFRONT_MODE=1`
+ * (docs/features/storefront-split/plan.md §Phase 1). Accepting both keeps the
+ * flag robust to whichever literal is set while staying opt-in (any other
+ * value, including unset, → false → ops role).
+ *
+ * Env: `STOREFRONT_MODE=1`
+ */
+export const storefrontMode = (): boolean => {
+  const v = process.env.STOREFRONT_MODE;
+  return v === "1" || v === "true";
+};
