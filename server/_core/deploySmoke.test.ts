@@ -49,6 +49,17 @@ vi.mock("./escalationBox", () => ({
   listEscalations: vi.fn(async () => [{ id: 1 }]),
 }));
 
+// schemaContract: 第九臂呼叫 assertSchemaContract(db)。mock 成預設「全表都在」,
+// 個別 case 再覆寫成缺表 / 拋錯。
+vi.mock("./schemaContract", () => ({
+  assertSchemaContract: vi.fn(async () => ({
+    ok: true,
+    missing: [] as string[],
+    presentCount: 16,
+    checkedCount: 16,
+  })),
+}));
+
 import { runDeploySmoke } from "./deploySmoke";
 import * as db from "../db";
 import {
@@ -60,6 +71,7 @@ import {
 import { loadTodayListItems } from "../routers/adminCustomerOrders";
 import { listApprovalTasks } from "./approvalTasks";
 import { listEscalations } from "./escalationBox";
+import { assertSchemaContract } from "./schemaContract";
 
 const ARM_NAMES = [
   "customerList",
@@ -70,6 +82,7 @@ const ARM_NAMES = [
   "commandCenter.approvalTasks",
   "commandCenter.escalations",
   "activeToursCount",
+  "schemaContract",
 ];
 
 beforeEach(() => {
@@ -93,13 +106,20 @@ beforeEach(() => {
   vi.mocked(listEscalations).mockResolvedValue([{ id: 1 }] as any);
   // storefront healthy by default: 5 active tours (arm goes green)
   vi.mocked(db.searchTours).mockResolvedValue({ tours: [{ id: 1 }], total: 5 } as any);
+  // schema healthy by default: all 16 required tables present (arm goes green)
+  vi.mocked(assertSchemaContract).mockResolvedValue({
+    ok: true,
+    missing: [],
+    presentCount: 16,
+    checkedCount: 16,
+  } as any);
 });
 
-describe("runDeploySmoke — happy path (all seven arms succeed)", () => {
-  it("returns ok:true with all eight arms ok, correct rowCounts, ms timing present", async () => {
+describe("runDeploySmoke — happy path (all nine arms succeed)", () => {
+  it("returns ok:true with all nine arms ok, correct rowCounts, ms timing present", async () => {
     const result = await runDeploySmoke();
     expect(result.ok).toBe(true);
-    expect(result.arms).toHaveLength(8);
+    expect(result.arms).toHaveLength(9);
     expect(result.arms.map((a) => a.name)).toEqual(ARM_NAMES);
     for (const arm of result.arms) {
       expect(arm.ok).toBe(true);
@@ -118,6 +138,8 @@ describe("runDeploySmoke — happy path (all seven arms succeed)", () => {
     expect(byName["commandCenter.escalations"].rowCount).toBe(1);
     // activeToursCount reports the storefront's active-tour total (5 by default)
     expect(byName.activeToursCount.rowCount).toBe(5);
+    // schemaContract reports how many required tables were found (16 by default)
+    expect(byName.schemaContract.rowCount).toBe(16);
   });
 
   it("calls runCustomerListQuery / runGuestListQuery with the admin-UI default input ({})", async () => {
@@ -138,7 +160,7 @@ describe("runDeploySmoke — never-throw-whole-suite: one arm fails, others unaf
     vi.mocked(runCustomerListQuery).mockRejectedValue(new TypeError("boom"));
     const result = await runDeploySmoke();
     expect(result.ok).toBe(false);
-    expect(result.arms).toHaveLength(8);
+    expect(result.arms).toHaveLength(9);
     const byName = Object.fromEntries(result.arms.map((a) => [a.name, a]));
     expect(byName.customerList.ok).toBe(false);
     expect(byName.customerList.error).toBe("TypeError: boom");
@@ -225,16 +247,16 @@ describe("runDeploySmoke — watchdogForCustomer profileId resolution", () => {
 });
 
 describe("runDeploySmoke — simulateFail injection", () => {
-  it("opts.simulateFail:true appends a 'simulated' failed arm; real eight still run + succeed", async () => {
+  it("opts.simulateFail:true appends a 'simulated' failed arm; real nine still run + succeed", async () => {
     const result = await runDeploySmoke({ simulateFail: true });
     expect(result.ok).toBe(false);
-    expect(result.arms).toHaveLength(9);
+    expect(result.arms).toHaveLength(10);
     expect(result.arms.map((a) => a.name)).toEqual([...ARM_NAMES, "simulated"]);
     const simulated = result.arms.find((a) => a.name === "simulated")!;
     expect(simulated.ok).toBe(false);
     expect(simulated.ms).toBe(0);
     expect(simulated.error).toBeDefined();
-    // the real eight arms are untouched by the simulated injection
+    // the real nine arms are untouched by the simulated injection
     for (const name of ARM_NAMES) {
       const arm = result.arms.find((a) => a.name === name)!;
       expect(arm.ok).toBe(true);
@@ -243,7 +265,7 @@ describe("runDeploySmoke — simulateFail injection", () => {
 
   it("opts.simulateFail:false (default) never appends the simulated arm", async () => {
     const result = await runDeploySmoke({ simulateFail: false });
-    expect(result.arms).toHaveLength(8);
+    expect(result.arms).toHaveLength(9);
     expect(result.arms.some((a) => a.name === "simulated")).toBe(false);
   });
 });
@@ -278,7 +300,7 @@ describe("runDeploySmoke — activeToursCount (storefront zero alarm)", () => {
     vi.mocked(db.searchTours).mockRejectedValue(new Error("TiDB 500 on tours count"));
     const result = await runDeploySmoke();
     expect(result.ok).toBe(false);
-    expect(result.arms).toHaveLength(8);
+    expect(result.arms).toHaveLength(9);
     const byName = Object.fromEntries(result.arms.map((a) => [a.name, a]));
     expect(byName.activeToursCount.ok).toBe(false);
     expect(byName.activeToursCount.error).toBe("Error: TiDB 500 on tours count");
@@ -307,7 +329,7 @@ describe("runDeploySmoke — DB unavailable (getDb() → null)", () => {
     vi.mocked(db.getDb).mockResolvedValue(null as any);
     const result = await runDeploySmoke();
     expect(result.ok).toBe(false);
-    expect(result.arms).toHaveLength(8);
+    expect(result.arms).toHaveLength(9);
     const byName = Object.fromEntries(result.arms.map((a) => [a.name, a]));
     expect(byName.customerList.ok).toBe(false);
     expect(byName.guestList.ok).toBe(false);
@@ -318,5 +340,55 @@ describe("runDeploySmoke — DB unavailable (getDb() → null)", () => {
     // here to always succeed, so they stay ok.
     expect(byName.todayList.ok).toBe(true);
     expect(byName.activeToursCount.ok).toBe(true);
+    // schemaContract calls THIS module's getDb() → null → fails independently
+    expect(byName.schemaContract.ok).toBe(false);
+  });
+});
+
+describe("runDeploySmoke — schemaContract arm (DB 硬化批第九臂)", () => {
+  it("all required tables present → arm green, rowCount = presentCount", async () => {
+    vi.mocked(assertSchemaContract).mockResolvedValue({
+      ok: true,
+      missing: [],
+      presentCount: 16,
+      checkedCount: 16,
+    } as any);
+    const result = await runDeploySmoke();
+    const arm = result.arms.find((a) => a.name === "schemaContract")!;
+    expect(arm.ok).toBe(true);
+    expect(arm.rowCount).toBe(16);
+    expect(arm.error).toBeUndefined();
+  });
+
+  it("required table missing → arm red, error names the missing table(s) + incident report", async () => {
+    vi.mocked(assertSchemaContract).mockResolvedValue({
+      ok: false,
+      missing: ["tours", "bookings"],
+      presentCount: 14,
+      checkedCount: 16,
+    } as any);
+    const result = await runDeploySmoke();
+    expect(result.ok).toBe(false);
+    const arm = result.arms.find((a) => a.name === "schemaContract")!;
+    expect(arm.ok).toBe(false);
+    expect(arm.rowCount).toBeUndefined();
+    expect(arm.error).toContain("tours");
+    expect(arm.error).toContain("bookings");
+    expect(arm.error).toContain(
+      "docs/features/public-site/incident-20260617-tours-wipe.md",
+    );
+  });
+
+  it("assertSchemaContract throws → fail-open: arm red, other eight unaffected", async () => {
+    vi.mocked(assertSchemaContract).mockRejectedValue(new Error("TiDB 500 on information_schema"));
+    const result = await runDeploySmoke();
+    expect(result.ok).toBe(false);
+    expect(result.arms).toHaveLength(9);
+    const byName = Object.fromEntries(result.arms.map((a) => [a.name, a]));
+    expect(byName.schemaContract.ok).toBe(false);
+    expect(byName.schemaContract.error).toBe("Error: TiDB 500 on information_schema");
+    for (const name of ARM_NAMES.filter((n) => n !== "schemaContract")) {
+      expect(byName[name].ok).toBe(true);
+    }
   });
 });

@@ -64,6 +64,10 @@ export interface HealthCheckPayload {
     redis: SubCheckResult;
     stripe: SubCheckResult;
     llm: SubCheckResult;
+    // schema 契約:REQUIRED_TABLES 全在才 ok。表被 DROP / 清空-未重建 / rename 掉,
+    // 這條會 fail → /health 降級 503,UptimeRobot 告警。防 2026-06-17 tours 清空
+    // 那類「表沒了但沒人知道」再度無聲。見 ./schemaContract.ts。
+    schema: SubCheckResult;
   };
 }
 
@@ -75,6 +79,7 @@ const TIMEOUT_DB_MS = 2_000;
 const TIMEOUT_REDIS_MS = 1_000;
 const TIMEOUT_STRIPE_MS = 5_000;
 const TIMEOUT_LLM_MS = 5_000;
+const TIMEOUT_SCHEMA_MS = 3_000;
 
 // ────────────────────────────────────────────────────────────────────────────
 // In-process micro-caches (Stripe 5min, LLM 1h)
@@ -141,16 +146,25 @@ function errMsg(e: unknown): string {
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Minimal DB handle shape both checkDb and checkSchema need: something with an
+ * `execute()`. The real drizzle instance satisfies this structurally. `getDb()`
+ * is resolved ONCE in the orchestrator and the handle passed in — a single
+ * source of truth avoids two separate dynamic `import("../db")` calls racing
+ * (and, under Vitest, one resolving to the mock and the other to the real
+ * module — a genuine gotcha we hit while wiring the schema sub-check).
+ */
+interface DbHandle {
+  execute(query: unknown): Promise<unknown>;
+}
+
+/**
  * DB sub-check — runs `SELECT 1` via Drizzle's execute surface. Times out
- * at 2s. If `getDb()` returns null (DATABASE_URL unset in dev), reports a
+ * at 2s. If the resolved handle is null (DATABASE_URL unset in dev), reports a
  * clear "db not configured" failure rather than crashing.
  */
-async function checkDb(): Promise<SubCheckResult> {
+async function checkDb(db: DbHandle | null): Promise<SubCheckResult> {
   const t0 = Date.now();
   try {
-    const { getDb } = await import("../db");
-    const { sql } = await import("drizzle-orm");
-    const db = await getDb();
     if (!db) {
       return {
         status: "fail",
@@ -158,6 +172,7 @@ async function checkDb(): Promise<SubCheckResult> {
         error: "db not configured (DATABASE_URL missing)",
       };
     }
+    const { sql } = await import("drizzle-orm");
     await withTimeout(db.execute(sql`SELECT 1`), TIMEOUT_DB_MS, "db");
     return { status: "ok", latencyMs: Date.now() - t0 };
   } catch (err) {
@@ -301,6 +316,50 @@ async function checkLlm(): Promise<SubCheckResult> {
   }
 }
 
+/**
+ * Schema-contract sub-check — asserts every table in REQUIRED_TABLES exists in
+ * the app schema (information_schema read; no writes). A missing required table
+ * (DROP / TRUNCATE-then-never-written / rename) degrades the overall verdict so
+ * UptimeRobot alerts instead of the storefront silently going to zero for weeks
+ * (2026-06-17 tours-wipe pattern). Times out at 3s.
+ *
+ * If getDb() returns null (DATABASE_URL unset in dev) reports a clear "db not
+ * configured" fail rather than crashing — same shape as checkDb.
+ */
+async function checkSchema(db: DbHandle | null): Promise<SubCheckResult> {
+  const t0 = Date.now();
+  try {
+    if (!db) {
+      return {
+        status: "fail",
+        latencyMs: Date.now() - t0,
+        error: "db not configured (DATABASE_URL missing)",
+      };
+    }
+    const { assertSchemaContract } = await import("./schemaContract");
+    const res = await withTimeout(assertSchemaContract(db), TIMEOUT_SCHEMA_MS, "schema");
+    if (!res.ok) {
+      log.error(
+        { event: "healthcheck.schema_contract_breach", missing: res.missing },
+        "schema contract breach — required table(s) missing",
+      );
+      return {
+        status: "fail",
+        latencyMs: Date.now() - t0,
+        error: `missing required table(s): ${res.missing.join(", ")}`,
+      };
+    }
+    return { status: "ok", latencyMs: Date.now() - t0 };
+  } catch (err) {
+    const message = errMsg(err);
+    log.warn(
+      { event: "healthcheck.dependency_failed", dep: "schema", err: message },
+      "health check sub-fail",
+    );
+    return { status: "fail", latencyMs: Date.now() - t0, error: message };
+  }
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Orchestrator
 // ────────────────────────────────────────────────────────────────────────────
@@ -319,13 +378,28 @@ async function checkLlm(): Promise<SubCheckResult> {
  * Sentry + logs the error, and reports the failure as a sub-check fail.
  */
 export async function runHealthChecks(): Promise<HealthCheckPayload> {
+  // Resolve the DB handle once and share it with the DB + schema sub-checks.
+  // Single import — see DbHandle's comment for why two dynamic imports are a trap.
+  let db: DbHandle | null = null;
+  try {
+    const { getDb } = await import("../db");
+    db = (await getDb()) as DbHandle | null;
+  } catch (err) {
+    // getDb() throwing (bad DATABASE_URL) is surfaced as db+schema fails below.
+    log.warn(
+      { event: "healthcheck.getdb_failed", err: errMsg(err) },
+      "health check could not resolve db handle",
+    );
+  }
+
   const settled = await Promise.allSettled([
-    checkDb(),
+    checkDb(db),
     checkRedis(),
     checkStripe(),
     checkLlm(),
+    checkSchema(db),
   ]);
-  const [dbS, redisS, stripeS, llmS] = settled;
+  const [dbS, redisS, stripeS, llmS, schemaS] = settled;
 
   function unwrap(s: PromiseSettledResult<SubCheckResult>, dep: string): SubCheckResult {
     if (s.status === "fulfilled") return s.value;
@@ -345,11 +419,13 @@ export async function runHealthChecks(): Promise<HealthCheckPayload> {
     redis: unwrap(redisS, "redis"),
     stripe: unwrap(stripeS, "stripe"),
     llm: unwrap(llmS, "llm"),
+    schema: unwrap(schemaS, "schema"),
   };
 
+  const total = Object.keys(checks).length;
   const failCount = Object.values(checks).filter((c) => c.status === "fail").length;
   const overall: OverallStatus =
-    failCount === 0 ? "ok" : failCount === 4 ? "down" : "degraded";
+    failCount === 0 ? "ok" : failCount === total ? "down" : "degraded";
 
   return { overall, checks };
 }

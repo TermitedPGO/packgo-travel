@@ -135,8 +135,47 @@ async function startServer() {
     if (process.env.NODE_ENV === "production") {
       void warmUp();
     }
+    // DB 硬化批(2026-07-12):啟動時跑一次 schema 契約斷言。必要表缺失 = 大聲
+    // (errorFunnel 直達 Jeff + log.error),絕不靜默 —— 2026-06-17 tours 清空正是
+    // 靠「表沒了但沒人告警」拖了三週。刻意不 crash 進程(缺一張非致命表就 boot-loop
+    // 反而拖垮全站);持續信號由 /health 的 schema 子檢查與 deploySmoke 第九臂顧,
+    // 這裡只補「開機當下就喊一聲」。只有設了 DATABASE_URL 才跑(本地無 DB 直接跳過)。
+    // 見 server/_core/schemaContract.ts。
+    if (process.env.DATABASE_URL) {
+      void (async () => {
+        try {
+          const { getDb } = await import("../db");
+          const { assertSchemaContract } = await import("./schemaContract");
+          const db = await getDb();
+          if (!db) return;
+          const res = await assertSchemaContract(db);
+          if (!res.ok) {
+            logger.error(
+              { event: "startup.schema_contract_breach", missing: res.missing },
+              "schema contract breach at startup — required table(s) missing",
+            );
+            reportFunnelError({
+              source: "startup:schemaContract",
+              err: new Error(`schema 契約破損:缺必要表 ${res.missing.join(", ")}`),
+              context: { missing: res.missing, phase: "startup" },
+            }).catch(() => {});
+          } else {
+            logger.info(
+              { event: "startup.schema_contract_ok", checked: res.checkedCount },
+              "schema contract ok at startup",
+            );
+          }
+        } catch (err) {
+          reportFunnelError({
+            source: "fail-open:index:schemaContractStartup",
+            err,
+            context: { phase: "startup" },
+          }).catch(() => {});
+        }
+      })();
+    }
   });
-  
+
   // Round 80.18 v2: redirect old fly.dev / Manus / www → canonical
   // packgoplay.com. CRITICAL exemptions:
   //   - /healthz: Fly internal probes

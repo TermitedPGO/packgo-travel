@@ -6,7 +6,7 @@
  * ship 後對「後台開機就會打」的一批核心讀查詢跑一輪真查詢,任一支拋錯就報
  * 出來,而不是等 Jeff 自己點開後台才發現壞了。
  *
- * 八臂全部唯讀,零寫入、零 mutation:
+ * 九臂全部唯讀,零寫入、零 mutation:
  *   1. customerList         — runCustomerListQuery(drizzleDb, {})
  *   2. guestList             — runGuestListQuery(drizzleDb, {})
  *   3. customerUnreadCount   — runRegisteredUnreadCountQuery + runGuestUnreadRankingQuery
@@ -18,6 +18,8 @@
  *   7. commandCenter.escalations   — listEscalations()
  *   8. activeToursCount      — db.searchTours({}).total(公開賣場真查詢,status='active';
  *                               計數為 0 時刻意標紅,提醒賣場對客零商品直到目錄重建完成)
+ *   9. schemaContract        — assertSchemaContract(drizzleDb):REQUIRED_TABLES 全在才綠;
+ *                               缺表列出缺哪張(DB 硬化批,見 ./schemaContract.ts)
  *
  * 第八臂 WHY:2026-06-17 prod tours 等七表被非正規 DDL 清空,賣場對客零商品三週
  * 無告警(當時觀測神經未覆蓋「對客商品數」信號)。此臂跑與公開 searchTours 等價
@@ -45,6 +47,7 @@ import { loadTodayListItems } from "../routers/adminCustomerOrders";
 import { TEST_ACCOUNT_0909_EMAIL } from "./testAccounts";
 import { listApprovalTasks } from "./approvalTasks";
 import { listEscalations } from "./escalationBox";
+import { assertSchemaContract } from "./schemaContract";
 
 const log = createChildLogger({ module: "deploySmoke" });
 
@@ -87,10 +90,10 @@ async function timeArm(
 }
 
 /**
- * Ship 後自動煙霧:七臂依序跑(各自 try/catch,互不影響),回傳 { ok, arms }。
+ * Ship 後自動煙霧:九臂依序跑(各自 try/catch,互不影響),回傳 { ok, arms }。
  * opts.simulateFail 為 true 時,額外在 arms 尾端 push 一筆固定失敗紀錄(用於
  * 紅路演練 — 驗證 endpoint → safe-deploy.mjs 這條「失敗要印紅字」的管線真的通),
- * 不影響真實七臂各自照跑。
+ * 不影響真實九臂各自照跑。
  */
 export async function runDeploySmoke(
   opts?: { simulateFail?: boolean },
@@ -176,6 +179,25 @@ export async function runDeploySmoke(
         );
       }
       return { rowCount: total };
+    }),
+  );
+
+  arms.push(
+    await timeArm("schemaContract", async () => {
+      // 第九臂(DB 硬化批):REQUIRED_TABLES 全在才綠。表被 DROP / 清空-未重建 /
+      // rename 掉 → assertSchemaContract 回 ok:false,這裡 throw 讓臂標紅並列出缺表。
+      // 純讀 information_schema,零寫入。與 activeToursCount 互補:那臂看「對客團數」,
+      // 這臂看「災難級表還在不在」(表在但空 → 這臂綠、那臂紅)。見 ./schemaContract.ts。
+      const drizzleDb = await db.getDb();
+      if (!drizzleDb) throw new Error("database not available");
+      const res = await assertSchemaContract(drizzleDb);
+      if (!res.ok) {
+        throw new Error(
+          `schema 契約破損:缺 ${res.missing.length} 張必要表(${res.missing.join(", ")})— ` +
+            "見 docs/features/public-site/incident-20260617-tours-wipe.md",
+        );
+      }
+      return { rowCount: res.presentCount };
     }),
   );
 
