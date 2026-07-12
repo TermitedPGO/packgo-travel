@@ -1624,7 +1624,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "stripeWebhook.handleChargeRefunded.packpointEarnLookup",
-    sources: ["server/_core/stripeWebhook.ts:950"],
+    sources: ["server/_core/stripeWebhook.ts:951"],
     cls: "B",
     sql: "select `pointsTransactions`.`delta` from `pointsTransactions` where (`pointsTransactions`.`referenceType` = 'booking' AND `pointsTransactions`.`referenceId` = ? AND `pointsTransactions`.`reason` = 'booking_earn') limit 1",
     sampleParams: [1],
