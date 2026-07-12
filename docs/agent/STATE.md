@@ -20,7 +20,7 @@
 - 通信檔:桌面 PACKGO_AI交流/(兩夾+索引);第 5 則(虛報自首)草擬待證據齊才傳。
 
 ## 在飛/待處理
-- B1:recognizedAt 自動寫入已移除(commit 77045fc,已合併 main 未部署,未推 origin)。精確宣稱僅此一句;worker 仍非 dry-run 跑 transfer detection(寫 transferredAt+催轉卡)、admin 端點仍有 confirm/manual_backfill 寫模式、short-lead「已出發」文案可能為假。Codex 6.5 獨立複核:B1 窄目標通過(他重跑 121 tests+tsc 皆綠),完整信託停止線退回,擋 ship 待 B1.1(五項完成線,見 features/trust-recognition-fail-closed/)。B1.1 = 當前唯一高風險批。逐筆核准端點刻意未建(等 CPA 矩陣),建成前認列全停擺。
+- B1+B1.1:信託停止線已合併 main(77045fc + 0aafe37e),已推 origin,等 Jeff pnpm ship。精確宣稱:recognizedAt 自動寫入已移除;轉帳偵測經機械閘(trustTransferWriteGate 硬 false)強制 dry-run,manual_backfill blocked,端點寫模式 403;催轉語全移除;「已出發」改中性;scan 用 LA 曆日;!db 改 throw。Codex 6.5 五完成線全補,其裁定=B1.1 補完立即部署不等 CPA 矩陣。對抗審查 fresh opus PASS 零阻塞;指揮親跑 trust 133 綠+tsc 0。第 3 層驗證(部署後次日 cron 零自動認列+recognizedAt COUNT/MAX 基準比對)pending。逐筆核准端點刻意未建(等 CPA 矩陣),建成前認列全停擺。backlog:報表未定稿標示(P1.4)、en trustNote「recognized (departed)」措辭、資料模型三分離。
 - 證據補全批:完成(evidence_preservation 包+缺口登記+系統快照,~/Documents,已抽核)。
 - DB 硬化批:完成(branch db-hardening commit 00324eb,抽核過:migrate 安全回退、schemaContract 缺表才 503、canary 腳本備妥未實跑、角色腳本佔位符無真憑證)。未合 main。code 部分(schemaContract+deploySmoke 九臂+migrate 回退)byte-identical 安全;角色/canary/還原需 Jeff console 操作才推進。runbook: docs/infra/db-role-hardening.md、restore-drill.md。
 - CLAUDE.md 治理修正:本批(Codex 5.5 三 P0 已核採納,詳規進 60-evidence-and-ops.md)。
