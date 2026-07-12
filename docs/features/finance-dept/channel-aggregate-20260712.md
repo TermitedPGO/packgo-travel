@@ -4,7 +4,7 @@
 > 供決定共同帳本接入序，並作為信託事件重建的通道範圍證據。
 > 模式：全程 prod 唯讀 `SELECT`，零寫入。本檔去識別——只有通道 / 筆數 / 金額 / 退款 / 爭議 /
 > 撥款 / 已配對 / 未配對 / 涵蓋率，無客人姓名、信箱、單筆交易明細。
-> 對接文件：`legal-hold-manifest-20260711.md`（同源快照的完整表列與 SHA256）、
+> 對接文件：`evidence-preservation-manifest-20260711.md`（同源快照的完整表列與 SHA256）、
 > `trust-drift-audit-20260711.md`（信託三筆遞延的逐筆歸因）、`finance-page-checkup-20260711.md`。
 
 ---
@@ -195,10 +195,10 @@ fee / refund / dispute / payout 欄凡標「DB 無」者，一律不得當作「
 
 - **查詢來源**：prod app `packgo-travel` v811（sjc），`flyctl ssh console` + `mysql2` 唯讀 SELECT，2026-07-12。
 - **探針（off-git，scratchpad）**：`channel-probe.cjs`（本檔 §2 表列計數、§3 銀行總覽、§4 通道歸因、§5 涵蓋率）、`channel-probe2.cjs`（§4 退款/爭議/撥款關鍵字、§3 counterpartyType/agentCategory 分佈）。兩者 node --check 0 err、零寫入。
-- **同源快照與逐筆佐證（含 SHA256）**：`legal-hold-manifest-20260711.md`（bankTransactions 1524 / trustDeferredIncome 3 / links 16 / payments 0 / stripeWebhookEvents 0 / accountingEntries 0 — 與本檔一致，僅銀行流水 +4 增量漂移）。
+- **同源快照與逐筆佐證（含 SHA256）**：`evidence-preservation-manifest-20260711.md`（bankTransactions 1524 / trustDeferredIncome 3 / links 16 / payments 0 / stripeWebhookEvents 0 / accountingEntries 0 — 與本檔一致，僅銀行流水 +4 增量漂移）。
 - **信託事件通道範圍**：`trust-drift-audit-20260711.md`（三筆客人訂金 $15,422 走手機拍存進 Trust #5442、再掃往 Operating；印證五通道框架外的「手機拍存」是信託事件主要落地形態）。
 - **不確定標記**：關鍵字歸因會低估（漏標 memo）；「非五通道進帳 $338,587」中含內部轉帳 $105,222（非收款）；Zelle 出帳 $224,866 為 Jeff 對外付款（供應商等），非收款，不計入通道收款量。
 
 ---
 
-*本檔為去識別聚合，無客人姓名 / 信箱 / 單筆交易明細，可進 git。敏感個資與完整快照留 off-git（見 legal-hold-manifest §資料位置）。*
+*本檔為去識別聚合，無客人姓名 / 信箱 / 單筆交易明細，可進 git。敏感個資與完整快照留 off-git（見 evidence-preservation-manifest §資料位置）。*
