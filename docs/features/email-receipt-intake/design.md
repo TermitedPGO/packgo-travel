@@ -1,3 +1,5 @@
+> 【2026-07-12 指揮更正】本檔內「出發後才 recognize/轉 Operating」的信託口徑已撤回(法律定性歸律師/CPA)。現行規則:客戶款項具信託責任,不得僅以出發日推導可提領或可認列;見 CLAUDE.md 紅線 3 與 docs/agent/60-evidence-and-ops.md §7。下方原文僅存設計脈絡,勿據以入帳。
+
 # Email 收據自動收單(proposal + design + playbook)
 
 > 起因(2026-06-15):Jeff 自己拍紙本收據還行,但寄到 Gmail 的收據/發票要手動處理很煩。要讓後台 AI 自動把 Gmail 來的收據接收、讀出金額、排成一筆「待確認支出」給 Jeff 按。
