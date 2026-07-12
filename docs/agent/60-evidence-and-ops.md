@@ -46,7 +46,7 @@
 
 ## 八、證據安全（銀行/處理商/客戶原始資料）
 
-不進 Git、不進 iCloud/Dropbox/OneDrive 等同步路徑、不進任何 AI 對話。保全目錄用受控非同步位置（現為 ~/Documents/PACKGO_evidence_preservation_*）,原始檔唯讀,分析用工作副本。manifest 只記來源/期間/筆數/hash/缺口/安全位置,不抄帳號個資,副本與原始分開。
+不進 Git、不進 iCloud/Dropbox/OneDrive 等同步路徑、不進任何 AI 對話。保全目錄用受控非同步位置。【2026-07-12 修正:~/Documents 被 Codex 第6輪證實為 iCloud 同步(CloudDocs File Provider),我原宣稱錯誤;主副本已移至 ~/legal_hold(非同步700/檔600,雜湊零損),iCloud 原件保留待律師決定。加密磁碟為 Jeff 待辦。狀態=儲存邊界修復中,未達完整性檢查完成。】原始檔權限收緊,分析用工作副本。manifest 只記來源/期間/筆數/hash/缺口/安全位置,不抄帳號個資,副本與原始分開。
 
 ## 九、工位 preflight（iCloud 事故預防層）
 
