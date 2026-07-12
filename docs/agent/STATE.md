@@ -21,7 +21,7 @@
 
 ## 在飛/待處理
 - 證據補全批:完成(evidence_preservation 包+缺口登記+系統快照,~/Documents,已抽核)。
-- DB 硬化批:兩 session 撞停,成果在 網站-dbharden(9 檔未提交);root 鐵證已取;待重派(canary 隔離靶)。
+- DB 硬化批:完成(branch db-hardening commit 00324eb,抽核過:migrate 安全回退、schemaContract 缺表才 503、canary 腳本備妥未實跑、角色腳本佔位符無真憑證)。未合 main。code 部分(schemaContract+deploySmoke 九臂+migrate 回退)byte-identical 安全;角色/canary/還原需 Jeff console 操作才推進。runbook: docs/infra/db-role-hardening.md、restore-drill.md。
 - CLAUDE.md 治理修正:本批(Codex 5.5 三 P0 已核採納,詳規進 60-evidence-and-ops.md)。
 
 ## 等 Jeff(晨晚兩班)
