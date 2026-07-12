@@ -10,6 +10,9 @@
 | 指揮驗收 | 完成 2026-07-12:指揮親跑 grep 0 命中、tsc 0 錯、trust 8 檔 121 綠、i18n parity 3 檔 551 綠;錢路徑 diff 逐行親讀 | 本表下方證據欄 |
 | commit | 已提交(hash 見 git log 本資料夾首個 commit) | — |
 | 部署後觀察一輪零自動認列 | pending(等 Jeff pnpm ship 後次日 cron;查法:prod 唯讀查 trustDeferredIncome 無新 recognizedAt + worker log dueForReview) | — |
+| B1.1 施工(Codex 6.5 五完成線) | 完成 2026-07-12(opus 執行):機械閘 trustTransferWriteGate 硬 false 強制 dry-run、manual_backfill blocked、端點 confirm/manual_backfill 403、中性文案+LA 曆日、!db throw、守門擴 .mjs/.js/.cjs/.sql+scripts/、worker processor 抽出+整合測試 | tasks/03 + 本表下 |
+| B1.1 對抗審查 | 完成 2026-07-12:fresh opus PASS 零阻塞(三寫入點全在閘後、mock 不入產線圖、端點 body 覆寫無效、LA 無 off-by-one 逐一驗);1 觀察級遞延:en.ts trustNote/trustNoteEq「recognized (departed)」非本 diff,列 backlog | 審查報告收於指揮 session |
+| B1.1 指揮驗收 | 完成 2026-07-12:親跑 trust 10 檔 133 綠、i18n 551 綠、tsc 0 錯、grep 僅 2 呼叫點皆 dryRun:true+催轉語 0 命中;機械閘/worker/scan diff 逐行親讀 | 本表下方交付 |
 
 ## 交付內容(evidence_reference)
 

@@ -27,12 +27,16 @@ import type {
 import { notifyOwner } from "./_core/notification";
 import { wireWorkerFunnel, reportFunnelError } from "./_core/errorFunnel";
 
-export const trustRecognitionWorker = new Worker<
-  TrustRecognitionJobData,
-  TrustRecognitionJobResult
->(
-  "trust-recognition",
-  async (job: Job<TrustRecognitionJobData, TrustRecognitionJobResult>) => {
+/**
+ * The daily-cron job processor, extracted (B1.1, 2026-07-13) so an integration
+ * test can run the real funnel — transfer detection (mechanically forced
+ * dry-run) + scanRecognitionDue + review card — without constructing a BullMQ
+ * Worker or opening a Redis connection. Behavior is byte-identical to the
+ * previous inline processor.
+ */
+export async function processTrustRecognitionJob(
+  job: Job<TrustRecognitionJobData, TrustRecognitionJobResult>,
+): Promise<TrustRecognitionJobResult> {
     console.log(
       `[trustRecognitionWorker] starting run ${job.id} (triggered by: ${job.data.triggeredBy})`
     );
@@ -44,15 +48,17 @@ export const trustRecognitionWorker = new Worker<
     // (PLAID flag OR STRIPE flag)——這支 worker 是 scanRecognitionDue
     // 的唯一日常呼叫端,外層的 gate 若還只看 PLAID flag,即使函式本體已經
     // 修好,worker 還是會在 STRIPE-only 開啟時提早 return 不呼叫它。
-    // F2 塊B(2026-07-10):Trust→Operating 轉帳偵測 + 「認了沒轉錢」提醒,
-    // 搭每日認列 cron 的便車。刻意放在 flag gate 之前 —— 偵測對象是「已存在
-    // 的已認列列」(歷史事實,與當下 flag 開關無關),flag 全關時也要跑,
-    // 否則歷史認列列的轉出閉環永遠不會回填。runTrustTransferDetection 本體
-    // 絕不 throw(內部降級),不影響認列主流程。
+    // F2 塊B(2026-07-10):Trust→Operating 轉帳偵測,搭每日認列 cron 便車。
+    // B1.1(Codex 6.5 P0.1,2026-07-13):回填閉環暫停 —— 這裡硬帶 dryRun:true
+    // 作雙保險(服務內另有 isTrustTransferWriteApproved 機械閘,現硬回 false
+    // 亦強制 dry-run)。矩陣未核准前:不回填 transferredAt、不出催轉卡、不動錢。
+    // §17550.15(c) 無「會計已認列即可轉」;歷史 recognizedAt 可能來自舊出發日
+    // 規則,不得驅動 Jeff 動真錢。仍放 flag gate 之前(觀察對象是歷史列,與當下
+    // flag 無關)。runTrustTransferDetection 本體絕不 throw(內部降級)。
     const { runTrustTransferDetection } = await import(
       "./services/trustTransferDetection"
     );
-    const transferReport = await runTrustTransferDetection();
+    const transferReport = await runTrustTransferDetection({ dryRun: true });
     if (transferReport.backfilled > 0 || transferReport.overdueCount > 0) {
       console.log(
         `[trustRecognitionWorker] transfer detection: backfilled=${transferReport.backfilled} pairs=${transferReport.pairsFound} overdue=${transferReport.overdueCount} ($${transferReport.overdueTotal.toFixed(2)})`
@@ -100,9 +106,9 @@ export const trustRecognitionWorker = new Worker<
       await notifyOwner({
         title: `📋 信託到期待審 — ${result.dueForReview} 筆 $${total.toFixed(2)} 等你逐筆核`,
         content:
-          `${result.dueForReview} 筆出發日已到、已配對訂單的客戶款今天到期待審,總額 $${total.toFixed(2)}。\n\n` +
-          `系統不自動認列(認列是你的動錢權)。等 CPA 認列矩陣核准後,由你逐筆核。\n` +
-          `明細與去重狀態見駕駛艙的「到期待審」卡。`,
+          `${result.dueForReview} 筆舊規則審查日已到、已配對訂單的客戶款列為到期待審,總額 $${total.toFixed(2)}。\n\n` +
+          `審查日到不代表已出發、可認列或可從信託提領。系統不自動認列(認列是你的動錢權)。\n` +
+          `等 CPA 認列矩陣核准後,由你逐筆核。明細與去重狀態見駕駛艙的「到期待審」卡。`,
       });
     }
     if (result.skippedNotMatched > 5) {
@@ -117,14 +123,17 @@ export const trustRecognitionWorker = new Worker<
     }
 
     return result;
-  },
-  {
-    connection: redisBullMQ,
-    concurrency: 1,
-    lockDuration: 600_000, // 10 min
-    lockRenewTime: 180_000, // 3 min
-  }
-);
+}
+
+export const trustRecognitionWorker = new Worker<
+  TrustRecognitionJobData,
+  TrustRecognitionJobResult
+>("trust-recognition", processTrustRecognitionJob, {
+  connection: redisBullMQ,
+  concurrency: 1,
+  lockDuration: 600_000, // 10 min
+  lockRenewTime: 180_000, // 3 min
+});
 
 trustRecognitionWorker.on("completed", (job, result) => {
   console.log(

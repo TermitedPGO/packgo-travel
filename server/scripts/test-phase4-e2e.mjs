@@ -216,10 +216,10 @@ async function simulateProcessTrustInflow(conn, bankTxnId) {
  *
  * B1 fail-closed (2026-07-13): the real scanRecognitionDue is a READ-ONLY
  * scan — it NEVER writes recognizedAt; due rows only get queued for Jeff's
- * manual review. This mirror used to run an UPDATE ... SET recognizedAt =
- * NOW() here, which was the pre-B1 auto-recognition behavior and — because
- * this script executes against production TiDB — would have actually
- * written recognizedAt on live rows. Updated in lock-step with the source
+ * manual review. This mirror used to run an UPDATE that set the recognizedAt
+ * column to NOW() here, which was the pre-B1 auto-recognition behavior and —
+ * because this script executes against production TiDB — would have actually
+ * written that column on live rows. Updated in lock-step with the source
  * to match: count-only, zero writes.
  */
 async function simulateScanDue(conn, today) {

@@ -651,8 +651,10 @@ export async function scanRecognitionDue(
   opts?: { runId?: string; today?: string }
 ): Promise<ScanRecognitionDueResult> {
   const runId = opts?.runId ?? `trust-recog-scan-${nanoid(10)}`;
-  const today =
-    opts?.today ?? new Date().toISOString().slice(0, 10);
+  // B1.1(Codex 6.5 P1.1):today 預設走 America/Los_Angeles 曆日(重用同檔既有
+  // laDayOf helper),不用 UTC slice —— PACK&GO 是加州公司,expectedRecognitionDate
+  // 也是 LA 曆日字串,兩端同套換算,否則 UTC 前一晚會讓到期判定提早一天。
+  const today = opts?.today ?? laDayOf(new Date());
 
   const empty: ScanRecognitionDueResult = {
     runId,
@@ -671,7 +673,11 @@ export async function scanRecognitionDue(
   if (!isAnyTrustDeferralEnabled()) return empty;
 
   const db = await getDb();
-  if (!db) return empty;
+  // B1.1(Codex 6.5 P1.3):DB 不可用時丟錯,不再偽裝「零筆到期」—— 讓 worker job
+  // 走既有 failed 告警(trustRecognitionWorker.on("failed") → notifyOwner),
+  // plaidRouter 端點自然回 tRPC error(client 已有 onError toast)。靜默回全零
+  // 會讓「今天沒有到期款」與「掃不到庫」無法區分,是合規面的偽陰性。
+  if (!db) throw new Error("scanRecognitionDue: database unavailable");
 
   // Candidates: not yet recognized, not reversed
   const candidates = await db
@@ -799,8 +805,9 @@ export async function maybePostRecognitionDueCard(
       messageType: "alert" as const,
       title: `信託到期待審 — ${result.dueForReview} 筆 ${fmt(total)} 等你逐筆核`,
       body:
-        `每日信託掃描:下列訂金出發日已到、已配對訂單、未取消,列為「到期待審」` +
+        `每日信託掃描:下列訂金的舊規則審查日已到、已配對訂單、未取消,列為「到期待審」` +
         `(唯讀掃描,系統不自動認列):\n${lines}\n\n` +
+        `注意:審查日已到不代表已出發、可認列或可從信託提領。\n` +
         `處置:等 CPA 認列矩陣核准後,由你逐筆核。認列是動錢權,不是排程的。\n` +
         `(同一批待審持續期間本卡只出一次,集合變化才會再出。)`,
       priority: "high" as const,

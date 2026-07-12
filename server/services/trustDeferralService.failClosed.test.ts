@@ -16,7 +16,7 @@
  * 全部直接 await 被測函式,無 fire-and-forget,故不需 vi.waitFor。合成資料。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 
@@ -180,18 +180,26 @@ describe("scanRecognitionDue — PLAID/STRIPE 四組合皆零寫入(2b)", () => 
   }
 });
 
-// ── 2c:守門 —— 產線碼無自動認列寫入 ─────────────────────────────────────────
+// ── 2c:守門 —— 產線碼無自動認列寫入(B1.1:掃描面擴 .mjs/.js/.cjs/.sql + scripts/)──
 describe("mode 復活防護:產線碼零 recognizedAt 寫入(2c)", () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const serverDir = resolve(here, ".."); // server/services → server
+  const repoScriptsDir = resolve(here, "..", "..", "scripts"); // repo 根 scripts/
 
-  function walkTs(dir: string, out: string[] = []): string[] {
+  // B1.1(Codex 6.5 P1.2):掃描副檔名擴到 .ts/.mjs/.js/.cjs/.sql;排除任何
+  // *.test.*(含 .test.mjs 等);node_modules 跳過。根 scripts/ 也套同一副檔名
+  // 過濾(避免讀進 .png 等二進位)。
+  const CODE_EXT = /\.(ts|mjs|js|cjs|sql)$/;
+  const isScannable = (name: string) => CODE_EXT.test(name) && !name.includes(".test.");
+
+  function walkCode(dir: string, out: string[] = []): string[] {
+    if (!existsSync(dir)) return out;
     for (const name of readdirSync(dir)) {
       if (name === "node_modules") continue;
       const full = join(dir, name);
       const st = statSync(full);
-      if (st.isDirectory()) walkTs(full, out);
-      else if (name.endsWith(".ts") && !name.endsWith(".test.ts")) out.push(full);
+      if (st.isDirectory()) walkCode(full, out);
+      else if (isScannable(name)) out.push(full);
     }
     return out;
   }
@@ -231,28 +239,50 @@ describe("mode 復活防護:產線碼零 recognizedAt 寫入(2c)", () => {
     return hits;
   }
 
-  it("server/**/*.ts(排除 *.test.ts)無 recognizedAt 寫入痕跡(字面量/raw SQL 賦值/.set 區塊)", () => {
-    const files = walkTs(serverDir);
-    // sanity:確實掃到了產線檔(避免 walk 壞掉導致假綠)。
+  /**
+   * 單一原始碼字串 → offender 行清單(三層:字面量 recognizedAt:new Date /
+   * .set({ recognizedAt / raw SQL 賦值 recognizedAt =,加 .set 區塊掃描)。
+   * 抽出以便 fs 掃描與合成紅綠自證共用同一套判定邏輯。
+   */
+  function scanSource(src: string): string[] {
+    const offenders: string[] = [];
+    src.split("\n").forEach((ln, idx) => {
+      if (
+        /recognizedAt:\s*new Date/.test(ln) ||
+        /set\(\{\s*recognizedAt/.test(ln) ||
+        // raw SQL 賦值 `recognizedAt = NOW()`。負向斷言排除:`==`/`===` 比較,
+        // 以及 JS 模板字串內插 `recognizedAt=${...}`(debug 字串,非寫入)——
+        // 賦值等號後(略過空白)的第一個非空白字元不得是 `=` 或 `$`。
+        /recognizedAt\s*=\s*(?![$=])/.test(ln)
+      ) {
+        offenders.push(`${idx + 1}: ${ln.trim()}`);
+      }
+    });
+    offenders.push(...scanSetBlocks(src));
+    return offenders;
+  }
+
+  it("合成紅綠自證:三種 offender 寫法被抓,讀取/比較/select 映射放行", () => {
+    // 紅:三種寫入寫法各自被抓。
+    expect(scanSource("await db.update(x).set({ recognizedAt: new Date() })").length).toBeGreaterThan(0);
+    expect(scanSource("UPDATE trustDeferredIncome SET recognizedAt = NOW()").length).toBeGreaterThan(0);
+    expect(scanSource(".set({\n  recognizedAt,\n  recognitionRunId,\n})").length).toBeGreaterThan(0);
+    // 綠:讀取/比較/select 欄位映射/debug 內插字串不誤報。
+    expect(scanSource("recognizedAt: trustDeferredIncome.recognizedAt,")).toEqual([]);
+    expect(scanSource("if (row.recognizedAt === null) return;")).toEqual([]);
+    expect(scanSource("WHERE recognizedAt IS NULL AND reversedAt IS NULL")).toEqual([]);
+    expect(scanSource("`recognizedAt=${row.recognizedAt} reversedAt=${row.reversedAt}`")).toEqual([]);
+  });
+
+  it("server/**/*.{ts,mjs,js,cjs,sql} + scripts/(排除 *.test.*)無 recognizedAt 寫入痕跡", () => {
+    const files = [...walkCode(serverDir), ...walkCode(repoScriptsDir)];
+    // sanity:確實掃到產線檔,且擴充副檔名真的生效(有掃到 .mjs)。
     expect(files.length).toBeGreaterThan(50);
+    expect(files.some((f) => f.endsWith(".mjs"))).toBe(true);
     const offenders: string[] = [];
     for (const f of files) {
       const src = readFileSync(f, "utf8");
-      const lines = src.split("\n");
-      lines.forEach((ln, idx) => {
-        if (
-          /recognizedAt:\s*new Date/.test(ln) ||
-          /set\(\{\s*recognizedAt/.test(ln) ||
-          // raw SQL 模板字串裡的 `recognizedAt = NOW()` 類賦值;負向斷言排除
-          // `==`/`===` 比較(`(?!=)` 確保緊接的下一字元不是另一個 `=`)。
-          /recognizedAt\s*=(?!=)/.test(ln)
-        ) {
-          offenders.push(`${f}:${idx + 1}: ${ln.trim()}`);
-        }
-      });
-      for (const hit of scanSetBlocks(src)) {
-        offenders.push(`${f}:${hit}`);
-      }
+      for (const hit of scanSource(src)) offenders.push(`${f}:${hit}`);
     }
     expect(offenders).toEqual([]);
   });
@@ -353,6 +383,60 @@ describe("maybePostRecognitionDueCard — 待審卡與同集合去重(2d)", () =
       insert: () => ({ values: () => Promise.reject(new Error("insert blew up")) }),
     } as any;
     await expect(maybePostRecognitionDueCard(throwingDb, result(DUE))).resolves.toBe(false);
+  });
+});
+
+// ── 2f:today 預設走 LA 曆日(UTC 前一晚不提早到期)(B1.1 P1.1)──────────────────
+describe("scanRecognitionDue — today 預設 America/Los_Angeles 曆日(2f)", () => {
+  it("UTC 已跨到隔天、LA 仍是前一天 → 用 LA 曆日,隔天到期的列尚未到期", async () => {
+    // 2026-07-21T05:30:00Z:LA(PDT, UTC-7)= 2026-07-20 22:30 → LA 曆日 2026-07-20。
+    // UTC slice 會誤取 2026-07-21,讓「07-21 到期」的列提早一天被列入待審。
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-21T05:30:00Z"));
+    try {
+      const dueLA = {
+        id: 701, amount: "1000.00", bookingId: 71,
+        expectedRecognitionDate: "2026-07-20", recognizedAt: null, reversedAt: null,
+      };
+      const notDueUntilUtcTomorrow = {
+        id: 702, amount: "2000.00", bookingId: 72,
+        expectedRecognitionDate: "2026-07-21", recognizedAt: null, reversedAt: null,
+      };
+      // LA today = 07-20 → readyBookingIds 只含 71(07-21 列尚未到期,不進 bookings 查詢)。
+      const { db, updateCalls } = makeScanDb(
+        [dueLA, notDueUntilUtcTomorrow],
+        [{ id: 71, bookingStatus: "confirmed" }],
+      );
+      getDb.mockResolvedValue(db);
+
+      const r = await scanRecognitionDue(); // 不給 today → 走 LA 曆日預設
+
+      expect(updateCalls).toHaveLength(0);
+      // LA 口徑只 1 筆到期;UTC 口徑會誤判 2 筆。
+      expect(r.dueForReview).toBe(1);
+      expect(r.dueRows).toEqual([
+        { id: 701, amount: 1000, bookingId: 71, expectedRecognitionDate: "2026-07-20" },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ── 2g:DB 不可用 → throw(不再偽裝零筆);旗標關才回空 ────────────────────────────
+describe("scanRecognitionDue — DB 不可用丟錯(2g)", () => {
+  it("getDb 回 null(旗標開啟)→ throw,不靜默回全零(job 走 failed 告警)", async () => {
+    getDb.mockResolvedValue(null); // PLAID flag 由 beforeEach 設為 on
+    await expect(scanRecognitionDue({ today: "2026-07-20" })).rejects.toThrow(/database unavailable/i);
+  });
+
+  it("旗標全關 → 仍回空(旗標關不是錯誤,不 throw)——與『庫掛了』可區分", async () => {
+    delete process.env.PLAID_TRUST_DEFERRAL_ENABLED;
+    delete process.env.STRIPE_TRUST_DEFERRAL_ENABLED;
+    getDb.mockResolvedValue(null);
+    const r = await scanRecognitionDue({ today: "2026-07-20" });
+    expect(r.dueForReview).toBe(0);
+    expect(r.scanned).toBe(0);
   });
 });
 
