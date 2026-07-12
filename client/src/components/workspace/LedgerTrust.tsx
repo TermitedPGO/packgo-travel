@@ -1,16 +1,16 @@
 /**
  * LedgerTrust — 批3 m2 信託合規卡 (mockup 後台_06 PAGE 3).
  *
- * 餘額卡(drift 照實)+ 認列卡(🔒 → 既有 plaid.trustRecognizeNow 全域
- * 掃描,照實說明)+ 在途訂金明細(已認列淡化)。鐵律:訂金 ≠ 營收,
- * 出發後才認列(CST §17550,見 memory feedback_packgo_trust_accounting)。
+ * 餘額卡(drift 照實)+ 到期待審卡(🔒 → plaid.trustRecognizeNow **唯讀掃描**,
+ * 零寫入)+ 在途訂金明細(已認列淡化)。鐵律:訂金 ≠ 營收,出發後才認列
+ * (CST §17550,見 memory feedback_packgo_trust_accounting)。B1 fail-closed
+ * (2026-07-13):掃描不自動認列,等 CPA 認列矩陣核准後由 Jeff 逐筆核。
  */
-import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { useLocale } from "@/contexts/LocaleContext";
 import { toast } from "sonner";
 import { Lock, Check, AlertTriangle } from "lucide-react";
-import { BtnB, BtnO, Vault, Warn, Src } from "./ws-ui";
+import { BtnB, Vault, Warn, Src } from "./ws-ui";
 import { dueForRecognition } from "./workspaceLedger.helpers";
 
 export default function LedgerTrust() {
@@ -101,7 +101,7 @@ export default function LedgerTrust() {
   );
 }
 
-/* ── 🔒 認列卡 — 既有 trustRecognizeNow(全域掃描) ── */
+/* ── 🔒 到期待審卡 — trustRecognizeNow(唯讀全域掃描,零寫入) ── */
 
 function RecognizeCard({
   due,
@@ -110,15 +110,17 @@ function RecognizeCard({
 }) {
   const { t } = useLocale();
   const utils = trpc.useUtils();
-  const [confirmed, setConfirmed] = useState(false);
-  const [open, setOpen] = useState(false);
 
+  // B1 fail-closed:按鈕只做唯讀掃描(零寫入),不再有「確認認列」寫入閘。
   const recognizeMut = trpc.plaid.trustRecognizeNow.useMutation({
-    onSuccess: () => {
-      toast.success(t("workspace.ldgRecognized"));
+    onSuccess: (r) => {
+      if ("error" in r && r.error) {
+        toast.error(String(r.error));
+      } else {
+        toast.success(t("workspace.ldgRecognized", { n: r.dueForReview }));
+      }
       utils.plaid.trustDeferredList.invalidate();
       utils.plaid.trustReconciliation.invalidate();
-      setOpen(false);
     },
     onError: (e) => toast.error(e.message),
   });
@@ -140,37 +142,14 @@ function RecognizeCard({
       <div className="text-[11px] text-gray-500 mb-2">
         {t("workspace.ldgRecognizeHint")}
       </div>
-      {open ? (
-        <div className="rounded-lg bg-black text-white px-3 py-2.5 space-y-2">
-          <label className="flex items-start gap-2 cursor-pointer text-[11px] leading-relaxed">
-            <input
-              type="checkbox"
-              checked={confirmed}
-              onChange={(e) => setConfirmed(e.target.checked)}
-              className="mt-0.5"
-            />
-            <span>{t("workspace.ldgRecognizeConfirm")}</span>
-          </label>
-          <div className="flex gap-2">
-            <BtnO onClick={() => setOpen(false)}>
-              {t("workspace.supCancel")}
-            </BtnO>
-            <button
-              onClick={() => recognizeMut.mutate()}
-              disabled={!confirmed || recognizeMut.isPending}
-              className="px-2.5 py-1 rounded-lg bg-white text-black text-[11px] font-medium disabled:opacity-40"
-            >
-              {recognizeMut.isPending
-                ? t("workspace.ldgRecognizing")
-                : t("workspace.ldgRecognizeGo")}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <BtnB onClick={() => setOpen(true)}>
-          {t("workspace.ldgRecognizeOpen")}
-        </BtnB>
-      )}
+      <BtnB
+        onClick={() => recognizeMut.mutate()}
+        disabled={recognizeMut.isPending}
+      >
+        {recognizeMut.isPending
+          ? t("workspace.ldgRecognizing")
+          : t("workspace.ldgRecognizeOpen")}
+      </BtnB>
     </div>
   );
 }

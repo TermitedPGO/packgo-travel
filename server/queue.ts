@@ -1296,13 +1296,15 @@ console.log("✅ Plaid daily sync queue initialized");
 // ============================================================================
 // Phase 4 — Trust Account Recognition Cron
 //
-// Once a day at 06:00 UTC (1 hour after the Plaid sync at 05:00) scan
-// trustDeferredIncome for rows whose expectedRecognitionDate has arrived
-// and mark them recognized. This shifts the income from "deferred liability"
-// to actual P&L revenue on the recognition date.
+// Once a day at 06:00 UTC (1 hour after the Plaid sync at 05:00) READ-ONLY
+// scan of trustDeferredIncome for rows whose expectedRecognitionDate has
+// arrived. B1 fail-closed (2026-07-13): the scan NEVER writes recognizedAt —
+// recognition is Jeff's money-move call. dueForReview rows only surface a
+// review card (agentMessages) for Jeff to reconcile once the CPA recognition
+// matrix is approved; the per-row approval endpoint is a later batch.
 //
-// Feature-flagged via PLAID_TRUST_DEFERRAL_ENABLED in the service layer —
-// when off the worker fires but does nothing.
+// Feature-flagged via PLAID/STRIPE trust-deferral flags in the service layer —
+// when both off the worker fires but the scan returns empty.
 // ============================================================================
 
 export interface TrustRecognitionJobData {
@@ -1312,11 +1314,11 @@ export interface TrustRecognitionJobData {
 export interface TrustRecognitionJobResult {
   runId: string;
   scanned: number;
-  recognized: number;
-  totalRecognizedAmount: number;
+  /** B1 fail-closed:到期待審筆數(propose-only,零 recognizedAt 寫入)。
+   *  見 trustDeferralService.ScanRecognitionDueResult。 */
+  dueForReview: number;
   skippedNoDepartureDate: number;
   skippedNotMatched: number;
-  /** F1 塊B (2026-07-08) 對抗審查 P1 修復:見 trustDeferralService.RecognizeReadyResult。 */
   skippedCancelledBooking?: number;
 }
 

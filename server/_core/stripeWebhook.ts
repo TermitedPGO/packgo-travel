@@ -303,7 +303,8 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
       // 塊B:寫 trustDeferredIncome,不立即 createAccountingEntry —
       // bookingId 直接來自 webhook metadata(100% 確定,不用 findBookingMatch
       // 猜),認列規則(expectedRecognitionDate)沿用既有出發日計算,departure
-      // 到才由既有的 recognizeReadyDepartures 每日排程認列。
+      // 到才由每日 scanRecognitionDue 排程列入到期待審(B1 fail-closed:掃描
+      // 不自動認列,等 CPA 認列矩陣核准後由 Jeff 逐筆核)。
       await deferStripeBookingIncome(
         {
           paymentId: paymentRow.id,

@@ -2066,49 +2066,49 @@ export const plaidRouter = router({
     }),
 
   /**
-   * Manually trigger the daily trust-recognition scan. Useful for admin
-   * "rerun now" button after fixing matches.
+   * Manually trigger the daily trust-recognition scan. B1 fail-closed
+   * (2026-07-13): this is a READ-ONLY scan — it NEVER writes recognizedAt.
+   * Returns the list of rows due for review; recognition stays frozen until
+   * the CPA recognition matrix is approved and Jeff signs off per-row.
    */
   trustRecognizeNow: adminProcedure.mutation(async ({ ctx }) => {
-    const { recognizeReadyDepartures, isAnyTrustDeferralEnabled } = await import(
+    const { scanRecognitionDue, isAnyTrustDeferralEnabled } = await import(
       "../services/trustDeferralService"
     );
     // F1 塊B (2026-07-08) 對抗審查 P1 修復:改用 isAnyTrustDeferralEnabled——
-    // 只看 PLAID flag 會讓 Jeff 在只開 STRIPE flag 時按這顆「立即重跑」按鈕
-    // 得到誤導性的「disabled」訊息,即使 Stripe-direct 遞延列其實已經在等
-    // 認列。
+    // 只看 PLAID flag 會讓 Jeff 在只開 STRIPE flag 時按這顆「掃描」按鈕得到
+    // 誤導性的「disabled」訊息,即使 Stripe-direct 遞延列其實已經到期待審。
     if (!isAnyTrustDeferralEnabled()) {
       return {
         runId: "disabled",
         scanned: 0,
-        recognized: 0,
-        totalRecognizedAmount: 0,
+        dueForReview: 0,
+        dueRows: [],
         skippedNoDepartureDate: 0,
         skippedNotMatched: 0,
         skippedCancelledBooking: 0,
         error: "trust deferral is disabled (both PLAID_TRUST_DEFERRAL_ENABLED and STRIPE_TRUST_DEFERRAL_ENABLED are off)",
-      } as const;
+      };
     }
-    const result = await recognizeReadyDepartures();
-    // F3 塊B(2026-07-10):認列是 Jeff 在駕駛艙按的錢的動作,寫路徑接 audit
-    // (dispatch-f3 塊B#3)。fail-open:audit 失敗不吞掉已完成的認列結果。
+    const result = await scanRecognitionDue();
+    // B1 fail-closed:掃描是唯讀動作(零寫入),audit 記 trust.recognitionScan
+    // (舊 trust.recognizeNow 語意已不真)。fail-open:audit 失敗不吞掉掃描結果。
     try {
       const { audit } = await import("../_core/auditLog");
       await audit({
         ctx,
-        action: "trust.recognizeNow",
+        action: "trust.recognitionScan",
         targetType: "trustDeferredIncome",
         targetId: 0, // 批次動作,無單一目標列;明細在 changes
         changes: {
           runId: result.runId,
-          recognized: result.recognized,
-          totalRecognizedAmount: result.totalRecognizedAmount,
+          dueForReview: result.dueForReview,
           scanned: result.scanned,
         },
       });
     } catch (err) {
       reportFunnelError({
-        source: "fail-open:plaidRouter:trustRecognizeNowAudit",
+        source: "fail-open:plaidRouter:trustRecognitionScanAudit",
         err,
         context: { runId: result.runId },
       }).catch(() => {});

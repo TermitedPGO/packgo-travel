@@ -9,10 +9,13 @@
  *                              the departure happened — those stay deferred
  *                              and surface in admin reconciliation)
  *
- * Marks them recognized so bankPLService stops subtracting them from income.
+ * B1 fail-closed (2026-07-13): the daily tick is a READ-ONLY scan. It NEVER
+ * writes recognizedAt — recognition is Jeff's money-move call, frozen until
+ * the CPA recognition matrix is approved. dueForReview rows only produce a
+ * review card (agentMessages) for Jeff to reconcile per-row later.
  *
- * Feature-flagged via PLAID_TRUST_DEFERRAL_ENABLED — when off, the worker
- * fires but recognizeReadyDepartures returns 0 immediately.
+ * Feature-flagged via the PLAID/STRIPE trust-deferral flags — when both off,
+ * the worker fires but scanRecognitionDue returns empty immediately.
  */
 
 import { Worker, Job } from "bullmq";
@@ -34,12 +37,11 @@ export const trustRecognitionWorker = new Worker<
       `[trustRecognitionWorker] starting run ${job.id} (triggered by: ${job.data.triggeredBy})`
     );
 
-    const { recognizeReadyDepartures, isAnyTrustDeferralEnabled } = await import(
-      "./services/trustDeferralService"
-    );
+    const { scanRecognitionDue, maybePostRecognitionDueCard, isAnyTrustDeferralEnabled } =
+      await import("./services/trustDeferralService");
 
     // F1 塊B (2026-07-08) 對抗審查 P1 修復:改用 isAnyTrustDeferralEnabled
-    // (PLAID flag OR STRIPE flag)——這支 worker 是 recognizeReadyDepartures
+    // (PLAID flag OR STRIPE flag)——這支 worker 是 scanRecognitionDue
     // 的唯一日常呼叫端,外層的 gate 若還只看 PLAID flag,即使函式本體已經
     // 修好,worker 還是會在 STRIPE-only 開啟時提早 return 不呼叫它。
     // F2 塊B(2026-07-10):Trust→Operating 轉帳偵測 + 「認了沒轉錢」提醒,
@@ -64,33 +66,43 @@ export const trustRecognitionWorker = new Worker<
       return {
         runId: `disabled-${job.id}`,
         scanned: 0,
-        recognized: 0,
-        totalRecognizedAmount: 0,
+        dueForReview: 0,
         skippedNoDepartureDate: 0,
         skippedNotMatched: 0,
+        skippedCancelledBooking: 0,
       };
     }
 
-    const result = await recognizeReadyDepartures({
+    // B1 fail-closed:唯讀掃描,零 recognizedAt 寫入。到期款只列待審,不認列。
+    const result = await scanRecognitionDue({
       runId: `cron-${job.id}-${Date.now()}`,
     });
     console.log(
-      `[trustRecognitionWorker] ✅ run ${job.id}: scanned=${result.scanned} recognized=${result.recognized} amount=$${result.totalRecognizedAmount.toFixed(2)} skipNoDate=${result.skippedNoDepartureDate} skipNoMatch=${result.skippedNotMatched}`
+      `[trustRecognitionWorker] ✅ run ${job.id}: scanned=${result.scanned} dueForReview=${result.dueForReview} skipNoDate=${result.skippedNoDepartureDate} skipNoMatch=${result.skippedNotMatched} skipCancelled=${result.skippedCancelledBooking}`
     );
 
-    // Q5 operational reminder: every day, list today's departures + the
-    // amount in trust that Jeff manually needs to move trust → operating.
-    // This is the bridge between the accounting (which is now correct in
-    // the books via recognition) and the actual bank movement.
-    if (result.recognized > 0) {
+    // B1 fail-closed:到期待審 → 出一張 agentMessages 待審卡(同集合去重,照
+    // trustInvariantWatchdog 模式)+ notifyOwner 待審摘要。認列凍結,等 CPA
+    // 認列矩陣核准後由 Jeff 逐筆核 —— 文案只講到期待審,不再誤導成錢可轉出。
+    if (result.dueForReview > 0) {
+      const { getDb } = await import("./db");
+      const db = await getDb();
+      if (db) {
+        await maybePostRecognitionDueCard(db, result).catch((e) => {
+          reportFunnelError({
+            source: "fail-open:trustRecognitionWorker:dueCardFailed",
+            err: e,
+            context: { jobId: job.id ?? "?" },
+          }).catch(() => {});
+        });
+      }
+      const total = result.dueRows.reduce((s, r) => s + r.amount, 0);
       await notifyOwner({
-        title: `💰 信託收入認列 — $${result.totalRecognizedAmount.toFixed(2)} 該轉了`,
+        title: `📋 信託到期待審 — ${result.dueForReview} 筆 $${total.toFixed(2)} 等你逐筆核`,
         content:
-          `${result.recognized} 筆出發前已收的客戶款今天認列為收入,總額 $${result.totalRecognizedAmount.toFixed(2)}。\n\n` +
-          `📋 **今天該手動操作:**\n` +
-          `1. 從信託帳戶轉 **$${result.totalRecognizedAmount.toFixed(2)}** 到 operating 帳戶\n` +
-          `2. 銀行 app / 網銀內部轉帳即可,系統會在下次 Plaid sync 抓到\n\n` +
-          `本月 P&L 已經反映這筆 income(認列日 = 出發日)。`,
+          `${result.dueForReview} 筆出發日已到、已配對訂單的客戶款今天到期待審,總額 $${total.toFixed(2)}。\n\n` +
+          `系統不自動認列(認列是你的動錢權)。等 CPA 認列矩陣核准後,由你逐筆核。\n` +
+          `明細與去重狀態見駕駛艙的「到期待審」卡。`,
       });
     }
     if (result.skippedNotMatched > 5) {
@@ -116,7 +128,7 @@ export const trustRecognitionWorker = new Worker<
 
 trustRecognitionWorker.on("completed", (job, result) => {
   console.log(
-    `[trustRecognitionWorker] ✅ ${job.id}: +${result.recognized} recognized`
+    `[trustRecognitionWorker] ✅ ${job.id}: ${result.dueForReview} due for review`
   );
 });
 

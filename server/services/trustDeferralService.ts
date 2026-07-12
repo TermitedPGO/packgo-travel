@@ -27,10 +27,11 @@
  *       as income_booking on a trust account. Creates a trustDeferredIncome
  *       row, attempts auto-match to a booking.
  *
- *   recognizeReadyDepartures(runId?)
- *     — Called by the daily cron. Recognizes all rows where
- *       expectedRecognitionDate <= today, recognizedAt IS NULL, reversedAt
- *       IS NULL. Returns counts.
+ *   scanRecognitionDue(runId?)
+ *     — Called by the daily cron / admin button. READ-ONLY scan: returns the
+ *       rows where expectedRecognitionDate <= today, recognizedAt IS NULL,
+ *       reversedAt IS NULL, matched + not cancelled, as a review list. B1
+ *       fail-closed — never writes recognizedAt (recognition is Jeff's call).
  *
  *   linkInflowToBooking(deferredId, bookingId, userId)
  *     — Admin override. Manually associate a deferred row with a booking.
@@ -54,9 +55,11 @@ import {
   bookings,
   tourDepartures,
   payments,
+  agentMessages,
 } from "../../drizzle/schema";
 import { and, eq, isNull, isNotNull, lte, gte, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { createHash } from "node:crypto";
 // SECURITY_AUDIT_2026_05_14 P3-3: feature flag reads come from the typed
 // featureFlags module so a typo in env-var names becomes a compile error.
 import * as featureFlags from "../_core/featureFlags";
@@ -74,8 +77,8 @@ export function isTrustDeferralEnabled(): boolean {
  * 銀行同步遞延)與 STRIPE_TRUST_DEFERRAL_ENABLED(Stripe checkout 直接遞延)
  * 是兩個獨立、可分別切換的 flag。**建立**遞延列的路徑(processTrustInflow
  * 只認 PLAID flag、deferStripeBookingIncome 的呼叫端只認 STRIPE flag)本來
- * 就該分開——這是設計上刻意的,兩條路徑的資料來源不同。但**認列/查詢**
- * 遞延列的路徑(recognizeReadyDepartures/totalDeferredForUser/
+ * 就該分開——這是設計上刻意的,兩條路徑的資料來源不同。但**掃描/查詢**
+ * 遞延列的路徑(scanRecognitionDue/totalDeferredForUser/
  * trustRecognizeNow)如果只認 PLAID flag,會出現「Jeff 只開 STRIPE flag、
  * PLAID flag 維持預設 off」這個最可能發生的裁示組合下,Stripe-direct 遞延
  * 列永遠不會被認列、永遠不會被算進報表——3 路獨立對抗審查(含 1 路 opus)
@@ -286,7 +289,7 @@ export function computeExpectedRecognitionDate(
  *
  * CPA 答覆(Jeff 佇列中)回來若調整認列時點,只動 computeExpectedRecognitionDate
  * 的參數(RECOGNITION_OFFSET_DAYS / EARLY_RECOGNITION_WINDOW_DAYS)或本函式的
- * 比較式,不動呼叫端結構 —— recognizeReadyDepartures 的兩處比較都走這裡。
+ * 比較式,不動呼叫端結構 —— scanRecognitionDue 的兩處比較都走這裡。
  *
  * 兩端皆為 'YYYY-MM-DD' 曆日字串,字典序即日期序。expectedRecognitionDate 為
  * null(還算不出認列日,如缺出發日)一律不可認列。
@@ -612,38 +615,50 @@ export async function findStripeDeferredByPaymentId(
   return row ?? null;
 }
 
-export interface RecognizeReadyResult {
+/** scanRecognitionDue 回傳的每筆到期待審列最小明細(卡片/端點顯示用)。 */
+export interface DueRow {
+  id: number;
+  amount: number;
+  bookingId: number | null;
+  expectedRecognitionDate: string | null;
+}
+
+export interface ScanRecognitionDueResult {
   runId: string;
   scanned: number;
-  recognized: number;
-  totalRecognizedAmount: number;
+  /** 到期+已配對+未取消,等 Jeff 逐筆核的筆數(propose-only,零寫入)。 */
+  dueForReview: number;
+  /** 每筆到期待審列的最小明細。 */
+  dueRows: DueRow[];
   skippedNoDepartureDate: number;
   skippedNotMatched: number;
-  /** F1 塊B (2026-07-08) 對抗審查 P1 修復:booking 已 cancelled(退款流程
-   *  轉態)但遞延列還沒被 reverseDeferral 標記(例如 post-commit 沖銷失敗
-   *  留下的殘留態)——這裡當最後一道防線擋下,不認列已取消訂單的收入。 */
+  /** F1 塊B (2026-07-08):booking 已 cancelled(退款流程轉態)但遞延列還沒被
+   *  reverseDeferral 標記的殘留態——掃描不列入待審。 */
   skippedCancelledBooking: number;
 }
 
 /**
- * Daily cron: scan trustDeferredIncome for rows whose expectedRecognitionDate
- * has arrived. Mark them recognized.
+ * Daily cron / admin button:**唯讀掃描** trustDeferredIncome,找出
+ * expectedRecognitionDate 已到、已配對訂單、未取消的未認列列,回傳待審清單。
  *
- * After recognition, the bankPLService treats these as income on the
- * recognition date (not the deposit date).
+ * B1 fail-closed(2026-07-13,Codex 第6輪裁定):認列是 Jeff 的動錢權。CPA
+ * 認列矩陣核准前,本路徑 **絕不** 寫 recognizedAt —— 只 propose,不 dispose。
+ * 此函式沒有任何參數或旗標能讓它復活成寫入者;全庫唯一合法的 recognizedAt
+ * 寫入者是未來的「逐筆核准」批次(尚未建)。舊的自動認列函式已移除改名為本
+ * 函式,靠 tsc 抓漏網 caller。
  */
-export async function recognizeReadyDepartures(
+export async function scanRecognitionDue(
   opts?: { runId?: string; today?: string }
-): Promise<RecognizeReadyResult> {
-  const runId = opts?.runId ?? `trust-recog-${nanoid(10)}`;
+): Promise<ScanRecognitionDueResult> {
+  const runId = opts?.runId ?? `trust-recog-scan-${nanoid(10)}`;
   const today =
     opts?.today ?? new Date().toISOString().slice(0, 10);
 
-  const empty: RecognizeReadyResult = {
+  const empty: ScanRecognitionDueResult = {
     runId,
     scanned: 0,
-    recognized: 0,
-    totalRecognizedAmount: 0,
+    dueForReview: 0,
+    dueRows: [],
     skippedNoDepartureDate: 0,
     skippedNotMatched: 0,
     skippedCancelledBooking: 0,
@@ -652,7 +667,7 @@ export async function recognizeReadyDepartures(
   // F1 塊B (2026-07-08) 對抗審查 P1 修復:改用 isAnyTrustDeferralEnabled
   // (PLAID flag OR STRIPE flag)——只認 PLAID flag 會讓「只開 STRIPE flag」
   // (CPA 對 Stripe 適用範圍的裁示,跟 Jeff 有沒有啟用既有 Plaid 遞延系統是
-  // 兩件獨立的事)這個最可能發生的組合下,Stripe-direct 遞延列永遠不被認列。
+  // 兩件獨立的事)這個最可能發生的組合下,Stripe-direct 遞延列永遠不被掃描。
   if (!isAnyTrustDeferralEnabled()) return empty;
 
   const db = await getDb();
@@ -669,16 +684,14 @@ export async function recognizeReadyDepartures(
       )
     );
 
-  let recognized = 0;
-  let totalAmt = 0;
   let skipNoDate = 0;
   let skipNoMatch = 0;
   let skipCancelled = 0;
+  const dueRows: DueRow[] = [];
 
-  // F1 塊B 對抗審查 P1 修復:最後一道防線——booking 已 cancelled(退款流程
-  // 轉態)但遞延列還沒被 reverseDeferral 標記 reversed(例如 post-commit 沖銷
-  // 失敗、或還沒收到 webhook)的殘留態,認列前先擋下,不把已退款的錢當收入。
-  // 批次撈,不逐列查(N+1)。
+  // F1 塊B 對抗審查 P1 修復:booking 已 cancelled(退款流程轉態)但遞延列還沒
+  // 被 reverseDeferral 標記 reversed(例如 post-commit 沖銷失敗、或還沒收到
+  // webhook)的殘留態,掃描時排除,不把已退款的錢列入待審。批次撈,不逐列查。
   const readyBookingIds = candidates
     .filter((r) => r.bookingId && isRecognitionDue(r.expectedRecognitionDate ? String(r.expectedRecognitionDate) : null, today))
     .map((r) => r.bookingId as number);
@@ -704,36 +717,103 @@ export async function recognizeReadyDepartures(
       skipNoMatch++;
       continue;
     }
-    // §17550 認列時點單一函式(isRecognitionDue):出發前不可認列。
+    // §17550 認列時點單一函式(isRecognitionDue):出發前不到期,不列待審。
     if (!isRecognitionDue(String(r.expectedRecognitionDate), today)) continue; // not yet
     if (cancelledBookingIds.has(r.bookingId)) {
       skipCancelled++;
       continue;
     }
-    await db
-      .update(trustDeferredIncome)
-      .set({
-        recognizedAt: new Date(),
-        recognitionRunId: runId,
-      })
-      .where(eq(trustDeferredIncome.id, r.id));
-    recognized++;
-    totalAmt += parseFloat(r.amount as any) || 0;
+    // propose-only:收進待審清單,**絕不**寫 recognizedAt。
+    dueRows.push({
+      id: r.id,
+      amount: parseFloat(r.amount as any) || 0,
+      bookingId: r.bookingId,
+      expectedRecognitionDate: String(r.expectedRecognitionDate),
+    });
   }
 
   console.log(
-    `[trust-deferral] run=${runId} scanned=${candidates.length} recognized=${recognized} skippedNoDate=${skipNoDate} skippedNoMatch=${skipNoMatch} skippedCancelled=${skipCancelled} totalAmt=${totalAmt.toFixed(2)}`
+    `[trust-deferral] scan run=${runId} scanned=${candidates.length} dueForReview=${dueRows.length} skippedNoDate=${skipNoDate} skippedNoMatch=${skipNoMatch} skippedCancelled=${skipCancelled}`
   );
 
   return {
     runId,
     scanned: candidates.length,
-    recognized,
-    totalRecognizedAmount: totalAmt,
+    dueForReview: dueRows.length,
+    dueRows,
     skippedNoDepartureDate: skipNoDate,
     skippedNotMatched: skipNoMatch,
     skippedCancelledBooking: skipCancelled,
   };
+}
+
+/** 到期待審卡同集合去重的 Redis key(存上次出卡的 due 集合雜湊)。 */
+export const TRUST_RECOGNITION_DUE_ALERT_KEY = "trustRecognitionLastDueSetHash";
+
+type TrustDbHandle = NonNullable<Awaited<ReturnType<typeof getDb>>>;
+
+/**
+ * dueForReview > 0 → insert 一張 agentMessages「到期待審」卡(照
+ * trustInvariantWatchdog.maybePostTrustDriftCard 的形狀)。同一 due 集合
+ * (排序後 id+amount 串雜湊)持續期間去重,集合變化才再出卡;dueForReview
+ * 歸零時清去重記憶。Redis 讀失敗照出卡(合規寧可偏吵,同看門狗)。絕不
+ * throw。回傳是否真的出了卡。
+ */
+export async function maybePostRecognitionDueCard(
+  db: TrustDbHandle,
+  result: ScanRecognitionDueResult,
+): Promise<boolean> {
+  try {
+    const { redis } = await import("../redis");
+
+    if (result.dueForReview <= 0) {
+      // 待審集合清空:清去重記憶,未來再有到期款(即使同集合)要重新出卡。
+      await redis.del(TRUST_RECOGNITION_DUE_ALERT_KEY).catch(() => null);
+      return false;
+    }
+
+    // 同集合去重:排序後 id+amount 串雜湊,同一批待審不重複轟炸。
+    const setKey = result.dueRows
+      .map((r) => `${r.id}:${r.amount}`)
+      .sort()
+      .join("|");
+    const hash = createHash("sha256").update(setKey).digest("hex").slice(0, 16);
+
+    // Redis 讀失敗 → last=null → 照出卡(合規寧可偏吵,同看門狗)。
+    const last = await redis.get(TRUST_RECOGNITION_DUE_ALERT_KEY).catch(() => null);
+    if (last === hash) return false;
+
+    const fmt = (n: number) =>
+      `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const total = result.dueRows.reduce((s, r) => s + r.amount, 0);
+    const lines = result.dueRows
+      .map(
+        (r) =>
+          `- #${r.id} ${fmt(r.amount)} · Booking ${r.bookingId ?? "—"} · 到期 ${r.expectedRecognitionDate ?? "—"}`,
+      )
+      .join("\n");
+
+    await db.insert(agentMessages).values({
+      agentName: "trust-recognition",
+      senderRole: "agent" as const,
+      messageType: "alert" as const,
+      title: `信託到期待審 — ${result.dueForReview} 筆 ${fmt(total)} 等你逐筆核`,
+      body:
+        `每日信託掃描:下列訂金出發日已到、已配對訂單、未取消,列為「到期待審」` +
+        `(唯讀掃描,系統不自動認列):\n${lines}\n\n` +
+        `處置:等 CPA 認列矩陣核准後,由你逐筆核。認列是動錢權,不是排程的。\n` +
+        `(同一批待審持續期間本卡只出一次,集合變化才會再出。)`,
+      priority: "high" as const,
+    });
+    await redis.set(TRUST_RECOGNITION_DUE_ALERT_KEY, hash).catch(() => null);
+    return true;
+  } catch (err) {
+    console.error(
+      "[trust-deferral] recognition-due card post failed (scan continues):",
+      err,
+    );
+    return false;
+  }
 }
 
 /**
@@ -1073,7 +1153,7 @@ export async function totalDeferredForUser(opts: {
    *  預設 false(P&L 存入減項不可含哨兵 —— 哨兵無銀行入帳列可抵)。 */
   includeSentinel?: boolean;
 }): Promise<number> {
-  // F1 塊B 對抗審查 P1 修復:同 recognizeReadyDepartures,認列/查詢路徑要看
+  // F1 塊B 對抗審查 P1 修復:同 scanRecognitionDue,掃描/查詢路徑要看
   // 「任一」遞延機制的 flag,不能只看 PLAID flag(否則 STRIPE-only 開啟時,
   // 這支函式對 Stripe-direct 列永遠回 0,即使 flag 已經開了)。
   //

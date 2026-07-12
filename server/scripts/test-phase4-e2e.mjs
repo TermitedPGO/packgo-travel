@@ -211,29 +211,35 @@ async function simulateProcessTrustInflow(conn, bankTxnId) {
   };
 }
 
-/** Mirrors recognizeReadyDepartures */
-async function simulateRecognize(conn, today) {
+/**
+ * Mirrors scanRecognitionDue (server/services/trustDeferralService.ts).
+ *
+ * B1 fail-closed (2026-07-13): the real scanRecognitionDue is a READ-ONLY
+ * scan — it NEVER writes recognizedAt; due rows only get queued for Jeff's
+ * manual review. This mirror used to run an UPDATE ... SET recognizedAt =
+ * NOW() here, which was the pre-B1 auto-recognition behavior and — because
+ * this script executes against production TiDB — would have actually
+ * written recognizedAt on live rows. Updated in lock-step with the source
+ * to match: count-only, zero writes.
+ */
+async function simulateScanDue(conn, today) {
   const todayStr = today ?? ymd(new Date());
   const [rows] = await conn.execute(
     `SELECT id, expectedRecognitionDate, bookingId
      FROM trustDeferredIncome
      WHERE recognizedAt IS NULL AND reversedAt IS NULL`
   );
-  let recognized = 0;
+  let dueForReview = 0;
   for (const r of rows) {
     if (!r.expectedRecognitionDate || !r.bookingId) continue;
     const expected = new Date(r.expectedRecognitionDate)
       .toISOString()
       .slice(0, 10);
     if (expected > todayStr) continue;
-    await conn.execute(
-      `UPDATE trustDeferredIncome SET recognizedAt = NOW(),
-       recognitionRunId = ? WHERE id = ?`,
-      [`e2e-test-${Date.now()}`, r.id]
-    );
-    recognized++;
+    // B1 fail-closed: propose-only. Never write recognizedAt here.
+    dueForReview++;
   }
-  return { scanned: rows.length, recognized };
+  return { scanned: rows.length, dueForReview };
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -407,21 +413,21 @@ async function main() {
       `got=${r1.expectedRecognitionDate} expected=${ymd(today)}`
     );
 
-    // Step 8: simulate recognizeReadyDepartures
-    const recResult = await simulateRecognize(conn);
+    // Step 8: simulate scanRecognitionDue (B1 fail-closed: read-only scan)
+    const recResult = await simulateScanDue(conn);
     const [[rec1]] = await conn.execute(
       "SELECT recognizedAt FROM trustDeferredIncome WHERE id = ?",
       [r1.deferredId]
     );
     check(
-      "Step 8a: recognizeReadyDepartures recognized the row",
-      rec1.recognizedAt !== null,
+      "Step 8a: B1 fail-closed — scan never writes recognizedAt",
+      rec1.recognizedAt === null,
       `recognizedAt=${rec1.recognizedAt}`
     );
     check(
-      "Step 8b: at least 1 row recognized in this run",
-      recResult.recognized >= 1,
-      `recognized=${recResult.recognized}/${recResult.scanned}`
+      "Step 8b: at least 1 row queued dueForReview in this run",
+      recResult.dueForReview >= 1,
+      `dueForReview=${recResult.dueForReview}/${recResult.scanned}`
     );
 
     // Step 9: long-lead scenario (departure = today + 60 days)
@@ -491,7 +497,7 @@ async function main() {
        reversedReason = 'test cancellation' WHERE id = ?`,
       [r2.deferredId]
     );
-    const rec2 = await simulateRecognize(conn, ymd(addDays(longLeadDeparture, 1)));
+    const rec2 = await simulateScanDue(conn, ymd(addDays(longLeadDeparture, 1)));
     const [[checkRev]] = await conn.execute(
       "SELECT recognizedAt, reversedAt FROM trustDeferredIncome WHERE id = ?",
       [r2.deferredId]
@@ -528,7 +534,7 @@ async function main() {
       `bookingId=${r3.bookingId} expectedDate=${r3.expectedRecognitionDate}`
     );
     // Recognize cron should skip it
-    const rec3 = await simulateRecognize(conn);
+    const rec3 = await simulateScanDue(conn);
     const [[unmatchedRow]] = await conn.execute(
       "SELECT recognizedAt FROM trustDeferredIncome WHERE id = ?",
       [r3.deferredId]

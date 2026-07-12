@@ -1,10 +1,11 @@
 /**
- * RecognitionCard —— 待認列確認卡(F3 塊B#3,B-final 左欄第二卡)。
+ * RecognitionCard —— 到期待審卡(F3 塊B#3,B-final 左欄第二卡)。
  *
- * 「出發了 · 訂金可認列」:trustDeferredList(pending)前端摺 foldDepartedPending
- * (與 server trustOutstandingSplit.departedPending 同口徑 —— 卡上筆數 = 真相列
- * departedPendingCount)。「認列入帳」是 Jeff 按的錢的動作,接
- * plaid.trustRecognizeNow(server 端已接 audit);AI 不自動認列。
+ * B1 fail-closed(2026-07-13):「出發了 · 訂金到期待審」。trustDeferredList
+ * (pending)前端摺 foldDepartedPending(與 server trustOutstandingSplit.
+ * departedPending 同口徑 —— 卡上筆數 = 真相列 departedPendingCount)。按鈕接
+ * plaid.trustRecognizeNow —— 現為**唯讀掃描**(零寫入,server 端接 audit),
+ * 只列出到期待審;認列是 Jeff 的動錢權,等 CPA 認列矩陣核准後逐筆核。
  * 0 筆時整卡隱藏(空態由 WorkColumn 統一顯示)。
  */
 import { trpc } from "@/lib/trpc";
@@ -37,8 +38,7 @@ export function RecognitionCard() {
       } else {
         toast.success(
           t("financeCockpit.work.recogToastDone", {
-            count: String(r.recognized),
-            amount: fmtMoney(r.totalRecognizedAmount),
+            count: String(r.dueForReview),
           }),
         );
       }
@@ -86,7 +86,7 @@ export function RecognitionCard() {
         </div>
       ))}
 
-      {/* 認列按鈕:批次認列所有已到期(server recognizeReadyDepartures + audit) */}
+      {/* 掃描按鈕:唯讀掃描所有到期待審(server scanRecognitionDue + audit,零寫入) */}
       <div className="flex items-center justify-between gap-3 border-t border-gray-100 bg-gray-50 px-4 py-2.5">
         <div className="text-[11px] text-gray-500">
           {t("financeCockpit.work.recogFooter", {
