@@ -20,6 +20,7 @@
 - 通信檔:桌面 PACKGO_AI交流/(兩夾+索引);第 5 則(虛報自首)草擬待證據齊才傳。
 
 ## 在飛/待處理
+- B1 信託認列 fail-closed:已合併 main(commit 77045fc,未部署)。自動 recognizedAt 寫入全移除,worker/管理端改唯讀掃描只產待審卡;守門測試三層防復活(紅綠自證);e2e 腳本舊後門同封。fresh opus 對抗審查 PASS;指揮親跑 tsc 0 錯+trust 121 綠+grep 0 命中。evidence: server/services/trustDeferralService.failClosed.test.ts + docs/features/trust-recognition-fail-closed/progress.md。控制生效待 Jeff ship 後次日 cron 觀察零自動認列。注意:逐筆核准端點刻意未建(等 CPA 矩陣),建成前認列全停擺。
 - 證據補全批:完成(evidence_preservation 包+缺口登記+系統快照,~/Documents,已抽核)。
 - DB 硬化批:完成(branch db-hardening commit 00324eb,抽核過:migrate 安全回退、schemaContract 缺表才 503、canary 腳本備妥未實跑、角色腳本佔位符無真憑證)。未合 main。code 部分(schemaContract+deploySmoke 九臂+migrate 回退)byte-identical 安全;角色/canary/還原需 Jeff console 操作才推進。runbook: docs/infra/db-role-hardening.md、restore-drill.md。
 - CLAUDE.md 治理修正:本批(Codex 5.5 三 P0 已核採納,詳規進 60-evidence-and-ops.md)。
