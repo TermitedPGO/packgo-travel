@@ -21,7 +21,7 @@
 --
 -- Migration 風格:照 docs/MIGRATION_PATTERNS.md Rule 1,CREATE TABLE / ADD COLUMN
 -- IF NOT EXISTS(TiDB 原生),不套 PREPARE/IF(0070 事故);Rule 2,語句間用
--- --> statement-breakpoint 分隔(標記獨立成行,不寫進註解 —— 0112 事故)。
+-- breakpoint 標記行分隔(標記獨立成行,註解內不得出現字面標記 —— 0112 事故)。
 -- 本檔僅產出,絕不對任何 DB 執行(紅線 9;prod 由 pnpm ship 的 release_command
 -- 跑,執行後照 Rule 3 SHOW TABLES/COLUMNS 驗證)。
 
