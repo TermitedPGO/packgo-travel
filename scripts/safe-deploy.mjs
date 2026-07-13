@@ -44,6 +44,12 @@ const APPROVE_FILE = ".deploy-approve";
 // living in Jeff's terminal scrollback. Deleted on a successful deploy.
 // Gitignored (see .gitignore) — must never trip gate 2's clean-tree check.
 const ERROR_LOG_FILE = ".deploy-last-error.log";
+// B1.2(Codex 6.6 P0)外部審查閘:本 release 相關的 AI 交流審查若還有「待傳/待裁定/
+// 退回」未結,不得進 token 閘(6.7 §六流程教訓:未結審查就部署會把未裁定的東西上線)。
+// 讀桌面的 AI 交流索引;fail-closed(讀不到也擋),逃生口 SKIP_REVIEW_GATE=1。
+const REVIEW_INDEX_PATH = "/Users/jeff/Desktop/PACKGO_AI交流/00_索引.md";
+// 命中任一即擋:★待傳(還沒交給 Jeff 傳)、待裁定(等 Jeff/外部裁決)、退回(被打回重做)。
+const REVIEW_BLOCK_MARKERS = ["★待傳", "待裁定", "退回"];
 
 const indent = (s) =>
   String(s)
@@ -58,6 +64,44 @@ function tokensMatch(a, b) {
   const bb = Buffer.from(b, "utf8");
   if (ba.length !== bb.length) return false;
   return timingSafeEqual(ba, bb);
+}
+
+/**
+ * 6.9 外部審查閘的命中判定 —— 只比對 markdown 表格的「狀態欄」。
+ *
+ * 為什麼不整行比對:真實索引 00_索引.md 是「| 日期 | 輪 | 去/回 | 摘要 | 檔案 | 狀態 |」
+ * 表格,歷史列的「摘要」欄常含「證據保全狀態退回」「unsafe rollback與錯誤oracle退回B1.2」
+ * 這類字樣,但那些列的狀態欄其實是「已裁定/已收裁定接受」= 已結案。整行比對會讓這些
+ * 已結案歷史列永久命中 → 閘永久紅 → 逃生口 SKIP_REVIEW_GATE 變常態 = 閘失效。
+ * 改為只看狀態欄即根治:未結的審查其狀態欄才會真的是 ★待傳/待裁定/退回。
+ *
+ * 規則:狀態欄 = 每列以 | 切割後「最後一個非空 cell」。非表格行(trim 後不以 | 開頭)
+ * 不比對;表頭列(狀態=「狀態」,不含 marker 故自然不命中)與分隔列(|---|---|,狀態
+ * cell 全為 - : 空白)跳過。狀態欄含任一 marker 才算命中。
+ * 回傳 [{ n: 1-based 行號, l: 原始行文 }],供 fail 訊息照舊列行號與行文。
+ */
+export function reviewGateHits(idx) {
+  const hits = [];
+  const lines = String(idx).split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const line = raw.trim();
+    if (!line.startsWith("|")) continue; // 非表格資料列(敘述/標題/引言)不比對
+    const cells = line.split("|").map((c) => c.trim());
+    let status = "";
+    for (let k = cells.length - 1; k >= 0; k--) {
+      if (cells[k] !== "") {
+        status = cells[k];
+        break;
+      }
+    }
+    if (status === "") continue; // 全空列
+    if (/^[-:\s]+$/.test(status)) continue; // 分隔列 |---|---|(含對齊冒號)
+    if (REVIEW_BLOCK_MARKERS.some((m) => status.includes(m))) {
+      hits.push({ n: i + 1, l: raw });
+    }
+  }
+  return hits;
 }
 
 /**
@@ -191,6 +235,35 @@ async function guardInner(deps, opts) {
     ok(`SQL 彩排通過(${reh.passed}/${reh.total} 條 EXPLAIN-clean on prod TiDB)`);
   }
 
+  // 6.9 — 外部審查閘(B1.2 Codex 6.6 P0)。放 token 閘之前:本 release 相關的 AI 交流
+  //   審查若仍有「★待傳/待裁定/退回」未結,先結案再部署,不得直接進人工授權鎖。
+  //   讀桌面 AI 交流索引;fail-closed(讀不到=擋)。逃生口 SKIP_REVIEW_GATE=1(附風險
+  //   警語)。編號 6.9 是為了不動既有七閘「/7」語義(同 6.5 SQL 彩排的慣例)。
+  log("[6.9/7] 外部審查閘(AI 交流索引 待傳/待裁定/退回 未結即擋)");
+  if (env.SKIP_REVIEW_GATE === "1") {
+    log(
+      "  ⚠ skipped (SKIP_REVIEW_GATE=1) — 略過外部審查閘;你正在明知未確認 AI 交流索引" +
+        "(待傳/待裁定/退回)的情況下部署,風險自負",
+    );
+  } else {
+    const idx = deps.readReviewIndex();
+    if (idx == null) {
+      return fail(
+        `外部審查索引讀不到(${REVIEW_INDEX_PATH})— fail-closed 擋部署(無法確認審查已結)。\n` +
+          `   逃生口:SKIP_REVIEW_GATE=1 pnpm ship(略過外部審查閘;風險自負)`,
+      );
+    }
+    const hitLines = reviewGateHits(idx);
+    if (hitLines.length > 0) {
+      const listed = hitLines.map(({ n, l }) => `      L${n}: ${l.trim().slice(0, 120)}`).join("\n");
+      return fail(
+        `外部審查未結 — AI 交流索引仍有 待傳/待裁定/退回 標記,先結案再部署:\n${listed}\n` +
+          `   逃生口:SKIP_REVIEW_GATE=1 pnpm ship(明知未結仍部署;風險自負)`,
+      );
+    }
+    ok(`外部審查索引無 待傳/待裁定/退回(${REVIEW_BLOCK_MARKERS.join("/")})`);
+  }
+
   // 7. human authorization lock — the part a session cannot fabricate
   log("[7/7] human authorization lock (.deploy-approve must equal env DEPLOY_TOKEN)");
   const raw = deps.readApprove();
@@ -238,6 +311,11 @@ async function guardInner(deps, opts) {
   deps.deleteApprove();
   log(`\n  ✓ deployed; ${APPROVE_FILE} consumed (one-time token burned)`);
 
+  // 上線後驗證(health / 煙霧)紅燈時,部署已經發生 —— 這不是「還沒部署」的可退狀態。
+  // B1.2(Codex 6.6 P0):絕不建議 `flyctl releases rollback`。退回 v811 會把「信託自動
+  // 認列」裝回去(v812 才上線的財務停止線是為了擋掉它)。驗證紅 = forward-fix,不是回退。
+  let verificationFailed = false;
+
   // post-deploy health check
   try {
     const h = deps.health();
@@ -245,8 +323,14 @@ async function guardInner(deps, opts) {
     if (h.checks)
       for (const [k, v] of Object.entries(h.checks))
         log(`    ${k}: ${v.status}${v.latencyMs != null ? ` ${v.latencyMs}ms` : ""}`);
-    if (h.overall !== "ok")
-      error(`  ⚠ health NOT ok — investigate; rollback with: flyctl releases rollback -a ${APP}`);
+    if (h.overall !== "ok") {
+      verificationFailed = true;
+      error(
+        `  ⛔ DEPLOYED_UNVERIFIED — /health 非 ok。部署已發生但驗證未通過;` +
+          `不得回退 v811(退回 v811 會復活自動認列,重裝已被財務停止線擋掉的行為);` +
+          `保留財務停止線,立即 forward-fix。`,
+      );
+    }
   } catch (e) {
     error(`  ⚠ post-deploy health check failed: ${short(e)}`);
   }
@@ -267,9 +351,12 @@ async function guardInner(deps, opts) {
               `${a.rowCount != null ? ` rows=${a.rowCount}` : ""}${a.error ? `  ${a.error}` : ""}`,
           );
       if (!smoke.ok) {
+        verificationFailed = true;
         const failed = (smoke.arms || []).filter((a) => !a.ok).map((a) => a.name);
         error(
-          `  ⚠ 煙霧未全過(失敗臂:${failed.join(", ")})— 投查;rollback: flyctl releases rollback -a ${APP}`,
+          `  ⛔ DEPLOYED_UNVERIFIED — 煙霧未全過(失敗臂:${failed.join(", ")})。` +
+            `部署已發生但驗證未通過;不得回退 v811(退回 v811 會復活自動認列);` +
+            `保留財務停止線,立即 forward-fix。`,
         );
       }
     } catch (e) {
@@ -286,7 +373,17 @@ async function guardInner(deps, opts) {
     /* non-fatal */
   }
 
-  log("\n✅ deploy complete.");
+  if (verificationFailed) {
+    // 驗證(health / 煙霧)紅燈:部署已發生但未通過上線驗證。機械可辨認字串
+    // DEPLOYED_UNVERIFIED 讓 monitor / 下一個 session 明確識別此態,絕不印
+    // 「deploy complete」把未驗證誤導成成功。禁止回退 v811(會復活自動認列)。
+    error(
+      "\n⛔ DEPLOYED_UNVERIFIED — 部署已發生但上線驗證未通過。" +
+        "不得回退 v811(退回會復活自動認列);保留財務停止線,立即 forward-fix。",
+    );
+  } else {
+    log("\n✅ deploy complete.");
+  }
   return 0;
 }
 
@@ -315,6 +412,9 @@ function makeRealDeps() {
     run,
     env: process.env,
     readApprove: () => (existsSync(approvePath) ? readFileSync(approvePath, "utf8") : null),
+    // 6.9 外部審查閘:讀桌面 AI 交流索引原文(不存在回 null → 閘 fail-closed 擋)。
+    readReviewIndex: () =>
+      existsSync(REVIEW_INDEX_PATH) ? readFileSync(REVIEW_INDEX_PATH, "utf8") : null,
     deleteApprove: () => {
       if (existsSync(approvePath)) unlinkSync(approvePath);
     },

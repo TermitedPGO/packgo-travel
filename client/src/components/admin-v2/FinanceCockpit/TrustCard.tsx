@@ -190,7 +190,7 @@ export function TrustCard({ trust }: { trust: TrustTile }) {
                 </div>
               )}
 
-              {/* 已出發待認列列(red dot,對應左側待認列卡) */}
+              {/* 審查日已到列(red dot,舊規則到期 → 待人工審查,對應左側待審卡) */}
               {departed.items.map((row) => (
                 <div key={row.id} className="flex items-center gap-2 border-b border-gray-50 py-2 text-xs last:border-0">
                   <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-red-500" />

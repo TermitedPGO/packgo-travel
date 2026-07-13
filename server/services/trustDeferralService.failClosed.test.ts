@@ -16,7 +16,17 @@
  * 全部直接 await 被測函式,無 fire-and-forget,故不需 vi.waitFor。合成資料。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import {
+  readFileSync,
+  readdirSync,
+  statSync,
+  existsSync,
+  writeFileSync,
+  unlinkSync,
+  mkdtempSync,
+  rmSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 
@@ -185,6 +195,7 @@ describe("mode 復活防護:產線碼零 recognizedAt 寫入(2c)", () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const serverDir = resolve(here, ".."); // server/services → server
   const repoScriptsDir = resolve(here, "..", "..", "scripts"); // repo 根 scripts/
+  const drizzleDir = resolve(here, "..", "..", "drizzle"); // repo 根 drizzle/(140+ migration SQL)
 
   // B1.1(Codex 6.5 P1.2):掃描副檔名擴到 .ts/.mjs/.js/.cjs/.sql;排除任何
   // *.test.*(含 .test.mjs 等);node_modules 跳過。根 scripts/ 也套同一副檔名
@@ -247,13 +258,17 @@ describe("mode 復活防護:產線碼零 recognizedAt 寫入(2c)", () => {
   function scanSource(src: string): string[] {
     const offenders: string[] = [];
     src.split("\n").forEach((ln, idx) => {
+      // B1.2(Codex 6.6 P1):守門納入 drizzle/**/*.sql。SQL 註解行(-- 開頭)略過 ——
+      // 既有歷史 migration 的說明註解(如 0072 的「mark recognizedAt = NOW().」)是
+      // 文件不是寫入,不得誤判;真正的 raw-SQL 賦值(非註解)仍被下面三條抓。
+      if (ln.trim().startsWith("--")) return;
       if (
         /recognizedAt:\s*new Date/.test(ln) ||
         /set\(\{\s*recognizedAt/.test(ln) ||
-        // raw SQL 賦值 `recognizedAt = NOW()`。負向斷言排除:`==`/`===` 比較,
-        // 以及 JS 模板字串內插 `recognizedAt=${...}`(debug 字串,非寫入)——
-        // 賦值等號後(略過空白)的第一個非空白字元不得是 `=` 或 `$`。
-        /recognizedAt\s*=\s*(?![$=])/.test(ln)
+        // raw SQL 賦值 `recognizedAt = NOW()`,含 MySQL/TiDB 反引號欄名(`recognizedAt` = )。
+        // 負向斷言排除:`==`/`===` 比較,及 JS 模板字串內插 `recognizedAt=${...}`(debug
+        // 字串,非寫入)—— 賦值等號後(略過空白)的第一個非空白字元不得是 `=` 或 `$`。
+        /recognizedAt`?\s*=\s*(?![$=])/.test(ln)
       ) {
         offenders.push(`${idx + 1}: ${ln.trim()}`);
       }
@@ -272,13 +287,53 @@ describe("mode 復活防護:產線碼零 recognizedAt 寫入(2c)", () => {
     expect(scanSource("if (row.recognizedAt === null) return;")).toEqual([]);
     expect(scanSource("WHERE recognizedAt IS NULL AND reversedAt IS NULL")).toEqual([]);
     expect(scanSource("`recognizedAt=${row.recognizedAt} reversedAt=${row.reversedAt}`")).toEqual([]);
+
+    // B1.2(Codex 6.6 P1):drizzle SQL 面 —— 反引號欄名賦值被抓,SQL 註解與欄位/索引
+    // 定義放行(這正是 drizzle 歷史 migration 的既有形狀,不得誤判)。
+    expect(scanSource("UPDATE trustDeferredIncome SET `recognizedAt` = NOW();").length).toBeGreaterThan(0);
+    expect(scanSource("--   AND reversedAt IS NULL → mark recognizedAt = NOW(). bankPLService")).toEqual([]);
+    expect(scanSource("  `recognizedAt` TIMESTAMP NULL DEFAULT NULL,")).toEqual([]);
+    expect(scanSource("  KEY `idx_recognition_ready` (`recognizedAt`, `expectedRecognitionDate`, `reversedAt`),")).toEqual([]);
   });
 
-  it("server/**/*.{ts,mjs,js,cjs,sql} + scripts/(排除 *.test.*)無 recognizedAt 寫入痕跡", () => {
-    const files = [...walkCode(serverDir), ...walkCode(repoScriptsDir)];
-    // sanity:確實掃到產線檔,且擴充副檔名真的生效(有掃到 .mjs)。
+  it("drizzle/ SQL 守門紅綠自證:植入反引號 `recognizedAt` = NOW() 假檔轉紅、刪除復綠", () => {
+    // 用獨立 temp 目錄(不污染 repo 的 drizzle/,也不觸 clean-tree gate)驗證整條
+    // walk + scan + .sql 副檔名 + 反引號賦值偵測。finally 清目錄,單檔連跑多次互不殘留。
+    const tmp = mkdtempSync(join(tmpdir(), "trust-drizzle-guard-"));
+    try {
+      // 空目錄:綠。
+      expect(walkCode(tmp)).toEqual([]);
+      // 植入含反引號欄名賦值的假 migration → 轉紅。
+      const planted = join(tmp, "9999_planted_recognize_writeback.sql");
+      writeFileSync(
+        planted,
+        "-- 這行是註解,不該被抓:mark recognizedAt = NOW()\n" +
+          "UPDATE `trustDeferredIncome` SET `recognizedAt` = NOW() WHERE id = 1;\n",
+      );
+      const filesRed = walkCode(tmp);
+      expect(filesRed).toContain(planted);
+      const offendersRed: string[] = [];
+      for (const f of filesRed) for (const h of scanSource(readFileSync(f, "utf8"))) offendersRed.push(h);
+      expect(offendersRed.length).toBeGreaterThan(0); // 反引號賦值被抓(註解那行不算)
+      // 刪除假檔 → 復綠。
+      unlinkSync(planted);
+      const offendersGreen: string[] = [];
+      for (const f of walkCode(tmp)) for (const h of scanSource(readFileSync(f, "utf8"))) offendersGreen.push(h);
+      expect(offendersGreen).toEqual([]);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("server/ + scripts/ + drizzle/(排除 *.test.*)無 recognizedAt 寫入痕跡(.ts/.mjs/.js/.cjs/.sql)", () => {
+    // 效能:walkCode 只列路徑,下面單一迴圈每檔 readFileSync 一次(drizzle 有 140+
+    // migration SQL,一次列出、一次讀取,不重複掃)。
+    const files = [...walkCode(serverDir), ...walkCode(repoScriptsDir), ...walkCode(drizzleDir)];
+    // sanity:確實掃到產線檔,且擴充副檔名真的生效(有掃到 .mjs),drizzle 的 .sql 也在。
     expect(files.length).toBeGreaterThan(50);
     expect(files.some((f) => f.endsWith(".mjs"))).toBe(true);
+    // 守門確實把 drizzle/ 的 .sql 掃進來(否則歷史/未來 migration 的 raw-SQL 認列寫入漏網)。
+    expect(files.some((f) => f.endsWith(".sql") && f.includes("drizzle"))).toBe(true);
     const offenders: string[] = [];
     for (const f of files) {
       const src = readFileSync(f, "utf8");

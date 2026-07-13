@@ -2067,7 +2067,7 @@ export const plaidRouter = router({
 
   /**
    * Manually trigger the daily trust-recognition scan. B1 fail-closed
-   * (2026-07-13): this is a READ-ONLY scan — it NEVER writes recognizedAt.
+   * (2026-07-12): this is a READ-ONLY scan — it NEVER writes recognizedAt.
    * Returns the list of rows due for review; recognition stays frozen until
    * the CPA recognition matrix is approved and Jeff signs off per-row.
    */

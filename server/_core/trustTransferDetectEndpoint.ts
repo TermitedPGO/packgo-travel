@@ -1,7 +1,7 @@
 /**
  * trustTransferDetectEndpoint — /api/admin/trust-transfer-detect 的可測 handler。
  *
- * B1.1(Codex 6.5 P0.1,2026-07-13):兩個寫入模式 fail-closed。
+ * B1.1(Codex 6.5 P0.1,2026-07-12):兩個寫入模式 fail-closed。
  *   - mode:"dry_run"        → 只算不寫的偵測報表(唯一放行)。
  *   - mode:"confirm"        → 403(回填閉環暫停,等矩陣)。
  *   - mode:"manual_backfill"→ 403(逐筆回填暫停,等矩陣)。

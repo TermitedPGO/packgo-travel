@@ -1298,7 +1298,7 @@ console.log("✅ Plaid daily sync queue initialized");
 //
 // Once a day at 06:00 UTC (1 hour after the Plaid sync at 05:00) READ-ONLY
 // scan of trustDeferredIncome for rows whose expectedRecognitionDate has
-// arrived. B1 fail-closed (2026-07-13): the scan NEVER writes recognizedAt —
+// arrived. B1 fail-closed (2026-07-12): the scan NEVER writes recognizedAt —
 // recognition is Jeff's money-move call. dueForReview rows only surface a
 // review card (agentMessages) for Jeff to reconcile once the CPA recognition
 // matrix is approved; the per-row approval endpoint is a later batch.

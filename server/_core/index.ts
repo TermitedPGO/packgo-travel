@@ -1639,7 +1639,7 @@ async function startServer() {
   // transferredAt/transferBankTransactionId(僅規則 1 單列全等;回填走 systemAudit,
   // 檔頭慣例)。每日 trustRecognitionWorker 也會自動跑 confirm 口徑;本端點供
   // 人工觸發/走查。同 dry_run/confirm + LOCAL_SCRIPT_TOKEN 慣例,回應即報表。
-  // B1.1(Codex 6.5 P0.1,2026-07-13):寫入模式 fail-closed —— confirm 與
+  // B1.1(Codex 6.5 P0.1,2026-07-12):寫入模式 fail-closed —— confirm 與
   // manual_backfill 一律 403(回填閉環暫停,等 CPA 認列矩陣+律師提領矩陣),
   // 只放行 dry_run。除了服務內 isTrustTransferWriteApproved 機械閘之外的防禦
   // 縱深。路由/403/dry_run 放行的紅綠純測在 ./trustTransferDetectEndpoint。

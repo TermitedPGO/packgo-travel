@@ -9,7 +9,7 @@
  *                              the departure happened — those stay deferred
  *                              and surface in admin reconciliation)
  *
- * B1 fail-closed (2026-07-13): the daily tick is a READ-ONLY scan. It NEVER
+ * B1 fail-closed (2026-07-12): the daily tick is a READ-ONLY scan. It NEVER
  * writes recognizedAt — recognition is Jeff's money-move call, frozen until
  * the CPA recognition matrix is approved. dueForReview rows only produce a
  * review card (agentMessages) for Jeff to reconcile per-row later.
@@ -28,7 +28,7 @@ import { notifyOwner } from "./_core/notification";
 import { wireWorkerFunnel, reportFunnelError } from "./_core/errorFunnel";
 
 /**
- * The daily-cron job processor, extracted (B1.1, 2026-07-13) so an integration
+ * The daily-cron job processor, extracted (B1.1, 2026-07-12) so an integration
  * test can run the real funnel — transfer detection (mechanically forced
  * dry-run) + scanRecognitionDue + review card — without constructing a BullMQ
  * Worker or opening a Redis connection. Behavior is byte-identical to the
@@ -49,7 +49,7 @@ export async function processTrustRecognitionJob(
     // 的唯一日常呼叫端,外層的 gate 若還只看 PLAID flag,即使函式本體已經
     // 修好,worker 還是會在 STRIPE-only 開啟時提早 return 不呼叫它。
     // F2 塊B(2026-07-10):Trust→Operating 轉帳偵測,搭每日認列 cron 便車。
-    // B1.1(Codex 6.5 P0.1,2026-07-13):回填閉環暫停 —— 這裡硬帶 dryRun:true
+    // B1.1(Codex 6.5 P0.1,2026-07-12):回填閉環暫停 —— 這裡硬帶 dryRun:true
     // 作雙保險(服務內另有 isTrustTransferWriteApproved 機械閘,現硬回 false
     // 亦強制 dry-run)。矩陣未核准前:不回填 transferredAt、不出催轉卡、不動錢。
     // §17550.15(c) 無「會計已認列即可轉」;歷史 recognizedAt 可能來自舊出發日
@@ -141,15 +141,28 @@ trustRecognitionWorker.on("completed", (job, result) => {
   );
 });
 
-trustRecognitionWorker.on("failed", (job, err) => {
+/**
+ * failed-listener 告警路徑,抽成具名函式以便單測(B1.1 P1.3:scanRecognitionDue 在
+ * DB 不可用時 throw → job reject → BullMQ 走 failed → 這裡發 notifyOwner 告警)。
+ * 行為與原本 inline listener 逐字相同(fire-and-forget notifyOwner + 失敗降級到
+ * errorFunnel)。回傳 Promise 純為可測;.on("failed") 仍不 await(BullMQ 慣例)。
+ */
+export async function handleTrustRecognitionJobFailed(
+  job: Job<TrustRecognitionJobData, TrustRecognitionJobResult> | undefined,
+  err: Error,
+): Promise<void> {
   console.error(`[trustRecognitionWorker] ❌ ${job?.id} failed:`, err.message);
-  notifyOwner({
+  await notifyOwner({
     title: `[trustRecognitionWorker] Job ${job?.id ?? "?"} failed`,
     content: `Error: ${err.message}\n\n${err.stack ?? "(no stack)"}`,
   }).catch((e) => {
     console.error("[notifyOwner] dispatch failed:", e);
     reportFunnelError({ source: "fail-open:trustRecognitionWorker:notifyOwnerFailed", err: e, context: { jobId: job?.id ?? "?" } }).catch(() => {});
   });
+}
+
+trustRecognitionWorker.on("failed", (job, err) => {
+  void handleTrustRecognitionJobFailed(job, err);
 });
 
 wireWorkerFunnel(trustRecognitionWorker, "trust-recognition");

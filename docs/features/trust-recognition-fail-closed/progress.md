@@ -13,6 +13,10 @@
 | B1.1 施工(Codex 6.5 五完成線) | 完成 2026-07-12(opus 執行):機械閘 trustTransferWriteGate 硬 false 強制 dry-run、manual_backfill blocked、端點 confirm/manual_backfill 403、中性文案+LA 曆日、!db throw、守門擴 .mjs/.js/.cjs/.sql+scripts/、worker processor 抽出+整合測試 | tasks/03 + 本表下 |
 | B1.1 對抗審查 | 完成 2026-07-12:fresh opus PASS 零阻塞(三寫入點全在閘後、mock 不入產線圖、端點 body 覆寫無效、LA 無 off-by-one 逐一驗);1 觀察級遞延:en.ts trustNote/trustNoteEq「recognized (departed)」非本 diff,列 backlog | 審查報告收於指揮 session |
 | B1.1 指揮驗收 | 完成 2026-07-12:親跑 trust 10 檔 133 綠、i18n 551 綠、tsc 0 錯、grep 僅 2 呼叫點皆 dryRun:true+催轉語 0 命中;機械閘/worker/scan diff 逐行親讀 | 本表下方交付 |
+| cron 首輪運行驗證 | 通過 2026-07-13T06:00Z:五項計數全中 oracle、job completed、無催轉、探針零變化;第二輪待 07-14T06:00Z | prod-baseline-20260712.md 執行紀錄 |
+| B1.2 施工(Codex 6.6 七項) | 完成 2026-07-12 深夜(opus):safe-deploy 去 rollback 建議+DEPLOYED_UNVERIFIED+審查閘 6.9、TrustCard 三 key 中性化、真閘漏斗測試、drizzle 守門、failed handler 抽出可測、11 行日期誤標修 | tasks/04 |
+| B1.2 對抗審查 | 完成:fresh opus,verdict 阻塞 1(閘 6.9 整行比對=死閘,與指揮獨立發現收斂)已修(狀態欄比對+回歸測試+真索引實掃假陽性歸零);其餘六項宣稱成立;殘留觀察級 trustNote 進 backlog | tasks/04 尾註 |
+| B1.2 指揮驗收 | 完成:親跑 tsc 0、trust 10 檔 139 綠、i18n 551 綠、ship:test 32/32;reviewGateHits/safe-deploy 紅燈段 diff 親讀;真索引閘命中僅剩真待傳 1 行 | 本表 |
 
 ## 交付內容(evidence_reference)
 

@@ -641,7 +641,7 @@ export interface ScanRecognitionDueResult {
  * Daily cron / admin button:**唯讀掃描** trustDeferredIncome,找出
  * expectedRecognitionDate 已到、已配對訂單、未取消的未認列列,回傳待審清單。
  *
- * B1 fail-closed(2026-07-13,Codex 第6輪裁定):認列是 Jeff 的動錢權。CPA
+ * B1 fail-closed(2026-07-12,Codex 第6輪裁定):認列是 Jeff 的動錢權。CPA
  * 認列矩陣核准前,本路徑 **絕不** 寫 recognizedAt —— 只 propose,不 dispose。
  * 此函式沒有任何參數或旗標能讓它復活成寫入者;全庫唯一合法的 recognizedAt
  * 寫入者是未來的「逐筆核准」批次(尚未建)。舊的自動認列函式已移除改名為本
