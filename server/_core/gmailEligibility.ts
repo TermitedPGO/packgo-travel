@@ -66,3 +66,61 @@ export function classifyIntakeEligibility(fromHeader: string): EligibilityVerdic
 export function isEligibleForIntake(fromHeader: string): boolean {
   return classifyIntakeEligibility(fromHeader).eligible;
 }
+
+// ── v2 (Codex 12 輪 P0-1) — the ledger-first ROUTE decision ───────────────────
+//
+// The ledger now records EVERY discovered message (eligibility no longer gates
+// landing), so the downstream classification stage must decide, for an already-
+// landed row, WHERE it goes. This is the single source of truth for that decision
+// — the History feeder, the shadow observer, and any future backfill all call it
+// so a message one path routes as receipt and another as noise can never diverge.
+//
+// The five routes:
+//   customer          — a real customer inquiry → the InquiryAgent chain.
+//   receipt           — a vendor/merchant receipt → processReceiptEmail. The
+//                       receipt classifier runs BEFORE the noise/self terminal
+//                       (§五): a noreply merchant receipt (noreply@marriott.com)
+//                       MUST route to receipt, never be dropped as noise.
+//   noise             — noreply / known-noise sender, not a receipt → ignored.
+//   self_or_outbound  — own-mailbox / self-sent / outbound → ignored.
+//   manual_review     — reserved for ambiguous / conflict cases a human resolves.
+export type IntakeRoute =
+  | "customer"
+  | "receipt"
+  | "noise"
+  | "self_or_outbound"
+  | "manual_review";
+
+/**
+ * Normalize a raw `From` header to the bare lowercase address the ledger stores
+ * (display name dropped, bounded to the column width). Falls back to the trimmed-
+ * lowercased raw when unparseable so nothing lands blank; a bare address is a
+ * valid input to classifyIntakeEligibility (it re-parses). Lives here (not in the
+ * engine) so the route decision + normalization share one leaf module.
+ */
+export function normalizeFromAddress(raw: string): string {
+  const bare = parseEmailAddress(raw) ?? raw.trim().toLowerCase();
+  return bare.slice(0, 320);
+}
+
+/**
+ * Decide the route for a landed ledger row from the two raw signals the
+ * classification stage hydrates: the `From` header and whether the rules-only
+ * receipt sniff (legacy detectReceipt criteria) fired. Pure — no I/O.
+ *
+ * Ordering is the whole point (§五): the receipt check runs FIRST, before the
+ * eligibility terminal, so a receipt from a noreply/own address still routes to
+ * receipt. Only non-receipts fall through to eligibility: eligible → customer,
+ * own_email → self_or_outbound, noreply/known_noise → noise.
+ */
+export function decideIntakeRoute(
+  fromHeader: string,
+  isReceipt: boolean,
+): { route: IntakeRoute; fromAddress: string } {
+  const fromAddress = normalizeFromAddress(fromHeader);
+  if (isReceipt) return { route: "receipt", fromAddress };
+  const verdict = classifyIntakeEligibility(fromHeader);
+  if (verdict.eligible) return { route: "customer", fromAddress };
+  if (verdict.reason === "own_email") return { route: "self_or_outbound", fromAddress };
+  return { route: "noise", fromAddress }; // noreply | known_noise
+}

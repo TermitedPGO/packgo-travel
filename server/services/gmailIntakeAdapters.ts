@@ -13,11 +13,12 @@ import {
   buildGmailClient,
   ensureLabel,
   listMessagesByIds,
-  listHistoryMessageIds,
-  fetchMessagesMetadata,
+  fetchHistoryPage,
+  scanQueryPage,
   listMessageMetadataForQuery,
   getMailboxHistoryId as gmailGetMailboxHistoryId,
 } from "../_core/gmail";
+import { detectReceipt } from "../_core/receiptExtractor";
 import {
   runDownstreamForLedgerMessage,
   PROCESSED_LABEL,
@@ -25,18 +26,21 @@ import {
 import { createChildLogger } from "../_core/logger";
 import {
   syncHistoryForIntegration,
+  classifyPendingLedger,
   feedPendingDownstream,
   type GmailIntakePort,
+  type ClassifierPort,
   type LockPort,
   type LedgerStore,
   type AlertPort,
   type DownstreamPort,
   type HistorySyncDeps,
   type IntegrationCursor,
-  type LedgerCandidate,
+  type MinimalLedgerRow,
   type LedgerRow,
   type LedgerStatus,
   type FailureKind,
+  type IntakeRoute,
 } from "./gmailHistorySync";
 import {
   reconcileIntegration,
@@ -67,22 +71,53 @@ export function createGmailIntakePort(
   gmail: ReturnType<typeof buildGmailClient>,
 ): GmailIntakePort {
   return {
-    async collectHistoryAdded(startHistoryId) {
-      // maxMessages high so ALL pages are walked for PACK&GO scale (順序鐵律 —
-      // never stop mid-pagination and advance the cursor past uncollected ids).
-      return listHistoryMessageIds(gmail, startHistoryId, {
-        labelId: "INBOX",
-        maxMessages: 5000,
-      });
+    // ONE history page per call — the engine paginates + advances the cursor per
+    // page (P0-2 逐頁前綴推進). No discovery cap here.
+    fetchHistoryPage(startHistoryId, pageToken) {
+      return fetchHistoryPage(gmail, startHistoryId, pageToken, { labelId: "INBOX" });
     },
-    fetchMetadata(ids) {
-      return fetchMessagesMetadata(gmail, ids);
+    scanQueryPage(query, pageToken) {
+      return scanQueryPage(gmail, query, pageToken);
     },
     scanQueryMetadata(query) {
       return listMessageMetadataForQuery(gmail, query);
     },
     getMailboxHistoryId() {
       return gmailGetMailboxHistoryId(gmail);
+    },
+  };
+}
+
+// ── Classifier port (hydrate From + rules-only receipt sniff) ────────────────
+
+/**
+ * The classification stage's hydration (P0-1). Fetches ONE message's summary
+ * (subject/body/attachment metadata — NOT raw attachment bytes) and runs the SAME
+ * rules-only receipt sniff the legacy poll uses, so the ledger's route decision
+ * matches the legacy writer. Returns null when the message vanished (deleted/moved
+ * between discovery + classification) → the engine leaves the row pending to retry.
+ */
+export function createClassifierPort(
+  gmail: ReturnType<typeof buildGmailClient>,
+): ClassifierPort {
+  return {
+    async hydrateSignals(gmailMessageId) {
+      const [msg] = await listMessagesByIds(gmail, [gmailMessageId]);
+      if (!msg) return null;
+      // 對抗審查修正 2 — detectReceipt throws PROPAGATE. Swallowing a sniff error
+      // here would silently classify a potential receipt as noise (terminal); the
+      // engine instead schedules a non-terminal retry (F skeleton) and, after
+      // exhaustion, a manual-review card. Never guess a route from a failed sniff.
+      const isReceipt = detectReceipt({
+        subject: msg.subject,
+        body: msg.body,
+        attachments: msg.attachments ?? [],
+      }).isReceipt;
+      return {
+        from: msg.from,
+        isReceipt,
+        internalDateMs: msg.receivedAt instanceof Date ? msg.receivedAt.getTime() : 0,
+      };
     },
   };
 }
@@ -115,6 +150,10 @@ export function createRedisLockPort(): LockPort {
 // ── Ledger store (drizzle) ───────────────────────────────────────────────────
 
 const LEDGER_MAX_RETRIES = 3;
+// P0-2: these caps bound DOWNSTREAM classification/processing batches ONLY — never
+// discovery (the engine paginates history.list unbounded, guarded by its own valve).
+const LEDGER_CLASSIFY_BATCH = 100;
+const LEDGER_FEED_BATCH = 100;
 
 export function createDrizzleLedgerStore(
   db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
@@ -129,10 +168,12 @@ export function createDrizzleLedgerStore(
       return row ? toCursor(row) : null;
     },
 
-    async insertIgnore(rows) {
+    async insertMinimalIgnore(rows) {
       if (rows.length === 0) return 0;
       // INSERT IGNORE via onDuplicateKeyUpdate no-op (set a non-key col to itself)
-      // so a re-diff / duplicate push / crash-replay collapses to one row.
+      // so a re-diff / duplicate push / crash-replay collapses to one row. Minimal
+      // discovery row (P0-1): fromAddress/route/classifiedAt stay NULL, internalDateMs
+      // is 0 until the classification stage hydrates + backfills them.
       await db
         .insert(gmailIngestionLedger)
         .values(
@@ -141,14 +182,69 @@ export function createDrizzleLedgerStore(
             gmailMessageId: r.gmailMessageId,
             gmailThreadId: r.gmailThreadId,
             gmailHistoryId: r.gmailHistoryId,
-            internalDateMs: r.internalDateMs,
-            fromAddress: r.fromAddress,
+            internalDateMs: 0,
             source: r.source,
             status: "pending" as const,
           })),
         )
         .onDuplicateKeyUpdate({ set: { integrationId: sql`integrationId` } });
       return rows.length;
+    },
+
+    async listUnclassified(integrationId, nowMs) {
+      const now = new Date(nowMs);
+      const rows = await db
+        .select()
+        .from(gmailIngestionLedger)
+        .where(
+          and(
+            eq(gmailIngestionLedger.integrationId, integrationId),
+            eq(gmailIngestionLedger.status, "pending"),
+            isNull(gmailIngestionLedger.route),
+            // classify-retry backoff gate: fresh rows have nextRetryAt NULL; a row
+            // whose hydrate/sniff threw waits out its F-skeleton backoff here.
+            or(
+              isNull(gmailIngestionLedger.nextRetryAt),
+              lte(gmailIngestionLedger.nextRetryAt, now),
+            ),
+          ),
+        )
+        .orderBy(asc(gmailIngestionLedger.firstSeenAt))
+        .limit(LEDGER_CLASSIFY_BATCH);
+      return rows.map(mapLedgerRow);
+    },
+
+    async recordClassifyFailure(ledgerId, cls, retryCount, nextRetryAt, at) {
+      // NON-terminal (對抗審查修正 2): status stays pending + route stays NULL so
+      // the row is re-classified after the backoff — never noise'd by a sniff error.
+      await db
+        .update(gmailIngestionLedger)
+        .set({
+          failureKind: cls.failureKind,
+          httpStatus: cls.httpStatus,
+          errorDetail: cls.errorDetail,
+          retryCount,
+          nextRetryAt,
+          lastAttemptAt: at,
+        })
+        .where(eq(gmailIngestionLedger.id, ledgerId));
+    },
+
+    async classify(ledgerId, fields) {
+      await db
+        .update(gmailIngestionLedger)
+        .set({
+          fromAddress: fields.fromAddress,
+          route: fields.route,
+          wouldRoute: fields.wouldRoute,
+          internalDateMs: fields.internalDateMs,
+          classifiedAt: fields.classifiedAt,
+          status: fields.status,
+          lastAttemptAt: fields.classifiedAt,
+          // a terminal ignored classification also stamps processedAt (audit).
+          ...(fields.status === "ignored" ? { processedAt: fields.classifiedAt } : {}),
+        })
+        .where(eq(gmailIngestionLedger.id, ledgerId));
     },
 
     async advanceCursorCAS(integrationId, expectedHistoryId, newHistoryId, syncedAt) {
@@ -182,7 +278,12 @@ export function createDrizzleLedgerStore(
           and(
             eq(gmailIngestionLedger.integrationId, integrationId),
             or(
-              eq(gmailIngestionLedger.status, "pending"),
+              // classified customer/receipt still pending (P0-1: never an unclassified
+              // route-NULL row — the feeder only ever acts on a decided row).
+              and(
+                eq(gmailIngestionLedger.status, "pending"),
+                inArray(gmailIngestionLedger.route, ["customer", "receipt"]),
+              ),
               and(
                 eq(gmailIngestionLedger.status, "failed"),
                 lte(gmailIngestionLedger.retryCount, LEDGER_MAX_RETRIES - 1),
@@ -193,7 +294,7 @@ export function createDrizzleLedgerStore(
           ),
         )
         .orderBy(asc(gmailIngestionLedger.firstSeenAt))
-        .limit(100);
+        .limit(LEDGER_FEED_BATCH);
       return rows.map(mapLedgerRow);
     },
 
@@ -283,9 +384,11 @@ function mapLedgerRow(r: LedgerSelectRow): LedgerRow {
     gmailThreadId: r.gmailThreadId,
     gmailHistoryId: r.gmailHistoryId ?? null,
     internalDateMs: r.internalDateMs,
-    fromAddress: r.fromAddress,
+    fromAddress: r.fromAddress ?? null,
     source: r.source,
     status: r.status as LedgerStatus,
+    route: (r.route as IntakeRoute | null) ?? null,
+    wouldRoute: (r.wouldRoute as IntakeRoute | null) ?? null,
     failureKind: (r.failureKind as FailureKind | null) ?? null,
     httpStatus: r.httpStatus ?? null,
     retryCount: r.retryCount,
@@ -408,13 +511,16 @@ export interface IntakeRunResult {
   ran: boolean;
   mode: IntegrationCursor["intakeMode"];
   sync?: Awaited<ReturnType<typeof syncHistoryForIntegration>>;
+  classify?: Awaited<ReturnType<typeof classifyPendingLedger>>;
   feed?: Awaited<ReturnType<typeof feedPendingDownstream>>;
 }
 
 /**
  * Run the History ledger engine for ONE integration. Returns ran=false for
  * legacy integrations (the caller keeps running the legacy poll/push, unchanged).
- * shadow → sync only (ledger, no downstream, no label). history → sync + feed.
+ * All non-legacy modes: sync (discover + land + advance) → classify (route). shadow
+ * classification is terminal-only (observes wouldRoute, NO side effect — legacy
+ * stays the唯一副作用 writer). history additionally feeds classified rows downstream.
  */
 export async function runIntakeForIntegration(integrationId: number): Promise<IntakeRunResult> {
   const db = await getDb();
@@ -436,11 +542,13 @@ export async function runIntakeForIntegration(integrationId: number): Promise<In
     store,
     lock: createRedisLockPort(),
     alerts: createAlertPort(db),
+    classifier: createClassifierPort(gmail),
     downstream: cursor.intakeMode === "history" ? createDownstreamPort(cursor) : undefined,
   };
 
   const sync = await syncHistoryForIntegration(deps, integrationId);
-  const result: IntakeRunResult = { ran: true, mode: cursor.intakeMode, sync };
+  const classify = await classifyPendingLedger(deps, integrationId);
+  const result: IntakeRunResult = { ran: true, mode: cursor.intakeMode, sync, classify };
   if (cursor.intakeMode === "history") {
     result.feed = await feedPendingDownstream(deps, integrationId);
   }

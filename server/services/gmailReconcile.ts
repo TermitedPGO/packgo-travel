@@ -1,12 +1,13 @@
 /**
  * gmail-intake-ledger (2026-07-13) — the reconciliation tripwire (D, Codex 11
  * §4) + watch lifecycle health (§5). Runs every 5 minutes per non-legacy
- * integration and does a逐-message set-difference using the SAME eligibility
- * predicate the History engine uses (so a message one path ingests and another
- * skips can never masquerade as a漏接).
+ * integration and does a逐-message set-difference over the SAME inbox universe
+ * the History engine discovers (三宇宙一致: buildInboxScanQuery is shared with the
+ * fallback/bootstrap scans, and history discovery watches INBOX messageAdded +
+ * labelAdded — so a message one path sees and another misses is a REAL漏接).
  *
- * Four P1 rules (design §4):
- *   1. eligible new mail > 10 min old with NO ledger row        → P1
+ * Four P1 rules (design §4, rule 1 per v2 P0-1 semantics):
+ *   1. ANY inbox mail > 10 min old with NO ledger row            → P1
  *   2. any ledger row pending/failed > 30 min                    → P1
  *   3. last successful history sync > 10 min (or never)          → channel P1
  *   4. watchExpiration NULL / expired → P1; < 24h → warning; topic unset → P1
@@ -17,8 +18,13 @@
  * Every card carries ONLY ids / counts / kinds — never sender content or body
  * (attack surface 10). Pure engine over injected ports — tests use in-memory fakes.
  */
-import { isEligibleForIntake } from "../_core/gmailEligibility";
-import type { AlertPort, GmailIntakePort, LedgerStore, IntegrationCursor } from "./gmailHistorySync";
+import {
+  buildInboxScanQuery,
+  type AlertPort,
+  type GmailIntakePort,
+  type LedgerStore,
+  type IntegrationCursor,
+} from "./gmailHistorySync";
 
 // ── ports ────────────────────────────────────────────────────────────────────
 
@@ -114,25 +120,28 @@ export async function reconcileIntegration(
     incidentsRecovered: 0,
   };
 
-  // ── Rule 1 — eligible mail with no ledger row (the core漏接 tripwire) ───────
+  // ── Rule 1 — ANY inbox mail with no ledger row (the core漏接 tripwire) ──────
+  // v2 (Codex 12 輪 P0-1): the ledger is now the COMPLETE account — every
+  // discovered message lands (noise included), so eligibility no longer filters
+  // here. ANY INBOX message > 10 min old with NO ledger row is a漏接 (the ledger
+  // should have recorded it at discovery, regardless of how it later classified).
   {
-    const sinceSeconds = Math.floor((nowMs - RECONCILE_LOOKBACK_MS) / 1000);
-    // scanQueryMetadata now reports truncation; reconcile is the backstop tripwire
+    // 三宇宙一致 — the SAME query builder the fallback/bootstrap scans use, so
+    // reconcile can never see a universe discovery doesn't cover (and vice versa).
+    // scanQueryMetadata reports truncation; reconcile is the backstop tripwire
     // (a 1h lookback rarely caps), so it consumes the metas subset — a truncated
     // scan only under-reports, never advances a cursor, so it stays fail-safe.
-    const { metas } = await deps.gmail.scanQueryMetadata(`after:${sinceSeconds} in:inbox`);
-    const eligibleOldEnough = metas.filter(
-      (m) =>
-        m.id &&
-        isEligibleForIntake(m.from) &&
-        m.internalDateMs > 0 &&
-        nowMs - m.internalDateMs > MISSING_LEDGER_MIN_AGE_MS,
+    const { metas } = await deps.gmail.scanQueryMetadata(
+      buildInboxScanQuery(nowMs - RECONCILE_LOOKBACK_MS),
     );
-    const ids = eligibleOldEnough.map((m) => m.id);
+    const oldEnough = metas.filter(
+      (m) => m.id && m.internalDateMs > 0 && nowMs - m.internalDateMs > MISSING_LEDGER_MIN_AGE_MS,
+    );
+    const ids = oldEnough.map((m) => m.id);
     const known = ids.length
       ? await deps.store.existingMessageIds(integration.id, ids)
       : new Set<string>();
-    const missing = eligibleOldEnough
+    const missing = oldEnough
       .filter((m) => !known.has(m.id))
       .sort((a, b) => a.internalDateMs - b.internalDateMs); // oldest first → firstMissing
     report.missingFromLedger = missing.length;
@@ -145,9 +154,9 @@ export async function reconcileIntegration(
     if (missing.length > 0 && firstMissing) {
       const posted = await maybeAlert(deps, nowMs, fp, {
         priority: "high",
-        title: `客戶信未進 ledger(${missing.length} 封)`,
+        title: `INBOX 新信未進 ledger(${missing.length} 封)`,
         body:
-          `對帳發現 ${missing.length} 封合格客戶信超過 10 分鐘仍無 ledger 紀錄(疑似漏接)。\n` +
+          `對帳發現 ${missing.length} 封 INBOX 新信超過 10 分鐘仍無 ledger 紀錄(疑似漏接;ledger 應在發現當下即記錄,不分 eligibility)。\n` +
           `integrationId:${integration.id}\n` +
           `最早缺件 messageId:${firstMissing}\n` +
           `(卡片只含 id/計數,不含寄件人或內容)`,

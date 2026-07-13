@@ -26,6 +26,7 @@ import {
   decodePubSubPushBody,
   extractBearerToken,
   listHistoryMessageIds,
+  fetchHistoryPage,
   selectIngestableMessages,
 } from "./gmail";
 
@@ -237,6 +238,93 @@ describe("listHistoryMessageIds", () => {
     expect(out.messageIds).toEqual([]);
     expect(out.latestHistoryId).toBe("500");
     expect(out.expired).toBe(false);
+  });
+});
+
+// ── fetchHistoryPage (ledger v2 — labelAdded discovery + page boundaries) ─────
+
+describe("fetchHistoryPage — labelAdded 發現 (三宇宙一致, 對抗審查修正 1)", () => {
+  it("labelAdded 發現: a message moved INTO the inbox later (labelAdded INBOX) is discovered", async () => {
+    const gmail = gmailStub([
+      {
+        historyId: "700",
+        history: [
+          { id: "601", messagesAdded: [{ message: { id: "fresh", threadId: "t1" } }] },
+          // moved-into-inbox mail arrives ONLY as labelAdded — no messagesAdded.
+          {
+            id: "602",
+            labelsAdded: [
+              { message: { id: "moved-in", threadId: "t2" }, labelIds: ["INBOX"] },
+            ],
+          },
+        ],
+      },
+    ]);
+    const out = await fetchHistoryPage(gmail, "100", null, { labelId: "INBOX" });
+    expect(out.expired).toBe(false);
+    expect(out.messages.map((m) => m.id).sort()).toEqual(["fresh", "moved-in"]);
+    expect(out.boundaryHistoryId).toBe("700"); // final page → snapshot id
+  });
+
+  it("a labelAdded record for a DIFFERENT label does not count as discovery", async () => {
+    const gmail = gmailStub([
+      {
+        historyId: "701",
+        history: [
+          {
+            id: "603",
+            labelsAdded: [
+              { message: { id: "starred-only", threadId: "t3" }, labelIds: ["STARRED"] },
+            ],
+          },
+        ],
+      },
+    ]);
+    const out = await fetchHistoryPage(gmail, "100", null, { labelId: "INBOX" });
+    expect(out.messages).toEqual([]);
+  });
+
+  it("the same message in messagesAdded AND labelsAdded dedups to one discovery", async () => {
+    const gmail = gmailStub([
+      {
+        historyId: "702",
+        history: [
+          {
+            id: "604",
+            messagesAdded: [{ message: { id: "both", threadId: "t4" } }],
+            labelsAdded: [{ message: { id: "both", threadId: "t4" }, labelIds: ["INBOX"] }],
+          },
+        ],
+      },
+    ]);
+    const out = await fetchHistoryPage(gmail, "100", null, { labelId: "INBOX" });
+    expect(out.messages.map((m) => m.id)).toEqual(["both"]);
+  });
+
+  it("non-final page boundary = the LAST history record id (prefix advance target), not the snapshot", async () => {
+    const gmail = gmailStub([
+      {
+        historyId: "800",
+        nextPageToken: "p2",
+        history: [
+          { id: "651", messagesAdded: [{ message: { id: "a", threadId: "t" } }] },
+          { id: "652", labelsAdded: [{ message: { id: "b", threadId: "t" }, labelIds: ["INBOX"] }] },
+        ],
+      },
+    ]);
+    const out = await fetchHistoryPage(gmail, "100", null, { labelId: "INBOX" });
+    expect(out.nextPageToken).toBe("p2");
+    expect(out.boundaryHistoryId).toBe("652"); // last record on the page — NOT "800"
+  });
+
+  it("signals expired (not a throw) on a 404", async () => {
+    const err: any = new Error("Requested entity was not found.");
+    err.code = 404;
+    const gmail = gmailStub([{ __throw: err }]);
+    const out = await fetchHistoryPage(gmail, "tooOld", null, { labelId: "INBOX" });
+    expect(out.expired).toBe(true);
+    expect(out.messages).toEqual([]);
+    expect(out.boundaryHistoryId).toBeNull();
   });
 });
 

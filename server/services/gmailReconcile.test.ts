@@ -11,7 +11,14 @@ import {
   type ReconcileDeps,
   type IncidentTracker,
 } from "./gmailReconcile";
-import type { AlertPort, LedgerStore, IntegrationCursor, LedgerStatus, FailureKind } from "./gmailHistorySync";
+import {
+  buildInboxScanQuery,
+  type AlertPort,
+  type LedgerStore,
+  type IntegrationCursor,
+  type LedgerStatus,
+  type FailureKind,
+} from "./gmailHistorySync";
 import type { GmailMessageMetadata } from "../_core/gmail";
 
 const NOW = 1_780_000_000_000;
@@ -155,14 +162,46 @@ describe("reconcileIntegration — four P1 rules", () => {
     expect(alerts.cards).toHaveLength(0);
   });
 
-  it("rule 1: eligible mail already in the ledger, and noise mail, are NOT flagged", async () => {
+  it("rule 1 (v2 semantics): a message already in the ledger is not flagged; ANY inbox mail NOT in the ledger IS — regardless of eligibility", async () => {
+    // v2 (P0-1): the ledger is the COMPLETE account (noise lands too), so rule 1 no
+    // longer filters by eligibility. mKnown is in the ledger → fine; mNoise is a
+    // noise sender NOT in the ledger → a漏接 (it should have been recorded).
     const { deps, alerts } = makeDeps({
       scanResults: [oldMsg("mKnown"), oldMsg("mNoise", NOISE)],
       scanKnownIds: ["mKnown"],
     });
     const report = await reconcileIntegration(deps, healthy());
-    expect(report.missingFromLedger).toBe(0);
-    expect(alerts.cards).toHaveLength(0);
+    expect(report.missingFromLedger).toBe(1);
+    expect(alerts.cards).toHaveLength(1);
+    expect(alerts.cards[0].body).toContain("mNoise");
+    expect(alerts.cards[0].body).not.toContain(NOISE); // PII-safe (ids/counts only)
+  });
+
+  it("三宇宙一致: rule 1 scans the SAME in:inbox universe query the engine's scans use (no eligibility narrowing)", async () => {
+    // Captures the query reconcile passes to Gmail and pins it to the shared
+    // buildInboxScanQuery output — so reconcile can never watch a universe the
+    // discovery/fallback paths don't cover (labelAdded-into-inbox mail included).
+    const captured: string[] = [];
+    const alerts = new FakeAlerts();
+    const deps: ReconcileDeps = {
+      gmail: {
+        async scanQueryMetadata(q: string) {
+          captured.push(q);
+          return { metas: [], truncated: false };
+        },
+      },
+      store: fakeStore({}),
+      alerts,
+      incidents: new FakeIncidents(),
+      topicConfigured: true,
+      clock: () => NOW,
+    };
+    await reconcileIntegration(deps, healthy());
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toBe(buildInboxScanQuery(NOW - 60 * 60 * 1000)); // 1h lookback
+    expect(captured[0]).toMatch(/^after:\d+ in:inbox$/);
+    expect(captured[0]).not.toContain("-from:noreply");
+    expect(captured[0]).not.toContain("-label:");
   });
 
   it("rule 2: a ledger row stuck pending/failed > 30 min → P1 card", async () => {

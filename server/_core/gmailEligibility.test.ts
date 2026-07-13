@@ -8,7 +8,12 @@
  * Pure functions, zero I/O — no mocks needed.
  */
 import { describe, it, expect } from "vitest";
-import { classifyIntakeEligibility, isEligibleForIntake } from "./gmailEligibility";
+import {
+  classifyIntakeEligibility,
+  isEligibleForIntake,
+  decideIntakeRoute,
+  normalizeFromAddress,
+} from "./gmailEligibility";
 import { parseEmailAddress, isNoreplySender, isKnownNoise } from "./knownNoise";
 import { OWN_EMAILS } from "./testAccounts";
 
@@ -70,4 +75,54 @@ describe("three-way consistency — parity with the legacy predicates", () => {
       expect(isEligibleForIntake(from)).toBe(legacyEligible(from));
     });
   }
+});
+
+// ── v2 (Codex 12 輪 P0-1) — the ledger-first ROUTE decision, at its source ─────
+
+describe("decideIntakeRoute — receipt runs BEFORE the noise/self terminal (§五)", () => {
+  it("a receipt from a noreply sender still routes to receipt (never dropped as noise)", () => {
+    expect(decideIntakeRoute("noreply@marriott.com", true)).toEqual({
+      route: "receipt",
+      fromAddress: "noreply@marriott.com",
+    });
+  });
+  it("a receipt from an OWN address still routes to receipt (Jeff forwards receipts to himself)", () => {
+    expect(decideIntakeRoute("support@packgoplay.com", true).route).toBe("receipt");
+  });
+  it("a non-receipt noreply routes to noise", () => {
+    expect(decideIntakeRoute("noreply@marriott.com", false).route).toBe("noise");
+  });
+  it("a non-receipt known-noise sender routes to noise", () => {
+    expect(decideIntakeRoute("promo@awin.com", false).route).toBe("noise");
+  });
+  it("a non-receipt own address routes to self_or_outbound", () => {
+    expect(decideIntakeRoute("support@packgoplay.com", false).route).toBe("self_or_outbound");
+  });
+  it("a non-receipt real customer routes to customer + a normalized bare address", () => {
+    expect(decideIntakeRoute("Jane Doe <Jane.Doe@Example.COM>", false)).toEqual({
+      route: "customer",
+      fromAddress: "jane.doe@example.com",
+    });
+  });
+  it("the route boolean stays parity: customer iff isEligibleForIntake (for non-receipts)", () => {
+    const routeSenders = [
+      "customer@example.com",
+      "RANDOM Marketing <promo@awin.com>",
+      "hotel@hilton.com",
+      "notifications@github.com",
+      "support@packgoplay.com",
+      "not-an-email",
+    ];
+    for (const from of routeSenders) {
+      const route = decideIntakeRoute(from, false).route;
+      expect(route === "customer").toBe(legacyEligible(from));
+    }
+  });
+});
+
+describe("normalizeFromAddress (moved to the classifier leaf)", () => {
+  it("strips display name + lowercases + bounds to 320", () => {
+    expect(normalizeFromAddress("Jeff <Jeff@X.COM>")).toBe("jeff@x.com");
+    expect(normalizeFromAddress("x".repeat(400))).toHaveLength(320);
+  });
 });

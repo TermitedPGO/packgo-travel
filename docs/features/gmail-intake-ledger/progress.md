@@ -15,3 +15,11 @@
 - 截斷卡自動關閉現騎在對帳 Rule 3 上(executor 誠實申報),獨立自關需 AlertPort 擴充,列 slice2。
 
 WIP:本批為當前唯一高風險施工批(B1.2 已完工待部署,不佔施工名額)。
+
+## 切片 1.1(Codex 12 輪兩結構 P0)
+| 階段 | 狀態 | 證據 |
+|------|------|------|
+| 施工 | 完成 2026-07-13(opus):ledger 先於分類(發現即入帳,六終態,noise 留稽核)、逐頁前綴推進(續跑取代凍結,發現無 cap)、receipt route(單一入口,shadow 只記 wouldRoute)、0117 就地修訂 | branch |
+| 對抗審查 | PASS 零阻塞;四 finding 指揮裁定修完才交:labelAdded 發現宇宙錯配(真漏接,必修)、sniff-throw 誤終態 noise、insert 錯誤面不一致、白名單裸語句漂移 — 全修+新測試(labelAdded/三宇宙一致/sniff-throw/insert-throw) | 本表 |
+| 指揮驗收 | 通過:tsc 0、gmail 14 檔 256 綠、前綴推進主迴圈:376-435 親讀(頁界 API 回傳、落帳先行、CAS forward-only、續頁失效收輪) | 本表 |
+| 下輪 Codex 證據 | 待:12 輪 §十五組(順序紅綠/liveness 收斂/receipt parity/本地 TiDB migration 實跑+schema probe/SHA+manifest);本地 TiDB=Jeff 線下測試指令 | — |

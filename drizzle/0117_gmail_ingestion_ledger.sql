@@ -19,11 +19,29 @@
 --      現行 3 分鐘 poll 零變化;shadow = History 引擎跑+寫 ledger 但不餵下游不貼標;
 --      history = ledger pending 餵既有 processOneEmail 鏈。
 --
+-- v2 就地修訂(2026-07-13, Codex 12 輪退回兩結構 P0 —— 本 migration 尚未套用於
+-- 任何 DB,故直接改 CREATE 定義而非追加 ALTER):
+--   * P0-1 ledger 先於分類 —— 一列在「發現」當下即以最小欄落帳,分類移到下游。
+--     因此:`fromAddress` 由 NOT NULL 改 NULL(發現時還沒抓 From header);
+--     新增 `route`/`wouldRoute` ENUM 可空(分類階段才寫,收據路由先於 noise/self
+--     終態);新增 `classifiedAt` 可空(分類時點)。`internalDateMs` 維持 NOT NULL
+--     但發現時先寫 0,分類 hydrate 後回填(不改欄位型別,避免動 schema 面)。
+--   * 修訂只擴欄不改鍵:UNIQUE(integrationId,gmailMessageId) 冪等鍵不變,
+--     _journal 不變(同一 idx 117,仍未套用)。
+--
 -- Migration 風格:照 docs/MIGRATION_PATTERNS.md Rule 1,CREATE TABLE / ADD COLUMN
 -- IF NOT EXISTS(TiDB 原生),不套 PREPARE/IF(0070 事故);Rule 2,語句間用
 -- breakpoint 標記行分隔(標記獨立成行,註解內不得出現字面標記 —— 0112 事故)。
 -- 本檔僅產出,絕不對任何 DB 執行(紅線 9;prod 由 pnpm ship 的 release_command
 -- 跑,執行後照 Rule 3 SHOW TABLES/COLUMNS 驗證)。
+--
+-- 回退參考(documented down,非自動執行 —— 本 repo migration 為 forward-only,
+-- forward-fix 為主;此段供人工回退時照抄):
+--   DROP TABLE IF EXISTS `gmailIngestionLedger`;
+--   ALTER TABLE `gmailIntegration` DROP COLUMN IF EXISTS `intakeMode`;
+--   ALTER TABLE `gmailIntegration` DROP COLUMN IF EXISTS `lastSuccessfulSyncAt`;
+-- (v2 擴欄若已套用而只想回退欄位:DROP COLUMN route/wouldRoute/classifiedAt,
+--  MODIFY fromAddress ... NOT NULL —— 但表未上線前無此需要。)
 
 CREATE TABLE IF NOT EXISTS `gmailIngestionLedger` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -32,9 +50,12 @@ CREATE TABLE IF NOT EXISTS `gmailIngestionLedger` (
   `gmailThreadId` VARCHAR(128) NOT NULL,
   `gmailHistoryId` VARCHAR(100) NULL,
   `internalDateMs` BIGINT NOT NULL,
-  `fromAddress` VARCHAR(320) NOT NULL,
+  `fromAddress` VARCHAR(320) NULL,
   `source` ENUM('history','push_wake','fallback_scan','backfill') NOT NULL,
   `status` ENUM('pending','processed','ignored','failed') NOT NULL DEFAULT 'pending',
+  `route` ENUM('customer','receipt','noise','self_or_outbound','manual_review') NULL,
+  `wouldRoute` ENUM('customer','receipt','noise','self_or_outbound','manual_review') NULL,
+  `classifiedAt` TIMESTAMP NULL,
   `failureKind` VARCHAR(64) NULL,
   `errorDetail` VARCHAR(512) NULL,
   `httpStatus` INT NULL,

@@ -1276,6 +1276,132 @@ export async function getMailboxHistoryId(
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// gmail-intake-ledger v2 (2026-07-13, Codex 12 輪 P0-2 liveness) — PAGE-level
+// collectors for the ledger engine. Unlike listHistoryMessageIds (which the
+// LEGACY pipeline still uses, unchanged, capped at a burst), these return ONE
+// page so the engine can land that page durably THEN advance the cursor to the
+// page boundary (逐頁前綴推進) — no discovery cap, no starvation. The engine
+// drives pagination + the land→advance ordering; these only do I/O.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** A discovered message, minimal (id + threadId) — the ledger lands this at
+ *  discovery; the From header + receipt sniff are hydrated later by the
+ *  classification stage (fromAddress is NOT known yet). */
+export type DiscoveredMessage = { id: string; threadId: string };
+
+export type HistoryPageResult = {
+  messages: DiscoveredMessage[];
+  /** The historyId to advance the cursor to AFTER this page's ids durably land
+   *  (已落帳前綴的邊界). For a non-final page this is the LAST history record's id
+   *  on the page (Gmail returns records in ascending id order, so it is a valid
+   *  resume start for the next page); for the FINAL page (window drained) it is
+   *  the response's snapshot historyId. null when the page carries no boundary
+   *  (empty history) — the engine then skips the advance. NEVER arithmetic'd. */
+  boundaryHistoryId: string | null;
+  /** Continuation token for the NEXT page within this round; null = drained. */
+  nextPageToken: string | null;
+  /** true = startHistoryId is outside Gmail's retention window (404) → the engine
+   *  falls back to the bounded query scan + rebaseline. */
+  expired: boolean;
+};
+
+/**
+ * Fetch ONE history.list page from startHistoryId. No discovery cap — maxResults
+ * bounds a single page, the engine paginates unboundedly (guarded by its own
+ * per-round safety valve). Returns the page's {id, threadId} plus the boundary
+ * historyId to advance to and the continuation token. 404 → expired.
+ *
+ * 發現宇宙(v2 對抗審查修正):historyTypes = messageAdded 加 labelAdded。一封「事後
+ * 被搬進 inbox」的信(filter 重跑、解封存、手動拖回)只產生 labelAdded(INBOX) 記錄,
+ * 不產生 messageAdded —— 缺了它這些信永不落帳,而 reconcile 掃 `in:inbox` 看得見它們
+ * → 規則 1 恆 P1(真漏接)。三宇宙(history 發現 / fallback 掃描 / reconcile)的口徑
+ * 統一為「INBOX 裡的信」:這裡靠 labelId=INBOX + 兩種 history 型別;兩個掃描靠
+ * `in:inbox`(見 buildInboxScanQuery)。同一封信同時出現在兩種記錄由 ledger 的
+ * message 級唯一鍵自然去重。
+ */
+export async function fetchHistoryPage(
+  gmail: ReturnType<typeof buildGmailClient>,
+  startHistoryId: string,
+  pageToken: string | null,
+  opts?: { labelId?: string },
+): Promise<HistoryPageResult> {
+  try {
+    const resp = await gmail.users.history.list({
+      userId: "me",
+      startHistoryId,
+      historyTypes: ["messageAdded", "labelAdded"],
+      ...(opts?.labelId ? { labelId: opts.labelId } : {}),
+      ...(pageToken ? { pageToken } : {}),
+      maxResults: 500,
+    });
+    const seen = new Map<string, string>(); // id → threadId (page-level dedup)
+    let lastRecordId: string | null = null;
+    for (const h of resp.data.history ?? []) {
+      if (h.id) lastRecordId = String(h.id);
+      for (const added of h.messagesAdded ?? []) {
+        const id = added.message?.id;
+        if (id && !seen.has(id)) seen.set(id, added.message?.threadId ?? "");
+      }
+      // labelAdded(INBOX) is discovery too — the API's labelId param already scopes
+      // records, but each labelAdded record carries its own labelIds; filter
+      // defensively when present so an unrelated label add never counts.
+      for (const la of h.labelsAdded ?? []) {
+        const id = la.message?.id;
+        if (!id || seen.has(id)) continue;
+        if (opts?.labelId && Array.isArray(la.labelIds) && !la.labelIds.includes(opts.labelId)) {
+          continue;
+        }
+        seen.set(id, la.message?.threadId ?? "");
+      }
+    }
+    const nextPageToken = resp.data.nextPageToken ?? null;
+    const responseHistoryId = resp.data.historyId ? String(resp.data.historyId) : null;
+    // Non-final page → advance only to the last landed record (prefix boundary).
+    // Final page (drained) → safe to jump to the snapshot current historyId.
+    const boundaryHistoryId = nextPageToken ? lastRecordId : responseHistoryId;
+    return {
+      messages: Array.from(seen, ([id, threadId]) => ({ id, threadId })),
+      boundaryHistoryId,
+      nextPageToken,
+      expired: false,
+    };
+  } catch (e: any) {
+    const status = e?.code ?? e?.response?.status;
+    if (status === 404) {
+      log.warn({ startHistoryId }, "[gmail] fetchHistoryPage 404 — historyId expired, falling back to scan");
+      return { messages: [], boundaryHistoryId: null, nextPageToken: null, expired: true };
+    }
+    throw e;
+  }
+}
+
+export type ScanPageResult = { messages: DiscoveredMessage[]; nextPageToken: string | null };
+
+/**
+ * Fetch ONE messages.list page for a query (the bounded fallback / bootstrap
+ * scan). Returns {id, threadId} + the continuation token so the engine lands each
+ * batch durably before requesting the next (逐批落帳). Metadata (From / receipt)
+ * is hydrated later by the classification stage — the scan is id-only + cheap.
+ */
+export async function scanQueryPage(
+  gmail: ReturnType<typeof buildGmailClient>,
+  query: string,
+  pageToken: string | null,
+): Promise<ScanPageResult> {
+  const resp = await gmail.users.messages.list({
+    userId: "me",
+    q: query,
+    maxResults: 100,
+    ...(pageToken ? { pageToken } : {}),
+  });
+  const messages: DiscoveredMessage[] = [];
+  for (const m of resp.data.messages ?? []) {
+    if (m.id) messages.push({ id: m.id, threadId: m.threadId ?? "" });
+  }
+  return { messages, nextPageToken: resp.data.nextPageToken ?? null };
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // Pure parsers for the Pub/Sub push webhook — extracted so the route stays
 // thin and these can be unit-tested with zero network / DB / googleapis deps.
 // ──────────────────────────────────────────────────────────────────────────

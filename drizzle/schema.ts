@@ -3139,12 +3139,26 @@ export const gmailIngestionLedger = mysqlTable(
      *  ms value is never truncated to the second: it is not the dedup key but a
      *  DATETIME round-trip would still lose ordering precision). */
     internalDateMs: bigint("internalDateMs", { mode: "number" }).notNull(),
-    /** Sender address (bare, lowercased) — the minimum eligibility needs. */
-    fromAddress: varchar("fromAddress", { length: 320 }).notNull(),
+    /** Sender address (bare, lowercased). NULLABLE (v2, Codex 12 輪 P0-1): the row
+     *  lands minimal at DISCOVERY (fromAddress unknown until the classification
+     *  stage hydrates the From header downstream), so eligibility no longer gates
+     *  landing — nothing can be dropped before it is recorded. */
+    fromAddress: varchar("fromAddress", { length: 320 }),
     source: mysqlEnum("source", ["history", "push_wake", "fallback_scan", "backfill"]).notNull(),
     status: mysqlEnum("status", ["pending", "processed", "ignored", "failed"])
       .default("pending")
       .notNull(),
+    /** v2 (Codex 12 輪 P0-1) — the downstream classification decision. NULL until
+     *  the classification stage runs (route is set AFTER the row lands). The
+     *  receipt classifier runs BEFORE the noise/self terminal, so a noreply
+     *  merchant receipt routes to 'receipt', never silently dropped as noise. */
+    route: mysqlEnum("route", ["customer", "receipt", "noise", "self_or_outbound", "manual_review"]),
+    /** v2 shadow-mode parity: the route the History path WOULD have executed, for
+     *  comparison against the legacy writer. NULL in history mode (route is
+     *  authoritative + executed) and until classified. */
+    wouldRoute: mysqlEnum("wouldRoute", ["customer", "receipt", "noise", "self_or_outbound", "manual_review"]),
+    /** v2 — when the classification stage decided `route` (NULL while pending). */
+    classifiedAt: timestamp("classifiedAt"),
     /** F skeleton — llm/db/gmail_api/attachment/auth/noise/unknown. NULL until a
      *  failure (or an ignored-as-noise) classifies it. */
     failureKind: varchar("failureKind", { length: 64 }),
