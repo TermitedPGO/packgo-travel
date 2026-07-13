@@ -4,7 +4,7 @@
  * 餘額卡(drift 照實)+ 到期待審卡(🔒 → plaid.trustRecognizeNow **唯讀掃描**,
  * 零寫入)+ 在途訂金明細(已認列淡化)。鐵律:訂金 ≠ 營收,出發後才認列
  * (CST §17550,見 memory feedback_packgo_trust_accounting)。B1 fail-closed
- * (2026-07-13):掃描不自動認列,等 CPA 認列矩陣核准後由 Jeff 逐筆核。
+ * (2026-07-12):掃描不自動認列,等 CPA 認列矩陣核准後由 Jeff 逐筆核。
  */
 import { trpc } from "@/lib/trpc";
 import { useLocale } from "@/contexts/LocaleContext";

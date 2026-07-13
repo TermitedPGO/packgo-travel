@@ -1,7 +1,7 @@
 /**
  * RecognitionCard —— 到期待審卡(F3 塊B#3,B-final 左欄第二卡)。
  *
- * B1 fail-closed(2026-07-13):「出發了 · 訂金到期待審」。trustDeferredList
+ * B1 fail-closed(2026-07-12):「出發了 · 訂金到期待審」。trustDeferredList
  * (pending)前端摺 foldDepartedPending(與 server trustOutstandingSplit.
  * departedPending 同口徑 —— 卡上筆數 = 真相列 departedPendingCount)。按鈕接
  * plaid.trustRecognizeNow —— 現為**唯讀掃描**(零寫入,server 端接 audit),
