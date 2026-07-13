@@ -18,7 +18,7 @@
 
 - 服務層:server/services/trustDeferralService.ts — recognizeReadyDepartures 移除改 scanRecognitionDue(純掃描,零寫入),新增 maybePostRecognitionDueCard(agentMessages 待審卡,同集合去重,Redis 讀失敗照出卡,絕不 throw)。
 - 守門測試:server/services/trustDeferralService.failClosed.test.ts(333+ 行,13 tests)— 2a 零 update/insert、2b 旗標四組合、2c 原始碼三層掃描(字面 regex + raw SQL 賦值 + .set 區塊),2d 卡去重六 case、2e 行為改遷。紅綠自證:假 offender 檔在時 2c 轉紅。
-- worker:trustRecognitionWorker.ts — 待審卡+每日 notifyOwner 待審摘要(卡去重但摘要天天發,錢的可見性不沉默);runTrustTransferDetection 原樣保留 flag 閘前。
+- worker:trustRecognitionWorker.ts — 待審卡+每日 notifyOwner 待審摘要(卡去重但摘要天天發,錢的可見性不沉默);runTrustTransferDetection 仍在 flag 閘前但已強制 dry-run(B1.1 機械閘+呼叫端 dryRun:true 雙保險,零回填零催轉)。【本行原寫「原樣保留」,Codex 6.6 P2.3 抓出與 B1.1 實碼不一致,已改。】
 - router:plaidRouter.trustRecognizeNow 改唯讀掃描,audit action 改 trust.recognitionScan。
 - client:RecognitionCard/LedgerTrust 拆確認寫入閘改唯讀掃描;i18n 雙語 parity 綠。
 - 舊後門:server/scripts/test-phase4-e2e.mjs 的 raw UPDATE recognizedAt 改為零寫入掃描語意。

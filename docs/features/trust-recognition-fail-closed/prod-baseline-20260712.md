@@ -21,14 +21,24 @@
 與 A3 對帳一致:三筆信託訂金皆 unmatched(bookingId NULL),從未被自動認列。
 另一含義:prod 目前不存在任何歷史已認列列,transfer detection 現況本就無回填對象;B1.1 機械閘是對未來的防護,非清理現況。
 
-## 部署後驗證線(照 Codex 6.5 第七節)
+## 部署後驗證線(照 Codex 6.5 第七節;oracle 依 6.7 校正)
 
-1. ship 後手動掃描一次(trustRecognizeNow 或等 cron):dueForReview 可產生(預期 0,三筆皆 unmatched 走 skippedNotMatched),recognizedCount 仍 0、maxRecognizedAt 仍 null。
-2. 次日排程再驗一次,同標準。
-3. 全過才標「已部署且運行驗證」。記 Git SHA、Fly release、排程時間、查核結果。
+1. 正式 cron 或手動掃描:recognizedCount 仍 0、maxRecognizedAt 仍 null、transferredCount 仍 0。
+2. cron oracle(Codex 6.6/6.7 抓出我原寫 skippedNotMatched=3 是錯的;指揮 02:40Z 擴充探針親證三筆 expectedRecognitionDate 與 bookingId 皆 NULL,掃描先判日期):
+   scanned=3、dueForReview=0、skippedNoDepartureDate=3、skippedNotMatched=0、skippedCancelledBooking=0;job completed 非 failed;無「請轉出」通知。
+3. 次日同一排程再驗一次,全過才標「控制已運行驗證」。記部署 SHA、Fly release、排程時間、查核結果。
+
+## 探針 audit(6.6 要求留 exact SELECT)
+
+單條去識別聚合(無 PII、無寫語句):
+SELECT COUNT(*), SUM(recognizedAt IS NOT NULL), MAX(recognizedAt), SUM(reversedAt IS NOT NULL), SUM(transferredAt IS NOT NULL), MAX(transferredAt), SUM(recognizedAt IS NULL AND reversedAt IS NULL), SUM(expectedRecognitionDate IS NULL), SUM(bookingId IS NULL) FROM trustDeferredIncome
+(CASE 寫法同義;通道 flyctl ssh stdin node,DATABASE_URL 只在機上 env。)
 
 ## 執行紀錄
 
-- 2026-07-13T00:14Z 前後:Jeff pnpm ship → v812 complete(flyctl releases 核)。Git SHA ae0ea9d4(origin/main)。ship 輸出警示 LOCAL_SCRIPT_TOKEN 未設,ship 後煙霧跳過(不擋部署),已告 Jeff 可補設。
-- 2026-07-13T02:23:20Z 部署後比對探針(同支同通道):totalRows 3、recognizedCount 0、maxRecognizedAt null、reversedCount 0、transferredCount 0、pendingCount 3 —— 與部署前基準逐項相同,部署本身零寫入。/health 四項全 ok。第 1 步 PASS。
-- 待:06:00 UTC 正式 cron 首跑(= LA 7-12 晚 23:00)後驗 worker log(預期 dueForReview=0、skipNoMatch=3、transfer detection dry-run)+ 再跑一次比對探針;次日再驗一輪。全過才標「已部署且運行驗證」。
+- 2026-07-13T00:14Z 前後:Jeff pnpm ship → v812 complete(flyctl releases 核)。v812 image SHA = ae0ea9d4;其後的 6f09ba0d/後續為部署後證據文件 commit,不在 v812 image 內,分開記(6.7 §一.3)。ship 時 LOCAL_SCRIPT_TOKEN 未載入,ship 側煙霧跳過。
+- 補驗:Codex 以正式機上既有 token 執行同一 authenticated deploy-smoke,HTTP 200、ok=true、八臂全綠(6.7 §一.5;token 值不記錄)。
+- 2026-07-13T02:23:20Z 部署後比對探針:與部署前基準逐項相同,部署本身零信託狀態寫入。/health 四項全 ok。狀態=「部署後即時資料不變驗證 PASS」(6.7 校正措辭;非「控制已運行驗證」,worker 尚未跑)。
+- 2026-07-13T02:40:55Z 擴充探針:noExpectedDateCount=3、noBookingCount=3,親證 6.6/6.7 的 cron oracle 正確、我原 oracle 錯誤。
+- BullMQ 現場唯一 trust-recognition-daily repeatable job,pattern 0 6 * * *,next=2026-07-13T06:00:00Z(6.7 §一.6,Codex 現場核)。
+- 待:06:00 UTC cron 首跑收 worker log 五項計數+再探針;次日再一輪。v812 凍結,首輪 cron 前不換 release、不 rollback(6.7 §五)。
