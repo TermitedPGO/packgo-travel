@@ -1094,11 +1094,21 @@ export async function listHistoryMessageIds(
   gmail: ReturnType<typeof buildGmailClient>,
   startHistoryId: string,
   opts?: { maxMessages?: number; labelId?: string },
-): Promise<{ messageIds: string[]; latestHistoryId: string | null; expired: boolean }> {
+): Promise<{
+  messageIds: string[];
+  latestHistoryId: string | null;
+  expired: boolean;
+  truncated: boolean;
+}> {
   const maxMessages = opts?.maxMessages ?? 100;
   const ids = new Set<string>();
   let latestHistoryId: string | null = null;
   let pageToken: string | undefined;
+  // truncated = we stopped short of draining the window: either more pages remain
+  // unfetched, or the burst cap dropped ids from the collected set. The ledger
+  // caller MUST NOT advance the cursor on a truncated diff (順序鐵律 — a subset
+  // landed, so it re-collects from the same point next round instead of skipping).
+  let truncated = false;
 
   try {
     do {
@@ -1118,7 +1128,13 @@ export async function listHistoryMessageIds(
         }
       }
       pageToken = resp.data.nextPageToken ?? undefined;
-      if (ids.size >= maxMessages) break;
+      if (ids.size >= maxMessages) {
+        // Stop paging. truncated ONLY when we actually left data behind — more
+        // pages pending OR the slice below will drop ids. An exact-cap-with-no-
+        // more-pages hit is NOT truncation (else the cursor would livelock-freeze).
+        truncated = pageToken !== undefined || ids.size > maxMessages;
+        break;
+      }
     } while (pageToken);
   } catch (e: any) {
     // 404 → startHistoryId outside Gmail's retention window. Signal expiry so
@@ -1126,7 +1142,7 @@ export async function listHistoryMessageIds(
     const status = e?.code ?? e?.response?.status;
     if (status === 404) {
       log.warn({ startHistoryId }, "[gmail] history.list 404 — historyId expired, falling back to poll");
-      return { messageIds: [], latestHistoryId: null, expired: true };
+      return { messageIds: [], latestHistoryId: null, expired: true, truncated: false };
     }
     throw e;
   }
@@ -1135,7 +1151,128 @@ export async function listHistoryMessageIds(
     messageIds: Array.from(ids).slice(0, maxMessages),
     latestHistoryId,
     expired: false,
+    truncated,
   };
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// gmail-intake-ledger (2026-07-13) — lightweight metadata helpers for the
+// History ledger path. Writing a ledger row needs only {id, threadId, from,
+// internalDateMs}; downloading full bodies + attachments (hydrateMessageById)
+// is reserved for the downstream processing chain in history mode. Keeping the
+// shadow path metadata-only keeps it cheap + PII-minimal (no body ever fetched).
+// ──────────────────────────────────────────────────────────────────────────
+
+/** The minimum a ledger row + eligibility needs. internalDateMs = epoch ms. */
+export type GmailMessageMetadata = {
+  id: string;
+  threadId: string;
+  from: string;
+  internalDateMs: number;
+};
+
+/**
+ * Fetch ONE message as metadata only (format:metadata, From header + internalDate
+ * + threadId). Returns null on per-message failure (logged, never throws) so a
+ * caller iterating a page keeps going. No body / attachment bytes are fetched.
+ */
+export async function fetchMessageMetadata(
+  gmail: ReturnType<typeof buildGmailClient>,
+  id: string,
+): Promise<GmailMessageMetadata | null> {
+  try {
+    const resp = await gmail.users.messages.get({
+      userId: "me",
+      id,
+      format: "metadata",
+      metadataHeaders: ["From"],
+    });
+    const data = resp.data as {
+      id?: string | null;
+      threadId?: string | null;
+      internalDate?: string | null;
+      payload?: { headers?: Array<{ name?: string | null; value?: string | null }> };
+    };
+    const headers = data.payload?.headers ?? [];
+    const from = headers.find((h) => (h.name ?? "").toLowerCase() === "from")?.value ?? "";
+    return {
+      id: data.id ?? id,
+      threadId: data.threadId ?? "",
+      from,
+      internalDateMs: Number(data.internalDate ?? 0),
+    };
+  } catch (e) {
+    log.warn({ err: e, messageId: id }, "[gmail] fetchMessageMetadata failed — skipping");
+    return null;
+  }
+}
+
+/** Hydrate a set of message ids into metadata (skips per-message failures). */
+export async function fetchMessagesMetadata(
+  gmail: ReturnType<typeof buildGmailClient>,
+  ids: string[],
+): Promise<GmailMessageMetadata[]> {
+  const out: GmailMessageMetadata[] = [];
+  for (const id of ids) {
+    const m = await fetchMessageMetadata(gmail, id);
+    if (m) out.push(m);
+  }
+  return out;
+}
+
+/**
+ * gmail-intake-ledger — run a Gmail search query and return EVERY hit as
+ * metadata, walking ALL pages (nextPageToken) up to `maxMessages`. Used by the
+ * History 404 bounded-fallback scan ("-label:PACKGO_AI_PROCESSED -from:noreply"
+ * with an after: window) and the 5-minute reconciliation set-difference. Full
+ * pagination is mandatory — a single unpaged page would re-open the漏接 the
+ * whole ledger design closes.
+ */
+export async function listMessageMetadataForQuery(
+  gmail: ReturnType<typeof buildGmailClient>,
+  query: string,
+  maxMessages = 500,
+): Promise<{ metas: GmailMessageMetadata[]; truncated: boolean }> {
+  const ids: string[] = [];
+  let pageToken: string | undefined;
+  // truncated = the scan hit the cap before draining every page (or the slice
+  // below drops ids). A truncated fallback/bootstrap scan MUST NOT rebaseline the
+  // cursor — the gap is not fully covered, so the next round re-scans the window.
+  let truncated = false;
+  do {
+    const listResp = await gmail.users.messages.list({
+      userId: "me",
+      q: query,
+      maxResults: 100,
+      ...(pageToken ? { pageToken } : {}),
+    });
+    for (const m of listResp.data.messages ?? []) {
+      if (m.id) ids.push(m.id);
+    }
+    pageToken = listResp.data.nextPageToken ?? undefined;
+    if (ids.length >= maxMessages) {
+      truncated = pageToken !== undefined || ids.length > maxMessages;
+      break;
+    }
+  } while (pageToken);
+  const metas = await fetchMessagesMetadata(gmail, ids.slice(0, maxMessages));
+  return { metas, truncated };
+}
+
+/**
+ * gmail-intake-ledger — the mailbox's current historyId, read via getProfile.
+ * The bootstrap baseline (no lastHistoryId yet) and the 404 rebuild both take
+ * their fresh cursor from here rather than doing any arithmetic on historyId
+ * (Codex 11 §2: never add/subtract historyId). Throws on API failure so the
+ * caller can classify (auth vs transient) rather than silently baseline-ing.
+ */
+export async function getMailboxHistoryId(
+  gmail: ReturnType<typeof buildGmailClient>,
+): Promise<string> {
+  const profile = await gmail.users.getProfile({ userId: "me" });
+  const historyId = profile.data.historyId;
+  if (!historyId) throw new Error("getProfile returned no historyId");
+  return String(historyId);
 }
 
 // ──────────────────────────────────────────────────────────────────────────

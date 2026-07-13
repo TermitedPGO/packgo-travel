@@ -41,15 +41,41 @@ export const gmailPollWorker = new Worker<GmailPollJobData, GmailPollJobResult>(
 
     for (const integration of activeIntegrations) {
       try {
-        const result = await runGmailPipeline(integration.id);
-        totalProcessed += result.totalProcessed;
-        totalEscalated += result.totalEscalated;
-        totalReceipts += result.totalReceipts;
-        // PipelineResult doesn't separately count auto-replied; the
-        // gmailPipeline writes interactionOutcomes with actionTaken=
-        // "auto_replied" when send succeeds, which the dashboard reads
-        // directly. We just surface totalFailed + free-text errors here.
-        errors += result.totalFailed + result.errors.length;
+        // gmail-intake-ledger — intakeMode routing (default 'legacy' → ZERO
+        // change to this block). legacy + shadow keep running the existing poll
+        // (shadow runs it as the 並行對照 safety net); history mode is driven
+        // entirely by the ledger engine below, so the legacy poll is skipped.
+        if (integration.intakeMode !== "history") {
+          const result = await runGmailPipeline(integration.id);
+          totalProcessed += result.totalProcessed;
+          totalEscalated += result.totalEscalated;
+          totalReceipts += result.totalReceipts;
+          // PipelineResult doesn't separately count auto-replied; the
+          // gmailPipeline writes interactionOutcomes with actionTaken=
+          // "auto_replied" when send succeeds, which the dashboard reads
+          // directly. We just surface totalFailed + free-text errors here.
+          errors += result.totalFailed + result.errors.length;
+        }
+
+        // shadow + history run the History ledger engine (shadow = ledger only,
+        // history = ledger + feed). Isolated so a ledger hiccup never fails the
+        // legacy poll above. No-op for legacy integrations.
+        if (integration.intakeMode !== "legacy") {
+          try {
+            const { runIntakeForIntegration } = await import("./services/gmailIntakeAdapters");
+            await runIntakeForIntegration(integration.id);
+          } catch (e) {
+            console.error(
+              `[GmailPollWorker] ledger intake ${integration.id} failed (non-fatal):`,
+              e,
+            );
+            reportFunnelError({
+              source: "fail-open:gmailPollWorker:ledgerIntake",
+              err: e,
+              context: { integrationId: integration.id },
+            }).catch(() => {});
+          }
+        }
 
         // 2026-06-22 — also file OUTBOUND sent-mail attachments + record our
         // side of the thread. Separate lighter pass; isolated so a failure

@@ -53,23 +53,50 @@ export const gmailPushWorker = new Worker<GmailPushJobData, GmailPushJobResult>(
   "gmail-push",
   async (job) => {
     const { integrationId, notifiedHistoryId } = job.data;
-    const result = await runGmailPipelineForMessageIds(
-      integrationId,
-      notifiedHistoryId,
-    );
-    if (!result.ok && result.errors.length) {
-      // Surface so a persistently-broken integration is visible, but let BullMQ
-      // retry per the queue's attempts/backoff.
-      log.warn(
-        { integrationId, errors: result.errors.slice(0, 3) },
-        "[gmailPushWorker] incremental ingest reported errors",
-      );
+
+    // gmail-intake-ledger — the webhook already durably enqueued this job BEFORE
+    // acking Pub/Sub (先耐久排隊成功才 ack), and the ledger unique key makes a
+    // redelivery idempotent. Route by intakeMode: legacy + shadow still run the
+    // legacy incremental ingest (shadow keeps it as the 並行對照 net); history is
+    // driven by the ledger engine. Default 'legacy' → ZERO change.
+    const db = await getDb();
+    const [integ] = db
+      ? await db
+          .select({ intakeMode: gmailIntegration.intakeMode })
+          .from(gmailIntegration)
+          .where(eq(gmailIntegration.id, integrationId))
+          .limit(1)
+      : [];
+    const mode = integ?.intakeMode ?? "legacy";
+
+    let processed = 0;
+    let receipts = 0;
+    let errorCount = 0;
+
+    if (mode !== "history") {
+      const result = await runGmailPipelineForMessageIds(integrationId, notifiedHistoryId);
+      if (!result.ok && result.errors.length) {
+        log.warn(
+          { integrationId, errors: result.errors.slice(0, 3) },
+          "[gmailPushWorker] incremental ingest reported errors",
+        );
+      }
+      processed = result.totalProcessed;
+      receipts = result.totalReceipts;
+      errorCount = result.totalFailed + result.errors.length;
     }
-    return {
-      processed: result.totalProcessed,
-      receipts: result.totalReceipts,
-      errors: result.totalFailed + result.errors.length,
-    };
+
+    if (mode !== "legacy") {
+      try {
+        const { runIntakeForIntegration } = await import("./services/gmailIntakeAdapters");
+        await runIntakeForIntegration(integrationId);
+      } catch (e) {
+        errorCount++;
+        log.warn({ integrationId, err: e }, "[gmailPushWorker] ledger intake failed (non-fatal)");
+      }
+    }
+
+    return { processed, receipts, errors: errorCount };
   },
   {
     connection: redisBullMQ,
@@ -103,14 +130,24 @@ export const gmailWatchRenewWorker = new Worker<
     const db = await getDb();
     if (!db) throw new Error("Database not available");
 
-    // No topic configured → push isn't set up yet; renew is a no-op. The poll
-    // keeps working. (Runbook step: set GMAIL_PUBSUB_TOPIC, then push activates.)
+    // No topic configured → push isn't set up yet; renew can't run. The poll
+    // keeps working. gmail-intake-ledger (requirement 8): no longer a SILENT
+    // return — post a deduped topic-unset alert for each non-legacy integration
+    // (legacy mailboxes are unaffected, so they stay quiet). (Runbook step: set
+    // GMAIL_PUBSUB_TOPIC, then push activates.)
     if (!topicName) {
       log.info(
         { triggeredBy: job.data.triggeredBy },
-        "[gmailWatchRenewWorker] GMAIL_PUBSUB_TOPIC unset — skipping (poll still active)",
+        "[gmailWatchRenewWorker] GMAIL_PUBSUB_TOPIC unset — alerting non-legacy integrations (poll still active)",
       );
-      return { scanned: 0, renewed: 0, errors: 0 };
+      try {
+        const { alertTopicUnsetForNonLegacy } = await import("./services/gmailIntakeAdapters");
+        const posted = await alertTopicUnsetForNonLegacy();
+        return { scanned: posted, renewed: 0, errors: 0 };
+      } catch (e) {
+        log.warn({ err: e }, "[gmailWatchRenewWorker] topic-unset alert failed (non-fatal)");
+        return { scanned: 0, renewed: 0, errors: 0 };
+      }
     }
 
     const integrations = await db

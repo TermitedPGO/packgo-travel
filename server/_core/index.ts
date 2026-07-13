@@ -2296,6 +2296,18 @@ async function startServer() {
       reportFunnelError({ source: "fail-open:index:gmailPushWorkersInit", err }).catch(() => {});
     }
 
+    // gmail-intake-ledger (2026-07-13) — reconciliation tripwire cron (every 5
+    // min). Runs only for non-legacy (shadow/history) integrations; a pure-legacy
+    // deploy no-ops inside the worker. Closes the漏接 blind spot the poll can't.
+    try {
+      const { scheduleGmailReconcile } = await import('../queue');
+      await scheduleGmailReconcile();
+      await import('../gmailReconcileWorker');
+    } catch (err) {
+      logger.warn({ err }, "[Startup] Failed to init Gmail reconcile worker");
+      reportFunnelError({ source: "fail-open:index:gmailReconcileInit", err }).catch(() => {});
+    }
+
     // Booking followup worker — drains the queue that bookings.create
     // enqueues into. Generates deposit PDF + sends confirmation email
     // off the HTTP critical path.

@@ -79,7 +79,7 @@ import type { Message, Tool } from "../../_core/llm";
 import type { NotifyAgentMessageArgs } from "../../_core/agentNotify";
 const log = createChildLogger({ module: "gmailPipeline" });
 
-const PROCESSED_LABEL = "PACKGO_AI_PROCESSED";
+export const PROCESSED_LABEL = "PACKGO_AI_PROCESSED";
 
 // ── push/poll cross-worker dedup (2026-07-01) ────────────────────────────────
 // push (Pub/Sub) and the 3-min poll are two independent BullMQ workers with no
@@ -104,7 +104,7 @@ const MESSAGE_LOCK_TTL_SECONDS = 300;
  */
 export async function processWithMessageLock(
   messageId: string,
-  fn: () => Promise<void>,
+  fn: () => Promise<unknown>,
 ): Promise<boolean> {
   let acquired = true;
   try {
@@ -908,7 +908,7 @@ async function processOneEmail(
     /** Thread ids already synced this poll cycle (in-memory dedup). */
     syncedThreads: Set<string>;
   }
-): Promise<void> {
+): Promise<{ interactionId: number }> {
   // Extract sender email
   const senderEmail = parseEmailAddress(msg.from);
 
@@ -1856,6 +1856,97 @@ async function processOneEmail(
       .catch((e) =>
         log.warn({ err: e, profileId }, "[gmailPipeline] preference extraction failed (non-fatal)"),
       );
+  }
+
+  // gmail-intake-ledger — return the filed interaction id so the ledger
+  // (history mode) can stamp it on the processed row. The legacy callers
+  // (ingestFreshMessages) ignore this — zero behavior change for the poll path.
+  return { interactionId };
+}
+
+/**
+ * gmail-intake-ledger (2026-07-13) — process ONE ledger message through the
+ * SAME chain the poll uses (receipt pass → processOneEmail → PACKGO_AI_PROCESSED
+ * label), for intakeMode=history. Unlike ingestFreshMessages this does NOT
+ * swallow failures into cards — it lets processOneEmail throw so the ledger
+ * feeder (feedPendingDownstream) can classify the failureKind + schedule backoff.
+ * The Gmail label is applied AFTER processOneEmail commits and is best-effort
+ * (a label failure never marks the row failed nor re-drafts — the interaction is
+ * already durably filed; "label 為提交後可重試副作用"). Returns the interaction
+ * id (null for a receipt, which is queued to pendingExpenses instead).
+ *
+ * eligibility (own/noreply/knownNoise) is NOT re-checked here — the ledger only
+ * ever holds messages that already passed the shared eligibility gate at write
+ * time; the feeder re-checks drift before calling this.
+ */
+export async function runDownstreamForLedgerMessage(
+  db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
+  msg: GmailMessageSummary,
+  ctx: {
+    gmail: ReturnType<typeof buildGmailClient>;
+    labelId: string;
+    fromEmail: string;
+    integrationId: number;
+  },
+): Promise<{ interactionId: number | null; wasReceipt: boolean }> {
+  const { gmail, labelId, fromEmail, integrationId } = ctx;
+
+  // receipt pass — same rules-only sniff the poll runs first.
+  let looksLikeReceipt = false;
+  try {
+    looksLikeReceipt = detectReceipt({
+      subject: msg.subject,
+      body: msg.body,
+      attachments: msg.attachments ?? [],
+    }).isReceipt;
+  } catch {
+    looksLikeReceipt = false;
+  }
+  if (looksLikeReceipt) {
+    await processReceiptEmail(db, msg, { gmail, integrationId });
+    await applyLabelBestEffort(gmail, msg.id, labelId);
+    return { interactionId: null, wasReceipt: true };
+  }
+
+  const inquiryPolicy = await ensurePolicy(db, "inquiry", DEFAULT_INQUIRY_POLICY);
+  const refundPolicy = await ensurePolicy(db, "refund", DEFAULT_REFUND_POLICY);
+  const result: PipelineResult = {
+    ok: true,
+    emailAddress: fromEmail,
+    totalFetched: 1,
+    totalProcessed: 0,
+    totalFailed: 0,
+    totalEscalated: 0,
+    totalReceipts: 0,
+    errors: [],
+  };
+  const syncedThreads = new Set<string>();
+  const { interactionId } = await processOneEmail(
+    db,
+    msg,
+    inquiryPolicy,
+    refundPolicy,
+    result,
+    { gmail, fromEmail, syncedThreads },
+  );
+  // Post-commit side effect: interaction is already filed, so a label failure
+  // must NOT throw (it would mark the ledger row failed + re-draft on retry).
+  await applyLabelBestEffort(gmail, msg.id, labelId);
+  return { interactionId, wasReceipt: false };
+}
+
+async function applyLabelBestEffort(
+  gmail: ReturnType<typeof buildGmailClient>,
+  messageId: string,
+  labelId: string,
+): Promise<void> {
+  try {
+    await applyLabel(gmail, messageId, labelId);
+  } catch (e) {
+    log.warn(
+      { err: e, messageId },
+      "[gmailPipeline] ledger downstream: label apply failed (non-fatal, retriable side effect)",
+    );
   }
 }
 

@@ -778,6 +778,54 @@ export async function scheduleGmailWatchRenew() {
 console.log("✅ Gmail push + watch-renew queues initialized");
 
 // ============================================================================
+// gmail-intake-ledger (2026-07-13) — reconciliation tripwire (D, Codex 11 §4).
+// Every 5 minutes, per non-legacy integration, run the逐-message set-difference
+// + watch-lifecycle health check + incident-fingerprint alerting. Legacy
+// mailboxes are skipped inside the worker, so a pure-legacy deploy sees nothing.
+// ============================================================================
+
+export interface GmailReconcileJobData {
+  triggeredBy: "schedule" | "manual";
+}
+
+export interface GmailReconcileJobResult {
+  scanned: number;
+  reconciled: number;
+  errors: number;
+}
+
+export const gmailReconcileQueue = new Queue<
+  GmailReconcileJobData,
+  GmailReconcileJobResult
+>("gmail-reconcile", {
+  connection: redisBullMQ,
+  defaultJobOptions: {
+    attempts: 1, // a missed tick just re-runs 5 min later; no retry storms
+    removeOnComplete: { age: 86400, count: 100 },
+    removeOnFail: { age: 604800, count: 50 },
+  },
+});
+
+/** Schedule the reconciliation sweep every 5 minutes. */
+export async function scheduleGmailReconcile() {
+  const repeatableJobs = await gmailReconcileQueue.getRepeatableJobs();
+  for (const job of repeatableJobs) {
+    if (job.name === "gmail-reconcile-tick") {
+      await gmailReconcileQueue.removeRepeatableByKey(job.key);
+    }
+  }
+  await gmailReconcileQueue.add(
+    "gmail-reconcile-tick",
+    { triggeredBy: "schedule" },
+    {
+      repeat: { pattern: "*/5 * * * *" }, // every 5 minutes
+      jobId: "gmail-reconcile-scheduled",
+    },
+  );
+  console.log("✅ Gmail reconcile scheduled: every 5 minutes");
+}
+
+// ============================================================================
 // Customer AI Summary Queue — nightly warm-up of the customer-card AI summary
 // (customer-ai-sessions 批3 m3). Recomputes summaries for ACTIVE + STALE
 // customers so opening their card is instant; lazy-on-open covers the rest.

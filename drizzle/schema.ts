@@ -3086,6 +3086,20 @@ export const gmailIntegration = mysqlTable("gmailIntegration", {
   // whose expiration is within the renew window. bigint because epoch-ms
   // overflows INT.
   watchExpiration: bigint("watchExpiration", { mode: "number" }),
+  // gmail-intake-ledger (2026-07-13) — the last time the History sync engine
+  // durably advanced this mailbox's cursor (ledger landed + CAS advance). NULL
+  // = never synced via History. Reconciliation (D §4 rule 3) alerts when this
+  // is stale; the 404 bounded-fallback recovery window starts from here −24h.
+  lastSuccessfulSyncAt: timestamp("lastSuccessfulSyncAt"),
+  // gmail-intake-ledger — per-mailbox flag flipping this integration between the
+  // legacy poll path and the History ledger path. `legacy` (default) = the
+  // existing every-3-min poll, ZERO behavior change. `shadow` = History engine
+  // runs + writes the ledger for observability but does NOT feed downstream or
+  // apply labels (safety-net compare period). `history` = ledger pending is fed
+  // through the existing processOneEmail chain. Switched by DB column only
+  // (never env), per-mailbox after v814 (Codex 11 §7). See docs/features/
+  // gmail-intake-ledger/design.md §1.
+  intakeMode: mysqlEnum("intakeMode", ["legacy", "shadow", "history"]).default("legacy").notNull(),
   messagesProcessed: int("messagesProcessed").default(0).notNull(),
   messagesFailed: int("messagesFailed").default(0).notNull(),
   isActive: int("isActive").default(1).notNull(),
@@ -3099,6 +3113,66 @@ export const gmailIntegration = mysqlTable("gmailIntegration", {
 
 export type GmailIntegration = typeof gmailIntegration.$inferSelect;
 export type InsertGmailIntegration = typeof gmailIntegration.$inferInsert;
+
+// gmail-intake-ledger (2026-07-13) — the SINGLE auditable source of truth for
+// customer-mail intake (Codex 11 §五). One row = one Gmail message the History
+// engine (or a bounded fallback / backfill) discovered. The message-level
+// UNIQUE(integrationId, gmailMessageId) is the idempotency key: a re-diff after
+// a crash, a duplicate Pub/Sub push, or a manual label removal all collapse to
+// one row (at-least-once discovery + idempotent landing). The cursor only
+// advances AFTER every candidate durably lands here (順序鐵律), so nothing can
+// be silently skipped. NO subject/body/attachment content is stored — fromAddress
+// is the minimum field eligibility needs; everything else is a provenance /
+// lifecycle field, never customer PII beyond the sender address already in logs.
+export const gmailIngestionLedger = mysqlTable(
+  "gmailIngestionLedger",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    integrationId: int("integrationId").notNull(),
+    /** Gmail internal message id (per-mailbox). Half of the idempotency key. */
+    gmailMessageId: varchar("gmailMessageId", { length: 128 }).notNull(),
+    gmailThreadId: varchar("gmailThreadId", { length: 128 }).notNull(),
+    /** The mailbox historyId this message was discovered at (audit; NULL for
+     *  fallback/backfill rows discovered by query rather than history diff). */
+    gmailHistoryId: varchar("gmailHistoryId", { length: 100 }),
+    /** Gmail internalDate in EPOCH MILLISECONDS (bigint — never a DATETIME, so a
+     *  ms value is never truncated to the second: it is not the dedup key but a
+     *  DATETIME round-trip would still lose ordering precision). */
+    internalDateMs: bigint("internalDateMs", { mode: "number" }).notNull(),
+    /** Sender address (bare, lowercased) — the minimum eligibility needs. */
+    fromAddress: varchar("fromAddress", { length: 320 }).notNull(),
+    source: mysqlEnum("source", ["history", "push_wake", "fallback_scan", "backfill"]).notNull(),
+    status: mysqlEnum("status", ["pending", "processed", "ignored", "failed"])
+      .default("pending")
+      .notNull(),
+    /** F skeleton — llm/db/gmail_api/attachment/auth/noise/unknown. NULL until a
+     *  failure (or an ignored-as-noise) classifies it. */
+    failureKind: varchar("failureKind", { length: 64 }),
+    /** Truncated error string for debugging — NEVER message body / attachment
+     *  content (design §1, attack surface 10). */
+    errorDetail: varchar("errorDetail", { length: 512 }),
+    httpStatus: int("httpStatus"),
+    retryCount: int("retryCount").default(0).notNull(),
+    nextRetryAt: timestamp("nextRetryAt"),
+    firstSeenAt: timestamp("firstSeenAt").defaultNow().notNull(),
+    lastAttemptAt: timestamp("lastAttemptAt"),
+    processedAt: timestamp("processedAt"),
+    /** customerInteractions.id once the message lands as an interaction (history
+     *  mode). Soft ref, no FK — matches the repo's provenance convention. */
+    interactionId: int("interactionId"),
+  },
+  (table) => ({
+    // message-level idempotency key (same thread → each new message is its own
+    // business event, so the key is per-message not per-thread).
+    msgUq: unique("uq_ledger_integration_msg").on(table.integrationId, table.gmailMessageId),
+    // reconciliation + retry sweeps scan by (integration, status).
+    statusIdx: index("idx_ledger_status").on(table.integrationId, table.status, table.nextRetryAt),
+    threadIdx: index("idx_ledger_thread").on(table.integrationId, table.gmailThreadId),
+  }),
+);
+
+export type GmailIngestionLedger = typeof gmailIngestionLedger.$inferSelect;
+export type InsertGmailIngestionLedger = typeof gmailIngestionLedger.$inferInsert;
 
 // ──────────────────────────────────────────────────────────────────────────
 // Plaid bookkeeping integration (migration 0070).
