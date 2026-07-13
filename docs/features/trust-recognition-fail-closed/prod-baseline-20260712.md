@@ -41,4 +41,6 @@ SELECT COUNT(*), SUM(recognizedAt IS NOT NULL), MAX(recognizedAt), SUM(reversedA
 - 2026-07-13T02:23:20Z 部署後比對探針:與部署前基準逐項相同,部署本身零信託狀態寫入。/health 四項全 ok。狀態=「部署後即時資料不變驗證 PASS」(6.7 校正措辭;非「控制已運行驗證」,worker 尚未跑)。
 - 2026-07-13T02:40:55Z 擴充探針:noExpectedDateCount=3、noBookingCount=3,親證 6.6/6.7 的 cron oracle 正確、我原 oracle 錯誤。
 - BullMQ 現場唯一 trust-recognition-daily repeatable job,pattern 0 6 * * *,next=2026-07-13T06:00:00Z(6.7 §一.6,Codex 現場核)。
-- 待:06:00 UTC cron 首跑收 worker log 五項計數+再探針;次日再一輪。v812 凍結,首輪 cron 前不換 release、不 rollback(6.7 §五)。
+- 2026-07-13T06:00:00Z cron 首跑(監看窗 05:57-06:13Z 自動收):worker log 原樣「scan run=cron-repeat:...:1783922400000-... scanned=3 dueForReview=0 skippedNoDate=3 skippedNoMatch=0 skippedCancelled=0」+「✅ ... 0 due for review」;job completed 非 failed;無「請轉出」通知;transfer detection 零輸出(=零回填零催促)。五項計數與 oracle 完全一致。
+- 2026-07-13T06:13:07Z cron 後探針:與基準逐項相同(recognizedCount 0/maxRecognizedAt null/transferredCount 0/pendingCount 3)。
+- 裁定:首次 worker 運行驗證通過(6.7 §三四條全中)。「控制已運行驗證」仍待次日 06:00Z 第二輪同標準複驗。原始 log 檔:scratchpad cron-window-trust.log(session 暫存,關鍵行已原樣抄錄於上)。
