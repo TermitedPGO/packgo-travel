@@ -56,3 +56,11 @@ WIP:本批為當前唯一高風險施工批(B1.2 已完工待部署,不佔施工
 | 彩排白名單 | 行號漂移同步:adapter 235/241/253/288/436→238/244/267/308/456,gmailPipeline 1010/1438/1444→1081/1509/1515,WHERE/INSERT 裸語句更新;coverage.test 綠 | registryWhitelist/Entries.ts |
 | 指揮驗收 | 通過:tsc 0、gmail 16 檔 313 綠、全套綠、新測 5 次穩 | 本表 |
 | 階梯位置 | 三窄修 + scan floor 語義完成,重新申請 shadow-only code gate(等 Codex);authoritative 翻閘前 mode epoch/drain 列未來批;TiDB gate 未動 | — |
+
+## 切片 1.5(Codex 18 輪三阻塞+scan floor)
+| 階段 | 狀態 | 證據 |
+|------|------|------|
+| 施工 | 完成 2026-07-14(opus,隔離 worktree 首戰):requeue 三值數值 MAX(GREATEST 輪轉 COALESCE,NULL-safe)、404 recovery baseline-first(照 bootstrap 先例+race fixture)、authoritative 三層閘(feeder 本體+最深 sink+legacy fence)+gmailRunNow mode 路由+pushWorker 去 fail-open+call-site guard、scanConsumedFloor 持久化(三 NULL fail-closed 非 '0') | 6c6a9142 |
+| 對抗審查 | PASS 零阻塞(讀 origin diff 不動工作樹):GREATEST 七種 NULL 組合逐一驗算恆取非 NULL 最大值;getProfile 失敗 fail-safe;fence 位置在建 client 前;call-site guard 真掃描;彩排行號零漂移。2 誠實備註:動態閘未來批補註記、真 DB 語義延 TiDB gate(設計內) | 本表 |
+| 指揮驗收 | 通過:worktree 內親跑 tsc 0、gmail 16 檔 313 綠;baseline-first/最深 sink/requeue WHERE 親讀 | 本表 |
+| 階梯位置 | shadow-only code gate 重新申請(Codex 18 §五.7 條件:三窄修+scan floor 已齊);TiDB gate 未動;隔離 worktree 規則首次實戰成功(main 全程未被佔用,v813 ship 平行進行) | — |
