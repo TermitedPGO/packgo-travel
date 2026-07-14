@@ -44,3 +44,11 @@ SELECT COUNT(*), SUM(recognizedAt IS NOT NULL), MAX(recognizedAt), SUM(reversedA
 - 2026-07-13T06:00:00Z cron 首跑(監看窗 05:57-06:13Z 自動收):worker log 原樣「scan run=cron-repeat:...:1783922400000-... scanned=3 dueForReview=0 skippedNoDate=3 skippedNoMatch=0 skippedCancelled=0」+「✅ ... 0 due for review」;job completed 非 failed;無「請轉出」通知;transfer detection 零輸出(=零回填零催促)。五項計數與 oracle 完全一致。
 - 2026-07-13T06:13:07Z cron 後探針:與基準逐項相同(recognizedCount 0/maxRecognizedAt null/transferredCount 0/pendingCount 3)。
 - 裁定:首次 worker 運行驗證通過(6.7 §三四條全中)。「控制已運行驗證」仍待次日 06:00Z 第二輪同標準複驗。原始 log 檔:scratchpad cron-window-trust.log(session 暫存,關鍵行已原樣抄錄於上)。
+
+## 第二輪 cron 驗證(2026-07-14T06:00Z)
+
+- 收證方式誠實記:長 sleep 監看程序死亡(疑機器休眠),log 緩衝回不到事發點;改讀 BullMQ completed job 回傳值(耐久紀錄,證據等級高於 log)。
+- job repeat:...:1784008800000,finishedOn 2026-07-14T06:00:00.339Z,returnvalue 原樣:scanned=3 dueForReview=0 dueRows=[] skippedNoDepartureDate=3 skippedNotMatched=0 skippedCancelledBooking=0;failedReason null。與 oracle 完全一致。
+- 06:31:15Z 探針:recognizedCount 0、maxRecognizedAt null、transferredCount 0、pendingCount 3,與基準逐項相同。
+- 附帶佐證:BullMQ 歷史 completed jobs 顯示 07-11/07-12(v811 舊碼)同樣 recognized=0 — 三筆自始未被自動認列。
+- 裁定:第二輪同標準通過,第三層運行證據完成。B1/B1.1 於 v812 = 「已部署且運行驗證」(待 Codex 複核蓋章)。v813(B1.2)ship 條件=Codex 複核+審查閘綠(待傳信結案)。
