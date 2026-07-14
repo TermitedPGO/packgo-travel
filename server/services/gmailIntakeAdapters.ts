@@ -170,10 +170,18 @@ export function createDrizzleLedgerStore(
 
     async insertMinimalIgnore(rows) {
       if (rows.length === 0) return 0;
-      // INSERT IGNORE via onDuplicateKeyUpdate no-op (set a non-key col to itself)
-      // so a re-diff / duplicate push / crash-replay collapses to one row. Minimal
-      // discovery row (P0-1): fromAddress/route/classifiedAt stay NULL, internalDateMs
-      // is 0 until the classification stage hydrates + backfills them.
+      // State-aware upsert (Codex 15 輪 P0-2), done as TWO ordering-hazard-free
+      // statements under the per-integration fencing lock (the sole writer, so no
+      // concurrent-upsert race). Both are idempotent → duplicate labelAdded / crash-
+      // replay converge with zero duplication.
+      //
+      // Statement 1 — idempotent INSERT + ALWAYS track the latest inbox-arrival
+      // historyId (every eventKind / every status branch). Minimal discovery row
+      // (P0-1): fromAddress/route/classifiedAt stay NULL, internalDateMs 0 until the
+      // classification stage hydrates them. On a duplicate key we only refresh
+      // lastSeenHistoryId — COALESCE'd so a fallback-scan re-discovery (which carries
+      // gmailHistoryId=NULL) never clobbers a real value; the requeue itself is
+      // statement 2 so no SET clause here references `status`.
       await db
         .insert(gmailIngestionLedger)
         .values(
@@ -182,12 +190,62 @@ export function createDrizzleLedgerStore(
             gmailMessageId: r.gmailMessageId,
             gmailThreadId: r.gmailThreadId,
             gmailHistoryId: r.gmailHistoryId,
+            lastSeenHistoryId: r.gmailHistoryId,
+            discoveryReason: "initial" as const,
             internalDateMs: 0,
             source: r.source,
             status: "pending" as const,
           })),
         )
-        .onDuplicateKeyUpdate({ set: { integrationId: sql`integrationId` } });
+        .onDuplicateKeyUpdate({
+          set: {
+            lastSeenHistoryId: sql`coalesce(values(\`lastSeenHistoryId\`), \`lastSeenHistoryId\`)`,
+          },
+        });
+
+      // Statement 2 — REQUEUE gate (Codex 15 輪 §四.1 修正): ONLY discoveries whose
+      // eventKind is 'label_added_inbox' (an explicit labelAdded event carrying INBOX)
+      // may resurrect a terminal-ignored row. messagesAdded replays and fallback/
+      // bootstrap/backfill scans are 'message_added' → they never reach this statement,
+      // so a 404 full-inbox re-scan cannot mass-requeue historical noise (重排風暴閘門).
+      // For the gated ids: flip ignored→pending, clear the classification (route/
+      // wouldRoute → re-classify from scratch), reset the retry/classify track, and
+      // stamp the audit trail. The `WHERE status='ignored'` gate makes this a no-op
+      // for processed/failed/pending rows (§四 3/4) and idempotent on replay (a re-hit
+      // finds status='pending'). No SET column references `status`, so there is NO
+      // ODKU-style assignment-order hazard — every RHS reads the pre-update row.
+      const requeueIds = rows
+        .filter((r) => r.eventKind === "label_added_inbox")
+        .map((r) => r.gmailMessageId);
+      if (requeueIds.length === 0) return rows.length;
+      const integrationId = rows[0]!.integrationId;
+      await db
+        .update(gmailIngestionLedger)
+        .set({
+          status: "pending",
+          route: null,
+          wouldRoute: null,
+          classifiedAt: null,
+          fromAddress: null,
+          internalDateMs: 0,
+          failureKind: null,
+          errorDetail: null,
+          httpStatus: null,
+          retryCount: 0,
+          nextRetryAt: null,
+          processedAt: null,
+          interactionId: null,
+          discoveryReason: "inbox_requeue",
+          lastRequeuedAt: new Date(),
+          requeueCount: sql`${gmailIngestionLedger.requeueCount} + 1`,
+        })
+        .where(
+          and(
+            eq(gmailIngestionLedger.integrationId, integrationId),
+            inArray(gmailIngestionLedger.gmailMessageId, requeueIds),
+            eq(gmailIngestionLedger.status, "ignored"),
+          ),
+        );
       return rows.length;
     },
 
@@ -394,6 +452,10 @@ function mapLedgerRow(r: LedgerSelectRow): LedgerRow {
     retryCount: r.retryCount,
     nextRetryAt: r.nextRetryAt ?? null,
     interactionId: r.interactionId ?? null,
+    lastSeenHistoryId: r.lastSeenHistoryId ?? null,
+    discoveryReason: r.discoveryReason ?? null,
+    requeueCount: r.requeueCount,
+    lastRequeuedAt: r.lastRequeuedAt ?? null,
   };
 }
 

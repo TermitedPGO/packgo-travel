@@ -21,6 +21,7 @@ import {
   feedPendingDownstream,
   classifyFailure,
   computeNextRetryAt,
+  isHistoryIdNewer,
   buildInboxScanQuery,
   normalizeFromAddress,
   errorSummary,
@@ -63,32 +64,63 @@ class FakeStore implements LedgerStore {
     return c ? { ...c } : null;
   }
   async insertMinimalIgnore(rows: MinimalLedgerRow[]) {
+    // Mirrors the real two-statement state-aware upsert (Codex 15 輪 P0-2 + §四.1
+    // eventKind gate): absent → INSERT pending; existing + ignored + eventKind=
+    // label_added_inbox → REQUEUE (message_added / scan re-discovery NEVER
+    // requeues); else → only lastSeen refresh (null never clobbers — COALESCE).
     let inserted = 0;
     for (const r of rows) {
       const dup = this.rows.find(
         (x) => x.integrationId === r.integrationId && x.gmailMessageId === r.gmailMessageId,
       );
-      if (dup) continue;
-      this.rows.push({
-        id: this.nextId++,
-        integrationId: r.integrationId,
-        gmailMessageId: r.gmailMessageId,
-        gmailThreadId: r.gmailThreadId,
-        gmailHistoryId: r.gmailHistoryId,
-        internalDateMs: 0,
-        fromAddress: null,
-        source: r.source,
-        status: "pending",
-        route: null,
-        wouldRoute: null,
-        failureKind: null,
-        httpStatus: null,
-        retryCount: 0,
-        nextRetryAt: null,
-        interactionId: null,
-        firstSeenMs: this.clock(),
-      });
-      inserted++;
+      if (!dup) {
+        this.rows.push({
+          id: this.nextId++,
+          integrationId: r.integrationId,
+          gmailMessageId: r.gmailMessageId,
+          gmailThreadId: r.gmailThreadId,
+          gmailHistoryId: r.gmailHistoryId,
+          internalDateMs: 0,
+          fromAddress: null,
+          source: r.source,
+          status: "pending",
+          route: null,
+          wouldRoute: null,
+          failureKind: null,
+          httpStatus: null,
+          retryCount: 0,
+          nextRetryAt: null,
+          interactionId: null,
+          lastSeenHistoryId: r.gmailHistoryId,
+          discoveryReason: "initial",
+          requeueCount: 0,
+          lastRequeuedAt: null,
+          firstSeenMs: this.clock(),
+        });
+        inserted++;
+        continue;
+      }
+      // statement 1: every status branch refreshes the latest inbox-arrival id
+      // (COALESCE semantics — a null scan-discovery id never clobbers a real one).
+      dup.lastSeenHistoryId = r.gmailHistoryId ?? dup.lastSeenHistoryId;
+      // statement 2: requeue ONLY terminal-ignored rows AND only for an explicit
+      // label_added_inbox event (§四.1 gate); idempotent — a pending/processed/
+      // failed row, or any message_added re-discovery, is untouched.
+      if (dup.status === "ignored" && r.eventKind === "label_added_inbox") {
+        dup.status = "pending";
+        dup.route = null;
+        dup.wouldRoute = null;
+        dup.fromAddress = null;
+        dup.internalDateMs = 0;
+        dup.failureKind = null;
+        dup.httpStatus = null;
+        dup.retryCount = 0;
+        dup.nextRetryAt = null;
+        dup.interactionId = null;
+        dup.discoveryReason = "inbox_requeue";
+        dup.requeueCount += 1;
+        dup.lastRequeuedAt = new Date(this.clock());
+      }
     }
     return inserted;
   }
@@ -344,10 +376,20 @@ function page(
   nextPageToken: string | null,
   extra: Partial<HistoryPage> = {},
 ): HistoryPage {
+  // a bare string = a plain messageAdded discovery (eventKind omitted → the engine
+  // defaults it to "message_added"; only an explicit inboxEvent() can requeue).
   const msgs: DiscoveredMessage[] = messages.map((m) =>
     typeof m === "string" ? { id: m, threadId: `t-${m}` } : m,
   );
   return { messages: msgs, boundaryHistoryId, nextPageToken, ...extra };
+}
+
+/** A labelAdded(INBOX) discovery — the ONE event kind allowed to requeue an ignored
+ *  row (Codex 15 輪 §四.1). fetchHistoryPage emits this for real labelAdded(INBOX)
+ *  records (and for a message seen in BOTH messagesAdded and labelsAdded — label wins,
+ *  unit-tested in gmailPush.test.ts). */
+function inboxEvent(id: string): DiscoveredMessage {
+  return { id, threadId: `t-${id}`, eventKind: "label_added_inbox" };
 }
 
 function cursor(overrides: Partial<IntegrationCursor> = {}): IntegrationCursor {
@@ -779,6 +821,79 @@ describe("liveness: per-page prefix advance + safety-valve continuation (P0-2)",
   });
 });
 
+// ── P0-1: cursor 語義 + 大數精度 (Codex 15 輪 §三) ──────────────────────────────
+
+describe("isHistoryIdNewer — forward-only BigInt order (大數精度加固)", () => {
+  it("uses full BigInt precision where Number() would collapse two distinct ids", () => {
+    // 2^53 = 9007199254740992. Number('9007199254740993') === 9007199254740992 (the
+    // +1 is lost), so a Number()-based compare would call these EQUAL (not newer).
+    expect(isHistoryIdNewer("9007199254740993", "9007199254740992")).toBe(true);
+    expect(isHistoryIdNewer("9007199254740992", "9007199254740993")).toBe(false);
+    // far beyond 2^53 — a realistic Gmail-scale value.
+    expect(isHistoryIdNewer("18446744073709551616", "18446744073709551615")).toBe(true);
+  });
+  it("is numeric order, NOT lexicographic ('100' > '99', though '100' < '99' as strings)", () => {
+    expect(isHistoryIdNewer("100", "99")).toBe(true); // lexicographic would be false
+    expect(isHistoryIdNewer("99", "100")).toBe(false);
+  });
+  it("equal → not newer (no advance on an unchanged cursor)", () => {
+    expect(isHistoryIdNewer("9007199254740993", "9007199254740993")).toBe(false);
+  });
+  it("symbolic (non-decimal) test ids degrade to the equality gate", () => {
+    expect(isHistoryIdNewer("H2", "H1")).toBe(true);
+    expect(isHistoryIdNewer("H1", "H1")).toBe(false);
+  });
+});
+
+describe("cursor advances to the record-id prefix (NOT the snapshot) + big-number replay", () => {
+  it("non-final page: cursor advances only to the page's last history[].id, then resumes past a crash with zero loss", async () => {
+    // Mirrors Codex §三's mandated fixture at the ENGINE level: a non-final page's
+    // boundary is the LAST history record id (小於同頁頂層 snapshot — fetchHistoryPage's
+    // "有 nextPageToken 時禁存頂層 historyId" is unit-proven in gmailPush.test.ts). All
+    // ids exceed 2^53 to prove the flow keeps full string precision end-to-end.
+    const START = "9007199254740000";
+    const P1_RECORD = "9007199254740611"; // page-1 last history[].id (the prefix)
+    const P2_SNAPSHOT = "9007199254749999"; // page-2 top-level snapshot (much larger)
+    const { deps, store, gmail } = makeDeps({
+      integrations: [cursor({ lastHistoryId: START, intakeMode: "history" })],
+    });
+    // page 1: has a continuation (nextPageToken) → boundary is the record id, NOT a snapshot.
+    gmail.historyPages.push(page(["m1"], P1_RECORD, "tokA"));
+    // page 2: the continuation crashes mid-round.
+    gmail.historyPages.push(new Error("history.list network error on page 2"));
+
+    const crash = await syncHistoryForIntegration(deps, 1);
+    // cursor advanced ONLY to the landed record-id prefix — never the (unseen) snapshot.
+    expect(crash).toMatchObject({ ok: true, outcome: "continued", phase: "history", cursor: P1_RECORD });
+    expect((await store.getIntegration(1))!.lastHistoryId).toBe(P1_RECORD);
+    expect(store.ledgerFor(1).map((r) => r.gmailMessageId)).toEqual(["m1"]);
+
+    // restart from the record-id prefix: page 2 arrives, drains, advances to the snapshot.
+    gmail.historyPages.push(page(["m2"], P2_SNAPSHOT, null));
+    const restart = await syncHistoryForIntegration(deps, 1);
+    expect(restart).toMatchObject({ ok: true, outcome: "advanced", cursor: P2_SNAPSHOT });
+    expect(store.ledgerFor(1).map((r) => r.gmailMessageId).sort()).toEqual(["m1", "m2"]); // zero loss, zero dup
+    expect((await store.getIntegration(1))!.lastHistoryId).toBe(P2_SNAPSHOT);
+  });
+
+  it("a full round with all history ids > 2^53 advances correctly (no precision loss)", async () => {
+    const START = "9223372036854775800"; // near 2^63
+    const B1 = "9223372036854775991";
+    const B2 = "9223372036854776050";
+    const { deps, store, gmail } = makeDeps({
+      integrations: [cursor({ lastHistoryId: START, intakeMode: "history" })],
+    });
+    gmail.historyPages.push(page(["m1"], B1, "tokA")); // page 1
+    gmail.historyPages.push(page(["m2"], B2, null)); // page 2 drained
+
+    const res = await syncHistoryForIntegration(deps, 1);
+
+    expect(res).toMatchObject({ ok: true, outcome: "advanced", cursor: B2 });
+    expect(store.ledgerFor(1).map((r) => r.gmailMessageId).sort()).toEqual(["m1", "m2"]);
+    expect((await store.getIntegration(1))!.lastHistoryId).toBe(B2);
+  });
+});
+
 // ── fencing + CAS + concurrency ───────────────────────────────────────────────
 
 describe("syncHistoryForIntegration — fencing + CAS", () => {
@@ -963,7 +1078,7 @@ describe("feedPendingDownstream — history mode terminal states + F skeleton", 
   /** seed a classified pending customer row directly (skip discovery for brevity). */
   async function seedClassifiedCustomer(store: FakeStore, from = CUSTOMER, id = "m1") {
     await store.insertMinimalIgnore([
-      { integrationId: 1, gmailMessageId: id, gmailThreadId: `t-${id}`, gmailHistoryId: "H2", source: "history" },
+      { integrationId: 1, gmailMessageId: id, gmailThreadId: `t-${id}`, gmailHistoryId: "H2", source: "history", eventKind: "message_added" },
     ]);
     const row = store.ledgerFor(1).find((r) => r.gmailMessageId === id)!;
     await store.classify(row.id, {
@@ -1034,6 +1149,262 @@ describe("feedPendingDownstream — history mode terminal states + F skeleton", 
     expect(alerts.cards).toHaveLength(1);
     expect(alerts.cards[0].body).toContain("m1");
     expect(alerts.cards[0].body).not.toContain(CUSTOMER); // PII-safe
+  });
+});
+
+// ── P0-2: labelsAdded 狀態感知重排 (Codex 15 輪 §四 five cases) ─────────────────
+
+describe("state-aware requeue: an inbox re-entry re-surfaces the right rows (P0-2)", () => {
+  it("1) a NEW message seen via both messageAdded and labelAdded lands ONE row, routes ONCE, no spurious requeue", async () => {
+    const classifier = new FakeClassifier();
+    classifier.set("m1", { from: CUSTOMER, isReceipt: false, internalDateMs: 1_780_000_000_000 });
+    const { deps, store, gmail } = makeDeps({ integrations: [cursor({ intakeMode: "history" })], classifier });
+
+    // fetchHistoryPage collapses a message present in BOTH messagesAdded and labelsAdded
+    // to a single DiscoveredMessage tagged label_added_inbox (label wins — unit-tested in
+    // gmailPush.test.ts), so the engine receives m1 once; a duplicate re-discovery round
+    // must not add a second row, and a brand-new (pending) row is never "requeued".
+    gmail.historyPages.push(page([inboxEvent("m1")], "H2", null));
+    gmail.historyPages.push(page([inboxEvent("m1")], "H3", null));
+    await syncHistoryForIntegration(deps, 1);
+    await syncHistoryForIntegration(deps, 1);
+
+    expect(store.ledgerFor(1)).toHaveLength(1); // exactly one row
+
+    const c = await classifyPendingLedger(deps, 1);
+    expect(c.deferredToFeeder).toBe(1); // routed exactly once
+    expect(store.ledgerFor(1)).toHaveLength(1);
+    expect(store.ledgerFor(1)[0]).toMatchObject({ route: "customer", requeueCount: 0 });
+  });
+
+  it("2) an ignored row that receives a newer INBOX event is requeued to pending + re-classified", async () => {
+    const classifier = new FakeClassifier();
+    classifier.set("m1", { from: NOISE, isReceipt: false, internalDateMs: 1_780_000_000_000 });
+    const { deps, store, gmail } = makeDeps({ integrations: [cursor({ intakeMode: "history" })], classifier });
+
+    // round 1: discover + classify m1 as noise → terminal ignored.
+    gmail.historyPages.push(page(["m1"], "9007199254740801", null));
+    await syncHistoryForIntegration(deps, 1);
+    await classifyPendingLedger(deps, 1);
+    expect(store.ledgerFor(1)[0]).toMatchObject({ route: "noise", status: "ignored", requeueCount: 0 });
+
+    // m1 is moved back INTO the inbox → a newer labelAdded(INBOX) history event
+    // (eventKind label_added_inbox — the ONE kind allowed to requeue, §四.1) re-
+    // surfaces it. Classification now yields customer (rules updated / sender now
+    // recognised) — the requeue re-evaluates instead of staying permanently stuck ignored.
+    classifier.set("m1", { from: CUSTOMER, isReceipt: false, internalDateMs: 1_780_000_000_005 });
+    gmail.historyPages.push(page([inboxEvent("m1")], "9007199254740950", null));
+    await syncHistoryForIntegration(deps, 1);
+
+    let row = store.ledgerFor(1)[0];
+    expect(row).toMatchObject({
+      status: "pending",
+      route: null,
+      requeueCount: 1,
+      discoveryReason: "inbox_requeue",
+      lastSeenHistoryId: "9007199254740950",
+    });
+    expect(row.lastRequeuedAt).not.toBeNull();
+
+    // re-classification routes it as customer — the customer need is no longer stuck.
+    await classifyPendingLedger(deps, 1);
+    row = store.ledgerFor(1)[0];
+    expect(row).toMatchObject({ route: "customer", status: "pending", requeueCount: 1 });
+    expect(store.ledgerFor(1)).toHaveLength(1); // still exactly ONE row
+  });
+
+  it("3) a processed row hit by a later label change updates only lastSeenHistoryId — zero side effect", async () => {
+    const classifier = new FakeClassifier();
+    classifier.set("m1", { from: CUSTOMER, isReceipt: false, internalDateMs: 1_780_000_000_000 });
+    const downstream = new FakeDownstream();
+    const { deps, store, gmail } = makeDeps({
+      integrations: [cursor({ intakeMode: "history" })],
+      classifier,
+      downstream,
+    });
+
+    // round 1: discover → classify customer → feed → processed.
+    gmail.historyPages.push(page(["m1"], "9007199254740801", null));
+    await syncHistoryForIntegration(deps, 1);
+    await classifyPendingLedger(deps, 1);
+    await feedPendingDownstream(deps, 1);
+    expect(store.ledgerFor(1)[0]).toMatchObject({ status: "processed", route: "customer" });
+    expect(downstream.processed).toEqual(["m1"]);
+
+    // a later GENUINE labelAdded(INBOX) event re-surfaces the SAME already-processed
+    // message — even the requeue-capable event kind must not touch a processed row.
+    gmail.historyPages.push(page([inboxEvent("m1")], "9007199254740950", null));
+    await syncHistoryForIntegration(deps, 1);
+
+    const row = store.ledgerFor(1)[0];
+    // status stays processed (NOT requeued), only the latest-seen id advanced.
+    expect(row).toMatchObject({
+      status: "processed",
+      route: "customer",
+      requeueCount: 0,
+      lastSeenHistoryId: "9007199254740950",
+    });
+    expect(row.lastRequeuedAt).toBeNull();
+
+    // classify + feed again → the downstream chain is NEVER re-invoked (no double booking).
+    await classifyPendingLedger(deps, 1);
+    await feedPendingDownstream(deps, 1);
+    expect(downstream.processed).toEqual(["m1"]); // still exactly one
+  });
+
+  it("4) duplicate labelAdded on a still-pending row → one row, no spurious requeue, routed once", async () => {
+    const classifier = new FakeClassifier();
+    classifier.set("m1", { from: CUSTOMER, isReceipt: false, internalDateMs: 1_780_000_000_000 });
+    const { deps, store, gmail } = makeDeps({ integrations: [cursor({ intakeMode: "history" })], classifier });
+
+    // two rounds of DUPLICATE labelAdded(INBOX) re-see m1 BEFORE it is classified —
+    // even the requeue-capable kind is a no-op on a still-pending row.
+    gmail.historyPages.push(page([inboxEvent("m1")], "9007199254740801", null));
+    gmail.historyPages.push(page([inboxEvent("m1")], "9007199254740950", null));
+    await syncHistoryForIntegration(deps, 1);
+    await syncHistoryForIntegration(deps, 1);
+
+    // exactly ONE row; a pending row is never requeued (requeue is ignored-only).
+    expect(store.ledgerFor(1)).toHaveLength(1);
+    expect(store.ledgerFor(1)[0]).toMatchObject({
+      status: "pending",
+      requeueCount: 0,
+      lastSeenHistoryId: "9007199254740950",
+    });
+
+    // classified exactly once.
+    const c = await classifyPendingLedger(deps, 1);
+    expect(c.deferredToFeeder).toBe(1);
+    expect(store.ledgerFor(1)).toHaveLength(1);
+  });
+
+  it("5) requeue then crash before cursor advance → replay is idempotent (requeueCount stays 1, zero dup)", async () => {
+    const classifier = new FakeClassifier();
+    classifier.set("m1", { from: NOISE, isReceipt: false, internalDateMs: 1_780_000_000_000 });
+    const { deps, store, gmail, lock } = makeDeps({ integrations: [cursor({ intakeMode: "history" })], classifier });
+
+    // classify m1 → ignored (cursor advances to H_A).
+    gmail.historyPages.push(page(["m1"], "H_A", null));
+    await syncHistoryForIntegration(deps, 1);
+    await classifyPendingLedger(deps, 1);
+    expect(store.ledgerFor(1)[0]).toMatchObject({ status: "ignored", requeueCount: 0 });
+
+    // a newer labelAdded(INBOX) event requeues m1, but the fencing token is lost right
+    // before the cursor advance (a crash window) → the round lands + requeues but does
+    // NOT advance.
+    classifier.set("m1", { from: CUSTOMER, isReceipt: false, internalDateMs: 1_780_000_000_005 });
+    gmail.historyPages.push(page([inboxEvent("m1")], "H_B", null));
+    lock.failVerify = true;
+    const r1 = await syncHistoryForIntegration(deps, 1);
+    expect(r1).toMatchObject({ ok: true, outcome: "noop", reason: "lost-fencing-token" });
+    expect(store.ledgerFor(1)[0]).toMatchObject({ status: "pending", route: null, requeueCount: 1 });
+    expect((await store.getIntegration(1))!.lastHistoryId).toBe("H_A"); // cursor did NOT advance
+
+    // replay from the un-advanced cursor re-sees the SAME labelAdded(INBOX) event for
+    // m1 (now pending) → the requeue is a no-op (ignored-only gate).
+    lock.failVerify = false;
+    gmail.historyPages.push(page([inboxEvent("m1")], "H_B", null));
+    await syncHistoryForIntegration(deps, 1);
+    expect(store.ledgerFor(1)[0].requeueCount).toBe(1); // NOT 2 — idempotent under replay
+
+    // classify once → routed once, still one row.
+    await classifyPendingLedger(deps, 1);
+    expect(store.ledgerFor(1)[0]).toMatchObject({ status: "pending", route: "customer", requeueCount: 1 });
+    expect(store.ledgerFor(1)).toHaveLength(1);
+  });
+
+  it("6) messageAdded replay re-seeing an ignored row does NOT requeue it (§四.1 gate)", async () => {
+    const classifier = new FakeClassifier();
+    classifier.set("m1", { from: NOISE, isReceipt: false, internalDateMs: 1_780_000_000_000 });
+    const { deps, store, gmail } = makeDeps({ integrations: [cursor({ intakeMode: "history" })], classifier });
+
+    // classify m1 → terminal ignored.
+    gmail.historyPages.push(page(["m1"], "H_A", null));
+    await syncHistoryForIntegration(deps, 1);
+    await classifyPendingLedger(deps, 1);
+    expect(store.ledgerFor(1)[0]).toMatchObject({ status: "ignored", route: "noise", requeueCount: 0 });
+
+    // a crash-replay round re-lists the SAME messageAdded diff (plain message_added —
+    // no inbox-entry signal). The ignored row must stay ignored: seeing the id again
+    // proves nothing about the mail re-entering the inbox.
+    gmail.historyPages.push(page(["m1"], "H_B", null));
+    await syncHistoryForIntegration(deps, 1);
+
+    const row = store.ledgerFor(1)[0];
+    expect(row).toMatchObject({
+      status: "ignored", // NOT requeued
+      route: "noise", // classification untouched
+      requeueCount: 0,
+      lastSeenHistoryId: "H_B", // statement 1 still tracked the latest sighting
+    });
+    expect(row.lastRequeuedAt).toBeNull();
+    // and it is NOT re-classified.
+    const c = await classifyPendingLedger(deps, 1);
+    expect(c).toMatchObject({ deferredToFeeder: 0, ignoredTerminal: 0 });
+  });
+
+  it("7) 404 fallback full-inbox re-scan re-seeing ignored rows requeues NOTHING (無重排風暴)", async () => {
+    const classifier = new FakeClassifier();
+    classifier.set("m1", { from: NOISE, isReceipt: false, internalDateMs: 1_780_000_000_000 });
+    classifier.set("m2", { from: NOREPLY, isReceipt: false, internalDateMs: 1_780_000_000_001 });
+    const { deps, store, gmail } = makeDeps({ integrations: [cursor({ intakeMode: "history" })], classifier });
+
+    // two historical noise mails, both terminal ignored.
+    gmail.historyPages.push(page(["m1", "m2"], "H_A", null));
+    await syncHistoryForIntegration(deps, 1);
+    await classifyPendingLedger(deps, 1);
+    expect(store.ledgerFor(1).every((r) => r.status === "ignored")).toBe(true);
+
+    // cursor expires → the 404 fallback re-scans the WHOLE inbox and re-discovers both
+    // old ignored mails (scan discoveries are always message_added-equivalent). Neither
+    // may be resurrected — otherwise every fallback round would be a requeue storm.
+    gmail.historyPages.push(page([], null, null, { expired: true }));
+    gmail.scanPages.push({
+      messages: [
+        { id: "m1", threadId: "t-m1", eventKind: "message_added" },
+        { id: "m2", threadId: "t-m2", eventKind: "message_added" },
+        { id: "m3", threadId: "t-m3", eventKind: "message_added" }, // genuinely new
+      ],
+      nextPageToken: null,
+    });
+    gmail.profileHistoryId = "H_REBUILT";
+    const res = await syncHistoryForIntegration(deps, 1);
+    expect(res).toMatchObject({ ok: true, outcome: "recovered", cursor: "H_REBUILT" });
+
+    const byId = Object.fromEntries(store.ledgerFor(1).map((r) => [r.gmailMessageId, r]));
+    // both old rows: still ignored, zero requeue, classification intact…
+    expect(byId.m1).toMatchObject({ status: "ignored", route: "noise", requeueCount: 0 });
+    expect(byId.m2).toMatchObject({ status: "ignored", route: "noise", requeueCount: 0 });
+    // …and the fallback's null historyId did NOT clobber the real lastSeen (COALESCE).
+    expect(byId.m1.lastSeenHistoryId).toBe("H_A");
+    // the genuinely new mail landed pending as usual.
+    expect(byId.m3).toMatchObject({ status: "pending", route: null });
+    expect(store.ledgerFor(1)).toHaveLength(3);
+  });
+
+  it("8) both events on an IGNORED row (collapsed to label_added_inbox) → one row, requeued exactly once", async () => {
+    const classifier = new FakeClassifier();
+    classifier.set("m1", { from: NOISE, isReceipt: false, internalDateMs: 1_780_000_000_000 });
+    const { deps, store, gmail } = makeDeps({ integrations: [cursor({ intakeMode: "history" })], classifier });
+
+    // m1 → terminal ignored.
+    gmail.historyPages.push(page(["m1"], "H_A", null));
+    await syncHistoryForIntegration(deps, 1);
+    await classifyPendingLedger(deps, 1);
+
+    // one diff carries BOTH messagesAdded and labelsAdded(INBOX) for m1 —
+    // fetchHistoryPage collapses that to ONE discovery tagged label_added_inbox
+    // (label wins, unit-tested in gmailPush.test.ts). The engine sees it once.
+    classifier.set("m1", { from: CUSTOMER, isReceipt: false, internalDateMs: 1_780_000_000_005 });
+    gmail.historyPages.push(page([inboxEvent("m1")], "H_B", null));
+    await syncHistoryForIntegration(deps, 1);
+
+    expect(store.ledgerFor(1)).toHaveLength(1); // one row
+    expect(store.ledgerFor(1)[0]).toMatchObject({ status: "pending", route: null, requeueCount: 1 }); // requeued ONCE
+
+    const c = await classifyPendingLedger(deps, 1);
+    expect(c.deferredToFeeder).toBe(1); // re-routed exactly once
+    expect(store.ledgerFor(1)[0]).toMatchObject({ route: "customer", requeueCount: 1 });
   });
 });
 

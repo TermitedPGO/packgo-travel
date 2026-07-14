@@ -57,14 +57,24 @@ export type FailureKind =
   | "noise"
   | "unknown";
 
+/** What kind of event surfaced a discovery (mirrors gmail.ts DiscoveryEventKind —
+ *  Codex 15 輪 P0-2 重排閘門). Only "label_added_inbox" (an explicit labelAdded event
+ *  carrying INBOX) may requeue a terminal-ignored row; messagesAdded and ALL query
+ *  scans (fallback/bootstrap/backfill) are "message_added" and NEVER requeue — a 404
+ *  fallback re-scan of the whole inbox must not resurrect every old ignored row. */
+export type DiscoveryEventKind = "message_added" | "label_added_inbox";
+
 /** What lands at DISCOVERY — no From / subject / body, only provenance. The
- *  classification stage hydrates fromAddress + route downstream (P0-1). */
+ *  classification stage hydrates fromAddress + route downstream (P0-1). eventKind is
+ *  RUNTIME-ONLY routing for the state-aware upsert's requeue gate — deliberately NOT
+ *  persisted (discoveryReason already records the audit outcome on the row). */
 export interface MinimalLedgerRow {
   integrationId: number;
   gmailMessageId: string;
   gmailThreadId: string;
   gmailHistoryId: string | null;
   source: LedgerSource;
+  eventKind: DiscoveryEventKind;
 }
 
 export interface LedgerRow {
@@ -87,6 +97,16 @@ export interface LedgerRow {
   retryCount: number;
   nextRetryAt: Date | null;
   interactionId: number | null;
+  // ── v3 state-aware requeue audit (Codex 15 輪 P0-2) ──
+  /** Latest inbox-arrival historyId that (re)surfaced this row (gmailHistoryId stays
+   *  the first-discovery id). */
+  lastSeenHistoryId: string | null;
+  /** 'initial' at first discovery, 'inbox_requeue' after an ignored→pending flip. */
+  discoveryReason: string | null;
+  /** # times a terminal-ignored row was requeued to pending by a newer INBOX event. */
+  requeueCount: number;
+  /** When the row was last requeued (NULL until the first ignored→pending flip). */
+  lastRequeuedAt: Date | null;
 }
 
 export interface IntegrationCursor {
@@ -100,10 +120,14 @@ export interface IntegrationCursor {
 
 // ── injected ports ───────────────────────────────────────────────────────────
 
-/** A discovered message id + thread id (mirrors gmail.ts DiscoveredMessage). */
+/** A discovered message id + thread id (mirrors gmail.ts DiscoveredMessage).
+ *  eventKind is optional at the PORT boundary and defaults to "message_added" in
+ *  toMinimalRows — fail-safe: an adapter that doesn't tag events can never trigger
+ *  a requeue by accident (only an explicit label_added_inbox does). */
 export interface DiscoveredMessage {
   id: string;
   threadId: string;
+  eventKind?: DiscoveryEventKind;
 }
 
 /** The raw signals the classification stage needs — hydrated per message. */
@@ -154,9 +178,24 @@ export interface LockPort {
 
 export interface LedgerStore {
   getIntegration(integrationId: number): Promise<IntegrationCursor | null>;
-  /** INSERT IGNORE minimal discovery rows (fromAddress/route NULL, internalDateMs
-   *  0, status=pending). Returns count newly inserted. Throws on any non-duplicate
-   *  DB error so the caller must NOT advance the cursor (順序鐵律). */
+  /** State-aware upsert of minimal discovery rows (Codex 15 輪 P0-2 —取代單純 INSERT
+   *  IGNORE). Per (integrationId, gmailMessageId):
+   *    • row absent → INSERT pending (fromAddress/route NULL, internalDateMs 0,
+   *      discoveryReason 'initial'); lastSeenHistoryId = the discovery historyId.
+   *    • row exists, status='ignored' AND the discovery's eventKind =
+   *      'label_added_inbox' → REQUEUE: flip to pending, clear route/wouldRoute
+   *      (re-classify from scratch), reset retry track, bump requeueCount + stamp
+   *      lastRequeuedAt/discoveryReason='inbox_requeue' (audit — the counter records
+   *      the resurrection). eventKind='message_added' NEVER requeues (§四.1): a 404
+   *      fallback scan / crash-replay re-seeing old ignored rows must not resurrect
+   *      them (重排風暴閘門).
+   *    • row exists, status='processed' → ONLY update lastSeenHistoryId; NEVER
+   *      re-generate business side effects (any eventKind).
+   *    • row exists, status='failed'/'pending' → ONLY update lastSeenHistoryId; the
+   *      existing retry/classify track continues untouched (any eventKind).
+   *  Idempotent under duplicate labelAdded / crash-replay (a re-hit on a now-pending
+   *  row matches no ignored branch). Returns count of input rows. Throws on any
+   *  non-duplicate DB error so the caller must NOT advance the cursor (順序鐵律). */
   insertMinimalIgnore(rows: MinimalLedgerRow[]): Promise<number>;
   /** CAS: UPDATE ... SET lastHistoryId=new WHERE id=? AND lastHistoryId<=>expected.
    *  Returns true when exactly this writer advanced it, false on a concurrent race. */
@@ -314,6 +353,34 @@ export function computeNextRetryAt(retryCount: number, nowMs: number): Date | nu
   return new Date(nowMs + RETRY_BASE_MS * Math.pow(2, retryCount));
 }
 
+/** A decimal-string historyId → bigint, or null if it isn't a plain decimal string. */
+function tryHistoryBigInt(s: string): bigint | null {
+  if (!/^\d+$/.test(s)) return null;
+  try {
+    return BigInt(s);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Forward-only historyId comparison — the ONLY ordering ever applied to a historyId
+ * (Codex 15 輪 P0-1 精度加固). Returns true iff `candidate` is STRICTLY greater than
+ * `current` (a real forward step); equal or smaller → false (no advance, never a
+ * regression). The whole point is precision: Gmail history ids routinely exceed
+ * Number.MAX_SAFE_INTEGER (2^53), so they MUST be compared as BigInt — Number()
+ * collapses distinct ids ('…992' vs '…993' both round to the same double) and a
+ * lexicographic string compare is plain wrong ('100' < '99'). Both traps are unit-
+ * tested. Real Gmail ids are always decimal strings → the BigInt path is always taken
+ * in prod; the fallback below only exists so unit tests may use symbolic ids ('H2').
+ */
+export function isHistoryIdNewer(candidate: string, current: string): boolean {
+  const a = tryHistoryBigInt(candidate);
+  const b = tryHistoryBigInt(current);
+  if (a !== null && b !== null) return a > b; // real ids: full-precision BigInt order
+  return candidate !== current; // symbolic test ids: degrade to the equality gate
+}
+
 /**
  * The ONE inbox-universe scan query — shared by the 404 fallback scan, bootstrap,
  * AND the reconcile tripwire (三宇宙一致, v2 對抗審查修正). Universe = "mail in
@@ -329,7 +396,9 @@ export function buildInboxScanQuery(sinceMs: number): string {
   return `after:${sinceSeconds} in:inbox`;
 }
 
-/** Map discovered messages → minimal ledger rows (NO eligibility filter — P0-1). */
+/** Map discovered messages → minimal ledger rows (NO eligibility filter — P0-1).
+ *  eventKind defaults to "message_added" (fail-safe: absent tag can never requeue);
+ *  fetchHistoryPage tags real labelAdded(INBOX) events, scans never do. */
 function toMinimalRows(
   integrationId: number,
   messages: DiscoveredMessage[],
@@ -344,6 +413,7 @@ function toMinimalRows(
       gmailThreadId: m.threadId || "",
       gmailHistoryId,
       source,
+      eventKind: m.eventKind ?? "message_added",
     }));
 }
 
@@ -431,8 +501,11 @@ export async function syncHistoryForIntegration(
         landed += minimal.length;
       }
 
-      // advance the cursor to this page's boundary (已落帳前綴) — forward only.
-      if (page.boundaryHistoryId !== null && page.boundaryHistoryId !== expectedCursor) {
+      // advance the cursor to this page's boundary (已落帳前綴) — forward only. The
+      // guard is a BigInt strict-greater (isHistoryIdNewer): a boundary equal to the
+      // current cursor is a no-op, and an anomalous boundary that is NOT strictly newer
+      // can never drag the cursor backward (精度加固, Codex 15 §三).
+      if (page.boundaryHistoryId !== null && isHistoryIdNewer(page.boundaryHistoryId, expectedCursor)) {
         if (!(await deps.lock.verify(key, token))) {
           return { ok: true, outcome: "noop", reason: "lost-fencing-token", landed };
         }

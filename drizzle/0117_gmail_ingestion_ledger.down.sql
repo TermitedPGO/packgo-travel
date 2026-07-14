@@ -3,6 +3,8 @@
 -- 被發現/處理/失敗)—— 這是漏接稽核的唯一事實源,down 只該用於未上線環境回滾;
 -- 一旦 shadow/history 模式在 prod 累積過真實列,不應執行本檔。intakeMode 欄移除後
 -- 所有信箱回到 legacy 行為(現行 poll),不影響既有客戶信處理。不動任何其他表。
+-- v3 的四個稽核欄(lastSeenHistoryId/discoveryReason/requeueCount/lastRequeuedAt)是
+-- gmailIngestionLedger 的欄位,隨下方 DROP TABLE 一併移除,無需額外語句。
 
 ALTER TABLE `gmailIntegration` DROP COLUMN IF EXISTS `intakeMode`;
 

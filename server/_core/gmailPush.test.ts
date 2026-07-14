@@ -264,6 +264,11 @@ describe("fetchHistoryPage — labelAdded 發現 (三宇宙一致, 對抗審查�
     expect(out.expired).toBe(false);
     expect(out.messages.map((m) => m.id).sort()).toEqual(["fresh", "moved-in"]);
     expect(out.boundaryHistoryId).toBe("700"); // final page → snapshot id
+    // eventKind 貫穿 (Codex 15 輪 §四.1 requeue gate): a NEW mail is message_added;
+    // only the moved-into-inbox one carries the label_added_inbox requeue signal.
+    const byId = Object.fromEntries(out.messages.map((m) => [m.id, m]));
+    expect(byId["fresh"].eventKind).toBe("message_added");
+    expect(byId["moved-in"].eventKind).toBe("label_added_inbox");
   });
 
   it("a labelAdded record for a DIFFERENT label does not count as discovery", async () => {
@@ -299,6 +304,26 @@ describe("fetchHistoryPage — labelAdded 發現 (三宇宙一致, 對抗審查�
     ]);
     const out = await fetchHistoryPage(gmail, "100", null, { labelId: "INBOX" });
     expect(out.messages.map((m) => m.id)).toEqual(["both"]);
+    // 同信兩事件並存 → 取 label_added_inbox (label wins — the collapsed discovery must
+    // keep the inbox-entry signal so an ignored row would still be requeued exactly once).
+    expect(out.messages[0].eventKind).toBe("label_added_inbox");
+  });
+
+  it("labelsAdded arriving BEFORE messagesAdded for the same id still collapses to label_added_inbox", async () => {
+    // order-independence of the upgrade: the label record comes first, then the
+    // messageAdded record re-sees the id — eventKind must NOT be downgraded.
+    const gmail = gmailStub([
+      {
+        historyId: "703",
+        history: [
+          { id: "605", labelsAdded: [{ message: { id: "both2", threadId: "t5" }, labelIds: ["INBOX"] }] },
+          { id: "606", messagesAdded: [{ message: { id: "both2", threadId: "t5" } }] },
+        ],
+      },
+    ]);
+    const out = await fetchHistoryPage(gmail, "100", null, { labelId: "INBOX" });
+    expect(out.messages.map((m) => m.id)).toEqual(["both2"]);
+    expect(out.messages[0].eventKind).toBe("label_added_inbox");
   });
 
   it("non-final page boundary = the LAST history record id (prefix advance target), not the snapshot", async () => {
@@ -315,6 +340,42 @@ describe("fetchHistoryPage — labelAdded 發現 (三宇宙一致, 對抗審查�
     const out = await fetchHistoryPage(gmail, "100", null, { labelId: "INBOX" });
     expect(out.nextPageToken).toBe("p2");
     expect(out.boundaryHistoryId).toBe("652"); // last record on the page — NOT "800"
+  });
+
+  it("大數 non-final page: boundary = last history[].id, and the far-larger top-level snapshot is NOT stored", async () => {
+    // Codex §三 mandated fixture: page-1 history[].id max (…613) is FAR smaller than the
+    // page's top-level snapshot (…9999), and a nextPageToken is present. All ids exceed
+    // 2^53 (9007199254740992) so a Number()-based collapse would be visible. The boundary
+    // MUST be the last record id — persisting the top-level snapshot here would skip the
+    //未落帳尾頁 (the漏信洞).
+    const gmail = gmailStub([
+      {
+        historyId: "9007199254749999", // 頂層=信箱現行水位, MUCH larger than any record here
+        nextPageToken: "p2",
+        history: [
+          { id: "9007199254740611", messagesAdded: [{ message: { id: "a", threadId: "t" } }] },
+          { id: "9007199254740613", labelsAdded: [{ message: { id: "b", threadId: "t" }, labelIds: ["INBOX"] }] },
+        ],
+      },
+    ]);
+    const out = await fetchHistoryPage(gmail, "9007199254740000", null, { labelId: "INBOX" });
+    expect(out.nextPageToken).toBe("p2");
+    expect(out.boundaryHistoryId).toBe("9007199254740613"); // last record id — NOT "9007199254749999"
+    expect(out.boundaryHistoryId).not.toBe("9007199254749999"); // 有 nextPageToken 時禁存頂層
+  });
+
+  it("大數 final page: boundary = the top-level snapshot (window drained, nothing follows)", async () => {
+    const gmail = gmailStub([
+      {
+        historyId: "9007199254749999", // final page → snapshot IS the safe cursor
+        history: [
+          { id: "9007199254740611", messagesAdded: [{ message: { id: "a", threadId: "t" } }] },
+        ],
+      },
+    ]);
+    const out = await fetchHistoryPage(gmail, "9007199254740000", null, { labelId: "INBOX" });
+    expect(out.nextPageToken).toBeNull();
+    expect(out.boundaryHistoryId).toBe("9007199254749999");
   });
 
   it("signals expired (not a throw) on a 404", async () => {

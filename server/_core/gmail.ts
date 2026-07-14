@@ -1284,10 +1284,20 @@ export async function getMailboxHistoryId(
 // drives pagination + the land→advance ordering; these only do I/O.
 // ──────────────────────────────────────────────────────────────────────────
 
-/** A discovered message, minimal (id + threadId) — the ledger lands this at
- *  discovery; the From header + receipt sniff are hydrated later by the
- *  classification stage (fromAddress is NOT known yet). */
-export type DiscoveredMessage = { id: string; threadId: string };
+/** What kind of event surfaced a discovery (Codex 15 輪 P0-2 重排閘門). Only
+ *  "label_added_inbox" may requeue a terminal-ignored ledger row:
+ *    - "message_added": a NEW message (history messagesAdded) — and every query-scan
+ *      discovery (fallback/bootstrap/backfill) is message_added-equivalent, because a
+ *      404 fallback re-scans the whole inbox and re-sees every old ignored row; if
+ *      that could requeue, each fallback round would be a重排風暴.
+ *    - "label_added_inbox": an explicit labelAdded event carrying INBOX — the one
+ *      real「事後被搬進收件匣」signal that justifies resurrecting an ignored row. */
+export type DiscoveryEventKind = "message_added" | "label_added_inbox";
+
+/** A discovered message, minimal (id + threadId + how it surfaced) — the ledger
+ *  lands this at discovery; the From header + receipt sniff are hydrated later by
+ *  the classification stage (fromAddress is NOT known yet). */
+export type DiscoveredMessage = { id: string; threadId: string; eventKind: DiscoveryEventKind };
 
 export type HistoryPageResult = {
   messages: DiscoveredMessage[];
@@ -1334,33 +1344,58 @@ export async function fetchHistoryPage(
       ...(pageToken ? { pageToken } : {}),
       maxResults: 500,
     });
-    const seen = new Map<string, string>(); // id → threadId (page-level dedup)
+    // id → {threadId, eventKind} (page-level dedup). eventKind: the same message in
+    // BOTH messagesAdded and labelsAdded(INBOX) collapses to ONE discovery tagged
+    // label_added_inbox (label wins — Codex 15 輪修正指示), so the requeue gate sees
+    // the inbox-entry signal; a brand-new message stays message_added.
+    const seen = new Map<string, { threadId: string; eventKind: DiscoveryEventKind }>();
     let lastRecordId: string | null = null;
     for (const h of resp.data.history ?? []) {
       if (h.id) lastRecordId = String(h.id);
       for (const added of h.messagesAdded ?? []) {
         const id = added.message?.id;
-        if (id && !seen.has(id)) seen.set(id, added.message?.threadId ?? "");
+        if (id && !seen.has(id)) {
+          seen.set(id, { threadId: added.message?.threadId ?? "", eventKind: "message_added" });
+        }
       }
       // labelAdded(INBOX) is discovery too — the API's labelId param already scopes
       // records, but each labelAdded record carries its own labelIds; filter
       // defensively when present so an unrelated label add never counts.
       for (const la of h.labelsAdded ?? []) {
         const id = la.message?.id;
-        if (!id || seen.has(id)) continue;
+        if (!id) continue;
         if (opts?.labelId && Array.isArray(la.labelIds) && !la.labelIds.includes(opts.labelId)) {
           continue;
         }
-        seen.set(id, la.message?.threadId ?? "");
+        const prev = seen.get(id);
+        if (prev) {
+          prev.eventKind = "label_added_inbox"; // upgrade: label event wins
+        } else {
+          seen.set(id, { threadId: la.message?.threadId ?? "", eventKind: "label_added_inbox" });
+        }
       }
     }
     const nextPageToken = resp.data.nextPageToken ?? null;
     const responseHistoryId = resp.data.historyId ? String(resp.data.historyId) : null;
-    // Non-final page → advance only to the last landed record (prefix boundary).
-    // Final page (drained) → safe to jump to the snapshot current historyId.
+    // ── cursor boundary (Codex 15 輪 P0-1 契約證明) ────────────────────────────
+    // Google users.history.list official contract
+    // (https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.history/list):
+    //   • resp.data.historyId (responseHistoryId, from resp.data.historyId above) is
+    //     the MAILBOX'S CURRENT history record — the信箱現行水位 at the moment of the
+    //     response, NOT this page's last record. When a nextPageToken is present it is
+    //     STRICTLY GREATER than the ids on this page (later pages/records still follow),
+    //     so persisting it as the cursor while pages remain would skip the未落帳尾頁 →
+    //     the漏信洞. Therefore: 有 nextPageToken 時禁存頂層 historyId.
+    //   • each history[].id (lastRecordId, captured in the loop above from h.id) is a
+    //     per-record id in ASCENDING order, so the LAST one on a fully-landed page is a
+    //     valid已落帳前綴 to resume the next page from.
+    // Non-final page (nextPageToken present) → advance ONLY to lastRecordId (the landed
+    //   prefix); the top-level snapshot is deliberately discarded here.
+    // Final page (nextPageToken null, window drained) → safe to jump to responseHistoryId
+    //   (the mailbox snapshot), because nothing follows it.
     const boundaryHistoryId = nextPageToken ? lastRecordId : responseHistoryId;
     return {
-      messages: Array.from(seen, ([id, threadId]) => ({ id, threadId })),
+      messages: Array.from(seen, ([id, v]) => ({ id, threadId: v.threadId, eventKind: v.eventKind })),
       boundaryHistoryId,
       nextPageToken,
       expired: false,
@@ -1396,7 +1431,9 @@ export async function scanQueryPage(
   });
   const messages: DiscoveredMessage[] = [];
   for (const m of resp.data.messages ?? []) {
-    if (m.id) messages.push({ id: m.id, threadId: m.threadId ?? "" });
+    // scans are ALWAYS message_added-equivalent (Codex 15 輪修正): a query re-scan
+    // re-seeing an old ignored message must never carry the inbox-entry requeue signal.
+    if (m.id) messages.push({ id: m.id, threadId: m.threadId ?? "", eventKind: "message_added" });
   }
   return { messages, nextPageToken: resp.data.nextPageToken ?? null };
 }

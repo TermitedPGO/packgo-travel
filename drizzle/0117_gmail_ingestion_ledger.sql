@@ -29,6 +29,15 @@
 --   * 修訂只擴欄不改鍵:UNIQUE(integrationId,gmailMessageId) 冪等鍵不變,
 --     _journal 不變(同一 idx 117,仍未套用)。
 --
+-- v3 就地修訂(2026-07-13, Codex 15 輪 P0-2 labelsAdded 狀態感知重排 —— 同樣尚未套用,
+-- 故直接改 CREATE 定義):加四個稽核欄支援 ignored→pending 重排。發現寫入從單純
+-- INSERT IGNORE 升為狀態感知 upsert —— 一封被分類為 ignored(noise/self)的信之後又有
+-- 較新的 INBOX 事件(labelAdded INBOX / 重新掃到)時,重排回 pending 重新分類,不再永久
+-- 卡在 ignored;processed 列只更新 lastSeenHistoryId 絕不重跑商業副作用。
+--   * lastSeenHistoryId:最近一次入箱事件的 historyId(gmailHistoryId 維持首次發現值)。
+--   * discoveryReason:'initial'(首次)/'inbox_requeue'(重排)。
+--   * requeueCount / lastRequeuedAt:重排次數與時點(稽核軌跡,不覆蓋原分類歷史)。
+--
 -- Migration 風格:照 docs/MIGRATION_PATTERNS.md Rule 1,CREATE TABLE / ADD COLUMN
 -- IF NOT EXISTS(TiDB 原生),不套 PREPARE/IF(0070 事故);Rule 2,語句間用
 -- breakpoint 標記行分隔(標記獨立成行,註解內不得出現字面標記 —— 0112 事故)。
@@ -65,6 +74,10 @@ CREATE TABLE IF NOT EXISTS `gmailIngestionLedger` (
   `lastAttemptAt` TIMESTAMP NULL,
   `processedAt` TIMESTAMP NULL,
   `interactionId` INT NULL,
+  `lastSeenHistoryId` VARCHAR(100) NULL,
+  `discoveryReason` VARCHAR(64) NULL,
+  `requeueCount` INT NOT NULL DEFAULT 0,
+  `lastRequeuedAt` TIMESTAMP NULL,
   UNIQUE KEY `uq_ledger_integration_msg` (`integrationId`, `gmailMessageId`),
   KEY `idx_ledger_status` (`integrationId`, `status`, `nextRetryAt`),
   KEY `idx_ledger_thread` (`integrationId`, `gmailThreadId`)

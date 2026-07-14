@@ -3174,6 +3174,20 @@ export const gmailIngestionLedger = mysqlTable(
     /** customerInteractions.id once the message lands as an interaction (history
      *  mode). Soft ref, no FK — matches the repo's provenance convention. */
     interactionId: int("interactionId"),
+    /** v3 (2026-07-13, Codex 15 輪 P0-2 狀態感知重排) — the MOST RECENT inbox-arrival
+     *  historyId that (re)surfaced this message. gmailHistoryId stays the FIRST
+     *  discovery id (immutable audit); this tracks the latest labelAdded/messageAdded
+     *  re-entry so a moved-back-into-inbox message records its newest INBOX event. */
+    lastSeenHistoryId: varchar("lastSeenHistoryId", { length: 100 }),
+    /** v3 — coarse lifecycle marker: 'initial' at first discovery, 'inbox_requeue'
+     *  when a terminal-ignored row is flipped back to pending by a newer INBOX event. */
+    discoveryReason: varchar("discoveryReason", { length: 64 }),
+    /** v3 — how many times a terminal-ignored row was requeued to pending by a newer
+     *  INBOX event. Pure audit: it NEVER overwrites the original classification history
+     *  (route/wouldRoute are reset for re-classification but this counts the resets). */
+    requeueCount: int("requeueCount").default(0).notNull(),
+    /** v3 — when the row was last requeued (NULL until the first ignored→pending flip). */
+    lastRequeuedAt: timestamp("lastRequeuedAt"),
   },
   (table) => ({
     // message-level idempotency key (same thread → each new message is its own
