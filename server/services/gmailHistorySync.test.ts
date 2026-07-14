@@ -71,6 +71,19 @@ function clearClaim(r: FakeRow): void {
   r.claimStage = null;
 }
 
+/** The NUMERIC MAX of the non-NULL watermarks (Codex 18 §四/§七) — mirror of the real
+ *  GREATEST-COALESCE WHERE. Returns null when ALL are null (fail-closed: no requeue). The
+ *  old FakeStore used `lastRequeueEventId ?? lastSeenHistoryId` (COALESCE-first-non-null),
+ *  which copied the production bug — a strictly-greater lastSeen was ignored. */
+function maxWatermark(...ids: (string | null | undefined)[]): string | null {
+  let max: string | null = null;
+  for (const id of ids) {
+    if (id == null) continue;
+    if (max == null || isHistoryIdNewer(id, max)) max = id;
+  }
+  return max;
+}
+
 class FakeStore implements LedgerStore {
   integrations = new Map<number, IntegrationCursor>();
   rows: FakeRow[] = [];
@@ -101,11 +114,13 @@ class FakeStore implements LedgerStore {
       // statement 1 (FIRST): requeue ONLY a terminal-ignored row, ONLY for a discovery
       // carrying a labelAdded(INBOX) event id (labelEventId non-null; message_added / scan
       // carry null → never here), ONLY when that id is STRICTLY GREATER than the CONSUMED
-      // watermark COALESCE(lastRequeueEventId, lastSeenHistoryId) — the highest event id
-      // consumed BEFORE this one. A null watermark (scan-created row) → no requeue
-      // (fail-closed). Records consumption + advances lastSeen monotonically atomically.
+      // watermark = NUMERIC MAX of the non-NULL values among (lastRequeueEventId,
+      // lastSeenHistoryId, scanConsumedFloor) — the highest event id consumed BEFORE this
+      // one (Codex 18 §四/§七 三值 MAX; the old `?? ` COALESCE copied the production bug).
+      // ALL-NULL watermark → no requeue (fail-closed). Records consumption + advances
+      // lastSeen monotonically atomically. scanConsumedFloor is never touched by a requeue.
       if (dup && dup.status === "ignored" && r.eventKind === "label_added_inbox" && r.labelEventId != null) {
-        const watermark = dup.lastRequeueEventId ?? dup.lastSeenHistoryId ?? null;
+        const watermark = maxWatermark(dup.lastRequeueEventId, dup.lastSeenHistoryId, dup.scanConsumedFloor);
         if (watermark != null && isHistoryIdNewer(r.labelEventId, watermark)) {
           dup.status = "pending";
           dup.route = null;
@@ -158,6 +173,8 @@ class FakeStore implements LedgerStore {
           requeueCount: 0,
           lastRequeuedAt: null,
           lastRequeueEventId: r.labelEventId,
+          // Codex 18 §七 — scan/bootstrap rows persist the pre-scan baseline; history → null.
+          scanConsumedFloor: r.scanConsumedFloor ?? null,
           claimToken: null,
           claimExpiresAt: null,
           claimStage: null,
@@ -392,8 +409,12 @@ class FakeGmail implements GmailIntakePort {
   }
   /** queries passed to scanQueryPage — for the三宇宙一致 universe assertions. */
   scanQueries: string[] = [];
+  /** Interleaving hook: awaited INSIDE scanQueryPage (models mail arriving DURING the
+   *  scan) so the P0-2 race fixture can prove the baseline was captured BEFORE the scan. */
+  onScanQuery: (() => void | Promise<void>) | null = null;
   async scanQueryPage(query: string, _pageToken: string | null) {
     this.scanQueries.push(query);
+    if (this.onScanQuery) await this.onScanQuery();
     const next = this.scanPages.shift();
     if (!next) return { messages: [], nextPageToken: null };
     if (next instanceof Error) throw next;
@@ -1810,6 +1831,184 @@ describe("event consumption watermark: requeue compares the watermark BEFORE thi
   });
 });
 
+// ── Codex 18 輪 §四: 事件消耗水位 = 三值數值 MAX(不是 COALESCE-first-non-null) ──────────
+describe("event consumption watermark is the numeric MAX, not COALESCE (Codex 18 輪 §四 — P0-1)", () => {
+  // ids > 2^53 so BigInt ordering is load-bearing; E10 < E20 < E30 numerically.
+  const E5 = "9007199254740905";
+  const E10 = "9007199254740910";
+  const E20 = "9007199254740920";
+  const E30 = "9007199254740930";
+  const mAdded = (id: string, seen: string): DiscoveredMessage => ({
+    id,
+    threadId: `t-${id}`,
+    eventKind: "message_added",
+    maxSeenEventId: seen,
+    labelEventId: null,
+  });
+
+  it("lastRequeue=E10, lastSeen=E30, incoming label=E20 → NO requeue (status/route/requeueCount all unchanged)", async () => {
+    const classifier = new FakeClassifier();
+    classifier.set("m1", { from: NOISE, isReceipt: false, internalDateMs: 1_780_000_000_000 });
+    const { deps, store, gmail } = makeDeps({ integrations: [cursor({ intakeMode: "history" })], classifier });
+
+    // Build the exact split-watermark state:
+    // 1) message_added at E5 → ignored (lastSeen=E5, lastRequeue=null).
+    gmail.historyPages.push(page([mAdded("m1", E5)], "b1", null));
+    await syncHistoryForIntegration(deps, 1);
+    await classifyPendingLedger(deps, 1);
+    // 2) label E10 requeues (E10 > MAX(null,E5)=E5) → re-classify noise → ignored,
+    //    so lastRequeueEventId=E10, lastSeen advanced to E10.
+    gmail.historyPages.push(page([inboxEvent("m1", E10)], "b2", null));
+    await syncHistoryForIntegration(deps, 1);
+    await classifyPendingLedger(deps, 1);
+    // 3) a later message_added sighting at E30 advances forward-only lastSeen to E30 WITHOUT
+    //    touching lastRequeueEventId (stays E10). Precondition: lastRequeue=E10, lastSeen=E30.
+    gmail.historyPages.push(page([mAdded("m1", E30)], "b3", null));
+    await syncHistoryForIntegration(deps, 1);
+    expect(store.ledgerFor(1)[0]).toMatchObject({
+      status: "ignored",
+      route: "noise",
+      requeueCount: 1,
+      lastRequeueEventId: E10,
+      lastSeenHistoryId: E30,
+    });
+    const before = { ...store.ledgerFor(1)[0] };
+
+    // 4) THE fixture: a label event E20 with E10 < E20 < E30. The OLD COALESCE(lastRequeue,
+    //    lastSeen) took E10 → E20 > E10 → spurious requeue. The MAX is MAX(E10,E30)=E30 →
+    //    E20 not > E30 → NO requeue: status, route, requeueCount ALL unchanged.
+    gmail.historyPages.push(page([inboxEvent("m1", E20)], "b4", null));
+    await syncHistoryForIntegration(deps, 1);
+
+    const row = store.ledgerFor(1)[0];
+    expect(row).toMatchObject({ status: "ignored", route: "noise", requeueCount: 1, lastRequeueEventId: E10 });
+    expect(row.lastRequeuedAt).toEqual(before.lastRequeuedAt); // no fresh requeue stamp
+    expect(row.lastSeenHistoryId).toBe(E30); // E20 < E30 → forward-only lastSeen unmoved
+    expect(store.ledgerFor(1)).toHaveLength(1);
+  });
+});
+
+// ── Codex 18 輪 §五: 404 recovery baseline-first (P0-2 掃描中新信零永久遺失) ───────────
+describe("404 recovery captures the baseline BEFORE the scan (Codex 18 輪 §五 — P0-2)", () => {
+  const B_PRESCAN = "9007199254740500";
+  const DURING = "9007199254740700"; // a mail arriving during the scan (> B_PRESCAN)
+  const B_POSTSCAN = "9007199254740999"; // mailbox head AFTER that mail (≥ DURING)
+
+  it("recovers to the PRE-scan baseline (not the post-scan head); the during-scan mail is caught next History round — zero permanent loss", async () => {
+    const { deps, store, gmail } = makeDeps({ integrations: [cursor({ intakeMode: "history" })] });
+    // History 404 → recovery. getProfile (called FIRST now) returns the pre-scan baseline.
+    gmail.historyPages.push(page([], null, null, { expired: true }));
+    gmail.profileHistoryId = B_PRESCAN;
+    // A new mail arrives DURING the scan → the mailbox head advances to B_POSTSCAN. With the
+    // OLD order (scan → THEN getProfile) the cursor would jump to B_POSTSCAN, which already
+    // covers the new mail's event → the next History round skips it (permanent loss).
+    gmail.onScanQuery = () => {
+      gmail.profileHistoryId = B_POSTSCAN;
+    };
+    gmail.scanPages.push({ messages: [{ id: "mold", threadId: "t-old" }], nextPageToken: null });
+
+    const rec = await syncHistoryForIntegration(deps, 1);
+
+    // THE discriminator: cursor is the PRE-scan baseline, NOT the post-scan head.
+    expect(rec).toMatchObject({ ok: true, outcome: "recovered", cursor: B_PRESCAN });
+    expect((await store.getIntegration(1))!.lastHistoryId).toBe(B_PRESCAN);
+    // the scan row persists the pre-scan baseline as its consumed floor (§七), not lastSeen.
+    const scanRow = store.ledgerFor(1).find((r) => r.gmailMessageId === "mold")!;
+    expect(scanRow).toMatchObject({ source: "fallback_scan", scanConsumedFloor: B_PRESCAN, lastSeenHistoryId: null });
+
+    // the during-scan mail (event > B_PRESCAN) is returned by the NEXT History round from
+    // B_PRESCAN → landed. Nothing permanently lost.
+    gmail.historyPages.push(page(["mnew"], DURING, null));
+    const next = await syncHistoryForIntegration(deps, 1);
+    expect(next).toMatchObject({ ok: true, outcome: "advanced", cursor: DURING });
+    expect(store.ledgerFor(1).map((r) => r.gmailMessageId).sort()).toEqual(["mnew", "mold"]);
+  });
+});
+
+// ── Codex 18 輪 §七: scan-created row 的 consumed floor 守第一個真 label(四案) ─────────
+describe("scan floor: a scan-created row's consumed floor guards the first real label (Codex 18 輪 §七)", () => {
+  const FLOOR = "9007199254740600";
+  const ABOVE = "9007199254740700"; // a real new label id > floor
+  const BELOW = "9007199254740500"; // a stale label id < floor
+
+  /** bootstrap (null cursor) → getProfile baseline FLOOR → scan creates `ms` with
+   *  scanConsumedFloor=FLOOR → classify noise → terminal ignored. */
+  async function seedScanRowIgnored() {
+    const classifier = new FakeClassifier();
+    classifier.set("ms", { from: NOISE, isReceipt: false, internalDateMs: 1_780_000_000_000 });
+    const deps = makeDeps({
+      integrations: [cursor({ lastHistoryId: null, lastSuccessfulSyncAt: null, intakeMode: "history" })],
+      classifier,
+    });
+    deps.gmail.profileHistoryId = FLOOR;
+    deps.gmail.scanPages.push({ messages: [{ id: "ms", threadId: "t-ms" }], nextPageToken: null });
+    await syncHistoryForIntegration(deps.deps, 1);
+    await classifyPendingLedger(deps.deps, 1);
+    return deps;
+  }
+
+  it("precondition: the scan row stores the baseline as scanConsumedFloor (NOT as lastSeenHistoryId)", async () => {
+    const { store } = await seedScanRowIgnored();
+    expect(store.ledgerFor(1)[0]).toMatchObject({
+      status: "ignored",
+      route: "noise",
+      scanConsumedFloor: FLOOR,
+      lastSeenHistoryId: null,
+      lastRequeueEventId: null,
+      requeueCount: 0,
+    });
+  });
+
+  it("1) a real new label (id > floor) requeues the scan row exactly ONCE", async () => {
+    const { deps, store, gmail } = await seedScanRowIgnored();
+    gmail.historyPages.push(page([inboxEvent("ms", ABOVE)], "b2", null));
+    await syncHistoryForIntegration(deps, 1);
+    expect(store.ledgerFor(1)[0]).toMatchObject({
+      status: "pending",
+      requeueCount: 1,
+      lastRequeueEventId: ABOVE,
+      discoveryReason: "inbox_requeue",
+    });
+  });
+
+  it("2) replaying the SAME event that first crossed the floor never re-requeues (requeueCount stays 1)", async () => {
+    const { deps, store, gmail } = await seedScanRowIgnored();
+    gmail.historyPages.push(page([inboxEvent("ms", ABOVE)], "b2", null));
+    await syncHistoryForIntegration(deps, 1);
+    await classifyPendingLedger(deps, 1); // noise again → back to ignored (lastRequeue=ABOVE)
+    expect(store.ledgerFor(1)[0]).toMatchObject({ status: "ignored", requeueCount: 1 });
+    // replay ABOVE → not strictly greater than MAX(ABOVE, ABOVE, FLOOR)=ABOVE → no requeue.
+    gmail.historyPages.push(page([inboxEvent("ms", ABOVE)], "b3", null));
+    await syncHistoryForIntegration(deps, 1);
+    expect(store.ledgerFor(1)[0]).toMatchObject({ status: "ignored", requeueCount: 1 });
+  });
+
+  it("3) a stale label (id < floor) does NOT requeue — the floor holds", async () => {
+    const { deps, store, gmail } = await seedScanRowIgnored();
+    gmail.historyPages.push(page([inboxEvent("ms", BELOW)], "b2", null));
+    await syncHistoryForIntegration(deps, 1);
+    const row = store.ledgerFor(1)[0];
+    expect(row).toMatchObject({ status: "ignored", route: "noise", requeueCount: 0 });
+    expect(row.lastRequeuedAt).toBeNull();
+  });
+
+  it("4) a message_added-created row is UNAFFECTED (scanConsumedFloor stays NULL)", async () => {
+    const classifier = new FakeClassifier();
+    classifier.set("mh", { from: NOISE, isReceipt: false, internalDateMs: 1_780_000_000_000 });
+    const { deps, store, gmail } = makeDeps({ integrations: [cursor({ intakeMode: "history" })], classifier });
+    gmail.historyPages.push(
+      page([{ id: "mh", threadId: "t-mh", eventKind: "message_added", maxSeenEventId: ABOVE, labelEventId: null }], "b1", null),
+    );
+    await syncHistoryForIntegration(deps, 1);
+    await classifyPendingLedger(deps, 1);
+    expect(store.ledgerFor(1)[0]).toMatchObject({
+      status: "ignored",
+      scanConsumedFloor: null,
+      lastSeenHistoryId: ABOVE,
+    });
+  });
+});
+
 // ── Codex 16 輪 P0-3: orchestration fencing gate (§六.3/§六.6) ────────────────────
 describe("P0-3 orchestration fencing gate (runIntakeStages, Codex 16 輪 §六.3/§六.6)", () => {
   it("predicate: only the authoritative sync winner is granted classify/feed", () => {
@@ -1908,6 +2107,22 @@ describe("authoritative fail-closed gate (runIntakeStages, Codex 17 輪 §五.1)
     expect(out2.feed).toBeUndefined();
     expect(downstream.processed).toEqual([]);
     expect(alerts.cards.filter((c) => c.body.includes("authoritative_blocked"))).toHaveLength(1);
+  });
+
+  it("direct feeder call + gate CLOSED → claims + processes NOTHING (Codex 18 §六.1 sink gate — the direct-caller bypass反證)", async () => {
+    // Codex 反證: calling feedPendingDownstream DIRECTLY (bypassing runIntakeStages' front
+    // guard) with gate=false previously still returned processed=1. The sink gate inside the
+    // feeder body now refuses to claim/process anything while the gate is closed.
+    authoritativeApproved.mockReturnValue(false);
+    const downstream = new FakeDownstream();
+    const { deps, store } = makeDeps({ integrations: [cursor({ intakeMode: "history" })], downstream });
+    await seedClassifiedCustomer(store); // m1 pending customer, ready to feed
+
+    const res = await feedPendingDownstream(deps, 1);
+
+    expect(res).toMatchObject({ processed: 0, failed: 0, ignored: 0, deadLettered: 0, lostLease: 0 });
+    expect(downstream.processed).toEqual([]); // ZERO downstream side effect
+    expect(store.ledgerFor(1)[0]).toMatchObject({ status: "pending", route: "customer" }); // unharmed
   });
 
   it("gate CLOSED + shadow mode → unaffected (shadow never feeds, no block card)", async () => {

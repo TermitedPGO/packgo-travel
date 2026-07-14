@@ -46,3 +46,13 @@ WIP:本批為當前唯一高風險施工批(B1.2 已完工待部署,不佔施工
 | 對抗審查 | PASS 零阻塞(focused,§四.1 三反例照正式 SQL 重放全過);2 low:scan 建列 fail-closed(authoritative 前須裁 '0' 兜底,交 Codex)、blocked 卡文案 cosmetic | 本表 |
 | 指揮驗收 | 通過:tsc 0、gmail 15 檔 294 綠(親跑) | 本表 |
 | 階梯位置 | shadow-only code gate 重新申請中(等 Codex);TiDB gate 未動 | — |
+
+## 切片 1.5(Codex 18 輪:三阻塞退回 + scan floor 窄修)
+| 階段 | 狀態 | 證據 |
+|------|------|------|
+| 施工 | 完成 2026-07-14(opus):P0-1 requeue 閘由 COALESCE 改三值數值 MAX(lastRequeueEventId,lastSeenHistoryId,scanConsumedFloor)(GREATEST-COALESCE NULL-safe,正式 SQL+FakeStore 同語義)、P0-2 404 recovery baseline-first(照 bootstrap 先例,先取 B 再掃再寫游標)、P0-3 硬閘下沉三層(feedPendingDownstream 本體+runDownstreamForLedgerMessage sink+legacy pipeline mode 重讀 fail-closed+gmailRunNow 按 mode 路由+push worker 修 fail-open)+source call-site guard、scan floor(schema.ts+0117 加 scanConsumedFloor,scan 建列寫掃描前 baseline) | branch |
+| 測試 | 新增 19 測:E10/E30/E20 精確紅綠、404 baseline-first race、scan floor 四案、mode truth-table(poll/push×legacy/shadow/history)、sink gate t/f、direct-feeder 反證、source call-site guard | gmailHistorySync.test.ts(85)+gmailPipelineModeGate.test.ts(11) |
+| §八 措辭 | design.md 固定「新增 ledger shadow 路徑零新增商業副作用,legacy 仍是唯一 writer」,不寫「shadow 模式零副作用」 | design.md §v3/§八 |
+| 彩排白名單 | 行號漂移同步:adapter 235/241/253/288/436→238/244/267/308/456,gmailPipeline 1010/1438/1444→1081/1509/1515,WHERE/INSERT 裸語句更新;coverage.test 綠 | registryWhitelist/Entries.ts |
+| 指揮驗收 | 通過:tsc 0、gmail 16 檔 313 綠、全套綠、新測 5 次穩 | 本表 |
+| 階梯位置 | 三窄修 + scan floor 語義完成,重新申請 shadow-only code gate(等 Codex);authoritative 翻閘前 mode epoch/drain 列未來批;TiDB gate 未動 | — |

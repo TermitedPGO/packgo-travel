@@ -17,7 +17,9 @@
 - 不存 subject/body/附件任何內容;fromAddress 為 eligibility 判斷必要最小欄。
 
 gmailIntegration 加欄:lastSuccessfulSyncAt timestamp 可空;intakeMode enum(legacy/shadow/history) default legacy
-(逐 mailbox 開旗標的機制;shadow=History 路徑跑+寫 ledger 但不餵下游不貼標,與 legacy 並行對照)。
+(逐 mailbox 開旗標的機制;shadow=History 路徑跑+寫 ledger 但不餵下游不貼標,與 legacy 並行對照——
+即「新增 ledger shadow 路徑零新增商業副作用,legacy 仍是唯一 writer」,不是「shadow 模式零副作用」,
+見 §八)。
 
 ## 2. 同步引擎(權威路徑)
 
@@ -86,3 +88,42 @@ E backfill 與 136 分類表=獨立唯讀工具(dry-run 輸出 metadata 清單),
 ### v814 狀態梯(12 輪 §七,照抄為紀律)
 code review(現在)→ inert deploy(旗標全關+migration rehearsal/manifest/smoke/forward-fix 齊)→ shadow(兩 P0+receipt route 修好+證明零回信零建單零貼標零收據寫入)→ authoritative(兩信箱 parity+30 天 dry-run+136 分類+watch 運行證據,逐信箱)。
 migration 證據要求:production-like TiDB fresh+existing 各實跑、schema probe 讀回、耗時/鎖表/forward-fix/回退保表安全性紀錄。
+
+## v3 修正(Codex 18 輪切片1.5 退回三阻塞 + scan floor 窄修,取代 §2 / v2 對應語義)
+
+### P0-1 事件消耗水位 = 三值數值 MAX(不是 COALESCE-first-non-null)
+- requeue 閘門:incoming label 事件 id 必須嚴格大於「lastRequeueEventId、lastSeenHistoryId、
+  scanConsumedFloor 三者非 NULL 值的數值最大值」(NULL-safe GREATEST-COALESCE)。v5 的
+  `COALESCE(lastRequeueEventId, lastSeenHistoryId)` 只取第一個非 NULL,不是 MAX——反例
+  lastRequeue=E10、lastSeen=E30、label=E20 會誤重排;MAX(E10,E30)=E30,E20 不 >E30,正確不重排。
+- 三者皆 NULL(NULL 分支)獨立處理不混入:X>NULL→NULL→不重排(fail-closed),不把 NULL 當 '0' 兜底。
+- 正式 SQL(gmailIntakeAdapters.ts requeue WHERE)與 FakeStore 同語義;精確紅綠 fixture:E10/E30/E20。
+
+### P0-2 404 recovery baseline-first(掃描中新信零永久遺失)
+- 照 bootstrap 先例:404 後先 getMailboxHistoryId 取 baseline B → 完整 scan 逐頁耐久落帳 →
+  drained 且 fencing token 有效才把 cursor 寫 B。scan 期間抵達的新信(event > B)留給下一輪
+  History,唯一鍵吸收重複。舊順序(先掃後取 head)會把 cursor 跳過掃描中新信 → 永久漏接。
+
+### P0-3 authoritative 硬閘旁路封死(雙/三層)
+- gate 下沉:orchestrator(runIntakeStages)前置 guard 保留;feedPendingDownstream 本體、
+  runDownstreamForLedgerMessage sink 層各加 authoritative gate,gate=false 一律零副作用 return/throw。
+- legacy pipeline 重讀 mode:runGmailPipeline / runGmailPipelineForMessageIds 重讀 integration 後
+  mode=history → 在建 Gmail client / ensureLabel / DB / LLM / 任何副作用之前 fail-closed(去重告警卡)。
+- gmailRunNow 按 mode 路由:history 只走 ledger engine(仍受 sink gate);legacy/shadow 走 legacy。
+- push worker 修 fail-open:DB 不可用或 integration 查不到時停止+告警,不猜成 legacy。
+- source call-site guard:runDownstreamForLedgerMessage / feedPendingDownstream 呼叫點只允許白名單檔案。
+- authoritative 翻閘前的 mode epoch / active-job drain 註記為未來批,不在本切片。
+
+### scan floor(§七,'0' 兜底棄案)
+- schema.ts + 0117 就地加 `scanConsumedFloor` VARCHAR(100) NULL(down 隨 DROP TABLE)。
+- scan/bootstrap 掃描前 capture 的 baseline B 持久寫入 scan-created row 的 scanConsumedFloor
+  (不冒充 lastSeenHistoryId);重排條件納入第三水位(見 P0-1 的 MAX)。四案測試:scan row+真新
+  label(>floor)重排恰一次、同 event replay 不動、較舊 label(<floor)不動、messageAdded 建列不受影響。
+
+## §八 shadow 語義固定措辭(不得漂移)
+
+成立的是:**「新增 ledger shadow 路徑零新增商業副作用,legacy 仍是唯一 writer」**。
+不成立的是:「整個 shadow 模式零副作用」——poll 與 push 在 shadow 仍刻意執行 legacy writer
+(既定的並行對照設計,是既有正常副作用,不是硬閘失效)。design.md 與相關測試描述一律用前一種
+說法,避免日後把 legacy 正常副作用誤認為 hard gate 失效,或把 hard gate 旁路藏在「shadow 本來就
+有副作用」裡。

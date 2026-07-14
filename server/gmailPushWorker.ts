@@ -58,16 +58,35 @@ export const gmailPushWorker = new Worker<GmailPushJobData, GmailPushJobResult>(
     // acking Pub/Sub (先耐久排隊成功才 ack), and the ledger unique key makes a
     // redelivery idempotent. Route by intakeMode: legacy + shadow still run the
     // legacy incremental ingest (shadow keeps it as the 並行對照 net); history is
-    // driven by the ledger engine. Default 'legacy' → ZERO change.
+    // driven by the ledger engine.
+    //
+    // P0-3 (Codex 18 §六.4) — DO NOT default a missing mode to 'legacy'. The old
+    // `integ?.intakeMode ?? "legacy"` was FAIL-OPEN: if the DB was unavailable or the
+    // integration row was missing, a possibly-history mailbox would be pushed through the
+    // legacy side-effect chain. Now both cases STOP (throw → BullMQ retries after recovery,
+    // the failed handler + wireWorkerFunnel alert) and never guess legacy. The durable job
+    // is not lost; a retry re-reads the real mode.
     const db = await getDb();
-    const [integ] = db
-      ? await db
-          .select({ intakeMode: gmailIntegration.intakeMode })
-          .from(gmailIntegration)
-          .where(eq(gmailIntegration.id, integrationId))
-          .limit(1)
-      : [];
-    const mode = integ?.intakeMode ?? "legacy";
+    if (!db) {
+      log.error(
+        { integrationId },
+        "[gmailPushWorker] DB unavailable — cannot resolve intakeMode, refusing to run (fail-closed, will retry)",
+      );
+      throw new Error("Database unavailable — cannot resolve gmail intakeMode (fail-closed)");
+    }
+    const [integ] = await db
+      .select({ intakeMode: gmailIntegration.intakeMode })
+      .from(gmailIntegration)
+      .where(eq(gmailIntegration.id, integrationId))
+      .limit(1);
+    if (!integ) {
+      log.error(
+        { integrationId },
+        "[gmailPushWorker] integration not found — refusing to run (fail-closed, not guessed as legacy)",
+      );
+      throw new Error(`gmail integration ${integrationId} not found (fail-closed)`);
+    }
+    const mode = integ.intakeMode;
 
     let processed = 0;
     let receipts = 0;

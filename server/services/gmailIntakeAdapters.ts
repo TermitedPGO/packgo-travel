@@ -194,22 +194,25 @@ export function createDrizzleLedgerStore(
       // event's own bump. (The alternative was merging into one ODKU with hand-ordered SET
       // assignments — rejected as fragile.)
       //
-      // Statement 1 — REQUEUE gate (§四.1). ONLY a discovery carrying a labelAdded(INBOX)
-      // event id (labelEventId non-null; message_added / fallback / bootstrap / backfill
-      // scans carry null → never reach here — 重排風暴閘門) may resurrect a terminal-ignored
-      // row, and ONLY when that label event id is STRICTLY GREATER than the CONSUMED
-      // watermark COALESCE(lastRequeueEventId, lastSeenHistoryId) — the highest event id
-      // already consumed BEFORE this one. Each candidate carries its OWN labelEventId, so
+      // Statement 1 — REQUEUE gate (§四.1 + Codex 18 §四/§七 三值 MAX). ONLY a discovery
+      // carrying a labelAdded(INBOX) event id (labelEventId non-null; message_added /
+      // fallback / bootstrap / backfill scans carry null → never reach here — 重排風暴閘門)
+      // may resurrect a terminal-ignored row, and ONLY when that label event id is STRICTLY
+      // GREATER than the CONSUMED watermark = the NUMERIC MAX of the non-NULL values among
+      // (lastRequeueEventId, lastSeenHistoryId, scanConsumedFloor) — the highest event id
+      // already consumed BEFORE this one (COALESCE-first-non-null was WRONG: it took the
+      // first not the max — see the WHERE below). Each candidate carries its OWN labelEventId, so
       // this is a per-message conditional CAS UPDATE: the strict-greater guard makes
       // replaying the SAME (or older) label event — even after the row cycled back to
       // ignored — a no-op (affectedRows=0), so requeueCount can NEVER double-count. On a
       // real requeue: flip ignored→pending, clear the classification, reset retry/claim
       // track, and — ATOMICALLY in the one UPDATE (no先記消耗後重排 crash gap) — bump
       // requeueCount, record consumption (lastRequeueEventId=labelEventId), advance the
-      // monotonic lastSeenHistoryId, stamp the audit trail. `WHERE status='ignored'` keeps
-      // processed/failed/pending a no-op (§四 3/4). A NULL watermark (scan-created row, no
-      // event id yet) → X > NULL → NULL → no requeue (fail-closed: never resurrect on an
-      // incomparable watermark). No SET column references `status`, so no assignment hazard.
+      // monotonic lastSeenHistoryId, stamp the audit trail. scanConsumedFloor is NOT
+      // touched here (it is a permanent scan baseline; a requeue never changes it).
+      // `WHERE status='ignored'` keeps processed/failed/pending a no-op (§四 3/4). An
+      // ALL-NULL watermark → X > NULL → NULL → no requeue (fail-closed: never resurrect on
+      // an incomparable watermark). No SET column references `status`, so no assignment hazard.
       const requeueCandidates = rows.filter(
         (r) => r.eventKind === "label_added_inbox" && r.labelEventId !== null,
       );
@@ -250,7 +253,18 @@ export function createDrizzleLedgerStore(
               eq(gmailIngestionLedger.integrationId, r.integrationId),
               eq(gmailIngestionLedger.gmailMessageId, r.gmailMessageId),
               eq(gmailIngestionLedger.status, "ignored"),
-              sql`cast(${r.labelEventId} as unsigned) > cast(coalesce(${gmailIngestionLedger.lastRequeueEventId}, ${gmailIngestionLedger.lastSeenHistoryId}) as unsigned)`,
+              // Codex 18 §四/§七 — the CONSUMED watermark is the NUMERIC MAX of the
+              // non-NULL values among (lastRequeueEventId, lastSeenHistoryId,
+              // scanConsumedFloor), NOT COALESCE-first-non-null. COALESCE was WRONG:
+              // (lastRequeue=E10, lastSeen=E30) → COALESCE picks E10, so a stale label
+              // E20 spuriously requeued; MAX(E10,E30)=E30 → E20 not >E30 → no requeue.
+              // NULL-safe max in MySQL = GREATEST over the three CAST-UNSIGNED COALESCE
+              // rotations: any single non-NULL value fills every rotation, so GREATEST is
+              // the true max; ALL-NULL → every rotation NULL → GREATEST NULL → `X > NULL`
+              // → NULL → row not matched → no requeue (fail-closed, NOT a '0' 兜底 — the
+              // NULL branch is handled independently). scanConsumedFloor guards a scan-
+              // created row whose two per-message watermarks are NULL (§七).
+              sql`cast(${r.labelEventId} as unsigned) > greatest(coalesce(cast(${gmailIngestionLedger.lastRequeueEventId} as unsigned), cast(${gmailIngestionLedger.lastSeenHistoryId} as unsigned), cast(${gmailIngestionLedger.scanConsumedFloor} as unsigned)), coalesce(cast(${gmailIngestionLedger.lastSeenHistoryId} as unsigned), cast(${gmailIngestionLedger.scanConsumedFloor} as unsigned), cast(${gmailIngestionLedger.lastRequeueEventId} as unsigned)), coalesce(cast(${gmailIngestionLedger.scanConsumedFloor} as unsigned), cast(${gmailIngestionLedger.lastRequeueEventId} as unsigned), cast(${gmailIngestionLedger.lastSeenHistoryId} as unsigned)))`,
             ),
           );
       }
@@ -265,8 +279,11 @@ export function createDrizzleLedgerStore(
       // lastSeenHistoryId ONLY when the incoming id is strictly greater (BigInt CAST UNSIGNED),
       // NULL-safe both ways (a scan re-discovery carries NULL → never clobbers; a reordered/
       // older event → never regresses) — idempotent for a just-requeued row (statement 1
-      // already bumped it). ODKU set NEVER touches lastRequeueEventId or `status` (requeue is
-      // statement 1), so no ODKU assignment-order hazard.
+      // already bumped it). scanConsumedFloor is set on INSERT only (§七): the ODKU set below
+      // does NOT touch it, so a history sighting of a scan-created row keeps the scan floor,
+      // and a scan re-discovery of a history row never stamps a floor. ODKU set NEVER touches
+      // lastRequeueEventId, scanConsumedFloor, or `status` (requeue is statement 1), so no
+      // ODKU assignment-order hazard.
       await db
         .insert(gmailIngestionLedger)
         .values(
@@ -277,6 +294,9 @@ export function createDrizzleLedgerStore(
             gmailHistoryId: r.maxSeenEventId,
             lastSeenHistoryId: r.maxSeenEventId,
             lastRequeueEventId: r.labelEventId,
+            // Codex 18 §七 — scan/bootstrap rows persist the pre-scan mailbox baseline
+            // as their consumed floor; history discoveries carry null (undefined → null).
+            scanConsumedFloor: r.scanConsumedFloor ?? null,
             discoveryReason: "initial" as const,
             internalDateMs: 0,
             source: r.source,
@@ -568,6 +588,7 @@ function mapLedgerRow(r: LedgerSelectRow): LedgerRow {
     requeueCount: r.requeueCount,
     lastRequeuedAt: r.lastRequeuedAt ?? null,
     lastRequeueEventId: r.lastRequeueEventId ?? null,
+    scanConsumedFloor: r.scanConsumedFloor ?? null,
     claimToken: r.claimToken ?? null,
     claimExpiresAt: r.claimExpiresAt ?? null,
     claimStage: r.claimStage ?? null,

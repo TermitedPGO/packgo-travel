@@ -70,6 +70,7 @@ import {
 // so gmailPipeline.noise.test.ts + any legacy importer keep resolving them.
 export { isNoreplySender, isKnownNoise };
 import { decideInteractionOrderAssignment } from "../../_core/interactionOrderAssignment";
+import { isGmailAuthoritativeApproved } from "../../services/gmailAuthoritativeGate";
 import { listCustomOrdersByProfile } from "../../db/customOrder";
 // invokeLLM is dynamically imported inside resolveInboundInteractionOrderId
 // (not statically here) — a static import pulls in _core/llm's module-init
@@ -160,6 +161,64 @@ export type PipelineResult = {
 };
 
 /**
+ * gmail-intake-ledger (Codex 18 §六 P0-3) — the legacy poll/push pipeline must NOT run
+ * when the mailbox is intakeMode='history': the ledger engine is the authoritative writer
+ * there, and running the legacy chain would produce the very customer-visible side effects
+ * (reply / attachment / proposal / label) the authoritative hard gate exists to withhold.
+ * Both runGmailPipeline (poll) and runGmailPipelineForMessageIds (push) call this AFTER
+ * re-reading the integration and BEFORE building the Gmail client / ensureLabel / any
+ * DB/LLM side effect — so a mode switch between a worker's mode snapshot and this re-read
+ * is caught here (a legacy job started before the switch cannot cross it). Posts ONE
+ * deduped alert card (60-min window) so the block is visible, returns a zero result. Fixes
+ * the re-read gap Codex §六.5 flagged; shadow + legacy are unaffected (they SHOULD run the
+ * legacy writer — shadow keeps it as the 並行對照 net).
+ */
+async function fenceLegacyPipelineForMode(
+  db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
+  integrationId: number,
+  emailAddress: string,
+  entry: "poll" | "push",
+): Promise<PipelineResult> {
+  const fingerprint = `gmail-intake-legacy-mode-fenced:${integrationId}:${entry}`;
+  try {
+    const fresh = await redis
+      .set(`gmail-intake-alert:${fingerprint}`, "1", "EX", 60 * 60, "NX")
+      .catch(() => null);
+    if (fresh === "OK") {
+      await db.insert(agentMessages).values({
+        agentName: "gmail-intake",
+        senderRole: "agent",
+        messageType: "alert",
+        priority: "high",
+        title: "Gmail legacy pipeline 在 history 模式被 fail-closed 擋下".slice(0, 200),
+        body:
+          `integrationId:${integrationId} 的 intakeMode=history,但 legacy ${entry} pipeline 仍被觸發` +
+          `(worker mode snapshot 與 pipeline 重讀之間可能發生模式切換)。已在建立 Gmail client / ensureLabel /` +
+          `任何 DB/LLM 副作用之前 fail-closed return —— 不跑 processOneEmail、不貼標、不寄信、不建 proposal。` +
+          `history 模式一律由 ledger 引擎驅動。\n` +
+          `entry:${entry}\n分類:legacy_mode_fenced\n(卡片只含 id/分類,不含信件內容)`,
+      });
+    }
+  } catch (e) {
+    reportFunnelError({
+      source: "fail-open:gmailPipeline:fenceLegacyPipelineForMode",
+      err: e,
+      context: { integrationId, entry },
+    }).catch(() => {});
+  }
+  return {
+    ok: true,
+    emailAddress,
+    totalFetched: 0,
+    totalProcessed: 0,
+    totalFailed: 0,
+    totalEscalated: 0,
+    totalReceipts: 0,
+    errors: [],
+  };
+}
+
+/**
  * Run the pipeline once for a single integration. Returns counters for
  * the dashboard + any errors.
  */
@@ -176,6 +235,12 @@ export async function runGmailPipeline(
     .limit(1);
   if (!integration) throw new Error("Gmail integration not found");
   if (integration.isActive !== 1) throw new Error("Integration is disabled");
+
+  // P0-3 — re-read said intakeMode=history → fail-closed BEFORE any Gmail/DB/LLM side
+  // effect (the ledger engine is authoritative in history mode).
+  if (integration.intakeMode === "history") {
+    return await fenceLegacyPipelineForMode(db, integrationId, integration.emailAddress, "poll");
+  }
 
   const gmail = buildGmailClient(integration);
   const labelId = await ensureLabel(gmail, PROCESSED_LABEL);
@@ -708,6 +773,12 @@ export async function runGmailPipelineForMessageIds(
     .limit(1);
   if (!integration) throw new Error("Gmail integration not found");
   if (integration.isActive !== 1) throw new Error("Integration is disabled");
+
+  // P0-3 — re-read said intakeMode=history → fail-closed BEFORE any Gmail/DB/LLM side
+  // effect (mirror of the poll path; the ledger engine is authoritative in history mode).
+  if (integration.intakeMode === "history") {
+    return await fenceLegacyPipelineForMode(db, integrationId, integration.emailAddress, "push");
+  }
 
   const gmail = buildGmailClient(integration);
   const labelId = await ensureLabel(gmail, PROCESSED_LABEL);
@@ -1890,6 +1961,17 @@ export async function runDownstreamForLedgerMessage(
   },
 ): Promise<{ interactionId: number | null; wasReceipt: boolean }> {
   const { gmail, labelId, fromEmail, integrationId } = ctx;
+
+  // P0-3 DEEPEST SINK GATE (Codex 18 §六.1) — the LAST mechanical stop before ANY
+  // customer-visible side effect (receipt queue / processOneEmail / reply / label).
+  // fail-closed while the authoritative gate is off, BEFORE the receipt sniff or any I/O.
+  // feedPendingDownstream already gates (雙層); this is defence-in-depth so no future
+  // caller of the ledger downstream sink can bypass the hard gate. In normal operation the
+  // feeder never reaches here while the gate is closed, so this throw is unreachable belt-
+  // and-suspenders (not a hot path).
+  if (!isGmailAuthoritativeApproved()) {
+    throw new Error("gmail authoritative feed not approved — fail-closed sink gate (runDownstreamForLedgerMessage)");
+  }
 
   // receipt pass — same rules-only sniff the poll runs first.
   let looksLikeReceipt = false;

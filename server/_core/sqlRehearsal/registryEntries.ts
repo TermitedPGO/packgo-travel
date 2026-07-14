@@ -1093,7 +1093,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "gmailPipeline.recentInteractionsByProfile",
-    sources: ["server/agents/autonomous/gmailPipeline.ts:1010"],
+    sources: ["server/agents/autonomous/gmailPipeline.ts:1081"],
     cls: "B",
     sql: "SELECT *\nFROM `customerInteractions`\nWHERE `customerInteractions`.`customerProfileId` = ?\nORDER BY `customerInteractions`.`createdAt` DESC\nLIMIT ?",
     sampleParams: [1,1],
@@ -1102,7 +1102,7 @@ export const ENTRIES: RehearsalEntry[] = [
   },
   {
     key: "gmailPipeline.todaysAutoSentCount",
-    sources: ["server/agents/autonomous/gmailPipeline.ts:1438", "server/agents/autonomous/gmailPipeline.ts:1444"],
+    sources: ["server/agents/autonomous/gmailPipeline.ts:1509", "server/agents/autonomous/gmailPipeline.ts:1515"],
     cls: "B",
     sql: "SELECT COUNT(*) AS c\nFROM `interactionOutcomes`\nWHERE `interactionOutcomes`.`agentName` = ?\n  AND `interactionOutcomes`.`actionTaken` = ?\n  AND DATE(`interactionOutcomes`.`createdAt`) = CURDATE()",
     sampleParams: ["x","x"],

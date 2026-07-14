@@ -92,6 +92,11 @@ export interface MinimalLedgerRow {
   labelEventId: string | null;
   source: LedgerSource;
   eventKind: DiscoveryEventKind;
+  /** v5 (Codex 18 輪 §七) — the mailbox baseline captured BEFORE a discovery scan,
+   *  written to scanConsumedFloor on a scan-CREATED row (never touched on an existing
+   *  row's ODKU). Only the scan / bootstrap paths set it; history discoveries leave it
+   *  absent → null → the message_added row's floor stays NULL (unaffected). */
+  scanConsumedFloor?: string | null;
 }
 
 export interface LedgerRow {
@@ -128,6 +133,12 @@ export interface LedgerRow {
   /** The monotonic requeue watermark: history record id of the last label_added_inbox
    *  event that TRIGGERED a requeue. The gate fires only for a strictly-greater id. */
   lastRequeueEventId: string | null;
+  /** v5 (Codex 18 輪 §七) — scan-created row's consumed floor: the mailbox baseline
+   *  captured before the scan. NULL for message_added-created rows. The requeue gate
+   *  compares a label event against MAX(lastRequeueEventId, lastSeenHistoryId,
+   *  scanConsumedFloor), so a scan row (whose two per-message watermarks are NULL) is
+   *  still guarded by this floor. */
+  scanConsumedFloor: string | null;
   /** Row-claim lease (P0-3). claimToken = the runner currently leasing this row for a
    *  side-effecting stage; claimExpiresAt = lease expiry; claimStage = 'classify'|'feed'.
    *  All NULL when free. */
@@ -223,16 +234,22 @@ export interface LedgerStore {
    *      otherwise lastRequeueEventId stays NULL.
    *    • row exists, status='ignored' AND labelEventId is non-null (an explicit
    *      labelAdded(INBOX) event) AND labelEventId is STRICTLY GREATER than the CONSUMED
-   *      watermark = COALESCE(lastRequeueEventId, lastSeenHistoryId) — i.e. the highest
-   *      event already consumed BEFORE this one (Codex 17 §四.1 monotonic gate) → REQUEUE:
+   *      watermark = the NUMERIC MAX of the non-NULL values among (lastRequeueEventId,
+   *      lastSeenHistoryId, scanConsumedFloor) — i.e. the highest event already consumed
+   *      BEFORE this one (Codex 17 §四.1 monotonic gate + Codex 18 §四/§七 三值 MAX;
+   *      COALESCE-first-non-null was WRONG — E10/E30 → COALESCE picks E10 not MAX=E30 →
+   *      a stale E20 spuriously requeued) → REQUEUE:
    *      flip to pending, clear route/wouldRoute (re-classify from scratch), reset retry
    *      track, clear any claim, bump requeueCount + stamp lastRequeuedAt + set
    *      lastRequeueEventId=labelEventId + monotonic lastSeenHistoryId + discoveryReason
    *      ='inbox_requeue', ALL in the one atomic UPDATE (no先記消耗後重排 crash gap).
    *      Replaying the SAME (or older) label event — even after the row cycled back to
-   *      ignored — is NOT strictly greater → no-op (requeueCount can't double-count). A
-   *      null watermark (scan-created row, no event id yet) is conservatively NOT requeued
-   *      (fail-closed: never resurrect on an incomparable watermark).
+   *      ignored — is NOT strictly greater → no-op (requeueCount can't double-count). An
+   *      ALL-NULL watermark (a row with none of the three set) is conservatively NOT
+   *      requeued (fail-closed: never resurrect on an incomparable watermark — the NULL
+   *      branch is handled independently, NOT folded into a '0' 兜底 that would treat any
+   *      stale first-label as new). A scan-created row now carries scanConsumedFloor, so
+   *      its floor guards the first real label event (Codex 18 §七).
    *      labelEventId null (message_added / scans) NEVER requeues (§四.1): a 404 fallback
    *      scan / crash-replay re-seeing old ignored rows must not resurrect them (重排風暴閘門).
    *    • row exists, status='processed' → ONLY forward-only lastSeenHistoryId; NEVER
@@ -533,6 +550,7 @@ function toMinimalRows(
   integrationId: number,
   messages: DiscoveredMessage[],
   source: LedgerSource,
+  scanConsumedFloor: string | null = null,
 ): MinimalLedgerRow[] {
   return messages
     .filter((m) => !!m.id)
@@ -544,6 +562,10 @@ function toMinimalRows(
       labelEventId: m.labelEventId ?? null,
       source,
       eventKind: m.eventKind ?? "message_added",
+      // scan/bootstrap discoveries carry the pre-scan mailbox baseline as their consumed
+      // floor (Codex 18 §七); history discoveries pass null (their per-message event ids
+      // already provide the watermark).
+      scanConsumedFloor,
     }));
 }
 
@@ -677,6 +699,7 @@ async function runScanPages(
   integrationId: number,
   query: string,
   source: LedgerSource,
+  scanConsumedFloor: string | null,
 ): Promise<{ landed: number; drained: boolean }> {
   const maxPages = deps.maxPagesPerRound ?? SAFETY_VALVE_PAGES;
   let pageToken: string | null = null;
@@ -687,7 +710,8 @@ async function runScanPages(
     // scan discoveries carry both maxSeenEventId and labelEventId null (a messages.list
     // result has no history record id) — the mailbox snapshot must never masquerade as a
     // per-event id (P0-2), and null labelEventId means a scan can never requeue (§四.3).
-    const minimal = toMinimalRows(integrationId, page.messages, source);
+    // The pre-scan baseline is persisted SEPARATELY as scanConsumedFloor (Codex 18 §七).
+    const minimal = toMinimalRows(integrationId, page.messages, source, scanConsumedFloor);
     if (minimal.length > 0) {
       await deps.store.insertMinimalIgnore(minimal);
       landed += minimal.length;
@@ -719,7 +743,8 @@ async function bootstrap(
   // first-page history fetch failure (一致錯誤面); un-bootstrapped cursor stays null.
   let scan: { landed: number; drained: boolean };
   try {
-    scan = await runScanPages(deps, cur.id, buildInboxScanQuery(sinceMs), "fallback_scan");
+    // baseline was captured BEFORE the scan → it is this scan's consumed floor (§七).
+    scan = await runScanPages(deps, cur.id, buildInboxScanQuery(sinceMs), "fallback_scan", baseline);
   } catch (e) {
     return { ok: false, reason: "ledger-insert-failed", failure: classifyFailure(e) };
   }
@@ -739,8 +764,16 @@ async function bootstrap(
   return { ok: true, outcome: "bootstrapped", landed: scan.landed, cursor: baseline };
 }
 
-/** 404 recovery — scan the −24h overlap window per page, land ALL, THEN getProfile
- *  for a fresh baseline. Never jumps the cursor forward without scanning the gap. */
+/** 404 recovery (Codex 18 §五 P0-2 — BASELINE-FIRST, 照 bootstrap 先例) — capture the
+ *  mailbox baseline B FIRST, then scan the −24h overlap window per page landing ALL,
+ *  and only rebaseline the cursor to B when the scan drained AND the fencing token is
+ *  still valid. The OLD order (scan → THEN getProfile) took a POST-scan head: a mail
+ *  arriving after the worker turned the first scan page is absent from the later (older)
+ *  pages yet already covered by the post-scan head, so the cursor jumped PAST it and the
+ *  next History round never returned it — a permanent miss (reconcile only alerts, never
+ *  backfills, so it is NOT self-healing). Capturing B before the scan leaves every event
+ *  > B during the scan for the NEXT History round (唯一鍵吸收 scan 與 History 的重複). B is
+ *  also the scan rows' consumed floor (§七). */
 async function runFallbackRecovery(
   deps: HistorySyncDeps,
   cur: IntegrationCursor,
@@ -748,19 +781,28 @@ async function runFallbackRecovery(
   token: string,
   nowMs: number,
 ): Promise<SyncResult> {
+  // 1) baseline BEFORE the scan (the P0-2 fix). getProfile failure → SAME {ok:false}
+  //    shape; the cursor stays expired so the next round re-runs fallback.
+  let baseline: string;
+  try {
+    baseline = await deps.gmail.getMailboxHistoryId();
+  } catch (e) {
+    return { ok: false, reason: "recovery-getprofile-failed", failure: classifyFailure(e) };
+  }
+
   const sinceMs = (cur.lastSuccessfulSyncAt?.getTime() ?? nowMs) - FALLBACK_OVERLAP_MS;
-  // scan/insert failures surface as the SAME {ok:false, failure} shape (一致錯誤面);
-  // the cursor stays expired so the next round re-runs fallback.
+  // 2) scan/insert failures surface as the SAME {ok:false, failure} shape (一致錯誤面);
+  //    the cursor stays expired so the next round re-runs fallback. B is the scan floor.
   let scan: { landed: number; drained: boolean };
   try {
-    scan = await runScanPages(deps, cur.id, buildInboxScanQuery(sinceMs), "fallback_scan");
+    scan = await runScanPages(deps, cur.id, buildInboxScanQuery(sinceMs), "fallback_scan", baseline);
   } catch (e) {
     return { ok: false, reason: "ledger-insert-failed", failure: classifyFailure(e) };
   }
 
-  // valve hit → the gap is NOT fully covered. Land the subset but do NOT rebaseline:
-  // the cursor stays expired so the next round re-runs fallback (query idempotent,
-  // 唯一鍵去重). Continuation card fires.
+  // 3) valve hit → the gap is NOT fully covered. Land the subset but do NOT rebaseline:
+  //    the cursor stays expired so the next round re-runs fallback (query idempotent,
+  //    唯一鍵去重). Continuation card fires. (The captured B is discarded this round.)
   if (!scan.drained) {
     await postContinuationCard(deps, cur.id, "fallback", scan.landed);
     return {
@@ -772,12 +814,8 @@ async function runFallbackRecovery(
     };
   }
 
-  let baseline: string;
-  try {
-    baseline = await deps.gmail.getMailboxHistoryId();
-  } catch (e) {
-    return { ok: false, reason: "recovery-getprofile-failed", failure: classifyFailure(e) };
-  }
+  // 4) drained + fencing token still valid → write the cursor to the PRE-scan baseline B
+  //    (events > B during the scan are left for the next History round, not skipped).
   if (!(await deps.lock.verify(key, token))) {
     return { ok: true, outcome: "noop", reason: "lost-fencing-token" };
   }
@@ -969,8 +1007,16 @@ export async function feedPendingDownstream(
   integrationId: number,
 ): Promise<FeedResult> {
   if (!deps.downstream) throw new Error("feedPendingDownstream requires a DownstreamPort");
-  const now = () => (deps.clock ? deps.clock() : Date.now());
   const res: FeedResult = { processed: 0, ignored: 0, failed: 0, deadLettered: 0, lostLease: 0 };
+  // P0-3 SINK GATE (Codex 18 §六.1) — authoritative fail-closed check INSIDE the feeder
+  // body, NOT only in the orchestrator (runIntakeStages). Closes the direct-caller bypass
+  // Codex 反證 found: calling feedPendingDownstream directly with gate=false previously
+  // still returned processed=1 (one downstream side effect). Now the feeder itself claims
+  // and processes NOTHING while the gate is closed — zero side effect regardless of the
+  // entry point. The orchestrator's front guard stays (雙層); runDownstreamForLedgerMessage
+  // adds a third, deepest sink check.
+  if (!isGmailAuthoritativeApproved()) return res;
+  const now = () => (deps.clock ? deps.clock() : Date.now());
 
   // P0-3 — atomically CLAIM the actionable batch. HONEST scope of the guarantee (對抗
   // 審查修正): the token-gated writes make the LEDGER outcome exactly-once — a peer's

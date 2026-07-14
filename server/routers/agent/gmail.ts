@@ -73,11 +73,34 @@ export const gmailRouter = router({
       return verifyConnection(integration);
     }),
 
-  /** Run the pipeline once now (for testing / on-demand). */
+  /** Run the pipeline once now (for testing / on-demand).
+   *
+   * gmail-intake-ledger (Codex 18 §六 P0-3) — route by intakeMode. history is driven
+   * ONLY by the ledger engine (runIntakeForIntegration; its feed is still subject to the
+   * authoritative sink gate), so a manual "Run now" can NEVER push a history mailbox
+   * through the legacy side-effect chain. legacy + shadow run the legacy pipeline (shadow
+   * keeps it as the 並行對照 writer). A missing integration or unavailable DB STOPS + errors
+   * (surfaced to admin) — it is NEVER guessed as legacy (fail-closed, not fail-open). */
   gmailRunNow: adminProcedure
     .input(z.object({ integrationId: z.number().int() }))
     .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db)
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const [integration] = await db
+        .select({ id: gmailIntegration.id, intakeMode: gmailIntegration.intakeMode })
+        .from(gmailIntegration)
+        .where(eq(gmailIntegration.id, input.integrationId))
+        .limit(1);
+      if (!integration)
+        throw new TRPCError({ code: "NOT_FOUND", message: "Integration not found" });
       try {
+        if (integration.intakeMode === "history") {
+          const { runIntakeForIntegration } = await import(
+            "../../services/gmailIntakeAdapters"
+          );
+          return await runIntakeForIntegration(input.integrationId);
+        }
         return await runGmailPipeline(input.integrationId);
       } catch (e) {
         throw new TRPCError({

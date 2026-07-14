@@ -3198,6 +3198,21 @@ export const gmailIngestionLedger = mysqlTable(
      *  real requeue, so statement 2 can compare against a value statement 1 never
      *  overwrote (no read-after-write hazard between the two upsert statements). */
     lastRequeueEventId: varchar("lastRequeueEventId", { length: 100 }),
+    /** v5 (2026-07-14, Codex 18 輪 §七 scan floor) — the mailbox baseline historyId
+     *  CAPTURED BEFORE a discovery scan (bootstrap / 404 fallback), persisted on the
+     *  scan-CREATED row. A scan discovery carries NO per-message history event id
+     *  (lastSeenHistoryId + lastRequeueEventId both NULL), so without this floor the
+     *  FIRST real labelAdded(INBOX) event on a scan-created ignored row would meet
+     *  `E > NULL` → NULL → no requeue, yet the INSERT would still bump lastSeen to E —
+     *  the genuine event gets marked seen but never drives the requeue (§七 的吞事件洞).
+     *  Held in its OWN column (NEVER impersonating a per-message lastSeenHistoryId /
+     *  mailbox snapshot): the requeue gate requires a label event STRICTLY GREATER than
+     *  MAX(lastRequeueEventId, lastSeenHistoryId, scanConsumedFloor). The rejected '0'
+     *  兜底 would have treated any incomparable stale first-label as new — this keeps the
+     *  floor a real consumed baseline. Set ONLY on a scan INSERT; a later history sighting
+     *  never overwrites it (ODKU leaves it untouched); message_added-created rows keep it
+     *  NULL (unaffected). */
+    scanConsumedFloor: varchar("scanConsumedFloor", { length: 100 }),
     // ── v4 row-claim lease (Codex 16 輪 P0-3) — the LAST gate for downstream side
     //    effects. classify + feed each atomically CAS-claim a candidate row
     //    (claimToken + claimExpiresAt + claimStage) before acting; only the

@@ -53,6 +53,15 @@
 --     per-integration fencing 仍為第一層,row claim 為商業副作用的最後一道門。
 --     idx_ledger_claim(integrationId,status,claimExpiresAt)支撐每輪 claim 掃描。
 --
+-- v5 就地修訂(2026-07-14, Codex 18 輪 §七 scan floor —— 同樣尚未套用,故直接改 CREATE):
+--   * 加 `scanConsumedFloor` VARCHAR(100) NULL:scan(bootstrap / 404 fallback)發現的列
+--     沒有 per-message history event id(lastSeenHistoryId/lastRequeueEventId 皆 NULL),
+--     持久保存「掃描前 capture 的 mailbox baseline」作 consumed floor(獨立欄,不冒充
+--     per-message lastSeenHistoryId)。重排閘門(adapter statement 1 WHERE)由比
+--     COALESCE(lastRequeueEventId, lastSeenHistoryId) 升為嚴格大於
+--     MAX(lastRequeueEventId, lastSeenHistoryId, scanConsumedFloor)——修掉「scan 建列的
+--     NULL 水位吞掉第一個真 label 事件」的洞,且拒絕把 NULL 一律當 '0' 兜底。
+--     只在 scan INSERT 寫,之後 history sighting 的 ODKU 不覆蓋;message_added 建列保持 NULL。
 -- Migration 風格:照 docs/MIGRATION_PATTERNS.md Rule 1,CREATE TABLE / ADD COLUMN
 -- IF NOT EXISTS(TiDB 原生),不套 PREPARE/IF(0070 事故);Rule 2,語句間用
 -- breakpoint 標記行分隔(標記獨立成行,註解內不得出現字面標記 —— 0112 事故)。
@@ -94,6 +103,7 @@ CREATE TABLE IF NOT EXISTS `gmailIngestionLedger` (
   `requeueCount` INT NOT NULL DEFAULT 0,
   `lastRequeuedAt` TIMESTAMP NULL,
   `lastRequeueEventId` VARCHAR(100) NULL,
+  `scanConsumedFloor` VARCHAR(100) NULL,
   `claimToken` VARCHAR(64) NULL,
   `claimExpiresAt` TIMESTAMP NULL,
   `claimStage` VARCHAR(16) NULL,
