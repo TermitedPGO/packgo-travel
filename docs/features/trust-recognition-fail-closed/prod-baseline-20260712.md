@@ -52,3 +52,9 @@ SELECT COUNT(*), SUM(recognizedAt IS NOT NULL), MAX(recognizedAt), SUM(reversedA
 - 06:31:15Z 探針:recognizedCount 0、maxRecognizedAt null、transferredCount 0、pendingCount 3,與基準逐項相同。
 - 附帶佐證:BullMQ 歷史 completed jobs 顯示 07-11/07-12(v811 舊碼)同樣 recognized=0 — 三筆自始未被自動認列。
 - 裁定:第二輪同標準通過,第三層運行證據完成。B1/B1.1 於 v812 = 「已部署且運行驗證」(待 Codex 複核蓋章)。v813(B1.2)ship 條件=Codex 複核+審查閘綠(待傳信結案)。
+
+## 證據原件保全(Codex 17 輪 §二 衛生要求,Redis 七天過期前收)
+
+- evidence/bullmq-jobs-raw-20260714.json(completed 7 筆含兩輪 cron 完整 returnvalue,failed 0)SHA-256 387d73edb3d9c5671fb9ba3b0eed74f97015f2b2a8dd6a2f1acba1a4f1483e6e
+- evidence/db-probe-raw-20260714.json(聚合探針原始輸出)SHA-256 017791f896392f7e2b10a91e4b2213d13733593d23499693d09d23ce92f7ac03
+- 兩檔皆去識別(job id/計數/時間戳,零 PII)。Codex 17 輪已獨立複核同源資料並裁定:B1/B1.1=「v812 已部署,兩輪排程運行驗證通過」,免第三輪。

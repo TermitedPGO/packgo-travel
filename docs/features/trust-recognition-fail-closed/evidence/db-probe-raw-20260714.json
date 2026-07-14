@@ -1,0 +1,1 @@
+{"ok":true,"probedAtUtc":"2026-07-14T20:09:56.334Z","table":"trustDeferredIncome","stats":{"totalRows":3,"recognizedCount":0,"maxRecognizedAt":null,"reversedCount":0,"transferredCount":0,"maxTransferredAt":null,"pendingCount":3,"noExpectedDateCount":3,"noBookingCount":3}}
