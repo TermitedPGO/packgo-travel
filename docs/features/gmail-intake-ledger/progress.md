@@ -38,3 +38,11 @@ WIP:本批為當前唯一高風險施工批(B1.2 已完工待部署,不佔施工
 | 對抗審查 | PASS(code gate 範圍,直接讀正式 adapter 照 Codex §六.8):token 覆蓋全、§四反例重放過;3 findings:feed 單封超租雙發(指揮裁修=逐封心跳續租+誠實註解+紅綠自證)、真 SQL 語義延 DB gate(design 已明訂)、sync 失敗輪 backlog 由 reconcile 規則2 兜底≤30min | 本表 |
 | 指揮驗收 | 通過:tsc 0、gmail 287 綠(指揮親跑;執行者報 311,以親跑為準,差異記錄在案)、全套 pre-push 放行、重排 CAS/claim 段親讀 | 本表 |
 | 階梯位置 | local code gate 候選(等 Codex 複核);下一關 Local DB gate=本地 TiDB 獨立批 | — |
+
+## 切片 1.4(Codex 17 輪:消耗水位+authoritative 硬閘)
+| 階段 | 狀態 | 證據 |
+|------|------|------|
+| 施工 | 完成 2026-07-14 晨(opus):requeue 語句移到 INSERT 前(讀事前水位,消自遮蔽+同語句原子刷 lastSeen)、首次 label 建列 seed 消耗水位、collector 兩水位分開、authoritative 硬閘(gmailAuthoritativeGate 硬 false+一次性卡)、heartbeat 無空窗測法、at-least-once 反證保留 | branch |
+| 對抗審查 | PASS 零阻塞(focused,§四.1 三反例照正式 SQL 重放全過);2 low:scan 建列 fail-closed(authoritative 前須裁 '0' 兜底,交 Codex)、blocked 卡文案 cosmetic | 本表 |
+| 指揮驗收 | 通過:tsc 0、gmail 15 檔 294 綠(親跑) | 本表 |
+| 階梯位置 | shadow-only code gate 重新申請中(等 Codex);TiDB gate 未動 | — |

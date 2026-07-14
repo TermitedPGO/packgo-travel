@@ -14,7 +14,17 @@
  *   Plus: fencing / CAS, 404 fallback, bootstrap, feeder terminal states + backoff +
  *     dead-letter, and the pure classifiers.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
+
+// authoritative fail-closed gate (Codex 17 輪 §五.1). 實機閘 isGmailAuthoritativeApproved
+// 硬回 false;這批既有 feed-path 測試把閘 mock 為可切,預設 true 以繼續守護那段 feed 碼
+// (留待未來核准批復用)。下方另有 gate=false 的 fail-closed 測試;實機閘 === false 的斷言
+// 在未 mock 的 gmailAuthoritativeGate.test.ts。
+const authoritativeApproved = vi.fn(() => true);
+vi.mock("./gmailAuthoritativeGate", () => ({
+  isGmailAuthoritativeApproved: () => authoritativeApproved(),
+}));
+
 import {
   syncHistoryForIntegration,
   classifyPendingLedger,
@@ -79,24 +89,59 @@ class FakeStore implements LedgerStore {
     return c ? { ...c } : null;
   }
   async insertMinimalIgnore(rows: MinimalLedgerRow[]) {
-    // Mirrors the real two-statement state-aware upsert (Codex 15 輪 P0-2 + 16 輪
-    // 事件級冪等): absent → INSERT pending; existing + ignored + label_added_inbox +
-    // eventHistoryId STRICTLY GREATER than lastRequeueEventId → REQUEUE
-    // (message_added / scan re-discovery / same-or-older event NEVER requeue); every
-    // branch forward-only-advances lastSeenHistoryId (null never clobbers, older
-    // never regresses).
+    // Mirrors the real two-statement state-aware upsert (Codex 15 輪 P0-2 + 16 輪事件級
+    // 冪等 + 17 輪 §四 事件消耗水位). ⚠ ORDER matches the real reorder: the REQUEUE runs
+    // FIRST (reading the consumed watermark BEFORE this event — no self-shadow), then the
+    // INSERT / forward-only lastSeen bump.
     let inserted = 0;
     for (const r of rows) {
       const dup = this.rows.find(
         (x) => x.integrationId === r.integrationId && x.gmailMessageId === r.gmailMessageId,
       );
+      // statement 1 (FIRST): requeue ONLY a terminal-ignored row, ONLY for a discovery
+      // carrying a labelAdded(INBOX) event id (labelEventId non-null; message_added / scan
+      // carry null → never here), ONLY when that id is STRICTLY GREATER than the CONSUMED
+      // watermark COALESCE(lastRequeueEventId, lastSeenHistoryId) — the highest event id
+      // consumed BEFORE this one. A null watermark (scan-created row) → no requeue
+      // (fail-closed). Records consumption + advances lastSeen monotonically atomically.
+      if (dup && dup.status === "ignored" && r.eventKind === "label_added_inbox" && r.labelEventId != null) {
+        const watermark = dup.lastRequeueEventId ?? dup.lastSeenHistoryId ?? null;
+        if (watermark != null && isHistoryIdNewer(r.labelEventId, watermark)) {
+          dup.status = "pending";
+          dup.route = null;
+          dup.wouldRoute = null;
+          dup.fromAddress = null;
+          dup.internalDateMs = 0;
+          dup.failureKind = null;
+          dup.httpStatus = null;
+          dup.retryCount = 0;
+          dup.nextRetryAt = null;
+          dup.interactionId = null;
+          dup.discoveryReason = "inbox_requeue";
+          dup.requeueCount += 1;
+          dup.lastRequeuedAt = new Date(this.clock());
+          dup.lastRequeueEventId = r.labelEventId;
+          if (
+            r.maxSeenEventId != null &&
+            (dup.lastSeenHistoryId == null || isHistoryIdNewer(r.maxSeenEventId, dup.lastSeenHistoryId))
+          ) {
+            dup.lastSeenHistoryId = r.maxSeenEventId;
+          }
+          dup.claimToken = null;
+          dup.claimExpiresAt = null;
+          dup.claimStage = null;
+        }
+      }
+      // statement 2 (SECOND): INSERT a new row, or forward-only lastSeen on any existing
+      // row. A first-by-label discovery seeds lastRequeueEventId = labelEventId (§四.2);
+      // message_added / scan → null.
       if (!dup) {
         this.rows.push({
           id: this.nextId++,
           integrationId: r.integrationId,
           gmailMessageId: r.gmailMessageId,
           gmailThreadId: r.gmailThreadId,
-          gmailHistoryId: r.eventHistoryId,
+          gmailHistoryId: r.maxSeenEventId,
           internalDateMs: 0,
           fromAddress: null,
           source: r.source,
@@ -108,11 +153,11 @@ class FakeStore implements LedgerStore {
           retryCount: 0,
           nextRetryAt: null,
           interactionId: null,
-          lastSeenHistoryId: r.eventHistoryId,
+          lastSeenHistoryId: r.maxSeenEventId,
           discoveryReason: "initial",
           requeueCount: 0,
           lastRequeuedAt: null,
-          lastRequeueEventId: null,
+          lastRequeueEventId: r.labelEventId,
           claimToken: null,
           claimExpiresAt: null,
           claimStage: null,
@@ -121,41 +166,14 @@ class FakeStore implements LedgerStore {
         inserted++;
         continue;
       }
-      // statement 1: FORWARD-ONLY lastSeen (BigInt-monotonic via isHistoryIdNewer) —
-      // a null scan-discovery never clobbers, an older/reordered event never regresses.
+      // FORWARD-ONLY lastSeen (BigInt-monotonic via isHistoryIdNewer) — a null scan-
+      // discovery never clobbers, an older/reordered event never regresses; idempotent
+      // for a row statement 1 just requeued.
       if (
-        r.eventHistoryId != null &&
-        (dup.lastSeenHistoryId == null || isHistoryIdNewer(r.eventHistoryId, dup.lastSeenHistoryId))
+        r.maxSeenEventId != null &&
+        (dup.lastSeenHistoryId == null || isHistoryIdNewer(r.maxSeenEventId, dup.lastSeenHistoryId))
       ) {
-        dup.lastSeenHistoryId = r.eventHistoryId;
-      }
-      // statement 2: requeue ONLY a terminal-ignored row, ONLY for an explicit
-      // label_added_inbox event, ONLY when its id is STRICTLY GREATER than the row's
-      // lastRequeueEventId (monotonic gate). Replaying the same/older event — even after
-      // the row cycled back to ignored — is a no-op → requeueCount can't double-count.
-      if (
-        dup.status === "ignored" &&
-        r.eventKind === "label_added_inbox" &&
-        r.eventHistoryId != null &&
-        (dup.lastRequeueEventId == null || isHistoryIdNewer(r.eventHistoryId, dup.lastRequeueEventId))
-      ) {
-        dup.status = "pending";
-        dup.route = null;
-        dup.wouldRoute = null;
-        dup.fromAddress = null;
-        dup.internalDateMs = 0;
-        dup.failureKind = null;
-        dup.httpStatus = null;
-        dup.retryCount = 0;
-        dup.nextRetryAt = null;
-        dup.interactionId = null;
-        dup.discoveryReason = "inbox_requeue";
-        dup.requeueCount += 1;
-        dup.lastRequeuedAt = new Date(this.clock());
-        dup.lastRequeueEventId = r.eventHistoryId;
-        dup.claimToken = null;
-        dup.claimExpiresAt = null;
-        dup.claimStage = null;
+        dup.lastSeenHistoryId = r.maxSeenEventId;
       }
     }
     return inserted;
@@ -452,32 +470,49 @@ function page(
   nextPageToken: string | null,
   extra: Partial<HistoryPage> = {},
 ): HistoryPage {
-  // a bare string = a plain messageAdded discovery (eventKind → "message_added").
-  // Each message's PER-EVENT id (eventHistoryId, Codex 16 輪) defaults to the page
-  // boundary UNLESS the caller set an explicit one — real fetchHistoryPage sets a
-  // per-record id distinct from the boundary (proven in gmailPush.test.ts); the
-  // event-level tests below pass explicit ids to exercise that distinction, while
-  // legacy tests that don't care keep the boundary as the stand-in event id.
-  const msgs: DiscoveredMessage[] = messages.map((m) =>
-    typeof m === "string"
-      ? { id: m, threadId: `t-${m}`, eventKind: "message_added", eventHistoryId: boundaryHistoryId }
-      : { ...m, eventHistoryId: m.eventHistoryId ?? boundaryHistoryId },
-  );
+  // a bare string = a plain messageAdded discovery (eventKind → "message_added",
+  // labelEventId null). Each message's PER-EVENT ids (maxSeenEventId / labelEventId,
+  // Codex 17 輪 §四.3) default to the page boundary UNLESS the caller set explicit ones —
+  // real fetchHistoryPage sets per-record ids distinct from the boundary (proven in
+  // gmailPush.test.ts); the event-level tests below pass explicit ids to exercise that
+  // distinction, while legacy tests that don't care keep the boundary as the stand-in.
+  const msgs: DiscoveredMessage[] = messages.map((m) => {
+    if (typeof m === "string") {
+      return {
+        id: m,
+        threadId: `t-${m}`,
+        eventKind: "message_added" as const,
+        maxSeenEventId: boundaryHistoryId,
+        labelEventId: null,
+      };
+    }
+    const isLabel = m.eventKind === "label_added_inbox";
+    const seen = m.maxSeenEventId ?? boundaryHistoryId;
+    return {
+      id: m.id,
+      threadId: m.threadId,
+      eventKind: m.eventKind,
+      maxSeenEventId: seen,
+      // a label discovery's requeue-trigger id defaults to its seen id; a message_added
+      // discovery carries none.
+      labelEventId: m.labelEventId ?? (isLabel ? seen : null),
+    };
+  });
   return { messages: msgs, boundaryHistoryId, nextPageToken, ...extra };
 }
 
 /** A labelAdded(INBOX) discovery — the ONE event kind allowed to requeue an ignored
  *  row (Codex 15 輪 §四.1). fetchHistoryPage emits this for real labelAdded(INBOX)
  *  records (and for a message seen in BOTH messagesAdded and labelsAdded — label wins,
- *  unit-tested in gmailPush.test.ts). Optional explicit eventHistoryId = the label
- *  event's own history record id (Codex 16 輪 P0-2); omitted → page() defaults it to
- *  the boundary. */
-function inboxEvent(id: string, eventHistoryId?: string): DiscoveredMessage {
+ *  unit-tested in gmailPush.test.ts). Optional explicit eventId sets BOTH maxSeenEventId
+ *  and labelEventId to the label event's own history record id (Codex 17 輪 §四.3);
+ *  omitted → page() defaults both to the boundary. */
+function inboxEvent(id: string, eventId?: string): DiscoveredMessage {
   return {
     id,
     threadId: `t-${id}`,
     eventKind: "label_added_inbox",
-    ...(eventHistoryId !== undefined ? { eventHistoryId } : {}),
+    ...(eventId !== undefined ? { maxSeenEventId: eventId, labelEventId: eventId } : {}),
   };
 }
 
@@ -485,7 +520,7 @@ function inboxEvent(id: string, eventHistoryId?: string): DiscoveredMessage {
  *  going through the real claim protocol (claim → token-gated classify). */
 async function seedClassifiedCustomer(store: FakeStore, from = CUSTOMER, id = "m1") {
   await store.insertMinimalIgnore([
-    { integrationId: 1, gmailMessageId: id, gmailThreadId: `t-${id}`, eventHistoryId: "H2", source: "history", eventKind: "message_added" },
+    { integrationId: 1, gmailMessageId: id, gmailThreadId: `t-${id}`, maxSeenEventId: "H2", labelEventId: null, source: "history", eventKind: "message_added" },
   ]);
   const row = store.ledgerFor(1).find((r) => r.gmailMessageId === id)!;
   const token = `seed-${id}`;
@@ -1546,8 +1581,9 @@ describe("event-level requeue idempotency (Codex 16 輪 P0-2, §六.4-5)", () =>
   const E_LO = "9007199254740993";
   const E_HI = "9007199254740999";
 
-  function msgAdded(id: string, eventHistoryId: string): DiscoveredMessage {
-    return { id, threadId: `t-${id}`, eventKind: "message_added", eventHistoryId };
+  function msgAdded(id: string, eventId: string): DiscoveredMessage {
+    // a plain messagesAdded discovery: its own maxSeenEventId, no label event.
+    return { id, threadId: `t-${id}`, eventKind: "message_added", maxSeenEventId: eventId, labelEventId: null };
   }
 
   it("§六.4 requeue → re-ignored in the SAME run → replay of the SAME label event does NOT re-requeue (requeueCount stays 1)", async () => {
@@ -1625,11 +1661,12 @@ describe("event-level requeue idempotency (Codex 16 輪 P0-2, §六.4-5)", () =>
 
   it("§六.5 lastSeenHistoryId is forward-only: a reordered older / null sighting keeps the higher watermark", async () => {
     const { store } = makeDeps();
-    const row = (eventHistoryId: string | null, source: MinimalLedgerRow["source"] = "history"): MinimalLedgerRow => ({
+    const row = (maxSeenEventId: string | null, source: MinimalLedgerRow["source"] = "history"): MinimalLedgerRow => ({
       integrationId: 1,
       gmailMessageId: "m1",
       gmailThreadId: "t",
-      eventHistoryId,
+      maxSeenEventId,
+      labelEventId: null,
       source,
       eventKind: "message_added",
     });
@@ -1639,6 +1676,137 @@ describe("event-level requeue idempotency (Codex 16 輪 P0-2, §六.4-5)", () =>
     expect(store.ledgerFor(1)[0].lastSeenHistoryId).toBe(E_HI);
     await store.insertMinimalIgnore([row(null, "fallback_scan")]); // scan null → must NOT clobber
     expect(store.ledgerFor(1)[0].lastSeenHistoryId).toBe(E_HI);
+  });
+});
+
+// ── Codex 17 輪 §四: event CONSUMPTION watermark (closes the P0-1 reversal) ────────
+describe("event consumption watermark: requeue compares the watermark BEFORE this event (Codex 17 輪 §四)", () => {
+  // all ids > 2^53 so BigInt ordering is load-bearing (a Number() collapse would be visible).
+  const E = "9007199254740993";
+  const E_LO = "9007199254740990";
+  const E_MID = "9007199254740995";
+  const E_HI = "9007199254740999";
+  /** a plain messageAdded discovery carrying its OWN seen id, no label event. */
+  const msg = (id: string, seen: string): DiscoveredMessage => ({
+    id,
+    threadId: `t-${id}`,
+    eventKind: "message_added",
+    maxSeenEventId: seen,
+    labelEventId: null,
+  });
+
+  it("1) FIRST discovery by label event E → ignored → replay E does NOT requeue (§四.2 — closes the reversal)", async () => {
+    const classifier = new FakeClassifier();
+    classifier.set("m1", { from: NOISE, isReceipt: false, internalDateMs: 1_780_000_000_000 });
+    const { deps, store, gmail } = makeDeps({ integrations: [cursor({ intakeMode: "history" })], classifier });
+
+    // m1 is FIRST surfaced by a labelAdded(INBOX) event E (no prior messageAdded row). §四.2:
+    // the new row is seeded lastRequeueEventId=E — that event already drove it to pending.
+    gmail.historyPages.push(page([inboxEvent("m1", E)], "b1", null));
+    await syncHistoryForIntegration(deps, 1);
+    expect(store.ledgerFor(1)[0]).toMatchObject({
+      lastRequeueEventId: E,
+      requeueCount: 0,
+      discoveryReason: "initial",
+    });
+
+    // classify → noise → terminal ignored.
+    await classifyPendingLedger(deps, 1);
+    expect(store.ledgerFor(1)[0]).toMatchObject({ status: "ignored", requeueCount: 0 });
+
+    // the cursor never advanced past E → the next round REPLAYS the same label event E. The
+    // OLD null-gate (lastRequeueEventId null → open) would spuriously requeue; the §四.2 seed
+    // makes E NOT strictly greater than the consumed watermark E → no-op.
+    gmail.historyPages.push(page([inboxEvent("m1", E)], "b2", null));
+    await syncHistoryForIntegration(deps, 1);
+
+    const row = store.ledgerFor(1)[0];
+    expect(row).toMatchObject({ status: "ignored", requeueCount: 0 }); // UNCHANGED — reversal closed
+    expect(row.lastRequeuedAt).toBeNull();
+    expect(store.ledgerFor(1)).toHaveLength(1);
+  });
+
+  it("2) a stale label (id < lastSeen) on a never-requeued ignored row does NOT requeue (§四.1 null-gate stale hole)", async () => {
+    const classifier = new FakeClassifier();
+    classifier.set("m1", { from: NOISE, isReceipt: false, internalDateMs: 1_780_000_000_000 });
+    const { deps, store, gmail } = makeDeps({ integrations: [cursor({ intakeMode: "history" })], classifier });
+
+    // m1 discovered by a plain messageAdded at the HIGH id → lastSeen=E_HI, never requeued
+    // (lastRequeueEventId stays null). classify → noise → ignored.
+    gmail.historyPages.push(page([msg("m1", E_HI)], "b1", null));
+    await syncHistoryForIntegration(deps, 1);
+    await classifyPendingLedger(deps, 1);
+    expect(store.ledgerFor(1)[0]).toMatchObject({
+      status: "ignored",
+      lastRequeueEventId: null,
+      lastSeenHistoryId: E_HI,
+      requeueCount: 0,
+    });
+
+    // a STALE labelAdded(INBOX) event with a LOWER id (E_LO < E_HI). lastRequeueEventId is
+    // null, so the OLD gate (null → open) would requeue. The consumed-watermark gate compares
+    // E_LO against COALESCE(null, lastSeen=E_HI)=E_HI → not strictly greater → NO requeue.
+    gmail.historyPages.push(page([inboxEvent("m1", E_LO)], "b2", null));
+    await syncHistoryForIntegration(deps, 1);
+
+    const row = store.ledgerFor(1)[0];
+    expect(row).toMatchObject({ status: "ignored", requeueCount: 0, lastSeenHistoryId: E_HI });
+    expect(row.lastRequeuedAt).toBeNull();
+  });
+
+  it("3) a label event id < lastRequeueEventId does NOT requeue (monotonic gate)", async () => {
+    const classifier = new FakeClassifier();
+    classifier.set("m1", { from: NOISE, isReceipt: false, internalDateMs: 1_780_000_000_000 });
+    const { deps, store, gmail } = makeDeps({ integrations: [cursor({ intakeMode: "history" })], classifier });
+
+    // m1: message_added → ignored → requeued by label E_MID → re-ignored (noise again),
+    // so lastRequeueEventId=E_MID.
+    gmail.historyPages.push(page([msg("m1", E_LO)], "b1", null));
+    await syncHistoryForIntegration(deps, 1);
+    await classifyPendingLedger(deps, 1);
+    gmail.historyPages.push(page([inboxEvent("m1", E_MID)], "b2", null));
+    await syncHistoryForIntegration(deps, 1);
+    await classifyPendingLedger(deps, 1);
+    expect(store.ledgerFor(1)[0]).toMatchObject({ status: "ignored", requeueCount: 1, lastRequeueEventId: E_MID });
+
+    // a label event E_LO < lastRequeueEventId E_MID → not strictly greater → no requeue.
+    gmail.historyPages.push(page([inboxEvent("m1", E_LO)], "b3", null));
+    await syncHistoryForIntegration(deps, 1);
+    expect(store.ledgerFor(1)[0]).toMatchObject({ status: "ignored", requeueCount: 1, lastRequeueEventId: E_MID });
+  });
+
+  it("4) split watermarks: the requeue gate uses labelEventId, NOT the (higher) maxSeenEventId", async () => {
+    const classifier = new FakeClassifier();
+    classifier.set("m1", { from: NOISE, isReceipt: false, internalDateMs: 1_780_000_000_000 });
+    const { deps, store, gmail } = makeDeps({ integrations: [cursor({ intakeMode: "history" })], classifier });
+
+    // set up an ignored row whose lastRequeueEventId is E_MID (via a prior requeue).
+    gmail.historyPages.push(page([msg("m1", "9007199254740900")], "b1", null));
+    await syncHistoryForIntegration(deps, 1);
+    await classifyPendingLedger(deps, 1);
+    gmail.historyPages.push(page([inboxEvent("m1", E_MID)], "b2", null));
+    await syncHistoryForIntegration(deps, 1);
+    await classifyPendingLedger(deps, 1);
+    expect(store.ledgerFor(1)[0]).toMatchObject({ status: "ignored", lastRequeueEventId: E_MID, requeueCount: 1 });
+
+    // a same-page discovery where the LABEL record id (E_LO) < E_MID but a same-page
+    // messageAdded record pushes maxSeenEventId to E_HI (> E_MID). The gate must compare the
+    // LABEL id (E_LO) — NOT maxSeen (E_HI) — against E_MID → E_LO < E_MID → NO requeue. If the
+    // code wrongly used maxSeen, E_HI > E_MID would spuriously resurrect the row. lastSeen
+    // still advances forward to E_HI (that is the max-seen watermark's job).
+    gmail.historyPages.push(
+      page(
+        [{ id: "m1", threadId: "t-m1", eventKind: "label_added_inbox", maxSeenEventId: E_HI, labelEventId: E_LO }],
+        "b3",
+        null,
+      ),
+    );
+    await syncHistoryForIntegration(deps, 1);
+
+    const row = store.ledgerFor(1)[0];
+    expect(row).toMatchObject({ status: "ignored", requeueCount: 1, lastRequeueEventId: E_MID }); // NOT requeued
+    expect(row.lastSeenHistoryId).toBe(E_HI); // max-seen watermark still advanced
+    expect(row.lastRequeuedAt).not.toBeNull(); // (from the earlier real requeue, unchanged)
   });
 });
 
@@ -1692,6 +1860,8 @@ describe("P0-3 orchestration fencing gate (runIntakeStages, Codex 16 輪 §六.3
   });
 
   it("the authoritative winner DOES classify+feed (positive control — m1 fed exactly once)", async () => {
+    // authoritative gate mocked OPEN here (authoritativeApproved default true) to guard the
+    // feed wiring; the fail-closed default is proven in the §五.1 block + gmailAuthoritativeGate.test.ts.
     const downstream = new FakeDownstream();
     const { deps, store, gmail } = makeDeps({ integrations: [cursor({ intakeMode: "history" })], downstream });
     await seedClassifiedCustomer(store);
@@ -1704,12 +1874,70 @@ describe("P0-3 orchestration fencing gate (runIntakeStages, Codex 16 輪 §六.3
   });
 });
 
+// ── Codex 17 輪 §五.1: authoritative fail-closed hard gate ────────────────────────
+describe("authoritative fail-closed gate (runIntakeStages, Codex 17 輪 §五.1)", () => {
+  // the whole-file mock defaults authoritativeApproved → true; these tests flip it false
+  // to exercise the real production posture. Reset after each so later blocks stay open.
+  afterEach(() => authoritativeApproved.mockReturnValue(true));
+
+  it("gate CLOSED + history mode → classify RUNS but feed is REFUSED: zero downstream, rows stay pending, one deduped card", async () => {
+    authoritativeApproved.mockReturnValue(false);
+    const downstream = new FakeDownstream();
+    const { deps, store, gmail, alerts } = makeDeps({
+      integrations: [cursor({ intakeMode: "history" })],
+      downstream,
+    });
+    await seedClassifiedCustomer(store); // m1 classified pending customer, ready to feed
+    gmail.historyPages.push(page([], "H1", null)); // authoritative round, no new mail
+
+    const out = await runIntakeStages(deps, 1, "history");
+
+    expect(out.classify).toBeDefined(); // classification still runs
+    expect(out.feed).toBeUndefined(); // feed refused by the gate
+    expect(downstream.processed).toEqual([]); // ZERO downstream side effect
+    // the customer row is unharmed: still pending + classified, ready to feed once opened.
+    expect(store.ledgerFor(1)[0]).toMatchObject({ status: "pending", route: "customer" });
+    // exactly one authoritative-blocked card.
+    const blocked = alerts.cards.filter((c) => c.body.includes("authoritative_blocked"));
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0].priority).toBe("high");
+
+    // a SECOND round → still zero feed, and the card is deduped (still exactly one).
+    gmail.historyPages.push(page([], "H1", null));
+    const out2 = await runIntakeStages(deps, 1, "history");
+    expect(out2.feed).toBeUndefined();
+    expect(downstream.processed).toEqual([]);
+    expect(alerts.cards.filter((c) => c.body.includes("authoritative_blocked"))).toHaveLength(1);
+  });
+
+  it("gate CLOSED + shadow mode → unaffected (shadow never feeds, no block card)", async () => {
+    authoritativeApproved.mockReturnValue(false);
+    const downstream = new FakeDownstream();
+    const { deps, store, gmail, alerts } = makeDeps({
+      integrations: [cursor({ intakeMode: "shadow" })],
+      downstream,
+    });
+    // a discovered customer mail → shadow classifies it TERMINAL ignored (wouldRoute), and
+    // never reaches the feed path (mode !== history) → the gate is irrelevant to shadow.
+    gmail.historyPages.push(page(["m1"], "H2", null));
+
+    const out = await runIntakeStages(deps, 1, "shadow");
+
+    expect(out.classify).toBeDefined();
+    expect(out.feed).toBeUndefined(); // shadow never feeds regardless of the gate
+    expect(downstream.processed).toEqual([]); // zero side effect
+    expect(store.ledgerFor(1)[0]).toMatchObject({ status: "ignored", wouldRoute: "customer" });
+    // no authoritative-blocked card — the block only concerns history-mode feed.
+    expect(alerts.cards.filter((c) => c.body.includes("authoritative_blocked"))).toHaveLength(0);
+  });
+});
+
 // ── Codex 16 輪 P0-3: DB row claim (§六.6-7) ──────────────────────────────────────
 describe("P0-3 row claim: concurrent runners never double-process (Codex 16 輪 §六.6-7)", () => {
   const EVENT = "9007199254740993";
   function seedUnclassified(store: FakeStore, id = "m1"): Promise<number> {
     return store.insertMinimalIgnore([
-      { integrationId: 1, gmailMessageId: id, gmailThreadId: `t-${id}`, eventHistoryId: EVENT, source: "history", eventKind: "message_added" },
+      { integrationId: 1, gmailMessageId: id, gmailThreadId: `t-${id}`, maxSeenEventId: EVENT, labelEventId: null, source: "history", eventKind: "message_added" },
     ]);
   }
 
@@ -1802,8 +2030,15 @@ describe("P0-3 row claim: concurrent runners never double-process (Codex 16 輪 
 
 // ── Codex 16 輪對抗審查修正: per-message claim heartbeat during feed ──────────────
 describe("P0-3 claim heartbeat: a single slow downstream message keeps its lease (對抗審查修正)", () => {
-  it("heartbeat renews mid-process: a message slower than the lease is NOT re-claimable by a peer (contrast: §六.7 expiry test)", async () => {
-    let tNow = 1_780_000_100_000;
+  it("heartbeat renews BEFORE the lease expiry → coverage is continuous, no gap window ever opens (Codex 17 §六.1)", async () => {
+    // Proof of NO GAP (not just "renew eventually works"): renew at t+60 — while the
+    // ORIGINAL t+120 lease is still valid — extending it to t+180, THEN let a peer claim
+    // at t+130. t+130 is past the original t+120 expiry but inside the renewed t+180, so
+    // the peer must find the row still leased. Because the renew landed BEFORE t+120, the
+    // lease was valid across the ENTIRE [t0, t+180] span — there is no instant a peer
+    // could have won. (The old test renewed at t+130, AFTER t+120, leaving the t+120→t+130
+    // window unproven.)
+    let tNow = 1_780_000_100_000; // t0; claim lease → t0+120_000, heartbeat interval 60_000
     const sleeps = manualSleep();
     const downstream = new FakeDownstream();
     const { deps, store } = makeDeps({
@@ -1819,27 +2054,33 @@ describe("P0-3 claim heartbeat: a single slow downstream message keeps its lease
     downstream.onProcess = async (id) => {
       if (id !== "m1" || acted) return;
       acted = true;
-      // the single message is SLOW: real time crosses the ORIGINAL lease expiry…
-      tNow += 130_000; // > CLAIM_LEASE_MS (120s)
-      // …but a heartbeat tick fires and renews the lease before any peer looks:
+      // t+60 — INSIDE the original t+120 lease. The heartbeat fires and renews to t+180.
+      tNow += 60_000;
       sleeps.tick();
-      await macroTick(); // let the renew land
-      // a peer feeding NOW must find the row still leased (renewed) → gets nothing.
-      // WITHOUT the heartbeat the lease would have lapsed at +120s and the peer would
-      // re-claim + re-process (the §六.7 expiry test shows exactly that takeover).
+      await macroTick(); // let the renew land (lease t0+120 → t0+180, no gap)
+      // t+130 — past the ORIGINAL t+120 expiry, inside the renewed t+180. A peer feeding
+      // NOW must be handed NOTHING (row still leased). WITHOUT the mid-lease renew the lease
+      // would have lapsed at t+120 and the peer would re-claim + re-process (§六.7 shows that).
+      tNow += 70_000;
       peer = await feedPendingDownstream(deps, 1);
     };
 
     const res = await feedPendingDownstream(deps, 1);
 
-    expect(peer!.processed).toBe(0); // peer was handed NOTHING mid-flight
+    expect(peer!.processed).toBe(0); // peer was handed NOTHING mid-flight (lease never lapsed)
     expect(peer!.lostLease).toBe(0);
     expect(downstream.processed).toEqual(["m1"]); // downstream fired exactly once
     expect(res).toMatchObject({ processed: 1, lostLease: 0 }); // winner completed + wrote back
     expect(store.ledgerFor(1)[0]).toMatchObject({ status: "processed", claimToken: null });
   });
 
-  it("heartbeat renew FAILURE mid-process → no write-back for that message, the round STOPS, the row is re-fed after the lease lapses", async () => {
+  // ⚠ DO NOT DELETE — this test is the AT-LEAST-ONCE counter-evidence (Codex 17 §六.3):
+  // it proves the downstream SIDE EFFECT is at-least-once (m1's process fires twice in the
+  // heartbeat-failure window), which is exactly WHY authoritative feed is HARD-BLOCKED by
+  // gmailAuthoritativeGate until every side effect has a durable idempotency key / outbox.
+  // Removing it to make a guarantee "look" exactly-once would erase the proof the hard gate
+  // exists for. It stays green as documented at-least-once behaviour, not a bug.
+  it("at-least-once counter-evidence (authoritative 硬擋的反證,不得刪): heartbeat renew FAILURE → no write-back, round STOPS, row re-fed → m1 processed TWICE", async () => {
     let tNow = 1_780_000_100_000;
     const sleeps = manualSleep();
     const downstream = new FakeDownstream();

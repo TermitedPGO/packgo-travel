@@ -1298,18 +1298,25 @@ export type DiscoveryEventKind = "message_added" | "label_added_inbox";
  *  lands this at discovery; the From header + receipt sniff are hydrated later by
  *  the classification stage (fromAddress is NOT known yet).
  *
- *  eventHistoryId (Codex 16 輪 P0-2) = the history RECORD id (history[].id) of the
- *  event that surfaced THIS message — its own per-event id, NOT the page boundary
- *  and NOT the top-level mailbox snapshot (those two only drive the cursor). When a
- *  message appears in several records on one page it keeps the MAX record id (the
- *  latest sighting). It is the value the ledger's forward-only lastSeen watermark +
- *  the strict-greater requeue gate compare against. null for query-scan discoveries
- *  (fallback / bootstrap / backfill), which carry no history record id. */
+ *  Two per-event watermarks (Codex 17 輪 §四.3 — 分開保存,取代舊的共用單一
+ *  eventHistoryId):
+ *   • maxSeenEventId = MAX history RECORD id (history[].id) over ALL events surfacing
+ *     this message on this page (messagesAdded ∪ labelsAdded(INBOX)). Drives the
+ *     ledger's first-discovery gmailHistoryId + the forward-only lastSeen watermark.
+ *   • labelEventId = MAX history RECORD id over ONLY the labelAdded(INBOX) events
+ *     (null when this message carried no inbox-label event). This — NOT maxSeenEventId
+ *     — is the id the strict-greater requeue gate compares against; sharing one max
+ *     would let a label-kind discovery carry a NON-label (messagesAdded) record id and
+ *     mis-fire the gate.
+ *  Neither is the page boundary nor the top-level mailbox snapshot (those two only
+ *  drive the cursor). Both null for query-scan discoveries (fallback / bootstrap /
+ *  backfill), which carry no history record id (→ never a requeue trigger). */
 export type DiscoveredMessage = {
   id: string;
   threadId: string;
   eventKind: DiscoveryEventKind;
-  eventHistoryId: string | null;
+  maxSeenEventId: string | null;
+  labelEventId: string | null;
 };
 
 /** BigInt-precise max of two decimal-string history record ids (null-safe). Real
@@ -1369,13 +1376,22 @@ export async function fetchHistoryPage(
       ...(pageToken ? { pageToken } : {}),
       maxResults: 500,
     });
-    // id → {threadId, eventKind} (page-level dedup). eventKind: the same message in
-    // BOTH messagesAdded and labelsAdded(INBOX) collapses to ONE discovery tagged
-    // label_added_inbox (label wins — Codex 15 輪修正指示), so the requeue gate sees
-    // the inbox-entry signal; a brand-new message stays message_added.
+    // id → {threadId, eventKind, maxSeenEventId, labelEventId} (page-level dedup).
+    // eventKind: the same message in BOTH messagesAdded and labelsAdded(INBOX) collapses
+    // to ONE discovery tagged label_added_inbox (label wins — Codex 15 輪修正指示), so the
+    // requeue gate sees the inbox-entry signal; a brand-new message stays message_added.
+    // maxSeenEventId / labelEventId are tracked SEPARATELY (Codex 17 輪 §四.3): a
+    // messagesAdded record advances only maxSeenEventId; a labelsAdded(INBOX) record
+    // advances BOTH — so a label-kind discovery never carries a non-label record id in
+    // its requeue-trigger id.
     const seen = new Map<
       string,
-      { threadId: string; eventKind: DiscoveryEventKind; eventHistoryId: string | null }
+      {
+        threadId: string;
+        eventKind: DiscoveryEventKind;
+        maxSeenEventId: string | null;
+        labelEventId: string | null;
+      }
     >();
     let lastRecordId: string | null = null;
     for (const h of resp.data.history ?? []) {
@@ -1386,14 +1402,16 @@ export async function fetchHistoryPage(
         if (!id) continue;
         const prev = seen.get(id);
         if (prev) {
-          // same message in a later record on this page → keep the MAX record id
-          // (its own latest per-event id), never downgrade the kind.
-          prev.eventHistoryId = maxHistoryRecordId(prev.eventHistoryId, recordId);
+          // same message in a later record on this page → advance the max-SEEN id only
+          // (a message event is NOT a label event → labelEventId untouched); never
+          // downgrade the kind.
+          prev.maxSeenEventId = maxHistoryRecordId(prev.maxSeenEventId, recordId);
         } else {
           seen.set(id, {
             threadId: added.message?.threadId ?? "",
             eventKind: "message_added",
-            eventHistoryId: recordId,
+            maxSeenEventId: recordId,
+            labelEventId: null,
           });
         }
       }
@@ -1409,15 +1427,18 @@ export async function fetchHistoryPage(
         const prev = seen.get(id);
         if (prev) {
           prev.eventKind = "label_added_inbox"; // upgrade: label event wins
-          // the label event is the requeue-triggering one — keep the MAX record id
-          // so the ledger's strict-greater requeue gate compares against a real,
-          // monotonically-latest INBOX-entry event id (never the page boundary).
-          prev.eventHistoryId = maxHistoryRecordId(prev.eventHistoryId, recordId);
+          // a label event advances BOTH the max-seen id AND the label-only id — the
+          // latter is the requeue-triggering id, so the ledger's strict-greater gate
+          // compares against a real, monotonically-latest INBOX-entry event id (never a
+          // messagesAdded record id, never the page boundary).
+          prev.maxSeenEventId = maxHistoryRecordId(prev.maxSeenEventId, recordId);
+          prev.labelEventId = maxHistoryRecordId(prev.labelEventId, recordId);
         } else {
           seen.set(id, {
             threadId: la.message?.threadId ?? "",
             eventKind: "label_added_inbox",
-            eventHistoryId: recordId,
+            maxSeenEventId: recordId,
+            labelEventId: recordId,
           });
         }
       }
@@ -1446,7 +1467,8 @@ export async function fetchHistoryPage(
         id,
         threadId: v.threadId,
         eventKind: v.eventKind,
-        eventHistoryId: v.eventHistoryId,
+        maxSeenEventId: v.maxSeenEventId,
+        labelEventId: v.labelEventId,
       })),
       boundaryHistoryId,
       nextPageToken,
@@ -1485,9 +1507,17 @@ export async function scanQueryPage(
   for (const m of resp.data.messages ?? []) {
     // scans are ALWAYS message_added-equivalent (Codex 15 輪修正): a query re-scan
     // re-seeing an old ignored message must never carry the inbox-entry requeue signal.
-    // eventHistoryId is null — a messages.list result has no history record id, so a
-    // scan can never masquerade a mailbox snapshot as a per-event id (Codex 16 輪 P0-2).
-    if (m.id) messages.push({ id: m.id, threadId: m.threadId ?? "", eventKind: "message_added", eventHistoryId: null });
+    // BOTH watermarks are null — a messages.list result has no history record id, so a
+    // scan can never masquerade a mailbox snapshot as a per-event id (Codex 16 輪 P0-2)
+    // and, with labelEventId null, is never a requeue candidate (Codex 17 輪 §四.3).
+    if (m.id)
+      messages.push({
+        id: m.id,
+        threadId: m.threadId ?? "",
+        eventKind: "message_added",
+        maxSeenEventId: null,
+        labelEventId: null,
+      });
   }
   return { messages, nextPageToken: resp.data.nextPageToken ?? null };
 }

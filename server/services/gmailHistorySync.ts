@@ -39,6 +39,7 @@ import {
   normalizeFromAddress,
   type IntakeRoute,
 } from "../_core/gmailEligibility";
+import { isGmailAuthoritativeApproved } from "./gmailAuthoritativeGate";
 
 // re-export so existing importers (tests / adapters) keep resolving these here.
 export { normalizeFromAddress };
@@ -69,18 +70,26 @@ export type DiscoveryEventKind = "message_added" | "label_added_inbox";
  *  RUNTIME-ONLY routing for the state-aware upsert's requeue gate — deliberately NOT
  *  persisted (discoveryReason already records the audit outcome on the row).
  *
- *  eventHistoryId (Codex 16 輪 P0-2) = the per-event history RECORD id that surfaced
- *  this message (gmail.ts DiscoveredMessage.eventHistoryId). NEVER the page boundary
- *  nor the mailbox snapshot (those only drive the cursor). It becomes the row's
- *  gmailHistoryId (first-discovery audit) + lastSeenHistoryId on insert, drives the
- *  forward-only lastSeen watermark on a duplicate, and — for a label_added_inbox
- *  event — is the id the strict-greater requeue gate compares against. null for
- *  query-scan discoveries (fallback / bootstrap / backfill carry no record id). */
+ *  Two SEPARATE per-event watermarks (Codex 17 輪 §四.3 — 取代舊的共用單一 eventHistoryId,
+ *  runtime-only, mapped onto EXISTING columns, no migration):
+ *   • maxSeenEventId = MAX history RECORD id over ALL events surfacing this message
+ *     (messagesAdded ∪ labelsAdded(INBOX)). Becomes the row's gmailHistoryId
+ *     (first-discovery audit) + lastSeenHistoryId on insert, and drives the forward-only
+ *     lastSeen watermark on a duplicate.
+ *   • labelEventId = MAX history RECORD id over ONLY labelAdded(INBOX) events (null when
+ *     no inbox-label event). This — NOT maxSeenEventId — is the id the strict-greater
+ *     requeue gate compares against, AND (Codex 17 輪 §四.2) the value written to
+ *     lastRequeueEventId when a label event is the FIRST discovery (that event already
+ *     drove the row to pending, so a replay must not count as a fresh requeue).
+ *  NEVER the page boundary nor the mailbox snapshot (those only drive the cursor). Both
+ *  null for query-scan discoveries (fallback / bootstrap / backfill carry no record id
+ *  → never a requeue trigger). */
 export interface MinimalLedgerRow {
   integrationId: number;
   gmailMessageId: string;
   gmailThreadId: string;
-  eventHistoryId: string | null;
+  maxSeenEventId: string | null;
+  labelEventId: string | null;
   source: LedgerSource;
   eventKind: DiscoveryEventKind;
 }
@@ -146,10 +155,13 @@ export interface DiscoveredMessage {
   id: string;
   threadId: string;
   eventKind?: DiscoveryEventKind;
-  /** The per-event history record id that surfaced this message (Codex 16 輪 P0-2).
-   *  Optional at the port boundary; toMinimalRows defaults an absent value to null
-   *  (a scan / untagged adapter carries no record id → never a requeue trigger). */
-  eventHistoryId?: string | null;
+  /** MAX history record id over ALL events surfacing this message (Codex 17 輪 §四.3).
+   *  Optional at the port boundary; toMinimalRows defaults an absent value to null. */
+  maxSeenEventId?: string | null;
+  /** MAX history record id over ONLY labelAdded(INBOX) events — the requeue-trigger id
+   *  (Codex 17 輪 §四.3). Optional; absent (a scan / untagged / message-only adapter) →
+   *  null → never a requeue trigger. */
+  labelEventId?: string | null;
 }
 
 /** The raw signals the classification stage needs — hydrated per message. */
@@ -200,24 +212,33 @@ export interface LockPort {
 
 export interface LedgerStore {
   getIntegration(integrationId: number): Promise<IntegrationCursor | null>;
-  /** State-aware upsert of minimal discovery rows (Codex 15 輪 P0-2 —取代單純 INSERT
-   *  IGNORE). Per (integrationId, gmailMessageId):
+  /** State-aware upsert of minimal discovery rows (Codex 15 輪 P0-2 + 17 輪 §四 事件消耗
+   *  水位). Per (integrationId, gmailMessageId), a REQUEUE UPDATE runs FIRST (before the
+   *  INSERT/lastSeen bump, so it reads the watermark BEFORE this event — no self-shadow),
+   *  then an INSERT … ON DUPLICATE KEY UPDATE:
    *    • row absent → INSERT pending (fromAddress/route NULL, internalDateMs 0,
-   *      discoveryReason 'initial'); lastSeenHistoryId = the discovery historyId.
-   *    • row exists, status='ignored' AND the discovery's eventKind =
-   *      'label_added_inbox' AND its eventHistoryId is STRICTLY GREATER than the row's
-   *      lastRequeueEventId (Codex 16 輪 P0-2 monotonic gate) → REQUEUE: flip to
-   *      pending, clear route/wouldRoute (re-classify from scratch), reset retry track,
-   *      clear any claim, bump requeueCount + stamp lastRequeuedAt + set
-   *      lastRequeueEventId=eventHistoryId + discoveryReason='inbox_requeue'. Replaying
-   *      the SAME (or an older) label event — even after the row cycled back to ignored
-   *      — is NOT strictly greater → no-op (requeueCount can't double-count).
-   *      eventKind='message_added' NEVER requeues (§四.1): a 404 fallback scan /
-   *      crash-replay re-seeing old ignored rows must not resurrect them (重排風暴閘門).
+   *      discoveryReason 'initial'); lastSeenHistoryId = maxSeenEventId. When the FIRST
+   *      discovery is a label event, lastRequeueEventId = labelEventId (Codex 17 §四.2:
+   *      that event already drove the row to pending → a replay must not re-requeue);
+   *      otherwise lastRequeueEventId stays NULL.
+   *    • row exists, status='ignored' AND labelEventId is non-null (an explicit
+   *      labelAdded(INBOX) event) AND labelEventId is STRICTLY GREATER than the CONSUMED
+   *      watermark = COALESCE(lastRequeueEventId, lastSeenHistoryId) — i.e. the highest
+   *      event already consumed BEFORE this one (Codex 17 §四.1 monotonic gate) → REQUEUE:
+   *      flip to pending, clear route/wouldRoute (re-classify from scratch), reset retry
+   *      track, clear any claim, bump requeueCount + stamp lastRequeuedAt + set
+   *      lastRequeueEventId=labelEventId + monotonic lastSeenHistoryId + discoveryReason
+   *      ='inbox_requeue', ALL in the one atomic UPDATE (no先記消耗後重排 crash gap).
+   *      Replaying the SAME (or older) label event — even after the row cycled back to
+   *      ignored — is NOT strictly greater → no-op (requeueCount can't double-count). A
+   *      null watermark (scan-created row, no event id yet) is conservatively NOT requeued
+   *      (fail-closed: never resurrect on an incomparable watermark).
+   *      labelEventId null (message_added / scans) NEVER requeues (§四.1): a 404 fallback
+   *      scan / crash-replay re-seeing old ignored rows must not resurrect them (重排風暴閘門).
    *    • row exists, status='processed' → ONLY forward-only lastSeenHistoryId; NEVER
-   *      re-generate business side effects (any eventKind).
+   *      re-generate business side effects.
    *    • row exists, status='failed'/'pending' → ONLY forward-only lastSeenHistoryId;
-   *      the existing retry/classify track continues untouched (any eventKind).
+   *      the existing retry/classify track continues untouched.
    *  lastSeenHistoryId is FORWARD-ONLY (BigInt-monotonic, never regresses on a
    *  reordered/older sighting) — not COALESCE-only. Idempotent under duplicate
    *  labelAdded / crash-replay. Returns the input row count. Throws on any
@@ -504,9 +525,10 @@ export function buildInboxScanQuery(sinceMs: number): string {
 
 /** Map discovered messages → minimal ledger rows (NO eligibility filter — P0-1).
  *  eventKind defaults to "message_added" (fail-safe: absent tag can never requeue);
- *  fetchHistoryPage tags real labelAdded(INBOX) events, scans never do. eventHistoryId
- *  is PER-MESSAGE (its own history record id; Codex 16 輪 P0-2) — never a page boundary
- *  or mailbox snapshot; absent (scans) → null (can never trigger a requeue). */
+ *  fetchHistoryPage tags real labelAdded(INBOX) events, scans never do. maxSeenEventId /
+ *  labelEventId are PER-MESSAGE (their own history record ids; Codex 17 輪 §四.3) — never
+ *  a page boundary or mailbox snapshot; absent (scans) → null (labelEventId null → can
+ *  never trigger a requeue). */
 function toMinimalRows(
   integrationId: number,
   messages: DiscoveredMessage[],
@@ -518,7 +540,8 @@ function toMinimalRows(
       integrationId,
       gmailMessageId: m.id,
       gmailThreadId: m.threadId || "",
-      eventHistoryId: m.eventHistoryId ?? null,
+      maxSeenEventId: m.maxSeenEventId ?? null,
+      labelEventId: m.labelEventId ?? null,
       source,
       eventKind: m.eventKind ?? "message_added",
     }));
@@ -661,8 +684,9 @@ async function runScanPages(
   let landed = 0;
   for (;;) {
     const page = await deps.gmail.scanQueryPage(query, pageToken);
-    // scan discoveries carry eventHistoryId null (a messages.list result has no history
-    // record id) — the mailbox snapshot must never masquerade as a per-event id (P0-2).
+    // scan discoveries carry both maxSeenEventId and labelEventId null (a messages.list
+    // result has no history record id) — the mailbox snapshot must never masquerade as a
+    // per-event id (P0-2), and null labelEventId means a scan can never requeue (§四.3).
     const minimal = toMinimalRows(integrationId, page.messages, source);
     if (minimal.length > 0) {
       await deps.store.insertMinimalIgnore(minimal);
@@ -1100,12 +1124,20 @@ export interface IntakeStagesResult {
 }
 
 /**
- * One integration's intake round: sync → (fencing gate) → classify → feed. Pure over
- * injected ports so the P0-3 orchestration gate is unit-testable with fakes. Only the
- * authoritative sync winner (syncGrantsDownstream) proceeds to classify/feed; a runner
- * that lost/never-held the fencing token, lost the cursor CAS, was locked out, or whose
- * sync failed does NOT touch downstream — the winner (or a later round) handles it. The
- * DB row claim inside classify/feed is the last gate; this is the first.
+ * One integration's intake round: sync → (fencing gate) → classify → (authoritative
+ * gate) → feed. Pure over injected ports so the P0-3 orchestration gate is unit-testable
+ * with fakes. Only the authoritative sync winner (syncGrantsDownstream) proceeds to
+ * classify/feed; a runner that lost/never-held the fencing token, lost the cursor CAS,
+ * was locked out, or whose sync failed does NOT touch downstream — the winner (or a
+ * later round) handles it. The DB row claim inside classify/feed is the last gate; this
+ * is the first.
+ *
+ * history-mode feed is additionally guarded by the authoritative fail-closed gate
+ * (Codex 17 輪 §五.1): while isGmailAuthoritativeApproved() is false, classification still
+ * runs (rows get routed) but the FEED is refused — no downstream side effect fires — and
+ * a single deduped alert card is posted. The classified customer/receipt rows stay
+ * pending (unharmed), ready to feed once the gate is legitimately opened. shadow mode
+ * never feeds regardless (mode !== 'history'), so it is unaffected.
  */
 export async function runIntakeStages(
   deps: HistorySyncDeps,
@@ -1117,7 +1149,13 @@ export async function runIntakeStages(
   if (syncGrantsDownstream(sync)) {
     result.classify = await classifyPendingLedger(deps, integrationId);
     if (mode === "history") {
-      result.feed = await feedPendingDownstream(deps, integrationId);
+      if (isGmailAuthoritativeApproved()) {
+        result.feed = await feedPendingDownstream(deps, integrationId);
+      } else {
+        // authoritative fail-closed (Codex 17 §五.1): rows are classified but NOT fed —
+        // zero downstream side effect. Rows stay pending (unharmed); one deduped card.
+        await postAuthoritativeBlockedCard(deps, integrationId);
+      }
     }
   }
   return result;
@@ -1159,6 +1197,32 @@ async function postContinuationCard(
       `integrationId:${integrationId}\n` +
       `階段:${phase}\n` +
       `分類:continuation\n` +
+      `(卡片只含 id/計數,不含寄件人或內容)`,
+  });
+}
+
+/** authoritative fail-closed block card (Codex 17 §五.1). history-mode feed is refused
+ *  while the gate is closed — this INFORMS an operator that classified customer/receipt
+ *  mail is landing + routed but deliberately NOT delivered downstream (no reply / no
+ *  attachment / no proposal / no label), so nothing is silently stuck. Deduped per
+ *  integration for 60 min; carries only ids/counts — never sender content. */
+async function postAuthoritativeBlockedCard(
+  deps: HistorySyncDeps,
+  integrationId: number,
+): Promise<void> {
+  const fingerprint = `gmail-intake-authoritative-blocked:${integrationId}`;
+  if (await deps.alerts.alreadyAlerted(fingerprint, DEAD_LETTER_ALERT_WINDOW_S)) return;
+  await deps.alerts.postCard({
+    agentName: "gmail-intake",
+    priority: "high",
+    title: `Gmail authoritative 餵送已 fail-closed 硬擋(列留 pending)`.slice(0, 200),
+    body:
+      `intakeMode=history,但 authoritative 機械閘(isGmailAuthoritativeApproved)現硬回 false,` +
+      `本輪已分類的 customer/receipt 列一律不餵下游(不跑 processOneEmail/收據鏈、不上傳附件、` +
+      `不建 proposal、不寄 auto reply、不貼標),ledger 列留 pending 不損。翻閘需 outbox/冪等鍵` +
+      `機械證據齊 + Codex 裁定 + Jeff 核准(獨立設計批)。\n` +
+      `integrationId:${integrationId}\n` +
+      `分類:authoritative_blocked\n` +
       `(卡片只含 id/計數,不含寄件人或內容)`,
   });
 }

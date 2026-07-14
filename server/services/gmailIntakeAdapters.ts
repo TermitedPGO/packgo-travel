@@ -181,61 +181,38 @@ export function createDrizzleLedgerStore(
 
     async insertMinimalIgnore(rows) {
       if (rows.length === 0) return 0;
-      // State-aware upsert (Codex 15 輪 P0-2 + 16 輪事件級冪等), done as TWO
-      // ordering-hazard-free statements under the per-integration fencing lock (the
-      // sole writer, so no concurrent-upsert race). Both idempotent → duplicate
+      // State-aware upsert (Codex 15 輪 P0-2 + 16 輪事件級冪等 + 17 輪 §四 事件消耗水位),
+      // done as TWO ordering-hazard-free statements under the per-integration fencing lock
+      // (the sole writer, so no concurrent-upsert race). Both idempotent → duplicate
       // labelAdded / crash-replay converge with ZERO duplication.
       //
-      // Statement 1 — idempotent INSERT + FORWARD-ONLY track of the latest inbox-arrival
-      // historyId (every eventKind / every status branch). Minimal discovery row (P0-1):
-      // fromAddress/route/classifiedAt stay NULL, internalDateMs 0 until classification
-      // hydrates them. gmailHistoryId + lastSeenHistoryId land the PER-EVENT history
-      // record id (eventHistoryId; Codex 16 輪) — never a page boundary / mailbox
-      // snapshot. On a duplicate we advance lastSeenHistoryId ONLY when the incoming
-      // event id is strictly greater (BigInt-precise CAST UNSIGNED), NULL-safe both ways
-      // (a scan re-discovery carries NULL → never clobbers; a reordered/older event →
-      // never regresses). Statement 1 NEVER touches lastRequeueEventId, so statement 2's
-      // requeue gate reads a watermark statement 1 didn't overwrite (no read-after-write
-      // hazard between the two). No SET clause references `status` (requeue is stmt 2).
-      await db
-        .insert(gmailIngestionLedger)
-        .values(
-          rows.map((r) => ({
-            integrationId: r.integrationId,
-            gmailMessageId: r.gmailMessageId,
-            gmailThreadId: r.gmailThreadId,
-            gmailHistoryId: r.eventHistoryId,
-            lastSeenHistoryId: r.eventHistoryId,
-            discoveryReason: "initial" as const,
-            internalDateMs: 0,
-            source: r.source,
-            status: "pending" as const,
-          })),
-        )
-        .onDuplicateKeyUpdate({
-          set: {
-            lastSeenHistoryId: sql`case when values(\`lastSeenHistoryId\`) is null then \`lastSeenHistoryId\` when \`lastSeenHistoryId\` is null then values(\`lastSeenHistoryId\`) when cast(values(\`lastSeenHistoryId\`) as unsigned) > cast(\`lastSeenHistoryId\` as unsigned) then values(\`lastSeenHistoryId\`) else \`lastSeenHistoryId\` end`,
-          },
-        });
-
-      // Statement 2 — REQUEUE gate (Codex 15 輪 §四.1 + 16 輪事件級冪等). ONLY a
-      // discovery whose eventKind is 'label_added_inbox' (an explicit labelAdded event
-      // carrying INBOX) AND whose per-event id is STRICTLY GREATER than the row's
-      // lastRequeueEventId may resurrect a terminal-ignored row. messagesAdded replays
-      // and fallback/bootstrap/backfill scans are 'message_added' → never reach here
-      // (重排風暴閘門). Each candidate carries its OWN eventHistoryId, so this is a
-      // per-message conditional CAS UPDATE (mirrors advanceCursorCAS): the strict-greater
-      // guard makes replaying the SAME (or an older) label event — even after the row
-      // cycled back to ignored — a no-op (affectedRows=0), so requeueCount can NEVER
-      // double-count. On a real requeue: flip ignored→pending, clear the classification,
-      // reset retry/claim track, bump requeueCount + set lastRequeueEventId=eventHistoryId
-      // + stamp the audit trail. `WHERE status='ignored'` keeps processed/failed/pending
-      // a no-op (§四 3/4). No SET column references `status`, so no ODKU assignment-order hazard.
+      // ⚠ STATEMENT ORDER — REQUEUE runs FIRST (Codex 17 輪 §四.1 自遮蔽修正). The old
+      // order (INSERT/lastSeen bump first, then requeue) self-shadowed: statement 1 raised
+      // lastSeenHistoryId to include THIS event, so the requeue gate — comparing against
+      // COALESCE(lastRequeueEventId, lastSeenHistoryId) — always saw a watermark already
+      // ≥ this event →永 false. Reordering makes the requeue read the watermark BEFORE this
+      // event's own bump. (The alternative was merging into one ODKU with hand-ordered SET
+      // assignments — rejected as fragile.)
+      //
+      // Statement 1 — REQUEUE gate (§四.1). ONLY a discovery carrying a labelAdded(INBOX)
+      // event id (labelEventId non-null; message_added / fallback / bootstrap / backfill
+      // scans carry null → never reach here — 重排風暴閘門) may resurrect a terminal-ignored
+      // row, and ONLY when that label event id is STRICTLY GREATER than the CONSUMED
+      // watermark COALESCE(lastRequeueEventId, lastSeenHistoryId) — the highest event id
+      // already consumed BEFORE this one. Each candidate carries its OWN labelEventId, so
+      // this is a per-message conditional CAS UPDATE: the strict-greater guard makes
+      // replaying the SAME (or older) label event — even after the row cycled back to
+      // ignored — a no-op (affectedRows=0), so requeueCount can NEVER double-count. On a
+      // real requeue: flip ignored→pending, clear the classification, reset retry/claim
+      // track, and — ATOMICALLY in the one UPDATE (no先記消耗後重排 crash gap) — bump
+      // requeueCount, record consumption (lastRequeueEventId=labelEventId), advance the
+      // monotonic lastSeenHistoryId, stamp the audit trail. `WHERE status='ignored'` keeps
+      // processed/failed/pending a no-op (§四 3/4). A NULL watermark (scan-created row, no
+      // event id yet) → X > NULL → NULL → no requeue (fail-closed: never resurrect on an
+      // incomparable watermark). No SET column references `status`, so no assignment hazard.
       const requeueCandidates = rows.filter(
-        (r) => r.eventKind === "label_added_inbox" && r.eventHistoryId !== null,
+        (r) => r.eventKind === "label_added_inbox" && r.labelEventId !== null,
       );
-      if (requeueCandidates.length === 0) return rows.length;
-      const integrationId = rows[0]!.integrationId;
       for (const r of requeueCandidates) {
         await db
           .update(gmailIngestionLedger)
@@ -256,7 +233,12 @@ export function createDrizzleLedgerStore(
             discoveryReason: "inbox_requeue",
             lastRequeuedAt: new Date(),
             requeueCount: sql`${gmailIngestionLedger.requeueCount} + 1`,
-            lastRequeueEventId: r.eventHistoryId,
+            // record THIS label event as consumed (§四.1) …
+            lastRequeueEventId: r.labelEventId,
+            // … and advance the seen watermark monotonically in the SAME statement —
+            // GREATEST(current, maxSeenEventId), BigInt CAST UNSIGNED, NULL-safe, never
+            // regressing (§四.1 「lastSeenHistoryId=GREATEST(單調)」).
+            lastSeenHistoryId: sql`case when ${gmailIngestionLedger.lastSeenHistoryId} is null then ${r.maxSeenEventId} when ${r.maxSeenEventId} is null then ${gmailIngestionLedger.lastSeenHistoryId} when cast(${r.maxSeenEventId} as unsigned) > cast(${gmailIngestionLedger.lastSeenHistoryId} as unsigned) then ${r.maxSeenEventId} else ${gmailIngestionLedger.lastSeenHistoryId} end`,
             // an ignored row shouldn't hold a live lease, but clear defensively so the
             // re-classification round can claim the freshly-pending row.
             claimToken: null,
@@ -265,13 +247,48 @@ export function createDrizzleLedgerStore(
           })
           .where(
             and(
-              eq(gmailIngestionLedger.integrationId, integrationId),
+              eq(gmailIngestionLedger.integrationId, r.integrationId),
               eq(gmailIngestionLedger.gmailMessageId, r.gmailMessageId),
               eq(gmailIngestionLedger.status, "ignored"),
-              sql`(${gmailIngestionLedger.lastRequeueEventId} is null or cast(${r.eventHistoryId} as unsigned) > cast(${gmailIngestionLedger.lastRequeueEventId} as unsigned))`,
+              sql`cast(${r.labelEventId} as unsigned) > cast(coalesce(${gmailIngestionLedger.lastRequeueEventId}, ${gmailIngestionLedger.lastSeenHistoryId}) as unsigned)`,
             ),
           );
       }
+
+      // Statement 2 — idempotent INSERT + FORWARD-ONLY lastSeen (§四.2/.3). Minimal
+      // discovery row (P0-1): fromAddress/route/classifiedAt NULL, internalDateMs 0 until
+      // classification hydrates them. gmailHistoryId + lastSeenHistoryId land maxSeenEventId
+      // (this message's own MAX record id; Codex 17 §四.3) — never a page boundary / mailbox
+      // snapshot. A FIRST-by-label discovery seeds lastRequeueEventId=labelEventId (§四.2:
+      // that event already drove the row to pending → a replay must not count as a fresh
+      // requeue); a message_added / scan discovery leaves it NULL. On a duplicate we advance
+      // lastSeenHistoryId ONLY when the incoming id is strictly greater (BigInt CAST UNSIGNED),
+      // NULL-safe both ways (a scan re-discovery carries NULL → never clobbers; a reordered/
+      // older event → never regresses) — idempotent for a just-requeued row (statement 1
+      // already bumped it). ODKU set NEVER touches lastRequeueEventId or `status` (requeue is
+      // statement 1), so no ODKU assignment-order hazard.
+      await db
+        .insert(gmailIngestionLedger)
+        .values(
+          rows.map((r) => ({
+            integrationId: r.integrationId,
+            gmailMessageId: r.gmailMessageId,
+            gmailThreadId: r.gmailThreadId,
+            gmailHistoryId: r.maxSeenEventId,
+            lastSeenHistoryId: r.maxSeenEventId,
+            lastRequeueEventId: r.labelEventId,
+            discoveryReason: "initial" as const,
+            internalDateMs: 0,
+            source: r.source,
+            status: "pending" as const,
+          })),
+        )
+        .onDuplicateKeyUpdate({
+          set: {
+            lastSeenHistoryId: sql`case when values(\`lastSeenHistoryId\`) is null then \`lastSeenHistoryId\` when \`lastSeenHistoryId\` is null then values(\`lastSeenHistoryId\`) when cast(values(\`lastSeenHistoryId\`) as unsigned) > cast(\`lastSeenHistoryId\` as unsigned) then values(\`lastSeenHistoryId\`) else \`lastSeenHistoryId\` end`,
+          },
+        });
+
       return rows.length;
     },
 
