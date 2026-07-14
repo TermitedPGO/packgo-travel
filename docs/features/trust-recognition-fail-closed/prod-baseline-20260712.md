@@ -47,7 +47,7 @@ SELECT COUNT(*), SUM(recognizedAt IS NOT NULL), MAX(recognizedAt), SUM(reversedA
 
 ## 第二輪 cron 驗證(2026-07-14T06:00Z)
 
-- 收證方式誠實記:長 sleep 監看程序死亡(疑機器休眠),log 緩衝回不到事發點;改讀 BullMQ completed job 回傳值(耐久紀錄,證據等級高於 log)。
+- 收證方式誠實記:長 sleep 監看被機器休眠拖遲(事後醒來,窗口已過,如預期零捕獲),log 緩衝回不到事發點;改讀 BullMQ completed job 回傳值(耐久紀錄,證據等級高於 log)。
 - job repeat:...:1784008800000,finishedOn 2026-07-14T06:00:00.339Z,returnvalue 原樣:scanned=3 dueForReview=0 dueRows=[] skippedNoDepartureDate=3 skippedNotMatched=0 skippedCancelledBooking=0;failedReason null。與 oracle 完全一致。
 - 06:31:15Z 探針:recognizedCount 0、maxRecognizedAt null、transferredCount 0、pendingCount 3,與基準逐項相同。
 - 附帶佐證:BullMQ 歷史 completed jobs 顯示 07-11/07-12(v811 舊碼)同樣 recognized=0 — 三筆自始未被自動認列。
