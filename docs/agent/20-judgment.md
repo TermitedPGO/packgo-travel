@@ -84,3 +84,5 @@
 - 高風險（fresh 驗收 + 需要時第二意見；對外動作先問）：出給客人的任何東西、碰錢碰帳、刪資料、schema 變更、部署相關、寄信發布
 - 中風險（fresh 驗收）：上 main 的 feature code、批次改檔、自動化規則變更
 - 低風險（自驗即可）：文檔、scratchpad 實驗、read-only 查詢、單檔小修
+
+- 2026-07-14 反例:執行者依派工單在共用工作樹切 feature 分支,指揮同時段 commit docs 落錯分支(4e4cfeb6),事後 reset 復原。規則化:執行者佔用工作樹施工(尤其涉分支切換)期間,指揮禁 commit/禁切分支;需並行時派工加 isolation: "worktree"。
