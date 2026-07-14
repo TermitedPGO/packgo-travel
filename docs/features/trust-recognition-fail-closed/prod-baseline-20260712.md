@@ -58,3 +58,13 @@ SELECT COUNT(*), SUM(recognizedAt IS NOT NULL), MAX(recognizedAt), SUM(reversedA
 - evidence/bullmq-jobs-raw-20260714.json(completed 7 筆含兩輪 cron 完整 returnvalue,failed 0)SHA-256 387d73edb3d9c5671fb9ba3b0eed74f97015f2b2a8dd6a2f1acba1a4f1483e6e
 - evidence/db-probe-raw-20260714.json(聚合探針原始輸出)SHA-256 017791f896392f7e2b10a91e4b2213d13733593d23499693d09d23ce92f7ac03
 - 兩檔皆去識別(job id/計數/時間戳,零 PII)。Codex 17 輪已獨立複核同源資料並裁定:B1/B1.1=「v812 已部署,兩輪排程運行驗證通過」,免第三輪。
+
+## v813 部署(B1.2 上線,2026-07-14)
+
+- 2026-07-14T21:52Z 前後 Jeff pnpm ship → v813 complete(flyctl releases 核,5 分鐘後查)。image = main HEAD 90848514。
+- 七閘全綠:分支/clean tree/同步 origin/migration 檔核/tsc 0/全套 5176 綠/SQL 彩排 238 EXPLAIN-clean on prod TiDB/審查閘 6.9 首次真跑放行(索引無待結標記)/token 鎖。release_command migration 成功。
+- /health 四項全 ok(db 50ms/redis 15ms/stripe 281ms/llm 345ms)。
+- 21:59:03Z 部署後探針:與基準逐項相同(recognizedCount 0/maxRecognizedAt null/transferredCount 0/pendingCount 3)— v813 部署零信託狀態寫入。
+- B1.2 控制上線:safe-deploy 紅燈不再建議 rollback(綠路徑正常印 deploy complete)、審查閘 6.9 生效、TrustCard 中性文案上線。
+- LOCAL_SCRIPT_TOKEN 未載入,ship 側煙霧跳過(同 v812,不擋;可由機上 token 補驗)。
+- 待:今晚 06:00Z cron 於 v813 首跑(oracle 同前),屬額外資料點非閉環條件。
